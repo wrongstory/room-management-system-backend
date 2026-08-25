@@ -13,7 +13,7 @@
 - 공개 스키마 전 테이블 RLS와 비공개 사진 버킷 정책
 - 원본 정본의 4개 객실 타입, 고정 단가, 숙박 인원, 121개 객실 seed
 
-전체 분석과 설계는 [프로젝트 분석](docs/PROJECT_ANALYSIS.md), [백엔드 설계](docs/ARCHITECTURE.md)를 참고하세요.
+전체 분석과 설계는 [프로젝트 분석](docs/PROJECT_ANALYSIS.md), [백엔드 설계](docs/ARCHITECTURE.md)를 참고하세요. 구현 전에 검토할 최신 관계도는 [ERD 초안](docs/ERD.md)이며, [DBML 원본](docs/room-management-system.dbml)을 dbdiagram.io에 붙여 넣어 전체 다이어그램을 확인할 수 있습니다.
 
 ## 로컬 실행
 
@@ -49,4 +49,3 @@ npm run db:reset
 - 사용자 인증정보는 `user_metadata`가 아니라 DB 프로필과 서버 검증 결과로 권한을 결정합니다.
 - 사진은 private Storage 버킷에 불변 경로로 저장하고, RLS 또는 짧은 signed URL로만 읽습니다.
 - 현재 연결된 원격 Supabase 프로젝트에는 아직 마이그레이션을 적용하지 않았습니다.
-

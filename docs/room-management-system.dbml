@@ -1,0 +1,601 @@
+Project room_management_system {
+  database_type: 'PostgreSQL'
+  Note: 'ERD review draft v1. Supabase Free Plan only. Not yet applied to a remote database.'
+}
+
+Enum account_status {
+  active
+  deactivation_pending
+  upload_only
+  inactive
+  departed
+}
+
+Enum availability_status {
+  draft
+  submitted
+  superseded
+}
+
+Enum request_status {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+Enum cleaning_kind {
+  checkout
+  stayover
+  additional
+  reclean
+}
+
+Enum cleaning_target_status {
+  unassigned
+  draft_assigned
+  notified
+  in_progress
+  upload_pending
+  inspection_pending
+  approved
+  rejected
+  cancelled
+}
+
+Enum attempt_status {
+  scheduled
+  in_progress
+  field_completed
+  upload_pending
+  submitted
+  approved
+  rejected
+  interrupted
+  superseded
+}
+
+Enum submission_status {
+  submitted
+  superseded
+  approved
+  rejected
+}
+
+Enum payroll_status {
+  open
+  paying
+  check
+  paid
+}
+
+Table auth.users {
+  id uuid [pk, note: 'Managed by Supabase Auth']
+}
+
+Table public.profiles {
+  id uuid [pk]
+  auth_user_id uuid [not null, unique]
+  login_id text [not null, unique]
+  display_name text [not null]
+  status account_status [not null, default: 'active']
+  phone_last_four text
+  phone_lookup_hash text [unique]
+  must_change_password boolean [not null, default: true]
+  failed_login_count int [not null, default: 0]
+  locked_until timestamptz
+  deactivated_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table public.roles {
+  id smallint [pk, increment]
+  code text [not null, unique, note: 'Initial values: admin, maid']
+  name text [not null]
+  active boolean [not null, default: true]
+  created_at timestamptz [not null]
+}
+
+Table public.profile_roles {
+  id bigint [pk, increment]
+  profile_id uuid [not null]
+  role_id smallint [not null]
+  granted_by uuid [not null]
+  granted_at timestamptz [not null]
+  revoked_by uuid
+  revoked_at timestamptz
+
+  Indexes {
+    (profile_id, role_id) [name: 'profile_roles_lookup']
+  }
+
+  Note: 'A partial unique index permits one active row per profile and role where revoked_at is null.'
+}
+
+Table private.login_aliases {
+  id bigint [pk, increment]
+  profile_id uuid [not null]
+  alias_normalized text [not null, unique]
+  active boolean [not null, default: true]
+  expires_after_new_login boolean [not null, default: false]
+  created_at timestamptz [not null]
+  retired_at timestamptz
+}
+
+Table public.maid_profiles {
+  profile_id uuid [pk]
+  hired_on date
+  departed_on date
+  note text
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table public.availability_versions {
+  id uuid [pk]
+  maid_profile_id uuid [not null]
+  week_start date [not null]
+  version int [not null]
+  status availability_status [not null]
+  submitted_at timestamptz
+  created_at timestamptz [not null]
+
+  Indexes {
+    (maid_profile_id, week_start, version) [unique]
+  }
+}
+
+Table public.availability_days {
+  id bigint [pk, increment]
+  availability_version_id uuid [not null]
+  work_date date [not null]
+  available boolean [not null]
+
+  Indexes {
+    (availability_version_id, work_date) [unique]
+  }
+}
+
+Table public.availability_change_requests {
+  id uuid [pk]
+  availability_version_id uuid [not null]
+  requested_days jsonb [not null]
+  reason_code text [not null]
+  status request_status [not null, default: 'pending']
+  requested_at timestamptz [not null]
+  decided_by uuid
+  decided_at timestamptz
+}
+
+Table public.room_types {
+  id uuid [pk]
+  code text [not null, unique]
+  name text [not null]
+  base_cleaning_fee int [not null, note: 'KRW integer']
+  default_duration_minutes int [not null]
+  default_guest_count int [not null]
+  max_guest_count int [not null]
+  active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table public.rooms {
+  id uuid [pk]
+  room_number text [not null, unique]
+  room_type_id uuid [not null]
+  elevator_zone text
+  data_status text [not null]
+  occupancy_override text
+  state_version bigint [not null, default: 1]
+  operation_suspended_at timestamptz
+  operation_suspended_reason text
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table public.reservations {
+  id uuid [pk]
+  room_id uuid [not null]
+  check_in_at timestamptz [not null]
+  check_out_at timestamptz [not null]
+  guest_count int [not null]
+  status text [not null]
+  guest_name_encrypted text
+  preparation_obligation_id uuid [not null]
+  version bigint [not null, default: 1]
+  created_by uuid [not null]
+  updated_by uuid [not null]
+  actual_check_in_at timestamptz
+  actual_checkout_at timestamptz
+  cancelled_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  Note: 'PostgreSQL exclusion constraint prevents overlapping active ranges for the same room.'
+}
+
+Table public.room_operation_events {
+  id bigint [pk, increment]
+  room_id uuid [not null]
+  event_type text [not null]
+  before_state jsonb
+  after_state jsonb
+  reason_code text
+  actor_profile_id uuid [not null]
+  effective_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+}
+
+Table public.room_issues {
+  id uuid [pk]
+  room_id uuid [not null]
+  cleaning_attempt_id uuid
+  category text [not null]
+  description text
+  severity text [not null]
+  blocks_guest_assignment boolean [not null, default: false]
+  status text [not null]
+  reported_by uuid [not null]
+  resolved_by uuid
+  reported_at timestamptz [not null]
+  resolved_at timestamptz
+}
+
+Table public.room_candle_events {
+  id bigint [pk, increment]
+  room_id uuid [not null]
+  cleaning_attempt_id uuid
+  action text [not null]
+  count_before int [not null]
+  count_after int [not null]
+  location_note text
+  reason_code text
+  actor_profile_id uuid [not null]
+  physically_verified boolean [not null, default: false]
+  created_at timestamptz [not null]
+}
+
+Table public.checkout_inspections {
+  id uuid [pk]
+  reservation_id uuid [not null, unique]
+  status text [not null]
+  completion_source text
+  completed_by uuid
+  completed_at timestamptz
+  created_at timestamptz [not null]
+}
+
+Table public.cleaning_template_versions {
+  id uuid [pk]
+  room_type_id uuid [not null]
+  cleaning_kind cleaning_kind [not null]
+  version int [not null]
+  status text [not null]
+  duration_minutes int [not null]
+  published_at timestamptz
+  created_by uuid [not null]
+  created_at timestamptz [not null]
+
+  Indexes {
+    (room_type_id, cleaning_kind, version) [unique]
+  }
+}
+
+Table public.cleaning_photo_slots {
+  id uuid [pk]
+  template_version_id uuid [not null]
+  slot_key text [not null]
+  section_key text [not null]
+  label text [not null]
+  description text
+  display_order int [not null]
+  required boolean [not null, default: true]
+
+  Indexes {
+    (template_version_id, slot_key) [unique]
+    (template_version_id, display_order) [unique]
+  }
+}
+
+Table public.cleaning_targets {
+  id uuid [pk]
+  room_id uuid [not null]
+  reservation_id uuid
+  cleaning_kind cleaning_kind [not null]
+  source text [not null]
+  source_key text [not null, unique]
+  original_service_date date [not null]
+  effective_service_date date [not null]
+  carryover_count int [not null, default: 0]
+  available_from timestamptz
+  due_at timestamptz
+  status cleaning_target_status [not null]
+  assignment_version bigint [not null]
+  room_type_snapshot jsonb [not null]
+  fee_snapshot int [not null]
+  template_snapshot jsonb [not null]
+  cancelled_by uuid
+  cancelled_at timestamptz
+  cancellation_reason_code text
+  created_by uuid [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  Note: 'A partial unique index allows at most one non-terminal target per room.'
+}
+
+Table public.cleaning_assignments {
+  id uuid [pk]
+  cleaning_target_id uuid [not null]
+  maid_profile_id uuid [not null]
+  sequence_number int [not null]
+  revision bigint [not null]
+  is_current boolean [not null, default: true]
+  notified_at timestamptz
+  ended_at timestamptz
+  change_reason_code text
+  changed_by uuid [not null]
+  created_at timestamptz [not null]
+
+  Indexes {
+    (cleaning_target_id, revision) [unique]
+  }
+
+  Note: 'A partial unique index permits one current assignment per target.'
+}
+
+Table public.cleaning_attempts {
+  id uuid [pk]
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null]
+  maid_profile_id uuid [not null]
+  attempt_number int [not null]
+  status attempt_status [not null]
+  assignment_revision bigint [not null]
+  started_at timestamptz
+  field_completed_at timestamptz
+  ended_at timestamptz
+  end_reason text
+  template_snapshot jsonb [not null]
+  room_snapshot jsonb [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  Indexes {
+    (cleaning_target_id, attempt_number) [unique]
+  }
+}
+
+Table public.cleaning_submissions {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  client_submission_id uuid [not null, unique]
+  version int [not null]
+  status submission_status [not null]
+  issue_snapshot jsonb [not null]
+  candle_count int [not null, default: 0]
+  submitted_by uuid [not null]
+  submitted_at timestamptz [not null]
+  superseded_at timestamptz
+
+  Indexes {
+    (cleaning_attempt_id, version) [unique]
+  }
+}
+
+Table public.submission_photos {
+  id uuid [pk]
+  submission_id uuid [not null]
+  photo_slot_id uuid
+  evidence_kind text [not null, note: 'template, bomb_room, issue']
+  object_path text [not null, unique]
+  sha256 text [not null]
+  mime_type text [not null]
+  size_bytes int [not null]
+  width_px int
+  height_px int
+  upload_status text [not null]
+  captured_at timestamptz
+  uploaded_at timestamptz
+  purge_after timestamptz
+
+  Indexes {
+    (submission_id, photo_slot_id) [unique]
+  }
+
+  Note: 'The object lives in a private Supabase Storage bucket. No FK is created to storage.objects.'
+}
+
+Table public.bomb_room_reports {
+  id uuid [pk]
+  submission_id uuid [not null, unique]
+  note text
+  status text [not null]
+  decision text
+  decision_reason_code text
+  decided_by uuid
+  decided_at timestamptz
+  created_at timestamptz [not null]
+}
+
+Table public.inspection_decisions {
+  id uuid [pk]
+  submission_id uuid [not null, unique]
+  decision text [not null]
+  reason_code text
+  reason_detail text
+  decided_by uuid [not null]
+  decided_at timestamptz [not null]
+}
+
+Table public.earnings {
+  id uuid [pk]
+  submission_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  earned_on date [not null]
+  base_amount int [not null]
+  bomb_room_bonus int [not null, default: 0]
+  total_amount int [not null, note: 'Generated as base_amount + bomb_room_bonus in SQL']
+  created_at timestamptz [not null]
+}
+
+Table public.payroll_cycles {
+  id uuid [pk]
+  maid_profile_id uuid [not null]
+  week_start date [not null]
+  status payroll_status [not null]
+  locked_amount int
+  payment_started_by uuid
+  payment_started_at timestamptz
+  paid_at timestamptz
+  check_reason text
+  version bigint [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  Indexes {
+    (maid_profile_id, week_start) [unique]
+  }
+}
+
+Table public.payroll_items {
+  id bigint [pk, increment]
+  payroll_cycle_id uuid [not null]
+  earning_id uuid [not null]
+  locked_amount int [not null]
+  created_at timestamptz [not null]
+
+  Indexes {
+    (payroll_cycle_id, earning_id) [unique]
+  }
+}
+
+Table public.payroll_events {
+  id bigint [pk, increment]
+  payroll_cycle_id uuid [not null]
+  event_type text [not null]
+  before_status payroll_status
+  after_status payroll_status [not null]
+  actor_profile_id uuid [not null]
+  reason_code text
+  created_at timestamptz [not null]
+}
+
+Table public.payroll_adjustments {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null]
+  amount int [not null]
+  reason_code text [not null]
+  created_by uuid [not null]
+  created_at timestamptz [not null]
+}
+
+Table public.notifications {
+  id uuid [pk]
+  recipient_profile_id uuid [not null]
+  category text [not null]
+  title text [not null]
+  body text [not null]
+  room_id uuid
+  cleaning_target_id uuid
+  dedupe_key text
+  group_key text
+  requires_action boolean [not null, default: false]
+  read_at timestamptz
+  resolved_at timestamptz
+  occurred_at timestamptz [not null]
+  created_at timestamptz [not null]
+}
+
+Table private.notification_outbox {
+  id bigint [pk, increment]
+  notification_id uuid [not null]
+  channel text [not null]
+  delivery_status text [not null]
+  retry_count int [not null, default: 0]
+  next_attempt_at timestamptz
+  delivered_at timestamptz
+  last_error_code text
+  created_at timestamptz [not null]
+}
+
+Table private.audit_events {
+  id bigint [pk, increment]
+  actor_profile_id uuid
+  actor_display_name_snapshot text
+  event_type text [not null]
+  entity_type text [not null]
+  entity_id uuid
+  effective_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+  reason_code text
+  before_state jsonb
+  after_state jsonb
+  request_id text
+  idempotency_key text [unique]
+}
+
+Ref: public.profiles.auth_user_id - auth.users.id
+Ref: public.profile_roles.profile_id > public.profiles.id
+Ref: public.profile_roles.role_id > public.roles.id
+Ref: public.profile_roles.granted_by > public.profiles.id
+Ref: public.profile_roles.revoked_by > public.profiles.id
+Ref: private.login_aliases.profile_id > public.profiles.id
+Ref: public.maid_profiles.profile_id - public.profiles.id
+Ref: public.availability_versions.maid_profile_id > public.profiles.id
+Ref: public.availability_days.availability_version_id > public.availability_versions.id
+Ref: public.availability_change_requests.availability_version_id > public.availability_versions.id
+Ref: public.availability_change_requests.decided_by > public.profiles.id
+Ref: public.rooms.room_type_id > public.room_types.id
+Ref: public.reservations.room_id > public.rooms.id
+Ref: public.reservations.created_by > public.profiles.id
+Ref: public.reservations.updated_by > public.profiles.id
+Ref: public.room_operation_events.room_id > public.rooms.id
+Ref: public.room_operation_events.actor_profile_id > public.profiles.id
+Ref: public.room_issues.room_id > public.rooms.id
+Ref: public.room_issues.cleaning_attempt_id > public.cleaning_attempts.id
+Ref: public.room_issues.reported_by > public.profiles.id
+Ref: public.room_issues.resolved_by > public.profiles.id
+Ref: public.room_candle_events.room_id > public.rooms.id
+Ref: public.room_candle_events.cleaning_attempt_id > public.cleaning_attempts.id
+Ref: public.room_candle_events.actor_profile_id > public.profiles.id
+Ref: public.checkout_inspections.reservation_id - public.reservations.id
+Ref: public.checkout_inspections.completed_by > public.profiles.id
+Ref: public.cleaning_template_versions.room_type_id > public.room_types.id
+Ref: public.cleaning_template_versions.created_by > public.profiles.id
+Ref: public.cleaning_photo_slots.template_version_id > public.cleaning_template_versions.id
+Ref: public.cleaning_targets.room_id > public.rooms.id
+Ref: public.cleaning_targets.reservation_id > public.reservations.id
+Ref: public.cleaning_targets.cancelled_by > public.profiles.id
+Ref: public.cleaning_targets.created_by > public.profiles.id
+Ref: public.cleaning_assignments.cleaning_target_id > public.cleaning_targets.id
+Ref: public.cleaning_assignments.maid_profile_id > public.profiles.id
+Ref: public.cleaning_assignments.changed_by > public.profiles.id
+Ref: public.cleaning_attempts.cleaning_target_id > public.cleaning_targets.id
+Ref: public.cleaning_attempts.assignment_id > public.cleaning_assignments.id
+Ref: public.cleaning_attempts.maid_profile_id > public.profiles.id
+Ref: public.cleaning_submissions.cleaning_attempt_id > public.cleaning_attempts.id
+Ref: public.cleaning_submissions.submitted_by > public.profiles.id
+Ref: public.submission_photos.submission_id > public.cleaning_submissions.id
+Ref: public.submission_photos.photo_slot_id > public.cleaning_photo_slots.id
+Ref: public.bomb_room_reports.submission_id - public.cleaning_submissions.id
+Ref: public.bomb_room_reports.decided_by > public.profiles.id
+Ref: public.inspection_decisions.submission_id - public.cleaning_submissions.id
+Ref: public.inspection_decisions.decided_by > public.profiles.id
+Ref: public.earnings.submission_id - public.cleaning_submissions.id
+Ref: public.earnings.maid_profile_id > public.profiles.id
+Ref: public.payroll_cycles.maid_profile_id > public.profiles.id
+Ref: public.payroll_cycles.payment_started_by > public.profiles.id
+Ref: public.payroll_items.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_items.earning_id > public.earnings.id
+Ref: public.payroll_events.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_events.actor_profile_id > public.profiles.id
+Ref: public.payroll_adjustments.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_adjustments.created_by > public.profiles.id
+Ref: public.notifications.recipient_profile_id > public.profiles.id
+Ref: public.notifications.room_id > public.rooms.id
+Ref: public.notifications.cleaning_target_id > public.cleaning_targets.id
+Ref: private.notification_outbox.notification_id > public.notifications.id
+Ref: private.audit_events.actor_profile_id > public.profiles.id
