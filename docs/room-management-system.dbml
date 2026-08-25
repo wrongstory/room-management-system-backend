@@ -399,13 +399,13 @@ Table public.submission_photos {
   upload_status text [not null]
   captured_at timestamptz
   uploaded_at timestamptz
-  purge_after timestamptz
+  purge_after timestamptz [not null, note: 'uploaded_at + 30 days; cleanup may retry but must not delete earlier']
 
   Indexes {
     (submission_id, photo_slot_id) [unique]
   }
 
-  Note: 'The object lives in a private Supabase Storage bucket. No FK is created to storage.objects.'
+  Note: 'The object lives in a private Supabase Storage bucket. Assume 3 MB per photo and retain for 30 days from upload. No FK is created to storage.objects.'
 }
 
 Table public.bomb_room_reports {
