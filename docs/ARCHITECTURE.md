@@ -6,7 +6,7 @@
 - 데이터·인증·파일: Supabase Auth, PostgreSQL 17, Storage
 - 입력 검증: Zod
 - 테스트: Vitest와 Fastify injection
-- 배포 단위: 상태 없는 API 서버 + Supabase 프로젝트
+- 배포 단위: 상태 없는 API 서버 + Supabase 운영 프로젝트 + Supabase 복구검증 프로젝트
 
 Fastify는 작은 초기 서버에서 모듈 경계를 명확히 유지하면서도 요청 처리 비용이 낮습니다. 핵심 정합성은 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둡니다.
 
@@ -108,8 +108,16 @@ erDiagram
 ## 아직 필요한 원격 설정
 
 - 요청 계정 `yeosucastletheart@gmail.com`으로 Supabase 플러그인 재인증
-- 생성할 조직과 요금 확인 후 프로젝트 생성
+- Free 조직·프로젝트 수와 비용 `$0` 확인 후 운영·복구검증 프로젝트 구성
 - Data API 노출 스키마 확인
 - 마이그레이션 적용, RLS advisor와 performance advisor 확인
 - publishable/secret key를 로컬·배포 환경에 각각 저장
 - 실제 관리자 계정 1개 seed 후 로그인·RLS 통합 테스트
+
+## 백업·복구
+
+- 마이그레이션 SQL은 GitHub의 `supabase/migrations/`를 정본으로 사용한다.
+- Free Plan의 두 번째 프로젝트는 최신 논리 dump를 실제로 복원하는 warm recovery copy로 사용한다.
+- 매일 roles·schema·data dump를 만들고 recovery 프로젝트에 복원한 뒤 핵심 행 수·RLS·관리자·객실 seed를 검사한다.
+- DB dump는 Storage 사진 객체를 포함하지 않으므로 사진 보관 정책은 별도로 운영한다.
+- 전체 주기와 복원 명령은 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)에 정의한다.
