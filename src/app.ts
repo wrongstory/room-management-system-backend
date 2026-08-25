@@ -41,11 +41,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     trustProxy: true
   });
 
-  const clients = options.services ? null : createSupabaseClients(options.env);
-  const services = options.services ?? {
-    auth: new SupabaseAuthService(clients!),
-    rooms: new SupabaseRoomService(clients!)
-  };
+  let services = options.services;
+  if (!services) {
+    const clients = createSupabaseClients(options.env);
+    services = {
+      auth: new SupabaseAuthService(clients),
+      rooms: new SupabaseRoomService(clients)
+    };
+  }
 
   await app.register(helmet, { global: true });
   await app.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });

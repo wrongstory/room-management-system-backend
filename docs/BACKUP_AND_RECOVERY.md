@@ -1,7 +1,7 @@
 # Supabase Free Plan 백업·복구 운영안
 
 > 결정일: 2026-08-26  
-> 상태: 대상 Supabase 계정 재연결 전 설계 확정, 원격 프로젝트 미생성
+> 상태: Free 조직과 운영·복구검증 프로젝트 생성 완료, 원격 마이그레이션 적용 전
 
 ## 목적
 
@@ -9,10 +9,10 @@ Supabase Free Plan의 활성 프로젝트 2개를 다음처럼 사용한다.
 
 | 프로젝트 | 역할 | 앱 연결 |
 |---|---|---|
-| `room-management-system-prod` | 실제 운영 DB·Auth·사진 메타데이터 | 운영 API만 연결 |
-| `room-management-system-recovery` | 최신 논리 백업 복원과 복구 검증 | 일반 사용자 트래픽 연결 금지 |
+| `room-management-system-prod` (`aodikrxcczbogjpsjwjt`) | 서울 운영 DB·Auth·사진 메타데이터 | 운영 API만 연결 |
+| 기존 프로젝트 (`matalcofimnhuzslfhdd`) | 뭄바이 논리 백업 복원과 복구 검증 | 일반 사용자 트래픽 연결 금지 |
 
-두 프로젝트는 `yeosucastletheart@gmail.com` 계정의 Free 조직에 만들고 가능하면 같은 서울 리전(`ap-northeast-2`)을 사용한다. 실제 조직의 프로젝트 수와 생성 비용이 `$0`인지 다시 확인한 뒤 생성한다.
+두 프로젝트는 `yeosucastletheart@gmail.com` 계정의 Free 조직에 있으며 생성 비용은 월 `$0`로 확인했다. 운영 지연시간을 최소화하기 위해 운영 프로젝트는 서울(`ap-northeast-2`)을 사용한다. 기존 뭄바이 프로젝트는 사용자 트래픽에 연결하지 않고 복구검증 전용으로 사용한다.
 
 ## 무엇을 어디에 보관하는가
 
@@ -69,15 +69,12 @@ psql \
 - Free에는 공식 일일 백업 보장, PITR, DB branching, SLA가 없다.
 - 프로젝트를 삭제하면 그 프로젝트에 종속된 데이터와 백업은 영구 삭제된다.
 
-## 생성 전 차단 조건
+## 적용 전 확인 조건
 
-현재 Codex의 Supabase 연결은 `wrongstory` 조직이며 이미 활성 프로젝트 2개를 보유한다. 이 조직의 프로젝트는 건드리지 않는다. `yeosucastletheart@gmail.com` 계정으로 플러그인을 재인증한 뒤 다음을 순서대로 확인한다.
-
-1. 연결 조직 이름과 Free 구독 상태
-2. 현재 활성 프로젝트 수
-3. 운영 프로젝트 존재 여부와 ref
-4. 두 번째 프로젝트 생성 비용 `$0`
-5. recovery 프로젝트 이름·리전
+1. 대상 Ref가 운영 `aodikrxcczbogjpsjwjt`인지 확인한다.
+2. Git 마이그레이션과 원격 마이그레이션 목록이 일치하는지 확인한다.
+3. 운영 dump/복구검증 작업의 접속 문자열이 서로 다른 secret인지 확인한다.
+4. recovery 프로젝트가 일반 앱 환경변수에 들어가지 않았는지 확인한다.
 
 공식 근거:
 
