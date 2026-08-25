@@ -1,4 +1,4 @@
-+-- CASTLE THE ART room-management core schema
+-- CASTLE THE ART room-management core schema
 -- Policy sources: frontend DOCS/16-20 and FINAL_UX_AUDIT.md.
 -- Every public table is protected by RLS. The service secret remains server-only.
 
@@ -42,6 +42,12 @@ create type public.attempt_status as enum (
 );
 create type public.submission_status as enum ('submitted', 'superseded', 'approved', 'rejected');
 create type public.payment_status as enum ('open', 'paying', 'check', 'paid');
+create type public.photo_upload_status as enum (
+  'uploaded',
+  'delete_pending',
+  'delete_failed',
+  'purged'
+);
 
 create function private.set_updated_at()
 returns trigger
@@ -50,6 +56,17 @@ set search_path = pg_catalog
 as $$
 begin
   new.updated_at = now();
+  return new;
+end;
+$$;
+
+create function private.set_photo_purge_after()
+returns trigger
+language plpgsql
+set search_path = pg_catalog
+as $$
+begin
+  new.purge_after = new.uploaded_at + interval '7 days';
   return new;
 end;
 $$;
@@ -361,6 +378,49 @@ create unique index cleaning_submissions_one_current
 on public.cleaning_submissions (cleaning_attempt_id)
 where status = 'submitted';
 
+create table public.submission_photos (
+  id uuid primary key default gen_random_uuid(),
+  submission_id uuid not null references public.cleaning_submissions(id) on delete restrict,
+  photo_slot_key text,
+  evidence_kind text not null check (evidence_kind in ('template', 'bomb_room', 'issue')),
+  drive_file_id text not null unique,
+  drive_folder_id text not null,
+  file_name text not null,
+  sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+  mime_type text not null check (mime_type in ('image/jpeg', 'image/webp')),
+  size_bytes integer not null check (size_bytes > 0 and size_bytes <= 307200),
+  width_px integer check (width_px is null or width_px > 0),
+  height_px integer check (height_px is null or height_px > 0),
+  upload_status public.photo_upload_status not null default 'uploaded',
+  captured_at timestamptz,
+  uploaded_at timestamptz not null default now(),
+  purge_after timestamptz not null,
+  delete_attempt_count integer not null default 0 check (delete_attempt_count >= 0),
+  last_delete_error_code text,
+  purged_at timestamptz,
+  created_at timestamptz not null default now(),
+  check (purged_at is null or purged_at >= uploaded_at),
+  check (
+    (upload_status = 'purged' and purged_at is not null)
+    or (upload_status <> 'purged' and purged_at is null)
+  )
+);
+
+create trigger submission_photos_set_purge_after
+before insert or update of uploaded_at on public.submission_photos
+for each row execute function private.set_photo_purge_after();
+
+create index submission_photos_submission_id_idx
+on public.submission_photos (submission_id);
+
+create index submission_photos_due_purge_idx
+on public.submission_photos (purge_after)
+where purged_at is null;
+
+create unique index submission_photos_template_slot_unique
+on public.submission_photos (submission_id, photo_slot_key)
+where evidence_kind = 'template' and photo_slot_key is not null;
+
 create table public.inspection_decisions (
   id uuid primary key default gen_random_uuid(),
   submission_id uuid not null unique references public.cleaning_submissions(id),
@@ -505,6 +565,7 @@ alter table public.cleaning_targets enable row level security;
 alter table public.cleaning_assignments enable row level security;
 alter table public.cleaning_attempts enable row level security;
 alter table public.cleaning_submissions enable row level security;
+alter table public.submission_photos enable row level security;
 alter table public.inspection_decisions enable row level security;
 alter table public.earnings enable row level security;
 alter table public.payroll_cycles enable row level security;
@@ -610,6 +671,18 @@ create policy submissions_insert_own on public.cleaning_submissions
 for insert to authenticated
 with check (submitted_by = (select private.current_profile_id()));
 
+create policy submission_photos_read_scoped on public.submission_photos
+for select to authenticated
+using (
+  (select private.current_role()) = 'admin'
+  or exists (
+    select 1
+    from public.cleaning_submissions s
+    where s.id = submission_photos.submission_id
+      and s.submitted_by = (select private.current_profile_id())
+  )
+);
+
 create policy decisions_read_scoped on public.inspection_decisions
 for select to authenticated
 using (
@@ -686,33 +759,3 @@ grant select on public.reservations, public.audit_events to authenticated;
 -- new Supabase projects no longer auto-expose newly created public tables.
 grant all privileges on all tables in schema public to service_role;
 grant all privileges on all routines in schema public to service_role;
-
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values (
-  'cleaning-evidence',
-  'cleaning-evidence',
-  false,
-  10485760,
-  array['image/jpeg', 'image/png', 'image/heic', 'image/heif']
-)
-on conflict (id) do nothing;
-
-create policy cleaning_evidence_insert_own
-on storage.objects
-for insert to authenticated
-with check (
-  bucket_id = 'cleaning-evidence'
-  and (storage.foldername(name))[1] = (select auth.uid())::text
-  and (select private.current_account_active())
-);
-
-create policy cleaning_evidence_read_scoped
-on storage.objects
-for select to authenticated
-using (
-  bucket_id = 'cleaning-evidence'
-  and (
-    owner_id = (select auth.uid())::text
-    or (select private.current_role()) = 'admin'
-  )
-);

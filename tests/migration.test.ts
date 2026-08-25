@@ -25,4 +25,18 @@ describe('initial migration contract', () => {
 
     expect(new Set(rlsTables)).toEqual(new Set(tables));
   });
+
+  it('stores only Drive photo metadata with a 300 KiB and seven-day policy', async () => {
+    const sql = await readFile(migrationUrl, 'utf8');
+    const authenticatedGrants = sql.slice(
+      sql.indexOf('grant usage on schema public'),
+      sql.indexOf('-- The backend secret')
+    );
+
+    expect(sql).toContain('drive_file_id text not null unique');
+    expect(sql).toContain('size_bytes > 0 and size_bytes <= 307200');
+    expect(sql).toContain("new.purge_after = new.uploaded_at + interval '7 days'");
+    expect(sql).not.toContain('insert into storage.buckets');
+    expect(authenticatedGrants).not.toContain('public.submission_photos');
+  });
 });

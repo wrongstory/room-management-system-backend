@@ -237,10 +237,13 @@ erDiagram
   SUBMISSION_PHOTOS {
     uuid id PK
     uuid submission_id FK
-    uuid photo_slot_id FK
-    text object_path
+    text photo_slot_key
+    text drive_file_id UK
+    text drive_folder_id
     text upload_status
     int size_bytes
+    timestamptz purge_after
+    timestamptz purged_at
   }
   BOMB_ROOM_REPORTS {
     uuid id PK
@@ -262,7 +265,8 @@ erDiagram
 - 작업마다 현재 배정은 최대 한 건이고, 과거 revision은 삭제하지 않는다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.
 - 제출은 `client_submission_id`로 멱등 처리하며, 수행 회차별 현재 제출은 한 건이다.
-- 사진은 Supabase Storage의 비공개 버킷에 저장하고 DB에는 경로·해시·크기·상태만 둔다.
+- 사진 파일은 비공개 Google Drive 폴더에만 저장하고 DB에는 Drive 파일 ID·해시·크기·삭제예정일·삭제 결과만 둔다.
+- `purge_after`는 서버가 `uploaded_at + 7일`로 강제하며, 삭제 작업이 Drive 파일을 영구삭제한 뒤 `purged_at`을 기록한다.
 - 제출 당시 템플릿과 슬롯을 스냅샷으로 고정해 이후 템플릿 변경이 과거 검수에 소급되지 않게 한다.
 
 ## 6. 수익·주급·알림·감사
@@ -346,23 +350,16 @@ erDiagram
 | 활성 프로젝트 | 최대 2개 | 운영 1개 + 최신 논리 백업 복구검증 1개, 유료 DB 브랜치 미사용 |
 | Auth | 총 사용자 무제한, 월 활성 사용자 50,000명 | 관리자·메이드 수를 앱에서 고정하지 않음 |
 | Database | 프로젝트당 500MB | 400MB 경고, 감사 JSON 크기 제한, 불필요한 중복 스냅샷 금지 |
-| Storage | 조직당 1GB | 비공개 버킷 1개, 사진 1장 3MB 가정, 업로드일로부터 30일 보관 |
-| Egress | 5GB + cached 5GB | 서명 URL을 짧게 사용하고 동일 검수 화면에서 중복 다운로드 억제 |
+| Storage | 조직당 1GB | 사진 파일 미사용, DB에는 Google Drive 메타데이터만 저장 |
+| Egress | 5GB + cached 5GB | 사진 파일이 Data API·Storage를 통과하지 않으므로 사진 egress 미사용 |
 | Realtime | 월 200만 메시지, 동시 200연결 | MVP 핵심 경로에는 미사용, 필요 화면만 제한 구독 |
 | Edge Functions | 월 500,000회 | 초기 백엔드는 Fastify 서버 사용, 정리 작업만 필요 시 검토 |
 
-사진은 업로드일로부터 30일 동안 유지하고 30일이 지난 객체만 정리한다. 계산은 월 길이와 삭제 작업 지연을 고려해 31일 보유를 기준으로 한다. 1GB를 보수적으로 1,000MB로 계산하면 이론상 `1,000MB ÷ 3MB ÷ 31일 = 10.75장/일`이므로 하루 10장이 절대 상한에 가깝다. 하루 11장이면 `11 × 3MB × 31일 = 1,023MB`로 Free 한도를 넘는다.
+사진은 프론트 앱에서 **최대 300KiB(307,200바이트)** JPEG/WebP로 압축하고 EXIF를 제거한 뒤 API에 전송한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜를 사용하며, 중복 방지를 위해 실제 파일명에는 수행 회차·사진 슬롯·사진 UUID를 포함한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
 
-| 하루 평균 | 31일 보관량 | 판정 |
-|---:|---:|---|
-| 8장 | 744MB | 권장 운영선, 약 25% 여유 |
-| 9장 | 837MB | 주의, 증빙·썸네일·삭제 지연 여유가 작음 |
-| 10장 | 930MB | 이론상 가능하지만 운영 여유가 거의 없음 |
-| 11장 | 1,023MB | Free Storage 한도 초과 |
+현재 121개 객실을 모두 하루에 한 번 청소하고 타입별 필수 슬롯 수(10·11·13·15장)를 그대로 적용하면 하루 최대 1,475장, 7일 보관량은 약 **3.17GB**다. 모든 객실에 가장 큰 15장 기준을 적용한 보수적 최악값도 하루 1,815장, 약 **3.90GB**다. Google 개인 계정 기본 15GB 중 20% 여유를 남긴 12GB를 사진에 쓴다고 보면 이론상 약 5,580장/일까지 가능하므로 객실 운영 최대치보다 충분하다. 단, 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
 
-따라서 **안전한 평균은 하루 8장**, 경고선은 하루 9장, 하드 제한은 하루 10장으로 본다. 현재 객실 타입별 필수 사진이 10·11·13·15장이므로 3MB 원본을 그대로 한 달 보관하면 Free Plan에서는 하루 청소 한 객실조차 안정적으로 수용하지 못한다. 평균 12.25장/청소 기준 안전 운영량은 약 `8 ÷ 12.25 = 0.65건/일`, 즉 월 약 20건이다. 실제 운영량이 이를 넘으면 1GB Free Storage와 `3MB × 30일` 조건을 동시에 만족할 수 없다.
-
-사진 업로드는 Fastify 서버를 경유하지 않고 서버가 발급한 제한된 업로드 경로를 사용해 클라이언트에서 Supabase Storage로 직접 전송한다. 따라서 3MB 파일 자체는 API 서버 메모리에 부담을 주지 않는다. 검수 화면은 사진을 자동으로 전부 내려받지 않고 필요할 때만 열어 5GB uncached egress도 보호한다. Storage 객체를 지운 뒤에도 제출 메타데이터·해시·크기·검수 결과는 DB에 보존한다.
+각 사진의 `purge_after`는 폴더 날짜가 아니라 정확히 `uploaded_at + 7일`이다. 정리 작업은 주기적으로 만료 레코드를 잠그고 Drive `files.delete`를 호출해 휴지통을 거치지 않고 영구삭제한다. 성공 또는 이미 없는 파일(404)은 `purged`로 완료하고, 일시 오류는 지수 백오프로 재시도한다. 빈 객실·날짜 폴더는 그 안의 관리 대상 파일이 모두 삭제된 뒤 정리한다. 메타데이터·해시·검수 결과는 DB 감사 근거로 유지한다. 상세 규칙은 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
 
 Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있고 공식 일일 백업 보장·PITR·DB branching·SLA가 없다. 마이그레이션 정본은 Git에 보관하고, 두 번째 Free 프로젝트에는 주기적으로 최신 논리 백업을 복원해 실제 복구 가능성을 검증한다. 구체적인 절차는 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)을 따른다.
 
@@ -372,6 +369,9 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 - [Supabase billing guide](https://supabase.com/docs/guides/platform/billing-on-supabase)
 - [Supabase Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing)
 - [Supabase Storage usage](https://supabase.com/docs/guides/platform/manage-your-usage/storage-size)
+- [Google 계정 저장용량](https://support.google.com/drive/answer/6374270?hl=ko)
+- [Google Drive 폴더 생성과 parents](https://developers.google.com/workspace/drive/api/guides/folder)
+- [Google Drive 파일 영구삭제](https://developers.google.com/workspace/drive/api/guides/delete)
 
 ## 8. 무료 ERD 사이트에서 확인하기
 

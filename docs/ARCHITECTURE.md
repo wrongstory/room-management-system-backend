@@ -3,7 +3,8 @@
 ## 기술 선택
 
 - API: Node.js 22, Fastify 5, TypeScript
-- 데이터·인증·파일: Supabase Auth, PostgreSQL 17, Storage
+- 데이터·인증: Supabase Auth, PostgreSQL 17
+- 사진 파일: Google Drive API, 전용 비공개 폴더
 - 입력 검증: Zod
 - 테스트: Vitest와 Fastify injection
 - 배포 단위: 상태 없는 API 서버 + Supabase 운영 프로젝트 + Supabase 복구검증 프로젝트
@@ -18,7 +19,7 @@ flowchart LR
   API -->|사용자 JWT| DATA[Supabase Data API · RLS]
   API -->|서버 secret| ADMIN[Auth 관리·원자 명령]
   DATA --> DB[(PostgreSQL)]
-  API --> STORAGE[Private Storage]
+  API -->|서버 OAuth · drive.file| DRIVE[Private Google Drive folder]
   DB --> JOBS[예약 전이·알림·보존 작업]
 ```
 
@@ -26,6 +27,7 @@ flowchart LR
 - secret/service-role 키는 서버에서만 사용하고 로그에 남기지 않습니다.
 - 조회는 가능한 한 사용자 JWT와 RLS를 통과시킵니다.
 - 계정 생성·비밀번호 초기화·여러 원장을 함께 바꾸는 명령만 서버 secret과 DB 함수를 사용합니다.
+- Google Drive access/refresh token은 서버 secret으로만 보관하며 브라우저는 Drive에 직접 접근하지 않습니다.
 
 ## 인증
 
@@ -83,7 +85,8 @@ erDiagram
 - 관리자는 운영 테이블을 관리하지만 객실 PIN 원문은 전용 조회 함수로만 받습니다.
 - view는 `security_invoker = true`를 사용합니다.
 - 내부 권한 함수는 `private` 스키마, 고정 `search_path`, 최소 반환값, 명시적 EXECUTE 권한을 사용합니다.
-- Storage는 private bucket이며 사용자 UUID 첫 경로와 owner를 검사합니다. 업로드는 불변 객체로 처리해 upsert 권한을 주지 않습니다.
+- 사진 파일은 Drive에서 공개 공유하지 않습니다. API가 사용자 역할과 제출 소유권을 검사한 뒤 업로드·열람·삭제를 대행합니다.
+- Supabase에는 Drive 파일 ID·해시·크기·삭제예정일만 저장하고, 사진 레코드 쓰기는 서버 역할에만 허용합니다.
 
 ## API 단계
 
@@ -100,7 +103,7 @@ erDiagram
 - 객실 상세·기준정보 변경
 - 예약 CRUD와 자동/수동 체크아웃 명령
 - 주간 가능일 제출, 오늘/내일 청소 대상, 배정·순서 통보
-- 사진 업로드 URL, 현장 완료, 전체 제출
+- 300KiB 사진 업로드, 인증된 사진 스트리밍, 현장 완료, 전체 제출
 - 검수 승인/반려, 폭탄방 판정, 재청소
 - 메이드별 주급과 지급 상태
 - 역할별 알림함과 푸시 구독
@@ -113,11 +116,12 @@ erDiagram
 - 마이그레이션 적용, RLS advisor와 performance advisor 확인
 - publishable/secret key를 로컬·배포 환경에 각각 저장
 - 실제 관리자 계정 1개 seed 후 로그인·RLS 통합 테스트
+- Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token 설정
 
 ## 백업·복구
 
 - 마이그레이션 SQL은 GitHub의 `supabase/migrations/`를 정본으로 사용한다.
 - Free Plan의 두 번째 프로젝트는 최신 논리 dump를 실제로 복원하는 warm recovery copy로 사용한다.
 - 매일 roles·schema·data dump를 만들고 recovery 프로젝트에 복원한 뒤 핵심 행 수·RLS·관리자·객실 seed를 검사한다.
-- DB dump는 Storage 사진 객체를 포함하지 않으므로 사진 보관 정책은 별도로 운영한다.
+- DB dump는 Google Drive 사진 파일을 포함하지 않으므로 사진은 업로드 후 7일 자동삭제 정책으로 별도 운영한다.
 - 전체 주기와 복원 명령은 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)에 정의한다.

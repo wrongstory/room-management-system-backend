@@ -388,9 +388,11 @@ Table public.cleaning_submissions {
 Table public.submission_photos {
   id uuid [pk]
   submission_id uuid [not null]
-  photo_slot_id uuid
+  photo_slot_key text
   evidence_kind text [not null, note: 'template, bomb_room, issue']
-  object_path text [not null, unique]
+  drive_file_id text [not null, unique]
+  drive_folder_id text [not null]
+  file_name text [not null]
   sha256 text [not null]
   mime_type text [not null]
   size_bytes int [not null]
@@ -398,14 +400,20 @@ Table public.submission_photos {
   height_px int
   upload_status text [not null]
   captured_at timestamptz
-  uploaded_at timestamptz
-  purge_after timestamptz [not null, note: 'uploaded_at + 30 days; cleanup may retry but must not delete earlier']
+  uploaded_at timestamptz [not null]
+  purge_after timestamptz [not null, note: 'Always uploaded_at + 7 days']
+  delete_attempt_count int [not null, default: 0]
+  last_delete_error_code text
+  purged_at timestamptz
+  created_at timestamptz [not null]
 
   Indexes {
-    (submission_id, photo_slot_id) [unique]
+    submission_id
+    purge_after
+    (submission_id, photo_slot_key) [unique]
   }
 
-  Note: 'The object lives in a private Supabase Storage bucket. Assume 3 MB per photo and retain for 30 days from upload. No FK is created to storage.objects.'
+  Note: 'The private object lives only in Google Drive. The backend enforces a 307200-byte limit and permanently deletes it 7 days after uploaded_at.'
 }
 
 Table public.bomb_room_reports {
@@ -579,7 +587,6 @@ Ref: public.cleaning_attempts.maid_profile_id > public.profiles.id
 Ref: public.cleaning_submissions.cleaning_attempt_id > public.cleaning_attempts.id
 Ref: public.cleaning_submissions.submitted_by > public.profiles.id
 Ref: public.submission_photos.submission_id > public.cleaning_submissions.id
-Ref: public.submission_photos.photo_slot_id > public.cleaning_photo_slots.id
 Ref: public.bomb_room_reports.submission_id - public.cleaning_submissions.id
 Ref: public.bomb_room_reports.decided_by > public.profiles.id
 Ref: public.inspection_decisions.submission_id - public.cleaning_submissions.id

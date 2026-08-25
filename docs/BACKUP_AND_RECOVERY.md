@@ -9,7 +9,7 @@ Supabase Free Plan의 활성 프로젝트 2개를 다음처럼 사용한다.
 
 | 프로젝트 | 역할 | 앱 연결 |
 |---|---|---|
-| `room-management-system-prod` | 실제 운영 DB·Auth·Storage | 운영 API만 연결 |
+| `room-management-system-prod` | 실제 운영 DB·Auth·사진 메타데이터 | 운영 API만 연결 |
 | `room-management-system-recovery` | 최신 논리 백업 복원과 복구 검증 | 일반 사용자 트래픽 연결 금지 |
 
 두 프로젝트는 `yeosucastletheart@gmail.com` 계정의 Free 조직에 만들고 가능하면 같은 서울 리전(`ap-northeast-2`)을 사용한다. 실제 조직의 프로젝트 수와 생성 비용이 `$0`인지 다시 확인한 뒤 생성한다.
@@ -19,7 +19,7 @@ Supabase Free Plan의 활성 프로젝트 2개를 다음처럼 사용한다.
 - 마이그레이션 SQL의 정본은 이 GitHub 저장소의 `supabase/migrations/`이다.
 - 운영 데이터의 최신 복구 가능 사본은 recovery 프로젝트에 복원한다. dump 파일 자체를 recovery DB에 넣지는 않는다.
 - `roles.sql`, `schema.sql`, `data.sql`은 생성 시각·원본 프로젝트 ref·CLI 버전·SHA-256과 함께 관리한다.
-- DB 논리 백업에는 Supabase Storage의 실제 사진 객체가 들어가지 않는다. 사진은 별도 30일 보관·삭제 정책으로 관리한다.
+- DB 논리 백업에는 Google Drive의 실제 사진 파일이 들어가지 않는다. 사진 파일은 백업 대상이 아니라 단기 증빙으로 보고 업로드 후 7일에 영구삭제하며, 파일 ID·해시·삭제 결과만 DB에 남긴다.
 - 데이터가 포함된 dump는 개인정보를 포함할 수 있으므로 Git에 커밋하지 않고 로그에도 출력하지 않는다.
 
 recovery 프로젝트는 최신 상태를 실제로 복원해 보는 **warm recovery copy**다. 같은 계정·같은 공급자 안에 있으므로 이것만으로 계정 탈취, 공급자 장애, 잘못된 백업의 전파까지 막는 독립 백업은 아니다. 최소한 최근 성공 dump 7세트는 암호화해 별도 안전 저장소에 보관한다.
@@ -64,7 +64,7 @@ psql \
 ## Free Plan 주의사항
 
 - Free 프로젝트 한도는 소유자·관리자로 속한 모든 조직을 합쳐 활성 2개다.
-- Database 한도는 프로젝트당 500MB지만 Storage 1GB와 egress 등 일부 사용량은 조직 전체 합산이다.
+- Database 한도는 프로젝트당 500MB다. 이 시스템은 사진 파일에 Supabase Storage를 사용하지 않는다.
 - Free 프로젝트는 활동이 부족하면 7일 후 일시 정지될 수 있다. 주기적 복원·검증이 실제 DB 활동을 만들도록 한다.
 - Free에는 공식 일일 백업 보장, PITR, DB branching, SLA가 없다.
 - 프로젝트를 삭제하면 그 프로젝트에 종속된 데이터와 백업은 영구 삭제된다.
