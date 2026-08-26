@@ -1,5 +1,7 @@
 # 원본 프로젝트 분석
 
+> 문서 지위: 프런트엔드 분석 snapshot이다. 제품 규칙이나 현재 구현과 충돌하면 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)의 우선순위와 `[미확정]` 표시를 먼저 따른다.
+
 분석 대상: `wrongstory/room-management-system` 및 로컬 `room-management-system-main`
 
 ## 결론
@@ -57,4 +59,3 @@
 3. 수행 회차, 사진 업로드, 제출·검수·재청소
 4. 수익 원장, 폭탄방, 주급 지급 상태
 5. PWA 푸시, 오프라인 lease, 보존 만료 작업
-

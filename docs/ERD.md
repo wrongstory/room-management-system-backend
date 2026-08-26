@@ -1,7 +1,8 @@
 # Room Management System ERD 초안
 
-> 상태: **검토용 v1**  
+> 상태: **검토용 v1**
 > 이 문서는 구현 전에 관계와 운영 규칙을 합의하기 위한 초안이다. 아직 Supabase 원격 DB에는 적용하지 않았다.
+> 제품 계약과 미확정 사항은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 우선한다.
 
 ## 1. 설계 결론
 
