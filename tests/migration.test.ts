@@ -20,6 +20,14 @@ const accountHardeningMigrationUrl = new URL(
   '../supabase/migrations/20260826023016_harden_account_command_idempotency.sql',
   import.meta.url
 );
+const domainIntegrityMigrationUrl = new URL(
+  '../supabase/migrations/20260826114731_harden_domain_integrity.sql',
+  import.meta.url
+);
+const domainIndexMigrationUrl = new URL(
+  '../supabase/migrations/20260826115804_add_domain_integrity_indexes.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -33,7 +41,13 @@ describe('initial migration contract', () => {
   });
 
   it('enables RLS for every public base table', async () => {
-    const sql = await readFile(initialMigrationUrl, 'utf8');
+    const sql = [
+      await readFile(initialMigrationUrl, 'utf8'),
+      await readFile(accountMigrationUrl, 'utf8'),
+      await readFile(accountHardeningMigrationUrl, 'utf8'),
+      await readFile(domainIntegrityMigrationUrl, 'utf8'),
+      await readFile(domainIndexMigrationUrl, 'utf8')
+    ].join('\n');
     const tables = [...sql.matchAll(/create table public\.([a-z_]+)/g)].map((match) => match[1]);
     const rlsTables = [...sql.matchAll(/alter table public\.([a-z_]+) enable row level security/g)]
       .map((match) => match[1]);
@@ -122,5 +136,25 @@ describe('initial migration contract', () => {
     expect(sql).toContain('create function public.bootstrap_first_admin_profile');
     expect(sql).toContain('to service_role');
     expect(sql).toContain('from public, anon, authenticated');
+  });
+
+  it('hardens cross-table cleaning and payroll integrity', async () => {
+    const sql = await readFile(domainIntegrityMigrationUrl, 'utf8');
+    const indexSql = await readFile(domainIndexMigrationUrl, 'utf8');
+
+    expect(sql).toContain('drop index public.cleaning_targets_one_active_per_room');
+    expect(sql).toContain('cleaning_targets_one_checkout_per_reservation');
+    expect(sql).toContain('cleaning_attempts_assignment_contract_fk');
+    expect(sql).toContain('cleaning_submissions_attempt_maid_fk');
+    expect(sql).toContain('earnings_submission_maid_fk');
+    expect(sql).toContain('drop column reclean_compensation_decision_id');
+    expect(sql).toContain('earnings_bomb_bonus_exact_check');
+    expect(sql).toContain('drop column locked_earning_ids');
+    expect(sql).toContain('create table public.payroll_items');
+    expect(sql).toContain('earning_id uuid not null unique');
+    expect(sql).toContain('alter table public.payroll_items enable row level security');
+    expect(indexSql).toContain('create policy login_aliases_read_scoped');
+    expect(indexSql).toContain('cleaning_attempts_assignment_contract_idx');
+    expect(indexSql).toContain('payroll_items_earning_maid_idx');
   });
 });

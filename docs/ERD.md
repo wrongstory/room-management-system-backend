@@ -1,7 +1,7 @@
 # Room Management System ERD 초안
 
-> 상태: **검토용 v2**
-> P0 핵심 스키마와 계정 수명주기 계약은 운영 Supabase에 마이그레이션으로 반영하며, 이후 도메인 표는 구현 순서에 따라 확장한다.
+> 상태: **검토용 v3**
+> P0 핵심 스키마·계정 수명주기·도메인 무결성 계약은 migration으로 관리하며, 이후 업무 API와 원장은 구현 순서에 따라 확장한다.
 
 ## 1. 설계 결론
 
@@ -199,6 +199,8 @@ erDiagram
     date effective_service_date
     text status
     int fee_snapshot
+    uuid reclean_of_attempt_id FK
+    uuid reclean_maid_profile_id FK
   }
   CLEANING_ASSIGNMENTS {
     uuid id PK
@@ -250,8 +252,11 @@ erDiagram
 
 핵심 제약:
 
-- 객실마다 종료되지 않은 활성 청소 대상은 최대 한 건이다.
+- 같은 객실의 서로 다른 미래 예약은 각각 checkout 청소 대상을 가질 수 있다.
+- 같은 예약의 예정/수동 checkout은 합쳐서 청소 대상 한 건이며 `source_key` 재시도도 한 건으로 수렴한다.
 - 작업마다 현재 배정은 최대 한 건이고, 과거 revision은 삭제하지 않는다.
+- attempt는 assignment의 target·maid·revision과 모두 일치해야 하며, submission·earning의 maid도 같은 수행자를 가리킨다.
+- 검수 반려 재청소는 원 attempt·원 maid를 불변 링크로 보존하고 다른 메이드에게 배정할 수 없다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.
 - 제출은 `client_submission_id`로 멱등 처리하며, 수행 회차별 현재 제출은 한 건이다.
 - 사진 파일은 비공개 Google Drive 폴더에만 저장하고 DB에는 Drive 파일 ID·해시·크기·삭제예정일·삭제 결과만 둔다.
@@ -290,9 +295,10 @@ erDiagram
     bigint version
   }
   PAYROLL_ITEMS {
-    bigint id PK
+    uuid id PK
     uuid payroll_cycle_id FK
-    uuid earning_id FK
+    uuid earning_id FK,UK
+    uuid maid_profile_id FK
     int locked_amount
   }
   PAYROLL_EVENTS {
@@ -377,5 +383,5 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블을 추가한다.
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.
-4. 배열로 저장하던 지급 수익 ID를 `payroll_items`로 정규화한다.
-5. 도메인별 인덱스·RLS·명시적 GRANT·서버 명령을 추가한다.
+4. 지급 명령에서 `payroll_items` 잠금 합계와 cycle 상태를 원자적으로 전이한다.
+5. 도메인별 서버 명령과 상태 전이 테스트를 추가한다.

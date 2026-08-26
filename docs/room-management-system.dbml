@@ -305,11 +305,13 @@ Table public.cleaning_targets {
   cancelled_by uuid
   cancelled_at timestamptz
   cancellation_reason_code text
+  reclean_of_attempt_id uuid [unique]
+  reclean_maid_profile_id uuid
   created_by uuid [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'A partial unique index allows at most one non-terminal target per room.'
+  Note: 'Checkout targets are unique per reservation. Inspection recleans keep an immutable original attempt and maid link.'
 }
 
 Table public.cleaning_assignments {
@@ -426,6 +428,7 @@ Table public.inspection_decisions {
 
 Table public.earnings {
   id uuid [pk]
+  earning_entitlement_id uuid [not null, unique]
   submission_id uuid [not null, unique]
   maid_profile_id uuid [not null]
   earned_on date [not null]
@@ -455,9 +458,10 @@ Table public.payroll_cycles {
 }
 
 Table public.payroll_items {
-  id bigint [pk, increment]
+  id uuid [pk]
   payroll_cycle_id uuid [not null]
-  earning_id uuid [not null]
+  earning_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
   locked_amount int [not null]
   created_at timestamptz [not null]
 
@@ -560,6 +564,8 @@ Ref: public.cleaning_targets.room_id > public.rooms.id
 Ref: public.cleaning_targets.reservation_id > public.reservations.id
 Ref: public.cleaning_targets.cancelled_by > public.profiles.id
 Ref: public.cleaning_targets.created_by > public.profiles.id
+Ref: public.cleaning_targets.reclean_of_attempt_id - public.cleaning_attempts.id
+Ref: public.cleaning_targets.reclean_maid_profile_id > public.profiles.id
 Ref: public.cleaning_assignments.cleaning_target_id > public.cleaning_targets.id
 Ref: public.cleaning_assignments.maid_profile_id > public.profiles.id
 Ref: public.cleaning_assignments.changed_by > public.profiles.id
@@ -579,6 +585,7 @@ Ref: public.payroll_cycles.maid_profile_id > public.profiles.id
 Ref: public.payroll_cycles.payment_started_by > public.profiles.id
 Ref: public.payroll_items.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_items.earning_id > public.earnings.id
+Ref: public.payroll_items.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_events.actor_profile_id > public.profiles.id
 Ref: public.payroll_adjustments.payroll_cycle_id > public.payroll_cycles.id
