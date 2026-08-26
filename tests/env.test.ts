@@ -6,7 +6,8 @@ const localEnv = {
   NODE_ENV: 'test',
   SUPABASE_URL: 'http://127.0.0.1:54321',
   SUPABASE_PUBLISHABLE_KEY: 'local-publishable',
-  SUPABASE_SECRET_KEY: 'local-secret'
+  SUPABASE_SECRET_KEY: 'local-secret',
+  ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters'
 };
 
 describe('environment contract', () => {

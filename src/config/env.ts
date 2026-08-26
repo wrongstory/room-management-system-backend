@@ -15,7 +15,8 @@ const envSchema = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_PROJECT_REF: optionalProjectRef,
   SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
-  SUPABASE_SECRET_KEY: z.string().min(1)
+  SUPABASE_SECRET_KEY: z.string().min(1),
+  ACCOUNT_PHONE_PEPPER: z.string().min(32)
 }).superRefine((env, context) => {
   const supabaseUrl = new URL(env.SUPABASE_URL);
   const isLocalSupabase = ['127.0.0.1', 'localhost'].includes(supabaseUrl.hostname);

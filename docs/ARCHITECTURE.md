@@ -33,10 +33,10 @@ flowchart LR
 
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.
 2. 내부 이메일은 `user-{profile_id}@auth.castletheart.invalid` 형식으로 서버만 계산합니다.
-3. 사용자가 이름형 `loginId`와 숫자 6자리 이상 로그인 비밀번호를 보냅니다.
+3. 사용자가 이름형 `loginId`와 최초 휴대전화 끝 4자리 임시 비밀번호 또는 숫자 6자리 이상 개인 비밀번호를 보냅니다.
 4. 서버가 활성 alias와 프로필을 찾고 5회 실패/15분 잠금을 검사합니다.
 5. 서버가 Supabase Auth password 로그인을 수행해 access/refresh token을 반환합니다.
-6. 이후 API는 `auth.getUser(accessToken)`으로 토큰을 검증하고 최신 프로필 역할·상태를 다시 읽습니다.
+6. 이후 API는 `auth.getUser(accessToken)`과 `auth.sessions`의 `session_id`를 검증하고 최신 프로필 역할·상태를 다시 읽습니다.
 
 권한은 사용자 수정 가능한 `user_metadata`에 의존하지 않습니다. 역할 변경과 비활성화가 JWT 갱신 전에도 반영되도록 DB 프로필을 매 요청 확인합니다.
 
@@ -97,11 +97,16 @@ erDiagram
 - `GET /health`
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
+- `POST /v1/auth/password`
+- `GET·POST /v1/accounts`
+- `PATCH /v1/accounts/:profileId/role`
+- `PATCH /v1/accounts/:profileId/status`
+- `POST /v1/accounts/:profileId/unlock`
+- `POST /v1/accounts/:profileId/password-reset`
 - `GET /v1/rooms`
 
 다음 구현:
 
-- 관리자 계정 생성·복구·비밀번호 초기화
 - 객실 상세·기준정보 변경
 - 예약 CRUD와 자동/수동 체크아웃 명령
 - 주간 가능일 제출, 오늘/내일 청소 대상, 배정·순서 통보

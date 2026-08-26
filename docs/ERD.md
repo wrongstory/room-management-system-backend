@@ -1,17 +1,16 @@
 # Room Management System ERD 초안
 
-> 상태: **검토용 v1**  
-> 이 문서는 구현 전에 관계와 운영 규칙을 합의하기 위한 초안이다. 아직 Supabase 원격 DB에는 적용하지 않았다.
+> 상태: **검토용 v2**
+> P0 핵심 스키마와 계정 수명주기 계약은 운영 Supabase에 마이그레이션으로 반영하며, 이후 도메인 표는 구현 순서에 따라 확장한다.
 
 ## 1. 설계 결론
 
 - 관리자와 메이드는 인원 수를 코드나 enum에 고정하지 않는다.
-- 한 로그인 계정은 `profiles` 한 건을 가지며, 역할은 `roles`와 `profile_roles`에서 부여·회수한다.
-- `admin`, `maid`는 초기 역할 데이터일 뿐이다. 이후 `inspector` 같은 역할을 추가해도 사용자 테이블을 변경하지 않는다.
+- 한 로그인 계정은 `profiles` 한 건을 가지며 현재 제품 역할은 `admin | maid`다. 각 역할의 계정 수에는 제한이 없다.
 - 메이드 전용 인사 정보만 `maid_profiles`에 분리한다. 관리자는 별도 관리자 테이블 없이 역할로 판정한다.
 - 계정과 역할은 물리 삭제하지 않고 `status`, `revoked_at`으로 종료해 과거 배정·검수·급여 이력을 보존한다.
-- 관리자 계정 추가/메이드 계정 추가는 서버의 관리자 전용 명령에서 `auth.users → profiles → profile_roles → login_aliases`를 한 트랜잭션처럼 처리한다.
-- 공개 스키마의 모든 테이블은 RLS를 사용하고, 역할 판정은 사용자 수정이 가능한 JWT `user_metadata`가 아니라 DB의 활성 `profile_roles`를 조회한다.
+- 관리자 계정 추가/메이드 계정 추가는 서버의 관리자 전용 명령에서 `auth.users → profiles + login_aliases + audit_events`를 보상 트랜잭션으로 처리한다.
+- 공개 스키마의 모든 테이블은 RLS를 사용하고, 역할 판정은 사용자 수정이 가능한 JWT `user_metadata`가 아니라 DB `profiles.role`을 조회한다.
 
 ## 2. 전체 도메인 지도
 
@@ -35,8 +34,6 @@ flowchart LR
 ```mermaid
 erDiagram
   AUTH_USERS ||--|| PROFILES : "1:1 앱 계정"
-  PROFILES ||--o{ PROFILE_ROLES : "역할 부여 이력"
-  ROLES ||--o{ PROFILE_ROLES : "역할 정의"
   PROFILES ||--o{ LOGIN_ALIASES : "로그인 별칭"
   PROFILES ||--o| MAID_PROFILES : "메이드일 때만"
   PROFILES ||--o{ AVAILABILITY_VERSIONS : "주차별 제출 버전"
@@ -51,23 +48,15 @@ erDiagram
     uuid id PK
     uuid auth_user_id UK
     text login_id UK
+    text login_id_normalized UK
     text display_name
+    text display_name_normalized
+    int login_sequence
+    text role
     text status
   }
-  ROLES {
-    smallint id PK
-    text code UK
-    boolean active
-  }
-  PROFILE_ROLES {
-    bigint id PK
-    uuid profile_id FK
-    smallint role_id FK
-    timestamptz granted_at
-    timestamptz revoked_at
-  }
   LOGIN_ALIASES {
-    bigint id PK
+    uuid id PK
     uuid profile_id FK
     text alias_normalized UK
     timestamptz retired_at
@@ -100,7 +89,7 @@ erDiagram
 
 핵심 제약:
 
-- `(profile_id, role_id)`에는 활성 역할 한 건만 허용한다.
+- 역할은 `admin | maid`이고 각 역할의 계정은 여러 개 만들 수 있다.
 - 최소 한 명의 활성 관리자는 항상 남겨야 한다.
 - 활성 메이드만 근무 가능일을 제출할 수 있다.
 - `(maid_profile_id, week_start, version)`은 유일하고, 주차별 현재 제출 버전은 한 건이다.
@@ -383,11 +372,10 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 
 위 Mermaid 블록은 [Mermaid Live Editor](https://mermaid.live/edit)에서도 바로 확인할 수 있다.
 
-## 9. 승인 뒤 반영 순서
+## 9. 이후 반영 순서
 
-1. 기존 `profiles.role enum`을 `roles + profile_roles`로 교체한다.
-2. 근무 가능일 3개 테이블을 먼저 추가한다.
+1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
+2. 근무 가능일 3개 테이블을 추가한다.
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.
 4. 배열로 저장하던 지급 수익 ID를 `payroll_items`로 정규화한다.
-5. 인덱스·RLS·명시적 GRANT·관리자 계정 생성 명령을 추가한다.
-6. 올바른 `yeosucastletheart@gmail.com` Supabase 계정의 Free 조직인지 확인한 뒤에만 원격 프로젝트를 생성한다.
+5. 도메인별 인덱스·RLS·명시적 GRANT·서버 명령을 추가한다.

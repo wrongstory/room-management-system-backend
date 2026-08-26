@@ -1,6 +1,11 @@
 Project room_management_system {
   database_type: 'PostgreSQL'
-  Note: 'ERD review draft v1. Supabase Free Plan only. Not yet applied to a remote database.'
+  Note: 'ERD review draft v2. P0 core is applied; account migrations follow the issue #5 rollout.'
+}
+
+Enum app_role {
+  admin
+  maid
 }
 
 Enum account_status {
@@ -77,7 +82,11 @@ Table public.profiles {
   id uuid [pk]
   auth_user_id uuid [not null, unique]
   login_id text [not null, unique]
+  login_id_normalized text [not null, unique]
   display_name text [not null]
+  display_name_normalized text [not null]
+  login_sequence int [not null]
+  role app_role [not null]
   status account_status [not null, default: 'active']
   phone_last_four text
   phone_lookup_hash text [unique]
@@ -89,33 +98,10 @@ Table public.profiles {
   updated_at timestamptz [not null]
 }
 
-Table public.roles {
-  id smallint [pk, increment]
-  code text [not null, unique, note: 'Initial values: admin, maid']
-  name text [not null]
-  active boolean [not null, default: true]
-  created_at timestamptz [not null]
-}
-
-Table public.profile_roles {
-  id bigint [pk, increment]
+Table public.login_aliases {
+  id uuid [pk]
   profile_id uuid [not null]
-  role_id smallint [not null]
-  granted_by uuid [not null]
-  granted_at timestamptz [not null]
-  revoked_by uuid
-  revoked_at timestamptz
-
-  Indexes {
-    (profile_id, role_id) [name: 'profile_roles_lookup']
-  }
-
-  Note: 'A partial unique index permits one active row per profile and role where revoked_at is null.'
-}
-
-Table private.login_aliases {
-  id bigint [pk, increment]
-  profile_id uuid [not null]
+  alias text [not null]
   alias_normalized text [not null, unique]
   active boolean [not null, default: true]
   expires_after_new_login boolean [not null, default: false]
@@ -546,11 +532,7 @@ Table private.audit_events {
 }
 
 Ref: public.profiles.auth_user_id - auth.users.id
-Ref: public.profile_roles.profile_id > public.profiles.id
-Ref: public.profile_roles.role_id > public.roles.id
-Ref: public.profile_roles.granted_by > public.profiles.id
-Ref: public.profile_roles.revoked_by > public.profiles.id
-Ref: private.login_aliases.profile_id > public.profiles.id
+Ref: public.login_aliases.profile_id > public.profiles.id
 Ref: public.maid_profiles.profile_id - public.profiles.id
 Ref: public.availability_versions.maid_profile_id > public.profiles.id
 Ref: public.availability_days.availability_version_id > public.availability_versions.id

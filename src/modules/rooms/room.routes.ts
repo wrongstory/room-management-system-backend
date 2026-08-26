@@ -3,9 +3,8 @@ import type { RoomService } from './room.service.js';
 
 export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
   return async (app) => {
-    app.get('/', { preHandler: app.authenticate }, async (request) => ({
+    app.get('/', { preHandler: [app.authenticate, app.requirePasswordChanged] }, async (request) => ({
       rooms: await roomService.list(request.actor.accessToken)
     }));
   };
 }
-

@@ -11,6 +11,16 @@ const hardeningMigrationUrl = new URL(
   import.meta.url
 );
 
+const accountMigrationUrl = new URL(
+  '../supabase/migrations/20260826021457_account_lifecycle_contract.sql',
+  import.meta.url
+);
+
+const accountHardeningMigrationUrl = new URL(
+  '../supabase/migrations/20260826023016_harden_account_command_idempotency.sql',
+  import.meta.url
+);
+
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
     const sql = await readFile(initialMigrationUrl, 'utf8');
@@ -72,5 +82,45 @@ describe('initial migration contract', () => {
     expect(sql).toContain('alter default privileges for role postgres in schema public');
     expect(sql).toContain('drop policy if exists notifications_read_scoped');
     expect(sql).toContain('create policy notifications_read_scoped');
+  });
+
+  it('locks after five failures for a fixed fifteen-minute window', async () => {
+    const sql = await readFile(initialMigrationUrl, 'utf8');
+
+    expect(sql).toContain("when p.locked_until is not null and p.locked_until <= now() then 1");
+    expect(sql).toContain(") >= 5 then now() + interval '15 minutes'");
+    expect(sql).toContain('set failed_login_count = 0, locked_until = null');
+  });
+
+  it('keeps account lifecycle commands service-only and protects the last admin', async () => {
+    const sql = await readFile(accountMigrationUrl, 'utf8');
+
+    expect(sql).toContain("message = 'LAST_ACTIVE_ADMIN_REQUIRED'");
+    expect(sql).toContain("event_type = 'account.created'");
+    expect(sql).toContain("grant execute on function public.create_account_profile(");
+    expect(sql).toContain('to service_role');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('delete from auth.sessions where user_id = v_result.auth_user_id');
+    expect(sql).toContain('create function public.is_active_auth_session');
+  });
+
+  it('renames the first duplicate login id and retires its old alias on new-id login', async () => {
+    const sql = await readFile(accountMigrationUrl, 'utf8');
+
+    expect(sql).toContain("login_id = p_display_name || '1'");
+    expect(sql).toContain('set expires_after_new_login = true');
+    expect(sql).toContain('and p.login_id_normalized = p_login_alias_normalized');
+    expect(sql).toContain('set active = false, retired_at = now()');
+  });
+
+  it('guards idempotency keys and allows only a one-time first admin bootstrap', async () => {
+    const sql = await readFile(accountHardeningMigrationUrl, 'utf8');
+
+    expect(sql).toContain("message = 'IDEMPOTENCY_KEY_REUSED'");
+    expect(sql).toContain('before insert on public.audit_events');
+    expect(sql).toContain("message = 'FIRST_ADMIN_ALREADY_EXISTS'");
+    expect(sql).toContain('create function public.bootstrap_first_admin_profile');
+    expect(sql).toContain('to service_role');
+    expect(sql).toContain('from public, anon, authenticated');
   });
 });

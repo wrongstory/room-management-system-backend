@@ -5,6 +5,6 @@ export interface Actor {
   profileId: string;
   displayName: string;
   role: AppRole;
+  mustChangePassword: boolean;
   accessToken: string;
 }
-

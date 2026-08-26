@@ -17,6 +17,12 @@ export interface LoginResult {
 export interface AuthService {
   login(input: LoginInput): Promise<LoginResult>;
   authenticate(accessToken: string): Promise<Actor>;
+  changePassword(
+    actor: Actor,
+    currentPassword: string,
+    newPassword: string,
+    idempotencyKey: string
+  ): Promise<void>;
 }
 
 interface ProfileRow {
@@ -26,6 +32,7 @@ interface ProfileRow {
   role: AppRole;
   status: string;
   locked_until: string | null;
+  must_change_password: boolean;
 }
 
 function normalizeLoginId(loginId: string): string {
@@ -34,6 +41,21 @@ function normalizeLoginId(loginId: string): string {
 
 function syntheticEmail(profileId: string): string {
   return `user-${profileId}@auth.castletheart.invalid`;
+}
+
+function sessionId(accessToken: string): string | null {
+  try {
+    const payload = accessToken.split('.')[1];
+    if (!payload) {
+      return null;
+    }
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      session_id?: unknown;
+    };
+    return typeof claims.session_id === 'string' ? claims.session_id : null;
+  } catch {
+    return null;
+  }
 }
 
 export class SupabaseAuthService implements AuthService {
@@ -73,7 +95,17 @@ export class SupabaseAuthService implements AuthService {
       throw new AppError(401, 'INVALID_CREDENTIALS', '아이디 또는 로그인 비밀번호가 올바르지 않습니다.');
     }
 
-    await this.clients.admin.rpc('record_login_success', { p_profile_id: profile.id });
+    const { data: retiredAliasCount, error: successError } = await this.clients.admin.rpc(
+      'record_login_success',
+      { p_profile_id: profile.id, p_login_alias_normalized: alias }
+    );
+    if (successError) {
+      await this.clients.admin.auth.admin.signOut(data.session.access_token, 'local');
+      throw new AppError(500, 'LOGIN_STATE_UPDATE_FAILED', '로그인 상태를 갱신하지 못했습니다.');
+    }
+    if (typeof retiredAliasCount === 'number' && retiredAliasCount > 0) {
+      await this.clients.admin.auth.admin.signOut(data.session.access_token, 'others');
+    }
 
     return {
       accessToken: data.session.access_token,
@@ -83,7 +115,8 @@ export class SupabaseAuthService implements AuthService {
         authUserId: profile.auth_user_id,
         profileId: profile.id,
         displayName: profile.display_name,
-        role: profile.role
+        role: profile.role,
+        mustChangePassword: profile.must_change_password
       }
     };
   }
@@ -99,13 +132,60 @@ export class SupabaseAuthService implements AuthService {
       throw new AppError(403, 'ACCOUNT_INACTIVE', '현재 사용할 수 없는 계정입니다.');
     }
 
+    const activeSessionId = sessionId(accessToken);
+    if (!activeSessionId) {
+      throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.');
+    }
+    const { data: isActiveSession, error: sessionError } = await this.clients.admin.rpc(
+      'is_active_auth_session',
+      { p_auth_user_id: data.user.id, p_session_id: activeSessionId }
+    );
+    if (sessionError || isActiveSession !== true) {
+      throw new AppError(401, 'SESSION_REVOKED', '로그인이 만료되었습니다. 다시 로그인해 주세요.');
+    }
+
     return {
       authUserId: profile.auth_user_id,
       profileId: profile.id,
       displayName: profile.display_name,
       role: profile.role,
+      mustChangePassword: profile.must_change_password,
       accessToken
     };
+  }
+
+  async changePassword(
+    actor: Actor,
+    currentPassword: string,
+    newPassword: string,
+    idempotencyKey: string
+  ): Promise<void> {
+    const { data: verification, error: verificationError } =
+      await this.clients.publicClient.auth.signInWithPassword({
+        email: syntheticEmail(actor.profileId),
+        password: currentPassword
+      });
+    if (verificationError || !verification.session) {
+      throw new AppError(401, 'INVALID_CURRENT_PASSWORD', '현재 비밀번호가 올바르지 않습니다.');
+    }
+
+    const { error: updateError } = await this.clients.admin.auth.admin.updateUserById(
+      actor.authUserId,
+      { password: newPassword }
+    );
+    if (updateError) {
+      await this.clients.admin.auth.admin.signOut(verification.session.access_token, 'local');
+      throw new AppError(502, 'AUTH_PASSWORD_CHANGE_FAILED', '비밀번호를 변경하지 못했습니다.');
+    }
+
+    await this.clients.admin.auth.admin.signOut(actor.accessToken, 'others');
+    const { error } = await this.clients.admin.rpc('complete_password_change', {
+      p_actor_profile_id: actor.profileId,
+      p_idempotency_key: idempotencyKey
+    });
+    if (error) {
+      throw new AppError(500, 'PASSWORD_STATE_UPDATE_FAILED', '비밀번호 변경 상태를 저장하지 못했습니다.');
+    }
   }
 
   private async getProfileById(profileId: string): Promise<ProfileRow> {
@@ -119,7 +199,7 @@ export class SupabaseAuthService implements AuthService {
   private async fetchProfile(column: 'id' | 'auth_user_id', value: string): Promise<ProfileRow> {
     const { data, error } = await this.clients.admin
       .from('profiles')
-      .select('id,auth_user_id,display_name,role,status,locked_until')
+      .select('id,auth_user_id,display_name,role,status,locked_until,must_change_password')
       .eq(column, value)
       .single();
 
