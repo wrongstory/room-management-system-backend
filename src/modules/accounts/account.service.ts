@@ -69,10 +69,13 @@ interface ProfileRow {
   id: string;
   auth_user_id: string;
   display_name: string;
+  display_name_normalized: string;
   login_id: string;
+  login_id_normalized: string;
   role: AppRole;
   status: AccountStatus;
   phone_last_four: string | null;
+  phone_lookup_hash: string | null;
   must_change_password: boolean;
   failed_login_count: number;
   locked_until: string | null;
@@ -84,10 +87,13 @@ const accountColumns = [
   'id',
   'auth_user_id',
   'display_name',
+  'display_name_normalized',
   'login_id',
+  'login_id_normalized',
   'role',
   'status',
   'phone_last_four',
+  'phone_lookup_hash',
   'must_change_password',
   'failed_login_count',
   'locked_until',
@@ -146,6 +152,29 @@ function ensureAdmin(actor: Actor): void {
   }
 }
 
+interface AccountCreationFingerprint {
+  displayNameNormalized: string;
+  role: AppRole;
+  phoneLookupHash: string;
+}
+
+export function assertIdempotentAccountCreation(
+  existing: Pick<ProfileRow, 'display_name_normalized' | 'role' | 'phone_lookup_hash'>,
+  requested: AccountCreationFingerprint
+): void {
+  if (
+    existing.display_name_normalized !== requested.displayNameNormalized ||
+    existing.role !== requested.role ||
+    existing.phone_lookup_hash !== requested.phoneLookupHash
+  ) {
+    throw new AppError(
+      409,
+      'IDEMPOTENCY_KEY_REUSED',
+      '이미 다른 요청에 사용한 Idempotency-Key입니다.'
+    );
+  }
+}
+
 function databaseError(error: { code?: string; message?: string } | null): AppError {
   const message = error?.message ?? '';
   if (message.includes('LAST_ACTIVE_ADMIN_REQUIRED')) {
@@ -199,10 +228,19 @@ export class SupabaseAccountService implements AccountService {
     const name = normalizeDisplayName(input.displayName);
     const phone = normalizeKoreanMobile(input.phone);
     const phoneHash = createHmac('sha256', this.phonePepper).update(phone.canonical).digest('hex');
-    const existing = await this.findIdempotentAccount(input.idempotencyKey, 'account.created');
+    const fingerprint = {
+      displayNameNormalized: name.normalized,
+      role: input.role,
+      phoneLookupHash: phoneHash
+    };
+    const existing = await this.findIdempotentProfile(input.idempotencyKey, 'account.created');
 
     if (existing) {
-      return { account: existing, temporaryPassword: existing.phoneLastFour ?? phone.lastFour };
+      assertIdempotentAccountCreation(existing, fingerprint);
+      return {
+        account: toAccount(existing),
+        temporaryPassword: existing.phone_last_four ?? phone.lastFour
+      };
     }
 
     const profileId = randomUUID();
@@ -236,10 +274,14 @@ export class SupabaseAccountService implements AccountService {
       }
 
       const row = data as ProfileRow;
+      assertIdempotentAccountCreation(row, fingerprint);
       if (row.id !== profileId) {
         await this.clients.admin.auth.admin.deleteUser(profileId);
       }
-      return { account: toAccount(row), temporaryPassword: phone.lastFour };
+      return {
+        account: toAccount(row),
+        temporaryPassword: row.phone_last_four ?? phone.lastFour
+      };
     } catch (error) {
       await this.clients.admin.auth.admin.deleteUser(profileId);
       throw error;
@@ -250,12 +292,21 @@ export class SupabaseAccountService implements AccountService {
     const name = normalizeDisplayName(input.displayName);
     const phone = normalizeKoreanMobile(input.phone);
     const phoneHash = createHmac('sha256', this.phonePepper).update(phone.canonical).digest('hex');
-    const existing = await this.findIdempotentAccount(
+    const fingerprint = {
+      displayNameNormalized: name.normalized,
+      role: 'admin' as const,
+      phoneLookupHash: phoneHash
+    };
+    const existing = await this.findIdempotentProfile(
       input.idempotencyKey,
       'account.bootstrap_admin_created'
     );
     if (existing) {
-      return { account: existing, temporaryPassword: existing.phoneLastFour ?? phone.lastFour };
+      assertIdempotentAccountCreation(existing, fingerprint);
+      return {
+        account: toAccount(existing),
+        temporaryPassword: existing.phone_last_four ?? phone.lastFour
+      };
     }
 
     const profileId = randomUUID();
@@ -283,7 +334,15 @@ export class SupabaseAccountService implements AccountService {
       if (error || !data) {
         throw databaseError(error);
       }
-      return { account: toAccount(data as ProfileRow), temporaryPassword: phone.lastFour };
+      const row = data as ProfileRow;
+      assertIdempotentAccountCreation(row, fingerprint);
+      if (row.id !== profileId) {
+        await this.clients.admin.auth.admin.deleteUser(profileId);
+      }
+      return {
+        account: toAccount(row),
+        temporaryPassword: row.phone_last_four ?? phone.lastFour
+      };
     } catch (error) {
       await this.clients.admin.auth.admin.deleteUser(profileId);
       throw error;
@@ -396,7 +455,7 @@ export class SupabaseAccountService implements AccountService {
     return data as unknown as ProfileRow;
   }
 
-  private async findIdempotentAccount(key: string, eventType: string): Promise<Account | null> {
+  private async findIdempotentProfile(key: string, eventType: string): Promise<ProfileRow | null> {
     const { data, error } = await this.clients.admin
       .from('audit_events')
       .select('entity_id')
@@ -409,6 +468,6 @@ export class SupabaseAccountService implements AccountService {
     if (!data?.entity_id) {
       return null;
     }
-    return toAccount(await this.getProfile(data.entity_id));
+    return this.getProfile(data.entity_id);
   }
 }

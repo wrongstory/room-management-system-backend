@@ -184,6 +184,17 @@ export class SupabaseAuthService implements AuthService {
       p_idempotency_key: idempotencyKey
     });
     if (error) {
+      const { error: rollbackError } = await this.clients.admin.auth.admin.updateUserById(
+        actor.authUserId,
+        { password: currentPassword }
+      );
+      if (rollbackError) {
+        throw new AppError(
+          500,
+          'PASSWORD_STATE_INCONSISTENT',
+          '비밀번호 상태를 복구하지 못했습니다. 관리자에게 비밀번호 초기화를 요청해 주세요.'
+        );
+      }
       throw new AppError(500, 'PASSWORD_STATE_UPDATE_FAILED', '비밀번호 변경 상태를 저장하지 못했습니다.');
     }
   }
