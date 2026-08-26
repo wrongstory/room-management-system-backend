@@ -70,6 +70,7 @@ describe('initial migration contract', () => {
     expect(sql).toContain('revoke all on schema public from public, anon, authenticated');
     expect(sql).toContain('revoke all privileges on all tables in schema public');
     expect(sql).toContain('alter default privileges for role postgres in schema public');
+    expect(sql).toContain('drop policy if exists notifications_read_scoped');
     expect(sql).toContain('create policy notifications_read_scoped');
   });
 });

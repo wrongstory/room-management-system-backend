@@ -17,6 +17,7 @@ alter default privileges for role postgres in schema public
 
 drop policy if exists notifications_read_own on public.notifications;
 drop policy if exists notifications_admin_read on public.notifications;
+drop policy if exists notifications_read_scoped on public.notifications;
 
 create policy notifications_read_scoped on public.notifications
 for select to authenticated
