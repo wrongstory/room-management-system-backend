@@ -3,12 +3,13 @@ import { buildApp, type AppServices } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 
 const env: AppEnv = {
+  APP_ENV: 'local',
   NODE_ENV: 'test',
   HOST: '127.0.0.1',
   PORT: 3000,
   LOG_LEVEL: 'silent',
   CORS_ORIGINS: 'http://127.0.0.1:4173',
-  SUPABASE_URL: 'https://example.supabase.co',
+  SUPABASE_URL: 'http://127.0.0.1:54321',
   SUPABASE_PUBLISHABLE_KEY: 'publishable-test',
   SUPABASE_SECRET_KEY: 'secret-test',
   corsOrigins: ['http://127.0.0.1:4173']

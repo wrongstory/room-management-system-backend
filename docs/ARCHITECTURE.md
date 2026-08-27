@@ -89,6 +89,8 @@ erDiagram
 - 내부 권한 함수는 `private` 스키마, 고정 `search_path`, 최소 반환값, 명시적 EXECUTE 권한을 사용합니다.
 - 사진 파일은 Drive에서 공개 공유하지 않습니다. API가 사용자 역할과 제출 소유권을 검사한 뒤 업로드·열람·삭제를 대행합니다.
 - Supabase에는 Drive 파일 ID·해시·크기·삭제예정일만 저장하고, 사진 레코드 쓰기는 서버 역할에만 허용합니다.
+- 인증 사용자의 직접 DML은 본인 알림의 `read_at`으로 제한합니다. `resolved_at`과 업무 상태 변경은 서버 명령/RPC만 사용합니다.
+- 상세 역할 매트릭스와 상태 변경 규칙은 [Auth·RLS 계약](./AUTH_RLS_CONTRACT.md)을 따릅니다.
 
 ## API 단계
 
@@ -110,10 +112,15 @@ erDiagram
 - 메이드별 주급과 지급 상태
 - 역할별 알림함과 푸시 구독
 
-## 아직 필요한 원격 설정
+## 원격 환경 현황
 
-- 요청 계정 `yeosucastletheart@gmail.com`으로 Supabase 플러그인 재인증
-- Free 조직·프로젝트 수와 비용 `$0` 확인 후 운영·복구검증 프로젝트 구성
+- Free 조직: `yeosucastletheart@gmail.com's Org`
+- 운영: 서울 `room-management-system-prod` (`aodikrxcczbogjpsjwjt`)
+- 복구검증: 뭄바이 기존 프로젝트 (`matalcofimnhuzslfhdd`), 사용자 트래픽 금지
+- 두 프로젝트 생성 비용은 월 `$0`로 확인
+
+아직 필요한 설정:
+
 - Data API 노출 스키마 확인
 - 마이그레이션 적용, RLS advisor와 performance advisor 확인
 - publishable/secret key를 로컬·배포 환경에 각각 저장

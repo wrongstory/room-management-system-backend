@@ -7,6 +7,8 @@ create extension if not exists btree_gist with schema extensions;
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 grant usage on schema private to authenticated;
+revoke all on schema public from public, anon, authenticated;
+grant usage on schema public to authenticated, service_role;
 
 create type public.app_role as enum ('admin', 'maid');
 create type public.account_status as enum (
@@ -508,6 +510,39 @@ create unique index audit_events_idempotency
 on public.audit_events (idempotency_key)
 where idempotency_key is not null;
 
+-- PostgreSQL does not create indexes for foreign keys automatically. These indexes
+-- support scoped reads, RLS subqueries, joins, and safe parent-row maintenance.
+create index login_aliases_profile_id_idx on public.login_aliases (profile_id);
+create index rooms_room_type_id_idx on public.rooms (room_type_id);
+create index reservations_room_id_idx on public.reservations (room_id);
+create index reservations_created_by_idx on public.reservations (created_by);
+create index reservations_updated_by_idx on public.reservations (updated_by);
+create index cleaning_template_versions_created_by_idx
+on public.cleaning_template_versions (created_by);
+create index cleaning_targets_room_id_idx on public.cleaning_targets (room_id);
+create index cleaning_targets_reservation_id_idx
+on public.cleaning_targets (reservation_id) where reservation_id is not null;
+create index cleaning_targets_cancelled_by_idx
+on public.cleaning_targets (cancelled_by) where cancelled_by is not null;
+create index cleaning_targets_created_by_idx on public.cleaning_targets (created_by);
+create index cleaning_assignments_maid_profile_id_idx
+on public.cleaning_assignments (maid_profile_id);
+create index cleaning_assignments_changed_by_idx on public.cleaning_assignments (changed_by);
+create index cleaning_attempts_assignment_id_idx on public.cleaning_attempts (assignment_id);
+create index cleaning_attempts_maid_profile_id_idx on public.cleaning_attempts (maid_profile_id);
+create index cleaning_submissions_submitted_by_idx
+on public.cleaning_submissions (submitted_by);
+create index inspection_decisions_decided_by_idx on public.inspection_decisions (decided_by);
+create index earnings_maid_profile_id_idx on public.earnings (maid_profile_id);
+create index payroll_cycles_payment_started_by_idx
+on public.payroll_cycles (payment_started_by) where payment_started_by is not null;
+create index notifications_room_id_idx
+on public.notifications (room_id) where room_id is not null;
+create index notifications_cleaning_target_id_idx
+on public.notifications (cleaning_target_id) where cleaning_target_id is not null;
+create index audit_events_actor_profile_id_idx
+on public.audit_events (actor_profile_id) where actor_profile_id is not null;
+
 create trigger profiles_set_updated_at before update on public.profiles
 for each row execute function private.set_updated_at();
 create trigger room_types_set_updated_at before update on public.room_types
@@ -576,42 +611,21 @@ create policy profiles_select_self_or_admin on public.profiles
 for select to authenticated
 using (id = (select private.current_profile_id()) or (select private.current_role()) = 'admin');
 
-create policy profiles_admin_all on public.profiles
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
-
 create policy room_types_read_active on public.room_types
 for select to authenticated
 using ((select private.current_account_active()));
-
-create policy room_types_admin_write on public.room_types
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
 
 create policy rooms_read_active on public.rooms
 for select to authenticated
 using ((select private.current_account_active()));
 
-create policy rooms_admin_write on public.rooms
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
-
-create policy reservations_admin_all on public.reservations
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
+create policy reservations_admin_read on public.reservations
+for select to authenticated
+using ((select private.current_role()) = 'admin');
 
 create policy templates_read_active on public.cleaning_template_versions
 for select to authenticated
 using ((select private.current_account_active()));
-
-create policy templates_admin_write on public.cleaning_template_versions
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
 
 create policy targets_read_scoped on public.cleaning_targets
 for select to authenticated
@@ -626,22 +640,12 @@ using (
   )
 );
 
-create policy targets_admin_write on public.cleaning_targets
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
-
 create policy assignments_read_scoped on public.cleaning_assignments
 for select to authenticated
 using (
   (select private.current_role()) = 'admin'
   or maid_profile_id = (select private.current_profile_id())
 );
-
-create policy assignments_admin_write on public.cleaning_assignments
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
 
 create policy attempts_read_scoped on public.cleaning_attempts
 for select to authenticated
@@ -650,26 +654,12 @@ using (
   or maid_profile_id = (select private.current_profile_id())
 );
 
-create policy attempts_maid_update_own on public.cleaning_attempts
-for update to authenticated
-using (maid_profile_id = (select private.current_profile_id()))
-with check (maid_profile_id = (select private.current_profile_id()));
-
-create policy attempts_admin_all on public.cleaning_attempts
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
-
 create policy submissions_read_scoped on public.cleaning_submissions
 for select to authenticated
 using (
   (select private.current_role()) = 'admin'
   or submitted_by = (select private.current_profile_id())
 );
-
-create policy submissions_insert_own on public.cleaning_submissions
-for insert to authenticated
-with check (submitted_by = (select private.current_profile_id()));
 
 create policy submission_photos_read_scoped on public.submission_photos
 for select to authenticated
@@ -695,22 +685,12 @@ using (
   )
 );
 
-create policy decisions_admin_write on public.inspection_decisions
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
-
 create policy earnings_read_scoped on public.earnings
 for select to authenticated
 using (
   (select private.current_role()) = 'admin'
   or maid_profile_id = (select private.current_profile_id())
 );
-
-create policy earnings_admin_write on public.earnings
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
 
 create policy payroll_read_scoped on public.payroll_cycles
 for select to authenticated
@@ -719,40 +699,37 @@ using (
   or maid_profile_id = (select private.current_profile_id())
 );
 
-create policy payroll_admin_write on public.payroll_cycles
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
-
-create policy notifications_read_own on public.notifications
+create policy notifications_read_scoped on public.notifications
 for select to authenticated
-using (recipient_profile_id = (select private.current_profile_id()));
+using (
+  recipient_profile_id = (select private.current_profile_id())
+  or (select private.current_role()) = 'admin'
+);
 
 create policy notifications_update_own on public.notifications
 for update to authenticated
 using (recipient_profile_id = (select private.current_profile_id()))
 with check (recipient_profile_id = (select private.current_profile_id()));
 
-create policy notifications_admin_all on public.notifications
-for all to authenticated
-using ((select private.current_role()) = 'admin')
-with check ((select private.current_role()) = 'admin');
-
 create policy audit_admin_read on public.audit_events
 for select to authenticated
 using ((select private.current_role()) = 'admin');
 
-grant usage on schema public to authenticated;
+revoke all privileges on all tables in schema public from anon, authenticated;
+revoke all privileges on all sequences in schema public from anon, authenticated;
+revoke all privileges on all routines in schema public from anon, authenticated;
+alter default privileges for role postgres in schema public
+  revoke all on tables from anon, authenticated;
+alter default privileges for role postgres in schema public
+  revoke all on sequences from anon, authenticated;
+alter default privileges for role postgres in schema public
+  revoke execute on functions from anon, authenticated;
+
 grant select on public.profiles, public.room_types, public.rooms, public.room_catalog,
   public.cleaning_template_versions, public.cleaning_targets, public.cleaning_assignments,
   public.cleaning_attempts, public.cleaning_submissions, public.inspection_decisions,
   public.earnings, public.payroll_cycles, public.notifications to authenticated;
-grant insert on public.cleaning_submissions to authenticated;
-grant update on public.cleaning_attempts, public.notifications to authenticated;
-grant insert, update, delete on public.profiles, public.room_types, public.rooms,
-  public.reservations, public.cleaning_template_versions, public.cleaning_targets,
-  public.cleaning_assignments, public.cleaning_attempts, public.inspection_decisions,
-  public.earnings, public.payroll_cycles, public.notifications to authenticated;
+grant update (read_at, resolved_at) on public.notifications to authenticated;
 grant select on public.reservations, public.audit_events to authenticated;
 
 -- The backend secret maps to service_role. Explicit grants are required because

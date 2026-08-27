@@ -1,14 +1,86 @@
 import { z } from 'zod';
 
+const optionalProjectRef = z.preprocess(
+  (value) => value === '' ? undefined : value,
+  z.string().regex(/^[a-z]{20}$/).optional()
+);
+
 const envSchema = z.object({
+  APP_ENV: z.enum(['local', 'development', 'production']).default('local'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   CORS_ORIGINS: z.string().default('http://127.0.0.1:4173,http://localhost:4173'),
   SUPABASE_URL: z.url(),
+  SUPABASE_PROJECT_REF: optionalProjectRef,
   SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
   SUPABASE_SECRET_KEY: z.string().min(1)
+}).superRefine((env, context) => {
+  const supabaseUrl = new URL(env.SUPABASE_URL);
+  const isLocalSupabase = ['127.0.0.1', 'localhost'].includes(supabaseUrl.hostname);
+
+  if (env.SUPABASE_PUBLISHABLE_KEY === env.SUPABASE_SECRET_KEY) {
+    context.addIssue({
+      code: 'custom',
+      path: ['SUPABASE_SECRET_KEY'],
+      message: 'publishable key와 server secret은 서로 달라야 합니다.'
+    });
+  }
+
+  if (env.SUPABASE_SECRET_KEY.startsWith('sb_publishable_')) {
+    context.addIssue({
+      code: 'custom',
+      path: ['SUPABASE_SECRET_KEY'],
+      message: 'SUPABASE_SECRET_KEY에 publishable key를 사용할 수 없습니다.'
+    });
+  }
+
+  if (env.APP_ENV === 'local' && !isLocalSupabase) {
+    context.addIssue({
+      code: 'custom',
+      path: ['SUPABASE_URL'],
+      message: 'local 환경은 로컬 Supabase URL만 사용할 수 있습니다.'
+    });
+  }
+
+  if (env.APP_ENV === 'production') {
+    if (isLocalSupabase || supabaseUrl.protocol !== 'https:') {
+      context.addIssue({
+        code: 'custom',
+        path: ['SUPABASE_URL'],
+        message: 'production 환경은 HTTPS 원격 Supabase URL을 사용해야 합니다.'
+      });
+    }
+
+    if (!env.SUPABASE_PROJECT_REF) {
+      context.addIssue({
+        code: 'custom',
+        path: ['SUPABASE_PROJECT_REF'],
+        message: 'production 환경에는 프로젝트 Ref가 필요합니다.'
+      });
+    }
+
+    const origins = env.CORS_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean);
+    if (origins.some((origin) => !origin.startsWith('https://'))) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CORS_ORIGINS'],
+        message: 'production CORS origin은 모두 HTTPS여야 합니다.'
+      });
+    }
+  }
+
+  if (!isLocalSupabase && env.SUPABASE_PROJECT_REF) {
+    const expectedHost = `${env.SUPABASE_PROJECT_REF}.supabase.co`;
+    if (supabaseUrl.hostname !== expectedHost) {
+      context.addIssue({
+        code: 'custom',
+        path: ['SUPABASE_URL'],
+        message: `SUPABASE_URL은 프로젝트 Ref와 일치하는 ${expectedHost}여야 합니다.`
+      });
+    }
+  }
 });
 
 export type AppEnv = z.infer<typeof envSchema> & { corsOrigins: string[] };
@@ -23,4 +95,3 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
       .filter(Boolean)
   };
 }
-

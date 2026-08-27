@@ -10,6 +10,7 @@ import { SupabaseAuthService, type AuthService } from './modules/auth/auth.servi
 import { createAuthRoutes } from './modules/auth/auth.routes.js';
 import { SupabaseRoomService, type RoomService } from './modules/rooms/room.service.js';
 import { createRoomRoutes } from './modules/rooms/room.routes.js';
+import { loggerOptions } from './config/logger.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -36,16 +37,19 @@ function bearerToken(authorization: string | undefined): string {
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: options.logger === false ? false : { level: options.env.LOG_LEVEL },
+    logger: options.logger === false ? false : loggerOptions(options.env.LOG_LEVEL),
     requestIdHeader: 'x-request-id',
     trustProxy: true
   });
 
-  const clients = options.services ? null : createSupabaseClients(options.env);
-  const services = options.services ?? {
-    auth: new SupabaseAuthService(clients!),
-    rooms: new SupabaseRoomService(clients!)
-  };
+  let services = options.services;
+  if (!services) {
+    const clients = createSupabaseClients(options.env);
+    services = {
+      auth: new SupabaseAuthService(clients),
+      rooms: new SupabaseRoomService(clients)
+    };
+  }
 
   await app.register(helmet, { global: true });
   await app.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
