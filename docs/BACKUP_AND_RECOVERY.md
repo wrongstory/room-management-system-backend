@@ -1,7 +1,7 @@
 # Supabase Free Plan 백업·복구 운영안
 
 > 결정일: 2026-08-26  
-> 상태: Free 조직과 운영·복구검증 프로젝트 생성 완료, 원격 마이그레이션 적용 전
+> 상태: Free 조직과 운영·복구검증 프로젝트 생성 및 schema migration 재현 완료, 주기적 논리 dump 자동화 전
 
 ## 목적
 
@@ -23,6 +23,8 @@ Supabase Free Plan의 활성 프로젝트 2개를 다음처럼 사용한다.
 - 데이터가 포함된 dump는 개인정보를 포함할 수 있으므로 Git에 커밋하지 않고 로그에도 출력하지 않는다.
 
 recovery 프로젝트는 최신 상태를 실제로 복원해 보는 **warm recovery copy**다. 같은 계정·같은 공급자 안에 있으므로 이것만으로 계정 탈취, 공급자 장애, 잘못된 백업의 전파까지 막는 독립 백업은 아니다. 최소한 최근 성공 dump 7세트는 암호화해 별도 안전 저장소에 보관한다.
+
+2026-08-26에 recovery 프로젝트에 Git의 기존 P0/P1 migration과 도메인 무결성 migration을 순서대로 적용했다. 구조 검사 16건과 rollback DML 검사 10건이 통과했으며 검증 fixture는 0건으로 복귀했다. 이는 schema 복구 경로 검증이며, 운영 데이터의 주기적 roles/schema/data dump 자동화와 실제 data restore 검증은 별도 후속 작업이다.
 
 ## 백업 주기
 
