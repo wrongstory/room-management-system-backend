@@ -38,7 +38,7 @@
 | `admin` | `maid` | 마지막 활성 관리자가 아님 |
 | `maid` | `admin` | 활성 관리자가 실행 |
 
-`deactivation_pending`과 `upload_only`는 진행 중 업무를 종결하는 후속 이슈에서 사용한다. 이 단계의 일반 계정 API는 `active`, `inactive`, `departed`만 직접 받는다.
+`deactivation_pending`과 `upload_only`는 진행 중 업무를 종결하는 후속 이슈에서 사용하는 제한 capability 상태다. 별도 역할이 아니며 일반 관리자·메이드 권한을 상속하지 않는다. 현재 Data API의 일반 RLS 조회는 `active` 계정에만 열고, 후속 사진/수행 구현에서는 동결된 assignment revision과 만료 시각에 묶인 좁은 서버 command로만 제한 capability를 제공한다. 이 단계의 일반 계정 API는 `active`, `inactive`, `departed`만 직접 받는다.
 
 ## 관리자 API
 
