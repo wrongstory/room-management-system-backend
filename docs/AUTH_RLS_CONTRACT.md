@@ -4,7 +4,7 @@
 
 - 브라우저는 publishable key와 사용자 access token만 가진다.
 - 인증된 사용자는 Data API에서 자신의 범위에 해당하는 조회만 수행한다.
-- 브라우저가 직접 변경할 수 있는 값은 본인 알림의 `read_at`, `resolved_at`뿐이다.
+- 브라우저가 직접 변경할 수 있는 값은 본인 알림의 `read_at`뿐이다. `resolved_at`은 검증된 도메인 command만 변경한다.
 - 계정, 예약, 배정, 수행, 제출, 검수, 수익, 지급의 변경은 Fastify 서버의 검증된 명령과 트랜잭션/RPC를 통해서만 수행한다.
 - 서버 secret/service-role은 서버와 배포 secret에만 둔다.
 - API 로그는 Authorization·Cookie·비밀번호·토큰·PIN·휴대전화·서버 secret 필드를 `[REDACTED]`로 치환한다.

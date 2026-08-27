@@ -29,6 +29,11 @@ const domainIndexMigrationUrl = new URL(
   import.meta.url
 );
 
+const notificationGrantMigrationUrl = new URL(
+  '../supabase/migrations/20260827211304_restrict_notification_recipient_updates.sql',
+  import.meta.url
+);
+
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
     const sql = await readFile(initialMigrationUrl, 'utf8');
@@ -64,9 +69,7 @@ describe('initial migration contract', () => {
 
     expect(authenticatedGrants).not.toMatch(/grant (insert|delete)\b/);
     expect(authenticatedGrants).not.toContain('grant update on');
-    expect(authenticatedGrants).toContain(
-      'grant update (read_at, resolved_at) on public.notifications to authenticated'
-    );
+    expect(authenticatedGrants).toContain('grant update (read_at, resolved_at)');
     expect(sql).not.toContain('auth.role()');
     expect(sql).not.toContain('user_metadata');
     expect(sql).toContain(
@@ -156,5 +159,15 @@ describe('initial migration contract', () => {
     expect(indexSql).toContain('create policy login_aliases_read_scoped');
     expect(indexSql).toContain('cleaning_attempts_assignment_contract_idx');
     expect(indexSql).toContain('payroll_items_earning_maid_idx');
+  });
+
+  it('allows recipients to update read_at but not resolve notifications', async () => {
+    const sql = await readFile(notificationGrantMigrationUrl, 'utf8');
+
+    expect(sql).toContain(
+      'revoke update (read_at, resolved_at) on public.notifications from authenticated'
+    );
+    expect(sql).toContain('grant update (read_at) on public.notifications to authenticated');
+    expect(sql).not.toContain('grant update (read_at, resolved_at)');
   });
 });

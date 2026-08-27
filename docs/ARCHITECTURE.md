@@ -1,5 +1,7 @@
 # 백엔드 서버 설계
 
+> 문서 지위: 설계 검토 초안이다. 구현 전에 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 먼저 읽는다. 이 문서와 ERD/DBML은 제품 가이드와 reconcile되기 전에는 목표 계약이 아니며, `[미확정]` 정책을 기존 코드나 이 문서만으로 확정하지 않는다.
+
 ## 기술 선택
 
 - API: Node.js 22, Fastify 5, TypeScript

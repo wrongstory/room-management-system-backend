@@ -43,4 +43,4 @@ Free 프로젝트가 2개뿐이므로 recovery 프로젝트를 개발 DB로 겸�
 
 ## CI와 병합 제한
 
-GitHub Actions의 `application`과 `migration` 작업이 PR과 main push에서 실행된다. 현재 저장소는 개인 계정의 비공개 Free 저장소라 GitHub API가 branch protection을 허용하지 않는다. 따라서 실패 시 병합을 기술적으로 차단하려면 저장소를 public으로 전환하거나 GitHub 유료 플랜이 필요하다. 그 전에는 두 작업의 성공을 병합 전 운영 규칙으로 강제한다.
+GitHub Actions의 `application`과 `migration` 작업이 PR과 `main` push에서 실행된다. 저장소는 public이며 `main` branch protection은 두 작업을 필수 상태 검사로 요구하고, 작업 브랜치가 최신 `main`을 포함하도록 strict 검사를 적용한다. 두 작업 중 하나라도 실패하거나 최신 base 반영 뒤 다시 실행되지 않으면 병합하지 않는다.

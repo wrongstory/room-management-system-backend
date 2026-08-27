@@ -1,7 +1,8 @@
 # Supabase Free Plan 백업·복구 운영안
 
-> 결정일: 2026-08-26  
-> 상태: Free 조직과 운영·복구검증 프로젝트 생성 및 schema migration 재현 완료, 주기적 논리 dump 자동화 전
+> 결정일: 2026-08-26
+> 상태: 대상 계정 연결과 Free 프로젝트 2개 확인 완료, 운영·복구검증 migration 적용·재현 완료, 정기 dump 자동화는 구현 전
+> 사진은 Google Drive에만 비공개 저장하고 `uploaded_at + 7 days`에 예외 없이 영구삭제하는 확정 정책이다. DB 백업은 사진 객체를 포함하지 않으며 파일 ID·해시·삭제 결과 메타데이터만 보존한다.
 
 ## 목적
 
@@ -9,10 +10,10 @@ Supabase Free Plan의 활성 프로젝트 2개를 다음처럼 사용한다.
 
 | 프로젝트 | 역할 | 앱 연결 |
 |---|---|---|
-| `room-management-system-prod` (`aodikrxcczbogjpsjwjt`) | 서울 운영 DB·Auth·사진 메타데이터 | 운영 API만 연결 |
-| 기존 프로젝트 (`matalcofimnhuzslfhdd`) | 뭄바이 논리 백업 복원과 복구 검증 | 일반 사용자 트래픽 연결 금지 |
+| `room-management-system-prod` (`aodikrxcczbogjpsjwjt`, 서울) | 실제 운영 DB·Auth·사진 메타데이터 | 운영 API만 연결 |
+| `yeosucastletheart@gmail.com's Project` (`matalcofimnhuzslfhdd`, 뭄바이) | 최신 논리 백업 복원과 복구 검증 | 일반 사용자 트래픽 연결 금지 |
 
-두 프로젝트는 `yeosucastletheart@gmail.com` 계정의 Free 조직에 있으며 생성 비용은 월 `$0`로 확인했다. 운영 지연시간을 최소화하기 위해 운영 프로젝트는 서울(`ap-northeast-2`)을 사용한다. 기존 뭄바이 프로젝트는 사용자 트래픽에 연결하지 않고 복구검증 전용으로 사용한다.
+두 프로젝트는 `yeosucastletheart@gmail.com` 계정의 같은 Free 조직에 있고 현재 모두 `ACTIVE_HEALTHY`다. Free 활성 프로젝트 한도 2개를 모두 사용하므로 세 번째 프로젝트를 만들지 않는다. 복구검증 프로젝트의 리전이 운영과 다르다는 점은 복구 시간 측정과 연결 설정에 반영한다.
 
 ## 무엇을 어디에 보관하는가
 
@@ -71,12 +72,15 @@ psql \
 - Free에는 공식 일일 백업 보장, PITR, DB branching, SLA가 없다.
 - 프로젝트를 삭제하면 그 프로젝트에 종속된 데이터와 백업은 영구 삭제된다.
 
-## 적용 전 확인 조건
+## 자동화 전 확인 조건
 
-1. 대상 Ref가 운영 `aodikrxcczbogjpsjwjt`인지 확인한다.
-2. Git 마이그레이션과 원격 마이그레이션 목록이 일치하는지 확인한다.
-3. 운영 dump/복구검증 작업의 접속 문자열이 서로 다른 secret인지 확인한다.
-4. recovery 프로젝트가 일반 앱 환경변수에 들어가지 않았는지 확인한다.
+계정 연결과 프로젝트 생성은 완료됐다. 백업 자동화를 실행하기 전에는 다음을 매번 확인한다.
+
+1. 프로젝트 ref가 운영 `aodikrxcczbogjpsjwjt`, 복구검증 `matalcofimnhuzslfhdd`와 정확히 일치하는지
+2. 두 프로젝트가 모두 `ACTIVE_HEALTHY`이고 같은 Git migration 집합을 갖는지
+3. 복구검증 프로젝트에 일반 사용자 트래픽과 운영 API가 연결되지 않았는지
+4. dump·복원 연결 문자열과 DB 비밀번호가 전용 secret으로만 주입되는지
+5. 복원 실패 시 직전 성공 recovery 사본을 보존하는 절차가 준비됐는지
 
 공식 근거:
 
