@@ -377,15 +377,6 @@ export class SupabaseAccountService implements AccountService {
   async changeStatus(actor: Actor, input: ChangeAccountStatusInput): Promise<Account> {
     ensureAdmin(actor);
     const before = await this.getProfile(input.targetProfileId);
-    const nextBanDuration = input.status === 'active' ? 'none' : '876000h';
-    const previousBanDuration = before.status === 'active' ? 'none' : '876000h';
-    const { error: authError } = await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
-      ban_duration: nextBanDuration
-    });
-    if (authError) {
-      throw new AppError(502, 'AUTH_USER_UPDATE_FAILED', '인증 계정 상태를 변경하지 못했습니다.');
-    }
-
     const { data, error } = await this.clients.admin.rpc('change_account_status', {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: input.targetProfileId,
@@ -394,12 +385,23 @@ export class SupabaseAccountService implements AccountService {
       p_idempotency_key: input.idempotencyKey
     });
     if (error || !data) {
-      await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
-        ban_duration: previousBanDuration
-      });
       throw databaseError(error);
     }
-    return toAccount(data as ProfileRow);
+
+    const row = data as ProfileRow;
+    const nextBanDuration = row.status === 'active' ? 'none' : '876000h';
+    const { error: authError } = await this.clients.admin.auth.admin.updateUserById(
+      before.auth_user_id,
+      { ban_duration: nextBanDuration }
+    );
+    if (authError) {
+      throw new AppError(
+        502,
+        'ACCOUNT_AUTH_STATE_INCONSISTENT',
+        'DB 계정 상태는 변경됐지만 Auth 동기화에 실패했습니다. 동일한 Idempotency-Key로 다시 시도해 주세요.'
+      );
+    }
+    return toAccount(row);
   }
 
   async unlock(actor: Actor, input: AccountMutationInput): Promise<Account> {
