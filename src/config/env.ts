@@ -16,7 +16,9 @@ const envSchema = z.object({
   SUPABASE_PROJECT_REF: optionalProjectRef,
   SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
   SUPABASE_SECRET_KEY: z.string().min(1),
-  ACCOUNT_PHONE_PEPPER: z.string().min(32)
+  ACCOUNT_PHONE_PEPPER: z.string().min(32),
+  RESERVATION_PII_KEY_BASE64: z.string().min(1),
+  RESERVATION_PII_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default('v1')
 }).superRefine((env, context) => {
   const supabaseUrl = new URL(env.SUPABASE_URL);
   const isLocalSupabase = ['127.0.0.1', 'localhost'].includes(supabaseUrl.hostname);
@@ -34,6 +36,26 @@ const envSchema = z.object({
       code: 'custom',
       path: ['SUPABASE_SECRET_KEY'],
       message: 'SUPABASE_SECRET_KEY에 publishable key를 사용할 수 없습니다.'
+    });
+  }
+
+  try {
+    const reservationPiiKey = Buffer.from(env.RESERVATION_PII_KEY_BASE64, 'base64');
+    if (
+      reservationPiiKey.length !== 32 ||
+      reservationPiiKey.toString('base64') !== env.RESERVATION_PII_KEY_BASE64
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RESERVATION_PII_KEY_BASE64'],
+        message: '예약 개인정보 암호키는 Base64로 인코딩한 32바이트여야 합니다.'
+      });
+    }
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      path: ['RESERVATION_PII_KEY_BASE64'],
+      message: '예약 개인정보 암호키가 올바른 Base64가 아닙니다.'
     });
   }
 

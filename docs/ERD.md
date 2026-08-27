@@ -1,6 +1,6 @@
 # Room Management System ERD 초안
 
-> 상태: **검토용 v3**
+> 상태: **검토용 v4**
 > P0 핵심 스키마·계정 수명주기·도메인 무결성 계약은 migration으로 관리하며, 이후 업무 API와 원장은 구현 순서에 따라 확장한다.
 > 제품 계약과 미확정 사항은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 우선한다.
 
@@ -102,12 +102,18 @@ erDiagram
 erDiagram
   ROOM_TYPES ||--o{ ROOMS : "객실 유형"
   ROOMS ||--o{ RESERVATIONS : "예약"
-  ROOMS ||--o{ ROOM_OPERATION_EVENTS : "상태 변경"
+  RESERVATIONS ||--o{ RESERVATION_SCHEDULE_REVISIONS : "일정 이력"
+  RESERVATIONS ||--|| PREPARATION_OBLIGATIONS : "입실 준비"
+  RESERVATIONS ||--|| CHECKOUT_CLEANING_OBLIGATIONS : "퇴실 청소 의무"
+  RESERVATIONS ||--o{ ROOM_OCCUPANCY_EVENTS : "점유 이력"
+  CHECKOUT_CLEANING_OBLIGATIONS o|--o| CLEANING_TARGETS : "필요 시 공개"
+  ROOMS ||--o{ ROOM_OPERATION_BLOCKS : "운영 차단"
   ROOMS ||--o{ ROOM_ISSUES : "특이사항"
   ROOMS ||--o{ ROOM_CANDLE_EVENTS : "촛불 증감"
-  RESERVATIONS ||--o| CHECKOUT_INSPECTIONS : "퇴실 점검"
+  ROOMS ||--o{ ROOM_PIN_SYNC_EVENTS : "PIN 일치 상태"
+  ROOMS ||--o{ ROOM_PIN_ACCESS_LEASES : "제한 접근"
   PROFILES ||--o{ RESERVATIONS : "등록·수정"
-  PROFILES ||--o{ ROOM_OPERATION_EVENTS : "수행자"
+  PROFILES ||--o{ ROOM_OCCUPANCY_EVENTS : "수행자"
   PROFILES ||--o{ ROOM_ISSUES : "등록·해결"
 
   ROOM_TYPES {
@@ -128,15 +134,60 @@ erDiagram
     uuid room_id FK
     timestamptz check_in_at
     timestamptz check_out_at
+    timestamptz actual_check_in_at
+    timestamptz actual_checkout_at
+    uuid preparation_obligation_id FK
+    uuid checkout_obligation_id FK
     text status
     bigint version
   }
-  ROOM_OPERATION_EVENTS {
-    bigint id PK
+  RESERVATION_SCHEDULE_REVISIONS {
+    uuid id PK
+    uuid reservation_id FK
+    bigint version
     uuid room_id FK
+    timestamptz check_in_at
+    timestamptz check_out_at
+    int guest_count
+    text reason_code
+  }
+  PREPARATION_OBLIGATIONS {
+    uuid id PK
+    uuid reservation_id UK
+    uuid room_id FK
+    text status
+    uuid current_attempt_id FK
+    uuid approved_submission_id FK
+    bigint version
+  }
+  CHECKOUT_CLEANING_OBLIGATIONS {
+    uuid id PK
+    uuid reservation_id UK
+    uuid room_id FK
+    text status
+    date effective_service_date
+    timestamptz available_from
+    timestamptz due_at
+    uuid current_cleaning_target_id UK
+    bigint version
+  }
+  ROOM_OCCUPANCY_EVENTS {
+    uuid id PK
+    uuid room_id FK
+    uuid reservation_id FK
+    text event_key UK
     text event_type
     jsonb before_state
     jsonb after_state
+  }
+  ROOM_OPERATION_BLOCKS {
+    uuid id PK
+    uuid room_id FK
+    text reason_code
+    timestamptz starts_at
+    timestamptz ends_at
+    timestamptz released_at
+    bigint version
   }
   ROOM_ISSUES {
     uuid id PK
@@ -146,18 +197,39 @@ erDiagram
     text status
   }
   ROOM_CANDLE_EVENTS {
-    bigint id PK
+    uuid id PK
     uuid room_id FK
     int count_before
     int count_after
+    boolean physically_verified
   }
-  CHECKOUT_INSPECTIONS {
+  ROOM_PIN_SYNC_EVENTS {
     uuid id PK
+    uuid room_id FK
+    text sync_status
+    bigint pin_version
+  }
+  ROOM_PIN_ACCESS_LEASES {
+    uuid id PK
+    uuid room_id FK
     uuid reservation_id FK
-    text status
-    text completion_source
+    uuid cleaning_target_id FK
+    uuid assignment_id FK
+    bigint pin_version
+    uuid issued_to FK
+    timestamptz expires_at
+    timestamptz revoked_at
   }
 ```
+
+핵심 제약:
+
+- 활성 예약 구간은 `[check_in_at, check_out_at)` 반개구간이며 GiST exclusion으로 객실별 겹침을 막는다. KST 날짜가 다음 날 이상이고 분 단위인 일정만 허용한다.
+- 예약마다 입실 준비 의무와 비공개 퇴실 청소 의무를 정확히 하나씩 만든다. 퇴실 청소 대상은 필요 시 같은 의무에서 한 번만 공개한다.
+- 예약 일정, 점유, 촛불, PIN 동기화 이력은 append-only다. 예약·객실 current row는 CAS version으로만 갱신한다.
+- 예약 취소는 입실 전에만 soft cancel한다. 수동 체크아웃은 예정 일정을 덮어쓰지 않고 실제 시각과 점유 event를 추가한다.
+- 고객 배정에는 PIN 동기화 `verified`와 객실 기준정보 확인을 포함한 독립 readiness 조건을 모두 요구한다. PIN 원문은 이 ERD의 일반 업무 테이블에 저장하지 않는다.
+- 퇴실점검 lifecycle은 아직 `[미확정]`이므로 `checkout_inspections`를 구현된 목표 테이블처럼 두지 않는다.
 
 ## 5. 청소 배정·수행·검수
 

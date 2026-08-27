@@ -13,6 +13,8 @@ const env: AppEnv = {
   SUPABASE_PUBLISHABLE_KEY: 'publishable-test',
   SUPABASE_SECRET_KEY: 'secret-test',
   ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters',
+  RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
+  RESERVATION_PII_KEY_VERSION: 'test-v1',
   corsOrigins: ['http://127.0.0.1:4173']
 };
 
@@ -71,8 +73,43 @@ function services(): AppServices {
         roomTypeCode: 'premium',
         roomTypeName: '프리미어',
         elevatorZone: 'A' as const,
-        dataStatus: 'verified' as const
-      }])
+        dataStatus: 'verified' as const,
+        stateVersion: 1,
+        occupied: false,
+        cleaningRequired: false,
+        candleCount: 0,
+        pinSyncStatus: 'unconfigured' as const,
+        allocationBlocked: true,
+        allocationReady: false,
+        reasonCodes: ['DATA_UNCONFIRMED' as const]
+      }]),
+      get: vi.fn(),
+      changeMasterData: vi.fn(),
+      mutateOperation: vi.fn()
+    },
+    reservations: {
+      list: vi.fn(async () => []),
+      create: vi.fn(async (_actor, input) => ({
+        id: '41000000-0000-4000-8000-000000000001',
+        roomId: input.roomId,
+        checkInAt: input.checkInAt,
+        checkOutAt: input.checkOutAt,
+        guestCount: input.guestCount,
+        status: 'active' as const,
+        preparationObligationId: '42000000-0000-4000-8000-000000000001',
+        checkoutObligationId: '43000000-0000-4000-8000-000000000001',
+        version: 1,
+        roomStateVersion: 2,
+        actualCheckInAt: null,
+        actualCheckoutAt: null,
+        cancelledAt: null,
+        createdAt: '2026-08-28T00:00:00.000Z',
+        updatedAt: '2026-08-28T00:00:00.000Z'
+      })),
+      change: vi.fn(),
+      cancel: vi.fn(),
+      manualCheckout: vi.fn(),
+      processDue: vi.fn()
     }
   };
 }
@@ -182,6 +219,36 @@ describe('application', () => {
 
     expect(temporary.statusCode).toBe(200);
     expect(invalid.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('creates a reservation through an administrator command without returning encrypted PII', async () => {
+    const app = await buildApp({ env, services: services(), logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'reservation-create-0001'
+      },
+      payload: {
+        roomId: '51000000-0000-4000-8000-000000000001',
+        checkInAt: '2026-09-01T16:00:00+09:00',
+        checkOutAt: '2026-09-02T11:00:00+09:00',
+        guestCount: 2,
+        guestName: '홍길동',
+        expectedRoomVersion: 1
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().reservation).toMatchObject({
+      status: 'active',
+      guestCount: 2,
+      version: 1
+    });
+    expect(JSON.stringify(response.json())).not.toContain('guest_name_encrypted');
+    expect(JSON.stringify(response.json())).not.toContain('홍길동');
     await app.close();
   });
 });

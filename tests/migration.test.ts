@@ -33,6 +33,10 @@ const notificationGrantMigrationUrl = new URL(
   '../supabase/migrations/20260827211304_restrict_notification_recipient_updates.sql',
   import.meta.url
 );
+const roomReservationMigrationUrl = new URL(
+  '../supabase/migrations/20260827224644_room_reservation_commands.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -51,7 +55,8 @@ describe('initial migration contract', () => {
       await readFile(accountMigrationUrl, 'utf8'),
       await readFile(accountHardeningMigrationUrl, 'utf8'),
       await readFile(domainIntegrityMigrationUrl, 'utf8'),
-      await readFile(domainIndexMigrationUrl, 'utf8')
+      await readFile(domainIndexMigrationUrl, 'utf8'),
+      await readFile(roomReservationMigrationUrl, 'utf8')
     ].join('\n');
     const tables = [...sql.matchAll(/create table public\.([a-z_]+)/g)].map((match) => match[1]);
     const rlsTables = [...sql.matchAll(/alter table public\.([a-z_]+) enable row level security/g)]
@@ -169,5 +174,36 @@ describe('initial migration contract', () => {
     );
     expect(sql).toContain('grant update (read_at) on public.notifications to authenticated');
     expect(sql).not.toContain('grant update (read_at, resolved_at)');
+  });
+
+  it('adds reservation history, obligations, occupancy ledgers, and CAS commands', async () => {
+    const sql = await readFile(roomReservationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table public.reservation_schedule_revisions');
+    expect(sql).toContain('create table public.preparation_obligations');
+    expect(sql).toContain('create table public.checkout_cleaning_obligations');
+    expect(sql).toContain('create table public.room_occupancy_events');
+    expect(sql).toContain('create function public.create_reservation(');
+    expect(sql).toContain('create function public.change_reservation(');
+    expect(sql).toContain('create function public.cancel_reservation(');
+    expect(sql).toContain('create function public.manual_checkout_reservation(');
+    expect(sql).toContain('create function public.process_due_reservation_transitions(');
+    expect(sql).toContain("message = 'STALE_VERSION'");
+    expect(sql).toContain("message = 'IDEMPOTENCY_KEY_REUSED'");
+    expect(sql).toContain("message = 'RESERVATION_OVERLAP'");
+    expect(sql).toContain("at time zone 'Asia/Seoul'");
+  });
+
+  it('keeps new room ledgers append-only and service commands private', async () => {
+    const sql = await readFile(roomReservationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('reservation_schedule_revisions_append_only');
+    expect(sql).toContain('room_occupancy_events_append_only');
+    expect(sql).toContain('room_candle_events_append_only');
+    expect(sql).toContain('room_pin_sync_events_append_only');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/for all to authenticated/);
+    expect(sql).not.toMatch(/grant (insert|delete|update) on public\.(reservation|room_)/);
   });
 });

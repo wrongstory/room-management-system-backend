@@ -1,6 +1,6 @@
 Project room_management_system {
   database_type: 'PostgreSQL'
-  Note: 'ERD review draft v2. P0 core is applied; account migrations follow the issue #5 rollout.'
+  Note: 'ERD review draft v4. P0/account baseline is on main; issue #1 room/reservation additions are represented as a proposed append-only migration.'
 }
 
 Enum app_role {
@@ -190,6 +190,7 @@ Table public.reservations {
   status text [not null]
   guest_name_encrypted text
   preparation_obligation_id uuid [not null]
+  checkout_obligation_id uuid [not null]
   version bigint [not null, default: 1]
   created_by uuid [not null]
   updated_by uuid [not null]
@@ -202,55 +203,135 @@ Table public.reservations {
   Note: 'PostgreSQL exclusion constraint prevents overlapping active ranges for the same room.'
 }
 
-Table public.room_operation_events {
-  id bigint [pk, increment]
+Table public.reservation_schedule_revisions {
+  id uuid [pk]
+  reservation_id uuid [not null]
+  version bigint [not null]
   room_id uuid [not null]
+  check_in_at timestamptz [not null]
+  check_out_at timestamptz [not null]
+  guest_count int [not null]
+  reason_code text [not null]
+  actor_profile_id uuid [not null]
+  effective_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  Indexes {
+    (reservation_id, version) [unique]
+  }
+}
+
+Table public.preparation_obligations {
+  id uuid [pk]
+  reservation_id uuid [not null, unique]
+  room_id uuid [not null]
+  status text [not null]
+  current_attempt_id uuid
+  approved_submission_id uuid
+  version bigint [not null]
+  invalidated_reason_code text
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table public.checkout_cleaning_obligations {
+  id uuid [pk]
+  reservation_id uuid [not null, unique]
+  room_id uuid [not null]
+  status text [not null]
+  original_service_date date [not null]
+  effective_service_date date [not null]
+  available_from timestamptz [not null]
+  due_at timestamptz
+  current_cleaning_target_id uuid [unique]
+  version bigint [not null]
+  cancelled_at timestamptz
+  cancellation_reason_code text
+  created_by uuid [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table public.room_occupancy_events {
+  id uuid [pk]
+  event_key text [not null, unique]
+  room_id uuid [not null]
+  reservation_id uuid [not null]
   event_type text [not null]
   before_state jsonb
-  after_state jsonb
-  reason_code text
+  after_state jsonb [not null]
+  reason_code text [not null]
   actor_profile_id uuid [not null]
   effective_at timestamptz [not null]
   recorded_at timestamptz [not null]
 }
 
+Table public.room_operation_blocks {
+  id uuid [pk]
+  room_id uuid [not null]
+  reason_code text [not null]
+  starts_at timestamptz [not null]
+  ends_at timestamptz
+  created_by uuid [not null]
+  created_at timestamptz [not null]
+  released_by uuid
+  released_at timestamptz
+  release_reason_code text
+  version bigint [not null]
+}
+
 Table public.room_issues {
   id uuid [pk]
   room_id uuid [not null]
-  cleaning_attempt_id uuid
   category text [not null]
-  description text
   severity text [not null]
   blocks_guest_assignment boolean [not null, default: false]
+  description text
   status text [not null]
   reported_by uuid [not null]
   resolved_by uuid
   reported_at timestamptz [not null]
   resolved_at timestamptz
+  resolution_reason_code text
+  version bigint [not null]
 }
 
 Table public.room_candle_events {
-  id bigint [pk, increment]
+  id uuid [pk]
   room_id uuid [not null]
-  cleaning_attempt_id uuid
-  action text [not null]
   count_before int [not null]
   count_after int [not null]
-  location_note text
-  reason_code text
-  actor_profile_id uuid [not null]
   physically_verified boolean [not null, default: false]
-  created_at timestamptz [not null]
+  reason_code text [not null]
+  actor_profile_id uuid [not null]
+  effective_at timestamptz [not null]
+  recorded_at timestamptz [not null]
 }
 
-Table public.checkout_inspections {
+Table public.room_pin_sync_events {
   id uuid [pk]
-  reservation_id uuid [not null, unique]
-  status text [not null]
-  completion_source text
-  completed_by uuid
-  completed_at timestamptz
-  created_at timestamptz [not null]
+  room_id uuid [not null]
+  sync_status text [not null]
+  pin_version bigint
+  reason_code text [not null]
+  actor_profile_id uuid [not null]
+  effective_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+}
+
+Table public.room_pin_access_leases {
+  id uuid [pk]
+  room_id uuid [not null]
+  reservation_id uuid
+  cleaning_target_id uuid
+  assignment_id uuid
+  pin_version bigint [not null]
+  issued_to uuid [not null]
+  issued_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  revealed_at timestamptz
+  revoked_at timestamptz
+  revoke_reason_code text
 }
 
 Table public.cleaning_template_versions {
@@ -289,6 +370,7 @@ Table public.cleaning_targets {
   id uuid [pk]
   room_id uuid [not null]
   reservation_id uuid
+  checkout_obligation_id uuid [unique]
   cleaning_kind cleaning_kind [not null]
   source text [not null]
   source_key text [not null, unique]
@@ -312,6 +394,22 @@ Table public.cleaning_targets {
   updated_at timestamptz [not null]
 
   Note: 'Checkout targets are unique per reservation. Inspection recleans keep an immutable original attempt and maid link.'
+}
+
+Table public.cleaning_target_schedule_revisions {
+  id uuid [pk]
+  cleaning_target_id uuid [not null]
+  revision bigint [not null]
+  effective_service_date date [not null]
+  available_from timestamptz
+  due_at timestamptz
+  reason_code text [not null]
+  changed_by uuid [not null]
+  recorded_at timestamptz [not null]
+
+  Indexes {
+    (cleaning_target_id, revision) [unique]
+  }
 }
 
 Table public.cleaning_assignments {
@@ -526,7 +624,7 @@ Table private.notification_outbox {
   created_at timestamptz [not null]
 }
 
-Table private.audit_events {
+Table public.audit_events {
   id bigint [pk, increment]
   actor_profile_id uuid
   actor_display_name_snapshot text
@@ -539,7 +637,10 @@ Table private.audit_events {
   before_state jsonb
   after_state jsonb
   request_id text
+  request_hash text
   idempotency_key text [unique]
+
+  Note: 'UPDATE and DELETE are rejected by an append-only trigger.'
 }
 
 Ref: public.profiles.auth_user_id - auth.users.id
@@ -553,26 +654,49 @@ Ref: public.rooms.room_type_id > public.room_types.id
 Ref: public.reservations.room_id > public.rooms.id
 Ref: public.reservations.created_by > public.profiles.id
 Ref: public.reservations.updated_by > public.profiles.id
-Ref: public.room_operation_events.room_id > public.rooms.id
-Ref: public.room_operation_events.actor_profile_id > public.profiles.id
+Ref: public.reservations.preparation_obligation_id - public.preparation_obligations.id
+Ref: public.reservations.checkout_obligation_id - public.checkout_cleaning_obligations.id
+Ref: public.reservation_schedule_revisions.reservation_id > public.reservations.id
+Ref: public.reservation_schedule_revisions.room_id > public.rooms.id
+Ref: public.reservation_schedule_revisions.actor_profile_id > public.profiles.id
+Ref: public.preparation_obligations.reservation_id - public.reservations.id
+Ref: public.preparation_obligations.room_id > public.rooms.id
+Ref: public.preparation_obligations.current_attempt_id > public.cleaning_attempts.id
+Ref: public.preparation_obligations.approved_submission_id > public.cleaning_submissions.id
+Ref: public.checkout_cleaning_obligations.reservation_id - public.reservations.id
+Ref: public.checkout_cleaning_obligations.room_id > public.rooms.id
+Ref: public.checkout_cleaning_obligations.current_cleaning_target_id - public.cleaning_targets.id
+Ref: public.checkout_cleaning_obligations.created_by > public.profiles.id
+Ref: public.room_occupancy_events.room_id > public.rooms.id
+Ref: public.room_occupancy_events.reservation_id > public.reservations.id
+Ref: public.room_occupancy_events.actor_profile_id > public.profiles.id
+Ref: public.room_operation_blocks.room_id > public.rooms.id
+Ref: public.room_operation_blocks.created_by > public.profiles.id
+Ref: public.room_operation_blocks.released_by > public.profiles.id
 Ref: public.room_issues.room_id > public.rooms.id
-Ref: public.room_issues.cleaning_attempt_id > public.cleaning_attempts.id
 Ref: public.room_issues.reported_by > public.profiles.id
 Ref: public.room_issues.resolved_by > public.profiles.id
 Ref: public.room_candle_events.room_id > public.rooms.id
-Ref: public.room_candle_events.cleaning_attempt_id > public.cleaning_attempts.id
 Ref: public.room_candle_events.actor_profile_id > public.profiles.id
-Ref: public.checkout_inspections.reservation_id - public.reservations.id
-Ref: public.checkout_inspections.completed_by > public.profiles.id
+Ref: public.room_pin_sync_events.room_id > public.rooms.id
+Ref: public.room_pin_sync_events.actor_profile_id > public.profiles.id
+Ref: public.room_pin_access_leases.room_id > public.rooms.id
+Ref: public.room_pin_access_leases.reservation_id > public.reservations.id
+Ref: public.room_pin_access_leases.cleaning_target_id > public.cleaning_targets.id
+Ref: public.room_pin_access_leases.assignment_id > public.cleaning_assignments.id
+Ref: public.room_pin_access_leases.issued_to > public.profiles.id
 Ref: public.cleaning_template_versions.room_type_id > public.room_types.id
 Ref: public.cleaning_template_versions.created_by > public.profiles.id
 Ref: public.cleaning_photo_slots.template_version_id > public.cleaning_template_versions.id
 Ref: public.cleaning_targets.room_id > public.rooms.id
 Ref: public.cleaning_targets.reservation_id > public.reservations.id
+Ref: public.cleaning_targets.checkout_obligation_id - public.checkout_cleaning_obligations.id
 Ref: public.cleaning_targets.cancelled_by > public.profiles.id
 Ref: public.cleaning_targets.created_by > public.profiles.id
 Ref: public.cleaning_targets.reclean_of_attempt_id - public.cleaning_attempts.id
 Ref: public.cleaning_targets.reclean_maid_profile_id > public.profiles.id
+Ref: public.cleaning_target_schedule_revisions.cleaning_target_id > public.cleaning_targets.id
+Ref: public.cleaning_target_schedule_revisions.changed_by > public.profiles.id
 Ref: public.cleaning_assignments.cleaning_target_id > public.cleaning_targets.id
 Ref: public.cleaning_assignments.maid_profile_id > public.profiles.id
 Ref: public.cleaning_assignments.changed_by > public.profiles.id
@@ -601,4 +725,4 @@ Ref: public.notifications.recipient_profile_id > public.profiles.id
 Ref: public.notifications.room_id > public.rooms.id
 Ref: public.notifications.cleaning_target_id > public.cleaning_targets.id
 Ref: private.notification_outbox.notification_id > public.notifications.id
-Ref: private.audit_events.actor_profile_id > public.profiles.id
+Ref: public.audit_events.actor_profile_id > public.profiles.id

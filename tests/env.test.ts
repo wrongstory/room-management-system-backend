@@ -7,7 +7,9 @@ const localEnv = {
   SUPABASE_URL: 'http://127.0.0.1:54321',
   SUPABASE_PUBLISHABLE_KEY: 'local-publishable',
   SUPABASE_SECRET_KEY: 'local-secret',
-  ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters'
+  ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters',
+  RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
+  RESERVATION_PII_KEY_VERSION: 'test-v1'
 };
 
 describe('environment contract', () => {
@@ -56,6 +58,20 @@ describe('environment contract', () => {
       SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
       SUPABASE_PROJECT_REF: 'aodikrxcczbogjpsjwjt',
       CORS_ORIGINS: 'https://rooms.example.com'
+    })).toThrow();
+  });
+
+  it('rejects a reservation PII key that is not 32 bytes', () => {
+    expect(() => loadEnv({
+      ...localEnv,
+      RESERVATION_PII_KEY_BASE64: Buffer.alloc(16, 7).toString('base64')
+    })).toThrow();
+  });
+
+  it('rejects a non-canonical reservation PII Base64 value', () => {
+    expect(() => loadEnv({
+      ...localEnv,
+      RESERVATION_PII_KEY_BASE64: `${localEnv.RESERVATION_PII_KEY_BASE64}!!`
     })).toThrow();
   });
 });

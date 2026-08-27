@@ -13,11 +13,17 @@ import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { loggerOptions } from './config/logger.js';
 import { SupabaseAccountService, type AccountService } from './modules/accounts/account.service.js';
 import { createAccountRoutes } from './modules/accounts/account.routes.js';
+import {
+  SupabaseReservationService,
+  type ReservationService
+} from './modules/reservations/reservation.service.js';
+import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
 
 export interface AppServices {
   auth: AuthService;
   accounts: AccountService;
   rooms: RoomService;
+  reservations: ReservationService;
 }
 
 export interface BuildAppOptions {
@@ -51,7 +57,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     services = {
       auth: new SupabaseAuthService(clients),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
-      rooms: new SupabaseRoomService(clients)
+      rooms: new SupabaseRoomService(clients),
+      reservations: new SupabaseReservationService(
+        clients,
+        options.env.RESERVATION_PII_KEY_BASE64,
+        options.env.RESERVATION_PII_KEY_VERSION
+      )
     };
   }
 
@@ -117,6 +128,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAuthRoutes(services.auth), { prefix: '/v1/auth' });
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
 
   return app;
 }
