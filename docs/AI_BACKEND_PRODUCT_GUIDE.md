@@ -552,23 +552,24 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - `cleaning_targets_one_active_per_room`은 여러 미래 예약의 퇴실 청소 의무를 막는다.
 - `locked_earning_ids uuid[]`는 이중 지급을 막지 못한다.
 - `earnings.earning_entitlement_id`와 `reclean_compensation_decision_id`는 실제 source entity FK가 없는 nullable/raw UUID다. 호출자가 새 UUID를 만들면 UNIQUE를 우회할 수 있어 exactly-once를 보장하지 못한다.
-- initial migration과 테스트가 `purge_after NOT NULL` 및 업로드 후 7일을 hard-code한다.
-- Google Drive 업로드/조회/purge worker는 아직 구현되지 않았다.
+- initial migration과 테스트에는 확정된 `purge_after NOT NULL` 및 업로드 후 7일 계약이 들어 있지만, 실제 Google Drive 업로드·조회·purge worker는 아직 구현되지 않았다.
 - backend CI와 실제 Postgres/RLS/concurrency test가 없다.
 - 원격 Supabase에는 migration을 아직 적용하지 않았다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 
 위 목록은 백엔드 `main` 7e229c2 기준의 감사 snapshot이며 후속 구현을 현재 상태처럼 읽으면 안 된다.
 
-### 2026-08-27 후속 구현 반영
+### 2026-08-27 병합 대기·외부 적용 현황 — 이 PR 브랜치에는 미포함
 
-- PR #15에서 application/migration GitHub Actions가 fresh DB reset과 SQL test를 실행한다.
-- PR #16에서 계정 생성·alias·강제 비밀번호 변경·잠금·세션 폐기·마지막 활성 관리자 보호를 구현했다.
-- PR #19/#18에서 객실 전체 active target 제약, 업무 간 독립 FK 조합, 검수 반려 보상 earning, payroll UUID 배열을 보정했다.
-- 일반 Data API profile/role helper는 `active` 계정만 식별하며 `deactivation_pending`과 `upload_only`는 일반 역할 권한을 상속하지 않는다.
-- notification recipient의 직접 UPDATE는 `read_at` 한 컬럼으로 제한한다.
-- 운영·복구검증 Supabase에 migration을 적용했고 계정 상태 RLS 11/11, 기존 구조 16/16, DML 10/10, Security Advisor lint 0을 확인했다.
-- 아직 없는 주간 가능일, preparation obligation, assignment revision, 정규화 photo slot/submission version, complaint, payroll event/adjustment, notification outbox, PIN lease, offline work lease는 각 roadmap issue에서 구현한다.
+다음 항목은 PR #17의 base인 `main`과 이 문서 브랜치의 코드에 포함된 구현이 아니다. 각각의 별도 stacked PR 또는 원격 Supabase에 적용된 상태를 기록한 참고 정보이며, 해당 PR이 순서대로 병합되기 전에는 `main`의 현재 구현으로 간주하지 않는다.
+
+- PR #15는 application/migration GitHub Actions에서 fresh DB reset과 SQL test를 실행하도록 제안한다.
+- PR #16은 계정 생성·alias·강제 비밀번호 변경·잠금·세션 폐기·마지막 활성 관리자 보호를 구현한 별도 변경이다.
+- PR #19/#18은 객실 전체 active target 제약, 업무 간 독립 FK 조합, payroll UUID 배열과 **검수 반려 재청소에 잘못 연결된 보상 earning source**를 보정한 별도 변경이다.
+- PR #19가 제거하는 것은 최초 검수 반려 재청소의 잘못된 raw 보상 source뿐이다. 승인 후 고객 민원 보상 entity/source는 구현된 것이 아니며 별도 후속 범위다.
+- PR #19에서는 일반 Data API profile/role helper를 `active` 계정만 식별하도록 제한하고, notification recipient의 직접 UPDATE를 `read_at` 한 컬럼으로 제한한다.
+- 위 migration은 운영·복구검증 Supabase에 별도로 적용됐고 계정 상태 RLS 11/11, 구조 19/19, DML 13/13, Security Advisor lint 0을 확인했다. 이 원격 적용 사실도 PR #17 브랜치에 코드를 포함시킨다는 뜻은 아니다.
+- 아직 없는 주간 가능일, preparation obligation, assignment revision, 정규화 photo slot/submission version, complaint/민원 보상, payroll event/adjustment, notification outbox, PIN lease, offline work lease는 각 roadmap issue에서 구현한다.
 
 ---
 
