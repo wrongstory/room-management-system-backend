@@ -455,6 +455,8 @@ Table public.payroll_cycles {
   Indexes {
     (maid_profile_id, week_start) [unique]
   }
+
+  Note: 'Identity is immutable. Lock metadata is immutable after leaving OPEN; PAID snapshots are append-only.'
 }
 
 Table public.payroll_items {
@@ -468,6 +470,8 @@ Table public.payroll_items {
   Indexes {
     (payroll_cycle_id, earning_id) [unique]
   }
+
+  Note: 'Insert only while the cycle is OPEN. Earning earned_on must fall within the cycle week; membership and amount are immutable.'
 }
 
 Table public.payroll_events {

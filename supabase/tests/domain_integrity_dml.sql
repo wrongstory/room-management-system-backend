@@ -194,6 +194,21 @@ begin
 end;
 $$;
 
+update public.cleaning_assignments
+set maid_profile_id = '20000000-0000-4000-8000-000000000003'
+where id = '50000000-0000-4000-8000-000000000002';
+
+insert into public.cleaning_attempts (
+  id, cleaning_target_id, assignment_id, maid_profile_id,
+  attempt_number, assignment_revision, template_snapshot, room_snapshot
+) values (
+  '60000000-0000-4000-8000-000000000002',
+  '40000000-0000-4000-8000-000000000002',
+  '50000000-0000-4000-8000-000000000002',
+  '20000000-0000-4000-8000-000000000003',
+  1, 1, '{}'::jsonb, '{}'::jsonb
+);
+
 do $$
 begin
   begin
@@ -272,13 +287,11 @@ insert into public.earnings (
 );
 
 insert into public.payroll_cycles (
-  id, maid_profile_id, week_start, status, locked_amount,
-  payment_started_by, payment_started_at
+  id, maid_profile_id, week_start
 ) values (
   '90000000-0000-4000-8000-000000000001',
   '20000000-0000-4000-8000-000000000002',
-  '2026-12-28', 'paying', 32000,
-  '20000000-0000-4000-8000-000000000001', now()
+  '2026-12-28'
 );
 
 insert into public.payroll_items (
@@ -289,6 +302,13 @@ insert into public.payroll_items (
   '20000000-0000-4000-8000-000000000002', 1
 );
 
+update public.payroll_cycles
+set status = 'paying',
+    locked_amount = 32000,
+    payment_started_by = '20000000-0000-4000-8000-000000000001',
+    payment_started_at = now()
+where id = '90000000-0000-4000-8000-000000000001';
+
 do $$
 begin
   if (
@@ -297,6 +317,65 @@ begin
   ) <> 32000 then
     raise exception 'PAYROLL_ITEM_AMOUNT_NOT_DERIVED';
   end if;
+end;
+$$;
+
+update public.payroll_cycles
+set status = 'paid', paid_at = now()
+where id = '90000000-0000-4000-8000-000000000001';
+
+do $$
+begin
+  begin
+    update public.payroll_cycles
+    set locked_amount = 64000
+    where id = '90000000-0000-4000-8000-000000000001';
+    raise exception 'PAID_PAYROLL_AMOUNT_REWRITE_ACCEPTED';
+  exception when object_not_in_prerequisite_state then
+    null;
+  end;
+end;
+$$;
+
+do $$
+begin
+  begin
+    insert into public.payroll_items (
+      payroll_cycle_id, earning_id, maid_profile_id, locked_amount
+    ) values (
+      '90000000-0000-4000-8000-000000000001',
+      '80000000-0000-4000-8000-000000000003',
+      '20000000-0000-4000-8000-000000000002', 32000
+    );
+    raise exception 'PAID_PAYROLL_ITEM_INSERT_ACCEPTED';
+  exception when object_not_in_prerequisite_state then
+    null;
+  end;
+end;
+$$;
+
+insert into public.payroll_cycles (
+  id, maid_profile_id, week_start
+) values (
+  '90000000-0000-4000-8000-000000000002',
+  '20000000-0000-4000-8000-000000000002',
+  '2027-01-04'
+);
+
+do $$
+begin
+  begin
+    insert into public.payroll_items (
+      payroll_cycle_id, earning_id, maid_profile_id, locked_amount
+    ) values (
+      '90000000-0000-4000-8000-000000000002',
+      '80000000-0000-4000-8000-000000000003',
+      '20000000-0000-4000-8000-000000000002', 32000
+    );
+    raise exception 'WRONG_WEEK_EARNING_ACCEPTED';
+  exception when check_violation then
+    null;
+  end;
 end;
 $$;
 
@@ -347,9 +426,23 @@ begin
 end;
 $$;
 
+do $$
+begin
+  begin
+    update public.cleaning_targets
+    set reclean_of_attempt_id = '60000000-0000-4000-8000-000000000002',
+        reclean_maid_profile_id = '20000000-0000-4000-8000-000000000003'
+    where id = '40000000-0000-4000-8000-000000000003';
+    raise exception 'RECLEAN_ORIGIN_RETARGET_ACCEPTED';
+  exception when object_not_in_prerequisite_state then
+    null;
+  end;
+end;
+$$;
+
 rollback;
 
-select '1..10';
+select '1..13';
 select format('ok %s - %s', test_number, description)
 from (
   values
@@ -362,5 +455,8 @@ from (
     (7, 'earning owner must match submission maid'),
     (8, 'bomb-room bonus must equal zero or base amount'),
     (9, 'payroll item amount is derived and immutable'),
-    (10, 'inspection reclean stays with the original maid')
+    (10, 'inspection reclean stays with the original maid'),
+    (11, 'inspection reclean origin cannot be retargeted'),
+    (12, 'paid payroll membership and amount are immutable'),
+    (13, 'earning date must belong to the payroll week')
 ) as passed_checks(test_number, description);

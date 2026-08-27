@@ -1,4 +1,4 @@
-select '1..16';
+select '1..19';
 
 with checks(test_number, description, passed) as (
   values
@@ -129,6 +129,36 @@ with checks(test_number, description, passed) as (
         select 1 from pg_trigger
         where tgrelid = 'public.cleaning_assignments'::regclass
           and tgname = 'cleaning_assignments_enforce_contract'
+          and not tgisinternal
+      )
+    ),
+    (
+      17,
+      'inspection reclean origin is immutable after creation',
+      position(
+        'CLEANING_TARGET_ORIGIN_IMMUTABLE'
+        in pg_get_functiondef('private.enforce_reclean_origin_room()'::regprocedure)
+      ) > 0
+    ),
+    (
+      18,
+      'payroll item trigger checks cycle state and earning week',
+      position(
+        'PAYROLL_CYCLE_NOT_OPEN'
+        in pg_get_functiondef('private.set_payroll_item_amount()'::regprocedure)
+      ) > 0
+      and position(
+        'EARNING_OUTSIDE_PAYROLL_WEEK'
+        in pg_get_functiondef('private.set_payroll_item_amount()'::regprocedure)
+      ) > 0
+    ),
+    (
+      19,
+      'payroll cycle snapshot rewrite trigger exists',
+      exists (
+        select 1 from pg_trigger
+        where tgrelid = 'public.payroll_cycles'::regclass
+          and tgname = 'payroll_cycles_prevent_snapshot_rewrite'
           and not tgisinternal
       )
     )

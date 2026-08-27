@@ -256,7 +256,7 @@ erDiagram
 - 같은 예약의 예정/수동 checkout은 합쳐서 청소 대상 한 건이며 `source_key` 재시도도 한 건으로 수렴한다.
 - 작업마다 현재 배정은 최대 한 건이고, 과거 revision은 삭제하지 않는다.
 - attempt는 assignment의 target·maid·revision과 모두 일치해야 하며, submission·earning의 maid도 같은 수행자를 가리킨다.
-- 검수 반려 재청소는 원 attempt·원 maid를 불변 링크로 보존하고 다른 메이드에게 배정할 수 없다.
+- 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 다른 메이드에게 배정할 수 없다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.
 - 제출은 `client_submission_id`로 멱등 처리하며, 수행 회차별 현재 제출은 한 건이다.
 - 사진 파일은 비공개 Google Drive 폴더에만 저장하고 DB에는 Drive 파일 ID·해시·크기·삭제예정일·삭제 결과만 둔다.
@@ -335,6 +335,9 @@ erDiagram
     text idempotency_key UK
   }
 ```
+
+- `payroll_items`는 cycle이 `OPEN`인 잠금 transaction에서만 추가하며 earning의 `earned_on`이 cycle의 월요일 시작 7일 구간에 속해야 한다.
+- cycle이 `PAYING`에 진입한 뒤에는 item membership과 잠금 금액·행위자·시각 snapshot을 바꿀 수 없고 `PAID` snapshot은 되돌려 쓰지 않는다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 

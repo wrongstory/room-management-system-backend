@@ -72,7 +72,7 @@ erDiagram
 | 제출 | `client_submission_id` unique + 회차별 현재 제출 unique |
 | 검수 | 제출별 decision unique, 현재 `submitted` 버전만 조건부 전이 |
 | 수익 | submission/entitlement unique |
-| 지급 | `(maid_profile_id, week_start)` unique + `payroll_items.earning_id` exclusive claim + version CAS |
+| 지급 | `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + PAYING 이후 snapshot 불변 + version CAS |
 | 알림 | 수신자별 dedupe key unique, 10분 group key |
 
 복수 테이블을 바꾸는 예약 저장, 배정 통보, 검수, 지급은 다음 단계에서 SQL RPC로 구현하고 감사 이벤트까지 같은 트랜잭션으로 커밋합니다.
