@@ -428,20 +428,20 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - Google Drive는 현재 기술 채택안이지만 운영 계정·자격증명·용량·비용은 아직 확정되지 않았다. provider를 바꿔도 API에 locator나 provider 세부를 노출하지 않는다.
 - DB에는 opaque storage locator, hash, MIME, 크기, 소유 관계, 보존 상태를 둔다.
 - 사진 record 작성과 purge는 서버 command/worker만 수행한다.
-- 삭제 worker는 DB 상태, hold, 참조 관계를 다시 확인하고 멱등적으로 원본·파생본·캐시를 정리한다.
+- 삭제 worker는 DB 상태, 만료 시각, 참조 관계를 다시 확인하고 멱등적으로 원본·파생본·캐시를 정리한다.
 
-### `[미확정·출시 차단]` 보존 기간
+### `[확정]` 보존 기간
 
-현재 정책이 충돌한다.
+사용자가 2026-08-26 대화에서 다음 정책을 명시적으로 확정했다. 이 결정은 프런트 문서의 180일/hold 초안보다 우선한다.
 
-- 현재 백엔드 migration/문서: 업로드 후 7일
-- 제품 정본: 승인·반려/이슈 해결 등 종결 후 180일, 미결은 countdown 미시작, hold 중 정지, 진짜 orphan은 30일
+- Google Drive에만 저장한다. Supabase Storage에는 사진 객체를 저장하지 않는다.
+- 프런트에서 JPEG/WebP를 300KiB 이하로 압축하고 서버도 크기·magic bytes·MIME·EXIF 제거를 검증한다.
+- 비공개 KST 업로드 일자/객실 폴더에 정리한다.
+- `purge_after`는 검수 상태와 무관하게 정확히 `uploaded_at + 7 days`다.
+- 7일 보존에는 retention hold나 180일 예외를 두지 않는다.
+- worker는 Drive `files.delete`로 영구삭제하고 404를 멱등 성공으로 처리한다.
 
-7일 가정의 저장량을 180일로 늘리면 현재 15GB 무료 계정 가정과 양립하지 않을 수 있다. 사용자가 비용·분쟁 증거·개인정보 파기 기준을 확정하기 전에는 **영구삭제 worker를 배포하지 않고**, `uploaded_at + 7일` trigger를 최종 정책으로 간주하지 않는다.
-
-현재 initial migration 자체가 `purge_after NOT NULL`, `uploaded_at + 7 days` trigger와 7일 고정 테스트를 포함한다. worker만 끄면 해결되는 문제가 아니다. 정책 결정 전 이 migration을 production baseline으로 그대로 적용하지 말고, terminal 전 `purge_after NULL`, retention class, hold를 수용하도록 baseline 전략을 먼저 정한다.
-
-모델은 최소 `retention_class`, `terminal_at`, `purge_after`, active hold를 수용해야 한다.
+Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제다. 자격증명 없이 provider가 연결됐다고 가정하거나 worker를 배포하지 않는다. 용량 보호 기준은 현재 #9의 10GB 경고/12GB 업로드 차단 계약을 따른다.
 
 ---
 
@@ -530,7 +530,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 이 절은 “다음 작업이 어디서 시작하는가”를 설명한다.
 
-### 현재 구현됨
+### 가이드 최초 작성 snapshot에서 구현됨
 
 - `GET /health`
 - `POST /v1/auth/login`
@@ -541,7 +541,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 일부 cleaning/payroll table과 partial unique index
 - public table RLS 활성화
 
-### 아직 운영 계약을 충족하지 않음
+### 가이드 최초 작성 snapshot에서 아직 운영 계약을 충족하지 않던 항목
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - 주간 가능일, preparation obligation, 객실 operation event/issue/candle/퇴실점검, 정규화 photo slot, bomb report, complaint/penalty/appeal, payroll item/event/adjustment, notification outbox, PIN version/change lease, 개인정보 저장소, offline work lease가 없다.
@@ -558,7 +558,17 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 원격 Supabase에는 migration을 아직 적용하지 않았다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 
-따라서 현재 migration을 운영 baseline으로 적용하기 전에 정책 충돌과 P0 schema/RLS 문제를 먼저 고친다.
+위 목록은 백엔드 `main` 7e229c2 기준의 감사 snapshot이며 후속 구현을 현재 상태처럼 읽으면 안 된다.
+
+### 2026-08-27 후속 구현 반영
+
+- PR #15에서 application/migration GitHub Actions가 fresh DB reset과 SQL test를 실행한다.
+- PR #16에서 계정 생성·alias·강제 비밀번호 변경·잠금·세션 폐기·마지막 활성 관리자 보호를 구현했다.
+- PR #19/#18에서 객실 전체 active target 제약, 업무 간 독립 FK 조합, 검수 반려 보상 earning, payroll UUID 배열을 보정했다.
+- 일반 Data API profile/role helper는 `active` 계정만 식별하며 `deactivation_pending`과 `upload_only`는 일반 역할 권한을 상속하지 않는다.
+- notification recipient의 직접 UPDATE는 `read_at` 한 컬럼으로 제한한다.
+- 운영·복구검증 Supabase에 migration을 적용했고 계정 상태 RLS 11/11, 기존 구조 16/16, DML 10/10, Security Advisor lint 0을 확인했다.
+- 아직 없는 주간 가능일, preparation obligation, assignment revision, 정규화 photo slot/submission version, complaint, payroll event/adjustment, notification outbox, PIN lease, offline work lease는 각 roadmap issue에서 구현한다.
 
 ---
 
@@ -567,15 +577,14 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 AI는 아래 항목을 암묵적으로 확정하지 않는다.
 
 1. 투숙 중이면서 청소가 필요한 객실의 **프런트 대표 표현**: `DOCS/17` 우선순위와 `DOCS/20`/현재 wireframe의 주 상태+하위 상태 중 어느 쪽인지. 백엔드 독립 축은 이 결정과 무관하게 유지한다.
-2. 사진 보존 7일/180일, hold, 저장 용량·유료 전환 기준
-3. 타입별 예상시간과 기본/최대 숙박 인원을 운영 정본으로 확정할지
-4. current role 단일값과 역할 이력/복수 역할 구조 중 어느 모델을 채택할지
-5. 최초 검수 반려 뒤 원 메이드가 퇴사·부상 등으로 재청소할 수 없는 예외 처리
-6. 승인 후 컴플레인 재작업을 다른 메이드가 맡을 때 관리자 보상금의 선택 기준
-7. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
-8. Google Drive·도어락·향후 송금·OTA/PMS·push의 실제 공급자와 자격증명/비용
-9. 운영 시작 시 608호 차단이 여전히 유효한지
-10. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
+2. 타입별 예상시간과 기본/최대 숙박 인원을 운영 정본으로 확정할지
+3. current role 단일값과 역할 이력/복수 역할 구조 중 어느 모델을 채택할지. 단, `upload_only`는 별도 역할이 아니라 제한 capability다.
+4. 최초 검수 반려 뒤 원 메이드가 퇴사·부상 등으로 재청소할 수 없는 예외 처리
+5. 승인 후 컴플레인 재작업을 다른 메이드가 맡을 때 관리자 보상금의 선택 기준
+6. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
+7. Google Drive·도어락·향후 송금·OTA/PMS·push의 실제 공급자와 자격증명/비용
+8. 운영 시작 시 608호 차단이 여전히 유효한지
+9. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
 
 미확정 항목도 확장 가능한 schema는 설계할 수 있다. 다만 한쪽 정책을 강제하는 irreversible migration, purge, 지급 로직은 결정 전 배포하지 않는다.
 
@@ -628,15 +637,14 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-1. 미확정 정책 중 영구삭제를 막는 사진 보존·저장 비용 결정을 받는다. 수동 체크아웃은 확정 계약으로 구현한다.
-2. 현재 RLS/GRANT의 광범위한 DML과 DELETE를 회수한다.
-3. 제품 계약을 기준으로 ERD/DBML/migration을 reconcile한다.
-4. 계정 상태·강제 비밀번호 변경·session revoke·마지막 관리자 보호를 완성한다.
-5. 가능일, 객실 operation event/readiness, 청소 의무와 배정 revision을 구현한다.
-6. 사진 slot, submission version, 검수·재청소·폭탄방을 원자 command로 구현한다.
-7. earning, payroll item/event/adjustment와 이중 지급 방지를 구현한다.
-8. notification outbox와 외부 worker를 연결한다.
-9. OpenAPI/생성 client로 프런트와 계약을 고정한다.
-10. 실제 Postgres RLS·동시성·복구 테스트를 CI 필수 gate로 둔다.
+1. P0 migration/CI, 계정, #18 무결성·RLS 보정을 독립 리뷰하고 stacked 순서대로 반영한다.
+2. 계정 hosted Auth/RLS 검증을 마치고 객실·예약·점유·수동 체크아웃 command를 구현한다.
+3. 가능일, 객실 operation event/readiness, 청소 의무와 assignment revision을 구현한다.
+4. offline work lease와 수행 상태를 구현한다.
+5. 7일 Drive 저장 worker, 사진 slot, submission version, 검수·재청소·폭탄방을 원자 command로 구현한다.
+6. earning, payroll item/event/adjustment와 이중 지급 방지를 구현한다.
+7. notification outbox와 외부 worker를 연결한다.
+8. OpenAPI/생성 client로 프런트와 계약을 고정한다.
+9. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 
 기능 수를 빨리 늘리는 것보다 **삭제 불가 이력, 돈, 권한, 중복 방지**를 먼저 맞추는 것이 우선이다.
