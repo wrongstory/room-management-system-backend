@@ -11,9 +11,9 @@
 - 예약 기간 중복 배타 제약, 활성 청소 대상/담당/수행 회차 유일 제약
 - 제출·검수·수익·주차별 지급 중복 방지 키
 - 공개 스키마 전 테이블 RLS와 Google Drive 사진 메타데이터 정책
-- 원본 정본의 4개 객실 타입, 고정 단가, 숙박 인원, 121개 객실 seed
+- 원본 정본의 4개 객실 타입, 고정 단가, 121개 객실 seed. 타입별 숙박 인원 상한은 아직 데모값이라 production 제약으로 확정되지 않았습니다.
 
-전체 분석과 설계는 [프로젝트 분석](docs/PROJECT_ANALYSIS.md), [백엔드 설계](docs/ARCHITECTURE.md)를 참고하세요. 구현 전에 검토할 최신 관계도는 [ERD 초안](docs/ERD.md)이며, [DBML 원본](docs/room-management-system.dbml)을 dbdiagram.io에 붙여 넣어 전체 다이어그램을 확인할 수 있습니다. 사진 압축·폴더·자동삭제 규칙은 [사진 저장 운영안](docs/PHOTO_STORAGE.md), Free 프로젝트 2개를 이용한 운영·복구 구조는 [백업·복구 운영안](docs/BACKUP_AND_RECOVERY.md)에 정리했습니다.
+백엔드 GPT/Codex는 구현 전에 [제품·도메인 가이드](docs/AI_BACKEND_PRODUCT_GUIDE.md)를 먼저 읽어야 합니다. 전체 분석과 설계는 [프로젝트 분석](docs/PROJECT_ANALYSIS.md), [백엔드 설계 초안](docs/ARCHITECTURE.md)을 참고하세요. 검토용 관계도는 [ERD 초안](docs/ERD.md)이며, [DBML 원본](docs/room-management-system.dbml)을 dbdiagram.io에 붙여 넣어 전체 다이어그램을 확인할 수 있습니다. ERD/DBML은 제품 가이드와 reconcile되기 전에는 목표 계약이 아닙니다. 사진 압축·폴더·자동삭제 규칙은 [사진 저장 운영안](docs/PHOTO_STORAGE.md), Free 프로젝트 2개를 이용한 운영·복구 구조는 [백업·복구 운영안](docs/BACKUP_AND_RECOVERY.md)에 정리했습니다. 정책 문서끼리 충돌하면 제품·도메인 가이드의 우선순위와 `[미확정]` 표시를 따릅니다.
 
 ## 로컬 실행
 
@@ -47,5 +47,5 @@ npm run db:reset
 - `SUPABASE_SECRET_KEY`는 API 서버에서만 사용합니다.
 - 브라우저는 객실 PIN 원문, 내부 Auth 이메일, 다른 메이드 데이터에 직접 접근하지 않습니다.
 - 사용자 인증정보는 `user_metadata`가 아니라 DB 프로필과 서버 검증 결과로 권한을 결정합니다.
-- 사진은 앱에서 300KiB 이하로 압축한 뒤 백엔드가 비공개 Google Drive 폴더에 저장합니다. Google OAuth 토큰과 파일 ID는 브라우저에 직접 노출하지 않습니다.
-- 현재 연결된 원격 Supabase 프로젝트에는 아직 마이그레이션을 적용하지 않았습니다.
+- 사진은 앱에서 300KiB 이하로 압축해 Google Drive 비공개 폴더에만 저장하고, 업로드 시각부터 정확히 7일 뒤 영구삭제하는 것이 확정 계약입니다. 180일 보존이나 retention hold 예외는 두지 않습니다. 업로드·삭제 worker와 운영 OAuth 자격증명은 아직 구현·배포 전이며, token과 locator를 브라우저에 노출하지 않습니다.
+- 운영·복구검증 Supabase에는 후속 PR의 마이그레이션이 별도로 적용됐습니다. 다만 이 문서 PR의 base인 `main`과 현재 브랜치 코드에는 그 후속 구현이 포함되지 않으므로, 정확한 구분은 제품·도메인 가이드의 구현 현황 절을 따릅니다.
