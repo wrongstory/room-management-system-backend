@@ -178,8 +178,9 @@ enable_signup = false
 enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
 enable_manual_linking = false
-# Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
-minimum_password_length = 4
+# Passwords shorter than this value will be rejected as weak. User-facing four-digit temporary
+# passwords are server-namespaced to eight characters before they reach Supabase Auth.
+minimum_password_length = 6
 # Passwords that do not meet the following requirements will be rejected as weak. Supported values
 # are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
 password_requirements = ""

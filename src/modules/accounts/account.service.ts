@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import type { Actor, AppRole } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
+import { toSupabaseAuthPassword } from '../auth/password.js';
 
 export type AccountStatus =
   | 'active'
@@ -247,7 +248,7 @@ export class SupabaseAccountService implements AccountService {
     const { data: authData, error: authError } = await this.clients.admin.auth.admin.createUser({
       id: profileId,
       email: syntheticEmail(profileId),
-      password: phone.lastFour,
+      password: toSupabaseAuthPassword(phone.lastFour),
       email_confirm: true,
       app_metadata: { profile_id: profileId, role: input.role }
     });
@@ -313,7 +314,7 @@ export class SupabaseAccountService implements AccountService {
     const { data: authData, error: authError } = await this.clients.admin.auth.admin.createUser({
       id: profileId,
       email: syntheticEmail(profileId),
-      password: phone.lastFour,
+      password: toSupabaseAuthPassword(phone.lastFour),
       email_confirm: true,
       app_metadata: { profile_id: profileId, role: 'admin' }
     });
@@ -429,7 +430,7 @@ export class SupabaseAccountService implements AccountService {
       throw new AppError(409, 'PHONE_REQUIRED_FOR_RESET', '등록된 휴대전화 번호가 없어 초기화할 수 없습니다.');
     }
     const { error: authError } = await this.clients.admin.auth.admin.updateUserById(row.auth_user_id, {
-      password: row.phone_last_four
+      password: toSupabaseAuthPassword(row.phone_last_four)
     });
     if (authError) {
       throw new AppError(502, 'AUTH_PASSWORD_RESET_FAILED', '인증 비밀번호를 초기화하지 못했습니다. 다시 시도해 주세요.');

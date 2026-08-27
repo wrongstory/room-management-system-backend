@@ -1,6 +1,7 @@
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { AppError } from '../../lib/app-error.js';
 import type { Actor, AppRole } from '../../domain/actor.js';
+import { toSupabaseAuthPassword } from './password.js';
 
 export interface LoginInput {
   loginId: string;
@@ -87,7 +88,7 @@ export class SupabaseAuthService implements AuthService {
 
     const { data, error } = await this.clients.publicClient.auth.signInWithPassword({
       email: syntheticEmail(profile.id),
-      password: input.password
+      password: toSupabaseAuthPassword(input.password)
     });
 
     if (error || !data.session) {
@@ -163,7 +164,7 @@ export class SupabaseAuthService implements AuthService {
     const { data: verification, error: verificationError } =
       await this.clients.publicClient.auth.signInWithPassword({
         email: syntheticEmail(actor.profileId),
-        password: currentPassword
+        password: toSupabaseAuthPassword(currentPassword)
       });
     if (verificationError || !verification.session) {
       throw new AppError(401, 'INVALID_CURRENT_PASSWORD', '현재 비밀번호가 올바르지 않습니다.');
@@ -171,7 +172,7 @@ export class SupabaseAuthService implements AuthService {
 
     const { error: updateError } = await this.clients.admin.auth.admin.updateUserById(
       actor.authUserId,
-      { password: newPassword }
+      { password: toSupabaseAuthPassword(newPassword) }
     );
     if (updateError) {
       await this.clients.admin.auth.admin.signOut(verification.session.access_token, 'local');
@@ -186,7 +187,7 @@ export class SupabaseAuthService implements AuthService {
     if (error) {
       const { error: rollbackError } = await this.clients.admin.auth.admin.updateUserById(
         actor.authUserId,
-        { password: currentPassword }
+        { password: toSupabaseAuthPassword(currentPassword) }
       );
       if (rollbackError) {
         throw new AppError(

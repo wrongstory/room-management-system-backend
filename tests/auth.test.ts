@@ -40,7 +40,7 @@ describe('password change consistency', () => {
     });
 
     expect(updateUserById).toHaveBeenNthCalledWith(1, 'auth-user-id', { password: '654321' });
-    expect(updateUserById).toHaveBeenNthCalledWith(2, 'auth-user-id', { password: '1234' });
+    expect(updateUserById).toHaveBeenNthCalledWith(2, 'auth-user-id', { password: 'tmp:1234' });
   });
 
   it('reports manual recovery when Auth password rollback also fails', async () => {
