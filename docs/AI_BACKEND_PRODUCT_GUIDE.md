@@ -422,10 +422,11 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 ## 11. 사진 저장과 보존
 
-### `[확정]` 저장 보안 / `[현재 채택안]` Google Drive
+### `[확정]` 저장 보안·Google Drive / `[배포 전]` 운영 계정·OAuth
 
 - 확정된 계약은 비공개 저장, 서버 중계, opaque locator다. 브라우저가 storage token/file ID를 받거나 공개 링크를 만들지 않는다.
-- Google Drive는 현재 기술 채택안이지만 운영 계정·자격증명·용량·비용은 아직 확정되지 않았다. provider를 바꿔도 API에 locator나 provider 세부를 노출하지 않는다.
+- 사진 저장 provider는 Google Drive로 확정됐다. API에는 보안과 결합도 완화를 위해 Drive file ID, OAuth token, provider 세부를 노출하지 않는다.
+- 아직 배포 전인 항목은 전용 Google 운영 계정, OAuth 자격증명 주입, 실제 용량 감시와 비용 운영이다. 이를 provider 미확정으로 해석하지 않는다.
 - DB에는 opaque storage locator, hash, MIME, 크기, 소유 관계, 보존 상태를 둔다.
 - 사진 record 작성과 purge는 서버 command/worker만 수행한다.
 - 삭제 worker는 DB 상태, 만료 시각, 참조 관계를 다시 확인하고 멱등적으로 원본·파생본·캐시를 정리한다.
@@ -583,7 +584,7 @@ AI는 아래 항목을 암묵적으로 확정하지 않는다.
 4. 최초 검수 반려 뒤 원 메이드가 퇴사·부상 등으로 재청소할 수 없는 예외 처리
 5. 승인 후 컴플레인 재작업을 다른 메이드가 맡을 때 관리자 보상금의 선택 기준
 6. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
-7. Google Drive·도어락·향후 송금·OTA/PMS·push의 실제 공급자와 자격증명/비용
+7. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
 8. 운영 시작 시 608호 차단이 여전히 유효한지
 9. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
 

@@ -1,8 +1,8 @@
 # Supabase Free Plan 백업·복구 운영안
 
 > 결정일: 2026-08-26
-> 상태: 대상 Supabase 계정 재연결 전 설계 확정, 원격 프로젝트 미생성
-> 이 문서의 사진 7일 삭제 전제는 미확정이다. 사진 보존·삭제는 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)의 출시 차단 결정을 우선한다.
+> 상태: 대상 계정 연결과 Free 프로젝트 2개 확인 완료, 운영·복구검증 migration 적용 완료, 정기 dump 자동화는 구현 전
+> 사진은 Google Drive에만 비공개 저장하고 `uploaded_at + 7 days`에 예외 없이 영구삭제하는 확정 정책이다. DB 백업은 사진 객체를 포함하지 않으며 파일 ID·해시·삭제 결과 메타데이터만 보존한다.
 
 ## 목적
 
@@ -10,10 +10,10 @@ Supabase Free Plan의 활성 프로젝트 2개를 다음처럼 사용한다.
 
 | 프로젝트 | 역할 | 앱 연결 |
 |---|---|---|
-| `room-management-system-prod` | 실제 운영 DB·Auth·사진 메타데이터 | 운영 API만 연결 |
-| `room-management-system-recovery` | 최신 논리 백업 복원과 복구 검증 | 일반 사용자 트래픽 연결 금지 |
+| `room-management-system-prod` (`aodikrxcczbogjpsjwjt`, 서울) | 실제 운영 DB·Auth·사진 메타데이터 | 운영 API만 연결 |
+| `yeosucastletheart@gmail.com's Project` (`matalcofimnhuzslfhdd`, 뭄바이) | 최신 논리 백업 복원과 복구 검증 | 일반 사용자 트래픽 연결 금지 |
 
-두 프로젝트는 `yeosucastletheart@gmail.com` 계정의 Free 조직에 만들고 가능하면 같은 서울 리전(`ap-northeast-2`)을 사용한다. 실제 조직의 프로젝트 수와 생성 비용이 `$0`인지 다시 확인한 뒤 생성한다.
+두 프로젝트는 `yeosucastletheart@gmail.com` 계정의 같은 Free 조직에 있고 현재 모두 `ACTIVE_HEALTHY`다. Free 활성 프로젝트 한도 2개를 모두 사용하므로 세 번째 프로젝트를 만들지 않는다. 복구검증 프로젝트의 리전이 운영과 다르다는 점은 복구 시간 측정과 연결 설정에 반영한다.
 
 ## 무엇을 어디에 보관하는가
 
@@ -70,15 +70,15 @@ psql \
 - Free에는 공식 일일 백업 보장, PITR, DB branching, SLA가 없다.
 - 프로젝트를 삭제하면 그 프로젝트에 종속된 데이터와 백업은 영구 삭제된다.
 
-## 생성 전 차단 조건
+## 자동화 전 확인 조건
 
-현재 Codex의 Supabase 연결은 `wrongstory` 조직이며 이미 활성 프로젝트 2개를 보유한다. 이 조직의 프로젝트는 건드리지 않는다. `yeosucastletheart@gmail.com` 계정으로 플러그인을 재인증한 뒤 다음을 순서대로 확인한다.
+계정 연결과 프로젝트 생성은 완료됐다. 백업 자동화를 실행하기 전에는 다음을 매번 확인한다.
 
-1. 연결 조직 이름과 Free 구독 상태
-2. 현재 활성 프로젝트 수
-3. 운영 프로젝트 존재 여부와 ref
-4. 두 번째 프로젝트 생성 비용 `$0`
-5. recovery 프로젝트 이름·리전
+1. 프로젝트 ref가 운영 `aodikrxcczbogjpsjwjt`, 복구검증 `matalcofimnhuzslfhdd`와 정확히 일치하는지
+2. 두 프로젝트가 모두 `ACTIVE_HEALTHY`이고 같은 Git migration 집합을 갖는지
+3. 복구검증 프로젝트에 일반 사용자 트래픽과 운영 API가 연결되지 않았는지
+4. dump·복원 연결 문자열과 DB 비밀번호가 전용 secret으로만 주입되는지
+5. 복원 실패 시 직전 성공 recovery 사본을 보존하는 절차가 준비됐는지
 
 공식 근거:
 
