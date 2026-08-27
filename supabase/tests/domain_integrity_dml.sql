@@ -320,9 +320,89 @@ begin
 end;
 $$;
 
+do $$
+begin
+  begin
+    update public.payroll_cycles
+    set status = 'open',
+        locked_amount = null,
+        payment_started_by = null,
+        payment_started_at = null,
+        version = version + 1
+    where id = '90000000-0000-4000-8000-000000000001';
+    raise exception 'PAYROLL_REOPEN_WITHOUT_REASON_ACCEPTED';
+  exception when check_violation then
+    null;
+  end;
+end;
+$$;
+
+update public.payroll_cycles
+set status = 'open',
+    locked_amount = null,
+    payment_started_by = null,
+    payment_started_at = null,
+    last_reopen_reason = 'transfer_not_sent',
+    last_reopened_by = '20000000-0000-4000-8000-000000000001',
+    last_reopened_at = now(),
+    version = version + 1
+where id = '90000000-0000-4000-8000-000000000001';
+
+update public.payroll_cycles
+set status = 'paying',
+    locked_amount = 32000,
+    payment_started_by = '20000000-0000-4000-8000-000000000001',
+    payment_started_at = now()
+where id = '90000000-0000-4000-8000-000000000001';
+
+update public.payroll_cycles
+set status = 'check',
+    check_reason = 'transfer_result_unknown'
+where id = '90000000-0000-4000-8000-000000000001';
+
+update public.payroll_cycles
+set status = 'open',
+    locked_amount = null,
+    payment_started_by = null,
+    payment_started_at = null,
+    check_reason = null,
+    last_reopen_reason = 'bank_confirmed_not_sent',
+    last_reopened_by = '20000000-0000-4000-8000-000000000001',
+    last_reopened_at = now(),
+    version = version + 1
+where id = '90000000-0000-4000-8000-000000000001';
+
+update public.payroll_cycles
+set status = 'paying',
+    locked_amount = 32000,
+    payment_started_by = '20000000-0000-4000-8000-000000000001',
+    payment_started_at = now()
+where id = '90000000-0000-4000-8000-000000000001';
+
 update public.payroll_cycles
 set status = 'paid', paid_at = now()
 where id = '90000000-0000-4000-8000-000000000001';
+
+do $$
+begin
+  begin
+    update public.payroll_cycles
+    set status = 'open',
+        locked_amount = null,
+        payment_started_by = null,
+        payment_started_at = null,
+        paid_at = null,
+        last_reopen_reason = 'must_not_reopen_paid',
+        last_reopened_by = '20000000-0000-4000-8000-000000000001',
+        last_reopened_at = now(),
+        version = version + 1
+    where id = '90000000-0000-4000-8000-000000000001';
+    raise exception 'PAID_PAYROLL_REOPEN_ACCEPTED';
+  exception when object_not_in_prerequisite_state then
+    null;
+  end;
+end;
+$$;
 
 do $$
 begin
@@ -442,7 +522,7 @@ $$;
 
 rollback;
 
-select '1..13';
+select '1..17';
 select format('ok %s - %s', test_number, description)
 from (
   values
@@ -455,8 +535,12 @@ from (
     (7, 'earning owner must match submission maid'),
     (8, 'bomb-room bonus must equal zero or base amount'),
     (9, 'payroll item amount is derived and immutable'),
-    (10, 'inspection reclean stays with the original maid'),
-    (11, 'inspection reclean origin cannot be retargeted'),
-    (12, 'paid payroll membership and amount are immutable'),
-    (13, 'earning date must belong to the payroll week')
+    (10, 'payroll reopen requires a recorded reason actor and time'),
+    (11, 'paying payroll can reopen after an unsent transfer is recorded'),
+    (12, 'check payroll can reopen after an unsent transfer is confirmed'),
+    (13, 'paid payroll cannot reopen'),
+    (14, 'inspection reclean stays with the original maid'),
+    (15, 'inspection reclean origin cannot be retargeted'),
+    (16, 'paid payroll membership and amount are immutable'),
+    (17, 'earning date must belong to the payroll week')
 ) as passed_checks(test_number, description);

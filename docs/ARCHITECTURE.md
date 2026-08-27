@@ -72,7 +72,7 @@ erDiagram
 | 제출 | `client_submission_id` unique + 회차별 현재 제출 unique |
 | 검수 | 제출별 decision unique, 현재 `submitted` 버전만 조건부 전이 |
 | 수익 | submission/entitlement unique |
-| 지급 | `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + PAYING 이후 snapshot 불변 + version CAS |
+| 지급 | `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + PAYING 이후 snapshot 불변 + 미송금 사유 기록 reopen + version CAS |
 | 알림 | 수신자별 dedupe key unique, 10분 group key |
 
 복수 테이블을 바꾸는 예약 저장, 배정 통보, 검수, 지급은 다음 단계에서 SQL RPC로 구현하고 감사 이벤트까지 같은 트랜잭션으로 커밋합니다.
@@ -131,7 +131,7 @@ erDiagram
 - 실제 관리자 계정 1개 seed 후 로그인·RLS 통합 테스트
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token 설정
 
-2026-08-26에 운영·복구검증 프로젝트에 P0/P1 및 도메인 무결성 migration을 적용했다. 두 프로젝트에서 구조 검사 16건과 rollback DML 검사 10건이 통과했고 Security Advisor 경고는 0건이다. Performance Advisor에는 아직 업무 데이터가 없어 예상되는 unused-index 정보만 남아 있다.
+2026-08-28에 운영·복구검증 프로젝트에 P0/P1 및 도메인 무결성 migration을 적용했다. 두 프로젝트에서 구조 검사 22건과 rollback DML 검사 17건이 통과했고 Security Advisor 경고는 0건이다. Performance Advisor에는 아직 업무 데이터가 없어 예상되는 unused-index 정보만 남아 있다.
 
 ## 백업·복구
 

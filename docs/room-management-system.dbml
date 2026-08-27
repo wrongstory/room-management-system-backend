@@ -448,6 +448,9 @@ Table public.payroll_cycles {
   payment_started_at timestamptz
   paid_at timestamptz
   check_reason text
+  last_reopen_reason text
+  last_reopened_by uuid [ref: > public.profiles.id]
+  last_reopened_at timestamptz
   version bigint [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
@@ -456,7 +459,7 @@ Table public.payroll_cycles {
     (maid_profile_id, week_start) [unique]
   }
 
-  Note: 'Identity is immutable. Lock metadata is immutable after leaving OPEN; PAID snapshots are append-only.'
+  Note: 'Identity is immutable. Lock metadata is immutable after leaving OPEN except a reasoned, versioned PAYING/CHECK -> OPEN recovery. Candidate items remain; PAID snapshots are append-only.'
 }
 
 Table public.payroll_items {

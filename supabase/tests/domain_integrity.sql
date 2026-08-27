@@ -1,4 +1,4 @@
-select '1..19';
+select '1..22';
 
 with checks(test_number, description, passed) as (
   values
@@ -161,6 +161,39 @@ with checks(test_number, description, passed) as (
           and tgname = 'payroll_cycles_prevent_snapshot_rewrite'
           and not tgisinternal
       )
+    ),
+    (
+      20,
+      'payroll cycle stores the latest recorded reopen reason',
+      (
+        select count(*) = 3
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'payroll_cycles'
+          and column_name in (
+            'last_reopen_reason', 'last_reopened_by', 'last_reopened_at'
+          )
+      )
+    ),
+    (
+      21,
+      'payroll reopen requires reason actor time and version',
+      position(
+        'PAYROLL_REOPEN_REASON_REQUIRED'
+        in pg_get_functiondef('private.prevent_payroll_cycle_snapshot_rewrite()'::regprocedure)
+      ) > 0
+      and position(
+        'PAYROLL_REOPEN_VERSION_MISMATCH'
+        in pg_get_functiondef('private.prevent_payroll_cycle_snapshot_rewrite()'::regprocedure)
+      ) > 0
+    ),
+    (
+      22,
+      'open payroll may retain candidate items for a retry',
+      position(
+        'OPEN_PAYROLL_CANNOT_HAVE_ITEMS'
+        in pg_get_functiondef('private.assert_payroll_cycle_total(uuid)'::regprocedure)
+      ) = 0
     )
 )
 select case
