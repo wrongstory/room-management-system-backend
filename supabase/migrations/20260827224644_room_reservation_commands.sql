@@ -1783,8 +1783,8 @@ begin
 
   update public.checkout_cleaning_obligations
   set status = case
-        when current_cleaning_target_id is null then 'available'
-        else 'materialized'
+        when current_cleaning_target_id is null then 'available'::public.checkout_obligation_status
+        else 'materialized'::public.checkout_obligation_status
       end,
       available_from = p_effective_at,
       effective_service_date = (p_effective_at at time zone 'Asia/Seoul')::date,
@@ -2057,8 +2057,8 @@ begin
 
     update public.checkout_cleaning_obligations
     set status = case
-          when current_cleaning_target_id is null then 'available'
-          else 'materialized'
+          when current_cleaning_target_id is null then 'available'::public.checkout_obligation_status
+          else 'materialized'::public.checkout_obligation_status
         end,
         available_from = v_updated.check_out_at,
         effective_service_date = (v_updated.check_out_at at time zone 'Asia/Seoul')::date,
