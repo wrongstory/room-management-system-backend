@@ -11,9 +11,12 @@ import { createAuthRoutes } from './modules/auth/auth.routes.js';
 import { SupabaseRoomService, type RoomService } from './modules/rooms/room.service.js';
 import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { loggerOptions } from './config/logger.js';
+import { SupabaseAccountService, type AccountService } from './modules/accounts/account.service.js';
+import { createAccountRoutes } from './modules/accounts/account.routes.js';
 
 export interface AppServices {
   auth: AuthService;
+  accounts: AccountService;
   rooms: RoomService;
 }
 
@@ -47,6 +50,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const clients = createSupabaseClients(options.env);
     services = {
       auth: new SupabaseAuthService(clients),
+      accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       rooms: new SupabaseRoomService(clients)
     };
   }
@@ -67,6 +71,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.decorateRequest('actor');
   app.decorate('authenticate', async (request) => {
     request.actor = await services.auth.authenticate(bearerToken(request.headers.authorization));
+  });
+  app.decorate('requirePasswordChanged', async (request) => {
+    if (request.actor.mustChangePassword) {
+      throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '계속하려면 먼저 임시 비밀번호를 변경해 주세요.');
+    }
+  });
+  app.decorate('requireAdmin', async (request) => {
+    if (request.actor.role !== 'admin') {
+      throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 접근할 수 있습니다.');
+    }
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -101,6 +115,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }));
 
   await app.register(createAuthRoutes(services.auth), { prefix: '/v1/auth' });
+  await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
 
   return app;

@@ -35,10 +35,10 @@ flowchart LR
 
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.
 2. 내부 이메일은 `user-{profile_id}@auth.castletheart.invalid` 형식으로 서버만 계산합니다.
-3. 사용자가 이름형 `loginId`와 숫자 6자리 이상 로그인 비밀번호를 보냅니다.
+3. 사용자가 이름형 `loginId`와 최초 휴대전화 끝 4자리 임시 비밀번호 또는 숫자 6자리 이상 개인 비밀번호를 보냅니다. 4자리 임시값은 서버 내부에서만 Supabase 최소 길이를 만족하는 namespace 값으로 변환합니다.
 4. 서버가 활성 alias와 프로필을 찾고 5회 실패/15분 잠금을 검사합니다.
 5. 서버가 Supabase Auth password 로그인을 수행해 access/refresh token을 반환합니다.
-6. 이후 API는 `auth.getUser(accessToken)`으로 토큰을 검증하고 최신 프로필 역할·상태를 다시 읽습니다.
+6. 이후 API는 `auth.getUser(accessToken)`과 `auth.sessions`의 `session_id`를 검증하고 최신 프로필 역할·상태를 다시 읽습니다.
 
 권한은 사용자 수정 가능한 `user_metadata`에 의존하지 않습니다. 역할 변경과 비활성화가 JWT 갱신 전에도 반영되도록 DB 프로필을 매 요청 확인합니다.
 
@@ -68,13 +68,13 @@ erDiagram
 | 작업 | 서버 보장 |
 |---|---|
 | 예약 저장 | `tstzrange` + GiST exclusion으로 겹침 차단 |
-| 청소 요청 | 객실별 활성 대상 partial unique + `source_key` |
+| 청소 요청 | 예약별 checkout 의무 unique + source별 `source_key` |
 | 담당 변경 | 대상 `assignment_version` CAS + 현재 담당 partial unique |
 | 청소 시작 | 메이드별 `in_progress` partial unique |
 | 제출 | `client_submission_id` unique + 회차별 현재 제출 unique |
 | 검수 | 제출별 decision unique, 현재 `submitted` 버전만 조건부 전이 |
 | 수익 | submission/entitlement unique |
-| 지급 | `(maid_profile_id, week_start)` unique + version CAS |
+| 지급 | `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + PAYING 이후 snapshot 불변 + 미송금 사유 기록 reopen + version CAS |
 | 알림 | 수신자별 dedupe key unique, 10분 group key |
 
 복수 테이블을 바꾸는 예약 저장, 배정 통보, 검수, 지급은 다음 단계에서 SQL RPC로 구현하고 감사 이벤트까지 같은 트랜잭션으로 커밋합니다.
@@ -86,6 +86,8 @@ erDiagram
 - 메이드는 본인 담당·수행·제출·수익·지급·알림만 읽습니다.
 - 관리자는 운영 테이블을 관리하지만 객실 PIN 원문은 전용 조회 함수로만 받습니다.
 - view는 `security_invoker = true`를 사용합니다.
+- 일반 Data API RLS의 profile/role 보조 함수는 `active` 계정만 식별합니다. `deactivation_pending`과 `upload_only`는 일반 역할이 아니라 만료 가능하고 업무 revision에 묶인 서버 전용 제한 capability로만 처리합니다.
+- 알림 수신자가 직접 바꿀 수 있는 필드는 `read_at`뿐입니다. `resolved_at`은 관련 업무 command만 service-role transaction에서 변경합니다.
 - 내부 권한 함수는 `private` 스키마, 고정 `search_path`, 최소 반환값, 명시적 EXECUTE 권한을 사용합니다.
 - 사진 파일은 Drive에서 공개 공유하지 않습니다. API가 사용자 역할과 제출 소유권을 검사한 뒤 업로드·열람·삭제를 대행합니다.
 - Supabase에는 Drive 파일 ID·해시·크기·삭제예정일만 저장하고, 사진 레코드 쓰기는 서버 역할에만 허용합니다.
@@ -99,11 +101,16 @@ erDiagram
 - `GET /health`
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
+- `POST /v1/auth/password`
+- `GET·POST /v1/accounts`
+- `PATCH /v1/accounts/:profileId/role`
+- `PATCH /v1/accounts/:profileId/status`
+- `POST /v1/accounts/:profileId/unlock`
+- `POST /v1/accounts/:profileId/password-reset`
 - `GET /v1/rooms`
 
 다음 구현:
 
-- 관리자 계정 생성·복구·비밀번호 초기화
 - 객실 상세·기준정보 변경
 - 예약 CRUD와 자동/수동 체크아웃 명령
 - 주간 가능일 제출, 오늘/내일 청소 대상, 배정·순서 통보
@@ -122,10 +129,11 @@ erDiagram
 아직 필요한 설정:
 
 - Data API 노출 스키마 확인
-- 마이그레이션 적용, RLS advisor와 performance advisor 확인
 - publishable/secret key를 로컬·배포 환경에 각각 저장
 - 실제 관리자 계정 1개 seed 후 로그인·RLS 통합 테스트
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token 설정
+
+2026-08-28에 운영·복구검증 프로젝트에 P0/P1 및 도메인 무결성 migration을 적용했다. 두 프로젝트에서 구조 검사 22건과 rollback DML 검사 17건이 통과했고 Security Advisor 경고는 0건이다. Performance Advisor에는 아직 업무 데이터가 없어 예상되는 unused-index 정보만 남아 있다.
 
 ## 백업·복구
 

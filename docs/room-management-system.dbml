@@ -1,6 +1,11 @@
 Project room_management_system {
   database_type: 'PostgreSQL'
-  Note: 'ERD review draft v1. Supabase Free Plan only. Not yet applied to a remote database.'
+  Note: 'ERD review draft v2. P0 core is applied; account migrations follow the issue #5 rollout.'
+}
+
+Enum app_role {
+  admin
+  maid
 }
 
 Enum account_status {
@@ -77,7 +82,11 @@ Table public.profiles {
   id uuid [pk]
   auth_user_id uuid [not null, unique]
   login_id text [not null, unique]
+  login_id_normalized text [not null, unique]
   display_name text [not null]
+  display_name_normalized text [not null]
+  login_sequence int [not null]
+  role app_role [not null]
   status account_status [not null, default: 'active']
   phone_last_four text
   phone_lookup_hash text [unique]
@@ -89,33 +98,10 @@ Table public.profiles {
   updated_at timestamptz [not null]
 }
 
-Table public.roles {
-  id smallint [pk, increment]
-  code text [not null, unique, note: 'Initial values: admin, maid']
-  name text [not null]
-  active boolean [not null, default: true]
-  created_at timestamptz [not null]
-}
-
-Table public.profile_roles {
-  id bigint [pk, increment]
+Table public.login_aliases {
+  id uuid [pk]
   profile_id uuid [not null]
-  role_id smallint [not null]
-  granted_by uuid [not null]
-  granted_at timestamptz [not null]
-  revoked_by uuid
-  revoked_at timestamptz
-
-  Indexes {
-    (profile_id, role_id) [name: 'profile_roles_lookup']
-  }
-
-  Note: 'A partial unique index permits one active row per profile and role where revoked_at is null.'
-}
-
-Table private.login_aliases {
-  id bigint [pk, increment]
-  profile_id uuid [not null]
+  alias text [not null]
   alias_normalized text [not null, unique]
   active boolean [not null, default: true]
   expires_after_new_login boolean [not null, default: false]
@@ -319,11 +305,13 @@ Table public.cleaning_targets {
   cancelled_by uuid
   cancelled_at timestamptz
   cancellation_reason_code text
+  reclean_of_attempt_id uuid [unique]
+  reclean_maid_profile_id uuid
   created_by uuid [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'A partial unique index allows at most one non-terminal target per room.'
+  Note: 'Checkout targets are unique per reservation. Inspection recleans keep an immutable original attempt and maid link.'
 }
 
 Table public.cleaning_assignments {
@@ -440,6 +428,7 @@ Table public.inspection_decisions {
 
 Table public.earnings {
   id uuid [pk]
+  earning_entitlement_id uuid [not null, unique]
   submission_id uuid [not null, unique]
   maid_profile_id uuid [not null]
   earned_on date [not null]
@@ -459,6 +448,9 @@ Table public.payroll_cycles {
   payment_started_at timestamptz
   paid_at timestamptz
   check_reason text
+  last_reopen_reason text
+  last_reopened_by uuid [ref: > public.profiles.id]
+  last_reopened_at timestamptz
   version bigint [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
@@ -466,18 +458,23 @@ Table public.payroll_cycles {
   Indexes {
     (maid_profile_id, week_start) [unique]
   }
+
+  Note: 'Identity is immutable. Lock metadata is immutable after leaving OPEN except a reasoned, versioned PAYING/CHECK -> OPEN recovery. Candidate items remain; PAID snapshots are append-only.'
 }
 
 Table public.payroll_items {
-  id bigint [pk, increment]
+  id uuid [pk]
   payroll_cycle_id uuid [not null]
-  earning_id uuid [not null]
+  earning_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
   locked_amount int [not null]
   created_at timestamptz [not null]
 
   Indexes {
     (payroll_cycle_id, earning_id) [unique]
   }
+
+  Note: 'Insert only while the cycle is OPEN. Earning earned_on must fall within the cycle week; membership and amount are immutable.'
 }
 
 Table public.payroll_events {
@@ -546,11 +543,7 @@ Table private.audit_events {
 }
 
 Ref: public.profiles.auth_user_id - auth.users.id
-Ref: public.profile_roles.profile_id > public.profiles.id
-Ref: public.profile_roles.role_id > public.roles.id
-Ref: public.profile_roles.granted_by > public.profiles.id
-Ref: public.profile_roles.revoked_by > public.profiles.id
-Ref: private.login_aliases.profile_id > public.profiles.id
+Ref: public.login_aliases.profile_id > public.profiles.id
 Ref: public.maid_profiles.profile_id - public.profiles.id
 Ref: public.availability_versions.maid_profile_id > public.profiles.id
 Ref: public.availability_days.availability_version_id > public.availability_versions.id
@@ -578,6 +571,8 @@ Ref: public.cleaning_targets.room_id > public.rooms.id
 Ref: public.cleaning_targets.reservation_id > public.reservations.id
 Ref: public.cleaning_targets.cancelled_by > public.profiles.id
 Ref: public.cleaning_targets.created_by > public.profiles.id
+Ref: public.cleaning_targets.reclean_of_attempt_id - public.cleaning_attempts.id
+Ref: public.cleaning_targets.reclean_maid_profile_id > public.profiles.id
 Ref: public.cleaning_assignments.cleaning_target_id > public.cleaning_targets.id
 Ref: public.cleaning_assignments.maid_profile_id > public.profiles.id
 Ref: public.cleaning_assignments.changed_by > public.profiles.id
@@ -597,6 +592,7 @@ Ref: public.payroll_cycles.maid_profile_id > public.profiles.id
 Ref: public.payroll_cycles.payment_started_by > public.profiles.id
 Ref: public.payroll_items.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_items.earning_id > public.earnings.id
+Ref: public.payroll_items.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_events.actor_profile_id > public.profiles.id
 Ref: public.payroll_adjustments.payroll_cycle_id > public.payroll_cycles.id

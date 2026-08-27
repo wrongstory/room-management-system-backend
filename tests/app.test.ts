@@ -12,6 +12,7 @@ const env: AppEnv = {
   SUPABASE_URL: 'http://127.0.0.1:54321',
   SUPABASE_PUBLISHABLE_KEY: 'publishable-test',
   SUPABASE_SECRET_KEY: 'secret-test',
+  ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters',
   corsOrigins: ['http://127.0.0.1:4173']
 };
 
@@ -26,16 +27,42 @@ function services(): AppServices {
           authUserId: 'auth-user-1',
           profileId: 'profile-1',
           displayName: '관리자 데모',
-          role: 'admin' as const
+          role: 'admin' as const,
+          mustChangePassword: false
         }
       })),
+      changePassword: vi.fn(async () => undefined),
       authenticate: vi.fn(async (accessToken: string) => ({
         authUserId: 'auth-user-1',
         profileId: 'profile-1',
         displayName: '관리자 데모',
         role: 'admin' as const,
+        mustChangePassword: false,
         accessToken
       }))
+    },
+    accounts: {
+      list: vi.fn(async () => []),
+      create: vi.fn(async (_actor, input) => ({
+        account: {
+          id: '11111111-1111-4111-8111-111111111111',
+          displayName: input.displayName,
+          loginId: input.displayName,
+          role: input.role,
+          status: 'active' as const,
+          phoneLastFour: '5678',
+          mustChangePassword: true,
+          failedLoginCount: 0,
+          lockedUntil: null,
+          createdAt: '2026-08-26T00:00:00.000Z',
+          updatedAt: '2026-08-26T00:00:00.000Z'
+        },
+        temporaryPassword: '5678'
+      })),
+      changeRole: vi.fn(),
+      changeStatus: vi.fn(),
+      unlock: vi.fn(),
+      resetPassword: vi.fn()
     },
     rooms: {
       list: vi.fn(async () => [{
@@ -93,6 +120,68 @@ describe('application', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().error.code).toBe('VALIDATION_ERROR');
+    await app.close();
+  });
+
+  it('creates an individual maid account without exposing internal auth fields', async () => {
+    const app = await buildApp({ env, services: services(), logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/accounts',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'account-create-0001'
+      },
+      payload: { displayName: '김민지', role: 'maid', phone: '010-1234-5678' }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      account: { displayName: '김민지', loginId: '김민지', role: 'maid' },
+      temporaryPassword: '5678'
+    });
+    expect(JSON.stringify(response.json())).not.toContain('@auth.castletheart.invalid');
+    expect(JSON.stringify(response.json())).not.toContain('authUserId');
+    await app.close();
+  });
+
+  it('blocks business routes until the temporary password is changed', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-user-1',
+      profileId: 'profile-1',
+      displayName: '관리자 데모',
+      role: 'admin' as const,
+      mustChangePassword: true,
+      accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('PASSWORD_CHANGE_REQUIRED');
+    await app.close();
+  });
+
+  it('allows the four-digit temporary password but rejects five digits', async () => {
+    const app = await buildApp({ env, services: services(), logger: false });
+    const temporary = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { loginId: '김민지', password: '5678' }
+    });
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { loginId: '김민지', password: '12345' }
+    });
+
+    expect(temporary.statusCode).toBe(200);
+    expect(invalid.statusCode).toBe(400);
     await app.close();
   });
 });

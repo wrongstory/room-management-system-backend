@@ -44,7 +44,10 @@ P1부터 각 이슈는 상태 전이표와 금지 전이 테스트를 API 구현
 - refresh token rotation: 켬
 - access token 기본 만료: 1시간
 - 로그인 실패 5회: 15분 잠금
-- 비밀번호: 제품 정책상 숫자 6자리 이상을 API에서 검증
+- 임시 비밀번호: 휴대전화 마지막 4자리, 첫 로그인 뒤 변경 강제
+- 개인 비밀번호: 숫자 6자리 이상을 API에서 검증
+- Auth 최소 길이: 6. 휴대전화 끝 4자리 임시값은 서버 내부 namespace로 8자 이상 변환해 전달
+- 비밀번호 초기화·비활성화 때 모든 세션을 폐기하고 매 요청 `session_id` 존재를 검사
 - 권한 데이터: `profiles` 정본, `user_metadata` 사용 금지
 
 운영 Dashboard의 Auth 설정은 로컬 `supabase/config.toml`과 일치하는지 적용 직후 다시 확인한다.

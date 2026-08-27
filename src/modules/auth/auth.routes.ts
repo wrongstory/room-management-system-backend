@@ -4,8 +4,24 @@ import type { AuthService } from './auth.service.js';
 
 const loginSchema = z.object({
   loginId: z.string().trim().min(1).max(80),
-  password: z.string().regex(/^\d{6,}$/, '로그인 비밀번호는 숫자 6자리 이상이어야 합니다.')
+  password: z.string().regex(/^(?:\d{4}|\d{6,})$/, '임시 비밀번호 4자리 또는 개인 비밀번호 숫자 6자리 이상을 입력해 주세요.')
 });
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().regex(/^(?:\d{4}|\d{6,})$/),
+  newPassword: z.string().regex(/^\d{6,}$/, '새 비밀번호는 숫자 6자리 이상이어야 합니다.')
+}).refine((value) => value.currentPassword !== value.newPassword, {
+  path: ['newPassword'],
+  message: '새 비밀번호는 현재 비밀번호와 달라야 합니다.'
+});
+
+function idempotencyKey(value: string | string[] | undefined): string {
+  return z.string()
+    .min(8)
+    .max(128)
+    .regex(/^[A-Za-z0-9._:-]+$/)
+    .parse(value);
+}
 
 export function createAuthRoutes(authService: AuthService): FastifyPluginAsync {
   return async (app) => {
@@ -22,9 +38,20 @@ export function createAuthRoutes(authService: AuthService): FastifyPluginAsync {
         authUserId: request.actor.authUserId,
         profileId: request.actor.profileId,
         displayName: request.actor.displayName,
-        role: request.actor.role
+        role: request.actor.role,
+        mustChangePassword: request.actor.mustChangePassword
       }
     }));
+
+    app.post('/password', { preHandler: app.authenticate }, async (request, reply) => {
+      const input = changePasswordSchema.parse(request.body);
+      await authService.changePassword(
+        request.actor,
+        input.currentPassword,
+        input.newPassword,
+        idempotencyKey(request.headers['idempotency-key'])
+      );
+      return reply.code(204).send();
+    });
   };
 }
-
