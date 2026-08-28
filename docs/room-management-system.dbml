@@ -17,16 +17,14 @@ Enum account_status {
 }
 
 Enum availability_status {
-  draft
   submitted
   superseded
 }
 
-Enum request_status {
+Enum availability_request_status {
   pending
   approved
   rejected
-  cancelled
 }
 
 Enum cleaning_kind {
@@ -124,11 +122,13 @@ Table public.availability_versions {
   week_start date [not null]
   version int [not null]
   status availability_status [not null]
-  submitted_at timestamptz
+  is_current boolean [not null, default: true]
+  submitted_at timestamptz [not null]
   created_at timestamptz [not null]
 
   Indexes {
     (maid_profile_id, week_start, version) [unique]
+    (maid_profile_id, week_start) [unique, note: 'partial unique where is_current']
   }
 }
 
@@ -137,6 +137,7 @@ Table public.availability_days {
   availability_version_id uuid [not null]
   work_date date [not null]
   available boolean [not null]
+  created_at timestamptz [not null]
 
   Indexes {
     (availability_version_id, work_date) [unique]
@@ -146,12 +147,18 @@ Table public.availability_days {
 Table public.availability_change_requests {
   id uuid [pk]
   availability_version_id uuid [not null]
-  requested_days jsonb [not null]
+  maid_profile_id uuid [not null]
+  week_start date [not null]
+  source_version int [not null]
+  requested_available_dates date[] [not null]
   reason_code text [not null]
-  status request_status [not null, default: 'pending']
+  status availability_request_status [not null, default: 'pending']
   requested_at timestamptz [not null]
   decided_by uuid
   decided_at timestamptz
+  decision_reason_code text
+  approved_version_id uuid
+  created_at timestamptz [not null]
 }
 
 Table public.room_types {
@@ -548,7 +555,9 @@ Ref: public.maid_profiles.profile_id - public.profiles.id
 Ref: public.availability_versions.maid_profile_id > public.profiles.id
 Ref: public.availability_days.availability_version_id > public.availability_versions.id
 Ref: public.availability_change_requests.availability_version_id > public.availability_versions.id
+Ref: public.availability_change_requests.maid_profile_id > public.profiles.id
 Ref: public.availability_change_requests.decided_by > public.profiles.id
+Ref: public.availability_change_requests.approved_version_id > public.availability_versions.id
 Ref: public.rooms.room_type_id > public.room_types.id
 Ref: public.reservations.room_id > public.rooms.id
 Ref: public.reservations.created_by > public.profiles.id
