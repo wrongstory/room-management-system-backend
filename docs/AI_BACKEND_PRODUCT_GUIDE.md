@@ -573,6 +573,15 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 위 migration은 운영·복구검증 Supabase에 별도로 적용됐고 계정 상태 RLS 11/11, 구조 19/19, DML 13/13, Security Advisor lint 0을 확인했다. 이 원격 적용 사실도 PR #17 브랜치에 코드를 포함시킨다는 뜻은 아니다.
 - 아직 없는 주간 가능일, preparation obligation, assignment revision, 정규화 photo slot/submission version, complaint/민원 보상, payroll event/adjustment, notification outbox, PIN lease, offline work lease는 각 roadmap issue에서 구현한다.
 
+### Issue #6 작업 브랜치에서 제안 중 — 병합·원격 적용 전
+
+- 가능일 제출은 일요일 12:00–23:59 KST와 다음 월요일 `week_start`를 DB command에서 검증한다.
+- 메이드·주차별 current version은 `expectedVersion` CAS와 advisory lock으로 직렬화하며 과거 version과 7개 날짜 row를 삭제하지 않는다.
+- 마감 뒤에는 pending 변경 요청을 만들고 활성 관리자의 승인 시에만 새 current version을 추가한다. 반려도 결정·사유·행위자·시각을 보존한다.
+- 같은 idempotency key와 canonical payload는 기존 결과를 반환하고 다른 payload 재사용은 거절한다.
+- 조회 RLS는 활성 관리자의 전체 범위와 활성 메이드 본인 범위만 허용하며, 직접 DML과 비활성·제한 capability 제출은 차단한다.
+- 관리자 후보 projection은 current version에서 해당 날짜가 available인 활성 maid만 반환한다.
+
 ---
 
 ## 15. 아직 사용자가 결정해야 할 사항

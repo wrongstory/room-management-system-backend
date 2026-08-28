@@ -68,6 +68,8 @@ erDiagram
 | 작업 | 서버 보장 |
 |---|---|
 | 예약 저장 | `tstzrange` + GiST exclusion으로 겹침 차단 |
+| 주간 가능일 | 일요일 12:00–23:59 KST + 메이드/주차 current version CAS + canonical request hash |
+| 마감 후 가능일 변경 | pending 요청 1건 + 관리자 결정 row lock + 승인 때만 새 immutable version |
 | 청소 요청 | 예약별 checkout 의무 unique + source별 `source_key` |
 | 담당 변경 | 대상 `assignment_version` CAS + 현재 담당 partial unique |
 | 청소 시작 | 메이드별 `in_progress` partial unique |
@@ -108,12 +110,15 @@ erDiagram
 - `POST /v1/accounts/:profileId/unlock`
 - `POST /v1/accounts/:profileId/password-reset`
 - `GET /v1/rooms`
+- `GET /v1/availability`, `POST /v1/availability/submissions`
+- `GET·POST /v1/availability/change-requests`, 관리자 승인·반려
+- `GET /v1/availability/candidates` 활성·가능 메이드 후보 조회
 
 다음 구현:
 
 - 객실 상세·기준정보 변경
 - 예약 CRUD와 자동/수동 체크아웃 명령
-- 주간 가능일 제출, 오늘/내일 청소 대상, 배정·순서 통보
+- 오늘/내일 청소 대상, 배정·순서 통보
 - 300KiB 사진 업로드, 인증된 사진 스트리밍, 현장 완료, 전체 제출
 - 검수 승인/반려, 폭탄방 판정, 재청소
 - 메이드별 주급과 지급 상태
