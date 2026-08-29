@@ -227,11 +227,23 @@ Table public.preparation_obligations {
   room_id uuid [not null]
   status text [not null]
   current_attempt_id uuid
-  approved_submission_id uuid
+  approved_submission_id uuid [unique]
   version bigint [not null]
   invalidated_reason_code text
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
+}
+
+Table private.preparation_proof_usages {
+  id uuid [pk]
+  preparation_obligation_id uuid [not null]
+  reservation_id uuid [not null]
+  room_id uuid [not null]
+  approved_submission_id uuid [not null, unique]
+  cleaning_attempt_id uuid [not null]
+  recorded_at timestamptz [not null]
+
+  Note: 'Append-only consumption ledger. One approved submission can prove exactly one preparation obligation, including after that obligation is invalidated.'
 }
 
 Table public.checkout_cleaning_obligations {
@@ -668,6 +680,11 @@ Ref: public.preparation_obligations.reservation_id - public.reservations.id
 Ref: public.preparation_obligations.room_id > public.rooms.id
 Ref: public.preparation_obligations.current_attempt_id > public.cleaning_attempts.id
 Ref: public.preparation_obligations.approved_submission_id > public.cleaning_submissions.id
+Ref: private.preparation_proof_usages.preparation_obligation_id > public.preparation_obligations.id
+Ref: private.preparation_proof_usages.reservation_id > public.reservations.id
+Ref: private.preparation_proof_usages.room_id > public.rooms.id
+Ref: private.preparation_proof_usages.approved_submission_id > public.cleaning_submissions.id
+Ref: private.preparation_proof_usages.cleaning_attempt_id > public.cleaning_attempts.id
 Ref: public.checkout_cleaning_obligations.reservation_id - public.reservations.id
 Ref: public.checkout_cleaning_obligations.room_id > public.rooms.id
 Ref: public.checkout_cleaning_obligations.current_cleaning_target_id - public.cleaning_targets.id

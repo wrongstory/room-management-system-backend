@@ -410,7 +410,7 @@ select public.create_reservation(
 
 insert into public.cleaning_targets (
   id, room_id, reservation_id, cleaning_kind, source, source_key,
-  original_service_date, effective_service_date, status,
+  original_service_date, effective_service_date, available_from, status,
   room_type_snapshot, fee_snapshot, template_snapshot, created_by
 ) values (
   '73000000-0000-4000-8000-000000000021',
@@ -421,6 +421,7 @@ insert into public.cleaning_targets (
   'adjacent-preparation-proof',
   '2029-01-02',
   '2029-01-02',
+  '2029-01-02 11:00:00+09',
   'approved',
   '{}'::jsonb,
   16000,
@@ -451,9 +452,9 @@ insert into public.cleaning_attempts (
   1,
   'approved',
   1,
-  '2029-01-02 09:00:00+09',
-  '2029-01-02 10:00:00+09',
-  '2029-01-02 10:05:00+09',
+  '2029-01-02 11:00:00+09',
+  '2029-01-02 11:00:00+09',
+  '2029-01-02 11:00:00+09',
   '{}'::jsonb,
   '{}'::jsonb
 );
@@ -469,7 +470,7 @@ insert into public.cleaning_submissions (
   'approved',
   '{}'::jsonb,
   '72000000-0000-4000-8000-000000000002',
-  '2029-01-02 10:05:00+09'
+  '2029-01-02 11:00:00+09'
 );
 
 insert into public.inspection_decisions (
@@ -480,14 +481,203 @@ insert into public.inspection_decisions (
   'approved',
   'ADJACENT_CHECKIN_PROOF',
   '72000000-0000-4000-8000-000000000001',
+  '2029-01-02 11:00:00+09'
+);
+
+insert into public.cleaning_targets (
+  id, room_id, reservation_id, cleaning_kind, source, source_key,
+  original_service_date, effective_service_date, available_from, status,
+  room_type_snapshot, fee_snapshot, template_snapshot, created_by
+) values (
+  '73000000-0000-4000-8000-000000000020',
+  (select id from public.rooms where room_number = '332'),
+  null,
+  'additional',
+  'manual_room_request',
+  'stale-preparation-proof',
+  '2029-01-02',
+  '2029-01-02',
+  '2029-01-02 10:00:00+09',
+  'approved',
+  '{}'::jsonb,
+  16000,
+  '{}'::jsonb,
+  '72000000-0000-4000-8000-000000000001'
+);
+
+insert into public.cleaning_assignments (
+  id, cleaning_target_id, maid_profile_id, sequence_number, revision, changed_by
+) values (
+  '76000000-0000-4000-8000-000000000020',
+  '73000000-0000-4000-8000-000000000020',
+  '72000000-0000-4000-8000-000000000002',
+  1,
+  1,
+  '72000000-0000-4000-8000-000000000001'
+);
+
+insert into public.cleaning_attempts (
+  id, cleaning_target_id, assignment_id, maid_profile_id, attempt_number,
+  status, assignment_revision, started_at, field_completed_at, ended_at,
+  template_snapshot, room_snapshot
+) values (
+  '77000000-0000-4000-8000-000000000020',
+  '73000000-0000-4000-8000-000000000020',
+  '76000000-0000-4000-8000-000000000020',
+  '72000000-0000-4000-8000-000000000002',
+  1,
+  'approved',
+  1,
+  '2029-01-02 10:00:00+09',
+  '2029-01-02 10:05:00+09',
+  '2029-01-02 10:05:00+09',
+  '{}'::jsonb,
+  '{}'::jsonb
+);
+
+insert into public.cleaning_submissions (
+  id, cleaning_attempt_id, client_submission_id, version, status,
+  photo_manifest, submitted_by, submitted_at
+) values (
+  '79000000-0000-4000-8000-000000000020',
+  '77000000-0000-4000-8000-000000000020',
+  '79000000-0000-4000-8000-000000000024',
+  1,
+  'approved',
+  '{}'::jsonb,
+  '72000000-0000-4000-8000-000000000002',
+  '2029-01-02 10:05:00+09'
+);
+
+insert into public.inspection_decisions (
+  id, submission_id, decision, reason_code, decided_by, decided_at
+) values (
+  '79000000-0000-4000-8000-000000000025',
+  '79000000-0000-4000-8000-000000000020',
+  'approved',
+  'STALE_PREVIOUS_OCCUPANCY_PROOF',
+  '72000000-0000-4000-8000-000000000001',
   '2029-01-02 10:10:00+09'
 );
+
+do $$
+begin
+  begin
+    update public.preparation_obligations
+    set status = 'approved',
+        current_attempt_id = '77000000-0000-4000-8000-000000000020',
+        approved_submission_id = '79000000-0000-4000-8000-000000000020'
+    where reservation_id = '74000000-0000-4000-8000-000000000022';
+
+    insert into reservation_security_results values
+      (26, 'preparation proof must occur after the immediately preceding occupancy', false);
+  exception when check_violation then
+    insert into reservation_security_results values
+      (26, 'preparation proof must occur after the immediately preceding occupancy', sqlerrm like '%PREPARATION_APPROVAL_PROOF_REQUIRED%');
+  end;
+end;
+$$;
 
 update public.preparation_obligations
 set status = 'approved',
     current_attempt_id = '77000000-0000-4000-8000-000000000021',
     approved_submission_id = '79000000-0000-4000-8000-000000000021'
 where reservation_id = '74000000-0000-4000-8000-000000000022';
+
+do $$
+begin
+  begin
+    insert into private.preparation_proof_usages (
+      preparation_obligation_id,
+      reservation_id,
+      room_id,
+      approved_submission_id,
+      cleaning_attempt_id
+    ) select
+      r.preparation_obligation_id,
+      r.id,
+      r.room_id,
+      '79000000-0000-4000-8000-000000000021',
+      '77000000-0000-4000-8000-000000000021'
+    from public.reservations r
+    where r.id = '74000000-0000-4000-8000-000000000021';
+
+    insert into reservation_security_results values
+      (27, 'an approved preparation submission can be consumed by only one obligation', false);
+  exception when unique_violation then
+    insert into reservation_security_results values
+      (27, 'an approved preparation submission can be consumed by only one obligation', true);
+  end;
+end;
+$$;
+
+do $$
+begin
+  begin
+    update public.cleaning_submissions
+    set status = 'rejected'
+    where id = '79000000-0000-4000-8000-000000000021';
+
+    insert into reservation_security_results values
+      (28, 'consumed preparation evidence cannot be rewritten', false);
+  exception when object_not_in_prerequisite_state then
+    insert into reservation_security_results values
+      (28, 'consumed preparation evidence cannot be rewritten', sqlerrm like '%CONSUMED_PREPARATION_PROOF_IMMUTABLE%');
+  end;
+end;
+$$;
+
+do $$
+begin
+  begin
+    perform public.change_reservation(
+      '72000000-0000-4000-8000-000000000001',
+      '74000000-0000-4000-8000-000000000021',
+      (select id from public.rooms where room_number = '332'),
+      '2029-01-01 16:00:00+09',
+      '2029-01-02 10:00:00+09',
+      2,
+      'keep',
+      null,
+      1,
+      'PREPARATION_BOUNDARY_TEST',
+      'preparation-boundary-first-change-0001',
+      repeat('e', 64)
+    );
+
+    perform public.change_reservation(
+      '72000000-0000-4000-8000-000000000001',
+      '74000000-0000-4000-8000-000000000022',
+      (select id from public.rooms where room_number = '332'),
+      '2029-01-02 10:30:00+09',
+      '2029-01-03 11:00:00+09',
+      2,
+      'keep',
+      null,
+      1,
+      'PREPARATION_CHECKIN_ADVANCED',
+      'preparation-boundary-second-change-0001',
+      repeat('f', 64)
+    );
+
+    if exists (
+      select 1
+      from public.preparation_obligations o
+      where o.reservation_id = '74000000-0000-4000-8000-000000000022'
+        and o.status = 'invalidated'
+        and o.invalidated_reason_code = 'RESERVATION_CHECK_IN_CHANGED'
+    ) then
+      raise exception using errcode = 'P0001', message = 'EXPECTED_PREPARATION_INVALIDATION';
+    end if;
+
+    insert into reservation_security_results values
+      (29, 'advancing check-in invalidates proof that now falls outside the preparation window', false);
+  exception when raise_exception then
+    insert into reservation_security_results values
+      (29, 'advancing check-in invalidates proof that now falls outside the preparation window', sqlerrm = 'EXPECTED_PREPARATION_INVALIDATION');
+  end;
+end;
+$$;
 
 update public.reservations
 set actual_check_in_at = check_in_at
@@ -603,6 +793,13 @@ insert into public.cleaning_attempts (
   '76000000-0000-4000-8000-000000000001',
   '72000000-0000-4000-8000-000000000002',
   2, 'scheduled', 2, '{}'::jsonb, '{}'::jsonb
+),
+(
+  '77000000-0000-4000-8000-000000000009',
+  '73000000-0000-4000-8000-000000000002',
+  '76000000-0000-4000-8000-000000000001',
+  '72000000-0000-4000-8000-000000000002',
+  9, 'superseded', 2, '{}'::jsonb, '{}'::jsonb
 );
 
 insert into public.room_pin_access_leases (
@@ -716,6 +913,45 @@ exception when check_violation then
 end;
 $$;
 
+do $$
+begin
+  perform public.create_manual_cleaning_request(
+    '72000000-0000-4000-8000-000000000001',
+    '73000000-0000-4000-8000-000000000006',
+    (select id from public.rooms where room_number = '136'),
+    null,
+    'additional',
+    '2030-03-03',
+    '2030-03-03 09:00:00+09',
+    '2030-03-03 10:00:00+09',
+    (select state_version from public.rooms where room_number = '136'),
+    'ACTUAL_OVERSTAY_ADDITIONAL_REQUEST',
+    'additional-overstay-invalid-0001',
+    repeat('b', 64)
+  );
+  insert into reservation_security_results values
+    (24, 'additional cleaning rejects actual occupancy beyond scheduled checkout', false);
+exception when check_violation then
+  insert into reservation_security_results values
+    (24, 'additional cleaning rejects actual occupancy beyond scheduled checkout', sqlerrm like '%VACANT_ROOM_REQUIRED%');
+end;
+$$;
+
+select public.mutate_room_operation(
+  '72000000-0000-4000-8000-000000000001',
+  (select id from public.rooms where room_number = '136'),
+  'record_pin_sync',
+  (select state_version from public.rooms where room_number = '136'),
+  'PIN_ROTATED_BEFORE_MANUAL_CHECKOUT',
+  jsonb_build_object(
+    'entityId', '75000000-0000-4000-8000-000000000003',
+    'syncStatus', 'verified',
+    'pinVersion', 2
+  ),
+  'manual-checkout-pin-sync-0002',
+  repeat('c', 64)
+);
+
 select public.manual_checkout_reservation(
   '72000000-0000-4000-8000-000000000001',
   '74000000-0000-4000-8000-000000000002',
@@ -745,7 +981,8 @@ insert into reservation_security_results values
        where cleaning_target_id = '73000000-0000-4000-8000-000000000002'
          and id not in (
            '77000000-0000-4000-8000-000000000000',
-           '77000000-0000-4000-8000-000000000001'
+           '77000000-0000-4000-8000-000000000001',
+           '77000000-0000-4000-8000-000000000009'
          ))
   )),
   (10, 'manual checkout revokes old PIN lease, reissues metadata, and notifies the maid', (
@@ -756,12 +993,41 @@ insert into reservation_security_results values
        from public.room_pin_access_leases
        where cleaning_target_id = '73000000-0000-4000-8000-000000000002'
          and id <> '78000000-0000-4000-8000-000000000001'
-         and revoked_at is null and revealed_at is null)
+         and revoked_at is null and revealed_at is null and pin_version = 2)
       and (select count(*) = 1
        from public.notifications
        where cleaning_target_id = '73000000-0000-4000-8000-000000000002'
          and category = 'cleaning_schedule_changed')
   ));
+
+update public.cleaning_targets
+set available_from = '2030-03-02 23:30:00+09',
+    due_at = '2030-03-03 00:30:00+09'
+where id = '73000000-0000-4000-8000-000000000002';
+
+do $$
+begin
+  perform public.create_manual_cleaning_request(
+    '72000000-0000-4000-8000-000000000001',
+    '73000000-0000-4000-8000-000000000007',
+    (select id from public.rooms where room_number = '136'),
+    null,
+    'additional',
+    '2030-03-03',
+    '2030-03-03 00:00:00+09',
+    '2030-03-03 00:15:00+09',
+    (select state_version from public.rooms where room_number = '136'),
+    'CROSS_MIDNIGHT_CONFLICT',
+    'additional-cross-midnight-invalid-0001',
+    repeat('d', 64)
+  );
+  insert into reservation_security_results values
+    (25, 'manual cleaning detects access-window conflicts across service dates', false);
+exception when exclusion_violation then
+  insert into reservation_security_results values
+    (25, 'manual cleaning detects access-window conflicts across service dates', sqlerrm like '%CLEANING_REQUEST_TIME_CONFLICT%');
+end;
+$$;
 
 update public.reservations
 set status = 'cancelled',
@@ -1026,6 +1292,22 @@ insert into reservation_security_results values
       )
   ));
 
+do $$
+begin
+  begin
+    update public.cleaning_targets
+    set status = 'approved'
+    where id = '73000000-0000-4000-8000-000000000005';
+    set constraints cleaning_targets_validate_checkout_terminal_contract immediate;
+    insert into reservation_security_results values
+      (22, 'checkout terminal target changes cannot commit without the matching obligation transition', false);
+  exception when check_violation then
+    insert into reservation_security_results values
+      (22, 'checkout terminal target changes cannot commit without the matching obligation transition', sqlerrm like '%CHECKOUT_TERMINAL_CONTRACT_NOT_ATOMIC%');
+  end;
+end;
+$$;
+
 update public.cleaning_targets
 set status = 'approved'
 where id = '73000000-0000-4000-8000-000000000005';
@@ -1041,15 +1323,15 @@ begin
     set status = 'cancelled'
     where id = '73000000-0000-4000-8000-000000000005';
     insert into reservation_security_results values
-      (22, 'completed checkout targets cannot regress through direct service-role DML', false);
+      (23, 'completed checkout targets cannot regress through direct service-role DML', false);
   exception when check_violation then
     insert into reservation_security_results values
-      (22, 'completed checkout targets cannot regress through direct service-role DML', sqlerrm like '%TERMINAL_CHECKOUT_TARGET_IMMUTABLE%');
+      (23, 'completed checkout targets cannot regress through direct service-role DML', sqlerrm like '%TERMINAL_CHECKOUT_TARGET_IMMUTABLE%');
   end;
 end;
 $$;
 
-select '1..22';
+select '1..29';
 
 select case
   when passed then format('ok %s - %s', test_number, description)

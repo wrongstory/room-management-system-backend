@@ -164,7 +164,7 @@ create table public.preparation_obligations (
   room_id uuid not null references public.rooms(id) on delete restrict,
   status public.preparation_obligation_status not null default 'pending',
   current_attempt_id uuid references public.cleaning_attempts(id) on delete restrict,
-  approved_submission_id uuid references public.cleaning_submissions(id) on delete restrict,
+  approved_submission_id uuid unique references public.cleaning_submissions(id) on delete restrict,
   version bigint not null default 1 check (version > 0),
   invalidated_reason_code text,
   created_at timestamptz not null default now(),
@@ -248,6 +248,7 @@ select
   r.room_id,
   case
     when r.status = 'cancelled' then 'cancelled'::public.checkout_obligation_status
+    when t.status = 'approved' then 'completed'::public.checkout_obligation_status
     when t.id is not null then 'materialized'::public.checkout_obligation_status
     when r.status = 'checked_out' then 'available'::public.checkout_obligation_status
     else 'private'::public.checkout_obligation_status
@@ -263,11 +264,13 @@ select
   r.updated_at
 from public.reservations r
 left join lateral (
-  select ct.id
+  select ct.id, ct.status
   from public.cleaning_targets ct
-  where ct.reservation_id = r.id
+  where r.status <> 'cancelled'
+    and ct.reservation_id = r.id
     and ct.cleaning_kind = 'checkout'
-  order by ct.created_at
+    and ct.status <> 'cancelled'
+  order by ct.created_at desc, ct.id desc
   limit 1
 ) t on true;
 
@@ -344,6 +347,42 @@ alter table public.preparation_obligations
     references public.cleaning_submissions (id, cleaning_attempt_id)
     on delete restrict
     deferrable initially deferred;
+
+create table private.preparation_proof_usages (
+  id uuid primary key default gen_random_uuid(),
+  preparation_obligation_id uuid not null
+    references public.preparation_obligations(id) on delete restrict,
+  reservation_id uuid not null references public.reservations(id) on delete restrict,
+  room_id uuid not null references public.rooms(id) on delete restrict,
+  approved_submission_id uuid not null unique,
+  cleaning_attempt_id uuid not null,
+  recorded_at timestamptz not null default now(),
+  foreign key (preparation_obligation_id, reservation_id, room_id)
+    references public.preparation_obligations (id, reservation_id, room_id)
+    on delete restrict,
+  foreign key (approved_submission_id, cleaning_attempt_id)
+    references public.cleaning_submissions (id, cleaning_attempt_id)
+    on delete restrict
+);
+
+create index preparation_proof_usages_obligation_idx
+on private.preparation_proof_usages (
+  preparation_obligation_id,
+  reservation_id,
+  room_id,
+  recorded_at desc
+);
+create index preparation_proof_usages_reservation_idx
+on private.preparation_proof_usages (reservation_id);
+create index preparation_proof_usages_room_idx
+on private.preparation_proof_usages (room_id);
+create index preparation_proof_usages_submission_attempt_idx
+on private.preparation_proof_usages (approved_submission_id, cleaning_attempt_id);
+create index preparation_proof_usages_attempt_idx
+on private.preparation_proof_usages (cleaning_attempt_id);
+
+revoke all on table private.preparation_proof_usages from public, anon, authenticated;
+grant select, insert on table private.preparation_proof_usages to service_role;
 
 create table public.room_occupancy_events (
   id uuid primary key default gen_random_uuid(),
@@ -521,7 +560,28 @@ set search_path = pg_catalog, public
 as $$
 declare
   v_attempt_room_id uuid;
+  v_check_in_at timestamptz;
+  v_required_clean_after_at timestamptz;
 begin
+  select r.check_in_at into v_check_in_at
+  from public.reservations r
+  where r.id = new.reservation_id
+    and r.room_id = new.room_id;
+
+  if not found then
+    raise exception using errcode = '23514', message = 'PREPARATION_RESERVATION_ROOM_MISMATCH';
+  end if;
+
+  select coalesce(
+    max(coalesce(r.actual_checkout_at, r.check_out_at)),
+    new.created_at
+  ) into v_required_clean_after_at
+  from public.reservations r
+  where r.room_id = new.room_id
+    and r.id <> new.reservation_id
+    and r.status <> 'cancelled'
+    and r.check_in_at < v_check_in_at;
+
   if new.current_attempt_id is not null then
     select t.room_id into v_attempt_room_id
     from public.cleaning_attempts a
@@ -537,10 +597,19 @@ begin
     select 1
     from public.cleaning_submissions s
     join public.inspection_decisions d on d.submission_id = s.id
+    join public.cleaning_attempts a on a.id = s.cleaning_attempt_id
+    join public.cleaning_targets t on t.id = a.cleaning_target_id
     where s.id = new.approved_submission_id
       and s.cleaning_attempt_id = new.current_attempt_id
       and s.status = 'approved'
       and d.decision = 'approved'
+      and t.room_id = new.room_id
+      and t.status = 'approved'
+      and t.available_from is not null
+      and t.available_from >= v_required_clean_after_at
+      and d.decided_at >= t.available_from
+      and d.decided_at >= v_required_clean_after_at
+      and d.decided_at <= v_check_in_at
   ) then
     raise exception using errcode = '23514', message = 'PREPARATION_APPROVAL_PROOF_REQUIRED';
   end if;
@@ -555,6 +624,111 @@ create trigger preparation_obligations_enforce_proof
 before insert or update of room_id, status, current_attempt_id, approved_submission_id
 on public.preparation_obligations
 for each row execute function private.enforce_preparation_proof_contract();
+
+create function private.record_preparation_proof_usage()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+declare
+  v_existing_obligation_id uuid;
+begin
+  if new.status <> 'approved' then
+    return new;
+  end if;
+
+  select u.preparation_obligation_id into v_existing_obligation_id
+  from private.preparation_proof_usages u
+  where u.approved_submission_id = new.approved_submission_id;
+
+  if found then
+    if v_existing_obligation_id <> new.id then
+      raise exception using errcode = '23514', message = 'PREPARATION_PROOF_ALREADY_USED';
+    end if;
+    return new;
+  end if;
+
+  insert into private.preparation_proof_usages (
+    preparation_obligation_id,
+    reservation_id,
+    room_id,
+    approved_submission_id,
+    cleaning_attempt_id
+  ) values (
+    new.id,
+    new.reservation_id,
+    new.room_id,
+    new.approved_submission_id,
+    new.current_attempt_id
+  );
+
+  return new;
+end;
+$$;
+
+revoke all on function private.record_preparation_proof_usage() from public;
+
+create trigger preparation_obligations_record_proof_usage
+after insert or update of status, current_attempt_id, approved_submission_id
+on public.preparation_obligations
+for each row execute function private.record_preparation_proof_usage();
+
+create function private.invalidate_stale_preparation_proofs(
+  p_room_id uuid,
+  p_reason_code text
+)
+returns void
+language plpgsql
+set search_path = pg_catalog, public
+as $$
+begin
+  update public.preparation_obligations o
+  set status = 'invalidated',
+      approved_submission_id = null,
+      invalidated_reason_code = p_reason_code,
+      version = o.version + 1
+  from public.reservations current_reservation
+  where current_reservation.id = o.reservation_id
+    and current_reservation.room_id = p_room_id
+    and current_reservation.status = 'active'
+    and o.status = 'approved'
+    and not exists (
+      select 1
+      from public.cleaning_submissions s
+      join public.inspection_decisions d on d.submission_id = s.id
+      join public.cleaning_attempts a on a.id = s.cleaning_attempt_id
+      join public.cleaning_targets t on t.id = a.cleaning_target_id
+      where s.id = o.approved_submission_id
+        and s.cleaning_attempt_id = o.current_attempt_id
+        and s.status = 'approved'
+        and d.decision = 'approved'
+        and t.room_id = o.room_id
+        and t.status = 'approved'
+        and t.available_from is not null
+        and t.available_from >= coalesce((
+          select max(coalesce(previous_reservation.actual_checkout_at, previous_reservation.check_out_at))
+          from public.reservations previous_reservation
+          where previous_reservation.room_id = current_reservation.room_id
+            and previous_reservation.id <> current_reservation.id
+            and previous_reservation.status <> 'cancelled'
+            and previous_reservation.check_in_at < current_reservation.check_in_at
+        ), o.created_at)
+        and d.decided_at >= t.available_from
+        and d.decided_at >= coalesce((
+          select max(coalesce(previous_reservation.actual_checkout_at, previous_reservation.check_out_at))
+          from public.reservations previous_reservation
+          where previous_reservation.room_id = current_reservation.room_id
+            and previous_reservation.id <> current_reservation.id
+            and previous_reservation.status <> 'cancelled'
+            and previous_reservation.check_in_at < current_reservation.check_in_at
+        ), o.created_at)
+        and d.decided_at <= current_reservation.check_in_at
+    );
+end;
+$$;
+
+revoke all on function private.invalidate_stale_preparation_proofs(uuid, text) from public;
 
 create function private.enforce_checkout_obligation_target_state()
 returns trigger
@@ -631,6 +805,60 @@ create trigger cleaning_targets_preserve_terminal_checkout_contract
 before update of status, checkout_obligation_id, reservation_id, room_id, cleaning_kind
 on public.cleaning_targets
 for each row execute function private.prevent_terminal_checkout_target_regression();
+
+create function private.validate_checkout_obligation_target_at_commit()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, public
+as $$
+declare
+  v_obligation_id uuid;
+begin
+  if tg_table_name = 'checkout_cleaning_obligations' then
+    v_obligation_id := new.id;
+  else
+    select o.id into v_obligation_id
+    from public.checkout_cleaning_obligations o
+    where o.current_cleaning_target_id = new.id;
+
+    if not found then
+      return null;
+    end if;
+  end if;
+
+  if exists (
+    select 1
+    from public.checkout_cleaning_obligations o
+    left join public.cleaning_targets t on t.id = o.current_cleaning_target_id
+    where o.id = v_obligation_id
+      and (
+        (o.status = 'materialized' and t.status in ('approved', 'cancelled'))
+        or (o.status = 'completed' and t.status is distinct from 'approved')
+        or (
+          o.status = 'cancelled'
+          and o.current_cleaning_target_id is not null
+          and t.status is distinct from 'cancelled'
+        )
+      )
+  ) then
+    raise exception using errcode = '23514', message = 'CHECKOUT_TERMINAL_CONTRACT_NOT_ATOMIC';
+  end if;
+
+  return null;
+end;
+$$;
+
+revoke all on function private.validate_checkout_obligation_target_at_commit() from public;
+
+create constraint trigger checkout_obligations_validate_terminal_contract
+after insert or update on public.checkout_cleaning_obligations
+deferrable initially deferred
+for each row execute function private.validate_checkout_obligation_target_at_commit();
+
+create constraint trigger cleaning_targets_validate_checkout_terminal_contract
+after insert or update on public.cleaning_targets
+deferrable initially deferred
+for each row execute function private.validate_checkout_obligation_target_at_commit();
 
 create function private.enforce_pin_lease_contract()
 returns trigger
@@ -784,10 +1012,6 @@ create index preparation_obligations_current_attempt_idx
 on public.preparation_obligations (current_attempt_id)
 where current_attempt_id is not null;
 
-create index preparation_obligations_approved_submission_idx
-on public.preparation_obligations (approved_submission_id)
-where approved_submission_id is not null;
-
 create index preparation_obligations_submission_attempt_contract_idx
 on public.preparation_obligations (approved_submission_id, current_attempt_id);
 
@@ -868,6 +1092,48 @@ $$;
 
 revoke all on function private.prevent_append_only_mutation() from public;
 
+create function private.prevent_consumed_preparation_proof_mutation()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, public, private
+as $$
+begin
+  if (
+    tg_table_name = 'cleaning_targets'
+    and exists (
+      select 1
+      from private.preparation_proof_usages u
+      join public.cleaning_attempts a on a.id = u.cleaning_attempt_id
+      where a.cleaning_target_id = old.id
+    )
+  ) or (
+    tg_table_name = 'cleaning_attempts'
+    and exists (
+      select 1
+      from private.preparation_proof_usages u
+      where u.cleaning_attempt_id = old.id
+    )
+  ) or (
+    tg_table_name = 'cleaning_submissions'
+    and exists (
+      select 1
+      from private.preparation_proof_usages u
+      where u.approved_submission_id = old.id
+    )
+  ) then
+    raise exception using errcode = '55000', message = 'CONSUMED_PREPARATION_PROOF_IMMUTABLE';
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function private.prevent_consumed_preparation_proof_mutation() from public;
+
 create trigger audit_events_append_only
 before update or delete on public.audit_events
 for each row execute function private.prevent_append_only_mutation();
@@ -891,6 +1157,26 @@ for each row execute function private.prevent_append_only_mutation();
 create trigger cleaning_target_schedule_revisions_append_only
 before update or delete on public.cleaning_target_schedule_revisions
 for each row execute function private.prevent_append_only_mutation();
+
+create trigger inspection_decisions_append_only
+before update or delete on public.inspection_decisions
+for each row execute function private.prevent_append_only_mutation();
+
+create trigger preparation_proof_usages_append_only
+before update or delete on private.preparation_proof_usages
+for each row execute function private.prevent_append_only_mutation();
+
+create trigger consumed_preparation_target_immutable
+before update or delete on public.cleaning_targets
+for each row execute function private.prevent_consumed_preparation_proof_mutation();
+
+create trigger consumed_preparation_attempt_immutable
+before update or delete on public.cleaning_attempts
+for each row execute function private.prevent_consumed_preparation_proof_mutation();
+
+create trigger consumed_preparation_submission_immutable
+before update or delete on public.cleaning_submissions
+for each row execute function private.prevent_consumed_preparation_proof_mutation();
 
 create trigger preparation_obligations_set_updated_at
 before update on public.preparation_obligations
@@ -1588,6 +1874,10 @@ begin
   returning * into v_room;
 
   perform private.refresh_checkout_due_at(v_reservation.room_id, p_actor_profile_id);
+  perform private.invalidate_stale_preparation_proofs(
+    v_reservation.room_id,
+    'PREVIOUS_OCCUPANCY_CHANGED'
+  );
 
   v_response := private.reservation_response(v_reservation)
     || jsonb_build_object(
@@ -1744,6 +2034,7 @@ begin
         on a.cleaning_target_id = t.id
         and a.assignment_id = ca.id
       where t.reservation_id = v_reservation.id
+        and a.status <> 'superseded'
         and (a.started_at is not null or a.status <> 'scheduled')
     ) or exists (
       select 1
@@ -1820,15 +2111,18 @@ begin
   update public.preparation_obligations
   set room_id = p_room_id,
       status = case
-        when p_room_id <> v_reservation.room_id then 'invalidated'
+        when p_room_id <> v_reservation.room_id
+          or p_check_in_at <> v_reservation.check_in_at then 'invalidated'
         else status
       end,
       approved_submission_id = case
-        when p_room_id <> v_reservation.room_id then null
+        when p_room_id <> v_reservation.room_id
+          or p_check_in_at <> v_reservation.check_in_at then null
         else approved_submission_id
       end,
       invalidated_reason_code = case
         when p_room_id <> v_reservation.room_id then 'RESERVATION_ROOM_CHANGED'
+        when p_check_in_at <> v_reservation.check_in_at then 'RESERVATION_CHECK_IN_CHANGED'
         else invalidated_reason_code
       end,
       version = version + 1
@@ -1980,8 +2274,16 @@ begin
   end if;
 
   perform private.refresh_checkout_due_at(v_old_room_id, p_actor_profile_id);
+  perform private.invalidate_stale_preparation_proofs(
+    v_old_room_id,
+    'RESERVATION_SCHEDULE_CHANGED'
+  );
   if p_room_id <> v_old_room_id then
     perform private.refresh_checkout_due_at(p_room_id, p_actor_profile_id);
+    perform private.invalidate_stale_preparation_proofs(
+      p_room_id,
+      'RESERVATION_SCHEDULE_CHANGED'
+    );
   end if;
 
   v_response := private.reservation_response(v_updated);
@@ -2130,6 +2432,10 @@ begin
   where id = v_reservation.room_id;
 
   perform private.refresh_checkout_due_at(v_reservation.room_id, p_actor_profile_id);
+  perform private.invalidate_stale_preparation_proofs(
+    v_reservation.room_id,
+    'PREVIOUS_OCCUPANCY_CHANGED'
+  );
   v_response := private.reservation_response(v_updated);
 
   insert into public.audit_events (
@@ -2193,6 +2499,8 @@ declare
   v_attempt public.cleaning_attempts%rowtype;
   v_new_assignment_id uuid;
   v_new_attempt_id uuid;
+  v_current_pin_version bigint;
+  v_current_pin_status text;
   v_before jsonb;
   v_response jsonb;
 begin
@@ -2243,6 +2551,7 @@ begin
       on a.cleaning_target_id = t.id
       and a.assignment_id = ca.id
     where t.reservation_id = v_reservation.id
+      and a.status <> 'superseded'
       and (a.started_at is not null or a.status <> 'scheduled')
   ) or exists (
     select 1
@@ -2406,6 +2715,13 @@ begin
     end if;
   end if;
 
+  select e.sync_status, e.pin_version
+  into v_current_pin_status, v_current_pin_version
+  from public.room_pin_sync_events e
+  where e.room_id = v_updated.room_id
+  order by e.recorded_at desc, e.id desc
+  limit 1;
+
   with revoked as (
     update public.room_pin_access_leases
     set revoked_at = p_effective_at,
@@ -2431,7 +2747,7 @@ begin
     l.cleaning_target_id,
     v_new_assignment_id,
     v_new_attempt_id,
-    l.pin_version,
+    v_current_pin_version,
     l.issued_to,
     p_effective_at,
     l.expires_at
@@ -2444,7 +2760,9 @@ begin
     and l.attempt_id = v_attempt.id
     and l.issued_to = v_assignment.maid_profile_id
     and l.revealed_at is null
-    and l.expires_at > p_effective_at;
+    and l.expires_at > p_effective_at
+    and v_current_pin_status = 'verified'
+    and v_current_pin_version is not null;
 
   insert into public.room_occupancy_events (
     event_key,
@@ -2905,7 +3223,15 @@ begin
     from public.reservations r
     where r.room_id = p_room_id
       and r.status = 'active'
-      and r.stay_range && tstzrange(
+      and tstzrange(
+        coalesce(r.actual_check_in_at, r.check_in_at),
+        case
+          when r.actual_check_in_at is not null and r.actual_checkout_at is null
+            then 'infinity'::timestamptz
+          else coalesce(r.actual_checkout_at, r.check_out_at)
+        end,
+        '[)'
+      ) && tstzrange(
         p_available_from,
         coalesce(
           p_due_at,
@@ -2922,7 +3248,6 @@ begin
     from public.cleaning_targets t
     where t.room_id = p_room_id
       and t.status not in ('approved', 'cancelled')
-      and t.effective_service_date = p_service_date
       and tstzrange(
         coalesce(t.available_from, p_available_from),
         coalesce(
@@ -3110,6 +3435,7 @@ begin
         and ca.cleaning_target_id = v_target.id
         and ca.is_current
       where a.cleaning_target_id = v_target.id
+        and a.status <> 'superseded'
         and (a.started_at is not null or a.status <> 'scheduled')
     )
     or exists (

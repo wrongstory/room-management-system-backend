@@ -195,8 +195,16 @@ describe('initial migration contract', () => {
     expect(sql).toContain('cleaning_targets_checkout_obligation_contract_fk');
     expect(sql).toContain('checkout_obligations_current_target_contract_fk');
     expect(sql).toContain('preparation_obligations_submission_attempt_fk');
+    expect(sql).toContain('approved_submission_id uuid unique');
+    expect(sql).toContain('create table private.preparation_proof_usages');
+    expect(sql).toContain('preparation_proof_usages_append_only');
+    expect(sql).toContain('inspection_decisions_append_only');
+    expect(sql).toContain('consumed_preparation_submission_immutable');
     expect(sql).toContain('preparation_obligations_enforce_proof');
+    expect(sql).toContain('invalidate_stale_preparation_proofs');
     expect(sql).toContain('checkout_obligations_enforce_target_state');
+    expect(sql).toContain('checkout_obligations_validate_terminal_contract');
+    expect(sql).toContain('cleaning_targets_validate_checkout_terminal_contract');
     expect(sql).toContain('room_pin_leases_attempt_contract_fk');
     expect(sql).toContain('room_pin_access_leases_enforce_contract');
     expect(sql).toContain('attempt_id uuid not null');

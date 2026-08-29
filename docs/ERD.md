@@ -104,6 +104,7 @@ erDiagram
   ROOMS ||--o{ RESERVATIONS : "예약"
   RESERVATIONS ||--o{ RESERVATION_SCHEDULE_REVISIONS : "일정 이력"
   RESERVATIONS ||--|| PREPARATION_OBLIGATIONS : "입실 준비"
+  PREPARATION_OBLIGATIONS ||--o{ PREPARATION_PROOF_USAGES : "승인 증빙 소비 이력"
   RESERVATIONS ||--|| CHECKOUT_CLEANING_OBLIGATIONS : "퇴실 청소 의무"
   RESERVATIONS ||--o{ ROOM_OCCUPANCY_EVENTS : "점유 이력"
   CHECKOUT_CLEANING_OBLIGATIONS o|--o| CLEANING_TARGETS : "필요 시 공개"
@@ -161,6 +162,15 @@ erDiagram
     uuid current_attempt_id FK
     uuid approved_submission_id FK
     bigint version
+  }
+  PREPARATION_PROOF_USAGES {
+    uuid id PK
+    uuid preparation_obligation_id FK
+    uuid reservation_id FK
+    uuid room_id FK
+    uuid approved_submission_id UK
+    uuid cleaning_attempt_id FK
+    timestamptz recorded_at
   }
   CHECKOUT_CLEANING_OBLIGATIONS {
     uuid id PK
@@ -229,14 +239,14 @@ erDiagram
 
 - 활성 예약 구간은 `[check_in_at, check_out_at)` 반개구간이며 GiST exclusion으로 객실별 겹침을 막는다. KST 날짜가 다음 날 이상이고 분 단위인 일정만 허용한다.
 - 예약마다 입실 준비 의무와 비공개 퇴실 청소 의무를 정확히 하나씩 만든다. 퇴실 청소 대상은 필요 시 같은 의무에서 한 번만 공개한다.
-- 퇴실 의무와 checkout target은 예약·객실·의무 ID 복합키로 양방향 동일성을 강제한다. `completed`는 동일 target의 승인 근거가, `cancelled`의 historical pointer는 동일 target의 취소 상태가 있어야 한다.
-- 입실 준비 `approved`는 같은 current attempt의 승인 submission/inspection decision과 동일 객실 증명을 요구한다.
+- 퇴실 의무와 checkout target은 예약·객실·의무 ID 복합키와 deferred constraint trigger로 commit 시점까지 양방향 동일성을 강제한다. `completed`는 동일 target의 승인 근거가, `cancelled`의 historical pointer는 동일 target의 취소 상태가 있어야 한다.
+- 입실 준비 `approved`는 같은 current attempt의 승인 submission/inspection decision이 직전 점유 종료 이후·해당 체크인 이전에 같은 객실에서 생성됐음을 요구한다. `private.preparation_proof_usages`는 submission 소비를 append-only·전역 unique로 기록해 무효화 뒤에도 다른 예약에서 재사용하지 못하게 한다.
 - 예약 일정, 점유, 촛불, PIN 동기화 이력은 append-only다. 예약·객실 current row는 CAS version으로만 갱신한다.
 - 예약 취소는 입실 전에만 soft cancel한다. 수동 체크아웃은 예정 일정을 덮어쓰지 않고 실제 시각과 점유 event를 추가한다.
-- 연박·추가 청소 요청은 `cleaning_targets`의 안정적인 ID와 `stayover_request`/`manual_room_request` source로 생성한다. 시작 또는 PIN 공개 전까지만 CAS version으로 soft cancel하며 대상·담당·수행 이력은 삭제하지 않는다.
+- 연박·추가 청소 요청은 `cleaning_targets`의 안정적인 ID와 `stayover_request`/`manual_room_request` source로 생성한다. 실제 초과 점유와 자정을 넘는 access window까지 interval로 충돌 검사하고, 시작 또는 PIN 공개 전까지만 CAS version으로 soft cancel하며 대상·담당·수행 이력은 삭제하지 않는다.
 - 고객명 암호문은 예약에만 존재하고 목록 projection에서는 제외한다. 관리자 단건 상세에서만 복호화하며 체크아웃/취소 후 180일 보존 만료 시 암호문만 제거한다.
 - 고객 배정에는 PIN 동기화 `verified`와 객실 기준정보 확인을 포함한 독립 readiness 조건을 모두 요구한다. PIN 원문은 이 ERD의 일반 업무 테이블에 저장하지 않는다.
-- PIN lease는 target·현재 assignment·현재 attempt·담당 메이드·PIN version을 함께 고정하며 다른 객실/예약/과거 담당을 조합할 수 없다.
+- PIN lease는 target·현재 assignment·현재 attempt·담당 메이드·최신 verified PIN version을 함께 고정하며 다른 객실/예약/과거 담당을 조합할 수 없다. PIN version이 바뀐 뒤 수동 checkout은 stale lease를 revoke-only하고 최신 version으로만 새 lease를 만든다.
 - 퇴실점검 lifecycle은 아직 `[미확정]`이므로 `checkout_inspections`를 구현된 목표 테이블처럼 두지 않는다.
 
 ## 5. 청소 배정·수행·검수
