@@ -513,10 +513,10 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - RLS는 활성 계정 상태와 실제 ownership을 함께 검사한다.
 - 관리자라는 이유만으로 업무 원장에 `FOR ALL` + DELETE를 주지 않는다.
 - 메이드에게 attempt 전체 컬럼 UPDATE, 임의 상태 submission INSERT, notification 전체 UPDATE를 주지 않는다.
-- 조회는 필요한 범위의 SELECT, 쓰기는 좁은 Fastify command 또는 고정 `search_path`의 검증된 RPC로 제한한다.
+- 조회는 필요한 범위의 SELECT, 쓰기는 좁은 서버 command adapter 또는 고정 `search_path`의 검증된 RPC로 제한한다.
 - `SECURITY DEFINER` 함수는 명시적 schema, 최소 EXECUTE 권한, actor 재검증, 안전한 `search_path`를 사용한다.
 - view는 `security_invoker = true`를 사용한다.
-- service-role/secret은 서버에만 두고 로그·브라우저에 노출하지 않는다. service role은 RLS를 우회하므로 Fastify command가 access token의 actor를 식별한 뒤 최신 DB role/status, ownership, capability, expected version, transition을 매번 다시 검증한다.
+- service-role/secret은 서버 runtime에만 두고 로그·브라우저에 노출하지 않는다. service role은 RLS를 우회하므로 Fastify 또는 Edge command adapter가 access token의 actor를 식별한 뒤 최신 DB role/status, ownership, capability, expected version, transition을 매번 다시 검증한다.
 
 ### 관계·제약·index
 
@@ -552,6 +552,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 담당 배정 revision/current pointer·순서·preview·activation, 현장 attempt/offline lease, 정규화 photo slot, Drive worker, 검수·재청소, bomb report, complaint/penalty/appeal, payroll event/adjustment, notification outbox와 프런트 실제 연동이 남아 있다.
 - initial migration과 테스트에는 확정된 `purge_after NOT NULL` 및 업로드 후 7일 계약이 들어 있지만, 실제 Google Drive 업로드·조회·purge worker는 아직 구현되지 않았다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
+- Issue #36에서 Supabase Edge Functions `api`의 health/Auth/rooms RPC와 Cron용 예약 scheduler Function을 로컬 PoC로 검증한다. 운영 smoke와 독립 리뷰 전에는 Supabase-only production runtime을 확정하거나 Fastify를 삭제하지 않는다.
 
 원격 운영·복구검증 프로젝트는 Git과 SQL 내용은 대응하지만 migration version은 서로 다르다. `supabase db push`로 자동 추론하지 않고 `docs/RELEASE_V0.2.0.md`의 검증된 mapping과 MCP 순차 적용 절차를 사용한다. 2026-08-29 기준 운영 Security Advisor는 0건이며, 실제 source 병합·원격 적용·tag 상태는 Release Issue #24가 추적한다.
 

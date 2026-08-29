@@ -5,6 +5,7 @@
 ## 현재 구현
 
 - Fastify 5 + TypeScript API
+- Supabase Edge Functions + Cron 무료 production runtime PoC (#36)
 - Supabase Auth 기반 로그인 토큰 검증
 - 이름형 로그인 아이디를 Supabase Auth 내부 계정에 매핑하는 서버 로그인
 - 관리자·메이드 개별 계정 생성, 역할·상태 변경, 잠금 해제, 비밀번호 초기화
@@ -57,7 +58,10 @@ npm run build
 ```bash
 npm run db:start
 npm run db:reset
+npm run edge:check
 ```
+
+Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge runtime PoC](docs/EDGE_RUNTIME_POC.md)에 정리했습니다. 운영 smoke가 끝나기 전까지 기존 Fastify 구현은 개발 기준선으로 유지합니다.
 
 ## 보안 경계
 
