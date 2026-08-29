@@ -202,6 +202,10 @@ describe('initial migration contract', () => {
     expect(sql).toContain('consumed_preparation_submission_immutable');
     expect(sql).toContain('preparation_obligations_enforce_proof');
     expect(sql).toContain('invalidate_stale_preparation_proofs');
+    expect(sql).toContain("a.status = 'approved'");
+    expect(sql).toContain('a.started_at >= t.available_from');
+    expect(sql).toContain('s.submitted_at >= a.ended_at');
+    expect(sql).toContain('d.decided_at >= s.submitted_at');
     expect(sql).toContain('checkout_obligations_enforce_target_state');
     expect(sql).toContain('checkout_obligations_validate_terminal_contract');
     expect(sql).toContain('cleaning_targets_validate_checkout_terminal_contract');

@@ -497,7 +497,7 @@ insert into public.cleaning_targets (
   'stale-preparation-proof',
   '2029-01-02',
   '2029-01-02',
-  '2029-01-02 10:00:00+09',
+  '2029-01-02 11:00:00+09',
   'approved',
   '{}'::jsonb,
   16000,
@@ -557,7 +557,7 @@ insert into public.inspection_decisions (
   'approved',
   'STALE_PREVIOUS_OCCUPANCY_PROOF',
   '72000000-0000-4000-8000-000000000001',
-  '2029-01-02 10:10:00+09'
+  '2029-01-02 11:00:00+09'
 );
 
 do $$
@@ -570,10 +570,10 @@ begin
     where reservation_id = '74000000-0000-4000-8000-000000000022';
 
     insert into reservation_security_results values
-      (26, 'preparation proof must occur after the immediately preceding occupancy', false);
+      (26, 'preparation attempt and submission must occur after the immediately preceding occupancy', false);
   exception when check_violation then
     insert into reservation_security_results values
-      (26, 'preparation proof must occur after the immediately preceding occupancy', sqlerrm like '%PREPARATION_APPROVAL_PROOF_REQUIRED%');
+      (26, 'preparation attempt and submission must occur after the immediately preceding occupancy', sqlerrm like '%PREPARATION_APPROVAL_PROOF_REQUIRED%');
   end;
 end;
 $$;

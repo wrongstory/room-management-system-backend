@@ -603,12 +603,19 @@ begin
       and s.cleaning_attempt_id = new.current_attempt_id
       and s.status = 'approved'
       and d.decision = 'approved'
+      and a.status = 'approved'
       and t.room_id = new.room_id
       and t.status = 'approved'
       and t.available_from is not null
       and t.available_from >= v_required_clean_after_at
-      and d.decided_at >= t.available_from
-      and d.decided_at >= v_required_clean_after_at
+      and a.started_at is not null
+      and a.field_completed_at is not null
+      and a.ended_at is not null
+      and a.started_at >= t.available_from
+      and a.field_completed_at >= a.started_at
+      and a.ended_at >= a.field_completed_at
+      and s.submitted_at >= a.ended_at
+      and d.decided_at >= s.submitted_at
       and d.decided_at <= v_check_in_at
   ) then
     raise exception using errcode = '23514', message = 'PREPARATION_APPROVAL_PROOF_REQUIRED';
@@ -703,6 +710,7 @@ begin
         and s.cleaning_attempt_id = o.current_attempt_id
         and s.status = 'approved'
         and d.decision = 'approved'
+        and a.status = 'approved'
         and t.room_id = o.room_id
         and t.status = 'approved'
         and t.available_from is not null
@@ -714,15 +722,14 @@ begin
             and previous_reservation.status <> 'cancelled'
             and previous_reservation.check_in_at < current_reservation.check_in_at
         ), o.created_at)
-        and d.decided_at >= t.available_from
-        and d.decided_at >= coalesce((
-          select max(coalesce(previous_reservation.actual_checkout_at, previous_reservation.check_out_at))
-          from public.reservations previous_reservation
-          where previous_reservation.room_id = current_reservation.room_id
-            and previous_reservation.id <> current_reservation.id
-            and previous_reservation.status <> 'cancelled'
-            and previous_reservation.check_in_at < current_reservation.check_in_at
-        ), o.created_at)
+        and a.started_at is not null
+        and a.field_completed_at is not null
+        and a.ended_at is not null
+        and a.started_at >= t.available_from
+        and a.field_completed_at >= a.started_at
+        and a.ended_at >= a.field_completed_at
+        and s.submitted_at >= a.ended_at
+        and d.decided_at >= s.submitted_at
         and d.decided_at <= current_reservation.check_in_at
     );
 end;
