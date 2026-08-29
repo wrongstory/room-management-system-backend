@@ -26,11 +26,12 @@ Free 프로젝트가 2개뿐이므로 recovery 프로젝트를 개발 DB로 겸�
 2. 로컬에서 `npm run db:verify`로 전체 마이그레이션을 처음부터 적용한다.
 3. `npm run ci:quality`와 RLS 계약 테스트를 통과시킨다.
 4. 운영 적용 전 원격 마이그레이션 목록과 대상 project Ref를 확인한다.
-5. Git의 동일 SQL을 운영 프로젝트에 한 번 적용한다.
+5. Git과 원격 version history가 일치할 때만 표준 migration push를 사용한다. 일치하지 않으면 릴리즈별 검증 문서의 명시적 mapping과 승인된 적용 수단을 사용한다.
 6. 적용 후 121개 객실, RLS, 명시적 GRANT, Security/Performance Advisor를 검증한다.
 7. recovery 프로젝트에는 운영 dump 복구 절차를 통해 반영한다.
 
 운영 스키마를 Dashboard에서 직접 수정하지 않는다. 긴급 변경도 먼저 마이그레이션 파일을 만들고 검증한 뒤 적용한다.
+원격 history가 Git과 다르면 자동 `supabase db push`를 실행하지 않는다. history repair는 DDL 적용과 별도 작업으로 검토하고, 이미 적용된 스키마를 다시 실행하지 않도록 SQL 내용·원격 객체·version mapping을 먼저 증명한다.
 
 ## Auth 기본 원칙
 

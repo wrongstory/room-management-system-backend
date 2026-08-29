@@ -189,7 +189,11 @@ describe('initial migration contract', () => {
     expect(sql).toContain('AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS');
     expect(sql).toContain('OUTSIDE_AVAILABILITY_WINDOW');
     expect(sql).toContain('STALE_VERSION');
-    expect(sql).toContain('IDEMPOTENCY_KEY_REUSED');
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain("'availability.submit'");
+    expect(sql).toContain("'availability.change_requested'");
+    expect(sql).toContain("'availability.change_decided'");
     expect(sql).toContain('with (security_invoker = true, security_barrier = true)');
     expect(sql).toContain('alter table public.availability_versions enable row level security');
     expect(sql).toContain('from public, anon, authenticated');

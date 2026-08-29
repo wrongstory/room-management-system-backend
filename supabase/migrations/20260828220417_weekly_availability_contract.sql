@@ -335,7 +335,7 @@ declare
   v_dates date[];
   v_local_at timestamp without time zone := p_command_at at time zone 'Asia/Seoul';
   v_hash text;
-  v_receipt public.audit_events%rowtype;
+  v_replay jsonb;
   v_current public.availability_versions%rowtype;
   v_result public.availability_versions%rowtype;
   v_current_version integer;
@@ -357,22 +357,22 @@ begin
     'expectedVersion', p_expected_version
   ));
 
-  perform pg_advisory_xact_lock(hashtextextended('idempotency:' || p_idempotency_key, 0));
+  v_replay := private.replay_command(
+    p_actor_profile_id,
+    'availability.submit',
+    p_idempotency_key,
+    v_hash
+  );
+  if v_replay is not null then
+    select * into v_result
+    from public.availability_versions
+    where id = (v_replay ->> 'id')::uuid;
+    return v_result;
+  end if;
+
   perform pg_advisory_xact_lock(hashtextextended(
     'availability:' || p_actor_profile_id::text || ':' || p_week_start::text, 0
   ));
-
-  select * into v_receipt
-  from public.audit_events ae
-  where ae.idempotency_key = p_idempotency_key;
-  if found then
-    if v_receipt.event_type <> 'availability.submitted'
-      or v_receipt.after_state ->> 'requestHash' <> v_hash then
-      raise exception using errcode = '23505', message = 'IDEMPOTENCY_KEY_REUSED';
-    end if;
-    select * into v_result from public.availability_versions where id = v_receipt.entity_id;
-    return v_result;
-  end if;
 
   if extract(isodow from v_local_at) <> 7
     or v_local_at::time < time '12:00'
@@ -421,9 +421,22 @@ begin
       'availableDates', to_jsonb(v_dates),
       'requestHash', v_hash
     ),
-    p_idempotency_key
+    private.audit_command_key(
+      p_actor_profile_id,
+      'availability.submit',
+      p_idempotency_key
+    )
   from public.profiles p
   where p.id = p_actor_profile_id;
+
+  perform private.complete_command(
+    p_actor_profile_id,
+    'availability.submit',
+    p_idempotency_key,
+    v_hash,
+    v_result.id,
+    jsonb_build_object('id', v_result.id)
+  );
 
   return v_result;
 end;
@@ -465,7 +478,7 @@ declare
   v_dates date[];
   v_local_at timestamp without time zone := p_command_at at time zone 'Asia/Seoul';
   v_hash text;
-  v_receipt public.audit_events%rowtype;
+  v_replay jsonb;
   v_current public.availability_versions%rowtype;
   v_result public.availability_change_requests%rowtype;
 begin
@@ -490,21 +503,22 @@ begin
     'expectedVersion', p_expected_version
   ));
 
-  perform pg_advisory_xact_lock(hashtextextended('idempotency:' || p_idempotency_key, 0));
+  v_replay := private.replay_command(
+    p_actor_profile_id,
+    'availability.change_requested',
+    p_idempotency_key,
+    v_hash
+  );
+  if v_replay is not null then
+    select * into v_result
+    from public.availability_change_requests
+    where id = (v_replay ->> 'id')::uuid;
+    return v_result;
+  end if;
+
   perform pg_advisory_xact_lock(hashtextextended(
     'availability:' || p_actor_profile_id::text || ':' || p_week_start::text, 0
   ));
-
-  select * into v_receipt from public.audit_events where idempotency_key = p_idempotency_key;
-  if found then
-    if v_receipt.event_type <> 'availability.change_requested'
-      or v_receipt.after_state ->> 'requestHash' <> v_hash then
-      raise exception using errcode = '23505', message = 'IDEMPOTENCY_KEY_REUSED';
-    end if;
-    select * into v_result
-    from public.availability_change_requests where id = v_receipt.entity_id;
-    return v_result;
-  end if;
 
   if v_local_at < p_week_start::timestamp then
     raise exception using errcode = '22023', message = 'CHANGE_REQUEST_BEFORE_DEADLINE';
@@ -545,8 +559,21 @@ begin
       'requestedAvailableDates', to_jsonb(v_dates),
       'requestHash', v_hash
     ),
-    p_idempotency_key
+    private.audit_command_key(
+      p_actor_profile_id,
+      'availability.change_requested',
+      p_idempotency_key
+    )
   from public.profiles p where p.id = p_actor_profile_id;
+
+  perform private.complete_command(
+    p_actor_profile_id,
+    'availability.change_requested',
+    p_idempotency_key,
+    v_hash,
+    v_result.id,
+    jsonb_build_object('id', v_result.id)
+  );
 
   return v_result;
 exception
@@ -593,7 +620,7 @@ set search_path = pg_catalog, public, extensions
 as $$
 declare
   v_hash text;
-  v_receipt public.audit_events%rowtype;
+  v_replay jsonb;
   v_request public.availability_change_requests%rowtype;
   v_current public.availability_versions%rowtype;
   v_approved public.availability_versions%rowtype;
@@ -621,15 +648,16 @@ begin
     'expectedVersion', p_expected_version
   ));
 
-  perform pg_advisory_xact_lock(hashtextextended('idempotency:' || p_idempotency_key, 0));
-  select * into v_receipt from public.audit_events where idempotency_key = p_idempotency_key;
-  if found then
-    if v_receipt.event_type <> 'availability.change_decided'
-      or v_receipt.after_state ->> 'requestHash' <> v_hash then
-      raise exception using errcode = '23505', message = 'IDEMPOTENCY_KEY_REUSED';
-    end if;
+  v_replay := private.replay_command(
+    p_actor_profile_id,
+    'availability.change_decided',
+    p_idempotency_key,
+    v_hash
+  );
+  if v_replay is not null then
     select * into v_request
-    from public.availability_change_requests where id = v_receipt.entity_id;
+    from public.availability_change_requests
+    where id = (v_replay ->> 'id')::uuid;
     return v_request;
   end if;
 
@@ -698,8 +726,21 @@ begin
       'approvedVersionId', v_approved.id,
       'requestHash', v_hash
     ),
-    p_idempotency_key
+    private.audit_command_key(
+      p_actor_profile_id,
+      'availability.change_decided',
+      p_idempotency_key
+    )
   from public.profiles p where p.id = p_actor_profile_id;
+
+  perform private.complete_command(
+    p_actor_profile_id,
+    'availability.change_decided',
+    p_idempotency_key,
+    v_hash,
+    v_request.id,
+    jsonb_build_object('id', v_request.id)
+  );
 
   return v_request;
 end;

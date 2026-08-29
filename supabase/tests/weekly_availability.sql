@@ -175,13 +175,13 @@ begin
   perform private.submit_weekly_availability_at(
     '22000000-0000-4000-8000-000000000003', '2026-08-31',
     array['2026-08-31'::date, '2026-09-04'::date], 0,
-    'availability-submit-maid2-v1', '2026-08-30 12:05:00+09'
+    'availability-submit-maid1-v1', '2026-08-30 12:05:00+09'
   );
 
   select (private.request_availability_change_at(
     '22000000-0000-4000-8000-000000000002', '2026-08-31',
     array['2026-08-31'::date, '2026-09-04'::date], 'SCHEDULE_CHANGED', 2,
-    'availability-change-maid1', '2026-08-31 00:00:00+09'
+    'availability-submit-maid1-v1', '2026-08-31 00:00:00+09'
   )).id into v_change_id;
   insert into availability_test_results values (
     11, 'post-deadline change creates a pending immutable request',
@@ -261,7 +261,7 @@ insert into availability_test_results values (
     and not has_table_privilege('anon', 'public.availability_versions', 'SELECT')
 );
 
-select '1..20';
+select '1..22';
 select case when passed then 'ok ' else 'not ok ' end
   || test_number || ' - ' || description
 from availability_test_results
@@ -294,4 +294,29 @@ select case
 end;
 
 reset role;
+
+select case
+  when (
+    select count(*)
+    from private.command_executions
+    where idempotency_key = 'availability-submit-maid1-v1'
+  ) = 3
+    then 'ok 21 - the same raw key is independent across actors and command types'
+  else 'not ok 21 - the same raw key is independent across actors and command types'
+end;
+
+select case
+  when (
+    select count(*)
+    from public.audit_events
+    where idempotency_key in (
+      '22000000-0000-4000-8000-000000000002:availability.submit:availability-submit-maid1-v1',
+      '22000000-0000-4000-8000-000000000003:availability.submit:availability-submit-maid1-v1',
+      '22000000-0000-4000-8000-000000000002:availability.change_requested:availability-submit-maid1-v1'
+    )
+  ) = 3
+    then 'ok 22 - audit idempotency keys preserve actor and command namespaces'
+  else 'not ok 22 - audit idempotency keys preserve actor and command namespaces'
+end;
+
 rollback;

@@ -532,7 +532,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 이 절은 “다음 작업이 어디서 시작하는가”를 설명한다.
 
-### `main` 70e479e 기준 구현됨
+### `v0.1.0` 기준선 (`main@70e479e`)에 구현됨
 
 - `GET /health`
 - `POST /v1/auth/login`
@@ -544,21 +544,20 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - cleaning/payroll 관계 무결성과 partial unique index
 - public table RLS 활성화, active 계정 기반 helper, notification 수신자의 `read_at` 한정 UPDATE
 - application/migration GitHub Actions의 fresh DB reset과 SQL test
-- 운영·복구검증 Supabase의 동일 migration history
+- 운영·복구검증 Supabase에 같은 기준 스키마가 적용돼 있으나, 초기 수동 적용 과정에서 Git과 서로 다른 migration version으로 기록됨
 
-### `main` 기준 남은 차이
+### `v0.2.0` 포함 후 남은 차이
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
-- 객실·예약의 `version` 컬럼은 있으나 CAS command/RPC가 없다.
-- 주간 가능일, preparation obligation, 객실 operation block/issue/candle, 퇴실점검, 정규화 photo slot, bomb report, complaint/penalty/appeal, payroll item/event/adjustment, notification outbox, PIN sync/access lease, 개인정보 저장소, offline work lease, reservation schedule/occupancy revision이 없다.
+- 담당 배정 revision/current pointer·순서·preview·activation, 현장 attempt/offline lease, 정규화 photo slot, Drive worker, 검수·재청소, bomb report, complaint/penalty/appeal, payroll event/adjustment, notification outbox와 프런트 실제 연동이 남아 있다.
 - initial migration과 테스트에는 확정된 `purge_after NOT NULL` 및 업로드 후 7일 계약이 들어 있지만, 실제 Google Drive 업로드·조회·purge worker는 아직 구현되지 않았다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 
-원격 운영·복구검증 프로젝트에는 `main`과 같은 적용 migration history가 있으며, 2026-08-28 기준 구조·DML·RLS 검사와 Security Advisor 0건을 확인했다. 새 기능 PR의 migration은 병합·배포 전까지 이 현황에 포함하지 않는다.
+원격 운영·복구검증 프로젝트는 Git과 SQL 내용은 대응하지만 migration version은 서로 다르다. `supabase db push`로 자동 추론하지 않고 `docs/RELEASE_V0.2.0.md`의 검증된 mapping과 MCP 순차 적용 절차를 사용한다. 2026-08-29 기준 운영 Security Advisor는 0건이며, 실제 source 병합·원격 적용·tag 상태는 Release Issue #24가 추적한다.
 
-### Issue #1 `dev` 통합 구현 — `main` release·원격 적용 전
+### Issue #1 `v0.2.0` source release 범위
 
-다음 항목은 `dev`에 통합됐지만 release PR과 운영 migration 적용 전에는 `main` 또는 운영 구현으로 간주하지 않는다.
+다음 항목은 release candidate `4da80cb`에 포함된다. source가 `main`에 병합됐는지, 운영 migration까지 적용됐는지는 서로 다른 상태이며 Release Issue #24에서 확인한다.
 
 - 객실 목록·상세는 점유, 청소 필요, 배정 차단/가능과 안정적인 reason code를 독립 축으로 반환한다.
 - 객실 기준정보, 운영 차단, 촛불, 이슈, PIN 동기화는 최신 active admin과 객실 `state_version`을 재검증하는 원자 명령이다.
@@ -576,12 +575,12 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 타입별 인원 상한, 프런트 대표 상태, 퇴실점검 lifecycle은 이번 변경에서 확정하지 않는다.
 - Docker Desktop 복구 후 fresh local DB reset, 역할별 SQL 회귀 검사, DB advisor를 실행할 수 있다. 각 변경은 실제 실행 결과를 PR에 기록하며 실행하지 않은 검증은 완료로 표현하지 않는다.
 
-### Issue #6 `dev` 통합 구현 — `main` release·원격 적용 전
+### Issue #6 `v0.2.0` source release 범위
 
 - 가능일 제출은 일요일 12:00–23:59 KST와 다음 월요일 `week_start`를 DB command에서 검증한다.
 - 메이드·주차별 current version은 `expectedVersion` CAS와 advisory lock으로 직렬화하며 과거 version과 7개 날짜 row를 삭제하지 않는다.
 - 마감 뒤에는 pending 변경 요청을 만들고 활성 관리자의 승인 시에만 새 current version을 추가한다. 반려도 결정·사유·행위자·시각을 보존한다.
-- 같은 idempotency key와 canonical payload는 기존 결과를 반환하고 다른 payload 재사용은 거절한다.
+- idempotency receipt는 `(actor_id, command_type, idempotency_key)` 범위다. 같은 범위의 같은 payload는 기존 결과를 반환하고 다른 payload 재사용은 거절하며, 다른 actor 또는 command의 같은 raw key는 독립 요청이다.
 - 조회 RLS는 활성 관리자의 전체 범위와 활성 메이드 본인 범위만 허용하며, 직접 DML과 비활성·제한 capability 제출은 차단한다.
 - 관리자 후보 projection은 current version에서 해당 날짜가 available인 활성 maid만 반환한다.
 
