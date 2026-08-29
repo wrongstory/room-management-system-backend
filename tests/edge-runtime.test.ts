@@ -25,7 +25,9 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(runtime).toMatch(/\.from\(["']profiles["']\)/);
     expect(runtime).toMatch(/profile\.status !== ["']active["']/);
     expect(runtime).toMatch(/["']is_active_auth_session["']/);
-    expect(api).toMatch(/actor\.role !== ["']admin["']/);
+    expect(runtime).toMatch(/role:\s*["']developer["']\s*\|\s*["']admin["']\s*\|\s*["']maid["']/);
+    expect(runtime).toMatch(/actor\.role !== ["']admin["']/);
+    expect(api).toMatch(/requireBusinessAdmin\(actor\)/);
     expect(api).toMatch(/["']get_room_operational_projection["']/);
   });
 

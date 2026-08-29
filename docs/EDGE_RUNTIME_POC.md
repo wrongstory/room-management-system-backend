@@ -37,6 +37,8 @@ Supabase Cron (pg_cron)
 
 `verify_jwt=false`는 공개 허용을 뜻하지 않는다. 하나의 API Function 안에서 health와 인증 endpoint를 함께 라우팅하기 위해 gateway 검사를 끄고, 보호 경로에서 `auth.getUser`와 최신 DB profile/session을 매 요청 재검증한다. scheduler Function은 32자 이상의 별도 secret을 HMAC 방식으로 비교한 뒤에만 service-role RPC를 호출한다.
 
+단일 `developer`도 `/v1/auth/me`에서 자신의 실제 역할로 인증되지만 객실·예약 같은 업무 API에서는 `admin`으로 간주하지 않는다. `/v1/rooms`와 예약 scheduler actor는 최신 active profile의 역할이 정확히 `admin`일 때만 허용하며, developer를 scheduler actor로 지정하면 DB command가 `ADMIN_REQUIRED`로 거부한다.
+
 Scheduler 시간값은 두 역할로 분리한다. 요청의 `scheduledAt`은 해당 Cron 호출을 식별하는 minute bucket과 idempotency key에만 사용하며 업무 전이의 기준 시각으로 사용하지 않는다. 실제 `p_as_of`는 Function이 RPC를 실행하는 현재 시각이다. 따라서 같은 `scheduledAt` 재시도는 같은 호출로 처리하면서도 pause나 전달 지연 뒤에는 실제 실행 시각까지 누락된 예약 전이를 catch-up한다.
 
 ## 로컬 검증

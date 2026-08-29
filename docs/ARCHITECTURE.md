@@ -18,7 +18,7 @@ Fastify는 현재 개발 기준선이며 Edge PoC가 실패할 때의 rollback �
 
 ```mermaid
 flowchart LR
-  UI[관리자·메이드 PWA] -->|Bearer access token| API[Fastify 또는 Edge API adapter]
+  UI[개발자·관리자·메이드 PWA] -->|Bearer access token| API[Fastify 또는 Edge API adapter]
   API -->|사용자 JWT| DATA[Supabase Data API · RLS]
   API -->|서버 secret| ADMIN[Auth 관리·원자 명령]
   DATA --> DB[(PostgreSQL)]
@@ -37,7 +37,7 @@ flowchart LR
 
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.
 2. 내부 이메일은 `user-{profile_id}@auth.castletheart.invalid` 형식으로 서버만 계산합니다.
-3. 사용자가 이름형 `loginId`와 최초 휴대전화 끝 4자리 임시 비밀번호 또는 숫자 6자리 이상 개인 비밀번호를 보냅니다. 4자리 임시값은 서버 내부에서만 Supabase 최소 길이를 만족하는 namespace 값으로 변환합니다.
+3. 사용자가 이름형 `loginId`와 최초 휴대전화 끝 4자리 임시 비밀번호 또는 허용된 개인 비밀번호를 보냅니다. 개인 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합이며, 4자리 임시값은 서버 내부에서만 Supabase 최소 길이를 만족하는 namespace 값으로 변환합니다.
 4. 서버가 활성 alias와 프로필을 찾고 5회 실패/15분 잠금을 검사합니다.
 5. 서버가 Supabase Auth password 로그인을 수행해 access/refresh token을 반환합니다.
 6. 이후 API는 `auth.getUser(accessToken)`과 `auth.sessions`의 `session_id`를 검증하고 최신 프로필 역할·상태를 다시 읽습니다.
@@ -96,7 +96,7 @@ erDiagram
 - `public`의 모든 테이블은 RLS를 활성화합니다.
 - `anon`에는 테이블 권한을 주지 않습니다.
 - 메이드는 본인 담당·수행·제출·수익·지급·알림만 읽습니다.
-- 관리자는 운영 테이블을 관리하지만 객실 PIN 원문은 전용 조회 함수로만 받습니다.
+- developer는 계정 수명주기만 관리하고 업무 권한을 상속하지 않습니다. active admin은 운영 테이블을 관리하지만 객실 PIN 원문은 전용 조회 함수로만 받습니다.
 - view는 `security_invoker = true`를 사용합니다.
 - 일반 Data API RLS의 profile/role 보조 함수는 `active` 계정만 식별합니다. `deactivation_pending`과 `upload_only`는 일반 역할이 아니라 만료 가능하고 업무 revision에 묶인 서버 전용 제한 capability로만 처리합니다.
 - 알림 수신자가 직접 바꿀 수 있는 필드는 `read_at`뿐입니다. `resolved_at`은 관련 업무 command만 service-role transaction에서 변경합니다.
@@ -147,7 +147,7 @@ erDiagram
 
 - Data API 노출 스키마 확인
 - publishable/secret key를 로컬·배포 환경에 각각 저장
-- 실제 관리자 계정 1개 seed 후 로그인·RLS 통합 테스트
+- 단일 developer bootstrap 후 별도 업무 관리자 생성·로그인·RLS 통합 테스트
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token 설정
 
 예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. 객실 PIN도 원문 대신 동기화 상태와 PIN version만 일반 업무 원장에 기록합니다.

@@ -43,6 +43,16 @@ const availabilityMigrationUrl = new URL(
   import.meta.url
 );
 
+const developerRoleMigrationUrl = new URL(
+  '../supabase/migrations/20260829120003_add_developer_role.sql',
+  import.meta.url
+);
+
+const developerContractMigrationUrl = new URL(
+  '../supabase/migrations/20260829120005_developer_account_contract.sql',
+  import.meta.url
+);
+
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
     const sql = await readFile(initialMigrationUrl, 'utf8');
@@ -150,6 +160,25 @@ describe('initial migration contract', () => {
     expect(sql).toContain('create function public.bootstrap_first_admin_profile');
     expect(sql).toContain('to service_role');
     expect(sql).toContain('from public, anon, authenticated');
+  });
+
+  it('separates the singleton developer from business administrators', async () => {
+    const roleSql = await readFile(developerRoleMigrationUrl, 'utf8');
+    const contractSql = await readFile(developerContractMigrationUrl, 'utf8');
+
+    expect(roleSql).toContain("add value if not exists 'developer'");
+    expect(contractSql).toContain('profiles_singleton_developer_idx');
+    expect(contractSql).toContain('create function public.bootstrap_first_developer_profile');
+    expect(contractSql).toContain("'account.bootstrap_developer_created'");
+    expect(contractSql).toContain("message = 'DEVELOPER_ACCOUNT_PROTECTED'");
+    expect(contractSql).toContain("or new.login_id <> 'admin'");
+    expect(contractSql).toContain("or new.login_id_normalized <> 'admin'");
+    expect(contractSql).toMatch(
+      /'admin',\r?\n\s+'admin',\r?\n\s+0,\r?\n\s+'developer'/
+    );
+    expect(contractSql).toContain('from service_role');
+    expect(contractSql).toContain('to service_role');
+    expect(contractSql).not.toContain('grant execute on function public.bootstrap_first_admin_profile');
   });
 
   it('hardens cross-table cleaning and payroll integrity', async () => {

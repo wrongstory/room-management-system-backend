@@ -4,7 +4,7 @@ export interface EdgeActor {
   authUserId: string;
   profileId: string;
   displayName: string;
-  role: "admin" | "maid";
+  role: "developer" | "admin" | "maid";
   mustChangePassword: boolean;
 }
 
@@ -12,7 +12,7 @@ interface ProfileRow {
   id: string;
   auth_user_id: string;
   display_name: string;
-  role: "admin" | "maid";
+  role: "developer" | "admin" | "maid";
   status: string;
   must_change_password: boolean;
 }
@@ -149,6 +149,16 @@ export async function authenticate(
 export function requestId(request: Request): string {
   return request.headers.get("x-request-id")?.slice(0, 128) ||
     crypto.randomUUID();
+}
+
+export function requireBusinessAdmin(actor: EdgeActor): void {
+  if (actor.role !== "admin") {
+    throw new EdgeError(
+      403,
+      "ADMIN_REQUIRED",
+      "관리자만 접근할 수 있습니다.",
+    );
+  }
 }
 
 export function jsonResponse(

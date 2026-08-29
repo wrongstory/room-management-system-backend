@@ -5,6 +5,7 @@ import {
   EdgeError,
   errorResponse,
   jsonResponse,
+  requireBusinessAdmin,
   requestId,
 } from "../_shared/runtime.ts";
 
@@ -53,13 +54,7 @@ Deno.serve(async (request) => {
           "계속하려면 먼저 임시 비밀번호를 변경해 주세요.",
         );
       }
-      if (actor.role !== "admin") {
-        throw new EdgeError(
-          403,
-          "ADMIN_REQUIRED",
-          "관리자만 접근할 수 있습니다.",
-        );
-      }
+      requireBusinessAdmin(actor);
       const { data, error } = await clients.admin.rpc(
         "get_room_operational_projection",
         {
