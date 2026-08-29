@@ -2,7 +2,7 @@
 
 ## 작업 전 필독과 정책 우선순위
 
-1. `docs/AI_BACKEND_PRODUCT_GUIDE.md`를 끝까지 읽는다. 프런트엔드 저장소나 과거 대화를 볼 수 없어도 따라야 하는 제품·도메인 계약이다.
+1. `docs/AI_BACKEND_PRODUCT_GUIDE.md`를 끝까지 읽는다. 프런트엔드 저장소나 과거 대화를 볼 수 없어도 따라야 하는 제품·도메인 계약이다. 프런트엔드 정본 저장소는 `makee-ham/room-management-system`이며, 기준 commit은 제품 가이드의 검토 기준을 따른다.
 2. 변경 영역의 `docs/ERD.md`, `docs/room-management-system.dbml`, `docs/ARCHITECTURE.md`와 현재 migration/API를 함께 확인한다. 셋은 review draft이지 목표 계약이 아니다.
 3. 정책이 충돌하면 `현재 사용자의 명시적 결정 → AI_BACKEND_PRODUCT_GUIDE의 [확정] → 그 가이드가 고정한 프런트 정책 → 설계 초안 → 현재 구현` 순서로 따른다. 같은 snapshot의 가이드와 원문이 충돌하면 가이드 오류/기획 충돌로 기록하고 되돌리기 어려운 구현 전에 질문한다.
 
