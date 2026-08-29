@@ -27,7 +27,8 @@
     "db:reset": "supabase db reset",
     "db:verify": "supabase db reset --local --no-seed",
     "db:test": "supabase test db supabase/tests --local",
-    "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs"
+    "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs",
+    "edge:check": "node scripts/check-edge-functions.mjs"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",

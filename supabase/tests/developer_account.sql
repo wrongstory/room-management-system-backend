@@ -191,6 +191,22 @@ begin
       10, 'developer has no business room capability', sqlerrm = 'ADMIN_REQUIRED'
     );
   end;
+
+  begin
+    perform public.process_due_reservation_transitions(
+      '23000000-0000-4000-8000-000000000001',
+      clock_timestamp(),
+      'developer-scheduler-test-0001',
+      repeat('a', 64)
+    );
+    insert into developer_test_results values (13, 'developer cannot act as the reservation scheduler admin', false);
+  exception when insufficient_privilege then
+    insert into developer_test_results values (
+      13,
+      'developer cannot act as the reservation scheduler admin',
+      sqlerrm = 'ADMIN_REQUIRED'
+    );
+  end;
 end;
 $$;
 
@@ -212,7 +228,7 @@ insert into developer_test_results values (
 
 reset role;
 
-select '1..12';
+select '1..13';
 select case when passed then 'ok ' else 'not ok ' end
   || test_number || ' - ' || description
 from developer_test_results
