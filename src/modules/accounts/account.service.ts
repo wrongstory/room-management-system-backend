@@ -303,9 +303,6 @@ export class SupabaseAccountService implements AccountService {
 
   async bootstrapFirstDeveloper(input: BootstrapDeveloperInput): Promise<Account> {
     const name = normalizeDisplayName(input.displayName);
-    if (name.normalized !== 'admin') {
-      throw new AppError(400, 'DEVELOPER_LOGIN_ID_MUST_BE_ADMIN', '개발자 로그인 아이디는 admin이어야 합니다.');
-    }
     if (!isPersonalPassword(input.password)) {
       throw new AppError(400, 'INVALID_PASSWORD', '허용된 강도의 개인 비밀번호가 필요합니다.');
     }

@@ -54,7 +54,7 @@ async function readHiddenPassword(): Promise<string> {
 const displayName = argument('name');
 const phone = argument('phone');
 if (!displayName || !phone) {
-  throw new Error('사용법: npm run bootstrap:developer -- --name admin --phone "010-0000-0000"');
+  throw new Error('사용법: npm run bootstrap:developer -- --name "개발자 표시 이름" --phone "010-0000-0000"');
 }
 
 const env = loadEnv();

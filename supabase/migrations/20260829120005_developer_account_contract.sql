@@ -17,6 +17,7 @@ begin
         raise exception using errcode = '23514', message = 'DEVELOPER_ALREADY_EXISTS';
       end if;
       if new.status <> 'active'
+        or new.login_id <> 'admin'
         or new.login_id_normalized <> 'admin'
         or new.must_change_password then
         raise exception using errcode = '23514', message = 'INVALID_DEVELOPER_BOOTSTRAP';
@@ -28,7 +29,8 @@ begin
   if old.role = 'developer' then
     if new.role <> 'developer'
       or new.status <> 'active'
-      or new.login_id_normalized <> old.login_id_normalized
+      or new.login_id <> 'admin'
+      or new.login_id_normalized <> 'admin'
       or new.must_change_password <> old.must_change_password then
       raise exception using errcode = '23514', message = 'DEVELOPER_ACCOUNT_PROTECTED';
     end if;
@@ -98,10 +100,6 @@ begin
   if exists (select 1 from public.profiles) then
     raise exception using errcode = '23514', message = 'DEVELOPER_ALREADY_EXISTS';
   end if;
-  if p_display_name_normalized <> 'admin' then
-    raise exception using errcode = '22023', message = 'DEVELOPER_LOGIN_ID_MUST_BE_ADMIN';
-  end if;
-
   insert into public.profiles (
     id,
     auth_user_id,
@@ -120,8 +118,8 @@ begin
     p_auth_user_id,
     p_display_name,
     p_display_name_normalized,
-    p_display_name,
-    p_display_name_normalized,
+    'admin',
+    'admin',
     0,
     'developer',
     'active',
@@ -134,7 +132,7 @@ begin
   insert into public.login_aliases (
     profile_id, alias, alias_normalized, active, expires_after_new_login
   ) values (
-    v_result.id, v_result.login_id, v_result.login_id_normalized, true, false
+    v_result.id, 'admin', 'admin', true, false
   );
 
   insert into public.audit_events (

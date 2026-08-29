@@ -36,10 +36,10 @@ npm run dev
 
 macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다. production에서는 예정 전이·개인정보 보존 worker가 조용히 중지되지 않도록 활성 관리자 profile ID인 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`도 반드시 설정합니다.
 
-빈 프로젝트의 단일 최상위 developer만 서버 환경에서 다음 명령으로 생성합니다. 로그인 ID는 `admin`으로 고정하며 휴대전화 번호 외 비밀번호는 명령 인자로 전달하지 않습니다.
+빈 프로젝트의 단일 최상위 developer만 서버 환경에서 다음 명령으로 생성합니다. `--name`은 표시 이름일 뿐이며 로그인 ID는 입력과 무관하게 `admin`으로 고정합니다. 휴대전화 번호 외 비밀번호는 명령 인자로 전달하지 않습니다.
 
 ```bash
-npm run bootstrap:developer -- --name admin --phone "010-0000-0000"
+npm run bootstrap:developer -- --name "개발자 표시 이름" --phone "010-0000-0000"
 ```
 
 ## 검증

@@ -171,6 +171,9 @@ describe('initial migration contract', () => {
     expect(contractSql).toContain('create function public.bootstrap_first_developer_profile');
     expect(contractSql).toContain("'account.bootstrap_developer_created'");
     expect(contractSql).toContain("message = 'DEVELOPER_ACCOUNT_PROTECTED'");
+    expect(contractSql).toContain("or new.login_id <> 'admin'");
+    expect(contractSql).toContain("or new.login_id_normalized <> 'admin'");
+    expect(contractSql).toContain("'admin',\n    'admin',\n    0,\n    'developer'");
     expect(contractSql).toContain('from service_role');
     expect(contractSql).toContain('to service_role');
     expect(contractSql).not.toContain('grant execute on function public.bootstrap_first_admin_profile');

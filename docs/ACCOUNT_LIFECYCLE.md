@@ -71,7 +71,7 @@ Auth 사용자 생성 뒤 프로필 RPC가 실패하면 서버는 새 Auth 사�
 빈 프로젝트에는 로그인 ID `admin`인 developer를 서버 CLI로 한 번만 만든다. 이후 developer가 일반 계정 API로 업무 관리자를 생성한다.
 
 ```bash
-npm run bootstrap:developer -- --name admin --phone "010-0000-0000"
+npm run bootstrap:developer -- --name "개발자 표시 이름" --phone "010-0000-0000"
 ```
 
-이 명령은 `profiles`가 비어 있을 때 한 번만 성공하고 개인 비밀번호를 echo하지 않는 대화형 입력으로 받는다. 비밀번호를 CLI 인자·CI·공유 화면에서 전달하지 않는다. developer 생성 후 `POST /v1/accounts`로 별도의 active 업무 관리자를 만들며 scheduler actor에는 해당 업무 관리자 profile ID를 사용한다.
+이 명령은 `profiles`가 비어 있을 때 한 번만 성공하고 개인 비밀번호를 echo하지 않는 대화형 입력으로 받는다. `--name`은 표시 이름이며 DB function과 보호 trigger가 실제 `login_id`, `login_id_normalized`를 모두 literal `admin`으로 고정한다. 비밀번호를 CLI 인자·CI·공유 화면에서 전달하지 않는다. developer 생성 후 `POST /v1/accounts`로 별도의 active 업무 관리자를 만들며 scheduler actor에는 해당 업무 관리자 profile ID를 사용한다.
