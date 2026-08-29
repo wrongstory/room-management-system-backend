@@ -161,12 +161,13 @@ do $$
 begin
   begin
     insert into public.cleaning_targets (
-      room_id, reservation_id, cleaning_kind, source, source_key,
+      room_id, reservation_id, checkout_obligation_id, cleaning_kind, source, source_key,
       original_service_date, effective_service_date,
       room_type_snapshot, fee_snapshot, template_snapshot, created_by
     ) values (
       (select id from public.rooms where room_number = '117'),
       '30000000-0000-4000-8000-000000000001',
+      '32000000-0000-4000-8000-000000000001',
       'checkout', 'manual_checkout', 'test:reservation:1:manual-checkout',
       '2027-01-02', '2027-01-02', '{}'::jsonb, 16000, '{}'::jsonb,
       '20000000-0000-4000-8000-000000000001'
@@ -182,12 +183,13 @@ do $$
 begin
   begin
     insert into public.cleaning_targets (
-      room_id, reservation_id, cleaning_kind, source, source_key,
+      room_id, reservation_id, checkout_obligation_id, cleaning_kind, source, source_key,
       original_service_date, effective_service_date,
       room_type_snapshot, fee_snapshot, template_snapshot, created_by
     ) values (
       (select id from public.rooms where room_number = '135'),
       '30000000-0000-4000-8000-000000000003',
+      '32000000-0000-4000-8000-000000000003',
       'checkout', 'scheduled_checkout', 'test:wrong-room',
       '2027-01-02', '2027-01-02', '{}'::jsonb, 16000, '{}'::jsonb,
       '20000000-0000-4000-8000-000000000001'

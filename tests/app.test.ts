@@ -16,6 +16,7 @@ const env: AppEnv = {
   RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
   RESERVATION_PII_KEY_VERSION: 'test-v1',
   RESERVATION_PII_KEYRING_JSON: '{}',
+  RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
   RESERVATION_SCHEDULER_INTERVAL_SECONDS: 60,
   corsOrigins: ['http://127.0.0.1:4173']
 };

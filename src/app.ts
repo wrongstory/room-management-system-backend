@@ -63,6 +63,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         clients,
         options.env.RESERVATION_PII_KEY_BASE64,
         options.env.RESERVATION_PII_KEY_VERSION,
+        options.env.RESERVATION_GUEST_NAME_PEPPER,
         JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
       )
     };
@@ -142,17 +143,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       mustChangePassword: false,
       accessToken: 'system-reservation-scheduler'
     };
-    const runScheduledTransitions = async () => {
+    const runScheduledTransitions = async (failFast = false) => {
       const bucket = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
       try {
         await services.reservations.processDue(schedulerActor, `reservation-scheduler-${bucket}`);
       } catch (error) {
         app.log.error({ err: error }, 'Reservation transition scheduler failed');
+        if (failFast) {
+          throw error;
+        }
       }
     };
     let timer: NodeJS.Timeout | undefined;
     app.addHook('onReady', async () => {
-      await runScheduledTransitions();
+      await runScheduledTransitions(options.env.APP_ENV === 'production');
       timer = setInterval(
         () => void runScheduledTransitions(),
         options.env.RESERVATION_SCHEDULER_INTERVAL_SECONDS * 1_000

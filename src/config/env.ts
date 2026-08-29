@@ -20,6 +20,7 @@ const envSchema = z.object({
   RESERVATION_PII_KEY_BASE64: z.string().min(1),
   RESERVATION_PII_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default('v1'),
   RESERVATION_PII_KEYRING_JSON: z.string().default('{}'),
+  RESERVATION_GUEST_NAME_PEPPER: z.string().min(32),
   RESERVATION_SCHEDULER_ACTOR_PROFILE_ID: z.preprocess(
     (value) => value === '' ? undefined : value,
     z.uuid().optional()
@@ -111,6 +112,14 @@ const envSchema = z.object({
         code: 'custom',
         path: ['SUPABASE_PROJECT_REF'],
         message: 'production 환경에는 프로젝트 Ref가 필요합니다.'
+      });
+    }
+
+    if (!env.RESERVATION_SCHEDULER_ACTOR_PROFILE_ID) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RESERVATION_SCHEDULER_ACTOR_PROFILE_ID'],
+        message: 'production 환경에는 예약 전이 scheduler 관리자 profile ID가 필요합니다.'
       });
     }
 

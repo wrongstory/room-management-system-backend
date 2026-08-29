@@ -192,6 +192,15 @@ describe('initial migration contract', () => {
     expect(sql).toContain("message = 'IDEMPOTENCY_KEY_REUSED'");
     expect(sql).toContain("message = 'RESERVATION_OVERLAP'");
     expect(sql).toContain("at time zone 'Asia/Seoul'");
+    expect(sql).toContain('cleaning_targets_checkout_obligation_contract_fk');
+    expect(sql).toContain('checkout_obligations_current_target_contract_fk');
+    expect(sql).toContain('preparation_obligations_submission_attempt_fk');
+    expect(sql).toContain('preparation_obligations_enforce_proof');
+    expect(sql).toContain('checkout_obligations_enforce_target_state');
+    expect(sql).toContain('room_pin_leases_attempt_contract_fk');
+    expect(sql).toContain('room_pin_access_leases_enforce_contract');
+    expect(sql).toContain('attempt_id uuid not null');
+    expect(sql).toContain('Close due stays first');
   });
 
   it('keeps new room ledgers append-only and service commands private', async () => {

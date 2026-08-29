@@ -19,6 +19,7 @@ const actor: Actor = {
 };
 
 const piiKey = Buffer.alloc(32, 7).toString('base64');
+const guestNamePepper = 'reservation-guest-name-pepper-test-value';
 
 const commandResult = {
   id: '41000000-0000-4000-8000-000000000001',
@@ -58,7 +59,12 @@ describe('reservation privacy and idempotency', () => {
       publicClient: {},
       forAccessToken: vi.fn()
     } as unknown as SupabaseClients;
-    const service = new SupabaseReservationService(clients, piiKey, 'test-v1');
+    const service = new SupabaseReservationService(
+      clients,
+      piiKey,
+      'test-v1',
+      guestNamePepper
+    );
     const input = {
       roomId: commandResult.room_id,
       checkInAt: '2026-09-01T16:00:00+09:00',
@@ -94,6 +100,49 @@ describe('reservation privacy and idempotency', () => {
     expect(decryptGuestName(encrypted, piiKey, 'test-v2', { 'old-v1': oldKey })).toBe('홍길동');
   });
 
+  it('keeps the guest-name request fingerprint stable across encryption key rotation', async () => {
+    const rpc = vi.fn(async (_name: string, _parameters: Record<string, unknown>) => ({
+      data: commandResult,
+      error: null
+    }));
+    const clients = {
+      admin: { rpc },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const nextKey = Buffer.alloc(32, 9).toString('base64');
+    const beforeRotation = new SupabaseReservationService(
+      clients,
+      piiKey,
+      'test-v1',
+      guestNamePepper
+    );
+    const afterRotation = new SupabaseReservationService(
+      clients,
+      nextKey,
+      'test-v2',
+      guestNamePepper,
+      { 'test-v1': piiKey }
+    );
+    const input = {
+      roomId: commandResult.room_id,
+      checkInAt: '2026-09-01T16:00:00+09:00',
+      checkOutAt: '2026-09-02T11:00:00+09:00',
+      guestCount: 2,
+      guestName: '홍길동',
+      expectedRoomVersion: 1,
+      idempotencyKey: 'reservation-key-rotation-0001'
+    };
+
+    await beforeRotation.create(actor, input);
+    await afterRotation.create(actor, input);
+
+    const first = rpc.mock.calls[0]?.[1] as Record<string, unknown>;
+    const second = rpc.mock.calls[1]?.[1] as Record<string, unknown>;
+    expect(first.p_request_hash).toBe(second.p_request_hash);
+    expect(first.p_guest_name_encrypted).not.toBe(second.p_guest_name_encrypted);
+  });
+
   it('omits guest names from lists and decrypts them only for a detail request', async () => {
     const encrypted = encryptGuestName('홍길동', piiKey, 'test-v1');
     const row = { ...commandResult, guest_name_encrypted: encrypted };
@@ -106,7 +155,12 @@ describe('reservation privacy and idempotency', () => {
       publicClient: {},
       forAccessToken: vi.fn()
     } as unknown as SupabaseClients;
-    const service = new SupabaseReservationService(clients, piiKey, 'test-v1');
+    const service = new SupabaseReservationService(
+      clients,
+      piiKey,
+      'test-v1',
+      guestNamePepper
+    );
 
     const list = await service.list(actor);
     const detail = await service.get(actor, commandResult.id);
@@ -133,5 +187,40 @@ describe('reservation privacy and idempotency', () => {
       expect.objectContaining({ code: 'SENSITIVE_TEXT_NOT_ALLOWED' })
     );
     expect(() => assertNoContactInformation('침대 옆 조명 파손')).not.toThrow();
+  });
+
+  it.each([
+    ['INVALID_MANUAL_CLEANING_REQUEST', 400],
+    ['STAYOVER_ACCESS_WINDOW_INVALID', 409],
+    ['VACANT_ROOM_REQUIRED', 409],
+    ['RESERVATION_ROOM_MISMATCH', 409]
+  ])('maps manual cleaning domain error %s without leaking a 500', async (message, statusCode) => {
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { code: '23514', message }
+    }));
+    const clients = {
+      admin: { rpc },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseReservationService(
+      clients,
+      piiKey,
+      'test-v1',
+      guestNamePepper
+    );
+
+    await expect(service.createManualCleaningRequest(actor, {
+      roomId: commandResult.room_id,
+      reservationId: commandResult.id,
+      cleaningKind: 'stayover',
+      serviceDate: '2026-09-01',
+      availableFrom: '2026-09-01T08:00:00+00:00',
+      dueAt: '2026-09-01T09:00:00+00:00',
+      expectedRoomVersion: 1,
+      reasonCode: 'ADMIN_REQUEST',
+      idempotencyKey: `manual-cleaning-${message.toLowerCase()}`
+    })).rejects.toMatchObject({ statusCode, code: message });
   });
 });

@@ -136,11 +136,11 @@ interface ReservationRow {
   updated_at: string;
 }
 
-function guestNameFingerprint(value: string | null, encodedKey: string): string | null {
+function guestNameFingerprint(value: string | null, pepper: string): string | null {
   if (value === null) {
     return null;
   }
-  return createHmac('sha256', Buffer.from(encodedKey, 'base64')).update(value, 'utf8').digest('hex');
+  return createHmac('sha256', pepper).update(value, 'utf8').digest('hex');
 }
 
 interface ReservationCommandRow {
@@ -208,6 +208,9 @@ function reservationError(error: { code?: string; message?: string; details?: st
   if (message.includes('INVALID_RESERVATION_SCHEDULE')) {
     return new AppError(400, 'INVALID_RESERVATION_SCHEDULE', '예약은 분 단위이며 최소 1박이어야 합니다.');
   }
+  if (message.includes('INVALID_MANUAL_CLEANING_REQUEST')) {
+    return new AppError(400, 'INVALID_MANUAL_CLEANING_REQUEST', '수동 청소 요청의 종류와 시간 값을 확인해 주세요.');
+  }
   if (
     message.includes('INVALID_TRANSITION') ||
     message.includes('NOT_ALLOWED') ||
@@ -217,6 +220,9 @@ function reservationError(error: { code?: string; message?: string; details?: st
     message.includes('SCHEDULE_LOCKED') ||
     message.includes('MANUAL_CLEANING_REQUEST') ||
     message.includes('ACTIVE_STAY_RESERVATION_REQUIRED') ||
+    message.includes('STAYOVER_ACCESS_WINDOW_INVALID') ||
+    message.includes('VACANT_ROOM_REQUIRED') ||
+    message.includes('RESERVATION_ROOM_MISMATCH') ||
     message.includes('NOT_MANUAL_CLEANING_REQUEST')
   ) {
     return new AppError(409, message || 'INVALID_TRANSITION', '현재 예약 상태에서는 요청한 변경을 할 수 없습니다.');
@@ -266,6 +272,7 @@ export class SupabaseReservationService implements ReservationService {
     private readonly clients: SupabaseClients,
     private readonly piiKey: string,
     private readonly piiKeyVersion: string,
+    private readonly guestNamePepper: string,
     private readonly previousPiiKeys: Record<string, string> = {}
   ) {}
 
@@ -343,7 +350,7 @@ export class SupabaseReservationService implements ReservationService {
       checkInAt: input.checkInAt,
       checkOutAt: input.checkOutAt,
       guestCount: input.guestCount,
-      guestNameFingerprint: guestNameFingerprint(guestName, this.piiKey),
+      guestNameFingerprint: guestNameFingerprint(guestName, this.guestNamePepper),
       expectedRoomVersion: input.expectedRoomVersion
     };
     const { data, error } = await this.clients.admin.rpc('create_reservation', {
@@ -380,7 +387,7 @@ export class SupabaseReservationService implements ReservationService {
       checkOutAt: input.checkOutAt,
       guestCount: input.guestCount,
       guestNameMode,
-      guestNameFingerprint: guestNameFingerprint(guestName ?? null, this.piiKey),
+      guestNameFingerprint: guestNameFingerprint(guestName ?? null, this.guestNamePepper),
       expectedVersion: input.expectedVersion,
       reasonCode: input.reasonCode
     };

@@ -12,6 +12,7 @@
 - `GET /health`, `/v1/auth`, `/v1/accounts`, `/v1/rooms`, `/v1/reservations`
 - 객실 기준정보 CAS 변경, 운영 차단·촛불·이슈·PIN 동기화 event 기록
 - 예약 생성·일정 변경·취소·수동 체크아웃, 연박/추가 청소 요청과 예정 입·퇴실 전이
+- production 시작 시 활성 관리자 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`를 필수 검증하고, 중단 기간의 예약은 퇴실 우선 catch-up으로 복구
 - 예약 고객명 AES-256-GCM 암호화, 목록 비노출, 관리자 상세 복호화와 180일 보존 만료
 - 예약 기간 중복 배타 제약, 활성 청소 대상/담당/수행 회차 유일 제약
 - 제출·검수·수익·주차별 지급 중복 방지 키
@@ -32,7 +33,7 @@ copy .env.example .env
 npm run dev
 ```
 
-macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다.
+macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다. production에서는 예정 전이·개인정보 보존 worker가 조용히 중지되지 않도록 활성 관리자 profile ID인 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`도 반드시 설정합니다.
 
 빈 프로젝트의 최초 관리자만 서버 환경에서 다음 명령으로 생성합니다. 실제 이름과 휴대전화 번호는 명령 인자로만 전달하고 CI 로그에서는 실행하지 않습니다.
 
@@ -65,4 +66,5 @@ npm run db:reset
 - 휴대전화 원문은 저장하지 않고 서버 비밀값으로 만든 HMAC과 마지막 4자리만 저장합니다.
 - 사진은 앱에서 300KiB 이하로 압축해 Google Drive 비공개 폴더에만 저장하고, 업로드 시각부터 정확히 7일 뒤 영구삭제하는 것이 확정 계약입니다. 180일 보존이나 retention hold 예외는 두지 않습니다. 업로드·삭제 worker와 운영 OAuth 자격증명은 아직 구현·배포 전이며, token과 locator를 브라우저에 노출하지 않습니다.
 - 예약 고객명은 서버에서만 암복호화하고 DB·로그·감사 payload에 평문을 저장하지 않습니다. 목록에서는 제외하고 관리자 단건 상세에서만 표시하며 체크아웃/취소 180일 뒤 worker가 암호문을 제거합니다. 암호화 키를 바꿀 때는 이전 키를 `RESERVATION_PII_KEYRING_JSON`에 유지한 채 새 key version으로 쓰기를 전환하고 기존 암호문을 계획적으로 재암호화해야 합니다.
+- 고객명 idempotency fingerprint는 암호화 키와 분리된 `RESERVATION_GUEST_NAME_PEPPER`를 사용해 암호화 키 회전 전후에도 같은 요청 hash를 유지합니다.
 - 운영·복구검증 Supabase에는 P0·계정 수명주기·도메인 무결성 migration이 적용됐습니다. 정확한 구현·배포 구분은 제품·도메인 가이드의 구현 현황 절을 따릅니다.

@@ -325,8 +325,9 @@ Table public.room_pin_access_leases {
   id uuid [pk]
   room_id uuid [not null]
   reservation_id uuid
-  cleaning_target_id uuid
-  assignment_id uuid
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null]
+  attempt_id uuid [not null]
   pin_version bigint [not null]
   issued_to uuid [not null]
   issued_at timestamptz [not null]
@@ -334,6 +335,8 @@ Table public.room_pin_access_leases {
   revealed_at timestamptz
   revoked_at timestamptz
   revoke_reason_code text
+
+  Note: 'Room/reservation/target/current assignment/current attempt/maid/latest verified PIN version are one enforced work contract.'
 }
 
 Table public.cleaning_template_versions {
@@ -686,6 +689,7 @@ Ref: public.room_pin_access_leases.room_id > public.rooms.id
 Ref: public.room_pin_access_leases.reservation_id > public.reservations.id
 Ref: public.room_pin_access_leases.cleaning_target_id > public.cleaning_targets.id
 Ref: public.room_pin_access_leases.assignment_id > public.cleaning_assignments.id
+Ref: public.room_pin_access_leases.attempt_id > public.cleaning_attempts.id
 Ref: public.room_pin_access_leases.issued_to > public.profiles.id
 Ref: public.cleaning_template_versions.room_type_id > public.room_types.id
 Ref: public.cleaning_template_versions.created_by > public.profiles.id

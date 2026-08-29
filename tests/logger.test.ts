@@ -19,7 +19,8 @@ describe('logger redaction contract', () => {
       '*.phone',
       '*.SUPABASE_SECRET_KEY',
       '*.RESERVATION_PII_KEY_BASE64',
-      '*.RESERVATION_PII_KEYRING_JSON'
+      '*.RESERVATION_PII_KEYRING_JSON',
+      '*.RESERVATION_GUEST_NAME_PEPPER'
     ]));
   });
 });
