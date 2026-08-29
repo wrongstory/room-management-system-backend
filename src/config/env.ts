@@ -18,7 +18,13 @@ const envSchema = z.object({
   SUPABASE_SECRET_KEY: z.string().min(1),
   ACCOUNT_PHONE_PEPPER: z.string().min(32),
   RESERVATION_PII_KEY_BASE64: z.string().min(1),
-  RESERVATION_PII_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default('v1')
+  RESERVATION_PII_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default('v1'),
+  RESERVATION_PII_KEYRING_JSON: z.string().default('{}'),
+  RESERVATION_SCHEDULER_ACTOR_PROFILE_ID: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.uuid().optional()
+  ),
+  RESERVATION_SCHEDULER_INTERVAL_SECONDS: z.coerce.number().int().min(30).max(3600).default(60)
 }).superRefine((env, context) => {
   const supabaseUrl = new URL(env.SUPABASE_URL);
   const isLocalSupabase = ['127.0.0.1', 'localhost'].includes(supabaseUrl.hostname);
@@ -56,6 +62,30 @@ const envSchema = z.object({
       code: 'custom',
       path: ['RESERVATION_PII_KEY_BASE64'],
       message: '예약 개인정보 암호키가 올바른 Base64가 아닙니다.'
+    });
+  }
+
+  try {
+    const keyring = JSON.parse(env.RESERVATION_PII_KEYRING_JSON) as unknown;
+    if (!keyring || Array.isArray(keyring) || typeof keyring !== 'object') {
+      throw new Error('keyring must be an object');
+    }
+    for (const [version, encodedKey] of Object.entries(keyring)) {
+      const key = typeof encodedKey === 'string' ? Buffer.from(encodedKey, 'base64') : null;
+      if (
+        !/^[A-Za-z0-9._-]{1,32}$/.test(version) ||
+        !key ||
+        key.length !== 32 ||
+        key.toString('base64') !== encodedKey
+      ) {
+        throw new Error('invalid keyring entry');
+      }
+    }
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      path: ['RESERVATION_PII_KEYRING_JSON'],
+      message: '예약 개인정보 이전 키 모음은 version별 Base64 32바이트 키 JSON 객체여야 합니다.'
     });
   }
 

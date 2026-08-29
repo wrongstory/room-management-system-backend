@@ -108,6 +108,12 @@ function toRoom(row: RoomProjectionRow): RoomSummary {
   };
 }
 
+function ensureAdmin(actor: Actor): void {
+  if (actor.role !== 'admin') {
+    throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 객실 운영 현황을 조회할 수 있습니다.');
+  }
+}
+
 function roomError(error: { message?: string } | null): AppError {
   const message = error?.message ?? '';
   if (message.includes('STALE_VERSION')) {
@@ -146,6 +152,7 @@ export class SupabaseRoomService implements RoomService {
   constructor(private readonly clients: SupabaseClients) {}
 
   async list(actor: Actor): Promise<RoomSummary[]> {
+    ensureAdmin(actor);
     const { data, error } = await this.clients.admin.rpc('get_room_operational_projection', {
       p_actor_profile_id: actor.profileId,
       p_room_id: null
@@ -157,6 +164,7 @@ export class SupabaseRoomService implements RoomService {
   }
 
   async get(actor: Actor, roomId: string): Promise<RoomSummary> {
+    ensureAdmin(actor);
     const { data, error } = await this.clients.admin.rpc('get_room_operational_projection', {
       p_actor_profile_id: actor.profileId,
       p_room_id: roomId

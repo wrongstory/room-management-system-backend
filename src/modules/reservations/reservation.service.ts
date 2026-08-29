@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
 import { requestHash } from '../../lib/command.js';
 import { AppError } from '../../lib/app-error.js';
@@ -13,7 +13,6 @@ export interface Reservation {
   checkInAt: string;
   checkOutAt: string;
   guestCount: number;
-  guestName: string | null;
   status: ReservationStatus;
   preparationObligationId: string;
   checkoutObligationId: string;
@@ -25,7 +24,11 @@ export interface Reservation {
   updatedAt: string;
 }
 
-export type ReservationCommandResult = Omit<Reservation, 'guestName'> & {
+export interface ReservationDetail extends Reservation {
+  guestName: string | null;
+}
+
+export type ReservationCommandResult = Reservation & {
   roomStateVersion?: number;
 };
 
@@ -58,20 +61,61 @@ export interface ReservationMutationInput {
   idempotencyKey: string;
 }
 
+export interface CreateManualCleaningRequestInput {
+  roomId: string;
+  reservationId?: string | null;
+  cleaningKind: 'stayover' | 'additional';
+  serviceDate: string;
+  availableFrom: string;
+  dueAt?: string | null;
+  expectedRoomVersion: number;
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface CancelManualCleaningRequestInput {
+  targetId: string;
+  expectedVersion: number;
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface ManualCleaningRequestResult {
+  id: string;
+  roomId: string;
+  reservationId: string | null;
+  cleaningKind: 'stayover' | 'additional';
+  status: string;
+  serviceDate: string;
+  availableFrom: string;
+  dueAt: string | null;
+  version: number;
+}
+
 export interface TransitionResult {
   asOf: string;
   checkedInCount: number;
   checkedOutCount: number;
   blockedCheckInCount: number;
+  purgedGuestNameCount: number;
 }
 
 export interface ReservationService {
   list(actor: Actor, roomId?: string): Promise<Reservation[]>;
+  get(actor: Actor, reservationId: string): Promise<ReservationDetail>;
   create(actor: Actor, input: CreateReservationInput): Promise<ReservationCommandResult>;
   change(actor: Actor, input: ChangeReservationInput): Promise<ReservationCommandResult>;
   cancel(actor: Actor, input: ReservationMutationInput): Promise<ReservationCommandResult>;
   manualCheckout(actor: Actor, input: ReservationMutationInput): Promise<ReservationCommandResult>;
   processDue(actor: Actor, idempotencyKey: string): Promise<TransitionResult>;
+  createManualCleaningRequest(
+    actor: Actor,
+    input: CreateManualCleaningRequestInput
+  ): Promise<ManualCleaningRequestResult>;
+  cancelManualCleaningRequest(
+    actor: Actor,
+    input: CancelManualCleaningRequestInput
+  ): Promise<ManualCleaningRequestResult>;
 }
 
 interface ReservationRow {
@@ -92,6 +136,13 @@ interface ReservationRow {
   updated_at: string;
 }
 
+function guestNameFingerprint(value: string | null, encodedKey: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return createHmac('sha256', Buffer.from(encodedKey, 'base64')).update(value, 'utf8').digest('hex');
+}
+
 interface ReservationCommandRow {
   id: string;
   room_id: string;
@@ -108,6 +159,18 @@ interface ReservationCommandRow {
   created_at: string;
   updated_at: string;
   room_state_version?: number;
+}
+
+interface ManualCleaningRequestRow {
+  id: string;
+  room_id: string;
+  reservation_id: string | null;
+  cleaning_kind: 'stayover' | 'additional';
+  status: string;
+  service_date: string;
+  available_from: string;
+  due_at: string | null;
+  version: number;
 }
 
 function ensureAdmin(actor: Actor): void {
@@ -136,6 +199,12 @@ function reservationError(error: { code?: string; message?: string; details?: st
   if (message.includes('RESERVATION_NOT_FOUND')) {
     return new AppError(404, 'RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다.');
   }
+  if (message.includes('CLEANING_REQUEST_NOT_FOUND')) {
+    return new AppError(404, 'CLEANING_REQUEST_NOT_FOUND', '청소 요청을 찾을 수 없습니다.');
+  }
+  if (message.includes('CLEANING_TEMPLATE_NOT_CONFIGURED')) {
+    return new AppError(409, 'CLEANING_TEMPLATE_NOT_CONFIGURED', '해당 객실 유형의 청소 템플릿이 아직 없습니다.');
+  }
   if (message.includes('INVALID_RESERVATION_SCHEDULE')) {
     return new AppError(400, 'INVALID_RESERVATION_SCHEDULE', '예약은 분 단위이며 최소 1박이어야 합니다.');
   }
@@ -145,7 +214,10 @@ function reservationError(error: { code?: string; message?: string; details?: st
     message.includes('IMMUTABLE') ||
     message.includes('CONFLICT') ||
     message.includes('REPLAN_REQUIRED') ||
-    message.includes('SCHEDULE_LOCKED')
+    message.includes('SCHEDULE_LOCKED') ||
+    message.includes('MANUAL_CLEANING_REQUEST') ||
+    message.includes('ACTIVE_STAY_RESERVATION_REQUIRED') ||
+    message.includes('NOT_MANUAL_CLEANING_REQUEST')
   ) {
     return new AppError(409, message || 'INVALID_TRANSITION', '현재 예약 상태에서는 요청한 변경을 할 수 없습니다.');
   }
@@ -175,11 +247,26 @@ function toCommandResult(row: ReservationCommandRow): ReservationCommandResult {
   };
 }
 
+function toManualCleaningRequest(row: ManualCleaningRequestRow): ManualCleaningRequestResult {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    reservationId: row.reservation_id,
+    cleaningKind: row.cleaning_kind,
+    status: row.status,
+    serviceDate: row.service_date,
+    availableFrom: row.available_from,
+    dueAt: row.due_at,
+    version: row.version
+  };
+}
+
 export class SupabaseReservationService implements ReservationService {
   constructor(
     private readonly clients: SupabaseClients,
     private readonly piiKey: string,
-    private readonly piiKeyVersion: string
+    private readonly piiKeyVersion: string,
+    private readonly previousPiiKeys: Record<string, string> = {}
   ) {}
 
   async list(actor: Actor, roomId?: string): Promise<Reservation[]> {
@@ -197,9 +284,6 @@ export class SupabaseReservationService implements ReservationService {
       checkInAt: row.check_in_at,
       checkOutAt: row.check_out_at,
       guestCount: row.guest_count,
-      guestName: row.guest_name_encrypted
-        ? decryptGuestName(row.guest_name_encrypted, this.piiKey, this.piiKeyVersion)
-        : null,
       status: row.status,
       preparationObligationId: row.preparation_obligation_id,
       checkoutObligationId: row.checkout_obligation_id,
@@ -212,6 +296,45 @@ export class SupabaseReservationService implements ReservationService {
     }));
   }
 
+  async get(actor: Actor, reservationId: string): Promise<ReservationDetail> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('get_reservation_detail', {
+      p_actor_profile_id: actor.profileId,
+      p_reservation_id: reservationId
+    });
+    if (error) {
+      throw reservationError(error);
+    }
+    const row = (data as ReservationRow[] | null)?.[0];
+    if (!row) {
+      throw new AppError(404, 'RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다.');
+    }
+    return {
+      id: row.id,
+      roomId: row.room_id,
+      checkInAt: row.check_in_at,
+      checkOutAt: row.check_out_at,
+      guestCount: row.guest_count,
+      guestName: row.guest_name_encrypted
+        ? decryptGuestName(
+          row.guest_name_encrypted,
+          this.piiKey,
+          this.piiKeyVersion,
+          this.previousPiiKeys
+        )
+        : null,
+      status: row.status,
+      preparationObligationId: row.preparation_obligation_id,
+      checkoutObligationId: row.checkout_obligation_id,
+      version: row.version,
+      actualCheckInAt: row.actual_check_in_at,
+      actualCheckoutAt: row.actual_checkout_at,
+      cancelledAt: row.cancelled_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
   async create(actor: Actor, input: CreateReservationInput): Promise<ReservationCommandResult> {
     ensureAdmin(actor);
     const guestName = input.guestName == null ? null : normalizeGuestName(input.guestName);
@@ -220,7 +343,7 @@ export class SupabaseReservationService implements ReservationService {
       checkInAt: input.checkInAt,
       checkOutAt: input.checkOutAt,
       guestCount: input.guestCount,
-      guestName,
+      guestNameFingerprint: guestNameFingerprint(guestName, this.piiKey),
       expectedRoomVersion: input.expectedRoomVersion
     };
     const { data, error } = await this.clients.admin.rpc('create_reservation', {
@@ -257,7 +380,7 @@ export class SupabaseReservationService implements ReservationService {
       checkOutAt: input.checkOutAt,
       guestCount: input.guestCount,
       guestNameMode,
-      guestName,
+      guestNameFingerprint: guestNameFingerprint(guestName ?? null, this.piiKey),
       expectedVersion: input.expectedVersion,
       reasonCode: input.reasonCode
     };
@@ -333,13 +456,74 @@ export class SupabaseReservationService implements ReservationService {
       checked_in_count: number;
       checked_out_count: number;
       blocked_check_in_count: number;
+      purged_guest_name_count: number;
     };
     return {
       asOf: row.as_of,
       checkedInCount: row.checked_in_count,
       checkedOutCount: row.checked_out_count,
-      blockedCheckInCount: row.blocked_check_in_count
+      blockedCheckInCount: row.blocked_check_in_count,
+      purgedGuestNameCount: row.purged_guest_name_count
     };
+  }
+
+  async createManualCleaningRequest(
+    actor: Actor,
+    input: CreateManualCleaningRequestInput
+  ): Promise<ManualCleaningRequestResult> {
+    ensureAdmin(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      reservationId: input.reservationId ?? null,
+      cleaningKind: input.cleaningKind,
+      serviceDate: input.serviceDate,
+      availableFrom: input.availableFrom,
+      dueAt: input.dueAt ?? null,
+      expectedRoomVersion: input.expectedRoomVersion,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('create_manual_cleaning_request', {
+      p_actor_profile_id: actor.profileId,
+      p_target_id: randomUUID(),
+      p_room_id: input.roomId,
+      p_reservation_id: input.reservationId ?? null,
+      p_cleaning_kind: input.cleaningKind,
+      p_service_date: input.serviceDate,
+      p_available_from: input.availableFrom,
+      p_due_at: input.dueAt ?? null,
+      p_expected_room_version: input.expectedRoomVersion,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) {
+      throw reservationError(error);
+    }
+    return toManualCleaningRequest(data as ManualCleaningRequestRow);
+  }
+
+  async cancelManualCleaningRequest(
+    actor: Actor,
+    input: CancelManualCleaningRequestInput
+  ): Promise<ManualCleaningRequestResult> {
+    ensureAdmin(actor);
+    const fingerprint = {
+      targetId: input.targetId,
+      expectedVersion: input.expectedVersion,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('cancel_manual_cleaning_request', {
+      p_actor_profile_id: actor.profileId,
+      p_target_id: input.targetId,
+      p_expected_version: input.expectedVersion,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) {
+      throw reservationError(error);
+    }
+    return toManualCleaningRequest(data as ManualCleaningRequestRow);
   }
 
   private async runMutation(

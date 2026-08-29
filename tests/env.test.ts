@@ -9,7 +9,8 @@ const localEnv = {
   SUPABASE_SECRET_KEY: 'local-secret',
   ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters',
   RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
-  RESERVATION_PII_KEY_VERSION: 'test-v1'
+  RESERVATION_PII_KEY_VERSION: 'test-v1',
+  RESERVATION_PII_KEYRING_JSON: '{}'
 };
 
 describe('environment contract', () => {

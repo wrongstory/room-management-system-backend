@@ -250,6 +250,8 @@ Table public.checkout_cleaning_obligations {
   created_by uuid [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
+
+  Note: 'materialized requires a current target; private/available require no current target. Cancelled obligations may retain the historical target pointer.'
 }
 
 Table public.room_occupancy_events {
@@ -393,7 +395,7 @@ Table public.cleaning_targets {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Checkout targets are unique per reservation. Inspection recleans keep an immutable original attempt and maid link.'
+  Note: 'Checkout targets are unique per reservation. Stayover/additional manual requests use stable target IDs and soft cancellation. Inspection recleans keep an immutable original attempt and maid link.'
 }
 
 Table public.cleaning_target_schedule_revisions {

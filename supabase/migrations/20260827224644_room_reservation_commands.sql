@@ -242,8 +242,8 @@ select
   r.room_id,
   case
     when r.status = 'cancelled' then 'cancelled'::public.checkout_obligation_status
-    when r.status = 'checked_out' then 'available'::public.checkout_obligation_status
     when t.id is not null then 'materialized'::public.checkout_obligation_status
+    when r.status = 'checked_out' then 'available'::public.checkout_obligation_status
     else 'private'::public.checkout_obligation_status
   end,
   (r.check_out_at at time zone 'Asia/Seoul')::date,
@@ -264,6 +264,13 @@ left join lateral (
   order by ct.created_at
   limit 1
 ) t on true;
+
+alter table public.checkout_cleaning_obligations
+  add constraint checkout_obligation_status_target_check check (
+    (status = 'materialized' and current_cleaning_target_id is not null)
+    or (status in ('private', 'available') and current_cleaning_target_id is null)
+    or status = 'cancelled'
+  );
 
 alter table public.reservations
   add column checkout_obligation_id uuid not null default gen_random_uuid();
@@ -735,7 +742,8 @@ create function private.room_block_reason_codes(
   p_room_id uuid,
   p_at timestamptz,
   p_include_occupancy boolean default true,
-  p_include_cleaning boolean default true
+  p_include_cleaning boolean default true,
+  p_preparation_reservation_id uuid default null
 )
 returns text[]
 language plpgsql
@@ -771,6 +779,10 @@ begin
     join public.reservations r on r.id = po.reservation_id
     where po.room_id = p_room_id
       and r.status = 'active'
+      and (
+        p_preparation_reservation_id is null
+        or po.reservation_id = p_preparation_reservation_id
+      )
       and po.status <> 'approved'
   ) then
     v_reasons := array_append(v_reasons, 'CLEANING_REQUIRED');
@@ -865,7 +877,7 @@ security definer
 set search_path = pg_catalog, public, private
 as $$
 begin
-  perform private.assert_active_actor(p_actor_profile_id);
+  perform private.assert_room_admin(p_actor_profile_id);
 
   return query
   select
@@ -1088,6 +1100,10 @@ begin
     return v_response;
   end if;
 
+  -- Reservation commands share one short transaction lock. The free-plan workload is
+  -- small, and a single ordering point prevents room/reservation/obligation deadlocks.
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command', 0));
+
   if (p_check_out_at at time zone 'Asia/Seoul')::date
       <= (p_check_in_at at time zone 'Asia/Seoul')::date
     or p_check_in_at <> date_trunc('minute', p_check_in_at)
@@ -1292,6 +1308,8 @@ begin
     return v_response;
   end if;
 
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command', 0));
+
   if (p_check_out_at at time zone 'Asia/Seoul')::date
       <= (p_check_in_at at time zone 'Asia/Seoul')::date
     or p_check_in_at <> date_trunc('minute', p_check_in_at)
@@ -1378,7 +1396,9 @@ begin
       p_room_id <> v_reservation.room_id
       or p_check_out_at <> v_reservation.check_out_at
     ) then
-    raise exception using errcode = '23514', message = 'CLEANING_WORKFLOW_REPLAN_REQUIRED';
+    if not v_reopen_occupancy then
+      raise exception using errcode = '23514', message = 'CLEANING_WORKFLOW_REPLAN_REQUIRED';
+    end if;
   end if;
 
   if p_room_id <> v_reservation.room_id then
@@ -1442,7 +1462,8 @@ begin
   update public.checkout_cleaning_obligations
   set room_id = p_room_id,
       status = case
-        when v_reopen_occupancy then 'private'
+        when v_reopen_occupancy and current_cleaning_target_id is null then 'private'
+        when v_reopen_occupancy then 'materialized'
         else status
       end,
       effective_service_date = (p_check_out_at at time zone 'Asia/Seoul')::date,
@@ -1477,6 +1498,78 @@ begin
   where id in (v_old_room_id, p_room_id);
 
   if v_reopen_occupancy then
+    update public.cleaning_attempts a
+    set status = 'superseded',
+        ended_at = now(),
+        end_reason = 'RESERVATION_EXTENDED'
+    from public.cleaning_targets t
+    where t.id = v_checkout_obligation.current_cleaning_target_id
+      and a.cleaning_target_id = t.id
+      and a.status = 'scheduled';
+
+    update public.cleaning_assignments a
+    set is_current = false,
+        ended_at = now(),
+        change_reason_code = 'RESERVATION_EXTENDED'
+    where a.cleaning_target_id = v_checkout_obligation.current_cleaning_target_id
+      and a.is_current;
+
+    insert into public.notifications (
+      recipient_profile_id,
+      category,
+      title,
+      body,
+      room_id,
+      cleaning_target_id,
+      dedupe_key,
+      requires_action
+    )
+    select
+      a.maid_profile_id,
+      'cleaning_assignment_revoked',
+      '청소 배정이 회수되었습니다',
+      '예약 퇴실 시간이 연장되어 기존 청소 배정이 회수되었습니다.',
+      v_updated.room_id,
+      a.cleaning_target_id,
+      private.audit_command_key(
+        p_actor_profile_id,
+        'reservation.change.assignment_revoked.' || a.id::text,
+        p_idempotency_key
+      ),
+      false
+    from public.cleaning_assignments a
+    where a.cleaning_target_id = v_checkout_obligation.current_cleaning_target_id
+      and a.change_reason_code = 'RESERVATION_EXTENDED'
+      and a.ended_at is not null
+      and a.notified_at is not null;
+
+    update public.cleaning_targets
+    set status = 'unassigned',
+        available_from = p_check_out_at,
+        effective_service_date = (p_check_out_at at time zone 'Asia/Seoul')::date,
+        assignment_version = assignment_version + 1
+    where id = v_checkout_obligation.current_cleaning_target_id;
+
+    insert into public.cleaning_target_schedule_revisions (
+      cleaning_target_id,
+      revision,
+      effective_service_date,
+      available_from,
+      due_at,
+      reason_code,
+      changed_by
+    )
+    select
+      t.id,
+      t.assignment_version,
+      t.effective_service_date,
+      t.available_from,
+      t.due_at,
+      'RESERVATION_EXTENDED',
+      p_actor_profile_id
+    from public.cleaning_targets t
+    where t.id = v_checkout_obligation.current_cleaning_target_id;
+
     update public.room_pin_access_leases
     set revoked_at = now(), revoke_reason_code = 'RESERVATION_EXTENDED'
     where reservation_id = v_reservation.id
@@ -1589,6 +1682,8 @@ begin
   if v_response is not null then
     return v_response;
   end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command', 0));
 
   select * into v_reservation
   from public.reservations
@@ -1717,6 +1812,9 @@ declare
   v_reservation public.reservations%rowtype;
   v_updated public.reservations%rowtype;
   v_obligation public.checkout_cleaning_obligations%rowtype;
+  v_assignment public.cleaning_assignments%rowtype;
+  v_attempt public.cleaning_attempts%rowtype;
+  v_new_assignment_id uuid;
   v_before jsonb;
   v_response jsonb;
 begin
@@ -1730,6 +1828,8 @@ begin
   if v_response is not null then
     return v_response;
   end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command', 0));
 
   select * into v_reservation
   from public.reservations
@@ -1769,6 +1869,22 @@ begin
       and l.revoked_at is null
   ) then
     raise exception using errcode = '23514', message = 'MANUAL_CHECKOUT_ACCESS_CONFLICT';
+  end if;
+
+  if v_obligation.current_cleaning_target_id is not null then
+    select * into v_assignment
+    from public.cleaning_assignments a
+    where a.cleaning_target_id = v_obligation.current_cleaning_target_id
+      and a.is_current
+    for update;
+
+    select * into v_attempt
+    from public.cleaning_attempts a
+    where a.cleaning_target_id = v_obligation.current_cleaning_target_id
+      and a.status = 'scheduled'
+    order by a.attempt_number desc
+    limit 1
+    for update;
   end if;
 
   v_before := private.reservation_response(v_reservation);
@@ -1819,11 +1935,122 @@ begin
   where t.id = v_obligation.current_cleaning_target_id
     and t.status in ('unassigned', 'draft_assigned', 'notified');
 
-  update public.room_pin_access_leases
-  set revoked_at = p_effective_at,
-      revoke_reason_code = 'MANUAL_CHECKOUT_RESCHEDULE'
-  where reservation_id = v_reservation.id
-    and revoked_at is null;
+  if v_assignment.id is not null then
+    update public.cleaning_assignments
+    set is_current = false,
+        ended_at = p_effective_at,
+        change_reason_code = 'MANUAL_CHECKOUT_RESCHEDULE'
+    where id = v_assignment.id;
+
+    v_new_assignment_id := gen_random_uuid();
+    insert into public.cleaning_assignments (
+      id,
+      cleaning_target_id,
+      maid_profile_id,
+      sequence_number,
+      revision,
+      is_current,
+      notified_at,
+      changed_by
+    ) values (
+      v_new_assignment_id,
+      v_assignment.cleaning_target_id,
+      v_assignment.maid_profile_id,
+      v_assignment.sequence_number,
+      v_assignment.revision + 1,
+      true,
+      case when v_assignment.notified_at is null then null else p_effective_at end,
+      p_actor_profile_id
+    );
+
+    if v_attempt.id is not null then
+      update public.cleaning_attempts
+      set status = 'superseded',
+          ended_at = p_effective_at,
+          end_reason = 'MANUAL_CHECKOUT_RESCHEDULE'
+      where id = v_attempt.id;
+
+      insert into public.cleaning_attempts (
+        cleaning_target_id,
+        assignment_id,
+        maid_profile_id,
+        attempt_number,
+        status,
+        assignment_revision,
+        template_snapshot,
+        room_snapshot
+      ) values (
+        v_attempt.cleaning_target_id,
+        v_new_assignment_id,
+        v_assignment.maid_profile_id,
+        v_attempt.attempt_number + 1,
+        'scheduled',
+        v_assignment.revision + 1,
+        v_attempt.template_snapshot,
+        v_attempt.room_snapshot
+      );
+    end if;
+
+    if v_assignment.notified_at is not null then
+      insert into public.notifications (
+        recipient_profile_id,
+        category,
+        title,
+        body,
+        room_id,
+        cleaning_target_id,
+        dedupe_key,
+        requires_action,
+        occurred_at
+      ) values (
+        v_assignment.maid_profile_id,
+        'cleaning_schedule_changed',
+        '청소 시작 시간이 변경되었습니다',
+        '수동 체크아웃 처리로 청소 가능 시간이 변경되었습니다.',
+        v_updated.room_id,
+        v_assignment.cleaning_target_id,
+        private.audit_command_key(
+          p_actor_profile_id,
+          'reservation.manual_checkout.assignment_notice',
+          p_idempotency_key
+        ),
+        true,
+        p_effective_at
+      );
+    end if;
+  end if;
+
+  with revoked as (
+    update public.room_pin_access_leases
+    set revoked_at = p_effective_at,
+        revoke_reason_code = 'MANUAL_CHECKOUT_RESCHEDULE'
+    where reservation_id = v_reservation.id
+      and revoked_at is null
+    returning *
+  )
+  insert into public.room_pin_access_leases (
+    room_id,
+    reservation_id,
+    cleaning_target_id,
+    assignment_id,
+    pin_version,
+    issued_to,
+    issued_at,
+    expires_at
+  )
+  select
+    l.room_id,
+    l.reservation_id,
+    l.cleaning_target_id,
+    v_new_assignment_id,
+    l.pin_version,
+    l.issued_to,
+    p_effective_at,
+    l.expires_at
+  from revoked l
+  where v_new_assignment_id is not null
+    and l.revealed_at is null
+    and l.expires_at > p_effective_at;
 
   insert into public.room_occupancy_events (
     event_key,
@@ -1918,6 +2145,7 @@ declare
   v_checked_in integer := 0;
   v_checked_out integer := 0;
   v_blocked integer := 0;
+  v_purged_guest_names integer := 0;
   v_response jsonb;
 begin
   perform private.assert_room_admin(p_actor_profile_id);
@@ -1930,6 +2158,8 @@ begin
   if v_response is not null then
     return v_response;
   end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command', 0));
 
   for v_reservation in
     select r.*
@@ -1946,7 +2176,8 @@ begin
       v_reservation.room_id,
       p_as_of,
       true,
-      true
+      true,
+      v_reservation.id
     );
 
     if cardinality(v_reason_codes) > 0 then
@@ -2127,11 +2358,52 @@ begin
     v_checked_out := v_checked_out + 1;
   end loop;
 
+  update public.reservations r
+  set guest_name_encrypted = null,
+      version = version + 1,
+      updated_by = p_actor_profile_id
+  where r.guest_name_encrypted is not null
+    and (
+      (r.status = 'checked_out' and r.actual_checkout_at <= p_as_of - interval '180 days')
+      or (r.status = 'cancelled' and r.cancelled_at <= p_as_of - interval '180 days')
+    );
+  get diagnostics v_purged_guest_names = row_count;
+
+  if v_purged_guest_names > 0 then
+    insert into public.audit_events (
+      actor_profile_id,
+      actor_display_name_snapshot,
+      event_type,
+      entity_type,
+      effective_at,
+      reason_code,
+      after_state,
+      request_hash,
+      idempotency_key
+    )
+    select
+      p.id,
+      p.display_name,
+      'reservation.guest_name_retention_purged',
+      'reservation_retention_batch',
+      p_as_of,
+      'RETENTION_180_DAYS_EXPIRED',
+      jsonb_build_object('purged_count', v_purged_guest_names),
+      p_request_hash,
+      private.audit_command_key(
+        p_actor_profile_id,
+        'reservation.guest_name_retention_purged',
+        p_idempotency_key
+      )
+    from public.profiles p where p.id = p_actor_profile_id;
+  end if;
+
   v_response := jsonb_build_object(
     'as_of', p_as_of,
     'checked_in_count', v_checked_in,
     'checked_out_count', v_checked_out,
-    'blocked_check_in_count', v_blocked
+    'blocked_check_in_count', v_blocked,
+    'purged_guest_name_count', v_purged_guest_names
   );
 
   perform private.complete_command(
@@ -2140,6 +2412,374 @@ begin
     p_idempotency_key,
     p_request_hash,
     null,
+    v_response
+  );
+  return v_response;
+end;
+$$;
+
+create function public.create_manual_cleaning_request(
+  p_actor_profile_id uuid,
+  p_target_id uuid,
+  p_room_id uuid,
+  p_reservation_id uuid,
+  p_cleaning_kind public.cleaning_kind,
+  p_service_date date,
+  p_available_from timestamptz,
+  p_due_at timestamptz,
+  p_expected_room_version bigint,
+  p_reason_code text,
+  p_idempotency_key text,
+  p_request_hash text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+declare
+  v_room public.rooms%rowtype;
+  v_room_type public.room_types%rowtype;
+  v_template public.cleaning_template_versions%rowtype;
+  v_target public.cleaning_targets%rowtype;
+  v_response jsonb;
+begin
+  perform private.assert_room_admin(p_actor_profile_id);
+  v_response := private.replay_command(
+    p_actor_profile_id,
+    'cleaning.manual_request.create',
+    p_idempotency_key,
+    p_request_hash
+  );
+  if v_response is not null then
+    return v_response;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command', 0));
+
+  if p_cleaning_kind not in ('stayover', 'additional')
+    or (p_available_from at time zone 'Asia/Seoul')::date <> p_service_date
+    or (p_due_at is not null and p_due_at <= p_available_from) then
+    raise exception using errcode = '22023', message = 'INVALID_MANUAL_CLEANING_REQUEST';
+  end if;
+
+  select * into v_room from public.rooms where id = p_room_id for update;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'ROOM_NOT_FOUND';
+  end if;
+  if v_room.state_version <> p_expected_room_version then
+    raise exception using errcode = '40001', message = 'STALE_VERSION';
+  end if;
+
+  if p_cleaning_kind = 'stayover' and not exists (
+    select 1
+    from public.reservations r
+    where r.id = p_reservation_id
+      and r.room_id = p_room_id
+      and r.status = 'active'
+      and r.actual_check_in_at is not null
+      and r.actual_checkout_at is null
+  ) then
+    raise exception using errcode = '23514', message = 'ACTIVE_STAY_RESERVATION_REQUIRED';
+  end if;
+  if p_cleaning_kind = 'additional' and p_reservation_id is not null and not exists (
+    select 1 from public.reservations r
+    where r.id = p_reservation_id and r.room_id = p_room_id
+  ) then
+    raise exception using errcode = '23514', message = 'RESERVATION_ROOM_MISMATCH';
+  end if;
+
+  select * into v_room_type from public.room_types where id = v_room.room_type_id;
+  select * into v_template
+  from public.cleaning_template_versions t
+  where t.room_type_id = v_room.room_type_id
+    and t.cleaning_kind = p_cleaning_kind
+    and t.status = 'published';
+  if not found then
+    raise exception using errcode = '23514', message = 'CLEANING_TEMPLATE_NOT_CONFIGURED';
+  end if;
+
+  insert into public.cleaning_targets (
+    id,
+    room_id,
+    reservation_id,
+    cleaning_kind,
+    source,
+    source_key,
+    original_service_date,
+    effective_service_date,
+    available_from,
+    due_at,
+    room_type_snapshot,
+    fee_snapshot,
+    template_snapshot,
+    created_by
+  ) values (
+    p_target_id,
+    p_room_id,
+    p_reservation_id,
+    p_cleaning_kind,
+    case when p_cleaning_kind = 'stayover' then 'stayover_request' else 'manual_room_request' end,
+    'manual-cleaning-request:' || p_target_id::text,
+    p_service_date,
+    p_service_date,
+    p_available_from,
+    p_due_at,
+    jsonb_build_object(
+      'id', v_room_type.id,
+      'code', v_room_type.code,
+      'name', v_room_type.name,
+      'defaultDurationMinutes', v_room_type.default_duration_minutes
+    ),
+    v_room_type.base_cleaning_fee,
+    jsonb_build_object(
+      'id', v_template.id,
+      'version', v_template.version,
+      'durationMinutes', v_template.duration_minutes,
+      'photoSlots', v_template.photo_slots
+    ),
+    p_actor_profile_id
+  ) returning * into v_target;
+
+  insert into public.cleaning_target_schedule_revisions (
+    cleaning_target_id,
+    revision,
+    effective_service_date,
+    available_from,
+    due_at,
+    reason_code,
+    changed_by
+  ) values (
+    v_target.id,
+    v_target.assignment_version,
+    v_target.effective_service_date,
+    v_target.available_from,
+    v_target.due_at,
+    p_reason_code,
+    p_actor_profile_id
+  );
+
+  update public.rooms set state_version = state_version + 1 where id = p_room_id;
+
+  v_response := jsonb_build_object(
+    'id', v_target.id,
+    'room_id', v_target.room_id,
+    'reservation_id', v_target.reservation_id,
+    'cleaning_kind', v_target.cleaning_kind,
+    'status', v_target.status,
+    'service_date', v_target.effective_service_date,
+    'available_from', v_target.available_from,
+    'due_at', v_target.due_at,
+    'version', v_target.assignment_version
+  );
+
+  insert into public.audit_events (
+    actor_profile_id,
+    actor_display_name_snapshot,
+    event_type,
+    entity_type,
+    entity_id,
+    effective_at,
+    reason_code,
+    after_state,
+    request_hash,
+    idempotency_key
+  )
+  select
+    p.id,
+    p.display_name,
+    'cleaning.manual_request.created',
+    'cleaning_target',
+    v_target.id,
+    now(),
+    p_reason_code,
+    v_response,
+    p_request_hash,
+    private.audit_command_key(
+      p_actor_profile_id,
+      'cleaning.manual_request.create',
+      p_idempotency_key
+    )
+  from public.profiles p where p.id = p_actor_profile_id;
+
+  perform private.complete_command(
+    p_actor_profile_id,
+    'cleaning.manual_request.create',
+    p_idempotency_key,
+    p_request_hash,
+    v_target.id,
+    v_response
+  );
+  return v_response;
+end;
+$$;
+
+create function public.cancel_manual_cleaning_request(
+  p_actor_profile_id uuid,
+  p_target_id uuid,
+  p_expected_version bigint,
+  p_reason_code text,
+  p_idempotency_key text,
+  p_request_hash text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+declare
+  v_target public.cleaning_targets%rowtype;
+  v_response jsonb;
+begin
+  perform private.assert_room_admin(p_actor_profile_id);
+  v_response := private.replay_command(
+    p_actor_profile_id,
+    'cleaning.manual_request.cancel',
+    p_idempotency_key,
+    p_request_hash
+  );
+  if v_response is not null then
+    return v_response;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command', 0));
+
+  select * into v_target
+  from public.cleaning_targets t
+  where t.id = p_target_id
+  for update;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'CLEANING_REQUEST_NOT_FOUND';
+  end if;
+  if v_target.source not in ('stayover_request', 'manual_room_request') then
+    raise exception using errcode = '23514', message = 'NOT_MANUAL_CLEANING_REQUEST';
+  end if;
+  if v_target.assignment_version <> p_expected_version then
+    raise exception using errcode = '40001', message = 'STALE_VERSION';
+  end if;
+  if v_target.status not in ('unassigned', 'draft_assigned', 'notified')
+    or exists (
+      select 1 from public.cleaning_attempts a
+      where a.cleaning_target_id = v_target.id
+        and (a.started_at is not null or a.status <> 'scheduled')
+    )
+    or exists (
+      select 1 from public.room_pin_access_leases l
+      where l.cleaning_target_id = v_target.id
+        and l.revealed_at is not null
+        and l.revoked_at is null
+    ) then
+    raise exception using errcode = '23514', message = 'CLEANING_REQUEST_CANCEL_CONFLICT';
+  end if;
+
+  insert into public.notifications (
+    recipient_profile_id,
+    category,
+    title,
+    body,
+    room_id,
+    cleaning_target_id,
+    dedupe_key,
+    requires_action
+  )
+  select
+    a.maid_profile_id,
+    'cleaning_assignment_revoked',
+    '청소 요청이 취소되었습니다',
+    '관리자가 추가 청소 요청을 취소했습니다.',
+    v_target.room_id,
+    v_target.id,
+    private.audit_command_key(
+      p_actor_profile_id,
+      'cleaning.manual_request.cancel.notice.' || a.id::text,
+      p_idempotency_key
+    ),
+    false
+  from public.cleaning_assignments a
+  where a.cleaning_target_id = v_target.id
+    and a.is_current
+    and a.notified_at is not null;
+
+  update public.cleaning_attempts
+  set status = 'superseded',
+      ended_at = now(),
+      end_reason = 'MANUAL_REQUEST_CANCELLED'
+  where cleaning_target_id = v_target.id
+    and status = 'scheduled';
+
+  update public.cleaning_assignments
+  set is_current = false,
+      ended_at = now(),
+      change_reason_code = p_reason_code
+  where cleaning_target_id = v_target.id
+    and is_current;
+
+  update public.room_pin_access_leases
+  set revoked_at = now(),
+      revoke_reason_code = 'MANUAL_REQUEST_CANCELLED'
+  where cleaning_target_id = v_target.id
+    and revoked_at is null;
+
+  update public.cleaning_targets
+  set status = 'cancelled',
+      assignment_version = assignment_version + 1,
+      cancellation_reason_code = p_reason_code,
+      cancelled_at = now(),
+      cancelled_by = p_actor_profile_id
+  where id = v_target.id
+  returning * into v_target;
+
+  update public.rooms set state_version = state_version + 1 where id = v_target.room_id;
+
+  v_response := jsonb_build_object(
+    'id', v_target.id,
+    'room_id', v_target.room_id,
+    'reservation_id', v_target.reservation_id,
+    'cleaning_kind', v_target.cleaning_kind,
+    'status', v_target.status,
+    'service_date', v_target.effective_service_date,
+    'available_from', v_target.available_from,
+    'due_at', v_target.due_at,
+    'version', v_target.assignment_version
+  );
+
+  insert into public.audit_events (
+    actor_profile_id,
+    actor_display_name_snapshot,
+    event_type,
+    entity_type,
+    entity_id,
+    effective_at,
+    reason_code,
+    before_state,
+    after_state,
+    request_hash,
+    idempotency_key
+  )
+  select
+    p.id,
+    p.display_name,
+    'cleaning.manual_request.cancelled',
+    'cleaning_target',
+    v_target.id,
+    now(),
+    p_reason_code,
+    jsonb_build_object('status', 'active', 'version', p_expected_version),
+    v_response,
+    p_request_hash,
+    private.audit_command_key(
+      p_actor_profile_id,
+      'cleaning.manual_request.cancel',
+      p_idempotency_key
+    )
+  from public.profiles p where p.id = p_actor_profile_id;
+
+  perform private.complete_command(
+    p_actor_profile_id,
+    'cleaning.manual_request.cancel',
+    p_idempotency_key,
+    p_request_hash,
+    v_target.id,
     v_response
   );
   return v_response;
@@ -2162,6 +2802,24 @@ begin
   from public.reservations r
   where p_room_id is null or r.room_id = p_room_id
   order by r.check_in_at, r.id;
+end;
+$$;
+
+create function public.get_reservation_detail(
+  p_actor_profile_id uuid,
+  p_reservation_id uuid
+)
+returns setof public.reservations
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+begin
+  perform private.assert_room_admin(p_actor_profile_id);
+  return query
+  select r.*
+  from public.reservations r
+  where r.id = p_reservation_id;
 end;
 $$;
 
@@ -2514,6 +3172,27 @@ grant select on public.room_pin_access_leases to authenticated;
 grant select on public.cleaning_target_schedule_revisions to authenticated;
 
 revoke update, delete, truncate on public.audit_events from service_role;
+revoke delete, truncate on public.reservations,
+  public.reservation_schedule_revisions,
+  public.preparation_obligations,
+  public.checkout_cleaning_obligations,
+  public.room_occupancy_events,
+  public.room_operation_blocks,
+  public.room_issues,
+  public.room_candle_events,
+  public.room_pin_sync_events,
+  public.room_pin_access_leases,
+  public.cleaning_targets,
+  public.cleaning_assignments,
+  public.cleaning_attempts,
+  public.cleaning_submissions,
+  public.submission_photos,
+  public.inspection_decisions,
+  public.earnings,
+  public.payroll_cycles,
+  public.notifications,
+  public.cleaning_target_schedule_revisions
+from service_role;
 grant select, insert on public.audit_events to service_role;
 
 grant select, insert on public.reservation_schedule_revisions to service_role;
@@ -2534,7 +3213,7 @@ revoke all on function private.complete_command(uuid, text, text, text, uuid, js
 revoke all on function private.audit_command_key(uuid, text, text) from public, anon, authenticated;
 revoke all on function private.current_candle_count(uuid) from public, anon, authenticated;
 revoke all on function private.current_pin_sync_status(uuid) from public, anon, authenticated;
-revoke all on function private.room_block_reason_codes(uuid, timestamptz, boolean, boolean) from public, anon, authenticated;
+revoke all on function private.room_block_reason_codes(uuid, timestamptz, boolean, boolean, uuid) from public, anon, authenticated;
 revoke all on function private.reservation_response(public.reservations) from public, anon, authenticated;
 revoke all on function private.refresh_checkout_due_at(uuid) from public, anon, authenticated;
 
@@ -2557,7 +3236,15 @@ revoke all on function public.manual_checkout_reservation(
 revoke all on function public.process_due_reservation_transitions(
   uuid, timestamptz, text, text
 ) from public, anon, authenticated;
+revoke all on function public.create_manual_cleaning_request(
+  uuid, uuid, uuid, uuid, public.cleaning_kind, date, timestamptz, timestamptz,
+  bigint, text, text, text
+) from public, anon, authenticated;
+revoke all on function public.cancel_manual_cleaning_request(
+  uuid, uuid, bigint, text, text, text
+) from public, anon, authenticated;
 revoke all on function public.list_reservations(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.get_reservation_detail(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.mutate_room_operation(
   uuid, uuid, text, bigint, text, jsonb, text, text
 ) from public, anon, authenticated;
@@ -2581,7 +3268,15 @@ grant execute on function public.manual_checkout_reservation(
 grant execute on function public.process_due_reservation_transitions(
   uuid, timestamptz, text, text
 ) to service_role;
+grant execute on function public.create_manual_cleaning_request(
+  uuid, uuid, uuid, uuid, public.cleaning_kind, date, timestamptz, timestamptz,
+  bigint, text, text, text
+) to service_role;
+grant execute on function public.cancel_manual_cleaning_request(
+  uuid, uuid, bigint, text, text, text
+) to service_role;
 grant execute on function public.list_reservations(uuid, uuid) to service_role;
+grant execute on function public.get_reservation_detail(uuid, uuid) to service_role;
 grant execute on function public.mutate_room_operation(
   uuid, uuid, text, bigint, text, jsonb, text, text
 ) to service_role;

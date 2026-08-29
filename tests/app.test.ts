@@ -15,6 +15,8 @@ const env: AppEnv = {
   ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters',
   RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
   RESERVATION_PII_KEY_VERSION: 'test-v1',
+  RESERVATION_PII_KEYRING_JSON: '{}',
+  RESERVATION_SCHEDULER_INTERVAL_SECONDS: 60,
   corsOrigins: ['http://127.0.0.1:4173']
 };
 
@@ -89,6 +91,7 @@ function services(): AppServices {
     },
     reservations: {
       list: vi.fn(async () => []),
+      get: vi.fn(),
       create: vi.fn(async (_actor, input) => ({
         id: '41000000-0000-4000-8000-000000000001',
         roomId: input.roomId,
@@ -109,7 +112,9 @@ function services(): AppServices {
       change: vi.fn(),
       cancel: vi.fn(),
       manualCheckout: vi.fn(),
-      processDue: vi.fn()
+      processDue: vi.fn(),
+      createManualCleaningRequest: vi.fn(),
+      cancelManualCleaningRequest: vi.fn()
     }
   };
 }
@@ -133,7 +138,7 @@ describe('application', () => {
     await app.close();
   });
 
-  it('returns rooms for an authenticated actor', async () => {
+  it('returns rooms for an authenticated administrator', async () => {
     const app = await buildApp({ env, services: services(), logger: false });
     const response = await app.inject({
       method: 'GET',
@@ -144,6 +149,59 @@ describe('application', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().rooms).toHaveLength(1);
     expect(response.json().rooms[0].roomNumber).toBe('117');
+    await app.close();
+  });
+
+  it('runs the reservation transition worker when an administrator profile is configured', async () => {
+    const appServices = services();
+    appServices.reservations.processDue = vi.fn(async () => ({
+      asOf: '2026-08-29T00:00:00.000Z',
+      checkedInCount: 0,
+      checkedOutCount: 0,
+      blockedCheckInCount: 0,
+      purgedGuestNameCount: 0
+    }));
+    const app = await buildApp({
+      env: {
+        ...env,
+        RESERVATION_SCHEDULER_ACTOR_PROFILE_ID: '72000000-0000-4000-8000-000000000001'
+      },
+      services: appServices,
+      logger: false
+    });
+
+    await app.ready();
+
+    expect(appServices.reservations.processDue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: '72000000-0000-4000-8000-000000000001',
+        role: 'admin'
+      }),
+      expect.stringMatching(/^reservation-scheduler-/)
+    );
+    await app.close();
+  });
+
+  it('does not expose the global room projection to a maid', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-maid-1',
+      profileId: 'maid-1',
+      displayName: '메이드',
+      role: 'maid' as const,
+      mustChangePassword: false,
+      accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ADMIN_REQUIRED');
+    expect(appServices.rooms.list).not.toHaveBeenCalled();
     await app.close();
   });
 

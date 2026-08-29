@@ -39,15 +39,23 @@ export function encryptGuestName(value: string, encodedKey: string, keyVersion: 
   return JSON.stringify(envelope);
 }
 
-export function decryptGuestName(value: string, encodedKey: string, expectedKeyVersion: string): string {
+export function decryptGuestName(
+  value: string,
+  encodedKey: string,
+  expectedKeyVersion: string,
+  previousKeys: Record<string, string> = {}
+): string {
   try {
     const envelope = JSON.parse(value) as GuestNameEnvelope;
-    if (envelope.version !== 1 || envelope.keyVersion !== expectedKeyVersion) {
+    const selectedKey = envelope.keyVersion === expectedKeyVersion
+      ? encodedKey
+      : previousKeys[envelope.keyVersion];
+    if (envelope.version !== 1 || !selectedKey) {
       throw new Error('Unsupported envelope');
     }
     const decipher = createDecipheriv(
       'aes-256-gcm',
-      keyFromBase64(encodedKey),
+      keyFromBase64(selectedKey),
       Buffer.from(envelope.iv, 'base64')
     );
     decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));

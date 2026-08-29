@@ -71,10 +71,10 @@ erDiagram
 
 | 작업 | 서버 보장 |
 |---|---|
-| 객실·예약 명령 | actor 최신 상태·admin 역할 + 객실 `state_version`/예약 `version` CAS + actor/명령별 idempotency key |
+| 객실·예약 명령 | actor 최신 상태·admin 역할 + 객실 `state_version`/예약 `version` CAS + actor/명령별 idempotency key + 짧은 전역 advisory lock으로 lock 순서 고정 |
 | 예약 저장 | KST 기준 최소 1박·분 단위 + `[check_in_at, check_out_at)` `tstzrange` GiST exclusion으로 겹침 차단 |
 | 입·퇴실 전이 | 고유 event key + 예약 lock으로 예정/수동 전이 중복 차단, 실제 checkout은 예정 시각을 덮어쓰지 않음 |
-| 청소 요청 | 예약별 비공개 checkout obligation unique + 동일 obligation을 target으로 한 번만 materialize |
+| 청소 요청 | 예약별 비공개 checkout obligation unique + 동일 obligation을 target으로 한 번만 materialize + 연박/추가 수동 요청은 안정적인 target ID와 CAS soft cancel |
 | 담당 변경 | 대상 `assignment_version` CAS + 현재 담당 partial unique |
 | 청소 시작 | 메이드별 `in_progress` partial unique |
 | 제출 | `client_submission_id` unique + 회차별 현재 제출 unique |
@@ -113,9 +113,10 @@ erDiagram
 - `PATCH /v1/accounts/:profileId/status`
 - `POST /v1/accounts/:profileId/unlock`
 - `POST /v1/accounts/:profileId/password-reset`
-- `GET /v1/rooms`, `GET /v1/rooms/:roomId`
+- `GET /v1/rooms`, `GET /v1/rooms/:roomId` (관리자 전용 운영 projection)
 - 객실 기준정보 변경, 운영 차단·해제, 촛불 수량 event, 이슈 등록·해결, PIN 동기화 결과 기록
-- `GET·POST /v1/reservations`
+- `GET·POST /v1/reservations`, `GET /v1/reservations/:reservationId`
+- `POST /v1/reservations/cleaning-requests`, `POST /v1/reservations/cleaning-requests/:targetId/cancel`
 - 예약 일정 변경·취소·수동 체크아웃과 예약 시각 기반 전이 처리
 
 다음 구현:
@@ -140,7 +141,9 @@ erDiagram
 - 실제 관리자 계정 1개 seed 후 로그인·RLS 통합 테스트
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token 설정
 
-예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION` 환경변수로 관리하며 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. 객실 PIN도 원문 대신 동기화 상태와 PIN version만 일반 업무 원장에 기록합니다.
+예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. 객실 PIN도 원문 대신 동기화 상태와 PIN version만 일반 업무 원장에 기록합니다.
+
+`RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`를 활성 관리자 profile ID로 설정하면 서버가 시작 즉시, 이후 설정된 간격마다 예정 입·퇴실 전이와 고객명 보존 만료를 처리합니다. DB는 실행마다 해당 actor의 최신 역할·상태를 다시 검증하고 advisory lock과 event/idempotency key로 중복 실행을 막습니다. 값을 설정하지 않은 환경에서는 worker가 비활성화되며 관리자 전이 endpoint로 같은 command를 수동 실행할 수 있습니다.
 
 2026-08-28에 운영·복구검증 프로젝트에 P0·계정 수명주기·도메인 무결성 migration을 적용했다. 두 프로젝트에서 구조 검사 22건과 rollback DML 검사 17건이 통과했고 Security Advisor 경고는 0건이다. Performance Advisor에는 아직 업무 데이터가 없어 예상되는 unused-index 정보만 남아 있다. Issue #1 객실·예약 migration은 아직 두 원격 프로젝트에 적용하지 않았다.
 

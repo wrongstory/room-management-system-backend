@@ -77,6 +77,46 @@ describe('reservation privacy and idempotency', () => {
     expect(first.p_request_hash).toBe(second.p_request_hash);
     expect(first.p_guest_name_encrypted).not.toBe(second.p_guest_name_encrypted);
     expect(String(first.p_guest_name_encrypted)).not.toContain('홍길동');
+    expect(String(first.p_request_hash)).not.toBe(requestHash({
+      roomId: input.roomId,
+      checkInAt: input.checkInAt,
+      checkOutAt: input.checkOutAt,
+      guestCount: input.guestCount,
+      guestName: '홍길동',
+      expectedRoomVersion: input.expectedRoomVersion
+    }));
+  });
+
+  it('keeps older encrypted names readable during key rotation', () => {
+    const oldKey = Buffer.alloc(32, 3).toString('base64');
+    const encrypted = encryptGuestName('홍길동', oldKey, 'old-v1');
+
+    expect(decryptGuestName(encrypted, piiKey, 'test-v2', { 'old-v1': oldKey })).toBe('홍길동');
+  });
+
+  it('omits guest names from lists and decrypts them only for a detail request', async () => {
+    const encrypted = encryptGuestName('홍길동', piiKey, 'test-v1');
+    const row = { ...commandResult, guest_name_encrypted: encrypted };
+    const rpc = vi.fn(async (name: string) => ({
+      data: name === 'list_reservations' ? [row] : [row],
+      error: null
+    }));
+    const clients = {
+      admin: { rpc },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseReservationService(clients, piiKey, 'test-v1');
+
+    const list = await service.list(actor);
+    const detail = await service.get(actor, commandResult.id);
+
+    expect(list[0]).not.toHaveProperty('guestName');
+    expect(detail.guestName).toBe('홍길동');
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      'list_reservations',
+      'get_reservation_detail'
+    ]);
   });
 
   it('canonicalizes object key order before hashing commands', () => {

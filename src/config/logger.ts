@@ -19,7 +19,8 @@ const sensitiveLogPaths = [
   '*.googleDriveRefreshToken',
   '*.GOOGLE_DRIVE_REFRESH_TOKEN',
   '*.SUPABASE_SECRET_KEY',
-  '*.RESERVATION_PII_KEY_BASE64'
+  '*.RESERVATION_PII_KEY_BASE64',
+  '*.RESERVATION_PII_KEYRING_JSON'
 ] as const;
 
 export function loggerOptions(level: string) {

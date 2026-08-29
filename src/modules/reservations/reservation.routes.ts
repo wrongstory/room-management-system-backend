@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ReservationService } from './reservation.service.js';
 
 const reservationIdSchema = z.object({ reservationId: z.uuid() });
+const targetIdSchema = z.object({ targetId: z.uuid() });
 const listQuerySchema = z.object({ roomId: z.uuid().optional() });
 const timestampSchema = z.string().datetime({ offset: true });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
@@ -31,6 +32,30 @@ const mutationSchema = z.object({
   reasonCode: reasonCodeSchema
 });
 
+const manualCleaningRequestSchema = z.object({
+  roomId: z.uuid(),
+  reservationId: z.uuid().nullable().optional(),
+  cleaningKind: z.enum(['stayover', 'additional']),
+  serviceDate: z.iso.date(),
+  availableFrom: timestampSchema,
+  dueAt: timestampSchema.nullable().optional(),
+  expectedRoomVersion: z.number().int().positive(),
+  reasonCode: reasonCodeSchema
+}).superRefine((input, context) => {
+  if (input.cleaningKind === 'stayover' && !input.reservationId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['reservationId'],
+      message: '연박 청소 요청에는 예약 ID가 필요합니다.'
+    });
+  }
+});
+
+const cancelCleaningRequestSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  reasonCode: reasonCodeSchema
+});
+
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
     .min(8)
@@ -46,6 +71,43 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
     app.get('/', { preHandler: adminPreHandler }, async (request) => {
       const { roomId } = listQuerySchema.parse(request.query);
       return { reservations: await service.list(request.actor, roomId) };
+    });
+
+    app.post('/cleaning-requests', { preHandler: adminPreHandler }, async (request, reply) => {
+      const input = manualCleaningRequestSchema.parse(request.body);
+      const cleaningRequest = await service.createManualCleaningRequest(request.actor, {
+        roomId: input.roomId,
+        cleaningKind: input.cleaningKind,
+        serviceDate: input.serviceDate,
+        availableFrom: input.availableFrom,
+        expectedRoomVersion: input.expectedRoomVersion,
+        reasonCode: input.reasonCode,
+        ...(input.reservationId !== undefined ? { reservationId: input.reservationId } : {}),
+        ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
+        idempotencyKey: idempotencyKey(request)
+      });
+      return reply.code(201).send({ cleaningRequest });
+    });
+
+    app.post(
+      '/cleaning-requests/:targetId/cancel',
+      { preHandler: adminPreHandler },
+      async (request) => {
+        const { targetId } = targetIdSchema.parse(request.params);
+        const input = cancelCleaningRequestSchema.parse(request.body);
+        return {
+          cleaningRequest: await service.cancelManualCleaningRequest(request.actor, {
+            targetId,
+            ...input,
+            idempotencyKey: idempotencyKey(request)
+          })
+        };
+      }
+    );
+
+    app.get('/:reservationId', { preHandler: adminPreHandler }, async (request) => {
+      const { reservationId } = reservationIdSchema.parse(request.params);
+      return { reservation: await service.get(request.actor, reservationId) };
     });
 
     app.post('/', { preHandler: adminPreHandler }, async (request, reply) => {

@@ -59,11 +59,11 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
     const authenticated = [app.authenticate, app.requirePasswordChanged];
     const admin = [...authenticated, app.requireAdmin];
 
-    app.get('/', { preHandler: authenticated }, async (request) => ({
+    app.get('/', { preHandler: admin }, async (request) => ({
       rooms: await roomService.list(request.actor)
     }));
 
-    app.get('/:roomId', { preHandler: authenticated }, async (request) => {
+    app.get('/:roomId', { preHandler: admin }, async (request) => {
       const { roomId } = roomIdSchema.parse(request.params);
       return { room: await roomService.get(request.actor, roomId) };
     });
