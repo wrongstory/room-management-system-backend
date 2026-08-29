@@ -42,5 +42,6 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(command).toBeGreaterThan(actorCheck);
     expect(scheduler).toContain('crypto.subtle.verify');
     expect(scheduler).toContain('reservation-scheduler-$' + '{bucket}');
+    expect(scheduler).toMatch(/p_as_of:\s*new Date\(\)\.toISOString\(\)/);
   });
 });
