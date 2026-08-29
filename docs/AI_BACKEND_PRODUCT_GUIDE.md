@@ -5,8 +5,10 @@
 검토 기준:
 
 - 백엔드 `main`: `7e229c2c1fabd4efd9c77e6032a8ffea09b16cd4`
-- 프런트엔드 `main`: `b517fb79922f97426b41bf33e2f15cbbc003b136`
-- 기준일: 2026-08-26 KST
+- 프런트엔드 정본 저장소: `makee-ham/room-management-system`
+- 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
+- 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
+- 기준일: 2026-08-29 KST
 
 프런트엔드는 실제 API 소비자가 아니라 단일 HTML로 만든 고충실도 업무 시뮬레이터다. 화면 객체, fixture, dead code를 그대로 API나 테이블로 옮기지 않는다.
 
@@ -25,7 +27,7 @@
 
 현재 SQL이나 API가 이 문서와 다르면 **코드가 곧 정책이라는 뜻이 아니다.** 차이를 기술 부채로 기록하고, 기존 운영 데이터에 미칠 영향을 확인한 migration으로 고친다.
 
-이 가이드는 아래 프런트엔드 commit을 요약한 저장소 내부 정본이다. 같은 snapshot의 인용 문서와 `[확정]` 문장이 충돌하면 위 순위를 기계적으로 적용해 가이드 문장을 정당화하지 않는다. 가이드 오류 또는 아직 해소되지 않은 기획 충돌로 기록하고, 되돌리기 어려운 구현은 수정·질문 전까지 멈춘다. ERD/DBML은 `review draft`이므로 이 가이드와 reconciliation되기 전에는 목표 계약이나 완성 체크리스트로 사용하지 않는다.
+이 가이드는 아래 프런트엔드의 고정 정책 snapshot과 최신 상호작용 snapshot을 함께 참조하는 저장소 내부 정본이다. 같은 snapshot의 인용 문서와 `[확정]` 문장이 충돌하면 위 순위를 기계적으로 적용해 가이드 문장을 정당화하지 않는다. 가이드 오류 또는 아직 해소되지 않은 기획 충돌로 기록하고, 되돌리기 어려운 구현은 수정·질문 전까지 멈춘다. ERD/DBML은 `review draft`이므로 이 가이드와 reconciliation되기 전에는 목표 계약이나 완성 체크리스트로 사용하지 않는다.
 
 ### 고정한 프런트엔드 근거
 
@@ -37,7 +39,9 @@
 | 사건·알림 | [`DOCS/19`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/19_EVENT_NOTIFICATION_POLICY.md) |
 | 객실 청소 요청·취소 | [`DOCS/20`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/20_ROOM_CLEANING_REQUEST_FLOW.md) |
 | 전체 도메인 안전 규칙 | [`FINAL_UX_AUDIT`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/FINAL_UX_AUDIT.md) |
-| 현재 상호작용 구현 | [`WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/WIREFRAME/index.html) |
+| 현재 상호작용 구현 | [`WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/f70efc862e7f0973ef0a1327441f152745768253/WIREFRAME/index.html) |
+
+2026-08-29 재대조 결과, 이전 `b517fb7` 이후 현재 `f70efc8`까지 35개 commit이 추가됐지만 `DOCS/16~20`과 `FINAL_UX_AUDIT`의 고정 정책은 변경되지 않았다. 변경은 `WIREFRAME/README.md`, `WIREFRAME/QA.md`, `WIREFRAME/index.html` 등 현재 상호작용 구현과 검증 보강에 집중되어 있다. 따라서 기존 `[확정]` 백엔드 불변식은 유지하고 최신 `WIREFRAME`은 상호작용 snapshot으로만 해석한다. 데모 객실 수·상태·랜덤 배정 결과 같은 fixture 변화는 production seed나 정책으로 승격하지 않는다.
 
 프런트엔드 기준 commit을 바꾸면 관련 범위의 가이드, 알려진 충돌, 테스트 계약을 같은 PR에서 다시 대조한다.
 
