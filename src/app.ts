@@ -18,12 +18,19 @@ import {
   type AvailabilityService
 } from './modules/availability/availability.service.js';
 import { createAvailabilityRoutes } from './modules/availability/availability.routes.js';
+import {
+  SupabaseReservationService,
+  type ReservationService
+} from './modules/reservations/reservation.service.js';
+import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
+import type { Actor } from './domain/actor.js';
 
 export interface AppServices {
   auth: AuthService;
   accounts: AccountService;
   availability: AvailabilityService;
   rooms: RoomService;
+  reservations: ReservationService;
 }
 
 export interface BuildAppOptions {
@@ -58,7 +65,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       auth: new SupabaseAuthService(clients),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
-      rooms: new SupabaseRoomService(clients)
+      rooms: new SupabaseRoomService(clients),
+      reservations: new SupabaseReservationService(
+        clients,
+        options.env.RESERVATION_PII_KEY_BASE64,
+        options.env.RESERVATION_PII_KEY_VERSION,
+        options.env.RESERVATION_GUEST_NAME_PEPPER,
+        JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
+      )
     };
   }
 
@@ -125,6 +139,44 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
+
+  const schedulerActorId = options.env.RESERVATION_SCHEDULER_ACTOR_PROFILE_ID;
+  if (schedulerActorId) {
+    const schedulerActor: Actor = {
+      authUserId: 'system-reservation-scheduler',
+      profileId: schedulerActorId,
+      displayName: '예약 전환 스케줄러',
+      role: 'admin',
+      mustChangePassword: false,
+      accessToken: 'system-reservation-scheduler'
+    };
+    const runScheduledTransitions = async (failFast = false) => {
+      const bucket = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+      try {
+        await services.reservations.processDue(schedulerActor, `reservation-scheduler-${bucket}`);
+      } catch (error) {
+        app.log.error({ err: error }, 'Reservation transition scheduler failed');
+        if (failFast) {
+          throw error;
+        }
+      }
+    };
+    let timer: NodeJS.Timeout | undefined;
+    app.addHook('onReady', async () => {
+      await runScheduledTransitions(options.env.APP_ENV === 'production');
+      timer = setInterval(
+        () => void runScheduledTransitions(),
+        options.env.RESERVATION_SCHEDULER_INTERVAL_SECONDS * 1_000
+      );
+      timer.unref();
+    });
+    app.addHook('onClose', async () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    });
+  }
 
   return app;
 }

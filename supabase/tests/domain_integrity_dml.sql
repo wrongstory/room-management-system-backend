@@ -32,12 +32,16 @@ insert into public.profiles (
   );
 
 insert into public.reservations (
-  id, room_id, check_in_at, check_out_at, guest_count, created_by, updated_by
+  id, room_id, check_in_at, check_out_at, guest_count,
+  preparation_obligation_id, checkout_obligation_id,
+  created_by, updated_by
 ) values
   (
     '30000000-0000-4000-8000-000000000001',
     (select id from public.rooms where room_number = '117'),
     '2027-01-01 15:00:00+09', '2027-01-02 11:00:00+09', 2,
+    '31000000-0000-4000-8000-000000000001',
+    '32000000-0000-4000-8000-000000000001',
     '20000000-0000-4000-8000-000000000001',
     '20000000-0000-4000-8000-000000000001'
   ),
@@ -45,6 +49,8 @@ insert into public.reservations (
     '30000000-0000-4000-8000-000000000002',
     (select id from public.rooms where room_number = '117'),
     '2027-01-02 15:00:00+09', '2027-01-03 11:00:00+09', 2,
+    '31000000-0000-4000-8000-000000000002',
+    '32000000-0000-4000-8000-000000000002',
     '20000000-0000-4000-8000-000000000001',
     '20000000-0000-4000-8000-000000000001'
   ),
@@ -52,12 +58,59 @@ insert into public.reservations (
     '30000000-0000-4000-8000-000000000003',
     (select id from public.rooms where room_number = '117'),
     '2027-01-03 15:00:00+09', '2027-01-04 11:00:00+09', 2,
+    '31000000-0000-4000-8000-000000000003',
+    '32000000-0000-4000-8000-000000000003',
     '20000000-0000-4000-8000-000000000001',
     '20000000-0000-4000-8000-000000000001'
   );
 
+insert into public.preparation_obligations (
+  id, reservation_id, room_id
+) values
+  (
+    '31000000-0000-4000-8000-000000000001',
+    '30000000-0000-4000-8000-000000000001',
+    (select id from public.rooms where room_number = '117')
+  ),
+  (
+    '31000000-0000-4000-8000-000000000002',
+    '30000000-0000-4000-8000-000000000002',
+    (select id from public.rooms where room_number = '117')
+  ),
+  (
+    '31000000-0000-4000-8000-000000000003',
+    '30000000-0000-4000-8000-000000000003',
+    (select id from public.rooms where room_number = '117')
+  );
+
+insert into public.checkout_cleaning_obligations (
+  id, reservation_id, room_id, original_service_date, effective_service_date,
+  available_from, created_by
+) values
+  (
+    '32000000-0000-4000-8000-000000000001',
+    '30000000-0000-4000-8000-000000000001',
+    (select id from public.rooms where room_number = '117'),
+    '2027-01-02', '2027-01-02', '2027-01-02 11:00:00+09',
+    '20000000-0000-4000-8000-000000000001'
+  ),
+  (
+    '32000000-0000-4000-8000-000000000002',
+    '30000000-0000-4000-8000-000000000002',
+    (select id from public.rooms where room_number = '117'),
+    '2027-01-03', '2027-01-03', '2027-01-03 11:00:00+09',
+    '20000000-0000-4000-8000-000000000001'
+  ),
+  (
+    '32000000-0000-4000-8000-000000000003',
+    '30000000-0000-4000-8000-000000000003',
+    (select id from public.rooms where room_number = '117'),
+    '2027-01-04', '2027-01-04', '2027-01-04 11:00:00+09',
+    '20000000-0000-4000-8000-000000000001'
+  );
+
 insert into public.cleaning_targets (
-  id, room_id, reservation_id, cleaning_kind, source, source_key,
+  id, room_id, reservation_id, checkout_obligation_id, cleaning_kind, source, source_key,
   original_service_date, effective_service_date,
   room_type_snapshot, fee_snapshot, template_snapshot, created_by
 ) values
@@ -65,6 +118,7 @@ insert into public.cleaning_targets (
     '40000000-0000-4000-8000-000000000001',
     (select id from public.rooms where room_number = '117'),
     '30000000-0000-4000-8000-000000000001',
+    '32000000-0000-4000-8000-000000000001',
     'checkout', 'scheduled_checkout', 'test:reservation:1:checkout',
     '2027-01-02', '2027-01-02', '{}'::jsonb, 16000, '{}'::jsonb,
     '20000000-0000-4000-8000-000000000001'
@@ -73,10 +127,24 @@ insert into public.cleaning_targets (
     '40000000-0000-4000-8000-000000000002',
     (select id from public.rooms where room_number = '117'),
     '30000000-0000-4000-8000-000000000002',
+    '32000000-0000-4000-8000-000000000002',
     'checkout', 'scheduled_checkout', 'test:reservation:2:checkout',
     '2027-01-03', '2027-01-03', '{}'::jsonb, 16000, '{}'::jsonb,
     '20000000-0000-4000-8000-000000000001'
   );
+
+update public.checkout_cleaning_obligations
+set status = 'materialized',
+    current_cleaning_target_id = case reservation_id
+      when '30000000-0000-4000-8000-000000000001'::uuid
+        then '40000000-0000-4000-8000-000000000001'::uuid
+      when '30000000-0000-4000-8000-000000000002'::uuid
+        then '40000000-0000-4000-8000-000000000002'::uuid
+    end
+where reservation_id in (
+  '30000000-0000-4000-8000-000000000001',
+  '30000000-0000-4000-8000-000000000002'
+);
 
 do $$
 begin
@@ -93,12 +161,13 @@ do $$
 begin
   begin
     insert into public.cleaning_targets (
-      room_id, reservation_id, cleaning_kind, source, source_key,
+      room_id, reservation_id, checkout_obligation_id, cleaning_kind, source, source_key,
       original_service_date, effective_service_date,
       room_type_snapshot, fee_snapshot, template_snapshot, created_by
     ) values (
       (select id from public.rooms where room_number = '117'),
       '30000000-0000-4000-8000-000000000001',
+      '32000000-0000-4000-8000-000000000001',
       'checkout', 'manual_checkout', 'test:reservation:1:manual-checkout',
       '2027-01-02', '2027-01-02', '{}'::jsonb, 16000, '{}'::jsonb,
       '20000000-0000-4000-8000-000000000001'
@@ -114,12 +183,13 @@ do $$
 begin
   begin
     insert into public.cleaning_targets (
-      room_id, reservation_id, cleaning_kind, source, source_key,
+      room_id, reservation_id, checkout_obligation_id, cleaning_kind, source, source_key,
       original_service_date, effective_service_date,
       room_type_snapshot, fee_snapshot, template_snapshot, created_by
     ) values (
       (select id from public.rooms where room_number = '135'),
       '30000000-0000-4000-8000-000000000003',
+      '32000000-0000-4000-8000-000000000003',
       'checkout', 'scheduled_checkout', 'test:wrong-room',
       '2027-01-02', '2027-01-02', '{}'::jsonb, 16000, '{}'::jsonb,
       '20000000-0000-4000-8000-000000000001'
