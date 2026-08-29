@@ -4,6 +4,7 @@ Project room_management_system {
 }
 
 Enum app_role {
+  developer
   admin
   maid
 }

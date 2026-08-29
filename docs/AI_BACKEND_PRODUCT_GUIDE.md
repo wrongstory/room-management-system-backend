@@ -5,8 +5,10 @@
 검토 기준:
 
 - 백엔드 `main`: `7e229c2c1fabd4efd9c77e6032a8ffea09b16cd4`
-- 프런트엔드 `main`: `b517fb79922f97426b41bf33e2f15cbbc003b136`
-- 기준일: 2026-08-26 KST
+- 프런트엔드 정본 저장소: `makee-ham/room-management-system`
+- 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
+- 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
+- 기준일: 2026-08-29 KST
 
 프런트엔드는 실제 API 소비자가 아니라 단일 HTML로 만든 고충실도 업무 시뮬레이터다. 화면 객체, fixture, dead code를 그대로 API나 테이블로 옮기지 않는다.
 
@@ -25,7 +27,7 @@
 
 현재 SQL이나 API가 이 문서와 다르면 **코드가 곧 정책이라는 뜻이 아니다.** 차이를 기술 부채로 기록하고, 기존 운영 데이터에 미칠 영향을 확인한 migration으로 고친다.
 
-이 가이드는 아래 프런트엔드 commit을 요약한 저장소 내부 정본이다. 같은 snapshot의 인용 문서와 `[확정]` 문장이 충돌하면 위 순위를 기계적으로 적용해 가이드 문장을 정당화하지 않는다. 가이드 오류 또는 아직 해소되지 않은 기획 충돌로 기록하고, 되돌리기 어려운 구현은 수정·질문 전까지 멈춘다. ERD/DBML은 `review draft`이므로 이 가이드와 reconciliation되기 전에는 목표 계약이나 완성 체크리스트로 사용하지 않는다.
+이 가이드는 아래 프런트엔드의 고정 정책 snapshot과 최신 상호작용 snapshot을 함께 참조하는 저장소 내부 정본이다. 같은 snapshot의 인용 문서와 `[확정]` 문장이 충돌하면 위 순위를 기계적으로 적용해 가이드 문장을 정당화하지 않는다. 가이드 오류 또는 아직 해소되지 않은 기획 충돌로 기록하고, 되돌리기 어려운 구현은 수정·질문 전까지 멈춘다. ERD/DBML은 `review draft`이므로 이 가이드와 reconciliation되기 전에는 목표 계약이나 완성 체크리스트로 사용하지 않는다.
 
 ### 고정한 프런트엔드 근거
 
@@ -37,7 +39,9 @@
 | 사건·알림 | [`DOCS/19`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/19_EVENT_NOTIFICATION_POLICY.md) |
 | 객실 청소 요청·취소 | [`DOCS/20`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/20_ROOM_CLEANING_REQUEST_FLOW.md) |
 | 전체 도메인 안전 규칙 | [`FINAL_UX_AUDIT`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/FINAL_UX_AUDIT.md) |
-| 현재 상호작용 구현 | [`WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/WIREFRAME/index.html) |
+| 현재 상호작용 구현 | [`WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/f70efc862e7f0973ef0a1327441f152745768253/WIREFRAME/index.html) |
+
+2026-08-29 재대조 결과, 이전 `b517fb7` 이후 현재 `f70efc8`까지 35개 commit이 추가됐지만 `DOCS/16~20`과 `FINAL_UX_AUDIT`의 고정 정책은 변경되지 않았다. 변경은 `WIREFRAME/README.md`, `WIREFRAME/QA.md`, `WIREFRAME/index.html` 등 현재 상호작용 구현과 검증 보강에 집중되어 있다. 따라서 기존 `[확정]` 백엔드 불변식은 유지하고 최신 `WIREFRAME`은 상호작용 snapshot으로만 해석한다. 데모 객실 수·상태·랜덤 배정 결과 같은 fixture 변화는 production seed나 정책으로 승격하지 않는다.
 
 프런트엔드 기준 commit을 바꾸면 관련 범위의 가이드, 알려진 충돌, 테스트 계약을 같은 PR에서 다시 대조한다.
 
@@ -68,10 +72,11 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 
 ### 사용자 역할
 
+- **개발자**: 단일 bootstrap 계정으로 관리자·메이드 계정을 관리한다. 일반 객실·예약·배정 업무 권한은 갖지 않으며 역할·상태를 변경할 수 없다.
 - **관리자**: 객실 기준정보·예약·운영 차단·청소 대상·메이드 가능일·배정/순서·통보·검수·계정·주급·감사 이력을 관리한다.
 - **메이드**: 본인에게 통보된 작업, 본인 가능일, 본인 수행 회차·사진·제출·검수 결과·수익/주급만 본다.
 
-현재 제품 역할은 관리자와 메이드 두 종류다. 단일 `role`로 갈지 역할 이력/복수 역할 테이블로 갈지는 데이터 모델 결정 사항이지만, 어떤 구조든 역할 변경 이력과 마지막 활성 관리자 보호가 필요하다.
+현재 제품 역할은 단일 최상위 `developer`, 복수 `admin`, 복수 `maid`다. developer는 로그인 ID `admin`으로 빈 시스템에서 한 번만 bootstrap하며 일반 계정 명령으로 생성·강등·비활성화할 수 없다. admin과 maid의 역할 변경 이력과 마지막 활성 관리자 보호가 필요하다.
 
 ### 제품이 해결하는 흐름
 
@@ -382,7 +387,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 휴대폰 전체 번호를 정규화해 중복을 검사한다. 같은 번호의 활성 계정이 있으면 생성을 막고, 비활성/퇴사 계정이면 새 계정 대신 기존 계정 복구 흐름으로 보낸다.
 - 동명이인은 안정적인 suffix를 가진 login ID/alias로 구분하며 한번 부여한 suffix를 비활성·퇴사 후에도 재사용하거나 당겨 붙이지 않는다.
 - 내부 Auth 이메일은 서버 전용이며 API에 노출하지 않는다.
-- 최초 발급과 관리자 초기화 로그인 비밀번호는 등록 휴대폰 번호 뒤 4자리이며, 다음 로그인에서 선행 0을 허용하는 숫자 6자리 이상 개인 비밀번호로 바꾸게 한다. 객실 PIN과는 완전히 별개다.
+- 관리자·메이드 최초 발급과 관리자 초기화 로그인 비밀번호는 등록 휴대폰 번호 뒤 4자리이며, 다음 로그인에서 개인 비밀번호로 바꾸게 한다. 개인 비밀번호는 선행 0을 허용하는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합이다. 단일 developer는 bootstrap 시 강한 개인 비밀번호를 대화형 입력으로 직접 설정하며 CLI 인자·출력·Git·로그에 남기지 않는다. 객실 PIN과는 완전히 별개다.
 - Supabase Auth에는 4자리 임시값을 서버 내부 namespace로 변환해 전달한다. 사용자가 입력하는 값은 계속 휴대폰 뒤 4자리이며 변환값은 클라이언트·로그·알림에 노출하지 않는다.
 - 초기/초기화 비밀번호 상태에서는 `must_change_password`를 강제하고 비밀번호 변경·로그아웃 외 일반 운영 API를 열지 않는다.
 - 로그인 5회 실패 시 **5번째 실패 시각부터 고정 15분** 잠근다. 추가 실패가 잠금 종료를 계속 미루지 않게 한다.
@@ -513,10 +518,10 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - RLS는 활성 계정 상태와 실제 ownership을 함께 검사한다.
 - 관리자라는 이유만으로 업무 원장에 `FOR ALL` + DELETE를 주지 않는다.
 - 메이드에게 attempt 전체 컬럼 UPDATE, 임의 상태 submission INSERT, notification 전체 UPDATE를 주지 않는다.
-- 조회는 필요한 범위의 SELECT, 쓰기는 좁은 Fastify command 또는 고정 `search_path`의 검증된 RPC로 제한한다.
+- 조회는 필요한 범위의 SELECT, 쓰기는 좁은 서버 command adapter 또는 고정 `search_path`의 검증된 RPC로 제한한다.
 - `SECURITY DEFINER` 함수는 명시적 schema, 최소 EXECUTE 권한, actor 재검증, 안전한 `search_path`를 사용한다.
 - view는 `security_invoker = true`를 사용한다.
-- service-role/secret은 서버에만 두고 로그·브라우저에 노출하지 않는다. service role은 RLS를 우회하므로 Fastify command가 access token의 actor를 식별한 뒤 최신 DB role/status, ownership, capability, expected version, transition을 매번 다시 검증한다.
+- service-role/secret은 서버 runtime에만 두고 로그·브라우저에 노출하지 않는다. service role은 RLS를 우회하므로 Fastify 또는 Edge command adapter가 access token의 actor를 식별한 뒤 최신 DB role/status, ownership, capability, expected version, transition을 매번 다시 검증한다.
 
 ### 관계·제약·index
 
@@ -552,6 +557,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 담당 배정 revision/current pointer·순서·preview·activation, 현장 attempt/offline lease, 정규화 photo slot, Drive worker, 검수·재청소, bomb report, complaint/penalty/appeal, payroll event/adjustment, notification outbox와 프런트 실제 연동이 남아 있다.
 - initial migration과 테스트에는 확정된 `purge_after NOT NULL` 및 업로드 후 7일 계약이 들어 있지만, 실제 Google Drive 업로드·조회·purge worker는 아직 구현되지 않았다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
+- Issue #36에서 Supabase Edge Functions `api`의 health/Auth/rooms RPC와 Cron용 예약 scheduler Function을 로컬 PoC로 검증한다. 운영 smoke와 독립 리뷰 전에는 Supabase-only production runtime을 확정하거나 Fastify를 삭제하지 않는다.
 
 원격 운영·복구검증 프로젝트는 Git과 SQL 내용은 대응하지만 migration version은 서로 다르다. `supabase db push`로 자동 추론하지 않고 `docs/RELEASE_V0.2.0.md`의 검증된 mapping과 MCP 순차 적용 절차를 사용한다. 2026-08-29 기준 운영 Security Advisor는 0건이며, 실제 source 병합·원격 적용·tag 상태는 Release Issue #24가 추적한다.
 

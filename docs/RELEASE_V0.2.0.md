@@ -46,8 +46,9 @@
 - local fresh reset, application 60 tests, DB 126 tests, 예약 동시성, DB lint PASS
 - 독립 리뷰 P0/P1 0
 - 운영 Security Advisor 차단사항 0
-- 예약 PII key/version/keyring, guest-name pepper가 production secret manager에 존재
+- 예약 PII key/version/keyring, guest-name pepper가 production Function Secrets에 존재
 - 운영 DB에 활성 관리자 계정이 있고 그 profile ID가 scheduler actor secret으로 설정됨
+- Issue #36 Edge API/Auth/rooms/scheduler PoC의 운영 smoke와 독립 리뷰 통과
 
 ## 적용 후 smoke
 
@@ -56,4 +57,4 @@
 - 예약·객실 command 함수와 가능일 command 함수 존재 및 service-role 외 실행 권한 차단
 - 운영 migration 목록에 위 3개 이름이 순서대로 존재
 - Security Advisor 차단사항 0, Performance Advisor는 ERROR/WARN을 차단하고 초기 unused-index INFO는 기록만 유지
-- 실제 HTTP endpoint가 없으면 HTTP smoke를 `BLOCKED`로 기록하고 배포 완료로 표현하지 않음
+- Edge `api/health`, 실제 관리자 Auth/rooms, Cron scheduler HTTP smoke를 통과하지 못하면 배포 완료로 표현하지 않음

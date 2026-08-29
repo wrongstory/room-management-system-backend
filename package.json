@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "bootstrap:admin": "tsx src/scripts/bootstrap-admin.ts",
+    "bootstrap:developer": "tsx src/scripts/bootstrap-admin.ts",
     "lint": "biome lint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -26,7 +27,8 @@
     "db:reset": "supabase db reset",
     "db:verify": "supabase db reset --local --no-seed",
     "db:test": "supabase test db supabase/tests --local",
-    "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs"
+    "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs",
+    "edge:check": "node scripts/check-edge-functions.mjs"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",

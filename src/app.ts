@@ -1,29 +1,29 @@
-import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import type { AppEnv } from './config/env.js';
-import { createSupabaseClients } from './lib/supabase.js';
-import { AppError } from './lib/app-error.js';
-import { SupabaseAuthService, type AuthService } from './modules/auth/auth.service.js';
-import { createAuthRoutes } from './modules/auth/auth.routes.js';
-import { SupabaseRoomService, type RoomService } from './modules/rooms/room.service.js';
-import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { loggerOptions } from './config/logger.js';
-import { SupabaseAccountService, type AccountService } from './modules/accounts/account.service.js';
+import { type Actor, canManageAccounts } from './domain/actor.js';
+import { AppError } from './lib/app-error.js';
+import { createSupabaseClients } from './lib/supabase.js';
 import { createAccountRoutes } from './modules/accounts/account.routes.js';
+import { type AccountService, SupabaseAccountService } from './modules/accounts/account.service.js';
+import { createAuthRoutes } from './modules/auth/auth.routes.js';
+import { type AuthService, SupabaseAuthService } from './modules/auth/auth.service.js';
+import { createAvailabilityRoutes } from './modules/availability/availability.routes.js';
 import {
   SupabaseAvailabilityService,
   type AvailabilityService
 } from './modules/availability/availability.service.js';
-import { createAvailabilityRoutes } from './modules/availability/availability.routes.js';
+import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
 import {
   SupabaseReservationService,
   type ReservationService
 } from './modules/reservations/reservation.service.js';
-import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
-import type { Actor } from './domain/actor.js';
+import { createRoomRoutes } from './modules/rooms/room.routes.js';
+import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -96,6 +96,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.decorate('requirePasswordChanged', async (request) => {
     if (request.actor.mustChangePassword) {
       throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '계속하려면 먼저 임시 비밀번호를 변경해 주세요.');
+    }
+  });
+  app.decorate('requireAccountManager', async (request) => {
+    if (!canManageAccounts(request.actor.role)) {
+      throw new AppError(403, 'ACCOUNT_MANAGER_REQUIRED', '계정 관리 권한이 필요합니다.');
     }
   });
   app.decorate('requireAdmin', async (request) => {

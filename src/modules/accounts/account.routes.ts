@@ -28,7 +28,7 @@ function idempotencyKey(request: FastifyRequest): string {
 
 export function createAccountRoutes(accountService: AccountService): FastifyPluginAsync {
   return async (app) => {
-    const adminPreHandler = [app.authenticate, app.requirePasswordChanged, app.requireAdmin];
+    const adminPreHandler = [app.authenticate, app.requirePasswordChanged, app.requireAccountManager];
 
     app.get('/', { preHandler: adminPreHandler }, async (request) => ({
       accounts: await accountService.list(request.actor)

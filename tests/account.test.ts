@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Actor } from '../src/domain/actor.js';
+import { type Actor, canManageAccounts } from '../src/domain/actor.js';
 import { AppError } from '../src/lib/app-error.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import {
@@ -36,7 +36,11 @@ const activeAdminProfile = {
   updated_at: '2026-08-26T00:00:00.000Z'
 };
 
-function accountStatusHarness(rpcResult: unknown, authError: unknown = null) {
+function accountStatusHarness(
+  rpcResult: unknown,
+  authError: unknown = null,
+  profile: unknown = activeAdminProfile
+) {
   const callOrder: string[] = [];
   const rpc = vi.fn(async () => {
     callOrder.push('database');
@@ -51,7 +55,7 @@ function accountStatusHarness(rpcResult: unknown, authError: unknown = null) {
       from: vi.fn(() => ({
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
-            single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            single: vi.fn(async () => ({ data: profile, error: null }))
           }))
         }))
       })),
@@ -84,6 +88,12 @@ describe('account input normalization', () => {
 
   it('rejects non-mobile phone numbers', () => {
     expect(() => normalizeKoreanMobile('02-1234-5678')).toThrow(AppError);
+  });
+
+  it('allows developer and admin to manage accounts but not maids', () => {
+    expect(canManageAccounts('developer')).toBe(true);
+    expect(canManageAccounts('admin')).toBe(true);
+    expect(canManageAccounts('maid')).toBe(false);
   });
 
   it('uses a stable normalized name while preserving the display name', () => {
@@ -164,5 +174,24 @@ describe('account input normalization', () => {
       activeAdminProfile.auth_user_id,
       { ban_duration: '876000h' }
     );
+  });
+
+  it('rejects developer role mutation before touching Auth or DB', async () => {
+    const developerProfile = {
+      ...activeAdminProfile,
+      id: 'developer-1',
+      auth_user_id: 'auth-developer-1',
+      role: 'developer' as const
+    };
+    const harness = accountStatusHarness({ data: null, error: null }, null, developerProfile);
+
+    await expect(harness.service.changeRole(actor, {
+      targetProfileId: developerProfile.id,
+      role: 'admin',
+      idempotencyKey: 'protect-developer-role-0001'
+    })).rejects.toMatchObject({ code: 'DEVELOPER_ACCOUNT_PROTECTED', statusCode: 403 });
+
+    expect(harness.rpc).not.toHaveBeenCalled();
+    expect(harness.updateUserById).not.toHaveBeenCalled();
   });
 });
