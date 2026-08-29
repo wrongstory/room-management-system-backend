@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "bootstrap:admin": "tsx src/scripts/bootstrap-admin.ts",
+    "bootstrap:developer": "tsx src/scripts/bootstrap-admin.ts",
     "lint": "biome lint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
