@@ -1,13 +1,13 @@
 # CASTLE THE ART 객실관리 백엔드
 
-`room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
+`room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 단일 개발자와 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
 
 ## 현재 구현
 
 - Fastify 5 + TypeScript API
 - Supabase Auth 기반 로그인 토큰 검증
 - 이름형 로그인 아이디를 Supabase Auth 내부 계정에 매핑하는 서버 로그인
-- 관리자·메이드 개별 계정 생성, 역할·상태 변경, 잠금 해제, 비밀번호 초기화
+- 단일 developer bootstrap과 관리자·메이드 개별 계정 생성, 역할·상태 변경, 잠금 해제, 비밀번호 초기화
 - 임시 비밀번호 변경 강제와 폐기된 세션의 매 요청 차단
 - `GET /health`, `/v1/auth`, `/v1/accounts`, `/v1/rooms`, `/v1/reservations`, `/v1/availability`
 - 객실 기준정보 CAS 변경, 운영 차단·촛불·이슈·PIN 동기화 event 기록
@@ -36,10 +36,10 @@ npm run dev
 
 macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다. production에서는 예정 전이·개인정보 보존 worker가 조용히 중지되지 않도록 활성 관리자 profile ID인 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`도 반드시 설정합니다.
 
-빈 프로젝트의 최초 관리자만 서버 환경에서 다음 명령으로 생성합니다. 실제 이름과 휴대전화 번호는 명령 인자로만 전달하고 CI 로그에서는 실행하지 않습니다.
+빈 프로젝트의 단일 최상위 developer만 서버 환경에서 다음 명령으로 생성합니다. 로그인 ID는 `admin`으로 고정하며 휴대전화 번호 외 비밀번호는 명령 인자로 전달하지 않습니다.
 
 ```bash
-npm run bootstrap:admin -- --name "관리자 이름" --phone "010-0000-0000"
+npm run bootstrap:developer -- --name admin --phone "010-0000-0000"
 ```
 
 ## 검증

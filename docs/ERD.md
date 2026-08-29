@@ -7,10 +7,10 @@
 ## 1. 설계 결론
 
 - 관리자와 메이드는 인원 수를 코드나 enum에 고정하지 않는다.
-- 한 로그인 계정은 `profiles` 한 건을 가지며 현재 제품 역할은 `admin | maid`다. 각 역할의 계정 수에는 제한이 없다.
+- 한 로그인 계정은 `profiles` 한 건을 가지며 현재 제품 역할은 `developer | admin | maid`다. developer는 singleton이고 admin·maid 계정 수에는 제한이 없다.
 - 메이드 전용 인사 정보만 `maid_profiles`에 분리한다. 관리자는 별도 관리자 테이블 없이 역할로 판정한다.
 - 계정과 역할은 물리 삭제하지 않고 `status`, `revoked_at`으로 종료해 과거 배정·검수·급여 이력을 보존한다.
-- 관리자 계정 추가/메이드 계정 추가는 서버의 관리자 전용 명령에서 `auth.users → profiles + login_aliases + audit_events`를 보상 트랜잭션으로 처리한다.
+- 관리자 계정 추가/메이드 계정 추가는 서버의 developer/admin 계정 명령에서 `auth.users → profiles + login_aliases + audit_events`를 보상 트랜잭션으로 처리한다.
 - 공개 스키마의 모든 테이블은 RLS를 사용하고, 역할 판정은 사용자 수정이 가능한 JWT `user_metadata`가 아니라 DB `profiles.role`을 조회한다.
 
 ## 2. 전체 도메인 지도
@@ -97,7 +97,7 @@ erDiagram
 
 핵심 제약:
 
-- 역할은 `admin | maid`이고 각 역할의 계정은 여러 개 만들 수 있다.
+- 역할은 singleton `developer`와 복수 `admin | maid`다. developer는 계정 관리만 하고 일반 업무 capability는 active admin이 가진다.
 - 최소 한 명의 활성 관리자는 항상 남겨야 한다.
 - 활성 메이드만 근무 가능일을 제출할 수 있다.
 - `(maid_profile_id, week_start, version)`은 유일하고, 주차별 현재 제출 버전은 한 건이다.

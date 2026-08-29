@@ -1,4 +1,8 @@
-export type AppRole = 'admin' | 'maid';
+export type AppRole = 'developer' | 'admin' | 'maid';
+
+export function canManageAccounts(role: AppRole): boolean {
+  return role === 'developer' || role === 'admin';
+}
 
 export interface Actor {
   authUserId: string;

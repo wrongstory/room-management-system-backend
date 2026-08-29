@@ -1,8 +1,10 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import type { Actor, AppRole } from '../../domain/actor.js';
+import { type Actor, type AppRole, canManageAccounts } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
-import { toSupabaseAuthPassword } from '../auth/password.js';
+import { isPersonalPassword, toSupabaseAuthPassword } from '../auth/password.js';
+
+export type ManagedRole = Exclude<AppRole, 'developer'>;
 
 export type AccountStatus =
   | 'active'
@@ -27,7 +29,7 @@ export interface Account {
 
 export interface CreateAccountInput {
   displayName: string;
-  role: AppRole;
+  role: ManagedRole;
   phone: string;
   idempotencyKey: string;
 }
@@ -38,7 +40,7 @@ export interface AccountMutationInput {
 }
 
 export interface ChangeAccountRoleInput extends AccountMutationInput {
-  role: AppRole;
+  role: ManagedRole;
 }
 
 export interface ChangeAccountStatusInput extends AccountMutationInput {
@@ -51,9 +53,10 @@ export interface CreatedAccount {
   temporaryPassword: string;
 }
 
-export interface BootstrapAdminInput {
+export interface BootstrapDeveloperInput {
   displayName: string;
   phone: string;
+  password: string;
   idempotencyKey: string;
 }
 
@@ -144,9 +147,9 @@ function toAccount(row: ProfileRow): Account {
   };
 }
 
-function ensureAdmin(actor: Actor): void {
-  if (actor.role !== 'admin') {
-    throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 계정을 관리할 수 있습니다.');
+function ensureAccountManager(actor: Actor): void {
+  if (!canManageAccounts(actor.role)) {
+    throw new AppError(403, 'ACCOUNT_MANAGER_REQUIRED', '계정 관리 권한이 필요합니다.');
   }
   if (actor.mustChangePassword) {
     throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '계속하려면 먼저 임시 비밀번호를 변경해 주세요.');
@@ -193,6 +196,15 @@ function databaseError(error: { code?: string; message?: string } | null): AppEr
   if (message.includes('FIRST_ADMIN_ALREADY_EXISTS')) {
     return new AppError(409, 'FIRST_ADMIN_ALREADY_EXISTS', '최초 관리자가 이미 생성되어 관리자 API를 사용해야 합니다.');
   }
+  if (message.includes('DEVELOPER_ALREADY_EXISTS')) {
+    return new AppError(409, 'DEVELOPER_ALREADY_EXISTS', '최상위 개발자 계정이 이미 생성되어 있습니다.');
+  }
+  if (message.includes('DEVELOPER_ACCOUNT_PROTECTED')) {
+    return new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 계정은 이 작업으로 변경할 수 없습니다.');
+  }
+  if (message.includes('ACTIVE_ACCOUNT_MANAGER_REQUIRED')) {
+    return new AppError(403, 'ACCOUNT_MANAGER_REQUIRED', '활성 계정 관리자 권한이 필요합니다.');
+  }
   if (message.includes('IDEMPOTENCY_KEY_REUSED')) {
     return new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 요청에 사용한 Idempotency-Key입니다.');
   }
@@ -212,7 +224,7 @@ export class SupabaseAccountService implements AccountService {
   ) {}
 
   async list(actor: Actor): Promise<Account[]> {
-    ensureAdmin(actor);
+    ensureAccountManager(actor);
     const { data, error } = await this.clients.admin
       .from('profiles')
       .select(accountColumns)
@@ -225,7 +237,7 @@ export class SupabaseAccountService implements AccountService {
   }
 
   async create(actor: Actor, input: CreateAccountInput): Promise<CreatedAccount> {
-    ensureAdmin(actor);
+    ensureAccountManager(actor);
     const name = normalizeDisplayName(input.displayName);
     const phone = normalizeKoreanMobile(input.phone);
     const phoneHash = createHmac('sha256', this.phonePepper).update(phone.canonical).digest('hex');
@@ -289,41 +301,44 @@ export class SupabaseAccountService implements AccountService {
     }
   }
 
-  async bootstrapFirstAdmin(input: BootstrapAdminInput): Promise<CreatedAccount> {
+  async bootstrapFirstDeveloper(input: BootstrapDeveloperInput): Promise<Account> {
     const name = normalizeDisplayName(input.displayName);
+    if (name.normalized !== 'admin') {
+      throw new AppError(400, 'DEVELOPER_LOGIN_ID_MUST_BE_ADMIN', '개발자 로그인 아이디는 admin이어야 합니다.');
+    }
+    if (!isPersonalPassword(input.password)) {
+      throw new AppError(400, 'INVALID_PASSWORD', '허용된 강도의 개인 비밀번호가 필요합니다.');
+    }
     const phone = normalizeKoreanMobile(input.phone);
     const phoneHash = createHmac('sha256', this.phonePepper).update(phone.canonical).digest('hex');
     const fingerprint = {
       displayNameNormalized: name.normalized,
-      role: 'admin' as const,
+      role: 'developer' as const,
       phoneLookupHash: phoneHash
     };
     const existing = await this.findIdempotentProfile(
       input.idempotencyKey,
-      'account.bootstrap_admin_created'
+      'account.bootstrap_developer_created'
     );
     if (existing) {
       assertIdempotentAccountCreation(existing, fingerprint);
-      return {
-        account: toAccount(existing),
-        temporaryPassword: existing.phone_last_four ?? phone.lastFour
-      };
+      return toAccount(existing);
     }
 
     const profileId = randomUUID();
     const { data: authData, error: authError } = await this.clients.admin.auth.admin.createUser({
       id: profileId,
       email: syntheticEmail(profileId),
-      password: toSupabaseAuthPassword(phone.lastFour),
+      password: toSupabaseAuthPassword(input.password),
       email_confirm: true,
-      app_metadata: { profile_id: profileId, role: 'admin' }
+      app_metadata: { profile_id: profileId, role: 'developer' }
     });
     if (authError || !authData.user) {
-      throw new AppError(502, 'AUTH_USER_CREATE_FAILED', '최초 관리자 인증 계정을 만들지 못했습니다.');
+      throw new AppError(502, 'AUTH_USER_CREATE_FAILED', '최상위 개발자 인증 계정을 만들지 못했습니다.');
     }
 
     try {
-      const { data, error } = await this.clients.admin.rpc('bootstrap_first_admin_profile', {
+      const { data, error } = await this.clients.admin.rpc('bootstrap_first_developer_profile', {
         p_profile_id: profileId,
         p_auth_user_id: authData.user.id,
         p_display_name: name.displayName,
@@ -340,10 +355,7 @@ export class SupabaseAccountService implements AccountService {
       if (row.id !== profileId) {
         await this.clients.admin.auth.admin.deleteUser(profileId);
       }
-      return {
-        account: toAccount(row),
-        temporaryPassword: row.phone_last_four ?? phone.lastFour
-      };
+      return toAccount(row);
     } catch (error) {
       await this.clients.admin.auth.admin.deleteUser(profileId);
       throw error;
@@ -351,8 +363,11 @@ export class SupabaseAccountService implements AccountService {
   }
 
   async changeRole(actor: Actor, input: ChangeAccountRoleInput): Promise<Account> {
-    ensureAdmin(actor);
+    ensureAccountManager(actor);
     const before = await this.getProfile(input.targetProfileId);
+    if (before.role === 'developer') {
+      throw new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 역할은 변경할 수 없습니다.');
+    }
     const { error: authError } = await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
       app_metadata: { profile_id: before.id, role: input.role }
     });
@@ -376,8 +391,11 @@ export class SupabaseAccountService implements AccountService {
   }
 
   async changeStatus(actor: Actor, input: ChangeAccountStatusInput): Promise<Account> {
-    ensureAdmin(actor);
+    ensureAccountManager(actor);
     const before = await this.getProfile(input.targetProfileId);
+    if (before.role === 'developer') {
+      throw new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 상태는 변경할 수 없습니다.');
+    }
     const { data, error } = await this.clients.admin.rpc('change_account_status', {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: input.targetProfileId,
@@ -406,7 +424,7 @@ export class SupabaseAccountService implements AccountService {
   }
 
   async unlock(actor: Actor, input: AccountMutationInput): Promise<Account> {
-    ensureAdmin(actor);
+    ensureAccountManager(actor);
     return this.runAccountRpc('unlock_account', {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: input.targetProfileId,
@@ -415,7 +433,11 @@ export class SupabaseAccountService implements AccountService {
   }
 
   async resetPassword(actor: Actor, input: AccountMutationInput): Promise<Account> {
-    ensureAdmin(actor);
+    ensureAccountManager(actor);
+    const before = await this.getProfile(input.targetProfileId);
+    if (before.role === 'developer') {
+      throw new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 비밀번호는 본인만 변경할 수 있습니다.');
+    }
     const { data, error } = await this.clients.admin.rpc('prepare_account_password_reset', {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: input.targetProfileId,

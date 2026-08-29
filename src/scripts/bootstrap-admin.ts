@@ -9,10 +9,52 @@ function argument(name: string): string | undefined {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+async function readHiddenPassword(): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdin.setRawMode) {
+    throw new Error('개발자 비밀번호는 공유되지 않는 대화형 터미널에서 입력해야 합니다.');
+  }
+
+  process.stdout.write('개발자 개인 비밀번호: ');
+  return new Promise((resolve, reject) => {
+    let password = '';
+    const input = process.stdin;
+    const cleanup = () => {
+      input.off('data', onData);
+      input.setRawMode(false);
+      input.pause();
+      process.stdout.write('\n');
+    };
+    const onData = (chunk: Buffer | string) => {
+      const value = chunk.toString();
+      for (const character of value) {
+        if (character === '\u0003') {
+          cleanup();
+          reject(new Error('개발자 bootstrap이 취소되었습니다.'));
+          return;
+        }
+        if (character === '\r' || character === '\n') {
+          cleanup();
+          resolve(password);
+          return;
+        }
+        if (character === '\u007f' || character === '\b') {
+          password = password.slice(0, -1);
+          continue;
+        }
+        password += character;
+      }
+    };
+
+    input.setRawMode(true);
+    input.resume();
+    input.on('data', onData);
+  });
+}
+
 const displayName = argument('name');
 const phone = argument('phone');
 if (!displayName || !phone) {
-  throw new Error('사용법: npm run bootstrap:admin -- --name "관리자 이름" --phone "010-0000-0000"');
+  throw new Error('사용법: npm run bootstrap:developer -- --name admin --phone "010-0000-0000"');
 }
 
 const env = loadEnv();
@@ -21,15 +63,15 @@ if (env.APP_ENV === 'local' && !['127.0.0.1', 'localhost'].includes(new URL(env.
 }
 
 const service = new SupabaseAccountService(createSupabaseClients(env), env.ACCOUNT_PHONE_PEPPER);
-const result = await service.bootstrapFirstAdmin({
+const result = await service.bootstrapFirstDeveloper({
   displayName,
   phone,
-  idempotencyKey: argument('idempotency-key') ?? `bootstrap-admin:${randomUUID()}`
+  password: await readHiddenPassword(),
+  idempotencyKey: argument('idempotency-key') ?? `bootstrap-developer:${randomUUID()}`
 });
 
 process.stdout.write([
-  `최초 관리자 생성 완료: ${result.account.displayName}`,
-  `로그인 아이디: ${result.account.loginId}`,
-  `임시 비밀번호: ${result.temporaryPassword}`,
-  '첫 로그인 직후 숫자 6자리 이상의 개인 비밀번호로 변경하세요.'
+  `최상위 개발자 생성 완료: ${result.displayName}`,
+  `로그인 아이디: ${result.loginId}`,
+  '비밀번호는 출력하거나 저장하지 않았습니다.'
 ].join('\n'));
