@@ -1,15 +1,21 @@
 # CASTLE THE ART 객실관리 백엔드
 
-`room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 관리자·메이드 개별 계정 수명주기, 객실 조회 API, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
+`room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 단일 개발자와 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
 
 ## 현재 구현
 
 - Fastify 5 + TypeScript API
+- Supabase Edge Functions + Cron 무료 production runtime PoC (#36)
 - Supabase Auth 기반 로그인 토큰 검증
 - 이름형 로그인 아이디를 Supabase Auth 내부 계정에 매핑하는 서버 로그인
-- 관리자·메이드 개별 계정 생성, 역할·상태 변경, 잠금 해제, 비밀번호 초기화
+- 단일 developer bootstrap과 관리자·메이드 개별 계정 생성, 역할·상태 변경, 잠금 해제, 비밀번호 초기화
 - 임시 비밀번호 변경 강제와 폐기된 세션의 매 요청 차단
-- `GET /health`, `/v1/auth`, `/v1/accounts`, `GET /v1/rooms`
+- `GET /health`, `/v1/auth`, `/v1/accounts`, `/v1/rooms`, `/v1/reservations`, `/v1/availability`
+- 객실 기준정보 CAS 변경, 운영 차단·촛불·이슈·PIN 동기화 event 기록
+- 예약 생성·일정 변경·취소·수동 체크아웃, 연박/추가 청소 요청과 예정 입·퇴실 전이
+- 메이드 주간 가능일 version 제출, 마감 후 관리자 변경 승인·반려, 날짜별 배정 후보 조회
+- production 시작 시 활성 관리자 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`를 필수 검증하고, 중단 기간의 예약은 퇴실 우선 catch-up으로 복구
+- 예약 고객명 AES-256-GCM 암호화, 목록 비노출, 관리자 상세 복호화와 180일 보존 만료
 - 예약 기간 중복 배타 제약, 활성 청소 대상/담당/수행 회차 유일 제약
 - 제출·검수·수익·주차별 지급 중복 방지 키
 - 공개 스키마 전 테이블 RLS와 Google Drive 사진 메타데이터 정책
@@ -29,12 +35,12 @@ copy .env.example .env
 npm run dev
 ```
 
-macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key를 입력합니다.
+macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다. production에서는 예정 전이·개인정보 보존 worker가 조용히 중지되지 않도록 활성 관리자 profile ID인 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`도 반드시 설정합니다.
 
-빈 프로젝트의 최초 관리자만 서버 환경에서 다음 명령으로 생성합니다. 실제 이름과 휴대전화 번호는 명령 인자로만 전달하고 CI 로그에서는 실행하지 않습니다.
+빈 프로젝트의 단일 최상위 developer만 서버 환경에서 다음 명령으로 생성합니다. `--name`은 표시 이름일 뿐이며 로그인 ID는 입력과 무관하게 `admin`으로 고정합니다. 휴대전화 번호 외 비밀번호는 명령 인자로 전달하지 않습니다.
 
 ```bash
-npm run bootstrap:admin -- --name "관리자 이름" --phone "010-0000-0000"
+npm run bootstrap:developer -- --name "개발자 표시 이름" --phone "010-0000-0000"
 ```
 
 ## 검증
@@ -52,7 +58,10 @@ npm run build
 ```bash
 npm run db:start
 npm run db:reset
+npm run edge:check
 ```
+
+Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge runtime PoC](docs/EDGE_RUNTIME_POC.md)에 정리했습니다. 운영 smoke가 끝나기 전까지 기존 Fastify 구현은 개발 기준선으로 유지합니다.
 
 ## 보안 경계
 
@@ -61,4 +70,6 @@ npm run db:reset
 - 사용자 인증정보는 `user_metadata`가 아니라 DB 프로필과 서버 검증 결과로 권한을 결정합니다.
 - 휴대전화 원문은 저장하지 않고 서버 비밀값으로 만든 HMAC과 마지막 4자리만 저장합니다.
 - 사진은 앱에서 300KiB 이하로 압축해 Google Drive 비공개 폴더에만 저장하고, 업로드 시각부터 정확히 7일 뒤 영구삭제하는 것이 확정 계약입니다. 180일 보존이나 retention hold 예외는 두지 않습니다. 업로드·삭제 worker와 운영 OAuth 자격증명은 아직 구현·배포 전이며, token과 locator를 브라우저에 노출하지 않습니다.
+- 예약 고객명은 서버에서만 암복호화하고 DB·로그·감사 payload에 평문을 저장하지 않습니다. 목록에서는 제외하고 관리자 단건 상세에서만 표시하며 체크아웃/취소 180일 뒤 worker가 암호문을 제거합니다. 암호화 키를 바꿀 때는 이전 키를 `RESERVATION_PII_KEYRING_JSON`에 유지한 채 새 key version으로 쓰기를 전환하고 기존 암호문을 계획적으로 재암호화해야 합니다.
+- 고객명 idempotency fingerprint는 암호화 키와 분리된 `RESERVATION_GUEST_NAME_PEPPER`를 사용해 암호화 키 회전 전후에도 같은 요청 hash를 유지합니다.
 - 운영·복구검증 Supabase에는 P0·계정 수명주기·도메인 무결성 migration이 적용됐습니다. 정확한 구현·배포 구분은 제품·도메인 가이드의 구현 현황 절을 따릅니다.

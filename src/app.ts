@@ -1,23 +1,36 @@
-import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import type { AppEnv } from './config/env.js';
-import { createSupabaseClients } from './lib/supabase.js';
-import { AppError } from './lib/app-error.js';
-import { SupabaseAuthService, type AuthService } from './modules/auth/auth.service.js';
-import { createAuthRoutes } from './modules/auth/auth.routes.js';
-import { SupabaseRoomService, type RoomService } from './modules/rooms/room.service.js';
-import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { loggerOptions } from './config/logger.js';
-import { SupabaseAccountService, type AccountService } from './modules/accounts/account.service.js';
+import { type Actor, canManageAccounts } from './domain/actor.js';
+import { AppError } from './lib/app-error.js';
+import { createSupabaseClients } from './lib/supabase.js';
 import { createAccountRoutes } from './modules/accounts/account.routes.js';
+import { type AccountService, SupabaseAccountService } from './modules/accounts/account.service.js';
+import { createAuthRoutes } from './modules/auth/auth.routes.js';
+import { type AuthService, SupabaseAuthService } from './modules/auth/auth.service.js';
+import { createAvailabilityRoutes } from './modules/availability/availability.routes.js';
+import {
+  SupabaseAvailabilityService,
+  type AvailabilityService
+} from './modules/availability/availability.service.js';
+import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
+import {
+  SupabaseReservationService,
+  type ReservationService
+} from './modules/reservations/reservation.service.js';
+import { createRoomRoutes } from './modules/rooms/room.routes.js';
+import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
 
 export interface AppServices {
   auth: AuthService;
   accounts: AccountService;
+  availability: AvailabilityService;
   rooms: RoomService;
+  reservations: ReservationService;
 }
 
 export interface BuildAppOptions {
@@ -51,7 +64,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     services = {
       auth: new SupabaseAuthService(clients),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
-      rooms: new SupabaseRoomService(clients)
+      availability: new SupabaseAvailabilityService(clients),
+      rooms: new SupabaseRoomService(clients),
+      reservations: new SupabaseReservationService(
+        clients,
+        options.env.RESERVATION_PII_KEY_BASE64,
+        options.env.RESERVATION_PII_KEY_VERSION,
+        options.env.RESERVATION_GUEST_NAME_PEPPER,
+        JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
+      )
     };
   }
 
@@ -75,6 +96,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.decorate('requirePasswordChanged', async (request) => {
     if (request.actor.mustChangePassword) {
       throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '계속하려면 먼저 임시 비밀번호를 변경해 주세요.');
+    }
+  });
+  app.decorate('requireAccountManager', async (request) => {
+    if (!canManageAccounts(request.actor.role)) {
+      throw new AppError(403, 'ACCOUNT_MANAGER_REQUIRED', '계정 관리 권한이 필요합니다.');
     }
   });
   app.decorate('requireAdmin', async (request) => {
@@ -116,7 +142,46 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   await app.register(createAuthRoutes(services.auth), { prefix: '/v1/auth' });
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
+  await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
+
+  const schedulerActorId = options.env.RESERVATION_SCHEDULER_ACTOR_PROFILE_ID;
+  if (schedulerActorId) {
+    const schedulerActor: Actor = {
+      authUserId: 'system-reservation-scheduler',
+      profileId: schedulerActorId,
+      displayName: '예약 전환 스케줄러',
+      role: 'admin',
+      mustChangePassword: false,
+      accessToken: 'system-reservation-scheduler'
+    };
+    const runScheduledTransitions = async (failFast = false) => {
+      const bucket = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+      try {
+        await services.reservations.processDue(schedulerActor, `reservation-scheduler-${bucket}`);
+      } catch (error) {
+        app.log.error({ err: error }, 'Reservation transition scheduler failed');
+        if (failFast) {
+          throw error;
+        }
+      }
+    };
+    let timer: NodeJS.Timeout | undefined;
+    app.addHook('onReady', async () => {
+      await runScheduledTransitions(options.env.APP_ENV === 'production');
+      timer = setInterval(
+        () => void runScheduledTransitions(),
+        options.env.RESERVATION_SCHEDULER_INTERVAL_SECONDS * 1_000
+      );
+      timer.unref();
+    });
+    app.addHook('onClose', async () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    });
+  }
 
   return app;
 }

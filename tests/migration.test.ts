@@ -33,6 +33,25 @@ const notificationGrantMigrationUrl = new URL(
   '../supabase/migrations/20260827211304_restrict_notification_recipient_updates.sql',
   import.meta.url
 );
+const roomReservationMigrationUrl = new URL(
+  '../supabase/migrations/20260827224644_room_reservation_commands.sql',
+  import.meta.url
+);
+
+const availabilityMigrationUrl = new URL(
+  '../supabase/migrations/20260828220417_weekly_availability_contract.sql',
+  import.meta.url
+);
+
+const developerRoleMigrationUrl = new URL(
+  '../supabase/migrations/20260829120003_add_developer_role.sql',
+  import.meta.url
+);
+
+const developerContractMigrationUrl = new URL(
+  '../supabase/migrations/20260829120005_developer_account_contract.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -51,7 +70,9 @@ describe('initial migration contract', () => {
       await readFile(accountMigrationUrl, 'utf8'),
       await readFile(accountHardeningMigrationUrl, 'utf8'),
       await readFile(domainIntegrityMigrationUrl, 'utf8'),
-      await readFile(domainIndexMigrationUrl, 'utf8')
+      await readFile(domainIndexMigrationUrl, 'utf8'),
+      await readFile(roomReservationMigrationUrl, 'utf8'),
+      await readFile(availabilityMigrationUrl, 'utf8')
     ].join('\n');
     const tables = [...sql.matchAll(/create table public\.([a-z_]+)/g)].map((match) => match[1]);
     const rlsTables = [...sql.matchAll(/alter table public\.([a-z_]+) enable row level security/g)]
@@ -141,6 +162,25 @@ describe('initial migration contract', () => {
     expect(sql).toContain('from public, anon, authenticated');
   });
 
+  it('separates the singleton developer from business administrators', async () => {
+    const roleSql = await readFile(developerRoleMigrationUrl, 'utf8');
+    const contractSql = await readFile(developerContractMigrationUrl, 'utf8');
+
+    expect(roleSql).toContain("add value if not exists 'developer'");
+    expect(contractSql).toContain('profiles_singleton_developer_idx');
+    expect(contractSql).toContain('create function public.bootstrap_first_developer_profile');
+    expect(contractSql).toContain("'account.bootstrap_developer_created'");
+    expect(contractSql).toContain("message = 'DEVELOPER_ACCOUNT_PROTECTED'");
+    expect(contractSql).toContain("or new.login_id <> 'admin'");
+    expect(contractSql).toContain("or new.login_id_normalized <> 'admin'");
+    expect(contractSql).toMatch(
+      /'admin',\r?\n\s+'admin',\r?\n\s+0,\r?\n\s+'developer'/
+    );
+    expect(contractSql).toContain('from service_role');
+    expect(contractSql).toContain('to service_role');
+    expect(contractSql).not.toContain('grant execute on function public.bootstrap_first_admin_profile');
+  });
+
   it('hardens cross-table cleaning and payroll integrity', async () => {
     const sql = await readFile(domainIntegrityMigrationUrl, 'utf8');
     const indexSql = await readFile(domainIndexMigrationUrl, 'utf8');
@@ -169,5 +209,75 @@ describe('initial migration contract', () => {
     );
     expect(sql).toContain('grant update (read_at) on public.notifications to authenticated');
     expect(sql).not.toContain('grant update (read_at, resolved_at)');
+  });
+
+  it('keeps weekly availability versioned, service-only, and RLS scoped', async () => {
+    const sql = await readFile(availabilityMigrationUrl, 'utf8');
+
+    expect(sql).toContain('availability_versions_one_current_per_week');
+    expect(sql).toContain('AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS');
+    expect(sql).toContain('OUTSIDE_AVAILABILITY_WINDOW');
+    expect(sql).toContain('STALE_VERSION');
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain("'availability.submit'");
+    expect(sql).toContain("'availability.change_requested'");
+    expect(sql).toContain("'availability.change_decided'");
+    expect(sql).toContain('with (security_invoker = true, security_barrier = true)');
+    expect(sql).toContain('alter table public.availability_versions enable row level security');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+  });
+
+  it('adds reservation history, obligations, occupancy ledgers, and CAS commands', async () => {
+    const sql = await readFile(roomReservationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table public.reservation_schedule_revisions');
+    expect(sql).toContain('create table public.preparation_obligations');
+    expect(sql).toContain('create table public.checkout_cleaning_obligations');
+    expect(sql).toContain('create table public.room_occupancy_events');
+    expect(sql).toContain('create function public.create_reservation(');
+    expect(sql).toContain('create function public.change_reservation(');
+    expect(sql).toContain('create function public.cancel_reservation(');
+    expect(sql).toContain('create function public.manual_checkout_reservation(');
+    expect(sql).toContain('create function public.process_due_reservation_transitions(');
+    expect(sql).toContain("message = 'STALE_VERSION'");
+    expect(sql).toContain("message = 'IDEMPOTENCY_KEY_REUSED'");
+    expect(sql).toContain("message = 'RESERVATION_OVERLAP'");
+    expect(sql).toContain("at time zone 'Asia/Seoul'");
+    expect(sql).toContain('cleaning_targets_checkout_obligation_contract_fk');
+    expect(sql).toContain('checkout_obligations_current_target_contract_fk');
+    expect(sql).toContain('preparation_obligations_submission_attempt_fk');
+    expect(sql).toContain('approved_submission_id uuid unique');
+    expect(sql).toContain('create table private.preparation_proof_usages');
+    expect(sql).toContain('preparation_proof_usages_append_only');
+    expect(sql).toContain('inspection_decisions_append_only');
+    expect(sql).toContain('consumed_preparation_submission_immutable');
+    expect(sql).toContain('preparation_obligations_enforce_proof');
+    expect(sql).toContain('invalidate_stale_preparation_proofs');
+    expect(sql).toContain("a.status = 'approved'");
+    expect(sql).toContain('a.started_at >= t.available_from');
+    expect(sql).toContain('s.submitted_at >= a.ended_at');
+    expect(sql).toContain('d.decided_at >= s.submitted_at');
+    expect(sql).toContain('checkout_obligations_enforce_target_state');
+    expect(sql).toContain('checkout_obligations_validate_terminal_contract');
+    expect(sql).toContain('cleaning_targets_validate_checkout_terminal_contract');
+    expect(sql).toContain('room_pin_leases_attempt_contract_fk');
+    expect(sql).toContain('room_pin_access_leases_enforce_contract');
+    expect(sql).toContain('attempt_id uuid not null');
+    expect(sql).toContain('Close due stays first');
+  });
+
+  it('keeps new room ledgers append-only and service commands private', async () => {
+    const sql = await readFile(roomReservationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('reservation_schedule_revisions_append_only');
+    expect(sql).toContain('room_occupancy_events_append_only');
+    expect(sql).toContain('room_candle_events_append_only');
+    expect(sql).toContain('room_pin_sync_events_append_only');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/for all to authenticated/);
+    expect(sql).not.toMatch(/grant (insert|delete|update) on public\.(reservation|room_)/);
   });
 });

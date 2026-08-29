@@ -14,11 +14,12 @@ Free 프로젝트가 2개뿐이므로 recovery 프로젝트를 개발 DB로 겸�
 ## 환경변수 규칙
 
 - 로컬은 `.env.example`을 `.env`로 복사하고 `supabase status -o env` 결과를 입력한다.
-- 운영값은 배포 플랫폼의 encrypted secret으로만 주입한다.
+- Fastify 운영값은 배포 플랫폼의 encrypted secret으로만 주입한다. Supabase-only PoC에서는 Function Secrets를 사용하고 Cron 호출 secret은 같은 값의 Vault copy만 허용한다.
 - `APP_ENV=production`에서는 HTTPS 원격 URL, 프로젝트 Ref, HTTPS CORS origin이 모두 필요하다.
 - URL의 호스트와 `SUPABASE_PROJECT_REF`가 다르면 서버가 시작하지 않는다.
 - publishable key는 브라우저 사용이 가능하지만 secret/service-role key는 서버에만 둔다.
 - 운영·복구 DB 접속 문자열, Google OAuth 값, dump 파일은 Git과 일반 로그에 넣지 않는다.
+- Edge runtime이 자동 제공하는 `SUPABASE_SERVICE_ROLE_KEY`를 custom secret이나 Vault에 복제하지 않는다. custom Function Secret 이름은 `SUPABASE_` prefix를 사용하지 않는다.
 
 ## 마이그레이션 흐름
 
@@ -26,11 +27,12 @@ Free 프로젝트가 2개뿐이므로 recovery 프로젝트를 개발 DB로 겸�
 2. 로컬에서 `npm run db:verify`로 전체 마이그레이션을 처음부터 적용한다.
 3. `npm run ci:quality`와 RLS 계약 테스트를 통과시킨다.
 4. 운영 적용 전 원격 마이그레이션 목록과 대상 project Ref를 확인한다.
-5. Git의 동일 SQL을 운영 프로젝트에 한 번 적용한다.
+5. Git과 원격 version history가 일치할 때만 표준 migration push를 사용한다. 일치하지 않으면 릴리즈별 검증 문서의 명시적 mapping과 승인된 적용 수단을 사용한다.
 6. 적용 후 121개 객실, RLS, 명시적 GRANT, Security/Performance Advisor를 검증한다.
 7. recovery 프로젝트에는 운영 dump 복구 절차를 통해 반영한다.
 
 운영 스키마를 Dashboard에서 직접 수정하지 않는다. 긴급 변경도 먼저 마이그레이션 파일을 만들고 검증한 뒤 적용한다.
+원격 history가 Git과 다르면 자동 `supabase db push`를 실행하지 않는다. history repair는 DDL 적용과 별도 작업으로 검토하고, 이미 적용된 스키마를 다시 실행하지 않도록 SQL 내용·원격 객체·version mapping을 먼저 증명한다.
 
 ## Auth 기본 원칙
 

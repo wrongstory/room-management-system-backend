@@ -2,7 +2,9 @@
 
 > 문서 지위: 프런트엔드 분석 snapshot이다. 제품 규칙이나 현재 구현과 충돌하면 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)의 우선순위와 `[미확정]` 표시를 먼저 따른다.
 
-분석 대상: `wrongstory/room-management-system` 및 로컬 `room-management-system-main`
+분석 대상: `makee-ham/room-management-system` `main@f70efc862e7f0973ef0a1327441f152745768253`
+
+최신화 메모(2026-08-29 KST): 이전 프런트 snapshot `b517fb7`에서 현재 `f70efc8`까지 35개 commit을 재대조했다. `DOCS/16~20`과 `DOCS/FINAL_UX_AUDIT.md`는 변경되지 않았고, `WIREFRAME/README.md`, `WIREFRAME/QA.md`, `WIREFRAME/index.html` 등 상호작용 구현이 갱신됐다. 따라서 이번 최신화는 제품 불변식을 새로 확정하지 않고 정본 저장소·snapshot과 현재 상호작용 구현 기준만 갱신한다.
 
 ## 결론
 

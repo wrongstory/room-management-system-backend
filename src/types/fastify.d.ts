@@ -8,6 +8,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     authenticate: (request: FastifyRequest) => Promise<void>;
     requirePasswordChanged: (request: FastifyRequest) => Promise<void>;
+    requireAccountManager: (request: FastifyRequest) => Promise<void>;
     requireAdmin: (request: FastifyRequest) => Promise<void>;
   }
 }

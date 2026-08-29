@@ -1,15 +1,22 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { AuthService } from './auth.service.js';
+import { isLoginPassword, isPersonalPassword } from './password.js';
 
 const loginSchema = z.object({
   loginId: z.string().trim().min(1).max(80),
-  password: z.string().regex(/^(?:\d{4}|\d{6,})$/, '임시 비밀번호 4자리 또는 개인 비밀번호 숫자 6자리 이상을 입력해 주세요.')
+  password: z.string().refine(
+    isLoginPassword,
+    '임시 비밀번호 4자리 또는 허용된 개인 비밀번호를 입력해 주세요.'
+  )
 });
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string().regex(/^(?:\d{4}|\d{6,})$/),
-  newPassword: z.string().regex(/^\d{6,}$/, '새 비밀번호는 숫자 6자리 이상이어야 합니다.')
+  currentPassword: z.string().refine(isLoginPassword),
+  newPassword: z.string().refine(
+    isPersonalPassword,
+    '새 비밀번호는 숫자 6자리 이상 또는 10자 이상의 영문 대·소문자, 숫자, 특수문자 조합이어야 합니다.'
+  )
 }).refine((value) => value.currentPassword !== value.newPassword, {
   path: ['newPassword'],
   message: '새 비밀번호는 현재 비밀번호와 달라야 합니다.'

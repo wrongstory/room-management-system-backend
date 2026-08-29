@@ -24,6 +24,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run edge:check
       - run: npm run ci:quality
 
   migration:
@@ -40,6 +41,7 @@ jobs:
       - run: npm run db:start:ci
       - run: npm run db:verify
       - run: npm run db:test
+      - run: npm run db:test:concurrency
       - name: Stop local Supabase
         if: always()
         run: npm run db:stop

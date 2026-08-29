@@ -5,8 +5,10 @@
 검토 기준:
 
 - 백엔드 `main`: `7e229c2c1fabd4efd9c77e6032a8ffea09b16cd4`
-- 프런트엔드 `main`: `b517fb79922f97426b41bf33e2f15cbbc003b136`
-- 기준일: 2026-08-26 KST
+- 프런트엔드 정본 저장소: `makee-ham/room-management-system`
+- 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
+- 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
+- 기준일: 2026-08-29 KST
 
 프런트엔드는 실제 API 소비자가 아니라 단일 HTML로 만든 고충실도 업무 시뮬레이터다. 화면 객체, fixture, dead code를 그대로 API나 테이블로 옮기지 않는다.
 
@@ -25,7 +27,7 @@
 
 현재 SQL이나 API가 이 문서와 다르면 **코드가 곧 정책이라는 뜻이 아니다.** 차이를 기술 부채로 기록하고, 기존 운영 데이터에 미칠 영향을 확인한 migration으로 고친다.
 
-이 가이드는 아래 프런트엔드 commit을 요약한 저장소 내부 정본이다. 같은 snapshot의 인용 문서와 `[확정]` 문장이 충돌하면 위 순위를 기계적으로 적용해 가이드 문장을 정당화하지 않는다. 가이드 오류 또는 아직 해소되지 않은 기획 충돌로 기록하고, 되돌리기 어려운 구현은 수정·질문 전까지 멈춘다. ERD/DBML은 `review draft`이므로 이 가이드와 reconciliation되기 전에는 목표 계약이나 완성 체크리스트로 사용하지 않는다.
+이 가이드는 아래 프런트엔드의 고정 정책 snapshot과 최신 상호작용 snapshot을 함께 참조하는 저장소 내부 정본이다. 같은 snapshot의 인용 문서와 `[확정]` 문장이 충돌하면 위 순위를 기계적으로 적용해 가이드 문장을 정당화하지 않는다. 가이드 오류 또는 아직 해소되지 않은 기획 충돌로 기록하고, 되돌리기 어려운 구현은 수정·질문 전까지 멈춘다. ERD/DBML은 `review draft`이므로 이 가이드와 reconciliation되기 전에는 목표 계약이나 완성 체크리스트로 사용하지 않는다.
 
 ### 고정한 프런트엔드 근거
 
@@ -37,7 +39,9 @@
 | 사건·알림 | [`DOCS/19`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/19_EVENT_NOTIFICATION_POLICY.md) |
 | 객실 청소 요청·취소 | [`DOCS/20`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/20_ROOM_CLEANING_REQUEST_FLOW.md) |
 | 전체 도메인 안전 규칙 | [`FINAL_UX_AUDIT`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/FINAL_UX_AUDIT.md) |
-| 현재 상호작용 구현 | [`WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/WIREFRAME/index.html) |
+| 현재 상호작용 구현 | [`WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/f70efc862e7f0973ef0a1327441f152745768253/WIREFRAME/index.html) |
+
+2026-08-29 재대조 결과, 이전 `b517fb7` 이후 현재 `f70efc8`까지 35개 commit이 추가됐지만 `DOCS/16~20`과 `FINAL_UX_AUDIT`의 고정 정책은 변경되지 않았다. 변경은 `WIREFRAME/README.md`, `WIREFRAME/QA.md`, `WIREFRAME/index.html` 등 현재 상호작용 구현과 검증 보강에 집중되어 있다. 따라서 기존 `[확정]` 백엔드 불변식은 유지하고 최신 `WIREFRAME`은 상호작용 snapshot으로만 해석한다. 데모 객실 수·상태·랜덤 배정 결과 같은 fixture 변화는 production seed나 정책으로 승격하지 않는다.
 
 프런트엔드 기준 commit을 바꾸면 관련 범위의 가이드, 알려진 충돌, 테스트 계약을 같은 PR에서 다시 대조한다.
 
@@ -68,10 +72,11 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 
 ### 사용자 역할
 
+- **개발자**: 단일 bootstrap 계정으로 관리자·메이드 계정을 관리한다. 일반 객실·예약·배정 업무 권한은 갖지 않으며 역할·상태를 변경할 수 없다.
 - **관리자**: 객실 기준정보·예약·운영 차단·청소 대상·메이드 가능일·배정/순서·통보·검수·계정·주급·감사 이력을 관리한다.
 - **메이드**: 본인에게 통보된 작업, 본인 가능일, 본인 수행 회차·사진·제출·검수 결과·수익/주급만 본다.
 
-현재 제품 역할은 관리자와 메이드 두 종류다. 단일 `role`로 갈지 역할 이력/복수 역할 테이블로 갈지는 데이터 모델 결정 사항이지만, 어떤 구조든 역할 변경 이력과 마지막 활성 관리자 보호가 필요하다.
+현재 제품 역할은 단일 최상위 `developer`, 복수 `admin`, 복수 `maid`다. developer는 로그인 ID `admin`으로 빈 시스템에서 한 번만 bootstrap하며 일반 계정 명령으로 생성·강등·비활성화할 수 없다. admin과 maid의 역할 변경 이력과 마지막 활성 관리자 보호가 필요하다.
 
 ### 제품이 해결하는 흐름
 
@@ -382,7 +387,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 휴대폰 전체 번호를 정규화해 중복을 검사한다. 같은 번호의 활성 계정이 있으면 생성을 막고, 비활성/퇴사 계정이면 새 계정 대신 기존 계정 복구 흐름으로 보낸다.
 - 동명이인은 안정적인 suffix를 가진 login ID/alias로 구분하며 한번 부여한 suffix를 비활성·퇴사 후에도 재사용하거나 당겨 붙이지 않는다.
 - 내부 Auth 이메일은 서버 전용이며 API에 노출하지 않는다.
-- 최초 발급과 관리자 초기화 로그인 비밀번호는 등록 휴대폰 번호 뒤 4자리이며, 다음 로그인에서 선행 0을 허용하는 숫자 6자리 이상 개인 비밀번호로 바꾸게 한다. 객실 PIN과는 완전히 별개다.
+- 관리자·메이드 최초 발급과 관리자 초기화 로그인 비밀번호는 등록 휴대폰 번호 뒤 4자리이며, 다음 로그인에서 개인 비밀번호로 바꾸게 한다. 개인 비밀번호는 선행 0을 허용하는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합이다. 단일 developer는 bootstrap 시 강한 개인 비밀번호를 대화형 입력으로 직접 설정하며 CLI 인자·출력·Git·로그에 남기지 않는다. 객실 PIN과는 완전히 별개다.
 - Supabase Auth에는 4자리 임시값을 서버 내부 namespace로 변환해 전달한다. 사용자가 입력하는 값은 계속 휴대폰 뒤 4자리이며 변환값은 클라이언트·로그·알림에 노출하지 않는다.
 - 초기/초기화 비밀번호 상태에서는 `must_change_password`를 강제하고 비밀번호 변경·로그아웃 외 일반 운영 API를 열지 않는다.
 - 로그인 5회 실패 시 **5번째 실패 시각부터 고정 15분** 잠근다. 추가 실패가 잠금 종료를 계속 미루지 않게 한다.
@@ -513,10 +518,10 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - RLS는 활성 계정 상태와 실제 ownership을 함께 검사한다.
 - 관리자라는 이유만으로 업무 원장에 `FOR ALL` + DELETE를 주지 않는다.
 - 메이드에게 attempt 전체 컬럼 UPDATE, 임의 상태 submission INSERT, notification 전체 UPDATE를 주지 않는다.
-- 조회는 필요한 범위의 SELECT, 쓰기는 좁은 Fastify command 또는 고정 `search_path`의 검증된 RPC로 제한한다.
+- 조회는 필요한 범위의 SELECT, 쓰기는 좁은 서버 command adapter 또는 고정 `search_path`의 검증된 RPC로 제한한다.
 - `SECURITY DEFINER` 함수는 명시적 schema, 최소 EXECUTE 권한, actor 재검증, 안전한 `search_path`를 사용한다.
 - view는 `security_invoker = true`를 사용한다.
-- service-role/secret은 서버에만 두고 로그·브라우저에 노출하지 않는다. service role은 RLS를 우회하므로 Fastify command가 access token의 actor를 식별한 뒤 최신 DB role/status, ownership, capability, expected version, transition을 매번 다시 검증한다.
+- service-role/secret은 서버 runtime에만 두고 로그·브라우저에 노출하지 않는다. service role은 RLS를 우회하므로 Fastify 또는 Edge command adapter가 access token의 actor를 식별한 뒤 최신 DB role/status, ownership, capability, expected version, transition을 매번 다시 검증한다.
 
 ### 관계·제약·index
 
@@ -532,46 +537,58 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 이 절은 “다음 작업이 어디서 시작하는가”를 설명한다.
 
-### 가이드 최초 작성 snapshot에서 구현됨
+### `v0.1.0` 기준선 (`main@70e479e`)에 구현됨
 
 - `GET /health`
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
 - `GET /v1/rooms`
+- 계정 생성·alias·강제 비밀번호 변경·잠금·세션 폐기·마지막 활성 관리자 보호
 - 121실/4타입 seed
 - 활성 예약의 `tstzrange` exclusion
-- 일부 cleaning/payroll table과 partial unique index
-- public table RLS 활성화
+- cleaning/payroll 관계 무결성과 partial unique index
+- public table RLS 활성화, active 계정 기반 helper, notification 수신자의 `read_at` 한정 UPDATE
+- application/migration GitHub Actions의 fresh DB reset과 SQL test
+- 운영·복구검증 Supabase에 같은 기준 스키마가 적용돼 있으나, 초기 수동 적용 과정에서 Git과 서로 다른 migration version으로 기록됨
 
-### 가이드 최초 작성 snapshot에서 아직 운영 계약을 충족하지 않던 항목
+### `v0.2.0` 포함 후 남은 차이
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
-- 주간 가능일, preparation obligation, 객실 operation event/issue/candle/퇴실점검, 정규화 photo slot, bomb report, complaint/penalty/appeal, payroll item/event/adjustment, notification outbox, PIN version/change lease, 개인정보 저장소, offline work lease가 없다.
-- 현재 RLS/GRANT는 maid의 광범위한 UPDATE/INSERT와 admin DELETE를 허용한다.
-- 현재 `private.current_role()`과 일부 admin policy는 `active` 상태를 함께 확인하지 않아 `deactivation_pending`/`upload_only` 관리자 JWT가 full admin DML을 유지할 수 있다.
-- `version` 컬럼은 있으나 CAS command/RPC가 없다.
-- `must_change_password`, alias retirement, 제한 업로드, session revoke가 연결되지 않았다.
-- `cleaning_targets_one_active_per_room`은 여러 미래 예약의 퇴실 청소 의무를 막는다.
-- `locked_earning_ids uuid[]`는 이중 지급을 막지 못한다.
-- `earnings.earning_entitlement_id`와 `reclean_compensation_decision_id`는 실제 source entity FK가 없는 nullable/raw UUID다. 호출자가 새 UUID를 만들면 UNIQUE를 우회할 수 있어 exactly-once를 보장하지 못한다.
+- 담당 배정 revision/current pointer·순서·preview·activation, 현장 attempt/offline lease, 정규화 photo slot, Drive worker, 검수·재청소, bomb report, complaint/penalty/appeal, payroll event/adjustment, notification outbox와 프런트 실제 연동이 남아 있다.
 - initial migration과 테스트에는 확정된 `purge_after NOT NULL` 및 업로드 후 7일 계약이 들어 있지만, 실제 Google Drive 업로드·조회·purge worker는 아직 구현되지 않았다.
-- backend CI와 실제 Postgres/RLS/concurrency test가 없다.
-- 원격 Supabase에는 migration을 아직 적용하지 않았다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
+- Issue #36에서 Supabase Edge Functions `api`의 health/Auth/rooms RPC와 Cron용 예약 scheduler Function을 로컬 PoC로 검증한다. 운영 smoke와 독립 리뷰 전에는 Supabase-only production runtime을 확정하거나 Fastify를 삭제하지 않는다.
 
-위 목록은 백엔드 `main` 7e229c2 기준의 감사 snapshot이며 후속 구현을 현재 상태처럼 읽으면 안 된다.
+원격 운영·복구검증 프로젝트는 Git과 SQL 내용은 대응하지만 migration version은 서로 다르다. `supabase db push`로 자동 추론하지 않고 `docs/RELEASE_V0.2.0.md`의 검증된 mapping과 MCP 순차 적용 절차를 사용한다. 2026-08-29 기준 운영 Security Advisor는 0건이며, 실제 source 병합·원격 적용·tag 상태는 Release Issue #24가 추적한다.
 
-### 2026-08-27 병합 대기·외부 적용 현황 — 이 PR 브랜치에는 미포함
+### Issue #1 `v0.2.0` source release 범위
 
-다음 항목은 PR #17의 base인 `main`과 이 문서 브랜치의 코드에 포함된 구현이 아니다. 각각의 별도 stacked PR 또는 원격 Supabase에 적용된 상태를 기록한 참고 정보이며, 해당 PR이 순서대로 병합되기 전에는 `main`의 현재 구현으로 간주하지 않는다.
+다음 항목은 release candidate `4da80cb`에 포함된다. source가 `main`에 병합됐는지, 운영 migration까지 적용됐는지는 서로 다른 상태이며 Release Issue #24에서 확인한다.
 
-- PR #15는 application/migration GitHub Actions에서 fresh DB reset과 SQL test를 실행하도록 제안한다.
-- PR #16은 계정 생성·alias·강제 비밀번호 변경·잠금·세션 폐기·마지막 활성 관리자 보호를 구현한 별도 변경이다.
-- PR #19/#18은 객실 전체 active target 제약, 업무 간 독립 FK 조합, payroll UUID 배열과 **검수 반려 재청소에 잘못 연결된 보상 earning source**를 보정한 별도 변경이다.
-- PR #19가 제거하는 것은 최초 검수 반려 재청소의 잘못된 raw 보상 source뿐이다. 승인 후 고객 민원 보상 entity/source는 구현된 것이 아니며 별도 후속 범위다.
-- PR #19에서는 일반 Data API profile/role helper를 `active` 계정만 식별하도록 제한하고, notification recipient의 직접 UPDATE를 `read_at` 한 컬럼으로 제한한다.
-- 위 migration은 운영·복구검증 Supabase에 별도로 적용됐고 계정 상태 RLS 11/11, 구조 19/19, DML 13/13, Security Advisor lint 0을 확인했다. 이 원격 적용 사실도 PR #17 브랜치에 코드를 포함시킨다는 뜻은 아니다.
-- 아직 없는 주간 가능일, preparation obligation, assignment revision, 정규화 photo slot/submission version, complaint/민원 보상, payroll event/adjustment, notification outbox, PIN lease, offline work lease는 각 roadmap issue에서 구현한다.
+- 객실 목록·상세는 점유, 청소 필요, 배정 차단/가능과 안정적인 reason code를 독립 축으로 반환한다.
+- 객실 기준정보, 운영 차단, 촛불, 이슈, PIN 동기화는 최신 active admin과 객실 `state_version`을 재검증하는 원자 명령이다.
+- 예약 생성·일정 변경·취소·수동 체크아웃·시각 기반 전이는 예약/객실 lock, CAS, actor별 idempotency key와 request hash를 사용한다.
+- 예약 일정 revision, 입실 준비 의무, 예약별 비공개 퇴실 청소 의무, 점유 event를 추가하고 원장을 UPDATE/DELETE하지 않는다.
+- 고객명은 API 서버가 AES-256-GCM으로 암호화하며 명령 응답·감사 payload에 원문이나 암호문을 포함하지 않는다.
+- 고객명 idempotency fingerprint는 암호화 키와 분리된 안정적 server HMAC pepper를 사용해 key rotation 전후 request hash를 보존한다.
+- 예약 목록은 고객명을 반환하지 않고 관리자 단건 상세에서만 복호화한다. 체크아웃/취소 후 180일 보존 만료는 예약 전이 worker가 처리하며 멱등성 hash에는 암호화 키와 분리된 HMAC pepper fingerprint만 사용한다.
+- PIN 원문은 저장하지 않고 동기화 상태와 version만 기록한다. `verified`가 아닌 객실은 고객 배정을 차단한다.
+- 객실 전체 운영 projection은 관리자 전용이다. 메이드는 자신의 현재 배정·수행 범위 projection만 후속 업무 API에서 제공받는다.
+- 연박/추가 수동 청소 요청은 안정적인 target ID로 생성하고 시작·PIN 공개 전까지만 CAS soft cancel한다.
+- 예정 전이 worker는 production에서 활성 관리자 actor를 필수로 하며 시작 시 검증 실패를 숨기지 않는다. catch-up은 퇴실을 입실보다 먼저 처리해 같은 instant의 인접 예약을 한 batch에서 전이하고, 완전히 지난 미입실 예약은 가짜 check-in 없이 종결한다.
+- checkout obligation↔target은 deferred commit-time 검증까지 포함해 종료 상태가 반쪽만 저장되지 않게 하고, preparation obligation↔승인 submission/attempt는 직전 점유 종료 이후·해당 체크인 이전 시간창 안에서 target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서를 검증하며 append-only 1회 소비 원장까지 강제한다. PIN lease↔현재 assignment/attempt는 최신 verified PIN version까지 업무 동일성을 복합키와 DB 검증으로 강제한다.
+- 다음 예약 변경은 종결된 과거 의무를 덮지 않는다. 미배정 target은 schedule revision과 함께 마감을 갱신하고 배정·통보된 target은 명시적 재계획 전까지 충돌로 거부한다.
+- 타입별 인원 상한, 프런트 대표 상태, 퇴실점검 lifecycle은 이번 변경에서 확정하지 않는다.
+- Docker Desktop 복구 후 fresh local DB reset, 역할별 SQL 회귀 검사, DB advisor를 실행할 수 있다. 각 변경은 실제 실행 결과를 PR에 기록하며 실행하지 않은 검증은 완료로 표현하지 않는다.
+
+### Issue #6 `v0.2.0` source release 범위
+
+- 가능일 제출은 일요일 12:00–23:59 KST와 다음 월요일 `week_start`를 DB command에서 검증한다.
+- 메이드·주차별 current version은 `expectedVersion` CAS와 advisory lock으로 직렬화하며 과거 version과 7개 날짜 row를 삭제하지 않는다.
+- 마감 뒤에는 pending 변경 요청을 만들고 활성 관리자의 승인 시에만 새 current version을 추가한다. 반려도 결정·사유·행위자·시각을 보존한다.
+- idempotency receipt는 `(actor_id, command_type, idempotency_key)` 범위다. 같은 범위의 같은 payload는 기존 결과를 반환하고 다른 payload 재사용은 거절하며, 다른 actor 또는 command의 같은 raw key는 독립 요청이다.
+- 조회 RLS는 활성 관리자의 전체 범위와 활성 메이드 본인 범위만 허용하며, 직접 DML과 비활성·제한 capability 제출은 차단한다.
+- 관리자 후보 projection은 current version에서 해당 날짜가 available인 활성 maid만 반환한다.
 
 ---
 
@@ -640,14 +657,13 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-1. P0 migration/CI, 계정, #18 무결성·RLS 보정을 독립 리뷰하고 stacked 순서대로 반영한다.
-2. 계정 hosted Auth/RLS 검증을 마치고 객실·예약·점유·수동 체크아웃 command를 구현한다.
-3. 가능일, 객실 operation event/readiness, 청소 의무와 assignment revision을 구현한다.
-4. offline work lease와 수행 상태를 구현한다.
-5. 7일 Drive 저장 worker, 사진 slot, submission version, 검수·재청소·폭탄방을 원자 command로 구현한다.
-6. earning, payroll item/event/adjustment와 이중 지급 방지를 구현한다.
-7. notification outbox와 외부 worker를 연결한다.
-8. OpenAPI/생성 client로 프런트와 계약을 고정한다.
-9. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
+1. Issue #1 객실·예약·점유·수동 체크아웃 command를 fresh DB CI와 독립 리뷰 후 반영한다.
+2. 가능일 제출과 assignment revision을 구현한다. 객실 readiness와 예약별 preparation/checkout obligation은 Issue #1 구현을 확장해 사용한다.
+3. offline work lease와 수행 상태를 구현한다.
+4. 7일 Drive 저장 worker, 사진 slot, submission version, 검수·재청소·폭탄방을 원자 command로 구현한다.
+5. earning, payroll item/event/adjustment와 이중 지급 방지를 구현한다.
+6. notification outbox와 외부 worker를 연결한다.
+7. OpenAPI/생성 client로 프런트와 계약을 고정한다.
+8. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 
 기능 수를 빨리 늘리는 것보다 **삭제 불가 이력, 돈, 권한, 중복 방지**를 먼저 맞추는 것이 우선이다.
