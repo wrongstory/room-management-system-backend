@@ -38,6 +38,11 @@ const roomReservationMigrationUrl = new URL(
   import.meta.url
 );
 
+const availabilityMigrationUrl = new URL(
+  '../supabase/migrations/20260828220417_weekly_availability_contract.sql',
+  import.meta.url
+);
+
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
     const sql = await readFile(initialMigrationUrl, 'utf8');
@@ -56,7 +61,8 @@ describe('initial migration contract', () => {
       await readFile(accountHardeningMigrationUrl, 'utf8'),
       await readFile(domainIntegrityMigrationUrl, 'utf8'),
       await readFile(domainIndexMigrationUrl, 'utf8'),
-      await readFile(roomReservationMigrationUrl, 'utf8')
+      await readFile(roomReservationMigrationUrl, 'utf8'),
+      await readFile(availabilityMigrationUrl, 'utf8')
     ].join('\n');
     const tables = [...sql.matchAll(/create table public\.([a-z_]+)/g)].map((match) => match[1]);
     const rlsTables = [...sql.matchAll(/alter table public\.([a-z_]+) enable row level security/g)]
@@ -174,6 +180,20 @@ describe('initial migration contract', () => {
     );
     expect(sql).toContain('grant update (read_at) on public.notifications to authenticated');
     expect(sql).not.toContain('grant update (read_at, resolved_at)');
+  });
+
+  it('keeps weekly availability versioned, service-only, and RLS scoped', async () => {
+    const sql = await readFile(availabilityMigrationUrl, 'utf8');
+
+    expect(sql).toContain('availability_versions_one_current_per_week');
+    expect(sql).toContain('AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS');
+    expect(sql).toContain('OUTSIDE_AVAILABILITY_WINDOW');
+    expect(sql).toContain('STALE_VERSION');
+    expect(sql).toContain('IDEMPOTENCY_KEY_REUSED');
+    expect(sql).toContain('with (security_invoker = true, security_barrier = true)');
+    expect(sql).toContain('alter table public.availability_versions enable row level security');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
   });
 
   it('adds reservation history, obligations, occupancy ledgers, and CAS commands', async () => {

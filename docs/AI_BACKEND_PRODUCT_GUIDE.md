@@ -556,9 +556,9 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 원격 운영·복구검증 프로젝트에는 `main`과 같은 적용 migration history가 있으며, 2026-08-28 기준 구조·DML·RLS 검사와 Security Advisor 0건을 확인했다. 새 기능 PR의 migration은 병합·배포 전까지 이 현황에 포함하지 않는다.
 
-### Issue #1 작업 브랜치에서 제안 중 — 병합·원격 적용 전
+### Issue #1 `dev` 통합 구현 — `main` release·원격 적용 전
 
-다음 항목은 `codex/1-room-reservations`의 제안이며 CI와 독립 리뷰가 끝나기 전에는 `main` 또는 운영 구현으로 간주하지 않는다.
+다음 항목은 `dev`에 통합됐지만 release PR과 운영 migration 적용 전에는 `main` 또는 운영 구현으로 간주하지 않는다.
 
 - 객실 목록·상세는 점유, 청소 필요, 배정 차단/가능과 안정적인 reason code를 독립 축으로 반환한다.
 - 객실 기준정보, 운영 차단, 촛불, 이슈, PIN 동기화는 최신 active admin과 객실 `state_version`을 재검증하는 원자 명령이다.
@@ -575,6 +575,15 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 다음 예약 변경은 종결된 과거 의무를 덮지 않는다. 미배정 target은 schedule revision과 함께 마감을 갱신하고 배정·통보된 target은 명시적 재계획 전까지 충돌로 거부한다.
 - 타입별 인원 상한, 프런트 대표 상태, 퇴실점검 lifecycle은 이번 변경에서 확정하지 않는다.
 - Docker Desktop 복구 후 fresh local DB reset, 역할별 SQL 회귀 검사, DB advisor를 실행할 수 있다. 각 변경은 실제 실행 결과를 PR에 기록하며 실행하지 않은 검증은 완료로 표현하지 않는다.
+
+### Issue #6 `dev` 통합 구현 — `main` release·원격 적용 전
+
+- 가능일 제출은 일요일 12:00–23:59 KST와 다음 월요일 `week_start`를 DB command에서 검증한다.
+- 메이드·주차별 current version은 `expectedVersion` CAS와 advisory lock으로 직렬화하며 과거 version과 7개 날짜 row를 삭제하지 않는다.
+- 마감 뒤에는 pending 변경 요청을 만들고 활성 관리자의 승인 시에만 새 current version을 추가한다. 반려도 결정·사유·행위자·시각을 보존한다.
+- 같은 idempotency key와 canonical payload는 기존 결과를 반환하고 다른 payload 재사용은 거절한다.
+- 조회 RLS는 활성 관리자의 전체 범위와 활성 메이드 본인 범위만 허용하며, 직접 DML과 비활성·제한 capability 제출은 차단한다.
+- 관리자 후보 projection은 current version에서 해당 날짜가 available인 활성 maid만 반환한다.
 
 ---
 

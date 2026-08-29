@@ -69,6 +69,14 @@ function services(): AppServices {
       unlock: vi.fn(),
       resetPassword: vi.fn()
     },
+    availability: {
+      listCurrent: vi.fn(async () => []),
+      listChangeRequests: vi.fn(async () => []),
+      submit: vi.fn(),
+      requestChange: vi.fn(),
+      decideChange: vi.fn(),
+      listCandidates: vi.fn(async () => [])
+    },
     rooms: {
       list: vi.fn(async () => [{
         id: 'room-1',
@@ -278,6 +286,74 @@ describe('application', () => {
 
     expect(temporary.statusCode).toBe(200);
     expect(invalid.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('submits a maid weekly availability with an idempotency key', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-maid-1',
+      profileId: '11111111-1111-4111-8111-111111111111',
+      displayName: '김민지',
+      role: 'maid' as const,
+      mustChangePassword: false,
+      accessToken
+    }));
+    appServices.availability.submit = vi.fn(async (_actor, input) => ({
+      id: '22222222-2222-4222-8222-222222222222',
+      maidProfileId: '11111111-1111-4111-8111-111111111111',
+      weekStart: input.weekStart,
+      version: 1,
+      status: 'submitted' as const,
+      current: true,
+      submittedAt: '2026-08-30T03:00:00.000Z',
+      days: input.availableDates.map((workDate: string) => ({ workDate, available: true }))
+    }));
+
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/availability/submissions',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'availability-submit-0001'
+      },
+      payload: {
+        weekStart: '2026-08-31',
+        availableDates: ['2026-08-31', '2026-09-02'],
+        expectedVersion: 0
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().availability).toMatchObject({ version: 1, current: true });
+    expect(appServices.availability.submit).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'maid' }),
+      expect.objectContaining({ idempotencyKey: 'availability-submit-0001' })
+    );
+    await app.close();
+  });
+
+  it('requires an administrator for the availability candidate list', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-maid-1',
+      profileId: '11111111-1111-4111-8111-111111111111',
+      displayName: '김민지',
+      role: 'maid' as const,
+      mustChangePassword: false,
+      accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/availability/candidates?workDate=2026-08-31',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ADMIN_REQUIRED');
+    expect(appServices.availability.listCandidates).not.toHaveBeenCalled();
     await app.close();
   });
 

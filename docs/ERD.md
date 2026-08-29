@@ -73,6 +73,8 @@ erDiagram
     date week_start
     int version
     text status
+    boolean is_current
+    timestamptz submitted_at
   }
   AVAILABILITY_DAYS {
     bigint id PK
@@ -83,8 +85,13 @@ erDiagram
   AVAILABILITY_CHANGE_REQUESTS {
     uuid id PK
     uuid availability_version_id FK
+    uuid maid_profile_id FK
+    date week_start
+    int source_version
+    date[] requested_available_dates
     uuid decided_by FK
     text status
+    uuid approved_version_id FK
   }
 ```
 
@@ -94,6 +101,9 @@ erDiagram
 - 최소 한 명의 활성 관리자는 항상 남겨야 한다.
 - 활성 메이드만 근무 가능일을 제출할 수 있다.
 - `(maid_profile_id, week_start, version)`은 유일하고, 주차별 현재 제출 버전은 한 건이다.
+- version은 7개 날짜 row를 명시적으로 가지며, 새 제출·승인 version이 생겨도 이전 version과 날짜는 삭제하지 않는다.
+- 일요일 12:00–23:59 KST의 일반 제출은 `expectedVersion` CAS와 idempotency key로 직렬화한다.
+- 마감 뒤 변경은 pending 요청을 만들고 활성 관리자의 승인 시에만 새 current version으로 전환한다.
 - 메이드 후보 목록은 `활성 계정 + 활성 maid 역할 + 해당 날짜 available`을 모두 만족해야 한다.
 
 ## 4. 객실·예약·운영
@@ -475,7 +485,7 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 ## 9. 이후 반영 순서
 
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
-2. 근무 가능일 3개 테이블을 추가한다.
+2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.
 4. 지급 명령에서 `payroll_items` 잠금 합계와 cycle 상태를 원자적으로 전이한다.
 5. 도메인별 서버 명령과 상태 전이 테스트를 추가한다.

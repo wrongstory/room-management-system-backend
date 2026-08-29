@@ -14,6 +14,11 @@ import { loggerOptions } from './config/logger.js';
 import { SupabaseAccountService, type AccountService } from './modules/accounts/account.service.js';
 import { createAccountRoutes } from './modules/accounts/account.routes.js';
 import {
+  SupabaseAvailabilityService,
+  type AvailabilityService
+} from './modules/availability/availability.service.js';
+import { createAvailabilityRoutes } from './modules/availability/availability.routes.js';
+import {
   SupabaseReservationService,
   type ReservationService
 } from './modules/reservations/reservation.service.js';
@@ -23,6 +28,7 @@ import type { Actor } from './domain/actor.js';
 export interface AppServices {
   auth: AuthService;
   accounts: AccountService;
+  availability: AvailabilityService;
   rooms: RoomService;
   reservations: ReservationService;
 }
@@ -58,6 +64,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     services = {
       auth: new SupabaseAuthService(clients),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
+      availability: new SupabaseAvailabilityService(clients),
       rooms: new SupabaseRoomService(clients),
       reservations: new SupabaseReservationService(
         clients,
@@ -130,6 +137,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   await app.register(createAuthRoutes(services.auth), { prefix: '/v1/auth' });
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
+  await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
   await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
 
