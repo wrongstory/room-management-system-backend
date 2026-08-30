@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -21,6 +21,88 @@ function assert(condition, message) {
     throw new Error(message);
   }
 }
+
+const loginGlobalRateLimitKey = createHash('sha256')
+  .update(`edge-login-global-concurrency-${randomUUID()}`)
+  .digest('hex');
+const loginClientRateLimitKey = createHash('sha256')
+  .update(`edge-login-client-concurrency-${randomUUID()}`)
+  .digest('hex');
+const loginRateLimitKey = createHash('sha256')
+  .update(`edge-login-concurrency-${randomUUID()}`)
+  .digest('hex');
+const loginRateLimitResults = await Promise.all(Array.from({ length: 20 }, () => (
+  client.rpc('consume_login_rate_limits', {
+    p_client_key_hash: loginClientRateLimitKey,
+    p_login_key_hash: loginRateLimitKey,
+    p_global_key_hash: loginGlobalRateLimitKey,
+    p_client_limit: 100,
+    p_login_limit: 10,
+    p_global_limit: 1000,
+    p_window_seconds: 60
+  })
+)));
+assert(
+  loginRateLimitResults.every((result) => !result.error && Array.isArray(result.data)),
+  'concurrent login rate-limit RPC calls must all complete'
+);
+const loginRateLimitDecisions = loginRateLimitResults.map((result) => result.data[0]?.allowed);
+assert(
+  loginRateLimitDecisions.filter((allowed) => allowed === true).length === 10,
+  'concurrent login rate limit must allow exactly ten requests'
+);
+assert(
+  loginRateLimitDecisions.filter((allowed) => allowed === false).length === 10,
+  'concurrent login rate limit must deny exactly ten requests'
+);
+
+const rotatingGlobalKey = createHash('sha256')
+  .update(`edge-login-rotating-global-${randomUUID()}`)
+  .digest('hex');
+const rotatingAttackerClientKey = createHash('sha256')
+  .update(`edge-login-rotating-client-${randomUUID()}`)
+  .digest('hex');
+const rotatingLoginResults = await Promise.all(Array.from({ length: 200 }, (_, index) => (
+  client.rpc('consume_login_rate_limits', {
+    p_client_key_hash: rotatingAttackerClientKey,
+    p_login_key_hash: createHash('sha256')
+      .update(`edge-login-rotating-${index}-${randomUUID()}`)
+      .digest('hex'),
+    p_global_key_hash: rotatingGlobalKey,
+    p_client_limit: 40,
+    p_login_limit: 10,
+    p_global_limit: 200,
+    p_window_seconds: 60
+  })
+)));
+assert(
+  rotatingLoginResults.every((result) => !result.error && Array.isArray(result.data)),
+  'rotating login-ID limiter calls must all complete'
+);
+assert(
+  rotatingLoginResults
+    .map((result) => result.data[0]?.allowed)
+    .filter((allowed) => allowed === true).length === 40,
+  'one attacker client must be capped at forty rotating login IDs'
+);
+
+const isolatedNormalClientResult = await client.rpc('consume_login_rate_limits', {
+  p_client_key_hash: createHash('sha256')
+    .update(`edge-login-normal-client-${randomUUID()}`)
+    .digest('hex'),
+  p_login_key_hash: createHash('sha256')
+    .update(`edge-login-normal-admin-${randomUUID()}`)
+    .digest('hex'),
+  p_global_key_hash: rotatingGlobalKey,
+  p_client_limit: 40,
+  p_login_limit: 10,
+  p_global_limit: 200,
+  p_window_seconds: 60
+});
+assert(
+  !isolatedNormalClientResult.error && isolatedNormalClientResult.data?.[0]?.allowed === true,
+  'an attacker client at its limit must not block a normal admin client'
+);
 
 const authUserId = randomUUID();
 const actorProfileId = randomUUID();
@@ -47,6 +129,75 @@ const { error: profileError } = await client.from('profiles').insert({
   must_change_password: false
 });
 assert(!profileError, `profile fixture failed: ${profileError?.message}`);
+
+const accountCandidateIds = [randomUUID(), randomUUID()];
+const accountDisplayName = `동시생성${randomUUID().slice(0, 8)}`;
+const accountPhoneHash = createHash('sha256')
+  .update(`account-create-concurrency-${randomUUID()}`)
+  .digest('hex');
+const accountCreateKey = `account-${randomUUID()}`;
+const accountRequestHash = createHash('sha256')
+  .update(`account-create-request-${randomUUID()}`)
+  .digest('hex');
+
+const accountAuthResults = await Promise.all(accountCandidateIds.map((candidateId) => (
+  client.auth.admin.createUser({
+    id: candidateId,
+    email: `user-${candidateId}@auth.castletheart.invalid`,
+    password: `tmp:${randomUUID().slice(0, 4)}`,
+    email_confirm: true,
+    app_metadata: { profile_id: candidateId, role: 'maid' }
+  })
+)));
+assert(
+  accountAuthResults.every((result) => !result.error && result.data.user),
+  'concurrent account-create Auth fixtures must be created'
+);
+
+const accountCreateResults = await Promise.all(accountCandidateIds.map((candidateId) => (
+  client.rpc('create_account_profile', {
+    p_profile_id: candidateId,
+    p_auth_user_id: candidateId,
+    p_actor_profile_id: actorProfileId,
+    p_display_name: accountDisplayName,
+    p_display_name_normalized: accountDisplayName.toLocaleLowerCase('ko-KR'),
+    p_role: 'maid',
+    p_phone_last_four: '0000',
+    p_phone_lookup_hash: accountPhoneHash,
+    p_idempotency_key: accountCreateKey,
+    p_request_hash: accountRequestHash
+  })
+)));
+assert(
+  accountCreateResults.every((result) => !result.error && result.data),
+  'concurrent identical account-create commands must both succeed'
+);
+const logicalAccountIds = new Set(accountCreateResults.map((result) => result.data.id));
+assert(logicalAccountIds.size === 1, 'concurrent account-create must return one logical result');
+const logicalAccountId = accountCreateResults[0].data.id;
+
+for (const candidateId of accountCandidateIds) {
+  if (candidateId !== logicalAccountId) {
+    const { error } = await client.auth.admin.deleteUser(candidateId);
+    assert(!error, `duplicate Auth cleanup failed: ${error?.message}`);
+  }
+}
+
+const { count: logicalAccountCount, error: logicalAccountError } = await client
+  .from('profiles')
+  .select('id', { count: 'exact', head: true })
+  .eq('phone_lookup_hash', accountPhoneHash);
+assert(!logicalAccountError && logicalAccountCount === 1, 'one logical account must remain');
+
+const authSurvivors = await Promise.all(accountCandidateIds.map(async (candidateId) => {
+  const { data } = await client.auth.admin.getUserById(candidateId);
+  return Boolean(data.user);
+}));
+assert(
+  authSurvivors.filter(Boolean).length === 1 &&
+    authSurvivors[accountCandidateIds.indexOf(logicalAccountId)] === true,
+  'duplicate account-create compensation must leave no orphan Auth user'
+);
 
 const { data: room, error: roomError } = await client
   .from('rooms')
@@ -125,4 +276,6 @@ assert(
   'concurrent manual checkout must reject exactly one loser'
 );
 
-console.log('Reservation concurrency checks passed: create=1/2, manual-checkout=1/2.');
+console.log(
+  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, reservation-create=1/2, manual-checkout=1/2.'
+);

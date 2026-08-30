@@ -51,6 +51,8 @@
 
 모든 변경 요청에는 재시도 중복을 막는 `Idempotency-Key`가 필요하다.
 
+Fastify와 Supabase Edge adapter는 아래 경로, 정상 응답, 오류 code를 동일하게 유지한다. Edge 로그인은 짧게 재생성될 수 있는 Function instance의 메모리 대신 PostgreSQL의 service-role 전용 fixed window를 사용하고, alias 조회 전에 정규화 ID의 HMAC key로 제한을 소비한다. 요청 본문, 비밀번호, 휴대전화 원문, bearer/refresh token은 로그나 감사 payload에 남기지 않는다.
+
 | 메서드 | 경로 | 기능 |
 |---|---|---|
 | `GET` | `/v1/accounts` | 계정 목록, 휴대전화 마지막 4자리만 반환 |
@@ -60,9 +62,17 @@
 | `POST` | `/v1/accounts/:profileId/unlock` | 실패 횟수와 잠금 초기화 |
 | `POST` | `/v1/accounts/:profileId/password-reset` | 마지막 4자리로 초기화하고 변경 강제 |
 
-Auth 사용자 생성 뒤 프로필 RPC가 실패하면 서버는 새 Auth 사용자를 삭제해 보상한다. 동일한 계정 생성 멱등성 키는 정규화된 이름·역할·휴대전화 HMAC이 모두 같은 재시도에만 기존 결과를 반환하며, 하나라도 다르면 `409 IDEMPOTENCY_KEY_REUSED`로 거절한다. 프로필·alias·감사 이벤트는 한 DB 트랜잭션에서 커밋한다. 역할·상태·잠금·비밀번호 초기화는 실행 관리자, 시각, 전후 상태, 통제 사유, 멱등성 키를 감사 이벤트에 남긴다.
+전체 계약은 Edge Function의 `GET /openapi.json`에서 기계 판독 형식으로 제공하고 `GET /docs`의 Swagger UI에서 확인한다. Swagger UI의 Authorize 값은 저장하지 않으며 developer 생성·승격 endpoint는 제공하지 않는다.
+
+별도 custom logout endpoint는 만들지 않는다. 웹·Python 클라이언트는 Supabase Auth 표준 `signOut({ scope: 'local' })`로 현재 세션을 폐기하고 로컬 access/refresh token을 즉시 삭제한다. 관리 명령으로 이미 폐기된 세션은 보호 API의 `is_active_auth_session` 재검증에서 거부한다.
+
+토큰 갱신도 별도 custom endpoint 없이 Supabase Auth 표준 `refreshSession()`을 사용한다. 갱신된 access token이 있더라도 이후 보호 API는 Auth 사용자, 최신 active profile, DB의 active session을 다시 검증하므로 role/status 변경이나 세션 폐기를 우회하지 못한다.
+
+Auth 사용자 생성 뒤 프로필 RPC가 실패하면 서버는 새 Auth 사용자를 삭제해 보상한다. 계정 생성 보상 삭제나 역할 변경의 Auth rollback까지 실패하면 성공처럼 처리하지 않고 `ACCOUNT_AUTH_STATE_INCONSISTENT`를 반환해 운영 확인이 필요함을 알린다. 생성·역할·상태·잠금·비밀번호 초기화는 `private.command_executions`의 `(actor_profile_id, command_type, idempotency_key)`와 canonical `request_hash`를 command receipt로 사용한다. 같은 scope와 payload는 기존 logical profile을 반환하고 다른 payload는 `409 IDEMPOTENCY_KEY_REUSED`로 거절하며, 다른 actor 또는 command의 같은 raw key는 독립 요청이다. 동시에 동일 account-create가 들어오면 receipt advisory lock 뒤 한 profile만 생성하고, 패자 요청이 만든 Auth user는 서버가 삭제한 뒤 양쪽에 같은 logical 결과를 반환한다. 프로필·alias·감사 이벤트와 완료 receipt는 한 DB 트랜잭션에서 커밋하고 감사 원장에는 raw key 대신 actor·command가 포함된 scoped key를 남긴다.
 
 상태 변경은 DB의 마지막 활성 관리자·허용 전이 검증과 세션 폐기를 먼저 커밋한 뒤 Auth ban을 동기화한다. 따라서 거부된 전이가 Auth 계정을 먼저 잠그지 않는다. DB 커밋 뒤 Auth 동기화가 실패하면 `ACCOUNT_AUTH_STATE_INCONSISTENT`를 반환하며, 운영자는 같은 `Idempotency-Key`로 재시도해 Auth 상태를 reconcile한다. 권한 판정은 항상 최신 DB 프로필을 사용하므로 동기화 대기 중 비활성 계정의 업무 접근은 허용되지 않는다.
+
+`POST /v1/auth/password`는 아직 scoped account receipt 대상이 아니다. Auth 변경 뒤 응답이 유실되면 동일 payload 자동 재시도가 현재 비밀번호 검증에서 실패할 수 있으므로 프론트는 결과 미확정으로 처리한다. 비밀번호 원문이나 재사용 가능한 verifier를 저장하지 않으면서 안전한 replay를 지원하는 계약은 후속 Issue #46에서 설계·검증한다.
 
 개인 비밀번호 변경은 Auth 비밀번호를 먼저 바꾼 뒤 DB의 `must_change_password`와 감사 이벤트를 기록한다. DB 기록이 실패하면 서버가 검증에 사용한 기존 비밀번호로 Auth 변경을 보상하며, 보상까지 실패하면 `PASSWORD_STATE_INCONSISTENT`를 반환해 관리자의 비밀번호 초기화가 필요함을 명시한다.
 

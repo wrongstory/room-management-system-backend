@@ -4,12 +4,12 @@
 
 - release candidate: `release/v0.2.0`
 - 최초 기준 commit: `dev@4da80cb2ddcb5de2f5b3dd5bd41354b80a3f7ae5`
-- 최신 통합 기준 commit: `dev@4a62c2e833914d5bdd9e063c8f43fb9644aeab8d`
+- 최신 통합 기준 commit: `dev@2a73c1b76b89e54f6325bff22effae32bb790df1`
 - 운영 project: `aodikrxcczbogjpsjwjt`
 - recovery project: `matalcofimnhuzslfhdd`
 - 상태 추적: GitHub Issue #24
 
-최신 release candidate에는 프런트 정본 갱신(#41), singleton developer 계층(#39), Supabase Edge runtime PoC(#37)가 모두 포함된다. `release/v0.2.0 → main` 병합은 **운영 배포 가능한 승인된 source 확정**만 뜻하며, 운영 migration·Edge 배포·runtime 채택·`v0.2.0` 발행 완료를 뜻하지 않는다.
+최신 release candidate에는 프런트 정본 갱신(#41), singleton developer 계층(#39), Supabase Edge runtime PoC(#37), Edge 계정 관리·Swagger source(#45)가 포함된다. `release/v0.2.0 → main` 병합은 **운영 배포 가능한 승인된 source 확정**만 뜻하며, 운영 migration·Edge 배포·runtime 채택·`v0.2.0` 발행 완료를 뜻하지 않는다.
 
 이 문서는 운영 자격증명이나 SQL 결과 데이터를 저장하지 않는다. 실제 적용은 `main` 병합 뒤 Supabase MCP를 통해 수행하고, 각 단계의 성공 여부만 Issue #24에 기록한다.
 
@@ -31,53 +31,65 @@
 
 이 mapping이 정규화되기 전에는 `supabase db push`를 사용하지 않는다. migration history repair는 schema 변경과 분리한 후속 작업이며, 이 릴리즈에서는 원격 기존 version을 수정하지 않는다.
 
-## 운영 적용 순서
+## 최초 release에 적용 완료된 migration 기록 — 재적용 금지
 
-다음 파일의 전체 SQL을 Git에서 읽어 Supabase MCP `apply_migration`으로 한 건씩 적용한다. 다음 단계는 직전 단계가 성공하고 `list_migrations`에서 기록된 것을 확인한 뒤에만 진행한다.
+아래 3건은 최초 `main@c25e234` 병합 후 운영에 이미 적용됐고, 현재 운영 migration history 14건에 포함된다. 이 목록은 과거 적용 기록일 뿐이며 follow-up release에서 `apply_migration` 또는 `db push`로 다시 실행하지 않는다.
 
-1. `20260827211304_restrict_notification_recipient_updates.sql`
-   - 현재 운영의 실효 권한은 이미 `read_at` UPDATE만 허용한다.
-   - 멱등적인 revoke/grant를 다시 실행해 migration history를 명시적으로 남긴다.
-2. `20260827224644_room_reservation_commands.sql`
-3. `20260828220417_weekly_availability_contract.sql`
-4. `20260829120003_add_developer_role.sql`
-5. `20260829120005_developer_account_contract.sql`
+| Git migration | 운영 history |
+|---|---|
+| `20260827211304_restrict_notification_recipient_updates.sql` | `20260829164900_restrict_notification_recipient_updates` |
+| `20260827224644_room_reservation_commands.sql` | `20260829164937_room_reservation_commands` |
+| `20260828220417_weekly_availability_contract.sql` | `20260829165002_weekly_availability_contract` |
 
-적용 도중 실패하면 뒤 migration을 실행하지 않는다. 성공한 migration과 원격 객체 상태를 읽기 전용으로 확인하고, destructive down migration이나 history 조작 없이 새 append-only forward-fix migration을 만든다.
+과거 적용 여부가 의심되면 SQL을 재실행하지 않고 `list_migrations`와 원격 객체를 읽기 전용으로 확인한 뒤 Issue #24에 기록한다.
 
-## main 병합 전 source 승인 gate
+## follow-up main 병합 전 source 승인 gate
 
 - release PR의 `application`과 `migration` required checks PASS
-- GitHub fresh runner에서 전체 14개 migration 재적용, `db:verify`, DB/RLS 139 tests, 예약 동시성 PASS
-- application lint/type/test/build와 Edge format/type PASS, application 69 tests 유지
-- 최신 release head 독립 리뷰 P0/P1 0
-- 운영 Security Advisor 차단사항 0
-- `main...release/v0.2.0` diff에 이후 미완성 기능이나 비밀정보가 없음
+- fresh local DB에 전체 17개 migration 재적용, DB/RLS 169 tests, 예약·계정·로그인 동시성 PASS
+- application lint/type/test/build 80 tests와 Edge format/type/unit 15 tests PASS
+- PR #45 최신 head 독립 리뷰 P0/P1 0
+- follow-up release PR 최신 head 독립 리뷰 P0/P1 0
+- 운영 Security Advisor의 source/DDL 차단사항 0
+- `main..release/v0.2.0` content diff가 #42 source와 신규 migration 3건으로 제한되고 이후 미완성 기능이나 비밀정보가 없음
 - 운영 적용 순서, 실패 시 중단·append-only forward-fix, Fastify rollback 기준이 문서화됨
 
-Issue #36의 Edge 운영 smoke는 이 source 승인 gate의 선행조건이 아니다. #37은 독립 리뷰 P0/P1 0과 required CI PASS로 `dev`에 병합하되, Issue #36은 아래 운영 smoke가 끝날 때까지 열린 상태로 유지한다.
+Issue #36의 Edge 운영 smoke는 source 승인 gate의 선행조건이 아니다. Issue #36은 아래 운영 smoke가 끝날 때까지 열린 상태로 유지한다.
 
-## main 병합 후 운영 순서
+운영 Security Advisor의 `Leaked Password Protection Disabled` WARN은 Supabase Pro 이상에서만 활성화 가능한 기능으로, Free Plan 고정 정책에서는 해소할 수 없는 알려진 플랫폼 제한이다. 이 항목은 source/DDL 차단사항으로 분류하지 않되 강제 초기 비밀번호 변경, 계정 잠금, durable 로그인 limiter를 유지하고 운영 기록에 남긴다.
 
-1. 위 5개 pending migration을 순서대로 적용하고 각 version과 객체를 확인한다.
-2. 계정 생성에 필요한 `ACCOUNT_PHONE_PEPPER`를 Function Secret에 먼저 설정한다. 이어 예약 PII key/version/keyring과 guest-name pepper를 준비한다.
-3. 신뢰된 one-off Fastify/CLI 경로로 singleton developer를 bootstrap한다. 로그인 ID는 DB 계약대로 `admin`이며, 비밀번호·휴대전화 원문은 GitHub·문서·로그에 남기지 않는다.
-4. developer가 별도의 active business admin을 생성하고 최초 로그인·비밀번호 변경을 확인한다. developer를 scheduler actor로 사용하지 않는다.
-5. business admin의 profile ID를 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`로 설정하고, 32자 이상 `SCHEDULER_INVOKE_SECRET`과 `CORS_ORIGINS`를 포함한 나머지 Function Secrets를 구성한다.
-6. Edge Functions `api`, `reservation-scheduler`를 배포하고 HTTP smoke를 수행한다.
-7. HTTP smoke가 통과한 뒤에만 Vault에 scheduler 호출값을 저장하고 `pg_cron`·`pg_net`을 활성화한다.
-8. 실제 Cron을 여러 회 관찰해 job run, HTTP response, Edge log, command audit와 재시도 멱등성을 함께 검증한다.
-9. 모든 운영 smoke가 통과한 뒤에만 Issue #36·#35·#24를 완료하고 annotated tag와 GitHub Release를 발행한다.
+## main 병합 후 유일한 운영 적용 순서 — 현재 pending 3건
+
+Issue #42의 Edge 인증·계정 관리 API는 `dev@2a73c1b`에 병합됐고 follow-up release PR을 통해 `main` 승격을 기다린다. 현재 운영은 14 migrations, release source는 17 migrations이므로 pending은 아래 3건뿐이다. 이 source가 `main`에 도달하기 전에는 production Edge Function을 배포하거나 신규 migration을 운영에 적용하지 않는다.
+
+적용 직전에 `list_migrations`로 세 migration이 아직 없는지 확인한다. 이미 같은 이름이 존재하면 재적용하지 않고 중단해 Issue #24의 mapping을 갱신한다. 각 파일의 전체 SQL은 Supabase MCP `apply_migration`으로 한 건씩 적용하고, 직전 단계가 성공해 `list_migrations`에 기록된 것을 확인한 뒤에만 다음 단계로 진행한다.
+
+1. `20260830015035_edge_login_rate_limit.sql`
+   - 로그인 alias 조회보다 앞선 durable fixed-window 저장소 기반
+2. `20260830045832_harden_account_receipts_and_login_limits.sql`
+   - rotating login ID의 write/cardinality 상한 기반 추가
+   - 계정 command를 actor·command·key + canonical request hash receipt로 전환
+   - 기존 service-role용 per-login-only/account RPC 실행 권한 회수
+3. `20260830054446_isolate_login_rate_limit_clients.sql`
+   - trusted client → login ID → emergency global 순서로 로그인 DoS 격리
+   - saturated bucket의 추가 거부 write 중단, 기존 client-unaware RPC 권한 회수
+4. production Function 재배포 후 `/api/openapi.json`, `/api/docs`, 로그인·비밀번호 변경, developer/admin/maid 계정 관리 권한 smoke
+5. production gateway가 spoofed client header보다 platform client address를 우선하는지 smoke
+6. 기존 developer를 다시 bootstrap하지 않고, developer가 별도 active business admin을 생성
+7. business admin의 임시 비밀번호 변경과 scheduler actor 지정 후 Edge/Cron smoke
+
+적용 도중 실패하면 뒤 migration과 배포 단계를 실행하지 않는다. 성공한 migration과 원격 객체 상태를 읽기 전용으로 확인하고, destructive down migration이나 history 조작 없이 새 append-only forward-fix migration을 만든다.
 
 ## 적용 후 smoke
 
 - `public.rooms` 기준정보 121건과 public base table RLS 누락 0
 - notification recipient의 `read_at` UPDATE 허용, `resolved_at` UPDATE 거부
-- 예약·객실 command 함수와 가능일 command 함수 존재 및 service-role 외 실행 권한 차단
-- developer login ID/normalized ID/alias가 정확히 `admin`이고 developer singleton·업무 권한 차단 계약이 유지됨
-- 운영 migration 목록에 위 5개 이름이 순서대로 존재
-- Security Advisor 차단사항 0, Performance Advisor는 ERROR/WARN을 차단하고 초기 unused-index INFO는 기록만 유지
+- 예약·객실·가능일·계정 command 함수가 존재하고 service-role 외 실행 권한이 차단됨
+- 운영 migration history가 17건이며 이번에 적용한 3건이 위 순서대로 한 번씩만 기록됨
+- Security Advisor의 source/DDL 차단사항 0. Free Plan의 leaked-password protection WARN은 알려진 제한으로 기록하고, Performance Advisor는 ERROR/WARN을 차단하며 초기 unused-index/FK-index INFO는 기록만 유지
 - Edge health 200, developer `/auth/me` 200·rooms 403, active business admin rooms 121건, maid rooms 403, inactive/revoked/invalid JWT 차단
 - scheduler secret 오류 차단, 정상 수동 호출 성공, 같은 `scheduledAt` 재호출의 결과·side effect 멱등성
 - Vault/Cron 활성화 뒤 `cron.job_run_details`, `net._http_response`, Edge log, command audit 확인
 - 위 smoke를 통과하지 못하면 Supabase-only runtime 채택·운영 배포 완료·`v0.2.0` 발행 완료로 표현하지 않음
+
+Swagger UI는 운영 secret 입력·보관 수단이 아니다. 실제 token은 smoke 중에만 Authorize에 입력하고 브라우저 저장소에 유지하지 않으며, 캡처·로그·Issue에 남기지 않는다.

@@ -22,13 +22,14 @@ export class EdgeError extends Error {
     public readonly status: number,
     public readonly code: string,
     message: string,
+    public readonly headers: Record<string, string> = {},
   ) {
     super(message);
     this.name = "EdgeError";
   }
 }
 
-function requiredEnv(name: string): string {
+export function requiredEnv(name: string): string {
   const value = Deno.env.get(name)?.trim();
   if (!value) {
     throw new EdgeError(
@@ -58,6 +59,8 @@ export function createEdgeClients(): {
     publicClient: createClient(url, anonKey, { auth }),
   };
 }
+
+export type EdgeClients = ReturnType<typeof createEdgeClients>;
 
 export function bearerToken(request: Request): string {
   const authorization = request.headers.get("authorization");
@@ -181,7 +184,7 @@ export function errorResponse(
     return jsonResponse(
       { error: { code: error.code, message: error.message }, requestId: id },
       error.status,
-      corsHeaders,
+      { ...corsHeaders, ...error.headers },
     );
   }
   console.error("Unhandled Edge Function error", { requestId: id });

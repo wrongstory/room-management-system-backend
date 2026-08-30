@@ -135,6 +135,74 @@ describe('account input normalization', () => {
     })).not.toThrow();
   });
 
+  it('uses the same canonical request hash for account create replay and commit', async () => {
+    const rpc = vi.fn(async (name: string, parameters: Record<string, string>) => {
+      if (name === 'replay_account_command') {
+        return { data: null, error: null };
+      }
+      if (name === 'create_account_profile') {
+        return {
+          data: {
+            ...activeAdminProfile,
+            id: parameters.p_profile_id,
+            auth_user_id: parameters.p_auth_user_id,
+            display_name: parameters.p_display_name,
+            display_name_normalized: parameters.p_display_name_normalized,
+            login_id: parameters.p_display_name,
+            login_id_normalized: parameters.p_display_name_normalized,
+            role: parameters.p_role,
+            phone_last_four: parameters.p_phone_last_four,
+            phone_lookup_hash: parameters.p_phone_lookup_hash,
+            must_change_password: true
+          },
+          error: null
+        };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const createUser = vi.fn(async (attributes: { id: string }) => ({
+      data: { user: { id: attributes.id } },
+      error: null
+    }));
+    const clients = {
+      admin: {
+        rpc,
+        auth: { admin: { createUser, deleteUser: vi.fn() } }
+      },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    );
+
+    await service.create(actor, {
+      displayName: '현장 메이드',
+      role: 'maid',
+      phone: '01012345678',
+      idempotencyKey: 'create-hash-contract-0001'
+    });
+
+    expect(rpc).toHaveBeenCalledTimes(2);
+    const replayParameters = rpc.mock.calls[0]?.[1];
+    const commitParameters = rpc.mock.calls[1]?.[1];
+    expect(replayParameters).toBeDefined();
+    expect(commitParameters).toBeDefined();
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      'replay_account_command',
+      'create_account_profile'
+    ]);
+    expect(replayParameters).toMatchObject({
+      p_actor_profile_id: actor.profileId,
+      p_command_type: 'account.create',
+      p_idempotency_key: 'create-hash-contract-0001'
+    });
+    expect(replayParameters?.p_request_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(commitParameters?.p_request_hash).toBe(replayParameters?.p_request_hash);
+    expect(createUser).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects the last active admin before mutating Auth state', async () => {
     const harness = accountStatusHarness({
       data: null,
@@ -193,5 +261,43 @@ describe('account input normalization', () => {
 
     expect(harness.rpc).not.toHaveBeenCalled();
     expect(harness.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it('reports an inconsistency when Auth role rollback fails after a DB rejection', async () => {
+    const updateUserById = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'Auth rollback unavailable' } });
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc: vi.fn(async () => ({
+          data: null,
+          error: { message: 'LAST_ACTIVE_ADMIN_REQUIRED' }
+        })),
+        auth: { admin: { updateUserById } }
+      },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    );
+
+    await expect(service.changeRole(actor, {
+      targetProfileId: activeAdminProfile.id,
+      role: 'maid',
+      idempotencyKey: 'role-rollback-failure-0001'
+    })).rejects.toMatchObject({
+      code: 'ACCOUNT_AUTH_STATE_INCONSISTENT',
+      statusCode: 502
+    });
+    expect(updateUserById).toHaveBeenCalledTimes(2);
   });
 });
