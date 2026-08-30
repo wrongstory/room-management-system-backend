@@ -1,7 +1,7 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 
-export const expectedMigrationVersion = "20260830123241";
+export const expectedMigrationName = "developer_operations_projections";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -125,7 +125,7 @@ export function developerRuntimeStatus(): Record<string, unknown> {
     },
     source: {
       apiVersion: "0.2.0",
-      expectedMigration: expectedMigrationVersion,
+      expectedMigration: expectedMigrationName,
       fastifyRollbackBaseline: "available",
     },
     configuration: Object.fromEntries(
@@ -145,7 +145,7 @@ export async function developerDatabaseStatus(
   requireDeveloper(actor);
   const database = await rpcJson(clients, "get_developer_database_status", {
     p_actor_profile_id: actor.profileId,
-    p_expected_migration_version: expectedMigrationVersion,
+    p_expected_migration_name: expectedMigrationName,
   });
   const runtime = developerRuntimeStatus();
   return {

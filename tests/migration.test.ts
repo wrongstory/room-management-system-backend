@@ -66,6 +66,10 @@ const clientIsolationMigrationUrl = new URL(
   '../supabase/migrations/20260830054446_isolate_login_rate_limit_clients.sql',
   import.meta.url
 );
+const developerOperationsMigrationUrl = new URL(
+  '../supabase/migrations/20260830123241_developer_operations_projections.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -236,6 +240,20 @@ describe('initial migration contract', () => {
     expect(sql).toContain('attempt_count < p_limit + 1');
     expect(sql).toContain('from service_role');
     expect(sql).toContain('to service_role');
+  });
+
+  it('uses stable migration names and exact critical RPC privilege contracts', async () => {
+    const sql = await readFile(developerOperationsMigrationUrl, 'utf8');
+
+    expect(sql).toContain('p_expected_migration_name text');
+    expect(sql).toContain('where name = $1');
+    expect(sql).not.toContain('p_expected_migration_version');
+    expect(sql).toContain('pg_catalog.to_regprocedure(expected.signature)');
+    expect(sql).toContain("'service_role', resolved.function_oid, 'EXECUTE'");
+    expect(sql).toContain("'authenticated', resolved.function_oid, 'EXECUTE'");
+    expect(sql).toContain(
+      'public.create_account_profile(uuid,uuid,uuid,text,text,public.app_role,text,text,text,text)'
+    );
   });
 
   it('hardens cross-table cleaning and payroll integrity', async () => {

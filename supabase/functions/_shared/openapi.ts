@@ -949,7 +949,12 @@ export const openApiDocument = {
             ],
             properties: {
               apiVersion: { type: "string" },
-              expectedMigration: { type: "string", pattern: "^[0-9]{14}$" },
+              expectedMigration: {
+                type: "string",
+                pattern: "^[a-z][a-z0-9_]{2,100}$",
+                description:
+                  "원격 적용 시각과 무관한 Git migration의 안정적인 name",
+              },
               fastifyRollbackBaseline: {
                 type: "string",
                 enum: ["available", "retired"],
@@ -1001,6 +1006,7 @@ export const openApiDocument = {
         required: [
           "databaseReachable",
           "currentMigration",
+          "currentMigrationVersion",
           "expectedMigration",
           "migrationDrift",
           "rlsMissingCount",
@@ -1015,9 +1021,18 @@ export const openApiDocument = {
           databaseReachable: { type: "boolean" },
           currentMigration: {
             type: ["string", "null"],
-            pattern: "^[0-9]{14}$",
+            pattern: "^[a-z][a-z0-9_]{2,100}$",
           },
-          expectedMigration: { type: "string", pattern: "^[0-9]{14}$" },
+          currentMigrationVersion: {
+            type: ["string", "null"],
+            pattern: "^[0-9]{14}$",
+            description:
+              "현재 환경이 부여한 원격 migration version. source identity로 사용하지 않습니다.",
+          },
+          expectedMigration: {
+            type: "string",
+            pattern: "^[a-z][a-z0-9_]{2,100}$",
+          },
           migrationDrift: {
             type: "string",
             enum: ["ahead", "equal", "behind", "unknown"],

@@ -1,6 +1,6 @@
 begin;
 
-select plan(23);
+select plan(30);
 
 insert into auth.users (id) values
   ('16000000-0000-4000-8000-000000000001'),
@@ -79,16 +79,62 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    '20260830123241'
+    'developer_operations_projections'
+  ) ->> 'currentMigration',
+  'developer_operations_projections',
+  'database status exposes the stable current migration name'
+);
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'developer_operations_projections'
   ) ->> 'migrationDrift',
   'equal',
-  'database status matches the source migration head'
+  'database status matches the source migration name'
+);
+
+update supabase_migrations.schema_migrations
+set version = '20991231235958'
+where name = 'developer_operations_projections';
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'developer_operations_projections'
+  ) ->> 'migrationDrift',
+  'equal',
+  'remote execution version remapping does not create false drift'
+);
+
+insert into supabase_migrations.schema_migrations (version, statements, name)
+values ('20991231235959', array[]::text[], 'developer_operations_future');
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'developer_operations_projections'
+  ) ->> 'migrationDrift',
+  'ahead',
+  'a migration after the expected named migration reports ahead'
+);
+
+delete from supabase_migrations.schema_migrations
+where name = 'developer_operations_future';
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'developer_operations_future'
+  ) ->> 'migrationDrift',
+  'behind',
+  'a missing expected migration name reports behind'
 );
 
 select is(
   (public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    '20260830123241'
+    'developer_operations_projections'
   ) ->> 'rlsMissingCount')::integer,
   0,
   'database status reports no public base table without RLS'
@@ -97,17 +143,58 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    '20260830123240'
-  ) ->> 'migrationDrift',
-  'ahead',
-  'database status normalizes a newer database head as ahead'
+    'developer_operations_projections'
+  ) #>> '{criticalRpcs,create_account_profile}',
+  'true',
+  'critical RPC requires the current account-create signature and safe grants'
 );
+
+select ok(
+  to_regprocedure(
+    'public.create_account_profile(uuid,uuid,uuid,text,text,public.app_role,text,text,text)'
+  ) is not null,
+  'legacy account-create overload remains available for the false-green regression'
+);
+
+revoke execute on function public.create_account_profile(
+  uuid, uuid, uuid, text, text, public.app_role, text, text, text, text
+) from service_role;
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'developer_operations_projections'
+  ) #>> '{criticalRpcs,create_account_profile}',
+  'false',
+  'legacy overload cannot mask missing service-role EXECUTE on the secure signature'
+);
+
+grant execute on function public.create_account_profile(
+  uuid, uuid, uuid, text, text, public.app_role, text, text, text, text
+) to service_role;
+
+grant execute on function public.create_account_profile(
+  uuid, uuid, uuid, text, text, public.app_role, text, text, text, text
+) to authenticated;
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'developer_operations_projections'
+  ) #>> '{criticalRpcs,create_account_profile}',
+  'false',
+  'critical RPC becomes unhealthy when authenticated can execute it'
+);
+
+revoke execute on function public.create_account_profile(
+  uuid, uuid, uuid, text, text, public.app_role, text, text, text, text
+) from authenticated;
 
 alter table public.notifications disable row level security;
 select is(
   (public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    '20260830123241'
+    'developer_operations_projections'
   ) ->> 'rlsMissingCount')::integer,
   1,
   'database status detects a public base table without RLS'

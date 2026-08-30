@@ -29,6 +29,8 @@ business admin과 maid는 developer endpoint에서 항상 `403 DEVELOPER_REQUIRE
 ### DB
 
 - `migrationDrift=equal`이고 `rlsValid=true`이며 모든 `criticalRpcs`가 true일 때 정상이다.
+- migration identity는 적용 시점마다 달라질 수 있는 14자리 원격 version이 아니라 Git migration의 안정적인 `name`을 사용한다. `currentMigrationVersion`은 진단 정보일 뿐 source 동일성 판단에 사용하지 않는다.
+- `criticalRpcs`는 같은 이름의 함수 존재 여부가 아니다. 정본 exact signature가 존재하고 `service_role`만 실행할 수 있으며 `anon`·`authenticated`는 실행할 수 없어야 true다.
 - `behind`는 운영 DB에 source migration이 아직 적용되지 않은 상태다. 운영 콘솔에서 migration을 직접 실행하지 않고 정식 release runbook으로 이동한다.
 - `ahead`는 DB가 현재 client source보다 앞선 상태다. client 업데이트 전 변경 동작을 차단한다.
 - `unknown`은 자동 정상 처리하지 않고 연결 환경과 migration history를 별도로 확인한다.

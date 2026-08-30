@@ -171,7 +171,9 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/audit-events"');
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
-    expect(developerApi).toContain('expectedMigrationVersion = "20260830123241"');
+    expect(developerApi).toContain(
+      'expectedMigrationName = "developer_operations_projections"'
+    );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
     expect(migration).toContain('private.assert_active_developer');

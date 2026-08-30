@@ -1,5 +1,5 @@
 import {
-  expectedMigrationVersion,
+  expectedMigrationName,
   toDeveloperAuditEvent,
 } from "./developer-api.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
@@ -30,10 +30,10 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
   assert(!("after_state" in event), "raw after_state must never leak");
 });
 
-Deno.test("developer source migration head is a fixed version", () => {
+Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    /^[0-9]{14}$/.test(expectedMigrationVersion),
-    "expected migration must be a 14-digit source version",
+    expectedMigrationName === "developer_operations_projections",
+    "expected migration must not depend on a remote execution timestamp",
   );
 });
 

@@ -261,7 +261,7 @@ $$;
 
 create function public.get_developer_database_status(
   p_actor_profile_id uuid,
-  p_expected_migration_version text
+  p_expected_migration_name text
 )
 returns jsonb
 language plpgsql
@@ -270,29 +270,58 @@ set search_path = pg_catalog, public, private
 as $$
 declare
   v_current_migration text;
+  v_current_migration_version text;
+  v_expected_remote_version text;
+  v_expected_match_count integer := 0;
   v_drift text := 'unknown';
   v_rls_missing integer;
   v_critical_rpcs jsonb;
 begin
   perform private.assert_active_developer(p_actor_profile_id);
 
-  if p_expected_migration_version is null
-    or p_expected_migration_version !~ '^[0-9]{14}$' then
+  if p_expected_migration_name is null
+    or p_expected_migration_name !~ '^[a-z][a-z0-9_]{2,100}$' then
     raise exception using errcode = '22023', message = 'INVALID_EXPECTED_MIGRATION';
   end if;
 
   if to_regclass('supabase_migrations.schema_migrations') is not null then
-    execute 'select max(version)::text from supabase_migrations.schema_migrations'
-    into v_current_migration;
+    begin
+      execute $history$
+        select version::text, name::text
+        from supabase_migrations.schema_migrations
+        order by version desc
+        limit 1
+      $history$
+      into v_current_migration_version, v_current_migration;
+
+      execute $expected$
+        select count(*)::integer, max(version)::text
+        from supabase_migrations.schema_migrations
+        where name = $1
+      $expected$
+      into v_expected_match_count, v_expected_remote_version
+      using p_expected_migration_name;
+    exception
+      when undefined_column or undefined_table then
+        v_current_migration := null;
+        v_current_migration_version := null;
+        v_expected_remote_version := null;
+        v_expected_match_count := 0;
+    end;
   end if;
 
-  if v_current_migration = p_expected_migration_version then
+  if v_current_migration_version ~ '^[0-9]{14}$'
+    and v_expected_remote_version ~ '^[0-9]{14}$'
+    and v_expected_match_count = 1
+    and v_current_migration_version = v_expected_remote_version then
     v_drift := 'equal';
-  elsif v_current_migration ~ '^[0-9]{14}$'
-    and v_current_migration > p_expected_migration_version then
+  elsif v_current_migration_version ~ '^[0-9]{14}$'
+    and v_expected_remote_version ~ '^[0-9]{14}$'
+    and v_expected_match_count = 1
+    and v_current_migration_version > v_expected_remote_version then
     v_drift := 'ahead';
-  elsif v_current_migration ~ '^[0-9]{14}$'
-    and v_current_migration < p_expected_migration_version then
+  elsif v_current_migration_version ~ '^[0-9]{14}$'
+    and v_expected_match_count = 0 then
     v_drift := 'behind';
   end if;
 
@@ -303,28 +332,53 @@ begin
     and c.relkind in ('r', 'p')
     and not c.relrowsecurity;
 
-  select jsonb_object_agg(required.name, required.present order by required.name)
+  select jsonb_object_agg(required.name, required.valid order by required.name)
   into v_critical_rpcs
   from (
-    select expected.name, exists (
-      select 1
-      from pg_catalog.pg_proc p
-      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-      where n.nspname = 'public' and p.proname = expected.name
-    ) as present
-    from unnest(array[
-      'create_account_profile',
-      'get_developer_database_status',
-      'get_room_operational_projection',
-      'is_active_auth_session',
-      'process_due_reservation_transitions'
-    ]) as expected(name)
+    select
+      expected.name,
+      resolved.function_oid is not null
+        and coalesce(pg_catalog.has_function_privilege(
+          'service_role', resolved.function_oid, 'EXECUTE'
+        ), false)
+        and not coalesce(pg_catalog.has_function_privilege(
+          'anon', resolved.function_oid, 'EXECUTE'
+        ), false)
+        and not coalesce(pg_catalog.has_function_privilege(
+          'authenticated', resolved.function_oid, 'EXECUTE'
+        ), false) as valid
+    from (values
+      (
+        'create_account_profile',
+        'public.create_account_profile(uuid,uuid,uuid,text,text,public.app_role,text,text,text,text)'
+      ),
+      (
+        'get_developer_database_status',
+        'public.get_developer_database_status(uuid,text)'
+      ),
+      (
+        'get_room_operational_projection',
+        'public.get_room_operational_projection(uuid,uuid)'
+      ),
+      (
+        'is_active_auth_session',
+        'public.is_active_auth_session(uuid,uuid)'
+      ),
+      (
+        'process_due_reservation_transitions',
+        'public.process_due_reservation_transitions(uuid,timestamp with time zone,text,text)'
+      )
+    ) as expected(name, signature)
+    cross join lateral (
+      select pg_catalog.to_regprocedure(expected.signature) as function_oid
+    ) resolved
   ) required;
 
   return jsonb_build_object(
     'databaseReachable', true,
     'currentMigration', v_current_migration,
-    'expectedMigration', p_expected_migration_version,
+    'currentMigrationVersion', v_current_migration_version,
+    'expectedMigration', p_expected_migration_name,
     'migrationDrift', v_drift,
     'rlsMissingCount', v_rls_missing,
     'rlsValid', v_rls_missing = 0,
