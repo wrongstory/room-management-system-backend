@@ -58,3 +58,23 @@
 - 운영 migration 목록에 위 3개 이름이 순서대로 존재
 - Security Advisor 차단사항 0, Performance Advisor는 ERROR/WARN을 차단하고 초기 unused-index INFO는 기록만 유지
 - Edge `api/health`, 실제 관리자 Auth/rooms, Cron scheduler HTTP smoke를 통과하지 못하면 배포 완료로 표현하지 않음
+
+## #42 follow-up source와 운영 적용
+
+위 3건은 최초 `main@c25e234` 이후 운영에 적용 완료된 기존 기록이다. Issue #42의 Edge 인증·계정 관리 API는 일반 작업 브랜치에서 `dev`로 병합한 뒤 `release/v0.2.0`을 다시 동기화하고 별도 follow-up release PR로 `main`에 승격한다. 이 source가 `main`에 도달하기 전에는 production Edge Function을 배포하거나 아래 신규 migration을 운영에 적용하지 않는다.
+
+1. `20260830015035_edge_login_rate_limit.sql`
+   - 로그인 alias 조회보다 앞선 durable fixed-window 저장소 기반
+2. `20260830045832_harden_account_receipts_and_login_limits.sql`
+   - rotating login ID의 write/cardinality 상한 기반 추가
+   - 계정 command를 actor·command·key + canonical request hash receipt로 전환
+   - 기존 service-role용 per-login-only/account RPC 실행 권한 회수
+3. `20260830054446_isolate_login_rate_limit_clients.sql`
+   - trusted client → login ID → emergency global 순서로 로그인 DoS 격리
+   - saturated bucket의 추가 거부 write 중단, 기존 client-unaware RPC 권한 회수
+4. production Function 재배포 후 `/api/openapi.json`, `/api/docs`, 로그인·비밀번호 변경, developer/admin/maid 계정 관리 권한 smoke
+5. production gateway가 spoofed client header보다 platform client address를 우선하는지 smoke
+6. 기존 developer를 다시 bootstrap하지 않고, developer가 별도 active business admin을 생성
+7. business admin의 임시 비밀번호 변경과 scheduler actor 지정 후 Edge/Cron smoke
+
+Swagger UI는 운영 secret 입력·보관 수단이 아니다. 실제 token은 smoke 중에만 Authorize에 입력하고 브라우저 저장소에 유지하지 않으며, 캡처·로그·Issue에 남기지 않는다.

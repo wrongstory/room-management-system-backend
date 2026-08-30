@@ -97,7 +97,8 @@ select public.create_account_profile(
   'admin',
   '0002',
   'business-admin-phone-hash',
-  'create-business-admin-test-0001'
+  'create-business-admin-test-0001',
+  repeat('1', 64)
 );
 
 insert into developer_test_results values (
@@ -132,7 +133,8 @@ begin
       '23000000-0000-4000-8000-000000000002',
       '23000000-0000-4000-8000-000000000001',
       'admin',
-      'change-developer-role-test-0001'
+      'change-developer-role-test-0001',
+      repeat('2', 64)
     );
     insert into developer_test_results values (6, 'business admin cannot demote developer', false);
   exception when check_violation then
@@ -147,7 +149,8 @@ begin
       '23000000-0000-4000-8000-000000000001',
       'inactive',
       'SECURITY_TEST',
-      'change-developer-status-test-0001'
+      'change-developer-status-test-0001',
+      repeat('3', 64)
     );
     insert into developer_test_results values (7, 'business admin cannot deactivate developer', false);
   exception when check_violation then
@@ -160,7 +163,8 @@ begin
     perform public.prepare_account_password_reset(
       '23000000-0000-4000-8000-000000000002',
       '23000000-0000-4000-8000-000000000001',
-      'reset-developer-password-test-0001'
+      'reset-developer-password-test-0001',
+      repeat('4', 64)
     );
     insert into developer_test_results values (8, 'business admin cannot reset developer password', false);
   exception when check_violation then

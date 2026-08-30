@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { AppError } from '../../lib/app-error.js';
 import type { AuthService } from './auth.service.js';
 import { isLoginPassword, isPersonalPassword } from './password.js';
 
@@ -33,7 +34,17 @@ function idempotencyKey(value: string | string[] | undefined): string {
 export function createAuthRoutes(authService: AuthService): FastifyPluginAsync {
   return async (app) => {
     app.post('/login', {
-      config: { rateLimit: { max: 10, timeWindow: '1 minute' } }
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '1 minute',
+          errorResponseBuilder: () => new AppError(
+            429,
+            'LOGIN_RATE_LIMITED',
+            '로그인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.'
+          )
+        }
+      }
     }, async (request, reply) => {
       const input = loginSchema.parse(request.body);
       const result = await authService.login(input);

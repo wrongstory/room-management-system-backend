@@ -53,6 +53,20 @@ const developerContractMigrationUrl = new URL(
   import.meta.url
 );
 
+const edgeLoginRateLimitMigrationUrl = new URL(
+  '../supabase/migrations/20260830015035_edge_login_rate_limit.sql',
+  import.meta.url
+);
+
+const accountReceiptHardeningMigrationUrl = new URL(
+  '../supabase/migrations/20260830045832_harden_account_receipts_and_login_limits.sql',
+  import.meta.url
+);
+const clientIsolationMigrationUrl = new URL(
+  '../supabase/migrations/20260830054446_isolate_login_rate_limit_clients.sql',
+  import.meta.url
+);
+
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
     const sql = await readFile(initialMigrationUrl, 'utf8');
@@ -179,6 +193,49 @@ describe('initial migration contract', () => {
     expect(contractSql).toContain('from service_role');
     expect(contractSql).toContain('to service_role');
     expect(contractSql).not.toContain('grant execute on function public.bootstrap_first_admin_profile');
+  });
+
+  it('stores Edge login throttling in a service-only durable fixed window', async () => {
+    const sql = await readFile(edgeLoginRateLimitMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.login_rate_limit_windows');
+    expect(sql).toContain('create function public.consume_login_rate_limit(');
+    expect(sql).toContain('on conflict (key_hash) do update');
+    expect(sql).toContain('allowed := v_attempt_count <= p_limit');
+    expect(sql).toContain('retry_after_seconds := case');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+  });
+
+  it('bounds rotating login IDs and scopes account command receipts', async () => {
+    const sql = await readFile(accountReceiptHardeningMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create function public.consume_login_rate_limits(');
+    expect(sql).toContain("'global'::text");
+    expect(sql).toContain('limit 64');
+    expect(sql).toContain('for update skip locked');
+    expect(sql).toContain('create function public.replay_account_command(');
+    expect(sql).toContain("'account.create'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('private.audit_command_key(');
+    expect(sql).toContain('p_request_hash');
+    expect(sql).toContain('from service_role');
+    expect(sql).toContain('to service_role');
+  });
+
+  it('isolates abusive clients before login and emergency global limits', async () => {
+    const sql = await readFile(clientIsolationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('p_client_key_hash text');
+    expect(sql).toContain('p_client_limit integer default 30');
+    expect(sql).toContain('p_login_limit integer default 10');
+    expect(sql).toContain('p_global_limit integer default 600');
+    expect(sql).toContain("'client'::text");
+    expect(sql.indexOf('p_client_key_hash')).toBeLessThan(sql.indexOf('p_login_key_hash'));
+    expect(sql).toContain('attempt_count < p_limit + 1');
+    expect(sql).toContain('from service_role');
+    expect(sql).toContain('to service_role');
   });
 
   it('hardens cross-table cleaning and payroll integrity', async () => {

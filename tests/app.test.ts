@@ -289,6 +289,24 @@ describe('application', () => {
     await app.close();
   });
 
+  it('returns the shared login rate-limit error contract', async () => {
+    const app = await buildApp({ env, services: services(), logger: false });
+    const responses = [];
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      responses.push(await app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        payload: { loginId: '관리자', password: '123456' }
+      }));
+    }
+
+    expect(responses.slice(0, 10).every((response) => response.statusCode === 200)).toBe(true);
+    expect(responses[10]?.statusCode).toBe(429);
+    expect(responses[10]?.json().error.code).toBe('LOGIN_RATE_LIMITED');
+    expect(Number(responses[10]?.headers['retry-after'])).toBeGreaterThan(0);
+    await app.close();
+  });
+
   it('submits a maid weekly availability with an idempotency key', async () => {
     const appServices = services();
     appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
