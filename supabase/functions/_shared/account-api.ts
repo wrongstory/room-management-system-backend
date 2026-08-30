@@ -205,6 +205,29 @@ async function hmacHex(key: string, value: string): Promise<string> {
     .join("");
 }
 
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalize(nested)]),
+    );
+  }
+  return value;
+}
+
+/** 계정 command의 재시도 payload를 동일하게 식별하는 canonical SHA-256이다. */
+async function requestHash(value: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(canonicalize(value)));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function toAccount(row: ProfileRow): Account {
   return {
     id: row.id,
@@ -335,24 +358,26 @@ async function getProfile(
   return data as unknown as ProfileRow;
 }
 
-async function findIdempotentProfile(
+async function replayAccountProfile(
   clients: EdgeClients,
+  actorProfileId: string,
+  commandType: string,
   key: string,
-  eventType: string,
+  hash: string,
 ): Promise<ProfileRow | null> {
-  const { data, error } = await clients.admin
-    .from("audit_events")
-    .select("entity_id")
-    .eq("idempotency_key", key)
-    .eq("event_type", eventType)
-    .maybeSingle();
+  const { data, error } = await clients.admin.rpc("replay_account_command", {
+    p_actor_profile_id: actorProfileId,
+    p_command_type: commandType,
+    p_idempotency_key: key,
+    p_request_hash: hash,
+  });
   if (error) {
     throw databaseError(error);
   }
-  if (!data?.entity_id) {
+  if (typeof data !== "string") {
     return null;
   }
-  return getProfile(clients, "id", data.entity_id);
+  return getProfile(clients, "id", data);
 }
 
 function assertIdempotentAccountCreation(
@@ -383,13 +408,19 @@ async function consumeLoginRateLimit(
   clients: EdgeClients,
   normalizedLoginId: string,
 ): Promise<void> {
-  const keyHash = await hmacHex(
-    requiredEnv("ACCOUNT_PHONE_PEPPER"),
-    `edge-login-rate-limit:${normalizedLoginId}`,
-  );
-  const { data, error } = await clients.admin.rpc("consume_login_rate_limit", {
-    p_key_hash: keyHash,
-    p_limit: 10,
+  const pepper = requiredEnv("ACCOUNT_PHONE_PEPPER");
+  const [globalKeyHash, loginKeyHash] = await Promise.all([
+    hmacHex(pepper, "edge-login-rate-limit:global:v1"),
+    hmacHex(
+      pepper,
+      `edge-login-rate-limit:${normalizedLoginId}`,
+    ),
+  ]);
+  const { data, error } = await clients.admin.rpc("consume_login_rate_limits", {
+    p_global_key_hash: globalKeyHash,
+    p_login_key_hash: loginKeyHash,
+    p_global_limit: 60,
+    p_login_limit: 10,
     p_window_seconds: 60,
   });
   if (error || !Array.isArray(data) || !data[0]) {
@@ -627,7 +658,18 @@ export async function createAccount(
     role,
     phoneLookupHash: phoneHash,
   };
-  const existing = await findIdempotentProfile(clients, key, "account.created");
+  const hash = await requestHash({
+    actorProfileId: actor.profileId,
+    command: "account.create",
+    ...fingerprint,
+  });
+  const existing = await replayAccountProfile(
+    clients,
+    actor.profileId,
+    "account.create",
+    key,
+    hash,
+  );
   if (existing) {
     assertIdempotentAccountCreation(existing, fingerprint);
     return {
@@ -665,6 +707,7 @@ export async function createAccount(
       p_phone_last_four: phone.lastFour,
       p_phone_lookup_hash: phoneHash,
       p_idempotency_key: key,
+      p_request_hash: hash,
     });
     if (error || !data) {
       throw databaseError(error);
@@ -718,6 +761,13 @@ export async function changeAccountRole(
     invalidRequest("role은 admin 또는 maid여야 합니다.");
   }
   const role = body.role as ManagedRole;
+  const key = idempotencyKey(request);
+  const hash = await requestHash({
+    actorProfileId: actor.profileId,
+    command: "account.role.change",
+    role,
+    targetProfileId,
+  });
   const before = await getProfile(clients, "id", targetProfileId);
   if (before.role === "developer") {
     throw new EdgeError(
@@ -741,7 +791,8 @@ export async function changeAccountRole(
     p_actor_profile_id: actor.profileId,
     p_target_profile_id: targetProfileId,
     p_role: role,
-    p_idempotency_key: idempotencyKey(request),
+    p_idempotency_key: key,
+    p_request_hash: hash,
   });
   if (error || !data) {
     const { error: rollbackError } = await clients.admin.auth.admin
@@ -781,6 +832,14 @@ export async function changeAccountStatus(
   if (!reasonCodePattern.test(reasonCode)) {
     invalidRequest("reasonCode 형식이 올바르지 않습니다.");
   }
+  const key = idempotencyKey(request);
+  const hash = await requestHash({
+    actorProfileId: actor.profileId,
+    command: "account.status.change",
+    reasonCode,
+    status: body.status,
+    targetProfileId,
+  });
   const before = await getProfile(clients, "id", targetProfileId);
   if (before.role === "developer") {
     throw new EdgeError(
@@ -794,7 +853,8 @@ export async function changeAccountStatus(
     p_target_profile_id: targetProfileId,
     p_status: body.status,
     p_reason_code: reasonCode,
-    p_idempotency_key: idempotencyKey(request),
+    p_idempotency_key: key,
+    p_request_hash: hash,
   });
   if (error || !data) {
     throw databaseError(error);
@@ -841,10 +901,16 @@ export async function unlockAccount(
       "최상위 개발자 잠금은 일반 계정 명령으로 해제할 수 없습니다.",
     );
   }
+  const key = idempotencyKey(request);
   return runAccountRpc(clients, "unlock_account", {
     p_actor_profile_id: actor.profileId,
     p_target_profile_id: targetProfileId,
-    p_idempotency_key: idempotencyKey(request),
+    p_idempotency_key: key,
+    p_request_hash: await requestHash({
+      actorProfileId: actor.profileId,
+      command: "account.unlock",
+      targetProfileId,
+    }),
   });
 }
 
@@ -863,12 +929,18 @@ export async function resetAccountPassword(
       "최상위 개발자 비밀번호는 본인만 변경할 수 있습니다.",
     );
   }
+  const key = idempotencyKey(request);
   const { data, error } = await clients.admin.rpc(
     "prepare_account_password_reset",
     {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: targetProfileId,
-      p_idempotency_key: idempotencyKey(request),
+      p_idempotency_key: key,
+      p_request_hash: await requestHash({
+        actorProfileId: actor.profileId,
+        command: "account.password.reset",
+        targetProfileId,
+      }),
     },
   );
   if (error || !data) {

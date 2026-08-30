@@ -65,7 +65,7 @@ export const openApiDocument = {
   externalDocs: {
     description: "프론트엔드 Codex용 연동 가이드",
     url:
-      "https://github.com/wrongstory/room-management-system-backend/blob/dev/docs/FRONTEND_API_INTEGRATION.md",
+      "https://github.com/wrongstory/room-management-system-backend/blob/main/docs/FRONTEND_API_INTEGRATION.md",
   },
   "x-adapters": ["fastify", "supabase-edge"],
   servers: [{ url: ".", description: "현재 Edge api Function" }],
@@ -171,7 +171,7 @@ export const openApiDocument = {
         operationId: "login",
         summary: "로그인하고 세션 토큰 받기",
         description:
-          "로그인 ID는 NFKC·trim·소문자로 정규화됩니다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`입니다. 60초 10회 durable 제한과 계정별 5회 실패/15분 잠금을 함께 적용합니다. 응답의 `mustChangePassword`가 true이면 비밀번호 변경 화면으로 이동하세요.",
+          "로그인 ID는 NFKC·trim·소문자로 정규화됩니다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`입니다. rotating ID 공격을 막는 전역 60회/분 제한을 먼저 적용하고, 이어 ID별 10회/분 durable 제한과 계정별 5회 실패/15분 잠금을 적용합니다. 응답의 `mustChangePassword`가 true이면 비밀번호 변경 화면으로 이동하세요.",
         requestBody: {
           required: true,
           content: {
@@ -932,7 +932,7 @@ export function swaggerUiResponse(
     <h1>CASTLE THE ART 프론트 연동 API</h1>
     <p>Authorize에는 access token만 입력하고, 변경 요청에는 사용자 동작별 Idempotency-Key를 사용하세요. 실제 토큰·비밀번호·휴대전화는 캡처나 Issue에 남기지 않습니다.</p>
     <a href="./openapi.json" download="room-management-openapi.json">OpenAPI JSON 내려받기</a>
-    <a href="https://github.com/wrongstory/room-management-system-backend/blob/dev/docs/FRONTEND_API_INTEGRATION.md" target="_blank" rel="noreferrer">프론트 연동 가이드</a>
+    <a href="https://github.com/wrongstory/room-management-system-backend/blob/main/docs/FRONTEND_API_INTEGRATION.md" target="_blank" rel="noreferrer">프론트 연동 가이드</a>
   </header>
   <div id="swagger-ui"></div>
   <script src="${swaggerBundle}" integrity="${swaggerBundleIntegrity}" crossorigin="anonymous"></script>

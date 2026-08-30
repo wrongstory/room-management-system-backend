@@ -58,6 +58,11 @@ const edgeLoginRateLimitMigrationUrl = new URL(
   import.meta.url
 );
 
+const accountReceiptHardeningMigrationUrl = new URL(
+  '../supabase/migrations/20260830045832_harden_account_receipts_and_login_limits.sql',
+  import.meta.url
+);
+
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
     const sql = await readFile(initialMigrationUrl, 'utf8');
@@ -195,6 +200,23 @@ describe('initial migration contract', () => {
     expect(sql).toContain('allowed := v_attempt_count <= p_limit');
     expect(sql).toContain('retry_after_seconds := case');
     expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+  });
+
+  it('bounds rotating login IDs and scopes account command receipts', async () => {
+    const sql = await readFile(accountReceiptHardeningMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create function public.consume_login_rate_limits(');
+    expect(sql).toContain("'global'::text");
+    expect(sql).toContain('limit 64');
+    expect(sql).toContain('for update skip locked');
+    expect(sql).toContain('create function public.replay_account_command(');
+    expect(sql).toContain("'account.create'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('private.audit_command_key(');
+    expect(sql).toContain('p_request_hash');
+    expect(sql).toContain('from service_role');
     expect(sql).toContain('to service_role');
   });
 

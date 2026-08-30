@@ -133,7 +133,7 @@ Deno.test("unknown alias and wrong password share INVALID_CREDENTIALS", async ()
     admin: {
       rpc: (name: string) => {
         wrongEvents.push(`rpc:${name}`);
-        if (name === "consume_login_rate_limit") {
+        if (name === "consume_login_rate_limits") {
           return Promise.resolve({
             data: [{ allowed: true, retry_after_seconds: 0 }],
             error: null,
@@ -167,7 +167,7 @@ Deno.test("unknown alias and wrong password share INVALID_CREDENTIALS", async ()
   assertEquals(unknown.message, wrong.message, "credential error message");
   assertEquals(
     unknownEvents.slice(0, 2),
-    ["rpc:consume_login_rate_limit", "from:login_aliases"],
+    ["rpc:consume_login_rate_limits", "from:login_aliases"],
     "durable limiter runs before alias lookup",
   );
   assert(
@@ -242,7 +242,18 @@ Deno.test("developer and active admin create separate business accounts", async 
       admin: {
         from: () => queryResult(null),
         rpc: (name: string, parameters: Record<string, string>) => {
+          if (name === "replay_account_command") {
+            assert(
+              /^[0-9a-f]{64}$/.test(parameters.p_request_hash),
+              "account replay requires a canonical request hash",
+            );
+            return Promise.resolve({ data: null, error: null });
+          }
           assertEquals(name, "create_account_profile", "account create RPC");
+          assert(
+            /^[0-9a-f]{64}$/.test(parameters.p_request_hash),
+            "account create requires a canonical request hash",
+          );
           return Promise.resolve({
             data: {
               ...profile,

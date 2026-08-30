@@ -102,7 +102,7 @@ const idempotencyKey = crypto.randomUUID();
 | 최초 비밀번호 변경 | `PASSWORD_CHANGE_REQUIRED` | 비밀번호 변경 화면 고정 |
 | 권한 부족 | `ACCOUNT_MANAGER_REQUIRED`, `ADMIN_REQUIRED` | 접근 차단·권한 안내 |
 | 계정 잠금 | `ACCOUNT_LOCKED` | 잠금 종료 또는 관리자 해제 안내 |
-| 로그인 요청 과다 | `LOGIN_RATE_LIMITED` | `Retry-After` 이후 재시도 |
+| 로그인 요청 과다 | `LOGIN_RATE_LIMITED` | `Retry-After` 이후 재시도. 전역 abuse 제한도 있으므로 다른 로그인 ID로 바꿔 재시도하지 않음 |
 | 동시 변경/업무 충돌 | `IDEMPOTENCY_KEY_REUSED`, `LAST_ACTIVE_ADMIN_REQUIRED` 등 409 | 최신 목록 재조회 후 사용자 확인 |
 | 서버 상태 불일치 | `ACCOUNT_AUTH_STATE_INCONSISTENT`, `PASSWORD_STATE_INCONSISTENT` | 자동 성공 처리 금지, requestId로 운영 확인 |
 

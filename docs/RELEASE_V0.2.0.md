@@ -64,10 +64,13 @@
 위 3건은 최초 `main@c25e234` 이후 운영에 적용 완료된 기존 기록이다. Issue #42의 Edge 인증·계정 관리 API는 일반 작업 브랜치에서 `dev`로 병합한 뒤 `release/v0.2.0`을 다시 동기화하고 별도 follow-up release PR로 `main`에 승격한다. 이 source가 `main`에 도달하기 전에는 production Edge Function을 배포하거나 아래 신규 migration을 운영에 적용하지 않는다.
 
 1. `20260830015035_edge_login_rate_limit.sql`
-   - 로그인 alias 조회보다 앞선 durable fixed-window 제한
-   - `private.login_rate_limit_windows`와 service-role 전용 command
-2. production Function 재배포 후 `/api/openapi.json`, `/api/docs`, 로그인·비밀번호 변경, developer/admin/maid 계정 관리 권한 smoke
-3. 기존 developer를 다시 bootstrap하지 않고, developer가 별도 active business admin을 생성
-4. business admin의 임시 비밀번호 변경과 scheduler actor 지정 후 Edge/Cron smoke
+   - 로그인 alias 조회보다 앞선 durable fixed-window 저장소 기반
+2. `20260830045832_harden_account_receipts_and_login_limits.sql`
+   - 전역 bucket 선행으로 rotating login ID의 write/cardinality 상한 강제
+   - 계정 command를 actor·command·key + canonical request hash receipt로 전환
+   - 기존 service-role용 per-login-only/account RPC 실행 권한 회수
+3. production Function 재배포 후 `/api/openapi.json`, `/api/docs`, 로그인·비밀번호 변경, developer/admin/maid 계정 관리 권한 smoke
+4. 기존 developer를 다시 bootstrap하지 않고, developer가 별도 active business admin을 생성
+5. business admin의 임시 비밀번호 변경과 scheduler actor 지정 후 Edge/Cron smoke
 
 Swagger UI는 운영 secret 입력·보관 수단이 아니다. 실제 token은 smoke 중에만 Authorize에 입력하고 브라우저 저장소에 유지하지 않으며, 캡처·로그·Issue에 남기지 않는다.

@@ -45,7 +45,7 @@ flowchart LR
 
 권한은 사용자 수정 가능한 `user_metadata`에 의존하지 않습니다. 역할 변경과 비활성화가 JWT 갱신 전에도 반영되도록 DB 프로필을 매 요청 확인합니다.
 
-Edge 로그인은 alias 조회 전에 정규화 ID의 HMAC key로 PostgreSQL fixed-window 제한을 원자적으로 소비합니다. Edge instance 메모리는 cold start와 수평 확장 때 공유되지 않으므로 보안 제한 상태를 두지 않습니다. 사용자별 5회 실패/15분 잠금은 이 전역 abuse 제한과 별도로 유지합니다.
+Edge 로그인은 alias 조회 전에 PostgreSQL fixed-window 제한을 **고정된 전역 HMAC bucket(60회/분) → 정규화 ID별 HMAC bucket(10회/분)** 순서로 원자적으로 소비합니다. 전역 제한을 먼저 적용하므로 공격자가 계속 다른 ID를 보내도 해당 분에 만들어지는 ID별 row 수가 전역 허용량으로 제한됩니다. 만료 row 정리도 요청당 최대 64개만 수행합니다. Edge instance 메모리는 cold start와 수평 확장 때 공유되지 않으므로 보안 제한 상태를 두지 않습니다. 사용자별 5회 실패/15분 잠금은 이 abuse 제한과 별도로 유지합니다.
 
 ## 데이터 모델
 
@@ -76,6 +76,7 @@ erDiagram
 
 | 작업 | 서버 보장 |
 |---|---|
+| 계정 명령 | `(actor_profile_id, command_type, idempotency_key)` receipt + canonical request hash. 같은 scope·같은 payload는 동일 결과를 재생하고, 같은 scope·다른 payload는 거부하며, 서로 다른 actor/command의 동일 raw key는 충돌하지 않음. 동시 계정 생성에서 DB winner 외 Auth 사용자는 보상 삭제 |
 | 객실·예약 명령 | actor 최신 상태·admin 역할 + 객실 `state_version`/예약 `version` CAS + actor/명령별 idempotency key + 짧은 전역 advisory lock으로 lock 순서 고정 |
 | 예약 저장 | KST 기준 최소 1박·분 단위 + `[check_in_at, check_out_at)` `tstzrange` GiST exclusion으로 겹침 차단 |
 | 입·퇴실 전이 | 고유 event key + 예약 lock으로 예정/수동 전이 중복 차단. 한 batch에서는 퇴실을 먼저 닫아 같은 instant의 다음 입실을 지연시키지 않고, worker 중단 중 완전히 지난 미입실 예약도 가짜 check-in 없이 checkout으로 catch-up |

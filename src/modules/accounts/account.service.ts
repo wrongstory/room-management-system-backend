@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { type Actor, type AppRole, canManageAccounts } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
+import { requestHash } from '../../lib/command.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { isPersonalPassword, toSupabaseAuthPassword } from '../auth/password.js';
 
@@ -246,7 +247,17 @@ export class SupabaseAccountService implements AccountService {
       role: input.role,
       phoneLookupHash: phoneHash
     };
-    const existing = await this.findIdempotentProfile(input.idempotencyKey, 'account.created');
+    const hash = requestHash({
+      actorProfileId: actor.profileId,
+      command: 'account.create',
+      ...fingerprint
+    });
+    const existing = await this.replayAccountProfile(
+      actor.profileId,
+      'account.create',
+      input.idempotencyKey,
+      hash
+    );
 
     if (existing) {
       assertIdempotentAccountCreation(existing, fingerprint);
@@ -280,7 +291,8 @@ export class SupabaseAccountService implements AccountService {
         p_role: input.role,
         p_phone_last_four: phone.lastFour,
         p_phone_lookup_hash: phoneHash,
-        p_idempotency_key: input.idempotencyKey
+        p_idempotency_key: input.idempotencyKey,
+        p_request_hash: hash
       });
 
       if (error || !data) {
@@ -332,7 +344,7 @@ export class SupabaseAccountService implements AccountService {
       role: 'developer' as const,
       phoneLookupHash: phoneHash
     };
-    const existing = await this.findIdempotentProfile(
+    const existing = await this.findBootstrapProfile(
       input.idempotencyKey,
       'account.bootstrap_developer_created'
     );
@@ -380,6 +392,12 @@ export class SupabaseAccountService implements AccountService {
 
   async changeRole(actor: Actor, input: ChangeAccountRoleInput): Promise<Account> {
     ensureAccountManager(actor);
+    const hash = requestHash({
+      actorProfileId: actor.profileId,
+      command: 'account.role.change',
+      role: input.role,
+      targetProfileId: input.targetProfileId
+    });
     const before = await this.getProfile(input.targetProfileId);
     if (before.role === 'developer') {
       throw new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 역할은 변경할 수 없습니다.');
@@ -395,7 +413,8 @@ export class SupabaseAccountService implements AccountService {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: input.targetProfileId,
       p_role: input.role,
-      p_idempotency_key: input.idempotencyKey
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: hash
     });
     if (error || !data) {
       const { error: rollbackError } = await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
@@ -415,6 +434,13 @@ export class SupabaseAccountService implements AccountService {
 
   async changeStatus(actor: Actor, input: ChangeAccountStatusInput): Promise<Account> {
     ensureAccountManager(actor);
+    const hash = requestHash({
+      actorProfileId: actor.profileId,
+      command: 'account.status.change',
+      reasonCode: input.reasonCode,
+      status: input.status,
+      targetProfileId: input.targetProfileId
+    });
     const before = await this.getProfile(input.targetProfileId);
     if (before.role === 'developer') {
       throw new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 상태는 변경할 수 없습니다.');
@@ -424,7 +450,8 @@ export class SupabaseAccountService implements AccountService {
       p_target_profile_id: input.targetProfileId,
       p_status: input.status,
       p_reason_code: input.reasonCode,
-      p_idempotency_key: input.idempotencyKey
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: hash
     });
     if (error || !data) {
       throw databaseError(error);
@@ -451,7 +478,12 @@ export class SupabaseAccountService implements AccountService {
     return this.runAccountRpc('unlock_account', {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: input.targetProfileId,
-      p_idempotency_key: input.idempotencyKey
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash({
+        actorProfileId: actor.profileId,
+        command: 'account.unlock',
+        targetProfileId: input.targetProfileId
+      })
     });
   }
 
@@ -464,7 +496,12 @@ export class SupabaseAccountService implements AccountService {
     const { data, error } = await this.clients.admin.rpc('prepare_account_password_reset', {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: input.targetProfileId,
-      p_idempotency_key: input.idempotencyKey
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash({
+        actorProfileId: actor.profileId,
+        command: 'account.password.reset',
+        targetProfileId: input.targetProfileId
+      })
     });
     if (error || !data) {
       throw databaseError(error);
@@ -503,7 +540,28 @@ export class SupabaseAccountService implements AccountService {
     return data as unknown as ProfileRow;
   }
 
-  private async findIdempotentProfile(key: string, eventType: string): Promise<ProfileRow | null> {
+  private async replayAccountProfile(
+    actorProfileId: string,
+    commandType: string,
+    key: string,
+    hash: string
+  ): Promise<ProfileRow | null> {
+    const { data, error } = await this.clients.admin.rpc('replay_account_command', {
+      p_actor_profile_id: actorProfileId,
+      p_command_type: commandType,
+      p_idempotency_key: key,
+      p_request_hash: hash
+    });
+    if (error) {
+      throw databaseError(error);
+    }
+    if (typeof data !== 'string') {
+      return null;
+    }
+    return this.getProfile(data);
+  }
+
+  private async findBootstrapProfile(key: string, eventType: string): Promise<ProfileRow | null> {
     const { data, error } = await this.clients.admin
       .from('audit_events')
       .select('entity_id')

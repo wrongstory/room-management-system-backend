@@ -48,7 +48,7 @@ Supabase Cron (pg_cron)
 
 단일 `developer`도 `/v1/auth/me`에서 자신의 실제 역할로 인증되지만 객실·예약 같은 업무 API에서는 `admin`으로 간주하지 않는다. `/v1/rooms`와 예약 scheduler actor는 최신 active profile의 역할이 정확히 `admin`일 때만 허용하며, developer를 scheduler actor로 지정하면 DB command가 `ADMIN_REQUIRED`로 거부한다.
 
-로그인 endpoint는 Edge instance 메모리를 제한 상태로 사용하지 않는다. 정규화한 로그인 ID를 응답이나 DB에 그대로 저장하지 않고 `ACCOUNT_PHONE_PEPPER`로 domain-separated HMAC-SHA256 key를 만든 뒤 `private.login_rate_limit_windows`의 원자 fixed window를 소비한다. 60초 동안 10회까지 허용하고 초과 시 `429`와 `Retry-After`를 반환한다. 이 검사는 alias 조회보다 먼저 수행하며, 계정이 존재하는 경우에는 기존 5회 실패/15분 계정 잠금도 별도로 적용한다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`로 응답한다.
+로그인 endpoint는 Edge instance 메모리를 제한 상태로 사용하지 않는다. 정규화한 로그인 ID를 응답이나 DB에 그대로 저장하지 않고 `ACCOUNT_PHONE_PEPPER`로 domain-separated HMAC-SHA256 key를 만든다. 하나의 원자 DB command가 **전역 60회/분 bucket을 먼저 소비한 뒤 로그인 ID별 10회/분 bucket**을 소비하므로, 공격자가 매번 다른 ID를 보내도 한 window에 생성 가능한 per-login row와 DB write가 전역 상한을 넘지 않는다. hot path의 만료 row 정리도 호출당 최대 64건으로 제한한다. 제한 초과는 `429`와 `Retry-After`를 반환한다. 이 검사는 alias 조회보다 먼저 수행하며, 계정이 존재하는 경우에는 기존 5회 실패/15분 계정 잠금도 별도로 적용한다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`로 응답한다.
 
 `/api/docs`는 `/api/openapi.json`을 읽는 한글 Swagger UI다. Swagger asset version과 SRI hash를 소스에 고정하고 CSP를 적용하며 bearer token은 브라우저 저장소에 유지하지 않는다. 문서에는 실제 전화번호, 토큰, secret, project ref를 example로 넣지 않는다. `Authorize`에는 사용자 bearer token만 입력하고 변경 API의 `Idempotency-Key`에는 8~128자의 요청별 값을 사용한다. 프론트와 프론트 Codex는 [API 연동 가이드](./FRONTEND_API_INTEGRATION.md)에 따라 OpenAPI JSON에서 타입을 생성하고, endpoint·role·error code를 와이어프레임에서 추측하지 않는다.
 
