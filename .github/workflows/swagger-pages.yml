@@ -1,0 +1,56 @@
+name: swagger-pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/swagger-pages.yml
+      - docs/swagger-portal/**
+      - scripts/build-swagger-pages.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swagger-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PUBLIC_API_BASE_URL: ${{ vars.PUBLIC_API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: actions/configure-pages@v5
+      - name: Build production OpenAPI snapshot
+        run: >-
+          npm run swagger:pages:build --
+          --source-url "$PUBLIC_API_BASE_URL/openapi.json"
+          --output-dir .tmp/swagger-site
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .tmp/swagger-site
+
+  deploy:
+    name: deploy-pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
