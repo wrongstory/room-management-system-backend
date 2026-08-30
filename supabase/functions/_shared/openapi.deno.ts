@@ -27,9 +27,43 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "service secret name leaked",
   );
   assert(
+    !/010[- ]?\d{4}[- ]?\d{4}/.test(serialized),
+    "phone number example leaked",
+  );
+  assert(
+    serialized.includes('"#/components/schemas/ErrorCode"'),
+    "error codes must generate a reusable frontend type",
+  );
+  assert(
+    serialized.includes('"#/components/schemas/RoomProjection"'),
+    "room projection must not be an untyped object",
+  );
+  assert(
     response.headers.get("cache-control") === "public, max-age=300",
     "contract cache",
   );
+});
+
+Deno.test("every Swagger operation has Korean integration guidance", async () => {
+  const response = openApiResponse({});
+  const document = await response.json() as {
+    paths: Record<string, Record<string, Record<string, unknown>>>;
+  };
+
+  for (const [path, pathItem] of Object.entries(document.paths)) {
+    for (const [method, operation] of Object.entries(pathItem)) {
+      const summary = operation.summary;
+      const description = operation.description;
+      assert(
+        typeof summary === "string" && /[가-힣]/.test(summary),
+        `${method.toUpperCase()} ${path} requires a Korean summary`,
+      );
+      assert(
+        typeof description === "string" && /[가-힣]/.test(description),
+        `${method.toUpperCase()} ${path} requires Korean integration guidance`,
+      );
+    }
+  }
 });
 
 Deno.test("Swagger UI pins assets, uses SRI and does not persist bearer tokens", async () => {
@@ -50,6 +84,15 @@ Deno.test("Swagger UI pins assets, uses SRI and does not persist bearer tokens",
     html.includes("validatorUrl: null"),
     "external schema validation must be disabled",
   );
+  assert(
+    html.includes("OpenAPI JSON 내려받기"),
+    "frontend handoff needs a contract download link",
+  );
+  assert(
+    html.includes("FRONTEND_API_INTEGRATION.md"),
+    "frontend integration guide must be linked",
+  );
+  assert(html.includes("filter: true"), "operation search must be enabled");
   assert(csp.includes("default-src 'none'"), "strict default CSP is required");
   assert(
     csp.includes("script-src 'nonce-"),

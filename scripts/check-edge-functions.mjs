@@ -5,12 +5,14 @@ const sourcePaths = [
   'supabase/functions/_shared/runtime.ts',
   'supabase/functions/_shared/account-api.ts',
   'supabase/functions/_shared/openapi.ts',
+  'supabase/functions/_shared/room-api.ts',
   'supabase/functions/api/index.ts',
   'supabase/functions/reservation-scheduler/index.ts'
 ];
 const testPaths = [
   'supabase/functions/_shared/account-api.deno.ts',
-  'supabase/functions/_shared/openapi.deno.ts'
+  'supabase/functions/_shared/openapi.deno.ts',
+  'supabase/functions/_shared/room-api.deno.ts'
 ];
 
 function runDeno(args) {

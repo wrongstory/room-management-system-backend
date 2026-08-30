@@ -50,7 +50,7 @@ Supabase Cron (pg_cron)
 
 로그인 endpoint는 Edge instance 메모리를 제한 상태로 사용하지 않는다. 정규화한 로그인 ID를 응답이나 DB에 그대로 저장하지 않고 `ACCOUNT_PHONE_PEPPER`로 domain-separated HMAC-SHA256 key를 만든 뒤 `private.login_rate_limit_windows`의 원자 fixed window를 소비한다. 60초 동안 10회까지 허용하고 초과 시 `429`와 `Retry-After`를 반환한다. 이 검사는 alias 조회보다 먼저 수행하며, 계정이 존재하는 경우에는 기존 5회 실패/15분 계정 잠금도 별도로 적용한다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`로 응답한다.
 
-`/api/docs`는 `/api/openapi.json`을 읽는 Swagger UI다. Swagger asset version과 SRI hash를 소스에 고정하고 CSP를 적용하며 bearer token은 브라우저 저장소에 유지하지 않는다. 문서에는 실제 전화번호, 토큰, secret, project ref를 example로 넣지 않는다. `Authorize`에는 사용자 bearer token만 입력하고 변경 API의 `Idempotency-Key`에는 8~128자의 요청별 값을 사용한다.
+`/api/docs`는 `/api/openapi.json`을 읽는 한글 Swagger UI다. Swagger asset version과 SRI hash를 소스에 고정하고 CSP를 적용하며 bearer token은 브라우저 저장소에 유지하지 않는다. 문서에는 실제 전화번호, 토큰, secret, project ref를 example로 넣지 않는다. `Authorize`에는 사용자 bearer token만 입력하고 변경 API의 `Idempotency-Key`에는 8~128자의 요청별 값을 사용한다. 프론트와 프론트 Codex는 [API 연동 가이드](./FRONTEND_API_INTEGRATION.md)에 따라 OpenAPI JSON에서 타입을 생성하고, endpoint·role·error code를 와이어프레임에서 추측하지 않는다.
 
 Scheduler 시간값은 두 역할로 분리한다. 요청의 `scheduledAt`은 해당 Cron 호출을 식별하는 minute bucket과 idempotency key에만 사용하며 업무 전이의 기준 시각으로 사용하지 않는다. 실제 `p_as_of`는 Function이 RPC를 실행하는 현재 시각이다. 따라서 같은 `scheduledAt` 재시도는 같은 호출로 처리하면서도 pause나 전달 지연 뒤에는 실제 실행 시각까지 누락된 예약 전이를 catch-up한다.
 
@@ -64,6 +64,8 @@ npm run edge:check
 ```
 
 로컬 Function이 실행 중이면 `http://127.0.0.1:54321/functions/v1/api/docs`에서 Swagger UI를 열 수 있다. 운영 URL은 source가 release를 통해 `main`에 승격되고 Function이 배포된 뒤에만 사용한다.
+
+Swagger 상단의 **OpenAPI JSON 내려받기** 또는 `/api/openapi.json`을 사용하면 프론트 저장소에서 codegen 가능한 계약을 받을 수 있다. 현재 Edge 객실 응답은 Fastify와 동일한 camelCase `RoomProjection`을 사용하며 DB RPC의 snake_case column을 브라우저에 노출하지 않는다.
 
 `.env.local`은 Git에 넣지 않는다. 로컬 active admin UUID와 무작위 scheduler secret만 넣고, 실제 운영 비밀값을 복사하지 않는다.
 

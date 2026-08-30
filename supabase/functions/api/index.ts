@@ -10,6 +10,7 @@ import {
   unlockAccount,
 } from "../_shared/account-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
+import { toRoomProjections } from "../_shared/room-api.ts";
 import {
   authenticate,
   cors,
@@ -175,7 +176,11 @@ Deno.serve(async (request) => {
           "객실 정보를 처리하지 못했습니다.",
         );
       }
-      return jsonResponse({ rooms: data ?? [] }, 200, corsHeaders);
+      return jsonResponse(
+        { rooms: toRoomProjections(data) },
+        200,
+        corsHeaders,
+      );
     }
 
     throw new EdgeError(

@@ -63,7 +63,7 @@ npm run edge:check
 
 Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge runtime PoC](docs/EDGE_RUNTIME_POC.md)에 정리했습니다. 운영 smoke가 끝나기 전까지 기존 Fastify 구현은 개발 기준선으로 유지합니다.
 
-로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 Swagger UI로 Edge API를 확인할 수 있습니다. `/openapi.json`과 `/docs`는 API 계약 확인용이며 실제 secret, 휴대전화 원문, 운영 token을 문서 example이나 캡처에 넣지 않습니다.
+로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 프론트엔드와 Codex는 `http://127.0.0.1:54321/functions/v1/api/openapi.json`을 타입 생성 정본으로 사용하고 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md)의 인증·멱등성·오류 처리 규칙을 따릅니다. `/openapi.json`과 `/docs`에는 실제 secret, 휴대전화 원문, 운영 token을 입력하거나 캡처하지 않습니다.
 
 ## 보안 경계
 

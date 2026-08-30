@@ -100,7 +100,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/openapi.json"');
     expect(api).toContain('path === "/docs"');
     expect(openApi).toContain('openapi: "3.1.1"');
-    expect(openApi).toContain('bearerAuth: { type: "http", scheme: "bearer"');
+    expect(openApi).toMatch(/bearerAuth:\s*\{[\s\S]*?type:\s*"http"[\s\S]*?scheme:\s*"bearer"/);
     expect(openApi).toContain('name: "Idempotency-Key"');
     expect(openApi).toContain('const swaggerUiVersion = "5.32.11"');
     expect(openApi).toMatch(/swagger-ui-dist@\$\{swaggerUiVersion\}/);

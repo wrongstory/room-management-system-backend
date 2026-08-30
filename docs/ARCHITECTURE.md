@@ -9,7 +9,7 @@
 - 데이터·인증: Supabase Auth, PostgreSQL 17
 - 사진 파일: Google Drive API, 전용 비공개 폴더
 - 입력 검증: Zod
-- API 계약: OpenAPI 3.1 + pinned Swagger UI
+- API 계약: OpenAPI 3.1 + pinned Swagger UI + [프론트·Codex 연동 가이드](./FRONTEND_API_INTEGRATION.md)
 - 테스트: Vitest, Fastify injection, Deno Edge type check
 - 배포 후보: 운영 Supabase의 Edge Functions·Cron + Supabase 복구검증 프로젝트
 
@@ -139,6 +139,8 @@ erDiagram
 - 검수 승인/반려, 폭탄방 판정, 재청소
 - 메이드별 주급과 지급 상태
 - 역할별 알림함과 푸시 구독
+
+Edge `/v1/rooms`는 DB RPC의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase `RoomProjection`으로 변환한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 
 ## 원격 환경 현황
 
