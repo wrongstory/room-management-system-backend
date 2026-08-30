@@ -380,6 +380,76 @@ async function replayAccountProfile(
   return getProfile(clients, "id", data);
 }
 
+function validGatewayAddress(value: string | null): string | null {
+  const normalized = value?.trim().toLocaleLowerCase("en-US") ?? "";
+  if (
+    normalized.length < 2 || normalized.length > 64 ||
+    !/^[0-9a-f:.]+$/.test(normalized) ||
+    (!normalized.includes(".") && !normalized.includes(":"))
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+function trustedClientAddress(request: Request): string {
+  // Hosted Supabase attaches Cloudflare/gateway client address metadata. The
+  // platform value wins over all caller-controlled fallback headers.
+  const cloudflare = validGatewayAddress(
+    request.headers.get("cf-connecting-ip"),
+  );
+  if (cloudflare) {
+    return `cf:${cloudflare}`;
+  }
+
+  let requestHostname = "";
+  try {
+    requestHostname = new URL(request.url).hostname.toLocaleLowerCase(
+      "en-US",
+    );
+  } catch {
+    // The runtime configuration validator reports malformed URLs separately.
+  }
+  if (
+    requestHostname.endsWith(".supabase.co") ||
+    requestHostname.endsWith(".supabase.in")
+  ) {
+    throw new EdgeError(
+      503,
+      "LOGIN_CLIENT_ID_UNAVAILABLE",
+      "로그인 요청의 보호 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    );
+  }
+
+  // The remaining headers are accepted only for local/self-hosted gateways,
+  // whose reverse proxy must overwrite them with its peer address.
+  const realIp = validGatewayAddress(request.headers.get("x-real-ip"));
+  if (realIp) {
+    return `gateway:${realIp}`;
+  }
+
+  // Local/self-hosted gateways append their peer address to X-Forwarded-For.
+  // Read from the right so a caller-prepended value cannot select its bucket.
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",") ?? [];
+  for (let index = forwarded.length - 1; index >= 0; index -= 1) {
+    const address = validGatewayAddress(forwarded[index] ?? null);
+    if (address) {
+      return `forwarded:${address}`;
+    }
+  }
+  const hostname = new URL(request.url).hostname.toLocaleLowerCase("en-US");
+  if (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+  ) {
+    return "local-development";
+  }
+  throw new EdgeError(
+    503,
+    "LOGIN_CLIENT_ID_UNAVAILABLE",
+    "로그인 요청의 보호 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+  );
+}
+
 function assertIdempotentAccountCreation(
   existing: Pick<
     ProfileRow,
@@ -405,22 +475,29 @@ function assertIdempotentAccountCreation(
 }
 
 async function consumeLoginRateLimit(
+  request: Request,
   clients: EdgeClients,
   normalizedLoginId: string,
 ): Promise<void> {
   const pepper = requiredEnv("ACCOUNT_PHONE_PEPPER");
-  const [globalKeyHash, loginKeyHash] = await Promise.all([
-    hmacHex(pepper, "edge-login-rate-limit:global:v1"),
+  const [clientKeyHash, loginKeyHash, globalKeyHash] = await Promise.all([
+    hmacHex(
+      pepper,
+      `edge-login-rate-limit:client:v1:${trustedClientAddress(request)}`,
+    ),
     hmacHex(
       pepper,
       `edge-login-rate-limit:${normalizedLoginId}`,
     ),
+    hmacHex(pepper, "edge-login-rate-limit:global-emergency:v1"),
   ]);
   const { data, error } = await clients.admin.rpc("consume_login_rate_limits", {
-    p_global_key_hash: globalKeyHash,
+    p_client_key_hash: clientKeyHash,
     p_login_key_hash: loginKeyHash,
-    p_global_limit: 60,
+    p_global_key_hash: globalKeyHash,
+    p_client_limit: 30,
     p_login_limit: 10,
+    p_global_limit: 600,
     p_window_seconds: 60,
   });
   if (error || !Array.isArray(data) || !data[0]) {
@@ -461,7 +538,7 @@ export async function login(
   }
   const password = passwordValue as string;
   const alias = normalizeLoginId(loginId);
-  await consumeLoginRateLimit(clients, alias);
+  await consumeLoginRateLimit(request, clients, alias);
 
   const { data: aliasRow, error: aliasError } = await clients.admin
     .from("login_aliases")

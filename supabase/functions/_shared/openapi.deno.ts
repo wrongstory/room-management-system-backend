@@ -35,6 +35,10 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "error codes must generate a reusable frontend type",
   );
   assert(
+    serialized.includes('"LOGIN_CLIENT_ID_UNAVAILABLE"'),
+    "trusted client metadata failure must be documented",
+  );
+  assert(
     serialized.includes('"#/components/schemas/RoomProjection"'),
     "room projection must not be an untyped object",
   );

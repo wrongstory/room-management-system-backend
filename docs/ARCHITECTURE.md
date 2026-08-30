@@ -45,7 +45,7 @@ flowchart LR
 
 권한은 사용자 수정 가능한 `user_metadata`에 의존하지 않습니다. 역할 변경과 비활성화가 JWT 갱신 전에도 반영되도록 DB 프로필을 매 요청 확인합니다.
 
-Edge 로그인은 alias 조회 전에 PostgreSQL fixed-window 제한을 **고정된 전역 HMAC bucket(60회/분) → 정규화 ID별 HMAC bucket(10회/분)** 순서로 원자적으로 소비합니다. 전역 제한을 먼저 적용하므로 공격자가 계속 다른 ID를 보내도 해당 분에 만들어지는 ID별 row 수가 전역 허용량으로 제한됩니다. 만료 row 정리도 요청당 최대 64개만 수행합니다. Edge instance 메모리는 cold start와 수평 확장 때 공유되지 않으므로 보안 제한 상태를 두지 않습니다. 사용자별 5회 실패/15분 잠금은 이 abuse 제한과 별도로 유지합니다.
+Edge 로그인은 alias 조회 전에 PostgreSQL fixed-window 제한을 **Supabase gateway가 확인한 client HMAC bucket(30회/분) → 정규화 ID별 HMAC bucket(10회/분) → 높은 emergency global bucket(600회/분)** 순서로 원자적으로 소비합니다. 공격 client가 ID를 계속 바꿔도 자기 bucket만 소진하며 다른 정상 client의 로그인을 막지 못합니다. global cap은 여러 client를 동원한 비상 상황의 최종 안전장치입니다. 원문 IP와 로그인 ID는 저장하지 않고, 첫 차단을 기록한 `limit + 1` 이후 같은 window의 추가 거부는 saturated row를 갱신하지 않습니다. 만료 row 정리도 요청당 최대 64개만 수행합니다. Edge instance 메모리는 cold start와 수평 확장 때 공유되지 않으므로 보안 제한 상태를 두지 않습니다. 사용자별 5회 실패/15분 잠금은 이 abuse 제한과 별도로 유지합니다.
 
 ## 데이터 모델
 

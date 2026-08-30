@@ -45,12 +45,14 @@ async function captureEdgeError(
 function request(
   body: Record<string, unknown>,
   idempotency = "edge-test-0001",
+  clientIp = "192.0.2.10",
 ): Request {
   return new Request("http://localhost", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "idempotency-key": idempotency,
+      "cf-connecting-ip": clientIp,
     },
     body: JSON.stringify(body),
   });
@@ -196,6 +198,143 @@ Deno.test("rate limit response includes Retry-After", async () => {
   assertEquals(error.status, 429, "rate-limit status");
   assertEquals(error.code, "LOGIN_RATE_LIMITED", "rate-limit code");
   assertEquals(error.headers["retry-after"], "17", "Retry-After header");
+});
+
+Deno.test("an exhausted client bucket does not block another client", async () => {
+  Deno.env.set("ACCOUNT_PHONE_PEPPER", "test-only-login-pepper-32-characters");
+  const attempts = new Map<string, number>();
+  const limiterParameters: Array<Record<string, string | number>> = [];
+  const clients = {
+    admin: {
+      rpc: (name: string, parameters: Record<string, string | number>) => {
+        assertEquals(name, "consume_login_rate_limits", "login limiter RPC");
+        limiterParameters.push(parameters);
+        const clientKey = String(parameters.p_client_key_hash);
+        const next = (attempts.get(clientKey) ?? 0) + 1;
+        attempts.set(clientKey, next);
+        return Promise.resolve({
+          data: [{
+            allowed: next <= 2,
+            retry_after_seconds: next <= 2 ? 0 : 30,
+            blocked_scope: next <= 2 ? null : "client",
+          }],
+          error: null,
+        });
+      },
+      from: () => queryResult(null),
+    },
+    publicClient: { auth: { signInWithPassword: () => Promise.resolve({}) } },
+  } as unknown as EdgeClients;
+
+  for (const loginId of ["rotating-1", "rotating-2"]) {
+    const error = await captureEdgeError(() =>
+      login(
+        request({ loginId, password: "1234" }, undefined, "198.51.100.10"),
+        clients,
+      )
+    );
+    assertEquals(error.code, "INVALID_CREDENTIALS", "allowed attacker request");
+  }
+  const blocked = await captureEdgeError(() =>
+    login(
+      request(
+        { loginId: "rotating-3", password: "1234" },
+        undefined,
+        "198.51.100.10",
+      ),
+      clients,
+    )
+  );
+  const normal = await captureEdgeError(() =>
+    login(
+      request(
+        { loginId: "admin", password: "1234" },
+        undefined,
+        "203.0.113.20",
+      ),
+      clients,
+    )
+  );
+
+  assertEquals(blocked.code, "LOGIN_RATE_LIMITED", "attacker client denial");
+  assertEquals(normal.code, "INVALID_CREDENTIALS", "normal client isolation");
+  assertEquals(attempts.size, 2, "two trusted client buckets");
+  assertEquals(
+    limiterParameters[0]?.p_client_limit,
+    30,
+    "client production limit",
+  );
+  assertEquals(
+    limiterParameters[0]?.p_login_limit,
+    10,
+    "login production limit",
+  );
+  assertEquals(
+    limiterParameters[0]?.p_global_limit,
+    600,
+    "emergency global limit",
+  );
+  assert(
+    limiterParameters[0]?.p_global_key_hash ===
+      limiterParameters[3]?.p_global_key_hash,
+    "all clients share only the high emergency bucket",
+  );
+});
+
+Deno.test("platform Cloudflare address wins over spoofable fallback headers", async () => {
+  Deno.env.set("ACCOUNT_PHONE_PEPPER", "test-only-login-pepper-32-characters");
+  const clientKeys: string[] = [];
+  const clients = {
+    admin: {
+      rpc: (_name: string, parameters: Record<string, string>) => {
+        clientKeys.push(parameters.p_client_key_hash);
+        return Promise.resolve({
+          data: [{ allowed: true, retry_after_seconds: 0 }],
+          error: null,
+        });
+      },
+      from: () => queryResult(null),
+    },
+    publicClient: { auth: { signInWithPassword: () => Promise.resolve({}) } },
+  } as unknown as EdgeClients;
+
+  const first = request({ loginId: "unknown", password: "1234" });
+  first.headers.set("x-real-ip", "198.51.100.1");
+  first.headers.set("x-forwarded-for", "198.51.100.2");
+  const second = request({ loginId: "unknown", password: "1234" });
+  second.headers.set("x-real-ip", "203.0.113.1");
+  second.headers.set("x-forwarded-for", "203.0.113.2");
+
+  await captureEdgeError(() => login(first, clients));
+  await captureEdgeError(() => login(second, clients));
+
+  assertEquals(clientKeys.length, 2, "two limiter calls");
+  assertEquals(
+    clientKeys[0],
+    clientKeys[1],
+    "spoofable fallbacks cannot change a Cloudflare client bucket",
+  );
+});
+
+Deno.test("hosted Supabase fails closed without platform client metadata", async () => {
+  Deno.env.set("ACCOUNT_PHONE_PEPPER", "test-only-login-pepper-32-characters");
+  const hostedRequest = new Request(
+    "https://example.supabase.co/functions/v1/api/v1/auth/login",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ loginId: "admin", password: "1234" }),
+    },
+  );
+  const error = await captureEdgeError(() =>
+    login(hostedRequest, {} as EdgeClients)
+  );
+
+  assertEquals(
+    error.code,
+    "LOGIN_CLIENT_ID_UNAVAILABLE",
+    "hosted requests require Cloudflare client metadata",
+  );
 });
 
 Deno.test("account API rejects maid and temporary-password admin", async () => {

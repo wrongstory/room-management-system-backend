@@ -66,11 +66,15 @@
 1. `20260830015035_edge_login_rate_limit.sql`
    - 로그인 alias 조회보다 앞선 durable fixed-window 저장소 기반
 2. `20260830045832_harden_account_receipts_and_login_limits.sql`
-   - 전역 bucket 선행으로 rotating login ID의 write/cardinality 상한 강제
+   - rotating login ID의 write/cardinality 상한 기반 추가
    - 계정 command를 actor·command·key + canonical request hash receipt로 전환
    - 기존 service-role용 per-login-only/account RPC 실행 권한 회수
-3. production Function 재배포 후 `/api/openapi.json`, `/api/docs`, 로그인·비밀번호 변경, developer/admin/maid 계정 관리 권한 smoke
-4. 기존 developer를 다시 bootstrap하지 않고, developer가 별도 active business admin을 생성
-5. business admin의 임시 비밀번호 변경과 scheduler actor 지정 후 Edge/Cron smoke
+3. `20260830054446_isolate_login_rate_limit_clients.sql`
+   - trusted client → login ID → emergency global 순서로 로그인 DoS 격리
+   - saturated bucket의 추가 거부 write 중단, 기존 client-unaware RPC 권한 회수
+4. production Function 재배포 후 `/api/openapi.json`, `/api/docs`, 로그인·비밀번호 변경, developer/admin/maid 계정 관리 권한 smoke
+5. production gateway가 spoofed client header보다 platform client address를 우선하는지 smoke
+6. 기존 developer를 다시 bootstrap하지 않고, developer가 별도 active business admin을 생성
+7. business admin의 임시 비밀번호 변경과 scheduler actor 지정 후 Edge/Cron smoke
 
 Swagger UI는 운영 secret 입력·보관 수단이 아니다. 실제 token은 smoke 중에만 Authorize에 입력하고 브라우저 저장소에 유지하지 않으며, 캡처·로그·Issue에 남기지 않는다.

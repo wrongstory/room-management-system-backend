@@ -25,15 +25,20 @@ function assert(condition, message) {
 const loginGlobalRateLimitKey = createHash('sha256')
   .update(`edge-login-global-concurrency-${randomUUID()}`)
   .digest('hex');
+const loginClientRateLimitKey = createHash('sha256')
+  .update(`edge-login-client-concurrency-${randomUUID()}`)
+  .digest('hex');
 const loginRateLimitKey = createHash('sha256')
   .update(`edge-login-concurrency-${randomUUID()}`)
   .digest('hex');
 const loginRateLimitResults = await Promise.all(Array.from({ length: 20 }, () => (
   client.rpc('consume_login_rate_limits', {
-    p_global_key_hash: loginGlobalRateLimitKey,
+    p_client_key_hash: loginClientRateLimitKey,
     p_login_key_hash: loginRateLimitKey,
-    p_global_limit: 100,
+    p_global_key_hash: loginGlobalRateLimitKey,
+    p_client_limit: 100,
     p_login_limit: 10,
+    p_global_limit: 1000,
     p_window_seconds: 60
   })
 )));
@@ -54,14 +59,19 @@ assert(
 const rotatingGlobalKey = createHash('sha256')
   .update(`edge-login-rotating-global-${randomUUID()}`)
   .digest('hex');
+const rotatingAttackerClientKey = createHash('sha256')
+  .update(`edge-login-rotating-client-${randomUUID()}`)
+  .digest('hex');
 const rotatingLoginResults = await Promise.all(Array.from({ length: 200 }, (_, index) => (
   client.rpc('consume_login_rate_limits', {
-    p_global_key_hash: rotatingGlobalKey,
+    p_client_key_hash: rotatingAttackerClientKey,
     p_login_key_hash: createHash('sha256')
       .update(`edge-login-rotating-${index}-${randomUUID()}`)
       .digest('hex'),
-    p_global_limit: 40,
+    p_global_key_hash: rotatingGlobalKey,
+    p_client_limit: 40,
     p_login_limit: 10,
+    p_global_limit: 200,
     p_window_seconds: 60
   })
 )));
@@ -73,7 +83,25 @@ assert(
   rotatingLoginResults
     .map((result) => result.data[0]?.allowed)
     .filter((allowed) => allowed === true).length === 40,
-  'global login bucket must cap 200 rotating IDs at forty writes'
+  'one attacker client must be capped at forty rotating login IDs'
+);
+
+const isolatedNormalClientResult = await client.rpc('consume_login_rate_limits', {
+  p_client_key_hash: createHash('sha256')
+    .update(`edge-login-normal-client-${randomUUID()}`)
+    .digest('hex'),
+  p_login_key_hash: createHash('sha256')
+    .update(`edge-login-normal-admin-${randomUUID()}`)
+    .digest('hex'),
+  p_global_key_hash: rotatingGlobalKey,
+  p_client_limit: 40,
+  p_login_limit: 10,
+  p_global_limit: 200,
+  p_window_seconds: 60
+});
+assert(
+  !isolatedNormalClientResult.error && isolatedNormalClientResult.data?.[0]?.allowed === true,
+  'an attacker client at its limit must not block a normal admin client'
 );
 
 const authUserId = randomUUID();
@@ -249,5 +277,5 @@ assert(
 );
 
 console.log(
-  'Concurrency checks passed: login=10/20, rotating-login=40/200, account-create=1/2, reservation-create=1/2, manual-checkout=1/2.'
+  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, reservation-create=1/2, manual-checkout=1/2.'
 );

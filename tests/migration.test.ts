@@ -62,6 +62,10 @@ const accountReceiptHardeningMigrationUrl = new URL(
   '../supabase/migrations/20260830045832_harden_account_receipts_and_login_limits.sql',
   import.meta.url
 );
+const clientIsolationMigrationUrl = new URL(
+  '../supabase/migrations/20260830054446_isolate_login_rate_limit_clients.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -216,6 +220,20 @@ describe('initial migration contract', () => {
     expect(sql).toContain('private.complete_command(');
     expect(sql).toContain('private.audit_command_key(');
     expect(sql).toContain('p_request_hash');
+    expect(sql).toContain('from service_role');
+    expect(sql).toContain('to service_role');
+  });
+
+  it('isolates abusive clients before login and emergency global limits', async () => {
+    const sql = await readFile(clientIsolationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('p_client_key_hash text');
+    expect(sql).toContain('p_client_limit integer default 30');
+    expect(sql).toContain('p_login_limit integer default 10');
+    expect(sql).toContain('p_global_limit integer default 600');
+    expect(sql).toContain("'client'::text");
+    expect(sql.indexOf('p_client_key_hash')).toBeLessThan(sql.indexOf('p_login_key_hash'));
+    expect(sql).toContain('attempt_count < p_limit + 1');
     expect(sql).toContain('from service_role');
     expect(sql).toContain('to service_role');
   });

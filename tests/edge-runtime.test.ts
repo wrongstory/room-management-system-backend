@@ -17,6 +17,10 @@ const accountSecurityMigrationUrl = new URL(
   '../supabase/migrations/20260830045832_harden_account_receipts_and_login_limits.sql',
   import.meta.url
 );
+const clientIsolationMigrationUrl = new URL(
+  '../supabase/migrations/20260830054446_isolate_login_rate_limit_clients.sql',
+  import.meta.url
+);
 
 describe('Supabase Edge runtime PoC contract', () => {
   it('allows existing email accounts to sign in while public signup remains disabled', async () => {
@@ -60,19 +64,23 @@ describe('Supabase Edge runtime PoC contract', () => {
   });
 
   it('uses a durable database-backed limiter before looking up a login alias', async () => {
-    const [accountApi, originalMigration, securityMigration] = await Promise.all([
+    const [accountApi, originalMigration, securityMigration, isolationMigration] = await Promise.all([
       readFile(accountApiUrl, 'utf8'),
       readFile(loginRateLimitMigrationUrl, 'utf8'),
-      readFile(accountSecurityMigrationUrl, 'utf8')
+      readFile(accountSecurityMigrationUrl, 'utf8'),
+      readFile(clientIsolationMigrationUrl, 'utf8')
     ]);
-    const limiter = accountApi.indexOf('await consumeLoginRateLimit(clients, alias)');
+    const limiter = accountApi.indexOf('await consumeLoginRateLimit(request, clients, alias)');
     const aliasLookup = accountApi.indexOf('.from("login_aliases")');
 
     expect(limiter).toBeGreaterThan(0);
     expect(aliasLookup).toBeGreaterThan(limiter);
     expect(accountApi).not.toMatch(/new\s+Map\s*</);
-    expect(accountApi).toContain('"edge-login-rate-limit:global:v1"');
+    expect(accountApi).toContain('edge-login-rate-limit:client:v1:');
+    expect(accountApi).toContain('"edge-login-rate-limit:global-emergency:v1"');
     expect(accountApi).toMatch(/edge-login-rate-limit:\$\{normalizedLoginId\}/);
+    expect(accountApi).toContain('request.headers.get("cf-connecting-ip")');
+    expect(accountApi).toContain('request.headers.get("x-real-ip")');
     expect(accountApi).toContain('"consume_login_rate_limits"');
     expect(originalMigration).toContain('create table private.login_rate_limit_windows');
     expect(securityMigration).toContain('create function public.consume_login_rate_limits(');
@@ -80,6 +88,11 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(securityMigration).toContain('limit 64');
     expect(securityMigration).toContain('to service_role');
     expect(securityMigration).toContain('from public, anon, authenticated');
+    expect(isolationMigration).toContain('p_client_key_hash');
+    expect(isolationMigration).toContain("'client'::text");
+    expect(isolationMigration).toContain('p_global_limit integer default 600');
+    expect(isolationMigration).toContain('attempt_count < p_limit + 1');
+    expect(isolationMigration).toContain('from service_role');
   });
 
   it('uses scoped request-hashed receipts before account-create Auth side effects', async () => {

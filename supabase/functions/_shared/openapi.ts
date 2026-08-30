@@ -171,7 +171,7 @@ export const openApiDocument = {
         operationId: "login",
         summary: "로그인하고 세션 토큰 받기",
         description:
-          "로그인 ID는 NFKC·trim·소문자로 정규화됩니다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`입니다. rotating ID 공격을 막는 전역 60회/분 제한을 먼저 적용하고, 이어 ID별 10회/분 durable 제한과 계정별 5회 실패/15분 잠금을 적용합니다. 응답의 `mustChangePassword`가 true이면 비밀번호 변경 화면으로 이동하세요.",
+          "로그인 ID는 NFKC·trim·소문자로 정규화됩니다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`입니다. Supabase gateway가 확인한 client별 30회/분, ID별 10회/분, 프로젝트 emergency 600회/분 durable 제한을 순서대로 적용하고 계정별 5회 실패/15분 잠금도 유지합니다. 응답의 `mustChangePassword`가 true이면 비밀번호 변경 화면으로 이동하세요.",
         requestBody: {
           required: true,
           content: {
@@ -437,6 +437,7 @@ export const openApiDocument = {
           "INVALID_CREDENTIALS",
           "ACCOUNT_LOCKED",
           "LOGIN_RATE_LIMITED",
+          "LOGIN_CLIENT_ID_UNAVAILABLE",
           "LOGIN_RATE_LIMIT_UNAVAILABLE",
           "AUTH_LOOKUP_FAILED",
           "LOGIN_STATE_UPDATE_FAILED",

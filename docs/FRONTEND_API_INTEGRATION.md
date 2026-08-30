@@ -87,6 +87,7 @@ const idempotencyKey = crypto.randomUUID();
 - request body가 바뀌면 새 키를 만든다.
 - 같은 키를 다른 payload에 쓰면 `IDEMPOTENCY_KEY_REUSED`가 반환된다.
 - 키를 analytics, 오류 수집 payload, 사용자 화면에 노출하지 않는다.
+- 현재 `POST /v1/auth/password`는 #46에서 receipt 재시도 계약을 별도로 보강할 예정이다. 응답 유실·timeout 때 기존 요청을 자동 반복하지 말고 결과 미확정 상태로 처리한다. 나머지 계정 변경 API는 같은 payload 재시도에 기존 logical 결과를 반환한다.
 
 ### 응답과 오류
 
@@ -102,7 +103,8 @@ const idempotencyKey = crypto.randomUUID();
 | 최초 비밀번호 변경 | `PASSWORD_CHANGE_REQUIRED` | 비밀번호 변경 화면 고정 |
 | 권한 부족 | `ACCOUNT_MANAGER_REQUIRED`, `ADMIN_REQUIRED` | 접근 차단·권한 안내 |
 | 계정 잠금 | `ACCOUNT_LOCKED` | 잠금 종료 또는 관리자 해제 안내 |
-| 로그인 요청 과다 | `LOGIN_RATE_LIMITED` | `Retry-After` 이후 재시도. 전역 abuse 제한도 있으므로 다른 로그인 ID로 바꿔 재시도하지 않음 |
+| 로그인 요청 과다 | `LOGIN_RATE_LIMITED` | `Retry-After` 이후 재시도. 로그인 ID를 바꿔 제한을 우회하지 않음 |
+| 로그인 client 확인 불가 | `LOGIN_CLIENT_ID_UNAVAILABLE` | 자동 반복하지 않고 네트워크·gateway 상태 확인 |
 | 동시 변경/업무 충돌 | `IDEMPOTENCY_KEY_REUSED`, `LAST_ACTIVE_ADMIN_REQUIRED` 등 409 | 최신 목록 재조회 후 사용자 확인 |
 | 서버 상태 불일치 | `ACCOUNT_AUTH_STATE_INCONSISTENT`, `PASSWORD_STATE_INCONSISTENT` | 자동 성공 처리 금지, requestId로 운영 확인 |
 
