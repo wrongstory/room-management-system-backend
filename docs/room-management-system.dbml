@@ -650,7 +650,7 @@ Table private.notification_outbox {
 }
 
 Table public.audit_events {
-  id bigint [pk, increment]
+  id uuid [pk]
   actor_profile_id uuid
   actor_display_name_snapshot text
   event_type text [not null]
@@ -666,6 +666,32 @@ Table public.audit_events {
   idempotency_key text [unique]
 
   Note: 'UPDATE and DELETE are rejected by an append-only trigger.'
+}
+
+Table private.scheduler_invocation_heartbeats {
+  invocation_key text [pk]
+  scheduled_at timestamptz [not null]
+  actor_profile_id uuid [not null]
+  status text [not null, note: 'succeeded or failed']
+  transition_count int
+  last_error_code text
+  attempt_count int [not null, default: 1]
+  first_started_at timestamptz [not null]
+  last_completed_at timestamptz [not null]
+  last_request_id text
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  Note: 'App-owned 7-day operational heartbeat. Raw table access is denied; developer status uses a bounded SECURITY DEFINER projection.'
+}
+
+Table private.developer_diagnostic_rate_limits {
+  actor_profile_id uuid [pk]
+  window_started_at timestamptz [not null]
+  attempt_count int [not null]
+  updated_at timestamptz [not null]
+
+  Note: 'Durable fixed-window limiter for developer diagnostics. Saturates at limit plus one.'
 }
 
 Ref: public.profiles.auth_user_id - auth.users.id
@@ -759,3 +785,5 @@ Ref: public.notifications.room_id > public.rooms.id
 Ref: public.notifications.cleaning_target_id > public.cleaning_targets.id
 Ref: private.notification_outbox.notification_id > public.notifications.id
 Ref: public.audit_events.actor_profile_id > public.profiles.id
+Ref: private.scheduler_invocation_heartbeats.actor_profile_id > public.profiles.id
+Ref: private.developer_diagnostic_rate_limits.actor_profile_id - public.profiles.id
