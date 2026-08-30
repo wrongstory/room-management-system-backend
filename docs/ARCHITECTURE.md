@@ -20,6 +20,7 @@ Fastify는 현재 개발 기준선이며 Edge PoC가 실패할 때의 rollback �
 ```mermaid
 flowchart LR
   UI[개발자·관리자·메이드 PWA] -->|Bearer access token| API[Fastify 또는 Edge API adapter]
+  OPS[Python API-only 운영 콘솔] -->|developer bearer token| API
   API -->|사용자 JWT| DATA[Supabase Data API · RLS]
   API -->|서버 secret| ADMIN[Auth 관리·원자 명령]
   DATA --> DB[(PostgreSQL)]
@@ -33,6 +34,8 @@ flowchart LR
 - 조회는 가능한 한 사용자 JWT와 RLS를 통과시킵니다.
 - 계정 생성·비밀번호 초기화·여러 원장을 함께 바꾸는 명령만 서버 secret과 DB 함수를 사용합니다.
 - Google Drive access/refresh token은 서버 secret으로만 보관하며 브라우저는 Drive에 직접 접근하지 않습니다.
+
+developer 운영 상태는 `private` 원본이나 Supabase 내부 schema를 Edge에서 직접 직렬화하지 않습니다. DB catalog·Cron·감사 원장은 developer role을 다시 검증하는 app-owned `SECURITY DEFINER` projection을 거치고, Edge는 camelCase 응답과 안정적인 error code만 공개합니다. runtime secret은 소스 allowlist의 `configured` boolean만 반환하며 값·길이·해시·부분문자열은 반환하지 않습니다. Python 운영도구 연동은 [developer 운영 API 가이드](./DEVELOPER_OPERATIONS_API.md)를 따른다.
 
 ## 인증
 
@@ -125,6 +128,8 @@ erDiagram
 - `POST /v1/accounts/:profileId/unlock`
 - `POST /v1/accounts/:profileId/password-reset`
 - `GET /v1/rooms`, `GET /v1/rooms/:roomId` (관리자 전용 운영 projection)
+- `GET /v1/developer/overview`, `/runtime-status`, `/database-status`, `/scheduler-status`
+- `GET /v1/developer/audit-events`, `POST /v1/developer/diagnostics` (singleton developer 전용 bounded projection)
 - 객실 기준정보 변경, 운영 차단·해제, 촛불 수량 event, 이슈 등록·해결, PIN 동기화 결과 기록
 - `GET·POST /v1/reservations`, `GET /v1/reservations/:reservationId`
 - `POST /v1/reservations/cleaning-requests`, `POST /v1/reservations/cleaning-requests/:targetId/cancel`
@@ -142,6 +147,8 @@ erDiagram
 - 역할별 알림함과 푸시 구독
 
 Edge `/v1/rooms`는 DB RPC의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase `RoomProjection`으로 변환한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
+
+developer API의 DB 상태는 source migration head와 실제 head를 `ahead | equal | behind | unknown`으로 정규화하고, public base table RLS 누락 수와 allowlist RPC 존재 여부만 제공한다. scheduler 상태는 Cron SQL·Vault·`pg_net` 응답 본문 대신 정규화된 Cron metadata와 `private.scheduler_invocation_heartbeats` projection을 사용한다. 감사 조회는 최대 31일·100건 cursor pagination이고 raw `before_state`/`after_state`를 노출하지 않는다. diagnostics는 임의 URL·SQL·RPC 이름을 받지 않으며 durable 10회/분 제한을 적용한다.
 
 ## 원격 환경 현황
 

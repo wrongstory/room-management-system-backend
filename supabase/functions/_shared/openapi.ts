@@ -85,6 +85,11 @@ export const openApiDocument = {
         "비밀번호 변경을 완료한 active developer 또는 active admin의 계정 관리 API입니다. developer 계정 자체는 변경할 수 없습니다.",
     },
     {
+      name: "Developer",
+      description:
+        "singleton active developer 전용 운영 상태 API입니다. Supabase 내부 schema 원문, secret 값, 고객 개인정보를 반환하지 않습니다.",
+    },
+    {
       name: "Rooms",
       description:
         "비밀번호 변경을 완료한 active business admin 전용 객실 운영 projection입니다. developer는 접근할 수 없습니다.",
@@ -352,6 +357,178 @@ export const openApiDocument = {
     "/v1/accounts/{profileId}/password-reset": accountMutationPath(
       "resetAccountPassword",
     ),
+    "/v1/developer/overview": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperOverview",
+        summary: "개발자 운영 대시보드 요약 조회",
+        description:
+          "active developer 전용입니다. 계정·객실 집계와 runtime·DB·scheduler의 app-owned projection을 한 번에 반환합니다. 전체 전화번호, 고객명, secret 값, 내부 catalog row는 포함하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("운영 대시보드 요약", "overview", {
+            $ref: "#/components/schemas/DeveloperOverview",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/runtime-status": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperRuntimeStatus",
+        summary: "Edge runtime과 설정 여부 조회",
+        description:
+          "환경 badge, project ref, adapter와 allowlist 설정의 configured 여부만 반환합니다. 환경변수를 열거하거나 secret 값·길이·해시를 노출하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("Edge runtime 상태", "runtime", {
+            $ref: "#/components/schemas/DeveloperRuntimeStatus",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/database-status": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperDatabaseStatus",
+        summary: "DB migration·RLS·핵심 RPC 상태 조회",
+        description:
+          "source가 기대하는 migration head와 실제 DB head를 비교하고 public base table RLS 누락과 허용된 핵심 RPC 존재 여부만 반환합니다. auth·vault·migration 원본 row는 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("DB 운영 상태", "database", {
+            $ref: "#/components/schemas/DeveloperDatabaseStatus",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/scheduler-status": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperSchedulerStatus",
+        summary: "예약 scheduler·Cron 상태 조회",
+        description:
+          "Cron 활성 여부, exact-admin actor 유효성, 최근 실행 메타데이터와 app-owned heartbeat를 안전한 projection으로 반환합니다. Cron SQL, Authorization header, Vault 값, HTTP 응답 본문은 노출하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("scheduler 운영 상태", "scheduler", {
+            $ref: "#/components/schemas/DeveloperSchedulerStatus",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/audit-events": {
+      get: {
+        tags: ["Developer"],
+        operationId: "listDeveloperAuditEvents",
+        summary: "허용된 운영 감사 이벤트 조회",
+        description:
+          "계정·운영 event allowlist만 최대 31일, 페이지당 100건으로 조회합니다. cursor는 응답 값을 그대로 사용하고 raw before_state/after_state 대신 이벤트별 허용 필드 summary만 표시합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [
+          {
+            name: "eventType",
+            in: "query",
+            schema: {
+              type: "array",
+              maxItems: 8,
+              items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
+            },
+            style: "form",
+            explode: true,
+            description: "반복 query로 전달하는 이벤트 allowlist 필터",
+          },
+          {
+            name: "actorProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "특정 행위자 profile ID 필터",
+          },
+          {
+            name: "from",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+            description: "조회 시작. 생략 시 최근 7일",
+          },
+          {
+            name: "to",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+            description: "조회 종료. from과 최대 31일 간격",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", maxLength: 512 },
+            description:
+              "직전 응답의 nextCursor. 내부 구조를 수정하지 않습니다.",
+          },
+          {
+            name: "limit",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            description: "페이지당 최대 이벤트 수",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "민감정보를 제거한 감사 이벤트 페이지",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/DeveloperAuditPage" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/diagnostics": {
+      post: {
+        tags: ["Developer"],
+        operationId: "runDeveloperDiagnostics",
+        summary: "허용된 운영 진단 일괄 실행",
+        description:
+          "요청 본문·임의 URL·SQL·RPC 이름을 받지 않고 Auth/session 검증 후 runtime·DB·scheduler read-only 검사만 수행합니다. 분당 10회 durable 제한과 개별 timeout을 적용합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("운영 진단 결과", "diagnostics", {
+            $ref: "#/components/schemas/DeveloperDiagnostics",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "429": {
+            ...errorResponse,
+            headers: {
+              "Retry-After": { schema: { type: "integer", minimum: 1 } },
+            },
+          },
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/rooms": {
       get: {
         tags: ["Rooms"],
@@ -448,6 +625,17 @@ export const openApiDocument = {
           "PASSWORD_CHANGE_REQUIRED",
           "ACCOUNT_MANAGER_REQUIRED",
           "ADMIN_REQUIRED",
+          "DEVELOPER_REQUIRED",
+          "DEVELOPER_PROJECTION_FAILED",
+          "DATABASE_UNREACHABLE",
+          "MIGRATION_DRIFT",
+          "RLS_CONFIGURATION_INVALID",
+          "SCHEDULER_NOT_CONFIGURED",
+          "SCHEDULER_ACTOR_INVALID",
+          "SCHEDULER_DEGRADED",
+          "SCHEDULER_HEARTBEAT_FAILED",
+          "DIAGNOSTIC_TIMEOUT",
+          "DIAGNOSTICS_RATE_LIMITED",
           "ACCOUNT_NOT_FOUND",
           "DEVELOPER_ACCOUNT_PROTECTED",
           "LAST_ACTIVE_ADMIN_REQUIRED",
@@ -702,6 +890,354 @@ export const openApiDocument = {
           },
         },
       },
+      DeveloperAuditEventType: {
+        type: "string",
+        enum: [
+          "account.bootstrap_developer_created",
+          "account.bootstrap_admin_created",
+          "account.created",
+          "account.role_changed",
+          "account.status_changed",
+          "account.unlocked",
+          "account.password_reset_requested",
+          "account.password_changed",
+        ],
+        description:
+          "운영 콘솔에 노출할 수 있도록 서버에서 고정한 감사 이벤트 allowlist",
+      },
+      DeveloperRuntimeStatus: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "adapter",
+          "environment",
+          "projectRef",
+          "runtime",
+          "source",
+          "configuration",
+          "checkedAt",
+        ],
+        properties: {
+          adapter: { const: "supabase-edge" },
+          environment: {
+            type: "string",
+            enum: ["production", "recovery", "local", "unknown"],
+            description:
+              "색상만으로 구분하지 말고 이 텍스트와 projectRef를 함께 표시합니다.",
+          },
+          projectRef: {
+            type: "string",
+            description:
+              "현재 연결 대상 확인용 공개 project ref 또는 local/unknown",
+          },
+          runtime: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "version"],
+            properties: {
+              name: { const: "deno" },
+              version: { type: "string" },
+            },
+          },
+          source: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "apiVersion",
+              "expectedMigration",
+              "fastifyRollbackBaseline",
+            ],
+            properties: {
+              apiVersion: { type: "string" },
+              expectedMigration: { type: "string", pattern: "^[0-9]{14}$" },
+              fastifyRollbackBaseline: {
+                type: "string",
+                enum: ["available", "retired"],
+              },
+            },
+          },
+          configuration: {
+            type: "object",
+            description:
+              "소스 allowlist에 포함된 이름별 configured boolean. 값·길이·해시는 절대 포함하지 않습니다.",
+            additionalProperties: false,
+            required: [
+              "ACCOUNT_PHONE_PEPPER",
+              "RESERVATION_PII_KEY_BASE64",
+              "RESERVATION_PII_KEY_VERSION",
+              "RESERVATION_PII_KEYRING_JSON",
+              "RESERVATION_GUEST_NAME_PEPPER",
+              "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
+              "SCHEDULER_INVOKE_SECRET",
+              "CORS_ORIGINS",
+            ],
+            properties: Object.fromEntries(
+              [
+                "ACCOUNT_PHONE_PEPPER",
+                "RESERVATION_PII_KEY_BASE64",
+                "RESERVATION_PII_KEY_VERSION",
+                "RESERVATION_PII_KEYRING_JSON",
+                "RESERVATION_GUEST_NAME_PEPPER",
+                "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
+                "SCHEDULER_INVOKE_SECRET",
+                "CORS_ORIGINS",
+              ].map((name) => [
+                name,
+                {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["configured"],
+                  properties: { configured: { type: "boolean" } },
+                },
+              ]),
+            ),
+          },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperDatabaseStatus: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "databaseReachable",
+          "currentMigration",
+          "expectedMigration",
+          "migrationDrift",
+          "rlsMissingCount",
+          "rlsValid",
+          "criticalRpcs",
+          "rowCounts",
+          "environment",
+          "projectRef",
+          "checkedAt",
+        ],
+        properties: {
+          databaseReachable: { type: "boolean" },
+          currentMigration: {
+            type: ["string", "null"],
+            pattern: "^[0-9]{14}$",
+          },
+          expectedMigration: { type: "string", pattern: "^[0-9]{14}$" },
+          migrationDrift: {
+            type: "string",
+            enum: ["ahead", "equal", "behind", "unknown"],
+          },
+          rlsMissingCount: { type: "integer", minimum: 0 },
+          rlsValid: { type: "boolean" },
+          criticalRpcs: {
+            type: "object",
+            additionalProperties: { type: "boolean" },
+          },
+          rowCounts: {
+            type: "object",
+            additionalProperties: false,
+            required: ["profiles", "rooms", "auditEventsEstimate"],
+            properties: {
+              profiles: { type: "integer", minimum: 0 },
+              rooms: { type: "integer", minimum: 0 },
+              auditEventsEstimate: {
+                type: "integer",
+                minimum: 0,
+                description:
+                  "append-only 감사 원장의 catalog 추정치. dashboard를 위해 전체 count scan을 하지 않습니다.",
+              },
+            },
+          },
+          environment: {
+            type: "string",
+            enum: ["production", "recovery", "local", "unknown"],
+          },
+          projectRef: { type: "string" },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperSchedulerStatus: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "status",
+          "cronCatalogAvailable",
+          "cronConfigured",
+          "cronActive",
+          "cadence",
+          "schedulerActorConfigured",
+          "schedulerActorValid",
+          "invokeSecretConfigured",
+          "lastCronRun",
+          "lastHeartbeat",
+          "checkedAt",
+        ],
+        properties: {
+          status: {
+            type: "string",
+            enum: [
+              "not_configured",
+              "actor_invalid",
+              "awaiting_first_run",
+              "degraded",
+              "healthy",
+            ],
+          },
+          cronCatalogAvailable: { type: "boolean" },
+          cronConfigured: { type: "boolean" },
+          cronActive: { type: "boolean" },
+          cadence: { type: ["string", "null"] },
+          schedulerActorConfigured: { type: "boolean" },
+          schedulerActorValid: { type: "boolean" },
+          invokeSecretConfigured: { type: "boolean" },
+          lastCronRun: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: {
+              status: { type: "string" },
+              startedAt: { type: ["string", "null"], format: "date-time" },
+              endedAt: { type: ["string", "null"], format: "date-time" },
+            },
+          },
+          lastHeartbeat: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: {
+              invocationKey: { type: "string" },
+              scheduledAt: { type: "string", format: "date-time" },
+              status: { type: "string", enum: ["succeeded", "failed"] },
+              transitionCount: { type: ["integer", "null"], minimum: 0 },
+              errorCode: { type: ["string", "null"] },
+              attemptCount: { type: "integer", minimum: 1 },
+              completedAt: { type: "string", format: "date-time" },
+            },
+          },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperAuditEvent: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "eventType",
+          "entityType",
+          "entityId",
+          "actorProfileId",
+          "actorDisplayName",
+          "effectiveAt",
+          "recordedAt",
+          "reasonCode",
+          "summary",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          eventType: { $ref: "#/components/schemas/DeveloperAuditEventType" },
+          entityType: { type: "string" },
+          entityId: { type: ["string", "null"], format: "uuid" },
+          actorProfileId: { type: ["string", "null"], format: "uuid" },
+          actorDisplayName: { type: ["string", "null"] },
+          effectiveAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+          reasonCode: { type: ["string", "null"] },
+          summary: {
+            type: "object",
+            description:
+              "이벤트별 displayName/loginId/role/status/mustChangePassword 허용 필드만 포함",
+            additionalProperties: false,
+            properties: {
+              displayName: { type: "string" },
+              loginId: { type: "string" },
+              role: { $ref: "#/components/schemas/AppRole" },
+              status: { $ref: "#/components/schemas/AccountStatus" },
+              mustChangePassword: { type: "boolean" },
+            },
+          },
+        },
+      },
+      DeveloperAuditPage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["events", "nextCursor"],
+        properties: {
+          events: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DeveloperAuditEvent" },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            description: "다음 페이지 요청에 그대로 전달할 opaque cursor",
+          },
+        },
+      },
+      DeveloperDiagnostics: {
+        type: "object",
+        additionalProperties: false,
+        required: ["status", "checks", "checkedAt"],
+        properties: {
+          status: { type: "string", enum: ["passed", "degraded"] },
+          checks: {
+            type: "array",
+            maxItems: 8,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "status"],
+              properties: {
+                id: { type: "string" },
+                status: {
+                  type: "string",
+                  enum: ["passed", "failed", "timed_out"],
+                },
+                errorCode: { type: "string" },
+                detail: { type: "object", additionalProperties: true },
+              },
+            },
+          },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperOverview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "generatedAt",
+          "accounts",
+          "rooms",
+          "auditEventsLast24Hours",
+          "runtime",
+          "database",
+          "scheduler",
+        ],
+        properties: {
+          generatedAt: { type: "string", format: "date-time" },
+          accounts: {
+            type: "object",
+            additionalProperties: false,
+            required: ["total", "active", "byRole"],
+            properties: {
+              total: { type: "integer", minimum: 0 },
+              active: { type: "integer", minimum: 0 },
+              byRole: {
+                type: "object",
+                additionalProperties: false,
+                required: ["developer", "admin", "maid"],
+                properties: {
+                  developer: { type: "integer", minimum: 0 },
+                  admin: { type: "integer", minimum: 0 },
+                  maid: { type: "integer", minimum: 0 },
+                },
+              },
+            },
+          },
+          rooms: {
+            type: "object",
+            additionalProperties: false,
+            required: ["total"],
+            properties: { total: { type: "integer", minimum: 0 } },
+          },
+          auditEventsLast24Hours: { type: "integer", minimum: 0 },
+          runtime: { $ref: "#/components/schemas/DeveloperRuntimeStatus" },
+          database: { $ref: "#/components/schemas/DeveloperDatabaseStatus" },
+          scheduler: { $ref: "#/components/schemas/DeveloperSchedulerStatus" },
+        },
+      },
       RoomReasonCode: {
         type: "string",
         enum: [
@@ -798,6 +1334,27 @@ export const openApiDocument = {
     },
   },
 } as const;
+
+function developerResponse(
+  description: string,
+  property: string,
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: [property],
+          properties: { [property]: schema },
+        },
+      },
+    },
+  };
+}
 
 function accountMutationDescription(
   operationId: string,

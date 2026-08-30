@@ -164,6 +164,16 @@ export function requireBusinessAdmin(actor: EdgeActor): void {
   }
 }
 
+export function requireDeveloper(actor: EdgeActor): void {
+  if (actor.role !== "developer") {
+    throw new EdgeError(
+      403,
+      "DEVELOPER_REQUIRED",
+      "최상위 개발자만 접근할 수 있습니다.",
+    );
+  }
+}
+
 export function jsonResponse(
   body: unknown,
   status = 200,

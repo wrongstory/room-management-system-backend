@@ -5,6 +5,7 @@ const configUrl = new URL('../supabase/config.toml', import.meta.url);
 const apiUrl = new URL('../supabase/functions/api/index.ts', import.meta.url);
 const runtimeUrl = new URL('../supabase/functions/_shared/runtime.ts', import.meta.url);
 const accountApiUrl = new URL('../supabase/functions/_shared/account-api.ts', import.meta.url);
+const developerApiUrl = new URL('../supabase/functions/_shared/developer-api.ts', import.meta.url);
 const openApiUrl = new URL('../supabase/functions/_shared/openapi.ts', import.meta.url);
 const fastifyPasswordUrl = new URL('../src/modules/auth/password.ts', import.meta.url);
 const fastifyAuthRoutesUrl = new URL('../src/modules/auth/auth.routes.ts', import.meta.url);
@@ -19,6 +20,10 @@ const accountSecurityMigrationUrl = new URL(
 );
 const clientIsolationMigrationUrl = new URL(
   '../supabase/migrations/20260830054446_isolate_login_rate_limit_clients.sql',
+  import.meta.url
+);
+const developerOperationsMigrationUrl = new URL(
+  '../supabase/migrations/20260830123241_developer_operations_projections.sql',
   import.meta.url
 );
 
@@ -150,6 +155,32 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(openApi).toContain('/blob/main/docs/FRONTEND_API_INTEGRATION.md');
     expect(openApi).not.toContain('/blob/dev/docs/FRONTEND_API_INTEGRATION.md');
     expect(openApi).not.toMatch(/example:\s*["']?(?:Bearer|eyJ|010\d{8})/);
+  });
+
+  it('keeps developer operations behind exact-role and app-owned projections', async () => {
+    const [api, runtime, developerApi, migration, openApi] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(runtimeUrl, 'utf8'),
+      readFile(developerApiUrl, 'utf8'),
+      readFile(developerOperationsMigrationUrl, 'utf8'),
+      readFile(openApiUrl, 'utf8')
+    ]);
+
+    expect(runtime).toMatch(/actor\.role !== ["']developer["']/);
+    expect(api).toContain('path === "/v1/developer/overview"');
+    expect(api).toContain('path === "/v1/developer/audit-events"');
+    expect(api).toContain('path === "/v1/developer/diagnostics"');
+    expect(api).toContain('requireDeveloper(actor)');
+    expect(developerApi).toContain('expectedMigrationVersion = "20260830123241"');
+    expect(developerApi).toContain('secretConfigurationAllowlist');
+    expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
+    expect(migration).toContain('private.assert_active_developer');
+    expect(migration).toContain('private.scheduler_invocation_heartbeats');
+    expect(migration).toContain('private.developer_diagnostic_rate_limits');
+    expect(migration).toContain('from public, anon, authenticated');
+    expect(migration).toContain('to service_role');
+    expect(openApi).toContain('DeveloperAuditPage');
+    expect(openApi).toContain('DIAGNOSTICS_RATE_LIMITED');
   });
 
   it('keeps Fastify and Edge password and rate-limit contracts aligned', async () => {

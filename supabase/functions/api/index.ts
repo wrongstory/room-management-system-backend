@@ -9,6 +9,14 @@ import {
   resetAccountPassword,
   unlockAccount,
 } from "../_shared/account-api.ts";
+import {
+  developerAuditEvents,
+  developerDatabaseStatus,
+  developerOverview,
+  developerRuntimeStatus,
+  developerSchedulerStatus,
+  runDeveloperDiagnostics,
+} from "../_shared/developer-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
 import { toRoomProjections } from "../_shared/room-api.ts";
 import {
@@ -20,6 +28,7 @@ import {
   jsonResponse,
   requestId,
   requireBusinessAdmin,
+  requireDeveloper,
 } from "../_shared/runtime.ts";
 
 function routePath(url: string): string {
@@ -148,6 +157,55 @@ Deno.serve(async (request) => {
             resetProfileId,
           ),
         },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/developer/overview") {
+      requireDeveloper(actor);
+      return jsonResponse(
+        { overview: await developerOverview(clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/developer/runtime-status") {
+      requireDeveloper(actor);
+      return jsonResponse(
+        { runtime: developerRuntimeStatus() },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/developer/database-status") {
+      requireDeveloper(actor);
+      return jsonResponse(
+        { database: await developerDatabaseStatus(clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/developer/scheduler-status") {
+      requireDeveloper(actor);
+      return jsonResponse(
+        { scheduler: await developerSchedulerStatus(clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/developer/audit-events") {
+      requireDeveloper(actor);
+      return jsonResponse(
+        await developerAuditEvents(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && path === "/v1/developer/diagnostics") {
+      requireDeveloper(actor);
+      return jsonResponse(
+        { diagnostics: await runDeveloperDiagnostics(request, clients, actor) },
         200,
         corsHeaders,
       );

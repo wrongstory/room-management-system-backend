@@ -4,6 +4,10 @@
 
 월 비용 `$0`을 우선해 Fastify production process를 Supabase Edge Functions와 Cron으로 대체할 수 있는지 검증한다. 이 문서와 `supabase/functions/` 코드는 Issue #36의 PoC이며, 운영 smoke와 독립 리뷰가 끝나기 전에는 Fastify를 제거하거나 production runtime 전환이 완료됐다고 간주하지 않는다.
 
+PoC source의 `dev` 병합 조건은 최신 head 독립 리뷰 P0/P1 0과 required CI PASS다. 운영 smoke는 `dev` 병합 선행조건이 아니라 `release → main` 뒤 운영 migration과 계정·secret 준비를 마친 다음 수행하는 runtime 채택 조건이다. 따라서 source가 병합돼도 Issue #36은 운영 smoke가 완료될 때까지 닫지 않으며 기존 Fastify를 rollback 기준선으로 유지한다.
+
+현재 production은 source·migration 17건·Edge API/Swagger 배포와 gateway/JWT/CORS 1차 smoke까지 완료됐다. business admin과 scheduler/Cron은 #43과 #44 Phase A 뒤 활성화하므로 scheduler 503 fail-closed는 현재 정상이다. `v0.2.0` tag/release는 operational activation smoke가 끝날 때까지 발행하지 않는다.
+
 ```text
 Frontend
   └─ Edge Function api
@@ -41,6 +45,12 @@ Supabase Cron (pg_cron)
 | `api` | `PATCH /api/v1/accounts/:profileId/status` | developer 또는 active admin | 계정 상태 전이 |
 | `api` | `POST /api/v1/accounts/:profileId/unlock` | developer 또는 active admin | 로그인 잠금 해제 |
 | `api` | `POST /api/v1/accounts/:profileId/password-reset` | developer 또는 active admin | 임시 비밀번호 초기화 |
+| `api` | `GET /api/v1/developer/overview` | active developer | 운영 dashboard 집계 |
+| `api` | `GET /api/v1/developer/runtime-status` | active developer | environment·설정 여부 projection |
+| `api` | `GET /api/v1/developer/database-status` | active developer | migration·RLS·핵심 RPC 검사 |
+| `api` | `GET /api/v1/developer/scheduler-status` | active developer | Cron·actor·heartbeat 상태 |
+| `api` | `GET /api/v1/developer/audit-events` | active developer | bounded 감사 projection |
+| `api` | `POST /api/v1/developer/diagnostics` | active developer | allowlist read-only 진단 |
 | `api` | `GET /api/v1/rooms` | active admin + password changed | 기존 객실 projection RPC |
 | `reservation-scheduler` | `POST /reservation-scheduler` | `x-scheduler-secret` | 예약 전이/PII 보존 command |
 
@@ -53,6 +63,10 @@ Supabase Cron (pg_cron)
 `/api/docs`는 `/api/openapi.json`을 읽는 한글 Swagger UI다. Swagger asset version과 SRI hash를 소스에 고정하고 CSP를 적용하며 bearer token은 브라우저 저장소에 유지하지 않는다. 문서에는 실제 전화번호, 토큰, secret, project ref를 example로 넣지 않는다. `Authorize`에는 사용자 bearer token만 입력하고 변경 API의 `Idempotency-Key`에는 8~128자의 요청별 값을 사용한다. 프론트와 프론트 Codex는 [API 연동 가이드](./FRONTEND_API_INTEGRATION.md)에 따라 OpenAPI JSON에서 타입을 생성하고, endpoint·role·error code를 와이어프레임에서 추측하지 않는다.
 
 Scheduler 시간값은 두 역할로 분리한다. 요청의 `scheduledAt`은 해당 Cron 호출을 식별하는 minute bucket과 idempotency key에만 사용하며 업무 전이의 기준 시각으로 사용하지 않는다. 실제 `p_as_of`는 Function이 RPC를 실행하는 현재 시각이다. 따라서 같은 `scheduledAt` 재시도는 같은 호출로 처리하면서도 pause나 전달 지연 뒤에는 실제 실행 시각까지 누락된 예약 전이를 catch-up한다.
+
+각 인증된 scheduler 실행은 업무 RPC 완료 뒤 `private.scheduler_invocation_heartbeats`에 7일 app-owned 상태를 기록한다. 같은 invocation key 재시도는 attempt count와 마지막 결과만 갱신하며 secret·Authorization·HTTP body·원문 DB 오류는 저장하지 않는다. developer scheduler projection은 Cron SQL이나 `net._http_response` raw row를 공개하지 않고 활성 여부·cadence·최근 run 시각, exact-admin actor 유효성, 안전한 heartbeat 필드만 반환한다.
+
+developer 운영 API는 exact `developer` 역할만 허용한다. DB·Cron·감사 원본은 app-owned `SECURITY DEFINER` projection 뒤에 두며 service-role도 private heartbeat/limiter table을 직접 조회하지 않는다. audit는 계정 운영 event allowlist, 최대 31일·100건이고 diagnostics는 임의 URL·SQL·RPC 입력 없이 10회/분 durable 제한을 사용한다. 모든 developer 응답은 `Cache-Control: no-store`다.
 
 ## 로컬 검증
 
@@ -81,6 +95,7 @@ Function Secret:
 - `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`
 - `SCHEDULER_INVOKE_SECRET`
 - `CORS_ORIGINS`
+- `RUNTIME_ENVIRONMENT` — `production | recovery | local`; 운영 콘솔의 연결 대상 badge
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`는 Edge runtime이 자동 제공한다. custom secret은 `SUPABASE_` prefix를 사용할 수 없으며 service-role 값은 응답·로그·Vault·Git에 복제하지 않는다.
 

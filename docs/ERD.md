@@ -378,6 +378,8 @@ erDiagram
   PROFILES ||--o{ NOTIFICATIONS : "수신자"
   NOTIFICATIONS ||--o{ NOTIFICATION_OUTBOX : "푸시 재시도"
   PROFILES ||--o{ AUDIT_EVENTS : "행위자"
+  PROFILES ||--o{ SCHEDULER_INVOCATION_HEARTBEATS : "scheduler actor"
+  PROFILES ||--o| DEVELOPER_DIAGNOSTIC_RATE_LIMITS : "진단 제한"
 
   EARNINGS {
     uuid id PK
@@ -428,17 +430,33 @@ erDiagram
     int retry_count
   }
   AUDIT_EVENTS {
-    bigint id PK
+    uuid id PK
     uuid actor_profile_id FK
     text event_type
     text entity_type
     uuid entity_id
     text idempotency_key UK
   }
+  SCHEDULER_INVOCATION_HEARTBEATS {
+    text invocation_key PK
+    timestamptz scheduled_at
+    uuid actor_profile_id FK
+    text status
+    int transition_count
+    int attempt_count
+    timestamptz last_completed_at
+  }
+  DEVELOPER_DIAGNOSTIC_RATE_LIMITS {
+    uuid actor_profile_id PK,FK
+    timestamptz window_started_at
+    int attempt_count
+  }
 ```
 
 - `payroll_items`는 cycle이 `OPEN`인 잠금 transaction에서만 추가하며 earning의 `earned_on`이 cycle의 월요일 시작 7일 구간에 속해야 한다.
 - cycle이 `PAYING`에 진입한 뒤에는 item membership과 잠금 금액·행위자·시각 snapshot을 임의로 바꿀 수 없다. 외부 송금이 없음을 확인한 `PAYING/CHECK → OPEN`은 사유·행위자·시각과 CAS version을 기록하면서 lock metadata만 해제하며 candidate item은 유지한다. `PAID` snapshot은 되돌려 쓰지 않는다.
+- scheduler heartbeat와 developer 진단 제한은 `private` 운영 projection 상태다. Data API table 권한을 주지 않고 service-role도 원본 table을 직접 읽지 않으며, exact developer/admin 검증을 포함한 app-owned RPC로만 기록·조회한다.
+- developer 감사 API는 `audit_events`의 raw JSON을 반환하지 않고 계정 운영 event allowlist의 필드별 projection만 최대 31일·100건 cursor pagination으로 반환한다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 
