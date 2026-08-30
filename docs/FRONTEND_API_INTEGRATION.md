@@ -26,7 +26,9 @@ http://127.0.0.1:54321/functions/v1/api
 | Codex·코드 생성 | `http://127.0.0.1:54321/functions/v1/api/openapi.json` |
 | runtime 확인 | `http://127.0.0.1:54321/functions/v1/api/health` |
 
-Swagger UI 상단의 **OpenAPI JSON 다운로드**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
+Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
+
+production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. #43 developer operation path와 #51~#53의 가능일·예약·객실 상세/mutation은 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
 
 ## 2. 로컬 백엔드 준비
 
@@ -79,6 +81,8 @@ export type AccountListResponse =
   paths["/v1/accounts"]["get"]["responses"][200]["content"]["application/json"];
 ```
 
+Python 운영도구도 같은 OpenAPI JSON을 저장소에 복사해 수동 모델을 중복 작성하지 않는다. #44에서 선택한 generator 버전을 lockfile에 고정하고 생성 코드는 직접 수정하지 않으며, `httpx` 인증·재시도·redaction adapter는 생성 코드 밖에 둔다. 상태별 UI·운영 대응은 [developer 운영 API 가이드](./DEVELOPER_OPERATIONS_API.md)를 따른다.
+
 ## 4. 공통 HTTP 규칙
 
 ### 인증
@@ -118,19 +122,21 @@ const idempotencyKey = crypto.randomUUID();
 | 로그인 필요/만료 | `MISSING_ACCESS_TOKEN`, `INVALID_ACCESS_TOKEN`, `SESSION_REVOKED` | 세션 정리 후 로그인 화면 |
 | 최초 비밀번호 변경 | `PASSWORD_CHANGE_REQUIRED` | 비밀번호 변경 화면 고정 |
 | 권한 부족 | `ACCOUNT_MANAGER_REQUIRED`, `ADMIN_REQUIRED` | 접근 차단·권한 안내 |
+| developer 전용 | `DEVELOPER_REQUIRED` | 일반 admin/maid 화면으로 복귀, 권한 우회 재시도 금지 |
 | 계정 잠금 | `ACCOUNT_LOCKED` | 잠금 종료 또는 관리자 해제 안내 |
 | 로그인 요청 과다 | `LOGIN_RATE_LIMITED` | `Retry-After` 이후 재시도. 로그인 ID를 바꿔 제한을 우회하지 않음 |
 | 로그인 client 확인 불가 | `LOGIN_CLIENT_ID_UNAVAILABLE` | 자동 반복하지 않고 네트워크·gateway 상태 확인 |
 | 동시 변경/업무 충돌 | `IDEMPOTENCY_KEY_REUSED`, `LAST_ACTIVE_ADMIN_REQUIRED` 등 409 | 최신 목록 재조회 후 사용자 확인 |
 | 서버 상태 불일치 | `ACCOUNT_AUTH_STATE_INCONSISTENT`, `PASSWORD_STATE_INCONSISTENT` | 자동 성공 처리 금지, requestId로 운영 확인 |
+| 진단 요청 과다 | `DIAGNOSTICS_RATE_LIMITED` | `Retry-After` 뒤 사용자가 다시 실행 |
 
 ## 5. 역할별 화면 경계
 
-| 역할 | `/auth/me` | 계정 목록·변경 | 전체 객실 목록 |
-|---|---:|---:|---:|
-| `developer` | 허용 | 허용 | 금지 |
-| `admin` | 허용 | 허용 | 허용 |
-| `maid` | 허용 | 금지 | 금지 |
+| 역할 | `/auth/me` | 계정 목록·변경 | developer 운영 상태 | 전체 객실 목록 |
+|---|---:|---:|---:|---:|
+| `developer` | 허용 | 허용 | 허용 | 금지 |
+| `admin` | 허용 | 허용 | 금지 | 허용 |
+| `maid` | 허용 | 금지 | 금지 | 금지 |
 
 - `developer`는 최상위 백엔드·계정 운영자이며 business admin이 아니다.
 - 계정 생성·역할 변경 입력에는 `admin | maid`만 사용한다.
@@ -150,9 +156,17 @@ const idempotencyKey = crypto.randomUUID();
 | 상태 변경 | `PATCH /v1/accounts/{profileId}/status` | 퇴사는 inactive 선행, reasonCode 필요 |
 | 잠금 해제 | `POST /v1/accounts/{profileId}/unlock` | developer 대상 금지 |
 | 비밀번호 초기화 | `POST /v1/accounts/{profileId}/password-reset` | 휴대전화 마지막 4자리 임시값, developer 대상 금지 |
+| 운영 dashboard | `GET /v1/developer/overview` | developer 전용, 계정·runtime·DB·scheduler 통합 projection |
+| runtime 상태 | `GET /v1/developer/runtime-status` | secret은 allowlist 이름별 configured boolean만 제공 |
+| DB 상태 | `GET /v1/developer/database-status` | migration drift·RLS 누락·핵심 RPC 여부 |
+| scheduler 상태 | `GET /v1/developer/scheduler-status` | Cron SQL/Vault/HTTP body 없이 정규화 상태만 제공 |
+| 운영 감사 | `GET /v1/developer/audit-events` | 최대 31일·100건 cursor pagination, raw state 없음 |
+| 운영 진단 | `POST /v1/developer/diagnostics` | body 없음, 임의 URL/SQL/RPC 입력 없음, 10회/분 |
 | 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 독립 상태 축 사용 |
 
 객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다.
+
+developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
 
 ## 7. 민감정보 처리
 
@@ -179,4 +193,4 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 
 ## 9. 현재 범위 제한
 
-현재 Edge Swagger의 구현 범위는 인증·계정·전체 객실 목록이다. 예약·가능일 Fastify API가 저장소에 존재하더라도 Edge OpenAPI에 없는 route는 Supabase-only production endpoint로 가정하지 않는다. #42가 `main`에 승격되고 운영 Edge smoke가 끝나기 전에는 이 문서를 production 배포 완료 선언으로 사용하지 않는다.
+현재 source Swagger 범위는 인증·계정·developer 운영 projection·전체 객실 목록이다. 예약·가능일 Fastify API가 저장소에 존재하더라도 Edge OpenAPI에 없는 route는 Supabase-only production endpoint로 가정하지 않는다. 각 환경에서 내려받은 OpenAPI에 없는 #43 path를 production에 이미 배포됐다고 가정하지 않으며, feature → dev → release → main 승격과 Edge 재배포 뒤에만 활성화한다.

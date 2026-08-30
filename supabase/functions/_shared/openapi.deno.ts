@@ -43,6 +43,19 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "room projection must not be an untyped object",
   );
   assert(
+    serialized.includes('"#/components/schemas/DeveloperOverview"'),
+    "developer overview needs a reusable generated type",
+  );
+  assert(
+    serialized.includes('"/v1/developer/diagnostics"'),
+    "developer diagnostics must be published",
+  );
+  assert(
+    !serialized.includes('"before_state"') &&
+      !serialized.includes('"after_state"'),
+    "raw audit state must not be part of the public contract",
+  );
+  assert(
     response.headers.get("cache-control") === "public, max-age=300",
     "contract cache",
   );
