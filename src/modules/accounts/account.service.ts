@@ -269,6 +269,7 @@ export class SupabaseAccountService implements AccountService {
       throw new AppError(502, 'AUTH_USER_CREATE_FAILED', '인증 계정을 만들지 못했습니다.');
     }
 
+    let profileCommandCompleted = false;
     try {
       const { data, error } = await this.clients.admin.rpc('create_account_profile', {
         p_profile_id: profileId,
@@ -285,18 +286,36 @@ export class SupabaseAccountService implements AccountService {
       if (error || !data) {
         throw databaseError(error);
       }
+      profileCommandCompleted = true;
 
       const row = data as ProfileRow;
       assertIdempotentAccountCreation(row, fingerprint);
       if (row.id !== profileId) {
-        await this.clients.admin.auth.admin.deleteUser(profileId);
+        const { error: cleanupError } = await this.clients.admin.auth.admin.deleteUser(profileId);
+        if (cleanupError) {
+          throw new AppError(
+            502,
+            'ACCOUNT_AUTH_STATE_INCONSISTENT',
+            '중복 Auth 계정을 정리하지 못했습니다. 운영자 확인이 필요합니다.'
+          );
+        }
       }
       return {
         account: toAccount(row),
         temporaryPassword: row.phone_last_four ?? phone.lastFour
       };
     } catch (error) {
-      await this.clients.admin.auth.admin.deleteUser(profileId);
+      if (profileCommandCompleted) {
+        throw error;
+      }
+      const { error: cleanupError } = await this.clients.admin.auth.admin.deleteUser(profileId);
+      if (cleanupError) {
+        throw new AppError(
+          502,
+          'ACCOUNT_AUTH_STATE_INCONSISTENT',
+          '프로필 생성 실패 후 Auth 계정을 정리하지 못했습니다. 운영자 확인이 필요합니다.'
+        );
+      }
       throw error;
     }
   }
@@ -379,9 +398,16 @@ export class SupabaseAccountService implements AccountService {
       p_idempotency_key: input.idempotencyKey
     });
     if (error || !data) {
-      await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
+      const { error: rollbackError } = await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
         app_metadata: { profile_id: before.id, role: before.role }
       });
+      if (rollbackError) {
+        throw new AppError(
+          502,
+          'ACCOUNT_AUTH_STATE_INCONSISTENT',
+          '역할 변경 실패 후 Auth 역할을 복구하지 못했습니다. 운영자 확인이 필요합니다.'
+        );
+      }
       throw databaseError(error);
     }
     return toAccount(data as ProfileRow);

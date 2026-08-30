@@ -4,7 +4,15 @@ import { describe, expect, it } from 'vitest';
 const configUrl = new URL('../supabase/config.toml', import.meta.url);
 const apiUrl = new URL('../supabase/functions/api/index.ts', import.meta.url);
 const runtimeUrl = new URL('../supabase/functions/_shared/runtime.ts', import.meta.url);
+const accountApiUrl = new URL('../supabase/functions/_shared/account-api.ts', import.meta.url);
+const openApiUrl = new URL('../supabase/functions/_shared/openapi.ts', import.meta.url);
+const fastifyPasswordUrl = new URL('../src/modules/auth/password.ts', import.meta.url);
+const fastifyAuthRoutesUrl = new URL('../src/modules/auth/auth.routes.ts', import.meta.url);
 const schedulerUrl = new URL('../supabase/functions/reservation-scheduler/index.ts', import.meta.url);
+const loginRateLimitMigrationUrl = new URL(
+  '../supabase/migrations/20260830015035_edge_login_rate_limit.sql',
+  import.meta.url
+);
 
 describe('Supabase Edge runtime PoC contract', () => {
   it('allows existing email accounts to sign in while public signup remains disabled', async () => {
@@ -45,5 +53,79 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(scheduler).toContain('crypto.subtle.verify');
     expect(scheduler).toContain('reservation-scheduler-$' + '{bucket}');
     expect(scheduler).toMatch(/p_as_of:\s*new Date\(\)\.toISOString\(\)/);
+  });
+
+  it('uses a durable database-backed limiter before looking up a login alias', async () => {
+    const [accountApi, migration] = await Promise.all([
+      readFile(accountApiUrl, 'utf8'),
+      readFile(loginRateLimitMigrationUrl, 'utf8')
+    ]);
+    const limiter = accountApi.indexOf('await consumeLoginRateLimit(clients, alias)');
+    const aliasLookup = accountApi.indexOf('.from("login_aliases")');
+
+    expect(limiter).toBeGreaterThan(0);
+    expect(aliasLookup).toBeGreaterThan(limiter);
+    expect(accountApi).not.toMatch(/new\s+Map\s*</);
+    expect(accountApi).toMatch(/edge-login-rate-limit:\$\{normalizedLoginId\}/);
+    expect(migration).toContain('create table private.login_rate_limit_windows');
+    expect(migration).toContain('create function public.consume_login_rate_limit(');
+    expect(migration).toContain('to service_role');
+    expect(migration).toContain('from public, anon, authenticated');
+  });
+
+  it('exposes account lifecycle routes without a developer bootstrap or promotion route', async () => {
+    const [api, accountApi] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(accountApiUrl, 'utf8')
+    ]);
+
+    expect(api).toContain('path === "/v1/auth/login"');
+    expect(api).toContain('path === "/v1/auth/password"');
+    expect(api).toContain('path === "/v1/accounts"');
+    expect(api).toContain('profileIdFromPath(path, "role")');
+    expect(api).toContain('profileIdFromPath(path, "status")');
+    expect(api).toContain('profileIdFromPath(path, "unlock")');
+    expect(api).toContain('profileIdFromPath(path, "password-reset")');
+    expect(accountApi).toMatch(/roleValue !== "admin" && roleValue !== "maid"/);
+    expect(accountApi).toMatch(/body\.role !== "admin" && body\.role !== "maid"/);
+    expect(accountApi).not.toContain('bootstrap_first_developer_profile');
+  });
+
+  it('publishes pinned Swagger UI and an OpenAPI contract without persisting authorization', async () => {
+    const [api, openApi] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(openApiUrl, 'utf8')
+    ]);
+
+    expect(api).toContain('path === "/openapi.json"');
+    expect(api).toContain('path === "/docs"');
+    expect(openApi).toContain('openapi: "3.1.1"');
+    expect(openApi).toContain('bearerAuth: { type: "http", scheme: "bearer"');
+    expect(openApi).toContain('name: "Idempotency-Key"');
+    expect(openApi).toContain('const swaggerUiVersion = "5.32.11"');
+    expect(openApi).toMatch(/swagger-ui-dist@\$\{swaggerUiVersion\}/);
+    expect(openApi).toContain('persistAuthorization: false');
+    expect(openApi).toContain('content-security-policy');
+    expect(openApi).toMatch(/integrity="\$\{swaggerCssIntegrity\}"/);
+    expect(openApi).toMatch(/integrity="\$\{swaggerBundleIntegrity\}"/);
+    expect(openApi).not.toMatch(/example:\s*["']?(?:Bearer|eyJ|010\d{8})/);
+  });
+
+  it('keeps Fastify and Edge password and rate-limit contracts aligned', async () => {
+    const [accountApi, password, authRoutes, openApi] = await Promise.all([
+      readFile(accountApiUrl, 'utf8'),
+      readFile(fastifyPasswordUrl, 'utf8'),
+      readFile(fastifyAuthRoutesUrl, 'utf8'),
+      readFile(openApiUrl, 'utf8')
+    ]);
+
+    const printableAsciiContract = String.raw`[\x20-\x7e]+`;
+    expect(accountApi).toContain(printableAsciiContract);
+    expect(password).toContain(printableAsciiContract);
+    expect(accountApi).toMatch(/`tmp:\$\{value\}`/);
+    expect(password).toMatch(/`tmp:\$\{password\}`/);
+    expect(authRoutes).toContain("'LOGIN_RATE_LIMITED'");
+    expect(accountApi).toContain('"LOGIN_RATE_LIMITED"');
+    expect(openApi).toContain('"LOGIN_RATE_LIMITED"');
   });
 });

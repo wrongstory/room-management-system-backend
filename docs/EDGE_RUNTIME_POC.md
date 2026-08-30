@@ -26,18 +26,31 @@ Supabase Cron (pg_cron)
 - Free 프로젝트는 7일 저활동 시 pause될 수 있다. 실제 사용자의 매일 DB 요청은 pause 가능성을 낮추지만 무중단을 보장하지 않는다.
 - Free에는 SLA와 자동 DB backup이 없다. Git migration과 두 번째 recovery 프로젝트의 논리 복구 절차를 계속 사용한다.
 
-## PoC endpoint
+## Edge endpoint
 
 | Function | Method/path | 인증 | 목적 |
 |---|---|---|---|
 | `api` | `GET /api/health` | 없음 | Edge runtime health |
+| `api` | `GET /api/openapi.json` | 없음 | OpenAPI 3.1 계약 |
+| `api` | `GET /api/docs` | 없음 | pinned Swagger UI |
+| `api` | `POST /api/v1/auth/login` | 없음 | 이름형 ID 로그인 |
 | `api` | `GET /api/v1/auth/me` | 사용자 bearer JWT | Auth/profile/session 계약 |
+| `api` | `POST /api/v1/auth/password` | 사용자 bearer JWT | 개인 비밀번호 변경 |
+| `api` | `GET·POST /api/v1/accounts` | developer 또는 active admin | 계정 조회·생성 |
+| `api` | `PATCH /api/v1/accounts/:profileId/role` | developer 또는 active admin | 관리자·메이드 역할 변경 |
+| `api` | `PATCH /api/v1/accounts/:profileId/status` | developer 또는 active admin | 계정 상태 전이 |
+| `api` | `POST /api/v1/accounts/:profileId/unlock` | developer 또는 active admin | 로그인 잠금 해제 |
+| `api` | `POST /api/v1/accounts/:profileId/password-reset` | developer 또는 active admin | 임시 비밀번호 초기화 |
 | `api` | `GET /api/v1/rooms` | active admin + password changed | 기존 객실 projection RPC |
 | `reservation-scheduler` | `POST /reservation-scheduler` | `x-scheduler-secret` | 예약 전이/PII 보존 command |
 
 `verify_jwt=false`는 공개 허용을 뜻하지 않는다. 하나의 API Function 안에서 health와 인증 endpoint를 함께 라우팅하기 위해 gateway 검사를 끄고, 보호 경로에서 `auth.getUser`와 최신 DB profile/session을 매 요청 재검증한다. scheduler Function은 32자 이상의 별도 secret을 HMAC 방식으로 비교한 뒤에만 service-role RPC를 호출한다.
 
 단일 `developer`도 `/v1/auth/me`에서 자신의 실제 역할로 인증되지만 객실·예약 같은 업무 API에서는 `admin`으로 간주하지 않는다. `/v1/rooms`와 예약 scheduler actor는 최신 active profile의 역할이 정확히 `admin`일 때만 허용하며, developer를 scheduler actor로 지정하면 DB command가 `ADMIN_REQUIRED`로 거부한다.
+
+로그인 endpoint는 Edge instance 메모리를 제한 상태로 사용하지 않는다. 정규화한 로그인 ID를 응답이나 DB에 그대로 저장하지 않고 `ACCOUNT_PHONE_PEPPER`로 domain-separated HMAC-SHA256 key를 만든 뒤 `private.login_rate_limit_windows`의 원자 fixed window를 소비한다. 60초 동안 10회까지 허용하고 초과 시 `429`와 `Retry-After`를 반환한다. 이 검사는 alias 조회보다 먼저 수행하며, 계정이 존재하는 경우에는 기존 5회 실패/15분 계정 잠금도 별도로 적용한다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`로 응답한다.
+
+`/api/docs`는 `/api/openapi.json`을 읽는 Swagger UI다. Swagger asset version과 SRI hash를 소스에 고정하고 CSP를 적용하며 bearer token은 브라우저 저장소에 유지하지 않는다. 문서에는 실제 전화번호, 토큰, secret, project ref를 example로 넣지 않는다. `Authorize`에는 사용자 bearer token만 입력하고 변경 API의 `Idempotency-Key`에는 8~128자의 요청별 값을 사용한다.
 
 Scheduler 시간값은 두 역할로 분리한다. 요청의 `scheduledAt`은 해당 Cron 호출을 식별하는 minute bucket과 idempotency key에만 사용하며 업무 전이의 기준 시각으로 사용하지 않는다. 실제 `p_as_of`는 Function이 RPC를 실행하는 현재 시각이다. 따라서 같은 `scheduledAt` 재시도는 같은 호출로 처리하면서도 pause나 전달 지연 뒤에는 실제 실행 시각까지 누락된 예약 전이를 catch-up한다.
 
@@ -49,6 +62,8 @@ copy supabase/functions/.env.example supabase/functions/.env.local
 npm exec supabase -- functions serve api reservation-scheduler --env-file supabase/functions/.env.local
 npm run edge:check
 ```
+
+로컬 Function이 실행 중이면 `http://127.0.0.1:54321/functions/v1/api/docs`에서 Swagger UI를 열 수 있다. 운영 URL은 source가 release를 통해 `main`에 승격되고 Function이 배포된 뒤에만 사용한다.
 
 `.env.local`은 Git에 넣지 않는다. 로컬 active admin UUID와 무작위 scheduler secret만 넣고, 실제 운영 비밀값을 복사하지 않는다.
 

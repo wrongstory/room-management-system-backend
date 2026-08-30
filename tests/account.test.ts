@@ -194,4 +194,42 @@ describe('account input normalization', () => {
     expect(harness.rpc).not.toHaveBeenCalled();
     expect(harness.updateUserById).not.toHaveBeenCalled();
   });
+
+  it('reports an inconsistency when Auth role rollback fails after a DB rejection', async () => {
+    const updateUserById = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'Auth rollback unavailable' } });
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc: vi.fn(async () => ({
+          data: null,
+          error: { message: 'LAST_ACTIVE_ADMIN_REQUIRED' }
+        })),
+        auth: { admin: { updateUserById } }
+      },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    );
+
+    await expect(service.changeRole(actor, {
+      targetProfileId: activeAdminProfile.id,
+      role: 'maid',
+      idempotencyKey: 'role-rollback-failure-0001'
+    })).rejects.toMatchObject({
+      code: 'ACCOUNT_AUTH_STATE_INCONSISTENT',
+      statusCode: 502
+    });
+    expect(updateUserById).toHaveBeenCalledTimes(2);
+  });
 });

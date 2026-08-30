@@ -10,7 +10,7 @@
 - 이름형 로그인 아이디를 Supabase Auth 내부 계정에 매핑하는 서버 로그인
 - 단일 developer bootstrap과 관리자·메이드 개별 계정 생성, 역할·상태 변경, 잠금 해제, 비밀번호 초기화
 - 임시 비밀번호 변경 강제와 폐기된 세션의 매 요청 차단
-- `GET /health`, `/v1/auth`, `/v1/accounts`, `/v1/rooms`, `/v1/reservations`, `/v1/availability`
+- `GET /health`, `/openapi.json`, `/docs` Swagger UI, `/v1/auth`, `/v1/accounts`, `/v1/rooms`, `/v1/reservations`, `/v1/availability`
 - 객실 기준정보 CAS 변경, 운영 차단·촛불·이슈·PIN 동기화 event 기록
 - 예약 생성·일정 변경·취소·수동 체크아웃, 연박/추가 청소 요청과 예정 입·퇴실 전이
 - 메이드 주간 가능일 version 제출, 마감 후 관리자 변경 승인·반려, 날짜별 배정 후보 조회
@@ -62,6 +62,8 @@ npm run edge:check
 ```
 
 Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge runtime PoC](docs/EDGE_RUNTIME_POC.md)에 정리했습니다. 운영 smoke가 끝나기 전까지 기존 Fastify 구현은 개발 기준선으로 유지합니다.
+
+로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 Swagger UI로 Edge API를 확인할 수 있습니다. `/openapi.json`과 `/docs`는 API 계약 확인용이며 실제 secret, 휴대전화 원문, 운영 token을 문서 example이나 캡처에 넣지 않습니다.
 
 ## 보안 경계
 

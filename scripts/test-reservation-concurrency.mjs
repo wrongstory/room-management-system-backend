@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -21,6 +21,30 @@ function assert(condition, message) {
     throw new Error(message);
   }
 }
+
+const loginRateLimitKey = createHash('sha256')
+  .update(`edge-login-concurrency-${randomUUID()}`)
+  .digest('hex');
+const loginRateLimitResults = await Promise.all(Array.from({ length: 20 }, () => (
+  client.rpc('consume_login_rate_limit', {
+    p_key_hash: loginRateLimitKey,
+    p_limit: 10,
+    p_window_seconds: 60
+  })
+)));
+assert(
+  loginRateLimitResults.every((result) => !result.error && Array.isArray(result.data)),
+  'concurrent login rate-limit RPC calls must all complete'
+);
+const loginRateLimitDecisions = loginRateLimitResults.map((result) => result.data[0]?.allowed);
+assert(
+  loginRateLimitDecisions.filter((allowed) => allowed === true).length === 10,
+  'concurrent login rate limit must allow exactly ten requests'
+);
+assert(
+  loginRateLimitDecisions.filter((allowed) => allowed === false).length === 10,
+  'concurrent login rate limit must deny exactly ten requests'
+);
 
 const authUserId = randomUUID();
 const actorProfileId = randomUUID();
@@ -125,4 +149,6 @@ assert(
   'concurrent manual checkout must reject exactly one loser'
 );
 
-console.log('Reservation concurrency checks passed: create=1/2, manual-checkout=1/2.');
+console.log(
+  'Concurrency checks passed: login-rate-limit=10/20, reservation-create=1/2, manual-checkout=1/2.'
+);

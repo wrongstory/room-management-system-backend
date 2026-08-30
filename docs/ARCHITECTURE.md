@@ -9,6 +9,7 @@
 - 데이터·인증: Supabase Auth, PostgreSQL 17
 - 사진 파일: Google Drive API, 전용 비공개 폴더
 - 입력 검증: Zod
+- API 계약: OpenAPI 3.1 + pinned Swagger UI
 - 테스트: Vitest, Fastify injection, Deno Edge type check
 - 배포 후보: 운영 Supabase의 Edge Functions·Cron + Supabase 복구검증 프로젝트
 
@@ -43,6 +44,8 @@ flowchart LR
 6. 이후 API는 `auth.getUser(accessToken)`과 `auth.sessions`의 `session_id`를 검증하고 최신 프로필 역할·상태를 다시 읽습니다.
 
 권한은 사용자 수정 가능한 `user_metadata`에 의존하지 않습니다. 역할 변경과 비활성화가 JWT 갱신 전에도 반영되도록 DB 프로필을 매 요청 확인합니다.
+
+Edge 로그인은 alias 조회 전에 정규화 ID의 HMAC key로 PostgreSQL fixed-window 제한을 원자적으로 소비합니다. Edge instance 메모리는 cold start와 수평 확장 때 공유되지 않으므로 보안 제한 상태를 두지 않습니다. 사용자별 5회 실패/15분 잠금은 이 전역 abuse 제한과 별도로 유지합니다.
 
 ## 데이터 모델
 
@@ -111,6 +114,7 @@ erDiagram
 현재:
 
 - `GET /health`
+- `GET /openapi.json`, `GET /docs` (OpenAPI 3.1·pinned Swagger UI)
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
 - `POST /v1/auth/password`

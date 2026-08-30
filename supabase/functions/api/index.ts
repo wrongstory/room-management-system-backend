@@ -1,4 +1,16 @@
 import {
+  changeAccountRole,
+  changeAccountStatus,
+  changePassword,
+  createAccount,
+  listAccounts,
+  login,
+  profileIdFromPath,
+  resetAccountPassword,
+  unlockAccount,
+} from "../_shared/account-api.ts";
+import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
+import {
   authenticate,
   cors,
   createEdgeClients,
@@ -40,10 +52,104 @@ Deno.serve(async (request) => {
       );
     }
 
+    if (request.method === "GET" && path === "/openapi.json") {
+      return openApiResponse(corsHeaders);
+    }
+    if (request.method === "GET" && path === "/docs") {
+      return swaggerUiResponse(corsHeaders);
+    }
+
     const clients = createEdgeClients();
+    if (request.method === "POST" && path === "/v1/auth/login") {
+      return jsonResponse(await login(request, clients), 200, corsHeaders);
+    }
+
     const actor = await authenticate(request, clients);
     if (request.method === "GET" && path === "/v1/auth/me") {
       return jsonResponse({ user: actor }, 200, corsHeaders);
+    }
+    if (request.method === "POST" && path === "/v1/auth/password") {
+      await changePassword(request, clients, actor);
+      return new Response(null, {
+        status: 204,
+        headers: { "cache-control": "no-store", ...corsHeaders },
+      });
+    }
+
+    if (request.method === "GET" && path === "/v1/accounts") {
+      return jsonResponse(
+        { accounts: await listAccounts(clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && path === "/v1/accounts") {
+      return jsonResponse(
+        await createAccount(request, clients, actor),
+        201,
+        corsHeaders,
+      );
+    }
+
+    const roleProfileId = profileIdFromPath(path, "role");
+    if (request.method === "PATCH" && roleProfileId) {
+      return jsonResponse(
+        {
+          account: await changeAccountRole(
+            request,
+            clients,
+            actor,
+            roleProfileId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    const statusProfileId = profileIdFromPath(path, "status");
+    if (request.method === "PATCH" && statusProfileId) {
+      return jsonResponse(
+        {
+          account: await changeAccountStatus(
+            request,
+            clients,
+            actor,
+            statusProfileId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    const unlockProfileId = profileIdFromPath(path, "unlock");
+    if (request.method === "POST" && unlockProfileId) {
+      return jsonResponse(
+        {
+          account: await unlockAccount(
+            request,
+            clients,
+            actor,
+            unlockProfileId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    const resetProfileId = profileIdFromPath(path, "password-reset");
+    if (request.method === "POST" && resetProfileId) {
+      return jsonResponse(
+        {
+          account: await resetAccountPassword(
+            request,
+            clients,
+            actor,
+            resetProfileId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
     }
 
     if (request.method === "GET" && path === "/v1/rooms") {

@@ -51,6 +51,8 @@
 
 모든 변경 요청에는 재시도 중복을 막는 `Idempotency-Key`가 필요하다.
 
+Fastify와 Supabase Edge adapter는 아래 경로, 정상 응답, 오류 code를 동일하게 유지한다. Edge 로그인은 짧게 재생성될 수 있는 Function instance의 메모리 대신 PostgreSQL의 service-role 전용 fixed window를 사용하고, alias 조회 전에 정규화 ID의 HMAC key로 제한을 소비한다. 요청 본문, 비밀번호, 휴대전화 원문, bearer/refresh token은 로그나 감사 payload에 남기지 않는다.
+
 | 메서드 | 경로 | 기능 |
 |---|---|---|
 | `GET` | `/v1/accounts` | 계정 목록, 휴대전화 마지막 4자리만 반환 |
@@ -60,7 +62,13 @@
 | `POST` | `/v1/accounts/:profileId/unlock` | 실패 횟수와 잠금 초기화 |
 | `POST` | `/v1/accounts/:profileId/password-reset` | 마지막 4자리로 초기화하고 변경 강제 |
 
-Auth 사용자 생성 뒤 프로필 RPC가 실패하면 서버는 새 Auth 사용자를 삭제해 보상한다. 동일한 계정 생성 멱등성 키는 정규화된 이름·역할·휴대전화 HMAC이 모두 같은 재시도에만 기존 결과를 반환하며, 하나라도 다르면 `409 IDEMPOTENCY_KEY_REUSED`로 거절한다. 프로필·alias·감사 이벤트는 한 DB 트랜잭션에서 커밋한다. 역할·상태·잠금·비밀번호 초기화는 실행 관리자, 시각, 전후 상태, 통제 사유, 멱등성 키를 감사 이벤트에 남긴다.
+전체 계약은 Edge Function의 `GET /openapi.json`에서 기계 판독 형식으로 제공하고 `GET /docs`의 Swagger UI에서 확인한다. Swagger UI의 Authorize 값은 저장하지 않으며 developer 생성·승격 endpoint는 제공하지 않는다.
+
+별도 custom logout endpoint는 만들지 않는다. 웹·Python 클라이언트는 Supabase Auth 표준 `signOut({ scope: 'local' })`로 현재 세션을 폐기하고 로컬 access/refresh token을 즉시 삭제한다. 관리 명령으로 이미 폐기된 세션은 보호 API의 `is_active_auth_session` 재검증에서 거부한다.
+
+토큰 갱신도 별도 custom endpoint 없이 Supabase Auth 표준 `refreshSession()`을 사용한다. 갱신된 access token이 있더라도 이후 보호 API는 Auth 사용자, 최신 active profile, DB의 active session을 다시 검증하므로 role/status 변경이나 세션 폐기를 우회하지 못한다.
+
+Auth 사용자 생성 뒤 프로필 RPC가 실패하면 서버는 새 Auth 사용자를 삭제해 보상한다. 계정 생성 보상 삭제나 역할 변경의 Auth rollback까지 실패하면 성공처럼 처리하지 않고 `ACCOUNT_AUTH_STATE_INCONSISTENT`를 반환해 운영 확인이 필요함을 알린다. 동일한 계정 생성 멱등성 키는 정규화된 이름·역할·휴대전화 HMAC이 모두 같은 재시도에만 기존 결과를 반환하며, 하나라도 다르면 `409 IDEMPOTENCY_KEY_REUSED`로 거절한다. 프로필·alias·감사 이벤트는 한 DB 트랜잭션에서 커밋한다. 역할·상태·잠금·비밀번호 초기화는 실행 관리자, 시각, 전후 상태, 통제 사유, 멱등성 키를 감사 이벤트에 남긴다.
 
 상태 변경은 DB의 마지막 활성 관리자·허용 전이 검증과 세션 폐기를 먼저 커밋한 뒤 Auth ban을 동기화한다. 따라서 거부된 전이가 Auth 계정을 먼저 잠그지 않는다. DB 커밋 뒤 Auth 동기화가 실패하면 `ACCOUNT_AUTH_STATE_INCONSISTENT`를 반환하며, 운영자는 같은 `Idempotency-Key`로 재시도해 Auth 상태를 reconcile한다. 권한 판정은 항상 최신 DB 프로필을 사용하므로 동기화 대기 중 비활성 계정의 업무 접근은 허용되지 않는다.
 

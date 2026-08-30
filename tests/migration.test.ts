@@ -53,6 +53,11 @@ const developerContractMigrationUrl = new URL(
   import.meta.url
 );
 
+const edgeLoginRateLimitMigrationUrl = new URL(
+  '../supabase/migrations/20260830015035_edge_login_rate_limit.sql',
+  import.meta.url
+);
+
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
     const sql = await readFile(initialMigrationUrl, 'utf8');
@@ -179,6 +184,18 @@ describe('initial migration contract', () => {
     expect(contractSql).toContain('from service_role');
     expect(contractSql).toContain('to service_role');
     expect(contractSql).not.toContain('grant execute on function public.bootstrap_first_admin_profile');
+  });
+
+  it('stores Edge login throttling in a service-only durable fixed window', async () => {
+    const sql = await readFile(edgeLoginRateLimitMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.login_rate_limit_windows');
+    expect(sql).toContain('create function public.consume_login_rate_limit(');
+    expect(sql).toContain('on conflict (key_hash) do update');
+    expect(sql).toContain('allowed := v_attempt_count <= p_limit');
+    expect(sql).toContain('retry_after_seconds := case');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
   });
 
   it('hardens cross-table cleaning and payroll integrity', async () => {
