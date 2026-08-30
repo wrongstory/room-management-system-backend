@@ -2,6 +2,16 @@ node_modules/
 dist/
 coverage/
 .tmp/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tools/backend-console/config.json
+tools/backend-console/build/
+tools/backend-console/dist/
+tools/backend-console/*.spec
 .env
 .env.*
 !.env.example
