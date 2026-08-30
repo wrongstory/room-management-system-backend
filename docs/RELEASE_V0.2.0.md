@@ -4,9 +4,12 @@
 
 - release candidate: `release/v0.2.0`
 - 최초 기준 commit: `dev@4da80cb2ddcb5de2f5b3dd5bd41354b80a3f7ae5`
+- 최신 통합 기준 commit: `dev@2a73c1b76b89e54f6325bff22effae32bb790df1`
 - 운영 project: `aodikrxcczbogjpsjwjt`
 - recovery project: `matalcofimnhuzslfhdd`
 - 상태 추적: GitHub Issue #24
+
+최신 release candidate에는 프런트 정본 갱신(#41), singleton developer 계층(#39), Supabase Edge runtime PoC(#37), Edge 계정 관리·Swagger source(#45)가 포함된다. `release/v0.2.0 → main` 병합은 **운영 배포 가능한 승인된 source 확정**만 뜻하며, 운영 migration·Edge 배포·runtime 채택·`v0.2.0` 발행 완료를 뜻하지 않는다.
 
 이 문서는 운영 자격증명이나 SQL 결과 데이터를 저장하지 않는다. 실제 적용은 `main` 병합 뒤 Supabase MCP를 통해 수행하고, 각 단계의 성공 여부만 Issue #24에 기록한다.
 
@@ -40,15 +43,20 @@
 
 적용 도중 실패하면 뒤 migration을 실행하지 않는다. 성공한 migration과 원격 객체 상태를 읽기 전용으로 확인하고, destructive down migration이나 history 조작 없이 새 append-only forward-fix migration을 만든다.
 
-## 적용 전 gate
+## follow-up main 병합 전 source 승인 gate
 
 - release PR의 `application`과 `migration` required checks PASS
-- local fresh reset, application 60 tests, DB 126 tests, 예약 동시성, DB lint PASS
-- 독립 리뷰 P0/P1 0
-- 운영 Security Advisor 차단사항 0
-- 예약 PII key/version/keyring, guest-name pepper가 production Function Secrets에 존재
-- 운영 DB에 활성 관리자 계정이 있고 그 profile ID가 scheduler actor secret으로 설정됨
-- Issue #36 Edge API/Auth/rooms/scheduler PoC의 운영 smoke와 독립 리뷰 통과
+- fresh local DB에 전체 17개 migration 재적용, DB/RLS 169 tests, 예약·계정·로그인 동시성 PASS
+- application lint/type/test/build 80 tests와 Edge format/type/unit 15 tests PASS
+- PR #45 최신 head 독립 리뷰 P0/P1 0
+- follow-up release PR 최신 head 독립 리뷰 P0/P1 0
+- 운영 Security Advisor의 source/DDL 차단사항 0
+- `main..release/v0.2.0` content diff가 #42 source와 신규 migration 3건으로 제한되고 이후 미완성 기능이나 비밀정보가 없음
+- 운영 적용 순서, 실패 시 중단·append-only forward-fix, Fastify rollback 기준이 문서화됨
+
+Issue #36의 Edge 운영 smoke는 source 승인 gate의 선행조건이 아니다. Issue #36은 아래 운영 smoke가 끝날 때까지 열린 상태로 유지한다.
+
+운영 Security Advisor의 `Leaked Password Protection Disabled` WARN은 Supabase Pro 이상에서만 활성화 가능한 기능으로, Free Plan 고정 정책에서는 해소할 수 없는 알려진 플랫폼 제한이다. 이 항목은 source/DDL 차단사항으로 분류하지 않되 강제 초기 비밀번호 변경, 계정 잠금, durable 로그인 limiter를 유지하고 운영 기록에 남긴다.
 
 ## 적용 후 smoke
 
@@ -56,12 +64,12 @@
 - notification recipient의 `read_at` UPDATE 허용, `resolved_at` UPDATE 거부
 - 예약·객실 command 함수와 가능일 command 함수 존재 및 service-role 외 실행 권한 차단
 - 운영 migration 목록에 위 3개 이름이 순서대로 존재
-- Security Advisor 차단사항 0, Performance Advisor는 ERROR/WARN을 차단하고 초기 unused-index INFO는 기록만 유지
+- Security Advisor의 source/DDL 차단사항 0. Free Plan의 leaked-password protection WARN은 알려진 제한으로 기록하고, Performance Advisor는 ERROR/WARN을 차단하며 초기 unused-index/FK-index INFO는 기록만 유지
 - Edge `api/health`, 실제 관리자 Auth/rooms, Cron scheduler HTTP smoke를 통과하지 못하면 배포 완료로 표현하지 않음
 
 ## #42 follow-up source와 운영 적용
 
-위 3건은 최초 `main@c25e234` 이후 운영에 적용 완료된 기존 기록이다. Issue #42의 Edge 인증·계정 관리 API는 일반 작업 브랜치에서 `dev`로 병합한 뒤 `release/v0.2.0`을 다시 동기화하고 별도 follow-up release PR로 `main`에 승격한다. 이 source가 `main`에 도달하기 전에는 production Edge Function을 배포하거나 아래 신규 migration을 운영에 적용하지 않는다.
+위 3건은 최초 `main@c25e234` 이후 운영에 적용 완료된 기존 기록이다. Issue #42의 Edge 인증·계정 관리 API는 `dev@2a73c1b`에 병합됐고 follow-up release PR을 통해 `main` 승격을 기다린다. 이 source가 `main`에 도달하기 전에는 production Edge Function을 배포하거나 아래 신규 migration을 운영에 적용하지 않는다.
 
 1. `20260830015035_edge_login_rate_limit.sql`
    - 로그인 alias 조회보다 앞선 durable fixed-window 저장소 기반

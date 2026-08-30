@@ -4,6 +4,8 @@
 
 월 비용 `$0`을 우선해 Fastify production process를 Supabase Edge Functions와 Cron으로 대체할 수 있는지 검증한다. 이 문서와 `supabase/functions/` 코드는 Issue #36의 PoC이며, 운영 smoke와 독립 리뷰가 끝나기 전에는 Fastify를 제거하거나 production runtime 전환이 완료됐다고 간주하지 않는다.
 
+PoC source의 `dev` 병합 조건은 최신 head 독립 리뷰 P0/P1 0과 required CI PASS다. 운영 smoke는 `dev` 병합 선행조건이 아니라 `release → main` 뒤 운영 migration과 계정·secret 준비를 마친 다음 수행하는 runtime 채택 조건이다. 따라서 source가 병합돼도 Issue #36은 운영 smoke가 완료될 때까지 닫지 않으며 기존 Fastify를 rollback 기준선으로 유지한다.
+
 ```text
 Frontend
   └─ Edge Function api
