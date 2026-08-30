@@ -44,6 +44,7 @@ export function requiredEnv(name: string): string {
 export function createEdgeClients(): {
   admin: SupabaseClient;
   publicClient: SupabaseClient;
+  forAccessToken: (accessToken: string) => SupabaseClient;
 } {
   const url = requiredEnv("SUPABASE_URL");
   const anonKey = requiredEnv("SUPABASE_ANON_KEY");
@@ -57,6 +58,11 @@ export function createEdgeClients(): {
   return {
     admin: createClient(url, serviceRoleKey, { auth }),
     publicClient: createClient(url, anonKey, { auth }),
+    forAccessToken: (accessToken: string) =>
+      createClient(url, anonKey, {
+        auth,
+        global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      }),
   };
 }
 
@@ -170,6 +176,16 @@ export function requireDeveloper(actor: EdgeActor): void {
       403,
       "DEVELOPER_REQUIRED",
       "최상위 개발자만 접근할 수 있습니다.",
+    );
+  }
+}
+
+export function requirePasswordChanged(actor: EdgeActor): void {
+  if (actor.mustChangePassword) {
+    throw new EdgeError(
+      403,
+      "PASSWORD_CHANGE_REQUIRED",
+      "계속하려면 먼저 임시 비밀번호를 변경해 주세요.",
     );
   }
 }

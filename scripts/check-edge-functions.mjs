@@ -4,6 +4,7 @@ const image = 'denoland/deno:2.1.4@sha256:3bf75873714baa410dcf7fabaf76d806d20f0a
 const sourcePaths = [
   'supabase/functions/_shared/runtime.ts',
   'supabase/functions/_shared/account-api.ts',
+  'supabase/functions/_shared/availability-api.ts',
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/openapi.ts',
   'supabase/functions/_shared/room-api.ts',
@@ -12,6 +13,7 @@ const sourcePaths = [
 ];
 const testPaths = [
   'supabase/functions/_shared/account-api.deno.ts',
+  'supabase/functions/_shared/availability-api.deno.ts',
   'supabase/functions/_shared/developer-api.deno.ts',
   'supabase/functions/_shared/openapi.deno.ts',
   'supabase/functions/_shared/room-api.deno.ts'

@@ -28,7 +28,7 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. #43 developer operation path와 #51~#53의 가능일·예약·객실 상세/mutation은 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
+production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. source에는 #43 developer operation과 #51 가능일 path가 추가됐지만, #51~#53의 가능일·예약·객실 상세/mutation은 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
 
 ## 2. 로컬 백엔드 준비
 
@@ -92,7 +92,7 @@ Python 운영도구도 같은 OpenAPI JSON을 저장소에 복사해 수동 모�
 3. 앱 시작·새로고침·세션 복구 뒤 `GET /v1/auth/me`를 호출해 최신 role/status/session을 다시 확인한다.
 4. token 갱신은 Supabase Auth 표준 refresh session 계약을 사용한다. refresh token을 custom API request body에 보내지 않는다.
 
-`user.mustChangePassword=true`이면 비밀번호 변경 화면 외 일반 계정·객실 화면을 막는다. `POST /v1/auth/password` 성공은 `204 No Content`이므로 JSON 파싱을 시도하지 말고 `/v1/auth/me`를 다시 조회한다.
+`user.mustChangePassword=true`이면 비밀번호 변경 화면 외 일반 계정·객실·가능일 화면을 막는다. `POST /v1/auth/password` 성공은 `204 No Content`이므로 JSON 파싱을 시도하지 말고 `/v1/auth/me`를 다시 조회한다.
 
 ### 멱등성
 
@@ -111,7 +111,7 @@ const idempotencyKey = crypto.randomUUID();
 
 ### 응답과 오류
 
-- 인증·계정·객실 응답은 `Cache-Control: no-store`다.
+- 인증·계정·객실·가능일 응답은 `Cache-Control: no-store`다.
 - 성공 본문이 없는 `204`를 별도로 처리한다.
 - 오류는 `{ error: { code, message }, requestId }` 형식이다.
 - 분기는 HTTP status와 `error.code`를 사용한다. 한국어 `message` 문자열 비교는 금지한다.
@@ -129,14 +129,17 @@ const idempotencyKey = crypto.randomUUID();
 | 동시 변경/업무 충돌 | `IDEMPOTENCY_KEY_REUSED`, `LAST_ACTIVE_ADMIN_REQUIRED` 등 409 | 최신 목록 재조회 후 사용자 확인 |
 | 서버 상태 불일치 | `ACCOUNT_AUTH_STATE_INCONSISTENT`, `PASSWORD_STATE_INCONSISTENT` | 자동 성공 처리 금지, requestId로 운영 확인 |
 | 진단 요청 과다 | `DIAGNOSTICS_RATE_LIMITED` | `Retry-After` 뒤 사용자가 다시 실행 |
+| 가능일 제출 시간 아님 | `OUTSIDE_AVAILABILITY_WINDOW` | KST 일요일 12:00–23:59 안내, 클라이언트 시각으로 우회 금지 |
+| 가능일 동시 변경 | `STALE_VERSION` | 현재 가능일·요청 목록을 다시 조회하고 expectedVersion 갱신 |
+| 처리 중 변경 요청 존재 | `PENDING_CHANGE_REQUEST_EXISTS` | 기존 pending 요청을 표시하고 중복 요청 금지 |
 
 ## 5. 역할별 화면 경계
 
-| 역할 | `/auth/me` | 계정 목록·변경 | developer 운영 상태 | 전체 객실 목록 |
-|---|---:|---:|---:|---:|
-| `developer` | 허용 | 허용 | 허용 | 금지 |
-| `admin` | 허용 | 허용 | 금지 | 허용 |
-| `maid` | 허용 | 금지 | 금지 | 금지 |
+| 역할 | `/auth/me` | 계정 목록·변경 | developer 운영 상태 | 전체 객실 목록 | 가능일 조회 | 가능일 제출·요청 | 가능일 결정·후보 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `developer` | 허용 | 허용 | 허용 | 금지 | 금지 | 금지 | 금지 |
+| `admin` | 허용 | 허용 | 금지 | 허용 | 전체 허용 | 금지 | 허용 |
+| `maid` | 허용 | 금지 | 금지 | 금지 | 본인만 | 허용 | 금지 |
 
 - `developer`는 최상위 백엔드·계정 운영자이며 business admin이 아니다.
 - 계정 생성·역할 변경 입력에는 `admin | maid`만 사용한다.
@@ -163,8 +166,16 @@ const idempotencyKey = crypto.randomUUID();
 | 운영 감사 | `GET /v1/developer/audit-events` | 최대 31일·100건 cursor pagination, raw state 없음 |
 | 운영 진단 | `POST /v1/developer/diagnostics` | body 없음, 임의 URL/SQL/RPC 입력 없음, 10회/분 |
 | 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 독립 상태 축 사용 |
+| 현재 가능일 | `GET /v1/availability?weekStart=...` | maid는 본인만, admin은 maidProfileId 선택 가능 |
+| 가능일 제출 | `POST /v1/availability/submissions` | maid만, KST 일요일 제출창·CAS·Idempotency-Key |
+| 마감 후 변경 요청 | `POST /v1/availability/change-requests` | maid만, pending 1건·이력 보존 |
+| 변경 요청 목록 | `GET /v1/availability/change-requests` | maid 본인만, admin은 status/weekStart/maid 필터 |
+| 변경 요청 결정 | `POST /v1/availability/change-requests/{requestId}/decision` | active admin만, 승인 시 새 version 생성 |
+| 배정 가능 후보 | `GET /v1/availability/candidates?workDate=...` | active admin만, 현재 가능일의 active maid |
 
 객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다.
+
+가능일의 `weekStart`와 날짜는 `YYYY-MM-DD`로 보내며 client timezone으로 날짜를 다시 변환하지 않는다. `version`은 화면 로컬 카운터가 아니라 서버 응답값을 그대로 다음 `expectedVersion`에 사용한다. 제출 가능 시간과 마감 전/후 구분은 서버의 KST 판정을 따르고, 409를 받은 요청을 다른 Idempotency-Key로 자동 반복하지 않는다.
 
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
 
@@ -193,4 +204,4 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 
 ## 9. 현재 범위 제한
 
-현재 source Swagger 범위는 인증·계정·developer 운영 projection·전체 객실 목록이다. 예약·가능일 Fastify API가 저장소에 존재하더라도 Edge OpenAPI에 없는 route는 Supabase-only production endpoint로 가정하지 않는다. 각 환경에서 내려받은 OpenAPI에 없는 #43 path를 production에 이미 배포됐다고 가정하지 않으며, feature → dev → release → main 승격과 Edge 재배포 뒤에만 활성화한다.
+현재 source Swagger 범위는 인증·계정·developer 운영 projection·전체 객실 목록·주간 가능일이다. 예약과 객실 상세/mutation Fastify API가 저장소에 존재하더라도 Edge OpenAPI에 없는 route는 Supabase-only production endpoint로 가정하지 않는다. source OpenAPI에 가능일이 추가됐어도 production Edge와 GitHub Pages snapshot은 release → main 승격, Edge 재배포, hosted role smoke가 끝날 때까지 활성화하지 않는다.

@@ -1,4 +1,13 @@
 import {
+  availabilityDecisionRequestId,
+  decideAvailabilityChange,
+  listAvailability,
+  listAvailabilityCandidates,
+  listAvailabilityChangeRequests,
+  requestAvailabilityChange,
+  submitAvailability,
+} from "../_shared/availability-api.ts";
+import {
   changeAccountRole,
   changeAccountStatus,
   changePassword,
@@ -29,6 +38,7 @@ import {
   requestId,
   requireBusinessAdmin,
   requireDeveloper,
+  requirePasswordChanged,
 } from "../_shared/runtime.ts";
 
 function routePath(url: string): string {
@@ -211,14 +221,93 @@ Deno.serve(async (request) => {
       );
     }
 
+    if (request.method === "GET" && path === "/v1/availability") {
+      return jsonResponse(
+        { availability: await listAvailability(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path === "/v1/availability/submissions"
+    ) {
+      return jsonResponse(
+        { availability: await submitAvailability(request, clients, actor) },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path === "/v1/availability/change-requests"
+    ) {
+      return jsonResponse(
+        {
+          changeRequest: await requestAvailabilityChange(
+            request,
+            clients,
+            actor,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "GET" &&
+      path === "/v1/availability/change-requests"
+    ) {
+      return jsonResponse(
+        {
+          changeRequests: await listAvailabilityChangeRequests(
+            request,
+            clients,
+            actor,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/availability/change-requests/") &&
+      path.endsWith("/decision")
+    ) {
+      const changeRequestId = availabilityDecisionRequestId(path);
+      return jsonResponse(
+        {
+          changeRequest: await decideAvailabilityChange(
+            request,
+            clients,
+            actor,
+            changeRequestId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "GET" &&
+      path === "/v1/availability/candidates"
+    ) {
+      return jsonResponse(
+        {
+          candidates: await listAvailabilityCandidates(
+            request,
+            clients,
+            actor,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+
     if (request.method === "GET" && path === "/v1/rooms") {
-      if (actor.mustChangePassword) {
-        throw new EdgeError(
-          403,
-          "PASSWORD_CHANGE_REQUIRED",
-          "계속하려면 먼저 임시 비밀번호를 변경해 주세요.",
-        );
-      }
+      requirePasswordChanged(actor);
       requireBusinessAdmin(actor);
       const { data, error } = await clients.admin.rpc(
         "get_room_operational_projection",

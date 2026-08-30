@@ -50,6 +50,29 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     serialized.includes('"/v1/developer/diagnostics"'),
     "developer diagnostics must be published",
   );
+  for (
+    const path of [
+      "/v1/availability",
+      "/v1/availability/submissions",
+      "/v1/availability/change-requests",
+      "/v1/availability/change-requests/{requestId}/decision",
+      "/v1/availability/candidates",
+    ]
+  ) {
+    assert(serialized.includes(`"${path}"`), `${path} must be published`);
+  }
+  assert(
+    serialized.includes('"#/components/schemas/AvailabilityVersion"') &&
+      serialized.includes(
+        '"#/components/schemas/AvailabilityChangeRequest"',
+      ),
+    "availability codegen schemas must be reusable",
+  );
+  assert(
+    serialized.includes('"OUTSIDE_AVAILABILITY_WINDOW"') &&
+      serialized.includes('"STALE_VERSION"'),
+    "availability KST and CAS errors must be documented",
+  );
   assert(
     !serialized.includes('"before_state"') &&
       !serialized.includes('"after_state"'),
