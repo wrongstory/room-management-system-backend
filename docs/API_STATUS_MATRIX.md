@@ -56,7 +56,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 최종 확인: **2026-08-30 KST**
 
 - 운영 승인 source: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
-- 현재 `dev`: `02d5089ead35f10485bac58011d617682312e863`
+- PR #50 통합 기준 `dev`: `ce2d1374b6eaf3416ad295f7d494a93840ccaba4` — 이 문서의 최초 정본 병합본
 - PR #48 / #43 developer 운영 API: `dev` 병합 완료, production 미반영
 - 운영 migration: **17건**
 - 운영 Edge Functions:
@@ -67,7 +67,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 - business admin: 아직 생성하지 않음
 - scheduler actor/invoke secret: 아직 미설정, `reservation-scheduler` 503 fail-closed가 정상
 - production `/docs`: HTTP route는 존재하고 200이지만 Supabase hosted 기본 domain에서 HTML이 브라우저 Swagger UI로 렌더링되지 않아 사람용 운영 문서로는 사용 제한
-- PR #50 GitHub Pages 읽기 전용 Swagger 포털: 독립 리뷰 P0/P1=0, 아직 `dev` 미병합/Pages 미배포
+- PR #50 GitHub Pages 읽기 전용 Swagger 포털: source·독립 보안/배포 리뷰 완료, production Pages 미배포
 
 ## 3. System / 문서 API
 
@@ -75,8 +75,18 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 |---|---|---|---|---|---|---|---|---|
 | [x] | `GET /health` | public | — | ✅ | ✅ | ✅ | ✅ | production HTTP 200 확인 |
 | [x] | `GET /openapi.json` | public | — | — | ✅ | ✅ | ✅ | production HTTP 계약 정본 |
-| [ ] | `GET /docs` | public | — | — | ✅ | ✅ | ⚠️ | route/200은 존재. hosted domain 브라우저 Swagger UI 사용 불가; PR #50 대기 |
-| [ ] | GitHub Pages Swagger portal | public read-only | — | — | 🟡 | ❌ | ❌ | PR #50 `bf2fd53`, P0/P1=0. `main` 승격 후 Pages deploy/smoke 필요 |
+| [ ] | `GET /docs` | public | — | — | ✅ | ✅ | ⚠️ | route/200은 존재. hosted domain 브라우저 Swagger UI 사용 불가 |
+| [ ] | GitHub Pages Swagger portal | public read-only | — | — | — | — | ❌ | 별도 정적 배포 source·리뷰 완료. `main` 승격 후 Pages deploy/smoke 필요 |
+
+GitHub Pages 포털은 Supabase Edge Function이 아닌 별도 정적 배포다. 따라서 위 행의 `Edge source`와 `Production Edge`는 `—`로 두고, source 완료와 production Pages 배포 완료를 비고와 아래 배포 gate에서 구분한다.
+
+### GitHub Pages Swagger 배포 gate — #49 / PR #50
+
+- [x] 읽기 전용 portal source·build 검증 완료
+- [x] SSRF 경계, CSP/SRI, Try-it-out·Authorization 차단, Pages 최소 권한 독립 리뷰 완료
+- [ ] 승인된 source의 `main` 승격
+- [ ] GitHub Pages workflow 실행
+- [ ] 공개 portal과 same-origin OpenAPI snapshot HTTP smoke
 
 ## 4. Auth API
 
@@ -218,7 +228,7 @@ production completeness 기준의 정본 순서다.
 3. [ ] **#44 Python 운영도구 Phase A** — #51과 병행 가능
 4. [ ] #52 Reservation Edge parity (P1)
 5. [ ] #53 Room detail/mutation Edge parity (P1)
-6. [ ] PR #50 GitHub Pages Swagger portal `dev` 병합 — parity와 병행 가능
+6. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능
 7. [ ] 최신 source를 `release/v0.2.0 → main`으로 승격
 8. [ ] 필요한 신규 migration 순차 적용
 9. [ ] `api`와 `reservation-scheduler`를 승인된 `main` source로 재배포
