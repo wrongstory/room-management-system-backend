@@ -148,7 +148,7 @@ erDiagram
 - 메이드별 주급과 지급 상태
 - 역할별 알림함과 푸시 구독
 
-Edge `/v1/rooms`는 DB RPC의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase `RoomProjection`으로 변환한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
+Edge `/v1/rooms`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 
 developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migration version이 아니라 안정적인 Git migration name으로 source head를 찾은 뒤 실제 원격 순서를 `ahead | equal | behind | unknown`으로 정규화한다. public base table RLS 누락 수와 allowlist RPC 상태만 제공하며, critical RPC는 exact signature와 `service_role` 전용 EXECUTE 경계를 모두 만족해야 정상이다. scheduler 상태는 Cron SQL·Vault·`pg_net` 응답 본문 대신 정규화된 Cron metadata와 `private.scheduler_invocation_heartbeats` projection을 사용한다. 감사 조회는 최대 31일·100건 cursor pagination이고 raw `before_state`/`after_state`를 노출하지 않는다. diagnostics는 임의 URL·SQL·RPC 이름을 받지 않으며 durable 10회/분 제한을 적용한다.
 

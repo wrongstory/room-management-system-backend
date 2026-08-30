@@ -53,11 +53,12 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-최종 확인: **2026-08-30 KST**
+최종 확인: **2026-08-31 KST**
 
 - 운영 승인 source: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
-- PR #50 통합 기준 `dev`: `ce2d1374b6eaf3416ad295f7d494a93840ccaba4` — 이 문서의 최초 정본 병합본
+- #51 작업 시작 기준 `dev`: `33b3884ed4483f3590dfdb5d35a1da5cbbde0791` — PR #50 Pages source 병합 완료
 - PR #48 / #43 developer 운영 API: `dev` 병합 완료, production 미반영
+- #51 Availability Edge parity: route·RLS read adapter·OpenAPI source를 이 변경에 포함, production 미반영
 - 운영 migration: **17건**
 - 운영 Edge Functions:
   - `api` version 2 — ACTIVE
@@ -157,20 +158,20 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [ ] | `GET /v1/availability?weekStart=...` | maid / admin | ✅ | ✅ | ❌ | ❌ | ❌ | #51, maid는 본인 데이터만 |
-| [ ] | `POST /v1/availability/submissions` | maid | ✅ | ✅ | ❌ | ❌ | ❌ | #51, `submit_weekly_availability` |
-| [ ] | `POST /v1/availability/change-requests` | maid | ✅ | ✅ | ❌ | ❌ | ❌ | #51, 마감 후 변경 요청 |
-| [ ] | `GET /v1/availability/change-requests` | maid / admin | ✅ | ✅ | ❌ | ❌ | ❌ | #51, maid는 본인 요청만 |
-| [ ] | `POST /v1/availability/change-requests/{requestId}/decision` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #51, 승인/반려 |
-| [ ] | `GET /v1/availability/candidates?workDate=...` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #51, 배정 후보 조회 |
+| [ ] | `GET /v1/availability?weekStart=...` | maid / admin | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, maid는 본인 데이터만 |
+| [ ] | `POST /v1/availability/submissions` | maid | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, `submit_weekly_availability` |
+| [ ] | `POST /v1/availability/change-requests` | maid | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, 마감 후 변경 요청 |
+| [ ] | `GET /v1/availability/change-requests` | maid / admin | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, maid는 본인 요청만 |
+| [ ] | `POST /v1/availability/change-requests/{requestId}/decision` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, 승인/반려 |
+| [ ] | `GET /v1/availability/candidates?workDate=...` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, 배정 후보 조회 |
 
 ### #51 완료 조건
 
-- [ ] Fastify 계약과 동일한 validation/error code/camelCase projection
-- [ ] maid self-only / admin exact-role / developer 차단 회귀
-- [ ] must-change/inactive/revoked/upload-only 차단
-- [ ] KST 제출창, CAS version, Idempotency-Key 계약 유지
-- [ ] OpenAPI/Swagger/codegen 갱신
+- [x] Fastify 계약과 동일한 validation/error code/camelCase projection
+- [x] maid self-only / admin exact-role / developer 차단 회귀
+- [x] must-change/inactive/revoked/upload-only 차단
+- [x] KST 제출창, CAS version, Idempotency-Key 계약 유지
+- [x] OpenAPI/Swagger/codegen 갱신
 - [ ] Edge Deno tests + required CI + 독립 리뷰 P0/P1=0
 - [ ] `dev → release → main`
 - [ ] production `api` 재배포 및 maid/admin/developer hosted HTTP smoke

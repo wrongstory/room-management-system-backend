@@ -5,6 +5,10 @@ const configUrl = new URL('../supabase/config.toml', import.meta.url);
 const apiUrl = new URL('../supabase/functions/api/index.ts', import.meta.url);
 const runtimeUrl = new URL('../supabase/functions/_shared/runtime.ts', import.meta.url);
 const accountApiUrl = new URL('../supabase/functions/_shared/account-api.ts', import.meta.url);
+const availabilityApiUrl = new URL(
+  '../supabase/functions/_shared/availability-api.ts',
+  import.meta.url
+);
 const developerApiUrl = new URL('../supabase/functions/_shared/developer-api.ts', import.meta.url);
 const openApiUrl = new URL('../supabase/functions/_shared/openapi.ts', import.meta.url);
 const fastifyPasswordUrl = new URL('../src/modules/auth/password.ts', import.meta.url);
@@ -183,6 +187,35 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(migration).toContain('to service_role');
     expect(openApi).toContain('DeveloperAuditPage');
     expect(openApi).toContain('DIAGNOSTICS_RATE_LIMITED');
+  });
+
+  it('ports weekly availability through authenticated RLS reads and actor-bound commands', async () => {
+    const [api, runtime, availabilityApi, openApi] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(runtimeUrl, 'utf8'),
+      readFile(availabilityApiUrl, 'utf8'),
+      readFile(openApiUrl, 'utf8')
+    ]);
+
+    expect(runtime).toContain('forAccessToken: (accessToken: string)');
+    expect(runtime).toMatch(/Authorization:\s*`Bearer \$\{accessToken\}`/);
+    expect(api).toContain('path === "/v1/availability"');
+    expect(api).toContain('path === "/v1/availability/submissions"');
+    expect(api).toContain('path === "/v1/availability/change-requests"');
+    expect(api).toContain('path === "/v1/availability/candidates"');
+    expect(api).toContain('availabilityDecisionRequestId(path)');
+    expect(availabilityApi).toContain('clients.forAccessToken(bearerToken(request))');
+    expect(availabilityApi).toContain('"submit_weekly_availability"');
+    expect(availabilityApi).toContain('"request_availability_change"');
+    expect(availabilityApi).toContain('"decide_availability_change"');
+    expect(availabilityApi).toContain('p_actor_profile_id: actor.profileId');
+    expect(availabilityApi).toContain('actor.role !== "maid"');
+    expect(availabilityApi).toContain('requireBusinessAdmin(actor)');
+    expect(availabilityApi).toContain('requirePasswordChanged(actor)');
+    expect(openApi).toContain('operationId: "submitAvailability"');
+    expect(openApi).toContain('AvailabilityChangeRequestInput');
+    expect(openApi).toContain('"OUTSIDE_AVAILABILITY_WINDOW"');
+    expect(openApi).toContain('"STALE_VERSION"');
   });
 
   it('keeps Fastify and Edge password and rate-limit contracts aligned', async () => {

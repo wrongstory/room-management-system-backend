@@ -45,7 +45,7 @@ export const openApiDocument = {
     title: "CASTLE THE ART Room Management API",
     version: "0.2.0",
     description: [
-      "Supabase Edge API의 인증·계정·객실 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
+      "Supabase Edge API의 인증·계정·객실·주간 가능일 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
       "",
       "## 프론트 연동 순서",
       "1. `POST /v1/auth/login`으로 세션 토큰과 `user.mustChangePassword`를 받습니다.",
@@ -57,7 +57,7 @@ export const openApiDocument = {
       "## 역할 경계",
       "- `developer`: 계정 관리만 가능하며 객실 업무는 금지됩니다.",
       "- `admin`: 계정 관리와 객실 업무가 가능합니다.",
-      "- `maid`: 현재 문서 범위의 계정·전체 객실 API는 사용할 수 없습니다.",
+      "- `maid`: 계정·전체 객실 API는 사용할 수 없고 본인의 주간 가능일만 조회·제출·변경 요청할 수 있습니다.",
       "",
       "프론트 구현 절차와 타입 생성 명령은 저장소의 `docs/FRONTEND_API_INTEGRATION.md`를 참고하세요.",
     ].join("\n"),
@@ -93,6 +93,11 @@ export const openApiDocument = {
       name: "Rooms",
       description:
         "비밀번호 변경을 완료한 active business admin 전용 객실 운영 projection입니다. developer는 접근할 수 없습니다.",
+    },
+    {
+      name: "Availability",
+      description:
+        "메이드의 다음 주 가능일 제출·변경 요청과 관리자의 승인·후보 조회 API입니다. 제출창은 일요일 12:00–23:59 KST이며 서버가 DB 시각으로 판정합니다.",
     },
   ],
   paths: {
@@ -529,6 +534,206 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/availability": {
+      get: {
+        tags: ["Availability"],
+        operationId: "listAvailability",
+        summary: "현재 주간 가능일 조회",
+        description:
+          "비밀번호 변경을 완료한 active maid 또는 active business admin 전용입니다. maid는 본인 자료만 조회할 수 있으며, admin만 maidProfileId로 특정 메이드를 선택할 수 있습니다. weekStart는 조회할 주의 월요일 날짜입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid", "admin"],
+        parameters: [
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "대상 주의 월요일(YYYY-MM-DD)",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description:
+              "admin 선택 필터. maid가 다른 profile ID를 전달하면 403입니다.",
+          },
+        ],
+        responses: {
+          "200": availabilityListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability/submissions": {
+      post: {
+        tags: ["Availability"],
+        operationId: "submitAvailability",
+        summary: "다음 주 가능일 제출",
+        description:
+          "비밀번호 변경을 완료한 active maid만 일요일 12:00–23:59 KST에 다음 월요일 주차를 제출할 수 있습니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/AvailabilitySubmissionRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": availabilityItemResponse("가능일 제출 완료"),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability/change-requests": {
+      post: {
+        tags: ["Availability"],
+        operationId: "requestAvailabilityChange",
+        summary: "마감 후 가능일 변경 요청",
+        description:
+          "비밀번호 변경을 완료한 active maid가 제출 마감 후 현재 version의 변경을 요청합니다. 기존 가능일 원장은 보존되고 pending 요청이 append되며, 같은 주차에는 pending 요청 하나만 허용됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/AvailabilityChangeRequestInput",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": availabilityChangeResponse("변경 요청 접수 완료"),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+      get: {
+        tags: ["Availability"],
+        operationId: "listAvailabilityChangeRequests",
+        summary: "가능일 변경 요청 목록 조회",
+        description:
+          "active maid는 본인 요청만, active business admin은 전체 요청을 조회합니다. status·weekStart·maidProfileId 필터는 모두 선택이며 maid가 다른 profile ID를 전달하면 403입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid", "admin"],
+        parameters: [
+          {
+            name: "status",
+            in: "query",
+            schema: {
+              $ref: "#/components/schemas/AvailabilityChangeRequestStatus",
+            },
+            description: "요청 처리 상태 필터",
+          },
+          {
+            name: "weekStart",
+            in: "query",
+            schema: { type: "string", format: "date" },
+            description: "대상 주의 월요일 날짜 필터",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "admin용 메이드 profile 필터",
+          },
+        ],
+        responses: {
+          "200": availabilityChangeListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability/change-requests/{requestId}/decision": {
+      post: {
+        tags: ["Availability"],
+        operationId: "decideAvailabilityChange",
+        summary: "가능일 변경 요청 승인 또는 반려",
+        description:
+          "비밀번호 변경을 완료한 active business admin만 호출합니다. 승인하면 새 가능일 version을 만들고 current pointer를 이동하며, 반려하면 요청 결과만 append합니다. developer는 관리자 권한을 상속하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "requestId",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description: "변경 요청 ID",
+          },
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/AvailabilityDecisionRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": availabilityChangeResponse("변경 요청 결정 완료"),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability/candidates": {
+      get: {
+        tags: ["Availability"],
+        operationId: "listAvailabilityCandidates",
+        summary: "날짜별 배정 가능 메이드 후보 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 해당 날짜가 가능하다고 제출한 현재 version의 active maid만 반환하며 developer와 maid는 조회할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "workDate",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "후보를 조회할 근무 날짜",
+          },
+        ],
+        responses: {
+          "200": availabilityCandidateListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/rooms": {
       get: {
         tags: ["Rooms"],
@@ -651,6 +856,22 @@ export const openApiDocument = {
           "AUTH_PASSWORD_RESET_FAILED",
           "ACCOUNT_AUTH_STATE_INCONSISTENT",
           "ACCOUNT_COMMAND_FAILED",
+          "FORBIDDEN",
+          "MAID_REQUIRED",
+          "AVAILABILITY_ACCESS_REQUIRED",
+          "ACTIVE_MAID_REQUIRED",
+          "ACTIVE_ADMIN_REQUIRED",
+          "OUTSIDE_AVAILABILITY_WINDOW",
+          "CHANGE_REQUEST_BEFORE_DEADLINE",
+          "STALE_VERSION",
+          "PENDING_CHANGE_REQUEST_EXISTS",
+          "INVALID_TRANSITION",
+          "AVAILABILITY_NOT_FOUND",
+          "CHANGE_REQUEST_NOT_FOUND",
+          "WEEK_START_MUST_BE_MONDAY",
+          "AVAILABILITY_DATES_MUST_BE_UNIQUE",
+          "AVAILABILITY_DATE_OUTSIDE_WEEK",
+          "AVAILABILITY_COMMAND_FAILED",
           "ROOM_COMMAND_FAILED",
           "ORIGIN_NOT_ALLOWED",
           "ROUTE_NOT_FOUND",
@@ -1253,6 +1474,224 @@ export const openApiDocument = {
           scheduler: { $ref: "#/components/schemas/DeveloperSchedulerStatus" },
         },
       },
+      AvailabilityDay: {
+        type: "object",
+        additionalProperties: false,
+        required: ["workDate", "available"],
+        properties: {
+          workDate: {
+            type: "string",
+            format: "date",
+            description: "대상 주차의 근무 날짜",
+          },
+          available: {
+            type: "boolean",
+            description: "해당 날짜 근무 가능 여부",
+          },
+        },
+      },
+      AvailabilityVersion: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "maidProfileId",
+          "weekStart",
+          "version",
+          "status",
+          "current",
+          "submittedAt",
+          "days",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          maidProfileId: {
+            type: "string",
+            format: "uuid",
+            description: "가능일을 제출한 메이드 profile ID",
+          },
+          weekStart: {
+            type: "string",
+            format: "date",
+            description: "대상 주의 월요일",
+          },
+          version: {
+            type: "integer",
+            minimum: 1,
+            description: "다음 변경 요청의 expectedVersion으로 사용할 CAS 값",
+          },
+          status: {
+            type: "string",
+            enum: ["submitted", "superseded"],
+            description: "제출 version의 이력 상태",
+          },
+          current: {
+            type: "boolean",
+            description: "해당 메이드·주차의 현재 version 여부",
+          },
+          submittedAt: { type: "string", format: "date-time" },
+          days: {
+            type: "array",
+            minItems: 7,
+            maxItems: 7,
+            items: { $ref: "#/components/schemas/AvailabilityDay" },
+            description: "월요일부터 일요일까지 날짜순 7개 projection",
+          },
+        },
+      },
+      AvailabilityChangeRequestStatus: {
+        type: "string",
+        enum: ["pending", "approved", "rejected"],
+      },
+      AvailabilityChangeRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "availabilityVersionId",
+          "maidProfileId",
+          "weekStart",
+          "sourceVersion",
+          "requestedAvailableDates",
+          "reasonCode",
+          "status",
+          "requestedAt",
+          "decidedBy",
+          "decidedAt",
+          "decisionReasonCode",
+          "approvedVersionId",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          availabilityVersionId: {
+            type: "string",
+            format: "uuid",
+            description: "요청이 기준으로 삼은 가능일 version ID",
+          },
+          maidProfileId: { type: "string", format: "uuid" },
+          weekStart: { type: "string", format: "date" },
+          sourceVersion: {
+            type: "integer",
+            minimum: 1,
+            description: "요청 생성 시점의 CAS version",
+          },
+          requestedAvailableDates: {
+            type: "array",
+            maxItems: 7,
+            uniqueItems: true,
+            items: { type: "string", format: "date" },
+          },
+          reasonCode: {
+            type: "string",
+            pattern: "^[A-Z0-9_]{2,80}$",
+            description: "메이드가 제출한 변경 사유 코드",
+          },
+          status: {
+            $ref: "#/components/schemas/AvailabilityChangeRequestStatus",
+          },
+          requestedAt: { type: "string", format: "date-time" },
+          decidedBy: { type: ["string", "null"], format: "uuid" },
+          decidedAt: { type: ["string", "null"], format: "date-time" },
+          decisionReasonCode: {
+            type: ["string", "null"],
+            pattern: "^[A-Z0-9_]{2,80}$",
+          },
+          approvedVersionId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description: "승인으로 생성된 새 version ID. 반려·대기 중에는 null",
+          },
+        },
+      },
+      AvailabilityCandidate: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "workDate",
+          "weekStart",
+          "availabilityVersion",
+          "maidProfileId",
+          "displayName",
+        ],
+        properties: {
+          workDate: { type: "string", format: "date" },
+          weekStart: { type: "string", format: "date" },
+          availabilityVersion: { type: "integer", minimum: 1 },
+          maidProfileId: { type: "string", format: "uuid" },
+          displayName: {
+            type: "string",
+            description: "현재 메이드 표시 이름",
+          },
+        },
+      },
+      AvailabilitySubmissionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["weekStart", "availableDates", "expectedVersion"],
+        properties: {
+          weekStart: {
+            type: "string",
+            format: "date",
+            description: "다음 주 월요일",
+          },
+          availableDates: {
+            type: "array",
+            maxItems: 7,
+            uniqueItems: true,
+            items: { type: "string", format: "date" },
+            description: "근무 가능한 날짜만 전달. 빈 배열은 전일 불가능",
+          },
+          expectedVersion: {
+            type: "integer",
+            minimum: 0,
+            description: "최초 제출은 0, 재제출은 현재 version",
+          },
+        },
+      },
+      AvailabilityChangeRequestInput: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "weekStart",
+          "requestedAvailableDates",
+          "reasonCode",
+          "expectedVersion",
+        ],
+        properties: {
+          weekStart: { type: "string", format: "date" },
+          requestedAvailableDates: {
+            type: "array",
+            maxItems: 7,
+            uniqueItems: true,
+            items: { type: "string", format: "date" },
+          },
+          reasonCode: {
+            type: "string",
+            pattern: "^[A-Z0-9_]{2,80}$",
+          },
+          expectedVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      AvailabilityDecisionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["decision", "reasonCode", "expectedVersion"],
+        properties: {
+          decision: {
+            type: "string",
+            enum: ["approved", "rejected"],
+          },
+          reasonCode: {
+            type: "string",
+            pattern: "^[A-Z0-9_]{2,80}$",
+          },
+          expectedVersion: {
+            type: "integer",
+            minimum: 1,
+            description: "요청의 sourceVersion과 비교할 CAS 값",
+          },
+        },
+      },
       RoomReasonCode: {
         type: "string",
         enum: [
@@ -1349,6 +1788,97 @@ export const openApiDocument = {
     },
   },
 } as const;
+
+function availabilityListResponse(): Record<string, unknown> {
+  return availabilityArrayResponse(
+    "현재 가능일 version 목록",
+    "availability",
+    "#/components/schemas/AvailabilityVersion",
+  );
+}
+
+function availabilityChangeListResponse(): Record<string, unknown> {
+  return availabilityArrayResponse(
+    "가능일 변경 요청 목록",
+    "changeRequests",
+    "#/components/schemas/AvailabilityChangeRequest",
+  );
+}
+
+function availabilityCandidateListResponse(): Record<string, unknown> {
+  return availabilityArrayResponse(
+    "배정 가능한 active maid 후보 목록",
+    "candidates",
+    "#/components/schemas/AvailabilityCandidate",
+  );
+}
+
+function availabilityArrayResponse(
+  description: string,
+  property: string,
+  itemReference: string,
+): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: [property],
+          properties: {
+            [property]: {
+              type: "array",
+              items: { $ref: itemReference },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function availabilityItemResponse(
+  description: string,
+): Record<string, unknown> {
+  return availabilityObjectResponse(
+    description,
+    "availability",
+    "#/components/schemas/AvailabilityVersion",
+  );
+}
+
+function availabilityChangeResponse(
+  description: string,
+): Record<string, unknown> {
+  return availabilityObjectResponse(
+    description,
+    "changeRequest",
+    "#/components/schemas/AvailabilityChangeRequest",
+  );
+}
+
+function availabilityObjectResponse(
+  description: string,
+  property: string,
+  reference: string,
+): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: [property],
+          properties: { [property]: { $ref: reference } },
+        },
+      },
+    },
+  };
+}
 
 function developerResponse(
   description: string,
