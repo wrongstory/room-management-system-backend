@@ -9,7 +9,7 @@
 - 데이터·인증: Supabase Auth, PostgreSQL 17
 - 사진 파일: Google Drive API, 전용 비공개 폴더
 - 입력 검증: Zod
-- API 계약: OpenAPI 3.1 + pinned Swagger UI + [프론트·Codex 연동 가이드](./FRONTEND_API_INTEGRATION.md)
+- API 계약: OpenAPI 3.1 + 로컬 pinned Swagger UI + GitHub Pages 읽기 전용 운영 snapshot + [프론트·Codex 연동 가이드](./FRONTEND_API_INTEGRATION.md)
 - 테스트: Vitest, Fastify injection, Deno Edge type check
 - 배포 후보: 운영 Supabase의 Edge Functions·Cron + Supabase 복구검증 프로젝트
 
@@ -20,6 +20,7 @@ Fastify는 현재 개발 기준선이며 Edge PoC가 실패할 때의 rollback �
 ```mermaid
 flowchart LR
   UI[개발자·관리자·메이드 PWA] -->|Bearer access token| API[Fastify 또는 Edge API adapter]
+  DOCS[GitHub Pages 읽기 전용 Swagger] -->|배포 시 검증한 snapshot| OPENAPI[Production OpenAPI JSON]
   OPS[Python API-only 운영 콘솔] -->|developer bearer token| API
   API -->|사용자 JWT| DATA[Supabase Data API · RLS]
   API -->|서버 secret| ADMIN[Auth 관리·원자 명령]
@@ -34,6 +35,7 @@ flowchart LR
 - 조회는 가능한 한 사용자 JWT와 RLS를 통과시킵니다.
 - 계정 생성·비밀번호 초기화·여러 원장을 함께 바꾸는 명령만 서버 secret과 DB 함수를 사용합니다.
 - Google Drive access/refresh token은 서버 secret으로만 보관하며 브라우저는 Drive에 직접 접근하지 않습니다.
+- GitHub Pages에는 production OpenAPI snapshot과 정적 UI만 배포합니다. token 입력과 API 실행을 비활성화하고 service-role key나 repository secret을 artifact에 포함하지 않습니다.
 
 developer 운영 상태는 `private` 원본이나 Supabase 내부 schema를 Edge에서 직접 직렬화하지 않습니다. DB catalog·Cron·감사 원장은 developer role을 다시 검증하는 app-owned `SECURITY DEFINER` projection을 거치고, Edge는 camelCase 응답과 안정적인 error code만 공개합니다. runtime secret은 소스 allowlist의 `configured` boolean만 반환하며 값·길이·해시·부분문자열은 반환하지 않습니다. Python 운영도구 연동은 [developer 운영 API 가이드](./DEVELOPER_OPERATIONS_API.md)를 따른다.
 

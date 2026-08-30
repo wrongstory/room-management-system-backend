@@ -4,6 +4,16 @@
 
 ## 1. 계약을 받는 위치
 
+운영 배포 계약:
+
+| 목적 | URL |
+|---|---|
+| 사람이 확인 | `https://wrongstory.github.io/room-management-system-backend/` |
+| Codex·코드 생성 | `https://wrongstory.github.io/room-management-system-backend/openapi.json` |
+| snapshot 정보·SHA-256 | `https://wrongstory.github.io/room-management-system-backend/portal-manifest.json` |
+
+GitHub Pages는 실제 production Edge의 `/openapi.json`을 배포 workflow가 검증·복사한 **읽기 전용 snapshot**이다. 공개 포털은 `Try it out`과 Authorization 입력을 비활성화하며 secret, 실제 전화번호, token 입력 용도로 사용하지 않는다. Edge Function을 새로 배포한 뒤 Pages workflow를 수동 실행해 snapshot을 갱신한다. 실행 중인 HTTP 계약의 최종 정본은 production Edge OpenAPI이고 Pages는 프론트 전달·codegen용 검증 snapshot이다.
+
 로컬 API base URL:
 
 ```text
@@ -16,7 +26,9 @@ http://127.0.0.1:54321/functions/v1/api
 | Codex·코드 생성 | `http://127.0.0.1:54321/functions/v1/api/openapi.json` |
 | runtime 확인 | `http://127.0.0.1:54321/functions/v1/api/health` |
 
-Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. production Edge API·Swagger는 배포되어 있지만 클라이언트에는 base URL을 환경변수로만 주입한다. Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. #43 developer operation path는 해당 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 존재할 때만 활성화한다.
+Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
+
+production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. #43 developer operation path와 #51~#53의 가능일·예약·객실 상세/mutation은 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
 
 ## 2. 로컬 백엔드 준비
 
@@ -41,6 +53,12 @@ OpenAPI를 사람이 보고 interface로 다시 작성하지 않는다. 프론�
 
 ```bash
 npx openapi-typescript@7.13.0 http://127.0.0.1:54321/functions/v1/api/openapi.json --output src/api/generated/room-management-api.ts
+```
+
+운영 snapshot으로 생성할 때:
+
+```bash
+npx openapi-typescript@7.13.0 https://wrongstory.github.io/room-management-system-backend/openapi.json --output src/api/generated/room-management-api.ts
 ```
 
 권장 규칙:
