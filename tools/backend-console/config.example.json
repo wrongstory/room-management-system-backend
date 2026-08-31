@@ -1,0 +1,7 @@
+{
+  "environment": "production",
+  "projectRef": "aodikrxcczbogjpsjwjt",
+  "supabaseUrl": "https://aodikrxcczbogjpsjwjt.supabase.co",
+  "publishableKey": "replace-with-publishable-key",
+  "inactivityMinutes": 15
+}

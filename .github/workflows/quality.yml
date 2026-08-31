@@ -16,7 +16,7 @@ jobs:
   application:
     name: application
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,6 +26,25 @@ jobs:
       - run: npm ci
       - run: npm run edge:check
       - run: npm run ci:quality
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install headless Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes libegl1 libgl1
+      - run: python -m pip install uv==0.11.32
+      - name: Verify Python backend console
+        working-directory: tools/backend-console
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          uv sync --python 3.12 --frozen
+          uv run --python 3.12 ruff check .
+          uv run --python 3.12 ruff format --check .
+          uv run --python 3.12 mypy src tests scripts
+          uv run --python 3.12 pytest
+          uv run --python 3.12 python scripts/build.py --check-only
 
   migration:
     name: migration

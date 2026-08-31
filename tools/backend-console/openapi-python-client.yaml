@@ -1,0 +1,5 @@
+project_name_override: room-management-console-generated
+package_name_override: generated
+post_hooks:
+  - "ruff check . --fix-only"
+  - "ruff format ."

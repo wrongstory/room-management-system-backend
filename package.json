@@ -29,7 +29,8 @@
     "db:test": "supabase test db supabase/tests --local",
     "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs",
     "edge:check": "node scripts/check-edge-functions.mjs",
-    "swagger:pages:build": "node scripts/build-swagger-pages.mjs"
+    "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
+    "console:openapi:export": "tsx scripts/export-backend-console-openapi.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",

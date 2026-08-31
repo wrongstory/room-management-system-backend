@@ -56,9 +56,11 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 최종 확인: **2026-08-31 KST**
 
 - 운영 승인 source: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
-- #51 작업 시작 기준 `dev`: `33b3884ed4483f3590dfdb5d35a1da5cbbde0791` — PR #50 Pages source 병합 완료
+- 현재 개발 통합 기준 `dev`: `e06a5c3d755c42799326178a39c688a754ce0dbe`
 - PR #48 / #43 developer 운영 API: `dev` 병합 완료, production 미반영
-- #51 Availability Edge parity: route·RLS read adapter·OpenAPI source를 이 변경에 포함, production 미반영
+- #51 Availability Edge parity: source·독립 리뷰·`dev` 병합 완료, production 미반영
+- #44 Python 운영도구 Phase A: 이 변경에서 API-only source·테스트·Windows packaging 기반을 추가,
+  release artifact와 production 계정 smoke는 미완료
 - 운영 migration: **17건**
 - 운영 Edge Functions:
   - `api` version 2 — ACTIVE
@@ -172,8 +174,9 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 - [x] must-change/inactive/revoked/upload-only 차단
 - [x] KST 제출창, CAS version, Idempotency-Key 계약 유지
 - [x] OpenAPI/Swagger/codegen 갱신
-- [ ] Edge Deno tests + required CI + 독립 리뷰 P0/P1=0
-- [ ] `dev → release → main`
+- [x] Edge Deno tests + required CI + 독립 리뷰 P0/P1=0
+- [x] `dev` 병합
+- [ ] `release → main`
 - [ ] production `api` 재배포 및 maid/admin/developer hosted HTTP smoke
 - [ ] 배포 OpenAPI 및 GitHub Pages snapshot 갱신
 
@@ -220,27 +223,62 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
 
-## 12. 현재 우선순위
+## 12. Python 운영도구 — #44 Phase A
+
+Python 운영도구는 Edge Function이 아니라 승인된 Windows PC에서 실행하는 로컬 client다.
+따라서 `Edge source`/`Production Edge` 상태를 만들지 않으며, 실제 사용 가능 판정은 source,
+Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
+
+| 체크 | 기능 | API source | Python source | Windows artifact | Hosted smoke | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|
+| [ ] | developer 로그인·메모리 세션·refresh/logout | ✅ | ✅ | ❌ | ❌ | ❌ | 고정 ID `admin`, token 영속 저장 없음 |
+| [ ] | business admin/maid 계정 관리 | ✅ | ✅ | ❌ | ❌ | ❌ | 멱등 재시도, phone 입력 즉시 제거 |
+| [ ] | overview/runtime/database/scheduler | ✅ | ✅ | ❌ | ❌ | ❌ | #43 production 미반영 |
+| [ ] | 안전한 감사 목록·진단 | ✅ | ✅ | ❌ | ❌ | ❌ | raw state/secret/SQL 없음 |
+| [ ] | DB direct 진단 | — | ❌ | ❌ | ❌ | ❌ | Phase B 전까지 의도적으로 비활성 |
+| [ ] | maintenance action catalog | — | ❌ | ❌ | ❌ | ❌ | Phase C 전까지 의도적으로 비활성 |
+
+### #44 Phase A source gate
+
+- [x] Python 3.12+, PySide6, httpx exact dependency와 `uv.lock`
+- [x] OpenAPI 0.29.0 생성 client + 생성 코드 밖 인증/멱등성/redaction adapter
+- [x] environment/project ref 고정 텍스트, developer/last-admin UI 보호
+- [x] production/recovery source-controlled exact allowlist + 로그인 후 runtime 대상 재대조
+- [x] account response 5개 상태 표시 / status command 3개 target 분리
+- [x] 계정·developer dashboard·감사·진단 화면
+- [x] DB credential/service role/SQL 기능 미포함
+- [x] Windows x64 PyInstaller workflow와 checksum source
+- [x] 설치·업데이트·삭제·PC 분실 runbook
+- [ ] PR #57 새 exact head required CI + 독립 보안/운영 재검토 P0/P1=0
+- [ ] `dev` 병합
+- [ ] 승인 source 기반 Windows x64 artifact build/smoke
+- [ ] developer 로그인 → business admin 생성 hosted smoke
+
+Phase A가 `dev`에 병합돼도 #44 전체 Issue는 Phase B/C와 Windows/hosted gate가 남으므로 Open
+유지한다.
+
+## 13. 현재 우선순위
 
 production completeness 기준의 정본 순서다.
 
 1. [x] #48 `dev` 병합
-2. [ ] **#51 Availability Edge parity (P0)** — 최우선
-3. [ ] **#44 Python 운영도구 Phase A** — #51과 병행 가능
-4. [ ] #52 Reservation Edge parity (P1)
-5. [ ] #53 Room detail/mutation Edge parity (P1)
-6. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능
-7. [ ] 최신 source를 `release/v0.2.0 → main`으로 승격
-8. [ ] 필요한 신규 migration 순차 적용
-9. [ ] `api`와 `reservation-scheduler`를 승인된 `main` source로 재배포
-10. [ ] developer / business admin / maid 실제 hosted HTTP role matrix smoke
-11. [ ] Python 콘솔에서 business admin 생성 및 최초 비밀번호 변경
-12. [ ] scheduler actor/invoke secret → Vault/pg_cron/pg_net 활성화
-13. [ ] Cron heartbeat/audit/idempotency smoke
-14. [ ] GitHub Pages workflow 수동 실행 및 공개 portal/openapi snapshot smoke
-15. [ ] `v0.2.0` tag / GitHub Release
+2. [x] **#51 Availability Edge parity source/dev** — production 배포·hosted smoke까지 Issue Open
+3. [ ] **#44 Python 운영도구 Phase A** — 현재 작업
+4. [ ] **#58 Actor Activity / Audit 로그 정본화 (P1)** — #52/#53 공통 logging 기반, 이 PR 범위 밖
+5. [ ] #52 Reservation Edge parity (P1)
+6. [ ] #53 Room detail/mutation Edge parity (P1)
+7. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능
+8. [ ] 최신 source를 `release/v0.2.0 → main`으로 승격
+9. [ ] 필요한 신규 migration 순차 적용
+10. [ ] `api`와 `reservation-scheduler`를 승인된 `main` source로 재배포
+11. [ ] developer / business admin / maid 실제 hosted HTTP role matrix smoke
+12. [ ] Python 콘솔에서 business admin 생성 및 최초 비밀번호 변경
+13. [ ] scheduler actor/invoke secret → Vault/pg_cron/pg_net 활성화
+14. [ ] Cron heartbeat/audit/idempotency smoke
+15. [ ] GitHub Pages workflow 수동 실행 및 공개 portal/openapi snapshot smoke
+16. [ ] `v0.2.0` tag / GitHub Release
 
-## 13. 이 문서 갱신 규칙
+## 14. 이 문서 갱신 규칙
 
 API 관련 PR은 아래 조건 중 하나라도 발생하면 `docs/API_STATUS_MATRIX.md`를 같이 수정한다.
 
@@ -266,7 +304,7 @@ API 관련 PR은 아래 조건 중 하나라도 발생하면 `docs/API_STATUS_MA
 
 Swagger/OpenAPI에 표시된 operation 수와 이 문서의 **Production Edge ✅** endpoint 수가 다르면 배포 drift로 보고 확인한다.
 
-## 14. 연결 문서·Issue
+## 15. 연결 문서·Issue
 
 - Roadmap: #14
 - v0.2.0 release: #24

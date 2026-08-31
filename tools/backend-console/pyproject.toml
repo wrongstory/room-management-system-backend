@@ -1,0 +1,57 @@
+[project]
+name = "room-management-backend-console"
+version = "0.1.0"
+description = "CASTLE THE ART Supabase API-only backend operations console"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+license = { text = "Proprietary" }
+dependencies = [
+  "attrs==26.1.0",
+  "httpx==0.28.1",
+  "pyside6==6.10.3",
+]
+
+[project.scripts]
+room-management-console = "room_management_console.__main__:main"
+
+[dependency-groups]
+dev = [
+  "mypy==2.3.1",
+  "openapi-python-client==0.29.0",
+  "pyinstaller==6.22.2",
+  "pytest==9.1.1",
+  "pytest-qt==4.5.0",
+  "ruff==0.16.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/room_management_console"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]
+"scripts/generate_client.py" = ["S607"]
+"src/room_management_console/generated/**/*.py" = ["ALL"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+exclude = ["src/room_management_console/generated/"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+qt_api = "pyside6"
+
+[tool.uv]
+default-groups = ["dev"]
