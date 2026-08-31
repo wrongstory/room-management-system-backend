@@ -514,7 +514,7 @@ export const openApiDocument = {
         operationId: "listDeveloperActivityEvents",
         summary: "인증·권한·민감접근 활동 로그 조회",
         description:
-          "업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인 ID 공격은 원문 없이 분 단위 aggregate summary로만 반환합니다.",
+          "업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인과 권한 거부 반복은 원문 request metadata 없이 분 단위 aggregate summary로 반환합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["developer"],
         parameters: [
@@ -1601,7 +1601,9 @@ export const openApiDocument = {
           reasonCode: { type: ["string", "null"] },
           requestId: {
             type: ["string", "null"],
-            description: "안전한 correlation ID. 세션 ID가 아닙니다.",
+            format: "uuid",
+            description:
+              "개별 이벤트에만 존재하는 Edge 생성 UUID v4입니다. caller X-Request-ID나 세션 ID가 아닙니다.",
           },
           occurredAt: { type: "string", format: "date-time" },
           recordedAt: { type: "string", format: "date-time" },
@@ -1609,7 +1611,7 @@ export const openApiDocument = {
             type: "object",
             additionalProperties: false,
             description:
-              "unknown login aggregate에만 count/lastOccurredAt/bucketMinutes를 반환합니다.",
+              "unknown login과 authorization denial aggregate에 count/lastOccurredAt/bucketMinutes를 반환합니다.",
             properties: {
               aggregateCount: { type: "integer", minimum: 1, maximum: 600 },
               lastOccurredAt: { type: "string", format: "date-time" },

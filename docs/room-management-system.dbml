@@ -672,7 +672,7 @@ Table private.actor_activity_events {
   id uuid [pk]
   actor_profile_id uuid [not null]
   actor_role_snapshot app_role [not null]
-  category text [not null, note: 'auth, authorization, or sensitive_access']
+  category text [not null, note: 'auth or sensitive_access']
   event_type text [not null]
   outcome text [not null]
   source text [not null, note: 'Source-controlled capability category']
@@ -683,7 +683,7 @@ Table private.actor_activity_events {
   occurred_at timestamptz [not null]
   recorded_at timestamptz [not null]
 
-  Note: 'Immutable known-actor activity ledger. Raw Data API access is denied; no credential, PII, request body, or raw IP columns.'
+  Note: 'Immutable known-actor login and sensitive-access ledger. request_id is server-generated UUID v4 only. Raw Data API access is denied.'
 }
 
 Table private.actor_activity_aggregates {
@@ -704,6 +704,28 @@ Table private.actor_activity_aggregates {
   }
 
   Note: 'One anonymous unknown-login row per minute; count saturates at 600 and retains no login ID, HMAC, or raw IP.'
+}
+
+Table private.actor_authorization_denial_aggregates {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  actor_role_snapshot app_role [not null]
+  category text [not null, note: 'authorization']
+  event_type text [not null, note: 'authorization.denied']
+  outcome text [not null, note: 'denied']
+  source text [not null, note: 'Source-controlled capability category']
+  reason_code text [not null]
+  bucket_started_at timestamptz [not null]
+  occurrence_count int [not null]
+  first_occurred_at timestamptz [not null]
+  last_occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  indexes {
+    (actor_profile_id, source, reason_code, bucket_started_at) [unique]
+  }
+
+  Note: 'One row per actor/source/reason/UTC minute; count saturates at 600 and retains no URL, request body, token, IP, or request ID.'
 }
 
 Table private.scheduler_invocation_heartbeats {
@@ -824,5 +846,6 @@ Ref: public.notifications.cleaning_target_id > public.cleaning_targets.id
 Ref: private.notification_outbox.notification_id > public.notifications.id
 Ref: public.audit_events.actor_profile_id > public.profiles.id
 Ref: private.actor_activity_events.actor_profile_id > public.profiles.id
+Ref: private.actor_authorization_denial_aggregates.actor_profile_id > public.profiles.id
 Ref: private.scheduler_invocation_heartbeats.actor_profile_id > public.profiles.id
 Ref: private.developer_diagnostic_rate_limits.actor_profile_id - public.profiles.id

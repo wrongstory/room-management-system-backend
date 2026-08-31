@@ -125,7 +125,7 @@ PR #48은 `dev@02d5089`로 병합 완료됐다. 아직 release/main 승격, prod
 | [ ] | `GET /v1/developer/database-status` | developer only | ✅ | — | ✅ | ❌ | ❌ | migration name drift + exact RPC privilege 검사 |
 | [ ] | `GET /v1/developer/scheduler-status` | developer only | ✅ | — | ✅ | ❌ | ❌ | raw Cron/Vault/net body 비노출 |
 | [ ] | `GET /v1/developer/audit-events` | developer only | ✅ | — | ✅ | ❌ | ❌ | account·availability·reservation·room·scheduler domain allowlist + 31일/100건 cursor |
-| [ ] | `GET /v1/developer/activity-events` | developer only | ✅ | — | ✅ | ❌ | ❌ | #58 인증·권한·민감접근 분리 원장, unknown login은 분 단위 aggregate |
+| [ ] | `GET /v1/developer/activity-events` | developer only | ✅ | — | ✅ | ❌ | ❌ | #58 인증·권한·민감접근 분리 원장, unknown login·권한거부는 분 단위 aggregate |
 | [ ] | `POST /v1/developer/diagnostics` | developer only | ✅ | — | ✅ | ❌ | ❌ | body/임의 URL·SQL·RPC 입력 금지, 10/min |
 
 ### #43 production 반영 조건
@@ -143,13 +143,13 @@ PR #48은 `dev@02d5089`로 병합 완료됐다. 아직 release/main 승격, prod
 
 - [x] 성공한 account/availability/reservation/room/scheduler mutation audit event inventory
 - [x] immutable `audit_events`의 승인된 domain event projection 확장
-- [x] private activity event + unknown-login bounded aggregate 원장
+- [x] private activity event + unknown-login/authorization-denial bounded aggregate 원장
 - [x] login success/known failure/authorization denial 기록과 민감조회 공통 helper
 - [x] developer-only 31일/100건/cursor activity API와 OpenAPI/Python 화면 분리
 - [x] raw table 및 privileged RPC의 PUBLIC/anon/authenticated 접근 차단
 - [x] fresh DB/RLS/Edge/Python 로컬 회귀 검증
-- [ ] PR #58 독립 보안/API 재검토 P0/P1=0
-- [ ] PR #58 `dev` 병합
+- [ ] PR #59 독립 보안/API 재검토 P0/P1=0
+- [ ] PR #59 `dev` 병합
 - [ ] release/main 승격 후 migration 적용·production Edge 재배포·hosted role smoke
 
 ## 7. 객실 API — Edge parity #53 (P1)

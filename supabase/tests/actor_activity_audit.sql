@@ -79,6 +79,14 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
+    'public.record_authorization_denial(uuid,text,text,timestamptz)',
+    'EXECUTE'
+  ),
+  'service role can append a bounded authorization-denial aggregate'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
     'public.list_developer_activity_events(uuid,uuid,public.app_role,text[],text[],text[],timestamptz,timestamptz,timestamptz,uuid,integer)',
     'EXECUTE'
   ),
@@ -91,6 +99,10 @@ select ok(
     'EXECUTE'
   ) and not has_function_privilege(
     'anon', 'public.record_unknown_login_failure(timestamptz)', 'EXECUTE'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.record_authorization_denial(uuid,text,text,timestamptz)',
+    'EXECUTE'
   ) and not has_function_privilege(
     'public',
     'public.list_developer_activity_events(uuid,uuid,public.app_role,text[],text[],text[],timestamptz,timestamptz,timestamptz,uuid,integer)',
@@ -111,29 +123,53 @@ select ok(
   and not has_table_privilege('service_role', 'private.actor_activity_aggregates', 'SELECT'),
   'raw unknown-login aggregate rows are not exposed through Data API roles'
 );
+select ok(
+  not has_table_privilege(
+    'anon', 'private.actor_authorization_denial_aggregates', 'SELECT'
+  ) and not has_table_privilege(
+    'authenticated', 'private.actor_authorization_denial_aggregates', 'SELECT'
+  ) and not has_table_privilege(
+    'service_role', 'private.actor_authorization_denial_aggregates', 'SELECT'
+  ),
+  'raw authorization-denial aggregate rows are not exposed through Data API roles'
+);
 
 set local role service_role;
 select public.record_actor_activity_event(
   '27000000-0000-4000-8000-000000000002',
   'auth.login_succeeded', 'succeeded', 'edge.auth.login',
-  'activity-login-success-0001', null, null, null, clock_timestamp() - interval '4 minutes'
+  gen_random_uuid()::text, null, null, null, clock_timestamp() - interval '4 minutes'
 );
 select public.record_actor_activity_event(
   '27000000-0000-4000-8000-000000000002',
   'auth.login_failed', 'failed', 'edge.auth.login',
-  'activity-login-failed-0001', 'INVALID_CREDENTIALS', null, null,
+  gen_random_uuid()::text, 'INVALID_CREDENTIALS', null, null,
   clock_timestamp() - interval '3 minutes'
 );
-select public.record_actor_activity_event(
+select public.record_authorization_denial(
   '27000000-0000-4000-8000-000000000003',
-  'authorization.denied', 'denied', 'edge.authorization.availability',
-  'activity-denied-0001', 'ADMIN_REQUIRED', null, null,
+  'edge.authorization.availability', 'ADMIN_REQUIRED',
+  clock_timestamp() - interval '2 minutes'
+) from generate_series(1, 1000);
+select public.record_authorization_denial(
+  '27000000-0000-4000-8000-000000000002',
+  'edge.authorization.availability', 'ADMIN_REQUIRED',
+  clock_timestamp() - interval '2 minutes'
+);
+select public.record_authorization_denial(
+  '27000000-0000-4000-8000-000000000003',
+  'edge.authorization.rooms', 'ADMIN_REQUIRED',
+  clock_timestamp() - interval '2 minutes'
+);
+select public.record_authorization_denial(
+  '27000000-0000-4000-8000-000000000003',
+  'edge.authorization.availability', 'PASSWORD_CHANGE_REQUIRED',
   clock_timestamp() - interval '2 minutes'
 );
 select public.record_actor_activity_event(
   '27000000-0000-4000-8000-000000000002',
   'sensitive.read', 'succeeded', 'edge.sensitive.reservation_guest_name',
-  'activity-sensitive-read-0001', null, 'reservation',
+  gen_random_uuid()::text, null, 'reservation',
   '37000000-0000-4000-8000-000000000001', clock_timestamp() - interval '1 minute'
 );
 select public.record_unknown_login_failure(clock_timestamp())
@@ -144,7 +180,7 @@ select throws_ok(
   $$ select public.record_actor_activity_event(
     '27000000-0000-4000-8000-000000000003',
     'sensitive.read', 'succeeded', 'edge.sensitive.reservation_guest_name',
-    'activity-sensitive-maid-denied', null, 'reservation',
+    gen_random_uuid()::text, null, 'reservation',
     '37000000-0000-4000-8000-000000000001', clock_timestamp()
   ) $$,
   '22023', 'INVALID_ACTIVITY_ACTOR',
@@ -161,11 +197,42 @@ select is(
   600,
   'unknown-login aggregate count saturates at the fixed cap'
 );
+select is(
+  (
+    select count(*)::integer
+    from private.actor_authorization_denial_aggregates
+    where actor_profile_id = '27000000-0000-4000-8000-000000000003'
+      and source = 'edge.authorization.availability'
+      and reason_code = 'ADMIN_REQUIRED'
+  ),
+  1,
+  'one actor capability denial creates one row per UTC minute'
+);
+select is(
+  (
+    select occurrence_count
+    from private.actor_authorization_denial_aggregates
+    where actor_profile_id = '27000000-0000-4000-8000-000000000003'
+      and source = 'edge.authorization.availability'
+      and reason_code = 'ADMIN_REQUIRED'
+  ),
+  600,
+  'authorization-denial aggregate saturates at the fixed cap'
+);
+select is(
+  (select count(*)::integer from private.actor_authorization_denial_aggregates),
+  4,
+  'different actors, sources, and reasons keep isolated denial aggregates'
+);
 select ok(
   not exists (
     select 1 from information_schema.columns
     where table_schema = 'private'
-      and table_name in ('actor_activity_events', 'actor_activity_aggregates')
+      and table_name in (
+        'actor_activity_events',
+        'actor_activity_aggregates',
+        'actor_authorization_denial_aggregates'
+      )
       and column_name ~ '(password|token|authorization|phone|guest|pin|photo|ip|body|login)'
   ),
   'activity ledgers have no prohibited secret, PII, raw IP, body, or login columns'
@@ -175,9 +242,49 @@ select ok(
     coalesce((select string_agg(row_to_json(event)::text, '')
       from private.actor_activity_events event), '') ||
     coalesce((select string_agg(row_to_json(aggregate)::text, '')
-      from private.actor_activity_aggregates aggregate), '')
+      from private.actor_activity_aggregates aggregate), '') ||
+    coalesce((select string_agg(row_to_json(denial)::text, '')
+      from private.actor_authorization_denial_aggregates denial), '')
   )) = 0,
   'unknown login input is never persisted in raw activity storage'
+);
+select ok(
+  not exists (
+    select 1 from private.actor_activity_events
+    where request_id !~
+      '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  ),
+  'persisted request IDs accept only server UUID v4 format'
+);
+select ok(
+  not exists (
+    select 1
+    from unnest(array[
+      '01012345678',
+      '9d0fc2c7-40a7-4bfd-9003-7d52ea7ad3ce',
+      'short-token',
+      'refresh-token.example.secret',
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.signature'
+    ]) caller_value
+    where position(caller_value in (
+      coalesce((select string_agg(row_to_json(event)::text, '')
+        from private.actor_activity_events event), '') ||
+      coalesce((select string_agg(row_to_json(aggregate)::text, '')
+        from private.actor_activity_aggregates aggregate), '') ||
+      coalesce((select string_agg(row_to_json(denial)::text, '')
+        from private.actor_authorization_denial_aggregates denial), '')
+    )) > 0
+  ),
+  'caller phone, UUID-like secret, short token, refresh token, and JWT-like IDs are absent'
+);
+select throws_ok(
+  $$ select public.record_actor_activity_event(
+    '27000000-0000-4000-8000-000000000002',
+    'auth.login_succeeded', 'succeeded', 'edge.auth.login',
+    '01012345678', null, null, null, clock_timestamp()
+  ) $$,
+  '22023', 'INVALID_ACTIVITY_EVENT',
+  'caller-shaped request IDs cannot be persisted directly'
 );
 
 select ok(
@@ -198,8 +305,11 @@ select ok(
       clock_timestamp() - interval '1 hour', clock_timestamp() + interval '1 hour', null, null, 100
     ) where actor_profile_id = '27000000-0000-4000-8000-000000000003'
       and source = 'edge.authorization.availability'
+      and reason_code = 'ADMIN_REQUIRED'
+      and request_id is null
+      and summary ->> 'aggregateCount' = '600'
   ),
-  'developer can query a source-controlled authorization denial category'
+  'developer sees a bounded authorization denial in the common activity shape'
 );
 select ok(
   exists (
@@ -258,7 +368,7 @@ set local role service_role;
 select public.record_actor_activity_event(
   '27000000-0000-4000-8000-000000000002',
   'auth.login_succeeded', 'succeeded', 'edge.auth.login',
-  'activity-page-' || lpad(sequence_number::text, 4, '0'),
+  gen_random_uuid()::text,
   null, null, null, clock_timestamp() - interval '4 minutes' + sequence_number * interval '1 second'
 )
 from generate_series(1, 101) sequence_number;

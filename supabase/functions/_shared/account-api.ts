@@ -1,5 +1,5 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
-import { bearerToken, EdgeError, requestId, requiredEnv } from "./runtime.ts";
+import { bearerToken, EdgeError, requiredEnv } from "./runtime.ts";
 import {
   recordKnownLoginFailed,
   recordLoginSucceeded,
@@ -532,7 +532,6 @@ async function consumeLoginRateLimit(
 export async function login(
   request: Request,
   clients: EdgeClients,
-  requestIdValue = requestId(request),
 ): Promise<Record<string, unknown>> {
   const body = await readJsonBody(request);
   const loginId = stringField(body, "loginId", 1, 80);
@@ -573,7 +572,6 @@ export async function login(
     await recordKnownLoginFailed(
       clients,
       { profileId: profile.id },
-      requestIdValue,
       "ACCOUNT_INACTIVE",
     );
     throw new EdgeError(
@@ -586,7 +584,6 @@ export async function login(
     await recordKnownLoginFailed(
       clients,
       { profileId: profile.id },
-      requestIdValue,
       "ACCOUNT_LOCKED",
     );
     throw new EdgeError(
@@ -607,7 +604,6 @@ export async function login(
     await recordKnownLoginFailed(
       clients,
       { profileId: profile.id },
-      requestIdValue,
       "INVALID_CREDENTIALS",
     );
     throw new EdgeError(
@@ -638,7 +634,6 @@ export async function login(
     await recordLoginSucceeded(
       clients,
       { profileId: profile.id },
-      requestIdValue,
     );
   } catch (error) {
     await clients.admin.auth.admin.signOut(data.session.access_token, "local");

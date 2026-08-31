@@ -265,14 +265,21 @@ describe('initial migration contract', () => {
 
     expect(sql).toContain('create table private.actor_activity_events');
     expect(sql).toContain('create table private.actor_activity_aggregates');
+    expect(sql).toContain(
+      'create table private.actor_authorization_denial_aggregates'
+    );
     expect(sql).toContain('create function public.record_actor_activity_event(');
     expect(sql).toContain('create function public.record_unknown_login_failure(');
+    expect(sql).toContain('create function public.record_authorization_denial(');
     expect(sql).toContain('create function public.list_developer_activity_events(');
     expect(sql).toContain("set search_path = ''");
     expect(sql).toContain("'auth.login_succeeded'");
     expect(sql).toContain("'authorization.denied'");
     expect(sql).toContain("'sensitive.read'");
     expect(sql).toMatch(/least\(\s*private\.actor_activity_aggregates\.occurrence_count \+ 1,\s*600\s*\)/);
+    expect(sql).toMatch(
+      /least\(\s*private\.actor_authorization_denial_aggregates\.occurrence_count \+ 1,\s*600\s*\)/
+    );
     expect(sql).toContain("v_to - v_from > interval '31 days'");
     expect(sql).toContain('p_limit not between 1 and 100');
     expect(sql).toContain('from public, anon, authenticated');

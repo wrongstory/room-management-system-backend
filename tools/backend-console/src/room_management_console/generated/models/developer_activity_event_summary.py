@@ -13,7 +13,7 @@ T = TypeVar("T", bound="DeveloperActivityEventSummary")
 
 @_attrs_define
 class DeveloperActivityEventSummary:
-    """unknown login aggregate에만 count/lastOccurredAt/bucketMinutes를 반환합니다.
+    """unknown login과 authorization denial aggregate에 count/lastOccurredAt/bucketMinutes를 반환합니다.
 
     Attributes:
         aggregate_count (int | Unset):

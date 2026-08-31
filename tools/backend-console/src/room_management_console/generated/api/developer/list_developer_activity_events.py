@@ -159,8 +159,8 @@ def sync_detailed(
 ) -> Response[DeveloperActivityPage | ErrorEnvelope]:
     """인증·권한·민감접근 활동 로그 조회
 
-     업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인 ID 공격은 원문 없이 분 단위 aggregate summary로만
-    반환합니다.
+     업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인과 권한 거부 반복은 원문 request metadata 없이 분 단위
+    aggregate summary로 반환합니다.
 
     Args:
         actor_profile_id (UUID | Unset):
@@ -215,8 +215,8 @@ def sync(
 ) -> DeveloperActivityPage | ErrorEnvelope | None:
     """인증·권한·민감접근 활동 로그 조회
 
-     업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인 ID 공격은 원문 없이 분 단위 aggregate summary로만
-    반환합니다.
+     업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인과 권한 거부 반복은 원문 request metadata 없이 분 단위
+    aggregate summary로 반환합니다.
 
     Args:
         actor_profile_id (UUID | Unset):
@@ -266,8 +266,8 @@ async def asyncio_detailed(
 ) -> Response[DeveloperActivityPage | ErrorEnvelope]:
     """인증·권한·민감접근 활동 로그 조회
 
-     업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인 ID 공격은 원문 없이 분 단위 aggregate summary로만
-    반환합니다.
+     업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인과 권한 거부 반복은 원문 request metadata 없이 분 단위
+    aggregate summary로 반환합니다.
 
     Args:
         actor_profile_id (UUID | Unset):
@@ -320,8 +320,8 @@ async def asyncio(
 ) -> DeveloperActivityPage | ErrorEnvelope | None:
     """인증·권한·민감접근 활동 로그 조회
 
-     업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인 ID 공격은 원문 없이 분 단위 aggregate summary로만
-    반환합니다.
+     업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인과 권한 거부 반복은 원문 request metadata 없이 분 단위
+    aggregate summary로 반환합니다.
 
     Args:
         actor_profile_id (UUID | Unset):

@@ -6,21 +6,15 @@ create table private.actor_activity_events (
   id uuid primary key default gen_random_uuid(),
   actor_profile_id uuid not null references public.profiles(id),
   actor_role_snapshot public.app_role not null,
-  category text not null check (category in ('auth', 'authorization', 'sensitive_access')),
+  category text not null check (category in ('auth', 'sensitive_access')),
   event_type text not null check (event_type in (
     'auth.login_succeeded',
     'auth.login_failed',
-    'authorization.denied',
     'sensitive.read'
   )),
-  outcome text not null check (outcome in ('succeeded', 'failed', 'denied')),
+  outcome text not null check (outcome in ('succeeded', 'failed')),
   source text not null check (source in (
     'edge.auth.login',
-    'edge.authorization.accounts',
-    'edge.authorization.developer',
-    'edge.authorization.availability',
-    'edge.authorization.reservations',
-    'edge.authorization.rooms',
     'edge.sensitive.reservation_guest_name'
   )),
   resource_type text,
@@ -33,7 +27,7 @@ create table private.actor_activity_events (
     reason_code is null or reason_code ~ '^[A-Z0-9_]{2,80}$'
   ),
   constraint actor_activity_request_id_safe check (
-    request_id ~ '^[A-Za-z0-9._:-]{1,128}$'
+    request_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   ),
   constraint actor_activity_resource_pair check (
     (resource_type is null) = (resource_id is null)
@@ -41,7 +35,7 @@ create table private.actor_activity_events (
 );
 
 comment on table private.actor_activity_events is
-  'Immutable known-actor auth, authorization, and sensitive-access activity. No request bodies, credentials, raw client addresses, or free-form metadata.';
+  'Immutable known-actor login and sensitive-access activity. Request IDs are server-generated UUID v4 only; no caller request metadata, credentials, raw addresses, or free-form fields.';
 
 create index actor_activity_recorded_cursor_idx
 on private.actor_activity_events (recorded_at desc, id desc);
@@ -81,8 +75,55 @@ comment on table private.actor_activity_aggregates is
 create index actor_activity_aggregates_recorded_cursor_idx
 on private.actor_activity_aggregates (recorded_at desc, id desc);
 
+-- Authorization denials are accountability signals, but a caller must not be
+-- able to grow the ledger by repeatedly hitting the same forbidden capability.
+-- Keep one saturated row per actor/source/reason/UTC minute.
+create table private.actor_authorization_denial_aggregates (
+  id uuid primary key default gen_random_uuid(),
+  actor_profile_id uuid not null references public.profiles(id),
+  actor_role_snapshot public.app_role not null,
+  category text not null check (category = 'authorization'),
+  event_type text not null check (event_type = 'authorization.denied'),
+  outcome text not null check (outcome = 'denied'),
+  source text not null check (source in (
+    'edge.authorization.accounts',
+    'edge.authorization.developer',
+    'edge.authorization.availability',
+    'edge.authorization.reservations',
+    'edge.authorization.rooms'
+  )),
+  reason_code text not null check (reason_code in (
+    'ACCOUNT_MANAGER_REQUIRED',
+    'ADMIN_REQUIRED',
+    'AVAILABILITY_ACCESS_REQUIRED',
+    'DEVELOPER_REQUIRED',
+    'MAID_REQUIRED',
+    'PASSWORD_CHANGE_REQUIRED'
+  )),
+  bucket_started_at timestamptz not null,
+  occurrence_count integer not null check (occurrence_count between 1 and 600),
+  first_occurred_at timestamptz not null,
+  last_occurred_at timestamptz not null,
+  recorded_at timestamptz not null default clock_timestamp(),
+  unique (actor_profile_id, source, reason_code, bucket_started_at),
+  check (first_occurred_at <= last_occurred_at)
+);
+
+comment on table private.actor_authorization_denial_aggregates is
+  'One bounded authorization-denial row per actor, capability, reason, and UTC minute. No request metadata or free-form input is stored.';
+
+create index actor_authorization_denial_actor_cursor_idx
+on private.actor_authorization_denial_aggregates (
+  actor_profile_id, recorded_at desc, id desc
+);
+
+create index actor_authorization_denial_cursor_idx
+on private.actor_authorization_denial_aggregates (recorded_at desc, id desc);
+
 revoke all on table private.actor_activity_events from public, anon, authenticated, service_role;
 revoke all on table private.actor_activity_aggregates from public, anon, authenticated, service_role;
+revoke all on table private.actor_authorization_denial_aggregates
+from public, anon, authenticated, service_role;
 
 create function public.record_actor_activity_event(
   p_actor_profile_id uuid,
@@ -106,7 +147,7 @@ declare
   v_id uuid;
 begin
   if p_request_id is null
-    or p_request_id !~ '^[A-Za-z0-9._:-]{1,128}$'
+    or p_request_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
     or p_occurred_at is null
     or abs(extract(epoch from (clock_timestamp() - p_occurred_at))) > 300
     or (p_reason_code is not null and p_reason_code !~ '^[A-Z0-9_]{2,80}$')
@@ -138,25 +179,6 @@ begin
       )
       and p_resource_type is null then
       v_category := 'auth';
-    when p_event_type = 'authorization.denied'
-      and p_outcome = 'denied'
-      and p_source in (
-        'edge.authorization.accounts',
-        'edge.authorization.developer',
-        'edge.authorization.availability',
-        'edge.authorization.reservations',
-        'edge.authorization.rooms'
-      )
-      and p_reason_code in (
-        'ACCOUNT_MANAGER_REQUIRED',
-        'ADMIN_REQUIRED',
-        'AVAILABILITY_ACCESS_REQUIRED',
-        'DEVELOPER_REQUIRED',
-        'MAID_REQUIRED',
-        'PASSWORD_CHANGE_REQUIRED'
-      )
-      and p_resource_type is null then
-      v_category := 'authorization';
     when p_event_type = 'sensitive.read'
       and p_outcome = 'succeeded'
       and p_source = 'edge.sensitive.reservation_guest_name'
@@ -170,7 +192,6 @@ begin
 
   if p_event_type in (
     'auth.login_succeeded',
-    'authorization.denied',
     'sensitive.read'
   ) and v_profile.status <> 'active' then
     raise exception using errcode = '22023', message = 'INVALID_ACTIVITY_ACTOR';
@@ -275,6 +296,98 @@ begin
 end;
 $$;
 
+create function public.record_authorization_denial(
+  p_actor_profile_id uuid,
+  p_source text,
+  p_reason_code text,
+  p_occurred_at timestamptz default clock_timestamp()
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_profile public.profiles%rowtype;
+  v_bucket timestamptz;
+begin
+  if p_occurred_at is null
+    or abs(extract(epoch from (clock_timestamp() - p_occurred_at))) > 300
+    or p_source not in (
+      'edge.authorization.accounts',
+      'edge.authorization.developer',
+      'edge.authorization.availability',
+      'edge.authorization.reservations',
+      'edge.authorization.rooms'
+    )
+    or p_reason_code not in (
+      'ACCOUNT_MANAGER_REQUIRED',
+      'ADMIN_REQUIRED',
+      'AVAILABILITY_ACCESS_REQUIRED',
+      'DEVELOPER_REQUIRED',
+      'MAID_REQUIRED',
+      'PASSWORD_CHANGE_REQUIRED'
+    ) then
+    raise exception using errcode = '22023', message = 'INVALID_ACTIVITY_EVENT';
+  end if;
+
+  select * into v_profile
+  from public.profiles profile
+  where profile.id = p_actor_profile_id
+    and profile.status = 'active';
+  if not found then
+    raise exception using errcode = '22023', message = 'INVALID_ACTIVITY_ACTOR';
+  end if;
+
+  v_bucket := date_trunc('minute', p_occurred_at);
+
+  insert into private.actor_authorization_denial_aggregates (
+    actor_profile_id,
+    actor_role_snapshot,
+    category,
+    event_type,
+    outcome,
+    source,
+    reason_code,
+    bucket_started_at,
+    occurrence_count,
+    first_occurred_at,
+    last_occurred_at
+  ) values (
+    v_profile.id,
+    v_profile.role,
+    'authorization',
+    'authorization.denied',
+    'denied',
+    p_source,
+    p_reason_code,
+    v_bucket,
+    1,
+    p_occurred_at,
+    p_occurred_at
+  )
+  on conflict (actor_profile_id, source, reason_code, bucket_started_at)
+  do update set
+    occurrence_count = least(
+      private.actor_authorization_denial_aggregates.occurrence_count + 1,
+      600
+    ),
+    last_occurred_at = greatest(
+      private.actor_authorization_denial_aggregates.last_occurred_at,
+      excluded.last_occurred_at
+    );
+
+  delete from private.actor_authorization_denial_aggregates aggregate
+  where aggregate.id in (
+    select expired.id
+    from private.actor_authorization_denial_aggregates expired
+    where expired.bucket_started_at < v_bucket - interval '31 days'
+    order by expired.bucket_started_at
+    limit 64
+  );
+end;
+$$;
+
 create function public.list_developer_activity_events(
   p_actor_profile_id uuid,
   p_filter_actor_profile_id uuid default null,
@@ -365,6 +478,27 @@ begin
       event.recorded_at,
       '{}'::jsonb as summary
     from private.actor_activity_events event
+    union all
+    select
+      denial.id,
+      denial.category,
+      denial.event_type,
+      denial.outcome,
+      denial.actor_profile_id,
+      denial.actor_role_snapshot::text,
+      denial.source,
+      null::text,
+      null::uuid,
+      denial.reason_code,
+      null::text,
+      denial.first_occurred_at,
+      denial.recorded_at,
+      jsonb_build_object(
+        'aggregateCount', denial.occurrence_count,
+        'lastOccurredAt', denial.last_occurred_at,
+        'bucketMinutes', 1
+      )
+    from private.actor_authorization_denial_aggregates denial
     union all
     select
       aggregate.id,
@@ -586,6 +720,9 @@ revoke all on function public.record_actor_activity_event(
 ) from public, anon, authenticated;
 revoke all on function public.record_unknown_login_failure(timestamptz)
 from public, anon, authenticated;
+revoke all on function public.record_authorization_denial(
+  uuid, text, text, timestamptz
+) from public, anon, authenticated;
 revoke all on function public.list_developer_activity_events(
   uuid, uuid, public.app_role, text[], text[], text[], timestamptz, timestamptz,
   timestamptz, uuid, integer
@@ -596,6 +733,9 @@ grant execute on function public.record_actor_activity_event(
 ) to service_role;
 grant execute on function public.record_unknown_login_failure(timestamptz)
 to service_role;
+grant execute on function public.record_authorization_denial(
+  uuid, text, text, timestamptz
+) to service_role;
 grant execute on function public.list_developer_activity_events(
   uuid, uuid, public.app_role, text[], text[], text[], timestamptz, timestamptz,
   timestamptz, uuid, integer

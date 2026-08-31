@@ -198,6 +198,9 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(migration).toContain('to service_role');
     expect(activityMigration).toContain('private.actor_activity_events');
     expect(activityMigration).toContain('private.actor_activity_aggregates');
+    expect(activityMigration).toContain(
+      'private.actor_authorization_denial_aggregates'
+    );
     expect(activityMigration).toContain('public.list_developer_activity_events');
     expect(openApi).toContain('DeveloperAuditPage');
     expect(openApi).toContain('DIAGNOSTICS_RATE_LIMITED');
@@ -215,11 +218,13 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(accountApi).toContain('recordUnknownLoginFailed(clients)');
     expect(accountApi).toContain('recordLoginSucceeded(');
     expect(accountApi).toContain('recordKnownLoginFailed(');
-    expect(api).toContain('recordAuthorizationDenied(clients, actor, source, id, error.code)');
+    expect(api).toContain('recordAuthorizationDenied(clients, actor, source, error.code)');
     expect(contract).toContain('edge.authorization.reservations');
     expect(contract).toContain('edge.authorization.rooms');
     expect(activityApi).toContain('record_actor_activity_event');
     expect(activityApi).toContain('record_unknown_login_failure');
+    expect(activityApi).toContain('record_authorization_denial');
+    expect(activityApi).toContain('p_request_id: serverActivityRequestId()');
     expect(migration).toContain("set search_path = ''");
     expect(migration).toContain('from public, anon, authenticated');
     expect(migration).toContain('revoke all on table private.actor_activity_events');

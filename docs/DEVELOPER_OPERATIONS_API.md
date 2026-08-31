@@ -80,7 +80,7 @@ GET /v1/developer/activity-events?category=authorization&outcome=denied&limit=50
 GET /v1/developer/activity-events?cursor={nextCursor}&limit=50
 ```
 
-알 수 없는 로그인 실패는 `actorProfileId`, `requestId`가 없는 분 단위 aggregate로만 보인다. `summary.aggregateCount`는 600에서 포화되며 로그인 ID, IP, HMAC, request body를 복원할 수 있는 값은 존재하지 않는다. `sensitive.read`는 예약 목록처럼 일반 조회가 아니라 고객명 복호화 결과처럼 민감값이 실제 반환된 뒤에만 기록한다.
+알 수 없는 로그인 실패는 `actorProfileId`, `requestId`가 없는 분 단위 aggregate로만 보인다. 권한 거부도 `(actorProfileId, source, reasonCode, UTC minute)`별 aggregate이며 두 집계 모두 `summary.aggregateCount`가 600에서 포화된다. actor/source/reason이 다르면 별도 행으로 격리된다. 개별 activity event의 `requestId`는 Edge가 생성한 UUID v4이고 caller의 `X-Request-ID`는 영구 원장에 저장하지 않는다. 로그인 ID, IP, HMAC, request body를 복원할 수 있는 값은 존재하지 않는다. `sensitive.read`는 예약 목록처럼 일반 조회가 아니라 고객명 복호화 결과처럼 민감값이 실제 반환된 뒤에만 기록한다.
 
 ## Python #44 연결 기준
 

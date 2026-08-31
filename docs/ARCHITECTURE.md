@@ -52,7 +52,7 @@ developer 운영 상태는 `private` 원본이나 Supabase 내부 schema를 Edge
 
 Edge 로그인은 alias 조회 전에 PostgreSQL fixed-window 제한을 **Supabase gateway가 확인한 client HMAC bucket(30회/분) → 정규화 ID별 HMAC bucket(10회/분) → 높은 emergency global bucket(600회/분)** 순서로 원자적으로 소비합니다. 공격 client가 ID를 계속 바꿔도 자기 bucket만 소진하며 다른 정상 client의 로그인을 막지 못합니다. global cap은 여러 client를 동원한 비상 상황의 최종 안전장치입니다. 원문 IP와 로그인 ID는 저장하지 않고, 첫 차단을 기록한 `limit + 1` 이후 같은 window의 추가 거부는 saturated row를 갱신하지 않습니다. 만료 row 정리도 요청당 최대 64개만 수행합니다. Edge instance 메모리는 cold start와 수평 확장 때 공유되지 않으므로 보안 제한 상태를 두지 않습니다. 사용자별 5회 실패/15분 잠금은 이 abuse 제한과 별도로 유지합니다.
 
-성공한 업무 상태 변경은 `public.audit_events`에 immutable domain audit로 남깁니다. 로그인 성공·알려진 계정 로그인 실패·인증된 actor의 중요 capability 거부·실제 민감정보 조회는 별도의 `private.actor_activity_events`에 기록합니다. 알 수 없는 로그인 ID 실패는 ID/IP/HMAC을 저장하지 않고 `private.actor_activity_aggregates`의 분 단위 한 row와 포화 count로만 집계합니다. 두 private 원본은 Data API에 노출하지 않고 fixed `search_path`와 exact server-only grant를 가진 app-owned RPC를 통해서만 append/projection합니다.
+성공한 업무 상태 변경은 `public.audit_events`에 immutable domain audit로 남깁니다. 로그인 성공·알려진 계정 로그인 실패·실제 민감정보 조회는 별도의 `private.actor_activity_events`에 개별 기록합니다. 알 수 없는 로그인 ID 실패는 ID/IP/HMAC 없이 분 단위 aggregate로, 인증된 actor의 중요 capability 거부는 `(actor, source, reason, UTC minute)` 단위 aggregate로 집계하며 count는 600에서 포화됩니다. activity 원장에 영구 저장되는 `request_id`는 Edge가 직접 생성한 UUID v4만 허용하고 caller의 `X-Request-ID`는 응답 correlation에만 transient하게 사용합니다. 모든 private 원본은 Data API에 노출하지 않고 fixed `search_path`와 exact server-only grant를 가진 app-owned RPC를 통해서만 append/projection합니다.
 
 ## 데이터 모델
 

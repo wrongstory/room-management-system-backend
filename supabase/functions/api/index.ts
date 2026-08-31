@@ -92,7 +92,7 @@ Deno.serve(async (request) => {
 
     clients = createEdgeClients();
     if (request.method === "POST" && path === "/v1/auth/login") {
-      return jsonResponse(await login(request, clients, id), 200, corsHeaders);
+      return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
 
     actor = await authenticate(request, clients);
@@ -362,7 +362,7 @@ Deno.serve(async (request) => {
       isAuthorizationDeniedCode(error.code)
     ) {
       try {
-        await recordAuthorizationDenied(clients, actor, source, id, error.code);
+        await recordAuthorizationDenied(clients, actor, source, error.code);
       } catch (activityError) {
         responseError = activityError;
       }

@@ -379,6 +379,7 @@ erDiagram
   NOTIFICATIONS ||--o{ NOTIFICATION_OUTBOX : "푸시 재시도"
   PROFILES ||--o{ AUDIT_EVENTS : "행위자"
   PROFILES ||--o{ ACTOR_ACTIVITY_EVENTS : "인증·권한·민감접근 행위자"
+  PROFILES ||--o{ ACTOR_AUTHORIZATION_DENIAL_AGGREGATES : "권한 거부 집계 행위자"
   PROFILES ||--o{ SCHEDULER_INVOCATION_HEARTBEATS : "scheduler actor"
   PROFILES ||--o| DEVELOPER_DIAGNOSTIC_RATE_LIMITS : "진단 제한"
 
@@ -458,6 +459,17 @@ erDiagram
     int occurrence_count
     timestamptz last_occurred_at
   }
+  ACTOR_AUTHORIZATION_DENIAL_AGGREGATES {
+    uuid id PK
+    uuid actor_profile_id FK
+    text actor_role_snapshot
+    text source
+    text reason_code
+    timestamptz bucket_started_at
+    int occurrence_count
+    timestamptz first_occurred_at
+    timestamptz last_occurred_at
+  }
   SCHEDULER_INVOCATION_HEARTBEATS {
     text invocation_key PK
     timestamptz scheduled_at
@@ -478,7 +490,7 @@ erDiagram
 - cycle이 `PAYING`에 진입한 뒤에는 item membership과 잠금 금액·행위자·시각 snapshot을 임의로 바꿀 수 없다. 외부 송금이 없음을 확인한 `PAYING/CHECK → OPEN`은 사유·행위자·시각과 CAS version을 기록하면서 lock metadata만 해제하며 candidate item은 유지한다. `PAID` snapshot은 되돌려 쓰지 않는다.
 - scheduler heartbeat, developer 진단 제한, actor activity 원본은 `private` 운영 projection 상태다. Data API table 권한을 주지 않고 service-role도 원본 table을 직접 읽지 않으며, exact developer/admin 검증을 포함한 app-owned RPC로만 기록·조회한다.
 - developer 감사 API는 `audit_events`의 raw JSON을 반환하지 않고 account·availability·reservation·cleaning·room domain event allowlist의 필드별 projection만 최대 31일·100건 cursor pagination으로 반환한다.
-- 로그인·권한거부·민감접근은 domain audit과 분리해 `actor_activity_events`에 append한다. unknown login 실패는 로그인 ID·IP·HMAC 없이 `actor_activity_aggregates`의 분 단위 한 row와 600 포화 count로만 유지한다.
+- 로그인·민감접근은 domain audit과 분리해 `actor_activity_events`에 append하며 저장 request ID는 server-generated UUID v4만 허용한다. unknown login 실패는 로그인 ID·IP·HMAC 없이 `actor_activity_aggregates`의 분 단위 한 row로, 권한거부는 `(actor, source, reason, UTC minute)`별 `actor_authorization_denial_aggregates` 한 row로 유지하고 두 count 모두 600에서 포화한다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 

@@ -33,10 +33,11 @@ class DeveloperActivityEvent:
         resource_type (None | str):
         resource_id (None | UUID):
         reason_code (None | str):
-        request_id (None | str): 안전한 correlation ID. 세션 ID가 아닙니다.
+        request_id (None | UUID): 개별 이벤트에만 존재하는 Edge 생성 UUID v4입니다. caller X-Request-ID나 세션 ID가 아닙니다.
         occurred_at (datetime.datetime):
         recorded_at (datetime.datetime):
-        summary (DeveloperActivityEventSummary): unknown login aggregate에만 count/lastOccurredAt/bucketMinutes를 반환합니다.
+        summary (DeveloperActivityEventSummary): unknown login과 authorization denial aggregate에
+            count/lastOccurredAt/bucketMinutes를 반환합니다.
     """
 
     id: UUID
@@ -49,7 +50,7 @@ class DeveloperActivityEvent:
     resource_type: None | str
     resource_id: None | UUID
     reason_code: None | str
-    request_id: None | str
+    request_id: None | UUID
     occurred_at: datetime.datetime
     recorded_at: datetime.datetime
     summary: DeveloperActivityEventSummary
@@ -90,7 +91,10 @@ class DeveloperActivityEvent:
         reason_code = self.reason_code
 
         request_id: None | str
-        request_id = self.request_id
+        if isinstance(self.request_id, UUID):
+            request_id = str(self.request_id)
+        else:
+            request_id = self.request_id
 
         occurred_at = self.occurred_at.isoformat()
 
@@ -195,10 +199,18 @@ class DeveloperActivityEvent:
 
         reason_code = _parse_reason_code(d.pop("reasonCode"))
 
-        def _parse_request_id(data: object) -> None | str:
+        def _parse_request_id(data: object) -> None | UUID:
             if data is None:
                 return data
-            return cast(None | str, data)
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                request_id_type_0 = UUID(data)
+
+                return request_id_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | UUID, data)
 
         request_id = _parse_request_id(d.pop("requestId"))
 
