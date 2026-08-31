@@ -10,6 +10,11 @@ const availabilityApiUrl = new URL(
   import.meta.url
 );
 const developerApiUrl = new URL('../supabase/functions/_shared/developer-api.ts', import.meta.url);
+const activityApiUrl = new URL('../supabase/functions/_shared/activity-api.ts', import.meta.url);
+const activityContractUrl = new URL(
+  '../supabase/functions/_shared/activity-contract.ts',
+  import.meta.url
+);
 const openApiUrl = new URL('../supabase/functions/_shared/openapi.ts', import.meta.url);
 const fastifyPasswordUrl = new URL('../src/modules/auth/password.ts', import.meta.url);
 const fastifyAuthRoutesUrl = new URL('../src/modules/auth/auth.routes.ts', import.meta.url);
@@ -28,6 +33,10 @@ const clientIsolationMigrationUrl = new URL(
 );
 const developerOperationsMigrationUrl = new URL(
   '../supabase/migrations/20260830123241_developer_operations_projections.sql',
+  import.meta.url
+);
+const actorActivityMigrationUrl = new URL(
+  '../supabase/migrations/20260831124140_actor_activity_audit_contract.sql',
   import.meta.url
 );
 
@@ -162,21 +171,23 @@ describe('Supabase Edge runtime PoC contract', () => {
   });
 
   it('keeps developer operations behind exact-role and app-owned projections', async () => {
-    const [api, runtime, developerApi, migration, openApi] = await Promise.all([
+    const [api, runtime, developerApi, migration, activityMigration, openApi] = await Promise.all([
       readFile(apiUrl, 'utf8'),
       readFile(runtimeUrl, 'utf8'),
       readFile(developerApiUrl, 'utf8'),
       readFile(developerOperationsMigrationUrl, 'utf8'),
+      readFile(actorActivityMigrationUrl, 'utf8'),
       readFile(openApiUrl, 'utf8')
     ]);
 
     expect(runtime).toMatch(/actor\.role !== ["']developer["']/);
     expect(api).toContain('path === "/v1/developer/overview"');
     expect(api).toContain('path === "/v1/developer/audit-events"');
+    expect(api).toContain('path === "/v1/developer/activity-events"');
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toContain(
-      'expectedMigrationName = "developer_operations_projections"'
+      'expectedMigrationName = "actor_activity_audit_contract"'
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -185,8 +196,39 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(migration).toContain('private.developer_diagnostic_rate_limits');
     expect(migration).toContain('from public, anon, authenticated');
     expect(migration).toContain('to service_role');
+    expect(activityMigration).toContain('private.actor_activity_events');
+    expect(activityMigration).toContain('private.actor_activity_aggregates');
+    expect(activityMigration).toContain(
+      'private.actor_authorization_denial_aggregates'
+    );
+    expect(activityMigration).toContain('public.list_developer_activity_events');
     expect(openApi).toContain('DeveloperAuditPage');
     expect(openApi).toContain('DIAGNOSTICS_RATE_LIMITED');
+  });
+
+  it('records only source-controlled security activity through server-owned RPCs', async () => {
+    const [api, accountApi, activityApi, contract, migration] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(accountApiUrl, 'utf8'),
+      readFile(activityApiUrl, 'utf8'),
+      readFile(activityContractUrl, 'utf8'),
+      readFile(actorActivityMigrationUrl, 'utf8')
+    ]);
+
+    expect(accountApi).toContain('recordUnknownLoginFailed(clients)');
+    expect(accountApi).toContain('recordLoginSucceeded(');
+    expect(accountApi).toContain('recordKnownLoginFailed(');
+    expect(api).toContain('recordAuthorizationDenied(clients, actor, source, error.code)');
+    expect(contract).toContain('edge.authorization.reservations');
+    expect(contract).toContain('edge.authorization.rooms');
+    expect(activityApi).toContain('record_actor_activity_event');
+    expect(activityApi).toContain('record_unknown_login_failure');
+    expect(activityApi).toContain('record_authorization_denial');
+    expect(activityApi).toContain('p_request_id: serverActivityRequestId()');
+    expect(migration).toContain("set search_path = ''");
+    expect(migration).toContain('from public, anon, authenticated');
+    expect(migration).toContain('revoke all on table private.actor_activity_events');
+    expect(migration).not.toMatch(/\b(access_token|refresh_token|authorization_header|client_ip|request_body)\b/i);
   });
 
   it('ports weekly availability through authenticated RLS reads and actor-bound commands', async () => {

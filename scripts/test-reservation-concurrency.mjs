@@ -106,6 +106,28 @@ assert(
 
 const authUserId = randomUUID();
 const actorProfileId = randomUUID();
+const developerAuthUserId = randomUUID();
+const developerProfileId = randomUUID();
+const { error: developerAuthError } = await client.auth.admin.createUser({
+  id: developerAuthUserId,
+  email: `developer-${developerAuthUserId}@test.invalid`,
+  password: `T:${randomUUID()}`,
+  email_confirm: true
+});
+assert(!developerAuthError, `developer Auth fixture failed: ${developerAuthError?.message}`);
+const { error: developerProfileError } = await client.rpc('bootstrap_first_developer_profile', {
+  p_profile_id: developerProfileId,
+  p_auth_user_id: developerAuthUserId,
+  p_display_name: '동시성 테스트 개발자',
+  p_display_name_normalized: '동시성 테스트 개발자',
+  p_phone_last_four: '0001',
+  p_phone_lookup_hash: createHash('sha256')
+    .update(`activity-developer-${randomUUID()}`)
+    .digest('hex'),
+  p_idempotency_key: `activity-developer-${randomUUID()}`
+});
+assert(!developerProfileError, `developer profile fixture failed: ${developerProfileError?.message}`);
+
 const email = `concurrency-${authUserId}@test.invalid`;
 const password = `T:${randomUUID()}`;
 const { error: authError } = await client.auth.admin.createUser({
@@ -199,6 +221,66 @@ assert(
   'duplicate account-create compensation must leave no orphan Auth user'
 );
 
+const denialOccurredAt = new Date(
+  Math.floor(Date.now() / 60_000) * 60_000 + 1_000
+).toISOString();
+const denialCalls = Array.from({ length: 1000 }, () => () => (
+  client.rpc('record_authorization_denial', {
+    p_actor_profile_id: actorProfileId,
+    p_source: 'edge.authorization.developer',
+    p_reason_code: 'DEVELOPER_REQUIRED',
+    p_occurred_at: denialOccurredAt
+  })
+));
+const denialResults = [];
+for (let offset = 0; offset < denialCalls.length; offset += 100) {
+  denialResults.push(...await Promise.all(
+    denialCalls.slice(offset, offset + 100).map((call) => call())
+  ));
+}
+assert(
+  denialResults.every((result) => !result.error),
+  'concurrent authorization denials must not raise unique or saturation errors'
+);
+const { error: isolatedDenialError } = await client.rpc('record_authorization_denial', {
+  p_actor_profile_id: logicalAccountId,
+  p_source: 'edge.authorization.developer',
+  p_reason_code: 'DEVELOPER_REQUIRED',
+  p_occurred_at: denialOccurredAt
+});
+assert(!isolatedDenialError, 'different actor denial must use an isolated aggregate');
+
+async function denialProjection(profileId) {
+  const { data, error } = await client.rpc('list_developer_activity_events', {
+    p_actor_profile_id: developerProfileId,
+    p_filter_actor_profile_id: profileId,
+    p_role: null,
+    p_categories: ['authorization'],
+    p_event_types: ['authorization.denied'],
+    p_outcomes: ['denied'],
+    p_from: new Date(Date.now() - 5 * 60_000).toISOString(),
+    p_to: new Date(Date.now() + 5 * 60_000).toISOString(),
+    p_before_recorded_at: null,
+    p_before_id: null,
+    p_limit: 100
+  });
+  assert(!error && Array.isArray(data), `denial projection failed: ${error?.message}`);
+  return data;
+}
+
+const saturatedDenials = await denialProjection(actorProfileId);
+assert(
+  saturatedDenials.length === 1 &&
+    saturatedDenials[0].summary?.aggregateCount === 600,
+  '1000 same actor/source/reason denials must converge to one saturated row'
+);
+const isolatedDenials = await denialProjection(logicalAccountId);
+assert(
+  isolatedDenials.length === 1 &&
+    isolatedDenials[0].summary?.aggregateCount === 1,
+  'different actors must keep isolated authorization denial rows'
+);
+
 const { data: room, error: roomError } = await client
   .from('rooms')
   .select('id,state_version')
@@ -277,5 +359,5 @@ assert(
 );
 
 console.log(
-  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, reservation-create=1/2, manual-checkout=1/2.'
+  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, reservation-create=1/2, manual-checkout=1/2.'
 );

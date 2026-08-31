@@ -52,6 +52,8 @@ developer 운영 상태는 `private` 원본이나 Supabase 내부 schema를 Edge
 
 Edge 로그인은 alias 조회 전에 PostgreSQL fixed-window 제한을 **Supabase gateway가 확인한 client HMAC bucket(30회/분) → 정규화 ID별 HMAC bucket(10회/분) → 높은 emergency global bucket(600회/분)** 순서로 원자적으로 소비합니다. 공격 client가 ID를 계속 바꿔도 자기 bucket만 소진하며 다른 정상 client의 로그인을 막지 못합니다. global cap은 여러 client를 동원한 비상 상황의 최종 안전장치입니다. 원문 IP와 로그인 ID는 저장하지 않고, 첫 차단을 기록한 `limit + 1` 이후 같은 window의 추가 거부는 saturated row를 갱신하지 않습니다. 만료 row 정리도 요청당 최대 64개만 수행합니다. Edge instance 메모리는 cold start와 수평 확장 때 공유되지 않으므로 보안 제한 상태를 두지 않습니다. 사용자별 5회 실패/15분 잠금은 이 abuse 제한과 별도로 유지합니다.
 
+성공한 업무 상태 변경은 `public.audit_events`에 immutable domain audit로 남깁니다. 로그인 성공·알려진 계정 로그인 실패·실제 민감정보 조회는 별도의 `private.actor_activity_events`에 개별 기록합니다. 알 수 없는 로그인 ID 실패는 ID/IP/HMAC 없이 분 단위 aggregate로, 인증된 actor의 중요 capability 거부는 `(actor, source, reason, UTC minute)` 단위 aggregate로 집계하며 count는 600에서 포화됩니다. activity 원장에 영구 저장되는 `request_id`는 Edge가 직접 생성한 UUID v4만 허용하고 caller의 `X-Request-ID`는 응답 correlation에만 transient하게 사용합니다. 모든 private 원본은 Data API에 노출하지 않고 fixed `search_path`와 exact server-only grant를 가진 app-owned RPC를 통해서만 append/projection합니다.
+
 ## 데이터 모델
 
 ```mermaid
@@ -73,6 +75,7 @@ erDiagram
   PROFILES ||--o{ PAYROLL_CYCLES : paid
   PROFILES ||--o{ NOTIFICATIONS : receives
   PROFILES ||--o{ AUDIT_EVENTS : acts
+  PROFILES ||--o{ ACTOR_ACTIVITY_EVENTS : generates
 ```
 
 색상이나 `투숙 중/청소 필요/배정 가능/배정 불가` 같은 복합 UI 상태는 저장하지 않습니다. 예약·수동 점유 보정·운영 중지·청소 단계·촛불·차단 이슈에서 파생합니다.
@@ -131,7 +134,7 @@ erDiagram
 - `POST /v1/accounts/:profileId/password-reset`
 - `GET /v1/rooms`, `GET /v1/rooms/:roomId` (관리자 전용 운영 projection)
 - `GET /v1/developer/overview`, `/runtime-status`, `/database-status`, `/scheduler-status`
-- `GET /v1/developer/audit-events`, `POST /v1/developer/diagnostics` (singleton developer 전용 bounded projection)
+- `GET /v1/developer/audit-events`, `GET /v1/developer/activity-events`, `POST /v1/developer/diagnostics` (singleton developer 전용 bounded projection)
 - 객실 기준정보 변경, 운영 차단·해제, 촛불 수량 event, 이슈 등록·해결, PIN 동기화 결과 기록
 - `GET·POST /v1/reservations`, `GET /v1/reservations/:reservationId`
 - `POST /v1/reservations/cleaning-requests`, `POST /v1/reservations/cleaning-requests/:targetId/cancel`
@@ -150,7 +153,7 @@ erDiagram
 
 Edge `/v1/rooms`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 
-developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migration version이 아니라 안정적인 Git migration name으로 source head를 찾은 뒤 실제 원격 순서를 `ahead | equal | behind | unknown`으로 정규화한다. public base table RLS 누락 수와 allowlist RPC 상태만 제공하며, critical RPC는 exact signature와 `service_role` 전용 EXECUTE 경계를 모두 만족해야 정상이다. scheduler 상태는 Cron SQL·Vault·`pg_net` 응답 본문 대신 정규화된 Cron metadata와 `private.scheduler_invocation_heartbeats` projection을 사용한다. 감사 조회는 최대 31일·100건 cursor pagination이고 raw `before_state`/`after_state`를 노출하지 않는다. diagnostics는 임의 URL·SQL·RPC 이름을 받지 않으며 durable 10회/분 제한을 적용한다.
+developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migration version이 아니라 안정적인 Git migration name으로 source head를 찾은 뒤 실제 원격 순서를 `ahead | equal | behind | unknown`으로 정규화한다. public base table RLS 누락 수와 allowlist RPC 상태만 제공하며, critical RPC는 exact signature와 `service_role` 전용 EXECUTE 경계를 모두 만족해야 정상이다. scheduler 상태는 Cron SQL·Vault·`pg_net` 응답 본문 대신 정규화된 Cron metadata와 `private.scheduler_invocation_heartbeats` projection을 사용한다. domain 감사와 활동/보안 조회는 각각 최대 31일·100건 cursor pagination이고 raw state·request body·자격증명·PII를 노출하지 않는다. diagnostics는 임의 URL·SQL·RPC 이름을 받지 않으며 durable 10회/분 제한을 적용한다.
 
 ## 원격 환경 현황
 

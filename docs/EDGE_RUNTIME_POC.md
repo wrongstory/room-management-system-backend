@@ -51,7 +51,8 @@ Supabase Cron (pg_cron)
 | `api` | `GET /api/v1/developer/runtime-status` | active developer | environment·설정 여부 projection |
 | `api` | `GET /api/v1/developer/database-status` | active developer | migration·RLS·핵심 RPC 검사 |
 | `api` | `GET /api/v1/developer/scheduler-status` | active developer | Cron·actor·heartbeat 상태 |
-| `api` | `GET /api/v1/developer/audit-events` | active developer | bounded 감사 projection |
+| `api` | `GET /api/v1/developer/audit-events` | active developer | bounded domain 감사 projection |
+| `api` | `GET /api/v1/developer/activity-events` | active developer | bounded 인증·권한·민감접근 projection |
 | `api` | `POST /api/v1/developer/diagnostics` | active developer | allowlist read-only 진단 |
 | `api` | `GET /api/v1/rooms` | active admin + password changed | 기존 객실 projection RPC |
 | `reservation-scheduler` | `POST /reservation-scheduler` | `x-scheduler-secret` | 예약 전이/PII 보존 command |
@@ -68,7 +69,7 @@ Scheduler 시간값은 두 역할로 분리한다. 요청의 `scheduledAt`은 �
 
 각 인증된 scheduler 실행은 업무 RPC 완료 뒤 `private.scheduler_invocation_heartbeats`에 7일 app-owned 상태를 기록한다. 같은 invocation key 재시도는 attempt count와 마지막 결과만 갱신하며 secret·Authorization·HTTP body·원문 DB 오류는 저장하지 않는다. developer scheduler projection은 Cron SQL이나 `net._http_response` raw row를 공개하지 않고 활성 여부·cadence·최근 run 시각, exact-admin actor 유효성, 안전한 heartbeat 필드만 반환한다.
 
-developer 운영 API는 exact `developer` 역할만 허용한다. DB·Cron·감사 원본은 app-owned `SECURITY DEFINER` projection 뒤에 두며 service-role도 private heartbeat/limiter table을 직접 조회하지 않는다. audit는 계정 운영 event allowlist, 최대 31일·100건이고 diagnostics는 임의 URL·SQL·RPC 입력 없이 10회/분 durable 제한을 사용한다. 모든 developer 응답은 `Cache-Control: no-store`다.
+developer 운영 API는 exact `developer` 역할만 허용한다. DB·Cron·감사 원본은 app-owned `SECURITY DEFINER` projection 뒤에 두며 service-role도 private heartbeat/limiter/activity table을 직접 조회하지 않는다. 성공한 업무 mutation은 immutable `public.audit_events`에 남기고 account·availability·reservation·room·scheduler 승인 event만 안전한 summary로 공개한다. 로그인·민감정보 조회는 별도 private activity event에 기록하고, 알 수 없는 로그인 실패와 권한 거부는 각각 분 단위 bounded aggregate로 집계한다. 권한 거부 key는 actor/source/reason을 포함하며 count는 600에서 포화된다. 영구 request ID는 Edge가 생성한 UUID v4만 사용하고 caller `X-Request-ID`는 저장하지 않는다. 두 projection 모두 최대 31일·100건 cursor pagination을 적용하고 raw before/after state를 반환하지 않는다. diagnostics는 임의 URL·SQL·RPC 입력 없이 10회/분 durable 제한을 사용한다. 모든 developer 응답은 `Cache-Control: no-store`다.
 
 ## 로컬 검증
 

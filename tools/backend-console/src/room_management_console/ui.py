@@ -537,6 +537,68 @@ class AuditPage(QWidget):
                 self.table.setItem(row, column, QTableWidgetItem(text))
 
 
+class ActivityPage(QWidget):
+    """업무 변경 감사와 분리된 인증·권한·민감접근 로그 화면."""
+
+    def __init__(self, client: BackendApiClient) -> None:
+        super().__init__()
+        self._client = client
+        self._pool = QThreadPool.globalInstance()
+        self._cursor: str | None = None
+        layout = QVBoxLayout(self)
+        controls = QHBoxLayout()
+        refresh = QPushButton("최근 활동/보안 로그 조회")
+        refresh.clicked.connect(self.refresh)
+        self.next_button = QPushButton("다음 페이지")
+        self.next_button.clicked.connect(self.next_page)
+        self.next_button.setEnabled(False)
+        controls.addWidget(refresh)
+        controls.addWidget(self.next_button)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(
+            ["기록 시각", "범주", "이벤트", "결과", "행위자/역할", "사유", "안전 요약"]
+        )
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table)
+
+    def refresh(self) -> None:
+        self._cursor = None
+        self._load(None)
+
+    def next_page(self) -> None:
+        self._load(self._cursor)
+
+    def _load(self, cursor: str | None) -> None:
+        worker = Worker(lambda: self._client.developer_activity_events(cursor=cursor))
+        worker.signals.succeeded.connect(self._render)
+        worker.signals.failed.connect(lambda error: show_api_error(self, cast(ApiError, error)))
+        self._pool.start(worker)
+
+    def _render(self, value: object) -> None:
+        page = cast(dict[str, Any], value)
+        events = cast(list[dict[str, Any]], page.get("events", []))
+        self._cursor = cast(str | None, page.get("nextCursor"))
+        self.next_button.setEnabled(bool(self._cursor))
+        self.table.setRowCount(len(events))
+        for row, event in enumerate(events):
+            actor = event.get("actorProfileId") or "anonymous aggregate"
+            role = event.get("actorRole") or "—"
+            values = [
+                str(event.get("recordedAt", "")),
+                str(event.get("category", "")),
+                str(event.get("eventType", "")),
+                str(event.get("outcome", "")),
+                f"{actor} / {role}",
+                str(event.get("reasonCode") or "—"),
+                json_summary(event.get("summary", {})),
+            ]
+            for column, text in enumerate(values):
+                self.table.setItem(row, column, QTableWidgetItem(text))
+
+
 def json_summary(value: object) -> str:
     if not isinstance(value, dict):
         return ""
@@ -585,9 +647,11 @@ class MainWindow(QMainWindow):
         self.dashboard = DashboardPage(client)
         self.accounts = AccountsPage(client)
         self.audit = AuditPage(client)
+        self.activity = ActivityPage(client)
         tabs.addTab(self.dashboard, "운영 대시보드")
         tabs.addTab(self.accounts, "계정 관리")
         tabs.addTab(self.audit, "감사 이벤트")
+        tabs.addTab(self.activity, "활동/보안 로그")
         layout.addWidget(tabs)
         self.setCentralWidget(central)
 

@@ -19,6 +19,7 @@ import {
   unlockAccount,
 } from "../_shared/account-api.ts";
 import {
+  developerActivityEvents,
   developerAuditEvents,
   developerDatabaseStatus,
   developerOverview,
@@ -26,12 +27,19 @@ import {
   developerSchedulerStatus,
   runDeveloperDiagnostics,
 } from "../_shared/developer-api.ts";
+import {
+  authorizationSourceForPath,
+  isAuthorizationDeniedCode,
+} from "../_shared/activity-contract.ts";
+import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
 import { toRoomProjections } from "../_shared/room-api.ts";
 import {
   authenticate,
   cors,
   createEdgeClients,
+  type EdgeActor,
+  type EdgeClients,
   EdgeError,
   errorResponse,
   jsonResponse,
@@ -53,13 +61,16 @@ function routePath(url: string): string {
 Deno.serve(async (request) => {
   const id = requestId(request);
   let corsHeaders: Record<string, string> = {};
+  let clients: EdgeClients | undefined;
+  let actor: EdgeActor | undefined;
+  let path = "/";
   try {
     corsHeaders = cors(request);
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    const path = routePath(request.url);
+    path = routePath(request.url);
     if (request.method === "GET" && path === "/health") {
       return jsonResponse(
         {
@@ -79,12 +90,12 @@ Deno.serve(async (request) => {
       return swaggerUiResponse(corsHeaders);
     }
 
-    const clients = createEdgeClients();
+    clients = createEdgeClients();
     if (request.method === "POST" && path === "/v1/auth/login") {
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
 
-    const actor = await authenticate(request, clients);
+    actor = await authenticate(request, clients);
     if (request.method === "GET" && path === "/v1/auth/me") {
       return jsonResponse({ user: actor }, 200, corsHeaders);
     }
@@ -208,6 +219,14 @@ Deno.serve(async (request) => {
       requireDeveloper(actor);
       return jsonResponse(
         await developerAuditEvents(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/developer/activity-events") {
+      requireDeveloper(actor);
+      return jsonResponse(
+        await developerActivityEvents(request, clients, actor),
         200,
         corsHeaders,
       );
@@ -336,6 +355,18 @@ Deno.serve(async (request) => {
       "요청한 API 경로를 찾을 수 없습니다.",
     );
   } catch (error) {
-    return errorResponse(error, id, corsHeaders);
+    let responseError = error;
+    const source = authorizationSourceForPath(path);
+    if (
+      error instanceof EdgeError && actor && clients && source &&
+      isAuthorizationDeniedCode(error.code)
+    ) {
+      try {
+        await recordAuthorizationDenied(clients, actor, source, error.code);
+      } catch (activityError) {
+        responseError = activityError;
+      }
+    }
+    return errorResponse(responseError, id, corsHeaders);
   }
 });

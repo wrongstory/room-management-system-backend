@@ -2,12 +2,18 @@
 
 from .account import Account
 from .account_status import AccountStatus
+from .activity_category import ActivityCategory
+from .activity_event_type import ActivityEventType
+from .activity_outcome import ActivityOutcome
 from .actor import Actor
 from .app_role import AppRole
 from .change_account_role_response_200 import ChangeAccountRoleResponse200
 from .change_account_status_response_200 import ChangeAccountStatusResponse200
 from .create_account_request import CreateAccountRequest
 from .create_account_response_201 import CreateAccountResponse201
+from .developer_activity_event import DeveloperActivityEvent
+from .developer_activity_event_summary import DeveloperActivityEventSummary
+from .developer_activity_page import DeveloperActivityPage
 from .developer_audit_event import DeveloperAuditEvent
 from .developer_audit_event_summary import DeveloperAuditEventSummary
 from .developer_audit_event_type import DeveloperAuditEventType
@@ -92,12 +98,18 @@ from .unlock_account_response_200 import UnlockAccountResponse200
 __all__ = (
     "Account",
     "AccountStatus",
+    "ActivityCategory",
+    "ActivityEventType",
+    "ActivityOutcome",
     "Actor",
     "AppRole",
     "ChangeAccountRoleResponse200",
     "ChangeAccountStatusResponse200",
     "CreateAccountRequest",
     "CreateAccountResponse201",
+    "DeveloperActivityEvent",
+    "DeveloperActivityEventSummary",
+    "DeveloperActivityPage",
     "DeveloperAuditEvent",
     "DeveloperAuditEventSummary",
     "DeveloperAuditEventType",

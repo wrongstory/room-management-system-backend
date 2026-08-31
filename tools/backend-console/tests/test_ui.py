@@ -9,7 +9,12 @@ from room_management_console.api_client import BackendApiClient
 from room_management_console.approved_targets import APPROVED_HOSTED_TARGETS
 from room_management_console.config import AppConfig
 from room_management_console.models import Account
-from room_management_console.ui import AccountsPage, CreateAccountDialog, LoginDialog
+from room_management_console.ui import (
+    AccountsPage,
+    ActivityPage,
+    CreateAccountDialog,
+    LoginDialog,
+)
 
 RECOVERY_TARGET = APPROVED_HOSTED_TARGETS["recovery"]
 
@@ -169,3 +174,37 @@ def test_account_table_displays_transitional_statuses_without_enabling_status_ch
     page.table.selectRow(0)
     page._update_actions()
     assert not page.status_button.isEnabled()
+
+
+def test_activity_page_labels_security_events_separately_from_domain_audit(
+    qtbot: QtBot,
+) -> None:
+    client = BackendApiClient(
+        config(), transport=httpx.MockTransport(lambda request: httpx.Response(500))
+    )
+    page = ActivityPage(client)
+    qtbot.addWidget(page)
+    page._render(
+        {
+            "events": [
+                {
+                    "recordedAt": "2026-08-31T12:00:00Z",
+                    "category": "authorization",
+                    "eventType": "authorization.denied",
+                    "outcome": "denied",
+                    "actorProfileId": "00000000-0000-4000-8000-000000000001",
+                    "actorRole": "maid",
+                    "reasonCode": "ADMIN_REQUIRED",
+                    "summary": {},
+                }
+            ],
+            "nextCursor": None,
+        }
+    )
+
+    category_header = page.table.horizontalHeaderItem(1)
+    event_item = page.table.item(0, 2)
+    actor_item = page.table.item(0, 4)
+    assert category_header is not None and category_header.text() == "범주"
+    assert event_item is not None and event_item.text() == "authorization.denied"
+    assert actor_item is not None and actor_item.text().endswith(" / maid")

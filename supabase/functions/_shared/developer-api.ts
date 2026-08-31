@@ -1,7 +1,7 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 
-export const expectedMigrationName = "developer_operations_projections";
+export const expectedMigrationName = "actor_activity_audit_contract";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -13,6 +13,30 @@ const allowedAuditParameters = new Set([
   "limit",
   "to",
 ]);
+const allowedActivityParameters = new Set([
+  "actorProfileId",
+  "category",
+  "cursor",
+  "eventType",
+  "from",
+  "limit",
+  "outcome",
+  "role",
+  "to",
+]);
+const activityRoles = new Set(["developer", "admin", "maid"]);
+const activityCategories = new Set([
+  "auth",
+  "authorization",
+  "sensitive_access",
+]);
+const activityEventTypes = new Set([
+  "auth.login_succeeded",
+  "auth.login_failed",
+  "authorization.denied",
+  "sensitive.read",
+]);
+const activityOutcomes = new Set(["succeeded", "failed", "denied"]);
 const secretConfigurationAllowlist = [
   "ACCOUNT_PHONE_PEPPER",
   "RESERVATION_PII_KEY_BASE64",
@@ -42,6 +66,23 @@ interface AuditCursor {
   id: string;
 }
 
+interface ActivityRow {
+  id: string;
+  category: string;
+  event_type: string;
+  outcome: string;
+  actor_profile_id: string | null;
+  actor_role: string | null;
+  source: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  reason_code: string | null;
+  request_id: string | null;
+  occurred_at: string;
+  recorded_at: string;
+  summary: Record<string, unknown>;
+}
+
 interface DiagnosticLimitRow {
   allowed: boolean;
   retry_after_seconds: number;
@@ -59,6 +100,7 @@ function projectionError(error: { message?: string } | null): never {
   }
   if (
     message.includes("INVALID_AUDIT_QUERY") ||
+    message.includes("INVALID_ACTIVITY_QUERY") ||
     message.includes("INVALID_EXPECTED_MIGRATION") ||
     message.includes("INVALID_DIAGNOSTIC_LIMIT")
   ) {
@@ -276,7 +318,7 @@ function auditQuery(request: Request): {
     );
   }
   const eventTypes = parameters.getAll("eventType");
-  if (eventTypes.length > 8 || eventTypes.some((value) => value.length > 80)) {
+  if (eventTypes.length > 27 || eventTypes.some((value) => value.length > 80)) {
     throw new EdgeError(
       400,
       "VALIDATION_ERROR",
@@ -292,6 +334,98 @@ function auditQuery(request: Request): {
     from: optionalDate(parameters.get("from"), "from"),
     limit,
     to: optionalDate(parameters.get("to"), "to"),
+  };
+}
+
+function selectedValues(
+  parameters: URLSearchParams,
+  name: string,
+  allowed: Set<string>,
+): string[] | null {
+  const values = parameters.getAll(name);
+  if (values.length === 0) {
+    return null;
+  }
+  if (
+    values.length > allowed.size || values.some((value) => !allowed.has(value))
+  ) {
+    throw new EdgeError(
+      400,
+      "VALIDATION_ERROR",
+      `${name} 조회 조건이 올바르지 않습니다.`,
+    );
+  }
+  return values;
+}
+
+function activityQuery(request: Request): {
+  actorProfileId: string | null;
+  before: AuditCursor | null;
+  categories: string[] | null;
+  eventTypes: string[] | null;
+  from: string | null;
+  limit: number;
+  outcomes: string[] | null;
+  role: string | null;
+  to: string | null;
+} {
+  const parameters = new URL(request.url).searchParams;
+  for (const name of parameters.keys()) {
+    if (!allowedActivityParameters.has(name)) {
+      throw new EdgeError(
+        400,
+        "VALIDATION_ERROR",
+        "허용되지 않은 활동 로그 조회 조건입니다.",
+      );
+    }
+  }
+  const limitValue = parameters.get("limit") ?? "50";
+  if (!/^\d{1,3}$/.test(limitValue)) {
+    throw new EdgeError(400, "VALIDATION_ERROR", "limit이 올바르지 않습니다.");
+  }
+  const limit = Number(limitValue);
+  if (limit < 1 || limit > 100) {
+    throw new EdgeError(400, "VALIDATION_ERROR", "limit은 1~100입니다.");
+  }
+  const actorProfileId = parameters.get("actorProfileId");
+  if (actorProfileId && !uuidPattern.test(actorProfileId)) {
+    throw new EdgeError(
+      400,
+      "VALIDATION_ERROR",
+      "actorProfileId가 올바르지 않습니다.",
+    );
+  }
+  const role = parameters.get("role");
+  if (role && !activityRoles.has(role)) {
+    throw new EdgeError(
+      400,
+      "VALIDATION_ERROR",
+      "role 조회 조건이 올바르지 않습니다.",
+    );
+  }
+  const from = optionalDate(parameters.get("from"), "from");
+  const to = optionalDate(parameters.get("to"), "to");
+  if (
+    from && to && Date.parse(to) - Date.parse(from) > 31 * 24 * 60 * 60 * 1000
+  ) {
+    throw new EdgeError(
+      400,
+      "VALIDATION_ERROR",
+      "조회 기간은 최대 31일입니다.",
+    );
+  }
+  return {
+    actorProfileId,
+    before: parameters.get("cursor")
+      ? decodeCursor(parameters.get("cursor") as string)
+      : null,
+    categories: selectedValues(parameters, "category", activityCategories),
+    eventTypes: selectedValues(parameters, "eventType", activityEventTypes),
+    from,
+    limit,
+    outcomes: selectedValues(parameters, "outcome", activityOutcomes),
+    role,
+    to,
   };
 }
 
@@ -337,6 +471,63 @@ export async function developerAuditEvents(
   const last = rows.at(-1);
   return {
     events: rows.map(toDeveloperAuditEvent),
+    nextCursor: rows.length === query.limit && last
+      ? encodeCursor({ recordedAt: last.recorded_at, id: last.id })
+      : null,
+  };
+}
+
+export function toDeveloperActivityEvent(
+  row: ActivityRow,
+): Record<string, unknown> {
+  return {
+    id: row.id,
+    category: row.category,
+    eventType: row.event_type,
+    outcome: row.outcome,
+    actorProfileId: row.actor_profile_id,
+    actorRole: row.actor_role,
+    source: row.source,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id,
+    reasonCode: row.reason_code,
+    requestId: row.request_id,
+    occurredAt: row.occurred_at,
+    recordedAt: row.recorded_at,
+    summary: row.summary,
+  };
+}
+
+export async function developerActivityEvents(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<Record<string, unknown>> {
+  requireDeveloper(actor);
+  const query = activityQuery(request);
+  const { data, error } = await clients.admin.rpc(
+    "list_developer_activity_events",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_filter_actor_profile_id: query.actorProfileId,
+      p_role: query.role,
+      p_categories: query.categories,
+      p_event_types: query.eventTypes,
+      p_outcomes: query.outcomes,
+      p_from: query.from,
+      p_to: query.to,
+      p_before_recorded_at: query.before?.recordedAt ?? null,
+      p_before_id: query.before?.id ?? null,
+      p_limit: query.limit,
+    },
+  );
+  if (error || !Array.isArray(data)) {
+    projectionError(error);
+  }
+  const rows = data as ActivityRow[];
+  const last = rows.at(-1);
+  return {
+    events: rows.map(toDeveloperActivityEvent),
     nextCursor: rows.length === query.limit && last
       ? encodeCursor({ recordedAt: last.recorded_at, id: last.id })
       : null,

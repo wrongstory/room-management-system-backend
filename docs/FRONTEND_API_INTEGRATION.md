@@ -163,7 +163,8 @@ const idempotencyKey = crypto.randomUUID();
 | runtime 상태 | `GET /v1/developer/runtime-status` | secret은 allowlist 이름별 configured boolean만 제공 |
 | DB 상태 | `GET /v1/developer/database-status` | migration drift·RLS 누락·핵심 RPC 여부 |
 | scheduler 상태 | `GET /v1/developer/scheduler-status` | Cron SQL/Vault/HTTP body 없이 정규화 상태만 제공 |
-| 운영 감사 | `GET /v1/developer/audit-events` | 최대 31일·100건 cursor pagination, raw state 없음 |
+| 업무 감사 | `GET /v1/developer/audit-events` | 성공한 domain mutation, 최대 31일·100건 cursor pagination, raw state 없음 |
+| 활동·보안 로그 | `GET /v1/developer/activity-events` | 로그인·민감접근 및 분 단위 권한거부 집계, 최대 31일·100건 cursor pagination |
 | 운영 진단 | `POST /v1/developer/diagnostics` | body 없음, 임의 URL/SQL/RPC 입력 없음, 10회/분 |
 | 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 독립 상태 축 사용 |
 | 현재 가능일 | `GET /v1/availability?weekStart=...` | maid는 본인만, admin은 maidProfileId 선택 가능 |

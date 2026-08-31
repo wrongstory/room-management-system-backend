@@ -29,7 +29,7 @@ class DeveloperAuditEvent:
         effective_at (datetime.datetime):
         recorded_at (datetime.datetime):
         reason_code (None | str):
-        summary (DeveloperAuditEventSummary): 이벤트별 displayName/loginId/role/status/mustChangePassword 허용 필드만 포함
+        summary (DeveloperAuditEventSummary): 이벤트 종류별로 서버가 승인한 표시 필드만 포함하며 raw before_state/after_state는 반환하지 않습니다.
     """
 
     id: UUID

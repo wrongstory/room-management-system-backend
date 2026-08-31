@@ -156,8 +156,10 @@ export async function authenticate(
 }
 
 export function requestId(request: Request): string {
-  return request.headers.get("x-request-id")?.slice(0, 128) ||
-    crypto.randomUUID();
+  const supplied = request.headers.get("x-request-id")?.trim() ?? "";
+  return /^[A-Za-z0-9._:-]{1,128}$/.test(supplied)
+    ? supplied
+    : crypto.randomUUID();
 }
 
 export function requireBusinessAdmin(actor: EdgeActor): void {

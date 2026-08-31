@@ -173,8 +173,16 @@ Deno.test("unknown alias and wrong password share INVALID_CREDENTIALS", async ()
     "durable limiter runs before alias lookup",
   );
   assert(
+    unknownEvents.includes("rpc:record_unknown_login_failure"),
+    "unknown account failure must use the bounded activity aggregate",
+  );
+  assert(
     wrongEvents.includes("rpc:record_login_failure"),
     "known account failure must increment the account lock counter",
+  );
+  assert(
+    wrongEvents.includes("rpc:record_actor_activity_event"),
+    "known account failure must append a safe activity event",
   );
 });
 
@@ -207,6 +215,9 @@ Deno.test("an exhausted client bucket does not block another client", async () =
   const clients = {
     admin: {
       rpc: (name: string, parameters: Record<string, string | number>) => {
+        if (name === "record_unknown_login_failure") {
+          return Promise.resolve({ data: null, error: null });
+        }
         assertEquals(name, "consume_login_rate_limits", "login limiter RPC");
         limiterParameters.push(parameters);
         const clientKey = String(parameters.p_client_key_hash);
@@ -286,7 +297,10 @@ Deno.test("platform Cloudflare address wins over spoofable fallback headers", as
   const clientKeys: string[] = [];
   const clients = {
     admin: {
-      rpc: (_name: string, parameters: Record<string, string>) => {
+      rpc: (name: string, parameters: Record<string, string>) => {
+        if (name === "record_unknown_login_failure") {
+          return Promise.resolve({ data: null, error: null });
+        }
         clientKeys.push(parameters.p_client_key_hash);
         return Promise.resolve({
           data: [{ allowed: true, retry_after_seconds: 0 }],

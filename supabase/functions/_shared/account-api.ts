@@ -1,5 +1,10 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { bearerToken, EdgeError, requiredEnv } from "./runtime.ts";
+import {
+  recordKnownLoginFailed,
+  recordLoginSucceeded,
+  recordUnknownLoginFailed,
+} from "./activity-api.ts";
 
 type AppRole = "developer" | "admin" | "maid";
 type ManagedRole = Exclude<AppRole, "developer">;
@@ -554,6 +559,7 @@ export async function login(
     );
   }
   if (!aliasRow) {
+    await recordUnknownLoginFailed(clients);
     throw new EdgeError(
       401,
       "INVALID_CREDENTIALS",
@@ -563,6 +569,11 @@ export async function login(
 
   const profile = await getProfile(clients, "id", aliasRow.profile_id);
   if (profile.status !== "active") {
+    await recordKnownLoginFailed(
+      clients,
+      { profileId: profile.id },
+      "ACCOUNT_INACTIVE",
+    );
     throw new EdgeError(
       403,
       "ACCOUNT_INACTIVE",
@@ -570,6 +581,11 @@ export async function login(
     );
   }
   if (profile.locked_until && Date.parse(profile.locked_until) > Date.now()) {
+    await recordKnownLoginFailed(
+      clients,
+      { profileId: profile.id },
+      "ACCOUNT_LOCKED",
+    );
     throw new EdgeError(
       423,
       "ACCOUNT_LOCKED",
@@ -585,6 +601,11 @@ export async function login(
     await clients.admin.rpc("record_login_failure", {
       p_profile_id: profile.id,
     });
+    await recordKnownLoginFailed(
+      clients,
+      { profileId: profile.id },
+      "INVALID_CREDENTIALS",
+    );
     throw new EdgeError(
       401,
       "INVALID_CREDENTIALS",
@@ -607,6 +628,16 @@ export async function login(
   }
   if (typeof retiredAliasCount === "number" && retiredAliasCount > 0) {
     await clients.admin.auth.admin.signOut(data.session.access_token, "others");
+  }
+
+  try {
+    await recordLoginSucceeded(
+      clients,
+      { profileId: profile.id },
+    );
+  } catch (error) {
+    await clients.admin.auth.admin.signOut(data.session.access_token, "local");
+    throw error;
   }
 
   return {
