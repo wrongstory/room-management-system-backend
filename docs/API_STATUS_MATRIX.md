@@ -243,11 +243,13 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 - [x] Python 3.12+, PySide6, httpx exact dependency와 `uv.lock`
 - [x] OpenAPI 0.29.0 생성 client + 생성 코드 밖 인증/멱등성/redaction adapter
 - [x] environment/project ref 고정 텍스트, developer/last-admin UI 보호
+- [x] production/recovery source-controlled exact allowlist + 로그인 후 runtime 대상 재대조
+- [x] account response 5개 상태 표시 / status command 3개 target 분리
 - [x] 계정·developer dashboard·감사·진단 화면
 - [x] DB credential/service role/SQL 기능 미포함
 - [x] Windows x64 PyInstaller workflow와 checksum source
 - [x] 설치·업데이트·삭제·PC 분실 runbook
-- [ ] feature CI + 독립 보안/운영 리뷰 P0/P1=0
+- [ ] PR #57 새 exact head required CI + 독립 보안/운영 재검토 P0/P1=0
 - [ ] `dev` 병합
 - [ ] 승인 source 기반 Windows x64 artifact build/smoke
 - [ ] developer 로그인 → business admin 생성 hosted smoke
@@ -262,18 +264,19 @@ production completeness 기준의 정본 순서다.
 1. [x] #48 `dev` 병합
 2. [x] **#51 Availability Edge parity source/dev** — production 배포·hosted smoke까지 Issue Open
 3. [ ] **#44 Python 운영도구 Phase A** — 현재 작업
-4. [ ] #52 Reservation Edge parity (P1)
-5. [ ] #53 Room detail/mutation Edge parity (P1)
-6. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능
-7. [ ] 최신 source를 `release/v0.2.0 → main`으로 승격
-8. [ ] 필요한 신규 migration 순차 적용
-9. [ ] `api`와 `reservation-scheduler`를 승인된 `main` source로 재배포
-10. [ ] developer / business admin / maid 실제 hosted HTTP role matrix smoke
-11. [ ] Python 콘솔에서 business admin 생성 및 최초 비밀번호 변경
-12. [ ] scheduler actor/invoke secret → Vault/pg_cron/pg_net 활성화
-13. [ ] Cron heartbeat/audit/idempotency smoke
-14. [ ] GitHub Pages workflow 수동 실행 및 공개 portal/openapi snapshot smoke
-15. [ ] `v0.2.0` tag / GitHub Release
+4. [ ] **#58 Actor Activity / Audit 로그 정본화 (P1)** — #52/#53 공통 logging 기반, 이 PR 범위 밖
+5. [ ] #52 Reservation Edge parity (P1)
+6. [ ] #53 Room detail/mutation Edge parity (P1)
+7. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능
+8. [ ] 최신 source를 `release/v0.2.0 → main`으로 승격
+9. [ ] 필요한 신규 migration 순차 적용
+10. [ ] `api`와 `reservation-scheduler`를 승인된 `main` source로 재배포
+11. [ ] developer / business admin / maid 실제 hosted HTTP role matrix smoke
+12. [ ] Python 콘솔에서 business admin 생성 및 최초 비밀번호 변경
+13. [ ] scheduler actor/invoke secret → Vault/pg_cron/pg_net 활성화
+14. [ ] Cron heartbeat/audit/idempotency smoke
+15. [ ] GitHub Pages workflow 수동 실행 및 공개 portal/openapi snapshot smoke
+16. [ ] `v0.2.0` tag / GitHub Release
 
 ## 14. 이 문서 갱신 규칙
 

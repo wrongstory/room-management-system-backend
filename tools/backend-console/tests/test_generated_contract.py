@@ -17,6 +17,10 @@ from room_management_console.generated.api.developer import (
     list_developer_audit_events,
     run_developer_diagnostics,
 )
+from room_management_console.generated.models.account_status import AccountStatus
+from room_management_console.generated.models.status_change_request_status import (
+    StatusChangeRequestStatus,
+)
 
 
 def test_phase_a_openapi_operations_are_generated() -> None:
@@ -37,3 +41,18 @@ def test_phase_a_openapi_operations_are_generated() -> None:
         run_developer_diagnostics.sync_detailed,
     ]
     assert len(operations) == 14
+
+
+def test_account_response_and_status_command_use_distinct_enums() -> None:
+    assert {status.value for status in AccountStatus} == {
+        "active",
+        "deactivation_pending",
+        "upload_only",
+        "inactive",
+        "departed",
+    }
+    assert {status.value for status in StatusChangeRequestStatus} == {
+        "active",
+        "inactive",
+        "departed",
+    }

@@ -24,8 +24,19 @@ DB 직접 진단과 maintenance action catalog는 #44 Phase B/C의 별도 보안
 1. Python 3.12와 `uv`를 준비한다.
 2. `tools/backend-console`에서 `uv sync --python 3.12 --frozen`을 실행한다.
 3. `config.example.json`을 `config.json`으로 복사한다.
-4. 공개 project ref, Supabase URL, publishable key, 환경 텍스트를 입력한다.
+4. 아래 승인 mapping의 환경·공개 project ref·Supabase URL과 publishable key를 입력한다.
 5. `uv run --python 3.12 room-management-console --config config.json`을 실행한다.
+
+| 환경 | 승인 project ref | 승인 URL |
+|---|---|---|
+| production | `aodikrxcczbogjpsjwjt` | `https://aodikrxcczbogjpsjwjt.supabase.co` |
+| recovery | `matalcofimnhuzslfhdd` | `https://matalcofimnhuzslfhdd.supabase.co` |
+| local | `local` | `http://127.0.0.1:<port>` 또는 `http://localhost:<port>` |
+
+hosted 대상은 `approved_targets.py`의 environment/project ref/URL과 정확히 일치해야 한다.
+서로 일치하는 임의 project ref와 URL도 허용하지 않는다. 로그인 성공 뒤에는 developer
+runtime-status의 environment/project ref를 다시 비교하며 불일치 또는 확인 실패 시 세션을
+폐기하고 mutation UI에 진입하지 않는다.
 
 ### Windows x64 artifact
 

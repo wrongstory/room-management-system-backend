@@ -9,15 +9,17 @@ import httpx
 import pytest
 
 from room_management_console.api_client import ApiError, BackendApiClient
+from room_management_console.approved_targets import APPROVED_HOSTED_TARGETS
 from room_management_console.config import AppConfig
 
-PROJECT_URL = "https://abcdefgh.supabase.co"
+PRODUCTION_TARGET = APPROVED_HOSTED_TARGETS["production"]
+PROJECT_URL = PRODUCTION_TARGET.supabase_url
 
 
 def config() -> AppConfig:
     return AppConfig(
         environment="production",
-        project_ref="abcdefgh",
+        project_ref=PRODUCTION_TARGET.project_ref,
         supabase_url=PROJECT_URL,
         publishable_key="sb_publishable_example_only_1234567890",
     )
@@ -33,13 +35,13 @@ def actor(role: str = "developer", *, must_change: bool = False) -> dict[str, An
     }
 
 
-def account() -> dict[str, Any]:
+def account(*, status: str = "active", profile_suffix: str = "20") -> dict[str, Any]:
     return {
-        "id": "00000000-0000-4000-8000-000000000020",
+        "id": f"00000000-0000-4000-8000-0000000000{profile_suffix}",
         "displayName": "운영 관리자",
         "loginId": "operator",
         "role": "admin",
-        "status": "active",
+        "status": status,
         "phoneLastFour": "0000",
         "mustChangePassword": True,
         "failedLoginCount": 0,
@@ -58,8 +60,58 @@ def login_response(role: str = "developer") -> dict[str, Any]:
     }
 
 
-def transport(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.MockTransport:
-    return httpx.MockTransport(handler)
+def runtime_response(
+    *, environment: str = "production", project_ref: str = PRODUCTION_TARGET.project_ref
+) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "runtime": {
+                "adapter": "supabase-edge",
+                "environment": environment,
+                "projectRef": project_ref,
+                "runtime": {"name": "deno", "version": "2.test"},
+                "source": {
+                    "apiVersion": "0.2.0",
+                    "expectedMigration": "developer_operations_projection",
+                    "fastifyRollbackBaseline": "available",
+                },
+                "configuration": {
+                    name: {"configured": False}
+                    for name in (
+                        "ACCOUNT_PHONE_PEPPER",
+                        "CORS_ORIGINS",
+                        "RESERVATION_GUEST_NAME_PEPPER",
+                        "RESERVATION_PII_KEY_BASE64",
+                        "RESERVATION_PII_KEYRING_JSON",
+                        "RESERVATION_PII_KEY_VERSION",
+                        "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
+                        "SCHEDULER_INVOKE_SECRET",
+                    )
+                },
+                "checkedAt": "2026-08-31T00:00:00Z",
+            }
+        },
+    )
+
+
+def transport(
+    handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    runtime_environment: str = "production",
+    runtime_project_ref: str = PRODUCTION_TARGET.project_ref,
+) -> httpx.MockTransport:
+    def routed(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/developer/runtime-status"):
+            return runtime_response(
+                environment=runtime_environment,
+                project_ref=runtime_project_ref,
+            )
+        if request.url.path.endswith("/auth/v1/logout"):
+            return httpx.Response(204)
+        return handler(request)
+
+    return httpx.MockTransport(routed)
 
 
 def test_login_rejects_business_roles_and_discards_session() -> None:
@@ -70,6 +122,44 @@ def test_login_rejects_business_roles_and_discards_session() -> None:
     with pytest.raises(ApiError, match="developer"):
         client.login("admin", "not-a-real-password")
     assert not client.is_authenticated
+
+
+def test_unapproved_hosted_target_is_rejected_before_any_http_request() -> None:
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(500)
+
+    unsafe_config = AppConfig(
+        environment="production",
+        project_ref="unapprovedprojectref00",
+        supabase_url="https://unapprovedprojectref00.supabase.co",
+        publishable_key="sb_publishable_example_only_1234567890",
+    )
+    with pytest.raises(ValueError, match="승인되지 않은"):
+        BackendApiClient(unsafe_config, transport=httpx.MockTransport(handler))
+    assert request_count == 0
+
+
+def test_runtime_target_mismatch_locks_session_before_mutation_ui_can_open() -> None:
+    recovery = APPROVED_HOSTED_TARGETS["recovery"]
+    client = BackendApiClient(
+        config(),
+        transport=transport(
+            lambda request: httpx.Response(200, json=login_response()),
+            runtime_environment="recovery",
+            runtime_project_ref=recovery.project_ref,
+        ),
+    )
+    with pytest.raises(ApiError) as error:
+        client.login("admin", "not-a-real-password")
+    assert error.value.code == "RUNTIME_TARGET_MISMATCH"
+    assert not client.is_authenticated
+    with pytest.raises(ApiError) as account_error:
+        client.list_accounts()
+    assert account_error.value.code == "AUTHENTICATION_REQUIRED"
 
 
 def test_network_retry_reuses_command_key_without_retaining_phone_payload() -> None:
@@ -224,3 +314,39 @@ def test_error_exposes_only_code_message_and_request_id() -> None:
     assert error.value.safe_summary().endswith("(요청 ID: request-safe-id)")
     assert "must-not-be-exposed" not in error.value.safe_summary()
     assert "01000000000" not in error.value.safe_summary()
+
+
+def test_account_list_accepts_transitional_statuses_without_coercion() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/auth/login"):
+            return httpx.Response(200, json=login_response())
+        if request.url.path.endswith("/v1/accounts"):
+            return httpx.Response(
+                200,
+                json={
+                    "accounts": [
+                        account(status="deactivation_pending", profile_suffix="21"),
+                        account(status="upload_only", profile_suffix="22"),
+                    ]
+                },
+            )
+        raise AssertionError(request.url.path)
+
+    client = BackendApiClient(config(), transport=transport(handler))
+    client.login("admin", "not-a-real-password")
+    accounts = client.list_accounts()
+    assert [item.status for item in accounts] == ["deactivation_pending", "upload_only"]
+
+
+def test_status_command_rejects_transitional_target_before_http_request() -> None:
+    client = BackendApiClient(
+        config(), transport=transport(lambda request: httpx.Response(200, json=login_response()))
+    )
+    client.login("admin", "not-a-real-password")
+    with pytest.raises(ApiError) as error:
+        client.change_account_status(
+            "00000000-0000-4000-8000-000000000020",
+            "upload_only",  # type: ignore[arg-type]
+            "OPERATOR_REQUEST",
+        )
+    assert error.value.code == "INVALID_ACCOUNT_STATUS_TARGET"

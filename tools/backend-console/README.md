@@ -14,8 +14,10 @@ Copy-Item config.example.json config.json
 uv run --python 3.12 room-management-console --config config.json
 ```
 
-`config.json`에는 공개 가능한 project ref, Supabase URL, publishable key만 둔다. developer
-비밀번호와 access/refresh token은 파일·레지스트리·로그에 저장하지 않는다.
+`config.json`에는 source-controlled allowlist와 일치하는 공개 project ref/Supabase URL 및
+publishable key만 둔다. 승인 mapping은 `approved_targets.py`가 정본이며 일치하지 않는 hosted
+대상은 비밀번호 전송 전에 거부한다. developer 비밀번호와 access/refresh token은
+파일·레지스트리·로그에 저장하지 않는다.
 
 ## 검증
 

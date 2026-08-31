@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from room_management_console.models import Account
 from room_management_console.policies import account_action_policy
 
@@ -41,3 +43,13 @@ def test_maid_unlock_is_available_after_login_failures() -> None:
     policy = account_action_policy(account(role="maid", failed=5), active_admin_count=1)
     assert policy.can_unlock
     assert policy.can_reset_password
+
+
+@pytest.mark.parametrize("status", ["deactivation_pending", "upload_only"])
+def test_transitional_account_status_cannot_be_changed(status: str) -> None:
+    policy = account_action_policy(
+        account(role="maid", status=status),
+        active_admin_count=1,
+    )
+    assert not policy.can_change_status
+    assert policy.warning is not None

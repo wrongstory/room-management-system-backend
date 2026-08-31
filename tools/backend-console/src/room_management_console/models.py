@@ -6,7 +6,16 @@ from typing import Any, Literal
 
 Environment = Literal["production", "recovery", "local"]
 Role = Literal["developer", "admin", "maid"]
-AccountStatus = Literal["active", "inactive", "departed"]
+AccountStatus = Literal[
+    "active",
+    "deactivation_pending",
+    "upload_only",
+    "inactive",
+    "departed",
+]
+AccountStatusTarget = Literal["active", "inactive", "departed"]
+ACCOUNT_STATUS_TARGETS = frozenset({"active", "inactive", "departed"})
+TRANSITIONAL_ACCOUNT_STATUSES = frozenset({"deactivation_pending", "upload_only"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +60,7 @@ class Account:
         status = value.get("status")
         if role not in {"developer", "admin", "maid"}:
             raise ValueError("지원하지 않는 계정 역할입니다.")
-        if status not in {"active", "inactive", "departed"}:
+        if status not in ACCOUNT_STATUS_TARGETS | TRANSITIONAL_ACCOUNT_STATUSES:
             raise ValueError("지원하지 않는 계정 상태입니다.")
         return cls(
             id=str(value["id"]),

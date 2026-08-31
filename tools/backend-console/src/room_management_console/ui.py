@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 
 from .api_client import ApiError, BackendApiClient
 from .config import AppConfig
-from .models import Account
+from .models import ACCOUNT_STATUS_TARGETS, Account, AccountStatusTarget
 from .policies import account_action_policy
 from .worker import Worker
 
@@ -334,6 +334,13 @@ class AccountsPage(QWidget):
         account = self._selected()
         if not account:
             return
+        if account.status not in ACCOUNT_STATUS_TARGETS:
+            QMessageBox.information(
+                self,
+                "상태 변경 불가",
+                "deactivation_pending/upload_only 계정은 서버 lifecycle이 끝난 뒤 변경하세요.",
+            )
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle("계정 상태 변경")
         layout = QFormLayout(dialog)
@@ -359,7 +366,7 @@ class AccountsPage(QWidget):
                 self, "입력 확인", "사유 코드는 영문 대문자·숫자·밑줄 2~80자입니다."
             )
             return
-        target = str(status.currentData())
+        target = cast(AccountStatusTarget, str(status.currentData()))
         if not self._confirm(account, f"상태를 {account.status} → {target}(으)로 변경"):
             return
         self._run(

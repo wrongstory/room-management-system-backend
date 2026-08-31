@@ -14,7 +14,17 @@ import httpx
 from .config import AppConfig
 from .generated.models.account import Account as GeneratedAccount
 from .generated.models.actor import Actor as GeneratedActor
-from .models import Account, Actor, CommandReceipt, MemorySession
+from .generated.models.developer_runtime_status import (
+    DeveloperRuntimeStatus as GeneratedDeveloperRuntimeStatus,
+)
+from .models import (
+    ACCOUNT_STATUS_TARGETS,
+    Account,
+    AccountStatusTarget,
+    Actor,
+    CommandReceipt,
+    MemorySession,
+)
 from .redaction import redact_text
 
 
@@ -99,6 +109,7 @@ class InMemoryCommandRegistry:
 
 class BackendApiClient:
     def __init__(self, config: AppConfig, *, transport: httpx.BaseTransport | None = None) -> None:
+        config.assert_approved_target()
         self.config = config
         self._session: MemorySession | None = None
         self._session_lock = RLock()
@@ -157,6 +168,11 @@ class BackendApiClient:
                 expires_in=self._integer(body, "expiresIn"),
                 actor=actor,
             )
+        try:
+            self._verify_runtime_target()
+        except ApiError:
+            self.lock(logout=True)
+            raise
         return actor
 
     def lock(self, *, logout: bool) -> None:
@@ -209,6 +225,11 @@ class BackendApiClient:
                 expires_in=expires_in,
                 actor=actor,
             )
+            try:
+                self._verify_runtime_target()
+            except ApiError:
+                self.lock(logout=True)
+                raise
             return actor
 
     def current_user(self) -> Actor:
@@ -253,7 +274,15 @@ class BackendApiClient:
         )
         return self._account_from_response(response)
 
-    def change_account_status(self, profile_id: str, status: str, reason_code: str) -> Account:
+    def change_account_status(
+        self, profile_id: str, status: AccountStatusTarget, reason_code: str
+    ) -> Account:
+        if status not in ACCOUNT_STATUS_TARGETS:
+            raise ApiError(
+                status_code=400,
+                code="INVALID_ACCOUNT_STATUS_TARGET",
+                message="상태 변경 대상은 active, inactive, departed만 허용됩니다.",
+            )
         body = {"status": status, "reasonCode": reason_code}
         response = self._command_json(
             "PATCH",
@@ -286,6 +315,25 @@ class BackendApiClient:
 
     def developer_runtime_status(self) -> dict[str, Any]:
         return self._object(self._authorized_json("GET", "/v1/developer/runtime-status"), "runtime")
+
+    def _verify_runtime_target(self) -> None:
+        runtime = self.developer_runtime_status()
+        try:
+            GeneratedDeveloperRuntimeStatus.from_dict(runtime)
+        except (KeyError, TypeError, ValueError) as error:
+            raise self._contract_error() from error
+        if (
+            runtime.get("environment") != self.config.environment
+            or runtime.get("projectRef") != self.config.project_ref
+        ):
+            raise ApiError(
+                status_code=403,
+                code="RUNTIME_TARGET_MISMATCH",
+                message=(
+                    "로그인 대상과 Edge runtime 환경이 일치하지 않아 세션을 잠갔습니다. "
+                    "mutation은 사용할 수 없습니다."
+                ),
+            )
 
     def developer_database_status(self) -> dict[str, Any]:
         return self._object(
