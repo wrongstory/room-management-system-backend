@@ -50,6 +50,11 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     serialized.includes('"/v1/developer/diagnostics"'),
     "developer diagnostics must be published",
   );
+  assert(
+    serialized.includes('"/v1/developer/activity-events"') &&
+      serialized.includes('"#/components/schemas/DeveloperActivityPage"'),
+    "developer security activity needs a reusable bounded contract",
+  );
   for (
     const path of [
       "/v1/availability",

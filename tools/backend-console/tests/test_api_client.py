@@ -350,3 +350,33 @@ def test_status_command_rejects_transitional_target_before_http_request() -> Non
             "OPERATOR_REQUEST",
         )
     assert error.value.code == "INVALID_ACCOUNT_STATUS_TARGET"
+
+
+def test_activity_query_keeps_bounded_filters_separate_from_domain_audit() -> None:
+    observed: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/auth/login"):
+            return httpx.Response(200, json=login_response())
+        if request.url.path.endswith("/v1/developer/activity-events"):
+            observed.append(request)
+            return httpx.Response(200, json={"events": [], "nextCursor": None})
+        raise AssertionError(request.url.path)
+
+    client = BackendApiClient(config(), transport=transport(handler))
+    client.login("admin", "not-a-real-password")
+    page = client.developer_activity_events(
+        role="maid",
+        categories=("authorization",),
+        event_types=("authorization.denied",),
+        outcomes=("denied",),
+        limit=100,
+    )
+
+    assert page == {"events": [], "nextCursor": None}
+    query = observed[0].url.params
+    assert query["role"] == "maid"
+    assert query["category"] == "authorization"
+    assert query["eventType"] == "authorization.denied"
+    assert query["outcome"] == "denied"
+    assert query["limit"] == "100"

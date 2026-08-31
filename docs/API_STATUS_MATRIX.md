@@ -56,10 +56,10 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 최종 확인: **2026-08-31 KST**
 
 - 운영 승인 source: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
-- 현재 개발 통합 기준 `dev`: `e06a5c3d755c42799326178a39c688a754ce0dbe`
+- 현재 개발 통합 기준 `dev`: `388ab3caf92f166bc01d3d58273aee33f2ac9ac9`
 - PR #48 / #43 developer 운영 API: `dev` 병합 완료, production 미반영
 - #51 Availability Edge parity: source·독립 리뷰·`dev` 병합 완료, production 미반영
-- #44 Python 운영도구 Phase A: 이 변경에서 API-only source·테스트·Windows packaging 기반을 추가,
+- #44 Python 운영도구 Phase A: PR #57 독립 리뷰 P0/P1=0 및 `dev` 병합 완료,
   release artifact와 production 계정 smoke는 미완료
 - 운영 migration: **17건**
 - 운영 Edge Functions:
@@ -124,7 +124,8 @@ PR #48은 `dev@02d5089`로 병합 완료됐다. 아직 release/main 승격, prod
 | [ ] | `GET /v1/developer/runtime-status` | developer only | — | — | ✅ | ❌ | ❌ | secret은 configured boolean만 |
 | [ ] | `GET /v1/developer/database-status` | developer only | ✅ | — | ✅ | ❌ | ❌ | migration name drift + exact RPC privilege 검사 |
 | [ ] | `GET /v1/developer/scheduler-status` | developer only | ✅ | — | ✅ | ❌ | ❌ | raw Cron/Vault/net body 비노출 |
-| [ ] | `GET /v1/developer/audit-events` | developer only | ✅ | — | ✅ | ❌ | ❌ | allowlist + 31일/100건 cursor |
+| [ ] | `GET /v1/developer/audit-events` | developer only | ✅ | — | ✅ | ❌ | ❌ | account·availability·reservation·room·scheduler domain allowlist + 31일/100건 cursor |
+| [ ] | `GET /v1/developer/activity-events` | developer only | ✅ | — | ✅ | ❌ | ❌ | #58 인증·권한·민감접근 분리 원장, unknown login은 분 단위 aggregate |
 | [ ] | `POST /v1/developer/diagnostics` | developer only | ✅ | — | ✅ | ❌ | ❌ | body/임의 URL·SQL·RPC 입력 금지, 10/min |
 
 ### #43 production 반영 조건
@@ -137,6 +138,19 @@ PR #48은 `dev@02d5089`로 병합 완료됐다. 아직 release/main 승격, prod
 - [ ] production `reservation-scheduler` 재배포 — heartbeat source 포함
 - [ ] developer / admin / maid 권한 smoke
 - [ ] redaction / migration drift / critical RPC production smoke
+
+### #58 Actor Activity / Audit source gate
+
+- [x] 성공한 account/availability/reservation/room/scheduler mutation audit event inventory
+- [x] immutable `audit_events`의 승인된 domain event projection 확장
+- [x] private activity event + unknown-login bounded aggregate 원장
+- [x] login success/known failure/authorization denial 기록과 민감조회 공통 helper
+- [x] developer-only 31일/100건/cursor activity API와 OpenAPI/Python 화면 분리
+- [x] raw table 및 privileged RPC의 PUBLIC/anon/authenticated 접근 차단
+- [x] fresh DB/RLS/Edge/Python 로컬 회귀 검증
+- [ ] PR #58 독립 보안/API 재검토 P0/P1=0
+- [ ] PR #58 `dev` 병합
+- [ ] release/main 승격 후 migration 적용·production Edge 재배포·hosted role smoke
 
 ## 7. 객실 API — Edge parity #53 (P1)
 
@@ -234,7 +248,8 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 | [ ] | developer 로그인·메모리 세션·refresh/logout | ✅ | ✅ | ❌ | ❌ | ❌ | 고정 ID `admin`, token 영속 저장 없음 |
 | [ ] | business admin/maid 계정 관리 | ✅ | ✅ | ❌ | ❌ | ❌ | 멱등 재시도, phone 입력 즉시 제거 |
 | [ ] | overview/runtime/database/scheduler | ✅ | ✅ | ❌ | ❌ | ❌ | #43 production 미반영 |
-| [ ] | 안전한 감사 목록·진단 | ✅ | ✅ | ❌ | ❌ | ❌ | raw state/secret/SQL 없음 |
+| [ ] | 안전한 domain 감사 목록·진단 | ✅ | ✅ | ❌ | ❌ | ❌ | raw state/secret/SQL 없음 |
+| [ ] | 활동/보안 로그 | ✅ | ✅ | ❌ | ❌ | ❌ | 감사 이벤트와 화면 분리, anonymous aggregate 지원 |
 | [ ] | DB direct 진단 | — | ❌ | ❌ | ❌ | ❌ | Phase B 전까지 의도적으로 비활성 |
 | [ ] | maintenance action catalog | — | ❌ | ❌ | ❌ | ❌ | Phase C 전까지 의도적으로 비활성 |
 
@@ -249,8 +264,8 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 - [x] DB credential/service role/SQL 기능 미포함
 - [x] Windows x64 PyInstaller workflow와 checksum source
 - [x] 설치·업데이트·삭제·PC 분실 runbook
-- [ ] PR #57 새 exact head required CI + 독립 보안/운영 재검토 P0/P1=0
-- [ ] `dev` 병합
+- [x] PR #57 exact head required CI + 독립 보안/운영 재검토 P0/P1=0
+- [x] PR #57 `dev` 병합 — `dev@388ab3caf92f166bc01d3d58273aee33f2ac9ac9`
 - [ ] 승인 source 기반 Windows x64 artifact build/smoke
 - [ ] developer 로그인 → business admin 생성 hosted smoke
 
@@ -263,8 +278,8 @@ production completeness 기준의 정본 순서다.
 
 1. [x] #48 `dev` 병합
 2. [x] **#51 Availability Edge parity source/dev** — production 배포·hosted smoke까지 Issue Open
-3. [ ] **#44 Python 운영도구 Phase A** — 현재 작업
-4. [ ] **#58 Actor Activity / Audit 로그 정본화 (P1)** — #52/#53 공통 logging 기반, 이 PR 범위 밖
+3. [x] **#44 Python 운영도구 Phase A source/dev** — Windows artifact·hosted smoke는 별도 gate
+4. [ ] **#58 Actor Activity / Audit 로그 정본화 (P1)** — 현재 작업, #52/#53 공통 logging 기반
 5. [ ] #52 Reservation Edge parity (P1)
 6. [ ] #53 Room detail/mutation Edge parity (P1)
 7. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능

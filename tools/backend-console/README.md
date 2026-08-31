@@ -19,6 +19,10 @@ publishable key만 둔다. 승인 mapping은 `approved_targets.py`가 정본이�
 대상은 비밀번호 전송 전에 거부한다. developer 비밀번호와 access/refresh token은
 파일·레지스트리·로그에 저장하지 않는다.
 
+운영 화면은 성공한 업무 변경을 보여주는 `감사 이벤트`와 로그인·권한거부·실제
+민감접근을 보여주는 `활동/보안 로그`를 분리한다. 두 목록 모두 developer 전용 Edge
+projection만 사용하며 private 원본 table이나 DB credential에 직접 연결하지 않는다.
+
 ## 검증
 
 ```powershell

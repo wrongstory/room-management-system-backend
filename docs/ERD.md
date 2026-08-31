@@ -378,6 +378,7 @@ erDiagram
   PROFILES ||--o{ NOTIFICATIONS : "수신자"
   NOTIFICATIONS ||--o{ NOTIFICATION_OUTBOX : "푸시 재시도"
   PROFILES ||--o{ AUDIT_EVENTS : "행위자"
+  PROFILES ||--o{ ACTOR_ACTIVITY_EVENTS : "인증·권한·민감접근 행위자"
   PROFILES ||--o{ SCHEDULER_INVOCATION_HEARTBEATS : "scheduler actor"
   PROFILES ||--o| DEVELOPER_DIAGNOSTIC_RATE_LIMITS : "진단 제한"
 
@@ -437,6 +438,26 @@ erDiagram
     uuid entity_id
     text idempotency_key UK
   }
+  ACTOR_ACTIVITY_EVENTS {
+    uuid id PK
+    uuid actor_profile_id FK
+    text actor_role_snapshot
+    text category
+    text event_type
+    text outcome
+    text source
+    text reason_code
+    text request_id
+    timestamptz occurred_at
+    timestamptz recorded_at
+  }
+  ACTOR_ACTIVITY_AGGREGATES {
+    uuid id PK
+    timestamptz bucket_started_at
+    text event_type
+    int occurrence_count
+    timestamptz last_occurred_at
+  }
   SCHEDULER_INVOCATION_HEARTBEATS {
     text invocation_key PK
     timestamptz scheduled_at
@@ -455,8 +476,9 @@ erDiagram
 
 - `payroll_items`는 cycle이 `OPEN`인 잠금 transaction에서만 추가하며 earning의 `earned_on`이 cycle의 월요일 시작 7일 구간에 속해야 한다.
 - cycle이 `PAYING`에 진입한 뒤에는 item membership과 잠금 금액·행위자·시각 snapshot을 임의로 바꿀 수 없다. 외부 송금이 없음을 확인한 `PAYING/CHECK → OPEN`은 사유·행위자·시각과 CAS version을 기록하면서 lock metadata만 해제하며 candidate item은 유지한다. `PAID` snapshot은 되돌려 쓰지 않는다.
-- scheduler heartbeat와 developer 진단 제한은 `private` 운영 projection 상태다. Data API table 권한을 주지 않고 service-role도 원본 table을 직접 읽지 않으며, exact developer/admin 검증을 포함한 app-owned RPC로만 기록·조회한다.
-- developer 감사 API는 `audit_events`의 raw JSON을 반환하지 않고 계정 운영 event allowlist의 필드별 projection만 최대 31일·100건 cursor pagination으로 반환한다.
+- scheduler heartbeat, developer 진단 제한, actor activity 원본은 `private` 운영 projection 상태다. Data API table 권한을 주지 않고 service-role도 원본 table을 직접 읽지 않으며, exact developer/admin 검증을 포함한 app-owned RPC로만 기록·조회한다.
+- developer 감사 API는 `audit_events`의 raw JSON을 반환하지 않고 account·availability·reservation·cleaning·room domain event allowlist의 필드별 projection만 최대 31일·100건 cursor pagination으로 반환한다.
+- 로그인·권한거부·민감접근은 domain audit과 분리해 `actor_activity_events`에 append한다. unknown login 실패는 로그인 ID·IP·HMAC 없이 `actor_activity_aggregates`의 분 단위 한 row와 600 포화 count로만 유지한다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 

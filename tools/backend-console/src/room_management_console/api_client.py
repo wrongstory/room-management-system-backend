@@ -358,6 +358,34 @@ class BackendApiClient:
             parameters.append(("cursor", cursor))
         return self._authorized_json("GET", "/v1/developer/audit-events", params=parameters)
 
+    def developer_activity_events(
+        self,
+        *,
+        actor_profile_id: str | None = None,
+        role: str | None = None,
+        categories: Iterable[str] = (),
+        event_types: Iterable[str] = (),
+        outcomes: Iterable[str] = (),
+        from_time: str | None = None,
+        to_time: str | None = None,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        parameters: list[tuple[str, str | int | float | bool | None]] = [("limit", str(limit))]
+        parameters.extend(("category", category) for category in categories)
+        parameters.extend(("eventType", event_type) for event_type in event_types)
+        parameters.extend(("outcome", outcome) for outcome in outcomes)
+        for name, value in (
+            ("actorProfileId", actor_profile_id),
+            ("role", role),
+            ("from", from_time),
+            ("to", to_time),
+            ("cursor", cursor),
+        ):
+            if value:
+                parameters.append((name, value))
+        return self._authorized_json("GET", "/v1/developer/activity-events", params=parameters)
+
     def run_diagnostics(self) -> dict[str, Any]:
         return self._object(
             self._authorized_json("POST", "/v1/developer/diagnostics"), "diagnostics"

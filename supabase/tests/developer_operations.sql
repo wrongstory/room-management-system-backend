@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) ->> 'currentMigration',
-  'developer_operations_projections',
+  'actor_activity_audit_contract',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -96,12 +96,12 @@ select is(
 
 update supabase_migrations.schema_migrations
 set version = '20991231235958'
-where name = 'developer_operations_projections';
+where name = 'actor_activity_audit_contract';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) ->> 'migrationDrift',
   'equal',
   'remote execution version remapping does not create false drift'
@@ -113,7 +113,7 @@ values ('20991231235959', array[]::text[], 'developer_operations_future');
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) ->> 'migrationDrift',
   'ahead',
   'a migration after the expected named migration reports ahead'
@@ -134,7 +134,7 @@ select is(
 select is(
   (public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) ->> 'rlsMissingCount')::integer,
   0,
   'database status reports no public base table without RLS'
@@ -143,7 +143,7 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) #>> '{criticalRpcs,create_account_profile}',
   'true',
   'critical RPC requires the current account-create signature and safe grants'
@@ -163,7 +163,7 @@ revoke execute on function public.create_account_profile(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) #>> '{criticalRpcs,create_account_profile}',
   'false',
   'legacy overload cannot mask missing service-role EXECUTE on the secure signature'
@@ -180,7 +180,7 @@ grant execute on function public.create_account_profile(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) #>> '{criticalRpcs,create_account_profile}',
   'false',
   'critical RPC becomes unhealthy when authenticated can execute it'
@@ -194,7 +194,7 @@ alter table public.notifications disable row level security;
 select is(
   (public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_operations_projections'
+    'actor_activity_audit_contract'
   ) ->> 'rlsMissingCount')::integer,
   1,
   'database status detects a public base table without RLS'
@@ -344,11 +344,11 @@ select ok(
 select throws_ok(
   $$ select * from public.list_developer_audit_events(
     '26000000-0000-4000-8000-000000000001',
-    array['reservation.created'], null, null, null, null, null, 10
+    array['unapproved.event'], null, null, null, null, null, 10
   ) $$,
   '22023',
   'INVALID_AUDIT_QUERY',
-  'audit event types outside the operations allowlist are rejected'
+  'audit event types outside the domain allowlist are rejected'
 );
 
 select throws_ok(

@@ -14,6 +14,7 @@ from room_management_console.generated.api.developer import (
     get_developer_overview,
     get_developer_runtime_status,
     get_developer_scheduler_status,
+    list_developer_activity_events,
     list_developer_audit_events,
     run_developer_diagnostics,
 )
@@ -37,10 +38,11 @@ def test_phase_a_openapi_operations_are_generated() -> None:
         get_developer_runtime_status.sync_detailed,
         get_developer_database_status.sync_detailed,
         get_developer_scheduler_status.sync_detailed,
+        list_developer_activity_events.sync_detailed,
         list_developer_audit_events.sync_detailed,
         run_developer_diagnostics.sync_detailed,
     ]
-    assert len(operations) == 14
+    assert len(operations) == 15
 
 
 def test_account_response_and_status_command_use_distinct_enums() -> None:

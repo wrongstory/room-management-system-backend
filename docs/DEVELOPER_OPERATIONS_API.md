@@ -20,6 +20,7 @@ business admin과 maid는 developer endpoint에서 항상 `403 DEVELOPER_REQUIRE
 | `GET /v1/developer/database-status` | DB 상태 | migration drift, RLS 누락, 핵심 RPC 누락을 별도 경고로 표시 |
 | `GET /v1/developer/scheduler-status` | scheduler 상태 | `not_configured`는 활성화 전 정상 상태, 임의 실행 버튼을 만들지 않음 |
 | `GET /v1/developer/audit-events` | 감사 목록 | cursor pagination, 최대 31일·100건, raw state 없음 |
+| `GET /v1/developer/activity-events` | 활동/보안 로그 | 인증·권한거부·실제 민감조회, unknown login은 anonymous aggregate |
 | `POST /v1/developer/diagnostics` | 수동 진단 | body 없음, 자동 반복 금지, `Retry-After` 준수 |
 
 모든 응답은 `Cache-Control: no-store`다. 운영 콘솔은 dashboard 응답을 로컬 DB나 일반 설정 파일에 캐시하지 않는다.
@@ -55,6 +56,31 @@ GET /v1/developer/audit-events?cursor={nextCursor}&limit=50
 ```
 
 응답 `summary`는 event별 허용 필드만 가진다. raw `before_state`/`after_state`, 전화번호, 고객명, PIN, token, secret이 필요하다고 가정하지 않는다.
+
+### Domain audit event inventory
+
+Issue #58에서 현재 성공 mutation의 append 지점을 전수 확인했다. developer projection이 승인하는 정본은 다음과 같다.
+
+| 영역 | Event type |
+|---|---|
+| account | `account.bootstrap_developer_created`, `account.bootstrap_admin_created`, `account.created`, `account.role_changed`, `account.status_changed`, `account.unlocked`, `account.password_reset_requested`, `account.password_changed` |
+| availability | `availability.submitted`, `availability.change_requested`, `availability.change_decided` |
+| reservation | `reservation.created`, `reservation.changed`, `reservation.cancelled`, `reservation.manual_checkout`, `reservation.scheduled_check_in`, `reservation.scheduled_checkout`, `reservation.guest_name_retention_purged` |
+| cleaning request | `cleaning.manual_request.created`, `cleaning.manual_request.cancelled` |
+| room | `room.master_data_changed`, `room.create_block`, `room.release_block`, `room.set_candle_count`, `room.report_issue`, `room.resolve_issue`, `room.record_pin_sync` |
+
+scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `reservation.scheduled_check_in`/`reservation.scheduled_checkout`으로 같은 domain 원장에 기록된다. scheduler 실행 상태 자체는 `private.scheduler_invocation_heartbeats`의 bounded 운영 projection이다. 현재 구현된 성공 mutation 중 audit append 누락은 발견되지 않았다. 후속 #52/#53은 이 event 이름과 공통 activity helper를 재사용하며 자유문 event/source를 추가하지 않는다.
+
+## 활동/보안 pagination
+
+업무 상태 변경 감사와 로그인·권한·민감접근 activity를 한 목록으로 합치지 않는다. activity API는 `actorProfileId`, `role`, 반복 가능한 `category`/`eventType`/`outcome`, `from`/`to`, opaque `cursor`를 지원한다. 기간은 최대 31일, page size는 최대 100이다.
+
+```text
+GET /v1/developer/activity-events?category=authorization&outcome=denied&limit=50
+GET /v1/developer/activity-events?cursor={nextCursor}&limit=50
+```
+
+알 수 없는 로그인 실패는 `actorProfileId`, `requestId`가 없는 분 단위 aggregate로만 보인다. `summary.aggregateCount`는 600에서 포화되며 로그인 ID, IP, HMAC, request body를 복원할 수 있는 값은 존재하지 않는다. `sensitive.read`는 예약 목록처럼 일반 조회가 아니라 고객명 복호화 결과처럼 민감값이 실제 반환된 뒤에만 기록한다.
 
 ## Python #44 연결 기준
 
