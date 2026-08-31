@@ -53,14 +53,17 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-최종 확인: **2026-08-31 KST**
+최종 확인: **2026-09-01 KST**
 
 - 운영 승인 source: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
-- 현재 개발 통합 기준 `dev`: `388ab3caf92f166bc01d3d58273aee33f2ac9ac9`
+- 현재 개발 통합 기준 `dev`: `4c897fa7eceea6cb128c2e0d201569b71b236b25`
 - PR #48 / #43 developer 운영 API: `dev` 병합 완료, production 미반영
 - #51 Availability Edge parity: source·독립 리뷰·`dev` 병합 완료, production 미반영
 - #44 Python 운영도구 Phase A: PR #57 독립 리뷰 P0/P1=0 및 `dev` 병합 완료,
   release artifact와 production 계정 smoke는 미완료
+- #58 Actor Activity / Audit: PR #59 독립 보안/API 재검토 P0/P1=0 및
+  `dev@4c897fa7eceea6cb128c2e0d201569b71b236b25` 병합 완료, production 미반영
+- #52 Reservation Edge parity: `codex/52-reservation-edge-parity` 소스 구현 진행 중
 - 운영 migration: **17건**
 - 운영 Edge Functions:
   - `api` version 2 — ACTIVE
@@ -148,8 +151,8 @@ PR #48은 `dev@02d5089`로 병합 완료됐다. 아직 release/main 승격, prod
 - [x] developer-only 31일/100건/cursor activity API와 OpenAPI/Python 화면 분리
 - [x] raw table 및 privileged RPC의 PUBLIC/anon/authenticated 접근 차단
 - [x] fresh DB/RLS/Edge/Python 로컬 회귀 검증
-- [ ] PR #59 독립 보안/API 재검토 P0/P1=0
-- [ ] PR #59 `dev` 병합
+- [x] PR #59 독립 보안/API 재검토 P0/P1=0
+- [x] PR #59 `dev@4c897fa7eceea6cb128c2e0d201569b71b236b25` 병합
 - [ ] release/main 승격 후 migration 적용·production Edge 재배포·hosted role smoke
 
 ## 7. 객실 API — Edge parity #53 (P1)
@@ -200,15 +203,28 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [ ] | `GET /v1/reservations` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 목록 |
-| [ ] | `GET /v1/reservations/{reservationId}` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 상세 |
-| [ ] | `POST /v1/reservations` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 예약 생성 |
-| [ ] | `PATCH /v1/reservations/{reservationId}` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 예약 변경 |
-| [ ] | `POST /v1/reservations/{reservationId}/cancel` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 예약 취소 |
-| [ ] | `POST /v1/reservations/{reservationId}/manual-checkout` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 수동 체크아웃 |
-| [ ] | `POST /v1/reservations/cleaning-requests` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 연박/추가 청소 요청 |
-| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 청소 요청 취소 |
-| [ ] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ❌ | ❌ | ❌ | #52 관리자 수동 transition |
+| [ ] | `GET /v1/reservations` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 고객명·암호문 비노출 |
+| [ ] | `GET /v1/reservations/{reservationId}` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 고객명 복호화 + sensitive.read |
+| [ ] | `POST /v1/reservations` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, CAS·멱등성·PII 암호화 |
+| [ ] | `PATCH /v1/reservations/{reservationId}` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 예약 version CAS + 객실 lock/겹침 검증 |
+| [ ] | `POST /v1/reservations/{reservationId}/cancel` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, soft cancel |
+| [ ] | `POST /v1/reservations/{reservationId}/manual-checkout` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 현재 입실 예약만 허용 |
+| [ ] | `POST /v1/reservations/cleaning-requests` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 연박/추가 청소 요청 |
+| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, CAS soft cancel |
+| [ ] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, `reservation-scheduler-` namespace 수동 사용 차단 |
+
+### #52 source gate
+
+- [x] Fastify와 동일한 9개 operation·camelCase projection·stable error code
+- [x] exact active business admin + password changed + active session 경계
+- [x] 각 RPC의 예약/객실 CAS, scoped Idempotency-Key, request hash, audit 계약 유지
+- [x] AES-256-GCM 고객명 암호화·목록 비노출·상세 sensitive.read 기록
+- [x] OpenAPI/Swagger/codegen 문서 갱신, Python 운영도구 generated client 제외 유지
+- [x] Edge Deno·TypeScript·Python 로컬 회귀 검증
+- [ ] Issue #52 구현 PR 독립 보안/API 재검토 P0/P1=0
+- [ ] Issue #52 구현 PR `dev` 병합
+- [ ] `release → main` 후 production `api` 재배포
+- [ ] hosted admin/developer/maid/PII/CAS/idempotency smoke 및 Pages snapshot 갱신
 
 ## 10. Reservation Scheduler Edge Function
 
@@ -279,8 +295,8 @@ production completeness 기준의 정본 순서다.
 1. [x] #48 `dev` 병합
 2. [x] **#51 Availability Edge parity source/dev** — production 배포·hosted smoke까지 Issue Open
 3. [x] **#44 Python 운영도구 Phase A source/dev** — Windows artifact·hosted smoke는 별도 gate
-4. [ ] **#58 Actor Activity / Audit 로그 정본화 (P1)** — 현재 작업, #52/#53 공통 logging 기반
-5. [ ] #52 Reservation Edge parity (P1)
+4. [x] **#58 Actor Activity / Audit 로그 정본화 source/dev (P1)** — production 반영까지 Issue Open
+5. [ ] **#52 Reservation Edge parity (P1)** — 현재 feature source 완료, 독립 재검토·dev 병합 대기
 6. [ ] #53 Room detail/mutation Edge parity (P1)
 7. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능
 8. [ ] 최신 source를 `release/v0.2.0 → main`으로 승격

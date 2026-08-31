@@ -4,7 +4,8 @@ import { requestHash } from '../src/lib/command.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import {
   decryptGuestName,
-  encryptGuestName
+  encryptGuestName,
+  normalizeGuestName
 } from '../src/modules/reservations/guest-name-crypto.js';
 import { SupabaseReservationService } from '../src/modules/reservations/reservation.service.js';
 import { assertNoContactInformation } from '../src/modules/rooms/room.service.js';
@@ -40,6 +41,23 @@ const commandResult = {
 };
 
 describe('reservation privacy and idempotency', () => {
+  it('validates guest-name raw and normalized lengths before encryption', () => {
+    expect(normalizeGuestName('가'.repeat(80))).toBe('가'.repeat(80));
+    expect(() => normalizeGuestName('가'.repeat(81))).toThrowError(
+      expect.objectContaining({ code: 'INVALID_GUEST_NAME' })
+    );
+    expect(() => normalizeGuestName(`${' '.repeat(80)}홍`)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_GUEST_NAME' })
+    );
+    expect(() => normalizeGuestName(' '.repeat(80))).toThrowError(
+      expect.objectContaining({ code: 'INVALID_GUEST_NAME' })
+    );
+    expect(() => normalizeGuestName('\uFB03'.repeat(27))).toThrowError(
+      expect.objectContaining({ code: 'INVALID_GUEST_NAME' })
+    );
+    expect(normalizeGuestName('  홍   길동  ')).toBe('홍 길동');
+  });
+
   it('encrypts guest names with randomized AES-GCM envelopes', () => {
     const first = encryptGuestName(' 홍길동 ', piiKey, 'test-v1');
     const second = encryptGuestName('홍길동', piiKey, 'test-v1');

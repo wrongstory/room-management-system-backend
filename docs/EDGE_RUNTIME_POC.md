@@ -55,11 +55,20 @@ Supabase Cron (pg_cron)
 | `api` | `GET /api/v1/developer/activity-events` | active developer | bounded 인증·권한·민감접근 projection |
 | `api` | `POST /api/v1/developer/diagnostics` | active developer | allowlist read-only 진단 |
 | `api` | `GET /api/v1/rooms` | active admin + password changed | 기존 객실 projection RPC |
+| `api` | `GET·POST /api/v1/reservations` | active admin + password changed | 예약 목록·생성, 목록 고객명 비노출 |
+| `api` | `GET·PATCH /api/v1/reservations/:reservationId` | active admin + password changed | 예약 상세·일정 변경, 상세 고객명 복호화 activity 기록 |
+| `api` | `POST /api/v1/reservations/:reservationId/cancel` | active admin + password changed | 예약 soft cancel |
+| `api` | `POST /api/v1/reservations/:reservationId/manual-checkout` | active admin + password changed | 현재 투숙 예약 수동 체크아웃 |
+| `api` | `POST /api/v1/reservations/cleaning-requests` | active admin + password changed | 연박·추가 청소 요청 |
+| `api` | `POST /api/v1/reservations/cleaning-requests/:targetId/cancel` | active admin + password changed | 청소 요청 CAS soft cancel |
+| `api` | `POST /api/v1/reservations/transitions/process` | active admin + password changed | 관리자 수동 전이 실행 |
 | `reservation-scheduler` | `POST /reservation-scheduler` | `x-scheduler-secret` | 예약 전이/PII 보존 command |
 
 `verify_jwt=false`는 공개 허용을 뜻하지 않는다. 하나의 API Function 안에서 health와 인증 endpoint를 함께 라우팅하기 위해 gateway 검사를 끄고, 보호 경로에서 `auth.getUser`와 최신 DB profile/session을 매 요청 재검증한다. scheduler Function은 32자 이상의 별도 secret을 HMAC 방식으로 비교한 뒤에만 service-role RPC를 호출한다.
 
 단일 `developer`도 `/v1/auth/me`에서 자신의 실제 역할로 인증되지만 객실·예약 같은 업무 API에서는 `admin`으로 간주하지 않는다. `/v1/rooms`와 예약 scheduler actor는 최신 active profile의 역할이 정확히 `admin`일 때만 허용하며, developer를 scheduler actor로 지정하면 DB command가 `ADMIN_REQUIRED`로 거부한다.
+
+예약 Edge adapter는 Fastify와 같은 기존 9개 RPC를 호출하며 raw table DML을 하지 않는다. 모든 command는 예약·객실 version CAS, actor/command scope의 Idempotency-Key와 canonical request hash를 유지한다. 고객명은 Edge에서 AES-256-GCM으로만 암호화하고 목록·mutation projection에서는 이름과 암호문을 모두 제외한다. 단건 상세에서 실제 이름을 복호화한 경우 server-generated request ID로 `sensitive.read` activity를 먼저 기록하며 기록 실패 시 응답도 fail-closed한다. 수동 전이 command는 현재 실행 시각을 사용하고 scheduler의 secret·invocation identity와 섞지 않는다.
 
 로그인 endpoint는 Edge instance 메모리를 제한 상태로 사용하지 않는다. hosted Supabase에서는 platform이 붙이는 `cf-connecting-ip`만 client 정본으로 사용하고 이 값이 없으면 fail-closed한다. `x-real-ip`과 마지막 forwarded hop fallback은 reverse proxy가 해당 헤더를 덮어쓰도록 구성한 local/self-hosted 환경에서만 허용한다. production smoke에서는 caller가 보낸 spoof header보다 platform 값이 우선하는지 확인해야 한다. 원문 client address와 로그인 ID는 응답·DB·로그에 저장하지 않고 `ACCOUNT_PHONE_PEPPER`로 domain-separated HMAC-SHA256 key만 만든다. 하나의 원자 DB command가 **client별 30회/분 → 로그인 ID별 10회/분 → emergency global 600회/분** 순서로 소비한다. 공격 client가 ID를 바꿔도 자기 bucket에서 차단되어 다른 client의 정상 `admin` 로그인을 막지 못한다. 첫 차단 뒤 saturated bucket은 더 갱신하지 않고 hot path의 만료 row 정리도 호출당 최대 64건으로 제한한다. 제한 초과는 `429`와 `Retry-After`, 신뢰할 client metadata가 없으면 `503 LOGIN_CLIENT_ID_UNAVAILABLE`을 반환한다. 이 검사는 alias 조회보다 먼저 수행하며, 계정이 존재하는 경우에는 기존 5회 실패/15분 계정 잠금도 별도로 적용한다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`로 응답한다.
 

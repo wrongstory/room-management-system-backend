@@ -106,6 +106,11 @@ Deno.test("authorization activity maps routes to fixed capability sources", () =
     "availability route category",
   );
   assert(
+    authorizationSourceForPath("/v1/reservations/fixture/cancel") ===
+      "edge.authorization.reservations",
+    "reservation route category",
+  );
+  assert(
     authorizationSourceForPath("/v1/unknown") === null,
     "unknown routes must not be persisted",
   );
