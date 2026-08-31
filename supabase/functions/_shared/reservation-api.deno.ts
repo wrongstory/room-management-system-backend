@@ -325,6 +325,89 @@ Deno.test("guest-name create is randomized but keeps a stable request fingerprin
   );
 });
 
+Deno.test("guest-name validation enforces raw and normalized 80-character limits", async () => {
+  configurePii();
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      async rpc(name: string, argumentsValue: Record<string, unknown>) {
+        calls.push([name, argumentsValue]);
+        return { data: reservationRow, error: null };
+      },
+    },
+  } as unknown as EdgeClients;
+  const createBody = (guestName: unknown) => ({
+    roomId: reservationRow.room_id,
+    checkInAt: reservationRow.check_in_at,
+    checkOutAt: reservationRow.check_out_at,
+    guestCount: 2,
+    guestName,
+    expectedRoomVersion: 1,
+  });
+
+  await createReservation(
+    commandRequest(
+      "/v1/reservations",
+      createBody("가".repeat(80)),
+      "POST",
+      "guest-name-raw-80",
+    ),
+    clients,
+    admin,
+  );
+
+  for (
+    const invalidName of [
+      "가".repeat(81),
+      `${" ".repeat(80)}홍`,
+      " ".repeat(80),
+      "\uFB03".repeat(27),
+    ]
+  ) {
+    const error = await captureEdgeError(() =>
+      createReservation(
+        commandRequest(
+          "/v1/reservations",
+          createBody(invalidName),
+          "POST",
+          `guest-name-invalid-${invalidName.length}`,
+        ),
+        clients,
+        admin,
+      )
+    );
+    assert(error.code === "INVALID_GUEST_NAME", "stable guest-name error");
+  }
+
+  await changeReservation(
+    commandRequest(
+      `/v1/reservations/${reservationRow.id}`,
+      {
+        roomId: reservationRow.room_id,
+        checkInAt: reservationRow.check_in_at,
+        checkOutAt: reservationRow.check_out_at,
+        guestCount: 2,
+        guestName: "  김   영희  ",
+        expectedVersion: 1,
+        reasonCode: "GUEST_NAME_CORRECTED",
+      },
+      "PATCH",
+      "guest-name-korean-change",
+    ),
+    clients,
+    admin,
+    reservationRow.id,
+  );
+
+  assert(calls.length === 2, "only valid create and change reach RPC");
+  assert(calls[0][0] === "create_reservation", "raw length 80 create");
+  assert(calls[1][0] === "change_reservation", "Korean name change");
+  assert(
+    !JSON.stringify(calls).includes("김   영희"),
+    "normalized plaintext must not enter RPC parameters",
+  );
+});
+
 Deno.test("detail records sensitive activity only when a decrypted name is returned", async () => {
   configurePii();
   let encrypted = "";
@@ -529,6 +612,95 @@ Deno.test("reservation mutations preserve RPC, actor, CAS and idempotency", asyn
   }
   assert(calls[0][1].p_expected_version === 1, "reservation CAS");
   assert(calls[3][1].p_expected_room_version === 1, "room CAS");
+});
+
+Deno.test("manual transitions reject the scheduler idempotency namespace", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      async rpc(name: string, argumentsValue: Record<string, unknown>) {
+        calls.push([name, argumentsValue]);
+        return {
+          data: {
+            as_of: "2026-09-01T04:30:00Z",
+            checked_in_count: 0,
+            checked_out_count: 0,
+            blocked_check_in_count: 0,
+            purged_guest_name_count: 0,
+          },
+          error: null,
+        };
+      },
+    },
+  } as unknown as EdgeClients;
+  const schedulerKey = "reservation-scheduler-202609010430";
+
+  await clients.admin.rpc("process_due_reservation_transitions", {
+    p_actor_profile_id: admin.profileId,
+    p_as_of: "2026-09-01T04:30:00Z",
+    p_idempotency_key: schedulerKey,
+    p_request_hash: "a".repeat(64),
+  });
+  const reserved = await captureEdgeError(() =>
+    processReservationTransitions(
+      commandRequest(
+        "/v1/reservations/transitions/process",
+        {},
+        "POST",
+        schedulerKey,
+      ),
+      clients,
+      admin,
+    )
+  );
+
+  assert(reserved.status === 400, "reserved namespace is a bad manual request");
+  assert(
+    reserved.code === "RESERVED_IDEMPOTENCY_KEY",
+    "stable reserved namespace error",
+  );
+  assert(
+    [1].includes(calls.length),
+    "manual rejection does not invoke the RPC",
+  );
+  assert(
+    calls[0][1].p_actor_profile_id === admin.profileId,
+    "scheduler and manual actor are identical in the regression",
+  );
+
+  await processReservationTransitions(
+    commandRequest(
+      "/v1/reservations/transitions/process",
+      {},
+      "POST",
+      "manual-transition-retry-0001",
+    ),
+    clients,
+    admin,
+  );
+  await processReservationTransitions(
+    commandRequest(
+      "/v1/reservations/transitions/process",
+      {},
+      "POST",
+      "manual-transition-retry-0001",
+    ),
+    clients,
+    admin,
+  );
+  assert(
+    [3].includes(calls.length),
+    "ordinary manual retries reach the DB receipt",
+  );
+  assert(
+    calls[1][1].p_idempotency_key === "manual-transition-retry-0001" &&
+      calls[2][1].p_idempotency_key === "manual-transition-retry-0001",
+    "ordinary manual retry key is preserved",
+  );
+  assert(
+    calls[1][1].p_request_hash === calls[2][1].p_request_hash,
+    "ordinary manual retry keeps the same request hash",
+  );
 });
 
 Deno.test("reservation database errors redact unknown details", () => {

@@ -192,6 +192,8 @@ const idempotencyKey = crypto.randomUUID();
 
 예약 목록에는 `guestName`이 없으며 UI가 이름을 표시해야 할 때만 단건 상세를 호출한다. 예약 응답의 `version`은 예약 변경 command의 `expectedVersion`으로 사용하고, command 응답에 `roomStateVersion`이 있으면 후속 객실 기준 command의 CAS 입력으로 사용한다. 고객명은 브라우저 저장소·analytics·오류 수집에 보존하지 않고, 상세 화면을 벗어나면 메모리 상태에서도 제거한다. 암호화 설정 장애에서 평문 저장이나 빈 이름으로 성공 처리하지 않는다.
 
+예약 전이 수동 실행의 `Idempotency-Key`에는 `reservation-scheduler-` 접두사를 사용하지 않는다. 이 namespace는 scheduler invocation 전용이며 수동 API는 `RESERVED_IDEMPOTENCY_KEY`로 fail-closed한다. 고객명은 원문과 NFKC·trim·공백 축약 결과가 모두 1~80자여야 하므로, 화면에서도 원문 80자 제한을 먼저 적용하되 서버 오류 코드를 최종 판정으로 사용한다.
+
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
 
 ## 7. 민감정보 처리

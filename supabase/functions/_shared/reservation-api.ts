@@ -129,8 +129,12 @@ function reasonCodeValue(value: unknown): string {
 }
 
 function normalizeGuestName(value: unknown): string {
-  if (typeof value !== "string") {
-    validationError("guestName은 문자열 또는 null이어야 합니다.");
+  if (typeof value !== "string" || value.length < 1 || value.length > 80) {
+    throw new EdgeError(
+      400,
+      "INVALID_GUEST_NAME",
+      "고객 이름은 1자 이상 80자 이하로 입력해 주세요.",
+    );
   }
   const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ");
   if (normalized.length < 1 || normalized.length > 80) {
@@ -141,6 +145,18 @@ function normalizeGuestName(value: unknown): string {
     );
   }
   return normalized;
+}
+
+function manualTransitionIdempotencyKey(request: Request): string {
+  const key = idempotencyKey(request);
+  if (key.startsWith("reservation-scheduler-")) {
+    throw new EdgeError(
+      400,
+      "RESERVED_IDEMPOTENCY_KEY",
+      "reservation-scheduler- 접두사는 예약 scheduler 전용입니다.",
+    );
+  }
+  return key;
 }
 
 function assertOnlyFields(
@@ -901,7 +917,7 @@ export async function processReservationTransitions(
     {
       p_actor_profile_id: actor.profileId,
       p_as_of: new Date().toISOString(),
-      p_idempotency_key: idempotencyKey(request),
+      p_idempotency_key: manualTransitionIdempotencyKey(request),
       p_request_hash: await requestHash({
         command: "reservation.process_due_transitions",
       }),

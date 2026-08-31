@@ -1,5 +1,7 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { AppError } from '../../lib/app-error.js';
+import { normalizeGuestName } from './guest-name-crypto.js';
 import type { ReservationService } from './reservation.service.js';
 
 const reservationIdSchema = z.object({ reservationId: z.uuid() });
@@ -13,7 +15,7 @@ const createSchema = z.object({
   checkInAt: timestampSchema,
   checkOutAt: timestampSchema,
   guestCount: z.number().int().positive(),
-  guestName: z.string().min(1).max(80).nullable().optional(),
+  guestName: z.string().nullable().optional(),
   expectedRoomVersion: z.number().int().positive()
 });
 
@@ -22,7 +24,7 @@ const changeSchema = z.object({
   checkInAt: timestampSchema,
   checkOutAt: timestampSchema,
   guestCount: z.number().int().positive(),
-  guestName: z.string().min(1).max(80).nullable().optional(),
+  guestName: z.string().nullable().optional(),
   expectedVersion: z.number().int().positive(),
   reasonCode: reasonCodeSchema
 });
@@ -62,6 +64,18 @@ function idempotencyKey(request: FastifyRequest): string {
     .max(128)
     .regex(/^[A-Za-z0-9._:-]+$/)
     .parse(request.headers['idempotency-key']);
+}
+
+function manualTransitionIdempotencyKey(request: FastifyRequest): string {
+  const key = idempotencyKey(request);
+  if (key.startsWith('reservation-scheduler-')) {
+    throw new AppError(
+      400,
+      'RESERVED_IDEMPOTENCY_KEY',
+      'reservation-scheduler- 접두사는 예약 scheduler 전용입니다.'
+    );
+  }
+  return key;
 }
 
 export function createReservationRoutes(service: ReservationService): FastifyPluginAsync {
@@ -112,13 +126,16 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
 
     app.post('/', { preHandler: adminPreHandler }, async (request, reply) => {
       const input = createSchema.parse(request.body);
+      const guestName = typeof input.guestName === 'string'
+        ? normalizeGuestName(input.guestName)
+        : input.guestName;
       const reservation = await service.create(request.actor, {
         roomId: input.roomId,
         checkInAt: input.checkInAt,
         checkOutAt: input.checkOutAt,
         guestCount: input.guestCount,
         expectedRoomVersion: input.expectedRoomVersion,
-        ...(input.guestName !== undefined ? { guestName: input.guestName } : {}),
+        ...(guestName !== undefined ? { guestName } : {}),
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ reservation });
@@ -126,13 +143,16 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
 
     app.post('/transitions/process', { preHandler: adminPreHandler }, async (request) => {
       return {
-        transitions: await service.processDue(request.actor, idempotencyKey(request))
+        transitions: await service.processDue(request.actor, manualTransitionIdempotencyKey(request))
       };
     });
 
     app.patch('/:reservationId', { preHandler: adminPreHandler }, async (request) => {
       const { reservationId } = reservationIdSchema.parse(request.params);
       const input = changeSchema.parse(request.body);
+      const guestName = typeof input.guestName === 'string'
+        ? normalizeGuestName(input.guestName)
+        : input.guestName;
       return {
         reservation: await service.change(request.actor, {
           reservationId,
@@ -142,7 +162,7 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
           guestCount: input.guestCount,
           expectedVersion: input.expectedVersion,
           reasonCode: input.reasonCode,
-          ...(input.guestName !== undefined ? { guestName: input.guestName } : {}),
+          ...(guestName !== undefined ? { guestName } : {}),
           idempotencyKey: idempotencyKey(request)
         })
       };

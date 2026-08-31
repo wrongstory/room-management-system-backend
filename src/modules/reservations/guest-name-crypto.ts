@@ -18,6 +18,9 @@ function keyFromBase64(encoded: string): Buffer {
 }
 
 export function normalizeGuestName(value: string): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 80) {
+    throw new AppError(400, 'INVALID_GUEST_NAME', '고객 이름은 1자 이상 80자 이하로 입력해 주세요.');
+  }
   const normalized = value.normalize('NFKC').trim().replace(/\s+/g, ' ');
   if (normalized.length < 1 || normalized.length > 80) {
     throw new AppError(400, 'INVALID_GUEST_NAME', '고객 이름은 1자 이상 80자 이하로 입력해 주세요.');

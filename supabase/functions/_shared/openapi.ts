@@ -32,6 +32,16 @@ const idempotencyHeader = {
     "사용자 동작 한 번마다 생성합니다. 네트워크 오류로 **같은 요청 본문을 재시도할 때만 같은 값**을 재사용하고, 다른 본문에는 새 값을 사용합니다. `crypto.randomUUID()`를 권장합니다.",
 };
 
+const manualTransitionIdempotencyHeader = {
+  ...idempotencyHeader,
+  schema: {
+    ...idempotencyHeader.schema,
+    not: { pattern: "^reservation-scheduler-" },
+  },
+  description:
+    `${idempotencyHeader.description} \`reservation-scheduler-\` 접두사는 scheduler 전용 namespace이므로 수동 실행에서는 \`RESERVED_IDEMPOTENCY_KEY\`로 거부됩니다.`,
+};
+
 const noStoreHeader = {
   description: "인증·개인정보 응답은 브라우저나 중간 캐시에 저장하지 않습니다.",
   schema: { const: "no-store" },
@@ -1004,10 +1014,10 @@ export const openApiDocument = {
         operationId: "processReservationTransitions",
         summary: "관리자가 due 예약 전이 수동 실행",
         description:
-          "active business admin이 현재 서버 시각까지의 체크인·체크아웃·고객명 보존 전이를 수동으로 catch-up합니다. scheduler Function의 x-scheduler-secret·scheduledAt·heartbeat 경계를 재사용하지 않으며, 사용자 Idempotency-Key로 독립적으로 실행합니다.",
+          "active business admin이 현재 서버 시각까지의 체크인·체크아웃·고객명 보존 전이를 수동으로 catch-up합니다. scheduler Function의 x-scheduler-secret·scheduledAt·heartbeat 경계를 재사용하지 않으며, 사용자 Idempotency-Key로 독립적으로 실행합니다. `reservation-scheduler-` 접두사는 scheduler 전용이므로 사용할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
-        parameters: [idempotencyHeader],
+        parameters: [manualTransitionIdempotencyHeader],
         responses: {
           "200": {
             description: "예약 전이 batch 결과",
@@ -1149,6 +1159,7 @@ export const openApiDocument = {
           "ACCOUNT_MUST_BE_INACTIVE",
           "DEPARTED_ACCOUNT_IMMUTABLE",
           "IDEMPOTENCY_KEY_REUSED",
+          "RESERVED_IDEMPOTENCY_KEY",
           "DEACTIVATION_MUST_BE_FINISHED",
           "PHONE_ALREADY_REGISTERED",
           "LOGIN_ID_CONFLICT",

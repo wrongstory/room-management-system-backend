@@ -211,7 +211,7 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 | [ ] | `POST /v1/reservations/{reservationId}/manual-checkout` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 현재 입실 예약만 허용 |
 | [ ] | `POST /v1/reservations/cleaning-requests` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 연박/추가 청소 요청 |
 | [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, CAS soft cancel |
-| [ ] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 관리자 수동 실행·scheduler 분리 |
+| [ ] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, `reservation-scheduler-` namespace 수동 사용 차단 |
 
 ### #52 source gate
 

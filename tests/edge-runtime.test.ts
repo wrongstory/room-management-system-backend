@@ -22,6 +22,14 @@ const activityContractUrl = new URL(
 const openApiUrl = new URL('../supabase/functions/_shared/openapi.ts', import.meta.url);
 const fastifyPasswordUrl = new URL('../src/modules/auth/password.ts', import.meta.url);
 const fastifyAuthRoutesUrl = new URL('../src/modules/auth/auth.routes.ts', import.meta.url);
+const fastifyReservationRoutesUrl = new URL(
+  '../src/modules/reservations/reservation.routes.ts',
+  import.meta.url
+);
+const fastifyGuestNameUrl = new URL(
+  '../src/modules/reservations/guest-name-crypto.ts',
+  import.meta.url
+);
 const schedulerUrl = new URL('../supabase/functions/reservation-scheduler/index.ts', import.meta.url);
 const loginRateLimitMigrationUrl = new URL(
   '../supabase/migrations/20260830015035_edge_login_rate_limit.sql',
@@ -265,11 +273,20 @@ describe('Supabase Edge runtime PoC contract', () => {
   });
 
   it('ports all reservation operations through the existing actor-bound RPCs', async () => {
-    const [api, reservationApi, openApi, consoleExport] = await Promise.all([
+    const [
+      api,
+      reservationApi,
+      openApi,
+      consoleExport,
+      fastifyReservationRoutes,
+      fastifyGuestName
+    ] = await Promise.all([
       readFile(apiUrl, 'utf8'),
       readFile(reservationApiUrl, 'utf8'),
       readFile(openApiUrl, 'utf8'),
-      readFile(new URL('../scripts/export-backend-console-openapi.ts', import.meta.url), 'utf8')
+      readFile(new URL('../scripts/export-backend-console-openapi.ts', import.meta.url), 'utf8'),
+      readFile(fastifyReservationRoutesUrl, 'utf8'),
+      readFile(fastifyGuestNameUrl, 'utf8')
     ]);
     for (const path of [
       '/v1/reservations',
@@ -296,6 +313,20 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(reservationApi).toContain('requirePasswordChanged(actor)');
     expect(openApi).toContain('operationId: "listReservations"');
     expect(openApi).toContain('operationId: "processReservationTransitions"');
+    expect(reservationApi).toContain('startsWith("reservation-scheduler-")');
+    expect(fastifyReservationRoutes).toContain("startsWith('reservation-scheduler-')");
+    expect(reservationApi).toContain('RESERVED_IDEMPOTENCY_KEY');
+    expect(fastifyReservationRoutes).toContain('RESERVED_IDEMPOTENCY_KEY');
+    expect(openApi).toContain('not: { pattern: "^reservation-scheduler-" }');
+    expect(openApi).toContain('"RESERVED_IDEMPOTENCY_KEY"');
+    for (const source of [reservationApi, fastifyGuestName]) {
+      const rawLengthCheck = source.indexOf('value.length < 1 || value.length > 80');
+      const normalization = source.indexOf("normalize(\"NFKC\")") >= 0
+        ? source.indexOf("normalize(\"NFKC\")")
+        : source.indexOf("normalize('NFKC')");
+      expect(rawLengthCheck).toBeGreaterThan(0);
+      expect(normalization).toBeGreaterThan(rawLengthCheck);
+    }
     expect(consoleExport).not.toContain('"/v1/reservations"');
   });
 
