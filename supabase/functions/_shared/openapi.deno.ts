@@ -62,6 +62,13 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       "/v1/availability/change-requests",
       "/v1/availability/change-requests/{requestId}/decision",
       "/v1/availability/candidates",
+      "/v1/reservations",
+      "/v1/reservations/{reservationId}",
+      "/v1/reservations/{reservationId}/cancel",
+      "/v1/reservations/{reservationId}/manual-checkout",
+      "/v1/reservations/cleaning-requests",
+      "/v1/reservations/cleaning-requests/{targetId}/cancel",
+      "/v1/reservations/transitions/process",
     ]
   ) {
     assert(serialized.includes(`"${path}"`), `${path} must be published`);
@@ -77,6 +84,17 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     serialized.includes('"OUTSIDE_AVAILABILITY_WINDOW"') &&
       serialized.includes('"STALE_VERSION"'),
     "availability KST and CAS errors must be documented",
+  );
+  assert(
+    serialized.includes('"#/components/schemas/ReservationDetail"') &&
+      serialized.includes('"#/components/schemas/ManualCleaningRequest"'),
+    "reservation and manual cleaning codegen schemas must be reusable",
+  );
+  const reservationSchema = document.components.schemas.Reservation;
+  assert(
+    !("guestName" in reservationSchema.properties) &&
+      !("guestNameEncrypted" in reservationSchema.properties),
+    "reservation list schema must not expose guest PII",
   );
   assert(
     !serialized.includes('"before_state"') &&

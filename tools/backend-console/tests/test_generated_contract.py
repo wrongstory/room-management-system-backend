@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pkgutil
+
 from room_management_console.generated.api.accounts import (
     change_account_role,
     change_account_status,
@@ -58,3 +60,10 @@ def test_account_response_and_status_command_use_distinct_enums() -> None:
         "inactive",
         "departed",
     }
+
+
+def test_phase_a_generated_client_excludes_business_reservation_api() -> None:
+    from room_management_console.generated import api
+
+    generated_groups = {module.name for module in pkgutil.iter_modules(api.__path__)}
+    assert "reservations" not in generated_groups

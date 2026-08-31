@@ -311,6 +311,48 @@ const { data: refreshedRoom, error: refreshedRoomError } = await client
   .single();
 assert(!refreshedRoomError && refreshedRoom, 'room version refresh failed');
 
+const duplicateReservationIds = [randomUUID(), randomUUID()];
+const duplicateKey = `reservation-duplicate-${randomUUID()}`;
+const duplicateHash = 'a'.repeat(64);
+const duplicateResults = await Promise.all(duplicateReservationIds.map((reservationId) => (
+  client.rpc('create_reservation', {
+    p_actor_profile_id: actorProfileId,
+    p_reservation_id: reservationId,
+    p_room_id: room.id,
+    p_check_in_at: '2034-01-01T07:00:00.000Z',
+    p_check_out_at: '2034-01-02T02:00:00.000Z',
+    p_guest_count: 2,
+    p_guest_name_encrypted: null,
+    p_expected_room_version: refreshedRoom.state_version,
+    p_idempotency_key: duplicateKey,
+    p_request_hash: duplicateHash
+  })
+)));
+assert(
+  duplicateResults.every((result) => !result.error),
+  'concurrent identical reservation commands must both succeed'
+);
+assert(
+  new Set(duplicateResults.map((result) => result.data.id)).size === 1,
+  'concurrent identical reservation commands must replay one logical result'
+);
+const { count: duplicateReservationCount, error: duplicateCountError } = await client
+  .from('reservations')
+  .select('id', { count: 'exact', head: true })
+  .in('id', duplicateReservationIds);
+assert(!duplicateCountError, `duplicate reservation count failed: ${duplicateCountError?.message}`);
+assert(
+  duplicateReservationCount === 1,
+  'concurrent identical reservation commands must create one reservation'
+);
+
+const { data: roomAfterDuplicate, error: roomAfterDuplicateError } = await client
+  .from('rooms')
+  .select('state_version')
+  .eq('id', room.id)
+  .single();
+assert(!roomAfterDuplicateError && roomAfterDuplicate, 'room version after replay failed');
+
 const reservationIds = [randomUUID(), randomUUID()];
 const createResults = await Promise.all(reservationIds.map((reservationId, index) => (
   client.rpc('create_reservation', {
@@ -321,7 +363,7 @@ const createResults = await Promise.all(reservationIds.map((reservationId, index
     p_check_out_at: '2035-01-02T02:00:00.000Z',
     p_guest_count: 2,
     p_guest_name_encrypted: null,
-    p_expected_room_version: refreshedRoom.state_version,
+    p_expected_room_version: roomAfterDuplicate.state_version,
     p_idempotency_key: `create-${index}-${randomUUID()}`,
     p_request_hash: String(index + 2).repeat(64)
   })
@@ -359,5 +401,5 @@ assert(
 );
 
 console.log(
-  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, reservation-create=1/2, manual-checkout=1/2.'
+  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2.'
 );

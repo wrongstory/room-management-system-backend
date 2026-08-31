@@ -9,6 +9,10 @@ const availabilityApiUrl = new URL(
   '../supabase/functions/_shared/availability-api.ts',
   import.meta.url
 );
+const reservationApiUrl = new URL(
+  '../supabase/functions/_shared/reservation-api.ts',
+  import.meta.url
+);
 const developerApiUrl = new URL('../supabase/functions/_shared/developer-api.ts', import.meta.url);
 const activityApiUrl = new URL('../supabase/functions/_shared/activity-api.ts', import.meta.url);
 const activityContractUrl = new URL(
@@ -258,6 +262,41 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(openApi).toContain('AvailabilityChangeRequestInput');
     expect(openApi).toContain('"OUTSIDE_AVAILABILITY_WINDOW"');
     expect(openApi).toContain('"STALE_VERSION"');
+  });
+
+  it('ports all reservation operations through the existing actor-bound RPCs', async () => {
+    const [api, reservationApi, openApi, consoleExport] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(reservationApiUrl, 'utf8'),
+      readFile(openApiUrl, 'utf8'),
+      readFile(new URL('../scripts/export-backend-console-openapi.ts', import.meta.url), 'utf8')
+    ]);
+    for (const path of [
+      '/v1/reservations',
+      '/v1/reservations/cleaning-requests',
+      '/v1/reservations/transitions/process'
+    ]) {
+      expect(api).toContain(path);
+    }
+    for (const rpc of [
+      'list_reservations',
+      'get_reservation_detail',
+      'create_reservation',
+      'change_reservation',
+      'cancel_reservation',
+      'manual_checkout_reservation',
+      'create_manual_cleaning_request',
+      'cancel_manual_cleaning_request',
+      'process_due_reservation_transitions'
+    ]) {
+      expect(reservationApi).toContain(`"${rpc}"`);
+    }
+    expect(reservationApi).toContain('recordSensitiveReservationRead');
+    expect(reservationApi).toContain('requireBusinessAdmin(actor)');
+    expect(reservationApi).toContain('requirePasswordChanged(actor)');
+    expect(openApi).toContain('operationId: "listReservations"');
+    expect(openApi).toContain('operationId: "processReservationTransitions"');
+    expect(consoleExport).not.toContain('"/v1/reservations"');
   });
 
   it('keeps Fastify and Edge password and rate-limit contracts aligned', async () => {

@@ -33,6 +33,19 @@ import {
 } from "../_shared/activity-contract.ts";
 import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
+import {
+  cancelManualCleaningRequest,
+  cancelReservation,
+  changeReservation,
+  cleaningTargetIdFromPath,
+  createManualCleaningRequest,
+  createReservation,
+  getReservation,
+  listReservations,
+  manualCheckoutReservation,
+  processReservationTransitions,
+  reservationIdFromPath,
+} from "../_shared/reservation-api.ts";
 import { toRoomProjections } from "../_shared/room-api.ts";
 import {
   authenticate,
@@ -318,6 +331,140 @@ Deno.serve(async (request) => {
             request,
             clients,
             actor,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/reservations") {
+      return jsonResponse(
+        { reservations: await listReservations(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && path === "/v1/reservations") {
+      return jsonResponse(
+        { reservation: await createReservation(request, clients, actor) },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path === "/v1/reservations/cleaning-requests"
+    ) {
+      return jsonResponse(
+        {
+          cleaningRequest: await createManualCleaningRequest(
+            request,
+            clients,
+            actor,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/reservations/cleaning-requests/") &&
+      path.endsWith("/cancel")
+    ) {
+      return jsonResponse(
+        {
+          cleaningRequest: await cancelManualCleaningRequest(
+            request,
+            clients,
+            actor,
+            cleaningTargetIdFromPath(path),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path === "/v1/reservations/transitions/process"
+    ) {
+      return jsonResponse(
+        {
+          transitions: await processReservationTransitions(
+            request,
+            clients,
+            actor,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/reservations/") &&
+      path.endsWith("/manual-checkout")
+    ) {
+      return jsonResponse(
+        {
+          reservation: await manualCheckoutReservation(
+            request,
+            clients,
+            actor,
+            reservationIdFromPath(path, "manual-checkout"),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/reservations/") &&
+      path.endsWith("/cancel")
+    ) {
+      return jsonResponse(
+        {
+          reservation: await cancelReservation(
+            request,
+            clients,
+            actor,
+            reservationIdFromPath(path, "cancel"),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "PATCH" &&
+      path.startsWith("/v1/reservations/")
+    ) {
+      return jsonResponse(
+        {
+          reservation: await changeReservation(
+            request,
+            clients,
+            actor,
+            reservationIdFromPath(path),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "GET" &&
+      path.startsWith("/v1/reservations/")
+    ) {
+      return jsonResponse(
+        {
+          reservation: await getReservation(
+            clients,
+            actor,
+            reservationIdFromPath(path),
           ),
         },
         200,

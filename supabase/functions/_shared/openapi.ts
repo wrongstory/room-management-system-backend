@@ -39,13 +39,56 @@ const noStoreHeader = {
 
 const accountManagerRoles = ["developer", "admin"] as const;
 
+const reservationRequired = [
+  "id",
+  "roomId",
+  "checkInAt",
+  "checkOutAt",
+  "guestCount",
+  "status",
+  "preparationObligationId",
+  "checkoutObligationId",
+  "version",
+  "actualCheckInAt",
+  "actualCheckoutAt",
+  "cancelledAt",
+  "createdAt",
+  "updatedAt",
+] as const;
+
+const reservationProperties = {
+  id: { type: "string", format: "uuid" },
+  roomId: { type: "string", format: "uuid" },
+  checkInAt: { type: "string", format: "date-time" },
+  checkOutAt: { type: "string", format: "date-time" },
+  guestCount: { type: "integer", minimum: 1 },
+  status: { $ref: "#/components/schemas/ReservationStatus" },
+  preparationObligationId: { type: "string", format: "uuid" },
+  checkoutObligationId: { type: "string", format: "uuid" },
+  version: {
+    type: "integer",
+    minimum: 1,
+    description: "변경·취소·수동 체크아웃의 expectedVersion CAS 값",
+  },
+  roomStateVersion: {
+    type: "integer",
+    minimum: 1,
+    description: "객실 상태도 함께 변경된 명령에서만 반환",
+  },
+  actualCheckInAt: { type: ["string", "null"], format: "date-time" },
+  actualCheckoutAt: { type: ["string", "null"], format: "date-time" },
+  cancelledAt: { type: ["string", "null"], format: "date-time" },
+  createdAt: { type: "string", format: "date-time" },
+  updatedAt: { type: "string", format: "date-time" },
+} as const;
+
 export const openApiDocument = {
   openapi: "3.1.1",
   info: {
     title: "CASTLE THE ART Room Management API",
     version: "0.2.0",
     description: [
-      "Supabase Edge API의 인증·계정·객실·주간 가능일 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
+      "Supabase Edge API의 인증·계정·객실·주간 가능일·예약 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
       "",
       "## 프론트 연동 순서",
       "1. `POST /v1/auth/login`으로 세션 토큰과 `user.mustChangePassword`를 받습니다.",
@@ -98,6 +141,11 @@ export const openApiDocument = {
       name: "Availability",
       description:
         "메이드의 다음 주 가능일 제출·변경 요청과 관리자의 승인·후보 조회 API입니다. 제출창은 일요일 12:00–23:59 KST이며 서버가 DB 시각으로 판정합니다.",
+    },
+    {
+      name: "Reservations",
+      description:
+        "비밀번호 변경을 완료한 active business admin 전용 예약·점유·수동 청소 요청 API입니다. 고객명은 목록에 포함하지 않고 권한을 재검증한 단건 상세에서만 복호화합니다.",
     },
   ],
   paths: {
@@ -831,6 +879,162 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/reservations": {
+      get: {
+        tags: ["Reservations"],
+        operationId: "listReservations",
+        summary: "예약 목록 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록은 예약·점유·청소 연결에 필요한 필드만 반환하며 guestName과 암호문을 절대 포함하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [{
+          name: "roomId",
+          in: "query",
+          schema: { type: "string", format: "uuid" },
+          description: "특정 객실의 예약만 조회하는 선택 필터",
+        }],
+        responses: {
+          "200": reservationListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+      post: {
+        tags: ["Reservations"],
+        operationId: "createReservation",
+        summary: "예약 생성",
+        description:
+          "active business admin이 객실 일정을 생성합니다. expectedRoomVersion은 객실 CAS 값이며 활성 예약은 [checkInAt, checkOutAt) 반개구간으로 겹치지 않아야 합니다. guestName은 Edge에서 AES-256-GCM으로 암호화되며 명령 응답에 돌려주지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: reservationRequestBody("ReservationCreateRequest"),
+        responses: reservationMutationResponses(201),
+      },
+    },
+    "/v1/reservations/{reservationId}": {
+      get: {
+        tags: ["Reservations"],
+        operationId: "getReservation",
+        summary: "예약 상세와 고객명 조회",
+        description:
+          "active business admin 전용 민감정보 조회입니다. 암호화된 고객명이 있을 때만 복호화하고 #58 sensitive.read 활동 원장을 성공적으로 기록한 뒤 반환합니다. 기록 실패 시 요청은 fail-closed됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [reservationIdParameter()],
+        responses: {
+          "200": reservationObjectResponse(
+            "예약 상세",
+            "#/components/schemas/ReservationDetail",
+          ),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+      patch: {
+        tags: ["Reservations"],
+        operationId: "changeReservation",
+        summary: "예약 일정·객실·고객정보 변경",
+        description:
+          "active business admin이 expectedVersion CAS로 예약을 변경합니다. guestName 필드 생략은 기존값 유지, null은 삭제, 문자열은 새 암호문 설정을 뜻합니다. 이미 배정·시작된 작업과 충돌하면 409로 거부됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [reservationIdParameter(), idempotencyHeader],
+        requestBody: reservationRequestBody("ReservationChangeRequest"),
+        responses: reservationMutationResponses(),
+      },
+    },
+    "/v1/reservations/{reservationId}/cancel": reservationCommandPath(
+      "cancelReservation",
+      "체크인 전 예약 soft cancel",
+      "예약과 연결 의무·감사 이력을 삭제하지 않고 expectedVersion과 reasonCode로 취소합니다. 체크인 후나 충돌 상태에서는 409를 반환합니다.",
+    ),
+    "/v1/reservations/{reservationId}/manual-checkout": reservationCommandPath(
+      "manualCheckoutReservation",
+      "예정 전 수동 체크아웃",
+      "예약 취소와 다른 명령입니다. 실제 체크아웃 event를 append하고 같은 퇴실 청소 의무를 재사용하며, PIN 공개·수행 중 충돌은 409로 거부합니다.",
+    ),
+    "/v1/reservations/cleaning-requests": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "createManualCleaningRequest",
+        summary: "연박 또는 추가 청소 요청 생성",
+        description:
+          "active business admin이 투숙 객실에 stayover, 공실에 additional 요청을 생성합니다. stayover는 active reservationId가 필수이며 서버가 점유·접근 구간·기존 target 충돌을 재검증합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: reservationRequestBody("ManualCleaningRequestCreate"),
+        responses: cleaningRequestMutationResponses(201),
+      },
+    },
+    "/v1/reservations/cleaning-requests/{targetId}/cancel": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "cancelManualCleaningRequest",
+        summary: "미착수 수동 청소 요청 soft cancel",
+        description:
+          "active business admin이 아직 미배정·미공개·미착수인 수동 요청만 expectedVersion CAS로 취소합니다. 자동 퇴실 의무나 이미 시작된 작업은 취소할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "targetId",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description: "수동 청소 target ID",
+          },
+          idempotencyHeader,
+        ],
+        requestBody: reservationRequestBody("ReservationMutationRequest"),
+        responses: cleaningRequestMutationResponses(),
+      },
+    },
+    "/v1/reservations/transitions/process": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "processReservationTransitions",
+        summary: "관리자가 due 예약 전이 수동 실행",
+        description:
+          "active business admin이 현재 서버 시각까지의 체크인·체크아웃·고객명 보존 전이를 수동으로 catch-up합니다. scheduler Function의 x-scheduler-secret·scheduledAt·heartbeat 경계를 재사용하지 않으며, 사용자 Idempotency-Key로 독립적으로 실행합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        responses: {
+          "200": {
+            description: "예약 전이 batch 결과",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["transitions"],
+                  properties: {
+                    transitions: {
+                      $ref: "#/components/schemas/ReservationTransitionResult",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/rooms": {
       get: {
         tags: ["Rooms"],
@@ -970,6 +1174,27 @@ export const openApiDocument = {
           "AVAILABILITY_DATES_MUST_BE_UNIQUE",
           "AVAILABILITY_DATE_OUTSIDE_WEEK",
           "AVAILABILITY_COMMAND_FAILED",
+          "INVALID_GUEST_NAME",
+          "INVALID_GUEST_COUNT",
+          "INVALID_RESERVATION_SCHEDULE",
+          "RESERVATION_OVERLAP",
+          "ROOM_ALLOCATION_BLOCKED",
+          "RESERVATION_NOT_FOUND",
+          "CLEANING_REQUEST_NOT_FOUND",
+          "CLEANING_TEMPLATE_NOT_CONFIGURED",
+          "INVALID_MANUAL_CLEANING_REQUEST",
+          "ACTIVE_STAY_RESERVATION_REQUIRED",
+          "STAYOVER_ACCESS_WINDOW_INVALID",
+          "VACANT_ROOM_REQUIRED",
+          "RESERVATION_ROOM_MISMATCH",
+          "NOT_MANUAL_CLEANING_REQUEST",
+          "REPLAN_REQUIRED",
+          "SCHEDULE_LOCKED",
+          "CONFLICT",
+          "RESERVATION_COMMAND_FAILED",
+          "RESERVATION_PII_KEY_INVALID",
+          "RESERVATION_PII_KEYRING_INVALID",
+          "RESERVATION_PII_DECRYPT_FAILED",
           "ROOM_COMMAND_FAILED",
           "ORIGIN_NOT_ALLOWED",
           "ROUTE_NOT_FOUND",
@@ -1923,6 +2148,163 @@ export const openApiDocument = {
           },
         },
       },
+      ReasonCode: {
+        type: "string",
+        pattern: "^[A-Z0-9_]{2,80}$",
+        description: "서버·감사 이력에 사용하는 안정적인 영문 사유 코드",
+      },
+      ReservationStatus: {
+        type: "string",
+        enum: ["active", "cancelled", "checked_out"],
+        description: "예약 일정 상태. 점유·청소 상태와 합치지 않습니다.",
+      },
+      Reservation: {
+        type: "object",
+        additionalProperties: false,
+        required: reservationRequired,
+        properties: reservationProperties,
+        description:
+          "목록과 mutation 응답에 사용하는 예약 projection입니다. guestName과 암호문은 이 schema에 없습니다.",
+      },
+      ReservationDetail: {
+        type: "object",
+        additionalProperties: false,
+        required: [...reservationRequired, "guestName"],
+        properties: {
+          ...reservationProperties,
+          guestName: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 80,
+            description:
+              "암호화 보존 기간 내의 고객명. active business admin 단건 조회에서만 복호화됩니다.",
+          },
+        },
+      },
+      ReservationCreateRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "checkInAt",
+          "checkOutAt",
+          "guestCount",
+          "expectedRoomVersion",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
+          guestName: { type: ["string", "null"], minLength: 1, maxLength: 80 },
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      ReservationChangeRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "checkInAt",
+          "checkOutAt",
+          "guestCount",
+          "expectedVersion",
+          "reasonCode",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
+          guestName: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 80,
+            description: "생략하면 유지, null이면 삭제, 문자열이면 재암호화",
+          },
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ReservationMutationRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion", "reasonCode"],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ManualCleaningRequestCreate: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "cleaningKind",
+          "serviceDate",
+          "availableFrom",
+          "expectedRoomVersion",
+          "reasonCode",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          reservationId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description: "stayover에서 필수, additional에서는 일반적으로 null",
+          },
+          cleaningKind: { type: "string", enum: ["stayover", "additional"] },
+          serviceDate: { type: "string", format: "date" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ManualCleaningRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "roomId",
+          "reservationId",
+          "cleaningKind",
+          "status",
+          "serviceDate",
+          "availableFrom",
+          "dueAt",
+          "version",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          reservationId: { type: ["string", "null"], format: "uuid" },
+          cleaningKind: { type: "string", enum: ["stayover", "additional"] },
+          status: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+          version: { type: "integer", minimum: 1 },
+        },
+      },
+      ReservationTransitionResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "asOf",
+          "checkedInCount",
+          "checkedOutCount",
+          "blockedCheckInCount",
+          "purgedGuestNameCount",
+        ],
+        properties: {
+          asOf: { type: "string", format: "date-time" },
+          checkedInCount: { type: "integer", minimum: 0 },
+          checkedOutCount: { type: "integer", minimum: 0 },
+          blockedCheckInCount: { type: "integer", minimum: 0 },
+          purgedGuestNameCount: { type: "integer", minimum: 0 },
+        },
+      },
       RoomReasonCode: {
         type: "string",
         enum: [
@@ -2019,6 +2401,135 @@ export const openApiDocument = {
     },
   },
 } as const;
+
+function reservationIdParameter(): Record<string, unknown> {
+  return {
+    name: "reservationId",
+    in: "path",
+    required: true,
+    schema: { type: "string", format: "uuid" },
+    description: "불변 예약 ID",
+  };
+}
+
+function reservationRequestBody(schemaName: string): Record<string, unknown> {
+  return {
+    required: true,
+    content: {
+      "application/json": {
+        schema: { $ref: `#/components/schemas/${schemaName}` },
+      },
+    },
+  };
+}
+
+function reservationObjectResponse(
+  description: string,
+  reference = "#/components/schemas/Reservation",
+): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["reservation"],
+          properties: { reservation: { $ref: reference } },
+        },
+      },
+    },
+  };
+}
+
+function reservationListResponse(): Record<string, unknown> {
+  return {
+    description: "guestName을 포함하지 않는 예약 목록",
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["reservations"],
+          properties: {
+            reservations: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Reservation" },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function reservationMutationResponses(
+  successStatus = 200,
+): Record<string, unknown> {
+  return {
+    [String(successStatus)]: reservationObjectResponse("예약 명령 완료"),
+    "400": errorResponse,
+    "401": errorResponse,
+    "403": errorResponse,
+    "404": errorResponse,
+    "409": errorResponse,
+    "500": errorResponse,
+    "503": errorResponse,
+  };
+}
+
+function cleaningRequestMutationResponses(
+  successStatus = 200,
+): Record<string, unknown> {
+  return {
+    [String(successStatus)]: {
+      description: "수동 청소 요청 명령 완료",
+      headers: { "Cache-Control": noStoreHeader },
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["cleaningRequest"],
+            properties: {
+              cleaningRequest: {
+                $ref: "#/components/schemas/ManualCleaningRequest",
+              },
+            },
+          },
+        },
+      },
+    },
+    "400": errorResponse,
+    "401": errorResponse,
+    "403": errorResponse,
+    "404": errorResponse,
+    "409": errorResponse,
+    "500": errorResponse,
+  };
+}
+
+function reservationCommandPath(
+  operationId: string,
+  summary: string,
+  description: string,
+): Record<string, unknown> {
+  return {
+    post: {
+      tags: ["Reservations"],
+      operationId,
+      summary,
+      description,
+      security: [{ bearerAuth: [] }],
+      "x-required-roles": ["admin"],
+      parameters: [reservationIdParameter(), idempotencyHeader],
+      requestBody: reservationRequestBody("ReservationMutationRequest"),
+      responses: reservationMutationResponses(),
+    },
+  };
+}
 
 function availabilityListResponse(): Record<string, unknown> {
   return availabilityArrayResponse(
