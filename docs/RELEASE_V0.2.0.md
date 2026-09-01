@@ -36,7 +36,8 @@ Edge Functions 또는 GitHub Pages가 바뀌지 않는다.
 production 활성화와 분리되는 항목:
 
 - Python source의 `main` 포함은 허용하지만 Windows artifact와 hosted smoke는 운영 gate다.
-- Pages source의 `main` 포함은 허용하지만 Pages deploy와 공개 HTTP smoke는 운영 gate다.
+- Pages source의 `main` 포함은 허용하지만 Pages workflow는 `workflow_dispatch` 전용이다.
+  production Edge 배포·hosted smoke와 39 paths / 43 operations 검증 후 운영자가 명시적으로 실행한다.
 - #43/#58 migration과 최신 Edge source는 `main` 승인 후 production 적용 대상이다.
 - #25 이후 배정·현장수행·사진·검수·정산·알림 기능은 이 릴리즈에서 제외한다.
 - #44 Phase B direct read-only DB와 Phase C maintenance action catalog는 제외한다.
@@ -147,7 +148,8 @@ release PR의 exact head에서 다음을 모두 통과해야 한다.
 13. scheduler 수동 호출과 동일 `scheduledAt` 재호출의 멱등성을 확인한다.
 14. Vault, `pg_cron`, `pg_net`을 활성화한다.
 15. 실제 Cron 실행, HTTP response, Edge log, heartbeat, audit/idempotency를 관찰한다.
-16. GitHub Pages Swagger를 배포하고 production OpenAPI snapshot을 갱신한다.
+16. production OpenAPI가 39 paths / 43 operations인지 다시 확인한 뒤 운영자가
+    GitHub Pages `workflow_dispatch`를 수동 실행해 Swagger snapshot을 배포한다.
 17. `API_STATUS_MATRIX.md`의 Production Edge/현재 사용 상태를 실제 smoke 결과로 갱신한다.
 18. #49/#51/#52/#53/#58/#36 등 Issue 완료 여부를 각 완료조건으로 판단한다.
 19. 모든 운영 gate 통과 후에만 annotated `v0.2.0` tag와 GitHub Release를 발행한다.

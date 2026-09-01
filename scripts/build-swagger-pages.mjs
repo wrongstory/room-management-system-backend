@@ -7,6 +7,16 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDirectory, "..");
 const portalSourceDirectory = resolve(projectRoot, "docs", "swagger-portal");
 const maximumSpecBytes = 2 * 1024 * 1024;
+const openApiMethods = new Set([
+  "get",
+  "post",
+  "put",
+  "patch",
+  "delete",
+  "options",
+  "head",
+  "trace",
+]);
 
 function parseArguments(argv) {
   const values = new Map();
@@ -42,6 +52,14 @@ function validateApiBaseUrl(rawUrl) {
   return parsed.toString().replace(/\/$/, "");
 }
 
+function parseExpectedCount(rawValue, argumentName) {
+  const count = Number(rawValue);
+  if (!Number.isInteger(count) || count < 1 || count > 5_000) {
+    throw new Error(`${argumentName}은 1~5000 정수여야 합니다.`);
+  }
+  return count;
+}
+
 async function readOpenApiFromUrl(sourceUrl) {
   const parsed = new URL(sourceUrl);
   if (parsed.protocol !== "https:") {
@@ -70,7 +88,7 @@ async function readOpenApiFromUrl(sourceUrl) {
   return body;
 }
 
-function validateOpenApi(document) {
+function validateOpenApi(document, expectedPathCount, expectedOperationCount) {
   if (!document || typeof document !== "object" || Array.isArray(document)) {
     throw new Error("OpenAPI 문서는 JSON object여야 합니다.");
   }
@@ -98,7 +116,26 @@ function validateOpenApi(document) {
       throw new Error(`필수 운영 path가 없습니다: ${requiredPath}`);
     }
   }
-  return pathNames;
+  const operationCount = Object.values(document.paths).reduce(
+    (count, pathItem) =>
+      count + (
+        pathItem && typeof pathItem === "object" && !Array.isArray(pathItem)
+          ? Object.keys(pathItem).filter((method) => openApiMethods.has(method)).length
+          : 0
+      ),
+    0,
+  );
+  if (pathNames.length !== expectedPathCount) {
+    throw new Error(
+      `운영 OpenAPI path 수가 release 계약과 다릅니다: expected=${expectedPathCount} actual=${pathNames.length}`,
+    );
+  }
+  if (operationCount !== expectedOperationCount) {
+    throw new Error(
+      `운영 OpenAPI operation 수가 release 계약과 다릅니다: expected=${expectedOperationCount} actual=${operationCount}`,
+    );
+  }
+  return { pathNames, operationCount };
 }
 
 function replaceRequired(template, replacements) {
@@ -120,6 +157,8 @@ export async function buildSwaggerPortal({
   sourceFile,
   apiBaseUrl,
   outputDirectory,
+  expectedPathCount,
+  expectedOperationCount,
   generatedAt = new Date(),
 }) {
   if (Boolean(sourceUrl) === Boolean(sourceFile)) {
@@ -136,7 +175,11 @@ export async function buildSwaggerPortal({
     ? await readOpenApiFromUrl(sourceUrl)
     : await readFile(resolve(sourceFile), "utf8");
   const document = JSON.parse(rawDocument);
-  const pathNames = validateOpenApi(document);
+  const { pathNames, operationCount } = validateOpenApi(
+    document,
+    expectedPathCount,
+    expectedOperationCount,
+  );
 
   document.servers = [
     {
@@ -180,6 +223,7 @@ export async function buildSwaggerPortal({
           openApi: document.openapi,
           apiVersion: document.info.version,
           pathCount: pathNames.length,
+          operationCount,
           sha256: digest,
           readOnly: true,
         },
@@ -201,6 +245,7 @@ export async function buildSwaggerPortal({
     outputDirectory: destination,
     apiVersion: document.info.version,
     pathCount: pathNames.length,
+    operationCount,
     sha256: digest,
   };
 }
@@ -211,6 +256,14 @@ async function main() {
   const sourceFile = argumentsMap.get("--source-file");
   const apiBaseUrl = argumentsMap.get("--api-base-url") ?? process.env.PUBLIC_API_BASE_URL;
   const outputDirectory = argumentsMap.get("--output-dir") ?? resolve(projectRoot, ".tmp", "swagger-site");
+  const expectedPathCount = parseExpectedCount(
+    argumentsMap.get("--expected-path-count"),
+    "--expected-path-count",
+  );
+  const expectedOperationCount = parseExpectedCount(
+    argumentsMap.get("--expected-operation-count"),
+    "--expected-operation-count",
+  );
   if (!apiBaseUrl) {
     throw new Error("--api-base-url 또는 PUBLIC_API_BASE_URL이 필요합니다.");
   }
@@ -219,9 +272,11 @@ async function main() {
     sourceFile,
     apiBaseUrl,
     outputDirectory,
+    expectedPathCount,
+    expectedOperationCount,
   });
   process.stdout.write(
-    `Swagger portal build PASS: version=${result.apiVersion} paths=${result.pathCount} sha256=${result.sha256}\n`,
+    `Swagger portal build PASS: version=${result.apiVersion} paths=${result.pathCount} operations=${result.operationCount} sha256=${result.sha256}\n`,
   );
 }
 

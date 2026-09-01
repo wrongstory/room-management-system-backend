@@ -85,7 +85,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 | [x] | `GET /health` | public | — | ✅ | ✅ | ✅ | ✅ | production HTTP 200 확인 |
 | [x] | `GET /openapi.json` | public | — | — | ✅ | ✅ | ✅ | production HTTP 계약 정본 |
 | [ ] | `GET /docs` | public | — | — | ✅ | ✅ | ⚠️ | route/200은 존재. hosted domain 브라우저 Swagger UI 사용 불가 |
-| [ ] | GitHub Pages Swagger portal | public read-only | — | — | — | — | ❌ | 별도 정적 배포 source·리뷰 완료. `main` 승격 후 Pages deploy/smoke 필요 |
+| [ ] | GitHub Pages Swagger portal | public read-only | — | — | — | — | ❌ | 별도 정적 배포 source·리뷰 완료. `main` 승격과 Edge hosted smoke 후 수동 deploy 필요 |
 
 GitHub Pages 포털은 Supabase Edge Function이 아닌 별도 정적 배포다. 따라서 위 행의 `Edge source`와 `Production Edge`는 `—`로 두고, source 완료와 production Pages 배포 완료를 비고와 아래 배포 gate에서 구분한다.
 
@@ -94,7 +94,8 @@ GitHub Pages 포털은 Supabase Edge Function이 아닌 별도 정적 배포다.
 - [x] 읽기 전용 portal source·build 검증 완료
 - [x] SSRF 경계, CSP/SRI, Try-it-out·Authorization 차단, Pages 최소 권한 독립 리뷰 완료
 - [ ] 승인된 source의 `main` 승격
-- [ ] GitHub Pages workflow 실행
+- [ ] production Edge OpenAPI 39 paths / 43 operations 확인
+- [ ] GitHub Pages `workflow_dispatch` 수동 실행
 - [ ] 공개 portal과 same-origin OpenAPI snapshot HTTP smoke
 
 ## 4. Auth API
