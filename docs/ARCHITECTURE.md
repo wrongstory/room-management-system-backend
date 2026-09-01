@@ -151,7 +151,7 @@ erDiagram
 - 메이드별 주급과 지급 상태
 - 역할별 알림함과 푸시 구독
 
-Edge `/v1/rooms`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
+Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·촛불·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`만 재사용하며 raw table DML을 하지 않는다. actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 
 Edge `/v1/reservations*`도 기존 예약·청소요청 RPC 9개만 재사용하며 raw DML을 허용하지 않는다. actor는 exact active business admin이고 최초 비밀번호 변경과 active session까지 매 요청 확인한다. 목록·mutation projection에는 고객명과 암호문이 없고, 단건 상세에서 고객명을 실제 복호화할 때만 server-generated request ID를 가진 `sensitive.read` activity를 append한다. activity append가 실패하면 상세 응답도 fail-closed한다. Edge Web Crypto AES-256-GCM envelope와 HMAC request fingerprint는 Fastify 계약과 호환하며, scheduler와 관리자 수동 전이의 인증·멱등성 namespace는 분리한다.
 

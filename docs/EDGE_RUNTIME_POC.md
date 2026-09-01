@@ -8,7 +8,7 @@ PoC source의 `dev` 병합 조건은 최신 head 독립 리뷰 P0/P1 0과 requir
 
 현재 production은 source·migration 17건·Edge API/OpenAPI 배포와 gateway/JWT/CORS 1차 smoke까지 완료됐다. Supabase 기본 도메인은 HTML 응답을 `text/plain`으로 바꾸므로 production `/docs` route 자체는 존재하지만 인터넷 Swagger UI로 렌더링되지 않는다. 사람용 운영 문서는 GitHub Pages 읽기 전용 Swagger 포털에서 제공한다.
 
-운영 `api`의 HTTP surface는 아직 auth/accounts/객실 목록 중심의 부분 이식 상태다. Fastify와 운영 DB에 이미 존재하는 주간 가능일·예약·객실 상세/mutation은 각각 #51·#52·#53에서 Edge parity를 완료한다. business admin과 scheduler/Cron은 #43과 #44 Phase A 뒤 활성화하므로 scheduler 503 fail-closed는 현재 정상이다. `v0.2.0` tag/release는 parity와 operational activation smoke가 끝날 때까지 발행하지 않는다.
+운영 `api`의 HTTP surface는 아직 auth/accounts/객실 목록 중심의 부분 이식 상태다. source에는 Fastify와 운영 DB에 이미 존재하는 주간 가능일·예약·객실 상세/mutation의 #51~#53 Edge parity가 포함됐지만 release/main·production 재배포 전에는 운영 route로 간주하지 않는다. business admin과 scheduler/Cron은 #43과 #44 Phase A 뒤 활성화하므로 scheduler 503 fail-closed는 현재 정상이다. `v0.2.0` tag/release는 parity와 operational activation smoke가 끝날 때까지 발행하지 않는다.
 
 ```text
 Frontend
@@ -54,7 +54,12 @@ Supabase Cron (pg_cron)
 | `api` | `GET /api/v1/developer/audit-events` | active developer | bounded domain 감사 projection |
 | `api` | `GET /api/v1/developer/activity-events` | active developer | bounded 인증·권한·민감접근 projection |
 | `api` | `POST /api/v1/developer/diagnostics` | active developer | allowlist read-only 진단 |
-| `api` | `GET /api/v1/rooms` | active admin + password changed | 기존 객실 projection RPC |
+| `api` | `GET /api/v1/rooms`, `GET /api/v1/rooms/:roomId` | active admin + password changed | 전체·단건 객실 projection RPC |
+| `api` | `PATCH /api/v1/rooms/:roomId/master-data` | active admin + password changed | 객실 기준정보 CAS 변경 |
+| `api` | `POST /api/v1/rooms/:roomId/operation-blocks`, `.../:blockId/release` | active admin + password changed | 운영 차단 append·release |
+| `api` | `POST /api/v1/rooms/:roomId/candles` | active admin + password changed | 촛불 수량 event |
+| `api` | `POST /api/v1/rooms/:roomId/issues`, `.../:issueId/resolve` | active admin + password changed | 객실 이슈 append·해결 |
+| `api` | `POST /api/v1/rooms/:roomId/pin-sync-events` | active admin + password changed | PIN 원문 없는 동기화 상태 event |
 | `api` | `GET·POST /api/v1/reservations` | active admin + password changed | 예약 목록·생성, 목록 고객명 비노출 |
 | `api` | `GET·PATCH /api/v1/reservations/:reservationId` | active admin + password changed | 예약 상세·일정 변경, 상세 고객명 복호화 activity 기록 |
 | `api` | `POST /api/v1/reservations/:reservationId/cancel` | active admin + password changed | 예약 soft cancel |
@@ -69,6 +74,8 @@ Supabase Cron (pg_cron)
 단일 `developer`도 `/v1/auth/me`에서 자신의 실제 역할로 인증되지만 객실·예약 같은 업무 API에서는 `admin`으로 간주하지 않는다. `/v1/rooms`와 예약 scheduler actor는 최신 active profile의 역할이 정확히 `admin`일 때만 허용하며, developer를 scheduler actor로 지정하면 DB command가 `ADMIN_REQUIRED`로 거부한다.
 
 예약 Edge adapter는 Fastify와 같은 기존 9개 RPC를 호출하며 raw table DML을 하지 않는다. 모든 command는 예약·객실 version CAS, actor/command scope의 Idempotency-Key와 canonical request hash를 유지한다. 고객명은 Edge에서 AES-256-GCM으로만 암호화하고 목록·mutation projection에서는 이름과 암호문을 모두 제외한다. 단건 상세에서 실제 이름을 복호화한 경우 server-generated request ID로 `sensitive.read` activity를 먼저 기록하며 기록 실패 시 응답도 fail-closed한다. 수동 전이 command는 현재 실행 시각을 사용하고 scheduler의 secret·invocation identity와 섞지 않는다.
+
+객실 Edge adapter도 기존 projection·master-data·operation RPC 3개만 사용한다. 기준정보와 여섯 operation은 객실 state version CAS, actor/command scope Idempotency-Key, canonical request hash, immutable domain audit를 DB에서 다시 보장한다. create 동작의 server-generated entity ID는 hash에서 제외한다. 이슈 description은 연락처 패턴을 거부하고 raw description이나 DB 오류를 로그·오류 응답에 반사하지 않는다. PIN API는 `verified | mismatch | unconfigured`와 선택적 version만 수용하며 PIN 원문·credential·provider secret은 요청·응답·감사 payload에 넣지 않는다. 권한 거부는 #58의 `edge.authorization.rooms` 분 단위 aggregate를 재사용하고 일반 GET은 영구 activity로 남기지 않는다.
 
 로그인 endpoint는 Edge instance 메모리를 제한 상태로 사용하지 않는다. hosted Supabase에서는 platform이 붙이는 `cf-connecting-ip`만 client 정본으로 사용하고 이 값이 없으면 fail-closed한다. `x-real-ip`과 마지막 forwarded hop fallback은 reverse proxy가 해당 헤더를 덮어쓰도록 구성한 local/self-hosted 환경에서만 허용한다. production smoke에서는 caller가 보낸 spoof header보다 platform 값이 우선하는지 확인해야 한다. 원문 client address와 로그인 ID는 응답·DB·로그에 저장하지 않고 `ACCOUNT_PHONE_PEPPER`로 domain-separated HMAC-SHA256 key만 만든다. 하나의 원자 DB command가 **client별 30회/분 → 로그인 ID별 10회/분 → emergency global 600회/분** 순서로 소비한다. 공격 client가 ID를 바꿔도 자기 bucket에서 차단되어 다른 client의 정상 `admin` 로그인을 막지 못한다. 첫 차단 뒤 saturated bucket은 더 갱신하지 않고 hot path의 만료 row 정리도 호출당 최대 64건으로 제한한다. 제한 초과는 `429`와 `Retry-After`, 신뢰할 client metadata가 없으면 `503 LOGIN_CLIENT_ID_UNAVAILABLE`을 반환한다. 이 검사는 alias 조회보다 먼저 수행하며, 계정이 존재하는 경우에는 기존 5회 실패/15분 계정 잠금도 별도로 적용한다. 알 수 없는 ID와 잘못된 비밀번호는 모두 `INVALID_CREDENTIALS`로 응답한다.
 

@@ -13,6 +13,7 @@ const reservationApiUrl = new URL(
   '../supabase/functions/_shared/reservation-api.ts',
   import.meta.url
 );
+const roomApiUrl = new URL('../supabase/functions/_shared/room-api.ts', import.meta.url);
 const developerApiUrl = new URL('../supabase/functions/_shared/developer-api.ts', import.meta.url);
 const activityApiUrl = new URL('../supabase/functions/_shared/activity-api.ts', import.meta.url);
 const activityContractUrl = new URL(
@@ -62,9 +63,9 @@ describe('Supabase Edge runtime PoC contract', () => {
   });
 
   it('revalidates Auth user, active profile, and active session before service-role RPCs', async () => {
-    const [api, runtime] = await Promise.all([
-      readFile(apiUrl, 'utf8'),
-      readFile(runtimeUrl, 'utf8')
+    const [runtime, roomApi] = await Promise.all([
+      readFile(runtimeUrl, 'utf8'),
+      readFile(roomApiUrl, 'utf8')
     ]);
 
     expect(runtime).toMatch(/publicClient\.auth\s*\.getUser\(accessToken\)/);
@@ -73,8 +74,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(runtime).toMatch(/["']is_active_auth_session["']/);
     expect(runtime).toMatch(/role:\s*["']developer["']\s*\|\s*["']admin["']\s*\|\s*["']maid["']/);
     expect(runtime).toMatch(/actor\.role !== ["']admin["']/);
-    expect(api).toMatch(/requireBusinessAdmin\(actor\)/);
-    expect(api).toMatch(/["']get_room_operational_projection["']/);
+    expect(roomApi).toMatch(/requireBusinessAdmin\(actor\)/);
+    expect(roomApi).toMatch(/["']get_room_operational_projection["']/);
   });
 
   it('keeps the cron invocation secret and scheduler actor checks ahead of the command RPC', async () => {
@@ -328,6 +329,49 @@ describe('Supabase Edge runtime PoC contract', () => {
       expect(normalization).toBeGreaterThan(rawLengthCheck);
     }
     expect(consoleExport).not.toContain('"/v1/reservations"');
+  });
+
+  it('ports all room operations through the existing actor-bound RPCs without PIN material', async () => {
+    const [api, roomApi, openApi] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(roomApiUrl, 'utf8'),
+      readFile(openApiUrl, 'utf8')
+    ]);
+    for (const path of [
+      '/v1/rooms/',
+      '/master-data',
+      '/operation-blocks',
+      '/candles',
+      '/issues',
+      '/pin-sync-events'
+    ]) {
+      expect(api).toContain(path);
+    }
+    for (const rpc of [
+      'get_room_operational_projection',
+      'change_room_master_data',
+      'mutate_room_operation'
+    ]) {
+      expect(roomApi).toContain(`"${rpc}"`);
+    }
+    for (const action of [
+      'create_block',
+      'release_block',
+      'set_candle_count',
+      'report_issue',
+      'resolve_issue',
+      'record_pin_sync'
+    ]) {
+      expect(roomApi).toContain(`"${action}"`);
+    }
+    expect(roomApi).toContain('requireBusinessAdmin(actor)');
+    expect(roomApi).toContain('requirePasswordChanged(actor)');
+    expect(roomApi).toContain('SENSITIVE_TEXT_NOT_ALLOWED');
+    expect(roomApi).toContain('PIN_MATERIAL_NOT_ALLOWED');
+    expect(openApi).toContain('"changeRoomMasterData"');
+    expect(openApi).toContain('"recordRoomPinSync"');
+    expect(openApi).toContain('additionalProperties: false');
+    expect(roomApi).not.toContain('.from("rooms")');
   });
 
   it('keeps Fastify and Edge password and rate-limit contracts aligned', async () => {

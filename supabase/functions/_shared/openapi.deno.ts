@@ -69,6 +69,14 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       "/v1/reservations/cleaning-requests",
       "/v1/reservations/cleaning-requests/{targetId}/cancel",
       "/v1/reservations/transitions/process",
+      "/v1/rooms/{roomId}",
+      "/v1/rooms/{roomId}/master-data",
+      "/v1/rooms/{roomId}/operation-blocks",
+      "/v1/rooms/{roomId}/operation-blocks/{blockId}/release",
+      "/v1/rooms/{roomId}/candles",
+      "/v1/rooms/{roomId}/issues",
+      "/v1/rooms/{roomId}/issues/{issueId}/resolve",
+      "/v1/rooms/{roomId}/pin-sync-events",
     ]
   ) {
     assert(serialized.includes(`"${path}"`), `${path} must be published`);
@@ -101,6 +109,21 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       !serialized.includes('"after_state"'),
     "raw audit state must not be part of the public contract",
   );
+  for (
+    const forbidden of [
+      '"pin"',
+      '"rawPin"',
+      '"pinCode"',
+      '"doorCode"',
+      '"credential"',
+      '"providerSecret"',
+    ]
+  ) {
+    assert(
+      !serialized.includes(forbidden),
+      `${forbidden} must not be a schema field`,
+    );
+  }
   assert(
     response.headers.get("cache-control") === "public, max-age=300",
     "contract cache",
