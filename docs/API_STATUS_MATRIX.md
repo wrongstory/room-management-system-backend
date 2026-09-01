@@ -56,7 +56,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 최종 확인: **2026-09-01 KST**
 
 - 운영 승인 source: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
-- 현재 개발 통합 기준 `dev`: `1275b62bc9d628059433dd926ddcccc0b70e72d5`
+- 현재 개발 통합 기준 `dev`: `2adb7a7de2474883d892232395295dcf643b20a4`
 - PR #48 / #43 developer 운영 API: `dev` 병합 완료, production 미반영
 - #51 Availability Edge parity: source·독립 리뷰·`dev` 병합 완료, production 미반영
 - #44 Python 운영도구 Phase A: PR #57 독립 리뷰 P0/P1=0 및 `dev` 병합 완료,
@@ -65,7 +65,8 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
   `dev@4c897fa7eceea6cb128c2e0d201569b71b236b25` 병합 완료, production 미반영
 - #52 Reservation Edge parity: 독립 보안/API 재검토 P0/P1=0 및
   `dev@1275b62bc9d628059433dd926ddcccc0b70e72d5` 병합 완료, production 미반영
-- #53 Room Edge parity: `codex/53-room-edge-parity` 소스 구현 진행 중
+- #53 Room Edge parity: PR #61 독립 보안/API 재검토 P0/P1=0 및
+  `dev@2adb7a7de2474883d892232395295dcf643b20a4` 병합 완료, production 미반영
 - 운영 migration: **17건**
 - 운영 Edge Functions:
   - `api` version 2 — ACTIVE
@@ -136,7 +137,7 @@ PR #48은 `dev@02d5089`로 병합 완료됐다. 아직 release/main 승격, prod
 ### #43 production 반영 조건
 
 - [x] PR #48 `dev` 병합
-- [ ] parity 작업 #51/#52/#53과 release scope 확정
+- [x] parity 작업 #51/#52/#53과 release scope 확정
 - [ ] `release/v0.2.0 → main` source 승격
 - [ ] `developer_operations_projections` migration 1회 적용
 - [ ] production `api` 재배포
@@ -182,8 +183,8 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 - [x] 연락처 설명 차단 및 PIN 원문·credential·provider secret 입력/응답 비노출
 - [x] #58 `edge.authorization.rooms` 권한 거부 aggregate와 domain audit projection 재사용
 - [x] OpenAPI/Swagger 한글 계약과 Edge 단위·동시성 회귀 추가
-- [ ] Issue #53 구현 PR 독립 보안/API 재검토 P0/P1=0
-- [ ] Issue #53 구현 PR `dev` 병합
+- [x] Issue #53 구현 PR #61 독립 보안/API 재검토 P0/P1=0
+- [x] Issue #53 구현 PR #61 `dev` 병합 — `dev@2adb7a7de2474883d892232395295dcf643b20a4`
 - [ ] `release → main` 후 production `api` 재배포
 - [ ] hosted admin/developer/maid/CAS/idempotency/PIN redaction smoke 및 Pages snapshot 갱신
 
@@ -313,7 +314,7 @@ production completeness 기준의 정본 순서다.
 3. [x] **#44 Python 운영도구 Phase A source/dev** — Windows artifact·hosted smoke는 별도 gate
 4. [x] **#58 Actor Activity / Audit 로그 정본화 source/dev (P1)** — production 반영까지 Issue Open
 5. [x] **#52 Reservation Edge parity source/dev (P1)** — production 배포·hosted smoke까지 Issue Open
-6. [ ] **#53 Room detail/mutation Edge parity (P1)** — 현재 feature source 구현 중
+6. [x] **#53 Room detail/mutation Edge parity source/dev (P1)** — production 배포·hosted smoke까지 Issue Open
 7. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능
 8. [ ] 최신 source를 `release/v0.2.0 → main`으로 승격
 9. [ ] 필요한 신규 migration 순차 적용

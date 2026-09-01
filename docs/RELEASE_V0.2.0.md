@@ -1,72 +1,167 @@
-# v0.2.0 릴리즈 적용 기록
+# v0.2.0 릴리즈 후보와 운영 적용 정본
 
-## 범위와 기준
+## 1. 기준과 현재 상태
 
-- release candidate: `release/v0.2.0`
-- 최초 기준 commit: `dev@4da80cb2ddcb5de2f5b3dd5bd41354b80a3f7ae5`
-- 최신 운영 source: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
-- 운영 project: `aodikrxcczbogjpsjwjt`
-- recovery project: `matalcofimnhuzslfhdd`
-- 상태 추적: GitHub Issue #24
+- release branch: `release/v0.2.0`
+- release source: `dev@2adb7a7de2474883d892232395295dcf643b20a4`
+- 비교 기준: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
+- 상태 추적: GitHub Issue #24, Edge runtime Issue #36
+- 현재 production DB: migration 17건 적용
+- 현재 production Edge: `api` version 2, `reservation-scheduler` version 2
+- 현재 production OpenAPI: 13 operations
+- release source OpenAPI: 39 paths / 43 operations
 
-이 문서는 운영 자격증명이나 SQL 결과 데이터를 저장하지 않는다. 실제 적용은 `main` 병합 뒤 Supabase MCP를 통해 수행하고, 각 단계의 성공 여부만 Issue #24에 기록한다.
+이 후보는 최신 `dev` 전체를 운영 승인 대상으로 고정한다. `main`에 source가 들어가는 것과
+production 활성화 완료는 서로 다른 상태다. release PR 생성·검증만으로 production DB,
+Edge Functions 또는 GitHub Pages가 바뀌지 않는다.
 
-## 기존 migration version mapping
+현재 production에는 developer bootstrap과 기존 Edge 배포까지 완료돼 있다. business admin은
+아직 생성하지 않았고 scheduler actor/invoke secret, Vault, `pg_cron`, `pg_net`은 미설정이다.
+따라서 scheduler의 503 fail-closed는 현재 의도된 상태다.
 
-초기 migration은 각 원격 프로젝트에 수동 적용돼 SQL 내용은 대응하지만 version이 Git과 다르다. 아래 mapping은 2026-08-29 `list_migrations`와 실제 스키마 검사를 함께 대조한 결과다.
+## 2. 릴리즈 범위
 
-| Git migration | 운영 history | recovery history |
-|---|---|---|
-| `20260825141441_initial_core_schema` | `20260825163223_initial_core_schema` | `20260826115124_20260825163223_initial_core_schema` |
-| `20260825163315_harden_data_api_grants` | `20260825163431_harden_data_api_grants` | `20260826115128_20260825163431_harden_data_api_grants` |
-| `20260826021457_account_lifecycle_contract` | `20260826022856_account_lifecycle_contract` | `20260826115131_20260826022856_account_lifecycle_contract` |
-| `20260826023016_harden_account_command_idempotency` | `20260826023335_harden_account_command_idempotency` | `20260826115135_20260826023335_harden_account_command_idempotency` |
-| `20260826114731_harden_domain_integrity` | `20260826120022_harden_domain_integrity` | `20260826115201_20260826114731_harden_domain_integrity` |
-| `20260826115804_add_domain_integrity_indexes` | `20260826120028_add_domain_integrity_indexes` | `20260826115833_20260826115804_add_domain_integrity_indexes` |
-| `20260827133604_restrict_non_active_data_api_access` | `20260827134735_restrict_non_active_data_api_access` | `20260827134627_restrict_non_active_data_api_access` |
-| `20260827141232_close_reviewed_ledger_gaps` | `20260827142157_close_reviewed_ledger_gaps` | `20260827142028_close_reviewed_ledger_gaps` |
-| `20260827153805_allow_unsent_payroll_reopen` | `20260827154153_allow_unsent_payroll_reopen` | `20260827154127_allow_unsent_payroll_reopen` |
+포함되는 source:
 
-이 mapping이 정규화되기 전에는 `supabase db push`를 사용하지 않는다. migration history repair는 schema 변경과 분리한 후속 작업이며, 이 릴리즈에서는 원격 기존 version을 수정하지 않는다.
+- #42 Auth/Account Supabase Edge API와 한글 OpenAPI
+- #43 developer operations Edge API와 scheduler heartbeat
+- #51 Availability Edge parity 6 operations
+- #52 Reservation Edge parity 9 operations
+- #53 Room detail/mutation Edge parity 8 operations
+- #58 Actor Activity/Audit private ledger와 developer projection
+- #44 Python backend console Phase A source, tests, packaging workflow
+- #49/#50 GitHub Pages 읽기 전용 Swagger portal source와 workflow
+- 관련 Fastify parity, 문서, DB/RLS/동시성 회귀 테스트
 
-## 적용 완료 기록 — 재적용 금지
+production 활성화와 분리되는 항목:
 
-최초 source와 #42 follow-up source는 `main@2bc6c63`까지 승격됐다. 아래 migration은 운영 history 17건에 이미 포함되며 `apply_migration`이나 `db push`로 다시 실행하지 않는다.
+- Python source의 `main` 포함은 허용하지만 Windows artifact와 hosted smoke는 운영 gate다.
+- Pages source의 `main` 포함은 허용하지만 Pages deploy와 공개 HTTP smoke는 운영 gate다.
+- #43/#58 migration과 최신 Edge source는 `main` 승인 후 production 적용 대상이다.
+- #25 이후 배정·현장수행·사진·검수·정산·알림 기능은 이 릴리즈에서 제외한다.
+- #44 Phase B direct read-only DB와 Phase C maintenance action catalog는 제외한다.
 
-| 단계 | 적용 완료 migration |
-|---|---|
-| 최초 release | notification 권한 제한, room/reservation commands, weekly availability, developer enum, developer account contract |
-| #42 follow-up | `edge_login_rate_limit`, `harden_account_receipts_and_login_limits`, `isolate_login_rate_limit_clients` |
+## 3. migration history와 pending inventory
 
-production Edge `api`와 `reservation-scheduler`도 승인된 main source에서 배포됐다. health/OpenAPI/Swagger 200, invalid JWT 차단, CORS, Supabase gateway client-header spoof 차단 smoke를 통과했다. business admin과 scheduler actor/secret은 아직 없으므로 scheduler 503 fail-closed는 현재 의도된 상태다.
+초기 migration은 원격 프로젝트에 수동 적용돼 Git filename timestamp와 remote history version이
+다를 수 있다. 원격 적용 여부는 timestamp 단순 비교가 아니라 **stable migration name**과 실제
+schema를 함께 대조한다. 기존 17건은 적용 완료 기록이며 재적용하지 않는다.
 
-현재 상태명은 **v0.2.0 source + Edge API deployed / operational activation pending**이다.
+이번 `main...release/v0.2.0`의 pending migration은 아래 2건뿐이다.
 
-## #43·#44 Phase A 운영 활성화 gate
+| 순서 | Git migration filename | stable migration name | 목적 | production 적용 |
+|---|---|---|---|---|
+| 1 | `20260830123241_developer_operations_projections.sql` | `developer_operations_projections` | developer-only 운영 projection, migration/RPC 권한 상태, scheduler heartbeat와 bounded diagnostics 원장 | 필요 |
+| 2 | `20260831124140_actor_activity_audit_contract.sql` | `actor_activity_audit_contract` | domain audit projection 확장, 인증·권한거부·민감조회 activity private ledger와 bounded aggregate | 필요 |
 
-business admin을 one-off DB/Fastify 경로로 지금 만들지 않는다. 공식 운영 UI를 준비한 뒤 아래 순서를 따른다.
+`actor_activity_audit_contract`는 developer audit/activity 조회 계약을 확장하므로
+`developer_operations_projections` 다음에 적용한다. 적용 직전에 production history를 다시 읽어
+같은 stable name이 이미 있으면 중단한다.
 
-1. #43 developer 운영 API를 `feature → dev → release/v0.2.0 → main`으로 승격
-2. #43 append-only migration을 main 병합 후 운영에 1회 적용
-3. production Edge를 해당 main source에서 재배포하고 developer-only 권한·redaction smoke
-4. #44 Phase A API-only Python 콘솔 구현·패키징·독립 보안 리뷰
-5. 콘솔에서 developer 로그인 후 `POST /v1/accounts`로 active business admin 생성
-6. business admin 최초 로그인과 개인 비밀번호 변경
-7. business admin profile을 scheduler actor로 지정하고 invoke secret 구성
-8. Vault + `pg_cron` + `pg_net` 활성화
-9. 수동 scheduler와 실제 Cron의 heartbeat·audit·idempotency smoke
-10. 모든 gate 통과 후 `v0.2.0` annotated tag와 GitHub Release 발행
+이 릴리즈에서는 다음 작업을 금지한다.
 
-#44 Phase B read-only DB 진단과 Phase C maintenance action catalog는 v0.2.0 비차단 후속이다. custom least-privilege role과 Shared Pooler 경계가 검증되기 전 direct DB mode는 비활성으로 출고한다.
+- `supabase db push`
+- migration history repair/rewrite
+- 기존 migration 수정 또는 재적용
+- down migration이나 production schema rewind
 
-## 후속 source·migration 적용 원칙
+## 4. Edge 재배포 inventory
 
-- feature/dev source와 migration을 production에 직접 배포·적용하지 않는다.
-- release PR의 `application`·`migration`, fresh reset, 전체 DB/RLS·동시성 검증, 독립 리뷰 P0/P1 0을 먼저 확인한다.
-- main 병합 직전과 적용 직전에 `list_migrations`를 다시 확인한다.
-- 이미 같은 migration이 존재하면 재적용하지 않고 중단해 Issue #24 기록을 갱신한다.
-- 적용 도중 실패하면 뒤 migration과 Edge 배포를 중단하고 destructive down/history 조작 없이 append-only forward-fix를 만든다.
-- Security Advisor의 source/DDL 차단사항과 Performance ERROR/WARN을 확인한다. Free Plan의 leaked-password protection WARN은 알려진 제한으로 기록한다.
-- Edge 장애 시 Cron을 먼저 중지하고 이전 Function/Fastify rollback 기준으로 전환하며 DB 원장과 적용 migration은 rewind하지 않는다.
+| Function | main 대비 source 변경 | production 재배포 | 이유 |
+|---|---|---|---|
+| `api` | 있음 | 필요 | developer/activity, Availability, Reservation, Room route와 43-operation OpenAPI 반영 |
+| `reservation-scheduler` | 있음 | 필요 | #43 scheduler heartbeat 기록 source 반영 |
 
-Swagger UI는 운영 secret 입력·보관 수단이 아니다. 실제 token은 smoke 중에만 Authorize에 입력하고 브라우저 저장소에 유지하지 않으며, 캡처·로그·Issue에 남기지 않는다.
+두 Function 모두 승인된 `main`의 exact source에서 배포한다. 현재 production readback 13 operations와
+release source 43 operations를 혼동하지 않으며, 재배포와 hosted smoke 전에는 신규 operation을
+production 사용 가능으로 표시하지 않는다.
+
+## 5. runtime configuration inventory
+
+값은 Git, PR, 로그, 문서 또는 채팅에 기록하지 않는다. 아래는 이름과 요구 조건만 기록한다.
+
+Supabase Edge가 제공하며 두 Function에서 사용하는 값:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+production `api`에 필요한 설정:
+
+- `CORS_ORIGINS`
+- `ACCOUNT_PHONE_PEPPER`
+- `RESERVATION_PII_KEY_BASE64`
+- `RESERVATION_PII_KEY_VERSION`
+- `RESERVATION_PII_KEYRING_JSON`
+- `RESERVATION_GUEST_NAME_PEPPER`
+- `RUNTIME_ENVIRONMENT`
+
+production scheduler 활성화에 필요한 설정:
+
+- `SCHEDULER_INVOKE_SECRET`
+- `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`
+
+`RUNTIME_ENVIRONMENT`는 production에서 `production`으로 고정하고 runtime-status의 project ref와
+승인된 운영 대상이 일치하는지 확인한다. scheduler actor는 active business admin이어야 하며
+developer를 지정하지 않는다.
+
+Fastify rollback 기준선에는 별도로 `SUPABASE_PROJECT_REF`, `SUPABASE_PUBLISHABLE_KEY`,
+`SUPABASE_SECRET_KEY`, `RESERVATION_SCHEDULER_INTERVAL_SECONDS`와 일반 runtime 설정
+`APP_ENV`, `NODE_ENV`, `HOST`, `PORT`, `LOG_LEVEL`이 필요하다. 이 값들도 source나 운영 기록에
+원문을 남기지 않는다.
+
+## 6. release source 검증 gate
+
+release PR의 exact head에서 다음을 모두 통과해야 한다.
+
+- `npm run edge:check`
+- `npm run ci:quality` (`secrets:check`, lint, typecheck, application tests, build 포함)
+- `npm run db:verify`
+- `npm run db:test`
+- `npm run db:test:concurrency`
+- local DB lint / Security Advisor 검토
+- Python `ruff`, `ruff format --check`, `mypy`, `pytest`, package/build source check
+- OpenAPI 3.1 구조 검증과 39 paths / 43 operations 확인
+- GitHub required checks `application`, `migration`
+- 독립 release review P0/P1 0
+
+검증 실패를 skip하거나 기준을 완화하지 않는다. Free Plan의 leaked-password protection 경고는
+알려진 제한으로 기록하되 source/RLS/RPC/secret 차단사항과 혼동하지 않는다.
+
+## 7. `main` 병합 후 production 적용 순서
+
+아래 순서는 release PR이 `main`에 병합된 후에만 시작한다.
+
+1. production DB, Edge, secret-name, migration history 상태를 다시 read한다.
+2. pending migration 2건을 stable name과 선후관계대로 정확히 1회 append-only 적용한다.
+3. migration, RLS, privileged RPC signature/grant와 private raw table 차단을 검증한다.
+4. 승인된 `main` exact source에서 `api`를 배포한다.
+5. 같은 `main` exact source에서 `reservation-scheduler`를 배포한다.
+6. public health와 배포 OpenAPI 43-operation HTTP smoke를 수행한다.
+7. developer hosted login과 developer operations/redaction smoke를 수행한다.
+8. Python 운영도구로 business admin을 생성하고 최초 비밀번호를 변경한다.
+9. business admin으로 Room/Reservation/Availability positive smoke를 수행한다.
+10. developer/maid/inactive/revoked 계정의 권한 negative smoke를 수행한다.
+11. PII 암복호화, `sensitive.read`, domain audit와 activity projection을 smoke한다.
+12. active business admin을 scheduler actor로 지정하고 invoke secret을 구성한다.
+13. scheduler 수동 호출과 동일 `scheduledAt` 재호출의 멱등성을 확인한다.
+14. Vault, `pg_cron`, `pg_net`을 활성화한다.
+15. 실제 Cron 실행, HTTP response, Edge log, heartbeat, audit/idempotency를 관찰한다.
+16. GitHub Pages Swagger를 배포하고 production OpenAPI snapshot을 갱신한다.
+17. `API_STATUS_MATRIX.md`의 Production Edge/현재 사용 상태를 실제 smoke 결과로 갱신한다.
+18. #49/#51/#52/#53/#58/#36 등 Issue 완료 여부를 각 완료조건으로 판단한다.
+19. 모든 운영 gate 통과 후에만 annotated `v0.2.0` tag와 GitHub Release를 발행한다.
+
+## 8. 중단·복구·forward-fix 기준
+
+- migration 전에 문제가 발견되면 production을 변경하지 않고 release PR을 수정한다.
+- migration 적용 중 실패하면 뒤 migration과 Edge 배포를 중단한다. 이미 적용된 migration을
+  내리거나 history를 조작하지 않고 append-only forward-fix migration을 새 리뷰 대상으로 만든다.
+- DB 적용 후 Edge 문제가 나면 Cron을 활성화하지 않거나 즉시 중지하고 기존 Function/Fastify
+  rollback 기준선으로 트래픽을 전환한다. DB 원장과 migration은 rewind하지 않는다.
+- Edge smoke가 실패하면 business admin/scheduler/Pages 활성화를 진행하지 않는다.
+- Pages 실패는 API runtime을 rollback하지 않고 Pages만 이전 artifact 또는 비활성 상태로 유지한다.
+- 비밀값 노출이 의심되면 즉시 해당 secret을 폐기·교체하고 노출 범위를 별도 보안 Issue로 기록한다.
+
+Swagger UI는 운영 secret 입력·보관 수단이 아니다. smoke 중 token을 사용하더라도 브라우저 저장소,
+캡처, 로그, Issue나 PR에 남기지 않는다.
