@@ -1,4 +1,5 @@
 import {
+  assertEmptyDiagnosticRequestBody,
   expectedMigrationName,
   toDeveloperActivityEvent,
   toDeveloperAuditEvent,
@@ -81,6 +82,75 @@ Deno.test("developer operations reject business admin and maid roles", () => {
     } catch (error) {
       assert(error instanceof EdgeError, `${role} must return an EdgeError`);
       assert(error.code === "DEVELOPER_REQUIRED", `${role} error code`);
+    }
+  }
+});
+
+Deno.test("developer diagnostics accepts hosted-style empty POST bodies", async () => {
+  await assertEmptyDiagnosticRequestBody(
+    new Request("https://example.test/v1/developer/diagnostics", {
+      method: "POST",
+    }),
+  );
+  await assertEmptyDiagnosticRequestBody(
+    new Request("https://example.test/v1/developer/diagnostics", {
+      method: "POST",
+      headers: { "content-length": "0" },
+      body: "",
+    }),
+  );
+});
+
+Deno.test("developer diagnostics rejects every non-empty request body", async () => {
+  for (const body of ["{}", " ", "null", '{"check":true}']) {
+    try {
+      await assertEmptyDiagnosticRequestBody(
+        new Request("https://example.test/v1/developer/diagnostics", {
+          method: "POST",
+          body,
+        }),
+      );
+      throw new Error("non-empty diagnostics body must be rejected");
+    } catch (error) {
+      assert(error instanceof EdgeError, "body rejection must be EdgeError");
+      assert(error.code === "VALIDATION_ERROR", "body rejection error code");
+    }
+  }
+
+  try {
+    await assertEmptyDiagnosticRequestBody(
+      new Request("https://example.test/v1/developer/diagnostics", {
+        method: "POST",
+        headers: { "content-length": "0" },
+        body: "{}",
+      }),
+    );
+    throw new Error("content-length zero must not hide actual body bytes");
+  } catch (error) {
+    assert(error instanceof EdgeError, "actual body bytes must be rejected");
+    assert(error.code === "VALIDATION_ERROR", "actual body error code");
+  }
+});
+
+Deno.test("developer diagnostics rejects positive or malformed content lengths", async () => {
+  for (const contentLength of ["1", "2", "invalid", "-1"]) {
+    try {
+      await assertEmptyDiagnosticRequestBody(
+        new Request("https://example.test/v1/developer/diagnostics", {
+          method: "POST",
+          headers: { "content-length": contentLength },
+        }),
+      );
+      throw new Error("invalid diagnostics content length must be rejected");
+    } catch (error) {
+      assert(
+        error instanceof EdgeError,
+        "content length rejection must be EdgeError",
+      );
+      assert(
+        error.code === "VALIDATION_ERROR",
+        "content length rejection error code",
+      );
     }
   }
 });
