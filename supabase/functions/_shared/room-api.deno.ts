@@ -8,6 +8,7 @@ import {
   reportRoomIssue,
   resolveRoomIssue,
   roomDatabaseError,
+  roomDetailIdFromPath,
   roomPathIds,
   setRoomCandleCount,
   toRoomProjections,
@@ -437,7 +438,14 @@ Deno.test("room validation and database errors use stable redacted codes", async
 });
 
 Deno.test("room path parser accepts only exact UUID route shapes", () => {
-  assert(roomPathIds(`/v1/rooms/${roomId}`).roomId === roomId, "detail path");
+  assert(
+    roomDetailIdFromPath(`/v1/rooms/${roomId}`) === roomId,
+    "detail path",
+  );
+  assert(
+    roomDetailIdFromPath(`/v1/rooms/${roomId}/issues`) === null,
+    "mutation path is not a detail alias",
+  );
   assert(
     roomPathIds(`/v1/rooms/${roomId}/operation-blocks/${blockId}/release`)
       .blockId === blockId,

@@ -366,6 +366,10 @@ describe('Supabase Edge runtime PoC contract', () => {
     }
     expect(roomApi).toContain('requireBusinessAdmin(actor)');
     expect(roomApi).toContain('requirePasswordChanged(actor)');
+    expect(api).toContain('roomDetailIdFromPath(path)');
+    expect(api).not.toContain(
+      'request.method === "GET" && path.startsWith("/v1/rooms/")'
+    );
     expect(roomApi).toContain('SENSITIVE_TEXT_NOT_ALLOWED');
     expect(roomApi).toContain('PIN_MATERIAL_NOT_ALLOWED');
     expect(openApi).toContain('"changeRoomMasterData"');

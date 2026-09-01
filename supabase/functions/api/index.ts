@@ -55,6 +55,7 @@ import {
   releaseRoomOperationBlock,
   reportRoomIssue,
   resolveRoomIssue,
+  roomDetailIdFromPath,
   roomPathIds,
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
@@ -80,7 +81,23 @@ function routePath(url: string): string {
   return `/${segments.slice(functionIndex + 1).join("/")}`;
 }
 
-Deno.serve(async (request) => {
+export interface ApiHandlerDependencies {
+  createClients: () => EdgeClients;
+  authenticateRequest: (
+    request: Request,
+    clients: EdgeClients,
+  ) => Promise<EdgeActor>;
+}
+
+const defaultDependencies: ApiHandlerDependencies = {
+  createClients: createEdgeClients,
+  authenticateRequest: authenticate,
+};
+
+export async function handleApiRequest(
+  request: Request,
+  dependencies: ApiHandlerDependencies = defaultDependencies,
+): Promise<Response> {
   const id = requestId(request);
   let corsHeaders: Record<string, string> = {};
   let clients: EdgeClients | undefined;
@@ -112,12 +129,12 @@ Deno.serve(async (request) => {
       return swaggerUiResponse(corsHeaders);
     }
 
-    clients = createEdgeClients();
+    clients = dependencies.createClients();
     if (request.method === "POST" && path === "/v1/auth/login") {
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
 
-    actor = await authenticate(request, clients);
+    actor = await dependencies.authenticateRequest(request, clients);
     if (request.method === "GET" && path === "/v1/auth/me") {
       return jsonResponse({ user: actor }, 200, corsHeaders);
     }
@@ -604,10 +621,12 @@ Deno.serve(async (request) => {
         corsHeaders,
       );
     }
-    if (request.method === "GET" && path.startsWith("/v1/rooms/")) {
-      const { roomId } = roomPathIds(path);
+    const roomDetailId = request.method === "GET"
+      ? roomDetailIdFromPath(path)
+      : null;
+    if (roomDetailId) {
       return jsonResponse(
-        { room: await getRoom(clients, actor, roomId) },
+        { room: await getRoom(clients, actor, roomDetailId) },
         200,
         corsHeaders,
       );
@@ -633,4 +652,8 @@ Deno.serve(async (request) => {
     }
     return errorResponse(responseError, id, corsHeaders);
   }
-});
+}
+
+if (import.meta.main) {
+  Deno.serve((request) => handleApiRequest(request));
+}

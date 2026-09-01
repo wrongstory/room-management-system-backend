@@ -311,7 +311,7 @@ export function roomPathIds(path: string): {
   const patterns = [
     /^\/v1\/rooms\/([^/]+)\/operation-blocks\/([^/]+)\/release$/,
     /^\/v1\/rooms\/([^/]+)\/issues\/([^/]+)\/resolve$/,
-    /^\/v1\/rooms\/([^/]+)(?:\/(?:master-data|operation-blocks|candles|issues|pin-sync-events))?$/,
+    /^\/v1\/rooms\/([^/]+)\/(?:master-data|operation-blocks|candles|issues|pin-sync-events)$/,
   ];
   const match = patterns[0].exec(path);
   if (match) {
@@ -330,6 +330,12 @@ export function roomPathIds(path: string): {
   const roomMatch = patterns[2].exec(path);
   if (roomMatch) return { roomId: uuidValue(roomMatch[1], "roomId") };
   validationError("객실 경로가 올바르지 않습니다.");
+}
+
+/** GET 객실 상세는 하위 mutation 경로를 alias로 수용하지 않는다. */
+export function roomDetailIdFromPath(path: string): string | null {
+  const match = /^\/v1\/rooms\/([^/]+)$/.exec(path);
+  return match ? uuidValue(match[1], "roomId") : null;
 }
 
 export async function listRooms(clients: EdgeClients, actor: EdgeActor) {
