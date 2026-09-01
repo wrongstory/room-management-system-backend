@@ -28,7 +28,7 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. source에는 #43 developer operation, #51 가능일과 #52 예약 path가 추가됐지만, #51~#53의 가능일·예약·객실 상세/mutation은 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
+production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. source에는 #43 developer operation과 #51~#53 가능일·예약·객실 상세/mutation path가 추가됐지만, 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
 
 ## 2. 로컬 백엔드 준비
 
@@ -170,6 +170,14 @@ const idempotencyKey = crypto.randomUUID();
 | 활동·보안 로그 | `GET /v1/developer/activity-events` | 로그인·민감접근 및 분 단위 권한거부 집계, 최대 31일·100건 cursor pagination |
 | 운영 진단 | `POST /v1/developer/diagnostics` | body 없음, 임의 URL/SQL/RPC 입력 없음, 10회/분 |
 | 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 독립 상태 축 사용 |
+| 객실 운영 상세 | `GET /v1/rooms/{roomId}` | 목록과 동일한 camelCase projection, PIN 원문 없음 |
+| 객실 기준정보 변경 | `PATCH /v1/rooms/{roomId}/master-data` | room state `expectedVersion` CAS와 Idempotency-Key |
+| 객실 운영 차단 | `POST /v1/rooms/{roomId}/operation-blocks` | 시작/종료 시각은 RFC 3339 offset, 생성 결과 ID는 서버 결정 |
+| 객실 운영 차단 해제 | `POST /v1/rooms/{roomId}/operation-blocks/{blockId}/release` | 삭제가 아닌 release 이력 append |
+| 촛불 수량 기록 | `POST /v1/rooms/{roomId}/candles` | count 0 이상, physicallyVerified 기본 false |
+| 객실 이슈 등록 | `POST /v1/rooms/{roomId}/issues` | description 연락처 입력 금지, raw 문구를 오류 로그에 남기지 않음 |
+| 객실 이슈 해결 | `POST /v1/rooms/{roomId}/issues/{issueId}/resolve` | hard delete 없이 해결 이력 기록 |
+| PIN 동기화 상태 | `POST /v1/rooms/{roomId}/pin-sync-events` | 상태·version만 전송, PIN/door code/credential 전송 금지 |
 | 현재 가능일 | `GET /v1/availability?weekStart=...` | maid는 본인만, admin은 maidProfileId 선택 가능 |
 | 가능일 제출 | `POST /v1/availability/submissions` | maid만, KST 일요일 제출창·CAS·Idempotency-Key |
 | 마감 후 변경 요청 | `POST /v1/availability/change-requests` | maid만, pending 1건·이력 보존 |
@@ -187,6 +195,8 @@ const idempotencyKey = crypto.randomUUID();
 | 예약 전이 수동 실행 | `POST /v1/reservations/transitions/process` | admin 운영 명령. scheduler secret endpoint와 별도 |
 
 객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다.
+
+객실 mutation은 최신 상세/목록의 `stateVersion`을 `expectedVersion` 또는 `expectedRoomVersion`으로 그대로 보낸다. `STALE_VERSION`이면 현재 객실을 다시 읽어 사용자 확인을 받고, 키를 바꿔 자동 덮어쓰지 않는다. 동일 payload의 통신 재시도에만 같은 Idempotency-Key를 사용한다. PIN 관련 화면은 `pinSyncStatus`와 `pinVersion`만 취급하며 `pin`, `rawPin`, `pinCode`, `doorCode`, `credential`, `providerSecret` 필드를 만들거나 analytics·오류 수집에 보내지 않는다.
 
 가능일의 `weekStart`와 날짜는 `YYYY-MM-DD`로 보내며 client timezone으로 날짜를 다시 변환하지 않는다. `version`은 화면 로컬 카운터가 아니라 서버 응답값을 그대로 다음 `expectedVersion`에 사용한다. 제출 가능 시간과 마감 전/후 구분은 서버의 KST 판정을 따르고, 409를 받은 요청을 다른 Idempotency-Key로 자동 반복하지 않는다.
 
@@ -221,4 +231,4 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 
 ## 9. 현재 범위 제한
 
-현재 source Swagger 범위는 인증·계정·developer 운영 projection·전체 객실 목록·주간 가능일·예약/청소요청이다. 객실 상세/mutation Fastify API가 저장소에 존재하더라도 Edge OpenAPI에 없는 route는 Supabase-only production endpoint로 가정하지 않는다. source OpenAPI에 가능일·예약이 추가됐어도 production Edge와 GitHub Pages snapshot은 release → main 승격, Edge 재배포, hosted role/PII smoke가 끝날 때까지 활성화하지 않는다. Python 운영도구의 generated client는 운영 관리 surface만 유지하며 업무 예약 operation을 자동 포함하지 않는다.
+현재 source Swagger 범위는 인증·계정·developer 운영 projection·객실 목록/상세/운영 mutation·주간 가능일·예약/청소요청이다. #51~#53 source operation은 존재하지만 production Edge와 GitHub Pages snapshot에서 release → main 승격, Edge 재배포, hosted 역할·CAS·PII/PIN redaction smoke가 끝날 때까지 프론트 기능을 활성화하지 않는다. Python 운영도구의 generated client는 운영 관리 surface만 유지하며 업무 예약·객실 operation을 자동 포함하지 않는다.

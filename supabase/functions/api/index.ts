@@ -46,7 +46,19 @@ import {
   processReservationTransitions,
   reservationIdFromPath,
 } from "../_shared/reservation-api.ts";
-import { toRoomProjections } from "../_shared/room-api.ts";
+import {
+  changeRoomMasterData,
+  createRoomOperationBlock,
+  getRoom,
+  listRooms,
+  recordRoomPinSync,
+  releaseRoomOperationBlock,
+  reportRoomIssue,
+  resolveRoomIssue,
+  roomDetailIdFromPath,
+  roomPathIds,
+  setRoomCandleCount,
+} from "../_shared/room-api.ts";
 import {
   authenticate,
   cors,
@@ -57,9 +69,7 @@ import {
   errorResponse,
   jsonResponse,
   requestId,
-  requireBusinessAdmin,
   requireDeveloper,
-  requirePasswordChanged,
 } from "../_shared/runtime.ts";
 
 function routePath(url: string): string {
@@ -71,7 +81,23 @@ function routePath(url: string): string {
   return `/${segments.slice(functionIndex + 1).join("/")}`;
 }
 
-Deno.serve(async (request) => {
+export interface ApiHandlerDependencies {
+  createClients: () => EdgeClients;
+  authenticateRequest: (
+    request: Request,
+    clients: EdgeClients,
+  ) => Promise<EdgeActor>;
+}
+
+const defaultDependencies: ApiHandlerDependencies = {
+  createClients: createEdgeClients,
+  authenticateRequest: authenticate,
+};
+
+export async function handleApiRequest(
+  request: Request,
+  dependencies: ApiHandlerDependencies = defaultDependencies,
+): Promise<Response> {
   const id = requestId(request);
   let corsHeaders: Record<string, string> = {};
   let clients: EdgeClients | undefined;
@@ -103,12 +129,12 @@ Deno.serve(async (request) => {
       return swaggerUiResponse(corsHeaders);
     }
 
-    clients = createEdgeClients();
+    clients = dependencies.createClients();
     if (request.method === "POST" && path === "/v1/auth/login") {
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
 
-    actor = await authenticate(request, clients);
+    actor = await dependencies.authenticateRequest(request, clients);
     if (request.method === "GET" && path === "/v1/auth/me") {
       return jsonResponse({ user: actor }, 200, corsHeaders);
     }
@@ -473,24 +499,134 @@ Deno.serve(async (request) => {
     }
 
     if (request.method === "GET" && path === "/v1/rooms") {
-      requirePasswordChanged(actor);
-      requireBusinessAdmin(actor);
-      const { data, error } = await clients.admin.rpc(
-        "get_room_operational_projection",
-        {
-          p_actor_profile_id: actor.profileId,
-          p_room_id: null,
-        },
+      return jsonResponse(
+        { rooms: await listRooms(clients, actor) },
+        200,
+        corsHeaders,
       );
-      if (error) {
+    }
+    if (
+      request.method === "PATCH" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/master-data")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        { room: await changeRoomMasterData(request, clients, actor, roomId) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/operation-blocks")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        {
+          operation: await createRoomOperationBlock(
+            request,
+            clients,
+            actor,
+            roomId,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/release")
+    ) {
+      const { roomId, blockId } = roomPathIds(path);
+      if (!blockId) {
         throw new EdgeError(
-          500,
-          "ROOM_COMMAND_FAILED",
-          "객실 정보를 처리하지 못했습니다.",
+          400,
+          "VALIDATION_ERROR",
+          "객실 차단 경로가 올바르지 않습니다.",
         );
       }
       return jsonResponse(
-        { rooms: toRoomProjections(data) },
+        {
+          operation: await releaseRoomOperationBlock(
+            request,
+            clients,
+            actor,
+            roomId,
+            blockId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/candles")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        {
+          operation: await setRoomCandleCount(request, clients, actor, roomId),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/issues")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        { operation: await reportRoomIssue(request, clients, actor, roomId) },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/resolve")
+    ) {
+      const { roomId, issueId } = roomPathIds(path);
+      if (!issueId) {
+        throw new EdgeError(
+          400,
+          "VALIDATION_ERROR",
+          "객실 이슈 경로가 올바르지 않습니다.",
+        );
+      }
+      return jsonResponse(
+        {
+          operation: await resolveRoomIssue(
+            request,
+            clients,
+            actor,
+            roomId,
+            issueId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/pin-sync-events")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        { operation: await recordRoomPinSync(request, clients, actor, roomId) },
+        201,
+        corsHeaders,
+      );
+    }
+    const roomDetailId = request.method === "GET"
+      ? roomDetailIdFromPath(path)
+      : null;
+    if (roomDetailId) {
+      return jsonResponse(
+        { room: await getRoom(clients, actor, roomDetailId) },
         200,
         corsHeaders,
       );
@@ -516,4 +652,8 @@ Deno.serve(async (request) => {
     }
     return errorResponse(responseError, id, corsHeaders);
   }
-});
+}
+
+if (import.meta.main) {
+  Deno.serve((request) => handleApiRequest(request));
+}

@@ -21,7 +21,8 @@ const testPaths = [
   'supabase/functions/_shared/reservation-api.deno.ts',
   'supabase/functions/_shared/developer-api.deno.ts',
   'supabase/functions/_shared/openapi.deno.ts',
-  'supabase/functions/_shared/room-api.deno.ts'
+  'supabase/functions/_shared/room-api.deno.ts',
+  'supabase/functions/api/index.deno.ts'
 ];
 
 function runDeno(args) {

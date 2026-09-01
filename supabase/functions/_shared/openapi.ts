@@ -1075,8 +1075,94 @@ export const openApiDocument = {
           },
           "401": errorResponse,
           "403": errorResponse,
+          "500": errorResponse,
         },
       },
+    },
+    "/v1/rooms/{roomId}": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "getRoom",
+        summary: "객실 단건 운영 projection 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록과 동일한 camelCase projection만 반환하며 객실 PIN 원문이나 provider 인증정보는 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [roomIdParameter()],
+        responses: roomReadResponses(),
+      },
+    },
+    "/v1/rooms/{roomId}/master-data": {
+      patch: roomMutationOperation(
+        "changeRoomMasterData",
+        "객실 기준정보 변경",
+        "RoomMasterDataRequest",
+        "room",
+        200,
+        "expectedVersion은 현재 room.stateVersion입니다. 객실 타입·엘리베이터 구역·기준정보 확인 상태를 기존 DB CAS·감사·멱등성 command로 변경합니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/operation-blocks": {
+      post: roomMutationOperation(
+        "createRoomOperationBlock",
+        "객실 운영 차단 생성",
+        "RoomOperationBlockRequest",
+        "operation",
+        201,
+        "객실 운영 차단을 append합니다. startsAt을 생략하면 DB 시각을 사용하며 endsAt은 null일 수 있습니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/operation-blocks/{blockId}/release": {
+      post: roomMutationOperation(
+        "releaseRoomOperationBlock",
+        "객실 운영 차단 해제",
+        "RoomOperationDecisionRequest",
+        "operation",
+        200,
+        "기존 차단을 삭제하지 않고 release 이력과 객실 CAS version을 기록합니다.",
+        roomEntityIdParameter("blockId", "해제할 운영 차단 ID"),
+      ),
+    },
+    "/v1/rooms/{roomId}/candles": {
+      post: roomMutationOperation(
+        "setRoomCandleCount",
+        "객실 촛불 수량 기록",
+        "RoomCandleRequest",
+        "operation",
+        201,
+        "현재 수량을 append-only event로 기록합니다. physicallyVerified를 생략하면 false이며 count는 0 이상입니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/issues": {
+      post: roomMutationOperation(
+        "reportRoomIssue",
+        "객실 이슈 등록",
+        "RoomIssueRequest",
+        "operation",
+        201,
+        "객실 이슈를 등록합니다. description에 전화번호나 이메일 등 연락처를 넣으면 SENSITIVE_TEXT_NOT_ALLOWED로 거부합니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/issues/{issueId}/resolve": {
+      post: roomMutationOperation(
+        "resolveRoomIssue",
+        "객실 이슈 해결",
+        "RoomOperationDecisionRequest",
+        "operation",
+        200,
+        "이슈 원장을 삭제하지 않고 해결 상태와 사유를 기록합니다.",
+        roomEntityIdParameter("issueId", "해결할 객실 이슈 ID"),
+      ),
+    },
+    "/v1/rooms/{roomId}/pin-sync-events": {
+      post: roomMutationOperation(
+        "recordRoomPinSync",
+        "객실 PIN 동기화 상태 기록",
+        "RoomPinSyncRequest",
+        "operation",
+        201,
+        "PIN 원문이 아닌 동기화 상태와 선택적 pinVersion만 기록합니다. pin, rawPin, pinCode, doorCode, credential, providerSecret 필드는 허용하지 않습니다.",
+      ),
     },
   },
   components: {
@@ -1206,6 +1292,10 @@ export const openApiDocument = {
           "RESERVATION_PII_KEY_INVALID",
           "RESERVATION_PII_KEYRING_INVALID",
           "RESERVATION_PII_DECRYPT_FAILED",
+          "ROOM_NOT_FOUND",
+          "ROOM_OPERATION_NOT_FOUND",
+          "SENSITIVE_TEXT_NOT_ALLOWED",
+          "PIN_MATERIAL_NOT_ALLOWED",
           "ROOM_COMMAND_FAILED",
           "ORIGIN_NOT_ALLOWED",
           "ROUTE_NOT_FOUND",
@@ -2332,6 +2422,7 @@ export const openApiDocument = {
       },
       RoomProjection: {
         type: "object",
+        additionalProperties: false,
         required: [
           "id",
           "roomNumber",
@@ -2409,9 +2500,234 @@ export const openApiDocument = {
           },
         },
       },
+      RoomMasterDataRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomTypeId",
+          "elevatorZone",
+          "dataStatus",
+          "expectedVersion",
+          "reasonCode",
+        ],
+        properties: {
+          roomTypeId: { type: "string", format: "uuid" },
+          elevatorZone: {
+            type: ["string", "null"],
+            enum: ["A", "B", "C", null],
+          },
+          dataStatus: {
+            type: "string",
+            enum: ["verified", "verification_required"],
+          },
+          dataStatusReason: {
+            type: ["string", "null"],
+            minLength: 2,
+            maxLength: 200,
+            description:
+              "verification_required일 때 필요한 운영 사유. 앞뒤 공백은 제거됩니다.",
+          },
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+        },
+      },
+      RoomOperationDecisionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedRoomVersion", "reasonCode"],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+        },
+      },
+      RoomOperationBlockRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedRoomVersion", "reasonCode"],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          startsAt: { type: "string", format: "date-time" },
+          endsAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      RoomCandleRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedRoomVersion", "reasonCode", "count"],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          count: { type: "integer", minimum: 0 },
+          physicallyVerified: { type: "boolean", default: false },
+        },
+      },
+      RoomIssueRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "expectedRoomVersion",
+          "reasonCode",
+          "category",
+          "severity",
+          "blocksGuestAssignment",
+        ],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          category: { type: "string", pattern: "^[A-Z0-9_]{2,80}$" },
+          severity: { type: "string", enum: ["info", "warning", "critical"] },
+          blocksGuestAssignment: { type: "boolean" },
+          description: {
+            type: "string",
+            maxLength: 500,
+            description:
+              "선택적 운영 설명. 전화번호·이메일은 허용하지 않습니다.",
+          },
+        },
+      },
+      RoomPinSyncRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedRoomVersion", "reasonCode", "syncStatus"],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          syncStatus: {
+            type: "string",
+            enum: ["verified", "mismatch", "unconfigured"],
+          },
+          pinVersion: { type: ["integer", "null"], minimum: 1 },
+        },
+        description:
+          "PIN 원문·door code·credential·provider secret은 요청할 수 없습니다.",
+      },
+      RoomCommandReasonCode: {
+        type: "string",
+        pattern: "^[A-Z0-9_]{2,80}$",
+        description: "감사 이력에 남는 소스 제어 가능한 안정적 사유 코드",
+      },
+      RoomOperationResult: {
+        type: "object",
+        additionalProperties: false,
+        required: ["entityId", "roomId", "roomStateVersion", "recordedAt"],
+        properties: {
+          entityId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
     },
   },
 } as const;
+
+function roomIdParameter(): Record<string, unknown> {
+  return {
+    name: "roomId",
+    in: "path",
+    required: true,
+    schema: { type: "string", format: "uuid" },
+    description: "불변 객실 ID",
+  };
+}
+
+function roomEntityIdParameter(
+  name: "blockId" | "issueId",
+  description: string,
+): Record<string, unknown> {
+  return {
+    name,
+    in: "path",
+    required: true,
+    schema: { type: "string", format: "uuid" },
+    description,
+  };
+}
+
+function roomReadResponses(): Record<string, unknown> {
+  return {
+    "200": {
+      description: "객실 운영 projection",
+      headers: { "Cache-Control": noStoreHeader },
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["room"],
+            properties: {
+              room: { $ref: "#/components/schemas/RoomProjection" },
+            },
+          },
+        },
+      },
+    },
+    "400": errorResponse,
+    "401": errorResponse,
+    "403": errorResponse,
+    "404": errorResponse,
+    "500": errorResponse,
+  };
+}
+
+function roomMutationOperation(
+  operationId: string,
+  summary: string,
+  requestSchema: string,
+  responseKey: "room" | "operation",
+  successStatus: 200 | 201,
+  description: string,
+  entityParameter?: Record<string, unknown>,
+): Record<string, unknown> {
+  const responseSchema = responseKey === "room"
+    ? "#/components/schemas/RoomProjection"
+    : "#/components/schemas/RoomOperationResult";
+  return {
+    tags: ["Rooms"],
+    operationId,
+    summary,
+    description:
+      `${description} 비밀번호 변경을 완료한 active business admin만 실행할 수 있고, Idempotency-Key 재시도와 expected version CAS를 적용합니다.`,
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": ["admin"],
+    parameters: [
+      roomIdParameter(),
+      ...(entityParameter ? [entityParameter] : []),
+      idempotencyHeader,
+    ],
+    requestBody: {
+      required: true,
+      content: {
+        "application/json": {
+          schema: { $ref: `#/components/schemas/${requestSchema}` },
+        },
+      },
+    },
+    responses: {
+      [String(successStatus)]: {
+        description: `${summary} 완료`,
+        headers: { "Cache-Control": noStoreHeader },
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: [responseKey],
+              properties: { [responseKey]: { $ref: responseSchema } },
+            },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "404": errorResponse,
+      "409": errorResponse,
+      "500": errorResponse,
+    },
+  };
+}
 
 function reservationIdParameter(): Record<string, unknown> {
   return {
