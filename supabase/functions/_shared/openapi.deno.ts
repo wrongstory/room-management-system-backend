@@ -43,6 +43,88 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "room projection must not be an untyped object",
   );
   assert(
+    serialized.includes('"#/components/schemas/DeveloperOverview"'),
+    "developer overview needs a reusable generated type",
+  );
+  assert(
+    serialized.includes('"/v1/developer/diagnostics"'),
+    "developer diagnostics must be published",
+  );
+  assert(
+    serialized.includes('"/v1/developer/activity-events"') &&
+      serialized.includes('"#/components/schemas/DeveloperActivityPage"'),
+    "developer security activity needs a reusable bounded contract",
+  );
+  for (
+    const path of [
+      "/v1/availability",
+      "/v1/availability/submissions",
+      "/v1/availability/change-requests",
+      "/v1/availability/change-requests/{requestId}/decision",
+      "/v1/availability/candidates",
+      "/v1/reservations",
+      "/v1/reservations/{reservationId}",
+      "/v1/reservations/{reservationId}/cancel",
+      "/v1/reservations/{reservationId}/manual-checkout",
+      "/v1/reservations/cleaning-requests",
+      "/v1/reservations/cleaning-requests/{targetId}/cancel",
+      "/v1/reservations/transitions/process",
+      "/v1/rooms/{roomId}",
+      "/v1/rooms/{roomId}/master-data",
+      "/v1/rooms/{roomId}/operation-blocks",
+      "/v1/rooms/{roomId}/operation-blocks/{blockId}/release",
+      "/v1/rooms/{roomId}/candles",
+      "/v1/rooms/{roomId}/issues",
+      "/v1/rooms/{roomId}/issues/{issueId}/resolve",
+      "/v1/rooms/{roomId}/pin-sync-events",
+    ]
+  ) {
+    assert(serialized.includes(`"${path}"`), `${path} must be published`);
+  }
+  assert(
+    serialized.includes('"#/components/schemas/AvailabilityVersion"') &&
+      serialized.includes(
+        '"#/components/schemas/AvailabilityChangeRequest"',
+      ),
+    "availability codegen schemas must be reusable",
+  );
+  assert(
+    serialized.includes('"OUTSIDE_AVAILABILITY_WINDOW"') &&
+      serialized.includes('"STALE_VERSION"'),
+    "availability KST and CAS errors must be documented",
+  );
+  assert(
+    serialized.includes('"#/components/schemas/ReservationDetail"') &&
+      serialized.includes('"#/components/schemas/ManualCleaningRequest"'),
+    "reservation and manual cleaning codegen schemas must be reusable",
+  );
+  const reservationSchema = document.components.schemas.Reservation;
+  assert(
+    !("guestName" in reservationSchema.properties) &&
+      !("guestNameEncrypted" in reservationSchema.properties),
+    "reservation list schema must not expose guest PII",
+  );
+  assert(
+    !serialized.includes('"before_state"') &&
+      !serialized.includes('"after_state"'),
+    "raw audit state must not be part of the public contract",
+  );
+  for (
+    const forbidden of [
+      '"pin"',
+      '"rawPin"',
+      '"pinCode"',
+      '"doorCode"',
+      '"credential"',
+      '"providerSecret"',
+    ]
+  ) {
+    assert(
+      !serialized.includes(forbidden),
+      `${forbidden} must not be a schema field`,
+    );
+  }
+  assert(
     response.headers.get("cache-control") === "public, max-age=300",
     "contract cache",
   );

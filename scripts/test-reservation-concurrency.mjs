@@ -106,6 +106,28 @@ assert(
 
 const authUserId = randomUUID();
 const actorProfileId = randomUUID();
+const developerAuthUserId = randomUUID();
+const developerProfileId = randomUUID();
+const { error: developerAuthError } = await client.auth.admin.createUser({
+  id: developerAuthUserId,
+  email: `developer-${developerAuthUserId}@test.invalid`,
+  password: `T:${randomUUID()}`,
+  email_confirm: true
+});
+assert(!developerAuthError, `developer Auth fixture failed: ${developerAuthError?.message}`);
+const { error: developerProfileError } = await client.rpc('bootstrap_first_developer_profile', {
+  p_profile_id: developerProfileId,
+  p_auth_user_id: developerAuthUserId,
+  p_display_name: '동시성 테스트 개발자',
+  p_display_name_normalized: '동시성 테스트 개발자',
+  p_phone_last_four: '0001',
+  p_phone_lookup_hash: createHash('sha256')
+    .update(`activity-developer-${randomUUID()}`)
+    .digest('hex'),
+  p_idempotency_key: `activity-developer-${randomUUID()}`
+});
+assert(!developerProfileError, `developer profile fixture failed: ${developerProfileError?.message}`);
+
 const email = `concurrency-${authUserId}@test.invalid`;
 const password = `T:${randomUUID()}`;
 const { error: authError } = await client.auth.admin.createUser({
@@ -199,6 +221,66 @@ assert(
   'duplicate account-create compensation must leave no orphan Auth user'
 );
 
+const denialOccurredAt = new Date(
+  Math.floor(Date.now() / 60_000) * 60_000 + 1_000
+).toISOString();
+const denialCalls = Array.from({ length: 1000 }, () => () => (
+  client.rpc('record_authorization_denial', {
+    p_actor_profile_id: actorProfileId,
+    p_source: 'edge.authorization.developer',
+    p_reason_code: 'DEVELOPER_REQUIRED',
+    p_occurred_at: denialOccurredAt
+  })
+));
+const denialResults = [];
+for (let offset = 0; offset < denialCalls.length; offset += 100) {
+  denialResults.push(...await Promise.all(
+    denialCalls.slice(offset, offset + 100).map((call) => call())
+  ));
+}
+assert(
+  denialResults.every((result) => !result.error),
+  'concurrent authorization denials must not raise unique or saturation errors'
+);
+const { error: isolatedDenialError } = await client.rpc('record_authorization_denial', {
+  p_actor_profile_id: logicalAccountId,
+  p_source: 'edge.authorization.developer',
+  p_reason_code: 'DEVELOPER_REQUIRED',
+  p_occurred_at: denialOccurredAt
+});
+assert(!isolatedDenialError, 'different actor denial must use an isolated aggregate');
+
+async function denialProjection(profileId) {
+  const { data, error } = await client.rpc('list_developer_activity_events', {
+    p_actor_profile_id: developerProfileId,
+    p_filter_actor_profile_id: profileId,
+    p_role: null,
+    p_categories: ['authorization'],
+    p_event_types: ['authorization.denied'],
+    p_outcomes: ['denied'],
+    p_from: new Date(Date.now() - 5 * 60_000).toISOString(),
+    p_to: new Date(Date.now() + 5 * 60_000).toISOString(),
+    p_before_recorded_at: null,
+    p_before_id: null,
+    p_limit: 100
+  });
+  assert(!error && Array.isArray(data), `denial projection failed: ${error?.message}`);
+  return data;
+}
+
+const saturatedDenials = await denialProjection(actorProfileId);
+assert(
+  saturatedDenials.length === 1 &&
+    saturatedDenials[0].summary?.aggregateCount === 600,
+  '1000 same actor/source/reason denials must converge to one saturated row'
+);
+const isolatedDenials = await denialProjection(logicalAccountId);
+assert(
+  isolatedDenials.length === 1 &&
+    isolatedDenials[0].summary?.aggregateCount === 1,
+  'different actors must keep isolated authorization denial rows'
+);
+
 const { data: room, error: roomError } = await client
   .from('rooms')
   .select('id,state_version')
@@ -229,6 +311,95 @@ const { data: refreshedRoom, error: refreshedRoomError } = await client
   .single();
 assert(!refreshedRoomError && refreshedRoom, 'room version refresh failed');
 
+const duplicateRoomOperationIds = [randomUUID(), randomUUID()];
+const duplicateRoomOperationKey = `room-operation-duplicate-${randomUUID()}`;
+const duplicateRoomOperationHash = '9'.repeat(64);
+const duplicateRoomOperationResults = await Promise.all(
+  duplicateRoomOperationIds.map((entityId) => client.rpc('mutate_room_operation', {
+    p_actor_profile_id: actorProfileId,
+    p_room_id: room.id,
+    p_action: 'set_candle_count',
+    p_expected_room_version: refreshedRoom.state_version,
+    p_reason_code: 'CONCURRENCY_TEST_CANDLE',
+    p_payload: { entityId, count: 0, physicallyVerified: false },
+    p_idempotency_key: duplicateRoomOperationKey,
+    p_request_hash: duplicateRoomOperationHash
+  }))
+);
+assert(
+  duplicateRoomOperationResults.every((result) => !result.error),
+  'concurrent identical room operations must both succeed'
+);
+assert(
+  new Set(duplicateRoomOperationResults.map((result) => result.data.entity_id)).size === 1,
+  'concurrent identical room operations must replay one logical result'
+);
+const { count: duplicateRoomOperationCount, error: duplicateRoomOperationCountError } =
+  await client
+    .from('room_candle_events')
+    .select('id', { count: 'exact', head: true })
+    .in('id', duplicateRoomOperationIds);
+assert(
+  !duplicateRoomOperationCountError,
+  `duplicate room operation count failed: ${duplicateRoomOperationCountError?.message}`
+);
+assert(
+  duplicateRoomOperationCount === 1,
+  'concurrent identical room operations must create one event'
+);
+
+const { data: roomAfterOperationReplay, error: roomAfterOperationReplayError } = await client
+  .from('rooms')
+  .select('state_version')
+  .eq('id', room.id)
+  .single();
+assert(
+  !roomAfterOperationReplayError && roomAfterOperationReplay,
+  'room version after operation replay failed'
+);
+
+const duplicateReservationIds = [randomUUID(), randomUUID()];
+const duplicateKey = `reservation-duplicate-${randomUUID()}`;
+const duplicateHash = 'a'.repeat(64);
+const duplicateResults = await Promise.all(duplicateReservationIds.map((reservationId) => (
+  client.rpc('create_reservation', {
+    p_actor_profile_id: actorProfileId,
+    p_reservation_id: reservationId,
+    p_room_id: room.id,
+    p_check_in_at: '2034-01-01T07:00:00.000Z',
+    p_check_out_at: '2034-01-02T02:00:00.000Z',
+    p_guest_count: 2,
+    p_guest_name_encrypted: null,
+    p_expected_room_version: roomAfterOperationReplay.state_version,
+    p_idempotency_key: duplicateKey,
+    p_request_hash: duplicateHash
+  })
+)));
+assert(
+  duplicateResults.every((result) => !result.error),
+  'concurrent identical reservation commands must both succeed'
+);
+assert(
+  new Set(duplicateResults.map((result) => result.data.id)).size === 1,
+  'concurrent identical reservation commands must replay one logical result'
+);
+const { count: duplicateReservationCount, error: duplicateCountError } = await client
+  .from('reservations')
+  .select('id', { count: 'exact', head: true })
+  .in('id', duplicateReservationIds);
+assert(!duplicateCountError, `duplicate reservation count failed: ${duplicateCountError?.message}`);
+assert(
+  duplicateReservationCount === 1,
+  'concurrent identical reservation commands must create one reservation'
+);
+
+const { data: roomAfterDuplicate, error: roomAfterDuplicateError } = await client
+  .from('rooms')
+  .select('state_version')
+  .eq('id', room.id)
+  .single();
+assert(!roomAfterDuplicateError && roomAfterDuplicate, 'room version after replay failed');
+
 const reservationIds = [randomUUID(), randomUUID()];
 const createResults = await Promise.all(reservationIds.map((reservationId, index) => (
   client.rpc('create_reservation', {
@@ -239,7 +410,7 @@ const createResults = await Promise.all(reservationIds.map((reservationId, index
     p_check_out_at: '2035-01-02T02:00:00.000Z',
     p_guest_count: 2,
     p_guest_name_encrypted: null,
-    p_expected_room_version: refreshedRoom.state_version,
+    p_expected_room_version: roomAfterDuplicate.state_version,
     p_idempotency_key: `create-${index}-${randomUUID()}`,
     p_request_hash: String(index + 2).repeat(64)
   })
@@ -277,5 +448,5 @@ assert(
 );
 
 console.log(
-  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, reservation-create=1/2, manual-checkout=1/2.'
+  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2.'
 );

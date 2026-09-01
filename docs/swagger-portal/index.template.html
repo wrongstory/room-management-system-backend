@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
+  />
+  <meta property="og:title" content="CASTLE THE ART API 문서" />
+  <meta
+    property="og:description"
+    content="프론트엔드와 운영도구 개발을 위한 읽기 전용 Swagger API 계약"
+  />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://wrongstory.github.io/room-management-system-backend/" />
+  <meta
+    property="og:image"
+    content="https://wrongstory.github.io/room-management-system-backend/og.png"
+  />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="CASTLE THE ART API 문서" />
+  <meta
+    name="twitter:description"
+    content="프론트엔드와 운영도구 개발을 위한 읽기 전용 Swagger API 계약"
+  />
+  <meta
+    name="twitter:image"
+    content="https://wrongstory.github.io/room-management-system-backend/og.png"
+  />
+  <title>CASTLE THE ART API 문서</title>
+  <link rel="canonical" href="https://wrongstory.github.io/room-management-system-backend/" />
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.11/swagger-ui.css"
+    integrity="sha384-9Q2fpS+xeS4ffJy6CagnwoUl+4ldAYhOs9pgZuEKxypVModhmZFzeMlvVsAjf7uT"
+    crossorigin="anonymous"
+  />
+  <link rel="stylesheet" href="./portal.css" />
+</head>
+<body>
+  <header class="portal-header">
+    <div class="portal-header__main">
+      <div>
+        <p class="eyebrow">ROOM MANAGEMENT · PRODUCTION CONTRACT</p>
+        <h1>CASTLE THE ART API</h1>
+        <p class="subtitle">
+          프론트엔드와 Python 운영도구를 위한 운영 OpenAPI 읽기 전용 포털
+        </p>
+      </div>
+      <span class="read-only-badge">읽기 전용</span>
+    </div>
+
+    <dl class="contract-meta" aria-label="API 계약 정보">
+      <div>
+        <dt>API 버전</dt>
+        <dd>__OPENAPI_INFO_VERSION__</dd>
+      </div>
+      <div>
+        <dt>경로</dt>
+        <dd>__OPENAPI_PATH_COUNT__개</dd>
+      </div>
+      <div>
+        <dt>갱신</dt>
+        <dd>__GENERATED_AT_KST__</dd>
+      </div>
+      <div>
+        <dt>계약 해시</dt>
+        <dd><code>__OPENAPI_SHA256_SHORT__</code></dd>
+      </div>
+    </dl>
+
+    <nav class="portal-actions" aria-label="API 문서 관련 링크">
+      <a class="primary-link" href="./openapi.json" download="room-management-openapi.json">
+        OpenAPI JSON 다운로드
+      </a>
+      <a href="__API_BASE_URL__/health">운영 Health</a>
+      <a href="https://github.com/wrongstory/room-management-system-backend/blob/main/docs/FRONTEND_API_INTEGRATION.md">
+        프론트 연동 가이드
+      </a>
+    </nav>
+
+    <p class="security-note">
+      이 공개 포털에서는 API 실행과 인증 토큰 입력을 지원하지 않습니다. 실제 비밀번호,
+      휴대전화번호, access token, service-role key를 입력하거나 공유하지 마세요.
+    </p>
+  </header>
+
+  <main id="swagger-ui" aria-label="Swagger API 명세"></main>
+
+  <noscript>
+    <p class="noscript-message">
+      API 문서를 표시하려면 JavaScript가 필요합니다. OpenAPI JSON은 위 다운로드 링크에서 받을 수 있습니다.
+    </p>
+  </noscript>
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.11/swagger-ui-bundle.js"
+    integrity="sha384-vfl/klfTFrIz5urj0HnhcXLAbzPdRHezizfy+XgFB6GqcKkhlk0lS3bIbyB39NLA"
+    crossorigin="anonymous"
+  ></script>
+  <script src="./swagger-initializer.js"></script>
+</body>
+</html>

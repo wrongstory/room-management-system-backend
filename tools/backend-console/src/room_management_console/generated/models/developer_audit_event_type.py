@@ -1,0 +1,34 @@
+from enum import Enum
+
+
+class DeveloperAuditEventType(str, Enum):
+    ACCOUNT_BOOTSTRAP_ADMIN_CREATED = "account.bootstrap_admin_created"
+    ACCOUNT_BOOTSTRAP_DEVELOPER_CREATED = "account.bootstrap_developer_created"
+    ACCOUNT_CREATED = "account.created"
+    ACCOUNT_PASSWORD_CHANGED = "account.password_changed"
+    ACCOUNT_PASSWORD_RESET_REQUESTED = "account.password_reset_requested"
+    ACCOUNT_ROLE_CHANGED = "account.role_changed"
+    ACCOUNT_STATUS_CHANGED = "account.status_changed"
+    ACCOUNT_UNLOCKED = "account.unlocked"
+    AVAILABILITY_CHANGE_DECIDED = "availability.change_decided"
+    AVAILABILITY_CHANGE_REQUESTED = "availability.change_requested"
+    AVAILABILITY_SUBMITTED = "availability.submitted"
+    CLEANING_MANUAL_REQUEST_CANCELLED = "cleaning.manual_request.cancelled"
+    CLEANING_MANUAL_REQUEST_CREATED = "cleaning.manual_request.created"
+    RESERVATION_CANCELLED = "reservation.cancelled"
+    RESERVATION_CHANGED = "reservation.changed"
+    RESERVATION_CREATED = "reservation.created"
+    RESERVATION_GUEST_NAME_RETENTION_PURGED = "reservation.guest_name_retention_purged"
+    RESERVATION_MANUAL_CHECKOUT = "reservation.manual_checkout"
+    RESERVATION_SCHEDULED_CHECKOUT = "reservation.scheduled_checkout"
+    RESERVATION_SCHEDULED_CHECK_IN = "reservation.scheduled_check_in"
+    ROOM_CREATE_BLOCK = "room.create_block"
+    ROOM_MASTER_DATA_CHANGED = "room.master_data_changed"
+    ROOM_RECORD_PIN_SYNC = "room.record_pin_sync"
+    ROOM_RELEASE_BLOCK = "room.release_block"
+    ROOM_REPORT_ISSUE = "room.report_issue"
+    ROOM_RESOLVE_ISSUE = "room.resolve_issue"
+    ROOM_SET_CANDLE_COUNT = "room.set_candle_count"
+
+    def __str__(self) -> str:
+        return str(self.value)

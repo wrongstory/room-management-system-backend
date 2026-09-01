@@ -66,6 +66,14 @@ const clientIsolationMigrationUrl = new URL(
   '../supabase/migrations/20260830054446_isolate_login_rate_limit_clients.sql',
   import.meta.url
 );
+const developerOperationsMigrationUrl = new URL(
+  '../supabase/migrations/20260830123241_developer_operations_projections.sql',
+  import.meta.url
+);
+const actorActivityMigrationUrl = new URL(
+  '../supabase/migrations/20260831124140_actor_activity_audit_contract.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -235,6 +243,46 @@ describe('initial migration contract', () => {
     expect(sql.indexOf('p_client_key_hash')).toBeLessThan(sql.indexOf('p_login_key_hash'));
     expect(sql).toContain('attempt_count < p_limit + 1');
     expect(sql).toContain('from service_role');
+    expect(sql).toContain('to service_role');
+  });
+
+  it('uses stable migration names and exact critical RPC privilege contracts', async () => {
+    const sql = await readFile(developerOperationsMigrationUrl, 'utf8');
+
+    expect(sql).toContain('p_expected_migration_name text');
+    expect(sql).toContain('where name = $1');
+    expect(sql).not.toContain('p_expected_migration_version');
+    expect(sql).toContain('pg_catalog.to_regprocedure(expected.signature)');
+    expect(sql).toContain("'service_role', resolved.function_oid, 'EXECUTE'");
+    expect(sql).toContain("'authenticated', resolved.function_oid, 'EXECUTE'");
+    expect(sql).toContain(
+      'public.create_account_profile(uuid,uuid,uuid,text,text,public.app_role,text,text,text,text)'
+    );
+  });
+
+  it('separates immutable domain audit from bounded private security activity', async () => {
+    const sql = await readFile(actorActivityMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.actor_activity_events');
+    expect(sql).toContain('create table private.actor_activity_aggregates');
+    expect(sql).toContain(
+      'create table private.actor_authorization_denial_aggregates'
+    );
+    expect(sql).toContain('create function public.record_actor_activity_event(');
+    expect(sql).toContain('create function public.record_unknown_login_failure(');
+    expect(sql).toContain('create function public.record_authorization_denial(');
+    expect(sql).toContain('create function public.list_developer_activity_events(');
+    expect(sql).toContain("set search_path = ''");
+    expect(sql).toContain("'auth.login_succeeded'");
+    expect(sql).toContain("'authorization.denied'");
+    expect(sql).toContain("'sensitive.read'");
+    expect(sql).toMatch(/least\(\s*private\.actor_activity_aggregates\.occurrence_count \+ 1,\s*600\s*\)/);
+    expect(sql).toMatch(
+      /least\(\s*private\.actor_authorization_denial_aggregates\.occurrence_count \+ 1,\s*600\s*\)/
+    );
+    expect(sql).toContain("v_to - v_from > interval '31 days'");
+    expect(sql).toContain('p_limit not between 1 and 100');
+    expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
   });
 

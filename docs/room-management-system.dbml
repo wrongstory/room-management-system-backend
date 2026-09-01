@@ -650,7 +650,7 @@ Table private.notification_outbox {
 }
 
 Table public.audit_events {
-  id bigint [pk, increment]
+  id uuid [pk]
   actor_profile_id uuid
   actor_display_name_snapshot text
   event_type text [not null]
@@ -666,6 +666,92 @@ Table public.audit_events {
   idempotency_key text [unique]
 
   Note: 'UPDATE and DELETE are rejected by an append-only trigger.'
+}
+
+Table private.actor_activity_events {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  actor_role_snapshot app_role [not null]
+  category text [not null, note: 'auth or sensitive_access']
+  event_type text [not null]
+  outcome text [not null]
+  source text [not null, note: 'Source-controlled capability category']
+  resource_type text
+  resource_id uuid
+  reason_code text
+  request_id text [not null]
+  occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  Note: 'Immutable known-actor login and sensitive-access ledger. request_id is server-generated UUID v4 only. Raw Data API access is denied.'
+}
+
+Table private.actor_activity_aggregates {
+  id uuid [pk]
+  bucket_started_at timestamptz [not null]
+  category text [not null]
+  event_type text [not null]
+  outcome text [not null]
+  source text [not null]
+  reason_code text [not null]
+  occurrence_count int [not null]
+  first_occurred_at timestamptz [not null]
+  last_occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  indexes {
+    (bucket_started_at, event_type, source) [unique]
+  }
+
+  Note: 'One anonymous unknown-login row per minute; count saturates at 600 and retains no login ID, HMAC, or raw IP.'
+}
+
+Table private.actor_authorization_denial_aggregates {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  actor_role_snapshot app_role [not null]
+  category text [not null, note: 'authorization']
+  event_type text [not null, note: 'authorization.denied']
+  outcome text [not null, note: 'denied']
+  source text [not null, note: 'Source-controlled capability category']
+  reason_code text [not null]
+  bucket_started_at timestamptz [not null]
+  occurrence_count int [not null]
+  first_occurred_at timestamptz [not null]
+  last_occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  indexes {
+    (actor_profile_id, source, reason_code, bucket_started_at) [unique]
+  }
+
+  Note: 'One row per actor/source/reason/UTC minute; count saturates at 600 and retains no URL, request body, token, IP, or request ID.'
+}
+
+Table private.scheduler_invocation_heartbeats {
+  invocation_key text [pk]
+  scheduled_at timestamptz [not null]
+  actor_profile_id uuid [not null]
+  status text [not null, note: 'succeeded or failed']
+  transition_count int
+  last_error_code text
+  attempt_count int [not null, default: 1]
+  first_started_at timestamptz [not null]
+  last_completed_at timestamptz [not null]
+  last_request_id text
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  Note: 'App-owned 7-day operational heartbeat. Raw table access is denied; developer status uses a bounded SECURITY DEFINER projection.'
+}
+
+Table private.developer_diagnostic_rate_limits {
+  actor_profile_id uuid [pk]
+  window_started_at timestamptz [not null]
+  attempt_count int [not null]
+  updated_at timestamptz [not null]
+
+  Note: 'Durable fixed-window limiter for developer diagnostics. Saturates at limit plus one.'
 }
 
 Ref: public.profiles.auth_user_id - auth.users.id
@@ -759,3 +845,7 @@ Ref: public.notifications.room_id > public.rooms.id
 Ref: public.notifications.cleaning_target_id > public.cleaning_targets.id
 Ref: private.notification_outbox.notification_id > public.notifications.id
 Ref: public.audit_events.actor_profile_id > public.profiles.id
+Ref: private.actor_activity_events.actor_profile_id > public.profiles.id
+Ref: private.actor_authorization_denial_aggregates.actor_profile_id > public.profiles.id
+Ref: private.scheduler_invocation_heartbeats.actor_profile_id > public.profiles.id
+Ref: private.developer_diagnostic_rate_limits.actor_profile_id - public.profiles.id

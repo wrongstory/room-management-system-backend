@@ -366,7 +366,46 @@ insert into room_reservation_test_results values
     )
   ));
 
-select '1..25';
+select public.process_due_reservation_transitions(
+  '62000000-0000-4000-8000-000000000001',
+  '2026-09-01 04:30:00+00',
+  'manual-transition-retry-0001',
+  repeat('2', 64)
+);
+
+select public.process_due_reservation_transitions(
+  '62000000-0000-4000-8000-000000000001',
+  '2026-09-01 04:30:00+00',
+  'manual-transition-retry-0001',
+  repeat('2', 64)
+);
+
+insert into room_reservation_test_results values
+  (23, 'manual transition retry replays one scoped command receipt', (
+    select count(*) = 1
+    from private.command_executions
+    where actor_profile_id = '62000000-0000-4000-8000-000000000001'
+      and command_type = 'reservation.process_due_transitions'
+      and idempotency_key = 'manual-transition-retry-0001'
+  ));
+
+do $$
+begin
+  perform public.process_due_reservation_transitions(
+    '62000000-0000-4000-8000-000000000001',
+    '2026-09-01 04:30:00+00',
+    'manual-transition-retry-0001',
+    repeat('3', 64)
+  );
+  insert into room_reservation_test_results values
+    (24, 'manual transition key cannot be reused with another request hash', false);
+exception when unique_violation then
+  insert into room_reservation_test_results values
+    (24, 'manual transition key cannot be reused with another request hash', sqlerrm like '%IDEMPOTENCY_KEY_REUSED%');
+end;
+$$;
+
+select '1..27';
 
 select case
   when passed then format('ok %s - %s', test_number, description)
@@ -381,24 +420,24 @@ select set_config('request.jwt.claim.sub', '61000000-0000-4000-8000-000000000001
 
 select case
   when (select count(*) from public.reservation_schedule_revisions) >= 1
-    then 'ok 23 - active administrator can read reservation ledgers'
-  else 'not ok 23 - active administrator can read reservation ledgers'
+    then 'ok 25 - active administrator can read reservation ledgers'
+  else 'not ok 25 - active administrator can read reservation ledgers'
 end;
 
 select set_config('request.jwt.claim.sub', '61000000-0000-4000-8000-000000000002', true);
 
 select case
   when (select count(*) from public.reservation_schedule_revisions) = 0
-    then 'ok 24 - active maid cannot read administrator reservation ledgers'
-  else 'not ok 24 - active maid cannot read administrator reservation ledgers'
+    then 'ok 26 - active maid cannot read administrator reservation ledgers'
+  else 'not ok 26 - active maid cannot read administrator reservation ledgers'
 end;
 
 select set_config('request.jwt.claim.sub', '61000000-0000-4000-8000-000000000003', true);
 
 select case
   when (select count(*) from public.reservation_schedule_revisions) = 0
-    then 'ok 25 - inactive administrator cannot read reservation ledgers'
-  else 'not ok 25 - inactive administrator cannot read reservation ledgers'
+    then 'ok 27 - inactive administrator cannot read reservation ledgers'
+  else 'not ok 27 - inactive administrator cannot read reservation ledgers'
 end;
 
 reset role;

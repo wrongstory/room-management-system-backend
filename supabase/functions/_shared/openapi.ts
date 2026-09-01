@@ -32,6 +32,16 @@ const idempotencyHeader = {
     "사용자 동작 한 번마다 생성합니다. 네트워크 오류로 **같은 요청 본문을 재시도할 때만 같은 값**을 재사용하고, 다른 본문에는 새 값을 사용합니다. `crypto.randomUUID()`를 권장합니다.",
 };
 
+const manualTransitionIdempotencyHeader = {
+  ...idempotencyHeader,
+  schema: {
+    ...idempotencyHeader.schema,
+    not: { pattern: "^reservation-scheduler-" },
+  },
+  description:
+    `${idempotencyHeader.description} \`reservation-scheduler-\` 접두사는 scheduler 전용 namespace이므로 수동 실행에서는 \`RESERVED_IDEMPOTENCY_KEY\`로 거부됩니다.`,
+};
+
 const noStoreHeader = {
   description: "인증·개인정보 응답은 브라우저나 중간 캐시에 저장하지 않습니다.",
   schema: { const: "no-store" },
@@ -39,13 +49,56 @@ const noStoreHeader = {
 
 const accountManagerRoles = ["developer", "admin"] as const;
 
+const reservationRequired = [
+  "id",
+  "roomId",
+  "checkInAt",
+  "checkOutAt",
+  "guestCount",
+  "status",
+  "preparationObligationId",
+  "checkoutObligationId",
+  "version",
+  "actualCheckInAt",
+  "actualCheckoutAt",
+  "cancelledAt",
+  "createdAt",
+  "updatedAt",
+] as const;
+
+const reservationProperties = {
+  id: { type: "string", format: "uuid" },
+  roomId: { type: "string", format: "uuid" },
+  checkInAt: { type: "string", format: "date-time" },
+  checkOutAt: { type: "string", format: "date-time" },
+  guestCount: { type: "integer", minimum: 1 },
+  status: { $ref: "#/components/schemas/ReservationStatus" },
+  preparationObligationId: { type: "string", format: "uuid" },
+  checkoutObligationId: { type: "string", format: "uuid" },
+  version: {
+    type: "integer",
+    minimum: 1,
+    description: "변경·취소·수동 체크아웃의 expectedVersion CAS 값",
+  },
+  roomStateVersion: {
+    type: "integer",
+    minimum: 1,
+    description: "객실 상태도 함께 변경된 명령에서만 반환",
+  },
+  actualCheckInAt: { type: ["string", "null"], format: "date-time" },
+  actualCheckoutAt: { type: ["string", "null"], format: "date-time" },
+  cancelledAt: { type: ["string", "null"], format: "date-time" },
+  createdAt: { type: "string", format: "date-time" },
+  updatedAt: { type: "string", format: "date-time" },
+} as const;
+
 export const openApiDocument = {
   openapi: "3.1.1",
   info: {
     title: "CASTLE THE ART Room Management API",
     version: "0.2.0",
     description: [
-      "Supabase Edge API의 인증·계정·객실 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
+      "Supabase Edge API의 인증·계정·객실·주간 가능일·예약 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
       "",
       "## 프론트 연동 순서",
       "1. `POST /v1/auth/login`으로 세션 토큰과 `user.mustChangePassword`를 받습니다.",
@@ -57,7 +110,7 @@ export const openApiDocument = {
       "## 역할 경계",
       "- `developer`: 계정 관리만 가능하며 객실 업무는 금지됩니다.",
       "- `admin`: 계정 관리와 객실 업무가 가능합니다.",
-      "- `maid`: 현재 문서 범위의 계정·전체 객실 API는 사용할 수 없습니다.",
+      "- `maid`: 계정·전체 객실 API는 사용할 수 없고 본인의 주간 가능일만 조회·제출·변경 요청할 수 있습니다.",
       "",
       "프론트 구현 절차와 타입 생성 명령은 저장소의 `docs/FRONTEND_API_INTEGRATION.md`를 참고하세요.",
     ].join("\n"),
@@ -85,9 +138,24 @@ export const openApiDocument = {
         "비밀번호 변경을 완료한 active developer 또는 active admin의 계정 관리 API입니다. developer 계정 자체는 변경할 수 없습니다.",
     },
     {
+      name: "Developer",
+      description:
+        "singleton active developer 전용 운영 상태 API입니다. Supabase 내부 schema 원문, secret 값, 고객 개인정보를 반환하지 않습니다.",
+    },
+    {
       name: "Rooms",
       description:
         "비밀번호 변경을 완료한 active business admin 전용 객실 운영 projection입니다. developer는 접근할 수 없습니다.",
+    },
+    {
+      name: "Availability",
+      description:
+        "메이드의 다음 주 가능일 제출·변경 요청과 관리자의 승인·후보 조회 API입니다. 제출창은 일요일 12:00–23:59 KST이며 서버가 DB 시각으로 판정합니다.",
+    },
+    {
+      name: "Reservations",
+      description:
+        "비밀번호 변경을 완료한 active business admin 전용 예약·점유·수동 청소 요청 API입니다. 고객명은 목록에 포함하지 않고 권한을 재검증한 단건 상세에서만 복호화합니다.",
     },
   ],
   paths: {
@@ -352,6 +420,631 @@ export const openApiDocument = {
     "/v1/accounts/{profileId}/password-reset": accountMutationPath(
       "resetAccountPassword",
     ),
+    "/v1/developer/overview": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperOverview",
+        summary: "개발자 운영 대시보드 요약 조회",
+        description:
+          "active developer 전용입니다. 계정·객실 집계와 runtime·DB·scheduler의 app-owned projection을 한 번에 반환합니다. 전체 전화번호, 고객명, secret 값, 내부 catalog row는 포함하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("운영 대시보드 요약", "overview", {
+            $ref: "#/components/schemas/DeveloperOverview",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/runtime-status": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperRuntimeStatus",
+        summary: "Edge runtime과 설정 여부 조회",
+        description:
+          "환경 badge, project ref, adapter와 allowlist 설정의 configured 여부만 반환합니다. 환경변수를 열거하거나 secret 값·길이·해시를 노출하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("Edge runtime 상태", "runtime", {
+            $ref: "#/components/schemas/DeveloperRuntimeStatus",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/database-status": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperDatabaseStatus",
+        summary: "DB migration·RLS·핵심 RPC 상태 조회",
+        description:
+          "source가 기대하는 migration head와 실제 DB head를 비교하고 public base table RLS 누락과 허용된 핵심 RPC 존재 여부만 반환합니다. auth·vault·migration 원본 row는 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("DB 운영 상태", "database", {
+            $ref: "#/components/schemas/DeveloperDatabaseStatus",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/scheduler-status": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperSchedulerStatus",
+        summary: "예약 scheduler·Cron 상태 조회",
+        description:
+          "Cron 활성 여부, exact-admin actor 유효성, 최근 실행 메타데이터와 app-owned heartbeat를 안전한 projection으로 반환합니다. Cron SQL, Authorization header, Vault 값, HTTP 응답 본문은 노출하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("scheduler 운영 상태", "scheduler", {
+            $ref: "#/components/schemas/DeveloperSchedulerStatus",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/audit-events": {
+      get: {
+        tags: ["Developer"],
+        operationId: "listDeveloperAuditEvents",
+        summary: "허용된 운영 감사 이벤트 조회",
+        description:
+          "계정·운영 event allowlist만 최대 31일, 페이지당 100건으로 조회합니다. cursor는 응답 값을 그대로 사용하고 raw before_state/after_state 대신 이벤트별 허용 필드 summary만 표시합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [
+          {
+            name: "eventType",
+            in: "query",
+            schema: {
+              type: "array",
+              maxItems: 27,
+              items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
+            },
+            style: "form",
+            explode: true,
+            description: "반복 query로 전달하는 이벤트 allowlist 필터",
+          },
+          {
+            name: "actorProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "특정 행위자 profile ID 필터",
+          },
+          {
+            name: "from",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+            description: "조회 시작. 생략 시 최근 7일",
+          },
+          {
+            name: "to",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+            description: "조회 종료. from과 최대 31일 간격",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", maxLength: 512 },
+            description:
+              "직전 응답의 nextCursor. 내부 구조를 수정하지 않습니다.",
+          },
+          {
+            name: "limit",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            description: "페이지당 최대 이벤트 수",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "민감정보를 제거한 감사 이벤트 페이지",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/DeveloperAuditPage" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/activity-events": {
+      get: {
+        tags: ["Developer"],
+        operationId: "listDeveloperActivityEvents",
+        summary: "인증·권한·민감접근 활동 로그 조회",
+        description:
+          "업무 상태 변경 감사와 분리된 보안 활동을 최대 31일, 페이지당 100건으로 조회합니다. 알 수 없는 로그인과 권한 거부 반복은 원문 request metadata 없이 분 단위 aggregate summary로 반환합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [
+          {
+            name: "actorProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "알려진 특정 행위자 profile ID 필터",
+          },
+          {
+            name: "role",
+            in: "query",
+            schema: { $ref: "#/components/schemas/AppRole" },
+            description: "이벤트 발생 시점 역할 snapshot 필터",
+          },
+          {
+            name: "category",
+            in: "query",
+            schema: {
+              type: "array",
+              maxItems: 3,
+              items: { $ref: "#/components/schemas/ActivityCategory" },
+            },
+            style: "form",
+            explode: true,
+          },
+          {
+            name: "eventType",
+            in: "query",
+            schema: {
+              type: "array",
+              maxItems: 4,
+              items: { $ref: "#/components/schemas/ActivityEventType" },
+            },
+            style: "form",
+            explode: true,
+          },
+          {
+            name: "outcome",
+            in: "query",
+            schema: {
+              type: "array",
+              maxItems: 3,
+              items: { $ref: "#/components/schemas/ActivityOutcome" },
+            },
+            style: "form",
+            explode: true,
+          },
+          {
+            name: "from",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+            description: "조회 시작. 생략 시 최근 7일",
+          },
+          {
+            name: "to",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+            description: "조회 종료. from과 최대 31일 간격",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", maxLength: 512 },
+            description: "직전 응답의 nextCursor를 그대로 전달합니다.",
+          },
+          {
+            name: "limit",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "민감 원문을 저장·노출하지 않는 활동 로그 페이지",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/DeveloperActivityPage" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/diagnostics": {
+      post: {
+        tags: ["Developer"],
+        operationId: "runDeveloperDiagnostics",
+        summary: "허용된 운영 진단 일괄 실행",
+        description:
+          "요청 본문·임의 URL·SQL·RPC 이름을 받지 않고 Auth/session 검증 후 runtime·DB·scheduler read-only 검사만 수행합니다. 분당 10회 durable 제한과 개별 timeout을 적용합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("운영 진단 결과", "diagnostics", {
+            $ref: "#/components/schemas/DeveloperDiagnostics",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "429": {
+            ...errorResponse,
+            headers: {
+              "Retry-After": { schema: { type: "integer", minimum: 1 } },
+            },
+          },
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability": {
+      get: {
+        tags: ["Availability"],
+        operationId: "listAvailability",
+        summary: "현재 주간 가능일 조회",
+        description:
+          "비밀번호 변경을 완료한 active maid 또는 active business admin 전용입니다. maid는 본인 자료만 조회할 수 있으며, admin만 maidProfileId로 특정 메이드를 선택할 수 있습니다. weekStart는 조회할 주의 월요일 날짜입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid", "admin"],
+        parameters: [
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "대상 주의 월요일(YYYY-MM-DD)",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description:
+              "admin 선택 필터. maid가 다른 profile ID를 전달하면 403입니다.",
+          },
+        ],
+        responses: {
+          "200": availabilityListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability/submissions": {
+      post: {
+        tags: ["Availability"],
+        operationId: "submitAvailability",
+        summary: "다음 주 가능일 제출",
+        description:
+          "비밀번호 변경을 완료한 active maid만 일요일 12:00–23:59 KST에 다음 월요일 주차를 제출할 수 있습니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/AvailabilitySubmissionRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": availabilityItemResponse("가능일 제출 완료"),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability/change-requests": {
+      post: {
+        tags: ["Availability"],
+        operationId: "requestAvailabilityChange",
+        summary: "마감 후 가능일 변경 요청",
+        description:
+          "비밀번호 변경을 완료한 active maid가 제출 마감 후 현재 version의 변경을 요청합니다. 기존 가능일 원장은 보존되고 pending 요청이 append되며, 같은 주차에는 pending 요청 하나만 허용됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/AvailabilityChangeRequestInput",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": availabilityChangeResponse("변경 요청 접수 완료"),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+      get: {
+        tags: ["Availability"],
+        operationId: "listAvailabilityChangeRequests",
+        summary: "가능일 변경 요청 목록 조회",
+        description:
+          "active maid는 본인 요청만, active business admin은 전체 요청을 조회합니다. status·weekStart·maidProfileId 필터는 모두 선택이며 maid가 다른 profile ID를 전달하면 403입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid", "admin"],
+        parameters: [
+          {
+            name: "status",
+            in: "query",
+            schema: {
+              $ref: "#/components/schemas/AvailabilityChangeRequestStatus",
+            },
+            description: "요청 처리 상태 필터",
+          },
+          {
+            name: "weekStart",
+            in: "query",
+            schema: { type: "string", format: "date" },
+            description: "대상 주의 월요일 날짜 필터",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "admin용 메이드 profile 필터",
+          },
+        ],
+        responses: {
+          "200": availabilityChangeListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability/change-requests/{requestId}/decision": {
+      post: {
+        tags: ["Availability"],
+        operationId: "decideAvailabilityChange",
+        summary: "가능일 변경 요청 승인 또는 반려",
+        description:
+          "비밀번호 변경을 완료한 active business admin만 호출합니다. 승인하면 새 가능일 version을 만들고 current pointer를 이동하며, 반려하면 요청 결과만 append합니다. developer는 관리자 권한을 상속하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "requestId",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description: "변경 요청 ID",
+          },
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/AvailabilityDecisionRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": availabilityChangeResponse("변경 요청 결정 완료"),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/availability/candidates": {
+      get: {
+        tags: ["Availability"],
+        operationId: "listAvailabilityCandidates",
+        summary: "날짜별 배정 가능 메이드 후보 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 해당 날짜가 가능하다고 제출한 현재 version의 active maid만 반환하며 developer와 maid는 조회할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "workDate",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "후보를 조회할 근무 날짜",
+          },
+        ],
+        responses: {
+          "200": availabilityCandidateListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/reservations": {
+      get: {
+        tags: ["Reservations"],
+        operationId: "listReservations",
+        summary: "예약 목록 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록은 예약·점유·청소 연결에 필요한 필드만 반환하며 guestName과 암호문을 절대 포함하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [{
+          name: "roomId",
+          in: "query",
+          schema: { type: "string", format: "uuid" },
+          description: "특정 객실의 예약만 조회하는 선택 필터",
+        }],
+        responses: {
+          "200": reservationListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+      post: {
+        tags: ["Reservations"],
+        operationId: "createReservation",
+        summary: "예약 생성",
+        description:
+          "active business admin이 객실 일정을 생성합니다. expectedRoomVersion은 객실 CAS 값이며 활성 예약은 [checkInAt, checkOutAt) 반개구간으로 겹치지 않아야 합니다. guestName은 Edge에서 AES-256-GCM으로 암호화되며 명령 응답에 돌려주지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: reservationRequestBody("ReservationCreateRequest"),
+        responses: reservationMutationResponses(201),
+      },
+    },
+    "/v1/reservations/{reservationId}": {
+      get: {
+        tags: ["Reservations"],
+        operationId: "getReservation",
+        summary: "예약 상세와 고객명 조회",
+        description:
+          "active business admin 전용 민감정보 조회입니다. 암호화된 고객명이 있을 때만 복호화하고 #58 sensitive.read 활동 원장을 성공적으로 기록한 뒤 반환합니다. 기록 실패 시 요청은 fail-closed됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [reservationIdParameter()],
+        responses: {
+          "200": reservationObjectResponse(
+            "예약 상세",
+            "#/components/schemas/ReservationDetail",
+          ),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+      patch: {
+        tags: ["Reservations"],
+        operationId: "changeReservation",
+        summary: "예약 일정·객실·고객정보 변경",
+        description:
+          "active business admin이 expectedVersion CAS로 예약을 변경합니다. guestName 필드 생략은 기존값 유지, null은 삭제, 문자열은 새 암호문 설정을 뜻합니다. 이미 배정·시작된 작업과 충돌하면 409로 거부됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [reservationIdParameter(), idempotencyHeader],
+        requestBody: reservationRequestBody("ReservationChangeRequest"),
+        responses: reservationMutationResponses(),
+      },
+    },
+    "/v1/reservations/{reservationId}/cancel": reservationCommandPath(
+      "cancelReservation",
+      "체크인 전 예약 soft cancel",
+      "예약과 연결 의무·감사 이력을 삭제하지 않고 expectedVersion과 reasonCode로 취소합니다. 체크인 후나 충돌 상태에서는 409를 반환합니다.",
+    ),
+    "/v1/reservations/{reservationId}/manual-checkout": reservationCommandPath(
+      "manualCheckoutReservation",
+      "예정 전 수동 체크아웃",
+      "예약 취소와 다른 명령입니다. 실제 체크아웃 event를 append하고 같은 퇴실 청소 의무를 재사용하며, PIN 공개·수행 중 충돌은 409로 거부합니다.",
+    ),
+    "/v1/reservations/cleaning-requests": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "createManualCleaningRequest",
+        summary: "연박 또는 추가 청소 요청 생성",
+        description:
+          "active business admin이 투숙 객실에 stayover, 공실에 additional 요청을 생성합니다. stayover는 active reservationId가 필수이며 서버가 점유·접근 구간·기존 target 충돌을 재검증합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: reservationRequestBody("ManualCleaningRequestCreate"),
+        responses: cleaningRequestMutationResponses(201),
+      },
+    },
+    "/v1/reservations/cleaning-requests/{targetId}/cancel": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "cancelManualCleaningRequest",
+        summary: "미착수 수동 청소 요청 soft cancel",
+        description:
+          "active business admin이 아직 미배정·미공개·미착수인 수동 요청만 expectedVersion CAS로 취소합니다. 자동 퇴실 의무나 이미 시작된 작업은 취소할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "targetId",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description: "수동 청소 target ID",
+          },
+          idempotencyHeader,
+        ],
+        requestBody: reservationRequestBody("ReservationMutationRequest"),
+        responses: cleaningRequestMutationResponses(),
+      },
+    },
+    "/v1/reservations/transitions/process": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "processReservationTransitions",
+        summary: "관리자가 due 예약 전이 수동 실행",
+        description:
+          "active business admin이 현재 서버 시각까지의 체크인·체크아웃·고객명 보존 전이를 수동으로 catch-up합니다. scheduler Function의 x-scheduler-secret·scheduledAt·heartbeat 경계를 재사용하지 않으며, 사용자 Idempotency-Key로 독립적으로 실행합니다. `reservation-scheduler-` 접두사는 scheduler 전용이므로 사용할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [manualTransitionIdempotencyHeader],
+        responses: {
+          "200": {
+            description: "예약 전이 batch 결과",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["transitions"],
+                  properties: {
+                    transitions: {
+                      $ref: "#/components/schemas/ReservationTransitionResult",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/rooms": {
       get: {
         tags: ["Rooms"],
@@ -382,8 +1075,94 @@ export const openApiDocument = {
           },
           "401": errorResponse,
           "403": errorResponse,
+          "500": errorResponse,
         },
       },
+    },
+    "/v1/rooms/{roomId}": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "getRoom",
+        summary: "객실 단건 운영 projection 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록과 동일한 camelCase projection만 반환하며 객실 PIN 원문이나 provider 인증정보는 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [roomIdParameter()],
+        responses: roomReadResponses(),
+      },
+    },
+    "/v1/rooms/{roomId}/master-data": {
+      patch: roomMutationOperation(
+        "changeRoomMasterData",
+        "객실 기준정보 변경",
+        "RoomMasterDataRequest",
+        "room",
+        200,
+        "expectedVersion은 현재 room.stateVersion입니다. 객실 타입·엘리베이터 구역·기준정보 확인 상태를 기존 DB CAS·감사·멱등성 command로 변경합니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/operation-blocks": {
+      post: roomMutationOperation(
+        "createRoomOperationBlock",
+        "객실 운영 차단 생성",
+        "RoomOperationBlockRequest",
+        "operation",
+        201,
+        "객실 운영 차단을 append합니다. startsAt을 생략하면 DB 시각을 사용하며 endsAt은 null일 수 있습니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/operation-blocks/{blockId}/release": {
+      post: roomMutationOperation(
+        "releaseRoomOperationBlock",
+        "객실 운영 차단 해제",
+        "RoomOperationDecisionRequest",
+        "operation",
+        200,
+        "기존 차단을 삭제하지 않고 release 이력과 객실 CAS version을 기록합니다.",
+        roomEntityIdParameter("blockId", "해제할 운영 차단 ID"),
+      ),
+    },
+    "/v1/rooms/{roomId}/candles": {
+      post: roomMutationOperation(
+        "setRoomCandleCount",
+        "객실 촛불 수량 기록",
+        "RoomCandleRequest",
+        "operation",
+        201,
+        "현재 수량을 append-only event로 기록합니다. physicallyVerified를 생략하면 false이며 count는 0 이상입니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/issues": {
+      post: roomMutationOperation(
+        "reportRoomIssue",
+        "객실 이슈 등록",
+        "RoomIssueRequest",
+        "operation",
+        201,
+        "객실 이슈를 등록합니다. description에 전화번호나 이메일 등 연락처를 넣으면 SENSITIVE_TEXT_NOT_ALLOWED로 거부합니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/issues/{issueId}/resolve": {
+      post: roomMutationOperation(
+        "resolveRoomIssue",
+        "객실 이슈 해결",
+        "RoomOperationDecisionRequest",
+        "operation",
+        200,
+        "이슈 원장을 삭제하지 않고 해결 상태와 사유를 기록합니다.",
+        roomEntityIdParameter("issueId", "해결할 객실 이슈 ID"),
+      ),
+    },
+    "/v1/rooms/{roomId}/pin-sync-events": {
+      post: roomMutationOperation(
+        "recordRoomPinSync",
+        "객실 PIN 동기화 상태 기록",
+        "RoomPinSyncRequest",
+        "operation",
+        201,
+        "PIN 원문이 아닌 동기화 상태와 선택적 pinVersion만 기록합니다. pin, rawPin, pinCode, doorCode, credential, providerSecret 필드는 허용하지 않습니다.",
+      ),
     },
   },
   components: {
@@ -439,6 +1218,7 @@ export const openApiDocument = {
           "LOGIN_RATE_LIMITED",
           "LOGIN_CLIENT_ID_UNAVAILABLE",
           "LOGIN_RATE_LIMIT_UNAVAILABLE",
+          "ACTIVITY_LOG_UNAVAILABLE",
           "AUTH_LOOKUP_FAILED",
           "LOGIN_STATE_UPDATE_FAILED",
           "INVALID_CURRENT_PASSWORD",
@@ -448,12 +1228,24 @@ export const openApiDocument = {
           "PASSWORD_CHANGE_REQUIRED",
           "ACCOUNT_MANAGER_REQUIRED",
           "ADMIN_REQUIRED",
+          "DEVELOPER_REQUIRED",
+          "DEVELOPER_PROJECTION_FAILED",
+          "DATABASE_UNREACHABLE",
+          "MIGRATION_DRIFT",
+          "RLS_CONFIGURATION_INVALID",
+          "SCHEDULER_NOT_CONFIGURED",
+          "SCHEDULER_ACTOR_INVALID",
+          "SCHEDULER_DEGRADED",
+          "SCHEDULER_HEARTBEAT_FAILED",
+          "DIAGNOSTIC_TIMEOUT",
+          "DIAGNOSTICS_RATE_LIMITED",
           "ACCOUNT_NOT_FOUND",
           "DEVELOPER_ACCOUNT_PROTECTED",
           "LAST_ACTIVE_ADMIN_REQUIRED",
           "ACCOUNT_MUST_BE_INACTIVE",
           "DEPARTED_ACCOUNT_IMMUTABLE",
           "IDEMPOTENCY_KEY_REUSED",
+          "RESERVED_IDEMPOTENCY_KEY",
           "DEACTIVATION_MUST_BE_FINISHED",
           "PHONE_ALREADY_REGISTERED",
           "LOGIN_ID_CONFLICT",
@@ -463,6 +1255,47 @@ export const openApiDocument = {
           "AUTH_PASSWORD_RESET_FAILED",
           "ACCOUNT_AUTH_STATE_INCONSISTENT",
           "ACCOUNT_COMMAND_FAILED",
+          "FORBIDDEN",
+          "MAID_REQUIRED",
+          "AVAILABILITY_ACCESS_REQUIRED",
+          "ACTIVE_MAID_REQUIRED",
+          "ACTIVE_ADMIN_REQUIRED",
+          "OUTSIDE_AVAILABILITY_WINDOW",
+          "CHANGE_REQUEST_BEFORE_DEADLINE",
+          "STALE_VERSION",
+          "PENDING_CHANGE_REQUEST_EXISTS",
+          "INVALID_TRANSITION",
+          "AVAILABILITY_NOT_FOUND",
+          "CHANGE_REQUEST_NOT_FOUND",
+          "WEEK_START_MUST_BE_MONDAY",
+          "AVAILABILITY_DATES_MUST_BE_UNIQUE",
+          "AVAILABILITY_DATE_OUTSIDE_WEEK",
+          "AVAILABILITY_COMMAND_FAILED",
+          "INVALID_GUEST_NAME",
+          "INVALID_GUEST_COUNT",
+          "INVALID_RESERVATION_SCHEDULE",
+          "RESERVATION_OVERLAP",
+          "ROOM_ALLOCATION_BLOCKED",
+          "RESERVATION_NOT_FOUND",
+          "CLEANING_REQUEST_NOT_FOUND",
+          "CLEANING_TEMPLATE_NOT_CONFIGURED",
+          "INVALID_MANUAL_CLEANING_REQUEST",
+          "ACTIVE_STAY_RESERVATION_REQUIRED",
+          "STAYOVER_ACCESS_WINDOW_INVALID",
+          "VACANT_ROOM_REQUIRED",
+          "RESERVATION_ROOM_MISMATCH",
+          "NOT_MANUAL_CLEANING_REQUEST",
+          "REPLAN_REQUIRED",
+          "SCHEDULE_LOCKED",
+          "CONFLICT",
+          "RESERVATION_COMMAND_FAILED",
+          "RESERVATION_PII_KEY_INVALID",
+          "RESERVATION_PII_KEYRING_INVALID",
+          "RESERVATION_PII_DECRYPT_FAILED",
+          "ROOM_NOT_FOUND",
+          "ROOM_OPERATION_NOT_FOUND",
+          "SENSITIVE_TEXT_NOT_ALLOWED",
+          "PIN_MATERIAL_NOT_ALLOWED",
           "ROOM_COMMAND_FAILED",
           "ORIGIN_NOT_ALLOWED",
           "ROUTE_NOT_FOUND",
@@ -702,6 +1535,877 @@ export const openApiDocument = {
           },
         },
       },
+      DeveloperAuditEventType: {
+        type: "string",
+        enum: [
+          "account.bootstrap_developer_created",
+          "account.bootstrap_admin_created",
+          "account.created",
+          "account.role_changed",
+          "account.status_changed",
+          "account.unlocked",
+          "account.password_reset_requested",
+          "account.password_changed",
+          "availability.submitted",
+          "availability.change_requested",
+          "availability.change_decided",
+          "reservation.created",
+          "reservation.changed",
+          "reservation.cancelled",
+          "reservation.manual_checkout",
+          "reservation.scheduled_check_in",
+          "reservation.scheduled_checkout",
+          "reservation.guest_name_retention_purged",
+          "cleaning.manual_request.created",
+          "cleaning.manual_request.cancelled",
+          "room.master_data_changed",
+          "room.create_block",
+          "room.release_block",
+          "room.set_candle_count",
+          "room.report_issue",
+          "room.resolve_issue",
+          "room.record_pin_sync",
+        ],
+        description:
+          "운영 콘솔에 노출할 수 있도록 서버에서 고정한 감사 이벤트 allowlist",
+      },
+      DeveloperRuntimeStatus: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "adapter",
+          "environment",
+          "projectRef",
+          "runtime",
+          "source",
+          "configuration",
+          "checkedAt",
+        ],
+        properties: {
+          adapter: { const: "supabase-edge" },
+          environment: {
+            type: "string",
+            enum: ["production", "recovery", "local", "unknown"],
+            description:
+              "색상만으로 구분하지 말고 이 텍스트와 projectRef를 함께 표시합니다.",
+          },
+          projectRef: {
+            type: "string",
+            description:
+              "현재 연결 대상 확인용 공개 project ref 또는 local/unknown",
+          },
+          runtime: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "version"],
+            properties: {
+              name: { const: "deno" },
+              version: { type: "string" },
+            },
+          },
+          source: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "apiVersion",
+              "expectedMigration",
+              "fastifyRollbackBaseline",
+            ],
+            properties: {
+              apiVersion: { type: "string" },
+              expectedMigration: {
+                type: "string",
+                pattern: "^[a-z][a-z0-9_]{2,100}$",
+                description:
+                  "원격 적용 시각과 무관한 Git migration의 안정적인 name",
+              },
+              fastifyRollbackBaseline: {
+                type: "string",
+                enum: ["available", "retired"],
+              },
+            },
+          },
+          configuration: {
+            type: "object",
+            description:
+              "소스 allowlist에 포함된 이름별 configured boolean. 값·길이·해시는 절대 포함하지 않습니다.",
+            additionalProperties: false,
+            required: [
+              "ACCOUNT_PHONE_PEPPER",
+              "RESERVATION_PII_KEY_BASE64",
+              "RESERVATION_PII_KEY_VERSION",
+              "RESERVATION_PII_KEYRING_JSON",
+              "RESERVATION_GUEST_NAME_PEPPER",
+              "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
+              "SCHEDULER_INVOKE_SECRET",
+              "CORS_ORIGINS",
+            ],
+            properties: Object.fromEntries(
+              [
+                "ACCOUNT_PHONE_PEPPER",
+                "RESERVATION_PII_KEY_BASE64",
+                "RESERVATION_PII_KEY_VERSION",
+                "RESERVATION_PII_KEYRING_JSON",
+                "RESERVATION_GUEST_NAME_PEPPER",
+                "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
+                "SCHEDULER_INVOKE_SECRET",
+                "CORS_ORIGINS",
+              ].map((name) => [
+                name,
+                {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["configured"],
+                  properties: { configured: { type: "boolean" } },
+                },
+              ]),
+            ),
+          },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperDatabaseStatus: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "databaseReachable",
+          "currentMigration",
+          "currentMigrationVersion",
+          "expectedMigration",
+          "migrationDrift",
+          "rlsMissingCount",
+          "rlsValid",
+          "criticalRpcs",
+          "rowCounts",
+          "environment",
+          "projectRef",
+          "checkedAt",
+        ],
+        properties: {
+          databaseReachable: { type: "boolean" },
+          currentMigration: {
+            type: ["string", "null"],
+            pattern: "^[a-z][a-z0-9_]{2,100}$",
+          },
+          currentMigrationVersion: {
+            type: ["string", "null"],
+            pattern: "^[0-9]{14}$",
+            description:
+              "현재 환경이 부여한 원격 migration version. source identity로 사용하지 않습니다.",
+          },
+          expectedMigration: {
+            type: "string",
+            pattern: "^[a-z][a-z0-9_]{2,100}$",
+          },
+          migrationDrift: {
+            type: "string",
+            enum: ["ahead", "equal", "behind", "unknown"],
+          },
+          rlsMissingCount: { type: "integer", minimum: 0 },
+          rlsValid: { type: "boolean" },
+          criticalRpcs: {
+            type: "object",
+            additionalProperties: { type: "boolean" },
+          },
+          rowCounts: {
+            type: "object",
+            additionalProperties: false,
+            required: ["profiles", "rooms", "auditEventsEstimate"],
+            properties: {
+              profiles: { type: "integer", minimum: 0 },
+              rooms: { type: "integer", minimum: 0 },
+              auditEventsEstimate: {
+                type: "integer",
+                minimum: 0,
+                description:
+                  "append-only 감사 원장의 catalog 추정치. dashboard를 위해 전체 count scan을 하지 않습니다.",
+              },
+            },
+          },
+          environment: {
+            type: "string",
+            enum: ["production", "recovery", "local", "unknown"],
+          },
+          projectRef: { type: "string" },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperSchedulerStatus: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "status",
+          "cronCatalogAvailable",
+          "cronConfigured",
+          "cronActive",
+          "cadence",
+          "schedulerActorConfigured",
+          "schedulerActorValid",
+          "invokeSecretConfigured",
+          "lastCronRun",
+          "lastHeartbeat",
+          "checkedAt",
+        ],
+        properties: {
+          status: {
+            type: "string",
+            enum: [
+              "not_configured",
+              "actor_invalid",
+              "awaiting_first_run",
+              "degraded",
+              "healthy",
+            ],
+          },
+          cronCatalogAvailable: { type: "boolean" },
+          cronConfigured: { type: "boolean" },
+          cronActive: { type: "boolean" },
+          cadence: { type: ["string", "null"] },
+          schedulerActorConfigured: { type: "boolean" },
+          schedulerActorValid: { type: "boolean" },
+          invokeSecretConfigured: { type: "boolean" },
+          lastCronRun: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: {
+              status: { type: "string" },
+              startedAt: { type: ["string", "null"], format: "date-time" },
+              endedAt: { type: ["string", "null"], format: "date-time" },
+            },
+          },
+          lastHeartbeat: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: {
+              invocationKey: { type: "string" },
+              scheduledAt: { type: "string", format: "date-time" },
+              status: { type: "string", enum: ["succeeded", "failed"] },
+              transitionCount: { type: ["integer", "null"], minimum: 0 },
+              errorCode: { type: ["string", "null"] },
+              attemptCount: { type: "integer", minimum: 1 },
+              completedAt: { type: "string", format: "date-time" },
+            },
+          },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperAuditEvent: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "eventType",
+          "entityType",
+          "entityId",
+          "actorProfileId",
+          "actorDisplayName",
+          "effectiveAt",
+          "recordedAt",
+          "reasonCode",
+          "summary",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          eventType: { $ref: "#/components/schemas/DeveloperAuditEventType" },
+          entityType: { type: "string" },
+          entityId: { type: ["string", "null"], format: "uuid" },
+          actorProfileId: { type: ["string", "null"], format: "uuid" },
+          actorDisplayName: { type: ["string", "null"] },
+          effectiveAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+          reasonCode: { type: ["string", "null"] },
+          summary: {
+            type: "object",
+            description:
+              "이벤트 종류별로 서버가 승인한 표시 필드만 포함하며 raw before_state/after_state는 반환하지 않습니다.",
+            additionalProperties: false,
+            properties: {
+              displayName: { type: "string" },
+              loginId: { type: "string" },
+              role: { $ref: "#/components/schemas/AppRole" },
+              status: { type: "string" },
+              mustChangePassword: { type: "boolean" },
+              maidProfileId: { type: "string", format: "uuid" },
+              weekStart: { type: "string", format: "date" },
+              version: { type: "integer", minimum: 0 },
+              sourceVersion: { type: "integer", minimum: 0 },
+              approvedVersionId: { type: "string", format: "uuid" },
+              roomId: { type: "string", format: "uuid" },
+              checkInAt: { type: "string", format: "date-time" },
+              checkOutAt: { type: "string", format: "date-time" },
+              purgedCount: { type: "integer", minimum: 0 },
+              reservationId: { type: "string", format: "uuid" },
+              cleaningKind: { type: "string" },
+              serviceDate: { type: "string", format: "date" },
+              availableFrom: { type: "string", format: "date-time" },
+              dueAt: { type: "string", format: "date-time" },
+              roomTypeId: { type: "string" },
+              elevatorZone: { type: "string" },
+              dataStatus: { type: "string" },
+              stateVersion: { type: "integer", minimum: 0 },
+              blockId: { type: "string", format: "uuid" },
+              active: { type: "boolean" },
+              count: { type: "integer", minimum: 0 },
+              issueId: { type: "string", format: "uuid" },
+              category: { type: "string" },
+              severity: { type: "string" },
+              blocksGuestAssignment: { type: "boolean" },
+              pinSyncEventId: { type: "string", format: "uuid" },
+              syncStatus: { type: "string" },
+              pinVersion: { type: "integer", minimum: 0 },
+            },
+          },
+        },
+      },
+      DeveloperAuditPage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["events", "nextCursor"],
+        properties: {
+          events: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DeveloperAuditEvent" },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            description: "다음 페이지 요청에 그대로 전달할 opaque cursor",
+          },
+        },
+      },
+      ActivityCategory: {
+        type: "string",
+        enum: ["auth", "authorization", "sensitive_access"],
+      },
+      ActivityEventType: {
+        type: "string",
+        enum: [
+          "auth.login_succeeded",
+          "auth.login_failed",
+          "authorization.denied",
+          "sensitive.read",
+        ],
+      },
+      ActivityOutcome: {
+        type: "string",
+        enum: ["succeeded", "failed", "denied"],
+      },
+      DeveloperActivityEvent: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "category",
+          "eventType",
+          "outcome",
+          "actorProfileId",
+          "actorRole",
+          "source",
+          "resourceType",
+          "resourceId",
+          "reasonCode",
+          "requestId",
+          "occurredAt",
+          "recordedAt",
+          "summary",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          category: { $ref: "#/components/schemas/ActivityCategory" },
+          eventType: { $ref: "#/components/schemas/ActivityEventType" },
+          outcome: { $ref: "#/components/schemas/ActivityOutcome" },
+          actorProfileId: { type: ["string", "null"], format: "uuid" },
+          actorRole: {
+            anyOf: [{ $ref: "#/components/schemas/AppRole" }, { type: "null" }],
+          },
+          source: {
+            type: "string",
+            description: "소스 코드에 고정된 capability category",
+          },
+          resourceType: { type: ["string", "null"] },
+          resourceId: { type: ["string", "null"], format: "uuid" },
+          reasonCode: { type: ["string", "null"] },
+          requestId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "개별 이벤트에만 존재하는 Edge 생성 UUID v4입니다. caller X-Request-ID나 세션 ID가 아닙니다.",
+          },
+          occurredAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+          summary: {
+            type: "object",
+            additionalProperties: false,
+            description:
+              "unknown login과 authorization denial aggregate에 count/lastOccurredAt/bucketMinutes를 반환합니다.",
+            properties: {
+              aggregateCount: { type: "integer", minimum: 1, maximum: 600 },
+              lastOccurredAt: { type: "string", format: "date-time" },
+              bucketMinutes: { const: 1 },
+            },
+          },
+        },
+      },
+      DeveloperActivityPage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["events", "nextCursor"],
+        properties: {
+          events: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DeveloperActivityEvent" },
+          },
+          nextCursor: { type: ["string", "null"] },
+        },
+      },
+      DeveloperDiagnostics: {
+        type: "object",
+        additionalProperties: false,
+        required: ["status", "checks", "checkedAt"],
+        properties: {
+          status: { type: "string", enum: ["passed", "degraded"] },
+          checks: {
+            type: "array",
+            maxItems: 8,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "status"],
+              properties: {
+                id: { type: "string" },
+                status: {
+                  type: "string",
+                  enum: ["passed", "failed", "timed_out"],
+                },
+                errorCode: { type: "string" },
+                detail: { type: "object", additionalProperties: true },
+              },
+            },
+          },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperOverview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "generatedAt",
+          "accounts",
+          "rooms",
+          "auditEventsLast24Hours",
+          "runtime",
+          "database",
+          "scheduler",
+        ],
+        properties: {
+          generatedAt: { type: "string", format: "date-time" },
+          accounts: {
+            type: "object",
+            additionalProperties: false,
+            required: ["total", "active", "byRole"],
+            properties: {
+              total: { type: "integer", minimum: 0 },
+              active: { type: "integer", minimum: 0 },
+              byRole: {
+                type: "object",
+                additionalProperties: false,
+                required: ["developer", "admin", "maid"],
+                properties: {
+                  developer: { type: "integer", minimum: 0 },
+                  admin: { type: "integer", minimum: 0 },
+                  maid: { type: "integer", minimum: 0 },
+                },
+              },
+            },
+          },
+          rooms: {
+            type: "object",
+            additionalProperties: false,
+            required: ["total"],
+            properties: { total: { type: "integer", minimum: 0 } },
+          },
+          auditEventsLast24Hours: { type: "integer", minimum: 0 },
+          runtime: { $ref: "#/components/schemas/DeveloperRuntimeStatus" },
+          database: { $ref: "#/components/schemas/DeveloperDatabaseStatus" },
+          scheduler: { $ref: "#/components/schemas/DeveloperSchedulerStatus" },
+        },
+      },
+      AvailabilityDay: {
+        type: "object",
+        additionalProperties: false,
+        required: ["workDate", "available"],
+        properties: {
+          workDate: {
+            type: "string",
+            format: "date",
+            description: "대상 주차의 근무 날짜",
+          },
+          available: {
+            type: "boolean",
+            description: "해당 날짜 근무 가능 여부",
+          },
+        },
+      },
+      AvailabilityVersion: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "maidProfileId",
+          "weekStart",
+          "version",
+          "status",
+          "current",
+          "submittedAt",
+          "days",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          maidProfileId: {
+            type: "string",
+            format: "uuid",
+            description: "가능일을 제출한 메이드 profile ID",
+          },
+          weekStart: {
+            type: "string",
+            format: "date",
+            description: "대상 주의 월요일",
+          },
+          version: {
+            type: "integer",
+            minimum: 1,
+            description: "다음 변경 요청의 expectedVersion으로 사용할 CAS 값",
+          },
+          status: {
+            type: "string",
+            enum: ["submitted", "superseded"],
+            description: "제출 version의 이력 상태",
+          },
+          current: {
+            type: "boolean",
+            description: "해당 메이드·주차의 현재 version 여부",
+          },
+          submittedAt: { type: "string", format: "date-time" },
+          days: {
+            type: "array",
+            minItems: 7,
+            maxItems: 7,
+            items: { $ref: "#/components/schemas/AvailabilityDay" },
+            description: "월요일부터 일요일까지 날짜순 7개 projection",
+          },
+        },
+      },
+      AvailabilityChangeRequestStatus: {
+        type: "string",
+        enum: ["pending", "approved", "rejected"],
+      },
+      AvailabilityChangeRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "availabilityVersionId",
+          "maidProfileId",
+          "weekStart",
+          "sourceVersion",
+          "requestedAvailableDates",
+          "reasonCode",
+          "status",
+          "requestedAt",
+          "decidedBy",
+          "decidedAt",
+          "decisionReasonCode",
+          "approvedVersionId",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          availabilityVersionId: {
+            type: "string",
+            format: "uuid",
+            description: "요청이 기준으로 삼은 가능일 version ID",
+          },
+          maidProfileId: { type: "string", format: "uuid" },
+          weekStart: { type: "string", format: "date" },
+          sourceVersion: {
+            type: "integer",
+            minimum: 1,
+            description: "요청 생성 시점의 CAS version",
+          },
+          requestedAvailableDates: {
+            type: "array",
+            maxItems: 7,
+            uniqueItems: true,
+            items: { type: "string", format: "date" },
+          },
+          reasonCode: {
+            type: "string",
+            pattern: "^[A-Z0-9_]{2,80}$",
+            description: "메이드가 제출한 변경 사유 코드",
+          },
+          status: {
+            $ref: "#/components/schemas/AvailabilityChangeRequestStatus",
+          },
+          requestedAt: { type: "string", format: "date-time" },
+          decidedBy: { type: ["string", "null"], format: "uuid" },
+          decidedAt: { type: ["string", "null"], format: "date-time" },
+          decisionReasonCode: {
+            type: ["string", "null"],
+            pattern: "^[A-Z0-9_]{2,80}$",
+          },
+          approvedVersionId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description: "승인으로 생성된 새 version ID. 반려·대기 중에는 null",
+          },
+        },
+      },
+      AvailabilityCandidate: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "workDate",
+          "weekStart",
+          "availabilityVersion",
+          "maidProfileId",
+          "displayName",
+        ],
+        properties: {
+          workDate: { type: "string", format: "date" },
+          weekStart: { type: "string", format: "date" },
+          availabilityVersion: { type: "integer", minimum: 1 },
+          maidProfileId: { type: "string", format: "uuid" },
+          displayName: {
+            type: "string",
+            description: "현재 메이드 표시 이름",
+          },
+        },
+      },
+      AvailabilitySubmissionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["weekStart", "availableDates", "expectedVersion"],
+        properties: {
+          weekStart: {
+            type: "string",
+            format: "date",
+            description: "다음 주 월요일",
+          },
+          availableDates: {
+            type: "array",
+            maxItems: 7,
+            uniqueItems: true,
+            items: { type: "string", format: "date" },
+            description: "근무 가능한 날짜만 전달. 빈 배열은 전일 불가능",
+          },
+          expectedVersion: {
+            type: "integer",
+            minimum: 0,
+            description: "최초 제출은 0, 재제출은 현재 version",
+          },
+        },
+      },
+      AvailabilityChangeRequestInput: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "weekStart",
+          "requestedAvailableDates",
+          "reasonCode",
+          "expectedVersion",
+        ],
+        properties: {
+          weekStart: { type: "string", format: "date" },
+          requestedAvailableDates: {
+            type: "array",
+            maxItems: 7,
+            uniqueItems: true,
+            items: { type: "string", format: "date" },
+          },
+          reasonCode: {
+            type: "string",
+            pattern: "^[A-Z0-9_]{2,80}$",
+          },
+          expectedVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      AvailabilityDecisionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["decision", "reasonCode", "expectedVersion"],
+        properties: {
+          decision: {
+            type: "string",
+            enum: ["approved", "rejected"],
+          },
+          reasonCode: {
+            type: "string",
+            pattern: "^[A-Z0-9_]{2,80}$",
+          },
+          expectedVersion: {
+            type: "integer",
+            minimum: 1,
+            description: "요청의 sourceVersion과 비교할 CAS 값",
+          },
+        },
+      },
+      ReasonCode: {
+        type: "string",
+        pattern: "^[A-Z0-9_]{2,80}$",
+        description: "서버·감사 이력에 사용하는 안정적인 영문 사유 코드",
+      },
+      ReservationStatus: {
+        type: "string",
+        enum: ["active", "cancelled", "checked_out"],
+        description: "예약 일정 상태. 점유·청소 상태와 합치지 않습니다.",
+      },
+      Reservation: {
+        type: "object",
+        additionalProperties: false,
+        required: reservationRequired,
+        properties: reservationProperties,
+        description:
+          "목록과 mutation 응답에 사용하는 예약 projection입니다. guestName과 암호문은 이 schema에 없습니다.",
+      },
+      ReservationDetail: {
+        type: "object",
+        additionalProperties: false,
+        required: [...reservationRequired, "guestName"],
+        properties: {
+          ...reservationProperties,
+          guestName: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 80,
+            description:
+              "암호화 보존 기간 내의 고객명. active business admin 단건 조회에서만 복호화됩니다.",
+          },
+        },
+      },
+      ReservationCreateRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "checkInAt",
+          "checkOutAt",
+          "guestCount",
+          "expectedRoomVersion",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
+          guestName: { type: ["string", "null"], minLength: 1, maxLength: 80 },
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      ReservationChangeRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "checkInAt",
+          "checkOutAt",
+          "guestCount",
+          "expectedVersion",
+          "reasonCode",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
+          guestName: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 80,
+            description: "생략하면 유지, null이면 삭제, 문자열이면 재암호화",
+          },
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ReservationMutationRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion", "reasonCode"],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ManualCleaningRequestCreate: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "cleaningKind",
+          "serviceDate",
+          "availableFrom",
+          "expectedRoomVersion",
+          "reasonCode",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          reservationId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description: "stayover에서 필수, additional에서는 일반적으로 null",
+          },
+          cleaningKind: { type: "string", enum: ["stayover", "additional"] },
+          serviceDate: { type: "string", format: "date" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ManualCleaningRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "roomId",
+          "reservationId",
+          "cleaningKind",
+          "status",
+          "serviceDate",
+          "availableFrom",
+          "dueAt",
+          "version",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          reservationId: { type: ["string", "null"], format: "uuid" },
+          cleaningKind: { type: "string", enum: ["stayover", "additional"] },
+          status: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+          version: { type: "integer", minimum: 1 },
+        },
+      },
+      ReservationTransitionResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "asOf",
+          "checkedInCount",
+          "checkedOutCount",
+          "blockedCheckInCount",
+          "purgedGuestNameCount",
+        ],
+        properties: {
+          asOf: { type: "string", format: "date-time" },
+          checkedInCount: { type: "integer", minimum: 0 },
+          checkedOutCount: { type: "integer", minimum: 0 },
+          blockedCheckInCount: { type: "integer", minimum: 0 },
+          purgedGuestNameCount: { type: "integer", minimum: 0 },
+        },
+      },
       RoomReasonCode: {
         type: "string",
         enum: [
@@ -718,6 +2422,7 @@ export const openApiDocument = {
       },
       RoomProjection: {
         type: "object",
+        additionalProperties: false,
         required: [
           "id",
           "roomNumber",
@@ -795,9 +2500,475 @@ export const openApiDocument = {
           },
         },
       },
+      RoomMasterDataRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomTypeId",
+          "elevatorZone",
+          "dataStatus",
+          "expectedVersion",
+          "reasonCode",
+        ],
+        properties: {
+          roomTypeId: { type: "string", format: "uuid" },
+          elevatorZone: {
+            type: ["string", "null"],
+            enum: ["A", "B", "C", null],
+          },
+          dataStatus: {
+            type: "string",
+            enum: ["verified", "verification_required"],
+          },
+          dataStatusReason: {
+            type: ["string", "null"],
+            minLength: 2,
+            maxLength: 200,
+            description:
+              "verification_required일 때 필요한 운영 사유. 앞뒤 공백은 제거됩니다.",
+          },
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+        },
+      },
+      RoomOperationDecisionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedRoomVersion", "reasonCode"],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+        },
+      },
+      RoomOperationBlockRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedRoomVersion", "reasonCode"],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          startsAt: { type: "string", format: "date-time" },
+          endsAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      RoomCandleRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedRoomVersion", "reasonCode", "count"],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          count: { type: "integer", minimum: 0 },
+          physicallyVerified: { type: "boolean", default: false },
+        },
+      },
+      RoomIssueRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "expectedRoomVersion",
+          "reasonCode",
+          "category",
+          "severity",
+          "blocksGuestAssignment",
+        ],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          category: { type: "string", pattern: "^[A-Z0-9_]{2,80}$" },
+          severity: { type: "string", enum: ["info", "warning", "critical"] },
+          blocksGuestAssignment: { type: "boolean" },
+          description: {
+            type: "string",
+            maxLength: 500,
+            description:
+              "선택적 운영 설명. 전화번호·이메일은 허용하지 않습니다.",
+          },
+        },
+      },
+      RoomPinSyncRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedRoomVersion", "reasonCode", "syncStatus"],
+        properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          syncStatus: {
+            type: "string",
+            enum: ["verified", "mismatch", "unconfigured"],
+          },
+          pinVersion: { type: ["integer", "null"], minimum: 1 },
+        },
+        description:
+          "PIN 원문·door code·credential·provider secret은 요청할 수 없습니다.",
+      },
+      RoomCommandReasonCode: {
+        type: "string",
+        pattern: "^[A-Z0-9_]{2,80}$",
+        description: "감사 이력에 남는 소스 제어 가능한 안정적 사유 코드",
+      },
+      RoomOperationResult: {
+        type: "object",
+        additionalProperties: false,
+        required: ["entityId", "roomId", "roomStateVersion", "recordedAt"],
+        properties: {
+          entityId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
     },
   },
 } as const;
+
+function roomIdParameter(): Record<string, unknown> {
+  return {
+    name: "roomId",
+    in: "path",
+    required: true,
+    schema: { type: "string", format: "uuid" },
+    description: "불변 객실 ID",
+  };
+}
+
+function roomEntityIdParameter(
+  name: "blockId" | "issueId",
+  description: string,
+): Record<string, unknown> {
+  return {
+    name,
+    in: "path",
+    required: true,
+    schema: { type: "string", format: "uuid" },
+    description,
+  };
+}
+
+function roomReadResponses(): Record<string, unknown> {
+  return {
+    "200": {
+      description: "객실 운영 projection",
+      headers: { "Cache-Control": noStoreHeader },
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["room"],
+            properties: {
+              room: { $ref: "#/components/schemas/RoomProjection" },
+            },
+          },
+        },
+      },
+    },
+    "400": errorResponse,
+    "401": errorResponse,
+    "403": errorResponse,
+    "404": errorResponse,
+    "500": errorResponse,
+  };
+}
+
+function roomMutationOperation(
+  operationId: string,
+  summary: string,
+  requestSchema: string,
+  responseKey: "room" | "operation",
+  successStatus: 200 | 201,
+  description: string,
+  entityParameter?: Record<string, unknown>,
+): Record<string, unknown> {
+  const responseSchema = responseKey === "room"
+    ? "#/components/schemas/RoomProjection"
+    : "#/components/schemas/RoomOperationResult";
+  return {
+    tags: ["Rooms"],
+    operationId,
+    summary,
+    description:
+      `${description} 비밀번호 변경을 완료한 active business admin만 실행할 수 있고, Idempotency-Key 재시도와 expected version CAS를 적용합니다.`,
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": ["admin"],
+    parameters: [
+      roomIdParameter(),
+      ...(entityParameter ? [entityParameter] : []),
+      idempotencyHeader,
+    ],
+    requestBody: {
+      required: true,
+      content: {
+        "application/json": {
+          schema: { $ref: `#/components/schemas/${requestSchema}` },
+        },
+      },
+    },
+    responses: {
+      [String(successStatus)]: {
+        description: `${summary} 완료`,
+        headers: { "Cache-Control": noStoreHeader },
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: [responseKey],
+              properties: { [responseKey]: { $ref: responseSchema } },
+            },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "404": errorResponse,
+      "409": errorResponse,
+      "500": errorResponse,
+    },
+  };
+}
+
+function reservationIdParameter(): Record<string, unknown> {
+  return {
+    name: "reservationId",
+    in: "path",
+    required: true,
+    schema: { type: "string", format: "uuid" },
+    description: "불변 예약 ID",
+  };
+}
+
+function reservationRequestBody(schemaName: string): Record<string, unknown> {
+  return {
+    required: true,
+    content: {
+      "application/json": {
+        schema: { $ref: `#/components/schemas/${schemaName}` },
+      },
+    },
+  };
+}
+
+function reservationObjectResponse(
+  description: string,
+  reference = "#/components/schemas/Reservation",
+): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["reservation"],
+          properties: { reservation: { $ref: reference } },
+        },
+      },
+    },
+  };
+}
+
+function reservationListResponse(): Record<string, unknown> {
+  return {
+    description: "guestName을 포함하지 않는 예약 목록",
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["reservations"],
+          properties: {
+            reservations: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Reservation" },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function reservationMutationResponses(
+  successStatus = 200,
+): Record<string, unknown> {
+  return {
+    [String(successStatus)]: reservationObjectResponse("예약 명령 완료"),
+    "400": errorResponse,
+    "401": errorResponse,
+    "403": errorResponse,
+    "404": errorResponse,
+    "409": errorResponse,
+    "500": errorResponse,
+    "503": errorResponse,
+  };
+}
+
+function cleaningRequestMutationResponses(
+  successStatus = 200,
+): Record<string, unknown> {
+  return {
+    [String(successStatus)]: {
+      description: "수동 청소 요청 명령 완료",
+      headers: { "Cache-Control": noStoreHeader },
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["cleaningRequest"],
+            properties: {
+              cleaningRequest: {
+                $ref: "#/components/schemas/ManualCleaningRequest",
+              },
+            },
+          },
+        },
+      },
+    },
+    "400": errorResponse,
+    "401": errorResponse,
+    "403": errorResponse,
+    "404": errorResponse,
+    "409": errorResponse,
+    "500": errorResponse,
+  };
+}
+
+function reservationCommandPath(
+  operationId: string,
+  summary: string,
+  description: string,
+): Record<string, unknown> {
+  return {
+    post: {
+      tags: ["Reservations"],
+      operationId,
+      summary,
+      description,
+      security: [{ bearerAuth: [] }],
+      "x-required-roles": ["admin"],
+      parameters: [reservationIdParameter(), idempotencyHeader],
+      requestBody: reservationRequestBody("ReservationMutationRequest"),
+      responses: reservationMutationResponses(),
+    },
+  };
+}
+
+function availabilityListResponse(): Record<string, unknown> {
+  return availabilityArrayResponse(
+    "현재 가능일 version 목록",
+    "availability",
+    "#/components/schemas/AvailabilityVersion",
+  );
+}
+
+function availabilityChangeListResponse(): Record<string, unknown> {
+  return availabilityArrayResponse(
+    "가능일 변경 요청 목록",
+    "changeRequests",
+    "#/components/schemas/AvailabilityChangeRequest",
+  );
+}
+
+function availabilityCandidateListResponse(): Record<string, unknown> {
+  return availabilityArrayResponse(
+    "배정 가능한 active maid 후보 목록",
+    "candidates",
+    "#/components/schemas/AvailabilityCandidate",
+  );
+}
+
+function availabilityArrayResponse(
+  description: string,
+  property: string,
+  itemReference: string,
+): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: [property],
+          properties: {
+            [property]: {
+              type: "array",
+              items: { $ref: itemReference },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function availabilityItemResponse(
+  description: string,
+): Record<string, unknown> {
+  return availabilityObjectResponse(
+    description,
+    "availability",
+    "#/components/schemas/AvailabilityVersion",
+  );
+}
+
+function availabilityChangeResponse(
+  description: string,
+): Record<string, unknown> {
+  return availabilityObjectResponse(
+    description,
+    "changeRequest",
+    "#/components/schemas/AvailabilityChangeRequest",
+  );
+}
+
+function availabilityObjectResponse(
+  description: string,
+  property: string,
+  reference: string,
+): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: [property],
+          properties: { [property]: { $ref: reference } },
+        },
+      },
+    },
+  };
+}
+
+function developerResponse(
+  description: string,
+  property: string,
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: [property],
+          properties: { [property]: schema },
+        },
+      },
+    },
+  };
+}
 
 function accountMutationDescription(
   operationId: string,

@@ -173,7 +173,7 @@ describe('application', () => {
     const app = await buildApp({
       env: {
         ...env,
-        RESERVATION_SCHEDULER_ACTOR_PROFILE_ID: '72000000-0000-4000-8000-000000000001'
+        RESERVATION_SCHEDULER_ACTOR_PROFILE_ID: 'profile-1'
       },
       services: appServices,
       logger: false
@@ -183,11 +183,44 @@ describe('application', () => {
 
     expect(appServices.reservations.processDue).toHaveBeenCalledWith(
       expect.objectContaining({
-        profileId: '72000000-0000-4000-8000-000000000001',
+        profileId: 'profile-1',
         role: 'admin'
       }),
       expect.stringMatching(/^reservation-scheduler-/)
     );
+    const schedulerKey = String(
+      (appServices.reservations.processDue as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]
+    );
+    const manualResponse = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/transitions/process',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': schedulerKey
+      }
+    });
+
+    expect(manualResponse.statusCode).toBe(400);
+    expect(manualResponse.json().error.code).toBe('RESERVED_IDEMPOTENCY_KEY');
+    expect(appServices.reservations.processDue).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('rejects the scheduler idempotency namespace on the manual transition route', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/transitions/process',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'reservation-scheduler-202609010430'
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('RESERVED_IDEMPOTENCY_KEY');
+    expect(appServices.reservations.processDue).not.toHaveBeenCalled();
     await app.close();
   });
 

@@ -56,8 +56,26 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+function transitionCount(value: unknown): number | null {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    return null;
+  }
+  const result = value as Record<string, unknown>;
+  const counts = [
+    result.checked_in_count,
+    result.checked_out_count,
+    result.blocked_check_in_count,
+    result.purged_guest_name_count,
+  ];
+  if (counts.some((count) => typeof count !== "number" || count < 0)) {
+    return null;
+  }
+  return (counts as number[]).reduce((sum, count) => sum + count, 0);
+}
+
 Deno.serve(async (request) => {
   const id = requestId(request);
+  const startedAt = new Date();
   try {
     if (request.method !== "POST") {
       throw new EdgeError(405, "METHOD_NOT_ALLOWED", "POST 요청만 허용합니다.");
@@ -98,26 +116,73 @@ Deno.serve(async (request) => {
         "scheduler 실행 시각이 올바르지 않습니다.",
       );
     }
-    const bucket = scheduledAt.toISOString().slice(0, 16).replace(/[-:T]/g, "");
+    const scheduledBucketAt = new Date(scheduledAt);
+    scheduledBucketAt.setUTCSeconds(0, 0);
+    const bucket = scheduledBucketAt.toISOString().slice(0, 16).replace(
+      /[-:T]/g,
+      "",
+    );
+    const invocationKey = `reservation-scheduler-${bucket}`;
     const clients = createEdgeClients();
     const { data, error } = await clients.admin.rpc(
       "process_due_reservation_transitions",
       {
         p_actor_profile_id: actorProfileId,
         p_as_of: new Date().toISOString(),
-        p_idempotency_key: `reservation-scheduler-${bucket}`,
+        p_idempotency_key: invocationKey,
         p_request_hash: await requestHash(),
       },
     );
     if (error || !data) {
+      const { error: heartbeatError } = await clients.admin.rpc(
+        "record_scheduler_heartbeat",
+        {
+          p_actor_profile_id: actorProfileId,
+          p_invocation_key: invocationKey,
+          p_scheduled_at: scheduledBucketAt.toISOString(),
+          p_status: "failed",
+          p_transition_count: null,
+          p_error_code: "RESERVATION_SCHEDULER_FAILED",
+          p_started_at: startedAt.toISOString(),
+          p_completed_at: new Date().toISOString(),
+          p_request_id: id,
+        },
+      );
       console.error("Reservation scheduler RPC failed", {
         requestId: id,
         code: error?.code,
+        heartbeatCode: heartbeatError?.code,
       });
       throw new EdgeError(
         500,
         "RESERVATION_SCHEDULER_FAILED",
         "예약 전이 scheduler를 실행하지 못했습니다.",
+      );
+    }
+
+    const { error: heartbeatError } = await clients.admin.rpc(
+      "record_scheduler_heartbeat",
+      {
+        p_actor_profile_id: actorProfileId,
+        p_invocation_key: invocationKey,
+        p_scheduled_at: scheduledBucketAt.toISOString(),
+        p_status: "succeeded",
+        p_transition_count: transitionCount(data),
+        p_error_code: null,
+        p_started_at: startedAt.toISOString(),
+        p_completed_at: new Date().toISOString(),
+        p_request_id: id,
+      },
+    );
+    if (heartbeatError) {
+      console.error("Reservation scheduler heartbeat failed", {
+        requestId: id,
+        code: heartbeatError.code,
+      });
+      throw new EdgeError(
+        500,
+        "SCHEDULER_HEARTBEAT_FAILED",
+        "scheduler 실행 상태를 기록하지 못했습니다.",
       );
     }
 
