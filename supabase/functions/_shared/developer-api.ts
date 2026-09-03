@@ -572,22 +572,59 @@ function diagnosticResult(
   };
 }
 
+function invalidDiagnosticBody(): never {
+  throw new EdgeError(
+    400,
+    "VALIDATION_ERROR",
+    "진단 API는 요청 본문을 받지 않습니다.",
+  );
+}
+
+export async function assertEmptyDiagnosticRequestBody(
+  request: Request,
+): Promise<void> {
+  const contentLength = request.headers.get("content-length")?.trim();
+  if (
+    contentLength !== undefined &&
+    (!/^\d+$/.test(contentLength) || Number(contentLength) > 0)
+  ) {
+    invalidDiagnosticBody();
+  }
+  if (request.body === null) {
+    return;
+  }
+
+  const reader = request.body.getReader();
+  let hasBodyChunk = false;
+  let streamEnded = false;
+  try {
+    for (let emptyChunks = 0; emptyChunks < 8; emptyChunks += 1) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        streamEnded = true;
+        break;
+      }
+      if ((chunk.value?.byteLength ?? 0) > 0) {
+        hasBodyChunk = true;
+        break;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  if (hasBodyChunk || !streamEnded) {
+    invalidDiagnosticBody();
+  }
+}
+
 export async function runDeveloperDiagnostics(
   request: Request,
   clients: EdgeClients,
   actor: EdgeActor,
 ): Promise<Record<string, unknown>> {
   requireDeveloper(actor);
-  const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (
-    request.body !== null || Number.isFinite(contentLength) && contentLength > 0
-  ) {
-    throw new EdgeError(
-      400,
-      "VALIDATION_ERROR",
-      "진단 API는 요청 본문을 받지 않습니다.",
-    );
-  }
+  await assertEmptyDiagnosticRequestBody(request);
 
   const { data: limitData, error: limitError } = await clients.admin.rpc(
     "consume_developer_diagnostic_limit",
