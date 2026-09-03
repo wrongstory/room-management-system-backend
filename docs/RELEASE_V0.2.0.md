@@ -165,12 +165,21 @@ GitHub Pages를 사용한다. 실행 HTTP 계약의 최종 정본은 계속 prod
 - [x] release acceptance exceptions 기록
 - [ ] 운영 활성화 docs-only PR required CI·독립 리뷰 P0/P1=0
 - [ ] docs-only PR `main` 병합
-- [ ] release PR #62의 Pages fail-closed 변경과 hotfix #64를 별도 PR로 `dev`에 역반영
+- [ ] PR #65 `main` 병합 후 별도 backport PR로 다음 변경을 모두 `dev`에 역반영
+  1. release PR #62의 Pages fail-closed 보강
+  2. hotfix #64 diagnostics 수정
+  3. PR #65의 최종 운영 활성화 문서
+     - `docs/API_STATUS_MATRIX.md`
+     - `docs/RELEASE_V0.2.0.md`
+- [ ] backport 후 `dev`의 production snapshot이 `main`과 동일함을 확인
+- [ ] backport PR required CI PASS
 - [ ] Issue #24 최종 gate 완료
 - [ ] `v0.2.0` annotated tag
 - [ ] GitHub Release
 
 Issue #24는 tag/Release 직전까지 Open으로 유지한다. 이 문서 PR은 코드, migration, API schema 또는
 production runtime을 변경하지 않는다. 2026-09-03 비교에서 `main`에는 `dev@2adb7a7d`에 없는
-release Pages 보강 5개 파일과 diagnostics hotfix 2개 파일이 확인됐다. 일반 release/hotfix 정책에
-따라 별도 backport PR로 `dev`에 반영하기 전에는 source 정합성 gate를 완료 처리하지 않는다.
+release Pages 보강 5개 파일과 diagnostics hotfix 2개 파일이 확인됐다. PR #65가 `main`에 병합되면
+이 두 변경뿐 아니라 위 최종 운영 활성화 문서 2개도 같은 별도 backport PR로 `dev`에 반영한다.
+세 범위가 모두 반영되어 `dev`의 production snapshot이 `main`과 동일하고 required CI가 PASS하기
+전에는 source 정합성 gate를 완료하거나 `v0.2.0` tag/GitHub Release를 발행하지 않는다.

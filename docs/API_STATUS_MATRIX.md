@@ -82,7 +82,10 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
   OpenAPI path·operationId 집합 비교가 PASS했다.
 - `main` production source는 정상이나 `dev@2adb7a7d`에는 release PR #62의 Pages
   fail-closed 보강 5개 파일과 hotfix #64의 diagnostics 2개 파일이 아직 역반영되지 않았다.
-  tag 전 별도 backport PR로 `dev`에 반영해야 하며 이 docs-only PR에 코드를 섞지 않는다.
+  PR #65가 `main`에 병합되면 이 문서와 `RELEASE_V0.2.0.md`의 최종 운영 활성화 기록도
+  함께 역반영해야 한다. tag 전 별도 backport PR에서 세 범위를 모두 `dev`에 반영하고,
+  `dev`의 production snapshot이 `main`과 동일하며 required CI가 PASS했는지 확인한다.
+  이 docs-only PR에는 backport 코드 변경을 섞지 않는다.
 - production `/docs`는 HTTP 200이지만 hosted 기본 domain의 HTML 렌더링 제약 때문에
   사람용 문서는 GitHub Pages 포털을 사용한다.
 
@@ -358,8 +361,12 @@ production completeness 기준의 정본 순서다.
 14. [x] Cron heartbeat/audit/idempotency smoke
 15. [x] GitHub Pages workflow 수동 실행 및 공개 portal/openapi snapshot smoke
 16. [ ] 운영 활성화 문서 PR 독립 리뷰·`main` 병합
-17. [ ] release PR #62 Pages 보강과 hotfix #64를 별도 PR로 `dev`에 역반영
-18. [ ] `v0.2.0` annotated tag / GitHub Release
+17. [ ] PR #65 `main` 병합 후 별도 backport PR로 아래 변경을 모두 `dev`에 역반영
+    - release PR #62 Pages fail-closed 보강
+    - hotfix #64 diagnostics 수정
+    - PR #65의 `docs/API_STATUS_MATRIX.md`·`docs/RELEASE_V0.2.0.md` 최종 운영 활성화 문서
+18. [ ] backport 후 `dev` production snapshot과 `main` 일치 + required CI PASS
+19. [ ] `v0.2.0` annotated tag / GitHub Release
 
 ## 14. 이 문서 갱신 규칙
 
