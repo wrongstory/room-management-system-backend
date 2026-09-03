@@ -53,30 +53,38 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-최종 확인: **2026-09-01 KST**
+최종 확인: **2026-09-03 KST**
 
-- 운영 승인 source: `main@2bc6c634ab95c2cdc758df39bb11eb310715575e`
-- 현재 개발 통합 기준 `dev`: `2adb7a7de2474883d892232395295dcf643b20a4`
-- PR #48 / #43 developer 운영 API: `dev` 병합 완료, production 미반영
-- #51 Availability Edge parity: source·독립 리뷰·`dev` 병합 완료, production 미반영
-- #44 Python 운영도구 Phase A: PR #57 독립 리뷰 P0/P1=0 및 `dev` 병합 완료,
-  release artifact와 production 계정 smoke는 미완료
-- #58 Actor Activity / Audit: PR #59 독립 보안/API 재검토 P0/P1=0 및
-  `dev@4c897fa7eceea6cb128c2e0d201569b71b236b25` 병합 완료, production 미반영
-- #52 Reservation Edge parity: 독립 보안/API 재검토 P0/P1=0 및
-  `dev@1275b62bc9d628059433dd926ddcccc0b70e72d5` 병합 완료, production 미반영
-- #53 Room Edge parity: PR #61 독립 보안/API 재검토 P0/P1=0 및
-  `dev@2adb7a7de2474883d892232395295dcf643b20a4` 병합 완료, production 미반영
-- 운영 migration: **17건**
-- 운영 Edge Functions:
-  - `api` version 2 — ACTIVE
-  - `reservation-scheduler` version 2 — ACTIVE
-- production `api` 실제 HTTP operation: **13개**
-- production `api`에는 아직 `/v1/developer/*`, `/v1/availability/*`, `/v1/reservations/*`, 객실 상세/변경 API가 없음
-- business admin: 아직 생성하지 않음
-- scheduler actor/invoke secret: 아직 미설정, `reservation-scheduler` 503 fail-closed가 정상
-- production `/docs`: HTTP route는 존재하고 200이지만 Supabase hosted 기본 domain에서 HTML이 브라우저 Swagger UI로 렌더링되지 않아 사람용 운영 문서로는 사용 제한
-- PR #50 GitHub Pages 읽기 전용 Swagger 포털: source·독립 보안/배포 리뷰 완료, production Pages 미배포
+- 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
+  - v0.2.0 통합 source 승격: `main@2a683fa`
+  - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
+- 개발 통합 source 기준: `dev@2adb7a7de2474883d892232395295dcf643b20a4`
+- 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
+- 운영 Edge Functions readback:
+  - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
+  - `reservation-scheduler` version 8 — ACTIVE, source identity는 위 승인 `main` 기준
+  - version 증가는 source 변경 외 Function Secret 환경 revision도 포함하므로 source identity로 사용하지 않는다.
+- production OpenAPI: **39 paths / 43 operations**, version `0.2.0`
+- active 계정 readback: developer/admin/maid 각각 1명, 모두 `must_change_password=false`
+- developer/admin/maid hosted role smoke와 diagnostics: PASS
+- 객실 121건, 예약 0건. 예약 고객명 대상이 없어 PII 상세 smoke는
+  `SKIPPED_WITH_REASON=NO_GUEST_NAME_RESERVATION`이다.
+- Availability/Reservation/Room의 안전한 read 및 role denial smoke는 PASS다. 운영 데이터를
+  만들거나 바꾸는 성공 mutation smoke는
+  `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`로 v0.2.0 release acceptance
+  exception을 적용한다.
+- scheduler actor/invoke secret과 Vault 2개 항목이 구성됐고 `pg_cron`/`pg_net`이 활성화됐다.
+  job `reservation-transition-every-minute`은 `* * * * *` cadence로 active이며,
+  활성화 gate에서 5회를 관찰했다. 2026-09-03 readback은 **1866/1866 succeeded**,
+  latest HTTP 200, heartbeat succeeded, transition 0, scheduler state `healthy`다.
+- GitHub Pages 읽기 전용 Swagger 포털은 workflow run `33718438975`에서 exact
+  `main@cd635b1`을 배포했다. 공개 portal/OpenAPI/manifest HTTP smoke와 production Edge
+  OpenAPI path·operationId 집합 비교가 PASS했다.
+- `main` production source는 정상이나 `dev@2adb7a7d`에는 release PR #62의 Pages
+  fail-closed 보강 5개 파일과 hotfix #64의 diagnostics 2개 파일이 아직 역반영되지 않았다.
+  tag 전 별도 backport PR로 `dev`에 반영해야 하며 이 docs-only PR에 코드를 섞지 않는다.
+- production `/docs`는 HTTP 200이지만 hosted 기본 domain의 HTML 렌더링 제약 때문에
+  사람용 문서는 GitHub Pages 포털을 사용한다.
 
 ## 3. System / 문서 API
 
@@ -84,8 +92,8 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 |---|---|---|---|---|---|---|---|---|
 | [x] | `GET /health` | public | — | ✅ | ✅ | ✅ | ✅ | production HTTP 200 확인 |
 | [x] | `GET /openapi.json` | public | — | — | ✅ | ✅ | ✅ | production HTTP 계약 정본 |
-| [ ] | `GET /docs` | public | — | — | ✅ | ✅ | ⚠️ | route/200은 존재. hosted domain 브라우저 Swagger UI 사용 불가 |
-| [ ] | GitHub Pages Swagger portal | public read-only | — | — | — | — | ❌ | 별도 정적 배포 source·리뷰 완료. `main` 승격과 Edge hosted smoke 후 수동 deploy 필요 |
+| [ ] | `GET /docs` | public | — | — | ✅ | ✅ | ⚠️ | route/200은 존재. hosted domain 브라우저 Swagger UI 사용 제한 |
+| [x] | GitHub Pages Swagger portal | public read-only | — | — | — | — | ✅ | https://wrongstory.github.io/room-management-system-backend/ 공개 smoke PASS |
 
 GitHub Pages 포털은 Supabase Edge Function이 아닌 별도 정적 배포다. 따라서 위 행의 `Edge source`와 `Production Edge`는 `—`로 두고, source 완료와 production Pages 배포 완료를 비고와 아래 배포 gate에서 구분한다.
 
@@ -93,58 +101,61 @@ GitHub Pages 포털은 Supabase Edge Function이 아닌 별도 정적 배포다.
 
 - [x] 읽기 전용 portal source·build 검증 완료
 - [x] SSRF 경계, CSP/SRI, Try-it-out·Authorization 차단, Pages 최소 권한 독립 리뷰 완료
-- [ ] 승인된 source의 `main` 승격
-- [ ] production Edge OpenAPI 39 paths / 43 operations 확인
-- [ ] GitHub Pages `workflow_dispatch` 수동 실행
-- [ ] 공개 portal과 same-origin OpenAPI snapshot HTTP smoke
+- [x] 승인된 source의 `main@cd635b116f451a39481f496f2bd368776385a409` 승격
+- [x] production Edge OpenAPI 39 paths / 43 operations 확인
+- [x] GitHub Pages `workflow_dispatch` 수동 실행 — run `33718438975`
+- [x] 공개 portal과 same-origin OpenAPI snapshot HTTP smoke
+- [x] Pages와 production Edge의 path set·operationId set 동일
 
 ## 4. Auth API
 
-valid account hosted smoke가 아직 남아 있으므로 production route 배포와 실제 사용 검증을 구분한다.
+developer/admin/maid의 실제 hosted login과 role 경계를 검증했다.
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [ ] | `POST /v1/auth/login` | all accounts | ✅ | ✅ | ✅ | ✅ | ⚠️ | limiter/gateway는 검증됨. developer valid-login smoke 대기 |
-| [ ] | `GET /v1/auth/me` | authenticated | ✅ | ✅ | ✅ | ✅ | ⚠️ | valid developer session hosted smoke 대기 |
-| [ ] | `POST /v1/auth/password` | authenticated | ✅ | ✅ | ✅ | ✅ | ⚠️ | valid account smoke 대기; timeout retry 의미는 후속 #46 |
+| [x] | `POST /v1/auth/login` | all accounts | ✅ | ✅ | ✅ | ✅ | ✅ | developer/admin/maid hosted login PASS |
+| [x] | `GET /v1/auth/me` | authenticated | ✅ | ✅ | ✅ | ✅ | ✅ | 최신 role/session hosted smoke PASS |
+| [x] | `POST /v1/auth/password` | authenticated | ✅ | ✅ | ✅ | ✅ | ✅ | 최초 비밀번호 변경 PASS; timeout retry 의미는 후속 #46 |
 
 ## 5. 계정 관리 API
 
-Edge와 DB 계약은 production에 배포됐지만 developer 실제 로그인 이후 hosted account smoke가 남아 있다. business admin/maid 생성은 #44 Phase A Python 운영도구에서 수행한다.
+Edge와 DB 계약은 production에 배포됐고 Python 운영도구를 통해 business admin/maid를 생성해
+hosted account 경계를 확인했다. 운영에 불필요한 추가 상태변경·초기화는 실행하지 않았다.
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [ ] | `GET /v1/accounts` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | developer hosted smoke 대기 |
-| [ ] | `POST /v1/accounts` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | #44에서 business admin 생성 시 실제 smoke |
-| [ ] | `PATCH /v1/accounts/{profileId}/role` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | developer 생성/승격 금지 |
-| [ ] | `PATCH /v1/accounts/{profileId}/status` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | 마지막 active admin 보호 |
-| [ ] | `POST /v1/accounts/{profileId}/unlock` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | developer 대상 금지 |
-| [ ] | `POST /v1/accounts/{profileId}/password-reset` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | developer는 self-change만 허용 |
+| [x] | `GET /v1/accounts` | developer / admin | ✅ | ✅ | ✅ | ✅ | ✅ | developer hosted read PASS |
+| [x] | `POST /v1/accounts` | developer / admin | ✅ | ✅ | ✅ | ✅ | ✅ | business admin/maid 운영 계정 생성 경로 확인 |
+| [ ] | `PATCH /v1/accounts/{profileId}/role` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | production success mutation 미실행; developer 생성/승격 금지 계약 유지 |
+| [ ] | `PATCH /v1/accounts/{profileId}/status` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | production success mutation 미실행; 마지막 active admin 보호 계약 유지 |
+| [ ] | `POST /v1/accounts/{profileId}/unlock` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | 잠긴 운영 fixture 없음; developer 대상 금지 계약 유지 |
+| [ ] | `POST /v1/accounts/{profileId}/password-reset` | developer / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | 불필요한 운영 reset 미실행; developer는 self-change만 허용 |
 
 ## 6. Developer 운영 API — #43 / PR #48
 
-PR #48은 `dev@02d5089`로 병합 완료됐다. 아직 release/main 승격, production migration, Edge 재배포는 하지 않았다.
+PR #48/#59 source와 hotfix #64가 승인된 `main` 및 production에 반영됐다. developer hosted
+login 이후 같은 메모리 세션에서 전체 projection·diagnostics·업무 권한 거부를 검증했다.
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [ ] | `GET /v1/developer/overview` | developer only | ✅ | — | ✅ | ❌ | ❌ | dev 완료, production 미반영 |
-| [ ] | `GET /v1/developer/runtime-status` | developer only | — | — | ✅ | ❌ | ❌ | secret은 configured boolean만 |
-| [ ] | `GET /v1/developer/database-status` | developer only | ✅ | — | ✅ | ❌ | ❌ | migration name drift + exact RPC privilege 검사 |
-| [ ] | `GET /v1/developer/scheduler-status` | developer only | ✅ | — | ✅ | ❌ | ❌ | raw Cron/Vault/net body 비노출 |
-| [ ] | `GET /v1/developer/audit-events` | developer only | ✅ | — | ✅ | ❌ | ❌ | account·availability·reservation·room·scheduler domain allowlist + 31일/100건 cursor |
-| [ ] | `GET /v1/developer/activity-events` | developer only | ✅ | — | ✅ | ❌ | ❌ | #58 인증·권한·민감접근 분리 원장, unknown login·권한거부는 분 단위 aggregate |
-| [ ] | `POST /v1/developer/diagnostics` | developer only | ✅ | — | ✅ | ❌ | ❌ | body/임의 URL·SQL·RPC 입력 금지, 10/min |
+| [x] | `GET /v1/developer/overview` | developer only | ✅ | — | ✅ | ✅ | ✅ | hosted 200 |
+| [x] | `GET /v1/developer/runtime-status` | developer only | — | — | ✅ | ✅ | ✅ | production target 일치, secret은 configured boolean만 |
+| [x] | `GET /v1/developer/database-status` | developer only | ✅ | — | ✅ | ✅ | ✅ | migration 19, drift/RLS/RPC 정상 |
+| [x] | `GET /v1/developer/scheduler-status` | developer only | ✅ | — | ✅ | ✅ | ✅ | `healthy`, raw Cron/Vault/net body 비노출 |
+| [x] | `GET /v1/developer/audit-events` | developer only | ✅ | — | ✅ | ✅ | ✅ | 승인된 domain summary만 반환 |
+| [x] | `GET /v1/developer/activity-events` | developer only | ✅ | — | ✅ | ✅ | ✅ | 권한 거부 aggregate hosted readback PASS |
+| [x] | `POST /v1/developer/diagnostics` | developer only | ✅ | — | ✅ | ✅ | ✅ | PR #64 zero-byte hosted hotfix 후 200 |
 
 ### #43 production 반영 조건
 
 - [x] PR #48 `dev` 병합
 - [x] parity 작업 #51/#52/#53과 release scope 확정
-- [ ] `release/v0.2.0 → main` source 승격
-- [ ] `developer_operations_projections` migration 1회 적용
-- [ ] production `api` 재배포
-- [ ] production `reservation-scheduler` 재배포 — heartbeat source 포함
-- [ ] developer / admin / maid 권한 smoke
-- [ ] redaction / migration drift / critical RPC production smoke
+- [x] `release/v0.2.0 → main` source 승격
+- [x] `developer_operations_projections` migration 1회 적용
+- [x] production `api` 재배포
+- [x] production `reservation-scheduler` 재배포 — heartbeat source 포함
+- [x] developer / admin / maid 권한 smoke
+- [x] redaction / migration drift / critical RPC production smoke
 
 ### #58 Actor Activity / Audit source gate
 
@@ -157,23 +168,25 @@ PR #48은 `dev@02d5089`로 병합 완료됐다. 아직 release/main 승격, prod
 - [x] fresh DB/RLS/Edge/Python 로컬 회귀 검증
 - [x] PR #59 독립 보안/API 재검토 P0/P1=0
 - [x] PR #59 `dev@4c897fa7eceea6cb128c2e0d201569b71b236b25` 병합
-- [ ] release/main 승격 후 migration 적용·production Edge 재배포·hosted role smoke
+- [x] release/main 승격 후 migration 적용·production Edge 재배포·hosted role smoke
+- [x] production activity/audit readback 및 bounded authorization denial aggregate 확인
 
 ## 7. 객실 API — Edge parity #53 (P1)
 
-DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 production Edge는 현재 **전체 객실 목록 1개만** 이식·배포돼 있다.
+목록·상세·관리자 mutation source가 production Edge에 배포됐다. 안전한 목록/상세와 role denial은
+hosted PASS이며 성공 mutation은 release acceptance exception을 적용한다.
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [x] | `GET /v1/rooms` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | business admin 생성 전 실제 admin smoke 대기 |
-| [ ] | `GET /v1/rooms/{roomId}` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #53 source 완료 |
-| [ ] | `PATCH /v1/rooms/{roomId}/master-data` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #53 source 완료 |
-| [ ] | `POST /v1/rooms/{roomId}/operation-blocks` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #53 source 완료 |
-| [ ] | `POST /v1/rooms/{roomId}/operation-blocks/{blockId}/release` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #53 source 완료 |
-| [ ] | `POST /v1/rooms/{roomId}/candles` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #53 source 완료 |
-| [ ] | `POST /v1/rooms/{roomId}/issues` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #53 source 완료 |
-| [ ] | `POST /v1/rooms/{roomId}/issues/{issueId}/resolve` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #53 source 완료 |
-| [ ] | `POST /v1/rooms/{roomId}/pin-sync-events` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #53 source 완료; PIN 원문 비수용 |
+| [x] | `GET /v1/rooms` | admin | ✅ | ✅ | ✅ | ✅ | ✅ | admin 121, developer/maid 403 |
+| [x] | `GET /v1/rooms/{roomId}` | admin | ✅ | ✅ | ✅ | ✅ | ✅ | 안전한 production 상세 200 |
+| [ ] | `PATCH /v1/rooms/{roomId}/master-data` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/rooms/{roomId}/operation-blocks` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/rooms/{roomId}/operation-blocks/{blockId}/release` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/rooms/{roomId}/candles` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/rooms/{roomId}/issues` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/rooms/{roomId}/issues/{issueId}/resolve` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/rooms/{roomId}/pin-sync-events` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | PIN 원문 비수용; success mutation hosted smoke release exception |
 
 ### #53 source gate
 
@@ -186,21 +199,24 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 - [x] OpenAPI/Swagger 한글 계약과 Edge 단위·동시성 회귀 추가
 - [x] Issue #53 구현 PR #61 독립 보안/API 재검토 P0/P1=0
 - [x] Issue #53 구현 PR #61 `dev` 병합 — `dev@2adb7a7de2474883d892232395295dcf643b20a4`
-- [ ] `release → main` 후 production `api` 재배포
-- [ ] hosted admin/developer/maid/CAS/idempotency/PIN redaction smoke 및 Pages snapshot 갱신
+- [x] `release → main` 후 production `api` 재배포
+- [x] hosted admin 목록/상세 및 developer/maid denial smoke
+- [x] 배포 OpenAPI 및 Pages snapshot 갱신
+- [ ] 성공 mutation hosted smoke — `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`
 
 ## 8. 메이드 주간 가능일 API — Edge parity #51 (P0)
 
-**현재 최우선 메이드 Edge 누락 영역이다.** #51은 새 도메인 개발이 아니라 이미 완료된 #6 DB/Fastify 계약의 Edge HTTP parity이며 `v0.2.0` operational activation P0 gate다.
+#51은 새 도메인 개발이 아니라 #6 DB/Fastify 계약의 Edge HTTP parity다. production Edge 배포,
+maid/admin/developer read·role smoke와 Pages snapshot을 완료했다.
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [ ] | `GET /v1/availability?weekStart=...` | maid / admin | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, maid는 본인 데이터만 |
-| [ ] | `POST /v1/availability/submissions` | maid | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, `submit_weekly_availability` |
-| [ ] | `POST /v1/availability/change-requests` | maid | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, 마감 후 변경 요청 |
-| [ ] | `GET /v1/availability/change-requests` | maid / admin | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, maid는 본인 요청만 |
-| [ ] | `POST /v1/availability/change-requests/{requestId}/decision` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, 승인/반려 |
-| [ ] | `GET /v1/availability/candidates?workDate=...` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #51 source 완료, 배정 후보 조회 |
+| [x] | `GET /v1/availability?weekStart=...` | maid / admin | ✅ | ✅ | ✅ | ✅ | ✅ | maid self/admin hosted read PASS |
+| [ ] | `POST /v1/availability/submissions` | maid | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/availability/change-requests` | maid | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [x] | `GET /v1/availability/change-requests` | maid / admin | ✅ | ✅ | ✅ | ✅ | ✅ | role/read hosted smoke PASS |
+| [ ] | `POST /v1/availability/change-requests/{requestId}/decision` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [x] | `GET /v1/availability/candidates?workDate=...` | admin | ✅ | ✅ | ✅ | ✅ | ✅ | admin 200, maid/developer 403 |
 
 ### #51 완료 조건
 
@@ -211,25 +227,27 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 - [x] OpenAPI/Swagger/codegen 갱신
 - [x] Edge Deno tests + required CI + 독립 리뷰 P0/P1=0
 - [x] `dev` 병합
-- [ ] `release → main`
-- [ ] production `api` 재배포 및 maid/admin/developer hosted HTTP smoke
-- [ ] 배포 OpenAPI 및 GitHub Pages snapshot 갱신
+- [x] `release → main`
+- [x] production `api` 재배포 및 maid/admin/developer hosted read/role smoke
+- [x] 배포 OpenAPI 및 GitHub Pages snapshot 갱신
+- [ ] 성공 mutation hosted smoke — `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`
 
 ## 9. 예약·청소요청 API — Edge parity #52 (P1)
 
-운영 DB와 Fastify에는 구현돼 있으나 production Edge `api`에는 아직 없다.
+예약 API 9개 operation이 production Edge에 배포됐다. 운영 예약이 0건이므로 목록과 role denial만
+hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exception을 적용한다.
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [ ] | `GET /v1/reservations` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 고객명·암호문 비노출 |
-| [ ] | `GET /v1/reservations/{reservationId}` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 고객명 복호화 + sensitive.read |
-| [ ] | `POST /v1/reservations` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, CAS·멱등성·PII 암호화 |
-| [ ] | `PATCH /v1/reservations/{reservationId}` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 예약 version CAS + 객실 lock/겹침 검증 |
-| [ ] | `POST /v1/reservations/{reservationId}/cancel` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, soft cancel |
-| [ ] | `POST /v1/reservations/{reservationId}/manual-checkout` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 현재 입실 예약만 허용 |
-| [ ] | `POST /v1/reservations/cleaning-requests` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, 연박/추가 청소 요청 |
-| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, CAS soft cancel |
-| [ ] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ✅ | ❌ | ❌ | #52 source 완료, `reservation-scheduler-` namespace 수동 사용 차단 |
+| [x] | `GET /v1/reservations` | admin | ✅ | ✅ | ✅ | ✅ | ✅ | admin 200/0건, developer·maid 403, 고객명·암호문 비노출 |
+| [ ] | `GET /v1/reservations/{reservationId}` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | `SKIPPED_WITH_REASON=NO_GUEST_NAME_RESERVATION` |
+| [ ] | `POST /v1/reservations` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `PATCH /v1/reservations/{reservationId}` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/reservations/{reservationId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/reservations/{reservationId}/manual-checkout` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/reservations/cleaning-requests` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [x] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ✅ | ✅ | ✅ | scheduler manual/replay 및 reserved namespace 계약 PASS |
 
 ### #52 source gate
 
@@ -241,15 +259,29 @@ DB와 Fastify에는 상세·변경 command까지 구현되어 있으나 producti
 - [x] Edge Deno·TypeScript·Python 로컬 회귀 검증
 - [x] Issue #52 구현 PR 독립 보안/API 재검토 P0/P1=0
 - [x] Issue #52 구현 PR `dev` 병합 — `dev@1275b62bc9d628059433dd926ddcccc0b70e72d5`
-- [ ] `release → main` 후 production `api` 재배포
-- [ ] hosted admin/developer/maid/PII/CAS/idempotency smoke 및 Pages snapshot 갱신
+- [x] `release → main` 후 production `api` 재배포
+- [x] hosted admin list와 developer/maid denial, scheduler manual/replay idempotency smoke
+- [x] 배포 OpenAPI 및 Pages snapshot 갱신
+- [ ] PII 상세 — `SKIPPED_WITH_REASON=NO_GUEST_NAME_RESERVATION`
+- [ ] 성공 mutation hosted smoke — `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`
 
 ## 10. Reservation Scheduler Edge Function
 
 | 체크 | Function / Path | 권한 | DB/RPC | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|
-| [x] | `POST /functions/v1/reservation-scheduler` | scheduler secret + active admin actor | ✅ | ✅ | ✅ | ⛔ | Function ACTIVE, actor/secret 미설정으로 503 fail-closed |
-| [ ] | scheduler heartbeat 기록/조회 | scheduler + developer projection | ✅ | ✅ | ❌ | ❌ | #48 dev source 완료. migration + scheduler 재배포 필요 |
+| [x] | `POST /functions/v1/reservation-scheduler` | scheduler secret + active admin actor | ✅ | ✅ | ✅ | ✅ | actor/secret configured, invalid 401, manual/replay 200 |
+| [x] | scheduler heartbeat 기록/조회 | scheduler + developer projection | ✅ | ✅ | ✅ | ✅ | Vault/Cron active, state healthy, latest HTTP 200 |
+
+운영 scheduler 정본:
+
+- actor configured/valid, invoke secret configured
+- Vault `scheduler_function_url`/`scheduler_invoke_secret` 각각 1개
+- `pg_cron`/`pg_net` enabled
+- job `reservation-transition-every-minute` 정확히 1개, active, `* * * * *`
+- command에는 secret/service-role/URL literal 없이 Vault lookup만 존재
+- 수동 동일 `scheduledAt` replay에서 logical receipt 1개와 side effect 0 확인
+- 활성화 gate 5회 succeeded; 2026-09-03 readback 1866/1866 succeeded, latest HTTP 200,
+  heartbeat succeeded, transition 0, rooms 121/reservations 0
 
 ## 11. 아직 개발하지 않은 후속 API 영역
 
@@ -279,11 +311,11 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 
 | 체크 | 기능 | API source | Python source | Windows artifact | Hosted smoke | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|
-| [ ] | developer 로그인·메모리 세션·refresh/logout | ✅ | ✅ | ❌ | ❌ | ❌ | 고정 ID `admin`, token 영속 저장 없음 |
-| [ ] | business admin/maid 계정 관리 | ✅ | ✅ | ❌ | ❌ | ❌ | 멱등 재시도, phone 입력 즉시 제거 |
-| [ ] | overview/runtime/database/scheduler | ✅ | ✅ | ❌ | ❌ | ❌ | #43 production 미반영 |
-| [ ] | 안전한 domain 감사 목록·진단 | ✅ | ✅ | ❌ | ❌ | ❌ | raw state/secret/SQL 없음 |
-| [ ] | 활동/보안 로그 | ✅ | ✅ | ❌ | ❌ | ❌ | 감사 이벤트와 화면 분리, anonymous aggregate 지원 |
+| [ ] | developer 로그인·메모리 세션·refresh/logout | ✅ | ✅ | ❌ | ✅ | ⚠️ | 로컬 source 실행 smoke PASS, Windows artifact 미완료 |
+| [ ] | business admin/maid 계정 관리 | ✅ | ✅ | ❌ | ✅ | ⚠️ | 운영 계정 생성 경로 PASS, Windows artifact 미완료 |
+| [ ] | overview/runtime/database/scheduler | ✅ | ✅ | ❌ | ✅ | ⚠️ | developer hosted smoke PASS, Windows artifact 미완료 |
+| [ ] | 안전한 domain 감사 목록·진단 | ✅ | ✅ | ❌ | ✅ | ⚠️ | diagnostics hotfix 후 hosted PASS |
+| [ ] | 활동/보안 로그 | ✅ | ✅ | ❌ | ✅ | ⚠️ | 감사/활동 분리 hosted readback PASS |
 | [ ] | DB direct 진단 | — | ❌ | ❌ | ❌ | ❌ | Phase B 전까지 의도적으로 비활성 |
 | [ ] | maintenance action catalog | — | ❌ | ❌ | ❌ | ❌ | Phase C 전까지 의도적으로 비활성 |
 
@@ -301,7 +333,7 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 - [x] PR #57 exact head required CI + 독립 보안/운영 재검토 P0/P1=0
 - [x] PR #57 `dev` 병합 — `dev@388ab3caf92f166bc01d3d58273aee33f2ac9ac9`
 - [ ] 승인 source 기반 Windows x64 artifact build/smoke
-- [ ] developer 로그인 → business admin 생성 hosted smoke
+- [x] developer 로그인 → business admin/maid 생성 hosted smoke
 
 Phase A가 `dev`에 병합돼도 #44 전체 Issue는 Phase B/C와 Windows/hosted gate가 남으므로 Open
 유지한다.
@@ -317,15 +349,17 @@ production completeness 기준의 정본 순서다.
 5. [x] **#52 Reservation Edge parity source/dev (P1)** — production 배포·hosted smoke까지 Issue Open
 6. [x] **#53 Room detail/mutation Edge parity source/dev (P1)** — production 배포·hosted smoke까지 Issue Open
 7. [x] PR #50 GitHub Pages Swagger portal source·독립 리뷰 완료 — parity와 병행 가능
-8. [ ] 최신 source를 `release/v0.2.0 → main`으로 승격
-9. [ ] 필요한 신규 migration 순차 적용
-10. [ ] `api`와 `reservation-scheduler`를 승인된 `main` source로 재배포
-11. [ ] developer / business admin / maid 실제 hosted HTTP role matrix smoke
-12. [ ] Python 콘솔에서 business admin 생성 및 최초 비밀번호 변경
-13. [ ] scheduler actor/invoke secret → Vault/pg_cron/pg_net 활성화
-14. [ ] Cron heartbeat/audit/idempotency smoke
-15. [ ] GitHub Pages workflow 수동 실행 및 공개 portal/openapi snapshot smoke
-16. [ ] `v0.2.0` tag / GitHub Release
+8. [x] 최신 source를 `release/v0.2.0 → main`으로 승격
+9. [x] 필요한 신규 migration 순차 적용 — production 19건
+10. [x] `api`와 `reservation-scheduler`를 승인된 `main` source로 재배포
+11. [x] developer / business admin / maid 실제 hosted HTTP role matrix smoke
+12. [x] Python 콘솔에서 business admin 생성 및 최초 비밀번호 변경
+13. [x] scheduler actor/invoke secret → Vault/pg_cron/pg_net 활성화
+14. [x] Cron heartbeat/audit/idempotency smoke
+15. [x] GitHub Pages workflow 수동 실행 및 공개 portal/openapi snapshot smoke
+16. [ ] 운영 활성화 문서 PR 독립 리뷰·`main` 병합
+17. [ ] release PR #62 Pages 보강과 hotfix #64를 별도 PR로 `dev`에 역반영
+18. [ ] `v0.2.0` annotated tag / GitHub Release
 
 ## 14. 이 문서 갱신 규칙
 
