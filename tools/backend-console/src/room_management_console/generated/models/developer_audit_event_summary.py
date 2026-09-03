@@ -24,6 +24,7 @@ class DeveloperAuditEventSummary:
         status (str | Unset):
         must_change_password (bool | Unset):
         maid_profile_id (UUID | Unset):
+        cleaning_target_id (UUID | Unset):
         week_start (datetime.date | Unset):
         version (int | Unset):
         source_version (int | Unset):
@@ -35,6 +36,9 @@ class DeveloperAuditEventSummary:
         reservation_id (UUID | Unset):
         cleaning_kind (str | Unset):
         service_date (datetime.date | Unset):
+        sequence_number (int | Unset):
+        revision (int | Unset):
+        target_assignment_version (int | Unset):
         available_from (datetime.datetime | Unset):
         due_at (datetime.datetime | Unset):
         room_type_id (str | Unset):
@@ -59,6 +63,7 @@ class DeveloperAuditEventSummary:
     status: str | Unset = UNSET
     must_change_password: bool | Unset = UNSET
     maid_profile_id: UUID | Unset = UNSET
+    cleaning_target_id: UUID | Unset = UNSET
     week_start: datetime.date | Unset = UNSET
     version: int | Unset = UNSET
     source_version: int | Unset = UNSET
@@ -70,6 +75,9 @@ class DeveloperAuditEventSummary:
     reservation_id: UUID | Unset = UNSET
     cleaning_kind: str | Unset = UNSET
     service_date: datetime.date | Unset = UNSET
+    sequence_number: int | Unset = UNSET
+    revision: int | Unset = UNSET
+    target_assignment_version: int | Unset = UNSET
     available_from: datetime.datetime | Unset = UNSET
     due_at: datetime.datetime | Unset = UNSET
     room_type_id: str | Unset = UNSET
@@ -103,6 +111,10 @@ class DeveloperAuditEventSummary:
         maid_profile_id: str | Unset = UNSET
         if not isinstance(self.maid_profile_id, Unset):
             maid_profile_id = str(self.maid_profile_id)
+
+        cleaning_target_id: str | Unset = UNSET
+        if not isinstance(self.cleaning_target_id, Unset):
+            cleaning_target_id = str(self.cleaning_target_id)
 
         week_start: str | Unset = UNSET
         if not isinstance(self.week_start, Unset):
@@ -139,6 +151,12 @@ class DeveloperAuditEventSummary:
         service_date: str | Unset = UNSET
         if not isinstance(self.service_date, Unset):
             service_date = self.service_date.isoformat()
+
+        sequence_number = self.sequence_number
+
+        revision = self.revision
+
+        target_assignment_version = self.target_assignment_version
 
         available_from: str | Unset = UNSET
         if not isinstance(self.available_from, Unset):
@@ -197,6 +215,8 @@ class DeveloperAuditEventSummary:
             field_dict["mustChangePassword"] = must_change_password
         if maid_profile_id is not UNSET:
             field_dict["maidProfileId"] = maid_profile_id
+        if cleaning_target_id is not UNSET:
+            field_dict["cleaningTargetId"] = cleaning_target_id
         if week_start is not UNSET:
             field_dict["weekStart"] = week_start
         if version is not UNSET:
@@ -219,6 +239,12 @@ class DeveloperAuditEventSummary:
             field_dict["cleaningKind"] = cleaning_kind
         if service_date is not UNSET:
             field_dict["serviceDate"] = service_date
+        if sequence_number is not UNSET:
+            field_dict["sequenceNumber"] = sequence_number
+        if revision is not UNSET:
+            field_dict["revision"] = revision
+        if target_assignment_version is not UNSET:
+            field_dict["targetAssignmentVersion"] = target_assignment_version
         if available_from is not UNSET:
             field_dict["availableFrom"] = available_from
         if due_at is not UNSET:
@@ -279,6 +305,13 @@ class DeveloperAuditEventSummary:
         else:
             maid_profile_id = UUID(_maid_profile_id)
 
+        _cleaning_target_id = d.pop("cleaningTargetId", UNSET)
+        cleaning_target_id: UUID | Unset
+        if isinstance(_cleaning_target_id, Unset):
+            cleaning_target_id = UNSET
+        else:
+            cleaning_target_id = UUID(_cleaning_target_id)
+
         _week_start = d.pop("weekStart", UNSET)
         week_start: datetime.date | Unset
         if isinstance(_week_start, Unset):
@@ -335,6 +368,12 @@ class DeveloperAuditEventSummary:
             service_date = UNSET
         else:
             service_date = datetime.date.fromisoformat(_service_date)
+
+        sequence_number = d.pop("sequenceNumber", UNSET)
+
+        revision = d.pop("revision", UNSET)
+
+        target_assignment_version = d.pop("targetAssignmentVersion", UNSET)
 
         _available_from = d.pop("availableFrom", UNSET)
         available_from: datetime.datetime | Unset
@@ -400,6 +439,7 @@ class DeveloperAuditEventSummary:
             status=status,
             must_change_password=must_change_password,
             maid_profile_id=maid_profile_id,
+            cleaning_target_id=cleaning_target_id,
             week_start=week_start,
             version=version,
             source_version=source_version,
@@ -411,6 +451,9 @@ class DeveloperAuditEventSummary:
             reservation_id=reservation_id,
             cleaning_kind=cleaning_kind,
             service_date=service_date,
+            sequence_number=sequence_number,
+            revision=revision,
+            target_assignment_version=target_assignment_version,
             available_from=available_from,
             due_at=due_at,
             room_type_id=room_type_id,

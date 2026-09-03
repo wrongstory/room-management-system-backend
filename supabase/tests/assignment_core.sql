@@ -1,12 +1,27 @@
 begin;
 
-select plan(25);
+select plan(28);
 
 insert into auth.users (id) values
   ('18000000-0000-4000-8000-000000000001'),
   ('18000000-0000-4000-8000-000000000002'),
   ('18000000-0000-4000-8000-000000000003'),
-  ('18000000-0000-4000-8000-000000000004');
+  ('18000000-0000-4000-8000-000000000004'),
+  ('18000000-0000-4000-8000-000000000005');
+
+set local role service_role;
+
+select public.bootstrap_first_developer_profile(
+  '28000000-0000-4000-8000-000000000005',
+  '18000000-0000-4000-8000-000000000005',
+  '배정 감사 개발자',
+  '배정 감사 개발자',
+  '0005',
+  'assignment-audit-developer-phone-hash',
+  'assignment-audit-bootstrap-0001'
+);
+
+reset role;
 
 insert into public.profiles (
   id, auth_user_id, display_name, display_name_normalized,
@@ -160,6 +175,56 @@ select ok(
       and a.due_at_snapshot = '2027-10-01 15:00:00+09'
   ),
   'first draft stores the exact target schedule snapshot'
+);
+select is(
+  (select count(*)::integer
+   from public.list_developer_audit_events(
+     '28000000-0000-4000-8000-000000000005',
+     array['assignment.draft_saved'],
+     '28000000-0000-4000-8000-000000000001',
+     clock_timestamp() - interval '1 hour',
+     clock_timestamp() + interval '1 hour',
+     null, null, 100
+   )),
+  1,
+  'developer audit projection exposes the assignment draft event'
+);
+select is(
+  (select summary
+   from public.list_developer_audit_events(
+     '28000000-0000-4000-8000-000000000005',
+     array['assignment.draft_saved'],
+     '28000000-0000-4000-8000-000000000001',
+     clock_timestamp() - interval '1 hour',
+     clock_timestamp() + interval '1 hour',
+     null, null, 100
+   )),
+  jsonb_build_object(
+    'cleaningTargetId', '48000000-0000-4000-8000-000000000001',
+    'maidProfileId', '28000000-0000-4000-8000-000000000002',
+    'serviceDate', '2027-10-01',
+    'sequenceNumber', 1,
+    'revision', 2,
+    'targetAssignmentVersion', 2
+  ),
+  'assignment developer audit summary contains only approved fields'
+);
+select ok(
+  not exists (
+    select 1
+    from public.list_developer_audit_events(
+      '28000000-0000-4000-8000-000000000005',
+      array['assignment.draft_saved'],
+      '28000000-0000-4000-8000-000000000001',
+      clock_timestamp() - interval '1 hour',
+      clock_timestamp() + interval '1 hour',
+      null, null, 100
+    ) projected
+    where to_jsonb(projected) ?| array['before_state', 'after_state']
+      or projected.summary ? 'requestHash'
+      or projected.summary::text ~* '(phone|password|token|guestName|pin)'
+  ),
+  'assignment audit projection hides raw state, request hash, and sensitive fields'
 );
 
 update assignment_results

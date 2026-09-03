@@ -392,3 +392,178 @@ revoke all on function public.save_cleaning_assignment_draft(
 grant execute on function public.save_cleaning_assignment_draft(
   uuid, uuid, uuid, integer, bigint, text, text
 ) to service_role;
+
+create or replace function public.list_developer_audit_events(
+  p_actor_profile_id uuid,
+  p_event_types text[] default null,
+  p_filter_actor_profile_id uuid default null,
+  p_from timestamptz default null,
+  p_to timestamptz default null,
+  p_before_recorded_at timestamptz default null,
+  p_before_id uuid default null,
+  p_limit integer default 50
+)
+returns table (
+  id uuid,
+  event_type text,
+  entity_type text,
+  entity_id uuid,
+  actor_profile_id uuid,
+  actor_display_name text,
+  effective_at timestamptz,
+  recorded_at timestamptz,
+  reason_code text,
+  summary jsonb
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_allowed constant text[] := array[
+    'account.bootstrap_developer_created',
+    'account.bootstrap_admin_created',
+    'account.created',
+    'account.role_changed',
+    'account.status_changed',
+    'account.unlocked',
+    'account.password_reset_requested',
+    'account.password_changed',
+    'availability.submitted',
+    'availability.change_requested',
+    'availability.change_decided',
+    'assignment.draft_saved',
+    'reservation.created',
+    'reservation.changed',
+    'reservation.cancelled',
+    'reservation.manual_checkout',
+    'reservation.scheduled_check_in',
+    'reservation.scheduled_checkout',
+    'reservation.guest_name_retention_purged',
+    'cleaning.manual_request.created',
+    'cleaning.manual_request.cancelled',
+    'room.master_data_changed',
+    'room.create_block',
+    'room.release_block',
+    'room.set_candle_count',
+    'room.report_issue',
+    'room.resolve_issue',
+    'room.record_pin_sync'
+  ];
+  v_selected text[] := coalesce(p_event_types, v_allowed);
+  v_from timestamptz := coalesce(p_from, clock_timestamp() - interval '7 days');
+  v_to timestamptz := coalesce(p_to, clock_timestamp());
+begin
+  perform private.assert_active_developer(p_actor_profile_id);
+
+  if p_limit not between 1 and 100
+    or v_from > v_to
+    or v_to - v_from > interval '31 days'
+    or (p_before_recorded_at is null) <> (p_before_id is null)
+    or coalesce(cardinality(v_selected), 0) not between 1 and 28
+    or exists (
+      select 1 from unnest(v_selected) requested
+      where not requested = any (v_allowed)
+    ) then
+    raise exception using errcode = '22023', message = 'INVALID_AUDIT_QUERY';
+  end if;
+
+  return query
+  select
+    ae.id,
+    ae.event_type,
+    ae.entity_type,
+    ae.entity_id,
+    ae.actor_profile_id,
+    ae.actor_display_name_snapshot,
+    ae.effective_at,
+    ae.recorded_at,
+    ae.reason_code,
+    case
+      when ae.event_type like 'account.%' then
+        jsonb_strip_nulls(jsonb_build_object(
+          'displayName', ae.after_state ->> 'displayName',
+          'loginId', ae.after_state ->> 'loginId',
+          'role', ae.after_state ->> 'role',
+          'status', ae.after_state ->> 'status',
+          'mustChangePassword', ae.after_state -> 'mustChangePassword'
+        ))
+      when ae.event_type like 'availability.%' then
+        jsonb_strip_nulls(jsonb_build_object(
+          'maidProfileId', ae.after_state ->> 'maidProfileId',
+          'weekStart', ae.after_state ->> 'weekStart',
+          'version', ae.after_state -> 'version',
+          'sourceVersion', ae.after_state -> 'sourceVersion',
+          'status', ae.after_state ->> 'status',
+          'approvedVersionId', ae.after_state ->> 'approvedVersionId'
+        ))
+      when ae.event_type = 'assignment.draft_saved' then
+        jsonb_strip_nulls(jsonb_build_object(
+          'cleaningTargetId', ae.after_state ->> 'cleaningTargetId',
+          'maidProfileId', ae.after_state ->> 'maidProfileId',
+          'serviceDate', ae.after_state ->> 'serviceDate',
+          'sequenceNumber', ae.after_state -> 'sequenceNumber',
+          'revision', ae.after_state -> 'revision',
+          'targetAssignmentVersion', ae.after_state -> 'targetAssignmentVersion'
+        ))
+      when ae.event_type like 'reservation.%' then
+        jsonb_strip_nulls(jsonb_build_object(
+          'roomId', ae.after_state ->> 'room_id',
+          'status', ae.after_state ->> 'status',
+          'version', ae.after_state -> 'version',
+          'checkInAt', ae.after_state ->> 'check_in_at',
+          'checkOutAt', ae.after_state ->> 'check_out_at',
+          'purgedCount', ae.after_state -> 'purged_count'
+        ))
+      when ae.event_type like 'cleaning.%' then
+        jsonb_strip_nulls(jsonb_build_object(
+          'roomId', ae.after_state ->> 'room_id',
+          'reservationId', ae.after_state ->> 'reservation_id',
+          'cleaningKind', ae.after_state ->> 'cleaning_kind',
+          'status', ae.after_state ->> 'status',
+          'serviceDate', ae.after_state ->> 'service_date',
+          'availableFrom', ae.after_state ->> 'available_from',
+          'dueAt', ae.after_state ->> 'due_at',
+          'version', ae.after_state -> 'version'
+        ))
+      when ae.event_type like 'room.%' then
+        jsonb_strip_nulls(jsonb_build_object(
+          'roomTypeId', ae.after_state ->> 'roomTypeId',
+          'elevatorZone', ae.after_state ->> 'elevatorZone',
+          'dataStatus', ae.after_state ->> 'dataStatus',
+          'stateVersion', ae.after_state -> 'stateVersion',
+          'blockId', ae.after_state ->> 'blockId',
+          'active', ae.after_state -> 'active',
+          'count', ae.after_state -> 'count',
+          'issueId', ae.after_state ->> 'issueId',
+          'category', ae.after_state ->> 'category',
+          'severity', ae.after_state ->> 'severity',
+          'blocksGuestAssignment', ae.after_state -> 'blocksGuestAssignment',
+          'status', ae.after_state ->> 'status',
+          'pinSyncEventId', ae.after_state ->> 'pinSyncEventId',
+          'syncStatus', ae.after_state ->> 'syncStatus',
+          'pinVersion', ae.after_state -> 'pinVersion'
+        ))
+      else '{}'::jsonb
+    end
+  from public.audit_events ae
+  where ae.event_type = any (v_selected)
+    and ae.recorded_at >= v_from
+    and ae.recorded_at <= v_to
+    and (p_filter_actor_profile_id is null
+      or ae.actor_profile_id = p_filter_actor_profile_id)
+    and (
+      p_before_recorded_at is null
+      or (ae.recorded_at, ae.id) < (p_before_recorded_at, p_before_id)
+    )
+  order by ae.recorded_at desc, ae.id desc
+  limit p_limit;
+end;
+$$;
+
+revoke all on function public.list_developer_audit_events(
+  uuid, text[], uuid, timestamptz, timestamptz, timestamptz, uuid, integer
+) from public, anon, authenticated;
+grant execute on function public.list_developer_audit_events(
+  uuid, text[], uuid, timestamptz, timestamptz, timestamptz, uuid, integer
+) to service_role;
