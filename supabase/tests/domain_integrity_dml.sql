@@ -213,7 +213,7 @@ insert into public.cleaning_assignments (
   (
     '50000000-0000-4000-8000-000000000002',
     '40000000-0000-4000-8000-000000000002',
-    '20000000-0000-4000-8000-000000000002', 1, 1,
+    '20000000-0000-4000-8000-000000000003', 1, 1,
     '20000000-0000-4000-8000-000000000001'
   );
 
@@ -263,10 +263,6 @@ begin
   end;
 end;
 $$;
-
-update public.cleaning_assignments
-set maid_profile_id = '20000000-0000-4000-8000-000000000003'
-where id = '50000000-0000-4000-8000-000000000002';
 
 insert into public.cleaning_attempts (
   id, cleaning_target_id, assignment_id, maid_profile_id,

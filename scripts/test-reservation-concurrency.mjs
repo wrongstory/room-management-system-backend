@@ -447,6 +447,81 @@ assert(
   'concurrent manual checkout must reject exactly one loser'
 );
 
+const { data: assignmentRooms, error: assignmentRoomsError } = await client
+  .from('rooms')
+  .select('id,room_number')
+  .in('room_number', ['135', '136', '139'])
+  .order('room_number');
+assert(
+  !assignmentRoomsError && assignmentRooms?.length === 3,
+  `assignment room fixtures failed: ${assignmentRoomsError?.message}`
+);
+
+const assignmentTargetIds = [randomUUID(), randomUUID(), randomUUID()];
+const assignmentSourceSuffix = randomUUID();
+const { error: assignmentTargetsError } = await client
+  .from('cleaning_targets')
+  .insert(assignmentTargetIds.map((id, index) => ({
+    id,
+    room_id: assignmentRooms[index].id,
+    cleaning_kind: 'additional',
+    source: 'manual_room_request',
+    source_key: `assignment-concurrency-${assignmentSourceSuffix}-${index}`,
+    original_service_date: '2036-01-01',
+    effective_service_date: '2036-01-01',
+    available_from: '2036-01-01T00:00:00.000Z',
+    due_at: '2036-01-01T08:00:00.000Z',
+    room_type_snapshot: {},
+    fee_snapshot: 0,
+    template_snapshot: {},
+    created_by: actorProfileId
+  })));
+assert(!assignmentTargetsError, `assignment target fixtures failed: ${assignmentTargetsError?.message}`);
+
+const targetRaceResults = await Promise.all([0, 1].map((index) => (
+  client.rpc('save_cleaning_assignment_draft', {
+    p_actor_profile_id: actorProfileId,
+    p_cleaning_target_id: assignmentTargetIds[0],
+    p_maid_profile_id: logicalAccountId,
+    p_sequence_number: index + 1,
+    p_expected_assignment_version: 1,
+    p_idempotency_key: `assignment-target-race-${index}-${randomUUID()}`,
+    p_request_hash: String(index + 6).repeat(64)
+  })
+)));
+assert(
+  targetRaceResults.filter((result) => !result.error).length === 1,
+  'same-target concurrent draft saves must have exactly one CAS winner'
+);
+assert(
+  targetRaceResults.filter((result) =>
+    result.error?.message?.includes('ASSIGNMENT_VERSION_CONFLICT')
+  ).length === 1,
+  'same-target concurrent draft saves must reject one stale assignmentVersion'
+);
+
+const sequenceRaceResults = await Promise.all([1, 2].map((targetIndex, index) => (
+  client.rpc('save_cleaning_assignment_draft', {
+    p_actor_profile_id: actorProfileId,
+    p_cleaning_target_id: assignmentTargetIds[targetIndex],
+    p_maid_profile_id: logicalAccountId,
+    p_sequence_number: 10,
+    p_expected_assignment_version: 1,
+    p_idempotency_key: `assignment-sequence-race-${index}-${randomUUID()}`,
+    p_request_hash: String(index + 8).repeat(64)
+  })
+)));
+assert(
+  sequenceRaceResults.filter((result) => !result.error).length === 1,
+  'same maid/date/sequence on different targets must have exactly one winner'
+);
+assert(
+  sequenceRaceResults.filter((result) =>
+    result.error?.message?.includes('cleaning_assignments_current_maid_date_sequence')
+  ).length === 1,
+  'same maid/date/sequence race must reject one unique-index loser'
+);
+
 console.log(
-  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2.'
+  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2.'
 );

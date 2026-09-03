@@ -55,6 +55,29 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       serialized.includes('"#/components/schemas/DeveloperActivityPage"'),
     "developer security activity needs a reusable bounded contract",
   );
+  assert(
+    serialized.includes('"assignment.draft_saved"'),
+    "assignment draft audit must be part of the developer allowlist",
+  );
+  const auditEventTypeParameter = document.paths["/v1/developer/audit-events"]
+    .get.parameters.find((parameter) => parameter.name === "eventType");
+  assert(
+    auditEventTypeParameter?.schema.maxItems === 28,
+    "developer audit filter limit must match the 28-event allowlist",
+  );
+  const auditSummary = document.components.schemas.DeveloperAuditEvent
+    .properties.summary;
+  assert(
+    auditSummary.additionalProperties === false &&
+      "cleaningTargetId" in auditSummary.properties &&
+      "maidProfileId" in auditSummary.properties &&
+      "serviceDate" in auditSummary.properties &&
+      "sequenceNumber" in auditSummary.properties &&
+      "revision" in auditSummary.properties &&
+      "targetAssignmentVersion" in auditSummary.properties &&
+      !("requestHash" in auditSummary.properties),
+    "assignment audit summary must expose only approved projection fields",
+  );
   for (
     const path of [
       "/v1/availability",
@@ -62,6 +85,9 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       "/v1/availability/change-requests",
       "/v1/availability/change-requests/{requestId}/decision",
       "/v1/availability/candidates",
+      "/v1/assignments",
+      "/v1/assignments/{cleaningTargetId}/history",
+      "/v1/assignments/drafts",
       "/v1/reservations",
       "/v1/reservations/{reservationId}",
       "/v1/reservations/{reservationId}/cancel",
@@ -87,6 +113,16 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
         '"#/components/schemas/AvailabilityChangeRequest"',
       ),
     "availability codegen schemas must be reusable",
+  );
+  assert(
+    serialized.includes('"#/components/schemas/Assignment"') &&
+      serialized.includes('"#/components/schemas/AssignmentDraftRequest"'),
+    "assignment codegen schemas must be reusable",
+  );
+  assert(
+    serialized.includes('"ASSIGNMENT_VERSION_CONFLICT"') &&
+      serialized.includes('"ASSIGNMENT_SEQUENCE_CONFLICT"'),
+    "assignment CAS and ordering errors must be documented",
   );
   assert(
     serialized.includes('"OUTSIDE_AVAILABILITY_WINDOW"') &&

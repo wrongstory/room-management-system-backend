@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pkgutil
 
+from attrs import fields
+
 from room_management_console.generated.api.accounts import (
     change_account_role,
     change_account_status,
@@ -21,6 +23,12 @@ from room_management_console.generated.api.developer import (
     run_developer_diagnostics,
 )
 from room_management_console.generated.models.account_status import AccountStatus
+from room_management_console.generated.models.developer_audit_event_summary import (
+    DeveloperAuditEventSummary,
+)
+from room_management_console.generated.models.developer_audit_event_type import (
+    DeveloperAuditEventType,
+)
 from room_management_console.generated.models.status_change_request_status import (
     StatusChangeRequestStatus,
 )
@@ -60,6 +68,20 @@ def test_account_response_and_status_command_use_distinct_enums() -> None:
         "inactive",
         "departed",
     }
+
+
+def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
+    assert DeveloperAuditEventType.ASSIGNMENT_DRAFT_SAVED.value == "assignment.draft_saved"
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {
+        "cleaning_target_id",
+        "maid_profile_id",
+        "service_date",
+        "sequence_number",
+        "revision",
+        "target_assignment_version",
+    } <= field_names
+    assert {"request_hash", "before_state", "after_state"}.isdisjoint(field_names)
 
 
 def test_phase_a_generated_client_excludes_business_reservation_api() -> None:

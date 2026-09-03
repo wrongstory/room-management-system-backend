@@ -307,9 +307,14 @@ erDiagram
     uuid id PK
     uuid cleaning_target_id FK
     uuid maid_profile_id FK
+    date service_date
     int sequence_number
     bigint revision
     boolean is_current
+    timestamptz available_from_snapshot
+    timestamptz due_at_snapshot
+    timestamptz notified_at
+    timestamptz ended_at
   }
   CLEANING_ATTEMPTS {
     uuid id PK
@@ -356,6 +361,9 @@ erDiagram
 - 같은 객실의 서로 다른 미래 예약은 각각 checkout 청소 대상을 가질 수 있다.
 - 같은 예약의 예정/수동 checkout은 합쳐서 청소 대상 한 건이며 `source_key` 재시도도 한 건으로 수렴한다.
 - 작업마다 현재 배정은 최대 한 건이고, 과거 revision은 삭제하지 않는다.
+- 현재 배정의 `(maid, service_date, sequence_number)`는 유일하다. 같은 순서는 메이드나 서비스 날짜가 다를 때만 재사용한다.
+- 배정 revision은 생성 시 target의 `effective_service_date`, `available_from`, `due_at`을 snapshot으로 고정하고 target·maid·순서·revision·snapshot·변경자·생성시각을 이후 수정하지 않는다.
+- #25 draft 저장은 `unassigned|draft_assigned` target만 row lock 후 `assignment_version` CAS로 갱신하며, 알림·outbox·attempt는 만들지 않는다.
 - attempt는 assignment의 target·maid·revision과 모두 일치해야 하며, submission·earning의 maid도 같은 수행자를 가리킨다.
 - 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 다른 메이드에게 배정할 수 없다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.

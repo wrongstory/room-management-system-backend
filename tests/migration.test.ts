@@ -74,6 +74,10 @@ const actorActivityMigrationUrl = new URL(
   '../supabase/migrations/20260831124140_actor_activity_audit_contract.sql',
   import.meta.url
 );
+const assignmentCoreMigrationUrl = new URL(
+  '../supabase/migrations/20260903102758_assignment_core.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -332,6 +336,27 @@ describe('initial migration contract', () => {
     expect(sql).toContain('alter table public.availability_versions enable row level security');
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
+  });
+
+  it('keeps assignment drafts revisioned, snapshot-bound, and service-only', async () => {
+    const sql = await readFile(assignmentCoreMigrationUrl, 'utf8');
+
+    expect(sql).toContain('add column service_date date');
+    expect(sql).toContain('alter column service_date set not null');
+    expect(sql).toContain('cleaning_assignments_current_maid_date_sequence');
+    expect(sql).toContain('ASSIGNMENT_SNAPSHOT_IMMUTABLE');
+    expect(sql).toContain('ASSIGNMENT_SNAPSHOT_MISMATCH');
+    expect(sql).toContain('create function public.save_cleaning_assignment_draft(');
+    expect(sql).toContain("'assignment.save_draft'");
+    expect(sql).toContain("'assignment.draft_saved'");
+    expect(sql).toContain("change_reason_code = 'DRAFT_REVISED'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('private.audit_command_key(');
+    expect(sql).toContain('for update');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
   });
 
   it('adds reservation history, obligations, occupancy ledgers, and CAS commands', async () => {
