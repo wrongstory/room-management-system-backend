@@ -204,7 +204,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toContain(
-      'expectedMigrationName = "assignment_core"'
+      'expectedMigrationName = "assignment_commit"'
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -287,15 +287,21 @@ describe('Supabase Edge runtime PoC contract', () => {
 
     expect(api).toContain('path === "/v1/assignments"');
     expect(api).toContain('path === "/v1/assignments/drafts"');
+    expect(api).toContain('path === "/v1/assignments/commit-impact"');
+    expect(api).toContain('path === "/v1/assignments/commit"');
     expect(api).toContain('assignmentTargetIdFromPath(path)');
     expect(assignmentApi).toContain('clients.forAccessToken(bearerToken(request))');
     expect(assignmentApi).toContain('"save_cleaning_assignment_draft"');
+    expect(assignmentApi).toContain('"get_assignment_commit_impact"');
+    expect(assignmentApi).toContain('"commit_and_notify_assignments"');
     expect(assignmentApi).toContain('p_actor_profile_id: actor.profileId');
     expect(assignmentApi).toContain('requireBusinessAdmin(actor)');
     expect(assignmentApi).toContain('requirePasswordChanged(actor)');
     expect(openApi).toContain('operationId: "listAssignments"');
     expect(openApi).toContain('operationId: "getAssignmentHistory"');
     expect(openApi).toContain('operationId: "saveAssignmentDraft"');
+    expect(openApi).toContain('operationId: "getAssignmentCommitImpact"');
+    expect(openApi).toContain('operationId: "commitAndNotifyAssignments"');
   });
 
   it('ports all reservation operations through the existing actor-bound RPCs', async () => {

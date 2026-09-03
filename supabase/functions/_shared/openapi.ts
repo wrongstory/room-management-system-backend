@@ -515,7 +515,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 28,
+              maxItems: 29,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -989,6 +989,60 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/assignments/commit-impact": {
+      get: {
+        tags: ["Assignments"],
+        operationId: "getAssignmentCommitImpact",
+        summary: "청소 배정 알림 확정 사전 영향도 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 오늘/내일 서비스 날짜의 현재 draft를 최신 객실 일정·메이드 상태·가능일 version과 다시 대조합니다. 응답 fingerprint는 POST /v1/assignments/commit의 optimistic concurrency gate이며 이 조회는 상태를 변경하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [{
+          name: "serviceDate",
+          in: "query",
+          required: true,
+          schema: { type: "string", format: "date" },
+          description: "KST 기준 오늘 또는 내일인 서비스 날짜",
+        }],
+        responses: {
+          "200": assignmentCommitImpactResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/assignments/commit": {
+      post: {
+        tags: ["Assignments"],
+        operationId: "commitAndNotifyAssignments",
+        summary: "선택한 청소 배정 알림 확정",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. preflight fingerprint와 선택한 draft의 assignment/availability version을 모두 재검증한 뒤 선택 부분집합을 단일 transaction으로 notified 상태로 전환하고 메이드 notification 및 persistent outbox를 기록합니다. 일부 항목만 실패하는 처리는 없으며 attempt나 외부 네트워크 호출은 생성하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/AssignmentCommitRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": assignmentCommitResultResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/reservations": {
       get: {
         tags: ["Reservations"],
@@ -1365,6 +1419,13 @@ export const openApiDocument = {
           "ASSIGNMENT_TARGET_STATE_INVALID",
           "ASSIGNMENT_SEQUENCE_CONFLICT",
           "ASSIGNMENT_NOT_FOUND",
+          "ASSIGNMENT_IMPACT_CHANGED",
+          "ASSIGNMENT_DRAFT_STALE_SCHEDULE",
+          "ASSIGNMENT_AVAILABILITY_REQUIRED",
+          "ASSIGNMENT_AVAILABILITY_STALE",
+          "ASSIGNMENT_MAID_UNAVAILABLE",
+          "ASSIGNMENT_WINDOW_EXPIRED",
+          "ASSIGNMENT_COMMIT_NOT_ALLOWED",
           "ASSIGNMENT_COMMAND_FAILED",
           "ACTIVE_ADMIN_REQUIRED",
           "OUTSIDE_AVAILABILITY_WINDOW",
@@ -1657,6 +1718,7 @@ export const openApiDocument = {
           "availability.change_requested",
           "availability.change_decided",
           "assignment.draft_saved",
+          "assignment.notified",
           "reservation.created",
           "reservation.changed",
           "reservation.cancelled",
@@ -1935,6 +1997,7 @@ export const openApiDocument = {
               mustChangePassword: { type: "boolean" },
               maidProfileId: { type: "string", format: "uuid" },
               cleaningTargetId: { type: "string", format: "uuid" },
+              assignmentId: { type: "string", format: "uuid" },
               weekStart: { type: "string", format: "date" },
               version: { type: "integer", minimum: 0 },
               sourceVersion: { type: "integer", minimum: 0 },
@@ -2203,6 +2266,249 @@ export const openApiDocument = {
           maidProfileId: { type: "string", format: "uuid" },
           sequenceNumber: { type: "integer", minimum: 1 },
           expectedAssignmentVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      AssignmentCommitCandidate: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "assignmentId",
+          "cleaningTargetId",
+          "roomId",
+          "roomNumber",
+          "maidProfileId",
+          "maidDisplayName",
+          "serviceDate",
+          "sequenceNumber",
+          "revision",
+          "targetAssignmentVersion",
+          "expectedAvailabilityVersion",
+          "availableFrom",
+          "dueAt",
+        ],
+        properties: {
+          assignmentId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          maidProfileId: { type: "string", format: "uuid" },
+          maidDisplayName: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          sequenceNumber: { type: "integer", minimum: 1 },
+          revision: { type: "integer", minimum: 1 },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAvailabilityVersion: { type: "integer", minimum: 1 },
+          availableFrom: { type: ["string", "null"], format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      AssignmentCommitBlockedCandidate: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "assignmentId",
+          "cleaningTargetId",
+          "roomId",
+          "roomNumber",
+          "maidProfileId",
+          "maidDisplayName",
+          "serviceDate",
+          "sequenceNumber",
+          "revision",
+          "targetAssignmentVersion",
+          "currentAvailabilityVersion",
+          "reasonCodes",
+          "availableFrom",
+          "dueAt",
+        ],
+        properties: {
+          assignmentId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          maidProfileId: { type: "string", format: "uuid" },
+          maidDisplayName: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          sequenceNumber: { type: "integer", minimum: 1 },
+          revision: { type: "integer", minimum: 1 },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          currentAvailabilityVersion: {
+            type: ["integer", "null"],
+            minimum: 1,
+          },
+          reasonCodes: {
+            type: "array",
+            minItems: 1,
+            items: { type: "string" },
+          },
+          availableFrom: { type: ["string", "null"], format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      AssignmentCommitUnassignedTarget: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cleaningTargetId",
+          "roomId",
+          "roomNumber",
+          "serviceDate",
+          "status",
+          "targetAssignmentVersion",
+          "availableFrom",
+          "dueAt",
+        ],
+        properties: {
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          status: { const: "unassigned" },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          availableFrom: { type: ["string", "null"], format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      AssignmentCommitImpact: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "serviceDate",
+          "impactFingerprint",
+          "committableDrafts",
+          "blockedDrafts",
+          "remainingUnassignedTargets",
+        ],
+        properties: {
+          serviceDate: { type: "string", format: "date" },
+          impactFingerprint: {
+            type: "string",
+            pattern: "^[0-9a-f]{64}$",
+            description:
+              "commit 직전 동일 impact인지 검증하는 SHA-256 fingerprint",
+          },
+          committableDrafts: {
+            type: "array",
+            items: { $ref: "#/components/schemas/AssignmentCommitCandidate" },
+          },
+          blockedDrafts: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/AssignmentCommitBlockedCandidate",
+            },
+          },
+          remainingUnassignedTargets: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/AssignmentCommitUnassignedTarget",
+            },
+          },
+        },
+      },
+      AssignmentCommitItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cleaningTargetId",
+          "expectedAssignmentVersion",
+          "expectedAvailabilityVersion",
+        ],
+        properties: {
+          cleaningTargetId: { type: "string", format: "uuid" },
+          expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAvailabilityVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      AssignmentCommitRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["serviceDate", "expectedImpactFingerprint", "items"],
+        properties: {
+          serviceDate: { type: "string", format: "date" },
+          expectedImpactFingerprint: {
+            type: "string",
+            pattern: "^[0-9a-f]{64}$",
+          },
+          items: {
+            type: "array",
+            minItems: 1,
+            maxItems: 121,
+            items: { $ref: "#/components/schemas/AssignmentCommitItem" },
+          },
+        },
+      },
+      AssignmentNotified: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "assignmentId",
+          "cleaningTargetId",
+          "roomId",
+          "roomNumber",
+          "maidProfileId",
+          "maidDisplayName",
+          "serviceDate",
+          "sequenceNumber",
+          "revision",
+          "targetAssignmentVersion",
+          "expectedAvailabilityVersion",
+          "availableFrom",
+          "dueAt",
+          "notifiedAt",
+        ],
+        properties: {
+          assignmentId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          maidProfileId: { type: "string", format: "uuid" },
+          maidDisplayName: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          sequenceNumber: { type: "integer", minimum: 1 },
+          revision: { type: "integer", minimum: 1 },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAvailabilityVersion: { type: "integer", minimum: 1 },
+          availableFrom: { type: ["string", "null"], format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+          notifiedAt: { type: "string", format: "date-time" },
+        },
+        description:
+          "알림 확정 결과입니다. expectedAvailabilityVersion은 preflight 입력 version을 나타냅니다.",
+      },
+      AssignmentCommitResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "serviceDate",
+          "impactFingerprint",
+          "notifiedAssignments",
+          "remainingDrafts",
+          "blockedDrafts",
+          "unassignedTargets",
+        ],
+        properties: {
+          serviceDate: { type: "string", format: "date" },
+          impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          notifiedAssignments: {
+            type: "array",
+            items: { $ref: "#/components/schemas/AssignmentNotified" },
+          },
+          remainingDrafts: {
+            type: "array",
+            items: { $ref: "#/components/schemas/AssignmentCommitCandidate" },
+          },
+          blockedDrafts: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/AssignmentCommitBlockedCandidate",
+            },
+          },
+          unassignedTargets: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/AssignmentCommitUnassignedTarget",
+            },
+          },
         },
       },
       AvailabilityDay: {
@@ -3157,6 +3463,44 @@ function assignmentItemResponse(description: string): Record<string, unknown> {
           required: ["assignment"],
           properties: {
             assignment: { $ref: "#/components/schemas/Assignment" },
+          },
+        },
+      },
+    },
+  };
+}
+
+function assignmentCommitImpactResponse(): Record<string, unknown> {
+  return {
+    description: "배정 알림 확정 사전 영향도",
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["impact"],
+          properties: {
+            impact: { $ref: "#/components/schemas/AssignmentCommitImpact" },
+          },
+        },
+      },
+    },
+  };
+}
+
+function assignmentCommitResultResponse(): Record<string, unknown> {
+  return {
+    description: "선택한 배정 알림 확정 결과와 남은 작업",
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["result"],
+          properties: {
+            result: { $ref: "#/components/schemas/AssignmentCommitResult" },
           },
         },
       },

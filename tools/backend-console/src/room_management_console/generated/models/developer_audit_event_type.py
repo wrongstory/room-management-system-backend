@@ -11,6 +11,7 @@ class DeveloperAuditEventType(str, Enum):
     ACCOUNT_STATUS_CHANGED = "account.status_changed"
     ACCOUNT_UNLOCKED = "account.unlocked"
     ASSIGNMENT_DRAFT_SAVED = "assignment.draft_saved"
+    ASSIGNMENT_NOTIFIED = "assignment.notified"
     AVAILABILITY_CHANGE_DECIDED = "availability.change_decided"
     AVAILABILITY_CHANGE_REQUESTED = "availability.change_requested"
     AVAILABILITY_SUBMITTED = "availability.submitted"

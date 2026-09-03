@@ -522,6 +522,231 @@ assert(
   'same maid/date/sequence race must reject one unique-index loser'
 );
 
+const kstToday = new Date(Date.now() + (9 * 60 * 60 * 1000));
+const assignmentCommitDate = new Date(kstToday);
+assignmentCommitDate.setUTCDate(assignmentCommitDate.getUTCDate() + 1);
+const assignmentCommitServiceDate = assignmentCommitDate.toISOString().slice(0, 10);
+const assignmentCommitWeekStart = new Date(`${assignmentCommitServiceDate}T00:00:00.000Z`);
+const isoDay = assignmentCommitWeekStart.getUTCDay() || 7;
+assignmentCommitWeekStart.setUTCDate(assignmentCommitWeekStart.getUTCDate() - isoDay + 1);
+const assignmentCommitWeekStartText = assignmentCommitWeekStart.toISOString().slice(0, 10);
+const availabilityVersionId = randomUUID();
+const { error: availabilityVersionError } = await client
+  .from('availability_versions')
+  .insert({
+    id: availabilityVersionId,
+    maid_profile_id: logicalAccountId,
+    week_start: assignmentCommitWeekStartText,
+    version: 1,
+    status: 'submitted',
+    is_current: true,
+    submitted_at: new Date().toISOString()
+  });
+assert(
+  !availabilityVersionError,
+  `assignment commit availability fixture failed: ${availabilityVersionError?.message}`
+);
+const availabilityDates = Array.from({ length: 7 }, (_, index) => {
+  const date = new Date(`${assignmentCommitWeekStartText}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + index);
+  return date.toISOString().slice(0, 10);
+});
+const { error: availabilityDaysError } = await client
+  .from('availability_days')
+  .insert(availabilityDates.map((workDate) => ({
+    availability_version_id: availabilityVersionId,
+    work_date: workDate,
+    available: true
+  })));
+assert(
+  !availabilityDaysError,
+  `assignment commit availability days failed: ${availabilityDaysError?.message}`
+);
+
+const { data: assignmentCommitRooms, error: assignmentCommitRoomsError } = await client
+  .from('rooms')
+  .select('id,room_number')
+  .in('room_number', ['211', '314', '410'])
+  .order('room_number');
+assert(
+  !assignmentCommitRoomsError && assignmentCommitRooms?.length === 3,
+  `assignment commit room fixtures failed: ${assignmentCommitRoomsError?.message}`
+);
+const assignmentCommitTargetIds = [randomUUID(), randomUUID(), randomUUID()];
+const assignmentCommitSourceSuffix = randomUUID();
+const { error: assignmentCommitTargetsError } = await client
+  .from('cleaning_targets')
+  .insert(assignmentCommitTargetIds.map((id, index) => ({
+    id,
+    room_id: assignmentCommitRooms[index].id,
+    cleaning_kind: 'additional',
+    source: 'manual_room_request',
+    source_key: `assignment-commit-concurrency-${assignmentCommitSourceSuffix}-${index}`,
+    original_service_date: assignmentCommitServiceDate,
+    effective_service_date: assignmentCommitServiceDate,
+    available_from: `${assignmentCommitServiceDate}T00:00:00.000Z`,
+    due_at: `${assignmentCommitServiceDate}T23:00:00.000Z`,
+    room_type_snapshot: {},
+    fee_snapshot: 0,
+    template_snapshot: { durationMinutes: 60 },
+    created_by: actorProfileId
+  })));
+assert(
+  !assignmentCommitTargetsError,
+  `assignment commit targets failed: ${assignmentCommitTargetsError?.message}`
+);
+for (const [index, targetId] of assignmentCommitTargetIds.entries()) {
+  const { error } = await client.rpc('save_cleaning_assignment_draft', {
+    p_actor_profile_id: actorProfileId,
+    p_cleaning_target_id: targetId,
+    p_maid_profile_id: logicalAccountId,
+    p_sequence_number: 20 + index,
+    p_expected_assignment_version: 1,
+    p_idempotency_key: `assignment-commit-draft-${index}-${randomUUID()}`,
+    p_request_hash: String(index + 1).repeat(64)
+  });
+  assert(!error, `assignment commit draft ${index} failed: ${error?.message}`);
+}
+
+const { data: initialImpact, error: initialImpactError } = await client.rpc(
+  'get_assignment_commit_impact',
+  {
+    p_actor_profile_id: actorProfileId,
+    p_service_date: assignmentCommitServiceDate
+  }
+);
+assert(!initialImpactError && initialImpact, 'assignment commit preflight must succeed');
+const replayItem = {
+  cleaningTargetId: assignmentCommitTargetIds[0],
+  expectedAssignmentVersion: 2,
+  expectedAvailabilityVersion: 1
+};
+const replayCommitKey = `assignment-commit-replay-${randomUUID()}`;
+const replayCommitHash = createHash('sha256')
+  .update(`assignment-commit-replay-${randomUUID()}`)
+  .digest('hex');
+const replayCommitResults = await Promise.all([0, 1].map(() => client.rpc(
+  'commit_and_notify_assignments',
+  {
+    p_actor_profile_id: actorProfileId,
+    p_service_date: assignmentCommitServiceDate,
+    p_expected_impact_fingerprint: initialImpact.impactFingerprint,
+    p_items: [replayItem],
+    p_idempotency_key: replayCommitKey,
+    p_request_hash: replayCommitHash
+  }
+)));
+assert(
+  replayCommitResults.every((result) => !result.error),
+  'concurrent identical assignment commits must both succeed'
+);
+assert(
+  new Set(replayCommitResults.map((result) => JSON.stringify(result.data))).size === 1,
+  'concurrent identical assignment commits must replay one logical response'
+);
+const { count: replayNotificationCount, error: replayNotificationCountError } = await client
+  .from('notifications')
+  .select('id', { count: 'exact', head: true })
+  .eq('cleaning_target_id', assignmentCommitTargetIds[0]);
+assert(
+  !replayNotificationCountError && replayNotificationCount === 1,
+  'concurrent identical assignment commit must create one notification'
+);
+
+const { data: saveRaceImpact, error: saveRaceImpactError } = await client.rpc(
+  'get_assignment_commit_impact',
+  { p_actor_profile_id: actorProfileId, p_service_date: assignmentCommitServiceDate }
+);
+assert(!saveRaceImpactError && saveRaceImpact, 'save race preflight must succeed');
+const saveRaceTargetId = assignmentCommitTargetIds[1];
+const saveCommitRace = await Promise.all([
+  client.rpc('commit_and_notify_assignments', {
+    p_actor_profile_id: actorProfileId,
+    p_service_date: assignmentCommitServiceDate,
+    p_expected_impact_fingerprint: saveRaceImpact.impactFingerprint,
+    p_items: [{
+      cleaningTargetId: saveRaceTargetId,
+      expectedAssignmentVersion: 2,
+      expectedAvailabilityVersion: 1
+    }],
+    p_idempotency_key: `assignment-commit-save-race-${randomUUID()}`,
+    p_request_hash: 'd'.repeat(64)
+  }),
+  client.rpc('save_cleaning_assignment_draft', {
+    p_actor_profile_id: actorProfileId,
+    p_cleaning_target_id: saveRaceTargetId,
+    p_maid_profile_id: logicalAccountId,
+    p_sequence_number: 30,
+    p_expected_assignment_version: 2,
+    p_idempotency_key: `assignment-save-commit-race-${randomUUID()}`,
+    p_request_hash: 'e'.repeat(64)
+  })
+]);
+assert(
+  saveCommitRace.filter((result) => !result.error).length === 1,
+  'save versus commit race must have exactly one winner'
+);
+assert(
+  saveCommitRace.filter((result) => result.error).length === 1,
+  'save versus commit race must reject exactly one stale loser'
+);
+
+const changeRequestId = randomUUID();
+const { error: changeRequestError } = await client
+  .from('availability_change_requests')
+  .insert({
+    id: changeRequestId,
+    availability_version_id: availabilityVersionId,
+    maid_profile_id: logicalAccountId,
+    week_start: assignmentCommitWeekStartText,
+    source_version: 1,
+    requested_available_dates: availabilityDates.filter(
+      (date) => date !== assignmentCommitServiceDate
+    ),
+    reason_code: 'CONCURRENCY_UNAVAILABLE',
+    status: 'pending',
+    requested_at: new Date().toISOString()
+  });
+assert(!changeRequestError, `availability change fixture failed: ${changeRequestError?.message}`);
+const { data: availabilityRaceImpact, error: availabilityRaceImpactError } = await client.rpc(
+  'get_assignment_commit_impact',
+  { p_actor_profile_id: actorProfileId, p_service_date: assignmentCommitServiceDate }
+);
+assert(
+  !availabilityRaceImpactError && availabilityRaceImpact,
+  'availability race preflight must succeed'
+);
+const availabilityRace = await Promise.all([
+  client.rpc('commit_and_notify_assignments', {
+    p_actor_profile_id: actorProfileId,
+    p_service_date: assignmentCommitServiceDate,
+    p_expected_impact_fingerprint: availabilityRaceImpact.impactFingerprint,
+    p_items: [{
+      cleaningTargetId: assignmentCommitTargetIds[2],
+      expectedAssignmentVersion: 2,
+      expectedAvailabilityVersion: 1
+    }],
+    p_idempotency_key: `assignment-availability-commit-${randomUUID()}`,
+    p_request_hash: 'f'.repeat(64)
+  }),
+  client.rpc('decide_availability_change', {
+    p_actor_profile_id: actorProfileId,
+    p_change_request_id: changeRequestId,
+    p_decision: 'approved',
+    p_reason_code: 'CONCURRENCY_APPROVED',
+    p_expected_version: 1,
+    p_idempotency_key: `assignment-availability-decision-${randomUUID()}`
+  })
+]);
+assert(
+  availabilityRace.filter((result) => !result.error).length === 1,
+  'availability versus commit race must have exactly one winner'
+);
+assert(
+  availabilityRace.filter((result) => result.error).length === 1,
+  'availability versus commit race must reject exactly one stale loser'
+);
+
 console.log(
-  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2.'
+  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2, assignment-commit-replay=1 logical/2 calls, assignment-save-vs-commit=1/2, availability-vs-commit=1/2.'
 );

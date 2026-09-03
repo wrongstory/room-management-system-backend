@@ -53,6 +53,71 @@ export interface AssignmentProjection {
   createdAt: string;
 }
 
+export interface AssignmentCommitCandidate {
+  assignmentId: string;
+  cleaningTargetId: string;
+  roomId: string;
+  roomNumber: string;
+  maidProfileId: string;
+  maidDisplayName: string;
+  serviceDate: string;
+  sequenceNumber: number;
+  revision: number;
+  targetAssignmentVersion: number;
+  expectedAvailabilityVersion: number;
+  availableFrom: string | null;
+  dueAt: string | null;
+}
+
+export interface AssignmentCommitBlockedCandidate {
+  assignmentId: string;
+  cleaningTargetId: string;
+  roomId: string;
+  roomNumber: string;
+  maidProfileId: string;
+  maidDisplayName: string;
+  serviceDate: string;
+  sequenceNumber: number;
+  revision: number;
+  targetAssignmentVersion: number;
+  currentAvailabilityVersion: number | null;
+  reasonCodes: string[];
+  availableFrom: string | null;
+  dueAt: string | null;
+}
+
+export interface AssignmentCommitUnassignedTarget {
+  cleaningTargetId: string;
+  roomId: string;
+  roomNumber: string;
+  serviceDate: string;
+  status: "unassigned";
+  targetAssignmentVersion: number;
+  availableFrom: string | null;
+  dueAt: string | null;
+}
+
+export interface AssignmentCommitImpact {
+  serviceDate: string;
+  impactFingerprint: string;
+  committableDrafts: AssignmentCommitCandidate[];
+  blockedDrafts: AssignmentCommitBlockedCandidate[];
+  remainingUnassignedTargets: AssignmentCommitUnassignedTarget[];
+}
+
+export interface AssignmentCommitResult {
+  serviceDate: string;
+  impactFingerprint: string;
+  notifiedAssignments: Array<
+    AssignmentCommitCandidate & {
+      notifiedAt: string;
+    }
+  >;
+  remainingDrafts: AssignmentCommitCandidate[];
+  blockedDrafts: AssignmentCommitBlockedCandidate[];
+  unassignedTargets: AssignmentCommitUnassignedTarget[];
+}
+
 const assignmentColumns = [
   "id",
   "cleaning_target_id",
@@ -71,6 +136,7 @@ const assignmentColumns = [
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+const sha256Pattern = /^[0-9a-f]{64}$/;
 
 function validationError(message: string): never {
   throw new EdgeError(400, "VALIDATION_ERROR", message);
@@ -207,6 +273,48 @@ export function assignmentDatabaseError(
       "배정 version이 변경되었습니다. 최신 상태를 다시 확인해 주세요.",
     ],
     [
+      "ASSIGNMENT_IMPACT_CHANGED",
+      409,
+      "ASSIGNMENT_IMPACT_CHANGED",
+      "배정 영향도가 변경되었습니다. preflight를 다시 실행해 주세요.",
+    ],
+    [
+      "ASSIGNMENT_DRAFT_STALE_SCHEDULE",
+      409,
+      "ASSIGNMENT_DRAFT_STALE_SCHEDULE",
+      "배정 이후 청소 일정이 변경되었습니다. draft를 다시 저장해 주세요.",
+    ],
+    [
+      "ASSIGNMENT_AVAILABILITY_REQUIRED",
+      409,
+      "ASSIGNMENT_AVAILABILITY_REQUIRED",
+      "메이드가 해당 주의 가능일을 아직 제출하지 않았습니다.",
+    ],
+    [
+      "ASSIGNMENT_AVAILABILITY_STALE",
+      409,
+      "ASSIGNMENT_AVAILABILITY_STALE",
+      "메이드 가능일이 변경되었습니다. preflight를 다시 실행해 주세요.",
+    ],
+    [
+      "ASSIGNMENT_MAID_UNAVAILABLE",
+      409,
+      "ASSIGNMENT_MAID_UNAVAILABLE",
+      "현재 활성 상태이며 가능한 메이드에게만 알릴 수 있습니다.",
+    ],
+    [
+      "ASSIGNMENT_WINDOW_EXPIRED",
+      409,
+      "ASSIGNMENT_WINDOW_EXPIRED",
+      "청소 완료 기한이 지나 알림을 확정할 수 없습니다.",
+    ],
+    [
+      "ASSIGNMENT_COMMIT_NOT_ALLOWED",
+      409,
+      "ASSIGNMENT_COMMIT_NOT_ALLOWED",
+      "현재 배정 상태 또는 날짜에는 알림을 확정할 수 없습니다.",
+    ],
+    [
       "ASSIGNMENT_TARGET_STATE_INVALID",
       409,
       "ASSIGNMENT_TARGET_STATE_INVALID",
@@ -241,6 +349,161 @@ export function assignmentDatabaseError(
     "ASSIGNMENT_COMMAND_FAILED",
     "청소 배정 정보를 처리하지 못했습니다.",
   );
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw assignmentDatabaseError(null);
+  }
+  return value as Record<string, unknown>;
+}
+
+function nullablePositiveInteger(value: unknown, name: string): number | null {
+  return value === null ? null : integerValue(value, name, 1);
+}
+
+function stringArray(value: unknown): string[] {
+  if (
+    !Array.isArray(value) || value.length === 0 ||
+    value.some((item) => typeof item !== "string")
+  ) {
+    throw assignmentDatabaseError(null);
+  }
+  return value as string[];
+}
+
+function toCommitCandidate(value: unknown): AssignmentCommitCandidate {
+  const row = objectValue(value);
+  return {
+    assignmentId: uuidValue(row.assignmentId, "assignmentId"),
+    cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
+    roomId: uuidValue(row.roomId, "roomId"),
+    roomNumber: String(row.roomNumber),
+    maidProfileId: uuidValue(row.maidProfileId, "maidProfileId"),
+    maidDisplayName: String(row.maidDisplayName),
+    serviceDate: dateValue(row.serviceDate, "serviceDate"),
+    sequenceNumber: integerValue(row.sequenceNumber, "sequenceNumber", 1),
+    revision: integerValue(row.revision, "revision", 1),
+    targetAssignmentVersion: integerValue(
+      row.targetAssignmentVersion,
+      "targetAssignmentVersion",
+      1,
+    ),
+    expectedAvailabilityVersion: integerValue(
+      row.expectedAvailabilityVersion,
+      "expectedAvailabilityVersion",
+      1,
+    ),
+    availableFrom: typeof row.availableFrom === "string"
+      ? row.availableFrom
+      : null,
+    dueAt: typeof row.dueAt === "string" ? row.dueAt : null,
+  };
+}
+
+function toBlockedCandidate(
+  value: unknown,
+): AssignmentCommitBlockedCandidate {
+  const row = objectValue(value);
+  return {
+    assignmentId: uuidValue(row.assignmentId, "assignmentId"),
+    cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
+    roomId: uuidValue(row.roomId, "roomId"),
+    roomNumber: String(row.roomNumber),
+    maidProfileId: uuidValue(row.maidProfileId, "maidProfileId"),
+    maidDisplayName: String(row.maidDisplayName),
+    serviceDate: dateValue(row.serviceDate, "serviceDate"),
+    sequenceNumber: integerValue(row.sequenceNumber, "sequenceNumber", 1),
+    revision: integerValue(row.revision, "revision", 1),
+    targetAssignmentVersion: integerValue(
+      row.targetAssignmentVersion,
+      "targetAssignmentVersion",
+      1,
+    ),
+    currentAvailabilityVersion: nullablePositiveInteger(
+      row.currentAvailabilityVersion,
+      "currentAvailabilityVersion",
+    ),
+    reasonCodes: stringArray(row.reasonCodes),
+    availableFrom: typeof row.availableFrom === "string"
+      ? row.availableFrom
+      : null,
+    dueAt: typeof row.dueAt === "string" ? row.dueAt : null,
+  };
+}
+
+function toUnassignedTarget(
+  value: unknown,
+): AssignmentCommitUnassignedTarget {
+  const row = objectValue(value);
+  if (row.status !== "unassigned") throw assignmentDatabaseError(null);
+  return {
+    cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
+    roomId: uuidValue(row.roomId, "roomId"),
+    roomNumber: String(row.roomNumber),
+    serviceDate: dateValue(row.serviceDate, "serviceDate"),
+    status: "unassigned",
+    targetAssignmentVersion: integerValue(
+      row.targetAssignmentVersion,
+      "targetAssignmentVersion",
+      1,
+    ),
+    availableFrom: typeof row.availableFrom === "string"
+      ? row.availableFrom
+      : null,
+    dueAt: typeof row.dueAt === "string" ? row.dueAt : null,
+  };
+}
+
+function arrayValue(value: unknown): unknown[] {
+  if (!Array.isArray(value)) throw assignmentDatabaseError(null);
+  return value;
+}
+
+function impactFingerprint(value: unknown): string {
+  if (typeof value !== "string" || !sha256Pattern.test(value)) {
+    throw assignmentDatabaseError(null);
+  }
+  return value;
+}
+
+function toAssignmentCommitImpact(value: unknown): AssignmentCommitImpact {
+  const row = objectValue(value);
+  return {
+    serviceDate: dateValue(row.serviceDate, "serviceDate"),
+    impactFingerprint: impactFingerprint(row.impactFingerprint),
+    committableDrafts: arrayValue(row.committableDrafts).map(
+      toCommitCandidate,
+    ),
+    blockedDrafts: arrayValue(row.blockedDrafts).map(toBlockedCandidate),
+    remainingUnassignedTargets: arrayValue(row.remainingUnassignedTargets).map(
+      toUnassignedTarget,
+    ),
+  };
+}
+
+function toAssignmentCommitResult(value: unknown): AssignmentCommitResult {
+  const row = objectValue(value);
+  const notifiedAssignments = arrayValue(row.notifiedAssignments).map(
+    (value) => {
+      const assignment = objectValue(value);
+      const projected = toCommitCandidate(assignment);
+      if (typeof assignment.notifiedAt !== "string") {
+        throw assignmentDatabaseError(null);
+      }
+      return { ...projected, notifiedAt: assignment.notifiedAt };
+    },
+  );
+  return {
+    serviceDate: dateValue(row.serviceDate, "serviceDate"),
+    impactFingerprint: impactFingerprint(row.impactFingerprint),
+    notifiedAssignments,
+    remainingDrafts: arrayValue(row.remainingDrafts).map(toCommitCandidate),
+    blockedDrafts: arrayValue(row.blockedDrafts).map(toBlockedCandidate),
+    unassignedTargets: arrayValue(row.unassignedTargets).map(
+      toUnassignedTarget,
+    ),
+  };
 }
 
 function accessTokenClient(request: Request, clients: EdgeClients) {
@@ -478,4 +741,101 @@ export async function saveAssignmentDraft(
   );
   if (error || !data) throw assignmentDatabaseError(error);
   return toAssignmentProjection(data);
+}
+
+export async function assignmentCommitImpact(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<AssignmentCommitImpact> {
+  requireAssignmentAdmin(actor);
+  const search = queryValues(request, ["serviceDate"]);
+  const serviceDate = dateValue(search.get("serviceDate"), "serviceDate");
+  const { data, error } = await clients.admin.rpc(
+    "get_assignment_commit_impact",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_service_date: serviceDate,
+    },
+  );
+  if (error || !data) throw assignmentDatabaseError(error);
+  return toAssignmentCommitImpact(data);
+}
+
+export async function commitAssignments(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<AssignmentCommitResult> {
+  requireAssignmentAdmin(actor);
+  const body = await readJsonBody(request);
+  assertOnlyFields(body, ["serviceDate", "expectedImpactFingerprint", "items"]);
+  const serviceDate = dateValue(body.serviceDate, "serviceDate");
+  if (
+    typeof body.expectedImpactFingerprint !== "string" ||
+    !sha256Pattern.test(body.expectedImpactFingerprint)
+  ) {
+    validationError(
+      "expectedImpactFingerprint는 소문자 SHA-256 값이어야 합니다.",
+    );
+  }
+  if (
+    !Array.isArray(body.items) || body.items.length < 1 ||
+    body.items.length > 121
+  ) {
+    validationError("items는 1~121개의 항목이어야 합니다.");
+  }
+  const items = body.items.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      validationError(`items[${index}]는 객체여야 합니다.`);
+    }
+    const item = value as Record<string, unknown>;
+    assertOnlyFields(item, [
+      "cleaningTargetId",
+      "expectedAssignmentVersion",
+      "expectedAvailabilityVersion",
+    ]);
+    return {
+      cleaningTargetId: uuidValue(
+        item.cleaningTargetId,
+        `items[${index}].cleaningTargetId`,
+      ),
+      expectedAssignmentVersion: integerValue(
+        item.expectedAssignmentVersion,
+        `items[${index}].expectedAssignmentVersion`,
+        1,
+      ),
+      expectedAvailabilityVersion: integerValue(
+        item.expectedAvailabilityVersion,
+        `items[${index}].expectedAvailabilityVersion`,
+        1,
+      ),
+    };
+  });
+  if (
+    new Set(items.map((item) => item.cleaningTargetId)).size !== items.length
+  ) {
+    validationError("items의 cleaningTargetId는 중복될 수 없습니다.");
+  }
+  const commandKey = idempotencyKey(request);
+  const commandRequestHash = await requestHash({
+    command: "assignment.commit_notify",
+    actorProfileId: actor.profileId,
+    serviceDate,
+    expectedImpactFingerprint: body.expectedImpactFingerprint,
+    items,
+  });
+  const { data, error } = await clients.admin.rpc(
+    "commit_and_notify_assignments",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_service_date: serviceDate,
+      p_expected_impact_fingerprint: body.expectedImpactFingerprint,
+      p_items: items,
+      p_idempotency_key: commandKey,
+      p_request_hash: commandRequestHash,
+    },
+  );
+  if (error || !data) throw assignmentDatabaseError(error);
+  return toAssignmentCommitResult(data);
 }

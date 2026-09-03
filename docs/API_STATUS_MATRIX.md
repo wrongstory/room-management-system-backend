@@ -58,7 +58,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@2b3969e464ad4ecab3599b75d723e721125d0e54`
+- 개발 통합 source 기준: `dev@c7e0b03dea309e09b720184975413fd5d42bc527`
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -80,12 +80,9 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 - GitHub Pages 읽기 전용 Swagger 포털은 workflow run `33718438975`에서 exact
   `main@cd635b1`을 배포했다. 공개 portal/OpenAPI/manifest HTTP smoke와 production Edge
   OpenAPI path·operationId 집합 비교가 PASS했다.
-- `main` production source는 정상이나 `dev@2adb7a7d`에는 release PR #62의 Pages
-  fail-closed 보강 5개 파일과 hotfix #64의 diagnostics 2개 파일이 아직 역반영되지 않았다.
-  PR #65가 `main`에 병합되면 이 문서와 `RELEASE_V0.2.0.md`의 최종 운영 활성화 기록도
-  함께 역반영해야 한다. tag 전 별도 backport PR에서 세 범위를 모두 `dev`에 반영하고,
-  `dev`의 production snapshot이 `main`과 동일하며 required CI가 PASS했는지 확인한다.
-  이 docs-only PR에는 backport 코드 변경을 섞지 않는다.
+- v0.2.0의 Pages fail-closed 보강, diagnostics hotfix, 최종 운영 활성화 문서는 tag 전에
+  `dev`로 역반영됐다. 이후 `dev`의 #25/#26 assignment source는 다음 release 대상이며
+  production에 아직 적용하지 않는다.
 - production `/docs`는 HTTP 200이지만 hosted 기본 domain의 HTML 렌더링 제약 때문에
   사람용 문서는 GitHub Pages 포털을 사용한다.
 
@@ -288,14 +285,14 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 
 ## 11. Assignment Core — #25
 
-#25는 미통보 `draft_assigned`까지만 소유한다. 현재 feature source에서 구현 중이며 production
-Supabase migration·Edge 배포·현재 사용은 모두 하지 않는다.
+#25는 미통보 `draft_assigned`까지만 소유한다. source gate와 `dev` 병합은 완료됐으며 production
+Supabase migration·Edge 배포·현재 사용은 아직 하지 않는다.
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [ ] | `GET /v1/assignments?serviceDate=...` | maid / admin | ⚠️ | ❌ | ⚠️ | ❌ | ❌ | feature #25 구현·검증 중 |
-| [ ] | `GET /v1/assignments/{cleaningTargetId}/history` | maid / admin | ⚠️ | ❌ | ⚠️ | ❌ | ❌ | maid self revision만 |
-| [ ] | `POST /v1/assignments/drafts` | admin | ⚠️ | ❌ | ⚠️ | ❌ | ❌ | notification/outbox/attempt 없음 |
+| [x] | `GET /v1/assignments?serviceDate=...` | maid / admin | ✅ | ❌ | ✅ | ❌ | ❌ | source/dev 완료, production 미승격 |
+| [x] | `GET /v1/assignments/{cleaningTargetId}/history` | maid / admin | ✅ | ❌ | ✅ | ❌ | ❌ | maid self revision만 |
+| [x] | `POST /v1/assignments/drafts` | admin | ✅ | ❌ | ✅ | ❌ | ❌ | notification/outbox/attempt 없음 |
 
 ### #25 source gate
 
@@ -305,18 +302,42 @@ Supabase migration·Edge 배포·현재 사용은 모두 하지 않는다.
 - [x] admin write, maid own read, developer/direct DML 차단 구현
 - [x] OpenAPI 3 operation·한글 연동 계약 반영
 - [x] local Edge/application/DB/concurrency 전체 검증
-- [ ] feature PR 독립 보안/API 리뷰 P0/P1=0
-- [ ] feature PR `dev` 병합
+- [x] feature PR 독립 보안/API 리뷰 P0/P1=0
+- [x] feature PR `dev` 병합 (`dev@c7e0b03` 기준)
 - [ ] release/main 승격 후 production migration·Edge 배포·hosted role smoke
 
-## 12. 아직 개발하지 않은 후속 API 영역
+## 12. Assignment Commit — #26
+
+#26은 오늘/내일 배정의 preflight와 선택 부분집합 알림 확정만 소유한다. 확정 transaction은
+최신 객실 일정·현재 assignment version·현재 availability version·active maid를 다시 검증하고,
+업무 notification과 private outbox 및 `assignment.notified` 감사만 기록한다. cleaning attempt와
+외부 push/network 호출은 만들지 않는다.
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/assignments/commit-impact?serviceDate=...` | admin | ✅ | ❌ | ✅ | ❌ | ❌ | side-effect 없는 fingerprint preflight |
+| [x] | `POST /v1/assignments/commit` | admin | ✅ | ❌ | ✅ | ❌ | ❌ | 선택 부분집합 atomic commit, persistent outbox |
+
+### #26 source gate
+
+- [x] KST 오늘/내일 및 source별 현재 상태·일정 재검증 구현
+- [x] impact fingerprint + assignment/availability version CAS 구현
+- [x] `assignment.commit_notify` scoped idempotency와 partial all-or-nothing 구현
+- [x] notification/private outbox/`assignment.notified` safe audit 구현
+- [x] admin-only Edge route·한글 OpenAPI·Python generated audit contract 반영
+- [x] local fresh 21 migrations·DB/RLS·Edge·concurrency 검증
+- [ ] PR 독립 보안/API 리뷰 P0/P1=0
+- [ ] PR `dev` 병합
+- [ ] release/main 승격 후 production migration·Edge 배포·hosted admin smoke
+
+## 13. 아직 개발하지 않은 후속 API 영역
 
 아래는 Edge 누락이 아니라 **기능/API 자체가 아직 후속 개발 대상**이다. 실제 route는 각 Issue 구현 PR에서 확정하고 이 문서를 갱신한다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|
-| [ ] | 청소 담당 배정·revision·현재 pointer·순서 | feature 구현 중 | #25 | 위 source gate 참조 |
-| [ ] | 배정 저장 시 가능일 재검증·부분 알림 | 미개발 | #26 | #4 분할 |
+| [x] | 청소 담당 배정·revision·현재 pointer·순서 | source/dev 완료 | #25 | production 미승격 |
+| [ ] | 배정 저장 시 가능일 재검증·부분 알림 | feature 구현·검증 중 | #26 | 위 source gate 참조 |
 | [ ] | 시작 전 재배정·취소 요청·관리자 결정 | 미개발 | #27 | #4 분할 |
 | [ ] | 오늘/내일 activation·rollover | 미개발 | #28 | #4 분할 |
 | [ ] | 배정 preview algorithm | 미개발 | #29 | #4 분할 |
@@ -329,7 +350,7 @@ Supabase migration·Edge 배포·현재 사용은 모두 하지 않는다.
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
 
-## 13. Python 운영도구 — #44 Phase A
+## 14. Python 운영도구 — #44 Phase A
 
 Python 운영도구는 Edge Function이 아니라 승인된 Windows PC에서 실행하는 로컬 client다.
 따라서 `Edge source`/`Production Edge` 상태를 만들지 않으며, 실제 사용 가능 판정은 source,
@@ -364,7 +385,7 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 Phase A가 `dev`에 병합돼도 #44 전체 Issue는 Phase B/C와 Windows/hosted gate가 남으므로 Open
 유지한다.
 
-## 14. 현재 우선순위
+## 15. 현재 우선순위
 
 production completeness 기준의 정본 순서다.
 
@@ -383,15 +404,17 @@ production completeness 기준의 정본 순서다.
 13. [x] scheduler actor/invoke secret → Vault/pg_cron/pg_net 활성화
 14. [x] Cron heartbeat/audit/idempotency smoke
 15. [x] GitHub Pages workflow 수동 실행 및 공개 portal/openapi snapshot smoke
-16. [ ] 운영 활성화 문서 PR 독립 리뷰·`main` 병합
-17. [ ] PR #65 `main` 병합 후 별도 backport PR로 아래 변경을 모두 `dev`에 역반영
+16. [x] 운영 활성화 문서 PR 독립 리뷰·`main` 병합
+17. [x] PR #65 `main` 병합 후 별도 backport PR로 아래 변경을 모두 `dev`에 역반영
     - release PR #62 Pages fail-closed 보강
     - hotfix #64 diagnostics 수정
     - PR #65의 `docs/API_STATUS_MATRIX.md`·`docs/RELEASE_V0.2.0.md` 최종 운영 활성화 문서
-18. [ ] backport 후 `dev` production snapshot과 `main` 일치 + required CI PASS
-19. [ ] `v0.2.0` annotated tag / GitHub Release
+18. [x] backport 후 `dev` production snapshot과 `main` 일치 + required CI PASS
+19. [x] `v0.2.0` annotated tag / GitHub Release
+20. [x] #25 Assignment Core source gate·`dev` 병합
+21. [ ] **#26 Assignment Commit source gate** — 이 PR의 독립 리뷰·`dev` 병합 대기
 
-## 15. 이 문서 갱신 규칙
+## 16. 이 문서 갱신 규칙
 
 API 관련 PR은 아래 조건 중 하나라도 발생하면 `docs/API_STATUS_MATRIX.md`를 같이 수정한다.
 
@@ -417,7 +440,7 @@ API 관련 PR은 아래 조건 중 하나라도 발생하면 `docs/API_STATUS_MA
 
 Swagger/OpenAPI에 표시된 operation 수와 이 문서의 **Production Edge ✅** endpoint 수가 다르면 배포 drift로 보고 확인한다.
 
-## 16. 연결 문서·Issue
+## 17. 연결 문서·Issue
 
 - Roadmap: #14
 - v0.2.0 release: #24

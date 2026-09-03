@@ -651,6 +651,8 @@ Table private.notification_outbox {
   delivered_at timestamptz
   last_error_code text
   created_at timestamptz [not null]
+
+  Note: '#26 inserts pending web_push rows transactionally with assignment notifications. Claim/retry/provider handling remains #10.'
 }
 
 Table public.audit_events {

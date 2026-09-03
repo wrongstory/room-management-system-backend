@@ -65,6 +65,7 @@ Issue #58에서 현재 성공 mutation의 append 지점을 전수 확인했다. 
 |---|---|
 | account | `account.bootstrap_developer_created`, `account.bootstrap_admin_created`, `account.created`, `account.role_changed`, `account.status_changed`, `account.unlocked`, `account.password_reset_requested`, `account.password_changed` |
 | availability | `availability.submitted`, `availability.change_requested`, `availability.change_decided` |
+| assignment | `assignment.draft_saved`, `assignment.notified` |
 | reservation | `reservation.created`, `reservation.changed`, `reservation.cancelled`, `reservation.manual_checkout`, `reservation.scheduled_check_in`, `reservation.scheduled_checkout`, `reservation.guest_name_retention_purged` |
 | cleaning request | `cleaning.manual_request.created`, `cleaning.manual_request.cancelled` |
 | room | `room.master_data_changed`, `room.create_block`, `room.release_block`, `room.set_candle_count`, `room.report_issue`, `room.resolve_issue`, `room.record_pin_sync` |

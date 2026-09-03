@@ -25,6 +25,7 @@ class DeveloperAuditEventSummary:
         must_change_password (bool | Unset):
         maid_profile_id (UUID | Unset):
         cleaning_target_id (UUID | Unset):
+        assignment_id (UUID | Unset):
         week_start (datetime.date | Unset):
         version (int | Unset):
         source_version (int | Unset):
@@ -64,6 +65,7 @@ class DeveloperAuditEventSummary:
     must_change_password: bool | Unset = UNSET
     maid_profile_id: UUID | Unset = UNSET
     cleaning_target_id: UUID | Unset = UNSET
+    assignment_id: UUID | Unset = UNSET
     week_start: datetime.date | Unset = UNSET
     version: int | Unset = UNSET
     source_version: int | Unset = UNSET
@@ -115,6 +117,10 @@ class DeveloperAuditEventSummary:
         cleaning_target_id: str | Unset = UNSET
         if not isinstance(self.cleaning_target_id, Unset):
             cleaning_target_id = str(self.cleaning_target_id)
+
+        assignment_id: str | Unset = UNSET
+        if not isinstance(self.assignment_id, Unset):
+            assignment_id = str(self.assignment_id)
 
         week_start: str | Unset = UNSET
         if not isinstance(self.week_start, Unset):
@@ -217,6 +223,8 @@ class DeveloperAuditEventSummary:
             field_dict["maidProfileId"] = maid_profile_id
         if cleaning_target_id is not UNSET:
             field_dict["cleaningTargetId"] = cleaning_target_id
+        if assignment_id is not UNSET:
+            field_dict["assignmentId"] = assignment_id
         if week_start is not UNSET:
             field_dict["weekStart"] = week_start
         if version is not UNSET:
@@ -311,6 +319,13 @@ class DeveloperAuditEventSummary:
             cleaning_target_id = UNSET
         else:
             cleaning_target_id = UUID(_cleaning_target_id)
+
+        _assignment_id = d.pop("assignmentId", UNSET)
+        assignment_id: UUID | Unset
+        if isinstance(_assignment_id, Unset):
+            assignment_id = UNSET
+        else:
+            assignment_id = UUID(_assignment_id)
 
         _week_start = d.pop("weekStart", UNSET)
         week_start: datetime.date | Unset
@@ -440,6 +455,7 @@ class DeveloperAuditEventSummary:
             must_change_password=must_change_password,
             maid_profile_id=maid_profile_id,
             cleaning_target_id=cleaning_target_id,
+            assignment_id=assignment_id,
             week_start=week_start,
             version=version,
             source_version=source_version,

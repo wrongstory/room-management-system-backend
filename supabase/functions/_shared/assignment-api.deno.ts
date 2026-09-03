@@ -1,7 +1,9 @@
 import {
+  assignmentCommitImpact,
   assignmentDatabaseError,
   assignmentHistory,
   assignmentTargetIdFromPath,
+  commitAssignments,
   listAssignments,
   saveAssignmentDraft,
 } from "./assignment-api.ts";
@@ -352,5 +354,179 @@ Deno.test("assignment validation rejects malformed query and draft input", async
       )
     );
     assert(error.code === "VALIDATION_ERROR", "invalid idempotency key");
+  }
+});
+
+function commitCandidate(overrides: Record<string, unknown> = {}) {
+  return {
+    assignmentId,
+    cleaningTargetId: targetId,
+    roomId,
+    roomNumber: "101",
+    maidProfileId: maid.profileId,
+    maidDisplayName: "메이드",
+    serviceDate: "2026-09-04",
+    sequenceNumber: 1,
+    revision: 2,
+    targetAssignmentVersion: 2,
+    expectedAvailabilityVersion: 3,
+    availableFrom: "2026-09-04T01:00:00Z",
+    dueAt: "2026-09-04T06:00:00Z",
+    ...overrides,
+  };
+}
+
+const fingerprint = "a".repeat(64);
+
+Deno.test("assignment commit preflight is admin-only and projects safe impact", async () => {
+  for (const actor of [maid, developer]) {
+    const denied = await captureEdgeError(() =>
+      assignmentCommitImpact(
+        request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+        {} as EdgeClients,
+        actor,
+      )
+    );
+    assert(denied.code === "ADMIN_REQUIRED", `${actor.role} preflight denied`);
+  }
+
+  let args: Record<string, unknown> = {};
+  const clients = {
+    admin: {
+      async rpc(name: string, value: Record<string, unknown>) {
+        assert(name === "get_assignment_commit_impact", "preflight RPC");
+        args = value;
+        return {
+          data: {
+            serviceDate: "2026-09-04",
+            impactFingerprint: fingerprint,
+            committableDrafts: [commitCandidate()],
+            blockedDrafts: [],
+            remainingUnassignedTargets: [],
+            requestHash: "must-not-leak",
+          },
+          error: null,
+        };
+      },
+    },
+  } as unknown as EdgeClients;
+  const impact = await assignmentCommitImpact(
+    request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+    clients,
+    admin,
+  );
+  assert(args.p_actor_profile_id === admin.profileId, "actor bound");
+  assert(impact.committableDrafts.length === 1, "candidate projected");
+  assert(!("requestHash" in impact), "unknown fields omitted");
+});
+
+Deno.test("assignment partial commit forwards scoped idempotency and allowlists response", async () => {
+  let rpcName = "";
+  let args: Record<string, unknown> = {};
+  const clients = {
+    admin: {
+      async rpc(name: string, value: Record<string, unknown>) {
+        rpcName = name;
+        args = value;
+        return {
+          data: {
+            serviceDate: "2026-09-04",
+            impactFingerprint: fingerprint,
+            notifiedAssignments: [
+              commitCandidate({
+                notifiedAt: "2026-09-03T12:00:00Z",
+              }),
+            ],
+            remainingDrafts: [
+              commitCandidate({
+                assignmentId: "40000000-0000-4000-8000-000000000002",
+              }),
+            ],
+            blockedDrafts: [],
+            unassignedTargets: [],
+            requestHash: "must-not-leak",
+          },
+          error: null,
+        };
+      },
+    },
+  } as unknown as EdgeClients;
+  const result = await commitAssignments(
+    request("/v1/assignments/commit", "POST", {
+      serviceDate: "2026-09-04",
+      expectedImpactFingerprint: fingerprint,
+      items: [{
+        cleaningTargetId: targetId,
+        expectedAssignmentVersion: 2,
+        expectedAvailabilityVersion: 3,
+      }],
+    }),
+    clients,
+    admin,
+  );
+  assert(rpcName === "commit_and_notify_assignments", "commit RPC");
+  assert(args.p_actor_profile_id === admin.profileId, "actor bound");
+  assert(args.p_expected_impact_fingerprint === fingerprint, "fingerprint");
+  assert(/^[0-9a-f]{64}$/.test(String(args.p_request_hash)), "request hash");
+  assert(result.notifiedAssignments.length === 1, "notified projection");
+  assert(result.remainingDrafts.length === 1, "partial remainder");
+  assert(!("requestHash" in result), "unknown fields omitted");
+});
+
+Deno.test("assignment commit rejects non-admin and malformed payloads before RPC", async () => {
+  const validBody = {
+    serviceDate: "2026-09-04",
+    expectedImpactFingerprint: fingerprint,
+    items: [{
+      cleaningTargetId: targetId,
+      expectedAssignmentVersion: 2,
+      expectedAvailabilityVersion: 3,
+    }],
+  };
+  for (const actor of [maid, developer]) {
+    const denied = await captureEdgeError(() =>
+      commitAssignments(
+        request("/v1/assignments/commit", "POST", validBody),
+        {} as EdgeClients,
+        actor,
+      )
+    );
+    assert(denied.code === "ADMIN_REQUIRED", `${actor.role} commit denied`);
+  }
+  const invalidBodies = [
+    { ...validBody, expectedImpactFingerprint: "bad" },
+    { ...validBody, items: [] },
+    { ...validBody, items: [...validBody.items, ...validBody.items] },
+    { ...validBody, extra: true },
+    {
+      ...validBody,
+      items: [{ ...validBody.items[0], expectedAvailabilityVersion: 0 }],
+    },
+  ];
+  for (const body of invalidBodies) {
+    const denied = await captureEdgeError(() =>
+      commitAssignments(
+        request("/v1/assignments/commit", "POST", body),
+        {} as EdgeClients,
+        admin,
+      )
+    );
+    assert(denied.code === "VALIDATION_ERROR", "malformed commit denied");
+  }
+});
+
+Deno.test("assignment commit database failures use stable redacted codes", () => {
+  for (
+    const code of [
+      "ASSIGNMENT_IMPACT_CHANGED",
+      "ASSIGNMENT_DRAFT_STALE_SCHEDULE",
+      "ASSIGNMENT_AVAILABILITY_REQUIRED",
+      "ASSIGNMENT_AVAILABILITY_STALE",
+      "ASSIGNMENT_MAID_UNAVAILABLE",
+      "ASSIGNMENT_WINDOW_EXPIRED",
+      "ASSIGNMENT_COMMIT_NOT_ALLOWED",
+    ]
+  ) {
+    assert(assignmentDatabaseError({ message: code }).code === code, code);
   }
 });
