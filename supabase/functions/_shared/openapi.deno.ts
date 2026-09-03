@@ -62,6 +62,9 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       "/v1/availability/change-requests",
       "/v1/availability/change-requests/{requestId}/decision",
       "/v1/availability/candidates",
+      "/v1/assignments",
+      "/v1/assignments/{cleaningTargetId}/history",
+      "/v1/assignments/drafts",
       "/v1/reservations",
       "/v1/reservations/{reservationId}",
       "/v1/reservations/{reservationId}/cancel",
@@ -87,6 +90,16 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
         '"#/components/schemas/AvailabilityChangeRequest"',
       ),
     "availability codegen schemas must be reusable",
+  );
+  assert(
+    serialized.includes('"#/components/schemas/Assignment"') &&
+      serialized.includes('"#/components/schemas/AssignmentDraftRequest"'),
+    "assignment codegen schemas must be reusable",
+  );
+  assert(
+    serialized.includes('"ASSIGNMENT_VERSION_CONFLICT"') &&
+      serialized.includes('"ASSIGNMENT_SEQUENCE_CONFLICT"'),
+    "assignment CAS and ordering errors must be documented",
   );
   assert(
     serialized.includes('"OUTSIDE_AVAILABILITY_WINDOW"') &&

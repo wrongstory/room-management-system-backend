@@ -9,6 +9,10 @@ const availabilityApiUrl = new URL(
   '../supabase/functions/_shared/availability-api.ts',
   import.meta.url
 );
+const assignmentApiUrl = new URL(
+  '../supabase/functions/_shared/assignment-api.ts',
+  import.meta.url
+);
 const reservationApiUrl = new URL(
   '../supabase/functions/_shared/reservation-api.ts',
   import.meta.url
@@ -200,7 +204,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toContain(
-      'expectedMigrationName = "actor_activity_audit_contract"'
+      'expectedMigrationName = "assignment_core"'
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -234,6 +238,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('recordAuthorizationDenied(clients, actor, source, error.code)');
     expect(contract).toContain('edge.authorization.reservations');
     expect(contract).toContain('edge.authorization.rooms');
+    expect(contract).toContain('edge.authorization.assignments');
     expect(activityApi).toContain('record_actor_activity_event');
     expect(activityApi).toContain('record_unknown_login_failure');
     expect(activityApi).toContain('record_authorization_denial');
@@ -271,6 +276,26 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(openApi).toContain('AvailabilityChangeRequestInput');
     expect(openApi).toContain('"OUTSIDE_AVAILABILITY_WINDOW"');
     expect(openApi).toContain('"STALE_VERSION"');
+  });
+
+  it('ports assignment draft revisions through RLS reads and an actor-bound command', async () => {
+    const [api, assignmentApi, openApi] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(assignmentApiUrl, 'utf8'),
+      readFile(openApiUrl, 'utf8')
+    ]);
+
+    expect(api).toContain('path === "/v1/assignments"');
+    expect(api).toContain('path === "/v1/assignments/drafts"');
+    expect(api).toContain('assignmentTargetIdFromPath(path)');
+    expect(assignmentApi).toContain('clients.forAccessToken(bearerToken(request))');
+    expect(assignmentApi).toContain('"save_cleaning_assignment_draft"');
+    expect(assignmentApi).toContain('p_actor_profile_id: actor.profileId');
+    expect(assignmentApi).toContain('requireBusinessAdmin(actor)');
+    expect(assignmentApi).toContain('requirePasswordChanged(actor)');
+    expect(openApi).toContain('operationId: "listAssignments"');
+    expect(openApi).toContain('operationId: "getAssignmentHistory"');
+    expect(openApi).toContain('operationId: "saveAssignmentDraft"');
   });
 
   it('ports all reservation operations through the existing actor-bound RPCs', async () => {

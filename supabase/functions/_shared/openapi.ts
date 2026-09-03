@@ -153,6 +153,11 @@ export const openApiDocument = {
         "메이드의 다음 주 가능일 제출·변경 요청과 관리자의 승인·후보 조회 API입니다. 제출창은 일요일 12:00–23:59 KST이며 서버가 DB 시각으로 판정합니다.",
     },
     {
+      name: "Assignments",
+      description:
+        "미통보 청소 배정 draft의 담당 메이드·서비스 날짜·순서 immutable revision API입니다. 알림·outbox·청소 attempt는 이 API에서 만들지 않습니다.",
+    },
+    {
       name: "Reservations",
       description:
         "비밀번호 변경을 완료한 active business admin 전용 예약·점유·수동 청소 요청 API입니다. 고객명은 목록에 포함하지 않고 권한을 재검증한 단건 상세에서만 복호화합니다.",
@@ -889,6 +894,101 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/assignments": {
+      get: {
+        tags: ["Assignments"],
+        operationId: "listAssignments",
+        summary: "서비스 날짜별 청소 배정 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 자신의 배정만 조회합니다. includeHistory=false가 기본이며 true일 때도 maid에게는 본인 revision만 반환됩니다. developer는 업무 배정을 조회할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "serviceDate",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "배정 snapshot의 서비스 날짜(YYYY-MM-DD)",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description:
+              "admin 선택 필터. maid가 다른 profile ID를 전달하면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
+          },
+          {
+            name: "includeHistory",
+            in: "query",
+            schema: { type: "boolean", default: false },
+            description: "종료된 과거 immutable revision 포함 여부",
+          },
+        ],
+        responses: {
+          "200": assignmentListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/assignments/{cleaningTargetId}/history": {
+      get: {
+        tags: ["Assignments"],
+        operationId: "getAssignmentHistory",
+        summary: "청소 대상의 배정 revision 이력 조회",
+        description:
+          "active business admin은 전체 revision을 조회하고 active maid는 자신에게 배정된 revision만 조회합니다. maid가 해당 target의 어느 revision에도 포함되지 않으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [{
+          name: "cleaningTargetId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "청소 대상 ID",
+        }],
+        responses: {
+          "200": assignmentListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/assignments/drafts": {
+      post: {
+        tags: ["Assignments"],
+        operationId: "saveAssignmentDraft",
+        summary: "미통보 청소 배정 draft 저장",
+        description:
+          "비밀번호 변경을 완료한 active business admin만 호출합니다. cleaning target row lock, expectedAssignmentVersion CAS, scoped Idempotency-Key로 현재 draft를 새 immutable revision으로 교체합니다. 이 명령은 알림·outbox·attempt를 생성하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/AssignmentDraftRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": assignmentItemResponse("청소 배정 draft 저장 완료"),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/reservations": {
       get: {
         tags: ["Reservations"],
@@ -1228,6 +1328,7 @@ export const openApiDocument = {
           "PASSWORD_CHANGE_REQUIRED",
           "ACCOUNT_MANAGER_REQUIRED",
           "ADMIN_REQUIRED",
+          "ASSIGNMENT_ACCESS_REQUIRED",
           "DEVELOPER_REQUIRED",
           "DEVELOPER_PROJECTION_FAILED",
           "DATABASE_UNREACHABLE",
@@ -1259,6 +1360,12 @@ export const openApiDocument = {
           "MAID_REQUIRED",
           "AVAILABILITY_ACCESS_REQUIRED",
           "ACTIVE_MAID_REQUIRED",
+          "CLEANING_TARGET_NOT_FOUND",
+          "ASSIGNMENT_VERSION_CONFLICT",
+          "ASSIGNMENT_TARGET_STATE_INVALID",
+          "ASSIGNMENT_SEQUENCE_CONFLICT",
+          "ASSIGNMENT_NOT_FOUND",
+          "ASSIGNMENT_COMMAND_FAILED",
           "ACTIVE_ADMIN_REQUIRED",
           "OUTSIDE_AVAILABILITY_WINDOW",
           "CHANGE_REQUEST_BEFORE_DEADLINE",
@@ -2029,6 +2136,68 @@ export const openApiDocument = {
           runtime: { $ref: "#/components/schemas/DeveloperRuntimeStatus" },
           database: { $ref: "#/components/schemas/DeveloperDatabaseStatus" },
           scheduler: { $ref: "#/components/schemas/DeveloperSchedulerStatus" },
+        },
+      },
+      Assignment: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "assignmentId",
+          "cleaningTargetId",
+          "roomId",
+          "roomNumber",
+          "maidProfileId",
+          "maidDisplayName",
+          "serviceDate",
+          "sequenceNumber",
+          "revision",
+          "isCurrent",
+          "targetAssignmentVersion",
+          "availableFrom",
+          "dueAt",
+          "notifiedAt",
+          "endedAt",
+          "createdAt",
+        ],
+        properties: {
+          assignmentId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          maidProfileId: { type: "string", format: "uuid" },
+          maidDisplayName: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          sequenceNumber: { type: "integer", minimum: 1 },
+          revision: { type: "integer", minimum: 1 },
+          isCurrent: { type: "boolean" },
+          targetAssignmentVersion: {
+            type: "integer",
+            minimum: 1,
+            description: "다음 draft 저장의 expectedAssignmentVersion CAS 값",
+          },
+          availableFrom: { type: ["string", "null"], format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+          notifiedAt: { type: ["string", "null"], format: "date-time" },
+          endedAt: { type: ["string", "null"], format: "date-time" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+        description:
+          "배정 당시 서비스 날짜·접근 가능 시각·마감 시각을 보존하는 revision projection입니다. 전화번호, 고객명, PIN, provider 식별자는 포함하지 않습니다.",
+      },
+      AssignmentDraftRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cleaningTargetId",
+          "maidProfileId",
+          "sequenceNumber",
+          "expectedAssignmentVersion",
+        ],
+        properties: {
+          cleaningTargetId: { type: "string", format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          sequenceNumber: { type: "integer", minimum: 1 },
+          expectedAssignmentVersion: { type: "integer", minimum: 1 },
         },
       },
       AvailabilityDay: {
@@ -2943,6 +3112,47 @@ function availabilityObjectResponse(
           additionalProperties: false,
           required: [property],
           properties: { [property]: { $ref: reference } },
+        },
+      },
+    },
+  };
+}
+
+function assignmentListResponse(): Record<string, unknown> {
+  return {
+    description: "청소 배정 revision 목록",
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["assignments"],
+          properties: {
+            assignments: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Assignment" },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function assignmentItemResponse(description: string): Record<string, unknown> {
+  return {
+    description,
+    headers: { "Cache-Control": noStoreHeader },
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["assignment"],
+          properties: {
+            assignment: { $ref: "#/components/schemas/Assignment" },
+          },
         },
       },
     },

@@ -8,6 +8,12 @@ import {
   submitAvailability,
 } from "../_shared/availability-api.ts";
 import {
+  assignmentHistory,
+  assignmentTargetIdFromPath,
+  listAssignments,
+  saveAssignmentDraft,
+} from "../_shared/assignment-api.ts";
+import {
   changeAccountRole,
   changeAccountStatus,
   changePassword,
@@ -357,6 +363,46 @@ export async function handleApiRequest(
             request,
             clients,
             actor,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/assignments") {
+      return jsonResponse(
+        { assignments: await listAssignments(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && path === "/v1/assignments/drafts") {
+      return jsonResponse(
+        { assignment: await saveAssignmentDraft(request, clients, actor) },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "GET" &&
+      /^\/v1\/assignments\/[^/]+\/history$/.test(path)
+    ) {
+      const cleaningTargetId = assignmentTargetIdFromPath(path);
+      if (!cleaningTargetId) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      return jsonResponse(
+        {
+          assignments: await assignmentHistory(
+            request,
+            clients,
+            actor,
+            cleaningTargetId,
           ),
         },
         200,

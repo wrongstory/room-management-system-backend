@@ -94,6 +94,7 @@ erDiagram
 | 입실 준비 증명 | preparation obligation의 current attempt와 approved submission을 같은 수행으로 묶고, target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서가 직전 점유 종료 이후부터 해당 체크인 이전까지 같은 객실에서 완결된 경우만 `approved` 허용. submission 소비 원장은 append-only·전역 unique라 다른 예약에 재사용할 수 없음 |
 | PIN lease | 객실·예약·target·현재 assignment·현재 attempt·담당 메이드·최신 verified PIN version을 한 계약으로 묶음. 수동 checkout은 stale lease를 폐기하고 현재 verified version으로 현재 미공개 lease 한 건만 새 revision으로 재발급 |
 | 담당 변경 | 대상 `assignment_version` CAS + 현재 담당 partial unique |
+| 미통보 draft 배정 | target row lock + immutable assignment revision + 현재 `(maid, service_date, sequence)` partial unique. 저장 시 target 날짜·접근 가능·마감 시각 snapshot 고정 |
 | 청소 시작 | 메이드별 `in_progress` partial unique |
 | 제출 | `client_submission_id` unique + 회차별 현재 제출 unique |
 | 검수 | 제출별 decision unique, 현재 `submitted` 버전만 조건부 전이 |
@@ -102,6 +103,8 @@ erDiagram
 | 알림 | 수신자별 dedupe key unique, 10분 group key |
 
 복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃은 현재 SQL RPC에서 짧은 transaction으로 예약, obligation, revision/event, 감사 원장을 함께 커밋합니다. 배정 통보·검수·지급도 같은 원칙으로 후속 구현합니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
+
+#25의 미통보 draft 배정은 기존 `cleaning_targets`와 `cleaning_assignments`를 재사용합니다. active business admin만 service-role RPC를 호출하며 DB가 actor를 다시 검사합니다. target의 `assignment_version`을 CAS로 잠근 뒤 기존 current draft를 `DRAFT_REVISED`로 닫고 새 immutable revision을 추가합니다. 이 단계는 `draft_assigned`까지만 전이하며 notification, outbox, cleaning attempt는 생성하지 않습니다.
 
 ## RLS 원칙
 

@@ -441,9 +441,12 @@ Table public.cleaning_assignments {
   id uuid [pk]
   cleaning_target_id uuid [not null]
   maid_profile_id uuid [not null]
+  service_date date [not null]
   sequence_number int [not null]
   revision bigint [not null]
   is_current boolean [not null, default: true]
+  available_from_snapshot timestamptz
+  due_at_snapshot timestamptz
   notified_at timestamptz
   ended_at timestamptz
   change_reason_code text
@@ -452,9 +455,10 @@ Table public.cleaning_assignments {
 
   Indexes {
     (cleaning_target_id, revision) [unique]
+    (maid_profile_id, service_date, sequence_number) [unique, note: 'Partial where is_current']
   }
 
-  Note: 'A partial unique index permits one current assignment per target.'
+  Note: 'Partial unique indexes permit one current assignment per target and one current sequence per maid/service date. Target, maid, sequence, revision, schedule snapshots, changer, and created time are immutable.'
 }
 
 Table public.cleaning_attempts {

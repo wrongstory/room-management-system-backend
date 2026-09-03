@@ -58,7 +58,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@2adb7a7de2474883d892232395295dcf643b20a4`
+- 개발 통합 source 기준: `dev@2b3969e464ad4ecab3599b75d723e721125d0e54`
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -286,13 +286,36 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 - 활성화 gate 5회 succeeded; 2026-09-03 readback 1866/1866 succeeded, latest HTTP 200,
   heartbeat succeeded, transition 0, rooms 121/reservations 0
 
-## 11. 아직 개발하지 않은 후속 API 영역
+## 11. Assignment Core — #25
+
+#25는 미통보 `draft_assigned`까지만 소유한다. 현재 feature source에서 구현 중이며 production
+Supabase migration·Edge 배포·현재 사용은 모두 하지 않는다.
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [ ] | `GET /v1/assignments?serviceDate=...` | maid / admin | ⚠️ | ❌ | ⚠️ | ❌ | ❌ | feature #25 구현·검증 중 |
+| [ ] | `GET /v1/assignments/{cleaningTargetId}/history` | maid / admin | ⚠️ | ❌ | ⚠️ | ❌ | ❌ | maid self revision만 |
+| [ ] | `POST /v1/assignments/drafts` | admin | ⚠️ | ❌ | ⚠️ | ❌ | ❌ | notification/outbox/attempt 없음 |
+
+### #25 source gate
+
+- [x] 기존 `cleaning_targets`·`cleaning_assignments` 재사용 설계
+- [x] service date/access window snapshot과 current maid/date/sequence unique 구현
+- [x] target row lock + assignmentVersion CAS + scoped request hash/idempotency 구현
+- [x] admin write, maid own read, developer/direct DML 차단 구현
+- [x] OpenAPI 3 operation·한글 연동 계약 반영
+- [x] local Edge/application/DB/concurrency 전체 검증
+- [ ] feature PR 독립 보안/API 리뷰 P0/P1=0
+- [ ] feature PR `dev` 병합
+- [ ] release/main 승격 후 production migration·Edge 배포·hosted role smoke
+
+## 12. 아직 개발하지 않은 후속 API 영역
 
 아래는 Edge 누락이 아니라 **기능/API 자체가 아직 후속 개발 대상**이다. 실제 route는 각 Issue 구현 PR에서 확정하고 이 문서를 갱신한다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|
-| [ ] | 청소 담당 배정·revision·현재 pointer·순서 | 미개발 | #25 | #4 분할 |
+| [ ] | 청소 담당 배정·revision·현재 pointer·순서 | feature 구현 중 | #25 | 위 source gate 참조 |
 | [ ] | 배정 저장 시 가능일 재검증·부분 알림 | 미개발 | #26 | #4 분할 |
 | [ ] | 시작 전 재배정·취소 요청·관리자 결정 | 미개발 | #27 | #4 분할 |
 | [ ] | 오늘/내일 activation·rollover | 미개발 | #28 | #4 분할 |
@@ -306,7 +329,7 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
 
-## 12. Python 운영도구 — #44 Phase A
+## 13. Python 운영도구 — #44 Phase A
 
 Python 운영도구는 Edge Function이 아니라 승인된 Windows PC에서 실행하는 로컬 client다.
 따라서 `Edge source`/`Production Edge` 상태를 만들지 않으며, 실제 사용 가능 판정은 source,
@@ -341,7 +364,7 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 Phase A가 `dev`에 병합돼도 #44 전체 Issue는 Phase B/C와 Windows/hosted gate가 남으므로 Open
 유지한다.
 
-## 13. 현재 우선순위
+## 14. 현재 우선순위
 
 production completeness 기준의 정본 순서다.
 
@@ -368,7 +391,7 @@ production completeness 기준의 정본 순서다.
 18. [ ] backport 후 `dev` production snapshot과 `main` 일치 + required CI PASS
 19. [ ] `v0.2.0` annotated tag / GitHub Release
 
-## 14. 이 문서 갱신 규칙
+## 15. 이 문서 갱신 규칙
 
 API 관련 PR은 아래 조건 중 하나라도 발생하면 `docs/API_STATUS_MATRIX.md`를 같이 수정한다.
 
@@ -394,7 +417,7 @@ API 관련 PR은 아래 조건 중 하나라도 발생하면 `docs/API_STATUS_MA
 
 Swagger/OpenAPI에 표시된 operation 수와 이 문서의 **Production Edge ✅** endpoint 수가 다르면 배포 drift로 보고 확인한다.
 
-## 15. 연결 문서·Issue
+## 16. 연결 문서·Issue
 
 - Roadmap: #14
 - v0.2.0 release: #24
@@ -407,6 +430,7 @@ Swagger/OpenAPI에 표시된 operation 수와 이 문서의 **Production Edge �
 - Availability Edge parity: #51 (P0)
 - Reservation Edge parity: #52 (P1)
 - Room Edge parity: #53 (P1)
+- Assignment Core: #25
 - `docs/AI_BACKEND_PRODUCT_GUIDE.md`
 - `docs/FRONTEND_API_INTEGRATION.md`
 - `docs/DEVELOPER_OPERATIONS_API.md`
