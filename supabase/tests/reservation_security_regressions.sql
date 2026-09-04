@@ -166,6 +166,12 @@ select public.mutate_room_operation(
   repeat('5', 64)
 );
 
+-- Synthetic published checkout templates: production configuration is never seeded here.
+insert into public.cleaning_template_versions (
+  room_type_id, cleaning_kind, version, status, duration_minutes, photo_slots, published_at, created_by
+) select id, 'checkout', 1, 'published', 60, '[]'::jsonb, now(), '72000000-0000-4000-8000-000000000001'
+from public.room_types;
+
 select public.create_reservation(
   '72000000-0000-4000-8000-000000000001',
   '74000000-0000-4000-8000-000000000001',
@@ -198,28 +204,6 @@ insert into reservation_security_results values
       '74000000-0000-4000-8000-000000000099'
     )))
   ));
-
-insert into public.cleaning_template_versions (
-  room_type_id,
-  cleaning_kind,
-  version,
-  status,
-  duration_minutes,
-  photo_slots,
-  published_at,
-  created_by
-)
-select
-  r.room_type_id,
-  'checkout',
-  1,
-  'published',
-  60,
-  '[]'::jsonb,
-  now(),
-  '72000000-0000-4000-8000-000000000001'
-from public.rooms r
-where r.room_number = '136';
 
 insert into public.cleaning_template_versions (
   room_type_id,
@@ -699,63 +683,10 @@ insert into reservation_security_results values
        from public.reservations where id = '74000000-0000-4000-8000-000000000022')
   ));
 
-insert into public.cleaning_targets (
-  id,
-  room_id,
-  reservation_id,
-  checkout_obligation_id,
-  cleaning_kind,
-  source,
-  source_key,
-  original_service_date,
-  effective_service_date,
-  available_from,
-  due_at,
-  status,
-  room_type_snapshot,
-  fee_snapshot,
-  template_snapshot,
-  created_by
-)
-select
-  '73000000-0000-4000-8000-000000000002',
-  r.room_id,
-  r.id,
-  r.checkout_obligation_id,
-  'checkout',
-  'scheduled_checkout',
-  'scheduled-checkout:74000000-0000-4000-8000-000000000002',
-  '2030-03-02',
-  '2030-03-02',
-  r.check_out_at,
-  null,
-  'notified',
-  jsonb_build_object('roomTypeId', rm.room_type_id),
-  rt.base_cleaning_fee,
-  jsonb_build_object('templateId', tv.id, 'version', tv.version),
-  '72000000-0000-4000-8000-000000000001'
-from public.reservations r
-join public.rooms rm on rm.id = r.room_id
-join public.room_types rt on rt.id = rm.room_type_id
-join public.cleaning_template_versions tv
-  on tv.room_type_id = rm.room_type_id
-  and tv.cleaning_kind = 'checkout'
-  and tv.status = 'published'
-where r.id = '74000000-0000-4000-8000-000000000002';
-
-update public.checkout_cleaning_obligations
-set status = 'materialized',
-    current_cleaning_target_id = '73000000-0000-4000-8000-000000000002'
-where reservation_id = '74000000-0000-4000-8000-000000000002';
-
-insert into public.cleaning_target_schedule_revisions (
-  cleaning_target_id, revision, effective_service_date, available_from, due_at,
-  reason_code, changed_by
-) values (
-  '73000000-0000-4000-8000-000000000002', 1, '2030-03-02',
-  '2030-03-02 11:00:00+09', null, 'INITIAL_ASSIGNMENT',
-  '72000000-0000-4000-8000-000000000001'
-);
+-- Reservation creation already owns the immutable planned identity.
+update public.cleaning_targets set status='notified', assignment_version=2
+where id=(select planned_cleaning_target_id from public.checkout_cleaning_obligations
+where reservation_id='74000000-0000-4000-8000-000000000002');
 
 insert into public.cleaning_assignments (
   id, cleaning_target_id, maid_profile_id, sequence_number, revision,
@@ -763,63 +694,21 @@ insert into public.cleaning_assignments (
 ) values
 (
   '76000000-0000-4000-8000-000000000000',
-  '73000000-0000-4000-8000-000000000002',
+  (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000002'),
   '72000000-0000-4000-8000-000000000002',
   1, 1, false, null, '2030-03-01 11:00:00+09', 'PAST_UNSTARTED_REASSIGNMENT',
   '72000000-0000-4000-8000-000000000001'
 ),
 (
   '76000000-0000-4000-8000-000000000001',
-  '73000000-0000-4000-8000-000000000002',
+  (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000002'),
   '72000000-0000-4000-8000-000000000002',
   1, 2, true, '2030-03-01 12:00:00+09', null, null,
   '72000000-0000-4000-8000-000000000001'
 );
 
-insert into public.cleaning_attempts (
-  id, cleaning_target_id, assignment_id, maid_profile_id, attempt_number,
-  status, assignment_revision, template_snapshot, room_snapshot
-) values
-(
-  '77000000-0000-4000-8000-000000000000',
-  '73000000-0000-4000-8000-000000000002',
-  '76000000-0000-4000-8000-000000000000',
-  '72000000-0000-4000-8000-000000000002',
-  1, 'superseded', 1, '{}'::jsonb, '{}'::jsonb
-),
-(
-  '77000000-0000-4000-8000-000000000001',
-  '73000000-0000-4000-8000-000000000002',
-  '76000000-0000-4000-8000-000000000001',
-  '72000000-0000-4000-8000-000000000002',
-  2, 'scheduled', 2, '{}'::jsonb, '{}'::jsonb
-),
-(
-  '77000000-0000-4000-8000-000000000009',
-  '73000000-0000-4000-8000-000000000002',
-  '76000000-0000-4000-8000-000000000001',
-  '72000000-0000-4000-8000-000000000002',
-  9, 'superseded', 2, '{}'::jsonb, '{}'::jsonb
-);
-
-insert into public.room_pin_access_leases (
-  id, room_id, reservation_id, cleaning_target_id, assignment_id, attempt_id,
-  pin_version, issued_to, issued_at, expires_at
-)
-select
-  '78000000-0000-4000-8000-000000000001',
-  r.room_id,
-  r.id,
-  '73000000-0000-4000-8000-000000000002',
-  '76000000-0000-4000-8000-000000000001',
-  '77000000-0000-4000-8000-000000000001',
-  1,
-  '72000000-0000-4000-8000-000000000002',
-  '2030-03-01 12:00:00+09',
-  '2030-03-02 14:00:00+09'
-from public.reservations r
-where r.id = '74000000-0000-4000-8000-000000000002';
-
+-- No attempt/PIN may exist before checkout; linkage tests reuse independent
+-- completed additional-cleaning proof in room 332.
 do $$
 begin
   begin
@@ -829,10 +718,10 @@ begin
     ) values (
       '78000000-0000-4000-8000-000000000002',
       (select id from public.rooms where room_number = '135'),
-      '74000000-0000-4000-8000-000000000002',
-      '73000000-0000-4000-8000-000000000002',
-      '76000000-0000-4000-8000-000000000001',
-      '77000000-0000-4000-8000-000000000001',
+      null,
+      '73000000-0000-4000-8000-000000000021',
+      '76000000-0000-4000-8000-000000000021',
+      '77000000-0000-4000-8000-000000000021',
       1,
       '72000000-0000-4000-8000-000000000002',
       '2030-03-01 12:00:00+09',
@@ -847,38 +736,13 @@ begin
 end;
 $$;
 
-insert into public.cleaning_submissions (
-  id, cleaning_attempt_id, client_submission_id, version, status,
-  photo_manifest, submitted_by, submitted_at
-) values (
-  '79000000-0000-4000-8000-000000000001',
-  '77000000-0000-4000-8000-000000000001',
-  '79000000-0000-4000-8000-000000000002',
-  1,
-  'approved',
-  '{}'::jsonb,
-  '72000000-0000-4000-8000-000000000002',
-  '2030-03-01 13:00:00+09'
-);
-
-insert into public.inspection_decisions (
-  id, submission_id, decision, reason_code, decided_by, decided_at
-) values (
-  '79000000-0000-4000-8000-000000000003',
-  '79000000-0000-4000-8000-000000000001',
-  'approved',
-  'SECURITY_PROOF_FIXTURE',
-  '72000000-0000-4000-8000-000000000001',
-  '2030-03-01 13:05:00+09'
-);
-
 do $$
 begin
   begin
     update public.preparation_obligations
     set status = 'approved',
-        current_attempt_id = '77000000-0000-4000-8000-000000000001',
-        approved_submission_id = '79000000-0000-4000-8000-000000000001'
+        current_attempt_id = '77000000-0000-4000-8000-000000000021',
+        approved_submission_id = '79000000-0000-4000-8000-000000000021'
     where reservation_id = '74000000-0000-4000-8000-000000000001';
     insert into reservation_security_results values
       (19, 'preparation approval rejects proof from another room', false);
@@ -963,47 +827,26 @@ select public.manual_checkout_reservation(
 );
 
 insert into reservation_security_results values
-  (9, 'manual checkout replaces the current assignment and scheduled attempt revisions', (
-    select
-      (select not is_current and ended_at is not null
-       from public.cleaning_assignments where id = '76000000-0000-4000-8000-000000000001')
-      and (select count(*) = 1 and bool_and(revision = 3 and is_current)
-       from public.cleaning_assignments
-       where cleaning_target_id = '73000000-0000-4000-8000-000000000002'
-         and id not in (
-           '76000000-0000-4000-8000-000000000000',
-           '76000000-0000-4000-8000-000000000001'
-         ))
-      and (select status = 'superseded'
-       from public.cleaning_attempts where id = '77000000-0000-4000-8000-000000000001')
-      and (select count(*) = 1 and bool_and(attempt_number = 3 and status = 'scheduled')
-       from public.cleaning_attempts
-       where cleaning_target_id = '73000000-0000-4000-8000-000000000002'
-         and id not in (
-           '77000000-0000-4000-8000-000000000000',
-           '77000000-0000-4000-8000-000000000001',
-           '77000000-0000-4000-8000-000000000009'
-         ))
+  (9, 'manual checkout revises the planned assignment without creating an attempt', (
+    (select not is_current and ended_at is not null from public.cleaning_assignments
+      where id='76000000-0000-4000-8000-000000000001')
+    and (select count(*)=1 and bool_and(revision=3) from public.cleaning_assignments
+      where cleaning_target_id=(select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000002') and is_current)
+    and not exists(select 1 from public.cleaning_attempts
+      where cleaning_target_id=(select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000002'))
   )),
-  (10, 'manual checkout revokes old PIN lease, reissues metadata, and notifies the maid', (
-    select
-      (select revoked_at is not null
-       from public.room_pin_access_leases where id = '78000000-0000-4000-8000-000000000001')
-      and (select count(*) = 1
-       from public.room_pin_access_leases
-       where cleaning_target_id = '73000000-0000-4000-8000-000000000002'
-         and id <> '78000000-0000-4000-8000-000000000001'
-         and revoked_at is null and revealed_at is null and pin_version = 2)
-      and (select count(*) = 1
-       from public.notifications
-       where cleaning_target_id = '73000000-0000-4000-8000-000000000002'
-         and category = 'cleaning_schedule_changed')
+  (10, 'manual checkout notifies changed access without issuing a PIN lease', (
+    not exists(select 1 from public.room_pin_access_leases
+      where cleaning_target_id=(select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000002'))
+    and (select count(*)=1 from public.notifications
+      where cleaning_target_id=(select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000002')
+      and category='cleaning_schedule_changed')
   ));
 
 update public.cleaning_targets
 set available_from = '2030-03-02 23:30:00+09',
     due_at = '2030-03-03 00:30:00+09'
-where id = '73000000-0000-4000-8000-000000000002';
+where id = (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000002');
 
 do $$
 begin
@@ -1068,65 +911,7 @@ select public.create_reservation(
   repeat('b', 64)
 );
 
-insert into public.cleaning_targets (
-  id,
-  room_id,
-  reservation_id,
-  checkout_obligation_id,
-  cleaning_kind,
-  source,
-  source_key,
-  original_service_date,
-  effective_service_date,
-  available_from,
-  status,
-  room_type_snapshot,
-  fee_snapshot,
-  template_snapshot,
-  created_by
-)
-select
-  '73000000-0000-4000-8000-000000000005',
-  r.room_id,
-  r.id,
-  r.checkout_obligation_id,
-  'checkout',
-  'scheduled_checkout',
-  'scheduled-checkout:74000000-0000-4000-8000-000000000003',
-  '2031-01-02',
-  '2031-01-02',
-  r.check_out_at,
-  'unassigned',
-  jsonb_build_object('roomTypeId', rm.room_type_id),
-  rt.base_cleaning_fee,
-  jsonb_build_object(
-    'templateId', tv.id,
-    'version', tv.version,
-    'durationMinutes', tv.duration_minutes
-  ),
-  '72000000-0000-4000-8000-000000000001'
-from public.reservations r
-join public.rooms rm on rm.id = r.room_id
-join public.room_types rt on rt.id = rm.room_type_id
-join public.cleaning_template_versions tv
-  on tv.room_type_id = rm.room_type_id
-  and tv.cleaning_kind = 'checkout'
-  and tv.status = 'published'
-where r.id = '74000000-0000-4000-8000-000000000003';
-
-update public.checkout_cleaning_obligations
-set status = 'materialized',
-    current_cleaning_target_id = '73000000-0000-4000-8000-000000000005'
-where reservation_id = '74000000-0000-4000-8000-000000000003';
-
-insert into public.cleaning_target_schedule_revisions (
-  cleaning_target_id, revision, effective_service_date, available_from, due_at,
-  reason_code, changed_by
-) values (
-  '73000000-0000-4000-8000-000000000005', 1, '2031-01-02',
-  '2031-01-02 11:00:00+09', null, 'INITIAL_TARGET',
-  '72000000-0000-4000-8000-000000000001'
-);
+-- Next-reservation replanning uses the target created with the reservation.
 
 select public.create_reservation(
   '72000000-0000-4000-8000-000000000001',
@@ -1147,13 +932,13 @@ insert into reservation_security_results values
       (select due_at = '2031-01-02 15:30:00+09'::timestamptz
          and assignment_version = 2
        from public.cleaning_targets
-       where id = '73000000-0000-4000-8000-000000000005')
+       where id = (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000003'))
       and (select due_at = '2031-01-02 15:30:00+09'::timestamptz
        from public.checkout_cleaning_obligations
        where reservation_id = '74000000-0000-4000-8000-000000000003')
       and (select count(*) = 1
        from public.cleaning_target_schedule_revisions
-       where cleaning_target_id = '73000000-0000-4000-8000-000000000005'
+       where cleaning_target_id = (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000003')
          and revision = 2
          and reason_code = 'NEXT_RESERVATION_CHANGED')
   ));
@@ -1230,29 +1015,13 @@ $$;
 do $$
 begin
   begin
-    insert into public.cleaning_targets (
-      id, room_id, reservation_id, checkout_obligation_id, cleaning_kind,
-      source, source_key, original_service_date, effective_service_date,
-      room_type_snapshot, fee_snapshot, template_snapshot, created_by
-    ) values (
-      '73000000-0000-4000-8000-000000000011',
-      (select id from public.rooms where room_number = '135'),
-      '74000000-0000-4000-8000-000000000010',
-      (select checkout_obligation_id from public.reservations where id = '74000000-0000-4000-8000-000000000001'),
-      'checkout',
-      'scheduled_checkout',
-      'cross-obligation-contract-test',
-      (now() at time zone 'Asia/Seoul')::date,
-      (now() at time zone 'Asia/Seoul')::date,
-      '{}'::jsonb,
-      16000,
-      '{}'::jsonb,
-      '72000000-0000-4000-8000-000000000001'
-    );
+    update public.cleaning_targets
+    set checkout_obligation_id=(select checkout_obligation_id from public.reservations where id='74000000-0000-4000-8000-000000000001')
+    where id=(select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000010');
     set constraints cleaning_targets_checkout_obligation_contract_fk immediate;
     insert into reservation_security_results values
       (17, 'checkout targets reject another reservation obligation', false);
-  exception when foreign_key_violation then
+  exception when foreign_key_violation or unique_violation then
     insert into reservation_security_results values
       (17, 'checkout targets reject another reservation obligation', true);
   end;
@@ -1297,7 +1066,7 @@ begin
   begin
     update public.cleaning_targets
     set status = 'approved'
-    where id = '73000000-0000-4000-8000-000000000005';
+    where id = (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000003');
     set constraints cleaning_targets_validate_checkout_terminal_contract immediate;
     insert into reservation_security_results values
       (22, 'checkout terminal target changes cannot commit without the matching obligation transition', false);
@@ -1310,7 +1079,7 @@ $$;
 
 update public.cleaning_targets
 set status = 'approved'
-where id = '73000000-0000-4000-8000-000000000005';
+where id = (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000003');
 
 update public.checkout_cleaning_obligations
 set status = 'completed'
@@ -1321,7 +1090,7 @@ begin
   begin
     update public.cleaning_targets
     set status = 'cancelled'
-    where id = '73000000-0000-4000-8000-000000000005';
+    where id = (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000003');
     insert into reservation_security_results values
       (23, 'completed checkout targets cannot regress through direct service-role DML', false);
   exception when check_violation then

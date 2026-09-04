@@ -234,6 +234,12 @@ begin
 end;
 $$;
 
+-- This fixture represents completed checkout, not future planning.
+update public.reservations set status='checked_out', actual_checkout_at=now()-interval '1 day'
+where id in ('30000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002');
+update public.cleaning_targets set available_from=now()-interval '1 day'
+where id in ('40000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000002');
+
 insert into public.cleaning_attempts (
   id, cleaning_target_id, assignment_id, maid_profile_id,
   attempt_number, assignment_revision, template_snapshot, room_snapshot

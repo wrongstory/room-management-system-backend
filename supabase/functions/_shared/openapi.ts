@@ -995,7 +995,7 @@ export const openApiDocument = {
         operationId: "getAssignmentCommitImpact",
         summary: "청소 배정 알림 확정 사전 영향도 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. 오늘/내일 서비스 날짜의 현재 draft를 최신 객실 일정·메이드 상태·가능일 version과 다시 대조합니다. 응답 fingerprint는 POST /v1/assignments/commit의 optimistic concurrency gate이며 이 조회는 상태를 변경하지 않습니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 오늘/내일 서비스 날짜의 현재 draft를 최신 객실 일정·메이드 상태·가능일 version과 다시 대조합니다. 예약 저장 시 생성된 미래 checkout 계획도 포함하지만 실제 checkout 전 attempt/PIN/현장 시작은 금지됩니다. 일정 변경으로 stale이 된 draft는 재저장하고 통보된 계획은 explicit replan해야 합니다. 응답 fingerprint는 POST /v1/assignments/commit의 optimistic concurrency gate이며 이 조회는 상태를 변경하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [{

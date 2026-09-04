@@ -109,6 +109,24 @@ erDiagram
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 `notifications`, private `notification_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
+## 미래 checkout 계획과 실행 경계 — #1/#4/#26/#28
+
+`checkout_cleaning_obligations.planned_cleaning_target_id`는 예약 생성 시점의 배정 identity이고,
+`current_cleaning_target_id`는 실제 checkout 이후 운영 pointer입니다. private 의무도 계획 target으로
+오늘/내일 배정·통보할 수 있지만 점유/입실 준비 projection은 바꾸지 않습니다. 예정/수동 checkout은
+같은 target을 materialized/current로 승격하고, 수동 조기 퇴실의 일정 변경은 새 schedule/assignment
+revision 및 변경 notification/outbox로 보존합니다. #28 전까지 attempt 활성화는 구현하지 않습니다.
+
+예약 변경·취소와 draft/commit은 동일 reservation-command transaction lock을 먼저 취득합니다.
+미통보 draft는 일정 변경 후 stale이며 재저장이 필요합니다. notified 일정은 explicit replan 없이
+변경하지 않고 취소 시 current assignment 종료와 회수 통보를 함께 기록합니다. checkout attempt/PIN
+테이블의 실행 guard는 실제 checkout/current pointer/access 시각을 재검증합니다.
+
+append-only `20260904144209_planned_checkout_targets.sql`은 기존 target identity를 재사용하며
+private 기존 의무만 계획 target으로 backfill합니다. 새 target에는 해당 객실 타입의 published
+checkout template이 필수이며 누락 시 migration/예약 저장을 fail-closed합니다. 운영 템플릿을
+임의 seed하지 않습니다. 생성 시 fee/template/room snapshot은 이후 예약 일정 수정에도 보존합니다.
+
 ## RLS 원칙
 
 - `public`의 모든 테이블은 RLS를 활성화합니다.

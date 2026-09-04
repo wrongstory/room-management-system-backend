@@ -313,6 +313,12 @@ Supabase migration·Edge 배포·현재 사용은 아직 하지 않는다.
 업무 notification과 private outbox 및 `assignment.notified` 감사만 기록한다. cleaning attempt와
 외부 push/network 호출은 만들지 않는다.
 
+PR #68 P1 보강: 예약 저장부터 `planned_cleaning_target_id`가 배정 계획을 제공한다.
+의무는 private/current=null을 유지하며, 실제 checkout 때 같은 target을 current로 승격한다.
+미통보 일정 변경은 schedule revision/draft stale, 통보 후 변경은 explicit replan,
+취소는 soft cancel/current 종료/회수 notification으로 처리한다. attempt/PIN 실행은 checkout
+전 차단하며 #28의 활성화 기능은 이번 PR에 포함하지 않는다. 운영 19 migrations는 변경하지 않았다.
+
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
 | [x] | `GET /v1/assignments/commit-impact?serviceDate=...` | admin | ✅ | ❌ | ✅ | ❌ | ❌ | side-effect 없는 fingerprint preflight |
@@ -325,7 +331,7 @@ Supabase migration·Edge 배포·현재 사용은 아직 하지 않는다.
 - [x] `assignment.commit_notify` scoped idempotency와 partial all-or-nothing 구현
 - [x] notification/private outbox/`assignment.notified` safe audit 구현
 - [x] admin-only Edge route·한글 OpenAPI·Python generated audit contract 반영
-- [x] local fresh 21 migrations·DB/RLS·Edge·concurrency 검증
+- [x] local fresh 22 migrations·DB/RLS 330건·Edge 69건·계획 경합 concurrency·DB lint 최종 재검증
 - [ ] PR 독립 보안/API 리뷰 P0/P1=0
 - [ ] PR `dev` 병합
 - [ ] release/main 승격 후 production migration·Edge 배포·hosted admin smoke
