@@ -58,7 +58,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@c7e0b03dea309e09b720184975413fd5d42bc527`
+- 개발 통합 source 기준: `dev@6f8d84c8c9d1a659fdebb142b0cad424f590572a` (#26 dev 병합 완료; #27은 feature 검증/리뷰 대상)
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -332,9 +332,33 @@ PR #68 P1 보강: 예약 저장부터 `planned_cleaning_target_id`가 배정 계
 - [x] notification/private outbox/`assignment.notified` safe audit 구현
 - [x] admin-only Edge route·한글 OpenAPI·Python generated audit contract 반영
 - [x] local fresh 22 migrations·DB/RLS 330건·Edge 69건·계획 경합 concurrency·DB lint 최종 재검증
-- [ ] PR 독립 보안/API 리뷰 P0/P1=0
-- [ ] PR `dev` 병합
+- [x] PR #68 독립 보안/API 리뷰 P0/P1=0
+- [x] PR #68 `dev` 병합 — `6f8d84c8c9d1a659fdebb142b0cad424f590572a`
 - [ ] release/main 승격 후 production migration·Edge 배포·hosted admin smoke
+
+### #27 Pre-start Change — feature source, production 미적용
+
+| Method / Path | 권한 | DB/RPC | Fastify | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|
+| `POST /v1/assignments/{cleaningTargetId}/change` | admin | 🟡 | ❌ | 🟡 | ❌ | ❌ |
+| `POST /v1/assignments/{cleaningTargetId}/unassign` | admin | 🟡 | ❌ | 🟡 | ❌ | ❌ |
+| `POST /v1/assignments/{cleaningTargetId}/cancellation-requests` | maid self | 🟡 | ❌ | 🟡 | ❌ | ❌ |
+| `GET /v1/assignment-change-requests` | admin / maid self | 🟡 | ❌ | 🟡 | ❌ | ❌ |
+| `POST /v1/assignment-change-requests/{requestId}/decision` | admin | 🟡 | ❌ | 🟡 | ❌ | ❌ |
+
+- [x] immutable request/source와 pending/decision/superseded lifecycle, scoped RLS/RPC
+- [x] 재배정/해제 CAS, non-superseded attempt 차단, 원 담당·planned checkout identity 보존
+- [x] draft 무통보 / notified old resolve + new notice/outbox/audit 원자 처리
+- [x] 감사 4개 event 및 한국어 OpenAPI/Python generated contract
+- [x] local fresh 23 migrations·DB/RLS 411건·Edge 76건·application 96건·Python 34건·동시성·DB lint/로컬 Security Advisor
+- [ ] exact head 전체 CI 최종 확인
+- [ ] #27 독립 보안/API 리뷰 P0/P1=0
+- [ ] #27 PR `dev` 병합
+- [ ] release/main 후 production migration·Edge·hosted role smoke
+
+신규 migration `20260904154536_assignment_prestart_change.sql`은 로컬 23번째다.
+source OpenAPI는 49 paths / 53 operations이며 운영 39 / 43 snapshot은 변경하지 않았다.
+시작/activation(#28), 중단·인계(#7), PIN/Sheets(#69), 실제 push worker(#10)는 제외한다.
 
 ## 13. 아직 개발하지 않은 후속 API 영역
 
@@ -343,8 +367,8 @@ PR #68 P1 보강: 예약 저장부터 `planned_cleaning_target_id`가 배정 계
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|
 | [x] | 청소 담당 배정·revision·현재 pointer·순서 | source/dev 완료 | #25 | production 미승격 |
-| [ ] | 배정 저장 시 가능일 재검증·부분 알림 | feature 구현·검증 중 | #26 | 위 source gate 참조 |
-| [ ] | 시작 전 재배정·취소 요청·관리자 결정 | 미개발 | #27 | #4 분할 |
+| [x] | 배정 저장 시 가능일 재검증·부분 알림 | source/dev 완료 | #26 | production 미승격 |
+| [ ] | 시작 전 재배정·취소 요청·관리자 결정 | feature 구현·검증, 독립 리뷰 대기 | #27 | 위 source gate 참조 |
 | [ ] | 오늘/내일 activation·rollover | 미개발 | #28 | #4 분할 |
 | [ ] | 배정 preview algorithm | 미개발 | #29 | #4 분할 |
 | [ ] | 현장 수행·offline lease·handover/conflict | 미개발 | #7 | 배정 이후 |
@@ -418,7 +442,8 @@ production completeness 기준의 정본 순서다.
 18. [x] backport 후 `dev` production snapshot과 `main` 일치 + required CI PASS
 19. [x] `v0.2.0` annotated tag / GitHub Release
 20. [x] #25 Assignment Core source gate·`dev` 병합
-21. [ ] **#26 Assignment Commit source gate** — 이 PR의 독립 리뷰·`dev` 병합 대기
+21. [x] **#26 Assignment Commit source gate** — PR #68 `dev` 병합 완료
+22. [ ] **#27 Pre-start Change source gate** — feature 검증 → 독립 리뷰 → `dev`; 운영 미적용
 
 ## 16. 이 문서 갱신 규칙
 

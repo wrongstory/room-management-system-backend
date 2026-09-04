@@ -515,7 +515,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 29,
+              maxItems: 33,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -887,6 +887,104 @@ export const openApiDocument = {
         ],
         responses: {
           "200": availabilityCandidateListResponse(),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/assignments/{cleaningTargetId}/change": {
+      post: prestartOperation(
+        "changeCleaningAssignmentPrestart",
+        "시작 전 담당·순서·접근 시간 변경",
+        "AssignmentPrestartChangeRequest",
+        "Assignment",
+        "admin",
+        "cleaningTargetId",
+      ),
+    },
+    "/v1/assignments/{cleaningTargetId}/unassign": {
+      post: prestartOperation(
+        "unassignCleaningAssignmentPrestart",
+        "시작 전 담당 해제 — 청소 target 취소 아님",
+        "AssignmentPrestartUnassignRequest",
+        "Assignment",
+        "admin",
+        "cleaningTargetId",
+      ),
+    },
+    "/v1/assignments/{cleaningTargetId}/cancellation-requests": {
+      post: prestartOperation(
+        "requestAssignmentCancellation",
+        "본인 통보 배정 취소 요청",
+        "AssignmentCancellationRequest",
+        "AssignmentChangeRequest",
+        "maid",
+        "cleaningTargetId",
+      ),
+    },
+    "/v1/assignment-change-requests/{requestId}/decision": {
+      post: prestartOperation(
+        "decideAssignmentCancellationRequest",
+        "메이드 담당 취소 요청 승인·반려",
+        "AssignmentCancellationDecisionRequest",
+        "AssignmentChangeRequest",
+        "admin",
+        "requestId",
+      ),
+    },
+    "/v1/assignment-change-requests": {
+      get: {
+        tags: ["Assignments"],
+        operationId: "listAssignmentChangeRequests",
+        summary: "담당 취소 요청 이력 조회",
+        description:
+          "active admin은 전체, active maid는 본인만 조회합니다. developer는 거부됩니다. 최대 31일/100건이며 cursor로 다음 페이지를 조회합니다. reasonDetail에는 개인정보·PIN·인증정보를 입력하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "maidProfileId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "status",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["pending", "approved", "rejected", "superseded"],
+            },
+          },
+          ...["from", "to"].map((name) => ({
+            name,
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+          })),
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", maxLength: 256 },
+          },
+          {
+            name: "limit",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "취소 요청 목록",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/AssignmentChangeRequestPage",
+                },
+              },
+            },
+          },
           "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
@@ -1719,6 +1817,10 @@ export const openApiDocument = {
           "availability.change_decided",
           "assignment.draft_saved",
           "assignment.notified",
+          "assignment.prestart_changed",
+          "assignment.prestart_unassigned",
+          "assignment.cancellation_requested",
+          "assignment.cancellation_decided",
           "reservation.created",
           "reservation.changed",
           "reservation.cancelled",
@@ -1998,6 +2100,11 @@ export const openApiDocument = {
               maidProfileId: { type: "string", format: "uuid" },
               cleaningTargetId: { type: "string", format: "uuid" },
               assignmentId: { type: "string", format: "uuid" },
+              previousAssignmentId: { type: "string", format: "uuid" },
+              previousMaidProfileId: { type: "string", format: "uuid" },
+              requestId: { type: "string", format: "uuid" },
+              decision: { type: "string", enum: ["approved", "rejected"] },
+              reasonCode: { type: "string" },
               weekStart: { type: "string", format: "date" },
               version: { type: "integer", minimum: 0 },
               sourceVersion: { type: "integer", minimum: 0 },
@@ -2204,6 +2311,65 @@ export const openApiDocument = {
           runtime: { $ref: "#/components/schemas/DeveloperRuntimeStatus" },
           database: { $ref: "#/components/schemas/DeveloperDatabaseStatus" },
           scheduler: { $ref: "#/components/schemas/DeveloperSchedulerStatus" },
+        },
+      },
+      AssignmentPrestartChangeRequest: prestartRequestSchema("change"),
+      AssignmentPrestartUnassignRequest: prestartRequestSchema("unassign"),
+      AssignmentCancellationRequest: prestartRequestSchema("request"),
+      AssignmentCancellationDecisionRequest: prestartRequestSchema("decision"),
+      AssignmentChangeRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "requestId",
+          "cleaningTargetId",
+          "assignmentId",
+          "maidProfileId",
+          "requestType",
+          "reasonCode",
+          "reasonDetail",
+          "status",
+          "sourceAssignmentRevision",
+          "sourceTargetAssignmentVersion",
+          "requestedAt",
+          "decision",
+          "decisionReasonCode",
+          "decidedAt",
+        ],
+        properties: {
+          requestId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          requestType: { type: "string", const: "cancel_assignment" },
+          reasonCode: { type: "string" },
+          reasonDetail: { type: ["string", "null"], maxLength: 200 },
+          status: {
+            type: "string",
+            enum: ["pending", "approved", "rejected", "superseded"],
+          },
+          sourceAssignmentRevision: { type: "integer", minimum: 1 },
+          sourceTargetAssignmentVersion: { type: "integer", minimum: 1 },
+          requestedAt: { type: "string", format: "date-time" },
+          decision: {
+            type: ["string", "null"],
+            enum: ["approved", "rejected", null],
+          },
+          decisionReasonCode: { type: ["string", "null"] },
+          decidedAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      AssignmentChangeRequestPage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["requests", "nextCursor"],
+        properties: {
+          requests: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/AssignmentChangeRequest" },
+          },
+          nextCursor: { type: ["string", "null"] },
         },
       },
       Assignment: {
@@ -3449,6 +3615,115 @@ function assignmentListResponse(): Record<string, unknown> {
       },
     },
   };
+}
+
+function prestartOperation(
+  operationId: string,
+  summary: string,
+  input: string,
+  output: string,
+  role: string,
+  id: string,
+) {
+  return {
+    tags: ["Assignments"],
+    operationId,
+    summary,
+    description:
+      "active 역할·최신 session·비밀번호 변경 완료를 검증합니다. non-superseded attempt가 있으면 ASSIGNMENT_ALREADY_STARTED입니다. expectedCurrentAssignmentId와 expectedAssignmentVersion을 함께 전달합니다. 변경은 새 immutable revision이며 draft는 통보하지 않고 notified는 알림/outbox를 원자적으로 기록합니다. 예정 checkout identity와 실행 금지 경계를 유지합니다. 같은 key/본문 재시도는 동일 결과, 다른 본문은 IDEMPOTENCY_KEY_REUSED입니다.",
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": [role],
+    parameters: [{
+      name: id,
+      in: "path",
+      required: true,
+      schema: { type: "string", format: "uuid" },
+    }, idempotencyHeader],
+    requestBody: {
+      required: true,
+      content: {
+        "application/json": {
+          schema: { $ref: `#/components/schemas/${input}` },
+        },
+      },
+    },
+    responses: {
+      "200": {
+        description: "명령 완료",
+        headers: { "Cache-Control": noStoreHeader },
+        content: {
+          "application/json": {
+            schema: { $ref: `#/components/schemas/${output}` },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "404": errorResponse,
+      "409": errorResponse,
+      "500": errorResponse,
+    },
+  };
+}
+
+function prestartRequestSchema(
+  action: "change" | "unassign" | "request" | "decision",
+) {
+  const properties: Record<string, unknown> = {
+    expectedCurrentAssignmentId: { type: "string", format: "uuid" },
+    expectedAssignmentVersion: { type: "integer", minimum: 1 },
+    reasonCode: {
+      type: "string",
+      enum: action === "request"
+        ? [
+          "PERSONAL_REASON",
+          "HEALTH_REASON",
+          "MAID_UNAVAILABLE",
+          "OPERATIONAL_CHANGE",
+        ]
+        : action === "decision"
+        ? ["APPROVED", "REJECTED", "OPERATIONAL_CHANGE", "MAID_UNAVAILABLE"]
+        : [
+          "MAID_UNAVAILABLE",
+          "SCHEDULE_CHANGED",
+          "SEQUENCE_CHANGED",
+          "OPERATIONAL_CHANGE",
+        ],
+    },
+  };
+  const required = Object.keys(properties);
+  if (action === "change") {
+    properties.maidProfileId = { type: "string", format: "uuid" };
+    properties.sequenceNumber = { type: "integer", minimum: 1 };
+    required.push("maidProfileId", "sequenceNumber");
+    properties.availableFrom = {
+      type: "string",
+      format: "date-time",
+      description:
+        "수동 청소의 기존 접근 창 안에서 같은 KST 날짜로 좁히기만 허용. checkout 원장 시간 변경은 불가.",
+    };
+    properties.dueAt = {
+      type: "string",
+      format: "date-time",
+      description: "기존 마감 이후로 늘릴 수 없음. 생략하면 기존 값 유지.",
+    };
+  }
+  if (action === "request") {
+    properties.reasonDetail = {
+      type: "string",
+      minLength: 1,
+      maxLength: 200,
+      pattern: "^[^0-9@:/]+$",
+      description:
+        "선택 상세 사유. PIN·고객정보·연락처·인증정보 입력 금지. 감사/알림에는 복제하지 않음.",
+    };
+  }
+  if (action === "decision") {
+    properties.decision = { type: "string", enum: ["approved", "rejected"] };
+    required.push("decision");
+  }
+  return { type: "object", additionalProperties: false, required, properties };
 }
 
 function assignmentItemResponse(description: string): Record<string, unknown> {

@@ -4,7 +4,11 @@ import {
   assignmentHistory,
   assignmentTargetIdFromPath,
   commitAssignments,
+  listAssignmentChangeRequests,
   listAssignments,
+  prestartCommand,
+  prestartDatabaseError,
+  prestartPath,
   saveAssignmentDraft,
 } from "./assignment-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
@@ -48,6 +52,363 @@ const developer: EdgeActor = {
 const targetId = "30000000-0000-4000-8000-000000000001";
 const assignmentId = "40000000-0000-4000-8000-000000000001";
 const roomId = "50000000-0000-4000-8000-000000000001";
+
+function prestartClients(errorMessage?: string) {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const clients = {
+    admin: {
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        if (errorMessage) {
+          return {
+            data: null,
+            error: { message: errorMessage },
+          };
+        }
+        const requestRow = {
+          requestId: assignmentId,
+          cleaningTargetId: targetId,
+          assignmentId,
+          maidProfileId: maid.profileId,
+          requestType: "cancel_assignment",
+          reasonCode: "PERSONAL_REASON",
+          reasonDetail: null,
+          status: "pending",
+          sourceAssignmentRevision: 2,
+          sourceTargetAssignmentVersion: 2,
+          requestedAt: "2026-09-05T00:00:00Z",
+          decision: null,
+          decisionReasonCode: null,
+          decidedAt: null,
+          requestHash: "hidden",
+          after_state: { secret: "hidden" },
+        };
+        if (name === "list_assignment_change_requests") {
+          return {
+            data: [requestRow],
+            error: null,
+          };
+        }
+        if (name.includes("cancellation")) {
+          return {
+            data: requestRow,
+            error: null,
+          };
+        }
+        return {
+          data: {
+            assignmentId,
+            cleaningTargetId: targetId,
+            roomId,
+            roomNumber: "101",
+            maidProfileId: maid.profileId,
+            maidDisplayName: "메이드",
+            serviceDate: "2026-09-05",
+            sequenceNumber: 3,
+            revision: 3,
+            isCurrent: name.includes("change_"),
+            targetAssignmentVersion: 3,
+            availableFrom: null,
+            dueAt: null,
+            notifiedAt: null,
+            endedAt: null,
+            createdAt: "2026-09-05T00:00:00Z",
+            raw: "hidden",
+          },
+          error: null,
+        };
+      },
+    },
+  } as unknown as EdgeClients;
+  return { clients, calls };
+}
+const prestartBody = {
+  expectedCurrentAssignmentId: assignmentId,
+  expectedAssignmentVersion: 2,
+  reasonCode: "OPERATIONAL_CHANGE",
+};
+
+Deno.test("prestart commands preserve actor CAS canonical retry and safe projections", async () => {
+  const { clients, calls } = prestartClients();
+  for (
+    const action of [
+      "change",
+      "unassign",
+      "cancellation-requests",
+      "decision",
+    ] as const
+  ) {
+    const body = {
+      ...prestartBody,
+      ...(action === "change"
+        ? { maidProfileId: maid.profileId, sequenceNumber: 3 }
+        : {}),
+      ...(action === "decision" ? { decision: "approved" } : {}),
+    };
+    const result = await prestartCommand(
+      request("/test", "POST", body),
+      clients,
+      action === "cancellation-requests" ? maid : admin,
+      targetId,
+      action,
+    );
+    assert(
+      !JSON.stringify(result).includes("hidden"),
+      "projection excludes extra raw fields",
+    );
+    assert(
+      calls.at(-1)?.args.p_actor_profile_id ===
+        (action === "cancellation-requests" ? maid.profileId : admin.profileId),
+      "verified actor",
+    );
+    assert(calls.at(-1)?.args.p_expected_assignment_version === 2, "CAS");
+    await prestartCommand(
+      request("/test", "POST", body),
+      clients,
+      action === "cancellation-requests" ? maid : admin,
+      targetId,
+      action,
+    );
+    assert(
+      calls.at(-1)?.args.p_request_hash === calls.at(-2)?.args.p_request_hash,
+      "canonical retry",
+    );
+  }
+});
+
+Deno.test("prestart admin and maid capabilities fail closed before RPC", async () => {
+  const { clients, calls } = prestartClients();
+  for (const action of ["change", "unassign", "decision"] as const) {
+    for (const actor of [maid, developer]) {
+      const error = await captureEdgeError(() =>
+        prestartCommand(
+          request("/test", "POST", prestartBody),
+          clients,
+          actor,
+          targetId,
+          action,
+        )
+      );
+      assert(error.code === "ADMIN_REQUIRED", "business admin only");
+    }
+  }
+  for (const actor of [admin, developer]) {
+    const error = await captureEdgeError(() =>
+      prestartCommand(
+        request("/test", "POST", prestartBody),
+        clients,
+        actor,
+        targetId,
+        "cancellation-requests",
+      )
+    );
+    assert(error.code === "MAID_REQUIRED", "maid only");
+  }
+  const error = await captureEdgeError(() =>
+    prestartCommand(
+      request("/test", "POST", prestartBody),
+      clients,
+      { ...admin, mustChangePassword: true },
+      targetId,
+      "unassign",
+    )
+  );
+  assert(
+    error.code === "PASSWORD_CHANGE_REQUIRED" && calls.length === 0,
+    "no mutation before authorization",
+  );
+});
+
+Deno.test("prestart input and idempotency validation rejects malformed or extra data", async () => {
+  const { clients, calls } = prestartClients();
+  const body = {
+    ...prestartBody,
+    maidProfileId: maid.profileId,
+    sequenceNumber: 1,
+  };
+  for (
+    const extra of [
+      { expectedCurrentAssignmentId: "invalid" },
+      { expectedAssignmentVersion: 0 },
+      { sequenceNumber: 0 },
+      { reasonCode: "raw reason" },
+      { secret: "raw" },
+      { availableFrom: "invalid" },
+    ]
+  ) {
+    const error = await captureEdgeError(() =>
+      prestartCommand(
+        request("/test", "POST", { ...body, ...extra }),
+        clients,
+        admin,
+        targetId,
+        "change",
+      )
+    );
+    assert(error.status === 400, "invalid input");
+  }
+  for (const key of ["", "short", "not a valid key"]) {
+    const error = await captureEdgeError(() =>
+      prestartCommand(
+        request("/test", "POST", body, key),
+        clients,
+        admin,
+        targetId,
+        "change",
+      )
+    );
+    assert(error.status === 400, "invalid idempotency key");
+  }
+  const decision = await captureEdgeError(() =>
+    prestartCommand(
+      request("/test", "POST", { ...prestartBody, decision: "maybe" }),
+      clients,
+      admin,
+      targetId,
+      "decision",
+    )
+  );
+  assert(
+    decision.status === 400 && calls.length === 0,
+    "decision invalid before RPC",
+  );
+});
+
+Deno.test("cancellation detail rejects overlong and sensitive-shaped text", async () => {
+  const { clients, calls } = prestartClients();
+  for (
+    const reasonDetail of [
+      " ",
+      "가".repeat(201),
+      "01012345678",
+      "PIN 1234",
+      "test@example.invalid",
+      "https://secret.invalid",
+    ]
+  ) {
+    const error = await captureEdgeError(() =>
+      prestartCommand(
+        request("/test", "POST", { ...prestartBody, reasonDetail }),
+        clients,
+        maid,
+        targetId,
+        "cancellation-requests",
+      )
+    );
+    assert(error.status === 400, "unsafe detail rejected");
+  }
+  assert(calls.length === 0, "no RPC for unsafe input");
+});
+
+Deno.test("prestart list enforces maid self scope pagination and bounds", async () => {
+  const { clients, calls } = prestartClients();
+  const page = await listAssignmentChangeRequests(
+    request("/v1/assignment-change-requests?limit=1"),
+    clients,
+    maid,
+  );
+  assert(page.requests.length === 1 && !!page.nextCursor, "cursor returned");
+  assert(
+    calls[0].args.p_maid_profile_id === maid.profileId,
+    "server self filter",
+  );
+  await listAssignmentChangeRequests(
+    request(
+      `/v1/assignment-change-requests?cursor=${
+        encodeURIComponent(page.nextCursor ?? "")
+      }`,
+    ),
+    clients,
+    admin,
+  );
+  assert(calls[1].args.p_before_id === assignmentId, "cursor identity");
+  const microseconds = "2026-09-05T01:00:00.123456+00:00";
+  await listAssignmentChangeRequests(
+    request(
+      "/v1/assignment-change-requests?cursor=" +
+        encodeURIComponent(
+          btoa(JSON.stringify({ at: microseconds, id: assignmentId })),
+        ),
+    ),
+    clients,
+    admin,
+  );
+  assert(
+    calls[2].args.p_before_at === microseconds,
+    "cursor preserves DB microseconds",
+  );
+  for (
+    const query of [
+      "limit=101",
+      "limit=0",
+      "status=raw",
+      "from=2026-01-01T00:00:00Z&to=2026-03-01T00:00:00Z",
+      "cursor=raw",
+      "extra=raw",
+    ]
+  ) {
+    const error = await captureEdgeError(() =>
+      listAssignmentChangeRequests(
+        request(`/v1/assignment-change-requests?${query}`),
+        clients,
+        admin,
+      )
+    );
+    assert(error.status === 400, "bounded query validation");
+  }
+  const denied = await captureEdgeError(() =>
+    listAssignmentChangeRequests(
+      request(
+        `/v1/assignment-change-requests?maidProfileId=${otherMaid.profileId}`,
+      ),
+      clients,
+      maid,
+    )
+  );
+  assert(denied.status === 403, "other maid filter denied");
+  const dev = await captureEdgeError(() =>
+    listAssignmentChangeRequests(
+      request("/v1/assignment-change-requests"),
+      clients,
+      developer,
+    )
+  );
+  assert(dev.status === 403, "developer list denied");
+});
+
+Deno.test("prestart exact routes and stable DB errors", async () => {
+  assert(
+    prestartPath(`/v1/assignments/${targetId}/change`)?.action === "change",
+    "exact route",
+  );
+  assert(
+    prestartPath(`/v1/assignments/${targetId}/change/extra`) === null,
+    "no suffix alias",
+  );
+  assert(
+    prestartPath(`/v1/assignment-change-requests/${assignmentId}/decision`)
+      ?.id === assignmentId,
+    "decision identity",
+  );
+  const { clients } = prestartClients(
+    "ASSIGNMENT_CHANGE_REQUEST_ACCESS_REQUIRED",
+  );
+  const error = await captureEdgeError(() =>
+    prestartCommand(
+      request("/test", "POST", prestartBody),
+      clients,
+      maid,
+      targetId,
+      "cancellation-requests",
+    )
+  );
+  assert(error.status === 403, "DB ownership denial");
+  const unknown = prestartDatabaseError({ message: "raw SQL phone secret" });
+  assert(
+    unknown.status === 500 && !unknown.message.includes("raw SQL"),
+    "raw SQL redacted",
+  );
+});
 
 function request(
   path: string,

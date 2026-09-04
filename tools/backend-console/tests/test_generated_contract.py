@@ -73,6 +73,12 @@ def test_account_response_and_status_command_use_distinct_enums() -> None:
 def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
     assert DeveloperAuditEventType.ASSIGNMENT_DRAFT_SAVED.value == "assignment.draft_saved"
     assert DeveloperAuditEventType.ASSIGNMENT_NOTIFIED.value == "assignment.notified"
+    assert {
+        "assignment.prestart_changed",
+        "assignment.prestart_unassigned",
+        "assignment.cancellation_requested",
+        "assignment.cancellation_decided",
+    } <= {event.value for event in DeveloperAuditEventType}
     field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
     assert {
         "assignment_id",
@@ -82,8 +88,13 @@ def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
         "sequence_number",
         "revision",
         "target_assignment_version",
+        "previous_assignment_id",
+        "previous_maid_profile_id",
+        "request_id",
+        "decision",
+        "reason_code",
     } <= field_names
-    assert {"request_hash", "before_state", "after_state"}.isdisjoint(field_names)
+    assert {"request_hash", "reason_detail", "before_state", "after_state"}.isdisjoint(field_names)
 
 
 def test_phase_a_generated_client_excludes_business_reservation_api() -> None:

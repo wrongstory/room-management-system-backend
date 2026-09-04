@@ -116,6 +116,30 @@ where t.id=(select target_id from plans where label='manual') $test$,'23505',nul
 select ok(not has_function_privilege('anon','private.ensure_planned_checkout_target(uuid)','EXECUTE')
  and not has_function_privilege('authenticated','private.ensure_planned_checkout_target(uuid)','EXECUTE'),
  'clients cannot invoke internal planning helper');
+-- #27 재배정은 planned target/obligation을 materialize하지 않는다.
+select pg_temp.make_plan('prestart','2036-10-02 11:00+09');
+select pg_temp.assign_plan('prestart');
+select pg_temp.notify_plan('prestart','2036-10-01 09:00+09');
+select lives_ok($test$ select public.change_cleaning_assignment_prestart(
+ 'a2000000-0000-4000-8000-000000000001',target_id,assignment_id,2,
+ 'a2000000-0000-4000-8000-000000000002',100,'SEQUENCE_CHANGED','planning-prestart-change',repeat('8',64))
+ from plans where label='prestart' $test$,'future notified checkout permits prestart revision');
+select is((select count(*)::int from public.cleaning_targets where reservation_id=(select reservation_id from plans where label='prestart')),1,'prestart never replaces planned target identity');
+select ok((select status='private' and current_cleaning_target_id is null
+ and planned_cleaning_target_id=(select target_id from plans where label='prestart')
+ from public.checkout_cleaning_obligations where reservation_id=(select reservation_id from plans where label='prestart')),'prestart retains private obligation/current null');
+select ok((select not is_current from public.cleaning_assignments where id=(select assignment_id from plans where label='prestart')),'old notified revision preserved/closed');
+update plans p set assignment_id=a.id from public.cleaning_assignments a where p.label='prestart' and a.cleaning_target_id=p.target_id and a.is_current;
+select throws_ok($test$ select public.change_cleaning_assignment_prestart(
+ 'a2000000-0000-4000-8000-000000000001',target_id,assignment_id,3,
+ 'a2000000-0000-4000-8000-000000000002',100,'SCHEDULE_CHANGED','planning-prestart-time',repeat('7',64),'2036-10-02 12:00+09')
+ from plans where label='prestart' $test$,'23514','ASSIGNMENT_SCHEDULE_INVALID','prestart cannot override checkout source time');
+select throws_ok($test$ insert into public.cleaning_attempts(cleaning_target_id,assignment_id,maid_profile_id,attempt_number,assignment_revision,template_snapshot,room_snapshot)
+select target_id,assignment_id,'a2000000-0000-4000-8000-000000000002',1,3,'{}','{}' from plans where label='prestart' $test$,'23514','CHECKOUT_NOT_MATERIALIZED','reassigned plan cannot start attempt');
+select throws_ok($test$ insert into public.room_pin_access_leases(room_id,reservation_id,cleaning_target_id,assignment_id,attempt_id,pin_version,issued_to,issued_at,expires_at)
+select room_id,reservation_id,target_id,assignment_id,gen_random_uuid(),1,'a2000000-0000-4000-8000-000000000002',now(),now()+interval '1 hour'
+from plans where label='prestart' $test$,'23514','CHECKOUT_NOT_MATERIALIZED','reassigned plan cannot issue PIN');
+select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=(select target_id from plans where label='prestart')),0,'prestart creates no attempt');
 set constraints all immediate;
 select * from finish();
 rollback;

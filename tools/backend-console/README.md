@@ -43,3 +43,8 @@ uv run --python 3.12 python scripts/generate_client.py
 
 생성 코드는 직접 수정하지 않는다. 인증 갱신·멱등성·redaction은 생성 코드 바깥의
 `api_client.py`가 담당한다.
+
+#27 source는 시작 전 변경/해제/취소 요청/결정 감사 event 4종과 safe summary를 생성 모델에
+추가한다. 상세 사유·request hash·원본 state는 포함하지 않으며, 콘솔에 admin 업무 변경
+기능이나 developer의 업무 권한을 추가하지 않는다. 운영 미배포 source enum이 존재한다는
+이유로 production API가 해당 기능을 제공한다고 판단하지 않는다.

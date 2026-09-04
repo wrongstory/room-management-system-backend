@@ -250,6 +250,21 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 배정 가능 여부는 API나 RLS가 최종 저장 시점에 다시 검증한다. 브라우저에서 후보 목록을 봤다는 사실은 권한이나 최신 상태의 증거가 아니다.
 
+### [확정] #27 시작 전 변경 경계 — 2026-09-05 구현 착수 계약
+
+- 일반 pre-start command는 target에 `status <> superseded` attempt가 하나라도 있으면 `ASSIGNMENT_ALREADY_STARTED`로 거부한다. `started_at` 유무로 우회하지 않는다. 이후 수행·인계는 #28/#7 소유다.
+- active business admin만 draft/notified의 담당·순서를 새 assignment revision으로 바꾸거나 현재 담당을 해제할 수 있다. target version과 current assignment ID를 함께 CAS 검증한다. active maid/current availability와 reclean 원 maid 불변식도 재검증한다.
+- unassign은 target을 `unassigned`로 돌리는 명령이지 청소 의무 자체의 취소가 아니다. target 취소는 예약/수동 청소 원 domain이 소유한다.
+- 메이드는 본인 notified assignment에만 취소를 요청한다. pending 요청은 assignment당 최대 한 건이며 결정 전 담당은 유지된다. 관리자 승인/반려도 현재 source revision과 attempt 경계를 다시 검사한다. source가 종료되면 pending은 superseded, 결정된 요청은 수정·삭제 금지다.
+- draft 변경은 통보하지 않는다. notified 변경은 기존 알림을 보존/resolve하고 이전·새 담당에게 필요한 변경/회수 알림과 outbox를 같은 transaction으로 한 번만 기록한다. 외부 push worker는 #10이다.
+- 미래 checkout의 재배정은 기존 planned target ID 안에서만 이루어진다. obligation materialization, 실제 checkout, attempt/PIN 활성화는 하지 않는다.
+
+### [현재 구현] #27 일정 변경의 제한
+
+- `manual_room_request`의 additional/stayover만 같은 service date에서 기존 non-null 접근/마감 창을 좁힐 수 있다. 연박은 active reservation 점유 구간도 벗어나지 않아야 한다. 날짜 이동·접근 창 확장·checkout 원장 시간 변경은 #27 API로 허용하지 않는다.
+- 요청 사유는 고정 reason code를 사용한다. 선택 detail은 1–200자이며 숫자·주소/URL형 구분자는 차단한다. 이는 모든 민감정보를 판별하는 필터가 아니므로 고객명·전화번호·PIN·token을 입력하지 않는다. detail은 관리자/요청 당사자에게만 보이며 감사 projection·알림에는 복제하지 않는다.
+- source 구현/검증과 운영 배포는 별도 gate다. #27의 production API는 아직 사용할 수 없다.
+
 ---
 
 ## 7. 청소 수행, 사진, 제출
