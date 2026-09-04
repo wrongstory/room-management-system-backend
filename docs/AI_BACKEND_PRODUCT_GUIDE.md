@@ -188,6 +188,10 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 체크인 전 예약 취소만 허용하고 soft cancel과 사유 code를 남긴다. 과거 예약과 연결 이력을 삭제하지 않는다.
 - 예약 변경은 연결된 청소 일정, 이미 통보한 담당 snapshot, PIN 접근, 진행 중 attempt의 영향을 같은 command에서 재검증한다.
 - 각 예약은 해당 체크아웃의 비공개 퇴실 청소 의무를 정확히 하나 가진다. 재시도해도 중복 생성하지 않는다.
+- **#1/#4/#26/#28 확정 보강:** 예약 저장 transaction에서 배정용 checkout target도 정확히 하나 생성하고 `planned_cleaning_target_id`로 연결한다. 비공개 의무의 lifecycle과 배정 계획은 별개 축이다. `private` 의무의 `current_cleaning_target_id`는 계속 null이며, 계획 target 때문에 점유·입실 준비·cleaning_required를 활성화하지 않는다.
+- 미래 계획은 예약 active·actual checkout 없음·예정 checkout/접근 시각/서비스 날짜/snapshot 일치 조건에서 오늘/내일 draft 저장과 통보가 가능하다. 실제 checkout 전 attempt 생성, PIN 발급·공개, 현장 시작은 금지한다.
+- 예정/수동 checkout은 기존 planned identity를 current로 승격하고 의무를 materialized로 만든다. target·최초 서비스 날짜·요금/템플릿/객실 생성 snapshot은 보존한다. 조기 수동 checkout은 schedule 및 현재 담당 revision과 변경 통보를 추가하며 attempt를 미리 만들지 않는다.
+- 예약 일정 변경 시 미배정 계획은 schedule CAS/revision으로 갱신한다. 미통보 draft의 기존 snapshot은 보존하여 stale로 만들고 재저장해야 통보할 수 있다. 통보된 계획은 암묵 변경하지 않고 explicit replan을 요구한다. 예약 취소는 target soft cancel, current assignment 종료, 통보 이력이 있으면 회수 알림/outbox를 원자적으로 추가한다.
 - 한 객실의 여러 미래 예약은 각각 자기 퇴실 청소 의무를 가질 수 있다. 따라서 “객실당 모든 비종결 target 1건” 제약을 두면 안 된다.
 - 체크인 예정 시각에 입실 준비 조건이 모두 충족되면 예약상 점유 시작 event를 멱등적으로 한 번 만든다. 조건이 남아 있으면 `입실 시각 도달·객실 미준비`로 두고, 유효 예약 중 조건이 모두 해소된 시점에 같은 전이를 원자적으로 한 번 실행한다.
 - 실제 checkout event가 없으면 예정 체크아웃 시각에 scheduler가 점유 종료, 퇴실 청소 활성화, 유효 담당의 PIN 조회·시작 가능 시각 개방을 멱등적으로 실행한다. 예정 전 수동 checkout이 이미 있으면 다시 종료하거나 청소를 복제하지 않는다.
@@ -241,7 +245,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 한 메이드는 하루에 여러 업무를 가질 수 있지만 동시에 `청소 중`인 attempt는 최대 한 건이다.
 - 전날 미배정 업무는 같은 target ID와 최초 계획일을 유지해 다음 날 재배정한다. 통보됐지만 미착수인 업무는 이전 담당 이력을 남긴 뒤 현재 담당을 풀고 다음 날 가능 여부로 다시 배정한다.
 - 이미 시작한 미완료 업무는 새 attempt나 새 담당을 만들지 않고 같은 attempt·담당·사진 진행을 유지한다. 현장 완료 뒤 업로드/제출 대기와 검수 대기는 배정 이월에서 제외한다.
-- 오늘 저장·통보는 실행 가능한 미시작 attempt를 정확히 한 번 만든다. 내일 저장·통보는 계획 상태로 남겼다가 대상일에 같은 target·담당·순서·snapshot으로 정확히 한 번 활성화한다.
+- 실행 가능한 오늘 작업의 attempt exactly-once 활성화는 #28 소유다. #25/#26 저장·통보 자체는 attempt를 만들지 않는다. 내일 작업이나 아직 실제 checkout 전인 오늘 퇴실 계획은 대기하며, #28이 대상일·실제 checkout·current materialization·접근 가능 시각을 모두 확인한 뒤 같은 target·담당·순서·snapshot으로 활성화한다.
 - 같은 객실의 이전 attempt가 진행·업로드·검수 중이면 새 당일 attempt 활성화를 보류하고 `관리자 확인 대기·시작 불가`로 둔다. 이전 workflow가 종결된 뒤 원 통보 revision을 기준으로 한 번만 활성화한다.
 
 배정 가능 여부는 API나 RLS가 최종 저장 시점에 다시 검증한다. 브라우저에서 후보 목록을 봤다는 사실은 권한이나 최신 상태의 증거가 아니다.
@@ -577,7 +581,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 연박/추가 수동 청소 요청은 안정적인 target ID로 생성하고 시작·PIN 공개 전까지만 CAS soft cancel한다.
 - 예정 전이 worker는 production에서 활성 관리자 actor를 필수로 하며 시작 시 검증 실패를 숨기지 않는다. catch-up은 퇴실을 입실보다 먼저 처리해 같은 instant의 인접 예약을 한 batch에서 전이하고, 완전히 지난 미입실 예약은 가짜 check-in 없이 종결한다.
 - checkout obligation↔target은 deferred commit-time 검증까지 포함해 종료 상태가 반쪽만 저장되지 않게 하고, preparation obligation↔승인 submission/attempt는 직전 점유 종료 이후·해당 체크인 이전 시간창 안에서 target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서를 검증하며 append-only 1회 소비 원장까지 강제한다. PIN lease↔현재 assignment/attempt는 최신 verified PIN version까지 업무 동일성을 복합키와 DB 검증으로 강제한다.
-- 다음 예약 변경은 종결된 과거 의무를 덮지 않는다. 미배정 target은 schedule revision과 함께 마감을 갱신하고 배정·통보된 target은 명시적 재계획 전까지 충돌로 거부한다.
+- 다음 예약 변경은 종결된 과거 의무를 덮지 않는다. 미배정 target은 schedule revision으로 마감을 갱신하며 private 미통보 draft는 stale로 처리한다. 통보된 target은 명시적 재계획 전까지 충돌로 거부한다.
 - 타입별 인원 상한, 프런트 대표 상태, 퇴실점검 lifecycle은 이번 변경에서 확정하지 않는다.
 - Docker Desktop 복구 후 fresh local DB reset, 역할별 SQL 회귀 검사, DB advisor를 실행할 수 있다. 각 변경은 실제 실행 결과를 PR에 기록하며 실행하지 않은 검증은 완료로 표현하지 않는다.
 

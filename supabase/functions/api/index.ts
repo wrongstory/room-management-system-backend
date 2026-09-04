@@ -8,8 +8,10 @@ import {
   submitAvailability,
 } from "../_shared/availability-api.ts";
 import {
+  assignmentCommitImpact,
   assignmentHistory,
   assignmentTargetIdFromPath,
+  commitAssignments,
   listAssignments,
   saveAssignmentDraft,
 } from "../_shared/assignment-api.ts";
@@ -373,6 +375,23 @@ export async function handleApiRequest(
     if (request.method === "GET" && path === "/v1/assignments") {
       return jsonResponse(
         { assignments: await listAssignments(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "GET" &&
+      path === "/v1/assignments/commit-impact"
+    ) {
+      return jsonResponse(
+        { impact: await assignmentCommitImpact(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && path === "/v1/assignments/commit") {
+      return jsonResponse(
+        { result: await commitAssignments(request, clients, actor) },
         200,
         corsHeaders,
       );

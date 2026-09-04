@@ -88,6 +88,12 @@ select public.mutate_room_operation(
   repeat('9', 64)
 );
 
+-- Synthetic published checkout templates: production configuration is never seeded here.
+insert into public.cleaning_template_versions (
+  room_type_id, cleaning_kind, version, status, duration_minutes, photo_slots, published_at, created_by
+) select id, 'checkout', 1, 'published', 60, '[]'::jsonb, now(), '62000000-0000-4000-8000-000000000001'
+from public.room_types;
+
 select public.create_reservation(
   '62000000-0000-4000-8000-000000000001',
   '63000000-0000-4000-8000-000000000001',
@@ -266,7 +272,7 @@ insert into room_reservation_test_results values
     where reservation_id = '63000000-0000-4000-8000-000000000001'
   )),
   (13, 'manual checkout opens the existing checkout obligation', (
-    select status = 'available'
+    select status = 'materialized' and current_cleaning_target_id = planned_cleaning_target_id
       and available_from = '2027-02-01 18:00:00+09'::timestamptz
     from public.checkout_cleaning_obligations
     where reservation_id = '63000000-0000-4000-8000-000000000001'

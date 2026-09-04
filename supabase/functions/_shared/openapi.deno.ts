@@ -56,14 +56,15 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "developer security activity needs a reusable bounded contract",
   );
   assert(
-    serialized.includes('"assignment.draft_saved"'),
-    "assignment draft audit must be part of the developer allowlist",
+    serialized.includes('"assignment.draft_saved"') &&
+      serialized.includes('"assignment.notified"'),
+    "assignment audit events must be part of the developer allowlist",
   );
   const auditEventTypeParameter = document.paths["/v1/developer/audit-events"]
     .get.parameters.find((parameter) => parameter.name === "eventType");
   assert(
-    auditEventTypeParameter?.schema.maxItems === 28,
-    "developer audit filter limit must match the 28-event allowlist",
+    auditEventTypeParameter?.schema.maxItems === 29,
+    "developer audit filter limit must match the 29-event allowlist",
   );
   const auditSummary = document.components.schemas.DeveloperAuditEvent
     .properties.summary;
@@ -88,6 +89,8 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       "/v1/assignments",
       "/v1/assignments/{cleaningTargetId}/history",
       "/v1/assignments/drafts",
+      "/v1/assignments/commit-impact",
+      "/v1/assignments/commit",
       "/v1/reservations",
       "/v1/reservations/{reservationId}",
       "/v1/reservations/{reservationId}/cancel",
@@ -116,13 +119,18 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   );
   assert(
     serialized.includes('"#/components/schemas/Assignment"') &&
-      serialized.includes('"#/components/schemas/AssignmentDraftRequest"'),
+      serialized.includes('"#/components/schemas/AssignmentDraftRequest"') &&
+      serialized.includes('"#/components/schemas/AssignmentCommitImpact"') &&
+      serialized.includes('"#/components/schemas/AssignmentCommitRequest"') &&
+      serialized.includes('"#/components/schemas/AssignmentCommitResult"'),
     "assignment codegen schemas must be reusable",
   );
   assert(
     serialized.includes('"ASSIGNMENT_VERSION_CONFLICT"') &&
-      serialized.includes('"ASSIGNMENT_SEQUENCE_CONFLICT"'),
-    "assignment CAS and ordering errors must be documented",
+      serialized.includes('"ASSIGNMENT_SEQUENCE_CONFLICT"') &&
+      serialized.includes('"ASSIGNMENT_IMPACT_CHANGED"') &&
+      serialized.includes('"ASSIGNMENT_AVAILABILITY_STALE"'),
+    "assignment draft and commit concurrency errors must be documented",
   );
   assert(
     serialized.includes('"OUTSIDE_AVAILABILITY_WINDOW"') &&

@@ -72,8 +72,10 @@ def test_account_response_and_status_command_use_distinct_enums() -> None:
 
 def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
     assert DeveloperAuditEventType.ASSIGNMENT_DRAFT_SAVED.value == "assignment.draft_saved"
+    assert DeveloperAuditEventType.ASSIGNMENT_NOTIFIED.value == "assignment.notified"
     field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
     assert {
+        "assignment_id",
         "cleaning_target_id",
         "maid_profile_id",
         "service_date",

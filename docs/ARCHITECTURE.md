@@ -95,6 +95,7 @@ erDiagram
 | PIN lease | 객실·예약·target·현재 assignment·현재 attempt·담당 메이드·최신 verified PIN version을 한 계약으로 묶음. 수동 checkout은 stale lease를 폐기하고 현재 verified version으로 현재 미공개 lease 한 건만 새 revision으로 재발급 |
 | 담당 변경 | 대상 `assignment_version` CAS + 현재 담당 partial unique |
 | 미통보 draft 배정 | target row lock + immutable assignment revision + 현재 `(maid, service_date, sequence)` partial unique. 저장 시 target 날짜·접근 가능·마감 시각 snapshot 고정 |
+| 배정 알림 확정 | 서비스 날짜 global lock + target/assignment row lock + maid/week availability advisory lock + impact fingerprint + assignment/availability version CAS. 선택 부분집합 전체를 한 transaction으로 notification/outbox/audit와 함께 확정 |
 | 청소 시작 | 메이드별 `in_progress` partial unique |
 | 제출 | `client_submission_id` unique + 회차별 현재 제출 unique |
 | 검수 | 제출별 decision unique, 현재 `submitted` 버전만 조건부 전이 |
@@ -102,9 +103,29 @@ erDiagram
 | 지급 | `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + PAYING 이후 snapshot 불변 + 미송금 사유 기록 reopen + version CAS |
 | 알림 | 수신자별 dedupe key unique, 10분 group key |
 
-복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃은 현재 SQL RPC에서 짧은 transaction으로 예약, obligation, revision/event, 감사 원장을 함께 커밋합니다. 배정 통보·검수·지급도 같은 원칙으로 후속 구현합니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
+복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃과 배정 알림 확정은 SQL RPC의 짧은 transaction으로 원장, projection, 감사 이벤트를 함께 커밋합니다. 검수·지급도 같은 원칙으로 후속 구현합니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
 
 #25의 미통보 draft 배정은 기존 `cleaning_targets`와 `cleaning_assignments`를 재사용합니다. active business admin만 service-role RPC를 호출하며 DB가 actor를 다시 검사합니다. target의 `assignment_version`을 CAS로 잠근 뒤 기존 current draft를 `DRAFT_REVISED`로 닫고 새 immutable revision을 추가합니다. 이 단계는 `draft_assigned`까지만 전이하며 notification, outbox, cleaning attempt는 생성하지 않습니다.
+
+#26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 `notifications`, private `notification_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
+
+## 미래 checkout 계획과 실행 경계 — #1/#4/#26/#28
+
+`checkout_cleaning_obligations.planned_cleaning_target_id`는 예약 생성 시점의 배정 identity이고,
+`current_cleaning_target_id`는 실제 checkout 이후 운영 pointer입니다. private 의무도 계획 target으로
+오늘/내일 배정·통보할 수 있지만 점유/입실 준비 projection은 바꾸지 않습니다. 예정/수동 checkout은
+같은 target을 materialized/current로 승격하고, 수동 조기 퇴실의 일정 변경은 새 schedule/assignment
+revision 및 변경 notification/outbox로 보존합니다. #28 전까지 attempt 활성화는 구현하지 않습니다.
+
+예약 변경·취소와 draft/commit은 동일 reservation-command transaction lock을 먼저 취득합니다.
+미통보 draft는 일정 변경 후 stale이며 재저장이 필요합니다. notified 일정은 explicit replan 없이
+변경하지 않고 취소 시 current assignment 종료와 회수 통보를 함께 기록합니다. checkout attempt/PIN
+테이블의 실행 guard는 실제 checkout/current pointer/access 시각을 재검증합니다.
+
+append-only `20260904144209_planned_checkout_targets.sql`은 기존 target identity를 재사용하며
+private 기존 의무만 계획 target으로 backfill합니다. 새 target에는 해당 객실 타입의 published
+checkout template이 필수이며 누락 시 migration/예약 저장을 fail-closed합니다. 운영 템플릿을
+임의 seed하지 않습니다. 생성 시 fee/template/room snapshot은 이후 예약 일정 수정에도 보존합니다.
 
 ## RLS 원칙
 

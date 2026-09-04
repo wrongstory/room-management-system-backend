@@ -16,6 +16,9 @@ const roomId = "30000000-0000-4000-8000-000000000001";
 const roomTypeId = "40000000-0000-4000-8000-000000000001";
 const blockId = "50000000-0000-4000-8000-000000000001";
 const issueId = "60000000-0000-4000-8000-000000000001";
+const assignmentId = "70000000-0000-4000-8000-000000000001";
+const cleaningTargetId = "80000000-0000-4000-8000-000000000001";
+const impactFingerprint = "a".repeat(64);
 const roomRow = {
   id: roomId,
   room_number: "101",
@@ -43,6 +46,31 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
         }
         if (name === "change_room_master_data") {
           return { data: null, error: null };
+        }
+        if (name === "get_assignment_commit_impact") {
+          return {
+            data: {
+              serviceDate: "2026-09-04",
+              impactFingerprint,
+              committableDrafts: [],
+              blockedDrafts: [],
+              remainingUnassignedTargets: [],
+            },
+            error: null,
+          };
+        }
+        if (name === "commit_and_notify_assignments") {
+          return {
+            data: {
+              serviceDate: "2026-09-04",
+              impactFingerprint,
+              notifiedAssignments: [],
+              remainingDrafts: [],
+              blockedDrafts: [],
+              unassignedTargets: [],
+            },
+            error: null,
+          };
         }
         const payload = args.p_payload as Record<string, unknown>;
         return {
@@ -108,6 +136,58 @@ Deno.test("Room GET detail route rejects every mutation-shaped alias", async () 
       `${path} must use the unknown route contract`,
     );
     assert(calls.length === 0, `${path} must not call a Room RPC`);
+  }
+});
+
+Deno.test("Assignment commit preflight and mutation use exact routes", async () => {
+  const routes: Array<{
+    method: string;
+    path: string;
+    body?: Record<string, unknown>;
+    rpc: string;
+  }> = [
+    {
+      method: "GET",
+      path: "/v1/assignments/commit-impact?serviceDate=2026-09-04",
+      rpc: "get_assignment_commit_impact",
+    },
+    {
+      method: "POST",
+      path: "/v1/assignments/commit",
+      body: {
+        serviceDate: "2026-09-04",
+        expectedImpactFingerprint: impactFingerprint,
+        items: [{
+          cleaningTargetId,
+          expectedAssignmentVersion: 2,
+          expectedAvailabilityVersion: 1,
+        }],
+      },
+      rpc: "commit_and_notify_assignments",
+    },
+  ];
+  for (const route of routes) {
+    const calls: string[] = [];
+    const response = await handleApiRequest(
+      request(route.method, route.path, route.body),
+      routeDependencies(calls),
+    );
+    assert(response.status === 200, `${route.method} ${route.path} must work`);
+    assert(calls.includes(route.rpc), `${route.rpc} must be called`);
+  }
+
+  for (
+    const path of [
+      "/v1/assignments/commit-impact/extra?serviceDate=2026-09-04",
+      `/v1/assignments/${assignmentId}/commit`,
+    ]
+  ) {
+    const response = await handleApiRequest(
+      request("GET", path),
+      routeDependencies([]),
+    );
+    assert(response.status === 404, `${path} must stay unknown`);
+    assert(await errorCode(response) === "ROUTE_NOT_FOUND", "stable 404");
   }
 });
 

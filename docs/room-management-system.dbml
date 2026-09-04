@@ -263,6 +263,7 @@ Table public.checkout_cleaning_obligations {
   effective_service_date date [not null]
   available_from timestamptz [not null]
   due_at timestamptz
+  planned_cleaning_target_id uuid [unique]
   current_cleaning_target_id uuid [unique]
   version bigint [not null]
   cancelled_at timestamptz
@@ -271,7 +272,7 @@ Table public.checkout_cleaning_obligations {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'materialized requires a current target; private/available require no current target. Cancelled obligations may retain the historical target pointer.'
+  Note: 'planned target is created with the reservation; private requires no current target and forbids execution. Actual checkout promotes the same planned identity to materialized/current. Cancellation preserves identity and soft cancels target/assignments. Composite FK ties planned target to obligation/reservation/room.'
 }
 
 Table public.room_occupancy_events {
@@ -651,6 +652,8 @@ Table private.notification_outbox {
   delivered_at timestamptz
   last_error_code text
   created_at timestamptz [not null]
+
+  Note: '#26 inserts pending web_push rows transactionally with assignment notifications. Claim/retry/provider handling remains #10.'
 }
 
 Table public.audit_events {
@@ -788,6 +791,7 @@ Ref: private.preparation_proof_usages.cleaning_attempt_id > public.cleaning_atte
 Ref: public.checkout_cleaning_obligations.reservation_id - public.reservations.id
 Ref: public.checkout_cleaning_obligations.room_id > public.rooms.id
 Ref: public.checkout_cleaning_obligations.current_cleaning_target_id - public.cleaning_targets.id
+Ref: public.checkout_cleaning_obligations.(planned_cleaning_target_id, id, reservation_id, room_id) - public.cleaning_targets.(id, checkout_obligation_id, reservation_id, room_id)
 Ref: public.checkout_cleaning_obligations.created_by > public.profiles.id
 Ref: public.room_occupancy_events.room_id > public.rooms.id
 Ref: public.room_occupancy_events.reservation_id > public.reservations.id

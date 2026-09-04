@@ -78,6 +78,10 @@ const assignmentCoreMigrationUrl = new URL(
   '../supabase/migrations/20260903102758_assignment_core.sql',
   import.meta.url
 );
+const assignmentCommitMigrationUrl = new URL(
+  '../supabase/migrations/20260903141742_assignment_commit.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -357,6 +361,27 @@ describe('initial migration contract', () => {
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
+  });
+
+  it('commits assignment notification subsets atomically through a private outbox', async () => {
+    const sql = await readFile(assignmentCommitMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.notification_outbox');
+    expect(sql).toContain('alter table private.notification_outbox enable row level security');
+    expect(sql).toContain('create function public.get_assignment_commit_impact(');
+    expect(sql).toContain('create function public.commit_and_notify_assignments(');
+    expect(sql).toContain("'assignment.commit_notify'");
+    expect(sql).toContain("'assignment.notified'");
+    expect(sql).toContain('ASSIGNMENT_IMPACT_CHANGED');
+    expect(sql).toContain('ASSIGNMENT_AVAILABILITY_STALE');
+    expect(sql).toContain("at time zone 'Asia/Seoul'");
+    expect(sql).toContain('pg_advisory_xact_lock');
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
+    expect(sql).not.toContain('http_post');
   });
 
   it('adds reservation history, obligations, occupancy ledgers, and CAS commands', async () => {
