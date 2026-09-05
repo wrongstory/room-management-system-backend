@@ -52,7 +52,10 @@ export function authorizationSourceForPath(
   if (path.startsWith("/v1/availability")) {
     return "edge.authorization.availability";
   }
-  if (path.startsWith("/v1/assignments")) {
+  if (
+    path.startsWith("/v1/assignments") ||
+    path.startsWith("/v1/assignment-change-requests")
+  ) {
     return "edge.authorization.assignments";
   }
   if (path.startsWith("/v1/reservations")) {

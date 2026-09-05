@@ -109,6 +109,20 @@ erDiagram
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 `notifications`, private `notification_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
+## 시작 전 배정 변경 — #27
+
+네 개의 service-only RPC(change/unassign/cancellation request/decision)가 같은 private command helper를 사용합니다. Edge는 Auth user → active profile → active session → 비밀번호 변경 완료 → exact admin/maid를 확인하고, DB는 actor·ownership·current assignment·target version·transition을 다시 검증합니다.
+
+잠금 순서는 scoped command receipt → 기존 reservation-command advisory lock → target → current assignment → 요청 row이며, 담당 변경은 그 뒤 maid/week availability lock을 사용합니다. attempt INSERT 경계도 같은 reservation/target/assignment 순서를 사용하고 stale assignment revision을 차단합니다. non-superseded attempt가 하나라도 있으면 네 명령 모두 실패합니다. activation 기능 자체는 추가하지 않습니다.
+
+`assignment_change_requests`는 source identity 불변, assignment별 pending partial unique, terminal 수정/DELETE 금지입니다. authenticated에는 SELECT만 주며 RLS는 active admin 전체/maid 자기 요청만 허용합니다. developer는 business 요청을 읽지 못합니다. source assignment 종료 trigger가 pending을 superseded로 바꾸므로 예약 취소/조기 checkout 같은 기존 command도 ghost pending을 남기지 않습니다.
+
+변경은 과거 snapshot을 수정하지 않고 current 종료와 새 revision을 기록합니다. draft에는 알림이 없고 notified에는 기존 actionable notice resolve 및 새 notification/outbox가 receipt/audit와 함께 commit됩니다. 승인 결정은 request를 terminal로 만든 뒤 담당을 해제하며 반려는 담당을 유지합니다. source가 바뀐 요청은 새 assignment를 해제할 수 없습니다.
+
+일정 변경은 생성 command의 정확한 `manual_room_request + additional` 또는 `stayover_request + stayover` 조합에서 같은 날짜의 기존 창 축소만 구현합니다. stayover는 actual check-in 이후 active reservation의 같은 객실·점유 구간을 다시 검증합니다. source-kind 불일치와 checkout 원장 시간 변경은 거부합니다. 미래 planned checkout 재배정도 target identity를 그대로 쓰며 실제 checkout/PIN/attempt를 활성화하지 않습니다.
+
+요청 목록은 최대 31일/100건, `(requested_at,id)` cursor와 maid/page indexes로 제한합니다. reason detail은 길이/형식 제한된 business 데이터이며 관리자/본인에게만 반환하고 감사/알림에서 제외합니다. 4개 audit event는 developer safe projection/OpenAPI/Python 생성 모델에 동기화합니다. 운영/recovery/Pages 및 #28/#7/#69/#10 실행 기능에는 변경이 없습니다.
+
 ## 미래 checkout 계획과 실행 경계 — #1/#4/#26/#28
 
 `checkout_cleaning_obligations.planned_cleaning_target_id`는 예약 생성 시점의 배정 identity이고,

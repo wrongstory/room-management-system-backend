@@ -117,7 +117,7 @@ insert into public.cleaning_assignments (
   '58000000-0000-4000-8000-000000000007',
   '48000000-0000-4000-8000-000000000007',
   '28000000-0000-4000-8000-000000000002',
-  7, 1, false, clock_timestamp(), 'TEST_COMPLETED',
+  7, 1, true, null, null,
   '28000000-0000-4000-8000-000000000001'
 );
 
@@ -131,6 +131,10 @@ insert into public.cleaning_attempts (
   '28000000-0000-4000-8000-000000000002',
   1, 'approved', 1, clock_timestamp(), 'TEST_APPROVED', '{}'::jsonb, '{}'::jsonb
 );
+
+-- 실제 lifecycle 순서: current assignment에 attempt를 연결한 뒤 과거 담당을 종료한다.
+update public.cleaning_assignments set is_current=false,ended_at=clock_timestamp(),change_reason_code='TEST_COMPLETED'
+where id='58000000-0000-4000-8000-000000000007';
 
 insert into public.cleaning_targets (
   id, room_id, cleaning_kind, source, source_key,

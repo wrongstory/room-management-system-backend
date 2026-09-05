@@ -377,6 +377,39 @@ erDiagram
 - `purge_after`는 서버가 `uploaded_at + 7일`로 강제하며, 삭제 작업이 Drive 파일을 영구삭제한 뒤 `purged_at`을 기록한다.
 - 제출 당시 템플릿과 슬롯을 스냅샷으로 고정해 이후 템플릿 변경이 과거 검수에 소급되지 않게 한다.
 
+### #27 시작 전 취소 요청 원장
+
+```mermaid
+erDiagram
+  CLEANING_TARGETS ||--o{ ASSIGNMENT_CHANGE_REQUESTS : "대상"
+  CLEANING_ASSIGNMENTS ||--o{ ASSIGNMENT_CHANGE_REQUESTS : "불변 source revision"
+  PROFILES ||--o{ ASSIGNMENT_CHANGE_REQUESTS : "요청 maid / 결정 admin"
+  ASSIGNMENT_CHANGE_REQUESTS {
+    uuid id PK
+    uuid cleaning_target_id FK
+    uuid assignment_id FK
+    uuid maid_profile_id FK
+    text request_type
+    text reason_code
+    text reason_detail
+    text status
+    bigint source_assignment_revision
+    bigint source_target_assignment_version
+    timestamptz requested_at
+    uuid decided_by FK
+    timestamptz decided_at
+    text decision_reason_code
+  }
+```
+
+- assignment/target/maid/revision 복합 FK, assignment당 pending 최대 1건. source와 terminal decision은 불변이고 DELETE 금지다.
+- pending → approved/rejected 또는 source 종료 시 superseded. source stale 요청으로 새 assignment를 해제할 수 없다.
+- RLS는 active admin 전체/maid 본인만, developer 0. 직접 INSERT/UPDATE/DELETE와 client RPC 실행은 차단한다.
+- pre-start 변경/해제/요청/결정은 non-superseded attempt가 있으면 전부 거부한다. current assignment ID + target version CAS와 공통 잠금으로 activation 경합에서 한쪽만 성공한다.
+- schedule 축소는 `manual_room_request + additional` 또는 `stayover_request + stayover`만 허용한다. stayover는 actual check-in된 active reservation과 target의 reservation/room 일치 및 checkout 이전 점유 구간을 재검증한다. 다른 source-kind 조합과 날짜 이동·창 확장은 거부한다.
+- notified 변경/해제는 기존 notification을 보존/resolve하고 새 알림/outbox를 추가한다. draft에는 통보가 없다. reason detail은 audit/notification에 포함하지 않는다.
+- request 조회는 31일/100건 상한과 requested_at/id cursor, maid/target/assignment/decider FK indexes를 사용한다.
+
 ## 6. 수익·주급·알림·감사
 
 ```mermaid

@@ -462,6 +462,35 @@ Table public.cleaning_assignments {
   Note: 'Partial unique indexes permit one current assignment per target and one current sequence per maid/service date. Target, maid, sequence, revision, schedule snapshots, changer, and created time are immutable.'
 }
 
+Table public.assignment_change_requests {
+  id uuid [pk]
+  cleaning_target_id uuid [not null, ref: > public.cleaning_targets.id]
+  assignment_id uuid [not null]
+  maid_profile_id uuid [not null, ref: > public.profiles.id]
+  request_type text [not null, default: 'cancel_assignment']
+  reason_code text [not null]
+  reason_detail text [note: '1-200 chars; no sensitive input; admin/self response only, never audit/notification']
+  status text [not null, default: 'pending', note: 'pending/approved/rejected/superseded']
+  source_assignment_revision bigint [not null]
+  source_target_assignment_version bigint [not null]
+  requested_at timestamptz [not null]
+  decided_by uuid [ref: > public.profiles.id]
+  decided_at timestamptz
+  decision_reason_code text
+  created_at timestamptz [not null]
+
+  Indexes {
+    assignment_id [unique, note: 'Partial where status=pending; separate full FK index']
+    cleaning_target_id
+    (maid_profile_id, requested_at, id)
+    (requested_at, id)
+    decided_by
+  }
+  Note: '#27 source identity/terminal decisions immutable, DELETE forbidden. Active admin all/maid self RLS; service-owned command writes. Source assignment ending supersedes pending requests. Schedule narrowing allows exact manual_room_request+additional or stayover_request+stayover only; stayover rechecks active occupied reservation. No attempt activation.'
+}
+
+Ref: public.assignment_change_requests.(assignment_id, cleaning_target_id, maid_profile_id, source_assignment_revision) > public.cleaning_assignments.(id, cleaning_target_id, maid_profile_id, revision)
+
 Table public.cleaning_attempts {
   id uuid [pk]
   cleaning_target_id uuid [not null]

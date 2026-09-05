@@ -12,7 +12,10 @@ import {
   assignmentHistory,
   assignmentTargetIdFromPath,
   commitAssignments,
+  listAssignmentChangeRequests,
   listAssignments,
+  prestartCommand,
+  prestartPath,
   saveAssignmentDraft,
 } from "../_shared/assignment-api.ts";
 import {
@@ -143,6 +146,29 @@ export async function handleApiRequest(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    if (request.method === "GET" && path === "/v1/assignment-change-requests") {
+      return jsonResponse(
+        await listAssignmentChangeRequests(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST") {
+      const prestart = prestartPath(path);
+      if (prestart) {
+        return jsonResponse(
+          await prestartCommand(
+            request,
+            clients,
+            actor,
+            prestart.id,
+            prestart.action,
+          ),
+          200,
+          corsHeaders,
+        );
+      }
+    }
     if (request.method === "GET" && path === "/v1/auth/me") {
       return jsonResponse({ user: actor }, 200, corsHeaders);
     }

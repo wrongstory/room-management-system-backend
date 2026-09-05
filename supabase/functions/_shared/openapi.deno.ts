@@ -63,8 +63,8 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   const auditEventTypeParameter = document.paths["/v1/developer/audit-events"]
     .get.parameters.find((parameter) => parameter.name === "eventType");
   assert(
-    auditEventTypeParameter?.schema.maxItems === 29,
-    "developer audit filter limit must match the 29-event allowlist",
+    auditEventTypeParameter?.schema.maxItems === 33,
+    "developer audit filter limit must match the 33-event allowlist",
   );
   const auditSummary = document.components.schemas.DeveloperAuditEvent
     .properties.summary;

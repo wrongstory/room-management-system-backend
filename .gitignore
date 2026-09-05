@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .tmp/
+.worktrees/
 .venv/
 __pycache__/
 *.py[cod]

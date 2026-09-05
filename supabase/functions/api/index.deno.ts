@@ -19,6 +19,67 @@ const issueId = "60000000-0000-4000-8000-000000000001";
 const assignmentId = "70000000-0000-4000-8000-000000000001";
 const cleaningTargetId = "80000000-0000-4000-8000-000000000001";
 const impactFingerprint = "a".repeat(64);
+
+Deno.test("prestart routes dispatch only exact methods and reject developer capability", async () => {
+  const paths = [
+    `/v1/assignments/${cleaningTargetId}/change`,
+    `/v1/assignments/${cleaningTargetId}/unassign`,
+    `/v1/assignments/${cleaningTargetId}/cancellation-requests`,
+    `/v1/assignment-change-requests/${assignmentId}/decision`,
+  ];
+  const calls: string[] = [];
+  const clients = {
+    admin: {
+      rpc: async (name: string) => {
+        calls.push(name);
+        if (name === "record_authorization_denial") {
+          return { data: null, error: null };
+        }
+        return { data: null, error: { message: "ASSIGNMENT_ALREADY_STARTED" } };
+      },
+    },
+  } as unknown as EdgeClients;
+  for (const path of paths) {
+    const role = path.endsWith("/cancellation-requests") ? "maid" : "admin";
+    const deps = {
+      createClients: () => clients,
+      authenticateRequest: () =>
+        Promise.resolve({ ...actor, role } as EdgeActor),
+    };
+    const body = {
+      expectedCurrentAssignmentId: assignmentId,
+      expectedAssignmentVersion: 2,
+      reasonCode: "OPERATIONAL_CHANGE",
+      ...(path.endsWith("/change")
+        ? { maidProfileId: actor.profileId, sequenceNumber: 1 }
+        : {}),
+      ...(path.endsWith("/decision") ? { decision: "approved" } : {}),
+    };
+    const response = await handleApiRequest(request("POST", path, body), deps);
+    assert(
+      response.status === 409 &&
+        (await response.json()).error.code === "ASSIGNMENT_ALREADY_STARTED",
+      "exact route calls guarded RPC",
+    );
+    for (const [method, route] of [["GET", path], ["POST", `${path}/extra`]]) {
+      const res = await handleApiRequest(
+        request(method, route, method === "POST" ? body : undefined),
+        deps,
+      );
+      assert(res.status === 404, "method/suffix mismatch not an alias");
+    }
+    const forbidden = await handleApiRequest(request("POST", path, body), {
+      ...deps,
+      authenticateRequest: () =>
+        Promise.resolve({ ...actor, role: "developer" }),
+    });
+    assert(forbidden.status === 403, "developer forbidden");
+  }
+  assert(
+    calls.filter((name) => name !== "record_authorization_denial").length === 4,
+    "only four exact mutations invoked",
+  );
+});
 const roomRow = {
   id: roomId,
   room_number: "101",

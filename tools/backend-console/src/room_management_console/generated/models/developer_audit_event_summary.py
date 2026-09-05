@@ -8,6 +8,7 @@ from uuid import UUID
 from attrs import define as _attrs_define
 
 from ..models.app_role import AppRole
+from ..models.developer_audit_event_summary_decision import DeveloperAuditEventSummaryDecision
 from ..types import UNSET, Unset
 
 T = TypeVar("T", bound="DeveloperAuditEventSummary")
@@ -26,6 +27,11 @@ class DeveloperAuditEventSummary:
         maid_profile_id (UUID | Unset):
         cleaning_target_id (UUID | Unset):
         assignment_id (UUID | Unset):
+        previous_assignment_id (UUID | Unset):
+        previous_maid_profile_id (UUID | Unset):
+        request_id (UUID | Unset):
+        decision (DeveloperAuditEventSummaryDecision | Unset):
+        reason_code (str | Unset):
         week_start (datetime.date | Unset):
         version (int | Unset):
         source_version (int | Unset):
@@ -66,6 +72,11 @@ class DeveloperAuditEventSummary:
     maid_profile_id: UUID | Unset = UNSET
     cleaning_target_id: UUID | Unset = UNSET
     assignment_id: UUID | Unset = UNSET
+    previous_assignment_id: UUID | Unset = UNSET
+    previous_maid_profile_id: UUID | Unset = UNSET
+    request_id: UUID | Unset = UNSET
+    decision: DeveloperAuditEventSummaryDecision | Unset = UNSET
+    reason_code: str | Unset = UNSET
     week_start: datetime.date | Unset = UNSET
     version: int | Unset = UNSET
     source_version: int | Unset = UNSET
@@ -121,6 +132,24 @@ class DeveloperAuditEventSummary:
         assignment_id: str | Unset = UNSET
         if not isinstance(self.assignment_id, Unset):
             assignment_id = str(self.assignment_id)
+
+        previous_assignment_id: str | Unset = UNSET
+        if not isinstance(self.previous_assignment_id, Unset):
+            previous_assignment_id = str(self.previous_assignment_id)
+
+        previous_maid_profile_id: str | Unset = UNSET
+        if not isinstance(self.previous_maid_profile_id, Unset):
+            previous_maid_profile_id = str(self.previous_maid_profile_id)
+
+        request_id: str | Unset = UNSET
+        if not isinstance(self.request_id, Unset):
+            request_id = str(self.request_id)
+
+        decision: str | Unset = UNSET
+        if not isinstance(self.decision, Unset):
+            decision = self.decision.value
+
+        reason_code = self.reason_code
 
         week_start: str | Unset = UNSET
         if not isinstance(self.week_start, Unset):
@@ -225,6 +254,16 @@ class DeveloperAuditEventSummary:
             field_dict["cleaningTargetId"] = cleaning_target_id
         if assignment_id is not UNSET:
             field_dict["assignmentId"] = assignment_id
+        if previous_assignment_id is not UNSET:
+            field_dict["previousAssignmentId"] = previous_assignment_id
+        if previous_maid_profile_id is not UNSET:
+            field_dict["previousMaidProfileId"] = previous_maid_profile_id
+        if request_id is not UNSET:
+            field_dict["requestId"] = request_id
+        if decision is not UNSET:
+            field_dict["decision"] = decision
+        if reason_code is not UNSET:
+            field_dict["reasonCode"] = reason_code
         if week_start is not UNSET:
             field_dict["weekStart"] = week_start
         if version is not UNSET:
@@ -326,6 +365,36 @@ class DeveloperAuditEventSummary:
             assignment_id = UNSET
         else:
             assignment_id = UUID(_assignment_id)
+
+        _previous_assignment_id = d.pop("previousAssignmentId", UNSET)
+        previous_assignment_id: UUID | Unset
+        if isinstance(_previous_assignment_id, Unset):
+            previous_assignment_id = UNSET
+        else:
+            previous_assignment_id = UUID(_previous_assignment_id)
+
+        _previous_maid_profile_id = d.pop("previousMaidProfileId", UNSET)
+        previous_maid_profile_id: UUID | Unset
+        if isinstance(_previous_maid_profile_id, Unset):
+            previous_maid_profile_id = UNSET
+        else:
+            previous_maid_profile_id = UUID(_previous_maid_profile_id)
+
+        _request_id = d.pop("requestId", UNSET)
+        request_id: UUID | Unset
+        if isinstance(_request_id, Unset):
+            request_id = UNSET
+        else:
+            request_id = UUID(_request_id)
+
+        _decision = d.pop("decision", UNSET)
+        decision: DeveloperAuditEventSummaryDecision | Unset
+        if isinstance(_decision, Unset):
+            decision = UNSET
+        else:
+            decision = DeveloperAuditEventSummaryDecision(_decision)
+
+        reason_code = d.pop("reasonCode", UNSET)
 
         _week_start = d.pop("weekStart", UNSET)
         week_start: datetime.date | Unset
@@ -456,6 +525,11 @@ class DeveloperAuditEventSummary:
             maid_profile_id=maid_profile_id,
             cleaning_target_id=cleaning_target_id,
             assignment_id=assignment_id,
+            previous_assignment_id=previous_assignment_id,
+            previous_maid_profile_id=previous_maid_profile_id,
+            request_id=request_id,
+            decision=decision,
+            reason_code=reason_code,
             week_start=week_start,
             version=version,
             source_version=source_version,
