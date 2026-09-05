@@ -57,14 +57,16 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   );
   assert(
     serialized.includes('"assignment.draft_saved"') &&
-      serialized.includes('"assignment.notified"'),
+      serialized.includes('"assignment.notified"') &&
+      serialized.includes('"assignment.attempt_activated"') &&
+      serialized.includes('"assignment.rolled_over"'),
     "assignment audit events must be part of the developer allowlist",
   );
   const auditEventTypeParameter = document.paths["/v1/developer/audit-events"]
     .get.parameters.find((parameter) => parameter.name === "eventType");
   assert(
-    auditEventTypeParameter?.schema.maxItems === 33,
-    "developer audit filter limit must match the 33-event allowlist",
+    auditEventTypeParameter?.schema.maxItems === 35,
+    "developer audit filter limit must match the 35-event allowlist",
   );
   const auditSummary = document.components.schemas.DeveloperAuditEvent
     .properties.summary;
@@ -76,6 +78,12 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       "sequenceNumber" in auditSummary.properties &&
       "revision" in auditSummary.properties &&
       "targetAssignmentVersion" in auditSummary.properties &&
+      "attemptId" in auditSummary.properties &&
+      "attemptNumber" in auditSummary.properties &&
+      "assignmentRevision" in auditSummary.properties &&
+      "rolloverFromDate" in auditSummary.properties &&
+      "rolloverToDate" in auditSummary.properties &&
+      "carryoverCount" in auditSummary.properties &&
       !("requestHash" in auditSummary.properties),
     "assignment audit summary must expose only approved projection fields",
   );

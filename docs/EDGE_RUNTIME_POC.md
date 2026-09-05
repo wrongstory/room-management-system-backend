@@ -67,7 +67,7 @@ Supabase Cron (pg_cron)
 | `api` | `POST /api/v1/reservations/cleaning-requests` | active admin + password changed | 연박·추가 청소 요청 |
 | `api` | `POST /api/v1/reservations/cleaning-requests/:targetId/cancel` | active admin + password changed | 청소 요청 CAS soft cancel |
 | `api` | `POST /api/v1/reservations/transitions/process` | active admin + password changed | 관리자 수동 전이 실행 |
-| `reservation-scheduler` | `POST /reservation-scheduler` | `x-scheduler-secret` | 예약 전이/PII 보존 command |
+| `reservation-scheduler` | `POST /reservation-scheduler` | `x-scheduler-secret` | 예약 전이/PII 보존 후 #28 배정 activation·rollover command |
 
 `verify_jwt=false`는 공개 허용을 뜻하지 않는다. 하나의 API Function 안에서 health와 인증 endpoint를 함께 라우팅하기 위해 gateway 검사를 끄고, 보호 경로에서 `auth.getUser`와 최신 DB profile/session을 매 요청 재검증한다. scheduler Function은 32자 이상의 별도 secret을 HMAC 방식으로 비교한 뒤에만 service-role RPC를 호출한다.
 
@@ -84,6 +84,11 @@ Supabase Cron (pg_cron)
 Scheduler 시간값은 두 역할로 분리한다. 요청의 `scheduledAt`은 해당 Cron 호출을 식별하는 minute bucket과 idempotency key에만 사용하며 업무 전이의 기준 시각으로 사용하지 않는다. 실제 `p_as_of`는 Function이 RPC를 실행하는 현재 시각이다. 따라서 같은 `scheduledAt` 재시도는 같은 호출로 처리하면서도 pause나 전달 지연 뒤에는 실제 실행 시각까지 누락된 예약 전이를 catch-up한다.
 
 각 인증된 scheduler 실행은 업무 RPC 완료 뒤 `private.scheduler_invocation_heartbeats`에 7일 app-owned 상태를 기록한다. 같은 invocation key 재시도는 attempt count와 마지막 결과만 갱신하며 secret·Authorization·HTTP body·원문 DB 오류는 저장하지 않는다. developer scheduler projection은 Cron SQL이나 `net._http_response` raw row를 공개하지 않고 활성 여부·cadence·최근 run 시각, exact-admin actor 유효성, 안전한 heartbeat 필드만 반환한다.
+
+#28 source에서는 예약 전이가 성공한 뒤 같은 실제 command 시각으로 별도
+`assignment.process_due_lifecycle` receipt를 실행한다. 활성화/이월 수를 heartbeat transition count에
+합산하지만 production scheduler는 다음 release/main·migration·Function 재배포 전까지 기존 예약 전이
+동작으로 간주한다.
 
 developer 운영 API는 exact `developer` 역할만 허용한다. DB·Cron·감사 원본은 app-owned `SECURITY DEFINER` projection 뒤에 두며 service-role도 private heartbeat/limiter/activity table을 직접 조회하지 않는다. 성공한 업무 mutation은 immutable `public.audit_events`에 남기고 account·availability·reservation·room·scheduler 승인 event만 안전한 summary로 공개한다. 로그인·민감정보 조회는 별도 private activity event에 기록하고, 알 수 없는 로그인 실패와 권한 거부는 각각 분 단위 bounded aggregate로 집계한다. 권한 거부 key는 actor/source/reason을 포함하며 count는 600에서 포화된다. 영구 request ID는 Edge가 생성한 UUID v4만 사용하고 caller `X-Request-ID`는 저장하지 않는다. 두 projection 모두 최대 31일·100건 cursor pagination을 적용하고 raw before/after state를 반환하지 않는다. diagnostics는 임의 URL·SQL·RPC 입력 없이 10회/분 durable 제한을 사용한다. 모든 developer 응답은 `Cache-Control: no-store`다.
 

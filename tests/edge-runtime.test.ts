@@ -89,13 +89,20 @@ describe('Supabase Edge runtime PoC contract', () => {
       /requiredEnv\(\s*["']RESERVATION_SCHEDULER_ACTOR_PROFILE_ID["']/
     );
     const command = scheduler.search(/["']process_due_reservation_transitions["']/);
+    const assignmentCommand = scheduler.search(
+      /["']process_due_assignment_lifecycle["']/
+    );
 
     expect(secretCheck).toBeGreaterThan(0);
     expect(actorCheck).toBeGreaterThan(secretCheck);
     expect(command).toBeGreaterThan(actorCheck);
+    expect(assignmentCommand).toBeGreaterThan(command);
     expect(scheduler).toContain('crypto.subtle.verify');
     expect(scheduler).toContain('reservation-scheduler-$' + '{bucket}');
-    expect(scheduler).toMatch(/p_as_of:\s*new Date\(\)\.toISOString\(\)/);
+    expect(scheduler).toContain("const commandAt = new Date().toISOString()");
+    expect(scheduler).toMatch(/p_as_of:\s*commandAt/);
+    expect(scheduler).toContain('"assignment.process_due_lifecycle"');
+    expect(scheduler).toContain("assignments: assignmentData");
   });
 
   it('uses a durable database-backed limiter before looking up a login alias', async () => {
@@ -204,7 +211,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toContain(
-      'expectedMigrationName = "assignment_prestart_change"'
+      'expectedMigrationName = "assignment_attempt_activation"'
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
