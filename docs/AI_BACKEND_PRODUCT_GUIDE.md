@@ -265,6 +265,15 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 요청 사유는 고정 reason code를 사용한다. 선택 detail은 1–200자이며 숫자·주소/URL형 구분자는 차단한다. 이는 모든 민감정보를 판별하는 필터가 아니므로 고객명·전화번호·PIN·token을 입력하지 않는다. detail은 관리자/요청 당사자에게만 보이며 감사 projection·알림에는 복제하지 않는다.
 - source 구현/검증과 운영 배포는 별도 gate다. #27의 production API는 아직 사용할 수 없다.
 
+### [현재 구현] #28 수행 회차 활성화·이월 경계
+
+- 기존 scheduler의 exact active business admin·secret·분 단위 invocation을 재사용하되, 예약 전이와 배정 lifecycle은 서로 다른 command scope/request hash로 멱등 처리한다. public activation API와 메이드 activation API는 만들지 않는다.
+- 오늘 KST의 notified current assignment만 active maid, current target/version, schedule snapshot, 접근/마감 창, source별 예약·checkout·reclean 계약을 transaction 안에서 다시 확인한 후 `scheduled` attempt를 exactly-once 생성한다. 내일 작업과 private planned checkout은 attempt 0이다.
+- checkout은 planned target이 obligation의 current pointer로 materialize되고 reservation actual checkout이 기록된 뒤에만 같은 target/current assignment revision으로 활성화한다. snapshot은 target의 template/room snapshot을 우선 사용하며 생성 뒤 바꾸지 않는다.
+- 같은 객실의 이전 non-terminal attempt가 있으면 `PREVIOUS_ROOM_WORKFLOW_ACTIVE`로 보류하고 target·assignment를 유지한다. blocked event는 scheduler 매 실행마다 쌓지 않는다.
+- 실행 창이 끝난 unassigned와 notified attempt-0 target만 같은 identity로 다음 KST 날짜에 이월한다. original date는 불변이고 effective date, carryover count, assignment version, schedule revision만 증가한다. notified assignment는 종료하고 기존 알림을 resolve하며 새 maid를 자동 배정하지 않는다.
+- active attempt는 자정을 넘어도 같은 attempt/assignment를 유지한다. 실제 시작·중단·인계는 #7, 자동 배정은 #29다. source 구현은 production/recovery에 아직 배포되지 않았다.
+
 ---
 
 ## 7. 청소 수행, 사진, 제출

@@ -121,7 +121,28 @@ erDiagram
 
 일정 변경은 생성 command의 정확한 `manual_room_request + additional` 또는 `stayover_request + stayover` 조합에서 같은 날짜의 기존 창 축소만 구현합니다. stayover는 actual check-in 이후 active reservation의 같은 객실·점유 구간을 다시 검증합니다. source-kind 불일치와 checkout 원장 시간 변경은 거부합니다. 미래 planned checkout 재배정도 target identity를 그대로 쓰며 실제 checkout/PIN/attempt를 활성화하지 않습니다.
 
-요청 목록은 최대 31일/100건, `(requested_at,id)` cursor와 maid/page indexes로 제한합니다. reason detail은 길이/형식 제한된 business 데이터이며 관리자/본인에게만 반환하고 감사/알림에서 제외합니다. 4개 audit event는 developer safe projection/OpenAPI/Python 생성 모델에 동기화합니다. 운영/recovery/Pages 및 #28/#7/#69/#10 실행 기능에는 변경이 없습니다.
+요청 목록은 최대 31일/100건, `(requested_at,id)` cursor와 maid/page indexes로 제한합니다. reason detail은 길이/형식 제한된 business 데이터이며 관리자/본인에게만 반환하고 감사/알림에서 제외합니다. 4개 audit event는 developer safe projection/OpenAPI/Python 생성 모델에 동기화합니다. 운영/recovery/Pages 및 #7/#69/#10 실행 기능에는 변경이 없습니다.
+
+## 수행 회차 활성화와 이월 — #28
+
+기존 `reservation-scheduler`는 예약 전이와 같은 실제 실행 시각을 사용해 service-only
+`process_due_assignment_lifecycle`을 이어서 호출합니다. command receipt는 예약 전이와 별도
+`assignment.process_due_lifecycle` scope를 사용하며, target별 core는 #27과 같은
+reservation-command advisory lock → target → current assignment 순서로 재검증합니다. public admin/maid
+activation route는 추가하지 않았고 메이드의 실제 `in_progress` 시작은 #7 소유입니다.
+
+오늘 KST의 notified current assignment만 접근 가능 시각과 source별 실행 조건을 통과하면
+`scheduled` attempt를 정확히 한 건 만듭니다. attempt는 current assignment/maid/revision과 target의
+template/room snapshot을 고정합니다. 미래 날짜와 실제 checkout 전 planned target은 attempt 0이며,
+checkout obligation이 materialized/current가 되고 reservation actual checkout까지 확인된 뒤에만 같은
+target으로 활성화합니다. 같은 객실의 이전 active workflow가 있으면 assignment를 유지한 채
+`PREVIOUS_ROOM_WORKFLOW_ACTIVE`로 보류합니다.
+
+실행 창이 끝난 unassigned 또는 notified attempt-0 target은 ID와 original service date를 유지하고
+effective service date를 하루 이동하며 carryover/version/schedule revision을 한 번만 증가시킵니다.
+notified assignment는 이력으로 종료하고 actionable 알림을 resolve한 뒤 informational notification과
+outbox만 append합니다. active attempt가 있는 업무는 이월하지 않습니다. activation/rollover 감사에는
+승인된 ID·revision·날짜·count만 노출하며 request hash와 raw state는 developer projection에서 제외합니다.
 
 ## 미래 checkout 계획과 실행 경계 — #1/#4/#26/#28
 
@@ -129,7 +150,8 @@ erDiagram
 `current_cleaning_target_id`는 실제 checkout 이후 운영 pointer입니다. private 의무도 계획 target으로
 오늘/내일 배정·통보할 수 있지만 점유/입실 준비 projection은 바꾸지 않습니다. 예정/수동 checkout은
 같은 target을 materialized/current로 승격하고, 수동 조기 퇴실의 일정 변경은 새 schedule/assignment
-revision 및 변경 notification/outbox로 보존합니다. #28 전까지 attempt 활성화는 구현하지 않습니다.
+revision 및 변경 notification/outbox로 보존합니다. #28은 materialization·actual checkout·접근 시각을
+다시 확인한 뒤에만 이 current revision을 scheduled attempt로 활성화합니다.
 
 예약 변경·취소와 draft/commit은 동일 reservation-command transaction lock을 먼저 취득합니다.
 미통보 draft는 일정 변경 후 stale이며 재저장이 필요합니다. notified 일정은 explicit replan 없이
