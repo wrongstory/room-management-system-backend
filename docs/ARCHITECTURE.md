@@ -119,7 +119,7 @@ erDiagram
 
 변경은 과거 snapshot을 수정하지 않고 current 종료와 새 revision을 기록합니다. draft에는 알림이 없고 notified에는 기존 actionable notice resolve 및 새 notification/outbox가 receipt/audit와 함께 commit됩니다. 승인 결정은 request를 terminal로 만든 뒤 담당을 해제하며 반려는 담당을 유지합니다. source가 바뀐 요청은 새 assignment를 해제할 수 없습니다.
 
-일정 변경은 manual additional/stayover의 같은 날짜 기존 창 축소만 구현합니다. checkout 원장 시간은 유지합니다. 미래 planned checkout 재배정도 target identity를 그대로 쓰며 실제 checkout/PIN/attempt를 활성화하지 않습니다.
+일정 변경은 생성 command의 정확한 `manual_room_request + additional` 또는 `stayover_request + stayover` 조합에서 같은 날짜의 기존 창 축소만 구현합니다. stayover는 actual check-in 이후 active reservation의 같은 객실·점유 구간을 다시 검증합니다. source-kind 불일치와 checkout 원장 시간 변경은 거부합니다. 미래 planned checkout 재배정도 target identity를 그대로 쓰며 실제 checkout/PIN/attempt를 활성화하지 않습니다.
 
 요청 목록은 최대 31일/100건, `(requested_at,id)` cursor와 maid/page indexes로 제한합니다. reason detail은 길이/형식 제한된 business 데이터이며 관리자/본인에게만 반환하고 감사/알림에서 제외합니다. 4개 audit event는 developer safe projection/OpenAPI/Python 생성 모델에 동기화합니다. 운영/recovery/Pages 및 #28/#7/#69/#10 실행 기능에는 변경이 없습니다.
 

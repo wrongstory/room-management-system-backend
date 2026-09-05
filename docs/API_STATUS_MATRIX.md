@@ -348,9 +348,10 @@ PR #68 P1 보강: 예약 저장부터 `planned_cleaning_target_id`가 배정 계
 
 - [x] immutable request/source와 pending/decision/superseded lifecycle, scoped RLS/RPC
 - [x] 재배정/해제 CAS, non-superseded attempt 차단, 원 담당·planned checkout identity 보존
+- [x] 실제 `create_manual_cleaning_request`의 `stayover_request + stayover` 일정 축소와 active reservation 점유 경계
 - [x] draft 무통보 / notified old resolve + new notice/outbox/audit 원자 처리
 - [x] 감사 4개 event 및 한국어 OpenAPI/Python generated contract
-- [x] local fresh 23 migrations·DB/RLS 411건·Edge 76건·application 96건·Python 34건·동시성·DB lint/로컬 Security Advisor
+- [x] local fresh 23 migrations·DB/RLS 426건·Edge 76건·application 96건·Python 34건·동시성·DB lint/로컬 Security Advisor
 - [ ] exact head 전체 CI 최종 확인
 - [ ] #27 독립 보안/API 리뷰 P0/P1=0
 - [ ] #27 PR `dev` 병합

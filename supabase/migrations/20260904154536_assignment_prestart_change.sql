@@ -249,16 +249,20 @@ begin
     access_at:=coalesce(p_available,t.available_from); deadline:=coalesce(p_due,t.due_at);
     changed_schedule:=access_at is distinct from t.available_from or deadline is distinct from t.due_at;
     if changed_schedule then
-      -- 예약/checkout 원장의 시간을 #27로 우회해 변경하지 않는다. 수동 요청만 같은 날짜의 기존 창을 좁힐 수 있다.
-      if t.source<>'manual_room_request' or t.cleaning_kind not in ('additional','stayover')
+      -- 생성 command의 source-kind 조합만 허용한다. 예약/checkout 원장의 시간은 #27로 우회하지 않는다.
+      if not ((t.source='manual_room_request' and t.cleaning_kind='additional')
+          or (t.source='stayover_request' and t.cleaning_kind='stayover'))
         or access_at is null or deadline is null or access_at>=deadline
         or t.available_from is null or t.due_at is null
         or access_at<t.available_from or deadline>t.due_at
-        or (access_at at time zone 'Asia/Seoul')::date<>t.effective_service_date then
+        or (access_at at time zone 'Asia/Seoul')::date<>t.effective_service_date
+        or (deadline at time zone 'Asia/Seoul')::date<>t.effective_service_date then
         raise exception using errcode='23514',message='ASSIGNMENT_SCHEDULE_INVALID'; end if;
       if t.cleaning_kind='stayover' then
         select * into r from public.reservations where id=t.reservation_id;
-        if r.status<>'active' or r.actual_checkout_at is not null or access_at<r.check_in_at or deadline>r.check_out_at then
+        if r.id is null or r.room_id is distinct from t.room_id
+          or r.status<>'active' or r.actual_check_in_at is null or r.actual_checkout_at is not null
+          or access_at<r.actual_check_in_at or deadline>r.check_out_at then
           raise exception using errcode='23514',message='ASSIGNMENT_SCHEDULE_INVALID'; end if;
       end if;
     end if;

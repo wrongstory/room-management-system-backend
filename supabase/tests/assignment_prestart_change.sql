@@ -74,6 +74,91 @@ select throws_ok($$select pg_temp.command(1,'change','duplicate-sequence-0001',3
 select throws_ok($$select pg_temp.command(1,'change','extend-window-0001',access_at=>'2027-10-01 08:00+09')$$,'23514','ASSIGNMENT_SCHEDULE_INVALID','cannot widen source access');
 select throws_ok($$update public.cleaning_assignments set sequence_number=999 where id=pg_temp.pid(401)$$,'23514','ASSIGNMENT_SNAPSHOT_IMMUTABLE','history immutable');
 
+-- 실제 production command가 생성한 stayover_request + stayover를 #27이 처리한다.
+create temp table stayover_case(reservation_id uuid,target_id uuid,room_id uuid,old_assignment_id uuid);
+insert into stayover_case(reservation_id,target_id,room_id)
+select pg_temp.pid(701),pg_temp.pid(702),id from public.rooms order by room_number offset 20 limit 1;
+insert into public.cleaning_template_versions(room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,published_at,created_by)
+select r.room_type_id,k,1,'published',60,'[]',now(),pg_temp.pid(1)
+from stayover_case s join public.rooms r on r.id=s.room_id
+cross join unnest(array['checkout','stayover']::public.cleaning_kind[]) k;
+insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
+select room_id,'verified',1,'TEST',pg_temp.pid(1),now() from stayover_case;
+select public.create_reservation(pg_temp.pid(1),reservation_id,room_id,
+  '2027-10-01 10:00+09','2027-10-03 11:00+09',2,null,
+  (select state_version from public.rooms where id=room_id),
+  'prestart-stayover-reservation',repeat('1',64)) from stayover_case;
+-- 기존 DB 테스트와 같은 occupied fixture: 예약 자체는 production command로 생성하고 입실 projection만 고정한다.
+update public.reservations set actual_check_in_at=check_in_at
+where id=(select reservation_id from stayover_case);
+select public.create_manual_cleaning_request(pg_temp.pid(1),target_id,room_id,reservation_id,'stayover',
+  '2027-10-02','2027-10-02 10:00+09','2027-10-02 15:00+09',
+  (select state_version from public.rooms where id=room_id),'STAYOVER_TEST',
+  'prestart-stayover-create',repeat('3',64)) from stayover_case;
+select is((select source from public.cleaning_targets where id=(select target_id from stayover_case)),
+  'stayover_request','actual command creates stayover_request source');
+select is((select cleaning_kind::text from public.cleaning_targets where id=(select target_id from stayover_case)),
+  'stayover','actual command creates stayover kind');
+select public.save_cleaning_assignment_draft(pg_temp.pid(1),(select target_id from stayover_case),pg_temp.pid(2),60,1,
+  'prestart-stayover-draft',repeat('4',64));
+update stayover_case s set old_assignment_id=a.id from public.cleaning_assignments a
+where a.cleaning_target_id=s.target_id and a.is_current;
+select lives_ok($test$ select public.change_cleaning_assignment_prestart(
+  pg_temp.pid(1),target_id,old_assignment_id,2,pg_temp.pid(2),61,'SCHEDULE_CHANGED',
+  'prestart-stayover-narrow',repeat('5',64),'2027-10-02 11:00+09','2027-10-02 14:00+09')
+  from stayover_case $test$,'actual stayover window narrows');
+select is((select count(*)::int from public.cleaning_target_schedule_revisions
+  where cleaning_target_id=(select target_id from stayover_case) and reason_code='SCHEDULE_CHANGED'),1,
+  'stayover change appends exactly one schedule revision');
+select ok((select not is_current and sequence_number=60 and service_date='2027-10-02'
+  and available_from_snapshot='2027-10-02 10:00+09'::timestamptz
+  and due_at_snapshot='2027-10-02 15:00+09'::timestamptz
+  from public.cleaning_assignments where id=(select old_assignment_id from stayover_case)),
+  'stayover prior assignment snapshot is immutable');
+select ok((select assignment_version=3 and available_from='2027-10-02 11:00+09'::timestamptz
+  and due_at='2027-10-02 14:00+09'::timestamptz from public.cleaning_targets
+  where id=(select target_id from stayover_case)),'stayover target version and narrowed window updated');
+
+create function pg_temp.change_stayover(p_key text,p_access timestamptz,p_due timestamptz) returns jsonb language sql as $$
+  select public.change_cleaning_assignment_prestart(pg_temp.pid(1),s.target_id,a.id,t.assignment_version,
+    pg_temp.pid(2),61,'SCHEDULE_CHANGED',p_key,repeat('6',64),p_access,p_due)
+  from stayover_case s join public.cleaning_targets t on t.id=s.target_id
+  join public.cleaning_assignments a on a.cleaning_target_id=t.id and a.is_current
+$$;
+select throws_ok($$select pg_temp.change_stayover('stayover-expand-0001','2027-10-02 09:00+09','2027-10-02 16:00+09')$$,
+  '23514','ASSIGNMENT_SCHEDULE_INVALID','stayover cannot expand prior window');
+select throws_ok($$select pg_temp.change_stayover('stayover-move-date-0001','2027-10-03 11:00+09','2027-10-03 13:00+09')$$,
+  '23514','ASSIGNMENT_SCHEDULE_INVALID','stayover cannot move service date');
+update public.reservations set check_out_at='2027-10-02 13:00+09' where id=(select reservation_id from stayover_case);
+select throws_ok($$select pg_temp.change_stayover('stayover-after-checkout-0001','2027-10-02 12:00+09','2027-10-02 13:30+09')$$,
+  '23514','ASSIGNMENT_SCHEDULE_INVALID','stayover due time cannot exceed reservation checkout');
+update public.reservations set check_out_at='2027-10-03 11:00+09',actual_check_in_at='2027-10-02 12:00+09'
+where id=(select reservation_id from stayover_case);
+select throws_ok($$select pg_temp.change_stayover('stayover-before-occupancy-0001','2027-10-02 11:30+09','2027-10-02 13:00+09')$$,
+  '23514','ASSIGNMENT_SCHEDULE_INVALID','stayover access cannot precede actual occupancy');
+update public.reservations set status='cancelled',actual_check_in_at=null,cancelled_at=now()
+where id=(select reservation_id from stayover_case);
+select throws_ok($$select pg_temp.change_stayover('stayover-cancelled-0001','2027-10-02 11:30+09','2027-10-02 13:00+09')$$,
+  '23514','ASSIGNMENT_SCHEDULE_INVALID','cancelled reservation cannot change stayover schedule');
+update public.reservations set status='checked_out',cancelled_at=null,actual_check_in_at='2027-10-01 10:00+09',
+  actual_checkout_at='2027-10-02 12:00+09' where id=(select reservation_id from stayover_case);
+select throws_ok($$select pg_temp.change_stayover('stayover-checkedout-0001','2027-10-02 11:30+09','2027-10-02 13:00+09')$$,
+  '23514','ASSIGNMENT_SCHEDULE_INVALID','checked-out reservation cannot change stayover schedule');
+update public.reservations set status='active',actual_check_in_at=null,actual_checkout_at=null
+where id=(select reservation_id from stayover_case);
+select throws_ok($$select pg_temp.change_stayover('stayover-not-occupied-0001','2027-10-02 11:30+09','2027-10-02 13:00+09')$$,
+  '23514','ASSIGNMENT_SCHEDULE_INVALID','not-yet-occupied active reservation cannot change stayover schedule');
+select throws_ok($$insert into public.cleaning_targets(id,room_id,reservation_id,cleaning_kind,source,source_key,
+  original_service_date,effective_service_date,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
+  select pg_temp.pid(703),room_id,reservation_id,'stayover','manual_room_request','mismatch-manual-stayover',
+  '2027-10-02','2027-10-02','{}',0,'{}',pg_temp.pid(1) from stayover_case$$,
+  '23514',null,'manual_room_request + stayover rejected by source-kind invariant');
+select throws_ok($$insert into public.cleaning_targets(id,room_id,reservation_id,cleaning_kind,source,source_key,
+  original_service_date,effective_service_date,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
+  select pg_temp.pid(704),room_id,reservation_id,'additional','stayover_request','mismatch-stayover-additional',
+  '2027-10-02','2027-10-02','{}',0,'{}',pg_temp.pid(1) from stayover_case$$,
+  '23514',null,'stayover_request + additional rejected by source-kind invariant');
+
 select throws_ok($$select pg_temp.command(8,'request','wrong-owner-0008',3)$$,'42501','ASSIGNMENT_CHANGE_REQUEST_ACCESS_REQUIRED','other maid request forbidden');
 select throws_ok($$select pg_temp.command(2,'request','draft-request-0002')$$,'23514','ASSIGNMENT_PRESTART_REQUIRED','draft cannot request');
 insert into results values('approve',pg_temp.command(8,'request','maid-request-0008'));

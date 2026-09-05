@@ -406,6 +406,7 @@ erDiagram
 - pending → approved/rejected 또는 source 종료 시 superseded. source stale 요청으로 새 assignment를 해제할 수 없다.
 - RLS는 active admin 전체/maid 본인만, developer 0. 직접 INSERT/UPDATE/DELETE와 client RPC 실행은 차단한다.
 - pre-start 변경/해제/요청/결정은 non-superseded attempt가 있으면 전부 거부한다. current assignment ID + target version CAS와 공통 잠금으로 activation 경합에서 한쪽만 성공한다.
+- schedule 축소는 `manual_room_request + additional` 또는 `stayover_request + stayover`만 허용한다. stayover는 actual check-in된 active reservation과 target의 reservation/room 일치 및 checkout 이전 점유 구간을 재검증한다. 다른 source-kind 조합과 날짜 이동·창 확장은 거부한다.
 - notified 변경/해제는 기존 notification을 보존/resolve하고 새 알림/outbox를 추가한다. draft에는 통보가 없다. reason detail은 audit/notification에 포함하지 않는다.
 - request 조회는 31일/100건 상한과 requested_at/id cursor, maid/target/assignment/decider FK indexes를 사용한다.
 

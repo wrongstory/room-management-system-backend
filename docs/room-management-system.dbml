@@ -486,7 +486,7 @@ Table public.assignment_change_requests {
     (requested_at, id)
     decided_by
   }
-  Note: '#27 source identity/terminal decisions immutable, DELETE forbidden. Active admin all/maid self RLS; service-owned command writes. Source assignment ending supersedes pending requests. No attempt activation.'
+  Note: '#27 source identity/terminal decisions immutable, DELETE forbidden. Active admin all/maid self RLS; service-owned command writes. Source assignment ending supersedes pending requests. Schedule narrowing allows exact manual_room_request+additional or stayover_request+stayover only; stayover rechecks active occupied reservation. No attempt activation.'
 }
 
 Ref: public.assignment_change_requests.(assignment_id, cleaning_target_id, maid_profile_id, source_assignment_revision) > public.cleaning_assignments.(id, cleaning_target_id, maid_profile_id, revision)

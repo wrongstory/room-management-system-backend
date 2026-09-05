@@ -261,7 +261,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 ### [현재 구현] #27 일정 변경의 제한
 
-- `manual_room_request`의 additional/stayover만 같은 service date에서 기존 non-null 접근/마감 창을 좁힐 수 있다. 연박은 active reservation 점유 구간도 벗어나지 않아야 한다. 날짜 이동·접근 창 확장·checkout 원장 시간 변경은 #27 API로 허용하지 않는다.
+- 생성 command가 만든 `manual_room_request + additional` 또는 `stayover_request + stayover` 조합만 같은 service date에서 기존 non-null 접근/마감 창을 좁힐 수 있다. 연박은 actual check-in 이후이고 아직 checkout하지 않은 active reservation의 같은 객실·점유 구간도 벗어나지 않아야 한다. source-kind 불일치, 날짜 이동·접근 창 확장·checkout 원장 시간 변경은 #27 API로 허용하지 않는다.
 - 요청 사유는 고정 reason code를 사용한다. 선택 detail은 1–200자이며 숫자·주소/URL형 구분자는 차단한다. 이는 모든 민감정보를 판별하는 필터가 아니므로 고객명·전화번호·PIN·token을 입력하지 않는다. detail은 관리자/요청 당사자에게만 보이며 감사 projection·알림에는 복제하지 않는다.
 - source 구현/검증과 운영 배포는 별도 gate다. #27의 production API는 아직 사용할 수 없다.
 
