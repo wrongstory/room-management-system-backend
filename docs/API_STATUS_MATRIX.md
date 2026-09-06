@@ -377,9 +377,10 @@ reservation-command → target → assignment 잠금 순서를 사용한다.
 - [x] planned checkout은 materialized current target·actual checkout 전 attempt 0 유지
 - [x] 이전 객실 active workflow 차단과 retry 후 활성화 계약
 - [x] rollover 시 target identity/original date 보존, effective date/carryover/version revision append
+- [x] 이월 전 next source-window 검증: 연박 예약 점유 범위/KST 날짜 및 추가 청소 예약 overlap; invalid는 blocked/mutation 0, 자동 취소·종류 변환 없음
 - [x] notified 미착수 assignment 종료, 기존 알림 resolve, informational notification/outbox append
 - [x] activation/rollover safe audit 및 developer OpenAPI/Python 생성 계약
-- [x] local fresh 24 migrations·DB/RLS 469건·Edge 76건·application 97건·동시성 검증
+- [x] local fresh 24 migrations·DB/RLS 510건·Edge 76건·application 97건·동시성 검증
 - [ ] #28 독립 보안/API 리뷰 P0/P1=0
 - [ ] #28 PR `dev` 병합
 - [ ] release/main 후 production migration·scheduler 재배포·hosted smoke

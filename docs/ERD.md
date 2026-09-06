@@ -373,6 +373,7 @@ erDiagram
 - #28 scheduler는 오늘 notified current assignment의 일정·active maid·source 조건을 다시 확인한 뒤 `scheduled` attempt를 exactly-once 만든다. attempt의 target/assignment/maid/revision/template/room snapshot은 생성 뒤 불변이다.
 - 미래 planned checkout은 obligation materialization·current pointer·actual checkout 전 attempt 0이다. 같은 객실의 이전 active workflow가 있으면 target/assignment를 유지하고 활성화만 보류한다.
 - 실행 창이 끝난 unassigned/notified attempt-0 target은 같은 ID/original date로 다음 KST 날짜에 이월한다. effective date/carryover/assignment version과 schedule revision만 증가하며 active attempt는 이월 대상이 아니다.
+- 이월 write 전에 다음 source window를 검증한다. 연박은 active·실제 입실·미퇴실·동일 객실 예약 점유 범위/KST 날짜가 유효해야 하며, 추가 청소는 active reservation과 다음 창이 겹치지 않아야 한다. invalid면 blocked/mutation 0이며 기존 notified assignment/알림을 유지한다. 자동 취소·종류 변환은 하지 않는다.
 - 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 다른 메이드에게 배정할 수 없다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.
 - 제출은 `client_submission_id`로 멱등 처리하며, 수행 회차별 현재 제출은 한 건이다.

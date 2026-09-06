@@ -144,6 +144,13 @@ notified assignment는 이력으로 종료하고 actionable 알림을 resolve한
 outbox만 append합니다. active attempt가 있는 업무는 이월하지 않습니다. activation/rollover 감사에는
 승인된 ID·revision·날짜·count만 노출하며 request hash와 raw state는 developer projection에서 제외합니다.
 
+이월 write 전 다음 schedule을 계산하고 source-domain을 검증합니다. 연박은 exact
+`stayover_request + stayover`이며 같은 객실의 active/actual check-in/미퇴실 예약에
+다음 접근·마감 창이 포함되고 접근 KST 날짜가 다음 service date와 같아야 합니다.
+추가 청소는 activation과 동일한 active reservation overlap 검사를 다음 창에 적용합니다.
+실패하면 stable blocked reason만 반환하고 assignment/notification/outbox/target/version/revision/audit는
+변경하지 않습니다. 자동 취소·종류 변환도 없습니다. reservation-command lock 아래 검증하므로 예약 전이와 직렬화됩니다.
+
 ## 미래 checkout 계획과 실행 경계 — #1/#4/#26/#28
 
 `checkout_cleaning_obligations.planned_cleaning_target_id`는 예약 생성 시점의 배정 identity이고,

@@ -273,6 +273,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 같은 객실의 이전 non-terminal attempt가 있으면 `PREVIOUS_ROOM_WORKFLOW_ACTIVE`로 보류하고 target·assignment를 유지한다. blocked event는 scheduler 매 실행마다 쌓지 않는다.
 - 실행 창이 끝난 unassigned와 notified attempt-0 target만 같은 identity로 다음 KST 날짜에 이월한다. original date는 불변이고 effective date, carryover count, assignment version, schedule revision만 증가한다. notified assignment는 종료하고 기존 알림을 resolve하며 새 maid를 자동 배정하지 않는다.
 - active attempt는 자정을 넘어도 같은 attempt/assignment를 유지한다. 실제 시작·중단·인계는 #7, 자동 배정은 #29다. source 구현은 production/recovery에 아직 배포되지 않았다.
+- 이월은 다음 schedule을 먼저 계산하고 source window가 유효할 때만 저장한다. `stayover_request + stayover`는 같은 객실의 active·실제 입실·미퇴실 예약 안에 다음 접근/마감 창이 모두 포함되고 KST 날짜가 일치해야 한다. 실패하면 `STAYOVER_ROLLOVER_NOT_ALLOWED`로 blocked이며 배정 종료·알림 resolve·일정/version/이력 변경은 모두 0이다. 자동 취소나 cleaning kind 변환은 하지 않는다. 추가 청소도 다음 창이 기존 활성화 규칙의 active 예약 점유와 겹치면 `ADDITIONAL_ROLLOVER_NOT_ALLOWED`로 변경 없이 차단한다.
 
 ---
 

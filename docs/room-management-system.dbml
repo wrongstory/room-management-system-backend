@@ -419,7 +419,7 @@ Table public.cleaning_targets {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Checkout targets are unique per reservation. Stayover/additional manual requests use stable target IDs and soft cancellation. Inspection recleans keep an immutable original attempt and maid link.'
+  Note: 'Checkout targets are unique per reservation. Stayover/additional manual requests use stable target IDs and soft cancellation. Rollover validates the proposed next source window before any write: stayover requires the same active occupied reservation and bounded next window/KST date; additional rejects active reservation overlap. Invalid windows are blocked with zero mutation, no auto-cancel/kind conversion. Inspection recleans keep an immutable original attempt and maid link.'
 }
 
 Table public.cleaning_target_schedule_revisions {

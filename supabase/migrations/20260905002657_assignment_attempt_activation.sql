@@ -379,6 +379,8 @@ declare
   v_old_date date;
   v_new_date date;
   v_day_delta integer;
+  v_next_available_from timestamptz;
+  v_next_due_at timestamptz;
   v_window_end timestamptz;
   v_notification_id uuid;
 begin
@@ -461,6 +463,55 @@ begin
   v_old_date := v_target.effective_service_date;
   v_new_date := v_old_date + 1;
   v_day_delta := v_new_date - v_old_date;
+  v_next_available_from := v_target.available_from + make_interval(days => v_day_delta);
+  v_next_due_at := v_target.due_at + make_interval(days => v_day_delta);
+
+  -- Validate the proposed source window before closing assignments or writing any side effect.
+  -- Invalid stayovers remain unchanged for explicit domain resolution, never auto-cancelled.
+  if v_target.source = 'stayover_request' and v_target.cleaning_kind = 'stayover' then
+    if not exists (
+      select 1 from public.reservations reservation
+      where reservation.id = v_target.reservation_id
+        and reservation.room_id = v_target.room_id
+        and reservation.status = 'active'
+        and reservation.actual_check_in_at is not null
+        and reservation.actual_checkout_at is null
+        and v_next_available_from is not null
+        and v_next_due_at is not null
+        and v_next_available_from < v_next_due_at
+        and v_next_available_from >= reservation.actual_check_in_at
+        and v_next_due_at <= reservation.check_out_at
+        and (v_next_available_from at time zone 'Asia/Seoul')::date = v_new_date
+    ) then
+      return private.assignment_activation_result(
+        'blocked', 'STAYOVER_ROLLOVER_NOT_ALLOWED', v_target, v_assignment, null
+      );
+    end if;
+  elsif v_target.source = 'manual_room_request' and v_target.cleaning_kind = 'additional' then
+    -- Same active-reservation overlap boundary as activation, evaluated on the shifted window.
+    if v_next_available_from is null or exists (
+      select 1 from public.reservations reservation
+      where reservation.room_id = v_target.room_id
+        and reservation.status = 'active'
+        and tstzrange(
+          coalesce(reservation.actual_check_in_at, reservation.check_in_at),
+          case
+            when reservation.actual_check_in_at is not null
+              and reservation.actual_checkout_at is null then 'infinity'::timestamptz
+            else coalesce(reservation.actual_checkout_at, reservation.check_out_at)
+          end, '[)'
+        ) && tstzrange(
+          v_next_available_from,
+          coalesce(v_next_due_at, v_next_available_from + make_interval(
+            mins => coalesce(nullif(v_target.template_snapshot ->> 'durationMinutes', '')::integer, 1)
+          )), '[)'
+        )
+    ) then
+      return private.assignment_activation_result(
+        'blocked', 'ADDITIONAL_ROLLOVER_NOT_ALLOWED', v_target, v_assignment, null
+      );
+    end if;
+  end if;
 
   if v_assignment.id is not null then
     update public.cleaning_assignments
@@ -480,14 +531,8 @@ begin
 
   update public.cleaning_targets
   set effective_service_date = v_new_date,
-      available_from = case
-        when available_from is null then null
-        else available_from + make_interval(days => v_day_delta)
-      end,
-      due_at = case
-        when due_at is null then null
-        else due_at + make_interval(days => v_day_delta)
-      end,
+      available_from = v_next_available_from,
+      due_at = v_next_due_at,
       carryover_count = carryover_count + 1,
       assignment_version = assignment_version + 1,
       status = 'unassigned',
