@@ -222,13 +222,16 @@ select is(
 select lives_ok(
   $$ select public.record_scheduler_heartbeat(
     '26000000-0000-4000-8000-000000000002',
-    'reservation-scheduler-202608301200',
-    '2026-08-30T12:00:00Z',
+    -- Keep this fixture inside the seven-day retention window as calendar time advances.
+    'reservation-scheduler-' || to_char(
+      (date_trunc('minute', now()) - interval '1 minute') at time zone 'UTC', 'YYYYMMDDHH24MI'
+    ),
+    date_trunc('minute', now()) - interval '1 minute',
     'succeeded',
     0,
     null,
-    '2026-08-30T12:00:01Z',
-    '2026-08-30T12:00:02Z',
+    date_trunc('minute', now()) - interval '1 minute' + interval '1 second',
+    date_trunc('minute', now()) - interval '1 minute' + interval '2 seconds',
     'developer-operations-heartbeat-request'
   ) $$,
   'active business admin can record an app-owned scheduler heartbeat'
