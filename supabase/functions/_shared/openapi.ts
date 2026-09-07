@@ -515,7 +515,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 35,
+              maxItems: 36,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -1087,6 +1087,116 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/assignments/preview": {
+      post: {
+        tags: ["Assignments"],
+        operationId: "previewAssignments",
+        summary: "동선 고려 랜덤 배정 초안 계산",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. KST 오늘/내일만 허용합니다. 확정 duration policy가 없으면 ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED(409)로 실패하며 데모 시간은 사용하지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 기존 고정 workload를 보존하고 완료 객실 수 → 요금 격차/편차 → 구역/호수 → seed 동률 순서로 비교합니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/AssignmentPreviewRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "저장되지 않은 배정 초안",
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/AssignmentPreviewResult",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": {
+            description: "청소시간 미확정: 결정 불가이며 제안은 항상 빈 배열",
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/AssignmentPreviewUnconfirmed",
+                },
+              },
+            },
+          },
+          "422": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/assignment-preview/duration-policy": {
+      get: {
+        tags: ["Assignments"],
+        operationId: "getAssignmentDurationPolicy",
+        summary: "현재 확정 청소시간 정책 조회",
+        description:
+          "active business admin 전용. 미확정 상태는 durationPolicy=null입니다. 데모 55/65/70/80분을 운영값으로 승격하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        responses: {
+          "200": {
+            description: "현재 확정 정책 또는 null",
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/AssignmentDurationPolicyEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+      post: {
+        tags: ["Assignments"],
+        operationId: "confirmAssignmentDurationPolicy",
+        summary: "네 객실 타입의 청소시간 정책을 함께 확정",
+        description:
+          "active business admin 전용 별도 config command입니다. 4개 positive integer를 완전하게 입력하고 expectedVersion(최초 0), Idempotency-Key로 CAS/재시도를 검증합니다. 과거 정책을 보존하고 새 version과 안전한 감사 이벤트를 생성합니다. preview 계산에서는 호출하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/AssignmentDurationPolicyRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "확정 정책",
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/AssignmentDurationPolicyEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/assignments/commit-impact": {
       get: {
         tags: ["Assignments"],
@@ -1428,6 +1538,299 @@ export const openApiDocument = {
       },
     },
     schemas: {
+      AssignmentPreviewRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["serviceDate"],
+        properties: {
+          serviceDate: {
+            type: "string",
+            format: "date",
+            description: "KST 오늘 또는 내일",
+          },
+          previewSeed: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9_-]{1,128}$",
+            description:
+              "동일 snapshot+seed 결과 재현용. 생략하면 서버 UUID 생성, 개인정보 입력 금지",
+          },
+        },
+      },
+      AssignmentPreviewUnconfirmed: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "serviceDate",
+          "previewSeed",
+          "decisionReady",
+          "durationPolicyStatus",
+          "proposedAssignments",
+          "error",
+        ],
+        properties: {
+          serviceDate: { type: "string", format: "date" },
+          previewSeed: { type: "string" },
+          decisionReady: { const: false },
+          durationPolicyStatus: { const: "unconfirmed" },
+          proposedAssignments: {
+            type: "array",
+            maxItems: 0,
+            items: { $ref: "#/components/schemas/AssignmentPreviewRow" },
+          },
+          error: {
+            type: "object",
+            additionalProperties: false,
+            required: ["code", "message"],
+            properties: {
+              code: { const: "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED" },
+              message: { type: "string" },
+            },
+          },
+        },
+      },
+      AssignmentDurationPolicyRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "expectedVersion",
+          "standardMinutes",
+          "premiumMinutes",
+          "oceanPremiumMinutes",
+          "oceanFamilyMinutes",
+        ],
+        properties: {
+          expectedVersion: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9007199254740991,
+          },
+          standardMinutes: { type: "integer", minimum: 1, maximum: 2147483647 },
+          premiumMinutes: { type: "integer", minimum: 1, maximum: 2147483647 },
+          oceanPremiumMinutes: {
+            type: "integer",
+            minimum: 1,
+            maximum: 2147483647,
+          },
+          oceanFamilyMinutes: {
+            type: "integer",
+            minimum: 1,
+            maximum: 2147483647,
+          },
+        },
+      },
+      AssignmentDurationPolicy: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "version",
+          "status",
+          "standardMinutes",
+          "premiumMinutes",
+          "oceanPremiumMinutes",
+          "oceanFamilyMinutes",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          version: { type: "integer", minimum: 1 },
+          status: { const: "confirmed" },
+          standardMinutes: { type: "integer", minimum: 1 },
+          premiumMinutes: { type: "integer", minimum: 1 },
+          oceanPremiumMinutes: { type: "integer", minimum: 1 },
+          oceanFamilyMinutes: { type: "integer", minimum: 1 },
+          createdAt: { type: "string", format: "date-time" },
+          confirmedAt: { type: "string", format: "date-time" },
+        },
+      },
+      AssignmentDurationPolicyEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["durationPolicy"],
+        properties: {
+          durationPolicy: {
+            anyOf: [{ $ref: "#/components/schemas/AssignmentDurationPolicy" }, {
+              type: "null",
+            }],
+          },
+        },
+      },
+      AssignmentPreviewRow: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cleaningTargetId",
+          "roomId",
+          "roomNumber",
+          "roomTypeCode",
+          "elevatorZone",
+          "maidProfileId",
+          "maidDisplayName",
+          "proposedSequenceNumber",
+          "serviceDate",
+          "expectedAssignmentVersion",
+          "expectedAvailabilityVersion",
+          "feeSnapshot",
+          "durationMinutes",
+          "availableFrom",
+          "dueAt",
+        ],
+        properties: {
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          roomTypeCode: {
+            type: "string",
+            enum: [
+              "standard",
+              "premium",
+              "oceanPremium",
+              "oceanFamily",
+              "unknown",
+            ],
+          },
+          elevatorZone: { type: "string" },
+          maidProfileId: { type: "string", format: "uuid" },
+          maidDisplayName: { type: "string" },
+          proposedSequenceNumber: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "고정 행에서는 기존 sequence, 신규 행은 고정 순서 이후 연속 번호",
+          },
+          serviceDate: { type: "string", format: "date" },
+          expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAvailabilityVersion: {
+            type: ["integer", "null"],
+            minimum: 1,
+          },
+          feeSnapshot: { type: "integer", minimum: 0 },
+          durationMinutes: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description:
+              "신규 제안은 확정 정책의 양수 시간. 고정 업무의 미지원 타입은 null이며 해당 메이드 신규 제안을 차단합니다.",
+          },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      AssignmentPreviewBlockedTarget: {
+        type: "object",
+        additionalProperties: false,
+        required: ["cleaningTargetId", "reason"],
+        properties: {
+          cleaningTargetId: { type: "string", format: "uuid" },
+          reason: {
+            type: "string",
+            description: "서버의 source/capacity 고정 reason code",
+          },
+        },
+      },
+      AssignmentPreviewResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "serviceDate",
+          "previewSeed",
+          "durationPolicy",
+          "decisionReady",
+          "inputFingerprint",
+          "fixedAssignments",
+          "proposedAssignments",
+          "remainingUnassignedTargets",
+          "blockedTargets",
+          "maidSummaries",
+          "objectiveScore",
+        ],
+        properties: {
+          serviceDate: { type: "string", format: "date" },
+          previewSeed: { type: "string" },
+          durationPolicy: {
+            $ref: "#/components/schemas/AssignmentDurationPolicy",
+          },
+          decisionReady: { const: true },
+          inputFingerprint: {
+            type: "string",
+            pattern: "^[a-f0-9]{64}$",
+            description:
+              "seed를 제외한 정렬된 정책 입력 snapshot SHA-256; 최종 DB CAS 대체 불가",
+          },
+          fixedAssignments: {
+            type: "array",
+            maxItems: 242,
+            items: { $ref: "#/components/schemas/AssignmentPreviewRow" },
+          },
+          proposedAssignments: {
+            type: "array",
+            maxItems: 121,
+            items: { $ref: "#/components/schemas/AssignmentPreviewRow" },
+          },
+          remainingUnassignedTargets: {
+            type: "array",
+            maxItems: 121,
+            items: {
+              $ref: "#/components/schemas/AssignmentPreviewBlockedTarget",
+            },
+          },
+          blockedTargets: {
+            type: "array",
+            maxItems: 242,
+            items: {
+              $ref: "#/components/schemas/AssignmentPreviewBlockedTarget",
+            },
+          },
+          maidSummaries: {
+            type: "array",
+            maxItems: 20,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "maidProfileId",
+                "totalFee",
+                "fixedCount",
+                "proposedCount",
+              ],
+              properties: {
+                maidProfileId: { type: "string", format: "uuid" },
+                totalFee: { type: "integer", minimum: 0 },
+                fixedCount: { type: "integer", minimum: 0 },
+                proposedCount: { type: "integer", minimum: 0 },
+              },
+            },
+          },
+          objectiveScore: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "completedTargetCount",
+              "feeSpread",
+              "feeDeviation",
+              "routeScore",
+            ],
+            properties: {
+              completedTargetCount: { type: "integer", minimum: 0 },
+              feeSpread: { type: "integer", minimum: 0 },
+              feeDeviation: {
+                type: "string",
+                pattern: "^[0-9]+$",
+                description:
+                  "정수 편차 Σ(n*fee - Σfee)^2. 고정 workload 포함, float 오차 없이 decimal string 반환",
+              },
+              routeScore: {
+                type: "object",
+                additionalProperties: false,
+                required: ["zoneChanges", "roomDistance"],
+                properties: {
+                  zoneChanges: { type: "integer", minimum: 0 },
+                  roomDistance: { type: "integer", minimum: 0 },
+                },
+              },
+            },
+          },
+        },
+      },
       AppRole: {
         type: "string",
         enum: ["developer", "admin", "maid"],
@@ -1525,6 +1928,12 @@ export const openApiDocument = {
           "ASSIGNMENT_WINDOW_EXPIRED",
           "ASSIGNMENT_COMMIT_NOT_ALLOWED",
           "ASSIGNMENT_COMMAND_FAILED",
+          "ASSIGNMENT_PREVIEW_DATE_NOT_ALLOWED",
+          "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
+          "ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED",
+          "ASSIGNMENT_PREVIEW_FAILED",
+          "INVALID_ASSIGNMENT_DURATION_POLICY",
+          "ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT",
           "ACTIVE_ADMIN_REQUIRED",
           "OUTSIDE_AVAILABILITY_WINDOW",
           "CHANGE_REQUEST_BEFORE_DEADLINE",
@@ -1823,6 +2232,7 @@ export const openApiDocument = {
           "assignment.cancellation_decided",
           "assignment.attempt_activated",
           "assignment.rolled_over",
+          "assignment.duration_policy_confirmed",
           "reservation.created",
           "reservation.changed",
           "reservation.cancelled",
@@ -2127,6 +2537,11 @@ export const openApiDocument = {
               rolloverFromDate: { type: "string", format: "date" },
               rolloverToDate: { type: "string", format: "date" },
               carryoverCount: { type: "integer", minimum: 0 },
+              policyVersion: { type: "integer", minimum: 1 },
+              standardMinutes: { type: "integer", minimum: 1 },
+              premiumMinutes: { type: "integer", minimum: 1 },
+              oceanPremiumMinutes: { type: "integer", minimum: 1 },
+              oceanFamilyMinutes: { type: "integer", minimum: 1 },
               availableFrom: { type: "string", format: "date-time" },
               dueAt: { type: "string", format: "date-time" },
               roomTypeId: { type: "string" },

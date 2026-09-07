@@ -9,6 +9,25 @@ Enum app_role {
   maid
 }
 
+Table assignment_duration_policy_versions {
+  id uuid [pk]
+  version bigint [not null, unique, note: 'Positive append-only version; admin expectedVersion CAS']
+  status text [not null, note: 'draft | confirmed | retired; partial unique confirmed <=1']
+  standard_minutes int [not null, note: '>0; no default/demo fallback']
+  premium_minutes int [not null, note: '>0']
+  ocean_premium_minutes int [not null, note: '>0']
+  ocean_family_minutes int [not null, note: '>0']
+  created_by uuid [not null, ref: > profiles.id]
+  created_at timestamptz [not null]
+  confirmed_by uuid [ref: > profiles.id]
+  confirmed_at timestamptz
+  indexes {
+    created_by
+    confirmed_by
+  }
+  Note: 'Issue #29 feature. RLS RPC-only. Confirmed/retired require confirmation metadata. Immutable values, no DELETE; only confirmed→retired lifecycle update. No confirmed seed. Preview reads without writes.'
+}
+
 Enum account_status {
   active
   deactivation_pending

@@ -80,8 +80,16 @@ def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
         "assignment.cancellation_decided",
         "assignment.attempt_activated",
         "assignment.rolled_over",
+        "assignment.duration_policy_confirmed",
     } <= {event.value for event in DeveloperAuditEventType}
     field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {
+        "policy_version",
+        "standard_minutes",
+        "premium_minutes",
+        "ocean_premium_minutes",
+        "ocean_family_minutes",
+    } <= field_names
     assert {
         "assignment_id",
         "cleaning_target_id",

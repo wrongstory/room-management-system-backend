@@ -58,7 +58,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@b529614b287e3c69750f0e91f3ac539b8e8e33b8` (#27 dev 병합 완료; #28은 feature 검증/리뷰 대상)
+- 개발 통합 source 기준: `dev@a98e2ccc0bf86d760b144691aacb0807215ca09e` (#28 / PR #71 독립 리뷰 및 dev 병합 완료; #29는 feature 구현/검증 대상)
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -361,7 +361,7 @@ PR #68 P1 보강: 예약 저장부터 `planned_cleaning_target_id`가 배정 계
 source OpenAPI는 49 paths / 53 operations이며 운영 39 / 43 snapshot은 변경하지 않았다.
 중단·인계(#7), PIN/Sheets(#69), 실제 push worker(#10)는 제외한다.
 
-### #28 Attempt Activation — feature source, production 미적용
+### #28 Attempt Activation — source/dev 완료, production 미적용
 
 #28은 public 업무 API를 추가하지 않는다. `reservation-scheduler`의 기존 secret/exact-admin 경계가
 예약 전이 뒤 service-owned `process_due_assignment_lifecycle` RPC를 호출하며, 대상별 core는 같은
@@ -381,13 +381,44 @@ reservation-command → target → assignment 잠금 순서를 사용한다.
 - [x] notified 미착수 assignment 종료, 기존 알림 resolve, informational notification/outbox append
 - [x] activation/rollover safe audit 및 developer OpenAPI/Python 생성 계약
 - [x] local fresh 24 migrations·DB/RLS 510건·Edge 76건·application 97건·동시성 검증
-- [ ] #28 독립 보안/API 리뷰 P0/P1=0
-- [ ] #28 PR `dev` 병합
+- [x] #28 독립 보안/API 리뷰 P0/P1=0 — PR #71 최종 리뷰
+- [x] #28 PR `dev` 병합 — `a98e2ccc0bf86d760b144691aacb0807215ca09e`
 - [ ] release/main 후 production migration·scheduler 재배포·hosted smoke
 
 신규 migration `20260905002657_assignment_attempt_activation.sql`은 로컬 24번째다. public
 OpenAPI operation은 추가하지 않아 source 49 paths / 53 operations를 유지한다. 실제 메이드 시작,
 중단·인계(#7), PIN(#69), 자동 배정(#29)은 포함하지 않는다.
+
+### #29 Assignment Preview — feature source, production 미적용
+
+통합 base는 `dev@a98e2ccc0bf86d760b144691aacb0807215ca09e`다. 미래 squash SHA를 기록하지
+않으며 독립 리뷰/병합과 운영 배포를 별도 gate로 유지한다.
+
+| Method / Path | 권한 | DB/RPC | Fastify | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|
+| `POST /v1/assignments/preview` | admin | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `GET /v1/assignment-preview/duration-policy` | admin | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `POST /v1/assignment-preview/duration-policy` | admin | ✅ | ❌ | ✅ | ❌ | ❌ |
+
+- [x] confirmed versioned duration 정책 / 데모·fallback·confirmed seed 없음
+- [x] STABLE snapshot + 순수 bounded optimizer / 기존 고정 부하와 reclean 원 maid 보존
+- [x] count → fee spread/deviation → route → seed 최종 동률 비교
+- [x] 오늘/내일·source schedule·actual interval 재검증 / fingerprint와 expected versions
+- [x] 한국어 OpenAPI / safe duration policy 감사 / Python developer filtered generated contract
+- [x] local fresh 25 migrations·DB/RLS 575건(Preview 65건)·동시성·Edge 84건·application 122건·Python 34건·package source 검증
+- [ ] exact head GitHub application / migration PASS
+- [ ] #29 독립 보안/API 리뷰 P0/P1=0
+- [ ] #29 PR `dev` 병합
+- [ ] release/main 후 production migration·Edge·역할별 hosted smoke 및 운영 소요시간 별도 확정
+
+신규 migration은 `20260907143843_assignment_preview_duration_policy.sql` 하나이며 기존
+24개는 변경하지 않는다. Source OpenAPI는 51 paths / 56 operations, production은 계속
+39 paths / 43 operations다. 성공 Preview의 assignment/attempt/알림/outbox/audit/receipt write는
+0이며, 설정 확정 POST만 별도 audit/receipt를 기록한다. `55/65/70/80`분은 운영값이 아니다.
+정책 미확정은 409 / `decisionReady=false` / 빈 제안이다. 상세 한계는
+[Preview 계약](./ASSIGNMENT_PREVIEW.md)을 따른다. 자동 apply/notify/PIN/#7 실행은 포함하지 않는다.
+DB lint 오류 0, local Security Advisor WARN/ERROR 0이다. `notification_outbox`와 새 duration
+정책의 RLS/no-policy INFO 2건은 직접 접근을 막고 RPC만 허용하는 의도된 경계다.
 
 ## 13. 아직 개발하지 않은 후속 API 영역
 
@@ -398,8 +429,8 @@ OpenAPI operation은 추가하지 않아 source 49 paths / 53 operations를 유�
 | [x] | 청소 담당 배정·revision·현재 pointer·순서 | source/dev 완료 | #25 | production 미승격 |
 | [x] | 배정 저장 시 가능일 재검증·부분 알림 | source/dev 완료 | #26 | production 미승격 |
 | [x] | 시작 전 재배정·취소 요청·관리자 결정 | source/dev 완료 | #27 | production 미승격 |
-| [ ] | 오늘/내일 activation·rollover | feature 구현·검증, 독립 리뷰 대기 | #28 | 위 source gate 참조 |
-| [ ] | 배정 preview algorithm | 미개발 | #29 | #4 분할 |
+| [x] | 오늘/내일 activation·rollover | source/dev 완료 | #28 | production 미승격 |
+| [ ] | 배정 preview algorithm | feature 구현/검증 중 | #29 | 독립 리뷰/dev 병합 전, production 미승격 |
 | [ ] | 현장 수행·offline lease·handover/conflict | 미개발 | #7 | 배정 이후 |
 | [ ] | 사진 template/slot snapshot·submission version | 미개발 | #30 | 사진 전 단계 |
 | [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미개발 | #9 | Drive only / <=300KiB |

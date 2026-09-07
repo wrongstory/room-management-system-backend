@@ -14,6 +14,7 @@ class DeveloperAuditEventType(str, Enum):
     ASSIGNMENT_CANCELLATION_DECIDED = "assignment.cancellation_decided"
     ASSIGNMENT_CANCELLATION_REQUESTED = "assignment.cancellation_requested"
     ASSIGNMENT_DRAFT_SAVED = "assignment.draft_saved"
+    ASSIGNMENT_DURATION_POLICY_CONFIRMED = "assignment.duration_policy_confirmed"
     ASSIGNMENT_NOTIFIED = "assignment.notified"
     ASSIGNMENT_PRESTART_CHANGED = "assignment.prestart_changed"
     ASSIGNMENT_PRESTART_UNASSIGNED = "assignment.prestart_unassigned"

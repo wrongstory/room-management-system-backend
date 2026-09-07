@@ -65,8 +65,8 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   const auditEventTypeParameter = document.paths["/v1/developer/audit-events"]
     .get.parameters.find((parameter) => parameter.name === "eventType");
   assert(
-    auditEventTypeParameter?.schema.maxItems === 35,
-    "developer audit filter limit must match the 35-event allowlist",
+    auditEventTypeParameter?.schema.maxItems === 36,
+    "developer audit filter limit must match the 36-event allowlist",
   );
   const auditSummary = document.components.schemas.DeveloperAuditEvent
     .properties.summary;
@@ -179,6 +179,40 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   assert(
     response.headers.get("cache-control") === "public, max-age=300",
     "contract cache",
+  );
+});
+
+Deno.test("preview OpenAPI documents pure admin preview and separate versioned config", async () => {
+  const doc = await openApiResponse({}).json() as typeof openApiDocument;
+  const operation = doc.paths["/v1/assignments/preview"].post;
+  assert(
+    operation["x-required-roles"].join(",") === "admin",
+    "developer is not business admin",
+  );
+  assert(
+    !("parameters" in operation),
+    "pure preview requires no mutation idempotency key",
+  );
+  assert(
+    doc.components.schemas.AssignmentPreviewRequest.additionalProperties ===
+      false,
+    "strict preview body",
+  );
+  assert(
+    doc.paths["/v1/assignment-preview/duration-policy"].post.parameters[0]
+      .name === "Idempotency-Key",
+    "config mutation has own receipt",
+  );
+  assert(
+    doc.components.schemas.DeveloperAuditEventType.enum.includes(
+      "assignment.duration_policy_confirmed",
+    ),
+    "config audit generated enum",
+  );
+  assert(
+    "policyVersion" in
+      doc.components.schemas.DeveloperAuditEvent.properties.summary.properties,
+    "safe config audit summary",
   );
 });
 

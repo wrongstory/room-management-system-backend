@@ -52,6 +52,11 @@ class DeveloperAuditEventSummary:
         rollover_from_date (datetime.date | Unset):
         rollover_to_date (datetime.date | Unset):
         carryover_count (int | Unset):
+        policy_version (int | Unset):
+        standard_minutes (int | Unset):
+        premium_minutes (int | Unset):
+        ocean_premium_minutes (int | Unset):
+        ocean_family_minutes (int | Unset):
         available_from (datetime.datetime | Unset):
         due_at (datetime.datetime | Unset):
         room_type_id (str | Unset):
@@ -103,6 +108,11 @@ class DeveloperAuditEventSummary:
     rollover_from_date: datetime.date | Unset = UNSET
     rollover_to_date: datetime.date | Unset = UNSET
     carryover_count: int | Unset = UNSET
+    policy_version: int | Unset = UNSET
+    standard_minutes: int | Unset = UNSET
+    premium_minutes: int | Unset = UNSET
+    ocean_premium_minutes: int | Unset = UNSET
+    ocean_family_minutes: int | Unset = UNSET
     available_from: datetime.datetime | Unset = UNSET
     due_at: datetime.datetime | Unset = UNSET
     room_type_id: str | Unset = UNSET
@@ -223,6 +233,16 @@ class DeveloperAuditEventSummary:
 
         carryover_count = self.carryover_count
 
+        policy_version = self.policy_version
+
+        standard_minutes = self.standard_minutes
+
+        premium_minutes = self.premium_minutes
+
+        ocean_premium_minutes = self.ocean_premium_minutes
+
+        ocean_family_minutes = self.ocean_family_minutes
+
         available_from: str | Unset = UNSET
         if not isinstance(self.available_from, Unset):
             available_from = self.available_from.isoformat()
@@ -334,6 +354,16 @@ class DeveloperAuditEventSummary:
             field_dict["rolloverToDate"] = rollover_to_date
         if carryover_count is not UNSET:
             field_dict["carryoverCount"] = carryover_count
+        if policy_version is not UNSET:
+            field_dict["policyVersion"] = policy_version
+        if standard_minutes is not UNSET:
+            field_dict["standardMinutes"] = standard_minutes
+        if premium_minutes is not UNSET:
+            field_dict["premiumMinutes"] = premium_minutes
+        if ocean_premium_minutes is not UNSET:
+            field_dict["oceanPremiumMinutes"] = ocean_premium_minutes
+        if ocean_family_minutes is not UNSET:
+            field_dict["oceanFamilyMinutes"] = ocean_family_minutes
         if available_from is not UNSET:
             field_dict["availableFrom"] = available_from
         if due_at is not UNSET:
@@ -528,6 +558,16 @@ class DeveloperAuditEventSummary:
 
         carryover_count = d.pop("carryoverCount", UNSET)
 
+        policy_version = d.pop("policyVersion", UNSET)
+
+        standard_minutes = d.pop("standardMinutes", UNSET)
+
+        premium_minutes = d.pop("premiumMinutes", UNSET)
+
+        ocean_premium_minutes = d.pop("oceanPremiumMinutes", UNSET)
+
+        ocean_family_minutes = d.pop("oceanFamilyMinutes", UNSET)
+
         _available_from = d.pop("availableFrom", UNSET)
         available_from: datetime.datetime | Unset
         if isinstance(_available_from, Unset):
@@ -619,6 +659,11 @@ class DeveloperAuditEventSummary:
             rollover_from_date=rollover_from_date,
             rollover_to_date=rollover_to_date,
             carryover_count=carryover_count,
+            policy_version=policy_version,
+            standard_minutes=standard_minutes,
+            premium_minutes=premium_minutes,
+            ocean_premium_minutes=ocean_premium_minutes,
+            ocean_family_minutes=ocean_family_minutes,
             available_from=available_from,
             due_at=due_at,
             room_type_id=room_type_id,

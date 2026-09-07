@@ -544,6 +544,23 @@ erDiagram
 
 ## 7. Supabase Free Plan 전용 운영 기준
 
+### #29 versioned duration policy (feature source)
+
+`profiles`의 관리자 생성자·확정자는 `assignment_duration_policy_versions`의 FK로 보존한다.
+정책은 target/assignment에 새 write pointer를 추가하지 않는다. Preview 응답의 policy version과
+input fingerprint만 조회 시점의 입력을 식별하며, 실제 배정 snapshot 저장은 #25/#26 책임이다.
+
+- `id`, 양수 unique `version`, `status = draft | confirmed | retired`
+- `standard_minutes`, `premium_minutes`, `ocean_premium_minutes`, `ocean_family_minutes`: 모두 양수
+- `created_by/created_at`, `confirmed_by/confirmed_at`; confirmed/retired는 확정자·시각 필수
+- confirmed partial unique index로 현재 확정 정책 최대 한 건, FK 자식 index 두 개
+- RLS 활성화·직접 SELECT/DML revoke; 관리자용 read/confirm RPC만 허용
+- 기존 값 immutable, DELETE 금지; 기존 confirmed의 retired 전환 외 UPDATE 금지
+- fresh confirmed 0건, 55/65/70/80 seed 없음, preview DML 0
+
+실제 DDL 정본은 `20260907143843_assignment_preview_duration_policy.sql`이며 기존 24개
+migration을 수정하지 않는다. 운영·recovery 적용 상태와 무관한 feature schema다.
+
 2026-08-25 기준 공식 Free Plan 범위 안에서만 사용한다.
 
 | 항목 | Free 한도 | 이 프로젝트 기준 |

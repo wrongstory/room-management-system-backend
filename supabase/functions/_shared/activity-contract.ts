@@ -54,6 +54,7 @@ export function authorizationSourceForPath(
   }
   if (
     path.startsWith("/v1/assignments") ||
+    path.startsWith("/v1/assignment-preview/") ||
     path.startsWith("/v1/assignment-change-requests")
   ) {
     return "edge.authorization.assignments";
