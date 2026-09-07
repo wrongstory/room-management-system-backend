@@ -78,6 +78,8 @@ def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
         "assignment.prestart_unassigned",
         "assignment.cancellation_requested",
         "assignment.cancellation_decided",
+        "assignment.attempt_activated",
+        "assignment.rolled_over",
     } <= {event.value for event in DeveloperAuditEventType}
     field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
     assert {
@@ -93,6 +95,12 @@ def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
         "request_id",
         "decision",
         "reason_code",
+        "attempt_id",
+        "attempt_number",
+        "assignment_revision",
+        "rollover_from_date",
+        "rollover_to_date",
+        "carryover_count",
     } <= field_names
     assert {"request_hash", "reason_detail", "before_state", "after_state"}.isdisjoint(field_names)
 

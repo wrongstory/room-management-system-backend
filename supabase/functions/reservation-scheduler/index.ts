@@ -33,9 +33,9 @@ async function matchesSecret(
   return crypto.subtle.verify("HMAC", expectedKey, signature, message);
 }
 
-async function requestHash(): Promise<string> {
+async function requestHash(command: string): Promise<string> {
   const value = new TextEncoder().encode(
-    '{"command":"reservation.process_due_transitions"}',
+    JSON.stringify({ command }),
   );
   const digest = await crypto.subtle.digest("SHA-256", value);
   return Array.from(
@@ -56,16 +56,26 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-function transitionCount(value: unknown): number | null {
-  if (!value || Array.isArray(value) || typeof value !== "object") {
+function transitionCount(
+  reservationValue: unknown,
+  assignmentValue: unknown,
+): number | null {
+  if (
+    !reservationValue || Array.isArray(reservationValue) ||
+    typeof reservationValue !== "object" || !assignmentValue ||
+    Array.isArray(assignmentValue) || typeof assignmentValue !== "object"
+  ) {
     return null;
   }
-  const result = value as Record<string, unknown>;
+  const result = reservationValue as Record<string, unknown>;
+  const assignment = assignmentValue as Record<string, unknown>;
   const counts = [
     result.checked_in_count,
     result.checked_out_count,
     result.blocked_check_in_count,
     result.purged_guest_name_count,
+    assignment.activatedCount,
+    assignment.rolledOverCount,
   ];
   if (counts.some((count) => typeof count !== "number" || count < 0)) {
     return null;
@@ -124,16 +134,32 @@ Deno.serve(async (request) => {
     );
     const invocationKey = `reservation-scheduler-${bucket}`;
     const clients = createEdgeClients();
+    const commandAt = new Date().toISOString();
     const { data, error } = await clients.admin.rpc(
       "process_due_reservation_transitions",
       {
         p_actor_profile_id: actorProfileId,
-        p_as_of: new Date().toISOString(),
+        p_as_of: commandAt,
         p_idempotency_key: invocationKey,
-        p_request_hash: await requestHash(),
+        p_request_hash: await requestHash(
+          "reservation.process_due_transitions",
+        ),
       },
     );
-    if (error || !data) {
+    const { data: assignmentData, error: assignmentError } = error || !data
+      ? { data: null, error: null }
+      : await clients.admin.rpc(
+        "process_due_assignment_lifecycle",
+        {
+          p_actor_profile_id: actorProfileId,
+          p_as_of: commandAt,
+          p_idempotency_key: invocationKey,
+          p_request_hash: await requestHash(
+            "assignment.process_due_lifecycle",
+          ),
+        },
+      );
+    if (error || !data || assignmentError || !assignmentData) {
       const { error: heartbeatError } = await clients.admin.rpc(
         "record_scheduler_heartbeat",
         {
@@ -150,7 +176,7 @@ Deno.serve(async (request) => {
       );
       console.error("Reservation scheduler RPC failed", {
         requestId: id,
-        code: error?.code,
+        code: error?.code ?? assignmentError?.code,
         heartbeatCode: heartbeatError?.code,
       });
       throw new EdgeError(
@@ -167,7 +193,7 @@ Deno.serve(async (request) => {
         p_invocation_key: invocationKey,
         p_scheduled_at: scheduledBucketAt.toISOString(),
         p_status: "succeeded",
-        p_transition_count: transitionCount(data),
+        p_transition_count: transitionCount(data, assignmentData),
         p_error_code: null,
         p_started_at: startedAt.toISOString(),
         p_completed_at: new Date().toISOString(),
@@ -186,7 +212,7 @@ Deno.serve(async (request) => {
       );
     }
 
-    return jsonResponse({ transitions: data });
+    return jsonResponse({ transitions: data, assignments: assignmentData });
   } catch (error) {
     return errorResponse(error, id, {});
   }

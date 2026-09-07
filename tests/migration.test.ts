@@ -82,6 +82,10 @@ const assignmentCommitMigrationUrl = new URL(
   '../supabase/migrations/20260903141742_assignment_commit.sql',
   import.meta.url
 );
+const assignmentAttemptActivationMigrationUrl = new URL(
+  '../supabase/migrations/20260905002657_assignment_attempt_activation.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -382,6 +386,26 @@ describe('initial migration contract', () => {
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
     expect(sql).not.toContain('http_post');
+  });
+
+  it('activates notified assignments and rolls missed targets through one scheduler command', async () => {
+    const sql = await readFile(assignmentAttemptActivationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create function private.activate_cleaning_attempt_at(');
+    expect(sql).toContain('create function private.rollover_cleaning_target_at(');
+    expect(sql).toContain('create function public.process_due_assignment_lifecycle(');
+    expect(sql).toContain("'assignment.process_due_lifecycle'");
+    expect(sql).toContain("'assignment.attempt_activated'");
+    expect(sql).toContain("'assignment.rolled_over'");
+    expect(sql).toContain("status = 'notified'");
+    expect(sql).toContain("obligation.status in ('materialized', 'completed')");
+    expect(sql).toContain('planned_cleaning_target_id');
+    expect(sql).toContain('for update');
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
   });
 
   it('adds reservation history, obligations, occupancy ledgers, and CAS commands', async () => {

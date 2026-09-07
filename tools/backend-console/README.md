@@ -48,3 +48,7 @@ uv run --python 3.12 python scripts/generate_client.py
 추가한다. 상세 사유·request hash·원본 state는 포함하지 않으며, 콘솔에 admin 업무 변경
 기능이나 developer의 업무 권한을 추가하지 않는다. 운영 미배포 source enum이 존재한다는
 이유로 production API가 해당 기능을 제공한다고 판단하지 않는다.
+
+#28 source는 수행 회차 활성화와 이월 감사 event 2종 및 승인된 요약 필드만 생성 모델에
+추가한다. attempt/assignment 식별자와 날짜·회차 정보 외의 raw state, request hash, 비밀정보는
+노출하지 않는다. 이 역시 다음 release 전에는 production 기능으로 간주하지 않는다.

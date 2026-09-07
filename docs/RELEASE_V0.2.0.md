@@ -1,5 +1,8 @@
 # v0.2.0 릴리즈·운영 활성화 정본
 
+> 후속 개발 주의: #28의 assignment activation/rollover scheduler source는 다음 릴리즈 후보이며
+> v0.2.0 production에 배포되지 않았다. 이 문서의 v0.2.0 운영 evidence를 소급 변경하지 않는다.
+
 ## 1. 승인 source와 현재 상태
 
 - 개발 통합 source: `dev@2adb7a7de2474883d892232395295dcf643b20a4`

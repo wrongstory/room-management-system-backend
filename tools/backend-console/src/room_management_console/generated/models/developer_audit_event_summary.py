@@ -46,6 +46,12 @@ class DeveloperAuditEventSummary:
         sequence_number (int | Unset):
         revision (int | Unset):
         target_assignment_version (int | Unset):
+        attempt_id (UUID | Unset):
+        attempt_number (int | Unset):
+        assignment_revision (int | Unset):
+        rollover_from_date (datetime.date | Unset):
+        rollover_to_date (datetime.date | Unset):
+        carryover_count (int | Unset):
         available_from (datetime.datetime | Unset):
         due_at (datetime.datetime | Unset):
         room_type_id (str | Unset):
@@ -91,6 +97,12 @@ class DeveloperAuditEventSummary:
     sequence_number: int | Unset = UNSET
     revision: int | Unset = UNSET
     target_assignment_version: int | Unset = UNSET
+    attempt_id: UUID | Unset = UNSET
+    attempt_number: int | Unset = UNSET
+    assignment_revision: int | Unset = UNSET
+    rollover_from_date: datetime.date | Unset = UNSET
+    rollover_to_date: datetime.date | Unset = UNSET
+    carryover_count: int | Unset = UNSET
     available_from: datetime.datetime | Unset = UNSET
     due_at: datetime.datetime | Unset = UNSET
     room_type_id: str | Unset = UNSET
@@ -193,6 +205,24 @@ class DeveloperAuditEventSummary:
 
         target_assignment_version = self.target_assignment_version
 
+        attempt_id: str | Unset = UNSET
+        if not isinstance(self.attempt_id, Unset):
+            attempt_id = str(self.attempt_id)
+
+        attempt_number = self.attempt_number
+
+        assignment_revision = self.assignment_revision
+
+        rollover_from_date: str | Unset = UNSET
+        if not isinstance(self.rollover_from_date, Unset):
+            rollover_from_date = self.rollover_from_date.isoformat()
+
+        rollover_to_date: str | Unset = UNSET
+        if not isinstance(self.rollover_to_date, Unset):
+            rollover_to_date = self.rollover_to_date.isoformat()
+
+        carryover_count = self.carryover_count
+
         available_from: str | Unset = UNSET
         if not isinstance(self.available_from, Unset):
             available_from = self.available_from.isoformat()
@@ -292,6 +322,18 @@ class DeveloperAuditEventSummary:
             field_dict["revision"] = revision
         if target_assignment_version is not UNSET:
             field_dict["targetAssignmentVersion"] = target_assignment_version
+        if attempt_id is not UNSET:
+            field_dict["attemptId"] = attempt_id
+        if attempt_number is not UNSET:
+            field_dict["attemptNumber"] = attempt_number
+        if assignment_revision is not UNSET:
+            field_dict["assignmentRevision"] = assignment_revision
+        if rollover_from_date is not UNSET:
+            field_dict["rolloverFromDate"] = rollover_from_date
+        if rollover_to_date is not UNSET:
+            field_dict["rolloverToDate"] = rollover_to_date
+        if carryover_count is not UNSET:
+            field_dict["carryoverCount"] = carryover_count
         if available_from is not UNSET:
             field_dict["availableFrom"] = available_from
         if due_at is not UNSET:
@@ -459,6 +501,33 @@ class DeveloperAuditEventSummary:
 
         target_assignment_version = d.pop("targetAssignmentVersion", UNSET)
 
+        _attempt_id = d.pop("attemptId", UNSET)
+        attempt_id: UUID | Unset
+        if isinstance(_attempt_id, Unset):
+            attempt_id = UNSET
+        else:
+            attempt_id = UUID(_attempt_id)
+
+        attempt_number = d.pop("attemptNumber", UNSET)
+
+        assignment_revision = d.pop("assignmentRevision", UNSET)
+
+        _rollover_from_date = d.pop("rolloverFromDate", UNSET)
+        rollover_from_date: datetime.date | Unset
+        if isinstance(_rollover_from_date, Unset):
+            rollover_from_date = UNSET
+        else:
+            rollover_from_date = datetime.date.fromisoformat(_rollover_from_date)
+
+        _rollover_to_date = d.pop("rolloverToDate", UNSET)
+        rollover_to_date: datetime.date | Unset
+        if isinstance(_rollover_to_date, Unset):
+            rollover_to_date = UNSET
+        else:
+            rollover_to_date = datetime.date.fromisoformat(_rollover_to_date)
+
+        carryover_count = d.pop("carryoverCount", UNSET)
+
         _available_from = d.pop("availableFrom", UNSET)
         available_from: datetime.datetime | Unset
         if isinstance(_available_from, Unset):
@@ -544,6 +613,12 @@ class DeveloperAuditEventSummary:
             sequence_number=sequence_number,
             revision=revision,
             target_assignment_version=target_assignment_version,
+            attempt_id=attempt_id,
+            attempt_number=attempt_number,
+            assignment_revision=assignment_revision,
+            rollover_from_date=rollover_from_date,
+            rollover_to_date=rollover_to_date,
+            carryover_count=carryover_count,
             available_from=available_from,
             due_at=due_at,
             room_type_id=room_type_id,
