@@ -52,3 +52,8 @@ uv run --python 3.12 python scripts/generate_client.py
 #28 source는 수행 회차 활성화와 이월 감사 event 2종 및 승인된 요약 필드만 생성 모델에
 추가한다. attempt/assignment 식별자와 날짜·회차 정보 외의 raw state, request hash, 비밀정보는
 노출하지 않는다. 이 역시 다음 release 전에는 production 기능으로 간주하지 않는다.
+
+#29 source는 `assignment.duration_policy_confirmed`와 정책 version/status/네 타입 minute의
+safe audit summary를 생성 모델에 추가한다. Developer 콘솔의 filtered OpenAPI는 기존
+auth/accounts/developer 경계만 유지하며 admin용 preview/정책 확정 기능을 추가하지 않는다.
+Preview 계산 자체는 감사 event를 만들지 않는다. source 모델 생성과 production API 배포는 별도다.

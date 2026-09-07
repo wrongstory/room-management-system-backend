@@ -250,6 +250,15 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 배정 가능 여부는 API나 RLS가 최종 저장 시점에 다시 검증한다. 브라우저에서 후보 목록을 봤다는 사실은 권한이나 최신 상태의 증거가 아니다.
 
+### [확정] #29 Preview 경계 — 2026-09-07 구현 착수 계약
+
+- Preview는 active business admin의 오늘/내일 계획 조회·계산이며, 기존 target/assignment/attempt/알림/outbox/audit/command receipt를 쓰지 않는다. 자동 저장·통보·attempt 활성화 API가 아니다. 확인·편집한 제안은 #25 draft 저장 → #26 commit/notify에서 최신 CAS/가능일/source를 다시 검증한다.
+- 소요시간은 네 객실 타입을 모두 포함한 versioned duration policy의 `confirmed` 값만 사용한다. fresh DB의 confirmed 0건은 정상이며 `ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED`, `decisionReady=false`로 fail-closed한다. 55/65/70/80분은 계속 `[데모]`이고 template 값·평균·고정 시간으로 대체하지 않는다. 실제 시간의 확정은 별도 관리자 운영 입력이며 이번 feature에서 production 값을 설정하지 않는다.
+- 유효한 미배정 target만 새로 제안한다. 기존 draft/notified 및 진행 업무는 고정 fee/time 부하이며 담당·순서를 변경하지 않는다. reclean은 원 메이드만 가능하고 부재 시 blocked로 남긴다. planned checkout은 배정 계획에만 포함하며 materialization/현장 실행 경계는 #28이 계속 소유한다.
+- 비교는 완료 가능한 수 → 기본 청소요금 spread → 전체 편차 → 동선 → 최종 동률 seed 순서다. previewSeed는 상위 목적함수를 약화하거나 fingerprint를 바꾸지 않는다. 제한된 탐색은 전역 최적해 증명이 아닌 휴리스틱임을 API 운영 문서에 명시한다.
+- 임의 근무시간·휴게시간·하루 최대 객실 수를 만들지 않는다. 실제 진행 attempt의 남은 시간을 알 수 없으면 추가 용량을 추정하지 않고 보류한다. target/maid 자원 상한 초과는 부분 자동결정이 아니라 `ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED`로 거부한다.
+- 입력 fingerprint는 정책 version과 후보/고정 부하/가능일/source schedule snapshot을 포함한다. 이는 읽은 상태의 식별자이지 저장 권한이나 예약 lock이 아니다.
+
 ### [확정] #27 시작 전 변경 경계 — 2026-09-05 구현 착수 계약
 
 - 일반 pre-start command는 target에 `status <> superseded` attempt가 하나라도 있으면 `ASSIGNMENT_ALREADY_STARTED`로 거부한다. `started_at` 유무로 우회하지 않는다. 이후 수행·인계는 #28/#7 소유다.

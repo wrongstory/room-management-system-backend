@@ -72,12 +72,18 @@ Issue #58에서 현재 성공 mutation의 append 지점을 전수 확인했다. 
 
 scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `reservation.scheduled_check_in`/`reservation.scheduled_checkout`으로 같은 domain 원장에 기록된다. scheduler 실행 상태 자체는 `private.scheduler_invocation_heartbeats`의 bounded 운영 projection이다. 현재 구현된 성공 mutation 중 audit append 누락은 발견되지 않았다. 후속 #52/#53은 이 event 이름과 공통 activity helper를 재사용하며 자유문 event/source를 추가하지 않는다.
 
-#28 source의 audit allowlist는 총 35개입니다. #27 pre-start 필드에
+#29 source의 audit allowlist는 총 36개입니다. #27 pre-start 필드에
 `assignment.attempt_activated`와 `assignment.rolled_over`를 더하고, attempt/rollover summary는
 `cleaningTargetId/assignmentId/attemptId/maidProfileId/serviceDate/assignmentRevision/attemptNumber/targetAssignmentVersion/rolloverFromDate/rolloverToDate/carryoverCount/reasonCode`만 허용합니다.
 `reasonDetail`, `requestHash`, raw before/after state, notification body는 반환하지 않습니다. Python
 filtered OpenAPI/generated model도 같은 enum/summary로 재생성합니다. developer 콘솔에 업무 activation
 권한을 추가한 것은 아니며 배포 전까지 production allowlist가 source와 같다고 가정하지 않습니다.
+
+#29의 `assignment.duration_policy_confirmed`는 별도 관리자 설정 명령의 성공 감사입니다.
+summary는 `policyVersion/status/standardMinutes/premiumMinutes/oceanPremiumMinutes/oceanFamilyMinutes`
+여섯 필드만 허용하며 raw before/after state나 requestHash를 반환하지 않습니다. Preview 자체는
+조회·계산으로 audit를 쓰지 않습니다. Python filtered OpenAPI는 이 감사 enum/summary만 수용하며
+developer에게 배정 preview 또는 duration 확정 권한을 추가하지 않습니다.
 
 ## 활동/보안 pagination
 

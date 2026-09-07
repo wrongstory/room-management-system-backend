@@ -1,5 +1,127 @@
 import { type ApiHandlerDependencies, handleApiRequest } from "./index.ts";
 import type { EdgeActor, EdgeClients } from "../_shared/runtime.ts";
+import { EdgeError } from "../_shared/runtime.ts";
+
+Deno.test("preview exact routes: admin success is read-only, other roles denied and inactive/revoked authentication fails", async () => {
+  const calls: string[] = [];
+  const serviceDate = new Date(Date.now() + 9 * 3600000).toISOString().slice(
+    0,
+    10,
+  );
+  const clients = {
+    admin: {
+      rpc: (name: string) => {
+        calls.push(name);
+        return Promise.resolve({
+          error: null,
+          data: name === "get_assignment_preview_snapshot"
+            ? {
+              serviceDate,
+              planningAt: new Date().toISOString(),
+              durationPolicy: {
+                version: 1,
+                status: "confirmed",
+                standardMinutes: 30,
+                premiumMinutes: 40,
+                oceanPremiumMinutes: 50,
+                oceanFamilyMinutes: 60,
+              },
+              maids: [],
+              targets: [],
+            }
+            : null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => clients,
+    authenticateRequest: () => Promise.resolve(actor),
+  };
+  const path = "/v1/assignments/preview";
+  const success = await handleApiRequest(
+    request("POST", path, { serviceDate }),
+    dependencies,
+  );
+  const data = await success.json();
+  assert(
+    success.status === 200 && data.decisionReady === true &&
+      data.proposedAssignments.length === 0,
+    "admin preview successful",
+  );
+  assert(/^[a-f0-9-]{36}$/.test(data.previewSeed), "server UUID default seed");
+  assert(
+    calls.join(",") === "get_assignment_preview_snapshot",
+    "successful preview no ledger write RPC",
+  );
+  const unavailable = await handleApiRequest(
+    request("POST", path, { serviceDate }),
+    {
+      ...dependencies,
+      createClients: () => ({
+        admin: {
+          rpc: () =>
+            Promise.resolve({
+              data: null,
+              error: {
+                message: "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
+              },
+            }),
+        },
+      } as unknown as EdgeClients),
+    },
+  );
+  const unavailableBody = await unavailable.json();
+  assert(
+    unavailable.status === 409 && unavailableBody.decisionReady === false &&
+      unavailableBody.proposedAssignments.length === 0 &&
+      unavailableBody.error.code ===
+        "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
+    "HTTP unconfirmed fails closed without success proposals",
+  );
+  for (const role of ["maid", "developer"] as const) {
+    const res = await handleApiRequest(request("POST", path, { serviceDate }), {
+      ...dependencies,
+      authenticateRequest: () => Promise.resolve({ ...actor, role }),
+    });
+    assert(
+      res.status === 403 && (await res.json()).error.code === "ADMIN_REQUIRED",
+      "business roles enforced",
+    );
+  }
+  assert(
+    calls.filter((x) => x === "record_authorization_denial").length === 2,
+    "denials preserve bounded security recording",
+  );
+  for (const code of ["PROFILE_INACTIVE", "SESSION_REVOKED"]) {
+    const res = await handleApiRequest(request("POST", path, { serviceDate }), {
+      ...dependencies,
+      authenticateRequest: () =>
+        Promise.reject(new EdgeError(403, code, "접근 불가")),
+    });
+    assert(res.status === 403, "inactive/revoked rejected before route");
+  }
+  for (
+    const [method, url] of [["GET", path], ["POST", `${path}/extra`], [
+      "PUT",
+      "/v1/assignment-preview/duration-policy",
+    ]]
+  ) {
+    const res = await handleApiRequest(
+      request(method, url, method === "GET" ? undefined : { serviceDate }),
+      dependencies,
+    );
+    assert(res.status === 404, "no method/path alias");
+  }
+  const config = await handleApiRequest(
+    request("GET", "/v1/assignment-preview/duration-policy"),
+    dependencies,
+  );
+  assert(
+    config.status === 200 && (await config.json()).durationPolicy === null,
+    "unconfirmed config remains null",
+  );
+});
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

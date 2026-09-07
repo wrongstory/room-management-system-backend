@@ -19,6 +19,10 @@ import {
   saveAssignmentDraft,
 } from "../_shared/assignment-api.ts";
 import {
+  assignmentDurationPolicy,
+  previewAssignments,
+} from "../_shared/assignment-preview-api.ts";
+import {
   changeAccountRole,
   changeAccountStatus,
   changePassword,
@@ -146,6 +150,30 @@ export async function handleApiRequest(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    if (request.method === "POST" && path === "/v1/assignments/preview") {
+      const preview = await previewAssignments(request, clients, actor);
+      return jsonResponse(
+        preview,
+        preview.decisionReady ? 200 : 409,
+        corsHeaders,
+      );
+    }
+    if (
+      (request.method === "GET" || request.method === "POST") &&
+      path === "/v1/assignment-preview/duration-policy"
+    ) {
+      return jsonResponse(
+        {
+          durationPolicy: await assignmentDurationPolicy(
+            request,
+            clients,
+            actor,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
     if (request.method === "GET" && path === "/v1/assignment-change-requests") {
       return jsonResponse(
         await listAssignmentChangeRequests(request, clients, actor),

@@ -172,6 +172,27 @@ checkout template이 필수이며 누락 시 migration/예약 저장을 fail-clo
 
 ## RLS 원칙
 
+### #29 Assignment Preview: snapshot과 순수 계산 분리
+
+`get_assignment_preview_snapshot`은 `STABLE SECURITY DEFINER` 조회 RPC다. exact active business
+admin을 DB에서 재검증하고 고정 search_path/EXECUTE 최소 권한 아래 한 statement snapshot의
+정책·가능일·target·기존 배정·attempt·원 domain schedule을 반환한다. 이 RPC는 업무 DML,
+advisory write lock, audit, command receipt, outbox를 만들지 않는다.
+
+Edge의 platform-neutral `assignment-preview-core`는 snapshot만 입력으로 받는 bounded 순수
+계산 모듈이다. DB가 source lifecycle 유효성을 판정하고 optimizer가 고정 부하·capacity·fee·route를
+계산한다. 계획만 반환하며 저장은 기존 #25/#26 CAS 명령으로 분리한다. Fastify preview route는
+이번 범위가 아니므로 Edge source와 Fastify rollback parity를 같다고 표시하지 않는다.
+
+`assignment_duration_policy_versions`는 네 타입의 양수 minute 값과 version/상태/확정자를
+보존한다. 확정 정책은 최대 한 건이며 새 관리자 확정 command는 전역 policy lock과 expectedVersion
+CAS, actor/command/key + request hash receipt를 사용해 기존 confirmed를 retired로 전환하고
+새 version 및 `assignment.duration_policy_confirmed` 감사만 append한다. 기존 확정 값 변경·삭제,
+직접 Data API DML은 금지된다. 정책 확정은 preview 자체와 별도 명령이다. confirmed seed나
+template/default 시간 fallback은 없고 production 운영값 설정은 이번 PR에서 하지 않는다.
+
+상세 입력·출력·계산 한계는 [배정 Preview API 계약](./ASSIGNMENT_PREVIEW.md)을 따른다.
+
 - `public`의 모든 테이블은 RLS를 활성화합니다.
 - `anon`에는 테이블 권한을 주지 않습니다.
 - 메이드는 본인 담당·수행·제출·수익·지급·알림만 읽습니다.
