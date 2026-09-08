@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
 import { testAttemptActivationConcurrency } from './test-attempt-activation-concurrency.mjs';
 import { testAssignmentPreviewConcurrency } from './test-assignment-preview-concurrency.mjs';
+import { testAttemptExecutionConcurrency } from './test-attempt-execution-concurrency.mjs';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const status = JSON.parse(execFileSync(
@@ -899,6 +900,7 @@ console.log('Planning races passed: change/notify, cancel/notify, scheduled/retr
 await testPrestartConcurrency(client,actorProfileId);
 await testAttemptActivationConcurrency(client,actorProfileId);
 await testAssignmentPreviewConcurrency(client,actorProfileId);
+await testAttemptExecutionConcurrency(client,actorProfileId);
 
 console.log(
   'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2, assignment-commit-replay=1 logical/2 calls, assignment-save-vs-commit=1/2, availability-vs-commit=1/2.'

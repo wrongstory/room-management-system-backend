@@ -142,6 +142,177 @@ const assignmentId = "70000000-0000-4000-8000-000000000001";
 const cleaningTargetId = "80000000-0000-4000-8000-000000000001";
 const impactFingerprint = "a".repeat(64);
 
+Deno.test("attempt exact HTTP routes preserve maid-only CAS, denial logging and physical completion boundary", async () => {
+  const attemptId = "90000000-0000-4000-8000-000000000001";
+  const maid: EdgeActor = { ...actor, role: "maid" };
+  const body = {
+    expectedAssignmentId: assignmentId,
+    expectedAssignmentRevision: 2,
+    expectedExecutionVersion: 1,
+  };
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let dbError: string | null = null;
+  const clients = {
+    admin: {
+      rpc: (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        if (name === "record_authorization_denial") {
+          return Promise.resolve({
+            data: null,
+            error: null,
+          });
+        }
+        if (dbError) {
+          return Promise.resolve({
+            data: null,
+            error: { message: dbError },
+          });
+        }
+        const status = name === "get_current_cleaning_attempt"
+          ? "scheduled"
+          : name === "start_cleaning_attempt"
+          ? "in_progress"
+          : "field_completed";
+        return Promise.resolve({
+          error: null,
+          data: {
+            attemptId,
+            cleaningTargetId,
+            assignmentId,
+            maidProfileId: maid.profileId,
+            assignmentRevision: 2,
+            executionVersion: status === "scheduled" ? 1 : 2,
+            status,
+            startedAt: status === "scheduled" ? null : "2026-09-08T06:00:00Z",
+            fieldCompletedAt: status === "field_completed"
+              ? "2026-09-09T00:00:00Z"
+              : null,
+            endedAt: null,
+            effectiveAt: "2026-09-09T00:00:00Z",
+            recordedAt: "2026-09-09T00:00:00Z",
+            rawPhotoSnapshot: { secret: "not-public" },
+          },
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => clients,
+    authenticateRequest: () => Promise.resolve(maid),
+  };
+  const routes = [
+    {
+      method: "GET",
+      path: `/v1/attempts/current?assignmentId=${assignmentId}`,
+      status: "scheduled",
+      body: undefined,
+    },
+    {
+      method: "POST",
+      path: `/v1/attempts/${attemptId}/start`,
+      status: "in_progress",
+      body,
+    },
+    {
+      method: "POST",
+      path: `/v1/attempts/${attemptId}/complete-field-work`,
+      status: "field_completed",
+      body,
+    },
+  ];
+  for (const route of routes) {
+    const response = await handleApiRequest(
+      request(route.method, route.path, route.body),
+      dependencies,
+    );
+    const json = await response.json();
+    assert(
+      response.status === 200 && json.attempt.status === route.status,
+      "exact route dispatch",
+    );
+    assert(
+      !JSON.stringify(json).includes("not-public") &&
+        !JSON.stringify(json).includes("roomReady"),
+      "no photo/raw state or room-ready projection",
+    );
+  }
+  assert(
+    calls.length === 3 &&
+      calls.every((call) => call.args.p_actor_profile_id === maid.profileId),
+    "only own business RPC, no fake submission/lease",
+  );
+  for (const role of ["admin", "developer"] as const) {
+    for (const route of routes) {
+      const before: number = calls.length;
+      const response = await handleApiRequest(
+        request(route.method, route.path, route.body),
+        {
+          ...dependencies,
+          authenticateRequest: () => Promise.resolve({ ...maid, role }),
+        },
+      );
+      assert(
+        response.status === 403 &&
+          (await response.json()).error.code === "MAID_REQUIRED",
+        "no operator bypass",
+      );
+      assert(
+        calls.length === before + 1 &&
+          calls.at(-1)?.name === "record_authorization_denial" &&
+          calls.at(-1)?.args.p_source === "edge.authorization.attempts",
+        "bounded capability denial source",
+      );
+    }
+  }
+  for (const code of ["ACCOUNT_INACTIVE", "SESSION_REVOKED"]) {
+    const before: number = calls.length;
+    const response = await handleApiRequest(
+      request("POST", routes[1].path, body),
+      {
+        ...dependencies,
+        authenticateRequest: () =>
+          Promise.reject(new EdgeError(403, code, "차단")),
+      },
+    );
+    assert(
+      response.status === 403 && calls.length === before,
+      "inactive/limited/revoked auth never enters business RPC",
+    );
+  }
+  dbError = "ATTEMPT_ACCESS_REQUIRED";
+  const denied = await handleApiRequest(
+    request("POST", routes[1].path, body),
+    dependencies,
+  );
+  assert(
+    denied.status === 403 &&
+      calls.at(-1)?.args.p_reason_code === "ATTEMPT_ACCESS_REQUIRED",
+    "other maid denial recorded without request payload",
+  );
+  const before = calls.length;
+  for (
+    const [method, path] of [
+      ["GET", routes[1].path],
+      ["POST", "/v1/attempts/current"],
+      ["PUT", routes[2].path],
+      ["POST", `${routes[1].path}/extra`],
+      ["GET", "/v1/attempts"],
+      ["POST", `/v1/attempts/${attemptId}/claim`],
+    ]
+  ) {
+    const response = await handleApiRequest(
+      request(method, path, method === "GET" ? undefined : body),
+      dependencies,
+    );
+    assert(
+      response.status === 404 &&
+        (await response.json()).error.code === "ROUTE_NOT_FOUND",
+      "wrong method/path has no alias",
+    );
+  }
+  assert(calls.length === before, "unknown routes never mutate");
+});
+
 Deno.test("assignment GET routes expose only own notified revisions and preserve superseded history", async () => {
   function readRequest(path: string) {
     const result = request("GET", path);

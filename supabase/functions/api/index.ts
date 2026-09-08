@@ -23,6 +23,11 @@ import {
   previewAssignments,
 } from "../_shared/assignment-preview-api.ts";
 import {
+  attemptCommandPath,
+  currentAttempt,
+  executeAttempt,
+} from "../_shared/attempt-api.ts";
+import {
   changeAccountRole,
   changeAccountStatus,
   changePassword,
@@ -424,6 +429,32 @@ export async function handleApiRequest(
         200,
         corsHeaders,
       );
+    }
+
+    if (request.method === "GET" && path === "/v1/attempts/current") {
+      return jsonResponse(
+        { attempt: await currentAttempt(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST") {
+      const attemptRoute = attemptCommandPath(path);
+      if (attemptRoute) {
+        return jsonResponse(
+          {
+            attempt: await executeAttempt(
+              request,
+              clients,
+              actor,
+              attemptRoute.attemptId,
+              attemptRoute.action,
+            ),
+          },
+          200,
+          corsHeaders,
+        );
+      }
     }
 
     if (request.method === "GET" && path === "/v1/assignments") {

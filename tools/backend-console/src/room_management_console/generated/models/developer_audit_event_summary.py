@@ -49,6 +49,10 @@ class DeveloperAuditEventSummary:
         attempt_id (UUID | Unset):
         attempt_number (int | Unset):
         assignment_revision (int | Unset):
+        execution_version (int | Unset):
+        started_at (datetime.datetime | Unset):
+        field_completed_at (datetime.datetime | Unset):
+        ended_at (datetime.datetime | Unset):
         rollover_from_date (datetime.date | Unset):
         rollover_to_date (datetime.date | Unset):
         carryover_count (int | Unset):
@@ -105,6 +109,10 @@ class DeveloperAuditEventSummary:
     attempt_id: UUID | Unset = UNSET
     attempt_number: int | Unset = UNSET
     assignment_revision: int | Unset = UNSET
+    execution_version: int | Unset = UNSET
+    started_at: datetime.datetime | Unset = UNSET
+    field_completed_at: datetime.datetime | Unset = UNSET
+    ended_at: datetime.datetime | Unset = UNSET
     rollover_from_date: datetime.date | Unset = UNSET
     rollover_to_date: datetime.date | Unset = UNSET
     carryover_count: int | Unset = UNSET
@@ -222,6 +230,20 @@ class DeveloperAuditEventSummary:
         attempt_number = self.attempt_number
 
         assignment_revision = self.assignment_revision
+
+        execution_version = self.execution_version
+
+        started_at: str | Unset = UNSET
+        if not isinstance(self.started_at, Unset):
+            started_at = self.started_at.isoformat()
+
+        field_completed_at: str | Unset = UNSET
+        if not isinstance(self.field_completed_at, Unset):
+            field_completed_at = self.field_completed_at.isoformat()
+
+        ended_at: str | Unset = UNSET
+        if not isinstance(self.ended_at, Unset):
+            ended_at = self.ended_at.isoformat()
 
         rollover_from_date: str | Unset = UNSET
         if not isinstance(self.rollover_from_date, Unset):
@@ -348,6 +370,14 @@ class DeveloperAuditEventSummary:
             field_dict["attemptNumber"] = attempt_number
         if assignment_revision is not UNSET:
             field_dict["assignmentRevision"] = assignment_revision
+        if execution_version is not UNSET:
+            field_dict["executionVersion"] = execution_version
+        if started_at is not UNSET:
+            field_dict["startedAt"] = started_at
+        if field_completed_at is not UNSET:
+            field_dict["fieldCompletedAt"] = field_completed_at
+        if ended_at is not UNSET:
+            field_dict["endedAt"] = ended_at
         if rollover_from_date is not UNSET:
             field_dict["rolloverFromDate"] = rollover_from_date
         if rollover_to_date is not UNSET:
@@ -542,6 +572,29 @@ class DeveloperAuditEventSummary:
 
         assignment_revision = d.pop("assignmentRevision", UNSET)
 
+        execution_version = d.pop("executionVersion", UNSET)
+
+        _started_at = d.pop("startedAt", UNSET)
+        started_at: datetime.datetime | Unset
+        if isinstance(_started_at, Unset):
+            started_at = UNSET
+        else:
+            started_at = datetime.datetime.fromisoformat(_started_at)
+
+        _field_completed_at = d.pop("fieldCompletedAt", UNSET)
+        field_completed_at: datetime.datetime | Unset
+        if isinstance(_field_completed_at, Unset):
+            field_completed_at = UNSET
+        else:
+            field_completed_at = datetime.datetime.fromisoformat(_field_completed_at)
+
+        _ended_at = d.pop("endedAt", UNSET)
+        ended_at: datetime.datetime | Unset
+        if isinstance(_ended_at, Unset):
+            ended_at = UNSET
+        else:
+            ended_at = datetime.datetime.fromisoformat(_ended_at)
+
         _rollover_from_date = d.pop("rolloverFromDate", UNSET)
         rollover_from_date: datetime.date | Unset
         if isinstance(_rollover_from_date, Unset):
@@ -656,6 +709,10 @@ class DeveloperAuditEventSummary:
             attempt_id=attempt_id,
             attempt_number=attempt_number,
             assignment_revision=assignment_revision,
+            execution_version=execution_version,
+            started_at=started_at,
+            field_completed_at=field_completed_at,
+            ended_at=ended_at,
             rollover_from_date=rollover_from_date,
             rollover_to_date=rollover_to_date,
             carryover_count=carryover_count,

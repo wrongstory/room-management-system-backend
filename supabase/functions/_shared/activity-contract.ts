@@ -4,6 +4,7 @@ export type ActivitySource =
   | "edge.authorization.developer"
   | "edge.authorization.availability"
   | "edge.authorization.assignments"
+  | "edge.authorization.attempts"
   | "edge.authorization.reservations"
   | "edge.authorization.rooms"
   | "edge.sensitive.reservation_guest_name";
@@ -17,6 +18,7 @@ export type AuthorizationDeniedCode =
   | "ACCOUNT_MANAGER_REQUIRED"
   | "ADMIN_REQUIRED"
   | "ASSIGNMENT_ACCESS_REQUIRED"
+  | "ATTEMPT_ACCESS_REQUIRED"
   | "AVAILABILITY_ACCESS_REQUIRED"
   | "DEVELOPER_REQUIRED"
   | "MAID_REQUIRED"
@@ -26,6 +28,7 @@ const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
   "ACCOUNT_MANAGER_REQUIRED",
   "ADMIN_REQUIRED",
   "ASSIGNMENT_ACCESS_REQUIRED",
+  "ATTEMPT_ACCESS_REQUIRED",
   "AVAILABILITY_ACCESS_REQUIRED",
   "DEVELOPER_REQUIRED",
   "MAID_REQUIRED",
@@ -61,6 +64,9 @@ export function authorizationSourceForPath(
   }
   if (path.startsWith("/v1/reservations")) {
     return "edge.authorization.reservations";
+  }
+  if (path.startsWith("/v1/attempts/")) {
+    return "edge.authorization.attempts";
   }
   if (path.startsWith("/v1/rooms")) {
     return "edge.authorization.rooms";

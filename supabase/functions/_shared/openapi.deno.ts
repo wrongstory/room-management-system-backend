@@ -90,7 +90,8 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   const auditEventTypeParameter = document.paths["/v1/developer/audit-events"]
     .get.parameters.find((parameter) => parameter.name === "eventType");
   assert(
-    auditEventTypeParameter?.schema.maxItems === 36,
+    auditEventTypeParameter?.schema.maxItems ===
+      document.components.schemas.DeveloperAuditEventType.enum.length,
     "developer audit filter limit must match the 36-event allowlist",
   );
   const auditSummary = document.components.schemas.DeveloperAuditEvent
@@ -205,6 +206,118 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     response.headers.get("cache-control") === "public, max-age=300",
     "contract cache",
   );
+});
+
+Deno.test("attempt execution OpenAPI binds physical completion, strict CAS and safe audit contract", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const start = document.paths["/v1/attempts/{attemptId}/start"].post;
+  const complete =
+    document.paths["/v1/attempts/{attemptId}/complete-field-work"].post;
+  assert(
+    start.operationId === "startCleaning" &&
+      complete.operationId === "completeFieldWork",
+    "stable operation IDs",
+  );
+  assert(
+    start["x-required-roles"].join(",") === "maid" &&
+      complete["x-required-roles"].join(",") === "maid",
+    "maid only",
+  );
+  assert(
+    complete.description.includes("사진은 선행조건이 아니며") &&
+      complete.description.includes("room ready") &&
+      complete.description.includes("client timestamp"),
+    "physical completion not submission or client clock",
+  );
+  assert(
+    document.components.schemas.AttemptExecutionRequest.additionalProperties ===
+        false &&
+      Object.keys(
+          document.components.schemas.AttemptExecutionRequest.properties,
+        ).length === 3,
+    "strict CAS request",
+  );
+  assert(
+    document.components.schemas.AttemptExecution.additionalProperties ===
+        false &&
+      !JSON.stringify(document.components.schemas.AttemptExecution.properties)
+        .includes("snapshot"),
+    "safe response DTO",
+  );
+  assert(
+    document.components.schemas.DeveloperAuditEventType.enum.includes(
+      "cleaning.attempt_started",
+    ) &&
+      document.components.schemas.DeveloperAuditEventType.enum.includes(
+        "cleaning.field_completed",
+      ),
+    "audit events codegen",
+  );
+  assert(
+    "executionVersion" in
+      document.components.schemas.DeveloperAuditEvent.properties.summary
+        .properties,
+    "audit safe version",
+  );
+});
+
+Deno.test("cleaning field-completed audit projection fits the full strict summary schema", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const summarySchema =
+    document.components.schemas.DeveloperAuditEvent.properties.summary;
+  // list_developer_audit_events의 cleaning.field_completed safe projection 전체.
+  // jsonb_strip_nulls 때문에 시작 이벤트의 미완료 시각은 null 대신 생략된다.
+  const completedSummary = {
+    attemptId: "10000000-0000-4000-8000-000000000001",
+    cleaningTargetId: "10000000-0000-4000-8000-000000000002",
+    assignmentId: "10000000-0000-4000-8000-000000000003",
+    maidProfileId: "10000000-0000-4000-8000-000000000004",
+    assignmentRevision: 2,
+    executionVersion: 3,
+    status: "field_completed",
+    startedAt: "2026-09-08T01:00:00.000Z",
+    fieldCompletedAt: "2026-09-08T02:00:00.000Z",
+    endedAt: "2026-09-08T02:00:00.000Z",
+  };
+  const properties = summarySchema.properties as Record<string, {
+    type?: string;
+    format?: string;
+    minimum?: number;
+  }>;
+  assert(summarySchema.additionalProperties === false, "strict summary");
+  for (const [key, value] of Object.entries(completedSummary)) {
+    const field = properties[key];
+    assert(field !== undefined, `projected audit field ${key} is documented`);
+    assert(
+      field.type === "integer"
+        ? Number.isInteger(value) &&
+          Number(value) >= (field.minimum ?? Number.MIN_SAFE_INTEGER)
+        : typeof value === field.type,
+      `projected audit field ${key} matches its schema type`,
+    );
+    if (field.format === "date-time") {
+      assert(
+        typeof value === "string" && Number.isFinite(Date.parse(value)),
+        `projected audit field ${key} is a timestamp`,
+      );
+    }
+    if (field.format === "uuid") {
+      assert(
+        typeof value === "string" &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+            .test(value),
+        `projected audit field ${key} is a UUID`,
+      );
+    }
+  }
+  assert(
+    !("required" in summarySchema) && properties.endedAt.type === "string" &&
+      properties.endedAt.format === "date-time",
+    "endedAt is optional, not nullable: DB strips nulls on start",
+  );
+  for (const privateField of ["requestHash", "before_state", "after_state"]) {
+    assert(!(privateField in properties), `${privateField} remains excluded`);
+  }
 });
 
 Deno.test("preview OpenAPI documents pure admin preview and separate versioned config", async () => {

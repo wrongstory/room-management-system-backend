@@ -121,13 +121,25 @@ RLS 외에도 Edge query에서 self/notified를 다시 제한하며 파생 targe
 메이드 `targetAssignmentVersion`은 해당 통보 revision의 version이고 관리자는 현재 CAS를 봅니다.
 별도 Fastify assignment route는 기존에 없으므로 이번에 만들지 않습니다.
 
-기존 25개 migration은 그대로 두고 `20260908101844_maid_assignment_visibility.sql`만 추가합니다.
-#7A/B/C의 실행/lease/limited session은 승인된 후속 정책이며 이 PR에 구현하지 않습니다.
+PR #74는 기존 25개 migration을 그대로 두고 `20260908101844_maid_assignment_visibility.sql`만
+추가해 dev에 병합됐습니다. 그 PR에는 #7A/B/C의 실행/lease/limited session을 포함하지 않았습니다.
 field_completed는 물리적 완료 선언, 필수사진은 submission gate라는 최신 제품 가이드를 따릅니다.
 
 검증 중 발견한 기존 예약 객실 변경의 즉시 FK 충돌은 #73에서 별도 추적합니다. 현재 실제
 `change_reservation` 경로는 planned target 참조 때문에 실패하므로 이번 검증을 객실 변경 성공으로
 표현하지 않습니다. 현재 실패의 원자성과 별도 합성 relocation의 과거 snapshot 비노출을 구분합니다.
+
+### #7A 온라인 실행 경계
+
+시작/물리 완료와 실행 version은 [Attempt Execution Core](./ATTEMPT_EXECUTION_CORE.md)를 따릅니다.
+기존 #28 활성화는 scheduled 회차를 만들고 #7A의 exact own active maid 명령이 실행합니다.
+일반 active/session guard를 완화하지 않으며, physical completion과 사진/submission/검수/ready는
+별도 축으로 유지합니다. 시간창·source·실제 점유는 시작 시 다시 검증하되 정상 시작 후 자정·마감·
+scheduled checkout만으로 물리 완료를 막지 않습니다. #7B 전 일반 계정 변경이 진행 업무를 고립시키지
+않도록 DB에서 거부하며 새로운 limited capability/Auth 방법은 만들지 않습니다.
+
+source/dev 승인·서브에이전트 독립 리뷰는 [오케스트레이션 기준](./DEVELOPMENT_ORCHESTRATION.md)을
+따릅니다. 점수 90점 이상도 운영 승격 권한을 뜻하지 않습니다.
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 `notifications`, private `notification_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 

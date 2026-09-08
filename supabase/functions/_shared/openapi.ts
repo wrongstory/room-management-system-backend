@@ -49,6 +49,60 @@ const noStoreHeader = {
 
 const accountManagerRoles = ["developer", "admin"] as const;
 
+function attemptMutationOperation(
+  operationId: string,
+  summary: string,
+  description: string,
+) {
+  return {
+    tags: ["Attempts"],
+    operationId,
+    summary,
+    description,
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": ["maid"],
+    parameters: [idempotencyHeader, {
+      name: "attemptId",
+      in: "path",
+      required: true,
+      schema: { type: "string", format: "uuid" },
+      description: "본인의 현재 통보 배정에 연결된 수행 회차 ID",
+    }],
+    requestBody: {
+      required: true,
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/AttemptExecutionRequest" },
+        },
+      },
+    },
+    responses: {
+      "200": {
+        description:
+          "원자적으로 저장된 수행 결과 또는 동일 요청의 성공 receipt replay",
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["attempt"],
+              properties: {
+                attempt: { $ref: "#/components/schemas/AttemptExecution" },
+              },
+            },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "404": errorResponse,
+      "409": errorResponse,
+      "500": errorResponse,
+    },
+  };
+}
+
 const reservationRequired = [
   "id",
   "roomId",
@@ -151,6 +205,11 @@ export const openApiDocument = {
       name: "Availability",
       description:
         "메이드의 다음 주 가능일 제출·변경 요청과 관리자의 승인·후보 조회 API입니다. 제출창은 일요일 12:00–23:59 KST이며 서버가 DB 시각으로 판정합니다.",
+    },
+    {
+      name: "Attempts",
+      description:
+        "통보된 본인 업무의 온라인 시작·물리 완료 및 실행 version 조회입니다. 오프라인 lease·인계·사진 제출·검수·수익은 후속 단계입니다.",
     },
     {
       name: "Assignments",
@@ -515,7 +574,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 36,
+              maxItems: 38,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -991,6 +1050,65 @@ export const openApiDocument = {
           "500": errorResponse,
         },
       },
+    },
+    "/v1/attempts/current": {
+      get: {
+        tags: ["Attempts"],
+        operationId: "getCurrentAttempt",
+        summary: "본인 통보 배정의 수행 회차와 CAS version 조회",
+        description:
+          "비밀번호 변경을 완료한 active maid 전용입니다. 정확한 본인 current/notified assignmentId 한 건만 조회하며 attempt 활성화 전에는 null을 반환합니다. 미통보·종료 배정·다른 메이드·존재하지 않는 배정은 ATTEMPT_ACCESS_REQUIRED로 차단합니다. 목록/history API가 아니며 현재 객실·PIN·고객명·사진 snapshot은 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid"],
+        parameters: [{
+          name: "assignmentId",
+          in: "query",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description:
+            "본인에게 실제 통보된 현재 assignment revision ID. 중복·추가 query는 금지합니다.",
+        }],
+        responses: {
+          "200": {
+            description: "허용된 배정의 수행 회차 또는 활성화 대기 null",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["attempt"],
+                  properties: {
+                    attempt: {
+                      anyOf: [
+                        { $ref: "#/components/schemas/AttemptExecution" },
+                        { type: "null" },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/attempts/{attemptId}/start": {
+      post: attemptMutationOperation(
+        "startCleaning",
+        "온라인 현장 청소 시작",
+        "active maid 본인의 현재 통보 배정과 scheduled attempt만 시작합니다. executionVersion·assignment ID/revision CAS와 최신 접근 시각·source·실제 점유를 DB에서 검증하며 한 메이드의 in_progress는 최대 한 건입니다. 온라인 시작만 허용하고 lease/PIN/사진/오프라인 claim을 발급하지 않습니다. 같은 Idempotency-Key와 같은 본문은 기존 결과를 replay하고 다른 본문은 IDEMPOTENCY_KEY_REUSED입니다.",
+      ),
+    },
+    "/v1/attempts/{attemptId}/complete-field-work": {
+      post: attemptMutationOperation(
+        "completeFieldWork",
+        "물리적인 현장 청소 완료 선언",
+        "active maid 본인의 현재 통보 배정에 연결된 in_progress attempt만 field_completed로 전이합니다. 사진은 선행조건이 아니며 사진 완전성은 이후 submission gate입니다. 이미 적법하게 시작한 수행은 자정·마감 경과·정상 checkout만으로 완료를 막지 않지만 최신 권한·취소 여부·assignment identity·execution CAS는 다시 검증합니다. room ready·검수 승인·earning·payroll·submission·upload capability는 생성하지 않습니다. client timestamp와 임의 payload는 금지하며 같은 요청 재시도는 성공 receipt를 replay합니다.",
+      ),
     },
     "/v1/assignments": {
       get: {
@@ -1868,6 +1986,23 @@ export const openApiDocument = {
           "INVALID_ACCESS_TOKEN",
           "PROFILE_NOT_FOUND",
           "ACCOUNT_INACTIVE",
+          "ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED",
+          "ATTEMPT_ACCESS_REQUIRED",
+          "ATTEMPT_NOT_FOUND",
+          "ATTEMPT_VERSION_CONFLICT",
+          "ASSIGNMENT_NOT_NOTIFIED",
+          "ATTEMPT_INVALID_TRANSITION",
+          "MAID_ALREADY_IN_PROGRESS",
+          "ATTEMPT_COMMAND_FAILED",
+          "INVALID_ATTEMPT_COMMAND",
+          "ATTEMPT_ACTIVATION_NOT_ALLOWED",
+          "CLEANING_SERVICE_DATE_NOT_DUE",
+          "CLEANING_SERVICE_DATE_EXPIRED",
+          "CLEANING_WINDOW_NOT_OPEN",
+          "CLEANING_WINDOW_EXPIRED",
+          "CHECKOUT_NOT_MATERIALIZED",
+          "RECLEAN_MAID_IMMUTABLE",
+          "PREVIOUS_ROOM_WORKFLOW_ACTIVE",
           "SESSION_REVOKED",
           "INVALID_CREDENTIALS",
           "ACCOUNT_LOCKED",
@@ -2234,6 +2369,8 @@ export const openApiDocument = {
           "assignment.attempt_activated",
           "assignment.rolled_over",
           "assignment.duration_policy_confirmed",
+          "cleaning.attempt_started",
+          "cleaning.field_completed",
           "reservation.created",
           "reservation.changed",
           "reservation.cancelled",
@@ -2535,6 +2672,10 @@ export const openApiDocument = {
               attemptId: { type: "string", format: "uuid" },
               attemptNumber: { type: "integer", minimum: 1 },
               assignmentRevision: { type: "integer", minimum: 1 },
+              executionVersion: { type: "integer", minimum: 1 },
+              startedAt: { type: "string", format: "date-time" },
+              fieldCompletedAt: { type: "string", format: "date-time" },
+              endedAt: { type: "string", format: "date-time" },
               rolloverFromDate: { type: "string", format: "date" },
               rolloverToDate: { type: "string", format: "date" },
               carryoverCount: { type: "integer", minimum: 0 },
@@ -2795,6 +2936,77 @@ export const openApiDocument = {
           },
           nextCursor: { type: ["string", "null"] },
         },
+      },
+      AttemptExecutionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "expectedExecutionVersion",
+          "expectedAssignmentId",
+          "expectedAssignmentRevision",
+        ],
+        properties: {
+          expectedExecutionVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: 9007199254740991,
+          },
+          expectedAssignmentId: { type: "string", format: "uuid" },
+          expectedAssignmentRevision: {
+            type: "integer",
+            minimum: 1,
+            maximum: 9007199254740991,
+          },
+        },
+        description:
+          "직전 조회의 수행 version과 본인 배정 ID/revision만 보냅니다. 사용자 ID·시각·사진·PIN·lease·오프라인 payload는 서버가 받지 않습니다.",
+      },
+      AttemptExecution: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "attemptId",
+          "cleaningTargetId",
+          "assignmentId",
+          "maidProfileId",
+          "assignmentRevision",
+          "executionVersion",
+          "status",
+          "startedAt",
+          "fieldCompletedAt",
+          "endedAt",
+          "effectiveAt",
+          "recordedAt",
+        ],
+        properties: {
+          attemptId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          assignmentRevision: { type: "integer", minimum: 1 },
+          executionVersion: { type: "integer", minimum: 1 },
+          status: {
+            type: "string",
+            enum: [
+              "scheduled",
+              "in_progress",
+              "field_completed",
+              "upload_pending",
+              "submitted",
+              "approved",
+              "rejected",
+              "interrupted",
+              "superseded",
+            ],
+          },
+          startedAt: { type: ["string", "null"], format: "date-time" },
+          fieldCompletedAt: { type: ["string", "null"], format: "date-time" },
+          endedAt: { type: ["string", "null"], format: "date-time" },
+          effectiveAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+        description:
+          "서버가 검증한 수행 identity/version/timestamp만 포함합니다. 일반 상태 enum의 후속 단계가 보이더라도 이번 API는 scheduled→in_progress→field_completed만 변경합니다. 현장 상태는 attempt.status·fieldCompletedAt·endedAt이 정본이며 target의 거친 in_progress 값만으로 청소중 표시를 판단하지 않습니다. 전체 room/template snapshot·고객명·PIN·사진·token은 공개하지 않습니다.",
       },
       Assignment: {
         type: "object",

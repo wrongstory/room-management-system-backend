@@ -53,12 +53,12 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-최종 확인: **2026-09-03 KST**
+production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). 개발 통합 기준 갱신: **2026-09-08 KST**. 이번 개발에서 운영을 재검증하거나 변경하지 않았다.
 
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@8bdb5db2cd65359adca13e132959bcdf5f808324` (#25~#29 / PR #72까지 source/dev 완료; production 미승격)
+- 개발 통합 source 기준: `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1` (#25~#29 및 #4 / PR #74까지 source/dev 완료; production 미승격)
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -420,32 +420,63 @@ source/dev 완료와 운영 배포는 별도 gate다.
 DB lint 오류 0, local Security Advisor WARN/ERROR 0이다. `notification_outbox`와 새 duration
 정책의 RLS/no-policy INFO 2건은 직접 접근을 막고 RPC만 허용하는 의도된 경계다.
 
-### #4 Maid Assignment Visibility — 선행 feature, production 미적용
+### #4 Maid Assignment Visibility — source/dev 완료, production 미적용
 
 2026-09-08 승인 A안: maid는 실제 본인 통보 revision만 조회한다. 종료·superseded된 본인
 통보 history는 허용하며 미통보 draft/다른 maid/미통보 revision은 RLS와 Edge 모두 차단한다.
 과거 projection은 통보 당시 revision을 사용하고 현재 target version/새 담당을 노출하지 않는다.
 
 - [x] notified-only RLS/projection/Edge 및 로컬 회귀 검증 완료
-- [ ] exact-head GitHub application / migration PASS
-- [ ] GPT exact-head 독립 검토 P0/P1=0
-- [ ] 명시적 병합 허가 후 `dev` 병합
+- [x] exact-head GitHub application / migration PASS — run `34216520932`
+- [x] GPT exact-head 독립 검토 P0/P1=0 — `a95ff2efb351d9089b0b664568206db777103252`, review `5140718794` (COMMENTED)
+- [x] 사용자 최신 위임에 따른 Codex 96/100 승인 후 PR #74 `dev` squash 병합 — `7bdc2a3981e55e235de569527f7cc68f5ef80db1`
 - [ ] release/main 이후 운영 migration·Edge·hosted smoke
 
 로컬 fresh 26 migrations, DB/RLS 627건(조회 39 + 실제 command 실패/원자성 13), Edge 87건,
 application 122건, Python 34건 및 generated client 재생성 content 동일성을 확인했다.
 동시성·DB lint PASS, local Security Advisor WARN/ERROR 0이며 기존 RPC-only INFO 2건을 유지한다.
-GitHub exact-head CI와 GPT 독립 검토는 PR에서 별도로 확인하며 로컬 통과를 병합 허가로 해석하지 않는다.
+승인 head와 병합 결과의 tree는 `18353afd22d9e5edce11bce8bb7a66a282a8e811`로 동일하다.
+위임 승인 기록은 PR #74 comment `5584063601`이다. 점수·독립 리뷰·CI·병합을 구분해 기록한다.
 
 기존 25개 migration은 불변이며 append-only migration으로 정합화한다. API 수는 기존
 51 paths / 56 operations를 유지한다. production 39 paths / 43 operations 및 운영 snapshot은
-변경하지 않는다. #4가 검토·병합되기 전 #7A 구현을 시작하지 않는다.
+변경하지 않는다. #4 선행 gate 완료 후 #7A를 별도 feature에서 시작한다.
 
 별도 발견 #73: planned target이 있는 예약 객실 변경은 기존 즉시 FK 때문에 실패한다.
 이는 #4 변경과 무관한 기존 예약 기능 문제로 분리했으며 이번 PR에서 고치지 않는다.
 실제 command 테스트는 notify/unassign 이후 객실 변경의 실패·원자적 무변경을 확인하고,
 snapshot의 이동 후 비노출은 별도 합성 DB/Edge 회귀로 검증한다. 실제 객실 변경 성공
 smoke로 표현하지 않는다. 향후 #73 수정 뒤에도 과거 통보 snapshot을 보존해야 한다.
+
+### #7A Attempt Execution Core — feature 구현, 최종 source gate 검증 중
+
+기준 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에서 별도 feature를 만들었다.
+source OpenAPI는 **54 paths / 59 operations**이며 production은 계속 **39 / 43**이다.
+신규 append-only `20260908110343_attempt_execution_core.sql`은 27번째 source migration이다.
+기존 26개 migration은 불변이고 production 19개 history는 변경하지 않았다.
+
+| Method / Path | 권한 | DB/RPC | Fastify | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|
+| `GET /v1/attempts/current?assignmentId=...` | active maid self/current notified | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `POST /v1/attempts/{attemptId}/start` | active maid self | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `POST /v1/attempts/{attemptId}/complete-field-work` | active maid self | ✅ | ❌ | ✅ | ❌ | ❌ |
+
+- [x] execution version CAS/scoped request-hash receipt/서버 시각 start·물리 완료 구현
+- [x] latest actor/session/password/own current notified identity 및 start source·점유 검증
+- [x] maid in_progress 최대1 / 자정·마감·정상 checkout 후 물리 완료 / 사진 전제 없음
+- [x] #7B 전 진행 maid 일반 role/status 변경 거부 / audit 원자성 / safe projection
+- [x] 최종 로컬: Edge 95건, application 123건, fresh 27 migrations / DB·RLS 695건, 전체 concurrency, Python 34건·ruff/format/mypy/package/generated contract PASS
+- [ ] exact-head GitHub application / migration PASS
+- [ ] exact-head 독립 QA P0/P1=0 및 Codex 위임 승인 평가 90점 이상
+- [ ] feature PR `dev` 병합
+- [ ] release/main 이후 별도 production migration·Edge·hosted smoke
+
+target coarse `in_progress`를 실제 현장 수행중으로 해석하지 않는다. current attempt의 status와
+fieldCompletedAt/endedAt이 물리 완료 정본이다. field_completed만으로 사진 업로드·submission·
+검수·ready·earning을 생성하지 않는다. #7B 인계/capability, #7C offline/lease, #73 FK 수정은
+포함하지 않는다. [상세 실행 계약](./ATTEMPT_EXECUTION_CORE.md)을 따른다.
+DB lint 오류 0, local Security Advisor WARN/ERROR 0이며 기존 RPC-only INFO 2건은 유지된다.
+운영 DB/hosted 테스트는 실행하지 않았다. GitHub required CI와 exact-head 최종 승인은 별도 gate다.
 
 ## 13. 아직 개발하지 않은 후속 API 영역
 
@@ -458,8 +489,8 @@ smoke로 표현하지 않는다. 향후 #73 수정 뒤에도 과거 통보 snaps
 | [x] | 시작 전 재배정·취소 요청·관리자 결정 | source/dev 완료 | #27 | production 미승격 |
 | [x] | 오늘/내일 activation·rollover | source/dev 완료 | #28 | production 미승격 |
 | [x] | 배정 preview algorithm | source/dev 완료 | #29 | production 미승격 |
-| [ ] | maid notified-only 조회 정합화 | feature 구현/검증 중 | #4 | 독립 검토·명시적 병합 대기 |
-| [ ] | 현장 수행·offline lease·handover/conflict | 정책 승인 / 미개발 | #7 | #4 병합 → #7A → #7B → #7C |
+| [x] | maid notified-only 조회 정합화 | source/dev 완료 | #4 / PR #74 | production 미승격 |
+| [ ] | 현장 수행·offline lease·handover/conflict | #7A 구현·검증 중 / #7B·C 미개발 | #7 | #4 완료 → #7A → #7B → #7C |
 | [ ] | 사진 template/slot snapshot·submission version | 미개발 | #30 | 사진 전 단계 |
 | [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미개발 | #9 | Drive only / <=300KiB |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
@@ -534,13 +565,15 @@ production completeness 기준의 정본 순서다.
 22. [x] **#27 Pre-start Change source gate** — `dev@b529614`; 운영 미적용
 23. [x] **#28 Attempt Activation source gate** — PR #71 `dev` 병합; 운영 미적용
 24. [x] **#29 Assignment Preview source gate** — PR #72 `dev` 병합; 운영 미적용
-25. [ ] **#4 notified-only 조회 정합화** — feature → 검증 → GPT exact-head 검토 → 명시적 병합 허가
-26. [ ] **#7A → #7B → #7C → #30 → #9 → #31** — 승인된 다음 Critical Path, 아직 구현하지 않음
+25. [x] **#4 notified-only 조회 정합화** — PR #74 독립 리뷰·CI·Codex 위임 승인 → `dev@7bdc2a3` 병합
+26. [ ] **#7A → #7B → #7C → #30 → #9 → #31** — 현재 #7A 구현·검증 중, 나머지는 후속
 
 #10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
-#46 password replay, #69 Sheets PIN 트랙은 별도로 유지한다. 코드/CI PASS는 merge 허가가
-아니다. COMMENTED도 GPT 검토 기록으로 인정하되 exact head 변경 시 재검토하며 명시적
-병합 허가 전 merge하지 않는다.
+#46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.
+최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고
+Codex 평가가 90/100 이상이면 source/dev 병합을 승인할 수 있다. 미달/차단 시 리뷰를 남기고
+사용자 승인을 요청한다. exact head 변경 시 재검토한다. production/main/release 권한은
+포함하지 않는다. 상세 기준은 [개발 오케스트레이션](./DEVELOPMENT_ORCHESTRATION.md)을 따른다.
 
 ## 16. 이 문서 갱신 규칙
 

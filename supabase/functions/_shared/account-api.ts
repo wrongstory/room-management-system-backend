@@ -272,6 +272,12 @@ function databaseError(
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
     [
+      "ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED",
+      409,
+      "ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED",
+      "진행 중인 수행을 먼저 완료하거나 관리자 중단·인계 절차로 처리해 주세요.",
+    ],
+    [
       "LAST_ACTIVE_ADMIN_REQUIRED",
       409,
       "LAST_ACTIVE_ADMIN_REQUIRED",
