@@ -66,8 +66,9 @@ assignment/attempt identity·revision·CAS·in_progress 상태 및 명시적 취
 Auth metadata update → DB → 실패 시 metadata 보상 순서를 유지한다. 따라서 역할 변경 거부를
 "Auth 호출 0회"로 표현하지 않는다. 실제 권한은 metadata가 아니라 최신 DB role을 따른다.
 
-#7B가 현재 한 건 마무리/즉시 인계와 제한 capability 전용 경로를 구현하기 전까지는 이 거부를
-UI에서 정상 업무 제한으로 표시한다. 일반 active guard를 완화하거나 우회 credential을 발급하지 않는다.
+#7B 전용 lifecycle 경로와 구분해 이 일반 계정 명령의 거부를 정상 업무 제한으로 표시한다.
+후속 feature 계약은 [Attempt Lifecycle](./ATTEMPT_LIFECYCLE.md)에 정의한다. 일반 active guard를
+완화하거나 우회 credential을 발급하지 않는다. #7A 완료가 #7B 구현·배포 완료를 뜻하지 않는다.
 
 ## 원자성·노출
 
@@ -88,8 +89,8 @@ raw before/after state, template/room snapshot, request hash, PIN, PII, auth/ses
 - #73: 기존 planned checkout 예약 객실 변경 FK 문제는 별도 후속이며 #7A에서 수정하지 않는다.
 - 기존 #28은 scheduled를 포함한 non-superseded attempt가 있으면 이월하지 않고 #27도 변경을
   거부한다. 따라서 활성화만 되고 시작하지 않은 scheduled가 마감/자정을 넘으면 start가
-  fail-closed되며 현재 관리자 해소 경로는 없다. #7B 사전 분석에서 별도 해소 정책을 확인해야
-  하며, 이번 #7A가 이를 자동 이월·취소·재활성화하거나 해결했다고 표현하지 않는다.
+  fail-closed된다. #7A 범위에는 관리자 해소 경로가 없었다. 2026-09-08 사용자 승인에 따른
+  #7B feature가 별도 관리자 만료 해소를 구현하며, 이를 #7A의 자동 처리로 소급해 표현하지 않는다.
 
 기존 dev26 migrations는 수정하지 않고 append-only migration을 추가한다. 운영 19 migrations,
 production OpenAPI 39 paths / 43 operations, main/recovery/Edge/Pages/Cron/tag는 이번 작업에서 변경하지 않는다.

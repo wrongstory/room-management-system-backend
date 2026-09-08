@@ -119,7 +119,10 @@ export function attemptDatabaseError(
   );
 }
 
-function projectAttempt(value: unknown, actor: EdgeActor): AttemptProjection {
+export function projectAttempt(
+  value: unknown,
+  actor: EdgeActor,
+): AttemptProjection {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw attemptDatabaseError(null);
   }

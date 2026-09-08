@@ -136,7 +136,20 @@ field_completed는 물리적 완료 선언, 필수사진은 submission gate라�
 일반 active/session guard를 완화하지 않으며, physical completion과 사진/submission/검수/ready는
 별도 축으로 유지합니다. 시간창·source·실제 점유는 시작 시 다시 검증하되 정상 시작 후 자정·마감·
 scheduled checkout만으로 물리 완료를 막지 않습니다. #7B 전 일반 계정 변경이 진행 업무를 고립시키지
-않도록 DB에서 거부하며 새로운 limited capability/Auth 방법은 만들지 않습니다.
+않도록 DB에서 거부하며 #7A 자체에는 limited capability/Auth 방법을 포함하지 않았습니다.
+
+### #7B 인계·제한 권한 경계 — feature 구현 중
+
+[Attempt Lifecycle](./ATTEMPT_LIFECYCLE.md)은 일반 active-only 인증/RLS와 별도로 기존 Auth
+session을 검증하는 limited 경로를 정의합니다. private grant와 revocation 원장은 불변이며
+2시간 실행/최대24시간 증빙 권한을 attempt·assignment revision·action에 묶습니다. 별도 로그인
+token을 발급하지 않고 만료·완료·인계·회수 뒤 권한을 복원하거나 다른 key로 TTL을 연장하지 않습니다.
+admin 전용 명령이 account lifecycle CAS, 실행 전이, 알림/outbox, 감사, receipt를 함께 commit합니다.
+일반 인계는 계정 비활성화와 구분하고 명시한 경우에만 이전 담당 계정을 제한 상태로 변경합니다.
+
+미착수 만료 scheduled는 관리자 명령으로 superseded 보존 후 다음날 재배정·재통보할 수 있습니다.
+진행 회차의 인계는 새 일정과 실제 source/점유/예약·접근창을 다시 검증합니다. reclean은 다른
+maid에게 이관하지 않습니다. #7C offline, 사진/PIN/제출 구현이나 production 활성화는 포함하지 않습니다.
 
 source/dev 승인·서브에이전트 독립 리뷰는 [오케스트레이션 기준](./DEVELOPMENT_ORCHESTRATION.md)을
 따릅니다. 점수 90점 이상도 운영 승격 권한을 뜻하지 않습니다.

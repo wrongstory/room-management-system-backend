@@ -58,7 +58,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@c68e65e49362d4fef0ec903d836818f54834d3b2` (#25~#29, #4 / PR #74 및 #7A / PR #75까지 source/dev 완료; production 미승격)
+- 개발 통합 source 기준: `dev@bcc74c0515624ce8c9f3dfd8e167cd8b1030454c` (#25~#29, #4 / PR #74, #7A / PR #75 및 상태 문서 PR #76까지 source/dev 완료; production 미승격)
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -481,10 +481,39 @@ DB lint 오류 0, local Security Advisor WARN/ERROR 0이며 기존 RPC-only INFO
 승인 head와 병합 결과의 tree는 `cc971a2217e7985767782b0da5670ba1380bd8d6`로 동일하다.
 독립 QA·required CI·Codex 점수·병합 증거를 별도로 기록하며 운영 DB/hosted 테스트는 실행하지 않았다.
 
-후속 #7B/#7C는 아직 미구현이다. 미착수 `scheduled` attempt의 만료·해소 정책은 #7B
-사전분석에서 기존 #27/#28 경계와 함께 확인해야 한다. 자동 종료·취소·이월 또는 관리자
-해소 동작 중 어느 것도 여기서 새 확정 정책으로 채택하지 않는다.
-만료된 `in_progress` 인계 시 새 접근·마감 revision 허용 여부도 미확정 정책 확인 대상이며, 새 maid의 start 시간/source/점유 검증을 우회하는 방안으로 취급하지 않는다.
+### #7B Attempt Lifecycle — 로컬 구현·검증 완료, source gate 대기
+
+2026-09-08 사용자 승인으로 미착수 만료 `scheduled`의 superseded 보존·다음날 재배정과
+만료 `in_progress`의 명시적 새 인계 일정 정책을 확정했다. 현재 통합 기준에서 분기한
+`codex/7b-handover-limited-capability`에서 구현한다. 정확한 계약은
+[Attempt Lifecycle](./ATTEMPT_LIFECYCLE.md)을 따른다.
+
+feature OpenAPI는 **58 paths / 63 operations**이며 아래 4개 operation을 추가한다.
+이는 feature source 상태이며 production OpenAPI는 계속 **39 / 43**이다.
+
+| Method / Path | 권한 | DB/RPC | Fastify | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|
+| `GET /v1/attempts/lifecycle-impact?assignmentId=...` | active business admin | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `POST /v1/attempts/{attemptId}/lifecycle` | active business admin | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `GET /v1/limited/attempts/{attemptId}?assignmentRevision=...` | own maid + live capability/session | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `POST /v1/limited/attempts/{attemptId}/complete-field-work` | own maid + finish_current/session | ✅ | ❌ | ✅ | ❌ | ❌ |
+
+일반 Auth active-only/RLS는 유지하며 기존 session과 회차·revision·action에 묶인 DB capability를
+전용 limited 경로에서 확인한다. 2시간 execution 및 최대24시간 evidence/submission grant는
+발급 시각·만료가 불변이다. 별도 로그인 credential이나 실제 사진/제출 API를 추가하지 않는다.
+인계 시 새 담당의 실제 source·점유·예약·현재 실행창을 재검증하고 reclean 원 maid 제약을 유지한다.
+
+- [x] 미착수 만료 해소·만료 진행 회차의 새 인계 일정 정책 승인
+- [x] lifecycle/limited RPC·Edge·OpenAPI 및 DB/RLS/경쟁 회귀 완료
+- [x] 로컬 전체 Edge 104 / application 123 / fresh 28 migrations / DB·RLS 806(22 files, 신규111) / 전체 concurrency / Python 35 및 ruff·format·mypy·generated/package 검증 PASS
+- [x] DB lint 오류0, local Security Advisor WARN/ERROR0; 기본 거부 RPC-only INFO5(기존2+신규private3)
+- [ ] exact-head independent QA P0/P1=0 및 required CI PASS
+- [ ] 사용자 위임 기준 Codex 90점 이상 source 승인
+- [ ] feature → dev 병합
+- [ ] release/main 이후 production migration·Edge·역할별 hosted smoke
+
+#7C offline lease/replay/quarantine는 미구현이다. 이번 feature 진행 상태를 dev 완료 또는
+production 사용 가능으로 표시하지 않는다. production DB/Edge/Pages 변경은 없다.
 
 ## 13. 아직 개발하지 않은 후속 API 영역
 
@@ -499,7 +528,8 @@ DB lint 오류 0, local Security Advisor WARN/ERROR 0이며 기존 RPC-only INFO
 | [x] | 배정 preview algorithm | source/dev 완료 | #29 | production 미승격 |
 | [x] | maid notified-only 조회 정합화 | source/dev 완료 | #4 / PR #74 | production 미승격 |
 | [x] | 온라인 현장 시작·물리 완료 | #7A source/dev 완료 | #7 / PR #75 | production 미승격; 사진·submission·ready와 별도 |
-| [ ] | handover/capability·offline lease/conflict | #7B·C 미개발 | #7 | #7B 사전분석 → #7B → #7C; 미착수 scheduled 만료·해소 정책 확인 필요 |
+| [ ] | handover/capability | #7B 로컬 구현·검증 완료 | #7 | exact-head CI/독립 승인·dev 및 production gate 미완료 |
+| [ ] | offline lease/conflict | #7C 미개발 | #7 | #7B source/dev gate 이후 |
 | [ ] | 사진 template/slot snapshot·submission version | 미개발 | #30 | 사진 전 단계 |
 | [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미개발 | #9 | Drive only / <=300KiB |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
@@ -576,7 +606,7 @@ production completeness 기준의 정본 순서다.
 24. [x] **#29 Assignment Preview source gate** — PR #72 `dev` 병합; 운영 미적용
 25. [x] **#4 notified-only 조회 정합화** — PR #74 독립 리뷰·CI·Codex 위임 승인 → `dev@7bdc2a3` 병합
 26. [x] **#7A Attempt Execution Core source gate** — PR #75 독립 QA·required CI·Codex 96/100 승인 → `dev@c68e65e` 병합; 운영 미적용
-27. [ ] **#7B → #7C → #30 → #9 → #31** — 현재 #7B 사전분석 단계, 모두 미구현; 미착수 scheduled 만료·해소 정책 확인 필요
+27. [ ] **#7B → #7C → #30 → #9 → #31** — #7B 로컬 구현·검증 완료, exact-head source gate 대기; #7C 이후 미구현
 
 #10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
 #46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.

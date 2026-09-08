@@ -19,6 +19,7 @@ export type AuthorizationDeniedCode =
   | "ADMIN_REQUIRED"
   | "ASSIGNMENT_ACCESS_REQUIRED"
   | "ATTEMPT_ACCESS_REQUIRED"
+  | "CAPABILITY_ACCESS_REQUIRED"
   | "AVAILABILITY_ACCESS_REQUIRED"
   | "DEVELOPER_REQUIRED"
   | "MAID_REQUIRED"
@@ -29,6 +30,7 @@ const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
   "ADMIN_REQUIRED",
   "ASSIGNMENT_ACCESS_REQUIRED",
   "ATTEMPT_ACCESS_REQUIRED",
+  "CAPABILITY_ACCESS_REQUIRED",
   "AVAILABILITY_ACCESS_REQUIRED",
   "DEVELOPER_REQUIRED",
   "MAID_REQUIRED",
@@ -65,7 +67,9 @@ export function authorizationSourceForPath(
   if (path.startsWith("/v1/reservations")) {
     return "edge.authorization.reservations";
   }
-  if (path.startsWith("/v1/attempts/")) {
+  if (
+    path.startsWith("/v1/attempts/") || path.startsWith("/v1/limited/attempts/")
+  ) {
     return "edge.authorization.attempts";
   }
   if (path.startsWith("/v1/rooms")) {
