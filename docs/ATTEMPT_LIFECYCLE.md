@@ -1,7 +1,8 @@
 # #7B — 인계·비활성화 제한 권한
 
-기준 source: `dev@bcc74c0515624ce8c9f3dfd8e167cd8b1030454c`.
-이 문서는 #7B feature 구현 계약이며 완료/배포 선언이 아니다. 실제 gate는
+개발 시작 기준: `dev@bcc74c0515624ce8c9f3dfd8e167cd8b1030454c`.
+현재 통합 source: `dev@5882509afed6faf31f5e9d7775a163e19954c4c2` (PR #77 squash 병합).
+이 문서는 #7B source/dev 완료 계약이며 production 배포 선언이 아니다. 실제 gate는
 `API_STATUS_MATRIX.md`와 해당 exact-head PR evidence를 따른다.
 
 ## 승인 범위
@@ -105,8 +106,14 @@ PIN, guest PII, 전화번호, raw request/body/error, request hash를 감사 공
 - [x] 만료 해소·새 인계 일정 source/점유 검증 실패 시 전체 rollback
 - [x] 감사 safe summary / bounded denial / OpenAPI / Python generated contract
 - [x] fresh migration/DB/RLS/concurrency/lint/advisor 및 Edge/application/Python
-- [ ] exact-head independent QA P0/P1=0, required CI PASS, 위임 평가90점 이상
-- [ ] dev source 병합 (production 승격과 별도)
+- [x] exact-head independent QA P0/P1=0 — `037bc0652de8d9af1449249cbc3ee4a8f3e6cca9`
+- [x] required CI `application` / `migration` PASS — run `34231187656`
+- [x] 사용자 위임 기준 Codex 96/100 및 source/dev 승인
+- [x] PR #77 dev squash 병합 — `5882509afed6faf31f5e9d7775a163e19954c4c2` (production 승격과 별도)
+
+승인 head와 병합 결과의 tree는 `1add0ec8668513ece4acc8f9d09b9509e91e2145`로 동일하다.
+다음 #7C offline lease/replay/quarantine/resolution은 착수 준비 단계이며 아직 미구현이다.
+독립 QA·CI·위임 승인·dev 병합 완료를 production 활성화 완료로 해석하지 않는다.
 
 기존 27개 migration은 수정하지 않는다. production/recovery/main/release/Edge/Pages/Cron/Vault,
 secret/tag/GitHub Release는 별도 승인 전 변경하지 않는다.
