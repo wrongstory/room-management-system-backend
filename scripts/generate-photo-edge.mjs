@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { gzipSync } from 'node:zlib';
+import { canonicalPhotoGzip } from './photo-gzip.mjs';
 
 // Formatting is part of generation, so Deno's independent formatting gate cannot create drift.
 const denoImage = 'denoland/deno:2.1.4@sha256:3bf75873714baa410dcf7fabaf76d806d20f0ac8a7579df11577b4ed97416e34';
@@ -57,8 +57,8 @@ if (check) { if (await readFile(wrapperPath, 'utf8') !== wrapper) throw new Erro
 else await writeFile(wrapperPath, wrapper);
 const wasm = await readFile(new URL('dist/x86/magick.wasm', packageRoot));
 if (wasm.length !== 14828458 || createHash('sha256').update(wasm).digest('hex') !== '5a4ed1017eda113144c86ae839c22c610afebcfebfa22b1da18e00e98d78b0f7') throw new Error('Pinned WASM checksum mismatch');
-const compressed = gzipSync(wasm, { level: 9 });
-if (compressed.length !== 5269861 || createHash('sha256').update(compressed).digest('hex') !== '3db9e49639227093b44c633703c1985673d73a0910b2bd1ab54f4a09783dd091') throw new Error('Pinned compressed WASM checksum mismatch');
+const compressed = canonicalPhotoGzip(wasm);
+if (compressed.length !== 5269861 || createHash('sha256').update(compressed).digest('hex') !== '0ec87668655bced27afa7b39764f188fe16dc947d4fb37ea10e822112867121c') throw new Error('Pinned compressed WASM checksum mismatch');
 const compressedPath = 'supabase/functions/api/assets/magick.wasm.gz';
 if (!check) await writeFile(compressedPath, compressed);
 if (!(await readFile(compressedPath)).equals(compressed)) throw new Error('Compressed WASM asset drift');

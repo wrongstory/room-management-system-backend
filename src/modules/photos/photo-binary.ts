@@ -14,7 +14,7 @@ export class PhotoError extends Error {
 /** Pinned local build artifact only: no CDN/network fallback, exact compressed and decoded checksums. */
 export async function initializeCompressedPhotoDecoder(compressed: Uint8Array): Promise<void> {
   const digest = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength))), x => x.toString(16).padStart(2, '0')).join('');
-  if (compressed.length !== 5269861 || await digest(compressed) !== '3db9e49639227093b44c633703c1985673d73a0910b2bd1ab54f4a09783dd091') throw new PhotoError(503, 'PHOTO_DECODER_UNAVAILABLE');
+  if (compressed.length !== 5269861 || await digest(compressed) !== '0ec87668655bced27afa7b39764f188fe16dc947d4fb37ea10e822112867121c') throw new PhotoError(503, 'PHOTO_DECODER_UNAVAILABLE');
   // A single bounded output buffer avoids Blob/Response concatenation and duplicate 15MB allocations at cold start.
   const stream = new ReadableStream<BufferSource>({ start(c) { c.enqueue(new Uint8Array(compressed.buffer as ArrayBuffer, compressed.byteOffset, compressed.byteLength)); c.close(); } }).pipeThrough(new DecompressionStream('gzip'));
   const reader = stream.getReader(), bytes = new Uint8Array(14828458); let offset = 0;

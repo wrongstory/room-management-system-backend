@@ -40,7 +40,7 @@ export async function initializeCompressedPhotoDecoder(
   if (
     compressed.length !== 5269861 ||
     await digest(compressed) !==
-      "3db9e49639227093b44c633703c1985673d73a0910b2bd1ab54f4a09783dd091"
+      "0ec87668655bced27afa7b39764f188fe16dc947d4fb37ea10e822112867121c"
   ) throw new PhotoError(503, "PHOTO_DECODER_UNAVAILABLE");
   // A single bounded output buffer avoids Blob/Response concatenation and duplicate 15MB allocations at cold start.
   const stream = new ReadableStream<BufferSource>({
