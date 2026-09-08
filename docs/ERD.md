@@ -265,7 +265,7 @@ erDiagram
 ```mermaid
 erDiagram
   ROOM_TYPES ||--o{ CLEANING_TEMPLATE_VERSIONS : "타입별 버전"
-  CLEANING_TEMPLATE_VERSIONS ||--o{ CLEANING_PHOTO_SLOTS : "고정 슬롯"
+  CLEANING_TEMPLATE_VERSIONS ||--o{ PHOTO_TEMPLATE_SLOTS : "private 고정 슬롯"
   ROOMS ||--o{ CLEANING_TARGETS : "청소 원장"
   RESERVATIONS ||--o{ CLEANING_TARGETS : "예약 기반"
   CLEANING_TARGETS ||--o{ CLEANING_ASSIGNMENTS : "revision 이력"
@@ -273,8 +273,7 @@ erDiagram
   CLEANING_TARGETS ||--o{ CLEANING_ATTEMPTS : "수행 회차"
   CLEANING_ASSIGNMENTS ||--o{ CLEANING_ATTEMPTS : "통보 근거"
   CLEANING_ATTEMPTS ||--o{ CLEANING_SUBMISSIONS : "제출 버전"
-  CLEANING_SUBMISSIONS ||--o{ SUBMISSION_PHOTOS : "사진 슬롯 결과"
-  CLEANING_PHOTO_SLOTS ||--o{ SUBMISSION_PHOTOS : "슬롯 계약"
+  CLEANING_SUBMISSIONS ||--o{ SUBMISSION_PHOTOS : "기존 provider 모델, #30 증빙 정본 아님"
   CLEANING_SUBMISSIONS ||--o| BOMB_ROOM_REPORTS : "폭탄방 신고"
   CLEANING_SUBMISSIONS ||--o| INSPECTION_DECISIONS : "승인·반려"
   ROOM_ISSUES ||--o{ CLEANING_SUBMISSIONS : "제출 스냅샷 참조"
@@ -286,12 +285,13 @@ erDiagram
     int version
     text status
   }
-  CLEANING_PHOTO_SLOTS {
+  PHOTO_TEMPLATE_SLOTS {
     uuid id PK
     uuid template_version_id FK
     text slot_key
     int display_order
     boolean required
+    jsonb slot_snapshot
   }
   CLEANING_TARGETS {
     uuid id PK
@@ -385,7 +385,36 @@ erDiagram
 - 제출은 `client_submission_id`로 멱등 처리하며, 수행 회차별 현재 제출은 한 건이다.
 - 사진 파일은 비공개 Google Drive 폴더에만 저장하고 DB에는 Drive 파일 ID·해시·크기·삭제예정일·삭제 결과만 둔다.
 - `purge_after`는 서버가 `uploaded_at + 7일`로 강제하며, 삭제 작업이 Drive 파일을 영구삭제한 뒤 `purged_at`을 기록한다.
-- 제출 당시 템플릿과 슬롯을 스냅샷으로 고정해 이후 템플릿 변경이 과거 검수에 소급되지 않게 한다.
+- 템플릿과 슬롯은 **target 생성 시** 고정하고 attempt가 같은 계약을 사용한다. 제출에서는 그 슬롯의 특정 사진 버전 연결만 봉인하여 이후 교체가 과거 검수에 소급되지 않게 한다.
+
+### #30 사진 슬롯·제출 버전 모델
+
+```mermaid
+erDiagram
+  CLEANING_TARGETS ||--|| TARGET_PHOTO_SNAPSHOT_CONTRACTS : "불변 JSON bridge"
+  TARGET_PHOTO_SNAPSHOT_CONTRACTS ||--o{ TARGET_PHOTO_SLOT_SNAPSHOTS : "ready일 때 정확한 전체 집합"
+  CLEANING_ATTEMPTS ||--o{ ATTEMPT_PHOTO_VERSIONS : "회차별 불변 메타데이터"
+  TARGET_PHOTO_SLOT_SNAPSHOTS ||--o{ ATTEMPT_PHOTO_VERSIONS : "attempt와 같은 target 복합 FK"
+  ATTEMPT_PHOTO_VERSIONS ||--o| ATTEMPT_PHOTO_PURGE_STATES : "원본 삭제 확인, 시간 재설정 없음"
+  CLEANING_ATTEMPTS ||--o{ ATTEMPT_PHOTO_CURRENT : "회차 + 슬롯 CAS"
+  ATTEMPT_PHOTO_VERSIONS ||--o{ ATTEMPT_PHOTO_CURRENT : "null은 비움"
+  ATTEMPT_PHOTO_VERSIONS ||--o{ ATTEMPT_PHOTO_CHANGES : "교체·비움 이력"
+  CLEANING_SUBMISSIONS ||--o{ SUBMISSION_PHOTO_BINDINGS : "특정 photo version 불변 연결"
+  ATTEMPT_PHOTO_VERSIONS ||--o{ SUBMISSION_PHOTO_BINDINGS : "파일 복제 없음"
+  CLEANING_SUBMISSIONS ||--o| SUBMISSION_PHOTO_BINDING_SETS : "전체 연결 집합 봉인"
+  SUBMISSION_PHOTO_BINDING_SETS ||--o| SUBMISSION_CURRENT_POINTERS : "attempt별 CAS 정본"
+```
+
+- 새 사진 모델 10개 테이블은 모두 `private` + RLS이며 `PUBLIC/anon/authenticated/service_role`의 읽기·직접 DML 권한이 없다. 모델 helper도 owner-only다. #9/#31의 세션·실제 파일 검증 경로가 생기기 전 사진/제출 HTTP는 추가하지 않는다.
+- 기존 `cleaning_template_versions.photo_slots`, `cleaning_targets.template_snapshot`, `cleaning_attempts.template_snapshot`은 제거하지 않는다. 새 슬롯 row는 `slot_snapshot`에 구역·이름·설명·반복 인스턴스를 포함한 정확한 원본 객체를 보존하고, 식별자·필수 여부·표시 순서는 정규화 컬럼으로 검증한다.
+- 기존 v1 `[]` 또는 복원 근거가 없는 JSON은 `ready=false`다. 이 때문에 기존 예약/배정/물리적 완료가 막히지는 않지만 사진 완전성·제출 연결은 실패한다. 최신 템플릿으로 보간하거나 사진 0장을 완료로 인정하지 않는다. v6 명시 슬롯에는 v7 `tv-on`이나 개수를 소급하지 않는다.
+- 새 v7+ checkout 템플릿은 타입별 10/11/13/15개, 그중 선택 1개와 필수 `tv-on` 정확히 1개를 검증한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
+- 증빙 identity는 `(cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)`이다. 구 담당자의 interrupted 사진과 새 담당자의 사진은 같은 target slot을 쓰더라도 서로 다른 current pointer를 가진다. NULL/다른 target/다른 attempt 연결은 복합 FK로 거부한다.
+- `attempt_photo_versions`는 불변이다. `uploaded_at + 168시간` 만료는 교체·재제출·retry로 연장하지 않으며, 실제 provider 삭제 확인은 별도 append-only purge marker로 관리한다. #30에서 bytes/Drive 업로드나 삭제를 실제 수행하지 않는다.
+- 필수 슬롯이 전부 verified·미만료·미삭제 사진을 가져야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. frozen JSON과 normalized 슬롯의 전체 집합도 다시 대조한다.
+- `cleaning_submissions`가 계속 제출 버전 정본이다. 미소비 제출도 identity/manifest/업무 snapshot/제출자·시각은 수정·삭제할 수 없고 `status/superseded_at`만 기존 lifecycle projection으로 남긴다. `submission_photo_binding_sets`는 정본을 복제하는 제출 테이블이 아니라 연결 봉인 marker다.
+- 봉인 시 현재 photo set과 양방향 동일성을 검증하고, 이후 membership INSERT/UPDATE/DELETE를 금지한다. 사진 교체와 연결은 같은 attempt lock에서 직렬화한다. current pointer는 CAS로 바뀌지만 과거 제출의 특정 photo version은 유지된다.
+- 이 단계는 이미 존재하는 제출의 모델 연결을 검증할 뿐 business 전체제출·검수·room ready·수익·알림 명령을 실행하지 않는다. canonical `cleaning_submissions` 및 legacy `submission_photos`에 대한 service-role raw DML도 차단한다. legacy manifest/default `uploaded`만으로 verified 증빙을 만들지 않는다.
 
 ### #27 시작 전 취소 요청 원장
 
