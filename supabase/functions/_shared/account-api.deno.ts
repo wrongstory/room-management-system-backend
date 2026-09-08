@@ -1,5 +1,6 @@
 import {
   changeAccountRole,
+  changeAccountStatus,
   changePassword,
   createAccount,
   listAccounts,
@@ -547,4 +548,62 @@ Deno.test("failed Auth role rollback reports an explicit inconsistent state", as
     "rollback failure code",
   );
   assertEquals(updateCount, 2, "Auth update and rollback attempts");
+});
+
+Deno.test("in-progress account status fails before Auth, role preserves existing metadata compensation", async () => {
+  const updates: unknown[] = [];
+  const clients = {
+    admin: {
+      from: () => queryResult({ ...profile, role: "maid" }),
+      rpc: () =>
+        Promise.resolve({
+          data: null,
+          error: { message: "ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED" },
+        }),
+      auth: {
+        admin: {
+          updateUserById: (_id: string, change: unknown) => {
+            updates.push(change);
+            return Promise.resolve({ data: null, error: null });
+          },
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+  const status = await captureEdgeError(() =>
+    changeAccountStatus(
+      request({ status: "inactive", reasonCode: "ADMIN_REQUEST" }),
+      clients,
+      developer,
+      profile.id,
+    )
+  );
+  assert(
+    status.status === 409 &&
+      status.code === "ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED",
+    "stable execution lifecycle guard",
+  );
+  assertEquals(updates.length, 0, "DB rejection must not ban Auth");
+  const role = await captureEdgeError(() =>
+    changeAccountRole(
+      request({ role: "admin" }),
+      clients,
+      developer,
+      profile.id,
+    )
+  );
+  assertEquals(
+    role.code,
+    "ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED",
+    "role transition guard",
+  );
+  assertEquals(
+    updates.length,
+    2,
+    "existing role metadata update plus compensation retained",
+  );
+  assert(
+    JSON.stringify(updates[1]).includes('"role":"maid"'),
+    "metadata compensated to existing maid",
+  );
 });

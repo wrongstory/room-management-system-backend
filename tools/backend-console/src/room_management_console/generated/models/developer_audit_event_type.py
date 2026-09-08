@@ -22,6 +22,8 @@ class DeveloperAuditEventType(str, Enum):
     AVAILABILITY_CHANGE_DECIDED = "availability.change_decided"
     AVAILABILITY_CHANGE_REQUESTED = "availability.change_requested"
     AVAILABILITY_SUBMITTED = "availability.submitted"
+    CLEANING_ATTEMPT_STARTED = "cleaning.attempt_started"
+    CLEANING_FIELD_COMPLETED = "cleaning.field_completed"
     CLEANING_MANUAL_REQUEST_CANCELLED = "cleaning.manual_request.cancelled"
     CLEANING_MANUAL_REQUEST_CREATED = "cleaning.manual_request.created"
     RESERVATION_CANCELLED = "reservation.cancelled"

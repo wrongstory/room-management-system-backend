@@ -182,6 +182,9 @@ export function assertIdempotentAccountCreation(
 
 function databaseError(error: { code?: string; message?: string } | null): AppError {
   const message = error?.message ?? '';
+  if (message.includes('ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED')) {
+    return new AppError(409, 'ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED', '진행 중인 수행을 먼저 완료하거나 관리자 중단·인계 절차로 처리해 주세요.');
+  }
   if (message.includes('LAST_ACTIVE_ADMIN_REQUIRED')) {
     return new AppError(409, 'LAST_ACTIVE_ADMIN_REQUIRED', '마지막 활성 관리자 계정은 변경할 수 없습니다.');
   }

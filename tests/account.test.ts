@@ -244,6 +244,21 @@ describe('account input normalization', () => {
     );
   });
 
+  it('rejects in-progress maid deactivation before Auth and compensates the existing role metadata path', async () => {
+    const profile = { ...activeAdminProfile, role: 'maid' as const };
+    const harness = accountStatusHarness({ data: null, error: { message: 'ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED' } }, null, profile);
+    await expect(harness.service.changeStatus(actor, {
+      targetProfileId: profile.id, status: 'inactive', reasonCode: 'ADMIN_REQUEST', idempotencyKey: 'execution-status-blocked-1'
+    })).rejects.toMatchObject({ code: 'ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED', statusCode: 409 });
+    expect(harness.callOrder).toEqual(['database']);
+    expect(harness.updateUserById).not.toHaveBeenCalled();
+    await expect(harness.service.changeRole(actor, {
+      targetProfileId: profile.id, role: 'admin', idempotencyKey: 'execution-role-blocked-1'
+    })).rejects.toMatchObject({ code: 'ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED', statusCode: 409 });
+    expect(harness.callOrder).toEqual(['database', 'auth', 'database', 'auth']);
+    expect(harness.updateUserById).toHaveBeenLastCalledWith(profile.auth_user_id, { app_metadata: { profile_id: profile.id, role: 'maid' } });
+  });
+
   it('rejects developer role mutation before touching Auth or DB', async () => {
     const developerProfile = {
       ...activeAdminProfile,

@@ -57,3 +57,8 @@ uv run --python 3.12 python scripts/generate_client.py
 safe audit summary를 생성 모델에 추가한다. Developer 콘솔의 filtered OpenAPI는 기존
 auth/accounts/developer 경계만 유지하며 admin용 preview/정책 확정 기능을 추가하지 않는다.
 Preview 계산 자체는 감사 event를 만들지 않는다. source 모델 생성과 production API 배포는 별도다.
+
+#7A source는 `cleaning.attempt_started`/`cleaning.field_completed`와 실행 version·서버 시각의
+safe audit summary를 생성 모델에 추가한다. field_completed는 물리 완료이며 검수 승인/수익과
+별개다. filtered OpenAPI는 Auth/Accounts/Developer 기존 15 operations만 유지하고 maid의
+start/complete API를 콘솔에 추가하지 않는다. PIN/PII/raw state/request hash는 포함하지 않는다.

@@ -522,6 +522,7 @@ Table public.cleaning_attempts {
   attempt_number int [not null]
   status attempt_status [not null]
   assignment_revision bigint [not null]
+  execution_version bigint [not null, default: 1, note: '#7A positive CAS version; start/complete increments once, retry does not increment']
   started_at timestamptz
   field_completed_at timestamptz
   ended_at timestamptz
@@ -534,7 +535,7 @@ Table public.cleaning_attempts {
   Indexes {
     (cleaning_target_id, attempt_number) [unique]
   }
-  Note: '#28 creates scheduled attempts exactly once from the current notified assignment after KST date, access, source, checkout materialization, active-maid and prior-room-workflow checks. Target/assignment/maid/revision/template/room snapshots are immutable; actual in_progress start belongs to #7.'
+  Note: '#28 activates scheduled once. #7A exact own active maid starts/completes via scoped receipt, execution CAS and atomic safe audit. One in_progress per maid. Field completion does not approve cleaning/readiness or create a submission/earning. Target/assignment/maid/revision/template/room identity stays immutable. #7B/C remain separate.'
 }
 
 Table public.cleaning_submissions {

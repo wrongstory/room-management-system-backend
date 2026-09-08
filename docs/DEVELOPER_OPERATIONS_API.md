@@ -72,7 +72,7 @@ Issue #58에서 현재 성공 mutation의 append 지점을 전수 확인했다. 
 
 scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `reservation.scheduled_check_in`/`reservation.scheduled_checkout`으로 같은 domain 원장에 기록된다. scheduler 실행 상태 자체는 `private.scheduler_invocation_heartbeats`의 bounded 운영 projection이다. 현재 구현된 성공 mutation 중 audit append 누락은 발견되지 않았다. 후속 #52/#53은 이 event 이름과 공통 activity helper를 재사용하며 자유문 event/source를 추가하지 않는다.
 
-#29 source의 audit allowlist는 총 36개입니다. #27 pre-start 필드에
+#29 source의 audit allowlist는 총 36개였습니다. #27 pre-start 필드에
 `assignment.attempt_activated`와 `assignment.rolled_over`를 더하고, attempt/rollover summary는
 `cleaningTargetId/assignmentId/attemptId/maidProfileId/serviceDate/assignmentRevision/attemptNumber/targetAssignmentVersion/rolloverFromDate/rolloverToDate/carryoverCount/reasonCode`만 허용합니다.
 `reasonDetail`, `requestHash`, raw before/after state, notification body는 반환하지 않습니다. Python
@@ -84,6 +84,13 @@ summary는 `policyVersion/status/standardMinutes/premiumMinutes/oceanPremiumMinu
 여섯 필드만 허용하며 raw before/after state나 requestHash를 반환하지 않습니다. Preview 자체는
 조회·계산으로 audit를 쓰지 않습니다. Python filtered OpenAPI는 이 감사 enum/summary만 수용하며
 developer에게 배정 preview 또는 duration 확정 권한을 추가하지 않습니다.
+
+#7A source는 `cleaning.attempt_started`, `cleaning.field_completed`를 추가해 allowlist 총38개를
+사용합니다. 이 두 event는 본인 메이드의 온라인 실행 command가 성공한 경우만 기록합니다.
+요약은 attempt/target/assignment/maid 식별자, assignment/execution version, status와 실행·기록
+시각의 명시 allowlist입니다. raw state·room/template snapshot·request hash·사진·PIN·PII는
+반환하지 않습니다. `field_completed`는 물리 완료이며 검수 승인·수익 발생 event가 아닙니다.
+developer에게 청소 시작/완료 권한을 부여하지 않으며 Python 콘솔은 감사 조회 모델만 갱신합니다.
 
 ## 활동/보안 pagination
 
