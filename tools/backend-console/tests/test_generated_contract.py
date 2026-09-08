@@ -57,6 +57,14 @@ def test_phase_a_openapi_operations_are_generated() -> None:
     assert len(operations) == 16
 
 
+def test_photo_upload_and_original_read_are_not_developer_console_capabilities() -> None:
+    from room_management_console.generated import api
+
+    groups = {entry.name for entry in pkgutil.iter_modules(api.__path__)}
+    assert groups == {"accounts", "auth", "developer"}
+    assert {"photos", "attempts", "photo_uploads"}.isdisjoint(groups)
+
+
 def test_account_response_and_status_command_use_distinct_enums() -> None:
     assert {status.value for status in AccountStatus} == {
         "active",
@@ -257,3 +265,29 @@ def test_photo_upload_audit_generated_contract_has_safe_metadata_only() -> None:
         "purgeAfter": "2037-01-08T00:00:00+00:00",
     }
     assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary
+
+
+def test_drive_runtime_configuration_generated_contract_is_boolean_only() -> None:
+    from room_management_console.generated.models.developer_runtime_status_configuration import (
+        DeveloperRuntimeStatusConfiguration,
+    )
+
+    names = [
+        "ACCOUNT_PHONE_PEPPER",
+        "RESERVATION_PII_KEY_BASE64",
+        "RESERVATION_PII_KEY_VERSION",
+        "RESERVATION_PII_KEYRING_JSON",
+        "RESERVATION_GUEST_NAME_PEPPER",
+        "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
+        "SCHEDULER_INVOKE_SECRET",
+        "CORS_ORIGINS",
+        "GOOGLE_DRIVE_CLIENT_ID",
+        "GOOGLE_DRIVE_CLIENT_SECRET",
+        "GOOGLE_DRIVE_REFRESH_TOKEN",
+        "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+    ]
+    for configured in [False, True]:
+        sample = {name: {"configured": configured} for name in names}
+        result = DeveloperRuntimeStatusConfiguration.from_dict(sample).to_dict()
+        assert result == sample
+        assert all(set(value) == {"configured"} for value in result.values())

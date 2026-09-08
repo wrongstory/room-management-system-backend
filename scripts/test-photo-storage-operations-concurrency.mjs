@@ -165,13 +165,12 @@ export async function testPhotoStorageOperationsConcurrency(client) {
   `);
   const beforeRotating=actorCardinality();
   for(let batch=0;batch<20;batch+=1) {
-    const results=await Promise.all(Array.from({length:25},(_,index)=>client.rpc('begin_photo_upload',{
-      p_actor_profile_id:maid,p_session_id:session,p_attempt_id:same.attempt,p_assignment_id:same.assignment,
-      p_assignment_revision:2,p_target_slot_id:same.slot,p_expected_photo_revision:0,p_sha256:'a'.repeat(64),
-      p_mime_type:'image/jpeg',p_size_bytes:100,p_idempotency_key_digest:digest(`rotation-${same.attempt}-${batch}-${index}`),
-      p_request_hash:digest(same.attempt)
-    })));
-    assert(results.every((result)=>result.error?.message==='PHOTO_UPLOAD_IN_FLIGHT'), '500 rotating keys fail at the unfinished-slot gate');
+    // #84 revokes direct service EXECUTE. Preserve the #83 internal state-machine
+    // regression as owner-only local transactions, not a restored runtime bypass.
+    const results=await Promise.all(Array.from({length:25},(_,index)=>execute(
+      begin(same,`rotation-${same.attempt}-${batch}-${index}`),`photo83-${randomUUID()}`
+    )));
+    assert(results.every((result)=>!result.success&&result.reason==='PHOTO_UPLOAD_IN_FLIGHT'), '500 rotating keys fail at the unfinished-slot gate');
   }
   assert(actorCardinality()===beforeRotating, '500 distinct key denials append no operation/provider/state/event/rate row or bucket increment');
   unchanged(same,0,'reserved');

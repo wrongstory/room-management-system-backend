@@ -48,6 +48,48 @@ const noStoreHeader = {
 };
 
 const accountManagerRoles = ["developer", "admin"] as const;
+const photoPathId = (name: string) => ({
+  name,
+  in: "path",
+  required: true,
+  schema: { type: "string", format: "uuid" },
+});
+function photoOperation(
+  operationId: string,
+  summary: string,
+  schema: string,
+  roles: readonly string[] = ["maid"],
+) {
+  return {
+    tags: ["Photos"],
+    operationId,
+    summary,
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": roles,
+    responses: {
+      "200": {
+        description:
+          "최신 DB 권한과 상태를 검증한 안전한 결과. Drive ID·locator·OAuth·원문 hash는 반환하지 않습니다.",
+        headers: { "Cache-Control": noStoreHeader },
+        content: {
+          "application/json": {
+            schema: { $ref: `#/components/schemas/${schema}` },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "404": errorResponse,
+      "409": errorResponse,
+      "413": errorResponse,
+      "415": errorResponse,
+      "429": errorResponse,
+      "500": errorResponse,
+      "503": errorResponse,
+    },
+  };
+}
 
 function attemptMutationOperation(
   operationId: string,
@@ -259,6 +301,11 @@ export const openApiDocument = {
   servers: [{ url: ".", description: "현재 Edge api Function" }],
   tags: [
     {
+      name: "Photos",
+      description:
+        "서버가 bytes·형식·디코딩·EXIF 제거·최종 SHA를 검증하는 사진 업로드/상태/원본 proxy입니다. limited upload capability는 원본 조회 권한이 아닙니다. 저장 완료는 제출·검수·입실 준비 완료를 뜻하지 않습니다.",
+    },
+    {
       name: "System",
       description: "인증 없이 확인하는 Edge runtime·API 문서 상태입니다.",
     },
@@ -304,6 +351,136 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    "/v1/attempts/{attemptId}/photo-slots": {
+      get: {
+        ...photoOperation(
+          "getAttemptPhotoSlots",
+          "본인 회차의 사진 슬롯과 current revision 조회",
+          "AttemptPhotoSlots",
+        ),
+        parameters: [photoPathId("attemptId")],
+        description:
+          "업로드 전에 slotId와 currentRevision을 얻습니다. active maid의 본인 현재 회차 또는 해당 회차의 유효 upload_evidence capability만 허용합니다. 제한 계정/과거 인계 회차에는 photoId=null이며 원본 조회를 제공하지 않습니다. 슬롯 snapshot 미확정은 PHOTO_SLOT_INVALID로 차단하고 현재 template으로 추측하지 않습니다.",
+      },
+    },
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/upload": {
+      post: {
+        ...photoOperation(
+          "uploadAttemptPhoto",
+          "검증된 JPEG/WebP 사진을 슬롯에 업로드",
+          "PhotoUploadResponse",
+        ),
+        responses: {
+          ...photoOperation(
+            "uploadAttemptPhoto",
+            "사진 업로드",
+            "PhotoUploadResponse",
+          ).responses,
+          "408": {
+            ...errorResponse,
+            description:
+              "PHOTO_BODY_TIMEOUT: raw body 수신 제한시간 초과. 부분 본문은 업로드하지 않습니다.",
+          },
+        },
+        description:
+          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 원문 307200 bytes(300KiB)까지 허용하고 307201번째 byte에서 취소합니다. JPEG/WebP magic·전체 decode·단일 frame·자원상한을 검사하고 EXIF 등 metadata 제거 후 output decode/크기/SHA를 다시 검증합니다. assignmentId/assignmentRevision/expectedPhotoRevision의 3개 query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
+        parameters: [
+          photoPathId("attemptId"),
+          photoPathId("slotId"),
+          idempotencyHeader,
+          {
+            name: "assignmentId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "assignmentRevision",
+            in: "query",
+            required: true,
+            schema: {
+              type: "integer",
+              minimum: 1,
+              maximum: Number.MAX_SAFE_INTEGER - 1,
+            },
+          },
+          {
+            name: "expectedPhotoRevision",
+            in: "query",
+            required: true,
+            schema: {
+              type: "integer",
+              minimum: 0,
+              maximum: Number.MAX_SAFE_INTEGER - 1,
+            },
+            description:
+              "슬롯 조회의 currentRevision. 최초는0, 교체는 최신CAS revision.",
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "image/jpeg": {
+              schema: {
+                type: "string",
+                format: "binary",
+                maxLength: 307200,
+                "x-max-bytes": 307200,
+              },
+            },
+            "image/webp": {
+              schema: {
+                type: "string",
+                format: "binary",
+                maxLength: 307200,
+                "x-max-bytes": 307200,
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/photo-uploads/{operationId}": {
+      get: {
+        ...photoOperation(
+          "getPhotoUploadOperation",
+          "본인 업로드 작업의 안전한 상태 조회",
+          "PhotoUploadOperation",
+        ),
+        parameters: [photoPathId("operationId")],
+        description:
+          "본인 회차·현재 session·해당 업로드 capability를 DB에서 재검증합니다. Drive file ID/URL/claim digest는 노출하지 않습니다. accepted 결과도 현재 권한이 없으면 조회할 수 없으며 내부 reconciliation의 accepted 보존 판정과는 별도입니다.",
+      },
+    },
+    "/v1/photos/{photoId}/content": {
+      get: {
+        ...photoOperation(
+          "getPhotoContent",
+          "권한을 다시 확인한 사진 원본 proxy",
+          "PhotoUploadOperation",
+          ["admin", "maid"],
+        ),
+        parameters: [photoPathId("photoId")],
+        description:
+          "비밀번호 변경을 완료한 active business admin 또는 본인의 현재 유효 회차에 속한 active maid만 허용합니다. developer와 upload_only/deactivation_pending/과거 인계 회차의 원본 읽기는 금지합니다. provider bytes를 bounded download/SHA 검증한 뒤 응답 첫 byte 전에 session/ownership/7일 만료를 다시 확인합니다. redirect/Range/공개 URL은 지원하지 않으며 Cache-Control:no-store, nosniff, 서버 고정 filename만 반환합니다.",
+        responses: {
+          ...photoOperation("unused", "unused", "PhotoUploadOperation")
+            .responses,
+          "200": {
+            description:
+              "검증 완료된 원본 JPEG/WebP. Drive 응답 header/Location/filename은 전달하지 않습니다.",
+            headers: {
+              "Cache-Control": noStoreHeader,
+              "X-Content-Type-Options": { schema: { const: "nosniff" } },
+            },
+            content: {
+              "image/jpeg": { schema: { type: "string", format: "binary" } },
+              "image/webp": { schema: { type: "string", format: "binary" } },
+            },
+          },
+        },
+      },
+    },
     "/health": {
       get: {
         tags: ["System"],
@@ -1934,6 +2111,134 @@ export const openApiDocument = {
       },
     },
     schemas: {
+      AttemptPhotoSlots: {
+        type: "object",
+        additionalProperties: false,
+        required: ["attemptId", "assignmentId", "assignmentRevision", "slots"],
+        properties: {
+          attemptId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          assignmentRevision: { type: "integer", minimum: 1 },
+          slots: {
+            type: "array",
+            maxItems: 100,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "slotId",
+                "slotKey",
+                "required",
+                "displayOrder",
+                "currentRevision",
+                "uploadStatus",
+                "photoId",
+              ],
+              properties: {
+                slotId: { type: "string", format: "uuid" },
+                slotKey: { type: "string", pattern: "^[a-z][a-z0-9-]{0,79}$" },
+                required: { type: "boolean" },
+                displayOrder: { type: "integer", minimum: 0, maximum: 99 },
+                currentRevision: { type: "integer", minimum: 0 },
+                uploadStatus: {
+                  type: "string",
+                  enum: [
+                    "missing",
+                    "cleared",
+                    "verified",
+                    "pending",
+                    "failed",
+                    "purged",
+                    "expired",
+                  ],
+                },
+                photoId: {
+                  anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+                  description:
+                    "원본 읽기 권한이 있는 active 현재 회차+accepted+미만료 사진만 ID를 반환합니다. 업로드 전용 권한에는 null.",
+                },
+              },
+            },
+          },
+        },
+      },
+      PhotoUploadResponse: {
+        allOf: [
+          { $ref: "#/components/schemas/PhotoUploadOperation" },
+          { type: "object", required: ["quotaWarning"] },
+        ],
+        description:
+          "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
+      },
+      PhotoUploadOperation: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "operationId",
+          "objectId",
+          "attemptId",
+          "targetSlotId",
+          "status",
+          "leaseVersion",
+          "leaseExpiresAt",
+          "photoId",
+          "photoVersion",
+          "uploadedAt",
+          "purgeAfter",
+          "compensationAllowed",
+        ],
+        properties: {
+          operationId: { type: "string", format: "uuid" },
+          objectId: {
+            type: "string",
+            format: "uuid",
+            description: "앱 object UUID이며 Google Drive ID가 아닙니다.",
+          },
+          attemptId: { type: "string", format: "uuid" },
+          targetSlotId: { type: "string", format: "uuid" },
+          status: {
+            type: "string",
+            enum: [
+              "reserved",
+              "provider_succeeded",
+              "reconciliation_pending",
+              "accepted",
+              "compensation_pending",
+              "compensated",
+            ],
+          },
+          leaseVersion: { type: "integer", minimum: 0 },
+          leaseExpiresAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+          },
+          photoId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          photoVersion: {
+            anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+          },
+          uploadedAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+            description:
+              "서버가 identity/parent/MIME/size/SHA를 확인한 Google immutable createdTime. 클라이언트 촬영시각이 아닙니다.",
+          },
+          purgeAfter: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+            description:
+              "uploadedAt+정확한7일. 응답 재전송/교체 시 연장되지 않습니다.",
+          },
+          compensationAllowed: {
+            type: "boolean",
+            description:
+              "내부 fenced worker용 상태 표시입니다. 이 값은 클라이언트 삭제 capability가 아니며 공개 delete/worker endpoint는 없습니다.",
+          },
+          quotaWarning: {
+            type: "boolean",
+            description:
+              "업로드 응답에서 필수. admission 기준 decimal10GB 이상 경고이며 raw 사용량은 노출하지 않습니다. 상태 조회에는 생략됩니다.",
+          },
+        },
+      },
       AssignmentPreviewRequest: {
         type: "object",
         additionalProperties: false,
@@ -2749,6 +3054,10 @@ export const openApiDocument = {
               "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
               "SCHEDULER_INVOKE_SECRET",
               "CORS_ORIGINS",
+              "GOOGLE_DRIVE_CLIENT_ID",
+              "GOOGLE_DRIVE_CLIENT_SECRET",
+              "GOOGLE_DRIVE_REFRESH_TOKEN",
+              "GOOGLE_DRIVE_ROOT_FOLDER_ID",
             ],
             properties: Object.fromEntries(
               [
@@ -2760,6 +3069,10 @@ export const openApiDocument = {
                 "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
                 "SCHEDULER_INVOKE_SECRET",
                 "CORS_ORIGINS",
+                "GOOGLE_DRIVE_CLIENT_ID",
+                "GOOGLE_DRIVE_CLIENT_SECRET",
+                "GOOGLE_DRIVE_REFRESH_TOKEN",
+                "GOOGLE_DRIVE_ROOT_FOLDER_ID",
               ].map((name) => [
                 name,
                 {

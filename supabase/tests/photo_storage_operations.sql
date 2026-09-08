@@ -190,7 +190,8 @@ from unnest(array['anon','authenticated'])r cross join unnest(array[
  'public.record_photo_provider_success(uuid,integer,text,text,timestamptz)',
  'public.finalize_photo_upload(uuid,uuid,uuid,integer,text)','public.reconcile_photo_upload(uuid,text)',
  'public.settle_photo_compensation(uuid,integer,text,text)'])f;
-select ok(has_function_privilege('service_role',f,'EXECUTE'),'service only RPC '||f)
+-- #84 requires admission-bound wrappers; legacy primitives remain owner-only.
+select ok(not has_function_privilege('service_role',f,'EXECUTE'),'legacy RPC cannot bypass #84 admission '||f)
 from unnest(array[
  'public.begin_photo_upload(uuid,uuid,uuid,uuid,bigint,uuid,bigint,text,text,integer,text,text)',
  'public.get_photo_upload(uuid,uuid,uuid)','public.claim_photo_upload(uuid,uuid,uuid,text)',

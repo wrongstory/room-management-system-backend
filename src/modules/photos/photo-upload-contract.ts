@@ -1,3 +1,4 @@
+// Generated from supabase/functions/_shared/photo-upload-contract.ts. DO NOT EDIT.
 /**
  * #83 플랫폼 중립 업로드 작업 계약. HTTP/Drive/파일 디코딩을 수행하지 않는다.
  * #84는 실제 bytes/hash/MIME/EXIF와 Auth/session을 검증한 뒤 이 입력을 만들고,

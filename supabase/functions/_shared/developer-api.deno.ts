@@ -1,6 +1,7 @@
 import {
   assertEmptyDiagnosticRequestBody,
   developerAuditEvents,
+  developerRuntimeStatus,
   expectedMigrationName,
   toDeveloperActivityEvent,
   toDeveloperAuditEvent,
@@ -13,6 +14,59 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
+
+Deno.test("developer runtime reports four Google configuration booleans only without environment enumeration", () => {
+  const get = Deno.env.get;
+  const keys = [
+    "GOOGLE_DRIVE_CLIENT_ID",
+    "GOOGLE_DRIVE_CLIENT_SECRET",
+    "GOOGLE_DRIVE_REFRESH_TOKEN",
+    "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+  ];
+  const configured = new Set<string>();
+  const allowed: readonly string[] =
+    openApiDocument.components.schemas.DeveloperRuntimeStatus.properties
+      .configuration.required;
+  try {
+    Deno.env.get = (key: string) => {
+      assert(
+        allowed.includes(key) ||
+          ["RUNTIME_ENVIRONMENT", "SUPABASE_URL"].includes(key),
+        "only fixed environment names are read",
+      );
+      return configured.has(key) ? "synthetic-private-value" : undefined;
+    };
+    for (const present of [false, true]) {
+      if (present) {
+        keys.forEach((key) => {
+          configured.add(key);
+        });
+      }
+      const result = developerRuntimeStatus();
+      const configuration = result.configuration as Record<
+        string,
+        { configured: boolean }
+      >;
+      assert(
+        Object.keys(configuration).sort().join() === [...allowed].sort().join(),
+        "OpenAPI exact configuration keys",
+      );
+      for (const key of keys) {
+        assert(
+          JSON.stringify(configuration[key]) ===
+            JSON.stringify({ configured: present }),
+          "only configured boolean for Google field",
+        );
+      }
+      assert(
+        !JSON.stringify(result).includes("synthetic-private-value"),
+        "no raw configured value",
+      );
+    }
+  } finally {
+    Deno.env.get = get;
+  }
+});
 
 Deno.test("developer audit query accepts all 44 approved event types and rejects 45 before RPC", async () => {
   let calls = 0;
@@ -90,7 +144,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "photo_storage_operations",
+    expectedMigrationName === "photo_drive_upload_read",
     "expected migration must not depend on a remote execution timestamp",
   );
 });

@@ -638,6 +638,45 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 
 ## 9. 이후 반영 순서
 
+### #84 개발 소스: 디코딩 전 admission·Drive identity·사진 열람
+
+`20260908180643_photo_drive_upload_read.sql`은 기존 31개 migration 뒤에 추가한다.
+실제 Google/OAuth 연결이나 production 적용을 의미하지 않는다.
+
+```mermaid
+erDiagram
+  profiles ||--o{ photo_upload_admissions : "pre-decode ownership and CAS"
+  profiles ||--o| photo_upload_admission_limits : "bounded decode admission"
+  photo_upload_admissions ||--o| photo_upload_admission_bindings : "immutable quota reservation"
+  photo_drive_folder_identities ||--o{ photo_drive_folder_identities : "date parent to room scope"
+  photo_upload_operations ||--o| photo_upload_admission_bindings : "one validated operation"
+  photo_provider_objects ||--o| photo_drive_identities : "pre-generated ID before create"
+```
+
+- 5개 새 private table은 RLS/no direct grants다. 기존 #83 public primitive의 service EXECUTE를 회수하고
+  admission-bound wrapper와 service-only private provider/read context만 연다. 내부 locator context를 HTTP DTO로 전달하지 않는다.
+- admission은 현재 actor/session/capability·attempt/assignment/slot/photo CAS를 검증한 뒤 본문 decoding 전에
+  307,200 bytes를 예약한다. 같은 scoped digest는 같은 reservation이며, 호출마다 actor 30/min 포화 counter를 소비한다.
+  미연결 admission 5분·slot 1/actor 8 in-flight는 CPU/용량 기술 상한이고 2h/24h 제품 capability와 별개다.
+- singleton quota는 `about.storageQuota.usage` 전체 계정 사용량, refresh 요청 시작 시각과 revision을 보존한다.
+  60초 이상 지난/unknown snapshot은 차단한다. 시작 순서가 뒤집힌 응답은 최신 projection을 덮지 못한다.
+  전체 사용량 + 미반영 pending bytes가 decimal 10,000,000,000 이상이면 경고, 12,000,000,000 이상이면 신규 업로드 차단이다.
+- accepted도 refresh 시작 **이전** Google 생성 시각과 DB의 최초 provider-success 관측 event가 모두 확인되어
+  관측 usage에 흡수되기 전에는 예약 용량을 유지한다. 응답 유실 뒤 늦게 기록된 성공은 오래된 quota snapshot에서 차감하지 않는다.
+  timeout/unknown/lease 만료로 공간을 반환하지 않는다. 미연결 admission 만료는 외부 호출이 불가능했던 경우만 해제하며,
+  verified compensation 완료는 삭제 증거로 해제한다. 따라서 accepted 직후 quota snapshot 갱신 전 undercount가 없다.
+- Drive `files.generateIds` 결과와 검증된 부모 folder ID는 object/operation에 불변 연결하고 파일 ID 전역 unique를 강제한다.
+  날짜·객실 폴더도 private registry의 `(upload_date, scope_room_number)` unique로 후보 ID를 create 전에 예약한다.
+  date scope는 빈 객실 키와 root parent, room scope는 같은 날짜 date winner를 FK·검증으로 연결한다.
+  서로 다른 worker/candidate는 동일 winner만 받아 사용하며 losing ID는 Drive create에 사용하지 않는다.
+  파일 identity는 해당 날짜·객실 registry winner에만 연결한다. registry UPDATE/DELETE와 Data API 직접 접근은 금지한다.
+  ID 예약은 uploaded 상태가 아니다. 실제 provider 최초 `createdTime`을 `uploaded_at`으로 기록하고 409/retry에도 시각을 교체하지 않는다.
+  예약한 `upload_date`와 실제 `createdTime`의 KST 날짜가 다르면 finalize를 거부한다. 자정 교차로 생긴 known candidate는
+  불변 ID·폴더·시각을 유지한 채 fenced reconciliation/compensation으로만 종료하며 사진 acceptance를 만들지 않는다.
+- 사진 read는 app photo ID를 입력해 accepted·verified·미만료·미삭제를 검사한다. exact active business admin 또는
+  현재 통보된 assignment/attempt를 소유한 active maid만 허용하며, old revision/interrupted/upload-only read는 차단한다.
+  current pointer clear/replace는 미만료 accepted 과거 사진 version 자체를 삭제하지 않는다. auth session도 매 요청 다시 검사한다.
+
 ### #83 개발 소스: 사진 업로드 작업·provider identity
 
 `20260908170714_photo_storage_operations.sql`은 기존 30개 migration 뒤의 개발 전용 변경이다.

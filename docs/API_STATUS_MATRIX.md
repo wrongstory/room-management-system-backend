@@ -58,7 +58,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b` (#25~#29, #4 / PR #74, #7A / PR #75, #7B / PR #77, #7C / PR #79, #30 / PR #81 및 #83 / PR #86까지 source/dev 완료; production 미승격)
+- 개발 통합 source 기준: `dev@46c5f91e968556d1a13ecee398e98e8062839508` (#83 source 상태 정합화까지 통합; #25~#30, #4, #7A/B/C 및 #83 source/dev 완료, production 미승격)
 - 최신 dev source: **31 migrations / 63 paths / 68 operations**. #83은 DB 작업 원장·권한 계약을 추가했으며 공개 upload/read route를 추가하지 않아 HTTP/OpenAPI 수는 변하지 않았다. 아래 개별 PR 절의 이전 수치는 해당 PR 검증 당시 snapshot이며 현재 통합 수치는 이 항목을 따른다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
@@ -568,7 +568,8 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | offline lease/conflict | #7C source/dev 완료 | #7 / PR #79 | production 미승격; purge 운영·hosted E2E 별도 |
 | [x] | 사진 template/slot snapshot·submission version | source/dev 완료 | #30 / PR #81 | production 미승격; owner-only 모델이며 HTTP/Drive/전체 제출 command 제외 |
 | [x] | 사진 업로드 작업 원장·권한 계약 | #83 source/dev 완료 | #83 / PR #86 | production 미승격; DB/내부 계약만, 실제 Drive/HTTP/purge 제외 |
-| [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미구현 — 다음 #84 | #9 / #84 / #85 | #83 DB 기반 완료와 별개; 실제 Drive/HTTP/purge 미구현 |
+| [ ] | Google Drive 업로드·조회 | #84 feature 구현·검증 중 | #9 / #84 | 실제 HTTP adapter/fake 검증과 production OAuth·실사용 gate는 별도; 독립 QA/dev 미완료 |
+| [ ] | 7일 영구삭제·orphan 운영 worker | 미구현 | #9 / #85 | #84 보상 candidate 정리는 accepted 사진의7일 purge를 대체하지 않음 |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
 | [ ] | earning/payroll 정산 API | 미개발 | #8 | append-only |
 | [ ] | notification/outbox/Web Push | 미개발 | #10 | domain event 연계 |
@@ -695,6 +696,29 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 이번 source는 공개 upload/read route를 추가하지 않으므로 OpenAPI는 **63 paths / 68 operations**를 유지한다.
 승인 exact head와 병합 결과의 tree는 `9e7898af7de2d3025fe53ca848225cbbaa35b5fa`로 동일하다.
 독립 QA·GitHub COMMENTED 리뷰·required CI·Codex 위임 승인·병합 증거는 구분한다. 다음 작업은 **#84**다.
+
+### #84 Drive 업로드·열람 source gate — feature 검증 중, dev/production 미승격
+
+기준 dev는 `46c5f91e968556d1a13ecee398e98e8062839508`이며 후보 source는 **32 migrations / 67 paths / 72 operations**다.
+후보 숫자는 승인·병합·배포 evidence가 아니며 위 dev/production snapshot을 덮어쓰지 않는다.
+
+| API | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|
+| `GET /v1/attempts/{attemptId}/photo-slots` | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+| `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload` | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+| `GET /v1/photo-uploads/{operationId}` | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+| `GET /v1/photos/{photoId}/content` | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+
+- [x] 실제 local Edge v1.74.3 oneshot worker 합성1280×960/2048×2048 JPEG/WebP cold-start CPU/메모리·20MB bundle gate 완료(운영 hosted smoke 아님; PHOTO_STORAGE evidence 참고)
+- [ ] 전체 local DB/RLS/concurrency·Edge/Fastify·OpenAPI·Python 계약 최종 검증
+- [ ] exact head 독립 QA P0/P1=0 및 required GitHub application/migration PASS
+- [ ] source 승인 및 dev 병합
+- [ ] 별도 release/main → 운영 OAuth 설정·Google/hosted role smoke
+- [ ] #85 7일 purge/backlog/실패 감시 운영 gate
+
+원문307200 bytes, 사전 admission/총quota, JPEG/WebP 실제 decode·metadata 제거·최종SHA, 사전발급 provider identity,
+accepted 보존/fenced compensation, 원본 반환 직전 재인가가 이번 범위다. 실제 Google 계정 호출은 수행하지 않았고,
+파일 상태 accepted는 submission/검수/입실 준비 완료를 뜻하지 않는다. Python developer 콘솔에는 업로드/원본 기능을 추가하지 않는다.
 합성 metadata와 provider acknowledgement DB 테스트를 실파일·Drive 검증 완료로 표현하지 않는다.
 production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production snapshot은 **19 migrations / 39 paths / 43 operations**로 유지하며 이번에 운영을 재검증하지 않았다.
 

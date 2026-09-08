@@ -27,6 +27,7 @@ import {
   currentAttempt,
   executeAttempt,
 } from "../_shared/attempt-api.ts";
+import { requirePasswordChanged } from "../_shared/runtime.ts";
 import {
   completeLimitedAttempt,
   getLimitedAttempt,
@@ -108,7 +109,16 @@ import {
   jsonResponse,
   requestId,
   requireDeveloper,
+  verifiedRequestSessionId,
 } from "../_shared/runtime.ts";
+import { createPhotoService } from "../_shared/photo-api.ts";
+import {
+  photoError,
+  photoRoute,
+  type PhotoService,
+} from "../_shared/photo-service.ts";
+import { PhotoError } from "../_shared/photo-binary.ts";
+import { PhotoUploadContractError } from "../_shared/photo-upload-contract.ts";
 
 function routePath(url: string): string {
   const segments = new URL(url).pathname.split("/").filter(Boolean);
@@ -125,6 +135,7 @@ export interface ApiHandlerDependencies {
     request: Request,
     clients: EdgeClients,
   ) => Promise<EdgeActor>;
+  photoService?: (clients: EdgeClients) => PhotoService;
 }
 
 const defaultDependencies: ApiHandlerDependencies = {
@@ -170,6 +181,48 @@ export async function handleApiRequest(
     clients = dependencies.createClients();
     if (request.method === "POST" && path === "/v1/auth/login") {
       return jsonResponse(await login(request, clients), 200, corsHeaders);
+    }
+
+    const photo = photoRoute(request.method, path);
+    if (photo) {
+      if (!new URL(request.url).pathname.endsWith(path)) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      const service = (dependencies.photoService ?? createPhotoService)(
+        clients,
+      );
+      if (photo.kind === "content") {
+        actor = await dependencies.authenticateRequest(request, clients);
+        requirePasswordChanged(actor);
+        const result = await service.content(request, {
+          profileId: actor.profileId,
+          sessionId: verifiedRequestSessionId(request),
+          role: actor.role,
+          profileStatus: "active",
+        }, photo.photoId);
+        for (const [key, value] of Object.entries(corsHeaders)) {
+          result.headers.set(key, value);
+        }
+        return result;
+      }
+      const identity = await authenticateLimitedAttempt(request, clients);
+      actor = identity.actor;
+      const context = {
+        profileId: actor.profileId,
+        sessionId: identity.sessionId,
+        role: actor.role,
+        profileStatus: identity.profileStatus,
+      };
+      const result = photo.kind === "upload"
+        ? await service.upload(request, context, photo.attemptId, photo.slotId)
+        : photo.kind === "slots"
+        ? await service.slots(request, context, photo.attemptId)
+        : await service.status(request, context, photo.operationId);
+      return jsonResponse(result, 200, corsHeaders);
     }
 
     // 늦은 기록 수신은 수행 권한이 아니다. 이 단일 경로만 3-state identity를 검증한 뒤 DB에서 lease를 다시 검사한다.
@@ -899,14 +952,29 @@ export async function handleApiRequest(
       "요청한 API 경로를 찾을 수 없습니다.",
     );
   } catch (error) {
-    let responseError = error;
+    const safeError =
+      error instanceof PhotoError || error instanceof PhotoUploadContractError
+        ? photoError(error)
+        : null;
+    let responseError = safeError
+      ? new EdgeError(
+        safeError.statusCode,
+        safeError.code,
+        "사진 작업 조건을 확인해 주세요.",
+      )
+      : error;
     const source = authorizationSourceForPath(path);
     if (
-      error instanceof EdgeError && actor && clients && source &&
-      isAuthorizationDeniedCode(error.code)
+      responseError instanceof EdgeError && actor && clients && source &&
+      isAuthorizationDeniedCode(responseError.code)
     ) {
       try {
-        await recordAuthorizationDenied(clients, actor, source, error.code);
+        await recordAuthorizationDenied(
+          clients,
+          actor,
+          source,
+          responseError.code,
+        );
       } catch (activityError) {
         responseError = activityError;
       }

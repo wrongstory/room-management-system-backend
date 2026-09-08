@@ -12,6 +12,18 @@ if TYPE_CHECKING:
     from ..models.developer_runtime_status_configuration_corsorigins import (
         DeveloperRuntimeStatusConfigurationCORSORIGINS,
     )
+    from ..models.developer_runtime_status_configuration_googledriveclientid import (
+        DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTID,
+    )
+    from ..models.developer_runtime_status_configuration_googledriveclientsecret import (
+        DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET,
+    )
+    from ..models.developer_runtime_status_configuration_googledriverefreshtoken import (
+        DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN,
+    )
+    from ..models.developer_runtime_status_configuration_googledriverootfolderid import (
+        DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
+    )
     from ..models.developer_runtime_status_configuration_reservationguestnamepepper import (
         DeveloperRuntimeStatusConfigurationRESERVATIONGUESTNAMEPEPPER,
     )
@@ -48,6 +60,10 @@ class DeveloperRuntimeStatusConfiguration:
         reservation_scheduler_actor_profile_id (DeveloperRuntimeStatusConfigurationRESERVATIONSCHEDULERACTORPROFILEID):
         scheduler_invoke_secret (DeveloperRuntimeStatusConfigurationSCHEDULERINVOKESECRET):
         cors_origins (DeveloperRuntimeStatusConfigurationCORSORIGINS):
+        google_drive_client_id (DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTID):
+        google_drive_client_secret (DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET):
+        google_drive_refresh_token (DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN):
+        google_drive_root_folder_id (DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID):
     """
 
     account_phone_pepper: DeveloperRuntimeStatusConfigurationACCOUNTPHONEPEPPER
@@ -60,6 +76,10 @@ class DeveloperRuntimeStatusConfiguration:
     )
     scheduler_invoke_secret: DeveloperRuntimeStatusConfigurationSCHEDULERINVOKESECRET
     cors_origins: DeveloperRuntimeStatusConfigurationCORSORIGINS
+    google_drive_client_id: DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTID
+    google_drive_client_secret: DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET
+    google_drive_refresh_token: DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN
+    google_drive_root_folder_id: DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID
 
     def to_dict(self) -> dict[str, Any]:
         account_phone_pepper = self.account_phone_pepper.to_dict()
@@ -80,6 +100,14 @@ class DeveloperRuntimeStatusConfiguration:
 
         cors_origins = self.cors_origins.to_dict()
 
+        google_drive_client_id = self.google_drive_client_id.to_dict()
+
+        google_drive_client_secret = self.google_drive_client_secret.to_dict()
+
+        google_drive_refresh_token = self.google_drive_refresh_token.to_dict()
+
+        google_drive_root_folder_id = self.google_drive_root_folder_id.to_dict()
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -92,6 +120,10 @@ class DeveloperRuntimeStatusConfiguration:
                 "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID": reservation_scheduler_actor_profile_id,
                 "SCHEDULER_INVOKE_SECRET": scheduler_invoke_secret,
                 "CORS_ORIGINS": cors_origins,
+                "GOOGLE_DRIVE_CLIENT_ID": google_drive_client_id,
+                "GOOGLE_DRIVE_CLIENT_SECRET": google_drive_client_secret,
+                "GOOGLE_DRIVE_REFRESH_TOKEN": google_drive_refresh_token,
+                "GOOGLE_DRIVE_ROOT_FOLDER_ID": google_drive_root_folder_id,
             }
         )
 
@@ -104,6 +136,18 @@ class DeveloperRuntimeStatusConfiguration:
         )
         from ..models.developer_runtime_status_configuration_corsorigins import (
             DeveloperRuntimeStatusConfigurationCORSORIGINS,
+        )
+        from ..models.developer_runtime_status_configuration_googledriveclientid import (
+            DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTID,
+        )
+        from ..models.developer_runtime_status_configuration_googledriveclientsecret import (
+            DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET,
+        )
+        from ..models.developer_runtime_status_configuration_googledriverefreshtoken import (
+            DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN,
+        )
+        from ..models.developer_runtime_status_configuration_googledriverootfolderid import (
+            DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
         )
         from ..models.developer_runtime_status_configuration_reservationguestnamepepper import (
             DeveloperRuntimeStatusConfigurationRESERVATIONGUESTNAMEPEPPER,
@@ -169,6 +213,28 @@ class DeveloperRuntimeStatusConfiguration:
             d.pop("CORS_ORIGINS")
         )
 
+        google_drive_client_id = DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTID.from_dict(
+            d.pop("GOOGLE_DRIVE_CLIENT_ID")
+        )
+
+        google_drive_client_secret = (
+            DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET.from_dict(
+                d.pop("GOOGLE_DRIVE_CLIENT_SECRET")
+            )
+        )
+
+        google_drive_refresh_token = (
+            DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN.from_dict(
+                d.pop("GOOGLE_DRIVE_REFRESH_TOKEN")
+            )
+        )
+
+        google_drive_root_folder_id = (
+            DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID.from_dict(
+                d.pop("GOOGLE_DRIVE_ROOT_FOLDER_ID")
+            )
+        )
+
         developer_runtime_status_configuration = cls(
             account_phone_pepper=account_phone_pepper,
             reservation_pii_key_base64=reservation_pii_key_base64,
@@ -178,6 +244,10 @@ class DeveloperRuntimeStatusConfiguration:
             reservation_scheduler_actor_profile_id=reservation_scheduler_actor_profile_id,
             scheduler_invoke_secret=scheduler_invoke_secret,
             cors_origins=cors_origins,
+            google_drive_client_id=google_drive_client_id,
+            google_drive_client_secret=google_drive_client_secret,
+            google_drive_refresh_token=google_drive_refresh_token,
+            google_drive_root_folder_id=google_drive_root_folder_id,
         )
 
         return developer_runtime_status_configuration

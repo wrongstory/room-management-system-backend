@@ -19,5 +19,11 @@ tools/backend-console/*.spec
 .DS_Store
 *.log
 .supabase/
+supabase/functions/api/assets/magick.wasm
+supabase/functions/api/assets/magick.wasm.gz
+supabase/functions/api/assets/magick.js
+supabase/functions/api/assets/magick.d.ts
+supabase/functions/api/assets/magick.ts
+supabase/functions/api/assets/magick.NOTICE
 supabase/.temp/
 supabase/.branches/

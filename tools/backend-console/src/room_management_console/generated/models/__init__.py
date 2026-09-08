@@ -44,6 +44,18 @@ from .developer_runtime_status_configuration_accountphonepepper import (
 from .developer_runtime_status_configuration_corsorigins import (
     DeveloperRuntimeStatusConfigurationCORSORIGINS,
 )
+from .developer_runtime_status_configuration_googledriveclientid import (
+    DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTID,
+)
+from .developer_runtime_status_configuration_googledriveclientsecret import (
+    DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET,
+)
+from .developer_runtime_status_configuration_googledriverefreshtoken import (
+    DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN,
+)
+from .developer_runtime_status_configuration_googledriverootfolderid import (
+    DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
+)
 from .developer_runtime_status_configuration_reservationguestnamepepper import (
     DeveloperRuntimeStatusConfigurationRESERVATIONGUESTNAMEPEPPER,
 )
@@ -140,6 +152,10 @@ __all__ = (
     "DeveloperRuntimeStatusConfiguration",
     "DeveloperRuntimeStatusConfigurationACCOUNTPHONEPEPPER",
     "DeveloperRuntimeStatusConfigurationCORSORIGINS",
+    "DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTID",
+    "DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET",
+    "DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN",
+    "DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID",
     "DeveloperRuntimeStatusConfigurationRESERVATIONGUESTNAMEPEPPER",
     "DeveloperRuntimeStatusConfigurationRESERVATIONPIIKEYBASE64",
     "DeveloperRuntimeStatusConfigurationRESERVATIONPIIKEYRINGJSON",

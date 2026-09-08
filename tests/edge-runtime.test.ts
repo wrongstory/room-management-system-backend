@@ -211,7 +211,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toContain(
-      'expectedMigrationName = "photo_storage_operations"'
+      'expectedMigrationName = "photo_drive_upload_read"'
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -242,7 +242,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(accountApi).toContain('recordUnknownLoginFailed(clients)');
     expect(accountApi).toContain('recordLoginSucceeded(');
     expect(accountApi).toContain('recordKnownLoginFailed(');
-    expect(api).toContain('recordAuthorizationDenied(clients, actor, source, error.code)');
+    expect(api).toMatch(/recordAuthorizationDenied\(\s*clients,\s*actor,\s*source,\s*responseError\.code,?\s*\)/);
     expect(contract).toContain('edge.authorization.reservations');
     expect(contract).toContain('edge.authorization.rooms');
     expect(contract).toContain('edge.authorization.assignments');

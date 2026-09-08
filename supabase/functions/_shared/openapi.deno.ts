@@ -6,6 +6,80 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
+Deno.test("photo OpenAPI four operations retain raw body boundary, role separation and opaque projections", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const upload =
+    document.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/upload"].post;
+  assert(
+    upload.requestBody.content["image/jpeg"].schema["x-max-bytes"] === 307200 &&
+      upload.requestBody.content["image/webp"].schema.maxLength === 307200,
+    "raw300KiB both encodings",
+  );
+  assert(
+    !Object.hasOwn(upload.requestBody.content, "multipart/form-data") &&
+      !Object.hasOwn(upload.requestBody.content, "application/json"),
+    "no multipart/base64",
+  );
+  assert(
+    upload.parameters.filter((p) => p.in === "query").length === 3 &&
+      upload["x-required-roles"].join() === "maid",
+    "exact binding query and maid",
+  );
+  assert(
+    document.paths["/v1/photos/{photoId}/content"].get["x-required-roles"]
+      .join() === "admin,maid",
+    "developer original read denied",
+  );
+  const schemas = document.components.schemas;
+  assert(
+    upload.responses["408"].description.includes("PHOTO_BODY_TIMEOUT"),
+    "bounded body timeout is documented",
+  );
+  assert(
+    schemas.PhotoUploadResponse.allOf.some((value) =>
+      "required" in value && value.required.includes("quotaWarning")
+    ),
+    "initial and retry upload warning is required",
+  );
+  assert(
+    schemas.PhotoUploadOperation.properties.quotaWarning.type === "boolean",
+    "quota warning only, no usage raw fields",
+  );
+  assert(
+    schemas.AttemptPhotoSlots.properties.slots.maxItems === 100 &&
+      schemas.PhotoUploadOperation.additionalProperties === false,
+    "bounded metadata allowlist",
+  );
+  for (
+    const key of [
+      "providerFileId",
+      "providerLocator",
+      "sha256",
+      "claimDigest",
+      "sessionId",
+      "oauthToken",
+    ]
+  ) {
+    assert(
+      !Object.hasOwn(schemas.PhotoUploadOperation.properties, key),
+      "private fields absent",
+    );
+  }
+  assert(
+    schemas.AttemptPhotoSlots.properties.slots.items.properties.photoId.anyOf
+      .some((x) => x.type === "null"),
+    "limited cannot read original ID",
+  );
+  assert(
+    Object.keys(document.paths).length === 67 &&
+      Object.values(document.paths).flatMap((item) =>
+          Object.keys(item).filter((method) =>
+            ["get", "post", "put", "patch", "delete"].includes(method)
+          )
+        ).length === 72,
+    "candidate contract67/72",
+  );
+});
 
 Deno.test("offline lease contract has five exact operations, bounded ingest and safe permanent audit", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;

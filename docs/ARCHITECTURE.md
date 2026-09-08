@@ -17,6 +17,15 @@ Fastify는 현재 개발 기준선이며 Edge PoC가 실패할 때의 rollback �
 
 ## 신뢰 경계
 
+### #84 사진 HTTP adapter 후보 — source 검증 중
+
+`src/modules/photos`의 순수 binary validator/Drive adapter/application service를 Fastify와 generated Deno bridge가 공유한다.
+인증→DB durable admission/quota→bounded raw body/실파일 검증→begin/claim→사전 provider identity 저장→외부 HTTP→provider 성공 기록→finalize 순서이며 외부 요청 중 DB transaction을 유지하지 않는다.
+#83 legacy primitive service-role grant는 #84 migration에서 회수하고 admitted wrapper만 HTTP 서비스 경계로 사용한다.
+slot/status metadata와 original content 권한은 분리한다. limited upload는 일반 active guard를 완화하지 않으며 content는 provider wait 이후에도 최신 권한을 재검증한다.
+decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생성 검증이며 runtime CDN fallback이 없다. actual local worker(memory256MB/CPU2초) 합성4MP JPEG/WebP gate는 통과했으며 운영 Google/hosted 검증은 release 후 별도다. ignored asset 재생성 때문에 배포 전 `npm ci`와 `npm run edge:check`가 모두 성공해야 한다. 실패/누락 시 deploy 금지다.
+상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [#84 상태 gate](./API_STATUS_MATRIX.md)를 따른다. 원격 Google·production·#85 purge·#31 제출 구현은 제외한다.
+
 ```mermaid
 flowchart LR
   UI[개발자·관리자·메이드 PWA] -->|Bearer access token| API[Fastify 또는 Edge API adapter]

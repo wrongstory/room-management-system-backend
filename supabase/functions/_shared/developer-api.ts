@@ -1,7 +1,7 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 
-export const expectedMigrationName = "photo_storage_operations";
+export const expectedMigrationName = "photo_drive_upload_read";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -46,6 +46,10 @@ const secretConfigurationAllowlist = [
   "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
   "SCHEDULER_INVOKE_SECRET",
   "CORS_ORIGINS",
+  "GOOGLE_DRIVE_CLIENT_ID",
+  "GOOGLE_DRIVE_CLIENT_SECRET",
+  "GOOGLE_DRIVE_REFRESH_TOKEN",
+  "GOOGLE_DRIVE_ROOT_FOLDER_ID",
 ] as const;
 
 interface AuditRow {

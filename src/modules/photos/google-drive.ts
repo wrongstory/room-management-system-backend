@@ -1,0 +1,174 @@
+import { PhotoError, PHOTO_MAX_BYTES, type PhotoMime, readPhotoBody } from './photo-binary.js';
+
+type Fetch = typeof fetch;
+export interface DriveConfig { clientId: string; clientSecret: string; refreshToken: string; rootFolderId: string }
+export interface DriveObject { fileId: string; folderId: string; objectId: string; mime: PhotoMime; sizeBytes: number; sha256: string }
+export type DriveReadObject = Pick<DriveObject, 'fileId' | 'mime' | 'sizeBytes' | 'sha256'>;
+export interface DriveFolder { folderId: string; parentFolderId: string; name: string }
+export interface PhotoProvider {
+  quota(): Promise<{ refreshStartedAt: string; usageBytes: string }>;
+  generateId(): Promise<string>;
+  rootFolderId(): string;
+  ensureFolder(folder: DriveFolder): Promise<void>;
+  upload(object: DriveObject, bytes: Uint8Array): Promise<{ uploadedAt: string }>;
+  inspect(object: DriveObject): Promise<{ uploadedAt: string }>;
+  read(object: DriveReadObject): Promise<Uint8Array>;
+  remove(fileId: string): Promise<'deleted' | 'not_found'>;
+}
+const unavailable = (): never => { throw new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'); };
+const mismatch = (): never => { throw new PhotoError(409, 'PHOTO_PROVIDER_IDENTITY_CONFLICT'); };
+function id(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{10,200}$/.test(value)) return mismatch();
+  return value;
+}
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return unavailable();
+  return value as Record<string, unknown>;
+}
+const fields = 'id,name,mimeType,parents,size,sha256Checksum,appProperties,trashed,shared,createdTime';
+export class GoogleDriveProvider implements PhotoProvider {
+  #config: DriveConfig;
+  #fetch: Fetch;
+  #token: { value: string; expiresAt: number } | undefined;
+  #refresh: Promise<string> | undefined;
+  constructor(config: DriveConfig, transport: Fetch = fetch) {
+    for (const value of [config.clientId, config.clientSecret, config.refreshToken]) {
+      if (!value || value.length > 4096 || /[\r\n]/.test(value)) throw new PhotoError(503, 'PHOTO_PROVIDER_NOT_CONFIGURED');
+    }
+    id(config.rootFolderId);
+    this.#config = { ...config }; this.#fetch = transport;
+  }
+  async #json(response: Response): Promise<Record<string, unknown>> {
+    // Provider payload는 size-bounded parse 후 allowlist projection만 사용한다.
+    try {
+      const body = await readPhotoBody(response.body, response.headers.get('content-length'));
+      if (body.length > 65536) return unavailable();
+      return record(JSON.parse(new TextDecoder().decode(body)));
+    } catch { return unavailable(); }
+  }
+  async #accessToken(): Promise<string> {
+    if (this.#token && this.#token.expiresAt > Date.now() + 30000) return this.#token.value;
+    this.#refresh ??= (async () => {
+      try {
+        const response = await this.#fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ client_id: this.#config.clientId, client_secret: this.#config.clientSecret,
+            refresh_token: this.#config.refreshToken, grant_type: 'refresh_token' })
+        });
+        if (!response.ok) return unavailable();
+        const row = await this.#json(response);
+        if (typeof row.access_token !== 'string' || !/^[A-Za-z0-9._~+/-]{1,4096}$/.test(row.access_token) ||
+          row.token_type !== 'Bearer' || typeof row.expires_in !== 'number' || row.expires_in < 60 || row.expires_in > 3600) return unavailable();
+        this.#token = { value: row.access_token, expiresAt: Date.now() + row.expires_in * 1000 };
+        return row.access_token;
+      } catch { return unavailable(); }
+    })();
+    try { return await this.#refresh; } finally { this.#refresh = undefined; }
+  }
+  async #request(path: string, init: RequestInit = {}, upload = false): Promise<Response> {
+    // path는 이 class의 고정 builder에서만 생성한다. redirect/사용자 URL/외부 filename을 받지 않는다.
+    const token = await this.#accessToken();
+    try {
+      const response = await this.#fetch(`https://www.googleapis.com/${upload ? 'upload/' : ''}drive/v3/${path}`, {
+        ...init, redirect: 'error', signal: AbortSignal.timeout(10000),
+        headers: { ...init.headers, authorization: `Bearer ${token}` }
+      });
+      if (response.status === 401) this.#token = undefined;
+      if (response.status >= 300 && response.status < 400) return unavailable();
+      return response;
+    } catch { return unavailable(); }
+  }
+  async quota(): Promise<{ refreshStartedAt: string; usageBytes: string }> {
+    const refreshStartedAt = new Date().toISOString();
+    const response = await this.#request('about?fields=storageQuota(usage)');
+    if (!response.ok) return unavailable();
+    const usage = record((await this.#json(response)).storageQuota).usage;
+    if (typeof usage !== 'string' || !/^\d{1,18}$/.test(usage)) return unavailable();
+    return { refreshStartedAt, usageBytes: usage };
+  }
+  async generateId(): Promise<string> {
+    const response = await this.#request('files/generateIds?count=1&space=drive&type=files');
+    if (!response.ok) return unavailable();
+    const ids = (await this.#json(response)).ids;
+    if (!Array.isArray(ids) || ids.length !== 1) return unavailable();
+    return id(ids[0]);
+  }
+  async #metadata(fileId: string): Promise<Record<string, unknown>> {
+    const response = await this.#request(`files/${id(fileId)}?fields=${fields}`);
+    if (!response.ok) return unavailable();
+    return this.#json(response);
+  }
+  #privateFolder(row: Record<string, unknown>, folderId: string, parent?: string, name?: string): void {
+    if (row.id !== folderId || row.mimeType !== 'application/vnd.google-apps.folder' || row.trashed !== false || row.shared !== false) mismatch();
+    if (parent && (!Array.isArray(row.parents) || row.parents.length !== 1 || row.parents[0] !== parent || row.name !== name)) mismatch();
+  }
+  rootFolderId(): string { return this.#config.rootFolderId; }
+  async ensureFolder(folder: DriveFolder): Promise<void> {
+    const folderId = id(folder.folderId), parent = id(folder.parentFolderId), name = folder.name;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(name) && !/^\d{1,8}$/.test(name)) mismatch();
+    this.#privateFolder(await this.#metadata(parent), parent);
+    // A durable DB registry selected this identity before HTTP. No name lookup or fresh create ID.
+    const existing = await this.#request(`files/${folderId}?fields=${fields}`);
+    if (existing.ok) { this.#privateFolder(await this.#json(existing), folderId, parent, name); return; }
+    if (existing.status !== 404) return unavailable();
+    try {
+      const created = await this.#request(`files?fields=${fields}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: folderId, name, mimeType: 'application/vnd.google-apps.folder', parents: [parent] })
+      });
+      if (!created.ok && created.status !== 409) return unavailable();
+    } catch { /* Same generated identity only. Never create a second candidate after timeout. */ }
+    this.#privateFolder(await this.#metadata(folderId), folderId, parent, name);
+  }
+  async #verify(object: DriveObject): Promise<string> {
+    const row = await this.#metadata(object.fileId);
+    if (row.id !== object.fileId || row.name !== `${object.objectId}.${object.mime === 'image/jpeg' ? 'jpg' : 'webp'}` || row.mimeType !== object.mime || row.size !== String(object.sizeBytes) || row.trashed !== false || row.shared !== false ||
+      !Array.isArray(row.parents) || row.parents.length !== 1 || row.parents[0] !== object.folderId || record(row.appProperties).objectId !== object.objectId) mismatch();
+    // appProperties의 자체 hash 주장은 증명이 아니다. 실제 checksum이 없으면 bytes를 읽어 검증한다.
+    if (row.sha256Checksum !== undefined) { if (row.sha256Checksum !== object.sha256) mismatch(); }
+    else await this.read(object);
+    if (typeof row.createdTime !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(row.createdTime) || !Number.isFinite(Date.parse(row.createdTime)) || Date.parse(row.createdTime) > Date.now()) return mismatch();
+    return row.createdTime;
+  }
+  async upload(object: DriveObject, bytes: Uint8Array): Promise<{ uploadedAt: string }> {
+    id(object.fileId); id(object.folderId);
+    if (bytes.length !== object.sizeBytes || bytes.length > PHOTO_MAX_BYTES || !/^[0-9a-f]{64}$/.test(object.sha256)) mismatch();
+    const boundary = `photo_${crypto.randomUUID().replaceAll('-', '')}`;
+    const metadata = { id: object.fileId, name: `${object.objectId}.${object.mime === 'image/jpeg' ? 'jpg' : 'webp'}`,
+      mimeType: object.mime, parents: [object.folderId], appProperties: { objectId: object.objectId } };
+    const prefix = new TextEncoder().encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${object.mime}\r\n\r\n`);
+    const suffix = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+    const body = new Uint8Array(prefix.length + bytes.length + suffix.length);
+    body.set(prefix); body.set(bytes, prefix.length); body.set(suffix, prefix.length + bytes.length);
+    try {
+      const response = await this.#request(`files?uploadType=multipart&fields=${fields}`, {
+        method: 'POST', headers: { 'content-type': `multipart/related; boundary=${boundary}` }, body
+      }, true);
+      if (!response.ok && response.status !== 409) return unavailable();
+    } catch { /* 불확실한 create는 같은 private preallocated identity를 재조회한다. */ }
+    // create 요청에 createdTime을 지정하지 않는다. DB도 operation 생성~관측 now 경계를 재검증한다.
+    return { uploadedAt: await this.#verify(object) };
+  }
+  /** Read-only reconciliation of the one preallocated identity. Missing/unknown never authorizes deletion. */
+  async inspect(object: DriveObject): Promise<{ uploadedAt: string }> {
+    return { uploadedAt: await this.#verify(object) };
+  }
+  async read(object: DriveReadObject): Promise<Uint8Array> {
+    const response = await this.#request(`files/${id(object.fileId)}?alt=media`);
+    if (!response.ok || response.headers.get('content-type')?.split(';')[0] !== object.mime) return unavailable();
+    let bytes: Uint8Array;
+    try { bytes = await readPhotoBody(response.body, response.headers.get('content-length')); }
+    catch { return unavailable(); }
+    if (bytes.length !== object.sizeBytes) mismatch();
+    const hash = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes));
+    if (Array.from(new Uint8Array(hash), n => n.toString(16).padStart(2, '0')).join('') !== object.sha256) mismatch();
+    return bytes;
+  }
+  async remove(fileId: string): Promise<'deleted' | 'not_found'> {
+    const response = await this.#request(`files/${id(fileId)}`, { method: 'DELETE' });
+    if (response.status === 404) return 'not_found';
+    if (response.status !== 204) return unavailable();
+    return 'deleted';
+  }
+}
