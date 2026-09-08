@@ -535,7 +535,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 43,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 44,
     "actual audit allowlist count",
   );
 });

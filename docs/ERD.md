@@ -638,6 +638,36 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 
 ## 9. 이후 반영 순서
 
+### #83 개발 소스: 사진 업로드 작업·provider identity
+
+`20260908170714_photo_storage_operations.sql`은 기존 30개 migration 뒤의 개발 전용 변경이다.
+실제 Drive HTTP/OAuth, 업로드·열람 route, 7일 purge worker와 production 적용을 포함하지 않는다.
+
+```mermaid
+erDiagram
+  cleaning_attempts ||--o{ photo_upload_operations : "own revision and slot CAS"
+  target_photo_slot_snapshots ||--o{ photo_upload_operations : "frozen slot"
+  photo_upload_operations ||--|| photo_provider_objects : "one stable candidate"
+  photo_upload_operations ||--|| photo_upload_states : "current fenced state"
+  photo_upload_operations ||--o{ photo_upload_events : "append-only transitions"
+  photo_upload_operations ||--o| photo_upload_acceptances : "ever accepted"
+  photo_provider_objects ||--o| photo_upload_acceptances : "never rebound"
+  attempt_photo_versions ||--o| photo_upload_acceptances : "verified evidence"
+  profiles ||--o| photo_upload_rate_limits : "bounded minute counter"
+```
+
+- private/RLS/no direct grants. 좁은 service-only RPC가 actor/session/capability와 버전을 재검증한다.
+- operation의 `(actor,photo.upload,key digest)` unique와 별도 canonical request hash는 불변이며 원문 key를 보존하지 않는다.
+- provider locator는 private 객체 row에만 존재하고 provider 전체 unique다. operation당 candidate는 하나이며 claim마다 복제하지 않는다.
+- 성공 clock/metadata는 write-once다. `purge_after = uploaded_at + 168h`; retry나 재제출이 만료를 연장하지 않는다.
+- acceptance는 current pointer와 다른 불변 이력이다. 인계/교체/clear/계정폐기로 accepted를 compensation 대상으로 재분류하지 않는다.
+- finalization과 reconciliation은 같은 domain/state/object lock으로 직렬화한다. unknown은 삭제 불가,
+  never-accepted known candidate를 terminal compensation fence로 닫은 경우에만 삭제 후보로 반환한다.
+- claim digest와 monotonic fence를 함께 확인한다. slot provider-call in-flight 1 / actor 같은 in-flight 8 / 신규 작업 30/min /
+  lease 5분·최대8회는 기술 상한이며 2h/24h 사용자 capability와 별개다. raw claim/session은 공개 projection에 없다.
+- `photo.upload_accepted` audit는 photo/attempt/target/slot ID와 version/시각만 allowlist projection한다.
+  외부 실패나 DB 응답 유실을 audit 성공으로 위장하지 않으며 물리 완료/제출/검수/수익 상태를 변경하지 않는다.
+
 ### #7C 개발 소스: Offline v1 lease / quarantine
 
 `20260908144558_attempt_offline_lease_quarantine.sql`은 기존 28개 migration 뒤에

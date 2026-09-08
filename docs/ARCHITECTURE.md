@@ -82,6 +82,30 @@ erDiagram
 
 ## 동시성과 멱등성
 
+### #83 사진 업로드 작업 원장 — 구현 중, HTTP/provider 미노출
+
+`photo_storage_operations`는 #30 뒤의 append-only 개발 migration이다. private operation/object,
+mutable lease/state, immutable acceptance/event를 분리한다. scoped key digest + canonical request hash와
+실제 binding tuple 비교로 retry를 동일 작업에 수렴시킨다. raw key/session/provider locator는 공개 응답이나
+audit에 복제하지 않는다. provider object UUID는 작업당 하나이고 locator는 provider 전체에서 unique다.
+
+외부 업로드 전 작업 identity와 claim/fence를 commit한다. 실제 Drive 호출은 #84가 DB transaction 밖에서
+수행한 뒤 최초 성공 시각을 기록한다. finalize는 최신 actor/session/capability와 photo CAS를 재검증하고,
+verified photo/current/history/acceptance/`photo.upload_accepted` audit를 한 transaction으로 확정한다.
+helper의 metadata 주장은 실제 bytes/provider 검증을 대체하지 않는다.
+
+DB 응답 유실은 실패 확정이 아니다. worker reconciliation은 기존 사용자의 session 폐기와 무관하게
+accepted 연결을 조회하며, 과거 current 사진·submission에서도 사용된 파일을 고아로 판정하지 않는다.
+unknown provider 결과는 reconciliation_pending으로 보존한다. never-accepted임을 확인하고 비즈니스 finalize를
+차단하는 compensation_pending fence를 획득한 candidate만 후속 adapter의 보상 대상이다.
+accepted 파일의 7일 삭제 worker/Cron과 HTTP 열람은 #85/#84 후속이며 이번에 구현하지 않는다.
+
+서비스 RPC만 private 원장을 쓴다. global domain lock → profile NO KEY UPDATE → live Auth session SHARE →
+attempt → storage state/object 순서와 마지막 clock을 사용한다. actor당 30/min 포화 row, provider 호출 가능한 in-flight 8건,
+slot당 1건, lease 5분·최대8회 claim은 구현 자원 상한이고 제품 capability TTL은 그대로다.
+lease claim digest와 fence를 모두 검사하며 다른 worker가 유효 claim을 공유하거나 만료 claim으로 확정하지 못한다.
+세부 state/권한/후속 범위는 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
+
 ### #30 사진·제출 기반 모델 — source/dev 완료, production 미승격
 
 [PR #81](https://github.com/wrongstory/room-management-system-backend/pull/81)은 독립 QA P0/P1=0,

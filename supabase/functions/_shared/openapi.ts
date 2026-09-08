@@ -655,7 +655,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 43,
+              maxItems: 44,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -2658,6 +2658,7 @@ export const openApiDocument = {
           "cleaning.interrupted_handover",
           "cleaning.scheduled_expired",
           "cleaning.offline_event_resolved",
+          "photo.upload_accepted",
           "reservation.created",
           "reservation.changed",
           "reservation.cancelled",
@@ -2980,6 +2981,11 @@ export const openApiDocument = {
               },
               profileVersion: { type: "integer", minimum: 1 },
               nextAttemptId: { type: "string", format: "uuid" },
+              targetSlotId: { type: "string", format: "uuid" },
+              photoId: { type: "string", format: "uuid" },
+              photoVersion: { type: "integer", minimum: 1 },
+              uploadedAt: { type: "string", format: "date-time" },
+              purgeAfter: { type: "string", format: "date-time" },
               offlineQuarantineId: {
                 type: "string",
                 format: "uuid",

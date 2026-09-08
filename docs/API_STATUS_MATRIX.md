@@ -567,7 +567,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | handover/capability | #7B source/dev 완료 | #7 / PR #77 | production 미승격 |
 | [x] | offline lease/conflict | #7C source/dev 완료 | #7 / PR #79 | production 미승격; purge 운영·hosted E2E 별도 |
 | [x] | 사진 template/slot snapshot·submission version | source/dev 완료 | #30 / PR #81 | production 미승격; owner-only 모델이며 HTTP/Drive/전체 제출 command 제외 |
-| [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미개발 | #9 | Drive only / <=300KiB |
+| [ ] | Google Drive 업로드·조회·7일 영구삭제 | #83 feature source 구현 중 | #9 / #83 / #84 / #85 | DB 작업 원장부터 분리; 실제 Drive/HTTP/purge 미구현 |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
 | [ ] | earning/payroll 정산 API | 미개발 | #8 | append-only |
 | [ ] | notification/outbox/Web Push | 미개발 | #10 | domain event 연계 |
@@ -645,7 +645,7 @@ production completeness 기준의 정본 순서다.
 27. [x] **#7B Attempt Lifecycle source gate** — PR #77 독립 QA·required CI·Codex 96/100 승인 → `dev@5882509` 병합; 운영 미적용
 28. [x] **#7C Offline Lease/Replay/Quarantine source gate** — PR #79 독립 QA·required CI·Codex 96/100 승인 → `dev@e2648de` 병합; 운영 미적용
 29. [x] **#30 Photo Slot / Submission Base source gate** — PR #81 독립 QA·required CI·Codex 96/100 승인 → `dev@a4f8cb5` 병합; 운영 미적용
-30. [ ] **#9 → #31** — 실제 Drive 업로드·열람·삭제 이후 전체 제출·검수 command 구현
+30. [ ] **#83 → #84 → #85 → #31** — 작업 원장/권한 → 실제 Drive 업로드·열람 → 7일 삭제 → 전체 제출·검수
 
 ### #30 사진·제출 기반 source gate
 
@@ -666,7 +666,28 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 승인 head와 병합 결과의 tree는 `14cd83310840570bb291ef44689c41ea7e128b7f`로 동일하다.
 독립 QA·GitHub 리뷰·required CI·Codex 위임 허가·병합 증거를 구분한다. 미설정/legacy 빈 snapshot은
 완전한 사진 증빙으로 간주하지 않으며, #7 물리 완료에 사진 선행조건을 추가하지 않는다.
-다음 본선은 #9 → #31이며, 내부 모델 검증을 실제 파일·Drive 업로드/삭제나 HTTP retry 검증 완료로 표현하지 않는다.
+다음 본선은 #83 → #84 → #85 → #31이며, 내부 모델 검증을 실제 파일·Drive 업로드/삭제나 HTTP retry 검증 완료로 표현하지 않는다.
+
+### #83 사진 업로드 작업 원장 source gate — feature 검증 중, dev 미병합
+
+시작 기준은 `dev@b7cf567238d162a80841c4dcbca94fc23ee82a01`이다. append-only
+`photo_storage_operations` migration은 private operation/provider object/current state/acceptance/event/rate-limit를
+분리하고, raw key 대신 scoped digest와 canonical request hash를 사용한다. claimant digest+monotonic fence로
+동시 worker를 분리하며 accepted 이력은 clear·재촬영·인계·계정/session 폐기 뒤에도 compensation 대상이 아니다.
+
+- [x] #9를 #83(DB 작업 원장) → #84(Drive 업로드·열람) → #85(7일 purge/orphan)로 분리
+- [x] operation당 provider object 1개, slot provider-call in-flight 1·actor 같은 in-flight 8·begin 30/min·5분 lease/최대8회 기술 상한 구현
+- [x] provider-success와 business acceptance 분리, 최신 actor/session/capability/photo CAS finalize 구현
+- [x] safe operation/audit projection에서 raw key/hash/claim/provider locator 제외
+- [x] 전체 로컬 검증과 독립 P0/P1 재검토
+- [ ] required GitHub `application` / `migration` PASS
+- [ ] 구현 PR `dev` 병합
+- [ ] #84 실제 JPEG/WebP bytes·magic/MIME/EXIF 검증, Google OAuth/Drive HTTP, 업로드·열람 API
+- [ ] #85 정확히 168시간 삭제 worker 및 운영 provider/hosted 검증
+
+이번 source는 공개 upload/read route를 추가하지 않으므로 OpenAPI는 **63 paths / 68 operations**를 유지한다.
+합성 metadata와 provider acknowledgement DB 테스트를 실파일·Drive 검증 완료로 표현하지 않는다.
+production DB/Edge/Pages/Google 자격증명 변경은 없다.
 
 #10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
 #46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.

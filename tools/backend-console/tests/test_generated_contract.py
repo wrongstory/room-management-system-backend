@@ -221,3 +221,39 @@ def test_offline_resolution_generated_audit_excludes_ninety_day_client_metadata(
             "resolution": resolution,
         }
         assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary
+
+
+def test_photo_upload_audit_generated_contract_has_safe_metadata_only() -> None:
+    assert DeveloperAuditEventType.PHOTO_UPLOAD_ACCEPTED.value == "photo.upload_accepted"
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {
+        "target_slot_id",
+        "photo_id",
+        "photo_version",
+        "uploaded_at",
+        "purge_after",
+    } <= field_names
+    assert {
+        "provider_locator",
+        "drive_file_id",
+        "sha256",
+        "request_hash",
+        "idempotency_key",
+        "idempotency_key_digest",
+        "claim_id",
+        "claim_digest",
+        "session_id",
+        "token",
+        "raw_before_state",
+        "raw_after_state",
+    }.isdisjoint(field_names)
+    summary = {
+        "cleaningTargetId": "10000000-0000-4000-8000-000000000001",
+        "attemptId": "10000000-0000-4000-8000-000000000002",
+        "targetSlotId": "10000000-0000-4000-8000-000000000003",
+        "photoId": "10000000-0000-4000-8000-000000000004",
+        "photoVersion": 1,
+        "uploadedAt": "2037-01-01T00:00:00+00:00",
+        "purgeAfter": "2037-01-08T00:00:00+00:00",
+    }
+    assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary

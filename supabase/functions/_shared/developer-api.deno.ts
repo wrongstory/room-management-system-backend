@@ -14,14 +14,14 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
-Deno.test("developer audit query accepts all 43 approved event types and rejects 44 before RPC", async () => {
+Deno.test("developer audit query accepts all 44 approved event types and rejects 45 before RPC", async () => {
   let calls = 0;
   const clients = {
     admin: {
       rpc: (_name: string, args: Record<string, unknown>) => {
         calls += 1;
         assert(
-          (args.p_event_types as unknown[]).length === 43,
+          (args.p_event_types as unknown[]).length === 44,
           "full current inventory passed",
         );
         return Promise.resolve({ data: [], error: null });
@@ -40,7 +40,7 @@ Deno.test("developer audit query accepts all 43 approved event types and rejects
     const event of openApiDocument.components.schemas.DeveloperAuditEventType
       .enum
   ) query.append("eventType", event);
-  assert(query.size === 43, "actual source enum inventory");
+  assert(query.size === 44, "actual source enum inventory");
   await developerAuditEvents(
     new Request(
       `https://example.invalid/functions/v1/api/v1/developer/audit-events?${query}`,
@@ -48,7 +48,7 @@ Deno.test("developer audit query accepts all 43 approved event types and rejects
     clients,
     actor,
   );
-  assert(calls === 1, "all 43 accepted");
+  assert(calls === 1, "all 44 accepted");
   query.append("eventType", "cleaning.offline_event_resolved");
   try {
     await developerAuditEvents(
@@ -58,11 +58,11 @@ Deno.test("developer audit query accepts all 43 approved event types and rejects
       clients,
       actor,
     );
-    throw new Error("44 must fail");
+    throw new Error("45 must fail");
   } catch (error) {
     assert(
       error instanceof EdgeError && error.status === 400,
-      "44 rejected with stable validation",
+      "45 rejected with stable validation",
     );
   }
   assert(calls === 1, "over-limit query never reaches DB");
@@ -90,7 +90,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "photo_submission_base",
+    expectedMigrationName === "photo_storage_operations",
     "expected migration must not depend on a remote execution timestamp",
   );
 });

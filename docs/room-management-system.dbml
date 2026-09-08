@@ -1073,6 +1073,90 @@ Ref: public.reservation_schedule_revisions.reservation_id > public.reservations.
 Ref: public.reservation_schedule_revisions.room_id > public.rooms.id
 Ref: public.reservation_schedule_revisions.actor_profile_id > public.profiles.id
 Ref: public.preparation_obligations.reservation_id - public.reservations.id
+// #83 private storage operations. Service-only RPCs, no direct grants; actual Drive is #84.
+Table private.photo_upload_operations {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  command_type text [not null, note: 'photo.upload only']
+  idempotency_key_digest text [not null, note: '64 lower hex; never raw key']
+  request_hash text [not null]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null, ref: > public.cleaning_assignments.id]
+  assignment_revision bigint [not null]
+  target_photo_slot_id uuid [not null]
+  expected_photo_revision bigint [not null]
+  sha256 text [not null]
+  mime_type text [not null]
+  size_bytes integer [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (actor_profile_id, command_type, idempotency_key_digest) [unique]
+    (cleaning_attempt_id, created_at)
+    cleaning_target_id
+    assignment_id
+    (target_photo_slot_id, cleaning_target_id)
+  }
+  Note: 'Immutable operation binding and scoped receipt. No session/raw body. 300KiB JPEG/WebP metadata is not actual byte/provider proof.'
+}
+Table private.photo_provider_objects {
+  id uuid [pk]
+  operation_id uuid [not null, unique, ref: - private.photo_upload_operations.id]
+  provider text [not null, note: 'google_drive only']
+  provider_locator text
+  uploaded_at timestamptz
+  purge_after timestamptz
+  indexes {
+    (provider, provider_locator) [unique]
+    (id, operation_id) [unique]
+  }
+  Note: 'One server UUID per operation; locator/first success clock write-once. Provider locator never publicly projected. Exactly uploaded_at+168h.'
+}
+Table private.photo_upload_states {
+  operation_id uuid [pk, ref: - private.photo_upload_operations.id]
+  cleaning_attempt_id uuid [not null, ref: > public.cleaning_attempts.id]
+  target_photo_slot_id uuid [not null, ref: > private.target_photo_slot_snapshots.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  status text [not null]
+  lease_version integer [not null]
+  lease_claim_digest text
+  lease_expires_at timestamptz
+  revision integer [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (actor_profile_id,status)
+    (status,lease_expires_at,operation_id)
+    target_photo_slot_id
+  }
+  Note: 'Mutable projection. Partial unique attempt/slot for reserved/provider_succeeded. Claims max8 and5min with exact worker digest; accepted terminal, unknown no delete permission.'
+}
+Table private.photo_upload_acceptances {
+  operation_id uuid [pk, ref: - private.photo_upload_operations.id]
+  object_id uuid [not null, unique]
+  photo_version_id uuid [not null, unique, ref: - private.attempt_photo_versions.id]
+  accepted_at timestamptz [not null]
+  Note: 'Immutable EVER-accepted evidence, independent of current photo pointer. Never compensation after clear/replace/handover.'
+}
+Table private.photo_upload_events {
+  id uuid [pk]
+  operation_id uuid [not null, ref: > private.photo_upload_operations.id]
+  revision integer [not null]
+  state text [not null]
+  lease_version integer [not null]
+  occurred_at timestamptz [not null]
+  indexes { (operation_id,revision) [unique] }
+  Note: 'Append-only state/fencing events; no locator, claim digest, key or user payload.'
+}
+Table private.photo_upload_rate_limits {
+  actor_profile_id uuid [pk, ref: - public.profiles.id]
+  minute_started_at timestamptz [not null]
+  occurrence_count integer [not null]
+  Note: 'One mutable minute row per existing actor; saturation30 does not append denial rows.'
+}
+Ref: private.photo_upload_operations.(cleaning_attempt_id,cleaning_target_id) > public.cleaning_attempts.(id,cleaning_target_id)
+Ref: private.photo_upload_operations.(target_photo_slot_id,cleaning_target_id) > private.target_photo_slot_snapshots.(id,cleaning_target_id)
+Ref: private.photo_upload_acceptances.(object_id,operation_id) - private.photo_provider_objects.(id,operation_id)
+
 Ref: public.preparation_obligations.room_id > public.rooms.id
 Ref: public.preparation_obligations.current_attempt_id > public.cleaning_attempts.id
 Ref: public.preparation_obligations.approved_submission_id > public.cleaning_submissions.id
