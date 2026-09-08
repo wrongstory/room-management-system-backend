@@ -18,6 +18,8 @@ interface AssignmentRow {
   available_from_snapshot: string | null;
   due_at_snapshot: string | null;
   notified_at: string | null;
+  notified_room_id_snapshot: string | null;
+  notified_room_number_snapshot: string | null;
   ended_at: string | null;
   created_at: string;
 }
@@ -37,8 +39,8 @@ interface MaidRow {
 export interface AssignmentProjection {
   assignmentId: string;
   cleaningTargetId: string;
-  roomId: string;
-  roomNumber: string;
+  roomId: string | null;
+  roomNumber: string | null;
   maidProfileId: string;
   maidDisplayName: string;
   serviceDate: string;
@@ -441,6 +443,8 @@ const assignmentColumns = [
   "available_from_snapshot",
   "due_at_snapshot",
   "notified_at",
+  "notified_room_id_snapshot",
+  "notified_room_number_snapshot",
   "ended_at",
   "created_at",
 ].join(",");
@@ -838,8 +842,31 @@ function roomNumber(target: TargetRow): string {
 async function hydrateAssignments(
   clients: EdgeClients,
   rows: AssignmentRow[],
+  actor: EdgeActor,
 ): Promise<AssignmentProjection[]> {
   if (rows.length === 0) return [];
+  if (actor.role === "maid") {
+    // 통보 당시 snapshot만 공개한다. 과거 담당의 조회로 현재 target/새 담당을
+    // hydrate하지 않으며, 복원 근거가 없는 과거 객실 정보는 null로 남긴다.
+    return rows.map((row) => ({
+      assignmentId: row.id,
+      cleaningTargetId: row.cleaning_target_id,
+      roomId: row.notified_room_id_snapshot ?? null,
+      roomNumber: row.notified_room_number_snapshot ?? null,
+      maidProfileId: row.maid_profile_id,
+      maidDisplayName: actor.displayName,
+      serviceDate: row.service_date,
+      sequenceNumber: row.sequence_number,
+      revision: row.revision,
+      isCurrent: row.is_current,
+      targetAssignmentVersion: row.revision,
+      availableFrom: row.available_from_snapshot,
+      dueAt: row.due_at_snapshot,
+      notifiedAt: row.notified_at,
+      endedAt: row.ended_at,
+      createdAt: row.created_at,
+    }));
+  }
   const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
   const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
   const [targetResult, maidResult] = await Promise.all([
@@ -933,7 +960,11 @@ export async function listAssignments(
     .order("revision");
   if (!includeHistory) query = query.eq("is_current", true);
   if (actor.role === "maid") {
-    query = query.eq("maid_profile_id", actor.profileId);
+    query = query.eq("maid_profile_id", actor.profileId).not(
+      "notified_at",
+      "is",
+      null,
+    );
   } else if (maidProfileId) {
     query = query.eq("maid_profile_id", maidProfileId);
   }
@@ -941,7 +972,8 @@ export async function listAssignments(
   if (error) throw assignmentDatabaseError(error);
   return hydrateAssignments(
     clients,
-    (data ?? []) as unknown as AssignmentRow[],
+    visibleAssignmentRows(data, actor),
+    actor,
   );
 }
 
@@ -958,11 +990,15 @@ export async function assignmentHistory(
     .eq("cleaning_target_id", uuidValue(cleaningTargetId, "cleaningTargetId"))
     .order("revision");
   if (actor.role === "maid") {
-    query = query.eq("maid_profile_id", actor.profileId);
+    query = query.eq("maid_profile_id", actor.profileId).not(
+      "notified_at",
+      "is",
+      null,
+    );
   }
   const { data, error } = await query;
   if (error) throw assignmentDatabaseError(error);
-  const rows = (data ?? []) as unknown as AssignmentRow[];
+  const rows = visibleAssignmentRows(data, actor);
   if (rows.length === 0) {
     throw actor.role === "maid"
       ? new EdgeError(
@@ -976,7 +1012,22 @@ export async function assignmentHistory(
         "청소 배정 이력을 찾을 수 없습니다.",
       );
   }
-  return hydrateAssignments(clients, rows);
+  return hydrateAssignments(clients, rows, actor);
+}
+
+function visibleAssignmentRows(
+  data: unknown,
+  actor: EdgeActor,
+): AssignmentRow[] {
+  const rows = (data ?? []) as AssignmentRow[];
+  // RLS/쿼리 조건과 별개로 service-role hydration 이전에도 공개 경계를 확인한다.
+  // target에 통보 이력이 있다는 이유로 미통보/다른 담당 revision을 공개하지 않는다.
+  return actor.role === "maid"
+    ? rows.filter((row) =>
+      row.maid_profile_id === actor.profileId &&
+      typeof row.notified_at === "string"
+    )
+    : rows;
 }
 
 function toAssignmentProjection(value: unknown): AssignmentProjection {

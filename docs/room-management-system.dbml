@@ -468,6 +468,8 @@ Table public.cleaning_assignments {
   available_from_snapshot timestamptz
   due_at_snapshot timestamptz
   notified_at timestamptz
+  notified_room_id_snapshot uuid [ref: > public.rooms.id, note: 'Captured on first notification; immutable. Legacy unknown stays null, never current-target fallback.']
+  notified_room_number_snapshot text [note: 'Room number at notification; nullable legacy metadata.']
   ended_at timestamptz
   change_reason_code text
   changed_by uuid [not null]
@@ -476,9 +478,11 @@ Table public.cleaning_assignments {
   Indexes {
     (cleaning_target_id, revision) [unique]
     (maid_profile_id, service_date, sequence_number) [unique, note: 'Partial where is_current']
+    (maid_profile_id, cleaning_target_id, revision) [note: 'Partial where notified_at is not null; maid notified history lookup']
+    notified_room_id_snapshot [note: 'Partial where not null; snapshot FK lookup']
   }
 
-  Note: 'Partial unique indexes permit one current assignment per target and one current sequence per maid/service date. Target, maid, sequence, revision, schedule snapshots, changer, and created time are immutable.'
+  Note: 'Partial unique indexes permit one current assignment per target and one current sequence per maid/service date. Target, maid, sequence, revision, schedule snapshots, changer, and created time are immutable. Maid SELECT requires active self plus notified_at; notified superseded history remains visible, unnotified drafts never do. Notification room snapshots never hydrate from later target state.'
 }
 
 Table public.assignment_change_requests {

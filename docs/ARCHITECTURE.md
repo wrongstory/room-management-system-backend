@@ -107,6 +107,28 @@ erDiagram
 
 #25의 미통보 draft 배정은 기존 `cleaning_targets`와 `cleaning_assignments`를 재사용합니다. active business admin만 service-role RPC를 호출하며 DB가 actor를 다시 검사합니다. target의 `assignment_version`을 CAS로 잠근 뒤 기존 current draft를 `DRAFT_REVISED`로 닫고 새 immutable revision을 추가합니다. 이 단계는 `draft_assigned`까지만 전이하며 notification, outbox, cleaning attempt는 생성하지 않습니다.
 
+### #4 통보된 배정 조회 경계 — 2026-09-08 승인
+
+메이드 조회는 active profile/self ownership/notified revision을 모두 요구합니다. current 목록과
+history 모두 미통보 draft를 제외하며, 본인에게 실제 통보됐던 종료·superseded revision은
+history에 남깁니다. 다른 maid와 한 번도 본인에게 통보되지 않은 revision은 숨깁니다.
+RLS 외에도 Edge query에서 self/notified를 다시 제한하며 파생 target·schedule·attempt 조회가
+새 계획을 노출하는지 함께 검증합니다. 읽기 권한은 activation/start/PIN 권한이 아닙니다.
+
+통보 시점의 객실 ID/번호는 assignment에 immutable snapshot으로 저장합니다. 메이드 history는
+현재 target의 이동된 객실이나 최신 assignment version을 service-role hydration으로 읽지 않습니다.
+근거 없는 legacy 통보 행의 객실 snapshot은 null이며 현재 객실로 추측해서 채우지 않습니다.
+메이드 `targetAssignmentVersion`은 해당 통보 revision의 version이고 관리자는 현재 CAS를 봅니다.
+별도 Fastify assignment route는 기존에 없으므로 이번에 만들지 않습니다.
+
+기존 25개 migration은 그대로 두고 `20260908101844_maid_assignment_visibility.sql`만 추가합니다.
+#7A/B/C의 실행/lease/limited session은 승인된 후속 정책이며 이 PR에 구현하지 않습니다.
+field_completed는 물리적 완료 선언, 필수사진은 submission gate라는 최신 제품 가이드를 따릅니다.
+
+검증 중 발견한 기존 예약 객실 변경의 즉시 FK 충돌은 #73에서 별도 추적합니다. 현재 실제
+`change_reservation` 경로는 planned target 참조 때문에 실패하므로 이번 검증을 객실 변경 성공으로
+표현하지 않습니다. 현재 실패의 원자성과 별도 합성 relocation의 과거 snapshot 비노출을 구분합니다.
+
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 `notifications`, private `notification_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
 ## 시작 전 배정 변경 — #27

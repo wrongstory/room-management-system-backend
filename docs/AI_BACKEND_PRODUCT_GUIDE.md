@@ -235,6 +235,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 마감 뒤 수정은 원본을 덮지 않고 변경 요청과 승인/반려 이력으로 남긴다.
 - 관리자는 가능 메이드만 후보로 오늘/내일 청소를 배정한다.
 - 관리자가 메이드별 작업 순서 1–N을 정하고 저장·통보한다.
+- **[확정 — 2026-09-08 #4 A안]** 메이드는 본인에게 실제 통보된 assignment revision만 조회한다. 과거 superseded/종료 revision도 본인에게 실제 통보됐으면 history에 포함한다. 미통보 draft, 다른 maid의 배정, 자신에게 한 번도 통보되지 않은 revision은 금지한다. 과거 조회 권한은 현재 target 일정·새 담당·새 revision 조회나 수행 권한을 뜻하지 않는다.
 - 랜덤 배정은 먼저 마감 안에 완료 가능한 객실 수를 최대화하고, 그 후보 중 메이드별 기본 청소요금 총액의 최대·최소 격차와 전체 편차를 최소화한다. 금액 점수가 같을 때만 같은 엘리베이터 구역·가까운 호수를 보조 기준으로 쓰고, 그래도 같으면 랜덤으로 고른다. 최종 동률 결과가 반복 실행마다 같을 필요는 없다.
 - 완료 가능 객실 수 계산에는 타입별 예상시간이 필요하다. 예상시간이 운영값으로 확정되기 전에는 이 알고리즘을 production 자동결정으로 사용하지 않는다.
 - 랜덤 결과는 저장 전 초안이다. 실행만으로 담당·attempt·알림·감사 이력을 만들거나 기존 통보/관리자 수동 배정을 덮지 않는다.
@@ -322,19 +323,23 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 앱은 JPEG/WebP를 EXIF 제거 후 사진당 최대 300KiB(307,200 bytes)로 압축한다. 서버도 본문 크기와 허용 형식을 독립적으로 강제한다.
 - 서버는 파일 확장자나 client MIME만 믿지 않고 magic bytes, 허용 MIME, 크기, hash, 현재 담당/attempt/version을 검증한다.
 - 현장 완료, 미전송 업로드, 전체 제출, 검수 요청은 별도 상태다.
-- 모든 필수 slot이 서버에서 유효하게 처리되기 전에는 현장 완료와 전체 제출을 허용하지 않는다.
+- **[확정 — 2026-09-08 정책 변경]** `field_completed`는 물리적인 현장 청소 완료 선언이다. 필수 photo slot 충족은 현장 완료의 선행조건이 아니며 #30/#9/#31의 전체 submission gate에서 검증한다. 현장 완료만으로 room ready, cleaning/review approval, earning, payroll entitlement를 생성하지 않는다.
 - 메이드 화면 행동명은 `검수 요청`, 제출 상태명은 `검수 요청됨`, 관리자 목록명은 `검수 대상 목록`이다. API enum/code는 안정적인 영문값을 사용하고 표시 문구와 분리한다.
 - 재제출은 기존 row를 덮지 않는다. 새 immutable submission version을 만들고 이전 version을 `SUPERSEDED`로 표시하며 current pointer를 CAS로 전환한다.
 - 관리자와 메이드는 현재 version을 기준으로 작업하되 과거 version은 감사용으로 조회할 수 있다.
 
 ### `[확정]` 오프라인 동기화
 
-- 오프라인 수행은 현재 assignment/work version에 묶인 만료 가능한 work lease가 있을 때만 허용한다.
+- Offline v1은 온라인 `startCleaning` → 서버 attempt/lease 발급 → 오프라인 completion 기록 → 재연결 재검증으로 제한한다. offline 신규 start/claim/assignment 선택·변경은 금지한다.
+- work lease TTL은 2시간, clock skew는 ±5분이다. profile, attempt, assignment revision, issued/expires timestamp, allowed actions, lease identity/version에 bind한다.
 - lease와 offline queue에 객실 PIN 평문, 고객 개인정보, 다른 메이드 정보는 넣지 않는다.
 - 현장 완료 event는 client 시각, 마지막 server 시각 offset, stable event UUID를 함께 보존한다.
 - 서버는 event를 순서대로 재생하며 같은 submission/client UUID를 한 번만 반영한다.
-- offline 현장 완료만으로 객실을 배정 가능으로 만들거나 검수·earning을 생성하지 않는다. 서버가 현재 담당/version·필수 사진·권한을 검증해 수용한 뒤에만 효력이 생긴다.
-- 담당 또는 version이 달라진 event는 정상 완료로 강제 연결하지 않고 충돌로 격리한다. 관리자는 `과거 수행 기록으로만 수용`, `운영 효력 기각`, `정정으로 유효 작업에 연결` 중 명시적 command로 종결한다.
+- offline 현장 완료만으로 객실 ready·검수·earning을 생성하지 않는다. 서버가 현재 담당/version·lease·권한을 검증해야 현장 완료 효력이 생긴다. 사진 완전성은 이후 submission 단계에서 별도 검증한다.
+- 이미 성공한 event UUID는 기존 성공 receipt를 replay한다. 발급 당시 유효했지만 만료 후 도착하거나 revoke/reassign된 lease의 event는 quarantine한다. unknown/위조/발급 사실 없는 lease는 reject하고 domain quarantine을 만들지 않는다. 필요 시 bounded security activity만 기록한다. quarantine 재전송은 자동 승격하지 않는다.
+- quarantine에는 event UUID, actor/attempt/assignment revision/lease 식별자, occurred/received timestamps, stable reason, safe canonical hash, resolution state만 저장한다. PIN·guest PII·phone·token·Authorization·photo bytes·raw body·자유형 payload·secret은 금지한다.
+- 관리자 resolution은 `record_only`, `reject_effect`, `correction_link`다. correction_link는 새 검증된 correction command에서 원 quarantine ID를 provenance로 연결하며 원 event를 정상 event로 바꾸지 않는다. event metadata는 최대 90일, resolution은 별도 append-only audit에 기록하고 audit retention에 따른다.
+- 이 절과 아래 limited capability는 승인된 #7A/B/C 후속 계약이다. #4 조회정책 PR에서 실행·lease·quarantine 기능을 구현한 것으로 표시하지 않는다.
 
 ### `[확정]` 객실 특이사항
 
@@ -439,9 +444,12 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 - 새 업무 배정은 즉시 막는다.
 - 정상 현장 완료 후 미제출인 업무에는 capability 발급 시각부터 최대 24시간, 동결된 assignment revision 범위에서 사진 업로드·검증·유효한 전체 제출을 허용할 수 있다.
-- 청소 진행 중 비활성화는 관리자가 `현재 한 건 마무리` 또는 `즉시 중단·인계`를 선택한다. 전자는 지정한 한 회차만 완료하게 한다.
+- 청소 진행 중 비활성화는 관리자가 `현재 한 건 마무리` 또는 `즉시 중단·인계`를 선택한다. 전자는 현재 in_progress 한 건만 허용하며 새 시작·다른 assignment는 금지한다. execution capability는 발급 후 2시간 hard expiry이고 field_completed 시 즉시 종료한다. 만료 후 수행 권한은 종료하며 관리자 handover가 필요하다.
+- 즉시 중단·인계는 기존 attempt를 interrupted로 종결하고 execution capability를 회수하며 새 maid의 새 scheduled attempt를 만든다. 이전 maid의 complete·current attempt 재활성화는 금지한다.
 - 즉시 중단·인계된 이전 메이드에게는 증빙 업로드만 허용한다. current submission 생성, 검수, earning 연결은 금지한다.
 - 어떤 제한 capability도 일반 maid 권한이나 관리자 권한을 주지 않는다.
+- 별도 opaque login secret/bearer capability token/복구 인증키를 만들지 않는다. 기존 Supabase Auth user와 유효·미폐기 session, 허용 limited profile state, 미만료 DB capability, 정확한 attempt/revision, allowed action을 전용 endpoint에서 모두 검증한다. upload/submit capability도 profile/attempt/revision/발급·만료/actions에 bind한다.
+- 일반 API의 active-profile guard는 유지한다. session이 revoke됐거나 refresh 불가능하면 우회 credential을 발급하지 않고 관리자 handover/reassignment로 처리한다. 현재 일반 비활성화의 session 폐기/Auth ban 계약 변경은 #7B에서 별도 검증하며 #4에서 변경하지 않는다.
 - API와 RLS가 같은 capability matrix를 사용해야 한다.
 
 ### `[확정]` 객실 PIN
@@ -592,7 +600,8 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 ### `v0.2.0` 포함 후 남은 차이
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
-- 담당 배정 revision/current pointer·순서·preview·activation, 현장 attempt/offline lease, 정규화 photo slot, Drive worker, 검수·재청소, bomb report, complaint/penalty/appeal, payroll event/adjustment, notification outbox와 프런트 실제 연동이 남아 있다.
+- #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview는 `dev@8bdb5db2cd65359adca13e132959bcdf5f808324`에서 source/dev 완료다. production에는 승격되지 않았다. #4 notified-only 조회 정합화가 #7A 선행 gate이며 독립 검토·명시적 병합 허가 전에는 완료로 표시하지 않는다.
+- 이후 #7A 실행 → #7B 인계/limited capability → #7C offline, #30 photo slot → #9 Drive → #31 검수 순서다. 정산·알림 worker·프런트 실제 연동도 후속이며 배정의 outbox 저장과 실제 외부 전달을 구분한다.
 - initial migration과 테스트에는 확정된 `purge_after NOT NULL` 및 업로드 후 7일 계약이 들어 있지만, 실제 Google Drive 업로드·조회·purge worker는 아직 구현되지 않았다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36에서 Supabase Edge Functions `api`의 health/Auth/rooms RPC와 Cron용 예약 scheduler Function을 로컬 PoC로 검증한다. 운영 smoke와 독립 리뷰 전에는 Supabase-only production runtime을 확정하거나 Fastify를 삭제하지 않는다.

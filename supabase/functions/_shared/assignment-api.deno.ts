@@ -430,16 +430,24 @@ function request(
 function queryResult(data: unknown) {
   const filters: Array<[string, unknown]> = [];
   type Query = Promise<{ data: unknown; error: null }> & {
-    select: () => Query;
+    select: (columns: string) => Query;
     eq: (column: string, value: unknown) => Query;
+    not: (column: string, operator: string, value: unknown) => Query;
     in: (column: string, value: unknown[]) => Query;
     order: () => Query;
   };
   let query: Query;
   query = Object.assign(Promise.resolve({ data, error: null }), {
-    select: () => query,
+    select: (columns: string) => {
+      filters.push(["select", columns]);
+      return query;
+    },
     eq: (column: string, value: unknown) => {
       filters.push([column, value]);
+      return query;
+    },
+    not: (column: string, operator: string, value: unknown) => {
+      filters.push([`not.${column}.${operator}`, value]);
       return query;
     },
     in: (column: string, value: unknown[]) => {
@@ -462,7 +470,9 @@ function assignmentRow(overrides: Record<string, unknown> = {}) {
     is_current: true,
     available_from_snapshot: "2026-09-04T01:00:00Z",
     due_at_snapshot: "2026-09-04T06:00:00Z",
-    notified_at: null,
+    notified_at: "2026-09-03T12:00:00Z",
+    notified_room_id_snapshot: roomId,
+    notified_room_number_snapshot: "101",
     ended_at: null,
     created_at: "2026-09-03T10:00:00Z",
     ...overrides,
@@ -475,7 +485,7 @@ function readClients(rows: unknown[]) {
     {
       id: targetId,
       room_id: roomId,
-      assignment_version: 2,
+      assignment_version: 999,
       rooms: { room_number: "101" },
     },
   ]);
@@ -490,7 +500,7 @@ function readClients(rows: unknown[]) {
       },
     },
   } as unknown as EdgeClients;
-  return { clients, access };
+  return { clients, access, targets, maids };
 }
 
 Deno.test("assignment path accepts only exact UUID history route", () => {
@@ -540,6 +550,15 @@ Deno.test("admin and maid read assignment lists through scoped RLS", async () =>
         ),
         "maid self filter",
       );
+      assert(
+        access.filters.some(([column, value]) =>
+          column === "not.notified_at.is" && value === null
+        ),
+        "maid notified-only query",
+      );
+      assert(result[0].targetAssignmentVersion === 2, "revision snapshot");
+    } else {
+      assert(result[0].targetAssignmentVersion === 999, "admin current CAS");
     }
   }
 });
@@ -570,6 +589,103 @@ Deno.test("maid history is self-only and cross-maid reads fail before query", as
     )
   );
   assert(cross.code === "ASSIGNMENT_ACCESS_REQUIRED", "cross-maid blocked");
+});
+
+Deno.test("maid list and history preserve own notified revisions only, without current target version hydration", async () => {
+  const pastId = "70000000-0000-4000-8000-000000000010";
+  const rows = [
+    assignmentRow({ id: pastId, is_current: false, revision: 1 }),
+    assignmentRow(),
+    assignmentRow({ notified_at: null, revision: 3 }),
+    assignmentRow({ maid_profile_id: otherMaid.profileId, revision: 4 }),
+  ];
+  for (const historyRoute of [true, false]) {
+    const { clients, access, targets, maids } = readClients(rows);
+    const result = historyRoute
+      ? await assignmentHistory(
+        request(`/v1/assignments/${targetId}/history`),
+        clients,
+        maid,
+        targetId,
+      )
+      : await listAssignments(
+        request("/v1/assignments?serviceDate=2026-09-04&includeHistory=true"),
+        clients,
+        maid,
+      );
+    assert(
+      result.length === 2 && result[0].assignmentId === pastId,
+      "own notified past retained",
+    );
+    assert(
+      result.every((row) =>
+        row.notifiedAt !== null && row.maidProfileId === maid.profileId
+      ),
+      "no never-notified or other maid",
+    );
+    assert(
+      result[0].targetAssignmentVersion === 1,
+      "past version not current target version",
+    );
+    assert(
+      access.filters.some(([key]) => key === "not.notified_at.is"),
+      "DB filter required",
+    );
+    assert(
+      !access.filters.some(([key]) => key === "is_current"),
+      "history not restricted to current",
+    );
+    assert(
+      targets.filters.length === 0,
+      "maid history never hydrates mutable target or room",
+    );
+    assert(
+      maids.filters.length === 0,
+      "verified actor supplies own display name without service lookup",
+    );
+  }
+  const draftOnly = readClients([assignmentRow({ notified_at: null })]);
+  const empty = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-04"),
+    draftOnly.clients,
+    maid,
+  );
+  assert(
+    empty.length === 0 && draftOnly.targets.filters.length === 0,
+    "draft list empty before service hydration",
+  );
+  const denied = await captureEdgeError(() =>
+    assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      draftOnly.clients,
+      maid,
+      targetId,
+    )
+  );
+  assert(
+    denied.code === "ASSIGNMENT_ACCESS_REQUIRED",
+    "unpublished target history forbidden",
+  );
+});
+
+Deno.test("legacy notified assignment without a proven room snapshot remains null", async () => {
+  const { clients, targets } = readClients([assignmentRow({
+    notified_room_id_snapshot: null,
+    notified_room_number_snapshot: null,
+    is_current: false,
+  })]);
+  const result = await assignmentHistory(
+    request(`/v1/assignments/${targetId}/history`),
+    clients,
+    maid,
+    targetId,
+  );
+  assert(
+    result.length === 1 && result[0].roomId === null &&
+      result[0].roomNumber === null,
+    "never invent a historical room from current state",
+  );
+  assert(targets.filters.length === 0, "current target not read as fallback");
 });
 
 Deno.test("developer assignment reads and non-admin draft writes are denied", async () => {

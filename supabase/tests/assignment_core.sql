@@ -453,13 +453,11 @@ select is(
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '18000000-0000-4000-8000-000000000002', true);
-select ok(
-  (select count(*) > 0 from public.cleaning_assignments)
-    and not exists (
-      select 1 from public.cleaning_assignments
-      where maid_profile_id <> '28000000-0000-4000-8000-000000000002'
-    ),
-  'maid RLS exposes only own current and historical revisions'
+-- #4 승인 A안은 #25의 미통보 draft 조회 기대를 명시적으로 대체한다.
+select is(
+  (select count(*)::integer from public.cleaning_assignments),
+  0,
+  'maid RLS hides every never-notified draft and historical revision'
 );
 
 reset role;
