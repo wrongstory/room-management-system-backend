@@ -58,8 +58,8 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@a4f8cb5b3c551b6df641491f5ac02c209d71f26d` (#25~#29, #4 / PR #74, #7A / PR #75, #7B / PR #77, #7C / PR #79, 상태 문서 PR #80 및 #30 / PR #81까지 완료; production 미승격)
-- 최신 dev source: **30 migrations / 63 paths / 68 operations**. #30은 모델 기반만 추가하여 HTTP/OpenAPI 수는 변하지 않았다. 아래 개별 PR 절의 이전 수치는 해당 PR 검증 당시 snapshot이며 현재 통합 수치는 이 항목을 따른다.
+- 개발 통합 source 기준: `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b` (#25~#29, #4 / PR #74, #7A / PR #75, #7B / PR #77, #7C / PR #79, #30 / PR #81 및 #83 / PR #86까지 source/dev 완료; production 미승격)
+- 최신 dev source: **31 migrations / 63 paths / 68 operations**. #83은 DB 작업 원장·권한 계약을 추가했으며 공개 upload/read route를 추가하지 않아 HTTP/OpenAPI 수는 변하지 않았다. 아래 개별 PR 절의 이전 수치는 해당 PR 검증 당시 snapshot이며 현재 통합 수치는 이 항목을 따른다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -548,7 +548,7 @@ PR #79는 2026-09-09 KST에 dev로 squash 병합됐다. 운영 migration/API/Pag
 
 승인 head와 병합 결과의 tree는 `6768b63f64fdea6dba7d4eda32a70807b7274823`로 동일하다.
 GitHub COMMENTED 리뷰·독립 서브에이전트 QA·Codex 위임 허가를 구분한다. #7A/B/C는
-source/dev 완료이며 #30도 PR #81로 source/dev 완료했다. 다음 본선은 #9 → #31이다. production purge 주기/backlog/실패감시와
+source/dev 완료이며 #30 / PR #81과 #83 / PR #86도 source/dev 완료했다. 다음 본선은 #84 → #85 → #31이다. production purge 주기/backlog/실패감시와
 hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 gate 추적을 위해 Open 유지한다.
 
 ## 13. 후속 업무 API·모델 개발 상태
@@ -567,7 +567,8 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | handover/capability | #7B source/dev 완료 | #7 / PR #77 | production 미승격 |
 | [x] | offline lease/conflict | #7C source/dev 완료 | #7 / PR #79 | production 미승격; purge 운영·hosted E2E 별도 |
 | [x] | 사진 template/slot snapshot·submission version | source/dev 완료 | #30 / PR #81 | production 미승격; owner-only 모델이며 HTTP/Drive/전체 제출 command 제외 |
-| [ ] | Google Drive 업로드·조회·7일 영구삭제 | #83 feature source 구현 중 | #9 / #83 / #84 / #85 | DB 작업 원장부터 분리; 실제 Drive/HTTP/purge 미구현 |
+| [x] | 사진 업로드 작업 원장·권한 계약 | #83 source/dev 완료 | #83 / PR #86 | production 미승격; DB/내부 계약만, 실제 Drive/HTTP/purge 제외 |
+| [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미구현 — 다음 #84 | #9 / #84 / #85 | #83 DB 기반 완료와 별개; 실제 Drive/HTTP/purge 미구현 |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
 | [ ] | earning/payroll 정산 API | 미개발 | #8 | append-only |
 | [ ] | notification/outbox/Web Push | 미개발 | #10 | domain event 연계 |
@@ -645,7 +646,8 @@ production completeness 기준의 정본 순서다.
 27. [x] **#7B Attempt Lifecycle source gate** — PR #77 독립 QA·required CI·Codex 96/100 승인 → `dev@5882509` 병합; 운영 미적용
 28. [x] **#7C Offline Lease/Replay/Quarantine source gate** — PR #79 독립 QA·required CI·Codex 96/100 승인 → `dev@e2648de` 병합; 운영 미적용
 29. [x] **#30 Photo Slot / Submission Base source gate** — PR #81 독립 QA·required CI·Codex 96/100 승인 → `dev@a4f8cb5` 병합; 운영 미적용
-30. [ ] **#83 → #84 → #85 → #31** — 작업 원장/권한 → 실제 Drive 업로드·열람 → 7일 삭제 → 전체 제출·검수
+30. [x] **#83 Photo Storage Operations source gate** — PR #86 독립 QA·required CI·Codex 96/100 승인 → `dev@cf91753` 병합; 운영 미적용
+31. [ ] **#84 → #85 → #31** — 실제 Drive 업로드·열람 → 7일 삭제 → 전체 제출·검수
 
 ### #30 사진·제출 기반 source gate
 
@@ -666,11 +668,13 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 승인 head와 병합 결과의 tree는 `14cd83310840570bb291ef44689c41ea7e128b7f`로 동일하다.
 독립 QA·GitHub 리뷰·required CI·Codex 위임 허가·병합 증거를 구분한다. 미설정/legacy 빈 snapshot은
 완전한 사진 증빙으로 간주하지 않으며, #7 물리 완료에 사진 선행조건을 추가하지 않는다.
-다음 본선은 #83 → #84 → #85 → #31이며, 내부 모델 검증을 실제 파일·Drive 업로드/삭제나 HTTP retry 검증 완료로 표현하지 않는다.
+후속 #83도 PR #86으로 source/dev 완료했으며 다음 본선은 #84 → #85 → #31이다. 내부 모델 검증을 실제 파일·Drive 업로드/삭제나 HTTP retry 검증 완료로 표현하지 않는다.
 
-### #83 사진 업로드 작업 원장 source gate — feature 검증 중, dev 미병합
+### #83 사진 업로드 작업 원장 source gate — source/dev 완료, production 미승격
 
-시작 기준은 `dev@b7cf567238d162a80841c4dcbca94fc23ee82a01`이다. append-only
+개발 시작 기준(당시 base)은 `dev@b7cf567238d162a80841c4dcbca94fc23ee82a01`이고,
+[PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)의 dev squash 결과는
+`cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`이다. append-only
 `photo_storage_operations` migration은 private operation/provider object/current state/acceptance/event/rate-limit를
 분리하고, raw key 대신 scoped digest와 canonical request hash를 사용한다. claimant digest+monotonic fence로
 동시 worker를 분리하며 accepted 이력은 clear·재촬영·인계·계정/session 폐기 뒤에도 compensation 대상이 아니다.
@@ -679,15 +683,20 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 - [x] operation당 provider object 1개, slot provider-call in-flight 1·actor 같은 in-flight 8·begin 30/min·5분 lease/최대8회 기술 상한 구현
 - [x] provider-success와 business acceptance 분리, 최신 actor/session/capability/photo CAS finalize 구현
 - [x] safe operation/audit projection에서 raw key/hash/claim/provider locator 제외
-- [x] 전체 로컬 검증과 독립 P0/P1 재검토
-- [ ] required GitHub `application` / `migration` PASS
-- [ ] 구현 PR `dev` 병합
+- [x] 전체 로컬 검증: 500 rotating key, DB lock 대기 중 lease 만료, 실제 handover↔finalize 양순서를 포함한 동시성 검증
+- [x] exact-head 독립 QA **P0 0 / P1 0 / P2 0, 96/100** — `3dfbb70176533a69257c68c2b2af2ee19cc9bd22`, [PR #86 리뷰](https://github.com/wrongstory/room-management-system-backend/pull/86)
+- [x] exact-head required GitHub `application` / `migration` PASS — [run 34258980846](https://github.com/wrongstory/room-management-system-backend/actions/runs/34258980846)
+- [x] Codex 위임 평가96/100·명시적 source/dev 병합 허가 — [comment 5589446371](https://github.com/wrongstory/room-management-system-backend/pull/86#issuecomment-5589446371)
+- [x] PR #86 `dev` squash 병합 — `cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`
+- [ ] 별도 release/main 및 production migration·hosted 검증
 - [ ] #84 실제 JPEG/WebP bytes·magic/MIME/EXIF 검증, Google OAuth/Drive HTTP, 업로드·열람 API
 - [ ] #85 정확히 168시간 삭제 worker 및 운영 provider/hosted 검증
 
 이번 source는 공개 upload/read route를 추가하지 않으므로 OpenAPI는 **63 paths / 68 operations**를 유지한다.
+승인 exact head와 병합 결과의 tree는 `9e7898af7de2d3025fe53ca848225cbbaa35b5fa`로 동일하다.
+독립 QA·GitHub COMMENTED 리뷰·required CI·Codex 위임 승인·병합 증거는 구분한다. 다음 작업은 **#84**다.
 합성 metadata와 provider acknowledgement DB 테스트를 실파일·Drive 검증 완료로 표현하지 않는다.
-production DB/Edge/Pages/Google 자격증명 변경은 없다.
+production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production snapshot은 **19 migrations / 39 paths / 43 operations**로 유지하며 이번에 운영을 재검증하지 않았다.
 
 #10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
 #46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.

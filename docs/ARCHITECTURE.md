@@ -82,7 +82,13 @@ erDiagram
 
 ## 동시성과 멱등성
 
-### #83 사진 업로드 작업 원장 — 구현 중, HTTP/provider 미노출
+### #83 사진 업로드 작업 원장 — source/dev 완료, production 미승격
+
+[PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)은 exact head
+`3dfbb70176533a69257c68c2b2af2ee19cc9bd22`의 독립 QA P0/P1/P2=0·required CI·Codex 96/100 승인 후
+`dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다. 현재 개발 통합은
+31 migrations / 63 paths / 68 operations다. 기존 production 19 migrations / 39 paths / 43 operations는
+변경하지 않았다. 다음 구현은 #84 → #85 → #31이며 실제 Drive/HTTP/purge는 아직 미구현이다.
 
 `photo_storage_operations`는 #30 뒤의 append-only 개발 migration이다. private operation/object,
 mutable lease/state, immutable acceptance/event를 분리한다. scoped key digest + canonical request hash와
@@ -110,8 +116,8 @@ lease claim digest와 fence를 모두 검사하며 다른 worker가 유효 claim
 
 [PR #81](https://github.com/wrongstory/room-management-system-backend/pull/81)은 독립 QA P0/P1=0,
 required CI와 Codex 위임 평가96/100 승인을 거쳐 `dev@a4f8cb5b3c551b6df641491f5ac02c209d71f26d`에
-병합됐다. 개발 통합은 30 migrations / 63 paths / 68 operations이며, 기존 production
-19 migrations / 39 paths / 43 operations는 변경하지 않았다. 다음 본선은 #9 → #31이다.
+병합됐다. 당시 개발 통합은 30 migrations / 63 paths / 68 operations였으며, 기존 production
+19 migrations / 39 paths / 43 operations는 변경하지 않았다. 최신 통합 상태와 다음 작업은 위 #83 절을 따른다.
 
 사진 객체의 업로드, 제출본 작성, 검수와 물리 현장 완료는 분리한다.
 target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참조하고,

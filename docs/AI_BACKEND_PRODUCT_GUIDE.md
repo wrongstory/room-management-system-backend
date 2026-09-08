@@ -622,7 +622,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview는 source/dev 완료다. #4 notified-only 조회도 PR #74의 독립 검토·CI·위임 승인 후 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에 병합되어 #7A 선행 gate를 충족했다. production에는 승격되지 않았다.
 - 이후 #7A 실행 → #7B 인계/limited capability → #7C offline, #30 photo slot → #9 Drive → #31 검수 순서다. 정산·알림 worker·프런트 실제 연동도 후속이며 배정의 outbox 저장과 실제 외부 전달을 구분한다.
-- #30은 attempt/slot/photo-version 정본을 `dev`에 구현했다. #83 feature source는 그 위에 private upload operation/object/acceptance와 claimant fence를 추가하지만 실제 Google Drive HTTP·바이너리 검증·조회·purge worker는 아직 구현하지 않는다. 실제 provider 연동은 #84, 정확히 7일 삭제는 #85가 소유한다.
+- #30은 attempt/slot/photo-version 정본을 `dev`에 구현했다. 그 위에 private upload operation/object/acceptance와 claimant fence를 추가한 #83도 PR #86의 독립 QA·required CI·위임 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`로 source/dev 완료했다. 현재 개발 통합은 31 migrations / 63 paths / 68 operations이며 production에는 승격하지 않았다. 실제 Google Drive HTTP·바이너리 검증·조회·purge worker는 아직 미구현이다. 다음은 #84 실제 provider 업로드·열람 → #85 정확히 7일 삭제 → #31 전체 제출·검수 순서다. source/dev 완료를 production 사용 가능으로 표현하지 않는다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36에서 Supabase Edge Functions `api`의 health/Auth/rooms RPC와 Cron용 예약 scheduler Function을 로컬 PoC로 검증한다. 운영 smoke와 독립 리뷰 전에는 Supabase-only production runtime을 확정하거나 Fastify를 삭제하지 않는다.
 
