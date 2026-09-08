@@ -82,7 +82,12 @@ erDiagram
 
 ## 동시성과 멱등성
 
-### #30 사진·제출 기반 모델 — feature 구현 중
+### #30 사진·제출 기반 모델 — source/dev 완료, production 미승격
+
+[PR #81](https://github.com/wrongstory/room-management-system-backend/pull/81)은 독립 QA P0/P1=0,
+required CI와 Codex 위임 평가96/100 승인을 거쳐 `dev@a4f8cb5b3c551b6df641491f5ac02c209d71f26d`에
+병합됐다. 개발 통합은 30 migrations / 63 paths / 68 operations이며, 기존 production
+19 migrations / 39 paths / 43 operations는 변경하지 않았다. 다음 본선은 #9 → #31이다.
 
 사진 객체의 업로드, 제출본 작성, 검수와 물리 현장 완료는 분리한다.
 target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참조하고,

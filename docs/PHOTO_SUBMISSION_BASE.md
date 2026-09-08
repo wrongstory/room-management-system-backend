@@ -2,11 +2,14 @@
 
 ## 범위와 현재 상태
 
-- 작업 기준: `dev@9ed843ca570d1fccaa95fdb672fb8dc20fe91107`.
-- 상태: feature 구현·로컬 검증 완료. 독립 exact-head 리뷰·required CI·dev 병합은 별도 대기 gate다.
+- 개발 시작 기준(당시 base): `dev@9ed843ca570d1fccaa95fdb672fb8dc20fe91107`.
+- 상태: PR #81 독립 exact-head 리뷰·required CI·위임 승인·dev 병합 완료. production에는 승격하지 않았다.
+- 현재 개발 통합 기준: `dev@a4f8cb5b3c551b6df641491f5ac02c209d71f26d`, **30 migrations / 63 paths / 68 operations**. #30은 HTTP/OpenAPI를 추가하지 않았다.
+- production 기준은 기존 **19 migrations / 39 paths / 43 operations**로 유지되며 이번 작업에서 운영을 재검증하거나 변경하지 않았다.
 - 제품 정본: `AI_BACKEND_PRODUCT_GUIDE.md` §7, §10, §11과 고정 프런트 정책 `DOCS/18_TYPE_PHOTO_TEMPLATE_POLICY.md`.
 - #30은 versioned slot, target snapshot, attempt별 사진 연결, 불변 제출본과 current pointer, 증빙 완전성 검증 기반만 소유한다.
 - 실제 Google Drive 업로드·바이너리 검증·삭제 worker는 #9, 전체 제출·검수 command는 #31이다. 이번 단계에서 새 HTTP API나 운영 배포를 추가하지 않는다.
+- 다음 본선은 **#9 → #31**이다.
 
 ## 반드시 유지할 경계
 
@@ -28,7 +31,7 @@
 - 내부 projection 검증의 자원 상한은 슬롯 100개, stable key 80자, 표시 순서 0–99의 중복 없는 값이다. 이는 미확정 청소 종류의 필수 사진 수를 정하는 제품 정책이 아니다. 기존 자료가 이 상한이나 지원 형식 밖이면 값을 버리거나 바꾸지 않고 미설정 상태로 보존한다.
 - 필수 슬롯이 하나도 없는 자료는 사진 0장으로 제출 가능한 템플릿으로 인정하지 않는다. 임의 필수 슬롯을 추가하지 않고 완전성 검증에서 거부한다.
 
-## 검증 계획
+## source 검증 범위
 
 - NULL·다른 target/attempt/slot 연결과 중복 current pointer 차단.
 - 사진 교체·제출 pointer CAS·동시 재시도 및 과거 binding 불변.
@@ -69,3 +72,16 @@ role/status·capability·assignment/version 검증, scoped idempotency, audit/ou
   일시 제거하여 재현하고 rollback으로 복원한다. migration이나 실제 접근 권한을 완화하지 않으며,
   복원 후 원장 DELETE 차단도 재검증한다.
 - 이 기록은 GitHub required CI·독립 exact-head 승인·병합 또는 실제 이미지 업로드 검증을 대신하지 않는다.
+
+## source/dev 승인·병합 증거 — PR #81
+
+- 승인 exact head: `d43feafc3c64e0b722843dd1ee08d31393d6b6b0`.
+- 독립 보안/계약 QA P0/P1=0: [review 5144510401](https://github.com/wrongstory/room-management-system-backend/pull/81#pullrequestreview-5144510401).
+- exact-head required CI application/migration PASS: [run 34252427375](https://github.com/wrongstory/room-management-system-backend/actions/runs/34252427375).
+- Codex 위임 평가96/100 및 명시적 source/dev 병합 허가: [comment 5588646783](https://github.com/wrongstory/room-management-system-backend/pull/81#issuecomment-5588646783).
+- [PR #81](https://github.com/wrongstory/room-management-system-backend/pull/81) dev squash: `a4f8cb5b3c551b6df641491f5ac02c209d71f26d`.
+- 승인 head와 병합 결과의 tree: `14cd83310840570bb291ef44689c41ea7e128b7f`, 동일함을 확인했다.
+
+독립 QA·GitHub 리뷰·CI·Codex 위임 승인·병합은 별도 근거다. 위 source/dev 완료는 실제 파일의
+바이너리 검증, Drive 업로드·삭제, 전체 제출·검수 command, production/hosted 사용 가능 판정을
+포함하지 않는다. 이 후속은 #9/#31 및 별도 release/main 승격에서 검증한다.
