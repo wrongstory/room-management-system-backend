@@ -1,8 +1,13 @@
 # #7C — 오프라인 완료·격리·관리자 정정
 
 시작 기준: `dev@695c10cd8f6cf1be24d272bd18885e8272d83388`.
-작업 브랜치: `codex/7c-offline-lease-quarantine`. 이 문서는 승인된 제품 계약과 구현 설계이며
-아직 source 완료나 production 배포를 선언하지 않는다. 최종 HTTP 계약은 같은 head의 OpenAPI다.
+작업 브랜치: `codex/7c-offline-lease-quarantine`. PR #79는 source/dev 완료이며 production에는
+배포하지 않았다. 최종 HTTP 계약은 같은 source의 OpenAPI다.
+
+2026-09-09 KST: exact head `25ceabd2d9d781bb26e68be2230ab6d08ddd3e87`의 독립 QA P0/P1=0,
+required CI `34243676126` PASS, Codex96/100 위임 허가 후 dev squash
+`e2648de4e40a84e60d19cbb1e4d01974a2f3d369`에 병합했다. 양쪽 tree는
+`6768b63f64fdea6dba7d4eda32a70807b7274823`로 동일하다.
 
 ## 승인 범위
 
@@ -57,10 +62,10 @@ event에서 검증 가능한 정규화 시각을 명시 확인하는 좁은 경�
 재시도는 권한이 나중에 회복돼도 자동 성공으로 승격하지 않는다. 실제 완료와 receipt,
 감사 및 필요한 outbox는 같은 짧은 transaction으로 처리한다.
 
-## HTTP 경계 — 구현 중
+## HTTP 경계 — source/dev 완료
 
 기존 `POST /v1/attempts/{attemptId}/start`는 온라인 수행 계약을 그대로 유지한다.
-새 lease가 필요한 클라이언트만 아래 경로를 사용한다. 아래 표는 source 설계이며 운영 사용 가능
+새 lease가 필요한 클라이언트만 아래 경로를 사용한다. 아래 표는 검증된 source 계약이며 운영 사용 가능
 표시가 아니다. method/path가 정확히 일치하지 않으면 기존 unknown-route 계약으로 거부한다.
 
 | 경로 | 역할·효력 |
@@ -100,7 +105,7 @@ gate에는 bounded purger의 실제 주기 실행, 삭제 backlog와 실패 감�
 - `ci:quality`: secrets/lint/typecheck/application 123 tests/build PASS.
 - `edge:check`: 114 tests PASS. Python ruff/format/mypy 및 pytest 36 tests, build source check PASS.
 - `db:test:concurrency`: 전체 기존 suite 및 신규 offline/expiry 경합 PASS.
-- 독립 working-tree QA P0/P1=0. exact-head CI/최종 승인·병합은 별도 gate다.
+- 독립 exact-head QA P0/P1=0, GitHub application/migration 및 source/dev 승인·병합 완료.
 
 - [x] 온라인 시작/lease 원자성 및 다른 key·기기에서 TTL 연장 금지
 - [x] actor/session/owner/current revision과 limited 상태 persona/RPC/RLS 검증
@@ -111,8 +116,8 @@ gate에는 bounded purger의 실제 주기 실행, 삭제 backlog와 실패 감�
 - [x] 완료/인계/계정변경/session revoke/resolve/purge 동시성
 - [x] 원자 audit/outbox 및 raw UUID/PII/secret 영구복제 차단
 - [x] fresh DB/RLS/concurrency/lint/advisor, Edge/application/Python/OpenAPI
-- [ ] exact-head independent QA P0/P1=0 + required CI + 위임 평가90점 이상
-- [ ] dev 병합 (production과 별도)
+- [x] exact-head independent QA P0/P1=0 + required CI + 위임 평가96/100
+- [x] PR #79 dev 병합 (production과 별도)
 
 기존28 migrations는 그대로 두고 후속 migration을 추가한다. #30/#9/#31 및 #73은 이 PR에
 포함하지 않는다. production/recovery/main/release/Edge/Pages/Cron/Vault/secrets/tag 변경은 없다.
