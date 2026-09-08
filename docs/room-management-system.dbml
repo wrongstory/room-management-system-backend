@@ -106,6 +106,7 @@ Table public.profiles {
   login_sequence int [not null]
   role app_role [not null]
   status account_status [not null, default: 'active']
+  account_lifecycle_version bigint [not null, default: 1, note: '#7B role/status CAS; trigger-owned increment, never caller overwrite']
   phone_last_four text
   phone_lookup_hash text [unique]
   must_change_password boolean [not null, default: true]
@@ -535,7 +536,46 @@ Table public.cleaning_attempts {
   Indexes {
     (cleaning_target_id, attempt_number) [unique]
   }
-  Note: '#28 activates scheduled once. #7A exact own active maid starts/completes via scoped receipt, execution CAS and atomic safe audit. One in_progress per maid. Field completion does not approve cleaning/readiness or create a submission/earning. Target/assignment/maid/revision/template/room identity stays immutable. #7B/C remain separate.'
+  Note: '#28 activates scheduled once. #7A own active maid execution; #7B limited completion/handover/expired scheduled retirement advance CAS. One in_progress per maid. No physical completion implies submission/readiness/earning. Attempt identity and snapshots immutable. Only proven interrupted handover history is excluded from current-work checks; superseded expiry preserves history. #7C offline/PIN remains excluded.'
+}
+
+Table private.attempt_capability_grants {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  attempt_id uuid [not null, ref: > public.cleaning_attempts.id]
+  assignment_id uuid [not null, ref: > public.cleaning_assignments.id]
+  assignment_revision bigint [not null]
+  kind text [not null, note: 'finish_current / upload_submit / evidence_upload']
+  allowed_actions text[] [not null, note: 'Fixed by kind, never arbitrary caller actions']
+  issued_at timestamptz [not null]
+  expires_at timestamptz [not null, note: 'issued_at + 2h finish; +24h upload; immutable']
+  granted_by uuid [not null, ref: > public.profiles.id]
+  Indexes {
+    (attempt_id, kind) [unique]
+    (actor_profile_id, attempt_id)
+    assignment_id
+    granted_by
+  }
+  Note: '#7B private immutable ledger. No Data API/direct service-role table access. No token/session ID stored. Latest valid Supabase session + role/status + exact attempt/revision/action + unrevoked hard expiry required every dedicated API call. Different command key cannot renew TTL.'
+}
+
+Table private.attempt_capability_revocations {
+  capability_id uuid [pk, ref: > private.attempt_capability_grants.id]
+  revoked_at timestamptz [not null]
+  reason_code text [not null, note: 'FIELD_COMPLETED / HANDOVER / ACCOUNT_CHANGED']
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  Indexes { actor_profile_id }
+  Note: 'Immutable append-only revocation; restoring account status never revives a revoked grant.'
+}
+
+Table private.attempt_handover_events {
+  previous_attempt_id uuid [pk, ref: > public.cleaning_attempts.id]
+  next_attempt_id uuid [not null, unique, ref: > public.cleaning_attempts.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  reason_code text [not null, note: 'ADMIN_HANDOVER / DEACTIVATION_HANDOVER']
+  occurred_at timestamptz [not null]
+  Indexes { actor_profile_id }
+  Note: 'Immutable same-target provenance; old interrupted+ended/noncurrent -> new notified scheduled/higher attempt and assignment revisions. No cycles, deletion or snapshot rewrites. Current descendant still blocks scheduling; orphan interrupted is not ignored.'
 }
 
 Table public.cleaning_submissions {

@@ -354,6 +354,109 @@ Deno.test("preview OpenAPI documents pure admin preview and separate versioned c
   );
 });
 
+Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and future media contracts", async () => {
+  const doc = await openApiResponse({}).json() as typeof openApiDocument;
+  const impact = doc.paths["/v1/attempts/lifecycle-impact"].get;
+  const manage = doc.paths["/v1/attempts/{attemptId}/lifecycle"].post;
+  const read = doc.paths["/v1/limited/attempts/{attemptId}"].get;
+  const complete =
+    doc.paths["/v1/limited/attempts/{attemptId}/complete-field-work"].post;
+  assert(
+    impact["x-required-roles"].join(",") === "admin" &&
+      manage["x-required-roles"].join(",") === "admin",
+    "business admin lifecycle",
+  );
+  assert(
+    read["x-required-roles"].join(",") === "maid" &&
+      complete["x-required-roles"].join(",") === "maid",
+    "limited maid only",
+  );
+  assert(
+    read.description.includes("실행 endpoint가 아닙니다") &&
+      complete.description.includes("revoked session") &&
+      complete.description.includes("TTL 연장"),
+    "no fake photo/submit and no replay privilege extension",
+  );
+  const variants = doc.components.schemas.AttemptLifecycleRequest.oneOf;
+  const fiveStatuses =
+    "active,deactivation_pending,upload_only,inactive,departed";
+  const threeStatuses = "active,deactivation_pending,upload_only";
+  assert(
+    doc.components.schemas.AttemptLifecycleImpact.properties.profileStatus.enum
+          .join(",") === fiveStatuses &&
+      doc.components.schemas.AttemptLifecycleResult.properties.profileStatus
+          .enum.join(",") === fiveStatuses &&
+      doc.components.schemas.DeveloperAuditEvent.properties.summary.properties
+          .profileStatus.enum.join(",") === fiveStatuses,
+    "admin impact/result and audit preserve disabled expired owners",
+  );
+  assert(
+    doc.components.schemas.LimitedAttempt.properties.profileStatus.enum.join(
+          ",",
+        ) === threeStatuses &&
+      doc.components.schemas.LimitedAttemptLifecycleResult.allOf[1].properties
+          ?.profileStatus.enum.join(",") === threeStatuses &&
+      complete.responses[200].content["application/json"].schema.$ref ===
+        "#/components/schemas/LimitedAttemptLifecycleResult",
+    "limited read and complete response stay restricted to three candidate statuses",
+  );
+  assert(
+    variants.length === 4 &&
+      variants.every((variant) =>
+        variant.additionalProperties === false &&
+        variant.required.includes("expectedProfileVersion")
+      ),
+    "all actions strict CAS",
+  );
+  assert(
+    Object.keys(doc.paths).filter((path) => path.startsWith("/v1/limited/"))
+      .length === 2,
+    "only read and complete limited endpoints exist",
+  );
+  const safeKeys = [
+    "attemptId",
+    "cleaningTargetId",
+    "assignmentId",
+    "maidProfileId",
+    "assignmentRevision",
+    "executionVersion",
+    "status",
+    "startedAt",
+    "fieldCompletedAt",
+    "endedAt",
+    "capabilityKind",
+    "expiresAt",
+    "profileStatus",
+    "profileVersion",
+    "nextAttemptId",
+  ];
+  const summary = doc.components.schemas.DeveloperAuditEvent.properties.summary;
+  assert(
+    summary.additionalProperties === false &&
+      safeKeys.every((key) => key in summary.properties),
+    "full lifecycle safe audit summary fits strict schema",
+  );
+  for (
+    const forbidden of [
+      "sessionId",
+      "accessToken",
+      "requestHash",
+      "allowedActions",
+      "before_state",
+      "after_state",
+    ]
+  ) {
+    assert(
+      !(forbidden in summary.properties),
+      "no credential or raw state in audit projection",
+    );
+  }
+  assert(
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 42,
+    "actual audit allowlist count",
+  );
+});
+
 Deno.test("every Swagger operation has Korean integration guidance", async () => {
   const response = openApiResponse({});
   const document = await response.json() as {

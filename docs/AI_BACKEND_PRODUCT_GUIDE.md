@@ -285,6 +285,18 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - active attempt는 자정을 넘어도 같은 attempt/assignment를 유지한다. 실제 시작·중단·인계는 #7, 자동 배정은 #29다. source 구현은 production/recovery에 아직 배포되지 않았다.
 - 이월은 다음 schedule을 먼저 계산하고 source window가 유효할 때만 저장한다. `stayover_request + stayover`는 같은 객실의 active·실제 입실·미퇴실 예약 안에 다음 접근/마감 창이 모두 포함되고 KST 날짜가 일치해야 한다. 실패하면 `STAYOVER_ROLLOVER_NOT_ALLOWED`로 blocked이며 배정 종료·알림 resolve·일정/version/이력 변경은 모두 0이다. 자동 취소나 cleaning kind 변환은 하지 않는다. 추가 청소도 다음 창이 기존 활성화 규칙의 active 예약 점유와 겹치면 `ADDITIONAL_ROLLOVER_NOT_ALLOWED`로 변경 없이 차단한다.
 
+### [확정] #7B 만료 회차 해소·인계 — 2026-09-08 사용자 승인
+
+이 절은 기존 #27/#28의 구현 제한과 아래 새 회차 생성 제한에 대한 좁은 예외다.
+
+- 실제 시작하지 않은 채 만료된 `scheduled` 회차는 `superseded`로 보존하고 다음날 재배정·재통보 후 새 회차를 생성할 수 있다. 기존 target ID·최초 계획일·assignment/attempt snapshot·통보 이력은 보존한다. 기존 회차를 삭제하거나 시작/중단된 것처럼 위장하지 않는다.
+- 인계 뒤 새 scheduled가 만료된 경우에도 같은 해소 계약을 따른다. 불변 인계 관계로 새 책임 구간이 증명된 과거 interrupted는 live 회차로 오인하지 않되, 대체 증명 없는 interrupted나 현재 미종결 회차는 계속 재배정 차단 근거다. 과거 회차의 status를 변경하거나 전체 interrupted 이력을 무시하지 않는다.
+- 관리자 전용 해소 command가 현재 identity/version과 다음 source 일정을 검증한 뒤 기존 담당 종료·통보 회수·회차 supersede·schedule revision을 원자적으로 처리한다. 다음날 담당을 자동 선택하거나 통보 전에 새 회차를 만들지 않는다. 새 통보 후 #28의 실제 실행 가능 조건에서 exactly-once 활성화한다.
+- 만료된 `in_progress`의 인계는 관리자가 새 접근/마감 일정을 명시 확정하고, 현재 점유·예약·source·접근 조건을 재검증한 경우에만 새 담당이 시작할 수 있다. 인계 자체가 시간창·실제 checkout·점유 검사를 우회하는 권한이 아니다. 재계획 불가능한 source는 fail-closed로 관리자 확인 대상에 남긴다.
+- 이미 시작한 기존 회차는 `interrupted`로 보존하며 새 assignment/attempt가 새 책임 구간을 가진다. 이전 완료/현재 제출/수익 연결을 되살리지 않는다. 재청소의 원 maid 불변 및 다른 maid 이관 금지는 그대로 유지한다.
+- 해소/인계와 동시 시작·완료·계정 변경은 CAS·scoped receipt·공통 잠금·원자 audit/outbox로 직렬화한다. TTL을 새 idempotency key나 재시도로 연장하지 않는다.
+- 이 승인은 #7B source 개발 범위이며 #7C/offline, 사진/제출 구현 또는 production 승격 승인이 아니다.
+
 ---
 
 ## 7. 청소 수행, 사진, 제출
@@ -293,7 +305,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 1. **청소 의무/target**: 왜, 어느 객실을, 어느 운영일에 청소해야 하는가
 2. **assignment revision**: 누가 몇 번째 순서로 책임지는가
-3. **attempt**: 실제 수행 회차. 시작 전 담당 변경·순서 변경은 같은 미시작 업무 연결을 갱신하고, 시작한 업무의 이월은 같은 회차를 유지한다. 검수 반려 재청소 또는 명시적 중단·인계만 새 회차를 만든다.
+3. **attempt**: 실제 수행 회차. 시작 전 담당 변경·순서 변경은 같은 미시작 업무 연결을 갱신하고, 시작한 업무의 이월은 같은 회차를 유지한다. 검수 반려 재청소 또는 명시적 중단·인계가 새 회차를 만든다. 추가로 위 #7B 승인에 한해 실제 미착수 만료 scheduled를 superseded로 보존하고 다음날 재통보 후 새 회차를 활성화할 수 있다.
 4. **submission version**: 메이드가 검수 요청한 불변 제출본
 5. **photo slot snapshot**: target 생성 시 고정되어 해당 attempt가 사용하는 템플릿 version의 필수/선택 증빙
 6. **inspection decision**: 관리자의 승인/반려

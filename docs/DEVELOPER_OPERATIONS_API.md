@@ -92,6 +92,14 @@ developer에게 배정 preview 또는 duration 확정 권한을 추가하지 않
 반환하지 않습니다. `field_completed`는 물리 완료이며 검수 승인·수익 발생 event가 아닙니다.
 developer에게 청소 시작/완료 권한을 부여하지 않으며 Python 콘솔은 감사 조회 모델만 갱신합니다.
 
+#7B feature는 `cleaning.finish_current_allowed`, `cleaning.upload_only_allowed`,
+`cleaning.interrupted_handover`, `cleaning.scheduled_expired` 네 event를 추가해 source allowlist를
+42개로 확장합니다. 기존 attempt 실행 summary에 `capabilityKind`, `expiresAt`, `profileStatus`,
+`profileVersion`, `nextAttemptId`만 추가합니다. raw capability 원장, 세션 ID, request hash, 원본 state는 반환하지
+않습니다. capability 식별자·metadata는 별도 credential이 아니며 소지만으로 실행할 수 없습니다.
+developer는 감사 조회만 가능하며 admin lifecycle 명령이나 maid limited 실행 권한은 없습니다.
+정확한 source gate는 matrix를 따르며 production allowlist가 함께 변경됐다고 간주하지 않습니다.
+
 ## 활동/보안 pagination
 
 업무 상태 변경 감사와 로그인·권한·민감접근 activity를 한 목록으로 합치지 않는다. activity API는 `actorProfileId`, `role`, 반복 가능한 `category`/`eventType`/`outcome`, `from`/`to`, opaque `cursor`를 지원한다. 기간은 최대 31일, page size는 최대 100이다.

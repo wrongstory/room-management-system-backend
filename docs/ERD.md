@@ -609,6 +609,28 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 
 ## 9. 이후 반영 순서
 
+### #7B 개발 소스: 중단·인계와 제한 권한
+
+`20260908123214_attempt_handover_limited_capability.sql`은 기존 27개 migration을
+수정하지 않는 후속 schema다. 운영/recovery 적용을 의미하지 않는다.
+
+- `profiles.account_lifecycle_version`: 역할/상태 변경 CAS. trigger가 증가시키며 일반 로그인 권한을 확장하지 않는다.
+- `private.attempt_capability_grants`: profile/attempt/assignment revision/action/발급·만료 시각을 고정한다.
+  `(attempt_id, kind)` UNIQUE로 같은 업무에 다른 명령 키를 써도 2시간/24시간을 연장하지 못한다.
+- `private.attempt_capability_revocations`: 완료·인계·계정 변경에 따른 영구 회수 원장. UPDATE/DELETE 금지.
+- `private.attempt_handover_events`: 같은 target의 old interrupted → new scheduled 관계를 보존한다.
+  이전 담당/시작/증빙 snapshot은 수정하지 않으며, 승인된 인계 이력만 current-work 판단에서 제외한다.
+  실제 후속 회차와 원장 없는 interrupted는 계속 차단한다.
+- 한 건 마무리는 `deactivation_pending` + `finish_current(2h)`이고, 실제 완료는
+  `field_completed` + `upload_only` + `upload_submit(24h)`로 원자 전환한다.
+- 일반 인계는 이전 메이드 계정을 active로 유지한다. 명시적인 비활성화 선택 또는 기존 pending일 때만
+  upload_only로 전환한다. 이전 interrupted 회차에는 `evidence_upload(24h)`만 있어 전체 제출 권한은 없다.
+- 원장은 private/RLS/no direct grants이며 service-owned RPC만 사용한다. Auth session ID는 검증 인자로만
+  사용하고 원장·감사·receipt·응답에 저장하지 않는다. 제한 경로도 최신 역할/상태·session·ownership·만료를 재검증한다.
+- 만료된 미착수 scheduled는 관리자 명령에서만 superseded 보존 후 다음날 재계획한다.
+  source 검증 실패는 전체 rollback이며 reclean 원담당 불변, NULL due 보존, 실제 점유와 다음 입실 경계를 유지한다.
+- 사진 실업로드/제출·offline lease/PIN은 여기서 구현하지 않는다. capability 권한 계약과 실제 구현을 구분한다.
+
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.

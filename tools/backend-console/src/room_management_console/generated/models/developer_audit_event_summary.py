@@ -8,7 +8,13 @@ from uuid import UUID
 from attrs import define as _attrs_define
 
 from ..models.app_role import AppRole
+from ..models.developer_audit_event_summary_capability_kind import (
+    DeveloperAuditEventSummaryCapabilityKind,
+)
 from ..models.developer_audit_event_summary_decision import DeveloperAuditEventSummaryDecision
+from ..models.developer_audit_event_summary_profile_status import (
+    DeveloperAuditEventSummaryProfileStatus,
+)
 from ..types import UNSET, Unset
 
 T = TypeVar("T", bound="DeveloperAuditEventSummary")
@@ -53,6 +59,11 @@ class DeveloperAuditEventSummary:
         started_at (datetime.datetime | Unset):
         field_completed_at (datetime.datetime | Unset):
         ended_at (datetime.datetime | Unset):
+        capability_kind (DeveloperAuditEventSummaryCapabilityKind | Unset):
+        expires_at (datetime.datetime | Unset):
+        profile_status (DeveloperAuditEventSummaryProfileStatus | Unset):
+        profile_version (int | Unset):
+        next_attempt_id (UUID | Unset):
         rollover_from_date (datetime.date | Unset):
         rollover_to_date (datetime.date | Unset):
         carryover_count (int | Unset):
@@ -113,6 +124,11 @@ class DeveloperAuditEventSummary:
     started_at: datetime.datetime | Unset = UNSET
     field_completed_at: datetime.datetime | Unset = UNSET
     ended_at: datetime.datetime | Unset = UNSET
+    capability_kind: DeveloperAuditEventSummaryCapabilityKind | Unset = UNSET
+    expires_at: datetime.datetime | Unset = UNSET
+    profile_status: DeveloperAuditEventSummaryProfileStatus | Unset = UNSET
+    profile_version: int | Unset = UNSET
+    next_attempt_id: UUID | Unset = UNSET
     rollover_from_date: datetime.date | Unset = UNSET
     rollover_to_date: datetime.date | Unset = UNSET
     carryover_count: int | Unset = UNSET
@@ -244,6 +260,24 @@ class DeveloperAuditEventSummary:
         ended_at: str | Unset = UNSET
         if not isinstance(self.ended_at, Unset):
             ended_at = self.ended_at.isoformat()
+
+        capability_kind: str | Unset = UNSET
+        if not isinstance(self.capability_kind, Unset):
+            capability_kind = self.capability_kind.value
+
+        expires_at: str | Unset = UNSET
+        if not isinstance(self.expires_at, Unset):
+            expires_at = self.expires_at.isoformat()
+
+        profile_status: str | Unset = UNSET
+        if not isinstance(self.profile_status, Unset):
+            profile_status = self.profile_status.value
+
+        profile_version = self.profile_version
+
+        next_attempt_id: str | Unset = UNSET
+        if not isinstance(self.next_attempt_id, Unset):
+            next_attempt_id = str(self.next_attempt_id)
 
         rollover_from_date: str | Unset = UNSET
         if not isinstance(self.rollover_from_date, Unset):
@@ -378,6 +412,16 @@ class DeveloperAuditEventSummary:
             field_dict["fieldCompletedAt"] = field_completed_at
         if ended_at is not UNSET:
             field_dict["endedAt"] = ended_at
+        if capability_kind is not UNSET:
+            field_dict["capabilityKind"] = capability_kind
+        if expires_at is not UNSET:
+            field_dict["expiresAt"] = expires_at
+        if profile_status is not UNSET:
+            field_dict["profileStatus"] = profile_status
+        if profile_version is not UNSET:
+            field_dict["profileVersion"] = profile_version
+        if next_attempt_id is not UNSET:
+            field_dict["nextAttemptId"] = next_attempt_id
         if rollover_from_date is not UNSET:
             field_dict["rolloverFromDate"] = rollover_from_date
         if rollover_to_date is not UNSET:
@@ -595,6 +639,36 @@ class DeveloperAuditEventSummary:
         else:
             ended_at = datetime.datetime.fromisoformat(_ended_at)
 
+        _capability_kind = d.pop("capabilityKind", UNSET)
+        capability_kind: DeveloperAuditEventSummaryCapabilityKind | Unset
+        if isinstance(_capability_kind, Unset):
+            capability_kind = UNSET
+        else:
+            capability_kind = DeveloperAuditEventSummaryCapabilityKind(_capability_kind)
+
+        _expires_at = d.pop("expiresAt", UNSET)
+        expires_at: datetime.datetime | Unset
+        if isinstance(_expires_at, Unset):
+            expires_at = UNSET
+        else:
+            expires_at = datetime.datetime.fromisoformat(_expires_at)
+
+        _profile_status = d.pop("profileStatus", UNSET)
+        profile_status: DeveloperAuditEventSummaryProfileStatus | Unset
+        if isinstance(_profile_status, Unset):
+            profile_status = UNSET
+        else:
+            profile_status = DeveloperAuditEventSummaryProfileStatus(_profile_status)
+
+        profile_version = d.pop("profileVersion", UNSET)
+
+        _next_attempt_id = d.pop("nextAttemptId", UNSET)
+        next_attempt_id: UUID | Unset
+        if isinstance(_next_attempt_id, Unset):
+            next_attempt_id = UNSET
+        else:
+            next_attempt_id = UUID(_next_attempt_id)
+
         _rollover_from_date = d.pop("rolloverFromDate", UNSET)
         rollover_from_date: datetime.date | Unset
         if isinstance(_rollover_from_date, Unset):
@@ -713,6 +787,11 @@ class DeveloperAuditEventSummary:
             started_at=started_at,
             field_completed_at=field_completed_at,
             ended_at=ended_at,
+            capability_kind=capability_kind,
+            expires_at=expires_at,
+            profile_status=profile_status,
+            profile_version=profile_version,
+            next_attempt_id=next_attempt_id,
             rollover_from_date=rollover_from_date,
             rollover_to_date=rollover_to_date,
             carryover_count=carryover_count,

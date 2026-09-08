@@ -103,6 +103,87 @@ function attemptMutationOperation(
   };
 }
 
+function lifecycleOperation(
+  operationId: string,
+  summary: string,
+  description: string,
+  role: "admin" | "maid",
+  responseSchema: string,
+) {
+  return {
+    tags: ["Attempts"],
+    operationId,
+    summary,
+    description,
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": [role],
+    responses: {
+      "200": {
+        description:
+          "현재 scope의 안전한 수명주기 결과. credential·PIN·원문 snapshot은 반환하지 않습니다.",
+        headers: { "Cache-Control": noStoreHeader },
+        content: {
+          "application/json": {
+            schema: { $ref: `#/components/schemas/${responseSchema}` },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "409": errorResponse,
+      "500": errorResponse,
+    },
+  };
+}
+const attemptPathParameter = {
+  name: "attemptId",
+  in: "path",
+  required: true,
+  schema: { type: "string", format: "uuid" },
+  description: "서버 발급 수행 회차 ID이며 인증 credential이 아닙니다.",
+};
+const lifecycleCasProperties = {
+  expectedExecutionVersion: {
+    type: "integer",
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+  },
+  expectedAssignmentId: { type: "string", format: "uuid" },
+  expectedAssignmentRevision: {
+    type: "integer",
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+  },
+  expectedProfileVersion: {
+    type: "integer",
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+  },
+};
+function lifecycleRequestVariant(
+  action: string,
+  reasonCode: string[],
+  payload: unknown,
+) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      ...Object.keys(lifecycleCasProperties),
+      "action",
+      "payload",
+      "reasonCode",
+    ],
+    properties: {
+      ...lifecycleCasProperties,
+      action: { const: action },
+      reasonCode: { type: "string", enum: reasonCode },
+      payload,
+    },
+  };
+}
+
 const reservationRequired = [
   "id",
   "roomId",
@@ -574,7 +655,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 38,
+              maxItems: 42,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -1048,6 +1129,88 @@ export const openApiDocument = {
           "401": errorResponse,
           "403": errorResponse,
           "500": errorResponse,
+        },
+      },
+    },
+    "/v1/attempts/lifecycle-impact": {
+      get: {
+        ...lifecycleOperation(
+          "getAttemptLifecycleImpact",
+          "관리자 수행 수명주기 영향 조회",
+          "현재 assignment 한 건의 attempt, 계정 lifecycle version, target version 및 제한 권한 metadata만 조회합니다. 명령 전에 CAS 입력을 확보하고 최신 값을 다시 확인합니다. business admin 전용이며 무제한 목록·PII 조회가 아닙니다.",
+          "admin",
+          "AttemptLifecycleImpact",
+        ),
+        parameters: [{
+          name: "assignmentId",
+          in: "query",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description:
+            "명령을 검토할 현재 통보 배정 한 건. 추가·중복 query는 거부합니다.",
+        }],
+      },
+    },
+    "/v1/attempts/{attemptId}/lifecycle": {
+      post: {
+        ...lifecycleOperation(
+          "manageAttemptLifecycle",
+          "관리자 수행 중단·인계 및 제한 권한 결정",
+          "active business admin이 영향 조회의 CAS로 현재 한 건 2시간 마무리, 완료 뒤 24시간 업로드·제출 권한, 즉시 중단·인계, 만료된 미착수 scheduled 해소 중 하나를 명시합니다. TTL은 서버가 고정하며 연장 입력은 없습니다. 인계의 새 일정은 현재 예약/source/점유로 재검증하고 새 maid 시작 검증도 유지합니다. 재청소의 다른 maid 인계는 금지합니다. 일반 계정 변경의 Auth ban/session 폐기 경로를 재사용하지 않습니다. 사진·제출 API는 아직 구현하지 않습니다.",
+          "admin",
+          "AttemptLifecycleResult",
+        ),
+        parameters: [idempotencyHeader, attemptPathParameter],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/AttemptLifecycleRequest" },
+            },
+          },
+        },
+      },
+    },
+    "/v1/limited/attempts/{attemptId}": {
+      get: {
+        ...lifecycleOperation(
+          "getLimitedAttempt",
+          "본인 제한 수행 범위 조회",
+          "기존 Supabase Auth 사용자와 유효 세션, 최신 maid profile, 정확한 attempt/revision, 미만료 DB capability를 모두 확인합니다. active(인계 뒤 증빙 범위)·deactivation_pending·upload_only만 후보이며 상태만으로 허용하지 않습니다. 별도 bearer capability token을 발급하지 않고 PIN·사진·현재 target 상세를 노출하지 않습니다. upload/validate/submit allowedActions는 후속 계약이며 실행 endpoint가 아닙니다.",
+          "maid",
+          "LimitedAttempt",
+        ),
+        parameters: [attemptPathParameter, {
+          name: "assignmentRevision",
+          in: "query",
+          required: true,
+          schema: {
+            type: "integer",
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
+          description:
+            "제한 권한에 동결된 배정 revision. 추가·중복 query는 거부합니다.",
+        }],
+      },
+    },
+    "/v1/limited/attempts/{attemptId}/complete-field-work": {
+      post: {
+        ...lifecycleOperation(
+          "completeLimitedFieldWork",
+          "현재 한 건 제한 권한으로 물리 완료",
+          "finish_current의 2시간 hard expiry 안에서 본인 in_progress 한 건만 완료합니다. 현재 세션·권한·revision·execution CAS를 transaction에서 재검증합니다. 성공 후 execution capability를 종료하고 upload_only로 전환합니다. 응답 유실 뒤 동일 요청 receipt replay는 허용하지만 TTL 연장·새 수행 권한을 만들지 않습니다. revoked session은 replay도 차단합니다. 사진은 선행조건이 아니며 제출·검수·ready·earning을 생성하지 않습니다.",
+          "maid",
+          "LimitedAttemptLifecycleResult",
+        ),
+        parameters: [idempotencyHeader, attemptPathParameter],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/AttemptExecutionRequest" },
+            },
+          },
         },
       },
     },
@@ -1994,6 +2157,11 @@ export const openApiDocument = {
           "ATTEMPT_INVALID_TRANSITION",
           "MAID_ALREADY_IN_PROGRESS",
           "ATTEMPT_COMMAND_FAILED",
+          "CAPABILITY_ACCESS_REQUIRED",
+          "ACCOUNT_VERSION_CONFLICT",
+          "CLEANING_WINDOW_NOT_EXPIRED",
+          "ASSIGNMENT_SCHEDULE_INVALID",
+          "ROLLOVER_NOT_ALLOWED",
           "INVALID_ATTEMPT_COMMAND",
           "ATTEMPT_ACTIVATION_NOT_ALLOWED",
           "CLEANING_SERVICE_DATE_NOT_DUE",
@@ -2371,6 +2539,10 @@ export const openApiDocument = {
           "assignment.duration_policy_confirmed",
           "cleaning.attempt_started",
           "cleaning.field_completed",
+          "cleaning.finish_current_allowed",
+          "cleaning.upload_only_allowed",
+          "cleaning.interrupted_handover",
+          "cleaning.scheduled_expired",
           "reservation.created",
           "reservation.changed",
           "reservation.cancelled",
@@ -2676,6 +2848,23 @@ export const openApiDocument = {
               startedAt: { type: "string", format: "date-time" },
               fieldCompletedAt: { type: "string", format: "date-time" },
               endedAt: { type: "string", format: "date-time" },
+              capabilityKind: {
+                type: "string",
+                enum: ["finish_current", "upload_submit", "evidence_upload"],
+              },
+              expiresAt: { type: "string", format: "date-time" },
+              profileStatus: {
+                type: "string",
+                enum: [
+                  "active",
+                  "deactivation_pending",
+                  "upload_only",
+                  "inactive",
+                  "departed",
+                ],
+              },
+              profileVersion: { type: "integer", minimum: 1 },
+              nextAttemptId: { type: "string", format: "uuid" },
               rolloverFromDate: { type: "string", format: "date" },
               rolloverToDate: { type: "string", format: "date" },
               carryoverCount: { type: "integer", minimum: 0 },
@@ -2936,6 +3125,206 @@ export const openApiDocument = {
           },
           nextCursor: { type: ["string", "null"] },
         },
+      },
+      AttemptLifecycleRequest: {
+        description:
+          "action별 payload/reason은 고정 계약입니다. raw body·자유문·session ID·capability token·TTL은 입력하지 않습니다.",
+        oneOf: [
+          lifecycleRequestVariant("allow_finish", [
+            "DEACTIVATION_FINISH_CURRENT",
+          ], { type: "object", additionalProperties: false, maxProperties: 0 }),
+          lifecycleRequestVariant(
+            "allow_upload",
+            ["DEACTIVATION_UPLOAD_ONLY"],
+            { type: "object", additionalProperties: false, maxProperties: 0 },
+          ),
+          lifecycleRequestVariant("expire_scheduled", ["SCHEDULE_EXPIRED"], {
+            type: "object",
+            additionalProperties: false,
+            maxProperties: 0,
+          }),
+          lifecycleRequestVariant("interrupt_handover", [
+            "ADMIN_HANDOVER",
+            "DEACTIVATION_HANDOVER",
+          ], {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "maidProfileId",
+              "sequenceNumber",
+              "serviceDate",
+              "availableFrom",
+              "dueAt",
+              "deactivateOld",
+            ],
+            properties: {
+              maidProfileId: { type: "string", format: "uuid" },
+              sequenceNumber: {
+                type: "integer",
+                minimum: 1,
+                maximum: Number.MAX_SAFE_INTEGER,
+              },
+              serviceDate: { type: "string", format: "date" },
+              availableFrom: { type: "string", format: "date-time" },
+              dueAt: { type: "string", format: "date-time" },
+              deactivateOld: {
+                type: "boolean",
+                description:
+                  "true는 DEACTIVATION_HANDOVER, false는 ADMIN_HANDOVER 사유만 허용",
+              },
+            },
+          }),
+        ],
+      },
+      AttemptCapability: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "서버 DB 권한 metadata이며 bearer credential이 아닙니다. 반환된 ID만으로 접근할 수 없습니다. 사진/검증/submit action은 후속 구현을 위한 계약뿐입니다.",
+        required: [
+          "capabilityId",
+          "attemptId",
+          "assignmentId",
+          "assignmentRevision",
+          "kind",
+          "allowedActions",
+          "issuedAt",
+          "expiresAt",
+          "revokedAt",
+        ],
+        properties: {
+          capabilityId: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          assignmentRevision: { type: "integer", minimum: 1 },
+          kind: {
+            type: "string",
+            enum: ["finish_current", "upload_submit", "evidence_upload"],
+          },
+          allowedActions: {
+            type: "array",
+            minItems: 1,
+            maxItems: 3,
+            uniqueItems: true,
+            items: {
+              type: "string",
+              enum: [
+                "complete_field_work",
+                "upload_evidence",
+                "validate_evidence",
+                "submit",
+              ],
+            },
+          },
+          issuedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+          revokedAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      LimitedAttempt: {
+        type: "object",
+        additionalProperties: false,
+        required: ["attempt", "capability", "profileStatus"],
+        properties: {
+          attempt: { $ref: "#/components/schemas/AttemptExecution" },
+          capability: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptCapability" }, {
+              type: "null",
+            }],
+          },
+          profileStatus: {
+            type: "string",
+            enum: ["active", "deactivation_pending", "upload_only"],
+          },
+        },
+      },
+      AttemptLifecycleImpact: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "attempt",
+          "capability",
+          "profileStatus",
+          "profileVersion",
+          "targetAssignmentVersion",
+        ],
+        properties: {
+          attempt: { $ref: "#/components/schemas/AttemptExecution" },
+          capability: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptCapability" }, {
+              type: "null",
+            }],
+          },
+          profileStatus: {
+            type: "string",
+            enum: [
+              "active",
+              "deactivation_pending",
+              "upload_only",
+              "inactive",
+              "departed",
+            ],
+          },
+          profileVersion: { type: "integer", minimum: 1 },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      AttemptLifecycleResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "attempt",
+          "capability",
+          "profileStatus",
+          "profileVersion",
+          "nextAttempt",
+          "effectiveAt",
+          "recordedAt",
+        ],
+        properties: {
+          attempt: { $ref: "#/components/schemas/AttemptExecution" },
+          capability: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptCapability" }, {
+              type: "null",
+            }],
+          },
+          profileStatus: {
+            type: "string",
+            enum: [
+              "active",
+              "deactivation_pending",
+              "upload_only",
+              "inactive",
+              "departed",
+            ],
+            description:
+              "관리자의 미착수 만료 정리는 inactive/departed 상태를 그대로 보존하며 계정을 재활성화하거나 새 제한 권한을 발급하지 않습니다.",
+          },
+          nextAttempt: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptExecution" }, {
+              type: "null",
+            }],
+          },
+          profileVersion: { type: "integer", minimum: 1 },
+          effectiveAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
+      LimitedAttemptLifecycleResult: {
+        description:
+          "제한 완료 응답은 inactive/departed 계정에 반환하지 않습니다. 성공 receipt replay도 현재 유효한 세션과 DB capability 계약을 적용합니다.",
+        allOf: [
+          { $ref: "#/components/schemas/AttemptLifecycleResult" },
+          {
+            type: "object",
+            properties: {
+              profileStatus: {
+                type: "string",
+                enum: ["active", "deactivation_pending", "upload_only"],
+              },
+            },
+          },
+        ],
       },
       AttemptExecutionRequest: {
         type: "object",

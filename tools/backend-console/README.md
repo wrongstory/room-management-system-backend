@@ -60,5 +60,14 @@ Preview 계산 자체는 감사 event를 만들지 않는다. source 모델 생�
 
 #7A source는 `cleaning.attempt_started`/`cleaning.field_completed`와 실행 version·서버 시각의
 safe audit summary를 생성 모델에 추가한다. field_completed는 물리 완료이며 검수 승인/수익과
-별개다. filtered OpenAPI는 Auth/Accounts/Developer 기존 15 operations만 유지하고 maid의
+별개다. filtered OpenAPI는 Auth/Accounts/Developer 기존 16 operations만 유지하고 maid의
 start/complete API를 콘솔에 추가하지 않는다. PIN/PII/raw state/request hash는 포함하지 않는다.
+
+#7B feature의 생성 계약은 한 건 마무리 허용/증빙 유예/인계/미착수 만료 해소의 네 감사 event와
+허용된 version·시각·capability metadata를 추가한다. 운영 콘솔의 업무 상태 변경 화면에
+`deactivation_pending`/`upload_only`를 임의 target으로 추가하지 않는다. 이 상태는 전용 admin
+lifecycle command의 결과이며 developer가 업무 인계·limited 실행을 대신하는 기능은 없다.
+필터는 기존 Auth/Accounts/Developer 16 operations를 유지한다. 실제 사진·제출 API 및 별도
+capability 로그인 secret은 포함하지 않는다. 생성 모델 검증과 운영 배포는 별도 gate다.
+기존 문서의 15개 표기는 이미 생성되어 있던 `change_password` 1개를 누락한 설명 오류였다.
+이번 feature에서 그 endpoint를 새로 추가한 것이 아니며 exact module allowlist 회귀로 검증한다.

@@ -28,6 +28,14 @@ import {
   executeAttempt,
 } from "../_shared/attempt-api.ts";
 import {
+  completeLimitedAttempt,
+  getLimitedAttempt,
+  lifecycleImpact,
+  lifecyclePath,
+  limitedAttemptPath,
+  manageAttemptLifecycle,
+} from "../_shared/attempt-lifecycle-api.ts";
+import {
   changeAccountRole,
   changeAccountStatus,
   changePassword,
@@ -81,6 +89,7 @@ import {
 } from "../_shared/room-api.ts";
 import {
   authenticate,
+  authenticateLimitedAttempt,
   cors,
   createEdgeClients,
   type EdgeActor,
@@ -154,7 +163,48 @@ export async function handleApiRequest(
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
 
+    // 제한 capability는 정확히 이 두 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
+    const limited = limitedAttemptPath(path);
+    if (
+      limited && ((limited.action === "read" && request.method === "GET") ||
+        (limited.action === "complete" && request.method === "POST"))
+    ) {
+      const identity = await authenticateLimitedAttempt(request, clients);
+      actor = identity.actor;
+      const result = limited.action === "read"
+        ? await getLimitedAttempt(request, clients, identity, limited.attemptId)
+        : await completeLimitedAttempt(
+          request,
+          clients,
+          identity,
+          limited.attemptId,
+        );
+      return jsonResponse(result, 200, corsHeaders);
+    }
+
     actor = await dependencies.authenticateRequest(request, clients);
+    if (request.method === "GET" && path === "/v1/attempts/lifecycle-impact") {
+      return jsonResponse(
+        await lifecycleImpact(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
+    const lifecycleAttemptId = request.method === "POST"
+      ? lifecyclePath(path)
+      : null;
+    if (lifecycleAttemptId) {
+      return jsonResponse(
+        await manageAttemptLifecycle(
+          request,
+          clients,
+          actor,
+          lifecycleAttemptId,
+        ),
+        200,
+        corsHeaders,
+      );
+    }
     if (request.method === "POST" && path === "/v1/assignments/preview") {
       const preview = await previewAssignments(request, clients, actor);
       return jsonResponse(
