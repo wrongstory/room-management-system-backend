@@ -600,7 +600,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 ### `v0.2.0` 포함 후 남은 차이
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
-- #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview는 `dev@8bdb5db2cd65359adca13e132959bcdf5f808324`에서 source/dev 완료다. production에는 승격되지 않았다. #4 notified-only 조회 정합화가 #7A 선행 gate이며 독립 검토·명시적 병합 허가 전에는 완료로 표시하지 않는다.
+- #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview는 source/dev 완료다. #4 notified-only 조회도 PR #74의 독립 검토·CI·위임 승인 후 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에 병합되어 #7A 선행 gate를 충족했다. production에는 승격되지 않았다.
 - 이후 #7A 실행 → #7B 인계/limited capability → #7C offline, #30 photo slot → #9 Drive → #31 검수 순서다. 정산·알림 worker·프런트 실제 연동도 후속이며 배정의 outbox 저장과 실제 외부 전달을 구분한다.
 - initial migration과 테스트에는 확정된 `purge_after NOT NULL` 및 업로드 후 7일 계약이 들어 있지만, 실제 Google Drive 업로드·조회·purge worker는 아직 구현되지 않았다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
