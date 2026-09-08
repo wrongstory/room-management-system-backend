@@ -1,9 +1,16 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **확정 제품 정책 / #83 DB 작업 원장 구현 중, 실제 Drive 미연결**
+> 상태: **확정 제품 정책 / #83 DB 작업 원장 source/dev 완료·production 미승격, 실제 Drive 미연결**
 > 사용자가 확정한 계약은 Google Drive 전용·300KiB 이하·비공개 저장과 `uploaded_at + 7 days` 영구삭제다. 7일 보존에는 검수 상태, 분쟁, retention hold 또는 180일 보존 예외를 두지 않는다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
 아래 압축·업로드·삭제 흐름과 용량 보호 기준은 구현 시 따라야 하는 운영 계약이다. Google Drive worker와 배포 자격증명은 아직 구현·설정 전이다.
+
+#83은 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)의 독립 QA·required CI·
+Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다.
+개발 통합은 31 migrations / 63 paths / 68 operations이며 실제 업로드·열람 route를 추가하지 않았다.
+다음은 **#84 Drive 업로드·열람 → #85 7일 purge → #31 전체 제출·검수**다.
+production은 기존 19 migrations / 39 paths / 43 operations를 유지하며 DB/Edge/Pages/Google 환경을 변경하지 않았다.
+상세 source/dev 승인 증거는 [API 상태 정본의 #83 gate](./API_STATUS_MATRIX.md)를 따른다.
 
 ## 저장 위치와 폴더
 
@@ -39,7 +46,7 @@ room-management-system-photos/
 과거 `public.submission_photos`는 새 upload 경로로 사용하지 않고, 업로드를 위해 가짜 submission을 생성하지 않는다.
 실제 제출은 #31의 canonical submission과 immutable photo-version binding을 사용한다.
 
-#83의 개발 원장은 다음처럼 분리한다.
+#83에서 source/dev 완료한 원장은 다음처럼 분리한다. 운영 반영은 별도 release/main gate다.
 
 - `photo_upload_operations`: actor/attempt/assignment revision/slot/expected photo revision, 검증 metadata와 scoped key digest/request hash를 고정한다. 원문 key·session·body를 저장하지 않는다.
 - `photo_provider_objects`: operation마다 서버 UUID 하나. provider locator는 private에만 두고 provider 내 전역 unique로 다른 작업에 재사용하지 못하게 한다. 최초 성공의 uploaded_at/purge_after는 불변이다.
