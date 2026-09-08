@@ -53,12 +53,13 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). 개발 통합 기준 갱신: **2026-09-08 KST**. 이번 개발에서 운영을 재검증하거나 변경하지 않았다.
+production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). 개발 통합 기준 갱신: **2026-09-09 KST**. 이번 개발에서 운영을 재검증하거나 변경하지 않았다.
 
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@695c10cd8f6cf1be24d272bd18885e8272d83388` (#25~#29, #4 / PR #74, #7A / PR #75, #7B / PR #77 및 상태 문서 PR #78까지 source/dev 완료; production 미승격)
+- 개발 통합 source 기준: `dev@e2648de4e40a84e60d19cbb1e4d01974a2f3d369` (#25~#29, #4 / PR #74, #7A / PR #75, #7B / PR #77, #7C / PR #79까지 source/dev 완료; production 미승격)
+- 최신 dev source: **29 migrations / 63 paths / 68 operations**. 아래 개별 PR 절의 이전 수치는 해당 PR 검증 당시 snapshot이며 현재 통합 수치는 이 항목을 따른다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -488,8 +489,8 @@ DB lint 오류 0, local Security Advisor WARN/ERROR 0이며 기존 RPC-only INFO
 `codex/7b-handover-limited-capability`의 구현은 PR #77로 dev에 병합됐다. 정확한 계약은
 [Attempt Lifecycle](./ATTEMPT_LIFECYCLE.md)을 따른다.
 
-dev OpenAPI는 **58 paths / 63 operations**이며 아래 4개 operation을 포함한다.
-이는 dev source 상태이며 production OpenAPI는 계속 **39 / 43**이다.
+#7B 병합 당시 dev OpenAPI는 **58 paths / 63 operations**이며 아래 4개 operation을 포함한다.
+이후 #7C를 포함한 최신 통합 수치는 §2를 따른다. production OpenAPI는 계속 **39 / 43**이다.
 
 | Method / Path | 권한 | DB/RPC | Fastify | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|
@@ -515,25 +516,40 @@ dev OpenAPI는 **58 paths / 63 operations**이며 아래 4개 operation을 포�
 
 승인 exact head와 dev 병합 결과의 tree는 `1add0ec8668513ece4acc8f9d09b9509e91e2145`로 동일하다.
 독립 QA·required CI·Codex 점수·병합을 구분해 기록한다. #7B source/dev 완료는 production
-사용 가능 선언이 아니다. #7C offline lease/replay/quarantine는 구현 중이며 source gate는 미완료다.
+사용 가능 선언이 아니다. #7C offline lease/replay/quarantine도 아래 별도 증거에 따라 source/dev 완료다.
 production DB/Edge/Pages 변경은 없다.
 
-### #7C Offline — 추가 정책 승인·구현 중
+### #7C Offline — source/dev 완료, production 미적용
 
-`codex/7c-offline-lease-quarantine`는 위 dev 기준에서 시작한다. 2026-09-08 사용자가
+`codex/7c-offline-lease-quarantine`는 `dev@695c10c`에서 시작했다. 2026-09-08 사용자가
 replay 최대90일 후 만료거부와 현재 유효한 in_progress 회차의 관리자 물리완료 정정을 승인했다.
 과거 회차 복구 및 ready/검수/수익 생성은 금지한다. [Offline 계약](./ATTEMPT_OFFLINE.md)을 따른다.
-아직 source 완료/CI/독립 승인/dev 병합을 주장하지 않는다. 운영 migration/API/Pages 값은 그대로다.
-현재 feature의 OpenAPI는 63 paths / 68 operations이며 신규 offline 5 operations를 포함한다.
-이는 작업 중 source 계약 수치로, dev의 통합 완료나 production 공개 계약 수치가 아니다.
+PR #79는 2026-09-09 KST에 dev로 squash 병합됐다. 운영 migration/API/Pages 값은 그대로다.
+통합 source의 OpenAPI는 63 paths / 68 operations이며 신규 offline 5 operations를 포함한다.
+이는 dev 완료 수치이지 production 공개 계약 수치가 아니다.
+
+| Method / Path | 권한 | DB/RPC | Fastify | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|
+| `POST /v1/attempts/{attemptId}/start-with-lease` | active own maid/session | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `POST /v1/offline-events` | own known lease/session; metadata와 실제 효력 별도 검사 | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `GET /v1/offline-quarantines` | active business admin/session | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `GET /v1/offline-quarantines/{quarantineId}` | active business admin/session | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `POST /v1/offline-quarantines/{quarantineId}/resolve` | active business admin/session | ✅ | ❌ | ✅ | ❌ | ❌ |
 
 - [x] 90일 replay/metadata 경계와 관리자 정정의 현재회차 한정 정책 승인
 - [x] 시작 base application 123 tests PASS
 - [x] lease/ingest/quarantine/resolution/purge 구현 및 역할·시각·경합 로컬 검증
 - [x] OpenAPI/Python/문서 정합화와 전체 로컬 검증 (Edge114/application123/DB910/Python36/전체 concurrency PASS)
-- [ ] exact-head independent QA P0/P1=0, required CI PASS, Codex90점 이상
-- [ ] feature → dev 병합
+- [x] exact-head independent QA P0/P1=0 — `25ceabd2d9d781bb26e68be2230ab6d08ddd3e87`
+- [x] required CI application/migration PASS — run `34243676126`
+- [x] Codex 위임 평가96/100 및 PR #79 source/dev 병합 허가 — comment `5587516395`
+- [x] PR #79 squash 병합 — `dev@e2648de4e40a84e60d19cbb1e4d01974a2f3d369`
 - [ ] 별도 release/main 및 production 배포·보존 worker·hosted 검증
+
+승인 head와 병합 결과의 tree는 `6768b63f64fdea6dba7d4eda32a70807b7274823`로 동일하다.
+GitHub COMMENTED 리뷰·독립 서브에이전트 QA·Codex 위임 허가를 구분한다. #7A/B/C는
+source/dev 완료이며 다음 본선은 #30이다. production purge 주기/backlog/실패감시와
+hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 gate 추적을 위해 Open 유지한다.
 
 ## 13. 아직 개발하지 않은 후속 API 영역
 
@@ -549,7 +565,7 @@ replay 최대90일 후 만료거부와 현재 유효한 in_progress 회차의 �
 | [x] | maid notified-only 조회 정합화 | source/dev 완료 | #4 / PR #74 | production 미승격 |
 | [x] | 온라인 현장 시작·물리 완료 | #7A source/dev 완료 | #7 / PR #75 | production 미승격; 사진·submission·ready와 별도 |
 | [x] | handover/capability | #7B source/dev 완료 | #7 / PR #77 | production 미승격 |
-| [ ] | offline lease/conflict | #7C 구현 중·source gate 미완료 | #7 | lease/replay/quarantine 검증 및 독립 리뷰 대기 |
+| [x] | offline lease/conflict | #7C source/dev 완료 | #7 / PR #79 | production 미승격; purge 운영·hosted E2E 별도 |
 | [ ] | 사진 template/slot snapshot·submission version | 미개발 | #30 | 사진 전 단계 |
 | [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미개발 | #9 | Drive only / <=300KiB |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
@@ -627,7 +643,7 @@ production completeness 기준의 정본 순서다.
 25. [x] **#4 notified-only 조회 정합화** — PR #74 독립 리뷰·CI·Codex 위임 승인 → `dev@7bdc2a3` 병합
 26. [x] **#7A Attempt Execution Core source gate** — PR #75 독립 QA·required CI·Codex 96/100 승인 → `dev@c68e65e` 병합; 운영 미적용
 27. [x] **#7B Attempt Lifecycle source gate** — PR #77 독립 QA·required CI·Codex 96/100 승인 → `dev@5882509` 병합; 운영 미적용
-28. [ ] **#7C → #30 → #9 → #31** — #7C offline lease/replay/quarantine 구현 중, 이후 미구현
+28. [ ] **#30 → #9 → #31** — #7A/B/C source/dev 완료 후 사진 모델 → Drive → 제출·검수 순서, 이후 미구현
 
 #10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
 #46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.
