@@ -58,7 +58,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1` (#25~#29 및 #4 / PR #74까지 source/dev 완료; production 미승격)
+- 개발 통합 source 기준: `dev@c68e65e49362d4fef0ec903d836818f54834d3b2` (#25~#29, #4 / PR #74 및 #7A / PR #75까지 source/dev 완료; production 미승격)
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -440,7 +440,7 @@ application 122건, Python 34건 및 generated client 재생성 content 동일�
 
 기존 25개 migration은 불변이며 append-only migration으로 정합화한다. API 수는 기존
 51 paths / 56 operations를 유지한다. production 39 paths / 43 operations 및 운영 snapshot은
-변경하지 않는다. #4 선행 gate 완료 후 #7A를 별도 feature에서 시작한다.
+변경하지 않는다. #4 선행 gate 완료 후 별도 feature로 진행한 #7A도 아래와 같이 source/dev gate를 완료했다.
 
 별도 발견 #73: planned target이 있는 예약 객실 변경은 기존 즉시 FK 때문에 실패한다.
 이는 #4 변경과 무관한 기존 예약 기능 문제로 분리했으며 이번 PR에서 고치지 않는다.
@@ -448,9 +448,10 @@ application 122건, Python 34건 및 generated client 재생성 content 동일�
 snapshot의 이동 후 비노출은 별도 합성 DB/Edge 회귀로 검증한다. 실제 객실 변경 성공
 smoke로 표현하지 않는다. 향후 #73 수정 뒤에도 과거 통보 snapshot을 보존해야 한다.
 
-### #7A Attempt Execution Core — feature 구현, 최종 source gate 검증 중
+### #7A Attempt Execution Core — source/dev 완료, production 미적용
 
-기준 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에서 별도 feature를 만들었다.
+기준 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에서 만든 별도 feature PR #75는
+`dev@c68e65e49362d4fef0ec903d836818f54834d3b2`에 squash 병합됐다.
 source OpenAPI는 **54 paths / 59 operations**이며 production은 계속 **39 / 43**이다.
 신규 append-only `20260908110343_attempt_execution_core.sql`은 27번째 source migration이다.
 기존 26개 migration은 불변이고 production 19개 history는 변경하지 않았다.
@@ -466,9 +467,10 @@ source OpenAPI는 **54 paths / 59 operations**이며 production은 계속 **39 /
 - [x] maid in_progress 최대1 / 자정·마감·정상 checkout 후 물리 완료 / 사진 전제 없음
 - [x] #7B 전 진행 maid 일반 role/status 변경 거부 / audit 원자성 / safe projection
 - [x] 최종 로컬: Edge 95건, application 123건, fresh 27 migrations / DB·RLS 695건, 전체 concurrency, Python 34건·ruff/format/mypy/package/generated contract PASS
-- [ ] exact-head GitHub application / migration PASS
-- [ ] exact-head 독립 QA P0/P1=0 및 Codex 위임 승인 평가 90점 이상
-- [ ] feature PR `dev` 병합
+- [x] exact-head GitHub application / migration PASS — run `34221384259`
+- [x] exact-head 독립 QA P0/P1=0 — `c3fb595c034d3c501ee21b8361c9aef0f14be031`
+- [x] 사용자 위임 기준 Codex 평가 96/100 및 source/dev 승인
+- [x] PR #75 `dev` squash 병합 — `c68e65e49362d4fef0ec903d836818f54834d3b2`
 - [ ] release/main 이후 별도 production migration·Edge·hosted smoke
 
 target coarse `in_progress`를 실제 현장 수행중으로 해석하지 않는다. current attempt의 status와
@@ -476,7 +478,13 @@ fieldCompletedAt/endedAt이 물리 완료 정본이다. field_completed만으로
 검수·ready·earning을 생성하지 않는다. #7B 인계/capability, #7C offline/lease, #73 FK 수정은
 포함하지 않는다. [상세 실행 계약](./ATTEMPT_EXECUTION_CORE.md)을 따른다.
 DB lint 오류 0, local Security Advisor WARN/ERROR 0이며 기존 RPC-only INFO 2건은 유지된다.
-운영 DB/hosted 테스트는 실행하지 않았다. GitHub required CI와 exact-head 최종 승인은 별도 gate다.
+승인 head와 병합 결과의 tree는 `cc971a2217e7985767782b0da5670ba1380bd8d6`로 동일하다.
+독립 QA·required CI·Codex 점수·병합 증거를 별도로 기록하며 운영 DB/hosted 테스트는 실행하지 않았다.
+
+후속 #7B/#7C는 아직 미구현이다. 미착수 `scheduled` attempt의 만료·해소 정책은 #7B
+사전분석에서 기존 #27/#28 경계와 함께 확인해야 한다. 자동 종료·취소·이월 또는 관리자
+해소 동작 중 어느 것도 여기서 새 확정 정책으로 채택하지 않는다.
+만료된 `in_progress` 인계 시 새 접근·마감 revision 허용 여부도 미확정 정책 확인 대상이며, 새 maid의 start 시간/source/점유 검증을 우회하는 방안으로 취급하지 않는다.
 
 ## 13. 아직 개발하지 않은 후속 API 영역
 
@@ -490,7 +498,8 @@ DB lint 오류 0, local Security Advisor WARN/ERROR 0이며 기존 RPC-only INFO
 | [x] | 오늘/내일 activation·rollover | source/dev 완료 | #28 | production 미승격 |
 | [x] | 배정 preview algorithm | source/dev 완료 | #29 | production 미승격 |
 | [x] | maid notified-only 조회 정합화 | source/dev 완료 | #4 / PR #74 | production 미승격 |
-| [ ] | 현장 수행·offline lease·handover/conflict | #7A 구현·검증 중 / #7B·C 미개발 | #7 | #4 완료 → #7A → #7B → #7C |
+| [x] | 온라인 현장 시작·물리 완료 | #7A source/dev 완료 | #7 / PR #75 | production 미승격; 사진·submission·ready와 별도 |
+| [ ] | handover/capability·offline lease/conflict | #7B·C 미개발 | #7 | #7B 사전분석 → #7B → #7C; 미착수 scheduled 만료·해소 정책 확인 필요 |
 | [ ] | 사진 template/slot snapshot·submission version | 미개발 | #30 | 사진 전 단계 |
 | [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미개발 | #9 | Drive only / <=300KiB |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
@@ -566,7 +575,8 @@ production completeness 기준의 정본 순서다.
 23. [x] **#28 Attempt Activation source gate** — PR #71 `dev` 병합; 운영 미적용
 24. [x] **#29 Assignment Preview source gate** — PR #72 `dev` 병합; 운영 미적용
 25. [x] **#4 notified-only 조회 정합화** — PR #74 독립 리뷰·CI·Codex 위임 승인 → `dev@7bdc2a3` 병합
-26. [ ] **#7A → #7B → #7C → #30 → #9 → #31** — 현재 #7A 구현·검증 중, 나머지는 후속
+26. [x] **#7A Attempt Execution Core source gate** — PR #75 독립 QA·required CI·Codex 96/100 승인 → `dev@c68e65e` 병합; 운영 미적용
+27. [ ] **#7B → #7C → #30 → #9 → #31** — 현재 #7B 사전분석 단계, 모두 미구현; 미착수 scheduled 만료·해소 정책 확인 필요
 
 #10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
 #46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.
