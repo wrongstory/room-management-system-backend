@@ -7,6 +7,89 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
+Deno.test("offline lease contract has five exact operations, bounded ingest and safe permanent audit", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  assert(
+    document.paths["/v1/attempts/{attemptId}/start-with-lease"]
+      .post["x-required-roles"][0] === "maid",
+    "online start exact maid",
+  );
+  assert(
+    document.paths["/v1/offline-events"].post["x-required-roles"][0] === "maid",
+    "authenticated own event",
+  );
+  assert(
+    document.paths["/v1/offline-quarantines"].get["x-required-roles"][0] ===
+        "admin" &&
+      document.paths["/v1/offline-quarantines/{quarantineId}"]
+          .get["x-required-roles"][0] === "admin" &&
+      document.paths["/v1/offline-quarantines/{quarantineId}/resolve"]
+          .post["x-required-roles"][0] === "admin",
+    "only admin reviews quarantines",
+  );
+  const schema = document.components.schemas;
+  assert(
+    schema.OfflineCompletionRequest.additionalProperties === false &&
+      schema.OfflineCompletionRequest.required.length === 5,
+    "single completion no batch/action/PII",
+  );
+  assert(
+    schema.OfflineWorkLease.properties.allowedActions.items.const ===
+      "complete_field_work",
+    "no offline start or PIN action",
+  );
+  assert(
+    schema.OfflineQuarantinePage.properties.items.maxItems === 100,
+    "bounded page",
+  );
+  assert(
+    schema.OfflineResolutionRequest.oneOf.length === 3 &&
+      schema.OfflineResolutionRequest.oneOf.every((branch) =>
+        !Object.hasOwn(branch.properties, "correctedAt")
+      ),
+    "no free historical clock correction",
+  );
+  const safeSummary = {
+    offlineQuarantineId: "10000000-0000-4000-8000-000000000001",
+    resolution: "record_only",
+  };
+  assert(
+    Object.keys(safeSummary).every((key) =>
+      Object.hasOwn(
+        schema.DeveloperAuditEvent.properties.summary.properties,
+        key,
+      )
+    ),
+    "all DB offline audit projection fields are declared",
+  );
+  assert(
+    schema.DeveloperAuditEventType.enum.includes(
+      "cleaning.offline_event_resolved",
+    ),
+    "audit event is generated",
+  );
+  for (
+    const field of [
+      "eventId",
+      "leaseId",
+      "occurredAt",
+      "serverOffsetMs",
+      "requestHash",
+      "sessionId",
+      "token",
+      "requestBody",
+    ]
+  ) {
+    assert(
+      !Object.hasOwn(
+        schema.DeveloperAuditEvent.properties.summary.properties,
+        field,
+      ),
+      "client metadata excluded from permanent audit summary",
+    );
+  }
+});
+
 Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   const response = openApiResponse({});
   const document = await response.json() as typeof openApiDocument;
@@ -452,7 +535,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 42,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 43,
     "actual audit allowlist count",
   );
 });

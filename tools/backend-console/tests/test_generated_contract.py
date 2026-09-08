@@ -195,3 +195,29 @@ def test_phase_a_generated_client_contains_only_sixteen_authorized_operations() 
         "developer.list_developer_audit_events",
         "developer.run_developer_diagnostics",
     }
+
+
+def test_offline_resolution_generated_audit_excludes_ninety_day_client_metadata() -> None:
+    assert DeveloperAuditEventType.CLEANING_OFFLINE_EVENT_RESOLVED.value == (
+        "cleaning.offline_event_resolved"
+    )
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {"offline_quarantine_id", "resolution"} <= field_names
+    assert {
+        "event_id",
+        "lease_id",
+        "occurred_at",
+        "server_offset_ms",
+        "request_hash",
+        "session_id",
+        "request_body",
+        "token",
+        "pin",
+        "guest_name",
+    }.isdisjoint(field_names)
+    for resolution in ("record_only", "reject_effect", "correction_link"):
+        summary = {
+            "offlineQuarantineId": "10000000-0000-4000-8000-000000000001",
+            "resolution": resolution,
+        }
+        assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary

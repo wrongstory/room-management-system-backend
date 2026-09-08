@@ -353,6 +353,14 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 관리자 resolution은 `record_only`, `reject_effect`, `correction_link`다. correction_link는 새 검증된 correction command에서 원 quarantine ID를 provenance로 연결하며 원 event를 정상 event로 바꾸지 않는다. event metadata는 최대 90일, resolution은 별도 append-only audit에 기록하고 audit retention에 따른다.
 - 이 절과 아래 limited capability는 승인된 #7A/B/C 후속 계약이다. #4 조회정책 PR에서 실행·lease·quarantine 기능을 구현한 것으로 표시하지 않는다.
 
+### `[확정 — 2026-09-08 #7C 추가 승인]` 재시도 보존·관리자 정정
+
+- offline event metadata뿐 아니라 성공 응답 replay 보장도 최대 90일로 제한한다. 이후 오래된 이벤트는 재실행 없이 만료 거부한다. 원 event UUID, client 시각/offset, hash, 응답을 영구 command receipt나 audit에 복제하거나 영구 tombstone 예외를 만들어 보존 제한을 우회하지 않는다.
+- 구현상 최종 ingest/replay/metadata 보존선은 서버 `lease.issued_at + 90 days`로 고정한다. 늦은 최초 수신·새 UUID·재시도로 연장하지 않으므로 실제 개별 event 보존은 90일보다 짧을 수 있다. 이는 최대 90일 규칙의 구현이며 수신 후 정확히 90일 보장을 추가하지 않는다.
+- 관리자 완료 정정은 현재 유효한 원 담당자의 `in_progress` 회차만 대상으로 한다. 현재 actor·owner·assignment/revision·execution version·source를 재검증한 별도 correction command로 물리적 완료 효력과 불변 결정/provenance를 원자적으로 기록한다.
+- 인계·종료·superseded·재배정된 과거 회차 복구, 기존 완료 시각 덮어쓰기, ready·검수·수익 생성은 금지한다. 원 quarantine event는 성공 event로 변경하지 않고 `correction_link`로 새 결정과 연결한다.
+- 두 정책은 #7C source/dev 개발 승인이다. production/recovery/main/release/배포 승인이 아니다.
+
 ### `[확정]` 객실 특이사항
 
 - 메이드는 수행 중 객실 특이사항과 사진을 보고할 수 있다.

@@ -15,6 +15,7 @@ from ..models.developer_audit_event_summary_decision import DeveloperAuditEventS
 from ..models.developer_audit_event_summary_profile_status import (
     DeveloperAuditEventSummaryProfileStatus,
 )
+from ..models.developer_audit_event_summary_resolution import DeveloperAuditEventSummaryResolution
 from ..types import UNSET, Unset
 
 T = TypeVar("T", bound="DeveloperAuditEventSummary")
@@ -64,6 +65,8 @@ class DeveloperAuditEventSummary:
         profile_status (DeveloperAuditEventSummaryProfileStatus | Unset):
         profile_version (int | Unset):
         next_attempt_id (UUID | Unset):
+        offline_quarantine_id (UUID | Unset): 서버 발급 격리 기록 ID. 원 client event UUID가 아닙니다.
+        resolution (DeveloperAuditEventSummaryResolution | Unset):
         rollover_from_date (datetime.date | Unset):
         rollover_to_date (datetime.date | Unset):
         carryover_count (int | Unset):
@@ -129,6 +132,8 @@ class DeveloperAuditEventSummary:
     profile_status: DeveloperAuditEventSummaryProfileStatus | Unset = UNSET
     profile_version: int | Unset = UNSET
     next_attempt_id: UUID | Unset = UNSET
+    offline_quarantine_id: UUID | Unset = UNSET
+    resolution: DeveloperAuditEventSummaryResolution | Unset = UNSET
     rollover_from_date: datetime.date | Unset = UNSET
     rollover_to_date: datetime.date | Unset = UNSET
     carryover_count: int | Unset = UNSET
@@ -279,6 +284,14 @@ class DeveloperAuditEventSummary:
         if not isinstance(self.next_attempt_id, Unset):
             next_attempt_id = str(self.next_attempt_id)
 
+        offline_quarantine_id: str | Unset = UNSET
+        if not isinstance(self.offline_quarantine_id, Unset):
+            offline_quarantine_id = str(self.offline_quarantine_id)
+
+        resolution: str | Unset = UNSET
+        if not isinstance(self.resolution, Unset):
+            resolution = self.resolution.value
+
         rollover_from_date: str | Unset = UNSET
         if not isinstance(self.rollover_from_date, Unset):
             rollover_from_date = self.rollover_from_date.isoformat()
@@ -422,6 +435,10 @@ class DeveloperAuditEventSummary:
             field_dict["profileVersion"] = profile_version
         if next_attempt_id is not UNSET:
             field_dict["nextAttemptId"] = next_attempt_id
+        if offline_quarantine_id is not UNSET:
+            field_dict["offlineQuarantineId"] = offline_quarantine_id
+        if resolution is not UNSET:
+            field_dict["resolution"] = resolution
         if rollover_from_date is not UNSET:
             field_dict["rolloverFromDate"] = rollover_from_date
         if rollover_to_date is not UNSET:
@@ -669,6 +686,20 @@ class DeveloperAuditEventSummary:
         else:
             next_attempt_id = UUID(_next_attempt_id)
 
+        _offline_quarantine_id = d.pop("offlineQuarantineId", UNSET)
+        offline_quarantine_id: UUID | Unset
+        if isinstance(_offline_quarantine_id, Unset):
+            offline_quarantine_id = UNSET
+        else:
+            offline_quarantine_id = UUID(_offline_quarantine_id)
+
+        _resolution = d.pop("resolution", UNSET)
+        resolution: DeveloperAuditEventSummaryResolution | Unset
+        if isinstance(_resolution, Unset):
+            resolution = UNSET
+        else:
+            resolution = DeveloperAuditEventSummaryResolution(_resolution)
+
         _rollover_from_date = d.pop("rolloverFromDate", UNSET)
         rollover_from_date: datetime.date | Unset
         if isinstance(_rollover_from_date, Unset):
@@ -792,6 +823,8 @@ class DeveloperAuditEventSummary:
             profile_status=profile_status,
             profile_version=profile_version,
             next_attempt_id=next_attempt_id,
+            offline_quarantine_id=offline_quarantine_id,
+            resolution=resolution,
             rollover_from_date=rollover_from_date,
             rollover_to_date=rollover_to_date,
             carryover_count=carryover_count,

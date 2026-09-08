@@ -58,7 +58,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@5882509afed6faf31f5e9d7775a163e19954c4c2` (#25~#29, #4 / PR #74, #7A / PR #75, 상태 문서 PR #76 및 #7B / PR #77까지 source/dev 완료; production 미승격)
+- 개발 통합 source 기준: `dev@695c10cd8f6cf1be24d272bd18885e8272d83388` (#25~#29, #4 / PR #74, #7A / PR #75, #7B / PR #77 및 상태 문서 PR #78까지 source/dev 완료; production 미승격)
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -515,8 +515,25 @@ dev OpenAPI는 **58 paths / 63 operations**이며 아래 4개 operation을 포�
 
 승인 exact head와 dev 병합 결과의 tree는 `1add0ec8668513ece4acc8f9d09b9509e91e2145`로 동일하다.
 독립 QA·required CI·Codex 점수·병합을 구분해 기록한다. #7B source/dev 완료는 production
-사용 가능 선언이 아니다. #7C offline lease/replay/quarantine는 다음 단계이며 미구현이다.
+사용 가능 선언이 아니다. #7C offline lease/replay/quarantine는 구현 중이며 source gate는 미완료다.
 production DB/Edge/Pages 변경은 없다.
+
+### #7C Offline — 추가 정책 승인·구현 중
+
+`codex/7c-offline-lease-quarantine`는 위 dev 기준에서 시작한다. 2026-09-08 사용자가
+replay 최대90일 후 만료거부와 현재 유효한 in_progress 회차의 관리자 물리완료 정정을 승인했다.
+과거 회차 복구 및 ready/검수/수익 생성은 금지한다. [Offline 계약](./ATTEMPT_OFFLINE.md)을 따른다.
+아직 source 완료/CI/독립 승인/dev 병합을 주장하지 않는다. 운영 migration/API/Pages 값은 그대로다.
+현재 feature의 OpenAPI는 63 paths / 68 operations이며 신규 offline 5 operations를 포함한다.
+이는 작업 중 source 계약 수치로, dev의 통합 완료나 production 공개 계약 수치가 아니다.
+
+- [x] 90일 replay/metadata 경계와 관리자 정정의 현재회차 한정 정책 승인
+- [x] 시작 base application 123 tests PASS
+- [x] lease/ingest/quarantine/resolution/purge 구현 및 역할·시각·경합 로컬 검증
+- [x] OpenAPI/Python/문서 정합화와 전체 로컬 검증 (Edge114/application123/DB910/Python36/전체 concurrency PASS)
+- [ ] exact-head independent QA P0/P1=0, required CI PASS, Codex90점 이상
+- [ ] feature → dev 병합
+- [ ] 별도 release/main 및 production 배포·보존 worker·hosted 검증
 
 ## 13. 아직 개발하지 않은 후속 API 영역
 
@@ -532,7 +549,7 @@ production DB/Edge/Pages 변경은 없다.
 | [x] | maid notified-only 조회 정합화 | source/dev 완료 | #4 / PR #74 | production 미승격 |
 | [x] | 온라인 현장 시작·물리 완료 | #7A source/dev 완료 | #7 / PR #75 | production 미승격; 사진·submission·ready와 별도 |
 | [x] | handover/capability | #7B source/dev 완료 | #7 / PR #77 | production 미승격 |
-| [ ] | offline lease/conflict | #7C 미개발 | #7 | #7B source/dev gate 완료 후 다음 단계 |
+| [ ] | offline lease/conflict | #7C 구현 중·source gate 미완료 | #7 | lease/replay/quarantine 검증 및 독립 리뷰 대기 |
 | [ ] | 사진 template/slot snapshot·submission version | 미개발 | #30 | 사진 전 단계 |
 | [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미개발 | #9 | Drive only / <=300KiB |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
@@ -610,7 +627,7 @@ production completeness 기준의 정본 순서다.
 25. [x] **#4 notified-only 조회 정합화** — PR #74 독립 리뷰·CI·Codex 위임 승인 → `dev@7bdc2a3` 병합
 26. [x] **#7A Attempt Execution Core source gate** — PR #75 독립 QA·required CI·Codex 96/100 승인 → `dev@c68e65e` 병합; 운영 미적용
 27. [x] **#7B Attempt Lifecycle source gate** — PR #77 독립 QA·required CI·Codex 96/100 승인 → `dev@5882509` 병합; 운영 미적용
-28. [ ] **#7C → #30 → #9 → #31** — #7C offline lease/replay/quarantine 착수 준비, 이후 미구현
+28. [ ] **#7C → #30 → #9 → #31** — #7C offline lease/replay/quarantine 구현 중, 이후 미구현
 
 #10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
 #46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.

@@ -28,6 +28,7 @@ class DeveloperAuditEventType(str, Enum):
     CLEANING_INTERRUPTED_HANDOVER = "cleaning.interrupted_handover"
     CLEANING_MANUAL_REQUEST_CANCELLED = "cleaning.manual_request.cancelled"
     CLEANING_MANUAL_REQUEST_CREATED = "cleaning.manual_request.created"
+    CLEANING_OFFLINE_EVENT_RESOLVED = "cleaning.offline_event_resolved"
     CLEANING_SCHEDULED_EXPIRED = "cleaning.scheduled_expired"
     CLEANING_UPLOAD_ONLY_ALLOWED = "cleaning.upload_only_allowed"
     RESERVATION_CANCELLED = "reservation.cancelled"

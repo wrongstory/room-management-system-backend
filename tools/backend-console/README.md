@@ -71,3 +71,10 @@ lifecycle command의 결과이며 developer가 업무 인계·limited 실행을 
 capability 로그인 secret은 포함하지 않는다. 생성 모델 검증과 운영 배포는 별도 gate다.
 기존 문서의 15개 표기는 이미 생성되어 있던 `change_password` 1개를 누락한 설명 오류였다.
 이번 feature에서 그 endpoint를 새로 추가한 것이 아니며 exact module allowlist 회귀로 검증한다.
+
+#7C source는 `cleaning.offline_event_resolved`와 서버 발급 `offlineQuarantineId`, 고정
+`resolution` 요약만 생성 모델에 추가한다. client event UUID·lease ID·발생 시각·clock offset·
+request hash는 90일 metadata 저장소 계약이므로 영구 감사 projection에 복제하지 않는다.
+developer 콘솔은 기존 16 operations만 유지하며 admin 격리 판정 및 maid lease/동기화 API를
+대신 실행하지 않는다. `correction_link`는 현재 유효 회차의 검증 가능한 완료 정정이지 과거
+인계/종료 회차를 복구하거나 검수·입실 준비·수익을 만드는 기능이 아니다.

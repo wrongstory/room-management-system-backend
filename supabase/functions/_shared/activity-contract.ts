@@ -68,7 +68,9 @@ export function authorizationSourceForPath(
     return "edge.authorization.reservations";
   }
   if (
-    path.startsWith("/v1/attempts/") || path.startsWith("/v1/limited/attempts/")
+    path.startsWith("/v1/attempts/") ||
+    path.startsWith("/v1/limited/attempts/") ||
+    path === "/v1/offline-events" || path.startsWith("/v1/offline-quarantines")
   ) {
     return "edge.authorization.attempts";
   }

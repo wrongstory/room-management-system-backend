@@ -138,7 +138,7 @@ field_completed는 물리적 완료 선언, 필수사진은 submission gate라�
 scheduled checkout만으로 물리 완료를 막지 않습니다. #7B 전 일반 계정 변경이 진행 업무를 고립시키지
 않도록 DB에서 거부하며 #7A 자체에는 limited capability/Auth 방법을 포함하지 않았습니다.
 
-### #7B 인계·제한 권한 경계 — feature 구현 중
+### #7B 인계·제한 권한 경계 — source/dev 완료
 
 [Attempt Lifecycle](./ATTEMPT_LIFECYCLE.md)은 일반 active-only 인증/RLS와 별도로 기존 Auth
 session을 검증하는 limited 경로를 정의합니다. private grant와 revocation 원장은 불변이며
@@ -153,6 +153,22 @@ maid에게 이관하지 않습니다. #7C offline, 사진/PIN/제출 구현이�
 
 source/dev 승인·서브에이전트 독립 리뷰는 [오케스트레이션 기준](./DEVELOPMENT_ORCHESTRATION.md)을
 따릅니다. 점수 90점 이상도 운영 승격 권한을 뜻하지 않습니다.
+
+### #7C 오프라인 완료 경계 — 구현 중
+
+[Offline 계약](./ATTEMPT_OFFLINE.md)에 따라 온라인 시작과 work lease 발급을 원자적으로
+처리하고, 오프라인에서는 완료 1종만 기록합니다. 기존 온라인 start DTO를 바꾸지 않는 별도
+start-with-lease 경로를 사용합니다. PIN lease나 별도 bearer credential을 재사용하지 않습니다.
+
+서버가 발급한 lease와 본인 Auth/session을 확인한 뒤 현재 유효한 완료는 실행하고, 알려진
+만료/회수/재배정 완료는 제한된 metadata로 격리합니다. unknown/다른 사람의 lease는 해당
+원장을 만들지 않습니다. lease별 canonical completion 한 건으로 UUID 변경 공격의 row 증가를
+제한하고, 모든 잠금 뒤 시각으로 2시간 및 서버발급 후90일 한도를 검사합니다.
+
+90일 metadata/replay 이후에는 재실행하지 않습니다. 영구 command receipt나 audit로 client
+UUID/시각/offset/hash/응답을 복제하는 예외는 없습니다. 관리자 correction은 현재 유효한
+진행 회차의 물리완료만 별도 불변 결정/provenance로 기록하고 과거 회차를 복구하지 않습니다.
+이 구현은 production 자동 purge/HTTP 활성화나 ready/검수/수익을 만드는 작업이 아닙니다.
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 `notifications`, private `notification_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 

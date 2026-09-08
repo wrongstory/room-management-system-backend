@@ -609,6 +609,42 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 
 ## 9. 이후 반영 순서
 
+### #7C 개발 소스: Offline v1 lease / quarantine
+
+`20260908144558_attempt_offline_lease_quarantine.sql`은 기존 28개 migration 뒤에
+추가하는 개발 schema이며 운영/recovery 적용이나 Cron 활성화를 의미하지 않는다.
+
+```mermaid
+erDiagram
+  cleaning_attempts ||--o| offline_work_leases : "online start only"
+  offline_work_leases ||--o| offline_work_lease_revocations : "revoked"
+  offline_work_leases ||--o| offline_completion_events : "one canonical completion"
+  offline_completion_events ||--o| offline_event_resolutions : "one final decision"
+  offline_event_resolutions ||--|{ audit_events : "logical provenance, no FK"
+```
+
+- 네 raw table은 모두 private/RLS/no direct grants다. 고정 search_path의 service-only
+  RPC가 최신 Auth session·actor·ownership·CAS를 검사한다. session UUID는 저장하지 않는다.
+- work lease는 온라인 `start-with-lease`와 원자 발급한다. 기존 PIN lease/limited capability와
+  별개이며 `attempt_id` UNIQUE로 request key를 바꿔도 TTL을 연장하지 않는다.
+- 실행 lease는 `[issued_at, issued_at+2h)`이고 모든 metadata/replay 최종선은 서버가 정한
+  `issued_at+90d`다. 늦은 접수·다른 UUID·관리자 결정으로 보존 기간을 연장하지 않는다.
+- `offline_completion_events`의 `(actor_profile_id,event_id)` UNIQUE와 `lease_id` UNIQUE가
+  중복 적용 및 UUID 교체 공격을 막는다. unknown/다른 소유자 lease는 원장 없이 거절한다.
+- 정상 completion만 검증된 normalized 시각으로 물리 완료와 audit를 원자 기록한다.
+  known expired/revoked 또는 clock/KST 충돌은 quarantine하며 재전송으로 자동 승격하지 않는다.
+- 관리자는 `record_only` / `reject_effect` / `correction_link` 중 최종 결정을 한 번 기록한다.
+  correction은 현재 동일 담당·current notified assignment·in_progress·CAS·source identity와
+  검증 가능한 원 normalized 시각을 다시 확인한다. 자유 `correctedAt`이나 종료/인계 회차 복구는 없다.
+  검수/room-ready/submission/earning은 생성하지 않는다.
+- 이벤트 원 UUID/client 시각/offset/hash/응답은 영구 command receipt나 audit에 복제하지 않는다.
+  별도 audit에는 서버 생성 quarantine ID와 고정 resolution만 남겨 보정 provenance를 유지한다.
+  위 audit 연결은 실제 FK가 아닌 논리 provenance다. 모든 resolution은 결정 audit 하나를 만들고,
+  correction은 별도의 `cleaning.field_completed` 업무 audit도 같은 transaction에 추가한다.
+- bounded purger는 만료 lease 최대 100건의 종속 metadata 묶음만 FK 순서로 정리한다.
+  일반 원장/audit에는 DELETE가 없고 unexpired metadata 삭제도 차단한다. purge 뒤 과거 lease는
+  unknown reject, 이미 시작된 attempt의 새 lease 발급도 금지라 이벤트를 다시 실행할 수 없다.
+
 ### #7B 개발 소스: 중단·인계와 제한 권한
 
 `20260908123214_attempt_handover_limited_capability.sql`은 기존 27개 migration을
