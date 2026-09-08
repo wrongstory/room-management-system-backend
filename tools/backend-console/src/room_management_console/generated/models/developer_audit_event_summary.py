@@ -65,6 +65,11 @@ class DeveloperAuditEventSummary:
         profile_status (DeveloperAuditEventSummaryProfileStatus | Unset):
         profile_version (int | Unset):
         next_attempt_id (UUID | Unset):
+        target_slot_id (UUID | Unset):
+        photo_id (UUID | Unset):
+        photo_version (int | Unset):
+        uploaded_at (datetime.datetime | Unset):
+        purge_after (datetime.datetime | Unset):
         offline_quarantine_id (UUID | Unset): 서버 발급 격리 기록 ID. 원 client event UUID가 아닙니다.
         resolution (DeveloperAuditEventSummaryResolution | Unset):
         rollover_from_date (datetime.date | Unset):
@@ -132,6 +137,11 @@ class DeveloperAuditEventSummary:
     profile_status: DeveloperAuditEventSummaryProfileStatus | Unset = UNSET
     profile_version: int | Unset = UNSET
     next_attempt_id: UUID | Unset = UNSET
+    target_slot_id: UUID | Unset = UNSET
+    photo_id: UUID | Unset = UNSET
+    photo_version: int | Unset = UNSET
+    uploaded_at: datetime.datetime | Unset = UNSET
+    purge_after: datetime.datetime | Unset = UNSET
     offline_quarantine_id: UUID | Unset = UNSET
     resolution: DeveloperAuditEventSummaryResolution | Unset = UNSET
     rollover_from_date: datetime.date | Unset = UNSET
@@ -284,6 +294,24 @@ class DeveloperAuditEventSummary:
         if not isinstance(self.next_attempt_id, Unset):
             next_attempt_id = str(self.next_attempt_id)
 
+        target_slot_id: str | Unset = UNSET
+        if not isinstance(self.target_slot_id, Unset):
+            target_slot_id = str(self.target_slot_id)
+
+        photo_id: str | Unset = UNSET
+        if not isinstance(self.photo_id, Unset):
+            photo_id = str(self.photo_id)
+
+        photo_version = self.photo_version
+
+        uploaded_at: str | Unset = UNSET
+        if not isinstance(self.uploaded_at, Unset):
+            uploaded_at = self.uploaded_at.isoformat()
+
+        purge_after: str | Unset = UNSET
+        if not isinstance(self.purge_after, Unset):
+            purge_after = self.purge_after.isoformat()
+
         offline_quarantine_id: str | Unset = UNSET
         if not isinstance(self.offline_quarantine_id, Unset):
             offline_quarantine_id = str(self.offline_quarantine_id)
@@ -435,6 +463,16 @@ class DeveloperAuditEventSummary:
             field_dict["profileVersion"] = profile_version
         if next_attempt_id is not UNSET:
             field_dict["nextAttemptId"] = next_attempt_id
+        if target_slot_id is not UNSET:
+            field_dict["targetSlotId"] = target_slot_id
+        if photo_id is not UNSET:
+            field_dict["photoId"] = photo_id
+        if photo_version is not UNSET:
+            field_dict["photoVersion"] = photo_version
+        if uploaded_at is not UNSET:
+            field_dict["uploadedAt"] = uploaded_at
+        if purge_after is not UNSET:
+            field_dict["purgeAfter"] = purge_after
         if offline_quarantine_id is not UNSET:
             field_dict["offlineQuarantineId"] = offline_quarantine_id
         if resolution is not UNSET:
@@ -686,6 +724,36 @@ class DeveloperAuditEventSummary:
         else:
             next_attempt_id = UUID(_next_attempt_id)
 
+        _target_slot_id = d.pop("targetSlotId", UNSET)
+        target_slot_id: UUID | Unset
+        if isinstance(_target_slot_id, Unset):
+            target_slot_id = UNSET
+        else:
+            target_slot_id = UUID(_target_slot_id)
+
+        _photo_id = d.pop("photoId", UNSET)
+        photo_id: UUID | Unset
+        if isinstance(_photo_id, Unset):
+            photo_id = UNSET
+        else:
+            photo_id = UUID(_photo_id)
+
+        photo_version = d.pop("photoVersion", UNSET)
+
+        _uploaded_at = d.pop("uploadedAt", UNSET)
+        uploaded_at: datetime.datetime | Unset
+        if isinstance(_uploaded_at, Unset):
+            uploaded_at = UNSET
+        else:
+            uploaded_at = datetime.datetime.fromisoformat(_uploaded_at)
+
+        _purge_after = d.pop("purgeAfter", UNSET)
+        purge_after: datetime.datetime | Unset
+        if isinstance(_purge_after, Unset):
+            purge_after = UNSET
+        else:
+            purge_after = datetime.datetime.fromisoformat(_purge_after)
+
         _offline_quarantine_id = d.pop("offlineQuarantineId", UNSET)
         offline_quarantine_id: UUID | Unset
         if isinstance(_offline_quarantine_id, Unset):
@@ -823,6 +891,11 @@ class DeveloperAuditEventSummary:
             profile_status=profile_status,
             profile_version=profile_version,
             next_attempt_id=next_attempt_id,
+            target_slot_id=target_slot_id,
+            photo_id=photo_id,
+            photo_version=photo_version,
+            uploaded_at=uploaded_at,
+            purge_after=purge_after,
             offline_quarantine_id=offline_quarantine_id,
             resolution=resolution,
             rollover_from_date=rollover_from_date,

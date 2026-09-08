@@ -31,6 +31,7 @@ class DeveloperAuditEventType(str, Enum):
     CLEANING_OFFLINE_EVENT_RESOLVED = "cleaning.offline_event_resolved"
     CLEANING_SCHEDULED_EXPIRED = "cleaning.scheduled_expired"
     CLEANING_UPLOAD_ONLY_ALLOWED = "cleaning.upload_only_allowed"
+    PHOTO_UPLOAD_ACCEPTED = "photo.upload_accepted"
     RESERVATION_CANCELLED = "reservation.cancelled"
     RESERVATION_CHANGED = "reservation.changed"
     RESERVATION_CREATED = "reservation.created"
