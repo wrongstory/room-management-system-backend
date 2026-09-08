@@ -1,16 +1,72 @@
 import {
   assertEmptyDiagnosticRequestBody,
+  developerAuditEvents,
   expectedMigrationName,
   toDeveloperActivityEvent,
   toDeveloperAuditEvent,
 } from "./developer-api.ts";
-import { EdgeError, requireDeveloper } from "./runtime.ts";
+import { type EdgeClients, EdgeError, requireDeveloper } from "./runtime.ts";
+import { openApiDocument } from "./openapi.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
 }
+
+Deno.test("developer audit query accepts all 43 approved event types and rejects 44 before RPC", async () => {
+  let calls = 0;
+  const clients = {
+    admin: {
+      rpc: (_name: string, args: Record<string, unknown>) => {
+        calls += 1;
+        assert(
+          (args.p_event_types as unknown[]).length === 43,
+          "full current inventory passed",
+        );
+        return Promise.resolve({ data: [], error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const actor = {
+    authUserId: "10000000-0000-4000-8000-000000000001",
+    profileId: "20000000-0000-4000-8000-000000000001",
+    displayName: "개발자",
+    role: "developer" as const,
+    mustChangePassword: false,
+  };
+  const query = new URLSearchParams();
+  for (
+    const event of openApiDocument.components.schemas.DeveloperAuditEventType
+      .enum
+  ) query.append("eventType", event);
+  assert(query.size === 43, "actual source enum inventory");
+  await developerAuditEvents(
+    new Request(
+      `https://example.invalid/functions/v1/api/v1/developer/audit-events?${query}`,
+    ),
+    clients,
+    actor,
+  );
+  assert(calls === 1, "all 43 accepted");
+  query.append("eventType", "cleaning.offline_event_resolved");
+  try {
+    await developerAuditEvents(
+      new Request(
+        `https://example.invalid/functions/v1/api/v1/developer/audit-events?${query}`,
+      ),
+      clients,
+      actor,
+    );
+    throw new Error("44 must fail");
+  } catch (error) {
+    assert(
+      error instanceof EdgeError && error.status === 400,
+      "44 rejected with stable validation",
+    );
+  }
+  assert(calls === 1, "over-limit query never reaches DB");
+});
 
 Deno.test("developer audit mapper exposes only the bounded camelCase projection", () => {
   const event = toDeveloperAuditEvent({
@@ -34,7 +90,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "attempt_handover_limited_capability",
+    expectedMigrationName === "attempt_offline_lease_quarantine",
     "expected migration must not depend on a remote execution timestamp",
   );
 });

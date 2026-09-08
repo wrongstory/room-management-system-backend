@@ -36,6 +36,15 @@ import {
   manageAttemptLifecycle,
 } from "../_shared/attempt-lifecycle-api.ts";
 import {
+  getOfflineQuarantine,
+  listOfflineQuarantines,
+  quarantinePath,
+  resolveOfflineQuarantine,
+  startWithLease,
+  startWithLeasePath,
+  syncOfflineEvent,
+} from "../_shared/attempt-offline-api.ts";
+import {
   changeAccountRole,
   changeAccountStatus,
   changePassword,
@@ -163,6 +172,17 @@ export async function handleApiRequest(
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
 
+    // 늦은 기록 수신은 수행 권한이 아니다. 이 단일 경로만 3-state identity를 검증한 뒤 DB에서 lease를 다시 검사한다.
+    if (request.method === "POST" && path === "/v1/offline-events") {
+      const identity = await authenticateLimitedAttempt(request, clients);
+      actor = identity.actor;
+      return jsonResponse(
+        await syncOfflineEvent(request, clients, identity),
+        200,
+        corsHeaders,
+      );
+    }
+
     // 제한 capability는 정확히 이 두 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
     const limited = limitedAttemptPath(path);
     if (
@@ -183,6 +203,47 @@ export async function handleApiRequest(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    const startLeaseId = request.method === "POST"
+      ? startWithLeasePath(path)
+      : null;
+    if (startLeaseId) {
+      return jsonResponse(
+        await startWithLease(request, clients, actor, startLeaseId),
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/offline-quarantines") {
+      return jsonResponse(
+        await listOfflineQuarantines(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
+    const quarantineRoute = quarantinePath(path);
+    if (
+      quarantineRoute &&
+      ((!quarantineRoute.resolve && request.method === "GET") ||
+        (quarantineRoute.resolve && request.method === "POST"))
+    ) {
+      return jsonResponse(
+        quarantineRoute.resolve
+          ? await resolveOfflineQuarantine(
+            request,
+            clients,
+            actor,
+            quarantineRoute.id,
+          )
+          : await getOfflineQuarantine(
+            request,
+            clients,
+            actor,
+            quarantineRoute.id,
+          ),
+        200,
+        corsHeaders,
+      );
+    }
     if (request.method === "GET" && path === "/v1/attempts/lifecycle-impact") {
       return jsonResponse(
         await lifecycleImpact(request, clients, actor),

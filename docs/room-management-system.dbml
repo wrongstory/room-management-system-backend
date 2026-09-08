@@ -536,8 +536,81 @@ Table public.cleaning_attempts {
   Indexes {
     (cleaning_target_id, attempt_number) [unique]
   }
-  Note: '#28 activates scheduled once. #7A own active maid execution; #7B limited completion/handover/expired scheduled retirement advance CAS. One in_progress per maid. No physical completion implies submission/readiness/earning. Attempt identity and snapshots immutable. Only proven interrupted handover history is excluded from current-work checks; superseded expiry preserves history. #7C offline/PIN remains excluded.'
+  Note: '#28 activates scheduled once. #7A own active maid execution; #7B limited completion/handover/expired scheduled retirement advance CAS. One in_progress per maid. No physical completion implies submission/readiness/earning. Attempt identity and snapshots immutable. Only proven interrupted handover history is excluded from current-work checks; superseded expiry preserves history. #7C adds online-issued lease/offline completion/quarantine and current-attempt admin correction; PIN runtime remains excluded.'
 }
+
+Table private.offline_work_leases {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  attempt_id uuid [not null, unique, ref: > public.cleaning_attempts.id]
+  assignment_id uuid [not null, ref: > public.cleaning_assignments.id]
+  assignment_revision bigint [not null]
+  execution_version bigint [not null]
+  profile_version bigint [not null]
+  version bigint [not null, default: 1]
+  issued_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  metadata_expires_at timestamptz [not null]
+  Indexes {
+    (actor_profile_id, attempt_id)
+    assignment_id
+    (metadata_expires_at, id)
+    (id, actor_profile_id, metadata_expires_at) [unique]
+    (id, metadata_expires_at) [unique]
+  }
+  Note: '#7C online start-with-lease atomically issues exactly one completion lease per attempt; TTL=[issued_at,issued_at+2h), metadata/replay horizon=issued_at+90d. No renewal by changing request key. Separate from PIN and limited grants. Private RLS/no direct grants, immutable until bounded authorized expiry purge.'
+}
+
+Table private.offline_work_lease_revocations {
+  lease_id uuid [pk, ref: > private.offline_work_leases.id]
+  revoked_at timestamptz [not null]
+  reason_code text [not null, note: 'ACCOUNT_CHANGED / ATTEMPT_CHANGED']
+  metadata_expires_at timestamptz [not null]
+  Note: 'Append-only revocation until lease metadata horizon. Profile lifecycle or attempt transition revokes the original lease permanently; normal account restoration cannot restore it.'
+}
+
+Table private.offline_completion_events {
+  id uuid [pk, note: 'Server-owned record/quarantine identity']
+  lease_id uuid [not null, unique, ref: > private.offline_work_leases.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  event_id uuid [not null, note: 'Client stable UUID, expiring metadata only']
+  request_hash text [not null]
+  occurred_at timestamptz [not null, note: 'Client time claim, never permanent audit payload']
+  server_offset_ms bigint [not null]
+  normalized_occurred_at timestamptz [not null]
+  received_at timestamptz [not null]
+  metadata_expires_at timestamptz [not null]
+  outcome text [not null, note: 'applied / quarantined']
+  reason_code text [note: 'LEASE_EXPIRED / LEASE_REVOKED / ASSIGNMENT_CHANGED / CLOCK_CONFLICT / KST_DATE_CONFLICT']
+  response_payload jsonb [not null, note: 'Replay response only until original lease metadata horizon']
+  Indexes {
+    (actor_profile_id, event_id) [unique]
+    (id, metadata_expires_at) [unique]
+    (metadata_expires_at, id)
+    (received_at, id) [note: 'Descending partial index WHERE outcome=quarantined']
+  }
+  Note: 'One canonical completion slot per lease bounds rotating UUID attacks. Unknown/foreign lease has no event row. Successful retry replays; changed payload/second UUID conflicts; quarantined retries never auto-promote. Raw UUID/clock/hash/response cannot be copied to permanent command_executions/audit. Strictly no PII/PIN/body/token/IP.'
+}
+
+Table private.offline_event_resolutions {
+  id uuid [pk]
+  event_record_id uuid [not null, unique, ref: > private.offline_completion_events.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  resolution text [not null, note: 'record_only / reject_effect / correction_link']
+  idempotency_key text [not null]
+  request_hash text [not null]
+  response_payload jsonb [not null]
+  metadata_expires_at timestamptz [not null]
+  Indexes {
+    (actor_profile_id, idempotency_key) [unique]
+    (metadata_expires_at, id)
+  }
+  Note: 'One immutable final admin decision. correction_link is a new validated admin command on the same current in_progress attempt, confirming the pre-existing normalized completion time; no arbitrary correctedAt, no resurrection/submission/earning. Only server quarantine ID + fixed resolution remain in permanent domain audit. Expiring resolution receipt is deleted with event metadata.'
+}
+
+Ref: private.offline_work_lease_revocations.(lease_id, metadata_expires_at) > private.offline_work_leases.(id, metadata_expires_at)
+Ref: private.offline_completion_events.(lease_id, actor_profile_id, metadata_expires_at) > private.offline_work_leases.(id, actor_profile_id, metadata_expires_at)
+Ref: private.offline_event_resolutions.(event_record_id, metadata_expires_at) > private.offline_completion_events.(id, metadata_expires_at)
 
 Table private.attempt_capability_grants {
   id uuid [pk]

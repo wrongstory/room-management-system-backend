@@ -19,6 +19,7 @@ from .developer_audit_event_summary import DeveloperAuditEventSummary
 from .developer_audit_event_summary_capability_kind import DeveloperAuditEventSummaryCapabilityKind
 from .developer_audit_event_summary_decision import DeveloperAuditEventSummaryDecision
 from .developer_audit_event_summary_profile_status import DeveloperAuditEventSummaryProfileStatus
+from .developer_audit_event_summary_resolution import DeveloperAuditEventSummaryResolution
 from .developer_audit_event_type import DeveloperAuditEventType
 from .developer_audit_page import DeveloperAuditPage
 from .developer_database_status import DeveloperDatabaseStatus
@@ -118,6 +119,7 @@ __all__ = (
     "DeveloperAuditEventSummaryCapabilityKind",
     "DeveloperAuditEventSummaryDecision",
     "DeveloperAuditEventSummaryProfileStatus",
+    "DeveloperAuditEventSummaryResolution",
     "DeveloperAuditEventType",
     "DeveloperAuditPage",
     "DeveloperDatabaseStatus",

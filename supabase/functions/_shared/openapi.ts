@@ -655,7 +655,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 42,
+              maxItems: 43,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -1129,6 +1129,120 @@ export const openApiDocument = {
           "401": errorResponse,
           "403": errorResponse,
           "500": errorResponse,
+        },
+      },
+    },
+    "/v1/attempts/{attemptId}/start-with-lease": {
+      post: {
+        ...lifecycleOperation(
+          "startAttemptWithLease",
+          "온라인 청소 시작과 오프라인 완료 lease 발급",
+          "active 본인 maid의 online start 성공과 lease 발급을 원자적으로 수행합니다. 기존 /start 응답은 바뀌지 않으며 기존 /start만 사용한 회차에는 lease가 없습니다. 2시간 TTL·lease 발급 시각 기준 90일 metadata/replay 만료는 재시도·다른 key로 연장할 수 없습니다. lease ID는 credential이 아니며 재연결 때 유효 Supabase Auth 세션이 필요합니다. PIN·사진·개인정보는 lease/오프라인 큐에 저장하지 않습니다.",
+          "maid",
+          "AttemptWithOfflineLease",
+        ),
+        parameters: [idempotencyHeader, attemptPathParameter],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/AttemptExecutionRequest" },
+            },
+          },
+        },
+      },
+    },
+    "/v1/offline-events": {
+      post: {
+        ...lifecycleOperation(
+          "syncOfflineCompletion",
+          "본인 lease의 단일 오프라인 완료 이벤트 동기화",
+          "인증된 maid의 active/deactivation_pending/upload_only 상태와 현재 세션을 검증하고, 본인에게 서버가 발급한 lease의 complete_field_work 한 슬롯만 처리합니다. offline start·batch·임의 action은 없습니다(본문 최대 2048 bytes). eventId는 재시도 UUID이며 같은 UUID+payload만 90일 안에서 원 응답을 replay합니다. 같은 lease의 다른 UUID도 새 효과/무제한 row를 만들지 않습니다. 90일은 lease.issuedAt 기준이며 이후 거부하고 영구 tombstone은 남기지 않습니다. 보존 중 만료 lease는 OFFLINE_EVENT_EXPIRED, 이미 삭제/unknown lease는 OFFLINE_LEASE_UNKNOWN이며 모두 재실행하지 않습니다. normalizedOccurredAt=occurredAt+serverOffsetMs이며 ±5분 skew/server anchor/시작~lease 만료/KST 경계를 DB가 검증합니다. 잠금 후 수신이 TTL 이상이거나 취소/인계/시계·날짜 충돌이면 quarantined이고 수행 성공이 아닙니다. unknown/타인 lease와 revoked session은 거부합니다. Idempotency-Key/X-Request-ID를 이벤트 원장 식별로 사용하지 않습니다.",
+          "maid",
+          "OfflineSyncResult",
+        ),
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OfflineCompletionRequest" },
+            },
+          },
+        },
+      },
+    },
+    "/v1/offline-quarantines": {
+      get: {
+        ...lifecycleOperation(
+          "listOfflineQuarantines",
+          "관리자 오프라인 격리 기록 조회",
+          "active business admin 전용입니다. 최대 31일·100건·cursor 조회이며 90일 metadata horizon 밖 기록은 반환하지 않습니다. 기본 조회는 최근 7일입니다. 원 client event UUID/hash/offset/body는 반환하지 않고 발생 시각은 서버가 계산한 후보 시각이며 신뢰된 수행 완료를 뜻하지 않습니다.",
+          "admin",
+          "OfflineQuarantinePage",
+        ),
+        parameters: [
+          {
+            name: "from",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+          },
+          {
+            name: "to",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+          },
+          {
+            name: "limit",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", minLength: 1, maxLength: 256 },
+          },
+        ],
+      },
+    },
+    "/v1/offline-quarantines/{quarantineId}": {
+      get: {
+        ...lifecycleOperation(
+          "getOfflineQuarantine",
+          "관리자 격리 기록과 현재 수행 CAS 확인",
+          "과거 회차 복구 권한을 부여하지 않습니다. currentAttempt는 현재 유효 배정에 연결된 안전한 DTO 또는 null이며 correction 전에 status/executionVersion을 확인합니다. 원문 event UUID/clock offset/PII/PIN은 반환하지 않습니다.",
+          "admin",
+          "OfflineQuarantine",
+        ),
+        parameters: [{
+          name: "quarantineId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        }],
+      },
+    },
+    "/v1/offline-quarantines/{quarantineId}/resolve": {
+      post: {
+        ...lifecycleOperation(
+          "resolveOfflineQuarantine",
+          "관리자 격리 기록 판정 또는 현재 회차 완료 정정",
+          "record_only/reject_effect는 수행 상태를 바꾸지 않습니다. correction_link는 현재 유효 in_progress 회차·본인 소유/source/CAS와 검증 가능한 기존 normalizedOccurredAt만 명시 확인하여 별도 correction audit로 연결합니다. 새 correctedAt 입력·과거 인계/종료 회차 복구·ready/검수/수익 생성은 금지합니다. 격리 원 이벤트는 그대로 보존됩니다. 응답 effectiveAt/recordedAt은 관리자 결정 시각이며 물리 완료 정본은 attempt.fieldCompletedAt입니다. 판정 receipt도 lease 발급 기준 90일 안에서만 보존합니다.",
+          "admin",
+          "OfflineResolutionResult",
+        ),
+        parameters: [idempotencyHeader, {
+          name: "quarantineId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OfflineResolutionRequest" },
+            },
+          },
         },
       },
     },
@@ -2543,6 +2657,7 @@ export const openApiDocument = {
           "cleaning.upload_only_allowed",
           "cleaning.interrupted_handover",
           "cleaning.scheduled_expired",
+          "cleaning.offline_event_resolved",
           "reservation.created",
           "reservation.changed",
           "reservation.cancelled",
@@ -2865,6 +2980,16 @@ export const openApiDocument = {
               },
               profileVersion: { type: "integer", minimum: 1 },
               nextAttemptId: { type: "string", format: "uuid" },
+              offlineQuarantineId: {
+                type: "string",
+                format: "uuid",
+                description:
+                  "서버 발급 격리 기록 ID. 원 client event UUID가 아닙니다.",
+              },
+              resolution: {
+                type: "string",
+                enum: ["record_only", "reject_effect", "correction_link"],
+              },
               rolloverFromDate: { type: "string", format: "date" },
               rolloverToDate: { type: "string", format: "date" },
               carryoverCount: { type: "integer", minimum: 0 },
@@ -3267,6 +3392,279 @@ export const openApiDocument = {
           },
           profileVersion: { type: "integer", minimum: 1 },
           targetAssignmentVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      OfflineWorkLease: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "leaseId",
+          "version",
+          "attemptId",
+          "assignmentId",
+          "assignmentRevision",
+          "issuedAt",
+          "expiresAt",
+          "metadataExpiresAt",
+          "allowedActions",
+        ],
+        properties: {
+          leaseId: { type: "string", format: "uuid" },
+          version: { type: "integer", const: 1 },
+          attemptId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          assignmentRevision: { type: "integer", minimum: 1 },
+          issuedAt: { type: "string", format: "date-time" },
+          expiresAt: {
+            type: "string",
+            format: "date-time",
+            description: "서버 발급 +2시간 hard TTL",
+          },
+          metadataExpiresAt: {
+            type: "string",
+            format: "date-time",
+            description: "서버 발급 +90일 absolute retention/replay horizon",
+          },
+          allowedActions: {
+            type: "array",
+            minItems: 1,
+            maxItems: 1,
+            items: { type: "string", const: "complete_field_work" },
+          },
+        },
+      },
+      AttemptWithOfflineLease: {
+        type: "object",
+        additionalProperties: false,
+        required: ["attempt", "lease", "serverTime"],
+        properties: {
+          attempt: { $ref: "#/components/schemas/AttemptExecution" },
+          lease: { $ref: "#/components/schemas/OfflineWorkLease" },
+          serverTime: {
+            type: "string",
+            format: "date-time",
+            description:
+              "현재 응답의 서버 clock anchor. 재시도에서 갱신되어도 lease TTL은 불변입니다.",
+          },
+        },
+      },
+      OfflineCompletionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "leaseId",
+          "eventId",
+          "expectedExecutionVersion",
+          "occurredAt",
+          "serverOffsetMs",
+        ],
+        properties: {
+          leaseId: { type: "string", format: "uuid" },
+          eventId: {
+            type: "string",
+            format: "uuid",
+            description:
+              "단일 완료 이벤트의 client UUID. 비밀값을 넣거나 로그로 출력하지 않습니다.",
+          },
+          expectedExecutionVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
+          occurredAt: {
+            type: "string",
+            format: "date-time",
+            description: "client 발생 시각. 그 자체로 신뢰하지 않습니다.",
+          },
+          serverOffsetMs: {
+            type: "integer",
+            minimum: -86400000,
+            maximum: 86400000,
+            description:
+              "서버-클라이언트 clock 차이. ±300000ms 초과는 CLOCK_CONFLICT 격리이며 허용 skew 확대가 아닙니다.",
+          },
+        },
+      },
+      OfflineQuarantineReason: {
+        type: "string",
+        enum: [
+          "LEASE_EXPIRED",
+          "LEASE_REVOKED",
+          "ASSIGNMENT_CHANGED",
+          "CLOCK_CONFLICT",
+          "KST_DATE_CONFLICT",
+        ],
+      },
+      OfflineSyncResult: {
+        oneOf: [
+          {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "eventId",
+              "outcome",
+              "receivedAt",
+              "metadataExpiresAt",
+              "attempt",
+            ],
+            properties: {
+              eventId: { type: "string", format: "uuid" },
+              outcome: { type: "string", const: "applied" },
+              receivedAt: { type: "string", format: "date-time" },
+              metadataExpiresAt: { type: "string", format: "date-time" },
+              attempt: { $ref: "#/components/schemas/AttemptExecution" },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "eventId",
+              "outcome",
+              "receivedAt",
+              "metadataExpiresAt",
+              "reasonCode",
+              "quarantineId",
+            ],
+            properties: {
+              eventId: { type: "string", format: "uuid" },
+              outcome: { type: "string", const: "quarantined" },
+              receivedAt: { type: "string", format: "date-time" },
+              metadataExpiresAt: { type: "string", format: "date-time" },
+              reasonCode: {
+                $ref: "#/components/schemas/OfflineQuarantineReason",
+              },
+              quarantineId: { type: "string", format: "uuid" },
+            },
+          },
+        ],
+      },
+      OfflineResolution: {
+        type: "string",
+        enum: ["record_only", "reject_effect", "correction_link"],
+      },
+      OfflineQuarantine: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "quarantineId",
+          "attemptId",
+          "assignmentId",
+          "assignmentRevision",
+          "actorProfileId",
+          "reasonCode",
+          "occurredAt",
+          "receivedAt",
+          "metadataExpiresAt",
+          "resolution",
+          "currentAttempt",
+        ],
+        properties: {
+          quarantineId: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          assignmentRevision: { type: "integer", minimum: 1 },
+          actorProfileId: { type: "string", format: "uuid" },
+          reasonCode: { $ref: "#/components/schemas/OfflineQuarantineReason" },
+          occurredAt: {
+            type: "string",
+            format: "date-time",
+            description:
+              "계산된 후보 normalizedOccurredAt. clock 검증 여부에 따라 정정이 거부될 수 있습니다.",
+          },
+          receivedAt: { type: "string", format: "date-time" },
+          metadataExpiresAt: { type: "string", format: "date-time" },
+          resolution: {
+            anyOf: [{ $ref: "#/components/schemas/OfflineResolution" }, {
+              type: "null",
+            }],
+          },
+          currentAttempt: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptExecution" }, {
+              type: "null",
+            }],
+          },
+        },
+      },
+      OfflineQuarantinePage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["items", "nextCursor"],
+        properties: {
+          items: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/OfflineQuarantine" },
+          },
+          nextCursor: { type: ["string", "null"] },
+        },
+      },
+      OfflineResolutionRequest: {
+        oneOf: [
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["resolution", "expectedExecutionVersion", "reasonCode"],
+            properties: {
+              resolution: { type: "string", const: "record_only" },
+              expectedExecutionVersion: { type: "null" },
+              reasonCode: { type: "string", const: "OFFLINE_RECORD_ONLY" },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["resolution", "expectedExecutionVersion", "reasonCode"],
+            properties: {
+              resolution: { type: "string", const: "reject_effect" },
+              expectedExecutionVersion: { type: "null" },
+              reasonCode: { type: "string", const: "OFFLINE_REJECT_EFFECT" },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["resolution", "expectedExecutionVersion", "reasonCode"],
+            properties: {
+              resolution: { type: "string", const: "correction_link" },
+              expectedExecutionVersion: {
+                type: "integer",
+                minimum: 1,
+                maximum: Number.MAX_SAFE_INTEGER,
+              },
+              reasonCode: {
+                type: "string",
+                const: "OFFLINE_CORRECTION_APPROVED",
+              },
+            },
+          },
+        ],
+      },
+      OfflineResolutionResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "quarantineId",
+          "resolution",
+          "attempt",
+          "effectiveAt",
+          "recordedAt",
+        ],
+        properties: {
+          quarantineId: { type: "string", format: "uuid" },
+          resolution: { $ref: "#/components/schemas/OfflineResolution" },
+          attempt: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptExecution" }, {
+              type: "null",
+            }],
+          },
+          effectiveAt: {
+            type: "string",
+            format: "date-time",
+            description:
+              "관리자 결정 시각. 물리 완료는 attempt.fieldCompletedAt 확인",
+          },
+          recordedAt: { type: "string", format: "date-time" },
         },
       },
       AttemptLifecycleResult: {
