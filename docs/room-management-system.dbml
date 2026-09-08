@@ -1320,3 +1320,43 @@ Ref: private.actor_activity_events.actor_profile_id > public.profiles.id
 Ref: private.actor_authorization_denial_aggregates.actor_profile_id > public.profiles.id
 Ref: private.scheduler_invocation_heartbeats.actor_profile_id > public.profiles.id
 Ref: private.developer_diagnostic_rate_limits.actor_profile_id - public.profiles.id
+
+// #85 private retention/reconciliation ledgers. No Data API or business HTTP exposure.
+Table private.photo_purge_jobs {
+  object_id uuid [pk, ref: - private.photo_provider_objects.id]
+  operation_id uuid [not null, unique, ref: - private.photo_upload_operations.id]
+  photo_version_id uuid [not null, unique, ref: - private.attempt_photo_versions.id]
+  purge_after timestamptz [not null, note: 'Exactly provider uploaded_at + 168 hours']
+  status text [not null, note: 'pending/claimed/retry/blocked/purged']
+  lease_version integer [not null]
+  next_attempt_at timestamptz [not null]
+  purged_at timestamptz
+  outcome text
+  Note: 'Accepted-only durable purge authority. Raw provider locator is cleared on terminal settle; immutable clocks and private digest tombstone remain.'
+}
+Table private.photo_orphan_purge_jobs {
+  operation_id uuid [pk, ref: - private.photo_upload_operations.id]
+  object_id uuid [not null, unique, ref: - private.photo_provider_objects.id]
+  status text [not null]
+  lease_version integer [not null]
+  next_attempt_at timestamptz [not null]
+  purged_at timestamptz
+  outcome text
+  Note: 'Never-accepted compensation authority, separate from accepted 168-hour retention.'
+}
+Table private.photo_drive_folder_bindings {
+  operation_id uuid [pk, ref: - private.photo_upload_operations.id]
+  folder_registry_id uuid [not null, ref: > private.photo_drive_folder_identities.id]
+  bound_at timestamptz [not null]
+  Note: 'Immutable reserve-to-identity barrier. Migration backfills exact provider folder/date/room matches.'
+}
+Table private.photo_folder_purge_jobs {
+  folder_registry_id uuid [pk, ref: - private.photo_drive_folder_identities.id]
+  status text [not null, note: 'retiring/claimed/retry/blocked/purged']
+  retired_at timestamptz [not null]
+  lease_version integer [not null]
+  next_attempt_at timestamptz [not null]
+  purged_at timestamptz
+  outcome text
+  Note: 'Verified empty room first, date only after every child is terminal. Provider emptiness is never the sole DB authority.'
+}

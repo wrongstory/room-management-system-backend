@@ -58,8 +58,8 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@520abe7b80501ed9a4573e2251b9b640476d87b5` (#25~#30, #4, #7A/B/C 및 #83/#84 source/dev 완료, production 미승격)
-- 최신 dev source: **32 migrations / 67 paths / 72 operations**. #84의 사진 슬롯·업로드·작업 상태·원본 열람 4개 HTTP 경로가 DB/RPC·Fastify·Edge source에 통합됐다. 아래 개별 PR 절의 이전 수치는 해당 PR 검증 당시 snapshot이며 현재 통합 수치는 이 항목을 따른다.
+- 개발 통합 source 기준: `dev@4455bf9265e0b58e10021e779306e5e722d6f5fb` (#25~#30, #4, #7A/B/C 및 #83/#84 source/dev 완료, production 미승격)
+- 현재 #85 feature source: **33 migrations / 67 paths / 72 operations**. 별도 server-only `photo-purge` Function과 기존 developer status projection만 추가하며 public business API/OpenAPI path 수는 늘리지 않는다. 아직 독립 리뷰·dev 병합·production 배포 전이다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -569,7 +569,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | 사진 template/slot snapshot·submission version | source/dev 완료 | #30 / PR #81 | production 미승격; owner-only 모델이며 HTTP/Drive/전체 제출 command 제외 |
 | [x] | 사진 업로드 작업 원장·권한 계약 | #83 source/dev 완료 | #83 / PR #86 | production 미승격; DB/내부 계약만, 실제 Drive/HTTP/purge 제외 |
 | [x] | Google Drive 업로드·조회 | #84 source/dev 완료 | #9 / #84 | PR #88 독립 QA·required CI·source 승인/dev 병합 완료; production OAuth·hosted smoke 미완료 |
-| [ ] | 7일 영구삭제·orphan 운영 worker | 미구현 | #9 / #85 | #84 보상 candidate 정리는 accepted 사진의7일 purge를 대체하지 않음 |
+| [ ] | 7일 영구삭제·orphan 운영 worker | feature source 구현·검증 중 | #9 / #85 | accepted/orphan/folder 원장 분리; production 미승격·미사용 |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
 | [ ] | earning/payroll 정산 API | 미개발 | #8 | append-only |
 | [ ] | notification/outbox/Web Push | 미개발 | #10 | domain event 연계 |
@@ -649,7 +649,23 @@ production completeness 기준의 정본 순서다.
 29. [x] **#30 Photo Slot / Submission Base source gate** — PR #81 독립 QA·required CI·Codex 96/100 승인 → `dev@a4f8cb5` 병합; 운영 미적용
 30. [x] **#83 Photo Storage Operations source gate** — PR #86 독립 QA·required CI·Codex 96/100 승인 → `dev@cf91753` 병합; 운영 미적용
 31. [x] **#84 Drive 업로드·열람 source gate** — PR #88 독립 QA·required CI·source 승인 → `dev@520abe7` 병합; 운영 미적용
-32. [ ] **#85 → #31** — 7일 삭제 → 전체 제출·검수; production OAuth·hosted smoke는 별도 release gate
+32. [ ] **#85 source gate** — 7일 accepted 삭제·orphan 보상·빈 폴더 retirement feature 구현 및 로컬 검증; 독립 리뷰·dev 병합 전
+33. [ ] **#31** — #85 source/dev 완료 뒤 전체 제출·검수; production OAuth·hosted smoke는 별도 release gate
+
+### #85 사진 purge/reconciliation source gate — feature 검증 중, production 미승격
+
+- [x] accepted `uploaded_at + 168h`와 never-accepted orphan authority 분리
+- [x] room/date folder durable retirement, reserve→identity barrier, raw locator clear + private digest tombstone
+- [x] accepted → orphan → folder 순서와 전체 claim 10/run·45초 wall budget, DB `nextAttemptAt` retry
+- [x] 기존 developer database/runtime status에 bounded count·heartbeat와 secret configured boolean만 추가
+- [x] public business/OpenAPI path·operation **67/72 유지**
+- [x] fresh 33 migrations와 DB/RLS 1,390건 PASS
+- [ ] 독립 보안/API 리뷰 P0/P1=0
+- [ ] required GitHub application/migration PASS
+- [ ] PR dev 병합
+- [ ] release/main 후 production migration·secret·Edge 배포·Google hosted purge smoke
+
+production DB/Edge/Pages/Google Drive에는 이번 feature 작업으로 변경을 가하지 않았다. 운영 snapshot은 **19 migrations / 39 paths / 43 operations** 그대로다.
 
 ### #30 사진·제출 기반 source gate
 

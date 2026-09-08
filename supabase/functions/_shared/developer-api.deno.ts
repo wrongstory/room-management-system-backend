@@ -15,13 +15,14 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
-Deno.test("developer runtime reports four Google configuration booleans only without environment enumeration", () => {
+Deno.test("developer runtime reports Google and purge configuration booleans only without environment enumeration", () => {
   const get = Deno.env.get;
   const keys = [
     "GOOGLE_DRIVE_CLIENT_ID",
     "GOOGLE_DRIVE_CLIENT_SECRET",
     "GOOGLE_DRIVE_REFRESH_TOKEN",
     "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+    "PHOTO_PURGE_INVOKE_SECRET",
   ];
   const configured = new Set<string>();
   const allowed: readonly string[] =
@@ -144,7 +145,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "photo_drive_upload_read",
+    expectedMigrationName === "photo_purge_reconciliation",
     "expected migration must not depend on a remote execution timestamp",
   );
 });

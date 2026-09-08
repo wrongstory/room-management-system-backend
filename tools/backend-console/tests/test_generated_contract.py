@@ -30,6 +30,18 @@ from room_management_console.generated.models.developer_audit_event_summary impo
 from room_management_console.generated.models.developer_audit_event_type import (
     DeveloperAuditEventType,
 )
+from room_management_console.generated.models.developer_database_status import (
+    DeveloperDatabaseStatus,
+)
+from room_management_console.generated.models.developer_database_status_photo_purge import (
+    DeveloperDatabaseStatusPhotoPurge,
+)
+from room_management_console.generated.models.developer_database_status_photo_purge_status import (
+    DeveloperDatabaseStatusPhotoPurgeStatus,
+)
+from room_management_console.generated.models.developer_runtime_status_configuration import (
+    DeveloperRuntimeStatusConfiguration,
+)
 from room_management_console.generated.models.status_change_request_status import (
     StatusChangeRequestStatus,
 )
@@ -55,6 +67,27 @@ def test_phase_a_openapi_operations_are_generated() -> None:
         run_developer_diagnostics.sync_detailed,
     ]
     assert len(operations) == 16
+
+
+def test_photo_purge_status_is_generated_as_bounded_metadata_only() -> None:
+    assert "photo_purge" in {field.name for field in fields(DeveloperDatabaseStatus)}
+    assert {"status", "last_heartbeat", "backlog", "checked_at"} <= {
+        field.name for field in fields(DeveloperDatabaseStatusPhotoPurge)
+    }
+    assert {status.value for status in DeveloperDatabaseStatusPhotoPurgeStatus} == {
+        "awaiting_first_run",
+        "healthy",
+        "degraded",
+        "failed",
+    }
+    configuration_fields = {field.name for field in fields(DeveloperRuntimeStatusConfiguration)}
+    assert "photo_purge_invoke_secret" in configuration_fields
+    assert {
+        "provider_file_id",
+        "provider_folder_id",
+        "claim_digest",
+        "refresh_token",
+    }.isdisjoint(configuration_fields)
 
 
 def test_photo_upload_and_original_read_are_not_developer_console_capabilities() -> None:
@@ -285,6 +318,7 @@ def test_drive_runtime_configuration_generated_contract_is_boolean_only() -> Non
         "GOOGLE_DRIVE_CLIENT_SECRET",
         "GOOGLE_DRIVE_REFRESH_TOKEN",
         "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+        "PHOTO_PURGE_INVOKE_SECRET",
     ]
     for configured in [False, True]:
         sample = {name: {"configured": configured} for name in names}

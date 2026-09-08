@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_drive_upload_read'
+    'photo_purge_reconciliation'
   ) ->> 'currentMigration',
-  'photo_drive_upload_read',
+  'photo_purge_reconciliation',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_drive_upload_read'
+    'photo_purge_reconciliation'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'

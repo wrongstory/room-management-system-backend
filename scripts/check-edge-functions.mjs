@@ -19,6 +19,7 @@ const sourcePaths = [
   'supabase/functions/_shared/photo-binary.ts',
   'supabase/functions/_shared/google-drive.ts',
   'supabase/functions/_shared/photo-service.ts',
+  'supabase/functions/_shared/photo-purge.ts',
   'supabase/functions/_shared/photo-api.ts',
   'supabase/functions/_shared/assignment-preview-core.ts',
   'supabase/functions/_shared/assignment-preview-api.ts',
@@ -27,7 +28,8 @@ const sourcePaths = [
   'supabase/functions/_shared/openapi.ts',
   'supabase/functions/_shared/room-api.ts',
   'supabase/functions/api/index.ts',
-  'supabase/functions/reservation-scheduler/index.ts'
+  'supabase/functions/reservation-scheduler/index.ts',
+  'supabase/functions/photo-purge/index.ts'
 ];
 const testPaths = [
   'supabase/functions/_shared/activity-api.deno.ts',
@@ -40,6 +42,7 @@ const testPaths = [
   'supabase/functions/_shared/photo-submission-contract.deno.ts',
   'supabase/functions/_shared/photo-upload-contract.deno.ts',
   'supabase/functions/_shared/photo-api.deno.ts',
+  'supabase/functions/_shared/photo-purge.deno.ts',
   'supabase/functions/_shared/photo-binary.deno.ts',
   'supabase/functions/_shared/assignment-preview-core.deno.ts',
   'supabase/functions/_shared/assignment-preview-api.deno.ts',

@@ -5,6 +5,7 @@ import {
   type PhotoMime,
   readPhotoBody,
 } from "./photo-binary.ts";
+import { PhotoPurgeProviderError } from "./photo-purge.ts";
 
 type Fetch = typeof fetch;
 export interface DriveConfig {
@@ -350,5 +351,71 @@ export class GoogleDriveProvider implements PhotoProvider {
     if (response.status === 404) return "not_found";
     if (response.status !== 204) return unavailable();
     return "deleted";
+  }
+  async #purgeRequest(path: string, init: RequestInit = {}): Promise<Response> {
+    let response: Response;
+    try {
+      response = await this.#request(path, init);
+    } catch {
+      throw new PhotoPurgeProviderError("NETWORK_ERROR");
+    }
+    if (response.status === 429) {
+      throw new PhotoPurgeProviderError("RATE_LIMITED");
+    }
+    if (!response.ok && response.status !== 404) {
+      throw new PhotoPurgeProviderError("PROVIDER_ERROR");
+    }
+    return response;
+  }
+  /** Only a DB-fenced due/retired identity can reach this internal method. */
+  async purgeRemove(fileId: string): Promise<"deleted" | "not_found"> {
+    const response = await this.#purgeRequest(`files/${id(fileId)}`, {
+      method: "DELETE",
+    });
+    if (response.status === 404) return "not_found";
+    if (response.status !== 204) {
+      throw new PhotoPurgeProviderError("PROVIDER_ERROR");
+    }
+    return "deleted";
+  }
+  async purgeExists(fileId: string): Promise<boolean> {
+    const response = await this.#purgeRequest(`files/${id(fileId)}?fields=id`);
+    if (response.status === 404) return false;
+    if ((await this.#json(response)).id !== fileId) {
+      throw new PhotoPurgeProviderError("PROVIDER_ERROR");
+    }
+    return true;
+  }
+  /** Not deletion authority: caller must already own the DB retirement/admission barrier. */
+  async purgeEmptyFolder(
+    folderId: string,
+    parentId: string,
+  ): Promise<"empty" | "not_found" | "not_empty"> {
+    const response = await this.#purgeRequest(
+      `files/${id(folderId)}?fields=id,mimeType,parents,trashed,shared`,
+    );
+    if (response.status === 404) return "not_found";
+    const row = await this.#json(response);
+    if (
+      row.id !== folderId ||
+      row.mimeType !== "application/vnd.google-apps.folder" ||
+      row.shared !== false || row.trashed !== false ||
+      !Array.isArray(row.parents) || row.parents.length !== 1 ||
+      row.parents[0] !== id(parentId)
+    ) throw new PhotoPurgeProviderError("PROVIDER_ERROR");
+    // Parent-only existence check, including trashed children: no filename search and no pagination scan.
+    const query = new URLSearchParams({
+      q: `'${id(folderId)}' in parents`,
+      pageSize: "1",
+      fields: "files(id),nextPageToken,incompleteSearch",
+    });
+    const children = await this.#purgeRequest(`files?${query}`);
+    if (!children.ok) throw new PhotoPurgeProviderError("PROVIDER_ERROR");
+    const data = await this.#json(children);
+    if (
+      !Array.isArray(data.files) || data.incompleteSearch === true ||
+      data.nextPageToken
+    ) return "not_empty";
+    return data.files.length === 0 ? "empty" : "not_empty";
   }
 }

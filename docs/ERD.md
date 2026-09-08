@@ -638,6 +638,25 @@ Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있
 
 ## 9. 이후 반영 순서
 
+### #85 개발 소스: 168시간 purge·orphan 보상·폴더 retirement
+
+`20260908195510_photo_purge_reconciliation.sql`은 기존 32개 migration 뒤에 추가하는 feature migration이며 production 적용을 뜻하지 않는다.
+
+```mermaid
+erDiagram
+  photo_provider_objects ||--o| photo_purge_jobs : "accepted retention"
+  photo_upload_operations ||--o| photo_orphan_purge_jobs : "never-accepted compensation"
+  photo_drive_folder_identities ||--o| photo_folder_purge_jobs : "durable retirement"
+  photo_upload_operations ||--o| photo_drive_folder_bindings : "reserve-to-identity barrier"
+  photo_purge_jobs ||--o{ photo_cleanup_events : "immutable lifecycle"
+```
+
+- accepted 사진은 DB가 정확히 `uploaded_at + 168 hours`를 due로 판정하고 만료 즉시 읽기 불가다. never-accepted candidate는 별도 orphan ledger로만 정리한다.
+- 기존 및 신규 upload operation은 exact room-folder binding을 가진다. retirement가 시작되면 reserve/provider-success/finalize가 fail-closed하며, pending upload state 또는 identity가 있으면 folder retirement를 시작할 수 없다.
+- Drive 삭제 `204/404`만 terminal success다. raw locator는 terminal settle 때 제거하고 private SHA-256 tombstone과 append-only cleanup event를 남긴다.
+- room 폴더를 먼저 확인·삭제하고 모든 child가 terminal일 때 date 폴더를 처리한다. provider list emptiness만을 DB authority로 사용하지 않는다.
+- private 원장에는 RLS가 켜져 있고 Data API/direct write grant가 없다. worker RPC는 fixed search path와 service-role-only EXECUTE를 사용한다.
+
 ### #84 개발 소스: 디코딩 전 admission·Drive identity·사진 열람
 
 `20260908180643_photo_drive_upload_read.sql`은 기존 31개 migration 뒤에 추가한다.
