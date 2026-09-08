@@ -1,16 +1,19 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **확정 제품 정책 / #83 source/dev 완료·#84 feature 검증 중·production 미승격, 실제 운영 Drive 미연결**
+> 상태: **확정 제품 정책 / #83·#84 source/dev 완료·production 미승격, 실제 운영 Drive 미연결**
 > 사용자가 확정한 계약은 Google Drive 전용·300KiB 이하·비공개 저장과 `uploaded_at + 7 days` 영구삭제다. 7일 보존에는 검수 상태, 분쟁, retention hold 또는 180일 보존 예외를 두지 않는다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-아래 압축·업로드·삭제 흐름과 용량 보호 기준은 구현 시 따라야 하는 운영 계약이다. Google Drive worker와 배포 자격증명은 아직 구현·설정 전이다.
+아래 압축·업로드·삭제 흐름과 용량 보호 기준은 구현 시 따라야 하는 운영 계약이다. #84의 Drive HTTP adapter와 업로드·열람 API는 source/dev 완료했지만, 운영 OAuth 설정·Google/hosted smoke와 #85의 7일 purge 운영 worker는 아직 미완료다.
 
 #83은 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)의 독립 QA·required CI·
 Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다.
-개발 통합은 31 migrations / 63 paths / 68 operations이며 실제 업로드·열람 route를 추가하지 않았다.
-다음은 **#84 Drive 업로드·열람 → #85 7일 purge → #31 전체 제출·검수**다.
+#83 당시에는 31 migrations / 63 paths / 68 operations이며 공개 업로드·열람 route를 추가하지 않았다.
+후속 [PR #88](https://github.com/wrongstory/room-management-system-backend/pull/88)의 #84 source도 독립 QA·required CI·source 승인 후
+`dev@520abe7b80501ed9a4573e2251b9b640476d87b5`에 병합됐다. 현재 개발 통합은 **32 migrations / 67 paths / 72 operations**로,
+사진 슬롯·업로드·작업 상태·원본 열람 4개 경로의 DB/RPC·Fastify·Edge source가 완료됐다. production 배포·현재 사용은 아직 ❌다.
+다음은 **#85 7일 purge → #31 전체 제출·검수**다.
 production은 기존 19 migrations / 39 paths / 43 operations를 유지하며 DB/Edge/Pages/Google 환경을 변경하지 않았다.
-상세 source/dev 승인 증거는 [API 상태 정본의 #83 gate](./API_STATUS_MATRIX.md)를 따른다.
+상세 exact head·동일 tree·CI 재실행 및 source/dev 승인 증거는 [API 상태 정본의 #83/#84 gate](./API_STATUS_MATRIX.md)를 따른다.
 
 ## 저장 위치와 폴더
 
@@ -54,7 +57,7 @@ Edge의 업로드/슬롯/상태는 valid Auth+현재 profile+session 후 DB의 e
 6. finalize 응답 유실 시 accepted 원장을 재조회한다. unknown은 삭제하지 않고 같은 사전발급 identity를 read-only 검증한 후 retire fence를 얻는다. accepted는 계정/session 폐기나 current clear와 무관하게 보상 삭제하지 않는다.
 7. read는 bounded download/해시 확인 후 응답 첫 byte 직전에 session/ownership/7일 만료를 다시 확인한다. redirect·Range·공개URL·Drive header 전달은 없고 no-store/nosniff/고정 filename만 반환한다.
 
-구현 후보 decoder는 pinned `@imagemagick/magick-wasm@0.0.43`이며 Node는 npm, Edge는 검증된 JS glue+gzip WASM 단일 자산을 사용한다.
+source/dev 검증을 마친 decoder는 pinned `@imagemagick/magick-wasm@0.0.43`이며 Node는 npm, Edge는 검증된 JS glue+gzip WASM 단일 자산을 사용한다.
 `node scripts/generate-photo-edge.mjs`로 생성하고 `--check`로 원본/생성물 drift를 검사한다. compressed/uncompressed SHA-256과 크기는 스크립트에 고정하며 NOTICE를 함께 복사한다.
 gzip은 `scripts/photo-gzip.mjs`에서 optional header를 금지하고 mtime=0/OS=255로 정규화한다. Windows Node22.20과 Linux Node22.23.2는 같은 DEFLATE payload에도 OS header가10/3으로 달라졌으므로 이 비결정 metadata만 제거한다. 원본 WASM hash와 전체 canonical gzip hash(5,269,861 bytes)는 계속 고정하며 압축 알고리즘·payload·CRC 변경은 checksum 실패로 차단한다. runtime도 같은 canonical hash를 요구하고 CDN/다른 hash fallback은 없다.
 자산은 Git ignored 생성물이므로 **배포 전 `npm ci` → `npm run edge:check` 성공이 필수**다. 이 과정에서 pinned asset 재생성/양쪽 SHA·크기/정본 drift 검증이 실패하거나 자산이 없으면 배포하지 않는다. runtime CDN fallback은 없다.
@@ -92,7 +95,9 @@ begin/claim/finalize/user 조회는 최신 role/status·Auth session·attempt ow
 `begin_photo_upload → claim_photo_upload → record_photo_provider_success → finalize_photo_upload`는
 별도 짧은 transaction이다. 외부 HTTP는 그 사이에서 #84 서버 adapter가 수행한다.
 `get_photo_upload`는 사용자 권한 기반 상태이며 `reconcile_photo_upload`는 worker의 내구성 확인·후보 retire command다.
-`settle_photo_compensation`은 검증된 worker의 deleted/not_found 결과만 기록한다. 이번 source에 실제 DELETE 호출은 없다.
+`settle_photo_compensation`은 검증된 worker의 deleted/not_found 결과만 기록한다. #83 자체에는 실제 DELETE 호출이 없었고,
+#84는 admission-bound wrapper와 Drive adapter를 통해 미수락 candidate의 fenced compensation만 구현했다.
+accepted 사진의 7일 purge 운영 worker는 #85의 미완료 범위이며 candidate 보상 삭제로 대체하지 않는다.
 
 worker는 비밀 인증키가 아닌 서버 claim identity의 digest와 fence를 함께 전달한다. 유효 lease를 다른 claimant에게
 공유하지 않고, 같은 claim retry만 동일 expiry를 반환한다. 만료 뒤 새 fence는 이전 지연 callback을 거부한다.
