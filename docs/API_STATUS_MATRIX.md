@@ -58,7 +58,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@e2648de4e40a84e60d19cbb1e4d01974a2f3d369` (#25~#29, #4 / PR #74, #7A / PR #75, #7B / PR #77, #7C / PR #79까지 source/dev 완료; production 미승격)
+- 개발 통합 source 기준: `dev@9ed843ca570d1fccaa95fdb672fb8dc20fe91107` (#25~#29, #4 / PR #74, #7A / PR #75, #7B / PR #77, #7C / PR #79 및 상태 문서 PR #80까지 완료; production 미승격)
 - 최신 dev source: **29 migrations / 63 paths / 68 operations**. 아래 개별 PR 절의 이전 수치는 해당 PR 검증 당시 snapshot이며 현재 통합 수치는 이 항목을 따른다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
@@ -566,7 +566,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | 온라인 현장 시작·물리 완료 | #7A source/dev 완료 | #7 / PR #75 | production 미승격; 사진·submission·ready와 별도 |
 | [x] | handover/capability | #7B source/dev 완료 | #7 / PR #77 | production 미승격 |
 | [x] | offline lease/conflict | #7C source/dev 완료 | #7 / PR #79 | production 미승격; purge 운영·hosted E2E 별도 |
-| [ ] | 사진 template/slot snapshot·submission version | 미개발 | #30 | 사진 전 단계 |
+| [ ] | 사진 template/slot snapshot·submission version | feature 구현·로컬 검증 완료 | #30 | HTTP/Drive/전체 제출 command 제외; 독립 exact-head/CI/dev gate 대기 |
 | [ ] | Google Drive 업로드·조회·7일 영구삭제 | 미개발 | #9 | Drive only / <=300KiB |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
 | [ ] | earning/payroll 정산 API | 미개발 | #8 | append-only |
@@ -643,7 +643,24 @@ production completeness 기준의 정본 순서다.
 25. [x] **#4 notified-only 조회 정합화** — PR #74 독립 리뷰·CI·Codex 위임 승인 → `dev@7bdc2a3` 병합
 26. [x] **#7A Attempt Execution Core source gate** — PR #75 독립 QA·required CI·Codex 96/100 승인 → `dev@c68e65e` 병합; 운영 미적용
 27. [x] **#7B Attempt Lifecycle source gate** — PR #77 독립 QA·required CI·Codex 96/100 승인 → `dev@5882509` 병합; 운영 미적용
-28. [ ] **#30 → #9 → #31** — #7A/B/C source/dev 완료 후 사진 모델 → Drive → 제출·검수 순서, 이후 미구현
+28. [ ] **#30 → #9 → #31** — #30 기반 모델 feature 구현·로컬 검증 완료, source gate 대기; Drive → 제출·검수는 미구현
+
+### #30 사진·제출 기반 source gate
+
+현재 작업 기준은 `dev@9ed843ca570d1fccaa95fdb672fb8dc20fe91107`이다.
+[사진·제출 기반 계약](./PHOTO_SUBMISSION_BASE.md)의 모델/내부 검증만 구현하며
+새 HTTP route, Drive 업로드, 전체 제출·검수 command는 이번 범위가 아니다.
+production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operations는 변경하지 않는다.
+
+- [x] slot/template/target snapshot 및 attempt별 evidence·불변 submission binding 구현
+- [x] 로컬 fresh 30 migrations / DB 1,020 tests / photo 포함 동시성 / Edge 127 / application 136 / Python 36 / DB lint·Advisor 검증
+- [ ] 전체 로컬 검증 및 exact-head required CI PASS
+- [ ] 독립 보안/계약 리뷰 P0/P1=0
+- [ ] Codex 위임 평가·명시적 source/dev 병합 허가
+- [ ] dev 병합
+
+미래 PR 번호와 squash SHA를 선기록하지 않는다. 미설정/legacy 빈 snapshot은
+완전한 사진 증빙으로 간주하지 않으며, #7 물리 완료에 사진 선행조건을 추가하지 않는다.
 
 #10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
 #46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.

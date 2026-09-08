@@ -387,6 +387,7 @@ Table public.cleaning_template_versions {
   version int [not null]
   status text [not null]
   duration_minutes int [not null]
+  photo_slots jsonb [not null, note: 'Legacy JSON retained. Published payload immutable; explicit v7+ checkout counts/required tv-on validated. No implicit duration-policy confirmation.']
   published_at timestamptz
   created_by uuid [not null]
   created_at timestamptz [not null]
@@ -396,20 +397,140 @@ Table public.cleaning_template_versions {
   }
 }
 
-Table public.cleaning_photo_slots {
+Table private.photo_template_slots {
   id uuid [pk]
   template_version_id uuid [not null]
   slot_key text [not null]
-  section_key text [not null]
-  label text [not null]
-  description text
   display_order int [not null]
   required boolean [not null, default: true]
+  slot_snapshot jsonb [not null, note: 'Exact original slot object including section/label/description/repeated instance metadata; absent legacy values not invented.']
 
   Indexes {
     (template_version_id, slot_key) [unique]
     (template_version_id, display_order) [unique]
   }
+  Note: '#30 immutable rows; private RLS/no client or service-role grants. No photo HTTP is exposed.'
+}
+
+Table private.target_photo_snapshot_contracts {
+  cleaning_target_id uuid [pk, ref: > public.cleaning_targets.id]
+  ready boolean [not null]
+  frozen_snapshot jsonb [not null]
+  created_at timestamptz [not null]
+  Note: 'Immutable target-creation JSON bridge. Existing empty/unprovable JSON stays ready=false, never latest-template backfill or zero-photo completion.'
+}
+
+Table private.target_photo_slot_snapshots {
+  id uuid [pk]
+  cleaning_target_id uuid [not null, ref: > private.target_photo_snapshot_contracts.cleaning_target_id]
+  template_version_id uuid [not null, note: 'Historical snapshot identity, intentionally not current catalog FK.']
+  slot_key text [not null]
+  display_order int [not null]
+  required boolean [not null]
+  slot_snapshot jsonb [not null]
+  Indexes {
+    (id, cleaning_target_id) [unique]
+    (cleaning_target_id, slot_key) [unique]
+    (cleaning_target_id, display_order) [unique]
+    template_version_id
+  }
+}
+
+Table private.attempt_photo_versions {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  version bigint [not null]
+  validation_status text [not null, note: 'pending / verified / failed; verified is owner-only model metadata, not client or real byte verification in #30.']
+  sha256 text [not null]
+  mime_type text [not null]
+  size_bytes int [not null]
+  uploaded_at timestamptz [not null]
+  purge_after timestamptz [not null, note: 'Immutable uploaded_at + 168 hours; resubmission does not reset.']
+  Indexes {
+    (id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version) [unique]
+    (cleaning_attempt_id, target_photo_slot_id, version) [unique]
+    (target_photo_slot_id, cleaning_target_id)
+    cleaning_target_id
+    (purge_after, id)
+  }
+  Note: 'Immutable attempt-scoped metadata. No Drive locator or binary. Old interrupted and new current attempt have different photo versions/pointers even on the same target slot.'
+}
+
+Table private.attempt_photo_purge_states {
+  photo_version_id uuid [pk, ref: > private.attempt_photo_versions.id]
+  purged_at timestamptz [not null]
+  Note: 'Append-only purge marker separated from immutable photo version; #9 owns actual provider deletion.'
+}
+
+Table private.attempt_photo_current {
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  revision bigint [not null]
+  photo_version_id uuid
+  photo_version bigint
+  Indexes {
+    (cleaning_attempt_id, target_photo_slot_id) [pk]
+    (photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version)
+    (target_photo_slot_id, cleaning_target_id)
+    cleaning_target_id
+  }
+  Note: 'CAS revision +1; a null pointer means cleared, not deleted history. Mutations automatically append attempt_photo_changes.'
+}
+
+Table private.attempt_photo_changes {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  revision bigint [not null]
+  photo_version_id uuid
+  photo_version bigint
+  occurred_at timestamptz [not null]
+  Indexes {
+    (cleaning_attempt_id, target_photo_slot_id, revision) [unique]
+    (photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version)
+    (target_photo_slot_id, cleaning_target_id)
+    cleaning_target_id
+  }
+}
+
+Table private.submission_photo_bindings {
+  submission_id uuid [not null]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  photo_version_id uuid [not null]
+  photo_version bigint [not null]
+  Indexes {
+    (submission_id, target_photo_slot_id) [pk]
+    (photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version)
+    cleaning_attempt_id
+    cleaning_target_id
+    target_photo_slot_id
+  }
+  Note: 'Immutable membership references canonical cleaning_submissions and exact attempt/target/slot/photo version; no provider object or raw payload copy.'
+}
+
+Table private.submission_photo_binding_sets {
+  submission_id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  photo_count int [not null]
+  sealed_at timestamptz [not null]
+  Indexes {
+    (submission_id, cleaning_attempt_id) [unique]
+    cleaning_attempt_id
+  }
+  Note: 'Immutable membership seal, not a duplicate submission entity. Exact current-photo set and completeness required; no later append.'
+}
+
+Table private.submission_current_pointers {
+  cleaning_attempt_id uuid [pk, ref: > public.cleaning_attempts.id]
+  submission_id uuid [not null, unique]
+  revision bigint [not null]
+  Note: 'CAS references an already existing, sealed canonical submission. #30 does not create a public business submit command or transition attempt/review/ready/earning.'
 }
 
 Table public.cleaning_targets {
@@ -535,6 +656,7 @@ Table public.cleaning_attempts {
 
   Indexes {
     (cleaning_target_id, attempt_number) [unique]
+    (id, cleaning_target_id) [unique]
   }
   Note: '#28 activates scheduled once. #7A own active maid execution; #7B limited completion/handover/expired scheduled retirement advance CAS. One in_progress per maid. No physical completion implies submission/readiness/earning. Attempt identity and snapshots immutable. Only proven interrupted handover history is excluded from current-work checks; superseded expiry preserves history. #7C adds online-issued lease/offline completion/quarantine and current-attempt admin correction; PIN runtime remains excluded.'
 }
@@ -657,15 +779,19 @@ Table public.cleaning_submissions {
   client_submission_id uuid [not null, unique]
   version int [not null]
   status submission_status [not null]
+  photo_manifest jsonb [not null, note: 'Legacy presentation payload is immutable, never proof of verified upload.']
   issue_snapshot jsonb [not null]
   candle_count int [not null, default: 0]
+  bomb_room_snapshot jsonb
   submitted_by uuid [not null]
   submitted_at timestamptz [not null]
   superseded_at timestamptz
 
   Indexes {
     (cleaning_attempt_id, version) [unique]
+    (id, cleaning_attempt_id) [unique]
   }
+  Note: 'Canonical immutable submission versions, including unconsumed payloads. Only status/superseded_at remain lifecycle projections. Service-role direct writes revoked; #31 owns future submit command.'
 }
 
 Table public.submission_photos {
@@ -696,7 +822,7 @@ Table public.submission_photos {
     (submission_id, photo_slot_key) [unique]
   }
 
-  Note: 'The private object lives only in Google Drive. The backend enforces a 307200-byte limit and permanently deletes it 7 days after uploaded_at.'
+  Note: 'Legacy provider-shaped table retained, not the #30 evidence source. Nullable slot key/default uploaded cannot establish verified evidence. Service-role direct writes revoked. Actual provider upload/delete remains #9.'
 }
 
 Table public.bomb_room_reports {
@@ -981,7 +1107,20 @@ Ref: public.room_pin_access_leases.attempt_id > public.cleaning_attempts.id
 Ref: public.room_pin_access_leases.issued_to > public.profiles.id
 Ref: public.cleaning_template_versions.room_type_id > public.room_types.id
 Ref: public.cleaning_template_versions.created_by > public.profiles.id
-Ref: public.cleaning_photo_slots.template_version_id > public.cleaning_template_versions.id
+Ref: private.photo_template_slots.template_version_id > public.cleaning_template_versions.id
+Ref: private.attempt_photo_versions.(cleaning_attempt_id, cleaning_target_id) > public.cleaning_attempts.(id, cleaning_target_id)
+Ref: private.attempt_photo_versions.(target_photo_slot_id, cleaning_target_id) > private.target_photo_slot_snapshots.(id, cleaning_target_id)
+Ref: private.attempt_photo_current.(cleaning_attempt_id, cleaning_target_id) > public.cleaning_attempts.(id, cleaning_target_id)
+Ref: private.attempt_photo_current.(target_photo_slot_id, cleaning_target_id) > private.target_photo_slot_snapshots.(id, cleaning_target_id)
+Ref: private.attempt_photo_current.(photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version) > private.attempt_photo_versions.(id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)
+Ref: private.attempt_photo_changes.(cleaning_attempt_id, cleaning_target_id) > public.cleaning_attempts.(id, cleaning_target_id)
+Ref: private.attempt_photo_changes.(target_photo_slot_id, cleaning_target_id) > private.target_photo_slot_snapshots.(id, cleaning_target_id)
+Ref: private.attempt_photo_changes.(photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version) > private.attempt_photo_versions.(id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)
+Ref: private.submission_photo_bindings.(submission_id, cleaning_attempt_id) > public.cleaning_submissions.(id, cleaning_attempt_id)
+Ref: private.submission_photo_bindings.(photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version) > private.attempt_photo_versions.(id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)
+Ref: private.submission_photo_binding_sets.(submission_id, cleaning_attempt_id) > public.cleaning_submissions.(id, cleaning_attempt_id)
+Ref: private.submission_current_pointers.(submission_id, cleaning_attempt_id) > public.cleaning_submissions.(id, cleaning_attempt_id)
+Ref: private.submission_current_pointers.(submission_id, cleaning_attempt_id) > private.submission_photo_binding_sets.(submission_id, cleaning_attempt_id)
 Ref: public.cleaning_targets.room_id > public.rooms.id
 Ref: public.cleaning_targets.reservation_id > public.reservations.id
 Ref: public.cleaning_targets.checkout_obligation_id - public.checkout_cleaning_obligations.id

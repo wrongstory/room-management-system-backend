@@ -82,6 +82,19 @@ erDiagram
 
 ## 동시성과 멱등성
 
+### #30 사진·제출 기반 모델 — feature 구현 중
+
+사진 객체의 업로드, 제출본 작성, 검수와 물리 현장 완료는 분리한다.
+target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참조하고,
+현재 사진 pointer와 불변 제출본의 사진 binding은 서로 다른 관계로 관리한다.
+인계 전 사진이 새 maid의 attempt로 승계되거나 재촬영으로 과거 제출 증빙이 바뀌면 안 된다.
+
+이번 #30은 모델과 내부 완전성 검증 기반이며 새 HTTP API나 Drive worker를 제공하지 않는다.
+서버 내부 metadata 검증은 파일의 magic bytes·EXIF·Drive 업로드 성공 검증을 대체하지 않는다.
+빈/불명확한 legacy template은 보존하면서 새 제출은 fail-closed하고, 현재 v7을 과거 작업에
+자동 적용하지 않는다. 기존 사진 없는 물리적 현장 완료 계약은 유지한다.
+상세 범위와 검증 상태는 [사진·제출 기반 모델](./PHOTO_SUBMISSION_BASE.md)을 따른다.
+
 | 작업 | 서버 보장 |
 |---|---|
 | 계정 명령 | `(actor_profile_id, command_type, idempotency_key)` receipt + canonical request hash. 같은 scope·같은 payload는 동일 결과를 재생하고, 같은 scope·다른 payload는 거부하며, 서로 다른 actor/command의 동일 raw key는 충돌하지 않음. 동시 계정 생성에서 DB winner 외 Auth 사용자는 보상 삭제 |

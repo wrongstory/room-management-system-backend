@@ -8,6 +8,7 @@ import { testAttemptExecutionConcurrency } from './test-attempt-execution-concur
 import { testAttemptLifecycleConcurrency } from './test-attempt-lifecycle-concurrency.mjs';
 import { testAttemptOfflineConcurrency } from './test-attempt-offline-concurrency.mjs';
 import { testAttemptOfflineExpiryConcurrency } from './test-attempt-offline-expiry-concurrency.mjs';
+import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const status = JSON.parse(execFileSync(
@@ -907,6 +908,7 @@ await testAttemptExecutionConcurrency(client,actorProfileId);
 await testAttemptLifecycleConcurrency(client);
 await testAttemptOfflineConcurrency(client);
 await testAttemptOfflineExpiryConcurrency(client);
+await testPhotoSubmissionConcurrency(client);
 
 console.log(
   'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2, assignment-commit-replay=1 logical/2 calls, assignment-save-vs-commit=1/2, availability-vs-commit=1/2.'
