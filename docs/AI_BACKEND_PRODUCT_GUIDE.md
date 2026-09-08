@@ -516,6 +516,15 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제다. 자격증명 없이 provider가 연결됐다고 가정하거나 worker를 배포하지 않는다. 용량 보호 기준은 현재 #9의 10GB 경고/12GB 업로드 차단 계약을 따른다.
 
+### `[확정: #84 착수 승인]` 서버 중계·응답 유실 복구 경계
+
+- 파일명은 서버 사전발급 opaque app `object_id`이며 canonical photo version은 finalize에서 연결한다. Drive ID를 브라우저에 노출하지 않는다.
+- raw body는307200 bytes까지이며 MIME/magic·전체 decode·metadata 제거·최종 출력 검증을 서버가 수행한다. decoder pixel/frame/CPU/memory 상한은 기술상한으로 검증하고 제품 사진 개수 정책으로 승격하지 않는다.
+- 서버가 preallocated identity/부모/MIME/size/실제SHA를 검증한 Google immutable `createdTime`을 최초 업로드 성공시각으로 사용한다. create에서 시간값을 지정하지 않고 응답 유실/409에서도 같은 clock을 복구한다. 원문 client 촬영시각·retry 수신시각으로 보존기한을 연장하지 않는다.
+- 사전예약 KST 폴더 날짜와 실제 provider 생성 날짜가 다르면 acceptance를 거부한다. 이미 생성된 identity는 move/rebind하지 않고 미수락 여부와 fence를 확인한 보상 경로만 사용한다.
+- limited upload_evidence는 슬롯/업로드/상태 접근만 허용하며 사진 원본 read 권한이 아니다. 원본은 active admin 또는 본인 현재 회차의 active maid를 응답 직전까지 재검증한다.
+- 업로드 accepted는 물리적 완료/전체 제출/검수/ready/수익 상태를 암묵 생성하지 않는다. #85 7일 purge 운영 gate와 #31 제출·검수는 별도다.
+
 ---
 
 ## 12. 알림과 감사 이력

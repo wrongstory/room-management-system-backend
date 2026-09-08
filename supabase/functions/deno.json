@@ -3,6 +3,7 @@
     "strict": true
   },
   "imports": {
+    "@imagemagick/magick-wasm": "./api/assets/magick.ts",
     "@supabase/supabase-js": "npm:@supabase/supabase-js@2.112.4"
   }
 }

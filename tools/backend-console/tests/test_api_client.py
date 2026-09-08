@@ -87,6 +87,10 @@ def runtime_response(
                         "RESERVATION_PII_KEY_VERSION",
                         "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
                         "SCHEDULER_INVOKE_SECRET",
+                        "GOOGLE_DRIVE_CLIENT_ID",
+                        "GOOGLE_DRIVE_CLIENT_SECRET",
+                        "GOOGLE_DRIVE_REFRESH_TOKEN",
+                        "GOOGLE_DRIVE_ROOT_FOLDER_ID",
                     )
                 },
                 "checkedAt": "2026-08-31T00:00:00Z",

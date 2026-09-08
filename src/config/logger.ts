@@ -18,6 +18,8 @@ const sensitiveLogPaths = [
   '*.phone_lookup_hash',
   '*.googleDriveRefreshToken',
   '*.GOOGLE_DRIVE_REFRESH_TOKEN',
+  '*.GOOGLE_DRIVE_CLIENT_SECRET',
+  '*.GOOGLE_DRIVE_ROOT_FOLDER_ID',
   '*.SUPABASE_SECRET_KEY',
   '*.RESERVATION_PII_KEY_BASE64',
   '*.RESERVATION_PII_KEYRING_JSON',

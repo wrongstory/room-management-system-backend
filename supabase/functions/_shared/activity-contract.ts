@@ -5,6 +5,7 @@ export type ActivitySource =
   | "edge.authorization.availability"
   | "edge.authorization.assignments"
   | "edge.authorization.attempts"
+  | "edge.authorization.photos"
   | "edge.authorization.reservations"
   | "edge.authorization.rooms"
   | "edge.sensitive.reservation_guest_name";
@@ -23,6 +24,7 @@ export type AuthorizationDeniedCode =
   | "AVAILABILITY_ACCESS_REQUIRED"
   | "DEVELOPER_REQUIRED"
   | "MAID_REQUIRED"
+  | "PHOTO_ACCESS_REQUIRED"
   | "PASSWORD_CHANGE_REQUIRED";
 
 const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
@@ -34,6 +36,7 @@ const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
   "AVAILABILITY_ACCESS_REQUIRED",
   "DEVELOPER_REQUIRED",
   "MAID_REQUIRED",
+  "PHOTO_ACCESS_REQUIRED",
   "PASSWORD_CHANGE_REQUIRED",
 ]);
 
@@ -48,6 +51,13 @@ export function isAuthorizationDeniedCode(
 export function authorizationSourceForPath(
   path: string,
 ): AuthorizationSource | null {
+  if (
+    /^\/v1\/attempts\/[^/]+\/photo-slots(?:\/[^/]+\/upload)?$/.test(path) ||
+    /^\/v1\/photo-uploads\/[^/]+$/.test(path) ||
+    /^\/v1\/photos\/[^/]+\/content$/.test(path)
+  ) {
+    return "edge.authorization.photos";
+  }
   if (path === "/v1/accounts" || /^\/v1\/accounts\/[^/]+\/.+$/.test(path)) {
     return "edge.authorization.accounts";
   }

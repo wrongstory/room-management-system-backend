@@ -24,6 +24,7 @@ import {
 } from './modules/reservations/reservation.service.js';
 import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
+import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices } from './modules/photos/photo.routes.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -37,6 +38,7 @@ export interface BuildAppOptions {
   env: AppEnv;
   services?: AppServices;
   logger?: boolean;
+  photoServices?: PhotoHttpServices;
 }
 
 function bearerToken(authorization: string | undefined): string {
@@ -145,6 +147,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
   await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
+  await app.register(createPhotoRoutes(options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env)));
 
   const schedulerActorId = options.env.RESERVATION_SCHEDULER_ACTOR_PROFILE_ID;
   if (schedulerActorId) {

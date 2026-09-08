@@ -21,6 +21,10 @@ const envSchema = z.object({
   RESERVATION_PII_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default('v1'),
   RESERVATION_PII_KEYRING_JSON: z.string().default('{}'),
   RESERVATION_GUEST_NAME_PEPPER: z.string().min(32),
+  GOOGLE_DRIVE_CLIENT_ID: z.string().max(4096).optional(),
+  GOOGLE_DRIVE_CLIENT_SECRET: z.string().max(4096).optional(),
+  GOOGLE_DRIVE_REFRESH_TOKEN: z.string().max(4096).optional(),
+  GOOGLE_DRIVE_ROOT_FOLDER_ID: z.string().max(200).optional(),
   RESERVATION_SCHEDULER_ACTOR_PROFILE_ID: z.preprocess(
     (value) => value === '' ? undefined : value,
     z.uuid().optional()

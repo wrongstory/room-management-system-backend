@@ -1074,6 +1074,79 @@ Ref: public.reservation_schedule_revisions.room_id > public.rooms.id
 Ref: public.reservation_schedule_revisions.actor_profile_id > public.profiles.id
 Ref: public.preparation_obligations.reservation_id - public.reservations.id
 // #83 private storage operations. Service-only RPCs, no direct grants; actual Drive is #84.
+Table private.photo_storage_quota_snapshot {
+  provider text [pk, note: 'google_drive only; one configured account per deployment']
+  request_started_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+  usage_bytes bigint [not null]
+  revision bigint [not null]
+  Note: 'Private mutable full about.storageQuota.usage snapshot. Strictly increasing request-start watermark; unknown or age>=60s fail closed. Decimal10GB warning/12GB new upload block including pending.'
+}
+Table private.photo_upload_admissions {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null, ref: > public.cleaning_assignments.id]
+  assignment_revision bigint [not null]
+  target_photo_slot_id uuid [not null]
+  expected_photo_revision bigint [not null]
+  idempotency_key_digest text [not null]
+  reserved_bytes integer [not null, note: 'Exactly307200; before decoding']
+  created_at timestamptz [not null]
+  expires_at timestamptz [not null, note: 'Created+5min; never extend on retry']
+  quota_revision bigint [not null]
+  indexes {
+    (actor_profile_id,idempotency_key_digest) [unique]
+    (id,actor_profile_id) [unique]
+    (cleaning_attempt_id,target_photo_slot_id,expires_at)
+    (actor_profile_id,expires_at)
+    cleaning_target_id
+    assignment_id
+    (target_photo_slot_id,cleaning_target_id)
+  }
+  Note: 'Immutable private admission. Bound/unknown reservations survive expiry; accepted bytes remain pending until refresh starts after BOTH Google createdTime and first DB provider-success event. Late acknowledgement cannot debit an older snapshot. Latest actor/session/capability and CAS validation.'
+}
+Table private.photo_upload_admission_bindings {
+  admission_id uuid [pk, ref: - private.photo_upload_admissions.id]
+  operation_id uuid [not null, unique, ref: - private.photo_upload_operations.id]
+  bound_at timestamptz [not null]
+  Note: 'Immutable same actor/attempt/target/assignment/slot/CAS/digest binding, created before admission expiry. No raw credentials/locator.'
+}
+Table private.photo_upload_admission_limits {
+  actor_profile_id uuid [pk, ref: - public.profiles.id]
+  minute_started_at timestamptz [not null]
+  occurrence_count integer [not null]
+  Note: 'One mutable30/min saturated counter per actor, including same-key pre-decode retries; no individual denied rows.'
+}
+Table private.photo_drive_identities {
+  object_id uuid [pk]
+  operation_id uuid [not null, unique]
+  provider_file_id text [not null, unique]
+  provider_folder_id text [not null]
+  upload_date date [not null]
+  room_number text [not null]
+  reserved_at timestamptz [not null]
+  Note: 'Immutable private files.generateIds result persisted before external create; global fileID uniqueness including legacy provider objects. Validated parent chain stays server-only; reservation is not success. Finalize requires upload_date = Google createdTime KST date; cross-midnight candidates can only reconcile/compensate, never rewrite identity/clock or move folders.'
+}
+Table private.photo_drive_folder_identities {
+  id uuid [pk]
+  upload_date date [not null]
+  scope_room_number text [not null, note: 'Empty=date scope, three digits=room scope']
+  provider_folder_id text [not null, unique]
+  parent_folder_id text [not null]
+  parent_registry_id uuid [ref: > private.photo_drive_folder_identities.id]
+  created_at timestamptz [not null]
+  indexes {
+    (upload_date, scope_room_number) [unique]
+    parent_registry_id
+  }
+  Note: 'Immutable private pre-create folder winner. Date binds root; room binds same-date date winner. Service-only latest-authorized reservation returns existing winner on conflict, never registers losing candidate. File identity must use exact room winner. Raw provider IDs are not HTTP/Data API fields.'
+}
+Ref: private.photo_upload_admissions.(cleaning_attempt_id,cleaning_target_id) > public.cleaning_attempts.(id,cleaning_target_id)
+Ref: private.photo_upload_admissions.(target_photo_slot_id,cleaning_target_id) > private.target_photo_slot_snapshots.(id,cleaning_target_id)
+Ref: private.photo_drive_identities.(object_id,operation_id) - private.photo_provider_objects.(id,operation_id)
+
 Table private.photo_upload_operations {
   id uuid [pk]
   actor_profile_id uuid [not null, ref: > public.profiles.id]
