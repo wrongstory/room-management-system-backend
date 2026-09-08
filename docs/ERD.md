@@ -12,6 +12,7 @@
 - 계정과 역할은 물리 삭제하지 않고 `status`, `revoked_at`으로 종료해 과거 배정·검수·급여 이력을 보존한다.
 - 관리자 계정 추가/메이드 계정 추가는 서버의 developer/admin 계정 명령에서 `auth.users → profiles + login_aliases + audit_events`를 보상 트랜잭션으로 처리한다.
 - 공개 스키마의 모든 테이블은 RLS를 사용하고, 역할 판정은 사용자 수정이 가능한 JWT `user_metadata`가 아니라 DB `profiles.role`을 조회한다.
+- #4 승인 A안: assignment의 본인 실제 통보 revision만 maid에게 공개한다. 종료/superseded 통보 history는 보존하고 미통보 draft·다른 maid·새 target 계획은 숨긴다. `notified_room_id_snapshot`/`notified_room_number_snapshot`은 최초 통보 시점의 불변 객실 정보이며 복원 근거 없는 legacy 행은 null이다. 현재 target으로 대체하지 않는다.
 
 ## 2. 전체 도메인 지도
 

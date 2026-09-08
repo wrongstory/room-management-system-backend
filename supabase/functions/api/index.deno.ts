@@ -142,6 +142,190 @@ const assignmentId = "70000000-0000-4000-8000-000000000001";
 const cleaningTargetId = "80000000-0000-4000-8000-000000000001";
 const impactFingerprint = "a".repeat(64);
 
+Deno.test("assignment GET routes expose only own notified revisions and preserve superseded history", async () => {
+  function readRequest(path: string) {
+    const result = request("GET", path);
+    result.headers.set("authorization", "Bearer synthetic-assignment-test");
+    return result;
+  }
+  const maid = { ...actor, role: "maid" as const };
+  const ownPast = "70000000-0000-4000-8000-000000000010";
+  const otherId = "20000000-0000-4000-8000-000000000002";
+  const base = {
+    cleaning_target_id: cleaningTargetId,
+    maid_profile_id: maid.profileId,
+    service_date: "2026-09-04",
+    sequence_number: 1,
+    revision: 2,
+    is_current: true,
+    available_from_snapshot: "2026-09-04T01:00:00Z",
+    due_at_snapshot: "2026-09-04T06:00:00Z",
+    notified_at: "2026-09-03T12:00:00Z",
+    notified_room_id_snapshot: "30000000-0000-4000-8000-000000000009" as
+      | string
+      | null,
+    notified_room_number_snapshot: "109" as string | null,
+    ended_at: null,
+    created_at: "2026-09-03T10:00:00Z",
+  };
+  const rows = [
+    { ...base, id: ownPast, is_current: false, revision: 1 },
+    { ...base, id: assignmentId },
+    { ...base, id: "70000000-0000-4000-8000-000000000011", notified_at: null },
+    {
+      ...base,
+      id: "70000000-0000-4000-8000-000000000012",
+      maid_profile_id: otherId,
+    },
+  ];
+  const queries: Array<Array<string>> = [];
+  function query(data: Array<Record<string, unknown>>) {
+    const conditions: Array<(row: Record<string, unknown>) => boolean> = [];
+    const filters: string[] = [];
+    queries.push(filters);
+    const builder = {
+      select: (_columns: string) => builder,
+      eq: (key: string, value: unknown) => {
+        filters.push(`eq:${key}`);
+        conditions.push((row) => row[key] === value);
+        return builder;
+      },
+      not: (key: string, operator: string, value: unknown) => {
+        assert(
+          operator === "is" && value === null,
+          "exact PostgREST non-null filter",
+        );
+        filters.push(`not:${key}`);
+        conditions.push((row) => row[key] !== null);
+        return builder;
+      },
+      in: (_key: string, _values: unknown[]) => builder,
+      order: (_key: string) => builder,
+      // biome-ignore lint/suspicious/noThenProperty: PostgREST의 lazy thenable을 재현하여 await 시점에 누적된 RLS 대체 필터를 검사한다.
+      then: (resolve: (value: unknown) => unknown) =>
+        Promise.resolve({
+          data: data.filter((row) =>
+            conditions.every((condition) => condition(row))
+          ),
+          error: null,
+        }).then(resolve),
+    };
+    return builder;
+  }
+  const clients = {
+    forAccessToken: () => ({ from: () => query(rows) }),
+    admin: {
+      from: (table: string) =>
+        query(
+          table === "cleaning_targets"
+            ? [{
+              id: cleaningTargetId,
+              room_id: roomId,
+              assignment_version: 999,
+              rooms: { room_number: "101" },
+            }]
+            : [{ id: maid.profileId, display_name: "메이드" }],
+        ),
+      rpc: () => Promise.resolve({ data: null, error: null }),
+    },
+  } as unknown as EdgeClients;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => clients,
+    authenticateRequest: () => Promise.resolve(maid),
+  };
+  for (
+    const [path, count] of [
+      ["/v1/assignments?serviceDate=2026-09-04", 1],
+      ["/v1/assignments?serviceDate=2026-09-04&includeHistory=true", 2],
+      [`/v1/assignments/${cleaningTargetId}/history`, 2],
+    ] as const
+  ) {
+    const offset = queries.length;
+    const response = await handleApiRequest(readRequest(path), dependencies);
+    const body = await response.json();
+    assert(
+      response.status === 200 && body.assignments.length === count,
+      "HTTP visible row count",
+    );
+    assert(
+      queries[offset].includes("eq:maid_profile_id") &&
+        queries[offset].includes("not:notified_at"),
+      "route sends self and notified filters",
+    );
+    assert(
+      body.assignments.every((row: Record<string, unknown>) =>
+        row.notifiedAt !== null && row.maidProfileId === maid.profileId &&
+        row.targetAssignmentVersion !== 999 &&
+        row.roomId === base.notified_room_id_snapshot &&
+        row.roomNumber === "109"
+      ),
+      "no unpublished, other owner, or current target version",
+    );
+    if (count === 2) {
+      assert(
+        body.assignments[0].assignmentId === ownPast,
+        "past notified revision remains readable",
+      );
+    }
+  }
+  rows[0].notified_room_id_snapshot = null;
+  rows[0].notified_room_number_snapshot = null;
+  const legacy = await handleApiRequest(
+    readRequest(`/v1/assignments/${cleaningTargetId}/history`),
+    dependencies,
+  );
+  const legacyBody = await legacy.json();
+  assert(
+    legacy.status === 200 && legacyBody.assignments[0].roomId === null &&
+      legacyBody.assignments[0].roomNumber === null,
+    "legacy notified history never falls back to a new unpublished room",
+  );
+  rows.splice(0, 2);
+  const denied = await handleApiRequest(
+    readRequest(`/v1/assignments/${cleaningTargetId}/history`),
+    dependencies,
+  );
+  assert(
+    denied.status === 403 &&
+      (await denied.json()).error.code === "ASSIGNMENT_ACCESS_REQUIRED",
+    "never-notified-only history denied",
+  );
+  const adminResponse = await handleApiRequest(
+    readRequest(
+      "/v1/assignments?serviceDate=2026-09-04&includeHistory=true",
+    ),
+    {
+      ...dependencies,
+      authenticateRequest: () => Promise.resolve(actor),
+      createClients: () => ({
+        ...clients,
+        admin: {
+          ...clients.admin,
+          from: (table: string) =>
+            query(
+              table === "cleaning_targets"
+                ? [{
+                  id: cleaningTargetId,
+                  room_id: roomId,
+                  assignment_version: 999,
+                  rooms: { room_number: "101" },
+                }]
+                : [{ id: maid.profileId, display_name: "메이드" }, {
+                  id: otherId,
+                  display_name: "다른 메이드",
+                }],
+            ),
+        },
+      } as unknown as EdgeClients),
+    },
+  );
+  assert(
+    adminResponse.status === 200 &&
+      (await adminResponse.json()).assignments.length === 2,
+    "admin draft and other maid visibility preserved",
+  );
+});
+
 Deno.test("prestart routes dispatch only exact methods and reject developer capability", async () => {
   const paths = [
     `/v1/assignments/${cleaningTargetId}/change`,

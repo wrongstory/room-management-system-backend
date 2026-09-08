@@ -998,7 +998,7 @@ export const openApiDocument = {
         operationId: "listAssignments",
         summary: "서비스 날짜별 청소 배정 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 자신의 배정만 조회합니다. includeHistory=false가 기본이며 true일 때도 maid에게는 본인 revision만 반환됩니다. developer는 업무 배정을 조회할 수 없습니다.",
+          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 본인에게 실제 통보된 revision만 조회합니다. includeHistory=false가 기본이며 현재 통보 배정만 반환합니다. true이면 본인의 과거 실제 통보된 superseded revision도 포함하지만 미통보 draft와 다른 메이드의 revision은 숨깁니다. developer는 업무 배정을 조회할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -1020,7 +1020,8 @@ export const openApiDocument = {
             name: "includeHistory",
             in: "query",
             schema: { type: "boolean", default: false },
-            description: "종료된 과거 immutable revision 포함 여부",
+            description:
+              "종료된 과거 immutable revision 포함 여부. maid는 본인에게 실제 통보된 과거 revision만 포함하며 target의 모든 이력을 조회하는 권한이 아닙니다.",
           },
         ],
         responses: {
@@ -1038,7 +1039,7 @@ export const openApiDocument = {
         operationId: "getAssignmentHistory",
         summary: "청소 대상의 배정 revision 이력 조회",
         description:
-          "active business admin은 전체 revision을 조회하고 active maid는 자신에게 배정된 revision만 조회합니다. maid가 해당 target의 어느 revision에도 포함되지 않으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
+          "active business admin은 전체 revision을 조회하고 active maid는 본인에게 실제 통보된 revision만 조회합니다. 과거 superseded revision도 통보 사실이 있으면 읽기 전용으로 보존합니다. 한 번 통보받은 target이라도 미통보 draft·다른 메이드의 revision·현재 target version은 공개하지 않습니다. 본인의 실제 통보 이력이 없으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [{
@@ -2819,8 +2820,17 @@ export const openApiDocument = {
         properties: {
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
-          roomId: { type: "string", format: "uuid" },
-          roomNumber: { type: "string" },
+          roomId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "maid는 통보 당시 객실 snapshot입니다. 복원 근거가 없는 과거 이력은 null이며 현재 target 객실로 대체하지 않습니다. admin은 현재 객실 ID입니다.",
+          },
+          roomNumber: {
+            type: ["string", "null"],
+            description:
+              "maid는 통보 당시 객실 번호이며 과거 snapshot 부재 시 null입니다. admin은 현재 객실 번호입니다.",
+          },
           maidProfileId: { type: "string", format: "uuid" },
           maidDisplayName: { type: "string" },
           serviceDate: { type: "string", format: "date" },
@@ -2830,7 +2840,8 @@ export const openApiDocument = {
           targetAssignmentVersion: {
             type: "integer",
             minimum: 1,
-            description: "다음 draft 저장의 expectedAssignmentVersion CAS 값",
+            description:
+              "admin은 현재 target의 expectedAssignmentVersion CAS 값입니다. maid는 본인 통보 revision에 고정된 version이며 다른 담당의 현재 target version을 노출하지 않습니다. 과거 이력 조회는 mutation 권한이 아닙니다.",
           },
           availableFrom: { type: ["string", "null"], format: "date-time" },
           dueAt: { type: ["string", "null"], format: "date-time" },

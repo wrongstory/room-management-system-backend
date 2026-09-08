@@ -11,6 +11,31 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   const response = openApiResponse({});
   const document = await response.json() as typeof openApiDocument;
   const serialized = JSON.stringify(document);
+  const assignments = document.paths["/v1/assignments"].get;
+  const history =
+    document.paths["/v1/assignments/{cleaningTargetId}/history"].get;
+  assert(
+    assignments.description.includes("본인에게 실제 통보된 revision") &&
+      assignments.description.includes("미통보 draft") &&
+      history.description.includes("superseded") &&
+      history.description.includes("현재 target version은 공개하지 않습니다"),
+    "maid visibility documents exact notified revisions, not target-wide history",
+  );
+  assert(
+    document.components.schemas.Assignment.properties.targetAssignmentVersion
+      .description.includes("maid는 본인 통보 revision에 고정된 version"),
+    "history target version is a revision snapshot, not current reassignment state",
+  );
+  assert(
+    document.components.schemas.Assignment.properties.roomId.type.includes(
+      "null",
+    ) &&
+      document.components.schemas.Assignment.properties.roomNumber.type
+        .includes("null") &&
+      document.components.schemas.Assignment.properties.roomId.description
+        .includes("현재 target 객실로 대체하지 않습니다"),
+    "legacy unknown notification room snapshots are nullable, never current room fallbacks",
+  );
 
   assert(document.openapi === "3.1.1", "OpenAPI version must be 3.1.1");
   assert(serialized.includes('"bearerAuth"'), "bearerAuth must be documented");
