@@ -58,8 +58,8 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@46c5f91e968556d1a13ecee398e98e8062839508` (#83 source 상태 정합화까지 통합; #25~#30, #4, #7A/B/C 및 #83 source/dev 완료, production 미승격)
-- 최신 dev source: **31 migrations / 63 paths / 68 operations**. #83은 DB 작업 원장·권한 계약을 추가했으며 공개 upload/read route를 추가하지 않아 HTTP/OpenAPI 수는 변하지 않았다. 아래 개별 PR 절의 이전 수치는 해당 PR 검증 당시 snapshot이며 현재 통합 수치는 이 항목을 따른다.
+- 개발 통합 source 기준: `dev@520abe7b80501ed9a4573e2251b9b640476d87b5` (#25~#30, #4, #7A/B/C 및 #83/#84 source/dev 완료, production 미승격)
+- 최신 dev source: **32 migrations / 67 paths / 72 operations**. #84의 사진 슬롯·업로드·작업 상태·원본 열람 4개 HTTP 경로가 DB/RPC·Fastify·Edge source에 통합됐다. 아래 개별 PR 절의 이전 수치는 해당 PR 검증 당시 snapshot이며 현재 통합 수치는 이 항목을 따른다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -548,7 +548,7 @@ PR #79는 2026-09-09 KST에 dev로 squash 병합됐다. 운영 migration/API/Pag
 
 승인 head와 병합 결과의 tree는 `6768b63f64fdea6dba7d4eda32a70807b7274823`로 동일하다.
 GitHub COMMENTED 리뷰·독립 서브에이전트 QA·Codex 위임 허가를 구분한다. #7A/B/C는
-source/dev 완료이며 #30 / PR #81과 #83 / PR #86도 source/dev 완료했다. 다음 본선은 #84 → #85 → #31이다. production purge 주기/backlog/실패감시와
+source/dev 완료이며 #30 / PR #81, #83 / PR #86과 #84 / PR #88도 source/dev 완료했다. 다음 본선은 #85 → #31이다. production purge 주기/backlog/실패감시와
 hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 gate 추적을 위해 Open 유지한다.
 
 ## 13. 후속 업무 API·모델 개발 상태
@@ -568,7 +568,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | offline lease/conflict | #7C source/dev 완료 | #7 / PR #79 | production 미승격; purge 운영·hosted E2E 별도 |
 | [x] | 사진 template/slot snapshot·submission version | source/dev 완료 | #30 / PR #81 | production 미승격; owner-only 모델이며 HTTP/Drive/전체 제출 command 제외 |
 | [x] | 사진 업로드 작업 원장·권한 계약 | #83 source/dev 완료 | #83 / PR #86 | production 미승격; DB/내부 계약만, 실제 Drive/HTTP/purge 제외 |
-| [ ] | Google Drive 업로드·조회 | #84 feature 구현·검증 중 | #9 / #84 | 실제 HTTP adapter/fake 검증과 production OAuth·실사용 gate는 별도; 독립 QA/dev 미완료 |
+| [x] | Google Drive 업로드·조회 | #84 source/dev 완료 | #9 / #84 | PR #88 독립 QA·required CI·source 승인/dev 병합 완료; production OAuth·hosted smoke 미완료 |
 | [ ] | 7일 영구삭제·orphan 운영 worker | 미구현 | #9 / #85 | #84 보상 candidate 정리는 accepted 사진의7일 purge를 대체하지 않음 |
 | [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
 | [ ] | earning/payroll 정산 API | 미개발 | #8 | append-only |
@@ -648,7 +648,8 @@ production completeness 기준의 정본 순서다.
 28. [x] **#7C Offline Lease/Replay/Quarantine source gate** — PR #79 독립 QA·required CI·Codex 96/100 승인 → `dev@e2648de` 병합; 운영 미적용
 29. [x] **#30 Photo Slot / Submission Base source gate** — PR #81 독립 QA·required CI·Codex 96/100 승인 → `dev@a4f8cb5` 병합; 운영 미적용
 30. [x] **#83 Photo Storage Operations source gate** — PR #86 독립 QA·required CI·Codex 96/100 승인 → `dev@cf91753` 병합; 운영 미적용
-31. [ ] **#84 → #85 → #31** — 실제 Drive 업로드·열람 → 7일 삭제 → 전체 제출·검수
+31. [x] **#84 Drive 업로드·열람 source gate** — PR #88 독립 QA·required CI·source 승인 → `dev@520abe7` 병합; 운영 미적용
+32. [ ] **#85 → #31** — 7일 삭제 → 전체 제출·검수; production OAuth·hosted smoke는 별도 release gate
 
 ### #30 사진·제출 기반 source gate
 
@@ -669,7 +670,7 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 승인 head와 병합 결과의 tree는 `14cd83310840570bb291ef44689c41ea7e128b7f`로 동일하다.
 독립 QA·GitHub 리뷰·required CI·Codex 위임 허가·병합 증거를 구분한다. 미설정/legacy 빈 snapshot은
 완전한 사진 증빙으로 간주하지 않으며, #7 물리 완료에 사진 선행조건을 추가하지 않는다.
-후속 #83도 PR #86으로 source/dev 완료했으며 다음 본선은 #84 → #85 → #31이다. 내부 모델 검증을 실제 파일·Drive 업로드/삭제나 HTTP retry 검증 완료로 표현하지 않는다.
+후속 #83 / PR #86과 #84 / PR #88도 source/dev 완료했으며 다음 본선은 #85 → #31이다. #30 내부 모델 검증과 #84의 실제 decoder·HTTP adapter 합성 검증은 별개이며, 운영 Google 업로드/삭제 검증 완료로 표현하지 않는다.
 
 ### #83 사진 업로드 작업 원장 source gate — source/dev 완료, production 미승격
 
@@ -690,31 +691,39 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 - [x] Codex 위임 평가96/100·명시적 source/dev 병합 허가 — [comment 5589446371](https://github.com/wrongstory/room-management-system-backend/pull/86#issuecomment-5589446371)
 - [x] PR #86 `dev` squash 병합 — `cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`
 - [ ] 별도 release/main 및 production migration·hosted 검증
-- [ ] #84 실제 JPEG/WebP bytes·magic/MIME/EXIF 검증, Google OAuth/Drive HTTP, 업로드·열람 API
+- [x] #84 실제 JPEG/WebP bytes·magic/MIME/EXIF 검증, Google OAuth/Drive HTTP adapter, 업로드·열람 API source/dev 완료 — PR #88; 운영 자격증명·Google/hosted smoke는 미완료
 - [ ] #85 정확히 168시간 삭제 worker 및 운영 provider/hosted 검증
 
 이번 source는 공개 upload/read route를 추가하지 않으므로 OpenAPI는 **63 paths / 68 operations**를 유지한다.
 승인 exact head와 병합 결과의 tree는 `9e7898af7de2d3025fe53ca848225cbbaa35b5fa`로 동일하다.
-독립 QA·GitHub COMMENTED 리뷰·required CI·Codex 위임 승인·병합 증거는 구분한다. 다음 작업은 **#84**다.
+독립 QA·GitHub COMMENTED 리뷰·required CI·Codex 위임 승인·병합 증거는 구분한다. 후속 #84도 source/dev 완료했으며 다음 작업은 **#85**다.
 
-### #84 Drive 업로드·열람 source gate — feature 검증 중, dev/production 미승격
+### #84 Drive 업로드·열람 source gate — source/dev 완료, production 미승격
 
-기준 dev는 `46c5f91e968556d1a13ecee398e98e8062839508`이며 후보 source는 **32 migrations / 67 paths / 72 operations**다.
-후보 숫자는 승인·병합·배포 evidence가 아니며 위 dev/production snapshot을 덮어쓰지 않는다.
+개발 시작 기준은 `dev@46c5f91e968556d1a13ecee398e98e8062839508`이고,
+[PR #88](https://github.com/wrongstory/room-management-system-backend/pull/88)의 승인 exact head는
+`7a3cfec2994b02569b3004c6f94c051c581cb213`, dev squash 결과는
+`520abe7b80501ed9a4573e2251b9b640476d87b5`다. 최신 통합 source는 **32 migrations / 67 paths / 72 operations**이며
+승인 head와 병합 결과의 tree는 `2e430f83ba6f8c5e46166d3f6f5d5e991781b3ba`로 동일하다. source 승인·병합은 production 배포 증거가 아니다.
 
 | API | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|
-| `GET /v1/attempts/{attemptId}/photo-slots` | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
-| `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload` | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
-| `GET /v1/photo-uploads/{operationId}` | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
-| `GET /v1/photos/{photoId}/content` | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+| `GET /v1/attempts/{attemptId}/photo-slots` | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload` | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `GET /v1/photo-uploads/{operationId}` | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `GET /v1/photos/{photoId}/content` | ✅ | ✅ | ✅ | ❌ | ❌ |
 
 - [x] 실제 local Edge v1.74.3 oneshot worker 합성1280×960/2048×2048 JPEG/WebP cold-start CPU/메모리·20MB bundle gate 완료(운영 hosted smoke 아님; PHOTO_STORAGE evidence 참고)
-- [ ] 전체 local DB/RLS/concurrency·Edge/Fastify·OpenAPI·Python 계약 최종 검증
-- [ ] exact head 독립 QA P0/P1=0 및 required GitHub application/migration PASS
-- [ ] source 승인 및 dev 병합
+- [x] 전체 local DB/RLS/concurrency·Edge/Fastify·OpenAPI·Python 계약 최종 검증
+- [x] exact head 독립 QA **P0 0 / P1 0** — PR #88 승인 head 기준
+- [x] exact head required GitHub `application` / `migration` PASS — [run 34269466800, attempt 2](https://github.com/wrongstory/room-management-system-backend/actions/runs/34269466800/attempts/2)
+- [x] Codex 위임 source 승인 및 PR #88 dev squash 병합 — `520abe7b80501ed9a4573e2251b9b640476d87b5`
 - [ ] 별도 release/main → 운영 OAuth 설정·Google/hosted role smoke
 - [ ] #85 7일 purge/backlog/실패 감시 운영 gate
+
+비차단 P2인 admission quota의 장기 전체 이력 SUM 비용은 #85/hardening 후속으로 유지한다.
+같은 head의 첫 CI 시도에서 Python Qt 테스트가 exit139로 종료됐고 진단 재실행은 PASS했다.
+이는 일시적 실패의 재현 여부를 확인한 결과이며 Qt/thread lifecycle 결함을 수정·해결했다는 증거가 아니다.
 
 원문307200 bytes, 사전 admission/총quota, JPEG/WebP 실제 decode·metadata 제거·최종SHA, 사전발급 provider identity,
 accepted 보존/fenced compensation, 원본 반환 직전 재인가가 이번 범위다. 실제 Google 계정 호출은 수행하지 않았고,
