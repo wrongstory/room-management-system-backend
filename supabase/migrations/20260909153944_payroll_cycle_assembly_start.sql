@@ -190,12 +190,51 @@ on public.payroll_events (actor_profile_id, occurred_at desc);
 
 alter table public.payroll_events enable row level security;
 
+-- Payroll rows are unavailable until an active administrator or maid has
+-- completed the mandatory first-password change. The private predicate keeps
+-- the profiles base table closed while resolving every read from fresh DB state.
+create function private.can_read_payroll_row(p_maid_profile_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+  select exists (
+    select 1
+    from public.profiles actor
+    where actor.auth_user_id = (select auth.uid())
+      and actor.status = 'active'
+      and actor.must_change_password = false
+      and (
+        actor.role = 'admin'
+        or (actor.role = 'maid' and actor.id = p_maid_profile_id)
+      )
+  )
+$$;
+
+revoke all on function private.can_read_payroll_row(uuid)
+from public, anon, authenticated, service_role;
+grant execute on function private.can_read_payroll_row(uuid) to authenticated;
+
+drop policy if exists earnings_read_scoped on public.earnings;
+create policy earnings_read_scoped on public.earnings
+for select to authenticated
+using ((select private.can_read_payroll_row(earnings.maid_profile_id)));
+
+drop policy if exists payroll_read_scoped on public.payroll_cycles;
+create policy payroll_read_scoped on public.payroll_cycles
+for select to authenticated
+using ((select private.can_read_payroll_row(payroll_cycles.maid_profile_id)));
+
+drop policy if exists payroll_items_read_scoped on public.payroll_items;
+create policy payroll_items_read_scoped on public.payroll_items
+for select to authenticated
+using ((select private.can_read_payroll_row(payroll_items.maid_profile_id)));
+
 create policy payroll_events_read_scoped on public.payroll_events
 for select to authenticated
-using (
-  (select private.current_role()) = 'admin'
-  or maid_profile_id = (select private.current_profile_id())
-);
+using ((select private.can_read_payroll_row(payroll_events.maid_profile_id)));
 
 create function private.prevent_payroll_event_mutation()
 returns trigger

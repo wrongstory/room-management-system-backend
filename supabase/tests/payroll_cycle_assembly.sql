@@ -322,19 +322,141 @@ select ok(has_function_privilege('service_role','public.list_payroll_cycles(uuid
   'service role can execute only the reviewed payroll projection and command');
 select ok(not has_function_privilege('authenticated','public.start_payroll_cycle(uuid,uuid,date,bigint,text,text)','EXECUTE'),
   'authenticated clients cannot bypass the server-owned command');
+select ok(has_function_privilege('authenticated','private.can_read_payroll_row(uuid)','EXECUTE')
+  and not has_function_privilege('anon','private.can_read_payroll_row(uuid)','EXECUTE')
+  and not has_function_privilege('service_role','private.can_read_payroll_row(uuid)','EXECUTE'),
+  'only authenticated RLS evaluation can execute the private payroll read predicate');
+
+create temporary table payroll_rls_expected as
+select
+  (select count(*) from public.earnings) as earnings_all,
+  (select count(*) from public.payroll_cycles) as cycles_all,
+  (select count(*) from public.payroll_items) as items_all,
+  (select count(*) from public.payroll_events) as events_all,
+  (select count(*) from public.earnings where maid_profile_id=pg_temp.pid(2)) as earnings_maid,
+  (select count(*) from public.payroll_cycles where maid_profile_id=pg_temp.pid(2)) as cycles_maid,
+  (select count(*) from public.payroll_items where maid_profile_id=pg_temp.pid(2)) as items_maid,
+  (select count(*) from public.payroll_events where maid_profile_id=pg_temp.pid(2)) as events_maid;
+grant select on payroll_rls_expected to authenticated;
+
+update public.profiles
+set must_change_password=true
+where id in (pg_temp.pid(1),pg_temp.pid(2));
+
+set local role authenticated;
+set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000101';
+select is((select count(*) from public.earnings),0::bigint,
+  'active admin with a temporary password reads no earnings');
+select is((select count(*) from public.payroll_cycles),0::bigint,
+  'active admin with a temporary password reads no payroll cycles');
+select is((select count(*) from public.payroll_items),0::bigint,
+  'active admin with a temporary password reads no payroll items');
+select is((select count(*) from public.payroll_events),0::bigint,
+  'active admin with a temporary password reads no payroll events');
+reset role;
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000102';
-select is((select count(*) from public.payroll_cycles),1::bigint,
-  'active maid RLS reads only self payroll cycles');
-select is((select count(*) from public.payroll_events),2::bigint,
-  'active maid RLS reads only self payroll events');
+select is((select count(*) from public.earnings),0::bigint,
+  'active maid with a temporary password reads no earnings');
+select is((select count(*) from public.payroll_cycles),0::bigint,
+  'active maid with a temporary password reads no payroll cycles');
+select is((select count(*) from public.payroll_items),0::bigint,
+  'active maid with a temporary password reads no payroll items');
+select is((select count(*) from public.payroll_events),0::bigint,
+  'active maid with a temporary password reads no payroll events');
+reset role;
+
+update public.profiles
+set must_change_password=false
+where id in (pg_temp.pid(1),pg_temp.pid(2));
+
+set local role authenticated;
+set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000101';
+select is((select count(*) from public.earnings),
+  (select earnings_all from pg_temp.payroll_rls_expected),
+  'admin earnings access is restored after password change completion');
+select is((select count(*) from public.payroll_cycles),
+  (select cycles_all from pg_temp.payroll_rls_expected),
+  'admin payroll cycle access is restored after password change completion');
+select is((select count(*) from public.payroll_items),
+  (select items_all from pg_temp.payroll_rls_expected),
+  'admin payroll item access is restored after password change completion');
+select is((select count(*) from public.payroll_events),
+  (select events_all from pg_temp.payroll_rls_expected),
+  'admin payroll event access is restored after password change completion');
+reset role;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000102';
+select is((select count(*) from public.earnings),
+  (select earnings_maid from pg_temp.payroll_rls_expected),
+  'maid earnings access is restored with exact self scope after password change');
+select is((select count(*) from public.payroll_cycles),
+  (select cycles_maid from pg_temp.payroll_rls_expected),
+  'maid payroll cycle access is restored with exact self scope after password change');
+select is((select count(*) from public.payroll_items),
+  (select items_maid from pg_temp.payroll_rls_expected),
+  'maid payroll item access is restored with exact self scope after password change');
+select is((select count(*) from public.payroll_events),
+  (select events_maid from pg_temp.payroll_rls_expected),
+  'maid payroll event access is restored with exact self scope after password change');
+select is((select count(*) from public.earnings where maid_profile_id=pg_temp.pid(3)),0::bigint,
+  'maid cannot IDOR another maid earnings');
+select is((select count(*) from public.payroll_cycles where maid_profile_id=pg_temp.pid(3)),0::bigint,
+  'maid cannot IDOR another maid payroll cycles');
+select is((select count(*) from public.payroll_items where maid_profile_id=pg_temp.pid(3)),0::bigint,
+  'maid cannot IDOR another maid payroll items');
+select is((select count(*) from public.payroll_events where maid_profile_id=pg_temp.pid(3)),0::bigint,
+  'maid cannot IDOR another maid payroll events');
+reset role;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000106';
+select is((select count(*) from public.earnings),0::bigint,
+  'developer RLS reads no earnings');
+select is((select count(*) from public.payroll_cycles),0::bigint,
+  'developer RLS reads no payroll cycles');
+select is((select count(*) from public.payroll_items),0::bigint,
+  'developer RLS reads no payroll items');
+select is((select count(*) from public.payroll_events),0::bigint,
+  'developer RLS reads no payroll events');
+reset role;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000105';
+select is((select count(*) from public.earnings),0::bigint,
+  'upload-only maid RLS reads no earnings');
+select is((select count(*) from public.payroll_cycles),0::bigint,
+  'upload-only maid RLS reads no payroll cycles');
+select is((select count(*) from public.payroll_items),0::bigint,
+  'upload-only maid RLS reads no payroll items');
+select is((select count(*) from public.payroll_events),0::bigint,
+  'upload-only maid RLS reads no payroll events');
+reset role;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000107';
+select is((select count(*) from public.earnings),0::bigint,
+  'departed maid RLS reads no earnings');
+select is((select count(*) from public.payroll_cycles),0::bigint,
+  'departed maid RLS reads no payroll cycles');
+select is((select count(*) from public.payroll_items),0::bigint,
+  'departed maid RLS reads no payroll items');
+select is((select count(*) from public.payroll_events),0::bigint,
+  'departed maid RLS reads no payroll events');
 reset role;
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000104';
+select is((select count(*) from public.earnings),0::bigint,
+  'inactive admin RLS reads no earnings');
 select is((select count(*) from public.payroll_cycles),0::bigint,
   'inactive admin RLS reads no payroll cycles');
+select is((select count(*) from public.payroll_items),0::bigint,
+  'inactive admin RLS reads no payroll items');
+select is((select count(*) from public.payroll_events),0::bigint,
+  'inactive admin RLS reads no payroll events');
 reset role;
 
 select throws_ok($$update public.payroll_events set locked_amount=1$$,
