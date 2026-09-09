@@ -63,7 +63,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@9231d9e202d1402c67103789101cf8e92cfa0c04` (#25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격)
+- 개발 통합 기능 기준: PR #97 squash merge `9231d9e202d1402c67103789101cf8e92cfa0c04` 포함 (#25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격)
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했다. 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이고 다음 본선은 #8 earning/payroll 정산이다.
 - #93/#95는 PR #95로 source/dev 병합 완료했다. 개발 통합 계약은 **35 migrations / 76 paths / 82 operations**이며 conceptual OPEN 조회, OPEN→PAYING 잠금과 4개 payroll table의 active+비밀번호 변경 완료+admin/maid-self RLS를 포함한다.
