@@ -136,11 +136,27 @@ insert into public.cleaning_attempts (
 update public.cleaning_assignments set is_current=false,ended_at=clock_timestamp(),change_reason_code='TEST_COMPLETED'
 where id='58000000-0000-4000-8000-000000000007';
 
+insert into public.cleaning_submissions (
+  id, cleaning_attempt_id, client_submission_id, version, status, photo_manifest, submitted_by
+) values (
+  '78000000-0000-4000-8000-000000000007',
+  '68000000-0000-4000-8000-000000000007',
+  '88000000-0000-4000-8000-000000000007',
+  1, 'rejected', '{}'::jsonb, '28000000-0000-4000-8000-000000000002'
+);
+insert into public.inspection_decisions (id, submission_id, decision, reason_code, decided_by)
+values (
+  '98000000-0000-4000-8000-000000000007',
+  '78000000-0000-4000-8000-000000000007',
+  'rejected', 'QUALITY_REWORK', '28000000-0000-4000-8000-000000000001'
+);
+
 insert into public.cleaning_targets (
   id, room_id, cleaning_kind, source, source_key,
   original_service_date, effective_service_date, status,
   room_type_snapshot, fee_snapshot, template_snapshot, created_by,
-  reclean_of_attempt_id, reclean_maid_profile_id
+  reclean_of_attempt_id, reclean_maid_profile_id,
+  reclean_of_submission_id, reclean_of_inspection_decision_id
 ) values (
   '48000000-0000-4000-8000-000000000008',
   (select room_id from public.cleaning_targets where id = '48000000-0000-4000-8000-000000000007'),
@@ -149,7 +165,9 @@ insert into public.cleaning_targets (
   '{}'::jsonb, 0, '{}'::jsonb,
   '28000000-0000-4000-8000-000000000001',
   '68000000-0000-4000-8000-000000000007',
-  '28000000-0000-4000-8000-000000000002'
+  '28000000-0000-4000-8000-000000000002',
+  '78000000-0000-4000-8000-000000000007',
+  '98000000-0000-4000-8000-000000000007'
 );
 
 create temporary table assignment_results (

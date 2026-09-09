@@ -24,7 +24,10 @@ import {
 } from './modules/reservations/reservation.service.js';
 import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
-import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices } from './modules/photos/photo.routes.js';
+import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
+import { photoError } from './modules/photos/photo-service.js';
+import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
+import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -39,6 +42,7 @@ export interface BuildAppOptions {
   services?: AppServices;
   logger?: boolean;
   photoServices?: PhotoHttpServices;
+  submissionService?: SubmissionService;
 }
 
 function bearerToken(authorization: string | undefined): string {
@@ -61,6 +65,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   let services = options.services;
+  let submissionService = options.submissionService;
   if (!services) {
     const clients = createSupabaseClients(options.env);
     services = {
@@ -76,6 +81,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
       )
     };
+    submissionService ??= new SupabaseSubmissionService(clients);
   }
 
   await app.register(helmet, { global: true });
@@ -147,7 +153,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
   await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
-  await app.register(createPhotoRoutes(options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env)));
+  const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
+  await app.register(createPhotoRoutes(photoServices));
+  if (submissionService) {
+    await app.register(createSubmissionRoutes(submissionService, async (request) => {
+      try {
+        const identity = await photoServices.authenticate(webRequest(request), false);
+        return { profileId: identity.profileId, role: identity.role, mustChangePassword: false };
+      } catch (error) {
+        const safe = photoError(error);
+        throw new AppError(safe.statusCode, safe.code, '허용된 제한 수행 권한이 필요합니다.');
+      }
+    }));
+  }
 
   const schedulerActorId = options.env.RESERVATION_SCHEDULER_ACTOR_PROFILE_ID;
   if (schedulerActorId) {

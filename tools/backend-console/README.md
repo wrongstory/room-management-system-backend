@@ -82,3 +82,10 @@ request hash는 90일 metadata 저장소 계약이므로 영구 감사 projectio
 developer 콘솔은 기존 16 operations만 유지하며 admin 격리 판정 및 maid lease/동기화 API를
 대신 실행하지 않는다. `correction_link`는 현재 유효 회차의 검증 가능한 완료 정정이지 과거
 인계/종료 회차를 복구하거나 검수·입실 준비·수익을 만드는 기능이 아니다.
+
+#31 source는 submission/inspection audit event 5종을 filtered OpenAPI와 generated client에
+추가한다. 콘솔은 `submission.bomb_reported`, `submission.created`, `inspection.bomb_decided`,
+`inspection.approved`, `inspection.rejected`의 safe summary만 조회하며 폭탄방 memo·증빙 photo ID,
+일반 sealed photo ID, Drive locator/hash/file name, request hash/raw state를 받지 않는다. 관리자 검수
+업무 API 8개는 developer 콘솔 allowlist에 포함하지 않으며 운영 배포 전 source enum을 현재 사용
+가능 기능으로 표시하지 않는다.

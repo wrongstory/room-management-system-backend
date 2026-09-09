@@ -300,6 +300,59 @@ def test_photo_upload_audit_generated_contract_has_safe_metadata_only() -> None:
     assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary
 
 
+def test_submission_inspection_audit_generated_contract_has_safe_metadata_only() -> None:
+    assert {
+        DeveloperAuditEventType.SUBMISSION_BOMB_REPORTED.value,
+        DeveloperAuditEventType.SUBMISSION_CREATED.value,
+        DeveloperAuditEventType.INSPECTION_BOMB_DECIDED.value,
+        DeveloperAuditEventType.INSPECTION_APPROVED.value,
+        DeveloperAuditEventType.INSPECTION_REJECTED.value,
+    } == {
+        "submission.bomb_reported",
+        "submission.created",
+        "inspection.bomb_decided",
+        "inspection.approved",
+        "inspection.rejected",
+    }
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {
+        "attempt_id",
+        "submission_id",
+        "bomb_report_id",
+        "earning_id",
+        "reclean_target_id",
+        "evidence_count",
+        "photo_count",
+        "decision",
+    } <= field_names
+    assert {
+        "memo",
+        "evidence_photo_ids",
+        "provider_locator",
+        "drive_file_id",
+        "sha256",
+        "request_hash",
+        "idempotency_key",
+        "before_state",
+        "after_state",
+        "guest_name",
+        "pin",
+        "phone",
+        "token",
+    }.isdisjoint(field_names)
+    summary = {
+        "attemptId": "10000000-0000-4000-8000-000000000001",
+        "submissionId": "10000000-0000-4000-8000-000000000002",
+        "bombReportId": "10000000-0000-4000-8000-000000000003",
+        "earningId": "10000000-0000-4000-8000-000000000004",
+        "recleanTargetId": "10000000-0000-4000-8000-000000000005",
+        "evidenceCount": 2,
+        "photoCount": 3,
+        "decision": "approved",
+    }
+    assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary
+
+
 def test_drive_runtime_configuration_generated_contract_is_boolean_only() -> None:
     from room_management_console.generated.models.developer_runtime_status_configuration import (
         DeveloperRuntimeStatusConfiguration,

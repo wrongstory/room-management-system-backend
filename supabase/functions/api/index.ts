@@ -72,6 +72,15 @@ import {
 import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
 import {
+  createSubmission,
+  decideBombRoom,
+  decideSubmission,
+  getSubmission,
+  listSubmissions,
+  reportBombRoom,
+  submissionPath,
+} from "../_shared/submission-api.ts";
+import {
   cancelManualCleaningRequest,
   cancelReservation,
   changeReservation,
@@ -135,6 +144,7 @@ export interface ApiHandlerDependencies {
     request: Request,
     clients: EdgeClients,
   ) => Promise<EdgeActor>;
+  authenticateLimitedRequest?: typeof authenticateLimitedAttempt;
   photoService?: (clients: EdgeClients) => PhotoService;
 }
 
@@ -253,6 +263,30 @@ export async function handleApiRequest(
           limited.attemptId,
         );
       return jsonResponse(result, 200, corsHeaders);
+    }
+
+    // 제출은 upload_submit capability가 살아 있는 제한 상태 메이드도 허용한다.
+    // bomb 신고/조회/검수는 계속 active-only 일반 인증 경계를 사용한다.
+    const limitedSubmissionRoute = request.method === "POST"
+      ? submissionPath(path)
+      : null;
+    if (limitedSubmissionRoute?.kind === "submit") {
+      const identity = await (
+        dependencies.authenticateLimitedRequest ?? authenticateLimitedAttempt
+      )(request, clients);
+      actor = identity.actor;
+      return jsonResponse(
+        {
+          submission: await createSubmission(
+            request,
+            clients,
+            actor,
+            limitedSubmissionRoute.attemptId,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
@@ -375,6 +409,93 @@ export async function handleApiRequest(
         status: 204,
         headers: { "cache-control": "no-store", ...corsHeaders },
       });
+    }
+
+    if (request.method === "GET" && path === "/v1/inspections") {
+      return jsonResponse(
+        { submissions: await listSubmissions(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    const submissionRoute = submissionPath(path);
+    if (submissionRoute) {
+      if (submissionRoute.kind === "report" && request.method === "POST") {
+        return jsonResponse(
+          {
+            bombReport: await reportBombRoom(
+              request,
+              clients,
+              actor,
+              submissionRoute.attemptId,
+            ),
+          },
+          201,
+          corsHeaders,
+        );
+      }
+      if (submissionRoute.kind === "submit" && request.method === "GET") {
+        return jsonResponse(
+          {
+            submissions: await listSubmissions(
+              request,
+              clients,
+              actor,
+              submissionRoute.attemptId,
+            ),
+          },
+          200,
+          corsHeaders,
+        );
+      }
+      if (submissionRoute.kind === "detail" && request.method === "GET") {
+        return jsonResponse(
+          {
+            submission: await getSubmission(
+              request,
+              clients,
+              actor,
+              submissionRoute.submissionId,
+            ),
+          },
+          200,
+          corsHeaders,
+        );
+      }
+      if (
+        submissionRoute.kind === "bomb-decision" && request.method === "POST"
+      ) {
+        return jsonResponse(
+          {
+            bombDecision: await decideBombRoom(
+              request,
+              clients,
+              actor,
+              submissionRoute.submissionId,
+            ),
+          },
+          200,
+          corsHeaders,
+        );
+      }
+      if (
+        (submissionRoute.kind === "approve" ||
+          submissionRoute.kind === "reject") && request.method === "POST"
+      ) {
+        return jsonResponse(
+          {
+            inspection: await decideSubmission(
+              request,
+              clients,
+              actor,
+              submissionRoute.submissionId,
+              submissionRoute.kind,
+            ),
+          },
+          200,
+          corsHeaders,
+        );
+      }
     }
 
     if (request.method === "GET" && path === "/v1/accounts") {

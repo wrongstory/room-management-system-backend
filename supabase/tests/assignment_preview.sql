@@ -202,12 +202,17 @@ values(pg_temp.pid(510),pg_temp.pid(310),pg_temp.pid(410),pg_temp.pid(2),1,'reje
   '2038-06-07 13:00+09','INSPECTION_REJECTED','{}','{}');
 update public.cleaning_assignments set is_current=false,ended_at='2038-06-07 13:00+09',change_reason_code='INSPECTION_REJECTED'
 where id=pg_temp.pid(410);
+insert into public.cleaning_submissions(id,cleaning_attempt_id,client_submission_id,version,status,photo_manifest,submitted_by)
+values(pg_temp.pid(610),pg_temp.pid(510),pg_temp.pid(710),1,'rejected','{}',pg_temp.pid(2));
+insert into public.inspection_decisions(id,submission_id,decision,reason_code,decided_by)
+values(pg_temp.pid(810),pg_temp.pid(610),'rejected','QUALITY_REWORK',pg_temp.pid(1));
 insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
   available_from,due_at,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,
-  created_by,reclean_of_attempt_id,reclean_maid_profile_id)
+  created_by,reclean_of_attempt_id,reclean_maid_profile_id,reclean_of_submission_id,reclean_of_inspection_decision_id)
 select pg_temp.pid(311),room_id,'reclean','inspection_reclean','preview-reclean','2038-06-07','2038-06-07',
   '2038-06-07 14:00+09','2038-06-07 20:00+09','unassigned',1,room_type_snapshot,0,template_snapshot,
-  pg_temp.pid(1),pg_temp.pid(510),pg_temp.pid(2) from public.cleaning_targets where id=pg_temp.pid(310);
+  pg_temp.pid(1),pg_temp.pid(510),pg_temp.pid(2),pg_temp.pid(610),pg_temp.pid(810)
+  from public.cleaning_targets where id=pg_temp.pid(310);
 select is(private.assignment_preview_source_reason(t,30,'2038-06-07 13:00+09'),null::text,'reclean valid original rejected maid source')
 from public.cleaning_targets t where id=pg_temp.pid(311);
 select is(private.assignment_preview_source_reason(jsonb_populate_record(null::public.cleaning_targets,

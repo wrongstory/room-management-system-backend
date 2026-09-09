@@ -47,7 +47,7 @@ export function createPhotoHttpServices(clients: SupabaseClients, env: AppEnv): 
     }
   };
 }
-function webRequest(request: FastifyRequest, body = false): Request {
+export function webRequest(request: FastifyRequest, body = false): Request {
   const headers = new Headers();
   for (const [key, value] of Object.entries(request.headers)) if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(',') : value);
   const init: RequestInit & { duplex?: 'half' } = { method: request.method, headers };

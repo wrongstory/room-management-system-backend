@@ -237,9 +237,15 @@ update public.profiles set status='active' where id=pg_temp.pid(2);
 -- 재청소는 원 maid에게만 귀속한다. #27 재배정도 같은 불변식을 재검증한다.
 insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,assignment_revision,ended_at,end_reason,template_snapshot,room_snapshot)
 values(pg_temp.pid(512),pg_temp.pid(312),pg_temp.pid(412),pg_temp.pid(2),1,'rejected',2,now(),'INSPECTION_REJECTED','{}','{}');
+insert into public.cleaning_submissions(id,cleaning_attempt_id,client_submission_id,version,status,photo_manifest,submitted_by)
+values(pg_temp.pid(612),pg_temp.pid(512),pg_temp.pid(712),1,'rejected','{}',pg_temp.pid(2));
+insert into public.inspection_decisions(id,submission_id,decision,reason_code,decided_by)
+values(pg_temp.pid(812),pg_temp.pid(612),'rejected','QUALITY_REWORK',pg_temp.pid(1));
 insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
-  available_from,due_at,room_type_snapshot,fee_snapshot,template_snapshot,created_by,reclean_of_attempt_id,reclean_maid_profile_id)
+  available_from,due_at,room_type_snapshot,fee_snapshot,template_snapshot,created_by,reclean_of_attempt_id,reclean_maid_profile_id,
+  reclean_of_submission_id,reclean_of_inspection_decision_id)
 select pg_temp.pid(313),room_id,'reclean','inspection_reclean','prestart-reclean','2027-10-01','2027-10-01',available_from,due_at,'{}',0,'{}',pg_temp.pid(1),pg_temp.pid(512),pg_temp.pid(2)
+  ,pg_temp.pid(612),pg_temp.pid(812)
 from public.cleaning_targets where id=pg_temp.pid(312);
 select public.save_cleaning_assignment_draft(pg_temp.pid(1),pg_temp.pid(313),pg_temp.pid(2),40,1,'prestart-reclean-draft',repeat('d',64));
 select throws_ok($$select pg_temp.command(13,'change','reclean-wrong-maid-0013',3,40)$$,'23514','RECLEAN_MAID_IMMUTABLE','prestart cannot reassign reclean to other maid');

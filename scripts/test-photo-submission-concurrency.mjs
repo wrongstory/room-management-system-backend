@@ -167,5 +167,93 @@ export async function testPhotoSubmissionConcurrency(client) {
     and (select count(*) from private.submission_photo_binding_sets where cleaning_attempt_id='${pointer.attempt}')=2
     and (select count(*) from private.submission_photo_bindings where cleaning_attempt_id='${pointer.attempt}')=2
     and (select count(*) from public.cleaning_submissions where cleaning_attempt_id='${pointer.attempt}')=2;`) === 't', 'CAS loser leaves no partial binding/seal and prior canonical submission survives');
+
+  // #31 public commands: a duplicate delivery converges to one immutable
+  // submission, and competing terminal decisions admit exactly one winner.
+  const inspection = await fixture(); sql(photo(inspection, 0));
+  const inspectionPhoto = sql(`select photo_version_id from private.attempt_photo_current
+    where cleaning_attempt_id='${inspection.attempt}' and target_photo_slot_id='${inspection.slot}';`);
+  ok(await client.rpc('report_bomb_room', {
+    p_actor_profile_id: maid,
+    p_attempt_id: inspection.attempt,
+    p_evidence_photo_ids: [inspectionPhoto],
+    p_memo: 'synthetic bounded bomb report',
+    p_idempotency_key: `bomb-report-race-${randomUUID()}`,
+    p_request_hash: 'c'.repeat(64)
+  }), 'bomb decision race report');
+  const clientSubmissionId = randomUUID();
+  const submitKey = `submission-race-${randomUUID()}`;
+  const submitArgs = {
+    p_actor_profile_id: maid,
+    p_attempt_id: inspection.attempt,
+    p_client_submission_id: clientSubmissionId,
+    p_expected_revision: 0,
+    p_candle_count: 0,
+    p_idempotency_key: submitKey,
+    p_request_hash: 'd'.repeat(64)
+  };
+  const submittedRace = await Promise.all([
+    client.rpc('create_cleaning_submission', submitArgs),
+    client.rpc('create_cleaning_submission', submitArgs)
+  ]);
+  assert(submittedRace.every((result) => !result.error), 'duplicate submit deliveries both return the canonical result');
+  assert(JSON.stringify(submittedRace[0].data) === JSON.stringify(submittedRace[1].data), 'duplicate submit response is identical');
+  const inspectedSubmissionId = submittedRace[0].data?.id;
+  assert(/^[0-9a-f-]{36}$/.test(inspectedSubmissionId), 'submission race returns an opaque UUID');
+  assert(sql(`select count(*)=1 from public.cleaning_submissions where cleaning_attempt_id='${inspection.attempt}';`) === 't', 'duplicate submit creates exactly one immutable version');
+
+  const bombDecisionRace = await Promise.all([
+    client.rpc('decide_bomb_room', {
+      p_actor_profile_id: admin,
+      p_submission_id: inspectedSubmissionId,
+      p_decision: 'approved',
+      p_reason_code: 'BOMB_CONFIRMED',
+      p_idempotency_key: `bomb-approve-race-${randomUUID()}`,
+      p_request_hash: '1'.repeat(64)
+    }),
+    client.rpc('decide_bomb_room', {
+      p_actor_profile_id: admin,
+      p_submission_id: inspectedSubmissionId,
+      p_decision: 'rejected',
+      p_reason_code: 'BOMB_NOT_CONFIRMED',
+      p_idempotency_key: `bomb-reject-race-${randomUUID()}`,
+      p_request_hash: '2'.repeat(64)
+    })
+  ]);
+  assert(bombDecisionRace.filter((result) => !result.error).length === 1, 'opposing bomb decisions admit exactly one winner');
+  assert(bombDecisionRace.filter((result) => result.error).every((result) => /BOMB_DECISION_ALREADY_RECORDED/.test(result.error.message)), 'bomb decision loser receives a stable conflict');
+  assert(sql(`select count(*)=1 from private.bomb_room_decisions where submission_id='${inspectedSubmissionId}';`) === 't', 'bomb decision race commits one immutable decision');
+
+  const publishedReclean = Number(sql(`select count(*) from public.cleaning_template_versions
+    where room_type_id='${roomType.id}' and cleaning_kind='reclean' and status='published';`));
+  assert(publishedReclean <= 1, 'reclean template selection is never ambiguous');
+  if (publishedReclean === 0) {
+    const recleanVersion = Number(sql(`select greatest(coalesce(max(version),0),6)+1 from public.cleaning_template_versions
+      where room_type_id='${roomType.id}' and cleaning_kind='reclean';`));
+    sql(`insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by)
+      values('${randomUUID()}','${roomType.id}','reclean',${recleanVersion},'published',1,
+        '[{"slotKey":"reclean-required","required":true,"displayOrder":0,"label":"synthetic"}]','${admin}');`);
+  }
+  const terminalRace = await Promise.all([
+    client.rpc('approve_cleaning_submission', {
+      p_actor_profile_id: admin,
+      p_submission_id: inspectedSubmissionId,
+      p_reason_code: 'QUALITY_OK',
+      p_idempotency_key: `inspection-approve-race-${randomUUID()}`,
+      p_request_hash: 'e'.repeat(64)
+    }),
+    client.rpc('reject_cleaning_submission', {
+      p_actor_profile_id: admin,
+      p_submission_id: inspectedSubmissionId,
+      p_reason_code: 'QUALITY_REWORK',
+      p_idempotency_key: `inspection-reject-race-${randomUUID()}`,
+      p_request_hash: 'f'.repeat(64)
+    })
+  ]);
+  assert(terminalRace.filter((result) => !result.error).length === 1, 'approve versus reject admits exactly one terminal winner');
+  assert(terminalRace.filter((result) => result.error).every((result) => /STALE_VERSION/.test(result.error.message)), 'terminal loser fails closed as stale version');
+  assert(sql(`select (select count(*) from public.inspection_decisions where submission_id='${inspectedSubmissionId}')=1
+    and ((select count(*) from public.earnings where submission_id='${inspectedSubmissionId}')
+      +(select count(*) from public.cleaning_targets where reclean_of_submission_id='${inspectedSubmissionId}'))=1;`) === 't', 'terminal race commits one decision and exactly one follow-up branch');
   console.log('Photo model concurrency passed: slot CAS, replace/bind seal, submission pointer CAS.');
 }

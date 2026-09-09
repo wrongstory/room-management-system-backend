@@ -309,6 +309,17 @@ insert into public.cleaning_submissions (
   '20000000-0000-4000-8000-000000000002'
 );
 
+-- Synthetic approved bomb provenance for the valid 2x earning fixture below.
+-- Public commands enforce evidence cardinality; this lower-level integrity test
+-- focuses on the immutable decision-to-earning FK.
+insert into private.bomb_room_reports(id,cleaning_attempt_id,reported_by,memo)
+values('71000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000002','synthetic integrity fixture');
+insert into private.bomb_room_report_seals(report_id,submission_id)
+values('71000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000002');
+insert into private.bomb_room_decisions(id,report_id,submission_id,decision,reason_code,decided_by)
+values('71000000-0000-4000-8000-000000000002','71000000-0000-4000-8000-000000000001',
+ '70000000-0000-4000-8000-000000000002','approved','BOMB_CONFIRMED','20000000-0000-4000-8000-000000000001');
+
 do $$
 begin
   begin
@@ -349,13 +360,13 @@ $$;
 
 insert into public.earnings (
   id, earning_entitlement_id, submission_id, maid_profile_id,
-  earned_on, base_amount, bomb_room_bonus
+  earned_on, base_amount, bomb_room_bonus, bomb_room_decision_id
 ) values (
   '80000000-0000-4000-8000-000000000003',
   '80000000-0000-4000-8000-000000000003',
   '70000000-0000-4000-8000-000000000002',
   '20000000-0000-4000-8000-000000000002',
-  '2027-01-02', 16000, 16000
+  '2027-01-02', 16000, 16000, '71000000-0000-4000-8000-000000000002'
 );
 
 insert into public.payroll_cycles (
@@ -546,9 +557,25 @@ begin
 end;
 $$;
 
+insert into public.cleaning_submissions (
+  id, cleaning_attempt_id, client_submission_id, version, status, photo_manifest, submitted_by
+) values (
+  '70000000-0000-4000-8000-000000000003',
+  '60000000-0000-4000-8000-000000000001',
+  '70000000-0000-4000-8000-000000000004',
+  2, 'rejected', '{}'::jsonb, '20000000-0000-4000-8000-000000000002'
+);
+insert into public.inspection_decisions (id, submission_id, decision, reason_code, decided_by)
+values (
+  '70000000-0000-4000-8000-000000000005',
+  '70000000-0000-4000-8000-000000000003',
+  'rejected', 'QUALITY_REWORK', '20000000-0000-4000-8000-000000000001'
+);
+
 insert into public.cleaning_targets (
   id, room_id, cleaning_kind, source, source_key,
   reclean_of_attempt_id, reclean_maid_profile_id,
+  reclean_of_submission_id, reclean_of_inspection_decision_id,
   original_service_date, effective_service_date,
   room_type_snapshot, fee_snapshot, template_snapshot, created_by
 ) values (
@@ -557,6 +584,8 @@ insert into public.cleaning_targets (
   'reclean', 'inspection_reclean', 'test:inspection-reclean:1',
   '60000000-0000-4000-8000-000000000001',
   '20000000-0000-4000-8000-000000000002',
+  '70000000-0000-4000-8000-000000000003',
+  '70000000-0000-4000-8000-000000000005',
   '2027-01-02', '2027-01-02', '{}'::jsonb, 0, '{}'::jsonb,
   '20000000-0000-4000-8000-000000000001'
 );

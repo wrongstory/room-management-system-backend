@@ -31,6 +31,9 @@ class DeveloperAuditEventType(str, Enum):
     CLEANING_OFFLINE_EVENT_RESOLVED = "cleaning.offline_event_resolved"
     CLEANING_SCHEDULED_EXPIRED = "cleaning.scheduled_expired"
     CLEANING_UPLOAD_ONLY_ALLOWED = "cleaning.upload_only_allowed"
+    INSPECTION_APPROVED = "inspection.approved"
+    INSPECTION_BOMB_DECIDED = "inspection.bomb_decided"
+    INSPECTION_REJECTED = "inspection.rejected"
     PHOTO_UPLOAD_ACCEPTED = "photo.upload_accepted"
     RESERVATION_CANCELLED = "reservation.cancelled"
     RESERVATION_CHANGED = "reservation.changed"
@@ -46,6 +49,8 @@ class DeveloperAuditEventType(str, Enum):
     ROOM_REPORT_ISSUE = "room.report_issue"
     ROOM_RESOLVE_ISSUE = "room.resolve_issue"
     ROOM_SET_CANDLE_COUNT = "room.set_candle_count"
+    SUBMISSION_BOMB_REPORTED = "submission.bomb_reported"
+    SUBMISSION_CREATED = "submission.created"
 
     def __str__(self) -> str:
         return str(self.value)
