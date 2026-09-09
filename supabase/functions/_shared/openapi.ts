@@ -3058,6 +3058,7 @@ export const openApiDocument = {
               "GOOGLE_DRIVE_CLIENT_SECRET",
               "GOOGLE_DRIVE_REFRESH_TOKEN",
               "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+              "PHOTO_PURGE_INVOKE_SECRET",
             ],
             properties: Object.fromEntries(
               [
@@ -3073,6 +3074,7 @@ export const openApiDocument = {
                 "GOOGLE_DRIVE_CLIENT_SECRET",
                 "GOOGLE_DRIVE_REFRESH_TOKEN",
                 "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+                "PHOTO_PURGE_INVOKE_SECRET",
               ].map((name) => [
                 name,
                 {
@@ -3100,6 +3102,7 @@ export const openApiDocument = {
           "rlsValid",
           "criticalRpcs",
           "rowCounts",
+          "photoPurge",
           "environment",
           "projectRef",
           "checkedAt",
@@ -3143,6 +3146,50 @@ export const openApiDocument = {
                 description:
                   "append-only 감사 원장의 catalog 추정치. dashboard를 위해 전체 count scan을 하지 않습니다.",
               },
+            },
+          },
+          photoPurge: {
+            type: "object",
+            additionalProperties: false,
+            required: ["status", "lastHeartbeat", "backlog", "checkedAt"],
+            properties: {
+              status: {
+                type: "string",
+                enum: ["awaiting_first_run", "healthy", "degraded", "failed"],
+              },
+              lastHeartbeat: {
+                type: ["object", "null"],
+                additionalProperties: false,
+                properties: {
+                  status: {
+                    type: "string",
+                    enum: ["succeeded", "degraded", "failed"],
+                  },
+                  claimed: { type: "integer", minimum: 0, maximum: 10 },
+                  purged: { type: "integer", minimum: 0, maximum: 10 },
+                  retrying: { type: "integer", minimum: 0, maximum: 10 },
+                  blocked: { type: "integer", minimum: 0, maximum: 10 },
+                  acceptedClaimed: { type: "integer", minimum: 0, maximum: 10 },
+                  orphanClaimed: { type: "integer", minimum: 0, maximum: 10 },
+                  folderClaimed: { type: "integer", minimum: 0, maximum: 10 },
+                  errorCode: { type: ["string", "null"] },
+                  recordedAt: { type: "string", format: "date-time" },
+                },
+              },
+              backlog: {
+                type: "object",
+                additionalProperties: false,
+                required: ["acceptedDue", "orphanDue", "folderDue", "blocked"],
+                properties: Object.fromEntries(
+                  ["acceptedDue", "orphanDue", "folderDue", "blocked"].map((
+                    name,
+                  ) => [
+                    name,
+                    { type: "integer", minimum: 0, maximum: 1000 },
+                  ]),
+                ),
+              },
+              checkedAt: { type: "string", format: "date-time" },
             },
           },
           environment: {

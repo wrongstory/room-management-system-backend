@@ -73,6 +73,8 @@ insert into flow values('date_folder',public.reserve_photo_drive_folder(pg_temp.
 select is(public.reserve_photo_drive_folder(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'date','synthetic_root_84','synthetic_losing_date_84')->>'folderId','synthetic_date_folder_84','different date candidate replays immutable scope winner');
 insert into flow values('room_folder',public.reserve_photo_drive_folder(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'room','synthetic_root_84','synthetic_drive_folder_84'));
 select is(pg_temp.val('room_folder','parentFolderId'),'synthetic_date_folder_84','room folder is bound to the exact date winner');
+select is((select count(*) from private.photo_drive_folder_bindings where operation_id=pg_temp.val('operation','operationId')::uuid),1::bigint,'room reservation creates the durable operation-folder barrier before file identity');
+select is(private.maybe_retire_photo_folder((select id from private.photo_drive_folder_identities where provider_folder_id='synthetic_drive_folder_84'),clock_timestamp()),false,'reserved upload barrier prevents room-folder retirement before file identity');
 select is(public.reserve_photo_drive_folder(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'room','synthetic_root_84','synthetic_losing_room_84')->>'folderId','synthetic_drive_folder_84','different room candidate replays immutable scope winner');
 select is((select count(*) from private.photo_drive_folder_identities),2::bigint,'losing candidate IDs are never persisted');
 select throws_ok($$select public.reserve_photo_drive_folder(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'date','synthetic_other_root_84','synthetic_next_date_84')$$,
@@ -138,6 +140,7 @@ select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','0','e
 insert into flow values('unknown_admission',pg_temp.admit(20,2,'slot-2'));
 insert into flow values('unknown_operation',pg_temp.begin_upload('unknown_admission',20));
 select public.claim_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('unknown_operation','operationId')::uuid,repeat('c',64));
+select public.reserve_photo_drive_folder(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('unknown_operation','operationId')::uuid,1,repeat('c',64),'room','synthetic_root_84','synthetic_losing_unknown_room_84');
 select public.reserve_photo_provider_identity(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('unknown_operation','operationId')::uuid,1,repeat('c',64),'synthetic_drive_unknown_84','synthetic_drive_folder_84');
 update private.photo_upload_states set lease_expires_at=clock_timestamp()-interval '1 second',revision=revision+1 where operation_id=pg_temp.val('unknown_operation','operationId')::uuid;
 select throws_ok($$select public.get_photo_provider_context(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('unknown_operation','operationId')::uuid,1,repeat('c',64))$$,'40001','PHOTO_UPLOAD_FENCE_CONFLICT','post-expiry worker context cannot issue a new create');
@@ -148,6 +151,22 @@ select public.refresh_photo_storage_quota(clock_timestamp(),1100);
 select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','307200','new quota snapshot cannot absorb unknown object bytes');
 select public.record_admitted_photo_provider_success(pg_temp.val('unknown_operation','operationId')::uuid,2,repeat('d',64),'synthetic_drive_unknown_84',clock_timestamp());
 select is(public.get_photo_reconciliation_context(pg_temp.val('unknown_operation','operationId')::uuid,2,repeat('d',64))->>'compensationAllowed','true','known never-accepted retired object gets fenced cleanup context');
+savepoint orphan_eighth_failure;
+do $$ begin for i in 1..7 loop update private.photo_orphan_purge_jobs set status='retry',lease_version=lease_version+1,
+  next_attempt_at=clock_timestamp()-interval '1 second',lease_expires_at=clock_timestamp()-interval '1 second',revision=revision+1
+  where operation_id=pg_temp.val('unknown_operation','operationId')::uuid; end loop; end $$;
+insert into flow values('orphan_eighth_claim',public.claim_due_photo_orphan_purges(repeat('a',64),1));
+select is(public.settle_photo_orphan_purge(pg_temp.val('unknown_operation','operationId')::uuid,8,repeat('a',64),'retryable','PROVIDER_ERROR')->>'status','blocked','eighth orphan provider failure settles as blocked');
+rollback to orphan_eighth_failure;
+savepoint orphan_retry_exhausted;
+do $$ begin for i in 1..8 loop update private.photo_orphan_purge_jobs set status='retry',lease_version=lease_version+1,
+  next_attempt_at=clock_timestamp()-interval '1 second',lease_expires_at=clock_timestamp()-interval '1 second',revision=revision+1
+  where operation_id=pg_temp.val('unknown_operation','operationId')::uuid; end loop; end $$;
+insert into flow values('orphan_retry_blocked',public.claim_due_photo_orphan_purges(repeat('5',64),1));
+select is((select result->>'blocked' from flow where label='orphan_retry_blocked'),'1','retry-exhausted orphan claim reports its bounded blocked transition');
+select is((select jsonb_array_length(result->'items') from flow where label='orphan_retry_blocked'),0,'retry-exhausted orphan is not returned as provider work');
+select is((select status from private.photo_orphan_purge_jobs where operation_id=pg_temp.val('unknown_operation','operationId')::uuid),'blocked','retry-exhausted orphan becomes durable blocked');
+rollback to orphan_retry_exhausted;
 select public.settle_admitted_photo_compensation(pg_temp.val('unknown_operation','operationId')::uuid,2,repeat('d',64),'deleted');
 select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','0','confirmed compensation permits conservative reservation release');
 -- Actual #7B upload-only capability opens upload metadata only, never the original-photo read route.
@@ -201,6 +220,34 @@ select pg_temp.historical_photo(2,interval '7 days'-interval '2 seconds');
 select lives_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7202))$$,'legacy accepted photo is readable before exact seven-day boundary');
 select pg_sleep(2.1);
 select throws_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7202))$$,'42501','PHOTO_ACCESS_REQUIRED','fresh server clock revokes read as seven-day boundary is crossed');
+savepoint accepted_eighth_failure;
+do $$ begin for i in 1..7 loop update private.photo_purge_jobs set status='retry',lease_version=lease_version+1,
+  next_attempt_at=clock_timestamp()-interval '1 day',lease_expires_at=clock_timestamp()-interval '1 second',revision=revision+1
+  where object_id=pg_temp.pid(7102); end loop; end $$;
+insert into flow values('accepted_eighth_claim',public.claim_due_photo_purges(repeat('b',64),1));
+select is(public.settle_photo_purge(pg_temp.pid(7102),8,repeat('b',64),'retryable','PROVIDER_ERROR')->>'status','blocked','eighth accepted provider failure settles as blocked');
+rollback to accepted_eighth_failure;
+savepoint accepted_retry_exhausted;
+do $$ begin for i in 1..8 loop update private.photo_purge_jobs set status='retry',lease_version=lease_version+1,
+  next_attempt_at=clock_timestamp()-interval '1 day',lease_expires_at=clock_timestamp()-interval '1 second',revision=revision+1
+  where object_id=pg_temp.pid(7102); end loop; end $$;
+insert into flow values('accepted_retry_blocked',public.claim_due_photo_purges(repeat('4',64),1));
+select is((select result->>'blocked' from flow where label='accepted_retry_blocked'),'1','retry-exhausted accepted claim reports its bounded blocked transition');
+select is((select jsonb_array_length(result->'items') from flow where label='accepted_retry_blocked'),0,'retry-exhausted accepted photo is not returned as provider work');
+select is((select status from private.photo_purge_jobs where object_id=pg_temp.pid(7102)),'blocked','retry-exhausted accepted photo becomes durable blocked');
+select lives_ok($$select public.record_photo_purge_heartbeat('succeeded',0,0,0,0,0,0,0,null)$$,'a prior succeeded heartbeat can coexist with newly discovered blocked backlog');
+select is(public.get_developer_photo_purge_status(pg_temp.pid(4))->>'status','degraded','blocked backlog prevents a false-green developer status');
+rollback to accepted_retry_exhausted;
+insert into flow values('purge_claim',public.claim_due_photo_purges(repeat('9',64),1));
+select is((select result#>>'{items,0,objectId}' from flow where label='purge_claim'),pg_temp.pid(7101)::text,'oldest accepted object is claimed from the DB due clock');
+select is(public.get_photo_purge_context(pg_temp.pid(7101),1,repeat('9',64))->>'providerFileId','synthetic_historical_drive_1','fenced context exposes only the exact due provider identity');
+select is(public.settle_photo_purge(pg_temp.pid(7101),1,repeat('9',64),'not_found')->>'status','purged','provider 404 converges as logical purge');
+select is((select provider_locator from private.photo_provider_objects where id=pg_temp.pid(7101)),null,'accepted purge clears raw locator');
+select ok((select uploaded_at is not null and purge_after=uploaded_at+interval '168 hours' from private.photo_provider_objects where id=pg_temp.pid(7101)),'accepted purge preserves immutable upload and retention clocks');
+select is((select count(*) from private.photo_provider_identity_tombstones where object_id=pg_temp.pid(7101)),1::bigint,'accepted purge preserves a private locator digest tombstone');
+select is((select count(*) from private.photo_cleanup_events where object_id=pg_temp.pid(7101) and state='purged'),1::bigint,'callback replay emits one terminal cleanup event');
+select lives_ok($$select public.settle_photo_purge(pg_temp.pid(7101),1,repeat('9',64),'not_found')$$,'same fenced 404 callback replays without a second logical purge');
+select is((select count(*) from private.photo_cleanup_events where object_id=pg_temp.pid(7101) and state='purged'),1::bigint,'terminal callback replay remains exactly once');
 -- Historical 23:59 reservation -> 00:00 provider create, while the worker has a
 -- fresh claim now. Immutable rows are inserted once; no protected history is edited.
 do $$ declare midnight timestamptz:=date_trunc('day',clock_timestamp() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul';
@@ -218,7 +265,7 @@ begin
     values(pg_temp.pid(7301),pg_temp.pid(503),slot,pg_temp.pid(2),'reserved');
   insert into private.photo_upload_admission_bindings(admission_id,operation_id,bound_at) values(pg_temp.pid(7300),pg_temp.pid(7301),reserved);
   insert into private.photo_drive_identities(object_id,operation_id,provider_file_id,provider_folder_id,upload_date,room_number,reserved_at)
-    select pg_temp.pid(7302),pg_temp.pid(7301),'synthetic_midnight_file_84','synthetic_previous_day_folder_84',
+    select pg_temp.pid(7302),pg_temp.pid(7301),'synthetic_midnight_file_84','synthetic_previous_room_84',
       (reserved at time zone 'Asia/Seoul')::date,notified_room_number_snapshot,reserved from public.cleaning_assignments where id=pg_temp.pid(403);
 end; $$;
 select public.claim_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.pid(7301),repeat('c',64));
@@ -247,6 +294,38 @@ select is((select uploaded_at from private.photo_provider_objects where id=pg_te
 update private.photo_upload_states set lease_expires_at=clock_timestamp()-interval '1 second',revision=revision+1 where operation_id=pg_temp.pid(7301);
 select is(public.reconcile_admitted_photo_upload(pg_temp.pid(7301),repeat('d',64))->>'status','compensation_pending','known cross-day candidate follows fenced compensation only');
 select is(public.settle_admitted_photo_compensation(pg_temp.pid(7301),2,repeat('d',64),'deleted')->>'status','compensated','cross-day candidate can close without acceptance or folder move');
+select is((select status from private.photo_orphan_purge_jobs where operation_id=pg_temp.pid(7301)),'purged','never-accepted synchronous compensation converges into its separate durable ledger');
+select ok((select provider_locator is null and uploaded_at is not null from private.photo_provider_objects where operation_id=pg_temp.pid(7301)),'orphan compensation clears locator but preserves provider observation clock');
+select is((select count(*) from private.photo_folder_purge_jobs j join private.photo_drive_folder_identities f on f.id=j.folder_registry_id where f.scope_room_number<>''),1::bigint,'past room folder retires only after the operation becomes terminal');
+insert into flow values('room_purge_claim',public.claim_due_photo_folder_purges(repeat('8',64),1));
+select is(public.get_photo_folder_purge_context((select (result#>>'{items,0,folderRegistryId}')::uuid from flow where label='room_purge_claim'),1,repeat('8',64))->>'scope','room','room folder is prepared before its date parent');
+select is(public.settle_photo_folder_purge((select (result#>>'{items,0,folderRegistryId}')::uuid from flow where label='room_purge_claim'),1,repeat('8',64),'not_found')->>'status','purged','missing room folder is idempotent cleanup success');
+insert into flow values('date_purge_claim',public.claim_due_photo_folder_purges(repeat('6',64),1));
+select is(public.get_photo_folder_purge_context((select (result#>>'{items,0,folderRegistryId}')::uuid from flow where label='date_purge_claim'),1,repeat('6',64))->>'scope','date','date folder is claimable only after child room retirement');
+select is(public.settle_photo_folder_purge((select (result#>>'{items,0,folderRegistryId}')::uuid from flow where label='date_purge_claim'),1,repeat('6',64),'not_found')->>'status','purged','missing date folder is idempotent cleanup success');
+savepoint folder_eighth_failure;
+insert into private.photo_drive_folder_identities(id,upload_date,scope_room_number,provider_folder_id,parent_folder_id)
+  values(pg_temp.pid(7401),(clock_timestamp() at time zone 'Asia/Seoul')::date-42,'','synthetic_retry_date_85','synthetic_root_84');
+insert into private.photo_folder_purge_jobs(folder_registry_id,status,lease_version,next_attempt_at)
+  values(pg_temp.pid(7401),'retry',7,clock_timestamp()-interval '1 day');
+insert into flow values('folder_eighth_claim',public.claim_due_photo_folder_purges(repeat('c',64),1));
+select is(public.settle_photo_folder_purge(pg_temp.pid(7401),8,repeat('c',64),'retryable','PROVIDER_ERROR')->>'status','blocked','eighth folder provider failure settles as blocked');
+rollback to folder_eighth_failure;
+savepoint folder_retry_exhausted;
+insert into private.photo_drive_folder_identities(id,upload_date,scope_room_number,provider_folder_id,parent_folder_id)
+  values(pg_temp.pid(7401),(clock_timestamp() at time zone 'Asia/Seoul')::date-42,'','synthetic_retry_date_85','synthetic_root_84');
+insert into private.photo_folder_purge_jobs(folder_registry_id,status,lease_version,next_attempt_at)
+  values(pg_temp.pid(7401),'retry',8,clock_timestamp()-interval '1 day');
+insert into flow values('folder_retry_blocked',public.claim_due_photo_folder_purges(repeat('3',64),1));
+select is((select result->>'blocked' from flow where label='folder_retry_blocked'),'1','retry-exhausted folder claim reports its bounded blocked transition');
+select is((select jsonb_array_length(result->'items') from flow where label='folder_retry_blocked'),0,'retry-exhausted folder is not returned as provider work');
+select is((select status from private.photo_folder_purge_jobs where folder_registry_id=pg_temp.pid(7401)),'blocked','retry-exhausted folder becomes durable blocked');
+rollback to folder_retry_exhausted;
+select throws_ok($$select public.reserve_photo_drive_folder(pg_temp.pid(2),pg_temp.pid(902),pg_temp.pid(7301),2,repeat('d',64),'room','synthetic_root_84','synthetic_recreate_85')$$,
+  '55000','PHOTO_OPERATION_TERMINAL','terminal operation cannot reopen a retired folder scope');
+select lives_ok($$select public.record_photo_purge_heartbeat('succeeded',0,0,0,0,0,0,0,null)$$,'bounded worker heartbeat accepts aggregate-only status');
+select is(public.get_developer_photo_purge_status(pg_temp.pid(4))#>>'{backlog,blocked}','0','developer projection exposes bounded counts without locators');
+select ok(not public.get_developer_photo_purge_status(pg_temp.pid(4))::text like '%synthetic_%','developer purge status never exposes provider locators');
 select throws_ok($$update private.photo_drive_identities set provider_folder_id='synthetic_other_folder'$$,'55000','PHOTO_STORAGE_IMMUTABLE','reserved parent cannot silently change');
 select throws_ok($$update private.photo_drive_folder_identities set provider_folder_id='synthetic_overwrite_84'$$,'55000','PHOTO_STORAGE_IMMUTABLE','folder winner UPDATE is forbidden');
 select throws_ok($$delete from private.photo_drive_folder_identities$$,'55000','PHOTO_STORAGE_IMMUTABLE','folder winner DELETE is forbidden');
@@ -254,10 +333,14 @@ select throws_ok($$delete from private.photo_upload_admissions$$,'55000','PHOTO_
 select throws_ok($$update private.photo_upload_admission_bindings set bound_at=clock_timestamp()$$,'55000','PHOTO_STORAGE_IMMUTABLE','quota binding immutable');
 select ok(relrowsecurity,'RLS enabled '||relname) from pg_class where oid=any(array[
 'private.photo_storage_quota_snapshot'::regclass,'private.photo_upload_admissions'::regclass,'private.photo_upload_admission_bindings'::regclass,
-'private.photo_upload_admission_limits'::regclass,'private.photo_drive_identities'::regclass,'private.photo_drive_folder_identities'::regclass]);
+'private.photo_upload_admission_limits'::regclass,'private.photo_drive_identities'::regclass,'private.photo_drive_folder_identities'::regclass,
+'private.photo_purge_jobs'::regclass,'private.photo_orphan_purge_jobs'::regclass,'private.photo_folder_purge_jobs'::regclass,
+'private.photo_drive_folder_bindings'::regclass,'private.photo_cleanup_events'::regclass,'private.photo_provider_identity_tombstones'::regclass,
+'private.photo_quota_pending'::regclass,'private.photo_purge_heartbeat'::regclass]);
 select ok(not has_table_privilege(r,t,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),'no raw grant '||r||' '||t)
 from unnest(array['anon','authenticated','service_role'])r cross join unnest(array[
-'private.photo_storage_quota_snapshot','private.photo_upload_admissions','private.photo_upload_admission_bindings','private.photo_upload_admission_limits','private.photo_drive_identities','private.photo_drive_folder_identities'])t;
+'private.photo_storage_quota_snapshot','private.photo_upload_admissions','private.photo_upload_admission_bindings','private.photo_upload_admission_limits','private.photo_drive_identities','private.photo_drive_folder_identities',
+'private.photo_purge_jobs','private.photo_orphan_purge_jobs','private.photo_folder_purge_jobs','private.photo_drive_folder_bindings','private.photo_cleanup_events','private.photo_provider_identity_tombstones','private.photo_quota_pending','private.photo_purge_heartbeat'])t;
 create temp table new_functions(signature text);
 insert into new_functions values
 ('public.refresh_photo_storage_quota(timestamptz,bigint)'),
@@ -270,6 +353,14 @@ insert into new_functions values
 ('public.get_photo_reconciliation_context(uuid,integer,text)'),('public.authorize_photo_read(uuid,uuid,uuid)');
 insert into new_functions values('public.get_attempt_photo_slots(uuid,uuid,uuid)');
 insert into new_functions values('public.reserve_photo_drive_folder(uuid,uuid,uuid,integer,text,text,text,text)');
+insert into new_functions values
+('public.claim_due_photo_purges(text,integer)'),('public.get_photo_purge_context(uuid,integer,text)'),
+('public.settle_photo_purge(uuid,integer,text,text,text)'),('public.claim_due_photo_orphan_purges(text,integer)'),
+('public.get_photo_orphan_purge_context(uuid,integer,text)'),('public.settle_photo_orphan_purge(uuid,integer,text,text,text)'),
+('public.claim_due_photo_folder_purges(text,integer)'),('public.get_photo_folder_purge_context(uuid,integer,text)'),
+('public.settle_photo_folder_purge(uuid,integer,text,text,text)'),
+('public.record_photo_purge_heartbeat(text,integer,integer,integer,integer,integer,integer,integer,text)'),
+('public.get_developer_photo_purge_status(uuid)');
 select ok(not has_function_privilege(r,signature,'EXECUTE'),'no public/inherited EXECUTE '||r||' '||signature) from new_functions cross join unnest(array['anon','authenticated'])r;
 select ok(has_function_privilege('service_role',signature,'EXECUTE'),'narrow service RPC '||signature) from new_functions;
 set local role authenticated;

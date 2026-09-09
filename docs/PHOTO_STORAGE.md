@@ -1,9 +1,9 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **확정 제품 정책 / #83·#84 source/dev 완료·production 미승격, 실제 운영 Drive 미연결**
+> 상태: **확정 제품 정책 / #83·#84 source/dev 완료, #85 feature source 구현·production 미승격, 실제 운영 Drive 미연결**
 > 사용자가 확정한 계약은 Google Drive 전용·300KiB 이하·비공개 저장과 `uploaded_at + 7 days` 영구삭제다. 7일 보존에는 검수 상태, 분쟁, retention hold 또는 180일 보존 예외를 두지 않는다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-아래 압축·업로드·삭제 흐름과 용량 보호 기준은 구현 시 따라야 하는 운영 계약이다. #84의 Drive HTTP adapter와 업로드·열람 API는 source/dev 완료했지만, 운영 OAuth 설정·Google/hosted smoke와 #85의 7일 purge 운영 worker는 아직 미완료다.
+아래 압축·업로드·삭제 흐름과 용량 보호 기준은 구현 시 따라야 하는 운영 계약이다. #84의 Drive HTTP adapter와 업로드·열람 API는 source/dev 완료했고, #85의 7일 purge worker는 feature source와 로컬 검증까지만 완료했다. 운영 OAuth·Google/hosted smoke·주기 실행 활성화는 아직 미완료다.
 
 #83은 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)의 독립 QA·required CI·
 Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다.
@@ -11,7 +11,7 @@ Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합
 후속 [PR #88](https://github.com/wrongstory/room-management-system-backend/pull/88)의 #84 source도 독립 QA·required CI·source 승인 후
 `dev@520abe7b80501ed9a4573e2251b9b640476d87b5`에 병합됐다. 현재 개발 통합은 **32 migrations / 67 paths / 72 operations**로,
 사진 슬롯·업로드·작업 상태·원본 열람 4개 경로의 DB/RPC·Fastify·Edge source가 완료됐다. production 배포·현재 사용은 아직 ❌다.
-다음은 **#85 7일 purge → #31 전체 제출·검수**다.
+#85 feature source는 **33 migrations / 67 paths / 72 operations**이며 accepted 168시간 purge, never-accepted orphan 보상, 빈 room/date 폴더 retirement를 별도 server-only Function으로 구현한다. 독립 리뷰와 dev 병합 전이므로 다음 본선은 여전히 **#85 source gate 완료 → #31 전체 제출·검수**다.
 production은 기존 19 migrations / 39 paths / 43 operations를 유지하며 DB/Edge/Pages/Google 환경을 변경하지 않았다.
 상세 exact head·동일 tree·CI 재실행 및 source/dev 승인 증거는 [API 상태 정본의 #83/#84 gate](./API_STATUS_MATRIX.md)를 따른다.
 
@@ -64,9 +64,9 @@ gzip은 `scripts/photo-gzip.mjs`에서 optional header를 금지하고 mtime=0/O
 최신 source/NOTICE/checksum 포함 재현값은 **15,149,558 bytes(약14.45MiB)**다. `npm run edge:check`는 pinned `edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c`의 cwd `/workspace/supabase/functions`에서 `bundle --entrypoint api/index.ts --static api/assets/magick.wasm.gz --static api/assets/magick.NOTICE --output <검증된 .tmp 절대경로>/api.eszip --checksum sha256 --timeout 60`을 실행하고 보수적으로20,000,000 bytes 미만을 강제한다. config는 source `deno.json`을 사용하며 npm package 전체 WASM이나 runtime CDN을 묶지 않는다. `assets/*`는 금지하며 static은 gzip+NOTICE 두 파일만 허용한다. 임시 output은 성공/실패 모두 정확한 생성 디렉터리만 검증 후 정리한다. fmt 검사만 LF 임시사본을 사용하며 실제 source check/test/bundle은 원본을 사용한다.
 실제 local Edge runtime v1.74.3 oneshot worker(memory256MB/CPU2000ms)의 합성 cold-start는1280×960 JPEG207ms/51.9MB, WebP391ms/49.0MB, 2048×2048 JPEG345ms/66.4MB, WebP1016ms/79.8MB로 모두HTTP200/accepted, EarlyDrop, exceeded=false였다. 이는 실제 worker의 합성 검증이며 운영 Google/hosted smoke는 release 후 별도 gate다.
 4MP/4096px·native64MiB는 검증된 decoder 기술상한이지 확정 사진 제품 정책이 아니다. 실제 촬영 fixture/향후 dependency 변경도 동일 gate를 재검증한다.
-업로드 응답은 initial/retry 모두 `quotaWarning:boolean`만 노출한다. 장기 quota SUM 비용은 #85/hardening 비차단 후속이며 외부 사용량과의 원자적 보장을 주장하지 않는다.
+업로드 응답은 initial/retry 모두 `quotaWarning:boolean`만 노출한다. #85 feature는 장기 admission SUM 대신 bounded pending projection을 사용하지만, 외부 Gmail/Photos 사용량과의 원자적 보장을 주장하지 않는다.
 
-실제 운영 OAuth/Google 호출·배포·#85 purge schedule·#31 전체 제출/검수는 이번 작업에서 하지 않는다.
+실제 운영 OAuth/Google 호출·배포·#85 purge schedule 활성화·#31 전체 제출/검수는 이번 작업에서 하지 않는다.
 
 운영자는 developer `runtime-status.configuration`의 `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `GOOGLE_DRIVE_REFRESH_TOKEN` / `GOOGLE_DRIVE_ROOT_FOLDER_ID` 각각의 `configured:boolean`만 확인한다. 하나라도 false면 provider 준비 완료로 판단하지 않는다. true는 값 존재 여부일 뿐 Google 인증·권한·실제 업로드 검증을 대체하지 않는다. 값·길이·hash·전체 환경변수는 응답하지 않는다.
 
@@ -97,7 +97,7 @@ begin/claim/finalize/user 조회는 최신 role/status·Auth session·attempt ow
 `get_photo_upload`는 사용자 권한 기반 상태이며 `reconcile_photo_upload`는 worker의 내구성 확인·후보 retire command다.
 `settle_photo_compensation`은 검증된 worker의 deleted/not_found 결과만 기록한다. #83 자체에는 실제 DELETE 호출이 없었고,
 #84는 admission-bound wrapper와 Drive adapter를 통해 미수락 candidate의 fenced compensation만 구현했다.
-accepted 사진의 7일 purge 운영 worker는 #85의 미완료 범위이며 candidate 보상 삭제로 대체하지 않는다.
+#85 feature source의 accepted 7일 purge worker는 candidate 보상과 별도 원장·권한으로 구현한다. 아직 독립 리뷰·dev 병합·production 활성화 전이며, candidate 보상 삭제를 accepted 보존 만료로 간주하지 않는다.
 
 worker는 비밀 인증키가 아닌 서버 claim identity의 digest와 fence를 함께 전달한다. 유효 lease를 다른 claimant에게
 공유하지 않고, 같은 claim retry만 동일 expiry를 반환한다. 만료 뒤 새 fence는 이전 지연 callback을 거부한다.
@@ -107,7 +107,7 @@ lease 5분·최대 8회 claim이다. 이는 제품의 실행 2시간/증빙 24�
 
 `reserved`의 provider 결과가 unknown이면 `reconciliation_pending`이며 삭제 허가가 아니다.
 known object와 accepted 부재를 확인하고 finalize를 차단하는 전이를 commit한 `compensation_pending`만
-미수락 candidate 정리 대상이다. `accepted`는 영구 terminal이며 정당한 사진의 7일 purge는 #85가 별도로 수행한다.
+미수락 candidate 정리 대상이다. `accepted`는 영구 terminal이며 정당한 사진의 7일 purge는 #85의 별도 accepted 원장이 수행한다.
 소유권·사진 CAS 변경으로 finalize가 실패해도 provider 성공 기록과 identity를 보존하므로 다시 조회할 수 있다.
 
 실제 magic bytes·EXIF·MIME·SHA·provider 성공 검증은 #84의 책임이다. #83 service-only RPC 입력을

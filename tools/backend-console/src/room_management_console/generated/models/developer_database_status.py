@@ -11,6 +11,7 @@ from ..models.developer_database_status_migration_drift import DeveloperDatabase
 
 if TYPE_CHECKING:
     from ..models.developer_database_status_critical_rpcs import DeveloperDatabaseStatusCriticalRpcs
+    from ..models.developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
     from ..models.developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
 
 
@@ -30,6 +31,7 @@ class DeveloperDatabaseStatus:
         rls_valid (bool):
         critical_rpcs (DeveloperDatabaseStatusCriticalRpcs):
         row_counts (DeveloperDatabaseStatusRowCounts):
+        photo_purge (DeveloperDatabaseStatusPhotoPurge):
         environment (DeveloperDatabaseStatusEnvironment):
         project_ref (str):
         checked_at (datetime.datetime):
@@ -44,6 +46,7 @@ class DeveloperDatabaseStatus:
     rls_valid: bool
     critical_rpcs: DeveloperDatabaseStatusCriticalRpcs
     row_counts: DeveloperDatabaseStatusRowCounts
+    photo_purge: DeveloperDatabaseStatusPhotoPurge
     environment: DeveloperDatabaseStatusEnvironment
     project_ref: str
     checked_at: datetime.datetime
@@ -69,6 +72,8 @@ class DeveloperDatabaseStatus:
 
         row_counts = self.row_counts.to_dict()
 
+        photo_purge = self.photo_purge.to_dict()
+
         environment = self.environment.value
 
         project_ref = self.project_ref
@@ -88,6 +93,7 @@ class DeveloperDatabaseStatus:
                 "rlsValid": rls_valid,
                 "criticalRpcs": critical_rpcs,
                 "rowCounts": row_counts,
+                "photoPurge": photo_purge,
                 "environment": environment,
                 "projectRef": project_ref,
                 "checkedAt": checked_at,
@@ -101,6 +107,7 @@ class DeveloperDatabaseStatus:
         from ..models.developer_database_status_critical_rpcs import (
             DeveloperDatabaseStatusCriticalRpcs,
         )
+        from ..models.developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
         from ..models.developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
 
         d = dict(src_dict)
@@ -134,6 +141,8 @@ class DeveloperDatabaseStatus:
 
         row_counts = DeveloperDatabaseStatusRowCounts.from_dict(d.pop("rowCounts"))
 
+        photo_purge = DeveloperDatabaseStatusPhotoPurge.from_dict(d.pop("photoPurge"))
+
         environment = DeveloperDatabaseStatusEnvironment(d.pop("environment"))
 
         project_ref = d.pop("projectRef")
@@ -150,6 +159,7 @@ class DeveloperDatabaseStatus:
             rls_valid=rls_valid,
             critical_rpcs=critical_rpcs,
             row_counts=row_counts,
+            photo_purge=photo_purge,
             environment=environment,
             project_ref=project_ref,
             checked_at=checked_at,

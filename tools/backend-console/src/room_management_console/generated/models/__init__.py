@@ -26,6 +26,15 @@ from .developer_database_status import DeveloperDatabaseStatus
 from .developer_database_status_critical_rpcs import DeveloperDatabaseStatusCriticalRpcs
 from .developer_database_status_environment import DeveloperDatabaseStatusEnvironment
 from .developer_database_status_migration_drift import DeveloperDatabaseStatusMigrationDrift
+from .developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
+from .developer_database_status_photo_purge_backlog import DeveloperDatabaseStatusPhotoPurgeBacklog
+from .developer_database_status_photo_purge_last_heartbeat_type_0 import (
+    DeveloperDatabaseStatusPhotoPurgeLastHeartbeatType0,
+)
+from .developer_database_status_photo_purge_last_heartbeat_type_0_status import (
+    DeveloperDatabaseStatusPhotoPurgeLastHeartbeatType0Status,
+)
+from .developer_database_status_photo_purge_status import DeveloperDatabaseStatusPhotoPurgeStatus
 from .developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
 from .developer_diagnostics import DeveloperDiagnostics
 from .developer_diagnostics_checks_item import DeveloperDiagnosticsChecksItem
@@ -55,6 +64,9 @@ from .developer_runtime_status_configuration_googledriverefreshtoken import (
 )
 from .developer_runtime_status_configuration_googledriverootfolderid import (
     DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
+)
+from .developer_runtime_status_configuration_photopurgeinvokesecret import (
+    DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET,
 )
 from .developer_runtime_status_configuration_reservationguestnamepepper import (
     DeveloperRuntimeStatusConfigurationRESERVATIONGUESTNAMEPEPPER,
@@ -138,6 +150,11 @@ __all__ = (
     "DeveloperDatabaseStatusCriticalRpcs",
     "DeveloperDatabaseStatusEnvironment",
     "DeveloperDatabaseStatusMigrationDrift",
+    "DeveloperDatabaseStatusPhotoPurge",
+    "DeveloperDatabaseStatusPhotoPurgeBacklog",
+    "DeveloperDatabaseStatusPhotoPurgeLastHeartbeatType0",
+    "DeveloperDatabaseStatusPhotoPurgeLastHeartbeatType0Status",
+    "DeveloperDatabaseStatusPhotoPurgeStatus",
     "DeveloperDatabaseStatusRowCounts",
     "DeveloperDiagnostics",
     "DeveloperDiagnosticsChecksItem",
@@ -156,6 +173,7 @@ __all__ = (
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET",
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN",
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID",
+    "DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET",
     "DeveloperRuntimeStatusConfigurationRESERVATIONGUESTNAMEPEPPER",
     "DeveloperRuntimeStatusConfigurationRESERVATIONPIIKEYBASE64",
     "DeveloperRuntimeStatusConfigurationRESERVATIONPIIKEYRINGJSON",

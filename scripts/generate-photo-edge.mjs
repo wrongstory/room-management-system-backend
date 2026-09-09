@@ -17,7 +17,7 @@ function formatEdge(source) {
 }
 
 // 좁은 platform bridge: business/validator 원본은 src에 두며 별도 수작업 구현을 만들지 않는다.
-const files = ['photo-binary', 'google-drive', 'photo-service'];
+const files = ['photo-binary', 'google-drive', 'photo-service', 'photo-purge'];
 const check = process.argv.includes('--check');
 const assetsOnly = process.argv.includes('--assets-only');
 if (!assetsOnly) {

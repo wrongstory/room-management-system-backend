@@ -91,6 +91,7 @@ def runtime_response(
                         "GOOGLE_DRIVE_CLIENT_SECRET",
                         "GOOGLE_DRIVE_REFRESH_TOKEN",
                         "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+                        "PHOTO_PURGE_INVOKE_SECRET",
                     )
                 },
                 "checkedAt": "2026-08-31T00:00:00Z",

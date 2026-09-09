@@ -1,7 +1,7 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 
-export const expectedMigrationName = "photo_drive_upload_read";
+export const expectedMigrationName = "photo_purge_reconciliation";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -50,6 +50,7 @@ const secretConfigurationAllowlist = [
   "GOOGLE_DRIVE_CLIENT_SECRET",
   "GOOGLE_DRIVE_REFRESH_TOKEN",
   "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+  "PHOTO_PURGE_INVOKE_SECRET",
 ] as const;
 
 interface AuditRow {
@@ -189,13 +190,19 @@ export async function developerDatabaseStatus(
   actor: EdgeActor,
 ): Promise<Record<string, unknown>> {
   requireDeveloper(actor);
-  const database = await rpcJson(clients, "get_developer_database_status", {
-    p_actor_profile_id: actor.profileId,
-    p_expected_migration_name: expectedMigrationName,
-  });
+  const [database, photoPurge] = await Promise.all([
+    rpcJson(clients, "get_developer_database_status", {
+      p_actor_profile_id: actor.profileId,
+      p_expected_migration_name: expectedMigrationName,
+    }),
+    rpcJson(clients, "get_developer_photo_purge_status", {
+      p_actor_profile_id: actor.profileId,
+    }),
+  ]);
   const runtime = developerRuntimeStatus();
   return {
     ...database,
+    photoPurge,
     environment: runtime.environment,
     projectRef: runtime.projectRef,
   };

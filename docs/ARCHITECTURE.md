@@ -17,14 +17,16 @@ Fastify는 현재 개발 기준선이며 Edge PoC가 실패할 때의 rollback �
 
 ## 신뢰 경계
 
-### #84 사진 HTTP adapter 후보 — source 검증 중
+### #84/#85 사진 HTTP adapter와 보존 정리 worker — feature source 검증 중
 
 `src/modules/photos`의 순수 binary validator/Drive adapter/application service를 Fastify와 generated Deno bridge가 공유한다.
 인증→DB durable admission/quota→bounded raw body/실파일 검증→begin/claim→사전 provider identity 저장→외부 HTTP→provider 성공 기록→finalize 순서이며 외부 요청 중 DB transaction을 유지하지 않는다.
 #83 legacy primitive service-role grant는 #84 migration에서 회수하고 admitted wrapper만 HTTP 서비스 경계로 사용한다.
 slot/status metadata와 original content 권한은 분리한다. limited upload는 일반 active guard를 완화하지 않으며 content는 provider wait 이후에도 최신 권한을 재검증한다.
 decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생성 검증이며 runtime CDN fallback이 없다. actual local worker(memory256MB/CPU2초) 합성4MP JPEG/WebP gate는 통과했으며 운영 Google/hosted 검증은 release 후 별도다. ignored asset 재생성 때문에 배포 전 `npm ci`와 `npm run edge:check`가 모두 성공해야 한다. 실패/누락 시 deploy 금지다.
-상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [#84 상태 gate](./API_STATUS_MATRIX.md)를 따른다. 원격 Google·production·#85 purge·#31 제출 구현은 제외한다.
+상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [사진 상태 gate](./API_STATUS_MATRIX.md)를 따른다. #84 업로드·열람은 dev에 병합됐고, #85는 별도 `photo-purge` Function source와 append-only migration을 구현 중이다. 원격 Google·production·#31 제출 구현은 제외한다.
+
+#85 worker는 accepted 보존 만료, never-accepted orphan 보상, 확인된 빈 room/date 폴더를 서로 다른 durable 원장으로 처리한다. 한 실행의 세 단계 claim 합계는 blocked 전환을 포함해 10 이하이고 DB RPC·OAuth·Drive 호출·settle·heartbeat가 같은 45초 absolute deadline을 공유하며 Edge에서 sleep하지 않는다. provider DELETE는 settle/heartbeat 여유시간이 보장될 때만 시작하고, retry exhaustion으로 blocked가 생기면 heartbeat와 developer status를 degraded로 기록한다. provider `204/404`만 성공이고 retry는 DB `next_attempt_at`이 결정한다. 폴더 retirement는 operation→room-folder binding 및 upload state를 함께 잠가 reserve/provider-success/finalize와 경쟁해도 진행 중 업로드를 삭제하지 않는다. room 폴더를 먼저 정리하고 모든 child가 terminal인 경우에만 date 폴더를 정리한다. raw Drive locator는 terminal settle에서 지우고 private digest tombstone과 immutable cleanup event만 남긴다.
 
 ```mermaid
 flowchart LR

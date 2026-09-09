@@ -56,8 +56,20 @@ const actorActivityMigrationUrl = new URL(
   '../supabase/migrations/20260831124140_actor_activity_audit_contract.sql',
   import.meta.url
 );
+const photoPurgeMigrationUrl = new URL(
+  '../supabase/migrations/20260908195510_photo_purge_reconciliation.sql',
+  import.meta.url
+);
 
 describe('Supabase Edge runtime PoC contract', () => {
+  it('backfills existing Drive identities into the exact folder retirement barrier', async () => {
+    const migration = await readFile(photoPurgeMigrationUrl, 'utf8');
+    expect(migration).toContain('insert into private.photo_drive_folder_bindings(operation_id,folder_registry_id)');
+    expect(migration).toContain('on f.provider_folder_id=i.provider_folder_id');
+    expect(migration).toContain('and f.upload_date=i.upload_date');
+    expect(migration).toContain('and f.scope_room_number=i.room_number');
+    expect(migration).toContain("message='PHOTO_FOLDER_BINDING_BACKFILL_FAILED'");
+  });
   it('allows existing email accounts to sign in while public signup remains disabled', async () => {
     const config = await readFile(configUrl, 'utf8');
 
@@ -211,7 +223,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toContain(
-      'expectedMigrationName = "photo_drive_upload_read"'
+      'expectedMigrationName = "photo_purge_reconciliation"'
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
