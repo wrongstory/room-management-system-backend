@@ -85,7 +85,7 @@ Enum submission_status {
   rejected
 }
 
-Enum payroll_status {
+Enum payment_status {
   open
   paying
   check
@@ -889,7 +889,7 @@ Table public.payroll_cycles {
   id uuid [pk]
   maid_profile_id uuid [not null]
   week_start date [not null]
-  status payroll_status [not null]
+  status payment_status [not null]
   locked_amount int
   payment_started_by uuid
   payment_started_at timestamptz
@@ -927,12 +927,23 @@ Table public.payroll_items {
 Table public.payroll_events {
   id bigint [pk, increment]
   payroll_cycle_id uuid [not null]
-  event_type text [not null]
-  before_status payroll_status
-  after_status payroll_status [not null]
+  maid_profile_id uuid [not null]
+  event_type text [not null, note: 'Current #93 contract allows payment_started only']
+  before_status payment_status [not null, note: 'Current #93 contract requires open']
+  after_status payment_status [not null, note: 'Current #93 contract requires paying']
   actor_profile_id uuid [not null]
-  reason_code text
-  created_at timestamptz [not null]
+  cycle_version bigint [not null, note: 'Positive version captured after OPEN -> PAYING']
+  locked_amount int [not null, note: 'Positive immutable amount captured by the event']
+  occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  Indexes {
+    (payroll_cycle_id, cycle_version, event_type) [unique]
+    (maid_profile_id, occurred_at, id)
+    (actor_profile_id, occurred_at)
+  }
+
+  Note: '#93 implemented append-only payment-start ledger. UPDATE/DELETE is forbidden; the composite payroll cycle/maid relationship and actor identity are enforced by FK.'
 }
 
 Table public.payroll_adjustments {
@@ -942,6 +953,8 @@ Table public.payroll_adjustments {
   reason_code text [not null]
   created_by uuid [not null]
   created_at timestamptz [not null]
+
+  Note: 'Future design draft only. No payroll_adjustments table or adjustment command is implemented by #93.'
 }
 
 Table public.notifications {
@@ -1332,6 +1345,7 @@ Ref: public.payroll_items.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_items.earning_id > public.earnings.id
 Ref: public.payroll_items.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_events.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.actor_profile_id > public.profiles.id
 Ref: public.payroll_adjustments.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_adjustments.created_by > public.profiles.id

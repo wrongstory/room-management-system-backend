@@ -5,6 +5,7 @@ Python 3.12+ 데스크톱 도구다. Phase A에는 DB 연결, SQL 실행기, ser
 
 #84 사진 업로드/슬롯/원본4 operations는 business maid/admin 권한이며 developer 콘솔에 추가하지 않는다.
 filtered OpenAPI와 생성 client는 auth/accounts/developer16 operations만 유지한다. 사진 업로드 감사는 기존 `photo.upload_accepted` safe summary로 확인하며 Drive ID/OAuth/원본 내용을 노출하지 않는다.
+주급 API도 business admin/maid 업무 capability이므로 이 developer 콘솔의 filtered client와 GUI에는 넣지 않는다. 대신 전체 source OpenAPI를 임시 디렉터리에 Python client로 생성·컴파일하는 CI smoke로 `GET /v1/payroll`과 `POST /v1/payroll/start`의 codegen 호환성을 검증하며, 생성 결과는 운영 콘솔 artifact나 Git에 포함하지 않는다.
 runtime-status는 Drive CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN/ROOT_FOLDER_ID와 PHOTO_PURGE_INVOKE_SECRET의 configured boolean만 표시한다. database-status의 photoPurge는 최대 1,000건으로 제한한 backlog와 마지막 heartbeat의 안전한 집계만 제공한다. false나 누락 heartbeat가 있으면 운영 provider 준비 미완료이며, 모두 정상이어도 실제 Google 인증/hosted purge smoke 통과를 의미하지 않는다. 자격증명·Drive locator·claim digest를 입력하거나 출력하는 콘솔 기능은 없다.
 
 자세한 설치·운영·분실 대응 절차는 저장소의

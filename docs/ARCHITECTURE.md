@@ -36,6 +36,27 @@ decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생�
 
 승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다.
 
+### #93 주급 주차 조회·PAYING 시작 — feature source gate 진행 중
+
+Fastify와 Edge는 동일한 app-owned `list_payroll_cycles` / `start_payroll_cycle` RPC만 호출한다.
+GET은 종료된 KST 주차에서 active admin 전체·선택 조회와 active maid 본인 조회만 허용하며,
+cycle이 없으면 쓰기 없이 `cycleId=null`, `version=0` conceptual OPEN을 반환한다. POST는 active
+business admin만 실행하고 client amount/earning ID를 받지 않으며 expected version CAS와
+`(actor, payroll.start, Idempotency-Key, canonical request hash)` receipt를 사용한다.
+
+OPEN→PAYING은 확정 positive earning item, locked amount, immutable payroll event, domain audit,
+maid notification/outbox를 짧은 transaction 하나로 기록한다. 실제 송금 provider는 호출하지 않는다.
+PAYING 이후 늦게 확정된 earning은 locked snapshot에 섞지 않고 별도 late projection으로 표시한다.
+Edge 권한 거부는 raw route 대신 `edge.authorization.payroll` bounded source로 집계한다. Fastify
+rollback adapter는 같은 role/error 계약을 유지하지만 기존 전역 activity persistence 기반이 없으므로
+payroll만 별도 영속 로그를 만들지 않는다.
+
+Python developer 운영 콘솔의 auth/accounts/developer 16-operation allowlist는 유지한다. 대신 전체
+source OpenAPI를 CI 임시 디렉터리에 Python client로 생성·컴파일해 payroll codegen 호환성을 검사하고
+결과를 콘솔 artifact나 Git에 포함하지 않는다. feature 후보는 35 migrations / 76 paths / 82 operations이며
+독립 QA와 `dev` 병합 전에는 source/dev 완료로 표시하지 않는다. production 19 / 39 / 43과 Pages는
+변경하지 않는다.
+
 ```mermaid
 flowchart LR
   UI[개발자·관리자·메이드 PWA] -->|Bearer access token| API[Fastify 또는 Edge API adapter]

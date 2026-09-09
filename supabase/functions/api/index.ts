@@ -71,6 +71,7 @@ import {
 } from "../_shared/activity-contract.ts";
 import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
+import { listPayroll, startPayroll } from "../_shared/payroll-api.ts";
 import {
   createSubmission,
   decideBombRoom,
@@ -794,6 +795,21 @@ export async function handleApiRequest(
             cleaningTargetId,
           ),
         },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/payroll") {
+      return jsonResponse(
+        { payroll: await listPayroll(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && path === "/v1/payroll/start") {
+      return jsonResponse(
+        { payroll: await startPayroll(request, clients, actor) },
         200,
         corsHeaders,
       );

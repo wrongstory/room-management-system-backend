@@ -28,6 +28,8 @@ import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, web
 import { photoError } from './modules/photos/photo-service.js';
 import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
 import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
+import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
+import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -35,6 +37,7 @@ export interface AppServices {
   availability: AvailabilityService;
   rooms: RoomService;
   reservations: ReservationService;
+  payroll: PayrollService;
 }
 
 export interface BuildAppOptions {
@@ -79,7 +82,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         options.env.RESERVATION_PII_KEY_VERSION,
         options.env.RESERVATION_GUEST_NAME_PEPPER,
         JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
-      )
+      ),
+      payroll: new SupabasePayrollService(clients)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -153,6 +157,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
   await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
+  await app.register(createPayrollRoutes(services.payroll), { prefix: '/v1/payroll' });
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
   await app.register(createPhotoRoutes(photoServices));
   if (submissionService) {

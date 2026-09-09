@@ -390,6 +390,11 @@ export const openApiDocument = {
       description:
         "비밀번호 변경을 완료한 active business admin 전용 예약·점유·수동 청소 요청 API입니다. 고객명은 목록에 포함하지 않고 권한을 재검증한 단건 상세에서만 복호화합니다.",
     },
+    {
+      name: "Payroll",
+      description:
+        "종료된 KST 주차의 확정 수익만 조회하고 active business admin이 PAYING snapshot을 잠그는 API입니다. 실제 외부 송금 성공을 의미하지 않습니다.",
+    },
   ],
   paths: {
     "/v1/attempts/{attemptId}/bomb-room-reports": {
@@ -2010,6 +2015,85 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/payroll": {
+      get: {
+        tags: ["Payroll"],
+        operationId: "listPayrollCycles",
+        summary: "종료 주차의 메이드별 주급 조회",
+        description:
+          "비밀번호 변경을 완료한 active admin은 전체 또는 선택 메이드를, active maid는 본인만 조회합니다. cycle이 아직 없으면 쓰기 없이 cycleId=null, version=0인 conceptual OPEN을 반환합니다. totalAmount는 현재 OPEN에 편입 가능한 확정 수익이며 검수 대기 예상액을 포함하지 않습니다. PAYING 이후 늦게 확정된 수익은 lateEarnings로 분리하며 lockedAmount를 바꾸지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [{
+          name: "weekStart",
+          in: "query",
+          required: true,
+          schema: { type: "string", format: "date" },
+          description: "KST 기준 월요일인 종료 주차 시작일",
+        }, {
+          name: "maidProfileId",
+          in: "query",
+          required: false,
+          schema: { type: "string", format: "uuid" },
+          description: "admin 선택 필터. maid는 본인 ID만 허용됩니다.",
+        }],
+        responses: {
+          "200": {
+            description: "확정 earning만 포함한 주급 projection",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/PayrollListEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/start": {
+      post: {
+        tags: ["Payroll"],
+        operationId: "startPayrollCycle",
+        summary: "OPEN 주급을 PAYING snapshot으로 잠금",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 종료된 주차의 아직 claim되지 않은 positive earning을 서버가 계산해 원자적으로 잠급니다. 응답은 지급 처리 시작 상태일 뿐 실제 송금 성공이 아닙니다. amount나 earning ID는 클라이언트가 입력할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayrollStartRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "원자적으로 잠긴 PAYING snapshot 또는 동일 command replay",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/PayrollCycleEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/reservations": {
       get: {
         tags: ["Reservations"],
@@ -3168,6 +3252,14 @@ export const openApiDocument = {
           "RESERVATION_PII_KEY_INVALID",
           "RESERVATION_PII_KEYRING_INVALID",
           "RESERVATION_PII_DECRYPT_FAILED",
+          "PAYROLL_ACCESS_REQUIRED",
+          "PAYROLL_MAID_NOT_FOUND",
+          "PAYROLL_WEEK_MUST_START_MONDAY",
+          "INVALID_EXPECTED_VERSION",
+          "PAYROLL_WEEK_NOT_CLOSED",
+          "PAYROLL_CYCLE_NOT_OPEN",
+          "NO_PAYROLL_AMOUNT",
+          "PAYROLL_COMMAND_FAILED",
           "ROOM_NOT_FOUND",
           "ROOM_OPERATION_NOT_FOUND",
           "SENSITIVE_TEXT_NOT_ALLOWED",
@@ -5551,6 +5643,126 @@ export const openApiDocument = {
           roomId: { type: "string", format: "uuid" },
           roomStateVersion: { type: "integer", minimum: 1 },
           recordedAt: { type: "string", format: "date-time" },
+        },
+      },
+      PayrollStatus: {
+        type: "string",
+        enum: ["open", "paying", "check", "paid"],
+        description: "이번 Issue는 OPEN 조회와 OPEN→PAYING 잠금만 수행합니다.",
+      },
+      PayrollItem: {
+        type: "object",
+        additionalProperties: false,
+        required: ["earningId", "earnedOn", "amount", "alreadyClaimed"],
+        properties: {
+          earningId: { type: "string", format: "uuid" },
+          earnedOn: {
+            type: "string",
+            format: "date",
+            description: "현장 완료 KST 날짜",
+          },
+          amount: { type: "integer", minimum: 1 },
+          alreadyClaimed: {
+            type: "boolean",
+            description: "이미 이 OPEN cycle item에 편입된 확정 수익 여부",
+          },
+        },
+      },
+      PayrollLateEarning: {
+        type: "object",
+        additionalProperties: false,
+        required: ["earningId", "earnedOn", "amount"],
+        properties: {
+          earningId: { type: "string", format: "uuid" },
+          earnedOn: { type: "string", format: "date" },
+          amount: { type: "integer", minimum: 1 },
+        },
+        description:
+          "PAYING/CHECK/PAID snapshot 잠금 뒤 확정되어 현재 lockedAmount에는 포함되지 않은 수익입니다.",
+      },
+      PayrollCycle: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cycleId",
+          "maidProfileId",
+          "weekStart",
+          "status",
+          "version",
+          "lockedAmount",
+          "paymentStartedAt",
+          "itemCount",
+          "totalAmount",
+          "items",
+          "lateEarningCount",
+          "lateEarningAmount",
+          "lateEarnings",
+        ],
+        properties: {
+          cycleId: { type: ["string", "null"], format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          weekStart: { type: "string", format: "date" },
+          status: { $ref: "#/components/schemas/PayrollStatus" },
+          version: { type: "integer", minimum: 0 },
+          lockedAmount: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description:
+              "PAYING 시작 시 고정된 금액. late earnings를 포함해 다시 계산하지 않습니다.",
+          },
+          paymentStartedAt: { type: ["string", "null"], format: "date-time" },
+          itemCount: { type: "integer", minimum: 0 },
+          totalAmount: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "OPEN이면 현재 편입 가능한 확정 수익 합계, PAYING 이후에는 lockedAmount 합계",
+          },
+          items: {
+            type: "array",
+            items: { $ref: "#/components/schemas/PayrollItem" },
+          },
+          lateEarningCount: { type: "integer", minimum: 0 },
+          lateEarningAmount: {
+            type: "integer",
+            minimum: 0,
+            description: "현재 lockedAmount와 분리된 늦은 확정 수익 합계",
+          },
+          lateEarnings: {
+            type: "array",
+            items: { $ref: "#/components/schemas/PayrollLateEarning" },
+          },
+        },
+      },
+      PayrollStartRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["maidProfileId", "weekStart", "expectedVersion"],
+        properties: {
+          maidProfileId: { type: "string", format: "uuid" },
+          weekStart: { type: "string", format: "date" },
+          expectedVersion: { type: "integer", minimum: 0 },
+        },
+        description:
+          "금액과 earning ID는 서버가 계산하므로 입력할 수 없습니다.",
+      },
+      PayrollListEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["payroll"],
+        properties: {
+          payroll: {
+            type: "array",
+            items: { $ref: "#/components/schemas/PayrollCycle" },
+          },
+        },
+      },
+      PayrollCycleEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["payroll"],
+        properties: {
+          payroll: { $ref: "#/components/schemas/PayrollCycle" },
         },
       },
     },
