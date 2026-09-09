@@ -101,7 +101,8 @@ select public.create_reservation(pg_temp.pid(1),reservation_id,room_id,
 update public.reservations set actual_check_in_at=check_in_at
 where id=(select reservation_id from stayover_review_case);
 select public.create_manual_cleaning_request(pg_temp.pid(1),target_id,room_id,reservation_id,'stayover',
-  (clock_timestamp() at time zone 'Asia/Seoul')::date,date_trunc('minute',clock_timestamp())-interval '2 hours',
+  ((date_trunc('minute',clock_timestamp())-interval '2 hours') at time zone 'Asia/Seoul')::date,
+  date_trunc('minute',clock_timestamp())-interval '2 hours',
   date_trunc('minute',clock_timestamp())+interval '6 hours',
   (select state_version from public.rooms room where room.id=stayover_review_case.room_id),'STAYOVER_TEST',
   'submission-stayover-target',repeat('f',64)) from stayover_review_case;
