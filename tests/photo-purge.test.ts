@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { handlePhotoPurge, PHOTO_PURGE_RUN_BUDGET_MS, PhotoPurgeProviderError, PhotoPurgeWorker, type PurgeProvider, type PurgeRpc } from '../src/modules/photos/photo-purge.js';
+import { handlePhotoPurge, PHOTO_PURGE_BATCH_LIMIT, PHOTO_PURGE_RUN_BUDGET_MS, PhotoPurgeProviderError, PhotoPurgeWorker, type PurgeProvider, type PurgeRpc } from '../src/modules/photos/photo-purge.js';
 
 const objectId = '00000000-0000-4000-8000-000000000001';
 const providerId = 'synthetic_private_file';
@@ -41,6 +41,38 @@ describe('photo retention worker (no real Google calls)', () => {
     expect(result).toMatchObject({ claimed: 10, acceptedClaimed: 8, orphanClaimed: 2, folderClaimed: 0 });
     expect(limits).toEqual([10, 2]);
     expect(calls).not.toContain('claim_due_photo_folder_purges');
+  });
+  it('does not double-charge settle-time blocked items against later claim budgets', async () => {
+    const limits: number[] = [];
+    const acceptedIds = [
+      '00000000-0000-4000-8000-000000000011',
+      '00000000-0000-4000-8000-000000000012',
+    ];
+    const folderIds = Array.from({ length: 7 }, (_, index) => `00000000-0000-4000-8000-${String(index + 21).padStart(12, '0')}`);
+    const db: PurgeRpc = { rpc: async (name, args) => {
+      if (name.startsWith('claim_due_')) limits.push(args.p_limit as number);
+      if (name === 'claim_due_photo_purges') return { data: { items: acceptedIds.map(objectId => ({ objectId, leaseVersion: 8 })), blocked: 0 }, error: null };
+      if (name === 'claim_due_photo_orphan_purges') return { data: { items: [], blocked: 1 }, error: null };
+      if (name === 'claim_due_photo_folder_purges') return { data: { items: folderIds.map(folderRegistryId => ({ folderRegistryId, leaseVersion: 1 })), blocked: 0 }, error: null };
+      if (name === 'get_photo_purge_context') return { data: { objectId: args.p_object_id, providerFileId: providerId }, error: null };
+      if (name === 'get_photo_folder_purge_context') return { data: { providerFolderId: 'synthetic_room_folder', parentFolderId: 'synthetic_date_folder' }, error: null };
+      if (name === 'settle_photo_purge') return { data: { status: 'blocked' }, error: null };
+      if (name === 'settle_photo_folder_purge') return { data: { status: 'purged' }, error: null };
+      return { data: {}, error: null };
+    } };
+    let acceptedFailures = 0;
+    const provider: PurgeProvider = {
+      purgeRemove: async fileId => {
+        if (fileId === providerId && acceptedFailures++ < acceptedIds.length) throw new PhotoPurgeProviderError('PROVIDER_ERROR');
+        return 'deleted';
+      },
+      purgeExists: async () => true,
+      purgeEmptyFolder: async () => 'empty',
+    };
+    const result = await new PhotoPurgeWorker(db, provider).run();
+    expect(limits).toEqual([10, 8, 7]);
+    expect(result).toMatchObject({ claimed: 9, acceptedClaimed: 2, orphanClaimed: 0, folderClaimed: 7, blocked: 3 });
+    expect(result.claimed + 1).toBe(PHOTO_PURGE_BATCH_LIMIT);
   });
   it('verifies an empty folder before deleting and settles non-empty as a safe retry', async () => {
     const folderId = '00000000-0000-4000-8000-000000000099', settled: Record<string, unknown>[] = [];

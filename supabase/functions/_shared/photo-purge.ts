@@ -379,6 +379,7 @@ export class PhotoPurgeWorker {
       orphanClaimed: 0,
       folderClaimed: 0,
     };
+    let claimTimeBlocked = 0;
     try {
       const accepted = await this.#claim(
         "claim_due_photo_purges",
@@ -388,6 +389,7 @@ export class PhotoPurgeWorker {
       );
       result.acceptedClaimed = accepted.items.length;
       result.claimed += accepted.items.length;
+      claimTimeBlocked += accepted.blocked;
       result.blocked += accepted.blocked;
       await this.#files(
         accepted.items,
@@ -401,11 +403,12 @@ export class PhotoPurgeWorker {
         const orphan = await this.#claim(
           "claim_due_photo_orphan_purges",
           claim,
-          PHOTO_PURGE_BATCH_LIMIT - result.claimed - result.blocked,
+          PHOTO_PURGE_BATCH_LIMIT - result.claimed - claimTimeBlocked,
           providerDeadline,
         );
         result.orphanClaimed = orphan.items.length;
         result.claimed += orphan.items.length;
+        claimTimeBlocked += orphan.blocked;
         result.blocked += orphan.blocked;
         await this.#files(
           orphan.items,
@@ -420,11 +423,12 @@ export class PhotoPurgeWorker {
         const folders = await this.#claim(
           "claim_due_photo_folder_purges",
           claim,
-          PHOTO_PURGE_BATCH_LIMIT - result.claimed - result.blocked,
+          PHOTO_PURGE_BATCH_LIMIT - result.claimed - claimTimeBlocked,
           providerDeadline,
         );
         result.folderClaimed = folders.items.length;
         result.claimed += folders.items.length;
+        claimTimeBlocked += folders.blocked;
         result.blocked += folders.blocked;
         await this.#folders(
           folders.items,

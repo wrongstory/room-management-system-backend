@@ -138,18 +138,22 @@ export class PhotoPurgeWorker {
     const providerDeadline = settleDeadline - PHOTO_PURGE_SETTLE_RESERVE_MS;
     const claim = await newPurgeClaim();
     const result: PurgeRunResult = { claimed: 0, deleted: 0, notFound: 0, retryable: 0, deferred: 0, blocked: 0, acceptedClaimed: 0, orphanClaimed: 0, folderClaimed: 0 };
+    let claimTimeBlocked = 0;
     try {
       const accepted = await this.#claim('claim_due_photo_purges', claim, PHOTO_PURGE_BATCH_LIMIT, providerDeadline);
-      result.acceptedClaimed = accepted.items.length; result.claimed += accepted.items.length; result.blocked += accepted.blocked;
+      result.acceptedClaimed = accepted.items.length; result.claimed += accepted.items.length;
+      claimTimeBlocked += accepted.blocked; result.blocked += accepted.blocked;
       await this.#files(accepted.items, claim, 'accepted', providerDeadline, settleDeadline, result);
       if (this.#canStart(providerDeadline)) {
-        const orphan = await this.#claim('claim_due_photo_orphan_purges', claim, PHOTO_PURGE_BATCH_LIMIT - result.claimed - result.blocked, providerDeadline);
-        result.orphanClaimed = orphan.items.length; result.claimed += orphan.items.length; result.blocked += orphan.blocked;
+        const orphan = await this.#claim('claim_due_photo_orphan_purges', claim, PHOTO_PURGE_BATCH_LIMIT - result.claimed - claimTimeBlocked, providerDeadline);
+        result.orphanClaimed = orphan.items.length; result.claimed += orphan.items.length;
+        claimTimeBlocked += orphan.blocked; result.blocked += orphan.blocked;
         await this.#files(orphan.items, claim, 'orphan', providerDeadline, settleDeadline, result);
       } else result.deferred++;
       if (this.#canStart(providerDeadline)) {
-        const folders = await this.#claim('claim_due_photo_folder_purges', claim, PHOTO_PURGE_BATCH_LIMIT - result.claimed - result.blocked, providerDeadline);
-        result.folderClaimed = folders.items.length; result.claimed += folders.items.length; result.blocked += folders.blocked;
+        const folders = await this.#claim('claim_due_photo_folder_purges', claim, PHOTO_PURGE_BATCH_LIMIT - result.claimed - claimTimeBlocked, providerDeadline);
+        result.folderClaimed = folders.items.length; result.claimed += folders.items.length;
+        claimTimeBlocked += folders.blocked; result.blocked += folders.blocked;
         await this.#folders(folders.items, claim, providerDeadline, settleDeadline, result);
       } else result.deferred++;
       await this.rpc('record_photo_purge_heartbeat', {
