@@ -67,7 +67,8 @@ begin
   select * into v_room
   from public.rooms
   order by room_number
-  offset n limit 1;
+  offset mod(n, greatest((select count(*)::integer from public.rooms), 1))
+  limit 1;
 
   insert into public.cleaning_targets(
     id, room_id, cleaning_kind, source, source_key,
@@ -287,6 +288,133 @@ select ok(
   'late confirmed earning after PAYING is visible separately without mutating locked total'
 );
 
+-- #96 large-fixture regression: exact totals remain independent from bounded
+-- previews, start/replay never aggregate an unbounded receipt, and keyset
+-- traversal returns every entry exactly once.
+select pg_temp.add_earning(
+  100 + n,
+  3,
+  pg_temp.week_start(-4) + (n % 7),
+  1000
+)
+from generate_series(0, 119) n;
+
+insert into payroll_results values (
+  'large-first', public.start_payroll_cycle(
+    pg_temp.pid(8), pg_temp.pid(3), pg_temp.week_start(-4), 0,
+    'payroll-large-start', repeat('9',64)
+  )
+), (
+  'large-replay', public.start_payroll_cycle(
+    pg_temp.pid(8), pg_temp.pid(3), pg_temp.week_start(-4), 0,
+    'payroll-large-start', repeat('9',64)
+  )
+);
+select ok(
+  (select (value->>'itemCount')::integer = 120
+      and (value->>'totalAmount')::integer = 120000
+      and jsonb_array_length(value->'items') = 10
+      and (value->>'itemsHasMore')::boolean
+   from payroll_results where label='large-first'),
+  'large start returns exact totals with a ten-item bounded preview'
+);
+select is(
+  (select value from payroll_results where label='large-replay'),
+  (select value from payroll_results where label='large-first'),
+  'large replay returns the same bounded logical result without rebuilding an unbounded aggregate'
+);
+select ok(
+  (select pg_column_size(value) < 16384
+   from payroll_results where label='large-first'),
+  'large start receipt remains below sixteen KiB instead of scaling with earning count'
+);
+
+create temporary table large_entry_pages(page integer primary key, value jsonb);
+insert into large_entry_pages values (
+  1, public.list_payroll_entries_page(
+    pg_temp.pid(8), pg_temp.week_start(-4), pg_temp.pid(3),
+    'items', null, null, 50
+  )
+);
+insert into large_entry_pages
+select 2, public.list_payroll_entries_page(
+  pg_temp.pid(8), pg_temp.week_start(-4), pg_temp.pid(3), 'items',
+  (value->>'lastEarnedOn')::date, (value->>'lastEarningId')::uuid, 50
+)
+from large_entry_pages where page=1;
+insert into large_entry_pages
+select 3, public.list_payroll_entries_page(
+  pg_temp.pid(8), pg_temp.week_start(-4), pg_temp.pid(3), 'items',
+  (value->>'lastEarnedOn')::date, (value->>'lastEarningId')::uuid, 50
+)
+from large_entry_pages where page=2;
+select is(
+  (select string_agg(jsonb_array_length(value->'entries')::text, ',' order by page)
+   from large_entry_pages),
+  '50,50,20',
+  'entry keyset pages enforce the DB max and finish without OFFSET'
+);
+select is(
+  (select count(distinct entry->>'earningId')
+   from large_entry_pages page
+   cross join lateral jsonb_array_elements(page.value->'entries') entry),
+  120::bigint,
+  'entry keyset traversal has no duplicate or omitted earning'
+);
+select throws_ok(
+  $$select public.list_payroll_entries_page(pg_temp.pid(8), pg_temp.week_start(-4), pg_temp.pid(3), 'items', null, null, 51)$$,
+  '22023', 'PAYROLL_PAGE_LIMIT_INVALID',
+  'database independently rejects entry page limits above fifty'
+);
+select throws_ok(
+  $$select public.list_payroll_entries_page(pg_temp.pid(8), pg_temp.week_start(-4), pg_temp.pid(3), 'items', pg_temp.week_start(-4), null, 25)$$,
+  '22023', 'PAYROLL_CURSOR_INVALID',
+  'database rejects partial entry keysets'
+);
+
+insert into auth.users(id)
+select pg_temp.pid(120 + n) from generate_series(0, 11) n;
+insert into public.profiles(
+  id, auth_user_id, display_name, display_name_normalized,
+  login_id, login_id_normalized, login_sequence,
+  role, status, must_change_password
+)
+select
+  pg_temp.pid(20 + n), pg_temp.pid(120 + n), 'page-maid-' || n,
+  'page-maid-' || n, 'page-maid-' || n, 'page-maid-' || n, 0,
+  'maid'::public.app_role, 'active'::public.account_status, false
+from generate_series(0, 11) n;
+
+create temporary table large_cycle_pages(page integer primary key, value jsonb);
+insert into large_cycle_pages values (
+  1, public.list_payroll_cycles_page(
+    pg_temp.pid(8), pg_temp.week_start(-5), null, null, 10
+  )
+);
+insert into large_cycle_pages
+select 2, public.list_payroll_cycles_page(
+  pg_temp.pid(8), pg_temp.week_start(-5), null,
+  (value->>'lastMaidProfileId')::uuid, 10
+)
+from large_cycle_pages where page=1;
+select is(
+  (select count(distinct cycle->>'maidProfileId')
+   from large_cycle_pages page
+   cross join lateral jsonb_array_elements(page.value->'payroll') cycle),
+  16::bigint,
+  'admin-all cycle keyset traversal returns every maid exactly once'
+);
+select ok(
+  (select (value->>'hasMore')::boolean from large_cycle_pages where page=1)
+  and not (select (value->>'hasMore')::boolean from large_cycle_pages where page=2),
+  'cycle continuation terminates after the final keyset page'
+);
+select throws_ok(
+  $$select public.list_payroll_cycles_page(pg_temp.pid(8), pg_temp.week_start(-5), null, null, 11)$$,
+  '22023', 'PAYROLL_PAGE_LIMIT_INVALID',
+  'database independently rejects cycle page limits above ten'
+);
+
 select throws_ok($$select public.list_payroll_cycles(pg_temp.pid(2),pg_temp.week_start(-1),pg_temp.pid(3))$$,
   '42501','PAYROLL_ACCESS_REQUIRED','maid cannot IDOR another maid projection');
 select throws_ok($$select public.list_payroll_cycles(pg_temp.pid(6),pg_temp.week_start(-1),null)$$,
@@ -318,8 +446,10 @@ select ok(not exists(
 ), 'anon and service role have no raw payroll table privilege');
 
 select ok(has_function_privilege('service_role','public.list_payroll_cycles(uuid,date,uuid)','EXECUTE')
+  and has_function_privilege('service_role','public.list_payroll_cycles_page(uuid,date,uuid,uuid,integer)','EXECUTE')
+  and has_function_privilege('service_role','public.list_payroll_entries_page(uuid,date,uuid,text,date,uuid,integer)','EXECUTE')
   and has_function_privilege('service_role','public.start_payroll_cycle(uuid,uuid,date,bigint,text,text)','EXECUTE'),
-  'service role can execute only the reviewed payroll projection and command');
+  'service role can execute only bounded reviewed payroll projections and command');
 select ok(not has_function_privilege('authenticated','public.start_payroll_cycle(uuid,uuid,date,bigint,text,text)','EXECUTE'),
   'authenticated clients cannot bypass the server-owned command');
 select ok(has_function_privilege('authenticated','private.can_read_payroll_row(uuid)','EXECUTE')

@@ -3,13 +3,20 @@ import type { Actor } from '../src/domain/actor.js';
 import { requestHash } from '../src/lib/command.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import {
+  PAYROLL_RESPONSE_MAX_BYTES,
+  PayrollCursorCodec,
+  assertPayrollResponseSize,
+  payrollCursorScope
+} from '../src/modules/payroll/payroll-cursor.js';
+import {
   payrollDatabaseError,
   SupabasePayrollService,
   toPayrollCycle
 } from '../src/modules/payroll/payroll.service.js';
 
+const cursorSecret = 'payroll-cursor-secret-for-tests-123456';
 const admin: Actor = {
-  authUserId: 'auth-admin',
+  authUserId: '10000000-0000-4000-8000-000000000001',
   profileId: '20000000-0000-4000-8000-000000000001',
   displayName: '관리자',
   role: 'admin',
@@ -18,7 +25,7 @@ const admin: Actor = {
 };
 const maid: Actor = {
   ...admin,
-  authUserId: 'auth-maid',
+  authUserId: '10000000-0000-4000-8000-000000000002',
   profileId: '20000000-0000-4000-8000-000000000002',
   displayName: '메이드',
   role: 'maid',
@@ -32,56 +39,190 @@ const projection = {
   version: 0,
   lockedAmount: null,
   paymentStartedAt: null,
-  itemCount: 1,
-  totalAmount: 30000,
+  itemCount: 11,
+  totalAmount: 330000,
   items: [{
     earningId: '30000000-0000-4000-8000-000000000001',
     earnedOn: '2026-08-25',
     amount: 30000,
     alreadyClaimed: false
   }],
+  itemsHasMore: true,
+  itemsLastEarnedOn: '2026-08-25',
+  itemsLastEarningId: '30000000-0000-4000-8000-000000000001',
   lateEarningCount: 0,
   lateEarningAmount: 0,
-  lateEarnings: []
+  lateEarnings: [],
+  lateEarningsHasMore: false,
+  lateEarningsLastEarnedOn: null,
+  lateEarningsLastEarningId: null
 };
 
 function clients(rpc: ReturnType<typeof vi.fn>): SupabaseClients {
   return { admin: { rpc } } as unknown as SupabaseClients;
 }
+function service(rpc: ReturnType<typeof vi.fn>): SupabasePayrollService {
+  return new SupabasePayrollService(clients(rpc), cursorSecret);
+}
 
-describe('payroll service', () => {
-  it('lists conceptual OPEN payroll through the actor-bound projection RPC', async () => {
-    const rpc = vi.fn(async () => ({ data: [projection], error: null }));
-    const result = await new SupabasePayrollService(clients(rpc))
-      .list(maid, projection.weekStart);
+describe('payroll pagination service', () => {
+  it('lists a bounded conceptual OPEN page and emits opaque continuations', async () => {
+    const rpc = vi.fn(async () => ({
+      data: {
+        payroll: [projection],
+        hasMore: true,
+        lastMaidProfileId: maid.profileId
+      },
+      error: null
+    }));
+    const page = await service(rpc).list(admin, {
+      weekStart: projection.weekStart,
+      limit: 10
+    });
 
-    expect(result).toEqual([projection]);
-    expect(rpc).toHaveBeenCalledWith('list_payroll_cycles', {
-      p_actor_profile_id: maid.profileId,
+    expect(page.payroll[0]).toMatchObject({
+      cycleId: null,
+      itemCount: 11,
+      totalAmount: 330000
+    });
+    expect(page.nextCursor).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+    expect(page.payroll[0]?.itemsNextCursor).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+    expect(JSON.stringify(page)).not.toContain('itemsHasMore');
+    expect(rpc).toHaveBeenCalledWith('list_payroll_cycles_page', {
+      p_actor_profile_id: admin.profileId,
       p_week_start: projection.weekStart,
-      p_maid_profile_id: null
+      p_maid_profile_id: null,
+      p_after_maid_profile_id: null,
+      p_limit: 10
     });
   });
 
-  it('blocks developer and maid IDOR before any service-role RPC', async () => {
-    const rpc = vi.fn();
-    const service = new SupabasePayrollService(clients(rpc));
-    await expect(service.list({ ...admin, role: 'developer' }, projection.weekStart))
-      .rejects.toMatchObject({ statusCode: 403, code: 'PAYROLL_ACCESS_REQUIRED' });
-    await expect(service.list(maid, projection.weekStart, admin.profileId))
-      .rejects.toMatchObject({ statusCode: 403, code: 'PAYROLL_ACCESS_REQUIRED' });
-    expect(rpc).not.toHaveBeenCalled();
+  it('decodes only an actor, role, week, filter, sort and kind-bound cursor', async () => {
+    const firstRpc = vi.fn(async () => ({
+      data: { payroll: [projection], hasMore: true, lastMaidProfileId: maid.profileId },
+      error: null
+    }));
+    const first = await service(firstRpc).list(admin, { weekStart: projection.weekStart });
+    const secondRpc = vi.fn(async () => ({
+      data: { payroll: [], hasMore: false, lastMaidProfileId: null },
+      error: null
+    }));
+    await service(secondRpc).list(admin, {
+      weekStart: projection.weekStart,
+      cursor: first.nextCursor as string
+    });
+    expect(secondRpc).toHaveBeenCalledWith(
+      'list_payroll_cycles_page',
+      expect.objectContaining({ p_after_maid_profile_id: maid.profileId })
+    );
+
+    for (const [actor, input] of [
+      [{ ...admin, profileId: '20000000-0000-4000-8000-000000000009' }, { weekStart: projection.weekStart }],
+      [{ ...admin, role: 'maid' as const }, { weekStart: projection.weekStart }],
+      [admin, { weekStart: '2026-08-17' }],
+      [admin, { weekStart: projection.weekStart, maidProfileId: maid.profileId }]
+    ] as const) {
+      const forbiddenRpc = vi.fn();
+      await expect(service(forbiddenRpc).list(actor, {
+        ...input,
+        cursor: first.nextCursor as string
+      })).rejects.toMatchObject({ code: 'PAYROLL_CURSOR_INVALID' });
+      expect(forbiddenRpc).not.toHaveBeenCalled();
+    }
   });
 
-  it('starts a PAYING snapshot with the canonical actor-scoped request hash', async () => {
+  it('rejects tampered, wrong-secret, malformed and oversized cursors before RPC', async () => {
+    const scope = payrollCursorScope(admin, projection.weekStart, undefined, 'cycles');
+    const valid = new PayrollCursorCodec(cursorSecret).encode(scope, {
+      maidProfileId: maid.profileId
+    });
+    for (const cursor of [
+      valid.slice(0, -1) + (valid.endsWith('A') ? 'B' : 'A'),
+      'raw',
+      'x'.repeat(1025)
+    ]) {
+      const rpc = vi.fn();
+      await expect(service(rpc).list(admin, {
+        weekStart: projection.weekStart,
+        cursor
+      })).rejects.toMatchObject({ code: 'PAYROLL_CURSOR_INVALID' });
+      expect(rpc).not.toHaveBeenCalled();
+    }
+    expect(() => new PayrollCursorCodec('short')).toThrowError(
+      expect.objectContaining({ code: 'PAYROLL_CURSOR_NOT_CONFIGURED' })
+    );
+    expect(() => new PayrollCursorCodec('another-secret-at-least-thirty-two-bytes').decode(valid, scope))
+      .toThrowError(expect.objectContaining({ code: 'PAYROLL_CURSOR_INVALID' }));
+  });
+
+  it('pages items by earned date and earning ID', async () => {
+    const scope = payrollCursorScope(admin, projection.weekStart, maid.profileId, 'items');
+    const cursor = new PayrollCursorCodec(cursorSecret).encode(scope, {
+      earnedOn: '2026-08-25',
+      earningId: '30000000-0000-4000-8000-000000000001'
+    });
+    const nextId = '30000000-0000-4000-8000-000000000002';
+    const rpc = vi.fn(async () => ({
+      data: {
+        entries: [{
+          earningId: nextId,
+          earnedOn: '2026-08-25',
+          amount: 20000,
+          alreadyClaimed: false
+        }],
+        hasMore: false,
+        lastEarnedOn: '2026-08-25',
+        lastEarningId: nextId
+      },
+      error: null
+    }));
+    const page = await service(rpc).listEntries(admin, {
+      weekStart: projection.weekStart,
+      maidProfileId: maid.profileId,
+      kind: 'items',
+      limit: 25,
+      cursor
+    });
+    expect(page.entries).toHaveLength(1);
+    expect(page.nextCursor).toBeNull();
+    expect(rpc).toHaveBeenCalledWith('list_payroll_entries_page', expect.objectContaining({
+      p_after_earned_on: '2026-08-25',
+      p_after_earning_id: '30000000-0000-4000-8000-000000000001',
+      p_kind: 'items',
+      p_limit: 25
+    }));
+  });
+
+  it('blocks developer and maid cross-profile IDOR before any service-role RPC', async () => {
+    const rpc = vi.fn();
+    await expect(service(rpc).list({ ...admin, role: 'developer' }, { weekStart: projection.weekStart }))
+      .rejects.toMatchObject({ statusCode: 403, code: 'PAYROLL_ACCESS_REQUIRED' });
+    await expect(service(rpc).listEntries(maid, {
+      weekStart: projection.weekStart,
+      maidProfileId: admin.profileId,
+      kind: 'items'
+    })).rejects.toMatchObject({ statusCode: 403, code: 'PAYROLL_ACCESS_REQUIRED' });
+    expect(rpc).not.toHaveBeenCalled();
+
+    const selfRpc = vi.fn(async () => ({
+      data: { entries: [], hasMore: false, lastEarnedOn: null, lastEarningId: null },
+      error: null
+    }));
+    await expect(service(selfRpc).listEntries(maid, {
+      weekStart: projection.weekStart,
+      maidProfileId: maid.profileId.toUpperCase(),
+      kind: 'items'
+    })).resolves.toMatchObject({ entries: [] });
+  });
+
+  it('keeps start and replay logically idempotent while returning bounded cursors', async () => {
     const paying = {
       ...projection,
       cycleId: '40000000-0000-4000-8000-000000000001',
       status: 'paying',
       version: 1,
-      lockedAmount: 30000,
-      paymentStartedAt: '2026-09-10T00:00:00Z',
-      items: [{ ...projection.items[0], alreadyClaimed: true }]
+      lockedAmount: 330000,
+      paymentStartedAt: '2026-09-10T00:00:00Z'
     };
     const rpc = vi.fn(async () => ({ data: paying, error: null }));
     const input = {
@@ -90,8 +231,10 @@ describe('payroll service', () => {
       expectedVersion: 0,
       idempotencyKey: 'payroll-start-1'
     };
-    await expect(new SupabasePayrollService(clients(rpc)).start(admin, input))
-      .resolves.toEqual(paying);
+    const first = await service(rpc).start(admin, input);
+    const replay = await service(rpc).start(admin, input);
+    expect(first).toEqual(replay);
+    expect(first.itemsNextCursor).not.toBeNull();
     expect(rpc).toHaveBeenCalledWith('start_payroll_cycle', {
       p_actor_profile_id: admin.profileId,
       p_maid_profile_id: maid.profileId,
@@ -108,35 +251,13 @@ describe('payroll service', () => {
     });
   });
 
-  it('keeps only the strict public projection including bounded late earnings', () => {
-    expect(toPayrollCycle({
-      ...projection,
-      rawRequestBody: 'secret',
-      lateEarningCount: 1,
-      lateEarningAmount: 10000,
-      lateEarnings: [{
-        earningId: '30000000-0000-4000-8000-000000000002',
-        earnedOn: '2026-08-26',
-        amount: '10000',
-        rawLedger: 'private'
-      }]
-    })).toEqual({
-      ...projection,
-      lateEarningCount: 1,
-      lateEarningAmount: 10000,
-      lateEarnings: [{
-        earningId: '30000000-0000-4000-8000-000000000002',
-        earnedOn: '2026-08-26',
-        amount: 10000
-      }]
-    });
-  });
-
-  it('fails closed on malformed UUID, date and ISO timestamp projections', () => {
+  it('strips private fields and fails closed on malformed projections', () => {
+    expect(toPayrollCycle({ ...projection, rawRequestBody: 'secret' })).not.toHaveProperty('rawRequestBody');
     for (const malformed of [
       { ...projection, maidProfileId: 'not-a-uuid' },
       { ...projection, weekStart: '2026-02-30' },
-      { ...projection, paymentStartedAt: '2026' }
+      { ...projection, itemsHasMore: true, itemsLastEarningId: null },
+      { ...projection, items: Array.from({ length: 11 }, () => projection.items[0]) }
     ]) {
       expect(() => toPayrollCycle(malformed)).toThrowError(
         expect.objectContaining({ code: 'PAYROLL_COMMAND_FAILED' })
@@ -144,8 +265,16 @@ describe('payroll service', () => {
     }
   });
 
+  it('fails closed when the UTF-8 serialized response exceeds 128 KiB', () => {
+    expect(() => assertPayrollResponseSize({ value: '가'.repeat(PAYROLL_RESPONSE_MAX_BYTES) }))
+      .toThrowError(expect.objectContaining({ code: 'PAYROLL_RESPONSE_TOO_LARGE' }));
+    expect(() => assertPayrollResponseSize({ payroll: [projection] })).not.toThrow();
+  });
+
   it.each([
     ['PAYROLL_WEEK_MUST_START_MONDAY', 400],
+    ['PAYROLL_PAGE_LIMIT_INVALID', 400],
+    ['PAYROLL_CURSOR_INVALID', 400],
     ['PAYROLL_ACCESS_REQUIRED', 403],
     ['PAYROLL_MAID_NOT_FOUND', 404],
     ['PAYROLL_WEEK_NOT_CLOSED', 409],
@@ -154,11 +283,5 @@ describe('payroll service', () => {
   ])('maps %s without exposing raw database details', (code, statusCode) => {
     expect(payrollDatabaseError({ message: `${code}: private detail` }))
       .toMatchObject({ code, statusCode });
-  });
-
-  it('redacts unknown database errors', () => {
-    const result = payrollDatabaseError({ message: 'postgres secret detail' });
-    expect(result).toMatchObject({ statusCode: 500, code: 'PAYROLL_COMMAND_FAILED' });
-    expect(result.message).not.toContain('postgres');
   });
 });

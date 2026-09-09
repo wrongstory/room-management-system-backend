@@ -21,6 +21,10 @@ const envSchema = z.object({
   RESERVATION_PII_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default('v1'),
   RESERVATION_PII_KEYRING_JSON: z.string().default('{}'),
   RESERVATION_GUEST_NAME_PEPPER: z.string().min(32),
+  PAYROLL_CURSOR_HMAC_SECRET: z.string().trim().refine(
+    (value) => Buffer.byteLength(value, 'utf8') >= 32,
+    '주급 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
+  ),
   GOOGLE_DRIVE_CLIENT_ID: z.string().max(4096).optional(),
   GOOGLE_DRIVE_CLIENT_SECRET: z.string().max(4096).optional(),
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().max(4096).optional(),
@@ -47,6 +51,37 @@ const envSchema = z.object({
       code: 'custom',
       path: ['SUPABASE_SECRET_KEY'],
       message: 'SUPABASE_SECRET_KEY에 publishable key를 사용할 수 없습니다.'
+    });
+  }
+
+  let reservationPiiKeyringSecrets: string[] = [];
+  try {
+    const keyring = JSON.parse(env.RESERVATION_PII_KEYRING_JSON) as unknown;
+    if (keyring && !Array.isArray(keyring) && typeof keyring === 'object') {
+      reservationPiiKeyringSecrets = Object.values(keyring).filter(
+        (value): value is string => typeof value === 'string'
+      );
+    }
+  } catch {
+    // The dedicated keyring validator below reports malformed JSON.
+  }
+
+  if ([
+    env.SUPABASE_PUBLISHABLE_KEY,
+    env.SUPABASE_SECRET_KEY,
+    env.ACCOUNT_PHONE_PEPPER,
+    env.RESERVATION_PII_KEY_BASE64,
+    env.RESERVATION_GUEST_NAME_PEPPER,
+    env.GOOGLE_DRIVE_CLIENT_ID,
+    env.GOOGLE_DRIVE_CLIENT_SECRET,
+    env.GOOGLE_DRIVE_REFRESH_TOKEN,
+    env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
+    ...reservationPiiKeyringSecrets
+  ].includes(env.PAYROLL_CURSOR_HMAC_SECRET)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['PAYROLL_CURSOR_HMAC_SECRET'],
+      message: '주급 cursor HMAC 비밀값은 다른 key/pepper와 분리해야 합니다.'
     });
   }
 

@@ -71,7 +71,12 @@ import {
 } from "../_shared/activity-contract.ts";
 import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
-import { listPayroll, startPayroll } from "../_shared/payroll-api.ts";
+import {
+  listPayroll,
+  listPayrollEntries,
+  startPayroll,
+} from "../_shared/payroll-api.ts";
+import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
 import {
   createSubmission,
   decideBombRoom,
@@ -801,18 +806,19 @@ export async function handleApiRequest(
     }
 
     if (request.method === "GET" && path === "/v1/payroll") {
-      return jsonResponse(
-        { payroll: await listPayroll(request, clients, actor) },
-        200,
-        corsHeaders,
-      );
+      const response = await listPayroll(request, clients, actor);
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (request.method === "GET" && path === "/v1/payroll/entries") {
+      const response = await listPayrollEntries(request, clients, actor);
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
     }
     if (request.method === "POST" && path === "/v1/payroll/start") {
-      return jsonResponse(
-        { payroll: await startPayroll(request, clients, actor) },
-        200,
-        corsHeaders,
-      );
+      const response = { payroll: await startPayroll(request, clients, actor) };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
     }
 
     if (request.method === "GET" && path === "/v1/reservations") {

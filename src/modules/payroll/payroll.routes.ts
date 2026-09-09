@@ -1,5 +1,11 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import {
+  assertPayrollResponseSize,
+  PAYROLL_CURSOR_MAX_LENGTH,
+  PAYROLL_CYCLE_PAGE_MAX,
+  PAYROLL_ENTRY_PAGE_MAX
+} from './payroll-cursor.js';
 import type { PayrollService } from './payroll.service.js';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
@@ -13,9 +19,27 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
     && parsed.getUTCDate() === day;
 }, '유효한 날짜를 입력해야 합니다.');
 
+function pageLimitSchema(maximum: number) {
+  return z.union([
+    z.number().int().min(1).max(maximum),
+    z.string().regex(/^[1-9]\d*$/).transform(Number)
+      .refine((value) => Number.isSafeInteger(value) && value <= maximum)
+  ]);
+}
+
 const listSchema = z.object({
   weekStart: dateSchema,
-  maidProfileId: z.uuid().optional()
+  maidProfileId: z.uuid().optional(),
+  limit: pageLimitSchema(PAYROLL_CYCLE_PAGE_MAX).optional(),
+  cursor: z.string().min(1).max(PAYROLL_CURSOR_MAX_LENGTH).optional()
+}).strict();
+
+const entriesSchema = z.object({
+  weekStart: dateSchema,
+  maidProfileId: z.uuid(),
+  kind: z.enum(['items', 'lateEarnings']),
+  limit: pageLimitSchema(PAYROLL_ENTRY_PAGE_MAX).optional(),
+  cursor: z.string().min(1).max(PAYROLL_CURSOR_MAX_LENGTH).optional()
 }).strict();
 
 const startSchema = z.object({
@@ -30,6 +54,19 @@ function idempotencyKey(request: FastifyRequest): string {
     .parse(request.headers['idempotency-key']);
 }
 
+function requireExactQuery(request: FastifyRequest, allowed: readonly string[]): void {
+  const search = new URL(request.raw.url ?? '/', 'http://backend.internal').searchParams;
+  for (const key of search.keys()) {
+    if (!allowed.includes(key) || search.getAll(key).length !== 1) {
+      throw new z.ZodError([{
+        code: 'custom',
+        path: [key],
+        message: '허용되지 않거나 중복된 query 항목입니다.'
+      }]);
+    }
+  }
+}
+
 export function createPayrollRoutes(service: PayrollService): FastifyPluginAsync {
   return async (app) => {
     const authenticated = [app.authenticate, app.requirePasswordChanged];
@@ -39,21 +76,33 @@ export function createPayrollRoutes(service: PayrollService): FastifyPluginAsync
       preHandler: authenticated,
       prefixTrailingSlash: 'no-slash'
     }, async (request) => {
+      requireExactQuery(request, ['weekStart', 'maidProfileId', 'limit', 'cursor']);
       const query = listSchema.parse(request.query);
-      return {
-        payroll: await service.list(request.actor, query.weekStart, query.maidProfileId)
-      };
+      const response = await service.list(request.actor, query);
+      assertPayrollResponseSize(response);
+      return response;
+    });
+
+    app.get('/entries', { preHandler: authenticated }, async (request) => {
+      requireExactQuery(request, ['weekStart', 'maidProfileId', 'kind', 'limit', 'cursor']);
+      const query = entriesSchema.parse(request.query);
+      const response = await service.listEntries(request.actor, query);
+      assertPayrollResponseSize(response);
+      return response;
     });
 
     app.post('/start', { preHandler: admin }, async (request) => {
+      requireExactQuery(request, []);
       noQuerySchema.parse(request.query);
       const input = startSchema.parse(request.body);
-      return {
+      const response = {
         payroll: await service.start(request.actor, {
           ...input,
           idempotencyKey: idempotencyKey(request)
         })
       };
+      assertPayrollResponseSize(response);
+      return response;
     });
   };
 }

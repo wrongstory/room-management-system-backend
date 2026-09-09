@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 76:
-        raise RuntimeError("전체 source OpenAPI path 수가 76이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 77:
+        raise RuntimeError("전체 source OpenAPI path 수가 77이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 82:
-        raise RuntimeError("전체 source OpenAPI operation 수가 82가 아닙니다.")
+    if operation_count != 83:
+        raise RuntimeError("전체 source OpenAPI operation 수가 83이 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="payroll-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -60,10 +60,12 @@ def main() -> None:
         package = destination / "generated"
         required = [
             package / "api" / "payroll" / "list_payroll_cycles.py",
+            package / "api" / "payroll" / "list_payroll_entries.py",
             package / "api" / "payroll" / "start_payroll_cycle.py",
             package / "models" / "payroll_cycle.py",
             package / "models" / "payroll_item.py",
             package / "models" / "payroll_late_earning.py",
+            package / "models" / "payroll_entries_envelope.py",
             package / "models" / "payroll_start_request.py",
             package / "models" / "payroll_status.py",
         ]

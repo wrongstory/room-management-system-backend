@@ -883,6 +883,12 @@ Table public.earnings {
   bomb_room_decision_id uuid [unique, ref: - private.bomb_room_decisions.id]
   total_amount int [not null, note: 'Generated as base_amount + bomb_room_bonus in SQL']
   created_at timestamptz [not null]
+
+  Indexes {
+    (maid_profile_id, earned_on, id) [note: '#96 keyset payroll items/lateEarnings page; SQL INCLUDE(total_amount)']
+  }
+
+  Note: '#96 exposes exact totals with bounded preview/page RPCs: nested 10, details 50. Cursor HMAC remains in the HTTP adapters.'
 }
 
 Table public.payroll_cycles {

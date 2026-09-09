@@ -83,7 +83,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         options.env.RESERVATION_GUEST_NAME_PEPPER,
         JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
       ),
-      payroll: new SupabasePayrollService(clients)
+      payroll: new SupabasePayrollService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }

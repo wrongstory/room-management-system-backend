@@ -1,5 +1,18 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
+  assertPayrollCursorConfigured,
+  type CursorPosition,
+  decodePayrollCursor,
+  encodePayrollCursor,
+  PAYROLL_CURSOR_MAX_LENGTH,
+  PAYROLL_CYCLE_PAGE_DEFAULT,
+  PAYROLL_CYCLE_PAGE_MAX,
+  PAYROLL_ENTRY_PAGE_DEFAULT,
+  PAYROLL_ENTRY_PAGE_MAX,
+  PAYROLL_NESTED_PREVIEW_MAX,
+  payrollCursorScope,
+} from "./payroll-cursor.ts";
+import {
   type EdgeActor,
   type EdgeClients,
   EdgeError,
@@ -66,13 +79,34 @@ function exactFields(
   ) invalid();
 }
 
+function pageInteger(
+  value: string | null,
+  maximum: number,
+  fallback: number,
+): number {
+  if (value === null) return fallback;
+  if (!/^[1-9]\d*$/.test(value)) {
+    invalid("limit은 허용 범위의 정수여야 합니다.");
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed > maximum) {
+    invalid("limit은 허용 범위의 정수여야 합니다.");
+  }
+  return parsed;
+}
+
 function query(
   request: Request,
-): { weekStart: string; maidProfileId: string | null } {
+): {
+  weekStart: string;
+  maidProfileId: string | null;
+  limit: number;
+  cursor: string | null;
+} {
   const search = new URL(request.url).searchParams;
   for (const key of search.keys()) {
     if (
-      !["weekStart", "maidProfileId"].includes(key) ||
+      !["weekStart", "maidProfileId", "limit", "cursor"].includes(key) ||
       search.getAll(key).length !== 1
     ) {
       invalid("허용되지 않거나 중복된 query 항목입니다.");
@@ -80,9 +114,59 @@ function query(
   }
   const weekStart = date(search.get("weekStart"));
   const maidValue = search.get("maidProfileId");
+  const cursor = search.get("cursor");
+  if (
+    cursor !== null &&
+    (cursor.length < 1 || cursor.length > PAYROLL_CURSOR_MAX_LENGTH)
+  ) invalid("cursor 길이가 올바르지 않습니다.");
   return {
     weekStart,
     maidProfileId: maidValue === null ? null : uuid(maidValue, "maidProfileId"),
+    limit: pageInteger(
+      search.get("limit"),
+      PAYROLL_CYCLE_PAGE_MAX,
+      PAYROLL_CYCLE_PAGE_DEFAULT,
+    ),
+    cursor,
+  };
+}
+
+function entriesQuery(
+  request: Request,
+): {
+  weekStart: string;
+  maidProfileId: string;
+  kind: "items" | "lateEarnings";
+  limit: number;
+  cursor: string | null;
+} {
+  const search = new URL(request.url).searchParams;
+  for (const key of search.keys()) {
+    if (
+      !["weekStart", "maidProfileId", "kind", "limit", "cursor"].includes(
+        key,
+      ) || search.getAll(key).length !== 1
+    ) invalid("허용되지 않거나 중복된 query 항목입니다.");
+  }
+  const kind = search.get("kind");
+  if (kind !== "items" && kind !== "lateEarnings") {
+    invalid("kind는 items 또는 lateEarnings여야 합니다.");
+  }
+  const cursor = search.get("cursor");
+  if (
+    cursor !== null &&
+    (cursor.length < 1 || cursor.length > PAYROLL_CURSOR_MAX_LENGTH)
+  ) invalid("cursor 길이가 올바르지 않습니다.");
+  return {
+    weekStart: date(search.get("weekStart")),
+    maidProfileId: uuid(search.get("maidProfileId"), "maidProfileId"),
+    kind,
+    limit: pageInteger(
+      search.get("limit"),
+      PAYROLL_ENTRY_PAGE_MAX,
+      PAYROLL_ENTRY_PAGE_DEFAULT,
+    ),
+    cursor,
   };
 }
 
@@ -142,6 +226,17 @@ export function payrollDatabaseError(
     ["ADMIN_REQUIRED", 403, "관리자만 주급 지급 처리를 시작할 수 있습니다."],
     ["PAYROLL_MAID_NOT_FOUND", 404, "메이드 계정을 찾을 수 없습니다."],
     ["PAYROLL_WEEK_MUST_START_MONDAY", 400, "weekStart는 월요일이어야 합니다."],
+    [
+      "PAYROLL_PAGE_LIMIT_INVALID",
+      400,
+      "주급 page size가 허용 범위를 벗어났습니다.",
+    ],
+    [
+      "PAYROLL_PAGE_KIND_INVALID",
+      400,
+      "주급 상세 page 종류가 올바르지 않습니다.",
+    ],
+    ["PAYROLL_CURSOR_INVALID", 400, "주급 cursor가 올바르지 않습니다."],
     ["INVALID_EXPECTED_VERSION", 400, "expectedVersion을 확인해 주세요."],
     [
       "PAYROLL_WEEK_NOT_CLOSED",
@@ -193,6 +288,10 @@ function projectedUuid(value: unknown): string {
   return parsed.toLowerCase();
 }
 
+function nullableUuid(value: unknown): string | null {
+  return value === null ? null : projectedUuid(value);
+}
+
 function projectedDate(value: unknown): string {
   const parsed = text(value);
   const [year, month, day] = parsed.split("-").map(Number);
@@ -204,6 +303,10 @@ function projectedDate(value: unknown): string {
     throw payrollDatabaseError(null);
   }
   return parsed;
+}
+
+function nullableDate(value: unknown): string | null {
+  return value === null ? null : projectedDate(value);
 }
 
 function nullableTimestamp(value: unknown): string | null {
@@ -229,7 +332,18 @@ function integer(value: unknown): number {
   return parsed;
 }
 
-function projection(value: unknown): Record<string, unknown> {
+function boolean(value: unknown): boolean {
+  if (typeof value !== "boolean") throw payrollDatabaseError(null);
+  return value;
+}
+
+interface InternalProjection {
+  cycle: Record<string, unknown>;
+  itemsAfter: CursorPosition | null;
+  lateEarningsAfter: CursorPosition | null;
+}
+
+function projection(value: unknown): InternalProjection {
   const row = object(value);
   const status = text(row.status);
   if (!["open", "paying", "check", "paid"].includes(status)) {
@@ -238,38 +352,149 @@ function projection(value: unknown): Record<string, unknown> {
   if (!Array.isArray(row.items) || !Array.isArray(row.lateEarnings)) {
     throw payrollDatabaseError(null);
   }
+  if (
+    row.items.length > PAYROLL_NESTED_PREVIEW_MAX ||
+    row.lateEarnings.length > PAYROLL_NESTED_PREVIEW_MAX
+  ) throw payrollDatabaseError(null);
+  const itemsHasMore = boolean(row.itemsHasMore);
+  const itemsLastEarnedOn = nullableDate(row.itemsLastEarnedOn);
+  const itemsLastEarningId = nullableUuid(row.itemsLastEarningId);
+  const lateEarningsHasMore = boolean(row.lateEarningsHasMore);
+  const lateEarningsLastEarnedOn = nullableDate(row.lateEarningsLastEarnedOn);
+  const lateEarningsLastEarningId = nullableUuid(
+    row.lateEarningsLastEarningId,
+  );
+  if (
+    (itemsHasMore && (!itemsLastEarnedOn || !itemsLastEarningId)) ||
+    (lateEarningsHasMore &&
+      (!lateEarningsLastEarnedOn || !lateEarningsLastEarningId))
+  ) throw payrollDatabaseError(null);
   return {
-    cycleId: row.cycleId === null ? null : projectedUuid(row.cycleId),
-    maidProfileId: projectedUuid(row.maidProfileId),
-    weekStart: projectedDate(row.weekStart),
-    status,
-    version: integer(row.version),
-    lockedAmount: row.lockedAmount === null ? null : integer(row.lockedAmount),
-    paymentStartedAt: nullableTimestamp(row.paymentStartedAt),
-    itemCount: integer(row.itemCount),
-    totalAmount: integer(row.totalAmount),
-    items: row.items.map((value) => {
-      const item = object(value);
-      if (typeof item.alreadyClaimed !== "boolean") {
-        throw payrollDatabaseError(null);
+    cycle: {
+      cycleId: row.cycleId === null ? null : projectedUuid(row.cycleId),
+      maidProfileId: projectedUuid(row.maidProfileId),
+      weekStart: projectedDate(row.weekStart),
+      status,
+      version: integer(row.version),
+      lockedAmount: row.lockedAmount === null
+        ? null
+        : integer(row.lockedAmount),
+      paymentStartedAt: nullableTimestamp(row.paymentStartedAt),
+      itemCount: integer(row.itemCount),
+      totalAmount: integer(row.totalAmount),
+      items: row.items.map((value) => {
+        const item = object(value);
+        if (typeof item.alreadyClaimed !== "boolean") {
+          throw payrollDatabaseError(null);
+        }
+        return {
+          earningId: projectedUuid(item.earningId),
+          earnedOn: projectedDate(item.earnedOn),
+          amount: integer(item.amount),
+          alreadyClaimed: item.alreadyClaimed,
+        };
+      }),
+      itemsNextCursor: null,
+      lateEarningCount: integer(row.lateEarningCount),
+      lateEarningAmount: integer(row.lateEarningAmount),
+      lateEarnings: row.lateEarnings.map((value) => {
+        const item = object(value);
+        return {
+          earningId: projectedUuid(item.earningId),
+          earnedOn: projectedDate(item.earnedOn),
+          amount: integer(item.amount),
+        };
+      }),
+      lateEarningsNextCursor: null,
+    },
+    itemsAfter: itemsHasMore
+      ? {
+        earnedOn: itemsLastEarnedOn as string,
+        earningId: itemsLastEarningId as string,
       }
-      return {
-        earningId: projectedUuid(item.earningId),
-        earnedOn: projectedDate(item.earnedOn),
-        amount: integer(item.amount),
-        alreadyClaimed: item.alreadyClaimed,
-      };
-    }),
-    lateEarningCount: integer(row.lateEarningCount),
-    lateEarningAmount: integer(row.lateEarningAmount),
-    lateEarnings: row.lateEarnings.map((value) => {
-      const item = object(value);
-      return {
-        earningId: projectedUuid(item.earningId),
-        earnedOn: projectedDate(item.earnedOn),
-        amount: integer(item.amount),
-      };
-    }),
+      : null,
+    lateEarningsAfter: lateEarningsHasMore
+      ? {
+        earnedOn: lateEarningsLastEarnedOn as string,
+        earningId: lateEarningsLastEarningId as string,
+      }
+      : null,
+  };
+}
+
+async function publicProjection(
+  value: unknown,
+  actor: EdgeActor,
+  weekStart: string,
+): Promise<Record<string, unknown>> {
+  const projected = projection(value);
+  const maidProfileId = projected.cycle.maidProfileId as string;
+  return {
+    ...projected.cycle,
+    itemsNextCursor: projected.itemsAfter
+      ? await encodePayrollCursor(
+        payrollCursorScope(actor, weekStart, maidProfileId, "items"),
+        projected.itemsAfter,
+      )
+      : null,
+    lateEarningsNextCursor: projected.lateEarningsAfter
+      ? await encodePayrollCursor(
+        payrollCursorScope(actor, weekStart, maidProfileId, "lateEarnings"),
+        projected.lateEarningsAfter,
+      )
+      : null,
+  };
+}
+
+function afterCycle(position: CursorPosition | null): string | null {
+  if (!position) return null;
+  if (!("maidProfileId" in position)) {
+    throw new EdgeError(
+      400,
+      "PAYROLL_CURSOR_INVALID",
+      "주급 cursor가 올바르지 않습니다.",
+    );
+  }
+  return uuid(position.maidProfileId, "cursor");
+}
+
+function afterEntry(position: CursorPosition | null): {
+  earnedOn: string | null;
+  earningId: string | null;
+} {
+  if (!position) return { earnedOn: null, earningId: null };
+  if (!("earnedOn" in position)) {
+    throw new EdgeError(
+      400,
+      "PAYROLL_CURSOR_INVALID",
+      "주급 cursor가 올바르지 않습니다.",
+    );
+  }
+  return {
+    earnedOn: date(position.earnedOn),
+    earningId: uuid(position.earningId, "cursor"),
+  };
+}
+
+function itemProjection(value: unknown): Record<string, unknown> {
+  const item = object(value);
+  if (typeof item.alreadyClaimed !== "boolean") {
+    throw payrollDatabaseError(null);
+  }
+  return {
+    earningId: projectedUuid(item.earningId),
+    earnedOn: projectedDate(item.earnedOn),
+    amount: integer(item.amount),
+    alreadyClaimed: item.alreadyClaimed,
+  };
+}
+
+function lateEarningProjection(value: unknown): Record<string, unknown> {
+  const item = object(value);
+  return {
+    earningId: projectedUuid(item.earningId),
+    earnedOn: projectedDate(item.earnedOn),
+    amount: integer(item.amount),
   };
 }
 
@@ -277,16 +502,99 @@ export async function listPayroll(
   request: Request,
   clients: EdgeClients,
   actor: EdgeActor,
-): Promise<Record<string, unknown>[]> {
+): Promise<Record<string, unknown>> {
   const input = query(request);
   reader(actor, input.maidProfileId);
-  const { data, error } = await clients.admin.rpc("list_payroll_cycles", {
+  assertPayrollCursorConfigured();
+  const scope = payrollCursorScope(
+    actor,
+    input.weekStart,
+    input.maidProfileId,
+    "cycles",
+  );
+  const position = input.cursor
+    ? await decodePayrollCursor(input.cursor, scope)
+    : null;
+  const { data, error } = await clients.admin.rpc("list_payroll_cycles_page", {
     p_actor_profile_id: actor.profileId,
     p_week_start: input.weekStart,
     p_maid_profile_id: input.maidProfileId,
+    p_after_maid_profile_id: afterCycle(position),
+    p_limit: input.limit,
   });
-  if (error || !Array.isArray(data)) throw payrollDatabaseError(error);
-  return data.map(projection);
+  if (error || !data) throw payrollDatabaseError(error);
+  const page = object(data);
+  if (!Array.isArray(page.payroll)) throw payrollDatabaseError(null);
+  if (page.payroll.length > input.limit) throw payrollDatabaseError(null);
+  const payroll = await Promise.all(
+    page.payroll.map((item) => publicProjection(item, actor, input.weekStart)),
+  );
+  const hasMore = boolean(page.hasMore);
+  const lastMaidProfileId = nullableUuid(page.lastMaidProfileId);
+  if (hasMore && !lastMaidProfileId) throw payrollDatabaseError(null);
+  return {
+    payroll,
+    nextCursor: hasMore && lastMaidProfileId
+      ? await encodePayrollCursor(scope, {
+        maidProfileId: lastMaidProfileId,
+      })
+      : null,
+  };
+}
+
+export async function listPayrollEntries(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<Record<string, unknown>> {
+  const input = entriesQuery(request);
+  reader(actor, input.maidProfileId);
+  assertPayrollCursorConfigured();
+  const scope = payrollCursorScope(
+    actor,
+    input.weekStart,
+    input.maidProfileId,
+    input.kind,
+  );
+  const position = input.cursor
+    ? await decodePayrollCursor(input.cursor, scope)
+    : null;
+  const after = afterEntry(position);
+  const { data, error } = await clients.admin.rpc(
+    "list_payroll_entries_page",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_week_start: input.weekStart,
+      p_maid_profile_id: input.maidProfileId,
+      p_kind: input.kind,
+      p_after_earned_on: after.earnedOn,
+      p_after_earning_id: after.earningId,
+      p_limit: input.limit,
+    },
+  );
+  if (error || !data) throw payrollDatabaseError(error);
+  const page = object(data);
+  if (!Array.isArray(page.entries)) throw payrollDatabaseError(null);
+  if (page.entries.length > input.limit) throw payrollDatabaseError(null);
+  const entries = page.entries.map(
+    input.kind === "items" ? itemProjection : lateEarningProjection,
+  );
+  const hasMore = boolean(page.hasMore);
+  const lastEarnedOn = nullableDate(page.lastEarnedOn);
+  const lastEarningId = nullableUuid(page.lastEarningId);
+  if (hasMore && (!lastEarnedOn || !lastEarningId)) {
+    throw payrollDatabaseError(null);
+  }
+  return {
+    kind: input.kind,
+    entries,
+    nextCursor: hasMore
+      ? await encodePayrollCursor(scope, {
+        earnedOn: lastEarnedOn as string,
+        earningId: lastEarningId as string,
+      })
+      : null,
+  };
 }
 
 export async function startPayroll(
@@ -295,6 +603,7 @@ export async function startPayroll(
   actor: EdgeActor,
 ): Promise<Record<string, unknown>> {
   admin(actor);
+  assertPayrollCursorConfigured();
   noQuery(request);
   const body = await readJsonBody(request);
   exactFields(body, ["maidProfileId", "weekStart", "expectedVersion"]);
@@ -318,5 +627,5 @@ export async function startPayroll(
     p_request_hash: await requestHash(fingerprint),
   });
   if (error || !data) throw payrollDatabaseError(error);
-  return projection(data);
+  return await publicProjection(data, actor, input.weekStart);
 }

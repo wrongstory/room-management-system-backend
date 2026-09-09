@@ -767,23 +767,35 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
     itemCount: 0,
     totalAmount: 0,
     items: [],
+    itemsHasMore: false,
+    itemsLastEarnedOn: null,
+    itemsLastEarningId: null,
     lateEarningCount: 0,
     lateEarningAmount: 0,
     lateEarnings: [],
+    lateEarningsHasMore: false,
+    lateEarningsLastEarnedOn: null,
+    lateEarningsLastEarningId: null,
   };
   const clients = {
     admin: {
       rpc(name: string, args: Record<string, unknown>) {
         calls.push({ name, args });
         return Promise.resolve({
-          data: name === "list_payroll_cycles" ? [payroll] : {
-            ...payroll,
-            cycleId: "96000000-0000-4000-8000-000000000001",
-            status: "paying",
-            version: 1,
-            lockedAmount: 30000,
-            paymentStartedAt: "2026-09-10T00:00:00Z",
-          },
+          data: name === "list_payroll_cycles_page"
+            ? {
+              payroll: [payroll],
+              hasMore: false,
+              lastMaidProfileId: maidProfileId,
+            }
+            : {
+              ...payroll,
+              cycleId: "96000000-0000-4000-8000-000000000001",
+              status: "paying",
+              version: 1,
+              lockedAmount: 30000,
+              paymentStartedAt: "2026-09-10T00:00:00Z",
+            },
           error: null,
         });
       },

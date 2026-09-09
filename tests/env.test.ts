@@ -11,7 +11,8 @@ const localEnv = {
   RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
   RESERVATION_PII_KEY_VERSION: 'test-v1',
   RESERVATION_PII_KEYRING_JSON: '{}',
-  RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value'
+  RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
+  PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456'
 };
 
 describe('environment contract', () => {
@@ -87,5 +88,23 @@ describe('environment contract', () => {
       ...localEnv,
       RESERVATION_PII_KEY_BASE64: `${localEnv.RESERVATION_PII_KEY_BASE64}!!`
     })).toThrow();
+  });
+
+  it('requires a purpose-specific payroll cursor secret of at least 32 UTF-8 bytes', () => {
+    for (const value of [
+      undefined,
+      'short',
+      ' '.repeat(32),
+      localEnv.ACCOUNT_PHONE_PEPPER,
+      localEnv.RESERVATION_GUEST_NAME_PEPPER,
+      localEnv.RESERVATION_PII_KEY_BASE64,
+      localEnv.SUPABASE_SECRET_KEY,
+      localEnv.SUPABASE_PUBLISHABLE_KEY
+    ]) {
+      expect(() => loadEnv({
+        ...localEnv,
+        PAYROLL_CURSOR_HMAC_SECRET: value
+      })).toThrow();
+    }
   });
 });
