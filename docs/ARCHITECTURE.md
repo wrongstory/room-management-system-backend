@@ -36,7 +36,7 @@ decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생�
 
 승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다.
 
-### #93 주급 주차 조회·PAYING 시작 — feature source gate 진행 중
+### #93 주급 주차 조회·PAYING 시작 — source/dev 완료, production 미승격
 
 Fastify와 Edge는 동일한 app-owned `list_payroll_cycles` / `start_payroll_cycle` RPC만 호출한다.
 GET은 종료된 KST 주차에서 active admin 전체·선택 조회와 active maid 본인 조회만 허용하며,
@@ -52,10 +52,30 @@ rollback adapter는 같은 role/error 계약을 유지하지만 기존 전역 ac
 payroll만 별도 영속 로그를 만들지 않는다.
 
 Python developer 운영 콘솔의 auth/accounts/developer 16-operation allowlist는 유지한다. 대신 전체
-source OpenAPI를 CI 임시 디렉터리에 Python client로 생성·컴파일해 payroll codegen 호환성을 검사하고
-결과를 콘솔 artifact나 Git에 포함하지 않는다. feature 후보는 35 migrations / 76 paths / 82 operations이며
-독립 QA와 `dev` 병합 전에는 source/dev 완료로 표시하지 않는다. production 19 / 39 / 43과 Pages는
-변경하지 않는다.
+source OpenAPI를 CI 임시 디렉터리에 Python client로 생성·컴파일해 payroll codegen 호환성을 검사한다.
+#93/#95는 35 migrations / 76 paths / 82 operations로 `dev@c3bdece5e5e35fe693212b0c974df19d0e112e42`에
+병합됐다. production 19 / 39 / 43과 Pages는 변경하지 않았다.
+
+### #96 주급 keyset pagination·응답 상한 — feature source gate 진행 중
+
+Fastify와 Edge의 `GET /v1/payroll`은 app-owned `list_payroll_cycles_page` RPC를 호출하며 admin-all을
+`maidProfileId ASC`로 keyset 순회한다. 기본/최대 page size는 10이고 DB도 최대값을 독립 강제한다.
+각 cycle의 `itemCount/totalAmount/lateEarningCount/lateEarningAmount`는 전체 집합의 정확한 값이지만
+`items`와 `lateEarnings` preview는 각각 최대 10개다. 나머지는 `GET /v1/payroll/entries`에서
+`earnedOn ASC, earningId ASC` keyset으로 기본 25, 최대 50개를 조회하며 OFFSET은 사용하지 않는다.
+
+continuation은 `base64url(payload).base64url(HMAC-SHA256)` opaque cursor다. 별도
+`PAYROLL_CURSOR_HMAC_SECRET`(UTF-8 32 bytes 이상)이 없거나 짧으면 fail-closed하고, version·exact schema·
+canonical base64url·길이 1,024·서명을 검증한다. payload scope는 actor profile ID와 정확한 role,
+weekStart, maid에게 강제한 self를 포함한 effective maid filter, stream kind와 source-controlled sort를
+묶는다. cursor 내부 last key/hasMore는 공개 projection에 노출하지 않는다.
+
+기존 `list_payroll_cycles` RPC는 service-role에서 unbounded aggregate를 만들지 않도록 최대 10개 nested
+preview를 반환하는 bounded compatibility projection으로 교체했다. 따라서 `start_payroll_cycle`의 최초
+receipt와 동일 command replay도 전체 earning JSON을 먼저 생성하거나 저장하지 않으며, exact totals와
+bounded preview만 반환한다. Fastify/Edge는 list/entries/start/replay의 최종 HTTP envelope를 UTF-8 JSON
+128 KiB로 측정해 초과 시 `PAYROLL_RESPONSE_TOO_LARGE`로 실패한다. 후보 계약은 36 migrations /
+77 paths / 83 operations이며 production/main/recovery/Pages/Cron/Vault는 이 feature에서 변경하지 않는다.
 
 ```mermaid
 flowchart LR

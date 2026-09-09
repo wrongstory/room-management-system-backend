@@ -45,6 +45,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
   ├─ /v1/availability/*
   ├─ /v1/reservations/*
   ├─ /v1/payroll
+  ├─ /v1/payroll/entries
   ├─ /v1/payroll/start
   ├─ /v1/attempts/*/submissions
   └─ /v1/inspections/*
@@ -62,10 +63,11 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@725de8652f77245e1c5fdd23f4273106f4a59a38` (#25~#31, #4, #7A/B/C 및 #83/#84/#85 source/dev 완료, production 미승격)
+- 개발 통합 source 기준: `dev@c3bdece5e5e35fe693212b0c974df19d0e112e42` (#25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95 source/dev 완료, production 미승격)
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했다. 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이고 다음 본선은 #8 earning/payroll 정산이다.
-- #93 feature 후보는 append-only payroll migration과 Fastify/Edge 2개 operation을 구현 중이다. 후보 계약은 **35 migrations / 76 paths / 82 operations**지만 독립 exact-head 리뷰와 `dev` 병합 전이므로 개발 통합 완료로 표시하지 않는다. Python developer 콘솔 16 operations는 그대로 유지하고 전체 OpenAPI의 임시 Python codegen smoke만 추가한다.
+- #93/#95는 PR #95로 source/dev 병합 완료했다. 개발 통합 계약은 **35 migrations / 76 paths / 82 operations**이며 conceptual OPEN 조회, OPEN→PAYING 잠금과 4개 payroll table의 active+비밀번호 변경 완료+admin/maid-self RLS를 포함한다.
+- #96 feature 후보는 bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 추가한다. 후보 계약은 **36 migrations / 77 paths / 83 operations**이며 이 PR의 독립 exact-head 리뷰와 `dev` 병합 전에는 개발 통합 완료로 표시하지 않는다. Python developer 콘솔 16 operations는 유지하고 전체 OpenAPI Python codegen을 임시 검증한다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -577,7 +579,8 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | Google Drive 업로드·조회 | #84 source/dev 완료 | #9 / #84 | PR #88 독립 QA·required CI·source 승인/dev 병합 완료; production OAuth·hosted smoke 미완료 |
 | [x] | 7일 영구삭제·orphan 운영 worker | source/dev 완료 | #9 / #85 / PR #90 | accepted/orphan/folder 원장 분리; production 미승격·미사용 |
 | [x] | 제출·검수·재청소 | source/dev 완료 | #31 / PR #91 | 34 migrations / 74 paths / 80 operations; production 미승격·미사용; inspection queue pagination은 P2 후속 |
-| [ ] | earning/payroll 주차 조회·PAYING 시작 | feature source gate 진행 중 | #8 / #93 | 2 operations; production 미승격·미배포 |
+| [x] | earning/payroll 주차 조회·PAYING 시작 | source/dev 완료 | #8 / #93 / PR #95 | 35 migrations / 76 paths / 82 operations; production 미승격·미배포 |
+| [ ] | payroll pagination·응답 크기 상한 | feature source gate 진행 중 | #96 | 후보 36 migrations / 77 paths / 83 operations; production 변경 없음 |
 | [ ] | notification/outbox/Web Push | 미개발 | #10 | domain event 연계 |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
@@ -680,24 +683,49 @@ production completeness 기준의 정본 순서다.
 31. [x] **#84 Drive 업로드·열람 source gate** — PR #88 독립 QA·required CI·source 승인 → `dev@520abe7` 병합; 운영 미적용
 32. [x] **#85 source gate** — PR #90 exact head 독립 리뷰·required CI·source 승인 후 `dev@92c0f97` 병합; production 미승격
 33. [x] **#31 source gate** — PR #91 exact-head 독립 QA·required CI·96/100 위임 승인 후 `dev@f22005d` 병합; production 미승격
+34. [x] **#93/#95 Payroll Cycle Assembly source gate** — exact-head 리뷰 P0/P1=0 후 PR #95 `dev@c3bdece` 병합; production 미승격
+35. [ ] **#96 Payroll pagination source gate** — bounded keyset/cursor/response 계약 구현·검증 및 독립 리뷰 진행
 
-### #93 Payroll Cycle Assembly source gate — 진행 중, production 미승격
+### #93 Payroll Cycle Assembly source gate — source/dev 완료, production 미승격
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|---|
-| [ ] | `GET /v1/payroll` | admin / maid self | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
-| [ ] | `POST /v1/payroll/start` | admin | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+| [x] | `GET /v1/payroll` | admin / maid self | ✅ | ✅ | ✅ | ❌ | ❌ |
+| [x] | `POST /v1/payroll/start` | admin | ✅ | ✅ | ✅ | ❌ | ❌ |
 
-- [ ] fresh migration·DB/RLS·concurrency 검증
-- [ ] Fastify/Edge/OpenAPI 76 paths / 82 operations 검증
-- [ ] 전체 OpenAPI Python ephemeral codegen 검증; developer 콘솔 allowlist 16 operations 유지
-- [ ] 독립 exact-head QA P0/P1=0 및 90점 이상
-- [ ] PR #93 `dev` 병합
+- [x] fresh migration·DB/RLS·concurrency 검증
+- [x] Fastify/Edge/OpenAPI 76 paths / 82 operations 검증
+- [x] 전체 OpenAPI Python ephemeral codegen 검증; developer 콘솔 allowlist 16 operations 유지
+- [x] exact head `0041a2b704cf4052760104944787041025f22d21` 독립 재검토 P0/P1=0, P2=#96 비차단
+- [x] required CI application/migration exact-head PASS
+- [x] PR #95 `dev` squash 병합 — `dev@c3bdece5e5e35fe693212b0c974df19d0e112e42`
 
 GET은 cycle이 없어도 side effect 없이 conceptual OPEN을 반환한다. POST는 종료된 KST 주차의
 확정 earning만 서버가 계산해 OPEN→PAYING snapshot을 잠그며 실제 송금 성공을 뜻하지 않는다.
 PAYING 이후 늦은 확정 수익은 locked amount와 별도 projection으로 표시한다. 이 feature에서
 production DB/Edge/Pages를 변경하지 않는다.
+
+### #96 Payroll Pagination / Response Bound source gate — 진행 중, production 미승격
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|---|
+| [ ] | `GET /v1/payroll` | admin / maid self | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+| [ ] | `GET /v1/payroll/entries` | admin / maid self | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+| [ ] | `POST /v1/payroll/start` | admin | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+
+- [x] admin-all `maidProfileId ASC` keyset page 기본/최대 10, DB 독립 상한 및 exact total 유지
+- [x] cycle별 items/lateEarnings preview 최대 10과 상세 `earnedOn ASC, earningId ASC` page 기본 25/최대 50
+- [x] HMAC-SHA256 base64url cursor의 version/schema/길이/서명과 actor role+ID/week/effective maid filter/kind/fixed sort scope 고정
+- [x] Fastify/Edge strict query parity, public internal key 비노출, UTF-8 전체 envelope 128 KiB fail-closed
+- [x] start/replay bounded receipt 및 120 earning fixture의 exact total·10 preview·50/50/20 무중복/무누락 순회 검증
+- [x] append-only `payroll_bounded_pagination` migration, OpenAPI 77 paths / 83 operations, developer 콘솔 16 operations 유지
+- [ ] 전체 로컬 검증과 독립 exact-head QA P0/P1=0
+- [ ] required CI application/migration PASS
+- [ ] PR #96 `dev` 병합
+
+이 source gate는 `PAYROLL_CURSOR_HMAC_SECRET`이라는 별도 32-byte 이상 secret을 Fastify와 Edge에
+요구한다. production/main/recovery/Pages/Cron/Vault를 이 feature PR에서 변경하지 않으며, 실제 secret
+설정·migration 적용·Edge 배포·hosted role smoke는 release gate다.
 
 ### #85 사진 purge/reconciliation source gate — source/dev 완료, production 미승격
 

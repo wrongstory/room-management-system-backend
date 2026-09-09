@@ -17,6 +17,7 @@ const env: AppEnv = {
   RESERVATION_PII_KEY_VERSION: 'test-v1',
   RESERVATION_PII_KEYRING_JSON: '{}',
   RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
+  PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456',
   RESERVATION_SCHEDULER_INTERVAL_SECONDS: 60,
   corsOrigins: ['http://127.0.0.1:4173']
 };
@@ -126,7 +127,12 @@ function services(): AppServices {
       cancelManualCleaningRequest: vi.fn()
     },
     payroll: {
-      list: vi.fn(async () => []),
+      list: vi.fn(async () => ({ payroll: [], nextCursor: null })),
+      listEntries: vi.fn(async () => ({
+        kind: 'items' as const,
+        entries: [],
+        nextCursor: null
+      })),
       start: vi.fn()
     }
   };
@@ -444,7 +450,7 @@ describe('application', () => {
 
   it('lists payroll projections for an authenticated reader without side effects', async () => {
     const appServices = services();
-    appServices.payroll.list = vi.fn(async () => []);
+    appServices.payroll.list = vi.fn(async () => ({ payroll: [], nextCursor: null }));
     const app = await buildApp({ env, services: appServices, logger: false });
     const response = await app.inject({
       method: 'GET',
@@ -453,11 +459,10 @@ describe('application', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ payroll: [] });
+    expect(response.json()).toEqual({ payroll: [], nextCursor: null });
     expect(appServices.payroll.list).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'admin' }),
-      '2026-08-24',
-      undefined
+      expect.objectContaining({ weekStart: '2026-08-24' })
     );
 
     for (const url of [
@@ -470,6 +475,91 @@ describe('application', () => {
         headers: { authorization: 'Bearer access-token' }
       });
       expect(alias.statusCode).toBe(404);
+    }
+    await app.close();
+  });
+
+  it('keeps Fastify payroll query parsing identical to the strict Edge contract', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    for (const url of [
+      '/v1/payroll?weekStart=2026-08-24&limit=1e1',
+      '/v1/payroll?weekStart=2026-08-24&limit=1.0',
+      '/v1/payroll?weekStart=2026-08-24&limit=%2010%20',
+      '/v1/payroll?weekStart=2026-08-24&limit=10&limit=9',
+      '/v1/payroll?weekStart=2026-08-24&unknown=1',
+      '/v1/payroll/entries?weekStart=2026-08-24&maidProfileId=62000000-0000-4000-8000-000000000001&kind=items&limit=25&kind=lateEarnings'
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: 'Bearer access-token' }
+      });
+      expect(response.statusCode, url).toBe(400);
+      expect(response.json().error.code, url).toBe('VALIDATION_ERROR');
+    }
+    expect(appServices.payroll.list).not.toHaveBeenCalled();
+    expect(appServices.payroll.listEntries).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('pages payroll entries through the authenticated reader contract', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/payroll/entries?weekStart=2026-08-24&maidProfileId=62000000-0000-4000-8000-000000000001&kind=items&limit=25',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ kind: 'items', entries: [], nextCursor: null });
+    expect(appServices.payroll.listEntries).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ kind: 'items', limit: 25 })
+    );
+    await app.close();
+  });
+
+  it('fails closed when any payroll HTTP envelope exceeds 128 KiB', async () => {
+    const huge = '가'.repeat(128 * 1024);
+    const appServices = services();
+    appServices.payroll.list = vi.fn(async () => ({ payroll: [{ huge }] as never, nextCursor: null }));
+    appServices.payroll.listEntries = vi.fn(async () => ({
+      kind: 'items' as const,
+      entries: [{ huge }] as never,
+      nextCursor: null
+    }));
+    appServices.payroll.start = vi.fn(async () => ({ huge } as never));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const requests = [
+      app.inject({
+        method: 'GET',
+        url: '/v1/payroll?weekStart=2026-08-24',
+        headers: { authorization: 'Bearer access-token' }
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/v1/payroll/entries?weekStart=2026-08-24&maidProfileId=62000000-0000-4000-8000-000000000001&kind=items',
+        headers: { authorization: 'Bearer access-token' }
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/payroll/start',
+        headers: {
+          authorization: 'Bearer access-token',
+          'idempotency-key': 'payroll-start-size-cap'
+        },
+        payload: {
+          maidProfileId: '62000000-0000-4000-8000-000000000001',
+          weekStart: '2026-08-24',
+          expectedVersion: 0
+        }
+      })
+    ];
+    for (const request of requests) {
+      const response = await request;
+      expect(response.statusCode).toBe(500);
+      expect(response.json().error.code).toBe('PAYROLL_RESPONSE_TOO_LARGE');
     }
     await app.close();
   });
@@ -487,9 +577,11 @@ describe('application', () => {
       itemCount: 1,
       totalAmount: 30000,
       items: [],
+      itemsNextCursor: null,
       lateEarningCount: 0,
       lateEarningAmount: 0,
-      lateEarnings: []
+      lateEarnings: [],
+      lateEarningsNextCursor: null
     }));
     const app = await buildApp({ env, services: appServices, logger: false });
     const response = await app.inject({

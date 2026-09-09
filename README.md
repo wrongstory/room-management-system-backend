@@ -10,7 +10,7 @@
 - 이름형 로그인 아이디를 Supabase Auth 내부 계정에 매핑하는 서버 로그인
 - 단일 developer bootstrap과 관리자·메이드 개별 계정 생성, 역할·상태 변경, 잠금 해제, 비밀번호 초기화
 - 임시 비밀번호 변경 강제와 폐기된 세션의 매 요청 차단
-- `GET /health`, `/openapi.json`, 로컬 `/docs` Swagger UI, `/v1/auth`, `/v1/accounts`, `/v1/rooms`, `/v1/reservations`, `/v1/availability`
+- `GET /health`, `/openapi.json`, 로컬 `/docs` Swagger UI, `/v1/auth`, `/v1/accounts`, `/v1/rooms`, `/v1/reservations`, `/v1/availability`, `/v1/payroll`
 - 운영 OpenAPI snapshot을 제공하는 무료 GitHub Pages 읽기 전용 Swagger 포털
 - 객실 기준정보 CAS 변경, 운영 차단·촛불·이슈·PIN 동기화 event 기록
 - 예약 생성·일정 변경·취소·수동 체크아웃, 연박/추가 청소 요청과 예정 입·퇴실 전이
@@ -36,7 +36,7 @@ copy .env.example .env
 npm run dev
 ```
 
-macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다. production에서는 예정 전이·개인정보 보존 worker가 조용히 중지되지 않도록 활성 관리자 profile ID인 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`도 반드시 설정합니다.
+macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다. 주급 cursor에는 다른 key/pepper와 재사용하지 않는 `PAYROLL_CURSOR_HMAC_SECRET`을 UTF-8 32바이트 이상으로 생성해 Fastify와 Edge에 각각 설정합니다. production에서는 예정 전이·개인정보 보존 worker가 조용히 중지되지 않도록 활성 관리자 profile ID인 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`도 반드시 설정합니다.
 
 빈 프로젝트의 단일 최상위 developer만 서버 환경에서 다음 명령으로 생성합니다. `--name`은 표시 이름일 뿐이며 로그인 ID는 입력과 무관하게 `admin`으로 고정합니다. 휴대전화 번호 외 비밀번호는 명령 인자로 전달하지 않습니다.
 

@@ -71,19 +71,20 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 76 &&
+    Object.keys(document.paths).length === 77 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 82,
-    "candidate contract76/82",
+        ).length === 83,
+    "candidate contract77/83",
   );
 });
 
 Deno.test("payroll OpenAPI separates confirmed, locked and late earnings without client amounts", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const list = document.paths["/v1/payroll"].get;
+  const entries = document.paths["/v1/payroll/entries"].get;
   const start = document.paths["/v1/payroll/start"].post;
   const schemas = document.components.schemas;
   assert(
@@ -93,6 +94,12 @@ Deno.test("payroll OpenAPI separates confirmed, locked and late earnings without
   assert(
     start.operationId === "startPayrollCycle",
     "stable payroll start operation",
+  );
+  assert(
+    entries.operationId === "listPayrollEntries" &&
+      entries.parameters.find((parameter) => parameter.name === "limit")
+          ?.schema.maximum === 50,
+    "bounded payroll detail operation",
   );
   assert(
     list["x-required-roles"].join() === "admin,maid",
@@ -114,6 +121,12 @@ Deno.test("payroll OpenAPI separates confirmed, locked and late earnings without
   );
   assert(
     schemas.PayrollCycle.required.includes("lateEarnings") &&
+      schemas.PayrollCycle.required.includes("itemsNextCursor") &&
+      schemas.PayrollCycle.required.includes("lateEarningsNextCursor") &&
+      schemas.PayrollCycle.properties.items.maxItems === 10 &&
+      schemas.PayrollCycle.properties.lateEarnings.maxItems === 10 &&
+      schemas.PayrollListEnvelope.properties.payroll.maxItems === 10 &&
+      schemas.PayrollEntriesEnvelope.properties.entries.maxItems === 50 &&
       schemas.PayrollCycle.properties.lockedAmount.description.includes(
         "다시 계산하지",
       ) &&
@@ -124,8 +137,10 @@ Deno.test("payroll OpenAPI separates confirmed, locked and late earnings without
   );
   assert(
     list.description.includes("cycleId=null") &&
-      start.description.includes("실제 송금 성공이 아닙니다"),
-    "conceptual OPEN and no-transfer semantics documented",
+      start.description.includes("실제 송금 성공이 아닙니다") &&
+      list.description.includes("128 KiB") &&
+      entries.description.includes("actor 역할/ID"),
+    "conceptual OPEN, bounded response and signed-scope semantics documented",
   );
 });
 

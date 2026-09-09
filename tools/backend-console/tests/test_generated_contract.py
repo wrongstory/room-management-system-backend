@@ -353,7 +353,7 @@ def test_submission_inspection_audit_generated_contract_has_safe_metadata_only()
     assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary
 
 
-def test_drive_runtime_configuration_generated_contract_is_boolean_only() -> None:
+def test_runtime_secret_configuration_generated_contract_is_boolean_only() -> None:
     from room_management_console.generated.models.developer_runtime_status_configuration import (
         DeveloperRuntimeStatusConfiguration,
     )
@@ -372,9 +372,28 @@ def test_drive_runtime_configuration_generated_contract_is_boolean_only() -> Non
         "GOOGLE_DRIVE_REFRESH_TOKEN",
         "GOOGLE_DRIVE_ROOT_FOLDER_ID",
         "PHOTO_PURGE_INVOKE_SECRET",
+        "PAYROLL_CURSOR_HMAC_SECRET",
     ]
     for configured in [False, True]:
         sample = {name: {"configured": configured} for name in names}
         result = DeveloperRuntimeStatusConfiguration.from_dict(sample).to_dict()
         assert result == sample
         assert all(set(value) == {"configured"} for value in result.values())
+
+
+def test_payroll_pagination_error_codes_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert {
+        ErrorCode.PAYROLL_CURSOR_INVALID.value,
+        ErrorCode.PAYROLL_CURSOR_NOT_CONFIGURED.value,
+        ErrorCode.PAYROLL_PAGE_LIMIT_INVALID.value,
+        ErrorCode.PAYROLL_PAGE_KIND_INVALID.value,
+        ErrorCode.PAYROLL_RESPONSE_TOO_LARGE.value,
+    } == {
+        "PAYROLL_CURSOR_INVALID",
+        "PAYROLL_CURSOR_NOT_CONFIGURED",
+        "PAYROLL_PAGE_LIMIT_INVALID",
+        "PAYROLL_PAGE_KIND_INVALID",
+        "PAYROLL_RESPONSE_TOO_LARGE",
+    }

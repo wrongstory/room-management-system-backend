@@ -24,6 +24,9 @@ if TYPE_CHECKING:
     from ..models.developer_runtime_status_configuration_googledriverootfolderid import (
         DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
     )
+    from ..models.developer_runtime_status_configuration_payrollcursorhmacsecret import (
+        DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET,
+    )
     from ..models.developer_runtime_status_configuration_photopurgeinvokesecret import (
         DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET,
     )
@@ -68,6 +71,7 @@ class DeveloperRuntimeStatusConfiguration:
         google_drive_refresh_token (DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN):
         google_drive_root_folder_id (DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID):
         photo_purge_invoke_secret (DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET):
+        payroll_cursor_hmac_secret (DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET):
     """
 
     account_phone_pepper: DeveloperRuntimeStatusConfigurationACCOUNTPHONEPEPPER
@@ -85,6 +89,7 @@ class DeveloperRuntimeStatusConfiguration:
     google_drive_refresh_token: DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN
     google_drive_root_folder_id: DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID
     photo_purge_invoke_secret: DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET
+    payroll_cursor_hmac_secret: DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET
 
     def to_dict(self) -> dict[str, Any]:
         account_phone_pepper = self.account_phone_pepper.to_dict()
@@ -115,6 +120,8 @@ class DeveloperRuntimeStatusConfiguration:
 
         photo_purge_invoke_secret = self.photo_purge_invoke_secret.to_dict()
 
+        payroll_cursor_hmac_secret = self.payroll_cursor_hmac_secret.to_dict()
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -132,6 +139,7 @@ class DeveloperRuntimeStatusConfiguration:
                 "GOOGLE_DRIVE_REFRESH_TOKEN": google_drive_refresh_token,
                 "GOOGLE_DRIVE_ROOT_FOLDER_ID": google_drive_root_folder_id,
                 "PHOTO_PURGE_INVOKE_SECRET": photo_purge_invoke_secret,
+                "PAYROLL_CURSOR_HMAC_SECRET": payroll_cursor_hmac_secret,
             }
         )
 
@@ -156,6 +164,9 @@ class DeveloperRuntimeStatusConfiguration:
         )
         from ..models.developer_runtime_status_configuration_googledriverootfolderid import (
             DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
+        )
+        from ..models.developer_runtime_status_configuration_payrollcursorhmacsecret import (
+            DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET,
         )
         from ..models.developer_runtime_status_configuration_photopurgeinvokesecret import (
             DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET,
@@ -252,6 +263,12 @@ class DeveloperRuntimeStatusConfiguration:
             )
         )
 
+        payroll_cursor_hmac_secret = (
+            DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET.from_dict(
+                d.pop("PAYROLL_CURSOR_HMAC_SECRET")
+            )
+        )
+
         developer_runtime_status_configuration = cls(
             account_phone_pepper=account_phone_pepper,
             reservation_pii_key_base64=reservation_pii_key_base64,
@@ -266,6 +283,7 @@ class DeveloperRuntimeStatusConfiguration:
             google_drive_refresh_token=google_drive_refresh_token,
             google_drive_root_folder_id=google_drive_root_folder_id,
             photo_purge_invoke_secret=photo_purge_invoke_secret,
+            payroll_cursor_hmac_secret=payroll_cursor_hmac_secret,
         )
 
         return developer_runtime_status_configuration

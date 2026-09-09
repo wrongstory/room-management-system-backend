@@ -25,6 +25,7 @@ const sourcePaths = [
   'supabase/functions/_shared/assignment-preview-core.ts',
   'supabase/functions/_shared/assignment-preview-api.ts',
   'supabase/functions/_shared/reservation-api.ts',
+  'supabase/functions/_shared/payroll-cursor.ts',
   'supabase/functions/_shared/payroll-api.ts',
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/openapi.ts',
@@ -136,7 +137,7 @@ runDeno([
 runDeno([
   'test',
   '--allow-read=supabase/functions/api/assets',
-  '--allow-env=ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER',
+  '--allow-env=SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,PAYROLL_CURSOR_HMAC_SECRET',
   '--frozen',
   '--config',
   'supabase/functions/deno.json',

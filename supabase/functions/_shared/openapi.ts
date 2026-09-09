@@ -2021,7 +2021,7 @@ export const openApiDocument = {
         operationId: "listPayrollCycles",
         summary: "종료 주차의 메이드별 주급 조회",
         description:
-          "비밀번호 변경을 완료한 active admin은 전체 또는 선택 메이드를, active maid는 본인만 조회합니다. cycle이 아직 없으면 쓰기 없이 cycleId=null, version=0인 conceptual OPEN을 반환합니다. totalAmount는 현재 OPEN에 편입 가능한 확정 수익이며 검수 대기 예상액을 포함하지 않습니다. PAYING 이후 늦게 확정된 수익은 lateEarnings로 분리하며 lockedAmount를 바꾸지 않습니다.",
+          "비밀번호 변경을 완료한 active admin은 전체 또는 선택 메이드를, active maid는 본인만 조회합니다. cycle이 아직 없으면 쓰기 없이 cycleId=null, version=0인 conceptual OPEN을 반환합니다. admin 전체 조회는 maidProfileId 오름차순 keyset cursor이며 page 최대 10개입니다. opaque cursor는 actor 역할/ID, weekStart, 적용된 maid filter, 고정 sort와 stream kind에 묶여 있으므로 저장한 URL 전체를 그대로 이어서 사용해야 합니다. 각 cycle의 items/lateEarnings는 최대 10개 preview이며 정확한 count/amount 합계와 별도 continuation을 제공합니다. 모든 payroll HTTP 응답은 UTF-8 JSON 128 KiB 상한을 초과하면 실패합니다. totalAmount는 현재 OPEN에 편입 가능한 확정 수익이며 검수 대기 예상액을 포함하지 않습니다. PAYING 이후 늦게 확정된 수익은 lateEarnings로 분리하며 lockedAmount를 바꾸지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [{
@@ -2036,6 +2036,20 @@ export const openApiDocument = {
           required: false,
           schema: { type: "string", format: "uuid" },
           description: "admin 선택 필터. maid는 본인 ID만 허용됩니다.",
+        }, {
+          name: "limit",
+          in: "query",
+          required: false,
+          schema: { type: "integer", minimum: 1, maximum: 10, default: 10 },
+          description:
+            "cycle page 크기. 10진 양의 정수만 허용되며 DB도 최대 10을 독립 강제합니다.",
+        }, {
+          name: "cursor",
+          in: "query",
+          required: false,
+          schema: { type: "string", minLength: 1, maxLength: 1024 },
+          description:
+            "직전 응답 nextCursor의 opaque 서명값. 해석하거나 다른 사용자/주차/필터에 재사용하지 않습니다.",
         }],
         responses: {
           "200": {
@@ -2053,6 +2067,66 @@ export const openApiDocument = {
           "404": errorResponse,
           "409": errorResponse,
           "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/entries": {
+      get: {
+        tags: ["Payroll"],
+        operationId: "listPayrollEntries",
+        summary: "주급 item 또는 늦은 확정 수익 연속 조회",
+        description:
+          "cycle preview의 itemsNextCursor 또는 lateEarningsNextCursor를 사용해 earnedOn, earningId 오름차순 keyset으로 이어서 조회합니다. limit 기본 25, 최대 50이며 OFFSET을 사용하지 않습니다. cursor는 actor 역할/ID, weekStart, maidProfileId, kind와 고정 sort에 서명되어 scope가 달라지거나 위변조되면 거부됩니다. 전체 응답은 UTF-8 JSON 128 KiB 상한을 적용합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [{
+          name: "weekStart",
+          in: "query",
+          required: true,
+          schema: { type: "string", format: "date" },
+          description: "KST 기준 월요일인 종료 주차 시작일",
+        }, {
+          name: "maidProfileId",
+          in: "query",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "조회 대상 메이드. maid는 본인 ID만 허용됩니다.",
+        }, {
+          name: "kind",
+          in: "query",
+          required: true,
+          schema: { type: "string", enum: ["items", "lateEarnings"] },
+          description: "items와 lateEarnings는 서로 다른 cursor stream입니다.",
+        }, {
+          name: "limit",
+          in: "query",
+          required: false,
+          schema: { type: "integer", minimum: 1, maximum: 50, default: 25 },
+          description: "상세 page 크기. DB도 최대 50을 독립 강제합니다.",
+        }, {
+          name: "cursor",
+          in: "query",
+          required: false,
+          schema: { type: "string", minLength: 1, maxLength: 1024 },
+          description: "동일 scope 직전 응답의 opaque nextCursor",
+        }],
+        responses: {
+          "200": {
+            description: "최대 50개의 주급 상세 keyset page",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/PayrollEntriesEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
         },
       },
     },
@@ -2062,7 +2136,7 @@ export const openApiDocument = {
         operationId: "startPayrollCycle",
         summary: "OPEN 주급을 PAYING snapshot으로 잠금",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. 종료된 주차의 아직 claim되지 않은 positive earning을 서버가 계산해 원자적으로 잠급니다. 응답은 지급 처리 시작 상태일 뿐 실제 송금 성공이 아닙니다. amount나 earning ID는 클라이언트가 입력할 수 없습니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 종료된 주차의 아직 claim되지 않은 positive earning을 서버가 계산해 원자적으로 잠급니다. 응답과 동일 command replay는 정확한 합계와 최대 10개 nested preview/continuation만 반환하며 UTF-8 JSON 128 KiB 상한을 적용합니다. 응답은 지급 처리 시작 상태일 뿐 실제 송금 성공이 아닙니다. amount나 earning ID는 클라이언트가 입력할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -2091,6 +2165,7 @@ export const openApiDocument = {
           "404": errorResponse,
           "409": errorResponse,
           "500": errorResponse,
+          "503": errorResponse,
         },
       },
     },
@@ -3255,6 +3330,11 @@ export const openApiDocument = {
           "PAYROLL_ACCESS_REQUIRED",
           "PAYROLL_MAID_NOT_FOUND",
           "PAYROLL_WEEK_MUST_START_MONDAY",
+          "PAYROLL_PAGE_LIMIT_INVALID",
+          "PAYROLL_PAGE_KIND_INVALID",
+          "PAYROLL_CURSOR_INVALID",
+          "PAYROLL_CURSOR_NOT_CONFIGURED",
+          "PAYROLL_RESPONSE_TOO_LARGE",
           "INVALID_EXPECTED_VERSION",
           "PAYROLL_WEEK_NOT_CLOSED",
           "PAYROLL_CYCLE_NOT_OPEN",
@@ -3634,6 +3714,7 @@ export const openApiDocument = {
               "GOOGLE_DRIVE_REFRESH_TOKEN",
               "GOOGLE_DRIVE_ROOT_FOLDER_ID",
               "PHOTO_PURGE_INVOKE_SECRET",
+              "PAYROLL_CURSOR_HMAC_SECRET",
             ],
             properties: Object.fromEntries(
               [
@@ -3650,6 +3731,7 @@ export const openApiDocument = {
                 "GOOGLE_DRIVE_REFRESH_TOKEN",
                 "GOOGLE_DRIVE_ROOT_FOLDER_ID",
                 "PHOTO_PURGE_INVOKE_SECRET",
+                "PAYROLL_CURSOR_HMAC_SECRET",
               ].map((name) => [
                 name,
                 {
@@ -5694,9 +5776,11 @@ export const openApiDocument = {
           "itemCount",
           "totalAmount",
           "items",
+          "itemsNextCursor",
           "lateEarningCount",
           "lateEarningAmount",
           "lateEarnings",
+          "lateEarningsNextCursor",
         ],
         properties: {
           cycleId: { type: ["string", "null"], format: "uuid" },
@@ -5720,7 +5804,15 @@ export const openApiDocument = {
           },
           items: {
             type: "array",
+            maxItems: 10,
             items: { $ref: "#/components/schemas/PayrollItem" },
+          },
+          itemsNextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+            description:
+              "items preview가 더 있으면 동일 actor/week/maid/items scope의 opaque continuation",
           },
           lateEarningCount: { type: "integer", minimum: 0 },
           lateEarningAmount: {
@@ -5730,7 +5822,15 @@ export const openApiDocument = {
           },
           lateEarnings: {
             type: "array",
+            maxItems: 10,
             items: { $ref: "#/components/schemas/PayrollLateEarning" },
+          },
+          lateEarningsNextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+            description:
+              "lateEarnings preview가 더 있으면 별도 opaque continuation",
           },
         },
       },
@@ -5749,11 +5849,44 @@ export const openApiDocument = {
       PayrollListEnvelope: {
         type: "object",
         additionalProperties: false,
-        required: ["payroll"],
+        required: ["payroll", "nextCursor"],
         properties: {
           payroll: {
             type: "array",
+            maxItems: 10,
             items: { $ref: "#/components/schemas/PayrollCycle" },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+            description: "admin-all cycle keyset의 opaque continuation",
+          },
+        },
+      },
+      PayrollEntriesEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "entries", "nextCursor"],
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["items", "lateEarnings"],
+          },
+          entries: {
+            type: "array",
+            maxItems: 50,
+            items: {
+              oneOf: [
+                { $ref: "#/components/schemas/PayrollItem" },
+                { $ref: "#/components/schemas/PayrollLateEarning" },
+              ],
+            },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
           },
         },
       },
