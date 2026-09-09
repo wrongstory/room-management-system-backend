@@ -71,13 +71,61 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 74 &&
+    Object.keys(document.paths).length === 76 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 80,
-    "candidate contract74/80",
+        ).length === 82,
+    "candidate contract76/82",
+  );
+});
+
+Deno.test("payroll OpenAPI separates confirmed, locked and late earnings without client amounts", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const list = document.paths["/v1/payroll"].get;
+  const start = document.paths["/v1/payroll/start"].post;
+  const schemas = document.components.schemas;
+  assert(
+    list.operationId === "listPayrollCycles",
+    "stable payroll list operation",
+  );
+  assert(
+    start.operationId === "startPayrollCycle",
+    "stable payroll start operation",
+  );
+  assert(
+    list["x-required-roles"].join() === "admin,maid",
+    "admin and self maid read",
+  );
+  assert(
+    start["x-required-roles"].join() === "admin",
+    "business admin starts payment",
+  );
+  assert(
+    start.parameters.some((parameter) => parameter.name === "Idempotency-Key"),
+    "payroll start requires idempotency",
+  );
+  assert(
+    schemas.PayrollStartRequest.additionalProperties === false &&
+      !Object.hasOwn(schemas.PayrollStartRequest.properties, "amount") &&
+      !Object.hasOwn(schemas.PayrollStartRequest.properties, "earningIds"),
+    "server computes amount and earning set",
+  );
+  assert(
+    schemas.PayrollCycle.required.includes("lateEarnings") &&
+      schemas.PayrollCycle.properties.lockedAmount.description.includes(
+        "다시 계산하지",
+      ) &&
+      schemas.PayrollCycle.properties.lateEarningAmount.description.includes(
+        "분리",
+      ),
+    "locked snapshot and late earnings are distinct",
+  );
+  assert(
+    list.description.includes("cycleId=null") &&
+      start.description.includes("실제 송금 성공이 아닙니다"),
+    "conceptual OPEN and no-transfer semantics documented",
   );
 });
 

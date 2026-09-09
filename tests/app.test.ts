@@ -124,6 +124,10 @@ function services(): AppServices {
       processDue: vi.fn(),
       createManualCleaningRequest: vi.fn(),
       cancelManualCleaningRequest: vi.fn()
+    },
+    payroll: {
+      list: vi.fn(async () => []),
+      start: vi.fn()
     }
   };
 }
@@ -435,6 +439,140 @@ describe('application', () => {
     });
     expect(JSON.stringify(response.json())).not.toContain('guest_name_encrypted');
     expect(JSON.stringify(response.json())).not.toContain('홍길동');
+    await app.close();
+  });
+
+  it('lists payroll projections for an authenticated reader without side effects', async () => {
+    const appServices = services();
+    appServices.payroll.list = vi.fn(async () => []);
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/payroll?weekStart=2026-08-24',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ payroll: [] });
+    expect(appServices.payroll.list).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      '2026-08-24',
+      undefined
+    );
+
+    for (const url of [
+      '/v1/payroll/?weekStart=2026-08-24',
+      '/v1/payroll/extra?weekStart=2026-08-24'
+    ]) {
+      const alias = await app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: 'Bearer access-token' }
+      });
+      expect(alias.statusCode).toBe(404);
+    }
+    await app.close();
+  });
+
+  it('starts payroll with an exact body and Idempotency-Key', async () => {
+    const appServices = services();
+    appServices.payroll.start = vi.fn(async (_actor, input) => ({
+      cycleId: '61000000-0000-4000-8000-000000000001',
+      maidProfileId: input.maidProfileId,
+      weekStart: input.weekStart,
+      status: 'paying' as const,
+      version: 1,
+      lockedAmount: 30000,
+      paymentStartedAt: '2026-09-10T00:00:00Z',
+      itemCount: 1,
+      totalAmount: 30000,
+      items: [],
+      lateEarningCount: 0,
+      lateEarningAmount: 0,
+      lateEarnings: []
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/start',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'payroll-start-0001'
+      },
+      payload: {
+        maidProfileId: '62000000-0000-4000-8000-000000000001',
+        weekStart: '2026-08-24',
+        expectedVersion: 0
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().payroll.status).toBe('paying');
+    expect(appServices.payroll.start).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ idempotencyKey: 'payroll-start-0001' })
+    );
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/start',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'payroll-start-0002'
+      },
+      payload: {
+        maidProfileId: '62000000-0000-4000-8000-000000000001',
+        weekStart: '2026-08-24',
+        expectedVersion: 0,
+        amount: 30000
+      }
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error.code).toBe('VALIDATION_ERROR');
+    const queryAlias = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/start?amount=30000',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'payroll-start-0004'
+      },
+      payload: {
+        maidProfileId: '62000000-0000-4000-8000-000000000001',
+        weekStart: '2026-08-24',
+        expectedVersion: 0
+      }
+    });
+    expect(queryAlias.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('requires exact business admin role for payroll start', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-maid-1',
+      profileId: '62000000-0000-4000-8000-000000000001',
+      displayName: '메이드',
+      role: 'maid' as const,
+      mustChangePassword: false,
+      accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/start',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'payroll-start-0003'
+      },
+      payload: {
+        maidProfileId: '62000000-0000-4000-8000-000000000001',
+        weekStart: '2026-08-24',
+        expectedVersion: 0
+      }
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ADMIN_REQUIRED');
+    expect(appServices.payroll.start).not.toHaveBeenCalled();
     await app.close();
   });
 });

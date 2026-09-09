@@ -242,6 +242,33 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(openApi).toContain('DIAGNOSTICS_RATE_LIMITED');
   });
 
+  it('ports payroll through exact actor-bound RPCs and a bounded denial source', async () => {
+    const payrollApi = await readFile(
+      new URL('../supabase/functions/_shared/payroll-api.ts', import.meta.url),
+      'utf8'
+    );
+    const edgeIndex = await readFile(
+      new URL('../supabase/functions/api/index.ts', import.meta.url),
+      'utf8'
+    );
+    const activity = await readFile(
+      new URL('../supabase/functions/_shared/activity-contract.ts', import.meta.url),
+      'utf8'
+    );
+    const openApi = await readFile(
+      new URL('../supabase/functions/_shared/openapi.ts', import.meta.url),
+      'utf8'
+    );
+    expect(payrollApi).toContain('list_payroll_cycles');
+    expect(payrollApi).toContain('start_payroll_cycle');
+    expect(payrollApi).toContain('PAYROLL_ACCESS_REQUIRED');
+    expect(edgeIndex).toContain('path === "/v1/payroll"');
+    expect(edgeIndex).toContain('path === "/v1/payroll/start"');
+    expect(activity).toContain('edge.authorization.payroll');
+    expect(openApi).toContain('operationId: "listPayrollCycles"');
+    expect(openApi).toContain('operationId: "startPayrollCycle"');
+  });
+
   it('records only source-controlled security activity through server-owned RPCs', async () => {
     const [api, accountApi, activityApi, contract, migration] = await Promise.all([
       readFile(apiUrl, 'utf8'),

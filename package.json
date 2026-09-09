@@ -30,7 +30,8 @@
     "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs",
     "edge:check": "node scripts/check-edge-functions.mjs",
     "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
-    "console:openapi:export": "tsx scripts/export-backend-console-openapi.ts"
+    "console:openapi:export": "tsx scripts/export-backend-console-openapi.ts",
+    "openapi:export:full": "tsx scripts/export-full-openapi.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",

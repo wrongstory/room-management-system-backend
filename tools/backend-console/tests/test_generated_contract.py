@@ -95,7 +95,7 @@ def test_photo_upload_and_original_read_are_not_developer_console_capabilities()
 
     groups = {entry.name for entry in pkgutil.iter_modules(api.__path__)}
     assert groups == {"accounts", "auth", "developer"}
-    assert {"photos", "attempts", "photo_uploads"}.isdisjoint(groups)
+    assert {"photos", "attempts", "photo_uploads", "payroll"}.isdisjoint(groups)
 
 
 def test_account_response_and_status_command_use_distinct_enums() -> None:

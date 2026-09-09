@@ -111,6 +111,13 @@ Deno.test("authorization activity maps routes to fixed capability sources", () =
     "reservation route category",
   );
   assert(
+    authorizationSourceForPath("/v1/payroll") ===
+        "edge.authorization.payroll" &&
+      authorizationSourceForPath("/v1/payroll/start") ===
+        "edge.authorization.payroll",
+    "payroll route category",
+  );
+  assert(
     authorizationSourceForPath("/v1/unknown") === null,
     "unknown routes must not be persisted",
   );

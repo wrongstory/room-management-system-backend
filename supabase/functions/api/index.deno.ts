@@ -753,6 +753,132 @@ Deno.test("limited upload_only submission route uses capability auth and preserv
   }
 });
 
+Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial activity", async () => {
+  const maidProfileId = "95000000-0000-4000-8000-000000000001";
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const payroll = {
+    cycleId: null,
+    maidProfileId,
+    weekStart: "2026-08-24",
+    status: "open",
+    version: 0,
+    lockedAmount: null,
+    paymentStartedAt: null,
+    itemCount: 0,
+    totalAmount: 0,
+    items: [],
+    lateEarningCount: 0,
+    lateEarningAmount: 0,
+    lateEarnings: [],
+  };
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        return Promise.resolve({
+          data: name === "list_payroll_cycles" ? [payroll] : {
+            ...payroll,
+            cycleId: "96000000-0000-4000-8000-000000000001",
+            status: "paying",
+            version: 1,
+            lockedAmount: 30000,
+            paymentStartedAt: "2026-09-10T00:00:00Z",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => clients,
+    authenticateRequest: () => Promise.resolve(actor),
+  };
+
+  const listed = await handleApiRequest(
+    request("GET", "/v1/payroll?weekStart=2026-08-24"),
+    dependencies,
+  );
+  assert(
+    listed.status === 200 && (await listed.json()).payroll.length === 1,
+    "admin list",
+  );
+
+  const started = await handleApiRequest(
+    request("POST", "/v1/payroll/start", {
+      maidProfileId,
+      weekStart: "2026-08-24",
+      expectedVersion: 0,
+    }),
+    dependencies,
+  );
+  assert(
+    started.status === 200 &&
+      (await started.json()).payroll.status === "paying",
+    "admin start",
+  );
+
+  const maidActor: EdgeActor = {
+    ...actor,
+    profileId: maidProfileId,
+    role: "maid",
+  };
+  const maidList = await handleApiRequest(
+    request("GET", "/v1/payroll?weekStart=2026-08-24"),
+    { ...dependencies, authenticateRequest: () => Promise.resolve(maidActor) },
+  );
+  assert(maidList.status === 200, "maid self list");
+  const deniedStart = await handleApiRequest(
+    request("POST", "/v1/payroll/start", {
+      maidProfileId,
+      weekStart: "2026-08-24",
+      expectedVersion: 0,
+    }),
+    { ...dependencies, authenticateRequest: () => Promise.resolve(maidActor) },
+  );
+  assert(
+    deniedStart.status === 403 &&
+      (await deniedStart.json()).error.code === "ADMIN_REQUIRED",
+    "maid start denied",
+  );
+  assert(
+    calls.at(-1)?.name === "record_authorization_denial" &&
+      calls.at(-1)?.args.p_source === "edge.authorization.payroll",
+    "payroll denial uses bounded source",
+  );
+
+  const developerList = await handleApiRequest(
+    request("GET", "/v1/payroll?weekStart=2026-08-24"),
+    {
+      ...dependencies,
+      authenticateRequest: () =>
+        Promise.resolve({ ...actor, role: "developer" }),
+    },
+  );
+  assert(
+    developerList.status === 403 &&
+      (await developerList.json()).error.code === "PAYROLL_ACCESS_REQUIRED",
+    "developer list denied",
+  );
+
+  for (
+    const [method, path, body] of [
+      ["GET", "/v1/payroll/start", undefined],
+      ["POST", "/v1/payroll", {
+        maidProfileId,
+        weekStart: "2026-08-24",
+        expectedVersion: 0,
+      }],
+      ["GET", "/v1/payroll/extra?weekStart=2026-08-24", undefined],
+    ] as const
+  ) {
+    const response = await handleApiRequest(
+      request(method, path, body),
+      dependencies,
+    );
+    assert(response.status === 404, `${method} ${path} no alias`);
+  }
+});
+
 Deno.test("Room GET detail route rejects every mutation-shaped alias", async () => {
   const forbiddenGetPaths = [
     `/v1/rooms/${roomId}/master-data`,

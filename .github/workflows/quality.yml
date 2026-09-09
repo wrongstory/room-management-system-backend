@@ -44,6 +44,7 @@ jobs:
           uv run --python 3.12 ruff format --check .
           uv run --python 3.12 mypy src tests scripts
           uv run --python 3.12 pytest
+          uv run --python 3.12 python scripts/check_business_openapi_codegen.py
           uv run --python 3.12 python scripts/build.py --check-only
 
   migration:

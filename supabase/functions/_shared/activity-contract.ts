@@ -6,6 +6,7 @@ export type ActivitySource =
   | "edge.authorization.assignments"
   | "edge.authorization.attempts"
   | "edge.authorization.photos"
+  | "edge.authorization.payroll"
   | "edge.authorization.reservations"
   | "edge.authorization.rooms"
   | "edge.sensitive.reservation_guest_name";
@@ -27,6 +28,7 @@ export type AuthorizationDeniedCode =
   | "PHOTO_ACCESS_REQUIRED"
   | "BOMB_REPORT_ACCESS_REQUIRED"
   | "SUBMISSION_ACCESS_REQUIRED"
+  | "PAYROLL_ACCESS_REQUIRED"
   | "PASSWORD_CHANGE_REQUIRED";
 
 const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
@@ -41,6 +43,7 @@ const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
   "PHOTO_ACCESS_REQUIRED",
   "BOMB_REPORT_ACCESS_REQUIRED",
   "SUBMISSION_ACCESS_REQUIRED",
+  "PAYROLL_ACCESS_REQUIRED",
   "PASSWORD_CHANGE_REQUIRED",
 ]);
 
@@ -83,6 +86,9 @@ export function authorizationSourceForPath(
   }
   if (path.startsWith("/v1/reservations")) {
     return "edge.authorization.reservations";
+  }
+  if (path === "/v1/payroll" || path === "/v1/payroll/start") {
+    return "edge.authorization.payroll";
   }
   if (
     path.startsWith("/v1/attempts/") ||
