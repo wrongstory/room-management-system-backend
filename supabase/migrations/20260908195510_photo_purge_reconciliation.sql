@@ -167,7 +167,7 @@ from private.photo_orphan_purge_jobs where operation_id=p_operation $$;
 
 create function public.claim_due_photo_orphan_purges(p_claim_digest text,p_limit integer default 10) returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare j private.photo_orphan_purge_jobs; at_time timestamptz; items jsonb:='[]'::jsonb;
+declare j private.photo_orphan_purge_jobs; at_time timestamptz; items jsonb:='[]'::jsonb; blocked integer:=0;
 begin
   if p_claim_digest is null or p_claim_digest !~ '^[0-9a-f]{64}$' or p_limit is null or p_limit not between 1 and 10 then
     raise exception using errcode='23514',message='PHOTO_PURGE_INVALID'; end if;
@@ -179,12 +179,13 @@ begin
     at_time:=clock_timestamp();
     if j.lease_expires_at>at_time and j.claim_digest=p_claim_digest then items:=items||jsonb_build_array(private.photo_orphan_purge_projection(j.operation_id)); continue; end if;
     if j.lease_version>=8 then
-      update private.photo_orphan_purge_jobs set status='blocked',last_reason_code='RETRY_EXHAUSTED',revision=revision+1 where operation_id=j.operation_id; continue; end if;
+      update private.photo_orphan_purge_jobs set status='blocked',last_reason_code='RETRY_EXHAUSTED',revision=revision+1 where operation_id=j.operation_id;
+      blocked:=blocked+1; continue; end if;
     update private.photo_orphan_purge_jobs set status='claimed',lease_version=lease_version+1,claim_digest=p_claim_digest,
       lease_expires_at=at_time+interval '5 minutes',last_reason_code=null,revision=revision+1 where operation_id=j.operation_id;
     items:=items||jsonb_build_array(private.photo_orphan_purge_projection(j.operation_id));
   end loop;
-  return jsonb_build_object('items',items);
+  return jsonb_build_object('items',items,'blocked',blocked);
 end; $$;
 
 create function public.get_photo_orphan_purge_context(p_operation_id uuid,p_lease_version integer,p_claim_digest text) returns jsonb
@@ -265,7 +266,7 @@ from private.photo_folder_purge_jobs where folder_registry_id=p_folder $$;
 
 create function public.claim_due_photo_folder_purges(p_claim_digest text,p_limit integer default 10) returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare j private.photo_folder_purge_jobs; f private.photo_drive_folder_identities; at_time timestamptz; items jsonb:='[]'::jsonb;
+declare j private.photo_folder_purge_jobs; f private.photo_drive_folder_identities; at_time timestamptz; items jsonb:='[]'::jsonb; blocked integer:=0;
 begin
   if p_claim_digest is null or p_claim_digest !~ '^[0-9a-f]{64}$' or p_limit is null or p_limit not between 1 and 10 then
     raise exception using errcode='23514',message='PHOTO_PURGE_INVALID'; end if;
@@ -281,15 +282,17 @@ begin
     at_time:=clock_timestamp();
     if j.lease_expires_at>at_time and j.claim_digest=p_claim_digest then items:=items||jsonb_build_array(private.photo_folder_purge_projection(j.folder_registry_id)); continue; end if;
     if j.lease_version>=8 then
-      update private.photo_folder_purge_jobs set status='blocked',last_reason_code='RETRY_EXHAUSTED',revision=revision+1 where folder_registry_id=j.folder_registry_id; continue; end if;
+      update private.photo_folder_purge_jobs set status='blocked',last_reason_code='RETRY_EXHAUSTED',revision=revision+1 where folder_registry_id=j.folder_registry_id;
+      blocked:=blocked+1; continue; end if;
     if not private.maybe_retire_photo_folder(j.folder_registry_id,at_time) then
-      update private.photo_folder_purge_jobs set status='blocked',last_reason_code='FOLDER_NOT_EMPTY',revision=revision+1 where folder_registry_id=j.folder_registry_id; continue; end if;
+      update private.photo_folder_purge_jobs set status='blocked',last_reason_code='FOLDER_NOT_EMPTY',revision=revision+1 where folder_registry_id=j.folder_registry_id;
+      blocked:=blocked+1; continue; end if;
     update private.photo_folder_purge_jobs set status='claimed',lease_version=lease_version+1,claim_digest=p_claim_digest,
       lease_expires_at=at_time+interval '5 minutes',delete_prepared_version=lease_version+1,last_reason_code=null,revision=revision+1
       where folder_registry_id=j.folder_registry_id;
     items:=items||jsonb_build_array(private.photo_folder_purge_projection(j.folder_registry_id));
   end loop;
-  return jsonb_build_object('items',items);
+  return jsonb_build_object('items',items,'blocked',blocked);
 end; $$;
 
 create function public.get_photo_folder_purge_context(p_folder_registry_id uuid,p_lease_version integer,p_claim_digest text) returns jsonb
@@ -358,11 +361,14 @@ end; $$;
 
 create function public.get_developer_photo_purge_status(p_actor_profile_id uuid) returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare h private.photo_purge_heartbeat;
+declare h private.photo_purge_heartbeat; blocked_count integer;
 begin
   perform private.assert_active_developer(p_actor_profile_id);
   select * into h from private.photo_purge_heartbeat where singleton;
-  return jsonb_build_object('status',case when h.singleton is null then 'awaiting_first_run' when h.status='succeeded' then 'healthy' else h.status end,
+  select least(1000,count(*))::integer into blocked_count from (select 1 from private.photo_purge_jobs where status='blocked'
+    union all select 1 from private.photo_orphan_purge_jobs where status='blocked'
+    union all select 1 from private.photo_folder_purge_jobs where status='blocked' limit 1000) q;
+  return jsonb_build_object('status',case when blocked_count>0 then 'degraded' when h.singleton is null then 'awaiting_first_run' when h.status='succeeded' then 'healthy' else h.status end,
     'lastHeartbeat',case when h.singleton is null then null else jsonb_build_object('status',h.status,'claimed',h.claimed,'purged',h.purged,
       'retrying',h.retrying,'blocked',h.blocked,'acceptedClaimed',h.accepted_claimed,'orphanClaimed',h.orphan_claimed,
       'folderClaimed',h.folder_claimed,'errorCode',h.error_code,'recordedAt',h.recorded_at) end,
@@ -370,9 +376,7 @@ begin
       'acceptedDue',least(1000,(select count(*) from (select 1 from private.photo_purge_jobs where status in ('pending','retry','claimed') and purge_after<=clock_timestamp() limit 1000) q)),
       'orphanDue',least(1000,(select count(*) from (select 1 from private.photo_orphan_purge_jobs where status in ('pending','retry','claimed') and next_attempt_at<=clock_timestamp() limit 1000) q)),
       'folderDue',least(1000,(select count(*) from (select 1 from private.photo_folder_purge_jobs where status in ('retiring','retry','claimed') and next_attempt_at<=clock_timestamp() limit 1000) q)),
-      'blocked',least(1000,(select count(*) from (select 1 from private.photo_purge_jobs where status='blocked'
-        union all select 1 from private.photo_orphan_purge_jobs where status='blocked'
-        union all select 1 from private.photo_folder_purge_jobs where status='blocked' limit 1000) q))),
+      'blocked',blocked_count),
     'checkedAt',clock_timestamp());
 end; $$;
 
@@ -603,7 +607,7 @@ select jsonb_build_object('objectId',object_id,'operationId',operation_id,'photo
 from private.photo_purge_jobs where object_id=p_object $$;
 create function public.claim_due_photo_purges(p_claim_digest text,p_limit integer default 10) returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare j private.photo_purge_jobs; at_time timestamptz; items jsonb:='[]'::jsonb;
+declare j private.photo_purge_jobs; at_time timestamptz; items jsonb:='[]'::jsonb; blocked integer:=0;
 begin
   if p_claim_digest is null or p_claim_digest !~ '^[0-9a-f]{64}$' or p_limit is null or p_limit not between 1 and 10 then
     raise exception using errcode='23514',message='PHOTO_PURGE_INVALID'; end if;
@@ -615,12 +619,13 @@ begin
     at_time:=clock_timestamp();
     if j.lease_expires_at>at_time and j.claim_digest=p_claim_digest then items:=items||jsonb_build_array(private.photo_purge_projection(j.object_id)); continue; end if;
     if j.lease_version>=8 then
-      update private.photo_purge_jobs set status='blocked',last_reason_code='RETRY_EXHAUSTED',revision=revision+1 where object_id=j.object_id; continue; end if;
+      update private.photo_purge_jobs set status='blocked',last_reason_code='RETRY_EXHAUSTED',revision=revision+1 where object_id=j.object_id;
+      blocked:=blocked+1; continue; end if;
     update private.photo_purge_jobs set status='claimed',lease_version=lease_version+1,claim_digest=p_claim_digest,lease_expires_at=at_time+interval '5 minutes',
       last_reason_code=null,revision=revision+1 where object_id=j.object_id;
     items:=items||jsonb_build_array(private.photo_purge_projection(j.object_id));
   end loop;
-  return jsonb_build_object('items',items);
+  return jsonb_build_object('items',items,'blocked',blocked);
 end; $$;
 create function public.get_photo_purge_context(p_object_id uuid,p_lease_version integer,p_claim_digest text) returns jsonb
 language plpgsql security definer set search_path='' as $$

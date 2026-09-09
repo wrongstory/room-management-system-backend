@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GoogleDriveProvider } from '../src/modules/photos/google-drive.js';
 const fileId = 'synthetic_private_file', parentId = 'synthetic_private_parent';
 function setup(status: number, options: { network?: boolean; wrongParent?: boolean; children?: unknown[]; nextPage?: string; incomplete?: boolean } = {}) {
@@ -16,6 +16,7 @@ function setup(status: number, options: { network?: boolean; wrongParent?: boole
   return { calls, provider: new GoogleDriveProvider({ clientId: 'synthetic-client', clientSecret: 'synthetic-secret', refreshToken: 'synthetic-refresh', rootFolderId: 'synthetic_root_folder' }, transport) };
 }
 describe('purge Drive adapter fake-only boundaries', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
   it.each([204, 404])('DELETE %i is logical success with exact ID and no body', async status => {
     const s = setup(status); expect(await s.provider.purgeRemove(fileId)).toBe(status === 204 ? 'deleted' : 'not_found');
     expect(s.calls.at(-1)?.url.pathname).toBe(`/drive/v3/files/${fileId}`); expect(s.calls.at(-1)?.method).toBe('DELETE');
@@ -40,5 +41,32 @@ describe('purge Drive adapter fake-only boundaries', () => {
   });
   it('path injection fails before any network call', async () => {
     const s = setup(204); await expect(s.provider.purgeRemove('../folder?x=secret')).rejects.toBeDefined(); expect(s.calls).toHaveLength(0);
+  });
+  it('derives OAuth and Drive abort signals from one absolute provider deadline', async () => {
+    let now = 1000; const timeouts: number[] = [];
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => { timeouts.push(milliseconds); return new AbortController().signal; });
+    const transport: typeof fetch = async input => {
+      const url = new URL(String(input)); now += 200;
+      if (url.hostname === 'oauth2.googleapis.com') return Response.json({ access_token: 'synthetic_token', expires_in: 3600, token_type: 'Bearer' });
+      return new Response(null, { status: 204 });
+    };
+    const provider = new GoogleDriveProvider({ clientId: 'synthetic-client', clientSecret: 'synthetic-secret', refreshToken: 'synthetic-refresh', rootFolderId: 'synthetic_root_folder' }, transport);
+    await expect(provider.purgeRemove(fileId, 2000)).resolves.toBe('deleted');
+    expect(timeouts).toEqual([1000, 800]);
+  });
+  it('recomputes the remaining absolute deadline across folder metadata and child-list requests', async () => {
+    let now = 1000; const timeouts: number[] = [];
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => { timeouts.push(milliseconds); return new AbortController().signal; });
+    const transport: typeof fetch = async input => {
+      const url = new URL(String(input)); now += 200;
+      if (url.hostname === 'oauth2.googleapis.com') return Response.json({ access_token: 'synthetic_token', expires_in: 3600, token_type: 'Bearer' });
+      if (url.searchParams.has('q')) return Response.json({ files: [], incompleteSearch: false });
+      return Response.json({ id: fileId, mimeType: 'application/vnd.google-apps.folder', parents: [parentId], shared: false, trashed: false });
+    };
+    const provider = new GoogleDriveProvider({ clientId: 'synthetic-client', clientSecret: 'synthetic-secret', refreshToken: 'synthetic-refresh', rootFolderId: 'synthetic_root_folder' }, transport);
+    await expect(provider.purgeEmptyFolder(fileId, parentId, 2200)).resolves.toBe('empty');
+    expect(timeouts).toEqual([1200, 1000, 800]);
   });
 });

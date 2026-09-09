@@ -13,6 +13,7 @@ Deno.test("dedicated purge route refuses client credentials, aliases, clock and 
       notFound: 0,
       retryable: 0,
       deferred: 0,
+      blocked: 0,
       acceptedClaimed: 0,
       orphanClaimed: 0,
       folderClaimed: 0,
@@ -54,6 +55,7 @@ Deno.test("DB rejects stale due/fence before deletion and raw errors are not ref
               objectId: "00000000-0000-4000-8000-000000000001",
               leaseVersion: 1,
             }],
+            blocked: 0,
           },
           error: null,
         }

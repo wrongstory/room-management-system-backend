@@ -47,12 +47,17 @@ export class GoogleDriveProvider implements PhotoProvider {
       return record(JSON.parse(new TextDecoder().decode(body)));
     } catch { return unavailable(); }
   }
-  async #accessToken(): Promise<string> {
+  #signal(deadlineAt?: number): AbortSignal {
+    const remaining = deadlineAt === undefined ? 10000 : Math.floor(deadlineAt - Date.now());
+    if (remaining <= 0) throw new PhotoPurgeProviderError('NETWORK_ERROR');
+    return AbortSignal.timeout(Math.max(1, Math.min(10000, remaining)));
+  }
+  async #accessToken(deadlineAt?: number): Promise<string> {
     if (this.#token && this.#token.expiresAt > Date.now() + 30000) return this.#token.value;
     this.#refresh ??= (async () => {
       try {
         const response = await this.#fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+          method: 'POST', redirect: 'error', signal: this.#signal(deadlineAt),
           headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ client_id: this.#config.clientId, client_secret: this.#config.clientSecret,
             refresh_token: this.#config.refreshToken, grant_type: 'refresh_token' })
@@ -67,12 +72,12 @@ export class GoogleDriveProvider implements PhotoProvider {
     })();
     try { return await this.#refresh; } finally { this.#refresh = undefined; }
   }
-  async #request(path: string, init: RequestInit = {}, upload = false): Promise<Response> {
+  async #request(path: string, init: RequestInit = {}, upload = false, deadlineAt?: number): Promise<Response> {
     // path는 이 class의 고정 builder에서만 생성한다. redirect/사용자 URL/외부 filename을 받지 않는다.
-    const token = await this.#accessToken();
+    const token = await this.#accessToken(deadlineAt);
     try {
       const response = await this.#fetch(`https://www.googleapis.com/${upload ? 'upload/' : ''}drive/v3/${path}`, {
-        ...init, redirect: 'error', signal: AbortSignal.timeout(10000),
+        ...init, redirect: 'error', signal: this.#signal(deadlineAt),
         headers: { ...init.headers, authorization: `Bearer ${token}` }
       });
       if (response.status === 401) this.#token = undefined;
@@ -172,36 +177,36 @@ export class GoogleDriveProvider implements PhotoProvider {
     if (response.status !== 204) return unavailable();
     return 'deleted';
   }
-  async #purgeRequest(path: string, init: RequestInit = {}): Promise<Response> {
+  async #purgeRequest(path: string, deadlineAt: number, init: RequestInit = {}): Promise<Response> {
     let response: Response;
-    try { response = await this.#request(path, init); }
+    try { response = await this.#request(path, init, false, deadlineAt); }
     catch { throw new PhotoPurgeProviderError('NETWORK_ERROR'); }
     if (response.status === 429) throw new PhotoPurgeProviderError('RATE_LIMITED');
     if (!response.ok && response.status !== 404) throw new PhotoPurgeProviderError('PROVIDER_ERROR');
     return response;
   }
   /** Only a DB-fenced due/retired identity can reach this internal method. */
-  async purgeRemove(fileId: string): Promise<'deleted' | 'not_found'> {
-    const response = await this.#purgeRequest(`files/${id(fileId)}`, { method: 'DELETE' });
+  async purgeRemove(fileId: string, deadlineAt = Date.now() + 10000): Promise<'deleted' | 'not_found'> {
+    const response = await this.#purgeRequest(`files/${id(fileId)}`, deadlineAt, { method: 'DELETE' });
     if (response.status === 404) return 'not_found';
     if (response.status !== 204) throw new PhotoPurgeProviderError('PROVIDER_ERROR');
     return 'deleted';
   }
-  async purgeExists(fileId: string): Promise<boolean> {
-    const response = await this.#purgeRequest(`files/${id(fileId)}?fields=id`);
+  async purgeExists(fileId: string, deadlineAt = Date.now() + 10000): Promise<boolean> {
+    const response = await this.#purgeRequest(`files/${id(fileId)}?fields=id`, deadlineAt);
     if (response.status === 404) return false;
     if ((await this.#json(response)).id !== fileId) throw new PhotoPurgeProviderError('PROVIDER_ERROR');
     return true;
   }
   /** Not deletion authority: caller must already own the DB retirement/admission barrier. */
-  async purgeEmptyFolder(folderId: string, parentId: string): Promise<'empty' | 'not_found' | 'not_empty'> {
-    const response = await this.#purgeRequest(`files/${id(folderId)}?fields=id,mimeType,parents,trashed,shared`);
+  async purgeEmptyFolder(folderId: string, parentId: string, deadlineAt = Date.now() + 10000): Promise<'empty' | 'not_found' | 'not_empty'> {
+    const response = await this.#purgeRequest(`files/${id(folderId)}?fields=id,mimeType,parents,trashed,shared`, deadlineAt);
     if (response.status === 404) return 'not_found';
     const row = await this.#json(response);
     if (row.id !== folderId || row.mimeType !== 'application/vnd.google-apps.folder' || row.shared !== false || row.trashed !== false || !Array.isArray(row.parents) || row.parents.length !== 1 || row.parents[0] !== id(parentId)) throw new PhotoPurgeProviderError('PROVIDER_ERROR');
     // Parent-only existence check, including trashed children: no filename search and no pagination scan.
     const query = new URLSearchParams({ q: `'${id(folderId)}' in parents`, pageSize: '1', fields: 'files(id),nextPageToken,incompleteSearch' });
-    const children = await this.#purgeRequest(`files?${query}`);
+    const children = await this.#purgeRequest(`files?${query}`, deadlineAt);
     if (!children.ok) throw new PhotoPurgeProviderError('PROVIDER_ERROR');
     const data = await this.#json(children);
     if (!Array.isArray(data.files) || data.incompleteSearch === true || data.nextPageToken) return 'not_empty';

@@ -656,10 +656,10 @@ production completeness 기준의 정본 순서다.
 
 - [x] accepted `uploaded_at + 168h`와 never-accepted orphan authority 분리
 - [x] room/date folder durable retirement, reserve→identity barrier, raw locator clear + private digest tombstone
-- [x] accepted → orphan → folder 순서와 전체 claim 10/run·45초 wall budget, DB `nextAttemptAt` retry
+- [x] accepted → orphan → folder 순서와 blocked 전환 포함 전체 claim 10/run·45초 absolute deadline(DB/OAuth/Drive/settle/heartbeat), DB `nextAttemptAt` retry
 - [x] 기존 developer database/runtime status에 bounded count·heartbeat와 secret configured boolean만 추가
 - [x] public business/OpenAPI path·operation **67/72 유지**
-- [x] fresh 33 migrations와 DB/RLS 1,390건 PASS
+- [x] fresh 33 migrations와 DB/RLS 1,404건 PASS
 - [ ] 독립 보안/API 리뷰 P0/P1=0
 - [ ] required GitHub application/migration PASS
 - [ ] PR dev 병합
