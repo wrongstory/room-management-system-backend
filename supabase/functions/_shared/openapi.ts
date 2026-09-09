@@ -91,6 +91,42 @@ function photoOperation(
   };
 }
 
+function submissionOperation(
+  operationId: string,
+  summary: string,
+  role: "maid" | "admin",
+  responseSchema: string,
+  status = "200",
+) {
+  return {
+    tags: [role === "maid" ? "Attempts" : "Inspections"],
+    operationId,
+    summary,
+    description: role === "maid"
+      ? "메이드는 본인의 현재 통보 배정에 연결된 수행 회차만 조회·제출할 수 있습니다. 요청마다 최신 계정·세션·소유권·current revision을 다시 검증합니다."
+      : "활성 업무 관리자만 current 제출본을 조회·판정할 수 있습니다. 오래된 제출본과 중복 판정은 version 및 멱등성 계약으로 차단합니다.",
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": [role],
+    responses: {
+      [status]: {
+        description: "검증된 current version의 안전한 projection",
+        headers: { "Cache-Control": noStoreHeader },
+        content: {
+          "application/json": {
+            schema: { $ref: `#/components/schemas/${responseSchema}` },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "404": errorResponse,
+      "409": errorResponse,
+      "500": errorResponse,
+    },
+  };
+}
+
 function attemptMutationOperation(
   operationId: string,
   summary: string,
@@ -340,6 +376,11 @@ export const openApiDocument = {
         "통보된 본인 업무의 온라인 시작·물리 완료 및 실행 version 조회입니다. 오프라인 lease·인계·사진 제출·검수·수익은 후속 단계입니다.",
     },
     {
+      name: "Inspections",
+      description:
+        "active business admin 전용 검수 대상·폭탄방 선판정·최종 승인/반려 API입니다. 승인·반려 side effect는 DB transaction 하나로 처리됩니다.",
+    },
+    {
       name: "Assignments",
       description:
         "미통보 청소 배정 draft의 담당 메이드·서비스 날짜·순서 immutable revision API입니다. 알림·outbox·청소 attempt는 이 API에서 만들지 않습니다.",
@@ -351,6 +392,151 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    "/v1/attempts/{attemptId}/bomb-room-reports": {
+      post: {
+        ...submissionOperation(
+          "reportBombRoom",
+          "본인 수행 회차의 폭탄방 신고",
+          "maid",
+          "BombRoomReportEnvelope",
+          "201",
+        ),
+        description:
+          "current full submission 전에만 신고하며 증빙 1~20장을 현재 verified photo version으로 고정합니다. inspection_reclean에는 신고할 수 없습니다. memo와 사진 원문/locator는 audit에 복제하지 않습니다.",
+        parameters: [photoPathId("attemptId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/BombRoomReportRequest" },
+            },
+          },
+        },
+      },
+    },
+    "/v1/attempts/{attemptId}/submissions": {
+      get: {
+        ...submissionOperation(
+          "listAttemptSubmissions",
+          "본인 회차의 immutable 제출 이력 조회",
+          "maid",
+          "SubmissionListEnvelope",
+        ),
+        parameters: [photoPathId("attemptId")],
+        description:
+          "active maid가 본인 attempt의 current 및 과거 immutable submission version을 조회합니다. 다른 maid, 미통보 draft와 관리자 전용 review context/photo binding은 노출하지 않습니다.",
+      },
+      post: {
+        ...submissionOperation(
+          "createSubmissionVersion",
+          "필수 사진을 봉인하고 검수 요청",
+          "maid",
+          "SubmissionEnvelope",
+          "201",
+        ),
+        description:
+          "active maid 또는 live upload_submit limited capability가 있는 upload_only 원 담당자만 호출합니다. deactivation_pending의 finish_current capability는 제출 권한으로 확장되지 않습니다. field_completed와 모든 필수 current verified slot을 확인하고 새 immutable version과 정확한 photo binding set을 만든 뒤 이전 current version은 superseded 처리하고 pointer를 expectedRevision CAS로 교체합니다. 단, 폭탄방 신고/증빙은 최초 seal된 immutable submission version에서 이동할 수 없으므로 해당 version의 재제출은 BOMB_REPORT_SEALED(409)로 차단합니다.",
+        parameters: [photoPathId("attemptId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CreateSubmissionRequest" },
+            },
+          },
+        },
+      },
+    },
+    "/v1/inspections": {
+      get: {
+        ...submissionOperation(
+          "listPendingInspections",
+          "검수 대상 목록 조회",
+          "admin",
+          "SubmissionListEnvelope",
+        ),
+        description:
+          "current submitted version만 오래된 제출부터 최대 100건 반환합니다. 각 항목에는 immutable 검수 reviewContext가 포함됩니다. developer/maid는 관리자 전체 queue를 볼 수 없습니다. 100건 초과 cursor pagination은 후속 hardening 범위입니다.",
+      },
+    },
+    "/v1/inspections/{submissionId}": {
+      get: {
+        ...submissionOperation(
+          "getInspectionSubmission",
+          "검수 제출 상세 조회",
+          "admin",
+          "SubmissionEnvelope",
+        ),
+        parameters: [photoPathId("submissionId")],
+      },
+    },
+    "/v1/inspections/{submissionId}/bomb-room-decision": {
+      post: {
+        ...submissionOperation(
+          "decideBombRoom",
+          "폭탄방 신고 선판정",
+          "admin",
+          "BombRoomDecisionEnvelope",
+        ),
+        description:
+          "current submission에 seal된 신고만 1회 판정합니다. current pointer와 다른 제출은 STALE_VERSION(409), 다른 idempotency key의 동시·후속 판정은 BOMB_DECISION_ALREADY_RECORDED(409)로 거부되며, 폭탄방 판정만으로 earning은 생성되지 않습니다.",
+        parameters: [photoPathId("submissionId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/BombRoomDecisionRequest" },
+            },
+          },
+        },
+      },
+    },
+    "/v1/inspections/{submissionId}/approve": {
+      post: {
+        ...submissionOperation(
+          "approveSubmission",
+          "current 제출 최종 승인",
+          "admin",
+          "InspectionDecisionEnvelope",
+        ),
+        description:
+          "current pointer와 다른 제출은 STALE_VERSION(409)로 거부합니다. 제출·attempt·target 승인, notification/outbox/audit, 유상 원청소 earning을 한 transaction에서 정확히 한 번 생성합니다. 승인된 폭탄방 bonus는 base snapshot과 정확히 같습니다.",
+        parameters: [photoPathId("submissionId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/InspectionDecisionRequest",
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/inspections/{submissionId}/reject": {
+      post: {
+        ...submissionOperation(
+          "rejectSubmission",
+          "current 제출 최종 반려",
+          "admin",
+          "InspectionDecisionEnvelope",
+        ),
+        description:
+          "current pointer와 다른 제출은 STALE_VERSION(409)로 거부합니다. 원 attempt/maid/submission/decision에 묶인 0원 inspection_reclean target을 정확히 하나 만듭니다. 다른 메이드 이관과 earning 생성은 금지합니다.",
+        parameters: [photoPathId("submissionId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/InspectionDecisionRequest",
+              },
+            },
+          },
+        },
+      },
+    },
     "/v1/attempts/{attemptId}/photo-slots": {
       get: {
         ...photoOperation(
@@ -832,7 +1018,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 44,
+              maxItems: 49,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -2111,6 +2297,298 @@ export const openApiDocument = {
       },
     },
     schemas: {
+      BombRoomReportRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["evidencePhotoIds", "memo"],
+        properties: {
+          evidencePhotoIds: {
+            type: "array",
+            minItems: 1,
+            maxItems: 20,
+            uniqueItems: true,
+            items: { type: "string", format: "uuid" },
+            description: "본인 attempt의 현재 verified 사진 version ID",
+          },
+          memo: {
+            type: "string",
+            minLength: 1,
+            maxLength: 500,
+            description:
+              "검수용 신고 메모. audit/notification에는 복제되지 않습니다.",
+          },
+        },
+      },
+      CreateSubmissionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["clientSubmissionId", "expectedRevision", "candleCount"],
+        properties: {
+          clientSubmissionId: { type: "string", format: "uuid" },
+          expectedRevision: {
+            type: "integer",
+            minimum: 0,
+            description: "최초0, 이후 current submission pointer revision CAS",
+          },
+          candleCount: { type: "integer", minimum: 0 },
+        },
+      },
+      BombRoomDecisionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["decision", "reasonCode"],
+        properties: {
+          decision: { type: "string", enum: ["approved", "rejected"] },
+          reasonCode: {
+            type: "string",
+            enum: [
+              "BOMB_CONFIRMED",
+              "BOMB_NOT_CONFIRMED",
+              "BOMB_EVIDENCE_INSUFFICIENT",
+            ],
+            description:
+              "approved는 BOMB_CONFIRMED만, rejected는 나머지 두 코드만 허용합니다.",
+          },
+        },
+      },
+      InspectionDecisionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["reasonCode"],
+        properties: {
+          reasonCode: {
+            type: "string",
+            enum: [
+              "QUALITY_OK",
+              "QUALITY_REWORK",
+              "EVIDENCE_INCOMPLETE",
+              "CLEANING_INCOMPLETE",
+            ],
+            description:
+              "approve는 QUALITY_OK만, reject는 나머지 재작업 코드만 허용합니다.",
+          },
+        },
+      },
+      CleaningSubmission: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "attemptId",
+          "version",
+          "status",
+          "submittedBy",
+          "submittedAt",
+          "currentRevision",
+          "current",
+          "photoCount",
+          "candleCount",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          version: { type: "integer", minimum: 1 },
+          status: {
+            type: "string",
+            enum: ["submitted", "superseded", "approved", "rejected"],
+          },
+          submittedBy: { type: "string", format: "uuid" },
+          submittedAt: { type: "string", format: "date-time" },
+          currentRevision: { type: "integer", minimum: 1 },
+          current: { type: "boolean" },
+          photoCount: { type: "integer", minimum: 1, maximum: 100 },
+          candleCount: { type: "integer", minimum: 0 },
+          bombReportId: { type: ["string", "null"], format: "uuid" },
+          bombDecision: {
+            type: ["string", "null"],
+            enum: ["approved", "rejected", null],
+          },
+          inspectionDecision: {
+            type: ["string", "null"],
+            enum: ["approved", "rejected", null],
+          },
+          inspectionReasonCode: { type: ["string", "null"] },
+          decidedAt: { type: ["string", "null"], format: "date-time" },
+          bombReport: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "id",
+              "attemptId",
+              "memo",
+              "evidenceCount",
+              "evidencePhotoIds",
+              "reportedAt",
+            ],
+            properties: {
+              id: { type: "string", format: "uuid" },
+              attemptId: { type: "string", format: "uuid" },
+              memo: { type: "string", minLength: 1, maxLength: 500 },
+              evidenceCount: { type: "integer", minimum: 1, maximum: 20 },
+              evidencePhotoIds: {
+                type: "array",
+                minItems: 1,
+                maxItems: 20,
+                uniqueItems: true,
+                items: { type: "string", format: "uuid" },
+                description:
+                  "봉인된 증빙 photo version ID. 관리자만 기존 사진 content API에서 조회합니다.",
+              },
+              reportedAt: { type: "string", format: "date-time" },
+            },
+          },
+          photos: {
+            type: "array",
+            maxItems: 100,
+            description:
+              "관리자 검수 상세에만 포함되는 immutable 제출 증빙 목록입니다. photoId는 기존 사진 content API 조회에 사용하며 provider locator/hash는 노출하지 않습니다.",
+            items: { $ref: "#/components/schemas/SubmissionPhotoBinding" },
+          },
+          reviewContext: {
+            $ref: "#/components/schemas/SubmissionReviewContext",
+          },
+        },
+      },
+      SubmissionPhotoBinding: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "photoId",
+          "targetPhotoSlotId",
+          "slotKey",
+          "label",
+          "displayOrder",
+          "required",
+          "photoVersion",
+        ],
+        properties: {
+          photoId: { type: "string", format: "uuid" },
+          targetPhotoSlotId: { type: "string", format: "uuid" },
+          slotKey: { type: "string" },
+          label: { type: "string" },
+          displayOrder: { type: "integer", minimum: 0, maximum: 99 },
+          required: { type: "boolean" },
+          photoVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      SubmissionReviewContext: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cleaningTargetId",
+          "cleaningKind",
+          "roomNumber",
+          "serviceDate",
+          "maidProfileId",
+        ],
+        properties: {
+          cleaningTargetId: { type: "string", format: "uuid" },
+          cleaningKind: {
+            type: "string",
+            enum: ["checkout", "stayover", "additional", "reclean"],
+          },
+          roomNumber: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          maidProfileId: { type: "string", format: "uuid" },
+        },
+      },
+      SubmissionEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["submission"],
+        properties: {
+          submission: { $ref: "#/components/schemas/CleaningSubmission" },
+        },
+      },
+      SubmissionListEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["submissions"],
+        properties: {
+          submissions: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/CleaningSubmission" },
+          },
+        },
+      },
+      BombRoomReportEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["bombReport"],
+        properties: {
+          bombReport: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "attemptId", "evidenceCount", "reportedAt"],
+            properties: {
+              id: { type: "string", format: "uuid" },
+              attemptId: { type: "string", format: "uuid" },
+              evidenceCount: { type: "integer", minimum: 1, maximum: 20 },
+              reportedAt: { type: "string", format: "date-time" },
+            },
+          },
+        },
+      },
+      BombRoomDecisionEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["bombDecision"],
+        properties: {
+          bombDecision: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "id",
+              "submissionId",
+              "decision",
+              "reasonCode",
+              "decidedAt",
+            ],
+            properties: {
+              id: { type: "string", format: "uuid" },
+              submissionId: { type: "string", format: "uuid" },
+              decision: { type: "string", enum: ["approved", "rejected"] },
+              reasonCode: { type: "string" },
+              decidedAt: { type: "string", format: "date-time" },
+            },
+          },
+        },
+      },
+      InspectionDecisionEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["inspection"],
+        properties: {
+          inspection: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "submissionId",
+              "decisionId",
+              "decision",
+              "reasonCode",
+              "decidedAt",
+              "earningId",
+              "recleanTargetId",
+              "recleanAssignmentId",
+            ],
+            properties: {
+              submissionId: { type: "string", format: "uuid" },
+              decisionId: { type: "string", format: "uuid" },
+              decision: { type: "string", enum: ["approved", "rejected"] },
+              reasonCode: { type: "string" },
+              decidedAt: { type: "string", format: "date-time" },
+              earningId: { type: ["string", "null"], format: "uuid" },
+              recleanTargetId: { type: ["string", "null"], format: "uuid" },
+              recleanAssignmentId: {
+                type: ["string", "null"],
+                format: "uuid",
+              },
+            },
+          },
+        },
+      },
       AttemptPhotoSlots: {
         type: "object",
         additionalProperties: false,
@@ -2980,6 +3458,11 @@ export const openApiDocument = {
           "room.report_issue",
           "room.resolve_issue",
           "room.record_pin_sync",
+          "submission.bomb_reported",
+          "submission.created",
+          "inspection.bomb_decided",
+          "inspection.approved",
+          "inspection.rejected",
         ],
         description:
           "운영 콘솔에 노출할 수 있도록 서버에서 고정한 감사 이벤트 allowlist",
@@ -3318,6 +3801,13 @@ export const openApiDocument = {
               revision: { type: "integer", minimum: 1 },
               targetAssignmentVersion: { type: "integer", minimum: 1 },
               attemptId: { type: "string", format: "uuid" },
+              submissionId: { type: "string", format: "uuid" },
+              bombReportId: { type: "string", format: "uuid" },
+              earningId: { type: "string", format: "uuid" },
+              recleanTargetId: { type: "string", format: "uuid" },
+              evidenceCount: { type: "integer", minimum: 1, maximum: 20 },
+              photoCount: { type: "integer", minimum: 1 },
+              currentRevision: { type: "integer", minimum: 1 },
               attemptNumber: { type: "integer", minimum: 1 },
               assignmentRevision: { type: "integer", minimum: 1 },
               executionVersion: { type: "integer", minimum: 1 },

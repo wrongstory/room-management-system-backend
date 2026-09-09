@@ -54,6 +54,13 @@ class DeveloperAuditEventSummary:
         revision (int | Unset):
         target_assignment_version (int | Unset):
         attempt_id (UUID | Unset):
+        submission_id (UUID | Unset):
+        bomb_report_id (UUID | Unset):
+        earning_id (UUID | Unset):
+        reclean_target_id (UUID | Unset):
+        evidence_count (int | Unset):
+        photo_count (int | Unset):
+        current_revision (int | Unset):
         attempt_number (int | Unset):
         assignment_revision (int | Unset):
         execution_version (int | Unset):
@@ -126,6 +133,13 @@ class DeveloperAuditEventSummary:
     revision: int | Unset = UNSET
     target_assignment_version: int | Unset = UNSET
     attempt_id: UUID | Unset = UNSET
+    submission_id: UUID | Unset = UNSET
+    bomb_report_id: UUID | Unset = UNSET
+    earning_id: UUID | Unset = UNSET
+    reclean_target_id: UUID | Unset = UNSET
+    evidence_count: int | Unset = UNSET
+    photo_count: int | Unset = UNSET
+    current_revision: int | Unset = UNSET
     attempt_number: int | Unset = UNSET
     assignment_revision: int | Unset = UNSET
     execution_version: int | Unset = UNSET
@@ -257,6 +271,28 @@ class DeveloperAuditEventSummary:
         attempt_id: str | Unset = UNSET
         if not isinstance(self.attempt_id, Unset):
             attempt_id = str(self.attempt_id)
+
+        submission_id: str | Unset = UNSET
+        if not isinstance(self.submission_id, Unset):
+            submission_id = str(self.submission_id)
+
+        bomb_report_id: str | Unset = UNSET
+        if not isinstance(self.bomb_report_id, Unset):
+            bomb_report_id = str(self.bomb_report_id)
+
+        earning_id: str | Unset = UNSET
+        if not isinstance(self.earning_id, Unset):
+            earning_id = str(self.earning_id)
+
+        reclean_target_id: str | Unset = UNSET
+        if not isinstance(self.reclean_target_id, Unset):
+            reclean_target_id = str(self.reclean_target_id)
+
+        evidence_count = self.evidence_count
+
+        photo_count = self.photo_count
+
+        current_revision = self.current_revision
 
         attempt_number = self.attempt_number
 
@@ -441,6 +477,20 @@ class DeveloperAuditEventSummary:
             field_dict["targetAssignmentVersion"] = target_assignment_version
         if attempt_id is not UNSET:
             field_dict["attemptId"] = attempt_id
+        if submission_id is not UNSET:
+            field_dict["submissionId"] = submission_id
+        if bomb_report_id is not UNSET:
+            field_dict["bombReportId"] = bomb_report_id
+        if earning_id is not UNSET:
+            field_dict["earningId"] = earning_id
+        if reclean_target_id is not UNSET:
+            field_dict["recleanTargetId"] = reclean_target_id
+        if evidence_count is not UNSET:
+            field_dict["evidenceCount"] = evidence_count
+        if photo_count is not UNSET:
+            field_dict["photoCount"] = photo_count
+        if current_revision is not UNSET:
+            field_dict["currentRevision"] = current_revision
         if attempt_number is not UNSET:
             field_dict["attemptNumber"] = attempt_number
         if assignment_revision is not UNSET:
@@ -667,6 +717,40 @@ class DeveloperAuditEventSummary:
         else:
             attempt_id = UUID(_attempt_id)
 
+        _submission_id = d.pop("submissionId", UNSET)
+        submission_id: UUID | Unset
+        if isinstance(_submission_id, Unset):
+            submission_id = UNSET
+        else:
+            submission_id = UUID(_submission_id)
+
+        _bomb_report_id = d.pop("bombReportId", UNSET)
+        bomb_report_id: UUID | Unset
+        if isinstance(_bomb_report_id, Unset):
+            bomb_report_id = UNSET
+        else:
+            bomb_report_id = UUID(_bomb_report_id)
+
+        _earning_id = d.pop("earningId", UNSET)
+        earning_id: UUID | Unset
+        if isinstance(_earning_id, Unset):
+            earning_id = UNSET
+        else:
+            earning_id = UUID(_earning_id)
+
+        _reclean_target_id = d.pop("recleanTargetId", UNSET)
+        reclean_target_id: UUID | Unset
+        if isinstance(_reclean_target_id, Unset):
+            reclean_target_id = UNSET
+        else:
+            reclean_target_id = UUID(_reclean_target_id)
+
+        evidence_count = d.pop("evidenceCount", UNSET)
+
+        photo_count = d.pop("photoCount", UNSET)
+
+        current_revision = d.pop("currentRevision", UNSET)
+
         attempt_number = d.pop("attemptNumber", UNSET)
 
         assignment_revision = d.pop("assignmentRevision", UNSET)
@@ -880,6 +964,13 @@ class DeveloperAuditEventSummary:
             revision=revision,
             target_assignment_version=target_assignment_version,
             attempt_id=attempt_id,
+            submission_id=submission_id,
+            bomb_report_id=bomb_report_id,
+            earning_id=earning_id,
+            reclean_target_id=reclean_target_id,
+            evidence_count=evidence_count,
+            photo_count=photo_count,
+            current_revision=current_revision,
             attempt_number=attempt_number,
             assignment_revision=assignment_revision,
             execution_version=execution_version,

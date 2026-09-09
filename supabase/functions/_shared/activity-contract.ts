@@ -25,6 +25,8 @@ export type AuthorizationDeniedCode =
   | "DEVELOPER_REQUIRED"
   | "MAID_REQUIRED"
   | "PHOTO_ACCESS_REQUIRED"
+  | "BOMB_REPORT_ACCESS_REQUIRED"
+  | "SUBMISSION_ACCESS_REQUIRED"
   | "PASSWORD_CHANGE_REQUIRED";
 
 const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
@@ -37,6 +39,8 @@ const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
   "DEVELOPER_REQUIRED",
   "MAID_REQUIRED",
   "PHOTO_ACCESS_REQUIRED",
+  "BOMB_REPORT_ACCESS_REQUIRED",
+  "SUBMISSION_ACCESS_REQUIRED",
   "PASSWORD_CHANGE_REQUIRED",
 ]);
 
@@ -47,7 +51,7 @@ export function isAuthorizationDeniedCode(
 }
 
 // 원문 route를 저장하지 않고 코드에 고정된 capability category로만 변환한다.
-// #52/#53은 이 mapping과 recordAuthorizationDenied()를 그대로 재사용한다.
+// 업무 API는 이 mapping과 recordAuthorizationDenied()를 공통 권한거부 계약으로 사용한다.
 export function authorizationSourceForPath(
   path: string,
 ): AuthorizationSource | null {
@@ -57,6 +61,9 @@ export function authorizationSourceForPath(
     /^\/v1\/photos\/[^/]+\/content$/.test(path)
   ) {
     return "edge.authorization.photos";
+  }
+  if (path === "/v1/inspections" || path.startsWith("/v1/inspections/")) {
+    return "edge.authorization.attempts";
   }
   if (path === "/v1/accounts" || /^\/v1\/accounts\/[^/]+\/.+$/.test(path)) {
     return "edge.authorization.accounts";

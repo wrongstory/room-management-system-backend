@@ -399,7 +399,7 @@ const duplicateResults = await Promise.all(duplicateReservationIds.map((reservat
 )));
 assert(
   duplicateResults.every((result) => !result.error),
-  'concurrent identical reservation commands must both succeed'
+  `concurrent identical reservation commands must both succeed (${duplicateResults.map((result) => result.error ? `${result.error.code}:${result.error.message}` : 'OK').join(',')})`
 );
 assert(
   new Set(duplicateResults.map((result) => result.data.id)).size === 1,

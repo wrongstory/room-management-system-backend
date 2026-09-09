@@ -43,7 +43,9 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
   ├─ /v1/developer/*
   ├─ /v1/rooms/*
   ├─ /v1/availability/*
-  └─ /v1/reservations/*
+  ├─ /v1/reservations/*
+  ├─ /v1/attempts/*/submissions
+  └─ /v1/inspections/*
 
 /functions/v1/reservation-scheduler
   └─ scheduler 전용 POST
@@ -58,8 +60,9 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 개발 통합 source 기준: `dev@4455bf9265e0b58e10021e779306e5e722d6f5fb` (#25~#30, #4, #7A/B/C 및 #83/#84 source/dev 완료, production 미승격)
-- 현재 #85 feature source: **33 migrations / 67 paths / 72 operations**. 별도 server-only `photo-purge` Function과 기존 developer status projection만 추가하며 public business API/OpenAPI path 수는 늘리지 않는다. 아직 독립 리뷰·dev 병합·production 배포 전이다.
+- 개발 통합 source 기준: `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2` (#25~#30, #4, #7A/B/C 및 #83/#84/#85 source/dev 완료, production 미승격)
+- #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
+- 현재 #31 feature source: **34 migrations / 74 paths / 80 operations**. 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 구현했지만 아직 독립 리뷰·dev 병합·production 배포 전이다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -548,7 +551,7 @@ PR #79는 2026-09-09 KST에 dev로 squash 병합됐다. 운영 migration/API/Pag
 
 승인 head와 병합 결과의 tree는 `6768b63f64fdea6dba7d4eda32a70807b7274823`로 동일하다.
 GitHub COMMENTED 리뷰·독립 서브에이전트 QA·Codex 위임 허가를 구분한다. #7A/B/C는
-source/dev 완료이며 #30 / PR #81, #83 / PR #86과 #84 / PR #88도 source/dev 완료했다. 다음 본선은 #85 → #31이다. production purge 주기/backlog/실패감시와
+source/dev 완료이며 #30 / PR #81, #83 / PR #86, #84 / PR #88과 #85 / PR #90도 source/dev 완료했다. 현재 본선은 #31 feature다. production purge 주기/backlog/실패감시와
 hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 gate 추적을 위해 Open 유지한다.
 
 ## 13. 후속 업무 API·모델 개발 상태
@@ -569,12 +572,34 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | 사진 template/slot snapshot·submission version | source/dev 완료 | #30 / PR #81 | production 미승격; owner-only 모델이며 HTTP/Drive/전체 제출 command 제외 |
 | [x] | 사진 업로드 작업 원장·권한 계약 | #83 source/dev 완료 | #83 / PR #86 | production 미승격; DB/내부 계약만, 실제 Drive/HTTP/purge 제외 |
 | [x] | Google Drive 업로드·조회 | #84 source/dev 완료 | #9 / #84 | PR #88 독립 QA·required CI·source 승인/dev 병합 완료; production OAuth·hosted smoke 미완료 |
-| [ ] | 7일 영구삭제·orphan 운영 worker | feature source 구현·검증 중 | #9 / #85 | accepted/orphan/folder 원장 분리; production 미승격·미사용 |
-| [ ] | 제출·검수·재청소 | 미개발 | #31 | #30/#9 이후 |
+| [x] | 7일 영구삭제·orphan 운영 worker | source/dev 완료 | #9 / #85 / PR #90 | accepted/orphan/folder 원장 분리; production 미승격·미사용 |
+| [ ] | 제출·검수·재청소 | feature source 구현·로컬 검증 완료 | #31 | 34 migrations / 74 paths / 80 operations; 독립 리뷰·dev 병합·production 미완료 |
 | [ ] | earning/payroll 정산 API | 미개발 | #8 | append-only |
 | [ ] | notification/outbox/Web Push | 미개발 | #10 | domain event 연계 |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
+
+### #31 Submission / Inspection source gate
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [ ] | `POST /v1/attempts/{attemptId}/bomb-room-reports` | own active maid | ✅ | ✅ | ✅ | ❌ | ❌ | 제출 전 immutable 증빙 1~20장; reclean 신고 금지 |
+| [ ] | `GET /v1/attempts/{attemptId}/submissions` | own maid | ✅ | ✅ | ✅ | ❌ | ❌ | 본인 회차 이력, 관리자 review context 비노출 |
+| [ ] | `POST /v1/attempts/{attemptId}/submissions` | own maid / exact `upload_submit` capability | ✅ | ✅ | ✅ | ❌ | ❌ | 필수 verified current slot 봉인, pointer CAS |
+| [ ] | `GET /v1/inspections` | business admin | ✅ | ✅ | ✅ | ❌ | ❌ | oldest-first 최대 100건, 안전한 immutable review context |
+| [ ] | `GET /v1/inspections/{submissionId}` | business admin | ✅ | ✅ | ✅ | ❌ | ❌ | sealed photo ID/slot과 폭탄 증빙 ID만 공개 |
+| [ ] | `POST /v1/inspections/{submissionId}/bomb-room-decision` | business admin | ✅ | ✅ | ✅ | ❌ | ❌ | current version 1회 선판정 |
+| [ ] | `POST /v1/inspections/{submissionId}/approve` | business admin | ✅ | ✅ | ✅ | ❌ | ❌ | earning/알림/outbox/audit exactly-once |
+| [ ] | `POST /v1/inspections/{submissionId}/reject` | business admin | ✅ | ✅ | ✅ | ❌ | ❌ | 원 maid notified 0원 reclean, attempt는 #28만 생성 |
+
+- [x] append-only `submission_inspection_reclean` migration 및 8개 Fastify/Edge operation 구현
+- [x] role/capability/CAS/idempotency/concurrency/redaction 로컬 검증
+- [x] field_completed 단독 상태에서 submission/readiness/earning 0 유지
+- [x] 폭탄방 report·증빙은 최초 immutable submission에 seal되고 다른 version으로 이동 금지
+- [x] 반려는 정확히 같은 transaction에서 actionable notification/outbox와 원 maid notified reclean을 생성하며 earning과 attempt는 생성하지 않음
+- [ ] #31 feature PR 독립 보안/API 재검토 P0/P1=0
+- [ ] #31 feature PR `dev` 병합
+- [ ] release/main 승격, production migration/Edge 배포, hosted 역할·mutation smoke
 
 ## 14. Python 운영도구 — #44 Phase A
 
@@ -649,10 +674,10 @@ production completeness 기준의 정본 순서다.
 29. [x] **#30 Photo Slot / Submission Base source gate** — PR #81 독립 QA·required CI·Codex 96/100 승인 → `dev@a4f8cb5` 병합; 운영 미적용
 30. [x] **#83 Photo Storage Operations source gate** — PR #86 독립 QA·required CI·Codex 96/100 승인 → `dev@cf91753` 병합; 운영 미적용
 31. [x] **#84 Drive 업로드·열람 source gate** — PR #88 독립 QA·required CI·source 승인 → `dev@520abe7` 병합; 운영 미적용
-32. [ ] **#85 source gate** — 7일 accepted 삭제·orphan 보상·빈 폴더 retirement feature 구현 및 로컬 검증; 독립 리뷰·dev 병합 전
-33. [ ] **#31** — #85 source/dev 완료 뒤 전체 제출·검수; production OAuth·hosted smoke는 별도 release gate
+32. [x] **#85 source gate** — PR #90 exact head 독립 리뷰·required CI·source 승인 후 `dev@92c0f97` 병합; production 미승격
+33. [ ] **#31 source gate** — 전체 제출·검수 feature source와 로컬 검증 완료; 독립 리뷰·dev 병합 전
 
-### #85 사진 purge/reconciliation source gate — feature 검증 중, production 미승격
+### #85 사진 purge/reconciliation source gate — source/dev 완료, production 미승격
 
 - [x] accepted `uploaded_at + 168h`와 never-accepted orphan authority 분리
 - [x] room/date folder durable retirement, reserve→identity barrier, raw locator clear + private digest tombstone
@@ -660,9 +685,9 @@ production completeness 기준의 정본 순서다.
 - [x] 기존 developer database/runtime status에 bounded count·heartbeat와 secret configured boolean만 추가
 - [x] public business/OpenAPI path·operation **67/72 유지**
 - [x] fresh 33 migrations와 DB/RLS 1,404건 PASS
-- [ ] 독립 보안/API 리뷰 P0/P1=0
-- [ ] required GitHub application/migration PASS
-- [ ] PR dev 병합
+- [x] exact head `93524b680608fa54a2be2d9f826ba960a621dc12` 독립 보안/API 리뷰 P0/P1=0
+- [x] exact head required GitHub application/migration PASS
+- [x] PR #90 `dev` squash 병합 — `92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`
 - [ ] release/main 후 production migration·secret·Edge 배포·Google hosted purge smoke
 
 production DB/Edge/Pages/Google Drive에는 이번 feature 작업으로 변경을 가하지 않았다. 운영 snapshot은 **19 migrations / 39 paths / 43 operations** 그대로다.
@@ -686,7 +711,7 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 승인 head와 병합 결과의 tree는 `14cd83310840570bb291ef44689c41ea7e128b7f`로 동일하다.
 독립 QA·GitHub 리뷰·required CI·Codex 위임 허가·병합 증거를 구분한다. 미설정/legacy 빈 snapshot은
 완전한 사진 증빙으로 간주하지 않으며, #7 물리 완료에 사진 선행조건을 추가하지 않는다.
-후속 #83 / PR #86과 #84 / PR #88도 source/dev 완료했으며 다음 본선은 #85 → #31이다. #30 내부 모델 검증과 #84의 실제 decoder·HTTP adapter 합성 검증은 별개이며, 운영 Google 업로드/삭제 검증 완료로 표현하지 않는다.
+후속 #83 / PR #86, #84 / PR #88과 #85 / PR #90도 source/dev 완료했으며 현재 본선은 #31 feature다. #30 내부 모델 검증과 #84의 실제 decoder·HTTP adapter 합성 검증은 별개이며, 운영 Google 업로드/삭제 검증 완료로 표현하지 않는다.
 
 ### #83 사진 업로드 작업 원장 source gate — source/dev 완료, production 미승격
 
@@ -708,11 +733,12 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 - [x] PR #86 `dev` squash 병합 — `cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`
 - [ ] 별도 release/main 및 production migration·hosted 검증
 - [x] #84 실제 JPEG/WebP bytes·magic/MIME/EXIF 검증, Google OAuth/Drive HTTP adapter, 업로드·열람 API source/dev 완료 — PR #88; 운영 자격증명·Google/hosted smoke는 미완료
-- [ ] #85 정확히 168시간 삭제 worker 및 운영 provider/hosted 검증
+- [x] #85 정확히 168시간 삭제 worker source/dev 완료 — PR #90 / `dev@92c0f97`
+- [ ] #85 운영 provider/hosted purge 검증
 
 이번 source는 공개 upload/read route를 추가하지 않으므로 OpenAPI는 **63 paths / 68 operations**를 유지한다.
 승인 exact head와 병합 결과의 tree는 `9e7898af7de2d3025fe53ca848225cbbaa35b5fa`로 동일하다.
-독립 QA·GitHub COMMENTED 리뷰·required CI·Codex 위임 승인·병합 증거는 구분한다. 후속 #84도 source/dev 완료했으며 다음 작업은 **#85**다.
+독립 QA·GitHub COMMENTED 리뷰·required CI·Codex 위임 승인·병합 증거는 구분한다. 후속 #84와 #85도 source/dev 완료했으며 현재 본선은 **#31 feature**다.
 
 ### #84 Drive 업로드·열람 source gate — source/dev 완료, production 미승격
 
@@ -737,7 +763,7 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 - [ ] 별도 release/main → 운영 OAuth 설정·Google/hosted role smoke
 - [ ] #85 7일 purge/backlog/실패 감시 운영 gate
 
-비차단 P2인 admission quota의 장기 전체 이력 SUM 비용은 #85/hardening 후속으로 유지한다.
+비차단 P2인 admission quota의 장기 전체 이력 SUM 비용은 별도 hardening 후속으로 유지한다.
 같은 head의 첫 CI 시도에서 Python Qt 테스트가 exit139로 종료됐고 진단 재실행은 PASS했다.
 이는 일시적 실패의 재현 여부를 확인한 결과이며 Qt/thread lifecycle 결함을 수정·해결했다는 증거가 아니다.
 

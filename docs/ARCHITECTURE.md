@@ -17,16 +17,24 @@ Fastify는 현재 개발 기준선이며 Edge PoC가 실패할 때의 rollback �
 
 ## 신뢰 경계
 
-### #84/#85 사진 HTTP adapter와 보존 정리 worker — feature source 검증 중
+### #84/#85 사진 HTTP adapter와 보존 정리 worker — source/dev 완료
 
 `src/modules/photos`의 순수 binary validator/Drive adapter/application service를 Fastify와 generated Deno bridge가 공유한다.
 인증→DB durable admission/quota→bounded raw body/실파일 검증→begin/claim→사전 provider identity 저장→외부 HTTP→provider 성공 기록→finalize 순서이며 외부 요청 중 DB transaction을 유지하지 않는다.
 #83 legacy primitive service-role grant는 #84 migration에서 회수하고 admitted wrapper만 HTTP 서비스 경계로 사용한다.
 slot/status metadata와 original content 권한은 분리한다. limited upload는 일반 active guard를 완화하지 않으며 content는 provider wait 이후에도 최신 권한을 재검증한다.
 decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생성 검증이며 runtime CDN fallback이 없다. actual local worker(memory256MB/CPU2초) 합성4MP JPEG/WebP gate는 통과했으며 운영 Google/hosted 검증은 release 후 별도다. ignored asset 재생성 때문에 배포 전 `npm ci`와 `npm run edge:check`가 모두 성공해야 한다. 실패/누락 시 deploy 금지다.
-상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [사진 상태 gate](./API_STATUS_MATRIX.md)를 따른다. #84 업로드·열람은 dev에 병합됐고, #85는 별도 `photo-purge` Function source와 append-only migration을 구현 중이다. 원격 Google·production·#31 제출 구현은 제외한다.
+상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [사진 상태 gate](./API_STATUS_MATRIX.md)를 따른다. #84 업로드·열람과 #85 별도 `photo-purge` Function은 `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`까지 병합됐다. 원격 Google·production 검증은 별도 release gate다.
 
 #85 worker는 accepted 보존 만료, never-accepted orphan 보상, 확인된 빈 room/date 폴더를 서로 다른 durable 원장으로 처리한다. 한 실행의 세 단계 claim 합계는 blocked 전환을 포함해 10 이하이고 DB RPC·OAuth·Drive 호출·settle·heartbeat가 같은 45초 absolute deadline을 공유하며 Edge에서 sleep하지 않는다. provider DELETE는 settle/heartbeat 여유시간이 보장될 때만 시작하고, retry exhaustion으로 blocked가 생기면 heartbeat와 developer status를 degraded로 기록한다. provider `204/404`만 성공이고 retry는 DB `next_attempt_at`이 결정한다. 폴더 retirement는 operation→room-folder binding 및 upload state를 함께 잠가 reserve/provider-success/finalize와 경쟁해도 진행 중 업로드를 삭제하지 않는다. room 폴더를 먼저 정리하고 모든 child가 terminal인 경우에만 date 폴더를 정리한다. raw Drive locator는 terminal settle에서 지우고 private digest tombstone과 immutable cleanup event만 남긴다.
+
+### #31 전체 제출·검수·반려 재청소 — feature source
+
+`submission_inspection_reclean` append-only migration이 #30의 slot/current-photo/binding 원장을 실제 업무 command로 연결한다. 메이드 제출은 물리 완료, 본인 current notified attempt, 최신 assignment version, 필수 verified·미만료·미삭제 photo set을 같은 attempt lock에서 다시 확인하고 immutable submission version과 exact photo binding set을 만든다. current pointer는 expected revision CAS이며 일반 재제출은 과거 version을 `superseded`로 보존한다. 폭탄방 신고와 선택 증빙은 제출 전에 attempt에 불변 기록한 뒤 최초 submission에 seal하며 제품 계약상 다른 submission version으로 이동하지 않는다.
+
+관리자 queue/detail은 current `inspection_pending` 제출만 대상으로 하며 live room master 대신 notified assignment의 immutable room snapshot과 sealed photo ID/slot/version을 반환한다. provider locator/hash/file name, PIN, PII, request hash, raw before/after state는 공개하지 않는다. stale pointer의 폭탄 선판정·승인·반려는 `STALE_VERSION`으로 실패하고 서로 다른 key의 동시 폭탄 판정은 정확히 한 건만 승리한다.
+
+승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다.
 
 ```mermaid
 flowchart LR
@@ -97,9 +105,10 @@ erDiagram
 
 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)은 exact head
 `3dfbb70176533a69257c68c2b2af2ee19cc9bd22`의 독립 QA P0/P1/P2=0·required CI·Codex 96/100 승인 후
-`dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다. 현재 개발 통합은
-31 migrations / 63 paths / 68 operations다. 기존 production 19 migrations / 39 paths / 43 operations는
-변경하지 않았다. 다음 구현은 #84 → #85 → #31이며 실제 Drive/HTTP/purge는 아직 미구현이다.
+`dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다. 이후 #84/#85도
+`dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`까지 source/dev 완료했다. 현재 #31 feature는
+34 migrations / 74 paths / 80 operations이며 기존 production 19 migrations / 39 paths / 43 operations는
+변경하지 않았다. 운영 Drive/HTTP/purge hosted 검증은 별도 release gate다.
 
 `photo_storage_operations`는 #30 뒤의 append-only 개발 migration이다. private operation/object,
 mutable lease/state, immutable acceptance/event를 분리한다. scoped key digest + canonical request hash와
@@ -162,7 +171,7 @@ target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참
 | 지급 | `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + PAYING 이후 snapshot 불변 + 미송금 사유 기록 reopen + version CAS |
 | 알림 | 수신자별 dedupe key unique, 10분 group key |
 
-복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃과 배정 알림 확정은 SQL RPC의 짧은 transaction으로 원장, projection, 감사 이벤트를 함께 커밋합니다. 검수·지급도 같은 원칙으로 후속 구현합니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
+복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃, 배정 알림 확정과 #31 검수는 SQL RPC의 짧은 transaction으로 원장, projection, 감사 이벤트를 함께 커밋합니다. 지급 API는 같은 원칙의 후속 구현입니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
 
 #25의 미통보 draft 배정은 기존 `cleaning_targets`와 `cleaning_assignments`를 재사용합니다. active business admin만 service-role RPC를 호출하며 DB가 actor를 다시 검사합니다. target의 `assignment_version`을 CAS로 잠근 뒤 기존 current draft를 `DRAFT_REVISED`로 닫고 새 immutable revision을 추가합니다. 이 단계는 `draft_assigned`까지만 전이하며 notification, outbox, cleaning attempt는 생성하지 않습니다.
 

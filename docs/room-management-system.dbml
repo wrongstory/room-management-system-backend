@@ -285,6 +285,7 @@ Table public.checkout_cleaning_obligations {
   due_at timestamptz
   planned_cleaning_target_id uuid [unique]
   current_cleaning_target_id uuid [unique]
+  completion_submission_id uuid [unique, ref: - public.cleaning_submissions.id]
   version bigint [not null]
   cancelled_at timestamptz
   cancellation_reason_code text
@@ -556,11 +557,13 @@ Table public.cleaning_targets {
   cancellation_reason_code text
   reclean_of_attempt_id uuid [unique]
   reclean_maid_profile_id uuid
+  reclean_of_submission_id uuid [unique, ref: - public.cleaning_submissions.id]
+  reclean_of_inspection_decision_id uuid [unique, ref: - public.inspection_decisions.id]
   created_by uuid [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Checkout targets are unique per reservation. Stayover/additional manual requests use stable target IDs and soft cancellation. Rollover validates the proposed next source window before any write: stayover requires the same active occupied reservation and bounded next window/KST date; additional rejects active reservation overlap. Invalid windows are blocked with zero mutation, no auto-cancel/kind conversion. Inspection recleans keep an immutable original attempt and maid link.'
+  Note: 'Checkout targets are unique per reservation. Stayover/additional manual requests use stable target IDs and soft cancellation. Inspection rejection creates an automatically notified zero-fee reclean with immutable original attempt/submission/decision/maid links; #28 alone creates its attempt. No handoff.'
 }
 
 Table public.cleaning_target_schedule_revisions {
@@ -791,7 +794,7 @@ Table public.cleaning_submissions {
     (cleaning_attempt_id, version) [unique]
     (id, cleaning_attempt_id) [unique]
   }
-  Note: 'Canonical immutable submission versions, including unconsumed payloads. Only status/superseded_at remain lifecycle projections. Service-role direct writes revoked; #31 owns future submit command.'
+  Note: '#31 canonical immutable submission versions. Current pointer uses CAS; only the current submitted version is reviewable. General resubmission supersedes history, while a sealed bomb report never moves to another version.'
 }
 
 Table public.submission_photos {
@@ -825,16 +828,38 @@ Table public.submission_photos {
   Note: 'Legacy provider-shaped table retained, not the #30 evidence source. Nullable slot key/default uploaded cannot establish verified evidence. Service-role direct writes revoked. Actual provider upload/delete remains #9.'
 }
 
-Table public.bomb_room_reports {
+Table private.bomb_room_reports {
   id uuid [pk]
-  submission_id uuid [not null, unique]
-  note text
-  status text [not null]
-  decision text
-  decision_reason_code text
-  decided_by uuid
-  decided_at timestamptz
-  created_at timestamptz [not null]
+  cleaning_attempt_id uuid [not null, unique, ref: - public.cleaning_attempts.id]
+  reported_by uuid [not null, ref: > public.profiles.id]
+  memo text [not null, note: '1..500 raw length; admin detail only, never audit.']
+  reported_at timestamptz [not null]
+  Note: 'Attempt-bound immutable pre-submission report. Private RLS; no Data API or service-role table DML.'
+}
+
+Table private.bomb_room_report_evidence {
+  report_id uuid [not null, ref: > private.bomb_room_reports.id]
+  photo_version_id uuid [not null, ref: > private.attempt_photo_versions.id]
+  Indexes { (report_id, photo_version_id) [pk] }
+  Note: 'Selected immutable evidence versions from the same attempt only.'
+}
+
+Table private.bomb_room_report_seals {
+  report_id uuid [pk, ref: - private.bomb_room_reports.id]
+  submission_id uuid [not null, unique, ref: - public.cleaning_submissions.id]
+  sealed_at timestamptz [not null]
+  Note: 'A report/evidence set is sealed to exactly one immutable submission and never moves to a resubmission.'
+}
+
+Table private.bomb_room_decisions {
+  id uuid [pk]
+  report_id uuid [not null, unique, ref: - private.bomb_room_reports.id]
+  submission_id uuid [not null, unique, ref: - public.cleaning_submissions.id]
+  decision text [not null, note: 'approved / rejected']
+  reason_code text [not null]
+  decided_by uuid [not null, ref: > public.profiles.id]
+  decided_at timestamptz [not null]
+  Note: 'One immutable predecision for the report sealed to the current submission.'
 }
 
 Table public.inspection_decisions {
@@ -855,6 +880,7 @@ Table public.earnings {
   earned_on date [not null]
   base_amount int [not null]
   bomb_room_bonus int [not null, default: 0]
+  bomb_room_decision_id uuid [unique, ref: - private.bomb_room_decisions.id]
   total_amount int [not null, note: 'Generated as base_amount + bomb_room_bonus in SQL']
   created_at timestamptz [not null]
 }
@@ -1296,8 +1322,6 @@ Ref: public.cleaning_attempts.maid_profile_id > public.profiles.id
 Ref: public.cleaning_submissions.cleaning_attempt_id > public.cleaning_attempts.id
 Ref: public.cleaning_submissions.submitted_by > public.profiles.id
 Ref: public.submission_photos.submission_id > public.cleaning_submissions.id
-Ref: public.bomb_room_reports.submission_id - public.cleaning_submissions.id
-Ref: public.bomb_room_reports.decided_by > public.profiles.id
 Ref: public.inspection_decisions.submission_id - public.cleaning_submissions.id
 Ref: public.inspection_decisions.decided_by > public.profiles.id
 Ref: public.earnings.submission_id - public.cleaning_submissions.id

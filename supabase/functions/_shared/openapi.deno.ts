@@ -71,14 +71,54 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 67 &&
+    Object.keys(document.paths).length === 74 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 72,
-    "candidate contract67/72",
+        ).length === 80,
+    "candidate contract74/80",
   );
+});
+
+Deno.test("submission inspection OpenAPI matches immutable payload and capability contracts", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const schemas = document.components.schemas;
+  const inspection = schemas.InspectionDecisionEnvelope.properties.inspection;
+  assert(
+    inspection.required.includes("recleanAssignmentId") &&
+      inspection.properties.recleanAssignmentId.type.includes("null") &&
+      inspection.properties.recleanAssignmentId.format === "uuid",
+    "approve null and reject UUID reclean assignment both validate",
+  );
+  assert(
+    schemas.CleaningSubmission.properties.bombReport.properties.memo
+          .maxLength ===
+        500 &&
+      schemas.BombRoomReportRequest.properties.memo.maxLength === 500,
+    "bomb memo request and admin response share the 500 character boundary",
+  );
+  const history = document.paths["/v1/attempts/{attemptId}/submissions"].get;
+  const submit = document.paths["/v1/attempts/{attemptId}/submissions"].post;
+  assert(
+    history.description.includes("과거 immutable") &&
+      submit.description.includes("upload_submit") &&
+      submit.description.includes("deactivation_pending") &&
+      submit.description.includes("제출 권한으로 확장되지") &&
+      submit.description.includes("BOMB_REPORT_SEALED"),
+    "Korean handoff states history, upload_only-only limited submit and immutable bomb seal",
+  );
+  const inspectionPaths = document.paths as unknown as Record<
+    string,
+    { post: { description: string } }
+  >;
+  for (const action of ["bomb-room-decision", "approve", "reject"]) {
+    assert(
+      inspectionPaths[`/v1/inspections/{submissionId}/${action}`].post
+        .description.includes("STALE_VERSION"),
+      `stale review code ${action}`,
+    );
+  }
 });
 
 Deno.test("offline lease contract has five exact operations, bounded ingest and safe permanent audit", async () => {
@@ -609,7 +649,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 44,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 49,
     "actual audit allowlist count",
   );
 });

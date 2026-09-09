@@ -651,6 +651,108 @@ async function errorCode(response: Response): Promise<string | undefined> {
   return payload.error?.code;
 }
 
+Deno.test("limited upload_only submission route uses capability auth and preserves stable denial responses", async () => {
+  const attemptId = "93000000-0000-4000-8000-000000000001";
+  const submissionId = "93000000-0000-4000-8000-000000000002";
+  const maid: EdgeActor = { ...actor, role: "maid" };
+  const body = {
+    clientSubmissionId: submissionId,
+    expectedRevision: 0,
+    candleCount: 0,
+  };
+  const route = `/v1/attempts/${attemptId}/submissions`;
+  const successCalls: string[] = [];
+  const successClients = {
+    admin: {
+      rpc(name: string) {
+        successCalls.push(name);
+        return Promise.resolve({
+          data: name === "create_cleaning_submission"
+            ? {
+              id: submissionId,
+              attemptId,
+              version: 1,
+              status: "submitted",
+              currentRevision: 1,
+              current: true,
+            }
+            : null,
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const success = await handleApiRequest(request("POST", route, body), {
+    createClients: () => successClients,
+    authenticateRequest: () => {
+      throw new Error("active-only authentication must not run for submit");
+    },
+    authenticateLimitedRequest: () =>
+      Promise.resolve({
+        actor: maid,
+        sessionId: "93000000-0000-4000-8000-000000000003",
+        profileStatus: "upload_only",
+      }),
+  });
+  assert(success.status === 201, "live upload_submit route succeeds");
+  assert(
+    successCalls.join(",") === "create_cleaning_submission",
+    "limited route delegates exact capability decision to submission RPC",
+  );
+
+  for (
+    const fixture of [
+      "missing",
+      "expired",
+      "revoked",
+      "evidence-only",
+      "deactivation-pending",
+    ]
+  ) {
+    const calls: string[] = [];
+    const denialCode = fixture === "deactivation-pending"
+      ? "SUBMISSION_ACCESS_REQUIRED"
+      : "CAPABILITY_ACCESS_REQUIRED";
+    const deniedClients = {
+      admin: {
+        rpc(name: string) {
+          calls.push(name);
+          return Promise.resolve(
+            name === "record_authorization_denial"
+              ? { data: null, error: null }
+              : {
+                data: null,
+                error: { message: denialCode },
+              },
+          );
+        },
+      },
+    } as unknown as EdgeClients;
+    const denied = await handleApiRequest(request("POST", route, body), {
+      createClients: () => deniedClients,
+      authenticateRequest: () => Promise.resolve(actor),
+      authenticateLimitedRequest: () =>
+        Promise.resolve({
+          actor: maid,
+          sessionId: "93000000-0000-4000-8000-000000000003",
+          profileStatus: fixture === "deactivation-pending"
+            ? "deactivation_pending"
+            : "upload_only",
+        }),
+    });
+    assert(denied.status === 403, `${fixture} capability returns 403`);
+    assert(
+      await errorCode(denied) === denialCode,
+      `${fixture} capability keeps the stable code`,
+    );
+    assert(
+      calls.join(",") ===
+        "create_cleaning_submission,record_authorization_denial",
+      `${fixture} denial is bounded without replacing the intended response`,
+    );
+  }
+});
+
 Deno.test("Room GET detail route rejects every mutation-shaped alias", async () => {
   const forbiddenGetPaths = [
     `/v1/rooms/${roomId}/master-data`,

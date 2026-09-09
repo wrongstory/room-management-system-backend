@@ -188,13 +188,22 @@ insert into public.cleaning_attempts(
 );
 update public.cleaning_assignments set is_current=false,ended_at='2037-10-03 10:00+09',change_reason_code='INSPECTION_REJECTED'
 where id=pg_temp.pid(408);
+insert into public.cleaning_submissions(
+  id,cleaning_attempt_id,client_submission_id,version,status,photo_manifest,submitted_by
+) values (
+  pg_temp.pid(608),pg_temp.pid(508),pg_temp.pid(708),1,'rejected','{}',pg_temp.pid(2)
+);
+insert into public.inspection_decisions(id,submission_id,decision,reason_code,decided_by)
+values(pg_temp.pid(808),pg_temp.pid(608),'rejected','QUALITY_REWORK',pg_temp.pid(1));
 insert into public.cleaning_targets(
   id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
   available_from,due_at,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,
-  created_by,reclean_of_attempt_id,reclean_maid_profile_id
+  created_by,reclean_of_attempt_id,reclean_maid_profile_id,
+  reclean_of_submission_id,reclean_of_inspection_decision_id
 ) select pg_temp.pid(309),room_id,'reclean','inspection_reclean','activation-reclean',
   '2037-10-03','2037-10-03','2037-10-03 11:00+09','2037-10-03 14:00+09','notified',2,
-  room_type_snapshot,0,template_snapshot,pg_temp.pid(1),pg_temp.pid(508),pg_temp.pid(2)
+  room_type_snapshot,0,template_snapshot,pg_temp.pid(1),pg_temp.pid(508),pg_temp.pid(2),
+  pg_temp.pid(608),pg_temp.pid(808)
   from public.cleaning_targets where id=pg_temp.pid(308);
 insert into public.cleaning_assignments(
   id,cleaning_target_id,maid_profile_id,sequence_number,revision,changed_by,notified_at

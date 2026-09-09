@@ -4,12 +4,12 @@
 
 - 개발 시작 기준(당시 base): `dev@9ed843ca570d1fccaa95fdb672fb8dc20fe91107`.
 - 상태: PR #81 독립 exact-head 리뷰·required CI·위임 승인·dev 병합 완료. production에는 승격하지 않았다.
-- 현재 개발 통합 기준: `dev@a4f8cb5b3c551b6df641491f5ac02c209d71f26d`, **30 migrations / 63 paths / 68 operations**. #30은 HTTP/OpenAPI를 추가하지 않았다.
+- 현재 개발 통합 기준: `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`, **33 migrations / 67 paths / 72 operations**. #30/#83/#84/#85 source/dev가 완료됐다.
 - production 기준은 기존 **19 migrations / 39 paths / 43 operations**로 유지되며 이번 작업에서 운영을 재검증하거나 변경하지 않았다.
 - 제품 정본: `AI_BACKEND_PRODUCT_GUIDE.md` §7, §10, §11과 고정 프런트 정책 `DOCS/18_TYPE_PHOTO_TEMPLATE_POLICY.md`.
 - #30은 versioned slot, target snapshot, attempt별 사진 연결, 불변 제출본과 current pointer, 증빙 완전성 검증 기반만 소유한다.
-- 실제 Google Drive 업로드·바이너리 검증·삭제 worker는 #9, 전체 제출·검수 command는 #31이다. 이번 단계에서 새 HTTP API나 운영 배포를 추가하지 않는다.
-- 다음 본선은 **#9 → #31**이다.
+- 실제 Google Drive 업로드·바이너리 검증·삭제 worker source는 #84/#85까지 완료됐다. #31 feature는 전체 제출·검수 command를 Fastify/Edge에 연결했지만 아직 독립 리뷰·dev 병합·운영 배포 전이다.
+- 다음 gate는 **#31 독립 리뷰 → dev 병합 → 별도 release/main/production 검증**이다.
 
 ## 반드시 유지할 경계
 
@@ -54,9 +54,17 @@
 비교한다. client가 전달한 `verified`나 업로드 시각을 실제 검증 증거로 신뢰해서는 안 된다.
 
 DB helper는 owner-only 내부 기반이며 Auth/session·파일·Drive 검증을 수행하는 공개 command가
-아니다. #9/#31에서는 이 helper를 단순히 service-role에 개방하지 말고, 최신 session과
+아니다. #84/#31에서는 이 helper를 단순히 service-role에 개방하지 않고, 최신 session과
 role/status·capability·assignment/version 검증, scoped idempotency, audit/outbox를 포함하는
 서버 command를 별도로 검증해야 한다. #30 모델의 CAS 검증과 실제 HTTP retry 보장은 구분한다.
+
+## #31 submission / inspection 연결
+
+- 메이드 submit command는 own attempt의 `field_completed`, current notified assignment, exact assignment version과 frozen slot 전체의 current accepted evidence를 한 transaction에서 다시 검증한다. `upload_only`는 정확한 live `upload_submit` capability가 있을 때만 이 POST에 도달하며, `deactivation_pending`의 `finish_current` capability는 제출 권한으로 확대하지 않는다. 이 제한 인증을 일반 active route나 폭탄 신고 권한으로도 확대하지 않는다.
+- 새 submission version과 photo bindings/binding-set seal을 append하고 current pointer를 expected revision CAS로 교체한다. 일반 재제출은 과거 version을 superseded history로 유지한다. 폭탄방 report/evidence는 최초 submission에 seal되면 `BOMB_REPORT_SEALED`로 재제출을 막아 다른 version으로 이동하지 않는다.
+- 관리자 pending queue와 detail은 notified assignment의 immutable room snapshot, sealed opaque photo ID/slot/version, 폭탄 evidence photo ID만 공개한다. Drive locator/hash/file name, request hash, raw state, PIN/PII는 공개하지 않는다. 오래된 current pointer의 검수·폭탄 판정은 `STALE_VERSION`으로 거부한다.
+- 승인 transaction은 immutable inspection decision, 상태 전이, 비행동 notification/outbox/audit와 원청소 earning을 exactly-once 생성한다. 반려 transaction은 earning 없이 원 attempt/submission/decision·원 maid에 고정된 0원 notified reclean과 행동 notification/outbox/audit를 만든다. attempt 생성은 #28 activation만 담당한다.
+- `inspection_reclean` template이 room type에 대해 정확히 한 published version이 아니면 반려 transaction 전체를 fail-closed한다. 원 maid inactive/departed 예외는 자동 이관하지 않으며 미확정 정책으로 남긴다.
 
 운영 Supabase·recovery·main·Edge·Pages·Cron·Vault·tag/Release는 이번 작업에서 변경하지 않는다.
 

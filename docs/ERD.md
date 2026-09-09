@@ -414,7 +414,30 @@ erDiagram
 - 필수 슬롯이 전부 verified·미만료·미삭제 사진을 가져야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. frozen JSON과 normalized 슬롯의 전체 집합도 다시 대조한다.
 - `cleaning_submissions`가 계속 제출 버전 정본이다. 미소비 제출도 identity/manifest/업무 snapshot/제출자·시각은 수정·삭제할 수 없고 `status/superseded_at`만 기존 lifecycle projection으로 남긴다. `submission_photo_binding_sets`는 정본을 복제하는 제출 테이블이 아니라 연결 봉인 marker다.
 - 봉인 시 현재 photo set과 양방향 동일성을 검증하고, 이후 membership INSERT/UPDATE/DELETE를 금지한다. 사진 교체와 연결은 같은 attempt lock에서 직렬화한다. current pointer는 CAS로 바뀌지만 과거 제출의 특정 photo version은 유지된다.
-- 이 단계는 이미 존재하는 제출의 모델 연결을 검증할 뿐 business 전체제출·검수·room ready·수익·알림 명령을 실행하지 않는다. canonical `cleaning_submissions` 및 legacy `submission_photos`에 대한 service-role raw DML도 차단한다. legacy manifest/default `uploaded`만으로 verified 증빙을 만들지 않는다.
+- #30 단계 자체는 모델 연결까지만 소유했으며, #31의 후속 append-only migration이 business 전체제출·검수·수익·재청소 명령을 연결한다. canonical `cleaning_submissions` 및 legacy `submission_photos`에 대한 service-role raw DML 차단은 계속 유지한다. legacy manifest/default `uploaded`만으로 verified 증빙을 만들지 않는다.
+
+### #31 전체 제출·폭탄방·검수·재청소 원장
+
+```mermaid
+erDiagram
+  CLEANING_ATTEMPTS ||--o{ CLEANING_SUBMISSIONS : "immutable versions"
+  CLEANING_SUBMISSIONS ||--|| SUBMISSION_PHOTO_BINDING_SETS : "sealed exact set"
+  CLEANING_SUBMISSIONS ||--o| SUBMISSION_CURRENT_POINTERS : "attempt CAS current"
+  CLEANING_ATTEMPTS ||--o| BOMB_ROOM_REPORTS : "pre-submission immutable report"
+  BOMB_ROOM_REPORTS ||--o{ BOMB_ROOM_REPORT_EVIDENCE : "selected photo versions"
+  BOMB_ROOM_REPORTS ||--o| BOMB_ROOM_REPORT_SEALS : "locked to one submission"
+  BOMB_ROOM_REPORT_SEALS ||--o| BOMB_ROOM_DECISIONS : "one admin predecision"
+  CLEANING_SUBMISSIONS ||--o| INSPECTION_DECISIONS : "one final decision"
+  INSPECTION_DECISIONS ||--o| CLEANING_TARGETS : "rejected reclean provenance"
+  CLEANING_SUBMISSIONS ||--o| EARNINGS : "approved original work only"
+```
+
+- `private.bomb_room_reports/evidence/seals/decisions`는 RLS와 direct DML revoke가 적용된 append-only 원장이다. 신고는 정확한 본인 attempt와 selected verified photo version 1~20개를 묶고, 최초 full submission에서 한 번 seal된 memo/evidence를 다른 submission version으로 이동하지 않는다.
+- submission current pointer는 attempt별 revision CAS다. field completion만으로 제출/검수/earning은 생기지 않으며, 필수 current photo가 하나라도 누락·pending·failed·expired·purged면 새 제출을 거부한다. 일반 재제출은 과거 version/photo bindings를 immutable history로 남긴다.
+- 관리자 검수 queue/detail은 current `inspection_pending`만 사용한다. queue의 roomNumber는 target/live room이 아니라 notified assignment snapshot에서 가져오며, sealed photo ID/slot/version 외 provider locator/hash/file name과 PIN/PII/request hash/raw state는 반환하지 않는다.
+- stale current review와 bomb 선판정은 `STALE_VERSION`으로 실패한다. 최종 approve/reject, notification/outbox/audit, earning 또는 reclean 생성은 한 transaction이며 receipt lock과 unique provenance로 동시 재시도를 exactly-once 처리한다.
+- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유하고 다른 maid 이관은 금지한다.
+- checkout completion은 root target status만 신뢰하지 않는다. `completion_submission_id`에서 승인된 terminal descendant를 recursive reclean chain으로 증명하며, 새 completed obligation에 NULL submission proof를 허용하지 않는다.
 
 ### #27 시작 전 취소 요청 원장
 

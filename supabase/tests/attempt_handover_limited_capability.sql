@@ -241,11 +241,17 @@ select is((select count(*)::int from private.attempt_capability_grants where att
 -- Reclean expiration keeps the original maid and source; it is not a handover.
 update public.cleaning_attempts set status='rejected' where id=pg_temp.bid(508);
 update public.cleaning_assignments set is_current=false,ended_at=pg_temp.btime(),change_reason_code='INSPECTION_REJECTED' where id=pg_temp.bid(408);
+insert into public.cleaning_submissions(id,cleaning_attempt_id,client_submission_id,version,status,photo_manifest,submitted_by)
+values(pg_temp.bid(608),pg_temp.bid(508),pg_temp.bid(708),1,'rejected','{}',pg_temp.bid(9));
+insert into public.inspection_decisions(id,submission_id,decision,reason_code,decided_by)
+values(pg_temp.bid(808),pg_temp.bid(608),'rejected','QUALITY_REWORK',pg_temp.bid(1));
 insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
- available_from,due_at,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by,reclean_of_attempt_id,reclean_maid_profile_id)
+ available_from,due_at,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by,reclean_of_attempt_id,reclean_maid_profile_id,
+ reclean_of_submission_id,reclean_of_inspection_decision_id)
 select pg_temp.bid(312),room_id,'reclean','inspection_reclean','handover-reclean',(pg_temp.btime() at time zone 'Asia/Seoul')::date-1,
  (pg_temp.btime() at time zone 'Asia/Seoul')::date-1,((pg_temp.btime() at time zone 'Asia/Seoul')::date-1)::timestamp at time zone 'Asia/Seoul',
- null,'notified',2,'{}',0,'{}',pg_temp.bid(1),pg_temp.bid(508),pg_temp.bid(9) from public.cleaning_targets where id=pg_temp.bid(308);
+ null,'notified',2,'{}',0,'{}',pg_temp.bid(1),pg_temp.bid(508),pg_temp.bid(9),pg_temp.bid(608),pg_temp.bid(808)
+ from public.cleaning_targets where id=pg_temp.bid(308);
 insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,notified_at,changed_by)
 values(pg_temp.bid(412),pg_temp.bid(312),pg_temp.bid(9),99,2,pg_temp.btime(),pg_temp.bid(1));
 insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,assignment_revision,template_snapshot,room_snapshot)

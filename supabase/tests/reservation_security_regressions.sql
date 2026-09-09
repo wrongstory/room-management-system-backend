@@ -1081,21 +1081,17 @@ update public.cleaning_targets
 set status = 'approved'
 where id = (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000003');
 
-update public.checkout_cleaning_obligations
-set status = 'completed'
-where reservation_id = '74000000-0000-4000-8000-000000000003';
-
 do $$
 begin
   begin
-    update public.cleaning_targets
-    set status = 'cancelled'
-    where id = (select planned_cleaning_target_id from public.checkout_cleaning_obligations where reservation_id='74000000-0000-4000-8000-000000000003');
+    update public.checkout_cleaning_obligations
+    set status = 'completed'
+    where reservation_id = '74000000-0000-4000-8000-000000000003';
     insert into reservation_security_results values
-      (23, 'completed checkout targets cannot regress through direct service-role DML', false);
+      (23, 'target status alone cannot complete checkout without immutable approved submission proof', false);
   exception when check_violation then
     insert into reservation_security_results values
-      (23, 'completed checkout targets cannot regress through direct service-role DML', sqlerrm like '%TERMINAL_CHECKOUT_TARGET_IMMUTABLE%');
+      (23, 'target status alone cannot complete checkout without immutable approved submission proof', sqlerrm like '%CHECKOUT_COMPLETION_PROOF_REQUIRED%');
   end;
 end;
 $$;
