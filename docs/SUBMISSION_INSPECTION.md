@@ -2,10 +2,10 @@
 
 ## 상태와 범위
 
-- 기준: `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2` 위 feature source.
+- 개발 정본: `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`.
 - source: append-only `20260909120308_submission_inspection_reclean.sql`, Fastify/Edge parity,
   OpenAPI **74 paths / 80 operations**.
-- 상태: 로컬 source 검증 완료, 독립 리뷰·dev 병합·release/main·production 미완료.
+- 상태: exact head `3c283683d8bce5e5b6351c1de1c9271c2099163f` 독립 QA P0/P1=0·required CI·96/100 위임 승인 후 PR #91로 source/dev 병합 완료. release/main·production은 미완료이며 inspection queue cursor pagination은 비차단 P2 후속이다.
 - 승인 후 고객 컴플레인/보상 재작업과 원 maid inactive/departed 예외 이관은 범위 밖이다.
 
 ## 상태 전이

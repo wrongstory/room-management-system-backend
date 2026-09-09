@@ -24,11 +24,11 @@ Fastify는 현재 개발 기준선이며 Edge PoC가 실패할 때의 rollback �
 #83 legacy primitive service-role grant는 #84 migration에서 회수하고 admitted wrapper만 HTTP 서비스 경계로 사용한다.
 slot/status metadata와 original content 권한은 분리한다. limited upload는 일반 active guard를 완화하지 않으며 content는 provider wait 이후에도 최신 권한을 재검증한다.
 decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생성 검증이며 runtime CDN fallback이 없다. actual local worker(memory256MB/CPU2초) 합성4MP JPEG/WebP gate는 통과했으며 운영 Google/hosted 검증은 release 후 별도다. ignored asset 재생성 때문에 배포 전 `npm ci`와 `npm run edge:check`가 모두 성공해야 한다. 실패/누락 시 deploy 금지다.
-상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [사진 상태 gate](./API_STATUS_MATRIX.md)를 따른다. #84 업로드·열람과 #85 별도 `photo-purge` Function은 `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`까지 병합됐다. 원격 Google·production 검증은 별도 release gate다.
+상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [사진 상태 gate](./API_STATUS_MATRIX.md)를 따른다. #84 업로드·열람, #85 별도 `photo-purge` Function과 #31 제출·검수는 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`까지 병합됐다. 원격 Google·production 검증은 별도 release gate다.
 
 #85 worker는 accepted 보존 만료, never-accepted orphan 보상, 확인된 빈 room/date 폴더를 서로 다른 durable 원장으로 처리한다. 한 실행의 세 단계 claim 합계는 blocked 전환을 포함해 10 이하이고 DB RPC·OAuth·Drive 호출·settle·heartbeat가 같은 45초 absolute deadline을 공유하며 Edge에서 sleep하지 않는다. provider DELETE는 settle/heartbeat 여유시간이 보장될 때만 시작하고, retry exhaustion으로 blocked가 생기면 heartbeat와 developer status를 degraded로 기록한다. provider `204/404`만 성공이고 retry는 DB `next_attempt_at`이 결정한다. 폴더 retirement는 operation→room-folder binding 및 upload state를 함께 잠가 reserve/provider-success/finalize와 경쟁해도 진행 중 업로드를 삭제하지 않는다. room 폴더를 먼저 정리하고 모든 child가 terminal인 경우에만 date 폴더를 정리한다. raw Drive locator는 terminal settle에서 지우고 private digest tombstone과 immutable cleanup event만 남긴다.
 
-### #31 전체 제출·검수·반려 재청소 — feature source
+### #31 전체 제출·검수·반려 재청소 — source/dev 완료, production 미승격
 
 `submission_inspection_reclean` append-only migration이 #30의 slot/current-photo/binding 원장을 실제 업무 command로 연결한다. 메이드 제출은 물리 완료, 본인 current notified attempt, 최신 assignment version, 필수 verified·미만료·미삭제 photo set을 같은 attempt lock에서 다시 확인하고 immutable submission version과 exact photo binding set을 만든다. current pointer는 expected revision CAS이며 일반 재제출은 과거 version을 `superseded`로 보존한다. 폭탄방 신고와 선택 증빙은 제출 전에 attempt에 불변 기록한 뒤 최초 submission에 seal하며 제품 계약상 다른 submission version으로 이동하지 않는다.
 
@@ -106,7 +106,7 @@ erDiagram
 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)은 exact head
 `3dfbb70176533a69257c68c2b2af2ee19cc9bd22`의 독립 QA P0/P1/P2=0·required CI·Codex 96/100 승인 후
 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다. 이후 #84/#85도
-`dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`까지 source/dev 완료했다. 현재 #31 feature는
+`dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`까지 #31 포함 source/dev 완료했다. 개발 정본은
 34 migrations / 74 paths / 80 operations이며 기존 production 19 migrations / 39 paths / 43 operations는
 변경하지 않았다. 운영 Drive/HTTP/purge hosted 검증은 별도 release gate다.
 

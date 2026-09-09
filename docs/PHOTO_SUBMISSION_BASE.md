@@ -4,12 +4,12 @@
 
 - 개발 시작 기준(당시 base): `dev@9ed843ca570d1fccaa95fdb672fb8dc20fe91107`.
 - 상태: PR #81 독립 exact-head 리뷰·required CI·위임 승인·dev 병합 완료. production에는 승격하지 않았다.
-- 현재 개발 통합 기준: `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`, **33 migrations / 67 paths / 72 operations**. #30/#83/#84/#85 source/dev가 완료됐다.
+- 현재 개발 통합 기준: `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`, **34 migrations / 74 paths / 80 operations**. #30/#83/#84/#85/#31 source/dev가 완료됐다.
 - production 기준은 기존 **19 migrations / 39 paths / 43 operations**로 유지되며 이번 작업에서 운영을 재검증하거나 변경하지 않았다.
 - 제품 정본: `AI_BACKEND_PRODUCT_GUIDE.md` §7, §10, §11과 고정 프런트 정책 `DOCS/18_TYPE_PHOTO_TEMPLATE_POLICY.md`.
 - #30은 versioned slot, target snapshot, attempt별 사진 연결, 불변 제출본과 current pointer, 증빙 완전성 검증 기반만 소유한다.
-- 실제 Google Drive 업로드·바이너리 검증·삭제 worker source는 #84/#85까지 완료됐다. #31 feature는 전체 제출·검수 command를 Fastify/Edge에 연결했지만 아직 독립 리뷰·dev 병합·운영 배포 전이다.
-- 다음 gate는 **#31 독립 리뷰 → dev 병합 → 별도 release/main/production 검증**이다.
+- 실제 Google Drive 업로드·바이너리 검증·삭제 worker source는 #84/#85까지 완료됐고, #31 전체 제출·검수 command도 PR #91의 독립 QA·required CI·96/100 위임 승인 뒤 `dev`에 병합됐다.
+- 다음 gate는 **별도 release/main 승격 → production migration/Edge/Google hosted 검증**이다.
 
 ## 반드시 유지할 경계
 
@@ -91,5 +91,5 @@ role/status·capability·assignment/version 검증, scoped idempotency, audit/ou
 - 승인 head와 병합 결과의 tree: `14cd83310840570bb291ef44689c41ea7e128b7f`, 동일함을 확인했다.
 
 독립 QA·GitHub 리뷰·CI·Codex 위임 승인·병합은 별도 근거다. 위 source/dev 완료는 실제 파일의
-바이너리 검증, Drive 업로드·삭제, 전체 제출·검수 command, production/hosted 사용 가능 판정을
-포함하지 않는다. 이 후속은 #9/#31 및 별도 release/main 승격에서 검증한다.
+바이너리 검증, Drive 업로드·삭제, 전체 제출·검수 command의 production/hosted 사용 가능 판정을
+포함하지 않는다. 이 후속은 #9/#31의 production gate 및 별도 release/main 승격에서 검증한다.

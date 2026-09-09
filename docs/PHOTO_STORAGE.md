@@ -1,6 +1,6 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **확정 제품 정책 / #83·#84·#85 source/dev 완료, #31 feature source 구현·production 미승격, 실제 운영 Drive 미연결**
+> 상태: **확정 제품 정책 / #83·#84·#85·#31 source/dev 완료·production 미승격, 실제 운영 Drive 미연결**
 > 사용자가 확정한 계약은 Google Drive 전용·300KiB 이하·비공개 저장과 `uploaded_at + 7 days` 영구삭제다. 7일 보존에는 검수 상태, 분쟁, retention hold 또는 180일 보존 예외를 두지 않는다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
 아래 압축·업로드·삭제 흐름과 용량 보호 기준은 구현 시 따라야 하는 운영 계약이다. #84의 Drive HTTP adapter와 업로드·열람 API, #85의 7일 purge worker는 source/dev 완료했다. 운영 OAuth·Google/hosted smoke·주기 실행 활성화는 아직 미완료다.
@@ -12,7 +12,7 @@ Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합
 `dev@520abe7b80501ed9a4573e2251b9b640476d87b5`에 병합됐다. 이어 #85는 PR #90으로
 `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`에 병합됐다. 이 개발 통합은 **33 migrations / 67 paths / 72 operations**이며,
 사진 슬롯·업로드·작업 상태·원본 열람과 accepted 168시간 purge, never-accepted orphan 보상, 빈 room/date 폴더 retirement source가 완료됐다.
-현재 #31 feature는 전체 제출·검수·반려 재청소를 **34 migrations / 74 paths / 80 operations**로 구현했지만 독립 리뷰·dev 병합 전이다. production 배포·현재 사용은 아직 ❌다.
+PR #91로 #31 전체 제출·검수·반려 재청소까지 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`에 병합됐다. 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 production 배포·현재 사용은 아직 ❌다.
 production은 기존 19 migrations / 39 paths / 43 operations를 유지하며 DB/Edge/Pages/Google 환경을 변경하지 않았다.
 상세 exact head·동일 tree·CI 재실행 및 source/dev 승인 증거는 [API 상태 정본의 #83/#84/#85/#31 gate](./API_STATUS_MATRIX.md)를 따른다.
 
@@ -67,7 +67,7 @@ gzip은 `scripts/photo-gzip.mjs`에서 optional header를 금지하고 mtime=0/O
 4MP/4096px·native64MiB는 검증된 decoder 기술상한이지 확정 사진 제품 정책이 아니다. 실제 촬영 fixture/향후 dependency 변경도 동일 gate를 재검증한다.
 업로드 응답은 initial/retry 모두 `quotaWarning:boolean`만 노출한다. #85 feature는 장기 admission SUM 대신 bounded pending projection을 사용하지만, 외부 Gmail/Photos 사용량과의 원자적 보장을 주장하지 않는다.
 
-실제 운영 OAuth/Google 호출·배포·#85 purge schedule 활성화·#31 전체 제출/검수는 이번 작업에서 하지 않는다.
+실제 운영 OAuth/Google 호출·배포·#85 purge schedule 활성화·#31 전체 제출/검수 hosted smoke는 이번 source/dev 작업에서 하지 않았다.
 
 운영자는 developer `runtime-status.configuration`의 `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `GOOGLE_DRIVE_REFRESH_TOKEN` / `GOOGLE_DRIVE_ROOT_FOLDER_ID` 각각의 `configured:boolean`만 확인한다. 하나라도 false면 provider 준비 완료로 판단하지 않는다. true는 값 존재 여부일 뿐 Google 인증·권한·실제 업로드 검증을 대체하지 않는다. 값·길이·hash·전체 환경변수는 응답하지 않는다.
 
