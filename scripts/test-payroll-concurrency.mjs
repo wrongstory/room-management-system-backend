@@ -158,7 +158,7 @@ export async function testPayrollConcurrency(client, adminProfileId) {
     `"instanceCount":1}]','${adminProfileId}');`
   );
 
-  const weeks = [-1, -3, -5, -7, -9, -11, -12].map((offset) => sql(
+  const weeks = [-1, -3, -5, -7, -9, -11, -12, -13, -15, -17].map((offset) => sql(
     `select (date_trunc('week',clock_timestamp() at time zone 'Asia/Seoul')::date` +
     `${offset < 0 ? `-${Math.abs(offset * 7)}` : `+${offset * 7}`})::text;`
   ));
@@ -433,7 +433,7 @@ export async function testPayrollConcurrency(client, adminProfileId) {
   ]);
   const priorLateErrors = priorLateRace.filter((result) => result.error).map((result) => result.error);
   assert(priorLateErrors.every((error) => error.code !== '40P01'),
-    'prior late approval versus next freeze has zero SQLSTATE 40P01 deadlocks');
+    `prior late approval versus next freeze has zero SQLSTATE 40P01 deadlocks (${priorLateErrors.map((error) => `${error.code}:${error.message}`).join(',')})`);
   assert(priorLateErrors.length === 1 && priorLateErrors.every((error) =>
     /PAYROLL_PRIOR_LATE_EARNING_PENDING/.test(error.message)
   ), `prior late approval versus next freeze has one stable loser (${priorLateErrors.map((error) => `${error.code}:${error.message}`).join(',')})`);
@@ -446,7 +446,137 @@ export async function testPayrollConcurrency(client, adminProfileId) {
     `(next_cycle.status in ('paying','check','paid') or next_cycle.offset_settled_at is not null));`
   ) === 't', 'race never strands a prior late earning behind an immutable next-week snapshot');
 
+  async function startPaymentRaceWeek(weekStart, amount, digit) {
+    const submissionId = await pendingSubmission(weekStart, amount);
+    ok(await approve(submissionId, digit), 'payment-result race approval');
+    ok(await client.rpc('start_payroll_cycle', {
+      p_actor_profile_id: adminProfileId,
+      p_maid_profile_id: maidProfileId,
+      p_week_start: weekStart,
+      p_expected_version: 0,
+      p_idempotency_key: `payroll-payment-race-start-${randomUUID()}`,
+      p_request_hash: digit.repeat(64)
+    }), 'payment-result race PAYING baseline');
+    return sql(
+      `select attempt.id from public.payroll_payment_attempts attempt ` +
+      `join public.payroll_cycles cycle on cycle.id=attempt.payroll_cycle_id ` +
+      `where cycle.maid_profile_id='${maidProfileId}' and cycle.week_start='${weekStart}' ` +
+      `order by attempt.attempt_number desc limit 1;`
+    );
+  }
+
+  function assertStablePaymentRace(results, label) {
+    const errors = results.filter((result) => result.error).map((result) => result.error);
+    assert(results.filter((result) => !result.error).length === 1 && errors.length === 1,
+      `${label} has exactly one serialized winner and loser`);
+    assert(errors.every((error) => error.code !== '40P01'),
+      `${label} has zero SQLSTATE 40P01 deadlocks`);
+    assert(errors.every((error) =>
+      /STALE_VERSION|PAYROLL_PAYMENT_TRANSITION_INVALID|PAYROLL_PAYMENT_ATTEMPT_TERMINAL/.test(error.message)
+    ), `${label} has only stable domain losers (${errors.map((error) => `${error.code}:${error.message}`).join(',')})`);
+  }
+
+  const payingCheckPaidAttempt = await startPaymentRaceWeek(weeks[7], 21000, '6');
+  const payingCheckPaidRace = await Promise.all([
+    client.rpc('record_payroll_payment_check', {
+      p_actor_profile_id: adminProfileId,
+      p_payment_attempt_id: payingCheckPaidAttempt,
+      p_expected_version: 1,
+      p_reason_code: 'TRANSFER_RESULT_UNCERTAIN',
+      p_idempotency_key: `payroll-check-paid-race-check-${randomUUID()}`,
+      p_request_hash: '7'.repeat(64)
+    }),
+    client.rpc('record_payroll_payment_paid', {
+      p_actor_profile_id: adminProfileId,
+      p_payment_attempt_id: payingCheckPaidAttempt,
+      p_expected_version: 1,
+      p_payment_method: 'bank_transfer',
+      p_canonical_reference: `RACE.CHECK.${sequence}A1`,
+      p_idempotency_key: `payroll-check-paid-race-paid-${randomUUID()}`,
+      p_request_hash: '8'.repeat(64)
+    })
+  ]);
+  assertStablePaymentRace(payingCheckPaidRace, 'PAYING check versus paid');
+  assert(sql(
+    `select cycle.status in ('check','paid') and cycle.version=2 ` +
+    `and (select count(*) from public.payroll_payment_results result ` +
+    `where result.payment_attempt_id='${payingCheckPaidAttempt}')=1 ` +
+    `from public.payroll_cycles cycle join public.payroll_payment_attempts attempt ` +
+    `on attempt.payroll_cycle_id=cycle.id where attempt.id='${payingCheckPaidAttempt}';`
+  ) === 't', 'PAYING check versus paid leaves one result matching a version-2 cycle');
+
+  const payingPaidReopenAttempt = await startPaymentRaceWeek(weeks[8], 23000, '7');
+  const payingPaidReopenRace = await Promise.all([
+    client.rpc('record_payroll_payment_paid', {
+      p_actor_profile_id: adminProfileId,
+      p_payment_attempt_id: payingPaidReopenAttempt,
+      p_expected_version: 1,
+      p_payment_method: 'bank_transfer',
+      p_canonical_reference: `RACE.REOPEN.${sequence}B2`,
+      p_idempotency_key: `payroll-paid-reopen-race-paid-${randomUUID()}`,
+      p_request_hash: '9'.repeat(64)
+    }),
+    client.rpc('reopen_payroll_payment_attempt', {
+      p_actor_profile_id: adminProfileId,
+      p_payment_attempt_id: payingPaidReopenAttempt,
+      p_expected_version: 1,
+      p_reason_code: 'NO_TRANSFER_CONFIRMED',
+      p_idempotency_key: `payroll-paid-reopen-race-reopen-${randomUUID()}`,
+      p_request_hash: 'a'.repeat(64)
+    })
+  ]);
+  assertStablePaymentRace(payingPaidReopenRace, 'PAYING paid versus reopen');
+  assert(sql(
+    `select ((cycle.status='paid' and result.result_type='paid' and cycle.paid_at is not null) ` +
+    `or (cycle.status='open' and result.result_type='reopened' and cycle.paid_at is null)) ` +
+    `and cycle.version=2 and result.locked_amount=attempt.locked_amount ` +
+    `from public.payroll_cycles cycle join public.payroll_payment_attempts attempt ` +
+    `on attempt.payroll_cycle_id=cycle.id join public.payroll_payment_results result ` +
+    `on result.payment_attempt_id=attempt.id where attempt.id='${payingPaidReopenAttempt}';`
+  ) === 't', 'PAYING paid versus reopen leaves one coherent immutable terminal result');
+
+  const checkPaidReopenAttempt = await startPaymentRaceWeek(weeks[9], 25000, '8');
+  ok(await client.rpc('record_payroll_payment_check', {
+    p_actor_profile_id: adminProfileId,
+    p_payment_attempt_id: checkPaidReopenAttempt,
+    p_expected_version: 1,
+    p_reason_code: 'TRANSFER_RESULT_UNCERTAIN',
+    p_idempotency_key: `payroll-check-baseline-${randomUUID()}`,
+    p_request_hash: 'b'.repeat(64)
+  }), 'CHECK payment race baseline');
+  const checkPaidReopenRace = await Promise.all([
+    client.rpc('record_payroll_payment_paid', {
+      p_actor_profile_id: adminProfileId,
+      p_payment_attempt_id: checkPaidReopenAttempt,
+      p_expected_version: 2,
+      p_payment_method: 'bank_transfer',
+      p_canonical_reference: `RACE.CHECK.${sequence}C3`,
+      p_idempotency_key: `payroll-check-terminal-race-paid-${randomUUID()}`,
+      p_request_hash: 'c'.repeat(64)
+    }),
+    client.rpc('reopen_payroll_payment_attempt', {
+      p_actor_profile_id: adminProfileId,
+      p_payment_attempt_id: checkPaidReopenAttempt,
+      p_expected_version: 2,
+      p_reason_code: 'NO_TRANSFER_CONFIRMED',
+      p_idempotency_key: `payroll-check-terminal-race-reopen-${randomUUID()}`,
+      p_request_hash: 'd'.repeat(64)
+    })
+  ]);
+  assertStablePaymentRace(checkPaidReopenRace, 'CHECK paid versus reopen');
+  assert(sql(
+    `select ((cycle.status='paid' and terminal.result_type='paid' and cycle.paid_at is not null) ` +
+    `or (cycle.status='open' and terminal.result_type='reopened' and cycle.paid_at is null)) ` +
+    `and cycle.version=3 and terminal.before_status='check' ` +
+    `and (select count(*) from public.payroll_payment_results result ` +
+    `where result.payment_attempt_id=attempt.id)=2 ` +
+    `from public.payroll_cycles cycle join public.payroll_payment_attempts attempt ` +
+    `on attempt.payroll_cycle_id=cycle.id join public.payroll_payment_results terminal ` +
+    `on terminal.payment_attempt_id=attempt.id and terminal.result_type in ('paid','reopened') ` +
+    `where attempt.id='${checkPaidReopenAttempt}';`
+  ) === 't', 'CHECK paid versus reopen preserves check plus one coherent terminal result');
+
   console.log(
-    'Payroll concurrency passed: exact-one start, approval/start and prior-late/freeze lock orders, correction/reversal/start; SQLSTATE 40P01=0 and only stable domain losers.'
+    'Payroll concurrency passed: exact-one start, approval/start, prior-late/freeze, correction/reversal/start, and payment-result races; SQLSTATE 40P01=0, generic errors=0, and only stable domain losers.'
   );
 }

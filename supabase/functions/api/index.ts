@@ -77,6 +77,9 @@ import {
   correctPayrollAdjustment,
   listPayroll,
   listPayrollEntries,
+  recordPayrollPaymentCheck,
+  recordPayrollPaymentPaid,
+  reopenPayrollPayment,
   reversePayrollSource,
   startPayroll,
 } from "../_shared/payroll-api.ts";
@@ -874,6 +877,21 @@ export async function handleApiRequest(
       };
       assertPayrollResponseSize(response);
       return jsonResponse(response, 201, corsHeaders);
+    }
+    const paymentResultMatch = path.match(
+      /^\/v1\/payroll\/payment-attempts\/([^/]+)\/(check|paid|reopen)$/,
+    );
+    if (request.method === "POST" && paymentResultMatch) {
+      const attemptId = paymentResultMatch[1] ?? "";
+      const action = paymentResultMatch[2];
+      const paymentResult = action === "check"
+        ? await recordPayrollPaymentCheck(request, clients, actor, attemptId)
+        : action === "paid"
+        ? await recordPayrollPaymentPaid(request, clients, actor, attemptId)
+        : await reopenPayrollPayment(request, clients, actor, attemptId);
+      const response = { paymentResult };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
     }
 
     if (request.method === "GET" && path === "/v1/complaints") {

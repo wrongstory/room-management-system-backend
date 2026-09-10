@@ -86,6 +86,10 @@ const assignmentAttemptActivationMigrationUrl = new URL(
   '../supabase/migrations/20260905002657_assignment_attempt_activation.sql',
   import.meta.url
 );
+const payrollPaymentResultsMigrationUrl = new URL(
+  '../supabase/migrations/20260910114525_payroll_payment_results.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -458,5 +462,30 @@ describe('initial migration contract', () => {
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/for all to authenticated/);
     expect(sql).not.toMatch(/grant (insert|delete|update) on public\.(reservation|room_)/);
+  });
+
+  it('keeps external payroll payment results typed, immutable, and provider-free', async () => {
+    const sql = await readFile(payrollPaymentResultsMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table public.payroll_payment_attempts');
+    expect(sql).toContain('create table public.payroll_payment_results');
+    expect(sql).toContain('payroll_payment_results_terminal_attempt_unique');
+    expect(sql).toContain('payroll_payment_results_reference_unique');
+    expect(sql).toContain('PAYROLL_PAYMENT_EVIDENCE_IMMUTABLE');
+    expect(sql).toContain('private.payroll_payment_projection_transitions');
+    expect(sql).toContain('payroll_payment_projection_requires_evidence');
+    expect(sql).toContain('payroll_payment_attempt_requires_transition');
+    expect(sql).toContain('payroll_payment_result_requires_transition');
+    expect(sql).toContain('PAYROLL_PAYMENT_EVIDENCE_REQUIRED');
+    expect(sql).toContain("'TRANSFER_RESULT_UNCERTAIN'");
+    expect(sql).toContain("'NO_TRANSFER_CONFIRMED'");
+    expect(sql).toContain("'bank_transfer'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('alter table public.payroll_payment_results enable row level security');
+    expect(sql).toContain('from public,anon,authenticated,service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/https?:\/\//);
+    expect(sql).not.toMatch(/\b(?:http_post|net\.http_post)\b/);
   });
 });

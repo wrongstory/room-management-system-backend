@@ -19,6 +19,7 @@ from .developer_audit_event_summary import DeveloperAuditEventSummary
 from .developer_audit_event_summary_capability_kind import DeveloperAuditEventSummaryCapabilityKind
 from .developer_audit_event_summary_currency import DeveloperAuditEventSummaryCurrency
 from .developer_audit_event_summary_decision import DeveloperAuditEventSummaryDecision
+from .developer_audit_event_summary_payment_method import DeveloperAuditEventSummaryPaymentMethod
 from .developer_audit_event_summary_profile_status import DeveloperAuditEventSummaryProfileStatus
 from .developer_audit_event_summary_resolution import DeveloperAuditEventSummaryResolution
 from .developer_audit_event_type import DeveloperAuditEventType
@@ -147,6 +148,7 @@ __all__ = (
     "DeveloperAuditEventSummaryCapabilityKind",
     "DeveloperAuditEventSummaryCurrency",
     "DeveloperAuditEventSummaryDecision",
+    "DeveloperAuditEventSummaryPaymentMethod",
     "DeveloperAuditEventSummaryProfileStatus",
     "DeveloperAuditEventSummaryResolution",
     "DeveloperAuditEventType",

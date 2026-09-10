@@ -223,7 +223,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toContain(
-      'expectedMigrationName = "payroll_adjustments"'
+      'expectedMigrationName = "payroll_payment_results"'
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -261,12 +261,17 @@ describe('Supabase Edge runtime PoC contract', () => {
     );
     expect(payrollApi).toContain('list_payroll_cycles');
     expect(payrollApi).toContain('start_payroll_cycle');
+    expect(payrollApi).toContain('record_payroll_payment_check');
+    expect(payrollApi).toContain('record_payroll_payment_paid');
+    expect(payrollApi).toContain('reopen_payroll_payment_attempt');
     expect(payrollApi).toContain('PAYROLL_ACCESS_REQUIRED');
     expect(edgeIndex).toContain('path === "/v1/payroll"');
     expect(edgeIndex).toContain('path === "/v1/payroll/start"');
+    expect(edgeIndex).toContain('const paymentResultMatch = path.match(');
     expect(activity).toContain('edge.authorization.payroll');
     expect(openApi).toContain('operationId: "listPayrollCycles"');
     expect(openApi).toContain('operationId: "startPayrollCycle"');
+    expect(openApi).toContain('operationId: "recordPayrollPaymentPaid"');
   });
 
   it('records only source-controlled security activity through server-owned RPCs', async () => {

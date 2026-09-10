@@ -709,6 +709,19 @@ positive adjustment로 다음 주차에만 옮기며 원 earning은 보존되고
 여섯 public table 모두 authenticated SELECT에 live session과 admin/maid-self를 요구하고 direct DML 및
 service-role raw table 권한은 없다. production/main/recovery 적용 상태와 무관한 source 후보 schema다.
 
+`20260910114525_payroll_payment_results.sql`은 기존 39개 migration을 수정하지 않는 40번째 append-only
+feature migration이다. `payroll_payment_attempts`는 기존 `payment_started` event와 cycle/maid/version/locked
+amount/actor/time을 실제 FK와 trigger로 일치시키며, OPEN 복귀 뒤 다음 start는 증가하는 attempt identity를
+만든다. 기존 event는 attempt까지만 deterministic backfill하고 증명되지 않은 과거 CHECK/PAID result는 만들지
+않는다.
+
+`payroll_payment_results`는 CHECK, PAID, NO_TRANSFER_CONFIRMED reopen을 immutable typed result로 보존한다.
+PAID amount는 attempt의 양수 locked snapshot과 정확히 같고 `paid_at`은 server time이며 PAID cycle과 evidence는
+수정·삭제·reopen할 수 없다. `bank_transfer` reference는 엄격한 ASCII allowlist를 uppercase canonicalize해
+method와 함께 전역 unique로 묶는다. raw table은 live-session business admin만 읽고 maid/developer safe
+projection에는 reference와 cross-maid amount를 노출하지 않는다. production/main/recovery 적용 상태와 무관한
+source 후보 schema다.
+
 ## 7. Supabase Free Plan 전용 운영 기준
 
 ### #29 versioned duration policy (feature source)

@@ -5,6 +5,9 @@ import {
   listPayroll,
   listPayrollEntries,
   payrollDatabaseError,
+  recordPayrollPaymentCheck,
+  recordPayrollPaymentPaid,
+  reopenPayrollPayment,
   reversePayrollSource,
   startPayroll,
 } from "./payroll-api.ts";
@@ -82,7 +85,153 @@ const projection = {
   carryOutAmount: 0,
   payableAmount: 30000,
   adjustmentCount: 0,
+  paymentAttemptId: null,
+  paymentAttemptNumber: null,
+  paidAt: null,
+  checkReasonCode: null,
+  lastReopenReasonCode: null,
 };
+
+Deno.test("payroll payment results canonicalize references and reject client evidence", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const attemptId = "71000000-0000-4000-8000-000000000001";
+  const result = {
+    paymentResultId: "72000000-0000-4000-8000-000000000001",
+    paymentAttemptId: attemptId,
+    payrollCycleId: "73000000-0000-4000-8000-000000000001",
+    resultType: "paid",
+    beforeStatus: "check",
+    afterStatus: "paid",
+    cycleVersion: 3,
+    lockedAmount: 30000,
+    paymentMethod: "bank_transfer",
+    providerReferenceId: "BANK.AB12",
+    occurredAt: "2026-09-10T00:00:00Z",
+  };
+  const request = (action: string, body: Record<string, unknown>) =>
+    new Request(
+      `http://localhost/v1/payroll/payment-attempts/${attemptId}/${action}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": `payment-${action}-edge`,
+        },
+        body: JSON.stringify(body),
+      },
+    );
+  await recordPayrollPaymentPaid(
+    request("paid", {
+      expectedVersion: 2,
+      paymentMethod: "bank_transfer",
+      providerReferenceId: "bank.ab12",
+    }),
+    clients(calls, result),
+    admin,
+    attemptId,
+  );
+  assert(calls[0]?.[0] === "record_payroll_payment_paid", "paid RPC selected");
+  assert(
+    calls[0]?.[1].p_canonical_reference === "BANK.AB12",
+    "reference canonicalized before RPC",
+  );
+  const firstHash = calls[0]?.[1].p_request_hash;
+  await recordPayrollPaymentPaid(
+    request("paid", {
+      expectedVersion: 2,
+      paymentMethod: "bank_transfer",
+      providerReferenceId: "BANK.AB12",
+    }),
+    clients(calls, result),
+    admin,
+    attemptId,
+  );
+  assert(
+    firstHash === calls[1]?.[1].p_request_hash,
+    "raw case does not change canonical replay hash",
+  );
+  await recordPayrollPaymentCheck(
+    request("check", {
+      expectedVersion: 1,
+      reasonCode: "TRANSFER_RESULT_UNCERTAIN",
+    }),
+    clients(calls, {
+      ...result,
+      resultType: "check",
+      beforeStatus: "paying",
+      afterStatus: "check",
+      paymentMethod: undefined,
+      providerReferenceId: undefined,
+      reasonCode: "TRANSFER_RESULT_UNCERTAIN",
+    }),
+    admin,
+    attemptId,
+  );
+  await reopenPayrollPayment(
+    request("reopen", {
+      expectedVersion: 2,
+      reasonCode: "NO_TRANSFER_CONFIRMED",
+    }),
+    clients(calls, {
+      ...result,
+      resultType: "reopened",
+      afterStatus: "open",
+      paymentMethod: undefined,
+      providerReferenceId: undefined,
+      reasonCode: "NO_TRANSFER_CONFIRMED",
+    }),
+    admin,
+    attemptId,
+  );
+  for (
+    const body of [
+      {
+        expectedVersion: 0,
+        paymentMethod: "bank_transfer",
+        providerReferenceId: "BANK.AB12",
+      },
+      {
+        expectedVersion: 2,
+        paymentMethod: "bank_transfer",
+        providerReferenceId: "www.ab12",
+      },
+      {
+        expectedVersion: 2,
+        paymentMethod: "bank_transfer",
+        providerReferenceId: "AB1234567",
+      },
+      {
+        expectedVersion: 2,
+        paymentMethod: "bank_transfer",
+        providerReferenceId: "BANK.AB12",
+        amount: 1,
+      },
+      {
+        expectedVersion: 2,
+        paymentMethod: "bank_transfer",
+        providerReferenceId: "BANK.AB12",
+        paidAt: result.occurredAt,
+      },
+    ]
+  ) {
+    try {
+      await recordPayrollPaymentPaid(
+        request("paid", body),
+        clients([], result),
+        admin,
+        attemptId,
+      );
+      throw new Error("invalid payment evidence accepted");
+    } catch (error) {
+      assert(
+        ["VALIDATION_ERROR", "PAYROLL_PAYMENT_REFERENCE_INVALID"].includes(
+          (error as { code?: string }).code ?? "",
+        ),
+        "invalid client evidence rejected",
+      );
+    }
+  }
+});
 
 Deno.test("payroll adjustment commands keep typed source and fixed command hashes", async () => {
   const calls: Array<[string, Record<string, unknown>]> = [];
