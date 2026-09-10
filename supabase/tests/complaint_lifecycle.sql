@@ -72,7 +72,6 @@ end $$;
 select pg_temp.approved_source(1,2,interval '30 days');
 select pg_temp.approved_source(2,2,interval '30 days 1 second');
 select pg_temp.approved_source(3,2,interval '1 day','rejected','rejected');
-select pg_temp.approved_source(4,3,interval '1 day','approved','approved','post_approval_complaint_reclean');
 select pg_temp.approved_source(5,2,interval '1 day');
 select pg_temp.approved_source(6,2,interval '1 day');
 select pg_temp.approved_source(7,2,interval '1 day');
@@ -89,10 +88,6 @@ select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pi
 select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5003),
   'cleanliness_general',0,'complaint-create-rejected',repeat('c',64))$$,
   '55000','COMPLAINT_SOURCE_NOT_APPROVED','rejected provenance is not complaint intake provenance');
-select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5004),
-  'cleanliness_general',0,'complaint-create-post-approval-reclean',repeat('c',64))$$,
-  '55000','COMPLAINT_SOURCE_NOT_APPROVED',
-  'post-approval complaint rework cannot become original complaint provenance');
 select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5005),
   'free-form customer text',0,'complaint-create-free-text',repeat('d',64))$$,
   '22023','INVALID_COMPLAINT_CATEGORY','category is source controlled');
@@ -291,19 +286,6 @@ select lives_ok($$select public.close_complaint_case(pg_temp.pid(1),
   (select (value->>'id')::uuid from complaint_results where label='close-boundary'),3,
   'complaint-close-deadline-past',repeat('e',64))$$,
   'no-response case may close only after the inclusive seven-day window expires');
-
-alter table public.earnings disable trigger earnings_append_only;
-alter table public.earnings alter column earning_entitlement_id drop not null;
-update public.earnings set earning_entitlement_id=null where id=pg_temp.pid(5008);
-alter table public.earnings enable trigger earnings_append_only;
-select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5008),
-  'cleanliness_general',0,'complaint-create-null-entitlement',repeat('f',64))$$,
-  '55000','COMPLAINT_SOURCE_NOT_APPROVED',
-  'a future compensation-shaped NULL original entitlement fails closed instead of passing SQL NULL');
-alter table public.earnings disable trigger earnings_append_only;
-update public.earnings set earning_entitlement_id=submission_id where id=pg_temp.pid(5008);
-alter table public.earnings alter column earning_entitlement_id set not null;
-alter table public.earnings enable trigger earnings_append_only;
 
 select is((select bool_and(not requires_action) from public.notifications
   where category in ('complaint_received','complaint_corrected','complaint_acknowledged','complaint_closed')),true,

@@ -1,4 +1,8 @@
-import { complaintPath, dbError } from "./complaint-api.ts";
+import {
+  complaintPath,
+  complaintReworkDecisionProjection,
+  dbError,
+} from "./complaint-api.ts";
 import {
   complaintCursorScope,
   decodeComplaintCursor,
@@ -18,8 +22,42 @@ Deno.test("complaint path parser accepts only the bounded public contract", () =
     "correction",
   );
   assert(
+    complaintPath(`/v1/complaints/${id}/rework`)?.kind === "rework",
+    "rework",
+  );
+  assert(
     complaintPath(`/v1/complaints/${id}/reopen`) === null,
     "no reopen route",
+  );
+});
+
+Deno.test("complaint rework projection isolates maid identities and compensation", () => {
+  const original = complaintReworkDecisionProjection({
+    view: "originalMaid",
+    sameMaid: false,
+    sourceDecisionIsCurrent: true,
+  });
+  assert(original !== null, "original maid projection exists");
+  assert(
+    !("compensationAmount" in original),
+    "original maid has no other-maid pay",
+  );
+  assert(
+    !("assigneeMaidProfileId" in original),
+    "original maid has no assignee id",
+  );
+  const assignee = complaintReworkDecisionProjection({
+    view: "assigneeMaid",
+    id: "10000000-0000-4000-8000-000000000010",
+    reworkCleaningTargetId: "10000000-0000-4000-8000-000000000011",
+    compensationAmount: 0,
+    currency: "KRW",
+    sourceDecisionIsCurrent: false,
+  });
+  assert(assignee !== null, "assignee projection exists");
+  assert(
+    !("originalMaidProfileId" in assignee),
+    "assignee has no original maid id",
   );
 });
 

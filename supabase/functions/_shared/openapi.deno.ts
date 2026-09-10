@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 85 &&
+    Object.keys(document.paths).length === 86 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 92,
-    "candidate contract 85/92",
+        ).length === 93,
+    "candidate contract 86/93",
   );
 });
 
@@ -168,7 +168,7 @@ Deno.test(
         }
       >
     >;
-    assert(complaintPaths.length === 8, "eight exact complaint paths");
+    assert(complaintPaths.length === 9, "nine exact complaint paths");
     assert(
       doc.paths["/v1/complaints"].post["x-required-roles"].join(",") ===
         "admin",
@@ -181,9 +181,35 @@ Deno.test(
       "response maid only",
     );
     assert(
+      doc.paths["/v1/complaints/{complaintId}/rework"].post.operationId ===
+          "materializeComplaintRework" &&
+        doc.paths["/v1/complaints/{complaintId}/rework"].post[
+            "x-required-roles"
+          ].join(",") === "admin",
+      "rework is an explicit admin command",
+    );
+    assert(
       doc.components.schemas.ComplaintCategory.enum.length === 8,
       "exact category allowlist",
     );
+    for (
+      const code of [
+        "INVALID_COMPLAINT_REWORK",
+        "COMPLAINT_COMPENSATION_AMOUNT_INVALID",
+        "COMPLAINT_REWORK_MAID_UNAVAILABLE",
+        "COMPLAINT_REWORK_WINDOW_UNAVAILABLE",
+        "COMPLAINT_REWORK_NOT_CONFIRMED",
+        "COMPLAINT_REWORK_ALREADY_MATERIALIZED",
+        "COMPLAINT_REWORK_DECISION_STALE",
+        "COMPLAINT_REWORK_PRESTART_FROZEN",
+        "RECLEAN_TEMPLATE_NOT_CONFIGURED",
+      ] as const
+    ) {
+      assert(
+        doc.components.schemas.ErrorCode.enum.includes(code),
+        `complaint error code is public: ${code}`,
+      );
+    }
     assert(
       doc.components.schemas.ComplaintDecision.properties.penaltyScore
             .maximum === 10 &&
@@ -801,8 +827,17 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 49,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 51,
     "actual audit allowlist count",
+  );
+  assert(
+    doc.components.schemas.DeveloperAuditEventType.enum.includes(
+      "complaint.rework_materialized",
+    ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "compensation.earned",
+      ),
+    "complaint compensation events are operator-visible",
   );
 });
 

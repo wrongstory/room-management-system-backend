@@ -559,11 +559,12 @@ Table public.cleaning_targets {
   reclean_maid_profile_id uuid
   reclean_of_submission_id uuid [unique, ref: - public.cleaning_submissions.id]
   reclean_of_inspection_decision_id uuid [unique, ref: - public.inspection_decisions.id]
+  complaint_compensation_decision_id uuid [unique]
   created_by uuid [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Checkout targets are unique per reservation. Stayover/additional manual requests use stable target IDs and soft cancellation. Inspection rejection creates an automatically notified zero-fee reclean with immutable original attempt/submission/decision/maid links; #28 alone creates its attempt. No handoff.'
+  Note: 'Checkout targets are unique per reservation. Inspection rejection reclean and #101 post-approval complaint reclean are distinct typed sources. A complaint rework freezes one confirmed source decision, zero-fee target, published template and notified assignee; generic reassignment/handover is forbidden.'
 }
 
 Table public.cleaning_target_schedule_revisions {
@@ -874,7 +875,8 @@ Table public.inspection_decisions {
 
 Table public.earnings {
   id uuid [pk]
-  earning_entitlement_id uuid [not null, unique]
+  earning_entitlement_id uuid [unique]
+  compensation_entitlement_id uuid [unique]
   submission_id uuid [not null, unique]
   maid_profile_id uuid [not null]
   earned_on date [not null]
@@ -888,7 +890,7 @@ Table public.earnings {
     (maid_profile_id, earned_on, id) [note: '#96 keyset payroll items/lateEarnings page; SQL INCLUDE(total_amount)']
   }
 
-  Note: '#96 exposes exact totals with bounded preview/page RPCs: nested 10, details 50. Cursor HMAC remains in the HTTP adapters.'
+  Note: '#101 preserves original entitlement identity and requires exactly one typed entitlement FK. Other-maid zero-KRW compensation keeps one ledger row but does not increase payroll totals.'
 }
 
 Table public.complaint_cases {
@@ -904,6 +906,7 @@ Table public.complaint_cases {
   status text [not null, note: 'received / under_review / decided / acknowledged / appealed / closed']
   version bigint [not null]
   current_decision_id uuid
+  current_compensation_decision_id uuid
   first_decided_at timestamptz
   response_deadline timestamptz
   received_by uuid [not null]
@@ -948,9 +951,45 @@ Table public.complaint_case_events {
   actor_profile_id uuid [not null]
   decision_id uuid
   maid_response_id uuid
+  compensation_decision_id uuid
   occurred_at timestamptz [not null]
   Indexes { (complaint_case_id, case_version) [unique] }
   Note: '#100 append-only lifecycle history. No raw request, customer, PIN, photo locator or provider payload.'
+}
+
+Table public.complaint_compensation_decisions {
+  id uuid [pk]
+  complaint_case_id uuid [not null, unique]
+  complaint_decision_id uuid [not null, unique]
+  original_cleaning_target_id uuid [not null]
+  rework_cleaning_target_id uuid [not null, unique]
+  original_maid_profile_id uuid [not null]
+  assignee_maid_profile_id uuid [not null]
+  original_base_fee_snapshot int [not null]
+  compensation_amount int [not null, note: 'integer KRW 0..original base fee; same maid must be 0']
+  currency text [not null, default: 'KRW']
+  source_case_version bigint [not null]
+  decision_version int [not null, default: 1]
+  decided_by uuid [not null]
+  decided_at timestamptz [not null]
+  Note: '#101 append-only operational decision. Later complaint correction does not rewrite started work; projection exposes source/current divergence.'
+}
+
+Table public.compensation_entitlements {
+  id uuid [pk]
+  compensation_decision_id uuid [not null, unique]
+  complaint_case_id uuid [not null]
+  complaint_decision_id uuid [not null]
+  original_cleaning_target_id uuid [not null]
+  rework_cleaning_target_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  cleaning_attempt_id uuid [not null, unique]
+  submission_id uuid [not null, unique]
+  inspection_decision_id uuid [not null, unique]
+  amount int [not null]
+  currency text [not null, default: 'KRW']
+  entitled_at timestamptz [not null]
+  Note: '#101 other-maid approved work proof. Exact decision/target/maid/attempt/submission/inspection/amount provenance; zero amount remains a real entitlement.'
 }
 
 Table public.payroll_cycles {
@@ -1392,6 +1431,7 @@ Ref: public.cleaning_targets.cancelled_by > public.profiles.id
 Ref: public.cleaning_targets.created_by > public.profiles.id
 Ref: public.cleaning_targets.reclean_of_attempt_id - public.cleaning_attempts.id
 Ref: public.cleaning_targets.reclean_maid_profile_id > public.profiles.id
+Ref: public.cleaning_targets.complaint_compensation_decision_id - public.complaint_compensation_decisions.id
 Ref: public.cleaning_target_schedule_revisions.cleaning_target_id > public.cleaning_targets.id
 Ref: public.cleaning_target_schedule_revisions.changed_by > public.profiles.id
 Ref: public.cleaning_assignments.cleaning_target_id > public.cleaning_targets.id
@@ -1407,6 +1447,7 @@ Ref: public.inspection_decisions.submission_id - public.cleaning_submissions.id
 Ref: public.inspection_decisions.decided_by > public.profiles.id
 Ref: public.earnings.submission_id - public.cleaning_submissions.id
 Ref: public.earnings.maid_profile_id > public.profiles.id
+Ref: public.earnings.compensation_entitlement_id - public.compensation_entitlements.id
 Ref: public.complaint_cases.room_id > public.rooms.id
 Ref: public.complaint_cases.cleaning_target_id > public.cleaning_targets.id
 Ref: public.complaint_cases.cleaning_attempt_id > public.cleaning_attempts.id
@@ -1415,6 +1456,7 @@ Ref: public.complaint_cases.inspection_decision_id > public.inspection_decisions
 Ref: public.complaint_cases.original_earning_id > public.earnings.id
 Ref: public.complaint_cases.maid_profile_id > public.profiles.id
 Ref: public.complaint_cases.current_decision_id > public.complaint_decisions.id
+Ref: public.complaint_cases.current_compensation_decision_id - public.complaint_compensation_decisions.id
 Ref: public.complaint_cases.received_by > public.profiles.id
 Ref: public.complaint_decisions.complaint_case_id > public.complaint_cases.id
 Ref: public.complaint_decisions.prior_decision_id - public.complaint_decisions.id
@@ -1426,6 +1468,23 @@ Ref: public.complaint_case_events.complaint_case_id > public.complaint_cases.id
 Ref: public.complaint_case_events.actor_profile_id > public.profiles.id
 Ref: public.complaint_case_events.decision_id > public.complaint_decisions.id
 Ref: public.complaint_case_events.maid_response_id > public.complaint_maid_responses.id
+Ref: public.complaint_case_events.compensation_decision_id > public.complaint_compensation_decisions.id
+Ref: public.complaint_compensation_decisions.complaint_case_id - public.complaint_cases.id
+Ref: public.complaint_compensation_decisions.complaint_decision_id - public.complaint_decisions.id
+Ref: public.complaint_compensation_decisions.original_cleaning_target_id > public.cleaning_targets.id
+Ref: public.complaint_compensation_decisions.rework_cleaning_target_id - public.cleaning_targets.id
+Ref: public.complaint_compensation_decisions.original_maid_profile_id > public.profiles.id
+Ref: public.complaint_compensation_decisions.assignee_maid_profile_id > public.profiles.id
+Ref: public.complaint_compensation_decisions.decided_by > public.profiles.id
+Ref: public.compensation_entitlements.compensation_decision_id - public.complaint_compensation_decisions.id
+Ref: public.compensation_entitlements.complaint_case_id > public.complaint_cases.id
+Ref: public.compensation_entitlements.complaint_decision_id > public.complaint_decisions.id
+Ref: public.compensation_entitlements.original_cleaning_target_id > public.cleaning_targets.id
+Ref: public.compensation_entitlements.rework_cleaning_target_id - public.cleaning_targets.id
+Ref: public.compensation_entitlements.maid_profile_id > public.profiles.id
+Ref: public.compensation_entitlements.cleaning_attempt_id - public.cleaning_attempts.id
+Ref: public.compensation_entitlements.submission_id - public.cleaning_submissions.id
+Ref: public.compensation_entitlements.inspection_decision_id - public.inspection_decisions.id
 Ref: public.payroll_cycles.maid_profile_id > public.profiles.id
 Ref: public.payroll_cycles.payment_started_by > public.profiles.id
 Ref: public.payroll_items.payroll_cycle_id > public.payroll_cycles.id

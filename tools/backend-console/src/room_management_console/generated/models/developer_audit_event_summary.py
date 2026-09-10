@@ -11,6 +11,7 @@ from ..models.app_role import AppRole
 from ..models.developer_audit_event_summary_capability_kind import (
     DeveloperAuditEventSummaryCapabilityKind,
 )
+from ..models.developer_audit_event_summary_currency import DeveloperAuditEventSummaryCurrency
 from ..models.developer_audit_event_summary_decision import DeveloperAuditEventSummaryDecision
 from ..models.developer_audit_event_summary_profile_status import (
     DeveloperAuditEventSummaryProfileStatus,
@@ -103,6 +104,16 @@ class DeveloperAuditEventSummary:
         pin_sync_event_id (UUID | Unset):
         sync_status (str | Unset):
         pin_version (int | Unset):
+        complaint_id (UUID | Unset):
+        source_complaint_decision_id (UUID | Unset):
+        compensation_decision_id (UUID | Unset):
+        rework_cleaning_target_id (UUID | Unset):
+        inspection_decision_id (UUID | Unset):
+        same_maid (bool | Unset):
+        compensation_amount (int | Unset):
+        amount (int | Unset):
+        currency (DeveloperAuditEventSummaryCurrency | Unset):
+        case_version (int | Unset):
     """
 
     display_name: str | Unset = UNSET
@@ -182,6 +193,16 @@ class DeveloperAuditEventSummary:
     pin_sync_event_id: UUID | Unset = UNSET
     sync_status: str | Unset = UNSET
     pin_version: int | Unset = UNSET
+    complaint_id: UUID | Unset = UNSET
+    source_complaint_decision_id: UUID | Unset = UNSET
+    compensation_decision_id: UUID | Unset = UNSET
+    rework_cleaning_target_id: UUID | Unset = UNSET
+    inspection_decision_id: UUID | Unset = UNSET
+    same_maid: bool | Unset = UNSET
+    compensation_amount: int | Unset = UNSET
+    amount: int | Unset = UNSET
+    currency: DeveloperAuditEventSummaryCurrency | Unset = UNSET
+    case_version: int | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         display_name = self.display_name
@@ -418,6 +439,38 @@ class DeveloperAuditEventSummary:
 
         pin_version = self.pin_version
 
+        complaint_id: str | Unset = UNSET
+        if not isinstance(self.complaint_id, Unset):
+            complaint_id = str(self.complaint_id)
+
+        source_complaint_decision_id: str | Unset = UNSET
+        if not isinstance(self.source_complaint_decision_id, Unset):
+            source_complaint_decision_id = str(self.source_complaint_decision_id)
+
+        compensation_decision_id: str | Unset = UNSET
+        if not isinstance(self.compensation_decision_id, Unset):
+            compensation_decision_id = str(self.compensation_decision_id)
+
+        rework_cleaning_target_id: str | Unset = UNSET
+        if not isinstance(self.rework_cleaning_target_id, Unset):
+            rework_cleaning_target_id = str(self.rework_cleaning_target_id)
+
+        inspection_decision_id: str | Unset = UNSET
+        if not isinstance(self.inspection_decision_id, Unset):
+            inspection_decision_id = str(self.inspection_decision_id)
+
+        same_maid = self.same_maid
+
+        compensation_amount = self.compensation_amount
+
+        amount = self.amount
+
+        currency: str | Unset = UNSET
+        if not isinstance(self.currency, Unset):
+            currency = self.currency.value
+
+        case_version = self.case_version
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update({})
@@ -575,6 +628,26 @@ class DeveloperAuditEventSummary:
             field_dict["syncStatus"] = sync_status
         if pin_version is not UNSET:
             field_dict["pinVersion"] = pin_version
+        if complaint_id is not UNSET:
+            field_dict["complaintId"] = complaint_id
+        if source_complaint_decision_id is not UNSET:
+            field_dict["sourceComplaintDecisionId"] = source_complaint_decision_id
+        if compensation_decision_id is not UNSET:
+            field_dict["compensationDecisionId"] = compensation_decision_id
+        if rework_cleaning_target_id is not UNSET:
+            field_dict["reworkCleaningTargetId"] = rework_cleaning_target_id
+        if inspection_decision_id is not UNSET:
+            field_dict["inspectionDecisionId"] = inspection_decision_id
+        if same_maid is not UNSET:
+            field_dict["sameMaid"] = same_maid
+        if compensation_amount is not UNSET:
+            field_dict["compensationAmount"] = compensation_amount
+        if amount is not UNSET:
+            field_dict["amount"] = amount
+        if currency is not UNSET:
+            field_dict["currency"] = currency
+        if case_version is not UNSET:
+            field_dict["caseVersion"] = case_version
 
         return field_dict
 
@@ -935,6 +1008,56 @@ class DeveloperAuditEventSummary:
 
         pin_version = d.pop("pinVersion", UNSET)
 
+        _complaint_id = d.pop("complaintId", UNSET)
+        complaint_id: UUID | Unset
+        if isinstance(_complaint_id, Unset):
+            complaint_id = UNSET
+        else:
+            complaint_id = UUID(_complaint_id)
+
+        _source_complaint_decision_id = d.pop("sourceComplaintDecisionId", UNSET)
+        source_complaint_decision_id: UUID | Unset
+        if isinstance(_source_complaint_decision_id, Unset):
+            source_complaint_decision_id = UNSET
+        else:
+            source_complaint_decision_id = UUID(_source_complaint_decision_id)
+
+        _compensation_decision_id = d.pop("compensationDecisionId", UNSET)
+        compensation_decision_id: UUID | Unset
+        if isinstance(_compensation_decision_id, Unset):
+            compensation_decision_id = UNSET
+        else:
+            compensation_decision_id = UUID(_compensation_decision_id)
+
+        _rework_cleaning_target_id = d.pop("reworkCleaningTargetId", UNSET)
+        rework_cleaning_target_id: UUID | Unset
+        if isinstance(_rework_cleaning_target_id, Unset):
+            rework_cleaning_target_id = UNSET
+        else:
+            rework_cleaning_target_id = UUID(_rework_cleaning_target_id)
+
+        _inspection_decision_id = d.pop("inspectionDecisionId", UNSET)
+        inspection_decision_id: UUID | Unset
+        if isinstance(_inspection_decision_id, Unset):
+            inspection_decision_id = UNSET
+        else:
+            inspection_decision_id = UUID(_inspection_decision_id)
+
+        same_maid = d.pop("sameMaid", UNSET)
+
+        compensation_amount = d.pop("compensationAmount", UNSET)
+
+        amount = d.pop("amount", UNSET)
+
+        _currency = d.pop("currency", UNSET)
+        currency: DeveloperAuditEventSummaryCurrency | Unset
+        if isinstance(_currency, Unset):
+            currency = UNSET
+        else:
+            currency = DeveloperAuditEventSummaryCurrency(_currency)
+
+        case_version = d.pop("caseVersion", UNSET)
+
         developer_audit_event_summary = cls(
             display_name=display_name,
             login_id=login_id,
@@ -1013,6 +1136,16 @@ class DeveloperAuditEventSummary:
             pin_sync_event_id=pin_sync_event_id,
             sync_status=sync_status,
             pin_version=pin_version,
+            complaint_id=complaint_id,
+            source_complaint_decision_id=source_complaint_decision_id,
+            compensation_decision_id=compensation_decision_id,
+            rework_cleaning_target_id=rework_cleaning_target_id,
+            inspection_decision_id=inspection_decision_id,
+            same_maid=same_maid,
+            compensation_amount=compensation_amount,
+            amount=amount,
+            currency=currency,
+            case_version=case_version,
         )
 
         return developer_audit_event_summary

@@ -76,6 +76,14 @@ const response = z.discriminatedUnion("responseType", [
     })
     .strict(),
 ]);
+const rework = z
+  .object({
+    expectedVersion: expected,
+    complaintDecisionId: uuid,
+    assigneeMaidProfileId: uuid,
+    compensationAmount: z.int().min(0),
+  })
+  .strict();
 function key(request: FastifyRequest) {
   return z
     .string()
@@ -186,6 +194,23 @@ export function createComplaintRoutes(
       });
     adminCommand("/:complaintId/review", "review");
     adminCommand("/:complaintId/close", "close");
+    app.post(
+      "/:complaintId/rework",
+      { preHandler: admin },
+      async (req, reply) => {
+        exactQuery(req, []);
+        const { complaintId } = params.parse(req.params);
+        return reply.code(201).send(
+          send(
+            await service.rework(req.actor, {
+              complaintId,
+              ...rework.parse(req.body),
+              idempotencyKey: key(req),
+            }),
+          ),
+        );
+      },
+    );
     app.post(
       "/:complaintId/decision",
       { preHandler: admin },

@@ -54,6 +54,11 @@ export interface ComplaintDecisionCommand extends ComplaintCommand {
   penaltyScore: number;
   reworkRequired: boolean;
 }
+export interface ComplaintReworkCommand extends ComplaintCommand {
+  complaintDecisionId: string;
+  assigneeMaidProfileId: string;
+  compensationAmount: number;
+}
 export interface ComplaintService {
   list(actor: Actor, input: ComplaintListInput): Promise<unknown>;
   detail(actor: Actor, complaintId: string): Promise<unknown>;
@@ -78,6 +83,7 @@ export interface ComplaintService {
   ): Promise<unknown>;
   correct(actor: Actor, input: ComplaintDecisionCommand): Promise<unknown>;
   close(actor: Actor, input: ComplaintCommand): Promise<unknown>;
+  rework(actor: Actor, input: ComplaintReworkCommand): Promise<unknown>;
 }
 
 const uuidPattern =
@@ -158,6 +164,50 @@ function response(value: unknown): Record<string, unknown> | null {
     respondedAt: timestamp(r.respondedAt),
   };
 }
+export function complaintReworkDecisionProjection(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (value === null) return null;
+  const r = object(value);
+  const view = text(r.view);
+  if (view === "originalMaid") {
+    return {
+      view,
+      sameMaid: boolean(r.sameMaid),
+      sourceDecisionIsCurrent: boolean(r.sourceDecisionIsCurrent),
+    };
+  }
+  if (view === "assigneeMaid") {
+    return {
+      view,
+      id: uuid(r.id),
+      reworkCleaningTargetId: uuid(r.reworkCleaningTargetId),
+      compensationAmount: integer(r.compensationAmount),
+      currency: text(r.currency),
+      sourceDecisionIsCurrent: boolean(r.sourceDecisionIsCurrent),
+    };
+  }
+  if (view !== "admin") throw complaintDatabaseError(null);
+  return {
+    view,
+    id: uuid(r.id),
+    complaintId: uuid(r.complaintId),
+    sourceComplaintDecisionId: uuid(r.sourceComplaintDecisionId),
+    currentComplaintDecisionId: uuid(r.currentComplaintDecisionId),
+    sourceDecisionIsCurrent: boolean(r.sourceDecisionIsCurrent),
+    originalCleaningTargetId: uuid(r.originalCleaningTargetId),
+    reworkCleaningTargetId: uuid(r.reworkCleaningTargetId),
+    originalMaidProfileId: uuid(r.originalMaidProfileId),
+    assigneeMaidProfileId: uuid(r.assigneeMaidProfileId),
+    sameMaid: boolean(r.sameMaid),
+    originalBaseFeeSnapshot: integer(r.originalBaseFeeSnapshot),
+    compensationAmount: integer(r.compensationAmount),
+    currency: text(r.currency),
+    sourceCaseVersion: integer(r.sourceCaseVersion),
+    decisionVersion: integer(r.decisionVersion),
+    decidedAt: timestamp(r.decidedAt),
+  };
+}
 export function complaintProjection(value: unknown): Record<string, unknown> {
   const r = object(value);
   const status = text(r.status);
@@ -193,6 +243,7 @@ export function complaintProjection(value: unknown): Record<string, unknown> {
     updatedAt: timestamp(r.updatedAt),
     currentDecision: decision(r.currentDecision),
     maidResponse: response(r.maidResponse),
+    reworkDecision: complaintReworkDecisionProjection(r.reworkDecision),
   };
 }
 function historyProjection(value: unknown): Record<string, unknown> {
@@ -208,6 +259,7 @@ function historyProjection(value: unknown): Record<string, unknown> {
       "appealed",
       "closed",
       "corrected",
+      "rework_materialized",
     ].includes(eventType) ||
     ![
       "received",
@@ -230,6 +282,8 @@ function historyProjection(value: unknown): Record<string, unknown> {
   if (r.decision !== undefined) event.decision = decision(r.decision);
   if (r.maidResponse !== undefined)
     event.maidResponse = response(r.maidResponse);
+  if (r.compensationDecisionId !== undefined)
+    event.compensationDecisionId = uuid(r.compensationDecisionId);
   return event;
 }
 
@@ -273,6 +327,8 @@ export function complaintDatabaseError(
       "page size가 허용 범위를 벗어났습니다.",
     ],
     ["INVALID_COMPLAINT_CURSOR", 400, "컴플레인 cursor가 올바르지 않습니다."],
+    ["INVALID_COMPLAINT_REWORK", 400, "재작업 요청이 올바르지 않습니다."],
+    ["COMPLAINT_COMPENSATION_AMOUNT_INVALID", 400, "보상액 범위를 확인해 주세요."],
     [
       "COMPLAINT_INTAKE_WINDOW_CLOSED",
       409,
@@ -300,6 +356,13 @@ export function complaintDatabaseError(
       "메이드 응답은 한 번만 등록할 수 있습니다.",
     ],
     ["COMPLAINT_DECISION_REQUIRED", 409, "정정할 현재 판정이 없습니다."],
+    ["COMPLAINT_REWORK_MAID_UNAVAILABLE", 409, "재작업 메이드를 배정할 수 없습니다."],
+    ["COMPLAINT_REWORK_WINDOW_UNAVAILABLE", 409, "안전한 재작업 시간을 확보할 수 없습니다."],
+    ["COMPLAINT_REWORK_NOT_CONFIRMED", 409, "확정된 재작업 판정이 아닙니다."],
+    ["COMPLAINT_REWORK_ALREADY_MATERIALIZED", 409, "재작업이 이미 확정되었습니다."],
+    ["COMPLAINT_REWORK_DECISION_STALE", 409, "재작업 판정이 변경되었습니다."],
+    ["COMPLAINT_REWORK_PRESTART_FROZEN", 409, "배정된 재작업 판정은 시작 전에 변경할 수 없습니다."],
+    ["RECLEAN_TEMPLATE_NOT_CONFIGURED", 409, "게시된 재청소 템플릿을 확인해 주세요."],
     [
       "COMPLAINT_INVALID_TRANSITION",
       409,
@@ -431,7 +494,7 @@ export class SupabaseComplaintService implements ComplaintService {
       actorProfileId: actor.profileId,
       ...payload,
     };
-    return complaintProjection(
+    const commandResult = complaintProjection(
       await this.rpc(name, {
         p_actor_profile_id: actor.profileId,
         ...Object.fromEntries(
@@ -442,6 +505,12 @@ export class SupabaseComplaintService implements ComplaintService {
         ),
         p_idempotency_key: idempotencyKey,
         p_request_hash: requestHash(fingerprint),
+      }),
+    );
+    return complaintProjection(
+      await this.rpc("get_complaint_case", {
+        p_actor_profile_id: actor.profileId,
+        p_complaint_id: commandResult.id,
       }),
     );
   }
@@ -502,5 +571,44 @@ export class SupabaseComplaintService implements ComplaintService {
     return this.command(actor, "close_complaint_case", "complaint.close", {
       ...input,
     });
+  }
+  async rework(actor: Actor, input: ComplaintReworkCommand) {
+    admin(actor);
+    const { idempotencyKey, ...payload } = input;
+    const raw = object(
+      await this.rpc("materialize_complaint_rework", {
+        p_actor_profile_id: actor.profileId,
+        ...Object.fromEntries(
+          Object.entries(payload).map(([k, v]) => [
+            `p_${k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}`,
+            v,
+          ]),
+        ),
+        p_idempotency_key: idempotencyKey,
+        p_request_hash: requestHash({
+          command: "complaint.materialize_rework",
+          actorProfileId: actor.profileId,
+          ...payload,
+        }),
+      }),
+    );
+    const assignment = object(raw.assignment);
+    return {
+      complaint: complaintProjection(raw.complaint),
+      reworkDecision: complaintReworkDecisionProjection({
+        ...object(raw.reworkDecision),
+        view: "admin",
+      }),
+      assignment: {
+        id: uuid(assignment.id),
+        cleaningTargetId: uuid(assignment.cleaningTargetId),
+        maidProfileId: uuid(assignment.maidProfileId),
+        sequenceNumber: integer(assignment.sequenceNumber),
+        revision: integer(assignment.revision),
+        serviceDate: text(assignment.serviceDate),
+        availableFrom: timestamp(assignment.availableFrom),
+        dueAt: nullableTimestamp(assignment.dueAt),
+      },
+    };
   }
 }

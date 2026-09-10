@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 85:
-        raise RuntimeError("전체 source OpenAPI path 수가 85가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 86:
+        raise RuntimeError("전체 source OpenAPI path 수가 86이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 92:
-        raise RuntimeError("전체 source OpenAPI operation 수가 92가 아닙니다.")
+    if operation_count != 93:
+        raise RuntimeError("전체 source OpenAPI operation 수가 93이 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -77,10 +77,17 @@ def main() -> None:
             package / "api" / "complaints" / "respond_complaint.py",
             package / "api" / "complaints" / "correct_complaint_decision.py",
             package / "api" / "complaints" / "close_complaint.py",
+            package / "api" / "complaints" / "materialize_complaint_rework.py",
             package / "models" / "complaint.py",
             package / "models" / "complaint_decision.py",
             package / "models" / "complaint_history_event.py",
             package / "models" / "complaint_maid_response.py",
+            package / "models" / "complaint_rework_decision_type_0.py",
+            package / "models" / "complaint_rework_decision_type_1.py",
+            package / "models" / "complaint_rework_decision_type_2.py",
+            package / "models" / "complaint_rework_request.py",
+            package / "models" / "complaint_rework_envelope.py",
+            package / "models" / "complaint_rework_envelope_assignment.py",
         ]
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
