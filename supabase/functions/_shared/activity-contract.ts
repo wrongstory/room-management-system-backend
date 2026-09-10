@@ -5,6 +5,7 @@ export type ActivitySource =
   | "edge.authorization.availability"
   | "edge.authorization.assignments"
   | "edge.authorization.attempts"
+  | "edge.authorization.complaints"
   | "edge.authorization.photos"
   | "edge.authorization.payroll"
   | "edge.authorization.reservations"
@@ -22,6 +23,7 @@ export type AuthorizationDeniedCode =
   | "ASSIGNMENT_ACCESS_REQUIRED"
   | "ATTEMPT_ACCESS_REQUIRED"
   | "CAPABILITY_ACCESS_REQUIRED"
+  | "COMPLAINT_ACCESS_REQUIRED"
   | "AVAILABILITY_ACCESS_REQUIRED"
   | "DEVELOPER_REQUIRED"
   | "MAID_REQUIRED"
@@ -37,6 +39,7 @@ const authorizationDeniedCodes = new Set<AuthorizationDeniedCode>([
   "ASSIGNMENT_ACCESS_REQUIRED",
   "ATTEMPT_ACCESS_REQUIRED",
   "CAPABILITY_ACCESS_REQUIRED",
+  "COMPLAINT_ACCESS_REQUIRED",
   "AVAILABILITY_ACCESS_REQUIRED",
   "DEVELOPER_REQUIRED",
   "MAID_REQUIRED",
@@ -89,6 +92,9 @@ export function authorizationSourceForPath(
   }
   if (path === "/v1/payroll" || path === "/v1/payroll/start") {
     return "edge.authorization.payroll";
+  }
+  if (path === "/v1/complaints" || path.startsWith("/v1/complaints/")) {
+    return "edge.authorization.complaints";
   }
   if (
     path.startsWith("/v1/attempts/") ||

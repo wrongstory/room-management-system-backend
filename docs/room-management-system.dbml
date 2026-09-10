@@ -891,6 +891,68 @@ Table public.earnings {
   Note: '#96 exposes exact totals with bounded preview/page RPCs: nested 10, details 50. Cursor HMAC remains in the HTTP adapters.'
 }
 
+Table public.complaint_cases {
+  id uuid [pk]
+  room_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  cleaning_attempt_id uuid [not null]
+  submission_id uuid [not null]
+  inspection_decision_id uuid [not null]
+  original_earning_id uuid [not null]
+  maid_profile_id uuid [not null]
+  category text [not null, note: 'Exact #100 eight-code allowlist; no free text']
+  status text [not null, note: 'received / under_review / decided / acknowledged / appealed / closed']
+  version bigint [not null]
+  current_decision_id uuid
+  first_decided_at timestamptz
+  response_deadline timestamptz
+  received_by uuid [not null]
+  received_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Note: '#100 mutable current projection only. Source identity is immutable; every transition and pointer swap is CAS.'
+}
+
+Table public.complaint_decisions {
+  id uuid [pk]
+  complaint_case_id uuid [not null]
+  decision_version int [not null]
+  decision_kind text [not null, note: 'initial / correction']
+  prior_decision_id uuid [unique]
+  finding text [not null, note: 'confirmed / unverifiable / false']
+  penalty_score int [not null, note: '0..10 evaluation-only; never automatic payroll deduction']
+  rework_required boolean [not null]
+  decided_by uuid [not null]
+  decided_at timestamptz [not null]
+  Indexes { (complaint_case_id, decision_version) [unique] }
+  Note: '#100 append-only decision chain; correction points to the actual prior decision.'
+}
+
+Table public.complaint_maid_responses {
+  id uuid [pk]
+  complaint_case_id uuid [not null, unique]
+  decision_id uuid [not null]
+  maid_profile_id uuid [not null]
+  response_type text [not null, note: 'acknowledged / appealed']
+  appeal_reason_code text [note: 'Exact #100 four-code allowlist; null only for acknowledgement']
+  responded_at timestamptz [not null]
+  Note: '#100 append-only one response to the first decision within the inclusive seven-day window.'
+}
+
+Table public.complaint_case_events {
+  id bigint [pk, increment]
+  complaint_case_id uuid [not null]
+  event_type text [not null]
+  from_status text
+  to_status text [not null]
+  case_version bigint [not null]
+  actor_profile_id uuid [not null]
+  decision_id uuid
+  maid_response_id uuid
+  occurred_at timestamptz [not null]
+  Indexes { (complaint_case_id, case_version) [unique] }
+  Note: '#100 append-only lifecycle history. No raw request, customer, PIN, photo locator or provider payload.'
+}
+
 Table public.payroll_cycles {
   id uuid [pk]
   maid_profile_id uuid [not null]
@@ -1345,6 +1407,25 @@ Ref: public.inspection_decisions.submission_id - public.cleaning_submissions.id
 Ref: public.inspection_decisions.decided_by > public.profiles.id
 Ref: public.earnings.submission_id - public.cleaning_submissions.id
 Ref: public.earnings.maid_profile_id > public.profiles.id
+Ref: public.complaint_cases.room_id > public.rooms.id
+Ref: public.complaint_cases.cleaning_target_id > public.cleaning_targets.id
+Ref: public.complaint_cases.cleaning_attempt_id > public.cleaning_attempts.id
+Ref: public.complaint_cases.submission_id > public.cleaning_submissions.id
+Ref: public.complaint_cases.inspection_decision_id > public.inspection_decisions.id
+Ref: public.complaint_cases.original_earning_id > public.earnings.id
+Ref: public.complaint_cases.maid_profile_id > public.profiles.id
+Ref: public.complaint_cases.current_decision_id > public.complaint_decisions.id
+Ref: public.complaint_cases.received_by > public.profiles.id
+Ref: public.complaint_decisions.complaint_case_id > public.complaint_cases.id
+Ref: public.complaint_decisions.prior_decision_id - public.complaint_decisions.id
+Ref: public.complaint_decisions.decided_by > public.profiles.id
+Ref: public.complaint_maid_responses.complaint_case_id - public.complaint_cases.id
+Ref: public.complaint_maid_responses.decision_id > public.complaint_decisions.id
+Ref: public.complaint_maid_responses.maid_profile_id > public.profiles.id
+Ref: public.complaint_case_events.complaint_case_id > public.complaint_cases.id
+Ref: public.complaint_case_events.actor_profile_id > public.profiles.id
+Ref: public.complaint_case_events.decision_id > public.complaint_decisions.id
+Ref: public.complaint_case_events.maid_response_id > public.complaint_maid_responses.id
 Ref: public.payroll_cycles.maid_profile_id > public.profiles.id
 Ref: public.payroll_cycles.payment_started_by > public.profiles.id
 Ref: public.payroll_items.payroll_cycle_id > public.payroll_cycles.id

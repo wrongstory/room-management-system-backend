@@ -477,6 +477,10 @@ erDiagram
 ```mermaid
 erDiagram
   CLEANING_SUBMISSIONS ||--o| EARNINGS : "승인 후 1회 적립"
+  EARNINGS ||--o{ COMPLAINT_CASES : "승인 후 30일 접수"
+  COMPLAINT_CASES ||--o{ COMPLAINT_DECISIONS : "판정·정정 version"
+  COMPLAINT_CASES ||--o| COMPLAINT_MAID_RESPONSES : "최초 판정 1회 응답"
+  COMPLAINT_CASES ||--o{ COMPLAINT_CASE_EVENTS : "수명주기 원장"
   PROFILES ||--o{ EARNINGS : "메이드 수익"
   PROFILES ||--o{ PAYROLL_CYCLES : "메이드별 주차"
   PAYROLL_CYCLES ||--o{ PAYROLL_ITEMS : "잠금 원장"
@@ -498,6 +502,42 @@ erDiagram
     date earned_on
     int base_amount
     int bomb_room_bonus
+  }
+  COMPLAINT_CASES {
+    uuid id PK
+    uuid room_id FK
+    uuid cleaning_target_id FK
+    uuid cleaning_attempt_id FK
+    uuid submission_id FK
+    uuid inspection_decision_id FK
+    uuid original_earning_id FK
+    uuid maid_profile_id FK
+    text category
+    text status
+    bigint version
+    uuid current_decision_id FK
+  }
+  COMPLAINT_DECISIONS {
+    uuid id PK
+    uuid complaint_case_id FK
+    int decision_version
+    uuid prior_decision_id FK
+    text finding
+    int penalty_score
+    boolean rework_required
+  }
+  COMPLAINT_MAID_RESPONSES {
+    uuid id PK
+    uuid complaint_case_id FK,UK
+    uuid decision_id FK
+    text response_type
+    text appeal_reason_code
+  }
+  COMPLAINT_CASE_EVENTS {
+    bigint id PK
+    uuid complaint_case_id FK
+    text event_type
+    bigint case_version
   }
   PAYROLL_CYCLES {
     uuid id PK
@@ -604,6 +644,11 @@ erDiagram
 `20260909215829_payroll_bounded_pagination.sql`은 #93까지의 35개 migration을 수정하지 않는 36번째
 append-only feature migration이다. 새 table/column은 만들지 않고 earnings 조회 index와 bounded
 service-role projection RPC만 추가·교체한다. production/recovery 적용 상태는 이 source 변경과 별개다.
+
+`20260910003054_complaint_lifecycle.sql`은 기존 36개 migration을 수정하지 않는 37번째 append-only feature
+migration이다. complaint source identity 7개는 모두 실제 FK이며 임의 polymorphic UUID를 사용하지 않는다.
+case만 CAS projection으로 갱신하고 decision/maid response/event는 불변이다. 공개 table은 RLS를 켜고
+authenticated direct write와 privileged RPC 실행을 막으며 app-owned service-role RPC만 command를 수행한다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 

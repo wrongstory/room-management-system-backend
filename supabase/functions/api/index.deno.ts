@@ -891,6 +891,152 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
   }
 });
 
+Deno.test("complaint exact routes preserve admin commands, maid response, and bounded denial activity", async () => {
+  const complaintId = "97000000-0000-4000-8000-000000000001";
+  const maidProfileId = "97000000-0000-4000-8000-000000000002";
+  const baseComplaint = {
+    id: complaintId,
+    roomId,
+    cleaningTargetId,
+    cleaningAttemptId: "97000000-0000-4000-8000-000000000003",
+    submissionId: "97000000-0000-4000-8000-000000000004",
+    inspectionDecisionId: "97000000-0000-4000-8000-000000000005",
+    originalEarningId: "97000000-0000-4000-8000-000000000006",
+    maidProfileId,
+    category: "cleanliness_general",
+    status: "received",
+    version: 1,
+    currentDecisionId: null,
+    firstDecidedAt: null,
+    responseDeadline: null,
+    receivedAt: "2026-09-10T00:00:00Z",
+    updatedAt: "2026-09-10T00:00:00Z",
+    currentDecision: null,
+    maidResponse: null,
+  };
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        if (name === "record_authorization_denial") {
+          return Promise.resolve({ data: null, error: null });
+        }
+        if (name === "list_complaint_cases_page") {
+          return Promise.resolve({
+            data: {
+              complaints: [baseComplaint],
+              hasMore: false,
+              lastReceivedAt: null,
+              lastId: null,
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({
+          data: name === "start_complaint_review"
+            ? { ...baseComplaint, status: "under_review", version: 2 }
+            : name === "respond_to_complaint"
+            ? { ...baseComplaint, status: "acknowledged", version: 4 }
+            : baseComplaint,
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => clients,
+    authenticateRequest: () => Promise.resolve(actor),
+  };
+
+  const listed = await handleApiRequest(
+    request(
+      "GET",
+      "/v1/complaints?from=2026-09-01T00:00:00Z&to=2026-09-11T00:00:00Z",
+    ),
+    dependencies,
+  );
+  assert(listed.status === 200, "admin complaint list");
+
+  const created = await handleApiRequest(
+    request("POST", "/v1/complaints", {
+      originalEarningId: baseComplaint.originalEarningId,
+      category: "cleanliness_general",
+      expectedVersion: 0,
+    }),
+    dependencies,
+  );
+  assert(created.status === 201, "admin complaint create");
+
+  const zeroVersion = await handleApiRequest(
+    request("POST", `/v1/complaints/${complaintId}/review`, {
+      expectedVersion: 0,
+    }),
+    dependencies,
+  );
+  assert(zeroVersion.status === 400, "existing complaint CAS starts at one");
+
+  const reviewed = await handleApiRequest(
+    request("POST", `/v1/complaints/${complaintId}/review`, {
+      expectedVersion: 1,
+    }),
+    dependencies,
+  );
+  assert(
+    reviewed.status === 200 && (await reviewed.json()).complaint.version === 2,
+    "admin complaint review CAS",
+  );
+
+  const maidActor: EdgeActor = {
+    ...actor,
+    profileId: maidProfileId,
+    role: "maid",
+  };
+  const responded = await handleApiRequest(
+    request("POST", `/v1/complaints/${complaintId}/response`, {
+      expectedVersion: 3,
+      responseType: "acknowledged",
+    }),
+    { ...dependencies, authenticateRequest: () => Promise.resolve(maidActor) },
+  );
+  assert(responded.status === 200, "maid complaint response");
+
+  const developerList = await handleApiRequest(
+    request(
+      "GET",
+      "/v1/complaints?from=2026-09-01T00:00:00Z&to=2026-09-11T00:00:00Z",
+    ),
+    {
+      ...dependencies,
+      authenticateRequest: () =>
+        Promise.resolve({ ...actor, role: "developer" }),
+    },
+  );
+  assert(
+    developerList.status === 403 &&
+      await errorCode(developerList) === "COMPLAINT_ACCESS_REQUIRED",
+    "developer complaint list denied",
+  );
+  assert(
+    calls.at(-1)?.name === "record_authorization_denial" &&
+      calls.at(-1)?.args.p_source === "edge.authorization.complaints",
+    "complaint denial uses bounded source",
+  );
+  for (
+    const [method, path] of [
+      ["GET", `/v1/complaints/${complaintId}/review`],
+      ["POST", `/v1/complaints/${complaintId}/history`],
+      ["POST", `/v1/complaints/${complaintId}/reopen`],
+    ]
+  ) {
+    const response = await handleApiRequest(
+      request(method, path),
+      dependencies,
+    );
+    assert(response.status === 404, `${method} ${path} no alias`);
+  }
+});
+
 Deno.test("Room GET detail route rejects every mutation-shaped alias", async () => {
   const forbiddenGetPaths = [
     `/v1/rooms/${roomId}/master-data`,

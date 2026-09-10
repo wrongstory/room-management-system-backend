@@ -78,6 +78,16 @@ import {
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
 import {
+  complaintDetail,
+  complaintHistory,
+  complaintPath,
+  createComplaint,
+  listComplaints,
+  mutateComplaint,
+} from "../_shared/complaint-api.ts";
+import { assertComplaintResponseSize } from "../_shared/complaint-cursor.ts";
+
+import {
   createSubmission,
   decideBombRoom,
   decideSubmission,
@@ -818,6 +828,67 @@ export async function handleApiRequest(
     if (request.method === "POST" && path === "/v1/payroll/start") {
       const response = { payroll: await startPayroll(request, clients, actor) };
       assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+
+    if (request.method === "GET" && path === "/v1/complaints") {
+      const response = await listComplaints(request, clients, actor);
+      assertComplaintResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (request.method === "POST" && path === "/v1/complaints") {
+      const response = {
+        complaint: await createComplaint(request, clients, actor),
+      };
+      assertComplaintResponseSize(response);
+      return jsonResponse(response, 201, corsHeaders);
+    }
+    const complaintRoute = complaintPath(path);
+    if (
+      complaintRoute &&
+      request.method === "GET" &&
+      complaintRoute.kind === "detail"
+    ) {
+      const response = {
+        complaint: await complaintDetail(
+          clients,
+          actor,
+          complaintRoute.complaintId,
+        ),
+      };
+      assertComplaintResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (
+      complaintRoute &&
+      request.method === "GET" &&
+      complaintRoute.kind === "history"
+    ) {
+      const response = await complaintHistory(
+        request,
+        clients,
+        actor,
+        complaintRoute.complaintId,
+      );
+      assertComplaintResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (
+      complaintRoute &&
+      request.method === "POST" &&
+      complaintRoute.kind !== "detail" &&
+      complaintRoute.kind !== "history"
+    ) {
+      const response = {
+        complaint: await mutateComplaint(
+          request,
+          clients,
+          actor,
+          complaintRoute.complaintId,
+          complaintRoute.kind,
+        ),
+      };
+      assertComplaintResponseSize(response);
       return jsonResponse(response, 200, corsHeaders);
     }
 
