@@ -56,7 +56,7 @@ source OpenAPI를 CI 임시 디렉터리에 Python client로 생성·컴파일�
 #93/#95는 35 migrations / 76 paths / 82 operations로 `dev@c3bdece5e5e35fe693212b0c974df19d0e112e42`에
 병합됐다. production 19 / 39 / 43과 Pages는 변경하지 않았다.
 
-### #96 주급 keyset pagination·응답 상한 — feature source gate 진행 중
+### #96 주급 keyset pagination·응답 상한 — source/dev 완료, production 미승격
 
 Fastify와 Edge의 `GET /v1/payroll`은 app-owned `list_payroll_cycles_page` RPC를 호출하며 admin-all을
 `maidProfileId ASC`로 keyset 순회한다. 기본/최대 page size는 10이고 DB도 최대값을 독립 강제한다.
@@ -74,8 +74,39 @@ weekStart, maid에게 강제한 self를 포함한 effective maid filter, stream 
 preview를 반환하는 bounded compatibility projection으로 교체했다. 따라서 `start_payroll_cycle`의 최초
 receipt와 동일 command replay도 전체 earning JSON을 먼저 생성하거나 저장하지 않으며, exact totals와
 bounded preview만 반환한다. Fastify/Edge는 list/entries/start/replay의 최종 HTTP envelope를 UTF-8 JSON
-128 KiB로 측정해 초과 시 `PAYROLL_RESPONSE_TOO_LARGE`로 실패한다. 후보 계약은 36 migrations /
-77 paths / 83 operations이며 production/main/recovery/Pages/Cron/Vault는 이 feature에서 변경하지 않는다.
+128 KiB로 측정해 초과 시 `PAYROLL_RESPONSE_TOO_LARGE`로 실패한다. 36 migrations / 77 paths /
+83 operations가 `dev@e55f0e9be2f26a1a3700b8d31ba1958dcbe65b3d` 기준 source에 통합됐으며
+production/main/recovery/Pages/Cron/Vault는 변경하지 않았다.
+
+### #94 컴플레인·보상·정정·외부 지급 증거 — 정책 확정, source 구현 미착수
+
+Decision Issue #94는 아래 도메인 경계를 확정했다. 이 절은 후속 schema/API/migration의 설계 계약이며,
+현재 source에 해당 table·command가 구현됐다는 뜻이 아니다. 기존 #31 원청소 earning과 #93/#96의
+주차 조회·`OPEN → PAYING`·pagination identity는 future append-only migration에서 보존한다.
+
+- 원청소 entitlement와 타 메이드 compensation entitlement는 각각 실제 typed table/FK다. `earnings`는
+  source별 nullable FK와 exactly-one CHECK를 사용하고 임의 polymorphic UUID를 받지 않는다.
+- 컴플레인은 원 청소 승인 뒤 30일 안에 source-controlled reason code로 접수한다. 자유형 고객 정보와
+  PII를 저장하지 않는다. immutable decision version/current pointer CAS로 `confirmed / unverifiable / false`,
+  정수 0~10 평가 벌점, 재작업 결정을 보존한다. 본인 maid appeal은 최초 decision 뒤 7일 안에 한 번뿐이고,
+  종결 뒤 reopen 없이 active business admin correction version만 추가한다.
+- 같은 maid의 승인 후 재작업은 earning 0원이다. 다른 maid의 보상은 0원 이상 원 target base fee snapshot
+  이하의 정수 원화 immutable decision이며, 해당 maid의 field completion과 승인 뒤 exactly-once earning을 만든다.
+- adjustment는 signed append-only 원장이다. 음수는 실제 prior entitlement/adjustment의 correction/reversal만
+  허용하고 `reversal_of`의 provenance·maid·currency·amount를 검증한다. complaint penalty는 자동 음수
+  adjustment가 아니다. `PAID` cycle은 바꾸지 않고 이후 cycle에 adjustment를 추가한다.
+- adjustment 포함 payable amount가 0 이하이면 `OPEN → PAYING`과 0원 `PAID` event를 금지하고 residual을
+  다음 positive cycle로 이월한다.
+- 시스템은 송금 provider를 호출하지 않는다. active business admin이 외부 전액 송금을 확인한 결과만
+  `OPEN → PAYING → PAID`로 기록하고 불확실한 결과는 `PAYING → CHECK`로 둔다. `NO_TRANSFER_CONFIRMED`와
+  확인 actor/time이 있을 때만 `PAYING/CHECK → OPEN`이며 재시도는 새 event다. `PAID → OPEN`은 금지한다.
+- payment method는 source-controlled code다. provider/reference ID는 제한된 형식·길이로 PII/secret을
+  금지하고 `paidAt`은 server 시각이다. 영수증·계좌·수취인 PII를 저장하지 않는다. 모든 관리자 command는
+  actor, `expectedVersion`, scoped idempotency/request hash와 audit을 요구한다.
+
+정책 동기화 시점에는 DBML/ERD/schema/OpenAPI/route/RPC를 바꾸지 않는다. complaint/appeal/correction,
+compensation provenance, adjustment/carry-forward, `CHECK/PAID` command와 지급 evidence는 모두 후속 구현
+Issue 범위이며 main/recovery/production에도 적용되지 않았다.
 
 ```mermaid
 flowchart LR
@@ -208,8 +239,8 @@ target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참
 | 청소 시작 | 메이드별 `in_progress` partial unique |
 | 제출 | `client_submission_id` unique + 회차별 현재 제출 unique |
 | 검수 | 제출별 decision unique, 현재 `submitted` 버전만 조건부 전이 |
-| 수익 | submission/entitlement unique |
-| 지급 | `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + PAYING 이후 snapshot 불변 + 미송금 사유 기록 reopen + version CAS |
+| 수익 | 현재 #31 submission/원청소 entitlement unique. #94 후속은 원청소/타 메이드 compensation typed FK + exactly-one source CHECK를 append-only로 추가 |
+| 지급 | 현재 `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + `OPEN → PAYING` snapshot 불변 + version CAS. #94 후속은 signed adjustment/carry-forward, `CHECK/PAID`, `NO_TRANSFER_CONFIRMED` reopen과 외부 전액 지급 증거를 추가 |
 | 알림 | 수신자별 dedupe key unique, 10분 group key |
 
 복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃, 배정 알림 확정과 #31 검수는 SQL RPC의 짧은 transaction으로 원장, projection, 감사 이벤트를 함께 커밋합니다. 지급 API는 같은 원칙의 후속 구현입니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
