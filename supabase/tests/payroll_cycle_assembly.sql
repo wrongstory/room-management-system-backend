@@ -13,6 +13,9 @@ $$;
 insert into auth.users(id)
 select pg_temp.pid(100 + n) from generate_series(1, 8) n;
 
+insert into auth.sessions(id,user_id)
+select pg_temp.pid(900+n),pg_temp.pid(100+n) from generate_series(1,8)n;
+
 select public.bootstrap_first_developer_profile(
   pg_temp.pid(6), pg_temp.pid(106), 'payroll developer', 'payroll developer',
   '0093', repeat('d', 64), 'payroll-developer-bootstrap'
@@ -171,7 +174,7 @@ select throws_ok(
 
 select throws_ok(
   $$select public.start_payroll_cycle(pg_temp.pid(1), pg_temp.pid(3), pg_temp.week_start(-2), 0, 'payroll-zero-amount', repeat('3',64))$$,
-  '22023', 'NO_PAYROLL_AMOUNT',
+  '22023', 'PAYROLL_NONPOSITIVE_REQUIRES_CARRY',
   'zero-total payroll is rejected atomically'
 );
 
@@ -475,6 +478,7 @@ where id in (pg_temp.pid(1),pg_temp.pid(2));
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000101';
+set local request.jwt.claims = '{"sub":"93000000-0000-4000-8000-000000000101","session_id":"93000000-0000-4000-8000-000000000901"}';
 select is((select count(*) from public.earnings),0::bigint,
   'active admin with a temporary password reads no earnings');
 select is((select count(*) from public.payroll_cycles),0::bigint,
@@ -487,6 +491,7 @@ reset role;
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000102';
+set local request.jwt.claims = '{"sub":"93000000-0000-4000-8000-000000000102","session_id":"93000000-0000-4000-8000-000000000902"}';
 select is((select count(*) from public.earnings),0::bigint,
   'active maid with a temporary password reads no earnings');
 select is((select count(*) from public.payroll_cycles),0::bigint,
@@ -503,6 +508,7 @@ where id in (pg_temp.pid(1),pg_temp.pid(2));
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000101';
+set local request.jwt.claims = '{"sub":"93000000-0000-4000-8000-000000000101","session_id":"93000000-0000-4000-8000-000000000901"}';
 select is((select count(*) from public.earnings),
   (select earnings_all from pg_temp.payroll_rls_expected),
   'admin earnings access is restored after password change completion');
@@ -519,6 +525,7 @@ reset role;
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000102';
+set local request.jwt.claims = '{"sub":"93000000-0000-4000-8000-000000000102","session_id":"93000000-0000-4000-8000-000000000902"}';
 select is((select count(*) from public.earnings),
   (select earnings_maid from pg_temp.payroll_rls_expected),
   'maid earnings access is restored with exact self scope after password change');
@@ -543,6 +550,7 @@ reset role;
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000106';
+set local request.jwt.claims = '{"sub":"93000000-0000-4000-8000-000000000106","session_id":"93000000-0000-4000-8000-000000000906"}';
 select is((select count(*) from public.earnings),0::bigint,
   'developer RLS reads no earnings');
 select is((select count(*) from public.payroll_cycles),0::bigint,
@@ -555,6 +563,7 @@ reset role;
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000105';
+set local request.jwt.claims = '{"sub":"93000000-0000-4000-8000-000000000105","session_id":"93000000-0000-4000-8000-000000000905"}';
 select is((select count(*) from public.earnings),0::bigint,
   'upload-only maid RLS reads no earnings');
 select is((select count(*) from public.payroll_cycles),0::bigint,
@@ -567,6 +576,7 @@ reset role;
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000107';
+set local request.jwt.claims = '{"sub":"93000000-0000-4000-8000-000000000107","session_id":"93000000-0000-4000-8000-000000000907"}';
 select is((select count(*) from public.earnings),0::bigint,
   'departed maid RLS reads no earnings');
 select is((select count(*) from public.payroll_cycles),0::bigint,
@@ -579,6 +589,7 @@ reset role;
 
 set local role authenticated;
 set local request.jwt.claim.sub = '93000000-0000-4000-8000-000000000104';
+set local request.jwt.claims = '{"sub":"93000000-0000-4000-8000-000000000104","session_id":"93000000-0000-4000-8000-000000000904"}';
 select is((select count(*) from public.earnings),0::bigint,
   'inactive admin RLS reads no earnings');
 select is((select count(*) from public.payroll_cycles),0::bigint,

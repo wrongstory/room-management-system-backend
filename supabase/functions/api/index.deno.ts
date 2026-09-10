@@ -776,6 +776,12 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
     lateEarningsHasMore: false,
     lateEarningsLastEarnedOn: null,
     lateEarningsLastEarningId: null,
+    offsetSettled: false,
+    adjustmentAmount: 0,
+    carryInAmount: 0,
+    carryOutAmount: 0,
+    payableAmount: 30000,
+    adjustmentCount: 0,
   };
   const clients = {
     admin: {

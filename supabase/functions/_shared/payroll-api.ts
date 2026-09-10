@@ -136,7 +136,7 @@ function entriesQuery(
 ): {
   weekStart: string;
   maidProfileId: string;
-  kind: "items" | "lateEarnings";
+  kind: "items" | "lateEarnings" | "adjustments";
   limit: number;
   cursor: string | null;
 } {
@@ -149,8 +149,8 @@ function entriesQuery(
     ) invalid("허용되지 않거나 중복된 query 항목입니다.");
   }
   const kind = search.get("kind");
-  if (kind !== "items" && kind !== "lateEarnings") {
-    invalid("kind는 items 또는 lateEarnings여야 합니다.");
+  if (kind !== "items" && kind !== "lateEarnings" && kind !== "adjustments") {
+    invalid("kind는 items, lateEarnings 또는 adjustments여야 합니다.");
   }
   const cursor = search.get("cursor");
   if (
@@ -251,6 +251,60 @@ export function payrollDatabaseError(
     ["STALE_VERSION", 409, "주급 version이 변경되었습니다."],
     ["NO_PAYROLL_AMOUNT", 409, "지급 처리할 확정 수익이 없습니다."],
     [
+      "PAYROLL_NONPOSITIVE_REQUIRES_CARRY",
+      409,
+      "0원 이하 주급은 이월 상계가 필요합니다.",
+    ],
+    [
+      "PAYROLL_POSITIVE_REQUIRES_START",
+      409,
+      "양수 주급은 지급 시작으로 처리해야 합니다.",
+    ],
+    [
+      "PAYROLL_CYCLE_ECONOMICALLY_FROZEN",
+      409,
+      "상계 완료 주차는 경제적으로 동결되었습니다.",
+    ],
+    [
+      "PAYROLL_SOURCE_PAYMENT_UNCERTAIN",
+      409,
+      "지급 결과 확인 전에는 원장을 정정할 수 없습니다.",
+    ],
+    ["PAYROLL_SOURCE_ALREADY_REVERSED", 409, "이미 반전된 원장입니다."],
+    [
+      "PAYROLL_ROOT_ENTITLEMENT_NEGATIVE",
+      409,
+      "누적 지급 권리가 0원 미만이 될 수 없습니다.",
+    ],
+    ["STALE_ADJUSTMENT_VERSION", 409, "정정 원장 version이 변경되었습니다."],
+    [
+      "PAYROLL_LATE_EARNING_ALREADY_CARRIED",
+      409,
+      "이미 이월된 늦은 수익입니다.",
+    ],
+    [
+      "PAYROLL_EARNING_NOT_LATE",
+      409,
+      "지급 완료 또는 상계 완료 주차의 늦은 수익만 이월할 수 있습니다.",
+    ],
+    [
+      "PAYROLL_LATE_CARRY_TARGET_FROZEN",
+      409,
+      "다음 주차가 이미 동결되어 이월할 수 없습니다.",
+    ],
+    [
+      "PAYROLL_EARLIER_CARRY_PENDING",
+      409,
+      "앞선 주차의 잔여 이월을 먼저 처리해야 합니다.",
+    ],
+    [
+      "PAYROLL_PRIOR_LATE_EARNING_PENDING",
+      409,
+      "직전 주차의 늦은 수익을 먼저 이월해야 합니다.",
+    ],
+    ["PAYROLL_SOURCE_NOT_FOUND", 404, "정정할 원장 항목을 찾을 수 없습니다."],
+    ["PAYROLL_ADJUSTMENT_INVALID", 400, "정정 요청을 확인해 주세요."],
+    [
       "IDEMPOTENCY_KEY_REUSED",
       409,
       "이미 다른 요청에 사용한 Idempotency-Key입니다.",
@@ -332,6 +386,20 @@ function integer(value: unknown): number {
   return parsed;
 }
 
+function signedInteger(value: unknown): number {
+  const parsed = typeof value === "string" && /^-?\d+$/.test(value)
+    ? Number(value)
+    : value;
+  if (typeof parsed !== "number" || !Number.isSafeInteger(parsed)) {
+    throw payrollDatabaseError(null);
+  }
+  return parsed;
+}
+function krw(value: unknown): "KRW" {
+  if (value !== "KRW") throw payrollDatabaseError(null);
+  return "KRW";
+}
+
 function boolean(value: unknown): boolean {
   if (typeof value !== "boolean") throw payrollDatabaseError(null);
   return value;
@@ -406,6 +474,12 @@ function projection(value: unknown): InternalProjection {
         };
       }),
       lateEarningsNextCursor: null,
+      offsetSettled: boolean(row.offsetSettled),
+      adjustmentAmount: signedInteger(row.adjustmentAmount),
+      carryInAmount: signedInteger(row.carryInAmount),
+      carryOutAmount: signedInteger(row.carryOutAmount),
+      payableAmount: signedInteger(row.payableAmount),
+      adjustmentCount: integer(row.adjustmentCount),
     },
     itemsAfter: itemsHasMore
       ? {
@@ -498,6 +572,57 @@ function lateEarningProjection(value: unknown): Record<string, unknown> {
   };
 }
 
+function adjustmentProjection(value: unknown): Record<string, unknown> {
+  const item = object(value);
+  const reasonCode = text(item.reasonCode);
+  if (
+    ![
+      "earning_correction",
+      "adjustment_correction",
+      "earning_reversal",
+      "adjustment_reversal",
+      "late_earning_carry",
+    ].includes(reasonCode)
+  ) throw payrollDatabaseError(null);
+  return {
+    adjustmentId: projectedUuid(item.adjustmentId),
+    availableWeekStart: projectedDate(item.availableWeekStart),
+    amount: signedInteger(item.amount),
+    reasonCode,
+    alreadyClaimed: item.alreadyClaimed === undefined
+      ? false
+      : boolean(item.alreadyClaimed),
+    ...(item.maidProfileId === undefined
+      ? {}
+      : { maidProfileId: projectedUuid(item.maidProfileId) }),
+    ...(item.bookVersion === undefined
+      ? {}
+      : { bookVersion: integer(item.bookVersion) }),
+    ...(item.currency === undefined ? {} : { currency: krw(item.currency) }),
+    ...(item.rootEarningId === undefined
+      ? {}
+      : { rootEarningId: projectedUuid(item.rootEarningId) }),
+    ...(item.correctionOfEarningId === undefined
+      ? {}
+      : { correctionOfEarningId: projectedUuid(item.correctionOfEarningId) }),
+    ...(item.correctionOfAdjustmentId === undefined ? {} : {
+      correctionOfAdjustmentId: projectedUuid(item.correctionOfAdjustmentId),
+    }),
+    ...(item.reversalOfEarningId === undefined
+      ? {}
+      : { reversalOfEarningId: projectedUuid(item.reversalOfEarningId) }),
+    ...(item.reversalOfAdjustmentId === undefined
+      ? {}
+      : { reversalOfAdjustmentId: projectedUuid(item.reversalOfAdjustmentId) }),
+    ...(item.lateCarriedEarningId === undefined
+      ? {}
+      : { lateCarriedEarningId: projectedUuid(item.lateCarriedEarningId) }),
+    ...(item.createdAt === undefined
+      ? {}
+      : { createdAt: text(item.createdAt) }),
+  };
+}
+
 export async function listPayroll(
   request: Request,
   clients: EdgeClients,
@@ -577,7 +702,11 @@ export async function listPayrollEntries(
   if (!Array.isArray(page.entries)) throw payrollDatabaseError(null);
   if (page.entries.length > input.limit) throw payrollDatabaseError(null);
   const entries = page.entries.map(
-    input.kind === "items" ? itemProjection : lateEarningProjection,
+    input.kind === "items"
+      ? itemProjection
+      : input.kind === "lateEarnings"
+      ? lateEarningProjection
+      : adjustmentProjection,
   );
   const hasMore = boolean(page.hasMore);
   const lastEarnedOn = nullableDate(page.lastEarnedOn);
@@ -628,4 +757,161 @@ export async function startPayroll(
   });
   if (error || !data) throw payrollDatabaseError(error);
   return await publicProjection(data, actor, input.weekStart);
+}
+
+function adjustmentSource(body: Record<string, unknown>): {
+  sourceEarningId: string | null;
+  sourceAdjustmentId: string | null;
+  expectedVersion: number;
+} {
+  const allowed = ["sourceEarningId", "sourceAdjustmentId", "expectedVersion"];
+  if (
+    Object.keys(body).some((key) => !allowed.includes(key)) ||
+    Number(Object.hasOwn(body, "sourceEarningId")) +
+          Number(Object.hasOwn(body, "sourceAdjustmentId")) !== 1 ||
+    !Object.hasOwn(body, "expectedVersion")
+  ) invalid();
+  return {
+    sourceEarningId: Object.hasOwn(body, "sourceEarningId")
+      ? uuid(body.sourceEarningId, "sourceEarningId")
+      : null,
+    sourceAdjustmentId: Object.hasOwn(body, "sourceAdjustmentId")
+      ? uuid(body.sourceAdjustmentId, "sourceAdjustmentId")
+      : null,
+    expectedVersion: nonNegativeInteger(body.expectedVersion),
+  };
+}
+
+export async function correctPayrollAdjustment(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<Record<string, unknown>> {
+  admin(actor);
+  noQuery(request);
+  const body = await readJsonBody(request);
+  const source = adjustmentSource(
+    Object.fromEntries(
+      Object.entries(body).filter(([key]) => key !== "amount"),
+    ),
+  );
+  if (
+    !Object.hasOwn(body, "amount") ||
+    Object.keys(body).length !== 4 && Object.keys(body).length !== 3
+  ) invalid();
+  const amount = signedInteger(body.amount);
+  if (amount === 0) invalid("amount는 0이 아닌 정수여야 합니다.");
+  const key = idempotencyKey(request);
+  const fingerprint = {
+    command: "payroll.adjustment.correct",
+    actorProfileId: actor.profileId,
+    ...source,
+    amount,
+  };
+  const { data, error } = await clients.admin.rpc("record_payroll_correction", {
+    p_actor_profile_id: actor.profileId,
+    p_source_earning_id: source.sourceEarningId,
+    p_source_adjustment_id: source.sourceAdjustmentId,
+    p_amount: amount,
+    p_expected_book_version: source.expectedVersion,
+    p_idempotency_key: key,
+    p_request_hash: await requestHash(fingerprint),
+  });
+  if (error || !data) throw payrollDatabaseError(error);
+  return adjustmentProjection(data);
+}
+
+export async function reversePayrollSource(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<Record<string, unknown>> {
+  admin(actor);
+  noQuery(request);
+  const source = adjustmentSource(await readJsonBody(request));
+  const key = idempotencyKey(request);
+  const fingerprint = {
+    command: "payroll.adjustment.reverse",
+    actorProfileId: actor.profileId,
+    ...source,
+  };
+  const { data, error } = await clients.admin.rpc("reverse_payroll_source", {
+    p_actor_profile_id: actor.profileId,
+    p_source_earning_id: source.sourceEarningId,
+    p_source_adjustment_id: source.sourceAdjustmentId,
+    p_expected_book_version: source.expectedVersion,
+    p_idempotency_key: key,
+    p_request_hash: await requestHash(fingerprint),
+  });
+  if (error || !data) throw payrollDatabaseError(error);
+  return adjustmentProjection(data);
+}
+
+export async function carryForwardPayroll(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<Record<string, unknown>> {
+  admin(actor);
+  noQuery(request);
+  const body = await readJsonBody(request);
+  exactFields(body, ["maidProfileId", "weekStart", "expectedVersion"]);
+  const input = {
+    maidProfileId: uuid(body.maidProfileId, "maidProfileId"),
+    weekStart: date(body.weekStart),
+    expectedVersion: nonNegativeInteger(body.expectedVersion),
+  };
+  const key = idempotencyKey(request);
+  const fingerprint = {
+    command: "payroll.carry_forward",
+    actorProfileId: actor.profileId,
+    ...input,
+  };
+  const { data, error } = await clients.admin.rpc(
+    "carry_forward_payroll_cycle",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_maid_profile_id: input.maidProfileId,
+      p_week_start: input.weekStart,
+      p_expected_version: input.expectedVersion,
+      p_idempotency_key: key,
+      p_request_hash: await requestHash(fingerprint),
+    },
+  );
+  if (error || !data) throw payrollDatabaseError(error);
+  return await publicProjection(data, actor, input.weekStart);
+}
+
+export async function carryLatePayrollEarning(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  earningId: string,
+): Promise<Record<string, unknown>> {
+  admin(actor);
+  noQuery(request);
+  const body = await readJsonBody(request);
+  exactFields(body, ["expectedVersion"]);
+  const input = {
+    earningId: uuid(earningId, "earningId"),
+    expectedVersion: nonNegativeInteger(body.expectedVersion),
+  };
+  const key = idempotencyKey(request);
+  const fingerprint = {
+    command: "payroll.late_earning.carry",
+    actorProfileId: actor.profileId,
+    ...input,
+  };
+  const { data, error } = await clients.admin.rpc(
+    "carry_late_payroll_earning",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_earning_id: input.earningId,
+      p_expected_book_version: input.expectedVersion,
+      p_idempotency_key: key,
+      p_request_hash: await requestHash(fingerprint),
+    },
+  );
+  if (error || !data) throw payrollDatabaseError(error);
+  return adjustmentProjection(data);
 }

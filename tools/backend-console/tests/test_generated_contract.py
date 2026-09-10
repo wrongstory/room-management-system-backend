@@ -425,6 +425,47 @@ def test_payroll_pagination_error_codes_are_generated() -> None:
     }
 
 
+def test_payroll_adjustment_audit_and_error_codes_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert {
+        DeveloperAuditEventType.PAYROLL_ADJUSTMENT_RECORDED.value,
+        DeveloperAuditEventType.PAYROLL_ADJUSTMENT_REVERSED.value,
+        DeveloperAuditEventType.PAYROLL_OFFSET_SETTLED.value,
+        DeveloperAuditEventType.PAYROLL_LATE_EARNING_CARRIED.value,
+    } == {
+        "payroll.adjustment_recorded",
+        "payroll.adjustment_reversed",
+        "payroll.offset_settled",
+        "payroll.late_earning_carried",
+    }
+    assert {
+        ErrorCode.PAYROLL_ADJUSTMENT_INVALID.value,
+        ErrorCode.PAYROLL_CYCLE_ECONOMICALLY_FROZEN.value,
+        ErrorCode.PAYROLL_EARLIER_CARRY_PENDING.value,
+        ErrorCode.PAYROLL_LATE_EARNING_ALREADY_CARRIED.value,
+        ErrorCode.PAYROLL_EARNING_NOT_LATE.value,
+        ErrorCode.PAYROLL_NONPOSITIVE_REQUIRES_CARRY.value,
+        ErrorCode.PAYROLL_PRIOR_LATE_EARNING_PENDING.value,
+        ErrorCode.PAYROLL_ROOT_ENTITLEMENT_NEGATIVE.value,
+        ErrorCode.PAYROLL_SOURCE_ALREADY_REVERSED.value,
+        ErrorCode.PAYROLL_SOURCE_PAYMENT_UNCERTAIN.value,
+        ErrorCode.STALE_ADJUSTMENT_VERSION.value,
+    } == {
+        "PAYROLL_ADJUSTMENT_INVALID",
+        "PAYROLL_CYCLE_ECONOMICALLY_FROZEN",
+        "PAYROLL_EARLIER_CARRY_PENDING",
+        "PAYROLL_LATE_EARNING_ALREADY_CARRIED",
+        "PAYROLL_EARNING_NOT_LATE",
+        "PAYROLL_NONPOSITIVE_REQUIRES_CARRY",
+        "PAYROLL_PRIOR_LATE_EARNING_PENDING",
+        "PAYROLL_ROOT_ENTITLEMENT_NEGATIVE",
+        "PAYROLL_SOURCE_ALREADY_REVERSED",
+        "PAYROLL_SOURCE_PAYMENT_UNCERTAIN",
+        "STALE_ADJUSTMENT_VERSION",
+    }
+
+
 def test_complaint_rework_error_codes_are_generated() -> None:
     from room_management_console.generated.models.error_code import ErrorCode
 

@@ -1,7 +1,11 @@
 import {
+  carryForwardPayroll,
+  carryLatePayrollEarning,
+  correctPayrollAdjustment,
   listPayroll,
   listPayrollEntries,
   payrollDatabaseError,
+  reversePayrollSource,
   startPayroll,
 } from "./payroll-api.ts";
 import {
@@ -72,7 +76,89 @@ const projection = {
   lateEarningsHasMore: false,
   lateEarningsLastEarnedOn: null,
   lateEarningsLastEarningId: null,
+  offsetSettled: false,
+  adjustmentAmount: 0,
+  carryInAmount: 0,
+  carryOutAmount: 0,
+  payableAmount: 30000,
+  adjustmentCount: 0,
 };
+
+Deno.test("payroll adjustment commands keep typed source and fixed command hashes", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const adjustment = {
+    adjustmentId: "70000000-0000-4000-8000-000000000001",
+    maidProfileId: maid.profileId,
+    bookVersion: 1,
+    amount: -1000,
+    currency: "KRW",
+    reasonCode: "earning_correction",
+    rootEarningId: "30000000-0000-4000-8000-000000000001",
+    correctionOfEarningId: "30000000-0000-4000-8000-000000000001",
+    availableWeekStart: "2026-08-24",
+    createdAt: "2026-09-10T00:00:00Z",
+  };
+  const request = (path: string, body: unknown) =>
+    new Request(`http://localhost${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "payroll-adjust-edge",
+      },
+      body: JSON.stringify(body),
+    });
+  await correctPayrollAdjustment(
+    request("/v1/payroll/adjustments/corrections", {
+      sourceEarningId: adjustment.rootEarningId,
+      amount: -1000,
+      expectedVersion: 0,
+    }),
+    clients(calls, adjustment),
+    admin,
+  );
+  await reversePayrollSource(
+    request("/v1/payroll/adjustments/reversals", {
+      sourceAdjustmentId: adjustment.adjustmentId,
+      expectedVersion: 1,
+    }),
+    clients(calls, {
+      ...adjustment,
+      amount: 1000,
+      reasonCode: "adjustment_reversal",
+      correctionOfEarningId: undefined,
+      reversalOfAdjustmentId: adjustment.adjustmentId,
+    }),
+    admin,
+  );
+  await carryForwardPayroll(
+    request("/v1/payroll/carry-forward", {
+      maidProfileId: maid.profileId,
+      weekStart: "2026-08-24",
+      expectedVersion: 0,
+    }),
+    clients(calls, projection),
+    admin,
+  );
+  await carryLatePayrollEarning(
+    request(`/v1/payroll/late-earnings/${adjustment.rootEarningId}/carry`, {
+      expectedVersion: 2,
+    }),
+    clients(calls, {
+      ...adjustment,
+      amount: 1000,
+      reasonCode: "late_earning_carry",
+      correctionOfEarningId: undefined,
+      lateCarriedEarningId: adjustment.rootEarningId,
+    }),
+    admin,
+    adjustment.rootEarningId,
+  );
+  assert(
+    calls.map(([name]) => name).join(",") ===
+      "record_payroll_correction,reverse_payroll_source,carry_forward_payroll_cycle,carry_late_payroll_earning",
+    "four exact RPCs",
+  );
+});
 
 function clients(
   calls: Array<[string, Record<string, unknown>]>,
@@ -477,6 +563,15 @@ Deno.test("payroll database errors keep stable codes and redact unknown details"
       invalidPage.code === "PAYROLL_PAGE_LIMIT_INVALID" &&
       !invalidPage.message.includes("SQL"),
     "stable redacted page error",
+  );
+  const priorLate = payrollDatabaseError({
+    message: "PAYROLL_PRIOR_LATE_EARNING_PENDING private SQL",
+  });
+  assert(
+    priorLate.status === 409 &&
+      priorLate.code === "PAYROLL_PRIOR_LATE_EARNING_PENDING" &&
+      !priorLate.message.includes("SQL"),
+    "prior late earning has a stable redacted conflict",
   );
   const unknown = payrollDatabaseError({
     message: "postgres credential detail",

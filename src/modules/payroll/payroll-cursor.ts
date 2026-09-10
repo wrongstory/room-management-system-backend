@@ -10,7 +10,7 @@ export const PAYROLL_NESTED_PREVIEW_MAX = 10;
 export const PAYROLL_RESPONSE_MAX_BYTES = 128 * 1024;
 export const PAYROLL_CURSOR_MAX_LENGTH = 1024;
 
-export type PayrollCursorKind = 'cycles' | 'items' | 'lateEarnings';
+export type PayrollCursorKind = 'cycles' | 'items' | 'lateEarnings' | 'adjustments';
 
 export interface PayrollCursorScope {
   actorProfileId: string;

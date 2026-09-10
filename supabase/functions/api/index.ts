@@ -72,8 +72,12 @@ import {
 import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
 import {
+  carryForwardPayroll,
+  carryLatePayrollEarning,
+  correctPayrollAdjustment,
   listPayroll,
   listPayrollEntries,
+  reversePayrollSource,
   startPayroll,
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
@@ -829,6 +833,47 @@ export async function handleApiRequest(
       const response = { payroll: await startPayroll(request, clients, actor) };
       assertPayrollResponseSize(response);
       return jsonResponse(response, 200, corsHeaders);
+    }
+    if (
+      request.method === "POST" &&
+      path === "/v1/payroll/adjustments/corrections"
+    ) {
+      const response = {
+        adjustment: await correctPayrollAdjustment(request, clients, actor),
+      };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 201, corsHeaders);
+    }
+    if (
+      request.method === "POST" && path === "/v1/payroll/adjustments/reversals"
+    ) {
+      const response = {
+        adjustment: await reversePayrollSource(request, clients, actor),
+      };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 201, corsHeaders);
+    }
+    if (request.method === "POST" && path === "/v1/payroll/carry-forward") {
+      const response = {
+        payroll: await carryForwardPayroll(request, clients, actor),
+      };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    const lateCarryMatch = path.match(
+      /^\/v1\/payroll\/late-earnings\/([^/]+)\/carry$/,
+    );
+    if (request.method === "POST" && lateCarryMatch) {
+      const response = {
+        adjustment: await carryLatePayrollEarning(
+          request,
+          clients,
+          actor,
+          lateCarryMatch[1] ?? "",
+        ),
+      };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 201, corsHeaders);
     }
 
     if (request.method === "GET" && path === "/v1/complaints") {

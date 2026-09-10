@@ -696,6 +696,19 @@ operational source decision을 덮어쓰지 않으며 admin projection이 curren
 compensation decision Data API는 live-session business admin만 읽고 maid projection은 서로의 profile ID와
 타인의 보상액을 숨긴다. 이 source 후보는 production/main/recovery에 적용되지 않았다.
 
+`20260910071812_payroll_adjustments.sql`은 기존 38개 migration을 수정하지 않는 39번째 append-only feature
+migration이다. maid별 `payroll_adjustment_books` CAS가 signed correction/reversal/late carry 순서를 고정하고,
+`payroll_adjustments`의 five-way typed source CHECK와 unique reversal/late source가 임의 polymorphic provenance와
+중복을 막는다. reversal은 source 전액의 exact inverse이며 root earning 누적액은 0 미만이 될 수 없다.
+
+`payroll_adjustment_items`와 기존 earning item은 OPEN cycle이 claim한 immutable snapshot이다.
+`payroll_offset_settlements`는 net 0 이하 candidate를 payment event 없이 경제적으로 동결하고,
+`payroll_residual_carries`/`payroll_carry_items`는 음수 크기를 바로 다음 KST 주차로 한 칸씩 exactly-once 전달한다.
+net 0에는 carry row가 없다. PAID/offset-settled cycle의 late earning은 unique `late_carried_earning_id`를 가진
+positive adjustment로 다음 주차에만 옮기며 원 earning은 보존되고 다시 payroll item으로 claim되지 않는다.
+여섯 public table 모두 authenticated SELECT에 live session과 admin/maid-self를 요구하고 direct DML 및
+service-role raw table 권한은 없다. production/main/recovery 적용 상태와 무관한 source 후보 schema다.
+
 ## 7. Supabase Free Plan 전용 운영 기준
 
 ### #29 versioned duration policy (feature source)

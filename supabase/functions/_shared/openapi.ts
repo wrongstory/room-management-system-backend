@@ -1049,7 +1049,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 51,
+              maxItems: 55,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -2435,8 +2435,12 @@ export const openApiDocument = {
           name: "kind",
           in: "query",
           required: true,
-          schema: { type: "string", enum: ["items", "lateEarnings"] },
-          description: "items와 lateEarnings는 서로 다른 cursor stream입니다.",
+          schema: {
+            type: "string",
+            enum: ["items", "lateEarnings", "adjustments"],
+          },
+          description:
+            "items, lateEarnings, adjustments는 서로 다른 cursor stream입니다.",
         }, {
           name: "limit",
           in: "query",
@@ -2505,6 +2509,165 @@ export const openApiDocument = {
           "409": errorResponse,
           "500": errorResponse,
           "503": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/adjustments/corrections": {
+      post: {
+        tags: ["Payroll"],
+        operationId: "recordPayrollCorrection",
+        summary: "signed 주급 정정 원장 추가",
+        description:
+          "active password-complete business admin만 실제 선행 earning 또는 adjustment를 typed source로 지정합니다. amount는 0이 아닌 정수 KRW이고, 음수여도 root 누적 지급 권리를 0원 미만으로 만들 수 없습니다. reasonCode는 서버가 source에 따라 고정하며 자유문을 받지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayrollCorrectionRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "immutable correction",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollAdjustmentEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/adjustments/reversals": {
+      post: {
+        tags: ["Payroll"],
+        operationId: "reversePayrollSource",
+        summary: "선행 원장의 미반전 전액 반전",
+        description:
+          "source earning/adjustment 금액의 정확한 반대 부호를 서버가 계산합니다. source별 1회만 가능하고 partial reversal은 허용하지 않습니다. reversal-of-reversal도 같은 immutable exact-inverse chain과 root cumulative floor를 따릅니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayrollReversalRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "immutable full reversal",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollAdjustmentEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/carry-forward": {
+      post: {
+        tags: ["Payroll"],
+        operationId: "carryForwardPayrollCycle",
+        summary: "0원 이하 OPEN 주차 상계·순차 이월",
+        description:
+          "net payable이 0원 이하일 때만 immutable offset settlement를 기록하고 cycle version을 증가시킵니다. payment event는 만들지 않으며 net 0이면 residual row도 없습니다. 음수 residual은 정확히 다음 KST week에만 한 번 적용되고 더 늦은 주차 선점은 거부됩니다. offset-settled cycle은 status=open을 유지하지만 경제적으로 동결됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayrollStartRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "offset-settled projection",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/PayrollCycleEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/late-earnings/{earningId}/carry": {
+      post: {
+        tags: ["Payroll"],
+        operationId: "carryLatePayrollEarning",
+        summary: "동결 주차의 늦은 earning을 다음 주차로 명시 이월",
+        description:
+          "PAID 또는 offset-settled cycle의 아직 claim되지 않은 positive earning을 원본 변경 없이 unique late_earning_carry adjustment로 정확히 다음 주차에 반영합니다. PAYING/CHECK에서는 #103 결과 전 fail-closed합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [{
+          name: "earningId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        }, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PayrollLateCarryRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "server-derived late earning carry adjustment",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollAdjustmentEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
         },
       },
     },
@@ -3709,6 +3872,20 @@ export const openApiDocument = {
           "PAYROLL_WEEK_NOT_CLOSED",
           "PAYROLL_CYCLE_NOT_OPEN",
           "NO_PAYROLL_AMOUNT",
+          "PAYROLL_NONPOSITIVE_REQUIRES_CARRY",
+          "PAYROLL_POSITIVE_REQUIRES_START",
+          "PAYROLL_CYCLE_ECONOMICALLY_FROZEN",
+          "PAYROLL_SOURCE_PAYMENT_UNCERTAIN",
+          "PAYROLL_SOURCE_ALREADY_REVERSED",
+          "PAYROLL_ROOT_ENTITLEMENT_NEGATIVE",
+          "STALE_ADJUSTMENT_VERSION",
+          "PAYROLL_LATE_EARNING_ALREADY_CARRIED",
+          "PAYROLL_EARNING_NOT_LATE",
+          "PAYROLL_LATE_CARRY_TARGET_FROZEN",
+          "PAYROLL_EARLIER_CARRY_PENDING",
+          "PAYROLL_PRIOR_LATE_EARNING_PENDING",
+          "PAYROLL_SOURCE_NOT_FOUND",
+          "PAYROLL_ADJUSTMENT_INVALID",
           "PAYROLL_COMMAND_FAILED",
           "ROOM_NOT_FOUND",
           "ROOM_OPERATION_NOT_FOUND",
@@ -4007,6 +4184,10 @@ export const openApiDocument = {
           "inspection.rejected",
           "complaint.rework_materialized",
           "compensation.earned",
+          "payroll.adjustment_recorded",
+          "payroll.adjustment_reversed",
+          "payroll.offset_settled",
+          "payroll.late_earning_carried",
         ],
         description:
           "운영 콘솔에 노출할 수 있도록 서버에서 고정한 감사 이벤트 allowlist",
@@ -6543,7 +6724,8 @@ export const openApiDocument = {
       PayrollStatus: {
         type: "string",
         enum: ["open", "paying", "check", "paid"],
-        description: "이번 Issue는 OPEN 조회와 OPEN→PAYING 잠금만 수행합니다.",
+        description:
+          "지급 상태 enum은 유지합니다. offset-settled는 별도 boolean projection입니다.",
       },
       PayrollItem: {
         type: "object",
@@ -6594,6 +6776,12 @@ export const openApiDocument = {
           "lateEarningAmount",
           "lateEarnings",
           "lateEarningsNextCursor",
+          "offsetSettled",
+          "adjustmentAmount",
+          "carryInAmount",
+          "carryOutAmount",
+          "payableAmount",
+          "adjustmentCount",
         ],
         properties: {
           cycleId: { type: ["string", "null"], format: "uuid" },
@@ -6645,6 +6833,30 @@ export const openApiDocument = {
             description:
               "lateEarnings preview가 더 있으면 별도 opaque continuation",
           },
+          offsetSettled: {
+            type: "boolean",
+            description:
+              "0원 이하 상계가 완료되어 경제적으로 동결된 OPEN cycle 여부",
+          },
+          adjustmentAmount: {
+            type: "integer",
+            description: "이번 cycle의 signed adjustment 합계",
+          },
+          carryInAmount: {
+            type: "integer",
+            maximum: 0,
+            description: "이전 주차 residual의 signed 차감액",
+          },
+          carryOutAmount: {
+            type: "integer",
+            maximum: 0,
+            description: "다음 주차로 넘긴 signed residual. 없으면 0",
+          },
+          payableAmount: {
+            type: "integer",
+            description: "earning + adjustment + carry-in의 signed net",
+          },
+          adjustmentCount: { type: "integer", minimum: 0 },
         },
       },
       PayrollStartRequest: {
@@ -6658,6 +6870,123 @@ export const openApiDocument = {
         },
         description:
           "금액과 earning ID는 서버가 계산하므로 입력할 수 없습니다.",
+      },
+      PayrollAdjustmentReason: {
+        type: "string",
+        enum: [
+          "earning_correction",
+          "adjustment_correction",
+          "earning_reversal",
+          "adjustment_reversal",
+          "late_earning_carry",
+        ],
+      },
+      PayrollAdjustmentEntry: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "adjustmentId",
+          "availableWeekStart",
+          "amount",
+          "reasonCode",
+          "alreadyClaimed",
+        ],
+        properties: {
+          adjustmentId: { type: "string", format: "uuid" },
+          availableWeekStart: { type: "string", format: "date" },
+          amount: { type: "integer" },
+          reasonCode: { $ref: "#/components/schemas/PayrollAdjustmentReason" },
+          alreadyClaimed: { type: "boolean" },
+        },
+      },
+      PayrollAdjustment: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "adjustmentId",
+          "maidProfileId",
+          "bookVersion",
+          "availableWeekStart",
+          "amount",
+          "currency",
+          "reasonCode",
+          "rootEarningId",
+          "alreadyClaimed",
+          "createdAt",
+        ],
+        properties: {
+          adjustmentId: { type: "string", format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          bookVersion: { type: "integer", minimum: 1 },
+          availableWeekStart: { type: "string", format: "date" },
+          amount: { type: "integer" },
+          currency: { const: "KRW" },
+          reasonCode: { $ref: "#/components/schemas/PayrollAdjustmentReason" },
+          rootEarningId: { type: "string", format: "uuid" },
+          correctionOfEarningId: { type: "string", format: "uuid" },
+          correctionOfAdjustmentId: { type: "string", format: "uuid" },
+          reversalOfEarningId: { type: "string", format: "uuid" },
+          reversalOfAdjustmentId: { type: "string", format: "uuid" },
+          lateCarriedEarningId: { type: "string", format: "uuid" },
+          alreadyClaimed: { type: "boolean" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      PayrollCorrectionRequest: {
+        oneOf: [
+          { $ref: "#/components/schemas/PayrollEarningCorrectionRequest" },
+          { $ref: "#/components/schemas/PayrollAdjustmentCorrectionRequest" },
+        ],
+      },
+      PayrollEarningCorrectionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sourceEarningId", "amount", "expectedVersion"],
+        properties: {
+          sourceEarningId: { type: "string", format: "uuid" },
+          amount: { type: "integer", not: { const: 0 } },
+          expectedVersion: { type: "integer", minimum: 0 },
+        },
+      },
+      PayrollAdjustmentCorrectionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sourceAdjustmentId", "amount", "expectedVersion"],
+        properties: {
+          sourceAdjustmentId: { type: "string", format: "uuid" },
+          amount: { type: "integer", not: { const: 0 } },
+          expectedVersion: { type: "integer", minimum: 0 },
+        },
+      },
+      PayrollReversalRequest: {
+        oneOf: [
+          { $ref: "#/components/schemas/PayrollEarningReversalRequest" },
+          { $ref: "#/components/schemas/PayrollAdjustmentReversalRequest" },
+        ],
+      },
+      PayrollEarningReversalRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sourceEarningId", "expectedVersion"],
+        properties: {
+          sourceEarningId: { type: "string", format: "uuid" },
+          expectedVersion: { type: "integer", minimum: 0 },
+        },
+      },
+      PayrollAdjustmentReversalRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["sourceAdjustmentId", "expectedVersion"],
+        properties: {
+          sourceAdjustmentId: { type: "string", format: "uuid" },
+          expectedVersion: { type: "integer", minimum: 0 },
+        },
+      },
+      PayrollLateCarryRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion"],
+        properties: { expectedVersion: { type: "integer", minimum: 0 } },
       },
       PayrollListEnvelope: {
         type: "object",
@@ -6684,7 +7013,7 @@ export const openApiDocument = {
         properties: {
           kind: {
             type: "string",
-            enum: ["items", "lateEarnings"],
+            enum: ["items", "lateEarnings", "adjustments"],
           },
           entries: {
             type: "array",
@@ -6693,6 +7022,7 @@ export const openApiDocument = {
               oneOf: [
                 { $ref: "#/components/schemas/PayrollItem" },
                 { $ref: "#/components/schemas/PayrollLateEarning" },
+                { $ref: "#/components/schemas/PayrollAdjustmentEntry" },
               ],
             },
           },
@@ -6709,6 +7039,14 @@ export const openApiDocument = {
         required: ["payroll"],
         properties: {
           payroll: { $ref: "#/components/schemas/PayrollCycle" },
+        },
+      },
+      PayrollAdjustmentEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["adjustment"],
+        properties: {
+          adjustment: { $ref: "#/components/schemas/PayrollAdjustment" },
         },
       },
     },

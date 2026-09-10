@@ -3,16 +3,16 @@ import type { Actor } from '../src/domain/actor.js';
 import { requestHash } from '../src/lib/command.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import {
-  PAYROLL_RESPONSE_MAX_BYTES,
-  PayrollCursorCodec,
-  assertPayrollResponseSize,
-  payrollCursorScope
-} from '../src/modules/payroll/payroll-cursor.js';
-import {
   payrollDatabaseError,
   SupabasePayrollService,
   toPayrollCycle
 } from '../src/modules/payroll/payroll.service.js';
+import {
+  assertPayrollResponseSize,
+  PAYROLL_RESPONSE_MAX_BYTES,
+  PayrollCursorCodec,
+  payrollCursorScope
+} from '../src/modules/payroll/payroll-cursor.js';
 
 const cursorSecret = 'payroll-cursor-secret-for-tests-123456';
 const admin: Actor = {
@@ -55,7 +55,13 @@ const projection = {
   lateEarnings: [],
   lateEarningsHasMore: false,
   lateEarningsLastEarnedOn: null,
-  lateEarningsLastEarningId: null
+  lateEarningsLastEarningId: null,
+  offsetSettled: false,
+  adjustmentAmount: -5000,
+  carryInAmount: 0,
+  carryOutAmount: 0,
+  payableAmount: 325000,
+  adjustmentCount: 1
 };
 
 function clients(rpc: ReturnType<typeof vi.fn>): SupabaseClients {
@@ -251,6 +257,34 @@ describe('payroll pagination service', () => {
     });
   });
 
+  it('uses typed sources and server-owned reason/reversal RPCs', async () => {
+    const adjustment = {
+      adjustmentId: '70000000-0000-4000-8000-000000000001',
+      maidProfileId: maid.profileId,
+      bookVersion: 1,
+      amount: -5000,
+      currency: 'KRW',
+      reasonCode: 'earning_correction',
+      rootEarningId: '30000000-0000-4000-8000-000000000001',
+      correctionOfEarningId: '30000000-0000-4000-8000-000000000001',
+      availableWeekStart: projection.weekStart,
+      createdAt: '2026-09-10T00:00:00Z'
+    };
+    const rpc = vi.fn(async () => ({ data: adjustment, error: null }));
+    await expect(service(rpc).correct(admin, {
+      sourceEarningId: adjustment.rootEarningId,
+      amount: -5000,
+      expectedVersion: 0,
+      idempotencyKey: 'payroll-correction-1'
+    })).resolves.toMatchObject({ amount: -5000, reasonCode: 'earning_correction' });
+    expect(rpc).toHaveBeenCalledWith('record_payroll_correction', expect.objectContaining({
+      p_source_earning_id: adjustment.rootEarningId,
+      p_source_adjustment_id: null,
+      p_amount: -5000,
+      p_expected_book_version: 0
+    }));
+  });
+
   it('strips private fields and fails closed on malformed projections', () => {
     expect(toPayrollCycle({ ...projection, rawRequestBody: 'secret' })).not.toHaveProperty('rawRequestBody');
     for (const malformed of [
@@ -278,6 +312,7 @@ describe('payroll pagination service', () => {
     ['PAYROLL_ACCESS_REQUIRED', 403],
     ['PAYROLL_MAID_NOT_FOUND', 404],
     ['PAYROLL_WEEK_NOT_CLOSED', 409],
+    ['PAYROLL_PRIOR_LATE_EARNING_PENDING', 409],
     ['NO_PAYROLL_AMOUNT', 409],
     ['IDEMPOTENCY_KEY_REUSED', 409]
   ])('maps %s without exposing raw database details', (code, statusCode) => {

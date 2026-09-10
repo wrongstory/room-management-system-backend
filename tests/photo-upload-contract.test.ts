@@ -109,13 +109,13 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
   it('retains the complete safe DB photo audit summary alongside four photo HTTP routes', () => {
     const schemas=openApiDocument.components.schemas;
     expect(schemas.DeveloperAuditEventType.enum).toContain('photo.upload_accepted');
-    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(51);
+    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(55);
     const sample={cleaningTargetId:id(1),attemptId:id(2),targetSlotId:id(3),photoId:id(4),photoVersion:1,...uploaded};
     const summary=schemas.DeveloperAuditEvent.properties.summary;
     expect(summary.additionalProperties).toBe(false);
     for(const key of Object.keys(sample))expect(summary.properties).toHaveProperty(key);
     for(const key of ['requestHash','idempotencyKey','providerLocator','claimDigest','token','rawAfterState'])
       expect(summary.properties).not.toHaveProperty(key);
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(86);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(90);
   });
 });
