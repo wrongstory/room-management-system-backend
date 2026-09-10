@@ -836,6 +836,8 @@ production DB/Edge/Pages를 변경하지 않는다.
 - [x] receipt → global → actor → adjustment book → cycle → sorted source 단일 lock order와 book/cycle CAS
 - [x] payable 0 이하 start 무변경 실패; immutable offset settlement, zero payment event 0, negative residual만 바로 다음 KST week 순차 carry
 - [x] offset-settled OPEN cycle 경제적 동결; PAID/offset late earning은 explicit unique positive carry 뒤 원본 재claim 차단
+- [x] PAYING/CHECK/PAID/offset source의 미처리 positive late earning이 있으면 다음 주차 start/offset freeze 차단; 반대 race도 earning insert fail-closed
+- [x] settlement↔residual carry source/id·maid·currency·amount·바로 다음 week 양방향 불변식을 deferred constraint trigger로 commit 검증
 - [x] live-session RLS와 admin/maid-self Data API, developer/cross-maid 금액 비노출 safe audit
 - [x] signed adjustment/carry/payable bounded projection, 128 KiB·signed cursor·no-store Fastify/Edge parity; 90 paths / 97 operations
 - [ ] 독립 QA, required GitHub `application` / `migration`, `dev` 병합

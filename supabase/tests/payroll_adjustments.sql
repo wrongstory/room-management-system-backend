@@ -8,7 +8,7 @@ create function pg_temp.week(n integer) returns date language sql stable as $$
   select date_trunc('week',clock_timestamp() at time zone 'Asia/Seoul')::date+n*7
 $$;
 
-insert into auth.users(id) select pg_temp.pid(100+n) from generate_series(1,5)n;
+insert into auth.users(id) select pg_temp.pid(100+n) from generate_series(1,11)n;
 select public.bootstrap_first_developer_profile(pg_temp.pid(5),pg_temp.pid(105),'adjust-dev','adjust-dev',
   '0102',repeat('d',64),'adjust-dev-bootstrap');
 insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,
@@ -16,7 +16,13 @@ insert into public.profiles(id,auth_user_id,display_name,display_name_normalized
   (pg_temp.pid(1),pg_temp.pid(101),'adjust-admin','adjust-admin','adjust-admin','adjust-admin',0,'admin','active',false),
   (pg_temp.pid(2),pg_temp.pid(102),'adjust-maid','adjust-maid','adjust-maid','adjust-maid',0,'maid','active',false),
   (pg_temp.pid(3),pg_temp.pid(103),'adjust-other','adjust-other','adjust-other','adjust-other',0,'maid','active',false),
-  (pg_temp.pid(4),pg_temp.pid(104),'adjust-temp','adjust-temp','adjust-temp','adjust-temp',0,'admin','active',true);
+  (pg_temp.pid(4),pg_temp.pid(104),'adjust-temp','adjust-temp','adjust-temp','adjust-temp',0,'admin','active',true),
+  (pg_temp.pid(6),pg_temp.pid(106),'late-paying','late-paying','late-paying','late-paying',0,'maid','active',false),
+  (pg_temp.pid(7),pg_temp.pid(107),'late-check','late-check','late-check','late-check',0,'maid','active',false),
+  (pg_temp.pid(8),pg_temp.pid(108),'late-paid','late-paid','late-paid','late-paid',0,'maid','active',false),
+  (pg_temp.pid(9),pg_temp.pid(109),'late-offset','late-offset','late-offset','late-offset',0,'maid','active',false),
+  (pg_temp.pid(10),pg_temp.pid(110),'normal-absent','normal-absent','normal-absent','normal-absent',0,'maid','active',false),
+  (pg_temp.pid(11),pg_temp.pid(111),'normal-open','normal-open','normal-open','normal-open',0,'maid','active',false);
 insert into auth.sessions(id,user_id) select pg_temp.pid(900+n),pg_temp.pid(100+n) from generate_series(1,5)n;
 
 create function pg_temp.add_earning(n integer,p_maid integer,p_day date,p_amount integer)
@@ -45,6 +51,62 @@ begin
   insert into public.earnings(id,earning_entitlement_id,submission_id,maid_profile_id,earned_on,base_amount,bomb_room_bonus)
     values(v_earning,v_submission,v_submission,pg_temp.pid(p_maid),p_day,p_amount,0);
   return v_earning;
+end $$;
+
+create function pg_temp.freeze_cycle(p_maid integer,p_week date,p_status public.payment_status,p_offset boolean)
+returns uuid language plpgsql as $$
+declare v_cycle uuid:=gen_random_uuid();
+begin
+  insert into public.payroll_cycles(id,maid_profile_id,week_start,status,locked_amount,
+    payment_started_by,payment_started_at,paid_at,check_reason,offset_settled_at,offset_settled_by,version)
+  values(v_cycle,pg_temp.pid(p_maid),p_week,p_status,
+    case when p_status='open' then null else 1 end,
+    case when p_status='open' then null else pg_temp.pid(1) end,
+    case when p_status='open' then null else clock_timestamp() end,
+    case when p_status='paid' then clock_timestamp() end,
+    case when p_status='check' then 'fixture_only' end,
+    case when p_offset then clock_timestamp() end,
+    case when p_offset then pg_temp.pid(1) end,1);
+  return v_cycle;
+end $$;
+
+create function pg_temp.invalid_carry_pair(p_kind text,p_n integer)
+returns void language plpgsql as $$
+declare v_cycle uuid:=gen_random_uuid();v_cycle_two uuid:=gen_random_uuid();
+  v_settlement uuid:=gen_random_uuid();v_settlement_two uuid:=gen_random_uuid();
+  v_carry uuid:=gen_random_uuid();v_carry_two uuid:=gen_random_uuid();v_week date:=pg_temp.week(-20-p_n);
+begin
+  insert into public.payroll_cycles(id,maid_profile_id,week_start) values(v_cycle,pg_temp.pid(3),v_week);
+  if p_kind='missing_carry' then
+    insert into public.payroll_offset_settlements(id,payroll_cycle_id,maid_profile_id,week_start,cycle_version,
+      earning_amount,adjustment_amount,carry_in_amount,net_amount,carry_out_id,settled_by,settled_at)
+    values(v_settlement,v_cycle,pg_temp.pid(3),v_week,1,0,-100,0,-100,v_carry,pg_temp.pid(1),clock_timestamp());
+  elsif p_kind='one_sided_carry' then
+    insert into public.payroll_offset_settlements(id,payroll_cycle_id,maid_profile_id,week_start,cycle_version,
+      earning_amount,adjustment_amount,carry_in_amount,net_amount,carry_out_id,settled_by,settled_at)
+    values(v_settlement,v_cycle,pg_temp.pid(3),v_week,1,0,0,0,0,null,pg_temp.pid(1),clock_timestamp());
+    insert into public.payroll_residual_carries(id,maid_profile_id,source_settlement_id,available_week_start,amount)
+    values(v_carry,pg_temp.pid(3),v_settlement,v_week+7,100);
+  elsif p_kind in ('wrong_amount','wrong_week') then
+    insert into public.payroll_offset_settlements(id,payroll_cycle_id,maid_profile_id,week_start,cycle_version,
+      earning_amount,adjustment_amount,carry_in_amount,net_amount,carry_out_id,settled_by,settled_at)
+    values(v_settlement,v_cycle,pg_temp.pid(3),v_week,1,0,-100,0,-100,v_carry,pg_temp.pid(1),clock_timestamp());
+    insert into public.payroll_residual_carries(id,maid_profile_id,source_settlement_id,available_week_start,amount)
+    values(v_carry,pg_temp.pid(3),v_settlement,
+      case when p_kind='wrong_week' then v_week+14 else v_week+7 end,
+      case when p_kind='wrong_amount' then 99 else 100 end);
+  elsif p_kind='crossed_pair' then
+    insert into public.payroll_cycles(id,maid_profile_id,week_start) values(v_cycle_two,pg_temp.pid(3),v_week+7);
+    insert into public.payroll_offset_settlements(id,payroll_cycle_id,maid_profile_id,week_start,cycle_version,
+      earning_amount,adjustment_amount,carry_in_amount,net_amount,carry_out_id,settled_by,settled_at) values
+      (v_settlement,v_cycle,pg_temp.pid(3),v_week,1,0,-100,0,-100,v_carry,pg_temp.pid(1),clock_timestamp()),
+      (v_settlement_two,v_cycle_two,pg_temp.pid(3),v_week+7,1,0,-100,0,-100,v_carry_two,pg_temp.pid(1),clock_timestamp());
+    insert into public.payroll_residual_carries(id,maid_profile_id,source_settlement_id,available_week_start,amount) values
+      (v_carry,pg_temp.pid(3),v_settlement_two,v_week+14,100),
+      (v_carry_two,pg_temp.pid(3),v_settlement,v_week+7,100);
+  end if;
+  set constraints payroll_offset_settlements_carry_pair,
+    payroll_residual_carries_settlement_pair immediate;
 end $$;
 
 select pg_temp.add_earning(1,2,pg_temp.week(-3),10000);
@@ -132,6 +194,93 @@ select is((private.project_payroll_cycle_bounded(pg_temp.week(-2),pg_temp.pid(3)
 select throws_ok($$select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5005),3,
   'adjust-late-dup',repeat('8',64))$$,'23505','PAYROLL_LATE_EARNING_ALREADY_CARRIED',
   'late source carry is unique');
+
+-- A following week cannot freeze while its immediate source week has an unhandled positive late earning.
+select pg_temp.freeze_cycle(6,pg_temp.week(-8),'paying',false);
+select pg_temp.add_earning(20,6,pg_temp.week(-8)+1,4000);
+select pg_temp.add_earning(21,6,pg_temp.week(-7)+1,6000);
+select throws_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(6),pg_temp.week(-7),0,
+  'late-paying-next-start',repeat('a',64))$$,'55000','PAYROLL_PRIOR_LATE_EARNING_PENDING',
+  'PAYING source week late earning blocks next positive start');
+select throws_ok($$select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5020),0,
+  'late-paying-before-result',repeat('b',64))$$,'55000','PAYROLL_SOURCE_PAYMENT_UNCERTAIN',
+  'PAYING source must resolve before its late earning can be carried');
+update public.payroll_cycles set status='paid',paid_at=clock_timestamp()
+where maid_profile_id=pg_temp.pid(6) and week_start=pg_temp.week(-8);
+select lives_ok($$select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5020),0,
+  'late-paying-after-result',repeat('c',64))$$,'resolved PAYING source late earning is carried');
+select lives_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(6),pg_temp.week(-7),0,
+  'late-paying-next-retry',repeat('d',64))$$,'next positive start proceeds after explicit late carry');
+select throws_ok($$select pg_temp.add_earning(28,6,pg_temp.week(-8)+2,1000)$$,'55000',
+  'PAYROLL_PRIOR_LATE_EARNING_PENDING',
+  'a next-week freeze winner rejects a later source-week earning instead of stranding it');
+
+select pg_temp.freeze_cycle(7,pg_temp.week(-8),'check',false);
+select pg_temp.add_earning(22,7,pg_temp.week(-8)+1,4000);
+select pg_temp.add_earning(23,7,pg_temp.week(-7)+1,6000);
+select throws_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(7),pg_temp.week(-7),0,
+  'late-check-next-start',repeat('e',64))$$,'55000','PAYROLL_PRIOR_LATE_EARNING_PENDING',
+  'CHECK source week late earning blocks next positive start');
+update public.payroll_cycles set status='paid',paid_at=clock_timestamp(),check_reason=null
+where maid_profile_id=pg_temp.pid(7) and week_start=pg_temp.week(-8);
+select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5022),0,
+  'late-check-after-result',repeat('f',64));
+select lives_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(7),pg_temp.week(-7),0,
+  'late-check-next-retry',repeat('1',64))$$,'next start proceeds after CHECK resolves and late earning is carried');
+
+select pg_temp.freeze_cycle(8,pg_temp.week(-8),'paid',false);
+select pg_temp.add_earning(24,8,pg_temp.week(-8)+1,5000);
+select public.record_payroll_correction(pg_temp.pid(1),pg_temp.pid(5024),null,-5000,0,
+  'late-paid-negative',repeat('2',64));
+select throws_ok($$select public.carry_forward_payroll_cycle(pg_temp.pid(1),pg_temp.pid(8),pg_temp.week(-7),0,
+  'late-paid-next-offset',repeat('3',64))$$,'55000','PAYROLL_PRIOR_LATE_EARNING_PENDING',
+  'PAID source week late earning blocks next zero/negative offset settlement');
+select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5024),1,
+  'late-paid-carry',repeat('4',64));
+select lives_ok($$select public.carry_forward_payroll_cycle(pg_temp.pid(1),pg_temp.pid(8),pg_temp.week(-7),0,
+  'late-paid-next-offset-retry',repeat('5',64))$$,'offset settlement proceeds after PAID late earning carry');
+
+select pg_temp.freeze_cycle(9,pg_temp.week(-8),'open',true);
+select pg_temp.add_earning(25,9,pg_temp.week(-8)+1,5000);
+select public.record_payroll_correction(pg_temp.pid(1),pg_temp.pid(5025),null,-5000,0,
+  'late-offset-negative',repeat('6',64));
+select throws_ok($$select public.carry_forward_payroll_cycle(pg_temp.pid(1),pg_temp.pid(9),pg_temp.week(-7),0,
+  'late-offset-next-offset',repeat('7',64))$$,'55000','PAYROLL_PRIOR_LATE_EARNING_PENDING',
+  'offset-settled source week late earning blocks next zero/negative offset settlement');
+select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5025),1,
+  'late-offset-carry',repeat('8',64));
+select lives_ok($$select public.carry_forward_payroll_cycle(pg_temp.pid(1),pg_temp.pid(9),pg_temp.week(-7),0,
+  'late-offset-next-offset-retry',repeat('9',64))$$,'offset path proceeds after prior offset late earning carry');
+
+-- No source cycle or an ordinary OPEN source is not "late": W remains independently processable.
+select pg_temp.freeze_cycle(10,pg_temp.week(-9),'paying',false);
+select lives_ok($$select pg_temp.add_earning(26,10,pg_temp.week(-10)+1,4000)$$,
+  'a missing source cycle accepts its normal W earning even when W+1 is frozen');
+select lives_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(10),pg_temp.week(-10),0,
+  'normal-absent-source-start',repeat('a',64))$$,'the previously absent W cycle can claim and start normally');
+select pg_temp.freeze_cycle(11,pg_temp.week(-10),'open',false);
+select pg_temp.freeze_cycle(11,pg_temp.week(-9),'paying',false);
+select lives_ok($$select pg_temp.add_earning(27,11,pg_temp.week(-10)+1,4000)$$,
+  'an ordinary OPEN source accepts its normal W earning even when W+1 is frozen');
+select lives_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(11),pg_temp.week(-10),1,
+  'normal-open-source-start',repeat('b',64))$$,'the OPEN W cycle remains normally processable');
+
+-- Deferred pair checks reject every cross-table economic mismatch at transaction validation time.
+select throws_ok($$select pg_temp.invalid_carry_pair('wrong_amount',1)$$,'23514',
+  'PAYROLL_CARRY_INVARIANT_VIOLATION','wrong residual amount is rejected at deferred validation');
+select throws_ok($$select pg_temp.invalid_carry_pair('wrong_week',2)$$,'23514',
+  'PAYROLL_CARRY_INVARIANT_VIOLATION','wrong residual week is rejected at deferred validation');
+select throws_ok($$select pg_temp.invalid_carry_pair('crossed_pair',3)$$,'23514',
+  'PAYROLL_CARRY_INVARIANT_VIOLATION','crossed settlement and carry pairs are rejected');
+select throws_ok($$select pg_temp.invalid_carry_pair('one_sided_carry',4)$$,'23514',
+  'PAYROLL_CARRY_INVARIANT_VIOLATION','net-zero settlement cannot have a one-sided residual carry');
+select throws_ok($$select pg_temp.invalid_carry_pair('missing_carry',5)$$,'23514',
+  'PAYROLL_CARRY_INVARIANT_VIOLATION',
+  'negative settlement cannot retain a one-sided missing carry reference');
+set constraints payroll_offset_settlements_carry_pair,
+  payroll_residual_carries_settlement_pair immediate;
+set constraints payroll_offset_settlements_carry_pair,
+  payroll_residual_carries_settlement_pair deferred;
 
 select pg_temp.add_earning(6,3,pg_temp.week(-3),0);
 select is((private.project_payroll_cycle_bounded(pg_temp.week(-3),pg_temp.pid(3),10)->>'itemCount')::int,0,

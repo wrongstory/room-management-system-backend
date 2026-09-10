@@ -130,6 +130,10 @@ Deno.test("payroll OpenAPI separates earnings and signed adjustments with strict
     "payment enum is unchanged",
   );
   assert(
+    schemas.ErrorCode.enum.includes("PAYROLL_PRIOR_LATE_EARNING_PENDING"),
+    "prior late earning freeze conflict is public and stable",
+  );
+  assert(
     schemas.PayrollEntriesEnvelope.properties.entries.maxItems === 50 &&
       schemas.PayrollCycle.properties.items.maxItems === 10,
     "adjustment projections retain bounded contracts",

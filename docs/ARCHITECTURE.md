@@ -184,6 +184,9 @@ offset settlement가 있는 OPEN cycle은 경제적으로 동결되어 이후 PA
 offset-settled cycle에 늦게 승인된 earning은 late projection에 남고, active password-complete business admin의
 명시적 command가 원 earning을 수정하지 않은 채 바로 다음 주차에 positive `late_earning_carry` adjustment를
 exactly once 만든 뒤에만 원 주차 late projection에서 제외된다. PAYING/CHECK는 #103 결과 확정 전 fail-closed다.
+여기서 late earning은 source 주차 cycle이 이미 PAYING/CHECK/PAID 또는 offset-settled로 동결된 뒤 확정된
+positive earning만 뜻한다. source cycle이 없거나 일반 OPEN이면 그 earning은 원 주차의 정상 candidate이며,
+다음 주차가 먼저 동결됐더라도 원 주차를 독립적으로 start/carry할 수 있으므로 prior-late fence 대상이 아니다.
 
 Fastify와 Edge는 동일한 4개 command route와 bounded cycle/entry projection을 사용한다. 응답은
 `offsetSettled`, signed `adjustmentAmount/carryInAmount/carryOutAmount/payableAmount`를 포함하고 128 KiB 상한,

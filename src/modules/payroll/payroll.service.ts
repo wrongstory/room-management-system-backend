@@ -232,6 +232,7 @@ export function payrollDatabaseError(error: { message?: string } | null): AppErr
     ['PAYROLL_EARNING_NOT_LATE', 409, 'PAYROLL_EARNING_NOT_LATE', '지급 완료 또는 상계 완료 주차의 늦은 수익만 이월할 수 있습니다.'],
     ['PAYROLL_LATE_CARRY_TARGET_FROZEN', 409, 'PAYROLL_LATE_CARRY_TARGET_FROZEN', '다음 주차가 이미 동결되어 이월할 수 없습니다.'],
     ['PAYROLL_EARLIER_CARRY_PENDING', 409, 'PAYROLL_EARLIER_CARRY_PENDING', '앞선 주차의 잔여 이월을 먼저 처리해야 합니다.'],
+    ['PAYROLL_PRIOR_LATE_EARNING_PENDING', 409, 'PAYROLL_PRIOR_LATE_EARNING_PENDING', '직전 주차의 늦은 수익을 먼저 이월해야 합니다.'],
     ['PAYROLL_SOURCE_NOT_FOUND', 404, 'PAYROLL_SOURCE_NOT_FOUND', '정정할 원장 항목을 찾을 수 없습니다.'],
     ['PAYROLL_ADJUSTMENT_INVALID', 400, 'PAYROLL_ADJUSTMENT_INVALID', '정정 요청을 확인해 주세요.'],
     ['IDEMPOTENCY_KEY_REUSED', 409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 요청에 사용한 Idempotency-Key입니다.']

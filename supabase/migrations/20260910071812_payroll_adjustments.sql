@@ -151,6 +151,53 @@ for each row execute function private.prevent_payroll_ledger_mutation();
 create trigger payroll_offset_settlements_append_only before update or delete on public.payroll_offset_settlements
 for each row execute function private.prevent_payroll_ledger_mutation();
 
+create function private.enforce_payroll_settlement_carry_pair()
+returns trigger language plpgsql set search_path='' as $$
+declare
+  v_settlement_id uuid;
+  v_settlement public.payroll_offset_settlements;
+  v_carry public.payroll_residual_carries;
+begin
+  if tg_table_name='payroll_offset_settlements' then
+    v_settlement_id:=coalesce(new.id,old.id);
+  else
+    v_settlement_id:=coalesce(new.source_settlement_id,old.source_settlement_id);
+  end if;
+  select * into v_settlement from public.payroll_offset_settlements where id=v_settlement_id;
+  if v_settlement.id is null then
+    raise exception using errcode='23514',message='PAYROLL_CARRY_INVARIANT_VIOLATION';
+  end if;
+  select * into v_carry from public.payroll_residual_carries
+  where source_settlement_id=v_settlement.id;
+  if v_settlement.net_amount=0 then
+    if v_settlement.carry_out_id is not null or v_carry.id is not null then
+      raise exception using errcode='23514',message='PAYROLL_CARRY_INVARIANT_VIOLATION';
+    end if;
+  elsif v_settlement.net_amount<0 then
+    if v_carry.id is null or v_settlement.carry_out_id is distinct from v_carry.id
+      or v_carry.source_settlement_id is distinct from v_settlement.id
+      or v_carry.maid_profile_id is distinct from v_settlement.maid_profile_id
+      or v_carry.currency is distinct from v_settlement.currency
+      or v_carry.amount is distinct from -v_settlement.net_amount
+      or v_carry.available_week_start is distinct from v_settlement.week_start+7 then
+      raise exception using errcode='23514',message='PAYROLL_CARRY_INVARIANT_VIOLATION';
+    end if;
+  else
+    raise exception using errcode='23514',message='PAYROLL_CARRY_INVARIANT_VIOLATION';
+  end if;
+  return null;
+end $$;
+revoke all on function private.enforce_payroll_settlement_carry_pair()
+from public,anon,authenticated,service_role;
+create constraint trigger payroll_offset_settlements_carry_pair
+after insert or update or delete on public.payroll_offset_settlements
+deferrable initially deferred for each row
+execute function private.enforce_payroll_settlement_carry_pair();
+create constraint trigger payroll_residual_carries_settlement_pair
+after insert or update or delete on public.payroll_residual_carries
+deferrable initially deferred for each row
+execute function private.enforce_payroll_settlement_carry_pair();
+
 create function private.set_payroll_adjustment_item_amount()
 returns trigger language plpgsql set search_path='' as $$
 begin
@@ -622,6 +669,50 @@ end $$;
 revoke all on function private.payroll_source_available_week(uuid,uuid,uuid)
 from public,anon,authenticated,service_role;
 
+create function private.assert_no_prior_unhandled_late_earnings(p_maid uuid,p_week date)
+returns void language plpgsql stable set search_path='' as $$
+declare v_source_week date:=p_week-7;
+begin
+  if exists(
+    select 1 from public.payroll_cycles source_cycle
+    join public.earnings earning on earning.maid_profile_id=p_maid
+      and earning.earned_on>=v_source_week and earning.earned_on<v_source_week+7
+    where source_cycle.maid_profile_id=p_maid and source_cycle.week_start=v_source_week
+      and (source_cycle.status in ('paying','check','paid') or source_cycle.offset_settled_at is not null)
+      and earning.total_amount>0
+      and not exists(select 1 from public.payroll_items item where item.earning_id=earning.id)
+      and not exists(select 1 from public.payroll_adjustments adjustment
+        where adjustment.late_carried_earning_id=earning.id)
+  ) then
+    raise exception using errcode='55000',message='PAYROLL_PRIOR_LATE_EARNING_PENDING';
+  end if;
+end $$;
+revoke all on function private.assert_no_prior_unhandled_late_earnings(uuid,date)
+from public,anon,authenticated,service_role;
+
+create function private.prevent_stranded_late_payroll_earning()
+returns trigger language plpgsql set search_path='' as $$
+declare v_source_week date:=date_trunc('week',new.earned_on)::date;
+begin
+  if new.base_amount+new.bomb_room_bonus>0
+    and exists(select 1 from public.payroll_cycles source_cycle
+      where source_cycle.maid_profile_id=new.maid_profile_id
+        and source_cycle.week_start=v_source_week
+        and (source_cycle.status in ('paying','check','paid') or source_cycle.offset_settled_at is not null))
+    and exists(select 1 from public.payroll_cycles next_cycle
+      where next_cycle.maid_profile_id=new.maid_profile_id
+        and next_cycle.week_start=v_source_week+7
+        and (next_cycle.status in ('paying','check','paid') or next_cycle.offset_settled_at is not null)) then
+    raise exception using errcode='55000',message='PAYROLL_PRIOR_LATE_EARNING_PENDING';
+  end if;
+  return new;
+end $$;
+revoke all on function private.prevent_stranded_late_payroll_earning()
+from public,anon,authenticated,service_role;
+create trigger earnings_prevent_stranded_late_payroll
+before insert on public.earnings for each row
+execute function private.prevent_stranded_late_payroll_earning();
+
 create function public.record_payroll_correction(
   p_actor_profile_id uuid,p_source_earning_id uuid,p_source_adjustment_id uuid,
   p_amount integer,p_expected_book_version bigint,p_idempotency_key text,p_request_hash text
@@ -828,6 +919,7 @@ begin
     where carry.maid_profile_id=p_maid_profile_id and carry.available_week_start<p_week_start
       and not exists(select 1 from public.payroll_carry_items item where item.carry_id=carry.id)) then
     raise exception using errcode='55000',message='PAYROLL_EARLIER_CARRY_PENDING'; end if;
+  perform private.assert_no_prior_unhandled_late_earnings(p_maid_profile_id,p_week_start);
   perform private.claim_payroll_sources(v_cycle.id,p_maid_profile_id,p_week_start);
   select * into v_amounts from private.payroll_cycle_amounts(v_cycle.id);
   if v_amounts.payable_amount<=0 then
@@ -891,6 +983,7 @@ begin
     where carry.maid_profile_id=p_maid_profile_id and carry.available_week_start<p_week_start
       and not exists(select 1 from public.payroll_carry_items item where item.carry_id=carry.id)) then
     raise exception using errcode='55000',message='PAYROLL_EARLIER_CARRY_PENDING'; end if;
+  perform private.assert_no_prior_unhandled_late_earnings(p_maid_profile_id,p_week_start);
   perform private.claim_payroll_sources(v_cycle.id,p_maid_profile_id,p_week_start);
   select * into v_amounts from private.payroll_cycle_amounts(v_cycle.id);
   if v_amounts.payable_amount>0 then

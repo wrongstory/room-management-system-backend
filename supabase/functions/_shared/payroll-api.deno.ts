@@ -564,6 +564,15 @@ Deno.test("payroll database errors keep stable codes and redact unknown details"
       !invalidPage.message.includes("SQL"),
     "stable redacted page error",
   );
+  const priorLate = payrollDatabaseError({
+    message: "PAYROLL_PRIOR_LATE_EARNING_PENDING private SQL",
+  });
+  assert(
+    priorLate.status === 409 &&
+      priorLate.code === "PAYROLL_PRIOR_LATE_EARNING_PENDING" &&
+      !priorLate.message.includes("SQL"),
+    "prior late earning has a stable redacted conflict",
+  );
   const unknown = payrollDatabaseError({
     message: "postgres credential detail",
   });

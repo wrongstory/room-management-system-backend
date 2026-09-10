@@ -312,6 +312,7 @@ describe('payroll pagination service', () => {
     ['PAYROLL_ACCESS_REQUIRED', 403],
     ['PAYROLL_MAID_NOT_FOUND', 404],
     ['PAYROLL_WEEK_NOT_CLOSED', 409],
+    ['PAYROLL_PRIOR_LATE_EARNING_PENDING', 409],
     ['NO_PAYROLL_AMOUNT', 409],
     ['IDEMPOTENCY_KEY_REUSED', 409]
   ])('maps %s without exposing raw database details', (code, statusCode) => {

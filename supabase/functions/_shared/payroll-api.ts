@@ -297,6 +297,11 @@ export function payrollDatabaseError(
       409,
       "앞선 주차의 잔여 이월을 먼저 처리해야 합니다.",
     ],
+    [
+      "PAYROLL_PRIOR_LATE_EARNING_PENDING",
+      409,
+      "직전 주차의 늦은 수익을 먼저 이월해야 합니다.",
+    ],
     ["PAYROLL_SOURCE_NOT_FOUND", 404, "정정할 원장 항목을 찾을 수 없습니다."],
     ["PAYROLL_ADJUSTMENT_INVALID", 400, "정정 요청을 확인해 주세요."],
     [

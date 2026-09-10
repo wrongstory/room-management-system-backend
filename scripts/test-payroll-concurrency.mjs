@@ -158,7 +158,7 @@ export async function testPayrollConcurrency(client, adminProfileId) {
     `"instanceCount":1}]','${adminProfileId}');`
   );
 
-  const weeks = [-1, -2, -3, -4, -5].map((offset) => sql(
+  const weeks = [-1, -3, -5, -7, -9, -11, -12].map((offset) => sql(
     `select (date_trunc('week',clock_timestamp() at time zone 'Asia/Seoul')::date` +
     `${offset < 0 ? `-${Math.abs(offset * 7)}` : `+${offset * 7}`})::text;`
   ));
@@ -407,7 +407,46 @@ export async function testPayrollConcurrency(client, adminProfileId) {
     `and cycle.week_start='${weeks[4]}')=1);`
   ) === 't', 'reversal versus start leaves either one inverse or one immutable PAYING snapshot');
 
+  const priorSourceBaseline = await pendingSubmission(weeks[6], 5000);
+  ok(await approve(priorSourceBaseline, '4'), 'prior-late race source baseline approval');
+  ok(await client.rpc('start_payroll_cycle', {
+    p_actor_profile_id: adminProfileId,
+    p_maid_profile_id: maidProfileId,
+    p_week_start: weeks[6],
+    p_expected_version: 0,
+    p_idempotency_key: `payroll-prior-late-source-${randomUUID()}`,
+    p_request_hash: '4'.repeat(64)
+  }), 'prior-late race source PAYING baseline');
+  const nextWeekSubmission = await pendingSubmission(weeks[5], 13000);
+  ok(await approve(nextWeekSubmission, '4'), 'prior-late race next-week positive baseline');
+  const priorLateSubmission = await pendingSubmission(weeks[6], 17000);
+  const priorLateRace = await Promise.all([
+    approve(priorLateSubmission, '5'),
+    client.rpc('start_payroll_cycle', {
+      p_actor_profile_id: adminProfileId,
+      p_maid_profile_id: maidProfileId,
+      p_week_start: weeks[5],
+      p_expected_version: 0,
+      p_idempotency_key: `payroll-prior-late-start-${randomUUID()}`,
+      p_request_hash: '6'.repeat(64)
+    })
+  ]);
+  const priorLateErrors = priorLateRace.filter((result) => result.error).map((result) => result.error);
+  assert(priorLateErrors.every((error) => error.code !== '40P01'),
+    'prior late approval versus next freeze has zero SQLSTATE 40P01 deadlocks');
+  assert(priorLateErrors.length === 1 && priorLateErrors.every((error) =>
+    /PAYROLL_PRIOR_LATE_EARNING_PENDING/.test(error.message)
+  ), `prior late approval versus next freeze has one stable loser (${priorLateErrors.map((error) => `${error.code}:${error.message}`).join(',')})`);
+  assert(priorLateRace.filter((result) => !result.error).length === 1,
+    'prior late approval versus next freeze has exactly one serialized winner');
+  assert(sql(
+    `select not exists(select 1 from public.earnings earning join public.payroll_cycles next_cycle ` +
+    `on next_cycle.maid_profile_id=earning.maid_profile_id and next_cycle.week_start='${weeks[5]}' ` +
+    `where earning.submission_id='${priorLateSubmission}' and ` +
+    `(next_cycle.status in ('paying','check','paid') or next_cycle.offset_settled_at is not null));`
+  ) === 't', 'race never strands a prior late earning behind an immutable next-week snapshot');
+
   console.log(
-    'Payroll concurrency passed: exact-one start, approval/start lock orders, correction/reversal/start; SQLSTATE 40P01=0 and only stable domain losers.'
+    'Payroll concurrency passed: exact-one start, approval/start and prior-late/freeze lock orders, correction/reversal/start; SQLSTATE 40P01=0 and only stable domain losers.'
   );
 }
