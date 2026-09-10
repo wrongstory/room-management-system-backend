@@ -306,7 +306,6 @@ declare v_response public.complaint_maid_responses;
   v_operational public.complaint_compensation_decisions;
   v_source public.complaint_decisions; v_next public.complaint_decisions;
 begin
-  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command',0));
   if tg_op='DELETE' then raise exception using errcode='55000',message='COMPLAINT_CASE_DELETE_FORBIDDEN'; end if;
   if new.id<>old.id or new.room_id<>old.room_id or new.cleaning_target_id<>old.cleaning_target_id
     or new.cleaning_attempt_id<>old.cleaning_attempt_id or new.submission_id<>old.submission_id
@@ -354,6 +353,250 @@ begin
     return new;
   end if;
   raise exception using errcode='55000',message='COMPLAINT_INVALID_TRANSITION';
+end $$;
+
+-- Complaint state writers take the shared domain lock before their case row.
+-- The projection trigger validates only the row transition and never acquires
+-- locks, preventing row -> advisory inversion against materialize/start/finalize.
+create or replace function public.start_complaint_review(
+  p_actor_profile_id uuid,p_complaint_id uuid,p_expected_version bigint,
+  p_idempotency_key text,p_request_hash text
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_actor public.profiles; v_case public.complaint_cases; v_replay jsonb;
+  v_result jsonb; v_at timestamptz:=transaction_timestamp();
+begin
+  v_actor:=private.assert_complaint_admin(p_actor_profile_id);
+  v_replay:=private.replay_command(v_actor.id,'complaint.review',p_idempotency_key,p_request_hash);
+  if v_replay is not null then return v_replay; end if;
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command',0));
+  select * into v_case from public.complaint_cases where id=p_complaint_id for update;
+  if v_case.id is null then raise exception using errcode='P0002',message='COMPLAINT_NOT_FOUND'; end if;
+  if v_case.version is distinct from p_expected_version then
+    raise exception using errcode='40001',message='STALE_VERSION'; end if;
+  if v_case.status<>'received' then
+    raise exception using errcode='55000',message='COMPLAINT_INVALID_TRANSITION'; end if;
+  update public.complaint_cases set status='under_review',version=version+1,updated_at=v_at
+  where id=v_case.id returning * into v_case;
+  insert into public.complaint_case_events(complaint_case_id,event_type,from_status,to_status,
+    case_version,actor_profile_id,occurred_at)
+  values(v_case.id,'review_started','received','under_review',v_case.version,v_actor.id,v_at);
+  v_result:=private.get_complaint_projection(v_case.id);
+  insert into public.audit_events(actor_profile_id,event_type,entity_type,entity_id,effective_at,
+    after_state,idempotency_key)
+  values(v_actor.id,'complaint.review_started','complaint_case',v_case.id,v_at,
+    jsonb_build_object('complaintId',v_case.id,'status',v_case.status,'version',v_case.version),
+    private.audit_command_key(v_actor.id,'complaint.review',p_idempotency_key));
+  perform private.complete_command(v_actor.id,'complaint.review',p_idempotency_key,p_request_hash,
+    v_case.id,v_result);
+  return v_result;
+end $$;
+
+create or replace function public.decide_complaint_case(
+  p_actor_profile_id uuid,p_complaint_id uuid,p_expected_version bigint,p_finding text,
+  p_penalty_score integer,p_rework_required boolean,p_idempotency_key text,p_request_hash text
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_actor public.profiles; v_case public.complaint_cases; v_decision public.complaint_decisions;
+  v_replay jsonb; v_result jsonb; v_at timestamptz:=transaction_timestamp();
+begin
+  v_actor:=private.assert_complaint_admin(p_actor_profile_id);
+  v_replay:=private.replay_command(v_actor.id,'complaint.decide',p_idempotency_key,p_request_hash);
+  if p_finding is null or p_finding not in ('confirmed','unverifiable','false') then
+    raise exception using errcode='22023',message='INVALID_COMPLAINT_FINDING'; end if;
+  if p_penalty_score is null or p_penalty_score<0 or p_penalty_score>10 then
+    raise exception using errcode='22023',message='INVALID_COMPLAINT_PENALTY'; end if;
+  if p_rework_required is null then
+    raise exception using errcode='22023',message='INVALID_REWORK_DECISION'; end if;
+  if v_replay is not null then return v_replay; end if;
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command',0));
+  select * into v_case from public.complaint_cases where id=p_complaint_id for update;
+  if v_case.id is null then raise exception using errcode='P0002',message='COMPLAINT_NOT_FOUND'; end if;
+  if v_case.version is distinct from p_expected_version then
+    raise exception using errcode='40001',message='STALE_VERSION'; end if;
+  if v_case.status<>'under_review' or v_case.current_decision_id is not null then
+    raise exception using errcode='55000',message='COMPLAINT_INVALID_TRANSITION'; end if;
+  insert into public.complaint_decisions(complaint_case_id,decision_version,decision_kind,finding,
+    penalty_score,rework_required,decided_by,decided_at)
+  values(v_case.id,1,'initial',p_finding,p_penalty_score,p_rework_required,v_actor.id,v_at)
+  returning * into v_decision;
+  update public.complaint_cases set status='decided',version=version+1,
+    current_decision_id=v_decision.id,first_decided_at=v_at,
+    response_deadline=v_at+interval '7 days',updated_at=v_at
+  where id=v_case.id returning * into v_case;
+  insert into public.complaint_case_events(complaint_case_id,event_type,from_status,to_status,
+    case_version,actor_profile_id,decision_id,occurred_at)
+  values(v_case.id,'decided','under_review','decided',v_case.version,v_actor.id,v_decision.id,v_at);
+  perform private.enqueue_complaint_notice(v_case.maid_profile_id,v_case,'decided',v_case.version,v_at);
+  v_result:=private.get_complaint_projection(v_case.id);
+  insert into public.audit_events(actor_profile_id,event_type,entity_type,entity_id,effective_at,
+    after_state,idempotency_key)
+  values(v_actor.id,'complaint.decided','complaint_case',v_case.id,v_at,
+    jsonb_build_object('complaintId',v_case.id,'decisionId',v_decision.id,'finding',p_finding,
+      'penaltyScore',p_penalty_score,'reworkRequired',p_rework_required,'status',v_case.status,
+      'version',v_case.version),
+    private.audit_command_key(v_actor.id,'complaint.decide',p_idempotency_key));
+  perform private.complete_command(v_actor.id,'complaint.decide',p_idempotency_key,p_request_hash,
+    v_case.id,v_result);
+  return v_result;
+end $$;
+
+create or replace function public.respond_to_complaint(
+  p_actor_profile_id uuid,p_complaint_id uuid,p_expected_version bigint,p_response_type text,
+  p_appeal_reason_code text,p_idempotency_key text,p_request_hash text
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_actor public.profiles; v_case public.complaint_cases;
+  v_response public.complaint_maid_responses; v_decision public.complaint_decisions;
+  v_replay jsonb; v_result jsonb; v_at timestamptz:=transaction_timestamp();
+begin
+  v_actor:=private.assert_complaint_reader(p_actor_profile_id);
+  if v_actor.role<>'maid' then raise exception using errcode='42501',message='MAID_REQUIRED'; end if;
+  v_replay:=private.replay_command(v_actor.id,'complaint.respond',p_idempotency_key,p_request_hash);
+  if p_response_type not in ('acknowledged','appealed') then
+    raise exception using errcode='22023',message='INVALID_COMPLAINT_RESPONSE'; end if;
+  if p_response_type='acknowledged' and p_appeal_reason_code is not null then
+    raise exception using errcode='22023',message='COMPLAINT_APPEAL_REASON_FORBIDDEN'; end if;
+  if p_response_type='appealed' and (p_appeal_reason_code is null or p_appeal_reason_code not in (
+    'work_completed_as_required','evidence_misinterpreted','not_responsible','timeline_mismatch')) then
+    raise exception using errcode='22023',message='COMPLAINT_APPEAL_REASON_REQUIRED'; end if;
+  if v_replay is not null then return v_replay; end if;
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command',0));
+  select * into v_case from public.complaint_cases where id=p_complaint_id for update;
+  if v_case.id is null or v_case.maid_profile_id<>v_actor.id then
+    raise exception using errcode='42501',message='COMPLAINT_MAID_MISMATCH'; end if;
+  if v_case.version is distinct from p_expected_version then
+    raise exception using errcode='40001',message='STALE_VERSION'; end if;
+  if v_case.status<>'decided' or v_case.current_decision_id is null then
+    raise exception using errcode='55000',message='COMPLAINT_INVALID_TRANSITION'; end if;
+  if v_at>v_case.response_deadline then
+    raise exception using errcode='22023',message='COMPLAINT_RESPONSE_WINDOW_CLOSED'; end if;
+  if exists(select 1 from public.complaint_maid_responses r where r.complaint_case_id=v_case.id) then
+    raise exception using errcode='23505',message='COMPLAINT_RESPONSE_ALREADY_RECORDED'; end if;
+  select * into v_decision from public.complaint_decisions
+  where complaint_case_id=v_case.id and decision_version=1;
+  insert into public.complaint_maid_responses(complaint_case_id,decision_id,maid_profile_id,
+    response_type,appeal_reason_code,responded_at)
+  values(v_case.id,v_decision.id,v_actor.id,p_response_type,p_appeal_reason_code,v_at)
+  returning * into v_response;
+  update public.complaint_cases set status=p_response_type,version=version+1,updated_at=v_at
+  where id=v_case.id returning * into v_case;
+  insert into public.complaint_case_events(complaint_case_id,event_type,from_status,to_status,
+    case_version,actor_profile_id,decision_id,maid_response_id,occurred_at)
+  values(v_case.id,p_response_type,'decided',p_response_type,v_case.version,v_actor.id,
+    v_decision.id,v_response.id,v_at);
+  perform private.enqueue_complaint_notice(v_decision.decided_by,v_case,p_response_type,
+    v_case.version,v_at);
+  v_result:=private.get_complaint_projection(v_case.id);
+  insert into public.audit_events(actor_profile_id,event_type,entity_type,entity_id,effective_at,
+    reason_code,after_state,idempotency_key)
+  values(v_actor.id,'complaint.'||p_response_type,'complaint_case',v_case.id,v_at,
+    p_appeal_reason_code,jsonb_strip_nulls(jsonb_build_object('complaintId',v_case.id,
+      'decisionId',v_decision.id,'responseType',p_response_type,
+      'appealReasonCode',p_appeal_reason_code,'status',v_case.status,'version',v_case.version)),
+    private.audit_command_key(v_actor.id,'complaint.respond',p_idempotency_key));
+  perform private.complete_command(v_actor.id,'complaint.respond',p_idempotency_key,p_request_hash,
+    v_case.id,v_result);
+  return v_result;
+end $$;
+
+create or replace function public.correct_complaint_decision(
+  p_actor_profile_id uuid,p_complaint_id uuid,p_expected_version bigint,p_finding text,
+  p_penalty_score integer,p_rework_required boolean,p_idempotency_key text,p_request_hash text
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_actor public.profiles; v_case public.complaint_cases; v_prior public.complaint_decisions;
+  v_decision public.complaint_decisions; v_replay jsonb; v_result jsonb;
+  v_at timestamptz:=transaction_timestamp();
+begin
+  v_actor:=private.assert_complaint_admin(p_actor_profile_id);
+  v_replay:=private.replay_command(v_actor.id,'complaint.correct',p_idempotency_key,p_request_hash);
+  if p_finding is null or p_finding not in ('confirmed','unverifiable','false') then
+    raise exception using errcode='22023',message='INVALID_COMPLAINT_FINDING'; end if;
+  if p_penalty_score is null or p_penalty_score<0 or p_penalty_score>10 then
+    raise exception using errcode='22023',message='INVALID_COMPLAINT_PENALTY'; end if;
+  if p_rework_required is null then
+    raise exception using errcode='22023',message='INVALID_REWORK_DECISION'; end if;
+  if v_replay is not null then return v_replay; end if;
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command',0));
+  select * into v_case from public.complaint_cases where id=p_complaint_id for update;
+  if v_case.id is null then raise exception using errcode='P0002',message='COMPLAINT_NOT_FOUND'; end if;
+  if v_case.version is distinct from p_expected_version then
+    raise exception using errcode='40001',message='STALE_VERSION'; end if;
+  if v_case.status not in ('decided','acknowledged','appealed','closed')
+    or v_case.current_decision_id is null then
+    raise exception using errcode='55000',message='COMPLAINT_DECISION_REQUIRED'; end if;
+  select * into v_prior from public.complaint_decisions where id=v_case.current_decision_id for share;
+  insert into public.complaint_decisions(complaint_case_id,decision_version,decision_kind,
+    prior_decision_id,finding,penalty_score,rework_required,decided_by,decided_at)
+  values(v_case.id,v_prior.decision_version+1,'correction',v_prior.id,p_finding,p_penalty_score,
+    p_rework_required,v_actor.id,v_at) returning * into v_decision;
+  update public.complaint_cases set current_decision_id=v_decision.id,version=version+1,updated_at=v_at
+  where id=v_case.id returning * into v_case;
+  insert into public.complaint_case_events(complaint_case_id,event_type,from_status,to_status,
+    case_version,actor_profile_id,decision_id,occurred_at)
+  values(v_case.id,'corrected',v_case.status,v_case.status,v_case.version,v_actor.id,v_decision.id,v_at);
+  perform private.enqueue_complaint_notice(v_case.maid_profile_id,v_case,'corrected',v_case.version,v_at);
+  v_result:=private.get_complaint_projection(v_case.id);
+  insert into public.audit_events(actor_profile_id,event_type,entity_type,entity_id,effective_at,
+    after_state,idempotency_key)
+  values(v_actor.id,'complaint.corrected','complaint_case',v_case.id,v_at,
+    jsonb_build_object('complaintId',v_case.id,'decisionId',v_decision.id,
+      'priorDecisionId',v_prior.id,'finding',p_finding,'penaltyScore',p_penalty_score,
+      'reworkRequired',p_rework_required,'status',v_case.status,'version',v_case.version),
+    private.audit_command_key(v_actor.id,'complaint.correct',p_idempotency_key));
+  perform private.complete_command(v_actor.id,'complaint.correct',p_idempotency_key,p_request_hash,
+    v_case.id,v_result);
+  return v_result;
+end $$;
+
+create or replace function public.close_complaint_case(
+  p_actor_profile_id uuid,p_complaint_id uuid,p_expected_version bigint,
+  p_idempotency_key text,p_request_hash text
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare v_actor public.profiles; v_case public.complaint_cases;
+  v_response public.complaint_maid_responses; v_appeal_resolved boolean;
+  v_replay jsonb; v_result jsonb; v_at timestamptz:=transaction_timestamp();
+begin
+  v_actor:=private.assert_complaint_admin(p_actor_profile_id);
+  v_replay:=private.replay_command(v_actor.id,'complaint.close',p_idempotency_key,p_request_hash);
+  if v_replay is not null then return v_replay; end if;
+  perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command',0));
+  select * into v_case from public.complaint_cases where id=p_complaint_id for update;
+  if v_case.id is null then raise exception using errcode='P0002',message='COMPLAINT_NOT_FOUND'; end if;
+  if v_case.version is distinct from p_expected_version then
+    raise exception using errcode='40001',message='STALE_VERSION'; end if;
+  select * into v_response from public.complaint_maid_responses
+  where complaint_case_id=v_case.id;
+  select exists(
+    select 1 from public.complaint_case_events correction_event
+    join public.complaint_case_events response_event
+      on response_event.maid_response_id=v_response.id
+    where correction_event.complaint_case_id=v_case.id
+      and correction_event.event_type='corrected'
+      and correction_event.decision_id=v_case.current_decision_id
+      and correction_event.id>response_event.id
+  ) into v_appeal_resolved;
+  if v_case.status='decided' and v_at<=v_case.response_deadline then
+    raise exception using errcode='55000',message='COMPLAINT_RESPONSE_WINDOW_OPEN';
+  elsif v_case.status='appealed' and (v_response.id is null or not v_appeal_resolved) then
+    raise exception using errcode='55000',message='COMPLAINT_APPEAL_UNRESOLVED';
+  elsif v_case.status not in ('decided','acknowledged','appealed') then
+    raise exception using errcode='55000',message='COMPLAINT_INVALID_TRANSITION';
+  end if;
+  update public.complaint_cases set status='closed',version=version+1,updated_at=v_at
+  where id=v_case.id returning * into v_case;
+  insert into public.complaint_case_events(complaint_case_id,event_type,from_status,to_status,
+    case_version,actor_profile_id,decision_id,occurred_at)
+  values(v_case.id,'closed',case when v_response.response_type is null then 'decided'
+    else v_response.response_type end,'closed',v_case.version,v_actor.id,
+    v_case.current_decision_id,v_at);
+  perform private.enqueue_complaint_notice(v_case.maid_profile_id,v_case,'closed',v_case.version,v_at);
+  v_result:=private.get_complaint_projection(v_case.id);
+  insert into public.audit_events(actor_profile_id,event_type,entity_type,entity_id,effective_at,
+    after_state,idempotency_key)
+  values(v_actor.id,'complaint.closed','complaint_case',v_case.id,v_at,
+    jsonb_build_object('complaintId',v_case.id,'status','closed','version',v_case.version),
+    private.audit_command_key(v_actor.id,'complaint.close',p_idempotency_key));
+  perform private.complete_command(v_actor.id,'complaint.close',p_idempotency_key,p_request_hash,
+    v_case.id,v_result);
+  return v_result;
 end $$;
 
 create function private.complaint_compensation_projection(

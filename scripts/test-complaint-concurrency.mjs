@@ -311,6 +311,56 @@ export async function testComplaintConcurrency(client, adminProfileId) {
     sql(`select count(*)=1 from public.earnings where submission_id='${reworkSubmissionId}' and compensation_entitlement_id is not null;`) === "t",
   `concurrent compensation approval is exactly once (${approvals.map((result) => result.error?.code ?? "OK").join(",")})`);
 
+  const raceErrors = [];
+  function assertStableRaceErrors(results, label, allowedMessages) {
+    for (const result of results) {
+      if (!result.error) continue;
+      const observation = {
+        code: String(result.error.code ?? ""),
+        message: String(result.error.message ?? ""),
+      };
+      raceErrors.push(observation);
+      assert(observation.code !== "40P01", `${label} must never deadlock`);
+      assert(
+        allowedMessages.some((message) => observation.message.includes(message)),
+        `${label} returned a generic or unapproved error (${observation.code})`,
+      );
+    }
+  }
+  async function decidedReworkCase(label) {
+    const complaintId = await complaint();
+    const decision = ok(await client.rpc("decide_complaint_case", {
+      p_actor_profile_id: adminProfileId,
+      p_complaint_id: complaintId,
+      p_expected_version: 2,
+      p_finding: "confirmed",
+      p_penalty_score: 0,
+      p_rework_required: true,
+      p_idempotency_key: `${label}-decide-${randomUUID()}`,
+      p_request_hash: "a".repeat(64),
+    }), `${label} decision`);
+    return { complaintId, decision };
+  }
+  async function materializedRaceFixture(label) {
+    const fixture = await decidedReworkCase(label);
+    const materializedResult = ok(await client.rpc("materialize_complaint_rework", {
+      p_actor_profile_id: adminProfileId,
+      p_complaint_id: fixture.complaintId,
+      p_expected_version: 3,
+      p_complaint_decision_id: fixture.decision.currentDecisionId,
+      p_assignee_maid_profile_id: compensationMaidId,
+      p_compensation_amount: 15000,
+      p_idempotency_key: `${label}-materialize-${randomUUID()}`,
+      p_request_hash: "b".repeat(64),
+    }), `${label} materialize`);
+    return {
+      ...fixture,
+      materializedResult,
+      targetId: materializedResult.reworkDecision.reworkCleaningTargetId,
+      assignmentId: materializedResult.assignment.id,
+    };
+  }
+
   const correctionRaceCase = await complaint();
   const correctionRaceDecision = ok(await client.rpc("decide_complaint_case", {
     p_actor_profile_id: adminProfileId,
@@ -346,13 +396,163 @@ export async function testComplaintConcurrency(client, adminProfileId) {
   ]);
   assert(materializeVsCorrection.filter((result) => !result.error).length === 1,
     "materialize versus semantic correction has one CAS winner");
+  assertStableRaceErrors(materializeVsCorrection, "materialize/correction",
+    ["STALE_VERSION", "COMPLAINT_REWORK_DECISION_STALE"]);
   const compCount = Number(sql(`select count(*) from public.complaint_compensation_decisions where complaint_case_id='${correctionRaceCase}';`));
   const targetCount = Number(sql(`select count(*) from public.cleaning_targets where complaint_compensation_decision_id in (select id from public.complaint_compensation_decisions where complaint_case_id='${correctionRaceCase}');`));
   const assignmentCount = Number(sql(`select count(*) from public.cleaning_assignments where cleaning_target_id in (select rework_cleaning_target_id from public.complaint_compensation_decisions where complaint_case_id='${correctionRaceCase}') and is_current;`));
   assert((compCount === 0 && targetCount === 0 && assignmentCount === 0) ||
     (compCount === 1 && targetCount === 1 && assignmentCount === 1),
   "race leaves zero ghost rows or one complete executable assignment");
+
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const label = `complaint-comp-repeat-materialize-${iteration}`;
+    const fixture = await decidedReworkCase(label);
+    const results = await Promise.all([
+      client.rpc("materialize_complaint_rework", {
+        p_actor_profile_id: adminProfileId,
+        p_complaint_id: fixture.complaintId,
+        p_expected_version: 3,
+        p_complaint_decision_id: fixture.decision.currentDecisionId,
+        p_assignee_maid_profile_id: compensationMaidId,
+        p_compensation_amount: iteration,
+        p_idempotency_key: `${label}-materialize-${randomUUID()}`,
+        p_request_hash: "c".repeat(64),
+      }),
+      client.rpc("correct_complaint_decision", {
+        p_actor_profile_id: adminProfileId,
+        p_complaint_id: fixture.complaintId,
+        p_expected_version: 3,
+        p_finding: "false",
+        p_penalty_score: 0,
+        p_rework_required: false,
+        p_idempotency_key: `${label}-correct-${randomUUID()}`,
+        p_request_hash: "d".repeat(64),
+      }),
+    ]);
+    assert(results.filter((result) => !result.error).length === 1,
+      `${label} has one winner`);
+    assertStableRaceErrors(results, label,
+      ["STALE_VERSION", "COMPLAINT_REWORK_DECISION_STALE"]);
+    const counts = sql(`select
+      (select count(*) from public.complaint_compensation_decisions where complaint_case_id='${fixture.complaintId}')||'|'||
+      (select count(*) from public.cleaning_targets where complaint_compensation_decision_id in
+        (select id from public.complaint_compensation_decisions where complaint_case_id='${fixture.complaintId}'))||'|'||
+      (select count(*) from public.cleaning_assignments where cleaning_target_id in
+        (select rework_cleaning_target_id from public.complaint_compensation_decisions
+          where complaint_case_id='${fixture.complaintId}') and is_current);`);
+    assert(counts === "0|0|0" || counts === "1|1|1",
+      `${label} leaves no partial compensation graph`);
+  }
+
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const label = `complaint-comp-start-correct-${iteration}`;
+    const fixture = await materializedRaceFixture(label);
+    const activated = JSON.parse(sql(`select private.activate_cleaning_attempt_at(
+      '${adminProfileId}','${fixture.targetId}',clock_timestamp(),
+      '${fixture.assignmentId}',1)::text;`));
+    const results = await Promise.all([
+      client.rpc("start_cleaning_attempt", {
+        p_actor_profile_id: compensationMaidId,
+        p_attempt_id: activated.attemptId,
+        p_expected_execution_version: 1,
+        p_expected_assignment_id: fixture.assignmentId,
+        p_expected_assignment_revision: 1,
+        p_idempotency_key: `${label}-start-${randomUUID()}`,
+        p_request_hash: "e".repeat(64),
+      }),
+      client.rpc("correct_complaint_decision", {
+        p_actor_profile_id: adminProfileId,
+        p_complaint_id: fixture.complaintId,
+        p_expected_version: 4,
+        p_finding: "false",
+        p_penalty_score: 0,
+        p_rework_required: false,
+        p_idempotency_key: `${label}-correct-${randomUUID()}`,
+        p_request_hash: "f".repeat(64),
+      }),
+    ]);
+    assertStableRaceErrors(results, label, ["COMPLAINT_REWORK_PRESTART_FROZEN"]);
+    assert(!results[0].error,
+      `${label} start remains executable (${results[0].error?.code ?? "OK"}: ${results[0].error?.message ?? ""})`);
+    assert(sql(`select status='in_progress' and started_at is not null
+      from public.cleaning_attempts where id='${activated.attemptId}';`) === "t",
+    `${label} ends with one started operational attempt`);
+    assert(sql(`select
+      (select count(*) from public.cleaning_targets where id='${fixture.targetId}')||'|'||
+      (select count(*) from public.cleaning_assignments where cleaning_target_id='${fixture.targetId}' and is_current)||'|'||
+      (select count(*) from public.compensation_entitlements where rework_cleaning_target_id='${fixture.targetId}')||'|'||
+      (select count(*) from public.earnings where compensation_entitlement_id in
+        (select id from public.compensation_entitlements where rework_cleaning_target_id='${fixture.targetId}'));`) === "1|1|0|0",
+    `${label} preserves one target/assignment and no premature ledger rows`);
+    ok(await client.rpc("complete_cleaning_attempt_field_work", {
+      p_actor_profile_id: compensationMaidId,
+      p_attempt_id: activated.attemptId,
+      p_expected_execution_version: 2,
+      p_expected_assignment_id: fixture.assignmentId,
+      p_expected_assignment_revision: 1,
+      p_idempotency_key: `${label}-complete-${randomUUID()}`,
+      p_request_hash: "0".repeat(64),
+    }), `${label} completion cleanup`);
+  }
+
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const label = `complaint-comp-approve-correct-${iteration}`;
+    const fixture = await materializedRaceFixture(label);
+    const attemptId = randomUUID();
+    const submissionId = randomUUID();
+    sql(`insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,
+        attempt_number,status,assignment_revision,started_at,field_completed_at,ended_at,
+        template_snapshot,room_snapshot)
+      select '${attemptId}',target.id,assignment.id,'${compensationMaidId}',1,'submitted',
+        assignment.revision,clock_timestamp()-interval '40 minutes',clock_timestamp()-interval '10 minutes',
+        clock_timestamp()-interval '10 minutes',target.template_snapshot,jsonb_build_object('roomId',target.room_id)
+      from public.cleaning_targets target join public.cleaning_assignments assignment
+        on assignment.cleaning_target_id=target.id and assignment.is_current where target.id='${fixture.targetId}';
+      insert into public.cleaning_submissions(id,cleaning_attempt_id,client_submission_id,version,status,
+        photo_manifest,submitted_by,submitted_at)
+      values('${submissionId}','${attemptId}','${randomUUID()}',1,'submitted','{}',
+        '${compensationMaidId}',clock_timestamp()-interval '5 minutes');
+      alter table private.submission_photo_binding_sets disable trigger submission_photo_seal_validate;
+      insert into private.submission_photo_binding_sets(submission_id,cleaning_attempt_id,photo_count,sealed_at)
+      values('${submissionId}','${attemptId}',1,clock_timestamp()-interval '5 minutes');
+      alter table private.submission_photo_binding_sets enable trigger submission_photo_seal_validate;
+      insert into private.submission_current_pointers(cleaning_attempt_id,submission_id,revision)
+      values('${attemptId}','${submissionId}',1);
+      update public.cleaning_targets set status='inspection_pending' where id='${fixture.targetId}';`);
+    const results = await Promise.all([
+      client.rpc("approve_cleaning_submission", {
+        p_actor_profile_id: adminProfileId,
+        p_submission_id: submissionId,
+        p_reason_code: "QUALITY_OK",
+        p_idempotency_key: `${label}-approve-${randomUUID()}`,
+        p_request_hash: "1".repeat(64),
+      }),
+      client.rpc("correct_complaint_decision", {
+        p_actor_profile_id: adminProfileId,
+        p_complaint_id: fixture.complaintId,
+        p_expected_version: 4,
+        p_finding: "false",
+        p_penalty_score: 0,
+        p_rework_required: false,
+        p_idempotency_key: `${label}-correct-${randomUUID()}`,
+        p_request_hash: "2".repeat(64),
+      }),
+    ]);
+    assert(results.every((result) => !result.error),
+      `${label} serializes without invalidating started provenance`);
+    assertStableRaceErrors(results, label, []);
+    assert(sql(`select
+      (select count(*) from public.compensation_entitlements where submission_id='${submissionId}')||'|'||
+      (select count(*) from public.earnings where submission_id='${submissionId}'
+        and compensation_entitlement_id is not null)||'|'||
+      (select count(*) from public.complaint_decisions where complaint_case_id='${fixture.complaintId}');`) === "1|1|2",
+    `${label} ends with exactly one entitlement/earning and append-only correction`);
+  }
+
+  assert(raceErrors.every((error) => error.code !== "40P01"),
+    "repeated complaint races have SQLSTATE 40P01=0 and generic error=0");
   console.log(
-    "Complaint concurrency passed: identical replay, decision CAS, appeal/correction CAS, materialize retry, approval exactly-once, materialize/correction CAS.",
+    `Complaint concurrency passed: repeated materialize/correction, correction/start, correction/approval; SQLSTATE 40P01=0, generic error=0, stable losers=${raceErrors.length}.`,
   );
 }
