@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 77 &&
+    Object.keys(document.paths).length === 85 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 83,
-    "candidate contract77/83",
+        ).length === 92,
+    "candidate contract 85/92",
   );
 });
 
@@ -143,6 +143,95 @@ Deno.test("payroll OpenAPI separates confirmed, locked and late earnings without
     "conceptual OPEN, bounded response and signed-scope semantics documented",
   );
 });
+
+Deno.test(
+  "complaint OpenAPI fixes typed provenance, bounded history and evaluation-only penalty",
+  async () => {
+    const doc = (await openApiResponse({}).json()) as typeof openApiDocument;
+    const complaintPaths = Object.keys(doc.paths).filter((path) =>
+      path.startsWith("/v1/complaints")
+    );
+    const complaintApi = doc.paths as unknown as Record<
+      string,
+      Record<
+        string,
+        {
+          parameters?: Array<{
+            name: string;
+            description?: string;
+            schema: { minLength?: number };
+          }>;
+          responses: Record<
+            string,
+            { headers?: { "Cache-Control"?: { schema: { const: string } } } }
+          >;
+        }
+      >
+    >;
+    assert(complaintPaths.length === 8, "eight exact complaint paths");
+    assert(
+      doc.paths["/v1/complaints"].post["x-required-roles"].join(",") ===
+        "admin",
+      "create admin only",
+    );
+    assert(
+      doc.paths["/v1/complaints/{complaintId}/response"].post[
+        "x-required-roles"
+      ].join(",") === "maid",
+      "response maid only",
+    );
+    assert(
+      doc.components.schemas.ComplaintCategory.enum.length === 8,
+      "exact category allowlist",
+    );
+    assert(
+      doc.components.schemas.ComplaintDecision.properties.penaltyScore
+            .maximum === 10 &&
+        doc.components.schemas.ComplaintDecision.properties.penaltyScore
+          .description.includes(
+            "payroll",
+          ),
+      "bounded evaluation-only penalty",
+    );
+    assert(
+      doc.components.schemas.ComplaintCreateRequest.additionalProperties ===
+          false &&
+        !(
+          "customer" in doc.components.schemas.ComplaintCreateRequest.properties
+        ),
+      "no free-form customer payload",
+    );
+    assert(
+      !Object.keys(doc.paths).some((path) => path.includes("reopen")),
+      "closed complaint has no reopen route",
+    );
+    for (
+      const operation of [
+        complaintApi["/v1/complaints"].get,
+        complaintApi["/v1/complaints/{complaintId}/history"].get,
+      ]
+    ) {
+      const cursor = operation.parameters?.find((parameter) =>
+        parameter.name === "cursor"
+      );
+      assert(
+        cursor?.schema.minLength === 1 &&
+          cursor.description?.includes("INVALID_COMPLAINT_CURSOR"),
+        "empty complaint cursors have one stable 400 contract",
+      );
+    }
+    for (const path of complaintPaths) {
+      for (const operation of Object.values(complaintApi[path])) {
+        for (const response of Object.values(operation.responses)) {
+          assert(
+            response.headers?.["Cache-Control"]?.schema.const === "no-store",
+            `complaint response must be no-store: ${path}`,
+          );
+        }
+      }
+    }
+  },
+);
 
 Deno.test("submission inspection OpenAPI matches immutable payload and capability contracts", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;

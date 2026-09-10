@@ -30,6 +30,8 @@ import { createSubmissionRoutes } from './modules/submissions/submission.routes.
 import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
 import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
 import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
+import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
+import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -38,6 +40,7 @@ export interface AppServices {
   rooms: RoomService;
   reservations: ReservationService;
   payroll: PayrollService;
+  complaints?: ComplaintService;
 }
 
 export interface BuildAppOptions {
@@ -83,7 +86,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         options.env.RESERVATION_GUEST_NAME_PEPPER,
         JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
       ),
-      payroll: new SupabasePayrollService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET)
+      payroll: new SupabasePayrollService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET),
+      complaints: new SupabaseComplaintService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -158,6 +162,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
   await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
   await app.register(createPayrollRoutes(services.payroll), { prefix: '/v1/payroll' });
+  if (services.complaints) {
+    await app.register(createComplaintRoutes(services.complaints), { prefix: '/v1/complaints' });
+  }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
   await app.register(createPhotoRoutes(photoServices));
   if (submissionService) {

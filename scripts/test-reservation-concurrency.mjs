@@ -10,6 +10,7 @@ import { testAttemptOfflineConcurrency } from './test-attempt-offline-concurrenc
 import { testAttemptOfflineExpiryConcurrency } from './test-attempt-offline-expiry-concurrency.mjs';
 import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 import { testPayrollConcurrency } from './test-payroll-concurrency.mjs';
+import { testComplaintConcurrency } from './test-complaint-concurrency.mjs';
 import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-operations-concurrency.mjs';
 import { testPhotoDriveQuotaConcurrency } from './test-photo-drive-quota-concurrency.mjs';
 
@@ -912,6 +913,7 @@ await testAttemptLifecycleConcurrency(client);
 await testAttemptOfflineConcurrency(client);
 await testAttemptOfflineExpiryConcurrency(client);
 await testPayrollConcurrency(client,actorProfileId);
+await testComplaintConcurrency(client,actorProfileId);
 await testPhotoSubmissionConcurrency(client);
 await testPhotoStorageOperationsConcurrency(client);
 await testPhotoDriveQuotaConcurrency(client);

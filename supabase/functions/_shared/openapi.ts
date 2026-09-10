@@ -47,6 +47,11 @@ const noStoreHeader = {
   schema: { const: "no-store" },
 };
 
+const complaintErrorResponse = {
+  ...errorResponse,
+  headers: { "Cache-Control": noStoreHeader },
+};
+
 const accountManagerRoles = ["developer", "admin"] as const;
 const photoPathId = (name: string) => ({
   name,
@@ -124,6 +129,27 @@ function submissionOperation(
       "409": errorResponse,
       "500": errorResponse,
     },
+  };
+}
+
+function complaintMutationResponses() {
+  return {
+    "200": {
+      description:
+        "원자적으로 갱신된 current projection 또는 동일 command receipt replay",
+      headers: { "Cache-Control": noStoreHeader },
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/ComplaintEnvelope" },
+        },
+      },
+    },
+    "400": complaintErrorResponse,
+    "401": complaintErrorResponse,
+    "403": complaintErrorResponse,
+    "404": complaintErrorResponse,
+    "409": complaintErrorResponse,
+    "500": complaintErrorResponse,
   };
 }
 
@@ -2015,6 +2041,280 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/complaints": {
+      get: {
+        tags: ["Complaints"],
+        operationId: "listComplaints",
+        summary: "컴플레인 목록 조회",
+        description:
+          "비밀번호 변경을 완료한 active admin은 전체, active maid는 본인 원 청소에 연결된 사건만 조회합니다. from/to는 반열린 RFC 3339 구간이며 최대 31일, limit은 최대 100입니다. opaque cursor는 actor·기간·정렬에 서명되고 전체 응답은 128 KiB로 제한됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "from",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date-time" },
+            description: "조회 시작 시각(포함)",
+          },
+          {
+            name: "to",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date-time" },
+            description: "조회 종료 시각(미포함), from부터 최대 31일",
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            description: "DB에서도 강제하는 page 크기",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description:
+              "동일 actor·기간에서만 유효한 opaque continuation. 빈 값·변조·scope 불일치는 INVALID_COMPLAINT_CURSOR(400)입니다.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "안전한 current projection의 bounded page",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ComplaintListEnvelope" },
+              },
+            },
+          },
+          "400": complaintErrorResponse,
+          "401": complaintErrorResponse,
+          "403": complaintErrorResponse,
+          "500": complaintErrorResponse,
+          "503": complaintErrorResponse,
+        },
+      },
+      post: {
+        tags: ["Complaints"],
+        operationId: "createComplaint",
+        summary: "승인된 원 청소 컴플레인 접수",
+        description:
+          "active business admin이 원 수익 ID만 전달하면 서버가 room/target/attempt/submission/approved inspection/maid를 실제 FK로 확정합니다. 승인 후 30일 경계를 포함하며 자유문·고객정보·PIN·사진 locator는 입력할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ComplaintCreateRequest" },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "원자적으로 접수된 사건 또는 동일 receipt replay",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ComplaintEnvelope" },
+              },
+            },
+          },
+          "400": complaintErrorResponse,
+          "401": complaintErrorResponse,
+          "403": complaintErrorResponse,
+          "404": complaintErrorResponse,
+          "409": complaintErrorResponse,
+          "500": complaintErrorResponse,
+        },
+      },
+    },
+    "/v1/complaints/{complaintId}": {
+      get: {
+        tags: ["Complaints"],
+        operationId: "getComplaint",
+        summary: "컴플레인 current projection 조회",
+        description:
+          "active admin 또는 사건의 원 담당 maid만 현재 상태·판정·단일 응답을 조회합니다. 자유문 고객정보와 증빙 locator는 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [photoPathId("complaintId")],
+        responses: {
+          "200": {
+            description: "권한 범위의 current projection",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ComplaintEnvelope" },
+              },
+            },
+          },
+          "401": complaintErrorResponse,
+          "403": complaintErrorResponse,
+          "404": complaintErrorResponse,
+          "500": complaintErrorResponse,
+        },
+      },
+    },
+    "/v1/complaints/{complaintId}/history": {
+      get: {
+        tags: ["Complaints"],
+        operationId: "listComplaintHistory",
+        summary: "컴플레인 불변 이력 조회",
+        description:
+          "active admin 또는 원 담당 maid가 append-only event·decision·response 이력을 eventId 내림차순 keyset으로 조회합니다. limit은 최대 100이며 cursor는 actor와 complaint ID에 서명됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          photoPathId("complaintId"),
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            description: "이력 page 크기",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description:
+              "동일 actor·사건 전용 continuation. 빈 값·변조·scope 불일치는 INVALID_COMPLAINT_CURSOR(400)입니다.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "bounded append-only history page",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/ComplaintHistoryEnvelope",
+                },
+              },
+            },
+          },
+          "400": complaintErrorResponse,
+          "401": complaintErrorResponse,
+          "403": complaintErrorResponse,
+          "404": complaintErrorResponse,
+          "500": complaintErrorResponse,
+          "503": complaintErrorResponse,
+        },
+      },
+    },
+    "/v1/complaints/{complaintId}/review": {
+      post: {
+        tags: ["Complaints"],
+        operationId: "startComplaintReview",
+        summary: "컴플레인 검토 시작",
+        description:
+          "active business admin이 expectedVersion CAS와 멱등성 키로 received 사건을 under_review로 전이합니다. 사건 원천과 과거 event는 변경하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [photoPathId("complaintId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ComplaintCasRequest" },
+            },
+          },
+        },
+        responses: complaintMutationResponses(),
+      },
+    },
+    "/v1/complaints/{complaintId}/decision": {
+      post: {
+        tags: ["Complaints"],
+        operationId: "decideComplaint",
+        summary: "컴플레인 최초 판정",
+        description:
+          "active business admin이 finding, 평가 전용 penaltyScore 0..10, reworkRequired를 불변 decision version으로 기록합니다. 벌점은 수익·주급·정정 원장을 자동 변경하지 않으며 최초 판정부터 7일 응답 창이 열립니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [photoPathId("complaintId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ComplaintDecisionRequest" },
+            },
+          },
+        },
+        responses: complaintMutationResponses(),
+      },
+    },
+    "/v1/complaints/{complaintId}/response": {
+      post: {
+        tags: ["Complaints"],
+        operationId: "respondComplaint",
+        summary: "담당 메이드 판정 확인 또는 이의",
+        description:
+          "active 원 담당 maid만 최초 current decision 후 7일 경계를 포함해 정확히 한 번 acknowledged 또는 source-controlled appeal을 제출합니다. finding·벌점·재작업 판정은 변경할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid"],
+        parameters: [photoPathId("complaintId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ComplaintResponseRequest" },
+            },
+          },
+        },
+        responses: complaintMutationResponses(),
+      },
+    },
+    "/v1/complaints/{complaintId}/close": {
+      post: {
+        tags: ["Complaints"],
+        operationId: "closeComplaint",
+        summary: "컴플레인 종결",
+        description:
+          "active business admin만 확인 완료 사건, correction으로 해결된 이의 사건, 또는 7일 응답 창이 지난 미응답 사건을 종결합니다. closed 사건을 reopen하는 API는 존재하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [photoPathId("complaintId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ComplaintCasRequest" },
+            },
+          },
+        },
+        responses: complaintMutationResponses(),
+      },
+    },
+    "/v1/complaints/{complaintId}/corrections": {
+      post: {
+        tags: ["Complaints"],
+        operationId: "correctComplaintDecision",
+        summary: "컴플레인 판정 정정 version 추가",
+        description:
+          "active business admin이 현재 판정을 priorDecisionId로 가리키는 correction version을 append하고 pointer만 CAS 교체합니다. closed 상태는 유지되고 새 응답 창·수익·주급·자동 재작업 side effect는 생기지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [photoPathId("complaintId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ComplaintDecisionRequest" },
+            },
+          },
+        },
+        responses: complaintMutationResponses(),
+      },
+    },
+
     "/v1/payroll": {
       get: {
         tags: ["Payroll"],
@@ -5727,6 +6027,301 @@ export const openApiDocument = {
           recordedAt: { type: "string", format: "date-time" },
         },
       },
+      ComplaintCategory: {
+        type: "string",
+        enum: [
+          "cleanliness_general",
+          "bathroom_cleanliness",
+          "bedding_quality",
+          "trash_not_removed",
+          "amenity_missing",
+          "damage_or_loss",
+          "odor_or_smoke",
+          "access_or_handover",
+        ],
+      },
+      ComplaintFinding: {
+        type: "string",
+        enum: ["confirmed", "unverifiable", "false"],
+      },
+      ComplaintStatus: {
+        type: "string",
+        enum: [
+          "received",
+          "under_review",
+          "decided",
+          "acknowledged",
+          "appealed",
+          "closed",
+        ],
+      },
+      ComplaintDecision: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "complaintId",
+          "decisionVersion",
+          "decisionKind",
+          "priorDecisionId",
+          "finding",
+          "penaltyScore",
+          "reworkRequired",
+          "decidedAt",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          complaintId: { type: "string", format: "uuid" },
+          decisionVersion: { type: "integer", minimum: 1 },
+          decisionKind: { type: "string", enum: ["initial", "correction"] },
+          priorDecisionId: { type: ["string", "null"], format: "uuid" },
+          finding: { $ref: "#/components/schemas/ComplaintFinding" },
+          penaltyScore: {
+            type: "integer",
+            minimum: 0,
+            maximum: 10,
+            description:
+              "평가 전용이며 payroll deduction side effect가 없습니다.",
+          },
+          reworkRequired: { type: "boolean" },
+          decidedAt: { type: "string", format: "date-time" },
+        },
+      },
+      ComplaintMaidResponse: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "complaintId",
+          "decisionId",
+          "maidProfileId",
+          "responseType",
+          "appealReasonCode",
+          "respondedAt",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          complaintId: { type: "string", format: "uuid" },
+          decisionId: { type: "string", format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          responseType: { type: "string", enum: ["acknowledged", "appealed"] },
+          appealReasonCode: {
+            type: ["string", "null"],
+            enum: [
+              "work_completed_as_required",
+              "evidence_misinterpreted",
+              "not_responsible",
+              "timeline_mismatch",
+              null,
+            ],
+          },
+          respondedAt: { type: "string", format: "date-time" },
+        },
+      },
+      Complaint: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "roomId",
+          "cleaningTargetId",
+          "cleaningAttemptId",
+          "submissionId",
+          "inspectionDecisionId",
+          "originalEarningId",
+          "maidProfileId",
+          "category",
+          "status",
+          "version",
+          "currentDecisionId",
+          "firstDecidedAt",
+          "responseDeadline",
+          "receivedAt",
+          "updatedAt",
+          "currentDecision",
+          "maidResponse",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          cleaningAttemptId: { type: "string", format: "uuid" },
+          submissionId: { type: "string", format: "uuid" },
+          inspectionDecisionId: { type: "string", format: "uuid" },
+          originalEarningId: { type: "string", format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          category: { $ref: "#/components/schemas/ComplaintCategory" },
+          status: { $ref: "#/components/schemas/ComplaintStatus" },
+          version: { type: "integer", minimum: 1 },
+          currentDecisionId: { type: ["string", "null"], format: "uuid" },
+          firstDecidedAt: { type: ["string", "null"], format: "date-time" },
+          responseDeadline: { type: ["string", "null"], format: "date-time" },
+          receivedAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+          currentDecision: {
+            oneOf: [
+              { $ref: "#/components/schemas/ComplaintDecision" },
+              {
+                type: "null",
+              },
+            ],
+          },
+          maidResponse: {
+            oneOf: [
+              { $ref: "#/components/schemas/ComplaintMaidResponse" },
+              {
+                type: "null",
+              },
+            ],
+          },
+        },
+      },
+      ComplaintCreateRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["originalEarningId", "category", "expectedVersion"],
+        properties: {
+          originalEarningId: { type: "string", format: "uuid" },
+          category: { $ref: "#/components/schemas/ComplaintCategory" },
+          expectedVersion: { const: 0, type: "integer" },
+        },
+      },
+      ComplaintCasRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion"],
+        properties: { expectedVersion: { type: "integer", minimum: 1 } },
+      },
+      ComplaintDecisionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "expectedVersion",
+          "finding",
+          "penaltyScore",
+          "reworkRequired",
+        ],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          finding: { $ref: "#/components/schemas/ComplaintFinding" },
+          penaltyScore: { type: "integer", minimum: 0, maximum: 10 },
+          reworkRequired: { type: "boolean" },
+        },
+      },
+      ComplaintResponseRequest: {
+        oneOf: [
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["expectedVersion", "responseType"],
+            properties: {
+              expectedVersion: { type: "integer", minimum: 1 },
+              responseType: { const: "acknowledged", type: "string" },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["expectedVersion", "responseType", "appealReasonCode"],
+            properties: {
+              expectedVersion: { type: "integer", minimum: 1 },
+              responseType: { const: "appealed", type: "string" },
+              appealReasonCode: {
+                type: "string",
+                enum: [
+                  "work_completed_as_required",
+                  "evidence_misinterpreted",
+                  "not_responsible",
+                  "timeline_mismatch",
+                ],
+              },
+            },
+          },
+        ],
+      },
+      ComplaintEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["complaint"],
+        properties: { complaint: { $ref: "#/components/schemas/Complaint" } },
+      },
+      ComplaintListEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["complaints", "nextCursor"],
+        properties: {
+          complaints: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/Complaint" },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+          },
+        },
+      },
+      ComplaintHistoryEvent: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "eventId",
+          "eventType",
+          "toStatus",
+          "caseVersion",
+          "occurredAt",
+        ],
+        properties: {
+          eventId: { type: "integer", minimum: 1 },
+          eventType: {
+            type: "string",
+            enum: [
+              "received",
+              "review_started",
+              "decided",
+              "acknowledged",
+              "appealed",
+              "closed",
+              "corrected",
+            ],
+          },
+          fromStatus: {
+            type: "string",
+            enum: [
+              "received",
+              "under_review",
+              "decided",
+              "acknowledged",
+              "appealed",
+              "closed",
+            ],
+          },
+          toStatus: { $ref: "#/components/schemas/ComplaintStatus" },
+          caseVersion: { type: "integer", minimum: 1 },
+          occurredAt: { type: "string", format: "date-time" },
+          decision: { $ref: "#/components/schemas/ComplaintDecision" },
+          maidResponse: { $ref: "#/components/schemas/ComplaintMaidResponse" },
+        },
+      },
+      ComplaintHistoryEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["events", "nextCursor"],
+        properties: {
+          events: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/ComplaintHistoryEvent" },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+          },
+        },
+      },
+
       PayrollStatus: {
         type: "string",
         enum: ["open", "paying", "check", "paid"],

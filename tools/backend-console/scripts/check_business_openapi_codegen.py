@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 77:
-        raise RuntimeError("전체 source OpenAPI path 수가 77이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 85:
+        raise RuntimeError("전체 source OpenAPI path 수가 85가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,9 +34,9 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 83:
-        raise RuntimeError("전체 source OpenAPI operation 수가 83이 아닙니다.")
-    with tempfile.TemporaryDirectory(prefix="payroll-openapi-codegen-") as temporary:
+    if operation_count != 92:
+        raise RuntimeError("전체 source OpenAPI operation 수가 92가 아닙니다.")
+    with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
             [
@@ -68,14 +68,27 @@ def main() -> None:
             package / "models" / "payroll_entries_envelope.py",
             package / "models" / "payroll_start_request.py",
             package / "models" / "payroll_status.py",
+            package / "api" / "complaints" / "list_complaints.py",
+            package / "api" / "complaints" / "create_complaint.py",
+            package / "api" / "complaints" / "get_complaint.py",
+            package / "api" / "complaints" / "list_complaint_history.py",
+            package / "api" / "complaints" / "start_complaint_review.py",
+            package / "api" / "complaints" / "decide_complaint.py",
+            package / "api" / "complaints" / "respond_complaint.py",
+            package / "api" / "complaints" / "correct_complaint_decision.py",
+            package / "api" / "complaints" / "close_complaint.py",
+            package / "models" / "complaint.py",
+            package / "models" / "complaint_decision.py",
+            package / "models" / "complaint_history_event.py",
+            package / "models" / "complaint_maid_response.py",
         ]
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
-            raise RuntimeError(f"Payroll Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+            raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
         if not compileall.compile_dir(package, quiet=1):
-            raise RuntimeError("Payroll Python codegen 결과를 컴파일할 수 없습니다.")
+            raise RuntimeError("업무 Python codegen 결과를 컴파일할 수 없습니다.")
 
-    print("full OpenAPI payroll Python ephemeral codegen PASS")
+    print("full OpenAPI payroll/complaint Python ephemeral codegen PASS")
 
 
 if __name__ == "__main__":
