@@ -20,7 +20,7 @@ export type ComplaintCursorPosition = {
 function invalid(): never {
   throw new EdgeError(
     400,
-    "COMPLAINT_CURSOR_INVALID",
+    "INVALID_COMPLAINT_CURSOR",
     "컴플레인 cursor가 올바르지 않습니다.",
   );
 }

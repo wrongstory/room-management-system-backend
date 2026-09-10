@@ -785,13 +785,14 @@ production DB/Edge/Pages를 변경하지 않는다.
 | [ ] | `POST /v1/complaints/{complaintId}/close` | active password-complete business admin | ✅ | ✅ | ✅ | ❌ | ❌ |
 
 - [x] append-only `complaint_lifecycle` migration 1개; 기존 36 migrations 수정 없음
-- [x] 승인된 원 청소 room/target/attempt/submission/inspection/current earning typed FK와 30일 inclusive intake
+- [x] 승인된 원 청소 allowlist target + non-null exact submission entitlement/current earning typed FK와 30일 inclusive intake; reclean/alternate compensation source fail-closed
 - [x] immutable decision/maid response/event, current pointer CAS, 7일 inclusive 1회 응답, 종결 후 reopen 금지
 - [x] 벌점 0~10 평가 전용 및 earning/payroll/adjustment side effect 0
 - [x] source-controlled category/appeal code만 허용하고 자유형 고객·직원 content와 PII/PIN/photo locator 비저장
 - [x] bounded 31일 list, 최대 100 keyset page/history, actor·scope 바인딩 signed cursor
-- [x] RLS/Data API/SECURITY DEFINER 최소 권한과 감사·알림/outbox·멱등성 원자성
-- [x] Fastify/Edge/OpenAPI parity — 85 paths / 92 operations; developer 콘솔 16 operations 유지
+- [x] RLS/Data API/SECURITY DEFINER 최소 권한; JWT session_id와 같은 사용자 active auth.sessions exact match, revoked/missing/malformed/mismatch 0행
+- [x] 감사·알림/outbox·멱등성 원자성; correction 알림은 새 응답 요구 없는 informational(false)
+- [x] Fastify/Edge/OpenAPI parity — 전 응답 no-store, 빈 cursor도 INVALID_COMPLAINT_CURSOR; 85 paths / 92 operations; developer 콘솔 16 operations 유지
 - [ ] 독립 리뷰, required CI, `dev` 병합
 - [ ] release/main 승격, production migration/Edge 배포, hosted role/mutation smoke
 

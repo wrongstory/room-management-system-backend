@@ -956,7 +956,28 @@ Deno.test("complaint exact routes preserve admin commands, maid response, and bo
     ),
     dependencies,
   );
-  assert(listed.status === 200, "admin complaint list");
+  assert(
+    listed.status === 200 && listed.headers.get("cache-control") === "no-store",
+    "admin complaint list is non-cacheable",
+  );
+
+  for (
+    const path of [
+      "/v1/complaints?from=2026-09-01T00:00:00Z&to=2026-09-11T00:00:00Z&cursor=",
+      `/v1/complaints/${complaintId}/history?cursor=`,
+    ]
+  ) {
+    const emptyCursor = await handleApiRequest(
+      request("GET", path),
+      dependencies,
+    );
+    assert(
+      emptyCursor.status === 400 &&
+        await errorCode(emptyCursor) === "INVALID_COMPLAINT_CURSOR" &&
+        emptyCursor.headers.get("cache-control") === "no-store",
+      `${path} rejects an empty cursor without caching`,
+    );
+  }
 
   const created = await handleApiRequest(
     request("POST", "/v1/complaints", {

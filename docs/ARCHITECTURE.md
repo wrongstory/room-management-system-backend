@@ -113,19 +113,27 @@ main/recovery/production에는 적용되지 않았다.
 `complaint_cases`는 원 room/target/attempt/submission/approved inspection/current original earning/maid를
 실제 FK로 묶고 status/version/current decision만 갱신하는 projection이다. `complaint_decisions`,
 `complaint_maid_responses`, `complaint_case_events`는 UPDATE/DELETE가 금지된 append-only 원장이다.
-접수는 승인 시각부터 30일 경계를 포함하고, 최초 판정부터 7일 경계를 포함해 원 담당 maid가
+접수 원천은 `scheduled_checkout|manual_checkout|stayover_request|manual_room_request` target과
+승인 submission에 non-null로 정확히 귀속된 original earning만 허용한다. 따라서 inspection/post-approval
+reclean과 향후 alternate compensation source는 SQL NULL까지 fail-closed로 거부한다. 접수는 승인 시각부터
+30일 경계를 포함하고, 최초 판정부터 7일 경계를 포함해 원 담당 maid가
 `acknowledged` 또는 allowlist appeal을 정확히 한 번만 기록한다.
 
 상태는 `received → under_review → decided → acknowledged|appealed → closed`다. 미응답 사건은 7일
 응답 창이 지난 뒤에만 종결하고, appealed 사건은 appeal event 뒤에 current decision을 prior FK correction으로 교체한 뒤에만
-종결한다. closed는 reopen하지 않으며 post-close correction도 status와 최초 응답 창을 유지한다. 벌점 0..10은
-평가 전용이고 migration/RPC는 earning/payroll/adjustment를 쓰지 않는다.
+종결한다. closed는 reopen하지 않으며 post-close correction도 status와 최초 응답 창을 유지한다. correction
+알림은 새 응답 창을 열지 않는 informational event(`requires_action=false`)다. 벌점 0..10은 평가 전용이고
+migration/RPC는 earning/payroll/adjustment를 쓰지 않는다.
 
 Fastify와 Edge는 동일한 service-role-only RPC와 stable error mapping을 사용한다. 모든 mutation은 actor,
 expectedVersion, scoped Idempotency-Key, canonical request hash receipt, bounded audit와 필요한 notification/outbox를
 한 transaction에 기록한다. 목록은 최대 31일·100건, 이력은 최대 100건이며 HMAC cursor를 actor/range 또는
 actor/complaint stream에 고정하고 HTTP JSON은 128 KiB를 넘으면 실패한다. 후보 계약은 37 migrations /
 85 paths / 92 operations이며 기준 `dev@e31559d922c49f059ed5880ac1de4f3f11d8ca74` 위 source PR 검토 상태다.
+네 public complaint table의 SELECT RLS는 최신 profile 권한뿐 아니라 JWT `session_id`가 같은 사용자에게
+귀속된 현재 `auth.sessions` row와 정확히 일치해야 통과한다. claim 누락·malformed·삭제된 세션·타 사용자
+세션은 cast 오류나 정보 노출 없이 0행으로 실패한다. 모든 Fastify/Edge 성공·오류 응답은
+`Cache-Control: no-store`이며 빈 cursor도 `INVALID_COMPLAINT_CURSOR` 400으로 동일하게 거부한다.
 
 ```mermaid
 flowchart LR

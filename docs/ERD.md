@@ -647,8 +647,11 @@ service-role projection RPC만 추가·교체한다. production/recovery 적용 
 
 `20260910003054_complaint_lifecycle.sql`은 기존 36개 migration을 수정하지 않는 37번째 append-only feature
 migration이다. complaint source identity 7개는 모두 실제 FK이며 임의 polymorphic UUID를 사용하지 않는다.
-case만 CAS projection으로 갱신하고 decision/maid response/event는 불변이다. 공개 table은 RLS를 켜고
-authenticated direct write와 privileged RPC 실행을 막으며 app-owned service-role RPC만 command를 수행한다.
+원 target은 현재 original-cleaning source allowlist에 속하고 earning entitlement가 승인 submission과 non-null로
+정확히 같아야 하므로 reclean·향후 alternate compensation source는 fail-closed다. case만 CAS projection으로
+갱신하고 decision/maid response/event는 불변이다. 공개 table은 RLS를 켜고 SELECT에도 동일 사용자의 live
+`auth.sessions` JWT session을 요구하며 authenticated direct write와 privileged RPC 실행을 막고 app-owned
+service-role RPC만 command를 수행한다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 

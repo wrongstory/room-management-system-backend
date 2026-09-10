@@ -365,30 +365,58 @@ from public,anon,authenticated,service_role;
 create trigger complaint_decision_lineage before insert on public.complaint_decisions
 for each row execute function private.validate_complaint_decision_lineage();
 
+create function private.complaint_rls_session_is_active()
+returns boolean language plpgsql stable security definer set search_path='' as $$
+declare
+  v_auth_user_id uuid;
+  v_session_text text;
+  v_session_id uuid;
+begin
+  v_auth_user_id:=auth.uid();
+  v_session_text:=auth.jwt()->>'session_id';
+  if v_auth_user_id is null or v_session_text is null or v_session_text='' then
+    return false;
+  end if;
+  begin
+    v_session_id:=v_session_text::uuid;
+  exception when invalid_text_representation then
+    return false;
+  end;
+  return exists(select 1 from auth.sessions session
+    where session.id=v_session_id and session.user_id=v_auth_user_id
+      and (session.not_after is null or session.not_after>current_timestamp));
+end $$;
+
+revoke all on function private.complaint_rls_session_is_active()
+from public,anon,authenticated,service_role;
+grant execute on function private.complaint_rls_session_is_active() to authenticated;
+comment on function private.complaint_rls_session_is_active() is
+'#100 policy-only boolean. authenticated EXECUTE is required solely for complaint RLS evaluation; no session identifier is returned.';
+
 alter table public.complaint_cases enable row level security;
 alter table public.complaint_decisions enable row level security;
 alter table public.complaint_maid_responses enable row level security;
 alter table public.complaint_case_events enable row level security;
 
 create policy complaint_cases_read on public.complaint_cases for select to authenticated
-using (exists(select 1 from public.profiles actor
+using ((select private.complaint_rls_session_is_active()) and exists(select 1 from public.profiles actor
   where actor.id=(select private.current_profile_id()) and actor.status='active'
     and not actor.must_change_password
     and (actor.role='admin' or (actor.role='maid' and actor.id=maid_profile_id))));
 create policy complaint_decisions_read on public.complaint_decisions for select to authenticated
-using (exists(select 1 from public.complaint_cases c where c.id=complaint_case_id
+using ((select private.complaint_rls_session_is_active()) and exists(select 1 from public.complaint_cases c where c.id=complaint_case_id
   and exists(select 1 from public.profiles actor
     where actor.id=(select private.current_profile_id()) and actor.status='active'
       and not actor.must_change_password
       and (actor.role='admin' or (actor.role='maid' and actor.id=c.maid_profile_id)))));
 create policy complaint_responses_read on public.complaint_maid_responses for select to authenticated
-using (exists(select 1 from public.complaint_cases c where c.id=complaint_case_id
+using ((select private.complaint_rls_session_is_active()) and exists(select 1 from public.complaint_cases c where c.id=complaint_case_id
   and exists(select 1 from public.profiles actor
     where actor.id=(select private.current_profile_id()) and actor.status='active'
       and not actor.must_change_password
       and (actor.role='admin' or (actor.role='maid' and actor.id=c.maid_profile_id)))));
 create policy complaint_events_read on public.complaint_case_events for select to authenticated
-using (exists(select 1 from public.complaint_cases c where c.id=complaint_case_id
+using ((select private.complaint_rls_session_is_active()) and exists(select 1 from public.complaint_cases c where c.id=complaint_case_id
   and exists(select 1 from public.profiles actor
     where actor.id=(select private.current_profile_id()) and actor.status='active'
       and not actor.must_change_password
@@ -483,7 +511,7 @@ begin
       else '컴플레인 처리가 종결되었습니다.' end,
     p_case.room_id,p_case.cleaning_target_id,
     'complaint:'||p_case.id::text||':'||p_kind||':'||p_version::text,
-    p_kind in ('decided','corrected','appealed'),p_at) returning id into v_id;
+    p_kind in ('decided','appealed'),p_at) returning id into v_id;
   insert into private.notification_outbox(notification_id,channel,delivery_status,next_attempt_at,created_at)
   values(v_id,'web_push','pending',p_at,p_at);
   return v_id;
@@ -520,8 +548,11 @@ begin
   select * into v_inspection from public.inspection_decisions where submission_id=v_submission.id;
   if v_earning.id is null or v_submission.id is null or v_attempt.id is null or v_target.id is null
     or v_inspection.id is null or v_inspection.decision<>'approved' or v_submission.status<>'approved'
-    or v_attempt.status<>'approved' or v_target.status<>'approved' or v_target.source='inspection_reclean'
-    or v_earning.earning_entitlement_id<>v_submission.id or v_earning.maid_profile_id<>v_attempt.maid_profile_id
+    or v_attempt.status<>'approved' or v_target.status<>'approved'
+    or v_target.source not in ('scheduled_checkout','manual_checkout','stayover_request','manual_room_request')
+    or v_earning.earning_entitlement_id is null
+    or v_earning.earning_entitlement_id is distinct from v_submission.id
+    or v_earning.maid_profile_id<>v_attempt.maid_profile_id
     or v_submission.submitted_by<>v_attempt.maid_profile_id then
     raise exception using errcode='55000',message='COMPLAINT_SOURCE_NOT_APPROVED';
   end if;
@@ -750,7 +781,7 @@ begin
   if p_limit is null or p_limit<1 or p_limit>100 then
     raise exception using errcode='22023',message='COMPLAINT_PAGE_LIMIT_INVALID'; end if;
   if (p_after_received_at is null)<>(p_after_id is null) then
-    raise exception using errcode='22023',message='COMPLAINT_CURSOR_INVALID'; end if;
+    raise exception using errcode='22023',message='INVALID_COMPLAINT_CURSOR'; end if;
   with page as (
     select c.* from public.complaint_cases c
     where c.received_at>=p_from and c.received_at<p_to

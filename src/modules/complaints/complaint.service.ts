@@ -272,7 +272,7 @@ export function complaintDatabaseError(
       400,
       "page size가 허용 범위를 벗어났습니다.",
     ],
-    ["COMPLAINT_CURSOR_INVALID", 400, "컴플레인 cursor가 올바르지 않습니다."],
+    ["INVALID_COMPLAINT_CURSOR", 400, "컴플레인 cursor가 올바르지 않습니다."],
     [
       "COMPLAINT_INTAKE_WINDOW_CLOSED",
       409,
@@ -355,7 +355,7 @@ export class SupabaseComplaintService implements ComplaintService {
     });
     const pos = input.cursor ? this.cursor.decode(input.cursor, scope) : null;
     if (pos && "eventId" in pos)
-      throw complaintDatabaseError({ message: "COMPLAINT_CURSOR_INVALID" });
+      throw complaintDatabaseError({ message: "INVALID_COMPLAINT_CURSOR" });
     const page = object(
       await this.rpc("list_complaint_cases_page", {
         p_actor_profile_id: actor.profileId,
@@ -399,7 +399,7 @@ export class SupabaseComplaintService implements ComplaintService {
     });
     const pos = input.cursor ? this.cursor.decode(input.cursor, scope) : null;
     if (pos && "receivedAt" in pos)
-      throw complaintDatabaseError({ message: "COMPLAINT_CURSOR_INVALID" });
+      throw complaintDatabaseError({ message: "INVALID_COMPLAINT_CURSOR" });
     const page = object(
       await this.rpc("list_complaint_history_page", {
         p_actor_profile_id: actor.profileId,

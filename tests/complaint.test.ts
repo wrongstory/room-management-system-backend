@@ -63,7 +63,7 @@ describe("complaint service and cursor", () => {
       complaintId: id(10),
     });
     expect(() => codec.decode(`${cursor.slice(0, -1)}a`, scope)).toThrowError(
-      expect.objectContaining({ code: "COMPLAINT_CURSOR_INVALID" }),
+      expect.objectContaining({ code: "INVALID_COMPLAINT_CURSOR" }),
     );
     expect(() =>
       codec.decode(
@@ -75,7 +75,7 @@ describe("complaint service and cursor", () => {
         }),
       ),
     ).toThrowError(
-      expect.objectContaining({ code: "COMPLAINT_CURSOR_INVALID" }),
+      expect.objectContaining({ code: "INVALID_COMPLAINT_CURSOR" }),
     );
   });
   it("uses actor-bound CAS, idempotency and canonical request hash", async () => {
@@ -180,22 +180,28 @@ async function appFor(role: Actor["role"] = "admin") {
 describe("complaint Fastify contract", () => {
   it("exposes exact bounded list and all lifecycle routes", async () => {
     const { app, calls } = await appFor();
-    expect(
-      (
-        await app.inject({
-          method: "GET",
-          url: "/v1/complaints?from=2026-09-01T00%3A00%3A00Z&to=2026-09-10T00%3A00%3A00Z&limit=100",
-        })
-      ).statusCode,
-    ).toBe(200);
-    expect(
-      (
-        await app.inject({
-          method: "GET",
-          url: `/v1/complaints/${id(10)}/history?limit=50`,
-        })
-      ).statusCode,
-    ).toBe(200);
+    const getResponses = [
+      await app.inject({
+        method: "GET",
+        url: "/v1/complaints?from=2026-09-01T00%3A00%3A00Z&to=2026-09-10T00%3A00%3A00Z&limit=100",
+      }),
+      await app.inject({ method: "GET", url: `/v1/complaints/${id(10)}` }),
+      await app.inject({
+        method: "GET",
+        url: `/v1/complaints/${id(10)}/history?limit=50`,
+      }),
+    ];
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/v1/complaints",
+      headers: { "idempotency-key": "complaint-create" },
+      payload: {
+        originalEarningId: id(16),
+        category: "cleanliness_general",
+        expectedVersion: 0,
+      },
+    });
+    const commandResponses = [];
     for (const [path, payload] of [
       ["review", { expectedVersion: 1 }],
       [
@@ -218,28 +224,53 @@ describe("complaint Fastify contract", () => {
       ],
       ["close", { expectedVersion: 4 }],
     ] as const)
-      expect(
-        (
-          await app.inject({
-            method: "POST",
-            url: `/v1/complaints/${id(10)}/${path}`,
-            headers: { "idempotency-key": `complaint-${path}` },
-            payload,
-          })
-        ).statusCode,
-      ).toBe(200);
+      commandResponses.push(
+        await app.inject({
+          method: "POST",
+          url: `/v1/complaints/${id(10)}/${path}`,
+          headers: { "idempotency-key": `complaint-${path}` },
+          payload,
+        }),
+      );
+    commandResponses.push(
+      await app.inject({
+        method: "POST",
+        url: `/v1/complaints/${id(10)}/response`,
+        headers: { "idempotency-key": "complaint-response" },
+        payload: { expectedVersion: 3, responseType: "acknowledged" },
+      }),
+    );
+    expect(createResponse.statusCode).toBe(201);
+    for (const response of [...getResponses, ...commandResponses]) {
+      expect(response.statusCode).toBe(200);
+    }
+    for (const response of [...getResponses, createResponse, ...commandResponses]) {
+      expect(response.headers["cache-control"]).toBe("no-store");
+    }
     expect(calls).toEqual([
       "list",
+      "detail",
       "history",
+      "create",
       "review",
       "decide",
       "correct",
       "close",
+      "respond",
     ]);
     await app.close();
   });
   it("rejects query aliases, free text, penalty overflow, and reopen", async () => {
     const { app, calls } = await appFor();
+    for (const url of [
+      "/v1/complaints?from=2026-09-01T00%3A00%3A00Z&to=2026-09-10T00%3A00%3A00Z&cursor=",
+      `/v1/complaints/${id(10)}/history?cursor=`,
+    ]) {
+      const response = await app.inject({ method: "GET", url });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("INVALID_COMPLAINT_CURSOR");
+      expect(response.headers["cache-control"]).toBe("no-store");
+    }
     expect(
       (
         await app.inject({

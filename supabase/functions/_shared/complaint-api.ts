@@ -38,6 +38,13 @@ const findings = ["confirmed", "unverifiable", "false"],
 function invalid(message = "컴플레인 요청 값을 확인해 주세요."): never {
   throw new EdgeError(400, "VALIDATION_ERROR", message);
 }
+function invalidCursor(): never {
+  throw new EdgeError(
+    400,
+    "INVALID_COMPLAINT_CURSOR",
+    "컴플레인 cursor가 올바르지 않습니다.",
+  );
+}
 function uuid(v: unknown, name = "complaintId") {
   if (typeof v !== "string" || !uuidRe.test(v)) {
     invalid(`${name}에 UUID가 필요합니다.`);
@@ -240,7 +247,7 @@ export function dbError(error: { message?: string } | null) {
     ],
     ["COMPLAINT_PERIOD_INVALID", 400, "조회 기간은 31일 이내여야 합니다."],
     ["COMPLAINT_PAGE_LIMIT_INVALID", 400, "page size가 올바르지 않습니다."],
-    ["COMPLAINT_CURSOR_INVALID", 400, "컴플레인 cursor가 올바르지 않습니다."],
+    ["INVALID_COMPLAINT_CURSOR", 400, "컴플레인 cursor가 올바르지 않습니다."],
     [
       "COMPLAINT_INTAKE_WINDOW_CLOSED",
       409,
@@ -389,8 +396,11 @@ export async function listComplaints(
     invalid("limit을 확인해 주세요.");
   }
   const cursor = q.get("cursor");
-  if (cursor && cursor.length > COMPLAINT_CURSOR_MAX_LENGTH) {
-    invalid("cursor를 확인해 주세요.");
+  if (
+    cursor !== null &&
+    (cursor.length === 0 || cursor.length > COMPLAINT_CURSOR_MAX_LENGTH)
+  ) {
+    invalidCursor();
   }
   const scope = complaintCursorScope(actor, { kind: "list", from, to });
   const pos = cursor ? await decodeComplaintCursor(cursor, scope) : null;
@@ -455,6 +465,12 @@ export async function complaintHistory(
     complaintId: id,
   });
   const cursor = q.get("cursor");
+  if (
+    cursor !== null &&
+    (cursor.length === 0 || cursor.length > COMPLAINT_CURSOR_MAX_LENGTH)
+  ) {
+    invalidCursor();
+  }
   const pos = cursor ? await decodeComplaintCursor(cursor, scope) : null;
   if (pos && "receivedAt" in pos) invalid();
   const page = object(

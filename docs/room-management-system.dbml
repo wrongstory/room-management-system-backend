@@ -909,7 +909,7 @@ Table public.complaint_cases {
   received_by uuid [not null]
   received_at timestamptz [not null]
   updated_at timestamptz [not null]
-  Note: '#100 mutable current projection only. Source identity is immutable; every transition and pointer swap is CAS.'
+  Note: '#100 mutable current projection only. Source identity is immutable and requires an original-cleaning allowlist target plus a non-null exact approved-submission earning entitlement; every transition and pointer swap is CAS.'
 }
 
 Table public.complaint_decisions {

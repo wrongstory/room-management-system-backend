@@ -151,6 +151,23 @@ Deno.test(
     const complaintPaths = Object.keys(doc.paths).filter((path) =>
       path.startsWith("/v1/complaints")
     );
+    const complaintApi = doc.paths as unknown as Record<
+      string,
+      Record<
+        string,
+        {
+          parameters?: Array<{
+            name: string;
+            description?: string;
+            schema: { minLength?: number };
+          }>;
+          responses: Record<
+            string,
+            { headers?: { "Cache-Control"?: { schema: { const: string } } } }
+          >;
+        }
+      >
+    >;
     assert(complaintPaths.length === 8, "eight exact complaint paths");
     assert(
       doc.paths["/v1/complaints"].post["x-required-roles"].join(",") ===
@@ -188,6 +205,31 @@ Deno.test(
       !Object.keys(doc.paths).some((path) => path.includes("reopen")),
       "closed complaint has no reopen route",
     );
+    for (
+      const operation of [
+        complaintApi["/v1/complaints"].get,
+        complaintApi["/v1/complaints/{complaintId}/history"].get,
+      ]
+    ) {
+      const cursor = operation.parameters?.find((parameter) =>
+        parameter.name === "cursor"
+      );
+      assert(
+        cursor?.schema.minLength === 1 &&
+          cursor.description?.includes("INVALID_COMPLAINT_CURSOR"),
+        "empty complaint cursors have one stable 400 contract",
+      );
+    }
+    for (const path of complaintPaths) {
+      for (const operation of Object.values(complaintApi[path])) {
+        for (const response of Object.values(operation.responses)) {
+          assert(
+            response.headers?.["Cache-Control"]?.schema.const === "no-store",
+            `complaint response must be no-store: ${path}`,
+          );
+        }
+      }
+    }
   },
 );
 

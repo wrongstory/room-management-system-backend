@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { AppError } from "../../lib/app-error.js";
 import {
   assertComplaintResponseSize,
   COMPLAINT_CURSOR_MAX_LENGTH,
@@ -85,7 +86,7 @@ function key(request: FastifyRequest) {
 }
 function exactQuery(request: FastifyRequest, allowed: readonly string[]) {
   const q = new URL(request.raw.url ?? "/", "http://internal").searchParams;
-  for (const k of q.keys())
+  for (const k of q.keys()) {
     if (!allowed.includes(k) || q.getAll(k).length !== 1)
       throw new z.ZodError([
         {
@@ -94,6 +95,13 @@ function exactQuery(request: FastifyRequest, allowed: readonly string[]) {
           message: "허용되지 않거나 중복된 query 항목입니다.",
         },
       ]);
+    if (k === "cursor" && q.get(k) === "")
+      throw new AppError(
+        400,
+        "INVALID_COMPLAINT_CURSOR",
+        "컴플레인 cursor가 올바르지 않습니다.",
+      );
+  }
 }
 function send(body: unknown) {
   assertComplaintResponseSize(body);
@@ -103,6 +111,9 @@ export function createComplaintRoutes(
   service: ComplaintService,
 ): FastifyPluginAsync {
   return async (app) => {
+    app.addHook("onRequest", async (_request, reply) => {
+      reply.header("cache-control", "no-store");
+    });
     const auth = [app.authenticate, app.requirePasswordChanged];
     const admin = [...auth, app.requireAdmin];
     app.get(

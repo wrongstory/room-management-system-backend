@@ -27,7 +27,7 @@ type Payload = {
 function invalid(): AppError {
   return new AppError(
     400,
-    "COMPLAINT_CURSOR_INVALID",
+    "INVALID_COMPLAINT_CURSOR",
     "컴플레인 cursor가 올바르지 않습니다.",
   );
 }

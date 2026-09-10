@@ -25,9 +25,13 @@ union all select pg_temp.pid(8),pg_temp.pid(108),'complaint-8','complaint-8','co
 union all select pg_temp.pid(9),pg_temp.pid(109),'complaint-9','complaint-9','complaint-9','complaint-9',0,
   'admin'::public.app_role,'active'::public.account_status,false;
 
+insert into auth.sessions(id,user_id)
+select pg_temp.pid(900+n),pg_temp.pid(100+n) from generate_series(1,9)n;
+
 create function pg_temp.approved_source(
   n integer,p_maid integer default 2,p_age interval default interval '1 day',
-  p_submission_status public.submission_status default 'approved',p_inspection text default 'approved'
+  p_submission_status public.submission_status default 'approved',p_inspection text default 'approved',
+  p_target_source text default 'manual_room_request'
 ) returns uuid language plpgsql as $$
 declare v_room public.rooms; v_target uuid:=pg_temp.pid(1000+n); v_assignment uuid:=pg_temp.pid(2000+n);
   v_attempt uuid:=pg_temp.pid(3000+n); v_submission uuid:=pg_temp.pid(4000+n);
@@ -38,7 +42,10 @@ begin
   insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,
     effective_service_date,available_from,due_at,status,assignment_version,room_type_snapshot,
     fee_snapshot,template_snapshot,created_by)
-  values(v_target,v_room.id,'additional','manual_room_request','complaint-source-'||n,
+  values(v_target,v_room.id,
+    (case when p_target_source in ('inspection_reclean','post_approval_complaint_reclean')
+      then 'reclean' else 'additional' end)::public.cleaning_kind,
+    p_target_source,'complaint-source-'||n,
     (v_at at time zone 'Asia/Seoul')::date,(v_at at time zone 'Asia/Seoul')::date,
     v_at-interval '2 hours',v_at+interval '2 hours',
     (case when p_submission_status='approved' and p_inspection='approved' then 'approved' else 'rejected' end)::public.cleaning_target_status,
@@ -65,7 +72,7 @@ end $$;
 select pg_temp.approved_source(1,2,interval '30 days');
 select pg_temp.approved_source(2,2,interval '30 days 1 second');
 select pg_temp.approved_source(3,2,interval '1 day','rejected','rejected');
-select pg_temp.approved_source(4,3,interval '1 day');
+select pg_temp.approved_source(4,3,interval '1 day','approved','approved','post_approval_complaint_reclean');
 select pg_temp.approved_source(5,2,interval '1 day');
 select pg_temp.approved_source(6,2,interval '1 day');
 select pg_temp.approved_source(7,2,interval '1 day');
@@ -82,6 +89,10 @@ select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pi
 select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5003),
   'cleanliness_general',0,'complaint-create-rejected',repeat('c',64))$$,
   '55000','COMPLAINT_SOURCE_NOT_APPROVED','rejected provenance is not complaint intake provenance');
+select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5004),
+  'cleanliness_general',0,'complaint-create-post-approval-reclean',repeat('c',64))$$,
+  '55000','COMPLAINT_SOURCE_NOT_APPROVED',
+  'post-approval complaint rework cannot become original complaint provenance');
 select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5005),
   'free-form customer text',0,'complaint-create-free-text',repeat('d',64))$$,
   '22023','INVALID_COMPLAINT_CATEGORY','category is source controlled');
@@ -185,7 +196,7 @@ select is((select count(*) from private.notification_outbox o join public.notifi
   where n.category like 'complaint_%'),7::bigint,'required notifications and outbox rows commit atomically');
 
 insert into complaint_results values('pre-corrected',public.create_complaint_case(
-  pg_temp.pid(1),pg_temp.pid(5004),'damage_or_loss',0,'complaint-create-pre-corrected',repeat('2',64)));
+  pg_temp.pid(1),pg_temp.pid(5001),'damage_or_loss',0,'complaint-create-pre-corrected',repeat('2',64)));
 select public.start_complaint_review(pg_temp.pid(1),
   (select (value->>'id')::uuid from complaint_results where label='pre-corrected'),1,
   'complaint-review-pre-corrected',repeat('3',64));
@@ -195,7 +206,7 @@ select public.decide_complaint_case(pg_temp.pid(1),
 select public.correct_complaint_decision(pg_temp.pid(1),
   (select (value->>'id')::uuid from complaint_results where label='pre-corrected'),3,
   'unverifiable',2,false,'complaint-correct-before-response',repeat('5',64));
-insert into complaint_results values('appeal-after-correction',public.respond_to_complaint(pg_temp.pid(3),
+insert into complaint_results values('appeal-after-correction',public.respond_to_complaint(pg_temp.pid(2),
   (select (value->>'id')::uuid from complaint_results where label='pre-corrected'),4,
   'appealed','timeline_mismatch','complaint-appeal-after-correction',repeat('6',64)));
 select is((select value->'maidResponse'->>'decisionId' from complaint_results where label='appeal-after-correction'),
@@ -281,6 +292,26 @@ select lives_ok($$select public.close_complaint_case(pg_temp.pid(1),
   'complaint-close-deadline-past',repeat('e',64))$$,
   'no-response case may close only after the inclusive seven-day window expires');
 
+alter table public.earnings disable trigger earnings_append_only;
+alter table public.earnings alter column earning_entitlement_id drop not null;
+update public.earnings set earning_entitlement_id=null where id=pg_temp.pid(5008);
+alter table public.earnings enable trigger earnings_append_only;
+select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5008),
+  'cleanliness_general',0,'complaint-create-null-entitlement',repeat('f',64))$$,
+  '55000','COMPLAINT_SOURCE_NOT_APPROVED',
+  'a future compensation-shaped NULL original entitlement fails closed instead of passing SQL NULL');
+alter table public.earnings disable trigger earnings_append_only;
+update public.earnings set earning_entitlement_id=submission_id where id=pg_temp.pid(5008);
+alter table public.earnings alter column earning_entitlement_id set not null;
+alter table public.earnings enable trigger earnings_append_only;
+
+select is((select bool_and(not requires_action) from public.notifications
+  where category in ('complaint_received','complaint_corrected','complaint_acknowledged','complaint_closed')),true,
+  'received, correction, acknowledgement, and close notices are informational');
+select is((select bool_and(requires_action) from public.notifications
+  where category in ('complaint_decided','complaint_appealed')),true,
+  'initial decision and unresolved appeal notices retain their intended action flag');
+
 select ok(not exists(select 1 from information_schema.columns where table_schema='public'
   and table_name in ('complaint_cases','complaint_decisions','complaint_maid_responses','complaint_case_events')
   and column_name ~ '(note|detail|body|customer|phone|pin|photo|locator|payload|error)'),
@@ -297,6 +328,10 @@ select ok(has_function_privilege('service_role','public.create_complaint_case(uu
   and has_function_privilege('service_role','public.list_complaint_cases_page(uuid,timestamptz,timestamptz,timestamptz,uuid,integer)','EXECUTE')
   and not has_function_privilege('authenticated','public.create_complaint_case(uuid,uuid,text,bigint,text,text)','EXECUTE'),
   'Data API grants expose reviewed complaint RPCs only to service_role');
+select ok(has_function_privilege('authenticated','private.complaint_rls_session_is_active()','EXECUTE')
+  and not has_function_privilege('anon','private.complaint_rls_session_is_active()','EXECUTE')
+  and not has_function_privilege('service_role','private.complaint_rls_session_is_active()','EXECUTE'),
+  'session predicate grants only the authenticated policy execution role');
 select lives_ok($$select public.record_authorization_denial(pg_temp.pid(6),
   'edge.authorization.complaints','COMPLAINT_ACCESS_REQUIRED',clock_timestamp())$$,
   'complaint authorization denial uses a source-controlled aggregate');
@@ -313,27 +348,125 @@ select throws_ok($$select public.list_complaint_cases_page(pg_temp.pid(1),transa
 select throws_ok($$select public.list_complaint_cases_page(pg_temp.pid(1),transaction_timestamp()-interval '1 day',
   transaction_timestamp()+interval '1 day',null,null,101)$$,'22023','COMPLAINT_PAGE_LIMIT_INVALID','list page is bounded to 100');
 select throws_ok($$select public.list_complaint_cases_page(pg_temp.pid(1),transaction_timestamp()-interval '1 day',
-  transaction_timestamp()+interval '1 day',transaction_timestamp(),null,50)$$,'22023','COMPLAINT_CURSOR_INVALID','partial cursor is rejected');
+  transaction_timestamp()+interval '1 day',transaction_timestamp(),null,50)$$,'22023','INVALID_COMPLAINT_CURSOR','partial cursor is rejected');
 
 create temporary table complaint_rls_counts as select
   (select count(*) from public.complaint_cases) all_cases,
-  (select count(*) from public.complaint_cases where maid_profile_id=pg_temp.pid(2)) maid_cases;
+  (select count(*) from public.complaint_decisions) all_decisions,
+  (select count(*) from public.complaint_maid_responses) all_responses,
+  (select count(*) from public.complaint_case_events) all_events,
+  (select count(*) from public.complaint_cases where maid_profile_id=pg_temp.pid(2)) maid_cases,
+  (select count(*) from public.complaint_decisions d join public.complaint_cases c
+    on c.id=d.complaint_case_id where c.maid_profile_id=pg_temp.pid(2)) maid_decisions,
+  (select count(*) from public.complaint_maid_responses r join public.complaint_cases c
+    on c.id=r.complaint_case_id where c.maid_profile_id=pg_temp.pid(2)) maid_responses,
+  (select count(*) from public.complaint_case_events e join public.complaint_cases c
+    on c.id=e.complaint_case_id where c.maid_profile_id=pg_temp.pid(2)) maid_events;
 grant select on complaint_rls_counts to authenticated;
+
+set local role authenticated;
+set local request.jwt.claim.sub='10000000-0000-4000-8000-000000000101';
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000101"}';
+select is((select count(*) from public.complaint_cases),0::bigint,
+  'missing session claim hides complaint_cases');
+select is((select count(*) from public.complaint_decisions),0::bigint,
+  'missing session claim hides complaint_decisions');
+select is((select count(*) from public.complaint_maid_responses),0::bigint,
+  'missing session claim hides complaint_maid_responses');
+select is((select count(*) from public.complaint_case_events),0::bigint,
+  'missing session claim hides complaint_case_events');
+
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000101","session_id":"not-a-uuid"}';
+select is((select count(*) from public.complaint_cases),0::bigint,
+  'malformed session claim hides complaint_cases without a cast error');
+select is((select count(*) from public.complaint_decisions),0::bigint,
+  'malformed session claim hides complaint_decisions without a cast error');
+select is((select count(*) from public.complaint_maid_responses),0::bigint,
+  'malformed session claim hides complaint_maid_responses without a cast error');
+select is((select count(*) from public.complaint_case_events),0::bigint,
+  'malformed session claim hides complaint_case_events without a cast error');
+
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000101","session_id":"10000000-0000-4000-8000-000000000999"}';
+select is((select count(*) from public.complaint_cases),0::bigint,
+  'missing auth.sessions row hides complaint_cases');
+select is((select count(*) from public.complaint_decisions),0::bigint,
+  'missing auth.sessions row hides complaint_decisions');
+select is((select count(*) from public.complaint_maid_responses),0::bigint,
+  'missing auth.sessions row hides complaint_maid_responses');
+select is((select count(*) from public.complaint_case_events),0::bigint,
+  'missing auth.sessions row hides complaint_case_events');
+
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000101","session_id":"10000000-0000-4000-8000-000000000902"}';
+select is((select count(*) from public.complaint_cases),0::bigint,
+  'session bound to another auth user hides complaint_cases');
+select is((select count(*) from public.complaint_decisions),0::bigint,
+  'session bound to another auth user hides complaint_decisions');
+select is((select count(*) from public.complaint_maid_responses),0::bigint,
+  'session bound to another auth user hides complaint_maid_responses');
+select is((select count(*) from public.complaint_case_events),0::bigint,
+  'session bound to another auth user hides complaint_case_events');
+
+reset role;
+update auth.sessions set not_after=clock_timestamp()-interval '1 second' where id=pg_temp.pid(901);
+set local role authenticated;
+set local request.jwt.claim.sub='10000000-0000-4000-8000-000000000101';
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000101","session_id":"10000000-0000-4000-8000-000000000901"}';
+select is((select count(*) from public.complaint_cases),0::bigint,
+  'expired auth session hides complaint_cases');
+select is((select count(*) from public.complaint_decisions),0::bigint,
+  'expired auth session hides complaint_decisions');
+select is((select count(*) from public.complaint_maid_responses),0::bigint,
+  'expired auth session hides complaint_maid_responses');
+select is((select count(*) from public.complaint_case_events),0::bigint,
+  'expired auth session hides complaint_case_events');
+reset role;
+update auth.sessions set not_after=null where id=pg_temp.pid(901);
+
+set local role authenticated;
+set local request.jwt.claim.sub='10000000-0000-4000-8000-000000000101';
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000101","session_id":"10000000-0000-4000-8000-000000000901"}';
+select is((select count(*) from public.complaint_cases),(select all_cases from pg_temp.complaint_rls_counts),
+  'valid exact admin session authorizes complaint_cases');
+select is((select count(*) from public.complaint_decisions),(select all_decisions from pg_temp.complaint_rls_counts),
+  'valid exact admin session authorizes complaint_decisions');
+select is((select count(*) from public.complaint_maid_responses),(select all_responses from pg_temp.complaint_rls_counts),
+  'valid exact admin session authorizes complaint_maid_responses');
+select is((select count(*) from public.complaint_case_events),(select all_events from pg_temp.complaint_rls_counts),
+  'valid exact admin session authorizes complaint_case_events');
+reset role;
+
 set local role authenticated;
 set local request.jwt.claim.sub='10000000-0000-4000-8000-000000000102';
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000102","session_id":"10000000-0000-4000-8000-000000000902"}';
 select is((select count(*) from public.complaint_cases),(select maid_cases from pg_temp.complaint_rls_counts),
   'active password-complete maid sees only self complaints');
+select is((select count(*) from public.complaint_decisions),(select maid_decisions from pg_temp.complaint_rls_counts),
+  'active password-complete maid sees only self complaint decisions');
+select is((select count(*) from public.complaint_maid_responses),(select maid_responses from pg_temp.complaint_rls_counts),
+  'active password-complete maid sees only self complaint responses');
+select is((select count(*) from public.complaint_case_events),(select maid_events from pg_temp.complaint_rls_counts),
+  'active password-complete maid sees only self complaint events');
 select is((select count(*) from public.complaint_cases where maid_profile_id=pg_temp.pid(3)),0::bigint,
   'maid RLS denies cross-maid rows');
 reset role;
+
 set local role authenticated;
 set local request.jwt.claim.sub='10000000-0000-4000-8000-000000000106';
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000106","session_id":"10000000-0000-4000-8000-000000000906"}';
 select is((select count(*) from public.complaint_cases),0::bigint,'developer RLS sees no complaint cases');
 reset role;
+
 set local role authenticated;
-set local request.jwt.claim.sub='10000000-0000-4000-8000-000000000101';
-select is((select count(*) from public.complaint_cases),(select all_cases from pg_temp.complaint_rls_counts),
-  'active password-complete admin sees complaint cases');
+set local request.jwt.claim.sub='10000000-0000-4000-8000-000000000104';
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000104","session_id":"10000000-0000-4000-8000-000000000904"}';
+select is((select count(*) from public.complaint_cases),0::bigint,'inactive admin RLS sees no complaint cases');
+reset role;
+
+set local role authenticated;
+set local request.jwt.claim.sub='10000000-0000-4000-8000-000000000108';
+set local request.jwt.claims='{"sub":"10000000-0000-4000-8000-000000000108","session_id":"10000000-0000-4000-8000-000000000908"}';
+select is((select count(*) from public.complaint_cases),0::bigint,
+  'temporary-password admin RLS sees no complaint cases');
 reset role;
 
 select * from finish();

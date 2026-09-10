@@ -55,7 +55,7 @@ Deno.test("complaint cursor is signed and bound to actor, range, and stream", as
     await decodeComplaintCursor(cursor, changed);
   } catch (error) {
     denied = error instanceof EdgeError &&
-      error.code === "COMPLAINT_CURSOR_INVALID";
+      error.code === "INVALID_COMPLAINT_CURSOR";
   }
   assert(denied, "scope tampering denied");
 });
