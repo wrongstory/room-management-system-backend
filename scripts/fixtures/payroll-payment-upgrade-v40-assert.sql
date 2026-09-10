@@ -95,14 +95,29 @@ begin
   -- exists. No-event history remains readable without an invented attempt.
   select id into v_attempt from public.payroll_payment_attempts
   where payroll_cycle_id=pg_temp.upgrade_pid(7002);
+  begin
+    update public.payroll_cycles
+    set status='paid',paid_at=clock_timestamp(),check_reason='NEW_FREE_FORM_REASON',version=version+1
+    where id=pg_temp.upgrade_pid(7002);
+    raise exception 'UPGRADE_V40_ACCEPTED_CHANGED_LEGACY_REASON_ON_PAID';
+  exception when check_violation then
+    if sqlerrm<>'PAYROLL_PAYMENT_REASON_INVALID' then raise; end if;
+  end;
   perform public.record_payroll_payment_paid(
     pg_temp.upgrade_pid(1),v_attempt,2,'bank_transfer','UPGRADE-A12',
     'upgrade-legacy-check-paid',repeat('2',64)
   );
   if (select status from public.payroll_cycles where id=pg_temp.upgrade_pid(7002))<>'paid'
+    or (select check_reason from public.payroll_cycles where id=pg_temp.upgrade_pid(7002))
+      <> 'LEGACY_BANK_STATUS_PENDING'
     or (select count(*) from public.payroll_payment_results
       where payment_attempt_id=v_attempt and result_type='paid')<>1 then
-    raise exception 'UPGRADE_V40_LEGACY_CHECK_PAID_FAILED';
+    raise exception 'UPGRADE_V40_LEGACY_CHECK_PAID_REASON_NOT_PRESERVED';
+  end if;
+  v_projection:=private.project_payroll_cycle_bounded(date '2026-07-13',pg_temp.upgrade_pid(3),10);
+  if v_projection->>'checkReasonCode'<>'TRANSFER_RESULT_UNCERTAIN'
+    or v_projection::text like '%LEGACY_BANK_STATUS_PENDING%' then
+    raise exception 'UPGRADE_V40_PAID_PROJECTION_LEAKED_LEGACY_REASON';
   end if;
   if exists(select 1 from public.payroll_payment_attempts where payroll_cycle_id=pg_temp.upgrade_pid(7003)) then
     raise exception 'UPGRADE_V40_INFERRED_NO_EVENT_ATTEMPT';

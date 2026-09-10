@@ -157,6 +157,9 @@ select throws_ok($$select pg_temp.reopen_without_evidence((select id from public
 select lives_ok($$select public.record_payroll_payment_paid(pg_temp.pid(1),
   (select id from public.payroll_payment_attempts order by started_at desc limit 1),2,
   'bank_transfer','REF:AB12','payment-paid-2',repeat('5',64))$$,'same CHECK attempt transitions to PAID');
+select ok((select status='paid' and check_reason is null
+  from public.payroll_cycles where maid_profile_id=pg_temp.pid(2) and week_start=pg_temp.week(-3)),
+  'v40 fixed CHECK reason is cleared by the current PAID transition contract');
 select is((select count(*) from public.payroll_payment_results where result_type='check'),1::bigint,
   'CHECK history remains immutable after PAID');
 
@@ -318,14 +321,36 @@ set constraints private.payroll_payment_projection_requires_evidence,
   public.payroll_payment_attempt_requires_transition,
   public.payroll_payment_result_requires_transition deferred;
 
+select ok(not has_table_privilege('authenticated','public.payroll_cycles','SELECT'),
+  'authenticated has no table-level payroll cycle SELECT that could expose raw reasons');
+select ok(has_column_privilege('authenticated','public.payroll_cycles','id','SELECT')
+  and has_column_privilege('authenticated','public.payroll_cycles','status','SELECT')
+  and has_column_privilege('authenticated','public.payroll_cycles','version','SELECT')
+  and not has_column_privilege('authenticated','public.payroll_cycles','check_reason','SELECT')
+  and not has_column_privilege('authenticated','public.payroll_cycles','last_reopen_reason','SELECT'),
+  'authenticated receives only safe payroll cycle columns and no raw reason columns');
+
 set local role authenticated;
 set local request.jwt.claims='{"sub":"10300000-0000-4000-8000-000000000101","session_id":"10300000-0000-4000-8000-000000000901"}';
+select ok((select count(*)>0 from public.payroll_cycles),
+  'live exact admin session reads safe payroll cycle columns');
+select throws_ok($$select check_reason from public.payroll_cycles$$,'42501',
+  'permission denied for table payroll_cycles','admin Data API cannot read raw check reasons');
+select throws_ok($$select last_reopen_reason from public.payroll_cycles$$,'42501',
+  'permission denied for table payroll_cycles','admin Data API cannot read raw reopen reasons');
 select ok((select count(*)>0 from public.payroll_payment_attempts),'live exact admin session reads attempt evidence');
 select ok((select count(*)>0 from public.payroll_payment_results),'live exact admin session reads result evidence');
 set local request.jwt.claims='{"sub":"10300000-0000-4000-8000-000000000102","session_id":"10300000-0000-4000-8000-000000000902"}';
+select ok((select count(*)>0 and bool_and(maid_profile_id=pg_temp.pid(2)) from public.payroll_cycles),
+  'live maid reads only their own safe payroll cycle columns');
+select throws_ok($$select check_reason from public.payroll_cycles$$,'42501',
+  'permission denied for table payroll_cycles','maid Data API cannot read raw check reasons');
+select throws_ok($$select last_reopen_reason from public.payroll_cycles$$,'42501',
+  'permission denied for table payroll_cycles','maid Data API cannot read raw reopen reasons');
 select is((select count(*) from public.payroll_payment_attempts),0::bigint,'maid raw attempt evidence is hidden');
 select is((select count(*) from public.payroll_payment_results),0::bigint,'maid raw result/reference evidence is hidden');
 set local request.jwt.claims='{"sub":"10300000-0000-4000-8000-000000000101"}';
+select is((select count(*) from public.payroll_cycles),0::bigint,'missing live session claim hides safe payroll cycles');
 select is((select count(*) from public.payroll_payment_attempts),0::bigint,'missing live session claim hides attempts');
 select is((select count(*) from public.payroll_payment_results),0::bigint,'missing live session claim fails closed');
 set local request.jwt.claims='{"sub":"10300000-0000-4000-8000-000000000101","session_id":"bad"}';
@@ -335,6 +360,7 @@ set local request.jwt.claims='{"sub":"10300000-0000-4000-8000-000000000101","ses
 select is((select count(*) from public.payroll_payment_attempts),0::bigint,'session bound to another user hides attempts');
 select is((select count(*) from public.payroll_payment_results),0::bigint,'session bound to another user fails closed');
 set local request.jwt.claims='{"sub":"10300000-0000-4000-8000-000000000103","session_id":"10300000-0000-4000-8000-000000000903"}';
+select is((select count(*) from public.payroll_cycles),0::bigint,'temporary-password admin safe payroll cycles are hidden');
 select is((select count(*) from public.payroll_payment_results),0::bigint,'temporary-password admin raw evidence is hidden');
 set local request.jwt.claims='{"sub":"10300000-0000-4000-8000-000000000104","session_id":"10300000-0000-4000-8000-000000000904"}';
 select is((select count(*) from public.payroll_payment_results),0::bigint,'developer raw evidence is hidden');

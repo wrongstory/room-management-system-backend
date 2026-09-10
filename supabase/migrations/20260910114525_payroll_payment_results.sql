@@ -462,7 +462,12 @@ begin
       and new.check_reason is distinct from 'TRANSFER_RESULT_UNCERTAIN' then
       raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
     end if;
-    if new.status<>'check' and new.check_reason is not null then
+    if new.status<>'check' and new.check_reason is not null and not (
+      old.status='check' and new.status='paid'
+      and old.check_reason is not null
+      and old.check_reason<>'TRANSFER_RESULT_UNCERTAIN'
+      and new.check_reason is not distinct from old.check_reason
+    ) then
       raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
     end if;
   end if;
@@ -786,7 +791,15 @@ begin
     or v_cycle.locked_amount<>v_attempt.locked_amount or v_amounts.payable_amount<>v_attempt.locked_amount then
     raise exception using errcode='23514',message='PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH'; end if;
   v_before:=v_cycle.status;
-  update public.payroll_cycles set status='paid',paid_at=v_now,check_reason=null,version=version+1,
+  update public.payroll_cycles set status='paid',paid_at=v_now,
+    check_reason=case
+      when v_cycle.status='check'
+        and v_cycle.check_reason is not null
+        and v_cycle.check_reason<>'TRANSFER_RESULT_UNCERTAIN'
+      then v_cycle.check_reason
+      else null
+    end,
+    version=version+1,
     updated_at=v_now where id=v_cycle.id and version=v_cycle.version returning * into v_cycle;
   begin
     insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
@@ -946,6 +959,18 @@ comment on column public.payroll_payment_results.canonical_reference is
 revoke all privileges on public.payroll_payment_attempts,public.payroll_payment_results
 from public,anon,authenticated,service_role;
 grant select on public.payroll_payment_attempts,public.payroll_payment_results to authenticated;
+
+-- v39 exposed free-form operational reasons on the raw table. Keep the safe
+-- payroll columns and row-level admin/self scope, but remove both reason
+-- columns from authenticated Data API privileges. Table SELECT must be revoked
+-- before column grants because it otherwise overrides column-level revocation.
+revoke select on public.payroll_cycles from authenticated;
+revoke select(check_reason,last_reopen_reason) on public.payroll_cycles from authenticated;
+grant select(
+  id,maid_profile_id,week_start,status,locked_amount,payment_started_by,
+  payment_started_at,paid_at,version,created_at,updated_at,last_reopened_by,
+  last_reopened_at,offset_settled_at,offset_settled_by
+) on public.payroll_cycles to authenticated;
 
 revoke all on function public.record_payroll_payment_check(uuid,uuid,bigint,text,text,text),
   public.record_payroll_payment_paid(uuid,uuid,bigint,text,text,text,text),
