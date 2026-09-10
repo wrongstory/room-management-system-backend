@@ -90,7 +90,7 @@ export function authorizationSourceForPath(
   if (path.startsWith("/v1/reservations")) {
     return "edge.authorization.reservations";
   }
-  if (path === "/v1/payroll" || path === "/v1/payroll/start") {
+  if (path === "/v1/payroll" || path.startsWith("/v1/payroll/")) {
     return "edge.authorization.payroll";
   }
   if (path === "/v1/complaints" || path.startsWith("/v1/complaints/")) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildApp, type AppServices } from '../src/app.js';
+import { type AppServices, buildApp } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 
 const env: AppEnv = {
@@ -134,6 +134,7 @@ function services(): AppServices {
         nextCursor: null
       })),
       start: vi.fn()
+      , correct: vi.fn(), reverse: vi.fn(), carryForward: vi.fn(), carryLateEarning: vi.fn()
     }
   };
 }
@@ -582,6 +583,8 @@ describe('application', () => {
       lateEarningAmount: 0,
       lateEarnings: [],
       lateEarningsNextCursor: null
+      , offsetSettled: false, adjustmentAmount: 0, carryInAmount: 0,
+      carryOutAmount: 0, payableAmount: 30000, adjustmentCount: 0
     }));
     const app = await buildApp({ env, services: appServices, logger: false });
     const response = await app.inject({
@@ -635,6 +638,54 @@ describe('application', () => {
       }
     });
     expect(queryAlias.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('ports signed correction, reversal, carry-forward and late earning carry with no-store', async () => {
+    const appServices = services();
+    const adjustment = {
+      adjustmentId: '71000000-0000-4000-8000-000000000001', maidProfileId: '62000000-0000-4000-8000-000000000001',
+      bookVersion: 1, amount: -1000, currency: 'KRW' as const, reasonCode: 'earning_correction' as const,
+      rootEarningId: '72000000-0000-4000-8000-000000000001', correctionOfEarningId: '72000000-0000-4000-8000-000000000001',
+      availableWeekStart: '2026-08-24', createdAt: '2026-09-10T00:00:00Z', alreadyClaimed: false
+    };
+    appServices.payroll.correct = vi.fn(async () => adjustment);
+    appServices.payroll.reverse = vi.fn(async () => ({ ...adjustment, bookVersion: 2, amount: 1000,
+      reasonCode: 'adjustment_reversal' as const, correctionOfEarningId: undefined,
+      reversalOfAdjustmentId: adjustment.adjustmentId }));
+    appServices.payroll.carryLateEarning = vi.fn(async () => ({ ...adjustment, amount: 1000,
+      reasonCode: 'late_earning_carry' as const, correctionOfEarningId: undefined,
+      lateCarriedEarningId: adjustment.rootEarningId }));
+    appServices.payroll.carryForward = vi.fn(async () => ({
+      cycleId: '73000000-0000-4000-8000-000000000001', maidProfileId: adjustment.maidProfileId,
+      weekStart: '2026-08-24', status: 'open' as const, version: 1, lockedAmount: null,
+      paymentStartedAt: null, itemCount: 0, totalAmount: 0, items: [], itemsNextCursor: null,
+      lateEarningCount: 0, lateEarningAmount: 0, lateEarnings: [], lateEarningsNextCursor: null,
+      offsetSettled: true, adjustmentAmount: -1000, carryInAmount: 0, carryOutAmount: -1000,
+      payableAmount: -1000, adjustmentCount: 1
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const requests = [
+      ['POST', '/v1/payroll/adjustments/corrections', { sourceEarningId: adjustment.rootEarningId, amount: -1000, expectedVersion: 0 }, 201],
+      ['POST', '/v1/payroll/adjustments/reversals', { sourceAdjustmentId: adjustment.adjustmentId, expectedVersion: 1 }, 201],
+      ['POST', '/v1/payroll/carry-forward', { maidProfileId: adjustment.maidProfileId, weekStart: '2026-08-24', expectedVersion: 0 }, 200],
+      ['POST', `/v1/payroll/late-earnings/${adjustment.rootEarningId}/carry`, { expectedVersion: 1 }, 201]
+    ] as const;
+    for (const [method, url, payload, status] of requests) {
+      const response = await app.inject({ method, url, payload, headers: {
+        authorization: 'Bearer access-token', 'idempotency-key': `payroll-${status}-${url.length}`
+      } });
+      expect(response.statusCode, url).toBe(status);
+      expect(response.headers['cache-control'], url).toBe('no-store');
+    }
+    const unauthorized = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/carry-forward',
+      headers: { 'idempotency-key': 'payroll-no-store-error' },
+      payload: { maidProfileId: adjustment.maidProfileId, weekStart: '2026-08-24', expectedVersion: 0 }
+    });
+    expect(unauthorized.statusCode).toBe(401);
+    expect(unauthorized.headers['cache-control']).toBe('no-store');
     await app.close();
   });
 

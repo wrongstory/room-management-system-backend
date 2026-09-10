@@ -1005,6 +1005,8 @@ Table public.payroll_cycles {
   last_reopen_reason text
   last_reopened_by uuid [ref: > public.profiles.id]
   last_reopened_at timestamptz
+  offset_settled_at timestamptz
+  offset_settled_by uuid [ref: > public.profiles.id]
   version bigint [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
@@ -1055,13 +1057,80 @@ Table public.payroll_events {
 
 Table public.payroll_adjustments {
   id uuid [pk]
-  payroll_cycle_id uuid [not null]
-  amount int [not null]
-  reason_code text [not null]
+  maid_profile_id uuid [not null]
+  book_version bigint [not null]
+  amount int [not null, note: 'Signed, non-zero KRW delta']
+  currency text [not null, default: 'KRW']
+  reason_code text [not null, note: 'earning_correction/adjustment_correction/earning_reversal/adjustment_reversal/late_earning_carry']
+  root_earning_id uuid [not null]
+  correction_of_earning_id uuid
+  correction_of_adjustment_id uuid
+  reversal_of_earning_id uuid [unique]
+  reversal_of_adjustment_id uuid [unique]
+  late_carried_earning_id uuid [unique]
+  available_week_start date [not null]
   created_by uuid [not null]
   created_at timestamptz [not null]
 
-  Note: 'Future design draft only. No payroll_adjustments table or adjustment command is implemented by #93.'
+  Indexes {
+    (maid_profile_id, book_version) [unique]
+    (maid_profile_id, available_week_start, created_at, id)
+    (root_earning_id, created_at, id)
+  }
+
+  Note: '#102 immutable typed signed ledger. Exactly one source FK is non-null; exact full reversal is unique and root cumulative entitlement cannot become negative.'
+}
+
+Table public.payroll_adjustment_books {
+  maid_profile_id uuid [pk]
+  version bigint [not null]
+  updated_at timestamptz [not null]
+}
+
+Table public.payroll_adjustment_items {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null]
+  adjustment_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  locked_amount int [not null]
+  created_at timestamptz [not null]
+}
+
+Table public.payroll_residual_carries {
+  id uuid [pk]
+  maid_profile_id uuid [not null]
+  source_settlement_id uuid [not null, unique]
+  available_week_start date [not null]
+  amount int [not null, note: 'Positive magnitude of prior negative residual']
+  currency text [not null, default: 'KRW']
+  created_at timestamptz [not null]
+}
+
+Table public.payroll_carry_items {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null]
+  carry_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  locked_amount int [not null]
+  created_at timestamptz [not null]
+}
+
+Table public.payroll_offset_settlements {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  week_start date [not null]
+  cycle_version bigint [not null]
+  earning_amount int [not null]
+  adjustment_amount int [not null]
+  carry_in_amount int [not null]
+  net_amount int [not null, note: 'Zero or negative']
+  carry_out_id uuid [unique]
+  settled_by uuid [not null]
+  settled_at timestamptz [not null]
+  currency text [not null, default: 'KRW']
+
+  Note: '#102 immutable non-positive offset settlement. No PAYING/PAID event; negative magnitude moves only to the immediately following KST week.'
 }
 
 Table public.notifications {
@@ -1487,14 +1556,34 @@ Ref: public.compensation_entitlements.submission_id - public.cleaning_submission
 Ref: public.compensation_entitlements.inspection_decision_id - public.inspection_decisions.id
 Ref: public.payroll_cycles.maid_profile_id > public.profiles.id
 Ref: public.payroll_cycles.payment_started_by > public.profiles.id
+Ref: public.payroll_cycles.offset_settled_by > public.profiles.id
 Ref: public.payroll_items.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_items.earning_id > public.earnings.id
 Ref: public.payroll_items.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_events.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.actor_profile_id > public.profiles.id
-Ref: public.payroll_adjustments.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_adjustment_books.maid_profile_id - public.profiles.id
+Ref: public.payroll_adjustments.maid_profile_id > public.profiles.id
+Ref: public.payroll_adjustments.root_earning_id > public.earnings.id
+Ref: public.payroll_adjustments.correction_of_earning_id > public.earnings.id
+Ref: public.payroll_adjustments.correction_of_adjustment_id > public.payroll_adjustments.id
+Ref: public.payroll_adjustments.reversal_of_earning_id > public.earnings.id
+Ref: public.payroll_adjustments.reversal_of_adjustment_id > public.payroll_adjustments.id
+Ref: public.payroll_adjustments.late_carried_earning_id > public.earnings.id
 Ref: public.payroll_adjustments.created_by > public.profiles.id
+Ref: public.payroll_adjustment_items.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_adjustment_items.adjustment_id - public.payroll_adjustments.id
+Ref: public.payroll_adjustment_items.maid_profile_id > public.profiles.id
+Ref: public.payroll_residual_carries.maid_profile_id > public.profiles.id
+Ref: public.payroll_residual_carries.source_settlement_id - public.payroll_offset_settlements.id
+Ref: public.payroll_carry_items.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_carry_items.carry_id - public.payroll_residual_carries.id
+Ref: public.payroll_carry_items.maid_profile_id > public.profiles.id
+Ref: public.payroll_offset_settlements.payroll_cycle_id - public.payroll_cycles.id
+Ref: public.payroll_offset_settlements.maid_profile_id > public.profiles.id
+Ref: public.payroll_offset_settlements.carry_out_id - public.payroll_residual_carries.id
+Ref: public.payroll_offset_settlements.settled_by > public.profiles.id
 Ref: public.notifications.recipient_profile_id > public.profiles.id
 Ref: public.notifications.room_id > public.rooms.id
 Ref: public.notifications.cleaning_target_id > public.cleaning_targets.id

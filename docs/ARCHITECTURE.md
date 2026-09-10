@@ -104,9 +104,9 @@ Decision Issue #94는 아래 도메인 경계를 확정했다. 이 절은 후속
   금지하고 `paidAt`은 server 시각이다. 영수증·계좌·수취인 PII를 저장하지 않는다. 모든 관리자 command는
   actor, `expectedVersion`, scoped idempotency/request hash와 audit을 요구한다.
 
-#100 complaint/appeal/correction은 PR #104로 dev에 통합됐다. compensation provenance,
-adjustment/carry-forward, `CHECK/PAID` command와 지급 evidence는 각각 #101~#103 후속 범위이고
-main/recovery/production에는 적용되지 않았다.
+#100 complaint/appeal/correction과 #101 compensation provenance는 각각 PR #104/#105로 dev에 통합됐다.
+#102 adjustment/carry-forward는 아래 source PR 후보이며 `CHECK/PAID` command와 지급 evidence는 #103 후속
+범위다. main/recovery/production에는 적용되지 않았다.
 
 ### #100 컴플레인·이의·정정 수명주기 — source/dev 완료, production 미승격
 
@@ -135,7 +135,7 @@ actor/complaint stream에 고정하고 HTTP JSON은 128 KiB를 넘으면 실패�
 세션은 cast 오류나 정보 노출 없이 0행으로 실패한다. 모든 Fastify/Edge 성공·오류 응답은
 `Cache-Control: no-store`이며 빈 cursor도 `INVALID_COMPLAINT_CURSOR` 400으로 동일하게 거부한다.
 
-### #101 컴플레인 재작업·typed compensation earning — source PR 검토 중, production 미승격
+### #101 컴플레인 재작업·typed compensation earning — source/dev 완료, production 미승격
 
 38번째 append-only migration은 기존 37개와 #31 원청소 earning identity를 수정하지 않는다.
 `post_approval_complaint_reclean` target은 confirmed current complaint decision과 immutable typed FK로 연결하며
@@ -164,6 +164,33 @@ business admin만 허용하고 original/assignee maid HTTP projection은 서로�
 노출하지 않는다. developer 감사 목록은 `complaint.rework_materialized`와 `compensation.earned`의 source-controlled
 safe summary만 추가하며 raw state/request hash/idempotency key/maid cross-sensitive 식별자는 반환하지 않는다.
 Fastify/Edge/OpenAPI 후보는 86 paths / 93 operations이며 production은 변경하지 않았다.
+
+### #102 signed adjustment·순차 carry-forward — source PR 후보, production 미승격
+
+39번째 append-only migration은 기존 38개 migration과 earning/compensation provenance를 수정하지 않는다.
+`payroll_adjustments`는 correction/reversal/late carry source 중 정확히 하나의 typed FK를 가지며 client reason을
+받지 않는다. correction은 signed delta이고 reversal은 source의 미반전 전액을 정확히 반대 부호로 한 번만
+기록한다. reversal-of-reversal은 같은 규칙의 append-only inverse chain으로 허용하되 root earning의 누적
+entitlement는 0 미만이 될 수 없다. complaint penalty는 이 원장을 자동 생성하지 않는다.
+
+모든 payroll mutation은 scoped receipt, global advisory lock, actor, maid별 adjustment book, cycle, 정렬된 source
+순으로 잠근다. `start`는 earning + adjustment - carry의 payable이 0 이하면 쓰기 없이
+`PAYROLL_NONPOSITIVE_REQUIRES_CARRY`로 실패한다. 별도 carry-forward command만 OPEN candidate를 claim해
+immutable offset settlement를 기록하고 cycle version을 증가시키며 payment event는 만들지 않는다. net 0은
+carry row가 없고, net 음수의 절댓값만 바로 다음 KST 월요일 주차에 immutable residual로 생성한다. 그 다음
+주차도 non-positive면 같은 command를 다시 실행해야 하며 더 늦은 주차가 residual을 건너뛰어 선점할 수 없다.
+
+offset settlement가 있는 OPEN cycle은 경제적으로 동결되어 이후 PAYING 전환을 거부한다. PAID 또는
+offset-settled cycle에 늦게 승인된 earning은 late projection에 남고, active password-complete business admin의
+명시적 command가 원 earning을 수정하지 않은 채 바로 다음 주차에 positive `late_earning_carry` adjustment를
+exactly once 만든 뒤에만 원 주차 late projection에서 제외된다. PAYING/CHECK는 #103 결과 확정 전 fail-closed다.
+
+Fastify와 Edge는 동일한 4개 command route와 bounded cycle/entry projection을 사용한다. 응답은
+`offsetSettled`, signed `adjustmentAmount/carryInAmount/carryOutAmount/payableAmount`를 포함하고 128 KiB 상한,
+signed cursor, `Cache-Control: no-store`를 유지한다. 새 여섯 public ledger table은 live `auth.sessions`와 최신
+role/password/maid-self를 함께 확인하는 RLS만 허용한다. 감사 API는 네 source-controlled payroll event의 금액,
+maid 식별자, raw state/request hash를 제거한 safe summary만 제공한다. 후보 계약은 39 migrations / 90 paths /
+97 operations이며 #103 payment result/provider와 production/main/recovery는 변경하지 않는다.
 
 ```mermaid
 flowchart LR

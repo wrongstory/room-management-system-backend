@@ -158,7 +158,7 @@ export async function testPayrollConcurrency(client, adminProfileId) {
     `"instanceCount":1}]','${adminProfileId}');`
   );
 
-  const weeks = [-1, -2, -3].map((offset) => sql(
+  const weeks = [-1, -2, -3, -4, -5].map((offset) => sql(
     `select (date_trunc('week',clock_timestamp() at time zone 'Asia/Seoul')::date` +
     `${offset < 0 ? `-${Math.abs(offset * 7)}` : `+${offset * 7}`})::text;`
   ));
@@ -311,5 +311,103 @@ export async function testPayrollConcurrency(client, adminProfileId) {
   assert(lateProjection.lateEarningCount === 1 && lateProjection.lateEarningAmount === 19000,
     'start-first late earning remains explicitly visible and unclaimed for a future OPEN retry');
 
-  console.log('Payroll concurrency passed: exact-one start and both approval/start lock orders.');
+  const correctionSubmission = await pendingSubmission(weeks[3], 12000);
+  ok(await approve(correctionSubmission, 'c'), 'payroll correction race baseline approval');
+  const correctionEarningId = sql(
+    `select id from public.earnings where submission_id='${correctionSubmission}';`
+  );
+  const correctionRace = await Promise.all([
+    client.rpc('record_payroll_correction', {
+      p_actor_profile_id: adminProfileId,
+      p_source_earning_id: correctionEarningId,
+      p_source_adjustment_id: null,
+      p_amount: -1000,
+      p_expected_book_version: 0,
+      p_idempotency_key: `payroll-correction-race-a-${randomUUID()}`,
+      p_request_hash: 'c'.repeat(64)
+    }),
+    client.rpc('record_payroll_correction', {
+      p_actor_profile_id: adminProfileId,
+      p_source_earning_id: correctionEarningId,
+      p_source_adjustment_id: null,
+      p_amount: -2000,
+      p_expected_book_version: 0,
+      p_idempotency_key: `payroll-correction-race-b-${randomUUID()}`,
+      p_request_hash: 'd'.repeat(64)
+    }),
+    client.rpc('start_payroll_cycle', {
+      p_actor_profile_id: adminProfileId,
+      p_maid_profile_id: maidProfileId,
+      p_week_start: weeks[3],
+      p_expected_version: 0,
+      p_idempotency_key: `payroll-correction-start-race-${randomUUID()}`,
+      p_request_hash: 'e'.repeat(64)
+    })
+  ]);
+  const correctionErrors = correctionRace.filter((result) => result.error).map((result) => result.error);
+  assert(correctionErrors.every((error) => error.code !== '40P01'),
+    'correction versus start has zero SQLSTATE 40P01 deadlocks');
+  assert(correctionErrors.every((error) =>
+    /STALE_ADJUSTMENT_VERSION|PAYROLL_SOURCE_PAYMENT_UNCERTAIN/.test(error.message)
+  ), `correction versus start has only stable domain losers (${correctionErrors.map((error) => `${error.code}:${error.message}`).join(',')})`);
+  assert(sql(
+    `select (select count(*) from public.payroll_adjustments where root_earning_id='${correctionEarningId}')<=1 ` +
+    `and (select count(*) from public.payroll_cycles where maid_profile_id='${maidProfileId}' ` +
+    `and week_start='${weeks[3]}' and status='paying')=1;`
+  ) === 't', 'correction versus start leaves at most one correction and one coherent PAYING cycle');
+
+  const reversalSubmission = await pendingSubmission(weeks[4], 15000);
+  ok(await approve(reversalSubmission, 'f'), 'payroll reversal race baseline approval');
+  const reversalEarningId = sql(
+    `select id from public.earnings where submission_id='${reversalSubmission}';`
+  );
+  const currentBookVersion = Number(sql(
+    `select version from public.payroll_adjustment_books where maid_profile_id='${maidProfileId}';`
+  ));
+  const reversalRace = await Promise.all([
+    client.rpc('reverse_payroll_source', {
+      p_actor_profile_id: adminProfileId,
+      p_source_earning_id: reversalEarningId,
+      p_source_adjustment_id: null,
+      p_expected_book_version: currentBookVersion,
+      p_idempotency_key: `payroll-reversal-race-a-${randomUUID()}`,
+      p_request_hash: '1'.repeat(64)
+    }),
+    client.rpc('reverse_payroll_source', {
+      p_actor_profile_id: adminProfileId,
+      p_source_earning_id: reversalEarningId,
+      p_source_adjustment_id: null,
+      p_expected_book_version: currentBookVersion,
+      p_idempotency_key: `payroll-reversal-race-b-${randomUUID()}`,
+      p_request_hash: '2'.repeat(64)
+    }),
+    client.rpc('start_payroll_cycle', {
+      p_actor_profile_id: adminProfileId,
+      p_maid_profile_id: maidProfileId,
+      p_week_start: weeks[4],
+      p_expected_version: 0,
+      p_idempotency_key: `payroll-reversal-start-race-${randomUUID()}`,
+      p_request_hash: '3'.repeat(64)
+    })
+  ]);
+  const reversalErrors = reversalRace.filter((result) => result.error).map((result) => result.error);
+  assert(reversalErrors.every((error) => error.code !== '40P01'),
+    'reversal versus start has zero SQLSTATE 40P01 deadlocks');
+  assert(reversalErrors.every((error) =>
+    /STALE_ADJUSTMENT_VERSION|PAYROLL_SOURCE_ALREADY_REVERSED|PAYROLL_NONPOSITIVE_REQUIRES_CARRY|PAYROLL_SOURCE_PAYMENT_UNCERTAIN/.test(error.message)
+  ), `reversal versus start has only stable domain losers (${reversalErrors.map((error) => `${error.code}:${error.message}`).join(',')})`);
+  assert(sql(
+    `select ((select count(*) from public.payroll_adjustments where reversal_of_earning_id='${reversalEarningId}')=1 ` +
+    `and (select count(*) from public.payroll_events event join public.payroll_cycles cycle ` +
+    `on cycle.id=event.payroll_cycle_id where cycle.maid_profile_id='${maidProfileId}' ` +
+    `and cycle.week_start='${weeks[4]}')=0) or ` +
+    `((select count(*) from public.payroll_adjustments where reversal_of_earning_id='${reversalEarningId}')=0 ` +
+    `and (select count(*) from public.payroll_events event join public.payroll_cycles cycle ` +
+    `on cycle.id=event.payroll_cycle_id where cycle.maid_profile_id='${maidProfileId}' ` +
+    `and cycle.week_start='${weeks[4]}')=1);`
+  ) === 't', 'reversal versus start leaves either one inverse or one immutable PAYING snapshot');
+
+  console.log(
+    'Payroll concurrency passed: exact-one start, approval/start lock orders, correction/reversal/start; SQLSTATE 40P01=0 and only stable domain losers.'
+  );
 }

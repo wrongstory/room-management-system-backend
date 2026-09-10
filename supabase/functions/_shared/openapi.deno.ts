@@ -71,21 +71,26 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 86 &&
+    Object.keys(document.paths).length === 90 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 93,
-    "candidate contract 86/93",
+        ).length === 97,
+    "candidate contract 90/97",
   );
 });
 
-Deno.test("payroll OpenAPI separates confirmed, locked and late earnings without client amounts", async () => {
+Deno.test("payroll OpenAPI separates earnings and signed adjustments with strict command amounts", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const list = document.paths["/v1/payroll"].get;
   const entries = document.paths["/v1/payroll/entries"].get;
   const start = document.paths["/v1/payroll/start"].post;
+  const correction = document.paths["/v1/payroll/adjustments/corrections"].post;
+  const reversal = document.paths["/v1/payroll/adjustments/reversals"].post;
+  const carry = document.paths["/v1/payroll/carry-forward"].post;
+  const lateCarry =
+    document.paths["/v1/payroll/late-earnings/{earningId}/carry"].post;
   const schemas = document.components.schemas;
   assert(
     list.operationId === "listPayrollCycles",
@@ -112,6 +117,22 @@ Deno.test("payroll OpenAPI separates confirmed, locked and late earnings without
   assert(
     start.parameters.some((parameter) => parameter.name === "Idempotency-Key"),
     "payroll start requires idempotency",
+  );
+  assert(
+    correction.operationId === "recordPayrollCorrection" &&
+      reversal.operationId === "reversePayrollSource" &&
+      carry.operationId === "carryForwardPayrollCycle" &&
+      lateCarry.operationId === "carryLatePayrollEarning",
+    "four #102 operations",
+  );
+  assert(
+    schemas.PayrollStatus.enum.join() === "open,paying,check,paid",
+    "payment enum is unchanged",
+  );
+  assert(
+    schemas.PayrollEntriesEnvelope.properties.entries.maxItems === 50 &&
+      schemas.PayrollCycle.properties.items.maxItems === 10,
+    "adjustment projections retain bounded contracts",
   );
   assert(
     schemas.PayrollStartRequest.additionalProperties === false &&
@@ -467,7 +488,7 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   assert(
     auditEventTypeParameter?.schema.maxItems ===
       document.components.schemas.DeveloperAuditEventType.enum.length,
-    "developer audit filter limit must match the 36-event allowlist",
+    "developer audit filter limit must match the current allowlist",
   );
   const auditSummary = document.components.schemas.DeveloperAuditEvent
     .properties.summary;
@@ -827,7 +848,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 51,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 55,
     "actual audit allowlist count",
   );
   assert(
