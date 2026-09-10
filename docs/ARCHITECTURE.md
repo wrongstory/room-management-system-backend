@@ -104,11 +104,11 @@ Decision Issue #94는 아래 도메인 경계를 확정했다. 이 절은 후속
   금지하고 `paidAt`은 server 시각이다. 영수증·계좌·수취인 PII를 저장하지 않는다. 모든 관리자 command는
   actor, `expectedVersion`, scoped idempotency/request hash와 audit을 요구한다.
 
-#100 complaint/appeal/correction은 아래 source PR 후보로 구현했다. compensation provenance,
+#100 complaint/appeal/correction은 PR #104로 dev에 통합됐다. compensation provenance,
 adjustment/carry-forward, `CHECK/PAID` command와 지급 evidence는 각각 #101~#103 후속 범위이고
 main/recovery/production에는 적용되지 않았다.
 
-### #100 컴플레인·이의·정정 수명주기 — source PR 검토 중, production 미승격
+### #100 컴플레인·이의·정정 수명주기 — source/dev 완료, production 미승격
 
 `complaint_cases`는 원 room/target/attempt/submission/approved inspection/current original earning/maid를
 실제 FK로 묶고 status/version/current decision만 갱신하는 projection이다. `complaint_decisions`,
@@ -128,12 +128,42 @@ migration/RPC는 earning/payroll/adjustment를 쓰지 않는다.
 Fastify와 Edge는 동일한 service-role-only RPC와 stable error mapping을 사용한다. 모든 mutation은 actor,
 expectedVersion, scoped Idempotency-Key, canonical request hash receipt, bounded audit와 필요한 notification/outbox를
 한 transaction에 기록한다. 목록은 최대 31일·100건, 이력은 최대 100건이며 HMAC cursor를 actor/range 또는
-actor/complaint stream에 고정하고 HTTP JSON은 128 KiB를 넘으면 실패한다. 후보 계약은 37 migrations /
-85 paths / 92 operations이며 기준 `dev@e31559d922c49f059ed5880ac1de4f3f11d8ca74` 위 source PR 검토 상태다.
+actor/complaint stream에 고정하고 HTTP JSON은 128 KiB를 넘으면 실패한다. 계약은 37 migrations /
+85 paths / 92 operations이며 PR #104가 `dev@88d1865bdaafb6dc2afa556452ae80c91569f393`에 통합됐다.
 네 public complaint table의 SELECT RLS는 최신 profile 권한뿐 아니라 JWT `session_id`가 같은 사용자에게
 귀속된 현재 `auth.sessions` row와 정확히 일치해야 통과한다. claim 누락·malformed·삭제된 세션·타 사용자
 세션은 cast 오류나 정보 노출 없이 0행으로 실패한다. 모든 Fastify/Edge 성공·오류 응답은
 `Cache-Control: no-store`이며 빈 cursor도 `INVALID_COMPLAINT_CURSOR` 400으로 동일하게 거부한다.
+
+### #101 컴플레인 재작업·typed compensation earning — source PR 검토 중, production 미승격
+
+38번째 append-only migration은 기존 37개와 #31 원청소 earning identity를 수정하지 않는다.
+`post_approval_complaint_reclean` target은 confirmed current complaint decision과 immutable typed FK로 연결하며
+`inspection_reclean` provenance와 혼용하지 않는다. active password-complete business admin의 명시적 command가
+assignee와 amount를 결정하되, server가 current occupancy/next check-in, 다른 active room target, published
+reclean template, 당일 maid availability로 안전한 현재 접근 창을 증명한 경우에만 target과 notified assignment를
+원자 materialize한다. client가 `availableFrom`, `dueAt`, fee snapshot을 보내는 API는 없다.
+
+같은 원 maid는 compensation decision amount 0 이력만 보존하고 entitlement/earning은 만들지 않는다. 다른
+active maid는 정수 KRW `0..originalBaseFeeSnapshot`을 immutable decision으로 보존하며, 실제 current attempt의
+field completion과 current submission 승인 뒤 typed `compensation_entitlements`와 earning을 정확히 한 건 만든다.
+0원도 provenance/ledger 한 건을 유지하지만 기존 positive payroll candidate 합계를 늘리지 않는다. 폭탄방
+report/bonus는 재생성하지 않는다. approval RPC는 original/inspection reclean/complaint reclean을 명시적으로
+분기하며 실제 compensation `earningId`를 receipt/audit/HTTP에 돌려준다.
+complaint reclean 자체가 inspection에서 다시 반려되면 entitlement/earning 없이 종료하고 nested
+`inspection_reclean` target을 자동 생성하지 않는다. #94/#101은 재귀 재작업 정책을 확정하지 않았으므로
+후속 Decision 전까지 fail-closed한다.
+
+materialize와 correction/close/start/approval은 동일 domain lock과 case/target CAS로 경합한다. materialize 전
+semantic correction은 stale materialize를 막고, materialize 후 start 전 finding/reworkRequired correction은 ghost
+assignment 방지를 위해 `COMPLAINT_REWORK_PRESTART_FROZEN`으로 거부한다. penalty-only correction은 current
+confirmed+rework 의미가 유지되어 activation/start가 가능하다. 시작 뒤 correction은 과거 work/compensation
+provenance를 무효화하지 않고 actor-aware projection의 `sourceDecisionIsCurrent=false`로 차이를 드러낸다.
+generic pre-start change/handover는 frozen assignee를 바꿀 수 없다. raw compensation decision RLS는 live-session
+business admin만 허용하고 original/assignee maid HTTP projection은 서로의 profile UUID와 타인의 보상액을
+노출하지 않는다. developer 감사 목록은 `complaint.rework_materialized`와 `compensation.earned`의 source-controlled
+safe summary만 추가하며 raw state/request hash/idempotency key/maid cross-sensitive 식별자는 반환하지 않는다.
+Fastify/Edge/OpenAPI 후보는 86 paths / 93 operations이며 production은 변경하지 않았다.
 
 ```mermaid
 flowchart LR

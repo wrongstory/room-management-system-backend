@@ -153,6 +153,49 @@ function responseProjection(v: unknown): Record<string, unknown> | null {
     respondedAt: time(r.respondedAt),
   };
 }
+export function complaintReworkDecisionProjection(
+  v: unknown,
+): Record<string, unknown> | null {
+  if (v === null) return null;
+  const r = object(v), view = text(r.view);
+  if (view === "originalMaid") {
+    return {
+      view,
+      sameMaid: bool(r.sameMaid),
+      sourceDecisionIsCurrent: bool(r.sourceDecisionIsCurrent),
+    };
+  }
+  if (view === "assigneeMaid") {
+    return {
+      view,
+      id: uuid(r.id),
+      reworkCleaningTargetId: uuid(r.reworkCleaningTargetId),
+      compensationAmount: int(r.compensationAmount),
+      currency: text(r.currency),
+      sourceDecisionIsCurrent: bool(r.sourceDecisionIsCurrent),
+    };
+  }
+  if (view !== "admin") throw dbError(null);
+  return {
+    view,
+    id: uuid(r.id),
+    complaintId: uuid(r.complaintId),
+    sourceComplaintDecisionId: uuid(r.sourceComplaintDecisionId),
+    currentComplaintDecisionId: uuid(r.currentComplaintDecisionId),
+    sourceDecisionIsCurrent: bool(r.sourceDecisionIsCurrent),
+    originalCleaningTargetId: uuid(r.originalCleaningTargetId),
+    reworkCleaningTargetId: uuid(r.reworkCleaningTargetId),
+    originalMaidProfileId: uuid(r.originalMaidProfileId),
+    assigneeMaidProfileId: uuid(r.assigneeMaidProfileId),
+    sameMaid: bool(r.sameMaid),
+    originalBaseFeeSnapshot: int(r.originalBaseFeeSnapshot),
+    compensationAmount: int(r.compensationAmount),
+    currency: text(r.currency),
+    sourceCaseVersion: int(r.sourceCaseVersion),
+    decisionVersion: int(r.decisionVersion),
+    decidedAt: time(r.decidedAt),
+  };
+}
 function projection(v: unknown) {
   const r = object(v);
   if (
@@ -185,6 +228,7 @@ function projection(v: unknown) {
     updatedAt: time(r.updatedAt),
     currentDecision: decisionProjection(r.currentDecision),
     maidResponse: responseProjection(r.maidResponse),
+    reworkDecision: complaintReworkDecisionProjection(r.reworkDecision),
   };
 }
 function historyProjection(v: unknown) {
@@ -200,6 +244,7 @@ function historyProjection(v: unknown) {
       "appealed",
       "closed",
       "corrected",
+      "rework_materialized",
     ].includes(eventType) ||
     ![
       "received",
@@ -223,6 +268,9 @@ function historyProjection(v: unknown) {
   }
   if (r.maidResponse !== undefined) {
     event.maidResponse = responseProjection(r.maidResponse);
+  }
+  if (r.compensationDecisionId !== undefined) {
+    event.compensationDecisionId = uuid(r.compensationDecisionId);
   }
   return event;
 }
@@ -248,6 +296,12 @@ export function dbError(error: { message?: string } | null) {
     ["COMPLAINT_PERIOD_INVALID", 400, "조회 기간은 31일 이내여야 합니다."],
     ["COMPLAINT_PAGE_LIMIT_INVALID", 400, "page size가 올바르지 않습니다."],
     ["INVALID_COMPLAINT_CURSOR", 400, "컴플레인 cursor가 올바르지 않습니다."],
+    ["INVALID_COMPLAINT_REWORK", 400, "재작업 요청이 올바르지 않습니다."],
+    [
+      "COMPLAINT_COMPENSATION_AMOUNT_INVALID",
+      400,
+      "보상액 범위를 확인해 주세요.",
+    ],
     [
       "COMPLAINT_INTAKE_WINDOW_CLOSED",
       409,
@@ -271,6 +325,33 @@ export function dbError(error: { message?: string } | null) {
       "메이드 응답은 한 번만 가능합니다.",
     ],
     ["COMPLAINT_DECISION_REQUIRED", 409, "정정할 현재 판정이 없습니다."],
+    [
+      "COMPLAINT_REWORK_MAID_UNAVAILABLE",
+      409,
+      "재작업 메이드를 배정할 수 없습니다.",
+    ],
+    [
+      "COMPLAINT_REWORK_WINDOW_UNAVAILABLE",
+      409,
+      "안전한 재작업 시간을 확보할 수 없습니다.",
+    ],
+    ["COMPLAINT_REWORK_NOT_CONFIRMED", 409, "확정된 재작업 판정이 아닙니다."],
+    [
+      "COMPLAINT_REWORK_ALREADY_MATERIALIZED",
+      409,
+      "재작업이 이미 확정되었습니다.",
+    ],
+    ["COMPLAINT_REWORK_DECISION_STALE", 409, "재작업 판정이 변경되었습니다."],
+    [
+      "COMPLAINT_REWORK_PRESTART_FROZEN",
+      409,
+      "배정된 재작업 판정은 시작 전에 변경할 수 없습니다.",
+    ],
+    [
+      "RECLEAN_TEMPLATE_NOT_CONFIGURED",
+      409,
+      "게시된 재청소 템플릿을 확인해 주세요.",
+    ],
     [
       "COMPLAINT_INVALID_TRANSITION",
       409,
@@ -337,7 +418,7 @@ async function command(
   body: Record<string, unknown>,
 ) {
   const key = idempotencyKey(request);
-  return projection(
+  const result = projection(
     await rpc(clients, name, {
       p_actor_profile_id: actor.profileId,
       ...bodyArgs(body),
@@ -347,6 +428,12 @@ async function command(
         actorProfileId: actor.profileId,
         ...body,
       }),
+    }),
+  );
+  return projection(
+    await rpc(clients, "get_complaint_case", {
+      p_actor_profile_id: actor.profileId,
+      p_complaint_id: result.id,
     }),
   );
 }
@@ -361,10 +448,11 @@ export function complaintPath(
     | "decision"
     | "response"
     | "close"
-    | "corrections";
+    | "corrections"
+    | "rework";
 } | null {
   const m = path.match(
-    /^\/v1\/complaints\/([^/]+)(?:\/(history|review|decision|response|close|corrections))?$/,
+    /^\/v1\/complaints\/([^/]+)(?:\/(history|review|decision|response|close|corrections|rework))?$/,
   );
   if (!m) return null;
   return { complaintId: uuid(m[1]), kind: (m[2] ?? "detail") as "detail" };
@@ -526,10 +614,57 @@ export async function mutateComplaint(
   clients: EdgeClients,
   actor: EdgeActor,
   id: string,
-  kind: "review" | "decision" | "response" | "close" | "corrections",
+  kind: "review" | "decision" | "response" | "close" | "corrections" | "rework",
 ) {
   noQuery(request);
   const body = await readJsonBody(request);
+  if (kind === "rework") {
+    admin(actor);
+    exact(body, [
+      "expectedVersion",
+      "complaintDecisionId",
+      "assigneeMaidProfileId",
+      "compensationAmount",
+    ]);
+    const parsed = {
+      complaintId: id,
+      expectedVersion: version(body.expectedVersion),
+      complaintDecisionId: uuid(body.complaintDecisionId),
+      assigneeMaidProfileId: uuid(body.assigneeMaidProfileId),
+      compensationAmount: int(body.compensationAmount),
+    };
+    const key = idempotencyKey(request);
+    const raw = object(
+      await rpc(clients, "materialize_complaint_rework", {
+        p_actor_profile_id: actor.profileId,
+        ...bodyArgs(parsed),
+        p_idempotency_key: key,
+        p_request_hash: await hash({
+          command: "complaint.materialize_rework",
+          actorProfileId: actor.profileId,
+          ...parsed,
+        }),
+      }),
+    );
+    const assignment = object(raw.assignment);
+    return {
+      complaint: projection(raw.complaint),
+      reworkDecision: complaintReworkDecisionProjection({
+        ...object(raw.reworkDecision),
+        view: "admin",
+      }),
+      assignment: {
+        id: uuid(assignment.id),
+        cleaningTargetId: uuid(assignment.cleaningTargetId),
+        maidProfileId: uuid(assignment.maidProfileId),
+        sequenceNumber: int(assignment.sequenceNumber),
+        revision: int(assignment.revision),
+        serviceDate: text(assignment.serviceDate),
+        availableFrom: time(assignment.availableFrom),
+        dueAt: nullableTime(assignment.dueAt),
+      },
+    };
+  }
   if (kind === "response") {
     reader(actor);
     if (actor.role !== "maid") {

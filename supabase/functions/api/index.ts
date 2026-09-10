@@ -879,17 +879,22 @@ export async function handleApiRequest(
       complaintRoute.kind !== "detail" &&
       complaintRoute.kind !== "history"
     ) {
-      const response = {
-        complaint: await mutateComplaint(
-          request,
-          clients,
-          actor,
-          complaintRoute.complaintId,
-          complaintRoute.kind,
-        ),
-      };
+      const mutation = await mutateComplaint(
+        request,
+        clients,
+        actor,
+        complaintRoute.complaintId,
+        complaintRoute.kind,
+      );
+      const response = complaintRoute.kind === "rework"
+        ? mutation
+        : { complaint: mutation };
       assertComplaintResponseSize(response);
-      return jsonResponse(response, 200, corsHeaders);
+      return jsonResponse(
+        response,
+        complaintRoute.kind === "rework" ? 201 : 200,
+        corsHeaders,
+      );
     }
 
     if (request.method === "GET" && path === "/v1/reservations") {

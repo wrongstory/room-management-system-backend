@@ -353,6 +353,32 @@ def test_submission_inspection_audit_generated_contract_has_safe_metadata_only()
     assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary
 
 
+def test_complaint_compensation_audit_generated_contract_is_safe() -> None:
+    assert DeveloperAuditEventType.COMPLAINT_REWORK_MATERIALIZED.value == (
+        "complaint.rework_materialized"
+    )
+    assert DeveloperAuditEventType.COMPENSATION_EARNED.value == "compensation.earned"
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {
+        "complaint_id",
+        "source_complaint_decision_id",
+        "compensation_decision_id",
+        "rework_cleaning_target_id",
+        "inspection_decision_id",
+        "same_maid",
+        "compensation_amount",
+        "amount",
+        "currency",
+        "case_version",
+    } <= field_names
+    assert {
+        "request_hash",
+        "idempotency_key",
+        "before_state",
+        "after_state",
+    }.isdisjoint(field_names)
+
+
 def test_runtime_secret_configuration_generated_contract_is_boolean_only() -> None:
     from room_management_console.generated.models.developer_runtime_status_configuration import (
         DeveloperRuntimeStatusConfiguration,
@@ -396,4 +422,30 @@ def test_payroll_pagination_error_codes_are_generated() -> None:
         "PAYROLL_PAGE_LIMIT_INVALID",
         "PAYROLL_PAGE_KIND_INVALID",
         "PAYROLL_RESPONSE_TOO_LARGE",
+    }
+
+
+def test_complaint_rework_error_codes_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert {
+        ErrorCode.COMPLAINT_COMPENSATION_AMOUNT_INVALID.value,
+        ErrorCode.COMPLAINT_REWORK_ALREADY_MATERIALIZED.value,
+        ErrorCode.COMPLAINT_REWORK_DECISION_STALE.value,
+        ErrorCode.COMPLAINT_REWORK_MAID_UNAVAILABLE.value,
+        ErrorCode.COMPLAINT_REWORK_NOT_CONFIRMED.value,
+        ErrorCode.COMPLAINT_REWORK_PRESTART_FROZEN.value,
+        ErrorCode.COMPLAINT_REWORK_WINDOW_UNAVAILABLE.value,
+        ErrorCode.INVALID_COMPLAINT_REWORK.value,
+        ErrorCode.RECLEAN_TEMPLATE_NOT_CONFIGURED.value,
+    } == {
+        "COMPLAINT_COMPENSATION_AMOUNT_INVALID",
+        "COMPLAINT_REWORK_ALREADY_MATERIALIZED",
+        "COMPLAINT_REWORK_DECISION_STALE",
+        "COMPLAINT_REWORK_MAID_UNAVAILABLE",
+        "COMPLAINT_REWORK_NOT_CONFIRMED",
+        "COMPLAINT_REWORK_PRESTART_FROZEN",
+        "COMPLAINT_REWORK_WINDOW_UNAVAILABLE",
+        "INVALID_COMPLAINT_REWORK",
+        "RECLEAN_TEMPLATE_NOT_CONFIGURED",
     }

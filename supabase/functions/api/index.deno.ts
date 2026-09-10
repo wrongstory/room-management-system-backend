@@ -913,8 +913,10 @@ Deno.test("complaint exact routes preserve admin commands, maid response, and bo
     updatedAt: "2026-09-10T00:00:00Z",
     currentDecision: null,
     maidResponse: null,
+    reworkDecision: null,
   };
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let currentComplaint = baseComplaint;
   const clients = {
     admin: {
       rpc(name: string, args: Record<string, unknown>) {
@@ -933,14 +935,60 @@ Deno.test("complaint exact routes preserve admin commands, maid response, and bo
             error: null,
           });
         }
-        return Promise.resolve({
-          data: name === "start_complaint_review"
-            ? { ...baseComplaint, status: "under_review", version: 2 }
-            : name === "respond_to_complaint"
-            ? { ...baseComplaint, status: "acknowledged", version: 4 }
-            : baseComplaint,
-          error: null,
-        });
+        if (name === "materialize_complaint_rework") {
+          const decisionId = "97000000-0000-4000-8000-000000000007";
+          const targetId = "97000000-0000-4000-8000-000000000008";
+          return Promise.resolve({
+            data: {
+              complaint: { ...currentComplaint, version: 3 },
+              reworkDecision: {
+                id: decisionId,
+                complaintId,
+                sourceComplaintDecisionId:
+                  "97000000-0000-4000-8000-000000000009",
+                currentComplaintDecisionId:
+                  "97000000-0000-4000-8000-000000000009",
+                sourceDecisionIsCurrent: true,
+                originalCleaningTargetId: cleaningTargetId,
+                reworkCleaningTargetId: targetId,
+                originalMaidProfileId: maidProfileId,
+                assigneeMaidProfileId: maidProfileId,
+                sameMaid: true,
+                originalBaseFeeSnapshot: 15000,
+                compensationAmount: 0,
+                currency: "KRW",
+                sourceCaseVersion: 2,
+                decisionVersion: 1,
+                decidedAt: "2026-09-10T01:00:00Z",
+              },
+              assignment: {
+                id: "97000000-0000-4000-8000-000000000010",
+                cleaningTargetId: targetId,
+                maidProfileId,
+                sequenceNumber: 1,
+                revision: 1,
+                serviceDate: "2026-09-10",
+                availableFrom: "2026-09-10T01:00:00Z",
+                dueAt: "2026-09-10T02:00:00Z",
+              },
+            },
+            error: null,
+          });
+        }
+        if (name === "start_complaint_review") {
+          currentComplaint = {
+            ...baseComplaint,
+            status: "under_review",
+            version: 2,
+          };
+        } else if (name === "respond_to_complaint") {
+          currentComplaint = {
+            ...baseComplaint,
+            status: "acknowledged",
+            version: 4,
+          };
+        }
+        return Promise.resolve({ data: currentComplaint, error: null });
       },
     },
   } as unknown as EdgeClients;
@@ -1006,6 +1054,22 @@ Deno.test("complaint exact routes preserve admin commands, maid response, and bo
   assert(
     reviewed.status === 200 && (await reviewed.json()).complaint.version === 2,
     "admin complaint review CAS",
+  );
+
+  const reworked = await handleApiRequest(
+    request("POST", `/v1/complaints/${complaintId}/rework`, {
+      expectedVersion: 2,
+      complaintDecisionId: "97000000-0000-4000-8000-000000000009",
+      assigneeMaidProfileId: maidProfileId,
+      compensationAmount: 0,
+    }),
+    dependencies,
+  );
+  assert(
+    reworked.status === 201 &&
+      (await reworked.json()).reworkDecision.compensationAmount === 0 &&
+      reworked.headers.get("cache-control") === "no-store",
+    "admin complaint rework exact zero-amount contract",
   );
 
   const maidActor: EdgeActor = {

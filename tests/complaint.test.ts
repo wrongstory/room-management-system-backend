@@ -11,6 +11,7 @@ import {
   SupabaseComplaintService,
   type ComplaintService,
   complaintDatabaseError,
+  complaintReworkDecisionProjection,
 } from "../src/modules/complaints/complaint.service.js";
 
 const id = (n: number) =>
@@ -44,6 +45,7 @@ const projection = {
   updatedAt: "2026-09-01T00:00:00Z",
   currentDecision: null,
   maidResponse: null,
+  reworkDecision: null,
 };
 
 describe("complaint service and cursor", () => {
@@ -112,6 +114,29 @@ describe("complaint service and cursor", () => {
       },
     );
   });
+  it("keeps maid compensation projections mutually private", () => {
+    expect(
+      complaintReworkDecisionProjection({
+        view: "originalMaid",
+        sameMaid: false,
+        sourceDecisionIsCurrent: true,
+      }),
+    ).toEqual({
+      view: "originalMaid",
+      sameMaid: false,
+      sourceDecisionIsCurrent: true,
+    });
+    expect(
+      complaintReworkDecisionProjection({
+        view: "assigneeMaid",
+        id: id(21),
+        reworkCleaningTargetId: id(22),
+        compensationAmount: 0,
+        currency: "KRW",
+        sourceDecisionIsCurrent: false,
+      }),
+    ).not.toHaveProperty("originalMaidProfileId");
+  });
 });
 
 async function appFor(role: Actor["role"] = "admin") {
@@ -152,6 +177,17 @@ async function appFor(role: Actor["role"] = "admin") {
     async close() {
       calls.push("close");
       return projection;
+    },
+    async rework() {
+      calls.push("rework");
+      return {
+        complaint: projection,
+        reworkDecision: {
+          view: "admin",
+          id: id(21),
+        },
+        assignment: { id: id(22) },
+      };
     },
   };
   const app = Fastify();
@@ -240,10 +276,24 @@ describe("complaint Fastify contract", () => {
         payload: { expectedVersion: 3, responseType: "acknowledged" },
       }),
     );
+    commandResponses.push(
+      await app.inject({
+        method: "POST",
+        url: `/v1/complaints/${id(10)}/rework`,
+        headers: { "idempotency-key": "complaint-rework" },
+        payload: {
+          expectedVersion: 3,
+          complaintDecisionId: id(20),
+          assigneeMaidProfileId: id(2),
+          compensationAmount: 0,
+        },
+      }),
+    );
     expect(createResponse.statusCode).toBe(201);
-    for (const response of [...getResponses, ...commandResponses]) {
+    for (const response of [...getResponses, ...commandResponses.slice(0, -1)]) {
       expect(response.statusCode).toBe(200);
     }
+    expect(commandResponses.at(-1)?.statusCode).toBe(201);
     for (const response of [...getResponses, createResponse, ...commandResponses]) {
       expect(response.headers["cache-control"]).toBe("no-store");
     }
@@ -257,6 +307,7 @@ describe("complaint Fastify contract", () => {
       "correct",
       "close",
       "respond",
+      "rework",
     ]);
     await app.close();
   });

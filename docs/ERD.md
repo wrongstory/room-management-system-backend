@@ -481,6 +481,10 @@ erDiagram
   COMPLAINT_CASES ||--o{ COMPLAINT_DECISIONS : "판정·정정 version"
   COMPLAINT_CASES ||--o| COMPLAINT_MAID_RESPONSES : "최초 판정 1회 응답"
   COMPLAINT_CASES ||--o{ COMPLAINT_CASE_EVENTS : "수명주기 원장"
+  COMPLAINT_CASES ||--o| COMPLAINT_COMPENSATION_DECISIONS : "재작업 확정"
+  COMPLAINT_COMPENSATION_DECISIONS ||--|| CLEANING_TARGETS : "typed complaint reclean"
+  COMPLAINT_COMPENSATION_DECISIONS ||--o| COMPENSATION_ENTITLEMENTS : "타 maid 승인 근거"
+  COMPENSATION_ENTITLEMENTS ||--|| EARNINGS : "typed compensation source"
   PROFILES ||--o{ EARNINGS : "메이드 수익"
   PROFILES ||--o{ PAYROLL_CYCLES : "메이드별 주차"
   PAYROLL_CYCLES ||--o{ PAYROLL_ITEMS : "잠금 원장"
@@ -497,6 +501,8 @@ erDiagram
 
   EARNINGS {
     uuid id PK
+    uuid earning_entitlement_id FK
+    uuid compensation_entitlement_id FK
     uuid submission_id UK
     uuid maid_profile_id FK
     date earned_on
@@ -516,6 +522,7 @@ erDiagram
     text status
     bigint version
     uuid current_decision_id FK
+    uuid current_compensation_decision_id FK
   }
   COMPLAINT_DECISIONS {
     uuid id PK
@@ -538,6 +545,28 @@ erDiagram
     uuid complaint_case_id FK
     text event_type
     bigint case_version
+  }
+  COMPLAINT_COMPENSATION_DECISIONS {
+    uuid id PK
+    uuid complaint_case_id FK,UK
+    uuid complaint_decision_id FK,UK
+    uuid original_cleaning_target_id FK
+    uuid rework_cleaning_target_id FK,UK
+    uuid original_maid_profile_id FK
+    uuid assignee_maid_profile_id FK
+    int original_base_fee_snapshot
+    int compensation_amount
+    text currency
+  }
+  COMPENSATION_ENTITLEMENTS {
+    uuid id PK
+    uuid compensation_decision_id FK,UK
+    uuid rework_cleaning_target_id FK,UK
+    uuid maid_profile_id FK
+    uuid cleaning_attempt_id FK,UK
+    uuid submission_id FK,UK
+    uuid inspection_decision_id FK,UK
+    int amount
   }
   PAYROLL_CYCLES {
     uuid id PK
@@ -652,6 +681,20 @@ migration이다. complaint source identity 7개는 모두 실제 FK이며 임의
 갱신하고 decision/maid response/event는 불변이다. 공개 table은 RLS를 켜고 SELECT에도 동일 사용자의 live
 `auth.sessions` JWT session을 요구하며 authenticated direct write와 privileged RPC 실행을 막고 app-owned
 service-role RPC만 command를 수행한다.
+
+`20260910035941_complaint_compensation_earning.sql`은 기존 37개 migration을 수정하지 않는 38번째
+append-only feature migration이다. `post_approval_complaint_reclean`은 최초 검수 반려의
+`inspection_reclean`과 섞이지 않으며 confirmed current complaint decision, 원 target/base fee, active assignee,
+published reclean template, target/version/notified assignment revision을 한 admin CAS command로 고정한다.
+server가 현재 점유·다음 check-in·기존 active target·maid availability를 이용해 안전한 당일 접근 창을 증명하지
+못하면 materialize 전체가 실패하고 client schedule은 받지 않는다. 같은 maid는 amount 0 decision만 남기고
+entitlement/earning을 만들지 않는다. 다른 maid는 현장 완료와 current submission 승인 뒤 0원도 포함해 exact
+typed `compensation_entitlements`와 `earnings.compensation_entitlement_id`를 각각 한 건 만든다. earnings의
+원청소/보상 FK exactly-one CHECK는 기존 원청소 identity를 backfill 없이 보존한다. pre-start semantic correction은
+ghost assignment를 남기지 않도록 차단하고 penalty-only correction은 실행 가능하다. 시작 뒤 correction은
+operational source decision을 덮어쓰지 않으며 admin projection이 current/source divergence를 표시한다. raw
+compensation decision Data API는 live-session business admin만 읽고 maid projection은 서로의 profile ID와
+타인의 보상액을 숨긴다. 이 source 후보는 production/main/recovery에 적용되지 않았다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 
