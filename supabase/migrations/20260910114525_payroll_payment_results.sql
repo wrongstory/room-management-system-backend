@@ -191,7 +191,9 @@ returns trigger language plpgsql set search_path='' as $$
 begin
   if new.status<>'open' or new.version<>1 or new.locked_amount is not null
     or new.payment_started_by is not null or new.payment_started_at is not null
-    or new.paid_at is not null or new.check_reason is not null then
+    or new.paid_at is not null or new.check_reason is not null
+    or new.last_reopen_reason is not null or new.last_reopened_by is not null
+    or new.last_reopened_at is not null then
     raise exception using errcode='23514',message='PAYROLL_PAYMENT_EVIDENCE_REQUIRED';
   end if;
   return new;
@@ -395,8 +397,13 @@ create function private.current_payment_attempt_fields(p_cycle_id uuid)
 returns jsonb language sql stable set search_path='' as $$
   select coalesce((select jsonb_build_object(
     'paymentAttemptId',attempt.id,'paymentAttemptNumber',attempt.attempt_number,
-    'paidAt',cycle.paid_at,'checkReasonCode',cycle.check_reason,
-    'lastReopenReasonCode',cycle.last_reopen_reason)
+    'paidAt',cycle.paid_at,
+    -- Version 39 allowed free-form operational reasons. Preserve those rows in
+    -- PostgreSQL, but never expose their raw text through the v40 API contract.
+    'checkReasonCode',case when cycle.check_reason is null then null
+      else 'TRANSFER_RESULT_UNCERTAIN' end,
+    'lastReopenReasonCode',case when cycle.last_reopen_reason is null then null
+      else 'NO_TRANSFER_CONFIRMED' end)
   from public.payroll_cycles cycle left join lateral(
     select a.* from public.payroll_payment_attempts a where a.payroll_cycle_id=cycle.id
     order by a.attempt_number desc limit 1) attempt on true
@@ -446,13 +453,22 @@ from public,anon,authenticated,service_role;
 create function private.guard_payroll_payment_cycle_transition()
 returns trigger language plpgsql set search_path='' as $$
 begin
-  if new.status='check' and new.check_reason<>'TRANSFER_RESULT_UNCERTAIN' then
-    raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
+  -- Legacy v39 reason text is immutable history. It may survive an unrelated
+  -- UPDATE, but every v40 reason change and every new status transition must
+  -- use the source-controlled code (or clear the field when leaving CHECK).
+  if new.check_reason is distinct from old.check_reason
+    or new.status is distinct from old.status then
+    if new.status='check'
+      and new.check_reason is distinct from 'TRANSFER_RESULT_UNCERTAIN' then
+      raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
+    end if;
+    if new.status<>'check' and new.check_reason is not null then
+      raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
+    end if;
   end if;
-  if new.status<>'check' and new.check_reason is not null then
-    raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
-  end if;
-  if new.last_reopen_reason is not null and new.last_reopen_reason<>'NO_TRANSFER_CONFIRMED' then
+  if new.last_reopen_reason is distinct from old.last_reopen_reason
+    and new.last_reopen_reason is not null
+    and new.last_reopen_reason<>'NO_TRANSFER_CONFIRMED' then
     raise exception using errcode='23514',message='PAYROLL_PAYMENT_REOPEN_REASON_INVALID';
   end if;
   if new.status is distinct from old.status and not (

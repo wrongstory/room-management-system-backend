@@ -322,7 +322,9 @@ describe('payroll pagination service', () => {
       { ...projection, maidProfileId: 'not-a-uuid' },
       { ...projection, weekStart: '2026-02-30' },
       { ...projection, itemsHasMore: true, itemsLastEarningId: null },
-      { ...projection, items: Array.from({ length: 11 }, () => projection.items[0]) }
+      { ...projection, items: Array.from({ length: 11 }, () => projection.items[0]) },
+      { ...projection, checkReasonCode: 'LEGACY_BANK_STATUS_PENDING' },
+      { ...projection, lastReopenReasonCode: 'LEGACY_OPERATOR_CONFIRMED_NO_TRANSFER' }
     ]) {
       expect(() => toPayrollCycle(malformed)).toThrowError(
         expect.objectContaining({ code: 'PAYROLL_COMMAND_FAILED' })

@@ -545,11 +545,19 @@ function projection(value: unknown): InternalProjection {
       checkReasonCode:
         row.checkReasonCode === undefined || row.checkReasonCode === null
           ? null
-          : text(row.checkReasonCode),
+          : text(row.checkReasonCode) === "TRANSFER_RESULT_UNCERTAIN"
+          ? "TRANSFER_RESULT_UNCERTAIN"
+          : (() => {
+            throw payrollDatabaseError(null);
+          })(),
       lastReopenReasonCode: row.lastReopenReasonCode === undefined ||
           row.lastReopenReasonCode === null
         ? null
-        : text(row.lastReopenReasonCode),
+        : text(row.lastReopenReasonCode) === "NO_TRANSFER_CONFIRMED"
+        ? "NO_TRANSFER_CONFIRMED"
+        : (() => {
+          throw payrollDatabaseError(null);
+        })(),
     },
     itemsAfter: itemsHasMore
       ? {

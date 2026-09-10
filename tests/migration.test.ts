@@ -477,6 +477,10 @@ describe('initial migration contract', () => {
     expect(sql).toContain('payroll_payment_attempt_requires_transition');
     expect(sql).toContain('payroll_payment_result_requires_transition');
     expect(sql).toContain('PAYROLL_PAYMENT_EVIDENCE_REQUIRED');
+    expect(sql).toContain('new.check_reason is distinct from old.check_reason');
+    expect(sql).toContain('new.last_reopen_reason is distinct from old.last_reopen_reason');
+    expect(sql).toContain("else 'TRANSFER_RESULT_UNCERTAIN' end");
+    expect(sql).toContain("else 'NO_TRANSFER_CONFIRMED' end");
     expect(sql).toContain("'TRANSFER_RESULT_UNCERTAIN'");
     expect(sql).toContain("'NO_TRANSFER_CONFIRMED'");
     expect(sql).toContain("'bank_transfer'");

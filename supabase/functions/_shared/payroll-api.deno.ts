@@ -738,6 +738,11 @@ Deno.test("payroll projection fails closed on malformed UUID, date and ISO times
       { ...projection, maidProfileId: "not-a-uuid" },
       { ...projection, weekStart: "2026-02-30" },
       { ...projection, paymentStartedAt: "2026" },
+      { ...projection, checkReasonCode: "LEGACY_BANK_STATUS_PENDING" },
+      {
+        ...projection,
+        lastReopenReasonCode: "LEGACY_OPERATOR_CONFIRMED_NO_TRANSFER",
+      },
       {
         ...projection,
         items: Array.from({ length: 11 }, () => projection.items[0]),

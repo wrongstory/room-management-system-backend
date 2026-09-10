@@ -21,10 +21,13 @@ insert into auth.sessions(id,user_id)
 select pg_temp.cid(900+n),pg_temp.cid(100+n) from generate_series(1,7)n;
 
 insert into public.availability_versions(id,maid_profile_id,week_start,version,status,is_current,submitted_at)
-select pg_temp.cid(700+n),pg_temp.cid(n),current_date-(extract(isodow from current_date)::integer-1),
+select pg_temp.cid(700+n),pg_temp.cid(n),
+  (clock_timestamp() at time zone 'Asia/Seoul')::date
+    -(extract(isodow from (clock_timestamp() at time zone 'Asia/Seoul')::date)::integer-1),
   1,'submitted',true,clock_timestamp()-interval '1 day' from generate_series(2,3)n;
 insert into public.availability_days(availability_version_id,work_date,available)
-select pg_temp.cid(700+n),current_date,true from generate_series(2,3)n;
+select pg_temp.cid(700+n),(clock_timestamp() at time zone 'Asia/Seoul')::date,true
+from generate_series(2,3)n;
 
 create temporary table comp_rooms(n integer primary key,room_id uuid,room_type_id uuid,room_code text);
 insert into comp_rooms

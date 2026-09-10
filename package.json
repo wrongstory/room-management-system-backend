@@ -26,7 +26,7 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:verify": "supabase db reset --local --no-seed",
-    "db:test": "supabase test db supabase/tests --local",
+    "db:test": "node scripts/test-payroll-payment-upgrade.mjs && supabase test db supabase/tests --local",
     "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs",
     "edge:check": "node scripts/check-edge-functions.mjs",
     "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
