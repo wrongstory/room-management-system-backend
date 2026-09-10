@@ -401,44 +401,52 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 검수 반려 재청소와 승인 이후 고객 컴플레인으로 생기는 보상/재작업은 같은 종류가 아니다. 후자는 별도 정책·엔티티로 분리하고 아래 규칙을 적용한다.
 
-### `[확정]` 승인 후 컴플레인과 재작업
+### `[확정 — 2026-09-10 #94]` 승인 후 컴플레인과 재작업
 
 - 컴플레인은 `접수 → 확인 중 → 판정 → 메이드 확인/이의 → 종결` 사건으로 관리한다.
-- 관리자가 관련 객실·원 청소·증빙을 연결하고 `확인됨 / 확인 불가 / 사실 아님`, 벌점, 재작업 필요를 결정한다.
-- 메이드는 본인 건을 확인하거나 이의 메모를 남길 수 있지만 판정·벌점·재작업을 직접 바꾸지 못한다.
-- 청소 반려가 자동 벌점이 되지 않으며, 컴플레인·벌점을 주급에서 자동 차감하지 않는다.
-- 정정은 기존 판정을 삭제하지 않고 새 decision version/event로 남긴다.
+- 접수는 원 청소 승인 시각부터 30일 안에만 허용한다. 관련 객실·원 청소·승인 결정·증빙을 실제 FK로 연결하며, 접수·판정·이의 사유는 source-controlled reason code를 사용한다. 자유형 고객 정보와 고객·직원 PII를 입력하거나 감사·알림 payload에 복제하지 않는다.
+- 관리자는 immutable decision version과 current pointer를 분리하고 `expectedVersion` CAS로 `확인됨 / 확인 불가 / 사실 아님`, 벌점, 재작업 필요를 결정한다. 과거 decision을 수정·삭제하지 않는다.
+- 벌점은 0~10의 정수이고 평가 전용 데이터다. 청소 반려가 자동 벌점이 되지 않으며, 컴플레인·벌점이 음수 adjustment나 주급 차감을 자동 생성해서는 안 된다.
+- 메이드는 본인 건의 최초 판정 뒤 7일 안에 한 번만 이의를 제기할 수 있다. 판정·벌점·재작업을 직접 바꾸지 못한다.
+- 종결 뒤 reopen은 금지한다. 판정 오류는 active business admin이 기존 판정을 보존한 새 correction decision version으로만 바로잡는다.
+- 판정·이의 처리·종결·정정 command는 한 명의 active business admin이 처리하며 actor, `expectedVersion`, actor/command 범위 idempotency key와 canonical request hash, audit을 필수로 한다.
 - 이미 승인된 원 청소의 earning은 컴플레인 때문에 취소하거나 귀속일을 바꾸지 않는다.
-- 같은 메이드가 재작업하면 추가 earning은 없다. 다른 메이드가 맡으면 관리자가 명시한 보상 결정 ID에 연결된 금액을 새 재작업 현장 완료일에 정확히 한 번 적립할 수 있다.
-- 이 보상은 `reclean_compensation_decision_id` 같은 실제 FK/unique source를 가져야 하며, 최초 검수 반려 재청소에 재사용하면 안 된다.
+- 같은 메이드가 재작업하면 추가 earning은 0원이다. 다른 메이드가 맡으면 active business admin이 0원 이상, 원 target base fee snapshot 이하의 정수 원화 보상을 immutable compensation decision으로 확정한다.
+- 타 메이드 보상 earning은 해당 compensation decision과 타 메이드 재작업의 현장 완료·승인 근거를 실제 FK로 연결한 뒤 정확히 한 번만 생성한다. 최초 검수 반려 재청소나 현장 완료·승인 전에는 만들지 않는다.
 
 ---
 
 ## 9. 수익과 주급
 
-### `[확정]` 수익
+### `[확정 — 2026-09-10 #94 보강]` 수익
 
 - earning은 승인된 유상 청소 entitlement에서 정확히 한 번 생성되는 불변 원장이다.
+- 원청소 entitlement와 타 메이드 재작업 compensation entitlement는 서로 다른 실제 typed table/FK로 표현한다. `earnings`에는 임의 UUID polymorphic source를 두지 않고 source별 nullable FK와 exactly-one CHECK로 출처를 강제한다.
+- 이미 구현된 #31 원청소 earning identity와 이력은 미래 append-only migration에서 보존한다. 적용된 migration이나 기존 earning을 고쳐 써서 provenance를 바꾸지 않는다.
 - 금액은 작업 당시 base fee snapshot과 승인된 bonus에서 서버/DB가 계산한다.
 - `earned_on`은 최종 승인까지 이어진 성공 수행 회차의 **현장 완료 KST 날짜**다. 원 계획일, 이월 대상일, 업로드일, 검수일로 바꾸지 않는다.
 - 자정 또는 일요일/월요일 경계에서 offline client 시각과 server 기준이 충돌하면 자동 귀속하지 않고 관리자 확인 상태로 둔다.
 - 지급 전후를 막론하고 earning 원본 금액을 덮어쓰지 않는다.
-- 정정은 별도 adjustment event로 추가한다.
+- 정정은 signed append-only adjustment event로 추가한다. 음수 adjustment는 실제 선행 entitlement/adjustment의 오류 정정 또는 reversal에만 허용한다.
+- `reversal_of`는 실제 선행 원장을 FK로 참조하고 같은 provenance·maid·통화와 금액 관계를 검증한다. 존재하지 않거나 다른 메이드·통화·출처의 원장을 임의로 상계하지 않는다.
+- 컴플레인 벌점은 음수 adjustment를 자동 생성하지 않는다.
 
-### `[확정]` 지급
+### `[확정 — 2026-09-10 #94 보강]` 지급
 
 - 메이드·주차별 payroll cycle은 한 건이다.
 - `locked_earning_ids uuid[]` 같은 배열이 아니라 `payroll_items`로 earning을 정규화한다.
 - `payroll_items.earning_id`는 전 cycle에 걸쳐 UNIQUE여야 같은 수익을 두 번 지급하지 않는다.
 - 지급 snapshot 금액은 포함 item의 DB 합계와 같아야 한다.
 - 지난주 cycle이 아직 `OPEN`이면 늦게 승인된 해당 주 earning을 지난주 cycle에 포함한다. 이미 `PAID`라면 원 지급을 바꾸지 않고 다음 주 adjustment로 넘긴다.
-- 현재 진행 중인 주차와 확정액 0원 cycle에는 지급 command를 허용하지 않는다.
+- 현재 진행 중인 KST 주차에는 지급 command를 허용하지 않는다.
+- earning과 adjustment를 합산한 payable amount가 0 이하이면 `OPEN → PAYING`을 허용하지 않고, 0원 `PAID` event도 만들지 않는다. 남은 음수·0원 residual adjustment는 다음 positive cycle로 이월한다.
 - 기본 전이는 `OPEN → PAYING → PAID`다.
-- 송금 결과가 불확실하면 `PAYING → CHECK`로 둔다. 외부 송금이 없었음을 확인하고 필수 사유를 기록한 경우에만 `PAYING → OPEN` 또는 `CHECK → OPEN`으로 되돌린다.
-- UI에서 “미지급으로 되돌리기”를 제공하더라도 이미 실제 송금된 기록을 삭제하거나 조용히 OPEN으로 바꾸지 않는다. 정정/상계 event가 필요하다.
+- 송금 결과가 불확실하면 `PAYING → CHECK`로 둔다. 외부 송금이 없었음을 재확인한 actor와 시각, `NO_TRANSFER_CONFIRMED` reason을 기록한 경우에만 `PAYING → OPEN` 또는 `CHECK → OPEN`으로 되돌린다.
+- OPEN 복귀 뒤 재시도는 기존 지급 event를 재사용하지 않고 새 payment attempt/event로 시작한다. `PAID → OPEN`은 금지한다.
+- UI에서 “미지급으로 되돌리기”를 제공하더라도 이미 실제 송금된 기록을 삭제하거나 조용히 OPEN으로 바꾸지 않는다. `PAID` cycle은 불변이며 이후 cycle의 정정/상계 adjustment로만 바로잡는다.
 - 외부 송금 연동 전에는 실제 지급이 실행된 것처럼 응답하지 않는다.
 
-현재 제품은 은행/provider에 송금을 요청하지 않는다. 관리자가 외부에서 전액 송금한 결과만 기록한다. 향후 실제 provider 연동이 별도로 확정되면 lock/pay command는 대상 earning을 일정한 순서로 잠그고, 외부 호출을 DB transaction 안에서 기다리지 않으며 idempotency key와 provider reference로 결과를 조정한다.
+현재 제품은 은행/provider에 송금을 요청하지 않는다. active business admin이 외부에서 잠긴 payable 전액을 송금했음을 확인한 결과만 기록하며 일부 지급을 `PAID`로 확정하지 않는다. payment method는 source-controlled code를 사용하고 provider/reference ID는 형식·길이를 제한하며 PII·secret을 금지한다. `paidAt`은 server 시각이고 actor, cycle `expectedVersion`, idempotency key/request hash, audit을 필수로 한다. 영수증 파일·계좌번호·수취인 개인정보는 저장하지 않으며 실제 송금을 확인하기 전 `PAID` 응답을 반환하지 않는다. 향후 실제 provider 연동이 별도로 확정되면 lock/pay command는 대상 earning을 일정한 순서로 잠그고, 외부 호출을 DB transaction 안에서 기다리지 않으며 idempotency key와 provider reference로 결과를 조정한다.
 
 ---
 
@@ -632,6 +640,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview는 source/dev 완료다. #4 notified-only 조회도 PR #74의 독립 검토·CI·위임 승인 후 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에 병합되어 #7A 선행 gate를 충족했다. production에는 승격되지 않았다.
 - #7A 실행 → #7B 인계/limited capability → #7C offline, #30 photo slot → #83/#84 Drive 원장·HTTP → #85 purge worker까지 source/dev 완료했다. 정산·알림 worker·프런트 실제 연동은 후속이며 outbox 저장과 실제 외부 전달을 구분한다.
 - #30~#31 개발 통합 기준은 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`, 34 migrations / 74 paths / 80 operations이며 production에는 승격하지 않았다. #31은 전체 제출·폭탄방 신고/선판정·검수 승인/반려·원 maid 재청소를 append-only 34번째 migration과 Fastify/Edge source로 구현했고, exact-head 독립 QA P0/P1=0·required CI·96/100 위임 승인 뒤 PR #91로 `dev`에 병합됐다. release/main·production은 미완료이며 inspection queue pagination은 비차단 P2 후속이다. 이 `[현재 구현]` snapshot은 §8의 `[확정]` 정책을 변경하거나 production 사용 가능을 뜻하지 않는다. 다음 본선은 #8 earning/payroll 정산이다.
+- #93/#95/#96의 원청소 earning 기반 주차 조회·`OPEN → PAYING`·bounded pagination은 `dev@e55f0e9be2f26a1a3700b8d31ba1958dcbe65b3d`, 36 migrations / 77 paths / 83 operations에 source 통합됐다. #94의 typed compensation provenance, complaint/appeal/correction, signed adjustment/carry-forward, 외부 지급 결과·`CHECK/PAID` command는 정책만 확정됐고 source schema/API/migration 구현은 시작하지 않았다. 이 문서 동기화도 main/recovery/production을 변경하거나 향후 병합 SHA를 선기록하지 않는다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36에서 Supabase Edge Functions `api`의 health/Auth/rooms RPC와 Cron용 예약 scheduler Function을 로컬 PoC로 검증한다. 운영 smoke와 독립 리뷰 전에는 Supabase-only production runtime을 확정하거나 Fastify를 삭제하지 않는다.
 
@@ -676,11 +685,10 @@ AI는 아래 항목을 암묵적으로 확정하지 않는다.
 2. 타입별 예상시간과 기본/최대 숙박 인원을 운영 정본으로 확정할지
 3. current role 단일값과 역할 이력/복수 역할 구조 중 어느 모델을 채택할지. 단, `upload_only`는 별도 역할이 아니라 제한 capability다.
 4. 최초 검수 반려 뒤 원 메이드가 퇴사·부상 등으로 재청소할 수 없는 예외 처리
-5. 승인 후 컴플레인 재작업을 다른 메이드가 맡을 때 관리자 보상금의 선택 기준
-6. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
-7. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
-8. 운영 시작 시 608호 차단이 여전히 유효한지
-9. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
+5. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
+6. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
+7. 운영 시작 시 608호 차단이 여전히 유효한지
+8. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
 
 미확정 항목도 확장 가능한 schema는 설계할 수 있다. 다만 한쪽 정책을 강제하는 irreversible migration, purge, 지급 로직은 결정 전 배포하지 않는다.
 
