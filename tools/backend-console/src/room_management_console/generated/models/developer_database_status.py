@@ -11,6 +11,9 @@ from ..models.developer_database_status_migration_drift import DeveloperDatabase
 
 if TYPE_CHECKING:
     from ..models.developer_database_status_critical_rpcs import DeveloperDatabaseStatusCriticalRpcs
+    from ..models.developer_database_status_notification_delivery import (
+        DeveloperDatabaseStatusNotificationDelivery,
+    )
     from ..models.developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
     from ..models.developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
 
@@ -32,6 +35,7 @@ class DeveloperDatabaseStatus:
         critical_rpcs (DeveloperDatabaseStatusCriticalRpcs):
         row_counts (DeveloperDatabaseStatusRowCounts):
         photo_purge (DeveloperDatabaseStatusPhotoPurge):
+        notification_delivery (DeveloperDatabaseStatusNotificationDelivery):
         environment (DeveloperDatabaseStatusEnvironment):
         project_ref (str):
         checked_at (datetime.datetime):
@@ -47,6 +51,7 @@ class DeveloperDatabaseStatus:
     critical_rpcs: DeveloperDatabaseStatusCriticalRpcs
     row_counts: DeveloperDatabaseStatusRowCounts
     photo_purge: DeveloperDatabaseStatusPhotoPurge
+    notification_delivery: DeveloperDatabaseStatusNotificationDelivery
     environment: DeveloperDatabaseStatusEnvironment
     project_ref: str
     checked_at: datetime.datetime
@@ -74,6 +79,8 @@ class DeveloperDatabaseStatus:
 
         photo_purge = self.photo_purge.to_dict()
 
+        notification_delivery = self.notification_delivery.to_dict()
+
         environment = self.environment.value
 
         project_ref = self.project_ref
@@ -94,6 +101,7 @@ class DeveloperDatabaseStatus:
                 "criticalRpcs": critical_rpcs,
                 "rowCounts": row_counts,
                 "photoPurge": photo_purge,
+                "notificationDelivery": notification_delivery,
                 "environment": environment,
                 "projectRef": project_ref,
                 "checkedAt": checked_at,
@@ -106,6 +114,9 @@ class DeveloperDatabaseStatus:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.developer_database_status_critical_rpcs import (
             DeveloperDatabaseStatusCriticalRpcs,
+        )
+        from ..models.developer_database_status_notification_delivery import (
+            DeveloperDatabaseStatusNotificationDelivery,
         )
         from ..models.developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
         from ..models.developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
@@ -143,6 +154,10 @@ class DeveloperDatabaseStatus:
 
         photo_purge = DeveloperDatabaseStatusPhotoPurge.from_dict(d.pop("photoPurge"))
 
+        notification_delivery = DeveloperDatabaseStatusNotificationDelivery.from_dict(
+            d.pop("notificationDelivery")
+        )
+
         environment = DeveloperDatabaseStatusEnvironment(d.pop("environment"))
 
         project_ref = d.pop("projectRef")
@@ -160,6 +175,7 @@ class DeveloperDatabaseStatus:
             critical_rpcs=critical_rpcs,
             row_counts=row_counts,
             photo_purge=photo_purge,
+            notification_delivery=notification_delivery,
             environment=environment,
             project_ref=project_ref,
             checked_at=checked_at,

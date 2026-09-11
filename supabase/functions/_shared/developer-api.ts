@@ -1,7 +1,7 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 
-export const expectedMigrationName = "web_push_subscription_revisions";
+export const expectedMigrationName = "notification_delivery_worker";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -192,7 +192,7 @@ export async function developerDatabaseStatus(
   actor: EdgeActor,
 ): Promise<Record<string, unknown>> {
   requireDeveloper(actor);
-  const [database, photoPurge] = await Promise.all([
+  const [database, photoPurge, notificationDelivery] = await Promise.all([
     rpcJson(clients, "get_developer_database_status", {
       p_actor_profile_id: actor.profileId,
       p_expected_migration_name: expectedMigrationName,
@@ -200,11 +200,15 @@ export async function developerDatabaseStatus(
     rpcJson(clients, "get_developer_photo_purge_status", {
       p_actor_profile_id: actor.profileId,
     }),
+    rpcJson(clients, "get_developer_notification_delivery_status", {
+      p_actor_profile_id: actor.profileId,
+    }),
   ]);
   const runtime = developerRuntimeStatus();
   return {
     ...database,
     photoPurge,
+    notificationDelivery,
     environment: runtime.environment,
     projectRef: runtime.projectRef,
   };

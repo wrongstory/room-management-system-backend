@@ -17,7 +17,7 @@ business admin과 maid는 developer endpoint에서 항상 `403 DEVELOPER_REQUIRE
 |---|---|---|
 | `GET /v1/developer/overview` | 첫 dashboard | 계정·객실 집계와 runtime/DB/scheduler 상태를 한 번에 표시 |
 | `GET /v1/developer/runtime-status` | 연결 환경 | `environment` + `projectRef`를 색상과 무관하게 항상 텍스트 표시 |
-| `GET /v1/developer/database-status` | DB 상태 | migration drift, RLS 누락, 핵심 RPC 및 사진 purge backlog/heartbeat를 별도 경고로 표시 |
+| `GET /v1/developer/database-status` | DB 상태 | migration drift, RLS 누락, 사진 purge와 notification delivery의 bounded backlog/heartbeat를 별도 경고로 표시 |
 | `GET /v1/developer/scheduler-status` | scheduler 상태 | `not_configured`는 활성화 전 정상 상태, 임의 실행 버튼을 만들지 않음 |
 | `GET /v1/developer/audit-events` | 감사 목록 | cursor pagination, 최대 31일·100건, raw state 없음 |
 | `GET /v1/developer/activity-events` | 활동/보안 로그 | 인증·권한거부·실제 민감조회, unknown login은 anonymous aggregate |
@@ -37,6 +37,8 @@ business admin과 maid는 developer endpoint에서 항상 `403 DEVELOPER_REQUIRE
 - `unknown`은 자동 정상 처리하지 않고 연결 환경과 migration history를 별도로 확인한다.
 - `photoPurge`는 accepted/orphan/folder의 bounded backlog 수와 마지막 heartbeat 상태·시각·처리 수만 제공한다. Drive locator·claim·digest·secret은 응답에 존재하지 않으며 `PHOTO_PURGE_INVOKE_SECRET`은 runtime-status에서 `configured:boolean`으로만 확인한다.
 - purge heartbeat가 없거나 오래됐거나 `degraded|failed`이면 운영자가 raw table을 조회하거나 임의 삭제하지 않고 release runbook과 Function 로그를 확인한다.
+- `notificationDelivery`는 due/retry/dead-letter/operator-blocked/expired-lease count를 각각 1000에서 포화하고 oldest due 시각과 마지막 처리 수만 제공한다. target·notification·subscription ID, event family, endpoint/digest/key/session/provider 응답은 노출하지 않는다.
+- notification delivery heartbeat가 없으면 #112 활성화 전 `awaiting_first_run`이다. 최근 성공 heartbeat만으로 healthy가 되지 않으며 dead-letter/operator-blocked/expired lease 또는 5분 넘은 due backlog가 있으면 `degraded`다.
 
 ### scheduler
 

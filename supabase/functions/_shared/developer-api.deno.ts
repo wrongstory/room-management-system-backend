@@ -1,6 +1,7 @@
 import {
   assertEmptyDiagnosticRequestBody,
   developerAuditEvents,
+  developerDatabaseStatus,
   developerRuntimeStatus,
   expectedMigrationName,
   toDeveloperActivityEvent,
@@ -145,9 +146,78 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "web_push_subscription_revisions",
+    expectedMigrationName === "notification_delivery_worker",
     "expected migration must not depend on a remote execution timestamp",
   );
+});
+
+Deno.test("developer database status adds only bounded notification delivery health", async () => {
+  const names: string[] = [];
+  const get = Deno.env.get;
+  const clients = {
+    admin: {
+      rpc: (name: string) => {
+        names.push(name);
+        if (name === "get_developer_notification_delivery_status") {
+          return Promise.resolve({
+            data: {
+              status: "degraded",
+              lastHeartbeat: null,
+              backlog: {
+                due: 1,
+                retrying: 0,
+                deadLetter: 0,
+                blocked: 0,
+                expiredLeases: 0,
+                oldestDueAt: "2026-09-11T00:00:00.000Z",
+              },
+              checkedAt: "2026-09-11T00:01:00.000Z",
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: {}, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  let result: Record<string, unknown>;
+  try {
+    Deno.env.get = (key: string) =>
+      key === "RUNTIME_ENVIRONMENT"
+        ? "local"
+        : key === "SUPABASE_URL"
+        ? "http://127.0.0.1:54321"
+        : undefined;
+    result = await developerDatabaseStatus(clients, {
+      authUserId: "10000000-0000-4000-8000-000000000001",
+      profileId: "20000000-0000-4000-8000-000000000001",
+      displayName: "개발자",
+      role: "developer",
+      mustChangePassword: false,
+    });
+  } finally {
+    Deno.env.get = get;
+  }
+  assert(
+    names.length === 3,
+    "database status uses three app-owned projections",
+  );
+  assert(
+    "notificationDelivery" in result,
+    "bounded delivery health is present",
+  );
+  const serialized = JSON.stringify(result).toLowerCase();
+  for (
+    const forbidden of [
+      "endpoint",
+      "sessiondigest",
+      "claimdigest",
+      "ciphertext",
+      "providererror",
+    ]
+  ) {
+    assert(!serialized.includes(forbidden), `${forbidden} must not leak`);
+  }
 });
 
 Deno.test("developer activity mapper exposes only the safe projection", () => {
