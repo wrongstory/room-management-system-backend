@@ -133,6 +133,7 @@ describe('environment contract', () => {
   });
 
   it('requires canonical distinct Web Push keys and a separate current key version', () => {
+    expect(loadEnv({ ...localEnv, WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '' }).WEB_PUSH_SUBSCRIPTION_KEYRING_JSON).toBe('{}');
     for (const override of [
       { WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(16, 4).toString('base64') },
       { WEB_PUSH_SUBSCRIPTION_KEY_BASE64: localEnv.RESERVATION_PII_KEY_BASE64 },

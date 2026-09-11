@@ -31,7 +31,7 @@ const envSchema = z.object({
   ),
   WEB_PUSH_SUBSCRIPTION_KEY_BASE64: z.string().min(1),
   WEB_PUSH_SUBSCRIPTION_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/),
-  WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: z.string().default('{}'),
+  WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: z.string().default('{}').transform((value) => value.trim() || '{}'),
   WEB_PUSH_BINDING_DIGEST_SECRET: z.string().trim().refine(
     (value) => Buffer.byteLength(value, 'utf8') >= 32,
     'Web Push binding HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
