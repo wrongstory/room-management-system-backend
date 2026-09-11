@@ -518,11 +518,11 @@ template/default 시간 fallback은 없고 production 운영값 설정은 이번
 - developer는 계정 수명주기만 관리하고 업무 권한을 상속하지 않습니다. active admin은 운영 테이블을 관리하지만 객실 PIN 원문은 전용 조회 함수로만 받습니다.
 - view는 `security_invoker = true`를 사용합니다.
 - 일반 Data API RLS의 profile/role 보조 함수는 `active` 계정만 식별합니다. `deactivation_pending`과 `upload_only`는 일반 역할이 아니라 만료 가능하고 업무 revision에 묶인 서버 전용 제한 capability로만 처리합니다.
-- 알림 수신자가 직접 바꿀 수 있는 필드는 `read_at`뿐입니다. `resolved_at`은 관련 업무 command만 service-role transaction에서 변경합니다.
+- 알림 원본 Data API SELECT/UPDATE는 서비스 역할에도 노출하지 않습니다. 본인 조회와 `read_at` 최초 기록은 live session을 재검증하는 service-role 전용 RPC만 사용하고, `resolved_at`은 관련 SECURITY DEFINER 업무 command만 변경합니다.
 - 내부 권한 함수는 `private` 스키마, 고정 `search_path`, 최소 반환값, 명시적 EXECUTE 권한을 사용합니다.
 - 사진 파일은 Drive에서 공개 공유하지 않습니다. API가 사용자 역할과 제출 소유권을 검사한 뒤 업로드·열람·삭제를 대행합니다.
 - Supabase에는 Drive 파일 ID·해시·크기·삭제예정일만 저장하고, 사진 레코드 쓰기는 서버 역할에만 허용합니다.
-- 인증 사용자의 직접 DML은 본인 알림의 `read_at`으로 제한합니다. `resolved_at`과 업무 상태 변경은 서버 명령/RPC만 사용합니다.
+- 인증 사용자의 직접 알림 DML은 금지합니다. `read_at`은 좁은 markRead RPC, `resolved_at`과 업무 상태 변경은 검증된 서버 명령/RPC만 사용합니다.
 - 상세 역할 매트릭스와 상태 변경 규칙은 [Auth·RLS 계약](./AUTH_RLS_CONTRACT.md)을 따릅니다.
 
 ## API 단계
@@ -531,6 +531,8 @@ template/default 시간 fallback은 없고 production 운영값 설정은 이번
 
 - `GET /health`
 - `GET /openapi.json`, `GET /docs` (OpenAPI 3.1·pinned Swagger UI)
+- `GET /v1/notifications`는 admin/maid 각자의 inbox를 `(occurredAt DESC,id DESC)`로 최대 100건 조회합니다. 전용 HMAC cursor는 actor·role·stream·sort에 묶이고 128 KiB를 넘는 legacy 응답은 fail-closed합니다.
+- `POST /v1/notifications/{id}/read`는 client timestamp 없이 DB server 시각을 한 번만 기록하며 재시도·동시 요청은 같은 최초 `readAt`을 반환합니다. 타 수신자 ID는 동일한 404입니다.
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
 - `POST /v1/auth/password`

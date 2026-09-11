@@ -1196,6 +1196,12 @@ Table public.notifications {
   resolved_at timestamptz
   occurred_at timestamptz [not null]
   created_at timestamptz [not null]
+
+  indexes {
+    (recipient_profile_id, occurred_at, id) [name: 'notifications_recipient_occurred_id_idx', note: 'DESC occurred_at/id keyset order']
+  }
+
+  Note: '#108 immutable inbox ledger. Raw Data API SELECT/UPDATE is revoked; service-only own-list and server-time markRead RPCs revalidate exact live actor/session. resolved_at remains domain-command-only.'
 }
 
 Table private.notification_outbox {

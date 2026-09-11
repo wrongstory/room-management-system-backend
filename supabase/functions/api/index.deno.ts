@@ -1342,3 +1342,135 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
     );
   }
 });
+
+Deno.test("notification router keeps exact GET/list and POST/read contracts", async () => {
+  Deno.env.set(
+    "NOTIFICATION_CURSOR_HMAC_SECRET",
+    "notification-router-test-secret-distinct-123456",
+  );
+  Deno.env.set(
+    "PAYROLL_CURSOR_HMAC_SECRET",
+    "payroll-router-test-secret-distinct-123456789",
+  );
+  const notificationId = "10800000-0000-4000-8000-000000001001";
+  const sessionId = "10800000-0000-4000-8000-000000000901";
+  const encode = (value: unknown) =>
+    btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  const accessToken = `${encode({ alg: "none" })}.${
+    encode({ session_id: sessionId })
+  }.x`;
+  const notice = {
+    id: notificationId,
+    category: "assignment_changed",
+    title: "배정 변경",
+    body: "최신 배정을 확인해 주세요.",
+    roomId: null,
+    cleaningTargetId: null,
+    requiresAction: true,
+    readAt: null,
+    resolvedAt: null,
+    occurredAt: "2026-09-11T01:00:00Z",
+  };
+  const notificationRequest = (
+    method: string,
+    path: string,
+    body?: Record<string, unknown>,
+  ) =>
+    new Request(`http://localhost/functions/v1/api${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const dependencies = (crossRecipient = false): ApiHandlerDependencies => ({
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+    createClients: () => ({
+      admin: {
+        rpc(name: string) {
+          if (crossRecipient && name === "mark_notification_read") {
+            return Promise.resolve({
+              data: null,
+              error: { message: "NOTIFICATION_NOT_FOUND" },
+            });
+          }
+          return Promise.resolve({
+            error: null,
+            data: name === "list_notifications_page"
+              ? {
+                notifications: [notice],
+                hasMore: false,
+                lastOccurredAt: null,
+                lastId: null,
+              }
+              : { ...notice, readAt: "2026-09-11T02:00:00Z" },
+          });
+        },
+      },
+    } as unknown as EdgeClients),
+  });
+
+  const list = await handleApiRequest(
+    notificationRequest("GET", "/v1/notifications?limit=50"),
+    dependencies(),
+  );
+  assert(list.status === 200, "notification list route works");
+  assert(list.headers.get("cache-control") === "no-store", "list is no-store");
+  const listBody = await list.json();
+  assert(
+    !JSON.stringify(listBody).includes("dedupeKey") &&
+      !JSON.stringify(listBody).includes("groupKey") &&
+      !JSON.stringify(listBody).includes("recipientProfileId"),
+    "router keeps private notification fields out",
+  );
+
+  const read = await handleApiRequest(
+    notificationRequest("POST", `/v1/notifications/${notificationId}/read`, {}),
+    dependencies(),
+  );
+  assert(read.status === 200, "notification read route works");
+  assert(read.headers.get("cache-control") === "no-store", "read is no-store");
+
+  for (
+    const path of [
+      `/v1/notifications/${notificationId}/read/extra`,
+      `/v1/notification/${notificationId}/read`,
+    ]
+  ) {
+    const response = await handleApiRequest(
+      notificationRequest("POST", path, {}),
+      dependencies(),
+    );
+    assert(response.status === 404, "unknown notification alias is rejected");
+  }
+  for (
+    const path of [
+      "/v1/notifications?cursor=",
+      "/v1/notifications?limit=1&limit=2",
+    ]
+  ) {
+    const response = await handleApiRequest(
+      notificationRequest("GET", path),
+      dependencies(),
+    );
+    assert(
+      response.status === 400,
+      "empty cursor or duplicate query is rejected",
+    );
+  }
+  const cross = await handleApiRequest(
+    notificationRequest("POST", `/v1/notifications/${notificationId}/read`, {}),
+    dependencies(true),
+  );
+  assert(cross.status === 404, "cross-recipient read remains stable not-found");
+  assert(
+    cross.headers.get("cache-control") === "no-store",
+    "cross-recipient error remains no-store",
+  );
+  assert(
+    await errorCode(cross) === "NOTIFICATION_NOT_FOUND",
+    "stable cross-recipient code",
+  );
+});

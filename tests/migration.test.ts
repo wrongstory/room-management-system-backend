@@ -90,6 +90,10 @@ const payrollPaymentResultsMigrationUrl = new URL(
   '../supabase/migrations/20260910114525_payroll_payment_results.sql',
   import.meta.url
 );
+const notificationInboxMigrationUrl = new URL(
+  '../supabase/migrations/20260911004142_notification_inbox_read_contract.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -497,5 +501,29 @@ describe('initial migration contract', () => {
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/https?:\/\//);
     expect(sql).not.toMatch(/\b(?:http_post|net\.http_post)\b/);
+  });
+
+  it('keeps notification inbox reads service-only, bounded, and immutable', async () => {
+    const sql = await readFile(notificationInboxMigrationUrl, 'utf8');
+
+    expect(sql).toContain('notifications_recipient_occurred_id_idx');
+    expect(sql).toContain('recipient_profile_id, occurred_at desc, id desc');
+    expect(sql).toContain('create function public.list_notifications_page(');
+    expect(sql).toContain('create function public.mark_notification_read(');
+    expect(sql).toContain('private.assert_notification_actor');
+    expect(sql).toContain('auth.sessions');
+    expect(sql).toContain('not actor.must_change_password');
+    expect(sql).toContain("actor.role in ('admin', 'maid')");
+    expect(sql).toContain('NOTIFICATION_NOT_FOUND');
+    expect(sql).toContain('app.notification_write_mode');
+    expect(sql).toContain('clock_timestamp()');
+    expect(sql).toContain('NOTIFICATION_CONTENT_IMMUTABLE');
+    expect(sql).toContain('NOTIFICATION_READ_AT_IMMUTABLE');
+    expect(sql).toContain('NOTIFICATION_RESOLVED_AT_IMMUTABLE');
+    expect(sql).toContain('revoke select, update on table public.notifications');
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).toContain('grant execute on function public.list_notifications_page');
+    expect(sql).toContain('public.mark_notification_read(uuid, uuid, uuid)');
+    expect(sql).toContain('to service_role');
   });
 });

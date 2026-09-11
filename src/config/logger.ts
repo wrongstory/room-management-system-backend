@@ -24,7 +24,8 @@ const sensitiveLogPaths = [
   '*.RESERVATION_PII_KEY_BASE64',
   '*.RESERVATION_PII_KEYRING_JSON',
   '*.RESERVATION_GUEST_NAME_PEPPER',
-  '*.PAYROLL_CURSOR_HMAC_SECRET'
+  '*.PAYROLL_CURSOR_HMAC_SECRET',
+  '*.NOTIFICATION_CURSOR_HMAC_SECRET'
 ] as const;
 
 export function loggerOptions(level: string) {

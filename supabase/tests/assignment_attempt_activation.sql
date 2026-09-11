@@ -135,7 +135,7 @@ select ok((select not is_current and ended_at is not null and change_reason_code
   from public.cleaning_assignments where id=pg_temp.pid(405)),
   'notified rollover preserves and closes assignment history');
 select ok((select resolved_at is not null from public.notifications where dedupe_key='activation-old-notice'),
-  'notified rollover resolves old actionable notification');
+  'existing SECURITY DEFINER lifecycle command still resolves actionable notifications through the immutable guard');
 select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.pid(305)
   and category='cleaning_assignment_rolled_over'),1,'rollover appends one informational notification');
 select is((select count(*)::int from private.notification_outbox outbox join public.notifications notice

@@ -25,6 +25,10 @@ const envSchema = z.object({
     (value) => Buffer.byteLength(value, 'utf8') >= 32,
     '주급 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
   ),
+  NOTIFICATION_CURSOR_HMAC_SECRET: z.string().trim().refine(
+    (value) => Buffer.byteLength(value, 'utf8') >= 32,
+    '알림 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
+  ),
   GOOGLE_DRIVE_CLIENT_ID: z.string().max(4096).optional(),
   GOOGLE_DRIVE_CLIENT_SECRET: z.string().max(4096).optional(),
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().max(4096).optional(),
@@ -82,6 +86,26 @@ const envSchema = z.object({
       code: 'custom',
       path: ['PAYROLL_CURSOR_HMAC_SECRET'],
       message: '주급 cursor HMAC 비밀값은 다른 key/pepper와 분리해야 합니다.'
+    });
+  }
+
+  if ([
+    env.SUPABASE_PUBLISHABLE_KEY,
+    env.SUPABASE_SECRET_KEY,
+    env.ACCOUNT_PHONE_PEPPER,
+    env.RESERVATION_PII_KEY_BASE64,
+    env.RESERVATION_GUEST_NAME_PEPPER,
+    env.PAYROLL_CURSOR_HMAC_SECRET,
+    env.GOOGLE_DRIVE_CLIENT_ID,
+    env.GOOGLE_DRIVE_CLIENT_SECRET,
+    env.GOOGLE_DRIVE_REFRESH_TOKEN,
+    env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
+    ...reservationPiiKeyringSecrets
+  ].includes(env.NOTIFICATION_CURSOR_HMAC_SECRET)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['NOTIFICATION_CURSOR_HMAC_SECRET'],
+      message: '알림 cursor HMAC 비밀값은 다른 key/pepper와 분리해야 합니다.'
     });
   }
 

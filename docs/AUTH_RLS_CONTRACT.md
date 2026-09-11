@@ -4,7 +4,7 @@
 
 - 브라우저는 publishable key와 사용자 access token만 가진다.
 - 인증된 사용자는 Data API에서 자신의 범위에 해당하는 조회만 수행한다.
-- 브라우저가 직접 변경할 수 있는 값은 본인 알림의 `read_at`뿐이다. `resolved_at`은 검증된 도메인 command만 변경한다.
+- 알림 원본 테이블의 브라우저 SELECT/UPDATE는 금지한다. 본인 알림 조회와 `read_at` 최초 기록은 active·비밀번호 변경 완료·live session을 재검증하는 service-role 전용 RPC만 사용하고, `resolved_at`은 검증된 도메인 command만 변경한다.
 - 계정, 예약, 배정, 수행, 제출, 검수, 수익, 지급의 변경은 Fastify 서버의 검증된 명령과 트랜잭션/RPC를 통해서만 수행한다.
 - 서버 secret/service-role은 서버와 배포 secret에만 둔다.
 - API 로그는 Authorization·Cookie·비밀번호·토큰·PIN·휴대전화·서버 secret 필드를 `[REDACTED]`로 치환한다.
@@ -21,9 +21,14 @@
 | 청소 대상·배정·수행 | 전체 | 본인 담당/수행 |
 | 제출·검수·수익·주급 | 전체 | 본인 제출/수익/주급 |
 | 사진 메타데이터 | API 경유 | API 경유, 본인 제출만 |
-| 알림 | 전체 조회 | 본인 조회·읽음 처리 |
+| 알림 | 본인 조회·읽음 처리 | 본인 조회·읽음 처리 |
 
 RLS는 행 범위를 방어하고 GRANT는 가능한 작업 자체를 제한한다. `TO authenticated`만으로 권한을 허용하지 않으며 항상 관리자 또는 실제 소유권 조건을 둔다.
+
+알림함은 관리자도 다른 수신자의 알림을 읽지 않는다. `GET /v1/notifications`는 최대 100건의
+`(occurred_at DESC,id DESC)` keyset page만 반환하며 recipient/dedupe/group 및 내부 actor/session을
+노출하지 않는다. cursor는 전용 32-byte 이상 HMAC secret으로 actor·role·stream·sort에 묶는다.
+`POST /v1/notifications/{id}/read`는 임의 시각을 받지 않고 DB server가 첫 `read_at`만 기록한다.
 
 ## 상태 변경 규칙
 

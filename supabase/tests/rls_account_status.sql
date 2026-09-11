@@ -102,9 +102,9 @@ select case
 end;
 
 select case
-  when has_column_privilege('authenticated', 'public.notifications', 'read_at', 'UPDATE')
-    then 'ok 10 - recipients can update notification read_at'
-  else 'not ok 10 - recipients can update notification read_at'
+  when not has_column_privilege('authenticated', 'public.notifications', 'read_at', 'UPDATE')
+    then 'ok 10 - recipients cannot bypass the service-only notification markRead command'
+  else 'not ok 10 - recipients cannot bypass the service-only notification markRead command'
 end;
 
 select case

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 function assert(value,message) { if(!value) throw new Error(message); }
 function ok(result,label) { assert(!result.error,`${label}: ${result.error?.message}`);return result.data; }
@@ -68,8 +69,11 @@ export async function testPrestartConcurrency(client,actorProfileId) {
   const d=decision(j,jq);
   const decisions=await Promise.all([client.rpc('decide_assignment_cancellation_request',d),client.rpc('decide_assignment_cancellation_request',d)]);
   assert(decisions.every(r=>!r.error) && JSON.stringify(decisions[0].data)===JSON.stringify(decisions[1].data),'concurrent decision replay same logical response');
-  const notices=ok(await client.from('notifications').select('id').eq('dedupe_key',`assignment-decision:${jq.requestId}`),'decision notice');
+  const noticeCount=Number(execFileSync('docker',[
+    'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
+    '-c',`select count(*) from public.notifications where dedupe_key='assignment-decision:${jq.requestId}'`
+  ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
   const audits=ok(await client.from('audit_events').select('id').eq('entity_id',jq.requestId).eq('event_type','assignment.cancellation_decided'),'decision audit');
-  assert(notices.length===1 && audits.length===1,'exactly one decision notification/audit');
+  assert(noticeCount===1 && audits.length===1,'exactly one decision notification/audit');
   console.log('Prestart races PASS: change/activation (3), two changes/CAS, change/request, decision/change, concurrent decision replay; no ghost pending or duplicate decision.');
 }
