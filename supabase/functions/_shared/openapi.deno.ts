@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 95 &&
+    Object.keys(document.paths).length === 97 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 102,
-    "candidate contract 95/102",
+        ).length === 104,
+    "candidate contract 97/104",
   );
 });
 
@@ -115,6 +115,54 @@ Deno.test("notification OpenAPI exposes only bounded own-inbox operations", asyn
   assert(
     !Object.hasOwn(read, "requestBody"),
     "read timestamp remains server-owned",
+  );
+});
+
+Deno.test("Web Push OpenAPI exposes two strict secret-free own commands", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const register = document.paths["/v1/push-subscriptions"].post;
+  const retire =
+    document.paths["/v1/push-subscriptions/{subscriptionId}/retire"].post;
+  assert(
+    register.operationId === "registerWebPushSubscription" &&
+      retire.operationId === "retireWebPushSubscription",
+    "two stable operations",
+  );
+  assert(
+    register["x-required-roles"].join() === "admin,maid" &&
+      retire["x-required-roles"].join() === "admin,maid",
+    "business self roles only",
+  );
+  assert(
+    register.parameters.some((p) => p.name === "Idempotency-Key") &&
+      retire.parameters.some((p) => p.name === "Idempotency-Key"),
+    "both commands idempotent",
+  );
+  const projection = document.components.schemas.WebPushSubscription;
+  for (
+    const key of [
+      "endpoint",
+      "host",
+      "path",
+      "p256dh",
+      "auth",
+      "ciphertext",
+      "nonce",
+      "tag",
+      "digest",
+      "sessionId",
+      "deviceId",
+    ]
+  ) {
+    assert(
+      !Object.hasOwn(projection.properties, key),
+      `${key} remains private`,
+    );
+  }
+  assert(
+    register.responses["201"].headers["Cache-Control"].schema.const ===
+      "no-store",
+    "register no-store",
   );
 });
 

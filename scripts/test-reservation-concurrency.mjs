@@ -14,6 +14,7 @@ import { testComplaintConcurrency } from './test-complaint-concurrency.mjs';
 import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-operations-concurrency.mjs';
 import { testPhotoDriveQuotaConcurrency } from './test-photo-drive-quota-concurrency.mjs';
 import { testNotificationConcurrency } from './test-notification-concurrency.mjs';
+import { testWebPushConcurrency } from './test-web-push-concurrency.mjs';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const status = JSON.parse(execFileSync(
@@ -934,6 +935,7 @@ await testPhotoSubmissionConcurrency(client);
 await testPhotoStorageOperationsConcurrency(client);
 await testPhotoDriveQuotaConcurrency(client);
 await testNotificationConcurrency(client);
+await testWebPushConcurrency(client);
 
 console.log(
   'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2, assignment-commit-replay=1 logical/2 calls, assignment-save-vs-commit=1/2, availability-vs-commit=1/2.'

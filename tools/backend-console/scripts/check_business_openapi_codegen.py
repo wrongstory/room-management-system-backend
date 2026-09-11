@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 95:
-        raise RuntimeError("전체 source OpenAPI path 수가 95가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 97:
+        raise RuntimeError("전체 source OpenAPI path 수가 97이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 102:
-        raise RuntimeError("전체 source OpenAPI operation 수가 102가 아닙니다.")
+    if operation_count != 104:
+        raise RuntimeError("전체 source OpenAPI operation 수가 104가 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -59,6 +59,12 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "push_subscriptions" / "register_web_push_subscription.py",
+            package / "api" / "push_subscriptions" / "retire_web_push_subscription.py",
+            package / "models" / "web_push_subscription.py",
+            package / "models" / "web_push_subscription_envelope.py",
+            package / "models" / "web_push_subscription_register_request.py",
+            package / "models" / "web_push_subscription_retire_request.py",
             package / "api" / "notifications" / "list_notifications.py",
             package / "api" / "notifications" / "mark_notification_read.py",
             package / "models" / "notification.py",
@@ -120,7 +126,7 @@ def main() -> None:
         if not compileall.compile_dir(package, quiet=1):
             raise RuntimeError("업무 Python codegen 결과를 컴파일할 수 없습니다.")
 
-    print("full OpenAPI payroll/complaint Python ephemeral codegen PASS")
+    print("full OpenAPI push/payroll/complaint Python ephemeral codegen PASS")
 
 
 if __name__ == "__main__":

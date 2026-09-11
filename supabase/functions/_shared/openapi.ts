@@ -366,6 +366,11 @@ export const openApiDocument = {
   servers: [{ url: ".", description: "현재 Edge api Function" }],
   tags: [
     {
+      name: "Push Subscriptions",
+      description:
+        "active admin/maid 본인의 Web Push 구독을 암호화된 revision 원장으로 등록·회전·폐기합니다. 실제 provider 전송은 #111/#112 범위입니다.",
+    },
+    {
       name: "Photos",
       description:
         "서버가 bytes·형식·디코딩·EXIF 제거·최종 SHA를 검증하는 사진 업로드/상태/원본 proxy입니다. limited upload capability는 원본 조회 권한이 아닙니다. 저장 완료는 제출·검수·입실 준비 완료를 뜻하지 않습니다.",
@@ -2059,6 +2064,95 @@ export const openApiDocument = {
           "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/push-subscriptions": {
+      post: {
+        tags: ["Push Subscriptions"],
+        operationId: "registerWebPushSubscription",
+        summary: "본인 Web Push 구독 등록·회전",
+        description:
+          "비밀번호 변경을 완료한 active admin/maid와 현재 live Auth session만 허용합니다. 최초 등록과 exact replay는 expectedCurrent 없이, endpoint·key·session 변경은 현재 subscriptionId/version CAS와 함께 요청합니다. live session당 1개, profile당 5개, 동일 endpoint 전역 1개이며 다른 profile 충돌은 소유자 정보 없이 409입니다. endpoint와 key는 응답·로그·감사에 노출되지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/WebPushSubscriptionRegisterRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "등록 또는 회전된 안전한 logical subscription",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/WebPushSubscriptionEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "429": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
+    "/v1/push-subscriptions/{subscriptionId}/retire": {
+      post: {
+        tags: ["Push Subscriptions"],
+        operationId: "retireWebPushSubscription",
+        summary: "본인 Web Push 구독 폐기",
+        description:
+          "현재 version CAS로 본인 logical subscription을 영구 retired 처리하고 같은 transaction에서 current ciphertext를 crypto-shred합니다. 동일 명령 재시도는 최초 retiredAt을 반환하며 resurrect는 금지됩니다. unknown과 다른 소유자의 ID는 같은 404입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [{
+          name: "subscriptionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "폐기할 본인 logical subscription ID",
+        }, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/WebPushSubscriptionRetireRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "최초 retiredAt이 보존된 안전한 logical subscription",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/WebPushSubscriptionEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
           "409": errorResponse,
           "500": errorResponse,
         },
@@ -6639,6 +6733,101 @@ export const openApiDocument = {
           },
           reworkRequired: { type: "boolean" },
           decidedAt: { type: "string", format: "date-time" },
+        },
+      },
+      WebPushSubscriptionRegisterRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["subscription"],
+        properties: {
+          subscription: {
+            type: "object",
+            additionalProperties: false,
+            required: ["endpoint", "expirationTime", "keys"],
+            properties: {
+              endpoint: {
+                type: "string",
+                format: "uri",
+                minLength: 1,
+                maxLength: 4096,
+                pattern: "^https://",
+                description:
+                  "브라우저가 발급한 opaque capability URL. 저장·로그·응답에서는 원문이 노출되지 않습니다.",
+              },
+              expirationTime: {
+                type: ["integer", "null"],
+                minimum: 0,
+                description:
+                  "PushSubscription expirationTime epoch milliseconds. null 또는 서버 현재보다 미래만 허용합니다.",
+              },
+              keys: {
+                type: "object",
+                additionalProperties: false,
+                required: ["p256dh", "auth"],
+                properties: {
+                  p256dh: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: 256,
+                    description:
+                      "padding 없는 canonical base64url 65-byte uncompressed P-256 public point",
+                  },
+                  auth: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: 128,
+                    description:
+                      "padding 없는 canonical base64url 16-byte auth secret",
+                  },
+                },
+              },
+            },
+          },
+          expectedCurrent: {
+            type: "object",
+            additionalProperties: false,
+            required: ["subscriptionId", "version"],
+            properties: {
+              subscriptionId: { type: "string", format: "uuid" },
+              version: { type: "integer", minimum: 1 },
+            },
+          },
+        },
+      },
+      WebPushSubscriptionRetireRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion"],
+        properties: { expectedVersion: { type: "integer", minimum: 1 } },
+      },
+      WebPushSubscription: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "version",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "retiredAt",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          version: { type: "integer", minimum: 1 },
+          status: { type: "string", enum: ["active", "retired"] },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+          retiredAt: { type: ["string", "null"], format: "date-time" },
+        },
+        description:
+          "endpoint, host/path, key, cipher/nonce/tag, digest, session/device 정보를 포함하지 않는 공개 projection.",
+      },
+      WebPushSubscriptionEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["subscription"],
+        properties: {
+          subscription: { $ref: "#/components/schemas/WebPushSubscription" },
         },
       },
       Notification: {

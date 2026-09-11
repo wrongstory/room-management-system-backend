@@ -1476,3 +1476,130 @@ Deno.test("notification router keeps exact GET/list and POST/read contracts", as
     "stable cross-recipient code",
   );
 });
+
+Deno.test("Web Push router keeps exact register/retire, no-store and secret-free responses", async () => {
+  const sessionId = "11000000-0000-4000-8000-000000000901",
+    subscriptionId = "11000000-0000-4000-8000-000000001001";
+  const encode = (value: unknown) =>
+    btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(
+      /=+$/g,
+      "",
+    );
+  const token = `${encode({ alg: "none" })}.${
+    encode({ session_id: sessionId })
+  }.x`;
+  const pair = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  );
+  const point = new Uint8Array(
+    await crypto.subtle.exportKey("raw", pair.publicKey),
+  );
+  const b64u = (bytes: Uint8Array) =>
+    btoa(String.fromCharCode(...bytes)).replace(/=/g, "").replace(/\+/g, "-")
+      .replace(/\//g, "_");
+  const subscription = {
+    endpoint: "https://push.example.invalid/send/router-capability",
+    expirationTime: null,
+    keys: { p256dh: b64u(point), auth: b64u(new Uint8Array(16).fill(7)) },
+  };
+  const calls: string[] = [];
+  const dependencies: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+    createClients: () => ({
+      admin: {
+        rpc(name: string) {
+          calls.push(name);
+          return Promise.resolve({
+            error: null,
+            data: {
+              id: subscriptionId,
+              version: name === "retire_web_push_subscription" ? 2 : 1,
+              status: name === "retire_web_push_subscription"
+                ? "retired"
+                : "active",
+              createdAt: "2026-09-11T05:00:00Z",
+              updatedAt: "2026-09-11T05:01:00Z",
+              retiredAt: name === "retire_web_push_subscription"
+                ? "2026-09-11T05:01:00Z"
+                : null,
+            },
+          });
+        },
+      },
+    } as unknown as EdgeClients),
+    webPushCryptoConfig: {
+      key: new Uint8Array(32).fill(4),
+      version: "v1",
+      secret: "web-push-router-binding-secret-123456789",
+    },
+  };
+  const pushRequest = (path: string, body: unknown, key: string) =>
+    new Request(`http://localhost/functions/v1/api${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "idempotency-key": key,
+      },
+      body: JSON.stringify(body),
+    });
+  const register = await handleApiRequest(
+    pushRequest("/v1/push-subscriptions", { subscription }, "push-router-0001"),
+    dependencies,
+  );
+  assert(
+    register.status === 201 &&
+      register.headers.get("cache-control") === "no-store",
+    "register route exact/no-store",
+  );
+  const responseText = await register.text();
+  assert(
+    !responseText.includes(subscription.endpoint) &&
+      !responseText.includes(subscription.keys.auth) &&
+      !responseText.includes(subscription.keys.p256dh),
+    "response excludes raw subscription",
+  );
+  const retire = await handleApiRequest(
+    pushRequest(`/v1/push-subscriptions/${subscriptionId}/retire`, {
+      expectedVersion: 1,
+    }, "push-router-0002"),
+    dependencies,
+  );
+  assert(
+    retire.status === 200 && retire.headers.get("cache-control") === "no-store",
+    "retire exact/no-store",
+  );
+  assert(
+    calls.join(",") ===
+      "register_web_push_subscription,retire_web_push_subscription",
+    "router calls only app-owned RPCs",
+  );
+  for (
+    const path of [
+      "/v1/push-subscription",
+      `/v1/push-subscriptions/${subscriptionId}/remove`,
+      `/v1/push-subscriptions/${subscriptionId}/retire/extra`,
+    ]
+  ) {
+    assert(
+      (await handleApiRequest(
+        pushRequest(path, { expectedVersion: 1 }, "push-router-alias"),
+        dependencies,
+      )).status === 404,
+      "unknown aliases rejected",
+    );
+  }
+  assert(
+    (await handleApiRequest(
+      pushRequest(
+        "/v1/push-subscriptions?x=1",
+        { subscription },
+        "push-router-query",
+      ),
+      dependencies,
+    )).status === 400,
+    "query rejected",
+  );
+});

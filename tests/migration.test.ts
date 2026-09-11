@@ -94,6 +94,10 @@ const notificationInboxMigrationUrl = new URL(
   '../supabase/migrations/20260911004142_notification_inbox_read_contract.sql',
   import.meta.url
 );
+const webPushSubscriptionMigrationUrl = new URL(
+  '../supabase/migrations/20260911050151_web_push_subscription_revisions.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -525,5 +529,40 @@ describe('initial migration contract', () => {
     expect(sql).toContain('grant execute on function public.list_notifications_page');
     expect(sql).toContain('public.mark_notification_read(uuid, uuid, uuid)');
     expect(sql).toContain('to service_role');
+  });
+
+  it('keeps Web Push subscriptions encrypted, revisioned, service-only, and provider-free', async () => {
+    const sql = await readFile(webPushSubscriptionMigrationUrl, 'utf8');
+
+    for (const table of [
+      'web_push_subscriptions',
+      'web_push_subscription_revisions',
+      'web_push_subscription_secrets',
+      'web_push_subscription_events',
+      'web_push_registration_limits'
+    ]) {
+      expect(sql).toContain(`create table private.${table}`);
+      expect(sql).toContain(`alter table private.${table} enable row level security`);
+    }
+    expect(sql).toContain('web_push_subscriptions_active_endpoint_uidx');
+    expect(sql).toContain('web_push_subscriptions_active_session_uidx');
+    expect(sql).toContain('web_push_subscriptions_current_revision_idx');
+    expect(sql).toContain('web_push_subscription_revisions_profile_idx');
+    expect(sql).toContain("coalesce(current_setting('app.web_push_writer_mode',true),'') <> 'typed_v1'");
+    expect(sql).toContain('create function public.register_web_push_subscription(');
+    expect(sql).toContain('create function public.retire_web_push_subscription(');
+    expect(sql).toContain('create function public.purge_retired_web_push_subscription_metadata(');
+    expect(sql).toContain('auth.sessions');
+    expect(sql).toContain('v_profile.must_change_password');
+    expect(sql).toContain("v_profile.role::text not in ('admin','maid')");
+    expect(sql.match(/pg_advisory_xact_lock\(hashtextextended\('web-push:membership:v1',0\)\)/g)).toHaveLength(2);
+    expect(sql).not.toContain("'web-push:endpoint:'||p_endpoint_digest");
+    expect(sql).toContain('delete from private.web_push_subscription_secrets');
+    expect(sql).toContain("interval '90 days'");
+    expect(sql).toContain('p_limit not between 1 and 100');
+    expect(sql).toContain('from public,anon,authenticated,service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.web_push/);
+    expect(sql).not.toMatch(/\b(?:http_post|net\.http_post|vapid)\b/i);
   });
 });

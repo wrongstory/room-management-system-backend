@@ -488,6 +488,17 @@ event에 고정된 10분 half-open window와 비민감 UUID `groupId`를 보존�
 inactive/임시 비밀번호/self-action도 inbox에는 남지만 typed delivery outbox에는
 넣지 않는다. 상세 표는 [알림 이벤트 카탈로그](./NOTIFICATION_CATALOG.md)다.
 
+#110의 Web Push 구독은 `private.web_push_subscriptions` logical/current projection,
+`web_push_subscription_revisions` immutable revision metadata,
+`web_push_subscription_secrets` current AES-256-GCM envelope,
+`web_push_subscription_events` 최소 lifecycle 및 `web_push_registration_limits`로 분리한다.
+Auth session UUID는 metadata column에 평문 저장하지 않고 current encrypted envelope에만 포함해
+후속 #111 claim이 send 직전 live session을 재검증할 수 있게 한다.
+active endpoint digest는 전역 1개, `(profile,session digest)`는 1개이고 profile당 active 5개를
+profile lock으로 직렬화한다. rotation/retire CAS 때 이전 secret은 같은 transaction에서 삭제되며
+revision은 90일 metadata retention 대상이다. event에는 subscription UUID/reason/server time만 남는다.
+모든 private table은 RLS와 raw grant deny이고 service-only RPC가 live Auth session을 다시 검증한다.
+
 ```mermaid
 erDiagram
   CLEANING_SUBMISSIONS ||--o| EARNINGS : "승인 후 1회 적립"
@@ -509,6 +520,10 @@ erDiagram
   NOTIFICATION_EVENT_CATALOG ||--o{ NOTIFICATIONS : "typed event"
   NOTIFICATION_GROUPS ||--o{ NOTIFICATIONS : "fixed 10m group"
   NOTIFICATIONS ||--o| NOTIFICATION_DELIVERY_OUTBOX : "typed push input"
+  PROFILES ||--o{ WEB_PUSH_SUBSCRIPTIONS : "own active max 5"
+  WEB_PUSH_SUBSCRIPTIONS ||--o{ WEB_PUSH_SUBSCRIPTION_REVISIONS : "immutable CAS revisions"
+  WEB_PUSH_SUBSCRIPTION_REVISIONS ||--o| WEB_PUSH_SUBSCRIPTION_SECRETS : "current encrypted envelope"
+  WEB_PUSH_SUBSCRIPTIONS ||--o{ WEB_PUSH_SUBSCRIPTION_EVENTS : "minimal lifecycle"
   PROFILES ||--o{ AUDIT_EVENTS : "행위자"
   PROFILES ||--o{ ACTOR_ACTIVITY_EVENTS : "인증·권한·민감접근 행위자"
   PROFILES ||--o{ ACTOR_AUTHORIZATION_DENIAL_AGGREGATES : "권한 거부 집계 행위자"

@@ -29,6 +29,13 @@ const envSchema = z.object({
     (value) => Buffer.byteLength(value, 'utf8') >= 32,
     '알림 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
   ),
+  WEB_PUSH_SUBSCRIPTION_KEY_BASE64: z.string().min(1),
+  WEB_PUSH_SUBSCRIPTION_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/),
+  WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: z.string().default('{}').transform((value) => value.trim() || '{}'),
+  WEB_PUSH_BINDING_DIGEST_SECRET: z.string().trim().refine(
+    (value) => Buffer.byteLength(value, 'utf8') >= 32,
+    'Web Push binding HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
+  ),
   GOOGLE_DRIVE_CLIENT_ID: z.string().max(4096).optional(),
   GOOGLE_DRIVE_CLIENT_SECRET: z.string().max(4096).optional(),
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().max(4096).optional(),
@@ -59,12 +66,21 @@ const envSchema = z.object({
   }
 
   let reservationPiiKeyringSecrets: string[] = [];
+  let webPushKeyringSecrets: string[] = [];
   try {
     const keyring = JSON.parse(env.RESERVATION_PII_KEYRING_JSON) as unknown;
     if (keyring && !Array.isArray(keyring) && typeof keyring === 'object') {
       reservationPiiKeyringSecrets = Object.values(keyring).filter(
         (value): value is string => typeof value === 'string'
       );
+    }
+  } catch {
+    // The dedicated keyring validator below reports malformed JSON.
+  }
+  try {
+    const keyring = JSON.parse(env.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON) as unknown;
+    if (keyring && !Array.isArray(keyring) && typeof keyring === 'object') {
+      webPushKeyringSecrets = Object.values(keyring).filter((value): value is string => typeof value === 'string');
     }
   } catch {
     // The dedicated keyring validator below reports malformed JSON.
@@ -107,6 +123,33 @@ const envSchema = z.object({
       path: ['NOTIFICATION_CURSOR_HMAC_SECRET'],
       message: '알림 cursor HMAC 비밀값은 다른 key/pepper와 분리해야 합니다.'
     });
+  }
+
+  const webPushSecrets = [env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64, env.WEB_PUSH_BINDING_DIGEST_SECRET, ...webPushKeyringSecrets];
+  const existingSecrets = [env.SUPABASE_PUBLISHABLE_KEY,env.SUPABASE_SECRET_KEY,env.ACCOUNT_PHONE_PEPPER,
+    env.RESERVATION_PII_KEY_BASE64,env.RESERVATION_GUEST_NAME_PEPPER,env.PAYROLL_CURSOR_HMAC_SECRET,
+    env.NOTIFICATION_CURSOR_HMAC_SECRET,env.GOOGLE_DRIVE_CLIENT_ID,env.GOOGLE_DRIVE_CLIENT_SECRET,
+    env.GOOGLE_DRIVE_REFRESH_TOKEN,env.GOOGLE_DRIVE_ROOT_FOLDER_ID,...reservationPiiKeyringSecrets];
+  if (webPushSecrets.some((value,index) => existingSecrets.includes(value) || webPushSecrets.indexOf(value)!==index)) {
+    context.addIssue({code:'custom',path:['WEB_PUSH_BINDING_DIGEST_SECRET'],message:'Web Push key/digest는 모든 기존 비밀값 및 서로 간에 분리해야 합니다.'});
+  }
+
+  try {
+    const key=Buffer.from(env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64,'base64');
+    if(key.length!==32||key.toString('base64')!==env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64) throw new Error();
+  } catch {
+    context.addIssue({code:'custom',path:['WEB_PUSH_SUBSCRIPTION_KEY_BASE64'],message:'Web Push 구독 암호키는 Base64로 인코딩한 32바이트여야 합니다.'});
+  }
+  try {
+    const keyring=JSON.parse(env.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON) as unknown;
+    if(!keyring||Array.isArray(keyring)||typeof keyring!=='object') throw new Error();
+    if (Object.hasOwn(keyring, env.WEB_PUSH_SUBSCRIPTION_KEY_VERSION)) throw new Error();
+    for(const [version,encoded] of Object.entries(keyring)){
+      const key=typeof encoded==='string'?Buffer.from(encoded,'base64'):null;
+      if(!/^[A-Za-z0-9._-]{1,32}$/.test(version)||!key||key.length!==32||key.toString('base64')!==encoded) throw new Error();
+    }
+  } catch {
+    context.addIssue({code:'custom',path:['WEB_PUSH_SUBSCRIPTION_KEYRING_JSON'],message:'Web Push 이전 키 모음은 version별 Base64 32바이트 키 JSON 객체여야 합니다.'});
   }
 
   try {
