@@ -16,7 +16,7 @@ const listSchema = z.object({
   limit: limitSchema.optional(),
   cursor: z.string().min(1).max(NOTIFICATION_CURSOR_MAX_LENGTH).optional()
 }).strict();
-const paramsSchema = z.object({ id: z.uuid() }).strict();
+const paramsSchema = z.object({ notificationId: z.uuid() }).strict();
 const emptyBodySchema = z.union([z.undefined(), z.object({}).strict()]);
 
 function exactQuery(request: FastifyRequest, allowed: readonly string[]): void {
@@ -51,11 +51,11 @@ export function createNotificationRoutes(service: NotificationService): FastifyP
       return send(await service.list(request.actor, listSchema.parse(request.query)));
     });
 
-    app.post('/:id/read', { preHandler: authenticated }, async (request) => {
+    app.post('/:notificationId/read', { preHandler: authenticated }, async (request) => {
       exactQuery(request, []);
       emptyBodySchema.parse(request.body);
-      const { id } = paramsSchema.parse(request.params);
-      return send({ notification: await service.markRead(request.actor, id) });
+      const { notificationId } = paramsSchema.parse(request.params);
+      return send({ notification: await service.markRead(request.actor, notificationId) });
     });
   };
 }

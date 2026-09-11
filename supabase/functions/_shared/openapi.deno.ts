@@ -84,7 +84,7 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
 Deno.test("notification OpenAPI exposes only bounded own-inbox operations", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const list = document.paths["/v1/notifications"].get;
-  const read = document.paths["/v1/notifications/{id}/read"].post;
+  const read = document.paths["/v1/notifications/{notificationId}/read"].post;
   const schemas = document.components.schemas;
   assert(list.operationId === "listNotifications", "stable list operation");
   assert(read.operationId === "markNotificationRead", "stable read operation");

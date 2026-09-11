@@ -174,6 +174,10 @@ select private.manage_cleaning_attempt_lifecycle_at(pg_temp.pid(1),pg_temp.pid(9
  (select account_lifecycle_version from public.profiles where id=pg_temp.pid(3)),
  'allow_upload','{}','DEACTIVATION_UPLOAD_ONLY','photo84-allow-upload',repeat('e',64),null);
 select is((select status::text from public.profiles where id=pg_temp.pid(3)),'upload_only','real lifecycle established limited state');
+select is((select count(*)::int from public.notifications where event_family='capability.upload_submit_admin_issued'
+  and source_entity_id=(select id::text from private.attempt_capability_grants
+    where attempt_id=pg_temp.pid(502) and kind='upload_submit')),1,
+  'allow_upload reusing the immutable grant still emits one typed notice with exact provenance');
 select is(jsonb_array_length(public.get_attempt_photo_slots(pg_temp.pid(3),pg_temp.pid(903),pg_temp.pid(502))->'slots'),10,'limited upload capability can discover only its own slot IDs');
 insert into flow values('limited_admission',public.admit_photo_upload(pg_temp.pid(3),pg_temp.pid(903),pg_temp.pid(502),pg_temp.pid(402),2,pg_temp.slot(2),0,repeat('e',64)));
 select is(pg_temp.val('limited_admission','reservedBytes'),'307200','limited upload capability passes predecode admission');

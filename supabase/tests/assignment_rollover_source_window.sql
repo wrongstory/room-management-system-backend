@@ -117,8 +117,8 @@ select ok((select resolved_at is not null from public.notifications where dedupe
   'valid rollover resolves old actionable notification');
 select is((select count(*)::int from public.notifications n join cases c on c.target_id=n.cleaning_target_id
   where c.n=1 and n.category='cleaning_assignment_rolled_over'),1,'valid rollover notification exactly once');
-select is((select count(*)::int from private.notification_outbox o join public.notifications n on n.id=o.notification_id
-  join cases c on c.target_id=n.cleaning_target_id where c.n=1),1,'valid rollover outbox exactly once');
+select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  join cases c on c.target_id=n.cleaning_target_id where c.n=1),0,'informational rollover is inbox-only');
 select is(value->>'status','blocked','invalid source window blocked case '||n) from results where n between 2 and 8;
 select is(value->>'reasonCode',case when n=8 then 'ADDITIONAL_ROLLOVER_NOT_ALLOWED' else 'STAYOVER_ROLLOVER_NOT_ALLOWED' end,
   'stable source reason case '||n) from results where n between 2 and 8;

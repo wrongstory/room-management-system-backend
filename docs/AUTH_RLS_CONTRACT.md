@@ -28,7 +28,12 @@ RLS는 행 범위를 방어하고 GRANT는 가능한 작업 자체를 제한한�
 알림함은 관리자도 다른 수신자의 알림을 읽지 않는다. `GET /v1/notifications`는 최대 100건의
 `(occurred_at DESC,id DESC)` keyset page만 반환하며 recipient/dedupe/group 및 내부 actor/session을
 노출하지 않는다. cursor는 전용 32-byte 이상 HMAC secret으로 actor·role·stream·sort에 묶는다.
-`POST /v1/notifications/{id}/read`는 임의 시각을 받지 않고 DB server가 첫 `read_at`만 기록한다.
+`POST /v1/notifications/{notificationId}/read`는 임의 시각을 받지 않고 DB server가 첫 `read_at`만 기록한다.
+typed 알림은 private catalog의 exact source/recipient capability를 통과해야 생성되고,
+public projection은 허용된 UUID `deepLink`/`groupId`만 추가한다. self-action과
+inactive/임시 비밀번호 수신자도 inbox는 보존하지만 typed delivery enqueue는 거부한다.
+legacy/typed outbox 둘 다 raw `service_role` 권한을 주지 않고, #109의 typed outbox는
+#111 전용 입력이며 현재 claim/worker/provider 권한은 없다.
 
 ## 상태 변경 규칙
 

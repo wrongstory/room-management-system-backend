@@ -222,6 +222,11 @@ assert(
 const logicalAccountIds = new Set(accountCreateResults.map((result) => result.data.id));
 assert(logicalAccountIds.size === 1, 'concurrent account-create must return one logical result');
 const logicalAccountId = accountCreateResults[0].data.id;
+execFileSync('docker', [
+  'exec', '-i', 'supabase_db_room-management-system-backend',
+  'psql', '-X', '-q', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+  '-c', `update public.profiles set must_change_password=false where id='${logicalAccountId}'::uuid`
+], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 15000 });
 
 for (const candidateId of accountCandidateIds) {
   if (candidateId !== logicalAccountId) {
@@ -677,6 +682,15 @@ const replayNotificationCount = Number(execFileSync('docker', [
 assert(
   replayNotificationCount === 1,
   'concurrent identical assignment commit must create one notification'
+);
+const replayDeliveryCount = Number(execFileSync('docker', [
+  'exec', '-i', 'supabase_db_room-management-system-backend',
+  'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres',
+  '-c', `select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id='${assignmentCommitTargetIds[0]}'::uuid`
+], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim());
+assert(
+  replayDeliveryCount === 1,
+  'concurrent identical assignment commit must create one typed delivery row'
 );
 
 const { data: saveRaceImpact, error: saveRaceImpactError } = await client.rpc(

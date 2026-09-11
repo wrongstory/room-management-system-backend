@@ -1191,6 +1191,14 @@ Table public.notifications {
   cleaning_target_id uuid
   dedupe_key text
   group_key text
+  contract_version smallint [note: 'NULL legacy or 1 typed']
+  actor_profile_id uuid
+  event_family text
+  source_entity_kind text
+  source_entity_id text
+  deep_link_kind text [note: 'Six approved public deep-link kinds only']
+  deep_link_entity_id uuid
+  notification_group_id uuid
   requires_action boolean [not null, default: false]
   read_at timestamptz
   resolved_at timestamptz
@@ -1199,9 +1207,52 @@ Table public.notifications {
 
   indexes {
     (recipient_profile_id, occurred_at, id) [name: 'notifications_recipient_occurred_id_idx', note: 'DESC occurred_at/id keyset order']
+    (recipient_profile_id, dedupe_key) [unique, name: 'notifications_recipient_logical_event_dedupe_uq', note: 'Partial where dedupe_key is not null; logical event exactly-once, independent of grouping']
   }
 
-  Note: '#108 immutable inbox ledger. Raw Data API SELECT/UPDATE is revoked; service-only own-list and server-time markRead RPCs revalidate exact live actor/session. resolved_at remains domain-command-only.'
+  Note: '#108 immutable inbox ledger plus #109 typed provenance. Raw Data API SELECT/UPDATE is revoked; service-only own-list and server-time markRead RPCs revalidate exact live actor/session. resolved_at requires the catalog exact resolver.'
+}
+
+Table private.notification_event_catalog {
+  event_family text [pk]
+  category text [not null]
+  source_entity_kind text [not null]
+  recipient_capability text [not null]
+  requires_action boolean [not null]
+  push_eligible boolean [not null]
+  resolver_kind text [not null]
+  deep_link_kind text [not null]
+  group_family text [not null]
+  group_scope_kind text [not null]
+
+  Note: '#109 immutable source-controlled 42 event-family / 28 public-category contract.'
+}
+
+Table private.notification_groups {
+  id uuid [pk]
+  recipient_profile_id uuid [not null]
+  group_family text [not null]
+  scope_kind text [not null]
+  scope_id uuid [not null]
+  started_at timestamptz [not null]
+  ends_at timestamptz [not null, note: 'Exactly started_at + 10 minutes']
+  created_at timestamptz [not null]
+
+  indexes {
+    (recipient_profile_id, group_family, scope_kind, scope_id, ends_at, id) [name: 'notification_groups_fixed_lookup_idx']
+  }
+
+  Note: '#109 immutable fixed first-event half-open grouping ledger; public API exposes only id as groupId.'
+}
+
+Table private.notification_delivery_outbox {
+  id uuid [pk]
+  notification_id uuid [not null, unique]
+  event_family text [not null]
+  delivery_status text [not null, default: 'pending']
+  enqueued_at timestamptz [not null]
+
+  Note: '#109 typed-only future #111 input. Raw service_role access and current worker/claim/provider behavior are absent.'
 }
 
 Table private.notification_outbox {
@@ -1215,7 +1266,7 @@ Table private.notification_outbox {
   last_error_code text
   created_at timestamptz [not null]
 
-  Note: '#26 inserts pending web_push rows transactionally with assignment notifications. Claim/retry/provider handling remains #10.'
+  Note: 'LEGACY_DO_NOT_DELIVER: provenance-less pre-#109 history. No worker may read or claim this table.'
 }
 
 Table public.audit_events {
@@ -1649,7 +1700,13 @@ Ref: public.payroll_offset_settlements.settled_by > public.profiles.id
 Ref: public.notifications.recipient_profile_id > public.profiles.id
 Ref: public.notifications.room_id > public.rooms.id
 Ref: public.notifications.cleaning_target_id > public.cleaning_targets.id
+Ref: public.notifications.actor_profile_id > public.profiles.id
+Ref: public.notifications.event_family > private.notification_event_catalog.event_family
+Ref: public.notifications.notification_group_id > private.notification_groups.id
+Ref: private.notification_groups.recipient_profile_id > public.profiles.id
 Ref: private.notification_outbox.notification_id > public.notifications.id
+Ref: private.notification_delivery_outbox.notification_id > public.notifications.id
+Ref: private.notification_delivery_outbox.event_family > private.notification_event_catalog.event_family
 Ref: public.audit_events.actor_profile_id > public.profiles.id
 Ref: private.actor_activity_events.actor_profile_id > public.profiles.id
 Ref: private.actor_authorization_denial_aggregates.actor_profile_id > public.profiles.id

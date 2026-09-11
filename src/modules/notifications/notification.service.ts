@@ -58,6 +58,16 @@ function timestamp(value: unknown): string {
 function nullableTimestamp(value: unknown): string | null {
   return value === null ? null : timestamp(value);
 }
+function deepLink(value: unknown): { kind: string; entityId: string } | null {
+  if (value === null) return null;
+  const parsed = object(value);
+  if (Object.keys(parsed).sort().join(',') !== 'entityId,kind') throw databaseError(null);
+  const kind = text(parsed.kind);
+  if (!['cleaningTarget', 'assignmentRequest', 'submission', 'complaintCase', 'payrollCycle', 'payrollProfile'].includes(kind)) {
+    throw databaseError(null);
+  }
+  return { kind, entityId: uuid(parsed.entityId) };
+}
 function boolean(value: unknown): boolean {
   if (typeof value !== 'boolean') throw databaseError(null);
   return value;
@@ -72,6 +82,8 @@ export function notificationProjection(value: unknown): Record<string, unknown> 
     body: text(row.body),
     roomId: nullableUuid(row.roomId),
     cleaningTargetId: nullableUuid(row.cleaningTargetId),
+    deepLink: deepLink(row.deepLink),
+    groupId: nullableUuid(row.groupId),
     requiresAction: boolean(row.requiresAction),
     readAt: nullableTimestamp(row.readAt),
     resolvedAt: nullableTimestamp(row.resolvedAt),

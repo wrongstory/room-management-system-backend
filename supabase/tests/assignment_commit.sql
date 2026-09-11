@@ -20,22 +20,22 @@ reset role;
 
 insert into public.profiles (
   id, auth_user_id, display_name, display_name_normalized,
-  login_id, login_id_normalized, login_sequence, role, status
+  login_id, login_id_normalized, login_sequence, role, status, must_change_password
 ) values
   (
     '29000000-0000-4000-8000-000000000001',
     '19000000-0000-4000-8000-000000000001',
-    '확정 관리자', '확정 관리자', '확정 관리자', '확정 관리자', 0, 'admin', 'active'
+    '확정 관리자', '확정 관리자', '확정 관리자', '확정 관리자', 0, 'admin', 'active', false
   ),
   (
     '29000000-0000-4000-8000-000000000002',
     '19000000-0000-4000-8000-000000000002',
-    '가능 메이드', '가능 메이드', '가능 메이드', '가능 메이드', 0, 'maid', 'active'
+    '가능 메이드', '가능 메이드', '가능 메이드', '가능 메이드', 0, 'maid', 'active', false
   ),
   (
     '29000000-0000-4000-8000-000000000003',
     '19000000-0000-4000-8000-000000000003',
-    '불가 메이드', '불가 메이드', '불가 메이드', '불가 메이드', 0, 'maid', 'active'
+    '불가 메이드', '불가 메이드', '불가 메이드', '불가 메이드', 0, 'maid', 'active', false
   );
 
 insert into public.availability_versions (
@@ -216,7 +216,7 @@ select is(
   'commit creates exactly one persisted notification'
 );
 select is(
-  (select count(*)::integer from private.notification_outbox),
+  (select count(*)::integer from private.notification_delivery_outbox),
   1,
   'commit creates exactly one pending outbox item'
 );
@@ -379,7 +379,7 @@ select is(
   'multi-target commit atomically notifies every selected draft'
 );
 select is(
-  (select count(*)::integer from private.notification_outbox),
+  (select count(*)::integer from private.notification_delivery_outbox),
   3,
   'multi-target commit creates exactly one outbox row per notification'
 );
@@ -432,9 +432,10 @@ select ok(
   not has_table_privilege('anon', 'private.notification_outbox', 'SELECT')
     and not has_table_privilege('authenticated', 'private.notification_outbox', 'SELECT')
     and not has_table_privilege('authenticated', 'private.notification_outbox', 'UPDATE')
-    and has_table_privilege('service_role', 'private.notification_outbox', 'SELECT')
-    and has_table_privilege('service_role', 'private.notification_outbox', 'UPDATE'),
-  'notification outbox is server-owned and hidden from Data API roles'
+    and not has_table_privilege('service_role', 'private.notification_outbox', 'SELECT')
+    and not has_table_privilege('service_role', 'private.notification_outbox', 'UPDATE')
+    and not has_table_privilege('service_role', 'private.notification_delivery_outbox', 'SELECT'),
+  'legacy and typed notification outboxes expose no raw Data API access'
 );
 select ok(
   not has_function_privilege('anon', 'public.commit_and_notify_assignments(uuid,date,text,jsonb,text,text)', 'EXECUTE')

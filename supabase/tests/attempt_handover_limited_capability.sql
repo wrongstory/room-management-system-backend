@@ -79,6 +79,9 @@ select is((select account_lifecycle_version::int from public.profiles where id=p
 select is(pg_temp.bmanage(1,'allow_finish'),(select value from b_result where label='finish-grant'),'lost grant response replays despite changed profile CAS');
 select is((select count(*)::int from private.attempt_capability_grants where attempt_id=pg_temp.bid(501)),1,'grant replay creates one immutable grant');
 select is((select expires_at-issued_at from private.attempt_capability_grants where attempt_id=pg_temp.bid(501)),interval '2 hours','finish grant hard TTL is two hours');
+select is((select count(*)::int from public.notifications where event_family='capability.finish_current_issued'
+  and source_entity_id=(select id::text from private.attempt_capability_grants where attempt_id=pg_temp.bid(501) and kind='finish_current')),1,
+  'allow_finish maps to the exact immutable finish grant');
 select is(pg_temp.bmanage(1,'allow_finish',2,2,'handover-new-key')#>>'{capability,expiresAt}',
  (select value#>>'{capability,expiresAt}' from b_result where label='finish-grant'),'different key cannot renew capability TTL');
 select ok(exists(select 1 from auth.sessions where id=pg_temp.bid(202)),'limited transition preserves existing Auth session');
@@ -98,6 +101,15 @@ select is((select status::text from public.cleaning_attempts where id=pg_temp.bi
 select is((select status::text from public.profiles where id=pg_temp.bid(2)),'upload_only','limited finish atomically enters upload_only');
 select is((select value#>>'{capability,kind}' from b_result where label='complete'),'upload_submit','completion grants exact attempt upload/submit contract only');
 select is((select expires_at-issued_at from private.attempt_capability_grants where attempt_id=pg_temp.bid(501) and kind='upload_submit'),interval '24 hours','upload TTL is exactly 24 hours');
+select is((select count(*)::int from public.notifications where event_family='capability.upload_submit_self_issued'
+  and source_entity_id=(select id::text from private.attempt_capability_grants where attempt_id=pg_temp.bid(501) and kind='upload_submit')),1,
+  'limited self field completion maps to the exact self-issued upload grant');
+-- Persona matrix: allow_finish changes the recipient to deactivation_pending;
+-- field_completed then changes the same self-recipient to upload_only. Both keep
+-- inbox history, while neither lifecycle state is push eligible.
+select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  where n.source_entity_id in (select id::text from private.attempt_capability_grants where attempt_id=pg_temp.bid(501))),0,
+  'deactivation-pending and self upload-only capability notices stay inbox-only');
 select is(pg_temp.bcomplete(1,2),(select value from b_result where label='complete'),'lost limited completion response replays in upload_only');
 select is((select count(*)::int from private.attempt_capability_revocations),1,'finish capability is revoked exactly once');
 select throws_ok($$update private.attempt_capability_revocations set revoked_at=clock_timestamp()$$,
@@ -133,9 +145,12 @@ select is((select value#>>'{nextAttempt,status}' from b_result where label='hand
 select is((select status::text from public.profiles where id=pg_temp.bid(3)),'active','normal handover does not silently deactivate old maid');
 select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=pg_temp.bid(302)),2,'handover preserves old and creates exactly one new attempt');
 select is((select count(*)::int from private.attempt_handover_events),1,'handover provenance append is atomic');
-select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.bid(302)),2,'old/new notifications created exactly once');
-select is((select count(*)::int from private.notification_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.bid(302)),2,'notifications and outbox commit together');
+select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.bid(302)),3,'capability plus old/new notifications are created exactly once');
+select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.bid(302)),2,'only actionable capability and new assignment enter typed outbox');
 select is((select value#>>'{capability,kind}' from b_result where label='handover'),'evidence_upload','old attempt receives evidence-only rights');
+select is((select count(*)::int from public.notifications where event_family='capability.evidence_upload_handover_issued'
+  and source_entity_id=(select id::text from private.attempt_capability_grants where attempt_id=pg_temp.bid(502) and kind='evidence_upload')),1,
+  'interrupt handover maps to its exact evidence-only grant');
 select throws_ok($$select private.live_attempt_capability(pg_temp.bid(3),pg_temp.bid(502),2,'submit',pg_temp.btime())$$,
  '42501','CAPABILITY_ACCESS_REQUIRED','old partial evidence cannot submit current result');
 select throws_ok($$select pg_temp.bcomplete(2,3)$$,'42501','CAPABILITY_ACCESS_REQUIRED','old handover attempt cannot complete');
@@ -283,6 +298,13 @@ select private.execute_cleaning_attempt_at(pg_temp.bid(8),pg_temp.bid(507),2,pg_
  'upload-only-physical-complete',repeat('f',64),'complete_field_work',pg_temp.btime());
 select pg_temp.bmanage(7,'allow_upload',3);
 select is((select status::text from public.profiles where id=pg_temp.bid(8)),'upload_only','already completed maid may receive explicit upload-only permission');
+select is((select count(*)::int from public.notifications where event_family='capability.upload_submit_admin_issued'
+  and source_entity_id=(select id::text from private.attempt_capability_grants where attempt_id=pg_temp.bid(507) and kind='upload_submit')),1,
+  'allow_upload maps to the exact admin-issued upload grant');
+select ok(current_setting('app.notification_writer_mode',true)=''
+  and current_setting('app.notification_source_event_type',true)=''
+  and current_setting('app.notification_source_reason_code',true)='',
+  'successive lifecycle variants leave no typed writer or dispatch provenance behind');
 select throws_ok($$select private.live_attempt_capability(pg_temp.bid(8),pg_temp.bid(507),2,'upload_evidence',pg_temp.btime()+interval '24 hours')$$,
  '42501','CAPABILITY_ACCESS_REQUIRED','upload grant expires at exact 24-hour boundary');
 select is((select count(*)::int from public.list_developer_audit_events(pg_temp.bid(13),array['cleaning.interrupted_handover'],pg_temp.bid(1))),3,

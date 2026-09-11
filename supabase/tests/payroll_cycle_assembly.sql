@@ -216,9 +216,9 @@ select is((select count(*) from public.audit_events where event_type='payroll.pa
   'one safe audit event is appended');
 select is((select count(*) from public.notifications where category='payroll_payment_started'),1::bigint,
   'one maid notification is appended');
-select is((select count(*) from private.notification_outbox outbox join public.notifications notice on notice.id=outbox.notification_id
-  where notice.category='payroll_payment_started'),1::bigint,
-  'one private delivery outbox row is appended atomically');
+select is((select count(*) from private.notification_delivery_outbox outbox join public.notifications notice on notice.id=outbox.notification_id
+  where notice.category='payroll_payment_started'),0::bigint,
+  'informational payroll start is inbox-only');
 select ok((select request_hash is null and actor_display_name_snapshot is null
   and not (after_state ?| array['requestHash','maidProfileId','lockedAmount'])
   from public.audit_events where event_type='payroll.payment_started'),

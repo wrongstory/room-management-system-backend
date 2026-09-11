@@ -263,16 +263,21 @@ select ok((select status='paying' and version=1 from public.payroll_cycles
   where maid_profile_id=pg_temp.pid(6) and week_start=pg_temp.week(-1)),
   'duplicate reference rolls back the PAID projection atomically');
 
-create function pg_temp.fail_payment_outbox() returns trigger language plpgsql as $$
-begin raise exception 'TEST_PAYMENT_OUTBOX_FAILURE'; end $$;
-create trigger fail_payment_outbox before insert on private.notification_outbox
-for each row execute function pg_temp.fail_payment_outbox();
+create function pg_temp.fail_payment_notification() returns trigger language plpgsql as $$
+begin
+  if new.contract_version=1 and new.event_family='payroll.payment_check_recorded' then
+    raise exception 'TEST_PAYMENT_NOTIFICATION_FAILURE';
+  end if;
+  return new;
+end $$;
+create trigger fail_payment_notification before insert on public.notifications
+for each row execute function pg_temp.fail_payment_notification();
 select throws_ok($$select public.record_payroll_payment_check(pg_temp.pid(1),
   (select attempt.id from public.payroll_payment_attempts attempt join public.payroll_cycles cycle
     on cycle.id=attempt.payroll_cycle_id where cycle.maid_profile_id=pg_temp.pid(6)),1,
   'TRANSFER_RESULT_UNCERTAIN','payment-outbox-failure',repeat('f',64))$$,
-  'P0001','TEST_PAYMENT_OUTBOX_FAILURE','outbox failure aborts the whole payment result command');
-drop trigger fail_payment_outbox on private.notification_outbox;
+  'P0001','TEST_PAYMENT_NOTIFICATION_FAILURE','typed notification failure aborts the whole payment result command');
+drop trigger fail_payment_notification on public.notifications;
 select ok((select cycle.status='paying' and cycle.version=1
   and not exists(select 1 from public.payroll_payment_results result
     where result.payment_attempt_id=attempt.id)
@@ -302,11 +307,10 @@ select ok((select bool_and(after_state::text not like '%ABC-12.XY%' and after_st
   from public.audit_events where event_type like 'payroll.payment_%'),'audit payload never contains bank reference');
 select ok((select bool_and(body not like '%ABC-12.XY%' and body not like '%REF:AB12%')
   from public.notifications where category like 'payroll_payment_%'),'notification never contains bank reference');
-select is((select count(*) from private.notification_outbox outbox join public.notifications notice
+select is((select count(*) from private.notification_delivery_outbox outbox join public.notifications notice
   on notice.id=outbox.notification_id where notice.category in ('payroll_payment_check','payroll_payment_paid',
-  'payroll_payment_reopened')),(select count(*) from public.notifications where category in
-  ('payroll_payment_check','payroll_payment_paid','payroll_payment_reopened')),
-  'every result notification has one atomic outbox row');
+  'payroll_payment_reopened')),0::bigint,
+  'informational payment results are inbox-only');
 select ok((select bool_and(summary ? 'status' and summary ? 'version'
   and not summary ? 'paidAmount' and not summary ? 'canonicalReference'
   and summary::text not like '%ABC-12.XY%' and summary::text not like '%REF:AB12%')

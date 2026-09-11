@@ -3,9 +3,9 @@ select no_plan();
 create function pg_temp.pid(n integer) returns uuid language sql immutable as $$ select ('27000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid $$;
 insert into auth.users(id) select pg_temp.pid(n+100) from generate_series(1,6) n;
 select public.bootstrap_first_developer_profile(pg_temp.pid(6),pg_temp.pid(106),'개발자','개발자','0006','prestart-test-phone-hash','prestart-bootstrap-0001');
-insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status)
+insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password)
 select pg_temp.pid(n),pg_temp.pid(n+100),'prestart-'||n,'prestart-'||n,'prestart-'||n,'prestart-'||n,0,
-  case when n=1 then 'admin' else 'maid' end::public.app_role,case when n=4 then 'inactive' else 'active' end::public.account_status
+  case when n=1 then 'admin' else 'maid' end::public.app_role,case when n=4 then 'inactive' else 'active' end::public.account_status,false
 from generate_series(1,5) n;
 insert into public.availability_versions(id,maid_profile_id,week_start,version,submitted_at)
 select pg_temp.pid(n+200),pg_temp.pid(n),'2027-09-27',1,'2027-09-26 20:00+09' from generate_series(2,5) n;
@@ -58,7 +58,7 @@ select is((select count(*) from public.notifications where cleaning_target_id=pg
 insert into results values('notified',pg_temp.command(5,'change','notify-reassign-0005',3,33));
 select is((select count(*) from public.notifications where cleaning_target_id=pg_temp.pid(305)),3::bigint,'notified old plus revoke and new notice');
 select ok((select resolved_at is not null from public.notifications where dedupe_key='initial-prestart-5'),'old notice preserved/resolved');
-select is((select count(*) from private.notification_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.pid(305)),2::bigint,'two delivery rows');
+select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.pid(305)),1::bigint,'new actionable assignment enters typed delivery while informational revocation stays inbox-only');
 select lives_ok($$select pg_temp.command(5,'change','notify-reassign-0005',3,33,version=>2,assignment=>pg_temp.pid(405))$$,'notified replay');
 select is((select count(*) from public.notifications where cleaning_target_id=pg_temp.pid(305)),3::bigint,'replay no new notices');
 select lives_ok($$select pg_temp.command(6,'change','notify-sequence-0006',2,34)$$,'notified same maid sequence');

@@ -2110,7 +2110,7 @@ export const openApiDocument = {
         },
       },
     },
-    "/v1/notifications/{id}/read": {
+    "/v1/notifications/{notificationId}/read": {
       post: {
         tags: ["Notifications"],
         operationId: "markNotificationRead",
@@ -2120,7 +2120,7 @@ export const openApiDocument = {
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [{
-          name: "id",
+          name: "notificationId",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
@@ -6651,6 +6651,8 @@ export const openApiDocument = {
           "body",
           "roomId",
           "cleaningTargetId",
+          "deepLink",
+          "groupId",
           "requiresAction",
           "readAt",
           "resolvedAt",
@@ -6663,13 +6665,35 @@ export const openApiDocument = {
           body: { type: "string", minLength: 1 },
           roomId: { type: ["string", "null"], format: "uuid" },
           cleaningTargetId: { type: ["string", "null"], format: "uuid" },
+          deepLink: {
+            oneOf: [{
+              type: "object",
+              additionalProperties: false,
+              required: ["kind", "entityId"],
+              properties: {
+                kind: {
+                  type: "string",
+                  enum: [
+                    "cleaningTarget",
+                    "assignmentRequest",
+                    "submission",
+                    "complaintCase",
+                    "payrollCycle",
+                    "payrollProfile",
+                  ],
+                },
+                entityId: { type: "string", format: "uuid" },
+              },
+            }, { type: "null" }],
+          },
+          groupId: { type: ["string", "null"], format: "uuid" },
           requiresAction: { type: "boolean" },
           readAt: { type: ["string", "null"], format: "date-time" },
           resolvedAt: { type: ["string", "null"], format: "date-time" },
           occurredAt: { type: "string", format: "date-time" },
         },
         description:
-          "본인 알림의 안전한 projection. recipientProfileId, dedupeKey, groupKey와 내부 actor/session은 포함하지 않습니다.",
+          "본인 알림의 안전한 projection. typed 알림은 허용된 deepLink와 비민감 UUID groupId만 추가하며 recipientProfileId, dedupeKey, groupKey, provenance와 내부 actor/session은 포함하지 않습니다.",
       },
       NotificationEnvelope: {
         type: "object",

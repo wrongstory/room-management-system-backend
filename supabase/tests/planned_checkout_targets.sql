@@ -55,7 +55,7 @@ select is(public.create_reservation('a2000000-0000-4000-8000-000000000001',(sele
 select pg_temp.assign_plan('notified');
 select ok(exists(select 1 from private.assignment_commit_candidates_at('2034-10-02','2034-10-01 09:00+09') where target_id=(select target_id from plans where label='notified') and reason_code is null),'tomorrow scheduled private plan is committable');
 select pg_temp.notify_plan('notified','2034-10-01 09:00+09');
-select is((select count(*)::int from private.notification_outbox),1,'one notification outbox item');
+select is((select count(*)::int from private.notification_delivery_outbox),1,'one typed notification outbox item');
 select is((select count(*)::int from public.cleaning_attempts),0,'notify never creates attempts');
 
 select ok(not ('CLEANING_REQUIRED'=any(private.room_block_reason_codes(

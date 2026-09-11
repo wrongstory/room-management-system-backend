@@ -38,7 +38,7 @@ create function pg_temp.qid(n integer) returns uuid language sql stable as $$
  select id from private.offline_completion_events where lease_id=pg_temp.lease(n) $$;
 create function pg_temp.cresolve(n integer,action text,p_key text default null,p_version bigint default null,p_at timestamptz default '2040-03-01 13:00+09')
 returns jsonb language sql as $$
- select private.resolve_offline_quarantine_at(pg_temp.cid(1),pg_temp.cid(201),pg_temp.qid(n),action,p_version,
+ select private.resolve_offline_quarantine_with_notifications_at(pg_temp.cid(1),pg_temp.cid(201),pg_temp.qid(n),action,p_version,
  case action when 'record_only' then 'OFFLINE_RECORD_ONLY' when 'reject_effect' then 'OFFLINE_REJECT_EFFECT' else 'OFFLINE_CORRECTION_APPROVED' end,
  coalesce(p_key,'offline-resolve-'||n),repeat('b',64),p_at) $$;
 create function pg_temp.cledgers() returns jsonb language sql stable as $$
@@ -48,7 +48,8 @@ create function pg_temp.cledgers() returns jsonb language sql stable as $$
  'leases',(select jsonb_agg(x order by id)from private.offline_work_leases x),
  'revocations',(select jsonb_agg(x order by lease_id)from private.offline_work_lease_revocations x),
  'notices',(select jsonb_agg(x order by id)from public.notifications x),
- 'outbox',(select jsonb_agg(x order by id)from private.notification_outbox x)) $$;
+ 'outbox',(select jsonb_agg(x order by id)from private.notification_outbox x),
+ 'typedOutbox',(select jsonb_agg(x order by id)from private.notification_delivery_outbox x)) $$;
 
 select is((select count(*)::int from private.offline_work_leases),20,'online starts atomically issue one lease per attempt');
 select is((select expires_at-issued_at from private.offline_work_leases where id=pg_temp.lease(1)),interval '2 hours','lease hard TTL exactly 2h');
@@ -113,6 +114,22 @@ select is(pg_temp.csync(8)->>'reasonCode','LEASE_REVOKED','limited deactivation 
 select is((pg_temp.cresolve(8,'correction_link',null,2,'2040-03-01 10:40+09')#>>'{attempt,status}'),'field_completed','admin correction respects current valid one-job-finish capability');
 select is((select status::text from public.profiles where id=pg_temp.cid(9)),'upload_only','limited correction consumes finish grant and atomically enters upload-only');
 select is((select count(*)::int from private.attempt_capability_grants where attempt_id=pg_temp.cid(508) and kind='upload_submit'),1,'limited correction issues upload capability once');
+select is((select count(*)::int from public.notifications where event_family='capability.upload_submit_offline_resolution_issued'
+  and source_entity_id=(select id::text from private.attempt_capability_grants where attempt_id=pg_temp.cid(508) and kind='upload_submit')),1,
+  'offline correction emits one exact typed capability notice');
+select is((select count(*)::int from public.notifications n
+  where n.event_family='capability.upload_submit_offline_resolution_issued'
+    and private.notification_public_projection(n)->'deepLink'=jsonb_build_object('kind','cleaningTarget','entityId',pg_temp.cid(308))),1,
+  'offline capability notice exposes the exact cleaning-target deep link');
+select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  where n.event_family='capability.upload_submit_offline_resolution_issued' and n.source_entity_id=(select id::text
+    from private.attempt_capability_grants where attempt_id=pg_temp.cid(508) and kind='upload_submit')),0,
+  'offline correction leaves the recipient upload-only, so the typed notice is inbox-only');
+select ok(not exists(select 1 from public.notifications where contract_version is null
+  and dedupe_key=(select 'attempt-capability:'||id::text from private.attempt_capability_grants
+    where attempt_id=pg_temp.cid(508) and kind='upload_submit')),
+  'offline typed cutover suppresses the matching legacy notification');
+select is(current_setting('app.notification_writer_mode',true),'','offline writer wrapper clears typed mode after success');
 select is(pg_temp.csync(9,'2040-03-01 10:30+09','2040-03-01 12:01+09')->>'reasonCode','LEASE_EXPIRED','second late event available for terminal-state correction check');
 select private.execute_cleaning_attempt_at(pg_temp.cid(10),pg_temp.cid(509),2,pg_temp.cid(409),2,'offline-online-complete-9',repeat('d',64),'complete_field_work','2040-03-01 12:02+09');
 select throws_ok($$select pg_temp.cresolve(9,'correction_link',null,3)$$,'55000','ATTEMPT_INVALID_TRANSITION','already-completed timestamp cannot be corrected/overwritten');

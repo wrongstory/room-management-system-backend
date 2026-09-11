@@ -357,7 +357,7 @@ target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참
 | 검수 | 제출별 decision unique, 현재 `submitted` 버전만 조건부 전이 |
 | 수익 | 현재 #31 submission/원청소 entitlement unique. #94 후속은 원청소/타 메이드 compensation typed FK + exactly-one source CHECK를 append-only로 추가 |
 | 지급 | 현재 `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + `OPEN → PAYING` snapshot 불변 + version CAS. #94 후속은 signed adjustment/carry-forward, `CHECK/PAID`, `NO_TRANSFER_CONFIRMED` reopen과 외부 전액 지급 증거를 추가 |
-| 알림 | 수신자별 dedupe key unique, 10분 group key |
+| 알림 | `(recipient,dedupeKey)`는 logical event exactly-once, `groupId`는 `(recipient,groupFamily,scope)`별 첫 event 시각에서 고정된 10분 window로 분리. typed source/recipient/deep-link provenance와 exact terminal resolver를 DB가 검증 |
 
 복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃, 배정 알림 확정과 #31 검수는 SQL RPC의 짧은 transaction으로 원장, projection, 감사 이벤트를 함께 커밋합니다. 지급 API는 같은 원칙의 후속 구현입니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
 
@@ -426,7 +426,7 @@ UUID/시각/offset/hash/응답을 복제하는 예외는 없습니다. 관리자
 진행 회차의 물리완료만 별도 불변 결정/provenance로 기록하고 과거 회차를 복구하지 않습니다.
 이 구현은 production 자동 purge/HTTP 활성화나 ready/검수/수익을 만드는 작업이 아닙니다.
 
-#26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 `notifications`, private `notification_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
+#26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 typed `notifications`, private `notification_delivery_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
 ## 시작 전 배정 변경 — #27
 
@@ -525,14 +525,31 @@ template/default 시간 fallback은 없고 production 운영값 설정은 이번
 - 인증 사용자의 직접 알림 DML은 금지합니다. `read_at`은 좁은 markRead RPC, `resolved_at`과 업무 상태 변경은 검증된 서버 명령/RPC만 사용합니다.
 - 상세 역할 매트릭스와 상태 변경 규칙은 [Auth·RLS 계약](./AUTH_RLS_CONTRACT.md)을 따릅니다.
 
+### #109 typed 알림 writer 계약
+
+[notification catalog](./NOTIFICATION_CATALOG.md)이 28 category/42 event family의 recipient capability,
+source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
+모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
+DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
+재검수 요청은 active admin 전체의 inbox로 fan-out하고, 수동 checkout은 동일 logical
+schedule event를 한 번만 추가합니다.
+
+`dedupeKey`는 recipient별 logical event exactly-once이고 `groupId`는 이와 분리된 비민감
+UUID입니다. 그룹은 `(recipient,groupFamily,scopeKind,scopeId)`별 첫 event에서
+고정된 `[startedAt,startedAt+10m)`을 쓰며 정확한 경계는 새 그룹입니다. self-action,
+inactive, 임시 비밀번호 수신자도 inbox history는 남지만 push enqueue는 fail-closed합니다.
+provenance가 없는 `private.notification_outbox`는 legacy history로 격리하고 어떤 worker도
+읽지 않습니다. `private.notification_delivery_outbox`만 #111의 향후 유일 입력이며,
+#109에서는 pending append와 raw 권한 차단만 정의합니다.
+
 ## API 단계
 
 현재:
 
 - `GET /health`
 - `GET /openapi.json`, `GET /docs` (OpenAPI 3.1·pinned Swagger UI)
-- `GET /v1/notifications`는 admin/maid 각자의 inbox를 `(occurredAt DESC,id DESC)`로 최대 100건 조회합니다. 전용 HMAC cursor는 actor·role·stream·sort에 묶이고 128 KiB를 넘는 legacy 응답은 fail-closed합니다.
-- `POST /v1/notifications/{id}/read`는 client timestamp 없이 DB server 시각을 한 번만 기록하며 재시도·동시 요청은 같은 최초 `readAt`을 반환합니다. 타 수신자 ID는 동일한 404입니다.
+- `GET /v1/notifications`는 admin/maid 각자의 inbox를 `(occurredAt DESC,id DESC)`로 최대 100건 조회합니다. 전용 HMAC cursor는 actor·role·stream·sort에 묶이고 128 KiB를 넘는 legacy 응답은 fail-closed합니다. 공개 projection은 비민감 `deepLink`/`groupId`만 더하고 source, event family, recipient, actor, dedupe를 숨깁니다.
+- `POST /v1/notifications/{notificationId}/read`는 client timestamp 없이 DB server 시각을 한 번만 기록하며 재시도·동시 요청은 같은 최초 `readAt`을 반환합니다. 타 수신자 ID는 동일한 404입니다.
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
 - `POST /v1/auth/password`
@@ -558,7 +575,7 @@ template/default 시간 fallback은 없고 production 운영값 설정은 이번
 - 300KiB 사진 업로드, 인증된 사진 스트리밍, 현장 완료, 전체 제출
 - 검수 승인/반려, 폭탄방 판정, 재청소
 - 메이드별 주급과 지급 상태
-- 역할별 알림함과 푸시 구독
+- 푸시 구독·worker·provider (#110–#112)
 
 Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·촛불·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`만 재사용하며 raw table DML을 하지 않는다. actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 
