@@ -58,17 +58,75 @@ select throws_ok($$select public.get_current_cleaning_attempt(pg_temp.eid(1),pg_
 select throws_ok($$select public.get_current_cleaning_attempt(pg_temp.eid(6),pg_temp.eid(401))$$,'42501','MAID_REQUIRED','developer cannot use business execution');
 select throws_ok($$select pg_temp.run_execution(1,'complete_field_work')$$,'55000','ATTEMPT_INVALID_TRANSITION','scheduled cannot complete without start');
 select throws_ok($$select pg_temp.run_execution(1,'start',2)$$,'40001','ATTEMPT_VERSION_CONFLICT','stale execution CAS fails closed');
+select ok(array[
+    coalesce(current_setting('app.notification_writer_mode',true),''),
+    coalesce(current_setting('app.notification_terminal_kind',true),''),
+    coalesce(current_setting('app.notification_terminal_id',true),''),
+    coalesce(current_setting('app.notification_legacy_suppressed_count',true),''),
+    coalesce(current_setting('app.notification_typed_emit_count',true),'')
+  ]=array['','','','',''],
+  'failed start leaves writer, terminal, and counter GUCs clear');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,3)$$,'42501','ATTEMPT_ACCESS_REQUIRED','start requires exact owner');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,1)$$,'42501','MAID_REQUIRED','admin cannot start');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,6)$$,'42501','MAID_REQUIRED','developer cannot start');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,2,'2040-03-01 08:59+09')$$,'55000','CLEANING_WINDOW_NOT_OPEN','start before availableFrom rejected');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,2,'2040-03-01 15:00+09')$$,'55000','CLEANING_WINDOW_EXPIRED','start at due boundary rejected');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,2,'2040-03-02 10:00+09')$$,'55000','CLEANING_SERVICE_DATE_EXPIRED','yesterday scheduled cannot silently start');
+select private.emit_notification_v1('assignment.commit_notified',pg_temp.eid(1),pg_temp.eid(2),
+  'cleaning_assignment',pg_temp.eid(401)::text,'현재 배정','청소를 시작해 주세요.',
+  (select room_id from public.cleaning_targets where id=pg_temp.eid(301)),pg_temp.eid(301),pg_temp.eid(301),'2040-03-01 09:00+09');
+select private.emit_notification_v1('reservation.extension_revoked',pg_temp.eid(1),pg_temp.eid(2),
+  'cleaning_assignment',pg_temp.eid(401)::text,'현재 배정 기록','기록 보존 알림입니다.',
+  (select room_id from public.cleaning_targets where id=pg_temp.eid(301)),pg_temp.eid(301),pg_temp.eid(301),'2040-03-01 09:01+09');
+select private.emit_notification_v1('assignment.commit_notified',pg_temp.eid(1),pg_temp.eid(2),
+  'cleaning_assignment',pg_temp.eid(402)::text,'다른 배정','다른 배정 알림입니다.',
+  (select room_id from public.cleaning_targets where id=pg_temp.eid(302)),pg_temp.eid(302),pg_temp.eid(302),'2040-03-01 09:02+09');
+select private.emit_notification_v1('assignment.commit_notified',pg_temp.eid(1),pg_temp.eid(3),
+  'cleaning_assignment',pg_temp.eid(412)::text,'다른 메이드 배정','다른 메이드 알림입니다.',
+  (select room_id from public.cleaning_targets where id=pg_temp.eid(312)),pg_temp.eid(312),pg_temp.eid(312),'2040-03-01 09:03+09');
+select ok((select count(*)=4 from public.notifications where contract_version=1
+    and source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text))
+  and (select count(*)=3 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+    where n.source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text)),
+  'start resolver fixtures contain four inbox rows and exactly three actionable deliveries');
 insert into execution_result values('start',pg_temp.run_execution(1,'start'));
 select is((select value->>'status' from execution_result where label='start'),'in_progress','scheduled starts online');
 select is((select execution_version::int from public.cleaning_attempts where id=pg_temp.eid(501)),2,'start increments version once');
+select ok((select resolved_at is not null from public.notifications
+    where event_family='assignment.commit_notified' and source_entity_id=pg_temp.eid(401)::text)
+  and (select resolved_at is null from public.notifications
+    where event_family='reservation.extension_revoked' and source_entity_id=pg_temp.eid(401)::text)
+  and (select bool_and(resolved_at is null) from public.notifications
+    where event_family='assignment.commit_notified' and source_entity_id in (pg_temp.eid(402)::text,pg_temp.eid(412)::text)),
+  'start resolves only the current assignment actionable notice');
+select ok((select count(*)=4 from public.notifications where contract_version=1
+    and source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text))
+  and (select count(*)=3 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+    where n.source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text)),
+  'resolver-only start creates no notification or delivery row');
+create temp table start_resolution as select resolved_at from public.notifications
+where event_family='assignment.commit_notified' and source_entity_id=pg_temp.eid(401)::text;
+select ok(array[
+    coalesce(current_setting('app.notification_writer_mode',true),''),
+    coalesce(current_setting('app.notification_terminal_kind',true),''),
+    coalesce(current_setting('app.notification_terminal_id',true),''),
+    coalesce(current_setting('app.notification_legacy_suppressed_count',true),''),
+    coalesce(current_setting('app.notification_typed_emit_count',true),'')
+  ]=array['','','','',''],
+  'successful start clears writer, terminal, and counter GUCs');
 select is((select pg_temp.run_execution(1,'start')), (select value from execution_result where label='start'),'same key/hash replays exact logical start result');
 select is((select count(*)::int from public.audit_events where event_type='cleaning.attempt_started'),1,'start replay appends no duplicate audit');
+select is((select resolved_at from public.notifications where event_family='assignment.commit_notified'
+    and source_entity_id=pg_temp.eid(401)::text),(select resolved_at from start_resolution),
+  'start replay preserves the first resolvedAt');
+select ok(array[
+    coalesce(current_setting('app.notification_writer_mode',true),''),
+    coalesce(current_setting('app.notification_terminal_kind',true),''),
+    coalesce(current_setting('app.notification_terminal_id',true),''),
+    coalesce(current_setting('app.notification_legacy_suppressed_count',true),''),
+    coalesce(current_setting('app.notification_typed_emit_count',true),'')
+  ]=array['','','','',''],
+  'start replay leaves writer, terminal, and counter GUCs clear');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,repeat('b',64))$$,'23505','IDEMPOTENCY_KEY_REUSED','same scope different hash conflicts');
 select throws_ok($$select pg_temp.run_execution(2,'start')$$,'55000','MAID_ALREADY_IN_PROGRESS','same maid cannot start another room');
 select throws_ok($$update public.profiles set status='inactive' where id=pg_temp.eid(2)$$,'55000','ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED','generic deactivate cannot strand running attempt');
@@ -90,7 +148,8 @@ select is((select count(*)::int from public.audit_events where event_type='clean
 select is((select count(*)::int from public.cleaning_submissions),0,'physical completion creates no submission');
 select is((select count(*)::int from public.earnings),0,'physical completion creates no earning');
 select is((select count(*)::int from public.room_pin_access_leases),0,'no PIN lease is created');
-select is((select count(*)::int from public.notifications),0,'no premature submission notification');
+select is((select count(*)::int from public.notifications where source_entity_kind='cleaning_submission'),0,
+ 'physical completion creates no premature submission notification');
 select throws_ok($$update public.cleaning_attempts set status='in_progress' where id=pg_temp.eid(501)$$,'23514','ATTEMPT_INVALID_TRANSITION','field completed cannot return to in-progress');
 select throws_ok($$update public.cleaning_attempts set ended_at=ended_at+interval '1 second' where id=pg_temp.eid(501)$$,
  '23514','ATTEMPT_EXECUTION_TIMESTAMP_IMMUTABLE','physical completion end timestamp immutable');

@@ -190,6 +190,7 @@ begin
       'assignment.process_due_lifecycle','cleaning.lifecycle.allow_finish',
       'cleaning.lifecycle.allow_upload','cleaning.lifecycle.interrupt_handover',
       'cleaning.lifecycle.expire_scheduled','cleaning.limited.complete_field_work',
+      'cleaning.attempt.start',
       'submission.create','inspection.approved','inspection.rejected',
       'complaint.create','complaint.decide','complaint.respond','complaint.correct',
       'complaint.close','complaint.materialize_rework','payroll.adjustment.correct',
@@ -207,15 +208,15 @@ begin
       raise exception using errcode='23505',message='IDEMPOTENCY_KEY_REUSED';
     end if;
     perform set_config('app.notification_writer_mode','',true);
-    perform set_config('app.notification_legacy_suppressed_count','0',true);
-    perform set_config('app.notification_typed_emit_count','0',true);
+    perform set_config('app.notification_legacy_suppressed_count','',true);
+    perform set_config('app.notification_typed_emit_count','',true);
     return v_existing.response_payload;
   exception when others then
     perform set_config('app.notification_writer_mode','',true);
     perform set_config('app.notification_terminal_kind','',true);
     perform set_config('app.notification_terminal_id','',true);
-    perform set_config('app.notification_legacy_suppressed_count','0',true);
-    perform set_config('app.notification_typed_emit_count','0',true);
+    perform set_config('app.notification_legacy_suppressed_count','',true);
+    perform set_config('app.notification_typed_emit_count','',true);
     raise;
   end;
 end $$;
@@ -237,14 +238,14 @@ begin
     perform set_config('app.notification_writer_mode','',true);
     perform set_config('app.notification_terminal_kind','',true);
     perform set_config('app.notification_terminal_id','',true);
-    perform set_config('app.notification_legacy_suppressed_count','0',true);
-    perform set_config('app.notification_typed_emit_count','0',true);
+    perform set_config('app.notification_legacy_suppressed_count','',true);
+    perform set_config('app.notification_typed_emit_count','',true);
   exception when others then
     perform set_config('app.notification_writer_mode','',true);
     perform set_config('app.notification_terminal_kind','',true);
     perform set_config('app.notification_terminal_id','',true);
-    perform set_config('app.notification_legacy_suppressed_count','0',true);
-    perform set_config('app.notification_typed_emit_count','0',true);
+    perform set_config('app.notification_legacy_suppressed_count','',true);
+    perform set_config('app.notification_typed_emit_count','',true);
     raise;
   end;
 end $$;
@@ -745,7 +746,7 @@ declare
   previous_source_event_type text:=current_setting('app.notification_source_event_type',true);
   previous_source_reason_code text:=current_setting('app.notification_source_reason_code',true);
 begin
-  if current_setting('app.notification_writer_mode',true)<>'typed_v1' then return null; end if;
+  if coalesce(current_setting('app.notification_writer_mode',true),'')<>'typed_v1' then return null; end if;
   perform set_config('app.notification_terminal_kind','audit_event',true);
   perform set_config('app.notification_terminal_id',new.id::text,true);
   perform set_config('app.notification_source_event_type',new.event_type,true);
@@ -870,7 +871,8 @@ begin
   elsif new.event_type='cleaning.attempt_started' then
     select * into attempt from public.cleaning_attempts where id=new.entity_id;
     for item in select event_family,source_entity_kind,source_entity_id from public.notifications
-      where contract_version=1 and source_entity_kind='cleaning_assignment' and source_entity_id=attempt.assignment_id::text and resolved_at is null
+      where contract_version=1 and requires_action and source_entity_kind='cleaning_assignment'
+        and source_entity_id=attempt.assignment_id::text and resolved_at is null
     loop perform private.resolve_notifications_v1(item.event_family,item.source_entity_kind,item.source_entity_id,new.recorded_at); end loop;
 
   elsif new.event_type='assignment.rolled_over' then
@@ -1110,8 +1112,8 @@ begin
   perform set_config('app.notification_terminal_id',coalesce(previous_terminal_id,''),true);
   perform set_config('app.notification_source_event_type',coalesce(previous_source_event_type,''),true);
   perform set_config('app.notification_source_reason_code',coalesce(previous_source_reason_code,''),true);
-  perform set_config('app.notification_legacy_suppressed_count',coalesce(previous_suppressed,'0'),true);
-  perform set_config('app.notification_typed_emit_count',coalesce(previous_emitted,'0'),true);
+  perform set_config('app.notification_legacy_suppressed_count',coalesce(previous_suppressed,''),true);
+  perform set_config('app.notification_typed_emit_count',coalesce(previous_emitted,''),true);
   return result;
 exception when others then
   perform set_config('app.notification_writer_mode',coalesce(previous_mode,''),true);
@@ -1119,8 +1121,8 @@ exception when others then
   perform set_config('app.notification_terminal_id',coalesce(previous_terminal_id,''),true);
   perform set_config('app.notification_source_event_type',coalesce(previous_source_event_type,''),true);
   perform set_config('app.notification_source_reason_code',coalesce(previous_source_reason_code,''),true);
-  perform set_config('app.notification_legacy_suppressed_count',coalesce(previous_suppressed,'0'),true);
-  perform set_config('app.notification_typed_emit_count',coalesce(previous_emitted,'0'),true);
+  perform set_config('app.notification_legacy_suppressed_count',coalesce(previous_suppressed,''),true);
+  perform set_config('app.notification_typed_emit_count',coalesce(previous_emitted,''),true);
   raise;
 end $$;
 revoke all on function private.resolve_offline_quarantine_with_notifications_at(

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
 function assert(value, message) {
@@ -6,6 +7,12 @@ function assert(value, message) {
 function ok(result, message) {
   assert(!result.error, `${message}: ${result.error?.message}`);
   return result.data;
+}
+function psqlScalar(sql) {
+  return execFileSync('docker', [
+    'exec', '-i', 'supabase_db_room-management-system-backend',
+    'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', sql
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: 15000 }).trim();
 }
 
 // Local synthetic rooms isolate this suite from other concurrency suites' open work.
@@ -71,12 +78,32 @@ export async function testAttemptExecutionConcurrency(client, actorProfileId) {
   const profile = async (item) => ok(await client.from('profiles').select('status').eq('id', item.owner).single(), 'execution profile');
 
   const replay = await fixture();
+  const noticeId = psqlScalar(`select private.emit_notification_v1(
+    'assignment.commit_notified','${actorProfileId}'::uuid,'${replay.owner}'::uuid,
+    'cleaning_assignment','${replay.assignmentId}','동시 시작 배정','현재 청소를 시작해 주세요.',
+    (select room_id from public.cleaning_targets where id='${replay.targetId}'::uuid),
+    '${replay.targetId}'::uuid,'${replay.targetId}'::uuid,clock_timestamp())`);
+  assert(noticeId, 'concurrent start resolver fixture must emit one actionable notice');
   const startKey = randomUUID();
   const starts = await Promise.all([start(replay, startKey), start(replay, startKey)]);
   assert(starts.every((r) => !r.error) && JSON.stringify(starts[0].data) === JSON.stringify(starts[1].data),
     'concurrent same scoped start returns exact logical result');
   assert(Date.parse(starts[0].data.recordedAt) >= Date.parse(starts[0].data.startedAt),
     'recordedAt cannot predate lock-delayed actual start');
+  const firstResolution = JSON.parse(psqlScalar(`select json_build_object(
+    'resolvedAt',resolved_at,'notificationCount',(select count(*) from public.notifications
+      where source_entity_kind='cleaning_assignment' and source_entity_id='${replay.assignmentId}'),
+    'outboxCount',(select count(*) from private.notification_delivery_outbox o
+      join public.notifications n on n.id=o.notification_id
+      where n.source_entity_kind='cleaning_assignment' and n.source_entity_id='${replay.assignmentId}'))
+    from public.notifications where id='${noticeId}'::uuid`));
+  assert(firstResolution.resolvedAt && firstResolution.notificationCount === 1 && firstResolution.outboxCount === 1,
+    'concurrent start resolves the current actionable notice without creating inbox or outbox rows');
+  ok(await start(replay, startKey), 'start replay after concurrent winner');
+  const replayResolution = JSON.parse(psqlScalar(`select json_build_object('resolvedAt',resolved_at)
+    from public.notifications where id='${noticeId}'::uuid`));
+  assert(replayResolution.resolvedAt === firstResolution.resolvedAt,
+    'concurrent/replayed start must preserve the first resolvedAt');
   const completeKey = randomUUID();
   const completions = await Promise.all([complete(replay, completeKey), complete(replay, completeKey)]);
   assert(completions.every((r) => !r.error) && JSON.stringify(completions[0].data) === JSON.stringify(completions[1].data),
@@ -131,5 +158,5 @@ export async function testAttemptExecutionConcurrency(client, actorProfileId) {
   assert((await deactivate(startFirst)).error?.message === 'ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED', 'serial start first blocks generic deactivate');
   ok(await complete(startFirst), 'complete first');
   ok(await deactivate(startFirst), 'serial complete allows later deactivate');
-  console.log('Attempt execution concurrency passed: scoped replay, CAS winner, one running job/maid, start/deactivate and complete/deactivate both orders.');
+  console.log('Attempt execution concurrency passed: resolver-only start preserves first resolvedAt under replay, scoped replay, CAS winner, one running job/maid, start/deactivate and complete/deactivate both orders.');
 }

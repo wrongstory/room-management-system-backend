@@ -1,6 +1,6 @@
 begin;
 
-select plan(59);
+select plan(64);
 
 select is((select count(*) from private.notification_event_catalog),42::bigint,
   'source-controlled catalog contains every approved event family');
@@ -112,6 +112,21 @@ select throws_ok($$select private.emit_notification_v1('assignment.commit_notifi
   '30900000-0000-4000-8000-000000000001','30900000-0000-4000-8000-000000000001','2028-01-01 03:00:00+00')$$,
   '23514','NOTIFICATION_PROVENANCE_INVALID','source-recipient mismatch fails closed');
 
+select is(coalesce(current_setting('app.notification_writer_mode',true),''),'',
+  'fresh transaction has no typed writer capability');
+select lives_ok($$insert into public.audit_events(event_type,entity_type,entity_id,actor_profile_id,
+  actor_display_name_snapshot,effective_at,recorded_at,after_state)
+  values('assignment.notified','cleaning_assignment','40900000-0000-4000-8000-000000000007',
+    '20900000-0000-4000-8000-000000000001','카탈로그 관리자','2028-01-01 02:30:00+00',
+    '2028-01-01 02:30:00+00','{}')$$,
+  'matching audit append without typed writer capability remains inert');
+select ok(
+  (select count(*)=0 from public.notifications where contract_version=1
+    and source_entity_id='40900000-0000-4000-8000-000000000007')
+  and (select count(*)=0 from private.notification_delivery_outbox o join public.notifications n
+    on n.id=o.notification_id where n.source_entity_id='40900000-0000-4000-8000-000000000007'),
+  'fresh-session audit trigger emits neither typed inbox nor delivery row');
+
 insert into public.notifications(recipient_profile_id,category,title,body,dedupe_key,requires_action)
 values('20900000-0000-4000-8000-000000000002','legacy_collision','legacy','legacy',
   'notification:v1:assignment.commit_notified:cleaning_assignment:40900000-0000-4000-8000-000000000007',false);
@@ -187,10 +202,41 @@ select is(current_setting('app.notification_writer_mode',true),'typed_v1','appro
 select lives_ok($$select private.complete_command('20900000-0000-4000-8000-000000000001','assignment.commit_notify',
   'catalog-mode-new-0001',repeat('a',64),'40900000-0000-4000-8000-000000000001','{"ok":true}')$$,
   'typed command completion records receipt');
-select is(current_setting('app.notification_writer_mode',true),'','completion immediately clears writer mode');
+select ok(array[
+    coalesce(current_setting('app.notification_writer_mode',true),''),
+    coalesce(current_setting('app.notification_terminal_kind',true),''),
+    coalesce(current_setting('app.notification_terminal_id',true),''),
+    coalesce(current_setting('app.notification_source_event_type',true),''),
+    coalesce(current_setting('app.notification_source_reason_code',true),''),
+    coalesce(current_setting('app.notification_legacy_suppressed_count',true),''),
+    coalesce(current_setting('app.notification_typed_emit_count',true),'')
+  ]=array['','','','','','',''],
+  'successful command completion clears every notification writer GUC');
 select is(private.replay_command('20900000-0000-4000-8000-000000000001','assignment.commit_notify',
   'catalog-mode-new-0001',repeat('a',64)),'{"ok": true}'::jsonb,'exact replay returns the stored response');
-select is(current_setting('app.notification_writer_mode',true),'','replay exit leaves no writer capability behind');
+select ok(array[
+    coalesce(current_setting('app.notification_writer_mode',true),''),
+    coalesce(current_setting('app.notification_terminal_kind',true),''),
+    coalesce(current_setting('app.notification_terminal_id',true),''),
+    coalesce(current_setting('app.notification_source_event_type',true),''),
+    coalesce(current_setting('app.notification_source_reason_code',true),''),
+    coalesce(current_setting('app.notification_legacy_suppressed_count',true),''),
+    coalesce(current_setting('app.notification_typed_emit_count',true),'')
+  ]=array['','','','','','',''],
+  'replay exit clears every notification writer GUC');
+select throws_ok($$select private.replay_command(
+  '20900000-0000-4000-8000-000000000001','assignment.commit_notify','short',repeat('a',64))$$,
+  '22023','INVALID_IDEMPOTENCY_KEY','typed command setup rejects invalid input');
+select ok(array[
+    coalesce(current_setting('app.notification_writer_mode',true),''),
+    coalesce(current_setting('app.notification_terminal_kind',true),''),
+    coalesce(current_setting('app.notification_terminal_id',true),''),
+    coalesce(current_setting('app.notification_source_event_type',true),''),
+    coalesce(current_setting('app.notification_source_reason_code',true),''),
+    coalesce(current_setting('app.notification_legacy_suppressed_count',true),''),
+    coalesce(current_setting('app.notification_typed_emit_count',true),'')
+  ]=array['','','','','','',''],
+  'exception exit leaves every notification writer GUC clear');
 select is(private.replay_command('20900000-0000-4000-8000-000000000001','room.change_master_data',
   'catalog-mode-other-0001',repeat('b',64)),null::jsonb,'unmapped command remains a normal new command');
 select is(current_setting('app.notification_writer_mode',true),'','unmapped writer never suppresses legacy notification paths');
