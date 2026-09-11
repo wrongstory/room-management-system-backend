@@ -20,6 +20,8 @@ export interface WebPushCryptoConfig {
   key: Uint8Array;
   version: string;
   secret: string;
+  /** Deterministic vector input only; production callers leave this undefined. */
+  nonce?: Uint8Array;
 }
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -28,6 +30,10 @@ const responseLimit = 128 * 1024;
 
 function invalid(message = "Web Push 구독 값이 올바르지 않습니다."): never {
   throw new EdgeError(400, "INVALID_WEB_PUSH_SUBSCRIPTION", message);
+}
+function canonicalUuid(value: string): string {
+  if (!uuidPattern.test(value)) invalid();
+  return value.toLowerCase();
 }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
@@ -201,7 +207,8 @@ async function parseSubscription(value: unknown): Promise<SubscriptionInput> {
   const input = object(value);
   exactKeys(input, ["endpoint", "expirationTime", "keys"]);
   if (
-    typeof input.endpoint !== "string" || utf8(input.endpoint).length > 4096
+    typeof input.endpoint !== "string" || !input.endpoint ||
+    utf8(input.endpoint).length > 4096
   ) invalid();
   let url: URL;
   try {
@@ -236,8 +243,10 @@ async function parseSubscription(value: unknown): Promise<SubscriptionInput> {
   } catch {
     invalid();
   }
+  const canonicalEndpoint = `https://${url.host}${url.pathname}${url.search}`;
+  if (utf8(canonicalEndpoint).length > 4096) invalid();
   return {
-    endpoint: input.endpoint,
+    endpoint: canonicalEndpoint,
     expirationTime: input.expirationTime as number | null,
     keys: { p256dh: keys.p256dh as string, auth: keys.auth as string },
   };
@@ -341,21 +350,48 @@ async function rpc(
   return data;
 }
 function projection(value: unknown): Record<string, unknown> {
-  const row = object(value);
-  exactKeys(row, [
-    "id",
-    "version",
-    "status",
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw dbError(null);
+  }
+  const row = value as Record<string, unknown>;
+  const expected = [
     "createdAt",
-    "updatedAt",
+    "id",
     "retiredAt",
-  ]);
+    "status",
+    "updatedAt",
+    "version",
+  ];
   if (
+    Object.keys(row).sort().join(",") !== expected.join(",") ||
     typeof row.id !== "string" || !uuidPattern.test(row.id) ||
     !Number.isInteger(row.version) ||
-    !["active", "retired"].includes(String(row.status))
+    !["active", "retired"].includes(String(row.status)) ||
+    !strictRfc3339(row.createdAt) || !strictRfc3339(row.updatedAt) ||
+    (row.retiredAt !== null && !strictRfc3339(row.retiredAt))
   ) throw dbError(null);
-  return row;
+  return { ...row, id: row.id.toLowerCase() };
+}
+const timestampPattern =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
+function strictRfc3339(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = timestampPattern.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]),
+    month = Number(match[2]),
+    day = Number(match[3]);
+  const hour = Number(match[4]),
+    minute = Number(match[5]),
+    second = Number(match[6]);
+  const offsetHour = match[8] === "Z" ? 0 : Number(match[10]);
+  const offsetMinute = match[8] === "Z" ? 0 : Number(match[11]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return year >= 1 && month >= 1 && month <= 12 && day >= 1 &&
+    day <= (days[month - 1] ?? 0) && hour <= 23 && minute <= 59 &&
+    second <= 59 && offsetHour <= 23 && offsetMinute <= 59 &&
+    Number.isFinite(Date.parse(value));
 }
 function sized(value: unknown): unknown {
   if (utf8(JSON.stringify(value)).length > responseLimit) {
@@ -405,8 +441,11 @@ export async function registerWebPushSubscription(
       version: Number(value.version),
     };
   }
-  const sessionId = verifiedRequestSessionId(request);
-  const proposed = expected?.subscriptionId ?? crypto.randomUUID();
+  const actorProfileId = canonicalUuid(actor.profileId);
+  const sessionId = canonicalUuid(verifiedRequestSessionId(request));
+  const proposed = canonicalUuid(
+    expected?.subscriptionId ?? crypto.randomUUID(),
+  );
   const revision = (expected?.version ?? 0) + 1;
   const cfg = cryptoConfig;
   const canonical = JSON.stringify({
@@ -422,9 +461,12 @@ export async function registerWebPushSubscription(
     hmac(cfg.secret, "web-push-material:v1", canonical),
   ]);
   const aad = utf8(
-    `web-push-envelope:v1\0${actor.profileId}\0${sessionDigest}\0${endpointDigest}\0${proposed}\0${revision}`,
+    `web-push-envelope:v1\0${actorProfileId}\0${sessionDigest}\0${endpointDigest}\0${proposed}\0${revision}`,
   );
-  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const nonce = cfg.nonce === undefined
+    ? crypto.getRandomValues(new Uint8Array(12))
+    : new Uint8Array(cfg.nonce);
+  if (nonce.length !== 12) invalid();
   const key = await crypto.subtle.importKey(
     "raw",
     cfg.key,
@@ -458,7 +500,7 @@ export async function registerWebPushSubscription(
   return sized({
     subscription: projection(
       await rpc(clients, "register_web_push_subscription", {
-        p_actor_profile_id: actor.profileId,
+        p_actor_profile_id: actorProfileId,
         p_session_id: sessionId,
         p_proposed_subscription_id: proposed,
         p_expected_subscription_id: expected?.subscriptionId ?? null,
@@ -493,12 +535,15 @@ export async function retireWebPushSubscription(
   if (
     !Number.isInteger(body.expectedVersion) || Number(body.expectedVersion) < 1
   ) invalid();
+  const actorProfileId = canonicalUuid(actor.profileId);
+  const canonicalSessionId = canonicalUuid(verifiedRequestSessionId(request));
+  const canonicalSubscriptionId = canonicalUuid(subscriptionId);
   const requestHash = hex(
     await crypto.subtle.digest(
       "SHA-256",
       utf8(
         JSON.stringify({
-          subscriptionId,
+          subscriptionId: canonicalSubscriptionId,
           expectedVersion: Number(body.expectedVersion),
         }),
       ),
@@ -507,9 +552,9 @@ export async function retireWebPushSubscription(
   return sized({
     subscription: projection(
       await rpc(clients, "retire_web_push_subscription", {
-        p_actor_profile_id: actor.profileId,
-        p_session_id: verifiedRequestSessionId(request),
-        p_subscription_id: subscriptionId,
+        p_actor_profile_id: actorProfileId,
+        p_session_id: canonicalSessionId,
+        p_subscription_id: canonicalSubscriptionId,
         p_expected_version: Number(body.expectedVersion),
         p_idempotency_key: idempotencyKey(request),
         p_request_hash: requestHash,

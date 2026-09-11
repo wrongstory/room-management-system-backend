@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
-import { createWebPushEnvelope, type WebPushCryptoConfig, type WebPushSubscriptionInput } from './web-push-crypto.js';
+import { canonicalWebPushUuid, createWebPushEnvelope, type WebPushCryptoConfig, type WebPushSubscriptionInput } from './web-push-crypto.js';
 
 export interface WebPushExpectedCurrent { subscriptionId: string; version: number }
 export interface RegisterWebPushInput { subscription: WebPushSubscriptionInput; expectedCurrent?: WebPushExpectedCurrent | undefined }
@@ -13,7 +13,20 @@ export interface WebPushSubscriptionService {
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const timestampPattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+function strictRfc3339(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match=timestampPattern.exec(value); if(!match) return false;
+  const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+  const hour=Number(match[4]),minute=Number(match[5]),second=Number(match[6]);
+  const offsetHour=match[8]==='Z'?0:Number(match[10]),offsetMinute=match[8]==='Z'?0:Number(match[11]);
+  const leap=year%4===0&&(year%100!==0||year%400===0);
+  const days=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];
+  return year>=1&&month>=1&&month<=12&&day>=1&&day<=(days[month-1]??0)
+    &&hour<=23&&minute<=59&&second<=59&&offsetHour<=23&&offsetMinute<=59
+    &&Number.isFinite(Date.parse(value));
+}
 
 function sessionId(actor: Actor): string {
   try {
@@ -45,9 +58,11 @@ function databaseError(error: { message?: string } | null): AppError {
 function projection(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw databaseError(null);
   const row=value as Record<string,unknown>;
+  const expected=['createdAt','id','retiredAt','status','updatedAt','version'];
   if (typeof row.id!=='string'||!uuidPattern.test(row.id)||!Number.isInteger(row.version)||!['active','retired'].includes(String(row.status))
-    ||typeof row.createdAt!=='string'||!timestampPattern.test(row.createdAt)||typeof row.updatedAt!=='string'||!timestampPattern.test(row.updatedAt)
-    ||(row.retiredAt!==null&&(typeof row.retiredAt!=='string'||!timestampPattern.test(row.retiredAt)))) throw databaseError(null);
+    ||Object.keys(row).sort().join(',')!==expected.join(',')
+    ||!strictRfc3339(row.createdAt)||!strictRfc3339(row.updatedAt)
+    ||(row.retiredAt!==null&&!strictRfc3339(row.retiredAt))) throw databaseError(null);
   return { id:row.id.toLowerCase(),version:row.version,status:row.status,createdAt:row.createdAt,updatedAt:row.updatedAt,retiredAt:row.retiredAt };
 }
 
@@ -62,12 +77,15 @@ export class SupabaseWebPushSubscriptionService implements WebPushSubscriptionSe
   }
   async register(actor:Actor,input:RegisterWebPushInput,idempotencyKey:string):Promise<unknown>{
     if(actor.role!=='admin'&&actor.role!=='maid') throw databaseError({message:'WEB_PUSH_ACCESS_REQUIRED'});
-    const sid=sessionId(actor); const proposed=input.expectedCurrent?.subscriptionId??randomUUID();
+    const actorProfileId=canonicalWebPushUuid(actor.profileId);
+    const sid=canonicalWebPushUuid(sessionId(actor));
+    const expectedSubscriptionId=input.expectedCurrent===undefined?null:canonicalWebPushUuid(input.expectedCurrent.subscriptionId);
+    const proposed=canonicalWebPushUuid(expectedSubscriptionId??randomUUID());
     const revision=(input.expectedCurrent?.version??0)+1;
-    const envelope=createWebPushEnvelope(input.subscription,actor.profileId,sid,proposed,revision,this.config,input.expectedCurrent?.subscriptionId??null);
+    const envelope=createWebPushEnvelope(input.subscription,actorProfileId,sid,proposed,revision,this.config,expectedSubscriptionId);
     const result=projection(await this.rpc('register_web_push_subscription',{
-      p_actor_profile_id:actor.profileId,p_session_id:sid,p_proposed_subscription_id:proposed,
-      p_expected_subscription_id:input.expectedCurrent?.subscriptionId??null,p_expected_version:input.expectedCurrent?.version??null,
+      p_actor_profile_id:actorProfileId,p_session_id:sid,p_proposed_subscription_id:proposed,
+      p_expected_subscription_id:expectedSubscriptionId,p_expected_version:input.expectedCurrent?.version??null,
       p_endpoint_digest:envelope.endpointDigest,p_session_digest:envelope.sessionDigest,p_material_digest:envelope.materialDigest,
       p_expiration_at:envelope.expirationAt,p_key_version:envelope.keyVersion,p_ciphertext_base64:envelope.ciphertextBase64,
       p_nonce_base64:envelope.nonceBase64,p_auth_tag_base64:envelope.authTagBase64,p_idempotency_key:idempotencyKey,
@@ -76,9 +94,12 @@ export class SupabaseWebPushSubscriptionService implements WebPushSubscriptionSe
   }
   async retire(actor:Actor,input:RetireWebPushInput,idempotencyKey:string):Promise<unknown>{
     if(actor.role!=='admin'&&actor.role!=='maid') throw databaseError({message:'WEB_PUSH_ACCESS_REQUIRED'});
-    const hash=createHash('sha256').update(JSON.stringify({subscriptionId:input.subscriptionId,expectedVersion:input.expectedVersion})).digest('hex');
+    const actorProfileId=canonicalWebPushUuid(actor.profileId);
+    const sid=canonicalWebPushUuid(sessionId(actor));
+    const subscriptionId=canonicalWebPushUuid(input.subscriptionId);
+    const hash=createHash('sha256').update(JSON.stringify({subscriptionId,expectedVersion:input.expectedVersion})).digest('hex');
     const result=projection(await this.rpc('retire_web_push_subscription',{
-      p_actor_profile_id:actor.profileId,p_session_id:sessionId(actor),p_subscription_id:input.subscriptionId,
+      p_actor_profile_id:actorProfileId,p_session_id:sid,p_subscription_id:subscriptionId,
       p_expected_version:input.expectedVersion,p_idempotency_key:idempotencyKey,p_request_hash:hash
     })); assertWebPushResponseSize(result); return result;
   }

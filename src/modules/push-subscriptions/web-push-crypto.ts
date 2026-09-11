@@ -12,6 +12,8 @@ export interface WebPushCryptoConfig {
   keyVersion: string;
   keyring: Record<string, string>;
   bindingSecret: string;
+  /** Deterministic vector input only; production callers leave this undefined. */
+  nonce?: Uint8Array;
 }
 
 export interface WebPushEnvelope {
@@ -45,8 +47,13 @@ function canonicalBase64Url(value: string, expectedBytes: number): Buffer {
   return decoded;
 }
 
+export function canonicalWebPushUuid(value: string): string {
+  if (!uuidPattern.test(value)) invalid();
+  return value.toLowerCase();
+}
+
 export function validateWebPushSubscription(value: WebPushSubscriptionInput): WebPushSubscriptionInput {
-  if (Buffer.byteLength(value.endpoint, 'utf8') > 4096) invalid();
+  if (!value.endpoint || Buffer.byteLength(value.endpoint, 'utf8') > 4096) invalid();
   let endpoint: URL;
   try { endpoint = new URL(value.endpoint); } catch { invalid(); }
   if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.hash
@@ -62,7 +69,9 @@ export function validateWebPushSubscription(value: WebPushSubscriptionInput): We
     });
   } catch { invalid(); }
   canonicalBase64Url(value.keys.auth, 16);
-  return value;
+  const canonicalEndpoint = `https://${endpoint.host}${endpoint.pathname}${endpoint.search}`;
+  if (Buffer.byteLength(canonicalEndpoint, 'utf8') > 4096) invalid();
+  return { ...value, endpoint: canonicalEndpoint };
 }
 
 function canonical(value: WebPushSubscriptionInput, sessionId: string): string {
@@ -96,34 +105,39 @@ export function createWebPushEnvelope(
   config: WebPushCryptoConfig,
   requestSubscriptionId: string | null = subscriptionId
 ): WebPushEnvelope {
-  validateWebPushSubscription(input);
-  if (!uuidPattern.test(sessionId)) invalid();
-  const plaintext = canonical(input, sessionId.toLowerCase());
-  const endpointDigest = hmac(config.bindingSecret, 'web-push-endpoint:v1', input.endpoint);
-  const sessionDigest = hmac(config.bindingSecret, 'web-push-session:v1', sessionId);
+  const subscription = validateWebPushSubscription(input);
+  const canonicalActorProfileId = canonicalWebPushUuid(actorProfileId);
+  const canonicalSessionId = canonicalWebPushUuid(sessionId);
+  const canonicalSubscriptionId = canonicalWebPushUuid(subscriptionId);
+  const canonicalRequestSubscriptionId = requestSubscriptionId === null ? null : canonicalWebPushUuid(requestSubscriptionId);
+  if (!Number.isInteger(revisionNo) || revisionNo < 1) invalid();
+  const plaintext = canonical(subscription, canonicalSessionId);
+  const endpointDigest = hmac(config.bindingSecret, 'web-push-endpoint:v1', subscription.endpoint);
+  const sessionDigest = hmac(config.bindingSecret, 'web-push-session:v1', canonicalSessionId);
   const materialDigest = hmac(config.bindingSecret, 'web-push-material:v1', plaintext);
   const aad = Buffer.from(
-    `web-push-envelope:v1\0${actorProfileId}\0${sessionDigest}\0${endpointDigest}\0${subscriptionId}\0${revisionNo}`,
+    `web-push-envelope:v1\0${canonicalActorProfileId}\0${sessionDigest}\0${endpointDigest}\0${canonicalSubscriptionId}\0${revisionNo}`,
     'utf8'
   );
-  const nonce = randomBytes(12);
+  const nonce = config.nonce === undefined ? randomBytes(12) : Buffer.from(config.nonce);
+  if (nonce.length !== 12) invalid();
   const cipher = createCipheriv('aes-256-gcm', decodeKey(config.key), nonce);
   cipher.setAAD(aad);
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
   const requestHash = createHash('sha256').update(JSON.stringify({
     endpointDigest,
-    expirationTime: input.expirationTime,
+    expirationTime: subscription.expirationTime,
     materialDigest,
     sessionDigest,
-    subscriptionId: requestSubscriptionId,
+    subscriptionId: canonicalRequestSubscriptionId,
     revisionNo
   }), 'utf8').digest('hex');
   return {
     endpointDigest,
     sessionDigest,
     materialDigest,
-    expirationAt: input.expirationTime === null ? null : new Date(input.expirationTime).toISOString(),
+    expirationAt: subscription.expirationTime === null ? null : new Date(subscription.expirationTime).toISOString(),
     keyVersion: config.keyVersion,
     ciphertextBase64: ciphertext.toString('base64'),
     nonceBase64: nonce.toString('base64'),
@@ -140,8 +154,10 @@ export function decryptWebPushEnvelope(
   const encodedKey = envelope.keyVersion === config.keyVersion ? config.key : config.keyring[envelope.keyVersion];
   if (!encodedKey) throw new AppError(503, 'WEB_PUSH_KEY_UNAVAILABLE', 'Web Push 구독 복호화 키를 찾을 수 없습니다.');
   const decipher = createDecipheriv('aes-256-gcm', decodeKey(encodedKey), Buffer.from(envelope.nonceBase64, 'base64'));
+  const actorProfileId = canonicalWebPushUuid(binding.actorProfileId);
+  const subscriptionId = canonicalWebPushUuid(binding.subscriptionId);
   decipher.setAAD(Buffer.from(
-    `web-push-envelope:v1\0${binding.actorProfileId}\0${binding.sessionDigest}\0${binding.endpointDigest}\0${binding.subscriptionId}\0${binding.revisionNo}`,
+    `web-push-envelope:v1\0${actorProfileId}\0${binding.sessionDigest}\0${binding.endpointDigest}\0${subscriptionId}\0${binding.revisionNo}`,
     'utf8'
   ));
   decipher.setAuthTag(Buffer.from(envelope.authTagBase64, 'base64'));

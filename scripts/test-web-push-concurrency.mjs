@@ -4,8 +4,11 @@ import { promisify } from 'node:util';
 
 function assert(condition,message){if(!condition)throw new Error(message);}
 function digest(value){return createHash('sha256').update(value).digest('hex');}
+function canonicalEndpoint(value){const url=new URL(value);return `https://${url.host}${url.pathname}${url.search}`;}
+function stableDomain(result){return !/40P01|deadlock detected|WEB_PUSH_COMMAND_FAILED/i.test(result.error?.message??'');}
 function sealed(value){return Buffer.from(value).toString('base64');}
 function query(sql){return execFileSync('docker',['exec','-i','supabase_db_room-management-system-backend','psql','-X','-A','-t','-q','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1','-c',sql],{encoding:'utf8',timeout:15000}).trim();}
+function resetLimiter(profileId){query(`begin; select set_config('app.web_push_writer_mode','typed_v1',true); delete from private.web_push_registration_limits where profile_id='${profileId}'::uuid; commit;`);}
 const execFileAsync=promisify(execFile);
 async function queryAsync(sql){const {stdout}=await execFileAsync('docker',['exec','-i','supabase_db_room-management-system-backend','psql','-X','-A','-t','-q','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1','-c',sql],{encoding:'utf8',timeout:15000});return stdout.trim();}
 
@@ -40,32 +43,57 @@ export async function testWebPushConcurrency(client){
   const otherProfile=await client.from('profiles').insert({id:otherProfileId,auth_user_id:otherAuthUserId,display_name:otherDisplayName,display_name_normalized:otherDisplayName,login_id:`push-${otherProfileId}`,login_id_normalized:`push-${otherProfileId}`,login_sequence:0,role:'maid',status:'active',must_change_password:false});
   assert(!otherProfile.error,'cross-profile endpoint profile fixture');
   query(`insert into auth.sessions(id,user_id) values('${otherSessionId}'::uuid,'${otherAuthUserId}'::uuid),('${sharedOwnerSessionId}'::uuid,'${authUserId}'::uuid)`);
-  const sharedEndpointDigest=digest(`shared-endpoint:${randomUUID()}`);
+  const equivalentEndpointA='https://PUSH.Example.Invalid:443/shared/%2Fcapability?device=1';
+  const equivalentEndpointB='https://push.example.invalid/shared/%2Fcapability?device=1';
+  const sharedEndpointDigest=digest(`shared-endpoint:${canonicalEndpoint(equivalentEndpointA)}`);
+  assert(sharedEndpointDigest===digest(`shared-endpoint:${canonicalEndpoint(equivalentEndpointB)}`),'equivalent endpoints have one canonical identity');
   const ownEndpointArgs={...args(sharedOwnerSessionId,randomUUID(),`push-endpoint-owner-${randomUUID()}`,'shared-owner','shared-owner'),p_endpoint_digest:sharedEndpointDigest};
   const otherEndpointArgs={...args(otherSessionId,randomUUID(),`push-endpoint-other-${randomUUID()}`,'shared-other','shared-other'),p_actor_profile_id:otherProfileId,p_session_digest:digest(`session:${otherSessionId}`),p_endpoint_digest:sharedEndpointDigest};
   const endpointRace=await Promise.all([
     client.rpc('register_web_push_subscription',ownEndpointArgs),
     client.rpc('register_web_push_subscription',otherEndpointArgs)
   ]);
-  assert(endpointRace.filter(result=>!result.error).length===1&&endpointRace.filter(result=>/WEB_PUSH_ENDPOINT_CONFLICT/.test(result.error?.message??'')).length===1,'concurrent cross-profile endpoint claim returns one opaque conflict');
+  assert(endpointRace.every(stableDomain)&&endpointRace.filter(result=>!result.error).length===1&&endpointRace.filter(result=>/WEB_PUSH_ENDPOINT_CONFLICT/.test(result.error?.message??'')).length===1,'concurrent cross-profile equivalent endpoint claim returns one opaque conflict without deadlock');
   assert(query(`select count(*) from private.web_push_subscriptions where active_endpoint_digest='${sharedEndpointDigest}'`)==='1','global endpoint digest remains unique after cross-profile race');
-  if(!endpointRace[0].error){
-    const cleanup=await client.rpc('retire_web_push_subscription',{p_actor_profile_id:profileId,p_session_id:sharedOwnerSessionId,p_subscription_id:endpointRace[0].data.id,p_expected_version:1,p_idempotency_key:`push-endpoint-cleanup-${randomUUID()}`,p_request_hash:digest('endpoint-cleanup')});
-    assert(!cleanup.error,'cross-profile endpoint profile-cap isolation cleanup');
+  const endpointWinner=endpointRace.findIndex(result=>!result.error);
+  const winnerProfileId=endpointWinner===0?profileId:otherProfileId,winnerSessionId=endpointWinner===0?sharedOwnerSessionId:otherSessionId;
+  const cleanup=await client.rpc('retire_web_push_subscription',{p_actor_profile_id:winnerProfileId,p_session_id:winnerSessionId,p_subscription_id:endpointRace[endpointWinner].data.id,p_expected_version:1,p_idempotency_key:`push-endpoint-cleanup-${randomUUID()}`,p_request_hash:digest('endpoint-cleanup')});
+  assert(!cleanup.error,'cross-profile endpoint profile-cap isolation cleanup');
+
+  const swapAId=randomUUID(),swapBId=randomUUID();
+  const swapA=await client.rpc('register_web_push_subscription',args(sharedOwnerSessionId,swapAId,`push-swap-a-${randomUUID()}`,'swap-a','swap-a'));
+  const swapBArgs={...args(otherSessionId,swapBId,`push-swap-b-${randomUUID()}`,'swap-b','swap-b'),p_actor_profile_id:otherProfileId,p_session_digest:digest(`session:${otherSessionId}`)};
+  const swapB=await client.rpc('register_web_push_subscription',swapBArgs);
+  assert(!swapA.error&&!swapB.error,'endpoint swap fixtures register');
+  for(let attempt=0;attempt<8;attempt+=1){
+    const swapRace=await Promise.all([
+      client.rpc('register_web_push_subscription',{...args(sharedOwnerSessionId,swapAId,`push-swap-a-race-${attempt}-${randomUUID()}`,'swap-b',`swap-a-${attempt}`,swapAId,1),p_endpoint_digest:swapBArgs.p_endpoint_digest}),
+      client.rpc('register_web_push_subscription',{...args(otherSessionId,swapBId,`push-swap-b-race-${attempt}-${randomUUID()}`,'swap-a',`swap-b-${attempt}`,swapBId,1),p_actor_profile_id:otherProfileId,p_session_digest:digest(`session:${otherSessionId}`),p_endpoint_digest:args(sharedOwnerSessionId,swapAId,'unused','swap-a','unused').p_endpoint_digest})
+    ]);
+    assert(swapRace.every(stableDomain)&&swapRace.every(result=>/WEB_PUSH_ENDPOINT_CONFLICT/.test(result.error?.message??'')),`A/B endpoint swap attempt ${attempt} returns stable conflicts without deadlock`);
   }
+  const swapCleanup=await Promise.all([
+    client.rpc('retire_web_push_subscription',{p_actor_profile_id:profileId,p_session_id:sharedOwnerSessionId,p_subscription_id:swapAId,p_expected_version:1,p_idempotency_key:`push-swap-cleanup-a-${randomUUID()}`,p_request_hash:digest('swap-cleanup-a')}),
+    client.rpc('retire_web_push_subscription',{p_actor_profile_id:otherProfileId,p_session_id:otherSessionId,p_subscription_id:swapBId,p_expected_version:1,p_idempotency_key:`push-swap-cleanup-b-${randomUUID()}`,p_request_hash:digest('swap-cleanup-b')})
+  ]);
+  assert(swapCleanup.every(result=>!result.error&&stableDomain(result)),'endpoint swap fixtures retire without deadlock');
 
   const race=await Promise.all([
     client.rpc('register_web_push_subscription',args(sessionIds[0],subscriptionId,`push-rotate-${randomUUID()}`,'one','two',subscriptionId,1)),
     client.rpc('retire_web_push_subscription',{p_actor_profile_id:profileId,p_session_id:sessionIds[0],p_subscription_id:subscriptionId,p_expected_version:1,p_idempotency_key:`push-retire-${randomUUID()}`,p_request_hash:digest('retire-race')})
   ]);
-  assert(race.filter(r=>!r.error).length===1&&race.filter(r=>r.error).length===1,'rotate versus retire has one CAS winner');
+  assert(race.every(stableDomain)&&race.filter(r=>!r.error).length===1&&race.filter(r=>r.error).length===1,'rotate versus retire has one CAS winner without deadlock');
   const state=query(`select status||':'||(select count(*) from private.web_push_subscription_secrets s join private.web_push_subscription_revisions r on r.id=s.revision_id where r.subscription_id=w.id)::text from private.web_push_subscriptions w where id='${subscriptionId}'::uuid`);
   assert(state==='active:1'||state==='retired:0','rotate/retire winner leaves exact secret state');
 
   const distinct=await Promise.all([1,2].map(i=>client.rpc('register_web_push_subscription',args(sessionIds[i],randomUUID(),`push-isolated-${i}-${randomUUID()}`,`isolated-${i}`,`isolated-${i}`))));
   const distinctSummary=distinct.map(result=>({id:result.data?.id??null,error:result.error?.message??null}));
   assert(distinct.every(r=>!r.error)&&new Set(distinct.map(r=>r.data.id)).size===2,`different live sessions register independently: ${JSON.stringify(distinctSummary)}`);
+  const rotationTarget=distinct[0].data.id;
+  const twoRotations=await Promise.all([1,2].map(i=>client.rpc('register_web_push_subscription',args(sessionIds[1],rotationTarget,`push-two-rotations-${i}-${randomUUID()}`,`two-rotations-${i}`,`two-rotations-${i}`,rotationTarget,1))));
+  assert(twoRotations.every(stableDomain)&&twoRotations.filter(result=>!result.error).length===1&&twoRotations.filter(result=>/WEB_PUSH_STALE_VERSION/.test(result.error?.message??'')).length===1,'two rotations have one winner and one stable stale-version without deadlock');
 
+  resetLimiter(profileId);
   const sessionCapId=randomUUID();
   query(`insert into auth.sessions(id,user_id) values('${sessionCapId}'::uuid,'${authUserId}'::uuid)`);
   const sessionCap=await Promise.all([1,2].map(i=>client.rpc('register_web_push_subscription',args(sessionCapId,randomUUID(),`push-session-cap-${i}-${randomUUID()}`,`session-cap-${i}`,`session-cap-${i}`))));
@@ -77,16 +105,17 @@ export async function testWebPushConcurrency(client){
     client.rpc('register_web_push_subscription',args(revokedSessionId,revokeSubscriptionId,`push-revoke-race-${randomUUID()}`,'revoke-race','revoke-race')),
     queryAsync(`delete from auth.sessions where id='${revokedSessionId}'::uuid`)
   ]);
-  assert(registerAfterRace.error===null||/WEB_PUSH_SESSION_REVOKED/.test(registerAfterRace.error.message),'session revoke race has only success-before-revoke or revoked-session outcome');
+  assert(stableDomain(registerAfterRace)&&(registerAfterRace.error===null||/WEB_PUSH_SESSION_REVOKED/.test(registerAfterRace.error.message)),'session revoke race has only success-before-revoke or revoked-session outcome without deadlock');
   assert(query(`select count(*) from auth.sessions where id='${revokedSessionId}'::uuid`)==='0','revocation race ends with no live session');
   const racedRows=Number(query(`select count(*) from private.web_push_subscriptions where id='${revokeSubscriptionId}'::uuid`));
   assert(racedRows===(registerAfterRace.error?0:1),'session revoke race leaves no partial registration');
 
   const activeBefore=Number(query(`select count(*) from private.web_push_subscriptions where profile_id='${profileId}'::uuid and status='active'`));
+  resetLimiter(profileId);
   const fillSessionIds=Array.from({length:6-activeBefore},()=>randomUUID());
   query(`insert into auth.sessions(id,user_id) values ${fillSessionIds.map(id=>`('${id}'::uuid,'${authUserId}'::uuid)`).join(',')}`);
   const fill=await Promise.all(fillSessionIds.map((sessionId,index)=>client.rpc('register_web_push_subscription',args(sessionId,randomUUID(),`push-profile-cap-${index}-${randomUUID()}`,`profile-cap-${index}`,`profile-cap-${index}`))));
   assert(fill.filter(result=>!result.error).length===5-activeBefore&&fill.filter(result=>/WEB_PUSH_PROFILE_LIMIT/.test(result.error?.message??'')).length===1,'concurrent profile cap admits exactly five active subscriptions');
   assert(query(`select count(*) from private.web_push_subscriptions where profile_id='${profileId}'::uuid and status='active'`)==='5','profile active cap remains exactly five');
-  console.log('Web Push concurrency passed: first replay=1/2, cross-profile endpoint=1/2 opaque conflict, rotate-vs-retire=1/2, session cap=1/2, profile cap=5, session revoke linearized, secret state exact.');
+  console.log('Web Push concurrency passed: canonical endpoint cross-profile claim=1/2, A/B swap x8 deadlock=0, rotate-vs-retire=1/2, two rotations=1/2 stale CAS, session cap=1/2, profile cap=5, session revoke linearized, secret state exact.');
 }

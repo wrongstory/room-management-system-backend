@@ -555,6 +555,8 @@ describe('initial migration contract', () => {
     expect(sql).toContain('auth.sessions');
     expect(sql).toContain('v_profile.must_change_password');
     expect(sql).toContain("v_profile.role::text not in ('admin','maid')");
+    expect(sql.match(/pg_advisory_xact_lock\(hashtextextended\('web-push:membership:v1',0\)\)/g)).toHaveLength(2);
+    expect(sql).not.toContain("'web-push:endpoint:'||p_endpoint_digest");
     expect(sql).toContain('delete from private.web_push_subscription_secrets');
     expect(sql).toContain("interval '90 days'");
     expect(sql).toContain('p_limit not between 1 and 100');

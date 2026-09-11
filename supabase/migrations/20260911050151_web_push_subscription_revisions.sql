@@ -194,9 +194,10 @@ begin
     end if;
 
     perform private.consume_web_push_registration_limit(p_actor_profile_id,v_now);
-    -- Serialize the global endpoint capability before the visibility check so
-    -- concurrent cross-profile claims always return the stable opaque conflict.
-    perform pg_advisory_xact_lock(hashtextextended('web-push:endpoint:'||p_endpoint_digest,0));
+    -- Every active-membership mutation takes this one bounded lock. The coarse
+    -- protocol trades registration throughput for deterministic lock ordering;
+    -- delivery reads are unaffected and registration is already profile-limited.
+    perform pg_advisory_xact_lock(hashtextextended('web-push:membership:v1',0));
     select * into v_collision from private.web_push_subscriptions
     where status='active' and active_endpoint_digest=p_endpoint_digest for update;
 
@@ -290,6 +291,9 @@ begin
       if v_existing.request_hash<>p_request_hash then raise exception using errcode='23505',message='IDEMPOTENCY_KEY_REUSED'; end if;
       perform set_config('app.web_push_writer_mode','',true); return v_existing.response_payload;
     end if;
+    -- Match register/rotation before any subscription row lock. This prevents
+    -- endpoint-swap and rotate/retire lock-order inversions.
+    perform pg_advisory_xact_lock(hashtextextended('web-push:membership:v1',0));
     select * into v_subscription from private.web_push_subscriptions
       where id=p_subscription_id and profile_id=p_actor_profile_id for update;
     if not found then raise exception using errcode='P0002',message='WEB_PUSH_SUBSCRIPTION_NOT_FOUND'; end if;
@@ -339,3 +343,7 @@ comment on table private.web_push_subscription_secrets is
 '#110 AES-256-GCM envelope only. Raw endpoint/key/session is forbidden; #111 may read exact current revision through a new bounded claim RPC.';
 comment on function public.purge_retired_web_push_subscription_metadata(integer) is
 'Bounded 90-day retired metadata purge contract. No Cron or production scheduling is enabled by #110.';
+comment on function public.register_web_push_subscription(uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz,text,text,text,text,text,text) is
+'All active membership mutations use one transaction-scoped global advisory lock. This intentionally bounds register/rotate/retire throughput to remove cross-row lock cycles; reads and future delivery claims do not take it.';
+comment on function public.retire_web_push_subscription(uuid,uuid,uuid,integer,text,text) is
+'Uses the same transaction-scoped global membership advisory lock as register/rotation before locking a subscription row.';

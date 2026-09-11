@@ -548,6 +548,9 @@ Web Push capability URL과 `p256dh`/`auth`, Auth session binding은 API adapter�
 AES-256-GCM key로 암호화하고, endpoint equality와 live session binding은 서로 domain-separated
 HMAC digest로 판정합니다. private 저장소는 logical/current pointer, immutable revision,
 current secret envelope, append-only lifecycle event, profile minute limiter를 분리합니다.
+endpoint는 raw/canonical 양쪽 UTF-8 4096-byte 상한을 확인하고 hostname 소문자화와 기본 `:443`
+제거 후 path/query 의미를 유지한 HTTPS canonical form 하나만 envelope·digest·request hash·RPC에 사용합니다.
+actor/profile/session/subscription UUID도 parse 후 소문자 canonical form 하나만 AAD·hash·RPC에 사용합니다.
 원문 endpoint·host/path·key·cipher/nonce/tag·digest·session은 응답·알림·감사·로그에 넣지 않습니다.
 session UUID는 평문 column이나 metadata에 저장하지 않고 current envelope 안에서만 인증 암호화하여,
 #111이 exact revision을 claim할 때 실제 `auth.sessions` 생존 여부를 다시 확인할 수 있게 합니다.
@@ -558,6 +561,10 @@ service-role 전용 command RPC가 동작합니다. session당 active 1, profile
 동일 logical result, 변경은 기존 ID/version CAS의 immutable revision입니다. retire는 logical 상태와
 version을 전이하면서 current secret을 같은 transaction에서 삭제하며 재활성화하지 않습니다.
 retired 비민감 metadata는 90일 뒤 최대 100건 bounded purge 대상이지만 #110은 Cron을 활성화하지 않습니다.
+#110의 register/rotation/retire membership mutation은 모두 receipt replay 확인 뒤 하나의 transaction-scoped
+global advisory lock을 먼저 잡고 subscription row를 잠급니다. 이는 endpoint swap과 rotate/retire 사이의
+cross-row lock cycle을 제거하는 대신 구독 membership write를 전역 직렬화하는 의도적 병목입니다.
+profile별 10/min 제한과 낮은 빈도의 기기 등록 경로에만 적용하며 inbox 조회와 향후 delivery claim은 이 lock을 사용하지 않습니다.
 #111만 exact current revision을 delivery target에 고정할 수 있고 #112만 VAPID/provider HTTP와 outbound
 host 정책 및 production secret 주입을 소유합니다.
 

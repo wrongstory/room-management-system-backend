@@ -13,7 +13,8 @@
 - Web Push private logical/revision/secret/event/limiter 테이블은 RLS를 켜고 policy를 두지 않으며
   PUBLIC/anon/authenticated/service_role raw SELECT/DML을 모두 회수한다. private helper EXECUTE도 허용하지 않는다.
 - 고정 search_path SECURITY DEFINER register/retire/bounded-purge RPC만 service_role이 실행하며,
-  register/retire는 actor·ownership·CAS·상한을 함수 안에서 다시 검증한다.
+  register/retire는 actor·ownership·CAS·상한을 함수 안에서 다시 검증한다. 모든 membership mutation은
+  같은 bounded global advisory lock 뒤에서만 subscription row를 잠가 endpoint swap/retire 교착을 막는다.
 - endpoint/key/envelope/digest/session/token은 Data API, audit, notification, receipt, log, error projection에 노출하지 않는다.
 - raw Auth session UUID는 Web Push metadata column에 저장하지 않고 current AES-GCM envelope에만 포함하며,
   후속 #111 delivery claim에서 복호화한 exact session의 생존 여부를 fail-closed 재검증한다.
