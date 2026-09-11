@@ -187,8 +187,11 @@ select is((select value->>'responseDeadline' from complaint_results where label=
 
 select is((select count(*) from public.audit_events where event_type like 'complaint.%'),8::bigint,
   'each successful lifecycle mutation appends one bounded audit event');
-select is((select count(*) from private.notification_outbox o join public.notifications n on n.id=o.notification_id
-  where n.category like 'complaint_%'),7::bigint,'required notifications and outbox rows commit atomically');
+select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  where n.category like 'complaint_%'),(select count(*) from public.notifications n
+    join private.notification_event_catalog c on c.event_family=n.event_family
+    where n.category like 'complaint_%' and c.push_eligible),
+  'only push-eligible complaint notifications enter typed outbox atomically');
 
 insert into complaint_results values('pre-corrected',public.create_complaint_case(
   pg_temp.pid(1),pg_temp.pid(5001),'damage_or_loss',0,'complaint-create-pre-corrected',repeat('2',64)));

@@ -32,6 +32,8 @@ const notice = {
   body: '업무 앱에서 최신 배정을 확인해 주세요.',
   roomId: null,
   cleaningTargetId: null,
+  deepLink: null,
+  groupId: null,
   requiresAction: true,
   readAt: null,
   resolvedAt: null,
@@ -72,7 +74,7 @@ describe('notification cursor and service', () => {
       p_session_id: sessionId,
       p_limit: 50
     }));
-    expect(JSON.stringify(listed)).not.toMatch(/dedupeKey|groupKey|recipientProfileId|sessionId/);
+    expect(JSON.stringify(listed)).not.toMatch(/dedupeKey|groupKey|recipientProfileId|sessionId|eventFamily|sourceEntity/);
     await expect(service.markRead({ ...actor, role: 'developer' }, notice.id)).rejects.toMatchObject({
       code: 'NOTIFICATION_ACCESS_REQUIRED'
     });

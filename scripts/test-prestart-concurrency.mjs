@@ -15,7 +15,7 @@ export async function testPrestartConcurrency(client,actorProfileId) {
     ok(await client.auth.admin.createUser({id,email:`prestart-${id}@test.invalid`,password:`T:${randomUUID()}`,email_confirm:true}),'maid Auth fixture');
     const profile=randomUUID();
     ok(await client.from('profiles').insert({id:profile,auth_user_id:id,display_name:`prestart-${id}`,display_name_normalized:`prestart-${id}`,
-      login_id:`prestart-${id}`,login_id_normalized:`prestart-${id}`,login_sequence:0,role:'maid',status:'active'}),'maid fixture');
+      login_id:`prestart-${id}`,login_id_normalized:`prestart-${id}`,login_sequence:0,role:'maid',status:'active',must_change_password:false}),'maid fixture');
     const v=randomUUID();
     ok(await client.from('availability_versions').insert({id:v,maid_profile_id:profile,week_start:week,version:1,submitted_at:new Date().toISOString()}),'availability fixture');
     ok(await client.from('availability_days').insert(Array.from({length:7},(_,d)=>({availability_version_id:v,
@@ -66,14 +66,23 @@ export async function testPrestartConcurrency(client,actorProfileId) {
   assert(decisionChange[1].error ? current.length===0 : current.length===1 && current[0].maid_profile_id===maids[1],'stale request never cancels new assignment');
 
   const j=await fixture();const jq=ok(await client.rpc('request_assignment_cancellation',request(j)),'double decision request');
+  const requestNoticeBefore=Number(execFileSync('docker',[
+    'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
+    '-c',`select count(*) from public.notifications where contract_version=1 and recipient_profile_id='${actorProfileId}'::uuid and event_family='assignment.cancellation_requested' and source_entity_kind='assignment_change_request' and source_entity_id='${jq.requestId}' and resolved_at is null`
+  ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
+  assert(requestNoticeBefore===1,'request creates one unresolved typed admin notice before terminal decision');
   const d=decision(j,jq);
   const decisions=await Promise.all([client.rpc('decide_assignment_cancellation_request',d),client.rpc('decide_assignment_cancellation_request',d)]);
   assert(decisions.every(r=>!r.error) && JSON.stringify(decisions[0].data)===JSON.stringify(decisions[1].data),'concurrent decision replay same logical response');
   const noticeCount=Number(execFileSync('docker',[
     'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
-    '-c',`select count(*) from public.notifications where dedupe_key='assignment-decision:${jq.requestId}'`
+    '-c',`select count(*) from public.notifications where contract_version=1 and event_family='assignment.cancellation_approved' and source_entity_kind='assignment_change_request' and source_entity_id='${jq.requestId}'`
+  ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
+  const requestNoticeAfter=Number(execFileSync('docker',[
+    'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
+    '-c',`select count(*) from public.notifications where contract_version=1 and recipient_profile_id='${actorProfileId}'::uuid and event_family='assignment.cancellation_requested' and source_entity_kind='assignment_change_request' and source_entity_id='${jq.requestId}' and resolved_at is not null`
   ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
   const audits=ok(await client.from('audit_events').select('id').eq('entity_id',jq.requestId).eq('event_type','assignment.cancellation_decided'),'decision audit');
-  assert(noticeCount===1 && audits.length===1,'exactly one decision notification/audit');
+  assert(noticeCount===1 && requestNoticeAfter===1 && audits.length===1,'exactly one typed decision notification/audit and request resolution');
   console.log('Prestart races PASS: change/activation (3), two changes/CAS, change/request, decision/change, concurrent decision replay; no ghost pending or duplicate decision.');
 }

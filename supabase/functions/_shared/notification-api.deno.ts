@@ -46,6 +46,8 @@ const notice = {
   body: "업무 앱에서 최신 배정을 확인해 주세요.",
   roomId: null,
   cleaningTargetId: null,
+  deepLink: null,
+  groupId: null,
   requiresAction: true,
   readAt: null,
   resolvedAt: null,
@@ -149,7 +151,9 @@ Deno.test("notification list and markRead expose only safe fields and exact requ
   assert(
     !("dedupeKey" in list.notifications[0]) &&
       !("groupKey" in list.notifications[0]) &&
-      !("recipientProfileId" in list.notifications[0]),
+      !("recipientProfileId" in list.notifications[0]) &&
+      !("eventFamily" in list.notifications[0]) &&
+      !("sourceEntityId" in list.notifications[0]),
     "internal fields absent",
   );
   assert(

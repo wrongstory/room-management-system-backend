@@ -480,6 +480,14 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
+#109부터 typed 알림은 private event catalog의 42 event family/28 public category를 정본으로
+삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
+검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
+dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫
+event에 고정된 10분 half-open window와 비민감 UUID `groupId`를 보존한다.
+inactive/임시 비밀번호/self-action도 inbox에는 남지만 typed delivery outbox에는
+넣지 않는다. 상세 표는 [알림 이벤트 카탈로그](./NOTIFICATION_CATALOG.md)다.
+
 ```mermaid
 erDiagram
   CLEANING_SUBMISSIONS ||--o| EARNINGS : "승인 후 1회 적립"
@@ -498,7 +506,9 @@ erDiagram
   PAYROLL_CYCLES ||--o{ PAYROLL_EVENTS : "지급 상태 이력"
   PAYROLL_CYCLES ||--o{ PAYROLL_ADJUSTMENTS : "완료 후 정정"
   PROFILES ||--o{ NOTIFICATIONS : "수신자"
-  NOTIFICATIONS ||--o{ NOTIFICATION_OUTBOX : "푸시 재시도"
+  NOTIFICATION_EVENT_CATALOG ||--o{ NOTIFICATIONS : "typed event"
+  NOTIFICATION_GROUPS ||--o{ NOTIFICATIONS : "fixed 10m group"
+  NOTIFICATIONS ||--o| NOTIFICATION_DELIVERY_OUTBOX : "typed push input"
   PROFILES ||--o{ AUDIT_EVENTS : "행위자"
   PROFILES ||--o{ ACTOR_ACTIVITY_EVENTS : "인증·권한·민감접근 행위자"
   PROFILES ||--o{ ACTOR_AUTHORIZATION_DENIAL_AGGREGATES : "권한 거부 집계 행위자"
@@ -605,14 +615,34 @@ erDiagram
     uuid id PK
     uuid recipient_profile_id FK
     text category
+    text event_family FK
+    text source_entity_kind
+    text source_entity_id
+    text deep_link_kind
+    uuid deep_link_entity_id
+    uuid notification_group_id FK
     timestamptz read_at
     timestamptz resolved_at
   }
-  NOTIFICATION_OUTBOX {
-    bigint id PK
+  NOTIFICATION_EVENT_CATALOG {
+    text event_family PK
+    text category
+    text recipient_capability
+    text resolver_kind
+  }
+  NOTIFICATION_GROUPS {
+    uuid id PK
+    uuid recipient_profile_id FK
+    text group_family
+    uuid scope_id
+    timestamptz started_at
+    timestamptz ends_at
+  }
+  NOTIFICATION_DELIVERY_OUTBOX {
+    uuid id PK
     uuid notification_id FK
+    text event_family FK
     text delivery_status
-    int retry_count
   }
   AUDIT_EVENTS {
     uuid id PK

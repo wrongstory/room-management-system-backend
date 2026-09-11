@@ -138,9 +138,9 @@ select ok((select resolved_at is not null from public.notifications where dedupe
   'existing SECURITY DEFINER lifecycle command still resolves actionable notifications through the immutable guard');
 select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.pid(305)
   and category='cleaning_assignment_rolled_over'),1,'rollover appends one informational notification');
-select is((select count(*)::int from private.notification_outbox outbox join public.notifications notice
+select is((select count(*)::int from private.notification_delivery_outbox outbox join public.notifications notice
   on notice.id=outbox.notification_id where notice.cleaning_target_id=pg_temp.pid(305)
-  and notice.category='cleaning_assignment_rolled_over'),1,'rollover notification has one outbox row');
+  and notice.category='cleaning_assignment_rolled_over'),0,'informational rollover does not enter push outbox');
 select ok((select effective_service_date='2037-09-30' and carryover_count=0 from public.cleaning_targets
   where id=pg_temp.pid(306)),'active scheduled attempt is excluded from rollover');
 select is((select count(*)::int from public.cleaning_targets

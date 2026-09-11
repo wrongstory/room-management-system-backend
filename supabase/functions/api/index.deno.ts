@@ -1367,6 +1367,8 @@ Deno.test("notification router keeps exact GET/list and POST/read contracts", as
     body: "최신 배정을 확인해 주세요.",
     roomId: null,
     cleaningTargetId: null,
+    deepLink: null,
+    groupId: null,
     requiresAction: true,
     readAt: null,
     resolvedAt: null,

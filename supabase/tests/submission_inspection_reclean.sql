@@ -257,7 +257,7 @@ select is(public.approve_cleaning_submission(pg_temp.pid(1),(select (value->>'id
  'QUALITY_OK','bomb-approve-key',repeat('4',64)),(select value from submission_results where label='bomb-approved'),'approval retry replays exact logical result after terminal transition');
 select is((select count(*) from public.earnings where submission_id=(select (value->>'id')::uuid from submission_results where label='bomb-submission')),1::bigint,'approval retry cannot duplicate earning');
 select ok(not (select requires_action from public.notifications
-  where dedupe_key='inspection:'||(select value->>'decisionId' from submission_results where label='bomb-approved')),
+  where event_family like 'inspection.%approved' and source_entity_id=(select value->>'decisionId' from submission_results where label='bomb-approved')),
   'approval notification is informational and creates no false unresolved action');
 select is(public.report_bomb_room(pg_temp.pid(2),pg_temp.pid(503),array[(select photo_version_id from private.attempt_photo_current where cleaning_attempt_id=pg_temp.pid(503))],
  '폭탄방 합성 메모','bomb-report-key',repeat('1',64)),(select value from submission_results where label='bomb-report'),'bomb report retry remains replayable after approval');
@@ -324,7 +324,8 @@ select is((select count(*) from public.cleaning_assignments assignment
 reset role;
 select is((select count(*) from public.earnings where submission_id=(select (value->>'id')::uuid from submission_results where label='reject-submission')),0::bigint,'rejection creates no earning');
 select ok((select requires_action from public.notifications
-  where dedupe_key='inspection:'||(select value->>'decisionId' from submission_results where label='rejected')),
+  where event_family='inspection.original_rejected_reclean_created'
+    and source_entity_id=(select value->>'decisionId' from submission_results where label='rejected')),
   'rejection notification remains actionable for the required reclean');
 select is(public.reject_cleaning_submission(pg_temp.pid(1),(select (value->>'id')::uuid from submission_results where label='reject-submission'),
  'QUALITY_REWORK','reject-key',repeat('5',64)),(select value from submission_results where label='rejected'),'rejection retry replays without duplicate reclean');
