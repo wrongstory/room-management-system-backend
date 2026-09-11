@@ -14,6 +14,10 @@ const localEnv = {
   RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
   PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456',
   NOTIFICATION_CURSOR_HMAC_SECRET: 'notification-cursor-secret-tests-123456'
+  ,WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(32, 4).toString('base64')
+  ,WEB_PUSH_SUBSCRIPTION_KEY_VERSION: 'v1'
+  ,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{}'
+  ,WEB_PUSH_BINDING_DIGEST_SECRET: 'web-push-binding-secret-tests-123456789'
 };
 
 describe('environment contract', () => {
@@ -125,6 +129,23 @@ describe('environment contract', () => {
         ...localEnv,
         NOTIFICATION_CURSOR_HMAC_SECRET: value
       })).toThrow();
+    }
+  });
+
+  it('requires canonical distinct Web Push keys and a separate current key version', () => {
+    for (const override of [
+      { WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(16, 4).toString('base64') },
+      { WEB_PUSH_SUBSCRIPTION_KEY_BASE64: localEnv.RESERVATION_PII_KEY_BASE64 },
+      { WEB_PUSH_BINDING_DIGEST_SECRET: 'short' },
+      { WEB_PUSH_BINDING_DIGEST_SECRET: localEnv.NOTIFICATION_CURSOR_HMAC_SECRET },
+      {
+        WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: JSON.stringify({
+          v1: Buffer.alloc(32, 5).toString('base64')
+        })
+      },
+      { WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{"old":"not-base64"}' }
+    ]) {
+      expect(() => loadEnv({ ...localEnv, ...override })).toThrow();
     }
   });
 });

@@ -37,6 +37,8 @@ import {
   type NotificationService,
   SupabaseNotificationService
 } from './modules/notifications/notification.service.js';
+import { createWebPushSubscriptionRoutes } from './modules/push-subscriptions/web-push-subscription.routes.js';
+import { type WebPushSubscriptionService, SupabaseWebPushSubscriptionService } from './modules/push-subscriptions/web-push-subscription.service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -47,6 +49,7 @@ export interface AppServices {
   payroll: PayrollService;
   complaints?: ComplaintService;
   notifications?: NotificationService;
+  webPushSubscriptions?: WebPushSubscriptionService;
 }
 
 export interface BuildAppOptions {
@@ -97,7 +100,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       notifications: new SupabaseNotificationService(
         clients,
         options.env.NOTIFICATION_CURSOR_HMAC_SECRET
-      )
+      ),
+      webPushSubscriptions: new SupabaseWebPushSubscriptionService(clients, {
+        key: options.env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64,
+        keyVersion: options.env.WEB_PUSH_SUBSCRIPTION_KEY_VERSION,
+        keyring: JSON.parse(options.env.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON) as Record<string,string>,
+        bindingSecret: options.env.WEB_PUSH_BINDING_DIGEST_SECRET
+      })
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -177,6 +186,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   if (services.notifications) {
     await app.register(createNotificationRoutes(services.notifications), { prefix: '/v1/notifications' });
+  }
+  if (services.webPushSubscriptions) {
+    await app.register(createWebPushSubscriptionRoutes(services.webPushSubscriptions), { prefix: '/v1/push-subscriptions' });
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
   await app.register(createPhotoRoutes(photoServices));

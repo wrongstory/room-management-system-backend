@@ -98,6 +98,12 @@ import {
   markNotificationRead,
   notificationReadPath,
 } from "../_shared/notification-api.ts";
+import {
+  registerWebPushSubscription,
+  retireWebPushSubscription,
+  type WebPushCryptoConfig,
+  webPushRetirePath,
+} from "../_shared/web-push-subscription-api.ts";
 
 import {
   createSubmission,
@@ -174,6 +180,7 @@ export interface ApiHandlerDependencies {
   ) => Promise<EdgeActor>;
   authenticateLimitedRequest?: typeof authenticateLimitedAttempt;
   photoService?: (clients: EdgeClients) => PhotoService;
+  webPushCryptoConfig?: WebPushCryptoConfig;
 }
 
 const defaultDependencies: ApiHandlerDependencies = {
@@ -840,6 +847,29 @@ export async function handleApiRequest(
     if (notificationId) {
       return jsonResponse(
         await markNotificationRead(request, clients, actor, notificationId),
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "POST" && path === "/v1/push-subscriptions") {
+      return jsonResponse(
+        await registerWebPushSubscription(
+          request,
+          clients,
+          actor,
+          dependencies.webPushCryptoConfig,
+        ),
+        201,
+        corsHeaders,
+      );
+    }
+    const pushRetireId = request.method === "POST"
+      ? webPushRetirePath(path)
+      : null;
+    if (pushRetireId) {
+      return jsonResponse(
+        await retireWebPushSubscription(request, clients, actor, pushRetireId),
         200,
         corsHeaders,
       );

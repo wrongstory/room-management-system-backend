@@ -542,6 +542,25 @@ provenance가 없는 `private.notification_outbox`는 legacy history로 격리�
 읽지 않습니다. `private.notification_delivery_outbox`만 #111의 향후 유일 입력이며,
 #109에서는 pending append와 raw 권한 차단만 정의합니다.
 
+### #110 encrypted Web Push subscription 계약
+
+Web Push capability URL과 `p256dh`/`auth`, Auth session binding은 API adapter에서 canonical 검증한 뒤 전용
+AES-256-GCM key로 암호화하고, endpoint equality와 live session binding은 서로 domain-separated
+HMAC digest로 판정합니다. private 저장소는 logical/current pointer, immutable revision,
+current secret envelope, append-only lifecycle event, profile minute limiter를 분리합니다.
+원문 endpoint·host/path·key·cipher/nonce/tag·digest·session은 응답·알림·감사·로그에 넣지 않습니다.
+session UUID는 평문 column이나 metadata에 저장하지 않고 current envelope 안에서만 인증 암호화하여,
+#111이 exact revision을 claim할 때 실제 `auth.sessions` 생존 여부를 다시 확인할 수 있게 합니다.
+
+active/password-complete admin 또는 maid 본인과 실제 `auth.sessions(id,user_id)`가 일치할 때만
+service-role 전용 command RPC가 동작합니다. session당 active 1, profile당 최대 5, endpoint digest
+전역 active 1이며 교차 profile endpoint는 소유자 정보 없는 409입니다. 같은 material replay는
+동일 logical result, 변경은 기존 ID/version CAS의 immutable revision입니다. retire는 logical 상태와
+version을 전이하면서 current secret을 같은 transaction에서 삭제하며 재활성화하지 않습니다.
+retired 비민감 metadata는 90일 뒤 최대 100건 bounded purge 대상이지만 #110은 Cron을 활성화하지 않습니다.
+#111만 exact current revision을 delivery target에 고정할 수 있고 #112만 VAPID/provider HTTP와 outbound
+host 정책 및 production secret 주입을 소유합니다.
+
 ## API 단계
 
 현재:
@@ -550,6 +569,8 @@ provenance가 없는 `private.notification_outbox`는 legacy history로 격리�
 - `GET /openapi.json`, `GET /docs` (OpenAPI 3.1·pinned Swagger UI)
 - `GET /v1/notifications`는 admin/maid 각자의 inbox를 `(occurredAt DESC,id DESC)`로 최대 100건 조회합니다. 전용 HMAC cursor는 actor·role·stream·sort에 묶이고 128 KiB를 넘는 legacy 응답은 fail-closed합니다. 공개 projection은 비민감 `deepLink`/`groupId`만 더하고 source, event family, recipient, actor, dedupe를 숨깁니다.
 - `POST /v1/notifications/{notificationId}/read`는 client timestamp 없이 DB server 시각을 한 번만 기록하며 재시도·동시 요청은 같은 최초 `readAt`을 반환합니다. 타 수신자 ID는 동일한 404입니다.
+- `POST /v1/push-subscriptions`는 본인 브라우저 subscription의 최초 등록·exact replay·명시적 CAS rotation만 수행합니다.
+- `POST /v1/push-subscriptions/{subscriptionId}/retire`는 본인 current version을 폐기하고 암호문을 즉시 crypto-shred합니다. 두 API 모두 no-store이고 safe logical ID/version/status/server timestamp만 반환합니다.
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
 - `POST /v1/auth/password`

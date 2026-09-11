@@ -20,7 +20,19 @@ describe('logger redaction contract', () => {
       '*.SUPABASE_SECRET_KEY',
       '*.RESERVATION_PII_KEY_BASE64',
       '*.RESERVATION_PII_KEYRING_JSON',
-      '*.RESERVATION_GUEST_NAME_PEPPER'
+      '*.RESERVATION_GUEST_NAME_PEPPER',
+      '*.endpoint',
+      '*.p256dh',
+      '*.auth',
+      '*.ciphertextBase64',
+      '*.nonceBase64',
+      '*.authTagBase64',
+      '*.endpointDigest',
+      '*.sessionDigest',
+      '*.materialDigest',
+      '*.WEB_PUSH_SUBSCRIPTION_KEY_BASE64',
+      '*.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON',
+      '*.WEB_PUSH_BINDING_DIGEST_SECRET'
     ]));
   });
 });

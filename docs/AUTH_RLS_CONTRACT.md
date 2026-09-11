@@ -8,6 +8,15 @@
 - 계정, 예약, 배정, 수행, 제출, 검수, 수익, 지급의 변경은 Fastify 서버의 검증된 명령과 트랜잭션/RPC를 통해서만 수행한다.
 - 서버 secret/service-role은 서버와 배포 secret에만 둔다.
 - API 로그는 Authorization·Cookie·비밀번호·토큰·PIN·휴대전화·서버 secret 필드를 `[REDACTED]`로 치환한다.
+- Web Push 구독은 exact active/password-complete `admin | maid` 본인과 실제
+  `auth.sessions(id,user_id)` 일치만 허용한다. developer, limited/inactive, 폐기·불일치 session, anon은 거부한다.
+- Web Push private logical/revision/secret/event/limiter 테이블은 RLS를 켜고 policy를 두지 않으며
+  PUBLIC/anon/authenticated/service_role raw SELECT/DML을 모두 회수한다. private helper EXECUTE도 허용하지 않는다.
+- 고정 search_path SECURITY DEFINER register/retire/bounded-purge RPC만 service_role이 실행하며,
+  register/retire는 actor·ownership·CAS·상한을 함수 안에서 다시 검증한다.
+- endpoint/key/envelope/digest/session/token은 Data API, audit, notification, receipt, log, error projection에 노출하지 않는다.
+- raw Auth session UUID는 Web Push metadata column에 저장하지 않고 current AES-GCM envelope에만 포함하며,
+  후속 #111 delivery claim에서 복호화한 exact session의 생존 여부를 fail-closed 재검증한다.
 
 ## 역할별 조회 범위
 

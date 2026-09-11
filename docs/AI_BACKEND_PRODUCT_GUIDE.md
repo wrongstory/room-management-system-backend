@@ -549,6 +549,15 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - outbox는 재시도, provider response, 최종 실패를 기록한다.
 - push 거부·지연·최종 실패는 담당, 수행, 검수 같은 domain 상태를 되돌리거나 바꾸지 않는다.
 
+### `[확정: #110]` Web Push 구독 원장
+
+- 구독은 exact active/password-complete admin·maid 본인과 live Auth session에만 결합한다.
+- 원문 endpoint와 `p256dh`/`auth`, exact Auth session binding은 private AES-256-GCM current envelope에만 두고 API·알림·감사·로그에는 노출하지 않는다. session UUID 평문 metadata column은 만들지 않는다.
+- session당 active 1, profile당 최대 5이며 자동 LRU나 교차 profile endpoint 이전은 하지 않는다.
+- 같은 material replay는 같은 logical result를 반환하고, 변경은 현재 logical ID/version CAS의 새 immutable revision이다.
+- retire는 같은 transaction에서 current secret을 crypto-shred하며 retired logical subscription은 재활성화하지 않는다.
+- 구독 원장/API는 provider 전송과 분리한다. delivery worker는 #111, VAPID/provider/외부 HTTP/Cron/production secret은 #112만 소유한다.
+
 ### `[확정]` 감사 이력
 
 - 예약·점유·운영 차단·PIN·청소·담당·제출·검수·수익·지급·계정의 중요 변경을 기록한다.
