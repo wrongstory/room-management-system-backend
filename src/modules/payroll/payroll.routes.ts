@@ -59,6 +59,17 @@ const correctionSchema = z.object({ ...sourceFields, amount: z.int().refine((val
     'sourceEarningId 또는 sourceAdjustmentId 중 하나만 필요합니다.');
 const lateCarryParamsSchema = z.object({ earningId: z.uuid() }).strict();
 const lateCarryBodySchema = z.object({ expectedVersion: z.int().min(0) }).strict();
+const paymentAttemptParamsSchema = z.object({ attemptId: z.uuid() }).strict();
+const paymentCheckSchema = z.object({
+  expectedVersion: z.int().min(1), reasonCode: z.literal('TRANSFER_RESULT_UNCERTAIN')
+}).strict();
+const paymentPaidSchema = z.object({
+  expectedVersion: z.int().min(1), paymentMethod: z.literal('bank_transfer'),
+  providerReferenceId: z.string().min(8).max(64)
+}).strict();
+const paymentReopenSchema = z.object({
+  expectedVersion: z.int().min(1), reasonCode: z.literal('NO_TRANSFER_CONFIRMED')
+}).strict();
 const noQuerySchema = z.object({}).strict();
 
 function idempotencyKey(request: FastifyRequest): string {
@@ -166,6 +177,39 @@ export function createPayrollRoutes(service: PayrollService): FastifyPluginAsync
       const body = lateCarryBodySchema.parse(request.body);
       const response = { adjustment: await service.carryLateEarning(request.actor, {
         ...params, ...body, idempotencyKey: idempotencyKey(request)
+      }) };
+      assertPayrollResponseSize(response);
+      return response;
+    });
+
+    app.post('/payment-attempts/:attemptId/check', { preHandler: admin }, async (request) => {
+      requireExactQuery(request, []);
+      const params = paymentAttemptParamsSchema.parse(request.params);
+      const body = paymentCheckSchema.parse(request.body);
+      const response = { paymentResult: await service.recordPaymentCheck(request.actor, {
+        paymentAttemptId: params.attemptId, ...body, idempotencyKey: idempotencyKey(request)
+      }) };
+      assertPayrollResponseSize(response);
+      return response;
+    });
+
+    app.post('/payment-attempts/:attemptId/paid', { preHandler: admin }, async (request) => {
+      requireExactQuery(request, []);
+      const params = paymentAttemptParamsSchema.parse(request.params);
+      const body = paymentPaidSchema.parse(request.body);
+      const response = { paymentResult: await service.recordPaymentPaid(request.actor, {
+        paymentAttemptId: params.attemptId, ...body, idempotencyKey: idempotencyKey(request)
+      }) };
+      assertPayrollResponseSize(response);
+      return response;
+    });
+
+    app.post('/payment-attempts/:attemptId/reopen', { preHandler: admin }, async (request) => {
+      requireExactQuery(request, []);
+      const params = paymentAttemptParamsSchema.parse(request.params);
+      const body = paymentReopenSchema.parse(request.body);
+      const response = { paymentResult: await service.reopenPayment(request.actor, {
+        paymentAttemptId: params.attemptId, ...body, idempotencyKey: idempotencyKey(request)
       }) };
       assertPayrollResponseSize(response);
       return response;

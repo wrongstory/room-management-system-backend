@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'payroll_adjustments'
+    'payroll_payment_results'
   ) ->> 'currentMigration',
-  'payroll_adjustments',
+  'payroll_payment_results',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'payroll_adjustments'
+    'payroll_payment_results'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'

@@ -392,6 +392,16 @@ set status = 'paying',
     payment_started_at = now()
 where id = '90000000-0000-4000-8000-000000000001';
 
+insert into public.payroll_events(payroll_cycle_id,maid_profile_id,event_type,before_status,after_status,
+  actor_profile_id,cycle_version,locked_amount,occurred_at)
+select id,maid_profile_id,'payment_started','open','paying',payment_started_by,version,locked_amount,
+  payment_started_at from public.payroll_cycles where id='90000000-0000-4000-8000-000000000001';
+insert into public.payroll_payment_attempts(payroll_cycle_id,maid_profile_id,attempt_number,start_event_id,
+  start_cycle_version,locked_amount,started_by,started_at)
+select event.payroll_cycle_id,event.maid_profile_id,1,event.id,event.cycle_version,event.locked_amount,
+  event.actor_profile_id,event.occurred_at from public.payroll_events event
+where event.payroll_cycle_id='90000000-0000-4000-8000-000000000001' and event.cycle_version=1;
+
 do $$
 begin
   if (
@@ -425,23 +435,51 @@ set status = 'open',
     locked_amount = null,
     payment_started_by = null,
     payment_started_at = null,
-    last_reopen_reason = 'transfer_not_sent',
+    last_reopen_reason = 'NO_TRANSFER_CONFIRMED',
     last_reopened_by = '20000000-0000-4000-8000-000000000001',
     last_reopened_at = now(),
     version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
 
+insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
+  before_status,after_status,cycle_version,locked_amount,reason_code,actor_profile_id,occurred_at)
+select attempt.id,cycle.id,cycle.maid_profile_id,'reopened','paying','open',cycle.version,attempt.locked_amount,
+  'NO_TRANSFER_CONFIRMED',cycle.last_reopened_by,cycle.last_reopened_at
+from public.payroll_cycles cycle join public.payroll_payment_attempts attempt
+  on attempt.payroll_cycle_id=cycle.id and attempt.attempt_number=1
+where cycle.id='90000000-0000-4000-8000-000000000001';
+
 update public.payroll_cycles
 set status = 'paying',
     locked_amount = 32000,
     payment_started_by = '20000000-0000-4000-8000-000000000001',
-    payment_started_at = now()
+    payment_started_at = now(),
+    version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
+
+insert into public.payroll_events(payroll_cycle_id,maid_profile_id,event_type,before_status,after_status,
+  actor_profile_id,cycle_version,locked_amount,occurred_at)
+select id,maid_profile_id,'payment_started','open','paying',payment_started_by,version,locked_amount,
+  payment_started_at from public.payroll_cycles where id='90000000-0000-4000-8000-000000000001';
+insert into public.payroll_payment_attempts(payroll_cycle_id,maid_profile_id,attempt_number,start_event_id,
+  start_cycle_version,locked_amount,started_by,started_at)
+select event.payroll_cycle_id,event.maid_profile_id,2,event.id,event.cycle_version,event.locked_amount,
+  event.actor_profile_id,event.occurred_at from public.payroll_events event
+where event.payroll_cycle_id='90000000-0000-4000-8000-000000000001' and event.cycle_version=3;
 
 update public.payroll_cycles
 set status = 'check',
-    check_reason = 'transfer_result_unknown'
+    check_reason = 'TRANSFER_RESULT_UNCERTAIN',
+    version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
+
+insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
+  before_status,after_status,cycle_version,locked_amount,reason_code,actor_profile_id,occurred_at)
+select attempt.id,cycle.id,cycle.maid_profile_id,'check','paying','check',cycle.version,cycle.locked_amount,
+  'TRANSFER_RESULT_UNCERTAIN','20000000-0000-4000-8000-000000000001',now()
+from public.payroll_cycles cycle join public.payroll_payment_attempts attempt
+  on attempt.payroll_cycle_id=cycle.id and attempt.attempt_number=2
+where cycle.id='90000000-0000-4000-8000-000000000001';
 
 update public.payroll_cycles
 set status = 'open',
@@ -449,22 +487,50 @@ set status = 'open',
     payment_started_by = null,
     payment_started_at = null,
     check_reason = null,
-    last_reopen_reason = 'bank_confirmed_not_sent',
+    last_reopen_reason = 'NO_TRANSFER_CONFIRMED',
     last_reopened_by = '20000000-0000-4000-8000-000000000001',
     last_reopened_at = now(),
     version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
 
+insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
+  before_status,after_status,cycle_version,locked_amount,reason_code,actor_profile_id,occurred_at)
+select attempt.id,cycle.id,cycle.maid_profile_id,'reopened','check','open',cycle.version,attempt.locked_amount,
+  'NO_TRANSFER_CONFIRMED',cycle.last_reopened_by,cycle.last_reopened_at
+from public.payroll_cycles cycle join public.payroll_payment_attempts attempt
+  on attempt.payroll_cycle_id=cycle.id and attempt.attempt_number=2
+where cycle.id='90000000-0000-4000-8000-000000000001';
+
 update public.payroll_cycles
 set status = 'paying',
     locked_amount = 32000,
     payment_started_by = '20000000-0000-4000-8000-000000000001',
-    payment_started_at = now()
+    payment_started_at = now(),
+    version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
 
+insert into public.payroll_events(payroll_cycle_id,maid_profile_id,event_type,before_status,after_status,
+  actor_profile_id,cycle_version,locked_amount,occurred_at)
+select id,maid_profile_id,'payment_started','open','paying',payment_started_by,version,locked_amount,
+  payment_started_at from public.payroll_cycles where id='90000000-0000-4000-8000-000000000001';
+insert into public.payroll_payment_attempts(payroll_cycle_id,maid_profile_id,attempt_number,start_event_id,
+  start_cycle_version,locked_amount,started_by,started_at)
+select event.payroll_cycle_id,event.maid_profile_id,3,event.id,event.cycle_version,event.locked_amount,
+  event.actor_profile_id,event.occurred_at from public.payroll_events event
+where event.payroll_cycle_id='90000000-0000-4000-8000-000000000001' and event.cycle_version=6;
+
 update public.payroll_cycles
-set status = 'paid', paid_at = now()
+set status = 'paid', paid_at = now(), version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
+
+insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
+  before_status,after_status,cycle_version,locked_amount,payment_method,canonical_reference,
+  actor_profile_id,occurred_at)
+select attempt.id,cycle.id,cycle.maid_profile_id,'paid','paying','paid',cycle.version,cycle.locked_amount,
+  'bank_transfer','DOMAIN-12','20000000-0000-4000-8000-000000000001',cycle.paid_at
+from public.payroll_cycles cycle join public.payroll_payment_attempts attempt
+  on attempt.payroll_cycle_id=cycle.id and attempt.attempt_number=3
+where cycle.id='90000000-0000-4000-8000-000000000001';
 
 do $$
 begin

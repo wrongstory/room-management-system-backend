@@ -30,6 +30,9 @@ export interface PayrollCycleProjection {
   lateEarningsNextCursor: string | null;
   offsetSettled: boolean; adjustmentAmount: number; carryInAmount: number;
   carryOutAmount: number; payableAmount: number; adjustmentCount: number;
+  paymentAttemptId: string | null; paymentAttemptNumber: number | null;
+  paidAt: string | null; checkReasonCode: 'TRANSFER_RESULT_UNCERTAIN' | null;
+  lastReopenReasonCode: 'NO_TRANSFER_CONFIRMED' | null;
 }
 export interface PayrollListInput {
   weekStart: string;
@@ -60,6 +63,21 @@ export interface PayrollReversalInput extends AdjustmentSourceInput {
 }
 export interface CarryForwardInput extends StartPayrollInput {}
 export interface LateEarningCarryInput { earningId: string; expectedVersion: number; idempotencyKey: string }
+export type PayrollPaymentResultType = 'check' | 'paid' | 'reopened';
+export interface PayrollPaymentResult {
+  paymentResultId: string; paymentAttemptId: string; payrollCycleId: string;
+  resultType: PayrollPaymentResultType; beforeStatus: 'paying' | 'check'; afterStatus: 'check' | 'paid' | 'open';
+  cycleVersion: number; lockedAmount: number; paymentMethod?: 'bank_transfer' | undefined;
+  providerReferenceId?: string | undefined;
+  reasonCode?: 'TRANSFER_RESULT_UNCERTAIN' | 'NO_TRANSFER_CONFIRMED' | undefined;
+  occurredAt: string;
+}
+export interface PaymentAttemptInput { paymentAttemptId: string; expectedVersion: number; idempotencyKey: string }
+export interface PaymentCheckInput extends PaymentAttemptInput { reasonCode: 'TRANSFER_RESULT_UNCERTAIN' }
+export interface PaymentPaidInput extends PaymentAttemptInput {
+  paymentMethod: 'bank_transfer'; providerReferenceId: string;
+}
+export interface PaymentReopenInput extends PaymentAttemptInput { reasonCode: 'NO_TRANSFER_CONFIRMED' }
 export interface PayrollAdjustmentProjection extends PayrollAdjustmentEntry {
   maidProfileId: string; bookVersion: number; currency: 'KRW'; rootEarningId: string;
   correctionOfEarningId?: string | undefined; correctionOfAdjustmentId?: string | undefined;
@@ -74,6 +92,9 @@ export interface PayrollService {
   reverse(actor: Actor, input: PayrollReversalInput): Promise<PayrollAdjustmentProjection>;
   carryForward(actor: Actor, input: CarryForwardInput): Promise<PayrollCycleProjection>;
   carryLateEarning(actor: Actor, input: LateEarningCarryInput): Promise<PayrollAdjustmentProjection>;
+  recordPaymentCheck(actor: Actor, input: PaymentCheckInput): Promise<PayrollPaymentResult>;
+  recordPaymentPaid(actor: Actor, input: PaymentPaidInput): Promise<PayrollPaymentResult>;
+  reopenPayment(actor: Actor, input: PaymentReopenInput): Promise<PayrollPaymentResult>;
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -169,6 +190,41 @@ function adjustmentProjection(value: unknown): PayrollAdjustmentProjection {
     lateCarriedEarningId: optionalUuid('lateCarriedEarningId'), createdAt: text(row.createdAt) };
 }
 
+const providerReferencePattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,63}$/;
+export function canonicalPayrollProviderReference(value: string): string {
+  if (value.length < 8 || value.length > 64 || !providerReferencePattern.test(value)
+    || !/[A-Za-z]/.test(value) || !/[0-9]/.test(value) || /[0-9]{7}/.test(value)
+    || value.toLowerCase().includes('http') || value.toLowerCase().startsWith('www.')) {
+    throw new AppError(400, 'PAYROLL_PAYMENT_REFERENCE_INVALID', 'providerReferenceId 형식을 확인해 주세요.');
+  }
+  return value.toUpperCase();
+}
+
+function paymentResult(value: unknown): PayrollPaymentResult {
+  const row = object(value);
+  const resultType = text(row.resultType);
+  const beforeStatus = text(row.beforeStatus);
+  const afterStatus = text(row.afterStatus);
+  if (!['check', 'paid', 'reopened'].includes(resultType)
+    || !['paying', 'check'].includes(beforeStatus) || !['check', 'paid', 'open'].includes(afterStatus)) {
+    throw payrollDatabaseError(null);
+  }
+  const method = row.paymentMethod === undefined ? undefined : text(row.paymentMethod);
+  const reason = row.reasonCode === undefined ? undefined : text(row.reasonCode);
+  if (method !== undefined && method !== 'bank_transfer') throw payrollDatabaseError(null);
+  if (reason !== undefined && !['TRANSFER_RESULT_UNCERTAIN', 'NO_TRANSFER_CONFIRMED'].includes(reason)) throw payrollDatabaseError(null);
+  return {
+    paymentResultId: uuid(row.paymentResultId), paymentAttemptId: uuid(row.paymentAttemptId),
+    payrollCycleId: uuid(row.payrollCycleId), resultType: resultType as PayrollPaymentResultType,
+    beforeStatus: beforeStatus as 'paying' | 'check', afterStatus: afterStatus as 'check' | 'paid' | 'open',
+    cycleVersion: integer(row.cycleVersion), lockedAmount: integer(row.lockedAmount),
+    ...(method === undefined ? {} : { paymentMethod: method as 'bank_transfer' }),
+    ...(row.providerReferenceId === undefined ? {} : { providerReferenceId: text(row.providerReferenceId) }),
+    ...(reason === undefined ? {} : { reasonCode: reason as 'TRANSFER_RESULT_UNCERTAIN' | 'NO_TRANSFER_CONFIRMED' }),
+    occurredAt: text(row.occurredAt)
+  };
+}
+
 interface InternalPayrollCycle {
   cycle: PayrollCycleProjection;
   itemsHasMore: boolean; itemsLastEarnedOn: string | null; itemsLastEarningId: string | null;
@@ -189,7 +245,14 @@ function internalCycle(value: unknown): InternalPayrollCycle {
       lateEarnings: row.lateEarnings.map(lateEarning), lateEarningsNextCursor: null
       , offsetSettled: boolean(row.offsetSettled), adjustmentAmount: signedInteger(row.adjustmentAmount),
       carryInAmount: signedInteger(row.carryInAmount), carryOutAmount: signedInteger(row.carryOutAmount),
-      payableAmount: signedInteger(row.payableAmount), adjustmentCount: integer(row.adjustmentCount)
+      payableAmount: signedInteger(row.payableAmount), adjustmentCount: integer(row.adjustmentCount),
+      paymentAttemptId: row.paymentAttemptId === undefined || row.paymentAttemptId === null ? null : uuid(row.paymentAttemptId),
+      paymentAttemptNumber: row.paymentAttemptNumber === undefined || row.paymentAttemptNumber === null ? null : integer(row.paymentAttemptNumber),
+      paidAt: row.paidAt === undefined ? null : nullableTimestamp(row.paidAt),
+      checkReasonCode: row.checkReasonCode === undefined || row.checkReasonCode === null ? null
+        : text(row.checkReasonCode) === 'TRANSFER_RESULT_UNCERTAIN' ? 'TRANSFER_RESULT_UNCERTAIN' : (() => { throw payrollDatabaseError(null) })(),
+      lastReopenReasonCode: row.lastReopenReasonCode === undefined || row.lastReopenReasonCode === null ? null
+        : text(row.lastReopenReasonCode) === 'NO_TRANSFER_CONFIRMED' ? 'NO_TRANSFER_CONFIRMED' : (() => { throw payrollDatabaseError(null) })()
     },
     itemsHasMore: boolean(row.itemsHasMore), itemsLastEarnedOn: nullableDate(row.itemsLastEarnedOn), itemsLastEarningId: nullableUuid(row.itemsLastEarningId),
     lateEarningsHasMore: boolean(row.lateEarningsHasMore), lateEarningsLastEarnedOn: nullableDate(row.lateEarningsLastEarnedOn),
@@ -235,6 +298,15 @@ export function payrollDatabaseError(error: { message?: string } | null): AppErr
     ['PAYROLL_PRIOR_LATE_EARNING_PENDING', 409, 'PAYROLL_PRIOR_LATE_EARNING_PENDING', '직전 주차의 늦은 수익을 먼저 이월해야 합니다.'],
     ['PAYROLL_SOURCE_NOT_FOUND', 404, 'PAYROLL_SOURCE_NOT_FOUND', '정정할 원장 항목을 찾을 수 없습니다.'],
     ['PAYROLL_ADJUSTMENT_INVALID', 400, 'PAYROLL_ADJUSTMENT_INVALID', '정정 요청을 확인해 주세요.'],
+    ['PAYROLL_PAYMENT_ATTEMPT_NOT_FOUND', 404, 'PAYROLL_PAYMENT_ATTEMPT_NOT_FOUND', '지급 시도를 찾을 수 없습니다.'],
+    ['PAYROLL_PAYMENT_ATTEMPT_TERMINAL', 409, 'PAYROLL_PAYMENT_ATTEMPT_TERMINAL', '이미 종료된 지급 시도입니다.'],
+    ['PAYROLL_PAYMENT_TRANSITION_INVALID', 409, 'PAYROLL_PAYMENT_TRANSITION_INVALID', '현재 상태에서 해당 지급 결과를 기록할 수 없습니다.'],
+    ['PAYROLL_PAYMENT_REFERENCE_ALREADY_USED', 409, 'PAYROLL_PAYMENT_REFERENCE_ALREADY_USED', '이미 사용된 외부 송금 참조입니다.'],
+    ['PAYROLL_PAYMENT_REFERENCE_INVALID', 400, 'PAYROLL_PAYMENT_REFERENCE_INVALID', 'providerReferenceId 형식을 확인해 주세요.'],
+    ['PAYROLL_PAYMENT_METHOD_INVALID', 400, 'PAYROLL_PAYMENT_METHOD_INVALID', 'paymentMethod를 확인해 주세요.'],
+    ['PAYROLL_PAYMENT_REOPEN_REASON_INVALID', 400, 'PAYROLL_PAYMENT_REOPEN_REASON_INVALID', '재개 사유 코드를 확인해 주세요.'],
+    ['PAYROLL_PAYMENT_REASON_INVALID', 400, 'PAYROLL_PAYMENT_REASON_INVALID', '확인 사유 코드를 확인해 주세요.'],
+    ['PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH', 409, 'PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH', '잠긴 전액 지급 스냅샷이 일치하지 않습니다.'],
     ['IDEMPOTENCY_KEY_REUSED', 409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 요청에 사용한 Idempotency-Key입니다.']
   ];
   for (const [needle, statusCode, code, userMessage] of mappings) if (message.includes(needle)) return new AppError(statusCode, code, userMessage);
@@ -366,5 +438,34 @@ export class SupabasePayrollService implements PayrollService {
       p_request_hash: requestHash(fingerprint) });
     if (error || !data) throw payrollDatabaseError(error);
     return adjustmentProjection(data);
+  }
+  private async paymentCommand(actor: Actor, input: PaymentCheckInput | PaymentPaidInput | PaymentReopenInput,
+    rpcName: 'record_payroll_payment_check' | 'record_payroll_payment_paid' | 'reopen_payroll_payment_attempt'): Promise<PayrollPaymentResult> {
+    payrollAdmin(actor);
+    const command = rpcName === 'record_payroll_payment_check' ? 'payroll.payment.check'
+      : rpcName === 'record_payroll_payment_paid' ? 'payroll.payment.paid' : 'payroll.payment.reopen';
+    const canonicalReference = 'providerReferenceId' in input
+      ? canonicalPayrollProviderReference(input.providerReferenceId) : undefined;
+    const fingerprint = { command, actorProfileId: actor.profileId, paymentAttemptId: input.paymentAttemptId,
+      expectedVersion: input.expectedVersion,
+      ...('reasonCode' in input ? { reasonCode: input.reasonCode } : {}),
+      ...('paymentMethod' in input ? { paymentMethod: input.paymentMethod, providerReferenceId: canonicalReference } : {}) };
+    const args: Record<string, unknown> = { p_actor_profile_id: actor.profileId,
+      p_payment_attempt_id: input.paymentAttemptId, p_expected_version: input.expectedVersion,
+      p_idempotency_key: input.idempotencyKey, p_request_hash: requestHash(fingerprint) };
+    if ('reasonCode' in input) args.p_reason_code = input.reasonCode;
+    if ('paymentMethod' in input) { args.p_payment_method = input.paymentMethod; args.p_canonical_reference = canonicalReference; }
+    const { data, error } = await this.clients.admin.rpc(rpcName, args);
+    if (error || !data) throw payrollDatabaseError(error);
+    return paymentResult(data);
+  }
+  async recordPaymentCheck(actor: Actor, input: PaymentCheckInput): Promise<PayrollPaymentResult> {
+    return this.paymentCommand(actor, input, 'record_payroll_payment_check');
+  }
+  async recordPaymentPaid(actor: Actor, input: PaymentPaidInput): Promise<PayrollPaymentResult> {
+    return this.paymentCommand(actor, input, 'record_payroll_payment_paid');
+  }
+  async reopenPayment(actor: Actor, input: PaymentReopenInput): Promise<PayrollPaymentResult> {
+    return this.paymentCommand(actor, input, 'reopen_payroll_payment_attempt');
   }
 }

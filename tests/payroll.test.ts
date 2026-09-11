@@ -62,6 +62,8 @@ const projection = {
   carryOutAmount: 0,
   payableAmount: 325000,
   adjustmentCount: 1
+  , paymentAttemptId: null, paymentAttemptNumber: null, paidAt: null,
+  checkReasonCode: null, lastReopenReasonCode: null
 };
 
 function clients(rpc: ReturnType<typeof vi.fn>): SupabaseClients {
@@ -285,13 +287,44 @@ describe('payroll pagination service', () => {
     }));
   });
 
+  it('canonicalizes a strict provider reference before hashing and recording full payment', async () => {
+    const result = {
+      paymentResultId: '41000000-0000-4000-8000-000000000001',
+      paymentAttemptId: '42000000-0000-4000-8000-000000000001',
+      payrollCycleId: '43000000-0000-4000-8000-000000000001', resultType: 'paid',
+      beforeStatus: 'check', afterStatus: 'paid', cycleVersion: 3, lockedAmount: 325000,
+      paymentMethod: 'bank_transfer', providerReferenceId: 'BANK.AB12', occurredAt: '2026-09-10T00:00:00Z'
+    };
+    const rpc = vi.fn(async () => ({ data: result, error: null }));
+    await expect(service(rpc).recordPaymentPaid(admin, {
+      paymentAttemptId: result.paymentAttemptId, expectedVersion: 2,
+      paymentMethod: 'bank_transfer', providerReferenceId: 'bank.ab12', idempotencyKey: 'payment-paid-1'
+    })).resolves.toMatchObject({ providerReferenceId: 'BANK.AB12', lockedAmount: 325000 });
+    expect(rpc).toHaveBeenCalledWith('record_payroll_payment_paid', expect.objectContaining({
+      p_canonical_reference: 'BANK.AB12', p_payment_method: 'bank_transfer',
+      p_request_hash: requestHash({ command: 'payroll.payment.paid', actorProfileId: admin.profileId,
+        paymentAttemptId: result.paymentAttemptId, expectedVersion: 2,
+        paymentMethod: 'bank_transfer', providerReferenceId: 'BANK.AB12' })
+    }));
+    for (const providerReferenceId of ['ABCDEFGH', 'AB1234567', 'httpAB12', 'www.ab12', 'AB/12.XY', 'AB 12.XY']) {
+      const blocked = vi.fn();
+      await expect(service(blocked).recordPaymentPaid(admin, {
+        paymentAttemptId: result.paymentAttemptId, expectedVersion: 2,
+        paymentMethod: 'bank_transfer', providerReferenceId, idempotencyKey: 'payment-invalid-1'
+      })).rejects.toMatchObject({ code: 'PAYROLL_PAYMENT_REFERENCE_INVALID' });
+      expect(blocked).not.toHaveBeenCalled();
+    }
+  });
+
   it('strips private fields and fails closed on malformed projections', () => {
     expect(toPayrollCycle({ ...projection, rawRequestBody: 'secret' })).not.toHaveProperty('rawRequestBody');
     for (const malformed of [
       { ...projection, maidProfileId: 'not-a-uuid' },
       { ...projection, weekStart: '2026-02-30' },
       { ...projection, itemsHasMore: true, itemsLastEarningId: null },
-      { ...projection, items: Array.from({ length: 11 }, () => projection.items[0]) }
+      { ...projection, items: Array.from({ length: 11 }, () => projection.items[0]) },
+      { ...projection, checkReasonCode: 'LEGACY_BANK_STATUS_PENDING' },
+      { ...projection, lastReopenReasonCode: 'LEGACY_OPERATOR_CONFIRMED_NO_TRANSFER' }
     ]) {
       expect(() => toPayrollCycle(malformed)).toThrowError(
         expect.objectContaining({ code: 'PAYROLL_COMMAND_FAILED' })

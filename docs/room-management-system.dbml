@@ -1052,7 +1052,55 @@ Table public.payroll_events {
     (actor_profile_id, occurred_at)
   }
 
-  Note: '#93 implemented append-only payment-start ledger. UPDATE/DELETE is forbidden; the composite payroll cycle/maid relationship and actor identity are enforced by FK.'
+  Note: '#93 append-only payment-start ledger. #103 uses every start event as one immutable typed payment attempt source.'
+}
+
+Table public.payroll_payment_attempts {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null]
+  maid_profile_id uuid [not null]
+  attempt_number int [not null]
+  start_event_id bigint [not null, unique]
+  start_cycle_version bigint [not null]
+  locked_amount int [not null, note: 'Positive immutable payable snapshot']
+  started_by uuid [not null]
+  started_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  Indexes {
+    (payroll_cycle_id, attempt_number) [unique]
+    (id, payroll_cycle_id, maid_profile_id) [unique]
+    (maid_profile_id, started_at, id)
+  }
+
+  Note: '#103 immutable payment attempt. One typed payment_started event; reopen followed by start creates the next attempt number.'
+}
+
+Table public.payroll_payment_results {
+  id uuid [pk]
+  payment_attempt_id uuid [not null]
+  payroll_cycle_id uuid [not null]
+  maid_profile_id uuid [not null]
+  result_type text [not null, note: 'check/paid/reopened']
+  before_status payment_status [not null]
+  after_status payment_status [not null]
+  cycle_version bigint [not null]
+  locked_amount int [not null]
+  payment_method text [note: 'paid only: bank_transfer']
+  canonical_reference text [note: 'paid only: strict uppercase ASCII; admin-only evidence']
+  reason_code text [note: 'check: TRANSFER_RESULT_UNCERTAIN; reopened: NO_TRANSFER_CONFIRMED']
+  actor_profile_id uuid [not null]
+  occurred_at timestamptz [not null, note: 'DB server time']
+  recorded_at timestamptz [not null]
+
+  Indexes {
+    (payment_attempt_id, result_type) [unique]
+    (payment_method, canonical_reference) [unique]
+    (payroll_cycle_id, occurred_at, id)
+    (maid_profile_id, occurred_at, id)
+  }
+
+  Note: '#103 immutable CHECK/PAID/reopen result. A terminal paid/reopened result is unique per attempt; PAID equals the locked full amount.'
 }
 
 Table public.payroll_adjustments {
@@ -1563,6 +1611,14 @@ Ref: public.payroll_items.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_events.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.actor_profile_id > public.profiles.id
+Ref: public.payroll_payment_attempts.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_payment_attempts.maid_profile_id > public.profiles.id
+Ref: public.payroll_payment_attempts.start_event_id - public.payroll_events.id
+Ref: public.payroll_payment_attempts.started_by > public.profiles.id
+Ref: public.payroll_payment_results.payment_attempt_id > public.payroll_payment_attempts.id
+Ref: public.payroll_payment_results.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_payment_results.maid_profile_id > public.profiles.id
+Ref: public.payroll_payment_results.actor_profile_id > public.profiles.id
 Ref: public.payroll_adjustment_books.maid_profile_id - public.profiles.id
 Ref: public.payroll_adjustments.maid_profile_id > public.profiles.id
 Ref: public.payroll_adjustments.root_earning_id > public.earnings.id

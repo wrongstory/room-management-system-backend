@@ -466,6 +466,41 @@ def test_payroll_adjustment_audit_and_error_codes_are_generated() -> None:
     }
 
 
+def test_payroll_payment_result_audit_and_error_codes_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert {
+        DeveloperAuditEventType.PAYROLL_PAYMENT_CHECK_RECORDED.value,
+        DeveloperAuditEventType.PAYROLL_PAYMENT_PAID.value,
+        DeveloperAuditEventType.PAYROLL_PAYMENT_REOPENED.value,
+    } == {
+        "payroll.payment_check_recorded",
+        "payroll.payment_paid",
+        "payroll.payment_reopened",
+    }
+    assert {
+        ErrorCode.PAYROLL_PAYMENT_ATTEMPT_NOT_FOUND.value,
+        ErrorCode.PAYROLL_PAYMENT_ATTEMPT_TERMINAL.value,
+        ErrorCode.PAYROLL_PAYMENT_METHOD_INVALID.value,
+        ErrorCode.PAYROLL_PAYMENT_REASON_INVALID.value,
+        ErrorCode.PAYROLL_PAYMENT_REFERENCE_ALREADY_USED.value,
+        ErrorCode.PAYROLL_PAYMENT_REFERENCE_INVALID.value,
+        ErrorCode.PAYROLL_PAYMENT_REOPEN_REASON_INVALID.value,
+        ErrorCode.PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH.value,
+        ErrorCode.PAYROLL_PAYMENT_TRANSITION_INVALID.value,
+    } == {
+        "PAYROLL_PAYMENT_ATTEMPT_NOT_FOUND",
+        "PAYROLL_PAYMENT_ATTEMPT_TERMINAL",
+        "PAYROLL_PAYMENT_METHOD_INVALID",
+        "PAYROLL_PAYMENT_REASON_INVALID",
+        "PAYROLL_PAYMENT_REFERENCE_ALREADY_USED",
+        "PAYROLL_PAYMENT_REFERENCE_INVALID",
+        "PAYROLL_PAYMENT_REOPEN_REASON_INVALID",
+        "PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH",
+        "PAYROLL_PAYMENT_TRANSITION_INVALID",
+    }
+
+
 def test_complaint_rework_error_codes_are_generated() -> None:
     from room_management_console.generated.models.error_code import ErrorCode
 

@@ -55,19 +55,45 @@ end $$;
 
 create function pg_temp.freeze_cycle(p_maid integer,p_week date,p_status public.payment_status,p_offset boolean)
 returns uuid language plpgsql as $$
-declare v_cycle uuid:=gen_random_uuid();
+declare v_cycle uuid; v_attempt uuid;
 begin
-  insert into public.payroll_cycles(id,maid_profile_id,week_start,status,locked_amount,
-    payment_started_by,payment_started_at,paid_at,check_reason,offset_settled_at,offset_settled_by,version)
-  values(v_cycle,pg_temp.pid(p_maid),p_week,p_status,
-    case when p_status='open' then null else 1 end,
-    case when p_status='open' then null else pg_temp.pid(1) end,
-    case when p_status='open' then null else clock_timestamp() end,
-    case when p_status='paid' then clock_timestamp() end,
-    case when p_status='check' then 'fixture_only' end,
-    case when p_offset then clock_timestamp() end,
-    case when p_offset then pg_temp.pid(1) end,1);
+  if p_status='open' then
+    insert into public.payroll_cycles(maid_profile_id,week_start)
+    values(pg_temp.pid(p_maid),p_week) returning id into v_cycle;
+    if p_offset then
+      update public.payroll_cycles set offset_settled_at=clock_timestamp(),offset_settled_by=pg_temp.pid(1),
+        version=version+1 where id=v_cycle;
+    end if;
+    return v_cycle;
+  end if;
+
+  perform pg_temp.add_earning(100+p_maid,p_maid,p_week+1,1);
+  perform public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(p_maid),p_week,0,
+    'adjust-fixture-start-'||p_maid,repeat('a',64));
+  select id into v_cycle from public.payroll_cycles
+  where maid_profile_id=pg_temp.pid(p_maid) and week_start=p_week;
+  select id into v_attempt from public.payroll_payment_attempts where payroll_cycle_id=v_cycle;
+  if p_status='check' then
+    perform public.record_payroll_payment_check(pg_temp.pid(1),v_attempt,
+      (select version from public.payroll_cycles where id=v_cycle),'TRANSFER_RESULT_UNCERTAIN',
+      'adjust-fixture-check-'||p_maid,repeat('b',64));
+  elsif p_status='paid' then
+    perform public.record_payroll_payment_paid(pg_temp.pid(1),v_attempt,
+      (select version from public.payroll_cycles where id=v_cycle),'bank_transfer','HIST-'||p_maid||'-A1',
+      'adjust-fixture-paid-'||p_maid,repeat('c',64));
+  end if;
   return v_cycle;
+end $$;
+
+create function pg_temp.resolve_historical_cycle(p_maid integer,p_week date)
+returns void language plpgsql as $$
+declare v_cycle public.payroll_cycles; v_attempt uuid;
+begin
+  select * into v_cycle from public.payroll_cycles
+  where maid_profile_id=pg_temp.pid(p_maid) and week_start=p_week;
+  select id into v_attempt from public.payroll_payment_attempts where payroll_cycle_id=v_cycle.id;
+  perform public.record_payroll_payment_paid(pg_temp.pid(1),v_attempt,v_cycle.version,'bank_transfer',
+    'RESOLVE-'||p_maid||'-A1','adjust-fixture-resolve-'||p_maid,repeat('d',64));
 end $$;
 
 create function pg_temp.invalid_carry_pair(p_kind text,p_n integer)
@@ -143,8 +169,10 @@ select ok((select (projection->>'totalAmount')::int=30000
     and (projection->>'payableAmount')::int=30000
   from (select private.project_payroll_cycle_bounded(pg_temp.week(-3),pg_temp.pid(2),10) projection) p),
   'projection preserves gross earning total separately from signed adjustment and payable totals');
-update public.payroll_cycles set status='paid',paid_at=clock_timestamp()
-where maid_profile_id=pg_temp.pid(2) and week_start=pg_temp.week(-3);
+select public.record_payroll_payment_paid(pg_temp.pid(1),
+  (select id from public.payroll_payment_attempts where maid_profile_id=pg_temp.pid(2)),
+  (select version from public.payroll_cycles where maid_profile_id=pg_temp.pid(2) and week_start=pg_temp.week(-3)),
+  'bank_transfer','ADJUST-01','adjust-paid-fixture',repeat('0',64));
 select lives_ok($$select public.record_payroll_correction(pg_temp.pid(1),pg_temp.pid(5002),null,-5000,2,
   'adjust-negative-next',repeat('f',64))$$,'paid source correction is assigned to a later cycle');
 select throws_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(2),pg_temp.week(-2),0,
@@ -205,8 +233,7 @@ select throws_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(
 select throws_ok($$select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5020),0,
   'late-paying-before-result',repeat('b',64))$$,'55000','PAYROLL_SOURCE_PAYMENT_UNCERTAIN',
   'PAYING source must resolve before its late earning can be carried');
-update public.payroll_cycles set status='paid',paid_at=clock_timestamp()
-where maid_profile_id=pg_temp.pid(6) and week_start=pg_temp.week(-8);
+select pg_temp.resolve_historical_cycle(6,pg_temp.week(-8));
 select lives_ok($$select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5020),0,
   'late-paying-after-result',repeat('c',64))$$,'resolved PAYING source late earning is carried');
 select lives_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(6),pg_temp.week(-7),0,
@@ -221,8 +248,7 @@ select pg_temp.add_earning(23,7,pg_temp.week(-7)+1,6000);
 select throws_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(7),pg_temp.week(-7),0,
   'late-check-next-start',repeat('e',64))$$,'55000','PAYROLL_PRIOR_LATE_EARNING_PENDING',
   'CHECK source week late earning blocks next positive start');
-update public.payroll_cycles set status='paid',paid_at=clock_timestamp(),check_reason=null
-where maid_profile_id=pg_temp.pid(7) and week_start=pg_temp.week(-8);
+select pg_temp.resolve_historical_cycle(7,pg_temp.week(-8));
 select public.carry_late_payroll_earning(pg_temp.pid(1),pg_temp.pid(5022),0,
   'late-check-after-result',repeat('f',64));
 select lives_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(7),pg_temp.week(-7),0,

@@ -65,13 +65,13 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 현재 개발·문서 검토 기준: `dev@a5c48673ff339e5a338356c77ce83e8cf40ee21a`. #101 source가 독립 QA와 required CI를 통과해 이 exact SHA로 병합됐으며, #102는 이 기준에서 개발한다.
+- 현재 개발·문서 검토 기준: `dev@cb26650221b3e47804edafd51cad5bfc8872c349`. #102 source가 독립 QA와 required CI를 통과해 이 exact SHA로 병합됐으며, #103은 이 기준에서 개발한다.
 - 개발 통합 기능 기준: #25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했다. 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이고 다음 본선은 #8 earning/payroll 정산이다.
 - #93/#95는 PR #95로 source/dev 병합 완료했다. 개발 통합 계약은 **35 migrations / 76 paths / 82 operations**이며 conceptual OPEN 조회, OPEN→PAYING 잠금과 4개 payroll table의 active+비밀번호 변경 완료+admin/maid-self RLS를 포함한다.
 - #96은 PR #97로 source/dev 병합 완료했다. bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 포함한 개발 통합 계약은 **36 migrations / 77 paths / 83 operations**이다. Python developer 콘솔 16 operations는 유지하며 production에는 아직 승격하지 않았다.
-- #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100 complaint/appeal/correction slice는 PR #104로, #101 typed compensation earning은 PR #105로 **source/dev 병합 완료**했으며 현재 dev는 38 migrations / 86 paths / 93 operations다. #102 adjustment/carry-forward는 이 exact base 위 39 migrations / 90 paths / 97 operations source PR 후보이고, #103 외부 지급 결과와 main/recovery/production은 변경하지 않았다.
+- #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#102는 각각 PR #104/#105/#106으로 **source/dev 병합 완료**했으며 현재 dev는 39 migrations / 90 paths / 97 operations다. #103 외부 지급 결과는 이 exact base 위 40 migrations / 93 paths / 100 operations source PR 후보이고 main/recovery/production은 변경하지 않았다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -587,8 +587,8 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | payroll pagination·응답 크기 상한 | source/dev 완료 | #96 / PR #97 | 36 migrations / 77 paths / 83 operations; 비차단 P2 2건 후속; production 미승격 |
 | [x] | complaint·appeal·correction | source/dev 완료 | #8 / #94 / #100 / PR #104 | exact-head 독립 QA P0/P1/P2 0, required CI PASS; 37 migrations / 85 paths / 92 operations; production 미승격·미사용 |
 | [x] | complaint 재작업·typed compensation earning | source/dev 완료 | #8 / #94 / #101 / PR #105 | 38 migrations / 86 paths / 93 operations; production 미승격·미사용 |
-| [ ] | signed adjustment·carry-forward | source PR 후보 | #8 / #94 / #102 | 39 migrations / 90 paths / 97 operations 후보; 독립 QA·CI·dev merge 대기 |
-| [ ] | 외부 지급 결과 | 정책 승인 / source 구현 미착수 | #8 / #94 / #103 | #102 범위에서 명시적으로 제외 |
+| [x] | signed adjustment·carry-forward | source/dev 완료 | #8 / #94 / #102 / PR #106 | 39 migrations / 90 paths / 97 operations; production 미승격 |
+| [ ] | 외부 지급 결과 | source PR 후보 | #8 / #94 / #103 | 40 migrations / 93 paths / 100 operations 후보; 독립 QA·CI·dev merge 대기 |
 | [ ] | notification/outbox/Web Push | 미개발 | #10 | domain event 연계 |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
@@ -695,8 +695,8 @@ production completeness 기준의 정본 순서다.
 35. [x] **#96 Payroll pagination source gate** — PR #97 독립 QA P0/P1=0·94/100 및 required CI 후 `dev@9231d9e` 병합; production 미승격
 36. [x] **#100 Complaint lifecycle source gate** — PR #104 독립 QA·required CI 후 `dev@88d1865` 병합; production 미승격
 37. [x] **#101 source/dev gate** — PR #105 독립 QA·required CI 후 `dev@a5c4867` 병합; production 미승격
-38. [ ] **#102 source/dev gate** — signed adjustment/carry-forward 후보 구현 완료, 독립 QA·required CI·dev 병합 대기; production 미승격
-39. [ ] **#103 후속 구현 gate** — 외부 지급 결과 source 구현 미착수
+38. [x] **#102 source/dev gate** — PR #106 독립 QA·required CI 후 `dev@cb26650` 병합; production 미승격
+39. [ ] **#103 source/dev gate** — 외부 지급 결과 후보 구현 완료, 독립 QA·required CI·dev 병합 대기; production 미승격
 
 ### #93 Payroll Cycle Assembly source gate — source/dev 완료, production 미승격
 
@@ -741,15 +741,15 @@ production DB/Edge/Pages를 변경하지 않는다.
 요구한다. production/main/recovery/Pages/Cron/Vault를 이 feature PR에서 변경하지 않으며, 실제 secret
 설정·migration 적용·Edge 배포·hosted role smoke는 release gate다.
 
-### #94 Complaint / Compensation / Adjustment / Payment Evidence policy gate — 승인, #100 source/dev 완료
+### #94 Complaint / Compensation / Adjustment / Payment Evidence policy gate — 승인, #100~#102 source/dev 완료
 
 | 영역 | 정책 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|
 | typed earning provenance | 승인 / #101 source/dev 완료 | ✅ | ✅ | ✅ | ❌ | ❌ |
 | complaint / appeal / correction | 승인 / #100 source/dev 완료 | ✅ | ✅ | ✅ | ❌ | ❌ |
 | 타 메이드 compensation entitlement | 승인 / #101 source/dev 완료 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| signed adjustment / carry-forward | 승인 / #102 source PR 후보 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| external full-payment result / `CHECK` / `PAID` | 승인 | ❌ | ❌ | ❌ | ❌ | ❌ |
+| signed adjustment / carry-forward | 승인 / #102 source/dev 완료 | ✅ | ✅ | ✅ | ❌ | ❌ |
+| external full-payment result / `CHECK` / `PAID` | 승인 / #103 source PR 후보 | ✅ | ✅ | ✅ | ❌ | ❌ |
 
 - 원청소 entitlement와 타 메이드 compensation entitlement는 실제 typed FK이고 `earnings`의 source별
   nullable FK는 exactly-one CHECK를 가진다. 임의 polymorphic UUID를 도입하지 않으며 #31 identity/history는
@@ -771,8 +771,9 @@ production DB/Edge/Pages를 변경하지 않는다.
   적용한다. `paidAt`은 server 시각이며 actor, cycle `expectedVersion`, scoped idempotency/request hash, audit이
   필수다. 영수증·계좌·수취인 PII를 저장하거나 실제 송금 확인 전 `PAID`를 응답하지 않는다.
 
-#100 complaint lifecycle과 #101 typed compensation earning은 dev에 통합됐다. #102 source 후보는 아래 절에서
-독립 추적하며 #103과 main/recovery/production migration·Edge/Pages/Cron/Vault는 그대로 유지한다.
+#100 complaint lifecycle, #101 typed compensation earning, #102 adjustment/carry-forward는 dev에 통합됐다.
+#103 source 후보는 아래 절에서 독립 추적하며 main/recovery/production migration·Edge/Pages/Cron/Vault는
+그대로 유지한다.
 
 ### #100 Complaint / Appeal / Correction source gate — source/dev 완료, production 미승격
 
@@ -821,7 +822,7 @@ production DB/Edge/Pages를 변경하지 않는다.
 - [x] PR #105 독립 QA, required GitHub `application` / `migration` PASS, `dev@a5c48673ff339e5a338356c77ce83e8cf40ee21a` 병합
 - [ ] release/main 승격, production migration/Edge 배포, hosted role/mutation smoke
 
-### #102 Signed Payroll Adjustment / Carry-forward source gate — PR 후보, production 미승격
+### #102 Signed Payroll Adjustment / Carry-forward source gate — source/dev 완료, production 미승격
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|---|---|
@@ -840,10 +841,35 @@ production DB/Edge/Pages를 변경하지 않는다.
 - [x] settlement↔residual carry source/id·maid·currency·amount·바로 다음 week 양방향 불변식을 deferred constraint trigger로 commit 검증
 - [x] live-session RLS와 admin/maid-self Data API, developer/cross-maid 금액 비노출 safe audit
 - [x] signed adjustment/carry/payable bounded projection, 128 KiB·signed cursor·no-store Fastify/Edge parity; 90 paths / 97 operations
+- [x] PR #106 exact head `ede399c9d307f1aa3e29d9bad163e5e2410433f5`, 독립 QA 및 required GitHub `application` / `migration` PASS
+- [x] PR #106 `dev` squash 병합 — `dev@cb26650221b3e47804edafd51cad5bfc8872c349`
+- [ ] release/main 승격, production migration/Edge 배포, hosted role/mutation smoke
+
+#103의 `CHECK/PAID`·외부 전액 지급 결과/provider reference는 #102 source gate에 포함하지 않는다.
+
+### #103 External Full Payment Result source gate — PR 후보, production 미승격
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|---|
+| [x] | `POST /v1/payroll/payment-attempts/{attemptId}/check` | active password-complete business admin | ✅ | ✅ | ✅ | ❌ | ❌ |
+| [x] | `POST /v1/payroll/payment-attempts/{attemptId}/paid` | active password-complete business admin | ✅ | ✅ | ✅ | ❌ | ❌ |
+| [x] | `POST /v1/payroll/payment-attempts/{attemptId}/reopen` | active password-complete business admin | ✅ | ✅ | ✅ | ❌ | ❌ |
+
+- [x] 기존 39 migrations 수정 0, append-only `payroll_payment_results` 40번째 migration 1개
+- [x] 기존 `payment_started` event와 attempt typed identity; 과거 attempt만 deterministic backfill하고 CHECK/PAID result 추측 없음
+- [x] `PAYING → CHECK → PAID`, `PAYING → PAID`, fixed `NO_TRANSFER_CONFIRMED` `PAYING/CHECK → OPEN`; reopen 후 start는 새 attempt
+- [x] client amount/paidAt 없음, PAID amount=positive locked payable snapshot, server paidAt, PAID cycle/evidence UPDATE·DELETE·reopen 금지
+- [x] method `bank_transfer`; strict ASCII reference를 uppercase canonicalize하고 `(method, reference)` global unique
+- [x] canonical reference는 admin command/result만 노출; maid/developer audit/notification에 reference·cross-maid 금액·raw payload 비노출
+- [x] active/password/role/session/IDOR 재검증, cycle version CAS, scoped canonical idempotency hash
+- [x] immutable result·cycle·safe audit·maid notification/outbox 원자 transaction; provider HTTP/receipt/계좌/수취인 PII/secret 없음
+- [x] future payment projection transition ↔ event/attempt/result deferred 양방향 invariant; evidence 없는 privileged DML은 commit 시 `PAYROLL_PAYMENT_EVIDENCE_REQUIRED`, 과거 CHECK/PAID 추측 backfill 없음
+- [x] Fastify/Edge/OpenAPI parity, 128 KiB/no-store 유지; 93 paths / 100 operations
 - [ ] 독립 QA, required GitHub `application` / `migration`, `dev` 병합
 - [ ] release/main 승격, production migration/Edge 배포, hosted role/mutation smoke
 
-#103의 `CHECK/PAID`·외부 전액 지급 결과/provider reference는 이 source gate에 포함하지 않는다.
+실제 bank/provider reference format은 아직 미확정이다. 현재 allowlist는 fail-closed source 계약이며 실제 provider
+연동이 승인되면 별도 migration/API 검토가 필요하다. 이 source는 provider를 호출하지 않는다.
 
 ### #85 사진 purge/reconciliation source gate — source/dev 완료, production 미승격
 

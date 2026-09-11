@@ -782,6 +782,11 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
     carryOutAmount: 0,
     payableAmount: 30000,
     adjustmentCount: 0,
+    paymentAttemptId: null,
+    paymentAttemptNumber: null,
+    paidAt: null,
+    checkReasonCode: null,
+    lastReopenReasonCode: null,
   };
   const clients = {
     admin: {
@@ -793,6 +798,21 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
               payroll: [payroll],
               hasMore: false,
               lastMaidProfileId: maidProfileId,
+            }
+            : name.startsWith("record_payroll_payment_") ||
+                name === "reopen_payroll_payment_attempt"
+            ? {
+              paymentResultId: "96000000-0000-4000-8000-000000000003",
+              paymentAttemptId: "96000000-0000-4000-8000-000000000002",
+              payrollCycleId: "96000000-0000-4000-8000-000000000001",
+              resultType: "paid",
+              beforeStatus: "paying",
+              afterStatus: "paid",
+              cycleVersion: 2,
+              lockedAmount: 30000,
+              paymentMethod: "bank_transfer",
+              providerReferenceId: "BANK.AB12",
+              occurredAt: "2026-09-10T00:00:00Z",
             }
             : {
               ...payroll,
@@ -833,6 +853,24 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
     started.status === 200 &&
       (await started.json()).payroll.status === "paying",
     "admin start",
+  );
+  const paid = await handleApiRequest(
+    request(
+      "POST",
+      "/v1/payroll/payment-attempts/96000000-0000-4000-8000-000000000002/paid",
+      {
+        expectedVersion: 1,
+        paymentMethod: "bank_transfer",
+        providerReferenceId: "bank.ab12",
+      },
+    ),
+    dependencies,
+  );
+  assert(
+    paid.status === 200 &&
+      (await paid.json()).paymentResult.providerReferenceId === "BANK.AB12" &&
+      calls.at(-1)?.args.p_canonical_reference === "BANK.AB12",
+    "admin external full payment route canonicalizes before RPC",
   );
 
   const maidActor: EdgeActor = {

@@ -258,12 +258,12 @@ select lives_ok(
   'different actors can independently use the same raw idempotency key'
 );
 
--- Reopen is intentionally outside #93. The pre-existing #18 transition is used
--- here only as a fixture proving that existing items remain and late earnings
--- append on the next exact OPEN-version start.
+-- #103 narrows the pre-existing reopen reason to one fixed code. This direct
+-- fixture proves that existing items remain and late earnings append on the
+-- next exact OPEN-version start; command evidence is tested separately.
 update public.payroll_cycles
 set status='open', locked_amount=null, payment_started_by=null,
-  payment_started_at=null, last_reopen_reason='transfer_not_sent',
+  payment_started_at=null, last_reopen_reason='NO_TRANSFER_CONFIRMED',
   last_reopened_by=pg_temp.pid(1), last_reopened_at=clock_timestamp(),
   version=version+1
 where maid_profile_id=pg_temp.pid(2) and week_start=pg_temp.week_start(-1);

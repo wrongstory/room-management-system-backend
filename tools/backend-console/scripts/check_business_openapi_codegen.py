@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 90:
-        raise RuntimeError("전체 source OpenAPI path 수가 90이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 93:
+        raise RuntimeError("전체 source OpenAPI path 수가 93이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 97:
-        raise RuntimeError("전체 source OpenAPI operation 수가 97이 아닙니다.")
+    if operation_count != 100:
+        raise RuntimeError("전체 source OpenAPI operation 수가 100이 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -66,6 +66,9 @@ def main() -> None:
             package / "api" / "payroll" / "reverse_payroll_source.py",
             package / "api" / "payroll" / "carry_forward_payroll_cycle.py",
             package / "api" / "payroll" / "carry_late_payroll_earning.py",
+            package / "api" / "payroll" / "record_payroll_payment_check.py",
+            package / "api" / "payroll" / "record_payroll_payment_paid.py",
+            package / "api" / "payroll" / "reopen_payroll_payment_attempt.py",
             package / "models" / "payroll_cycle.py",
             package / "models" / "payroll_item.py",
             package / "models" / "payroll_late_earning.py",
@@ -80,6 +83,11 @@ def main() -> None:
             package / "models" / "payroll_earning_reversal_request.py",
             package / "models" / "payroll_adjustment_reversal_request.py",
             package / "models" / "payroll_late_carry_request.py",
+            package / "models" / "payroll_payment_check_request.py",
+            package / "models" / "payroll_payment_paid_request.py",
+            package / "models" / "payroll_payment_reopen_request.py",
+            package / "models" / "payroll_payment_result.py",
+            package / "models" / "payroll_payment_result_envelope.py",
             package / "api" / "complaints" / "list_complaints.py",
             package / "api" / "complaints" / "create_complaint.py",
             package / "api" / "complaints" / "get_complaint.py",

@@ -68,6 +68,30 @@ function nonNegativeInteger(value: unknown): number {
   return value as number;
 }
 
+function positiveExpectedVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    invalid("expectedVersion은 1 이상의 정수여야 합니다.");
+  }
+  return value as number;
+}
+
+function providerReference(value: unknown): string {
+  if (
+    typeof value !== "string" || value.length < 8 || value.length > 64 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,63}$/.test(value) ||
+    !/[A-Za-z]/.test(value) || !/[0-9]/.test(value) || /[0-9]{7}/.test(value) ||
+    value.toLowerCase().includes("http") ||
+    value.toLowerCase().startsWith("www.")
+  ) {
+    throw new EdgeError(
+      400,
+      "PAYROLL_PAYMENT_REFERENCE_INVALID",
+      "providerReferenceId 형식을 확인해 주세요.",
+    );
+  }
+  return value.toUpperCase();
+}
+
 function exactFields(
   body: Record<string, unknown>,
   expected: readonly string[],
@@ -304,6 +328,35 @@ export function payrollDatabaseError(
     ],
     ["PAYROLL_SOURCE_NOT_FOUND", 404, "정정할 원장 항목을 찾을 수 없습니다."],
     ["PAYROLL_ADJUSTMENT_INVALID", 400, "정정 요청을 확인해 주세요."],
+    ["PAYROLL_PAYMENT_ATTEMPT_NOT_FOUND", 404, "지급 시도를 찾을 수 없습니다."],
+    ["PAYROLL_PAYMENT_ATTEMPT_TERMINAL", 409, "이미 종료된 지급 시도입니다."],
+    [
+      "PAYROLL_PAYMENT_TRANSITION_INVALID",
+      409,
+      "현재 상태에서 해당 지급 결과를 기록할 수 없습니다.",
+    ],
+    [
+      "PAYROLL_PAYMENT_REFERENCE_ALREADY_USED",
+      409,
+      "이미 사용된 외부 송금 참조입니다.",
+    ],
+    [
+      "PAYROLL_PAYMENT_REFERENCE_INVALID",
+      400,
+      "providerReferenceId 형식을 확인해 주세요.",
+    ],
+    ["PAYROLL_PAYMENT_METHOD_INVALID", 400, "paymentMethod를 확인해 주세요."],
+    [
+      "PAYROLL_PAYMENT_REOPEN_REASON_INVALID",
+      400,
+      "재개 사유 코드를 확인해 주세요.",
+    ],
+    ["PAYROLL_PAYMENT_REASON_INVALID", 400, "확인 사유 코드를 확인해 주세요."],
+    [
+      "PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH",
+      409,
+      "잠긴 전액 지급 스냅샷이 일치하지 않습니다.",
+    ],
     [
       "IDEMPOTENCY_KEY_REUSED",
       409,
@@ -480,6 +533,31 @@ function projection(value: unknown): InternalProjection {
       carryOutAmount: signedInteger(row.carryOutAmount),
       payableAmount: signedInteger(row.payableAmount),
       adjustmentCount: integer(row.adjustmentCount),
+      paymentAttemptId:
+        row.paymentAttemptId === undefined || row.paymentAttemptId === null
+          ? null
+          : projectedUuid(row.paymentAttemptId),
+      paymentAttemptNumber: row.paymentAttemptNumber === undefined ||
+          row.paymentAttemptNumber === null
+        ? null
+        : integer(row.paymentAttemptNumber),
+      paidAt: row.paidAt === undefined ? null : nullableTimestamp(row.paidAt),
+      checkReasonCode:
+        row.checkReasonCode === undefined || row.checkReasonCode === null
+          ? null
+          : text(row.checkReasonCode) === "TRANSFER_RESULT_UNCERTAIN"
+          ? "TRANSFER_RESULT_UNCERTAIN"
+          : (() => {
+            throw payrollDatabaseError(null);
+          })(),
+      lastReopenReasonCode: row.lastReopenReasonCode === undefined ||
+          row.lastReopenReasonCode === null
+        ? null
+        : text(row.lastReopenReasonCode) === "NO_TRANSFER_CONFIRMED"
+        ? "NO_TRANSFER_CONFIRMED"
+        : (() => {
+          throw payrollDatabaseError(null);
+        })(),
     },
     itemsAfter: itemsHasMore
       ? {
@@ -914,4 +992,148 @@ export async function carryLatePayrollEarning(
   );
   if (error || !data) throw payrollDatabaseError(error);
   return adjustmentProjection(data);
+}
+
+function paymentResultProjection(value: unknown): Record<string, unknown> {
+  const row = object(value);
+  const resultType = text(row.resultType);
+  const beforeStatus = text(row.beforeStatus);
+  const afterStatus = text(row.afterStatus);
+  if (
+    !["check", "paid", "reopened"].includes(resultType) ||
+    !["paying", "check"].includes(beforeStatus) ||
+    !["check", "paid", "open"].includes(afterStatus)
+  ) {
+    throw payrollDatabaseError(null);
+  }
+  const result: Record<string, unknown> = {
+    paymentResultId: projectedUuid(row.paymentResultId),
+    paymentAttemptId: projectedUuid(row.paymentAttemptId),
+    payrollCycleId: projectedUuid(row.payrollCycleId),
+    resultType,
+    beforeStatus,
+    afterStatus,
+    cycleVersion: integer(row.cycleVersion),
+    lockedAmount: integer(row.lockedAmount),
+    occurredAt: text(row.occurredAt),
+  };
+  if (row.paymentMethod !== undefined) {
+    if (row.paymentMethod !== "bank_transfer") throw payrollDatabaseError(null);
+    result.paymentMethod = "bank_transfer";
+  }
+  if (row.providerReferenceId !== undefined) {
+    result.providerReferenceId = text(row.providerReferenceId);
+  }
+  if (row.reasonCode !== undefined) {
+    if (
+      !["TRANSFER_RESULT_UNCERTAIN", "NO_TRANSFER_CONFIRMED"].includes(
+        text(row.reasonCode),
+      )
+    ) throw payrollDatabaseError(null);
+    result.reasonCode = text(row.reasonCode);
+  }
+  return result;
+}
+
+async function paymentCommand(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  attemptId: string,
+  kind: "check" | "paid" | "reopen",
+): Promise<Record<string, unknown>> {
+  admin(actor);
+  noQuery(request);
+  const paymentAttemptId = uuid(attemptId, "attemptId");
+  const body = await readJsonBody(request);
+  const key = idempotencyKey(request);
+  let rpcName: string;
+  let command: string;
+  let input: Record<string, unknown>;
+  let args: Record<string, unknown>;
+  if (kind === "check") {
+    exactFields(body, ["expectedVersion", "reasonCode"]);
+    if (body.reasonCode !== "TRANSFER_RESULT_UNCERTAIN") {
+      invalid("reasonCode를 확인해 주세요.");
+    }
+    rpcName = "record_payroll_payment_check";
+    command = "payroll.payment.check";
+    input = {
+      paymentAttemptId,
+      expectedVersion: positiveExpectedVersion(body.expectedVersion),
+      reasonCode: body.reasonCode,
+    };
+    args = { p_reason_code: body.reasonCode };
+  } else if (kind === "reopen") {
+    exactFields(body, ["expectedVersion", "reasonCode"]);
+    if (body.reasonCode !== "NO_TRANSFER_CONFIRMED") {
+      invalid("reasonCode를 확인해 주세요.");
+    }
+    rpcName = "reopen_payroll_payment_attempt";
+    command = "payroll.payment.reopen";
+    input = {
+      paymentAttemptId,
+      expectedVersion: positiveExpectedVersion(body.expectedVersion),
+      reasonCode: body.reasonCode,
+    };
+    args = { p_reason_code: body.reasonCode };
+  } else {
+    exactFields(body, [
+      "expectedVersion",
+      "paymentMethod",
+      "providerReferenceId",
+    ]);
+    if (body.paymentMethod !== "bank_transfer") {
+      invalid("paymentMethod를 확인해 주세요.");
+    }
+    const canonicalReference = providerReference(body.providerReferenceId);
+    rpcName = "record_payroll_payment_paid";
+    command = "payroll.payment.paid";
+    input = {
+      paymentAttemptId,
+      expectedVersion: positiveExpectedVersion(body.expectedVersion),
+      paymentMethod: "bank_transfer",
+      providerReferenceId: canonicalReference,
+    };
+    args = {
+      p_payment_method: "bank_transfer",
+      p_canonical_reference: canonicalReference,
+    };
+  }
+  const fingerprint = { command, actorProfileId: actor.profileId, ...input };
+  const { data, error } = await clients.admin.rpc(rpcName, {
+    p_actor_profile_id: actor.profileId,
+    p_payment_attempt_id: paymentAttemptId,
+    p_expected_version: input.expectedVersion,
+    ...args,
+    p_idempotency_key: key,
+    p_request_hash: await requestHash(fingerprint),
+  });
+  if (error || !data) throw payrollDatabaseError(error);
+  return paymentResultProjection(data);
+}
+
+export function recordPayrollPaymentCheck(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  attemptId: string,
+) {
+  return paymentCommand(request, clients, actor, attemptId, "check");
+}
+export function recordPayrollPaymentPaid(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  attemptId: string,
+) {
+  return paymentCommand(request, clients, actor, attemptId, "paid");
+}
+export function reopenPayrollPayment(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  attemptId: string,
+) {
+  return paymentCommand(request, clients, actor, attemptId, "reopen");
 }

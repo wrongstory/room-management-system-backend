@@ -13,6 +13,9 @@ from ..models.developer_audit_event_summary_capability_kind import (
 )
 from ..models.developer_audit_event_summary_currency import DeveloperAuditEventSummaryCurrency
 from ..models.developer_audit_event_summary_decision import DeveloperAuditEventSummaryDecision
+from ..models.developer_audit_event_summary_payment_method import (
+    DeveloperAuditEventSummaryPaymentMethod,
+)
 from ..models.developer_audit_event_summary_profile_status import (
     DeveloperAuditEventSummaryProfileStatus,
 )
@@ -114,6 +117,8 @@ class DeveloperAuditEventSummary:
         amount (int | Unset):
         currency (DeveloperAuditEventSummaryCurrency | Unset):
         case_version (int | Unset):
+        payment_attempt_number (int | Unset):
+        payment_method (DeveloperAuditEventSummaryPaymentMethod | Unset):
     """
 
     display_name: str | Unset = UNSET
@@ -203,6 +208,8 @@ class DeveloperAuditEventSummary:
     amount: int | Unset = UNSET
     currency: DeveloperAuditEventSummaryCurrency | Unset = UNSET
     case_version: int | Unset = UNSET
+    payment_attempt_number: int | Unset = UNSET
+    payment_method: DeveloperAuditEventSummaryPaymentMethod | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         display_name = self.display_name
@@ -471,6 +478,12 @@ class DeveloperAuditEventSummary:
 
         case_version = self.case_version
 
+        payment_attempt_number = self.payment_attempt_number
+
+        payment_method: str | Unset = UNSET
+        if not isinstance(self.payment_method, Unset):
+            payment_method = self.payment_method.value
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update({})
@@ -648,6 +661,10 @@ class DeveloperAuditEventSummary:
             field_dict["currency"] = currency
         if case_version is not UNSET:
             field_dict["caseVersion"] = case_version
+        if payment_attempt_number is not UNSET:
+            field_dict["paymentAttemptNumber"] = payment_attempt_number
+        if payment_method is not UNSET:
+            field_dict["paymentMethod"] = payment_method
 
         return field_dict
 
@@ -1058,6 +1075,15 @@ class DeveloperAuditEventSummary:
 
         case_version = d.pop("caseVersion", UNSET)
 
+        payment_attempt_number = d.pop("paymentAttemptNumber", UNSET)
+
+        _payment_method = d.pop("paymentMethod", UNSET)
+        payment_method: DeveloperAuditEventSummaryPaymentMethod | Unset
+        if isinstance(_payment_method, Unset):
+            payment_method = UNSET
+        else:
+            payment_method = DeveloperAuditEventSummaryPaymentMethod(_payment_method)
+
         developer_audit_event_summary = cls(
             display_name=display_name,
             login_id=login_id,
@@ -1146,6 +1172,8 @@ class DeveloperAuditEventSummary:
             amount=amount,
             currency=currency,
             case_version=case_version,
+            payment_attempt_number=payment_attempt_number,
+            payment_method=payment_method,
         )
 
         return developer_audit_event_summary

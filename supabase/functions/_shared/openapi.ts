@@ -165,13 +165,16 @@ function attemptMutationOperation(
     description,
     security: [{ bearerAuth: [] }],
     "x-required-roles": ["maid"],
-    parameters: [idempotencyHeader, {
-      name: "attemptId",
-      in: "path",
-      required: true,
-      schema: { type: "string", format: "uuid" },
-      description: "본인의 현재 통보 배정에 연결된 수행 회차 ID",
-    }],
+    parameters: [
+      idempotencyHeader,
+      {
+        name: "attemptId",
+        in: "path",
+        required: true,
+        schema: { type: "string", format: "uuid" },
+        description: "본인의 현재 통보 배정에 연결된 수행 회차 ID",
+      },
+    ],
     requestBody: {
       required: true,
       content: {
@@ -947,10 +950,9 @@ export const openApiDocument = {
         },
       },
     },
-    "/v1/accounts/{profileId}/role": accountMutationPath(
-      "changeAccountRole",
-      { $ref: "#/components/schemas/RoleChangeRequest" },
-    ),
+    "/v1/accounts/{profileId}/role": accountMutationPath("changeAccountRole", {
+      $ref: "#/components/schemas/RoleChangeRequest",
+    }),
     "/v1/accounts/{profileId}/status": accountMutationPath(
       "changeAccountStatus",
       { $ref: "#/components/schemas/StatusChangeRequest" },
@@ -1049,7 +1051,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 55,
+              maxItems: 58,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -1607,12 +1609,14 @@ export const openApiDocument = {
           "admin",
           "OfflineQuarantine",
         ),
-        parameters: [{
-          name: "quarantineId",
-          in: "path",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-        }],
+        parameters: [
+          {
+            name: "quarantineId",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
       },
     },
     "/v1/offline-quarantines/{quarantineId}/resolve": {
@@ -1624,12 +1628,15 @@ export const openApiDocument = {
           "admin",
           "OfflineResolutionResult",
         ),
-        parameters: [idempotencyHeader, {
-          name: "quarantineId",
-          in: "path",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-        }],
+        parameters: [
+          idempotencyHeader,
+          {
+            name: "quarantineId",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -1649,14 +1656,16 @@ export const openApiDocument = {
           "admin",
           "AttemptLifecycleImpact",
         ),
-        parameters: [{
-          name: "assignmentId",
-          in: "query",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-          description:
-            "명령을 검토할 현재 통보 배정 한 건. 추가·중복 query는 거부합니다.",
-        }],
+        parameters: [
+          {
+            name: "assignmentId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description:
+              "명령을 검토할 현재 통보 배정 한 건. 추가·중복 query는 거부합니다.",
+          },
+        ],
       },
     },
     "/v1/attempts/{attemptId}/lifecycle": {
@@ -1688,18 +1697,21 @@ export const openApiDocument = {
           "maid",
           "LimitedAttempt",
         ),
-        parameters: [attemptPathParameter, {
-          name: "assignmentRevision",
-          in: "query",
-          required: true,
-          schema: {
-            type: "integer",
-            minimum: 1,
-            maximum: Number.MAX_SAFE_INTEGER,
+        parameters: [
+          attemptPathParameter,
+          {
+            name: "assignmentRevision",
+            in: "query",
+            required: true,
+            schema: {
+              type: "integer",
+              minimum: 1,
+              maximum: Number.MAX_SAFE_INTEGER,
+            },
+            description:
+              "제한 권한에 동결된 배정 revision. 추가·중복 query는 거부합니다.",
           },
-          description:
-            "제한 권한에 동결된 배정 revision. 추가·중복 query는 거부합니다.",
-        }],
+        ],
       },
     },
     "/v1/limited/attempts/{attemptId}/complete-field-work": {
@@ -1731,14 +1743,16 @@ export const openApiDocument = {
           "비밀번호 변경을 완료한 active maid 전용입니다. 정확한 본인 current/notified assignmentId 한 건만 조회하며 attempt 활성화 전에는 null을 반환합니다. 미통보·종료 배정·다른 메이드·존재하지 않는 배정은 ATTEMPT_ACCESS_REQUIRED로 차단합니다. 목록/history API가 아니며 현재 객실·PIN·고객명·사진 snapshot은 반환하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
-        parameters: [{
-          name: "assignmentId",
-          in: "query",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-          description:
-            "본인에게 실제 통보된 현재 assignment revision ID. 중복·추가 query는 금지합니다.",
-        }],
+        parameters: [
+          {
+            name: "assignmentId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description:
+              "본인에게 실제 통보된 현재 assignment revision ID. 중복·추가 query는 금지합니다.",
+          },
+        ],
         responses: {
           "200": {
             description: "허용된 배정의 수행 회차 또는 활성화 대기 null",
@@ -1831,13 +1845,15 @@ export const openApiDocument = {
           "active business admin은 전체 revision을 조회하고 active maid는 본인에게 실제 통보된 revision만 조회합니다. 과거 superseded revision도 통보 사실이 있으면 읽기 전용으로 보존합니다. 한 번 통보받은 target이라도 미통보 draft·다른 메이드의 revision·현재 target version은 공개하지 않습니다. 본인의 실제 통보 이력이 없으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
-        parameters: [{
-          name: "cleaningTargetId",
-          in: "path",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-          description: "청소 대상 ID",
-        }],
+        parameters: [
+          {
+            name: "cleaningTargetId",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description: "청소 대상 ID",
+          },
+        ],
         responses: {
           "200": assignmentListResponse(),
           "400": errorResponse,
@@ -1996,13 +2012,15 @@ export const openApiDocument = {
           "비밀번호 변경을 완료한 active business admin 전용입니다. 오늘/내일 서비스 날짜의 현재 draft를 최신 객실 일정·메이드 상태·가능일 version과 다시 대조합니다. 예약 저장 시 생성된 미래 checkout 계획도 포함하지만 실제 checkout 전 attempt/PIN/현장 시작은 금지됩니다. 일정 변경으로 stale이 된 draft는 재저장하고 통보된 계획은 explicit replan해야 합니다. 응답 fingerprint는 POST /v1/assignments/commit의 optimistic concurrency gate이며 이 조회는 상태를 변경하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
-        parameters: [{
-          name: "serviceDate",
-          in: "query",
-          required: true,
-          schema: { type: "string", format: "date" },
-          description: "KST 기준 오늘 또는 내일인 서비스 날짜",
-        }],
+        parameters: [
+          {
+            name: "serviceDate",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "KST 기준 오늘 또는 내일인 서비스 날짜",
+          },
+        ],
         responses: {
           "200": assignmentCommitImpactResponse(),
           "400": errorResponse,
@@ -2363,33 +2381,38 @@ export const openApiDocument = {
           "비밀번호 변경을 완료한 active admin은 전체 또는 선택 메이드를, active maid는 본인만 조회합니다. cycle이 아직 없으면 쓰기 없이 cycleId=null, version=0인 conceptual OPEN을 반환합니다. admin 전체 조회는 maidProfileId 오름차순 keyset cursor이며 page 최대 10개입니다. opaque cursor는 actor 역할/ID, weekStart, 적용된 maid filter, 고정 sort와 stream kind에 묶여 있으므로 저장한 URL 전체를 그대로 이어서 사용해야 합니다. 각 cycle의 items/lateEarnings는 최대 10개 preview이며 정확한 count/amount 합계와 별도 continuation을 제공합니다. 모든 payroll HTTP 응답은 UTF-8 JSON 128 KiB 상한을 초과하면 실패합니다. totalAmount는 현재 OPEN에 편입 가능한 확정 수익이며 검수 대기 예상액을 포함하지 않습니다. PAYING 이후 늦게 확정된 수익은 lateEarnings로 분리하며 lockedAmount를 바꾸지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
-        parameters: [{
-          name: "weekStart",
-          in: "query",
-          required: true,
-          schema: { type: "string", format: "date" },
-          description: "KST 기준 월요일인 종료 주차 시작일",
-        }, {
-          name: "maidProfileId",
-          in: "query",
-          required: false,
-          schema: { type: "string", format: "uuid" },
-          description: "admin 선택 필터. maid는 본인 ID만 허용됩니다.",
-        }, {
-          name: "limit",
-          in: "query",
-          required: false,
-          schema: { type: "integer", minimum: 1, maximum: 10, default: 10 },
-          description:
-            "cycle page 크기. 10진 양의 정수만 허용되며 DB도 최대 10을 독립 강제합니다.",
-        }, {
-          name: "cursor",
-          in: "query",
-          required: false,
-          schema: { type: "string", minLength: 1, maxLength: 1024 },
-          description:
-            "직전 응답 nextCursor의 opaque 서명값. 해석하거나 다른 사용자/주차/필터에 재사용하지 않습니다.",
-        }],
+        parameters: [
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "KST 기준 월요일인 종료 주차 시작일",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "admin 선택 필터. maid는 본인 ID만 허용됩니다.",
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 10, default: 10 },
+            description:
+              "cycle page 크기. 10진 양의 정수만 허용되며 DB도 최대 10을 독립 강제합니다.",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description:
+              "직전 응답 nextCursor의 opaque 서명값. 해석하거나 다른 사용자/주차/필터에 재사용하지 않습니다.",
+          },
+        ],
         responses: {
           "200": {
             description: "확정 earning만 포함한 주급 projection",
@@ -2419,41 +2442,47 @@ export const openApiDocument = {
           "cycle preview의 itemsNextCursor 또는 lateEarningsNextCursor를 사용해 earnedOn, earningId 오름차순 keyset으로 이어서 조회합니다. limit 기본 25, 최대 50이며 OFFSET을 사용하지 않습니다. cursor는 actor 역할/ID, weekStart, maidProfileId, kind와 고정 sort에 서명되어 scope가 달라지거나 위변조되면 거부됩니다. 전체 응답은 UTF-8 JSON 128 KiB 상한을 적용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
-        parameters: [{
-          name: "weekStart",
-          in: "query",
-          required: true,
-          schema: { type: "string", format: "date" },
-          description: "KST 기준 월요일인 종료 주차 시작일",
-        }, {
-          name: "maidProfileId",
-          in: "query",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-          description: "조회 대상 메이드. maid는 본인 ID만 허용됩니다.",
-        }, {
-          name: "kind",
-          in: "query",
-          required: true,
-          schema: {
-            type: "string",
-            enum: ["items", "lateEarnings", "adjustments"],
+        parameters: [
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "KST 기준 월요일인 종료 주차 시작일",
           },
-          description:
-            "items, lateEarnings, adjustments는 서로 다른 cursor stream입니다.",
-        }, {
-          name: "limit",
-          in: "query",
-          required: false,
-          schema: { type: "integer", minimum: 1, maximum: 50, default: 25 },
-          description: "상세 page 크기. DB도 최대 50을 독립 강제합니다.",
-        }, {
-          name: "cursor",
-          in: "query",
-          required: false,
-          schema: { type: "string", minLength: 1, maxLength: 1024 },
-          description: "동일 scope 직전 응답의 opaque nextCursor",
-        }],
+          {
+            name: "maidProfileId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description: "조회 대상 메이드. maid는 본인 ID만 허용됩니다.",
+          },
+          {
+            name: "kind",
+            in: "query",
+            required: true,
+            schema: {
+              type: "string",
+              enum: ["items", "lateEarnings", "adjustments"],
+            },
+            description:
+              "items, lateEarnings, adjustments는 서로 다른 cursor stream입니다.",
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 50, default: 25 },
+            description: "상세 page 크기. DB도 최대 50을 독립 강제합니다.",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description: "동일 scope 직전 응답의 opaque nextCursor",
+          },
+        ],
         responses: {
           "200": {
             description: "최대 50개의 주급 상세 keyset page",
@@ -2636,12 +2665,15 @@ export const openApiDocument = {
           "PAID 또는 offset-settled cycle의 아직 claim되지 않은 positive earning을 원본 변경 없이 unique late_earning_carry adjustment로 정확히 다음 주차에 반영합니다. PAYING/CHECK에서는 #103 결과 전 fail-closed합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
-        parameters: [{
-          name: "earningId",
-          in: "path",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-        }, idempotencyHeader],
+        parameters: [
+          {
+            name: "earningId",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          idempotencyHeader,
+        ],
         requestBody: {
           required: true,
           content: {
@@ -2671,6 +2703,129 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/payroll/payment-attempts/{attemptId}/check": {
+      post: {
+        tags: ["Payroll"],
+        operationId: "recordPayrollPaymentCheck",
+        summary: "외부 송금 결과 불확실 CHECK 기록",
+        description:
+          "active password-complete business admin이 현재 PAYING attempt에 고정 코드 TRANSFER_RESULT_UNCERTAIN만 기록합니다. 외부 provider 호출이나 자유문·증빙 업로드는 하지 않으며 immutable 결과, audit, 알림/outbox가 한 transaction에 기록됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [photoPathId("attemptId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/PayrollPaymentCheckRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "immutable CHECK result",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollPaymentResultEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/payment-attempts/{attemptId}/paid": {
+      post: {
+        tags: ["Payroll"],
+        operationId: "recordPayrollPaymentPaid",
+        summary: "외부 전액 송금 완료 PAID 기록",
+        description:
+          "POST 자체가 현재 PAYING/CHECK attempt의 잠긴 양수 KRW 전액 외부 송금 완료 attestation입니다. client는 amount·paidAt·계좌·수취인·영수증을 보내지 않습니다. paymentMethod는 bank_transfer만, providerReferenceId는 현재 미확정 은행 형식을 대신하는 fail-closed ASCII 계약이며 서버가 uppercase canonical로 저장합니다. 시스템은 provider HTTP를 호출하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [photoPathId("attemptId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/PayrollPaymentPaidRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "immutable full-payment result",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollPaymentResultEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/payment-attempts/{attemptId}/reopen": {
+      post: {
+        tags: ["Payroll"],
+        operationId: "reopenPayrollPaymentAttempt",
+        summary: "송금 없음 확인 후 OPEN 재개",
+        description:
+          "PAYING/CHECK에서 외부 송금이 없음을 확인한 active business admin만 고정 코드 NO_TRANSFER_CONFIRMED로 OPEN에 되돌립니다. PAID는 재개할 수 없고, 다음 지급 시작은 새 immutable attempt를 생성합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [photoPathId("attemptId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/PayrollPaymentReopenRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "immutable no-transfer reopen result",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollPaymentResultEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/reservations": {
       get: {
         tags: ["Reservations"],
@@ -2680,12 +2835,14 @@ export const openApiDocument = {
           "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록은 예약·점유·청소 연결에 필요한 필드만 반환하며 guestName과 암호문을 절대 포함하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
-        parameters: [{
-          name: "roomId",
-          in: "query",
-          schema: { type: "string", format: "uuid" },
-          description: "특정 객실의 예약만 조회하는 선택 필터",
-        }],
+        parameters: [
+          {
+            name: "roomId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "특정 객실의 예약만 조회하는 선택 필터",
+          },
+        ],
         responses: {
           "200": reservationListResponse(),
           "400": errorResponse,
@@ -3489,9 +3646,12 @@ export const openApiDocument = {
         required: ["durationPolicy"],
         properties: {
           durationPolicy: {
-            anyOf: [{ $ref: "#/components/schemas/AssignmentDurationPolicy" }, {
-              type: "null",
-            }],
+            anyOf: [
+              { $ref: "#/components/schemas/AssignmentDurationPolicy" },
+              {
+                type: "null",
+              },
+            ],
           },
         },
       },
@@ -3886,6 +4046,15 @@ export const openApiDocument = {
           "PAYROLL_PRIOR_LATE_EARNING_PENDING",
           "PAYROLL_SOURCE_NOT_FOUND",
           "PAYROLL_ADJUSTMENT_INVALID",
+          "PAYROLL_PAYMENT_ATTEMPT_NOT_FOUND",
+          "PAYROLL_PAYMENT_ATTEMPT_TERMINAL",
+          "PAYROLL_PAYMENT_TRANSITION_INVALID",
+          "PAYROLL_PAYMENT_REFERENCE_ALREADY_USED",
+          "PAYROLL_PAYMENT_REFERENCE_INVALID",
+          "PAYROLL_PAYMENT_METHOD_INVALID",
+          "PAYROLL_PAYMENT_REASON_INVALID",
+          "PAYROLL_PAYMENT_REOPEN_REASON_INVALID",
+          "PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH",
           "PAYROLL_COMMAND_FAILED",
           "ROOM_NOT_FOUND",
           "ROOM_OPERATION_NOT_FOUND",
@@ -4188,6 +4357,9 @@ export const openApiDocument = {
           "payroll.adjustment_reversed",
           "payroll.offset_settled",
           "payroll.late_earning_carried",
+          "payroll.payment_check_recorded",
+          "payroll.payment_paid",
+          "payroll.payment_reopened",
         ],
         description:
           "운영 콘솔에 노출할 수 있도록 서버에서 고정한 감사 이벤트 allowlist",
@@ -4391,12 +4563,12 @@ export const openApiDocument = {
                 additionalProperties: false,
                 required: ["acceptedDue", "orphanDue", "folderDue", "blocked"],
                 properties: Object.fromEntries(
-                  ["acceptedDue", "orphanDue", "folderDue", "blocked"].map((
-                    name,
-                  ) => [
-                    name,
-                    { type: "integer", minimum: 0, maximum: 1000 },
-                  ]),
+                  ["acceptedDue", "orphanDue", "folderDue", "blocked"].map(
+                    (name) => [
+                      name,
+                      { type: "integer", minimum: 0, maximum: 1000 },
+                    ],
+                  ),
                 ),
               },
               checkedAt: { type: "string", format: "date-time" },
@@ -4607,6 +4779,8 @@ export const openApiDocument = {
               amount: { type: "integer", minimum: 0 },
               currency: { type: "string", enum: ["KRW"] },
               caseVersion: { type: "integer", minimum: 1 },
+              paymentAttemptNumber: { type: "integer", minimum: 1 },
+              paymentMethod: { type: "string", enum: ["bank_transfer"] },
             },
           },
         },
@@ -4848,9 +5022,11 @@ export const openApiDocument = {
         description:
           "action별 payload/reason은 고정 계약입니다. raw body·자유문·session ID·capability token·TTL은 입력하지 않습니다.",
         oneOf: [
-          lifecycleRequestVariant("allow_finish", [
-            "DEACTIVATION_FINISH_CURRENT",
-          ], { type: "object", additionalProperties: false, maxProperties: 0 }),
+          lifecycleRequestVariant(
+            "allow_finish",
+            ["DEACTIVATION_FINISH_CURRENT"],
+            { type: "object", additionalProperties: false, maxProperties: 0 },
+          ),
           lifecycleRequestVariant(
             "allow_upload",
             ["DEACTIVATION_UPLOAD_ONLY"],
@@ -4861,37 +5037,38 @@ export const openApiDocument = {
             additionalProperties: false,
             maxProperties: 0,
           }),
-          lifecycleRequestVariant("interrupt_handover", [
-            "ADMIN_HANDOVER",
-            "DEACTIVATION_HANDOVER",
-          ], {
-            type: "object",
-            additionalProperties: false,
-            required: [
-              "maidProfileId",
-              "sequenceNumber",
-              "serviceDate",
-              "availableFrom",
-              "dueAt",
-              "deactivateOld",
-            ],
-            properties: {
-              maidProfileId: { type: "string", format: "uuid" },
-              sequenceNumber: {
-                type: "integer",
-                minimum: 1,
-                maximum: Number.MAX_SAFE_INTEGER,
-              },
-              serviceDate: { type: "string", format: "date" },
-              availableFrom: { type: "string", format: "date-time" },
-              dueAt: { type: "string", format: "date-time" },
-              deactivateOld: {
-                type: "boolean",
-                description:
-                  "true는 DEACTIVATION_HANDOVER, false는 ADMIN_HANDOVER 사유만 허용",
+          lifecycleRequestVariant(
+            "interrupt_handover",
+            ["ADMIN_HANDOVER", "DEACTIVATION_HANDOVER"],
+            {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "maidProfileId",
+                "sequenceNumber",
+                "serviceDate",
+                "availableFrom",
+                "dueAt",
+                "deactivateOld",
+              ],
+              properties: {
+                maidProfileId: { type: "string", format: "uuid" },
+                sequenceNumber: {
+                  type: "integer",
+                  minimum: 1,
+                  maximum: Number.MAX_SAFE_INTEGER,
+                },
+                serviceDate: { type: "string", format: "date" },
+                availableFrom: { type: "string", format: "date-time" },
+                dueAt: { type: "string", format: "date-time" },
+                deactivateOld: {
+                  type: "boolean",
+                  description:
+                    "true는 DEACTIVATION_HANDOVER, false는 ADMIN_HANDOVER 사유만 허용",
+                },
               },
             },
-          }),
+          ),
         ],
       },
       AttemptCapability: {
@@ -4946,9 +5123,12 @@ export const openApiDocument = {
         properties: {
           attempt: { $ref: "#/components/schemas/AttemptExecution" },
           capability: {
-            anyOf: [{ $ref: "#/components/schemas/AttemptCapability" }, {
-              type: "null",
-            }],
+            anyOf: [
+              { $ref: "#/components/schemas/AttemptCapability" },
+              {
+                type: "null",
+              },
+            ],
           },
           profileStatus: {
             type: "string",
@@ -4969,9 +5149,12 @@ export const openApiDocument = {
         properties: {
           attempt: { $ref: "#/components/schemas/AttemptExecution" },
           capability: {
-            anyOf: [{ $ref: "#/components/schemas/AttemptCapability" }, {
-              type: "null",
-            }],
+            anyOf: [
+              { $ref: "#/components/schemas/AttemptCapability" },
+              {
+                type: "null",
+              },
+            ],
           },
           profileStatus: {
             type: "string",
@@ -5168,14 +5351,20 @@ export const openApiDocument = {
           receivedAt: { type: "string", format: "date-time" },
           metadataExpiresAt: { type: "string", format: "date-time" },
           resolution: {
-            anyOf: [{ $ref: "#/components/schemas/OfflineResolution" }, {
-              type: "null",
-            }],
+            anyOf: [
+              { $ref: "#/components/schemas/OfflineResolution" },
+              {
+                type: "null",
+              },
+            ],
           },
           currentAttempt: {
-            anyOf: [{ $ref: "#/components/schemas/AttemptExecution" }, {
-              type: "null",
-            }],
+            anyOf: [
+              { $ref: "#/components/schemas/AttemptExecution" },
+              {
+                type: "null",
+              },
+            ],
           },
         },
       },
@@ -5247,9 +5436,12 @@ export const openApiDocument = {
           quarantineId: { type: "string", format: "uuid" },
           resolution: { $ref: "#/components/schemas/OfflineResolution" },
           attempt: {
-            anyOf: [{ $ref: "#/components/schemas/AttemptExecution" }, {
-              type: "null",
-            }],
+            anyOf: [
+              { $ref: "#/components/schemas/AttemptExecution" },
+              {
+                type: "null",
+              },
+            ],
           },
           effectiveAt: {
             type: "string",
@@ -5275,9 +5467,12 @@ export const openApiDocument = {
         properties: {
           attempt: { $ref: "#/components/schemas/AttemptExecution" },
           capability: {
-            anyOf: [{ $ref: "#/components/schemas/AttemptCapability" }, {
-              type: "null",
-            }],
+            anyOf: [
+              { $ref: "#/components/schemas/AttemptCapability" },
+              {
+                type: "null",
+              },
+            ],
           },
           profileStatus: {
             type: "string",
@@ -5292,9 +5487,12 @@ export const openApiDocument = {
               "관리자의 미착수 만료 정리는 inactive/departed 상태를 그대로 보존하며 계정을 재활성화하거나 새 제한 권한을 발급하지 않습니다.",
           },
           nextAttempt: {
-            anyOf: [{ $ref: "#/components/schemas/AttemptExecution" }, {
-              type: "null",
-            }],
+            anyOf: [
+              { $ref: "#/components/schemas/AttemptExecution" },
+              {
+                type: "null",
+              },
+            ],
           },
           profileVersion: { type: "integer", minimum: 1 },
           effectiveAt: { type: "string", format: "date-time" },
@@ -6782,6 +6980,11 @@ export const openApiDocument = {
           "carryOutAmount",
           "payableAmount",
           "adjustmentCount",
+          "paymentAttemptId",
+          "paymentAttemptNumber",
+          "paidAt",
+          "checkReasonCode",
+          "lastReopenReasonCode",
         ],
         properties: {
           cycleId: { type: ["string", "null"], format: "uuid" },
@@ -6857,6 +7060,17 @@ export const openApiDocument = {
             description: "earning + adjustment + carry-in의 signed net",
           },
           adjustmentCount: { type: "integer", minimum: 0 },
+          paymentAttemptId: { type: ["string", "null"], format: "uuid" },
+          paymentAttemptNumber: { type: ["integer", "null"], minimum: 1 },
+          paidAt: { type: ["string", "null"], format: "date-time" },
+          checkReasonCode: {
+            type: ["string", "null"],
+            enum: ["TRANSFER_RESULT_UNCERTAIN", null],
+          },
+          lastReopenReasonCode: {
+            type: ["string", "null"],
+            enum: ["NO_TRANSFER_CONFIRMED", null],
+          },
         },
       },
       PayrollStartRequest: {
@@ -6987,6 +7201,97 @@ export const openApiDocument = {
         additionalProperties: false,
         required: ["expectedVersion"],
         properties: { expectedVersion: { type: "integer", minimum: 0 } },
+      },
+      PayrollPaymentCheckRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion", "reasonCode"],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { const: "TRANSFER_RESULT_UNCERTAIN" },
+        },
+      },
+      PayrollPaymentPaidRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion", "paymentMethod", "providerReferenceId"],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          paymentMethod: { const: "bank_transfer" },
+          providerReferenceId: {
+            type: "string",
+            minLength: 8,
+            maxLength: 64,
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,63}$",
+            description:
+              "ASCII letter와 digit을 각각 포함하고 7자리 연속 숫자·URL-like 문자열을 금지합니다. 응답에서는 uppercase canonical 값입니다.",
+          },
+        },
+      },
+      PayrollPaymentReopenRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion", "reasonCode"],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { const: "NO_TRANSFER_CONFIRMED" },
+        },
+      },
+      PayrollPaymentResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "paymentResultId",
+          "paymentAttemptId",
+          "payrollCycleId",
+          "resultType",
+          "beforeStatus",
+          "afterStatus",
+          "cycleVersion",
+          "lockedAmount",
+          "occurredAt",
+        ],
+        properties: {
+          paymentResultId: { type: "string", format: "uuid" },
+          paymentAttemptId: { type: "string", format: "uuid" },
+          payrollCycleId: { type: "string", format: "uuid" },
+          resultType: { type: "string", enum: ["check", "paid", "reopened"] },
+          beforeStatus: { type: "string", enum: ["paying", "check"] },
+          afterStatus: { type: "string", enum: ["check", "paid", "open"] },
+          cycleVersion: { type: "integer", minimum: 1 },
+          lockedAmount: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "attempt 시작 시 서버가 잠근 전액 snapshot. CHECK/reopen에서는 지급액을 뜻하지 않으며 client 입력이 아닙니다.",
+          },
+          paymentMethod: { type: "string", const: "bank_transfer" },
+          providerReferenceId: {
+            type: "string",
+            minLength: 8,
+            maxLength: 64,
+            readOnly: true,
+            description:
+              "admin command result 전용 canonical reference. maid/developer/audit/notification에는 노출되지 않습니다.",
+          },
+          reasonCode: {
+            type: "string",
+            enum: ["TRANSFER_RESULT_UNCERTAIN", "NO_TRANSFER_CONFIRMED"],
+          },
+          occurredAt: {
+            type: "string",
+            format: "date-time",
+            description: "서버 기록 시각",
+          },
+        },
+      },
+      PayrollPaymentResultEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["paymentResult"],
+        properties: {
+          paymentResult: { $ref: "#/components/schemas/PayrollPaymentResult" },
+        },
       },
       PayrollListEnvelope: {
         type: "object",
@@ -7418,12 +7723,15 @@ function prestartOperation(
       "active 역할·최신 session·비밀번호 변경 완료를 검증합니다. non-superseded attempt가 있으면 ASSIGNMENT_ALREADY_STARTED입니다. expectedCurrentAssignmentId와 expectedAssignmentVersion을 함께 전달합니다. 변경은 새 immutable revision이며 draft는 통보하지 않고 notified는 알림/outbox를 원자적으로 기록합니다. 예정 checkout identity와 실행 금지 경계를 유지합니다. 같은 key/본문 재시도는 동일 결과, 다른 본문은 IDEMPOTENCY_KEY_REUSED입니다.",
     security: [{ bearerAuth: [] }],
     "x-required-roles": [role],
-    parameters: [{
-      name: id,
-      in: "path",
-      required: true,
-      schema: { type: "string", format: "uuid" },
-    }, idempotencyHeader],
+    parameters: [
+      {
+        name: id,
+        in: "path",
+        required: true,
+        schema: { type: "string", format: "uuid" },
+      },
+      idempotencyHeader,
+    ],
     requestBody: {
       required: true,
       content: {
@@ -7589,9 +7897,11 @@ function developerResponse(
   };
 }
 
-function accountMutationDescription(
-  operationId: string,
-): { summary: string; description: string; success: string } {
+function accountMutationDescription(operationId: string): {
+  summary: string;
+  description: string;
+  success: string;
+} {
   const descriptions: Record<
     string,
     { summary: string; description: string; success: string }

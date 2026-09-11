@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 90 &&
+    Object.keys(document.paths).length === 93 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 97,
-    "candidate contract 90/97",
+        ).length === 100,
+    "candidate contract 93/100",
   );
 });
 
@@ -91,6 +91,12 @@ Deno.test("payroll OpenAPI separates earnings and signed adjustments with strict
   const carry = document.paths["/v1/payroll/carry-forward"].post;
   const lateCarry =
     document.paths["/v1/payroll/late-earnings/{earningId}/carry"].post;
+  const paymentCheck =
+    document.paths["/v1/payroll/payment-attempts/{attemptId}/check"].post;
+  const paymentPaid =
+    document.paths["/v1/payroll/payment-attempts/{attemptId}/paid"].post;
+  const paymentReopen =
+    document.paths["/v1/payroll/payment-attempts/{attemptId}/reopen"].post;
   const schemas = document.components.schemas;
   assert(
     list.operationId === "listPayrollCycles",
@@ -124,6 +130,23 @@ Deno.test("payroll OpenAPI separates earnings and signed adjustments with strict
       carry.operationId === "carryForwardPayrollCycle" &&
       lateCarry.operationId === "carryLatePayrollEarning",
     "four #102 operations",
+  );
+  assert(
+    paymentCheck.operationId === "recordPayrollPaymentCheck" &&
+      paymentPaid.operationId === "recordPayrollPaymentPaid" &&
+      paymentReopen.operationId === "reopenPayrollPaymentAttempt",
+    "three exact #103 result operations",
+  );
+  assert(
+    schemas.PayrollPaymentPaidRequest.additionalProperties === false &&
+      !Object.hasOwn(schemas.PayrollPaymentPaidRequest.properties, "amount") &&
+      !Object.hasOwn(schemas.PayrollPaymentPaidRequest.properties, "paidAt") &&
+      schemas.PayrollPaymentResult.required.includes("lockedAmount") &&
+      !Object.hasOwn(schemas.PayrollPaymentResult.properties, "paidAmount") &&
+      schemas.PayrollPaymentPaidRequest.properties.paymentMethod.const ===
+        "bank_transfer" &&
+      paymentPaid.description.includes("provider HTTP를 호출하지 않습니다"),
+    "full payment attestation keeps amount, clock and provider calls server-owned",
   );
   assert(
     schemas.PayrollStatus.enum.join() === "open,paying,check,paid",
@@ -253,7 +276,7 @@ Deno.test(
       "no free-form customer payload",
     );
     assert(
-      !Object.keys(doc.paths).some((path) => path.includes("reopen")),
+      !complaintPaths.some((path) => path.includes("reopen")),
       "closed complaint has no reopen route",
     );
     for (
@@ -852,7 +875,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 55,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 58,
     "actual audit allowlist count",
   );
   assert(

@@ -105,8 +105,9 @@ Decision Issue #94는 아래 도메인 경계를 확정했다. 이 절은 후속
   actor, `expectedVersion`, scoped idempotency/request hash와 audit을 요구한다.
 
 #100 complaint/appeal/correction과 #101 compensation provenance는 각각 PR #104/#105로 dev에 통합됐다.
-#102 adjustment/carry-forward는 아래 source PR 후보이며 `CHECK/PAID` command와 지급 evidence는 #103 후속
-범위다. main/recovery/production에는 적용되지 않았다.
+#102 adjustment/carry-forward는 PR #106으로 `dev@cb26650221b3e47804edafd51cad5bfc8872c349`에
+통합됐다. `CHECK/PAID` command와 지급 evidence는 아래 #103 source PR 후보 범위이며
+main/recovery/production에는 적용되지 않았다.
 
 ### #100 컴플레인·이의·정정 수명주기 — source/dev 완료, production 미승격
 
@@ -165,7 +166,7 @@ business admin만 허용하고 original/assignee maid HTTP projection은 서로�
 safe summary만 추가하며 raw state/request hash/idempotency key/maid cross-sensitive 식별자는 반환하지 않는다.
 Fastify/Edge/OpenAPI 후보는 86 paths / 93 operations이며 production은 변경하지 않았다.
 
-### #102 signed adjustment·순차 carry-forward — source PR 후보, production 미승격
+### #102 signed adjustment·순차 carry-forward — source/dev 완료, production 미승격
 
 39번째 append-only migration은 기존 38개 migration과 earning/compensation provenance를 수정하지 않는다.
 `payroll_adjustments`는 correction/reversal/late carry source 중 정확히 하나의 typed FK를 가지며 client reason을
@@ -192,8 +193,36 @@ Fastify와 Edge는 동일한 4개 command route와 bounded cycle/entry projectio
 `offsetSettled`, signed `adjustmentAmount/carryInAmount/carryOutAmount/payableAmount`를 포함하고 128 KiB 상한,
 signed cursor, `Cache-Control: no-store`를 유지한다. 새 여섯 public ledger table은 live `auth.sessions`와 최신
 role/password/maid-self를 함께 확인하는 RLS만 허용한다. 감사 API는 네 source-controlled payroll event의 금액,
-maid 식별자, raw state/request hash를 제거한 safe summary만 제공한다. 후보 계약은 39 migrations / 90 paths /
-97 operations이며 #103 payment result/provider와 production/main/recovery는 변경하지 않는다.
+maid 식별자, raw state/request hash를 제거한 safe summary만 제공한다. 통합 계약은 39 migrations / 90 paths /
+97 operations이며 production/main/recovery는 변경하지 않는다.
+
+### #103 외부 전액 지급 결과·CHECK·PAID — source PR 후보, production 미승격
+
+40번째 append-only migration은 기존 39개 migration을 수정하지 않는다. 각 `payment_started` event는
+immutable `payroll_payment_attempts` 한 건의 typed source가 되고, `check`/`paid`/`reopened` 결과는 attempt,
+cycle, maid, locked amount, actor, server time을 함께 보존한다. 기존 start event는 attempt만 deterministic하게
+backfill하며 과거 CHECK/PAID evidence는 추측해 만들지 않는다. OPEN 복귀 뒤 재시작은 같은 cycle의 다음
+attempt number와 새 start event를 만든다.
+40번째 migration 이후 발생하는 payment status transition은 private append-only marker에만 기록한다. cycle
+projection과 start event/attempt/result 양쪽에 걸린 deferred constraint가 commit 시 exact version, locked amount,
+actor, server time, before/after status를 검증하므로 privileged direct DML도 evidence 없는 projection 변경이나
+transition 없는 evidence 삽입을 남길 수 없다. migration 이전 CHECK/PAID에는 marker나 결과를 추측 backfill하지 않는다.
+
+active password-complete business admin만 `PAYING → CHECK`, `PAYING/CHECK → PAID`,
+`PAYING/CHECK → OPEN`을 실행한다. CHECK 사유는 `TRANSFER_RESULT_UNCERTAIN`, reopen 사유는
+`NO_TRANSFER_CONFIRMED`로 고정하고 cycle `expectedVersion`과 scoped idempotency를 검증한다. PAID는 client
+amount나 `paidAt`을 받지 않고 current attempt의 양수 locked payable 전액과 DB server 시각만 기록하며 이후
+cycle/evidence UPDATE·DELETE·OPEN 복귀를 금지한다. 상태·결과·audit·maid notification/outbox는 한 transaction이다.
+지급 start/result와 승인에 의한 earning 생성은 모두 scoped receipt → global advisory → actor/domain row 순서로
+잠근다. 특히 inspection approval이 actor row를 global fence보다 먼저 잠그지 않아 late earning과 다음 cycle
+freeze 경합에서도 deadlock 대신 하나의 정상 결과 또는 stable domain loser만 남긴다.
+
+현재 payment method는 `bank_transfer` 하나다. reference는 8~64 ASCII allowlist, 영문/숫자 포함, 7자리 연속
+숫자와 URL-like 구문을 거부한 뒤 uppercase canonical 값으로 `(method, reference)` 전역 중복을 막는다. 이
+형식은 실제 은행/provider 계약이 미확정인 동안의 fail-closed source 계약이며 확장은 별도 migration이
+필요하다. canonical reference는 admin command/result에만 반환하고 maid 목록, developer audit, 알림에는
+노출하지 않는다. 영수증·계좌·수취인 PII·secret·raw body/error를 저장하지 않으며 provider HTTP를 호출하지
+않는다. Fastify/Edge/OpenAPI 후보는 93 paths / 100 operations이고 production은 변경하지 않았다.
 
 ```mermaid
 flowchart LR

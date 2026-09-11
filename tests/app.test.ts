@@ -134,7 +134,8 @@ function services(): AppServices {
         nextCursor: null
       })),
       start: vi.fn()
-      , correct: vi.fn(), reverse: vi.fn(), carryForward: vi.fn(), carryLateEarning: vi.fn()
+      , correct: vi.fn(), reverse: vi.fn(), carryForward: vi.fn(), carryLateEarning: vi.fn(),
+      recordPaymentCheck: vi.fn(), recordPaymentPaid: vi.fn(), reopenPayment: vi.fn()
     }
   };
 }
@@ -585,6 +586,8 @@ describe('application', () => {
       lateEarningsNextCursor: null
       , offsetSettled: false, adjustmentAmount: 0, carryInAmount: 0,
       carryOutAmount: 0, payableAmount: 30000, adjustmentCount: 0
+      , paymentAttemptId: '61500000-0000-4000-8000-000000000001', paymentAttemptNumber: 1,
+      paidAt: null, checkReasonCode: null, lastReopenReasonCode: null
     }));
     const app = await buildApp({ env, services: appServices, logger: false });
     const response = await app.inject({
@@ -663,6 +666,8 @@ describe('application', () => {
       lateEarningCount: 0, lateEarningAmount: 0, lateEarnings: [], lateEarningsNextCursor: null,
       offsetSettled: true, adjustmentAmount: -1000, carryInAmount: 0, carryOutAmount: -1000,
       payableAmount: -1000, adjustmentCount: 1
+      , paymentAttemptId: null, paymentAttemptNumber: null, paidAt: null,
+      checkReasonCode: null, lastReopenReasonCode: null
     }));
     const app = await buildApp({ env, services: appServices, logger: false });
     const requests = [
@@ -686,6 +691,54 @@ describe('application', () => {
     });
     expect(unauthorized.statusCode).toBe(401);
     expect(unauthorized.headers['cache-control']).toBe('no-store');
+    await app.close();
+  });
+
+  it('records only exact external payment result bodies with no-store', async () => {
+    const appServices = services();
+    const paymentResult = {
+      paymentResultId: '74000000-0000-4000-8000-000000000001',
+      paymentAttemptId: '75000000-0000-4000-8000-000000000001',
+      payrollCycleId: '76000000-0000-4000-8000-000000000001', resultType: 'paid' as const,
+      beforeStatus: 'paying' as const, afterStatus: 'paid' as const, cycleVersion: 2,
+      lockedAmount: 30000, paymentMethod: 'bank_transfer' as const,
+      providerReferenceId: 'BANK.AB12', occurredAt: '2026-09-10T00:00:00Z'
+    };
+    appServices.payroll.recordPaymentPaid = vi.fn(async () => paymentResult);
+    appServices.payroll.recordPaymentCheck = vi.fn(async () => ({ ...paymentResult, resultType: 'check' as const,
+      afterStatus: 'check' as const, paymentMethod: undefined, providerReferenceId: undefined,
+      reasonCode: 'TRANSFER_RESULT_UNCERTAIN' as const }));
+    appServices.payroll.reopenPayment = vi.fn(async () => ({ ...paymentResult, resultType: 'reopened' as const,
+      afterStatus: 'open' as const, paymentMethod: undefined, providerReferenceId: undefined,
+      reasonCode: 'NO_TRANSFER_CONFIRMED' as const }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    for (const [suffix, payload] of [
+      ['check', { expectedVersion: 1, reasonCode: 'TRANSFER_RESULT_UNCERTAIN' }],
+      ['paid', { expectedVersion: 1, paymentMethod: 'bank_transfer', providerReferenceId: 'bank.ab12' }],
+      ['reopen', { expectedVersion: 1, reasonCode: 'NO_TRANSFER_CONFIRMED' }]
+    ] as const) {
+      const response = await app.inject({ method: 'POST',
+        url: `/v1/payroll/payment-attempts/${paymentResult.paymentAttemptId}/${suffix}`,
+        headers: { authorization: 'Bearer access-token', 'idempotency-key': `payment-${suffix}-result` }, payload });
+      expect(response.statusCode, suffix).toBe(200);
+      expect(response.headers['cache-control'], suffix).toBe('no-store');
+    }
+    for (const extra of [{ amount: 1 }, { paidAt: '2026-09-10T00:00:00Z' },
+      { receipt: 'secret' }, { payeeAccount: 'private' }]) {
+      const response = await app.inject({ method: 'POST',
+        url: `/v1/payroll/payment-attempts/${paymentResult.paymentAttemptId}/paid`,
+        headers: { authorization: 'Bearer access-token', 'idempotency-key': `payment-reject-${Object.keys(extra)[0]}` },
+        payload: { expectedVersion: 1, paymentMethod: 'bank_transfer', providerReferenceId: 'BANK.AB12', ...extra } });
+      expect(response.statusCode).toBe(400);
+      expect(response.headers['cache-control']).toBe('no-store');
+    }
+    const zeroVersion = await app.inject({ method: 'POST',
+      url: `/v1/payroll/payment-attempts/${paymentResult.paymentAttemptId}/check`,
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'payment-zero-version' },
+      payload: { expectedVersion: 0, reasonCode: 'TRANSFER_RESULT_UNCERTAIN' } });
+    expect(zeroVersion.statusCode).toBe(400);
+    expect(zeroVersion.headers['cache-control']).toBe('no-store');
+    expect(appServices.payroll.recordPaymentCheck).toHaveBeenCalledTimes(1);
     await app.close();
   });
 
