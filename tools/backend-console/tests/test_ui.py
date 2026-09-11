@@ -102,6 +102,7 @@ def test_create_account_clears_phone_before_network_result(
                                 "GOOGLE_DRIVE_ROOT_FOLDER_ID",
                                 "PHOTO_PURGE_INVOKE_SECRET",
                                 "PAYROLL_CURSOR_HMAC_SECRET",
+                                "NOTIFICATION_CURSOR_HMAC_SECRET",
                             )
                         },
                         "checkedAt": "2026-08-31T00:00:00Z",

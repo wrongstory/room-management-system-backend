@@ -424,6 +424,11 @@ export const openApiDocument = {
       description:
         "종료된 KST 주차의 확정 수익만 조회하고 active business admin이 PAYING snapshot을 잠그는 API입니다. 실제 외부 송금 성공을 의미하지 않습니다.",
     },
+    {
+      name: "Notifications",
+      description:
+        "비밀번호 변경을 완료한 active admin/maid의 본인 알림함 API입니다. 원본 dedupe/group 내부값은 노출하지 않고 읽음 시각은 서버가 최초 한 번만 기록합니다.",
+    },
   ],
   paths: {
     "/v1/attempts/{attemptId}/bomb-room-reports": {
@@ -2056,6 +2061,86 @@ export const openApiDocument = {
           "403": errorResponse,
           "409": errorResponse,
           "500": errorResponse,
+        },
+      },
+    },
+    "/v1/notifications": {
+      get: {
+        tags: ["Notifications"],
+        operationId: "listNotifications",
+        summary: "본인 알림함 조회",
+        description:
+          "active admin/maid가 본인 수신 알림만 occurredAt, id 내림차순 keyset으로 조회합니다. limit 기본 50, 최대 100이며 opaque cursor는 actor ID·role·stream·고정 sort에 서명됩니다. dedupeKey, groupKey, 수신자 및 내부 actor/session 정보는 반환하지 않고 전체 응답은 UTF-8 JSON 128 KiB로 제한됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            description: "알림 page 크기. DB도 최대 100을 독립 강제합니다.",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description:
+              "직전 응답 nextCursor의 opaque 서명값. 해석하거나 다른 사용자·역할·stream에 재사용하지 않습니다.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "본인 알림의 안전한 bounded projection",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/NotificationListEnvelope",
+                },
+              },
+            },
+          },
+          "400": complaintErrorResponse,
+          "401": complaintErrorResponse,
+          "403": complaintErrorResponse,
+          "500": complaintErrorResponse,
+          "503": complaintErrorResponse,
+        },
+      },
+    },
+    "/v1/notifications/{id}/read": {
+      post: {
+        tags: ["Notifications"],
+        operationId: "markNotificationRead",
+        summary: "본인 알림 읽음 처리",
+        description:
+          "경로의 알림이 현재 actor 본인 수신분일 때만 서버 시각으로 최초 readAt을 기록합니다. 재시도와 동시 호출은 같은 최초 readAt을 반환하며 client timestamp, unread 복귀, content/resolution 변경은 허용하지 않습니다. 다른 수신자의 ID도 NOTIFICATION_NOT_FOUND로 응답합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [{
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "읽음 처리할 본인 알림 ID",
+        }],
+        responses: {
+          "200": {
+            description: "최초 readAt이 보존된 알림 projection",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/NotificationEnvelope" },
+              },
+            },
+          },
+          "400": complaintErrorResponse,
+          "401": complaintErrorResponse,
+          "403": complaintErrorResponse,
+          "404": complaintErrorResponse,
+          "500": complaintErrorResponse,
         },
       },
     },
@@ -4020,6 +4105,12 @@ export const openApiDocument = {
           "RECLEAN_TEMPLATE_NOT_CONFIGURED",
           "COMPLAINT_INVALID_TRANSITION",
           "COMPLAINT_COMMAND_FAILED",
+          "NOTIFICATION_ACCESS_REQUIRED",
+          "NOTIFICATION_NOT_FOUND",
+          "INVALID_NOTIFICATION_CURSOR",
+          "NOTIFICATION_CURSOR_NOT_CONFIGURED",
+          "NOTIFICATION_RESPONSE_TOO_LARGE",
+          "NOTIFICATION_QUERY_FAILED",
           "PAYROLL_ACCESS_REQUIRED",
           "PAYROLL_MAID_NOT_FOUND",
           "PAYROLL_WEEK_MUST_START_MONDAY",
@@ -4440,6 +4531,7 @@ export const openApiDocument = {
               "GOOGLE_DRIVE_ROOT_FOLDER_ID",
               "PHOTO_PURGE_INVOKE_SECRET",
               "PAYROLL_CURSOR_HMAC_SECRET",
+              "NOTIFICATION_CURSOR_HMAC_SECRET",
             ],
             properties: Object.fromEntries(
               [
@@ -4457,6 +4549,7 @@ export const openApiDocument = {
                 "GOOGLE_DRIVE_ROOT_FOLDER_ID",
                 "PHOTO_PURGE_INVOKE_SECRET",
                 "PAYROLL_CURSOR_HMAC_SECRET",
+                "NOTIFICATION_CURSOR_HMAC_SECRET",
               ].map((name) => [
                 name,
                 {
@@ -6546,6 +6639,61 @@ export const openApiDocument = {
           },
           reworkRequired: { type: "boolean" },
           decidedAt: { type: "string", format: "date-time" },
+        },
+      },
+      Notification: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "category",
+          "title",
+          "body",
+          "roomId",
+          "cleaningTargetId",
+          "requiresAction",
+          "readAt",
+          "resolvedAt",
+          "occurredAt",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          category: { type: "string", minLength: 1 },
+          title: { type: "string", minLength: 1 },
+          body: { type: "string", minLength: 1 },
+          roomId: { type: ["string", "null"], format: "uuid" },
+          cleaningTargetId: { type: ["string", "null"], format: "uuid" },
+          requiresAction: { type: "boolean" },
+          readAt: { type: ["string", "null"], format: "date-time" },
+          resolvedAt: { type: ["string", "null"], format: "date-time" },
+          occurredAt: { type: "string", format: "date-time" },
+        },
+        description:
+          "본인 알림의 안전한 projection. recipientProfileId, dedupeKey, groupKey와 내부 actor/session은 포함하지 않습니다.",
+      },
+      NotificationEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["notification"],
+        properties: {
+          notification: { $ref: "#/components/schemas/Notification" },
+        },
+      },
+      NotificationListEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["notifications", "nextCursor"],
+        properties: {
+          notifications: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/Notification" },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+          },
         },
       },
       ComplaintMaidResponse: {

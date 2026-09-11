@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 function assert(value, message) {
   if (!value) throw new Error(message);
@@ -264,10 +265,14 @@ export async function testAttemptActivationConcurrency(client, actorProfileId) {
     const snapshot = {};
     snapshot.target = ok(await client.from('cleaning_targets').select('*')
       .eq('id', item.targetId).single(), 'source race target snapshot');
-    for (const table of ['cleaning_assignments', 'cleaning_target_schedule_revisions', 'notifications']) {
+    for (const table of ['cleaning_assignments', 'cleaning_target_schedule_revisions']) {
       snapshot[table] = ok(await client.from(table).select('*')
         .eq('cleaning_target_id', item.targetId).order('id'), `source race ${table} snapshot`);
     }
+    snapshot.notifications = JSON.parse(execFileSync('docker',[
+      'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
+      '-c',`select coalesce(json_agg(n order by n.id),'[]'::json)::text from public.notifications n where cleaning_target_id='${item.targetId}'::uuid`
+    ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
     snapshot.audit = ok(await client.from('audit_events').select('id')
       .eq('entity_id', item.targetId).eq('event_type', 'assignment.rolled_over').order('id'),
     'source race rollover audit snapshot');

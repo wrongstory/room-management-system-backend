@@ -13,6 +13,7 @@ import { testPayrollConcurrency } from './test-payroll-concurrency.mjs';
 import { testComplaintConcurrency } from './test-complaint-concurrency.mjs';
 import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-operations-concurrency.mjs';
 import { testPhotoDriveQuotaConcurrency } from './test-photo-drive-quota-concurrency.mjs';
+import { testNotificationConcurrency } from './test-notification-concurrency.mjs';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const status = JSON.parse(execFileSync(
@@ -668,12 +669,13 @@ assert(
   new Set(replayCommitResults.map((result) => JSON.stringify(result.data))).size === 1,
   'concurrent identical assignment commits must replay one logical response'
 );
-const { count: replayNotificationCount, error: replayNotificationCountError } = await client
-  .from('notifications')
-  .select('id', { count: 'exact', head: true })
-  .eq('cleaning_target_id', assignmentCommitTargetIds[0]);
+const replayNotificationCount = Number(execFileSync('docker', [
+  'exec', '-i', 'supabase_db_room-management-system-backend',
+  'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres',
+  '-c', `select count(*) from public.notifications where cleaning_target_id='${assignmentCommitTargetIds[0]}'::uuid`
+], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim());
 assert(
-  !replayNotificationCountError && replayNotificationCount === 1,
+  replayNotificationCount === 1,
   'concurrent identical assignment commit must create one notification'
 );
 
@@ -917,6 +919,7 @@ await testComplaintConcurrency(client,actorProfileId);
 await testPhotoSubmissionConcurrency(client);
 await testPhotoStorageOperationsConcurrency(client);
 await testPhotoDriveQuotaConcurrency(client);
+await testNotificationConcurrency(client);
 
 console.log(
   'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2, assignment-commit-replay=1 logical/2 calls, assignment-save-vs-commit=1/2, availability-vs-commit=1/2.'

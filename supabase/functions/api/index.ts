@@ -93,6 +93,11 @@ import {
   mutateComplaint,
 } from "../_shared/complaint-api.ts";
 import { assertComplaintResponseSize } from "../_shared/complaint-cursor.ts";
+import {
+  listNotifications,
+  markNotificationRead,
+  notificationReadPath,
+} from "../_shared/notification-api.ts";
 
 import {
   createSubmission,
@@ -817,6 +822,24 @@ export async function handleApiRequest(
             cleaningTargetId,
           ),
         },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/notifications") {
+      return jsonResponse(
+        await listNotifications(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
+    const notificationId = request.method === "POST"
+      ? notificationReadPath(path)
+      : null;
+    if (notificationId) {
+      return jsonResponse(
+        await markNotificationRead(request, clients, actor, notificationId),
         200,
         corsHeaders,
       );

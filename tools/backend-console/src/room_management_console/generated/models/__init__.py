@@ -67,6 +67,9 @@ from .developer_runtime_status_configuration_googledriverefreshtoken import (
 from .developer_runtime_status_configuration_googledriverootfolderid import (
     DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
 )
+from .developer_runtime_status_configuration_notificationcursorhmacsecret import (
+    DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET,
+)
 from .developer_runtime_status_configuration_payrollcursorhmacsecret import (
     DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET,
 )
@@ -180,6 +183,7 @@ __all__ = (
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET",
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN",
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID",
+    "DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET",
     "DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET",
     "DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET",
     "DeveloperRuntimeStatusConfigurationRESERVATIONGUESTNAMEPEPPER",

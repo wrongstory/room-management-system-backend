@@ -32,6 +32,11 @@ import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
 import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
 import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
 import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
+import { createNotificationRoutes } from './modules/notifications/notification.routes.js';
+import {
+  type NotificationService,
+  SupabaseNotificationService
+} from './modules/notifications/notification.service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -41,6 +46,7 @@ export interface AppServices {
   reservations: ReservationService;
   payroll: PayrollService;
   complaints?: ComplaintService;
+  notifications?: NotificationService;
 }
 
 export interface BuildAppOptions {
@@ -87,7 +93,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
       ),
       payroll: new SupabasePayrollService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET),
-      complaints: new SupabaseComplaintService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET)
+      complaints: new SupabaseComplaintService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET),
+      notifications: new SupabaseNotificationService(
+        clients,
+        options.env.NOTIFICATION_CURSOR_HMAC_SECRET
+      )
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -164,6 +174,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createPayrollRoutes(services.payroll), { prefix: '/v1/payroll' });
   if (services.complaints) {
     await app.register(createComplaintRoutes(services.complaints), { prefix: '/v1/complaints' });
+  }
+  if (services.notifications) {
+    await app.register(createNotificationRoutes(services.notifications), { prefix: '/v1/notifications' });
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
   await app.register(createPhotoRoutes(photoServices));

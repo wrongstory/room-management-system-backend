@@ -474,6 +474,12 @@ erDiagram
 
 ## 6. 수익·주급·알림·감사
 
+알림은 삭제하지 않으며 recipient/category/title/body/room/target/dedupe/group/action/발생·생성 시각을
+수정하지 않는다. `read_at`은 본인 markRead command가 DB 시각으로 NULL에서 한 번만 채우고,
+`resolved_at`은 기존 도메인 SECURITY DEFINER command가 NULL에서 한 번만 채운다. raw Data API는
+SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
+`(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
+
 ```mermaid
 erDiagram
   CLEANING_SUBMISSIONS ||--o| EARNINGS : "승인 후 1회 적립"

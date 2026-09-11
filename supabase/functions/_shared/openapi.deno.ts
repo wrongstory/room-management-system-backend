@@ -71,13 +71,50 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 93 &&
+    Object.keys(document.paths).length === 95 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 100,
-    "candidate contract 93/100",
+        ).length === 102,
+    "candidate contract 95/102",
+  );
+});
+
+Deno.test("notification OpenAPI exposes only bounded own-inbox operations", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const list = document.paths["/v1/notifications"].get;
+  const read = document.paths["/v1/notifications/{id}/read"].post;
+  const schemas = document.components.schemas;
+  assert(list.operationId === "listNotifications", "stable list operation");
+  assert(read.operationId === "markNotificationRead", "stable read operation");
+  assert(
+    list.parameters.find((parameter) => parameter.name === "limit")?.schema
+      .maximum === 100,
+    "bounded limit",
+  );
+  assert(
+    list["x-required-roles"].join() === "admin,maid" &&
+      read["x-required-roles"].join() === "admin,maid",
+    "admin and maid own inbox only",
+  );
+  for (
+    const key of [
+      "recipientProfileId",
+      "dedupeKey",
+      "groupKey",
+      "actorProfileId",
+      "sessionId",
+    ]
+  ) {
+    assert(
+      !Object.hasOwn(schemas.Notification.properties, key),
+      `${key} stays private`,
+    );
+  }
+  assert(
+    !Object.hasOwn(read, "requestBody"),
+    "read timestamp remains server-owned",
   );
 });
 

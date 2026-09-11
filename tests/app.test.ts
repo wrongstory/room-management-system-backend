@@ -18,6 +18,7 @@ const env: AppEnv = {
   RESERVATION_PII_KEYRING_JSON: '{}',
   RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
   PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456',
+  NOTIFICATION_CURSOR_HMAC_SECRET: 'notification-cursor-secret-tests-123456',
   RESERVATION_SCHEDULER_INTERVAL_SECONDS: 60,
   corsOrigins: ['http://127.0.0.1:4173']
 };
