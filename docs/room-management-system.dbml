@@ -1252,7 +1252,94 @@ Table private.notification_delivery_outbox {
   delivery_status text [not null, default: 'pending']
   enqueued_at timestamptz [not null]
 
-  Note: '#109 typed-only future #111 input. Raw service_role access and current worker/claim/provider behavior are absent.'
+  Note: '#109 immutable typed intent and #111 sole worker input. Raw service_role access is denied.'
+}
+
+Table private.notification_delivery_jobs {
+  outbox_id uuid [pk]
+  status text [not null, note: 'pending/materialized/completed/suppressed/dead_letter/operator_blocked']
+  snapshot_at timestamptz
+  terminal_at timestamptz
+  terminal_reason text
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Note: '#111 one first-fanout snapshot per immutable typed outbox; no late subscription expansion.'
+}
+
+Table private.notification_delivery_targets {
+  id uuid [pk]
+  outbox_id uuid [not null]
+  notification_id uuid [not null]
+  recipient_profile_id uuid [not null]
+  subscription_id uuid [not null]
+  subscription_version int [not null]
+  subscription_revision_id uuid [not null]
+  status text [not null]
+  lease_version int [not null, note: '0..8']
+  claim_digest text
+  lease_expires_at timestamptz
+  next_attempt_at timestamptz [not null]
+  terminal_at timestamptz
+  reason_code text
+  indexes {
+    (outbox_id, subscription_id) [unique]
+    (next_attempt_at, id) [name: 'notification_delivery_targets_due_idx']
+  }
+  Note: '#111 exact subscription/version/revision target; 2-minute fenced lease, no envelope copy.'
+}
+
+Table private.notification_delivery_attempts {
+  id uuid [pk]
+  target_id uuid [not null]
+  attempt_no int [not null, note: '1..8']
+  lease_version int [not null]
+  claim_digest text [not null]
+  started_at timestamptz [not null]
+  indexes { (target_id, attempt_no) [unique] }
+  Note: '#111 append-only external attempt start; crash-after-send is at-least-once.'
+}
+
+Table private.notification_delivery_permits {
+  attempt_id uuid [pk]
+  subscription_revision_id uuid [not null]
+  permitted_at timestamptz [not null]
+  Note: '#111 exact-current/live-session send authorization linearization evidence.'
+}
+
+Table private.notification_delivery_attempt_results {
+  attempt_id uuid [pk]
+  outcome text [not null]
+  reason_code text
+  request_reason_code text
+  requested_retry_after_seconds int
+  retry_at timestamptz
+  completed_at timestamptz [not null]
+  Note: '#111 append-only provider-neutral result; no raw response/header/endpoint/key/session.'
+}
+
+Table private.notification_delivery_events {
+  id uuid [pk]
+  outbox_id uuid [not null]
+  target_id uuid
+  state text [not null]
+  reason_code text
+  occurred_at timestamptz [not null]
+  Note: '#111 append-only safe lifecycle, bounded 90-day terminal retention.'
+}
+
+Table private.notification_delivery_heartbeat {
+  singleton boolean [pk]
+  status text [not null]
+  claimed int [not null]
+  delivered int [not null]
+  retrying int [not null]
+  suppressed int [not null]
+  dead_letter int [not null]
+  blocked int [not null]
+  deferred int [not null]
+  error_code text
+  recorded_at timestamptz [not null]
+  Note: '#111 bounded non-sensitive worker health; source exists without #112 production activation.'
 }
 
 Table private.web_push_subscriptions {
@@ -1771,6 +1858,18 @@ Ref: private.notification_groups.recipient_profile_id > public.profiles.id
 Ref: private.notification_outbox.notification_id > public.notifications.id
 Ref: private.notification_delivery_outbox.notification_id > public.notifications.id
 Ref: private.notification_delivery_outbox.event_family > private.notification_event_catalog.event_family
+Ref: private.notification_delivery_jobs.outbox_id - private.notification_delivery_outbox.id
+Ref: private.notification_delivery_targets.outbox_id > private.notification_delivery_jobs.outbox_id
+Ref: private.notification_delivery_targets.notification_id > public.notifications.id
+Ref: private.notification_delivery_targets.recipient_profile_id > public.profiles.id
+Ref: private.notification_delivery_targets.subscription_id > private.web_push_subscriptions.id
+Ref: private.notification_delivery_targets.subscription_revision_id > private.web_push_subscription_revisions.id
+Ref: private.notification_delivery_attempts.target_id > private.notification_delivery_targets.id
+Ref: private.notification_delivery_permits.attempt_id - private.notification_delivery_attempts.id
+Ref: private.notification_delivery_permits.subscription_revision_id > private.web_push_subscription_revisions.id
+Ref: private.notification_delivery_attempt_results.attempt_id - private.notification_delivery_attempts.id
+Ref: private.notification_delivery_events.outbox_id > private.notification_delivery_jobs.outbox_id
+Ref: private.notification_delivery_events.target_id > private.notification_delivery_targets.id
 Ref: private.web_push_subscriptions.profile_id > public.profiles.id
 Ref: private.web_push_subscriptions.current_revision_id - private.web_push_subscription_revisions.id
 Ref: private.web_push_subscription_revisions.subscription_id > private.web_push_subscriptions.id

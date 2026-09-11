@@ -23,6 +23,10 @@ from room_management_console.generated.api.developer import (
     list_developer_audit_events,
     run_developer_diagnostics,
 )
+from room_management_console.generated.models import (
+    DeveloperDatabaseStatusNotificationDelivery,
+    DeveloperDatabaseStatusNotificationDeliveryBacklog,
+)
 from room_management_console.generated.models.account_status import AccountStatus
 from room_management_console.generated.models.developer_audit_event_summary import (
     DeveloperAuditEventSummary,
@@ -88,6 +92,35 @@ def test_photo_purge_status_is_generated_as_bounded_metadata_only() -> None:
         "claim_digest",
         "refresh_token",
     }.isdisjoint(configuration_fields)
+
+
+def test_notification_delivery_status_is_generated_as_bounded_metadata_only() -> None:
+    assert "notification_delivery" in {field.name for field in fields(DeveloperDatabaseStatus)}
+    assert {"status", "last_heartbeat", "backlog", "checked_at"} == {
+        field.name for field in fields(DeveloperDatabaseStatusNotificationDelivery)
+    }
+    assert {
+        "due",
+        "retrying",
+        "dead_letter",
+        "job_only_dead_letter",
+        "blocked",
+        "expired_leases",
+        "oldest_due_at",
+    } == {field.name for field in fields(DeveloperDatabaseStatusNotificationDeliveryBacklog)}
+    exposed = {field.name for field in fields(DeveloperDatabaseStatusNotificationDelivery)} | {
+        field.name for field in fields(DeveloperDatabaseStatusNotificationDeliveryBacklog)
+    }
+    assert {
+        "endpoint",
+        "endpoint_digest",
+        "session_digest",
+        "claim_digest",
+        "ciphertext",
+        "nonce",
+        "auth_tag",
+        "provider_error",
+    }.isdisjoint(exposed)
 
 
 def test_photo_upload_and_original_read_are_not_developer_console_capabilities() -> None:

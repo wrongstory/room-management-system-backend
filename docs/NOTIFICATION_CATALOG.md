@@ -64,3 +64,28 @@
 `private.notification_outbox`는 provenance가 없는 legacy history로만 보존하며 어떤 worker도 읽지 않는다.
 `private.notification_delivery_outbox`가 #111 worker의 유일한 향후 입력이다. #109에서는 pending append와
 권한 차단만 정의하며 claim, lease, retry, provider 호출은 구현하지 않는다.
+
+## #111 delivery 계약
+
+`private.notification_delivery_outbox`는 계속 변경 불가능한 typed intent다. #111은 별도 private
+job/target 원장에서 최초 claim 때 active subscription의 exact logical ID/version/revision을 한 번만
+snapshot한다. 당시 구독이 없으면 `NO_ACTIVE_SUBSCRIPTION`, enqueue 후 24시간이 지나면
+`STALE_NOTIFICATION` terminal이며 이후 등록으로 과거 push를 재생하지 않는다.
+
+send 권한의 선형화점은 encrypted envelope 복호화와 live `auth.sessions` 확인 뒤의 exact-current
+fenced permit이다. permit 전 rotation/retire는 전송을 막는다. permit 직후 동시 retire 또는 provider
+성공 뒤 settle 전 crash는 old endpoint 전송/재전송을 최대 한 번 더 만들 수 있으므로 delivery는
+at-least-once다. payload의 안정적인 `notificationId`가 client dedupe identity이며 dedupeKey/groupKey,
+recipient, endpoint/key/session/provider 원문은 payload·원장·로그에 포함하지 않는다.
+
+lease는 2분, provider attempt는 최대 8회다. retry는 DB server time 기준 30초 지수 backoff(최대 1시간)
++ deterministic 0~15초 jitter이고 worker는 sleep하지 않는다. attempt/result/event는 terminal 뒤 90일
+bounded purge 대상이지만 실제 purge Cron은 #112다. 401/403 계열 provider configuration 오류는 endpoint를
+retire하지 않고 operator-blocked로 멈추며 service-only bounded resume 후에도 총 8회 상한을 유지한다.
+
+`claim limit=10`은 한 run이 반환하거나 target 없이 terminal 처리하는 workload의 hard bound다. 최초
+fanout으로 10개보다 많은 target이 고정돼도 10개만 claim하고 나머지는 다음 run에 남긴다. 한 target의
+provider configuration failure가 parent job을 막으면 모든 non-terminal sibling은 lease가 만료돼도
+재claim되지 않으며, `resume_blocked_notification_deliveries()`만 parent와 sibling 전체를 함께 재개한다.
+developer health의 `jobOnlyDeadLetter`는 target 생성 전 contract 실패만 별도로 세고 target dead-letter와
+중복하지 않는다.

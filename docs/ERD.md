@@ -499,6 +499,14 @@ profile lock으로 직렬화한다. rotation/retire CAS 때 이전 secret은 같
 revision은 90일 metadata retention 대상이다. event에는 subscription UUID/reason/server time만 남는다.
 모든 private table은 RLS와 raw grant deny이고 service-only RPC가 live Auth session을 다시 검증한다.
 
+#111은 immutable `notification_delivery_outbox`를 job intent로 보존하고
+`notification_delivery_jobs` → exact `notification_delivery_targets` → append-only
+`notification_delivery_attempts`/`notification_delivery_attempt_results` 및
+`notification_delivery_permits`로 전송 상태와 외부 호출 경계를 분리한다. target은 최초 fanout 때의
+subscription ID/version/revision을 바꾸지 않으며 secret envelope를 복제하지 않는다. mutable job/target은
+terminal resurrection과 임의 DELETE가 금지되고, append-only attempt/result/event는 terminal 후 90일
+bounded purge RPC만 허용한다. heartbeat는 비민감 포화 count와 safe reason만 저장한다.
+
 ```mermaid
 erDiagram
   CLEANING_SUBMISSIONS ||--o| EARNINGS : "승인 후 1회 적립"
@@ -520,6 +528,12 @@ erDiagram
   NOTIFICATION_EVENT_CATALOG ||--o{ NOTIFICATIONS : "typed event"
   NOTIFICATION_GROUPS ||--o{ NOTIFICATIONS : "fixed 10m group"
   NOTIFICATIONS ||--o| NOTIFICATION_DELIVERY_OUTBOX : "typed push input"
+  NOTIFICATION_DELIVERY_OUTBOX ||--|| NOTIFICATION_DELIVERY_JOBS : "immutable intent companion"
+  NOTIFICATION_DELIVERY_JOBS ||--o{ NOTIFICATION_DELIVERY_TARGETS : "first fanout snapshot"
+  WEB_PUSH_SUBSCRIPTION_REVISIONS ||--o{ NOTIFICATION_DELIVERY_TARGETS : "exact revision binding"
+  NOTIFICATION_DELIVERY_TARGETS ||--o{ NOTIFICATION_DELIVERY_ATTEMPTS : "max 8 fenced attempts"
+  NOTIFICATION_DELIVERY_ATTEMPTS ||--o| NOTIFICATION_DELIVERY_PERMITS : "send linearization"
+  NOTIFICATION_DELIVERY_ATTEMPTS ||--o| NOTIFICATION_DELIVERY_ATTEMPT_RESULTS : "provider-neutral result"
   PROFILES ||--o{ WEB_PUSH_SUBSCRIPTIONS : "own active max 5"
   WEB_PUSH_SUBSCRIPTIONS ||--o{ WEB_PUSH_SUBSCRIPTION_REVISIONS : "immutable CAS revisions"
   WEB_PUSH_SUBSCRIPTION_REVISIONS ||--o| WEB_PUSH_SUBSCRIPTION_SECRETS : "current encrypted envelope"
