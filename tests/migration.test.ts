@@ -480,7 +480,9 @@ describe('initial migration contract', () => {
     expect(sql).toContain('new.check_reason is distinct from old.check_reason');
     expect(sql).toContain('new.last_reopen_reason is distinct from old.last_reopen_reason');
     expect(sql).toContain("old.status='check' and new.status='paid'");
-    expect(sql).toContain("v_cycle.check_reason<>'TRANSFER_RESULT_UNCERTAIN'");
+    expect(sql).toContain('private.current_payroll_attempt_has_typed_check');
+    expect(sql.match(/private\.current_payroll_attempt_has_typed_check/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(sql).toContain("when v_cycle.status='check' and not v_has_typed_check");
     expect(sql).toContain('revoke select on public.payroll_cycles from authenticated');
     expect(sql).toContain('revoke select(check_reason,last_reopen_reason) on public.payroll_cycles from authenticated');
     expect(sql).toContain("else 'TRANSFER_RESULT_UNCERTAIN' end");

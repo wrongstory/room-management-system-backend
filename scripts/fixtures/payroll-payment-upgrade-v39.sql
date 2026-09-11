@@ -7,7 +7,7 @@ create function pg_temp.upgrade_pid(n integer) returns uuid language sql immutab
 $$;
 
 insert into auth.users(id)
-select pg_temp.upgrade_pid(100+n) from generate_series(1,6)n;
+select pg_temp.upgrade_pid(100+n) from generate_series(1,7)n;
 
 insert into public.profiles(
   id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,
@@ -24,7 +24,9 @@ insert into public.profiles(
   (pg_temp.upgrade_pid(5),pg_temp.upgrade_pid(105),'upgrade-paid-event','upgrade-paid-event',
     'upgrade-paid-event','upgrade-paid-event',0,'maid','active',false),
   (pg_temp.upgrade_pid(6),pg_temp.upgrade_pid(106),'upgrade-paid-no-event','upgrade-paid-no-event',
-    'upgrade-paid-no-event','upgrade-paid-no-event',0,'maid','active',false);
+    'upgrade-paid-no-event','upgrade-paid-no-event',0,'maid','active',false),
+  (pg_temp.upgrade_pid(7),pg_temp.upgrade_pid(107),'upgrade-check-fixed-looking','upgrade-check-fixed-looking',
+    'upgrade-check-fixed-looking','upgrade-check-fixed-looking',0,'maid','active',false);
 
 create function pg_temp.add_upgrade_earning(
   n integer,p_maid integer,p_day date,p_amount integer
@@ -85,6 +87,7 @@ select pg_temp.add_upgrade_earning(2,3,date '2026-07-14',12000);
 select pg_temp.add_upgrade_earning(3,4,date '2026-07-21',13000);
 select pg_temp.add_upgrade_earning(4,5,date '2026-07-28',14000);
 select pg_temp.add_upgrade_earning(5,6,date '2026-08-04',15000);
+select pg_temp.add_upgrade_earning(6,7,date '2026-08-11',16000);
 
 -- v39 accepted free-form operational reasons. These exact values are fixtures,
 -- not values that v40 is allowed to create or expose through HTTP.
@@ -96,13 +99,15 @@ insert into public.payroll_cycles(
   (pg_temp.upgrade_pid(7002),pg_temp.upgrade_pid(3),date '2026-07-13','open',1,null,null,null),
   (pg_temp.upgrade_pid(7003),pg_temp.upgrade_pid(4),date '2026-07-20','open',1,null,null,null),
   (pg_temp.upgrade_pid(7004),pg_temp.upgrade_pid(5),date '2026-07-27','open',1,null,null,null),
-  (pg_temp.upgrade_pid(7005),pg_temp.upgrade_pid(6),date '2026-08-03','open',1,null,null,null);
+  (pg_temp.upgrade_pid(7005),pg_temp.upgrade_pid(6),date '2026-08-03','open',1,null,null,null),
+  (pg_temp.upgrade_pid(7006),pg_temp.upgrade_pid(7),date '2026-08-10','open',1,null,null,null);
 
 insert into public.payroll_items(payroll_cycle_id,earning_id,maid_profile_id,locked_amount) values
   (pg_temp.upgrade_pid(7002),pg_temp.upgrade_pid(5002),pg_temp.upgrade_pid(3),12000),
   (pg_temp.upgrade_pid(7003),pg_temp.upgrade_pid(5003),pg_temp.upgrade_pid(4),13000),
   (pg_temp.upgrade_pid(7004),pg_temp.upgrade_pid(5004),pg_temp.upgrade_pid(5),14000),
-  (pg_temp.upgrade_pid(7005),pg_temp.upgrade_pid(5005),pg_temp.upgrade_pid(6),15000);
+  (pg_temp.upgrade_pid(7005),pg_temp.upgrade_pid(5005),pg_temp.upgrade_pid(6),15000),
+  (pg_temp.upgrade_pid(7006),pg_temp.upgrade_pid(5006),pg_temp.upgrade_pid(7),16000);
 
 update public.payroll_cycles set
   status='check',locked_amount=12000,payment_started_by=pg_temp.upgrade_pid(1),
@@ -122,8 +127,12 @@ update public.payroll_cycles set
   payment_started_at='2026-08-08T01:00:00Z',paid_at='2026-08-08T02:00:00Z',
   check_reason='LEGACY_PAID_MANUAL',version=2
 where id=pg_temp.upgrade_pid(7005);
+update public.payroll_cycles set
+  status='check',locked_amount=16000,payment_started_by=pg_temp.upgrade_pid(1),
+  payment_started_at='2026-08-15T01:00:00Z',check_reason='TRANSFER_RESULT_UNCERTAIN',version=2
+where id=pg_temp.upgrade_pid(7006);
 
--- Only two of the four historical frozen cycles have authoritative v39
+-- Only three of the five historical frozen cycles have authoritative v39
 -- payment_started evidence. v40 may backfill attempts only for these rows.
 insert into public.payroll_events(
   payroll_cycle_id,maid_profile_id,event_type,before_status,after_status,
@@ -132,7 +141,9 @@ insert into public.payroll_events(
   (pg_temp.upgrade_pid(7002),pg_temp.upgrade_pid(3),'payment_started','open','paying',
     pg_temp.upgrade_pid(1),1,12000,'2026-07-18T01:00:00Z'),
   (pg_temp.upgrade_pid(7004),pg_temp.upgrade_pid(5),'payment_started','open','paying',
-    pg_temp.upgrade_pid(1),1,14000,'2026-08-01T01:00:00Z');
+    pg_temp.upgrade_pid(1),1,14000,'2026-08-01T01:00:00Z'),
+  (pg_temp.upgrade_pid(7006),pg_temp.upgrade_pid(7),'payment_started','open','paying',
+    pg_temp.upgrade_pid(1),1,16000,'2026-08-15T01:00:00Z');
 
 do $$
 begin
@@ -145,7 +156,9 @@ begin
     or (select check_reason from public.payroll_cycles where id=pg_temp.upgrade_pid(7004))
       <> 'LEGACY_PAID_REVIEW'
     or (select check_reason from public.payroll_cycles where id=pg_temp.upgrade_pid(7005))
-      <> 'LEGACY_PAID_MANUAL' then
+      <> 'LEGACY_PAID_MANUAL'
+    or (select check_reason from public.payroll_cycles where id=pg_temp.upgrade_pid(7006))
+      <> 'TRANSFER_RESULT_UNCERTAIN' then
     raise exception 'UPGRADE_V39_FIXTURE_REASON_MISMATCH';
   end if;
 end $$;

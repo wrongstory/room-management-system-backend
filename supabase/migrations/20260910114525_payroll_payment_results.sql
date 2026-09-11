@@ -450,8 +450,32 @@ end $$;
 revoke all on function private.assert_current_payment_attempt(uuid)
 from public,anon,authenticated,service_role;
 
+-- A reason string cannot prove whether CHECK was created by v40. Only the
+-- immutable typed result attached to the current attempt is authoritative.
+create function private.current_payroll_attempt_has_typed_check(p_cycle_id uuid)
+returns boolean language sql stable set search_path='' as $$
+  select exists(
+    select 1
+    from public.payroll_payment_attempts attempt
+    join public.payroll_payment_results result
+      on result.payment_attempt_id=attempt.id
+      and result.payroll_cycle_id=attempt.payroll_cycle_id
+      and result.maid_profile_id=attempt.maid_profile_id
+      and result.result_type='check'
+    where attempt.payroll_cycle_id=p_cycle_id
+      and not exists(
+        select 1 from public.payroll_payment_attempts newer
+        where newer.payroll_cycle_id=attempt.payroll_cycle_id
+          and newer.attempt_number>attempt.attempt_number
+      )
+  )
+$$;
+revoke all on function private.current_payroll_attempt_has_typed_check(uuid)
+from public,anon,authenticated,service_role;
+
 create function private.guard_payroll_payment_cycle_transition()
 returns trigger language plpgsql set search_path='' as $$
+declare v_has_typed_check boolean;
 begin
   -- Legacy v39 reason text is immutable history. It may survive an unrelated
   -- UPDATE, but every v40 reason change and every new status transition must
@@ -462,12 +486,13 @@ begin
       and new.check_reason is distinct from 'TRANSFER_RESULT_UNCERTAIN' then
       raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
     end if;
-    if new.status<>'check' and new.check_reason is not null and not (
-      old.status='check' and new.status='paid'
-      and old.check_reason is not null
-      and old.check_reason<>'TRANSFER_RESULT_UNCERTAIN'
-      and new.check_reason is not distinct from old.check_reason
-    ) then
+    if old.status='check' and new.status='paid' then
+      v_has_typed_check:=private.current_payroll_attempt_has_typed_check(old.id);
+      if (v_has_typed_check and new.check_reason is not null)
+        or (not v_has_typed_check and new.check_reason is distinct from old.check_reason) then
+        raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
+      end if;
+    elsif new.status<>'check' and new.check_reason is not null then
       raise exception using errcode='23514',message='PAYROLL_PAYMENT_REASON_INVALID';
     end if;
   end if;
@@ -764,7 +789,8 @@ create function public.record_payroll_payment_paid(
 ) returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_actor public.profiles; v_attempt public.payroll_payment_attempts; v_cycle public.payroll_cycles;
   v_result public.payroll_payment_results; v_replay jsonb; v_notification uuid; v_reference text;
-  v_amounts record; v_before public.payment_status; v_now timestamptz:=clock_timestamp();
+  v_amounts record; v_before public.payment_status; v_has_typed_check boolean;
+  v_now timestamptz:=clock_timestamp();
 begin
   v_replay:=private.replay_command(p_actor_profile_id,'payroll.payment.paid',p_idempotency_key,p_request_hash);
   perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command',0));
@@ -791,11 +817,10 @@ begin
     or v_cycle.locked_amount<>v_attempt.locked_amount or v_amounts.payable_amount<>v_attempt.locked_amount then
     raise exception using errcode='23514',message='PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH'; end if;
   v_before:=v_cycle.status;
+  v_has_typed_check:=private.current_payroll_attempt_has_typed_check(v_cycle.id);
   update public.payroll_cycles set status='paid',paid_at=v_now,
     check_reason=case
-      when v_cycle.status='check'
-        and v_cycle.check_reason is not null
-        and v_cycle.check_reason<>'TRANSFER_RESULT_UNCERTAIN'
+      when v_cycle.status='check' and not v_has_typed_check
       then v_cycle.check_reason
       else null
     end,

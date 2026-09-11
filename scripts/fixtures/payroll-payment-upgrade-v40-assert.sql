@@ -17,13 +17,16 @@ begin
     or (select check_reason from public.payroll_cycles where id=pg_temp.upgrade_pid(7004))
       <> 'LEGACY_PAID_REVIEW'
     or (select check_reason from public.payroll_cycles where id=pg_temp.upgrade_pid(7005))
-      <> 'LEGACY_PAID_MANUAL' then
+      <> 'LEGACY_PAID_MANUAL'
+    or (select check_reason from public.payroll_cycles where id=pg_temp.upgrade_pid(7006))
+      <> 'TRANSFER_RESULT_UNCERTAIN' then
     raise exception 'UPGRADE_V40_REWROTE_LEGACY_REASON';
   end if;
 
-  if (select count(*) from public.payroll_payment_attempts)<>2
+  if (select count(*) from public.payroll_payment_attempts)<>3
     or not exists(select 1 from public.payroll_payment_attempts where payroll_cycle_id=pg_temp.upgrade_pid(7002))
     or not exists(select 1 from public.payroll_payment_attempts where payroll_cycle_id=pg_temp.upgrade_pid(7004))
+    or not exists(select 1 from public.payroll_payment_attempts where payroll_cycle_id=pg_temp.upgrade_pid(7006))
     or exists(select 1 from public.payroll_payment_attempts where payroll_cycle_id in(
       pg_temp.upgrade_pid(7003),pg_temp.upgrade_pid(7005))) then
     raise exception 'UPGRADE_V40_ATTEMPT_BACKFILL_NOT_EVIDENCE_SCOPED';
@@ -118,6 +121,22 @@ begin
   if v_projection->>'checkReasonCode'<>'TRANSFER_RESULT_UNCERTAIN'
     or v_projection::text like '%LEGACY_BANK_STATUS_PENDING%' then
     raise exception 'UPGRADE_V40_PAID_PROJECTION_LEAKED_LEGACY_REASON';
+  end if;
+
+  -- A v39 raw reason may happen to equal the v40 enum. The missing immutable
+  -- typed CHECK result, not the string, still proves this row is legacy.
+  select id into v_attempt from public.payroll_payment_attempts
+  where payroll_cycle_id=pg_temp.upgrade_pid(7006);
+  perform public.record_payroll_payment_paid(
+    pg_temp.upgrade_pid(1),v_attempt,2,'bank_transfer','UPGRADE-B34',
+    'upgrade-fixed-looking-legacy-paid',repeat('3',64)
+  );
+  if (select status from public.payroll_cycles where id=pg_temp.upgrade_pid(7006))<>'paid'
+    or (select check_reason from public.payroll_cycles where id=pg_temp.upgrade_pid(7006))
+      <> 'TRANSFER_RESULT_UNCERTAIN'
+    or exists(select 1 from public.payroll_payment_results
+      where payment_attempt_id=v_attempt and result_type='check') then
+    raise exception 'UPGRADE_V40_FIXED_LOOKING_LEGACY_REASON_NOT_PRESERVED';
   end if;
   if exists(select 1 from public.payroll_payment_attempts where payroll_cycle_id=pg_temp.upgrade_pid(7003)) then
     raise exception 'UPGRADE_V40_INFERRED_NO_EVENT_ATTEMPT';
