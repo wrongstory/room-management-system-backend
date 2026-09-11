@@ -82,3 +82,10 @@ lease는 2분, provider attempt는 최대 8회다. retry는 DB server time 기�
 + deterministic 0~15초 jitter이고 worker는 sleep하지 않는다. attempt/result/event는 terminal 뒤 90일
 bounded purge 대상이지만 실제 purge Cron은 #112다. 401/403 계열 provider configuration 오류는 endpoint를
 retire하지 않고 operator-blocked로 멈추며 service-only bounded resume 후에도 총 8회 상한을 유지한다.
+
+`claim limit=10`은 한 run이 반환하거나 target 없이 terminal 처리하는 workload의 hard bound다. 최초
+fanout으로 10개보다 많은 target이 고정돼도 10개만 claim하고 나머지는 다음 run에 남긴다. 한 target의
+provider configuration failure가 parent job을 막으면 모든 non-terminal sibling은 lease가 만료돼도
+재claim되지 않으며, `resume_blocked_notification_deliveries()`만 parent와 sibling 전체를 함께 재개한다.
+developer health의 `jobOnlyDeadLetter`는 target 생성 전 contract 실패만 별도로 세고 target dead-letter와
+중복하지 않는다.

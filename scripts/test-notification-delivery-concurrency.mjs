@@ -103,5 +103,69 @@ export async function testNotificationDeliveryConcurrency(client) {
   assert(permit.sendAllowed === true && permit.payload.notificationId === notificationId, 'takeover permit preserves stable notification id');
   const settled = JSON.parse(sql(`select public.settle_notification_delivery('${targetId}'::uuid,2,'${takeoverDigest}','accepted',null,null)::text`));
   assert(settled.status === 'delivered', 'takeover winner settles terminally');
-  console.log('Notification delivery concurrency passed: bounded backlog drain, first fanout/claim exactly once, fenced takeover, stale settle rejection, stable notification id.');
+
+  const secondSessionId = randomUUID(), secondSubscriptionId = randomUUID();
+  sql(`insert into auth.sessions(id,user_id) values('${secondSessionId}'::uuid,'${authUserId}'::uuid)`);
+  const secondRegistration = await client.rpc('register_web_push_subscription', {
+    p_actor_profile_id: profileId, p_session_id: secondSessionId, p_proposed_subscription_id: secondSubscriptionId,
+    p_expected_subscription_id: null, p_expected_version: null,
+    p_endpoint_digest: digest(`endpoint:${secondSubscriptionId}`), p_session_digest: digest(`session:${secondSessionId}`),
+    p_material_digest: digest(`material:${secondSubscriptionId}`), p_expiration_at: null, p_key_version: 'v1',
+    p_ciphertext_base64: Buffer.from('sealed-2').toString('base64'), p_nonce_base64: Buffer.from('o'.repeat(12)).toString('base64'),
+    p_auth_tag_base64: Buffer.from('u'.repeat(16)).toString('base64'), p_idempotency_key: `delivery-${randomUUID()}`,
+    p_request_hash: digest(`request:${secondSubscriptionId}`),
+  });
+  assert(!secondRegistration.error, 'second delivery subscription fixture');
+  const blockedNotificationId = randomUUID(), blockedGroupId = randomUUID(), blockedOutboxId = randomUUID();
+  sql(`begin;
+    select set_config('app.notification_writer_mode','typed_v1',true);
+    insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
+      values('${blockedGroupId}'::uuid,'${profileId}'::uuid,'cleaning_assignment_notified','room','${blockedNotificationId}'::uuid,clock_timestamp(),clock_timestamp()+interval '10 minutes');
+    insert into public.notifications(id,recipient_profile_id,category,title,body,dedupe_key,contract_version,actor_profile_id,
+      event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id,requires_action,occurred_at)
+      values('${blockedNotificationId}'::uuid,'${profileId}'::uuid,'cleaning_assignment_notified','청소 배정','새 청소 배정이 등록되었습니다.',
+      'delivery:${blockedNotificationId}',1,(select id from public.profiles where role='admin' limit 1),'assignment.commit_notified',
+      'cleaning_assignment','${blockedNotificationId}','cleaningTarget','${blockedNotificationId}'::uuid,'${blockedGroupId}'::uuid,true,clock_timestamp());
+    insert into private.notification_delivery_outbox(id,notification_id,event_family)
+      values('${blockedOutboxId}'::uuid,'${blockedNotificationId}'::uuid,'assignment.commit_notified');
+    commit;`);
+  const blockedDigest = digest(`blocked:${randomUUID()}`);
+  const blockedClaim = JSON.parse(sql(`select public.claim_notification_deliveries('${blockedDigest}',10)::text`));
+  const blockedItems = blockedClaim.items.filter(item => item.notificationId === blockedNotificationId);
+  assert(blockedItems.length === 2, 'two-device fanout is claimed once');
+  const blockedTargetId = blockedItems[0].targetId;
+  const blockedEnvelope = JSON.parse(sql(`select public.get_notification_delivery_envelope('${blockedTargetId}'::uuid,1,'${blockedDigest}')::text`));
+  assert(blockedEnvelope.sendAllowed === true, 'blocked fixture envelope available');
+  const blockedPermit = JSON.parse(sql(`select public.permit_notification_delivery('${blockedTargetId}'::uuid,1,'${blockedDigest}','${sessionId}'::uuid)::text`));
+  assert(blockedPermit.sendAllowed === true, 'blocked fixture permit succeeds');
+  const blockedSettle = JSON.parse(sql(`select public.settle_notification_delivery('${blockedTargetId}'::uuid,1,'${blockedDigest}','provider_configuration_error','PROVIDER_CONFIGURATION_ERROR',null)::text`));
+  assert(blockedSettle.status === 'operator_blocked', 'configuration failure blocks parent job');
+  sql(`begin; select set_config('app.notification_delivery_writer_mode','typed_v1',true);
+    update private.notification_delivery_targets set lease_expires_at=clock_timestamp()-interval '1 second'
+      where outbox_id='${blockedOutboxId}'::uuid and status='claimed'; commit;`);
+  const blockedClaims = await Promise.all(Array.from({ length: 4 }, () =>
+    sqlAsync(`select public.claim_notification_deliveries('${digest(`blocked-claim:${randomUUID()}`)}',10)::text`)));
+  assert(blockedClaims.every(result => !result.error), `blocked sibling claims have no 40P01/generic error: ${JSON.stringify(blockedClaims)}`);
+  assert(blockedClaims.flatMap(result => JSON.parse(result.value).items)
+    .filter(item => item.notificationId === blockedNotificationId).length === 0,
+  'expired siblings remain unclaimed before explicit resume');
+  assert(sql(`select count(*) from private.notification_delivery_attempts a join private.notification_delivery_targets t on t.id=a.target_id where t.outbox_id='${blockedOutboxId}'::uuid`) === '2',
+    'blocked repeated claims append zero attempts');
+  const resumes = await Promise.all(Array.from({ length: 4 }, () =>
+    sqlAsync('select public.resume_blocked_notification_deliveries(10)::text')));
+  assert(resumes.every(result => !result.error), `concurrent resumes have no 40P01/generic error: ${JSON.stringify(resumes)}`);
+  assert(resumes.reduce((sum, result) => sum + Number(result.value), 0) === 2,
+    `concurrent resume moves each sibling once: ${JSON.stringify(resumes)}`);
+  const resumedA = digest(`resumed-a:${randomUUID()}`), resumedB = digest(`resumed-b:${randomUUID()}`);
+  const resumedClaims = await Promise.all([
+    sqlAsync(`select public.claim_notification_deliveries('${resumedA}',10)::text`),
+    sqlAsync(`select public.claim_notification_deliveries('${resumedB}',10)::text`),
+  ]);
+  assert(resumedClaims.every(result => !result.error), `resumed sibling claims have no 40P01/generic error: ${JSON.stringify(resumedClaims)}`);
+  assert(resumedClaims.flatMap(result => JSON.parse(result.value).items)
+    .filter(item => item.notificationId === blockedNotificationId).length === 2,
+  'explicit resume permits exactly two sibling claims');
+  assert(sql(`select count(*) from private.notification_delivery_attempts a join private.notification_delivery_targets t on t.id=a.target_id where t.outbox_id='${blockedOutboxId}'::uuid`) === '4',
+    'resume and parallel claims append one new attempt per sibling');
+  console.log('Notification delivery concurrency passed: bounded backlog drain, first fanout/claim exactly once, fenced takeover, stale settle rejection, stable notification id, parent block/resume sibling fencing.');
 }

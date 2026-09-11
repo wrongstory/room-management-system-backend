@@ -103,6 +103,7 @@ def test_notification_delivery_status_is_generated_as_bounded_metadata_only() ->
         "due",
         "retrying",
         "dead_letter",
+        "job_only_dead_letter",
         "blocked",
         "expired_leases",
         "oldest_due_at",

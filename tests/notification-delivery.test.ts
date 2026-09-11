@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   NOTIFICATION_DELIVERY_PROVIDER_DEADLINE_MS,
   NOTIFICATION_DELIVERY_RUN_BUDGET_MS,
+  NOTIFICATION_DELIVERY_SETTLE_DEADLINE_MS,
   NotificationDeliveryWorker,
   type NotificationDeliveryProvider,
   type NotificationDeliveryRpc,
@@ -322,6 +323,109 @@ describe("provider-neutral notification delivery worker", () => {
       ).run(),
     ).resolves.toMatchObject({ deferred: 1, delivered: 0 });
     expect(sends).toBe(0);
+  });
+
+  it("keeps a worst-case ten-item batch inside provider, settle and heartbeat deadlines", async () => {
+    const fixtures = Array.from({ length: 10 }, (_, index) => {
+      const suffix = String(index + 101).padStart(12, "0");
+      const itemTargetId = `50000000-0000-4000-8000-${suffix}`;
+      const itemNotificationId = `60000000-0000-4000-8000-${suffix}`;
+      const itemSubscriptionId = `30000000-0000-4000-8000-${suffix}`;
+      const itemRevisionId = `40000000-0000-4000-8000-${suffix}`;
+      const itemEnvelope = createWebPushEnvelope(
+        input,
+        profileId,
+        sessionId,
+        itemSubscriptionId,
+        1,
+        {
+          ...config,
+          nonce: new Uint8Array(12).fill(index + 1),
+        },
+      );
+      return {
+        itemTargetId,
+        itemNotificationId,
+        itemSubscriptionId,
+        itemRevisionId,
+        itemEnvelope,
+      };
+    });
+    const byTarget = new Map(fixtures.map((fixture) => [fixture.itemTargetId, fixture]));
+    let now = 0;
+    let heartbeatAt = -1;
+    const providerStarts: number[] = [];
+    const db: NotificationDeliveryRpc = {
+      rpc: async (name, args) => {
+        if (name === "claim_notification_deliveries")
+          return {
+            data: {
+              items: fixtures.map((fixture) => ({
+                targetId: fixture.itemTargetId,
+                notificationId: fixture.itemNotificationId,
+                leaseVersion: 1,
+                subscriptionRevisionId: fixture.itemRevisionId,
+              })),
+              suppressed: 0,
+              blocked: 0,
+            },
+            error: null,
+          };
+        const fixture = byTarget.get(String(args.p_target_id));
+        if (name === "get_notification_delivery_envelope" && fixture)
+          return {
+            data: {
+              sendAllowed: true,
+              actorProfileId: profileId,
+              subscriptionId: fixture.itemSubscriptionId,
+              revisionNo: 1,
+              sessionDigest: fixture.itemEnvelope.sessionDigest,
+              endpointDigest: fixture.itemEnvelope.endpointDigest,
+              keyVersion: fixture.itemEnvelope.keyVersion,
+              ciphertextBase64: fixture.itemEnvelope.ciphertextBase64,
+              nonceBase64: fixture.itemEnvelope.nonceBase64,
+              authTagBase64: fixture.itemEnvelope.authTagBase64,
+            },
+            error: null,
+          };
+        if (name === "permit_notification_delivery" && fixture)
+          return {
+            data: {
+              sendAllowed: true,
+              payload: {
+                notificationId: fixture.itemNotificationId,
+                title: "청소 배정",
+                body: "새 배정",
+              },
+            },
+            error: null,
+          };
+        if (name === "settle_notification_delivery") {
+          expect(now).toBeLessThan(NOTIFICATION_DELIVERY_SETTLE_DEADLINE_MS);
+          return { data: { status: "delivered" }, error: null };
+        }
+        if (name === "record_notification_delivery_heartbeat") {
+          heartbeatAt = now;
+          return { data: { status: "degraded" }, error: null };
+        }
+        return { data: null, error: new Error("unexpected RPC") };
+      },
+    };
+    const provider: NotificationDeliveryProvider = {
+      send: async () => {
+        providerStarts.push(now);
+        now += 3_700;
+        return { outcome: "accepted" };
+      },
+    };
+    await expect(
+      new NotificationDeliveryWorker(db, provider, config, () => now).run(),
+    ).resolves.toMatchObject({ claimed: 10, delivered: 9, deferred: 1 });
+    expect(providerStarts).toHaveLength(9);
+    expect(Math.max(...providerStarts)).toBeLessThan(
+      NOTIFICATION_DELIVERY_PROVIDER_DEADLINE_MS,
+    );
+    expect(heartbeatAt).toBeLessThan(NOTIFICATION_DELIVERY_RUN_BUDGET_MS);
   });
 
   it("aborts a hung RPC within five seconds and reports only stable failure", async () => {

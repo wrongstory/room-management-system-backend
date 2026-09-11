@@ -35,16 +35,24 @@ begin
   perform set_config('app.notification_writer_mode','',true);
 end $$;
 
-insert into auth.users(id) values(pg_temp.did(101)),(pg_temp.did(102)),(pg_temp.did(103)),(pg_temp.did(104));
+insert into auth.users(id) values(pg_temp.did(101)),(pg_temp.did(102)),(pg_temp.did(103)),(pg_temp.did(104)),
+  (pg_temp.did(105)),(pg_temp.did(106)),(pg_temp.did(107));
 insert into auth.sessions(id,user_id) values
   (pg_temp.did(901),pg_temp.did(101)),(pg_temp.did(902),pg_temp.did(102)),
-  (pg_temp.did(903),pg_temp.did(103)),(pg_temp.did(904),pg_temp.did(104));
+  (pg_temp.did(903),pg_temp.did(103)),(pg_temp.did(904),pg_temp.did(104)),
+  (pg_temp.did(905),pg_temp.did(105)),(pg_temp.did(906),pg_temp.did(105)),
+  (pg_temp.did(907),pg_temp.did(105)),(pg_temp.did(908),pg_temp.did(105)),
+  (pg_temp.did(909),pg_temp.did(105)),(pg_temp.did(911),pg_temp.did(107));
+insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password)
+values(pg_temp.did(6),pg_temp.did(106),'delivery developer','delivery developer','admin','admin',0,'developer','active',false);
 insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password)
 values
   (pg_temp.did(1),pg_temp.did(101),'delivery admin','delivery admin','delivery-admin','delivery-admin',0,'admin','active',false),
   (pg_temp.did(2),pg_temp.did(102),'delivery maid','delivery maid','delivery-maid','delivery-maid',0,'maid','active',false),
   (pg_temp.did(3),pg_temp.did(103),'delivery none','delivery none','delivery-none','delivery-none',0,'maid','active',false),
-  (pg_temp.did(4),pg_temp.did(104),'delivery expired','delivery expired','delivery-expired','delivery-expired',0,'maid','active',false);
+  (pg_temp.did(4),pg_temp.did(104),'delivery expired','delivery expired','delivery-expired','delivery-expired',0,'maid','active',false),
+  (pg_temp.did(5),pg_temp.did(105),'delivery batch','delivery batch','delivery-batch','delivery-batch',0,'maid','active',false),
+  (pg_temp.did(7),pg_temp.did(107),'delivery dead','delivery dead','delivery-dead','delivery-dead',0,'maid','active',false);
 
 select ok(has_function_privilege('service_role','public.claim_notification_deliveries(text,integer)','EXECUTE'),'service role may claim only through RPC');
 select ok(not has_function_privilege('authenticated','public.claim_notification_deliveries(text,integer)','EXECUTE'),'authenticated cannot claim');
@@ -88,6 +96,60 @@ select is((select status from private.notification_delivery_targets where id=(se
 select is((select status from private.notification_delivery_jobs where outbox_id=pg_temp.did(3001)),'completed','job completes after every target is terminal');
 select is((select count(*) from private.notification_delivery_attempts),1::bigint,'claim replay and settle replay do not duplicate attempt');
 select is((select count(*) from private.notification_delivery_attempt_results),1::bigint,'settle replay does not duplicate result');
+
+-- p_limit bounds returned/terminal target workload, not the number of jobs
+-- whose exact-current fanout is materialized. Fifteen targets drain as 10+5.
+select pg_temp.register(5,105,905,1101,'batch-1');
+select pg_temp.register(5,105,906,1102,'batch-2');
+select pg_temp.register(5,105,907,1103,'batch-3');
+select pg_temp.register(5,105,908,1104,'batch-4');
+select pg_temp.register(5,105,909,1105,'batch-5');
+select pg_temp.notice(5,2101,3101);
+select pg_temp.notice(5,2102,3102);
+select pg_temp.notice(5,2103,3103);
+create temporary table bounded_claim_one(value jsonb);
+insert into bounded_claim_one values(public.claim_notification_deliveries(repeat('1',64),10));
+select is(jsonb_array_length((select value->'items' from bounded_claim_one)),10,'first claim returns at most ten fanout targets');
+select is((select count(*) from private.notification_delivery_targets where outbox_id in (pg_temp.did(3101),pg_temp.did(3102),pg_temp.did(3103))),15::bigint,
+  'three five-device jobs snapshot all exact-current targets once');
+select is((select count(*) from private.notification_delivery_attempts a join private.notification_delivery_targets t on t.id=a.target_id
+  where t.outbox_id in (pg_temp.did(3101),pg_temp.did(3102),pg_temp.did(3103))),10::bigint,'only returned targets consume first-run claim attempts');
+create temporary table bounded_claim_two(value jsonb);
+insert into bounded_claim_two values(public.claim_notification_deliveries(repeat('2',64),10));
+select is(jsonb_array_length((select value->'items' from bounded_claim_two)),5,'remaining fanout targets are claimed on the following run');
+select is((select count(*) from private.notification_delivery_attempts a join private.notification_delivery_targets t on t.id=a.target_id
+  where t.outbox_id in (pg_temp.did(3101),pg_temp.did(3102),pg_temp.did(3103))),15::bigint,'bounded follow-up creates no duplicate attempt');
+
+-- One configuration failure blocks the whole parent job. Expired sibling
+-- leases remain unclaimable until the service-only resume moves every
+-- non-terminal sibling together.
+select pg_temp.notice(5,2104,3104);
+create temporary table blocked_claim(value jsonb);
+insert into blocked_claim values(public.claim_notification_deliveries(repeat('3',64),10));
+select is(jsonb_array_length((select value->'items' from blocked_claim)),5,'multi-device job initially claims five targets');
+create temporary table blocked_id as
+select (value->'items'->0->>'targetId')::uuid id from blocked_claim;
+select public.get_notification_delivery_envelope((select id from blocked_id),1,repeat('3',64));
+select public.permit_notification_delivery((select id from blocked_id),1,repeat('3',64),pg_temp.did(905));
+select public.settle_notification_delivery((select id from blocked_id),1,repeat('3',64),'provider_configuration_error','PROVIDER_CONFIGURATION_ERROR',null);
+select is((select status from private.notification_delivery_jobs where outbox_id=pg_temp.did(3104)),'operator_blocked','first configuration failure blocks the parent job');
+select set_config('app.notification_delivery_writer_mode','typed_v1',true);
+update private.notification_delivery_targets set lease_expires_at=clock_timestamp()-interval '1 second'
+where outbox_id=pg_temp.did(3104) and status='claimed';
+select set_config('app.notification_delivery_writer_mode','',true);
+create temporary table blocked_before_resume(value jsonb);
+insert into blocked_before_resume values(public.claim_notification_deliveries(repeat('4',64),10));
+select is((select count(*) from jsonb_array_elements((select value->'items' from blocked_before_resume)) item
+  where item->>'notificationId'=pg_temp.did(2104)::text),0::bigint,'blocked parent excludes every expired sibling from reclaim');
+select is((select count(*) from private.notification_delivery_attempts a join private.notification_delivery_targets t on t.id=a.target_id
+  where t.outbox_id=pg_temp.did(3104)),5::bigint,'blocked sibling claim creates no new provider attempt');
+select is(public.resume_blocked_notification_deliveries(10),5,'resume moves every non-terminal sibling in one bounded job operation');
+select is((select status from private.notification_delivery_jobs where outbox_id=pg_temp.did(3104)),'materialized','resume reopens the parent job only after all siblings move');
+select is((select count(*) from private.notification_delivery_targets where outbox_id=pg_temp.did(3104) and status='retry'),5::bigint,'resume clears all sibling leases into retry');
+create temporary table blocked_after_resume(value jsonb);
+insert into blocked_after_resume values(public.claim_notification_deliveries(repeat('5',64),10));
+select is((select count(*) from jsonb_array_elements((select value->'items' from blocked_after_resume)) item
+  where item->>'notificationId'=pg_temp.did(2104)::text),5::bigint,'only explicit resume makes all siblings claimable again');
 
 select pg_temp.notice(2,2006,3006);
 create temporary table retry_claim(value jsonb);
@@ -171,6 +233,42 @@ delete from auth.sessions where id=pg_temp.did(903);
 select is((public.permit_notification_delivery((select id from revoked_id),1,repeat('f',64),pg_temp.did(903))->>'reasonCode'),'SESSION_REVOKED','missing live session fails at exact permit');
 select is((select status from private.web_push_subscriptions where id=pg_temp.did(1002)),'retired','session-revoked exact-current subscription retires');
 select is((select count(*) from private.web_push_subscription_secrets s join private.web_push_subscription_revisions r on r.id=s.revision_id where r.subscription_id=pg_temp.did(1002)),0::bigint,'session-revoked retirement crypto-shreds secret');
+
+-- Developer health distinguishes target dead letters from jobs that failed
+-- contract validation before any target existed.
+select pg_temp.register(7,107,911,1201,'dead-target');
+select pg_temp.notice(7,2201,3201);
+select public.claim_notification_deliveries(repeat('0',64),10);
+create temporary table dead_target as select id,lease_version,claim_digest
+from private.notification_delivery_targets where outbox_id=pg_temp.did(3201);
+select public.get_notification_delivery_envelope((select id from dead_target),(select lease_version from dead_target),(select claim_digest from dead_target));
+select public.permit_notification_delivery((select id from dead_target),(select lease_version from dead_target),(select claim_digest from dead_target),pg_temp.did(911));
+select public.settle_notification_delivery((select id from dead_target),(select lease_version from dead_target),(select claim_digest from dead_target),'payload_rejected','PAYLOAD_REJECTED',null);
+select is((select status from private.notification_delivery_jobs where outbox_id=pg_temp.did(3201)),'dead_letter','target terminal dead letter also terminalizes its job');
+
+select set_config('app.notification_writer_mode','typed_v1',true);
+insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
+values(pg_temp.did(2202),pg_temp.did(7),'cleaning_assignment_notified','room',pg_temp.did(2202),clock_timestamp(),clock_timestamp()+interval '10 minutes');
+insert into public.notifications(id,recipient_profile_id,category,title,body,dedupe_key,contract_version,
+  actor_profile_id,event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,
+  notification_group_id,requires_action,occurred_at)
+values(pg_temp.did(2202),pg_temp.did(7),'cleaning_assignment_notified','청소 배정','새 청소 배정이 등록되었습니다.',
+  'delivery-invalid-2202',1,pg_temp.did(1),'assignment.commit_notified','cleaning_assignment',pg_temp.did(2202)::text,
+  'cleaningTarget',pg_temp.did(2202),pg_temp.did(2202),true,clock_timestamp());
+insert into private.notification_delivery_outbox(id,notification_id,event_family)
+values(pg_temp.did(3202),pg_temp.did(2202),'assignment.prestart_unassigned');
+select set_config('app.notification_writer_mode','',true);
+select public.claim_notification_deliveries(repeat('0',64),10);
+select is((select status from private.notification_delivery_jobs where outbox_id=pg_temp.did(3202)),'dead_letter','invalid delivery contract dead-letters before fanout');
+select is((select count(*) from private.notification_delivery_targets where outbox_id=pg_temp.did(3202)),0::bigint,'contract-invalid job has no target');
+select public.record_notification_delivery_heartbeat('succeeded',0,0,0,0,0,0,0,null);
+create temporary table delivery_health(value jsonb);
+insert into delivery_health values(public.get_developer_notification_delivery_status(pg_temp.did(6)));
+select is(((select value from delivery_health)#>>'{backlog,jobOnlyDeadLetter}')::integer,1,'job-only dead letter has a separate bounded health count');
+select is(((select value from delivery_health)#>>'{backlog,deadLetter}')::integer,
+  (select least(count(*),1000)::integer from private.notification_delivery_targets where status='dead_letter'),
+  'target dead letters are counted once and never include job-only failures');
+select is((select value->>'status' from delivery_health),'degraded','empty successful heartbeat cannot hide unresolved job-only dead letter');
 
 select is(coalesce(current_setting('app.notification_delivery_writer_mode',true),''),'','delivery writer capability clears after success paths');
 select is(coalesce(current_setting('app.web_push_writer_mode',true),''),'','web-push writer capability clears after automatic retirement');

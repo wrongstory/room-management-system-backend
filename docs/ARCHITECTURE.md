@@ -579,6 +579,10 @@ claim은 `(nextAttemptAt,enqueuedAt,id)` 순서의 `FOR UPDATE SKIP LOCKED`, 최
 `leaseVersion + claimDigest + expiry` fence를 사용합니다. 동일 claim replay는 같은 attempt를 반환하고
 expired takeover만 새 append-only attempt를 만듭니다. 외부 provider 성공 뒤 settle 전 crash는 재전송될 수
 있으므로 exactly-once를 주장하지 않으며 payload의 stable `notificationId`가 client dedupe identity입니다.
+claim의 `limit=10`은 반환 target과 target 없이 terminal 처리한 job의 합계 상한입니다. 최초 fanout이 10개를
+넘어도 한 run은 target을 최대 10개만 claim하고 나머지는 다음 run에 남깁니다. parent job이
+`operator_blocked`이면 lease 만료 여부와 무관하게 모든 non-terminal sibling을 claim에서 제외하며, bounded
+service-only resume만 job과 그 sibling target 전체를 함께 다시 엽니다.
 
 worker는 encrypted context를 fenced RPC로 받고 메모리에서만 복호화한 뒤 live Auth session과 exact-current
 revision을 permit RPC에서 다시 확인합니다. 이 permit 성공이 send authorization의 선형화점입니다. 직후
@@ -590,6 +594,8 @@ retry는 max 8, 30초 지수 backoff(최대 1시간)+deterministic 0~15초 jitte
 오류는 endpoint를 retire하지 않고 operator-blocked로 batch를 중단하며 service-only bounded resume만
 허용합니다. 45초 core는 provider start 33초, settle 39초, heartbeat 45초 absolute deadline을 지킵니다.
 실제 provider adapter/HTTP/VAPID/Cron/invoke secret/production activation은 #112입니다.
+developer health는 target dead-letter와 fanout 전 `DELIVERY_CONTRACT_INVALID` job-only dead-letter를 별도로
+포화 집계하므로 빈 성공 heartbeat가 unresolved job-only failure를 healthy로 숨길 수 없습니다.
 
 ## API 단계
 

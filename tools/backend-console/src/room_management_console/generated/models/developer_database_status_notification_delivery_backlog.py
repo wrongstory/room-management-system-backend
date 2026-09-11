@@ -16,6 +16,7 @@ class DeveloperDatabaseStatusNotificationDeliveryBacklog:
         due (int):
         retrying (int):
         dead_letter (int):
+        job_only_dead_letter (int):
         blocked (int):
         expired_leases (int):
         oldest_due_at (datetime.datetime | None):
@@ -24,6 +25,7 @@ class DeveloperDatabaseStatusNotificationDeliveryBacklog:
     due: int
     retrying: int
     dead_letter: int
+    job_only_dead_letter: int
     blocked: int
     expired_leases: int
     oldest_due_at: datetime.datetime | None
@@ -34,6 +36,8 @@ class DeveloperDatabaseStatusNotificationDeliveryBacklog:
         retrying = self.retrying
 
         dead_letter = self.dead_letter
+
+        job_only_dead_letter = self.job_only_dead_letter
 
         blocked = self.blocked
 
@@ -52,6 +56,7 @@ class DeveloperDatabaseStatusNotificationDeliveryBacklog:
                 "due": due,
                 "retrying": retrying,
                 "deadLetter": dead_letter,
+                "jobOnlyDeadLetter": job_only_dead_letter,
                 "blocked": blocked,
                 "expiredLeases": expired_leases,
                 "oldestDueAt": oldest_due_at,
@@ -68,6 +73,8 @@ class DeveloperDatabaseStatusNotificationDeliveryBacklog:
         retrying = d.pop("retrying")
 
         dead_letter = d.pop("deadLetter")
+
+        job_only_dead_letter = d.pop("jobOnlyDeadLetter")
 
         blocked = d.pop("blocked")
 
@@ -92,6 +99,7 @@ class DeveloperDatabaseStatusNotificationDeliveryBacklog:
             due=due,
             retrying=retrying,
             dead_letter=dead_letter,
+            job_only_dead_letter=job_only_dead_letter,
             blocked=blocked,
             expired_leases=expired_leases,
             oldest_due_at=oldest_due_at,

@@ -167,6 +167,7 @@ Deno.test("developer database status adds only bounded notification delivery hea
                 due: 1,
                 retrying: 0,
                 deadLetter: 0,
+                jobOnlyDeadLetter: 1,
                 blocked: 0,
                 expiredLeases: 0,
                 oldestDueAt: "2026-09-11T00:00:00.000Z",

@@ -357,30 +357,29 @@ begin
       order by o.enqueued_at,o.id
       for update of j skip locked limit p_limit
     loop
-      v_processed:=v_processed+1;
       v_now:=clock_timestamp();
       if v_job.enqueued_at+interval '24 hours'<=v_now then
         update private.notification_delivery_jobs set status='suppressed',snapshot_at=v_now,terminal_at=v_now,
           terminal_reason='STALE_NOTIFICATION',updated_at=v_now where outbox_id=v_job.outbox_id;
         perform private.append_notification_delivery_event(v_job.outbox_id,null,'suppressed','STALE_NOTIFICATION');
-        v_suppressed:=v_suppressed+1; continue;
+        v_suppressed:=v_suppressed+1; v_processed:=v_processed+1; continue;
       elsif v_job.resolved_at is not null then
         update private.notification_delivery_jobs set status='suppressed',snapshot_at=v_now,terminal_at=v_now,
           terminal_reason='NOTIFICATION_RESOLVED',updated_at=v_now where outbox_id=v_job.outbox_id;
         perform private.append_notification_delivery_event(v_job.outbox_id,null,'suppressed','NOTIFICATION_RESOLVED');
-        v_suppressed:=v_suppressed+1; continue;
+        v_suppressed:=v_suppressed+1; v_processed:=v_processed+1; continue;
       elsif v_job.contract_version<>1 or v_job.notification_event_family is distinct from v_job.event_family
         or not coalesce(v_job.push_eligible,false) or not coalesce(v_job.requires_action,false) then
         update private.notification_delivery_jobs set status='dead_letter',snapshot_at=v_now,terminal_at=v_now,
           terminal_reason='DELIVERY_CONTRACT_INVALID',updated_at=v_now where outbox_id=v_job.outbox_id;
         perform private.append_notification_delivery_event(v_job.outbox_id,null,'dead_letter','DELIVERY_CONTRACT_INVALID');
-        v_blocked:=v_blocked+1; continue;
+        v_blocked:=v_blocked+1; v_processed:=v_processed+1; continue;
       elsif v_job.recipient_role not in ('admin','maid') or v_job.recipient_status<>'active'
         or coalesce(v_job.must_change_password,true) then
         update private.notification_delivery_jobs set status='suppressed',snapshot_at=v_now,terminal_at=v_now,
           terminal_reason='RECIPIENT_NOT_ELIGIBLE',updated_at=v_now where outbox_id=v_job.outbox_id;
         perform private.append_notification_delivery_event(v_job.outbox_id,null,'suppressed','RECIPIENT_NOT_ELIGIBLE');
-        v_suppressed:=v_suppressed+1; continue;
+        v_suppressed:=v_suppressed+1; v_processed:=v_processed+1; continue;
       end if;
       insert into private.notification_delivery_targets(
         outbox_id,notification_id,recipient_profile_id,subscription_id,subscription_version,
@@ -398,7 +397,7 @@ begin
         update private.notification_delivery_jobs set status='suppressed',snapshot_at=v_now,terminal_at=v_now,
           terminal_reason='NO_ACTIVE_SUBSCRIPTION',updated_at=v_now where outbox_id=v_job.outbox_id;
         perform private.append_notification_delivery_event(v_job.outbox_id,null,'suppressed','NO_ACTIVE_SUBSCRIPTION');
-        v_suppressed:=v_suppressed+1;
+        v_suppressed:=v_suppressed+1; v_processed:=v_processed+1;
       else
         update private.notification_delivery_jobs set status='materialized',snapshot_at=v_now,updated_at=v_now
           where outbox_id=v_job.outbox_id;
@@ -407,12 +406,21 @@ begin
     end loop;
 
     for v_target in
-      select * from private.notification_delivery_targets
-      where status in ('pending','retry','claimed') and next_attempt_at<=clock_timestamp()
-        and (status<>'claimed' or lease_expires_at<=clock_timestamp() or claim_digest=p_claim_digest)
-      order by next_attempt_at,id for update skip locked limit greatest(0,p_limit-v_processed)
+      select t.* from private.notification_delivery_targets t
+      join private.notification_delivery_jobs j on j.outbox_id=t.outbox_id
+      where j.status='materialized' and t.status in ('pending','retry','claimed')
+        and t.next_attempt_at<=clock_timestamp()
+        and (t.status<>'claimed' or t.lease_expires_at<=clock_timestamp() or t.claim_digest=p_claim_digest)
+      order by t.next_attempt_at,t.id for update of t skip locked limit greatest(0,p_limit-v_processed)
     loop
       v_now:=clock_timestamp();
+      -- Re-read the parent in a new statement snapshot. A configuration
+      -- settlement that committed after the cursor snapshot must still fence
+      -- every sibling before a new claim/attempt is appended.
+      if not exists(select 1 from private.notification_delivery_jobs j
+        where j.outbox_id=v_target.outbox_id and j.status='materialized') then
+        continue;
+      end if;
       if v_target.status='claimed' and v_target.lease_expires_at>v_now
         and v_target.claim_digest=p_claim_digest then
         v_items:=v_items||jsonb_build_array(private.notification_delivery_target_projection(v_target.id));
@@ -678,7 +686,8 @@ end $$;
 
 create function public.resume_blocked_notification_deliveries(p_limit integer default 10)
 returns integer language plpgsql security definer set search_path='' as $$
-declare v_target private.notification_delivery_targets; v_count integer:=0; v_now timestamptz:=clock_timestamp();
+declare v_job record; v_target private.notification_delivery_targets; v_count integer:=0;
+  v_job_count integer; v_job_status text; v_now timestamptz:=clock_timestamp();
   v_previous text:=current_setting('app.notification_delivery_writer_mode',true);
 begin
   if p_limit is null or p_limit not between 1 and 10 then
@@ -686,21 +695,43 @@ begin
   end if;
   perform set_config('app.notification_delivery_writer_mode','typed_v1',true);
   begin
-    for v_target in select * from private.notification_delivery_targets where status='operator_blocked'
-      order by updated_at,id for update skip locked limit p_limit loop
-      if v_target.lease_version>=8 then
-        update private.notification_delivery_targets set status='dead_letter',terminal_at=v_now,
-          reason_code='RETRY_EXHAUSTED',updated_at=v_now where id=v_target.id;
-        perform private.append_notification_delivery_event(v_target.outbox_id,v_target.id,'dead_letter','RETRY_EXHAUSTED');
-        perform private.refresh_notification_delivery_job(v_target.outbox_id);
-      else
-        update private.notification_delivery_targets set status='retry',next_attempt_at=v_now,reason_code=null,updated_at=v_now
-          where id=v_target.id;
-        update private.notification_delivery_jobs set status='materialized',terminal_reason=null,updated_at=v_now
-          where outbox_id=v_target.outbox_id;
-        perform private.append_notification_delivery_event(v_target.outbox_id,v_target.id,'resumed',null);
-      end if;
-      v_count:=v_count+1;
+    -- One resume owns job selection globally, then takes target rows before the
+    -- parent row. This matches target->job settlement order and prevents two
+    -- resumptions from splitting one blocked fanout or deadlocking each other.
+    perform pg_advisory_xact_lock(hashtextextended('notification-delivery:resume:v1',0));
+    for v_job in
+      select j.outbox_id from private.notification_delivery_jobs j
+      where j.status='operator_blocked' order by j.updated_at,j.outbox_id limit p_limit
+    loop
+      select count(*) into v_job_count from private.notification_delivery_targets t
+      where t.outbox_id=v_job.outbox_id and t.status in ('pending','claimed','retry','operator_blocked');
+      if v_job_count=0 or v_count+v_job_count>p_limit then continue; end if;
+      perform t.id from private.notification_delivery_targets t
+      where t.outbox_id=v_job.outbox_id and t.status in ('pending','claimed','retry','operator_blocked')
+      order by t.id for update;
+      select j.status into v_job_status from private.notification_delivery_jobs j
+      where j.outbox_id=v_job.outbox_id for update;
+      if v_job_status<>'operator_blocked' then continue; end if;
+      v_now:=clock_timestamp();
+      for v_target in
+        select * from private.notification_delivery_targets t
+        where t.outbox_id=v_job.outbox_id and t.status in ('pending','claimed','retry','operator_blocked')
+        order by t.id
+      loop
+        if v_target.lease_version>=8 then
+          update private.notification_delivery_targets set status='dead_letter',claim_digest=null,
+            lease_expires_at=null,terminal_at=v_now,reason_code='RETRY_EXHAUSTED',updated_at=v_now
+            where id=v_target.id;
+          perform private.append_notification_delivery_event(v_target.outbox_id,v_target.id,'dead_letter','RETRY_EXHAUSTED');
+        else
+          update private.notification_delivery_targets set status='retry',claim_digest=null,
+            lease_expires_at=null,next_attempt_at=v_now,terminal_at=null,reason_code=null,updated_at=v_now
+            where id=v_target.id;
+          perform private.append_notification_delivery_event(v_target.outbox_id,v_target.id,'resumed',null);
+        end if;
+        v_count:=v_count+1;
+      end loop;
+      perform private.refresh_notification_delivery_job(v_job.outbox_id);
     end loop;
     perform set_config('app.notification_delivery_writer_mode',coalesce(v_previous,''),true); return v_count;
   exception when others then perform set_config('app.notification_delivery_writer_mode',coalesce(v_previous,''),true); raise; end;
@@ -776,7 +807,8 @@ end $$;
 create function public.get_developer_notification_delivery_status(p_actor_profile_id uuid)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_h private.notification_delivery_heartbeat%rowtype; v_due integer; v_retry integer;
-  v_dead integer; v_blocked integer; v_expired integer; v_pending_jobs integer; v_oldest timestamptz;
+  v_dead integer; v_job_only_dead integer; v_blocked integer; v_expired integer;
+  v_pending_jobs integer; v_oldest timestamptz;
   v_oldest_job timestamptz; v_status text; v_now timestamptz:=clock_timestamp();
 begin
   perform private.assert_active_developer(p_actor_profile_id);
@@ -792,19 +824,24 @@ begin
   select least(count(*),1000)::integer,min(o.enqueued_at)
   into v_pending_jobs,v_oldest_job from private.notification_delivery_jobs j
   join private.notification_delivery_outbox o on o.id=j.outbox_id where j.status='pending';
+  select least(count(*),1000)::integer into v_job_only_dead
+  from private.notification_delivery_jobs j where j.status='dead_letter'
+    and not exists(select 1 from private.notification_delivery_targets t where t.outbox_id=j.outbox_id);
   v_due:=least(1000,v_due+v_pending_jobs);
   v_oldest:=case when v_oldest is null then v_oldest_job when v_oldest_job is null then v_oldest else least(v_oldest,v_oldest_job) end;
   v_status:=case when v_h.singleton is null then 'awaiting_first_run'
     when v_h.status='failed' then 'failed'
-    when v_h.recorded_at<v_now-interval '5 minutes' or v_dead>0 or v_blocked>0 or v_expired>0
+    when v_h.recorded_at<v_now-interval '5 minutes' or v_dead>0 or v_job_only_dead>0
+      or v_blocked>0 or v_expired>0
       or (v_oldest is not null and v_oldest<v_now-interval '5 minutes') then 'degraded'
     when v_h.status='degraded' then 'degraded' else 'healthy' end;
   return jsonb_build_object('status',v_status,'lastHeartbeat',case when v_h.singleton is null then null else jsonb_build_object(
     'status',v_h.status,'claimed',v_h.claimed,'delivered',v_h.delivered,'retrying',v_h.retrying,
     'suppressed',v_h.suppressed,'deadLetter',v_h.dead_letter,'blocked',v_h.blocked,'deferred',v_h.deferred,
     'errorCode',v_h.error_code,'recordedAt',v_h.recorded_at) end,
-    'backlog',jsonb_build_object('due',v_due,'retrying',v_retry,'deadLetter',v_dead,'blocked',v_blocked,
-      'expiredLeases',v_expired,'oldestDueAt',v_oldest),'checkedAt',v_now);
+    'backlog',jsonb_build_object('due',v_due,'retrying',v_retry,'deadLetter',v_dead,
+      'jobOnlyDeadLetter',v_job_only_dead,'blocked',v_blocked,'expiredLeases',v_expired,
+      'oldestDueAt',v_oldest),'checkedAt',v_now);
 end $$;
 
 do $$ declare f regprocedure; begin

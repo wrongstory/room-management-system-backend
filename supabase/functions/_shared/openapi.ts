@@ -4797,6 +4797,7 @@ export const openApiDocument = {
                   "due",
                   "retrying",
                   "deadLetter",
+                  "jobOnlyDeadLetter",
                   "blocked",
                   "expiredLeases",
                   "oldestDueAt",
@@ -4805,6 +4806,11 @@ export const openApiDocument = {
                   due: { type: "integer", minimum: 0, maximum: 1000 },
                   retrying: { type: "integer", minimum: 0, maximum: 1000 },
                   deadLetter: { type: "integer", minimum: 0, maximum: 1000 },
+                  jobOnlyDeadLetter: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 1000,
+                  },
                   blocked: { type: "integer", minimum: 0, maximum: 1000 },
                   expiredLeases: { type: "integer", minimum: 0, maximum: 1000 },
                   oldestDueAt: {
