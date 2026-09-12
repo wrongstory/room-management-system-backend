@@ -13,6 +13,14 @@
 - 테스트: Vitest, Fastify injection, Deno Edge type check
 - 배포 환경: 운영 Supabase의 Edge Functions·Cron + Supabase 복구검증 프로젝트
 
+### GitHub Actions 런타임과 공급망 고정
+
+- `actions/checkout`은 공식 `v6.1.0`, `actions/setup-node`는 공식 `v6.5.0`의 전체 40자 commit SHA로 모든 workflow에서 고정한다. 가변 major tag만 사용하지 않는다.
+- 두 action의 `runs.using`은 Node.js 24다. 이는 GitHub가 action 구현 자체를 실행하는 내부 런타임이며, 저장소 애플리케이션 런타임과 별개다.
+- 애플리케이션과 DB 검증은 계속 `setup-node`의 `node-version: 22`를 사용한다. `package.json`의 Node.js 22 계약을 action 내부 Node.js 24로 올린 것으로 해석하지 않는다.
+- quality workflow의 npm cache는 `cache: npm`과 `cache-dependency-path: package-lock.json`으로 명시하고 설치는 `npm ci`만 사용한다. npm 설치가 없는 Swagger Pages workflow는 action의 자동 package-manager cache를 명시적으로 끈다.
+- action revision을 변경할 때는 공식 release와 해당 revision의 `action.yml` 런타임을 확인하고, source-controlled 회귀 테스트와 required CI를 함께 갱신한다.
+
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
 이 문서 갱신의 integration base는 `dev@9ec073e6908cd90768fad3f1c6841f8130f39a88`이며 #73 전 기능 snapshot은 45 migrations / OpenAPI 98 paths / 105 operations다. #73 source candidate는 46번째 append-only migration을 추가하고 public API 수는 바꾸지 않는다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
