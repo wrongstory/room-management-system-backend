@@ -117,6 +117,12 @@ select is((select count(*)::int from private.attempt_capability_grants where att
 select is((select count(*)::int from public.notifications where event_family='capability.upload_submit_offline_resolution_issued'
   and source_entity_id=(select id::text from private.attempt_capability_grants where attempt_id=pg_temp.cid(508) and kind='upload_submit')),1,
   'offline correction emits one exact typed capability notice');
+select is((select count(*) from public.notifications where event_family='cleaning.field_completed_admin'
+  and source_entity_id=pg_temp.cid(508)::text and recipient_profile_id=pg_temp.cid(1)),1::bigint,
+  'offline correction emits exactly one active-admin inbox notification');
+select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  where n.event_family='cleaning.field_completed_admin' and n.source_entity_id=pg_temp.cid(508)::text),0::bigint,
+  'admin offline correction suppresses only the actor own push');
 select is((select count(*)::int from public.notifications n
   where n.event_family='capability.upload_submit_offline_resolution_issued'
     and private.notification_public_projection(n)->'deepLink'=jsonb_build_object('kind','cleaningTarget','entityId',pg_temp.cid(308))),1,

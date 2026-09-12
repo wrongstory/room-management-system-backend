@@ -68,11 +68,95 @@ select target_id,assignment_id,'a2000000-0000-4000-8000-000000000002',1,2,'{}','
 select throws_ok($test$ insert into public.room_pin_access_leases(room_id,reservation_id,cleaning_target_id,assignment_id,attempt_id,pin_version,issued_to,issued_at,expires_at)
 select room_id,reservation_id,target_id,assignment_id,gen_random_uuid(),1,'a2000000-0000-4000-8000-000000000002',now(),now()+interval '1 hour' from plans where label='notified' $test$,'23514','CHECKOUT_NOT_MATERIALIZED','B checkout plan cannot issue/reveal PIN');
 
-select throws_ok($test$ select public.change_reservation('a2000000-0000-4000-8000-000000000001',reservation_id,room_id,'2034-10-01 16:00+09','2034-10-02 12:00+09',2,'keep',null,1,'TEST','planning-change-notified',repeat('d',64)) from plans where label='notified' $test$,'23514','CLEANING_WORKFLOW_REPLAN_REQUIRED','E notified plan requires explicit replan');
-select public.process_due_reservation_transitions('a2000000-0000-4000-8000-000000000001','2034-10-02 11:00+09','planning-scheduler-1',repeat('e',64));
+create temporary table notified_replan as
+select public.change_reservation('a2000000-0000-4000-8000-000000000001',reservation_id,room_id,
+  '2034-10-01 16:00+09','2034-10-02 12:00+09',3,'keep',null,1,'TEST',
+  'planning-change-notified',repeat('d',64)) response
+from plans where label='notified';
+select ok((select not is_current and change_reason_code='RESERVATION_SCHEDULE_CHANGED'
+  from public.cleaning_assignments where id=(select assignment_id from plans where label='notified')),
+  'safe notified replan closes the old immutable assignment revision');
+select ok((select count(*)=1 and bool_and(revision=3 and notified_at is not null)
+  from public.cleaning_assignments where cleaning_target_id=(select target_id from plans where label='notified') and is_current),
+  'safe notified replan creates one current notified assignment revision');
+select ok((select available_from='2034-10-02 12:00+09'::timestamptz and assignment_version=3
+  from public.cleaning_targets where id=(select target_id from plans where label='notified')),
+  'safe notified replan advances target schedule CAS exactly once');
+select ok((select resolved_at is not null from public.notifications
+    where event_family='assignment.commit_notified' and cleaning_target_id=(select target_id from plans where label='notified'))
+  and (select count(*)=1 from public.notifications where event_family='reservation.notified_schedule_changed'
+    and cleaning_target_id=(select target_id from plans where label='notified')),
+  'old actionable notice resolves and one replacement schedule notice is appended');
+select is((select count(*) from public.notifications where event_family='reservation.notified_guest_count_changed'
+  and cleaning_target_id=(select target_id from plans where label='notified')),1::bigint,
+  'guest-count card impact emits one informational notification to the current notified maid');
+select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  where n.cleaning_target_id=(select target_id from plans where label='notified')),3::bigint,
+  'safe replan atomically preserves original and appends schedule and guest-count deliveries');
+select is((select public.change_reservation('a2000000-0000-4000-8000-000000000001',reservation_id,room_id,
+  '2034-10-01 16:00+09','2034-10-02 12:00+09',3,'keep',null,1,'TEST',
+  'planning-change-notified',repeat('d',64)) from plans where label='notified'),
+  (select response from notified_replan),'safe replan retry replays without a second revision or notification');
+select public.change_reservation('a2000000-0000-4000-8000-000000000001',reservation_id,room_id,
+  '2034-10-01 16:00+09','2034-10-02 13:00+09',3,'keep',null,2,'TEST_SECOND',
+  'planning-change-notified-second',repeat('5',64))
+from plans where label='notified';
+select ok((select count(*)=2 from public.notifications
+    where event_family='reservation.notified_schedule_changed'
+      and cleaning_target_id=(select target_id from plans where label='notified'))
+  and (select count(*)=1 from public.cleaning_assignments
+    where cleaning_target_id=(select target_id from plans where label='notified') and is_current and revision=4),
+  'second safe replan consumes only its exact old/new pair and creates one further revision');
+
+select public.mutate_room_operation(
+  'a2000000-0000-4000-8000-000000000001',(select room_id from plans where label='notified'),
+  'report_issue',(select state_version from public.rooms where id=(select room_id from plans where label='notified')),
+  'TEST_NONBLOCKING','{"entityId":"a9000000-0000-4000-8000-000000000001","category":"note","severity":"info","blocksGuestAssignment":false}',
+  'planning-room-note',repeat('1',64));
+select is((select count(*) from public.notifications where event_family='room.issue_status_changed'
+  and cleaning_target_id=(select target_id from plans where label='notified')),0::bigint,
+  'nonblocking room note is outside the notification allowlist');
+select public.mutate_room_operation(
+  'a2000000-0000-4000-8000-000000000001',(select room_id from plans where label='notified'),
+  'report_issue',(select state_version from public.rooms where id=(select room_id from plans where label='notified')),
+  'TEST_BLOCKING','{"entityId":"a9000000-0000-4000-8000-000000000002","category":"access","severity":"critical","blocksGuestAssignment":true}',
+  'planning-room-blocking-issue',repeat('2',64));
+insert into public.room_pin_sync_events(
+  id,room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at,recorded_at)
+values
+  ('ff000000-0000-4000-8000-000000000001',(select room_id from plans where label='notified'),
+    'mismatch',null,'TEST_FUTURE_EFFECTIVE','a2000000-0000-4000-8000-000000000001',
+    '2099-01-01 00:00+09',now()),
+  ('ff000000-0000-4000-8000-000000000002',(select room_id from plans where label='notified'),
+    'unconfigured',null,'TEST_BACKDATED_EFFECTIVE','a2000000-0000-4000-8000-000000000001',
+    '2000-01-01 00:00+09',now());
+select is(private.current_pin_sync_status((select room_id from plans where label='notified')),
+  'unconfigured','PIN current projection follows recorded order, not effective time');
+select public.mutate_room_operation(
+  'a2000000-0000-4000-8000-000000000001',(select room_id from plans where label='notified'),
+  'record_pin_sync',(select state_version from public.rooms where id=(select room_id from plans where label='notified')),
+  'TEST_PIN_MISMATCH','{"entityId":"ff000000-0000-4000-8000-000000000003","syncStatus":"mismatch"}',
+  'planning-room-pin-change',repeat('3',64));
+select is(private.current_pin_sync_status((select room_id from plans where label='notified')),
+  'mismatch','newly recorded PIN event changes the authoritative current status');
+select is((select count(*) from public.notifications where event_family='room.pin_sync_status_changed'
+  and cleaning_target_id=(select target_id from plans where label='notified')),1::bigint,
+  'future-effective history cannot suppress one real recorded-order PIN status change');
+select public.mutate_room_operation(
+  'a2000000-0000-4000-8000-000000000001',(select room_id from plans where label='notified'),
+  'create_block',(select state_version from public.rooms where id=(select room_id from plans where label='notified')),
+  'TEST_OPERATION_BLOCK','{"entityId":"a9000000-0000-4000-8000-000000000004","startsAt":"2034-10-02T00:00:00+09:00","endsAt":"2034-10-03T00:00:00+09:00"}',
+  'planning-room-operation-block',repeat('4',64));
+select ok((select count(*)=3 and bool_and(not requires_action)
+  from public.notifications where cleaning_target_id=(select target_id from plans where label='notified')
+    and event_family in ('room.issue_status_changed','room.pin_sync_status_changed','room.operation_block_changed')),
+  'exact blocking issue, PIN status change, and operation block each emit one informational notification');
+select public.process_due_reservation_transitions('a2000000-0000-4000-8000-000000000001','2034-10-02 13:00+09','planning-scheduler-1',repeat('e',64));
 select ok((select current_cleaning_target_id=planned_cleaning_target_id and status='materialized' from public.checkout_cleaning_obligations where reservation_id=(select reservation_id from plans where label='notified')),'C scheduled checkout promotes exactly the same identity');
-select ok((select is_current and notified_at is not null from public.cleaning_assignments where id=(select assignment_id from plans where label='notified')),'C original notified assignment revision is preserved');
-select public.process_due_reservation_transitions('a2000000-0000-4000-8000-000000000001','2034-10-02 11:00+09','planning-scheduler-1',repeat('e',64));
+select ok((select not is_current and notified_at is not null from public.cleaning_assignments where id=(select assignment_id from plans where label='notified'))
+  and (select count(*)=1 from public.cleaning_assignments where cleaning_target_id=(select target_id from plans where label='notified')
+    and is_current and notified_at is not null),'C promotion preserves old history and the replacement current notified revision');
+select public.process_due_reservation_transitions('a2000000-0000-4000-8000-000000000001','2034-10-02 13:00+09','planning-scheduler-1',repeat('e',64));
 select is((select count(*)::int from public.cleaning_targets where reservation_id=(select reservation_id from plans where label='notified')),1,'scheduler retry adds no target');
 select is((select count(*)::int from public.cleaning_attempts),0,'C promotion leaves attempt activation to #28');
 
@@ -91,6 +175,34 @@ select ok((select status='cancelled' from public.cleaning_targets where id=(sele
 select is((select count(*)::int from public.cleaning_assignments where cleaning_target_id=(select target_id from plans where label='draft') and is_current),0,'F no ghost current assignment');
 select is((select count(*)::int from public.notifications where cleaning_target_id=(select target_id from plans where label='draft') and category='cleaning_assignment_revoked'),1,'F cancellation retains notification and adds revocation');
 select ok((select planned_cleaning_target_id=(select target_id from plans where label='draft') from public.checkout_cleaning_obligations where reservation_id=(select reservation_id from plans where label='draft')),'cancelled planned identity preserved');
+
+select pg_temp.make_plan('repeat-cancel','2035-11-02 11:00+09');
+select pg_temp.assign_plan('repeat-cancel');
+select pg_temp.notify_plan('repeat-cancel','2035-11-01 09:00+09');
+select public.change_reservation('a2000000-0000-4000-8000-000000000001',reservation_id,room_id,
+  '2035-11-01 16:00+09','2035-11-02 12:00+09',2,'keep',null,1,'REPLAN_ONE',
+  'planning-repeat-cancel-one',repeat('6',64)) from plans where label='repeat-cancel';
+select public.change_reservation('a2000000-0000-4000-8000-000000000001',reservation_id,room_id,
+  '2035-11-01 16:00+09','2035-11-02 13:00+09',2,'keep',null,2,'REPLAN_TWO',
+  'planning-repeat-cancel-two',repeat('7',64)) from plans where label='repeat-cancel';
+select lives_ok($test$select public.cancel_reservation(
+  'a2000000-0000-4000-8000-000000000001',reservation_id,3,'TEST_CANCEL',
+  'planning-repeat-cancel-final',repeat('8',64)) from plans where label='repeat-cancel'$test$,
+  'cancel after repeated replans does not reprocess a historical replan pair');
+select ok((select count(*)=2 from public.notifications
+    where cleaning_target_id=(select target_id from plans where label='repeat-cancel')
+      and event_family='reservation.notified_schedule_changed')
+  and (select count(*)=1 from public.notifications
+    where cleaning_target_id=(select target_id from plans where label='repeat-cancel')
+      and event_family='reservation.cancelled_revoked')
+  and (select count(*)=1 from private.notification_delivery_outbox o
+    join public.notifications n on n.id=o.notification_id
+    where n.cleaning_target_id=(select target_id from plans where label='repeat-cancel')
+      and n.event_family='reservation.cancelled_revoked')
+  and (select count(*)=0 from private.notification_outbox o
+    join public.notifications n on n.id=o.notification_id
+    where n.cleaning_target_id=(select target_id from plans where label='repeat-cancel')),
+  'repeated replan then cancel emits only exact schedule changes plus one cancellation notification/typed delivery and no legacy row');
 
 select pg_temp.make_plan('manual',((now() at time zone 'Asia/Seoul')::date+1+time '11:00') at time zone 'Asia/Seoul',date_trunc('minute',now())-interval '1 day');
 update public.reservations set actual_check_in_at=check_in_at where id=(select reservation_id from plans where label='manual');
@@ -140,6 +252,80 @@ select throws_ok($test$ insert into public.room_pin_access_leases(room_id,reserv
 select room_id,reservation_id,target_id,assignment_id,gen_random_uuid(),1,'a2000000-0000-4000-8000-000000000002',now(),now()+interval '1 hour'
 from plans where label='prestart' $test$,'23514','CHECKOUT_NOT_MATERIALIZED','reassigned plan cannot issue PIN');
 select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=(select target_id from plans where label='prestart')),0,'prestart creates no attempt');
+
+-- Safe replan boundaries after scheduler materialization. The helper is private;
+-- these fixtures exercise states that the private pre-checkout plan cannot forge.
+select pg_temp.make_plan('safety-started','2025-01-02 11:00+09');
+select pg_temp.assign_plan('safety-started');
+select pg_temp.notify_plan('safety-started','2025-01-01 09:00+09');
+select public.process_due_reservation_transitions('a2000000-0000-4000-8000-000000000001',
+  '2025-01-02 11:00+09','planning-safety-started-materialize',repeat('a',64));
+insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,
+  assignment_revision,status,template_snapshot,room_snapshot)
+select 'aa000000-0000-4000-8000-000000000001',p.target_id,a.id,a.maid_profile_id,1,a.revision,
+  'scheduled',t.template_snapshot,jsonb_build_object('roomId',t.room_id)
+from plans p join public.cleaning_targets t on t.id=p.target_id
+join public.cleaning_assignments a on a.cleaning_target_id=t.id and a.is_current
+where p.label='safety-started';
+update public.cleaning_attempts set status='in_progress',started_at='2025-01-02 11:00+09',execution_version=2
+where id='aa000000-0000-4000-8000-000000000001';
+select throws_ok($test$select private.replan_notified_checkout_assignment_v1(
+  target_id,'2025-01-02','2025-01-02 12:00+09',null,'TEST_REPLAN',
+  'a2000000-0000-4000-8000-000000000001','2025-01-01 10:00+09')
+from plans where label='safety-started'$test$,'23514','CLEANING_WORKFLOW_REPLAN_REQUIRED',
+  'started checkout attempt blocks late replan with the stable conflict');
+
+select pg_temp.make_plan('safety-pin','2025-02-02 11:00+09');
+select pg_temp.assign_plan('safety-pin');
+select pg_temp.notify_plan('safety-pin','2025-02-01 09:00+09');
+select public.process_due_reservation_transitions('a2000000-0000-4000-8000-000000000001',
+  '2025-02-02 11:00+09','planning-safety-pin-materialize',repeat('b',64));
+insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,
+  assignment_revision,status,template_snapshot,room_snapshot)
+select 'aa000000-0000-4000-8000-000000000002',p.target_id,a.id,a.maid_profile_id,1,a.revision,
+  'scheduled',t.template_snapshot,jsonb_build_object('roomId',t.room_id)
+from plans p join public.cleaning_targets t on t.id=p.target_id
+join public.cleaning_assignments a on a.cleaning_target_id=t.id and a.is_current
+where p.label='safety-pin';
+insert into public.room_pin_access_leases(room_id,reservation_id,cleaning_target_id,assignment_id,attempt_id,
+  pin_version,issued_to,issued_at,expires_at,revealed_at)
+select p.room_id,p.reservation_id,p.target_id,a.id,'aa000000-0000-4000-8000-000000000002',1,
+  a.maid_profile_id,'2025-02-02 11:00+09','2025-02-02 13:00+09','2025-02-02 11:01+09'
+from plans p join public.cleaning_assignments a on a.cleaning_target_id=p.target_id and a.is_current
+where p.label='safety-pin';
+select throws_ok($test$select private.replan_notified_checkout_assignment_v1(
+  target_id,'2025-02-02','2025-02-02 12:00+09',null,'TEST_REPLAN',
+  'a2000000-0000-4000-8000-000000000001','2025-02-01 10:00+09')
+from plans where label='safety-pin'$test$,'23514','CLEANING_WORKFLOW_REPLAN_REQUIRED',
+  'revealed PIN lease blocks late replan with the stable conflict');
+
+select pg_temp.make_plan('safety-offline','2025-03-02 11:00+09');
+select pg_temp.assign_plan('safety-offline');
+select pg_temp.notify_plan('safety-offline','2025-03-01 09:00+09');
+select public.process_due_reservation_transitions('a2000000-0000-4000-8000-000000000001',
+  '2025-03-02 11:00+09','planning-safety-offline-materialize',repeat('c',64));
+insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,
+  assignment_revision,status,template_snapshot,room_snapshot)
+select 'aa000000-0000-4000-8000-000000000003',p.target_id,a.id,a.maid_profile_id,1,a.revision,
+  'scheduled',t.template_snapshot,jsonb_build_object('roomId',t.room_id)
+from plans p join public.cleaning_targets t on t.id=p.target_id
+join public.cleaning_assignments a on a.cleaning_target_id=t.id and a.is_current
+where p.label='safety-offline';
+insert into private.offline_work_leases(id,actor_profile_id,attempt_id,assignment_id,assignment_revision,
+  execution_version,profile_version,issued_at,expires_at,metadata_expires_at)
+select 'aa000000-0000-4000-8000-000000000004',a.maid_profile_id,
+  'aa000000-0000-4000-8000-000000000003',a.id,a.revision,1,
+  (select account_lifecycle_version from public.profiles where id=a.maid_profile_id),
+  '2025-03-02 10:00+09','2025-03-02 12:00+09','2025-05-31 10:00+09'
+from plans p join public.cleaning_assignments a on a.cleaning_target_id=p.target_id and a.is_current
+where p.label='safety-offline';
+select throws_ok($test$select private.replan_notified_checkout_assignment_v1(
+  target_id,'2025-03-02','2025-03-02 12:00+09',null,'TEST_REPLAN',
+  'a2000000-0000-4000-8000-000000000001','2025-03-01 10:00+09')
+from plans where label='safety-offline'$test$,'23514','CLEANING_WORKFLOW_REPLAN_REQUIRED',
+  'issued offline lease blocks late replan with the stable conflict');
+select is((select count(*) from private.notification_outbox),0::bigint,
+  'schedule change, cancellation, room impact, and retry paths append no legacy delivery rows');
 set constraints all immediate;
 select * from finish();
 rollback;

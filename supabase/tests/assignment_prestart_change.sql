@@ -58,7 +58,7 @@ select is((select count(*) from public.notifications where cleaning_target_id=pg
 insert into results values('notified',pg_temp.command(5,'change','notify-reassign-0005',3,33));
 select is((select count(*) from public.notifications where cleaning_target_id=pg_temp.pid(305)),3::bigint,'notified old plus revoke and new notice');
 select ok((select resolved_at is not null from public.notifications where dedupe_key='initial-prestart-5'),'old notice preserved/resolved');
-select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.pid(305)),1::bigint,'new actionable assignment enters typed delivery while informational revocation stays inbox-only');
+select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.pid(305)),2::bigint,'new actionable assignment and push-eligible informational revocation both enter typed delivery');
 select lives_ok($$select pg_temp.command(5,'change','notify-reassign-0005',3,33,version=>2,assignment=>pg_temp.pid(405))$$,'notified replay');
 select is((select count(*) from public.notifications where cleaning_target_id=pg_temp.pid(305)),3::bigint,'replay no new notices');
 select lives_ok($$select pg_temp.command(6,'change','notify-sequence-0006',2,34)$$,'notified same maid sequence');

@@ -10,6 +10,7 @@ import { testAttemptOfflineExpiryConcurrency } from './test-attempt-offline-expi
 import { testComplaintConcurrency } from './test-complaint-concurrency.mjs';
 import { testNotificationConcurrency } from './test-notification-concurrency.mjs';
 import { testNotificationDeliveryConcurrency } from './test-notification-delivery-concurrency.mjs';
+import { testNotifiedReplanConcurrency } from './test-notified-replan-concurrency.mjs';
 import { testPasswordChangeConcurrency } from './test-password-change-concurrency.mjs';
 import { testPayrollConcurrency } from './test-payroll-concurrency.mjs';
 import { testPhotoDriveQuotaConcurrency } from './test-photo-drive-quota-concurrency.mjs';
@@ -977,6 +978,7 @@ for (const plan of [scheduledPlan,manualPlan]) {
     'checkout race: same identity, one occupancy event, zero premature attempts');
 }
 console.log('Planning races passed: room-change/notify, cancel/notify, scheduled/retry, room-change/checkout, manual/scheduled; one target and zero premature attempts.');
+await testNotifiedReplanConcurrency(client, actorProfileId);
 await testPrestartConcurrency(client,actorProfileId);
 await testAttemptActivationConcurrency(client,actorProfileId);
 await testAssignmentPreviewConcurrency(client,actorProfileId);

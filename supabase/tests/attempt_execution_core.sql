@@ -86,9 +86,9 @@ select private.emit_notification_v1('assignment.commit_notified',pg_temp.eid(1),
   (select room_id from public.cleaning_targets where id=pg_temp.eid(312)),pg_temp.eid(312),pg_temp.eid(312),'2040-03-01 09:03+09');
 select ok((select count(*)=4 from public.notifications where contract_version=1
     and source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text))
-  and (select count(*)=3 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  and (select count(*)=4 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
     where n.source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text)),
-  'start resolver fixtures contain four inbox rows and exactly three actionable deliveries');
+  'start resolver fixtures contain four inbox rows and actionable plus informational deliveries');
 insert into execution_result values('start',pg_temp.run_execution(1,'start'));
 select is((select value->>'status' from execution_result where label='start'),'in_progress','scheduled starts online');
 select is((select execution_version::int from public.cleaning_attempts where id=pg_temp.eid(501)),2,'start increments version once');
@@ -101,7 +101,7 @@ select ok((select resolved_at is not null from public.notifications
   'start resolves only the current assignment actionable notice');
 select ok((select count(*)=4 from public.notifications where contract_version=1
     and source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text))
-  and (select count(*)=3 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  and (select count(*)=4 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
     where n.source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text)),
   'resolver-only start creates no notification or delivery row');
 create temp table start_resolution as select resolved_at from public.notifications
@@ -145,6 +145,13 @@ select ok((select started_at='2040-03-01 10:00+09' and field_completed_at='2040-
  from public.cleaning_attempts where id=pg_temp.eid(501)),'completion freezes physical end and advances CAS');
 select is(pg_temp.run_execution(1,'complete_field_work',2),(select value from execution_result where label='complete'),'complete replay survives old CAS and lost response');
 select is((select count(*)::int from public.audit_events where event_type='cleaning.field_completed'),1,'complete replay appends one audit only');
+select ok((select count(*)=1 and bool_and(not requires_action)
+  from public.notifications where event_family='cleaning.field_completed_admin'
+    and source_entity_id=pg_temp.eid(501)::text and recipient_profile_id=pg_temp.eid(1)),
+  'online field completion emits one informational inbox notification to the active admin');
+select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  where n.event_family='cleaning.field_completed_admin' and n.source_entity_id=pg_temp.eid(501)::text),1::bigint,
+  'online field completion enqueues informational push independently of requiresAction');
 select is((select count(*)::int from public.cleaning_submissions),0,'physical completion creates no submission');
 select is((select count(*)::int from public.earnings),0,'physical completion creates no earning');
 select is((select count(*)::int from public.room_pin_access_leases),0,'no PIN lease is created');

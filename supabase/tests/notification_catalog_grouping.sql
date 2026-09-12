@@ -2,14 +2,20 @@ begin;
 
 select plan(64);
 
-select is((select count(*) from private.notification_event_catalog),42::bigint,
+select is((select count(*) from private.notification_event_catalog),48::bigint,
   'source-controlled catalog contains every approved event family');
-select is((select count(distinct category) from private.notification_event_catalog),28::bigint,
-  'event families map to exactly 28 public categories');
+select is((select count(distinct category) from private.notification_event_catalog),32::bigint,
+  'event families map to exactly 32 public categories');
 select ok(bool_and(deep_link_kind in ('cleaningTarget','assignmentRequest','submission','complaintCase','payrollCycle','payrollProfile')),
   'catalog deep links use only the six approved kinds') from private.notification_event_catalog;
-select ok(bool_and(not push_eligible or requires_action),
-  'push eligibility is a subset of actionable events') from private.notification_event_catalog;
+select ok((select bool_and(push_eligible and not requires_action)
+  from private.notification_event_catalog where event_family in (
+    'reservation.extension_revoked','reservation.cancelled_revoked',
+    'cleaning_request.cancelled_revoked','assignment.prestart_old_revoked',
+    'assignment.prestart_unassigned','attempt.handover_previous_revoked',
+    'assignment.cancellation_approved','assignment.cancellation_rejected',
+    'assignment.scheduled_rolled_over','cleaning.field_completed_admin')),
+  'approved informational events are push eligible without becoming actionable');
 
 insert into auth.users(id) values
   ('10900000-0000-4000-8000-000000000001'),

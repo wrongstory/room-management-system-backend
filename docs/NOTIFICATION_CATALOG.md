@@ -1,14 +1,16 @@
 # 알림 이벤트 카탈로그 v1
 
-이 문서는 Issue #109에서 확정한 28개 공개 category와 42개 event family의 정본이다. DB의
+이 문서는 Issue #109의 기반 계약과 Issue #128의 보완을 반영한 32개 공개 category와 48개 event family의 정본이다. DB의
 `private.notification_event_catalog`와 테스트가 이 표를 그대로 검증한다. `source`는 알림 생성과
 해결의 typed provenance이며 audit payload나 문자열 dedupe는 권한 근거가 아니다.
 
 공통 규칙:
 
 - inbox는 수신자 상태와 임시 비밀번호 여부와 무관하게 도메인 transaction 안에서 보존한다.
-- typed delivery outbox는 `push=yes`, `requiresAction=yes`, active/password-complete 수신자이고
+- typed delivery outbox는 `push=yes`, active/password-complete 수신자이고
   actor와 수신자가 다를 때만 생성한다.
+- `push`와 `requiresAction`은 독립 축이다. 취소·회수·결정·현장 완료 같은 informational event도
+  `no/yes`로 즉시 전달할 수 있으며 inbox의 행동 상태를 거짓으로 올리지 않는다.
 - 그룹은 `(recipient, groupFamily, scopeKind, scopeId)`별 최초 event 시각부터 고정 10분
   `[startedAt, startedAt + 10m)`이다. 경계 시각은 새 UUID `groupId`를 만든다.
 - 공개 deep link kind는 `cleaningTarget`, `assignmentRequest`, `submission`, `complaintCase`,
@@ -21,18 +23,24 @@
 | assignment.commit_notified | cleaning_assignment_notified | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_assignment_notified/room |
 | assignment.prestart_new_notified | cleaning_assignment_notified | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_assignment_notified/room |
 | attempt.handover_next_notified | cleaning_assignment_notified | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_assignment_notified/room |
-| reservation.extension_revoked | cleaning_assignment_revoked | maid.assignment_party | no/no | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
-| reservation.cancelled_revoked | cleaning_assignment_revoked | maid.assignment_party | no/no | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
-| cleaning_request.cancelled_revoked | cleaning_assignment_revoked | maid.assignment_party | no/no | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
-| assignment.prestart_old_revoked | cleaning_assignment_revoked | maid.assignment_party | no/no | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
-| assignment.prestart_unassigned | cleaning_assignment_revoked | maid.assignment_party | no/no | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
-| attempt.handover_previous_revoked | cleaning_assignment_revoked | maid.assignment_party | no/no | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
+| reservation.extension_revoked | cleaning_assignment_revoked | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
+| reservation.cancelled_revoked | cleaning_assignment_revoked | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
+| cleaning_request.cancelled_revoked | cleaning_assignment_revoked | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
+| assignment.prestart_old_revoked | cleaning_assignment_revoked | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
+| assignment.prestart_unassigned | cleaning_assignment_revoked | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
+| attempt.handover_previous_revoked | cleaning_assignment_revoked | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_revoked/room |
 | reservation.manual_checkout_rescheduled | cleaning_schedule_changed | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_schedule_changed/room |
+| reservation.notified_schedule_changed | cleaning_schedule_changed | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_schedule_changed/room |
+| reservation.notified_guest_count_changed | cleaning_assignment_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_assignment_changed/room |
 | assignment.prestart_same_maid_changed | cleaning_assignment_changed | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_assignment_changed/room |
 | assignment.cancellation_requested | assignment_cancellation_requested | admin.assignment_decider | yes/yes | assignment_change_request | assignment_request_terminal | assignmentRequest | assignment_cancellation_requested/room |
-| assignment.cancellation_approved | assignment_cancellation_approved | maid.assignment_party | no/no | assignment_change_request | none | assignmentRequest | assignment_cancellation_approved/room |
-| assignment.cancellation_rejected | assignment_cancellation_rejected | maid.assignment_party | no/no | assignment_change_request | none | assignmentRequest | assignment_cancellation_rejected/room |
-| assignment.scheduled_rolled_over | cleaning_assignment_rolled_over | maid.assignment_party | no/no | cleaning_assignment | none | cleaningTarget | cleaning_assignment_rolled_over/room |
+| assignment.cancellation_approved | assignment_cancellation_approved | maid.assignment_party | no/yes | assignment_change_request | none | assignmentRequest | assignment_cancellation_approved/room |
+| assignment.cancellation_rejected | assignment_cancellation_rejected | maid.assignment_party | no/yes | assignment_change_request | none | assignmentRequest | assignment_cancellation_rejected/room |
+| assignment.scheduled_rolled_over | cleaning_assignment_rolled_over | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_rolled_over/room |
+| cleaning.field_completed_admin | cleaning_field_completed | admin.inspection_queue | no/yes | cleaning_attempt | none | cleaningTarget | cleaning_field_completed/room |
+| room.operation_block_changed | cleaning_room_operation_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_room_operation_changed/room |
+| room.issue_status_changed | cleaning_room_issue_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_room_issue_changed/room |
+| room.pin_sync_status_changed | cleaning_pin_sync_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_pin_sync_changed/room |
 | capability.finish_current_issued | cleaning_capability_changed | maid.limited_grantee | yes/yes | attempt_capability_grant | capability_terminal | cleaningTarget | cleaning_capability_changed/room |
 | capability.upload_submit_admin_issued | cleaning_capability_changed | maid.limited_grantee | yes/yes | attempt_capability_grant | capability_terminal | cleaningTarget | cleaning_capability_changed/room |
 | capability.upload_submit_self_issued | cleaning_capability_changed | maid.limited_grantee | yes/yes | attempt_capability_grant | capability_terminal | cleaningTarget | cleaning_capability_changed/room |

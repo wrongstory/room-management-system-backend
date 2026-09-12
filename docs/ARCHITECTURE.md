@@ -23,7 +23,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@b76080b2e56ca1f54954cbac2131fd2cf242eb12`이며 #73까지 완료된 source/dev snapshot은 46 migrations / OpenAPI 98 paths / 105 operations다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@1eca96393bb353124c099f6f3923298df20d9bb5`이며 base snapshot은 47 migrations / OpenAPI 98 paths / 105 operations다. #128 candidate는 기존 47개를 수정하지 않는 48번째 append-only migration이며 public HTTP/OpenAPI 수는 바꾸지 않는다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
 
@@ -495,8 +495,11 @@ revision 및 변경 notification/outbox로 보존합니다. #28은 materializati
 다시 확인한 뒤에만 이 current revision을 scheduled attempt로 활성화합니다.
 
 예약 변경·취소와 draft/commit은 동일 reservation-command transaction lock을 먼저 취득합니다.
-미통보 draft는 일정 변경 후 stale이며 재저장이 필요합니다. notified 일정은 explicit replan 없이
-변경하지 않고 취소 시 current assignment 종료와 회수 통보를 함께 기록합니다. checkout attempt/PIN
+미통보 draft는 일정 변경 후 stale이며 재저장이 필요합니다. notified checkout의 같은 객실 퇴실 연장은
+미착수·PIN 미발급·offline lease 미발급일 때만 기존 assignment를 종료하고 schedule/assignment immutable
+revision, 이전 actionable resolve, 새 typed notification/outbox를 한 transaction에서 추가합니다. 그 밖의
+started/PIN/offline 경계와 notified 객실 변경은 `CLEANING_WORKFLOW_REPLAN_REQUIRED`로 원자 실패합니다. 취소 시
+current assignment 종료와 informational push 회수 통보를 함께 기록합니다. checkout attempt/PIN
 테이블의 실행 guard는 실제 checkout/current pointer/access 시각을 재검증합니다.
 
 append-only `20260904144209_planned_checkout_targets.sql`은 기존 target identity를 재사용하며
@@ -542,12 +545,17 @@ template/default 시간 fallback은 없고 production 운영값 설정은 이번
 
 ### #109 typed 알림 writer 계약 — source/dev 완료, production 미승격
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 28 category/42 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 32 category/48 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
 재검수 요청은 active admin 전체의 inbox로 fan-out하고, 수동 checkout은 동일 logical
 schedule event를 한 번만 추가합니다.
+
+#128은 `push_eligible`을 `requiresAction`과 분리해 취소·회수·결정 informational event도 전달합니다.
+`cleaning.field_completed`는 online/limited/offline correction 모두 active admin에게 typed inbox를 fan-out하고,
+actor 자신에게만 push를 생략합니다. 통보 후 예약 인원, 운영 차단, 배정에 영향을 주는 blocking room issue,
+PIN sync 상태 변화는 exact current notified assignment에만 audit-event/assignment provenance로 전달합니다.
 
 `dedupeKey`는 recipient별 logical event exactly-once이고 `groupId`는 이와 분리된 비민감
 UUID입니다. 그룹은 `(recipient,groupFamily,scopeKind,scopeId)`별 첫 event에서
