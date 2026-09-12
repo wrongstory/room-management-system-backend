@@ -25,6 +25,7 @@ export interface RoomPinSheetRpc {
   rpc(name: string, args: Record<string, unknown>): RpcCall;
 }
 export interface RoomPinSheetProvider {
+  validateConfiguration?(deadlineAt: number): Promise<void>;
   inspect(
     row: RoomPinSheetRow,
     deadlineAt: number,
@@ -290,11 +291,39 @@ export class RoomPinSheetSyncWorker {
           providerDeadline,
         ),
       );
+      if (items.length === 0 && this.#provider.validateConfiguration) {
+        try {
+          await this.#provider.validateConfiguration(providerDeadline);
+        } catch (error) {
+          if (
+            !(error instanceof RoomPinSheetProviderError) ||
+            error.reason !== "PROVIDER_CONFIGURATION_ERROR"
+          ) throw error;
+          await this.#rpc(
+            "record_room_pin_sheet_sync_heartbeat",
+            {
+              p_claim_id: claimId,
+              p_lease_fence: fence,
+              p_status: "degraded",
+              p_claimed: 0,
+              p_projected: 0,
+              p_already_current: 0,
+              p_superseded: 0,
+              p_retrying: 0,
+              p_blocked: 0,
+              p_error_code: "PROVIDER_CONFIGURATION_ERROR",
+            },
+            runDeadline,
+          );
+          return result;
+        }
+      }
       for (const item of items) {
         if (this.#remaining(providerDeadline) < PROVIDER_START_RESERVE_MS) {
           break;
         }
-        let row: RoomPinSheetRow | undefined;
+        let row: RoomPinSheetRow | undefined,
+          providerWriteSucceeded = false;
         try {
           const canonicalPin = await decryptRoomPin(
             item.envelope,
@@ -387,6 +416,7 @@ export class RoomPinSheetSyncWorker {
             return failed();
           }
           await this.#provider.write(row, providerDeadline);
+          providerWriteSucceeded = true;
           const settled = await this.#settle(
             item,
             claimId,
@@ -399,7 +429,9 @@ export class RoomPinSheetSyncWorker {
           else if (settled === "superseded") result.superseded++;
           else return failed();
         } catch (error) {
-          const reason = error instanceof RoomPinSheetProviderError
+          const reason = providerWriteSucceeded
+            ? "DB_SETTLE_UNCERTAIN"
+            : error instanceof RoomPinSheetProviderError
             ? error.reason
             : error instanceof DeadlineError
             ? "WRITE_OUTCOME_UNCERTAIN"

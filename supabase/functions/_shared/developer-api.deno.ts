@@ -295,6 +295,106 @@ Deno.test("developer database status degrades a fresh healthy heartbeat for a ma
   }
 });
 
+Deno.test("developer database status never reports healthy for malformed Sheet service-account configuration", async () => {
+  const originalGet = Deno.env.get;
+  const actor = {
+    authUserId: "10000000-0000-4000-8000-000000000001",
+    profileId: "20000000-0000-4000-8000-000000000001",
+    displayName: "개발자",
+    role: "developer" as const,
+    mustChangePassword: false,
+  };
+  const clients = {
+    admin: {
+      rpc: (name: string) => {
+        if (name === "get_developer_room_pin_sheet_sync_status") {
+          return Promise.resolve({
+            data: {
+              status: "healthy",
+              lastHeartbeat: {
+                status: "succeeded",
+                recordedAt: "2026-09-13T00:00:00.000Z",
+              },
+              backlog: {
+                due: 0,
+                retrying: 0,
+                blocked: 0,
+                expiredLeases: 0,
+                oldestDueAt: null,
+              },
+              worker: { operatorBlocked: false, blockedReasonCode: null },
+              checkedAt: "2026-09-13T00:00:10.000Z",
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: {}, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const baseEnvironment: Record<string, string> = {
+    RUNTIME_ENVIRONMENT: "local",
+    SUPABASE_PROJECT_REF: "local",
+    ROOM_PIN_KEY_BASE64: "configured-room-pin-key",
+    ROOM_PIN_KEY_VERSION: "room-pin-v1",
+    ROOM_PIN_SHEET_SYNC_INVOKE_SECRET: "configured-sheet-secret",
+    GOOGLE_SHEETS_SPREADSHEET_ID: "test-room-pin-sheet-projection-00001",
+    GOOGLE_SHEETS_ROOM_PIN_TAB: "객실_PIN_현황",
+  };
+
+  try {
+    for (
+      const malformed of [
+        {
+          email: "not-a-service-account-email",
+          privateKey: [
+            "-----BEGIN PRIVATE",
+            "KEY-----\ninvalid\n-----END PRIVATE",
+            "KEY-----",
+          ].join(" "),
+        },
+        {
+          email: "sheet-worker@example.iam.gserviceaccount.com",
+          privateKey: "not-a-pkcs8-private-key",
+        },
+      ]
+    ) {
+      const environment: Record<string, string> = {
+        ...baseEnvironment,
+        GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: malformed.email,
+        GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY: malformed.privateKey,
+      };
+      Deno.env.get = (key: string) => environment[key];
+      const result = await developerDatabaseStatus(clients, actor);
+      const sheet = result.roomPinSheetSync as Record<string, unknown>;
+      const activation = sheet.activation as Record<string, unknown>;
+      assert(
+        sheet.status === "degraded",
+        "malformed config must override healthy",
+      );
+      assert(
+        activation.functionSecretsConfigured === false,
+        "malformed service account must not be configuration-ready",
+      );
+      assert(
+        activation.targetApproved === true,
+        "local target must remain approved",
+      );
+      const serialized = JSON.stringify(result);
+      assert(
+        !serialized.includes(malformed.email),
+        "service-account email must not leak",
+      );
+      assert(
+        !serialized.includes(malformed.privateKey),
+        "private key must not leak",
+      );
+    }
+  } finally {
+    Deno.env.get = originalGet;
+  }
+});
+
 Deno.test("developer activity mapper exposes only the safe projection", () => {
   const event = toDeveloperActivityEvent({
     id: "00000000-0000-4000-8000-000000000001",

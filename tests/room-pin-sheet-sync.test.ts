@@ -222,6 +222,245 @@ describe("room PIN Sheet sync worker", () => {
       )?.args,
     ).toMatchObject({ p_status: "operator_blocked", p_blocked: 1 });
   });
+  it("validates malformed service-account configuration on an empty claim without network access", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let fetches = 0;
+    const db: RoomPinSheetRpc = {
+      rpc: async (name, args) => {
+        calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_sync") {
+          return {
+            data: { status: "claimed", items: [], blocked: 0, leaseFence: 4 },
+            error: null,
+          };
+        }
+        if (name === "renew_room_pin_sheet_sync_run") {
+          return { data: { status: "leased", leaseFence: 4 }, error: null };
+        }
+        return { data: { status: args.p_status }, error: null };
+      },
+    };
+    const provider = new GoogleSheetsPinProvider(
+      LOCAL_ROOM_PIN_SHEET_TARGET,
+      { email: "malformed", privateKeyPem: "malformed" },
+      async () => {
+        fetches++;
+        return Response.json({});
+      },
+    );
+    await expect(
+      new RoomPinSheetSyncWorker(db, provider, config).run(),
+    ).resolves.toMatchObject({ claimed: 0, blocked: 0, projected: 0 });
+    expect(fetches).toBe(0);
+    expect(calls.map((call) => call.name)).toEqual([
+      "claim_room_pin_sheet_sync",
+      "renew_room_pin_sheet_sync_run",
+      "record_room_pin_sheet_sync_heartbeat",
+    ]);
+    expect(calls.at(-1)?.args).toMatchObject({
+      p_status: "degraded",
+      p_claimed: 0,
+      p_error_code: "PROVIDER_CONFIGURATION_ERROR",
+    });
+  });
+  it("validates malformed PKCS8 on an empty claim without a Google token request", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let fetches = 0;
+    const db: RoomPinSheetRpc = {
+      rpc: async (name, args) => {
+        calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_sync") {
+          return {
+            data: { status: "claimed", items: [], blocked: 0, leaseFence: 4 },
+            error: null,
+          };
+        }
+        if (name === "renew_room_pin_sheet_sync_run") {
+          return { data: { status: "leased", leaseFence: 4 }, error: null };
+        }
+        return { data: { status: args.p_status }, error: null };
+      },
+    };
+    const provider = new GoogleSheetsPinProvider(
+      LOCAL_ROOM_PIN_SHEET_TARGET,
+      {
+        email: "sheet-worker@example.iam.gserviceaccount.com",
+        privateKeyPem: "not-a-pkcs8-private-key",
+      },
+      async () => {
+        fetches++;
+        return Response.json({});
+      },
+    );
+    await expect(
+      new RoomPinSheetSyncWorker(db, provider, config).run(),
+    ).resolves.toMatchObject({ claimed: 0, blocked: 0, projected: 0 });
+    expect(fetches).toBe(0);
+    expect(calls.at(-1)?.args).toMatchObject({
+      p_status: "degraded",
+      p_error_code: "PROVIDER_CONFIGURATION_ERROR",
+    });
+  });
+  it("classifies a failed DB settle after provider success without repeating the Sheet write", async () => {
+    const source = await fixture(),
+      calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let writes = 0,
+      settleAttempts = 0;
+    const db: RoomPinSheetRpc = {
+      rpc: async (name, args) => {
+        calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_sync") {
+          return {
+            data: {
+              status: "claimed",
+              items: [source],
+              blocked: 0,
+              leaseFence: 4,
+            },
+            error: null,
+          };
+        }
+        if (name === "renew_room_pin_sheet_sync_run") {
+          return { data: { status: "leased", leaseFence: 4 }, error: null };
+        }
+        if (name === "authorize_room_pin_sheet_write") {
+          return { data: { status: "authorized", leaseFence: 4 }, error: null };
+        }
+        if (name === "settle_room_pin_sheet_sync") {
+          settleAttempts++;
+          return settleAttempts === 1
+            ? { data: null, error: { code: "DB_UNAVAILABLE" } }
+            : { data: { status: "operator_blocked" }, error: null };
+        }
+        return { data: { status: args.p_status }, error: null };
+      },
+    };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => ({ outcome: "write", sheetRow: 2 }),
+      write: async () => {
+        writes++;
+      },
+    };
+    await expect(
+      new RoomPinSheetSyncWorker(db, provider, config).run(),
+    ).resolves.toMatchObject({ projected: 0, blocked: 1 });
+    expect(writes).toBe(1);
+    expect(settleAttempts).toBe(2);
+    expect(
+      calls.filter((call) => call.name === "settle_room_pin_sheet_sync").at(-1)
+        ?.args,
+    ).toMatchObject({
+      p_outcome: "operator_blocked",
+      p_reason_code: "DB_SETTLE_UNCERTAIN",
+    });
+  });
+  it("leaves fenced write evidence when both post-write settle attempts fail", async () => {
+    const source = await fixture();
+    let writes = 0;
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const db: RoomPinSheetRpc = {
+      rpc: async (name, args) => {
+        calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_sync") {
+          return {
+            data: {
+              status: "claimed",
+              items: [source],
+              blocked: 0,
+              leaseFence: 4,
+            },
+            error: null,
+          };
+        }
+        if (name === "renew_room_pin_sheet_sync_run") {
+          return { data: { status: "leased", leaseFence: 4 }, error: null };
+        }
+        if (name === "authorize_room_pin_sheet_write") {
+          return { data: { status: "authorized", leaseFence: 4 }, error: null };
+        }
+        return { data: null, error: { code: "DB_UNAVAILABLE" } };
+      },
+    };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => ({ outcome: "write", sheetRow: 2 }),
+      write: async () => {
+        writes++;
+      },
+    };
+    await expect(
+      new RoomPinSheetSyncWorker(db, provider, config).run(),
+    ).rejects.toMatchObject({ code: "ROOM_PIN_SHEET_SYNC_FAILED" });
+    expect(writes).toBe(1);
+    expect(
+      calls.filter((call) => call.name === "settle_room_pin_sheet_sync"),
+    ).toHaveLength(2);
+    expect(
+      calls.filter((call) => call.name === "authorize_room_pin_sheet_write"),
+    ).toHaveLength(1);
+  });
+  it("blocks lease-expiry reconciliation after both settles fail without a duplicate Sheet write", async () => {
+    const source = await fixture();
+    let leaseExpired = false,
+      providerWriteStarted = false,
+      writes = 0,
+      inspections = 0;
+    const db: RoomPinSheetRpc = {
+      rpc: async (name) => {
+        if (name === "claim_room_pin_sheet_sync") {
+          if (providerWriteStarted && leaseExpired) {
+            return {
+              data: {
+                status: "operator_blocked",
+                items: [],
+                blocked: 1,
+                leaseFence: 0,
+              },
+              error: null,
+            };
+          }
+          return {
+            data: {
+              status: "claimed",
+              items: [source],
+              blocked: 0,
+              leaseFence: 4,
+            },
+            error: null,
+          };
+        }
+        if (name === "renew_room_pin_sheet_sync_run") {
+          return { data: { status: "leased", leaseFence: 4 }, error: null };
+        }
+        if (name === "authorize_room_pin_sheet_write") {
+          providerWriteStarted = true;
+          return { data: { status: "authorized", leaseFence: 4 }, error: null };
+        }
+        return { data: null, error: { code: "DB_UNAVAILABLE" } };
+      },
+    };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => {
+        inspections++;
+        return { outcome: "write", sheetRow: 2 };
+      },
+      write: async () => {
+        writes++;
+      },
+    };
+
+    await expect(
+      new RoomPinSheetSyncWorker(db, provider, config).run(),
+    ).rejects.toMatchObject({ code: "ROOM_PIN_SHEET_SYNC_FAILED" });
+    expect(providerWriteStarted).toBe(true);
+    expect(writes).toBe(1);
+    leaseExpired = true;
+
+    await expect(
+      new RoomPinSheetSyncWorker(db, provider, config).run(),
+    ).resolves.toMatchObject({ claimed: 0, blocked: 1, projected: 0 });
+    expect(inspections).toBe(1);
+    expect(writes).toBe(1);
+  });
   it("does not begin a write without the provider reserve and finishes settle/heartbeat before 45 seconds", async () => {
     const source = await fixture(),
       times: Array<{ name: string; now: number }> = [];

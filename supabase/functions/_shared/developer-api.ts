@@ -2,7 +2,10 @@ import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 import { notificationDeliveryConfig } from "../notification-delivery/index.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
-import { assertApprovedRoomPinSheetTarget } from "./google-sheets-pin.ts";
+import {
+  assertApprovedRoomPinSheetTarget,
+  validateGoogleSheetsServiceAccount,
+} from "./google-sheets-pin.ts";
 
 export const expectedMigrationName = "room_pin_sheet_sync_worker";
 
@@ -292,9 +295,27 @@ export async function developerDatabaseStatus(
   } catch {
     /* source-controlled hosted target mapping intentionally remains empty */
   }
-  const roomPinConfigurationReady = roomPinSheetSecretNames.every(
+  const roomPinSecretsPresent = roomPinSheetSecretNames.every(
     (name) => Boolean(Deno.env.get(name)?.trim()),
   );
+  let roomPinProviderConfigurationValid = false;
+  if (roomPinSecretsPresent) {
+    try {
+      await validateGoogleSheetsServiceAccount({
+        email: Deno.env.get("GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL")?.trim() ??
+          "",
+        privateKeyPem:
+          Deno.env.get("GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY")?.trim() ??
+            "",
+      });
+      roomPinProviderConfigurationValid = true;
+    } catch {
+      /* expose only the aggregate configured boolean */
+    }
+  }
+  const roomPinConfigurationReady = roomPinSecretsPresent &&
+    roomPinProviderConfigurationValid;
+  const sheet = roomPinSheetSync as Record<string, unknown>;
   return {
     ...database,
     photoPurge,
@@ -310,7 +331,12 @@ export async function developerDatabaseStatus(
       },
     },
     roomPinSheetSync: {
-      ...roomPinSheetSync,
+      ...sheet,
+      status: roomPinConfigurationReady && targetApproved
+        ? sheet.status
+        : sheet.status === "operator_blocked"
+        ? "operator_blocked"
+        : "degraded",
       activation: {
         functionSecretsConfigured: roomPinConfigurationReady,
         targetApproved,

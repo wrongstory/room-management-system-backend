@@ -122,6 +122,33 @@ function pemBytes(value: string): Uint8Array {
   }
 }
 
+async function importServiceAccountKey(
+  serviceAccount: GoogleSheetsServiceAccount,
+): Promise<CryptoKey> {
+  if (
+    !/^[A-Za-z0-9._%+-]{1,128}@[A-Za-z0-9.-]+\.iam\.gserviceaccount\.com$/
+      .test(serviceAccount.email)
+  ) fail("PROVIDER_CONFIGURATION_ERROR");
+  try {
+    return await crypto.subtle.importKey(
+      "pkcs8",
+      bytes(pemBytes(serviceAccount.privateKeyPem)),
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+  } catch {
+    return fail("PROVIDER_CONFIGURATION_ERROR");
+  }
+}
+
+/** Performs bounded local syntax/import validation and never contacts Google. */
+export async function validateGoogleSheetsServiceAccount(
+  serviceAccount: GoogleSheetsServiceAccount,
+): Promise<void> {
+  await importServiceAccountKey(serviceAccount);
+}
+
 async function boundedFetch(
   fetcher: typeof fetch,
   url: string,
@@ -211,6 +238,7 @@ async function boundedJson(
 
 export class GoogleSheetsPinProvider {
   #token: { value: string; expiresAt: number } | undefined;
+  #signingKey: Promise<CryptoKey> | undefined;
   readonly #target: RoomPinSheetTarget;
   readonly #serviceAccount: GoogleSheetsServiceAccount;
   readonly #fetcher: typeof fetch;
@@ -227,14 +255,15 @@ export class GoogleSheetsPinProvider {
     this.#fetcher = fetcher;
     this.#clock = clock;
   }
+  async validateConfiguration(_deadlineAt: number): Promise<void> {
+    this.#signingKey ??= importServiceAccountKey(this.#serviceAccount);
+    await this.#signingKey;
+  }
   async #accessToken(deadlineAt: number): Promise<string> {
     // Target approval remains constructor-time, but credential validation must
     // happen after the worker owns a claim so invalid hosted configuration is
     // durably settled as operator-blocked instead of returning false-green.
-    if (
-      !/^[A-Za-z0-9._%+-]{1,128}@[A-Za-z0-9.-]+\.iam\.gserviceaccount\.com$/
-        .test(this.#serviceAccount.email)
-    ) fail("PROVIDER_CONFIGURATION_ERROR");
+    await this.validateConfiguration(deadlineAt);
     if (this.#token && this.#token.expiresAt - this.#clock() > 60000) {
       return this.#token.value;
     }
@@ -252,18 +281,8 @@ export class GoogleSheetsPinProvider {
       ),
     );
     const input = `${header}.${claim}`;
-    let key: CryptoKey;
-    try {
-      key = await crypto.subtle.importKey(
-        "pkcs8",
-        bytes(pemBytes(this.#serviceAccount.privateKeyPem)),
-        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-        false,
-        ["sign"],
-      );
-    } catch {
-      return fail("PROVIDER_CONFIGURATION_ERROR");
-    }
+    const key = await this.#signingKey;
+    if (!key) return fail("PROVIDER_CONFIGURATION_ERROR");
     const signature = new Uint8Array(
       await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, bytes(utf8(input))),
     );
