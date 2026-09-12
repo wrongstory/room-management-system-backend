@@ -4,7 +4,8 @@
 
 검토 기준:
 
-- 백엔드 `main`: `7e229c2c1fabd4efd9c77e6032a8ffea09b16cd4`
+- 백엔드 개발 정본 `dev`: `0253172c87b97184449c9f585d23b8eee19282d4` — 45 migrations / OpenAPI 98 paths / 105 operations
+- 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
 - 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
@@ -480,11 +481,12 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 일반 API의 active-profile guard는 유지한다. session이 revoke됐거나 refresh 불가능하면 우회 credential을 발급하지 않고 관리자 handover/reassignment로 처리한다. 현재 일반 비활성화의 session 폐기/Auth ban 계약 변경은 #7B에서 별도 검증하며 #4에서 변경하지 않는다.
 - API와 RLS가 같은 capability matrix를 사용해야 한다.
 
-### `[확정]` 객실 PIN
+### `[확정 — 2026-09-04 #69]` 객실 PIN
 
 - 로그인 비밀번호와 별도 암호키/수명주기로 관리한다.
-- 객실 PIN은 선행 0을 허용하는 4자리 숫자 문자열이다.
-- DB에는 authenticated encryption(AES-GCM 또는 XChaCha20-Poly1305)의 암호문, nonce, authentication tag, key version과 변경 이력을 저장한다. 키는 DB와 분리된 secret manager에 두고 평문을 저장하지 않는다.
+- 프런트 입력은 PIN 숫자 부분만 받으며 `^[0-9]{4,8}$`를 만족하는 문자열이어야 한다. 숫자형으로 변환하지 않고 `0256`, `00000001` 같은 선행 0을 보존한다.
+- 서버는 요청의 `room_id`로 현재 `rooms.room_number`를 다시 조회하고 저장·표시용 canonical credential을 `<room_number>-<pin_digits>`로 조합한다. 클라이언트가 보낸 객실번호 prefix를 신뢰하거나 다른 객실 credential 생성에 사용하지 않는다.
+- DB에는 canonical credential 전체를 authenticated encryption(AES-GCM 또는 XChaCha20-Poly1305)한 암호문, nonce, authentication tag, key version과 immutable revision으로 저장하고 current pointer만 CAS 갱신한다. 키는 DB와 분리된 secret manager에 두며 public table, 감사, outbox, 로그에는 평문이나 암호문을 저장하지 않는다.
 - 권한 있는 사용자가 특정 객실·현재 assignment/attempt에 대해 명시적으로 조회할 때만 서버가 복호화한다. 메이드는 담당뿐 아니라 해당 청소 유형의 출입 허용 시각 도달도 검증한다.
 - 응답은 `Cache-Control: no-store`를 사용하고 클라이언트는 최대 30초 뒤, 화면 이동, background/pagehide, 기기 잠금, 담당 해제, 출입 재잠금 때 평문을 메모리에서 지운다. clipboard, service worker cache, offline queue, 영속 브라우저 저장소에 넣지 않는다.
 - PIN 조회·변경은 객실, PIN version, actor, assignment/attempt에 묶인 lease/CAS와 감사 event를 남긴다.
@@ -647,15 +649,18 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview는 source/dev 완료다. #4 notified-only 조회도 PR #74의 독립 검토·CI·위임 승인 후 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에 병합되어 #7A 선행 gate를 충족했다. production에는 승격되지 않았다.
-- #7A 실행 → #7B 인계/limited capability → #7C offline, #30 photo slot → #83/#84 Drive 원장·HTTP → #85 purge worker까지 source/dev 완료했다. 정산·알림 worker·프런트 실제 연동은 후속이며 outbox 저장과 실제 외부 전달을 구분한다.
-- #30~#31 개발 통합 기준은 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`, 34 migrations / 74 paths / 80 operations이며 production에는 승격하지 않았다. #31은 전체 제출·폭탄방 신고/선판정·검수 승인/반려·원 maid 재청소를 append-only 34번째 migration과 Fastify/Edge source로 구현했고, exact-head 독립 QA P0/P1=0·required CI·96/100 위임 승인 뒤 PR #91로 `dev`에 병합됐다. release/main·production은 미완료이며 inspection queue pagination은 비차단 P2 후속이다. 이 `[현재 구현]` snapshot은 §8의 `[확정]` 정책을 변경하거나 production 사용 가능을 뜻하지 않는다. 다음 본선은 #8 earning/payroll 정산이다.
+- #7A 실행 → #7B 인계/limited capability → #7C offline, #30 photo slot → #83/#84 Drive 원장·HTTP → #85 purge worker와 #31 제출·검수까지 source/dev 완료했다. #7C는 PR #79로 `dev@e2648de4e40a84e60d19cbb1e4d01974a2f3d369`에 통합됐고 production purge 주기·hosted/client offline E2E는 별도 운영 gate다.
+- #30~#31 개발 통합 기준은 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`, 34 migrations / 74 paths / 80 operations이며 production에는 승격하지 않았다. #31은 전체 제출·폭탄방 신고/선판정·검수 승인/반려·원 maid 재청소를 append-only 34번째 migration과 Fastify/Edge source로 구현했고, exact-head 독립 QA P0/P1=0·required CI·96/100 위임 승인 뒤 PR #91로 `dev`에 병합됐다. release/main·production은 미완료이며 inspection queue pagination은 비차단 P2 후속이다. 이 `[현재 구현]` snapshot은 §8의 `[확정]` 정책을 변경하거나 production 사용 가능을 뜻하지 않는다.
 - #93/#95/#96의 원청소 earning 기반 주차 조회·`OPEN → PAYING`·bounded pagination은 `dev@e55f0e9be2f26a1a3700b8d31ba1958dcbe65b3d`, 36 migrations / 77 paths / 83 operations에 source 통합됐다. #94는 typed compensation provenance, complaint/appeal/correction, signed adjustment/carry-forward, 외부 지급 결과·`CHECK/PAID` command 정책을 확정했고, source 구현 상태는 아래 #100과 후속 #101~#103 항목에서 각각 추적한다. main/recovery/production을 변경하거나 향후 병합 SHA를 선기록하지 않는다.
 - #100 complaint/appeal/correction source는 PR #104로 `dev@88d1865bdaafb6dc2afa556452ae80c91569f393`에 통합됐다. 37 migrations / 85 paths / 92 operations이며 원 승인 수익의 typed FK chain과 original-cleaning source allowlist, 30일 접수, immutable decision/response/event와 current pointer CAS, 7일 1회 maid 응답, 종결·correction을 구현한다. complaint Data API SELECT는 JWT 세션과 같은 사용자의 live `auth.sessions` row를 함께 확인하고, correction 알림은 새 응답을 요구하지 않으며, 모든 complaint HTTP 응답은 `no-store`다. exact-head 독립 QA와 required `application`/`migration`은 PASS했지만 main/recovery/production에는 승격하지 않았고 현재 사용 가능을 뜻하지 않는다.
 - #101 complaint 재작업/typed compensation earning은 PR #105로 `dev@a5c48673ff339e5a338356c77ce83e8cf40ee21a`에 통합됐으며 38 migrations / 86 paths / 93 operations다. confirmed current decision을 typed `post_approval_complaint_reclean` target과 연결하고 server가 안전한 당일 접근 창을 증명한 경우에만 published template·notified assignment·assignee·amount를 admin CAS로 고정한다. 같은 maid는 amount 0 decision만 보존하고 earning 0건, 다른 maid는 현장 완료와 승인 뒤 amount가 0이어도 typed entitlement/earning 각 1건을 생성한다. 원청소/compensation earning은 nullable typed FK exactly-one CHECK이고 기존 #31 identity를 보존한다. pre-start semantic correction과 generic reassignment는 ghost/assignee drift를 막으며, 시작 뒤 correction은 operational source/current divergence를 노출한다. raw compensation decision은 live-session admin만 읽고 maid projection은 cross-maid UUID/타 보상액을 숨긴다. developer 감사에는 두 #101 event의 safe summary만 노출하고 raw state/request hash/maid cross-sensitive 필드는 제외한다. main/recovery/production은 변경하지 않았고 현재 사용 가능을 뜻하지 않는다.
 - #102 signed adjustment/carry-forward는 PR #106으로 `dev@cb26650221b3e47804edafd51cad5bfc8872c349`에 통합됐으며 39 migrations / 90 paths / 97 operations다. correction은 earning 또는 adjustment 한 건의 typed FK와 signed delta를 보존하고, reversal은 source의 미반전 전액을 정확히 반대 부호로 한 번만 기록하며 root cumulative entitlement가 0 아래로 내려가지 않는다. payment-start와 adjustment command는 receipt → global advisory → actor → adjustment book → cycle → sorted source 순으로 잠근다. net이 0 이하면 payment event 없이 immutable offset settlement로 OPEN cycle을 경제적으로 동결하고, 음수 크기만 바로 다음 KST 주차로 한 칸씩 이월한다. PAID/offset-settled cycle의 late earning은 명시적 admin command가 원본을 수정하지 않고 다음 주차의 positive `late_earning_carry` adjustment로 한 번만 옮긴다. 공개 조회는 signed adjustment/carry/payable과 `offsetSettled`를 bounded projection으로 제공하며 live-session RLS, audit/outbox, Fastify/Edge/OpenAPI parity를 유지한다. main/recovery/production에는 승격하지 않았다.
-- #103 외부 전액 지급 결과는 위 dev SHA에서 시작한 source PR 후보이며 40 migrations / 93 paths / 100 operations다. 기존 `payment_started` event를 immutable attempt identity로 연결하고, `TRANSFER_RESULT_UNCERTAIN` CHECK, `NO_TRANSFER_CONFIRMED` OPEN 복귀, 양수 locked snapshot 전액 PAID result를 typed append-only evidence로 보존한다. 40번째 migration 이후의 payment projection transition과 event/attempt/result 양쪽은 deferred commit invariant로 서로를 exact하게 요구하며 과거 CHECK/PAID evidence는 추측 backfill하지 않는다. client amount/`paidAt`은 받지 않고 server time과 cycle CAS를 사용하며 OPEN 복귀 뒤 재시작은 새 attempt다. 최초 method는 `bank_transfer`, reference는 8~64 ASCII allowlist·영문/숫자 필수·7자리 연속 숫자/URL-like 거부 뒤 uppercase canonical global unique다. 이 형식은 실제 provider 계약 미확정 동안의 fail-closed source 계약이며 canonical reference는 admin result에만 보이고 maid/developer/audit/notification에는 숨긴다. provider HTTP, 영수증·계좌·수취인 PII·secret/raw payload 저장은 없고 main/recovery/production은 변경하지 않았다.
+- #103 외부 전액 지급 결과는 PR #107로 `dev@3297679ca2e903e68cfa2dd9e7bc137341c5b27d`에 source/dev 통합됐으며 40 migrations / 93 paths / 100 operations다. 기존 `payment_started` event를 immutable attempt identity로 연결하고, `TRANSFER_RESULT_UNCERTAIN` CHECK, `NO_TRANSFER_CONFIRMED` OPEN 복귀, 양수 locked snapshot 전액 PAID result를 typed append-only evidence로 보존한다. 40번째 migration 이후의 payment projection transition과 event/attempt/result 양쪽은 deferred commit invariant로 서로를 exact하게 요구하며 과거 CHECK/PAID evidence는 추측 backfill하지 않는다. client amount/`paidAt`은 받지 않고 server time과 cycle CAS를 사용하며 OPEN 복귀 뒤 재시작은 새 attempt다. 최초 method는 `bank_transfer`, reference는 8~64 ASCII allowlist·영문/숫자 필수·7자리 연속 숫자/URL-like 거부 뒤 uppercase canonical global unique다. 이 형식은 실제 provider 계약 미확정 동안의 fail-closed source 계약이며 canonical reference는 admin result에만 보이고 maid/developer/audit/notification에는 숨긴다. provider HTTP, 영수증·계좌·수취인 PII·secret/raw payload 저장은 없고 main/recovery/production은 변경하지 않았다.
+- #108 알림함, #109 typed catalog/grouping/writer, #110 encrypted Web Push subscription, #111 delivery ledger/worker와 #112 VAPID/provider HTTP source까지 순차적으로 dev에 통합됐다. #112 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 PR #119 병합 commit `dfc98b1474f9f890851d49bd904869181d0d7880`의 tree는 동일하고 독립 QA 98/100, P0/P1/P2 0, required `application`/`migration` PASS다. 상태 문서 동기화까지 반영한 현재 개발 정본은 `dev@0253172c87b97184449c9f585d23b8eee19282d4`, 45 migrations / 98 paths / 105 operations다.
+- 위 source/dev 완료는 운영 사용 가능 선언이 아니다. Issue #112는 release/main 뒤 Function Secrets, 승인된 `api`/`notification-delivery` Edge bundle, negative/positive hosted smoke, Vault/`pg_cron`/`pg_net`, 5회 연속 heartbeat, 실제 기기 Web Push smoke가 끝날 때까지 OPEN이다. 현재 `main`/production/recovery는 v0.2.0 상태로 변경되지 않았다.
+- 다음 source critical path는 **#73 planned checkout 예약 객실 변경 FK → #34 Actions runtime → #46 password replay → #69 Phase A PIN domain**이다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
-- Issue #36에서 Supabase Edge Functions `api`의 health/Auth/rooms RPC와 Cron용 예약 scheduler Function을 로컬 PoC로 검증한다. 운영 smoke와 독립 리뷰 전에는 Supabase-only production runtime을 확정하거나 Fastify를 삭제하지 않는다.
+- Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
 
 원격 운영·복구검증 프로젝트는 Git과 SQL 내용은 대응하지만 migration version은 서로 다르다. `supabase db push`로 자동 추론하지 않고 `docs/RELEASE_V0.2.0.md`의 검증된 mapping과 MCP 순차 적용 절차를 사용한다. 2026-08-29 기준 운영 Security Advisor는 0건이며, 실제 source 병합·원격 적용·tag 상태는 Release Issue #24가 추적한다.
 
@@ -754,13 +759,15 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-1. Issue #1 객실·예약·점유·수동 체크아웃 command를 fresh DB CI와 독립 리뷰 후 반영한다.
-2. 가능일 제출과 assignment revision을 구현한다. 객실 readiness와 예약별 preparation/checkout obligation은 Issue #1 구현을 확장해 사용한다.
-3. offline work lease와 수행 상태를 구현한다.
-4. 7일 Drive 저장 worker, 사진 slot, submission version, 검수·재청소·폭탄방을 원자 command로 구현한다.
-5. earning, payroll item/event/adjustment와 이중 지급 방지를 구현한다.
-6. notification outbox와 외부 worker를 연결한다.
-7. OpenAPI/생성 client로 프런트와 계약을 고정한다.
-8. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
+현재 P2 배정부터 #112 Web Push provider까지의 source/dev critical path는 완료됐다. 다음 source 작업은 운영 승격과 섞지 않고 아래 순서로 진행한다.
+
+1. Issue #73에서 planned checkout target이 있는 예약 객실 변경의 즉시 FK 충돌을 append-only forward fix하고 원자성·과거 통보 snapshot을 회귀 검증한다.
+2. Issue #34에서 GitHub Actions runtime 경고를 별도 CI 유지보수 PR로 정리한다.
+3. Issue #46에서 비밀번호 원문·재사용 verifier 없이 password-change 응답 유실/replay 의미를 확정하고 Fastify/Edge 계약을 맞춘다.
+4. Issue #69 Phase A에서 4~8자리 PIN 입력과 `<room_number>-<pin_digits>` canonical credential의 encrypted immutable revision/current pointer를 구현한다. Google Sheets worker와 production credential/ACL은 후속 Phase B/C로 분리한다.
+5. Issue #12 backup/recovery source는 핵심 source와 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
+6. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
+
+source/dev 완료, release/main 승격, production migration/secret/Edge/Cron 활성화는 서로 다른 gate다. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 
 기능 수를 빨리 늘리는 것보다 **삭제 불가 이력, 돈, 권한, 중복 방지**를 먼저 맞추는 것이 우선이다.
