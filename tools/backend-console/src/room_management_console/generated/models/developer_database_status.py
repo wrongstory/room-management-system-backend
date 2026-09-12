@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     )
     from ..models.developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
     from ..models.developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
+    from ..models.room_pin_sheet_sync_status import RoomPinSheetSyncStatus
 
 
 T = TypeVar("T", bound="DeveloperDatabaseStatus")
@@ -36,6 +37,7 @@ class DeveloperDatabaseStatus:
         row_counts (DeveloperDatabaseStatusRowCounts):
         photo_purge (DeveloperDatabaseStatusPhotoPurge):
         notification_delivery (DeveloperDatabaseStatusNotificationDelivery):
+        room_pin_sheet_sync (RoomPinSheetSyncStatus):
         environment (DeveloperDatabaseStatusEnvironment):
         project_ref (str):
         checked_at (datetime.datetime):
@@ -52,6 +54,7 @@ class DeveloperDatabaseStatus:
     row_counts: DeveloperDatabaseStatusRowCounts
     photo_purge: DeveloperDatabaseStatusPhotoPurge
     notification_delivery: DeveloperDatabaseStatusNotificationDelivery
+    room_pin_sheet_sync: RoomPinSheetSyncStatus
     environment: DeveloperDatabaseStatusEnvironment
     project_ref: str
     checked_at: datetime.datetime
@@ -81,6 +84,8 @@ class DeveloperDatabaseStatus:
 
         notification_delivery = self.notification_delivery.to_dict()
 
+        room_pin_sheet_sync = self.room_pin_sheet_sync.to_dict()
+
         environment = self.environment.value
 
         project_ref = self.project_ref
@@ -102,6 +107,7 @@ class DeveloperDatabaseStatus:
                 "rowCounts": row_counts,
                 "photoPurge": photo_purge,
                 "notificationDelivery": notification_delivery,
+                "roomPinSheetSync": room_pin_sheet_sync,
                 "environment": environment,
                 "projectRef": project_ref,
                 "checkedAt": checked_at,
@@ -120,6 +126,7 @@ class DeveloperDatabaseStatus:
         )
         from ..models.developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
         from ..models.developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
+        from ..models.room_pin_sheet_sync_status import RoomPinSheetSyncStatus
 
         d = dict(src_dict)
         database_reachable = d.pop("databaseReachable")
@@ -158,6 +165,8 @@ class DeveloperDatabaseStatus:
             d.pop("notificationDelivery")
         )
 
+        room_pin_sheet_sync = RoomPinSheetSyncStatus.from_dict(d.pop("roomPinSheetSync"))
+
         environment = DeveloperDatabaseStatusEnvironment(d.pop("environment"))
 
         project_ref = d.pop("projectRef")
@@ -176,6 +185,7 @@ class DeveloperDatabaseStatus:
             row_counts=row_counts,
             photo_purge=photo_purge,
             notification_delivery=notification_delivery,
+            room_pin_sheet_sync=room_pin_sheet_sync,
             environment=environment,
             project_ref=project_ref,
             checked_at=checked_at,

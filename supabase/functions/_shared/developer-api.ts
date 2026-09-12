@@ -2,8 +2,9 @@ import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 import { notificationDeliveryConfig } from "../notification-delivery/index.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
+import { assertApprovedRoomPinSheetTarget } from "./google-sheets-pin.ts";
 
-export const expectedMigrationName = "assignment_notification_coverage";
+export const expectedMigrationName = "room_pin_sheet_sync_worker";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -66,6 +67,23 @@ const secretConfigurationAllowlist = [
   "VAPID_PRIVATE_KEY",
   "VAPID_KEYRING_JSON",
   "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+  "ROOM_PIN_KEY_BASE64",
+  "ROOM_PIN_KEY_VERSION",
+  "ROOM_PIN_KEYRING_JSON",
+  "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+  "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL",
+  "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+  "GOOGLE_SHEETS_SPREADSHEET_ID",
+  "GOOGLE_SHEETS_ROOM_PIN_TAB",
+] as const;
+const roomPinSheetSecretNames = [
+  "ROOM_PIN_KEY_BASE64",
+  "ROOM_PIN_KEY_VERSION",
+  "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+  "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL",
+  "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+  "GOOGLE_SHEETS_SPREADSHEET_ID",
+  "GOOGLE_SHEETS_ROOM_PIN_TAB",
 ] as const;
 const notificationDeliverySecretNames = [
   "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
@@ -222,6 +240,7 @@ export async function developerDatabaseStatus(
     database,
     photoPurge,
     notificationDelivery,
+    roomPinSheetSync,
     providerConfigurationValid,
   ] = await Promise.all([
     rpcJson(clients, "get_developer_database_status", {
@@ -232,6 +251,9 @@ export async function developerDatabaseStatus(
       p_actor_profile_id: actor.profileId,
     }),
     rpcJson(clients, "get_developer_notification_delivery_status", {
+      p_actor_profile_id: actor.profileId,
+    }),
+    rpcJson(clients, "get_developer_room_pin_sheet_sync_status", {
       p_actor_profile_id: actor.profileId,
     }),
     (async () => {
@@ -258,6 +280,21 @@ export async function developerDatabaseStatus(
       !Array.isArray(delivery.activation)
     ? delivery.activation as Record<string, unknown>
     : {};
+  let targetApproved = false;
+  try {
+    assertApprovedRoomPinSheetTarget({
+      environment: Deno.env.get("RUNTIME_ENVIRONMENT")?.trim() ?? "",
+      projectRef: Deno.env.get("SUPABASE_PROJECT_REF")?.trim() ?? "",
+      spreadsheetId: Deno.env.get("GOOGLE_SHEETS_SPREADSHEET_ID")?.trim() ?? "",
+      tab: Deno.env.get("GOOGLE_SHEETS_ROOM_PIN_TAB")?.trim() ?? "",
+    });
+    targetApproved = true;
+  } catch {
+    /* source-controlled hosted target mapping intentionally remains empty */
+  }
+  const roomPinConfigurationReady = roomPinSheetSecretNames.every(
+    (name) => Boolean(Deno.env.get(name)?.trim()),
+  );
   return {
     ...database,
     photoPurge,
@@ -270,6 +307,13 @@ export async function developerDatabaseStatus(
         ...activation,
         functionSecretsConfigured,
         providerConfigurationValid,
+      },
+    },
+    roomPinSheetSync: {
+      ...roomPinSheetSync,
+      activation: {
+        functionSecretsConfigured: roomPinConfigurationReady,
+        targetApproved,
       },
     },
     environment: runtime.environment,

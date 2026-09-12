@@ -1,10 +1,22 @@
-# 객실 PIN Phase A 운영 인계
+# 객실 PIN Phase A/B 운영 인계
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131의 source candidate를 설명한다. 기준은 `dev@58cf63e36fde8fd209e8ab18508b59d2bd275d0e`, 48 migrations / 98 paths / 105 operations이고 candidate는 49 migrations / 102 paths / 109 operations다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Edge, Cron, Vault, Google 설정은 변경하지 않는다.
+이 문서는 Issue #131 Phase A와 Issue #136 Phase B source 계약을 설명한다. 통합 기준은 `dev@d9b6ce90fa8f924a4a62cea6566fc8e7754f054b`, 49 migrations / 102 paths / 109 operations이고 Phase B candidate는 50번째 append-only migration을 추가하되 공개 OpenAPI 수는 유지한다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
 
-Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event, Phase-B sheet outbox 기반만 포함한다. Google Sheets provider 호출, worker, full resync, production secret/ACL은 포함하지 않는다.
+Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. full resync·운영 승인 target mapping·Google hosted ACL/Cron은 #137 및 release gate로 남긴다.
+
+## Phase B Google Sheets projection
+
+- Sheet는 DB 정본을 보여주는 단방향 projection이다. `room_number`가 business identity이며 worker는 bounded `A2:H122` board 전체에서 정확히 한 행을 찾아 실제 행 위치를 갱신한다. 중복 room number 또는 deterministic 빈 slot에 다른 객실이 있으면 덮어쓰지 않고 operator-blocked다.
+- 컬럼은 `room_number,current_pin,pin_version,sync_status,effective_at,last_synced_at,reason_code,environment`로 고정한다. 현재 event의 `sync_status`를 그대로 쓰며 PIN 이외의 자유형 값은 쓰지 않는다. `effective_at`은 PIN revision 생성 시각이 아니라 현재 projection outbox 사건 시각이므로, 같은 version을 물리 원복한 경우에도 더 늦은 rollback 사건과 reason을 보존한다.
+- Sheet version이 DB current보다 크면 사람/외부 변경으로 보고 block한다. version이 같고 PIN·marker가 모두 같을 때만 no-op이며, 같은 version의 PIN/marker 변조는 DB 정본으로 repair한다. 낮은 version은 최신 DB revision으로 갱신한다.
+- 한 실행은 최대 10개 room identity, provider 시작 33초, DB settle 39초, heartbeat 포함 전체 45초 absolute deadline을 공유한다. 명시적 HTTP 429/5xx는 bounded backoff retry이고, write 시작 뒤 network timeout/abort는 결과 불확실이므로 global operator-blocked다.
+- claim/authorize/settle은 global singleton lease와 증가 fence를 사용한다. 새 PIN version은 과거 pending outbox를 supersede하며 mid-write 변경은 stale settle 후 다음 current outbox로 수렴한다. 불확실 write와 retry 소진은 자동 성공 처리하지 않고 reconciliation 전까지 멈춘다.
+- Google OAuth는 별도 service account, fixed token endpoint, `https://www.googleapis.com/auth/spreadsheets` 단일 scope와 RS256 assertion만 쓴다. Sheet endpoint·private key·OAuth assertion/access token·PIN/envelope·provider raw error는 로그, heartbeat, developer projection, audit에 남기지 않는다.
+- source-controlled approved target에는 현재 local/test synthetic mapping만 있다. 승인되지 않은 hosted environment/projectRef/spreadsheet/tab은 PIN 복호화와 OAuth token exchange 전에 fail-closed한다. production mapping은 #137/release 승인 PR에서만 추가한다.
+- local worker adapter 테스트는 `RUNTIME_ENVIRONMENT=local`, `SUPABASE_PROJECT_REF=local`, synthetic spreadsheet ID, exact `객실_PIN_현황` tab을 함께 써야 한다. 공용 `.env.example`의 빈 project ref를 그대로 두고 worker를 실행할 수 없으며, 다른 local API의 target 계약을 바꾸려고 전역 예시를 임의 수정하지 않는다.
+- developer database status는 secret configured boolean, target approved boolean, safe status/count/time/stable error만 제공한다. raw outbox ID, room ID, PIN, Sheet cell/payload, provider credential은 제공하지 않는다.
 
 ## Secret과 암호화
 
@@ -48,4 +60,4 @@ DB의 `room_pin_sync_events`와 private sheet outbox에는 room/version/status/s
 
 ## Rollback
 
-Source rollback은 애플리케이션과 49번째 migration을 함께 되돌릴 수 있는 release 절차에서만 검토한다. 이미 encrypted revision/physical change가 존재하면 schema를 먼저 제거하지 않는다. 배포 중단 시에는 새 PIN endpoint 트래픽을 차단하고 mismatch 객실을 실제 re-entry/rollback 절차로 해소한 뒤 keyring과 DB backup을 보존한다. Phase A는 외부 Google side effect가 없으므로 provider 보상 작업은 없다.
+Source rollback은 애플리케이션과 해당 append-only migration을 함께 다루는 release 절차에서만 검토한다. 이미 encrypted revision/physical change가 존재하면 schema를 먼저 제거하지 않는다. 배포 중단 시에는 새 PIN endpoint 트래픽을 차단하고 mismatch 객실을 실제 re-entry/rollback 절차로 해소한 뒤 keyring과 DB backup을 보존한다. Phase B에서 write 결과가 불확실하면 Sheet와 DB current version/PIN을 사람이 대조한 후에만 service-owned reconciliation으로 재개하며, 자동 full resync나 추정 성공 처리는 하지 않는다.

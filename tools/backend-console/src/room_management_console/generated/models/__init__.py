@@ -85,6 +85,18 @@ from .developer_runtime_status_configuration_googledriverefreshtoken import (
 from .developer_runtime_status_configuration_googledriverootfolderid import (
     DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
 )
+from .developer_runtime_status_configuration_googlesheetsroompintab import (
+    DeveloperRuntimeStatusConfigurationGOOGLESHEETSROOMPINTAB,
+)
+from .developer_runtime_status_configuration_googlesheetsserviceaccountemail import (
+    DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTEMAIL,
+)
+from .developer_runtime_status_configuration_googlesheetsserviceaccountprivatekey import (
+    DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTPRIVATEKEY,
+)
+from .developer_runtime_status_configuration_googlesheetsspreadsheetid import (
+    DeveloperRuntimeStatusConfigurationGOOGLESHEETSSPREADSHEETID,
+)
 from .developer_runtime_status_configuration_notificationcursorhmacsecret import (
     DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET,
 )
@@ -111,6 +123,18 @@ from .developer_runtime_status_configuration_reservationpiikeyversion import (
 )
 from .developer_runtime_status_configuration_reservationscheduleractorprofileid import (
     DeveloperRuntimeStatusConfigurationRESERVATIONSCHEDULERACTORPROFILEID,
+)
+from .developer_runtime_status_configuration_roompinkeybase64 import (
+    DeveloperRuntimeStatusConfigurationROOMPINKEYBASE64,
+)
+from .developer_runtime_status_configuration_roompinkeyringjson import (
+    DeveloperRuntimeStatusConfigurationROOMPINKEYRINGJSON,
+)
+from .developer_runtime_status_configuration_roompinkeyversion import (
+    DeveloperRuntimeStatusConfigurationROOMPINKEYVERSION,
+)
+from .developer_runtime_status_configuration_roompinsheetsyncinvokesecret import (
+    DeveloperRuntimeStatusConfigurationROOMPINSHEETSYNCINVOKESECRET,
 )
 from .developer_runtime_status_configuration_schedulerinvokesecret import (
     DeveloperRuntimeStatusConfigurationSCHEDULERINVOKESECRET,
@@ -177,6 +201,17 @@ from .managed_role import ManagedRole
 from .password_change_request import PasswordChangeRequest
 from .reset_account_password_response_200 import ResetAccountPasswordResponse200
 from .role_change_request import RoleChangeRequest
+from .room_pin_sheet_sync_status import RoomPinSheetSyncStatus
+from .room_pin_sheet_sync_status_activation import RoomPinSheetSyncStatusActivation
+from .room_pin_sheet_sync_status_backlog import RoomPinSheetSyncStatusBacklog
+from .room_pin_sheet_sync_status_last_heartbeat_type_0 import (
+    RoomPinSheetSyncStatusLastHeartbeatType0,
+)
+from .room_pin_sheet_sync_status_last_heartbeat_type_0_status import (
+    RoomPinSheetSyncStatusLastHeartbeatType0Status,
+)
+from .room_pin_sheet_sync_status_status import RoomPinSheetSyncStatusStatus
+from .room_pin_sheet_sync_status_worker import RoomPinSheetSyncStatusWorker
 from .run_developer_diagnostics_response_200 import RunDeveloperDiagnosticsResponse200
 from .status_change_request import StatusChangeRequest
 from .status_change_request_status import StatusChangeRequestStatus
@@ -240,6 +275,10 @@ __all__ = (
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVECLIENTSECRET",
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVEREFRESHTOKEN",
     "DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID",
+    "DeveloperRuntimeStatusConfigurationGOOGLESHEETSROOMPINTAB",
+    "DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTEMAIL",
+    "DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTPRIVATEKEY",
+    "DeveloperRuntimeStatusConfigurationGOOGLESHEETSSPREADSHEETID",
     "DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET",
     "DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET",
     "DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET",
@@ -249,6 +288,10 @@ __all__ = (
     "DeveloperRuntimeStatusConfigurationRESERVATIONPIIKEYRINGJSON",
     "DeveloperRuntimeStatusConfigurationRESERVATIONPIIKEYVERSION",
     "DeveloperRuntimeStatusConfigurationRESERVATIONSCHEDULERACTORPROFILEID",
+    "DeveloperRuntimeStatusConfigurationROOMPINKEYBASE64",
+    "DeveloperRuntimeStatusConfigurationROOMPINKEYRINGJSON",
+    "DeveloperRuntimeStatusConfigurationROOMPINKEYVERSION",
+    "DeveloperRuntimeStatusConfigurationROOMPINSHEETSYNCINVOKESECRET",
     "DeveloperRuntimeStatusConfigurationSCHEDULERINVOKESECRET",
     "DeveloperRuntimeStatusConfigurationVAPIDCURRENTKEYVERSION",
     "DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON",
@@ -284,6 +327,13 @@ __all__ = (
     "PasswordChangeRequest",
     "ResetAccountPasswordResponse200",
     "RoleChangeRequest",
+    "RoomPinSheetSyncStatus",
+    "RoomPinSheetSyncStatusActivation",
+    "RoomPinSheetSyncStatusBacklog",
+    "RoomPinSheetSyncStatusLastHeartbeatType0",
+    "RoomPinSheetSyncStatusLastHeartbeatType0Status",
+    "RoomPinSheetSyncStatusStatus",
+    "RoomPinSheetSyncStatusWorker",
     "RunDeveloperDiagnosticsResponse200",
     "StatusChangeRequest",
     "StatusChangeRequestStatus",
