@@ -1591,10 +1591,39 @@ export async function resetAccountPassword(
     }
     return toAccount(row);
   }
+  const resetPassword = toSupabaseAuthPassword(row.phone_last_four);
+  if (
+    await currentPasswordEffectVersion(clients, row.auth_user_id, true) ===
+      effectMarker
+  ) {
+    if (
+      !(await verifyPasswordResetEffect(
+        clients,
+        row,
+        resetPassword,
+        effectMarker,
+      ))
+    ) {
+      throw new EdgeError(
+        502,
+        "PASSWORD_RESET_STATE_UPDATE_FAILED",
+        "인증 비밀번호 초기화 결과를 확인하지 못했습니다. 운영자 확인이 필요합니다.",
+      );
+    }
+    await finalizePasswordReset(
+      clients,
+      actor,
+      targetProfileId,
+      key,
+      hash,
+      effectMarker,
+    );
+    return toAccount(row);
+  }
   const { error: authError } = await clients.admin.auth.admin.updateUserById(
     row.auth_user_id,
     {
-      password: toSupabaseAuthPassword(row.phone_last_four),
+      password: resetPassword,
       app_metadata: {
         profile_id: row.id,
         role: row.role,
@@ -1602,6 +1631,24 @@ export async function resetAccountPassword(
     },
   );
   if (authError) {
+    if (
+      await verifyPasswordResetEffect(
+        clients,
+        row,
+        resetPassword,
+        effectMarker,
+      )
+    ) {
+      await finalizePasswordReset(
+        clients,
+        actor,
+        targetProfileId,
+        key,
+        hash,
+        effectMarker,
+      );
+      return toAccount(row);
+    }
     throw new EdgeError(
       502,
       "AUTH_PASSWORD_RESET_FAILED",
@@ -1609,8 +1656,12 @@ export async function resetAccountPassword(
     );
   }
   if (
-    await currentPasswordEffectVersion(clients, row.auth_user_id, true) !==
-      effectMarker
+    !(await verifyPasswordResetEffect(
+      clients,
+      row,
+      resetPassword,
+      effectMarker,
+    ))
   ) {
     throw new EdgeError(
       502,
@@ -1618,6 +1669,25 @@ export async function resetAccountPassword(
       "인증 비밀번호 초기화 결과를 확인하지 못했습니다. 같은 Idempotency-Key로 다시 시도해 주세요.",
     );
   }
+  await finalizePasswordReset(
+    clients,
+    actor,
+    targetProfileId,
+    key,
+    hash,
+    effectMarker,
+  );
+  return toAccount(row);
+}
+
+async function finalizePasswordReset(
+  clients: EdgeClients,
+  actor: EdgeActor,
+  targetProfileId: string,
+  key: string,
+  hash: string,
+  effectMarker: string,
+): Promise<void> {
   const { error: finalizeError } = await clients.admin.rpc(
     "finalize_password_change_admin_reset",
     {
@@ -1635,5 +1705,34 @@ export async function resetAccountPassword(
       "인증 비밀번호는 초기화됐지만 복구 상태를 완료하지 못했습니다. 같은 Idempotency-Key로 다시 시도해 주세요.",
     );
   }
-  return toAccount(row);
+}
+
+async function verifyPasswordResetEffect(
+  clients: EdgeClients,
+  row: ProfileRow,
+  resetPassword: string,
+  effectMarker: string,
+): Promise<boolean> {
+  if (
+    await currentPasswordEffectVersion(clients, row.auth_user_id, true) !==
+      effectMarker
+  ) return false;
+  const { data, error } = await clients.publicClient.auth.signInWithPassword({
+    email: syntheticEmail(row.id),
+    password: resetPassword,
+  });
+  if (error || !data.session) return false;
+  const { error: revokeError } = await clients.admin.auth.admin.signOut(
+    data.session.access_token,
+    "local",
+  );
+  if (revokeError) {
+    throw new EdgeError(
+      500,
+      "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
+      "비밀번호 확인 세션을 안전하게 폐기하지 못했습니다.",
+    );
+  }
+  return await currentPasswordEffectVersion(clients, row.auth_user_id, true) ===
+    effectMarker;
 }

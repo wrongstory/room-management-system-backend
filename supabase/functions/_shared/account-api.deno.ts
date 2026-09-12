@@ -1015,6 +1015,7 @@ Deno.test("Edge completed replay requires the original password effect version",
 
 Deno.test("Edge admin reset finalizes self-change recovery only after password version success", async () => {
   const rpcNames: string[] = [];
+  let versionReads = 0;
   const clients = {
     admin: {
       from: () => queryResult(profile),
@@ -1030,14 +1031,28 @@ Deno.test("Edge admin reset finalizes self-change recovery only after password v
           });
         }
         if (name === "get_auth_password_version") {
-          return Promise.resolve({ data: passwordEffectMarker, error: null });
+          versionReads += 1;
+          return Promise.resolve({
+            data: versionReads === 1 ? "0".repeat(64) : passwordEffectMarker,
+            error: null,
+          });
         }
         return Promise.resolve({ data: { completed: true }, error: null });
       },
       auth: {
         admin: {
           updateUserById: () => Promise.resolve({ data: null, error: null }),
+          signOut: () => Promise.resolve({ error: null }),
         },
+      },
+    },
+    publicClient: {
+      auth: {
+        signInWithPassword: () =>
+          Promise.resolve({
+            data: { session: { access_token: "ephemeral-reset-proof" } },
+            error: null,
+          }),
       },
     },
   } as unknown as EdgeClients;
@@ -1054,9 +1069,199 @@ Deno.test("Edge admin reset finalizes self-change recovery only after password v
       "prepare_account_password_reset",
       "prepare_password_change_admin_reset",
       "get_auth_password_version",
+      "get_auth_password_version",
+      "get_auth_password_version",
       "finalize_password_change_admin_reset",
     ],
     "reset recovery finalizes only after Auth verification",
+  );
+});
+
+Deno.test("Edge admin reset response loss finalizes once and replays without another Auth mutation", async () => {
+  let finalized = false;
+  let versionReads = 0;
+  let updateCount = 0;
+  let signInCount = 0;
+  let signOutCount = 0;
+  const clients = {
+    admin: {
+      from: () => queryResult(profile),
+      rpc: (name: string) => {
+        if (name === "prepare_account_password_reset") {
+          return Promise.resolve({ data: profile, error: null });
+        }
+        if (name === "prepare_password_change_admin_reset") {
+          return Promise.resolve({
+            data: {
+              state: finalized ? "completed" : "prepared",
+              effectMarker: passwordEffectMarker,
+            },
+            error: null,
+          });
+        }
+        if (name === "get_auth_password_version") {
+          versionReads += 1;
+          return Promise.resolve({
+            data: versionReads === 1 ? "0".repeat(64) : passwordEffectMarker,
+            error: null,
+          });
+        }
+        if (name === "finalize_password_change_admin_reset") {
+          finalized = true;
+          return Promise.resolve({ data: { completed: true }, error: null });
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({
+              data: null,
+              error: { message: "response lost after commit" },
+            });
+          },
+          signOut: () => {
+            signOutCount += 1;
+            return Promise.resolve({ error: null });
+          },
+        },
+      },
+    },
+    publicClient: {
+      auth: {
+        signInWithPassword: () => {
+          signInCount += 1;
+          return Promise.resolve({
+            data: { session: { access_token: "ephemeral-reset-proof" } },
+            error: null,
+          });
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+  const resetRequest = request({}, "edge-reset-response-loss-0013");
+
+  await resetAccountPassword(resetRequest, clients, developer, profile.id);
+  await resetAccountPassword(resetRequest, clients, developer, profile.id);
+
+  assertEquals(updateCount, 1, "response-loss replay never mutates Auth twice");
+  assertEquals(signInCount, 1, "intended reset password is proven once");
+  assertEquals(signOutCount, 1, "proof session is revoked immediately");
+});
+
+Deno.test("Edge prepared reset version with a different password fails closed before Auth mutation", async () => {
+  let updateCount = 0;
+  const clients = {
+    admin: {
+      from: () => queryResult(profile),
+      rpc: (name: string) => {
+        if (name === "prepare_account_password_reset") {
+          return Promise.resolve({ data: profile, error: null });
+        }
+        if (name === "get_auth_password_version") {
+          return Promise.resolve({ data: passwordEffectMarker, error: null });
+        }
+        return Promise.resolve({
+          data: { state: "prepared", effectMarker: passwordEffectMarker },
+          error: null,
+        });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({ data: null, error: null });
+          },
+          signOut: () => Promise.resolve({ error: null }),
+        },
+      },
+    },
+    publicClient: {
+      auth: {
+        signInWithPassword: () =>
+          Promise.resolve({
+            data: { session: null },
+            error: { message: "wrong reset password" },
+          }),
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    resetAccountPassword(
+      request({}, "edge-reset-wrong-effect-0014"),
+      clients,
+      developer,
+      profile.id,
+    )
+  );
+  assertEquals(
+    error.code,
+    "PASSWORD_RESET_STATE_UPDATE_FAILED",
+    "wrong prepared effect",
+  );
+  assertEquals(updateCount, 0, "wrong prepared effect is never overwritten");
+});
+
+Deno.test("Edge reset proof session revoke failure never finalizes or mutates Auth", async () => {
+  const rpcNames: string[] = [];
+  let updateCount = 0;
+  const clients = {
+    admin: {
+      from: () => queryResult(profile),
+      rpc: (name: string) => {
+        rpcNames.push(name);
+        if (name === "prepare_account_password_reset") {
+          return Promise.resolve({ data: profile, error: null });
+        }
+        if (name === "get_auth_password_version") {
+          return Promise.resolve({ data: passwordEffectMarker, error: null });
+        }
+        return Promise.resolve({
+          data: { state: "prepared", effectMarker: passwordEffectMarker },
+          error: null,
+        });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({ data: null, error: null });
+          },
+          signOut: () =>
+            Promise.resolve({ error: { message: "revoke unavailable" } }),
+        },
+      },
+    },
+    publicClient: {
+      auth: {
+        signInWithPassword: () =>
+          Promise.resolve({
+            data: { session: { access_token: "ephemeral-reset-proof" } },
+            error: null,
+          }),
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    resetAccountPassword(
+      request({}, "edge-reset-revoke-failure-0015"),
+      clients,
+      developer,
+      profile.id,
+    )
+  );
+  assertEquals(
+    error.code,
+    "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
+    "proof session revoke is fail-closed",
+  );
+  assertEquals(updateCount, 0, "revoke failure never retries Auth mutation");
+  assert(
+    !rpcNames.includes("finalize_password_change_admin_reset"),
+    "revoke failure never finalizes recovery",
   );
 });
 
@@ -1158,6 +1363,9 @@ Deno.test("Edge admin reset Auth failure never finalizes recovery", async () => 
         rpcNames.push(name);
         if (name === "prepare_account_password_reset") {
           return Promise.resolve({ data: profile, error: null });
+        }
+        if (name === "get_auth_password_version") {
+          return Promise.resolve({ data: "0".repeat(64), error: null });
         }
         return Promise.resolve({
           data: { state: "prepared", effectMarker: passwordEffectMarker },

@@ -555,23 +555,49 @@ export class SupabaseAccountService implements AccountService {
       }
       return toAccount(row);
     }
+    const resetPassword = toSupabaseAuthPassword(row.phone_last_four);
+    if (await this.currentPasswordEffectVersion(row.auth_user_id) === effectMarker) {
+      if (!await this.verifyPasswordResetEffect(row, resetPassword, effectMarker)) {
+        throw new AppError(
+          502,
+          'PASSWORD_RESET_STATE_UPDATE_FAILED',
+          '인증 비밀번호 초기화 결과를 확인하지 못했습니다. 운영자 확인이 필요합니다.'
+        );
+      }
+      await this.finalizePasswordReset(actor, input, hash, effectMarker);
+      return toAccount(row);
+    }
     const { error: authError } = await this.clients.admin.auth.admin.updateUserById(row.auth_user_id, {
-      password: toSupabaseAuthPassword(row.phone_last_four),
+      password: resetPassword,
       app_metadata: {
         profile_id: row.id,
         role: row.role
       }
     });
     if (authError) {
+      if (await this.verifyPasswordResetEffect(row, resetPassword, effectMarker)) {
+        await this.finalizePasswordReset(actor, input, hash, effectMarker);
+        return toAccount(row);
+      }
       throw new AppError(502, 'AUTH_PASSWORD_RESET_FAILED', '인증 비밀번호를 초기화하지 못했습니다. 다시 시도해 주세요.');
     }
-    if (await this.currentPasswordEffectVersion(row.auth_user_id) !== effectMarker) {
+    if (!await this.verifyPasswordResetEffect(row, resetPassword, effectMarker)) {
       throw new AppError(
         502,
         'PASSWORD_RESET_STATE_UPDATE_FAILED',
         '인증 비밀번호 초기화 결과를 확인하지 못했습니다. 같은 Idempotency-Key로 다시 시도해 주세요.'
       );
     }
+    await this.finalizePasswordReset(actor, input, hash, effectMarker);
+    return toAccount(row);
+  }
+
+  private async finalizePasswordReset(
+    actor: Actor,
+    input: AccountMutationInput,
+    hash: string,
+    effectMarker: string
+  ): Promise<void> {
     const { error: finalizeError } = await this.clients.admin.rpc(
       'finalize_password_change_admin_reset',
       {
@@ -589,7 +615,31 @@ export class SupabaseAccountService implements AccountService {
         '인증 비밀번호는 초기화됐지만 복구 상태를 완료하지 못했습니다. 같은 Idempotency-Key로 다시 시도해 주세요.'
       );
     }
-    return toAccount(row);
+  }
+
+  private async verifyPasswordResetEffect(
+    row: ProfileRow,
+    resetPassword: string,
+    effectMarker: string
+  ): Promise<boolean> {
+    if (await this.currentPasswordEffectVersion(row.auth_user_id) !== effectMarker) return false;
+    const { data, error } = await this.clients.publicClient.auth.signInWithPassword({
+      email: syntheticEmail(row.id),
+      password: resetPassword
+    });
+    if (error || !data.session) return false;
+    const { error: revokeError } = await this.clients.admin.auth.admin.signOut(
+      data.session.access_token,
+      'local'
+    );
+    if (revokeError) {
+      throw new AppError(
+        500,
+        'PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED',
+        '비밀번호 확인 세션을 안전하게 폐기하지 못했습니다.'
+      );
+    }
+    return await this.currentPasswordEffectVersion(row.auth_user_id) === effectMarker;
   }
 
   private async currentPasswordEffectVersion(authUserId: string): Promise<string> {

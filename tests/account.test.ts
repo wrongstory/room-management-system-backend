@@ -329,6 +329,7 @@ describe('account input normalization', () => {
   it('finalizes an inconsistent self-change receipt only after Auth reset marker success', async () => {
     const resetMarker = 'a'.repeat(64);
     const rpcNames: string[] = [];
+    let versionReads = 0;
     const rpc = vi.fn(async (name: string) => {
       rpcNames.push(name);
       if (name === 'prepare_account_password_reset') {
@@ -338,7 +339,8 @@ describe('account input normalization', () => {
         return { data: { state: 'prepared', effectMarker: resetMarker }, error: null };
       }
       if (name === 'get_auth_password_version') {
-        return { data: resetMarker, error: null };
+        versionReads += 1;
+        return { data: versionReads === 1 ? '0'.repeat(64) : resetMarker, error: null };
       }
       if (name === 'finalize_password_change_admin_reset') {
         return { data: { completed: true }, error: null };
@@ -356,7 +358,15 @@ describe('account input normalization', () => {
           }))
         })),
         rpc,
-        auth: { admin: { updateUserById } }
+        auth: { admin: { updateUserById, signOut: vi.fn(async () => ({ error: null })) } }
+      },
+      publicClient: {
+        auth: {
+          signInWithPassword: vi.fn(async () => ({
+            data: { session: { access_token: 'ephemeral-reset-proof' } },
+            error: null
+          }))
+        }
       }
     } as unknown as SupabaseClients;
     const service = new SupabaseAccountService(
@@ -373,6 +383,8 @@ describe('account input normalization', () => {
       'prepare_account_password_reset',
       'prepare_password_change_admin_reset',
       'get_auth_password_version',
+      'get_auth_password_version',
+      'get_auth_password_version',
       'finalize_password_change_admin_reset'
     ]);
     expect(updateUserById).toHaveBeenCalledWith(activeAdminProfile.auth_user_id, {
@@ -382,6 +394,111 @@ describe('account input normalization', () => {
         role: activeAdminProfile.role
       }
     });
+  });
+
+  it('recovers an Auth reset response loss and replays the same key without a second mutation', async () => {
+    const resetMarker = 'e'.repeat(64);
+    let invocation = 0;
+    let versionReads = 0;
+    const rpc = vi.fn(async (name: string) => {
+      if (name === 'prepare_account_password_reset') {
+        return { data: activeAdminProfile, error: null };
+      }
+      if (name === 'prepare_password_change_admin_reset') {
+        return {
+          data: {
+            state: invocation === 0 ? 'prepared' : 'completed',
+            effectMarker: resetMarker
+          },
+          error: null
+        };
+      }
+      if (name === 'get_auth_password_version') {
+        versionReads += 1;
+        return { data: versionReads === 1 ? '0'.repeat(64) : resetMarker, error: null };
+      }
+      if (name === 'finalize_password_change_admin_reset') {
+        invocation += 1;
+        return { data: { completed: true }, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const updateUserById = vi.fn(async () => ({
+      data: null,
+      error: { message: 'response lost after commit' }
+    }));
+    const signOut = vi.fn(async () => ({ error: null }));
+    const signInWithPassword = vi.fn(async () => ({
+      data: { session: { access_token: 'ephemeral-reset-proof' } },
+      error: null
+    }));
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc,
+        auth: { admin: { updateUserById, signOut } }
+      },
+      publicClient: { auth: { signInWithPassword } },
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    );
+    const command = {
+      targetProfileId: activeAdminProfile.id,
+      idempotencyKey: 'reset-response-loss-replay-0001'
+    };
+
+    await service.resetPassword(actor, command);
+    await service.resetPassword(actor, command);
+
+    expect(updateUserById).toHaveBeenCalledTimes(1);
+    expect(signInWithPassword).toHaveBeenCalledTimes(1);
+    expect(signOut).toHaveBeenCalledWith('ephemeral-reset-proof', 'local');
+    expect(rpc.mock.calls.filter(([name]) => name === 'finalize_password_change_admin_reset')).toHaveLength(1);
+  });
+
+  it('fails closed without another Auth mutation when a prepared reset version has the wrong password', async () => {
+    const resetMarker = 'f'.repeat(64);
+    const rpc = vi.fn(async (name: string) => {
+      if (name === 'prepare_account_password_reset') return { data: activeAdminProfile, error: null };
+      if (name === 'prepare_password_change_admin_reset') {
+        return { data: { state: 'prepared', effectMarker: resetMarker }, error: null };
+      }
+      if (name === 'get_auth_password_version') return { data: resetMarker, error: null };
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const updateUserById = vi.fn();
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc,
+        auth: { admin: { updateUserById, signOut: vi.fn() } }
+      },
+      publicClient: {
+        auth: { signInWithPassword: vi.fn(async () => ({ data: { session: null }, error: { message: 'bad password' } })) }
+      }
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(clients, 'test-phone-pepper-at-least-32-characters');
+
+    await expect(service.resetPassword(actor, {
+      targetProfileId: activeAdminProfile.id,
+      idempotencyKey: 'reset-wrong-prepared-effect-0001'
+    })).rejects.toMatchObject({ statusCode: 502, code: 'PASSWORD_RESET_STATE_UPDATE_FAILED' });
+    expect(updateUserById).not.toHaveBeenCalled();
   });
 
   it('replays a completed admin reset without mutating Auth when its marker is still current', async () => {
@@ -497,6 +614,9 @@ describe('account input normalization', () => {
       }
       if (name === 'prepare_password_change_admin_reset') {
         return { data: { state: 'prepared', effectMarker: resetMarker }, error: null };
+      }
+      if (name === 'get_auth_password_version') {
+        return { data: '0'.repeat(64), error: null };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
