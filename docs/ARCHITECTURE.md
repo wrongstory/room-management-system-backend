@@ -15,7 +15,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@0253172c87b97184449c9f585d23b8eee19282d4`이며 기능 snapshot은 45 migrations / OpenAPI 98 paths / 105 operations다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / OpenAPI 98 paths / 105 operations다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
 
@@ -703,7 +703,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-09-03에 v0.2.0 운영 활성화를 완료한 현재 `main`은 `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`이며 production은 19 migrations / OpenAPI 39 paths / 43 operations다. 이후 `dev@0253172c87b97184449c9f585d23b8eee19282d4`의 45 migrations / 98 paths / 105 operations와 #25~#112 source는 main/recovery/production에 승격하지 않았다. 이 문서 갱신에서는 원격 환경을 재검증하거나 변경하지 않았으며 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
+2026-09-03에 v0.2.0 운영 활성화를 완료한 현재 `main`은 `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`이며 production은 19 migrations / OpenAPI 39 paths / 43 operations다. 이후 이 문서의 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5` integration base가 가진 45 migrations / 98 paths / 105 operations와 #25~#112 source는 main/recovery/production에 승격하지 않았다. 이 문서 갱신에서는 원격 환경을 재검증하거나 변경하지 않았으며 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 
