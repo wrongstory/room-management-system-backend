@@ -57,7 +57,7 @@ export async function testNotificationDeliveryConcurrency(client) {
   sql(`begin;
     select set_config('app.notification_writer_mode','typed_v1',true);
     insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
-      values('${groupId}'::uuid,'${profileId}'::uuid,'cleaning_assignment_notified','room','${notificationId}'::uuid,clock_timestamp(),clock_timestamp()+interval '10 minutes');
+      values('${groupId}'::uuid,'${profileId}'::uuid,'cleaning_assignment_notified','room','${notificationId}'::uuid,current_timestamp,current_timestamp+interval '10 minutes');
     insert into public.notifications(id,recipient_profile_id,category,title,body,dedupe_key,contract_version,actor_profile_id,
       event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id,requires_action,occurred_at)
       values('${notificationId}'::uuid,'${profileId}'::uuid,'cleaning_assignment_notified','청소 배정','새 청소 배정이 등록되었습니다.',
@@ -120,7 +120,7 @@ export async function testNotificationDeliveryConcurrency(client) {
   sql(`begin;
     select set_config('app.notification_writer_mode','typed_v1',true);
     insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
-      values('${blockedGroupId}'::uuid,'${profileId}'::uuid,'cleaning_assignment_notified','room','${blockedNotificationId}'::uuid,clock_timestamp(),clock_timestamp()+interval '10 minutes');
+      values('${blockedGroupId}'::uuid,'${profileId}'::uuid,'cleaning_assignment_notified','room','${blockedNotificationId}'::uuid,current_timestamp,current_timestamp+interval '10 minutes');
     insert into public.notifications(id,recipient_profile_id,category,title,body,dedupe_key,contract_version,actor_profile_id,
       event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id,requires_action,occurred_at)
       values('${blockedNotificationId}'::uuid,'${profileId}'::uuid,'cleaning_assignment_notified','청소 배정','새 청소 배정이 등록되었습니다.',
