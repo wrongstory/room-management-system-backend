@@ -25,6 +25,7 @@ from room_management_console.generated.api.developer import (
 )
 from room_management_console.generated.models import (
     DeveloperDatabaseStatusNotificationDelivery,
+    DeveloperDatabaseStatusNotificationDeliveryActivation,
     DeveloperDatabaseStatusNotificationDeliveryBacklog,
 )
 from room_management_console.generated.models.account_status import AccountStatus
@@ -108,6 +109,9 @@ def test_notification_delivery_status_is_generated_as_bounded_metadata_only() ->
         "expired_leases",
         "oldest_due_at",
     } == {field.name for field in fields(DeveloperDatabaseStatusNotificationDeliveryBacklog)}
+    assert "provider_configuration_valid" in {
+        field.name for field in fields(DeveloperDatabaseStatusNotificationDeliveryActivation)
+    }
     exposed = {field.name for field in fields(DeveloperDatabaseStatusNotificationDelivery)} | {
         field.name for field in fields(DeveloperDatabaseStatusNotificationDeliveryBacklog)
     }
@@ -440,6 +444,7 @@ def test_runtime_secret_configuration_generated_contract_is_boolean_only() -> No
         "VAPID_SUBJECT",
         "VAPID_CURRENT_KEY_VERSION",
         "VAPID_PUBLIC_KEY",
+        "VAPID_PUBLIC_KEYRING_JSON",
         "VAPID_PRIVATE_KEY",
         "VAPID_KEYRING_JSON",
         "NOTIFICATION_DELIVERY_INVOKE_SECRET",

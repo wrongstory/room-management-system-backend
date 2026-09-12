@@ -101,6 +101,7 @@ def runtime_response(
                         "VAPID_SUBJECT",
                         "VAPID_CURRENT_KEY_VERSION",
                         "VAPID_PUBLIC_KEY",
+                        "VAPID_PUBLIC_KEYRING_JSON",
                         "VAPID_PRIVATE_KEY",
                         "VAPID_KEYRING_JSON",
                         "NOTIFICATION_DELIVERY_INVOKE_SECRET",

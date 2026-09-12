@@ -151,9 +151,41 @@ Deno.test("developer source migration head uses a stable migration name", () => 
   );
 });
 
-Deno.test("developer database status adds only bounded notification delivery health", async () => {
+Deno.test("developer database status degrades a fresh healthy heartbeat for a malformed prior envelope key", async () => {
   const names: string[] = [];
   const get = Deno.env.get;
+  const pair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+  const publicRaw = new Uint8Array(
+    await crypto.subtle.exportKey("raw", pair.publicKey),
+  );
+  const base64 = (value: Uint8Array) => btoa(String.fromCharCode(...value));
+  const base64url = (value: Uint8Array) =>
+    base64(value).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const malformedPriorKey = base64(new Uint8Array(31).fill(9));
+  const environment: Record<string, string> = {
+    RUNTIME_ENVIRONMENT: "local",
+    SUPABASE_URL: "http://127.0.0.1:54321",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role-status-test-secret-123456",
+    WEB_PUSH_BINDING_DIGEST_SECRET: "binding-status-test-secret-1234567890",
+    WEB_PUSH_SUBSCRIPTION_KEY_BASE64: base64(new Uint8Array(32).fill(7)),
+    WEB_PUSH_SUBSCRIPTION_KEY_VERSION: "envelope-v2",
+    WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: JSON.stringify({
+      "envelope-v1": malformedPriorKey,
+    }),
+    VAPID_SUBJECT: "mailto:push@example.com",
+    VAPID_CURRENT_KEY_VERSION: "vapid-v1",
+    VAPID_PUBLIC_KEY: base64url(publicRaw),
+    VAPID_PUBLIC_KEYRING_JSON: "{}",
+    VAPID_PRIVATE_KEY: String(privateJwk.d),
+    VAPID_KEYRING_JSON: "{}",
+    NOTIFICATION_DELIVERY_INVOKE_SECRET:
+      "notification-delivery-status-test-123456",
+  };
   const clients = {
     admin: {
       rpc: (name: string) => {
@@ -184,12 +216,7 @@ Deno.test("developer database status adds only bounded notification delivery hea
   } as unknown as EdgeClients;
   let result: Record<string, unknown>;
   try {
-    Deno.env.get = (key: string) =>
-      key === "RUNTIME_ENVIRONMENT"
-        ? "local"
-        : key === "SUPABASE_URL"
-        ? "http://127.0.0.1:54321"
-        : "configured";
+    Deno.env.get = (key: string) => environment[key] ?? "configured";
     result = await developerDatabaseStatus(clients, {
       authUserId: "10000000-0000-4000-8000-000000000001",
       profileId: "20000000-0000-4000-8000-000000000001",
@@ -211,7 +238,7 @@ Deno.test("developer database status adds only bounded notification delivery hea
   const delivery = result.notificationDelivery as Record<string, unknown>;
   assert(
     delivery.status === "degraded",
-    "invalid current VAPID config overrides a fresh healthy heartbeat",
+    "malformed prior envelope key overrides a fresh healthy heartbeat",
   );
   assert(
     (delivery.activation as Record<string, unknown>)
@@ -221,7 +248,7 @@ Deno.test("developer database status adds only bounded notification delivery hea
   assert(
     (delivery.activation as Record<string, unknown>)
       .providerConfigurationValid === false,
-    "current VAPID validity exposes only a safe boolean",
+    "current config validity exposes only a safe boolean",
   );
   const serialized = JSON.stringify(result).toLowerCase();
   for (
@@ -231,6 +258,7 @@ Deno.test("developer database status adds only bounded notification delivery hea
       "claimdigest",
       "ciphertext",
       "providererror",
+      malformedPriorKey.toLowerCase(),
     ]
   ) {
     assert(!serialized.includes(forbidden), `${forbidden} must not leak`);

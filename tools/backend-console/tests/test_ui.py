@@ -110,6 +110,7 @@ def test_create_account_clears_phone_before_network_result(
                                 "VAPID_SUBJECT",
                                 "VAPID_CURRENT_KEY_VERSION",
                                 "VAPID_PUBLIC_KEY",
+                                "VAPID_PUBLIC_KEYRING_JSON",
                                 "VAPID_PRIVATE_KEY",
                                 "VAPID_KEYRING_JSON",
                                 "NOTIFICATION_DELIVERY_INVOKE_SECRET",

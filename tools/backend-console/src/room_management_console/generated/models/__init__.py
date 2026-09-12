@@ -127,6 +127,9 @@ from .developer_runtime_status_configuration_vapidprivatekey import (
 from .developer_runtime_status_configuration_vapidpublickey import (
     DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY,
 )
+from .developer_runtime_status_configuration_vapidpublickeyringjson import (
+    DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEYRINGJSON,
+)
 from .developer_runtime_status_configuration_vapidsubject import (
     DeveloperRuntimeStatusConfigurationVAPIDSUBJECT,
 )
@@ -251,6 +254,7 @@ __all__ = (
     "DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON",
     "DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY",
     "DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY",
+    "DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEYRINGJSON",
     "DeveloperRuntimeStatusConfigurationVAPIDSUBJECT",
     "DeveloperRuntimeStatusConfigurationWEBPUSHBINDINGDIGESTSECRET",
     "DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYBASE64",

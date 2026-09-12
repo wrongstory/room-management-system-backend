@@ -253,4 +253,37 @@ Deno.test("notification delivery config requires exact bounded public/private VA
     }
     assert(rejected, "public/private ring drift must fail closed");
   }
+  Deno.env.set(
+    "VAPID_PUBLIC_KEYRING_JSON",
+    JSON.stringify({
+      "vapid-v1": prior.publicKey,
+    }),
+  );
+  const malformedPriorKey = btoa(
+    String.fromCharCode(...new Uint8Array(31).fill(9)),
+  );
+  Deno.env.set(
+    "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+    JSON.stringify({ "envelope-v0": malformedPriorKey }),
+  );
+  let rejected = false;
+  try {
+    notificationDeliveryConfig();
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "prior envelope keys must decode to exactly 32 bytes");
+
+  let recorded = 0;
+  const response = await handleNotificationDelivery(request(), {
+    loadInvokeSecret: () => secret,
+    loadConfig: notificationDeliveryConfig,
+    recordConfigurationFailure: () => {
+      recorded++;
+      return Promise.resolve();
+    },
+  });
+  const body = await response.text();
+  assert(response.status === 503 && recorded === 1);
+  assert(!body.includes(malformedPriorKey) && !body.includes(secret));
 });

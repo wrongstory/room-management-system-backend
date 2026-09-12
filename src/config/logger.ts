@@ -1,6 +1,7 @@
 const sensitiveLogPaths = [
   'req.headers.authorization',
   'req.headers.cookie',
+  'req.body.bindingProof',
   'res.headers.set-cookie',
   '*.authorization',
   '*.cookie',
@@ -10,6 +11,7 @@ const sensitiveLogPaths = [
   '*.temporaryPassword',
   '*.accessToken',
   '*.refreshToken',
+  '*.bindingProof',
   '*.pin',
   '*.guestName',
   '*.guest_name_encrypted',

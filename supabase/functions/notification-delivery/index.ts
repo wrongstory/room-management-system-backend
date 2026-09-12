@@ -86,7 +86,11 @@ export function notificationDeliveryConfig(): {
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(version) || typeof value !== "string") {
       throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
     }
-    envelopeKeyring[version] = base64(value);
+    const decoded = base64(value);
+    if (decoded.length !== 32) {
+      throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
+    }
+    envelopeKeyring[version] = decoded;
   }
   for (const [version, value] of Object.entries(vapidRaw)) {
     if (

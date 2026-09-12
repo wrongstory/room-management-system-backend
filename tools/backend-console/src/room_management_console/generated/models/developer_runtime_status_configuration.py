@@ -66,6 +66,9 @@ if TYPE_CHECKING:
     from ..models.developer_runtime_status_configuration_vapidpublickey import (
         DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY,
     )
+    from ..models.developer_runtime_status_configuration_vapidpublickeyringjson import (
+        DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEYRINGJSON,
+    )
     from ..models.developer_runtime_status_configuration_vapidsubject import (
         DeveloperRuntimeStatusConfigurationVAPIDSUBJECT,
     )
@@ -113,6 +116,7 @@ class DeveloperRuntimeStatusConfiguration:
         vapid_subject (DeveloperRuntimeStatusConfigurationVAPIDSUBJECT):
         vapid_current_key_version (DeveloperRuntimeStatusConfigurationVAPIDCURRENTKEYVERSION):
         vapid_public_key (DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY):
+        vapid_public_keyring_json (DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEYRINGJSON):
         vapid_private_key (DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY):
         vapid_keyring_json (DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON):
         notification_delivery_invoke_secret (DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET):
@@ -148,6 +152,7 @@ class DeveloperRuntimeStatusConfiguration:
     vapid_subject: DeveloperRuntimeStatusConfigurationVAPIDSUBJECT
     vapid_current_key_version: DeveloperRuntimeStatusConfigurationVAPIDCURRENTKEYVERSION
     vapid_public_key: DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY
+    vapid_public_keyring_json: DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEYRINGJSON
     vapid_private_key: DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY
     vapid_keyring_json: DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON
     notification_delivery_invoke_secret: (
@@ -201,6 +206,8 @@ class DeveloperRuntimeStatusConfiguration:
 
         vapid_public_key = self.vapid_public_key.to_dict()
 
+        vapid_public_keyring_json = self.vapid_public_keyring_json.to_dict()
+
         vapid_private_key = self.vapid_private_key.to_dict()
 
         vapid_keyring_json = self.vapid_keyring_json.to_dict()
@@ -233,6 +240,7 @@ class DeveloperRuntimeStatusConfiguration:
                 "VAPID_SUBJECT": vapid_subject,
                 "VAPID_CURRENT_KEY_VERSION": vapid_current_key_version,
                 "VAPID_PUBLIC_KEY": vapid_public_key,
+                "VAPID_PUBLIC_KEYRING_JSON": vapid_public_keyring_json,
                 "VAPID_PRIVATE_KEY": vapid_private_key,
                 "VAPID_KEYRING_JSON": vapid_keyring_json,
                 "NOTIFICATION_DELIVERY_INVOKE_SECRET": notification_delivery_invoke_secret,
@@ -302,6 +310,9 @@ class DeveloperRuntimeStatusConfiguration:
         )
         from ..models.developer_runtime_status_configuration_vapidpublickey import (
             DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY,
+        )
+        from ..models.developer_runtime_status_configuration_vapidpublickeyringjson import (
+            DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEYRINGJSON,
         )
         from ..models.developer_runtime_status_configuration_vapidsubject import (
             DeveloperRuntimeStatusConfigurationVAPIDSUBJECT,
@@ -442,6 +453,12 @@ class DeveloperRuntimeStatusConfiguration:
             d.pop("VAPID_PUBLIC_KEY")
         )
 
+        vapid_public_keyring_json = (
+            DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEYRINGJSON.from_dict(
+                d.pop("VAPID_PUBLIC_KEYRING_JSON")
+            )
+        )
+
         vapid_private_key = DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY.from_dict(
             d.pop("VAPID_PRIVATE_KEY")
         )
@@ -479,6 +496,7 @@ class DeveloperRuntimeStatusConfiguration:
             vapid_subject=vapid_subject,
             vapid_current_key_version=vapid_current_key_version,
             vapid_public_key=vapid_public_key,
+            vapid_public_keyring_json=vapid_public_keyring_json,
             vapid_private_key=vapid_private_key,
             vapid_keyring_json=vapid_keyring_json,
             notification_delivery_invoke_secret=notification_delivery_invoke_secret,
