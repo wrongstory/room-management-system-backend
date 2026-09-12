@@ -159,6 +159,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
     if (error instanceof AppError) {
+      if (error.headers) {
+        reply.headers(error.headers);
+      }
       return reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message },
         requestId: request.id

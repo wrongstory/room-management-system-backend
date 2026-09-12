@@ -625,6 +625,17 @@ begin
     ) returning * into v_reset_marker;
   end if;
 
+  -- A completed administrator reset is immutable replay evidence. Return it
+  -- before inspecting or changing any newer self-change receipt for this
+  -- target. The application may only treat the replay as successful when the
+  -- current Auth operation marker still matches this completed reset.
+  if v_reset_marker.state = 'completed' then
+    return jsonb_build_object(
+      'state', 'completed',
+      'effectMarker', v_reset_marker.effect_marker
+    );
+  end if;
+
   select * into v_command
   from private.password_change_commands command
   where command.actor_profile_id = p_target_profile_id

@@ -189,6 +189,20 @@ select is(
   )->>'state',
   'execute','post-reset self-change receives a fresh isolated receipt'
 );
+select is(
+  public.prepare_password_change_admin_reset(
+    pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('b',64)
+  )->>'state',
+  'completed','completed administrator reset key replays before inspecting a newer self-change receipt'
+);
+select is(
+  (select state from private.password_change_commands where actor_profile_id=pg_temp.pid(2) and idempotency_key='password-after-reset-01'),
+  'auth_pending','completed reset replay does not move a newer self-change receipt to reset_pending'
+);
+select is(
+  (select reset_command_execution_id from private.password_change_commands where actor_profile_id=pg_temp.pid(2) and idempotency_key='password-after-reset-01'),
+  null::uuid,'completed reset replay does not bind its old execution to a newer self-change receipt'
+);
 
 select lives_ok(
   $$select public.prepare_account_password_reset(pg_temp.pid(1),pg_temp.pid(3),'password-reset-plain-01',repeat('1',64))$$,

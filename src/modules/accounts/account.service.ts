@@ -535,8 +535,35 @@ export class SupabaseAccountService implements AccountService {
     const effectMarker = recoveryData && typeof recoveryData === 'object'
       ? (recoveryData as { effectMarker?: unknown }).effectMarker
       : null;
-    if (recoveryError || typeof effectMarker !== 'string' || !/^[0-9a-f]{64}$/.test(effectMarker)) {
+    const recoveryState = recoveryData && typeof recoveryData === 'object'
+      ? (recoveryData as { state?: unknown }).state
+      : null;
+    if (
+      recoveryError ||
+      (recoveryState !== 'prepared' && recoveryState !== 'completed') ||
+      typeof effectMarker !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(effectMarker)
+    ) {
       throw databaseError(recoveryError);
+    }
+    if (recoveryState === 'completed') {
+      const { data: replayAuthState, error: replayAuthStateError } =
+        await this.clients.admin.auth.admin.getUserById(row.auth_user_id);
+      if (replayAuthStateError || !replayAuthState.user) {
+        throw new AppError(
+          502,
+          'PASSWORD_RESET_STATE_UPDATE_FAILED',
+          '인증 비밀번호 초기화 상태를 확인하지 못했습니다. 다시 시도해 주세요.'
+        );
+      }
+      if (replayAuthState.user.app_metadata?.password_change_effect_marker !== effectMarker) {
+        throw new AppError(
+          409,
+          'IDEMPOTENCY_KEY_REUSED',
+          '이미 완료된 비밀번호 초기화 키는 후속 비밀번호 변경 뒤 재사용할 수 없습니다.'
+        );
+      }
+      return toAccount(row);
     }
     const { error: authError } = await this.clients.admin.auth.admin.updateUserById(row.auth_user_id, {
       password: toSupabaseAuthPassword(row.phone_last_four),

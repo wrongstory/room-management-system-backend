@@ -576,6 +576,7 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   const passwordChange = document.paths["/v1/auth/password"].post;
   assert(
     passwordChange.responses["429"] !== undefined &&
+      passwordChange.responses["429"].headers?.["Retry-After"] !== undefined &&
       passwordChange.responses["503"] !== undefined &&
       passwordChange.description.includes("operation marker") &&
       passwordChange.description.includes("actor 단위 durable rate limit"),

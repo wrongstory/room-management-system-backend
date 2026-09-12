@@ -391,6 +391,115 @@ describe('account input normalization', () => {
     });
   });
 
+  it('replays a completed admin reset without mutating Auth when its marker is still current', async () => {
+    const resetMarker = 'c'.repeat(64);
+    const rpcNames: string[] = [];
+    const rpc = vi.fn(async (name: string) => {
+      rpcNames.push(name);
+      if (name === 'prepare_account_password_reset') {
+        return { data: activeAdminProfile, error: null };
+      }
+      if (name === 'prepare_password_change_admin_reset') {
+        return { data: { state: 'completed', effectMarker: resetMarker }, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const updateUserById = vi.fn();
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc,
+        auth: {
+          admin: {
+            updateUserById,
+            getUserById: vi.fn(async () => ({
+              data: { user: { app_metadata: { password_change_effect_marker: resetMarker } } },
+              error: null
+            }))
+          }
+        }
+      }
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    );
+
+    await service.resetPassword(actor, {
+      targetProfileId: activeAdminProfile.id,
+      idempotencyKey: 'reset-completed-replay-0003'
+    });
+
+    expect(updateUserById).not.toHaveBeenCalled();
+    expect(rpcNames).toEqual([
+      'prepare_account_password_reset',
+      'prepare_password_change_admin_reset'
+    ]);
+  });
+
+  it('rejects a completed admin reset key after a later password effect', async () => {
+    const completedResetMarker = 'c'.repeat(64);
+    const laterPasswordMarker = 'd'.repeat(64);
+    const rpcNames: string[] = [];
+    const rpc = vi.fn(async (name: string) => {
+      rpcNames.push(name);
+      if (name === 'prepare_account_password_reset') {
+        return { data: activeAdminProfile, error: null };
+      }
+      if (name === 'prepare_password_change_admin_reset') {
+        return { data: { state: 'completed', effectMarker: completedResetMarker }, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const updateUserById = vi.fn();
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc,
+        auth: {
+          admin: {
+            updateUserById,
+            getUserById: vi.fn(async () => ({
+              data: {
+                user: {
+                  app_metadata: { password_change_effect_marker: laterPasswordMarker }
+                }
+              },
+              error: null
+            }))
+          }
+        }
+      }
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    );
+
+    await expect(service.resetPassword(actor, {
+      targetProfileId: activeAdminProfile.id,
+      idempotencyKey: 'reset-completed-stale-0004'
+    })).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+
+    expect(updateUserById).not.toHaveBeenCalled();
+    expect(rpcNames).toEqual([
+      'prepare_account_password_reset',
+      'prepare_password_change_admin_reset'
+    ]);
+  });
+
   it('keeps reset recovery unresolved when the external Auth reset fails', async () => {
     const resetMarker = 'b'.repeat(64);
     const rpc = vi.fn(async (name: string) => {

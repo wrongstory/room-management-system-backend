@@ -379,10 +379,14 @@ export class SupabaseAuthService implements AuthService {
       );
     }
     if (limit.allowed !== true) {
+      const retryAfter = typeof limit.retry_after_seconds === 'number'
+        ? Math.max(1, Math.min(3600, Math.ceil(limit.retry_after_seconds)))
+        : 60;
       throw new AppError(
         429,
         'PASSWORD_VERIFICATION_RATE_LIMITED',
-        '비밀번호 확인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.'
+        '비밀번호 확인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+        { 'Retry-After': String(retryAfter) }
       );
     }
 

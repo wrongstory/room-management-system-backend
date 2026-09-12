@@ -876,7 +876,12 @@ export const openApiDocument = {
           "400": errorResponse,
           "401": errorResponse,
           "409": errorResponse,
-          "429": errorResponse,
+          "429": {
+            ...errorResponse,
+            headers: {
+              "Retry-After": { schema: { type: "integer", minimum: 1 } },
+            },
+          },
           "500": errorResponse,
           "502": errorResponse,
           "503": errorResponse,

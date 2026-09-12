@@ -226,7 +226,11 @@ describe('password change replay receipt', () => {
         'password-change-limited-0010',
         'fastify-attacker-client'
       )
-    ).rejects.toMatchObject({ statusCode: 429, code: 'PASSWORD_VERIFICATION_RATE_LIMITED' });
+    ).rejects.toMatchObject({
+      statusCode: 429,
+      code: 'PASSWORD_VERIFICATION_RATE_LIMITED',
+      headers: { 'Retry-After': '60' }
+    });
     expect(mocked.signInWithPassword).not.toHaveBeenCalled();
   });
 

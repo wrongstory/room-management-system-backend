@@ -1057,6 +1057,107 @@ Deno.test("Edge admin reset finalizes self-change recovery only after Auth marke
   );
 });
 
+Deno.test("Edge completed admin reset replay is a no-op only while its marker is current", async () => {
+  const rpcNames: string[] = [];
+  let updateCount = 0;
+  const clients = {
+    admin: {
+      from: () => queryResult(profile),
+      rpc: (name: string) => {
+        rpcNames.push(name);
+        if (name === "prepare_account_password_reset") {
+          return Promise.resolve({ data: profile, error: null });
+        }
+        return Promise.resolve({
+          data: { state: "completed", effectMarker: passwordEffectMarker },
+          error: null,
+        });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({ data: null, error: null });
+          },
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  await resetAccountPassword(
+    request({}, "edge-reset-completed-replay-0011"),
+    clients,
+    developer,
+    profile.id,
+  );
+  assertEquals(updateCount, 0, "completed replay never mutates Auth again");
+  assertEquals(
+    rpcNames,
+    ["prepare_account_password_reset", "prepare_password_change_admin_reset"],
+    "completed replay does not finalize again",
+  );
+});
+
+Deno.test("Edge completed admin reset key is stale after a later password effect", async () => {
+  let updateCount = 0;
+  const clients = {
+    admin: {
+      from: () => queryResult(profile),
+      rpc: (name: string) => {
+        if (name === "prepare_account_password_reset") {
+          return Promise.resolve({ data: profile, error: null });
+        }
+        return Promise.resolve({
+          data: { state: "completed", effectMarker: passwordEffectMarker },
+          error: null,
+        });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({ data: null, error: null });
+          },
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: "f".repeat(64),
+                  },
+                },
+              },
+              error: null,
+            }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    resetAccountPassword(
+      request({}, "edge-reset-completed-stale-0012"),
+      clients,
+      developer,
+      profile.id,
+    )
+  );
+  assertEquals(error.status, 409, "stale reset replay status");
+  assertEquals(error.code, "IDEMPOTENCY_KEY_REUSED", "stale reset replay code");
+  assertEquals(updateCount, 0, "stale reset replay never mutates Auth");
+});
+
 Deno.test("Edge admin reset Auth failure never finalizes recovery", async () => {
   const rpcNames: string[] = [];
   const clients = {
