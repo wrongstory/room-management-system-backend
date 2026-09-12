@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 
 create function pg_temp.pid(n integer) returns uuid language sql immutable as $$
@@ -24,6 +25,7 @@ from cases c join public.rooms r on r.id=c.room_id
 cross join unnest(array['checkout','stayover','additional']::public.cleaning_kind[]) k;
 insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
 select room_id,'verified',1,'TEST',pg_temp.pid(1),now() from cases;
+select pg_temp.install_room_pin_fixture(room_id,pg_temp.pid(1),1) from cases;
 
 -- Both reservation and stayover targets are created by the real commands; only occupancy is fixture setup.
 select public.create_reservation(pg_temp.pid(1),reservation_id,room_id,

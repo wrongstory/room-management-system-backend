@@ -12,6 +12,9 @@ const localEnv = {
   RESERVATION_PII_KEY_VERSION: 'test-v1',
   RESERVATION_PII_KEYRING_JSON: '{}',
   RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
+  ROOM_PIN_KEY_BASE64: Buffer.alloc(32, 8).toString('base64'),
+  ROOM_PIN_KEY_VERSION: 'pin-v1',
+  ROOM_PIN_KEYRING_JSON: '{}',
   PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456',
   NOTIFICATION_CURSOR_HMAC_SECRET: 'notification-cursor-secret-tests-123456'
   ,WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(32, 4).toString('base64')
@@ -152,5 +155,19 @@ describe('environment contract', () => {
     ]) {
       expect(() => loadEnv({ ...localEnv, ...override })).toThrow();
     }
+  });
+
+  it('requires purpose-specific room PIN current and prior keys', () => {
+    const reservationPrior=Buffer.alloc(32,9).toString('base64');
+    const webPushPrior=Buffer.alloc(32,10).toString('base64');
+    const roomPrior=Buffer.alloc(32,11).toString('base64');
+    expect(loadEnv({...localEnv,ROOM_PIN_KEYRING_JSON:JSON.stringify({'pin-old-v1':roomPrior})})).toBeTruthy();
+    for(const override of [
+      {ROOM_PIN_KEY_BASE64:localEnv.RESERVATION_PII_KEY_BASE64},
+      {ROOM_PIN_KEY_BASE64:localEnv.WEB_PUSH_SUBSCRIPTION_KEY_BASE64},
+      {ROOM_PIN_KEY_BASE64:reservationPrior,RESERVATION_PII_KEYRING_JSON:JSON.stringify({'old-v1':reservationPrior})},
+      {ROOM_PIN_KEY_BASE64:webPushPrior,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON:JSON.stringify({'old-v1':webPushPrior})},
+      {ROOM_PIN_KEYRING_JSON:JSON.stringify({'pin-old-v1':localEnv.RESERVATION_PII_KEY_BASE64})}
+    ]) expect(()=>loadEnv({...localEnv,...override})).toThrow();
   });
 });

@@ -21,6 +21,9 @@ const envSchema = z.object({
   RESERVATION_PII_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default('v1'),
   RESERVATION_PII_KEYRING_JSON: z.string().default('{}'),
   RESERVATION_GUEST_NAME_PEPPER: z.string().min(32),
+  ROOM_PIN_KEY_BASE64: z.string().min(1),
+  ROOM_PIN_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/),
+  ROOM_PIN_KEYRING_JSON: z.string().default('{}').transform((value) => value.trim() || '{}'),
   PAYROLL_CURSOR_HMAC_SECRET: z.string().trim().refine(
     (value) => Buffer.byteLength(value, 'utf8') >= 32,
     '주급 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
@@ -70,6 +73,7 @@ const envSchema = z.object({
 
   let reservationPiiKeyringSecrets: string[] = [];
   let webPushKeyringSecrets: string[] = [];
+  let roomPinKeyringSecrets: string[] = [];
   try {
     const keyring = JSON.parse(env.RESERVATION_PII_KEYRING_JSON) as unknown;
     if (keyring && !Array.isArray(keyring) && typeof keyring === 'object') {
@@ -89,6 +93,30 @@ const envSchema = z.object({
     // The dedicated keyring validator below reports malformed JSON.
   }
 
+  try {
+    const key = Buffer.from(env.ROOM_PIN_KEY_BASE64, 'base64');
+    const keyring = JSON.parse(env.ROOM_PIN_KEYRING_JSON) as unknown;
+    if (key.length!==32 || key.toString('base64')!==env.ROOM_PIN_KEY_BASE64 || !keyring ||
+      Array.isArray(keyring) || typeof keyring!=='object' || Object.hasOwn(keyring,env.ROOM_PIN_KEY_VERSION) ||
+      Object.keys(keyring).length>5) throw new Error();
+    const seen=new Set([env.ROOM_PIN_KEY_BASE64]);
+    for(const [version,encoded] of Object.entries(keyring)) {
+      const prior=typeof encoded==='string'?Buffer.from(encoded,'base64'):null;
+      if(!/^[A-Za-z0-9._-]{1,32}$/.test(version)||!prior||prior.length!==32||
+        prior.toString('base64')!==encoded||seen.has(encoded)) throw new Error();
+      seen.add(encoded);
+    }
+    roomPinKeyringSecrets=[...seen];
+    const otherPurposeSecrets=[env.SUPABASE_PUBLISHABLE_KEY,env.SUPABASE_SECRET_KEY,env.ACCOUNT_PHONE_PEPPER,
+      env.RESERVATION_PII_KEY_BASE64,env.RESERVATION_GUEST_NAME_PEPPER,env.PAYROLL_CURSOR_HMAC_SECRET,
+      env.NOTIFICATION_CURSOR_HMAC_SECRET,env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64,env.WEB_PUSH_BINDING_DIGEST_SECRET,
+      env.GOOGLE_DRIVE_CLIENT_ID,env.GOOGLE_DRIVE_CLIENT_SECRET,env.GOOGLE_DRIVE_REFRESH_TOKEN,
+      env.GOOGLE_DRIVE_ROOT_FOLDER_ID,...reservationPiiKeyringSecrets,...webPushKeyringSecrets];
+    if(roomPinKeyringSecrets.some((secret)=>otherPurposeSecrets.includes(secret))) throw new Error();
+  } catch {
+    context.addIssue({code:'custom',path:['ROOM_PIN_KEYRING_JSON'],message:'객실 PIN current/prior 키는 서로 분리된 canonical Base64 32바이트 키이며 이전 키는 최대 5개여야 합니다.'});
+  }
+
   if ([
     env.SUPABASE_PUBLISHABLE_KEY,
     env.SUPABASE_SECRET_KEY,
@@ -99,7 +127,8 @@ const envSchema = z.object({
     env.GOOGLE_DRIVE_CLIENT_SECRET,
     env.GOOGLE_DRIVE_REFRESH_TOKEN,
     env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
-    ...reservationPiiKeyringSecrets
+    ...reservationPiiKeyringSecrets,
+    ...roomPinKeyringSecrets
   ].includes(env.PAYROLL_CURSOR_HMAC_SECRET)) {
     context.addIssue({
       code: 'custom',
@@ -119,7 +148,8 @@ const envSchema = z.object({
     env.GOOGLE_DRIVE_CLIENT_SECRET,
     env.GOOGLE_DRIVE_REFRESH_TOKEN,
     env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
-    ...reservationPiiKeyringSecrets
+    ...reservationPiiKeyringSecrets,
+    ...roomPinKeyringSecrets
   ].includes(env.NOTIFICATION_CURSOR_HMAC_SECRET)) {
     context.addIssue({
       code: 'custom',
@@ -132,7 +162,8 @@ const envSchema = z.object({
   const existingSecrets = [env.SUPABASE_PUBLISHABLE_KEY,env.SUPABASE_SECRET_KEY,env.ACCOUNT_PHONE_PEPPER,
     env.RESERVATION_PII_KEY_BASE64,env.RESERVATION_GUEST_NAME_PEPPER,env.PAYROLL_CURSOR_HMAC_SECRET,
     env.NOTIFICATION_CURSOR_HMAC_SECRET,env.GOOGLE_DRIVE_CLIENT_ID,env.GOOGLE_DRIVE_CLIENT_SECRET,
-    env.GOOGLE_DRIVE_REFRESH_TOKEN,env.GOOGLE_DRIVE_ROOT_FOLDER_ID,...reservationPiiKeyringSecrets];
+    env.GOOGLE_DRIVE_REFRESH_TOKEN,env.GOOGLE_DRIVE_ROOT_FOLDER_ID,...reservationPiiKeyringSecrets,
+    ...roomPinKeyringSecrets];
   if (webPushSecrets.some((value,index) => existingSecrets.includes(value) || webPushSecrets.indexOf(value)!==index)) {
     context.addIssue({code:'custom',path:['WEB_PUSH_BINDING_DIGEST_SECRET'],message:'Web Push key/digest는 모든 기존 비밀값 및 서로 간에 분리해야 합니다.'});
   }

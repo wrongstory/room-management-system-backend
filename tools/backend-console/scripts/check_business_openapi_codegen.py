@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 98:
-        raise RuntimeError("전체 source OpenAPI path 수가 98이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 102:
+        raise RuntimeError("전체 source OpenAPI path 수가 102가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 105:
-        raise RuntimeError("전체 source OpenAPI operation 수가 105가 아닙니다.")
+    if operation_count != 109:
+        raise RuntimeError("전체 source OpenAPI operation 수가 109가 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -120,14 +120,28 @@ def main() -> None:
             package / "models" / "complaint_rework_request.py",
             package / "models" / "complaint_rework_envelope.py",
             package / "models" / "complaint_rework_envelope_assignment.py",
+            package / "api" / "rooms" / "prepare_room_pin_change.py",
+            package / "api" / "rooms" / "confirm_room_pin_change.py",
+            package / "api" / "rooms" / "rollback_room_pin_change.py",
+            package / "api" / "rooms" / "reveal_room_pin.py",
+            package / "models" / "room_pin_change_prepare_request.py",
+            package / "models" / "room_pin_reveal.py",
         ]
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
             raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+        prepare_model = (package / "models" / "room_pin_change_prepare_request.py").read_text(
+            encoding="utf-8"
+        )
+        reveal_model = (package / "models" / "room_pin_reveal.py").read_text(encoding="utf-8")
+        if "pin_digits: str" not in prepare_model or '"pinDigits": pin_digits' not in prepare_model:
+            raise RuntimeError("PIN prepare codegen request에 pinDigits가 누락됐습니다.")
+        if "credential: str" not in reveal_model or '"credential": credential' not in reveal_model:
+            raise RuntimeError("PIN reveal codegen response에 credential이 누락됐습니다.")
         if not compileall.compile_dir(package, quiet=1):
             raise RuntimeError("업무 Python codegen 결과를 컴파일할 수 없습니다.")
 
-    print("full OpenAPI push/payroll/complaint Python ephemeral codegen PASS")
+    print("full OpenAPI push/payroll/complaint/room-PIN Python ephemeral codegen PASS")
 
 
 if __name__ == "__main__":

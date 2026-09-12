@@ -23,9 +23,17 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@1eca96393bb353124c099f6f3923298df20d9bb5`이며 base snapshot은 47 migrations / OpenAPI 98 paths / 105 operations다. #128 candidate는 기존 47개를 수정하지 않는 48번째 append-only migration이며 public HTTP/OpenAPI 수는 바꾸지 않는다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@58cf63e36fde8fd209e8ab18508b59d2bd275d0e`이며 base snapshot은 48 migrations / OpenAPI 98 paths / 105 operations다. #128은 source/dev 완료 상태다. #131 candidate는 기존 48개 blob을 수정하지 않는 49번째 append-only migration과 4개 PIN operation을 추가해 102 paths / 109 operations가 되며, 병합 전 source gate 검증 대상이다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
+
+### #131 encrypted room PIN Phase A — source candidate
+
+Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinDigits`는 선행 0을 보존하는 4~8자리 문자열이고, 서버가 global lifecycle lock과 room lock 아래 다시 읽은 `room_number` snapshot으로만 canonical credential을 만든다. envelope마다 12-byte random nonce를 생성하며 private change-lease 원장의 `(key_version, nonce)` unique가 생성 envelope 재사용을 fail-closed한다. immutable revision에는 key가 아닌 bounded AAD environment/projectRef를 저장해 recovery restore가 저장 당시 context로 복호화할 수 있다.
+
+물리 변경은 `prepare → physical lock change → confirm`이며 prepare가 즉시 mismatch를 기록하지만 current pointer는 confirm까지 유지한다. expired/uncertain mismatch는 actual PIN re-entry confirm 또는 기존 current의 confirmed physical rollback으로만 해소한다. maid read/change는 기존 public access lease의 exact room/target/current assignment/current attempt/maid/current pin version을 authority로 사용하고, change는 in-progress에서만 허용한다. maid confirm은 기존 lease를 revoke하고 동일 작업 권한·만료 시각의 새 pin version lease를 원자 재발급한다. reveal은 30초 이하 private 보조 lease, 최종 DB authorization recheck, authoritative lease `revealed_at`, `sensitive.read` append가 모두 성공한 뒤 남은 TTL 안에서만 plaintext를 반환한다.
+
+private revision/current/change/reveal/outbox tables는 FORCE RLS와 explicit revoke로 Data API를 닫는다. Phase-B outbox와 public sync event에는 room/version/status/source-controlled reason만 있고 envelope/PIN/AAD bytes는 없다. 모든 PIN RPC는 `reservation-command` global advisory lock을 가장 먼저 획득해 cancel/handover/complete와 동일한 lock graph를 사용한다. Google provider, worker, full resync, Cron/Vault/production secret 설정은 이 Phase A에 포함하지 않는다.
 
 ### #84/#85 사진 HTTP adapter와 보존 정리 worker — source/dev 완료
 
@@ -716,7 +724,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
 - Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
 
-예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. 객실 PIN의 일반 업무 원장에는 원문 대신 동기화 상태와 PIN version만 기록합니다. #69 Phase A의 승인 계약은 프런트가 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 현재 room master로 `<room_number>-<pin_digits>` canonical credential을 조합해 private immutable encrypted revision/current pointer에 저장하는 방식이다. 아직 source 미구현이며 평문·암호문을 public table, audit, outbox, error, URL 또는 로그에 넣지 않습니다.
+예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 4~8자리 `pinDigits`만 받고 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는 source candidate이며 production에는 승격하지 않았다.
 
 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`는 production에서 활성 관리자 profile ID로 설정한다. Fastify 기준선은 시작 시 첫 실행으로 actor를 검증하고, Supabase-only runtime은 Cron이 1분마다 별도 secret으로 scheduler Function을 호출하며 DB command가 actor의 최신 역할·상태를 매 실행 재검증한다. 어느 runtime이든 퇴실을 먼저 처리하므로 반개구간 경계의 다음 입실이 같은 batch에서 진행되고, 중단 기간 전체가 지난 미입실 예약도 가짜 check-in 없이 예정 checkout으로 종결된다. 자세한 운영·rollback 계약은 [Edge runtime PoC](./EDGE_RUNTIME_POC.md)를 따른다.
 

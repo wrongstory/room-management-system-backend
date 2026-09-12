@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 create function pg_temp.eid(n integer) returns uuid language sql immutable as $$
  select ('7a000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid
@@ -208,6 +209,7 @@ select distinct room_type_id,kind::public.cleaning_kind,1,'published',60,'[]'::j
 from stay_case cross join (values('checkout'),('stayover')) kinds(kind);
 insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
 select room_id,'verified',1,'EXECUTION_TEST',pg_temp.eid(1),now() from stay_case;
+select pg_temp.install_room_pin_fixture(room_id,pg_temp.eid(1),1) from stay_case;
 select public.create_reservation(pg_temp.eid(1),reservation_id,room_id,'2040-02-28 16:00+09','2040-03-01 11:00+09',
  1,null,(select state_version from public.rooms where id=room_id),'execution-stay-reservation',repeat('c',64)) from stay_case;
 update public.reservations set actual_check_in_at=check_in_at where id=(select reservation_id from stay_case);

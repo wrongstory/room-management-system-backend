@@ -123,6 +123,108 @@ Deno.test("preview exact routes: admin success is read-only, other roles denied 
   );
 });
 
+Deno.test("room PIN Edge route binds verified session, returns no-store safe shape, and maps database denial", async () => {
+  const sessionId = "51000000-0000-4000-8000-000000000001";
+  const payload = btoa(JSON.stringify({ session_id: sessionId }))
+    .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  const token = `e30.${payload}.signature`;
+  const pinKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  Deno.env.set("ROOM_PIN_KEY_BASE64", pinKey);
+  Deno.env.set("ROOM_PIN_KEY_VERSION", "key-v1");
+  Deno.env.set("ROOM_PIN_KEYRING_JSON", "{}");
+  Deno.env.set("RUNTIME_ENVIRONMENT", "test");
+  Deno.env.set("SUPABASE_PROJECT_REF", "local-ref");
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let denial: string | null = null;
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        if (denial) {
+          return Promise.resolve({ data: null, error: { message: denial } });
+        }
+        if (name === "get_room_pin_change_context") {
+          return Promise.resolve({
+            data: {
+              room_number: "0101",
+              current_pin_version: 0,
+              proposed_pin_version: 1,
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({
+          data: {
+            lease_id: "52000000-0000-4000-8000-000000000001",
+            room_id: roomId,
+            current_pin_version: 0,
+            proposed_pin_version: 1,
+            status: "prepared",
+            expires_at: new Date(Date.now() + 300_000).toISOString(),
+            replay: false,
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => clients,
+    authenticateRequest: () => Promise.resolve(actor),
+  };
+  const pinRequest = () =>
+    new Request(
+      `http://localhost/functions/v1/api/v1/rooms/${roomId}/pin-changes/prepare`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          "idempotency-key": "pin-router-0001",
+        },
+        body: JSON.stringify({
+          pinDigits: "0012",
+          expectedPinVersion: 0,
+          reasonCode: "ADMIN_INITIAL_PIN",
+        }),
+      },
+    );
+  const response = await handleApiRequest(pinRequest(), dependencies);
+  const text = await response.text();
+  assert(
+    response.status === 201 &&
+      response.headers.get("cache-control") === "no-store",
+    "PIN route no-store",
+  );
+  assert(
+    !text.includes("0012") && !text.includes("ciphertext") &&
+      !text.includes("nonce"),
+    "PIN route safe response",
+  );
+  assert(
+    calls[0].args.p_session_id === sessionId,
+    "verified JWT session bound",
+  );
+  assert(
+    calls[1].args.p_room_number_snapshot === "0101",
+    "room snapshot reaches prepare RPC",
+  );
+
+  denial = "ROOM_NUMBER_CHANGED: internal ciphertext detail";
+  const denied = await handleApiRequest(pinRequest(), dependencies);
+  const deniedBody = await denied.json();
+  assert(
+    denied.status === 409 &&
+      denied.headers.get("cache-control") === "no-store" &&
+      deniedBody.error.code === "ROOM_NUMBER_CHANGED",
+    "stable room snapshot denial",
+  );
+  assert(
+    !JSON.stringify(deniedBody).includes("ciphertext"),
+    "raw database denial hidden",
+  );
+});
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }

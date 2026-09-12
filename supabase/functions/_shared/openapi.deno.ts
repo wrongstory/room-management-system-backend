@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 98 &&
+    Object.keys(document.paths).length === 102 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 105,
-    "candidate contract 98/105",
+        ).length === 109,
+    "candidate contract 102/109",
   );
 });
 
@@ -498,7 +498,6 @@ Deno.test("offline lease contract has five exact operations, bounded ingest and 
   for (
     const field of [
       "eventId",
-      "leaseId",
       "occurredAt",
       "serverOffsetMs",
       "requestHash",
@@ -720,11 +719,9 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   );
   for (
     const forbidden of [
-      '"pin"',
       '"rawPin"',
       '"pinCode"',
       '"doorCode"',
-      '"credential"',
       '"providerSecret"',
     ]
   ) {
@@ -983,7 +980,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 58,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 61,
     "actual audit allowlist count",
   );
   assert(
@@ -995,6 +992,99 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
       ),
     "complaint compensation events are operator-visible",
   );
+});
+
+Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts", async () => {
+  const doc = await openApiResponse({}).json() as typeof openApiDocument;
+  const paths = [
+    "/v1/rooms/{roomId}/pin-changes/prepare",
+    "/v1/rooms/{roomId}/pin-changes/{leaseId}/confirm",
+    "/v1/rooms/{roomId}/pin-changes/{leaseId}/rollback",
+    "/v1/rooms/{roomId}/pin/reveal",
+  ];
+  assert(paths.every((path) => path in doc.paths), "four exact PIN paths");
+  assert(!("/v1/rooms/{roomId}/pin" in doc.paths), "no reveal alias");
+
+  const prepare = doc.components.schemas.RoomPinChangePrepareRequest;
+  assert(
+    prepare.properties.pinDigits.writeOnly === true &&
+      prepare.properties.pinDigits.pattern === "^[0-9]{4,8}$" &&
+      "accessLeaseId" in prepare.properties,
+    "request retains write-only digits and maid lease binding",
+  );
+  const reveal = doc.components.schemas.RoomPinReveal;
+  const change = doc.components.schemas.RoomPinChangeResult;
+  assert(
+    reveal.properties.credential.readOnly === true &&
+      reveal.required.includes("credential") &&
+      reveal.properties.clearAfterSeconds.minimum === 1 &&
+      reveal.properties.clearAfterSeconds.maximum === 30 &&
+      reveal.properties.clearAfterSeconds.description.includes("expiresAt"),
+    "response retains read-only credential and remaining TTL",
+  );
+  assert(
+    "accessLeaseId" in change.properties &&
+      change.properties.accessLeaseId.description.includes("maid confirm"),
+    "maid confirm publishes the reissued current-version access authority",
+  );
+  for (
+    const code of [
+      "INVALID_ROOM_PIN",
+      "ROOM_PIN_KEY_UNAVAILABLE",
+      "ROOM_PIN_CRYPTO_CONFIG_INVALID",
+      "ROOM_PIN_DECRYPT_FAILED",
+      "ROOM_PIN_COMMAND_FAILED",
+      "STALE_PIN_VERSION",
+      "ROOM_NUMBER_CHANGED",
+      "ROOM_PIN_REISSUE_REQUIRED",
+      "ROOM_PIN_MISMATCH_UNRESOLVED",
+      "PIN_CHANGE_IN_PROGRESS_REQUIRED",
+      "PIN_CHANGE_IN_PROGRESS",
+      "PIN_CHANGE_LEASE_EXPIRED",
+      "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
+      "PIN_REVEAL_AUTHORIZATION_CHANGED",
+      "ROOM_PIN_UNCONFIGURED",
+      "PIN_ACCESS_LEASE_REQUIRED",
+      "PIN_ACCESS_REQUIRED",
+    ] as const
+  ) {
+    assert(
+      doc.components.schemas.ErrorCode.enum.includes(code),
+      `error enum includes ${code}`,
+    );
+  }
+  for (
+    const eventType of [
+      "room.pin_change_prepared",
+      "room.pin_change_confirmed",
+      "room.pin_mismatch_resolved",
+    ] as const
+  ) {
+    assert(
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(eventType),
+      `audit enum includes ${eventType}`,
+    );
+  }
+  const summary = doc.components.schemas.DeveloperAuditEvent.properties.summary;
+  assert(
+    ["roomId", "leaseId", "pinVersion", "status"].every((field) =>
+      field in summary.properties
+    ),
+    "audit summary exposes only useful PIN identity/status",
+  );
+  for (
+    const forbidden of [
+      "requestHash",
+      "ciphertext",
+      "nonce",
+      "authTag",
+      "aad",
+      "pinDigits",
+      "credential",
+    ]
+  ) {
+    assert(!(forbidden in summary.properties), `audit omits ${forbidden}`);
+  }
 });
 
 Deno.test("every Swagger operation has Korean integration guidance", async () => {

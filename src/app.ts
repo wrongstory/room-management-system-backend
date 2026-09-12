@@ -87,7 +87,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
-      rooms: new SupabaseRoomService(clients),
+      rooms: new SupabaseRoomService(clients, {
+        key: options.env.ROOM_PIN_KEY_BASE64,
+        keyVersion: options.env.ROOM_PIN_KEY_VERSION,
+        keyring: JSON.parse(options.env.ROOM_PIN_KEYRING_JSON) as Record<string, string>,
+        environment: options.env.APP_ENV,
+        projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
+      }),
       reservations: new SupabaseReservationService(
         clients,
         options.env.RESERVATION_PII_KEY_BASE64,

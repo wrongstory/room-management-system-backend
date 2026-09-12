@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 create function pg_temp.pid(n integer) returns uuid language sql immutable as $$
  select ('30000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid
@@ -191,6 +192,7 @@ do $$ declare r public.rooms; day date:=(clock_timestamp() at time zone 'Asia/Se
  select * into r from public.rooms where room_type_id=(select id from public.room_types where code='standard') order by room_number offset 8 limit 1;
  insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
  values(r.id,'verified',1,'TEST',pg_temp.pid(1),clock_timestamp());
+ perform pg_temp.install_room_pin_fixture(r.id,pg_temp.pid(1),1);
  response:=public.create_reservation(pg_temp.pid(1),pg_temp.pid(801),r.id,(day+time '16:00') at time zone 'Asia/Seoul',
   (day+1+time '11:00') at time zone 'Asia/Seoul',2,null,r.state_version,'photo-reservation-create',repeat('a',64));
  insert into photo_source_results values('reservation',response);

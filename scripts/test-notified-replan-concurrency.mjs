@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { configureRoomPinForConcurrency } from './test-room-pin-concurrency.mjs';
 
 function assert(value, message) {
   if (!value) throw new Error(message);
@@ -34,8 +35,9 @@ function weekStart(serviceDate) {
   return date.toISOString().slice(0, 10);
 }
 
-export async function testNotifiedReplanConcurrency(client, actorProfileId) {
-  const rooms = ok(await client.from('rooms').select('id,state_version')
+export async function testNotifiedReplanConcurrency(client, actor) {
+  const actorProfileId = actor.profileId;
+  const rooms = ok(await client.from('rooms').select('id,room_number,state_version')
     .order('room_number').range(100, 106), 'notified replan rooms');
   assert(rooms.length === 7, 'notified replan needs seven isolated rooms');
 
@@ -100,16 +102,10 @@ export async function testNotifiedReplanConcurrency(client, actorProfileId) {
     const room = rooms[index];
     const maidId = await createMaid(label);
     const reservationId = randomUUID();
-    ok(await client.rpc('mutate_room_operation', {
-      p_actor_profile_id: actorProfileId,
-      p_room_id: room.id,
-      p_action: 'record_pin_sync',
-      p_expected_room_version: room.state_version,
-      p_reason_code: 'NOTIFIED_REPLAN_CONCURRENCY_FIXTURE',
-      p_payload: { entityId: randomUUID(), syncStatus: 'verified', pinVersion: 1 },
-      p_idempotency_key: `notified-replan-pin-${reservationId}`,
-      p_request_hash: '1'.repeat(64)
-    }), `${label} pin fixture`);
+    await configureRoomPinForConcurrency(client, actor, {
+      id: room.id,
+      roomNumber: room.room_number
+    });
     const currentRoom = ok(await client.from('rooms').select('state_version')
       .eq('id', room.id).single(), `${label} room version`);
     ok(await client.rpc('create_reservation', {
@@ -264,16 +260,10 @@ export async function testNotifiedReplanConcurrency(client, actorProfileId) {
   const plannedRoom = rooms[6];
   const plannedMaidId = await createMaid('planned-retry');
   const plannedReservationId = randomUUID();
-  ok(await client.rpc('mutate_room_operation', {
-    p_actor_profile_id: actorProfileId,
-    p_room_id: plannedRoom.id,
-    p_action: 'record_pin_sync',
-    p_expected_room_version: plannedRoom.state_version,
-    p_reason_code: 'NOTIFIED_REPLAN_CONCURRENCY_FIXTURE',
-    p_payload: { entityId: randomUUID(), syncStatus: 'verified', pinVersion: 1 },
-    p_idempotency_key: `notified-replan-pin-${plannedReservationId}`,
-    p_request_hash: '8'.repeat(64)
-  }), 'planned retry pin fixture');
+  await configureRoomPinForConcurrency(client, actor, {
+    id: plannedRoom.id,
+    roomNumber: plannedRoom.room_number
+  });
   const plannedRoomCurrent = ok(await client.from('rooms').select('state_version')
     .eq('id', plannedRoom.id).single(), 'planned retry room version');
   const plannedCheckInAt = `${previousKstDate(plannedCheckoutAt)}T16:00:00+09:00`;
