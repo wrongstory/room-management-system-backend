@@ -140,7 +140,7 @@ select is((select count(*)::int from public.notifications where cleaning_target_
   and category='cleaning_assignment_rolled_over'),1,'rollover appends one informational notification');
 select is((select count(*)::int from private.notification_delivery_outbox outbox join public.notifications notice
   on notice.id=outbox.notification_id where notice.cleaning_target_id=pg_temp.pid(305)
-  and notice.category='cleaning_assignment_rolled_over'),0,'informational rollover does not enter push outbox');
+  and notice.category='cleaning_assignment_rolled_over'),1,'push-eligible informational rollover enters typed delivery without requiring action');
 select ok((select effective_service_date='2037-09-30' and carryover_count=0 from public.cleaning_targets
   where id=pg_temp.pid(306)),'active scheduled attempt is excluded from rollover');
 select is((select count(*)::int from public.cleaning_targets

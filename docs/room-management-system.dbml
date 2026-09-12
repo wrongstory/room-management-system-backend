@@ -1225,7 +1225,7 @@ Table private.notification_event_catalog {
   group_family text [not null]
   group_scope_kind text [not null]
 
-  Note: '#109 immutable source-controlled 42 event-family / 28 public-category contract.'
+  Note: '#109/#128 immutable source-controlled 48 event-family / 32 public-category contract. push_eligible is independent from requires_action; self push is suppressed.'
 }
 
 Table private.notification_groups {

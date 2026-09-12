@@ -146,7 +146,8 @@ select is((select status::text from public.profiles where id=pg_temp.bid(3)),'ac
 select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=pg_temp.bid(302)),2,'handover preserves old and creates exactly one new attempt');
 select is((select count(*)::int from private.attempt_handover_events),1,'handover provenance append is atomic');
 select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.bid(302)),3,'capability plus old/new notifications are created exactly once');
-select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.bid(302)),2,'only actionable capability and new assignment enter typed outbox');
+select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.bid(302)),3,
+  'actionable capability/new assignment and informational previous-revoke enter typed outbox');
 select is((select value#>>'{capability,kind}' from b_result where label='handover'),'evidence_upload','old attempt receives evidence-only rights');
 select is((select count(*)::int from public.notifications where event_family='capability.evidence_upload_handover_issued'
   and source_entity_id=(select id::text from private.attempt_capability_grants where attempt_id=pg_temp.bid(502) and kind='evidence_upload')),1,
@@ -296,6 +297,12 @@ select is((select status::text from public.profiles where id=pg_temp.bid(7)),'up
 select throws_ok($$select pg_temp.bcomplete(6,7)$$,'42501','CAPABILITY_ACCESS_REQUIRED','handover permanently invalidates prior finish command');
 select private.execute_cleaning_attempt_at(pg_temp.bid(8),pg_temp.bid(507),2,pg_temp.bid(407),2,
  'upload-only-physical-complete',repeat('f',64),'complete_field_work',pg_temp.btime());
+select is((select count(*) from public.notifications where event_family='cleaning.field_completed_admin'
+  and source_entity_id=pg_temp.bid(507)::text and recipient_profile_id=pg_temp.bid(1)),1::bigint,
+  'limited-flow field completion emits exactly one active-admin inbox notification');
+select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  where n.event_family='cleaning.field_completed_admin' and n.source_entity_id=pg_temp.bid(507)::text),2::bigint,
+  'limited-flow field completion enqueues push for every active admin');
 select pg_temp.bmanage(7,'allow_upload',3);
 select is((select status::text from public.profiles where id=pg_temp.bid(8)),'upload_only','already completed maid may receive explicit upload-only permission');
 select is((select count(*)::int from public.notifications where event_family='capability.upload_submit_admin_issued'
