@@ -28,8 +28,7 @@ select old_room_id,'verified',1,'TEST',pg_temp.vid(1),now() from relocation
 union all select new_room_id,'verified',1,'TEST',pg_temp.vid(1),now() from relocation;
 
 -- Execute actual reservation -> draft -> commit/notify -> unassign -> move request.
--- Existing reservation-room FK currently rejects the last command atomically (#73);
--- this visibility PR records that limitation rather than changing reservation rules.
+-- #73 permits the move only after the notified assignment has been explicitly ended.
 select public.create_reservation(pg_temp.vid(1),x.reservation_id,x.old_room_id,
   x.check_in_at,x.check_out_at,2,null,r.state_version,'visibility-relocation-create',repeat('1',64))
 from relocation x join public.rooms r on r.id=x.old_room_id;
@@ -60,54 +59,31 @@ select is((select count(*)::integer from public.cleaning_attempts),0,'planned no
 select public.unassign_cleaning_assignment_prestart(pg_temp.vid(1),x.target_id,x.assignment_id,
   t.assignment_version,'OPERATIONAL_CHANGE','visibility-relocation-unassign',repeat('4',64))
 from relocation x join public.cleaning_targets t on t.id=x.target_id;
-create temporary table before_rejected_move as
-select (select to_jsonb(r) from public.reservations r where r.id=x.reservation_id) as reservation,
-  (select to_jsonb(t) from public.cleaning_targets t where t.id=x.target_id) as target,
-  (select to_jsonb(o) from public.checkout_cleaning_obligations o where o.reservation_id=x.reservation_id) as obligation,
-  (select jsonb_agg(to_jsonb(a) order by a.revision) from public.cleaning_assignments a where a.cleaning_target_id=x.target_id) as assignments,
-  (select jsonb_agg(to_jsonb(s) order by s.version) from public.reservation_schedule_revisions s where s.reservation_id=x.reservation_id) as reservation_schedules,
-  (select jsonb_agg(to_jsonb(s) order by s.revision) from public.cleaning_target_schedule_revisions s where s.cleaning_target_id=x.target_id) as target_schedules,
-  (select count(*) from public.audit_events) as audit_count,
-  (select count(*) from private.command_executions) as receipt_count,
-  (select count(*) from public.notifications) as notification_count,
-  (select count(*) from private.notification_outbox) as outbox_count
-from relocation x;
-select ok((select not condeferrable from pg_constraint
+select ok((select condeferrable and condeferred from pg_constraint
   where conname='cleaning_targets_reservation_room_fk' and conrelid='public.cleaning_targets'::regclass),
-  'existing reservation room FK is immediate; no test-only constraint deferral');
-select throws_ok($test$ select public.change_reservation(pg_temp.vid(1),x.reservation_id,x.new_room_id,x.check_in_at,x.check_out_at,
+  'reservation room FK remains enforced and is deferred by the production migration');
+select lives_ok($test$ select public.change_reservation(pg_temp.vid(1),x.reservation_id,x.new_room_id,x.check_in_at,x.check_out_at,
   2,'keep',null,r.version,'OPERATIONAL_CHANGE','visibility-relocation-move',repeat('5',64))
-from relocation x join public.reservations r on r.id=x.reservation_id $test$,'23503',
-  'update or delete on table "reservations" violates foreign key constraint "cleaning_targets_reservation_room_fk" on table "cleaning_targets"',
-  'known existing room-change limitation rejects before target synchronization');
-select ok((select b.reservation=to_jsonb(r) and b.target=to_jsonb(t) and b.obligation=to_jsonb(o)
-  and b.assignments is not distinct from (select jsonb_agg(to_jsonb(a) order by a.revision) from public.cleaning_assignments a where a.cleaning_target_id=x.target_id)
-  and b.reservation_schedules is not distinct from (select jsonb_agg(to_jsonb(s) order by s.version) from public.reservation_schedule_revisions s where s.reservation_id=x.reservation_id)
-  and b.target_schedules is not distinct from (select jsonb_agg(to_jsonb(s) order by s.revision) from public.cleaning_target_schedule_revisions s where s.cleaning_target_id=x.target_id)
-  and b.audit_count=(select count(*) from public.audit_events)
-  and b.receipt_count=(select count(*) from private.command_executions)
-  and b.notification_count=(select count(*) from public.notifications)
-  and b.outbox_count=(select count(*) from private.notification_outbox)
-  from relocation x cross join before_rejected_move b
-  join public.reservations r on r.id=x.reservation_id
-  join public.cleaning_targets t on t.id=x.target_id
-  join public.checkout_cleaning_obligations o on o.reservation_id=x.reservation_id),
-  'failed real room-change preserves reservation/target/obligation/assignment/schedules/audit/receipt/outbox');
-select ok((select t.room_id=x.old_room_id and o.planned_cleaning_target_id=x.target_id
+from relocation x join public.reservations r on r.id=x.reservation_id $test$,
+  'ended notified plan can move atomically to another room');
+select ok((select r.room_id=x.new_room_id and t.room_id=x.new_room_id and o.room_id=x.new_room_id
+  and o.planned_cleaning_target_id=x.target_id and o.current_cleaning_target_id is null
+  and o.status='private' and t.status='unassigned'
   from relocation x join public.cleaning_targets t on t.id=x.target_id
+  join public.reservations r on r.id=x.reservation_id
   join public.checkout_cleaning_obligations o on o.reservation_id=x.reservation_id),
-  'failed room-change retains original room and planned target identity');
+  'reservation, private obligation and same planned target move atomically');
 select is((select count(*)::integer from public.cleaning_targets t join relocation x on t.reservation_id=x.reservation_id),1,
-  'failed room replan does not duplicate the planned target');
+  'room replan does not duplicate the planned target');
 select ok((select not a.is_current and a.notified_at is not null
   and a.notified_room_id_snapshot=x.old_room_id and a.notified_room_number_snapshot=x.old_room_number
   from relocation x join public.cleaning_assignments a on a.id=x.assignment_id),
-  'unassign plus rejected room move preserves the actual old notification snapshot');
+  'unassign plus room move preserves the actual old notification snapshot');
 grant select on relocation to authenticated;
 set local role authenticated;
 select set_config('request.jwt.claim.sub',pg_temp.vid(102)::text,true);
 select is((select count(*)::integer from public.cleaning_assignments),1,
-  'old maid keeps the exact notified historical revision after unassign and rejected replan');
+  'old maid keeps the exact notified historical revision after unassign and replan');
 select ok((select a.notified_room_id_snapshot=x.old_room_id and a.notified_room_number_snapshot=x.old_room_number
   and a.notified_room_id_snapshot<>x.new_room_id
   from public.cleaning_assignments a join relocation x on x.assignment_id=a.id),

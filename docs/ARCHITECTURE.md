@@ -15,7 +15,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / OpenAPI 98 paths / 105 operations다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@9ec073e6908cd90768fad3f1c6841f8130f39a88`이며 #73 전 기능 snapshot은 45 migrations / OpenAPI 98 paths / 105 operations다. #73 source candidate는 46번째 append-only migration을 추가하고 public API 수는 바꾸지 않는다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
 
@@ -384,9 +384,12 @@ PR #74는 기존 25개 migration을 그대로 두고 `20260908101844_maid_assign
 추가해 dev에 병합됐습니다. 그 PR에는 #7A/B/C의 실행/lease/limited session을 포함하지 않았습니다.
 field_completed는 물리적 완료 선언, 필수사진은 submission gate라는 최신 제품 가이드를 따릅니다.
 
-검증 중 발견한 기존 예약 객실 변경의 즉시 FK 충돌은 #73에서 별도 추적합니다. 현재 실제
-`change_reservation` 경로는 planned target 참조 때문에 실패하므로 이번 검증을 객실 변경 성공으로
-표현하지 않습니다. 현재 실패의 원자성과 별도 합성 relocation의 과거 snapshot 비노출을 구분합니다.
+#73의 46번째 append-only migration은 `cleaning_targets_reservation_room_fk`를 다른 planned graph
+복합 FK와 같은 `DEFERRABLE INITIALLY DEFERRED` 검사 시점으로 맞춥니다. `change_reservation`은
+reservation → obligation → 동일 planned target을 기존 reservation-command lock 안에서 갱신하고,
+commit 시 FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` trigger가 최종 graph를 다시 검증합니다.
+제약 비활성화나 새 target 생성은 없습니다. unassigned/미통보 draft만 이동 가능하고 draft는 stale,
+notified와 checked-in은 stable domain error로 거부됩니다. 과거 notified room snapshot은 불변입니다.
 
 ### #7A 온라인 실행 경계
 
@@ -673,7 +676,7 @@ status는 조회 시점의 같은 current VAPID config parser·crypto validation
 
 #112 source는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 같은 tree로 PR #119에 병합됐다. Issue는 Function Secrets → 승인된 `api`/`notification-delivery` Edge bundle → negative/positive hosted smoke → Vault/`pg_cron`/`pg_net` → 5회 연속 heartbeat → 실제 기기 Web Push smoke까지 OPEN이다.
 
-다음 source critical path는 `#73 → #34 → #46 → #69 Phase A`다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
+#73 source 이후 critical path는 `#34 → #46 → #69 Phase A`다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 
 Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·촛불·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`만 재사용하며 raw table DML을 하지 않는다. actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 
@@ -703,7 +706,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-09-03에 v0.2.0 운영 활성화를 완료한 현재 `main`은 `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`이며 production은 19 migrations / OpenAPI 39 paths / 43 operations다. 이후 이 문서의 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5` integration base가 가진 45 migrations / 98 paths / 105 operations와 #25~#112 source는 main/recovery/production에 승격하지 않았다. 이 문서 갱신에서는 원격 환경을 재검증하거나 변경하지 않았으며 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
+2026-09-03에 v0.2.0 운영 활성화를 완료한 현재 `main`은 `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`이며 production은 19 migrations / OpenAPI 39 paths / 43 operations다. 이후 이 문서의 `dev@9ec073e6908cd90768fad3f1c6841f8130f39a88` integration base가 가진 #73 전 45 migrations / 98 paths / 105 operations와 #25~#112 source는 main/recovery/production에 승격하지 않았다. #73 source candidate는 46번째 migration만 추가하고 public API 수를 유지한다. 이 문서 갱신에서는 원격 환경을 재검증하거나 변경하지 않았으며 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 

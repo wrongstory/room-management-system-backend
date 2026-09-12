@@ -3,7 +3,7 @@ import { EdgeError, requireDeveloper } from "./runtime.ts";
 import { notificationDeliveryConfig } from "../notification-delivery/index.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "web_push_vapid_binding";
+export const expectedMigrationName = "planned_checkout_room_change_fk";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
