@@ -262,7 +262,7 @@ select is((select count(*) from private.notification_delivery_permits p join pri
 
 select set_config('app.notification_writer_mode','typed_v1',true);
 insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
-values(pg_temp.did(2202),pg_temp.did(7),'cleaning_assignment_notified','room',pg_temp.did(2202),clock_timestamp(),clock_timestamp()+interval '10 minutes');
+values(pg_temp.did(2202),pg_temp.did(7),'cleaning_assignment_notified','room',pg_temp.did(2202),transaction_timestamp(),transaction_timestamp()+interval '10 minutes');
 insert into public.notifications(id,recipient_profile_id,category,title,body,dedupe_key,contract_version,
   actor_profile_id,event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,
   notification_group_id,requires_action,occurred_at)
