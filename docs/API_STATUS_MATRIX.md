@@ -49,11 +49,19 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
   ├─ /v1/payroll/start
   ├─ /v1/complaints
   ├─ /v1/complaints/{complaintId}/*
+  ├─ /v1/notifications
+  ├─ /v1/push-subscriptions/*
   ├─ /v1/attempts/*/submissions
   └─ /v1/inspections/*
 
 /functions/v1/reservation-scheduler
   └─ scheduler 전용 POST
+
+/functions/v1/photo-purge                 # source/dev, production 미승격
+  └─ 사진 purge worker 전용 POST
+
+/functions/v1/notification-delivery       # source/dev, production 미승격
+  └─ Web Push delivery worker 전용 POST
 ```
 
 따라서 메이드 API를 추가한다고 `maid` Function을 새로 만드는 것이 아니라 기존 `api` Function에 route/adapter를 추가하고 다시 배포한다.
@@ -62,20 +70,22 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). 개발 통합 기준 갱신: **2026-09-12 KST**. 이번 개발에서 운영을 재검증하거나 변경하지 않았다.
 
-- 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
+- 현재 GitHub 운영 릴리즈 정본: `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`
   - v0.2.0 통합 source 승격: `main@2a683fa`
-  - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 현재 개발·문서 검토 기준: `dev@dfc98b1474f9f890851d49bd904869181d0d7880`. #112 VAPID/provider HTTP source gate가 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`에서 required CI와 독립 QA를 통과하고 PR #119로 source/dev에 병합된 **45 migrations / 98 paths / 105 operations** 기준이다. Issue #112는 hosted 활성화 완료까지 OPEN이며 main/recovery/production은 변경하지 않았다.
+  - production Edge 배포 bundle source: diagnostics zero-byte hosted 호환 hotfix PR #64 / `main@cd635b116f451a39481f496f2bd368776385a409`
+- 이 문서 갱신의 integration base: `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`; 기능 snapshot은 **45 migrations / 98 paths / 105 operations**다. #112 VAPID/provider HTTP source gate는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`에서 required CI와 독립 QA를 통과하고 PR #119로 `dev@dfc98b1474f9f890851d49bd904869181d0d7880`에 병합됐으며, PR #122의 상태 문서와 #124의 pgTAP fixture 안정화를 이 base가 포함한다. Issue #112는 hosted 활성화 완료까지 OPEN이며 main/recovery/production은 변경하지 않았다.
 - 개발 통합 기능 기준: #25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
-- #31은 PR #91로 source/dev 병합 완료했다. 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이고 다음 본선은 #8 earning/payroll 정산이다.
+- #31은 PR #91로 source/dev 병합 완료했다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이다.
 - #93/#95는 PR #95로 source/dev 병합 완료했다. 개발 통합 계약은 **35 migrations / 76 paths / 82 operations**이며 conceptual OPEN 조회, OPEN→PAYING 잠금과 4개 payroll table의 active+비밀번호 변경 완료+admin/maid-self RLS를 포함한다.
 - #96은 PR #97로 source/dev 병합 완료했다. bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 포함한 개발 통합 계약은 **36 migrations / 77 paths / 83 operations**이다. Python developer 콘솔 16 operations는 유지하며 production에는 아직 승격하지 않았다.
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 현재 dev는 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
+- #69 승인 PIN 계약은 프런트가 선행 0을 보존한 4~8자리 숫자 부분만 보내고, 서버가 현재 `rooms.room_number`로 `<room_number>-<pin_digits>` canonical credential을 조합해 private encrypted immutable revision/current pointer에 저장하는 방식이다. Phase A source는 아직 미구현이며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
+- 다음 source critical path는 **#73 → #34 → #46 → #69 Phase A**다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
-  - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
-  - `reservation-scheduler` version 8 — ACTIVE, source identity는 위 승인 `main` 기준
+  - `api` version 9 — ACTIVE, 배포 source는 위 `main@cd635b1` bundle 기준
+  - `reservation-scheduler` version 8 — ACTIVE, 배포 source는 위 `main@cd635b1` bundle 기준
   - version 증가는 source 변경 외 Function Secret 환경 revision도 포함하므로 source identity로 사용하지 않는다.
 - production OpenAPI: **39 paths / 43 operations**, version `0.2.0`
 - active 계정 readback: developer/admin/maid 각각 1명, 모두 `must_change_password=false`
@@ -785,8 +795,9 @@ production DB/Edge/Pages를 변경하지 않는다.
   적용한다. `paidAt`은 server 시각이며 actor, cycle `expectedVersion`, scoped idempotency/request hash, audit이
   필수다. 영수증·계좌·수취인 PII를 저장하거나 실제 송금 확인 전 `PAID`를 응답하지 않는다.
 
-#100 complaint lifecycle, #101 typed compensation earning, #102 adjustment/carry-forward는 dev에 통합됐다.
-#103, #108, #109, #110 source는 아래 절에서 완료 상태로 추적한다. #111 source 후보는 독립 QA·required CI·dev 병합 전이며
+#100~#103 정산·complaint source와 #108~#112 알림·Web Push source는 모두 dev에 통합됐다.
+#112만 Function Secrets, 승인 `api`/`notification-delivery` Edge bundle, hosted smoke,
+Vault/`pg_cron`/`pg_net`, 연속 heartbeat와 실제 기기 smoke의 production activation이 남았다.
 main/recovery/production migration·Edge/Pages/Cron/Vault는 그대로 유지한다.
 
 ### #100 Complaint / Appeal / Correction source gate — source/dev 완료, production 미승격
@@ -924,7 +935,8 @@ main/recovery/production migration·Edge/Pages/Cron/Vault는 그대로 유지한
 - [x] private raw table/helper PUBLIC/anon/authenticated/service_role 권한 차단, app-owned RPC만 service_role EXECUTE
 - [x] Fastify/Edge/OpenAPI strict 2 paths/2 operations, no-store·128 KiB, raw endpoint/key/digest/session 비노출; 97 paths / 104 operations
 - [x] PR #115 독립 QA, required GitHub `application` / `migration` PASS, `dev@6e22eaf1150063511356db03d9845c5bb5175723` 병합
-- [ ] #111 delivery target/attempt/claim/retry 및 #112 VAPID/provider HTTP/Cron/production secret·배포
+- [x] #111 delivery target/attempt/claim/retry source/dev 및 #112 VAPID/provider HTTP source/dev
+- [ ] #112 Function Secrets/Cron/Vault/production Edge 배포·hosted 활성화
 
 ### #111 Notification delivery worker source gate — source/dev 완료, production 미승격
 
@@ -1046,8 +1058,10 @@ accepted 보존/fenced compensation, 원본 반환 직전 재인가가 이번 �
 합성 metadata와 provider acknowledgement DB 테스트를 실파일·Drive 검증 완료로 표현하지 않는다.
 production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production snapshot은 **19 migrations / 39 paths / 43 operations**로 유지하며 이번에 운영을 재검증하지 않았다.
 
-#10 알림/Outbox, #12 Backup/Recovery, #34 Actions maintenance, #44 Python 후속,
-#46 password replay, #69 Sheets PIN 및 #73 예약 FK 트랙은 별도로 유지한다.
+#10 알림/Outbox source는 #108~#112까지 dev 완료이며 #112 운영 활성화만 별도 승인으로 남는다.
+다음 source critical path는 **#73 예약 FK → #34 Actions runtime → #46 password replay → #69 PIN Domain Phase A**다.
+#12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
+#44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고
 Codex 평가가 90/100 이상이면 source/dev 병합을 승인할 수 있다. 미달/차단 시 리뷰를 남기고
 사용자 승인을 요청한다. exact head 변경 시 재검토한다. production/main/release 권한은
