@@ -106,6 +106,8 @@ const accountColumns = [
   'updated_at'
 ].join(',');
 
+const authUpdatedAtPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+
 export function normalizeDisplayName(value: string): { displayName: string; normalized: string } {
   const displayName = value.normalize('NFKC').trim().replace(/\s+/g, ' ');
   return {
@@ -538,6 +540,9 @@ export class SupabaseAccountService implements AccountService {
     const recoveryState = recoveryData && typeof recoveryData === 'object'
       ? (recoveryData as { state?: unknown }).state
       : null;
+    const recoveryAuthUpdatedAt = recoveryData && typeof recoveryData === 'object'
+      ? (recoveryData as { authUpdatedAt?: unknown }).authUpdatedAt
+      : null;
     if (
       recoveryError ||
       (recoveryState !== 'prepared' && recoveryState !== 'completed') ||
@@ -563,6 +568,17 @@ export class SupabaseAccountService implements AccountService {
           '이미 완료된 비밀번호 초기화 키는 후속 비밀번호 변경 뒤 재사용할 수 없습니다.'
         );
       }
+      if (
+        typeof recoveryAuthUpdatedAt !== 'string' ||
+        !authUpdatedAtPattern.test(recoveryAuthUpdatedAt) ||
+        replayAuthState.user.updated_at !== recoveryAuthUpdatedAt
+      ) {
+        throw new AppError(
+          409,
+          'IDEMPOTENCY_KEY_REUSED',
+          '이미 완료된 비밀번호 초기화 키는 후속 인증 변경 뒤 재사용할 수 없습니다.'
+        );
+      }
       return toAccount(row);
     }
     const { error: authError } = await this.clients.admin.auth.admin.updateUserById(row.auth_user_id, {
@@ -579,9 +595,12 @@ export class SupabaseAccountService implements AccountService {
     const { data: authState, error: authStateError } = await this.clients.admin.auth.admin.getUserById(
       row.auth_user_id
     );
+    const authUpdatedAt = authState.user?.updated_at;
     if (
       authStateError ||
-      authState.user?.app_metadata?.password_change_effect_marker !== effectMarker
+      authState.user?.app_metadata?.password_change_effect_marker !== effectMarker ||
+      typeof authUpdatedAt !== 'string' ||
+      !authUpdatedAtPattern.test(authUpdatedAt)
     ) {
       throw new AppError(
         502,
@@ -596,7 +615,8 @@ export class SupabaseAccountService implements AccountService {
         p_target_profile_id: input.targetProfileId,
         p_idempotency_key: input.idempotencyKey,
         p_request_hash: hash,
-        p_effect_marker: effectMarker
+        p_effect_marker: effectMarker,
+        p_auth_updated_at: authUpdatedAt
       }
     );
     if (finalizeError) {

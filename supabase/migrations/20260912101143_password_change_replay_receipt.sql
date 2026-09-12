@@ -12,6 +12,10 @@ create table private.password_change_commands (
     check (idempotency_key ~ '^[A-Za-z0-9._:-]{8,128}$'),
   request_hash text not null check (request_hash ~ '^[0-9a-f]{64}$'),
   effect_marker text not null check (effect_marker ~ '^[0-9a-f]{64}$'),
+  auth_updated_at text check (
+    auth_updated_at is null or auth_updated_at ~
+      '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+  ),
   session_digest text not null check (session_digest ~ '^[0-9a-f]{64}$'),
   state text not null check (
     state in ('auth_pending', 'completed', 'failed', 'inconsistent', 'reset_pending', 'superseded')
@@ -36,7 +40,8 @@ create table private.password_change_commands (
     or (state in ('reset_pending', 'superseded') and claim_digest is null and lease_expires_at is null
       and reset_command_execution_id is not null)
   ),
-  check ((state in ('completed', 'superseded')) = (completed_at is not null))
+  check ((state in ('completed', 'superseded')) = (completed_at is not null)),
+  check ((state = 'completed') = (auth_updated_at is not null))
 );
 
 create unique index password_change_commands_actor_unresolved_uq
@@ -68,12 +73,17 @@ create table private.password_reset_auth_markers (
   actor_profile_id uuid not null references public.profiles(id) on delete restrict,
   target_profile_id uuid not null references public.profiles(id) on delete restrict,
   effect_marker text not null check (effect_marker ~ '^[0-9a-f]{64}$'),
+  auth_updated_at text check (
+    auth_updated_at is null or auth_updated_at ~
+      '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+  ),
   state text not null check (state in ('prepared', 'completed')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   completed_at timestamptz,
   unique (actor_profile_id, target_profile_id, command_execution_id),
-  check ((state = 'completed') = (completed_at is not null))
+  check ((state = 'completed') = (completed_at is not null)),
+  check ((state = 'completed') = (auth_updated_at is not null))
 );
 
 alter table private.password_reset_auth_markers enable row level security;
@@ -172,7 +182,8 @@ as $$
       else v_command.state
     end,
     'attemptCount', v_command.attempt_count,
-    'effectMarker', v_command.effect_marker
+    'effectMarker', v_command.effect_marker,
+    'authUpdatedAt', v_command.auth_updated_at
   )
 $$;
 
@@ -632,7 +643,8 @@ begin
   if v_reset_marker.state = 'completed' then
     return jsonb_build_object(
       'state', 'completed',
-      'effectMarker', v_reset_marker.effect_marker
+      'effectMarker', v_reset_marker.effect_marker,
+      'authUpdatedAt', v_reset_marker.auth_updated_at
     );
   end if;
 
@@ -672,7 +684,8 @@ create function public.finalize_password_change_admin_reset(
   p_target_profile_id uuid,
   p_idempotency_key text,
   p_request_hash text,
-  p_effect_marker text
+  p_effect_marker text,
+  p_auth_updated_at text
 )
 returns jsonb
 language plpgsql
@@ -685,6 +698,10 @@ declare
   v_reset_marker private.password_reset_auth_markers%rowtype;
   v_now timestamptz := clock_timestamp();
 begin
+  if p_auth_updated_at is null or p_auth_updated_at !~
+    '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' then
+    raise exception using errcode = '22023', message = 'INVALID_PASSWORD_AUTH_VERSION';
+  end if;
   perform pg_advisory_xact_lock(hashtextextended('password-reset-recovery:global', 0));
   perform pg_advisory_xact_lock(hashtextextended('password-change:' || p_target_profile_id::text, 0));
   v_execution_id := private.password_reset_command_execution(
@@ -708,7 +725,8 @@ begin
 
   if not found then
     update private.password_reset_auth_markers
-    set state = 'completed', updated_at = v_now, completed_at = v_now
+    set state = 'completed', auth_updated_at = p_auth_updated_at,
+        updated_at = v_now, completed_at = v_now
     where command_execution_id = v_execution_id and state = 'prepared';
     return jsonb_build_object('completed', true, 'receiptSuperseded', false);
   end if;
@@ -724,7 +742,8 @@ begin
   where id = v_command.id;
 
   update private.password_reset_auth_markers
-  set state = 'completed', updated_at = v_now, completed_at = v_now
+  set state = 'completed', auth_updated_at = p_auth_updated_at,
+      updated_at = v_now, completed_at = v_now
   where command_execution_id = v_execution_id and state = 'prepared';
 
   return jsonb_build_object('completed', true, 'receiptSuperseded', true);
@@ -747,6 +766,8 @@ begin
     or new.effect_marker <> old.effect_marker
     or new.created_at <> old.created_at
     or old.state = 'completed'
+    or (old.auth_updated_at is distinct from new.auth_updated_at
+      and not (old.auth_updated_at is null and new.state = 'completed' and new.auth_updated_at is not null))
     or (old.state = 'prepared' and new.state not in ('prepared', 'completed')) then
     raise exception using errcode = '55000', message = 'PASSWORD_RESET_MARKER_IMMUTABLE';
   end if;
@@ -766,7 +787,8 @@ create function public.complete_password_change(
   p_session_id uuid,
   p_idempotency_key text,
   p_request_hash text,
-  p_claim_digest text
+  p_claim_digest text,
+  p_auth_updated_at text
 )
 returns jsonb
 language plpgsql
@@ -778,6 +800,10 @@ declare
   v_command private.password_change_commands%rowtype;
   v_now timestamptz := clock_timestamp();
 begin
+  if p_auth_updated_at is null or p_auth_updated_at !~
+    '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' then
+    raise exception using errcode = '22023', message = 'INVALID_PASSWORD_AUTH_VERSION';
+  end if;
   perform pg_advisory_xact_lock(hashtextextended('password-change:' || p_actor_profile_id::text, 0));
   v_actor := private.assert_password_change_actor(p_actor_profile_id, p_auth_user_id, p_session_id);
 
@@ -828,7 +854,8 @@ begin
 
   update private.password_change_commands
   set state = 'completed', claim_digest = null, lease_expires_at = null,
-      failure_code = null, updated_at = v_now, completed_at = v_now
+      failure_code = null, auth_updated_at = p_auth_updated_at,
+      updated_at = v_now, completed_at = v_now
   where id = v_command.id;
 
   return jsonb_build_object('completed', true);
@@ -854,6 +881,8 @@ begin
     or new.effect_marker <> old.effect_marker
     or new.session_digest <> old.session_digest
     or new.created_at <> old.created_at
+    or (old.auth_updated_at is distinct from new.auth_updated_at
+      and not (old.auth_updated_at is null and new.state = 'completed' and new.auth_updated_at is not null))
     or (old.state in ('reset_pending', 'superseded')
       and new.reset_command_execution_id is distinct from old.reset_command_execution_id)
     or old.state in ('completed', 'failed', 'superseded')
@@ -887,22 +916,22 @@ revoke all on function public.prepare_password_change(uuid, uuid, uuid, text, te
   from public, anon, authenticated;
 revoke all on function public.finish_password_change_failure(uuid, uuid, uuid, text, text, text)
   from public, anon, authenticated;
-revoke all on function public.complete_password_change(uuid, uuid, uuid, text, text, text)
+revoke all on function public.complete_password_change(uuid, uuid, uuid, text, text, text, text)
   from public, anon, authenticated;
 revoke all on function public.consume_password_verification_rate_limit(
   uuid, uuid, uuid, text, integer, integer
 ) from public, anon, authenticated;
 revoke all on function public.prepare_password_change_admin_reset(uuid, uuid, text, text, text)
   from public, anon, authenticated;
-revoke all on function public.finalize_password_change_admin_reset(uuid, uuid, text, text, text)
+revoke all on function public.finalize_password_change_admin_reset(uuid, uuid, text, text, text, text)
   from public, anon, authenticated;
 
 grant execute on function public.inspect_password_change(uuid, uuid, uuid, text) to service_role;
 grant execute on function public.prepare_password_change(uuid, uuid, uuid, text, text, text, text) to service_role;
 grant execute on function public.finish_password_change_failure(uuid, uuid, uuid, text, text, text) to service_role;
-grant execute on function public.complete_password_change(uuid, uuid, uuid, text, text, text) to service_role;
+grant execute on function public.complete_password_change(uuid, uuid, uuid, text, text, text, text) to service_role;
 grant execute on function public.consume_password_verification_rate_limit(
   uuid, uuid, uuid, text, integer, integer
 ) to service_role;
 grant execute on function public.prepare_password_change_admin_reset(uuid, uuid, text, text, text) to service_role;
-grant execute on function public.finalize_password_change_admin_reset(uuid, uuid, text, text, text) to service_role;
+grant execute on function public.finalize_password_change_admin_reset(uuid, uuid, text, text, text, text) to service_role;

@@ -8,6 +8,7 @@ const sessionId = '30000000-0000-4000-8000-000000000001';
 const accessToken = `x.${Buffer.from(JSON.stringify({ session_id: sessionId })).toString('base64url')}.y`;
 const verificationPepper = 'password-verification-test-pepper-at-least-32-characters';
 const effectMarker = 'e'.repeat(64);
+const authUpdatedAt = '2026-09-12T12:00:00.123456Z';
 const actor = {
   authUserId,
   profileId,
@@ -23,6 +24,7 @@ function clientsFor(options: {
   updateError?: null | { message: string };
   rateLimitAllowed?: boolean | boolean[];
   authEffectMarker?: string | null;
+  authUpdatedAt?: string;
 }) {
   const verified = [...(options.verifiedPasswords ?? [])];
   const rateLimitDecisions = Array.isArray(options.rateLimitAllowed)
@@ -49,7 +51,14 @@ function clientsFor(options: {
       'state' in result.data && (result.data as { state?: unknown }).state !== 'absent' &&
       !('effectMarker' in result.data)
     ) {
-      return { ...result, data: { ...result.data, effectMarker } };
+      return { ...result, data: { ...result.data, effectMarker, authUpdatedAt } };
+    }
+    if (
+      result.data && typeof result.data === 'object' &&
+      'state' in result.data && (result.data as { state?: unknown }).state === 'completed' &&
+      !('authUpdatedAt' in result.data)
+    ) {
+      return { ...result, data: { ...result.data, authUpdatedAt } };
     }
     return result;
   });
@@ -65,6 +74,7 @@ function clientsFor(options: {
           getUserById: vi.fn(async () => ({
             data: {
               user: {
+                updated_at: options.authUpdatedAt ?? authUpdatedAt,
                 app_metadata: {
                   password_change_effect_marker: options.authEffectMarker === undefined
                     ? effectMarker
@@ -112,6 +122,9 @@ describe('password change replay receipt', () => {
     expect(prepare.p_effect_marker).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(prepare)).not.toContain('1234');
     expect(JSON.stringify(prepare)).not.toContain('654321');
+    const completeCall = mocked.rpc.mock.calls.find(([name]) => name === 'complete_password_change');
+    expect(completeCall).toBeDefined();
+    expect((completeCall?.[1] as Record<string, string> | undefined)?.p_auth_updated_at).toBe(authUpdatedAt);
   });
 
   it('returns success after response loss by verifying the supplied new password', async () => {
@@ -301,5 +314,23 @@ describe('password change replay receipt', () => {
       )
     ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
     expect(mocked.signInWithPassword).not.toHaveBeenCalled();
+  });
+
+  it('rejects an old completed key after an out-of-band Auth update leaves the marker unchanged', async () => {
+    const mocked = clientsFor({
+      authUpdatedAt: '2026-09-12T12:05:00.123456Z',
+      rpcStates: [{ data: { state: 'completed', effectMarker, authUpdatedAt }, error: null }]
+    });
+    await expect(
+      new SupabaseAuthService(mocked.clients, verificationPepper).changePassword(
+        actor,
+        '654321',
+        '777777',
+        'password-change-old-version-0013',
+        'fastify-client-1'
+      )
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+    expect(mocked.signInWithPassword).not.toHaveBeenCalled();
+    expect(mocked.updateUserById).not.toHaveBeenCalled();
   });
 });

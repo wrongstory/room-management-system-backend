@@ -9,6 +9,8 @@ import {
   SupabaseAccountService
 } from '../src/modules/accounts/account.service.js';
 
+const authUpdatedAt = '2026-09-12T12:10:00.123456Z';
+
 const actor: Actor = {
   authUserId: 'auth-admin-1',
   profileId: 'admin-1',
@@ -350,7 +352,7 @@ describe('account input normalization', () => {
     });
     const updateUserById = vi.fn(async () => ({ data: { user: {} }, error: null }));
     const getUserById = vi.fn(async () => ({
-      data: { user: { app_metadata: { password_change_effect_marker: resetMarker } } },
+      data: { user: { updated_at: authUpdatedAt, app_metadata: { password_change_effect_marker: resetMarker } } },
       error: null
     }));
     const clients = {
@@ -400,7 +402,7 @@ describe('account input normalization', () => {
         return { data: activeAdminProfile, error: null };
       }
       if (name === 'prepare_password_change_admin_reset') {
-        return { data: { state: 'completed', effectMarker: resetMarker }, error: null };
+        return { data: { state: 'completed', effectMarker: resetMarker, authUpdatedAt }, error: null };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
@@ -419,7 +421,7 @@ describe('account input normalization', () => {
           admin: {
             updateUserById,
             getUserById: vi.fn(async () => ({
-              data: { user: { app_metadata: { password_change_effect_marker: resetMarker } } },
+              data: { user: { updated_at: authUpdatedAt, app_metadata: { password_change_effect_marker: resetMarker } } },
               error: null
             }))
           }
@@ -453,7 +455,7 @@ describe('account input normalization', () => {
         return { data: activeAdminProfile, error: null };
       }
       if (name === 'prepare_password_change_admin_reset') {
-        return { data: { state: 'completed', effectMarker: completedResetMarker }, error: null };
+        return { data: { state: 'completed', effectMarker: completedResetMarker, authUpdatedAt }, error: null };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
@@ -474,6 +476,7 @@ describe('account input normalization', () => {
             getUserById: vi.fn(async () => ({
               data: {
                 user: {
+                  updated_at: authUpdatedAt,
                   app_metadata: { password_change_effect_marker: laterPasswordMarker }
                 }
               },
@@ -498,6 +501,55 @@ describe('account input normalization', () => {
       'prepare_account_password_reset',
       'prepare_password_change_admin_reset'
     ]);
+  });
+
+  it('rejects a completed reset key after an out-of-band Auth update preserves the marker', async () => {
+    const resetMarker = 'c'.repeat(64);
+    const rpc = vi.fn(async (name: string) => {
+      if (name === 'prepare_account_password_reset') {
+        return { data: activeAdminProfile, error: null };
+      }
+      if (name === 'prepare_password_change_admin_reset') {
+        return { data: { state: 'completed', effectMarker: resetMarker, authUpdatedAt }, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const updateUserById = vi.fn();
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc,
+        auth: {
+          admin: {
+            updateUserById,
+            getUserById: vi.fn(async () => ({
+              data: {
+                user: {
+                  updated_at: '2026-09-12T12:11:00.123456Z',
+                  app_metadata: { password_change_effect_marker: resetMarker }
+                }
+              },
+              error: null
+            }))
+          }
+        }
+      }
+    } as unknown as SupabaseClients;
+
+    await expect(new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    ).resetPassword(actor, {
+      targetProfileId: activeAdminProfile.id,
+      idempotencyKey: 'reset-completed-version-stale-0005'
+    })).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+    expect(updateUserById).not.toHaveBeenCalled();
   });
 
   it('keeps reset recovery unresolved when the external Auth reset fails', async () => {

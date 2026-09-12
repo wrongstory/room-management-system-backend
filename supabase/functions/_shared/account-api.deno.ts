@@ -110,6 +110,7 @@ const profile = {
 };
 
 const passwordEffectMarker = "e".repeat(64);
+const passwordAuthUpdatedAt = "2026-09-12T12:00:00.987000Z";
 const allowedPasswordVerification = {
   data: [{ allowed: true, retry_after_seconds: 0 }],
   error: null,
@@ -540,6 +541,7 @@ Deno.test("Edge password change serializes Auth mutation through a nonsecret rec
             Promise.resolve({
               data: {
                 user: {
+                  updated_at: passwordAuthUpdatedAt,
                   app_metadata: {
                     password_change_effect_marker: passwordEffectMarker,
                   },
@@ -628,6 +630,7 @@ Deno.test("Edge completed password receipt replays 204 semantics without Auth mu
               data: {
                 state: "completed",
                 effectMarker: passwordEffectMarker,
+                authUpdatedAt: passwordAuthUpdatedAt,
               },
               error: null,
             },
@@ -643,6 +646,7 @@ Deno.test("Edge completed password receipt replays 204 semantics without Auth mu
             Promise.resolve({
               data: {
                 user: {
+                  updated_at: passwordAuthUpdatedAt,
                   app_metadata: {
                     password_change_effect_marker: passwordEffectMarker,
                   },
@@ -686,6 +690,7 @@ Deno.test("Edge completed key with a different current Auth password fails close
               data: {
                 state: "completed",
                 effectMarker: passwordEffectMarker,
+                authUpdatedAt: passwordAuthUpdatedAt,
               },
               error: null,
             },
@@ -697,6 +702,7 @@ Deno.test("Edge completed key with a different current Auth password fails close
             Promise.resolve({
               data: {
                 user: {
+                  updated_at: passwordAuthUpdatedAt,
                   app_metadata: {
                     password_change_effect_marker: passwordEffectMarker,
                   },
@@ -763,6 +769,7 @@ Deno.test("Edge expired password receipt recovers an Auth-success DB-failure win
             Promise.resolve({
               data: {
                 user: {
+                  updated_at: passwordAuthUpdatedAt,
                   app_metadata: {
                     password_change_effect_marker: passwordEffectMarker,
                   },
@@ -967,7 +974,11 @@ Deno.test("Edge completed replay requires the original Auth effect marker", asyn
     admin: {
       rpc: () =>
         Promise.resolve({
-          data: { state: "completed", effectMarker: passwordEffectMarker },
+          data: {
+            state: "completed",
+            effectMarker: passwordEffectMarker,
+            authUpdatedAt: passwordAuthUpdatedAt,
+          },
           error: null,
         }),
       auth: {
@@ -976,6 +987,7 @@ Deno.test("Edge completed replay requires the original Auth effect marker", asyn
             Promise.resolve({
               data: {
                 user: {
+                  updated_at: passwordAuthUpdatedAt,
                   app_metadata: {
                     password_change_effect_marker: "f".repeat(64),
                   },
@@ -1003,6 +1015,64 @@ Deno.test("Edge completed replay requires the original Auth effect marker", asyn
   assertEquals(signInCount, 0, "marker mismatch blocks before password probe");
 });
 
+Deno.test("Edge completed replay rejects an out-of-band Auth update with an unchanged marker", async () => {
+  let signInCount = 0;
+  const clients = {
+    publicClient: {
+      auth: {
+        signInWithPassword: () => {
+          signInCount += 1;
+          return Promise.resolve({
+            data: { session: { access_token: "verification-token" } },
+            error: null,
+          });
+        },
+      },
+    },
+    admin: {
+      rpc: () =>
+        Promise.resolve({
+          data: {
+            state: "completed",
+            effectMarker: passwordEffectMarker,
+            authUpdatedAt: passwordAuthUpdatedAt,
+          },
+          error: null,
+        }),
+      auth: {
+        admin: {
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  updated_at: "2026-09-12T12:05:00.987000Z",
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    changePassword(
+      passwordRequest(
+        { currentPassword: "654321", newPassword: "777777" },
+        "edge-password-old-version-0013",
+      ),
+      clients,
+      developer,
+    )
+  );
+  assertEquals(error.status, 409, "out-of-band Auth update conflict status");
+  assertEquals(error.code, "IDEMPOTENCY_KEY_REUSED", "Auth version conflict");
+  assertEquals(signInCount, 0, "version mismatch blocks before password probe");
+});
+
 Deno.test("Edge admin reset finalizes self-change recovery only after Auth marker success", async () => {
   const rpcNames: string[] = [];
   const clients = {
@@ -1028,6 +1098,7 @@ Deno.test("Edge admin reset finalizes self-change recovery only after Auth marke
             Promise.resolve({
               data: {
                 user: {
+                  updated_at: passwordAuthUpdatedAt,
                   app_metadata: {
                     password_change_effect_marker: passwordEffectMarker,
                   },
@@ -1069,7 +1140,11 @@ Deno.test("Edge completed admin reset replay is a no-op only while its marker is
           return Promise.resolve({ data: profile, error: null });
         }
         return Promise.resolve({
-          data: { state: "completed", effectMarker: passwordEffectMarker },
+          data: {
+            state: "completed",
+            effectMarker: passwordEffectMarker,
+            authUpdatedAt: passwordAuthUpdatedAt,
+          },
           error: null,
         });
       },
@@ -1083,6 +1158,7 @@ Deno.test("Edge completed admin reset replay is a no-op only while its marker is
             Promise.resolve({
               data: {
                 user: {
+                  updated_at: passwordAuthUpdatedAt,
                   app_metadata: {
                     password_change_effect_marker: passwordEffectMarker,
                   },
@@ -1119,7 +1195,11 @@ Deno.test("Edge completed admin reset key is stale after a later password effect
           return Promise.resolve({ data: profile, error: null });
         }
         return Promise.resolve({
-          data: { state: "completed", effectMarker: passwordEffectMarker },
+          data: {
+            state: "completed",
+            effectMarker: passwordEffectMarker,
+            authUpdatedAt: passwordAuthUpdatedAt,
+          },
           error: null,
         });
       },
@@ -1156,6 +1236,64 @@ Deno.test("Edge completed admin reset key is stale after a later password effect
   assertEquals(error.status, 409, "stale reset replay status");
   assertEquals(error.code, "IDEMPOTENCY_KEY_REUSED", "stale reset replay code");
   assertEquals(updateCount, 0, "stale reset replay never mutates Auth");
+});
+
+Deno.test("Edge completed reset key is stale after an out-of-band Auth update preserves its marker", async () => {
+  let updateCount = 0;
+  const clients = {
+    admin: {
+      from: () => queryResult(profile),
+      rpc: (name: string) => {
+        if (name === "prepare_account_password_reset") {
+          return Promise.resolve({ data: profile, error: null });
+        }
+        return Promise.resolve({
+          data: {
+            state: "completed",
+            effectMarker: passwordEffectMarker,
+            authUpdatedAt: passwordAuthUpdatedAt,
+          },
+          error: null,
+        });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({ data: null, error: null });
+          },
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  updated_at: "2026-09-12T12:06:00.987000Z",
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    resetAccountPassword(
+      request({}, "edge-reset-completed-version-stale-0014"),
+      clients,
+      developer,
+      profile.id,
+    )
+  );
+  assertEquals(error.status, 409, "stale reset Auth version status");
+  assertEquals(
+    error.code,
+    "IDEMPOTENCY_KEY_REUSED",
+    "stale reset Auth version code",
+  );
+  assertEquals(updateCount, 0, "stale reset Auth version never mutates Auth");
 });
 
 Deno.test("Edge admin reset Auth failure never finalizes recovery", async () => {

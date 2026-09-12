@@ -768,6 +768,7 @@ export async function changePassword(
         clientDigest,
         next,
         effectMarker(inspected),
+        authUpdatedAt(inspected),
       ))
     ) {
       throw passwordChangeConflict();
@@ -821,6 +822,7 @@ export async function changePassword(
         clientDigest,
         next,
         effectMarker(prepared),
+        authUpdatedAt(prepared),
       ))
     ) {
       throw passwordChangeConflict();
@@ -834,16 +836,15 @@ export async function changePassword(
     throw passwordChangeInProgress();
   }
   if (prepared.state === "recover") {
-    if (
-      await verifyPasswordEffect(
-        clients,
-        actor,
-        sessionId,
-        clientDigest,
-        next,
-        effectMarker(prepared),
-      )
-    ) {
+    const recoveredAuthUpdatedAt = await verifyPasswordEffect(
+      clients,
+      actor,
+      sessionId,
+      clientDigest,
+      next,
+      effectMarker(prepared),
+    );
+    if (recoveredAuthUpdatedAt) {
       await completePasswordChange(
         clients,
         actor,
@@ -851,6 +852,7 @@ export async function changePassword(
         key,
         fingerprint,
         claimDigest,
+        recoveredAuthUpdatedAt,
       );
       return;
     }
@@ -881,16 +883,15 @@ export async function changePassword(
     },
   );
   if (updateError) {
-    if (
-      await verifyPasswordEffect(
-        clients,
-        actor,
-        sessionId,
-        clientDigest,
-        next,
-        currentEffectMarker,
-      )
-    ) {
+    const recoveredAuthUpdatedAt = await verifyPasswordEffect(
+      clients,
+      actor,
+      sessionId,
+      clientDigest,
+      next,
+      currentEffectMarker,
+    );
+    if (recoveredAuthUpdatedAt) {
       await completePasswordChange(
         clients,
         actor,
@@ -898,6 +899,7 @@ export async function changePassword(
         key,
         fingerprint,
         claimDigest,
+        recoveredAuthUpdatedAt,
       );
       return;
     }
@@ -935,6 +937,11 @@ export async function changePassword(
     throw passwordStateInconsistent();
   }
 
+  const currentAuthUpdatedAt = await currentPasswordEffectVersion(
+    clients,
+    actor.authUserId,
+    currentEffectMarker,
+  );
   await completePasswordChange(
     clients,
     actor,
@@ -942,6 +949,7 @@ export async function changePassword(
     key,
     fingerprint,
     claimDigest,
+    currentAuthUpdatedAt,
   );
 }
 
@@ -959,9 +967,12 @@ interface PasswordChangeReceiptState {
   state: PasswordChangeState;
   attemptCount?: number;
   effectMarker?: string;
+  authUpdatedAt?: string;
 }
 
 const passwordEffectMarkerPattern = /^[0-9a-f]{64}$/;
+const authUpdatedAtPattern =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function effectMarker(receipt: PasswordChangeReceiptState): string {
   if (
@@ -975,6 +986,20 @@ function effectMarker(receipt: PasswordChangeReceiptState): string {
     );
   }
   return receipt.effectMarker;
+}
+
+function authUpdatedAt(receipt: PasswordChangeReceiptState): string {
+  if (
+    typeof receipt.authUpdatedAt !== "string" ||
+    !authUpdatedAtPattern.test(receipt.authUpdatedAt)
+  ) {
+    throw new EdgeError(
+      500,
+      "PASSWORD_CHANGE_RECEIPT_FAILED",
+      "비밀번호 변경 요청 상태를 확인하지 못했습니다.",
+    );
+  }
+  return receipt.authUpdatedAt;
 }
 
 async function verifyPassword(
@@ -1046,7 +1071,8 @@ async function verifyPasswordEffect(
   clientDigest: string,
   password: string,
   expectedEffectMarker: string,
-): Promise<boolean> {
+  expectedAuthUpdatedAt?: string,
+): Promise<string | null> {
   const { data, error } = await clients.admin.auth.admin.getUserById(
     actor.authUserId,
   );
@@ -1057,19 +1083,69 @@ async function verifyPasswordEffect(
       "비밀번호 변경 요청 상태를 확인하지 못했습니다.",
     );
   }
+  const updatedAt = data.user.updated_at;
   if (
     data.user.app_metadata?.password_change_effect_marker !==
-      expectedEffectMarker
+      expectedEffectMarker ||
+    typeof updatedAt !== "string" ||
+    !authUpdatedAtPattern.test(updatedAt) ||
+    (expectedAuthUpdatedAt !== undefined && updatedAt !== expectedAuthUpdatedAt)
   ) {
-    return false;
+    return null;
   }
-  return verifyPassword(
-    clients,
-    actor,
-    sessionId,
-    clientDigest,
-    password,
+  if (
+    !(await verifyPassword(
+      clients,
+      actor,
+      sessionId,
+      clientDigest,
+      password,
+    ))
+  ) {
+    return null;
+  }
+
+  const { data: confirmedData, error: confirmedError } = await clients.admin
+    .auth.admin.getUserById(actor.authUserId);
+  const confirmedUpdatedAt = confirmedData.user?.updated_at;
+  if (
+    confirmedError || !confirmedData.user ||
+    confirmedData.user.app_metadata?.password_change_effect_marker !==
+      expectedEffectMarker ||
+    typeof confirmedUpdatedAt !== "string" ||
+    !authUpdatedAtPattern.test(confirmedUpdatedAt) ||
+    (expectedAuthUpdatedAt !== undefined &&
+      confirmedUpdatedAt !== expectedAuthUpdatedAt)
+  ) {
+    return null;
+  }
+
+  return confirmedUpdatedAt;
+}
+
+async function currentPasswordEffectVersion(
+  clients: EdgeClients,
+  authUserId: string,
+  expectedEffectMarker: string,
+): Promise<string> {
+  const { data, error } = await clients.admin.auth.admin.getUserById(
+    authUserId,
   );
+  const updatedAt = data.user?.updated_at;
+  if (
+    error || !data.user ||
+    data.user.app_metadata?.password_change_effect_marker !==
+      expectedEffectMarker ||
+    typeof updatedAt !== "string" ||
+    !authUpdatedAtPattern.test(updatedAt)
+  ) {
+    throw new EdgeError(
+      503,
+      "PASSWORD_CHANGE_RECEIPT_FAILED",
+      "비밀번호 변경 요청 상태를 확인하지 못했습니다.",
+    );
+  }
+  return updatedAt;
 }
 
 async function passwordChangeRpc(
@@ -1094,6 +1170,7 @@ async function completePasswordChange(
   key: string,
   fingerprint: string,
   claimDigest: string,
+  authUpdatedAt: string,
 ): Promise<void> {
   const { error } = await clients.admin.rpc("complete_password_change", {
     p_actor_profile_id: actor.profileId,
@@ -1102,6 +1179,7 @@ async function completePasswordChange(
     p_idempotency_key: key,
     p_request_hash: fingerprint,
     p_claim_digest: claimDigest,
+    p_auth_updated_at: authUpdatedAt,
   });
   if (error) throw passwordChangeDatabaseError(error, true);
 }
@@ -1559,6 +1637,9 @@ export async function resetAccountPassword(
   const recoveryState = recoveryData && typeof recoveryData === "object"
     ? (recoveryData as { state?: unknown }).state
     : null;
+  const recoveryAuthUpdatedAt = recoveryData && typeof recoveryData === "object"
+    ? (recoveryData as { authUpdatedAt?: unknown }).authUpdatedAt
+    : null;
   if (
     recoveryError ||
     (recoveryState !== "prepared" && recoveryState !== "completed") ||
@@ -1587,6 +1668,17 @@ export async function resetAccountPassword(
         "이미 완료된 비밀번호 초기화 키는 후속 비밀번호 변경 뒤 재사용할 수 없습니다.",
       );
     }
+    if (
+      typeof recoveryAuthUpdatedAt !== "string" ||
+      !authUpdatedAtPattern.test(recoveryAuthUpdatedAt) ||
+      replayAuthState.user.updated_at !== recoveryAuthUpdatedAt
+    ) {
+      throw new EdgeError(
+        409,
+        "IDEMPOTENCY_KEY_REUSED",
+        "이미 완료된 비밀번호 초기화 키는 후속 인증 변경 뒤 재사용할 수 없습니다.",
+      );
+    }
     return toAccount(row);
   }
   const { error: authError } = await clients.admin.auth.admin.updateUserById(
@@ -1609,9 +1701,13 @@ export async function resetAccountPassword(
   }
   const { data: authState, error: authStateError } = await clients.admin.auth
     .admin.getUserById(row.auth_user_id);
+  const authUpdatedAt = authState.user?.updated_at;
   if (
     authStateError ||
-    authState.user?.app_metadata?.password_change_effect_marker !== effectMarker
+    authState.user?.app_metadata?.password_change_effect_marker !==
+      effectMarker ||
+    typeof authUpdatedAt !== "string" ||
+    !authUpdatedAtPattern.test(authUpdatedAt)
   ) {
     throw new EdgeError(
       502,
@@ -1627,6 +1723,7 @@ export async function resetAccountPassword(
       p_idempotency_key: key,
       p_request_hash: hash,
       p_effect_marker: effectMarker,
+      p_auth_updated_at: authUpdatedAt,
     },
   );
   if (finalizeError) {

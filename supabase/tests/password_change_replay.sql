@@ -21,10 +21,10 @@ insert into public.profiles(
 select ok(has_function_privilege('service_role','public.inspect_password_change(uuid,uuid,uuid,text)','EXECUTE'),'service role may inspect password change receipt');
 select ok(has_function_privilege('service_role','public.prepare_password_change(uuid,uuid,uuid,text,text,text,text)','EXECUTE'),'service role may prepare password change receipt');
 select ok(has_function_privilege('service_role','public.finish_password_change_failure(uuid,uuid,uuid,text,text,text)','EXECUTE'),'service role may finish password change failure');
-select ok(has_function_privilege('service_role','public.complete_password_change(uuid,uuid,uuid,text,text,text)','EXECUTE'),'service role may complete password change receipt');
+select ok(has_function_privilege('service_role','public.complete_password_change(uuid,uuid,uuid,text,text,text,text)','EXECUTE'),'service role may complete password change receipt');
 select ok(not has_function_privilege('authenticated','public.inspect_password_change(uuid,uuid,uuid,text)','EXECUTE'),'authenticated cannot inspect privileged receipt');
 select ok(not has_function_privilege('anon','public.prepare_password_change(uuid,uuid,uuid,text,text,text,text)','EXECUTE'),'anon cannot prepare privileged receipt');
-select ok(not has_function_privilege('public','public.complete_password_change(uuid,uuid,uuid,text,text,text)','EXECUTE'),'PUBLIC cannot complete privileged receipt');
+select ok(not has_function_privilege('public','public.complete_password_change(uuid,uuid,uuid,text,text,text,text)','EXECUTE'),'PUBLIC cannot complete privileged receipt');
 select ok(not has_table_privilege('service_role','private.password_change_commands','SELECT'),'service role cannot read raw receipt table');
 select ok(not has_table_privilege('authenticated','private.password_change_commands','SELECT'),'authenticated cannot read raw receipt table');
 select ok(not has_table_privilege('anon','private.password_change_commands','SELECT'),'anon cannot read raw receipt table');
@@ -32,7 +32,7 @@ select ok(not has_table_privilege('service_role','private.password_verification_
 select ok(not has_table_privilege('service_role','private.password_reset_auth_markers','SELECT'),'service role cannot read raw reset marker ledger');
 select ok(not has_function_privilege('authenticated','public.consume_password_verification_rate_limit(uuid,uuid,uuid,text,integer,integer)','EXECUTE'),'authenticated cannot consume privileged password verification limiter');
 select ok(has_function_privilege('service_role','public.prepare_password_change_admin_reset(uuid,uuid,text,text,text)','EXECUTE'),'service role may prepare reset recovery marker');
-select ok(not has_function_privilege('authenticated','public.finalize_password_change_admin_reset(uuid,uuid,text,text,text)','EXECUTE'),'authenticated cannot finalize reset recovery');
+select ok(not has_function_privilege('authenticated','public.finalize_password_change_admin_reset(uuid,uuid,text,text,text,text)','EXECUTE'),'authenticated cannot finalize reset recovery');
 
 select is(
   public.inspect_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001')->>'state',
@@ -55,7 +55,7 @@ select throws_ok(
   '42501','PASSWORD_CHANGE_SESSION_MISMATCH','another live session cannot reclaim a known receipt'
 );
 select throws_ok(
-  $$select public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(902),'password-first-0001',repeat('a',64),repeat('b',64))$$,
+  $$select public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(902),'password-first-0001',repeat('a',64),repeat('b',64),'2026-09-12T12:00:00.987000Z')$$,
   '42501','PASSWORD_CHANGE_SESSION_MISMATCH','another live session cannot complete a known receipt'
 );
 select throws_ok(
@@ -72,7 +72,7 @@ select throws_ok(
 );
 
 select is(
-  public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('b',64))->>'completed',
+  public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('b',64),'2026-09-12T12:00:00.987000Z')->>'completed',
   'true','claimed command completes the DB state'
 );
 select is((select must_change_password from public.profiles where id=pg_temp.pid(1)),false,'completion clears must_change_password');
@@ -82,7 +82,7 @@ select is((select count(*) from auth.sessions where user_id=pg_temp.pid(101)),1:
 select ok(exists(select 1 from auth.sessions where id=pg_temp.pid(901)),'completion preserves caller session');
 select is((select count(*) from public.audit_events where actor_profile_id=pg_temp.pid(1) and event_type='account.password_changed'),1::bigint,'completion appends one audit event');
 select is(
-  public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('f',64))->>'completed',
+  public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('f',64),'2026-09-12T12:00:00.987000Z')->>'completed',
   'true','completed receipt replay is idempotent without reclaiming Auth'
 );
 select is((select count(*) from public.audit_events where actor_profile_id=pg_temp.pid(1) and event_type='account.password_changed'),1::bigint,'completed replay does not duplicate audit');
@@ -111,6 +111,10 @@ select is((select state from private.password_change_commands where actor_profil
 select is(
   public.inspect_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001')->>'effectMarker',
   repeat('e',64),'completed receipt retains a nonsecret Auth operation marker'
+);
+select is(
+  public.inspect_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001')->>'authUpdatedAt',
+  '2026-09-12T12:00:00.987000Z','completed receipt retains exact nonsecret Auth version evidence'
 );
 
 select is(
@@ -168,12 +172,12 @@ select is(
   repeat('a',64),'same administrator reset retry reuses its original Auth marker'
 );
 select throws_ok(
-  $$select public.finalize_password_change_admin_reset(pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('b',64))$$,
+  $$select public.finalize_password_change_admin_reset(pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('b',64),'2026-09-12T12:01:00.987000Z')$$,
   '23505','PASSWORD_RESET_EFFECT_MARKER_MISMATCH','reset finalization rejects a different Auth operation marker'
 );
 select is(
   public.finalize_password_change_admin_reset(
-    pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('a',64)
+    pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('a',64),'2026-09-12T12:01:00.987000Z'
   )->>'completed',
   'true','successful external Auth reset finalization supersedes the inconsistent receipt'
 );
