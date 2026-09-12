@@ -73,7 +73,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 현재 GitHub 운영 릴리즈 정본: `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - production Edge 배포 bundle source: diagnostics zero-byte hosted 호환 hotfix PR #64 / `main@cd635b116f451a39481f496f2bd368776385a409`
-- 현재 개발·문서 정본: `dev@0253172c87b97184449c9f585d23b8eee19282d4`, **45 migrations / 98 paths / 105 operations**. #112 VAPID/provider HTTP source gate는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`에서 required CI와 독립 QA를 통과하고 PR #119로 `dev@dfc98b1474f9f890851d49bd904869181d0d7880`에 병합됐으며, PR #122의 문서 동기화 뒤 현재 SHA가 됐다. Issue #112는 hosted 활성화 완료까지 OPEN이며 main/recovery/production은 변경하지 않았다.
+- 이 문서 갱신의 integration base: `dev@0253172c87b97184449c9f585d23b8eee19282d4`; 기능 snapshot은 **45 migrations / 98 paths / 105 operations**다. #112 VAPID/provider HTTP source gate는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`에서 required CI와 독립 QA를 통과하고 PR #119로 `dev@dfc98b1474f9f890851d49bd904869181d0d7880`에 병합됐으며, PR #122가 이 integration base에 상태 문서를 동기화했다. Issue #112는 hosted 활성화 완료까지 OPEN이며 main/recovery/production은 변경하지 않았다.
 - 개발 통합 기능 기준: #25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이다.
