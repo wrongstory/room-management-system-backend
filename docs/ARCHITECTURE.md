@@ -603,8 +603,11 @@ developer health는 target dead-letter와 fanout 전 `DELIVERY_CONTRACT_INVALID`
 `vapid_key_version`을 exactly-once로 묶습니다. 과거 unbound revision은 현재 키를 추측하지 않고
 `VAPID_KEY_UNBOUND` dead-letter로 push만 종결하며 inbox는 유지합니다. 클라이언트는 key version을 보내거나
 선택하지 않고, authenticated active/password-complete admin·maid가
-`GET /v1/push-subscriptions/config`의 `{keyVersion,publicKey}`만 no-store로 조회합니다. registration/rotation
-adapter가 같은 서버 current version을 service-only RPC에 전달하며 기존 unbound overload 권한은 폐기합니다.
+`GET /v1/push-subscriptions/config`의 `{keyVersion,publicKey,bindingProof,proofExpiresAt}`만 no-store로 조회합니다.
+10분 proof는 actor/profile/live session과 public-key identity를 HMAC으로 결합하며 registration/rotation adapter는
+검증된 proof version만 service-only RPC와 request hash에 전달합니다. current가 바뀌어도 prior public/private
+ring에 남은 proof는 동일 재시도에 유효하고, removed/unknown/expired/tampered/cross-session proof와 기존 unbound
+overload 권한은 fail-closed입니다.
 
 provider adapter는 RFC 8030/8291/8292의 `aes128gcm`과 ES256 VAPID를 Node/Deno 공용 source에서 구현합니다.
 VAPID audience는 endpoint origin, subject는 strict `mailto:` 또는 HTTPS, expiration은 12시간으로 24시간을
@@ -623,6 +626,10 @@ stable notification ID dedupe로 수렴합니다.
 constant-time 검증한 뒤에만 VAPID/envelope keyring을 읽습니다. 33초 provider-start, 39초 settle, 45초 hard
 budget을 기존 worker에 그대로 전달합니다. source migration은 Cron/Vault/`pg_net`을 만들지 않으며 실제
 secret 주입·Edge 배포·scheduler 활성화는 release runbook의 production gate입니다.
+Public proof ring은 최대 5개이며 delivery의 private pair ring과 exact version set/public identity가 같아야 합니다.
+malformed curve·pair mismatch·ring drift는 fetch 0이고 stable degraded heartbeat를 새로 기록합니다. 또한 developer
+status는 조회 시점의 같은 current VAPID config parser·crypto validation 결과를 `providerConfigurationValid` boolean으로만
+결합하므로, 최근 성공 heartbeat가 있어도 현재 설정이 유효하지 않으면 health는 `degraded`입니다.
 
 ## API 단계
 

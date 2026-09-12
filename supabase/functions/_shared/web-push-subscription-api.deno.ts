@@ -4,6 +4,7 @@ import {
   webPushPublicConfig,
   webPushRetirePath,
 } from "./web-push-subscription-api.ts";
+import { issueWebPushBindingProof } from "./web-push-binding-proof.ts";
 
 function assert(value: unknown): asserts value {
   if (!value) throw new Error("assertion failed");
@@ -21,31 +22,95 @@ const actor = {
   role: "maid" as const,
   mustChangePassword: false,
 };
-Deno.test("Web Push public config is exact and business-role only", () => {
-  const value = webPushPublicConfig(actor, {
-    key: new Uint8Array(32),
-    version: "v1",
-    secret: "x".repeat(32),
-    vapidKeyVersion: "vapid-v1",
-    vapidPublicKey: "B".repeat(87),
-  });
-  assert(
-    JSON.stringify(value) ===
-      JSON.stringify({ keyVersion: "vapid-v1", publicKey: "B".repeat(87) }),
-  );
-  let denied = false;
-  try {
-    webPushPublicConfig({ ...actor, role: "developer" as const }, {
+const vapidPublicKey =
+  "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU";
+const cryptoConfig = {
+  key: new Uint8Array(32).fill(4),
+  version: "v1",
+  secret: "web-push-edge-binding-secret-123456789",
+  vapidKeyVersion: "vapid-v1",
+  vapidPublicKey,
+  vapidPublicKeyring: {},
+};
+function bindingActor(who = actor, sessionId = ids.session) {
+  return {
+    authUserId: who.authUserId,
+    profileId: who.profileId,
+    sessionId,
+  };
+}
+async function bindingProof(
+  who = actor,
+  sessionId = ids.session,
+  cfg = cryptoConfig,
+) {
+  return (await issueWebPushBindingProof(bindingActor(who, sessionId), {
+    currentVersion: cfg.vapidKeyVersion,
+    currentPublicKey: cfg.vapidPublicKey,
+    publicKeyring: cfg.vapidPublicKeyring,
+  }, cfg.secret)).bindingProof;
+}
+Deno.test("Web Push public config is exact and business-role only", async () => {
+  const value = await webPushPublicConfig(
+    new Request("http://localhost/v1/push-subscriptions/config", {
+      headers: { authorization: `Bearer ${token()}` },
+    }),
+    actor,
+    {
       key: new Uint8Array(32),
       version: "v1",
       secret: "x".repeat(32),
       vapidKeyVersion: "vapid-v1",
-      vapidPublicKey: "B".repeat(87),
-    });
+      vapidPublicKey,
+      vapidPublicKeyring: {},
+    },
+  );
+  assert(
+    value.keyVersion === "vapid-v1" && value.publicKey === vapidPublicKey &&
+      typeof value.bindingProof === "string" &&
+      typeof value.proofExpiresAt === "string",
+  );
+  let denied = false;
+  try {
+    await webPushPublicConfig(
+      new Request("http://localhost/v1/push-subscriptions/config", {
+        headers: { authorization: `Bearer ${token()}` },
+      }),
+      { ...actor, role: "developer" as const },
+      {
+        key: new Uint8Array(32),
+        version: "v1",
+        secret: "x".repeat(32),
+        vapidKeyVersion: "vapid-v1",
+        vapidPublicKey,
+        vapidPublicKeyring: {},
+      },
+    );
   } catch {
     denied = true;
   }
   assert(denied);
+  let invalidCurve: { status?: number; code?: string } | undefined;
+  try {
+    await webPushPublicConfig(
+      new Request("http://localhost/v1/push-subscriptions/config", {
+        headers: { authorization: `Bearer ${token()}` },
+      }),
+      actor,
+      {
+        ...cryptoConfig,
+        vapidPublicKey: b64u(
+          new Uint8Array([4, ...new Uint8Array(64).fill(255)]),
+        ),
+      },
+    );
+  } catch (error) {
+    invalidCurve = error as typeof invalidCurve;
+  }
+  assert(
+    invalidCurve?.status === 503 &&
+      invalidCurve.code === "WEB_PUSH_NOT_CONFIGURED",
+  );
 });
 function b64u(bytes: Uint8Array) {
   return btoa(String.fromCharCode(...bytes)).replace(/=/g, "").replace(
@@ -104,8 +169,9 @@ function env() {
   Deno.env.set("VAPID_CURRENT_KEY_VERSION", "vapid-v1");
   Deno.env.set(
     "VAPID_PUBLIC_KEY",
-    "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
+    vapidPublicKey,
   );
+  Deno.env.set("VAPID_PUBLIC_KEYRING_JSON", "{}");
 }
 
 Deno.test("Edge Web Push register encrypts before RPC and projects no raw material", async () => {
@@ -130,8 +196,12 @@ Deno.test("Edge Web Push register encrypts before RPC and projects no raw materi
     },
   } as never;
   const input = await subscription();
+  const proof = await bindingProof();
   const result = await registerWebPushSubscription(
-    request("/v1/push-subscriptions", { subscription: input }),
+    request("/v1/push-subscriptions", {
+      bindingProof: proof,
+      subscription: input,
+    }),
     clients,
     actor,
   );
@@ -172,6 +242,7 @@ Deno.test("Edge Web Push matches the shared Node/Deno canonical identity and enc
     vapidKeyVersion: "vapid-v2",
     vapidPublicKey:
       "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
+    vapidPublicKeyring: {},
     nonce: new Uint8Array([...Array(12).keys()]),
   };
   let rpcArgs: Record<string, unknown> | undefined;
@@ -193,10 +264,13 @@ Deno.test("Edge Web Push matches the shared Node/Deno canonical identity and enc
       },
     },
   } as never;
+  const who = { ...actor, profileId: vectorIds.profile };
+  const proof = await bindingProof(who, vectorIds.session, cfg);
   await registerWebPushSubscription(
     request(
       "/v1/push-subscriptions",
       {
+        bindingProof: proof,
         subscription: input,
         expectedCurrent: {
           subscriptionId: vectorIds.subscription,
@@ -207,7 +281,7 @@ Deno.test("Edge Web Push matches the shared Node/Deno canonical identity and enc
       vectorIds.session,
     ),
     clients,
-    { ...actor, profileId: vectorIds.profile },
+    who,
     cfg,
   );
   assert(rpcArgs);
@@ -231,10 +305,29 @@ Deno.test("Edge Web Push matches the shared Node/Deno canonical identity and enc
     rpcArgs.p_material_digest ===
       "c08827336099b39bb92bd93ce466377eaa11712cc50f7539b7a8dfa5d4a58714",
   );
-  assert(
-    rpcArgs.p_request_hash ===
-      "a19b60927ac456910cda60cff24c9a671655e367d49431914ed067fdf7a2624c",
-  );
+  const proofDigest = Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(proof)),
+    ),
+  ).map((value) => value.toString(16).padStart(2, "0")).join("");
+  const expectedRequestHash = Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(JSON.stringify({
+          endpointDigest: rpcArgs.p_endpoint_digest,
+          expirationTime: null,
+          materialDigest: rpcArgs.p_material_digest,
+          sessionDigest: rpcArgs.p_session_digest,
+          subscriptionId: vectorIds.subscription.toLowerCase(),
+          revisionNo: 2,
+          vapidKeyVersion: "vapid-v2",
+          bindingProofDigest: proofDigest,
+        })),
+      ),
+    ),
+  ).map((value) => value.toString(16).padStart(2, "0")).join("");
+  assert(rpcArgs.p_request_hash === expectedRequestHash);
   assert(
     rpcArgs.p_ciphertext_base64 ===
       "QKZyBOAIcKJ15U/1CBgEkJPN2MKesgrJzlZmAAMWi9XJTjdMQ3SgkdDR/Mk2zQtLGCKAFkaEp/vBj2cZ4AhLTmF8LBUfQ4KN4vI0IkeKmoqk2mKDmqEpLLAUH7UG9ostoBCSfaSGAWhqZyqnx9TQYJDuP+he1iQECM0k+M77Qxx6kW7UJRO7kNKj0LaAsCZkKCMRJGCo9GnSWlPMV7r92GJxcHjtzojdgCCZcFcKomlJ7qeOYDwvmX/q5Ld+D1WaMwoV8KmlhmilUfbUNki1tJOpHzyqKWI+zinuAJVtJFubhHrJ3p+4BfMnCjR+DON89cbf4Yqg1iADgkmK7oNwEX8jyIqjlDup0uOr4V8OdLA=",
@@ -269,6 +362,7 @@ Deno.test("Edge Web Push matches the shared Node/Deno canonical identity and enc
 Deno.test("Edge Web Push rejects credentials, fragments and raw/canonical endpoint overflow", async () => {
   env();
   const input = await subscription();
+  const proof = await bindingProof();
   let calls = 0;
   const clients = {
     admin: {
@@ -290,6 +384,7 @@ Deno.test("Edge Web Push rejects credentials, fragments and raw/canonical endpoi
     try {
       await registerWebPushSubscription(
         request("/v1/push-subscriptions", {
+          bindingProof: proof,
           subscription: { ...input, endpoint },
         }),
         clients,
@@ -309,27 +404,39 @@ Deno.test("Edge Web Push strict inputs reject query, past expiry, malformed keys
     admin: { rpc: () => Promise.resolve({ data: null, error: null }) },
   } as never;
   const input = await subscription();
+  const proof = await bindingProof();
   for (
     const [req, who] of [[
-      request("/v1/push-subscriptions?x=1", { subscription: input }),
+      request("/v1/push-subscriptions?x=1", {
+        bindingProof: proof,
+        subscription: input,
+      }),
       actor,
     ], [
       request("/v1/push-subscriptions", {
+        bindingProof: proof,
         subscription: { ...input, expirationTime: Date.now() - 1 },
       }),
       actor,
     ], [
       request("/v1/push-subscriptions", {
+        bindingProof: proof,
         subscription: {
           ...input,
           keys: { ...input.keys, auth: `${input.keys.auth}=` },
         },
       }),
       actor,
-    ], [request("/v1/push-subscriptions", { subscription: input }), {
-      ...actor,
-      role: "developer" as const,
-    }]] as const
+    ], [
+      request("/v1/push-subscriptions", {
+        bindingProof: proof,
+        subscription: input,
+      }),
+      {
+        ...actor,
+        role: "developer" as const,
+      },
+    ]] as const
   ) {
     let failed = false;
     try {
@@ -389,6 +496,7 @@ Deno.test("Edge Web Push retire uses exact path, CAS body, idempotency and sessi
 
 Deno.test("Edge Web Push projection rejects invalid RFC3339 timestamps without raw detail", async () => {
   const input = await subscription();
+  const proof = await bindingProof();
   for (
     const data of [
       {
@@ -431,7 +539,10 @@ Deno.test("Edge Web Push projection rejects invalid RFC3339 timestamps without r
       | undefined;
     try {
       await registerWebPushSubscription(
-        request("/v1/push-subscriptions", { subscription: input }),
+        request("/v1/push-subscriptions", {
+          bindingProof: proof,
+          subscription: input,
+        }),
         {
           admin: { rpc: () => Promise.resolve({ data, error: null }) },
         } as never,
@@ -443,6 +554,7 @@ Deno.test("Edge Web Push projection rejects invalid RFC3339 timestamps without r
           vapidKeyVersion: "vapid-v1",
           vapidPublicKey:
             "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
+          vapidPublicKeyring: {},
         },
       );
     } catch (error) {

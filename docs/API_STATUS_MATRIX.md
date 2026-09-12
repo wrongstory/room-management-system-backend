@@ -943,6 +943,8 @@ main/recovery/production migration·Edge/Pages/Cron/Vault는 그대로 유지한
 - [x] Issue #112 정본 정책 댓글 `5641979910`과 RFC 8030/8291/8292 source 계약 반영
 - [x] 기존 44 migrations 수정 0, 45번째 append-only VAPID revision binding migration 후보 1개
 - [x] authenticated active/password-complete admin·maid 전용 public-key config 1 path/operation 추가; 후보 계약 **45 migrations / 98 paths / 105 operations**
+- [x] config→register 10분 actor/profile/live-session HMAC binding proof; current/prior overlap replay와 removed/expired/tampered scope fail-closed
+- [x] actual P-256 curve/pair 검증, 최대 5개 public/private ring exact identity 대조, config drift durable degraded heartbeat
 - [x] provider allowlist·manual redirect·bounded status mapping·generic 3 KiB payload·stable notification ID 구현
 - [x] distinct invoke secret의 전용 `notification-delivery` Edge source와 33/39/45초 budget 연결
 - [ ] 독립 QA, required GitHub `application` / `migration`, `dev` 병합

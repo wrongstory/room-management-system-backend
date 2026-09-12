@@ -1,4 +1,7 @@
-import { handleNotificationDelivery } from "./index.ts";
+import {
+  handleNotificationDelivery,
+  notificationDeliveryConfig,
+} from "./index.ts";
 const assert = (value: boolean, message = "assertion failed") => {
   if (!value) throw new Error(message);
 };
@@ -31,6 +34,7 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
   const dependencies = {
     loadInvokeSecret: () => secret,
     loadConfig: () => config,
+    validateConfig: () => Promise.resolve(),
     run: async () => {
       runs++;
       return {
@@ -65,6 +69,30 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
     (await handleNotificationDelivery(request("POST", "", "{}"), dependencies))
       .status === 400,
   );
+  let declaredEmptyPulls = 0;
+  const declaredEmpty = new Request(
+    "http://localhost/functions/v1/notification-delivery",
+    {
+      method: "POST",
+      headers: {
+        "x-notification-delivery-invoke-secret": secret,
+        "content-length": "0",
+      },
+      body: new ReadableStream({
+        pull() {
+          declaredEmptyPulls++;
+        },
+      }),
+    },
+  );
+  await Promise.resolve();
+  const declaredEmptyPullsBeforeHandler = declaredEmptyPulls;
+  assert(
+    (await handleNotificationDelivery(declaredEmpty, dependencies)).status ===
+        400 && declaredEmptyPulls === declaredEmptyPullsBeforeHandler,
+    "Content-Length: 0 cannot hide a non-null body and body is not read",
+  );
+  await declaredEmpty.body?.cancel();
   assert(
     (await handleNotificationDelivery(
       request("POST", "", undefined, "wrong-secret-that-is-long-enough-000"),
@@ -103,6 +131,7 @@ Deno.test("notification delivery Edge accepts the distinct invoke secret and ret
   const response = await handleNotificationDelivery(request(), {
     loadInvokeSecret: () => secret,
     loadConfig: () => config,
+    validateConfig: () => Promise.resolve(),
     run: async () => ({
       claimed: 1,
       delivered: 1,
@@ -124,6 +153,26 @@ Deno.test("notification delivery Edge accepts the distinct invoke secret and ret
   );
   assert(!JSON.stringify(body).includes(secret));
 });
+Deno.test("notification delivery Edge durably degrades invalid provider config without leaking detail", async () => {
+  let recorded = 0, runs = 0;
+  const raw = "private-key endpoint raw-provider-error";
+  const response = await handleNotificationDelivery(request(), {
+    loadInvokeSecret: () => secret,
+    loadConfig: () => config,
+    validateConfig: () => Promise.reject(new Error(raw)),
+    recordConfigurationFailure: () => {
+      recorded++;
+      return Promise.resolve();
+    },
+    run: async () => {
+      runs++;
+      return {};
+    },
+  });
+  const body = await response.text();
+  assert(response.status === 503 && recorded === 1 && runs === 0);
+  assert(!body.includes(raw) && !body.includes(secret));
+});
 Deno.test("notification delivery Edge fails closed when Function Secrets are missing", async () => {
   const response = await handleNotificationDelivery(request(), {
     loadInvokeSecret: () => {
@@ -132,4 +181,76 @@ Deno.test("notification delivery Edge fails closed when Function Secrets are mis
   });
   assert(response.status === 503);
   assert(!(await response.text()).includes("missing raw secret"));
+});
+
+Deno.test("notification delivery config requires exact bounded public/private VAPID keyring identity", async () => {
+  const pair = async () => {
+    const value = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign", "verify"],
+    );
+    const jwk = await crypto.subtle.exportKey("jwk", value.privateKey);
+    const raw = new Uint8Array(
+      await crypto.subtle.exportKey("raw", value.publicKey),
+    );
+    return {
+      publicKey: btoa(String.fromCharCode(...raw)).replace(/=/g, "").replace(
+        /\+/g,
+        "-",
+      ).replace(/\//g, "_"),
+      privateKey: String(jwk.d),
+    };
+  };
+  const current = await pair(), prior = await pair();
+  Deno.env.set(
+    "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+    "invoke-secret-for-config-ring-test-123456",
+  );
+  Deno.env.set(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "service-role-for-config-ring-test-123456",
+  );
+  Deno.env.set(
+    "WEB_PUSH_BINDING_DIGEST_SECRET",
+    "binding-digest-for-config-ring-test-123456",
+  );
+  Deno.env.set(
+    "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+    btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
+  );
+  Deno.env.set("WEB_PUSH_SUBSCRIPTION_KEY_VERSION", "envelope-v1");
+  Deno.env.set("WEB_PUSH_SUBSCRIPTION_KEYRING_JSON", "{}");
+  Deno.env.set("VAPID_SUBJECT", "mailto:push@example.com");
+  Deno.env.set("VAPID_CURRENT_KEY_VERSION", "vapid-v2");
+  Deno.env.set("VAPID_PUBLIC_KEY", current.publicKey);
+  Deno.env.set("VAPID_PRIVATE_KEY", current.privateKey);
+  Deno.env.set("VAPID_KEYRING_JSON", JSON.stringify({ "vapid-v1": prior }));
+  Deno.env.set(
+    "VAPID_PUBLIC_KEYRING_JSON",
+    JSON.stringify({ "vapid-v1": prior.publicKey }),
+  );
+  assert(
+    notificationDeliveryConfig().vapid.keyring["vapid-v1"]?.publicKey ===
+      prior.publicKey,
+  );
+  for (
+    const invalidPublicRing of [
+      {},
+      { "vapid-v1": current.publicKey },
+      { "vapid-v1": prior.publicKey, extra: prior.publicKey },
+    ]
+  ) {
+    Deno.env.set(
+      "VAPID_PUBLIC_KEYRING_JSON",
+      JSON.stringify(invalidPublicRing),
+    );
+    let rejected = false;
+    try {
+      notificationDeliveryConfig();
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "public/private ring drift must fail closed");
+  }
 });

@@ -9,6 +9,7 @@ const subscriptionSchema=z.object({
   keys:z.object({p256dh:z.string().min(1).max(256),auth:z.string().min(1).max(128)}).strict()
 }).strict();
 const registerSchema=z.object({
+  bindingProof:z.string().min(1).max(2048),
   subscription:subscriptionSchema,
   expectedCurrent:z.object({subscriptionId:z.uuid(),version:z.number().int().min(1)}).strict().optional()
 }).strict();

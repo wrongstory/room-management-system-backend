@@ -11,6 +11,7 @@ import {
 } from "../_shared/web-push-provider.ts";
 
 const utf8 = (value: string) => new TextEncoder().encode(value);
+const VAPID_KEYRING_MAX_ENTRIES = 5;
 const bytes = (value: Uint8Array) =>
   value.buffer.slice(
     value.byteOffset,
@@ -59,19 +60,25 @@ export function notificationDeliveryConfig(): {
     required("VAPID_PRIVATE_KEY"),
   );
   const subject = required("VAPID_SUBJECT");
-  let envelopeRaw: unknown, vapidRaw: unknown;
+  let envelopeRaw: unknown, vapidRaw: unknown, vapidPublicRaw: unknown;
   try {
     envelopeRaw = JSON.parse(
       Deno.env.get("WEB_PUSH_SUBSCRIPTION_KEYRING_JSON")?.trim() || "{}",
     );
     vapidRaw = JSON.parse(Deno.env.get("VAPID_KEYRING_JSON")?.trim() || "{}");
+    vapidPublicRaw = JSON.parse(
+      Deno.env.get("VAPID_PUBLIC_KEYRING_JSON")?.trim() || "{}",
+    );
   } catch {
     throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
   }
   if (
     !envelopeRaw || typeof envelopeRaw !== "object" ||
     Array.isArray(envelopeRaw) || !vapidRaw || typeof vapidRaw !== "object" ||
-    Array.isArray(vapidRaw)
+    Array.isArray(vapidRaw) || !vapidPublicRaw ||
+    typeof vapidPublicRaw !== "object" || Array.isArray(vapidPublicRaw) ||
+    Object.keys(vapidRaw).length > VAPID_KEYRING_MAX_ENTRIES ||
+    Object.keys(vapidPublicRaw).length > VAPID_KEYRING_MAX_ENTRIES
   ) throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
   const envelopeKeyring: Record<string, Uint8Array> = {},
     vapidKeyring: Record<string, VapidKeyMaterial> = {};
@@ -88,6 +95,19 @@ export function notificationDeliveryConfig(): {
     ) throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
     const row = value as Record<string, unknown>;
     vapidKeyring[version] = keyMaterial(row.publicKey, row.privateKey);
+  }
+  const privateVersions = Object.keys(vapidKeyring).sort();
+  const publicVersions = Object.keys(vapidPublicRaw).sort();
+  if (privateVersions.join("\0") !== publicVersions.join("\0")) {
+    throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
+  }
+  for (const version of privateVersions) {
+    if (
+      typeof (vapidPublicRaw as Record<string, unknown>)[version] !==
+        "string" ||
+      (vapidPublicRaw as Record<string, unknown>)[version] !==
+        vapidKeyring[version]?.publicKey
+    ) throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
   }
   const secretValues = [
     invokeSecret,
@@ -178,6 +198,27 @@ export interface NotificationDeliveryHandlerDependencies {
   run?: (
     config: ReturnType<typeof notificationDeliveryConfig>,
   ) => Promise<Record<string, number>>;
+  validateConfig?: (
+    config: ReturnType<typeof notificationDeliveryConfig>,
+  ) => Promise<void>;
+  recordConfigurationFailure?: () => Promise<void>;
+}
+async function recordConfigurationFailure(): Promise<void> {
+  const { error } = await createEdgeClients().admin.rpc(
+    "record_notification_delivery_heartbeat",
+    {
+      p_status: "degraded",
+      p_claimed: 0,
+      p_delivered: 0,
+      p_retrying: 0,
+      p_suppressed: 0,
+      p_dead_letter: 0,
+      p_blocked: 0,
+      p_deferred: 0,
+      p_error_code: "PROVIDER_CONFIGURATION_ERROR",
+    },
+  );
+  if (error) throw new Error("NOTIFICATION_DELIVERY_HEARTBEAT_FAILED");
 }
 export async function handleNotificationDelivery(
   request: Request,
@@ -200,8 +241,8 @@ export async function handleNotificationDelivery(
     }
     const contentLength = request.headers.get("content-length")?.trim();
     if (
-      (contentLength !== undefined && contentLength !== "0") ||
-      (request.body !== null && contentLength === undefined)
+      request.body !== null ||
+      (contentLength !== undefined && contentLength !== "0")
     ) {
       return response(400, id, {
         error: {
@@ -228,9 +269,24 @@ export async function handleNotificationDelivery(
         },
       });
     }
-    const config = (dependencies.loadConfig ?? notificationDeliveryConfig)();
-    if (!dependencies.run) {
-      await validateWebPushProviderConfig(config.vapid);
+    let config: ReturnType<typeof notificationDeliveryConfig>;
+    try {
+      config = (dependencies.loadConfig ?? notificationDeliveryConfig)();
+      await (dependencies.validateConfig ?? ((value) =>
+        validateWebPushProviderConfig(value.vapid)))(config);
+    } catch {
+      try {
+        await (dependencies.recordConfigurationFailure ??
+          recordConfigurationFailure)();
+      } catch {
+        /* configuration failure remains authoritative */
+      }
+      return response(503, id, {
+        error: {
+          code: "NOTIFICATION_DELIVERY_UNAVAILABLE",
+          message: "알림 전송을 실행하지 못했습니다.",
+        },
+      });
     }
     const result = dependencies.run
       ? await dependencies.run(config)

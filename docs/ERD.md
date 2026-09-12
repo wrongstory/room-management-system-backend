@@ -503,8 +503,10 @@ revision은 90일 metadata retention 대상이다. event에는 subscription UUID
 새 registration/rotation revision은 서버 current VAPID version을 같은 transaction에서 반드시 기록하고,
 immutable guard가 이후 변경을 금지한다. 기존 revision의 NULL은 legacy-unbound provenance로 보존하며 current
 version으로 backfill하거나 추측하지 않는다. delivery context는 exact target revision의 binding만 반환하고
-NULL이면 `VAPID_KEY_UNBOUND` dead-letter로 push를 종결한다. 공개 config API는 key version과 public P-256
-point만 노출하며 private scalar, endpoint/envelope/session/digest는 계속 private 원장 밖으로 나오지 않는다.
+NULL이면 `VAPID_KEY_UNBOUND` dead-letter로 push를 종결한다. 공개 config API는 key version, public P-256
+point와 10분 actor/session-bound opaque proof만 노출한다. register는 proof가 인증한 key version을 immutable
+revision과 request hash에 사용하며 current를 추측하지 않는다. private scalar, endpoint/envelope/session/digest는
+계속 private 원장 밖으로 나오지 않는다.
 
 #111은 immutable `notification_delivery_outbox`를 job intent로 보존하고
 `notification_delivery_jobs` → exact `notification_delivery_targets` → append-only

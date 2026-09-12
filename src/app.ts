@@ -107,7 +107,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         keyring: JSON.parse(options.env.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON) as Record<string,string>,
         bindingSecret: options.env.WEB_PUSH_BINDING_DIGEST_SECRET,
         vapidKeyVersion: options.env.VAPID_CURRENT_KEY_VERSION,
-        vapidPublicKey: options.env.VAPID_PUBLIC_KEY
+        vapidPublicKey: options.env.VAPID_PUBLIC_KEY,
+        vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
       })
     };
     submissionService ??= new SupabaseSubmissionService(clients);

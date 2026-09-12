@@ -1536,6 +1536,7 @@ Deno.test("Web Push router keeps exact register/retire, no-store and secret-free
       vapidKeyVersion: "vapid-v1",
       vapidPublicKey:
         "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
+      vapidPublicKeyring: {},
     },
   };
   const pushRequest = (path: string, body: unknown, key: string) =>
@@ -1548,10 +1549,6 @@ Deno.test("Web Push router keeps exact register/retire, no-store and secret-free
       },
       body: JSON.stringify(body),
     });
-  const register = await handleApiRequest(
-    pushRequest("/v1/push-subscriptions", { subscription }, "push-router-0001"),
-    dependencies,
-  );
   const publicConfig = await handleApiRequest(
     new Request(
       "http://localhost/functions/v1/api/v1/push-subscriptions/config",
@@ -1559,16 +1556,23 @@ Deno.test("Web Push router keeps exact register/retire, no-store and secret-free
     ),
     dependencies,
   );
+  const publicConfigBody = await publicConfig.json();
   assert(
     publicConfig.status === 200 &&
       publicConfig.headers.get("cache-control") === "no-store" &&
-      JSON.stringify(await publicConfig.json()) ===
-        JSON.stringify({
-          keyVersion: "vapid-v1",
-          publicKey:
-            "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
-        }),
+      publicConfigBody.keyVersion === "vapid-v1" &&
+      publicConfigBody.publicKey ===
+        "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU" &&
+      typeof publicConfigBody.bindingProof === "string" &&
+      typeof publicConfigBody.proofExpiresAt === "string",
     "public config exact/no-store",
+  );
+  const register = await handleApiRequest(
+    pushRequest("/v1/push-subscriptions", {
+      bindingProof: publicConfigBody.bindingProof,
+      subscription,
+    }, "push-router-0001"),
+    dependencies,
   );
   assert(
     register.status === 201 &&
@@ -1616,7 +1620,7 @@ Deno.test("Web Push router keeps exact register/retire, no-store and secret-free
     (await handleApiRequest(
       pushRequest(
         "/v1/push-subscriptions?x=1",
-        { subscription },
+        { bindingProof: publicConfigBody.bindingProof, subscription },
         "push-router-query",
       ),
       dependencies,

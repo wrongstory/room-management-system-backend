@@ -3,12 +3,13 @@ import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { canonicalWebPushUuid, createWebPushEnvelope, type WebPushCryptoConfig, type WebPushSubscriptionInput } from './web-push-crypto.js';
+import { issueWebPushBindingProof, verifyWebPushBindingProof, WebPushBindingProofError } from './web-push-binding-proof.js';
 
 export interface WebPushExpectedCurrent { subscriptionId: string; version: number }
-export interface RegisterWebPushInput { subscription: WebPushSubscriptionInput; expectedCurrent?: WebPushExpectedCurrent | undefined }
+export interface RegisterWebPushInput { bindingProof:string; subscription: WebPushSubscriptionInput; expectedCurrent?: WebPushExpectedCurrent | undefined }
 export interface RetireWebPushInput { subscriptionId: string; expectedVersion: number }
 export interface WebPushSubscriptionService {
-  config(actor: Actor): Promise<{ keyVersion: string; publicKey: string }>;
+  config(actor: Actor): Promise<{ keyVersion: string; publicKey: string; bindingProof:string; proofExpiresAt:string }>;
   register(actor: Actor, input: RegisterWebPushInput, idempotencyKey: string): Promise<unknown>;
   retire(actor: Actor, input: RetireWebPushInput, idempotencyKey: string): Promise<unknown>;
 }
@@ -56,6 +57,13 @@ function databaseError(error: { message?: string } | null): AppError {
   return new AppError(500,'WEB_PUSH_COMMAND_FAILED','Web Push 구독을 처리하지 못했습니다.');
 }
 
+function proofError(error:unknown):AppError {
+  if(error instanceof WebPushBindingProofError&&error.reason==='INVALID_CONFIGURATION') {
+    return new AppError(503,'WEB_PUSH_NOT_CONFIGURED','Web Push 공개키 설정이 올바르지 않습니다.');
+  }
+  return new AppError(400,'WEB_PUSH_BINDING_PROOF_INVALID','Web Push 구독 키 증명이 만료되었거나 올바르지 않습니다.');
+}
+
 function projection(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw databaseError(null);
   const row=value as Record<string,unknown>;
@@ -76,26 +84,30 @@ export class SupabaseWebPushSubscriptionService implements WebPushSubscriptionSe
   private async rpc(name:string,args:Record<string,unknown>):Promise<unknown>{
     const {data,error}=await this.clients.admin.rpc(name,args); if(error||data===null) throw databaseError(error); return data;
   }
-  async config(actor:Actor):Promise<{keyVersion:string;publicKey:string}>{
+  private actorBinding(actor:Actor){return {authUserId:canonicalWebPushUuid(actor.authUserId),profileId:canonicalWebPushUuid(actor.profileId),sessionId:canonicalWebPushUuid(sessionId(actor))};}
+  private keys(){return {currentVersion:this.cryptoConfig.vapidKeyVersion,currentPublicKey:this.cryptoConfig.vapidPublicKey,publicKeyring:this.cryptoConfig.vapidPublicKeyring};}
+  async config(actor:Actor):Promise<{keyVersion:string;publicKey:string;bindingProof:string;proofExpiresAt:string}>{
     if(actor.role!=='admin'&&actor.role!=='maid') throw databaseError({message:'WEB_PUSH_ACCESS_REQUIRED'});
-    const result={keyVersion:this.cryptoConfig.vapidKeyVersion,publicKey:this.cryptoConfig.vapidPublicKey};
+    const proof=await issueWebPushBindingProof(this.actorBinding(actor),this.keys(),this.cryptoConfig.bindingSecret).catch((error:unknown)=>{throw proofError(error);});
+    const result={keyVersion:this.cryptoConfig.vapidKeyVersion,publicKey:this.cryptoConfig.vapidPublicKey,...proof};
     assertWebPushResponseSize(result); return result;
   }
   async register(actor:Actor,input:RegisterWebPushInput,idempotencyKey:string):Promise<unknown>{
     if(actor.role!=='admin'&&actor.role!=='maid') throw databaseError({message:'WEB_PUSH_ACCESS_REQUIRED'});
     const actorProfileId=canonicalWebPushUuid(actor.profileId);
     const sid=canonicalWebPushUuid(sessionId(actor));
+    const binding=await verifyWebPushBindingProof(input.bindingProof,this.actorBinding(actor),this.keys(),this.cryptoConfig.bindingSecret).catch((error:unknown)=>{throw proofError(error);});
     const expectedSubscriptionId=input.expectedCurrent===undefined?null:canonicalWebPushUuid(input.expectedCurrent.subscriptionId);
     const proposed=canonicalWebPushUuid(expectedSubscriptionId??randomUUID());
     const revision=(input.expectedCurrent?.version??0)+1;
-    const envelope=createWebPushEnvelope(input.subscription,actorProfileId,sid,proposed,revision,this.cryptoConfig,expectedSubscriptionId);
+    const envelope=createWebPushEnvelope(input.subscription,actorProfileId,sid,proposed,revision,{...this.cryptoConfig,vapidKeyVersion:binding.keyVersion,vapidPublicKey:binding.publicKey},expectedSubscriptionId,input.bindingProof);
     const result=projection(await this.rpc('register_web_push_subscription',{
       p_actor_profile_id:actorProfileId,p_session_id:sid,p_proposed_subscription_id:proposed,
       p_expected_subscription_id:expectedSubscriptionId,p_expected_version:input.expectedCurrent?.version??null,
       p_endpoint_digest:envelope.endpointDigest,p_session_digest:envelope.sessionDigest,p_material_digest:envelope.materialDigest,
       p_expiration_at:envelope.expirationAt,p_key_version:envelope.keyVersion,p_ciphertext_base64:envelope.ciphertextBase64,
       p_nonce_base64:envelope.nonceBase64,p_auth_tag_base64:envelope.authTagBase64,p_idempotency_key:idempotencyKey,
-      p_request_hash:envelope.requestHash,p_vapid_key_version:this.cryptoConfig.vapidKeyVersion
+      p_request_hash:envelope.requestHash,p_vapid_key_version:binding.keyVersion
     })); assertWebPushResponseSize(result); return result;
   }
   async retire(actor:Actor,input:RetireWebPushInput,idempotencyKey:string):Promise<unknown>{

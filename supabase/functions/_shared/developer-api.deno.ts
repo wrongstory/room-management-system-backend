@@ -161,8 +161,8 @@ Deno.test("developer database status adds only bounded notification delivery hea
         if (name === "get_developer_notification_delivery_status") {
           return Promise.resolve({
             data: {
-              status: "degraded",
-              lastHeartbeat: null,
+              status: "healthy",
+              lastHeartbeat: "2026-09-11T00:00:30.000Z",
               backlog: {
                 due: 1,
                 retrying: 0,
@@ -189,7 +189,7 @@ Deno.test("developer database status adds only bounded notification delivery hea
         ? "local"
         : key === "SUPABASE_URL"
         ? "http://127.0.0.1:54321"
-        : undefined;
+        : "configured";
     result = await developerDatabaseStatus(clients, {
       authUserId: "10000000-0000-4000-8000-000000000001",
       profileId: "20000000-0000-4000-8000-000000000001",
@@ -209,11 +209,19 @@ Deno.test("developer database status adds only bounded notification delivery hea
     "bounded delivery health is present",
   );
   const delivery = result.notificationDelivery as Record<string, unknown>;
-  assert(delivery.status === "degraded", "missing secrets fail health closed");
+  assert(
+    delivery.status === "degraded",
+    "invalid current VAPID config overrides a fresh healthy heartbeat",
+  );
   assert(
     (delivery.activation as Record<string, unknown>)
-      .functionSecretsConfigured === false,
-    "Function Secrets expose only one aggregate configured boolean",
+      .functionSecretsConfigured === true,
+    "Function Secrets expose only an aggregate configured boolean",
+  );
+  assert(
+    (delivery.activation as Record<string, unknown>)
+      .providerConfigurationValid === false,
+    "current VAPID validity exposes only a safe boolean",
   );
   const serialized = JSON.stringify(result).toLowerCase();
   for (

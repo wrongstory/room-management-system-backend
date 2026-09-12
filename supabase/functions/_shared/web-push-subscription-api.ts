@@ -6,6 +6,11 @@ import {
   requirePasswordChanged,
   verifiedRequestSessionId,
 } from "./runtime.ts";
+import {
+  issueWebPushBindingProof,
+  verifyWebPushBindingProof,
+  WebPushBindingProofError,
+} from "./web-push-binding-proof.ts";
 
 interface SubscriptionInput {
   endpoint: string;
@@ -22,6 +27,7 @@ export interface WebPushCryptoConfig {
   secret: string;
   vapidKeyVersion: string;
   vapidPublicKey: string;
+  vapidPublicKeyring: Record<string, string>;
   /** Deterministic vector input only; production callers leave this undefined. */
   nonce?: Uint8Array;
 }
@@ -124,6 +130,30 @@ function config(): WebPushCryptoConfig {
   const secret = required("WEB_PUSH_BINDING_DIGEST_SECRET");
   const vapidKeyVersion = required("VAPID_CURRENT_KEY_VERSION");
   const vapidPublicKey = required("VAPID_PUBLIC_KEY");
+  let vapidPublicKeyring: Record<string, string>;
+  try {
+    const raw = JSON.parse(
+      Deno.env.get("VAPID_PUBLIC_KEYRING_JSON")?.trim() || "{}",
+    ) as unknown;
+    if (
+      !raw || typeof raw !== "object" || Array.isArray(raw) ||
+      Object.hasOwn(raw, vapidKeyVersion) || Object.keys(raw).length > 5
+    ) throw new Error();
+    vapidPublicKeyring = {};
+    for (const [entryVersion, value] of Object.entries(raw)) {
+      if (
+        !/^[A-Za-z0-9._-]{1,32}$/.test(entryVersion) ||
+        typeof value !== "string"
+      ) throw new Error();
+      vapidPublicKeyring[entryVersion] = value;
+    }
+  } catch {
+    throw new EdgeError(
+      503,
+      "WEB_PUSH_NOT_CONFIGURED",
+      "Web Push 구독 암호화 설정이 필요합니다.",
+    );
+  }
   let vapidPoint: Uint8Array;
   try {
     vapidPoint = b64u(vapidPublicKey, 65);
@@ -203,17 +233,62 @@ function config(): WebPushCryptoConfig {
       "Web Push 구독 암호화 설정이 필요합니다.",
     );
   }
-  return { key, version, secret, vapidKeyVersion, vapidPublicKey };
+  return {
+    key,
+    version,
+    secret,
+    vapidKeyVersion,
+    vapidPublicKey,
+    vapidPublicKeyring,
+  };
 }
 
-export function webPushPublicConfig(
+function proofError(error: unknown): EdgeError {
+  return error instanceof WebPushBindingProofError &&
+      error.reason === "INVALID_CONFIGURATION"
+    ? new EdgeError(
+      503,
+      "WEB_PUSH_NOT_CONFIGURED",
+      "Web Push 공개키 설정이 올바르지 않습니다.",
+    )
+    : new EdgeError(
+      400,
+      "WEB_PUSH_BINDING_PROOF_INVALID",
+      "Web Push 구독 키 증명이 만료되었거나 올바르지 않습니다.",
+    );
+}
+function proofActor(actor: EdgeActor, sessionId: string) {
+  return {
+    authUserId: canonicalUuid(actor.authUserId),
+    profileId: canonicalUuid(actor.profileId),
+    sessionId: canonicalUuid(sessionId),
+  };
+}
+function proofKeys(config: WebPushCryptoConfig) {
+  return {
+    currentVersion: config.vapidKeyVersion,
+    currentPublicKey: config.vapidPublicKey,
+    publicKeyring: config.vapidPublicKeyring,
+  };
+}
+
+export async function webPushPublicConfig(
+  request: Request,
   actor: EdgeActor,
   cryptoConfig: WebPushCryptoConfig = config(),
-): Record<string, string> {
+): Promise<Record<string, string>> {
   webPushActor(actor);
+  const proof = await issueWebPushBindingProof(
+    proofActor(actor, verifiedRequestSessionId(request)),
+    proofKeys(cryptoConfig),
+    cryptoConfig.secret,
+  ).catch((error: unknown) => {
+    throw proofError(error);
+  });
   return {
     keyVersion: cryptoConfig.vapidKeyVersion,
     publicKey: cryptoConfig.vapidPublicKey,
+    ...proof,
   };
 }
 async function parseBody(request: Request): Promise<Record<string, unknown>> {
@@ -450,9 +525,14 @@ export async function registerWebPushSubscription(
   queryless(request);
   const body = await parseBody(request);
   exactKeys(body, [
+    "bindingProof",
     "subscription",
     ...(Object.hasOwn(body, "expectedCurrent") ? ["expectedCurrent"] : []),
   ]);
+  if (
+    typeof body.bindingProof !== "string" ||
+    utf8(body.bindingProof).length > 2048
+  ) invalid();
   const subscription = await parseSubscription(body.subscription);
   let expected: ExpectedCurrent | undefined;
   if (Object.hasOwn(body, "expectedCurrent")) {
@@ -475,6 +555,14 @@ export async function registerWebPushSubscription(
   );
   const revision = (expected?.version ?? 0) + 1;
   const cfg = cryptoConfig;
+  const binding = await verifyWebPushBindingProof(
+    body.bindingProof,
+    proofActor(actor, sessionId),
+    proofKeys(cfg),
+    cfg.secret,
+  ).catch((error: unknown) => {
+    throw proofError(error);
+  });
   const canonical = JSON.stringify({
     auth: subscription.keys.auth,
     endpoint: subscription.endpoint,
@@ -520,7 +608,10 @@ export async function registerWebPushSubscription(
           sessionDigest,
           subscriptionId: expected?.subscriptionId ?? null,
           revisionNo: revision,
-          vapidKeyVersion: cfg.vapidKeyVersion,
+          vapidKeyVersion: binding.keyVersion,
+          bindingProofDigest: hex(
+            await crypto.subtle.digest("SHA-256", utf8(body.bindingProof)),
+          ),
         }),
       ),
     ),
@@ -545,7 +636,7 @@ export async function registerWebPushSubscription(
         p_auth_tag_base64: base64(tag),
         p_idempotency_key: idempotencyKey(request),
         p_request_hash: requestHash,
-        p_vapid_key_version: cfg.vapidKeyVersion,
+        p_vapid_key_version: binding.keyVersion,
       }),
     ),
   });

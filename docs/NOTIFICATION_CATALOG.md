@@ -96,6 +96,9 @@ developer health의 `jobOnlyDeadLetter`는 target 생성 전 contract 실패만 
 결합된다. legacy NULL binding은 current key로 추측하지 않고 `VAPID_KEY_UNBOUND` / `suppressed`
 dead-letter로 push만 종결한다. 사용자가 새 public config로 명시적으로 구독을 rotate하면 이후 새
 revision부터 다시 delivery 대상이 되며 과거 notification은 재생하지 않는다.
+config가 발급한 10분 opaque proof는 exact actor/profile/live session, key version과 public-key identity를
+결합하며 register는 client version 입력을 받지 않는다. 회전 overlap은 bounded prior keyring에 남은 proof만
+허용하고 removed/unknown/expired/tampered/cross-session proof는 fail-closed한다.
 
 provider plaintext는 catalog의 원문 title/body/category를 전달하지 않는다. 잠금화면 문구는
 `새 업무 알림`과 `앱에서 확인해 주세요`로 고정하고, data payload는 `payloadVersion=1`, stable

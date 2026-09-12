@@ -10,6 +10,7 @@ feature PR은 production, Vault, Cron, `pg_net`, Function Secrets를 변경하�
 - Function 시작 시 public/private pair를 실제 ES256 sign/verify로 검증한다. shape만 맞거나 pair가 다른 키는 provider 호출 전에 실패한다.
 - `VAPID_CURRENT_KEY_VERSION`은 새 registration/rotation revision에 서버가 결합한다. HTTP client는 version을 보내거나 선택하지 않는다.
 - `VAPID_KEYRING_JSON`은 prior version별 `{publicKey,privateKey}`만 포함한다. current version을 중복 포함하지 않는다.
+- `VAPID_PUBLIC_KEYRING_JSON`은 API가 binding proof를 검증할 prior version→public key map이며 최대 5개다. delivery 시작 시 private pair ring과 version set·public key identity를 exact 대조하고 drift는 provider 호출 0, durable `PROVIDER_CONFIGURATION_ERROR` degraded heartbeat로 끝낸다.
 - subscription envelope current/keyring, binding HMAC secret, delivery invoke secret, Supabase service-role key는 VAPID private key와 모두 서로 다른 값이어야 한다.
 - private key, envelope key, invoke secret, endpoint, digest, session, provider response body/header/status text는 source, 응답, audit, notification, 로그에 기록하지 않는다.
 
@@ -22,7 +23,7 @@ legacy revision의 `vapid_key_version IS NULL`은 현재 key를 추측해 backfi
 1. 승인된 release branch를 main에 병합한다. feature branch에서 production을 변경하지 않는다.
 2. 45번째 migration을 적용하고 migration history, RLS, service-only RPC grants를 확인한다.
 3. API/Edge 배포 전에 모든 Function Secrets를 먼저 주입한다. 특히 public config endpoint도
-   `VAPID_CURRENT_KEY_VERSION`과 `VAPID_PUBLIC_KEY`가 없으면 fail-closed이므로 secrets-before-API 순서를 지킨다.
+   `VAPID_CURRENT_KEY_VERSION`, `VAPID_PUBLIC_KEY`, `VAPID_PUBLIC_KEYRING_JSON`이 없거나 malformed curve이면 fail-closed이므로 secrets-before-API 순서를 지킨다.
 4. `api`와 `notification-delivery` Edge Function의 동일 승인 bundle을 배포한다.
 5. invoke secret 누락/오류, body/query/redirect/disallowed-host negative smoke를 먼저 수행한다.
 6. fake 또는 승인된 test subscription으로 config→register→delivery→settle positive smoke를 수행한다.
@@ -41,6 +42,12 @@ immutable bound version으로 prior key를 사용하고 새 revision만 current�
 전송은 fail-closed/operator-blocked가 되며, 새 pair 배포와 client rotation 뒤 service-only bounded resume을
 명시적으로 수행한다. 401/403은 endpoint를 retire하지 않는다.
 
+config 응답의 10분 binding proof는 auth user/profile/live session, key version, public-key identity, 발급·만료를
+domain-separated HMAC으로 결합한다. register는 proof의 검증된 version만 immutable revision과 request hash에
+사용한다. 회전 overlap 동안 prior public/private ring에 모두 남은 version의 proof는 재시도 가능하지만,
+만료·변조·다른 actor/session·unknown/removed version은 거부한다. 응답 유실 재시도는 같은 proof와 같은
+idempotency key를 보존해야 동일 logical result로 수렴한다.
+
 ## client/service-worker handoff
 
 frontend 정본 `makee-ham/room-management-system`의 후속 변경은 다음을 구현해야 한다.
@@ -52,7 +59,8 @@ frontend 정본 `makee-ham/room-management-system`의 후속 변경은 다음을
 
 ## incident와 rollback
 
-heartbeat가 5분 이상 오래됐거나 Cron configured/active가 아니거나 overdue/dead-letter/operator-blocked가 하나라도
+heartbeat가 5분 이상 오래됐거나 Cron configured/active가 아니거나 조회 시점의 current VAPID config crypto validation이
+실패하거나 overdue/dead-letter/operator-blocked가 하나라도
 있으면 health는 degraded다. 먼저 Cron을 중지해 새 invoke를 차단하고, 승인된 이전 Edge bundle로 되돌린다.
 원장 row나 migration을 삭제·rollback하지 않는다. credential 문제를 고친 뒤 negative smoke, bounded resume,
 5회 연속 success를 다시 확인하고 Cron을 재개한다.

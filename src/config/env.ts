@@ -38,6 +38,7 @@ const envSchema = z.object({
   ),
   VAPID_CURRENT_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/),
   VAPID_PUBLIC_KEY: z.string().regex(/^[A-Za-z0-9_-]{87}$/),
+  VAPID_PUBLIC_KEYRING_JSON: z.string().default('{}').transform((value)=>value.trim()||'{}'),
   GOOGLE_DRIVE_CLIENT_ID: z.string().max(4096).optional(),
   GOOGLE_DRIVE_CLIENT_SECRET: z.string().max(4096).optional(),
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().max(4096).optional(),
@@ -137,10 +138,18 @@ const envSchema = z.object({
   }
 
   try {
-    const publicKey=Buffer.from(env.VAPID_PUBLIC_KEY,'base64url');
-    if(publicKey.length!==65||publicKey[0]!==4||publicKey.toString('base64url')!==env.VAPID_PUBLIC_KEY) throw new Error();
+    const keyring=JSON.parse(env.VAPID_PUBLIC_KEYRING_JSON) as unknown;
+    if(!keyring||Array.isArray(keyring)||typeof keyring!=='object'||Object.hasOwn(keyring,env.VAPID_CURRENT_KEY_VERSION)||Object.keys(keyring).length>5) throw new Error();
+    const values:Array<[string,string]>=[[env.VAPID_CURRENT_KEY_VERSION,env.VAPID_PUBLIC_KEY],...Object.entries(keyring).map(([version,value])=>[version,String(value)] as [string,string])];
+    const identities=new Set<string>();
+    for(const [version,encoded] of values) {
+      if(!/^[A-Za-z0-9._-]{1,32}$/.test(version)||typeof encoded!=='string'||!/^[A-Za-z0-9_-]{87}$/.test(encoded)) throw new Error();
+      const publicKey=Buffer.from(encoded,'base64url');
+      if(publicKey.length!==65||publicKey[0]!==4||publicKey.toString('base64url')!==encoded||identities.has(encoded)) throw new Error();
+      identities.add(encoded);
+    }
   } catch {
-    context.addIssue({code:'custom',path:['VAPID_PUBLIC_KEY'],message:'VAPID 공개키는 canonical base64url P-256 uncompressed point여야 합니다.'});
+    context.addIssue({code:'custom',path:['VAPID_PUBLIC_KEYRING_JSON'],message:'VAPID current/prior 공개키는 최대 5개 prior version의 서로 다른 canonical P-256 point여야 합니다.'});
   }
 
   try {

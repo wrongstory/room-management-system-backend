@@ -23,6 +23,7 @@ const config = {
   bindingSecret: "b".repeat(32),
   vapidKeyVersion: "vapid-v1",
   vapidPublicKey: "B".repeat(87),
+  vapidPublicKeyring: {},
   nonce: new Uint8Array(12).fill(9),
 };
 const input = {

@@ -862,7 +862,11 @@ export async function handleApiRequest(
         );
       }
       return jsonResponse(
-        webPushPublicConfig(actor, dependencies.webPushCryptoConfig),
+        await webPushPublicConfig(
+          request,
+          actor,
+          dependencies.webPushCryptoConfig,
+        ),
         200,
         { ...corsHeaders, "cache-control": "no-store" },
       );

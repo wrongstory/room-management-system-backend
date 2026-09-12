@@ -20,6 +20,7 @@ const localEnv = {
   ,WEB_PUSH_BINDING_DIGEST_SECRET: 'web-push-binding-secret-tests-123456789'
   ,VAPID_CURRENT_KEY_VERSION: 'vapid-v1'
   ,VAPID_PUBLIC_KEY: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4'
+  ,VAPID_PUBLIC_KEYRING_JSON: '{}'
 };
 
 describe('environment contract', () => {
@@ -146,7 +147,8 @@ describe('environment contract', () => {
           v1: Buffer.alloc(32, 5).toString('base64')
         })
       },
-      { WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{"old":"not-base64"}' }
+      { WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{"old":"not-base64"}' },
+      { VAPID_PUBLIC_KEYRING_JSON: JSON.stringify(Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`old-${index}`, localEnv.VAPID_PUBLIC_KEY]))) }
     ]) {
       expect(() => loadEnv({ ...localEnv, ...override })).toThrow();
     }

@@ -1,5 +1,7 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
+import { notificationDeliveryConfig } from "../notification-delivery/index.ts";
+import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
 export const expectedMigrationName = "web_push_vapid_binding";
 
@@ -60,6 +62,7 @@ const secretConfigurationAllowlist = [
   "VAPID_SUBJECT",
   "VAPID_CURRENT_KEY_VERSION",
   "VAPID_PUBLIC_KEY",
+  "VAPID_PUBLIC_KEYRING_JSON",
   "VAPID_PRIVATE_KEY",
   "VAPID_KEYRING_JSON",
   "NOTIFICATION_DELIVERY_INVOKE_SECRET",
@@ -72,6 +75,7 @@ const notificationDeliverySecretNames = [
   "VAPID_SUBJECT",
   "VAPID_CURRENT_KEY_VERSION",
   "VAPID_PUBLIC_KEY",
+  "VAPID_PUBLIC_KEYRING_JSON",
   "VAPID_PRIVATE_KEY",
   "VAPID_KEYRING_JSON",
   "NOTIFICATION_DELIVERY_INVOKE_SECRET",
@@ -214,7 +218,12 @@ export async function developerDatabaseStatus(
   actor: EdgeActor,
 ): Promise<Record<string, unknown>> {
   requireDeveloper(actor);
-  const [database, photoPurge, notificationDelivery] = await Promise.all([
+  const [
+    database,
+    photoPurge,
+    notificationDelivery,
+    providerConfigurationValid,
+  ] = await Promise.all([
     rpcJson(clients, "get_developer_database_status", {
       p_actor_profile_id: actor.profileId,
       p_expected_migration_name: expectedMigrationName,
@@ -225,6 +234,15 @@ export async function developerDatabaseStatus(
     rpcJson(clients, "get_developer_notification_delivery_status", {
       p_actor_profile_id: actor.profileId,
     }),
+    (async () => {
+      try {
+        const config = notificationDeliveryConfig();
+        await validateWebPushProviderConfig(config.vapid);
+        return true;
+      } catch {
+        return false;
+      }
+    })(),
   ]);
   const runtime = developerRuntimeStatus();
   const configuration = runtime.configuration as Record<
@@ -245,8 +263,14 @@ export async function developerDatabaseStatus(
     photoPurge,
     notificationDelivery: {
       ...delivery,
-      status: functionSecretsConfigured ? delivery.status : "degraded",
-      activation: { ...activation, functionSecretsConfigured },
+      status: functionSecretsConfigured && providerConfigurationValid
+        ? delivery.status
+        : "degraded",
+      activation: {
+        ...activation,
+        functionSecretsConfigured,
+        providerConfigurationValid,
+      },
     },
     environment: runtime.environment,
     projectRef: runtime.projectRef,
