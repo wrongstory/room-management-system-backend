@@ -60,18 +60,18 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). 개발 통합 기준 갱신: **2026-09-11 KST**. 이번 개발에서 운영을 재검증하거나 변경하지 않았다.
+production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). 개발 통합 기준 갱신: **2026-09-12 KST**. 이번 개발에서 운영을 재검증하거나 변경하지 않았다.
 
 - 운영 승인 source: `main@cd635b116f451a39481f496f2bd368776385a409`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - diagnostics zero-byte hosted 호환 hotfix: PR #64 / `main@cd635b1`
-- 현재 개발·문서 검토 기준: `dev@cc15f47a74959943cf72a95e69da278243020f15`. #111 worker와 #117 claim/resume 교차 동시성 회귀가 source/dev에 병합된 **44 migrations / 97 paths / 104 operations** 기준이며, #112 source gate는 독립 QA·required CI·dev 병합 전까지 pending이다.
+- 현재 개발·문서 검토 기준: `dev@dfc98b1474f9f890851d49bd904869181d0d7880`. #112 VAPID/provider HTTP source gate가 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`에서 required CI와 독립 QA를 통과하고 PR #119로 source/dev에 병합된 **45 migrations / 98 paths / 105 operations** 기준이다. Issue #112는 hosted 활성화 완료까지 OPEN이며 main/recovery/production은 변경하지 않았다.
 - 개발 통합 기능 기준: #25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했다. 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이고 다음 본선은 #8 earning/payroll 정산이다.
 - #93/#95는 PR #95로 source/dev 병합 완료했다. 개발 통합 계약은 **35 migrations / 76 paths / 82 operations**이며 conceptual OPEN 조회, OPEN→PAYING 잠금과 4개 payroll table의 active+비밀번호 변경 완료+admin/maid-self RLS를 포함한다.
 - #96은 PR #97로 source/dev 병합 완료했다. bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 포함한 개발 통합 계약은 **36 migrations / 77 paths / 83 operations**이다. Python developer 콘솔 16 operations는 유지하며 production에는 아직 승격하지 않았다.
-- #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116으로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 현재 dev는 **44 migrations / 97 paths / 104 operations**다. #112 VAPID/provider source gate는 pending이며 main/recovery/production은 변경하지 않았다.
+- #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 현재 dev는 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, source identity는 위 승인 `main` 기준
@@ -594,7 +594,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | encrypted Web Push subscription revision ledger/API | source/dev 완료 | #10 / #110 / PR #115 | 43 migrations / 97 paths / 104 operations; production 미승격·미사용 |
 | [x] | notification delivery ledger·provider-neutral worker | source/dev 완료 | #10 / #111 / PR #116 | 44번째 append-only migration, 공개 97 paths / 104 operations 유지; production 미승격·미사용 |
 | [x] | claim/resume 교차 동시성 회귀 | source/dev 완료 | #10 / #117 | 기능·migration 변경 없이 실제 RPC Promise.all 경합 고정; `dev@cc15f47a74959943cf72a95e69da278243020f15` |
-| [ ] | VAPID/provider HTTP source 계약 | source gate 진행 중 | #10 / #112 | 45번째 append-only binding, config 1 path/operation, provider/Edge source 후보; Cron/Vault/production 활성화 제외 |
+| [x] | VAPID/provider HTTP source 계약 | source/dev 완료 | #10 / #112 / PR #119 | 45 migrations / 98 paths / 105 operations; 승인 head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`, `dev@dfc98b1474f9f890851d49bd904869181d0d7880`; Issue #112 OPEN, Cron/Vault/production hosted 활성화 미완료 |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
 
@@ -707,7 +707,7 @@ production completeness 기준의 정본 순서다.
 42. [x] **#110 source/dev gate** — encrypted Web Push subscription revision ledger/API가 PR #115로 dev 병합 완료; production 미승격
 43. [x] **#111 source/dev gate** — notification delivery ledger·provider-neutral worker PR #116이 `dev@8fb0886214ef8287f15f2ad2fd149cd271340834`로 병합; production 미승격
 44. [x] **#117 concurrency gate** — 실제 claim/resume 교차 경합 회귀가 `dev@cc15f47a74959943cf72a95e69da278243020f15`로 병합; 기능·migration 변경 없음
-45. [ ] **#112 source/dev gate** — VAPID revision binding·public config·provider/Edge source 후보 구현, 독립 QA·required CI·dev 병합 대기; production 미승격
+45. [x] **#112 source/dev gate** — VAPID revision binding·public config·provider/Edge source가 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`에서 독립 QA·required CI를 통과하고 PR #119로 `dev@dfc98b1474f9f890851d49bd904869181d0d7880`에 병합; Issue #112는 hosted 활성화까지 OPEN, production 미승격
 
 ### #93 Payroll Cycle Assembly source gate — source/dev 완료, production 미승격
 
@@ -936,19 +936,19 @@ main/recovery/production migration·Edge/Pages/Cron/Vault는 그대로 유지한
 - [x] 기존 developer database-status operation에 bounded backlog/heartbeat 추가; 공개 97 paths / 104 operations 유지
 - [x] PR #116 독립 QA, required GitHub `application` / `migration` PASS, `dev@8fb0886214ef8287f15f2ad2fd149cd271340834` 병합
 - [x] #117 실제 claim/resume 교차 동시성 회귀 `dev@cc15f47a74959943cf72a95e69da278243020f15` 병합
-- [ ] #112 VAPID/provider HTTP/Cron/invoke secret/production 활성화
+- [ ] #112 hosted VAPID/Cron/invoke secret/production 활성화
 
-### #112 VAPID Web Push source gate — 개발 중, production 미승격
+### #112 VAPID Web Push source gate — source/dev 완료, production 미승격
 
 - [x] Issue #112 정본 정책 댓글 `5641979910`과 RFC 8030/8291/8292 source 계약 반영
-- [x] 기존 44 migrations 수정 0, 45번째 append-only VAPID revision binding migration 후보 1개
-- [x] authenticated active/password-complete admin·maid 전용 public-key config 1 path/operation 추가; 후보 계약 **45 migrations / 98 paths / 105 operations**
+- [x] 기존 44 migrations 수정 0, 45번째 append-only VAPID revision binding migration 1개
+- [x] authenticated active/password-complete admin·maid 전용 public-key config 1 path/operation 추가; source/dev 계약 **45 migrations / 98 paths / 105 operations**
 - [x] config→register 10분 actor/profile/live-session HMAC binding proof; current/prior overlap replay와 removed/expired/tampered scope fail-closed
 - [x] actual P-256 curve/pair 검증, 최대 5개 public/private ring exact identity 대조, config drift durable degraded heartbeat
 - [x] provider allowlist·manual redirect·bounded status mapping·generic 3 KiB payload·stable notification ID 구현
 - [x] distinct invoke secret의 전용 `notification-delivery` Edge source와 33/39/45초 budget 연결
-- [ ] 독립 QA, required GitHub `application` / `migration`, `dev` 병합
-- [ ] release/main 후 Function Secrets·Edge deploy·Vault/pg_cron/pg_net·5회 success·real-device hosted smoke
+- [x] PR #119 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050` 독립 QA P0/P1/P2 0·98/100, required GitHub `application` / `migration` PASS, `dev@dfc98b1474f9f890851d49bd904869181d0d7880` 병합
+- [ ] Issue #112 OPEN 유지: release/main 후 Function Secrets·Edge deploy·Vault/pg_cron/pg_net·5회 success·real-device hosted smoke
 
 ### #85 사진 purge/reconciliation source gate — source/dev 완료, production 미승격
 
