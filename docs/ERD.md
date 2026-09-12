@@ -42,6 +42,7 @@ erDiagram
   AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_DAYS : "월~일 선택"
   AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_CHANGE_REQUESTS : "마감 후 변경 요청"
   PROFILES ||--o{ AVAILABILITY_CHANGE_REQUESTS : "관리자 처리"
+  PROFILES ||--o{ PASSWORD_CHANGE_COMMANDS : "응답 유실 복구 receipt"
 
   AUTH_USERS {
     uuid id PK
@@ -94,7 +95,22 @@ erDiagram
     text status
     uuid approved_version_id FK
   }
+  PASSWORD_CHANGE_COMMANDS {
+    uuid id PK
+    uuid actor_profile_id FK
+    text command_type
+    text idempotency_key
+    text request_hash
+    text session_digest
+    text state
+    text claim_digest
+    timestamptz lease_expires_at
+    int attempt_count
+    timestamptz completed_at
+  }
 ```
+
+- `private.password_change_commands`는 `(actor, account.password.change, idempotency key)` 범위의 private receipt다. actor마다 미완료 행 하나만 허용하고 Auth mutation claim을 직렬화한다. 시작한 live session은 domain-separated SHA-256 digest로 결합해 같은 actor의 다른 세션 takeover를 막으며 raw session ID는 저장하지 않는다. 비밀번호 원문·변환값·hash/HMAC/verifier·token은 저장하지 않고, 응답 유실 복구는 재전송된 새 비밀번호를 현재 Auth 상태에 직접 검증한다.
 
 핵심 제약:
 

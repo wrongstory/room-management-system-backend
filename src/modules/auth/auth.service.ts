@@ -1,6 +1,8 @@
-import type { SupabaseClients } from '../../lib/supabase.js';
-import { AppError } from '../../lib/app-error.js';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Actor, AppRole } from '../../domain/actor.js';
+import { AppError } from '../../lib/app-error.js';
+import { requestHash } from '../../lib/command.js';
+import type { SupabaseClients } from '../../lib/supabase.js';
 import { toSupabaseAuthPassword } from './password.js';
 
 export interface LoginInput {
@@ -34,6 +36,21 @@ interface ProfileRow {
   status: string;
   locked_until: string | null;
   must_change_password: boolean;
+}
+
+type PasswordChangeState =
+  | 'absent'
+  | 'execute'
+  | 'busy'
+  | 'recover'
+  | 'completed'
+  | 'failed'
+  | 'inconsistent'
+  | 'other_in_progress';
+
+interface PasswordChangeReceiptState {
+  state: PasswordChangeState;
+  attemptCount?: number;
 }
 
 function normalizeLoginId(loginId: string): string {
@@ -161,13 +178,88 @@ export class SupabaseAuthService implements AuthService {
     newPassword: string,
     idempotencyKey: string
   ): Promise<void> {
-    const { data: verification, error: verificationError } =
-      await this.clients.publicClient.auth.signInWithPassword({
-        email: syntheticEmail(actor.profileId),
-        password: toSupabaseAuthPassword(currentPassword)
-      });
-    if (verificationError || !verification.session) {
-      throw new AppError(401, 'INVALID_CURRENT_PASSWORD', '현재 비밀번호가 올바르지 않습니다.');
+    const activeSessionId = sessionId(actor.accessToken);
+    if (!activeSessionId) {
+      throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.');
+    }
+    const fingerprint = requestHash({
+      actorProfileId: actor.profileId,
+      command: 'account.password.change'
+    });
+    const inspected = await this.passwordChangeRpc('inspect_password_change', {
+      p_actor_profile_id: actor.profileId,
+      p_auth_user_id: actor.authUserId,
+      p_session_id: activeSessionId,
+      p_idempotency_key: idempotencyKey
+    });
+
+    if (inspected.state === 'completed') {
+      if (!(await this.verifyPassword(actor.profileId, newPassword))) {
+        throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 비밀번호 변경에 사용한 Idempotency-Key입니다.');
+      }
+      return;
+    }
+    if (inspected.state === 'failed') {
+      throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 종료된 비밀번호 변경에 사용한 Idempotency-Key입니다.');
+    }
+    if (inspected.state === 'busy' || inspected.state === 'other_in_progress') {
+      throw new AppError(409, 'PASSWORD_CHANGE_IN_PROGRESS', '다른 비밀번호 변경 요청이 처리 중입니다.');
+    }
+
+    let currentVerified = false;
+    if (inspected.state === 'absent') {
+      currentVerified = await this.verifyPassword(actor.profileId, currentPassword);
+      if (!currentVerified) {
+        throw new AppError(401, 'INVALID_CURRENT_PASSWORD', '현재 비밀번호가 올바르지 않습니다.');
+      }
+    }
+
+    const claimDigest = createHash('sha256')
+      .update(`password-change-claim:v1\0${randomUUID()}`)
+      .digest('hex');
+    const prepared = await this.passwordChangeRpc('prepare_password_change', {
+      p_actor_profile_id: actor.profileId,
+      p_auth_user_id: actor.authUserId,
+      p_session_id: activeSessionId,
+      p_idempotency_key: idempotencyKey,
+      p_request_hash: fingerprint,
+      p_claim_digest: claimDigest
+    });
+
+    if (prepared.state === 'completed') {
+      if (!(await this.verifyPassword(actor.profileId, newPassword))) {
+        throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 비밀번호 변경에 사용한 Idempotency-Key입니다.');
+      }
+      return;
+    }
+    if (prepared.state === 'failed') {
+      throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 종료된 비밀번호 변경에 사용한 Idempotency-Key입니다.');
+    }
+    if (prepared.state === 'busy' || prepared.state === 'other_in_progress') {
+      throw new AppError(409, 'PASSWORD_CHANGE_IN_PROGRESS', '다른 비밀번호 변경 요청이 처리 중입니다.');
+    }
+
+    if (prepared.state === 'recover') {
+      if (await this.verifyPassword(actor.profileId, newPassword)) {
+        await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
+        return;
+      }
+      await this.finishPasswordChangeFailure(
+        actor,
+        activeSessionId,
+        idempotencyKey,
+        claimDigest,
+        'PASSWORD_STATE_INCONSISTENT'
+      );
+      throw new AppError(
+        500,
+        'PASSWORD_STATE_INCONSISTENT',
+        '비밀번호 변경 결과를 안전하게 확인할 수 없습니다. 관리자에게 비밀번호 초기화를 요청해 주세요.'
+      );
+    }
+
+    if (prepared.state !== 'execute' || !currentVerified) {
+      throw new AppError(500, 'PASSWORD_STATE_INCONSISTENT', '비밀번호 변경 상태가 올바르지 않습니다.');
     }
 
     const { error: updateError } = await this.clients.admin.auth.admin.updateUserById(
@@ -175,29 +267,145 @@ export class SupabaseAuthService implements AuthService {
       { password: toSupabaseAuthPassword(newPassword) }
     );
     if (updateError) {
-      await this.clients.admin.auth.admin.signOut(verification.session.access_token, 'local');
-      throw new AppError(502, 'AUTH_PASSWORD_CHANGE_FAILED', '비밀번호를 변경하지 못했습니다.');
+      if (await this.verifyPassword(actor.profileId, newPassword)) {
+        await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
+        return;
+      }
+      if (await this.verifyPassword(actor.profileId, currentPassword)) {
+        await this.finishPasswordChangeFailure(
+          actor,
+          activeSessionId,
+          idempotencyKey,
+          claimDigest,
+          'AUTH_PASSWORD_CHANGE_FAILED'
+        );
+        throw new AppError(502, 'AUTH_PASSWORD_CHANGE_FAILED', '비밀번호를 변경하지 못했습니다.');
+      }
+      await this.finishPasswordChangeFailure(
+        actor,
+        activeSessionId,
+        idempotencyKey,
+        claimDigest,
+        'PASSWORD_STATE_INCONSISTENT'
+      );
+      throw new AppError(
+        500,
+        'PASSWORD_STATE_INCONSISTENT',
+        '비밀번호 변경 결과를 안전하게 확인할 수 없습니다. 관리자에게 비밀번호 초기화를 요청해 주세요.'
+      );
     }
 
-    await this.clients.admin.auth.admin.signOut(actor.accessToken, 'others');
+    await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
+  }
+
+  private async verifyPassword(profileId: string, password: string): Promise<boolean> {
+    const { data, error } = await this.clients.publicClient.auth.signInWithPassword({
+      email: syntheticEmail(profileId),
+      password: toSupabaseAuthPassword(password)
+    });
+    if (error || !data.session) {
+      return false;
+    }
+    const { error: signOutError } = await this.clients.admin.auth.admin.signOut(
+      data.session.access_token,
+      'local'
+    );
+    if (signOutError) {
+      throw new AppError(
+        500,
+        'PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED',
+        '비밀번호 확인 세션을 안전하게 폐기하지 못했습니다.'
+      );
+    }
+    return true;
+  }
+
+  private async passwordChangeRpc(
+    name: string,
+    parameters: Record<string, string>
+  ): Promise<PasswordChangeReceiptState> {
+    const { data, error } = await this.clients.admin.rpc(name, parameters);
+    if (error || !data || typeof data !== 'object' || typeof (data as { state?: unknown }).state !== 'string') {
+      throw this.passwordChangeDatabaseError(error);
+    }
+    return data as PasswordChangeReceiptState;
+  }
+
+  private async completePasswordChange(
+    actor: Actor,
+    activeSessionId: string,
+    idempotencyKey: string,
+    fingerprint: string,
+    claimDigest: string
+  ): Promise<void> {
     const { error } = await this.clients.admin.rpc('complete_password_change', {
       p_actor_profile_id: actor.profileId,
-      p_idempotency_key: idempotencyKey
+      p_auth_user_id: actor.authUserId,
+      p_session_id: activeSessionId,
+      p_idempotency_key: idempotencyKey,
+      p_request_hash: fingerprint,
+      p_claim_digest: claimDigest
     });
     if (error) {
-      const { error: rollbackError } = await this.clients.admin.auth.admin.updateUserById(
-        actor.authUserId,
-        { password: toSupabaseAuthPassword(currentPassword) }
-      );
-      if (rollbackError) {
-        throw new AppError(
-          500,
-          'PASSWORD_STATE_INCONSISTENT',
-          '비밀번호 상태를 복구하지 못했습니다. 관리자에게 비밀번호 초기화를 요청해 주세요.'
-        );
-      }
-      throw new AppError(500, 'PASSWORD_STATE_UPDATE_FAILED', '비밀번호 변경 상태를 저장하지 못했습니다.');
+      throw this.passwordChangeDatabaseError(error, true);
     }
+  }
+
+  private async finishPasswordChangeFailure(
+    actor: Actor,
+    activeSessionId: string,
+    idempotencyKey: string,
+    claimDigest: string,
+    failureCode: 'AUTH_PASSWORD_CHANGE_FAILED' | 'PASSWORD_STATE_INCONSISTENT'
+  ): Promise<void> {
+    const { error } = await this.clients.admin.rpc('finish_password_change_failure', {
+      p_actor_profile_id: actor.profileId,
+      p_auth_user_id: actor.authUserId,
+      p_session_id: activeSessionId,
+      p_idempotency_key: idempotencyKey,
+      p_claim_digest: claimDigest,
+      p_failure_code: failureCode
+    });
+    if (error) {
+      throw new AppError(
+        500,
+        'PASSWORD_STATE_INCONSISTENT',
+        '비밀번호 변경 결과를 저장하지 못했습니다. 관리자에게 비밀번호 초기화를 요청해 주세요.'
+      );
+    }
+  }
+
+  private passwordChangeDatabaseError(
+    error: { message?: string } | null,
+    completion = false
+  ): AppError {
+    const message = error?.message ?? '';
+    if (message.includes('IDEMPOTENCY_KEY_REUSED') || message.includes('PASSWORD_CHANGE_CLAIM_STALE')) {
+      return new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 비밀번호 변경에 사용한 Idempotency-Key입니다.');
+    }
+    if (message.includes('PASSWORD_CHANGE_IN_PROGRESS')) {
+      return new AppError(409, 'PASSWORD_CHANGE_IN_PROGRESS', '다른 비밀번호 변경 요청이 처리 중입니다.');
+    }
+    if (message.includes('SESSION_REVOKED')) {
+      return new AppError(401, 'SESSION_REVOKED', '로그인이 만료되었습니다. 다시 로그인해 주세요.');
+    }
+    if (message.includes('PASSWORD_CHANGE_SESSION_MISMATCH')) {
+      return new AppError(
+        409,
+        'PASSWORD_CHANGE_SESSION_MISMATCH',
+        '비밀번호 변경은 시작한 로그인 세션에서만 재시도할 수 있습니다.'
+      );
+    }
+    if (message.includes('ACTIVE_ACCOUNT_REQUIRED')) {
+      return new AppError(403, 'ACCOUNT_INACTIVE', '현재 사용할 수 없는 계정입니다.');
+    }
+    return new AppError(
+      500,
+      completion ? 'PASSWORD_STATE_UPDATE_FAILED' : 'PASSWORD_CHANGE_RECEIPT_FAILED',
+      completion
+        ? '비밀번호는 변경됐을 수 있습니다. 같은 Idempotency-Key로 다시 시도해 주세요.'
+        : '비밀번호 변경 요청 상태를 준비하지 못했습니다.'
+    );
   }
 
   private async getProfileById(profileId: string): Promise<ProfileRow> {

@@ -121,7 +121,7 @@ const idempotencyKey = crypto.randomUUID();
 - request body가 바뀌면 새 키를 만든다.
 - 같은 키를 다른 payload에 쓰면 `IDEMPOTENCY_KEY_REUSED`가 반환된다.
 - 키를 analytics, 오류 수집 payload, 사용자 화면에 노출하지 않는다.
-- 현재 `POST /v1/auth/password`는 #46에서 receipt 재시도 계약을 별도로 보강할 예정이다. 응답 유실·timeout 때 기존 요청을 자동 반복하지 말고 결과 미확정 상태로 처리한다. 나머지 계정 변경 API는 같은 payload 재시도에 기존 logical 결과를 반환한다.
+- `POST /v1/auth/password`의 timeout·응답 유실은 **동일 Idempotency-Key와 byte-equivalent currentPassword/newPassword**로만 재시도한다. 서버는 비밀번호 파생 fingerprint를 저장하지 않으며, replay에서는 새 비밀번호가 현재 Supabase Auth 값인지 확인해 same-effect가 증명되면 204를 반환한다. 이 증명은 `currentPassword` 문자열의 동일성을 서버가 저장·비교한다는 뜻이 아니므로 클라이언트가 원 body를 보존할 책임이 있다. 새 key로 다시 누르거나 비밀번호를 바꿔 보내지 않는다. `PASSWORD_CHANGE_IN_PROGRESS`는 짧게 대기 후 같은 요청을 재시도하고, `PASSWORD_STATE_UPDATE_FAILED`도 같은 key 재시도로 DB 완료를 복구한다. `PASSWORD_STATE_INCONSISTENT`는 자동 재시도하지 않고 운영자에게 문의한다.
 
 ### 응답과 오류
 

@@ -72,9 +72,11 @@ Auth 사용자 생성 뒤 프로필 RPC가 실패하면 서버는 새 Auth 사�
 
 상태 변경은 DB의 마지막 활성 관리자·허용 전이 검증과 세션 폐기를 먼저 커밋한 뒤 Auth ban을 동기화한다. 따라서 거부된 전이가 Auth 계정을 먼저 잠그지 않는다. DB 커밋 뒤 Auth 동기화가 실패하면 `ACCOUNT_AUTH_STATE_INCONSISTENT`를 반환하며, 운영자는 같은 `Idempotency-Key`로 재시도해 Auth 상태를 reconcile한다. 권한 판정은 항상 최신 DB 프로필을 사용하므로 동기화 대기 중 비활성 계정의 업무 접근은 허용되지 않는다.
 
-`POST /v1/auth/password`는 아직 scoped account receipt 대상이 아니다. Auth 변경 뒤 응답이 유실되면 동일 payload 자동 재시도가 현재 비밀번호 검증에서 실패할 수 있으므로 프론트는 결과 미확정으로 처리한다. 비밀번호 원문이나 재사용 가능한 verifier를 저장하지 않으면서 안전한 replay를 지원하는 계약은 후속 Issue #46에서 설계·검증한다.
+`POST /v1/auth/password`는 전용 `private.password_change_commands` receipt를 사용한다. 범위는 `(actor_profile_id, account.password.change, idempotency_key)`이고 한 actor의 미완료 변경은 하나뿐이다. 시작한 live session은 domain-separated SHA-256 digest로 결합해 같은 actor의 다른 세션이 key를 알아도 takeover할 수 없다. receipt에는 비밀번호 원문·Supabase 변환 비밀번호·hash/HMAC·재사용 가능한 verifier·token·raw session ID를 저장하지 않는다. 감사 원장에도 raw idempotency key 대신 actor/command/key의 SHA-256 scoped identity만 남긴다.
 
-개인 비밀번호 변경은 Auth 비밀번호를 먼저 바꾼 뒤 DB의 `must_change_password`와 감사 이벤트를 기록한다. DB 기록이 실패하면 서버가 검증에 사용한 기존 비밀번호로 Auth 변경을 보상하며, 보상까지 실패하면 `PASSWORD_STATE_INCONSISTENT`를 반환해 관리자의 비밀번호 초기화가 필요함을 명시한다.
+최초 실행은 현재 비밀번호를 Supabase Auth에 직접 검증한 뒤 receipt claim을 얻은 요청만 Auth를 한 번 변경한다. Auth 성공 뒤 DB 완료나 HTTP 응답이 유실되면 같은 key와 같은 요청을 다시 보낸다. 서버는 저장된 password evidence를 비교하지 않고 **요청에 다시 포함된 새 비밀번호를 현재 Supabase Auth 상태에 직접 검증**해 성공이 증명되면 `must_change_password=false`, 다른 session 폐기, 감사 1건, receipt 완료를 한 DB transaction으로 수렴시키고 204를 반환한다. 비밀번호에서 만든 fingerprint도 금지하므로 저장된 `request_hash`는 actor+command만 증명한다. 따라서 replay의 서버 측 same-effect 증명은 `newPassword`가 현재 Auth 값이라는 사실이며 `currentPassword` 문자열의 동일성까지 증명하지 않는다. 클라이언트는 반드시 원 요청 body를 그대로 재전송해야 하고, 같은 key에 다른 의도의 새 비밀번호를 쓰면 conflict 또는 inconsistent로 fail-closed한다. 완료 뒤 다른 비밀번호 변경이 이미 일어나 현재 Auth 값이 달라진 과거 key는 `IDEMPOTENCY_KEY_REUSED`다.
+
+다른 key 또는 같은 key의 충돌 요청은 미완료 lease 동안 `PASSWORD_CHANGE_IN_PROGRESS`로 막는다. 다른 live session의 takeover는 `PASSWORD_CHANGE_SESSION_MISMATCH`다. lease 만료 복구에서는 요청에 다시 포함된 새 비밀번호가 현재 Auth 상태와 일치할 때만 완료한다. 일치하지 않으면 crash-before-Auth인지 다른 payload 재시도인지 password-derived evidence 없이 구분할 수 없으므로 receipt를 `inconsistent`로 고정하고 운영 확인을 요구한다. 이 엄격한 선택은 audit 누락 상태를 잘못 `failed`로 종료하는 것보다 보안·감사 정합성을 우선한다. 검증을 위해 생성된 Auth session은 즉시 local revoke하며 폐기에 실패하면 변경 준비를 계속하지 않는다.
 
 ## 최초 개발자 부트스트랩
 

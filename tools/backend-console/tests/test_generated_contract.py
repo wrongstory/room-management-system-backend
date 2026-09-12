@@ -74,6 +74,22 @@ def test_phase_a_openapi_operations_are_generated() -> None:
     assert len(operations) == 16
 
 
+def test_password_change_replay_errors_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert {
+        ErrorCode.PASSWORD_CHANGE_IN_PROGRESS.value,
+        ErrorCode.PASSWORD_CHANGE_RECEIPT_FAILED.value,
+        ErrorCode.PASSWORD_CHANGE_SESSION_MISMATCH.value,
+        ErrorCode.PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED.value,
+    } == {
+        "PASSWORD_CHANGE_IN_PROGRESS",
+        "PASSWORD_CHANGE_RECEIPT_FAILED",
+        "PASSWORD_CHANGE_SESSION_MISMATCH",
+        "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
+    }
+
+
 def test_photo_purge_status_is_generated_as_bounded_metadata_only() -> None:
     assert "photo_purge" in {field.name for field in fields(DeveloperDatabaseStatus)}
     assert {"status", "last_heartbeat", "backlog", "checked_at"} <= {

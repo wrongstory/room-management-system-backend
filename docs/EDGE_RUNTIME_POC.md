@@ -41,7 +41,7 @@ Supabase Cron (pg_cron)
 | `api` | `GET /api/docs` | 없음 | local/self-hosted pinned Swagger UI source. Supabase 기본 hosted domain에서는 HTML 렌더링 불가 |
 | `api` | `POST /api/v1/auth/login` | 없음 | 이름형 ID 로그인 |
 | `api` | `GET /api/v1/auth/me` | 사용자 bearer JWT | Auth/profile/session 계약 |
-| `api` | `POST /api/v1/auth/password` | 사용자 bearer JWT | 개인 비밀번호 변경 |
+| `api` | `POST /api/v1/auth/password` | 사용자 bearer JWT | private scoped receipt 기반 개인 비밀번호 변경·응답 유실 replay |
 | `api` | `GET·POST /api/v1/accounts` | developer 또는 active admin | 계정 조회·생성 |
 | `api` | `PATCH /api/v1/accounts/:profileId/role` | developer 또는 active admin | 관리자·메이드 역할 변경 |
 | `api` | `PATCH /api/v1/accounts/:profileId/status` | developer 또는 active admin | 계정 상태 전이 |

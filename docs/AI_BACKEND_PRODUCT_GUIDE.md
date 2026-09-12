@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서 갱신의 `dev` integration base: `9ec073e6908cd90768fad3f1c6841f8130f39a88` — #73 전 기준 45 migrations / OpenAPI 98 paths / 105 operations. #73 source는 46번째 migration을 추가하고 공개 API 수는 바꾸지 않는다.
+- 이 문서 갱신의 `dev` integration base: `b60b14656168d5dcaebb868ffabbcb827311c066` — #73까지 반영된 기준 46 migrations / OpenAPI 98 paths / 105 operations. #46 source candidate는 47번째 migration을 추가하고 공개 API 수는 바꾸지 않는다.
 - 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -659,8 +659,9 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #103 외부 전액 지급 결과는 PR #107로 `dev@3297679ca2e903e68cfa2dd9e7bc137341c5b27d`에 source/dev 통합됐으며 40 migrations / 93 paths / 100 operations다. 기존 `payment_started` event를 immutable attempt identity로 연결하고, `TRANSFER_RESULT_UNCERTAIN` CHECK, `NO_TRANSFER_CONFIRMED` OPEN 복귀, 양수 locked snapshot 전액 PAID result를 typed append-only evidence로 보존한다. 40번째 migration 이후의 payment projection transition과 event/attempt/result 양쪽은 deferred commit invariant로 서로를 exact하게 요구하며 과거 CHECK/PAID evidence는 추측 backfill하지 않는다. client amount/`paidAt`은 받지 않고 server time과 cycle CAS를 사용하며 OPEN 복귀 뒤 재시작은 새 attempt다. 최초 method는 `bank_transfer`, reference는 8~64 ASCII allowlist·영문/숫자 필수·7자리 연속 숫자/URL-like 거부 뒤 uppercase canonical global unique다. 이 형식은 실제 provider 계약 미확정 동안의 fail-closed source 계약이며 canonical reference는 admin result에만 보이고 maid/developer/audit/notification에는 숨긴다. provider HTTP, 영수증·계좌·수취인 PII·secret/raw payload 저장은 없고 main/recovery/production은 변경하지 않았다.
 - #108 알림함, #109 typed catalog/grouping/writer, #110 encrypted Web Push subscription, #111 delivery ledger/worker와 #112 VAPID/provider HTTP source까지 순차적으로 dev에 통합됐다. #112 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 PR #119 병합 commit `dfc98b1474f9f890851d49bd904869181d0d7880`의 tree는 동일하고 독립 QA 98/100, P0/P1/P2 0, required `application`/`migration` PASS다. PR #122 문서 동기화와 #124 pgTAP fixture 안정화를 반영한 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / 98 paths / 105 operations다.
 - #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
+- #46 source candidate는 기존 46 migrations를 수정하지 않고 47번째 append-only private password-change receipt를 추가한다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. response loss는 재전송된 새 비밀번호를 현재 Supabase Auth에 직접 검증한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. crash-before-Auth와 다른 payload를 안전하게 구분할 evidence가 없는 expired receipt는 실패로 추정하지 않고 inconsistent로 격리한다. public HTTP path/operation 수는 바뀌지 않으며 독립 QA/dev 병합·release/production은 별도 gate다.
 - 위 source/dev 완료는 운영 사용 가능 선언이 아니다. Issue #112는 release/main 뒤 Function Secrets, 승인된 `api`/`notification-delivery` Edge bundle, negative/positive hosted smoke, Vault/`pg_cron`/`pg_net`, 5회 연속 heartbeat, 실제 기기 Web Push smoke가 끝날 때까지 OPEN이다. 현재 `main`/production/recovery는 v0.2.0 상태로 변경되지 않았다.
-- #73 source 이후 critical path는 **#34 Actions runtime → #46 password replay → #69 Phase A PIN domain**이다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
+- 현재 critical path는 **#46 password replay source/dev gate → #69 Phase A PIN domain**이다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
 
@@ -764,7 +765,7 @@ npm run db:reset
 현재 P2 배정부터 #112 Web Push provider까지의 source/dev critical path는 완료됐다. 이번 #73 source candidate도 46번째 append-only forward fix와 과거 통보 snapshot·동시성 회귀까지 구현을 마쳤으며, 독립 검토와 `dev` 병합은 별도 gate다. 다음 source 작업은 운영 승격과 섞지 않고 아래 순서로 진행한다.
 
 1. Issue #34에서 GitHub Actions runtime 경고를 별도 CI 유지보수 PR로 정리한다.
-2. Issue #46에서 비밀번호 원문·재사용 verifier 없이 password-change 응답 유실/replay 의미를 확정하고 Fastify/Edge 계약을 맞춘다.
+2. Issue #46 source candidate의 비밀번호 원문·재사용 verifier 없는 password-change 응답 유실/replay 계약을 독립 검토하고 `dev`에 통합한다.
 3. Issue #69 Phase A에서 4~8자리 PIN 입력과 `<room_number>-<pin_digits>` canonical credential의 encrypted immutable revision/current pointer를 구현한다. Google Sheets worker와 production credential/ACL은 후속 Phase B/C로 분리한다.
 4. Issue #12 backup/recovery source는 핵심 source와 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
 5. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.

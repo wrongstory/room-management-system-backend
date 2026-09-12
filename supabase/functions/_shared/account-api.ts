@@ -1,10 +1,10 @@
-import type { EdgeActor, EdgeClients } from "./runtime.ts";
-import { bearerToken, EdgeError, requiredEnv } from "./runtime.ts";
 import {
   recordKnownLoginFailed,
   recordLoginSucceeded,
   recordUnknownLoginFailed,
 } from "./activity-api.ts";
+import type { EdgeActor, EdgeClients } from "./runtime.ts";
+import { EdgeError, requiredEnv, verifiedRequestSessionId } from "./runtime.ts";
 
 type AppRole = "developer" | "admin" | "maid";
 type ManagedRole = Exclude<AppRole, "developer">;
@@ -228,6 +228,16 @@ function canonicalize(value: unknown): unknown {
 async function requestHash(value: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(canonicalize(value)));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -678,17 +688,96 @@ export async function changePassword(
     invalidRequest("새 비밀번호는 현재 비밀번호와 달라야 합니다.");
   }
 
-  const { data: verification, error: verificationError } = await clients
-    .publicClient.auth.signInWithPassword({
-      email: syntheticEmail(actor.profileId),
-      password: toSupabaseAuthPassword(current),
-    });
-  if (verificationError || !verification.session) {
-    throw new EdgeError(
-      401,
-      "INVALID_CURRENT_PASSWORD",
-      "현재 비밀번호가 올바르지 않습니다.",
+  const key = idempotencyKey(request);
+  const sessionId = verifiedRequestSessionId(request);
+  const fingerprint = await requestHash({
+    actorProfileId: actor.profileId,
+    command: "account.password.change",
+  });
+  const inspected = await passwordChangeRpc(
+    clients,
+    "inspect_password_change",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_auth_user_id: actor.authUserId,
+      p_session_id: sessionId,
+      p_idempotency_key: key,
+    },
+  );
+
+  if (inspected.state === "completed") {
+    if (!(await verifyPassword(clients, actor.profileId, next))) {
+      throw passwordChangeConflict();
+    }
+    return;
+  }
+  if (inspected.state === "failed") {
+    throw passwordChangeConflict();
+  }
+  if (inspected.state === "busy" || inspected.state === "other_in_progress") {
+    throw passwordChangeInProgress();
+  }
+
+  let currentVerified = false;
+  if (inspected.state === "absent") {
+    currentVerified = await verifyPassword(clients, actor.profileId, current);
+    if (!currentVerified) {
+      throw new EdgeError(
+        401,
+        "INVALID_CURRENT_PASSWORD",
+        "현재 비밀번호가 올바르지 않습니다.",
+      );
+    }
+  }
+
+  const claimDigest = await sha256Hex(
+    `password-change-claim:v1\u0000${crypto.randomUUID()}`,
+  );
+  const prepared = await passwordChangeRpc(clients, "prepare_password_change", {
+    p_actor_profile_id: actor.profileId,
+    p_auth_user_id: actor.authUserId,
+    p_session_id: sessionId,
+    p_idempotency_key: key,
+    p_request_hash: fingerprint,
+    p_claim_digest: claimDigest,
+  });
+
+  if (prepared.state === "completed") {
+    if (!(await verifyPassword(clients, actor.profileId, next))) {
+      throw passwordChangeConflict();
+    }
+    return;
+  }
+  if (prepared.state === "failed") {
+    throw passwordChangeConflict();
+  }
+  if (prepared.state === "busy" || prepared.state === "other_in_progress") {
+    throw passwordChangeInProgress();
+  }
+  if (prepared.state === "recover") {
+    if (await verifyPassword(clients, actor.profileId, next)) {
+      await completePasswordChange(
+        clients,
+        actor,
+        sessionId,
+        key,
+        fingerprint,
+        claimDigest,
+      );
+      return;
+    }
+    await finishPasswordChangeFailure(
+      clients,
+      actor,
+      sessionId,
+      key,
+      claimDigest,
+      "PASSWORD_STATE_INCONSISTENT",
     );
+    throw passwordStateInconsistent();
+  }
+  if (prepared.state !== "execute" || !currentVerified) {
+    throw passwordStateInconsistent();
   }
 
   const { error: updateError } = await clients.admin.auth.admin.updateUserById(
@@ -696,41 +785,208 @@ export async function changePassword(
     { password: toSupabaseAuthPassword(next) },
   );
   if (updateError) {
-    await clients.admin.auth.admin.signOut(
-      verification.session.access_token,
-      "local",
-    );
-    throw new EdgeError(
-      502,
-      "AUTH_PASSWORD_CHANGE_FAILED",
-      "비밀번호를 변경하지 못했습니다.",
-    );
-  }
-
-  await clients.admin.auth.admin.signOut(bearerToken(request), "others");
-  const { error } = await clients.admin.rpc("complete_password_change", {
-    p_actor_profile_id: actor.profileId,
-    p_idempotency_key: idempotencyKey(request),
-  });
-  if (error) {
-    const { error: rollbackError } = await clients.admin.auth.admin
-      .updateUserById(
-        actor.authUserId,
-        { password: toSupabaseAuthPassword(current) },
+    if (await verifyPassword(clients, actor.profileId, next)) {
+      await completePasswordChange(
+        clients,
+        actor,
+        sessionId,
+        key,
+        fingerprint,
+        claimDigest,
       );
-    if (rollbackError) {
+      return;
+    }
+    if (await verifyPassword(clients, actor.profileId, current)) {
+      await finishPasswordChangeFailure(
+        clients,
+        actor,
+        sessionId,
+        key,
+        claimDigest,
+        "AUTH_PASSWORD_CHANGE_FAILED",
+      );
       throw new EdgeError(
-        500,
-        "PASSWORD_STATE_INCONSISTENT",
-        "비밀번호 상태를 복구하지 못했습니다. 관리자에게 비밀번호 초기화를 요청해 주세요.",
+        502,
+        "AUTH_PASSWORD_CHANGE_FAILED",
+        "비밀번호를 변경하지 못했습니다.",
       );
     }
+    await finishPasswordChangeFailure(
+      clients,
+      actor,
+      sessionId,
+      key,
+      claimDigest,
+      "PASSWORD_STATE_INCONSISTENT",
+    );
+    throw passwordStateInconsistent();
+  }
+
+  await completePasswordChange(
+    clients,
+    actor,
+    sessionId,
+    key,
+    fingerprint,
+    claimDigest,
+  );
+}
+
+type PasswordChangeState =
+  | "absent"
+  | "execute"
+  | "busy"
+  | "recover"
+  | "completed"
+  | "failed"
+  | "inconsistent"
+  | "other_in_progress";
+
+interface PasswordChangeReceiptState {
+  state: PasswordChangeState;
+  attemptCount?: number;
+}
+
+async function verifyPassword(
+  clients: EdgeClients,
+  profileId: string,
+  password: string,
+): Promise<boolean> {
+  const { data, error } = await clients.publicClient.auth.signInWithPassword({
+    email: syntheticEmail(profileId),
+    password: toSupabaseAuthPassword(password),
+  });
+  if (error || !data.session) return false;
+  const { error: signOutError } = await clients.admin.auth.admin.signOut(
+    data.session.access_token,
+    "local",
+  );
+  if (signOutError) {
     throw new EdgeError(
       500,
-      "PASSWORD_STATE_UPDATE_FAILED",
-      "비밀번호 변경 상태를 저장하지 못했습니다.",
+      "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
+      "비밀번호 확인 세션을 안전하게 폐기하지 못했습니다.",
     );
   }
+  return true;
+}
+
+async function passwordChangeRpc(
+  clients: EdgeClients,
+  name: string,
+  parameters: Record<string, string>,
+): Promise<PasswordChangeReceiptState> {
+  const { data, error } = await clients.admin.rpc(name, parameters);
+  if (
+    error || !data || typeof data !== "object" ||
+    typeof (data as { state?: unknown }).state !== "string"
+  ) {
+    throw passwordChangeDatabaseError(error);
+  }
+  return data as PasswordChangeReceiptState;
+}
+
+async function completePasswordChange(
+  clients: EdgeClients,
+  actor: EdgeActor,
+  sessionId: string,
+  key: string,
+  fingerprint: string,
+  claimDigest: string,
+): Promise<void> {
+  const { error } = await clients.admin.rpc("complete_password_change", {
+    p_actor_profile_id: actor.profileId,
+    p_auth_user_id: actor.authUserId,
+    p_session_id: sessionId,
+    p_idempotency_key: key,
+    p_request_hash: fingerprint,
+    p_claim_digest: claimDigest,
+  });
+  if (error) throw passwordChangeDatabaseError(error, true);
+}
+
+async function finishPasswordChangeFailure(
+  clients: EdgeClients,
+  actor: EdgeActor,
+  sessionId: string,
+  key: string,
+  claimDigest: string,
+  failureCode: "AUTH_PASSWORD_CHANGE_FAILED" | "PASSWORD_STATE_INCONSISTENT",
+): Promise<void> {
+  const { error } = await clients.admin.rpc("finish_password_change_failure", {
+    p_actor_profile_id: actor.profileId,
+    p_auth_user_id: actor.authUserId,
+    p_session_id: sessionId,
+    p_idempotency_key: key,
+    p_claim_digest: claimDigest,
+    p_failure_code: failureCode,
+  });
+  if (error) throw passwordStateInconsistent();
+}
+
+function passwordChangeConflict(): EdgeError {
+  return new EdgeError(
+    409,
+    "IDEMPOTENCY_KEY_REUSED",
+    "이미 다른 비밀번호 변경에 사용한 Idempotency-Key입니다.",
+  );
+}
+
+function passwordChangeInProgress(): EdgeError {
+  return new EdgeError(
+    409,
+    "PASSWORD_CHANGE_IN_PROGRESS",
+    "다른 비밀번호 변경 요청이 처리 중입니다.",
+  );
+}
+
+function passwordStateInconsistent(): EdgeError {
+  return new EdgeError(
+    500,
+    "PASSWORD_STATE_INCONSISTENT",
+    "비밀번호 변경 결과를 안전하게 확인할 수 없습니다. 관리자에게 비밀번호 초기화를 요청해 주세요.",
+  );
+}
+
+function passwordChangeDatabaseError(
+  error: { message?: string } | null,
+  completion = false,
+): EdgeError {
+  const message = error?.message ?? "";
+  if (
+    message.includes("IDEMPOTENCY_KEY_REUSED") ||
+    message.includes("PASSWORD_CHANGE_CLAIM_STALE")
+  ) return passwordChangeConflict();
+  if (message.includes("SESSION_REVOKED")) {
+    return new EdgeError(
+      401,
+      "SESSION_REVOKED",
+      "로그인이 만료되었습니다. 다시 로그인해 주세요.",
+    );
+  }
+  if (message.includes("PASSWORD_CHANGE_SESSION_MISMATCH")) {
+    return new EdgeError(
+      409,
+      "PASSWORD_CHANGE_SESSION_MISMATCH",
+      "비밀번호 변경은 시작한 로그인 세션에서만 재시도할 수 있습니다.",
+    );
+  }
+  if (message.includes("ACTIVE_ACCOUNT_REQUIRED")) {
+    return new EdgeError(
+      403,
+      "ACCOUNT_INACTIVE",
+      "현재 사용할 수 없는 계정입니다.",
+    );
+  }
+  return new EdgeError(
+    500,
+    completion
+      ? "PASSWORD_STATE_UPDATE_FAILED"
+      : "PASSWORD_CHANGE_RECEIPT_FAILED",
+    completion
+      ? "비밀번호는 변경됐을 수 있습니다. 같은 Idempotency-Key로 다시 시도해 주세요."
+      : "비밀번호 변경 요청 상태를 준비하지 못했습니다.",
+  );
 }
 
 export async function listAccounts(

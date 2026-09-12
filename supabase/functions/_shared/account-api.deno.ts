@@ -59,6 +59,18 @@ function request(
   });
 }
 
+function passwordRequest(
+  body: Record<string, unknown>,
+  idempotency = "edge-password-0001",
+): Request {
+  const sessionId = "30000000-0000-4000-8000-000000000001";
+  const claims = btoa(JSON.stringify({ session_id: sessionId }))
+    .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  const value = request(body, idempotency);
+  value.headers.set("authorization", `Bearer x.${claims}.y`);
+  return value;
+}
+
 const developer: EdgeActor = {
   authUserId: "10000000-0000-4000-8000-000000000001",
   profileId: "20000000-0000-4000-8000-000000000001",
@@ -472,6 +484,303 @@ Deno.test("Edge password validation matches the Fastify printable-ASCII contract
     error.code,
     "VALIDATION_ERROR",
     "non-ASCII strong password denial",
+  );
+});
+
+Deno.test("Edge password change serializes Auth mutation through a nonsecret receipt", async () => {
+  const rpcCalls: Array<{ name: string; parameters: Record<string, string> }> =
+    [];
+  const states = [{ state: "absent" }, { state: "execute" }];
+  let updateCount = 0;
+  const clients = {
+    publicClient: {
+      auth: {
+        signInWithPassword: ({ password }: { password: string }) =>
+          Promise.resolve(
+            password === "123456"
+              ? {
+                data: { session: { access_token: "verification-token" } },
+                error: null,
+              }
+              : { data: { session: null }, error: { message: "invalid" } },
+          ),
+      },
+    },
+    admin: {
+      rpc: (name: string, parameters: Record<string, string>) => {
+        rpcCalls.push({ name, parameters });
+        if (name === "complete_password_change") {
+          return Promise.resolve({ data: { completed: true }, error: null });
+        }
+        return Promise.resolve({ data: states.shift(), error: null });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({ data: null, error: null });
+          },
+          signOut: () => Promise.resolve({ data: null, error: null }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  await changePassword(
+    passwordRequest({ currentPassword: "123456", newPassword: "654321" }),
+    clients,
+    developer,
+  );
+
+  assertEquals(updateCount, 1, "Auth mutates exactly once");
+  assertEquals(
+    rpcCalls.map((call) => call.name),
+    [
+      "inspect_password_change",
+      "prepare_password_change",
+      "complete_password_change",
+    ],
+    "receipt lifecycle order",
+  );
+  const persistedArguments = JSON.stringify(rpcCalls);
+  assert(
+    !persistedArguments.includes("123456"),
+    "current password is never sent to DB",
+  );
+  assert(
+    !persistedArguments.includes("654321"),
+    "new password is never sent to DB",
+  );
+  assert(
+    /^[0-9a-f]{64}$/.test(rpcCalls[1].parameters.p_request_hash),
+    "safe request fingerprint",
+  );
+  assert(
+    /^[0-9a-f]{64}$/.test(rpcCalls[1].parameters.p_claim_digest),
+    "nonsecret random claim digest",
+  );
+});
+
+Deno.test("Edge completed password receipt replays 204 semantics without Auth mutation", async () => {
+  let updateCount = 0;
+  const clients = {
+    publicClient: {
+      auth: {
+        signInWithPassword: ({ password }: { password: string }) =>
+          Promise.resolve(
+            password === "654321"
+              ? {
+                data: { session: { access_token: "verification-token" } },
+                error: null,
+              }
+              : { data: { session: null }, error: { message: "invalid" } },
+          ),
+      },
+    },
+    admin: {
+      rpc: () => Promise.resolve({ data: { state: "completed" }, error: null }),
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({ data: null, error: null });
+          },
+          signOut: () => Promise.resolve({ data: null, error: null }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  await changePassword(
+    passwordRequest(
+      { currentPassword: "123456", newPassword: "654321" },
+      "edge-password-replay-0002",
+    ),
+    clients,
+    developer,
+  );
+  assertEquals(updateCount, 0, "completed replay does not mutate Auth");
+});
+
+Deno.test("Edge completed key with a different current Auth password fails closed", async () => {
+  const clients = {
+    publicClient: {
+      auth: {
+        signInWithPassword: () =>
+          Promise.resolve({
+            data: { session: null },
+            error: { message: "invalid" },
+          }),
+      },
+    },
+    admin: {
+      rpc: () => Promise.resolve({ data: { state: "completed" }, error: null }),
+      auth: {
+        admin: { signOut: () => Promise.resolve({ data: null, error: null }) },
+      },
+    },
+  } as unknown as EdgeClients;
+  const error = await captureEdgeError(() =>
+    changePassword(
+      passwordRequest(
+        { currentPassword: "123456", newPassword: "654321" },
+        "edge-password-conflict-0003",
+      ),
+      clients,
+      developer,
+    )
+  );
+  assertEquals(error.status, 409, "conflict status");
+  assertEquals(error.code, "IDEMPOTENCY_KEY_REUSED", "conflict code");
+});
+
+Deno.test("Edge expired password receipt recovers an Auth-success DB-failure window", async () => {
+  const rpcNames: string[] = [];
+  const states = [{ state: "recover" }, { state: "recover" }];
+  const clients = {
+    publicClient: {
+      auth: {
+        signInWithPassword: ({ password }: { password: string }) =>
+          Promise.resolve(
+            password === "654321"
+              ? {
+                data: { session: { access_token: "verification-token" } },
+                error: null,
+              }
+              : { data: { session: null }, error: { message: "invalid" } },
+          ),
+      },
+    },
+    admin: {
+      rpc: (name: string) => {
+        rpcNames.push(name);
+        if (name === "complete_password_change") {
+          return Promise.resolve({ data: { completed: true }, error: null });
+        }
+        return Promise.resolve({ data: states.shift(), error: null });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            throw new Error("recovery must not mutate Auth again");
+          },
+          signOut: () => Promise.resolve({ data: null, error: null }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+  await changePassword(
+    passwordRequest(
+      { currentPassword: "123456", newPassword: "654321" },
+      "edge-password-recover-0004",
+    ),
+    clients,
+    developer,
+  );
+  assertEquals(
+    rpcNames,
+    [
+      "inspect_password_change",
+      "prepare_password_change",
+      "complete_password_change",
+    ],
+    "recovery finishes the durable DB state",
+  );
+});
+
+Deno.test("Edge crash-before-Auth ambiguity is persisted as inconsistent without a second Auth mutation", async () => {
+  const rpcNames: string[] = [];
+  const states = [{ state: "recover" }, { state: "recover" }];
+  let updateCount = 0;
+  const clients = {
+    publicClient: {
+      auth: {
+        signInWithPassword: () =>
+          Promise.resolve({
+            data: { session: null },
+            error: { message: "invalid" },
+          }),
+      },
+    },
+    admin: {
+      rpc: (name: string) => {
+        rpcNames.push(name);
+        if (name === "finish_password_change_failure") {
+          return Promise.resolve({ data: null, error: null });
+        }
+        return Promise.resolve({ data: states.shift(), error: null });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => {
+            updateCount += 1;
+            return Promise.resolve({ data: null, error: null });
+          },
+          signOut: () => Promise.resolve({ data: null, error: null }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    changePassword(
+      passwordRequest(
+        { currentPassword: "123456", newPassword: "654321" },
+        "edge-password-crash-before-auth-0005",
+      ),
+      clients,
+      developer,
+    )
+  );
+
+  assertEquals(
+    error.code,
+    "PASSWORD_STATE_INCONSISTENT",
+    "strict recovery result",
+  );
+  assertEquals(
+    updateCount,
+    0,
+    "recovery never performs a second Auth mutation",
+  );
+  assertEquals(
+    rpcNames,
+    [
+      "inspect_password_change",
+      "prepare_password_change",
+      "finish_password_change_failure",
+    ],
+    "ambiguous recovery persists an explicit inconsistent terminal state",
+  );
+});
+
+Deno.test("Edge cross-session receipt takeover maps to the stable conflict", async () => {
+  const clients = {
+    admin: {
+      rpc: () =>
+        Promise.resolve({
+          data: null,
+          error: { message: "PASSWORD_CHANGE_SESSION_MISMATCH" },
+        }),
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    changePassword(
+      passwordRequest(
+        { currentPassword: "123456", newPassword: "654321" },
+        "edge-password-session-mismatch-0006",
+      ),
+      clients,
+      developer,
+    )
+  );
+
+  assertEquals(error.status, 409, "session mismatch status");
+  assertEquals(
+    error.code,
+    "PASSWORD_CHANGE_SESSION_MISMATCH",
+    "session mismatch code",
   );
 });
 

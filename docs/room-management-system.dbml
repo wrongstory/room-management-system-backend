@@ -1440,6 +1440,31 @@ Table public.audit_events {
   Note: 'UPDATE and DELETE are rejected by an append-only trigger.'
 }
 
+Table private.password_change_commands {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  auth_user_id uuid [not null]
+  command_type text [not null, note: 'account.password.change']
+  idempotency_key text [not null]
+  request_hash text [not null, note: 'Safe actor+command fingerprint; contains no password-derived evidence']
+  session_digest text [not null, note: 'Domain-separated SHA-256 binding; raw session ID is not stored']
+  state text [not null, note: 'auth_pending/completed/failed/inconsistent']
+  claim_digest text [note: 'Random claim digest; not a credential or password verifier']
+  lease_expires_at timestamptz
+  attempt_count int [not null]
+  failure_code text
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  completed_at timestamptz
+
+  indexes {
+    (actor_profile_id, command_type, idempotency_key) [unique]
+    (actor_profile_id) [unique, note: 'Partial: unresolved state only']
+  }
+
+  Note: '#46 private response-loss receipt. Raw Data API access denied; password, password-derived verifier, token, and raw session ID are forbidden.'
+}
+
 Table private.actor_activity_events {
   id uuid [pk]
   actor_profile_id uuid [not null]
@@ -1878,6 +1903,7 @@ Ref: private.web_push_subscription_revisions.profile_id > public.profiles.id
 Ref: private.web_push_subscription_secrets.revision_id - private.web_push_subscription_revisions.id
 Ref: private.web_push_registration_limits.profile_id - public.profiles.id
 Ref: public.audit_events.actor_profile_id > public.profiles.id
+Ref: private.password_change_commands.actor_profile_id > public.profiles.id
 Ref: private.actor_activity_events.actor_profile_id > public.profiles.id
 Ref: private.actor_authorization_denial_aggregates.actor_profile_id > public.profiles.id
 Ref: private.scheduler_invocation_heartbeats.actor_profile_id > public.profiles.id

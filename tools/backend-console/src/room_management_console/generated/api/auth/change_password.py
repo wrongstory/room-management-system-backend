@@ -48,6 +48,11 @@ def _parse_response(
 
         return response_401
 
+    if response.status_code == 409:
+        response_409 = ErrorEnvelope.from_dict(response.json())
+
+        return response_409
+
     if response.status_code == 500:
         response_500 = ErrorEnvelope.from_dict(response.json())
 
@@ -83,8 +88,11 @@ def sync_detailed(
 ) -> Response[Any | ErrorEnvelope]:
     """현재 또는 임시 비밀번호를 개인 비밀번호로 변경
 
-     모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. 성공하면 다른 세션이
-    폐기될 수 있으므로 프론트는 현재 사용자 정보를 다시 조회하세요.
+     모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답
+    유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생
+    fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트
+    책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른
+    세션이 폐기됩니다.
 
     Args:
         idempotency_key (str):
@@ -118,8 +126,11 @@ def sync(
 ) -> Any | ErrorEnvelope | None:
     """현재 또는 임시 비밀번호를 개인 비밀번호로 변경
 
-     모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. 성공하면 다른 세션이
-    폐기될 수 있으므로 프론트는 현재 사용자 정보를 다시 조회하세요.
+     모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답
+    유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생
+    fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트
+    책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른
+    세션이 폐기됩니다.
 
     Args:
         idempotency_key (str):
@@ -148,8 +159,11 @@ async def asyncio_detailed(
 ) -> Response[Any | ErrorEnvelope]:
     """현재 또는 임시 비밀번호를 개인 비밀번호로 변경
 
-     모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. 성공하면 다른 세션이
-    폐기될 수 있으므로 프론트는 현재 사용자 정보를 다시 조회하세요.
+     모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답
+    유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생
+    fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트
+    책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른
+    세션이 폐기됩니다.
 
     Args:
         idempotency_key (str):
@@ -181,8 +195,11 @@ async def asyncio(
 ) -> Any | ErrorEnvelope | None:
     """현재 또는 임시 비밀번호를 개인 비밀번호로 변경
 
-     모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. 성공하면 다른 세션이
-    폐기될 수 있으므로 프론트는 현재 사용자 정보를 다시 조회하세요.
+     모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답
+    유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생
+    fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트
+    책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른
+    세션이 폐기됩니다.
 
     Args:
         idempotency_key (str):
