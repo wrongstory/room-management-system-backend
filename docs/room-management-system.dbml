@@ -564,7 +564,7 @@ Table public.cleaning_targets {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Checkout targets are unique per reservation. Inspection rejection reclean and #101 post-approval complaint reclean are distinct typed sources. A complaint rework freezes one confirmed source decision, zero-fee target, published template and notified assignee; generic reassignment/handover is forbidden.'
+  Note: 'Checkout targets are unique per reservation. The reservation-room composite FK remains enforced but is deferred to commit so an allowed reservation/obligation/planned-target room move is atomic; partial graph changes fail. Inspection rejection reclean and #101 post-approval complaint reclean are distinct typed sources. A complaint rework freezes one confirmed source decision, zero-fee target, published template and notified assignee; generic reassignment/handover is forbidden.'
 }
 
 Table public.cleaning_target_schedule_revisions {

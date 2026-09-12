@@ -791,29 +791,33 @@ assert(
 
 // Future checkout planning races use public commands, not synthetic materialization.
 const { data: planningRooms, error: planningRoomsError } = await client.from('rooms')
-  .select('id,state_version').order('room_number').range(50, 53);
-assert(!planningRoomsError && planningRooms?.length === 4, 'planning race rooms');
+  .select('id,state_version').order('room_number').range(50, 56);
+assert(!planningRoomsError && planningRooms?.length === 7, 'planning race rooms');
 const planningCheckIn = new Date(Math.floor((Date.now() - 86400000) / 60000) * 60000).toISOString();
 const planningCheckOut = `${assignmentCommitServiceDate}T11:00:00+09:00`;
-async function planningFixture(index) {
-  const id = randomUUID();
-  const room = planningRooms[index];
+async function verifyPlanningRoom(room, suffix) {
   const pin = await client.rpc('mutate_room_operation', {
     p_actor_profile_id: actorProfileId, p_room_id: room.id,
     p_action: 'record_pin_sync', p_expected_room_version: room.state_version,
     p_reason_code: 'PLANNING_RACE_FIXTURE',
     p_payload: { entityId: randomUUID(), syncStatus: 'verified', pinVersion: 1 },
-    p_idempotency_key: `planning-pin-${id}`, p_request_hash: '1'.repeat(64)
+    p_idempotency_key: `planning-pin-${suffix}`, p_request_hash: '1'.repeat(64)
   });
   assert(!pin.error, `planning PIN metadata: ${pin.error?.message}`);
   const latest = await client.from('rooms').select('state_version').eq('id',room.id).single();
   assert(!latest.error, 'planning room version');
+  return latest.data.state_version;
+}
+async function planningFixture(index) {
+  const id = randomUUID();
+  const room = planningRooms[index];
+  const roomVersion = await verifyPlanningRoom(room, id);
   const created = await client.rpc('create_reservation', {
     p_actor_profile_id: actorProfileId, p_reservation_id: id, p_room_id: room.id,
     p_check_in_at: index === 1 ? `${kstToday.toISOString().slice(0,10)}T23:59:00+09:00` : planningCheckIn,
     p_check_out_at: planningCheckOut,
     p_guest_count: 2, p_guest_name_encrypted: null,
-    p_expected_room_version: latest.data.state_version,
+    p_expected_room_version: roomVersion,
     p_idempotency_key: `planning-create-${id}`, p_request_hash: '2'.repeat(64)
   });
   assert(!created.error, `planning create: ${created.error?.message}`);
@@ -845,10 +849,12 @@ async function planningCommitArgs(plan) {
   };
 }
 const changePlan = await planningFixture(0);
+const changeRoomId = planningRooms[4].id;
+await verifyPlanningRoom(planningRooms[4], `change-destination-${changePlan.id}`);
 const changeCommitArgs = await planningCommitArgs(changePlan);
 const changeVsCommit = await Promise.all([
   client.rpc('change_reservation', {
-    p_actor_profile_id:actorProfileId,p_reservation_id:changePlan.id,p_room_id:changePlan.roomId,
+    p_actor_profile_id:actorProfileId,p_reservation_id:changePlan.id,p_room_id:changeRoomId,
     p_check_in_at:planningCheckIn,p_check_out_at:`${assignmentCommitServiceDate}T12:00:00+09:00`,
     p_guest_count:2,p_guest_name_mode:'keep',p_guest_name_encrypted:null,p_expected_version:1,
     p_reason_code:'PLANNING_RACE_CHANGE',p_idempotency_key:`planning-change-${changePlan.id}`,
@@ -859,6 +865,17 @@ const changeVsCommit = await Promise.all([
 assert(changeVsCommit.filter(r=>!r.error).length === 1, 'change versus notify exactly one winner');
 assert(changeVsCommit.filter(r=>r.error).every(r=> /REPLAN_REQUIRED|STALE|CONFLICT|ASSIGNMENT_IMPACT_CHANGED/.test(r.error.message)),
   'change versus notify fails closed, never deadlocks');
+const changedReservationGraph = await Promise.all([
+  client.from('reservations').select('room_id').eq('id',changePlan.id).single(),
+  client.from('checkout_cleaning_obligations').select('room_id,planned_cleaning_target_id').eq('reservation_id',changePlan.id).single(),
+  client.from('cleaning_targets').select('id,room_id').eq('reservation_id',changePlan.id)
+]);
+assert(changedReservationGraph.every(result=>!result.error) && changedReservationGraph[2].data.length===1 &&
+  changedReservationGraph[0].data.room_id===changedReservationGraph[1].data.room_id &&
+  changedReservationGraph[0].data.room_id===changedReservationGraph[2].data[0].room_id &&
+  changedReservationGraph[1].data.planned_cleaning_target_id===changePlan.targetId &&
+  changedReservationGraph[2].data[0].id===changePlan.targetId,
+  'change versus notify leaves one atomically aligned planned checkout graph');
 const cancelPlan = await planningFixture(1);
 const cancelArgs = await planningCommitArgs(cancelPlan);
 const cancelVsCommit = await Promise.all([
@@ -893,6 +910,42 @@ const afterPromote = await client.from('cleaning_assignments').select('id').eq('
 assert(!beforePromote.error && !afterPromote.error && beforePromote.data.id===afterPromote.data.id,
   'scheduled promotion preserves notified assignment revision');
 
+const checkoutMovePlan = await planningFixture(5);
+const checkoutMoveRoomId = planningRooms[6].id;
+await verifyPlanningRoom(planningRooms[6], `checkout-destination-${checkoutMovePlan.id}`);
+const checkoutMoveRace = await Promise.all([
+  client.rpc('change_reservation', {
+    p_actor_profile_id:actorProfileId,p_reservation_id:checkoutMovePlan.id,p_room_id:checkoutMoveRoomId,
+    p_check_in_at:planningCheckIn,p_check_out_at:planningCheckOut,
+    p_guest_count:2,p_guest_name_mode:'keep',p_guest_name_encrypted:null,p_expected_version:1,
+    p_reason_code:'PLANNING_CHECKOUT_MOVE_RACE',p_idempotency_key:`planning-checkout-move-${checkoutMovePlan.id}`,
+    p_request_hash:'a'.repeat(64)
+  }),
+  client.rpc('process_due_reservation_transitions', {
+    p_actor_profile_id:actorProfileId,p_as_of:planningCheckOut,
+    p_idempotency_key:`planning-checkout-move-scheduler-${checkoutMovePlan.id}`,
+    p_request_hash:'b'.repeat(64)
+  })
+]);
+assert(!checkoutMoveRace[1].error, `checkout transition race must finish: ${checkoutMoveRace[1].error?.message}`);
+assert(!checkoutMoveRace[0].error || /CHECKED_OUT_RESERVATION_IMMUTABLE|STALE|CONFLICT/.test(checkoutMoveRace[0].error.message),
+  'room move versus checkout loser fails closed without FK or deadlock error');
+const checkoutMoveReservation = await client.from('reservations').select('room_id,status').eq('id',checkoutMovePlan.id).single();
+const checkoutMoveObligation = await client.from('checkout_cleaning_obligations')
+  .select('room_id,status,planned_cleaning_target_id,current_cleaning_target_id').eq('reservation_id',checkoutMovePlan.id).single();
+const checkoutMoveTarget = await client.from('cleaning_targets').select('id,room_id').eq('reservation_id',checkoutMovePlan.id);
+const checkoutMoveEvents = await client.from('room_occupancy_events').select('id',{count:'exact',head:true})
+  .eq('reservation_id',checkoutMovePlan.id).eq('event_type','scheduled_checkout');
+assert(!checkoutMoveReservation.error && !checkoutMoveObligation.error && !checkoutMoveTarget.error &&
+  checkoutMoveTarget.data.length===1 && !checkoutMoveEvents.error && checkoutMoveEvents.count===1 &&
+  checkoutMoveReservation.data.status==='checked_out' && checkoutMoveObligation.data.status==='materialized' &&
+  checkoutMoveReservation.data.room_id===checkoutMoveObligation.data.room_id &&
+  checkoutMoveReservation.data.room_id===checkoutMoveTarget.data[0].room_id &&
+  checkoutMoveObligation.data.planned_cleaning_target_id===checkoutMovePlan.targetId &&
+  checkoutMoveObligation.data.current_cleaning_target_id===checkoutMovePlan.targetId &&
+  checkoutMoveTarget.data[0].id===checkoutMovePlan.targetId,
+  'room move versus checkout commits one aligned target and one checkout event');
+
 const manualPlan = await planningFixture(3);
 const checkedIn = await client.from('reservations').update({actual_check_in_at:planningCheckIn}).eq('id',manualPlan.id);
 assert(!checkedIn.error,'manual/scheduled check-in fixture');
@@ -922,7 +975,7 @@ for (const plan of [scheduledPlan,manualPlan]) {
     !events.error && events.count===1 && !attempts.error && attempts.count===0,
     'checkout race: same identity, one occupancy event, zero premature attempts');
 }
-console.log('Planning races passed: change/notify, cancel/notify, scheduled/retry, manual/scheduled; one target and zero premature attempts.');
+console.log('Planning races passed: room-change/notify, cancel/notify, scheduled/retry, room-change/checkout, manual/scheduled; one target and zero premature attempts.');
 await testPrestartConcurrency(client,actorProfileId);
 await testAttemptActivationConcurrency(client,actorProfileId);
 await testAssignmentPreviewConcurrency(client,actorProfileId);

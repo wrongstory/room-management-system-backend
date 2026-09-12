@@ -362,6 +362,7 @@ erDiagram
 - 같은 객실의 서로 다른 미래 예약은 각각 checkout 청소 대상을 가질 수 있다.
 - 같은 예약의 예정/수동 checkout은 합쳐서 청소 대상 한 건이며 `source_key` 재시도도 한 건으로 수렴한다.
 - 예약 생성 시 obligation의 `planned_cleaning_target_id`가 정확히 하나의 checkout target을 참조한다. private 의무와 배정 계획은 별개 lifecycle 축이며 current pointer는 실제 checkout 전 null이다.
+- 예약 객실 변경 command는 reservation·checkout obligation·동일 planned target의 `(reservation_id, room_id)` 복합 FK를 transaction commit에서 함께 검증한다. FK는 `DEFERRABLE INITIALLY DEFERRED`이지만 비활성화되지 않으며 반쪽 update는 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC`으로 실패한다. 미통보 draft는 stale로 남고 과거 notified 객실 snapshot은 변경하지 않는다.
 - 오늘/내일 계획 배정·통보는 가능하지만 checkout attempt/PIN은 materialized current target과 실제 checkout/access 시각 검증을 통과해야 한다. #28만 attempt 활성화를 소유한다.
 - 실제 checkout은 같은 planned target을 current로 승격한다. 조기 수동 퇴실은 schedule/assignment revision, 미통보 예약 변경은 draft stale, 통보 후 변경은 explicit replan, 취소는 soft cancel/current 종료/회수 알림으로 처리한다.
 - 작업마다 현재 배정은 최대 한 건이고, 과거 revision은 삭제하지 않는다.

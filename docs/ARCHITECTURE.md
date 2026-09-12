@@ -384,9 +384,12 @@ PR #74는 기존 25개 migration을 그대로 두고 `20260908101844_maid_assign
 추가해 dev에 병합됐습니다. 그 PR에는 #7A/B/C의 실행/lease/limited session을 포함하지 않았습니다.
 field_completed는 물리적 완료 선언, 필수사진은 submission gate라는 최신 제품 가이드를 따릅니다.
 
-검증 중 발견한 기존 예약 객실 변경의 즉시 FK 충돌은 #73에서 별도 추적합니다. 현재 실제
-`change_reservation` 경로는 planned target 참조 때문에 실패하므로 이번 검증을 객실 변경 성공으로
-표현하지 않습니다. 현재 실패의 원자성과 별도 합성 relocation의 과거 snapshot 비노출을 구분합니다.
+#73의 46번째 append-only migration은 `cleaning_targets_reservation_room_fk`를 다른 planned graph
+복합 FK와 같은 `DEFERRABLE INITIALLY DEFERRED` 검사 시점으로 맞춥니다. `change_reservation`은
+reservation → obligation → 동일 planned target을 기존 reservation-command lock 안에서 갱신하고,
+commit 시 FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` trigger가 최종 graph를 다시 검증합니다.
+제약 비활성화나 새 target 생성은 없습니다. unassigned/미통보 draft만 이동 가능하고 draft는 stale,
+notified와 checked-in은 stable domain error로 거부됩니다. 과거 notified room snapshot은 불변입니다.
 
 ### #7A 온라인 실행 경계
 
@@ -673,7 +676,7 @@ status는 조회 시점의 같은 current VAPID config parser·crypto validation
 
 #112 source는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 같은 tree로 PR #119에 병합됐다. Issue는 Function Secrets → 승인된 `api`/`notification-delivery` Edge bundle → negative/positive hosted smoke → Vault/`pg_cron`/`pg_net` → 5회 연속 heartbeat → 실제 기기 Web Push smoke까지 OPEN이다.
 
-다음 source critical path는 `#73 → #34 → #46 → #69 Phase A`다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
+#73 source 이후 critical path는 `#34 → #46 → #69 Phase A`다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 
 Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·촛불·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`만 재사용하며 raw table DML을 하지 않는다. actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 

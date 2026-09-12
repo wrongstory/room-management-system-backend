@@ -86,6 +86,10 @@ const assignmentAttemptActivationMigrationUrl = new URL(
   '../supabase/migrations/20260905002657_assignment_attempt_activation.sql',
   import.meta.url
 );
+const plannedCheckoutRoomChangeMigrationUrl = new URL(
+  '../supabase/migrations/20260912082738_planned_checkout_room_change_fk.sql',
+  import.meta.url
+);
 const payrollPaymentResultsMigrationUrl = new URL(
   '../supabase/migrations/20260910114525_payroll_payment_results.sql',
   import.meta.url
@@ -418,6 +422,17 @@ describe('initial migration contract', () => {
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
+  });
+
+  it('defers the planned checkout reservation-room FK without removing commit enforcement', async () => {
+    const sql = await readFile(plannedCheckoutRoomChangeMigrationUrl, 'utf8');
+
+    expect(sql).toContain('alter table public.cleaning_targets');
+    expect(sql).toContain('alter constraint cleaning_targets_reservation_room_fk');
+    expect(sql).toContain('deferrable initially deferred');
+    expect(sql).not.toContain('drop constraint cleaning_targets_reservation_room_fk');
+    expect(sql).not.toContain('not valid');
+    expect(sql).not.toContain('disable trigger');
   });
 
   it('adds reservation history, obligations, occupancy ledgers, and CAS commands', async () => {

@@ -73,7 +73,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 현재 GitHub 운영 릴리즈 정본: `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - production Edge 배포 bundle source: diagnostics zero-byte hosted 호환 hotfix PR #64 / `main@cd635b116f451a39481f496f2bd368776385a409`
-- 이 문서 갱신의 integration base: `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`; 기능 snapshot은 **45 migrations / 98 paths / 105 operations**다. #112 VAPID/provider HTTP source gate는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`에서 required CI와 독립 QA를 통과하고 PR #119로 `dev@dfc98b1474f9f890851d49bd904869181d0d7880`에 병합됐으며, PR #122의 상태 문서와 #124의 pgTAP fixture 안정화를 이 base가 포함한다. Issue #112는 hosted 활성화 완료까지 OPEN이며 main/recovery/production은 변경하지 않았다.
+- 이 문서 갱신의 integration base: `dev@9ec073e6908cd90768fad3f1c6841f8130f39a88`; #73 전 기능 snapshot은 **45 migrations / 98 paths / 105 operations**다. #73은 46번째 append-only migration을 추가하고 public paths/operations는 바꾸지 않는다. #112 VAPID/provider HTTP source gate는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`에서 required CI와 독립 QA를 통과하고 PR #119로 `dev@dfc98b1474f9f890851d49bd904869181d0d7880`에 병합됐으며, PR #122의 상태 문서와 #124의 pgTAP fixture 안정화를 이 base가 포함한다. Issue #112는 hosted 활성화 완료까지 OPEN이며 main/recovery/production은 변경하지 않았다.
 - 개발 통합 기능 기준: #25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이다.
@@ -81,7 +81,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - #96은 PR #97로 source/dev 병합 완료했다. bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 포함한 개발 통합 계약은 **36 migrations / 77 paths / 83 operations**이다. Python developer 콘솔 16 operations는 유지하며 production에는 아직 승격하지 않았다.
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 현재 dev는 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #69 승인 PIN 계약은 프런트가 선행 0을 보존한 4~8자리 숫자 부분만 보내고, 서버가 현재 `rooms.room_number`로 `<room_number>-<pin_digits>` canonical credential을 조합해 private encrypted immutable revision/current pointer에 저장하는 방식이다. Phase A source는 아직 미구현이며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
-- 다음 source critical path는 **#73 → #34 → #46 → #69 Phase A**다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
+- #73 source 이후 critical path는 **#34 → #46 → #69 Phase A**다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, 배포 source는 위 `main@cd635b1` bundle 기준
@@ -465,11 +465,18 @@ application 122건, Python 34건 및 generated client 재생성 content 동일�
 51 paths / 56 operations를 유지한다. production 39 paths / 43 operations 및 운영 snapshot은
 변경하지 않는다. #4 선행 gate 완료 후 별도 feature로 진행한 #7A도 아래와 같이 source/dev gate를 완료했다.
 
-별도 발견 #73: planned target이 있는 예약 객실 변경은 기존 즉시 FK 때문에 실패한다.
-이는 #4 변경과 무관한 기존 예약 기능 문제로 분리했으며 이번 PR에서 고치지 않는다.
-실제 command 테스트는 notify/unassign 이후 객실 변경의 실패·원자적 무변경을 확인하고,
-snapshot의 이동 후 비노출은 별도 합성 DB/Edge 회귀로 검증한다. 실제 객실 변경 성공
-smoke로 표현하지 않는다. 향후 #73 수정 뒤에도 과거 통보 snapshot을 보존해야 한다.
+### #73 Planned checkout 예약 객실 변경 — source 구현, production 미적용
+
+46번째 append-only migration은 기존 즉시 `cleaning_targets_reservation_room_fk`의 검사 시점만
+planned graph의 다른 복합 FK처럼 commit으로 맞춘다. FK와 commit-time graph validation은 유지하며
+제약 disable/drop이나 target 복제를 하지 않는다. public HTTP/OpenAPI 수는 그대로다.
+
+- [x] unassigned와 미통보 draft의 원자적 reservation/obligation/planned-target room move
+- [x] draft stale 처리, notified explicit-replan 거부, checked-in room lock
+- [x] command replay/hash conflict, 실패 transaction rollback, target creation snapshot 불변
+- [x] 실제 notify→unassign→move 뒤 과거 maid notified room snapshot 불변·새 target 비노출
+- [x] room-change↔notify 및 room-change↔checkout 직렬화·exactly-one 회귀
+- [ ] release/main 이후 production migration·hosted reservation smoke
 
 ### #7A Attempt Execution Core — source/dev 완료, production 미적용
 
@@ -1059,7 +1066,7 @@ accepted 보존/fenced compensation, 원본 반환 직전 재인가가 이번 �
 production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production snapshot은 **19 migrations / 39 paths / 43 operations**로 유지하며 이번에 운영을 재검증하지 않았다.
 
 #10 알림/Outbox source는 #108~#112까지 dev 완료이며 #112 운영 활성화만 별도 승인으로 남는다.
-다음 source critical path는 **#73 예약 FK → #34 Actions runtime → #46 password replay → #69 PIN Domain Phase A**다.
+#73 source 이후 critical path는 **#34 Actions runtime → #46 password replay → #69 PIN Domain Phase A**다.
 #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

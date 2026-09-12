@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서 갱신의 `dev` integration base: `569bbb62e07a484fe2f6aa67520d6f10797e44f5` — 기능 snapshot 45 migrations / OpenAPI 98 paths / 105 operations
+- 이 문서 갱신의 `dev` integration base: `9ec073e6908cd90768fad3f1c6841f8130f39a88` — #73 전 기준 45 migrations / OpenAPI 98 paths / 105 operations. #73 source는 46번째 migration을 추가하고 공개 API 수는 바꾸지 않는다.
 - 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -193,6 +193,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 미래 계획은 예약 active·actual checkout 없음·예정 checkout/접근 시각/서비스 날짜/snapshot 일치 조건에서 오늘/내일 draft 저장과 통보가 가능하다. 실제 checkout 전 attempt 생성, PIN 발급·공개, 현장 시작은 금지한다.
 - 예정/수동 checkout은 기존 planned identity를 current로 승격하고 의무를 materialized로 만든다. target·최초 서비스 날짜·요금/템플릿/객실 생성 snapshot은 보존한다. 조기 수동 checkout은 schedule 및 현재 담당 revision과 변경 통보를 추가하며 attempt를 미리 만들지 않는다.
 - 예약 일정 변경 시 미배정 계획은 schedule CAS/revision으로 갱신한다. 미통보 draft의 기존 snapshot은 보존하여 stale로 만들고 재저장해야 통보할 수 있다. 통보된 계획은 암묵 변경하지 않고 explicit replan을 요구한다. 예약 취소는 target soft cancel, current assignment 종료, 통보 이력이 있으면 회수 알림/outbox를 원자적으로 추가한다.
+- **#73 확정 보강:** 예약·비공개 checkout 의무·planned target의 객실 복합 FK는 command transaction 안의 일시적인 update 순서만 허용하도록 `DEFERRABLE INITIALLY DEFERRED`로 맞추고 commit에서 정확히 같은 `(reservation_id, room_id)`를 다시 강제한다. 제약을 끄거나 target을 복제하지 않는다. 미배정 또는 미통보 draft만 같은 planned identity로 객실 이동할 수 있고 draft는 stale이 된다. 현재 notified 계획은 explicit replan 전 변경을 거부하며, 실제 check-in 뒤 객실 변경도 거부한다. 과거 notified assignment의 객실 snapshot은 새 객실로 덮지 않는다.
 - 한 객실의 여러 미래 예약은 각각 자기 퇴실 청소 의무를 가질 수 있다. 따라서 “객실당 모든 비종결 target 1건” 제약을 두면 안 된다.
 - 체크인 예정 시각에 입실 준비 조건이 모두 충족되면 예약상 점유 시작 event를 멱등적으로 한 번 만든다. 조건이 남아 있으면 `입실 시각 도달·객실 미준비`로 두고, 유효 예약 중 조건이 모두 해소된 시점에 같은 전이를 원자적으로 한 번 실행한다.
 - 실제 checkout event가 없으면 예정 체크아웃 시각에 scheduler가 점유 종료, 퇴실 청소 활성화, 유효 담당의 PIN 조회·시작 가능 시각 개방을 멱등적으로 실행한다. 예정 전 수동 checkout이 이미 있으면 다시 종료하거나 청소를 복제하지 않는다.
@@ -657,8 +658,9 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #102 signed adjustment/carry-forward는 PR #106으로 `dev@cb26650221b3e47804edafd51cad5bfc8872c349`에 통합됐으며 39 migrations / 90 paths / 97 operations다. correction은 earning 또는 adjustment 한 건의 typed FK와 signed delta를 보존하고, reversal은 source의 미반전 전액을 정확히 반대 부호로 한 번만 기록하며 root cumulative entitlement가 0 아래로 내려가지 않는다. payment-start와 adjustment command는 receipt → global advisory → actor → adjustment book → cycle → sorted source 순으로 잠근다. net이 0 이하면 payment event 없이 immutable offset settlement로 OPEN cycle을 경제적으로 동결하고, 음수 크기만 바로 다음 KST 주차로 한 칸씩 이월한다. PAID/offset-settled cycle의 late earning은 명시적 admin command가 원본을 수정하지 않고 다음 주차의 positive `late_earning_carry` adjustment로 한 번만 옮긴다. 공개 조회는 signed adjustment/carry/payable과 `offsetSettled`를 bounded projection으로 제공하며 live-session RLS, audit/outbox, Fastify/Edge/OpenAPI parity를 유지한다. main/recovery/production에는 승격하지 않았다.
 - #103 외부 전액 지급 결과는 PR #107로 `dev@3297679ca2e903e68cfa2dd9e7bc137341c5b27d`에 source/dev 통합됐으며 40 migrations / 93 paths / 100 operations다. 기존 `payment_started` event를 immutable attempt identity로 연결하고, `TRANSFER_RESULT_UNCERTAIN` CHECK, `NO_TRANSFER_CONFIRMED` OPEN 복귀, 양수 locked snapshot 전액 PAID result를 typed append-only evidence로 보존한다. 40번째 migration 이후의 payment projection transition과 event/attempt/result 양쪽은 deferred commit invariant로 서로를 exact하게 요구하며 과거 CHECK/PAID evidence는 추측 backfill하지 않는다. client amount/`paidAt`은 받지 않고 server time과 cycle CAS를 사용하며 OPEN 복귀 뒤 재시작은 새 attempt다. 최초 method는 `bank_transfer`, reference는 8~64 ASCII allowlist·영문/숫자 필수·7자리 연속 숫자/URL-like 거부 뒤 uppercase canonical global unique다. 이 형식은 실제 provider 계약 미확정 동안의 fail-closed source 계약이며 canonical reference는 admin result에만 보이고 maid/developer/audit/notification에는 숨긴다. provider HTTP, 영수증·계좌·수취인 PII·secret/raw payload 저장은 없고 main/recovery/production은 변경하지 않았다.
 - #108 알림함, #109 typed catalog/grouping/writer, #110 encrypted Web Push subscription, #111 delivery ledger/worker와 #112 VAPID/provider HTTP source까지 순차적으로 dev에 통합됐다. #112 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 PR #119 병합 commit `dfc98b1474f9f890851d49bd904869181d0d7880`의 tree는 동일하고 독립 QA 98/100, P0/P1/P2 0, required `application`/`migration` PASS다. PR #122 문서 동기화와 #124 pgTAP fixture 안정화를 반영한 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / 98 paths / 105 operations다.
+- #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
 - 위 source/dev 완료는 운영 사용 가능 선언이 아니다. Issue #112는 release/main 뒤 Function Secrets, 승인된 `api`/`notification-delivery` Edge bundle, negative/positive hosted smoke, Vault/`pg_cron`/`pg_net`, 5회 연속 heartbeat, 실제 기기 Web Push smoke가 끝날 때까지 OPEN이다. 현재 `main`/production/recovery는 v0.2.0 상태로 변경되지 않았다.
-- 다음 source critical path는 **#73 planned checkout 예약 객실 변경 FK → #34 Actions runtime → #46 password replay → #69 Phase A PIN domain**이다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
+- #73 source 이후 critical path는 **#34 Actions runtime → #46 password replay → #69 Phase A PIN domain**이다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
 
@@ -761,7 +763,7 @@ npm run db:reset
 
 현재 P2 배정부터 #112 Web Push provider까지의 source/dev critical path는 완료됐다. 다음 source 작업은 운영 승격과 섞지 않고 아래 순서로 진행한다.
 
-1. Issue #73에서 planned checkout target이 있는 예약 객실 변경의 즉시 FK 충돌을 append-only forward fix하고 원자성·과거 통보 snapshot을 회귀 검증한다.
+1. Issue #73의 46번째 append-only forward fix로 planned checkout target이 있는 허용된 예약 객실 변경을 원자화하고 과거 통보 snapshot·동시성 회귀를 고정한다.
 2. Issue #34에서 GitHub Actions runtime 경고를 별도 CI 유지보수 PR로 정리한다.
 3. Issue #46에서 비밀번호 원문·재사용 verifier 없이 password-change 응답 유실/replay 의미를 확정하고 Fastify/Edge 계약을 맞춘다.
 4. Issue #69 Phase A에서 4~8자리 PIN 입력과 `<room_number>-<pin_digits>` canonical credential의 encrypted immutable revision/current pointer를 구현한다. Google Sheets worker와 production credential/ACL은 후속 Phase B/C로 분리한다.
