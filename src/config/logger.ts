@@ -1,6 +1,7 @@
 const sensitiveLogPaths = [
   'req.headers.authorization',
   'req.headers.cookie',
+  'req.body.bindingProof',
   'res.headers.set-cookie',
   '*.authorization',
   '*.cookie',
@@ -10,6 +11,7 @@ const sensitiveLogPaths = [
   '*.temporaryPassword',
   '*.accessToken',
   '*.refreshToken',
+  '*.bindingProof',
   '*.pin',
   '*.guestName',
   '*.guest_name_encrypted',
@@ -28,7 +30,8 @@ const sensitiveLogPaths = [
   '*.NOTIFICATION_CURSOR_HMAC_SECRET',
   '*.endpoint','*.p256dh','*.auth','*.ciphertext','*.ciphertextBase64','*.nonce','*.nonceBase64','*.authTag','*.authTagBase64',
   '*.endpointDigest','*.sessionDigest','*.materialDigest','*.WEB_PUSH_SUBSCRIPTION_KEY_BASE64',
-  '*.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON','*.WEB_PUSH_BINDING_DIGEST_SECRET'
+  '*.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON','*.WEB_PUSH_BINDING_DIGEST_SECRET',
+  '*.VAPID_PRIVATE_KEY','*.VAPID_KEYRING_JSON','*.NOTIFICATION_DELIVERY_INVOKE_SECRET'
 ] as const;
 
 export function loggerOptions(level: string) {

@@ -28,6 +28,7 @@ export interface EdgeDeliveryProvider {
     payload: string,
     notificationId: string,
     deadlineAt: number,
+    vapidKeyVersion: string,
   ): Promise<EdgeDeliveryOutcome>;
 }
 interface RpcCall extends PromiseLike<{ data: unknown; error: unknown }> {
@@ -88,6 +89,12 @@ const boundedCount = (value: unknown): number => {
 };
 const hex = (value: unknown): string => {
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) fail();
+  return value as string;
+};
+const keyVersion = (value: unknown): string => {
+  if (typeof value !== "string" || !/^[A-Za-z0-9._-]{1,32}$/.test(value)) {
+    fail();
+  }
   return value as string;
 };
 function bytes(value: unknown): Uint8Array {
@@ -306,6 +313,7 @@ export class EdgeNotificationDeliveryWorker {
         );
         if (envelope.sendAllowed !== true) {
           envelope.reasonCode === "ENVELOPE_UNAVAILABLE" ||
+            envelope.reasonCode === "VAPID_KEY_UNBOUND" ||
             envelope.reasonCode === "PAYLOAD_TOO_LARGE"
             ? result.deadLetter++
             : result.suppressed++;
@@ -341,6 +349,7 @@ export class EdgeNotificationDeliveryWorker {
               encoded,
               notificationId,
               providerDeadline,
+              keyVersion(envelope.vapidKeyVersion),
             ),
             providerDeadline,
           );

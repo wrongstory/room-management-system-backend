@@ -3,9 +3,10 @@ import Fastify from 'fastify';
 import { describe,expect,it,vi } from 'vitest';
 import type { Actor } from '../src/domain/actor.js';
 import { AppError } from '../src/lib/app-error.js';
-import { createWebPushEnvelope,decryptWebPushEnvelope,type WebPushSubscriptionInput } from '../src/modules/push-subscriptions/web-push-crypto.js';
+import { createWebPushEnvelope,decryptWebPushEnvelope,type WebPushCryptoConfig,type WebPushSubscriptionInput } from '../src/modules/push-subscriptions/web-push-crypto.js';
 import { createWebPushSubscriptionRoutes } from '../src/modules/push-subscriptions/web-push-subscription.routes.js';
 import { SupabaseWebPushSubscriptionService,type WebPushSubscriptionService } from '../src/modules/push-subscriptions/web-push-subscription.service.js';
+import { issueWebPushBindingProof } from '../src/modules/push-subscriptions/web-push-binding-proof.js';
 
 const ids={profile:'11000000-0000-4000-8000-000000000001',session:'11000000-0000-4000-8000-000000000901',subscription:'11000000-0000-4000-8000-000000001001'};
 const token=`e30.${Buffer.from(JSON.stringify({session_id:ids.session})).toString('base64url')}.x`;
@@ -13,13 +14,16 @@ const actor:Actor={authUserId:'11000000-0000-4000-8000-000000000101',profileId:i
 const ecdh=createECDH('prime256v1');ecdh.generateKeys();
 const subscription:WebPushSubscriptionInput={endpoint:'https://push.example.invalid/send/opaque-capability',expirationTime:null,keys:{p256dh:ecdh.getPublicKey().toString('base64url'),auth:Buffer.alloc(16,7).toString('base64url')}};
 const key=Buffer.alloc(32,4).toString('base64');
-const config={key,keyVersion:'v2',keyring:{v1:Buffer.alloc(32,3).toString('base64')},bindingSecret:'web-push-binding-test-secret-123456789'};
+const config={key,keyVersion:'v2',keyring:{v1:Buffer.alloc(32,3).toString('base64')},bindingSecret:'web-push-binding-test-secret-123456789',vapidKeyVersion:'vapid-v2',vapidPublicKey:subscription.keys.p256dh,vapidPublicKeyring:{}};
 const vectorSubscription:WebPushSubscriptionInput={
   endpoint:'https://PUSH.Example.Invalid:443/send/%2Fopaque?b=2&a=%2F',expirationTime:null,
   keys:{p256dh:'BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU',auth:'BwcHBwcHBwcHBwcHBwcHBw'}
 };
 const vectorIds={profile:'A1000000-0000-4000-8000-00000000000A',session:'B1000000-0000-4000-8000-00000000000B',subscription:'C1000000-0000-4000-8000-00000000000C'};
 const vectorConfig={...config,keyring:{},nonce:new Uint8Array([...Array(12).keys()])};
+async function proof(profileId=ids.profile,sessionId=ids.session,cryptoConfig:WebPushCryptoConfig=config){
+  return (await issueWebPushBindingProof({authUserId:actor.authUserId,profileId,sessionId},{currentVersion:cryptoConfig.vapidKeyVersion,currentPublicKey:cryptoConfig.vapidPublicKey,publicKeyring:cryptoConfig.vapidPublicKeyring},cryptoConfig.bindingSecret)).bindingProof;
+}
 
 describe('Web Push envelope',()=>{
   it('round-trips canonical AES-GCM and binds AAD to actor/session/endpoint/subscription/revision',()=>{
@@ -37,7 +41,7 @@ describe('Web Push envelope',()=>{
       materialDigest:'c08827336099b39bb92bd93ce466377eaa11712cc50f7539b7a8dfa5d4a58714',expirationAt:null,keyVersion:'v2',
       ciphertextBase64:'QKZyBOAIcKJ15U/1CBgEkJPN2MKesgrJzlZmAAMWi9XJTjdMQ3SgkdDR/Mk2zQtLGCKAFkaEp/vBj2cZ4AhLTmF8LBUfQ4KN4vI0IkeKmoqk2mKDmqEpLLAUH7UG9ostoBCSfaSGAWhqZyqnx9TQYJDuP+he1iQECM0k+M77Qxx6kW7UJRO7kNKj0LaAsCZkKCMRJGCo9GnSWlPMV7r92GJxcHjtzojdgCCZcFcKomlJ7qeOYDwvmX/q5Ld+D1WaMwoV8KmlhmilUfbUNki1tJOpHzyqKWI+zinuAJVtJFubhHrJ3p+4BfMnCjR+DON89cbf4Yqg1iADgkmK7oNwEX8jyIqjlDup0uOr4V8OdLA=',
       nonceBase64:'AAECAwQFBgcICQoL',authTagBase64:'z2dR/v7MHCXYiNtRehTrOA==',
-      requestHash:'f16d690cfc7680c506117970f4534a9e5b5f74f96977bc8c203d6beb2e0072ed'
+      requestHash:'a19b60927ac456910cda60cff24c9a671655e367d49431914ed067fdf7a2624c'
     });
     expect(decryptWebPushEnvelope(envelope,{actorProfileId:vectorIds.profile,sessionDigest:envelope.sessionDigest,endpointDigest:envelope.endpointDigest,subscriptionId:vectorIds.subscription,revisionNo:2},vectorConfig)).toEqual({
       subscription:{...vectorSubscription,endpoint:'https://push.example.invalid/send/%2Fopaque?b=2&a=%2F'},
@@ -69,21 +73,56 @@ describe('Web Push envelope',()=>{
 });
 
 describe('Web Push service and routes',()=>{
+  it('keeps an issued prior-key proof replayable during rotation overlap and rejects it after removal',async()=>{
+    const issued=await proof();
+    const next=createECDH('prime256v1');next.generateKeys();
+    const rotated={...config,vapidKeyVersion:'vapid-v3',vapidPublicKey:next.getPublicKey().toString('base64url'),vapidPublicKeyring:{'vapid-v2':config.vapidPublicKey}};
+    const rpc=vi.fn(async(..._args:unknown[])=>({data:{id:ids.subscription,version:1,status:'active',createdAt:'2026-09-11T05:00:00Z',updatedAt:'2026-09-11T05:00:00Z',retiredAt:null},error:null}));
+    const service=new SupabaseWebPushSubscriptionService({admin:{rpc}} as never,rotated);
+    await Promise.all([
+      service.register(actor,{bindingProof:issued,subscription},'push-proof-replay-0001'),
+      service.register(actor,{bindingProof:issued,subscription},'push-proof-replay-0001'),
+    ]);
+    const first=rpc.mock.calls[0]?.[1] as Record<string,unknown>,second=rpc.mock.calls[1]?.[1] as Record<string,unknown>;
+    expect(first.p_vapid_key_version).toBe('vapid-v2');
+    expect(second.p_vapid_key_version).toBe('vapid-v2');
+    expect(second.p_request_hash).toBe(first.p_request_hash);
+    const removed=new SupabaseWebPushSubscriptionService({admin:{rpc}} as never,{...rotated,vapidPublicKeyring:{}});
+    await expect(removed.register(actor,{bindingProof:issued,subscription},'push-proof-removed')).rejects.toMatchObject({code:'WEB_PUSH_BINDING_PROOF_INVALID'});
+  });
+  it('binds proofs to the exact auth user/profile/session and rejects invalid public curves',async()=>{
+    const issued=await proof();
+    const rpc=vi.fn();
+    for(const changed of [
+      {...actor,authUserId:'11000000-0000-4000-8000-000000000102'},
+      {...actor,profileId:'11000000-0000-4000-8000-000000000002'},
+      {...actor,accessToken:`e30.${Buffer.from(JSON.stringify({session_id:'11000000-0000-4000-8000-000000000902'})).toString('base64url')}.x`},
+    ]){
+      await expect(new SupabaseWebPushSubscriptionService({admin:{rpc}} as never,config).register(changed,{bindingProof:issued,subscription},'push-proof-scope')).rejects.toMatchObject({code:'WEB_PUSH_BINDING_PROOF_INVALID'});
+    }
+    const malformed={...config,vapidPublicKey:Buffer.concat([Buffer.from([4]),Buffer.alloc(64,0xff)]).toString('base64url')};
+    await expect(new SupabaseWebPushSubscriptionService({admin:{rpc}} as never,malformed).config(actor)).rejects.toMatchObject({code:'WEB_PUSH_NOT_CONFIGURED',statusCode:503});
+    const instance=await app(new SupabaseWebPushSubscriptionService({admin:{rpc}} as never,malformed));
+    const response=await instance.inject({method:'GET',url:'/v1/push-subscriptions/config'});
+    expect(response.statusCode).toBe(503);expect(response.json()).toMatchObject({error:{code:'WEB_PUSH_NOT_CONFIGURED'}});
+    await instance.close();
+  });
   it('passes only encrypted/digest material to the service-role RPC and exposes a safe projection',async()=>{
     const rpc=vi.fn(async (..._args:unknown[])=>({data:{id:ids.subscription,version:1,status:'active',createdAt:'2026-09-11T05:00:00Z',updatedAt:'2026-09-11T05:00:00Z',retiredAt:null},error:null}));
     const service=new SupabaseWebPushSubscriptionService({admin:{rpc}} as never,config);
-    const result=await service.register(actor,{subscription},'push-register-0001');
+    const result=await service.register(actor,{bindingProof:await proof(),subscription},'push-register-0001');
     expect(result).toEqual({id:ids.subscription,version:1,status:'active',createdAt:'2026-09-11T05:00:00Z',updatedAt:'2026-09-11T05:00:00Z',retiredAt:null});
     const args=rpc.mock.calls[0]?.[1] as Record<string,unknown>;
     expect(JSON.stringify(args)).not.toContain(subscription.endpoint);
     expect(args).not.toHaveProperty('p_endpoint');expect(args).not.toHaveProperty('p_auth');expect(args).not.toHaveProperty('p_p256dh');
-    await expect(service.register({...actor,role:'developer'},{subscription},'push-register-0002')).rejects.toMatchObject({code:'WEB_PUSH_ACCESS_REQUIRED'});
+    expect(args.p_vapid_key_version).toBe('vapid-v2');
+    await expect(service.register({...actor,role:'developer'},{bindingProof:await proof(),subscription},'push-register-0002')).rejects.toMatchObject({code:'WEB_PUSH_ACCESS_REQUIRED'});
   });
   it('canonicalizes uppercase UUIDs and equivalent endpoints before AAD, hash and RPC',async()=>{
     const rpc=vi.fn(async (..._args:unknown[])=>({data:{id:vectorIds.subscription.toLowerCase(),version:2,status:'active',createdAt:'2026-09-11T05:00:00+09:00',updatedAt:'2026-09-11T05:01:00Z',retiredAt:null},error:null}));
     const service=new SupabaseWebPushSubscriptionService({admin:{rpc}} as never,vectorConfig);
     const upperToken=`e30.${Buffer.from(JSON.stringify({session_id:vectorIds.session})).toString('base64url')}.x`;
-    await service.register({...actor,profileId:vectorIds.profile,accessToken:upperToken},{subscription:vectorSubscription,expectedCurrent:{subscriptionId:vectorIds.subscription,version:1}},'push-vector-0001');
+    await service.register({...actor,profileId:vectorIds.profile,accessToken:upperToken},{bindingProof:await proof(vectorIds.profile,vectorIds.session,vectorConfig),subscription:vectorSubscription,expectedCurrent:{subscriptionId:vectorIds.subscription,version:1}},'push-vector-0001');
     const args=rpc.mock.calls[0]?.[1] as Record<string,unknown>;
     expect(args).toMatchObject({p_actor_profile_id:vectorIds.profile.toLowerCase(),p_session_id:vectorIds.session.toLowerCase(),p_proposed_subscription_id:vectorIds.subscription.toLowerCase(),p_expected_subscription_id:vectorIds.subscription.toLowerCase(),p_endpoint_digest:'2fe510b0721dfd9416ab10f1796e4e6f0d80d9eb01a65ff94227ff030d42dd04'});
   });
@@ -95,14 +134,14 @@ describe('Web Push service and routes',()=>{
       {id:ids.subscription,version:1,status:'active',createdAt:'2026-09-11T05:00:00Z',updatedAt:'2026-09-11T05:00:00Z',retiredAt:null,raw:'forbidden'}
     ]){
       const service=new SupabaseWebPushSubscriptionService({admin:{rpc:vi.fn(async()=>({data,error:null}))}} as never,config);
-      await expect(service.register(actor,{subscription},'push-projection-bad')).rejects.toMatchObject({statusCode:500,code:'WEB_PUSH_COMMAND_FAILED',message:'Web Push 구독을 처리하지 못했습니다.'});
+      await expect(service.register(actor,{bindingProof:await proof(),subscription},'push-projection-bad')).rejects.toMatchObject({statusCode:500,code:'WEB_PUSH_COMMAND_FAILED',message:'Web Push 구독을 처리하지 못했습니다.'});
     }
   });
   it('maps unexpected database detail to a stable secret-free error',async()=>{
     const raw='https://push.example.invalid/private-capability?p256dh=secret&auth=secret';
     const service=new SupabaseWebPushSubscriptionService({admin:{rpc:vi.fn(async()=>({data:null,error:{message:raw}}))}} as never,config);
-    await expect(service.register(actor,{subscription},'push-register-error')).rejects.toMatchObject({code:'WEB_PUSH_COMMAND_FAILED',message:'Web Push 구독을 처리하지 못했습니다.'});
-    try{await service.register(actor,{subscription},'push-register-error2');}catch(error){expect(JSON.stringify(error)).not.toContain(raw);}
+    await expect(service.register(actor,{bindingProof:await proof(),subscription},'push-register-error')).rejects.toMatchObject({code:'WEB_PUSH_COMMAND_FAILED',message:'Web Push 구독을 처리하지 못했습니다.'});
+    try{await service.register(actor,{bindingProof:await proof(),subscription},'push-register-error2');}catch(error){expect(JSON.stringify(error)).not.toContain(raw);}
   });
 
   async function app(service:WebPushSubscriptionService){
@@ -111,14 +150,17 @@ describe('Web Push service and routes',()=>{
     await instance.register(createWebPushSubscriptionRoutes(service),{prefix:'/v1/push-subscriptions'});return instance;
   }
   it('supports only exact register/retire routes, strict bodies, idempotency and no-store',async()=>{
-    const service:WebPushSubscriptionService={register:vi.fn(async()=>({id:ids.subscription})),retire:vi.fn(async()=>({id:ids.subscription}))};const instance=await app(service);
-    const registered=await instance.inject({method:'POST',url:'/v1/push-subscriptions',headers:{'idempotency-key':'push-route-0001'},payload:{subscription}});
+    const service:WebPushSubscriptionService={config:vi.fn(async()=>({keyVersion:'vapid-v2',publicKey:subscription.keys.p256dh,bindingProof:'opaque-proof',proofExpiresAt:'2026-09-12T01:00:00.000Z'})),register:vi.fn(async()=>({id:ids.subscription})),retire:vi.fn(async()=>({id:ids.subscription}))};const instance=await app(service);
+    const configured=await instance.inject({method:'GET',url:'/v1/push-subscriptions/config'});
+    expect(configured.statusCode).toBe(200);expect(configured.json()).toEqual({keyVersion:'vapid-v2',publicKey:subscription.keys.p256dh,bindingProof:'opaque-proof',proofExpiresAt:'2026-09-12T01:00:00.000Z'});expect(configured.headers['cache-control']).toBe('no-store');
+    const registered=await instance.inject({method:'POST',url:'/v1/push-subscriptions',headers:{'idempotency-key':'push-route-0001'},payload:{bindingProof:'opaque-proof',subscription}});
     expect(registered.statusCode).toBe(201);expect(registered.headers['cache-control']).toBe('no-store');
     const retired=await instance.inject({method:'POST',url:`/v1/push-subscriptions/${ids.subscription}/retire`,headers:{'idempotency-key':'push-route-0002'},payload:{expectedVersion:1}});
     expect(retired.statusCode).toBe(200);expect(retired.headers['cache-control']).toBe('no-store');
     for(const request of [
-      {method:'POST' as const,url:'/v1/push-subscriptions/',headers:{'idempotency-key':'push-route-0003'},payload:{subscription}},
-      {method:'POST' as const,url:'/v1/push-subscriptions?x=1',headers:{'idempotency-key':'push-route-0004'},payload:{subscription}},
+      {method:'POST' as const,url:'/v1/push-subscriptions/',headers:{'idempotency-key':'push-route-0003'},payload:{bindingProof:'opaque-proof',subscription}},
+      {method:'POST' as const,url:'/v1/push-subscriptions?x=1',headers:{'idempotency-key':'push-route-0004'},payload:{bindingProof:'opaque-proof',subscription}},
+      {method:'POST' as const,url:'/v1/push-subscriptions',headers:{'idempotency-key':'push-route-0007'},payload:{bindingProof:'opaque-proof',subscription,vapidKeyVersion:'client-forbidden'}},
       {method:'POST' as const,url:`/v1/push-subscriptions/${ids.subscription}/retire/extra`,headers:{'idempotency-key':'push-route-0005'},payload:{expectedVersion:1}},
       {method:'POST' as const,url:`/v1/push-subscriptions/${ids.subscription}/retire`,headers:{'idempotency-key':'push-route-0006'},payload:{expectedVersion:1,endpoint:'forbidden'}}
     ])expect((await instance.inject(request)).statusCode).toBeGreaterThanOrEqual(400);

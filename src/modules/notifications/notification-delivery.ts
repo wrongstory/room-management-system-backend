@@ -33,6 +33,7 @@ export interface NotificationDeliveryProvider {
     payload: string,
     notificationId: string,
     deadlineAt: number,
+    vapidKeyVersion: string,
   ): Promise<NotificationProviderOutcome>;
 }
 
@@ -123,6 +124,10 @@ const base64 = (value: unknown): string => {
     failed();
   return value as string;
 };
+const keyVersion=(value:unknown):string=>{
+  if(typeof value!=='string'||!/^[A-Za-z0-9._-]{1,32}$/.test(value))failed();
+  return value as string;
+};
 
 export function newNotificationDeliveryClaim(): string {
   return createHash("sha256")
@@ -205,7 +210,7 @@ export class NotificationDeliveryWorker {
     totals: NotificationDeliveryRunResult,
   ): void {
     const reason = result.reasonCode;
-    if (reason === "ENVELOPE_UNAVAILABLE" || reason === "PAYLOAD_TOO_LARGE")
+    if (reason === "ENVELOPE_UNAVAILABLE" || reason === "VAPID_KEY_UNBOUND" || reason === "PAYLOAD_TOO_LARGE")
       totals.deadLetter++;
     else totals.suppressed++;
   }
@@ -338,6 +343,7 @@ export class NotificationDeliveryWorker {
               encodedPayload,
               notificationId,
               providerDeadline,
+              keyVersion(envelope.vapidKeyVersion),
             ),
             providerDeadline,
           );

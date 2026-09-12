@@ -9,6 +9,7 @@ const subscriptionSchema=z.object({
   keys:z.object({p256dh:z.string().min(1).max(256),auth:z.string().min(1).max(128)}).strict()
 }).strict();
 const registerSchema=z.object({
+  bindingProof:z.string().min(1).max(2048),
   subscription:subscriptionSchema,
   expectedCurrent:z.object({subscriptionId:z.uuid(),version:z.number().int().min(1)}).strict().optional()
 }).strict();
@@ -25,6 +26,9 @@ export function createWebPushSubscriptionRoutes(service:WebPushSubscriptionServi
   return async(app)=>{
     app.addHook('onRequest',async(_request,reply)=>{reply.header('cache-control','no-store');});
     const authenticated=[app.authenticate,app.requirePasswordChanged];
+    app.get('/config',{preHandler:authenticated},async(request)=>{
+      exactQuery(request); return service.config(request.actor);
+    });
     app.post('/',{preHandler:authenticated,prefixTrailingSlash:'no-slash'},async(request,reply)=>{
       exactQuery(request); const result=await service.register(request.actor,registerSchema.parse(request.body),key(request));
       return reply.code(201).send({subscription:result});

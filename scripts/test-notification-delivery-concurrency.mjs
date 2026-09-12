@@ -37,7 +37,7 @@ export async function testNotificationDeliveryConcurrency(client) {
     p_material_digest: digest(`material:${subscriptionId}`), p_expiration_at: null, p_key_version: 'v1',
     p_ciphertext_base64: Buffer.from('sealed').toString('base64'), p_nonce_base64: Buffer.from('n'.repeat(12)).toString('base64'),
     p_auth_tag_base64: Buffer.from('t'.repeat(16)).toString('base64'), p_idempotency_key: `delivery-${randomUUID()}`,
-    p_request_hash: digest(`request:${subscriptionId}`),
+    p_request_hash: digest(`request:${subscriptionId}`), p_vapid_key_version: 'vapid-v1',
   });
   assert(!registration.error, 'notification delivery subscription fixture');
   // Earlier concurrency suites intentionally leave typed outbox work behind. Drain only
@@ -113,7 +113,7 @@ export async function testNotificationDeliveryConcurrency(client) {
     p_material_digest: digest(`material:${secondSubscriptionId}`), p_expiration_at: null, p_key_version: 'v1',
     p_ciphertext_base64: Buffer.from('sealed-2').toString('base64'), p_nonce_base64: Buffer.from('o'.repeat(12)).toString('base64'),
     p_auth_tag_base64: Buffer.from('u'.repeat(16)).toString('base64'), p_idempotency_key: `delivery-${randomUUID()}`,
-    p_request_hash: digest(`request:${secondSubscriptionId}`),
+    p_request_hash: digest(`request:${secondSubscriptionId}`), p_vapid_key_version: 'vapid-v1',
   });
   assert(!secondRegistration.error, 'second delivery subscription fixture');
   const blockedNotificationId = randomUUID(), blockedGroupId = randomUUID(), blockedOutboxId = randomUUID();

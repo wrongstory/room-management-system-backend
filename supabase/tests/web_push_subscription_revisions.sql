@@ -14,7 +14,7 @@ create function pg_temp.call_register(profile_n integer,session_n integer,propos
     encode(digest('session-'||session_seed,'sha256'),'hex'),
     encode(digest('material-'||material_seed,'sha256'),'hex'),expiration_at,'v1',
     encode(convert_to('sealed-'||material_seed,'utf8'),'base64'),encode(repeat('n',12)::bytea,'base64'),
-    encode(repeat('t',16)::bytea,'base64'),command_key,encode(digest(command_key||':'||material_seed,'sha256'),'hex'))
+    encode(repeat('t',16)::bytea,'base64'),command_key,encode(digest(command_key||':'||material_seed,'sha256'),'hex'),'vapid-v1')
 $$;
 
 insert into auth.users(id) select pg_temp.pid(100+n) from generate_series(1,8)n;
@@ -35,8 +35,9 @@ insert into public.profiles(id,auth_user_id,display_name,display_name_normalized
   (pg_temp.pid(7),pg_temp.pid(107),'push other','push other','push-other','push-other',0,'maid','active',false),
   (pg_temp.pid(8),pg_temp.pid(108),'push devices','push devices','push-devices','push-devices',0,'maid','active',false);
 
-select ok(has_function_privilege('service_role','public.register_web_push_subscription(uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz,text,text,text,text,text,text)','EXECUTE'),'service role owns register RPC');
-select ok(not has_function_privilege('authenticated','public.register_web_push_subscription(uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz,text,text,text,text,text,text)','EXECUTE'),'authenticated cannot call register RPC');
+select ok(has_function_privilege('service_role','public.register_web_push_subscription(uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz,text,text,text,text,text,text,text)','EXECUTE'),'service role owns VAPID-bound register RPC');
+select ok(not has_function_privilege('authenticated','public.register_web_push_subscription(uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz,text,text,text,text,text,text,text)','EXECUTE'),'authenticated cannot call register RPC');
+select ok(not has_function_privilege('service_role','public.register_web_push_subscription_unbound_legacy(uuid,uuid,uuid,uuid,integer,text,text,text,timestamptz,text,text,text,text,text,text)','EXECUTE'),'service role cannot bypass VAPID binding through the legacy overload');
 select ok(not has_function_privilege('anon','public.retire_web_push_subscription(uuid,uuid,uuid,integer,text,text)','EXECUTE'),'anon cannot call retire RPC');
 select ok(not has_table_privilege('service_role','private.web_push_subscription_secrets','SELECT'),'service role raw secret SELECT denied');
 select ok(not has_table_privilege('service_role','private.web_push_subscriptions','UPDATE'),'service role raw logical UPDATE denied');
@@ -53,6 +54,7 @@ select is((select value from push_results where label='receipt-replay'),(select 
 select is((select value->>'id' from push_results where label='logical-replay'),pg_temp.pid(1001)::text,'same material new command reuses logical subscription');
 select is((select count(*) from private.web_push_subscriptions where profile_id=pg_temp.pid(1)),1::bigint,'replay creates no duplicate logical row');
 select is((select count(*) from private.web_push_subscription_revisions where subscription_id=pg_temp.pid(1001)),1::bigint,'replay creates no revision');
+select is((select min(vapid_key_version) from private.web_push_subscription_revisions where subscription_id=pg_temp.pid(1001)),'vapid-v1','registration binds the server-selected VAPID version exactly once');
 select is((select count(*) from private.web_push_subscription_secrets),1::bigint,'first registration stores one encrypted secret only');
 
 insert into push_results values('rotate-one',pg_temp.call_register(1,901,1001,1001,1,'a','a','b','push-rotate-0003'));

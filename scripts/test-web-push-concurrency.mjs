@@ -24,7 +24,7 @@ export async function testWebPushConcurrency(client){
     p_expected_subscription_id:expectedId,p_expected_version:expectedVersion,p_endpoint_digest:digest(`endpoint:${profileId}:${endpoint}`),
     p_session_digest:digest(`session:${sessionId}`),p_material_digest:digest(`material:${material}`),p_expiration_at:null,p_key_version:'v1',
     p_ciphertext_base64:sealed(`sealed:${material}`),p_nonce_base64:sealed('n'.repeat(12)),p_auth_tag_base64:sealed('t'.repeat(16)),
-    p_idempotency_key:key,p_request_hash:digest(`request:${endpoint}:${material}:${expectedId??''}:${expectedVersion??''}`)
+    p_idempotency_key:key,p_request_hash:digest(`request:${endpoint}:${material}:${expectedId??''}:${expectedVersion??''}`),p_vapid_key_version:'vapid-v1'
   });
   const replayKey=`push-concurrent-${randomUUID()}`;
   const concurrent=await Promise.all([randomUUID(),randomUUID()].map(id=>client.rpc('register_web_push_subscription',args(sessionIds[0],id,replayKey,'one','one'))));

@@ -25,6 +25,7 @@ from room_management_console.generated.api.developer import (
 )
 from room_management_console.generated.models import (
     DeveloperDatabaseStatusNotificationDelivery,
+    DeveloperDatabaseStatusNotificationDeliveryActivation,
     DeveloperDatabaseStatusNotificationDeliveryBacklog,
 )
 from room_management_console.generated.models.account_status import AccountStatus
@@ -96,7 +97,7 @@ def test_photo_purge_status_is_generated_as_bounded_metadata_only() -> None:
 
 def test_notification_delivery_status_is_generated_as_bounded_metadata_only() -> None:
     assert "notification_delivery" in {field.name for field in fields(DeveloperDatabaseStatus)}
-    assert {"status", "last_heartbeat", "backlog", "checked_at"} == {
+    assert {"status", "last_heartbeat", "backlog", "activation", "checked_at"} == {
         field.name for field in fields(DeveloperDatabaseStatusNotificationDelivery)
     }
     assert {
@@ -108,6 +109,9 @@ def test_notification_delivery_status_is_generated_as_bounded_metadata_only() ->
         "expired_leases",
         "oldest_due_at",
     } == {field.name for field in fields(DeveloperDatabaseStatusNotificationDeliveryBacklog)}
+    assert "provider_configuration_valid" in {
+        field.name for field in fields(DeveloperDatabaseStatusNotificationDeliveryActivation)
+    }
     exposed = {field.name for field in fields(DeveloperDatabaseStatusNotificationDelivery)} | {
         field.name for field in fields(DeveloperDatabaseStatusNotificationDeliveryBacklog)
     }
@@ -433,6 +437,17 @@ def test_runtime_secret_configuration_generated_contract_is_boolean_only() -> No
         "PHOTO_PURGE_INVOKE_SECRET",
         "PAYROLL_CURSOR_HMAC_SECRET",
         "NOTIFICATION_CURSOR_HMAC_SECRET",
+        "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+        "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
+        "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+        "WEB_PUSH_BINDING_DIGEST_SECRET",
+        "VAPID_SUBJECT",
+        "VAPID_CURRENT_KEY_VERSION",
+        "VAPID_PUBLIC_KEY",
+        "VAPID_PUBLIC_KEYRING_JSON",
+        "VAPID_PRIVATE_KEY",
+        "VAPID_KEYRING_JSON",
+        "NOTIFICATION_DELIVERY_INVOKE_SECRET",
     ]
     for configured in [False, True]:
         sample = {name: {"configured": configured} for name in names}

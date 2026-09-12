@@ -12,6 +12,9 @@ export interface WebPushCryptoConfig {
   keyVersion: string;
   keyring: Record<string, string>;
   bindingSecret: string;
+  vapidKeyVersion: string;
+  vapidPublicKey: string;
+  vapidPublicKeyring: Record<string,string>;
   /** Deterministic vector input only; production callers leave this undefined. */
   nonce?: Uint8Array;
 }
@@ -103,7 +106,8 @@ export function createWebPushEnvelope(
   subscriptionId: string,
   revisionNo: number,
   config: WebPushCryptoConfig,
-  requestSubscriptionId: string | null = subscriptionId
+  requestSubscriptionId: string | null = subscriptionId,
+  bindingProof?: string,
 ): WebPushEnvelope {
   const subscription = validateWebPushSubscription(input);
   const canonicalActorProfileId = canonicalWebPushUuid(actorProfileId);
@@ -131,7 +135,9 @@ export function createWebPushEnvelope(
     materialDigest,
     sessionDigest,
     subscriptionId: canonicalRequestSubscriptionId,
-    revisionNo
+    revisionNo,
+    vapidKeyVersion: config.vapidKeyVersion,
+    ...(bindingProof===undefined?{}:{bindingProofDigest:createHash('sha256').update(bindingProof,'utf8').digest('hex')})
   }), 'utf8').digest('hex');
   return {
     endpointDigest,

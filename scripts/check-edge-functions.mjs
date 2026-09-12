@@ -31,14 +31,17 @@ const sourcePaths = [
   'supabase/functions/_shared/complaint-api.ts',
   'supabase/functions/_shared/notification-cursor.ts',
   'supabase/functions/_shared/notification-api.ts',
+  'supabase/functions/_shared/web-push-binding-proof.ts',
   'supabase/functions/_shared/web-push-subscription-api.ts',
   'supabase/functions/_shared/notification-delivery-worker.ts',
+  'supabase/functions/_shared/web-push-provider.ts',
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/openapi.ts',
   'supabase/functions/_shared/room-api.ts',
   'supabase/functions/api/index.ts',
   'supabase/functions/reservation-scheduler/index.ts',
   'supabase/functions/photo-purge/index.ts'
+  ,'supabase/functions/notification-delivery/index.ts'
 ];
 const testPaths = [
   'supabase/functions/_shared/activity-api.deno.ts',
@@ -60,12 +63,15 @@ const testPaths = [
   'supabase/functions/_shared/payroll-api.deno.ts',
   'supabase/functions/_shared/complaint-api.deno.ts',
   'supabase/functions/_shared/notification-api.deno.ts',
+  'supabase/functions/_shared/web-push-binding-proof.deno.ts',
   'supabase/functions/_shared/web-push-subscription-api.deno.ts',
   'supabase/functions/_shared/notification-delivery-worker.deno.ts',
+  'supabase/functions/_shared/web-push-provider.deno.ts',
   'supabase/functions/_shared/developer-api.deno.ts',
   'supabase/functions/_shared/openapi.deno.ts',
   'supabase/functions/_shared/room-api.deno.ts',
   'supabase/functions/api/index.deno.ts'
+  ,'supabase/functions/notification-delivery/index.deno.ts'
 ];
 
 function runDeno(args, mountRoot = process.cwd()) {
@@ -136,6 +142,10 @@ for (const args of [['--assets-only'], ['--check']]) {
   const generated = spawnSync(process.execPath, ['scripts/generate-photo-edge.mjs', ...args], { stdio: 'inherit' });
   if (generated.status !== 0) throw new Error('Photo generated asset verification failed');
 }
+for (const args of [[], ['--check']]) {
+  const generated = spawnSync(process.execPath, ['scripts/generate-web-push-edge.mjs', ...args], { stdio: 'inherit' });
+  if (generated.status !== 0) throw new Error('Web Push provider generated source verification failed');
+}
 withLfFormatCopy([...sourcePaths, ...testPaths], temporary => runDeno(['fmt', '--check', ...sourcePaths, ...testPaths], temporary));
 runDeno([
   'check',
@@ -147,7 +157,7 @@ runDeno([
 runDeno([
   'test',
   '--allow-read=supabase/functions/api/assets',
-  '--allow-env=SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET',
+  '--allow-env=SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET,VAPID_SUBJECT,VAPID_CURRENT_KEY_VERSION,VAPID_PUBLIC_KEY,VAPID_PUBLIC_KEYRING_JSON,VAPID_PRIVATE_KEY,VAPID_KEYRING_JSON,NOTIFICATION_DELIVERY_INVOKE_SECRET',
   '--frozen',
   '--config',
   'supabase/functions/deno.json',

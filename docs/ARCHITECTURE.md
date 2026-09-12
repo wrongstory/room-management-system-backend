@@ -597,6 +597,40 @@ retry는 max 8, 30초 지수 backoff(최대 1시간)+deterministic 0~15초 jitte
 developer health는 target dead-letter와 fanout 전 `DELIVERY_CONTRACT_INVALID` job-only dead-letter를 별도로
 포화 집계하므로 빈 성공 heartbeat가 unresolved job-only failure를 healthy로 숨길 수 없습니다.
 
+### #112 VAPID Web Push provider source 계약
+
+45번째 append-only migration은 각 immutable subscription revision에 생성 당시 서버의
+`vapid_key_version`을 exactly-once로 묶습니다. 과거 unbound revision은 현재 키를 추측하지 않고
+`VAPID_KEY_UNBOUND` dead-letter로 push만 종결하며 inbox는 유지합니다. 클라이언트는 key version을 보내거나
+선택하지 않고, authenticated active/password-complete admin·maid가
+`GET /v1/push-subscriptions/config`의 `{keyVersion,publicKey,bindingProof,proofExpiresAt}`만 no-store로 조회합니다.
+10분 proof는 actor/profile/live session과 public-key identity를 HMAC으로 결합하며 registration/rotation adapter는
+검증된 proof version만 service-only RPC와 request hash에 전달합니다. current가 바뀌어도 prior public/private
+ring에 남은 proof는 동일 재시도에 유효하고, removed/unknown/expired/tampered/cross-session proof와 기존 unbound
+overload 권한은 fail-closed입니다.
+
+provider adapter는 RFC 8030/8291/8292의 `aes128gcm`과 ES256 VAPID를 Node/Deno 공용 source에서 구현합니다.
+VAPID audience는 endpoint origin, subject는 strict `mailto:` 또는 HTTPS, expiration은 12시간으로 24시간을
+넘지 않습니다. outbound는 HTTPS 기본 443의 exact `fcm.googleapis.com`, exact
+`updates.push.services.mozilla.com`, `*.push.apple.com`, `*.notify.windows.com`만 허용하고 credential,
+fragment, IP literal, redirect를 전송 전에 거부합니다. provider 응답 body/status text/header는 읽거나
+저장하지 않으며, `Retry-After`만 1..3600초로 정규화합니다.
+
+잠금화면 title/body는 항상 `새 업무 알림`/`앱에서 확인해 주세요`이고 provider plaintext에는
+`payloadVersion=1`, stable `notificationId`, catalog가 허용한 same-origin typed deep link만 포함합니다.
+plaintext 3072 bytes와 encrypted body 4096 bytes 상한을 fail-closed로 적용합니다. provider의
+201/202/204는 push service accepted일 뿐 device delivered가 아니며 at-least-once 재전송은 service worker의
+stable notification ID dedupe로 수렴합니다.
+
+`notification-delivery` Edge Function은 strict empty POST와 별도 32-byte 이상 invoke secret을 먼저
+constant-time 검증한 뒤에만 VAPID/envelope keyring을 읽습니다. 33초 provider-start, 39초 settle, 45초 hard
+budget을 기존 worker에 그대로 전달합니다. source migration은 Cron/Vault/`pg_net`을 만들지 않으며 실제
+secret 주입·Edge 배포·scheduler 활성화는 release runbook의 production gate입니다.
+Public proof ring은 최대 5개이며 delivery의 private pair ring과 exact version set/public identity가 같아야 합니다.
+malformed curve·pair mismatch·ring drift는 fetch 0이고 stable degraded heartbeat를 새로 기록합니다. 또한 developer
+status는 조회 시점의 같은 current VAPID config parser·crypto validation 결과를 `providerConfigurationValid` boolean으로만
+결합하므로, 최근 성공 heartbeat가 있어도 현재 설정이 유효하지 않으면 health는 `degraded`입니다.
+
 ## API 단계
 
 현재:

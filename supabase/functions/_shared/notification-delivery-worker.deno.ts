@@ -107,6 +107,7 @@ Deno.test("Edge worker decrypts, permits, sends and settles the same stable noti
             sessionDigest,
             endpointDigest,
             keyVersion: "v1",
+            vapidKeyVersion: "vapid-v1",
             ciphertextBase64: base64(ciphertext),
             nonceBase64: base64(nonce),
             authTagBase64: base64(tag),

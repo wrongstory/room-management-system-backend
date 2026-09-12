@@ -2075,7 +2075,7 @@ export const openApiDocument = {
         operationId: "registerWebPushSubscription",
         summary: "본인 Web Push 구독 등록·회전",
         description:
-          "비밀번호 변경을 완료한 active admin/maid와 현재 live Auth session만 허용합니다. 최초 등록과 exact replay는 expectedCurrent 없이, endpoint·key·session 변경은 현재 subscriptionId/version CAS와 함께 요청합니다. live session당 1개, profile당 5개, 동일 endpoint 전역 1개이며 다른 profile 충돌은 소유자 정보 없이 409입니다. endpoint와 key는 응답·로그·감사에 노출되지 않습니다.",
+          "비밀번호 변경을 완료한 active admin/maid와 현재 live Auth session만 허용합니다. 먼저 config에서 받은 actor/session-bound bindingProof를 그대로 보내야 하며 client가 keyVersion을 선택할 수 없습니다. 최초 등록과 exact replay는 expectedCurrent 없이, endpoint·key·session 변경은 현재 subscriptionId/version CAS와 함께 요청합니다. live session당 1개, profile당 5개, 동일 endpoint 전역 1개이며 다른 profile 충돌은 소유자 정보 없이 409입니다. endpoint와 key는 응답·로그·감사에 노출되지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [idempotencyHeader],
@@ -2106,6 +2106,61 @@ export const openApiDocument = {
           "403": errorResponse,
           "409": errorResponse,
           "429": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
+    "/v1/push-subscriptions/config": {
+      get: {
+        tags: ["Push Subscriptions"],
+        operationId: "getWebPushSubscriptionConfig",
+        summary: "현재 Web Push 공개 VAPID 설정 조회",
+        description:
+          "비밀번호 변경을 완료한 active admin/maid의 live Auth session에만 현재 서버 선택 VAPID 공개키와 10분짜리 actor/profile/session-bound opaque bindingProof를 반환합니다. client는 keyVersion을 등록 요청에 보내거나 선택하지 않습니다. rotation 뒤에도 proof version이 prior public keyring에 남은 동안 같은 proof replay가 가능합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        responses: {
+          "200": {
+            description: "현재 공개 VAPID key version과 공개키",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "keyVersion",
+                    "publicKey",
+                    "bindingProof",
+                    "proofExpiresAt",
+                  ],
+                  properties: {
+                    keyVersion: {
+                      type: "string",
+                      pattern: "^[A-Za-z0-9._-]{1,32}$",
+                    },
+                    publicKey: {
+                      type: "string",
+                      description:
+                        "canonical base64url P-256 uncompressed public key",
+                    },
+                    bindingProof: {
+                      type: "string",
+                      minLength: 1,
+                      maxLength: 2048,
+                      description:
+                        "actor/profile/live session과 공개키 identity·발급/만료를 HMAC으로 결합한 opaque proof",
+                    },
+                    proofExpiresAt: { type: "string", format: "date-time" },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
           "500": errorResponse,
           "503": errorResponse,
         },
@@ -4626,6 +4681,17 @@ export const openApiDocument = {
               "PHOTO_PURGE_INVOKE_SECRET",
               "PAYROLL_CURSOR_HMAC_SECRET",
               "NOTIFICATION_CURSOR_HMAC_SECRET",
+              "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+              "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
+              "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+              "WEB_PUSH_BINDING_DIGEST_SECRET",
+              "VAPID_SUBJECT",
+              "VAPID_CURRENT_KEY_VERSION",
+              "VAPID_PUBLIC_KEY",
+              "VAPID_PUBLIC_KEYRING_JSON",
+              "VAPID_PRIVATE_KEY",
+              "VAPID_KEYRING_JSON",
+              "NOTIFICATION_DELIVERY_INVOKE_SECRET",
             ],
             properties: Object.fromEntries(
               [
@@ -4644,6 +4710,17 @@ export const openApiDocument = {
                 "PHOTO_PURGE_INVOKE_SECRET",
                 "PAYROLL_CURSOR_HMAC_SECRET",
                 "NOTIFICATION_CURSOR_HMAC_SECRET",
+                "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+                "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
+                "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+                "WEB_PUSH_BINDING_DIGEST_SECRET",
+                "VAPID_SUBJECT",
+                "VAPID_CURRENT_KEY_VERSION",
+                "VAPID_PUBLIC_KEY",
+                "VAPID_PUBLIC_KEYRING_JSON",
+                "VAPID_PRIVATE_KEY",
+                "VAPID_KEYRING_JSON",
+                "NOTIFICATION_DELIVERY_INVOKE_SECRET",
               ].map((name) => [
                 name,
                 {
@@ -4765,7 +4842,13 @@ export const openApiDocument = {
           notificationDelivery: {
             type: "object",
             additionalProperties: false,
-            required: ["status", "lastHeartbeat", "backlog", "checkedAt"],
+            required: [
+              "status",
+              "lastHeartbeat",
+              "backlog",
+              "activation",
+              "checkedAt",
+            ],
             properties: {
               status: {
                 type: "string",
@@ -4817,6 +4900,22 @@ export const openApiDocument = {
                     type: ["string", "null"],
                     format: "date-time",
                   },
+                },
+              },
+              activation: {
+                type: "object",
+                additionalProperties: false,
+                required: [
+                  "cronConfigured",
+                  "cronActive",
+                  "functionSecretsConfigured",
+                  "providerConfigurationValid",
+                ],
+                properties: {
+                  cronConfigured: { type: "boolean" },
+                  cronActive: { type: "boolean" },
+                  functionSecretsConfigured: { type: "boolean" },
+                  providerConfigurationValid: { type: "boolean" },
                 },
               },
               checkedAt: { type: "string", format: "date-time" },
@@ -6799,8 +6898,15 @@ export const openApiDocument = {
       WebPushSubscriptionRegisterRequest: {
         type: "object",
         additionalProperties: false,
-        required: ["subscription"],
+        required: ["bindingProof", "subscription"],
         properties: {
+          bindingProof: {
+            type: "string",
+            minLength: 1,
+            maxLength: 2048,
+            description:
+              "동일 session에서 config endpoint가 발급한 opaque proof. 만료·변조·타 actor/session·removed version은 거부됩니다.",
+          },
           subscription: {
             type: "object",
             additionalProperties: false,
