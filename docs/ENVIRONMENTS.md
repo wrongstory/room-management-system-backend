@@ -20,6 +20,9 @@ Free 프로젝트가 2개뿐이므로 recovery 프로젝트를 개발 DB로 겸�
 - publishable key는 브라우저 사용이 가능하지만 secret/service-role key는 서버에만 둔다.
 - 운영·복구 DB 접속 문자열, Google OAuth 값, dump 파일은 Git과 일반 로그에 넣지 않는다.
 - Edge runtime이 자동 제공하는 `SUPABASE_SERVICE_ROLE_KEY`를 custom secret이나 Vault에 복제하지 않는다. custom Function Secret 이름은 `SUPABASE_` prefix를 사용하지 않는다.
+- 객실 PIN은 `ROOM_PIN_KEY_BASE64`(canonical Base64 32-byte AES key), `ROOM_PIN_KEY_VERSION`, 최대 5개 prior key의 `ROOM_PIN_KEYRING_JSON`을 전용 secret으로 주입한다. reservation PII/Web Push 키를 포함한 다른 목적 secret과 key material을 재사용하지 않는다.
+- `ROOM_PIN_AAD_ENVIRONMENT`, `ROOM_PIN_AAD_PROJECT_REF`는 비밀이 아닌 bounded AAD context다. 새 쓰기는 현재 승인 environment/project mapping을 사용하고, 복구 환경의 이전 revision 복호화는 DB에 보존된 exact context를 사용한다. key, AAD 전체 bytes, PIN/envelope를 로그·Issue·PR에 기록하지 않는다.
+- #131 feature PR은 source 예시와 검증만 갱신하며 production/recovery Function Secrets나 Vault를 설정하지 않는다. 실제 key 주입·회전은 별도 release 승인 범위다.
 
 ## 마이그레이션 흐름
 

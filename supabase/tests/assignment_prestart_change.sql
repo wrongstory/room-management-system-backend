@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 create function pg_temp.pid(n integer) returns uuid language sql immutable as $$ select ('27000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid $$;
 insert into auth.users(id) select pg_temp.pid(n+100) from generate_series(1,6) n;
@@ -84,6 +85,7 @@ from stayover_case s join public.rooms r on r.id=s.room_id
 cross join unnest(array['checkout','stayover']::public.cleaning_kind[]) k;
 insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
 select room_id,'verified',1,'TEST',pg_temp.pid(1),now() from stayover_case;
+select pg_temp.install_room_pin_fixture(room_id,pg_temp.pid(1),1) from stayover_case;
 select public.create_reservation(pg_temp.pid(1),reservation_id,room_id,
   '2027-10-01 10:00+09','2027-10-03 11:00+09',2,null,
   (select state_version from public.rooms where id=room_id),

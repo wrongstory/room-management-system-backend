@@ -156,6 +156,10 @@ erDiagram
   ROOMS ||--o{ ROOM_CANDLE_EVENTS : "촛불 증감"
   ROOMS ||--o{ ROOM_PIN_SYNC_EVENTS : "PIN 일치 상태"
   ROOMS ||--o{ ROOM_PIN_ACCESS_LEASES : "제한 접근"
+  ROOMS ||--o{ ROOM_PIN_REVISIONS : "암호화 PIN 이력"
+  ROOMS ||--o| ROOM_CURRENT_PIN : "현재 PIN 포인터"
+  ROOMS ||--o{ ROOM_PIN_CHANGE_LEASES : "물리 변경 조정"
+  ROOM_PIN_REVISIONS ||--o{ ROOM_PIN_REVEAL_LEASES : "30초 이하 복호화 허가"
   CLEANING_ASSIGNMENTS ||--o{ ROOM_PIN_ACCESS_LEASES : "현재 담당 계약"
   CLEANING_ATTEMPTS ||--o{ ROOM_PIN_ACCESS_LEASES : "현재 수행 계약"
   PROFILES ||--o{ RESERVATIONS : "등록·수정"
@@ -276,6 +280,39 @@ erDiagram
     timestamptz expires_at
     timestamptz revoked_at
   }
+  ROOM_PIN_REVISIONS {
+    uuid id PK
+    uuid room_id FK
+    bigint pin_version
+    bytea ciphertext
+    bytea nonce
+    bytea auth_tag
+    text key_version
+    text aad_environment
+    text aad_project_ref
+  }
+  ROOM_CURRENT_PIN {
+    uuid room_id PK
+    uuid pin_revision_id FK
+    bigint pin_version
+  }
+  ROOM_PIN_CHANGE_LEASES {
+    uuid id PK
+    uuid room_id FK
+    bigint expected_pin_version
+    bigint proposed_pin_version
+    uuid authoritative_access_lease_id FK
+    text status
+    timestamptz expires_at
+  }
+  ROOM_PIN_REVEAL_LEASES {
+    uuid id PK
+    uuid room_id FK
+    uuid pin_revision_id FK
+    uuid authoritative_access_lease_id FK
+    timestamptz expires_at
+    timestamptz finalized_at
+  }
 ```
 
 핵심 제약:
@@ -290,6 +327,8 @@ erDiagram
 - 고객명 암호문은 예약에만 존재하고 목록 projection에서는 제외한다. 관리자 단건 상세에서만 복호화하며 체크아웃/취소 후 180일 보존 만료 시 암호문만 제거한다.
 - 고객 배정에는 PIN 동기화 `verified`와 객실 기준정보 확인을 포함한 독립 readiness 조건을 모두 요구한다. PIN 원문은 이 ERD의 일반 업무 테이블에 저장하지 않는다.
 - PIN lease는 target·현재 assignment·현재 attempt·담당 메이드·최신 verified PIN version을 함께 고정하며 다른 객실/예약/과거 담당을 조합할 수 없다. PIN version이 바뀐 뒤 수동 checkout은 stale lease를 revoke-only하고 최신 version으로만 새 lease를 만든다.
+- #131 private PIN 원장은 AES-256-GCM ciphertext/12-byte nonce/tag/key version과 bounded nonsecret AAD context만 저장하며 plaintext, key, verifier, raw session ID는 저장하지 않는다. current pointer와 latest verified public sync event의 version이 정확히 같고 unresolved change lease가 없을 때만 PIN readiness가 verified다. legacy verified event만 있는 객실은 unconfigured다.
+- 물리 PIN 변경은 prepared mismatch를 먼저 기록하고 confirm 때만 immutable revision/current pointer를 원자 갱신한다. 만료된 mismatch는 actual re-entry revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결하며 room number 변경은 `ROOM_PIN_REISSUE_REQUIRED`다. 별도 생성 envelope의 `(key_version, nonce)`는 unique다.
 - 퇴실점검 lifecycle은 아직 `[미확정]`이므로 `checkout_inspections`를 구현된 목표 테이블처럼 두지 않는다.
 
 ## 5. 청소 배정·수행·검수

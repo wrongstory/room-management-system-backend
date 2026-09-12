@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 
 create temporary table reservation_security_results (
   test_number integer primary key,
@@ -165,6 +166,8 @@ select public.mutate_room_operation(
   'security-room-pin-sync-0001',
   repeat('5', 64)
 );
+select pg_temp.install_room_pin_fixture((select id from public.rooms where room_number='135'),
+  '72000000-0000-4000-8000-000000000001',1);
 
 -- Synthetic published checkout templates: production configuration is never seeded here.
 insert into public.cleaning_template_versions (
@@ -241,6 +244,8 @@ select public.mutate_room_operation(
   'manual-checkout-pin-sync-0001',
   repeat('6', 64)
 );
+select pg_temp.install_room_pin_fixture((select id from public.rooms where room_number='136'),
+  '72000000-0000-4000-8000-000000000001',1);
 
 select public.create_reservation(
   '72000000-0000-4000-8000-000000000001',
@@ -297,6 +302,8 @@ select public.mutate_room_operation(
   'extension-pin-sync-0001',
   repeat('1', 64)
 );
+select pg_temp.install_room_pin_fixture((select id from public.rooms where room_number='240'),
+  '72000000-0000-4000-8000-000000000001',1);
 
 select public.create_reservation(
   '72000000-0000-4000-8000-000000000001',
@@ -365,6 +372,8 @@ select public.mutate_room_operation(
   'adjacent-pin-sync-0001',
   repeat('5', 64)
 );
+select pg_temp.install_room_pin_fixture((select id from public.rooms where room_number='332'),
+  '72000000-0000-4000-8000-000000000001',1);
 
 select public.create_reservation(
   '72000000-0000-4000-8000-000000000001',
@@ -815,6 +824,8 @@ select public.mutate_room_operation(
   'manual-checkout-pin-sync-0002',
   repeat('c', 64)
 );
+select pg_temp.install_room_pin_fixture((select id from public.rooms where room_number='136'),
+  '72000000-0000-4000-8000-000000000001',2);
 
 select public.manual_checkout_reservation(
   '72000000-0000-4000-8000-000000000001',

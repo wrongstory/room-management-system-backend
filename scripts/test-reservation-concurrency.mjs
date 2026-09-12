@@ -17,6 +17,7 @@ import { testPhotoDriveQuotaConcurrency } from './test-photo-drive-quota-concurr
 import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-operations-concurrency.mjs';
 import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
+import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
 import { testWebPushConcurrency } from './test-web-push-concurrency.mjs';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -317,26 +318,16 @@ assert(
 
 const { data: room, error: roomError } = await client
   .from('rooms')
-  .select('id,state_version')
+  .select('id,room_number,state_version')
   .eq('room_number', '117')
   .single();
 assert(!roomError && room, `room fixture failed: ${roomError?.message}`);
 
-const { error: pinError } = await client.rpc('mutate_room_operation', {
-  p_actor_profile_id: actorProfileId,
-  p_room_id: room.id,
-  p_action: 'record_pin_sync',
-  p_expected_room_version: room.state_version,
-  p_reason_code: 'CONCURRENCY_TEST_PIN',
-  p_payload: {
-    entityId: randomUUID(),
-    syncStatus: 'verified',
-    pinVersion: 1
-  },
-  p_idempotency_key: `pin-${randomUUID()}`,
-  p_request_hash: '1'.repeat(64)
-});
-assert(!pinError, `PIN fixture failed: ${pinError?.message}`);
+await configureRoomPinForConcurrency(
+  client,
+  { profileId: actorProfileId, email, password },
+  { id: room.id, roomNumber: room.room_number }
+);
 
 const { data: refreshedRoom, error: refreshedRoomError } = await client
   .from('rooms')
@@ -793,19 +784,16 @@ assert(
 
 // Future checkout planning races use public commands, not synthetic materialization.
 const { data: planningRooms, error: planningRoomsError } = await client.from('rooms')
-  .select('id,state_version').order('room_number').range(50, 56);
+  .select('id,room_number,state_version').order('room_number').range(50, 56);
 assert(!planningRoomsError && planningRooms?.length === 7, 'planning race rooms');
 const planningCheckIn = new Date(Math.floor((Date.now() - 86400000) / 60000) * 60000).toISOString();
 const planningCheckOut = `${assignmentCommitServiceDate}T11:00:00+09:00`;
-async function verifyPlanningRoom(room, suffix) {
-  const pin = await client.rpc('mutate_room_operation', {
-    p_actor_profile_id: actorProfileId, p_room_id: room.id,
-    p_action: 'record_pin_sync', p_expected_room_version: room.state_version,
-    p_reason_code: 'PLANNING_RACE_FIXTURE',
-    p_payload: { entityId: randomUUID(), syncStatus: 'verified', pinVersion: 1 },
-    p_idempotency_key: `planning-pin-${suffix}`, p_request_hash: '1'.repeat(64)
-  });
-  assert(!pin.error, `planning PIN metadata: ${pin.error?.message}`);
+async function verifyPlanningRoom(room) {
+  await configureRoomPinForConcurrency(
+    client,
+    { profileId: actorProfileId, email, password },
+    { id: room.id, roomNumber: room.room_number }
+  );
   const latest = await client.from('rooms').select('state_version').eq('id',room.id).single();
   assert(!latest.error, 'planning room version');
   return latest.data.state_version;
@@ -813,7 +801,7 @@ async function verifyPlanningRoom(room, suffix) {
 async function planningFixture(index) {
   const id = randomUUID();
   const room = planningRooms[index];
-  const roomVersion = await verifyPlanningRoom(room, id);
+  const roomVersion = await verifyPlanningRoom(room);
   const created = await client.rpc('create_reservation', {
     p_actor_profile_id: actorProfileId, p_reservation_id: id, p_room_id: room.id,
     p_check_in_at: index === 1 ? `${kstToday.toISOString().slice(0,10)}T23:59:00+09:00` : planningCheckIn,
@@ -852,7 +840,7 @@ async function planningCommitArgs(plan) {
 }
 const changePlan = await planningFixture(0);
 const changeRoomId = planningRooms[4].id;
-await verifyPlanningRoom(planningRooms[4], `change-destination-${changePlan.id}`);
+await verifyPlanningRoom(planningRooms[4]);
 const changeCommitArgs = await planningCommitArgs(changePlan);
 const changeVsCommit = await Promise.all([
   client.rpc('change_reservation', {
@@ -914,7 +902,7 @@ assert(!beforePromote.error && !afterPromote.error && beforePromote.data.id===af
 
 const checkoutMovePlan = await planningFixture(5);
 const checkoutMoveRoomId = planningRooms[6].id;
-await verifyPlanningRoom(planningRooms[6], `checkout-destination-${checkoutMovePlan.id}`);
+await verifyPlanningRoom(planningRooms[6]);
 const checkoutMoveRace = await Promise.all([
   client.rpc('change_reservation', {
     p_actor_profile_id:actorProfileId,p_reservation_id:checkoutMovePlan.id,p_room_id:checkoutMoveRoomId,
@@ -978,9 +966,9 @@ for (const plan of [scheduledPlan,manualPlan]) {
     'checkout race: same identity, one occupancy event, zero premature attempts');
 }
 console.log('Planning races passed: room-change/notify, cancel/notify, scheduled/retry, room-change/checkout, manual/scheduled; one target and zero premature attempts.');
-await testNotifiedReplanConcurrency(client, actorProfileId);
+await testNotifiedReplanConcurrency(client, { profileId: actorProfileId, email, password });
 await testPrestartConcurrency(client,actorProfileId);
-await testAttemptActivationConcurrency(client,actorProfileId);
+await testAttemptActivationConcurrency(client,{ profileId: actorProfileId, email, password });
 await testAssignmentPreviewConcurrency(client,actorProfileId);
 await testAttemptExecutionConcurrency(client,actorProfileId);
 await testAttemptLifecycleConcurrency(client);
@@ -995,6 +983,7 @@ await testNotificationConcurrency(client);
 await testWebPushConcurrency(client);
 await testNotificationDeliveryConcurrency(client);
 await testPasswordChangeConcurrency(client);
+await testRoomPinConcurrency(client);
 
 console.log(
   'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2, assignment-commit-replay=1 logical/2 calls, assignment-save-vs-commit=1/2, availability-vs-commit=1/2.'

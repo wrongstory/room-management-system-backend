@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 create function pg_temp.vid(n integer) returns uuid language sql immutable
 as $$ select ('45000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid $$;
@@ -26,6 +27,8 @@ select pg_temp.vid(200) as reservation_id,
 insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
 select old_room_id,'verified',1,'TEST',pg_temp.vid(1),now() from relocation
 union all select new_room_id,'verified',1,'TEST',pg_temp.vid(1),now() from relocation;
+select pg_temp.install_room_pin_fixture(room_id,pg_temp.vid(1),1)
+from (select old_room_id room_id from relocation union select new_room_id from relocation) rooms;
 
 -- Execute actual reservation -> draft -> commit/notify -> unassign -> move request.
 -- #73 permits the move only after the notified assignment has been explicitly ended.

@@ -487,11 +487,11 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 로그인 비밀번호와 별도 암호키/수명주기로 관리한다.
 - 프런트 입력은 PIN 숫자 부분만 받으며 `^[0-9]{4,8}$`를 만족하는 문자열이어야 한다. 숫자형으로 변환하지 않고 `0256`, `00000001` 같은 선행 0을 보존한다.
 - 서버는 요청의 `room_id`로 현재 `rooms.room_number`를 다시 조회하고 저장·표시용 canonical credential을 `<room_number>-<pin_digits>`로 조합한다. 클라이언트가 보낸 객실번호 prefix를 신뢰하거나 다른 객실 credential 생성에 사용하지 않는다.
-- DB에는 canonical credential 전체를 authenticated encryption(AES-GCM 또는 XChaCha20-Poly1305)한 암호문, nonce, authentication tag, key version과 immutable revision으로 저장하고 current pointer만 CAS 갱신한다. 키는 DB와 분리된 secret manager에 두며 public table, 감사, outbox, 로그에는 평문이나 암호문을 저장하지 않는다.
+- DB에는 canonical credential 전체를 AES-256-GCM으로 암호화한 ciphertext, 12-byte random nonce, authentication tag, key version과 bounded nonsecret AAD context(`format/environment/projectRef/roomId/pinVersion`)를 private immutable revision으로 저장하고 current pointer만 CAS 갱신한다. 복구 프로젝트에서는 runtime context가 아니라 revision에 저장된 exact context로 복호화한다. 키는 DB와 분리된 secret manager에 두며 public table, 감사, outbox, 로그에는 평문이나 암호문을 저장하지 않는다.
 - 권한 있는 사용자가 특정 객실·현재 assignment/attempt에 대해 명시적으로 조회할 때만 서버가 복호화한다. 메이드는 담당뿐 아니라 해당 청소 유형의 출입 허용 시각 도달도 검증한다.
-- 응답은 `Cache-Control: no-store`를 사용하고 클라이언트는 최대 30초 뒤, 화면 이동, background/pagehide, 기기 잠금, 담당 해제, 출입 재잠금 때 평문을 메모리에서 지운다. clipboard, service worker cache, offline queue, 영속 브라우저 저장소에 넣지 않는다.
-- PIN 조회·변경은 객실, PIN version, actor, assignment/attempt에 묶인 lease/CAS와 감사 event를 남긴다.
-- 관리자 변경은 PIN 변경 lease 선점 → 실제 도어락 변경 → 앱 저장 순서로 조정한다. 저장 실패로 물리 도어락과 앱 값이 어긋나면 입실과 PIN 조회를 차단하고, 실제 PIN 재입력 또는 물리적 원복 확인 + 사유로만 종결한다.
+- 응답은 `Cache-Control: no-store`를 사용하고 클라이언트는 응답의 남은 TTL(최대 30초)과 `expiresAt` 중 더 이른 시점, 화면 이동, background/pagehide, 기기 잠금, 담당 해제, 출입 재잠금 때 평문을 메모리에서 지운다. 만료된 reveal은 평문을 반환하지 않는다. clipboard, service worker cache, offline queue, 영속 브라우저 저장소에 넣지 않는다.
+- PIN 조회·변경은 객실, PIN version, actor, current notified assignment/current nonterminal attempt와 기존 `room_pin_access_leases`의 exact unrevoked authoritative lease에 묶인 lease/CAS와 감사 event를 남긴다. 메이드 변경은 exact `in_progress`에서만 허용한다.
+- 관리자 변경은 PIN 변경 lease 선점 → 실제 도어락 변경 → confirm/save 순서로 조정한다. prepare 즉시 mismatch가 되어 배정 준비와 PIN 조회를 차단하며 confirm 전에는 current pointer를 바꾸지 않는다. 만료·불확실 상태는 실제 PIN 재입력 후 새 revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결한다. current가 없는 최초 변경이 만료된 경우에도 실제 PIN 재입력으로 version 1을 수립할 수 있다.
 - PIN 평문을 URL, 로그, error, audit payload, notification, analytics, Git, 브라우저 저장소에 넣지 않는다.
 
 ### `[확정]` 개인정보 보존
@@ -661,7 +661,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
 - #46 source candidate는 기존 46 migrations를 수정하지 않고 47번째 append-only private password-change receipt와 password-specific shadow version을 추가한다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. 따라서 후속 변경·관리자 reset·adapter 밖 Auth password 변경 뒤 과거 key가 현재 비밀번호만으로 replay되지 않고, ordinary login은 password version을 바꾸지 않는다. 모든 Auth password probe는 session/client/key 회전으로 우회할 수 없는 actor당 1행·10회/분 durable limit을 먼저 소비한다. crash-before-Auth와 다른 payload를 안전하게 구분할 password-derived evidence가 없는 expired receipt는 실패로 추정하지 않고 inconsistent로 격리하며, 관리자 reset은 외부 Auth 성공과 private version 확인 뒤에만 이를 supersede한다. public HTTP path/operation 수는 바뀌지 않으며 독립 QA/dev 병합·release/production은 별도 gate다.
 - 위 source/dev 완료는 운영 사용 가능 선언이 아니다. Issue #112는 release/main 뒤 Function Secrets, 승인된 `api`/`notification-delivery` Edge bundle, negative/positive hosted smoke, Vault/`pg_cron`/`pg_net`, 5회 연속 heartbeat, 실제 기기 Web Push smoke가 끝날 때까지 OPEN이다. 현재 `main`/production/recovery는 v0.2.0 상태로 변경되지 않았다.
-- 현재 critical path는 **#46 password replay source/dev gate → #69 Phase A PIN domain**이다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
+- #46과 #128은 source/dev에 통합됐고, 현재 source gate는 **#131 / #69 Phase A PIN domain**이다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
 
@@ -766,7 +766,7 @@ npm run db:reset
 
 1. Issue #34에서 GitHub Actions runtime 경고를 별도 CI 유지보수 PR로 정리한다.
 2. Issue #46 source candidate의 비밀번호 원문·재사용 verifier 없는 password-change 응답 유실/replay 계약을 독립 검토하고 `dev`에 통합한다.
-3. Issue #69 Phase A에서 4~8자리 PIN 입력과 `<room_number>-<pin_digits>` canonical credential의 encrypted immutable revision/current pointer를 구현한다. Google Sheets worker와 production credential/ACL은 후속 Phase B/C로 분리한다.
+3. Issue #131에서 #69 Phase A의 4~8자리 PIN 입력과 `<room_number>-<pin_digits>` canonical credential, encrypted immutable revision/current pointer, physical change/reveal lease를 source gate로 검증한다. Google Sheets worker와 production credential/ACL은 후속 Phase B/C로 분리한다.
 4. Issue #12 backup/recovery source는 핵심 source와 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
 5. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
 

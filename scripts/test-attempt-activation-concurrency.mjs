@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { configureRoomPinForConcurrency } from './test-room-pin-concurrency.mjs';
 
 function assert(value, message) {
   if (!value) throw new Error(message);
@@ -14,7 +15,8 @@ function kstDate(date = new Date()) {
   return new Date(date.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 }
 
-export async function testAttemptActivationConcurrency(client, actorProfileId) {
+export async function testAttemptActivationConcurrency(client, actor) {
+  const actorProfileId = actor.profileId;
   const today = kstDate();
   const weekday = new Date(`${today}T00:00:00Z`).getUTCDay() || 7;
   const week = new Date(Date.parse(`${today}T00:00:00Z`) - (weekday - 1) * 86_400_000)
@@ -205,7 +207,7 @@ export async function testAttemptActivationConcurrency(client, actorProfileId) {
 
   // 실제 예약/연박 생성 command로 만든 창을 경쟁시킨다. 원 command의
   // reservation-command lock과 lifecycle lock 순서가 같아야 반쪽 이월이 없다.
-  const sourceRooms = ok(await client.from('rooms').select('id,room_type_id,state_version')
+  const sourceRooms = ok(await client.from('rooms').select('id,room_number,room_type_id,state_version')
     .order('room_number').range(110, 112), 'source window race rooms');
   for (const roomTypeId of new Set(sourceRooms.map((room) => room.room_type_id))) {
     const published = ok(await client.from('cleaning_template_versions').select('id')
@@ -224,13 +226,10 @@ export async function testAttemptActivationConcurrency(client, actorProfileId) {
   const rolloverAt = '2039-10-02T16:00:00+09:00';
   async function reservationFixture(room, checkIn = stayCheckIn, checkOut = stayCheckOut) {
     const reservationId = randomUUID();
-    ok(await client.rpc('mutate_room_operation', {
-      p_actor_profile_id: actorProfileId, p_room_id: room.id,
-      p_action: 'record_pin_sync', p_expected_room_version: room.state_version,
-      p_reason_code: 'ACTIVATION_SOURCE_RACE_FIXTURE',
-      p_payload: { entityId: randomUUID(), syncStatus: 'verified', pinVersion: 1 },
-      p_idempotency_key: `source-pin-${reservationId}`, p_request_hash: '1'.repeat(64)
-    }), 'source window room metadata');
+    await configureRoomPinForConcurrency(client, actor, {
+      id: room.id,
+      roomNumber: room.room_number
+    });
     const currentRoom = ok(await client.from('rooms').select('state_version')
       .eq('id', room.id).single(), 'source window room version');
     ok(await client.rpc('create_reservation', {

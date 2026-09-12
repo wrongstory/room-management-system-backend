@@ -48,6 +48,7 @@ class DeveloperAuditEventSummary:
         source_version (int | Unset):
         approved_version_id (UUID | Unset):
         room_id (UUID | Unset):
+        lease_id (UUID | Unset):
         check_in_at (datetime.datetime | Unset):
         check_out_at (datetime.datetime | Unset):
         purged_count (int | Unset):
@@ -139,6 +140,7 @@ class DeveloperAuditEventSummary:
     source_version: int | Unset = UNSET
     approved_version_id: UUID | Unset = UNSET
     room_id: UUID | Unset = UNSET
+    lease_id: UUID | Unset = UNSET
     check_in_at: datetime.datetime | Unset = UNSET
     check_out_at: datetime.datetime | Unset = UNSET
     purged_count: int | Unset = UNSET
@@ -269,6 +271,10 @@ class DeveloperAuditEventSummary:
         room_id: str | Unset = UNSET
         if not isinstance(self.room_id, Unset):
             room_id = str(self.room_id)
+
+        lease_id: str | Unset = UNSET
+        if not isinstance(self.lease_id, Unset):
+            lease_id = str(self.lease_id)
 
         check_in_at: str | Unset = UNSET
         if not isinstance(self.check_in_at, Unset):
@@ -523,6 +529,8 @@ class DeveloperAuditEventSummary:
             field_dict["approvedVersionId"] = approved_version_id
         if room_id is not UNSET:
             field_dict["roomId"] = room_id
+        if lease_id is not UNSET:
+            field_dict["leaseId"] = lease_id
         if check_in_at is not UNSET:
             field_dict["checkInAt"] = check_in_at
         if check_out_at is not UNSET:
@@ -761,6 +769,13 @@ class DeveloperAuditEventSummary:
             room_id = UNSET
         else:
             room_id = UUID(_room_id)
+
+        _lease_id = d.pop("leaseId", UNSET)
+        lease_id: UUID | Unset
+        if isinstance(_lease_id, Unset):
+            lease_id = UNSET
+        else:
+            lease_id = UUID(_lease_id)
 
         _check_in_at = d.pop("checkInAt", UNSET)
         check_in_at: datetime.datetime | Unset
@@ -1103,6 +1118,7 @@ class DeveloperAuditEventSummary:
             source_version=source_version,
             approved_version_id=approved_version_id,
             room_id=room_id,
+            lease_id=lease_id,
             check_in_at=check_in_at,
             check_out_at=check_out_at,
             purged_count=purged_count,

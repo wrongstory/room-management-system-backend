@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 
 create function pg_temp.pid(n integer) returns uuid language sql immutable as $$
@@ -227,6 +228,7 @@ insert into checkout_case(reservation_id,room_id)
 select pg_temp.pid(701),id from public.rooms order by room_number offset 40 limit 1;
 insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
 select room_id,'verified',1,'TEST',pg_temp.pid(1),now() from checkout_case;
+select pg_temp.install_room_pin_fixture(room_id,pg_temp.pid(1),1) from checkout_case;
 select public.create_reservation(
   pg_temp.pid(1),reservation_id,room_id,date_trunc('minute',now())-interval '1 day',
   ((now() at time zone 'Asia/Seoul')::date+1+time '11:00') at time zone 'Asia/Seoul',

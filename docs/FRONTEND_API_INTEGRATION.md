@@ -30,6 +30,12 @@ Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있�
 
 production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. source에는 #43 developer operation과 #51~#53 가능일·예약·객실 상세/mutation path가 추가됐지만, 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
 
+### #131 객실 PIN Phase A source candidate
+
+source OpenAPI에는 prepare/confirm/rollback/reveal 4개 operation이 있다. `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+
+Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. Phase A는 production에 배포되지 않았으므로 운영 OpenAPI에 4개 path가 보일 때까지 기능을 켜지 않는다.
+
 ## 2. 로컬 백엔드 준비
 
 ### #84 사진 연동 후보 — 아직 production 기능을 켜지 않는다

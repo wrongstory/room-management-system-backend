@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 insert into auth.users(id) values ('a1000000-0000-4000-8000-000000000001'),('a1000000-0000-4000-8000-000000000002');
 insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password) values
@@ -13,6 +14,7 @@ begin
  select * into room from public.rooms r where not exists(select 1 from plans p where p.room_id=r.id) order by room_number limit 1;
  insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
  values(room.id,'verified',1,'TEST','a2000000-0000-4000-8000-000000000001',now());
+ perform pg_temp.install_room_pin_fixture(room.id,'a2000000-0000-4000-8000-000000000001',1);
  response:=public.create_reservation('a2000000-0000-4000-8000-000000000001',rid,room.id,
    coalesce(p_in,((p_out at time zone 'Asia/Seoul')::date-1 + time '16:00') at time zone 'Asia/Seoul'),
    p_out,2,null,room.state_version,'planning-create-'||p_label,repeat('a',64));

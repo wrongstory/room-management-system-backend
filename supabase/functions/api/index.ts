@@ -142,6 +142,12 @@ import {
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
 import {
+  finishRoomPinChange,
+  prepareRoomPinChange,
+  revealRoomPin,
+  roomPinPath,
+} from "../_shared/room-pin-api.ts";
+import {
   authenticate,
   authenticateLimitedAttempt,
   cors,
@@ -326,6 +332,40 @@ export async function handleApiRequest(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    const roomPinRoute = request.method === "POST" ? roomPinPath(path) : null;
+    if (roomPinRoute) {
+      const sessionId = verifiedRequestSessionId(request);
+      const result = roomPinRoute.kind === "prepare"
+        ? await prepareRoomPinChange(
+          request,
+          clients,
+          actor,
+          sessionId,
+          roomPinRoute.roomId,
+        )
+        : roomPinRoute.kind === "reveal"
+        ? await revealRoomPin(
+          request,
+          clients,
+          actor,
+          sessionId,
+          roomPinRoute.roomId,
+        )
+        : await finishRoomPinChange(
+          request,
+          clients,
+          actor,
+          sessionId,
+          roomPinRoute,
+        );
+      const response = jsonResponse(
+        roomPinRoute.kind === "reveal" ? { pin: result } : { change: result },
+        roomPinRoute.kind === "prepare" ? 201 : 200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     const startLeaseId = request.method === "POST"
       ? startWithLeasePath(path)
       : null;

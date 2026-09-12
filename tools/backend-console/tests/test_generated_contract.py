@@ -215,6 +215,51 @@ def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
     assert {"request_hash", "reason_detail", "before_state", "after_state"}.isdisjoint(field_names)
 
 
+def test_room_pin_audit_contract_is_generated_without_sensitive_material() -> None:
+    assert {
+        "room.pin_change_prepared",
+        "room.pin_change_confirmed",
+        "room.pin_mismatch_resolved",
+    } <= {event.value for event in DeveloperAuditEventType}
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {"room_id", "lease_id", "pin_version", "status"} <= field_names
+    assert {
+        "request_hash",
+        "ciphertext",
+        "nonce",
+        "auth_tag",
+        "aad_environment",
+        "aad_project_ref",
+        "credential",
+        "pin_digits",
+    }.isdisjoint(field_names)
+
+
+def test_room_pin_error_codes_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    expected = {
+        "INVALID_ROOM_PIN",
+        "ROOM_PIN_KEY_UNAVAILABLE",
+        "ROOM_PIN_CRYPTO_CONFIG_INVALID",
+        "ROOM_PIN_DECRYPT_FAILED",
+        "ROOM_PIN_COMMAND_FAILED",
+        "STALE_PIN_VERSION",
+        "ROOM_NUMBER_CHANGED",
+        "ROOM_PIN_REISSUE_REQUIRED",
+        "ROOM_PIN_MISMATCH_UNRESOLVED",
+        "PIN_CHANGE_IN_PROGRESS_REQUIRED",
+        "PIN_CHANGE_IN_PROGRESS",
+        "PIN_CHANGE_LEASE_EXPIRED",
+        "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
+        "PIN_REVEAL_AUTHORIZATION_CHANGED",
+        "ROOM_PIN_UNCONFIGURED",
+        "PIN_ACCESS_LEASE_REQUIRED",
+        "PIN_ACCESS_REQUIRED",
+    }
+    assert expected <= {code.value for code in ErrorCode}
+
+
 def test_attempt_lifecycle_audit_contract_preserves_only_safe_generated_fields() -> None:
     assert {
         "cleaning.finish_current_allowed",
@@ -305,7 +350,6 @@ def test_offline_resolution_generated_audit_excludes_ninety_day_client_metadata(
     assert {"offline_quarantine_id", "resolution"} <= field_names
     assert {
         "event_id",
-        "lease_id",
         "occurred_at",
         "server_offset_ms",
         "request_hash",
@@ -320,7 +364,20 @@ def test_offline_resolution_generated_audit_excludes_ninety_day_client_metadata(
             "offlineQuarantineId": "10000000-0000-4000-8000-000000000001",
             "resolution": resolution,
         }
-        assert DeveloperAuditEventSummary.from_dict(summary).to_dict() == summary
+        rendered = DeveloperAuditEventSummary.from_dict(summary).to_dict()
+        assert rendered == summary
+        assert {
+            "eventId",
+            "leaseId",
+            "occurredAt",
+            "serverOffsetMs",
+            "requestHash",
+            "sessionId",
+            "requestBody",
+            "token",
+            "pin",
+            "guestName",
+        }.isdisjoint(rendered)
 
 
 def test_photo_upload_audit_generated_contract_has_safe_metadata_only() -> None:

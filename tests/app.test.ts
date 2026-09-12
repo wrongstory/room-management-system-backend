@@ -15,6 +15,9 @@ const env: AppEnv = {
   SUPABASE_SECRET_KEY: 'secret-test',
   ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters',
   RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
+  ROOM_PIN_KEY_BASE64: Buffer.alloc(32, 8).toString('base64'),
+  ROOM_PIN_KEY_VERSION: 'pin-v1',
+  ROOM_PIN_KEYRING_JSON: '{}',
   RESERVATION_PII_KEY_VERSION: 'test-v1',
   RESERVATION_PII_KEYRING_JSON: '{}',
   RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
@@ -106,7 +109,11 @@ function services(): AppServices {
       }]),
       get: vi.fn(),
       changeMasterData: vi.fn(),
-      mutateOperation: vi.fn()
+      mutateOperation: vi.fn(),
+      preparePinChange: vi.fn(),
+      confirmPinChange: vi.fn(),
+      rollbackPinChange: vi.fn(),
+      revealPin: vi.fn()
     },
     reservations: {
       list: vi.fn(async () => []),

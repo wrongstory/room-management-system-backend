@@ -381,6 +381,91 @@ Table public.room_pin_access_leases {
   Note: 'Room/reservation/target/current assignment/current attempt/maid/latest verified PIN version are one enforced work contract.'
 }
 
+Table private.room_pin_revisions {
+  id uuid [pk]
+  room_id uuid [not null]
+  pin_version bigint [not null]
+  envelope_format smallint [not null]
+  ciphertext bytea [not null]
+  nonce bytea [not null]
+  auth_tag bytea [not null]
+  key_version text [not null]
+  aad_environment text [not null]
+  aad_project_ref text [not null]
+  recorded_by uuid [not null]
+  assignment_id uuid
+  attempt_id uuid
+  authoritative_access_lease_id uuid
+
+  indexes { (room_id, pin_version) [unique] }
+  Note: '#131 immutable AES-256-GCM revision. Nonsecret bounded AAD context is stored for recovery-context decrypt; plaintext/key/verifier/session is forbidden. FORCE RLS and no Data API grants.'
+}
+
+Table private.room_current_pin {
+  room_id uuid [pk]
+  pin_revision_id uuid [not null, unique]
+  pin_version bigint [not null]
+  updated_at timestamptz [not null]
+
+  Note: '#131 CAS current pointer; readiness also requires exact latest verified public sync version and no unresolved change lease.'
+}
+
+Table private.room_pin_change_leases {
+  id uuid [pk]
+  room_id uuid [not null]
+  expected_pin_version bigint [not null]
+  proposed_pin_version bigint [not null]
+  actor_profile_id uuid [not null]
+  assignment_id uuid
+  attempt_id uuid
+  authoritative_access_lease_id uuid
+  reason_code text [not null]
+  ciphertext bytea [not null]
+  nonce bytea [not null]
+  auth_tag bytea [not null]
+  key_version text [not null]
+  aad_environment text [not null]
+  aad_project_ref text [not null]
+  status text [not null]
+  expires_at timestamptz [not null]
+
+  indexes { (key_version, nonce) [unique] }
+  Note: '#131 prepare is the first envelope ledger and immediately creates mismatch without changing current. Confirm, actual re-entry, or confirmed rollback resolves physical state.'
+}
+
+Table private.room_pin_reveal_leases {
+  id uuid [pk]
+  room_id uuid [not null]
+  pin_revision_id uuid [not null]
+  pin_version bigint [not null]
+  actor_profile_id uuid [not null]
+  assignment_id uuid
+  attempt_id uuid
+  authoritative_access_lease_id uuid
+  issued_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  finalized_at timestamptz
+  request_id uuid [not null]
+
+  Note: '#131 max-30s private supplement. Maid authority remains the exact existing public access lease, whose revealed_at is set at final authorization.'
+}
+
+Table private.room_pin_sheet_sync_outbox {
+  id uuid [pk]
+  room_id uuid [not null]
+  pin_version bigint [not null]
+  sync_status text [not null]
+  reason_code text [not null]
+  status text [not null]
+  claim_id uuid
+  claimed_at timestamptz
+  claim_expires_at timestamptz
+  retry_count int [not null]
+  last_error_code text
+
+  Note: '#131 Phase-B foundation only. Immutable safe identity/status/reason/claim metadata; no PIN, envelope, AAD bytes, Google call, or worker.'
+}
+
 Table public.cleaning_template_versions {
   id uuid [pk]
   room_type_id uuid [not null]
@@ -1793,6 +1878,25 @@ Ref: public.room_pin_access_leases.cleaning_target_id > public.cleaning_targets.
 Ref: public.room_pin_access_leases.assignment_id > public.cleaning_assignments.id
 Ref: public.room_pin_access_leases.attempt_id > public.cleaning_attempts.id
 Ref: public.room_pin_access_leases.issued_to > public.profiles.id
+Ref: private.room_pin_revisions.room_id > public.rooms.id
+Ref: private.room_pin_revisions.recorded_by > public.profiles.id
+Ref: private.room_pin_revisions.assignment_id > public.cleaning_assignments.id
+Ref: private.room_pin_revisions.attempt_id > public.cleaning_attempts.id
+Ref: private.room_pin_revisions.authoritative_access_lease_id > public.room_pin_access_leases.id
+Ref: private.room_current_pin.room_id > public.rooms.id
+Ref: private.room_current_pin.pin_revision_id > private.room_pin_revisions.id
+Ref: private.room_pin_change_leases.room_id > public.rooms.id
+Ref: private.room_pin_change_leases.actor_profile_id > public.profiles.id
+Ref: private.room_pin_change_leases.assignment_id > public.cleaning_assignments.id
+Ref: private.room_pin_change_leases.attempt_id > public.cleaning_attempts.id
+Ref: private.room_pin_change_leases.authoritative_access_lease_id > public.room_pin_access_leases.id
+Ref: private.room_pin_reveal_leases.room_id > public.rooms.id
+Ref: private.room_pin_reveal_leases.pin_revision_id > private.room_pin_revisions.id
+Ref: private.room_pin_reveal_leases.actor_profile_id > public.profiles.id
+Ref: private.room_pin_reveal_leases.assignment_id > public.cleaning_assignments.id
+Ref: private.room_pin_reveal_leases.attempt_id > public.cleaning_attempts.id
+Ref: private.room_pin_reveal_leases.authoritative_access_lease_id > public.room_pin_access_leases.id
+Ref: private.room_pin_sheet_sync_outbox.room_id > public.rooms.id
 Ref: public.cleaning_template_versions.room_type_id > public.room_types.id
 Ref: public.cleaning_template_versions.created_by > public.profiles.id
 Ref: private.photo_template_slots.template_version_id > public.cleaning_template_versions.id

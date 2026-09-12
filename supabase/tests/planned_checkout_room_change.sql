@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 
 create function pg_temp.rid(n integer) returns uuid language sql immutable
@@ -48,6 +49,8 @@ begin
   ) values
     (old_room.id,'verified',1,'ROOM_CHANGE_FIXTURE',pg_temp.rid(1),now()),
     (new_room.id,'verified',1,'ROOM_CHANGE_FIXTURE',pg_temp.rid(1),now());
+  perform pg_temp.install_room_pin_fixture(old_room.id,pg_temp.rid(1),1);
+  perform pg_temp.install_room_pin_fixture(new_room.id,pg_temp.rid(1),1);
   perform public.create_reservation(
     pg_temp.rid(1),pg_temp.rid(p_reservation_number),old_room.id,p_check_in_at,p_check_out_at,
     2,null,(select state_version from public.rooms where id=old_room.id),

@@ -1069,7 +1069,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 58,
+              maxItems: 61,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -3345,6 +3345,170 @@ export const openApiDocument = {
         "PIN 원문이 아닌 동기화 상태와 선택적 pinVersion만 기록합니다. pin, rawPin, pinCode, doorCode, credential, providerSecret 필드는 허용하지 않습니다.",
       ),
     },
+    "/v1/rooms/{roomId}/pin-changes/prepare": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "prepareRoomPinChange",
+        summary: "물리 도어락 PIN 변경 준비",
+        description:
+          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 객실 배정 준비와 모든 PIN reveal이 차단됩니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [roomIdParameter(), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/RoomPinChangePrepareRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "물리 변경 대기 lease",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomPinChangeEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
+    "/v1/rooms/{roomId}/pin-changes/{leaseId}/confirm": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "confirmRoomPinChange",
+        summary: "물리 도어락 PIN 변경 확인·저장",
+        description:
+          "현장에서 준비한 PIN이 실제 도어락에 적용된 뒤에만 호출합니다. current pointer CAS, immutable revision, verified sync event, 비밀 없는 sheet outbox, audit와 receipt를 한 transaction에서 기록합니다. maid 권한은 준비 lease에 결합된 assignment·attempt·access lease를 다시 확인합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          roomIdParameter(),
+          roomEntityIdParameter("leaseId", "확인할 PIN 변경 lease ID"),
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/RoomPinChangeFinishRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "확인된 새 PIN revision",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomPinChangeEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/rooms/{roomId}/pin-changes/{leaseId}/rollback": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "rollbackRoomPinChange",
+        summary: "기존 물리 PIN 복구 확인",
+        description:
+          "active business admin이 실제 도어락을 기존 current PIN으로 되돌렸음을 확인한 경우에만 unresolved mismatch를 해소합니다. PIN 원문이나 자유 입력 사유는 받지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          roomIdParameter(),
+          roomEntityIdParameter("leaseId", "복구할 PIN 변경 lease ID"),
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/RoomPinChangeFinishRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "기존 current PIN으로 복구 확인",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomPinChangeEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/rooms/{roomId}/pin/reveal": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "revealRoomPin",
+        summary: "현재 객실 PIN 일시 표시",
+        description:
+          "30초 이하의 private reveal lease로 복호화한 뒤 세션·역할·current revision·불일치 상태와 maid의 정확한 assignment·nonterminal attempt·authoritative access lease를 DB에서 최종 재검증하고 sensitive.read append가 성공한 경우에만 plaintext credential을 반환합니다. 클라이언트는 clearAfterSeconds와 expiresAt 중 더 이른 시점 또는 화면 이동·background·pagehide·device lock·assignment removal·relock 즉시 plaintext를 지워야 하며 clipboard, cache, offline 또는 영구 저장소에 기록하면 안 됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [roomIdParameter()],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/RoomPinRevealRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "최대 30초 동안만 메모리에 표시할 plaintext credential",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomPinRevealEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -4313,6 +4477,23 @@ export const openApiDocument = {
           "PAYROLL_COMMAND_FAILED",
           "ROOM_NOT_FOUND",
           "ROOM_OPERATION_NOT_FOUND",
+          "INVALID_ROOM_PIN",
+          "ROOM_PIN_KEY_UNAVAILABLE",
+          "ROOM_PIN_CRYPTO_CONFIG_INVALID",
+          "ROOM_PIN_DECRYPT_FAILED",
+          "ROOM_PIN_COMMAND_FAILED",
+          "STALE_PIN_VERSION",
+          "ROOM_NUMBER_CHANGED",
+          "ROOM_PIN_REISSUE_REQUIRED",
+          "ROOM_PIN_MISMATCH_UNRESOLVED",
+          "PIN_CHANGE_IN_PROGRESS_REQUIRED",
+          "PIN_CHANGE_IN_PROGRESS",
+          "PIN_CHANGE_LEASE_EXPIRED",
+          "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
+          "PIN_REVEAL_AUTHORIZATION_CHANGED",
+          "ROOM_PIN_UNCONFIGURED",
+          "PIN_ACCESS_LEASE_REQUIRED",
+          "PIN_ACCESS_REQUIRED",
           "SENSITIVE_TEXT_NOT_ALLOWED",
           "PIN_MATERIAL_NOT_ALLOWED",
           "ROOM_COMMAND_FAILED",
@@ -4601,6 +4782,9 @@ export const openApiDocument = {
           "room.report_issue",
           "room.resolve_issue",
           "room.record_pin_sync",
+          "room.pin_change_prepared",
+          "room.pin_change_confirmed",
+          "room.pin_mismatch_resolved",
           "submission.bomb_reported",
           "submission.created",
           "inspection.bomb_decided",
@@ -5052,6 +5236,7 @@ export const openApiDocument = {
               sourceVersion: { type: "integer", minimum: 0 },
               approvedVersionId: { type: "string", format: "uuid" },
               roomId: { type: "string", format: "uuid" },
+              leaseId: { type: "string", format: "uuid" },
               checkInAt: { type: "string", format: "date-time" },
               checkOutAt: { type: "string", format: "date-time" },
               purgedCount: { type: "integer", minimum: 0 },
@@ -6834,6 +7019,137 @@ export const openApiDocument = {
         description:
           "PIN 원문·door code·credential·provider secret은 요청할 수 없습니다.",
       },
+      RoomPinChangePrepareRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["pinDigits", "expectedPinVersion", "reasonCode"],
+        properties: {
+          pinDigits: {
+            type: "string",
+            pattern: "^[0-9]{4,8}$",
+            minLength: 4,
+            maxLength: 8,
+            writeOnly: true,
+            description:
+              "선행 0을 보존하는 숫자 문자열. roomNumber 접두사는 서버만 추가합니다.",
+            example: "0123",
+          },
+          expectedPinVersion: { type: "integer", minimum: 0 },
+          reasonCode: {
+            type: "string",
+            enum: [
+              "ADMIN_INITIAL_PIN",
+              "ADMIN_PHYSICAL_CHANGE",
+              "MAID_CLEANING_CHANGE",
+              "ACTUAL_PIN_REENTRY",
+            ],
+          },
+          assignmentId: {
+            type: "string",
+            format: "uuid",
+            description: "maid에게 현재 통보된 assignment ID",
+          },
+          attemptId: {
+            type: "string",
+            format: "uuid",
+            description: "동일 assignment의 현재 in_progress attempt ID",
+          },
+          accessLeaseId: {
+            type: "string",
+            format: "uuid",
+            description:
+              "maid에게 발급된 현재 pinVersion의 unrevoked authoritative PIN access lease ID",
+          },
+        },
+        description:
+          "admin은 work binding을 생략하며 maid는 assignmentId/attemptId/accessLeaseId를 모두 보내야 합니다.",
+      },
+      RoomPinChangeFinishRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedPinVersion"],
+        properties: { expectedPinVersion: { type: "integer", minimum: 0 } },
+      },
+      RoomPinChangeResult: {
+        type: "object",
+        additionalProperties: false,
+        required: ["leaseId", "roomId", "status"],
+        properties: {
+          leaseId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          currentPinVersion: { type: "integer", minimum: 0 },
+          proposedPinVersion: { type: "integer", minimum: 1 },
+          pinVersion: { type: "integer", minimum: 1 },
+          accessLeaseId: {
+            type: "string",
+            format: "uuid",
+            description:
+              "maid confirm 시 기존 권한 lease를 새 pinVersion으로 원자 재발급한 ID. admin 응답에는 없습니다.",
+          },
+          status: {
+            type: "string",
+            enum: ["prepared", "confirmed", "rolled_back"],
+          },
+          expiresAt: { type: "string", format: "date-time" },
+          confirmedAt: { type: "string", format: "date-time" },
+          resolvedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomPinChangeEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["change"],
+        properties: {
+          change: { $ref: "#/components/schemas/RoomPinChangeResult" },
+        },
+      },
+      RoomPinRevealRequest: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          assignmentId: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          accessLeaseId: { type: "string", format: "uuid" },
+        },
+        description:
+          "admin은 빈 객체, maid는 exact assignmentId/attemptId/accessLeaseId를 전송합니다.",
+      },
+      RoomPinReveal: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "credential",
+          "pinVersion",
+          "clearAfterSeconds",
+          "expiresAt",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          credential: {
+            type: "string",
+            pattern: "^[A-Za-z0-9]{1,32}-[0-9]{4,8}$",
+            readOnly: true,
+            description:
+              "일시 표시 전용 plaintext. clipboard/cache/offline/persistent storage 금지.",
+          },
+          pinVersion: { type: "integer", minimum: 1 },
+          clearAfterSeconds: {
+            type: "integer",
+            minimum: 1,
+            maximum: 30,
+            description:
+              "응답 시점에 남은 lease TTL(최대 30초). 클라이언트는 이 값과 expiresAt 중 더 이른 시점에 plaintext를 제거합니다.",
+          },
+          expiresAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomPinRevealEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["pin"],
+        properties: { pin: { $ref: "#/components/schemas/RoomPinReveal" } },
+      },
       RoomCommandReasonCode: {
         type: "string",
         pattern: "^[A-Z0-9_]{2,80}$",
@@ -7912,7 +8228,7 @@ function roomIdParameter(): Record<string, unknown> {
 }
 
 function roomEntityIdParameter(
-  name: "blockId" | "issueId",
+  name: "blockId" | "issueId" | "leaseId",
   description: string,
 ): Record<string, unknown> {
   return {

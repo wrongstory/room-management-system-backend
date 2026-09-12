@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 select no_plan();
 
 create function pg_temp.pid(n integer) returns uuid language sql immutable as $$
@@ -94,6 +95,7 @@ where room.room_type_id=(select id from public.room_types where code='standard')
 order by room.room_number offset 16 limit 1;
 insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
 select room_id,'verified',1,'TEST',pg_temp.pid(1),clock_timestamp() from stayover_review_case;
+select pg_temp.install_room_pin_fixture(room_id,pg_temp.pid(1),1) from stayover_review_case;
 select public.create_reservation(pg_temp.pid(1),reservation_id,room_id,
   date_trunc('minute',clock_timestamp())-interval '1 day',date_trunc('minute',clock_timestamp())+interval '1 day',2,null,
   (select state_version from public.rooms room where room.id=stayover_review_case.room_id),
@@ -343,6 +345,7 @@ begin
    and not exists(select 1 from public.cleaning_targets target where target.room_id=room.id) order by room.room_number limit 1;
  insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
  values(room_row.id,'verified',1,'TEST',pg_temp.pid(1),clock_timestamp());
+ perform pg_temp.install_room_pin_fixture(room_row.id,pg_temp.pid(1),1);
  perform public.create_reservation(pg_temp.pid(1),v_reservation_id,room_row.id,date_trunc('minute',clock_timestamp())-interval '1 day',
    date_trunc('minute',clock_timestamp())+interval '1 day',2,null,room_row.state_version,'checkout-chain-create',repeat('7',64));
  update public.reservations set actual_check_in_at=check_in_at where id=v_reservation_id;

@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 
 create temporary table room_reservation_test_results (
   test_number integer primary key,
@@ -86,6 +87,10 @@ select public.mutate_room_operation(
   ),
   'room-pin-sync-test-0001',
   repeat('9', 64)
+);
+select pg_temp.install_room_pin_fixture(
+  (select id from public.rooms where room_number='117'),
+  '62000000-0000-4000-8000-000000000001',1
 );
 
 -- Synthetic published checkout templates: production configuration is never seeded here.
