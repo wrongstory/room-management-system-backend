@@ -761,14 +761,13 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-현재 P2 배정부터 #112 Web Push provider까지의 source/dev critical path는 완료됐다. 다음 source 작업은 운영 승격과 섞지 않고 아래 순서로 진행한다.
+현재 P2 배정부터 #112 Web Push provider까지의 source/dev critical path는 완료됐다. 이번 #73 source candidate도 46번째 append-only forward fix와 과거 통보 snapshot·동시성 회귀까지 구현을 마쳤으며, 독립 검토와 `dev` 병합은 별도 gate다. 다음 source 작업은 운영 승격과 섞지 않고 아래 순서로 진행한다.
 
-1. Issue #73의 46번째 append-only forward fix로 planned checkout target이 있는 허용된 예약 객실 변경을 원자화하고 과거 통보 snapshot·동시성 회귀를 고정한다.
-2. Issue #34에서 GitHub Actions runtime 경고를 별도 CI 유지보수 PR로 정리한다.
-3. Issue #46에서 비밀번호 원문·재사용 verifier 없이 password-change 응답 유실/replay 의미를 확정하고 Fastify/Edge 계약을 맞춘다.
-4. Issue #69 Phase A에서 4~8자리 PIN 입력과 `<room_number>-<pin_digits>` canonical credential의 encrypted immutable revision/current pointer를 구현한다. Google Sheets worker와 production credential/ACL은 후속 Phase B/C로 분리한다.
-5. Issue #12 backup/recovery source는 핵심 source와 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
-6. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
+1. Issue #34에서 GitHub Actions runtime 경고를 별도 CI 유지보수 PR로 정리한다.
+2. Issue #46에서 비밀번호 원문·재사용 verifier 없이 password-change 응답 유실/replay 의미를 확정하고 Fastify/Edge 계약을 맞춘다.
+3. Issue #69 Phase A에서 4~8자리 PIN 입력과 `<room_number>-<pin_digits>` canonical credential의 encrypted immutable revision/current pointer를 구현한다. Google Sheets worker와 production credential/ACL은 후속 Phase B/C로 분리한다.
+4. Issue #12 backup/recovery source는 핵심 source와 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
+5. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
 
 source/dev 완료, release/main 승격, production migration/secret/Edge/Cron 활성화는 서로 다른 gate다. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 
