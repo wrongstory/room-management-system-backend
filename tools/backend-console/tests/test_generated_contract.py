@@ -27,6 +27,9 @@ from room_management_console.generated.models import (
     DeveloperDatabaseStatusNotificationDelivery,
     DeveloperDatabaseStatusNotificationDeliveryActivation,
     DeveloperDatabaseStatusNotificationDeliveryBacklog,
+    RoomPinSheetSyncStatus,
+    RoomPinSheetSyncStatusActivation,
+    RoomPinSheetSyncStatusBacklog,
 )
 from room_management_console.generated.models.account_status import AccountStatus
 from room_management_console.generated.models.developer_audit_event_summary import (
@@ -146,6 +149,34 @@ def test_notification_delivery_status_is_generated_as_bounded_metadata_only() ->
         "nonce",
         "auth_tag",
         "provider_error",
+    }.isdisjoint(exposed)
+
+
+def test_room_pin_sheet_status_is_generated_as_bounded_metadata_only() -> None:
+    assert "room_pin_sheet_sync" in {field.name for field in fields(DeveloperDatabaseStatus)}
+    assert {"status", "last_heartbeat", "backlog", "worker", "activation", "checked_at"} == {
+        field.name for field in fields(RoomPinSheetSyncStatus)
+    }
+    assert {"due", "retrying", "blocked", "expired_leases", "oldest_due_at"} == {
+        field.name for field in fields(RoomPinSheetSyncStatusBacklog)
+    }
+    assert {"function_secrets_configured", "target_approved"} == {
+        field.name for field in fields(RoomPinSheetSyncStatusActivation)
+    }
+    exposed = {field.name for field in fields(RoomPinSheetSyncStatus)} | {
+        field.name for field in fields(RoomPinSheetSyncStatusBacklog)
+    }
+    assert {
+        "pin",
+        "ciphertext",
+        "nonce",
+        "auth_tag",
+        "spreadsheet_id",
+        "sheet_row",
+        "room_id",
+        "outbox_id",
+        "private_key",
+        "access_token",
     }.isdisjoint(exposed)
 
 
@@ -527,6 +558,14 @@ def test_runtime_secret_configuration_generated_contract_is_boolean_only() -> No
         "VAPID_PRIVATE_KEY",
         "VAPID_KEYRING_JSON",
         "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+        "ROOM_PIN_KEY_BASE64",
+        "ROOM_PIN_KEY_VERSION",
+        "ROOM_PIN_KEYRING_JSON",
+        "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+        "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL",
+        "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+        "GOOGLE_SHEETS_SPREADSHEET_ID",
+        "GOOGLE_SHEETS_ROOM_PIN_TAB",
     ]
     for configured in [False, True]:
         sample = {name: {"configured": configured} for name in names}

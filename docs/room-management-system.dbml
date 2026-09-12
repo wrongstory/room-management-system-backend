@@ -460,10 +460,39 @@ Table private.room_pin_sheet_sync_outbox {
   claim_id uuid
   claimed_at timestamptz
   claim_expires_at timestamptz
+  lease_fence bigint
+  provider_write_started_at timestamptz
   retry_count int [not null]
   last_error_code text
 
-  Note: '#131 Phase-B foundation only. Immutable safe identity/status/reason/claim metadata; no PIN, envelope, AAD bytes, Google call, or worker.'
+  Note: '#131 foundation + #136 fenced worker authority. Contains safe identity/status/reason/claim metadata only; no PIN, Google credential/token, or provider payload.'
+}
+
+Table private.room_pin_sheet_sync_worker_state {
+  singleton boolean [pk]
+  status text [not null, note: 'idle/leased/operator_blocked']
+  claim_id uuid
+  lease_fence bigint [not null]
+  lease_expires_at timestamptz
+  blocked_reason_code text
+  updated_at timestamptz [not null]
+
+  Note: '#136 global singleton fence. Uncertain provider write or retry exhaustion requires explicit reconciliation; FORCE RLS/no direct Data API access.'
+}
+
+Table private.room_pin_sheet_sync_heartbeat {
+  singleton boolean [pk]
+  status text [not null]
+  claimed int [not null]
+  projected int [not null]
+  already_current int [not null]
+  superseded int [not null]
+  retrying int [not null]
+  blocked int [not null]
+  error_code text
+  recorded_at timestamptz [not null]
+
+  Note: '#136 bounded safe observability only. No room/outbox ID, PIN, Sheet cell, provider response, assertion, token, or secret.'
 }
 
 Table public.cleaning_template_versions {

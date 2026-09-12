@@ -146,7 +146,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "assignment_notification_coverage",
+    expectedMigrationName === "room_pin_sheet_sync_worker",
     "expected migration must not depend on a remote execution timestamp",
   );
 });
@@ -210,6 +210,27 @@ Deno.test("developer database status degrades a fresh healthy heartbeat for a ma
             error: null,
           });
         }
+        if (name === "get_developer_room_pin_sheet_sync_status") {
+          return Promise.resolve({
+            data: {
+              status: "operator_blocked",
+              lastHeartbeat: null,
+              backlog: {
+                due: 1,
+                retrying: 0,
+                blocked: 1,
+                expiredLeases: 0,
+                oldestDueAt: null,
+              },
+              worker: {
+                operatorBlocked: true,
+                blockedReasonCode: "WRITE_OUTCOME_UNCERTAIN",
+              },
+              checkedAt: "2026-09-13T00:00:00.000Z",
+            },
+            error: null,
+          });
+        }
         return Promise.resolve({ data: {}, error: null });
       },
     },
@@ -228,12 +249,21 @@ Deno.test("developer database status degrades a fresh healthy heartbeat for a ma
     Deno.env.get = get;
   }
   assert(
-    names.length === 3,
-    "database status uses three app-owned projections",
+    names.length === 4,
+    "database status uses four app-owned projections",
   );
   assert(
     "notificationDelivery" in result,
     "bounded delivery health is present",
+  );
+  const sheet = result.roomPinSheetSync as Record<string, unknown>;
+  assert(
+    sheet.status === "operator_blocked",
+    "PIN Sheet operator block remains visible",
+  );
+  assert(
+    (sheet.activation as Record<string, unknown>).targetApproved === false,
+    "hosted target stays unapproved in Phase B",
   );
   const delivery = result.notificationDelivery as Record<string, unknown>;
   assert(

@@ -22,6 +22,8 @@ Free 프로젝트가 2개뿐이므로 recovery 프로젝트를 개발 DB로 겸�
 - Edge runtime이 자동 제공하는 `SUPABASE_SERVICE_ROLE_KEY`를 custom secret이나 Vault에 복제하지 않는다. custom Function Secret 이름은 `SUPABASE_` prefix를 사용하지 않는다.
 - 객실 PIN은 `ROOM_PIN_KEY_BASE64`(canonical Base64 32-byte AES key), `ROOM_PIN_KEY_VERSION`, 최대 5개 prior key의 `ROOM_PIN_KEYRING_JSON`을 전용 secret으로 주입한다. reservation PII/Web Push 키를 포함한 다른 목적 secret과 key material을 재사용하지 않는다.
 - `ROOM_PIN_AAD_ENVIRONMENT`, `ROOM_PIN_AAD_PROJECT_REF`는 비밀이 아닌 bounded AAD context다. 새 쓰기는 현재 승인 environment/project mapping을 사용하고, 복구 환경의 이전 revision 복호화는 DB에 보존된 exact context를 사용한다. key, AAD 전체 bytes, PIN/envelope를 로그·Issue·PR에 기록하지 않는다.
+- Phase B Sheet worker는 `GOOGLE_SHEETS_SPREADSHEET_ID`, `GOOGLE_SHEETS_ROOM_PIN_TAB`, `GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY`, `ROOM_PIN_SHEET_SYNC_INVOKE_SECRET`을 별도 secret/config로 받는다. 승인된 source mapping과 exact match하기 전 PIN key와 Google private key를 읽지 않는다. 현재 source에는 local/test synthetic target만 있으며 production/recovery mapping과 실제 Sheet ID/credential은 #137/release 승인 전 추가하지 않는다.
+- local Sheet adapter를 실행할 때만 `RUNTIME_ENVIRONMENT=local`, `SUPABASE_PROJECT_REF=local`을 exact synthetic target과 함께 설정한다. repository-wide 빈 `SUPABASE_PROJECT_REF` 예시는 다른 runtime의 별도 승인 mapping을 대신하지 않으며, 빈 값이나 `127.0.0.1` alias는 Sheet target 승인이 아니다.
 - #131 feature PR은 source 예시와 검증만 갱신하며 production/recovery Function Secrets나 Vault를 설정하지 않는다. 실제 key 주입·회전은 별도 release 승인 범위다.
 
 ## 마이그레이션 흐름
