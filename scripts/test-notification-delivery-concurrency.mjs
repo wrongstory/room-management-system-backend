@@ -167,5 +167,126 @@ export async function testNotificationDeliveryConcurrency(client) {
   'explicit resume permits exactly two sibling claims');
   assert(sql(`select count(*) from private.notification_delivery_attempts a join private.notification_delivery_targets t on t.id=a.target_id where t.outbox_id='${blockedOutboxId}'::uuid`) === '4',
     'resume and parallel claims append one new attempt per sibling');
-  console.log('Notification delivery concurrency passed: bounded backlog drain, first fanout/claim exactly once, fenced takeover, stale settle rejection, stable notification id, parent block/resume sibling fencing.');
+  const resumedDigests = [resumedA, resumedB];
+  const resumedWorkloads = resumedClaims.flatMap((result, index) => JSON.parse(result.value).items
+    .filter(item => item.notificationId === blockedNotificationId)
+    .map(item => ({ ...item, claimDigest: resumedDigests[index] })));
+  assert(new Set(resumedWorkloads.map(item => item.targetId)).size === 2,
+    'resumed provider workload contains each target once');
+
+  const firstBlockedWorkload = resumedWorkloads[0];
+  const firstBlockedPermit = JSON.parse(sql(`select public.permit_notification_delivery(
+    '${firstBlockedWorkload.targetId}'::uuid,${firstBlockedWorkload.leaseVersion},'${firstBlockedWorkload.claimDigest}','${sessionId}'::uuid
+  )::text`));
+  assert(firstBlockedPermit.sendAllowed === true, 'cross-race fixture permit succeeds');
+  const firstBlockedSettle = JSON.parse(sql(`select public.settle_notification_delivery(
+    '${firstBlockedWorkload.targetId}'::uuid,${firstBlockedWorkload.leaseVersion},'${firstBlockedWorkload.claimDigest}',
+    'provider_configuration_error','PROVIDER_CONFIGURATION_ERROR',null
+  )::text`));
+  assert(firstBlockedSettle.status === 'operator_blocked', 'cross-race fixture blocks parent job');
+  let staleFence = resumedWorkloads[1];
+  sql(`begin; select set_config('app.notification_delivery_writer_mode','typed_v1',true);
+    update private.notification_delivery_targets set lease_expires_at=clock_timestamp()-interval '1 second'
+      where id='${staleFence.targetId}'::uuid; commit;`);
+
+  // This fixture enters the crossed race at lease version 2, so six rounds
+  // exercise every permitted takeover through the max-attempt version 8.
+  const crossRaceRounds = 6;
+  const providerAttemptIds = new Set();
+  const providerWorkloadKeys = new Set();
+  for (let round = 0; round < crossRaceRounds; round++) {
+    const attemptsBefore = Number(sql(`select count(*) from private.notification_delivery_attempts a
+      join private.notification_delivery_targets t on t.id=a.target_id
+      where t.outbox_id='${blockedOutboxId}'::uuid`));
+    const resumedEventsBefore = Number(sql(`select count(*) from private.notification_delivery_events
+      where outbox_id='${blockedOutboxId}'::uuid and state='resumed'`));
+    const permitsBefore = Number(sql(`select count(*) from private.notification_delivery_permits p
+      join private.notification_delivery_attempts a on a.id=p.attempt_id
+      join private.notification_delivery_targets t on t.id=a.target_id
+      where t.outbox_id='${blockedOutboxId}'::uuid`));
+    const crossClaimDigest = digest(`claim-resume-cross:${round}:${randomUUID()}`);
+    const crossed = await Promise.all([
+      sqlAsync(`select public.claim_notification_deliveries('${crossClaimDigest}',10)::text`),
+      sqlAsync('select public.resume_blocked_notification_deliveries(10)::text'),
+    ]);
+    assert(crossed.every(result => !result.error),
+      `claim/resume cross race ${round} has no 40P01 or generic error: ${JSON.stringify(crossed)}`);
+    assert(Number(crossed[1].value) === 2,
+      `claim/resume cross race ${round} resumes both targets exactly once: ${JSON.stringify(crossed)}`);
+
+    let workloadDigest = crossClaimDigest;
+    let workloads = JSON.parse(crossed[0].value).items
+      .filter(item => item.notificationId === blockedNotificationId);
+    assert(workloads.length === 0 || workloads.length === 2,
+      `claim/resume cross race ${round} observes an atomic parent state: ${JSON.stringify(crossed)}`);
+    if (workloads.length === 0) {
+      workloadDigest = digest(`claim-resume-drain:${round}:${randomUUID()}`);
+      const drained = await sqlAsync(`select public.claim_notification_deliveries('${workloadDigest}',10)::text`);
+      assert(!drained.error, `claim/resume cross race ${round} post-race claim succeeds: ${drained.error}`);
+      workloads = JSON.parse(drained.value).items
+        .filter(item => item.notificationId === blockedNotificationId);
+    }
+    assert(workloads.length === 2 && new Set(workloads.map(item => item.targetId)).size === 2,
+      `claim/resume cross race ${round} creates one provider workload per target`);
+    for (const workload of workloads) {
+      const workloadKey = `${workload.targetId}:${workload.leaseVersion}`;
+      assert(!providerWorkloadKeys.has(workloadKey),
+        `claim/resume cross race ${round} does not duplicate provider workload ${workloadKey}`);
+      providerWorkloadKeys.add(workloadKey);
+    }
+    assert(Number(sql(`select count(*) from private.notification_delivery_attempts a
+      join private.notification_delivery_targets t on t.id=a.target_id
+      where t.outbox_id='${blockedOutboxId}'::uuid`)) === attemptsBefore + 2,
+    `claim/resume cross race ${round} appends one attempt per target`);
+    assert(Number(sql(`select count(*) from private.notification_delivery_events
+      where outbox_id='${blockedOutboxId}'::uuid and state='resumed'`)) === resumedEventsBefore + 2,
+    `claim/resume cross race ${round} appends one resume event per target`);
+    assert(sql(`select count(*) from (
+      select a.target_id,a.lease_version from private.notification_delivery_attempts a
+      join private.notification_delivery_targets t on t.id=a.target_id
+      where t.outbox_id='${blockedOutboxId}'::uuid
+      group by a.target_id,a.lease_version having count(*)>1
+    ) duplicate_attempts`) === '0', `claim/resume cross race ${round} has no duplicate attempts`);
+
+    const staleSettle = await sqlAsync(`select public.settle_notification_delivery(
+      '${staleFence.targetId}'::uuid,${staleFence.leaseVersion},'${staleFence.claimDigest}',
+      'accepted',null,null
+    )`);
+    assert(/NOTIFICATION_DELIVERY_FENCE_CONFLICT/.test(staleSettle.error),
+      `claim/resume cross race ${round} rejects the previous stale fence`);
+
+    const blockingWorkload = workloads[round % workloads.length];
+    const nextStaleWorkload = workloads[(round + 1) % workloads.length];
+    const currentEnvelope = JSON.parse(sql(`select public.get_notification_delivery_envelope(
+      '${blockingWorkload.targetId}'::uuid,${blockingWorkload.leaseVersion},'${workloadDigest}'
+    )::text`));
+    assert(currentEnvelope.sendAllowed === true,
+      `claim/resume cross race ${round} exact workload remains sendable`);
+    const currentPermit = JSON.parse(sql(`select public.permit_notification_delivery(
+      '${blockingWorkload.targetId}'::uuid,${blockingWorkload.leaseVersion},'${workloadDigest}','${sessionId}'::uuid
+    )::text`));
+    assert(currentPermit.sendAllowed === true && !providerAttemptIds.has(currentPermit.attemptId),
+      `claim/resume cross race ${round} authorizes one unique provider attempt`);
+    providerAttemptIds.add(currentPermit.attemptId);
+    assert(Number(sql(`select count(*) from private.notification_delivery_permits p
+      join private.notification_delivery_attempts a on a.id=p.attempt_id
+      join private.notification_delivery_targets t on t.id=a.target_id
+      where t.outbox_id='${blockedOutboxId}'::uuid`)) === permitsBefore + 1,
+    `claim/resume cross race ${round} appends one provider permit`);
+    const currentSettle = JSON.parse(sql(`select public.settle_notification_delivery(
+      '${blockingWorkload.targetId}'::uuid,${blockingWorkload.leaseVersion},'${workloadDigest}',
+      'provider_configuration_error','PROVIDER_CONFIGURATION_ERROR',null
+    )::text`));
+    assert(currentSettle.status === 'operator_blocked',
+      `claim/resume cross race ${round} re-blocks the parent job`);
+    staleFence = { ...nextStaleWorkload, claimDigest: workloadDigest };
+    sql(`begin; select set_config('app.notification_delivery_writer_mode','typed_v1',true);
+      update private.notification_delivery_targets set lease_expires_at=clock_timestamp()-interval '1 second'
+        where id='${staleFence.targetId}'::uuid; commit;`);
+  }
+  assert(providerWorkloadKeys.size === crossRaceRounds * 2,
+    'claim/resume cross races create no duplicate provider workload');
+  assert(providerAttemptIds.size === crossRaceRounds,
+    'claim/resume cross races create one unique provider permit per round');
+  console.log('Notification delivery concurrency passed: bounded backlog drain, first fanout/claim exactly once, fenced takeover, stale settle rejection, stable notification id, parent block/resume sibling fencing, repeated claim/resume cross-race duplicate-free workload.');
 }
