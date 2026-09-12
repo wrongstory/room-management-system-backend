@@ -1069,7 +1069,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 #46 password replay feature gate:
 
 - [x] private actor+command+key+origin session scoped receipt와 Auth/DB response-loss recovery 구현
-- [x] server operation marker로 completed replay를 실제 Auth 효과에 결합하고 후속 변경·관리자 reset 뒤 과거 key 차단
+- [x] password-specific private effect version으로 completed replay를 실제 Auth 효과에 결합하고 후속 변경·관리자 reset·별도 Auth password 변경 뒤 과거 key 차단
 - [x] actor당 1행·10회/분 durable Auth password verification limiter로 session/client/key 회전 우회 차단
 - [x] 관리자 reset은 Auth 성공 확인 뒤 finalize하여 inconsistent receipt를 supersede; reset 실패는 unresolved 유지
 - [x] Fastify / Edge / OpenAPI / DB / 문서 계약 정합화

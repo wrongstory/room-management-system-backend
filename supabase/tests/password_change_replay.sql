@@ -5,7 +5,8 @@ create function pg_temp.pid(n integer) returns uuid language sql immutable as $$
   select ('14600000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid
 $$;
 
-insert into auth.users(id) values (pg_temp.pid(101)), (pg_temp.pid(102)), (pg_temp.pid(103));
+insert into auth.users(id) values
+  (pg_temp.pid(101)), (pg_temp.pid(102)), (pg_temp.pid(103)), (pg_temp.pid(104));
 insert into auth.sessions(id,user_id) values
   (pg_temp.pid(901),pg_temp.pid(101)),
   (pg_temp.pid(902),pg_temp.pid(101)),
@@ -21,18 +22,79 @@ insert into public.profiles(
 select ok(has_function_privilege('service_role','public.inspect_password_change(uuid,uuid,uuid,text)','EXECUTE'),'service role may inspect password change receipt');
 select ok(has_function_privilege('service_role','public.prepare_password_change(uuid,uuid,uuid,text,text,text,text)','EXECUTE'),'service role may prepare password change receipt');
 select ok(has_function_privilege('service_role','public.finish_password_change_failure(uuid,uuid,uuid,text,text,text)','EXECUTE'),'service role may finish password change failure');
-select ok(has_function_privilege('service_role','public.complete_password_change(uuid,uuid,uuid,text,text,text,text)','EXECUTE'),'service role may complete password change receipt');
+select ok(has_function_privilege('service_role','public.complete_password_change(uuid,uuid,uuid,text,text,text)','EXECUTE'),'service role may complete password change receipt');
 select ok(not has_function_privilege('authenticated','public.inspect_password_change(uuid,uuid,uuid,text)','EXECUTE'),'authenticated cannot inspect privileged receipt');
 select ok(not has_function_privilege('anon','public.prepare_password_change(uuid,uuid,uuid,text,text,text,text)','EXECUTE'),'anon cannot prepare privileged receipt');
-select ok(not has_function_privilege('public','public.complete_password_change(uuid,uuid,uuid,text,text,text,text)','EXECUTE'),'PUBLIC cannot complete privileged receipt');
+select ok(not has_function_privilege('public','public.complete_password_change(uuid,uuid,uuid,text,text,text)','EXECUTE'),'PUBLIC cannot complete privileged receipt');
 select ok(not has_table_privilege('service_role','private.password_change_commands','SELECT'),'service role cannot read raw receipt table');
 select ok(not has_table_privilege('authenticated','private.password_change_commands','SELECT'),'authenticated cannot read raw receipt table');
 select ok(not has_table_privilege('anon','private.password_change_commands','SELECT'),'anon cannot read raw receipt table');
 select ok(not has_table_privilege('service_role','private.password_verification_rate_limits','SELECT'),'service role cannot read raw verification limiter');
 select ok(not has_table_privilege('service_role','private.password_reset_auth_markers','SELECT'),'service role cannot read raw reset marker ledger');
+select ok(not has_table_privilege('service_role','private.auth_password_versions','SELECT'),'service role cannot read raw password version ledger');
+select ok(not has_table_privilege('authenticated','private.auth_password_versions','SELECT'),'authenticated cannot read raw password version ledger');
+select ok(not has_table_privilege('anon','private.auth_password_versions','SELECT'),'anon cannot read raw password version ledger');
+select ok(has_function_privilege('service_role','public.get_auth_password_version(uuid)','EXECUTE'),'service role may read the nonsecret current password version');
+select ok(not has_function_privilege('authenticated','public.get_auth_password_version(uuid)','EXECUTE'),'authenticated cannot read the private password version');
+select ok(not has_function_privilege('anon','public.get_auth_password_version(uuid)','EXECUTE'),'anon cannot read the private password version');
+select ok(not has_function_privilege('public','private.rotate_auth_password_version()','EXECUTE'),'PUBLIC cannot invoke the Auth password trigger helper');
 select ok(not has_function_privilege('authenticated','public.consume_password_verification_rate_limit(uuid,uuid,uuid,text,integer,integer)','EXECUTE'),'authenticated cannot consume privileged password verification limiter');
 select ok(has_function_privilege('service_role','public.prepare_password_change_admin_reset(uuid,uuid,text,text,text)','EXECUTE'),'service role may prepare reset recovery marker');
-select ok(not has_function_privilege('authenticated','public.finalize_password_change_admin_reset(uuid,uuid,text,text,text,text)','EXECUTE'),'authenticated cannot finalize reset recovery');
+select ok(not has_function_privilege('authenticated','public.finalize_password_change_admin_reset(uuid,uuid,text,text,text)','EXECUTE'),'authenticated cannot finalize reset recovery');
+
+select is((select count(*) from private.auth_password_versions),4::bigint,'Auth user insert/backfill creates exactly one private password version per user');
+select ok(not exists(
+  select 1 from private.auth_password_versions
+  where password_version !~ '^[0-9a-f]{64}$'
+),'password versions are random nonsecret 64-hex identities');
+create temporary table password_version_observations(label text primary key, version text not null) on commit drop;
+insert into password_version_observations values
+  ('login-before',public.get_auth_password_version(pg_temp.pid(104)));
+update auth.users set last_sign_in_at=clock_timestamp() where id=pg_temp.pid(104);
+insert into password_version_observations values
+  ('login-after',public.get_auth_password_version(pg_temp.pid(104)));
+select is(
+  (select version from password_version_observations where label='login-after'),
+  (select version from password_version_observations where label='login-before'),
+  'ordinary login metadata update does not rotate password-specific provenance'
+);
+update auth.users set encrypted_password='direct-password-hash-fixture-1' where id=pg_temp.pid(104);
+insert into password_version_observations values
+  ('direct-first',public.get_auth_password_version(pg_temp.pid(104)));
+select isnt(
+  (select version from password_version_observations where label='direct-first'),
+  (select version from password_version_observations where label='login-before'),
+  'direct Auth password update rotates the private version exactly once'
+);
+select is(
+  (select count(*) from private.auth_password_versions where auth_user_id=pg_temp.pid(104)),
+  1::bigint,'password rotation updates one shadow row instead of appending password evidence'
+);
+update auth.users set last_sign_in_at=clock_timestamp() where id=pg_temp.pid(104);
+select is(
+  public.get_auth_password_version(pg_temp.pid(104)),
+  (select version from password_version_observations where label='direct-first'),
+  'non-password Auth update after rotation leaves the version unchanged'
+);
+create function pg_temp.reject_password_version_write() returns trigger language plpgsql as $$
+begin
+  raise exception using errcode='P0001', message='TEST_PASSWORD_VERSION_WRITE_BLOCKED';
+end;
+$$;
+create trigger reject_password_version_write
+before update on private.auth_password_versions
+for each row
+when (new.auth_user_id = pg_temp.pid(104))
+execute function pg_temp.reject_password_version_write();
+select throws_ok(
+  $$update auth.users set encrypted_password='password-hash-that-must-rollback' where id=pg_temp.pid(104)$$,
+  'P0001','TEST_PASSWORD_VERSION_WRITE_BLOCKED','shadow version write failure aborts the Auth password mutation'
+);
+select is(
+  (select encrypted_password from auth.users where id=pg_temp.pid(104)),
+  'direct-password-hash-fixture-1','failed provenance trigger leaves the prior Auth password hash unchanged'
+);
+drop trigger reject_password_version_write on private.auth_password_versions;
 
 select is(
   public.inspect_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001')->>'state',
@@ -55,7 +117,7 @@ select throws_ok(
   '42501','PASSWORD_CHANGE_SESSION_MISMATCH','another live session cannot reclaim a known receipt'
 );
 select throws_ok(
-  $$select public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(902),'password-first-0001',repeat('a',64),repeat('b',64),'2026-09-12T12:00:00.987000Z')$$,
+  $$select public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(902),'password-first-0001',repeat('a',64),repeat('b',64))$$,
   '42501','PASSWORD_CHANGE_SESSION_MISMATCH','another live session cannot complete a known receipt'
 );
 select throws_ok(
@@ -71,8 +133,14 @@ select throws_ok(
   '23505','IDEMPOTENCY_KEY_REUSED','same scoped key with a different safe fingerprint is rejected'
 );
 
+update auth.users set encrypted_password='self-password-hash-fixture-1' where id=pg_temp.pid(101);
 select is(
-  public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('b',64),'2026-09-12T12:00:00.987000Z')->>'completed',
+  public.get_auth_password_version(pg_temp.pid(101)),
+  repeat('e',64),'self-service Auth password change binds the prepared receipt version'
+);
+
+select is(
+  public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('b',64))->>'completed',
   'true','claimed command completes the DB state'
 );
 select is((select must_change_password from public.profiles where id=pg_temp.pid(1)),false,'completion clears must_change_password');
@@ -82,7 +150,7 @@ select is((select count(*) from auth.sessions where user_id=pg_temp.pid(101)),1:
 select ok(exists(select 1 from auth.sessions where id=pg_temp.pid(901)),'completion preserves caller session');
 select is((select count(*) from public.audit_events where actor_profile_id=pg_temp.pid(1) and event_type='account.password_changed'),1::bigint,'completion appends one audit event');
 select is(
-  public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('f',64),'2026-09-12T12:00:00.987000Z')->>'completed',
+  public.complete_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('f',64))->>'completed',
   'true','completed receipt replay is idempotent without reclaiming Auth'
 );
 select is((select count(*) from public.audit_events where actor_profile_id=pg_temp.pid(1) and event_type='account.password_changed'),1::bigint,'completed replay does not duplicate audit');
@@ -110,11 +178,7 @@ select is((select state from private.password_change_commands where actor_profil
 
 select is(
   public.inspect_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001')->>'effectMarker',
-  repeat('e',64),'completed receipt retains a nonsecret Auth operation marker'
-);
-select is(
-  public.inspect_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001')->>'authUpdatedAt',
-  '2026-09-12T12:00:00.987000Z','completed receipt retains exact nonsecret Auth version evidence'
+  repeat('e',64),'completed receipt retains its nonsecret password effect version'
 );
 
 select is(
@@ -162,22 +226,27 @@ select is(
   public.prepare_password_change_admin_reset(
     pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('a',64)
   )->>'effectMarker',
-  repeat('a',64),'reset recovery binds one nonsecret Auth marker to the command receipt'
+  repeat('a',64),'reset recovery binds one nonsecret password effect version to the command receipt'
 );
 select is((select state from private.password_change_commands where actor_profile_id=pg_temp.pid(2)),'reset_pending','Auth failure before finalize leaves the self-change receipt unresolved');
 select is(
   public.prepare_password_change_admin_reset(
     pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('b',64)
   )->>'effectMarker',
-  repeat('a',64),'same administrator reset retry reuses its original Auth marker'
+  repeat('a',64),'same administrator reset retry reuses its original effect version'
 );
 select throws_ok(
-  $$select public.finalize_password_change_admin_reset(pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('b',64),'2026-09-12T12:01:00.987000Z')$$,
-  '23505','PASSWORD_RESET_EFFECT_MARKER_MISMATCH','reset finalization rejects a different Auth operation marker'
+  $$select public.finalize_password_change_admin_reset(pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('b',64))$$,
+  '23505','PASSWORD_RESET_EFFECT_MARKER_MISMATCH','reset finalization rejects a different password effect version'
+);
+update auth.users set encrypted_password='admin-reset-password-hash-fixture-1' where id=pg_temp.pid(102);
+select is(
+  public.get_auth_password_version(pg_temp.pid(102)),
+  repeat('a',64),'administrator Auth reset binds the prepared reset version'
 );
 select is(
   public.finalize_password_change_admin_reset(
-    pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('a',64),'2026-09-12T12:01:00.987000Z'
+    pg_temp.pid(1),pg_temp.pid(2),'password-admin-reset-01',repeat('9',64),repeat('a',64)
   )->>'completed',
   'true','successful external Auth reset finalization supersedes the inconsistent receipt'
 );
@@ -214,7 +283,7 @@ select lives_ok(
 );
 select lives_ok(
   $$select public.prepare_password_change_admin_reset(pg_temp.pid(1),pg_temp.pid(3),'password-reset-plain-01',repeat('1',64),repeat('1',64))$$,
-  'first administrator reset owns the external Auth marker claim'
+  'first administrator reset owns the external Auth effect-version claim'
 );
 select lives_ok(
   $$select public.prepare_account_password_reset(pg_temp.pid(1),pg_temp.pid(3),'password-reset-plain-02',repeat('2',64))$$,
@@ -254,6 +323,10 @@ select ok(not exists(
        where to_jsonb(limits)::text like '%' || pg_temp.pid(session_number)::text || '%'
      )
 ),'verification limiter stores no raw session UUID, including rotated sessions');
+select ok(not exists(
+  select 1 from private.auth_password_versions versions
+  where to_jsonb(versions)::text ~ '(direct-password-hash|self-password-hash|admin-reset-password-hash|1234|654321|tmp:|eyJ|Bearer|refresh)'
+),'password version ledger stores no Auth hash, password, token, or reusable verifier material');
 select ok(not exists(
   select 1 from private.password_reset_auth_markers markers
   where to_jsonb(markers)::text ~ '(1234|654321|tmp:|eyJ|Bearer|refresh)'

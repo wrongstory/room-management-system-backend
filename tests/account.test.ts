@@ -9,8 +9,6 @@ import {
   SupabaseAccountService
 } from '../src/modules/accounts/account.service.js';
 
-const authUpdatedAt = '2026-09-12T12:10:00.123456Z';
-
 const actor: Actor = {
   authUserId: 'auth-admin-1',
   profileId: 'admin-1',
@@ -37,7 +35,6 @@ const activeAdminProfile = {
   created_at: '2026-08-26T00:00:00.000Z',
   updated_at: '2026-08-26T00:00:00.000Z'
 };
-const existingPasswordEffectMarker = 'c'.repeat(64);
 
 function accountStatusHarness(
   rpcResult: unknown,
@@ -53,10 +50,6 @@ function accountStatusHarness(
     callOrder.push('auth');
     return { data: null, error: authError };
   });
-  const getUserById = vi.fn(async () => ({
-    data: { user: { app_metadata: { password_change_effect_marker: existingPasswordEffectMarker } } },
-    error: null
-  }));
   const clients = {
     admin: {
       from: vi.fn(() => ({
@@ -67,7 +60,7 @@ function accountStatusHarness(
         }))
       })),
       rpc,
-      auth: { admin: { updateUserById, getUserById } }
+      auth: { admin: { updateUserById } }
     },
     publicClient: {},
     forAccessToken: vi.fn()
@@ -266,8 +259,7 @@ describe('account input normalization', () => {
     expect(harness.updateUserById).toHaveBeenLastCalledWith(profile.auth_user_id, {
       app_metadata: {
         profile_id: profile.id,
-        role: 'maid',
-        password_change_effect_marker: existingPasswordEffectMarker
+        role: 'maid'
       }
     });
   });
@@ -345,16 +337,15 @@ describe('account input normalization', () => {
       if (name === 'prepare_password_change_admin_reset') {
         return { data: { state: 'prepared', effectMarker: resetMarker }, error: null };
       }
+      if (name === 'get_auth_password_version') {
+        return { data: resetMarker, error: null };
+      }
       if (name === 'finalize_password_change_admin_reset') {
         return { data: { completed: true }, error: null };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
     const updateUserById = vi.fn(async () => ({ data: { user: {} }, error: null }));
-    const getUserById = vi.fn(async () => ({
-      data: { user: { updated_at: authUpdatedAt, app_metadata: { password_change_effect_marker: resetMarker } } },
-      error: null
-    }));
     const clients = {
       admin: {
         from: vi.fn(() => ({
@@ -365,7 +356,7 @@ describe('account input normalization', () => {
           }))
         })),
         rpc,
-        auth: { admin: { updateUserById, getUserById } }
+        auth: { admin: { updateUserById } }
       }
     } as unknown as SupabaseClients;
     const service = new SupabaseAccountService(
@@ -381,14 +372,14 @@ describe('account input normalization', () => {
     expect(rpcNames).toEqual([
       'prepare_account_password_reset',
       'prepare_password_change_admin_reset',
+      'get_auth_password_version',
       'finalize_password_change_admin_reset'
     ]);
     expect(updateUserById).toHaveBeenCalledWith(activeAdminProfile.auth_user_id, {
       password: 'tmp:5678',
       app_metadata: {
         profile_id: activeAdminProfile.id,
-        role: activeAdminProfile.role,
-        password_change_effect_marker: resetMarker
+        role: activeAdminProfile.role
       }
     });
   });
@@ -402,7 +393,10 @@ describe('account input normalization', () => {
         return { data: activeAdminProfile, error: null };
       }
       if (name === 'prepare_password_change_admin_reset') {
-        return { data: { state: 'completed', effectMarker: resetMarker, authUpdatedAt }, error: null };
+        return { data: { state: 'completed', effectMarker: resetMarker }, error: null };
+      }
+      if (name === 'get_auth_password_version') {
+        return { data: resetMarker, error: null };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
@@ -420,10 +414,6 @@ describe('account input normalization', () => {
         auth: {
           admin: {
             updateUserById,
-            getUserById: vi.fn(async () => ({
-              data: { user: { updated_at: authUpdatedAt, app_metadata: { password_change_effect_marker: resetMarker } } },
-              error: null
-            }))
           }
         }
       }
@@ -441,7 +431,8 @@ describe('account input normalization', () => {
     expect(updateUserById).not.toHaveBeenCalled();
     expect(rpcNames).toEqual([
       'prepare_account_password_reset',
-      'prepare_password_change_admin_reset'
+      'prepare_password_change_admin_reset',
+      'get_auth_password_version'
     ]);
   });
 
@@ -455,7 +446,10 @@ describe('account input normalization', () => {
         return { data: activeAdminProfile, error: null };
       }
       if (name === 'prepare_password_change_admin_reset') {
-        return { data: { state: 'completed', effectMarker: completedResetMarker, authUpdatedAt }, error: null };
+        return { data: { state: 'completed', effectMarker: completedResetMarker }, error: null };
+      }
+      if (name === 'get_auth_password_version') {
+        return { data: laterPasswordMarker, error: null };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
@@ -473,15 +467,6 @@ describe('account input normalization', () => {
         auth: {
           admin: {
             updateUserById,
-            getUserById: vi.fn(async () => ({
-              data: {
-                user: {
-                  updated_at: authUpdatedAt,
-                  app_metadata: { password_change_effect_marker: laterPasswordMarker }
-                }
-              },
-              error: null
-            }))
           }
         }
       }
@@ -499,57 +484,9 @@ describe('account input normalization', () => {
     expect(updateUserById).not.toHaveBeenCalled();
     expect(rpcNames).toEqual([
       'prepare_account_password_reset',
-      'prepare_password_change_admin_reset'
+      'prepare_password_change_admin_reset',
+      'get_auth_password_version'
     ]);
-  });
-
-  it('rejects a completed reset key after an out-of-band Auth update preserves the marker', async () => {
-    const resetMarker = 'c'.repeat(64);
-    const rpc = vi.fn(async (name: string) => {
-      if (name === 'prepare_account_password_reset') {
-        return { data: activeAdminProfile, error: null };
-      }
-      if (name === 'prepare_password_change_admin_reset') {
-        return { data: { state: 'completed', effectMarker: resetMarker, authUpdatedAt }, error: null };
-      }
-      throw new Error(`Unexpected RPC: ${name}`);
-    });
-    const updateUserById = vi.fn();
-    const clients = {
-      admin: {
-        from: vi.fn(() => ({
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
-            }))
-          }))
-        })),
-        rpc,
-        auth: {
-          admin: {
-            updateUserById,
-            getUserById: vi.fn(async () => ({
-              data: {
-                user: {
-                  updated_at: '2026-09-12T12:11:00.123456Z',
-                  app_metadata: { password_change_effect_marker: resetMarker }
-                }
-              },
-              error: null
-            }))
-          }
-        }
-      }
-    } as unknown as SupabaseClients;
-
-    await expect(new SupabaseAccountService(
-      clients,
-      'test-phone-pepper-at-least-32-characters'
-    ).resetPassword(actor, {
-      targetProfileId: activeAdminProfile.id,
-      idempotencyKey: 'reset-completed-version-stale-0005'
-    })).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
-    expect(updateUserById).not.toHaveBeenCalled();
   });
 
   it('keeps reset recovery unresolved when the external Auth reset fails', async () => {

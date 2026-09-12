@@ -53,11 +53,9 @@ interface PasswordChangeReceiptState {
   state: PasswordChangeState;
   attemptCount?: number;
   effectMarker?: string;
-  authUpdatedAt?: string;
 }
 
 const effectMarkerPattern = /^[0-9a-f]{64}$/;
-const authUpdatedAtPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function normalizeLoginId(loginId: string): string {
   return loginId.normalize('NFKC').trim().toLocaleLowerCase('ko-KR');
@@ -220,8 +218,7 @@ export class SupabaseAuthService implements AuthService {
         activeSessionId,
         clientDigest,
         newPassword,
-        this.effectMarker(inspected),
-        this.authUpdatedAt(inspected)
+        this.effectMarker(inspected)
       ))) {
         throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 비밀번호 변경에 사용한 Idempotency-Key입니다.');
       }
@@ -261,8 +258,7 @@ export class SupabaseAuthService implements AuthService {
         activeSessionId,
         clientDigest,
         newPassword,
-        this.effectMarker(prepared),
-        this.authUpdatedAt(prepared)
+        this.effectMarker(prepared)
       ))) {
         throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 비밀번호 변경에 사용한 Idempotency-Key입니다.');
       }
@@ -276,22 +272,14 @@ export class SupabaseAuthService implements AuthService {
     }
 
     if (prepared.state === 'recover') {
-      const recoveredAuthUpdatedAt = await this.verifyPasswordEffect(
+      if (await this.verifyPasswordEffect(
         actor,
         activeSessionId,
         clientDigest,
         newPassword,
         this.effectMarker(prepared)
-      );
-      if (recoveredAuthUpdatedAt) {
-        await this.completePasswordChange(
-          actor,
-          activeSessionId,
-          idempotencyKey,
-          fingerprint,
-          claimDigest,
-          recoveredAuthUpdatedAt
-        );
+      )) {
+        await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
         return;
       }
       await this.finishPasswordChangeFailure(
@@ -319,28 +307,19 @@ export class SupabaseAuthService implements AuthService {
         password: toSupabaseAuthPassword(newPassword),
         app_metadata: {
           profile_id: actor.profileId,
-          role: actor.role,
-          password_change_effect_marker: effectMarker
+          role: actor.role
         }
       }
     );
     if (updateError) {
-      const recoveredAuthUpdatedAt = await this.verifyPasswordEffect(
+      if (await this.verifyPasswordEffect(
         actor,
         activeSessionId,
         clientDigest,
         newPassword,
         effectMarker
-      );
-      if (recoveredAuthUpdatedAt) {
-        await this.completePasswordChange(
-          actor,
-          activeSessionId,
-          idempotencyKey,
-          fingerprint,
-          claimDigest,
-          recoveredAuthUpdatedAt
-        );
+      )) {
+        await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
         return;
       }
       if (await this.verifyPassword(actor, activeSessionId, clientDigest, currentPassword)) {
@@ -367,15 +346,22 @@ export class SupabaseAuthService implements AuthService {
       );
     }
 
-    const authUpdatedAt = await this.currentPasswordEffectVersion(actor.authUserId, effectMarker);
-    await this.completePasswordChange(
-      actor,
-      activeSessionId,
-      idempotencyKey,
-      fingerprint,
-      claimDigest,
-      authUpdatedAt
-    );
+    if (await this.currentPasswordEffectVersion(actor.authUserId) !== effectMarker) {
+      await this.finishPasswordChangeFailure(
+        actor,
+        activeSessionId,
+        idempotencyKey,
+        claimDigest,
+        'PASSWORD_STATE_INCONSISTENT'
+      );
+      throw new AppError(
+        500,
+        'PASSWORD_STATE_INCONSISTENT',
+        '비밀번호 변경 결과를 안전하게 확인할 수 없습니다. 관리자에게 비밀번호 초기화를 요청해 주세요.'
+      );
+    }
+
+    await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
   }
 
   private async verifyPassword(
@@ -450,83 +436,34 @@ export class SupabaseAuthService implements AuthService {
     return receipt.effectMarker;
   }
 
-  private authUpdatedAt(receipt: PasswordChangeReceiptState): string {
-    if (!receipt.authUpdatedAt || !authUpdatedAtPattern.test(receipt.authUpdatedAt)) {
-      throw new AppError(
-        500,
-        'PASSWORD_CHANGE_RECEIPT_FAILED',
-        '비밀번호 변경 요청 상태를 확인하지 못했습니다.'
-      );
-    }
-    return receipt.authUpdatedAt;
-  }
-
-  private async currentPasswordEffectVersion(
-    authUserId: string,
-    expectedEffectMarker: string
-  ): Promise<string> {
-    const { data, error } = await this.clients.admin.auth.admin.getUserById(authUserId);
-    const updatedAt = data.user?.updated_at;
-    if (
-      error ||
-      !data.user ||
-      data.user.app_metadata?.password_change_effect_marker !== expectedEffectMarker ||
-      typeof updatedAt !== 'string' ||
-      !authUpdatedAtPattern.test(updatedAt)
-    ) {
-      throw new AppError(
-        503,
-        'PASSWORD_CHANGE_RECEIPT_FAILED',
-        '비밀번호 변경 요청 상태를 확인하지 못했습니다.'
-      );
-    }
-    return updatedAt;
-  }
-
   private async verifyPasswordEffect(
     actor: Actor,
     activeSessionId: string,
     clientDigest: string,
     password: string,
-    effectMarker: string,
-    expectedAuthUpdatedAt?: string
-  ): Promise<string | null> {
-    const { data, error } = await this.clients.admin.auth.admin.getUserById(actor.authUserId);
-    if (error || !data.user) {
+    effectMarker: string
+  ): Promise<boolean> {
+    if (await this.currentPasswordEffectVersion(actor.authUserId) !== effectMarker) {
+      return false;
+    }
+    if (!(await this.verifyPassword(actor, activeSessionId, clientDigest, password))) {
+      return false;
+    }
+    return (await this.currentPasswordEffectVersion(actor.authUserId)) === effectMarker;
+  }
+
+  private async currentPasswordEffectVersion(authUserId: string): Promise<string> {
+    const { data, error } = await this.clients.admin.rpc('get_auth_password_version', {
+      p_auth_user_id: authUserId
+    });
+    if (error || typeof data !== 'string' || !effectMarkerPattern.test(data)) {
       throw new AppError(
         503,
         'PASSWORD_CHANGE_RECEIPT_FAILED',
         '비밀번호 변경 요청 상태를 확인하지 못했습니다.'
       );
     }
-    const updatedAt = data.user.updated_at;
-    if (
-      data.user.app_metadata?.password_change_effect_marker !== effectMarker ||
-      typeof updatedAt !== 'string' ||
-      !authUpdatedAtPattern.test(updatedAt) ||
-      (expectedAuthUpdatedAt !== undefined && updatedAt !== expectedAuthUpdatedAt)
-    ) {
-      return null;
-    }
-    if (!(await this.verifyPassword(actor, activeSessionId, clientDigest, password))) {
-      return null;
-    }
-
-    const { data: confirmedData, error: confirmedError } =
-      await this.clients.admin.auth.admin.getUserById(actor.authUserId);
-    const confirmedUpdatedAt = confirmedData.user?.updated_at;
-    if (
-      confirmedError ||
-      !confirmedData.user ||
-      confirmedData.user.app_metadata?.password_change_effect_marker !== effectMarker ||
-      typeof confirmedUpdatedAt !== 'string' ||
-      !authUpdatedAtPattern.test(confirmedUpdatedAt) ||
-      (expectedAuthUpdatedAt !== undefined && confirmedUpdatedAt !== expectedAuthUpdatedAt)
-    ) {
-      return null;
-    }
-
-    return confirmedUpdatedAt;
+    return data;
   }
 
   private async passwordChangeRpc(
@@ -545,8 +482,7 @@ export class SupabaseAuthService implements AuthService {
     activeSessionId: string,
     idempotencyKey: string,
     fingerprint: string,
-    claimDigest: string,
-    authUpdatedAt: string
+    claimDigest: string
   ): Promise<void> {
     const { error } = await this.clients.admin.rpc('complete_password_change', {
       p_actor_profile_id: actor.profileId,
@@ -554,8 +490,7 @@ export class SupabaseAuthService implements AuthService {
       p_session_id: activeSessionId,
       p_idempotency_key: idempotencyKey,
       p_request_hash: fingerprint,
-      p_claim_digest: claimDigest,
-      p_auth_updated_at: authUpdatedAt
+      p_claim_digest: claimDigest
     });
     if (error) {
       throw this.passwordChangeDatabaseError(error, true);

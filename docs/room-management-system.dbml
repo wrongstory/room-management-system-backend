@@ -1447,7 +1447,7 @@ Table private.password_change_commands {
   command_type text [not null, note: 'account.password.change']
   idempotency_key text [not null]
   request_hash text [not null, note: 'Safe actor+command fingerprint; contains no password-derived evidence']
-  effect_marker text [not null, note: 'Nonsecret server operation marker also bound to current Auth app_metadata']
+  effect_marker text [not null, note: 'Nonsecret password effect version bound by the auth.users password-hash trigger']
   session_digest text [not null, note: 'Domain-separated SHA-256 binding; raw session ID is not stored']
   state text [not null, note: 'auth_pending/completed/failed/inconsistent/reset_pending/superseded']
   claim_digest text [note: 'Random claim digest; not a credential or password verifier']
@@ -1464,7 +1464,7 @@ Table private.password_change_commands {
     (actor_profile_id) [unique, note: 'Partial: unresolved state only']
   }
 
-  Note: '#46 private response-loss receipt. Replay requires matching Auth marker and current password effect. Raw Data API access denied; password, password-derived verifier, token, and raw session ID are forbidden.'
+  Note: '#46 private response-loss receipt. Replay requires matching private password version and current password effect. Raw Data API access denied; password, password-derived verifier, token, and raw session ID are forbidden.'
 }
 
 Table private.password_verification_rate_limits {
@@ -1482,13 +1482,21 @@ Table private.password_reset_auth_markers {
   command_execution_id uuid [pk]
   actor_profile_id uuid [not null]
   target_profile_id uuid [not null]
-  effect_marker text [not null, note: 'Nonsecret Auth operation provenance']
+  effect_marker text [not null, note: 'Nonsecret password effect version prepared before Auth reset']
   state text [not null, note: 'prepared/completed']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   completed_at timestamptz
 
-  Note: 'Admin reset recovery is completed only after external Auth success and exact marker verification.'
+  Note: 'Admin reset recovery is completed only after external Auth success and exact private version verification.'
+}
+
+Table private.auth_password_versions {
+  auth_user_id uuid [pk]
+  password_version text [not null, note: 'Random nonsecret identity; never an Auth hash or password-derived value']
+  rotated_at timestamptz [not null]
+
+  Note: 'Private password-specific provenance. A minimal auth.users trigger rotates it only when encrypted_password actually changes; raw Data API and service-role table access are denied.'
 }
 
 Table private.actor_activity_events {

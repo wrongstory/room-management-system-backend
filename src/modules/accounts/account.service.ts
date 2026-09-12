@@ -106,8 +106,6 @@ const accountColumns = [
   'updated_at'
 ].join(',');
 
-const authUpdatedAtPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
-
 export function normalizeDisplayName(value: string): { displayName: string; normalized: string } {
   const displayName = value.normalize('NFKC').trim().replace(/\s+/g, ' ');
   return {
@@ -410,9 +408,8 @@ export class SupabaseAccountService implements AccountService {
     if (before.role === 'developer') {
       throw new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 역할은 변경할 수 없습니다.');
     }
-    const preservedEffectMetadata = await this.passwordEffectMetadata(before.auth_user_id);
     const { error: authError } = await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
-      app_metadata: { profile_id: before.id, role: input.role, ...preservedEffectMetadata }
+      app_metadata: { profile_id: before.id, role: input.role }
     });
     if (authError) {
       throw new AppError(502, 'AUTH_USER_UPDATE_FAILED', '인증 계정 역할을 변경하지 못했습니다.');
@@ -427,7 +424,7 @@ export class SupabaseAccountService implements AccountService {
     });
     if (error || !data) {
       const { error: rollbackError } = await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
-        app_metadata: { profile_id: before.id, role: before.role, ...preservedEffectMetadata }
+        app_metadata: { profile_id: before.id, role: before.role }
       });
       if (rollbackError) {
         throw new AppError(
@@ -540,9 +537,6 @@ export class SupabaseAccountService implements AccountService {
     const recoveryState = recoveryData && typeof recoveryData === 'object'
       ? (recoveryData as { state?: unknown }).state
       : null;
-    const recoveryAuthUpdatedAt = recoveryData && typeof recoveryData === 'object'
-      ? (recoveryData as { authUpdatedAt?: unknown }).authUpdatedAt
-      : null;
     if (
       recoveryError ||
       (recoveryState !== 'prepared' && recoveryState !== 'completed') ||
@@ -552,31 +546,11 @@ export class SupabaseAccountService implements AccountService {
       throw databaseError(recoveryError);
     }
     if (recoveryState === 'completed') {
-      const { data: replayAuthState, error: replayAuthStateError } =
-        await this.clients.admin.auth.admin.getUserById(row.auth_user_id);
-      if (replayAuthStateError || !replayAuthState.user) {
-        throw new AppError(
-          502,
-          'PASSWORD_RESET_STATE_UPDATE_FAILED',
-          '인증 비밀번호 초기화 상태를 확인하지 못했습니다. 다시 시도해 주세요.'
-        );
-      }
-      if (replayAuthState.user.app_metadata?.password_change_effect_marker !== effectMarker) {
+      if (await this.currentPasswordEffectVersion(row.auth_user_id) !== effectMarker) {
         throw new AppError(
           409,
           'IDEMPOTENCY_KEY_REUSED',
           '이미 완료된 비밀번호 초기화 키는 후속 비밀번호 변경 뒤 재사용할 수 없습니다.'
-        );
-      }
-      if (
-        typeof recoveryAuthUpdatedAt !== 'string' ||
-        !authUpdatedAtPattern.test(recoveryAuthUpdatedAt) ||
-        replayAuthState.user.updated_at !== recoveryAuthUpdatedAt
-      ) {
-        throw new AppError(
-          409,
-          'IDEMPOTENCY_KEY_REUSED',
-          '이미 완료된 비밀번호 초기화 키는 후속 인증 변경 뒤 재사용할 수 없습니다.'
         );
       }
       return toAccount(row);
@@ -585,23 +559,13 @@ export class SupabaseAccountService implements AccountService {
       password: toSupabaseAuthPassword(row.phone_last_four),
       app_metadata: {
         profile_id: row.id,
-        role: row.role,
-        password_change_effect_marker: effectMarker
+        role: row.role
       }
     });
     if (authError) {
       throw new AppError(502, 'AUTH_PASSWORD_RESET_FAILED', '인증 비밀번호를 초기화하지 못했습니다. 다시 시도해 주세요.');
     }
-    const { data: authState, error: authStateError } = await this.clients.admin.auth.admin.getUserById(
-      row.auth_user_id
-    );
-    const authUpdatedAt = authState.user?.updated_at;
-    if (
-      authStateError ||
-      authState.user?.app_metadata?.password_change_effect_marker !== effectMarker ||
-      typeof authUpdatedAt !== 'string' ||
-      !authUpdatedAtPattern.test(authUpdatedAt)
-    ) {
+    if (await this.currentPasswordEffectVersion(row.auth_user_id) !== effectMarker) {
       throw new AppError(
         502,
         'PASSWORD_RESET_STATE_UPDATE_FAILED',
@@ -615,8 +579,7 @@ export class SupabaseAccountService implements AccountService {
         p_target_profile_id: input.targetProfileId,
         p_idempotency_key: input.idempotencyKey,
         p_request_hash: hash,
-        p_effect_marker: effectMarker,
-        p_auth_updated_at: authUpdatedAt
+        p_effect_marker: effectMarker
       }
     );
     if (finalizeError) {
@@ -629,17 +592,18 @@ export class SupabaseAccountService implements AccountService {
     return toAccount(row);
   }
 
-  private async passwordEffectMetadata(
-    authUserId: string
-  ): Promise<{ password_change_effect_marker?: string }> {
-    const { data, error } = await this.clients.admin.auth.admin.getUserById(authUserId);
-    if (error || !data.user) {
-      throw new AppError(502, 'AUTH_USER_READ_FAILED', '인증 계정 상태를 확인하지 못했습니다.');
+  private async currentPasswordEffectVersion(authUserId: string): Promise<string> {
+    const { data, error } = await this.clients.admin.rpc('get_auth_password_version', {
+      p_auth_user_id: authUserId
+    });
+    if (error || typeof data !== 'string' || !/^[0-9a-f]{64}$/.test(data)) {
+      throw new AppError(
+        502,
+        'PASSWORD_RESET_STATE_UPDATE_FAILED',
+        '인증 비밀번호 초기화 상태를 확인하지 못했습니다. 다시 시도해 주세요.'
+      );
     }
-    const marker = data.user.app_metadata?.password_change_effect_marker;
-    return typeof marker === 'string' && /^[0-9a-f]{64}$/.test(marker)
-      ? { password_change_effect_marker: marker }
-      : {};
+    return data;
   }
 
   private async runAccountRpc(name: string, parameters: Record<string, string>): Promise<Account> {
