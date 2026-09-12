@@ -36,6 +36,8 @@ const envSchema = z.object({
     (value) => Buffer.byteLength(value, 'utf8') >= 32,
     'Web Push binding HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
   ),
+  VAPID_CURRENT_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/),
+  VAPID_PUBLIC_KEY: z.string().regex(/^[A-Za-z0-9_-]{87}$/),
   GOOGLE_DRIVE_CLIENT_ID: z.string().max(4096).optional(),
   GOOGLE_DRIVE_CLIENT_SECRET: z.string().max(4096).optional(),
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().max(4096).optional(),
@@ -132,6 +134,13 @@ const envSchema = z.object({
     env.GOOGLE_DRIVE_REFRESH_TOKEN,env.GOOGLE_DRIVE_ROOT_FOLDER_ID,...reservationPiiKeyringSecrets];
   if (webPushSecrets.some((value,index) => existingSecrets.includes(value) || webPushSecrets.indexOf(value)!==index)) {
     context.addIssue({code:'custom',path:['WEB_PUSH_BINDING_DIGEST_SECRET'],message:'Web Push key/digest는 모든 기존 비밀값 및 서로 간에 분리해야 합니다.'});
+  }
+
+  try {
+    const publicKey=Buffer.from(env.VAPID_PUBLIC_KEY,'base64url');
+    if(publicKey.length!==65||publicKey[0]!==4||publicKey.toString('base64url')!==env.VAPID_PUBLIC_KEY) throw new Error();
+  } catch {
+    context.addIssue({code:'custom',path:['VAPID_PUBLIC_KEY'],message:'VAPID 공개키는 canonical base64url P-256 uncompressed point여야 합니다.'});
   }
 
   try {

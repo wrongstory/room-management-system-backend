@@ -499,6 +499,13 @@ profile lock으로 직렬화한다. rotation/retire CAS 때 이전 secret은 같
 revision은 90일 metadata retention 대상이다. event에는 subscription UUID/reason/server time만 남는다.
 모든 private table은 RLS와 raw grant deny이고 service-only RPC가 live Auth session을 다시 검증한다.
 
+#112의 45번째 append-only migration은 `web_push_subscription_revisions.vapid_key_version`을 추가한다.
+새 registration/rotation revision은 서버 current VAPID version을 같은 transaction에서 반드시 기록하고,
+immutable guard가 이후 변경을 금지한다. 기존 revision의 NULL은 legacy-unbound provenance로 보존하며 current
+version으로 backfill하거나 추측하지 않는다. delivery context는 exact target revision의 binding만 반환하고
+NULL이면 `VAPID_KEY_UNBOUND` dead-letter로 push를 종결한다. 공개 config API는 key version과 public P-256
+point만 노출하며 private scalar, endpoint/envelope/session/digest는 계속 private 원장 밖으로 나오지 않는다.
+
 #111은 immutable `notification_delivery_outbox`를 job intent로 보존하고
 `notification_delivery_jobs` → exact `notification_delivery_targets` → append-only
 `notification_delivery_attempts`/`notification_delivery_attempt_results` 및

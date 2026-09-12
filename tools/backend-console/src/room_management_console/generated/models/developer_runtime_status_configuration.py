@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from ..models.developer_runtime_status_configuration_notificationcursorhmacsecret import (
         DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET,
     )
+    from ..models.developer_runtime_status_configuration_notificationdeliveryinvokesecret import (
+        DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET,
+    )
     from ..models.developer_runtime_status_configuration_payrollcursorhmacsecret import (
         DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET,
     )
@@ -50,6 +53,33 @@ if TYPE_CHECKING:
     )
     from ..models.developer_runtime_status_configuration_schedulerinvokesecret import (
         DeveloperRuntimeStatusConfigurationSCHEDULERINVOKESECRET,
+    )
+    from ..models.developer_runtime_status_configuration_vapidcurrentkeyversion import (
+        DeveloperRuntimeStatusConfigurationVAPIDCURRENTKEYVERSION,
+    )
+    from ..models.developer_runtime_status_configuration_vapidkeyringjson import (
+        DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON,
+    )
+    from ..models.developer_runtime_status_configuration_vapidprivatekey import (
+        DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY,
+    )
+    from ..models.developer_runtime_status_configuration_vapidpublickey import (
+        DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY,
+    )
+    from ..models.developer_runtime_status_configuration_vapidsubject import (
+        DeveloperRuntimeStatusConfigurationVAPIDSUBJECT,
+    )
+    from ..models.developer_runtime_status_configuration_webpushbindingdigestsecret import (
+        DeveloperRuntimeStatusConfigurationWEBPUSHBINDINGDIGESTSECRET,
+    )
+    from ..models.developer_runtime_status_configuration_webpushsubscriptionkeybase64 import (
+        DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYBASE64,
+    )
+    from ..models.developer_runtime_status_configuration_webpushsubscriptionkeyringjson import (
+        DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYRINGJSON,
+    )
+    from ..models.developer_runtime_status_configuration_webpushsubscriptionkeyversion import (
+        DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYVERSION,
     )
 
 
@@ -76,6 +106,16 @@ class DeveloperRuntimeStatusConfiguration:
         photo_purge_invoke_secret (DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET):
         payroll_cursor_hmac_secret (DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET):
         notification_cursor_hmac_secret (DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET):
+        web_push_subscription_key_base64 (DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYBASE64):
+        web_push_subscription_key_version (DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYVERSION):
+        web_push_subscription_keyring_json (DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYRINGJSON):
+        web_push_binding_digest_secret (DeveloperRuntimeStatusConfigurationWEBPUSHBINDINGDIGESTSECRET):
+        vapid_subject (DeveloperRuntimeStatusConfigurationVAPIDSUBJECT):
+        vapid_current_key_version (DeveloperRuntimeStatusConfigurationVAPIDCURRENTKEYVERSION):
+        vapid_public_key (DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY):
+        vapid_private_key (DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY):
+        vapid_keyring_json (DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON):
+        notification_delivery_invoke_secret (DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET):
     """
 
     account_phone_pepper: DeveloperRuntimeStatusConfigurationACCOUNTPHONEPEPPER
@@ -95,6 +135,24 @@ class DeveloperRuntimeStatusConfiguration:
     photo_purge_invoke_secret: DeveloperRuntimeStatusConfigurationPHOTOPURGEINVOKESECRET
     payroll_cursor_hmac_secret: DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET
     notification_cursor_hmac_secret: DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET
+    web_push_subscription_key_base64: (
+        DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYBASE64
+    )
+    web_push_subscription_key_version: (
+        DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYVERSION
+    )
+    web_push_subscription_keyring_json: (
+        DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYRINGJSON
+    )
+    web_push_binding_digest_secret: DeveloperRuntimeStatusConfigurationWEBPUSHBINDINGDIGESTSECRET
+    vapid_subject: DeveloperRuntimeStatusConfigurationVAPIDSUBJECT
+    vapid_current_key_version: DeveloperRuntimeStatusConfigurationVAPIDCURRENTKEYVERSION
+    vapid_public_key: DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY
+    vapid_private_key: DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY
+    vapid_keyring_json: DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON
+    notification_delivery_invoke_secret: (
+        DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET
+    )
 
     def to_dict(self) -> dict[str, Any]:
         account_phone_pepper = self.account_phone_pepper.to_dict()
@@ -129,6 +187,26 @@ class DeveloperRuntimeStatusConfiguration:
 
         notification_cursor_hmac_secret = self.notification_cursor_hmac_secret.to_dict()
 
+        web_push_subscription_key_base64 = self.web_push_subscription_key_base64.to_dict()
+
+        web_push_subscription_key_version = self.web_push_subscription_key_version.to_dict()
+
+        web_push_subscription_keyring_json = self.web_push_subscription_keyring_json.to_dict()
+
+        web_push_binding_digest_secret = self.web_push_binding_digest_secret.to_dict()
+
+        vapid_subject = self.vapid_subject.to_dict()
+
+        vapid_current_key_version = self.vapid_current_key_version.to_dict()
+
+        vapid_public_key = self.vapid_public_key.to_dict()
+
+        vapid_private_key = self.vapid_private_key.to_dict()
+
+        vapid_keyring_json = self.vapid_keyring_json.to_dict()
+
+        notification_delivery_invoke_secret = self.notification_delivery_invoke_secret.to_dict()
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -148,6 +226,16 @@ class DeveloperRuntimeStatusConfiguration:
                 "PHOTO_PURGE_INVOKE_SECRET": photo_purge_invoke_secret,
                 "PAYROLL_CURSOR_HMAC_SECRET": payroll_cursor_hmac_secret,
                 "NOTIFICATION_CURSOR_HMAC_SECRET": notification_cursor_hmac_secret,
+                "WEB_PUSH_SUBSCRIPTION_KEY_BASE64": web_push_subscription_key_base64,
+                "WEB_PUSH_SUBSCRIPTION_KEY_VERSION": web_push_subscription_key_version,
+                "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON": web_push_subscription_keyring_json,
+                "WEB_PUSH_BINDING_DIGEST_SECRET": web_push_binding_digest_secret,
+                "VAPID_SUBJECT": vapid_subject,
+                "VAPID_CURRENT_KEY_VERSION": vapid_current_key_version,
+                "VAPID_PUBLIC_KEY": vapid_public_key,
+                "VAPID_PRIVATE_KEY": vapid_private_key,
+                "VAPID_KEYRING_JSON": vapid_keyring_json,
+                "NOTIFICATION_DELIVERY_INVOKE_SECRET": notification_delivery_invoke_secret,
             }
         )
 
@@ -176,6 +264,9 @@ class DeveloperRuntimeStatusConfiguration:
         from ..models.developer_runtime_status_configuration_notificationcursorhmacsecret import (
             DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET,
         )
+        from ..models.developer_runtime_status_configuration_notificationdeliveryinvokesecret import (
+            DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET,
+        )
         from ..models.developer_runtime_status_configuration_payrollcursorhmacsecret import (
             DeveloperRuntimeStatusConfigurationPAYROLLCURSORHMACSECRET,
         )
@@ -199,6 +290,33 @@ class DeveloperRuntimeStatusConfiguration:
         )
         from ..models.developer_runtime_status_configuration_schedulerinvokesecret import (
             DeveloperRuntimeStatusConfigurationSCHEDULERINVOKESECRET,
+        )
+        from ..models.developer_runtime_status_configuration_vapidcurrentkeyversion import (
+            DeveloperRuntimeStatusConfigurationVAPIDCURRENTKEYVERSION,
+        )
+        from ..models.developer_runtime_status_configuration_vapidkeyringjson import (
+            DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON,
+        )
+        from ..models.developer_runtime_status_configuration_vapidprivatekey import (
+            DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY,
+        )
+        from ..models.developer_runtime_status_configuration_vapidpublickey import (
+            DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY,
+        )
+        from ..models.developer_runtime_status_configuration_vapidsubject import (
+            DeveloperRuntimeStatusConfigurationVAPIDSUBJECT,
+        )
+        from ..models.developer_runtime_status_configuration_webpushbindingdigestsecret import (
+            DeveloperRuntimeStatusConfigurationWEBPUSHBINDINGDIGESTSECRET,
+        )
+        from ..models.developer_runtime_status_configuration_webpushsubscriptionkeybase64 import (
+            DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYBASE64,
+        )
+        from ..models.developer_runtime_status_configuration_webpushsubscriptionkeyringjson import (
+            DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYRINGJSON,
+        )
+        from ..models.developer_runtime_status_configuration_webpushsubscriptionkeyversion import (
+            DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYVERSION,
         )
 
         d = dict(src_dict)
@@ -286,6 +404,58 @@ class DeveloperRuntimeStatusConfiguration:
             )
         )
 
+        web_push_subscription_key_base64 = (
+            DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYBASE64.from_dict(
+                d.pop("WEB_PUSH_SUBSCRIPTION_KEY_BASE64")
+            )
+        )
+
+        web_push_subscription_key_version = (
+            DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYVERSION.from_dict(
+                d.pop("WEB_PUSH_SUBSCRIPTION_KEY_VERSION")
+            )
+        )
+
+        web_push_subscription_keyring_json = (
+            DeveloperRuntimeStatusConfigurationWEBPUSHSUBSCRIPTIONKEYRINGJSON.from_dict(
+                d.pop("WEB_PUSH_SUBSCRIPTION_KEYRING_JSON")
+            )
+        )
+
+        web_push_binding_digest_secret = (
+            DeveloperRuntimeStatusConfigurationWEBPUSHBINDINGDIGESTSECRET.from_dict(
+                d.pop("WEB_PUSH_BINDING_DIGEST_SECRET")
+            )
+        )
+
+        vapid_subject = DeveloperRuntimeStatusConfigurationVAPIDSUBJECT.from_dict(
+            d.pop("VAPID_SUBJECT")
+        )
+
+        vapid_current_key_version = (
+            DeveloperRuntimeStatusConfigurationVAPIDCURRENTKEYVERSION.from_dict(
+                d.pop("VAPID_CURRENT_KEY_VERSION")
+            )
+        )
+
+        vapid_public_key = DeveloperRuntimeStatusConfigurationVAPIDPUBLICKEY.from_dict(
+            d.pop("VAPID_PUBLIC_KEY")
+        )
+
+        vapid_private_key = DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY.from_dict(
+            d.pop("VAPID_PRIVATE_KEY")
+        )
+
+        vapid_keyring_json = DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON.from_dict(
+            d.pop("VAPID_KEYRING_JSON")
+        )
+
+        notification_delivery_invoke_secret = (
+            DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET.from_dict(
+                d.pop("NOTIFICATION_DELIVERY_INVOKE_SECRET")
+            )
+        )
+
         developer_runtime_status_configuration = cls(
             account_phone_pepper=account_phone_pepper,
             reservation_pii_key_base64=reservation_pii_key_base64,
@@ -302,6 +472,16 @@ class DeveloperRuntimeStatusConfiguration:
             photo_purge_invoke_secret=photo_purge_invoke_secret,
             payroll_cursor_hmac_secret=payroll_cursor_hmac_secret,
             notification_cursor_hmac_secret=notification_cursor_hmac_secret,
+            web_push_subscription_key_base64=web_push_subscription_key_base64,
+            web_push_subscription_key_version=web_push_subscription_key_version,
+            web_push_subscription_keyring_json=web_push_subscription_keyring_json,
+            web_push_binding_digest_secret=web_push_binding_digest_secret,
+            vapid_subject=vapid_subject,
+            vapid_current_key_version=vapid_current_key_version,
+            vapid_public_key=vapid_public_key,
+            vapid_private_key=vapid_private_key,
+            vapid_keyring_json=vapid_keyring_json,
+            notification_delivery_invoke_secret=notification_delivery_invoke_secret,
         )
 
         return developer_runtime_status_configuration

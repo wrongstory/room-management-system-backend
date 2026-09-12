@@ -146,7 +146,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "notification_delivery_worker",
+    expectedMigrationName === "web_push_vapid_binding",
     "expected migration must not depend on a remote execution timestamp",
   );
 });
@@ -172,6 +172,7 @@ Deno.test("developer database status adds only bounded notification delivery hea
                 expiredLeases: 0,
                 oldestDueAt: "2026-09-11T00:00:00.000Z",
               },
+              activation: { cronConfigured: true, cronActive: true },
               checkedAt: "2026-09-11T00:01:00.000Z",
             },
             error: null,
@@ -206,6 +207,13 @@ Deno.test("developer database status adds only bounded notification delivery hea
   assert(
     "notificationDelivery" in result,
     "bounded delivery health is present",
+  );
+  const delivery = result.notificationDelivery as Record<string, unknown>;
+  assert(delivery.status === "degraded", "missing secrets fail health closed");
+  assert(
+    (delivery.activation as Record<string, unknown>)
+      .functionSecretsConfigured === false,
+    "Function Secrets expose only one aggregate configured boolean",
   );
   const serialized = JSON.stringify(result).toLowerCase();
   for (

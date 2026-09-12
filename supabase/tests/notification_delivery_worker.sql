@@ -14,7 +14,7 @@ returns jsonb language sql as $$
     pg_temp.sha('endpoint-'||seed),pg_temp.sha('session-'||seed),pg_temp.sha('material-'||seed),
     expires,'v1',encode(convert_to('sealed-'||seed,'utf8'),'base64'),
     encode(repeat('n',12)::bytea,'base64'),encode(repeat('t',16)::bytea,'base64'),
-    'delivery-register-'||seed,pg_temp.sha('request-'||seed)
+    'delivery-register-'||seed,pg_temp.sha('request-'||seed),'vapid-v1'
   )
 $$;
 create function pg_temp.notice(profile_n integer,notice_n integer,outbox_n integer,at_time timestamptz default clock_timestamp())
@@ -185,7 +185,7 @@ select public.claim_notification_deliveries(repeat('8',64),10);
 select lives_ok($$select public.register_web_push_subscription(pg_temp.did(2),pg_temp.did(902),pg_temp.did(1001),pg_temp.did(1001),1,
   pg_temp.sha('endpoint-maid-rotated'),pg_temp.sha('session-maid'),pg_temp.sha('material-maid-rotated'),null,'v1',
   encode(convert_to('sealed-maid-rotated','utf8'),'base64'),encode(repeat('o',12)::bytea,'base64'),encode(repeat('u',16)::bytea,'base64'),
-  'delivery-rotate-maid',pg_temp.sha('request-maid-rotated'))$$,'subscription rotates after target snapshot');
+  'delivery-rotate-maid',pg_temp.sha('request-maid-rotated'),'vapid-v1')$$,'subscription rotates after target snapshot');
 select is((public.get_notification_delivery_envelope((select id from private.notification_delivery_targets where outbox_id=pg_temp.did(3007)),1,repeat('8',64))->>'reasonCode'),
   'REVISION_SUPERSEDED','permit-before rotation barrier refuses superseded target without retargeting');
 select is((select count(*) from private.notification_delivery_targets where outbox_id=pg_temp.did(3007)),1::bigint,'rotation never expands or replaces first fanout target');
@@ -246,6 +246,20 @@ select public.permit_notification_delivery((select id from dead_target),(select 
 select public.settle_notification_delivery((select id from dead_target),(select lease_version from dead_target),(select claim_digest from dead_target),'payload_rejected','PAYLOAD_REJECTED',null);
 select is((select status from private.notification_delivery_jobs where outbox_id=pg_temp.did(3201)),'dead_letter','target terminal dead letter also terminalizes its job');
 
+-- Simulate an immutable revision created before migration 45. No current-key
+-- guess is allowed: it terminalizes without a provider permit or HTTP attempt.
+alter table private.web_push_subscription_revisions disable trigger user;
+update private.web_push_subscription_revisions set vapid_key_version=null
+where id=(select current_revision_id from private.web_push_subscriptions where id=pg_temp.did(1201));
+alter table private.web_push_subscription_revisions enable trigger user;
+select pg_temp.notice(7,2203,3203);
+select public.claim_notification_deliveries(pg_temp.sha('legacy-unbound-claim'),10);
+create temporary table unbound_target as select id,lease_version,claim_digest
+from private.notification_delivery_targets where outbox_id=pg_temp.did(3203);
+select is((public.get_notification_delivery_envelope((select id from unbound_target),(select lease_version from unbound_target),pg_temp.sha('legacy-unbound-claim'))->>'reasonCode'),'VAPID_KEY_UNBOUND','legacy unbound revision is never guessed from current VAPID config');
+select is((select status from private.notification_delivery_targets where outbox_id=pg_temp.did(3203)),'dead_letter','legacy unbound target is terminal rather than retried forever');
+select is((select count(*) from private.notification_delivery_permits p join private.notification_delivery_attempts a on a.id=p.attempt_id join private.notification_delivery_targets t on t.id=a.target_id where t.outbox_id=pg_temp.did(3203)),0::bigint,'legacy unbound target obtains no send permit');
+
 select set_config('app.notification_writer_mode','typed_v1',true);
 insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
 values(pg_temp.did(2202),pg_temp.did(7),'cleaning_assignment_notified','room',pg_temp.did(2202),clock_timestamp(),clock_timestamp()+interval '10 minutes');
@@ -269,6 +283,9 @@ select is(((select value from delivery_health)#>>'{backlog,deadLetter}')::intege
   (select least(count(*),1000)::integer from private.notification_delivery_targets where status='dead_letter'),
   'target dead letters are counted once and never include job-only failures');
 select is((select value->>'status' from delivery_health),'degraded','empty successful heartbeat cannot hide unresolved job-only dead letter');
+select is((select value#>>'{activation,expectedCronName}' from delivery_health),'notification-delivery','developer health exposes only the expected scheduler name');
+select is((select (value#>>'{activation,cronConfigured}')::boolean from delivery_health),false,'source-only migration does not create the production notification Cron');
+select is((select (value#>>'{activation,cronActive}')::boolean from delivery_health),false,'missing notification Cron prevents false-green health');
 
 select is(coalesce(current_setting('app.notification_delivery_writer_mode',true),''),'','delivery writer capability clears after success paths');
 select is(coalesce(current_setting('app.web_push_writer_mode',true),''),'','web-push writer capability clears after automatic retirement');

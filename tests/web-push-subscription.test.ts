@@ -13,7 +13,7 @@ const actor:Actor={authUserId:'11000000-0000-4000-8000-000000000101',profileId:i
 const ecdh=createECDH('prime256v1');ecdh.generateKeys();
 const subscription:WebPushSubscriptionInput={endpoint:'https://push.example.invalid/send/opaque-capability',expirationTime:null,keys:{p256dh:ecdh.getPublicKey().toString('base64url'),auth:Buffer.alloc(16,7).toString('base64url')}};
 const key=Buffer.alloc(32,4).toString('base64');
-const config={key,keyVersion:'v2',keyring:{v1:Buffer.alloc(32,3).toString('base64')},bindingSecret:'web-push-binding-test-secret-123456789'};
+const config={key,keyVersion:'v2',keyring:{v1:Buffer.alloc(32,3).toString('base64')},bindingSecret:'web-push-binding-test-secret-123456789',vapidKeyVersion:'vapid-v2',vapidPublicKey:subscription.keys.p256dh};
 const vectorSubscription:WebPushSubscriptionInput={
   endpoint:'https://PUSH.Example.Invalid:443/send/%2Fopaque?b=2&a=%2F',expirationTime:null,
   keys:{p256dh:'BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU',auth:'BwcHBwcHBwcHBwcHBwcHBw'}
@@ -37,7 +37,7 @@ describe('Web Push envelope',()=>{
       materialDigest:'c08827336099b39bb92bd93ce466377eaa11712cc50f7539b7a8dfa5d4a58714',expirationAt:null,keyVersion:'v2',
       ciphertextBase64:'QKZyBOAIcKJ15U/1CBgEkJPN2MKesgrJzlZmAAMWi9XJTjdMQ3SgkdDR/Mk2zQtLGCKAFkaEp/vBj2cZ4AhLTmF8LBUfQ4KN4vI0IkeKmoqk2mKDmqEpLLAUH7UG9ostoBCSfaSGAWhqZyqnx9TQYJDuP+he1iQECM0k+M77Qxx6kW7UJRO7kNKj0LaAsCZkKCMRJGCo9GnSWlPMV7r92GJxcHjtzojdgCCZcFcKomlJ7qeOYDwvmX/q5Ld+D1WaMwoV8KmlhmilUfbUNki1tJOpHzyqKWI+zinuAJVtJFubhHrJ3p+4BfMnCjR+DON89cbf4Yqg1iADgkmK7oNwEX8jyIqjlDup0uOr4V8OdLA=',
       nonceBase64:'AAECAwQFBgcICQoL',authTagBase64:'z2dR/v7MHCXYiNtRehTrOA==',
-      requestHash:'f16d690cfc7680c506117970f4534a9e5b5f74f96977bc8c203d6beb2e0072ed'
+      requestHash:'a19b60927ac456910cda60cff24c9a671655e367d49431914ed067fdf7a2624c'
     });
     expect(decryptWebPushEnvelope(envelope,{actorProfileId:vectorIds.profile,sessionDigest:envelope.sessionDigest,endpointDigest:envelope.endpointDigest,subscriptionId:vectorIds.subscription,revisionNo:2},vectorConfig)).toEqual({
       subscription:{...vectorSubscription,endpoint:'https://push.example.invalid/send/%2Fopaque?b=2&a=%2F'},
@@ -77,6 +77,7 @@ describe('Web Push service and routes',()=>{
     const args=rpc.mock.calls[0]?.[1] as Record<string,unknown>;
     expect(JSON.stringify(args)).not.toContain(subscription.endpoint);
     expect(args).not.toHaveProperty('p_endpoint');expect(args).not.toHaveProperty('p_auth');expect(args).not.toHaveProperty('p_p256dh');
+    expect(args.p_vapid_key_version).toBe('vapid-v2');
     await expect(service.register({...actor,role:'developer'},{subscription},'push-register-0002')).rejects.toMatchObject({code:'WEB_PUSH_ACCESS_REQUIRED'});
   });
   it('canonicalizes uppercase UUIDs and equivalent endpoints before AAD, hash and RPC',async()=>{
@@ -111,7 +112,9 @@ describe('Web Push service and routes',()=>{
     await instance.register(createWebPushSubscriptionRoutes(service),{prefix:'/v1/push-subscriptions'});return instance;
   }
   it('supports only exact register/retire routes, strict bodies, idempotency and no-store',async()=>{
-    const service:WebPushSubscriptionService={register:vi.fn(async()=>({id:ids.subscription})),retire:vi.fn(async()=>({id:ids.subscription}))};const instance=await app(service);
+    const service:WebPushSubscriptionService={config:vi.fn(async()=>({keyVersion:'vapid-v2',publicKey:subscription.keys.p256dh})),register:vi.fn(async()=>({id:ids.subscription})),retire:vi.fn(async()=>({id:ids.subscription}))};const instance=await app(service);
+    const configured=await instance.inject({method:'GET',url:'/v1/push-subscriptions/config'});
+    expect(configured.statusCode).toBe(200);expect(configured.json()).toEqual({keyVersion:'vapid-v2',publicKey:subscription.keys.p256dh});expect(configured.headers['cache-control']).toBe('no-store');
     const registered=await instance.inject({method:'POST',url:'/v1/push-subscriptions',headers:{'idempotency-key':'push-route-0001'},payload:{subscription}});
     expect(registered.statusCode).toBe(201);expect(registered.headers['cache-control']).toBe('no-store');
     const retired=await instance.inject({method:'POST',url:`/v1/push-subscriptions/${ids.subscription}/retire`,headers:{'idempotency-key':'push-route-0002'},payload:{expectedVersion:1}});
@@ -119,6 +122,7 @@ describe('Web Push service and routes',()=>{
     for(const request of [
       {method:'POST' as const,url:'/v1/push-subscriptions/',headers:{'idempotency-key':'push-route-0003'},payload:{subscription}},
       {method:'POST' as const,url:'/v1/push-subscriptions?x=1',headers:{'idempotency-key':'push-route-0004'},payload:{subscription}},
+      {method:'POST' as const,url:'/v1/push-subscriptions',headers:{'idempotency-key':'push-route-0007'},payload:{subscription,vapidKeyVersion:'client-forbidden'}},
       {method:'POST' as const,url:`/v1/push-subscriptions/${ids.subscription}/retire/extra`,headers:{'idempotency-key':'push-route-0005'},payload:{expectedVersion:1}},
       {method:'POST' as const,url:`/v1/push-subscriptions/${ids.subscription}/retire`,headers:{'idempotency-key':'push-route-0006'},payload:{expectedVersion:1,endpoint:'forbidden'}}
     ])expect((await instance.inject(request)).statusCode).toBeGreaterThanOrEqual(400);

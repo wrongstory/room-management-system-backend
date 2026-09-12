@@ -394,6 +394,9 @@ verify_jwt = false
 [functions.photo-purge]
 verify_jwt = false
 
+[functions.notification-delivery]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

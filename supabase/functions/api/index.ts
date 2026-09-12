@@ -102,6 +102,7 @@ import {
   registerWebPushSubscription,
   retireWebPushSubscription,
   type WebPushCryptoConfig,
+  webPushPublicConfig,
   webPushRetirePath,
 } from "../_shared/web-push-subscription-api.ts";
 
@@ -852,6 +853,20 @@ export async function handleApiRequest(
       );
     }
 
+    if (request.method === "GET" && path === "/v1/push-subscriptions/config") {
+      if ([...new URL(request.url).searchParams.keys()].length) {
+        throw new EdgeError(
+          400,
+          "INVALID_WEB_PUSH_SUBSCRIPTION",
+          "query 항목은 허용되지 않습니다.",
+        );
+      }
+      return jsonResponse(
+        webPushPublicConfig(actor, dependencies.webPushCryptoConfig),
+        200,
+        { ...corsHeaders, "cache-control": "no-store" },
+      );
+    }
     if (request.method === "POST" && path === "/v1/push-subscriptions") {
       return jsonResponse(
         await registerWebPushSubscription(

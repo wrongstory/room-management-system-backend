@@ -1,7 +1,7 @@
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 
-export const expectedMigrationName = "notification_delivery_worker";
+export const expectedMigrationName = "web_push_vapid_binding";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -53,6 +53,28 @@ const secretConfigurationAllowlist = [
   "GOOGLE_DRIVE_REFRESH_TOKEN",
   "GOOGLE_DRIVE_ROOT_FOLDER_ID",
   "PHOTO_PURGE_INVOKE_SECRET",
+  "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+  "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
+  "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+  "WEB_PUSH_BINDING_DIGEST_SECRET",
+  "VAPID_SUBJECT",
+  "VAPID_CURRENT_KEY_VERSION",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PRIVATE_KEY",
+  "VAPID_KEYRING_JSON",
+  "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+] as const;
+const notificationDeliverySecretNames = [
+  "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+  "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
+  "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+  "WEB_PUSH_BINDING_DIGEST_SECRET",
+  "VAPID_SUBJECT",
+  "VAPID_CURRENT_KEY_VERSION",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PRIVATE_KEY",
+  "VAPID_KEYRING_JSON",
+  "NOTIFICATION_DELIVERY_INVOKE_SECRET",
 ] as const;
 
 interface AuditRow {
@@ -205,10 +227,27 @@ export async function developerDatabaseStatus(
     }),
   ]);
   const runtime = developerRuntimeStatus();
+  const configuration = runtime.configuration as Record<
+    string,
+    { configured?: boolean }
+  >;
+  const functionSecretsConfigured = notificationDeliverySecretNames.every(
+    (name) => configuration[name]?.configured === true,
+  );
+  const delivery = notificationDelivery as Record<string, unknown>;
+  const activation = delivery.activation &&
+      typeof delivery.activation === "object" &&
+      !Array.isArray(delivery.activation)
+    ? delivery.activation as Record<string, unknown>
+    : {};
   return {
     ...database,
     photoPurge,
-    notificationDelivery,
+    notificationDelivery: {
+      ...delivery,
+      status: functionSecretsConfigured ? delivery.status : "degraded",
+      activation: { ...activation, functionSecretsConfigured },
+    },
     environment: runtime.environment,
     projectRef: runtime.projectRef,
   };

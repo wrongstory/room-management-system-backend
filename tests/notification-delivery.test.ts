@@ -21,6 +21,8 @@ const config = {
   keyVersion: "v1",
   keyring: {},
   bindingSecret: "b".repeat(32),
+  vapidKeyVersion: "vapid-v1",
+  vapidPublicKey: "B".repeat(87),
   nonce: new Uint8Array(12).fill(9),
 };
 const input = {
@@ -85,6 +87,7 @@ function mockDb(
             sessionDigest: envelope.sessionDigest,
             endpointDigest: envelope.endpointDigest,
             keyVersion: envelope.keyVersion,
+            vapidKeyVersion: "vapid-v1",
             ciphertextBase64: envelope.ciphertextBase64,
             nonceBase64: envelope.nonceBase64,
             authTagBase64: envelope.authTagBase64,
@@ -257,6 +260,7 @@ describe("provider-neutral notification delivery worker", () => {
               sessionDigest: envelope.sessionDigest,
               endpointDigest: envelope.endpointDigest,
               keyVersion: envelope.keyVersion,
+              vapidKeyVersion: "vapid-v1",
               ciphertextBase64: envelope.ciphertextBase64,
               nonceBase64: envelope.nonceBase64,
               authTagBase64: envelope.authTagBase64,
@@ -382,6 +386,7 @@ describe("provider-neutral notification delivery worker", () => {
               sessionDigest: fixture.itemEnvelope.sessionDigest,
               endpointDigest: fixture.itemEnvelope.endpointDigest,
               keyVersion: fixture.itemEnvelope.keyVersion,
+              vapidKeyVersion: "vapid-v1",
               ciphertextBase64: fixture.itemEnvelope.ciphertextBase64,
               nonceBase64: fixture.itemEnvelope.nonceBase64,
               authTagBase64: fixture.itemEnvelope.authTagBase64,

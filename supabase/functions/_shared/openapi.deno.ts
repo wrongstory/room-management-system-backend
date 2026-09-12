@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 97 &&
+    Object.keys(document.paths).length === 98 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 104,
-    "candidate contract 97/104",
+        ).length === 105,
+    "candidate contract 98/105",
   );
 });
 
@@ -118,15 +118,17 @@ Deno.test("notification OpenAPI exposes only bounded own-inbox operations", asyn
   );
 });
 
-Deno.test("Web Push OpenAPI exposes two strict secret-free own commands", async () => {
+Deno.test("Web Push OpenAPI exposes current public config and two strict secret-free own commands", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const register = document.paths["/v1/push-subscriptions"].post;
+  const config = document.paths["/v1/push-subscriptions/config"].get;
   const retire =
     document.paths["/v1/push-subscriptions/{subscriptionId}/retire"].post;
   assert(
-    register.operationId === "registerWebPushSubscription" &&
+    config.operationId === "getWebPushSubscriptionConfig" &&
+      register.operationId === "registerWebPushSubscription" &&
       retire.operationId === "retireWebPushSubscription",
-    "two stable operations",
+    "three stable operations",
   );
   assert(
     register["x-required-roles"].join() === "admin,maid" &&

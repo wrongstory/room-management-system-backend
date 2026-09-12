@@ -1,6 +1,7 @@
 import {
   registerWebPushSubscription,
   retireWebPushSubscription,
+  webPushPublicConfig,
   webPushRetirePath,
 } from "./web-push-subscription-api.ts";
 
@@ -20,6 +21,32 @@ const actor = {
   role: "maid" as const,
   mustChangePassword: false,
 };
+Deno.test("Web Push public config is exact and business-role only", () => {
+  const value = webPushPublicConfig(actor, {
+    key: new Uint8Array(32),
+    version: "v1",
+    secret: "x".repeat(32),
+    vapidKeyVersion: "vapid-v1",
+    vapidPublicKey: "B".repeat(87),
+  });
+  assert(
+    JSON.stringify(value) ===
+      JSON.stringify({ keyVersion: "vapid-v1", publicKey: "B".repeat(87) }),
+  );
+  let denied = false;
+  try {
+    webPushPublicConfig({ ...actor, role: "developer" as const }, {
+      key: new Uint8Array(32),
+      version: "v1",
+      secret: "x".repeat(32),
+      vapidKeyVersion: "vapid-v1",
+      vapidPublicKey: "B".repeat(87),
+    });
+  } catch {
+    denied = true;
+  }
+  assert(denied);
+});
 function b64u(bytes: Uint8Array) {
   return btoa(String.fromCharCode(...bytes)).replace(/=/g, "").replace(
     /\+/g,
@@ -73,6 +100,11 @@ function env() {
   Deno.env.set(
     "WEB_PUSH_BINDING_DIGEST_SECRET",
     "web-push-edge-binding-secret-123456789",
+  );
+  Deno.env.set("VAPID_CURRENT_KEY_VERSION", "vapid-v1");
+  Deno.env.set(
+    "VAPID_PUBLIC_KEY",
+    "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
   );
 }
 
@@ -137,6 +169,9 @@ Deno.test("Edge Web Push matches the shared Node/Deno canonical identity and enc
     key: new Uint8Array(32).fill(4),
     version: "v2",
     secret: "web-push-binding-test-secret-123456789",
+    vapidKeyVersion: "vapid-v2",
+    vapidPublicKey:
+      "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
     nonce: new Uint8Array([...Array(12).keys()]),
   };
   let rpcArgs: Record<string, unknown> | undefined;
@@ -198,7 +233,7 @@ Deno.test("Edge Web Push matches the shared Node/Deno canonical identity and enc
   );
   assert(
     rpcArgs.p_request_hash ===
-      "f16d690cfc7680c506117970f4534a9e5b5f74f96977bc8c203d6beb2e0072ed",
+      "a19b60927ac456910cda60cff24c9a671655e367d49431914ed067fdf7a2624c",
   );
   assert(
     rpcArgs.p_ciphertext_base64 ===
@@ -405,6 +440,9 @@ Deno.test("Edge Web Push projection rejects invalid RFC3339 timestamps without r
           key: new Uint8Array(32).fill(4),
           version: "v1",
           secret: "web-push-edge-binding-secret-123456789",
+          vapidKeyVersion: "vapid-v1",
+          vapidPublicKey:
+            "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU",
         },
       );
     } catch (error) {

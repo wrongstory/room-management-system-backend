@@ -12,6 +12,8 @@ export interface WebPushCryptoConfig {
   keyVersion: string;
   keyring: Record<string, string>;
   bindingSecret: string;
+  vapidKeyVersion: string;
+  vapidPublicKey: string;
   /** Deterministic vector input only; production callers leave this undefined. */
   nonce?: Uint8Array;
 }
@@ -131,7 +133,8 @@ export function createWebPushEnvelope(
     materialDigest,
     sessionDigest,
     subscriptionId: canonicalRequestSubscriptionId,
-    revisionNo
+    revisionNo,
+    vapidKeyVersion: config.vapidKeyVersion
   }), 'utf8').digest('hex');
   return {
     endpointDigest,

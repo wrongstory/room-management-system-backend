@@ -8,6 +8,7 @@ export interface WebPushExpectedCurrent { subscriptionId: string; version: numbe
 export interface RegisterWebPushInput { subscription: WebPushSubscriptionInput; expectedCurrent?: WebPushExpectedCurrent | undefined }
 export interface RetireWebPushInput { subscriptionId: string; expectedVersion: number }
 export interface WebPushSubscriptionService {
+  config(actor: Actor): Promise<{ keyVersion: string; publicKey: string }>;
   register(actor: Actor, input: RegisterWebPushInput, idempotencyKey: string): Promise<unknown>;
   retire(actor: Actor, input: RetireWebPushInput, idempotencyKey: string): Promise<unknown>;
 }
@@ -71,9 +72,14 @@ export function assertWebPushResponseSize(value: unknown): void {
 }
 
 export class SupabaseWebPushSubscriptionService implements WebPushSubscriptionService {
-  constructor(private readonly clients: SupabaseClients, private readonly config: WebPushCryptoConfig) {}
+  constructor(private readonly clients: SupabaseClients, private readonly cryptoConfig: WebPushCryptoConfig) {}
   private async rpc(name:string,args:Record<string,unknown>):Promise<unknown>{
     const {data,error}=await this.clients.admin.rpc(name,args); if(error||data===null) throw databaseError(error); return data;
+  }
+  async config(actor:Actor):Promise<{keyVersion:string;publicKey:string}>{
+    if(actor.role!=='admin'&&actor.role!=='maid') throw databaseError({message:'WEB_PUSH_ACCESS_REQUIRED'});
+    const result={keyVersion:this.cryptoConfig.vapidKeyVersion,publicKey:this.cryptoConfig.vapidPublicKey};
+    assertWebPushResponseSize(result); return result;
   }
   async register(actor:Actor,input:RegisterWebPushInput,idempotencyKey:string):Promise<unknown>{
     if(actor.role!=='admin'&&actor.role!=='maid') throw databaseError({message:'WEB_PUSH_ACCESS_REQUIRED'});
@@ -82,14 +88,14 @@ export class SupabaseWebPushSubscriptionService implements WebPushSubscriptionSe
     const expectedSubscriptionId=input.expectedCurrent===undefined?null:canonicalWebPushUuid(input.expectedCurrent.subscriptionId);
     const proposed=canonicalWebPushUuid(expectedSubscriptionId??randomUUID());
     const revision=(input.expectedCurrent?.version??0)+1;
-    const envelope=createWebPushEnvelope(input.subscription,actorProfileId,sid,proposed,revision,this.config,expectedSubscriptionId);
+    const envelope=createWebPushEnvelope(input.subscription,actorProfileId,sid,proposed,revision,this.cryptoConfig,expectedSubscriptionId);
     const result=projection(await this.rpc('register_web_push_subscription',{
       p_actor_profile_id:actorProfileId,p_session_id:sid,p_proposed_subscription_id:proposed,
       p_expected_subscription_id:expectedSubscriptionId,p_expected_version:input.expectedCurrent?.version??null,
       p_endpoint_digest:envelope.endpointDigest,p_session_digest:envelope.sessionDigest,p_material_digest:envelope.materialDigest,
       p_expiration_at:envelope.expirationAt,p_key_version:envelope.keyVersion,p_ciphertext_base64:envelope.ciphertextBase64,
       p_nonce_base64:envelope.nonceBase64,p_auth_tag_base64:envelope.authTagBase64,p_idempotency_key:idempotencyKey,
-      p_request_hash:envelope.requestHash
+      p_request_hash:envelope.requestHash,p_vapid_key_version:this.cryptoConfig.vapidKeyVersion
     })); assertWebPushResponseSize(result); return result;
   }
   async retire(actor:Actor,input:RetireWebPushInput,idempotencyKey:string):Promise<unknown>{

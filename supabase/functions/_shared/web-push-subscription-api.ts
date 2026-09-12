@@ -20,6 +20,8 @@ export interface WebPushCryptoConfig {
   key: Uint8Array;
   version: string;
   secret: string;
+  vapidKeyVersion: string;
+  vapidPublicKey: string;
   /** Deterministic vector input only; production callers leave this undefined. */
   nonce?: Uint8Array;
 }
@@ -120,6 +122,18 @@ function config(): WebPushCryptoConfig {
   const key = decodeBase64(encodedKey);
   const version = required("WEB_PUSH_SUBSCRIPTION_KEY_VERSION");
   const secret = required("WEB_PUSH_BINDING_DIGEST_SECRET");
+  const vapidKeyVersion = required("VAPID_CURRENT_KEY_VERSION");
+  const vapidPublicKey = required("VAPID_PUBLIC_KEY");
+  let vapidPoint: Uint8Array;
+  try {
+    vapidPoint = b64u(vapidPublicKey, 65);
+  } catch {
+    throw new EdgeError(
+      503,
+      "WEB_PUSH_NOT_CONFIGURED",
+      "Web Push 구독 암호화 설정이 필요합니다.",
+    );
+  }
   const forbidden = [
     "SUPABASE_ANON_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
@@ -175,6 +189,8 @@ function config(): WebPushCryptoConfig {
   if (
     key.length !== 32 || base64(key) !== encodedKey ||
     !/^[A-Za-z0-9._-]{1,32}$/.test(version) || utf8(secret).length < 32 ||
+    !/^[A-Za-z0-9._-]{1,32}$/.test(vapidKeyVersion) ||
+    vapidPoint[0] !== 4 ||
     forbidden.includes(encodedKey) || forbidden.includes(secret) ||
     encodedKey === secret ||
     prior.includes(encodedKey) || prior.includes(secret) ||
@@ -187,7 +203,18 @@ function config(): WebPushCryptoConfig {
       "Web Push 구독 암호화 설정이 필요합니다.",
     );
   }
-  return { key, version, secret };
+  return { key, version, secret, vapidKeyVersion, vapidPublicKey };
+}
+
+export function webPushPublicConfig(
+  actor: EdgeActor,
+  cryptoConfig: WebPushCryptoConfig = config(),
+): Record<string, string> {
+  webPushActor(actor);
+  return {
+    keyVersion: cryptoConfig.vapidKeyVersion,
+    publicKey: cryptoConfig.vapidPublicKey,
+  };
 }
 async function parseBody(request: Request): Promise<Record<string, unknown>> {
   const raw = await request.text();
@@ -493,6 +520,7 @@ export async function registerWebPushSubscription(
           sessionDigest,
           subscriptionId: expected?.subscriptionId ?? null,
           revisionNo: revision,
+          vapidKeyVersion: cfg.vapidKeyVersion,
         }),
       ),
     ),
@@ -517,6 +545,7 @@ export async function registerWebPushSubscription(
         p_auth_tag_base64: base64(tag),
         p_idempotency_key: idempotencyKey(request),
         p_request_hash: requestHash,
+        p_vapid_key_version: cfg.vapidKeyVersion,
       }),
     ),
   });

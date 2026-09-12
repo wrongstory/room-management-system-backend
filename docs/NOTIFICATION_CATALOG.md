@@ -89,3 +89,25 @@ provider configuration failure가 parent job을 막으면 모든 non-terminal si
 재claim되지 않으며, `resume_blocked_notification_deliveries()`만 parent와 sibling 전체를 함께 재개한다.
 developer health의 `jobOnlyDeadLetter`는 target 생성 전 contract 실패만 별도로 세고 target dead-letter와
 중복하지 않는다.
+
+## #112 Web Push payload/provider 계약
+
+각 subscription revision은 registration/rotation 당시 서버가 선택한 immutable VAPID key version에
+결합된다. legacy NULL binding은 current key로 추측하지 않고 `VAPID_KEY_UNBOUND` / `suppressed`
+dead-letter로 push만 종결한다. 사용자가 새 public config로 명시적으로 구독을 rotate하면 이후 새
+revision부터 다시 delivery 대상이 되며 과거 notification은 재생하지 않는다.
+
+provider plaintext는 catalog의 원문 title/body/category를 전달하지 않는다. 잠금화면 문구는
+`새 업무 알림`과 `앱에서 확인해 주세요`로 고정하고, data payload는 `payloadVersion=1`, stable
+`notificationId`, 아래 source-controlled deep-link kind 중 하나와 entity UUID만 허용한다.
+
+- `cleaningTarget`
+- `assignmentRequest`
+- `submission`
+- `complaintCase`
+- `payrollCycle`
+- `payrollProfile`
+
+plaintext는 UTF-8 3072 bytes, RFC8291 encrypted body는 4096 bytes를 넘지 않는다. accepted 결과는
+push service 수락이며 device 표시 보장이 아니다. service worker는 stable notification ID를 tag로 쓰고
+`renotify=false`, 24시간/최대 1000건 bounded dedupe로 at-least-once 재전송을 수렴시킨다.

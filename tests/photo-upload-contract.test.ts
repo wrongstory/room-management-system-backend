@@ -116,6 +116,6 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     for(const key of Object.keys(sample))expect(summary.properties).toHaveProperty(key);
     for(const key of ['requestHash','idempotencyKey','providerLocator','claimDigest','token','rawAfterState'])
       expect(summary.properties).not.toHaveProperty(key);
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(97);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(98);
   });
 });

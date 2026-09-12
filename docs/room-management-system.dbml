@@ -1373,12 +1373,13 @@ Table private.web_push_subscription_revisions {
   material_digest text [not null]
   expiration_at timestamptz
   key_version text [not null]
+  vapid_key_version text [note: '#112 immutable server-selected VAPID binding; NULL means legacy unbound and is never guessed/backfilled']
   created_at timestamptz [not null]
   indexes {
     (subscription_id, revision_no) [unique]
     (profile_id, created_at, id)
   }
-  Note: '#110 immutable non-plaintext provenance, retained 90 days after logical retirement.'
+  Note: '#110 immutable non-plaintext provenance, retained 90 days after logical retirement. #112 delivery uses only the exact bound VAPID key version; legacy NULL fails closed.'
 }
 
 Table private.web_push_subscription_secrets {
