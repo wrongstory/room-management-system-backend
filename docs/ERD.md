@@ -160,6 +160,7 @@ erDiagram
   ROOMS ||--o| ROOM_CURRENT_PIN : "현재 PIN 포인터"
   ROOMS ||--o{ ROOM_PIN_CHANGE_LEASES : "물리 변경 조정"
   ROOM_PIN_REVISIONS ||--o{ ROOM_PIN_REVEAL_LEASES : "30초 이하 복호화 허가"
+  ROOMS ||--o{ ROOM_PIN_SHEET_SYNC_OUTBOX : "현재 PIN projection"
   CLEANING_ASSIGNMENTS ||--o{ ROOM_PIN_ACCESS_LEASES : "현재 담당 계약"
   CLEANING_ATTEMPTS ||--o{ ROOM_PIN_ACCESS_LEASES : "현재 수행 계약"
   PROFILES ||--o{ RESERVATIONS : "등록·수정"
@@ -313,6 +314,38 @@ erDiagram
     timestamptz expires_at
     timestamptz finalized_at
   }
+  ROOM_PIN_SHEET_SYNC_OUTBOX {
+    uuid id PK
+    uuid room_id FK
+    bigint pin_version
+    text sync_status
+    text reason_code
+    text status
+    uuid claim_id
+    bigint lease_fence
+    timestamptz provider_write_started_at
+    int retry_count
+  }
+  ROOM_PIN_SHEET_SYNC_WORKER_STATE {
+    boolean singleton PK
+    text status
+    uuid claim_id
+    bigint lease_fence
+    timestamptz lease_expires_at
+    text blocked_reason_code
+  }
+  ROOM_PIN_SHEET_SYNC_HEARTBEAT {
+    boolean singleton PK
+    text status
+    int claimed
+    int projected
+    int already_current
+    int superseded
+    int retrying
+    int blocked
+    text error_code
+    timestamptz recorded_at
+  }
 ```
 
 핵심 제약:
@@ -329,6 +362,7 @@ erDiagram
 - PIN lease는 target·현재 assignment·현재 attempt·담당 메이드·최신 verified PIN version을 함께 고정하며 다른 객실/예약/과거 담당을 조합할 수 없다. PIN version이 바뀐 뒤 수동 checkout은 stale lease를 revoke-only하고 최신 version으로만 새 lease를 만든다.
 - #131 private PIN 원장은 AES-256-GCM ciphertext/12-byte nonce/tag/key version과 bounded nonsecret AAD context만 저장하며 plaintext, key, verifier, raw session ID는 저장하지 않는다. current pointer와 latest verified public sync event의 version이 정확히 같고 unresolved change lease가 없을 때만 PIN readiness가 verified다. legacy verified event만 있는 객실은 unconfigured다.
 - 물리 PIN 변경은 prepared mismatch를 먼저 기록하고 confirm 때만 immutable revision/current pointer를 원자 갱신한다. 만료된 mismatch는 actual re-entry revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결하며 room number 변경은 `ROOM_PIN_REISSUE_REQUIRED`다. 별도 생성 envelope의 `(key_version, nonce)`는 unique다.
+- #136 Sheet worker는 outbox의 current version만 global singleton lease/fence로 claim한다. private state/heartbeat은 FORCE RLS이고 safe developer projection 외 raw 접근을 막는다. Sheet는 room number 기준 bounded 121행 단방향 projection이며 equal-version 변조도 DB current로 repair한다. retry 소진·상위 Sheet version·불확실 write는 operator reconciliation 전 global block이다.
 - 퇴실점검 lifecycle은 아직 `[미확정]`이므로 `checkout_inspections`를 구현된 목표 테이블처럼 두지 않는다.
 
 ## 5. 청소 배정·수행·검수

@@ -397,6 +397,9 @@ verify_jwt = false
 [functions.notification-delivery]
 verify_jwt = false
 
+[functions.room-pin-sheet-sync]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

@@ -24,6 +24,18 @@ if TYPE_CHECKING:
     from ..models.developer_runtime_status_configuration_googledriverootfolderid import (
         DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
     )
+    from ..models.developer_runtime_status_configuration_googlesheetsroompintab import (
+        DeveloperRuntimeStatusConfigurationGOOGLESHEETSROOMPINTAB,
+    )
+    from ..models.developer_runtime_status_configuration_googlesheetsserviceaccountemail import (
+        DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTEMAIL,
+    )
+    from ..models.developer_runtime_status_configuration_googlesheetsserviceaccountprivatekey import (
+        DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTPRIVATEKEY,
+    )
+    from ..models.developer_runtime_status_configuration_googlesheetsspreadsheetid import (
+        DeveloperRuntimeStatusConfigurationGOOGLESHEETSSPREADSHEETID,
+    )
     from ..models.developer_runtime_status_configuration_notificationcursorhmacsecret import (
         DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET,
     )
@@ -50,6 +62,18 @@ if TYPE_CHECKING:
     )
     from ..models.developer_runtime_status_configuration_reservationscheduleractorprofileid import (
         DeveloperRuntimeStatusConfigurationRESERVATIONSCHEDULERACTORPROFILEID,
+    )
+    from ..models.developer_runtime_status_configuration_roompinkeybase64 import (
+        DeveloperRuntimeStatusConfigurationROOMPINKEYBASE64,
+    )
+    from ..models.developer_runtime_status_configuration_roompinkeyringjson import (
+        DeveloperRuntimeStatusConfigurationROOMPINKEYRINGJSON,
+    )
+    from ..models.developer_runtime_status_configuration_roompinkeyversion import (
+        DeveloperRuntimeStatusConfigurationROOMPINKEYVERSION,
+    )
+    from ..models.developer_runtime_status_configuration_roompinsheetsyncinvokesecret import (
+        DeveloperRuntimeStatusConfigurationROOMPINSHEETSYNCINVOKESECRET,
     )
     from ..models.developer_runtime_status_configuration_schedulerinvokesecret import (
         DeveloperRuntimeStatusConfigurationSCHEDULERINVOKESECRET,
@@ -120,6 +144,15 @@ class DeveloperRuntimeStatusConfiguration:
         vapid_private_key (DeveloperRuntimeStatusConfigurationVAPIDPRIVATEKEY):
         vapid_keyring_json (DeveloperRuntimeStatusConfigurationVAPIDKEYRINGJSON):
         notification_delivery_invoke_secret (DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET):
+        room_pin_key_base64 (DeveloperRuntimeStatusConfigurationROOMPINKEYBASE64):
+        room_pin_key_version (DeveloperRuntimeStatusConfigurationROOMPINKEYVERSION):
+        room_pin_keyring_json (DeveloperRuntimeStatusConfigurationROOMPINKEYRINGJSON):
+        room_pin_sheet_sync_invoke_secret (DeveloperRuntimeStatusConfigurationROOMPINSHEETSYNCINVOKESECRET):
+        google_sheets_service_account_email (DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTEMAIL):
+        google_sheets_service_account_private_key
+            (DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTPRIVATEKEY):
+        google_sheets_spreadsheet_id (DeveloperRuntimeStatusConfigurationGOOGLESHEETSSPREADSHEETID):
+        google_sheets_room_pin_tab (DeveloperRuntimeStatusConfigurationGOOGLESHEETSROOMPINTAB):
     """
 
     account_phone_pepper: DeveloperRuntimeStatusConfigurationACCOUNTPHONEPEPPER
@@ -158,6 +191,20 @@ class DeveloperRuntimeStatusConfiguration:
     notification_delivery_invoke_secret: (
         DeveloperRuntimeStatusConfigurationNOTIFICATIONDELIVERYINVOKESECRET
     )
+    room_pin_key_base64: DeveloperRuntimeStatusConfigurationROOMPINKEYBASE64
+    room_pin_key_version: DeveloperRuntimeStatusConfigurationROOMPINKEYVERSION
+    room_pin_keyring_json: DeveloperRuntimeStatusConfigurationROOMPINKEYRINGJSON
+    room_pin_sheet_sync_invoke_secret: (
+        DeveloperRuntimeStatusConfigurationROOMPINSHEETSYNCINVOKESECRET
+    )
+    google_sheets_service_account_email: (
+        DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTEMAIL
+    )
+    google_sheets_service_account_private_key: (
+        DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTPRIVATEKEY
+    )
+    google_sheets_spreadsheet_id: DeveloperRuntimeStatusConfigurationGOOGLESHEETSSPREADSHEETID
+    google_sheets_room_pin_tab: DeveloperRuntimeStatusConfigurationGOOGLESHEETSROOMPINTAB
 
     def to_dict(self) -> dict[str, Any]:
         account_phone_pepper = self.account_phone_pepper.to_dict()
@@ -214,6 +261,24 @@ class DeveloperRuntimeStatusConfiguration:
 
         notification_delivery_invoke_secret = self.notification_delivery_invoke_secret.to_dict()
 
+        room_pin_key_base64 = self.room_pin_key_base64.to_dict()
+
+        room_pin_key_version = self.room_pin_key_version.to_dict()
+
+        room_pin_keyring_json = self.room_pin_keyring_json.to_dict()
+
+        room_pin_sheet_sync_invoke_secret = self.room_pin_sheet_sync_invoke_secret.to_dict()
+
+        google_sheets_service_account_email = self.google_sheets_service_account_email.to_dict()
+
+        google_sheets_service_account_private_key = (
+            self.google_sheets_service_account_private_key.to_dict()
+        )
+
+        google_sheets_spreadsheet_id = self.google_sheets_spreadsheet_id.to_dict()
+
+        google_sheets_room_pin_tab = self.google_sheets_room_pin_tab.to_dict()
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -244,6 +309,14 @@ class DeveloperRuntimeStatusConfiguration:
                 "VAPID_PRIVATE_KEY": vapid_private_key,
                 "VAPID_KEYRING_JSON": vapid_keyring_json,
                 "NOTIFICATION_DELIVERY_INVOKE_SECRET": notification_delivery_invoke_secret,
+                "ROOM_PIN_KEY_BASE64": room_pin_key_base64,
+                "ROOM_PIN_KEY_VERSION": room_pin_key_version,
+                "ROOM_PIN_KEYRING_JSON": room_pin_keyring_json,
+                "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET": room_pin_sheet_sync_invoke_secret,
+                "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL": google_sheets_service_account_email,
+                "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY": google_sheets_service_account_private_key,
+                "GOOGLE_SHEETS_SPREADSHEET_ID": google_sheets_spreadsheet_id,
+                "GOOGLE_SHEETS_ROOM_PIN_TAB": google_sheets_room_pin_tab,
             }
         )
 
@@ -268,6 +341,18 @@ class DeveloperRuntimeStatusConfiguration:
         )
         from ..models.developer_runtime_status_configuration_googledriverootfolderid import (
             DeveloperRuntimeStatusConfigurationGOOGLEDRIVEROOTFOLDERID,
+        )
+        from ..models.developer_runtime_status_configuration_googlesheetsroompintab import (
+            DeveloperRuntimeStatusConfigurationGOOGLESHEETSROOMPINTAB,
+        )
+        from ..models.developer_runtime_status_configuration_googlesheetsserviceaccountemail import (
+            DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTEMAIL,
+        )
+        from ..models.developer_runtime_status_configuration_googlesheetsserviceaccountprivatekey import (
+            DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTPRIVATEKEY,
+        )
+        from ..models.developer_runtime_status_configuration_googlesheetsspreadsheetid import (
+            DeveloperRuntimeStatusConfigurationGOOGLESHEETSSPREADSHEETID,
         )
         from ..models.developer_runtime_status_configuration_notificationcursorhmacsecret import (
             DeveloperRuntimeStatusConfigurationNOTIFICATIONCURSORHMACSECRET,
@@ -295,6 +380,18 @@ class DeveloperRuntimeStatusConfiguration:
         )
         from ..models.developer_runtime_status_configuration_reservationscheduleractorprofileid import (
             DeveloperRuntimeStatusConfigurationRESERVATIONSCHEDULERACTORPROFILEID,
+        )
+        from ..models.developer_runtime_status_configuration_roompinkeybase64 import (
+            DeveloperRuntimeStatusConfigurationROOMPINKEYBASE64,
+        )
+        from ..models.developer_runtime_status_configuration_roompinkeyringjson import (
+            DeveloperRuntimeStatusConfigurationROOMPINKEYRINGJSON,
+        )
+        from ..models.developer_runtime_status_configuration_roompinkeyversion import (
+            DeveloperRuntimeStatusConfigurationROOMPINKEYVERSION,
+        )
+        from ..models.developer_runtime_status_configuration_roompinsheetsyncinvokesecret import (
+            DeveloperRuntimeStatusConfigurationROOMPINSHEETSYNCINVOKESECRET,
         )
         from ..models.developer_runtime_status_configuration_schedulerinvokesecret import (
             DeveloperRuntimeStatusConfigurationSCHEDULERINVOKESECRET,
@@ -473,6 +570,48 @@ class DeveloperRuntimeStatusConfiguration:
             )
         )
 
+        room_pin_key_base64 = DeveloperRuntimeStatusConfigurationROOMPINKEYBASE64.from_dict(
+            d.pop("ROOM_PIN_KEY_BASE64")
+        )
+
+        room_pin_key_version = DeveloperRuntimeStatusConfigurationROOMPINKEYVERSION.from_dict(
+            d.pop("ROOM_PIN_KEY_VERSION")
+        )
+
+        room_pin_keyring_json = DeveloperRuntimeStatusConfigurationROOMPINKEYRINGJSON.from_dict(
+            d.pop("ROOM_PIN_KEYRING_JSON")
+        )
+
+        room_pin_sheet_sync_invoke_secret = (
+            DeveloperRuntimeStatusConfigurationROOMPINSHEETSYNCINVOKESECRET.from_dict(
+                d.pop("ROOM_PIN_SHEET_SYNC_INVOKE_SECRET")
+            )
+        )
+
+        google_sheets_service_account_email = (
+            DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTEMAIL.from_dict(
+                d.pop("GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL")
+            )
+        )
+
+        google_sheets_service_account_private_key = (
+            DeveloperRuntimeStatusConfigurationGOOGLESHEETSSERVICEACCOUNTPRIVATEKEY.from_dict(
+                d.pop("GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY")
+            )
+        )
+
+        google_sheets_spreadsheet_id = (
+            DeveloperRuntimeStatusConfigurationGOOGLESHEETSSPREADSHEETID.from_dict(
+                d.pop("GOOGLE_SHEETS_SPREADSHEET_ID")
+            )
+        )
+
+        google_sheets_room_pin_tab = (
+            DeveloperRuntimeStatusConfigurationGOOGLESHEETSROOMPINTAB.from_dict(
+                d.pop("GOOGLE_SHEETS_ROOM_PIN_TAB")
+            )
+        )
+
         developer_runtime_status_configuration = cls(
             account_phone_pepper=account_phone_pepper,
             reservation_pii_key_base64=reservation_pii_key_base64,
@@ -500,6 +639,14 @@ class DeveloperRuntimeStatusConfiguration:
             vapid_private_key=vapid_private_key,
             vapid_keyring_json=vapid_keyring_json,
             notification_delivery_invoke_secret=notification_delivery_invoke_secret,
+            room_pin_key_base64=room_pin_key_base64,
+            room_pin_key_version=room_pin_key_version,
+            room_pin_keyring_json=room_pin_keyring_json,
+            room_pin_sheet_sync_invoke_secret=room_pin_sheet_sync_invoke_secret,
+            google_sheets_service_account_email=google_sheets_service_account_email,
+            google_sheets_service_account_private_key=google_sheets_service_account_private_key,
+            google_sheets_spreadsheet_id=google_sheets_spreadsheet_id,
+            google_sheets_room_pin_tab=google_sheets_room_pin_tab,
         )
 
         return developer_runtime_status_configuration

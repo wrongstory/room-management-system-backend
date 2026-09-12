@@ -23,7 +23,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@58cf63e36fde8fd209e8ab18508b59d2bd275d0e`이며 base snapshot은 48 migrations / OpenAPI 98 paths / 105 operations다. #128은 source/dev 완료 상태다. #131 candidate는 기존 48개 blob을 수정하지 않는 49번째 append-only migration과 4개 PIN operation을 추가해 102 paths / 109 operations가 되며, 병합 전 source gate 검증 대상이다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@d9b6ce90fa8f924a4a62cea6566fc8e7754f054b`이며 base snapshot은 49 migrations / OpenAPI 102 paths / 109 operations다. #131 Phase A는 source/dev 완료 상태다. #136 Phase B candidate는 기존 49개 blob을 수정하지 않는 50번째 append-only migration과 private worker Edge Function을 추가하며 공개 OpenAPI 수는 유지한다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
 
@@ -34,6 +34,14 @@ Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinD
 물리 변경은 `prepare → physical lock change → confirm`이며 prepare가 즉시 mismatch를 기록하지만 current pointer는 confirm까지 유지한다. expired/uncertain mismatch는 actual PIN re-entry confirm 또는 기존 current의 confirmed physical rollback으로만 해소한다. maid read/change는 기존 public access lease의 exact room/target/current assignment/current attempt/maid/current pin version을 authority로 사용하고, change는 in-progress에서만 허용한다. maid confirm은 기존 lease를 revoke하고 동일 작업 권한·만료 시각의 새 pin version lease를 원자 재발급한다. reveal은 30초 이하 private 보조 lease, 최종 DB authorization recheck, authoritative lease `revealed_at`, `sensitive.read` append가 모두 성공한 뒤 남은 TTL 안에서만 plaintext를 반환한다.
 
 private revision/current/change/reveal/outbox tables는 FORCE RLS와 explicit revoke로 Data API를 닫는다. Phase-B outbox와 public sync event에는 room/version/status/source-controlled reason만 있고 envelope/PIN/AAD bytes는 없다. 모든 PIN RPC는 `reservation-command` global advisory lock을 가장 먼저 획득해 cancel/handover/complete와 동일한 lock graph를 사용한다. Google provider, worker, full resync, Cron/Vault/production secret 설정은 이 Phase A에 포함하지 않는다.
+
+### #136 Google Sheets PIN projection worker — source candidate
+
+Phase B worker는 outbox의 current room/version만 global singleton lease/fence 아래 claim하고, 그때만 private encrypted revision context를 service-role RPC로 받는다. 런타임은 승인된 environment/projectRef/spreadsheet/tab mapping을 PIN 복호화와 Google OAuth 전에 확인한다. hosted mapping은 의도적으로 비어 있어 release 승인 전에는 fail-closed한다.
+
+Google Sheets에서는 `room_number`를 business identity로 하여 최대 121행을 bounded read한다. 행 이동은 실제 room-number 행을 갱신하고, 중복 identity·상위 Sheet version·다른 객실이 차지한 deterministic slot은 덮어쓰지 않는다. equal version도 canonical PIN과 safe marker가 다르면 DB 정본으로 repair한다. provider 시작 33초, settle 39초, 전체 45초의 하나의 absolute deadline을 DB/OAuth/Sheets response stream에 전달한다. HTTP 429/5xx는 bounded retry이고 write 시작 후 transport 불확실, retry 소진, schema/ACL/config 오류는 operator reconciliation 전 global block이다.
+
+private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 직접 접근을 막는다. developer database projection은 configured/approved boolean, safe counters/timestamp/stable error만 노출한다. full resync와 운영 mapping/ACL/Cron은 #137 범위다.
 
 ### #84/#85 사진 HTTP adapter와 보존 정리 worker — source/dev 완료
 

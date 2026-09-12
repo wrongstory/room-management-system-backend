@@ -493,6 +493,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - PIN 조회·변경은 객실, PIN version, actor, current notified assignment/current nonterminal attempt와 기존 `room_pin_access_leases`의 exact unrevoked authoritative lease에 묶인 lease/CAS와 감사 event를 남긴다. 메이드 변경은 exact `in_progress`에서만 허용한다.
 - 관리자 변경은 PIN 변경 lease 선점 → 실제 도어락 변경 → confirm/save 순서로 조정한다. prepare 즉시 mismatch가 되어 배정 준비와 PIN 조회를 차단하며 confirm 전에는 current pointer를 바꾸지 않는다. 만료·불확실 상태는 실제 PIN 재입력 후 새 revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결한다. current가 없는 최초 변경이 만료된 경우에도 실제 PIN 재입력으로 version 1을 수립할 수 있다.
 - PIN 평문을 URL, 로그, error, audit payload, notification, analytics, Git, 브라우저 저장소에 넣지 않는다.
+- `[확정 — 2026-09-13 #136]` Google Sheets는 DB PIN current revision의 단방향 운영 projection이다. `room_number`를 business identity로 bounded board에서 정확히 한 행만 갱신하고, equal-version 변조는 DB 정본으로 복구하며 Sheet-ahead/중복 identity/불확실 write는 operator-blocked한다. 전용 service account는 spreadsheets-only scope를 쓰며 source-controlled approved target 검증을 PIN 복호화·OAuth보다 먼저 수행한다. hosted target mapping과 full resync/운영 활성화는 #137/release 승인 전에는 없다.
 
 ### `[확정]` 개인정보 보존
 
