@@ -84,7 +84,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   if (!services) {
     const clients = createSupabaseClients(options.env);
     services = {
-      auth: new SupabaseAuthService(clients),
+      auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
       rooms: new SupabaseRoomService(clients),
@@ -159,6 +159,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
     if (error instanceof AppError) {
+      if (error.headers) {
+        reply.headers(error.headers);
+      }
       return reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message },
         requestId: request.id

@@ -42,6 +42,7 @@ erDiagram
   AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_DAYS : "월~일 선택"
   AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_CHANGE_REQUESTS : "마감 후 변경 요청"
   PROFILES ||--o{ AVAILABILITY_CHANGE_REQUESTS : "관리자 처리"
+  PROFILES ||--o{ PASSWORD_CHANGE_COMMANDS : "응답 유실 복구 receipt"
 
   AUTH_USERS {
     uuid id PK
@@ -94,7 +95,38 @@ erDiagram
     text status
     uuid approved_version_id FK
   }
+  PASSWORD_CHANGE_COMMANDS {
+    uuid id PK
+    uuid actor_profile_id FK
+    text command_type
+    text idempotency_key
+    text request_hash
+    text effect_marker
+    text session_digest
+    text state
+    text claim_digest
+    timestamptz lease_expires_at
+    int attempt_count
+    uuid reset_command_execution_id FK
+    timestamptz completed_at
+  }
+  PASSWORD_VERIFICATION_RATE_LIMITS {
+    uuid actor_profile_id PK,FK
+    text session_digest
+    text client_digest
+    int attempt_count
+    timestamptz expires_at
+  }
+  PASSWORD_RESET_AUTH_MARKERS {
+    uuid command_execution_id PK,FK
+    uuid actor_profile_id FK
+    uuid target_profile_id FK
+    text effect_marker
+    text state
+  }
 ```
+
+- `private.password_change_commands`는 `(actor, account.password.change, idempotency key)` 범위의 private receipt다. actor마다 미완료 행 하나만 허용하고 Auth mutation claim을 직렬화한다. 시작한 live session은 domain-separated SHA-256 digest로 결합해 같은 actor의 다른 세션 takeover를 막으며 raw session ID는 저장하지 않는다. 비밀번호 원문·변환값·hash/HMAC/verifier·token은 저장하지 않는다. `private.auth_password_versions`는 `auth.users.encrypted_password`가 실제로 바뀔 때만 최소 trigger가 회전하는 무작위 nonsecret version 원장으로 Auth hash나 파생값을 저장하지 않는다. 응답 유실 복구는 receipt `effect_marker`와 이 private version, 재전송된 새 비밀번호가 모두 일치할 때만 완료한다. `private.password_verification_rate_limits`는 actor당 한 행으로 모든 password probe를 제한하고, `private.password_reset_auth_markers`는 외부 Auth reset 성공과 exact private version 확인 후에만 inconsistent receipt를 supersede하는 command evidence다.
 
 핵심 제약:
 

@@ -67,7 +67,8 @@ export function createAuthRoutes(authService: AuthService): FastifyPluginAsync {
         request.actor,
         input.currentPassword,
         input.newPassword,
-        idempotencyKey(request.headers['idempotency-key'])
+        idempotencyKey(request.headers['idempotency-key']),
+        request.ip
       );
       return reply.code(204).send();
     });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type AppServices, buildApp } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
+import { AppError } from '../src/lib/app-error.js';
 
 const env: AppEnv = {
   APP_ENV: 'local',
@@ -164,6 +165,33 @@ describe('application', () => {
 
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('MISSING_ACCESS_TOKEN');
+    await app.close();
+  });
+
+  it('returns Retry-After for durable password-verification limits', async () => {
+    const appServices = services();
+    appServices.auth.changePassword = vi.fn(async () => {
+      throw new AppError(
+        429,
+        'PASSWORD_VERIFICATION_RATE_LIMITED',
+        '비밀번호 확인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+        { 'Retry-After': '37' }
+      );
+    });
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'password-retry-after-0001'
+      },
+      payload: { currentPassword: '1234', newPassword: '654321' }
+    });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['retry-after']).toBe('37');
+    expect(response.json().error.code).toBe('PASSWORD_VERIFICATION_RATE_LIMITED');
     await app.close();
   });
 

@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'planned_checkout_room_change_fk'
+    'password_change_replay_receipt'
   ) ->> 'currentMigration',
-  'planned_checkout_room_change_fk',
+  'password_change_replay_receipt',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'planned_checkout_room_change_fk'
+    'password_change_replay_receipt'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'

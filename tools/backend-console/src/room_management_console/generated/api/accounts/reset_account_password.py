@@ -94,8 +94,9 @@ def sync_detailed(
 ) -> Response[ErrorEnvelope | ResetAccountPasswordResponse200]:
     """계정 비밀번호를 휴대전화 뒤 4자리로 초기화
 
-     admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 전체
-    휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.
+     admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 외부
+    Auth 성공 뒤 password-specific private effect version을 확인한 후에만 충돌한 개인 비밀번호 변경 receipt를 supersede하므로
+    Auth 실패가 복구 원장을 허위 완료하지 않습니다. 전체 휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.
 
     Args:
         profile_id (UUID):
@@ -129,8 +130,9 @@ def sync(
 ) -> ErrorEnvelope | ResetAccountPasswordResponse200 | None:
     """계정 비밀번호를 휴대전화 뒤 4자리로 초기화
 
-     admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 전체
-    휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.
+     admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 외부
+    Auth 성공 뒤 password-specific private effect version을 확인한 후에만 충돌한 개인 비밀번호 변경 receipt를 supersede하므로
+    Auth 실패가 복구 원장을 허위 완료하지 않습니다. 전체 휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.
 
     Args:
         profile_id (UUID):
@@ -159,8 +161,9 @@ async def asyncio_detailed(
 ) -> Response[ErrorEnvelope | ResetAccountPasswordResponse200]:
     """계정 비밀번호를 휴대전화 뒤 4자리로 초기화
 
-     admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 전체
-    휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.
+     admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 외부
+    Auth 성공 뒤 password-specific private effect version을 확인한 후에만 충돌한 개인 비밀번호 변경 receipt를 supersede하므로
+    Auth 실패가 복구 원장을 허위 완료하지 않습니다. 전체 휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.
 
     Args:
         profile_id (UUID):
@@ -192,8 +195,9 @@ async def asyncio(
 ) -> ErrorEnvelope | ResetAccountPasswordResponse200 | None:
     """계정 비밀번호를 휴대전화 뒤 4자리로 초기화
 
-     admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 전체
-    휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.
+     admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 외부
+    Auth 성공 뒤 password-specific private effect version을 확인한 후에만 충돌한 개인 비밀번호 변경 receipt를 supersede하므로
+    Auth 실패가 복구 원장을 허위 완료하지 않습니다. 전체 휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.
 
     Args:
         profile_id (UUID):
