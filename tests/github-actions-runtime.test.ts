@@ -8,6 +8,8 @@ const checkoutPin =
   'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0';
 const setupNodePin =
   'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0';
+const setupPythonPin =
+  'actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0';
 
 async function workflows(): Promise<Array<{ name: string; source: string }>> {
   const names = (await readdir(workflowsDirectory)).filter(
@@ -22,10 +24,11 @@ async function workflows(): Promise<Array<{ name: string; source: string }>> {
 }
 
 describe('GitHub Actions runtime pins', () => {
-  it('pins every checkout and setup-node use to the approved immutable revisions', async () => {
+  it('pins every runtime action use to the approved immutable Node 24 revisions', async () => {
     const sources = await workflows();
     let checkoutUses = 0;
     let setupNodeUses = 0;
+    let setupPythonUses = 0;
 
     for (const { name, source } of sources) {
       for (const line of source.split(/\r?\n/)) {
@@ -37,11 +40,16 @@ describe('GitHub Actions runtime pins', () => {
           setupNodeUses += 1;
           expect(line.trim(), name).toBe(`- uses: ${setupNodePin}`);
         }
+        if (line.includes('actions/setup-python@')) {
+          setupPythonUses += 1;
+          expect(line.trim(), name).toBe(`- uses: ${setupPythonPin}`);
+        }
       }
     }
 
     expect(checkoutUses).toBe(4);
     expect(setupNodeUses).toBe(3);
+    expect(setupPythonUses).toBe(2);
   });
 
   it('keeps the application on Node 22 with explicit npm cache boundaries', async () => {

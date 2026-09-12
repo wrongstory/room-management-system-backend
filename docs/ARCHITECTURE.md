@@ -15,8 +15,8 @@
 
 ### GitHub Actions 런타임과 공급망 고정
 
-- `actions/checkout`은 공식 `v6.1.0`, `actions/setup-node`는 공식 `v6.5.0`의 전체 40자 commit SHA로 모든 workflow에서 고정한다. 가변 major tag만 사용하지 않는다.
-- 두 action의 `runs.using`은 Node.js 24다. 이는 GitHub가 action 구현 자체를 실행하는 내부 런타임이며, 저장소 애플리케이션 런타임과 별개다.
+- `actions/checkout`은 공식 `v6.1.0`, `actions/setup-node`는 공식 `v6.5.0`, `actions/setup-python`은 공식 `v6.3.0`의 전체 40자 commit SHA로 모든 workflow에서 고정한다. 가변 major tag만 사용하지 않는다.
+- 세 action의 `runs.using`은 Node.js 24다. 이는 GitHub가 action 구현 자체를 실행하는 내부 런타임이며, 저장소 애플리케이션과 Python 도구 런타임과 별개다.
 - 애플리케이션과 DB 검증은 계속 `setup-node`의 `node-version: 22`를 사용한다. `package.json`의 Node.js 22 계약을 action 내부 Node.js 24로 올린 것으로 해석하지 않는다.
 - quality workflow의 npm cache는 `cache: npm`과 `cache-dependency-path: package-lock.json`으로 명시하고 설치는 `npm ci`만 사용한다. npm 설치가 없는 Swagger Pages workflow는 action의 자동 package-manager cache를 명시적으로 끈다.
 - action revision을 변경할 때는 공식 release와 해당 revision의 `action.yml` 런타임을 확인하고, source-controlled 회귀 테스트와 required CI를 함께 갱신한다.
