@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { type Actor, type AppRole, canManageAccounts } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
@@ -212,6 +212,9 @@ function databaseError(error: { code?: string; message?: string } | null): AppEr
   if (message.includes('IDEMPOTENCY_KEY_REUSED')) {
     return new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 요청에 사용한 Idempotency-Key입니다.');
   }
+  if (message.includes('PASSWORD_CHANGE_IN_PROGRESS') || message.includes('PASSWORD_RESET_IN_PROGRESS')) {
+    return new AppError(409, 'PASSWORD_CHANGE_IN_PROGRESS', '비밀번호 변경 또는 초기화가 처리 중입니다. 잠시 후 다시 시도해 주세요.');
+  }
   if (error?.code === '23505' && message.includes('phone_lookup_hash')) {
     return new AppError(409, 'PHONE_ALREADY_REGISTERED', '이미 등록된 휴대전화 번호입니다. 기존 계정을 복구해 주세요.');
   }
@@ -405,8 +408,9 @@ export class SupabaseAccountService implements AccountService {
     if (before.role === 'developer') {
       throw new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 역할은 변경할 수 없습니다.');
     }
+    const preservedEffectMetadata = await this.passwordEffectMetadata(before.auth_user_id);
     const { error: authError } = await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
-      app_metadata: { profile_id: before.id, role: input.role }
+      app_metadata: { profile_id: before.id, role: input.role, ...preservedEffectMetadata }
     });
     if (authError) {
       throw new AppError(502, 'AUTH_USER_UPDATE_FAILED', '인증 계정 역할을 변경하지 못했습니다.');
@@ -421,7 +425,7 @@ export class SupabaseAccountService implements AccountService {
     });
     if (error || !data) {
       const { error: rollbackError } = await this.clients.admin.auth.admin.updateUserById(before.auth_user_id, {
-        app_metadata: { profile_id: before.id, role: before.role }
+        app_metadata: { profile_id: before.id, role: before.role, ...preservedEffectMetadata }
       });
       if (rollbackError) {
         throw new AppError(
@@ -496,15 +500,16 @@ export class SupabaseAccountService implements AccountService {
     if (before.role === 'developer') {
       throw new AppError(403, 'DEVELOPER_ACCOUNT_PROTECTED', '최상위 개발자 비밀번호는 본인만 변경할 수 있습니다.');
     }
+    const hash = requestHash({
+      actorProfileId: actor.profileId,
+      command: 'account.password.reset',
+      targetProfileId: input.targetProfileId
+    });
     const { data, error } = await this.clients.admin.rpc('prepare_account_password_reset', {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: input.targetProfileId,
       p_idempotency_key: input.idempotencyKey,
-      p_request_hash: requestHash({
-        actorProfileId: actor.profileId,
-        command: 'account.password.reset',
-        targetProfileId: input.targetProfileId
-      })
+      p_request_hash: hash
     });
     if (error || !data) {
       throw databaseError(error);
@@ -514,13 +519,80 @@ export class SupabaseAccountService implements AccountService {
     if (!row.phone_last_four) {
       throw new AppError(409, 'PHONE_REQUIRED_FOR_RESET', '등록된 휴대전화 번호가 없어 초기화할 수 없습니다.');
     }
+    const proposedEffectMarker = createHash('sha256')
+      .update(`password-reset-effect:v1\0${randomUUID()}`)
+      .digest('hex');
+    const { data: recoveryData, error: recoveryError } = await this.clients.admin.rpc(
+      'prepare_password_change_admin_reset',
+      {
+        p_actor_profile_id: actor.profileId,
+        p_target_profile_id: input.targetProfileId,
+        p_idempotency_key: input.idempotencyKey,
+        p_request_hash: hash,
+        p_effect_marker: proposedEffectMarker
+      }
+    );
+    const effectMarker = recoveryData && typeof recoveryData === 'object'
+      ? (recoveryData as { effectMarker?: unknown }).effectMarker
+      : null;
+    if (recoveryError || typeof effectMarker !== 'string' || !/^[0-9a-f]{64}$/.test(effectMarker)) {
+      throw databaseError(recoveryError);
+    }
     const { error: authError } = await this.clients.admin.auth.admin.updateUserById(row.auth_user_id, {
-      password: toSupabaseAuthPassword(row.phone_last_four)
+      password: toSupabaseAuthPassword(row.phone_last_four),
+      app_metadata: {
+        profile_id: row.id,
+        role: row.role,
+        password_change_effect_marker: effectMarker
+      }
     });
     if (authError) {
       throw new AppError(502, 'AUTH_PASSWORD_RESET_FAILED', '인증 비밀번호를 초기화하지 못했습니다. 다시 시도해 주세요.');
     }
+    const { data: authState, error: authStateError } = await this.clients.admin.auth.admin.getUserById(
+      row.auth_user_id
+    );
+    if (
+      authStateError ||
+      authState.user?.app_metadata?.password_change_effect_marker !== effectMarker
+    ) {
+      throw new AppError(
+        502,
+        'PASSWORD_RESET_STATE_UPDATE_FAILED',
+        '인증 비밀번호 초기화 결과를 확인하지 못했습니다. 같은 Idempotency-Key로 다시 시도해 주세요.'
+      );
+    }
+    const { error: finalizeError } = await this.clients.admin.rpc(
+      'finalize_password_change_admin_reset',
+      {
+        p_actor_profile_id: actor.profileId,
+        p_target_profile_id: input.targetProfileId,
+        p_idempotency_key: input.idempotencyKey,
+        p_request_hash: hash,
+        p_effect_marker: effectMarker
+      }
+    );
+    if (finalizeError) {
+      throw new AppError(
+        502,
+        'PASSWORD_RESET_STATE_UPDATE_FAILED',
+        '인증 비밀번호는 초기화됐지만 복구 상태를 완료하지 못했습니다. 같은 Idempotency-Key로 다시 시도해 주세요.'
+      );
+    }
     return toAccount(row);
+  }
+
+  private async passwordEffectMetadata(
+    authUserId: string
+  ): Promise<{ password_change_effect_marker?: string }> {
+    const { data, error } = await this.clients.admin.auth.admin.getUserById(authUserId);
+    if (error || !data.user) {
+      throw new AppError(502, 'AUTH_USER_READ_FAILED', '인증 계정 상태를 확인하지 못했습니다.');
+    }
+    const marker = data.user.app_metadata?.password_change_effect_marker;
+    return typeof marker === 'string' && /^[0-9a-f]{64}$/.test(marker)
+      ? { password_change_effect_marker: marker }
+      : {};
   }
 
   private async runAccountRpc(name: string, parameters: Record<string, string>): Promise<Account> {

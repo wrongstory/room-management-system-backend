@@ -1068,7 +1068,10 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 #10 알림/Outbox source는 #108~#112까지 dev 완료이며 #112 운영 활성화만 별도 승인으로 남는다.
 #46 password replay feature gate:
 
-- [x] private actor+command+key scoped receipt와 Auth/DB response-loss recovery 구현
+- [x] private actor+command+key+origin session scoped receipt와 Auth/DB response-loss recovery 구현
+- [x] server operation marker로 completed replay를 실제 Auth 효과에 결합하고 후속 변경·관리자 reset 뒤 과거 key 차단
+- [x] actor당 1행·10회/분 durable Auth password verification limiter로 session/client/key 회전 우회 차단
+- [x] 관리자 reset은 Auth 성공 확인 뒤 finalize하여 inconsistent receipt를 supersede; reset 실패는 unresolved 유지
 - [x] Fastify / Edge / OpenAPI / DB / 문서 계약 정합화
 - [x] 비밀번호·파생 verifier·token·raw session ID 비저장 회귀
 - [ ] PR exact-head 독립 QA P0/P1=0, 90점 이상

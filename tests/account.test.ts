@@ -35,6 +35,7 @@ const activeAdminProfile = {
   created_at: '2026-08-26T00:00:00.000Z',
   updated_at: '2026-08-26T00:00:00.000Z'
 };
+const existingPasswordEffectMarker = 'c'.repeat(64);
 
 function accountStatusHarness(
   rpcResult: unknown,
@@ -50,6 +51,10 @@ function accountStatusHarness(
     callOrder.push('auth');
     return { data: null, error: authError };
   });
+  const getUserById = vi.fn(async () => ({
+    data: { user: { app_metadata: { password_change_effect_marker: existingPasswordEffectMarker } } },
+    error: null
+  }));
   const clients = {
     admin: {
       from: vi.fn(() => ({
@@ -60,7 +65,7 @@ function accountStatusHarness(
         }))
       })),
       rpc,
-      auth: { admin: { updateUserById } }
+      auth: { admin: { updateUserById, getUserById } }
     },
     publicClient: {},
     forAccessToken: vi.fn()
@@ -256,7 +261,13 @@ describe('account input normalization', () => {
       targetProfileId: profile.id, role: 'admin', idempotencyKey: 'execution-role-blocked-1'
     })).rejects.toMatchObject({ code: 'ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED', statusCode: 409 });
     expect(harness.callOrder).toEqual(['database', 'auth', 'database', 'auth']);
-    expect(harness.updateUserById).toHaveBeenLastCalledWith(profile.auth_user_id, { app_metadata: { profile_id: profile.id, role: 'maid' } });
+    expect(harness.updateUserById).toHaveBeenLastCalledWith(profile.auth_user_id, {
+      app_metadata: {
+        profile_id: profile.id,
+        role: 'maid',
+        password_change_effect_marker: existingPasswordEffectMarker
+      }
+    });
   });
 
   it('rejects developer role mutation before touching Auth or DB', async () => {
@@ -295,7 +306,12 @@ describe('account input normalization', () => {
           data: null,
           error: { message: 'LAST_ACTIVE_ADMIN_REQUIRED' }
         })),
-        auth: { admin: { updateUserById } }
+        auth: {
+          admin: {
+            updateUserById,
+            getUserById: vi.fn(async () => ({ data: { user: { app_metadata: {} } }, error: null }))
+          }
+        }
       },
       publicClient: {},
       forAccessToken: vi.fn()
@@ -314,5 +330,111 @@ describe('account input normalization', () => {
       statusCode: 502
     });
     expect(updateUserById).toHaveBeenCalledTimes(2);
+  });
+
+  it('finalizes an inconsistent self-change receipt only after Auth reset marker success', async () => {
+    const resetMarker = 'a'.repeat(64);
+    const rpcNames: string[] = [];
+    const rpc = vi.fn(async (name: string) => {
+      rpcNames.push(name);
+      if (name === 'prepare_account_password_reset') {
+        return { data: activeAdminProfile, error: null };
+      }
+      if (name === 'prepare_password_change_admin_reset') {
+        return { data: { state: 'prepared', effectMarker: resetMarker }, error: null };
+      }
+      if (name === 'finalize_password_change_admin_reset') {
+        return { data: { completed: true }, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const updateUserById = vi.fn(async () => ({ data: { user: {} }, error: null }));
+    const getUserById = vi.fn(async () => ({
+      data: { user: { app_metadata: { password_change_effect_marker: resetMarker } } },
+      error: null
+    }));
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc,
+        auth: { admin: { updateUserById, getUserById } }
+      }
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    );
+
+    await service.resetPassword(actor, {
+      targetProfileId: activeAdminProfile.id,
+      idempotencyKey: 'reset-inconsistent-receipt-0001'
+    });
+
+    expect(rpcNames).toEqual([
+      'prepare_account_password_reset',
+      'prepare_password_change_admin_reset',
+      'finalize_password_change_admin_reset'
+    ]);
+    expect(updateUserById).toHaveBeenCalledWith(activeAdminProfile.auth_user_id, {
+      password: 'tmp:5678',
+      app_metadata: {
+        profile_id: activeAdminProfile.id,
+        role: activeAdminProfile.role,
+        password_change_effect_marker: resetMarker
+      }
+    });
+  });
+
+  it('keeps reset recovery unresolved when the external Auth reset fails', async () => {
+    const resetMarker = 'b'.repeat(64);
+    const rpc = vi.fn(async (name: string) => {
+      if (name === 'prepare_account_password_reset') {
+        return { data: activeAdminProfile, error: null };
+      }
+      if (name === 'prepare_password_change_admin_reset') {
+        return { data: { state: 'prepared', effectMarker: resetMarker }, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const clients = {
+      admin: {
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: activeAdminProfile, error: null }))
+            }))
+          }))
+        })),
+        rpc,
+        auth: {
+          admin: {
+            updateUserById: vi.fn(async () => ({
+              data: null,
+              error: { message: 'Auth unavailable' }
+            })),
+            getUserById: vi.fn()
+          }
+        }
+      }
+    } as unknown as SupabaseClients;
+    const service = new SupabaseAccountService(
+      clients,
+      'test-phone-pepper-at-least-32-characters'
+    );
+
+    await expect(service.resetPassword(actor, {
+      targetProfileId: activeAdminProfile.id,
+      idempotencyKey: 'reset-auth-failure-0002'
+    })).rejects.toMatchObject({ statusCode: 502, code: 'AUTH_PASSWORD_RESET_FAILED' });
+
+    expect(rpc.mock.calls.map(([name]) => name)).not.toContain(
+      'finalize_password_change_admin_reset'
+    );
   });
 });

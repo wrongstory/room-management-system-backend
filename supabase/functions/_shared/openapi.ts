@@ -856,7 +856,7 @@ export const openApiDocument = {
         operationId: "changePassword",
         summary: "현재 또는 임시 비밀번호를 개인 비밀번호로 변경",
         description:
-          "모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답 유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생 fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트 책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른 세션이 폐기됩니다.",
+          "모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답 유실 시 같은 Idempotency-Key와 원래 요청 body를 다시 보내세요. 서버는 비밀번호 파생 fingerprint를 저장하지 않으므로 currentPassword의 byte equality는 durable receipt에 포함하지 않습니다. 대신 Auth app_metadata의 비밀이 아닌 서버 발급 operation marker와 재전송한 newPassword가 현재 Auth 상태에 함께 일치할 때만 동일한 의도 효과로 증명하여 204를 replay합니다. 이후 변경·관리자 초기화로 marker가 바뀐 과거 key는 409가 됩니다. 모든 Auth 비밀번호 확인은 세션·client·key 회전으로 우회할 수 없는 actor 단위 durable rate limit을 먼저 소비하며, 한도 초과는 429입니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른 세션이 폐기됩니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["developer", "admin", "maid"],
         parameters: [idempotencyHeader],
@@ -876,8 +876,10 @@ export const openApiDocument = {
           "400": errorResponse,
           "401": errorResponse,
           "409": errorResponse,
+          "429": errorResponse,
           "500": errorResponse,
           "502": errorResponse,
+          "503": errorResponse,
         },
       },
     },
@@ -4140,7 +4142,10 @@ export const openApiDocument = {
           "PASSWORD_CHANGE_RECEIPT_FAILED",
           "PASSWORD_CHANGE_IN_PROGRESS",
           "PASSWORD_CHANGE_SESSION_MISMATCH",
+          "PASSWORD_VERIFICATION_RATE_LIMITED",
+          "PASSWORD_VERIFICATION_RATE_LIMIT_UNAVAILABLE",
           "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
+          "PASSWORD_RESET_STATE_UPDATE_FAILED",
           "PASSWORD_CHANGE_REQUIRED",
           "ACCOUNT_MANAGER_REQUIRED",
           "ADMIN_REQUIRED",
@@ -8460,7 +8465,7 @@ function accountMutationDescription(operationId: string): {
     resetAccountPassword: {
       summary: "계정 비밀번호를 휴대전화 뒤 4자리로 초기화",
       description:
-        "admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 전체 휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.",
+        "admin 또는 maid의 Supabase Auth 비밀번호를 서버 내부 namespace의 임시값으로 초기화하고 `mustChangePassword=true`로 전환합니다. 외부 Auth 성공 뒤 server operation marker를 확인한 후에만 충돌한 개인 비밀번호 변경 receipt를 supersede하므로 Auth 실패가 복구 원장을 허위 완료하지 않습니다. 전체 휴대전화 번호나 임시 내부 변환값은 응답하지 않습니다. developer는 본인 비밀번호 변경 API만 사용합니다.",
       success: "비밀번호 초기화 완료",
     },
   };

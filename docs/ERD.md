@@ -101,16 +101,32 @@ erDiagram
     text command_type
     text idempotency_key
     text request_hash
+    text effect_marker
     text session_digest
     text state
     text claim_digest
     timestamptz lease_expires_at
     int attempt_count
+    uuid reset_command_execution_id FK
     timestamptz completed_at
+  }
+  PASSWORD_VERIFICATION_RATE_LIMITS {
+    uuid actor_profile_id PK,FK
+    text session_digest
+    text client_digest
+    int attempt_count
+    timestamptz expires_at
+  }
+  PASSWORD_RESET_AUTH_MARKERS {
+    uuid command_execution_id PK,FK
+    uuid actor_profile_id FK
+    uuid target_profile_id FK
+    text effect_marker
+    text state
   }
 ```
 
-- `private.password_change_commands`는 `(actor, account.password.change, idempotency key)` 범위의 private receipt다. actor마다 미완료 행 하나만 허용하고 Auth mutation claim을 직렬화한다. 시작한 live session은 domain-separated SHA-256 digest로 결합해 같은 actor의 다른 세션 takeover를 막으며 raw session ID는 저장하지 않는다. 비밀번호 원문·변환값·hash/HMAC/verifier·token은 저장하지 않고, 응답 유실 복구는 재전송된 새 비밀번호를 현재 Auth 상태에 직접 검증한다.
+- `private.password_change_commands`는 `(actor, account.password.change, idempotency key)` 범위의 private receipt다. actor마다 미완료 행 하나만 허용하고 Auth mutation claim을 직렬화한다. 시작한 live session은 domain-separated SHA-256 digest로 결합해 같은 actor의 다른 세션 takeover를 막으며 raw session ID는 저장하지 않는다. 비밀번호 원문·변환값·hash/HMAC/verifier·token은 저장하지 않는다. 응답 유실 복구는 비밀이 아닌 `effect_marker`가 현재 Auth `app_metadata`에 남아 있고 재전송된 새 비밀번호도 현재 값일 때만 완료한다. `private.password_verification_rate_limits`는 actor당 한 행으로 모든 password probe를 제한하고, `private.password_reset_auth_markers`는 외부 Auth reset 성공 후에만 inconsistent receipt를 supersede하는 command evidence다.
 
 핵심 제약:
 

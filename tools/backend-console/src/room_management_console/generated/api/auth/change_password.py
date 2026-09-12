@@ -53,6 +53,11 @@ def _parse_response(
 
         return response_409
 
+    if response.status_code == 429:
+        response_429 = ErrorEnvelope.from_dict(response.json())
+
+        return response_429
+
     if response.status_code == 500:
         response_500 = ErrorEnvelope.from_dict(response.json())
 
@@ -62,6 +67,11 @@ def _parse_response(
         response_502 = ErrorEnvelope.from_dict(response.json())
 
         return response_502
+
+    if response.status_code == 503:
+        response_503 = ErrorEnvelope.from_dict(response.json())
+
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -89,10 +99,11 @@ def sync_detailed(
     """현재 또는 임시 비밀번호를 개인 비밀번호로 변경
 
      모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답
-    유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생
-    fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트
-    책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른
-    세션이 폐기됩니다.
+    유실 시 같은 Idempotency-Key와 원래 요청 body를 다시 보내세요. 서버는 비밀번호 파생 fingerprint를 저장하지 않으므로 currentPassword의
+    byte equality는 durable receipt에 포함하지 않습니다. 대신 Auth app_metadata의 비밀이 아닌 서버 발급 operation marker와 재전송한
+    newPassword가 현재 Auth 상태에 함께 일치할 때만 동일한 의도 효과로 증명하여 204를 replay합니다. 이후 변경·관리자 초기화로 marker가 바뀐 과거 key는
+    409가 됩니다. 모든 Auth 비밀번호 확인은 세션·client·key 회전으로 우회할 수 없는 actor 단위 durable rate limit을 먼저 소비하며, 한도 초과는
+    429입니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른 세션이 폐기됩니다.
 
     Args:
         idempotency_key (str):
@@ -127,10 +138,11 @@ def sync(
     """현재 또는 임시 비밀번호를 개인 비밀번호로 변경
 
      모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답
-    유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생
-    fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트
-    책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른
-    세션이 폐기됩니다.
+    유실 시 같은 Idempotency-Key와 원래 요청 body를 다시 보내세요. 서버는 비밀번호 파생 fingerprint를 저장하지 않으므로 currentPassword의
+    byte equality는 durable receipt에 포함하지 않습니다. 대신 Auth app_metadata의 비밀이 아닌 서버 발급 operation marker와 재전송한
+    newPassword가 현재 Auth 상태에 함께 일치할 때만 동일한 의도 효과로 증명하여 204를 replay합니다. 이후 변경·관리자 초기화로 marker가 바뀐 과거 key는
+    409가 됩니다. 모든 Auth 비밀번호 확인은 세션·client·key 회전으로 우회할 수 없는 actor 단위 durable rate limit을 먼저 소비하며, 한도 초과는
+    429입니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른 세션이 폐기됩니다.
 
     Args:
         idempotency_key (str):
@@ -160,10 +172,11 @@ async def asyncio_detailed(
     """현재 또는 임시 비밀번호를 개인 비밀번호로 변경
 
      모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답
-    유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생
-    fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트
-    책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른
-    세션이 폐기됩니다.
+    유실 시 같은 Idempotency-Key와 원래 요청 body를 다시 보내세요. 서버는 비밀번호 파생 fingerprint를 저장하지 않으므로 currentPassword의
+    byte equality는 durable receipt에 포함하지 않습니다. 대신 Auth app_metadata의 비밀이 아닌 서버 발급 operation marker와 재전송한
+    newPassword가 현재 Auth 상태에 함께 일치할 때만 동일한 의도 효과로 증명하여 204를 replay합니다. 이후 변경·관리자 초기화로 marker가 바뀐 과거 key는
+    409가 됩니다. 모든 Auth 비밀번호 확인은 세션·client·key 회전으로 우회할 수 없는 actor 단위 durable rate limit을 먼저 소비하며, 한도 초과는
+    429입니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른 세션이 폐기됩니다.
 
     Args:
         idempotency_key (str):
@@ -196,10 +209,11 @@ async def asyncio(
     """현재 또는 임시 비밀번호를 개인 비밀번호로 변경
 
      모든 active 역할이 본인 비밀번호를 변경할 때 사용합니다. 새 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합입니다. timeout/응답
-    유실 시 같은 Idempotency-Key와 byte-equivalent currentPassword/newPassword를 다시 보내세요. 서버는 비밀번호 파생
-    fingerprint를 저장하지 않고 새 비밀번호가 현재 Auth 값인지 확인해 same-effect가 증명되면 204를 replay하므로, 원 body 보존은 클라이언트
-    책임입니다. 그 뒤 다시 비밀번호가 변경된 과거 key는 409가 됩니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른
-    세션이 폐기됩니다.
+    유실 시 같은 Idempotency-Key와 원래 요청 body를 다시 보내세요. 서버는 비밀번호 파생 fingerprint를 저장하지 않으므로 currentPassword의
+    byte equality는 durable receipt에 포함하지 않습니다. 대신 Auth app_metadata의 비밀이 아닌 서버 발급 operation marker와 재전송한
+    newPassword가 현재 Auth 상태에 함께 일치할 때만 동일한 의도 효과로 증명하여 204를 replay합니다. 이후 변경·관리자 초기화로 marker가 바뀐 과거 key는
+    409가 됩니다. 모든 Auth 비밀번호 확인은 세션·client·key 회전으로 우회할 수 없는 actor 단위 durable rate limit을 먼저 소비하며, 한도 초과는
+    429입니다. 처리 중에는 PASSWORD_CHANGE_IN_PROGRESS이며 성공하면 현재 세션을 제외한 다른 세션이 폐기됩니다.
 
     Args:
         idempotency_key (str):

@@ -1447,12 +1447,14 @@ Table private.password_change_commands {
   command_type text [not null, note: 'account.password.change']
   idempotency_key text [not null]
   request_hash text [not null, note: 'Safe actor+command fingerprint; contains no password-derived evidence']
+  effect_marker text [not null, note: 'Nonsecret server operation marker also bound to current Auth app_metadata']
   session_digest text [not null, note: 'Domain-separated SHA-256 binding; raw session ID is not stored']
-  state text [not null, note: 'auth_pending/completed/failed/inconsistent']
+  state text [not null, note: 'auth_pending/completed/failed/inconsistent/reset_pending/superseded']
   claim_digest text [note: 'Random claim digest; not a credential or password verifier']
   lease_expires_at timestamptz
   attempt_count int [not null]
   failure_code text
+  reset_command_execution_id uuid
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   completed_at timestamptz
@@ -1462,7 +1464,31 @@ Table private.password_change_commands {
     (actor_profile_id) [unique, note: 'Partial: unresolved state only']
   }
 
-  Note: '#46 private response-loss receipt. Raw Data API access denied; password, password-derived verifier, token, and raw session ID are forbidden.'
+  Note: '#46 private response-loss receipt. Replay requires matching Auth marker and current password effect. Raw Data API access denied; password, password-derived verifier, token, and raw session ID are forbidden.'
+}
+
+Table private.password_verification_rate_limits {
+  actor_profile_id uuid [pk]
+  session_digest text [not null, note: 'Evidence only; not a budget dimension']
+  client_digest text [not null, note: 'Server HMAC evidence only; raw IP is forbidden']
+  window_started_at timestamptz [not null]
+  attempt_count int [not null]
+  expires_at timestamptz [not null]
+
+  Note: 'One authoritative bounded row per actor. Session/client/idempotency rotation cannot increase the Auth password verification allowance.'
+}
+
+Table private.password_reset_auth_markers {
+  command_execution_id uuid [pk]
+  actor_profile_id uuid [not null]
+  target_profile_id uuid [not null]
+  effect_marker text [not null, note: 'Nonsecret Auth operation provenance']
+  state text [not null, note: 'prepared/completed']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  completed_at timestamptz
+
+  Note: 'Admin reset recovery is completed only after external Auth success and exact marker verification.'
 }
 
 Table private.actor_activity_events {
@@ -1904,6 +1930,11 @@ Ref: private.web_push_subscription_secrets.revision_id - private.web_push_subscr
 Ref: private.web_push_registration_limits.profile_id - public.profiles.id
 Ref: public.audit_events.actor_profile_id > public.profiles.id
 Ref: private.password_change_commands.actor_profile_id > public.profiles.id
+Ref: private.password_change_commands.reset_command_execution_id > private.command_executions.id
+Ref: private.password_verification_rate_limits.actor_profile_id > public.profiles.id
+Ref: private.password_reset_auth_markers.command_execution_id > private.command_executions.id
+Ref: private.password_reset_auth_markers.actor_profile_id > public.profiles.id
+Ref: private.password_reset_auth_markers.target_profile_id > public.profiles.id
 Ref: private.actor_activity_events.actor_profile_id > public.profiles.id
 Ref: private.actor_authorization_denial_aggregates.actor_profile_id > public.profiles.id
 Ref: private.scheduler_invocation_heartbeats.actor_profile_id > public.profiles.id

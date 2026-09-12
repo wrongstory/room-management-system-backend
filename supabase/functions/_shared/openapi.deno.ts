@@ -573,6 +573,26 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     serialized.includes('"LOGIN_CLIENT_ID_UNAVAILABLE"'),
     "trusted client metadata failure must be documented",
   );
+  const passwordChange = document.paths["/v1/auth/password"].post;
+  assert(
+    passwordChange.responses["429"] !== undefined &&
+      passwordChange.responses["503"] !== undefined &&
+      passwordChange.description.includes("operation marker") &&
+      passwordChange.description.includes("actor 단위 durable rate limit"),
+    "password-change replay provenance and durable verification limit must be documented",
+  );
+  for (
+    const code of [
+      "PASSWORD_VERIFICATION_RATE_LIMITED",
+      "PASSWORD_VERIFICATION_RATE_LIMIT_UNAVAILABLE",
+      "PASSWORD_RESET_STATE_UPDATE_FAILED",
+    ] as const
+  ) {
+    assert(
+      document.components.schemas.ErrorCode.enum.includes(code),
+      `password recovery error code is public: ${code}`,
+    );
+  }
   assert(
     serialized.includes('"#/components/schemas/RoomProjection"'),
     "room projection must not be an untyped object",

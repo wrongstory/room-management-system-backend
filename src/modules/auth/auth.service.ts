@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import type { Actor, AppRole } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
@@ -24,7 +24,8 @@ export interface AuthService {
     actor: Actor,
     currentPassword: string,
     newPassword: string,
-    idempotencyKey: string
+    idempotencyKey: string,
+    clientIdentity: string
   ): Promise<void>;
 }
 
@@ -51,7 +52,10 @@ type PasswordChangeState =
 interface PasswordChangeReceiptState {
   state: PasswordChangeState;
   attemptCount?: number;
+  effectMarker?: string;
 }
+
+const effectMarkerPattern = /^[0-9a-f]{64}$/;
 
 function normalizeLoginId(loginId: string): string {
   return loginId.normalize('NFKC').trim().toLocaleLowerCase('ko-KR');
@@ -77,7 +81,10 @@ function sessionId(accessToken: string): string | null {
 }
 
 export class SupabaseAuthService implements AuthService {
-  constructor(private readonly clients: SupabaseClients) {}
+  constructor(
+    private readonly clients: SupabaseClients,
+    private readonly verificationPepper: string
+  ) {}
 
   async login(input: LoginInput): Promise<LoginResult> {
     const alias = normalizeLoginId(input.loginId);
@@ -176,7 +183,8 @@ export class SupabaseAuthService implements AuthService {
     actor: Actor,
     currentPassword: string,
     newPassword: string,
-    idempotencyKey: string
+    idempotencyKey: string,
+    clientIdentity: string
   ): Promise<void> {
     const activeSessionId = sessionId(actor.accessToken);
     if (!activeSessionId) {
@@ -186,6 +194,17 @@ export class SupabaseAuthService implements AuthService {
       actorProfileId: actor.profileId,
       command: 'account.password.change'
     });
+    const clientDigest = createHmac('sha256', this.verificationPepper)
+      .update('password-verification-client:v1\0', 'utf8')
+      .update(actor.profileId, 'utf8')
+      .update('\0', 'utf8')
+      .update(activeSessionId, 'utf8')
+      .update('\0', 'utf8')
+      .update(clientIdentity, 'utf8')
+      .digest('hex');
+    const proposedEffectMarker = createHash('sha256')
+      .update(`password-change-effect:v1\0${randomUUID()}`)
+      .digest('hex');
     const inspected = await this.passwordChangeRpc('inspect_password_change', {
       p_actor_profile_id: actor.profileId,
       p_auth_user_id: actor.authUserId,
@@ -194,7 +213,13 @@ export class SupabaseAuthService implements AuthService {
     });
 
     if (inspected.state === 'completed') {
-      if (!(await this.verifyPassword(actor.profileId, newPassword))) {
+      if (!(await this.verifyPasswordEffect(
+        actor,
+        activeSessionId,
+        clientDigest,
+        newPassword,
+        this.effectMarker(inspected)
+      ))) {
         throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 비밀번호 변경에 사용한 Idempotency-Key입니다.');
       }
       return;
@@ -208,7 +233,7 @@ export class SupabaseAuthService implements AuthService {
 
     let currentVerified = false;
     if (inspected.state === 'absent') {
-      currentVerified = await this.verifyPassword(actor.profileId, currentPassword);
+      currentVerified = await this.verifyPassword(actor, activeSessionId, clientDigest, currentPassword);
       if (!currentVerified) {
         throw new AppError(401, 'INVALID_CURRENT_PASSWORD', '현재 비밀번호가 올바르지 않습니다.');
       }
@@ -223,11 +248,18 @@ export class SupabaseAuthService implements AuthService {
       p_session_id: activeSessionId,
       p_idempotency_key: idempotencyKey,
       p_request_hash: fingerprint,
-      p_claim_digest: claimDigest
+      p_claim_digest: claimDigest,
+      p_effect_marker: proposedEffectMarker
     });
 
     if (prepared.state === 'completed') {
-      if (!(await this.verifyPassword(actor.profileId, newPassword))) {
+      if (!(await this.verifyPasswordEffect(
+        actor,
+        activeSessionId,
+        clientDigest,
+        newPassword,
+        this.effectMarker(prepared)
+      ))) {
         throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 비밀번호 변경에 사용한 Idempotency-Key입니다.');
       }
       return;
@@ -240,7 +272,13 @@ export class SupabaseAuthService implements AuthService {
     }
 
     if (prepared.state === 'recover') {
-      if (await this.verifyPassword(actor.profileId, newPassword)) {
+      if (await this.verifyPasswordEffect(
+        actor,
+        activeSessionId,
+        clientDigest,
+        newPassword,
+        this.effectMarker(prepared)
+      )) {
         await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
         return;
       }
@@ -262,16 +300,30 @@ export class SupabaseAuthService implements AuthService {
       throw new AppError(500, 'PASSWORD_STATE_INCONSISTENT', '비밀번호 변경 상태가 올바르지 않습니다.');
     }
 
+    const effectMarker = this.effectMarker(prepared);
     const { error: updateError } = await this.clients.admin.auth.admin.updateUserById(
       actor.authUserId,
-      { password: toSupabaseAuthPassword(newPassword) }
+      {
+        password: toSupabaseAuthPassword(newPassword),
+        app_metadata: {
+          profile_id: actor.profileId,
+          role: actor.role,
+          password_change_effect_marker: effectMarker
+        }
+      }
     );
     if (updateError) {
-      if (await this.verifyPassword(actor.profileId, newPassword)) {
+      if (await this.verifyPasswordEffect(
+        actor,
+        activeSessionId,
+        clientDigest,
+        newPassword,
+        effectMarker
+      )) {
         await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
         return;
       }
-      if (await this.verifyPassword(actor.profileId, currentPassword)) {
+      if (await this.verifyPassword(actor, activeSessionId, clientDigest, currentPassword)) {
         await this.finishPasswordChangeFailure(
           actor,
           activeSessionId,
@@ -298,9 +350,44 @@ export class SupabaseAuthService implements AuthService {
     await this.completePasswordChange(actor, activeSessionId, idempotencyKey, fingerprint, claimDigest);
   }
 
-  private async verifyPassword(profileId: string, password: string): Promise<boolean> {
+  private async verifyPassword(
+    actor: Actor,
+    activeSessionId: string,
+    clientDigest: string,
+    password: string
+  ): Promise<boolean> {
+    const { data: limitData, error: limitError } = await this.clients.admin.rpc(
+      'consume_password_verification_rate_limit',
+      {
+        p_actor_profile_id: actor.profileId,
+        p_auth_user_id: actor.authUserId,
+        p_session_id: activeSessionId,
+        p_client_digest: clientDigest,
+        p_limit: 10,
+        p_window_seconds: 60
+      }
+    );
+    const limit = Array.isArray(limitData) ? limitData[0] as {
+      allowed?: unknown;
+      retry_after_seconds?: unknown;
+    } | undefined : undefined;
+    if (limitError || !limit) {
+      throw new AppError(
+        503,
+        'PASSWORD_VERIFICATION_RATE_LIMIT_UNAVAILABLE',
+        '비밀번호 확인 보호 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+      );
+    }
+    if (limit.allowed !== true) {
+      throw new AppError(
+        429,
+        'PASSWORD_VERIFICATION_RATE_LIMITED',
+        '비밀번호 확인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.'
+      );
+    }
+
     const { data, error } = await this.clients.publicClient.auth.signInWithPassword({
-      email: syntheticEmail(profileId),
+      email: syntheticEmail(actor.profileId),
       password: toSupabaseAuthPassword(password)
     });
     if (error || !data.session) {
@@ -318,6 +405,38 @@ export class SupabaseAuthService implements AuthService {
       );
     }
     return true;
+  }
+
+  private effectMarker(receipt: PasswordChangeReceiptState): string {
+    if (!receipt.effectMarker || !effectMarkerPattern.test(receipt.effectMarker)) {
+      throw new AppError(
+        500,
+        'PASSWORD_CHANGE_RECEIPT_FAILED',
+        '비밀번호 변경 요청 상태를 확인하지 못했습니다.'
+      );
+    }
+    return receipt.effectMarker;
+  }
+
+  private async verifyPasswordEffect(
+    actor: Actor,
+    activeSessionId: string,
+    clientDigest: string,
+    password: string,
+    effectMarker: string
+  ): Promise<boolean> {
+    const { data, error } = await this.clients.admin.auth.admin.getUserById(actor.authUserId);
+    if (error || !data.user) {
+      throw new AppError(
+        503,
+        'PASSWORD_CHANGE_RECEIPT_FAILED',
+        '비밀번호 변경 요청 상태를 확인하지 못했습니다.'
+      );
+    }
+    if (data.user.app_metadata?.password_change_effect_marker !== effectMarker) {
+      return false;
+    }
+    return this.verifyPassword(actor, activeSessionId, clientDigest, password);
   }
 
   private async passwordChangeRpc(

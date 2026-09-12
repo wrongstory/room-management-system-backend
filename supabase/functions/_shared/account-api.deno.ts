@@ -5,6 +5,7 @@ import {
   createAccount,
   listAccounts,
   login,
+  resetAccountPassword,
 } from "./account-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError } from "./runtime.ts";
@@ -106,6 +107,12 @@ const profile = {
   locked_until: null,
   created_at: "2026-08-30T00:00:00.000Z",
   updated_at: "2026-08-30T00:00:00.000Z",
+};
+
+const passwordEffectMarker = "e".repeat(64);
+const allowedPasswordVerification = {
+  data: [{ allowed: true, retry_after_seconds: 0 }],
+  error: null,
 };
 
 function queryResult(data: unknown, error: unknown = null) {
@@ -490,8 +497,12 @@ Deno.test("Edge password validation matches the Fastify printable-ASCII contract
 Deno.test("Edge password change serializes Auth mutation through a nonsecret receipt", async () => {
   const rpcCalls: Array<{ name: string; parameters: Record<string, string> }> =
     [];
-  const states = [{ state: "absent" }, { state: "execute" }];
+  const states = [
+    { state: "absent" },
+    { state: "execute", effectMarker: passwordEffectMarker },
+  ];
   let updateCount = 0;
+  let authUpdate: unknown = null;
   const clients = {
     publicClient: {
       auth: {
@@ -509,6 +520,9 @@ Deno.test("Edge password change serializes Auth mutation through a nonsecret rec
     admin: {
       rpc: (name: string, parameters: Record<string, string>) => {
         rpcCalls.push({ name, parameters });
+        if (name === "consume_password_verification_rate_limit") {
+          return Promise.resolve(allowedPasswordVerification);
+        }
         if (name === "complete_password_change") {
           return Promise.resolve({ data: { completed: true }, error: null });
         }
@@ -516,11 +530,23 @@ Deno.test("Edge password change serializes Auth mutation through a nonsecret rec
       },
       auth: {
         admin: {
-          updateUserById: () => {
+          updateUserById: (_id: string, attributes: unknown) => {
             updateCount += 1;
+            authUpdate = attributes;
             return Promise.resolve({ data: null, error: null });
           },
           signOut: () => Promise.resolve({ data: null, error: null }),
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
         },
       },
     },
@@ -533,8 +559,18 @@ Deno.test("Edge password change serializes Auth mutation through a nonsecret rec
   );
 
   assertEquals(updateCount, 1, "Auth mutates exactly once");
+  assert(
+    JSON.stringify(authUpdate).includes(
+      `"profile_id":"${developer.profileId}"`,
+    ) &&
+      JSON.stringify(authUpdate).includes('"role":"developer"') &&
+      JSON.stringify(authUpdate).includes(passwordEffectMarker),
+    "password mutation preserves identity metadata and binds the effect marker",
+  );
   assertEquals(
-    rpcCalls.map((call) => call.name),
+    rpcCalls.map((call) => call.name).filter((name) =>
+      name !== "consume_password_verification_rate_limit"
+    ),
     [
       "inspect_password_change",
       "prepare_password_change",
@@ -552,11 +588,17 @@ Deno.test("Edge password change serializes Auth mutation through a nonsecret rec
     "new password is never sent to DB",
   );
   assert(
-    /^[0-9a-f]{64}$/.test(rpcCalls[1].parameters.p_request_hash),
+    /^[0-9a-f]{64}$/.test(
+      rpcCalls.find((call) => call.name === "prepare_password_change")
+        ?.parameters.p_request_hash ?? "",
+    ),
     "safe request fingerprint",
   );
   assert(
-    /^[0-9a-f]{64}$/.test(rpcCalls[1].parameters.p_claim_digest),
+    /^[0-9a-f]{64}$/.test(
+      rpcCalls.find((call) => call.name === "prepare_password_change")
+        ?.parameters.p_claim_digest ?? "",
+    ),
     "nonsecret random claim digest",
   );
 });
@@ -578,7 +620,18 @@ Deno.test("Edge completed password receipt replays 204 semantics without Auth mu
       },
     },
     admin: {
-      rpc: () => Promise.resolve({ data: { state: "completed" }, error: null }),
+      rpc: (name: string) =>
+        Promise.resolve(
+          name === "consume_password_verification_rate_limit"
+            ? allowedPasswordVerification
+            : {
+              data: {
+                state: "completed",
+                effectMarker: passwordEffectMarker,
+              },
+              error: null,
+            },
+        ),
       auth: {
         admin: {
           updateUserById: () => {
@@ -586,6 +639,17 @@ Deno.test("Edge completed password receipt replays 204 semantics without Auth mu
             return Promise.resolve({ data: null, error: null });
           },
           signOut: () => Promise.resolve({ data: null, error: null }),
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
         },
       },
     },
@@ -614,9 +678,33 @@ Deno.test("Edge completed key with a different current Auth password fails close
       },
     },
     admin: {
-      rpc: () => Promise.resolve({ data: { state: "completed" }, error: null }),
+      rpc: (name: string) =>
+        Promise.resolve(
+          name === "consume_password_verification_rate_limit"
+            ? allowedPasswordVerification
+            : {
+              data: {
+                state: "completed",
+                effectMarker: passwordEffectMarker,
+              },
+              error: null,
+            },
+        ),
       auth: {
-        admin: { signOut: () => Promise.resolve({ data: null, error: null }) },
+        admin: {
+          signOut: () => Promise.resolve({ data: null, error: null }),
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
+        },
       },
     },
   } as unknown as EdgeClients;
@@ -636,7 +724,10 @@ Deno.test("Edge completed key with a different current Auth password fails close
 
 Deno.test("Edge expired password receipt recovers an Auth-success DB-failure window", async () => {
   const rpcNames: string[] = [];
-  const states = [{ state: "recover" }, { state: "recover" }];
+  const states = [
+    { state: "recover", effectMarker: passwordEffectMarker },
+    { state: "recover", effectMarker: passwordEffectMarker },
+  ];
   const clients = {
     publicClient: {
       auth: {
@@ -654,6 +745,9 @@ Deno.test("Edge expired password receipt recovers an Auth-success DB-failure win
     admin: {
       rpc: (name: string) => {
         rpcNames.push(name);
+        if (name === "consume_password_verification_rate_limit") {
+          return Promise.resolve(allowedPasswordVerification);
+        }
         if (name === "complete_password_change") {
           return Promise.resolve({ data: { completed: true }, error: null });
         }
@@ -665,6 +759,17 @@ Deno.test("Edge expired password receipt recovers an Auth-success DB-failure win
             throw new Error("recovery must not mutate Auth again");
           },
           signOut: () => Promise.resolve({ data: null, error: null }),
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
         },
       },
     },
@@ -678,7 +783,9 @@ Deno.test("Edge expired password receipt recovers an Auth-success DB-failure win
     developer,
   );
   assertEquals(
-    rpcNames,
+    rpcNames.filter((name) =>
+      name !== "consume_password_verification_rate_limit"
+    ),
     [
       "inspect_password_change",
       "prepare_password_change",
@@ -690,7 +797,10 @@ Deno.test("Edge expired password receipt recovers an Auth-success DB-failure win
 
 Deno.test("Edge crash-before-Auth ambiguity is persisted as inconsistent without a second Auth mutation", async () => {
   const rpcNames: string[] = [];
-  const states = [{ state: "recover" }, { state: "recover" }];
+  const states = [
+    { state: "recover", effectMarker: passwordEffectMarker },
+    { state: "recover", effectMarker: passwordEffectMarker },
+  ];
   let updateCount = 0;
   const clients = {
     publicClient: {
@@ -705,6 +815,9 @@ Deno.test("Edge crash-before-Auth ambiguity is persisted as inconsistent without
     admin: {
       rpc: (name: string) => {
         rpcNames.push(name);
+        if (name === "consume_password_verification_rate_limit") {
+          return Promise.resolve(allowedPasswordVerification);
+        }
         if (name === "finish_password_change_failure") {
           return Promise.resolve({ data: null, error: null });
         }
@@ -717,6 +830,17 @@ Deno.test("Edge crash-before-Auth ambiguity is persisted as inconsistent without
             return Promise.resolve({ data: null, error: null });
           },
           signOut: () => Promise.resolve({ data: null, error: null }),
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
         },
       },
     },
@@ -744,7 +868,9 @@ Deno.test("Edge crash-before-Auth ambiguity is persisted as inconsistent without
     "recovery never performs a second Auth mutation",
   );
   assertEquals(
-    rpcNames,
+    rpcNames.filter((name) =>
+      name !== "consume_password_verification_rate_limit"
+    ),
     [
       "inspect_password_change",
       "prepare_password_change",
@@ -781,6 +907,192 @@ Deno.test("Edge cross-session receipt takeover maps to the stable conflict", asy
     error.code,
     "PASSWORD_CHANGE_SESSION_MISMATCH",
     "session mismatch code",
+  );
+});
+
+Deno.test("Edge password verification limiter blocks Auth probes before sign-in", async () => {
+  let signInCount = 0;
+  const clients = {
+    publicClient: {
+      auth: {
+        signInWithPassword: () => {
+          signInCount += 1;
+          return Promise.resolve({ data: { session: null }, error: null });
+        },
+      },
+    },
+    admin: {
+      rpc: (name: string) =>
+        Promise.resolve(
+          name === "consume_password_verification_rate_limit"
+            ? {
+              data: [{ allowed: false, retry_after_seconds: 60 }],
+              error: null,
+            }
+            : { data: { state: "absent" }, error: null },
+        ),
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    changePassword(
+      passwordRequest(
+        { currentPassword: "999999", newPassword: "654321" },
+        "edge-password-limited-0007",
+      ),
+      clients,
+      developer,
+    )
+  );
+  assertEquals(error.status, 429, "verification limiter status");
+  assertEquals(
+    error.code,
+    "PASSWORD_VERIFICATION_RATE_LIMITED",
+    "verification limiter code",
+  );
+  assertEquals(signInCount, 0, "rate limit blocks before Auth password probe");
+});
+
+Deno.test("Edge completed replay requires the original Auth effect marker", async () => {
+  let signInCount = 0;
+  const clients = {
+    publicClient: {
+      auth: {
+        signInWithPassword: () => {
+          signInCount += 1;
+          return Promise.resolve({ data: { session: null }, error: null });
+        },
+      },
+    },
+    admin: {
+      rpc: () =>
+        Promise.resolve({
+          data: { state: "completed", effectMarker: passwordEffectMarker },
+          error: null,
+        }),
+      auth: {
+        admin: {
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: "f".repeat(64),
+                  },
+                },
+              },
+              error: null,
+            }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    changePassword(
+      passwordRequest(
+        { currentPassword: "654321", newPassword: "777777" },
+        "edge-password-old-effect-0008",
+      ),
+      clients,
+      developer,
+    )
+  );
+  assertEquals(error.status, 409, "old operation marker conflict status");
+  assertEquals(error.code, "IDEMPOTENCY_KEY_REUSED", "old marker conflict");
+  assertEquals(signInCount, 0, "marker mismatch blocks before password probe");
+});
+
+Deno.test("Edge admin reset finalizes self-change recovery only after Auth marker success", async () => {
+  const rpcNames: string[] = [];
+  const clients = {
+    admin: {
+      from: () => queryResult(profile),
+      rpc: (name: string) => {
+        rpcNames.push(name);
+        if (name === "prepare_account_password_reset") {
+          return Promise.resolve({ data: profile, error: null });
+        }
+        if (name === "prepare_password_change_admin_reset") {
+          return Promise.resolve({
+            data: { state: "prepared", effectMarker: passwordEffectMarker },
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: { completed: true }, error: null });
+      },
+      auth: {
+        admin: {
+          updateUserById: () => Promise.resolve({ data: null, error: null }),
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  await resetAccountPassword(
+    request({}, "edge-reset-recovery-0009"),
+    clients,
+    developer,
+    profile.id,
+  );
+  assertEquals(
+    rpcNames,
+    [
+      "prepare_account_password_reset",
+      "prepare_password_change_admin_reset",
+      "finalize_password_change_admin_reset",
+    ],
+    "reset recovery finalizes only after Auth verification",
+  );
+});
+
+Deno.test("Edge admin reset Auth failure never finalizes recovery", async () => {
+  const rpcNames: string[] = [];
+  const clients = {
+    admin: {
+      from: () => queryResult(profile),
+      rpc: (name: string) => {
+        rpcNames.push(name);
+        if (name === "prepare_account_password_reset") {
+          return Promise.resolve({ data: profile, error: null });
+        }
+        return Promise.resolve({
+          data: { state: "prepared", effectMarker: passwordEffectMarker },
+          error: null,
+        });
+      },
+      auth: {
+        admin: {
+          updateUserById: () =>
+            Promise.resolve({ data: null, error: { message: "unavailable" } }),
+        },
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const error = await captureEdgeError(() =>
+    resetAccountPassword(
+      request({}, "edge-reset-auth-failure-0010"),
+      clients,
+      developer,
+      profile.id,
+    )
+  );
+  assertEquals(error.code, "AUTH_PASSWORD_RESET_FAILED", "Auth reset failure");
+  assert(
+    !rpcNames.includes("finalize_password_change_admin_reset"),
+    "failed Auth reset leaves recovery unresolved",
   );
 });
 
@@ -828,6 +1140,11 @@ Deno.test("failed Auth role rollback reports an explicit inconsistent state", as
         }),
       auth: {
         admin: {
+          getUserById: () =>
+            Promise.resolve({
+              data: { user: { app_metadata: {} } },
+              error: null,
+            }),
           updateUserById: () => {
             updateCount += 1;
             return Promise.resolve({
@@ -871,6 +1188,17 @@ Deno.test("in-progress account status fails before Auth, role preserves existing
         }),
       auth: {
         admin: {
+          getUserById: () =>
+            Promise.resolve({
+              data: {
+                user: {
+                  app_metadata: {
+                    password_change_effect_marker: passwordEffectMarker,
+                  },
+                },
+              },
+              error: null,
+            }),
           updateUserById: (_id: string, change: unknown) => {
             updates.push(change);
             return Promise.resolve({ data: null, error: null });
@@ -912,7 +1240,9 @@ Deno.test("in-progress account status fails before Auth, role preserves existing
     "existing role metadata update plus compensation retained",
   );
   assert(
-    JSON.stringify(updates[1]).includes('"role":"maid"'),
-    "metadata compensated to existing maid",
+    updates.every((value) =>
+      JSON.stringify(value).includes(passwordEffectMarker)
+    ) && JSON.stringify(updates[1]).includes('"role":"maid"'),
+    "metadata compensation preserves the password effect marker",
   );
 });

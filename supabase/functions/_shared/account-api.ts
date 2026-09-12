@@ -331,6 +331,18 @@ function databaseError(
       "이미 다른 요청에 사용한 Idempotency-Key입니다.",
     ],
     [
+      "PASSWORD_CHANGE_IN_PROGRESS",
+      409,
+      "PASSWORD_CHANGE_IN_PROGRESS",
+      "비밀번호 변경 또는 초기화가 처리 중입니다. 잠시 후 다시 시도해 주세요.",
+    ],
+    [
+      "PASSWORD_RESET_IN_PROGRESS",
+      409,
+      "PASSWORD_CHANGE_IN_PROGRESS",
+      "비밀번호 변경 또는 초기화가 처리 중입니다. 잠시 후 다시 시도해 주세요.",
+    ],
+    [
       "DEACTIVATION_MUST_BE_FINISHED",
       409,
       "DEACTIVATION_MUST_BE_FINISHED",
@@ -377,6 +389,26 @@ async function getProfile(
     throw new EdgeError(404, "ACCOUNT_NOT_FOUND", "계정을 찾을 수 없습니다.");
   }
   return data as unknown as ProfileRow;
+}
+
+async function passwordEffectMetadata(
+  clients: EdgeClients,
+  authUserId: string,
+): Promise<{ password_change_effect_marker?: string }> {
+  const { data, error } = await clients.admin.auth.admin.getUserById(
+    authUserId,
+  );
+  if (error || !data.user) {
+    throw new EdgeError(
+      502,
+      "AUTH_USER_READ_FAILED",
+      "인증 계정 상태를 확인하지 못했습니다.",
+    );
+  }
+  const marker = data.user.app_metadata?.password_change_effect_marker;
+  return typeof marker === "string" && passwordEffectMarkerPattern.test(marker)
+    ? { password_change_effect_marker: marker }
+    : {};
 }
 
 async function replayAccountProfile(
@@ -545,6 +577,20 @@ async function consumeLoginRateLimit(
   }
 }
 
+async function passwordVerificationClientDigest(
+  request: Request,
+  actor: EdgeActor,
+  sessionId: string,
+): Promise<string> {
+  const pepper = requiredEnv("ACCOUNT_PHONE_PEPPER");
+  return hmacHex(
+    pepper,
+    `password-verification-client:v1\u0000${actor.profileId}\u0000${sessionId}\u0000${
+      trustedClientAddress(request)
+    }`,
+  );
+}
+
 export async function login(
   request: Request,
   clients: EdgeClients,
@@ -690,6 +736,14 @@ export async function changePassword(
 
   const key = idempotencyKey(request);
   const sessionId = verifiedRequestSessionId(request);
+  const clientDigest = await passwordVerificationClientDigest(
+    request,
+    actor,
+    sessionId,
+  );
+  const proposedEffectMarker = await sha256Hex(
+    `password-change-effect:v1\u0000${crypto.randomUUID()}`,
+  );
   const fingerprint = await requestHash({
     actorProfileId: actor.profileId,
     command: "account.password.change",
@@ -706,7 +760,16 @@ export async function changePassword(
   );
 
   if (inspected.state === "completed") {
-    if (!(await verifyPassword(clients, actor.profileId, next))) {
+    if (
+      !(await verifyPasswordEffect(
+        clients,
+        actor,
+        sessionId,
+        clientDigest,
+        next,
+        effectMarker(inspected),
+      ))
+    ) {
       throw passwordChangeConflict();
     }
     return;
@@ -720,7 +783,13 @@ export async function changePassword(
 
   let currentVerified = false;
   if (inspected.state === "absent") {
-    currentVerified = await verifyPassword(clients, actor.profileId, current);
+    currentVerified = await verifyPassword(
+      clients,
+      actor,
+      sessionId,
+      clientDigest,
+      current,
+    );
     if (!currentVerified) {
       throw new EdgeError(
         401,
@@ -740,10 +809,20 @@ export async function changePassword(
     p_idempotency_key: key,
     p_request_hash: fingerprint,
     p_claim_digest: claimDigest,
+    p_effect_marker: proposedEffectMarker,
   });
 
   if (prepared.state === "completed") {
-    if (!(await verifyPassword(clients, actor.profileId, next))) {
+    if (
+      !(await verifyPasswordEffect(
+        clients,
+        actor,
+        sessionId,
+        clientDigest,
+        next,
+        effectMarker(prepared),
+      ))
+    ) {
       throw passwordChangeConflict();
     }
     return;
@@ -755,7 +834,16 @@ export async function changePassword(
     throw passwordChangeInProgress();
   }
   if (prepared.state === "recover") {
-    if (await verifyPassword(clients, actor.profileId, next)) {
+    if (
+      await verifyPasswordEffect(
+        clients,
+        actor,
+        sessionId,
+        clientDigest,
+        next,
+        effectMarker(prepared),
+      )
+    ) {
       await completePasswordChange(
         clients,
         actor,
@@ -780,12 +868,29 @@ export async function changePassword(
     throw passwordStateInconsistent();
   }
 
+  const currentEffectMarker = effectMarker(prepared);
   const { error: updateError } = await clients.admin.auth.admin.updateUserById(
     actor.authUserId,
-    { password: toSupabaseAuthPassword(next) },
+    {
+      password: toSupabaseAuthPassword(next),
+      app_metadata: {
+        profile_id: actor.profileId,
+        role: actor.role,
+        password_change_effect_marker: currentEffectMarker,
+      },
+    },
   );
   if (updateError) {
-    if (await verifyPassword(clients, actor.profileId, next)) {
+    if (
+      await verifyPasswordEffect(
+        clients,
+        actor,
+        sessionId,
+        clientDigest,
+        next,
+        currentEffectMarker,
+      )
+    ) {
       await completePasswordChange(
         clients,
         actor,
@@ -796,7 +901,15 @@ export async function changePassword(
       );
       return;
     }
-    if (await verifyPassword(clients, actor.profileId, current)) {
+    if (
+      await verifyPassword(
+        clients,
+        actor,
+        sessionId,
+        clientDigest,
+        current,
+      )
+    ) {
       await finishPasswordChangeFailure(
         clients,
         actor,
@@ -845,15 +958,70 @@ type PasswordChangeState =
 interface PasswordChangeReceiptState {
   state: PasswordChangeState;
   attemptCount?: number;
+  effectMarker?: string;
+}
+
+const passwordEffectMarkerPattern = /^[0-9a-f]{64}$/;
+
+function effectMarker(receipt: PasswordChangeReceiptState): string {
+  if (
+    typeof receipt.effectMarker !== "string" ||
+    !passwordEffectMarkerPattern.test(receipt.effectMarker)
+  ) {
+    throw new EdgeError(
+      500,
+      "PASSWORD_CHANGE_RECEIPT_FAILED",
+      "비밀번호 변경 요청 상태를 확인하지 못했습니다.",
+    );
+  }
+  return receipt.effectMarker;
 }
 
 async function verifyPassword(
   clients: EdgeClients,
-  profileId: string,
+  actor: EdgeActor,
+  sessionId: string,
+  clientDigest: string,
   password: string,
 ): Promise<boolean> {
+  const { data: limitData, error: limitError } = await clients.admin.rpc(
+    "consume_password_verification_rate_limit",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_auth_user_id: actor.authUserId,
+      p_session_id: sessionId,
+      p_client_digest: clientDigest,
+      p_limit: 10,
+      p_window_seconds: 60,
+    },
+  );
+  const limit = Array.isArray(limitData)
+    ? limitData[0] as {
+      allowed?: unknown;
+      retry_after_seconds?: unknown;
+    } | undefined
+    : undefined;
+  if (limitError || !limit) {
+    throw new EdgeError(
+      503,
+      "PASSWORD_VERIFICATION_RATE_LIMIT_UNAVAILABLE",
+      "비밀번호 확인 보호 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    );
+  }
+  if (limit.allowed !== true) {
+    const retryAfter = typeof limit.retry_after_seconds === "number"
+      ? Math.max(1, Math.min(3600, Math.ceil(limit.retry_after_seconds)))
+      : 60;
+    throw new EdgeError(
+      429,
+      "PASSWORD_VERIFICATION_RATE_LIMITED",
+      "비밀번호 확인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+      { "retry-after": String(retryAfter) },
+    );
+  }
+
   const { data, error } = await clients.publicClient.auth.signInWithPassword({
-    email: syntheticEmail(profileId),
+    email: syntheticEmail(actor.profileId),
     password: toSupabaseAuthPassword(password),
   });
   if (error || !data.session) return false;
@@ -869,6 +1037,39 @@ async function verifyPassword(
     );
   }
   return true;
+}
+
+async function verifyPasswordEffect(
+  clients: EdgeClients,
+  actor: EdgeActor,
+  sessionId: string,
+  clientDigest: string,
+  password: string,
+  expectedEffectMarker: string,
+): Promise<boolean> {
+  const { data, error } = await clients.admin.auth.admin.getUserById(
+    actor.authUserId,
+  );
+  if (error || !data.user) {
+    throw new EdgeError(
+      503,
+      "PASSWORD_CHANGE_RECEIPT_FAILED",
+      "비밀번호 변경 요청 상태를 확인하지 못했습니다.",
+    );
+  }
+  if (
+    data.user.app_metadata?.password_change_effect_marker !==
+      expectedEffectMarker
+  ) {
+    return false;
+  }
+  return verifyPassword(
+    clients,
+    actor,
+    sessionId,
+    clientDigest,
+    password,
+  );
 }
 
 async function passwordChangeRpc(
@@ -1146,9 +1347,19 @@ export async function changeAccountRole(
       "최상위 개발자 역할은 변경할 수 없습니다.",
     );
   }
+  const preservedEffectMetadata = await passwordEffectMetadata(
+    clients,
+    before.auth_user_id,
+  );
   const { error: authError } = await clients.admin.auth.admin.updateUserById(
     before.auth_user_id,
-    { app_metadata: { profile_id: before.id, role } },
+    {
+      app_metadata: {
+        profile_id: before.id,
+        role,
+        ...preservedEffectMetadata,
+      },
+    },
   );
   if (authError) {
     throw new EdgeError(
@@ -1169,7 +1380,11 @@ export async function changeAccountRole(
       .updateUserById(
         before.auth_user_id,
         {
-          app_metadata: { profile_id: before.id, role: before.role },
+          app_metadata: {
+            profile_id: before.id,
+            role: before.role,
+            ...preservedEffectMetadata,
+          },
         },
       );
     if (rollbackError) {
@@ -1300,17 +1515,18 @@ export async function resetAccountPassword(
     );
   }
   const key = idempotencyKey(request);
+  const hash = await requestHash({
+    actorProfileId: actor.profileId,
+    command: "account.password.reset",
+    targetProfileId,
+  });
   const { data, error } = await clients.admin.rpc(
     "prepare_account_password_reset",
     {
       p_actor_profile_id: actor.profileId,
       p_target_profile_id: targetProfileId,
       p_idempotency_key: key,
-      p_request_hash: await requestHash({
-        actorProfileId: actor.profileId,
-        command: "account.password.reset",
-        targetProfileId,
-      }),
+      p_request_hash: hash,
     },
   );
   if (error || !data) {
@@ -1324,15 +1540,73 @@ export async function resetAccountPassword(
       "등록된 휴대전화 번호가 없어 초기화할 수 없습니다.",
     );
   }
+  const proposedEffectMarker = await sha256Hex(
+    `password-reset-effect:v1\u0000${crypto.randomUUID()}`,
+  );
+  const { data: recoveryData, error: recoveryError } = await clients.admin.rpc(
+    "prepare_password_change_admin_reset",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_target_profile_id: targetProfileId,
+      p_idempotency_key: key,
+      p_request_hash: hash,
+      p_effect_marker: proposedEffectMarker,
+    },
+  );
+  const effectMarker = recoveryData && typeof recoveryData === "object"
+    ? (recoveryData as { effectMarker?: unknown }).effectMarker
+    : null;
+  if (
+    recoveryError || typeof effectMarker !== "string" ||
+    !passwordEffectMarkerPattern.test(effectMarker)
+  ) {
+    throw databaseError(recoveryError);
+  }
   const { error: authError } = await clients.admin.auth.admin.updateUserById(
     row.auth_user_id,
-    { password: toSupabaseAuthPassword(row.phone_last_four) },
+    {
+      password: toSupabaseAuthPassword(row.phone_last_four),
+      app_metadata: {
+        profile_id: row.id,
+        role: row.role,
+        password_change_effect_marker: effectMarker,
+      },
+    },
   );
   if (authError) {
     throw new EdgeError(
       502,
       "AUTH_PASSWORD_RESET_FAILED",
       "인증 비밀번호를 초기화하지 못했습니다. 다시 시도해 주세요.",
+    );
+  }
+  const { data: authState, error: authStateError } = await clients.admin.auth
+    .admin.getUserById(row.auth_user_id);
+  if (
+    authStateError ||
+    authState.user?.app_metadata?.password_change_effect_marker !== effectMarker
+  ) {
+    throw new EdgeError(
+      502,
+      "PASSWORD_RESET_STATE_UPDATE_FAILED",
+      "인증 비밀번호 초기화 결과를 확인하지 못했습니다. 같은 Idempotency-Key로 다시 시도해 주세요.",
+    );
+  }
+  const { error: finalizeError } = await clients.admin.rpc(
+    "finalize_password_change_admin_reset",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_target_profile_id: targetProfileId,
+      p_idempotency_key: key,
+      p_request_hash: hash,
+      p_effect_marker: effectMarker,
+    },
+  );
+  if (finalizeError) {
+    throw new EdgeError(
+      502,
+      "PASSWORD_RESET_STATE_UPDATE_FAILED",
+      "인증 비밀번호는 초기화됐지만 복구 상태를 완료하지 못했습니다. 같은 Idempotency-Key로 다시 시도해 주세요.",
     );
   }
   return toAccount(row);
