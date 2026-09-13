@@ -219,6 +219,120 @@ select lives_ok(format($sql$select public.settle_room_pin_sheet_sync(%L,%L,%s,3,
 select lives_ok(format($sql$select public.record_room_pin_sheet_sync_heartbeat(%L,%s,'succeeded',1,0,1,0,0,0,null)$sql$,
   pg_temp.fid(403),((select value->>'leaseFence' from newer_claim))::bigint),'incremental convergence releases the singleton');
 
+-- Retry exhaustion must retain the exact fence that put the singleton into
+-- operator-blocked. A later full-board success reconciles that one prior run,
+-- but neither a newer blocked record nor the same settle replay may widen the
+-- supersede set.
+create temp table exhausted_recovery_evidence(old_run_id uuid,blocked_fence bigint);
+select lives_ok(format($sql$select public.request_room_pin_sheet_full_resync(%L,%L,%s,'local','local',repeat('a',64),'retry-exhaustion-0001',repeat('7',64))$sql$,
+  pg_temp.fid(3),pg_temp.fid(203),(select lease_fence from private.room_pin_sheet_sync_worker_state where singleton)),
+  'retry-exhaustion fixture command is accepted');
+do $$
+declare
+  i integer;
+  claim_id uuid;
+  claimed jsonb;
+  settled jsonb;
+  run_id uuid;
+  fence bigint;
+begin
+  for i in 1..8 loop
+    claim_id:=pg_temp.fid(420+i);
+    claimed:=public.claim_room_pin_sheet_full_resync(claim_id,'local','local',repeat('a',64));
+    if claimed->>'status'<>'claimed' then
+      raise exception 'retry exhaustion claim % did not win: %',i,claimed;
+    end if;
+    run_id:=(claimed#>>'{operation,runId}')::uuid;
+    fence:=(claimed->>'leaseFence')::bigint;
+    settled:=public.settle_room_pin_sheet_full_resync(
+      run_id,claim_id,fence,'retryable','PROVIDER_UNAVAILABLE'
+    );
+    if i<8 then
+      if settled->>'status'<>'failed' then
+        raise exception 'retry % did not enter failed backoff: %',i,settled;
+      end if;
+      perform public.record_room_pin_sheet_sync_heartbeat(
+        claim_id,fence,'degraded',1,0,0,0,1,0,'PROVIDER_UNAVAILABLE'
+      );
+      update private.room_pin_sheet_full_resync_runs
+      set next_attempt_at=clock_timestamp()-interval '1 second'
+      where id=run_id;
+    elsif settled->>'status'<>'operator_blocked' then
+      raise exception 'eighth retry did not operator-block: %',settled;
+    end if;
+  end loop;
+  insert into pg_temp.exhausted_recovery_evidence values(run_id,fence);
+end $$;
+select is((select retry_count from private.room_pin_sheet_full_resync_runs run
+  join exhausted_recovery_evidence evidence on evidence.old_run_id=run.id),8,
+  'full resync stops after exactly eight retryable failures');
+select is((select run.lease_fence from private.room_pin_sheet_full_resync_runs run
+  join exhausted_recovery_evidence evidence on evidence.old_run_id=run.id),
+  (select blocked_fence from exhausted_recovery_evidence),
+  'retry exhaustion preserves the reconciliation fence on the blocked run');
+select is((select lease_fence from private.room_pin_sheet_sync_worker_state where singleton),
+  (select blocked_fence from exhausted_recovery_evidence),
+  'worker state and retry-exhausted run retain the same fence evidence');
+
+select lives_ok(format($sql$select public.request_room_pin_sheet_full_resync(%L,%L,%s,'local','local',repeat('a',64),'retry-recovery-0001',repeat('8',64))$sql$,
+  pg_temp.fid(3),pg_temp.fid(203),(select blocked_fence from exhausted_recovery_evidence)),
+  'operator may request one fenced recovery snapshot');
+create temp table retry_recovery_run as
+select id run_id from private.room_pin_sheet_full_resync_runs
+where actor_profile_id=pg_temp.fid(3) and idempotency_key='retry-recovery-0001';
+select is((select reconciles_blocked_fence from private.room_pin_sheet_full_resync_runs run
+  join retry_recovery_run recovery on recovery.run_id=run.id),
+  (select blocked_fence from exhausted_recovery_evidence),
+  'recovery command binds the exact retained blocked fence');
+
+insert into private.room_pin_sheet_full_resync_runs(
+  id,actor_profile_id,actor_role_snapshot,expected_fence,aad_environment,aad_project_ref,
+  target_identity_digest,snapshot_room_count,status,lease_fence,retry_count,last_error_code,
+  idempotency_key,request_hash,requested_at,completed_at
+) select pg_temp.fid(499),pg_temp.fid(3),'admin',blocked_fence,'local','local',repeat('a',64),
+  121,'operator_blocked',blocked_fence,8,'RETRY_EXHAUSTED','newer-blocked-0001',repeat('9',64),
+  clock_timestamp()+interval '1 second',clock_timestamp()+interval '1 second'
+from exhausted_recovery_evidence;
+
+create temp table retry_recovery_claim(value jsonb);
+insert into retry_recovery_claim values(public.claim_room_pin_sheet_full_resync(
+  pg_temp.fid(440),'local','local',repeat('a',64)
+));
+select is((select value->>'status' from retry_recovery_claim),'claimed',
+  'fenced recovery claims once after retry exhaustion');
+select is(public.authorize_room_pin_sheet_full_resync_write(
+  (select run_id from retry_recovery_run),pg_temp.fid(440),
+  ((select value->>'leaseFence' from retry_recovery_claim))::bigint
+)->>'status','authorized','recovery receives one provider permit');
+select is(public.settle_room_pin_sheet_full_resync(
+  (select run_id from retry_recovery_run),pg_temp.fid(440),
+  ((select value->>'leaseFence' from retry_recovery_claim))::bigint,'succeeded',null
+)->>'status','succeeded','recovery success settles once');
+select is((select status from private.room_pin_sheet_full_resync_runs run
+  join exhausted_recovery_evidence evidence on evidence.old_run_id=run.id),'superseded',
+  'recovery supersedes the exact prior retry-exhausted run');
+select is((select run.lease_fence from private.room_pin_sheet_full_resync_runs run
+  join exhausted_recovery_evidence evidence on evidence.old_run_id=run.id),
+  (select blocked_fence from exhausted_recovery_evidence),
+  'superseded retry-exhausted history retains its fence evidence');
+select is((select status from private.room_pin_sheet_full_resync_runs where id=pg_temp.fid(499)),
+  'operator_blocked','newer blocked run with the same fence remains unchanged');
+select is(public.settle_room_pin_sheet_full_resync(
+  (select run_id from retry_recovery_run),pg_temp.fid(440),
+  ((select value->>'leaseFence' from retry_recovery_claim))::bigint,'succeeded',null
+)->>'status','succeeded','replayed success settle is idempotent');
+select is((select count(*)::integer from private.room_pin_sheet_full_resync_runs
+  where status='superseded' and id=(select old_run_id from exhausted_recovery_evidence)),1,
+  'settle replay does not duplicate or widen reconciliation');
+select is((select status from private.room_pin_sheet_full_resync_runs where id=pg_temp.fid(499)),
+  'operator_blocked','settle replay still leaves the newer blocked run unchanged');
+
+update private.room_pin_sheet_full_resync_runs set status='superseded',completed_at=clock_timestamp()
+where id=pg_temp.fid(499);
+select lives_ok(format($sql$select public.record_room_pin_sheet_sync_heartbeat(%L,%s,'succeeded',1,1,0,0,0,0,null)$sql$,
+  pg_temp.fid(440),((select value->>'leaseFence' from retry_recovery_claim))::bigint),
+  'successful recovery heartbeat releases the singleton');
+
 create temp table safe_status(value jsonb);
 insert into safe_status values(public.get_room_pin_sheet_sync_status(pg_temp.fid(1),pg_temp.fid(201)));
 select is((select string_agg(key,',' order by key) from safe_status,jsonb_object_keys(value) key),
@@ -226,6 +340,12 @@ select is((select string_agg(key,',' order by key) from safe_status,jsonb_object
   'operator status exposes only the reviewed safe fields and CAS version');
 select ok(not (select value::text from safe_status) ~* '(pin|cipher|envelope|credential|token|spreadsheet|tab|google)',
   'operator projection exposes no PIN, envelope, credential, target, token, or raw response');
+select is(((select value->>'failed' from safe_status))::integer,0,
+  'successful retry-exhaustion recovery clears the failed projection');
+select is(((select value->>'operatorBlocked' from safe_status))::boolean,false,
+  'successful retry-exhaustion recovery clears operator-blocked state');
+select ok((select value->'lastErrorCode' from safe_status)='null'::jsonb,
+  'successful recovery heartbeat clears the current last error projection');
 
 create temp table changed_target_request(value jsonb);
 insert into changed_target_request values(public.request_room_pin_sheet_full_resync(

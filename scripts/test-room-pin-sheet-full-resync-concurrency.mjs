@@ -102,10 +102,63 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
     const followupHeartbeat = await sqlAsync(`select public.record_room_pin_sheet_sync_heartbeat('${followupFullClaim}'::uuid,${followup.leaseFence},'succeeded',1,1,0,0,0,0,null)::text`);
     assert(!followupHeartbeat.error, 'sequential full run releases the singleton');
   }
+
+  const exhaustionFence = Number(sql('select lease_fence from private.room_pin_sheet_sync_worker_state where singleton=true'));
+  const exhaustionKey = `full-exhaust-${randomUUID()}`;
+  const exhaustionRequest = await client.rpc('request_room_pin_sheet_full_resync', {
+    ...identicalArgs,
+    p_expected_fence: exhaustionFence,
+    p_idempotency_key: exhaustionKey,
+    p_request_hash: '7'.repeat(64),
+  });
+  assert(!exhaustionRequest.error, `retry-exhaustion concurrency fixture is accepted: ${JSON.stringify(exhaustionRequest)}`);
+  sql(`update private.room_pin_sheet_full_resync_runs set retry_count=7
+    where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${exhaustionKey}'`);
+  const exhaustionClaimId = randomUUID();
+  const exhaustionClaim = JSON.parse(sql(`select public.claim_room_pin_sheet_full_resync('${exhaustionClaimId}'::uuid,'local','local','${targetDigest}')::text`));
+  assert(exhaustionClaim.status === 'claimed', 'eighth retry fixture claims the singleton');
+  const exhaustedRunId = exhaustionClaim.operation.runId;
+  const blockedFence = exhaustionClaim.leaseFence;
+  const exhausted = JSON.parse(sql(`select public.settle_room_pin_sheet_full_resync('${exhaustedRunId}'::uuid,'${exhaustionClaimId}'::uuid,${blockedFence},'retryable','PROVIDER_UNAVAILABLE')::text`));
+  assert(exhausted.status === 'operator_blocked', 'eighth retry enters operator-blocked');
+  assert(sql(`select lease_fence from private.room_pin_sheet_full_resync_runs where id='${exhaustedRunId}'::uuid`) === String(blockedFence), 'retry exhaustion preserves the recovery fence');
+
+  const recoveryKey = `full-recovery-${randomUUID()}`;
+  const recoveryRequest = await client.rpc('request_room_pin_sheet_full_resync', {
+    ...identicalArgs,
+    p_expected_fence: blockedFence,
+    p_idempotency_key: recoveryKey,
+    p_request_hash: '8'.repeat(64),
+  });
+  assert(!recoveryRequest.error, `fenced recovery request is accepted: ${JSON.stringify(recoveryRequest)}`);
+  const recoveryRunId = sql(`select id from private.room_pin_sheet_full_resync_runs
+    where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${recoveryKey}'`);
+  const recoveryClaimIds = [randomUUID(), randomUUID()];
+  const recoveryClaims = await Promise.all(recoveryClaimIds.map(claimId => sqlAsync(
+    `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'local','local','${targetDigest}')::text`,
+  )));
+  assert(recoveryClaims.every(result => !/40P01|deadlock detected/i.test(result.error)), 'concurrent recovery claims have no deadlock');
+  assert(recoveryClaims.every(result => !result.error), `concurrent recovery claims have no generic failure: ${JSON.stringify(recoveryClaims)}`);
+  const recoveryResults = recoveryClaims.map(result => JSON.parse(result.value));
+  assert(recoveryResults.filter(result => result.status === 'claimed').length === 1, `concurrent recovery has one claim winner: ${JSON.stringify(recoveryResults)}`);
+  assert(recoveryResults.filter(result => result.status === 'busy').length === 1, 'concurrent recovery has one bounded busy loser');
+  const recoveryPermits = await Promise.all(recoveryClaimIds.map(claimId => sqlAsync(
+    `select public.authorize_room_pin_sheet_full_resync_write('${recoveryRunId}'::uuid,'${claimId}'::uuid,${recoveryResults[0].leaseFence})::text`,
+  )));
+  const authorizedPermits = recoveryPermits.filter(result => !result.error && JSON.parse(result.value).status === 'authorized');
+  assert(authorizedPermits.length === 1, `concurrent recovery grants at most one provider write permit: ${JSON.stringify(recoveryPermits)}`);
+  const winnerIndex = recoveryResults.findIndex(result => result.status === 'claimed');
+  const recoveryFence = recoveryResults[winnerIndex].leaseFence;
+  const recoverySettle = await sqlAsync(`select public.settle_room_pin_sheet_full_resync('${recoveryRunId}'::uuid,'${recoveryClaimIds[winnerIndex]}'::uuid,${recoveryFence},'succeeded',null)::text`);
+  assert(!recoverySettle.error && JSON.parse(recoverySettle.value).status === 'succeeded', 'the sole recovery permit settles successfully');
+  const recoveryHeartbeat = await sqlAsync(`select public.record_room_pin_sheet_sync_heartbeat('${recoveryClaimIds[winnerIndex]}'::uuid,${recoveryFence},'succeeded',1,1,0,0,0,0,null)::text`);
+  assert(!recoveryHeartbeat.error, 'successful concurrent recovery releases the singleton');
+  assert(sql(`select status from private.room_pin_sheet_full_resync_runs where id='${exhaustedRunId}'::uuid`) === 'superseded', 'recovery supersedes exactly the exhausted run');
   assert(sql("select status from private.room_pin_sheet_sync_worker_state where singleton=true") === 'idle', 'the winning lifecycle returns the singleton to idle');
   assert(sql("select count(*) from private.room_pin_sheet_full_resync_runs where status in ('pending','processing','failed')") === '0', 'no active full-resync run is orphaned');
+  assert(sql("select count(*) from private.room_pin_sheet_full_resync_runs where status='operator_blocked'") === '0', 'no reconciled operator-blocked full run is orphaned');
   assert(sql("select count(*) from private.room_pin_sheet_sync_outbox where status='processing'") === '0', 'no incremental processing row is orphaned');
-  console.log('Room PIN Sheet full-resync concurrency passed: same-key=1/2 replay, different-key=1/2 active, full-vs-incremental=1 concurrent permit with sequential drain, 40P01/generic errors=0.');
+  console.log('Room PIN Sheet full-resync concurrency passed: same-key=1/2 replay, different-key=1/2 active, full-vs-incremental=1 permit, retry recovery=1/2 claim and 1 provider permit, 40P01/generic errors=0.');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

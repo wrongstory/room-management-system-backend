@@ -440,9 +440,14 @@ begin
         where item.run_id=p_run_id and item.room_id=outbox.room_id
       );
     if run.reconciles_blocked_fence is not null then
+      -- The singleton fence is globally monotonic, but keep the temporal bound
+      -- explicit so a malformed/newer ledger row can never be swept into this
+      -- recovery. Retry exhaustion retains this exact fence below.
       update private.room_pin_sheet_full_resync_runs set status='superseded',completed_at=at_time
-      where id<>p_run_id and status in ('processing','failed','operator_blocked')
-        and lease_fence=run.reconciles_blocked_fence;
+      where id<>p_run_id and status='operator_blocked'
+        and lease_fence=run.reconciles_blocked_fence
+        and requested_at<run.requested_at
+        and completed_at is not null and completed_at<=run.requested_at;
     end if;
     insert into public.audit_events(
       actor_profile_id,actor_display_name_snapshot,event_type,entity_type,entity_id,
@@ -459,7 +464,8 @@ begin
       status=case when retry_count+1>=8 then 'operator_blocked' else 'failed' end,
       retry_count=retry_count+1,next_attempt_at=at_time+make_interval(secs=>delay_seconds),
       last_error_code=case when retry_count+1>=8 then 'RETRY_EXHAUSTED' else p_reason_code end,
-      claim_id=null,claimed_at=null,claim_expires_at=null,lease_fence=null,
+      claim_id=null,claimed_at=null,claim_expires_at=null,
+      lease_fence=case when retry_count+1>=8 then p_lease_fence else null end,
       provider_write_started_at=null,completed_at=case when retry_count+1>=8 then at_time else null end
     where id=p_run_id;
     if run.retry_count+1>=8 then
@@ -544,13 +550,15 @@ begin
       where state.blocked_reason_code is not null
     union all
     select run.last_error_code,coalesce(run.completed_at,run.requested_at)
-      from private.room_pin_sheet_full_resync_runs run where run.last_error_code is not null
+      from private.room_pin_sheet_full_resync_runs run
+      where run.status in ('failed','operator_blocked') and run.last_error_code is not null
     union all
     select o.last_error_code,coalesce(o.completed_at,o.claimed_at,o.created_at)
-      from private.room_pin_sheet_sync_outbox o where o.last_error_code is not null
+      from private.room_pin_sheet_sync_outbox o
+      where o.status='failed' and o.last_error_code is not null
     union all
     select heartbeat.error_code,heartbeat.recorded_at
-      from private.room_pin_sheet_sync_heartbeat heartbeat where heartbeat.error_code is not null
+      from private.room_pin_sheet_sync_heartbeat heartbeat
   ) candidate order by candidate.occurred_at desc nulls last limit 1;
   return jsonb_build_object(
     'pending',pending_count,'failed',failed_count,'operatorBlocked',state.status='operator_blocked',
