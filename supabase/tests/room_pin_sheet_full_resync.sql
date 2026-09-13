@@ -347,15 +347,214 @@ select is(((select value->>'operatorBlocked' from safe_status))::boolean,false,
 select ok((select value->'lastErrorCode' from safe_status)='null'::jsonb,
   'successful recovery heartbeat clears the current last error projection');
 
+-- Request-time stale-lease reconciliation must turn the provider-marked full
+-- run into durable uncertain history on the exact singleton fence. The newly
+-- requested recovery binds that fence and is the only run it may supersede.
+select lives_ok(format($sql$select public.request_room_pin_sheet_full_resync(%L,%L,%s,'local','local',repeat('a',64),'request-stale-source-0001',repeat('1',64))$sql$,
+  pg_temp.fid(1),pg_temp.fid(201),(select lease_fence from private.room_pin_sheet_sync_worker_state where singleton)),
+  'request-time stale fixture command is accepted');
+create temp table request_stale_source_run as
+select id run_id from private.room_pin_sheet_full_resync_runs
+where actor_profile_id=pg_temp.fid(1) and idempotency_key='request-stale-source-0001';
+create temp table request_stale_source_claim(value jsonb);
+insert into request_stale_source_claim values(public.claim_room_pin_sheet_full_resync(
+  pg_temp.fid(451),'local','local',repeat('a',64)
+));
+select is((select value->>'status' from request_stale_source_claim),'claimed',
+  'request-time stale fixture claims once');
+select is(public.authorize_room_pin_sheet_full_resync_write(
+  (select run_id from request_stale_source_run),pg_temp.fid(451),
+  ((select value->>'leaseFence' from request_stale_source_claim))::bigint
+)->>'status','authorized','request-time stale fixture records the provider marker');
+update private.room_pin_sheet_full_resync_runs set
+  claimed_at=clock_timestamp()-interval '2 minutes',
+  claim_expires_at=clock_timestamp()-interval '1 minute'
+where id=(select run_id from request_stale_source_run);
+update private.room_pin_sheet_sync_worker_state set
+  lease_expires_at=clock_timestamp()-interval '1 minute'
+where singleton=true;
+select lives_ok(format($sql$select public.request_room_pin_sheet_full_resync(%L,%L,%s,'local','local',repeat('a',64),'request-stale-recovery-0001',repeat('2',64))$sql$,
+  pg_temp.fid(1),pg_temp.fid(201),((select value->>'leaseFence' from request_stale_source_claim))::bigint),
+  'request path atomically reconciles an expired provider-marked full run');
+create temp table request_stale_recovery_run as
+select id run_id from private.room_pin_sheet_full_resync_runs
+where actor_profile_id=pg_temp.fid(1) and idempotency_key='request-stale-recovery-0001';
+select is((select status from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from request_stale_source_run)),'operator_blocked',
+  'request path makes the expired provider-marked run operator-blocked');
+select is((select last_error_code from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from request_stale_source_run)),'WRITE_OUTCOME_UNCERTAIN',
+  'request path records the uncertain provider outcome');
+select ok((select completed_at is not null and provider_write_started_at is not null
+  from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from request_stale_source_run)),
+  'request path preserves provider and completion evidence');
+select is((select lease_fence from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from request_stale_source_run)),
+  ((select value->>'leaseFence' from request_stale_source_claim))::bigint,
+  'request path preserves the exact stale provider fence');
+select is((select reconciles_blocked_fence from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from request_stale_recovery_run)),
+  ((select value->>'leaseFence' from request_stale_source_claim))::bigint,
+  'request-time recovery captures the exact uncertain fence');
+create temp table request_stale_recovery_claim(value jsonb);
+insert into request_stale_recovery_claim values(public.claim_room_pin_sheet_full_resync(
+  pg_temp.fid(452),'local','local',repeat('a',64)
+));
+select is((select value->>'status' from request_stale_recovery_claim),'claimed',
+  'request-time uncertain recovery claims once');
+select is(public.authorize_room_pin_sheet_full_resync_write(
+  (select run_id from request_stale_recovery_run),pg_temp.fid(452),
+  ((select value->>'leaseFence' from request_stale_recovery_claim))::bigint
+)->>'status','authorized','request-time uncertain recovery receives one permit');
+select is(public.settle_room_pin_sheet_full_resync(
+  (select run_id from request_stale_recovery_run),pg_temp.fid(452),
+  ((select value->>'leaseFence' from request_stale_recovery_claim))::bigint,'succeeded',null
+)->>'status','succeeded','request-time uncertain recovery settles');
+select is((select status from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from request_stale_source_run)),'superseded',
+  'request-time recovery supersedes its exact uncertain run');
+select lives_ok(format($sql$select public.record_room_pin_sheet_sync_heartbeat(%L,%s,'succeeded',1,1,0,0,0,0,null)$sql$,
+  pg_temp.fid(452),((select value->>'leaseFence' from request_stale_recovery_claim))::bigint),
+  'request-time recovery heartbeat releases the singleton');
+
+-- The worker claim path applies the identical stale-provider transition before
+-- it can consider another provider write.
+select lives_ok(format($sql$select public.request_room_pin_sheet_full_resync(%L,%L,%s,'local','local',repeat('a',64),'claim-stale-source-0001',repeat('3',64))$sql$,
+  pg_temp.fid(1),pg_temp.fid(201),(select lease_fence from private.room_pin_sheet_sync_worker_state where singleton)),
+  'claim-time stale fixture command is accepted');
+create temp table claim_stale_source_run as
+select id run_id from private.room_pin_sheet_full_resync_runs
+where actor_profile_id=pg_temp.fid(1) and idempotency_key='claim-stale-source-0001';
+create temp table claim_stale_source_claim(value jsonb);
+insert into claim_stale_source_claim values(public.claim_room_pin_sheet_full_resync(
+  pg_temp.fid(453),'local','local',repeat('a',64)
+));
+select is(public.authorize_room_pin_sheet_full_resync_write(
+  (select run_id from claim_stale_source_run),pg_temp.fid(453),
+  ((select value->>'leaseFence' from claim_stale_source_claim))::bigint
+)->>'status','authorized','claim-time stale fixture records the provider marker');
+update private.room_pin_sheet_full_resync_runs set
+  claimed_at=clock_timestamp()-interval '2 minutes',
+  claim_expires_at=clock_timestamp()-interval '1 minute'
+where id=(select run_id from claim_stale_source_run);
+update private.room_pin_sheet_sync_worker_state set
+  lease_expires_at=clock_timestamp()-interval '1 minute'
+where singleton=true;
+select is(public.claim_room_pin_sheet_full_resync(
+  pg_temp.fid(454),'local','local',repeat('a',64)
+)->>'status','operator_blocked','claim path blocks before another provider write');
+select is((select status from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from claim_stale_source_run)),'operator_blocked',
+  'claim path makes the expired provider-marked run operator-blocked');
+select is((select last_error_code from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from claim_stale_source_run)),'WRITE_OUTCOME_UNCERTAIN',
+  'claim path records the uncertain provider outcome');
+select ok((select completed_at is not null and provider_write_started_at is not null
+  from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from claim_stale_source_run)),
+  'claim path preserves provider and completion evidence');
+select is((select lease_fence from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from claim_stale_source_run)),
+  ((select value->>'leaseFence' from claim_stale_source_claim))::bigint,
+  'claim path preserves the exact stale provider fence');
+select lives_ok(format($sql$select public.request_room_pin_sheet_full_resync(%L,%L,%s,'local','local',repeat('a',64),'claim-stale-recovery-0001',repeat('4',64))$sql$,
+  pg_temp.fid(1),pg_temp.fid(201),((select value->>'leaseFence' from claim_stale_source_claim))::bigint),
+  'claim-time uncertain run accepts an exact-fence recovery');
+create temp table claim_stale_recovery_run as
+select id run_id from private.room_pin_sheet_full_resync_runs
+where actor_profile_id=pg_temp.fid(1) and idempotency_key='claim-stale-recovery-0001';
+create temp table claim_stale_recovery_claim(value jsonb);
+insert into claim_stale_recovery_claim values(public.claim_room_pin_sheet_full_resync(
+  pg_temp.fid(455),'local','local',repeat('a',64)
+));
+select is(public.authorize_room_pin_sheet_full_resync_write(
+  (select run_id from claim_stale_recovery_run),pg_temp.fid(455),
+  ((select value->>'leaseFence' from claim_stale_recovery_claim))::bigint
+)->>'status','authorized','claim-time uncertain recovery receives one permit');
+select is(public.settle_room_pin_sheet_full_resync(
+  (select run_id from claim_stale_recovery_run),pg_temp.fid(455),
+  ((select value->>'leaseFence' from claim_stale_recovery_claim))::bigint,'succeeded',null
+)->>'status','succeeded','claim-time uncertain recovery settles');
+select is((select status from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from claim_stale_source_run)),'superseded',
+  'claim-time recovery supersedes its exact uncertain run');
+select lives_ok(format($sql$select public.record_room_pin_sheet_sync_heartbeat(%L,%s,'succeeded',1,1,0,0,0,0,null)$sql$,
+  pg_temp.fid(455),((select value->>'leaseFence' from claim_stale_recovery_claim))::bigint),
+  'claim-time recovery heartbeat releases the singleton');
+create temp table stale_recovery_status(value jsonb);
+insert into stale_recovery_status values(public.get_room_pin_sheet_sync_status(pg_temp.fid(1),pg_temp.fid(201)));
+select is(((select value->>'pending' from stale_recovery_status))::integer,0,
+  'stale-provider recovery clears pending work');
+select is(((select value->>'failed' from stale_recovery_status))::integer,0,
+  'stale-provider recovery clears failed work');
+select is(((select value->>'operatorBlocked' from stale_recovery_status))::boolean,false,
+  'stale-provider recovery clears operator-blocked state');
+select ok((select value->'lastErrorCode' from stale_recovery_status)='null'::jsonb,
+  'stale-provider recovery clears the current last error');
+
 create temp table changed_target_request(value jsonb);
 insert into changed_target_request values(public.request_room_pin_sheet_full_resync(
-  pg_temp.fid(1),pg_temp.fid(201),((select value->>'version' from safe_status))::bigint,
+  pg_temp.fid(1),pg_temp.fid(201),((select value->>'version' from stale_recovery_status))::bigint,
   'local','local',repeat('e',64),'full-resync-request-0002',repeat('f',64)
 ));
-select is(public.claim_room_pin_sheet_full_resync(pg_temp.fid(404),'local','local',repeat('a',64))->>'status',
+create temp table changed_target_claim(value jsonb);
+insert into changed_target_claim values(public.claim_room_pin_sheet_full_resync(
+  pg_temp.fid(404),'local','local',repeat('a',64)
+));
+select is((select value->>'status' from changed_target_claim),
   'operator_blocked','a pending command cannot silently move to a changed spreadsheet/tab identity');
 select is((select blocked_reason_code from private.room_pin_sheet_sync_worker_state where singleton),
   'PROVIDER_CONFIGURATION_ERROR','target identity drift is durable operator-blocked');
+select is(((select value->>'leaseFence' from changed_target_claim))::bigint,
+  ((select value->>'version' from stale_recovery_status))::bigint+1,
+  'target mismatch atomically advances the singleton fence');
+select is((select lease_fence from private.room_pin_sheet_full_resync_runs
+  where actor_profile_id=pg_temp.fid(1) and idempotency_key='full-resync-request-0002'),
+  ((select value->>'leaseFence' from changed_target_claim))::bigint,
+  'target-mismatched run receives the same dedicated reconciliation fence');
+select lives_ok(format($sql$select public.request_room_pin_sheet_full_resync(%L,%L,%s,'local','local',repeat('a',64),'target-mismatch-recovery-0001',repeat('5',64))$sql$,
+  pg_temp.fid(1),pg_temp.fid(201),((select value->>'leaseFence' from changed_target_claim))::bigint),
+  'target-mismatch recovery captures its dedicated fence');
+create temp table changed_target_recovery_run as
+select id run_id from private.room_pin_sheet_full_resync_runs
+where actor_profile_id=pg_temp.fid(1) and idempotency_key='target-mismatch-recovery-0001';
+select is((select reconciles_blocked_fence from private.room_pin_sheet_full_resync_runs
+  where id=(select run_id from changed_target_recovery_run)),
+  ((select value->>'leaseFence' from changed_target_claim))::bigint,
+  'target-mismatch recovery binds the exact advanced fence');
+create temp table changed_target_recovery_claim(value jsonb);
+insert into changed_target_recovery_claim values(public.claim_room_pin_sheet_full_resync(
+  pg_temp.fid(456),'local','local',repeat('a',64)
+));
+select is(public.authorize_room_pin_sheet_full_resync_write(
+  (select run_id from changed_target_recovery_run),pg_temp.fid(456),
+  ((select value->>'leaseFence' from changed_target_recovery_claim))::bigint
+)->>'status','authorized','target-mismatch recovery receives one permit');
+select is(public.settle_room_pin_sheet_full_resync(
+  (select run_id from changed_target_recovery_run),pg_temp.fid(456),
+  ((select value->>'leaseFence' from changed_target_recovery_claim))::bigint,'succeeded',null
+)->>'status','succeeded','target-mismatch recovery settles');
+select is((select status from private.room_pin_sheet_full_resync_runs
+  where actor_profile_id=pg_temp.fid(1) and idempotency_key='full-resync-request-0002'),
+  'superseded','target-mismatch recovery supersedes its exact blocked run');
+select is(public.settle_room_pin_sheet_full_resync(
+  (select run_id from changed_target_recovery_run),pg_temp.fid(456),
+  ((select value->>'leaseFence' from changed_target_recovery_claim))::bigint,'succeeded',null
+)->>'status','succeeded','target-mismatch recovery settle replay is idempotent');
+select lives_ok(format($sql$select public.record_room_pin_sheet_sync_heartbeat(%L,%s,'succeeded',1,1,0,0,0,0,null)$sql$,
+  pg_temp.fid(456),((select value->>'leaseFence' from changed_target_recovery_claim))::bigint),
+  'target-mismatch recovery heartbeat releases the singleton');
+create temp table target_recovery_status(value jsonb);
+insert into target_recovery_status values(public.get_room_pin_sheet_sync_status(pg_temp.fid(1),pg_temp.fid(201)));
+select is(((select value->>'pending' from target_recovery_status))::integer,0,
+  'target-mismatch recovery clears pending work');
+select is(((select value->>'failed' from target_recovery_status))::integer,0,
+  'target-mismatch recovery clears failed work');
+select is(((select value->>'operatorBlocked' from target_recovery_status))::boolean,false,
+  'target-mismatch recovery clears operator-blocked state');
+select ok((select value->'lastErrorCode' from target_recovery_status)='null'::jsonb,
+  'target-mismatch recovery clears the current last error');
 
 select * from finish();
 rollback;

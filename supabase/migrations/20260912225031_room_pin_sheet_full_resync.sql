@@ -165,6 +165,16 @@ begin
       where f.status='processing' and f.claim_id=state.claim_id and f.lease_fence=state.lease_fence
         and f.provider_write_started_at is not null)
   ) then
+    -- A full-board provider marker is a linearization point. Once its lease
+    -- expires, preserve the exact run/fence evidence and require an explicit
+    -- fenced recovery instead of leaving an orphan processing row that could
+    -- be claimed again. This update and the singleton transition commit in the
+    -- same request transaction.
+    update private.room_pin_sheet_full_resync_runs set
+      status='operator_blocked',last_error_code='WRITE_OUTCOME_UNCERTAIN',
+      completed_at=coalesce(completed_at,at_time)
+    where status='processing' and claim_id=state.claim_id
+      and lease_fence=state.lease_fence and provider_write_started_at is not null;
     update private.room_pin_sheet_sync_worker_state set status='operator_blocked',claim_id=null,
       lease_expires_at=null,blocked_reason_code='WRITE_OUTCOME_UNCERTAIN',updated_at=at_time
     where singleton=true returning * into state;
@@ -285,6 +295,14 @@ begin
       where f.status='processing' and f.claim_id=state.claim_id and f.lease_fence=state.lease_fence
         and f.provider_write_started_at is not null)
   ) then
+    -- Keep request-time and claim-time stale-lease reconciliation identical:
+    -- the provider-marked run becomes durable uncertain history on the same
+    -- fence that blocks the singleton.
+    update private.room_pin_sheet_full_resync_runs set
+      status='operator_blocked',last_error_code='WRITE_OUTCOME_UNCERTAIN',
+      completed_at=coalesce(completed_at,at_time)
+    where status='processing' and claim_id=state.claim_id
+      and lease_fence=state.lease_fence and provider_write_started_at is not null;
     update private.room_pin_sheet_sync_worker_state set status='operator_blocked',claim_id=null,
       lease_expires_at=null,blocked_reason_code='WRITE_OUTCOME_UNCERTAIN',updated_at=at_time
     where singleton=true;
@@ -309,11 +327,16 @@ begin
   end if;
   if run.aad_environment<>p_expected_environment or run.aad_project_ref<>p_expected_project_ref
     or run.target_identity_digest<>p_expected_target_identity_digest then
-    update private.room_pin_sheet_full_resync_runs set status='operator_blocked',
-      last_error_code='PROVIDER_CONFIGURATION_ERROR',completed_at=at_time where id=run.id;
+    -- Target drift itself gets a unique monotonic reconciliation fence. This
+    -- prevents a later recovery from sharing an old singleton version or from
+    -- sweeping another blocked run into its exact-fence supersede set.
     update private.room_pin_sheet_sync_worker_state set status='operator_blocked',claim_id=null,
-      lease_expires_at=null,blocked_reason_code='PROVIDER_CONFIGURATION_ERROR',updated_at=at_time
-    where singleton=true;
+      lease_fence=lease_fence+1,lease_expires_at=null,
+      blocked_reason_code='PROVIDER_CONFIGURATION_ERROR',updated_at=at_time
+    where singleton=true returning * into state;
+    update private.room_pin_sheet_full_resync_runs set status='operator_blocked',
+      lease_fence=state.lease_fence,last_error_code='PROVIDER_CONFIGURATION_ERROR',
+      completed_at=at_time where id=run.id;
     return jsonb_build_object('status','operator_blocked','leaseFence',state.lease_fence);
   end if;
   update private.room_pin_sheet_sync_worker_state set status='leased',claim_id=p_claim_id,
