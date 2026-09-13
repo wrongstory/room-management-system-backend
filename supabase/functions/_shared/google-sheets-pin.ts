@@ -11,6 +11,7 @@ export const ROOM_PIN_SHEET_HEADERS = [
   "reason_code",
   "environment",
 ] as const;
+export const ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT = 121;
 export const LOCAL_ROOM_PIN_SHEET_TARGET = Object.freeze({
   environment: "local",
   projectRef: "local",
@@ -76,7 +77,7 @@ const safeTimestamp = (value: string): string => {
   return value;
 };
 
-/** Hosted targets are intentionally absent until #137/release approval adds an exact mapping. */
+/** Hosted targets remain absent until a release approval adds an exact mapping. */
 export function assertApprovedRoomPinSheetTarget(
   target: RoomPinSheetTarget,
 ): void {
@@ -86,6 +87,32 @@ export function assertApprovedRoomPinSheetTarget(
     target.spreadsheetId === LOCAL_ROOM_PIN_SHEET_TARGET.spreadsheetId &&
     target.tab === LOCAL_ROOM_PIN_SHEET_TARGET.tab;
   if (!approved) fail("PROVIDER_CONFIGURATION_ERROR");
+}
+
+export function approvedRoomPinSheetTarget(
+  environment: string,
+  projectRef: string,
+): RoomPinSheetTarget {
+  if (
+    environment !== LOCAL_ROOM_PIN_SHEET_TARGET.environment ||
+    projectRef !== LOCAL_ROOM_PIN_SHEET_TARGET.projectRef
+  ) {
+    return fail("PROVIDER_CONFIGURATION_ERROR");
+  }
+  return { ...LOCAL_ROOM_PIN_SHEET_TARGET };
+}
+
+/** Safe immutable identity marker; no credential or PIN material is included. */
+export async function roomPinSheetTargetDigest(
+  target: RoomPinSheetTarget,
+): Promise<string> {
+  assertApprovedRoomPinSheetTarget(target);
+  const canonical =
+    `room-pin-sheet-target:v1\0${target.environment}\0${target.projectRef}\0${target.spreadsheetId}\0${target.tab}`;
+  const digest = await crypto.subtle.digest("SHA-256", utf8(canonical));
+  return [...new Uint8Array(digest)].map((byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
 }
 
 function pemBytes(value: string): Uint8Array {
@@ -457,27 +484,48 @@ export class GoogleSheetsPinProvider {
     return { outcome, sheetRow };
   }
   async write(row: RoomPinSheetRow, deadlineAt: number): Promise<void> {
-    const values = [
-      {
-        range: `'${this.#target.tab}'!A1:H1`,
-        majorDimension: "ROWS",
-        values: [ROOM_PIN_SHEET_HEADERS],
-      },
-      {
-        range: this.#range(row.sheetRow),
-        majorDimension: "ROWS",
-        values: [[
-          row.roomNumber,
-          row.canonicalPin,
-          String(row.pinVersion),
-          row.syncStatus,
-          safeTimestamp(row.effectiveAt),
-          new Date(this.#clock()).toISOString(),
-          row.reasonCode,
-          row.environment,
-        ]],
-      },
+    await this.#writeValues(
+      [
+        {
+          range: `'${this.#target.tab}'!A1:H1`,
+          majorDimension: "ROWS",
+          values: [ROOM_PIN_SHEET_HEADERS],
+        },
+        {
+          range: this.#range(row.sheetRow),
+          majorDimension: "ROWS",
+          values: [[
+            ...this.#rowValues(row, new Date(this.#clock()).toISOString()),
+          ]],
+        },
+      ],
+      deadlineAt,
+      1,
+      2,
+    );
+  }
+  #rowValues(row: RoomPinSheetRow, syncedAt: string): readonly string[] {
+    return [
+      row.roomNumber,
+      row.canonicalPin,
+      String(row.pinVersion),
+      row.syncStatus,
+      safeTimestamp(row.effectiveAt),
+      syncedAt,
+      row.reasonCode,
+      row.environment,
     ];
+  }
+  async #writeValues(
+    data: Array<{
+      range: string;
+      majorDimension: "ROWS";
+      values: readonly (readonly string[])[];
+    }>,
+    deadlineAt: number,
+    minimumUpdatedRows: number,
+    maximumUpdatedRows: number,
+  ): Promise<void> {
     const response = await this.#sheets(
       "values:batchUpdate",
       {
@@ -486,7 +534,7 @@ export class GoogleSheetsPinProvider {
         body: JSON.stringify({
           valueInputOption: "RAW",
           includeValuesInResponse: false,
-          data: values,
+          data,
         }),
       },
       deadlineAt,
@@ -500,8 +548,51 @@ export class GoogleSheetsPinProvider {
       return fail("WRITE_OUTCOME_UNCERTAIN");
     }
     if (
-      typeof body.totalUpdatedRows !== "number" || body.totalUpdatedRows < 1 ||
-      body.totalUpdatedRows > 2
+      typeof body.totalUpdatedRows !== "number" ||
+      !Number.isSafeInteger(body.totalUpdatedRows) ||
+      body.totalUpdatedRows < minimumUpdatedRows ||
+      body.totalUpdatedRows > maximumUpdatedRows
     ) return fail("WRITE_OUTCOME_UNCERTAIN");
+  }
+
+  /**
+   * Replaces the complete bounded board from a DB snapshot. No Sheet value is
+   * accepted as input, so deleted, sorted, duplicated, or tampered rows cannot
+   * flow back into PostgreSQL.
+   */
+  async writeFullBoard(
+    rows: readonly RoomPinSheetRow[],
+    deadlineAt: number,
+  ): Promise<void> {
+    if (
+      rows.length !== ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT ||
+      new Set(rows.map((row) => row.roomNumber)).size !== rows.length ||
+      rows.some((row, index) =>
+        row.sheetRow !== index + 2 ||
+        row.environment !== this.#target.environment ||
+        row.reasonCode !== "FULL_RESYNC_REPAIR" ||
+        row.pinVersion < 0 || !Number.isSafeInteger(row.pinVersion) ||
+        (row.pinVersion === 0 && row.canonicalPin !== "") ||
+        (row.pinVersion > 0 && row.canonicalPin === "")
+      )
+    ) return fail("PROVIDER_CONFIGURATION_ERROR");
+    const syncedAt = new Date(this.#clock()).toISOString();
+    await this.#writeValues(
+      [
+        {
+          range: `'${this.#target.tab}'!A1:H1`,
+          majorDimension: "ROWS",
+          values: [ROOM_PIN_SHEET_HEADERS],
+        },
+        {
+          range: `'${this.#target.tab}'!A2:H122`,
+          majorDimension: "ROWS",
+          values: rows.map((row) => this.#rowValues(row, syncedAt)),
+        },
+      ],
+      deadlineAt,
+      ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT,
+      ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT + 1,
+    );
   }
 }

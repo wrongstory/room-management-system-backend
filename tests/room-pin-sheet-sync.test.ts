@@ -43,6 +43,33 @@ async function fixture() {
     ...envelope,
   };
 }
+async function fullResyncFixture() {
+  const first = await fixture();
+  return {
+    runId: "00000000-0000-4000-8000-000000000099",
+    leaseFence: 8,
+    items: Array.from({ length: 121 }, (_, index) => ({
+      roomId: index === 0 ? first.roomId : `00000000-0000-4000-8${String(index).padStart(3, "0")}-${String(index + 100).padStart(12, "0")}`,
+      roomNumber: index === 0 ? "101" : String(1001 + index),
+      sheetRow: index + 2,
+      pinVersion: index === 0 ? 1 : 0,
+      effectiveAt: "2026-09-13T00:00:00.000Z",
+      syncStatus: index === 0 ? "verified" : "unconfigured",
+      reasonCode: "FULL_RESYNC_REPAIR",
+      ...(index === 0
+        ? { envelope: {
+          envelopeFormat: first.envelopeFormat,
+          keyVersion: first.keyVersion,
+          ciphertextBase64: first.ciphertextBase64,
+          nonceBase64: first.nonceBase64,
+          authTagBase64: first.authTagBase64,
+          aadEnvironment: first.aadEnvironment,
+          aadProjectRef: first.aadProjectRef,
+        } }
+        : {}),
+    })),
+  };
+}
 async function setup(
   mode: "write" | "current" | "retry" | "blocked" = "write",
 ) {
@@ -51,6 +78,8 @@ async function setup(
   const db: RoomPinSheetRpc = {
     rpc: async (name, args) => {
       calls.push({ name, args });
+      if (name === "claim_room_pin_sheet_full_resync")
+        return { data: { status: "empty", leaseFence: 0 }, error: null };
       if (name === "claim_room_pin_sheet_sync")
         return {
           data: { status: "claimed", items: [row], blocked: 0, leaseFence: 4 },
@@ -128,6 +157,7 @@ describe("room PIN Sheet sync worker", () => {
       blocked: 0,
     });
     expect(value.calls.map((call) => call.name)).toEqual([
+      "claim_room_pin_sheet_full_resync",
       "claim_room_pin_sheet_sync",
       "renew_room_pin_sheet_sync_run",
       "authorize_room_pin_sheet_write",
@@ -175,6 +205,8 @@ describe("room PIN Sheet sync worker", () => {
     const db: RoomPinSheetRpc = {
       rpc: async (name, args) => {
         calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_full_resync")
+          return { data: { status: "empty", leaseFence: 0 }, error: null };
         if (name === "claim_room_pin_sheet_sync") {
           return {
             data: {
@@ -228,6 +260,8 @@ describe("room PIN Sheet sync worker", () => {
     const db: RoomPinSheetRpc = {
       rpc: async (name, args) => {
         calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_full_resync")
+          return { data: { status: "empty", leaseFence: 0 }, error: null };
         if (name === "claim_room_pin_sheet_sync") {
           return {
             data: { status: "claimed", items: [], blocked: 0, leaseFence: 4 },
@@ -253,6 +287,7 @@ describe("room PIN Sheet sync worker", () => {
     ).resolves.toMatchObject({ claimed: 0, blocked: 0, projected: 0 });
     expect(fetches).toBe(0);
     expect(calls.map((call) => call.name)).toEqual([
+      "claim_room_pin_sheet_full_resync",
       "claim_room_pin_sheet_sync",
       "renew_room_pin_sheet_sync_run",
       "record_room_pin_sheet_sync_heartbeat",
@@ -269,6 +304,8 @@ describe("room PIN Sheet sync worker", () => {
     const db: RoomPinSheetRpc = {
       rpc: async (name, args) => {
         calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_full_resync")
+          return { data: { status: "empty", leaseFence: 0 }, error: null };
         if (name === "claim_room_pin_sheet_sync") {
           return {
             data: { status: "claimed", items: [], blocked: 0, leaseFence: 4 },
@@ -309,6 +346,8 @@ describe("room PIN Sheet sync worker", () => {
     const db: RoomPinSheetRpc = {
       rpc: async (name, args) => {
         calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_full_resync")
+          return { data: { status: "empty", leaseFence: 0 }, error: null };
         if (name === "claim_room_pin_sheet_sync") {
           return {
             data: {
@@ -361,6 +400,8 @@ describe("room PIN Sheet sync worker", () => {
     const db: RoomPinSheetRpc = {
       rpc: async (name, args) => {
         calls.push({ name, args });
+        if (name === "claim_room_pin_sheet_full_resync")
+          return { data: { status: "empty", leaseFence: 0 }, error: null };
         if (name === "claim_room_pin_sheet_sync") {
           return {
             data: {
@@ -406,6 +447,8 @@ describe("room PIN Sheet sync worker", () => {
       inspections = 0;
     const db: RoomPinSheetRpc = {
       rpc: async (name) => {
+        if (name === "claim_room_pin_sheet_full_resync")
+          return { data: { status: "empty", leaseFence: 0 }, error: null };
         if (name === "claim_room_pin_sheet_sync") {
           if (providerWriteStarted && leaseExpired) {
             return {
@@ -469,6 +512,8 @@ describe("room PIN Sheet sync worker", () => {
     const db: RoomPinSheetRpc = {
       rpc: async (name, args) => {
         times.push({ name, now });
+        if (name === "claim_room_pin_sheet_full_resync")
+          return { data: { status: "empty", leaseFence: 0 }, error: null };
         if (name === "claim_room_pin_sheet_sync") {
           now = 1000;
           return {
@@ -547,6 +592,186 @@ describe("room PIN Sheet sync worker", () => {
       p_outcome: "operator_blocked",
       p_reason_code: "PROVIDER_RESPONSE_INVALID",
     });
+  });
+  it("writes one deterministic full-board snapshot and settles it under the singleton fence", async () => {
+    const operation = await fullResyncFixture();
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let writes = 0;
+    const db: RoomPinSheetRpc = { rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "claim_room_pin_sheet_full_resync") {
+        return { data: { status: "claimed", leaseFence: 8, operation }, error: null };
+      }
+      if (name === "renew_room_pin_sheet_full_resync") return { data: { status: "leased", leaseFence: 8 }, error: null };
+      if (name === "authorize_room_pin_sheet_full_resync_write") return { data: { status: "authorized", leaseFence: 8 }, error: null };
+      if (name === "settle_room_pin_sheet_full_resync") return { data: { status: "succeeded", roomCount: 121 }, error: null };
+      return { data: { status: args.p_status }, error: null };
+    } };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => { throw new Error("full resync must not read Sheet values"); },
+      write: async () => { throw new Error("full resync must not use incremental writes"); },
+      validateConfiguration: async () => undefined,
+      writeFullBoard: async (rows) => {
+        writes++;
+        expect(rows).toHaveLength(121);
+        expect(rows[0]).toMatchObject({ roomNumber: "101", sheetRow: 2, canonicalPin: "101-1234" });
+        expect(rows[120]).toMatchObject({ roomNumber: "1121", sheetRow: 122, canonicalPin: "", pinVersion: 0 });
+      },
+    };
+    await expect(new RoomPinSheetSyncWorker(db, provider, config).run()).resolves.toMatchObject({ claimed: 1, projected: 1 });
+    expect(writes).toBe(1);
+    expect(calls.map(call => call.name)).toEqual([
+      "claim_room_pin_sheet_full_resync",
+      "renew_room_pin_sheet_full_resync",
+      "authorize_room_pin_sheet_full_resync_write",
+      "settle_room_pin_sheet_full_resync",
+      "record_room_pin_sheet_sync_heartbeat",
+    ]);
+  });
+  it("keeps a recovery lineage operator-blocked when authorization finds a stale snapshot", async () => {
+    const operation = await fullResyncFixture();
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let writes = 0;
+    const db: RoomPinSheetRpc = { rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "claim_room_pin_sheet_full_resync") {
+        return { data: { status: "claimed", leaseFence: 8, operation }, error: null };
+      }
+      if (name === "renew_room_pin_sheet_full_resync") {
+        return { data: { status: "leased", leaseFence: 8 }, error: null };
+      }
+      if (name === "authorize_room_pin_sheet_full_resync_write") {
+        return { data: { status: "operator_blocked", leaseFence: 8 }, error: null };
+      }
+      return { data: { status: args.p_status }, error: null };
+    } };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => { throw new Error("no Sheet read"); },
+      write: async () => { throw new Error("no incremental write"); },
+      validateConfiguration: async () => undefined,
+      writeFullBoard: async () => { writes++; },
+    };
+    await expect(new RoomPinSheetSyncWorker(db, provider, config).run()).resolves.toMatchObject({
+      claimed: 1,
+      blocked: 1,
+      projected: 0,
+    });
+    expect(writes).toBe(0);
+    expect(calls.map(call => call.name)).not.toContain("settle_room_pin_sheet_full_resync");
+    expect(calls.find(call => call.name === "record_room_pin_sheet_sync_heartbeat")?.args).toMatchObject({
+      p_status: "operator_blocked",
+      p_blocked: 1,
+      p_error_code: "SNAPSHOT_STALE",
+    });
+  });
+  it("does not report success when bounded lineage cleanup requires another recovery", async () => {
+    const operation = await fullResyncFixture();
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let writes = 0;
+    const db: RoomPinSheetRpc = { rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "claim_room_pin_sheet_full_resync") {
+        return { data: { status: "claimed", leaseFence: 8, operation }, error: null };
+      }
+      if (name === "renew_room_pin_sheet_full_resync") {
+        return { data: { status: "leased", leaseFence: 8 }, error: null };
+      }
+      if (name === "authorize_room_pin_sheet_full_resync_write") {
+        return { data: { status: "authorized", leaseFence: 8 }, error: null };
+      }
+      if (name === "settle_room_pin_sheet_full_resync") {
+        return { data: { status: "operator_blocked", roomCount: 121 }, error: null };
+      }
+      return { data: { status: args.p_status }, error: null };
+    } };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => { throw new Error("no Sheet read"); },
+      write: async () => { throw new Error("no incremental write"); },
+      validateConfiguration: async () => undefined,
+      writeFullBoard: async () => { writes++; },
+    };
+    await expect(new RoomPinSheetSyncWorker(db, provider, config).run()).resolves.toMatchObject({
+      claimed: 1,
+      blocked: 1,
+      projected: 0,
+    });
+    expect(writes).toBe(1);
+    expect(calls.map(call => call.name)).not.toContain("block_room_pin_sheet_full_resync_after_settle_failure");
+    expect(calls.find(call => call.name === "record_room_pin_sheet_sync_heartbeat")?.args).toMatchObject({
+      p_status: "operator_blocked",
+      p_blocked: 1,
+      p_error_code: "DB_SETTLE_UNCERTAIN",
+    });
+  });
+  it("does not authorize a full-board write when snapshot preparation exhausts the provider reserve", async () => {
+    const operation = await fullResyncFixture();
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let now = 0;
+    let writes = 0;
+    const db: RoomPinSheetRpc = { rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "claim_room_pin_sheet_full_resync") {
+        return { data: { status: "claimed", leaseFence: 8, operation }, error: null };
+      }
+      if (name === "renew_room_pin_sheet_full_resync") {
+        now = 32500;
+        return { data: { status: "leased", leaseFence: 8 }, error: null };
+      }
+      if (name === "authorize_room_pin_sheet_full_resync_write") {
+        throw new Error("provider permit must not be created without reserve");
+      }
+      if (name === "settle_room_pin_sheet_full_resync") {
+        return { data: { status: "failed", roomCount: 121 }, error: null };
+      }
+      return { data: { status: args.p_status }, error: null };
+    } };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => { throw new Error("no Sheet read"); },
+      write: async () => { throw new Error("no incremental write"); },
+      validateConfiguration: async () => undefined,
+      writeFullBoard: async () => { writes++; },
+    };
+    const result = await new RoomPinSheetSyncWorker(db, provider, config, () => now).run();
+    expect(result).toMatchObject({ claimed: 1, projected: 0, retrying: 1, blocked: 0 });
+    expect(writes).toBe(0);
+    expect(calls.map(call => call.name)).not.toContain("authorize_room_pin_sheet_full_resync_write");
+    expect(calls.find(call => call.name === "settle_room_pin_sheet_full_resync")?.args).toMatchObject({
+      p_outcome: "retryable",
+      p_reason_code: "PROVIDER_UNAVAILABLE",
+    });
+    expect(calls.find(call => call.name === "record_room_pin_sheet_sync_heartbeat")?.args).toMatchObject({
+      p_status: "degraded",
+      p_retrying: 1,
+      p_error_code: "PROVIDER_UNAVAILABLE",
+    });
+  });
+  it("never repeats a full-board write after provider success and both settle paths fail", async () => {
+    const operation = await fullResyncFixture();
+    let leaseExpired = false, writes = 0, marker = false;
+    const db: RoomPinSheetRpc = { rpc: async (name) => {
+      if (name === "claim_room_pin_sheet_full_resync") {
+        if (leaseExpired && marker) return { data: { status: "operator_blocked", leaseFence: 8 }, error: null };
+        return { data: { status: "claimed", leaseFence: 8, operation }, error: null };
+      }
+      if (name === "renew_room_pin_sheet_full_resync") return { data: { status: "leased", leaseFence: 8 }, error: null };
+      if (name === "authorize_room_pin_sheet_full_resync_write") {
+        marker = true;
+        return { data: { status: "authorized", leaseFence: 8 }, error: null };
+      }
+      return { data: null, error: { code: "DB_UNAVAILABLE" } };
+    } };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => { throw new Error("no Sheet read"); },
+      write: async () => { throw new Error("no incremental write"); },
+      validateConfiguration: async () => undefined,
+      writeFullBoard: async () => { writes++; },
+    };
+    await expect(new RoomPinSheetSyncWorker(db, provider, config).run()).rejects.toMatchObject({ code: "ROOM_PIN_SHEET_SYNC_FAILED" });
+    expect(marker).toBe(true);
+    expect(writes).toBe(1);
+    leaseExpired = true;
+    await expect(new RoomPinSheetSyncWorker(db, provider, config).run()).resolves.toMatchObject({ blocked: 1, projected: 0 });
+    expect(writes).toBe(1);
   });
   it("rejects wrong route, method, secret and body before running", async () => {
     const secret = "s".repeat(32);

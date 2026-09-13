@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서 갱신의 `dev` integration base: `3e54e3ebfe09ea7ef206c4997cc0a907e010e431` — #136까지 반영된 기준 50 migrations / OpenAPI 102 paths / 109 operations. #140 source candidate는 51번째 migration과 PIN 초기화 API 1개를 추가해 103 paths / 110 operations가 된다.
+- 이 문서 갱신의 `dev` integration base: `45d18f1c12928340a80ef21d58d7edb3d6529ad8` — #137까지 반영된 기준 51 migrations / OpenAPI 104 paths / 111 operations. #140 source candidate는 52번째 migration과 PIN 초기화 API 1개를 추가해 105 paths / 112 operations가 된다.
 - 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -495,6 +495,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - PIN 평문을 URL, 로그, error, audit payload, notification, analytics, Git, 브라우저 저장소에 넣지 않는다.
 - `[확정 — 2026-09-13 #136]` Google Sheets는 DB PIN current revision의 단방향 운영 projection이다. `room_number`를 business identity로 bounded board에서 정확히 한 행만 갱신하고, equal-version 변조는 DB 정본으로 복구하며 Sheet-ahead/중복 identity/불확실 write는 operator-blocked한다. 전용 service account는 spreadsheets-only scope를 쓰며 source-controlled approved target 검증을 PIN 복호화·OAuth보다 먼저 수행한다. hosted target mapping과 full resync/운영 활성화는 #137/release 승인 전에는 없다.
 - `[확정 — 2026-09-13 #140]` 빈 DB의 PIN 미설정 상태는 예약 업무를 중단시키지 않는다. 배포 시 secret manager에 주입한 4~8자리 초기 숫자를 active admin 전용 bounded bootstrap command가 서버 안에서 객실번호와 조합·암호화해 version 1로 수립한다. 초기 숫자 평문은 source, migration, request/response, 로그, 감사, 알림에 넣지 않는다. bootstrap은 current PIN 또는 unresolved mismatch가 있는 객실을 덮어쓰지 않고 건너뛰며, batch 최대 25건·멱등 receipt·객실별 immutable revision/outbox를 사용한다.
+- `[확정 — 2026-09-13 #137 source]` developer/admin은 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 CAS version만 조회한다. full resync는 서버가 요청 시점의 정확한 121실 room/PIN current snapshot을 만들고 global singleton fence의 유일한 provider permit으로 `A1:H122`를 DB 정본에서 재작성한다. 요청·claim은 environment/project/spreadsheet/tab 전체의 source-controlled SHA-256 target identity에 묶이며 mapping 변경·stale snapshot·경쟁은 fail-closed한다. 성공 marker 이전에 생성된 snapshot-room incremental/uncertain 작업만 supersede하고 이후 PIN 변경은 보존한다. Sheet→DB 입력, PIN/envelope/credential/token/raw Google response 공개, production mapping·활성화는 금지한다.
 
 ### `[확정]` 개인정보 보존
 

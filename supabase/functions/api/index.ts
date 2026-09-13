@@ -149,6 +149,10 @@ import {
   roomPinPath,
 } from "../_shared/room-pin-api.ts";
 import {
+  requestRoomPinSheetFullResync,
+  roomPinSheetSyncStatus,
+} from "../_shared/room-pin-sheet-operations-api.ts";
+import {
   authenticate,
   authenticateLimitedAttempt,
   cors,
@@ -348,6 +352,23 @@ export async function handleApiRequest(
       );
       response.headers.set("Cache-Control", "no-store");
       return response;
+    }
+    if (request.method === "GET" && path === "/v1/room-pin-sheet-sync/status") {
+      return jsonResponse(
+        { sync: await roomPinSheetSyncStatus(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path === "/v1/room-pin-sheet-sync/full-resync"
+    ) {
+      return jsonResponse(
+        { sync: await requestRoomPinSheetFullResync(request, clients, actor) },
+        202,
+        corsHeaders,
+      );
     }
     const roomPinRoute = request.method === "POST" ? roomPinPath(path) : null;
     if (roomPinRoute) {

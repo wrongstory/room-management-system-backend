@@ -52,6 +52,10 @@ source에는 사진4 operations가 추가됐지만 운영 OpenAPI에 나타나�
 408 PHOTO_BODY_TIMEOUT은 본문 수신 시간 초과, 413은 원문/출력 크기 또는 decoder 기술상한, 415는 MIME, 409는 CAS/작업·quota·KST clock 경계, 503은 provider/환경 준비 상태를 구분한다. 업로드 initial/retry 응답의 `quotaWarning:boolean`이 true면 용량 경고를 표시한다. Google raw 사용량은 제공하지 않는다.
 사진 accepted가 field_completed/전체 제출/검수/ready로 자동 전이되지 않는다. Python developer 운영 콘솔은 이 business upload/read API를 생성하거나 호출하지 않는다.
 
+### #137 PIN Sheet 운영 source/dev 완료
+
+active developer/admin만 `GET /v1/room-pin-sheet-sync/status`를 호출한다. UI는 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 `version`만 표시하고 healthy를 별도로 추측하지 않는다. 전체 복구는 strict `{expectedVersion}` body와 새 `Idempotency-Key`로 `POST /v1/room-pin-sheet-sync/full-resync`를 호출한다. 409 stale/pending/busy이면 status를 다시 읽고 운영자가 판단하며 자동 반복하지 않는다. 응답과 클라이언트 상태에 PIN, spreadsheet/tab identity, credential/provider 원문을 저장하지 않는다. production OpenAPI에 두 path가 나타나고 hosted mapping/ACL/smoke가 끝날 때까지 기능을 켜지 않는다.
+
 백엔드 저장소에서:
 
 ```bash

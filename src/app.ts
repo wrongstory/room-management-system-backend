@@ -24,6 +24,11 @@ import {
 } from './modules/reservations/reservation.service.js';
 import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
+import { createRoomPinSheetOperationsRoutes } from './modules/rooms/room-pin-sheet-operations.routes.js';
+import {
+  type RoomPinSheetOperationsService,
+  SupabaseRoomPinSheetOperationsService
+} from './modules/rooms/room-pin-sheet-operations.service.js';
 import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
 import { photoError } from './modules/photos/photo-service.js';
 import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
@@ -45,6 +50,7 @@ export interface AppServices {
   accounts: AccountService;
   availability: AvailabilityService;
   rooms: RoomService;
+  roomPinSheetOperations?: RoomPinSheetOperationsService;
   reservations: ReservationService;
   payroll: PayrollService;
   complaints?: ComplaintService;
@@ -94,6 +100,25 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         environment: options.env.APP_ENV,
         projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
       }, options.env.ROOM_PIN_INITIAL_DIGITS),
+      roomPinSheetOperations: new SupabaseRoomPinSheetOperationsService(clients, {
+        target: {
+          environment: options.env.APP_ENV,
+          projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local',
+          spreadsheetId: options.env.GOOGLE_SHEETS_SPREADSHEET_ID ?? '',
+          tab: options.env.GOOGLE_SHEETS_ROOM_PIN_TAB ?? ''
+        },
+        serviceAccount: {
+          email: options.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL ?? '',
+          privateKeyPem: options.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY ?? ''
+        },
+        crypto: {
+          key: options.env.ROOM_PIN_KEY_BASE64,
+          keyVersion: options.env.ROOM_PIN_KEY_VERSION,
+          keyring: JSON.parse(options.env.ROOM_PIN_KEYRING_JSON) as Record<string, string>,
+          environment: options.env.APP_ENV,
+          projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
+        }
+      }),
       reservations: new SupabaseReservationService(
         clients,
         options.env.RESERVATION_PII_KEY_BASE64,
@@ -191,6 +216,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  if (services.roomPinSheetOperations) {
+    await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {
+      prefix: '/v1/room-pin-sheet-sync'
+    });
+  }
   await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
   await app.register(createPayrollRoutes(services.payroll), { prefix: '/v1/payroll' });
   if (services.complaints) {

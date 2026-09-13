@@ -50,6 +50,10 @@ const envSchema = z.object({
   GOOGLE_DRIVE_CLIENT_SECRET: z.string().max(4096).optional(),
   GOOGLE_DRIVE_REFRESH_TOKEN: z.string().max(4096).optional(),
   GOOGLE_DRIVE_ROOT_FOLDER_ID: z.string().max(200).optional(),
+  GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: z.string().max(256).optional(),
+  GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().max(8192).optional(),
+  GOOGLE_SHEETS_SPREADSHEET_ID: z.string().max(200).optional(),
+  GOOGLE_SHEETS_ROOM_PIN_TAB: z.string().max(100).optional(),
   RESERVATION_SCHEDULER_ACTOR_PROFILE_ID: z.preprocess(
     (value) => value === '' ? undefined : value,
     z.uuid().optional()

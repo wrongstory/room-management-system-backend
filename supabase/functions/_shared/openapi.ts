@@ -1054,6 +1054,89 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/room-pin-sheet-sync/status": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "getRoomPinSheetSyncStatus",
+        summary: "PIN Sheet 동기화 안전 상태 조회",
+        description:
+          "비밀번호 변경을 완료한 active developer/admin이 pending·failed·operatorBlocked·oldestPendingAt·lastSuccessAt·lastErrorCode와 command CAS version만 조회합니다. PIN, envelope, Google 응답·credential·token, spreadsheet/tab identity는 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer", "admin"],
+        responses: {
+          "200": {
+            description: "민감정보가 제거된 PIN Sheet 운영 상태",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["sync"],
+                  properties: {
+                    sync: {
+                      $ref: "#/components/schemas/RoomPinSheetOperatorStatus",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/room-pin-sheet-sync/full-resync": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "requestRoomPinSheetFullResync",
+        summary: "PIN Sheet 121실 전체 복구 요청",
+        description:
+          "Supabase 121실 정본 snapshot으로 삭제·정렬·변조된 Sheet 행을 deterministic A2:H122 범위에 복구하는 server-owned command입니다. source-approved exact target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer", "admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/RoomPinSheetFullResyncRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "202": {
+            description: "fenced full-resync command accepted",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["sync"],
+                  properties: {
+                    sync: {
+                      $ref:
+                        "#/components/schemas/RoomPinSheetFullResyncAccepted",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/developer/audit-events": {
       get: {
         tags: ["Developer"],
@@ -1069,7 +1152,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 61,
+              maxItems: 63,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -4538,6 +4621,14 @@ export const openApiDocument = {
           "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
           "PIN_REVEAL_AUTHORIZATION_CHANGED",
           "ROOM_PIN_UNCONFIGURED",
+          "ROOM_PIN_SHEET_OPERATOR_REQUIRED",
+          "ROOM_PIN_SHEET_NOT_CONFIGURED",
+          "ROOM_PIN_SHEET_OPERATION_FAILED",
+          "ROOM_PIN_SHEET_RESPONSE_TOO_LARGE",
+          "ROOM_PIN_SHEET_FULL_RESYNC_STALE",
+          "ROOM_PIN_SHEET_WORKER_BUSY",
+          "ROOM_PIN_SHEET_FULL_RESYNC_PENDING",
+          "ROOM_PIN_SHEET_ROOM_MASTER_INVALID",
           "PIN_ACCESS_LEASE_REQUIRED",
           "PIN_ACCESS_REQUIRED",
           "SENSITIVE_TEXT_NOT_ALLOWED",
@@ -4831,6 +4922,8 @@ export const openApiDocument = {
           "room.pin_change_prepared",
           "room.pin_change_confirmed",
           "room.pin_mismatch_resolved",
+          "room_pin_sheet.full_resync_requested",
+          "room_pin_sheet.full_resync_succeeded",
           "submission.bomb_reported",
           "submission.created",
           "inspection.bomb_decided",
@@ -4994,6 +5087,53 @@ export const openApiDocument = {
             ),
           },
           checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomPinSheetOperatorStatus: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "pending",
+          "failed",
+          "operatorBlocked",
+          "oldestPendingAt",
+          "lastSuccessAt",
+          "lastErrorCode",
+          "version",
+          "checkedAt",
+        ],
+        properties: {
+          pending: { type: "integer", minimum: 0, maximum: 1000 },
+          failed: { type: "integer", minimum: 0, maximum: 1000 },
+          operatorBlocked: { type: "boolean" },
+          oldestPendingAt: { type: ["string", "null"], format: "date-time" },
+          lastSuccessAt: { type: ["string", "null"], format: "date-time" },
+          lastErrorCode: {
+            type: ["string", "null"],
+            pattern: "^[A-Z0-9_]{2,80}$",
+          },
+          version: {
+            type: "integer",
+            minimum: 0,
+            description: "full-resync command용 singleton fence CAS version",
+          },
+          checkedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomPinSheetFullResyncRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion"],
+        properties: { expectedVersion: { type: "integer", minimum: 0 } },
+      },
+      RoomPinSheetFullResyncAccepted: {
+        type: "object",
+        additionalProperties: false,
+        required: ["status", "roomCount", "version"],
+        properties: {
+          status: { const: "pending" },
+          roomCount: { const: 121 },
+          version: { type: "integer", minimum: 0 },
         },
       },
       RoomPinSheetSyncStatus: {
@@ -5478,6 +5618,8 @@ export const openApiDocument = {
               pinSyncEventId: { type: "string", format: "uuid" },
               syncStatus: { type: "string" },
               pinVersion: { type: "integer", minimum: 0 },
+              roomCount: { type: "integer", minimum: 0, maximum: 121 },
+              reconciliation: { type: "boolean" },
               complaintId: { type: "string", format: "uuid" },
               sourceComplaintDecisionId: { type: "string", format: "uuid" },
               compensationDecisionId: { type: "string", format: "uuid" },

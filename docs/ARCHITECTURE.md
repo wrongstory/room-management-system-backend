@@ -23,7 +23,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@3e54e3ebfe09ea7ef206c4997cc0a907e010e431`이며 base snapshot은 50 migrations / OpenAPI 102 paths / 109 operations다. #131 Phase A와 #136 Phase B worker source는 dev에 통합됐다. #140 candidate는 기존 migration을 수정하지 않는 51번째 append-only migration과 PIN bootstrap API를 추가해 103 paths / 110 operations가 된다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@45d18f1c12928340a80ef21d58d7edb3d6529ad8`이며 base snapshot은 51 migrations / OpenAPI 104 paths / 111 operations다. #131 Phase A, #136 Phase B, #137 Phase C는 source/dev에 통합됐다. #140 candidate는 기존 migration을 수정하지 않는 52번째 append-only migration과 PIN bootstrap API를 추가해 105 paths / 112 operations가 된다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
 
@@ -48,6 +48,13 @@ private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 
 `pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. reveal/change의 기존 current revision·lease 권한 검사도 유지한다.
 
 초기 데이터가 없는 환경에서는 active admin만 `POST /v1/rooms/pins/bootstrap`을 호출한다. 런타임은 secret manager의 `ROOM_PIN_INITIAL_DIGITS`를 읽고 DB가 반환한 최대 25개 후보의 현재 객실번호와 서버 안에서 canonical credential을 조합·AES-GCM 암호화한 뒤 service-role RPC에 envelope만 전달한다. RPC는 global lifecycle lock, sorted room lock, immutable version 1 revision, current pointer, verified sync event, Sheet outbox, safe audit와 command receipt를 한 transaction에 기록한다. current PIN이나 unresolved mismatch가 있으면 덮어쓰지 않는다. 평문 초기 숫자는 source/migration/DB/API/log/audit/notification에 존재하지 않는다.
+### #137 PIN Sheet full resync와 운영 상태 — source/dev 완료
+
+공개 `GET /v1/room-pin-sheet-sync/status`는 변경 완료 비밀번호와 active developer/admin session을 매번 확인하고 `pending/failed/operatorBlocked/oldestPendingAt/lastSuccessAt/lastErrorCode/version`만 반환한다. 현재 local credential 또는 target mapping이 invalid이면 과거 successful heartbeat보다 우선해 false-green을 차단한다. `POST /v1/room-pin-sheet-sync/full-resync`는 strict `{expectedVersion}` body, scoped idempotency key와 status version CAS를 요구한다.
+
+요청은 121실 room master와 current PIN revision reference를 deterministic row 2..122 snapshot으로 고정한다. canonical environment/project/spreadsheet/tab SHA-256 marker가 request/run/claim 전 구간에서 일치해야 하며 raw spreadsheet/tab과 provider material은 DB/API/audit에 노출하지 않는다. full writer와 incremental writer는 같은 singleton fence를 사용해 provider permit 한 건만 얻는다. full write 성공 시 `provider_write_started_at` 이전에 만들어진 snapshot-room outbox만 version과 무관하게 supersede하고 marker 이후 PIN 변경은 남겨 최종 수렴한다. retryable failed run도 logical active command이므로 다른 key가 중복 full write를 예약할 수 없다. developer audit은 requested/succeeded의 `status/roomCount/reconciliation`만 투영한다.
+
+각 일반 run은 immutable self-FK `recovery_root_run_id`로 자신을 root로 삼고, 명시 recovery는 잠근 exact-fence `operator_blocked` predecessor의 기존 root만 상속한다. root는 cleanup 범위를 식별할 뿐 claim/authorize/settle 권한을 주지 않으며 매 단계의 singleton claim·lease fence CAS는 그대로 필요하다. recovery의 target mismatch, retry 소진, provider/DB 불확실, marker lease expiry와 `SNAPSHOT_STALE`은 같은 root의 새 block으로 남는다. 성공 settle은 요청 시점보다 과거인 같은-root block을 최대 32건만 정리하며, 초과 또는 부분 정리는 성공 audit 없이 현재 provider marker를 보존한 `DB_SETTLE_UNCERTAIN` block으로 닫아 다음 명시 recovery만 허용한다.
 
 ### #84/#85 사진 HTTP adapter와 보존 정리 worker — source/dev 완료
 
