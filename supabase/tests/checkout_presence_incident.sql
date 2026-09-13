@@ -47,7 +47,7 @@ declare
   v_attempt_id uuid;
   v_at timestamptz:=date_trunc('minute',clock_timestamp());
   v_service_date date:=(clock_timestamp() at time zone 'Asia/Seoul')::date;
-  v_planned_date date:=((clock_timestamp() at time zone 'Asia/Seoul')::date+1);
+  v_planned_date date:=((clock_timestamp() at time zone 'Asia/Seoul')::date);
   v_week date;
   v_availability uuid;
   v_result jsonb;
@@ -65,7 +65,7 @@ begin
   v_result:=public.create_reservation(
     pg_temp.iid(1),v_reservation_id,v_room.id,
     ((v_service_date-1)+time '16:00') at time zone 'Asia/Seoul',
-    (v_planned_date+time '11:00') at time zone 'Asia/Seoul',2,null,v_room.state_version,
+    v_at,2,null,v_room.state_version,
     'checkout-incident-create',repeat('1',64)
   );
   select planned_cleaning_target_id into v_target_id
@@ -114,9 +114,9 @@ begin
     'checkout-incident-notify',repeat('3',64),v_commit_at
   );
   update public.reservations set actual_check_in_at=check_in_at where id=v_reservation_id;
-  perform public.manual_checkout_reservation(
-    pg_temp.iid(1),v_reservation_id,1,'TEST_GUEST_DEPARTED',v_at,
-    'checkout-incident-manual-checkout',repeat('4',64)
+  perform public.process_due_reservation_transitions(
+    pg_temp.iid(1),v_at,
+    'checkout-incident-scheduled-checkout',repeat('4',64)
   );
   perform public.process_due_assignment_lifecycle(
     pg_temp.iid(1),v_at+interval '1 minute','checkout-incident-activate',repeat('5',64)
@@ -130,7 +130,14 @@ begin
 end $$;
 
 select ok((select attempt_id is not null from incident_fixture),
-  'auto-checkout current notified assignment produces a scheduled attempt fixture');
+  'actual scheduler checkout produces a scheduled attempt fixture');
+select ok(exists(
+  select 1 from public.room_occupancy_events occupancy
+  join incident_fixture fixture on fixture.reservation_id=occupancy.reservation_id
+  where occupancy.room_id=fixture.room_id
+    and occupancy.event_type='scheduled_checkout'
+    and occupancy.effective_at=fixture.at_time
+), 'fixture is backed by authoritative scheduled-checkout occupancy evidence');
 select ok(exists(select 1 from public.notifications
   where recipient_profile_id=pg_temp.iid(2)
     and cleaning_target_id=(select target_id from incident_fixture)
@@ -320,6 +327,27 @@ select throws_ok(
   'checkout extension must move checkout into the future'
 );
 
+select throws_ok(
+  (select format(
+    'select public.decide_checkout_presence_incident(%L,%L,%L,1,%L,%L,%L,null,%L::jsonb,%L,%L)',
+    pg_temp.iid(1),pg_temp.iid(201),incident_id,report_result->>'impactFingerprint',
+    'CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
+    jsonb_build_object(
+      'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
+      'serviceDate',(clock_timestamp() at time zone 'Asia/Seoul')::date,
+      'availableFrom',date_trunc('minute',clock_timestamp())-interval '2 minutes',
+      'dueAt',date_trunc('minute',clock_timestamp())-interval '1 minute'
+    )::text,'checkout-incident-expired-due',repeat('1',64)
+  ) from incident_fixture),
+  '22023','INVALID_CHECKOUT_INCIDENT_DECISION',
+  'a new decision cannot create an already expired reassignment window'
+);
+select is((select status from public.checkout_presence_incidents
+  where id=(select incident_id from incident_fixture)),'open',
+  'expired-due rejection rolls back without resolving the incident');
+select is((select count(*)::integer from public.checkout_presence_incident_decisions),0,
+  'expired-due rejection creates no immutable decision');
+
 update incident_fixture f set decision_result=public.decide_checkout_presence_incident(
   pg_temp.iid(1),pg_temp.iid(201),f.incident_id,1,
   f.report_result->>'impactFingerprint','CONFIRM_DEPARTED',
@@ -356,8 +384,17 @@ select ok((select count(*)=1 and bool_and(status='scheduled' and maid_profile_id
   'confirmed departure creates one new scheduled attempt for the selected maid');
 select ok(exists(select 1 from public.notifications
   where recipient_profile_id=pg_temp.iid(3) and event_family='checkout.presence_resolved_maid'
-    and requires_action and resolved_at is null),
+    and not requires_action and resolved_at is null),
+  'newly responsible maid receives one informational incident-resolution notification');
+select is((select count(*)::integer from public.notifications
+  where recipient_profile_id=pg_temp.iid(3) and event_family='assignment.commit_notified'
+    and requires_action and resolved_at is null),1,
   'newly responsible maid receives one actionable assignment notification');
+select is((select count(*)::integer from private.notification_delivery_outbox outbox
+  join public.notifications notice on notice.id=outbox.notification_id
+  where notice.recipient_profile_id=pg_temp.iid(3)
+    and notice.event_family in ('checkout.presence_resolved_maid','assignment.commit_notified')),2,
+  'informational resolution and actionable assignment each enqueue exactly one typed delivery');
 select ok(exists(select 1 from public.notifications
   where recipient_profile_id=pg_temp.iid(2) and event_family='checkout.presence_previous_maid_resolved'
     and not requires_action),
@@ -381,6 +418,10 @@ select is(
   (select decision_result from incident_fixture),
   'decision retry replays without duplicate responsibility or attempt'
 );
+select is((select count(*)::integer from public.notifications
+  where recipient_profile_id=pg_temp.iid(3)
+    and event_family in ('checkout.presence_resolved_maid','assignment.commit_notified')),2,
+  'decision replay duplicates neither the informational nor actionable notification');
 
 create temp table started_incident_fixture as
 select a.id attempt_id,a.assignment_id,s.revision assignment_revision,
@@ -397,6 +438,32 @@ select lives_ok(
   ) from started_incident_fixture),
   'the replacement responsibility can start before a second report'
 );
+create temp table replacement_notice_resolution as
+select resolved_at
+from public.notifications
+where event_family='assignment.commit_notified'
+  and source_entity_id=(select assignment_id::text from started_incident_fixture);
+select ok((select resolved_at is not null from replacement_notice_resolution),
+  'replacement start resolves its actionable assignment notification');
+select ok(exists(select 1 from public.notifications
+  where event_family='checkout.presence_resolved_maid'
+    and source_entity_id=(select current_decision_id::text
+      from public.checkout_presence_incidents where id=(select incident_id from incident_fixture))
+    and not requires_action and resolved_at is null),
+  'replacement start leaves the informational incident-resolution notice open as read-state only');
+select lives_ok(
+  (select format(
+    'select private.start_attempt_with_lease_at(%L,%L,%L,1,%L,%s,%L,%L,%L)',
+    pg_temp.iid(3),pg_temp.iid(203),attempt_id,assignment_id,assignment_revision,
+    'checkout-incident-second-start',repeat('b',64),at_time+interval '1 minute'
+  ) from started_incident_fixture),
+  'replacement start replay succeeds'
+);
+select is((select resolved_at from public.notifications
+    where event_family='assignment.commit_notified'
+      and source_entity_id=(select assignment_id::text from started_incident_fixture)),
+  (select resolved_at from replacement_notice_resolution),
+  'replacement start replay preserves the first notification resolved_at');
 insert into public.room_pin_access_leases(
   id,room_id,cleaning_target_id,assignment_id,attempt_id,pin_version,
   reservation_id,issued_to,issued_at,expires_at

@@ -365,7 +365,7 @@ insert into private.notification_event_catalog(
     'admin.assignment_decider',true,true,'checkout_incident_terminal','cleaningTarget',
     'checkout_presence_reported','room'),
   ('checkout.presence_resolved_maid','checkout_presence_resolved','checkout_presence_incident_decision',
-    'maid.assignment_party',true,true,'none','cleaningTarget',
+    'maid.assignment_party',false,true,'none','cleaningTarget',
     'checkout_presence_resolved','room'),
   ('checkout.presence_previous_maid_resolved','checkout_presence_resolved','checkout_presence_incident_decision',
     'maid.assignment_party',false,true,'none','cleaningTarget',
@@ -544,6 +544,7 @@ begin
   select * into a from public.cleaning_attempts where id=p_attempt_id for update;
   if r.id is null or o.id is null or t.id is null or s.id is null
     or t.cleaning_kind<>'checkout' or t.reservation_id<>r.id or t.checkout_obligation_id<>o.id
+    or t.room_id<>r.room_id or o.room_id<>r.room_id
     or r.status<>'checked_out' or r.actual_checkout_at is null
     or o.status<>'materialized' or o.current_cleaning_target_id<>t.id
     or not s.is_current or s.notified_at is null or s.id<>p_expected_assignment_id
@@ -551,6 +552,22 @@ begin
     or t.assignment_version<>s.revision or a.assignment_revision<>s.revision
     or a.execution_version<>p_expected_execution_version
     or a.status not in ('scheduled','in_progress') or a.field_completed_at is not null then
+    raise exception using errcode='40001',message='CHECKOUT_INCIDENT_REPORT_CONFLICT';
+  end if;
+  if not exists(
+    select 1
+    from (
+      select occupancy.room_id,occupancy.event_type,occupancy.effective_at
+      from public.room_occupancy_events occupancy
+      where occupancy.reservation_id=r.id
+        and occupancy.event_type in ('manual_checkout','scheduled_checkout')
+      order by occupancy.recorded_at desc,occupancy.id desc
+      limit 1
+    ) latest_checkout
+    where latest_checkout.room_id=r.room_id
+      and latest_checkout.event_type='scheduled_checkout'
+      and latest_checkout.effective_at=r.actual_checkout_at
+  ) then
     raise exception using errcode='40001',message='CHECKOUT_INCIDENT_REPORT_CONFLICT';
   end if;
   if exists(
@@ -679,24 +696,21 @@ begin
     raise exception using errcode='22023',message='INVALID_CHECKOUT_INCIDENT_DECISION';
   end;
   perform pg_advisory_xact_lock(hashtextextended('room-management:reservation-command',0));
-  at_time:=clock_timestamp();
+  actor:=private.assert_room_pin_actor_session(p_actor_profile_id,p_session_id);
+  if actor.role<>'admin' then raise exception using errcode='42501',message='ADMIN_REQUIRED'; end if;
+  replay:=private.replay_command(p_actor_profile_id,'checkout.presence.decision',p_idempotency_key,p_request_hash);
+  if replay is not null then return replay; end if;
   if next_maid is null or next_sequence is null or next_sequence<1 or next_date is null
     or next_from is null or next_due is null or not isfinite(next_from) or not isfinite(next_due)
     or next_due<=next_from or next_from<>date_trunc('minute',next_from)
     or next_due<>date_trunc('minute',next_due)
     or (p_decision='EXTEND_CHECKOUT' and (p_new_checkout_at is null
       or not isfinite(p_new_checkout_at) or p_new_checkout_at<>date_trunc('minute',p_new_checkout_at)
-      or p_new_checkout_at<=at_time or next_from<>p_new_checkout_at
+      or next_from<>p_new_checkout_at
       or next_date<>(p_new_checkout_at at time zone 'Asia/Seoul')::date))
-    or (p_decision<>'EXTEND_CHECKOUT' and p_new_checkout_at is not null)
-    or (p_decision<>'EXTEND_CHECKOUT' and (next_from>at_time
-      or next_date<>(at_time at time zone 'Asia/Seoul')::date)) then
+    or (p_decision<>'EXTEND_CHECKOUT' and p_new_checkout_at is not null) then
     raise exception using errcode='22023',message='INVALID_CHECKOUT_INCIDENT_DECISION';
   end if;
-  actor:=private.assert_room_pin_actor_session(p_actor_profile_id,p_session_id);
-  if actor.role<>'admin' then raise exception using errcode='42501',message='ADMIN_REQUIRED'; end if;
-  replay:=private.replay_command(p_actor_profile_id,'checkout.presence.decision',p_idempotency_key,p_request_hash);
-  if replay is not null then return replay; end if;
   select * into i from public.checkout_presence_incidents where id=p_incident_id for update;
   if i.id is null then raise exception using errcode='P0002',message='CHECKOUT_INCIDENT_NOT_FOUND'; end if;
   select * into r from public.reservations where id=i.reservation_id for update;
@@ -729,6 +743,16 @@ begin
     and x.maid_profile_id=next_maid and x.service_date=next_date
     and x.sequence_number=next_sequence and x.id<>s.id) then
     raise exception using errcode='23514',message='ASSIGNMENT_SEQUENCE_CONFLICT';
+  end if;
+  -- This clock sample deliberately occurs after every domain lock and current
+  -- state/fingerprint revalidation. A request that waited on a lock cannot
+  -- materialize an assignment whose due boundary elapsed while it waited.
+  at_time:=clock_timestamp();
+  if next_due<=at_time
+    or (p_decision='EXTEND_CHECKOUT' and p_new_checkout_at<=at_time)
+    or (p_decision<>'EXTEND_CHECKOUT' and (next_from>at_time
+      or next_date<>(at_time at time zone 'Asia/Seoul')::date)) then
+    raise exception using errcode='22023',message='INVALID_CHECKOUT_INCIDENT_DECISION';
   end if;
   perform set_config('app.checkout_incident_writer_mode','typed_v1',true);
   update public.room_pin_access_leases set revoked_at=coalesce(revoked_at,at_time),
@@ -800,6 +824,13 @@ begin
   perform set_config('app.notification_terminal_id',coalesce(previous_terminal_id,''),true);
   perform private.emit_checkout_incident_notification('checkout.presence_resolved_maid',p_actor_profile_id,
     ns.maid_profile_id,i.id,d.id,at_time);
+  perform private.emit_notification_v1(
+    'assignment.commit_notified',p_actor_profile_id,ns.maid_profile_id,
+    'cleaning_assignment',ns.id::text,
+    coalesce(t.room_type_snapshot->>'roomNumber','객실')||'호 청소 배정',
+    t.effective_service_date::text||' · '||ns.sequence_number||'번째 청소가 배정되었습니다.',
+    t.room_id,t.id,t.id,at_time
+  );
   if s.maid_profile_id<>ns.maid_profile_id then
     perform private.emit_checkout_incident_notification('checkout.presence_previous_maid_resolved',p_actor_profile_id,
       s.maid_profile_id,i.id,d.id,at_time);

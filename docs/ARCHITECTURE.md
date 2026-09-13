@@ -694,13 +694,18 @@ assignment·attempt snapshot을 고정하고, open 동안 실행·PIN·offline·
 각 command trigger에서 fail-closed합니다. raw PIN·고객 PII·session/token/request body는 두 원장과 audit/notification에
 저장하지 않습니다.
 
-신고 command는 동결, 기존 capability/lease revoke, immutable audit, 모든 active/password-complete business admin의
-행동 알림/outbox를 한 transaction으로 확정합니다. 결정은 `EXTEND_CHECKOUT`, `CONFIRM_DEPARTED`, `FALSE_REPORT`
+신고 command는 현재 예약·객실·checkout target과 동일한 최신 checkout 종료 원장이 정확히
+`scheduled_checkout`인지 확인하므로 수동 checkout이나 다른 예약·과거 주기의 자동 종료 증거로는 열리지 않습니다.
+신고와 동결, 기존 capability/lease revoke, immutable audit, 모든 active/password-complete business admin의
+행동 알림/outbox는 한 transaction으로 확정합니다. 결정은 `EXTEND_CHECKOUT`, `CONFIRM_DEPARTED`, `FALSE_REPORT`
 세 가지뿐이고 기존 checkout target을 재사용하면서 과거 assignment/attempt를 보존한 새 책임 revision을 만듭니다.
-연장은 과거 checkout을 지우지 않고 occupancy resumed 이력을 추가합니다. global reservation advisory lock → scoped
-command receipt → domain row lock 순서와 version CAS·서버 계산 impact fingerprint가 replay/상반 결정과 조회 이후 상태 변경을 직렬화하며, 중단 구간에는 earning·벌점을
-생성하지 않습니다. Fastify/Edge/OpenAPI candidate는 3개 route를 추가한 108 paths / 115 operations이고 production에는
-아직 승격되지 않았습니다.
+연장은 과거 checkout을 지우지 않고 occupancy resumed 이력을 추가합니다. 사건 해결 안내는 정보성이고, 새 책임자는
+기존 `assignment.commit_notified` 행동 알림과 assignment terminal resolver를 그대로 사용합니다. 같은 command replay는
+두 알림과 outbox를 중복 생성하지 않습니다. global reservation advisory lock → scoped command receipt → domain row lock
+순서와 version CAS·서버 계산 impact fingerprint가 replay/상반 결정을 직렬화합니다. 신규 결정의 마감 시각은 모든
+domain lock과 상태 재검증 뒤 `clock_timestamp()`로 다시 확인하고, 이미 완료된 receipt replay에는 이 시간 검사를
+재적용하지 않습니다. 중단 구간에는 earning·벌점을 생성하지 않습니다. Fastify/Edge/OpenAPI candidate는 3개 route를
+추가한 108 paths / 115 operations이고 production에는 아직 승격되지 않았습니다.
 
 ## API 단계
 

@@ -1129,6 +1129,9 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` 결정과 기존 checkout target 재사용, assignment/attempt 이력 보존, 중단 업무 earning·벌점 0
 - [x] 일반 reservation/assignment/attempt/PIN/submission/inspection 경로가 open incident를 직접 검사하며, 기존 공개 PIN의 회수를 주장하지 않고 이후 lease·조회·실행만 차단
 - [x] 동일 요청 replay와 상반 신고/판정 경쟁이 exactly-once/CAS로 수렴하며 global advisory → command receipt → domain row 잠금 순서와 서버 계산 impact fingerprint를 사용
+- [x] 최신 checkout 종료 원장이 현재 예약·객실·실제 종료 시각의 `scheduled_checkout`인 경우만 신고를 허용하고 manual/과거 증거는 부작용 없이 차단
+- [x] 신규 결정은 domain 잠금·상태 재검증 뒤 실제 시각으로 유효 마감을 검사하며, 완료 receipt replay는 시간 경과 후에도 최초 결과를 반환
+- [x] 사건 해결 안내는 정보성으로 분리하고 새 담당의 기존 assignment 행동 알림·resolver·outbox는 중복 없이 유지
 - [x] 기존 53 migrations 불변, 53→54 업무 원장 hash 보존 upgrade, fresh 54 migration 적용 검증
 - [x] Fastify/Edge/OpenAPI/Python generated contract parity — candidate **108 paths / 115 operations**
 - [ ] exact-head 독립 QA 90점 이상·P0/P1=0 및 required GitHub `application` / `migration` PASS

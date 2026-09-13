@@ -10,6 +10,10 @@ import {
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+const requestTimestampPattern =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2}):(\d{2}))$/;
+const responseTimestampPattern =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
 const reasons = {
   EXTEND_CHECKOUT: "GUEST_STILL_PRESENT_EXTENDED",
   CONFIRM_DEPARTED: "GUEST_DEPARTURE_CONFIRMED",
@@ -34,11 +38,30 @@ function positive(value: unknown): number {
   }
   return value;
 }
+function isStrictRfc3339(
+  value: unknown,
+  pattern: RegExp,
+): value is string {
+  if (typeof value !== "string") return false;
+  const match = pattern.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = match[6] === undefined ? 0 : Number(match[6]);
+  const offsetHour = match[8] === "Z" ? 0 : Number(match[10]);
+  const offsetMinute = match[8] === "Z" ? 0 : Number(match[11]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 &&
+    day <= (days[month - 1] ?? 0) && hour <= 23 && minute <= 59 &&
+    second <= 59 && offsetHour <= 23 && offsetMinute <= 59 &&
+    Number.isFinite(Date.parse(value));
+}
 function time(value: unknown): string {
-  if (
-    typeof value !== "string" || !Number.isFinite(Date.parse(value)) ||
-    !/[zZ]|[+-]\d{2}:\d{2}$/.test(value)
-  ) invalid();
+  if (!isStrictRfc3339(value, requestTimestampPattern)) invalid();
   return value;
 }
 function exactKeys(value: Record<string, unknown>, keys: string[]): void {
@@ -48,12 +71,9 @@ function exactKeys(value: Record<string, unknown>, keys: string[]): void {
   ) invalid();
 }
 function strictTime(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
-      .test(value) ||
-    !Number.isFinite(Date.parse(value))
-  ) throw checkoutIncidentDatabaseError(null);
+  if (!isStrictRfc3339(value, responseTimestampPattern)) {
+    throw checkoutIncidentDatabaseError(null);
+  }
   return value;
 }
 async function digest(value: unknown): Promise<string> {
