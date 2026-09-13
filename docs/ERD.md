@@ -159,6 +159,8 @@ erDiagram
   ROOMS ||--o{ ROOM_PIN_REVISIONS : "암호화 PIN 이력"
   ROOMS ||--o| ROOM_CURRENT_PIN : "현재 PIN 포인터"
   ROOMS ||--o{ ROOM_PIN_CHANGE_LEASES : "물리 변경 조정"
+  ROOM_PIN_CHANGE_LEASES }o--|| ROOM_PIN_NONCE_RESERVATIONS : "키·nonce 예약"
+  ROOM_PIN_REVISIONS }o--|| ROOM_PIN_NONCE_RESERVATIONS : "동일 논리 암호화"
   ROOM_PIN_REVISIONS ||--o{ ROOM_PIN_REVEAL_LEASES : "30초 이하 복호화 허가"
   ROOMS ||--o{ ROOM_PIN_SHEET_SYNC_OUTBOX : "현재 PIN projection"
   CLEANING_ASSIGNMENTS ||--o{ ROOM_PIN_ACCESS_LEASES : "현재 담당 계약"
@@ -306,6 +308,13 @@ erDiagram
     text status
     timestamptz expires_at
   }
+  ROOM_PIN_NONCE_RESERVATIONS {
+    uuid id PK
+    text key_version
+    bytea nonce
+    bytea envelope_fingerprint
+    timestamptz reserved_at
+  }
   ROOM_PIN_REVEAL_LEASES {
     uuid id PK
     uuid room_id FK
@@ -364,6 +373,7 @@ erDiagram
 - 물리 PIN 변경은 prepared mismatch를 먼저 기록하고 confirm 때만 immutable revision/current pointer를 원자 갱신한다. 만료된 mismatch는 actual re-entry revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결하며 room number 변경은 `ROOM_PIN_REISSUE_REQUIRED`다. 별도 생성 envelope의 `(key_version, nonce)`는 unique다.
 - #136 Sheet worker는 outbox의 current version만 global singleton lease/fence로 claim한다. private state/heartbeat은 FORCE RLS이고 safe developer projection 외 raw 접근을 막는다. Sheet는 room number 기준 bounded 121행 단방향 projection이며 equal-version 변조도 DB current로 repair한다. retry 소진·상위 Sheet version·불확실 write는 operator reconciliation 전 global block이다.
 - #140 초기화는 별도 PIN 테이블을 추가하지 않는다. secret의 초기 숫자를 런타임에서만 객실번호와 결합·암호화하고, active admin 전용 최대 25건 bootstrap RPC가 기존 immutable revision/current/sync/outbox/receipt 원장에 version 1을 기록한다. 이미 current 또는 unresolved mismatch가 있는 객실은 덮어쓰지 않는다.
+- #140 보완의 private nonce reservation은 regular prepare와 bootstrap revision insert 양쪽에서 `(key_version, nonce)`를 전역 선점한다. table은 FORCE RLS/무권한/append-only이고 ciphertext 대신 동일 논리 암호화를 식별하는 private SHA-256 fingerprint만 보존한다. prepare→confirm의 matching envelope는 같은 reservation을 사용하며 52→53 upgrade의 다른 과거 충돌은 원 lease/revision을 수정하지 않고 fail-closed한다.
 - #137 `room_pin_sheet_full_resync_runs/items`는 operator/session/CAS/idempotency에 묶인 121실 immutable snapshot과 실행 상태를 private FORCE RLS로 보존한다. run은 source-controlled exact target digest에 고정되고 incremental outbox와 같은 singleton fence를 쓴다. 일반 run은 자기 자신을 가리키는 immutable `recovery_root_run_id`를 만들며 recovery는 exact-fence blocked predecessor의 기존 root만 상속한다. root는 실행 CAS가 아니고 claim/lease fence 검증은 별도로 유지된다. 성공 시 snapshot room이면서 provider marker 이전 생성된 outbox와, 요청보다 과거인 같은-root blocked run 최대 32건만 supersede한다. 상한 초과/부분 정리는 marker 보존 `DB_SETTLE_UNCERTAIN`으로 닫고 marker 이후 새 PIN 변경과 unrelated/newer lineage는 남긴다. 공개 status와 developer audit에는 bounded count/time/stable code만 있고 PIN/envelope/provider identity는 없다.
 - 퇴실점검 lifecycle은 아직 `[미확정]`이므로 `checkout_inspections`를 구현된 목표 테이블처럼 두지 않는다.
 

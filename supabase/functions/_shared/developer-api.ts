@@ -7,7 +7,7 @@ import {
   validateGoogleSheetsServiceAccount,
 } from "./google-sheets-pin.ts";
 
-export const expectedMigrationName = "room_pin_sheet_full_resync";
+export const expectedMigrationName = "room_pin_nonce_reservation_hardening";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

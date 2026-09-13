@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서 갱신의 `dev` integration base: `45d18f1c12928340a80ef21d58d7edb3d6529ad8` — #137까지 반영된 기준 51 migrations / OpenAPI 104 paths / 111 operations. #140 source candidate는 52번째 migration과 PIN 초기화 API 1개를 추가해 105 paths / 112 operations가 된다.
+- 이 문서 갱신의 `dev` integration base: `322eb363ae9fe6d3f4a497437e4d38f7e3694578` — #140까지 반영된 기준 52 migrations / OpenAPI 105 paths / 112 operations. 현재 #140 보완 candidate는 기존 52개를 수정하지 않는 53번째 nonce reservation migration만 추가하며 공개 API 수를 바꾸지 않는다.
 - 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -495,6 +495,8 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - PIN 평문을 URL, 로그, error, audit payload, notification, analytics, Git, 브라우저 저장소에 넣지 않는다.
 - `[확정 — 2026-09-13 #136]` Google Sheets는 DB PIN current revision의 단방향 운영 projection이다. `room_number`를 business identity로 bounded board에서 정확히 한 행만 갱신하고, equal-version 변조는 DB 정본으로 복구하며 Sheet-ahead/중복 identity/불확실 write는 operator-blocked한다. 전용 service account는 spreadsheets-only scope를 쓰며 source-controlled approved target 검증을 PIN 복호화·OAuth보다 먼저 수행한다. hosted target mapping과 full resync/운영 활성화는 #137/release 승인 전에는 없다.
 - `[확정 — 2026-09-13 #140]` 빈 DB의 PIN 미설정 상태는 예약 업무를 중단시키지 않는다. 배포 시 secret manager에 주입한 4~8자리 초기 숫자를 active admin 전용 bounded bootstrap command가 서버 안에서 객실번호와 조합·암호화해 version 1로 수립한다. 초기 숫자 평문은 source, migration, request/response, 로그, 감사, 알림에 넣지 않는다. bootstrap은 current PIN 또는 unresolved mismatch가 있는 객실을 덮어쓰지 않고 건너뛰며, batch 최대 25건·멱등 receipt·객실별 immutable revision/outbox를 사용한다.
+- `[확정 — 2026-09-13 #140 보강]` 일반 PIN prepare와 bootstrap은 private `(key_version, nonce)` reservation을 공유한다. 같은 실제 PIN 암호키는 keyring 구성에서 여러 version 이름으로 중복 등록할 수 없고, 같은 key version과 12-byte nonce는 객실·AAD가 달라도 서로 다른 암호화에 재사용할 수 없다. prepare가 만든 envelope를 confirm이 그대로 revision으로 승격하는 것은 같은 논리 암호화이므로 reservation을 재사용한다. 52→53 upgrade에서 matching confirmed lease/revision은 한 reservation으로 backfill하며, 서로 다른 과거 암호화의 충돌이 발견되면 원 이력을 삭제·변환하지 않고 migration 전체를 fail-closed한다.
+- bootstrap 성공의 `initialized`는 그 batch transaction에서 신규 revision/current/verified sync/Sheet outbox/audit가 확정된 객실이고, `skipped`는 기존 current PIN 또는 미해결 물리 변경을 보존하기 위해 의도적으로 건너뛴 객실이다. 검증 오류를 `skipped`로 숨기지 않으며 DB validation 오류는 batch transaction 전체를 rollback해 업무 원장 변경 0건으로 끝난다. 반면 timeout·응답 유실은 rollback 증거가 아니므로 같은 `Idempotency-Key`로 완료 receipt를 재조회해 최초 결과를 확인한다.
 - `[확정 — 2026-09-13 #137 source]` developer/admin은 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 CAS version만 조회한다. full resync는 서버가 요청 시점의 정확한 121실 room/PIN current snapshot을 만들고 global singleton fence의 유일한 provider permit으로 `A1:H122`를 DB 정본에서 재작성한다. 요청·claim은 environment/project/spreadsheet/tab 전체의 source-controlled SHA-256 target identity에 묶이며 mapping 변경·stale snapshot·경쟁은 fail-closed한다. 성공 marker 이전에 생성된 snapshot-room incremental/uncertain 작업만 supersede하고 이후 PIN 변경은 보존한다. Sheet→DB 입력, PIN/envelope/credential/token/raw Google response 공개, production mapping·활성화는 금지한다.
 
 ### `[확정]` 개인정보 보존
@@ -662,17 +664,17 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #103 외부 전액 지급 결과는 PR #107로 `dev@3297679ca2e903e68cfa2dd9e7bc137341c5b27d`에 source/dev 통합됐으며 40 migrations / 93 paths / 100 operations다. 기존 `payment_started` event를 immutable attempt identity로 연결하고, `TRANSFER_RESULT_UNCERTAIN` CHECK, `NO_TRANSFER_CONFIRMED` OPEN 복귀, 양수 locked snapshot 전액 PAID result를 typed append-only evidence로 보존한다. 40번째 migration 이후의 payment projection transition과 event/attempt/result 양쪽은 deferred commit invariant로 서로를 exact하게 요구하며 과거 CHECK/PAID evidence는 추측 backfill하지 않는다. client amount/`paidAt`은 받지 않고 server time과 cycle CAS를 사용하며 OPEN 복귀 뒤 재시작은 새 attempt다. 최초 method는 `bank_transfer`, reference는 8~64 ASCII allowlist·영문/숫자 필수·7자리 연속 숫자/URL-like 거부 뒤 uppercase canonical global unique다. 이 형식은 실제 provider 계약 미확정 동안의 fail-closed source 계약이며 canonical reference는 admin result에만 보이고 maid/developer/audit/notification에는 숨긴다. provider HTTP, 영수증·계좌·수취인 PII·secret/raw payload 저장은 없고 main/recovery/production은 변경하지 않았다.
 - #108 알림함, #109 typed catalog/grouping/writer, #110 encrypted Web Push subscription, #111 delivery ledger/worker와 #112 VAPID/provider HTTP source까지 순차적으로 dev에 통합됐다. #112 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 PR #119 병합 commit `dfc98b1474f9f890851d49bd904869181d0d7880`의 tree는 동일하고 독립 QA 98/100, P0/P1/P2 0, required `application`/`migration` PASS다. PR #122 문서 동기화와 #124 pgTAP fixture 안정화를 반영한 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / 98 paths / 105 operations다.
 - #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
-- #46 source candidate는 기존 46 migrations를 수정하지 않고 47번째 append-only private password-change receipt와 password-specific shadow version을 추가한다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. 따라서 후속 변경·관리자 reset·adapter 밖 Auth password 변경 뒤 과거 key가 현재 비밀번호만으로 replay되지 않고, ordinary login은 password version을 바꾸지 않는다. 모든 Auth password probe는 session/client/key 회전으로 우회할 수 없는 actor당 1행·10회/분 durable limit을 먼저 소비한다. crash-before-Auth와 다른 payload를 안전하게 구분할 password-derived evidence가 없는 expired receipt는 실패로 추정하지 않고 inconsistent로 격리하며, 관리자 reset은 외부 Auth 성공과 private version 확인 뒤에만 이를 supersede한다. public HTTP path/operation 수는 바뀌지 않으며 독립 QA/dev 병합·release/production은 별도 gate다.
+- #46은 기존 46 migrations를 수정하지 않은 47번째 append-only private password-change receipt와 password-specific shadow version으로 source/dev에 통합됐다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. release/main·production 승격은 별도 gate다.
 - 위 source/dev 완료는 운영 사용 가능 선언이 아니다. Issue #112는 release/main 뒤 Function Secrets, 승인된 `api`/`notification-delivery` Edge bundle, negative/positive hosted smoke, Vault/`pg_cron`/`pg_net`, 5회 연속 heartbeat, 실제 기기 Web Push smoke가 끝날 때까지 OPEN이다. 현재 `main`/production/recovery는 v0.2.0 상태로 변경되지 않았다.
-- #46, #128, #131, #136은 source/dev에 통합됐다. 현재 source gate는 **#140 초기 PIN bootstrap과 예약 readiness 분리**이며, 이후 #137 full resync/운영 활성화와 release/main 승격을 진행한다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
+- #46, #128, #131, #136, #137과 #140은 source/dev에 통합됐다. #137의 안전 상태 조회·121실 full resync source도 완료됐지만 hosted target/서비스 계정/ACL/Secrets/Edge/Cron/smoke는 미완료다. 현재 source gate는 **#140 nonce reservation·병렬/응답 유실 회귀 보완**이며, 그 뒤에도 release/main 승격과 hosted 운영 활성화는 별도 승인이다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
 
 원격 운영·복구검증 프로젝트는 Git과 SQL 내용은 대응하지만 migration version은 서로 다르다. `supabase db push`로 자동 추론하지 않고 `docs/RELEASE_V0.2.0.md`의 검증된 mapping과 MCP 순차 적용 절차를 사용한다. 2026-08-29 기준 운영 Security Advisor는 0건이며, 실제 source 병합·원격 적용·tag 상태는 Release Issue #24가 추적한다.
 
-### Issue #1 `v0.2.0` source release 범위
+### Issue #1 `v0.2.0` 당시 source release 범위
 
-다음 항목은 release candidate `4da80cb`에 포함된다. source가 `main`에 병합됐는지, 운영 migration까지 적용됐는지는 서로 다른 상태이며 Release Issue #24에서 확인한다.
+다음 항목은 release candidate `4da80cb` 당시 계약이다. source가 `main`에 병합됐는지, 운영 migration까지 적용됐는지는 서로 다른 상태이며 Release Issue #24에서 확인한다. 특히 당시의 PIN 배정 차단 문구는 #140 이후 계약으로 대체됐고, 이 문서 갱신만으로 production 동작이 바뀌었다는 뜻은 아니다.
 
 - 객실 목록·상세는 점유, 청소 필요, 배정 차단/가능과 안정적인 reason code를 독립 축으로 반환한다.
 - 객실 기준정보, 운영 차단, 촛불, 이슈, PIN 동기화는 최신 active admin과 객실 `state_version`을 재검증하는 원자 명령이다.
@@ -681,7 +683,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 고객명은 API 서버가 AES-256-GCM으로 암호화하며 명령 응답·감사 payload에 원문이나 암호문을 포함하지 않는다.
 - 고객명 idempotency fingerprint는 암호화 키와 분리된 안정적 server HMAC pepper를 사용해 key rotation 전후 request hash를 보존한다.
 - 예약 목록은 고객명을 반환하지 않고 관리자 단건 상세에서만 복호화한다. 체크아웃/취소 후 180일 보존 만료는 예약 전이 worker가 처리하며 멱등성 hash에는 암호화 키와 분리된 HMAC pepper fingerprint만 사용한다.
-- PIN 원문은 저장하지 않고 동기화 상태와 version만 기록한다. `verified`가 아닌 객실은 고객 배정을 차단한다.
+- 당시에는 PIN 원문을 저장하지 않고 동기화 상태와 version만 기록하며 `verified`가 아닌 객실의 고객 배정을 차단했다. **#140 이후 source 계약은 이를 대체해** `unconfigured`/`mismatch`를 예약 생성·변경·배정의 비차단 경고로 유지하고, 실제 체크인과 maid PIN lease/reveal/change만 `verified` 및 권한·lease 검증까지 fail-closed한다. production 적용은 별도 release/운영 승인 전까지 완료로 간주하지 않는다.
 - 객실 전체 운영 projection은 관리자 전용이다. 메이드는 자신의 현재 배정·수행 범위 projection만 후속 업무 API에서 제공받는다.
 - 연박/추가 수동 청소 요청은 안정적인 target ID로 생성하고 시작·PIN 공개 전까지만 CAS soft cancel한다.
 - 예정 전이 worker는 production에서 활성 관리자 actor를 필수로 하며 시작 시 검증 실패를 숨기지 않는다. catch-up은 퇴실을 입실보다 먼저 처리해 같은 instant의 인접 예약을 한 batch에서 전이하고, 완전히 지난 미입실 예약은 가짜 check-in 없이 종결한다.
@@ -765,12 +767,12 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-현재 P2 배정부터 #112 Web Push provider까지의 source/dev critical path는 완료됐다. 이번 #73 source candidate도 46번째 append-only forward fix와 과거 통보 snapshot·동시성 회귀까지 구현을 마쳤으며, 독립 검토와 `dev` 병합은 별도 gate다. 다음 source 작업은 운영 승격과 섞지 않고 아래 순서로 진행한다.
+P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140까지 source/dev에 통합됐다. 현재 #140 보완은 기존 52 migrations와 공개 API를 보존한 53번째 nonce reservation·병렬 회귀 candidate다. 다음 작업도 운영 승격과 섞지 않는다.
 
-1. Issue #34에서 GitHub Actions runtime 경고를 별도 CI 유지보수 PR로 정리한다.
-2. Issue #46 source candidate의 비밀번호 원문·재사용 verifier 없는 password-change 응답 유실/replay 계약을 독립 검토하고 `dev`에 통합한다.
-3. Issue #131에서 #69 Phase A의 4~8자리 PIN 입력과 `<room_number>-<pin_digits>` canonical credential, encrypted immutable revision/current pointer, physical change/reveal lease를 source gate로 검증한다. Google Sheets worker와 production credential/ACL은 후속 Phase B/C로 분리한다.
-4. Issue #12 backup/recovery source는 핵심 source와 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
+1. Issue #140 보완 candidate의 53번째 append-only nonce reservation과 bootstrap 전용 병렬/응답 유실 회귀를 독립 검토해 `dev`에 통합한다.
+2. Issue #34의 GitHub Actions runtime 경고는 별도 CI 유지보수 PR로 관리한다.
+3. Issue #137 hosted Google Sheets 활성화는 실제 대상/서비스 계정/ACL/Secrets/Edge/Cron/smoke 승인 뒤에만 진행한다.
+4. Issue #12 backup/recovery source는 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
 5. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
 
 source/dev 완료, release/main 승격, production migration/secret/Edge/Cron 활성화는 서로 다른 gate다. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.

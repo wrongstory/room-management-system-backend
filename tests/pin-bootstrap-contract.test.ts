@@ -10,6 +10,13 @@ const migration = readFileSync(
   ),
   'utf8',
 );
+const nonceHardeningMigration = readFileSync(
+  join(
+    process.cwd(),
+    'supabase/migrations/20260913075134_room_pin_nonce_reservation_hardening.sql',
+  ),
+  'utf8',
+);
 
 describe('PIN bootstrap and reservation readiness contract', () => {
   it('keeps PIN warnings out of reservation allocation while retaining the check-in gate', () => {
@@ -61,5 +68,47 @@ describe('PIN bootstrap and reservation readiness contract', () => {
     expect(migration).toContain("status in ('prepared', 'expired')");
     expect(migration).toContain('v_skipped_ids := array_append(v_skipped_ids, v_room.id)');
     expect(migration).toContain('continue;');
+  });
+
+  it('reserves AES-GCM nonces across prepare and bootstrap without exposing the registry', () => {
+    expect(nonceHardeningMigration).toContain(
+      'unique (key_version, nonce)',
+    );
+    expect(nonceHardeningMigration).toContain(
+      "message = 'ROOM_PIN_HISTORICAL_NONCE_REUSE'",
+    );
+    expect(nonceHardeningMigration).toContain(
+      "message = 'ROOM_PIN_NONCE_REUSE'",
+    );
+    expect(nonceHardeningMigration).toContain(
+      'alter table private.room_pin_nonce_reservations force row level security',
+    );
+    expect(nonceHardeningMigration).toContain(
+      'create trigger room_pin_change_lease_nonce_reserved',
+    );
+    expect(nonceHardeningMigration).toContain(
+      'create trigger room_pin_revision_nonce_reserved',
+    );
+    expect(nonceHardeningMigration).toContain(
+      'ROOM_PIN_CHANGE_ENCRYPTION_IDENTITY_IMMUTABLE',
+    );
+    expect(nonceHardeningMigration).toContain(
+      'from public, anon, authenticated, service_role',
+    );
+  });
+
+  it('documents the atomic result and response-loss receipt semantics', () => {
+    const operation = openApiDocument.paths['/v1/rooms/pins/bootstrap'].post;
+    expect(operation.description).toContain('원자적');
+    expect(operation.description).toContain('Idempotency-Key');
+    expect(operation.description).toContain('receipt');
+
+    const result = openApiDocument.components.schemas.RoomPinBootstrapResult;
+    expect(result.properties.initializedRoomIds.description).toContain(
+      '신규 PIN 원장 전체가 확정된',
+    );
+    expect(result.properties.skippedRoomIds.description).toContain(
+      '의도적으로 건너뛴',
+    );
   });
 });
