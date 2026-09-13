@@ -5,6 +5,15 @@
 -- identities. A confirmed lease and its byte-for-byte matching revision are
 -- one logical encryption and therefore share one reservation.
 
+-- The installed CLI requires LOCK TABLE to be inside an authored transaction.
+-- Retain both locks through validation, backfill and trigger installation.
+begin;
+
+lock table
+  private.room_pin_change_leases,
+  private.room_pin_revisions
+in share row exclusive mode;
+
 create function private.room_pin_envelope_fingerprint(
   p_room_id uuid,
   p_pin_version bigint,
@@ -260,3 +269,5 @@ for each row execute function private.prevent_append_only_mutation();
 
 comment on table private.room_pin_nonce_reservations is
   'Private cross-flow AES-GCM nonce registry. One key-version/nonce pair may identify only one logical room PIN encryption; a confirmed lease and its matching revision share it.';
+
+commit;

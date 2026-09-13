@@ -71,6 +71,12 @@ describe('PIN bootstrap and reservation readiness contract', () => {
   });
 
   it('reserves AES-GCM nonces across prepare and bootstrap without exposing the registry', () => {
+    expect(nonceHardeningMigration).toMatch(/^begin;/m);
+    expect(nonceHardeningMigration).toContain(
+      'private.room_pin_change_leases,\n  private.room_pin_revisions\nin share row exclusive mode;',
+    );
+    expect(nonceHardeningMigration).not.toMatch(/skip\s+locked/i);
+    expect(nonceHardeningMigration).toMatch(/commit;\s*$/);
     expect(nonceHardeningMigration).toContain(
       'unique (key_version, nonce)',
     );

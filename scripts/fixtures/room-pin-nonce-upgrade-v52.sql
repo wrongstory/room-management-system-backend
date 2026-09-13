@@ -17,6 +17,10 @@ insert into public.profiles(
   'PIN nonce upgrade actor', 'PIN nonce upgrade actor',
   'pin-nonce-upgrade', 'pin-nonce-upgrade', 0, 'admin', 'active', false
 );
+insert into auth.sessions(id, user_id) values (
+  'f1531000-0000-4000-8000-000000000201',
+  'f1531000-0000-4000-8000-000000000101'
+);
 
 create temp table upgrade_rooms as
 select row_number() over (order by room_number, id) as n, id
@@ -86,20 +90,28 @@ select
   clock_timestamp() - interval '6 minutes'
 from upgrade_rooms where n = 4;
 
--- A v52 bootstrap-style direct revision has no change lease.
-insert into private.room_pin_revisions(
-  id, room_id, pin_version, envelope_format, ciphertext, nonce, auth_tag,
-  key_version, aad_environment, aad_project_ref,
-  recorded_by, recorded_by_role, source
+-- Exercise the actual v52 bootstrap RPC so its immutable revision, current
+-- pointer, verified sync event, Sheet outbox, audit and completed receipt all
+-- exist before migration 53. The harness hashes every column before/after.
+select public.bootstrap_room_pins(
+  'f1531000-0000-4000-8000-000000000001',
+  'f1531000-0000-4000-8000-000000000201',
+  jsonb_build_array(jsonb_build_object(
+    'roomId', id,
+    'roomNumber', room_number,
+    'envelopeFormat', 1,
+    'ciphertextBase64', encode(digest('upgrade-bootstrap-cipher', 'sha256'), 'base64'),
+    'nonceBase64', encode(substring(digest('upgrade-bootstrap-nonce', 'sha256') for 12), 'base64'),
+    'authTagBase64', encode(substring(digest('upgrade-bootstrap-tag', 'sha256') for 16), 'base64'),
+    'keyVersion', 'upgrade-v1',
+    'aadEnvironment', 'test',
+    'aadProjectRef', 'local'
+  )),
+  'upgrade-bootstrap-key-0005',
+  repeat('5', 64)
 )
-select
-  'f1531000-0000-4000-8000-000000000305', id, 1, 1,
-  digest('upgrade-bootstrap-cipher', 'sha256'),
-  substring(digest('upgrade-bootstrap-nonce', 'sha256') for 12),
-  substring(digest('upgrade-bootstrap-tag', 'sha256') for 16),
-  'upgrade-v1', 'test', 'local',
-  'f1531000-0000-4000-8000-000000000001', 'admin', 'admin_initial_entry'
-from upgrade_rooms where n = 5;
+from public.rooms
+where id = (select id from upgrade_rooms where n = 5);
 
 -- Optional corrupt v52 evidence: same key-version/nonce as the prepared lease
 -- for room 1, but a different room/AAD-bound encryption. Migration 53 must

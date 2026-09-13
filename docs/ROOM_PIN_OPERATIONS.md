@@ -41,13 +41,17 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 ### Production 활성화 체크리스트
 
-1. 승인된 release source에 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
-2. 기존 production DB backup과 51번째 migration 적용 순서를 확인한다.
-3. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
-4. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.
-5. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포한다.
-6. read-only status, 빈 큐 heartbeat, 121실 full resync, 삭제·정렬·변조 repair, duplicate-write 0을 hosted에서 확인한다.
-7. Cron/Vault를 마지막에 활성화하고 연속 heartbeat와 operator-blocked alert를 관찰한다.
+1. 기존 production DB backup과 적용된 52개 migration 및 PIN 원장 evidence를 확인한다. 이미 적용된 52개 파일은 수정·삭제하지 않는다.
+2. 승인된 release에서 53번째 migration을 파일에 명시된 단일 transaction으로 적용한다. transaction 시작 직후 첫 DDL인 table lock이 lease/revision 양쪽을 잠그며, lock 대기·timeout 또는 historical nonce conflict가 발생하면 적용을 중단한다. 오류를 무시하거나 `SKIP LOCKED`로 이력을 제외하지 않으며 registry/helper/trigger와 migration history는 반쪽 설치되지 않고 기존 원장 evidence는 그대로 남아야 한다.
+3. registry backfill 수와 history 정합성, 양쪽 INSERT trigger, lease identity guard, FORCE RLS와 최소 grant를 확인한다. 이 확인 전에는 bootstrap을 실행하지 않는다.
+4. 별도 release/운영 승인을 받은 뒤에만 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
+5. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
+6. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.
+7. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포한다.
+8. 별도 승인된 bootstrap을 실행하고 read-only status, 빈 큐 heartbeat, 121실 full resync, 삭제·정렬·변조 repair, duplicate-write 0을 hosted에서 확인한다.
+9. Cron/Vault를 마지막에 활성화하고 연속 heartbeat와 operator-blocked alert를 관찰한다.
+
+53번째 migration의 lock wait/timeout, validation conflict 또는 transaction 중간 실패는 hosted 적용 실패로 취급한다. 기존 lease/revision/current pointer/sync event/Sheet outbox/audit/completed receipt를 삭제·보정하지 말고 원 evidence를 보존한 채 조사한다. 현재 source/dev 검증 완료는 이 production 적용·bootstrap 승인과 별개다.
 
 서비스 계정 key 회전은 새 key 배치→local 구조 검증→OAuth/Sheets smoke→이전 key 폐기 순서다. PC/credential 유출 또는 ACL 오배치 시 Cron과 Function 호출을 중단하고 key를 즉시 폐기하며, target ACL을 회수하고 status/operator-blocked evidence와 audit을 보존한 채 승인된 새 credential로만 복구한다.
 
