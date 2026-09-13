@@ -685,6 +685,23 @@ malformed curve·pair mismatch·ring drift는 fetch 0이고 stable degraded hear
 status는 조회 시점의 같은 current VAPID config parser·crypto validation 결과를 `providerConfigurationValid` boolean으로만
 결합하므로, 최근 성공 heartbeat가 있어도 현재 설정이 유효하지 않으면 health는 `degraded`입니다.
 
+### #133 자동 checkout 후 퇴실 미진행 사건 — feature candidate
+
+54번째 append-only migration은 자동 checkout 뒤 손님 잔류를 발견한 현재 notified 메이드의 신고를
+`checkout_presence_incidents`에, business admin의 최종 판단을
+`checkout_presence_incident_decisions`에 분리해 기록합니다. 사건은 예약·객실·checkout obligation·기존 target·
+assignment·attempt snapshot을 고정하고, open 동안 실행·PIN·offline·제출·검수·일반 재배정·실제 다음 체크인을
+각 command trigger에서 fail-closed합니다. raw PIN·고객 PII·session/token/request body는 두 원장과 audit/notification에
+저장하지 않습니다.
+
+신고 command는 동결, 기존 capability/lease revoke, immutable audit, 모든 active/password-complete business admin의
+행동 알림/outbox를 한 transaction으로 확정합니다. 결정은 `EXTEND_CHECKOUT`, `CONFIRM_DEPARTED`, `FALSE_REPORT`
+세 가지뿐이고 기존 checkout target을 재사용하면서 과거 assignment/attempt를 보존한 새 책임 revision을 만듭니다.
+연장은 과거 checkout을 지우지 않고 occupancy resumed 이력을 추가합니다. global reservation advisory lock → scoped
+command receipt → domain row lock 순서와 version CAS·서버 계산 impact fingerprint가 replay/상반 결정과 조회 이후 상태 변경을 직렬화하며, 중단 구간에는 earning·벌점을
+생성하지 않습니다. Fastify/Edge/OpenAPI candidate는 3개 route를 추가한 108 paths / 115 operations이고 production에는
+아직 승격되지 않았습니다.
+
 ## API 단계
 
 현재:
@@ -720,6 +737,7 @@ status는 조회 시점의 같은 current VAPID config parser·crypto validation
 - #30/#83~#85/#31 사진·Drive adapter·7일 purge·제출·검수·재청소
 - #93/#96/#100~#103 수익·정정·지급 결과
 - #108~#112 알림함·typed writer·구독·delivery worker·VAPID/provider HTTP
+- #133 자동 checkout 후 퇴실 미진행 신고·조회·관리자 결정 candidate
 
 #112 source는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 같은 tree로 PR #119에 병합됐다. Issue는 Function Secrets → 승인된 `api`/`notification-delivery` Edge bundle → negative/positive hosted smoke → Vault/`pg_cron`/`pg_net` → 5회 연속 heartbeat → 실제 기기 Web Push smoke까지 OPEN이다.
 

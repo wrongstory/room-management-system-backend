@@ -252,6 +252,54 @@ def test_assignment_audit_contract_is_generated_without_raw_state() -> None:
     assert {"request_hash", "reason_detail", "before_state", "after_state"}.isdisjoint(field_names)
 
 
+def test_checkout_incident_audit_contract_is_generated_without_sensitive_state() -> None:
+    assert {
+        DeveloperAuditEventType.CHECKOUT_PRESENCE_REPORTED.value,
+        DeveloperAuditEventType.CHECKOUT_PRESENCE_DECIDED.value,
+    } == {"checkout.presence_reported", "checkout.presence_decided"}
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {
+        "incident_id",
+        "reservation_id",
+        "room_id",
+        "cleaning_target_id",
+        "assignment_id",
+        "attempt_id",
+        "decision_id",
+        "checkout_decision",
+        "next_assignment_id",
+        "next_attempt_id",
+        "version",
+    } <= field_names
+    assert {
+        "request_hash",
+        "before_state",
+        "after_state",
+        "guest_name",
+        "phone",
+        "pin_digits",
+        "ciphertext",
+        "nonce",
+        "auth_tag",
+        "session_id",
+        "token",
+    }.isdisjoint(field_names)
+    sample = {
+        "incidentId": "10000000-0000-4000-8000-000000000001",
+        "reservationId": "10000000-0000-4000-8000-000000000002",
+        "roomId": "10000000-0000-4000-8000-000000000003",
+        "cleaningTargetId": "10000000-0000-4000-8000-000000000004",
+        "assignmentId": "10000000-0000-4000-8000-000000000005",
+        "attemptId": "10000000-0000-4000-8000-000000000006",
+        "decisionId": "10000000-0000-4000-8000-000000000007",
+        "checkoutDecision": "CONFIRM_DEPARTED",
+        "nextAssignmentId": "10000000-0000-4000-8000-000000000008",
+        "nextAttemptId": "10000000-0000-4000-8000-000000000009",
+        "version": 2,
+    }
+    assert DeveloperAuditEventSummary.from_dict(sample).to_dict() == sample
+
+
 def test_room_pin_audit_contract_is_generated_without_sensitive_material() -> None:
     assert {
         "room.pin_change_prepared",

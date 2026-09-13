@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
-import { requestHash } from '../../lib/command.js';
 import { AppError } from '../../lib/app-error.js';
+import { requestHash } from '../../lib/command.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import {
   canonicalRoomPin,
   decryptRoomPin,
   encryptRoomPin,
-  RoomPinCryptoError,
   type RoomPinCryptoConfig,
+  RoomPinCryptoError,
   type RoomPinEnvelope
 } from './room-pin-crypto.js';
 
@@ -188,6 +188,9 @@ function ensureAdmin(actor: Actor): void {
 
 function roomError(error: { message?: string } | null): AppError {
   const message = error?.message ?? '';
+  if (message.includes('CHECKOUT_INCIDENT_OPEN')) {
+    return new AppError(409, 'CHECKOUT_INCIDENT_OPEN', '퇴실 미진행 사건을 관리자가 처리한 뒤 PIN 작업을 진행해 주세요.');
+  }
   if (message.includes('STALE_VERSION')) {
     return new AppError(409, 'STALE_VERSION', '다른 객실 변경이 먼저 반영됐습니다.');
   }

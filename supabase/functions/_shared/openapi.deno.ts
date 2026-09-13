@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 105 &&
+    Object.keys(document.paths).length === 108 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 112,
-    "candidate contract 105/112",
+        ).length === 115,
+    "candidate contract 108/115",
   );
 });
 
@@ -789,6 +789,71 @@ Deno.test("attempt execution OpenAPI binds physical completion, strict CAS and s
   );
 });
 
+Deno.test("checkout presence incident OpenAPI keeps typed roles and safe developer audit projection", async () => {
+  const doc = await openApiResponse({}).json() as typeof openApiDocument;
+  assert(
+    doc.paths["/v1/attempts/{attemptId}/checkout-not-completed"].post
+      .operationId === "reportCheckoutNotCompleted",
+    "maid report route",
+  );
+  assert(
+    doc.paths["/v1/checkout-incidents/{incidentId}"].get.operationId ===
+        "getCheckoutIncident" &&
+      doc.paths["/v1/checkout-incidents/{incidentId}/decision"].post
+          .operationId === "decideCheckoutIncident",
+    "incident read and admin decision routes",
+  );
+  assert(
+    doc.components.schemas.CheckoutIncident.required.includes(
+      "impactFingerprint",
+    ) &&
+      doc.components.schemas.CheckoutIncidentDecisionRequest.required.includes(
+        "expectedImpactFingerprint",
+      ),
+    "decision binds the server-computed impact fingerprint",
+  );
+  const auditTypes = doc.components.schemas.DeveloperAuditEventType.enum;
+  assert(
+    auditTypes.includes("checkout.presence_reported") &&
+      auditTypes.includes("checkout.presence_decided"),
+    "typed checkout events are operator-visible",
+  );
+  const summary = doc.components.schemas.DeveloperAuditEvent.properties.summary
+    .properties;
+  for (
+    const field of [
+      "incidentId",
+      "reservationId",
+      "roomId",
+      "cleaningTargetId",
+      "assignmentId",
+      "attemptId",
+      "decisionId",
+      "checkoutDecision",
+      "nextAssignmentId",
+      "nextAttemptId",
+      "version",
+    ]
+  ) {
+    assert(field in summary, `checkout audit summary exposes ${field}`);
+  }
+  for (
+    const forbidden of [
+      "requestHash",
+      "idempotencyKey",
+      "before_state",
+      "after_state",
+      "pinDigits",
+      "guestName",
+      "phone",
+      "sessionId",
+      "token",
+    ]
+  ) {
+    assert(!(forbidden in summary), `checkout audit omits ${forbidden}`);
+  }
+});
+
 Deno.test("cleaning field-completed audit projection fits the full strict summary schema", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const summarySchema =
@@ -980,7 +1045,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 63,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 65,
     "actual audit allowlist count",
   );
   assert(

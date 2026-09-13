@@ -22,6 +22,8 @@ class DeveloperAuditEventType(str, Enum):
     AVAILABILITY_CHANGE_DECIDED = "availability.change_decided"
     AVAILABILITY_CHANGE_REQUESTED = "availability.change_requested"
     AVAILABILITY_SUBMITTED = "availability.submitted"
+    CHECKOUT_PRESENCE_DECIDED = "checkout.presence_decided"
+    CHECKOUT_PRESENCE_REPORTED = "checkout.presence_reported"
     CLEANING_ATTEMPT_STARTED = "cleaning.attempt_started"
     CLEANING_FIELD_COMPLETED = "cleaning.field_completed"
     CLEANING_FINISH_CURRENT_ALLOWED = "cleaning.finish_current_allowed"

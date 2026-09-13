@@ -1152,7 +1152,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 63,
+              maxItems: 65,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -1895,6 +1895,116 @@ export const openApiDocument = {
         "물리적인 현장 청소 완료 선언",
         "active maid 본인의 현재 통보 배정에 연결된 in_progress attempt만 field_completed로 전이합니다. 사진은 선행조건이 아니며 사진 완전성은 이후 submission gate입니다. 이미 적법하게 시작한 수행은 자정·마감 경과·정상 checkout만으로 완료를 막지 않지만 최신 권한·취소 여부·assignment identity·execution CAS는 다시 검증합니다. room ready·검수 승인·earning·payroll·submission·upload capability는 생성하지 않습니다. client timestamp와 임의 payload는 금지하며 같은 요청 재시도는 성공 receipt를 replay합니다.",
       ),
+    },
+    "/v1/attempts/{attemptId}/checkout-not-completed": {
+      post: {
+        tags: ["Checkout incidents"],
+        operationId: "reportCheckoutNotCompleted",
+        summary: "자동 체크아웃 객실의 고객 잔류 신고",
+        description:
+          "비밀번호 변경을 완료한 active maid가 본인 current/notified checkout attempt에서 field completion 전에만 신고합니다. PIN 공개 전후와 청소 시작 전후를 지원하며 신고 즉시 이후 PIN 접근, 수행 완료, 제출·검수, 재배정을 차단합니다. 이미 화면에 공개된 PIN을 회수했다고 표현하지 않으며 향후 접근 lease만 폐기합니다. 신고·감사·모든 active business admin 알림과 delivery intent는 같은 transaction으로 commit됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["maid"],
+        parameters: [photoPathId("attemptId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/CheckoutIncidentReportRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "중복 없이 생성되거나 replay된 open 사건",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/CheckoutIncidentEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/checkout-incidents/{incidentId}": {
+      get: {
+        tags: ["Checkout incidents"],
+        operationId: "getCheckoutIncident",
+        summary: "퇴실 미진행 사건 조회",
+        description:
+          "active/password-complete business admin 또는 신고·통보 이력이 있는 maid만 안전한 사건 projection을 조회합니다. 고객명·전화번호·PIN·lease·request hash는 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [photoPathId("incidentId")],
+        responses: {
+          "200": {
+            description: "권한이 검증된 사건과 현재 결정",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/CheckoutIncidentEnvelope",
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/checkout-incidents/{incidentId}/decision": {
+      post: {
+        tags: ["Checkout incidents"],
+        operationId: "decideCheckoutIncident",
+        summary: "퇴실 미진행 사건 확인·일정·책임 구간 확정",
+        description:
+          "active/password-complete business admin만 EXTEND_CHECKOUT, CONFIRM_DEPARTED, FALSE_REPORT 중 하나를 version CAS와 조회 응답의 서버 계산 impact fingerprint로 확정합니다. 기존 checkout target과 과거 assignment/attempt는 보존하고 새 assignment revision 및 필요 시 새 scheduled attempt를 생성합니다. 중단된 수행에는 earning·penalty를 만들지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [photoPathId("incidentId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/CheckoutIncidentDecisionRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "원자적으로 해결된 사건과 결정",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/CheckoutIncidentEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
     },
     "/v1/assignments": {
       get: {
@@ -3646,6 +3756,156 @@ export const openApiDocument = {
       },
     },
     schemas: {
+      CheckoutIncidentReportRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "expectedExecutionVersion",
+          "expectedAssignmentId",
+          "expectedAssignmentRevision",
+        ],
+        properties: {
+          expectedExecutionVersion: { type: "integer", minimum: 1 },
+          expectedAssignmentId: { type: "string", format: "uuid" },
+          expectedAssignmentRevision: { type: "integer", minimum: 1 },
+        },
+      },
+      CheckoutIncidentReassignment: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "maidProfileId",
+          "sequenceNumber",
+          "serviceDate",
+          "availableFrom",
+          "dueAt",
+        ],
+        properties: {
+          maidProfileId: { type: "string", format: "uuid" },
+          sequenceNumber: { type: "integer", minimum: 1 },
+          serviceDate: { type: "string", format: "date" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: "string", format: "date-time" },
+        },
+      },
+      CheckoutIncidentDecisionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "expectedVersion",
+          "expectedImpactFingerprint",
+          "decision",
+          "reasonCode",
+          "newCheckoutAt",
+          "reassignment",
+        ],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          expectedImpactFingerprint: {
+            type: "string",
+            pattern: "^[0-9a-f]{64}$",
+            description: "사건 조회 응답의 서버 계산 영향 범위 fingerprint",
+          },
+          decision: {
+            type: "string",
+            enum: ["EXTEND_CHECKOUT", "CONFIRM_DEPARTED", "FALSE_REPORT"],
+          },
+          reasonCode: {
+            type: "string",
+            enum: [
+              "GUEST_STILL_PRESENT_EXTENDED",
+              "GUEST_DEPARTURE_CONFIRMED",
+              "REPORT_FALSE_CONFIRMED",
+            ],
+          },
+          newCheckoutAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+          },
+          reassignment: {
+            $ref: "#/components/schemas/CheckoutIncidentReassignment",
+          },
+        },
+      },
+      CheckoutIncident: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "incidentId",
+          "reservationId",
+          "roomId",
+          "cleaningTargetId",
+          "assignmentId",
+          "attemptId",
+          "reportedBy",
+          "reasonCode",
+          "status",
+          "version",
+          "impactFingerprint",
+          "reportedAt",
+        ],
+        properties: {
+          incidentId: { type: "string", format: "uuid" },
+          reservationId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          reportedBy: { type: "string", format: "uuid" },
+          reasonCode: { type: "string", enum: ["GUEST_STILL_PRESENT"] },
+          status: { type: "string", enum: ["open", "resolved"] },
+          version: { type: "integer", minimum: 1 },
+          impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          reportedAt: { type: "string", format: "date-time" },
+          resolvedAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+          },
+          currentDecisionId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          decision: {
+            anyOf: [{ $ref: "#/components/schemas/CheckoutIncidentDecision" }, {
+              type: "null",
+            }],
+          },
+        },
+      },
+      CheckoutIncidentDecision: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "decisionId",
+          "incidentId",
+          "incidentVersion",
+          "decision",
+          "reasonCode",
+          "decidedBy",
+          "decidedAt",
+          "nextAssignmentId",
+        ],
+        properties: {
+          decisionId: { type: "string", format: "uuid" },
+          incidentId: { type: "string", format: "uuid" },
+          incidentVersion: { type: "integer", minimum: 1 },
+          decision: {
+            type: "string",
+            enum: ["EXTEND_CHECKOUT", "CONFIRM_DEPARTED", "FALSE_REPORT"],
+          },
+          reasonCode: { type: "string" },
+          decidedBy: { type: "string", format: "uuid" },
+          decidedAt: { type: "string", format: "date-time" },
+          newCheckoutAt: { type: "string", format: "date-time" },
+          nextAssignmentId: { type: "string", format: "uuid" },
+          nextAttemptId: { type: "string", format: "uuid" },
+        },
+      },
+      CheckoutIncidentEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["incident"],
+        properties: {
+          incident: { $ref: "#/components/schemas/CheckoutIncident" },
+        },
+      },
       BombRoomReportRequest: {
         type: "object",
         additionalProperties: false,
@@ -4910,6 +5170,8 @@ export const openApiDocument = {
           "reservation.scheduled_check_in",
           "reservation.scheduled_checkout",
           "reservation.guest_name_retention_purged",
+          "checkout.presence_reported",
+          "checkout.presence_decided",
           "cleaning.manual_request.created",
           "cleaning.manual_request.cancelled",
           "room.master_data_changed",
@@ -5532,6 +5794,14 @@ export const openApiDocument = {
               previousMaidProfileId: { type: "string", format: "uuid" },
               requestId: { type: "string", format: "uuid" },
               decision: { type: "string", enum: ["approved", "rejected"] },
+              checkoutDecision: {
+                type: "string",
+                enum: [
+                  "EXTEND_CHECKOUT",
+                  "CONFIRM_DEPARTED",
+                  "FALSE_REPORT",
+                ],
+              },
               reasonCode: { type: "string" },
               weekStart: { type: "string", format: "date" },
               version: { type: "integer", minimum: 0 },
@@ -5549,6 +5819,9 @@ export const openApiDocument = {
               revision: { type: "integer", minimum: 1 },
               targetAssignmentVersion: { type: "integer", minimum: 1 },
               attemptId: { type: "string", format: "uuid" },
+              incidentId: { type: "string", format: "uuid" },
+              decisionId: { type: "string", format: "uuid" },
+              nextAssignmentId: { type: "string", format: "uuid" },
               submissionId: { type: "string", format: "uuid" },
               bombReportId: { type: "string", format: "uuid" },
               earningId: { type: "string", format: "uuid" },

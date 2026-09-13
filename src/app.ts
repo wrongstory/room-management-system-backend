@@ -14,13 +14,28 @@ import { createAuthRoutes } from './modules/auth/auth.routes.js';
 import { type AuthService, SupabaseAuthService } from './modules/auth/auth.service.js';
 import { createAvailabilityRoutes } from './modules/availability/availability.routes.js';
 import {
-  SupabaseAvailabilityService,
-  type AvailabilityService
+  type AvailabilityService,
+  SupabaseAvailabilityService
 } from './modules/availability/availability.service.js';
+import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
+import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
+import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
+import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
+import { createNotificationRoutes } from './modules/notifications/notification.routes.js';
+import {
+  type NotificationService,
+  SupabaseNotificationService
+} from './modules/notifications/notification.service.js';
+import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
+import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
+import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
+import { photoError } from './modules/photos/photo-service.js';
+import { createWebPushSubscriptionRoutes } from './modules/push-subscriptions/web-push-subscription.routes.js';
+import { SupabaseWebPushSubscriptionService, type WebPushSubscriptionService } from './modules/push-subscriptions/web-push-subscription.service.js';
 import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
 import {
-  SupabaseReservationService,
-  type ReservationService
+  type ReservationService,
+  SupabaseReservationService
 } from './modules/reservations/reservation.service.js';
 import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
@@ -29,21 +44,8 @@ import {
   type RoomPinSheetOperationsService,
   SupabaseRoomPinSheetOperationsService
 } from './modules/rooms/room-pin-sheet-operations.service.js';
-import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
-import { photoError } from './modules/photos/photo-service.js';
 import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
 import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
-import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
-import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
-import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
-import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
-import { createNotificationRoutes } from './modules/notifications/notification.routes.js';
-import {
-  type NotificationService,
-  SupabaseNotificationService
-} from './modules/notifications/notification.service.js';
-import { createWebPushSubscriptionRoutes } from './modules/push-subscriptions/web-push-subscription.routes.js';
-import { type WebPushSubscriptionService, SupabaseWebPushSubscriptionService } from './modules/push-subscriptions/web-push-subscription.service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -56,6 +58,7 @@ export interface AppServices {
   complaints?: ComplaintService;
   notifications?: NotificationService;
   webPushSubscriptions?: WebPushSubscriptionService;
+  checkoutIncidents?: CheckoutIncidentService;
 }
 
 export interface BuildAppOptions {
@@ -140,7 +143,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         vapidKeyVersion: options.env.VAPID_CURRENT_KEY_VERSION,
         vapidPublicKey: options.env.VAPID_PUBLIC_KEY,
         vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
-      })
+      }),
+      checkoutIncidents: new SupabaseCheckoutIncidentService(clients)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -231,6 +235,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   if (services.webPushSubscriptions) {
     await app.register(createWebPushSubscriptionRoutes(services.webPushSubscriptions), { prefix: '/v1/push-subscriptions' });
+  }
+  if (services.checkoutIncidents) {
+    await app.register(createCheckoutIncidentRoutes(services.checkoutIncidents));
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
   await app.register(createPhotoRoutes(photoServices));

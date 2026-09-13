@@ -75,7 +75,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 현재 GitHub 운영 릴리즈 정본: `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - production Edge 배포 bundle source: diagnostics zero-byte hosted 호환 hotfix PR #64 / `main@cd635b116f451a39481f496f2bd368776385a409`
-- 이 문서 갱신의 integration base: `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578`; base는 **52 migrations / 105 paths / 112 operations**이며 #131 Phase A, #136 Phase B, #137 Phase C와 #140 bootstrap/readiness source/dev가 완료됐다. 현재 #140 보완 candidate는 기존 52 migrations를 수정하지 않는 53번째 nonce reservation migration만 추가하고 공개 API 수를 유지한다. Issue #112/#137 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
+- 이 문서 갱신의 integration base: `dev@7b3835f0461986f3f7d9bfdb0228875a5422a798`; base는 **53 migrations / 105 paths / 112 operations**이며 #140 nonce/concurrency 보완까지 source/dev가 완료됐다. 현재 #133 feature candidate는 기존 53 migrations를 수정하지 않는 54번째 checkout incident migration과 3 paths / 3 operations를 추가해 **108 paths / 115 operations**다. Issue #112/#137/#140 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #137 Phase C는 developer/admin 안전 상태 조회와 121실 DB-authoritative full resync source를 통합했지만, source-controlled local exact target 외 hosted mapping, secret, ACL, Edge/Cron 배포와 Google 호출은 별도 release gate다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
 - 개발 통합 기능 기준: #25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
@@ -85,7 +85,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #131은 #69 승인 PIN 계약의 Phase A source/dev 정본이다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. private immutable revision/current pointer, physical-change mismatch lifecycle, authoritative maid access lease, 30초 이하 reveal과 safe sync/audit/outbox를 포함하며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
-- 현재 critical path는 **#140 nonce/concurrency 보완 source gate → release/main 승격·PIN Sheet hosted 활성화**다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
+- 현재 critical path는 **#133 exact-head source gate → dev 병합 → v0.3.0 release/main 검증·승격**이다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, 배포 source는 위 `main@cd635b1` bundle 기준
@@ -635,7 +635,8 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | encrypted room PIN Phase A | source/dev 완료 | #69 / #131 | 49 migrations / 102 paths / 109 operations; physical change/reveal/authoritative access lease; production 미승격 |
 | [x] | Google Sheets PIN projection worker Phase B | source/dev 완료 | #69 / #136 / PR #138 | 50 migrations, 공개 102 paths / 109 operations 유지; 수정 head `589a8cc08ecc555b66b201b4919c8ac29f3743dd` 독립 QA 98/100 및 required CI PASS, `dev@3e54e3ebfe09ea7ef206c4997cc0a907e010e431`; hosted target/Cron/full resync 미포함, production 미승격 |
 | [x] | PIN Sheet 안전 상태·full resync Phase C | source/dev 완료 | #69 / #137 | 51 migrations / 104 paths / 111 operations; exact target digest, 121실 snapshot, singleton fence/CAS/audit; production activation은 Issue OPEN |
-| [x] | 초기 PIN bootstrap·예약 readiness 분리 | source/dev 완료, 보완 candidate | #140 / PR #141 / follow-up | dev 52 migrations / 105 paths / 112 operations; follow-up 53번째 nonce reservation, 병렬/응답 유실 회귀; production 미승격 |
+| [x] | 초기 PIN bootstrap·예약 readiness 분리 | source/dev 완료 | #140 / PR #141 / PR #142 | dev 53 migrations / 105 paths / 112 operations; 공통 nonce reservation과 52→53 병렬·이력보존 회귀 완료; production 미승격 |
+| [ ] | 자동 checkout 후 퇴실 미진행 신고·관리자 재배정 | feature candidate | #133 | candidate 54 migrations / 108 paths / 115 operations; source QA·CI·dev 병합 및 production 승격 미완료 |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
 
@@ -1103,7 +1104,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `dev@1eca96393bb353124c099f6f3923298df20d9bb5` 병합
 - [ ] release/main 및 production Edge 승격 — 이번 feature PR 범위 밖
 
-### #140 초기 PIN bootstrap·예약 readiness 분리 — source/dev 완료, 보완 candidate
+### #140 초기 PIN bootstrap·예약 readiness 분리 — source/dev 완료, production 미승격
 
 - [x] 예약 생성·변경·객실 projection에서 `unconfigured`/`mismatch` PIN 경고를 allocation blocker와 분리
 - [x] actual check-in preparation context와 reveal/change의 verified-only fail-closed 유지
@@ -1112,11 +1113,29 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] Fastify/Edge/OpenAPI 및 frontend handoff 계약 정합화; legacy `pin-sync-events` deprecated
 - [x] 최신 `dev` 병합 후 fresh local DB reset, 43 SQL files / 2,536 assertions, 전체 concurrency, DB lint, Edge 226 tests·bundle gate PASS
 - [x] PR #141 exact-head required `application` / `migration` PASS와 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578` 병합
-- [ ] 53번째 append-only nonce reservation: prepare/bootstrap 공통 충돌 차단, 52→53 history-preserving fail-closed upgrade
-- [ ] bootstrap 전용 별도 DB session 병렬/응답 유실 replay와 원장 exactly-once 보완의 exact-head 독립 QA·required CI
+- [x] 53번째 append-only nonce reservation: prepare/bootstrap 공통 충돌 차단, 52→53 history-preserving fail-closed upgrade
+- [x] bootstrap 전용 별도 DB session 병렬/응답 유실 replay와 원장 exactly-once 보완의 exact-head 독립 QA·required CI
 - [ ] 별도 release/main·production secret/Edge/migration 승격
 
-현재 critical path는 **#140 follow-up exact-head source gate → release/main 승격·PIN Sheets hosted activation**이다.
+### #133 자동 checkout 후 퇴실 미진행 신고·관리자 재배정 — feature candidate
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|---|
+| [x] | `POST /v1/attempts/{attemptId}/checkout-not-completed` | current notified maid | ✅ | ✅ | ✅ | ❌ | ❌ |
+| [x] | `GET /v1/checkout-incidents/{incidentId}` | 관련 maid / business admin | ✅ | ✅ | ✅ | ❌ | ❌ |
+| [x] | `POST /v1/checkout-incidents/{incidentId}/decision` | business admin | ✅ | ✅ | ✅ | ❌ | ❌ |
+
+- [x] 신고와 attempt/PIN/offline/capability 동결, immutable audit, 전체 active password-complete admin inbox/outbox를 단일 transaction으로 처리
+- [x] `EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` 결정과 기존 checkout target 재사용, assignment/attempt 이력 보존, 중단 업무 earning·벌점 0
+- [x] 일반 reservation/assignment/attempt/PIN/submission/inspection 경로가 open incident를 직접 검사하며, 기존 공개 PIN의 회수를 주장하지 않고 이후 lease·조회·실행만 차단
+- [x] 동일 요청 replay와 상반 신고/판정 경쟁이 exactly-once/CAS로 수렴하며 global advisory → command receipt → domain row 잠금 순서와 서버 계산 impact fingerprint를 사용
+- [x] 기존 53 migrations 불변, 53→54 업무 원장 hash 보존 upgrade, fresh 54 migration 적용 검증
+- [x] Fastify/Edge/OpenAPI/Python generated contract parity — candidate **108 paths / 115 operations**
+- [ ] exact-head 독립 QA 90점 이상·P0/P1=0 및 required GitHub `application` / `migration` PASS
+- [ ] `dev` squash merge 및 승인 tree 대조
+- [ ] v0.3.0 release/main·production migration/Edge/hosted role·mutation smoke
+
+현재 critical path는 **#133 exact-head source gate → dev 병합 → v0.3.0 release/main 검증·승격**이다.
 #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

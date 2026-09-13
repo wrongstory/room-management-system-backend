@@ -1122,6 +1122,35 @@ erDiagram
   source 검증 실패는 전체 rollback이며 reclean 원담당 불변, NULL due 보존, 실제 점유와 다음 입실 경계를 유지한다.
 - 사진 실업로드/제출·offline lease/PIN은 여기서 구현하지 않는다. capability 권한 계약과 실제 구현을 구분한다.
 
+### #133 개발 소스: 자동 checkout 후 퇴실 미진행 사건
+
+`20260913141655_checkout_not_completed_incident_workflow.sql`은 기존 53개 migration을 수정하지 않는
+54번째 append-only feature migration이다.
+
+```mermaid
+erDiagram
+  reservations ||--o{ checkout_presence_incidents : "reported after auto checkout"
+  checkout_cleaning_obligations ||--o{ checkout_presence_incidents : "frozen materialized target"
+  cleaning_targets ||--o{ checkout_presence_incidents : "same checkout identity"
+  cleaning_assignments ||--o{ checkout_presence_incidents : "reported notified revision"
+  cleaning_attempts ||--|| checkout_presence_incidents : "one incident per attempt"
+  checkout_presence_incidents ||--o| checkout_presence_incident_decisions : "current immutable decision"
+  profiles ||--o{ checkout_presence_incidents : "reporter"
+  profiles ||--o{ checkout_presence_incident_decisions : "business admin"
+```
+
+- incident는 reservation/room/obligation/target/assignment/attempt/reporter와 각 version snapshot을 고정하며
+  한 attempt에 한 건, 한 target에 open 한 건만 허용한다. resolved projection pointer만 전진할 수 있으며
+  decision row와 과거 업무 이력은 UPDATE/DELETE할 수 없다.
+- open incident는 실행·PIN·offline·submission·inspection·일반 assignment/reservation 전이를 각 guard에서
+  차단한다. raw table은 live-session RLS를 통과한 관련 maid와 business admin만 읽을 수 있고 service-owned
+  mutation은 고정 search path의 helper로 raw Data API grant 없이 검사한다.
+- 신고는 lease/capability revoke, audit, 모든 active/password-complete admin notification/outbox와 원자적이다.
+  결정은 기존 target을 재사용하고 새 current assignment 및 필요 시 새 scheduled attempt를 만들며 과거
+  assignment/attempt는 보존한다. 연장은 occupancy resumed 이력을 추가하고 중단 작업의 earning·벌점은 0이다.
+- command lock은 global reservation advisory → scoped receipt → domain row 순서이며 report/decision replay와
+  상반 결정은 stable domain conflict로 수렴한다. production/recovery 적용 상태와 무관한 source candidate다.
+
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.

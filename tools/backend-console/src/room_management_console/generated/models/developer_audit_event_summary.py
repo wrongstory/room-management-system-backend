@@ -11,6 +11,9 @@ from ..models.app_role import AppRole
 from ..models.developer_audit_event_summary_capability_kind import (
     DeveloperAuditEventSummaryCapabilityKind,
 )
+from ..models.developer_audit_event_summary_checkout_decision import (
+    DeveloperAuditEventSummaryCheckoutDecision,
+)
 from ..models.developer_audit_event_summary_currency import DeveloperAuditEventSummaryCurrency
 from ..models.developer_audit_event_summary_decision import DeveloperAuditEventSummaryDecision
 from ..models.developer_audit_event_summary_payment_method import (
@@ -42,6 +45,7 @@ class DeveloperAuditEventSummary:
         previous_maid_profile_id (UUID | Unset):
         request_id (UUID | Unset):
         decision (DeveloperAuditEventSummaryDecision | Unset):
+        checkout_decision (DeveloperAuditEventSummaryCheckoutDecision | Unset):
         reason_code (str | Unset):
         week_start (datetime.date | Unset):
         version (int | Unset):
@@ -59,6 +63,9 @@ class DeveloperAuditEventSummary:
         revision (int | Unset):
         target_assignment_version (int | Unset):
         attempt_id (UUID | Unset):
+        incident_id (UUID | Unset):
+        decision_id (UUID | Unset):
+        next_assignment_id (UUID | Unset):
         submission_id (UUID | Unset):
         bomb_report_id (UUID | Unset):
         earning_id (UUID | Unset):
@@ -136,6 +143,7 @@ class DeveloperAuditEventSummary:
     previous_maid_profile_id: UUID | Unset = UNSET
     request_id: UUID | Unset = UNSET
     decision: DeveloperAuditEventSummaryDecision | Unset = UNSET
+    checkout_decision: DeveloperAuditEventSummaryCheckoutDecision | Unset = UNSET
     reason_code: str | Unset = UNSET
     week_start: datetime.date | Unset = UNSET
     version: int | Unset = UNSET
@@ -153,6 +161,9 @@ class DeveloperAuditEventSummary:
     revision: int | Unset = UNSET
     target_assignment_version: int | Unset = UNSET
     attempt_id: UUID | Unset = UNSET
+    incident_id: UUID | Unset = UNSET
+    decision_id: UUID | Unset = UNSET
+    next_assignment_id: UUID | Unset = UNSET
     submission_id: UUID | Unset = UNSET
     bomb_report_id: UUID | Unset = UNSET
     earning_id: UUID | Unset = UNSET
@@ -258,6 +269,10 @@ class DeveloperAuditEventSummary:
         if not isinstance(self.decision, Unset):
             decision = self.decision.value
 
+        checkout_decision: str | Unset = UNSET
+        if not isinstance(self.checkout_decision, Unset):
+            checkout_decision = self.checkout_decision.value
+
         reason_code = self.reason_code
 
         week_start: str | Unset = UNSET
@@ -309,6 +324,18 @@ class DeveloperAuditEventSummary:
         attempt_id: str | Unset = UNSET
         if not isinstance(self.attempt_id, Unset):
             attempt_id = str(self.attempt_id)
+
+        incident_id: str | Unset = UNSET
+        if not isinstance(self.incident_id, Unset):
+            incident_id = str(self.incident_id)
+
+        decision_id: str | Unset = UNSET
+        if not isinstance(self.decision_id, Unset):
+            decision_id = str(self.decision_id)
+
+        next_assignment_id: str | Unset = UNSET
+        if not isinstance(self.next_assignment_id, Unset):
+            next_assignment_id = str(self.next_assignment_id)
 
         submission_id: str | Unset = UNSET
         if not isinstance(self.submission_id, Unset):
@@ -525,6 +552,8 @@ class DeveloperAuditEventSummary:
             field_dict["requestId"] = request_id
         if decision is not UNSET:
             field_dict["decision"] = decision
+        if checkout_decision is not UNSET:
+            field_dict["checkoutDecision"] = checkout_decision
         if reason_code is not UNSET:
             field_dict["reasonCode"] = reason_code
         if week_start is not UNSET:
@@ -559,6 +588,12 @@ class DeveloperAuditEventSummary:
             field_dict["targetAssignmentVersion"] = target_assignment_version
         if attempt_id is not UNSET:
             field_dict["attemptId"] = attempt_id
+        if incident_id is not UNSET:
+            field_dict["incidentId"] = incident_id
+        if decision_id is not UNSET:
+            field_dict["decisionId"] = decision_id
+        if next_assignment_id is not UNSET:
+            field_dict["nextAssignmentId"] = next_assignment_id
         if submission_id is not UNSET:
             field_dict["submissionId"] = submission_id
         if bomb_report_id is not UNSET:
@@ -755,6 +790,13 @@ class DeveloperAuditEventSummary:
         else:
             decision = DeveloperAuditEventSummaryDecision(_decision)
 
+        _checkout_decision = d.pop("checkoutDecision", UNSET)
+        checkout_decision: DeveloperAuditEventSummaryCheckoutDecision | Unset
+        if isinstance(_checkout_decision, Unset):
+            checkout_decision = UNSET
+        else:
+            checkout_decision = DeveloperAuditEventSummaryCheckoutDecision(_checkout_decision)
+
         reason_code = d.pop("reasonCode", UNSET)
 
         _week_start = d.pop("weekStart", UNSET)
@@ -833,6 +875,27 @@ class DeveloperAuditEventSummary:
             attempt_id = UNSET
         else:
             attempt_id = UUID(_attempt_id)
+
+        _incident_id = d.pop("incidentId", UNSET)
+        incident_id: UUID | Unset
+        if isinstance(_incident_id, Unset):
+            incident_id = UNSET
+        else:
+            incident_id = UUID(_incident_id)
+
+        _decision_id = d.pop("decisionId", UNSET)
+        decision_id: UUID | Unset
+        if isinstance(_decision_id, Unset):
+            decision_id = UNSET
+        else:
+            decision_id = UUID(_decision_id)
+
+        _next_assignment_id = d.pop("nextAssignmentId", UNSET)
+        next_assignment_id: UUID | Unset
+        if isinstance(_next_assignment_id, Unset):
+            next_assignment_id = UNSET
+        else:
+            next_assignment_id = UUID(_next_assignment_id)
 
         _submission_id = d.pop("submissionId", UNSET)
         submission_id: UUID | Unset
@@ -1128,6 +1191,7 @@ class DeveloperAuditEventSummary:
             previous_maid_profile_id=previous_maid_profile_id,
             request_id=request_id,
             decision=decision,
+            checkout_decision=checkout_decision,
             reason_code=reason_code,
             week_start=week_start,
             version=version,
@@ -1145,6 +1209,9 @@ class DeveloperAuditEventSummary:
             revision=revision,
             target_assignment_version=target_assignment_version,
             attempt_id=attempt_id,
+            incident_id=incident_id,
+            decision_id=decision_id,
+            next_assignment_id=next_assignment_id,
             submission_id=submission_id,
             bomb_report_id=bomb_report_id,
             earning_id=earning_id,
