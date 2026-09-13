@@ -129,6 +129,18 @@ function config(): RoomPinCryptoConfig {
   }
 }
 
+function bootstrapPinDigits(): string {
+  const value = requiredEnv("ROOM_PIN_INITIAL_DIGITS");
+  if (!/^[0-9]{4,8}$/.test(value)) {
+    throw new EdgeError(
+      503,
+      "ROOM_PIN_BOOTSTRAP_CONFIG_INVALID",
+      "객실 초기 PIN 설정을 확인해 주세요.",
+    );
+  }
+  return value;
+}
+
 function envelope(row: Record<string, unknown>): RoomPinEnvelope {
   return {
     envelopeFormat: row.envelope_format as 1,
@@ -175,6 +187,15 @@ export type RoomPinRoute = {
   kind: "prepare" | "confirm" | "rollback" | "reveal";
   roomId: string;
   leaseId?: string;
+};
+
+export type RoomPinBootstrapResult = {
+  initializedRoomIds: string[];
+  skippedRoomIds: string[];
+  initializedCount: number;
+  skippedCount: number;
+  remainingCount: number;
+  completedAt: string;
 };
 export function roomPinPath(path: string): RoomPinRoute | null {
   let match = /^\/v1\/rooms\/([^/]+)\/pin-changes\/prepare$/.exec(path);
@@ -320,6 +341,110 @@ export async function prepareRoomPinChange(
     proposedPinVersion: row.proposed_pin_version,
     status: row.status,
     expiresAt: row.expires_at,
+  };
+}
+
+export async function bootstrapRoomPins(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  sessionId: string,
+): Promise<RoomPinBootstrapResult> {
+  requirePasswordChanged(actor);
+  if (actor.role !== "admin") {
+    throw new EdgeError(403, "ADMIN_REQUIRED", "관리자만 접근할 수 있습니다.");
+  }
+
+  const body = await readJsonBody(request);
+  only(body, ["limit"]);
+  const limit = body.limit === undefined ? 20 : body.limit;
+  if (
+    !Number.isSafeInteger(limit) || (limit as number) < 1 ||
+    (limit as number) > 25
+  ) {
+    throw new EdgeError(
+      400,
+      "INVALID_PIN_BOOTSTRAP_LIMIT",
+      "초기화 batch 크기는 1~25여야 합니다.",
+    );
+  }
+
+  const commandKey = idempotencyKey(request);
+  const commandHash = await hash({ operation: "room.pin.bootstrap", limit });
+  const digits = bootstrapPinDigits();
+  const cryptoConfig = config();
+  const { data: contextData, error: contextError } = await clients.admin.rpc(
+    "get_room_pin_bootstrap_context",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_limit: limit,
+    },
+  );
+  if (contextError || !contextData) throw roomDatabaseError(contextError);
+  const context = contextData as Record<string, unknown>;
+  if (!Array.isArray(context.candidates)) {
+    throw new EdgeError(
+      500,
+      "ROOM_PIN_BOOTSTRAP_FAILED",
+      "객실 초기 PIN 대상을 확인하지 못했습니다.",
+    );
+  }
+
+  const candidates = await Promise.all(context.candidates.map(async (value) => {
+    const candidate = value as Record<string, unknown>;
+    const roomId = String(candidate.room_id ?? "");
+    const roomNumber = String(candidate.room_number ?? "");
+    const proposedPinVersion = Number(candidate.proposed_pin_version);
+    if (
+      !uuidPattern.test(roomId) || !roomNumber || proposedPinVersion !== 1
+    ) {
+      throw new EdgeError(
+        500,
+        "ROOM_PIN_BOOTSTRAP_FAILED",
+        "객실 초기 PIN 대상이 올바르지 않습니다.",
+      );
+    }
+    let encrypted: RoomPinEnvelope;
+    try {
+      encrypted = await encryptRoomPin(
+        canonicalRoomPin(roomNumber, digits),
+        roomId,
+        proposedPinVersion,
+        cryptoConfig,
+      );
+    } catch (error) {
+      throw cryptoError(error);
+    }
+    return {
+      roomId,
+      roomNumber,
+      envelopeFormat: encrypted.envelopeFormat,
+      ciphertextBase64: encrypted.ciphertextBase64,
+      nonceBase64: encrypted.nonceBase64,
+      authTagBase64: encrypted.authTagBase64,
+      keyVersion: encrypted.keyVersion,
+      aadEnvironment: encrypted.aadEnvironment,
+      aadProjectRef: encrypted.aadProjectRef,
+    };
+  }));
+
+  const { data, error } = await clients.admin.rpc("bootstrap_room_pins", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: sessionId,
+    p_candidates: candidates,
+    p_idempotency_key: commandKey,
+    p_request_hash: commandHash,
+  });
+  if (error || !data) throw roomDatabaseError(error);
+  const result = data as Record<string, unknown>;
+  return {
+    initializedRoomIds: result.initialized_room_ids as string[],
+    skippedRoomIds: result.skipped_room_ids as string[],
+    initializedCount: Number(result.initialized_count),
+    skippedCount: Number(result.skipped_count),
+    remainingCount: Number(result.remaining_count),
+    completedAt: String(result.completed_at),
   };
 }
 

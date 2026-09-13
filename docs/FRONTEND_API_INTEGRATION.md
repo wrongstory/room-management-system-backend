@@ -30,11 +30,11 @@ Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있�
 
 production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. source에는 #43 developer operation과 #51~#53 가능일·예약·객실 상세/mutation path가 추가됐지만, 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
 
-### #131 객실 PIN Phase A source candidate
+### #131/#140 객실 PIN source 계약
 
-source OpenAPI에는 prepare/confirm/rollback/reveal 4개 operation이 있다. `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+source OpenAPI에는 prepare/confirm/rollback/reveal과 admin 초기화 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
 
-Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. Phase A는 production에 배포되지 않았으므로 운영 OpenAPI에 4개 path가 보일 때까지 기능을 켜지 않는다.
+Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 실제 초기 숫자는 배포 secret이므로 프런트가 보유·전송하지 않는다. 이 기능들은 production OpenAPI에 각 path가 나타날 때까지 켜지 않는다.
 
 ## 2. 로컬 백엔드 준비
 
@@ -52,7 +52,7 @@ source에는 사진4 operations가 추가됐지만 운영 OpenAPI에 나타나�
 408 PHOTO_BODY_TIMEOUT은 본문 수신 시간 초과, 413은 원문/출력 크기 또는 decoder 기술상한, 415는 MIME, 409는 CAS/작업·quota·KST clock 경계, 503은 provider/환경 준비 상태를 구분한다. 업로드 initial/retry 응답의 `quotaWarning:boolean`이 true면 용량 경고를 표시한다. Google raw 사용량은 제공하지 않는다.
 사진 accepted가 field_completed/전체 제출/검수/ready로 자동 전이되지 않는다. Python developer 운영 콘솔은 이 business upload/read API를 생성하거나 호출하지 않는다.
 
-### #137 PIN Sheet 운영 source candidate
+### #137 PIN Sheet 운영 source/dev 완료
 
 active developer/admin만 `GET /v1/room-pin-sheet-sync/status`를 호출한다. UI는 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 `version`만 표시하고 healthy를 별도로 추측하지 않는다. 전체 복구는 strict `{expectedVersion}` body와 새 `Idempotency-Key`로 `POST /v1/room-pin-sheet-sync/full-resync`를 호출한다. 409 stale/pending/busy이면 status를 다시 읽고 운영자가 판단하며 자동 반복하지 않는다. 응답과 클라이언트 상태에 PIN, spreadsheet/tab identity, credential/provider 원문을 저장하지 않는다. production OpenAPI에 두 path가 나타나고 hosted mapping/ACL/smoke가 끝날 때까지 기능을 켜지 않는다.
 
@@ -201,7 +201,8 @@ const idempotencyKey = crypto.randomUUID();
 | 촛불 수량 기록 | `POST /v1/rooms/{roomId}/candles` | count 0 이상, physicallyVerified 기본 false |
 | 객실 이슈 등록 | `POST /v1/rooms/{roomId}/issues` | description 연락처 입력 금지, raw 문구를 오류 로그에 남기지 않음 |
 | 객실 이슈 해결 | `POST /v1/rooms/{roomId}/issues/{issueId}/resolve` | hard delete 없이 해결 이력 기록 |
-| PIN 동기화 상태 | `POST /v1/rooms/{roomId}/pin-sync-events` | 상태·version만 전송, PIN/door code/credential 전송 금지 |
+| PIN 초기화 | `POST /v1/rooms/pins/bootstrap` | active admin, 선택적 limit만 전송; PIN은 서버 secret에서만 읽음 |
+| PIN 동기화 상태(legacy) | `POST /v1/rooms/{roomId}/pin-sync-events` | 신규 프런트 사용 금지; 상태 기록만으로 current PIN이 생성되지 않음 |
 | 현재 가능일 | `GET /v1/availability?weekStart=...` | maid는 본인만, admin은 maidProfileId 선택 가능 |
 | 가능일 제출 | `POST /v1/availability/submissions` | maid만, KST 일요일 제출창·CAS·Idempotency-Key |
 | 마감 후 변경 요청 | `POST /v1/availability/change-requests` | maid만, pending 1건·이력 보존 |
@@ -218,9 +219,9 @@ const idempotencyKey = crypto.randomUUID();
 | 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel |
 | 예약 전이 수동 실행 | `POST /v1/reservations/transitions/process` | admin 운영 명령. scheduler secret endpoint와 별도 |
 
-객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다.
+객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다. `pinSyncStatus=unconfigured|mismatch`는 별도 경고이며 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건으로 사용하지 않는다. 실제 체크인·PIN 접근 화면만 `verified` 전까지 차단한다.
 
-객실 mutation은 최신 상세/목록의 `stateVersion`을 `expectedVersion` 또는 `expectedRoomVersion`으로 그대로 보낸다. `STALE_VERSION`이면 현재 객실을 다시 읽어 사용자 확인을 받고, 키를 바꿔 자동 덮어쓰지 않는다. 동일 payload의 통신 재시도에만 같은 Idempotency-Key를 사용한다. PIN 관련 화면은 `pinSyncStatus`와 `pinVersion`만 취급하며 `pin`, `rawPin`, `pinCode`, `doorCode`, `credential`, `providerSecret` 필드를 만들거나 analytics·오류 수집에 보내지 않는다.
+객실 mutation은 최신 상세/목록의 `stateVersion`을 `expectedVersion` 또는 `expectedRoomVersion`으로 그대로 보낸다. `STALE_VERSION`이면 현재 객실을 다시 읽어 사용자 확인을 받고, 키를 바꿔 자동 덮어쓰지 않는다. 동일 payload의 통신 재시도에만 같은 Idempotency-Key를 사용한다. 수동 `PIN 동기화 상태 기록` 화면은 제거하고 bootstrap·prepare/confirm/rollback/reveal API만 사용한다. PIN 관련 목록은 `pinSyncStatus`와 `pinVersion`만 취급하며 `pin`, `rawPin`, `pinCode`, `doorCode`, `credential`, `providerSecret` 필드를 만들거나 analytics·오류 수집에 보내지 않는다.
 
 가능일의 `weekStart`와 날짜는 `YYYY-MM-DD`로 보내며 client timezone으로 날짜를 다시 변환하지 않는다. `version`은 화면 로컬 카운터가 아니라 서버 응답값을 그대로 다음 `expectedVersion`에 사용한다. 제출 가능 시간과 마감 전/후 구분은 서버의 KST 판정을 따르고, 409를 받은 요청을 다른 Idempotency-Key로 자동 반복하지 않는다.
 

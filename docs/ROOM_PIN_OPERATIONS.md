@@ -1,10 +1,18 @@
-# 객실 PIN Phase A/B/C 운영 인계
+# 객실 PIN Phase A/B/C 및 초기화 운영 인계
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A, Issue #136 Phase B와 Issue #137 Phase C source 계약을 설명한다. 통합 기준은 `dev@3e54e3ebfe09ea7ef206c4997cc0a907e010e431`, 50 migrations / 102 paths / 109 operations이고 Phase C candidate는 51번째 append-only migration과 공개 2 operations를 추가해 104 paths / 111 operations가 된다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 통합 기준은 `dev@45d18f1c12928340a80ef21d58d7edb3d6529ad8`, 51 migrations / 104 paths / 111 operations이고 #140 candidate는 52번째 append-only migration과 1개 공개 operation을 추가해 105 paths / 112 operations가 된다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
 
 Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다.
+
+## 초기 PIN bootstrap과 예약 계약
+
+- 초기 DB에서 `pinSyncStatus=unconfigured`여도 예약 생성·변경·배정은 가능하다. `allocationReady`와 `reasonCodes`는 예약 업무의 점유·청소·촛불·운영 차단·입실 차단 이슈·기준정보 확인만 나타낸다.
+- 실제 체크인 전이와 PIN reveal/change는 current PIN이 `verified`가 될 때까지 계속 fail-closed한다. `mismatch`도 예약 경고로는 표시하지만 실제 입실과 PIN 접근을 막는다.
+- active admin은 `POST /v1/rooms/pins/bootstrap`에 선택적 `limit`(기본 20, 최대 25)만 보낸다. PIN 숫자는 요청하지 않으며 응답에도 PIN·credential·envelope가 없다.
+- 런타임은 secret manager의 `ROOM_PIN_INITIAL_DIGITS`(4~8자리)를 읽어 DB 후보의 current room number와 결합한 뒤 AES-GCM으로 암호화한다. 실제 값은 Git, migration, `.env.example`, API payload, 로그, 감사 또는 알림에 기록하지 않는다.
+- command는 current PIN이나 unresolved mismatch가 없는 객실만 version 1로 초기화한다. 기존 current/mismatch를 자동 덮어쓰지 않으며 한 번에 최대 25개, 동일 `Idempotency-Key`와 payload는 exact response를 재생한다. `remainingCount`가 0이 될 때까지 새 key로 반복할 수 있다.
 
 ## Phase B Google Sheets projection
 
@@ -55,7 +63,7 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 ## 물리 변경 절차
 
 1. 권한 있는 사용자가 `POST /v1/rooms/{roomId}/pin-changes/prepare`를 호출한다. 클라이언트는 선행 0을 보존한 `pinDigits`만 보낸다. 서버가 global lifecycle lock과 room lock 아래 current room number snapshot을 확인하고 `<room_number>-<pin_digits>`를 암호화한다.
-2. prepare 성공 즉시 객실은 mismatch다. current pointer는 그대로지만 allocation readiness와 모든 reveal이 차단된다.
+2. prepare 성공 즉시 객실은 mismatch다. current pointer는 그대로이고 실제 체크인과 모든 reveal은 차단되지만 예약 생성·변경·배정은 차단하지 않는다.
 3. 운영자가 실제 도어락 PIN을 변경한다.
 4. 실제 변경이 확실할 때만 confirm한다. confirm이 immutable revision/current pointer, exact verified sync event, safe sheet outbox, audit/receipt를 한 transaction에서 기록한다.
 5. 물리 결과가 불확실하거나 lease가 만료되면 mismatch를 유지한다. 실제 PIN을 다시 입력해 새 revision을 confirm하거나, 기존 current PIN으로 실제 도어락을 원복한 뒤 source-controlled rollback을 확인해야 한다. 자유형 사유나 추측으로 해소하지 않는다.
@@ -74,7 +82,8 @@ Reveal은 기존 public access lease를 대체하지 않는 30초 이하 private
 
 ## 장애 확인
 
-- `ROOM_PIN_MISMATCH_UNRESOLVED`: allocation과 reveal을 계속 차단하고 실제 물리 상태를 확인한다.
+- `ROOM_PIN_MISMATCH_UNRESOLVED`: 실제 체크인과 reveal을 계속 차단하고 실제 물리 상태를 확인한다. 예약 배정은 별도 경고를 표시한 채 허용한다.
+- `ROOM_PIN_BOOTSTRAP_CONFIG_INVALID`: 배포 secret이 없거나 형식이 잘못됐다. 실제 값을 로그/Issue에 남기지 말고 secret manager 설정을 복구한다.
 - `PIN_CHANGE_IN_PROGRESS` / `PIN_CHANGE_LEASE_EXPIRED`: 새 변경으로 덮지 말고 기존 lease의 물리 결과를 resolve한다.
 - `STALE_PIN_VERSION` / `ROOM_NUMBER_CHANGED`: 최신 객실/version을 다시 조회하고 새로운 idempotency key로 재시도한다.
 - `PIN_ACCESS_REQUIRED` / `PIN_ACCESS_LEASE_REQUIRED` / `PIN_REVEAL_AUTHORIZATION_CHANGED`: assignment, attempt, session, access lease가 바뀐 것이므로 plaintext를 폐기하고 다시 권한을 얻는다.

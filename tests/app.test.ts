@@ -103,9 +103,9 @@ function services(): AppServices {
         cleaningRequired: false,
         candleCount: 0,
         pinSyncStatus: 'unconfigured' as const,
-        allocationBlocked: true,
-        allocationReady: false,
-        reasonCodes: ['DATA_UNCONFIRMED' as const]
+        allocationBlocked: false,
+        allocationReady: true,
+        reasonCodes: []
       }]),
       get: vi.fn(),
       changeMasterData: vi.fn(),
@@ -113,7 +113,15 @@ function services(): AppServices {
       preparePinChange: vi.fn(),
       confirmPinChange: vi.fn(),
       rollbackPinChange: vi.fn(),
-      revealPin: vi.fn()
+      revealPin: vi.fn(),
+      bootstrapPins: vi.fn(async () => ({
+        initializedRoomIds: ['11111111-1111-4111-8111-111111111111'],
+        skippedRoomIds: [],
+        initializedCount: 1,
+        skippedCount: 0,
+        remainingCount: 120,
+        completedAt: '2026-09-13T00:00:00.000Z'
+      }))
     },
     reservations: {
       list: vi.fn(async () => []),
@@ -213,6 +221,39 @@ describe('application', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().rooms).toHaveLength(1);
     expect(response.json().rooms[0].roomNumber).toBe('117');
+    await app.close();
+  });
+
+  it('bootstraps a bounded initial PIN batch without returning PIN material', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/rooms/pins/bootstrap',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'room-pin-bootstrap-test-0001'
+      },
+      payload: { limit: 1 }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual({
+      bootstrap: {
+        initializedRoomIds: ['11111111-1111-4111-8111-111111111111'],
+        skippedRoomIds: [],
+        initializedCount: 1,
+        skippedCount: 0,
+        remainingCount: 120,
+        completedAt: '2026-09-13T00:00:00.000Z'
+      }
+    });
+    expect(JSON.stringify(response.json())).not.toMatch(/credential|pinDigits|ciphertext/i);
+    expect(appServices.rooms.bootstrapPins).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      { limit: 1, idempotencyKey: 'room-pin-bootstrap-test-0001' }
+    );
     await app.close();
   });
 

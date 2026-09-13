@@ -63,6 +63,9 @@ const revealPinSchema = z.object({
   ...pinWorkBinding,
   accessLeaseId: z.uuid().optional()
 }).strict();
+const bootstrapPinsSchema = z.object({
+  limit: z.number().int().min(1).max(25).default(20)
+}).strict();
 
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
@@ -80,6 +83,16 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
     app.get('/', { preHandler: admin }, async (request) => ({
       rooms: await roomService.list(request.actor)
     }));
+
+    app.post('/pins/bootstrap', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const input = bootstrapPinsSchema.parse(request.body);
+      const bootstrap = await roomService.bootstrapPins(request.actor, {
+        limit: input.limit,
+        idempotencyKey: idempotencyKey(request)
+      });
+      return reply.header('Cache-Control', 'no-store').send({ bootstrap });
+    });
 
     app.get('/:roomId', { preHandler: admin }, async (request) => {
       const { roomId } = roomIdSchema.parse(request.params);

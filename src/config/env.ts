@@ -24,6 +24,10 @@ const envSchema = z.object({
   ROOM_PIN_KEY_BASE64: z.string().min(1),
   ROOM_PIN_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/),
   ROOM_PIN_KEYRING_JSON: z.string().default('{}').transform((value) => value.trim() || '{}'),
+  ROOM_PIN_INITIAL_DIGITS: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().regex(/^[0-9]{4,8}$/).optional()
+  ),
   PAYROLL_CURSOR_HMAC_SECRET: z.string().trim().refine(
     (value) => Buffer.byteLength(value, 'utf8') >= 32,
     '주급 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'

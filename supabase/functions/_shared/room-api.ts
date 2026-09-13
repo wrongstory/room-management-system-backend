@@ -12,7 +12,6 @@ export type RoomReasonCode =
   | "CANDLE_PRESENT"
   | "OPERATION_BLOCKED"
   | "ROOM_ISSUE_BLOCKED"
-  | "PIN_MISMATCH"
   | "DATA_UNCONFIRMED";
 
 interface RoomProjectionRow {
@@ -247,6 +246,18 @@ export function roomDatabaseError(
       409,
       "ROOM_NUMBER_CHANGED",
       "객실 번호가 변경되어 PIN 준비 요청을 다시 시작해야 합니다.",
+    ],
+    [
+      "INVALID_PIN_BOOTSTRAP_LIMIT",
+      400,
+      "INVALID_PIN_BOOTSTRAP_LIMIT",
+      "초기화 batch 크기는 1~25여야 합니다.",
+    ],
+    [
+      "INVALID_PIN_BOOTSTRAP",
+      400,
+      "INVALID_PIN_BOOTSTRAP",
+      "객실 초기 PIN 요청이 올바르지 않습니다.",
     ],
     [
       "ROOM_PIN_REISSUE_REQUIRED",

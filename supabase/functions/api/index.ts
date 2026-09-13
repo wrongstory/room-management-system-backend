@@ -142,6 +142,7 @@ import {
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
 import {
+  bootstrapRoomPins,
   finishRoomPinChange,
   prepareRoomPinChange,
   revealRoomPin,
@@ -336,6 +337,22 @@ export async function handleApiRequest(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    if (request.method === "POST" && path === "/v1/rooms/pins/bootstrap") {
+      const response = jsonResponse(
+        {
+          bootstrap: await bootstrapRoomPins(
+            request,
+            clients,
+            actor,
+            verifiedRequestSessionId(request),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     if (request.method === "GET" && path === "/v1/room-pin-sheet-sync/status") {
       return jsonResponse(
         { sync: await roomPinSheetSyncStatus(request, clients, actor) },

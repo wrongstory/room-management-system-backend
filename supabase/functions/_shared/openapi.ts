@@ -3315,7 +3315,7 @@ export const openApiDocument = {
         operationId: "listRooms",
         summary: "전체 객실 운영 projection 조회",
         description:
-          "active business admin 전용입니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 프론트에서 하나의 status enum으로 합치지 않습니다. `allocationReady=false`의 근거는 `reasonCodes`로 표시하세요.",
+          "active business admin 전용입니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 프론트에서 하나의 status enum으로 합치지 않습니다. `allocationReady=false`의 근거는 `reasonCodes`로 표시하세요. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         responses: {
@@ -3419,14 +3419,56 @@ export const openApiDocument = {
       ),
     },
     "/v1/rooms/{roomId}/pin-sync-events": {
-      post: roomMutationOperation(
-        "recordRoomPinSync",
-        "객실 PIN 동기화 상태 기록",
-        "RoomPinSyncRequest",
-        "operation",
-        201,
-        "PIN 원문이 아닌 동기화 상태와 선택적 pinVersion만 기록합니다. pin, rawPin, pinCode, doorCode, credential, providerSecret 필드는 허용하지 않습니다.",
-      ),
+      post: {
+        ...roomMutationOperation(
+          "recordRoomPinSync",
+          "객실 PIN 동기화 상태 기록(legacy)",
+          "RoomPinSyncRequest",
+          "operation",
+          201,
+          "기존 클라이언트 호환용 상태 기록 endpoint입니다. current PIN을 생성하거나 초기화하지 않으므로 신규 프론트는 사용하지 말고 bootstrap/prepare/confirm/rollback API를 사용합니다. PIN 원문 필드는 허용하지 않습니다.",
+        ),
+        deprecated: true,
+      },
+    },
+    "/v1/rooms/pins/bootstrap": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "bootstrapRoomPins",
+        summary: "누락된 객실 current PIN 암호화 초기화",
+        description:
+          "active business admin 전용 bounded command입니다. request body로 PIN을 받지 않고 배포 환경의 ROOM_PIN_INITIAL_DIGITS secret을 사용합니다. current PIN이 없고 unresolved 물리 변경도 없는 객실만 한 번에 최대 25실씩 version 1로 초기화합니다. 같은 Idempotency-Key 재시도는 동일 batch 응답을 반환하며 기존 current PIN이나 mismatch를 덮지 않습니다. 응답·로그·감사·알림에는 PIN 또는 envelope가 포함되지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/RoomPinBootstrapRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "PIN 원문이 없는 bounded 초기화 결과",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/RoomPinBootstrapEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
     },
     "/v1/rooms/{roomId}/pin-changes/prepare": {
       post: {
@@ -3434,7 +3476,7 @@ export const openApiDocument = {
         operationId: "prepareRoomPinChange",
         summary: "물리 도어락 PIN 변경 준비",
         description:
-          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 객실 배정 준비와 모든 PIN reveal이 차단됩니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 모든 PIN reveal이 차단되지만 예약 등록은 차단하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter(), idempotencyHeader],
@@ -4561,6 +4603,10 @@ export const openApiDocument = {
           "ROOM_NOT_FOUND",
           "ROOM_OPERATION_NOT_FOUND",
           "INVALID_ROOM_PIN",
+          "INVALID_PIN_BOOTSTRAP_LIMIT",
+          "INVALID_PIN_BOOTSTRAP",
+          "ROOM_PIN_BOOTSTRAP_CONFIG_INVALID",
+          "ROOM_PIN_BOOTSTRAP_FAILED",
           "ROOM_PIN_KEY_UNAVAILABLE",
           "ROOM_PIN_CRYPTO_CONFIG_INVALID",
           "ROOM_PIN_DECRYPT_FAILED",
@@ -7089,11 +7135,10 @@ export const openApiDocument = {
           "CANDLE_PRESENT",
           "OPERATION_BLOCKED",
           "ROOM_ISSUE_BLOCKED",
-          "PIN_MISMATCH",
           "DATA_UNCONFIRMED",
         ],
         description:
-          "객실이 고객 배정 준비되지 않은 독립 사유입니다. 여러 값이 동시에 올 수 있습니다.",
+          "객실 예약 배정이 준비되지 않은 독립 사유입니다. 여러 값이 동시에 올 수 있습니다. PIN 상태는 이 enum이 아니라 RoomProjection.pinSyncStatus의 별도 경고 축입니다.",
       },
       RoomProjection: {
         type: "object",
@@ -7157,7 +7202,8 @@ export const openApiDocument = {
           pinSyncStatus: {
             type: "string",
             enum: ["verified", "mismatch", "unconfigured"],
-            description: "객실 PIN 동기화 상태. PIN 원문은 포함하지 않습니다.",
+            description:
+              "객실 PIN 동기화 경고 상태. PIN 원문은 포함하지 않으며 mismatch/unconfigured만으로 예약 등록을 막지 않습니다. 실제 체크인과 PIN 접근은 verified 전까지 차단됩니다.",
           },
           allocationBlocked: {
             type: "boolean",
@@ -7290,7 +7336,6 @@ export const openApiDocument = {
             writeOnly: true,
             description:
               "선행 0을 보존하는 숫자 문자열. roomNumber 접두사는 서버만 추가합니다.",
-            example: "0123",
           },
           expectedPinVersion: { type: "integer", minimum: 0 },
           reasonCode: {
@@ -7327,6 +7372,57 @@ export const openApiDocument = {
         additionalProperties: false,
         required: ["expectedPinVersion"],
         properties: { expectedPinVersion: { type: "integer", minimum: 0 } },
+      },
+      RoomPinBootstrapRequest: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 25,
+            default: 20,
+            description: "한 command에서 초기화할 최대 객실 수",
+          },
+        },
+      },
+      RoomPinBootstrapResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "initializedRoomIds",
+          "skippedRoomIds",
+          "initializedCount",
+          "skippedCount",
+          "remainingCount",
+          "completedAt",
+        ],
+        properties: {
+          initializedRoomIds: {
+            type: "array",
+            maxItems: 25,
+            items: { type: "string", format: "uuid" },
+          },
+          skippedRoomIds: {
+            type: "array",
+            maxItems: 25,
+            items: { type: "string", format: "uuid" },
+          },
+          initializedCount: { type: "integer", minimum: 0, maximum: 25 },
+          skippedCount: { type: "integer", minimum: 0, maximum: 25 },
+          remainingCount: { type: "integer", minimum: 0, maximum: 121 },
+          completedAt: { type: "string", format: "date-time" },
+        },
+        description:
+          "PIN, credential, ciphertext 또는 provider 정보가 없는 초기화 진행 결과입니다.",
+      },
+      RoomPinBootstrapEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["bootstrap"],
+        properties: {
+          bootstrap: { $ref: "#/components/schemas/RoomPinBootstrapResult" },
+        },
       },
       RoomPinChangeResult: {
         type: "object",
