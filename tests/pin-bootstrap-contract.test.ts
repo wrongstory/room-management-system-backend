@@ -3,19 +3,15 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
 
-const migration = readFileSync(
-  join(
-    process.cwd(),
-    'supabase/migrations/20260913041707_pin_bootstrap_reservation_readiness.sql',
-  ),
-  'utf8',
+function readSqlFixture(path: string): string {
+  return readFileSync(join(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
+}
+
+const migration = readSqlFixture(
+  'supabase/migrations/20260913041707_pin_bootstrap_reservation_readiness.sql',
 );
-const nonceHardeningMigration = readFileSync(
-  join(
-    process.cwd(),
-    'supabase/migrations/20260913075134_room_pin_nonce_reservation_hardening.sql',
-  ),
-  'utf8',
+const nonceHardeningMigration = readSqlFixture(
+  'supabase/migrations/20260913075134_room_pin_nonce_reservation_hardening.sql',
 );
 
 describe('PIN bootstrap and reservation readiness contract', () => {
