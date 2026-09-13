@@ -18,6 +18,7 @@ import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-oper
 import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
 import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
+import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
 import { testRoomPinSheetSyncConcurrency } from './test-room-pin-sheet-sync-concurrency.mjs';
 import { testWebPushConcurrency } from './test-web-push-concurrency.mjs';
 
@@ -329,6 +330,7 @@ await configureRoomPinForConcurrency(
   { profileId: actorProfileId, email, password },
   { id: room.id, roomNumber: room.room_number }
 );
+await testRoomPinSheetFullResyncConcurrency(client,actorProfileId);
 
 const { data: refreshedRoom, error: refreshedRoomError } = await client
   .from('rooms')

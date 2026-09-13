@@ -40,6 +40,7 @@ const sourcePaths = [
   'supabase/functions/_shared/room-api.ts',
   'supabase/functions/_shared/room-pin-crypto.ts',
   'supabase/functions/_shared/room-pin-api.ts',
+  'supabase/functions/_shared/room-pin-sheet-operations-api.ts',
   'supabase/functions/_shared/google-sheets-pin.ts',
   'supabase/functions/_shared/room-pin-sheet-sync.ts',
   'supabase/functions/api/index.ts',
@@ -77,6 +78,7 @@ const testPaths = [
   'supabase/functions/_shared/room-api.deno.ts',
   'supabase/functions/_shared/room-pin-crypto.deno.ts',
   'supabase/functions/_shared/room-pin-api.deno.ts',
+  'supabase/functions/_shared/room-pin-sheet-operations-api.deno.ts',
   'supabase/functions/api/index.deno.ts'
   ,'supabase/functions/notification-delivery/index.deno.ts'
 ];

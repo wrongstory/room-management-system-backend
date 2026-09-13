@@ -76,6 +76,11 @@ function validateBinding(config: RoomPinCryptoConfig, roomId: string, pinVersion
   }
 }
 
+/** Validates the bounded local key structure without decrypting data or calling a provider. */
+export function validateRoomPinCryptoConfig(config: RoomPinCryptoConfig): void {
+  validateBinding(config, '00000000-0000-4000-8000-000000000000', 1);
+}
+
 function aad(environment: string, projectRef: string, roomId: string, pinVersion: number): Uint8Array {
   if (!bindingPattern.test(environment) || !bindingPattern.test(projectRef)) fail('ROOM_PIN_ENVELOPE_INVALID');
   return new TextEncoder().encode(

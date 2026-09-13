@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 102 &&
+    Object.keys(document.paths).length === 104 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 109,
-    "candidate contract 102/109",
+        ).length === 111,
+    "candidate contract 104/111",
   );
 });
 
@@ -980,7 +980,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 61,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 63,
     "actual audit allowlist count",
   );
   assert(
@@ -1084,6 +1084,71 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
     ]
   ) {
     assert(!(forbidden in summary.properties), `audit omits ${forbidden}`);
+  }
+});
+
+Deno.test("room PIN Sheet operator OpenAPI exposes only bounded status and fenced full resync", async () => {
+  const doc = await openApiResponse({}).json() as typeof openApiDocument;
+  const status = doc.paths["/v1/room-pin-sheet-sync/status"].get;
+  const command = doc.paths["/v1/room-pin-sheet-sync/full-resync"].post;
+  assert(
+    status.operationId === "getRoomPinSheetSyncStatus",
+    "stable status operation",
+  );
+  assert(
+    command.operationId === "requestRoomPinSheetFullResync",
+    "stable command operation",
+  );
+  assert(
+    command.responses["202"].headers["Cache-Control"].schema.const ===
+      "no-store",
+    "command no-store",
+  );
+  const fields = Object.keys(
+    doc.components.schemas.RoomPinSheetOperatorStatus.properties,
+  ).sort();
+  assert(
+    fields.join(",") === [
+      "checkedAt",
+      "failed",
+      "lastErrorCode",
+      "lastSuccessAt",
+      "oldestPendingAt",
+      "operatorBlocked",
+      "pending",
+      "version",
+    ].sort().join(","),
+    "reviewed safe status fields only",
+  );
+  assert(
+    doc.components.schemas.RoomPinSheetFullResyncAccepted.properties.roomCount
+      .const === 121,
+    "exact room count",
+  );
+  const auditTypes = doc.components.schemas.DeveloperAuditEventType.enum;
+  assert(
+    auditTypes.includes("room_pin_sheet.full_resync_requested") &&
+      auditTypes.includes("room_pin_sheet.full_resync_succeeded"),
+    "full resync audit allowlist",
+  );
+  const summary =
+    doc.components.schemas.DeveloperAuditEvent.properties.summary.properties;
+  for (
+    const forbidden of [
+      "requestHash",
+      "targetIdentityDigest",
+      "spreadsheetId",
+      "tab",
+      "credential",
+      "token",
+      "ciphertext",
+      "envelope",
+    ]
+  ) {
+    assert(
+      !(forbidden in summary),
+      "sensitive full-resync audit fields absent",
+    );
   }
 });
 

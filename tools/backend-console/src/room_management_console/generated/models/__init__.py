@@ -194,13 +194,20 @@ from .get_developer_database_status_response_200 import GetDeveloperDatabaseStat
 from .get_developer_overview_response_200 import GetDeveloperOverviewResponse200
 from .get_developer_runtime_status_response_200 import GetDeveloperRuntimeStatusResponse200
 from .get_developer_scheduler_status_response_200 import GetDeveloperSchedulerStatusResponse200
+from .get_room_pin_sheet_sync_status_response_200 import GetRoomPinSheetSyncStatusResponse200
 from .list_accounts_response_200 import ListAccountsResponse200
 from .login_request import LoginRequest
 from .login_response import LoginResponse
 from .managed_role import ManagedRole
 from .password_change_request import PasswordChangeRequest
+from .request_room_pin_sheet_full_resync_response_202 import (
+    RequestRoomPinSheetFullResyncResponse202,
+)
 from .reset_account_password_response_200 import ResetAccountPasswordResponse200
 from .role_change_request import RoleChangeRequest
+from .room_pin_sheet_full_resync_accepted import RoomPinSheetFullResyncAccepted
+from .room_pin_sheet_full_resync_request import RoomPinSheetFullResyncRequest
+from .room_pin_sheet_operator_status import RoomPinSheetOperatorStatus
 from .room_pin_sheet_sync_status import RoomPinSheetSyncStatus
 from .room_pin_sheet_sync_status_activation import RoomPinSheetSyncStatusActivation
 from .room_pin_sheet_sync_status_backlog import RoomPinSheetSyncStatusBacklog
@@ -320,13 +327,18 @@ __all__ = (
     "GetDeveloperOverviewResponse200",
     "GetDeveloperRuntimeStatusResponse200",
     "GetDeveloperSchedulerStatusResponse200",
+    "GetRoomPinSheetSyncStatusResponse200",
     "ListAccountsResponse200",
     "LoginRequest",
     "LoginResponse",
     "ManagedRole",
     "PasswordChangeRequest",
+    "RequestRoomPinSheetFullResyncResponse202",
     "ResetAccountPasswordResponse200",
     "RoleChangeRequest",
+    "RoomPinSheetFullResyncAccepted",
+    "RoomPinSheetFullResyncRequest",
+    "RoomPinSheetOperatorStatus",
     "RoomPinSheetSyncStatus",
     "RoomPinSheetSyncStatusActivation",
     "RoomPinSheetSyncStatusBacklog",

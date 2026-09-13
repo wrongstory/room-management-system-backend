@@ -495,6 +495,53 @@ Table private.room_pin_sheet_sync_heartbeat {
   Note: '#136 bounded safe observability only. No room/outbox ID, PIN, Sheet cell, provider response, assertion, token, or secret.'
 }
 
+Table private.room_pin_sheet_full_resync_runs {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  actor_role_snapshot app_role [not null]
+  expected_fence bigint [not null]
+  reconciles_blocked_fence bigint
+  aad_environment text [not null]
+  aad_project_ref text [not null]
+  target_identity_digest text [not null]
+  snapshot_room_count int [not null, note: 'exactly 121']
+  status text [not null, note: 'pending/processing/succeeded/failed/operator_blocked/superseded']
+  claim_id uuid
+  claimed_at timestamptz
+  claim_expires_at timestamptz
+  lease_fence bigint
+  provider_write_started_at timestamptz
+  retry_count int [not null]
+  next_attempt_at timestamptz [not null]
+  last_error_code text
+  idempotency_key text [not null]
+  request_hash text [not null]
+  requested_at timestamptz [not null]
+  completed_at timestamptz
+
+  indexes { (actor_profile_id, idempotency_key) [unique] }
+  Note: '#137 immutable operator command identity and exact target digest. FORCE RLS; public status/audit never expose hashes or target/provider material.'
+}
+
+Table private.room_pin_sheet_full_resync_items {
+  run_id uuid [not null]
+  room_id uuid [not null]
+  room_number_snapshot text [not null]
+  sheet_row int [not null, note: '2..122']
+  pin_revision_id uuid
+  pin_version bigint [not null]
+  sync_status text [not null]
+  effective_at timestamptz [not null]
+  reason_code text [not null, note: 'FULL_RESYNC_REPAIR']
+
+  indexes {
+    (run_id, room_id) [pk]
+    (run_id, room_number_snapshot) [unique]
+    (run_id, sheet_row) [unique]
+  }
+  Note: '#137 append-only 121-room snapshot. Holds revision references and safe row metadata, never plaintext PIN or copied envelope.'
+}
+
 Table public.cleaning_template_versions {
   id uuid [pk]
   room_type_id uuid [not null]

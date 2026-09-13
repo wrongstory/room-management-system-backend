@@ -23,7 +23,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@d9b6ce90fa8f924a4a62cea6566fc8e7754f054b`이며 base snapshot은 49 migrations / OpenAPI 102 paths / 109 operations다. #131 Phase A는 source/dev 완료 상태다. #136 Phase B candidate는 기존 49개 blob을 수정하지 않는 50번째 append-only migration과 private worker Edge Function을 추가하며 공개 OpenAPI 수는 유지한다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@3e54e3ebfe09ea7ef206c4997cc0a907e010e431`이며 base snapshot은 50 migrations / OpenAPI 102 paths / 109 operations다. #131 Phase A와 #136 Phase B는 source/dev 완료 상태다. #137 Phase C candidate는 기존 migration을 수정하지 않는 51번째 append-only migration과 2개 공개 operation을 추가해 104 paths / 111 operations가 된다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
 
@@ -42,6 +42,12 @@ Phase B worker는 outbox의 current room/version만 global singleton lease/fence
 Google Sheets에서는 `room_number`를 business identity로 하여 최대 121행을 bounded read한다. 행 이동은 실제 room-number 행을 갱신하고, 중복 identity·상위 Sheet version·다른 객실이 차지한 deterministic slot은 덮어쓰지 않는다. equal version도 canonical PIN과 safe marker가 다르면 DB 정본으로 repair한다. provider 시작 33초, settle 39초, 전체 45초의 하나의 absolute deadline을 DB/OAuth/Sheets response stream에 전달한다. HTTP 429/5xx는 bounded retry이고 write 시작 후 transport 불확실, retry 소진, schema/ACL/config 오류는 operator reconciliation 전 global block이다.
 
 private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 직접 접근을 막는다. developer database projection은 configured/approved boolean, safe counters/timestamp/stable error만 노출한다. full resync와 운영 mapping/ACL/Cron은 #137 범위다.
+
+### #137 PIN Sheet full resync와 운영 상태 — source candidate
+
+공개 `GET /v1/room-pin-sheet-sync/status`는 변경 완료 비밀번호와 active developer/admin session을 매번 확인하고 `pending/failed/operatorBlocked/oldestPendingAt/lastSuccessAt/lastErrorCode/version`만 반환한다. 현재 local credential 또는 target mapping이 invalid이면 과거 successful heartbeat보다 우선해 false-green을 차단한다. `POST /v1/room-pin-sheet-sync/full-resync`는 strict `{expectedVersion}` body, scoped idempotency key와 status version CAS를 요구한다.
+
+요청은 121실 room master와 current PIN revision reference를 deterministic row 2..122 snapshot으로 고정한다. canonical environment/project/spreadsheet/tab SHA-256 marker가 request/run/claim 전 구간에서 일치해야 하며 raw spreadsheet/tab과 provider material은 DB/API/audit에 노출하지 않는다. full writer와 incremental writer는 같은 singleton fence를 사용해 provider permit 한 건만 얻는다. full write 성공 시 `provider_write_started_at` 이전에 만들어진 snapshot-room outbox만 version과 무관하게 supersede하고 marker 이후 PIN 변경은 남겨 최종 수렴한다. retryable failed run도 logical active command이므로 다른 key가 중복 full write를 예약할 수 없다. developer audit은 requested/succeeded의 `status/roomCount/reconciliation`만 투영한다.
 
 ### #84/#85 사진 HTTP adapter와 보존 정리 worker — source/dev 완료
 

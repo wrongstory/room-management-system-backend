@@ -102,6 +102,10 @@ const webPushSubscriptionMigrationUrl = new URL(
   '../supabase/migrations/20260911050151_web_push_subscription_revisions.sql',
   import.meta.url
 );
+const roomPinSheetFullResyncMigrationUrl = new URL(
+  '../supabase/migrations/20260912225031_room_pin_sheet_full_resync.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -579,5 +583,26 @@ describe('initial migration contract', () => {
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.web_push/);
     expect(sql).not.toMatch(/\b(?:http_post|net\.http_post|vapid)\b/i);
+  });
+
+  it('keeps full PIN Sheet repair immutable, fenced, bounded, and provider-free', async () => {
+    const sql = await readFile(roomPinSheetFullResyncMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.room_pin_sheet_full_resync_runs');
+    expect(sql).toContain('create table private.room_pin_sheet_full_resync_items');
+    expect(sql).toContain('snapshot_room_count integer not null check (snapshot_room_count = 121)');
+    expect(sql).toContain('target_identity_digest text not null');
+    expect(sql).toContain('create function public.request_room_pin_sheet_full_resync(');
+    expect(sql).toContain('create function public.claim_room_pin_sheet_full_resync(');
+    expect(sql).toContain('create function public.authorize_room_pin_sheet_full_resync_write(');
+    expect(sql).toContain('create function public.settle_room_pin_sheet_full_resync(');
+    expect(sql).toContain('outbox.created_at<=run.provider_write_started_at');
+    expect(sql).toContain("where status in ('pending','processing','failed')");
+    expect(sql).toContain("'room_pin_sheet.full_resync_requested'");
+    expect(sql).toContain("'room_pin_sheet.full_resync_succeeded'");
+    expect(sql).toContain('from public,anon,authenticated,service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_pin_sheet_full_resync/);
+    expect(sql).not.toMatch(/\b(?:http_post|net\.http_post|oauth|private_key|access_token)\b/i);
   });
 });

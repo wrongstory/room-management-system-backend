@@ -223,7 +223,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toContain(
-      'expectedMigrationName = "room_pin_sheet_sync_worker"'
+      'expectedMigrationName = "room_pin_sheet_full_resync"'
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);

@@ -814,4 +814,39 @@ describe('application', () => {
     expect(appServices.payroll.start).not.toHaveBeenCalled();
     await app.close();
   });
+
+  it('exposes bounded developer/admin PIN Sheet status and fenced full-resync routes', async () => {
+    const appServices = services();
+    appServices.roomPinSheetOperations = {
+      status: vi.fn(async () => ({
+        pending: 0, failed: 0, operatorBlocked: false, oldestPendingAt: null,
+        lastSuccessAt: null, lastErrorCode: null, version: 4,
+        checkedAt: '2026-09-13T00:00:00.000Z'
+      })),
+      requestFullResync: vi.fn(async () => ({ status: 'pending' as const, roomCount: 121 as const, version: 4 }))
+    };
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const status = await app.inject({ method: 'GET', url: '/v1/room-pin-sheet-sync/status',
+      headers: { authorization: 'Bearer access-token' } });
+    expect(status.statusCode).toBe(200);
+    expect(status.headers['cache-control']).toBe('no-store');
+    expect(Object.keys(status.json().sync).sort()).toEqual([
+      'checkedAt', 'failed', 'lastErrorCode', 'lastSuccessAt', 'oldestPendingAt',
+      'operatorBlocked', 'pending', 'version'
+    ]);
+    const accepted = await app.inject({ method: 'POST', url: '/v1/room-pin-sheet-sync/full-resync',
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'full-resync-route-0001' },
+      payload: { expectedVersion: 4 } });
+    expect(accepted.statusCode).toBe(202);
+    expect(accepted.headers['cache-control']).toBe('no-store');
+    expect(accepted.json()).toEqual({ sync: { status: 'pending', roomCount: 121, version: 4 } });
+    expect(appServices.roomPinSheetOperations.requestFullResync).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }), 4, 'full-resync-route-0001'
+    );
+    const extra = await app.inject({ method: 'POST', url: '/v1/room-pin-sheet-sync/full-resync',
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'full-resync-route-0002' },
+      payload: { expectedVersion: 4, spreadsheetId: 'forbidden' } });
+    expect(extra.statusCode).toBe(400);
+    await app.close();
+  });
 });
