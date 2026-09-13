@@ -1,14 +1,17 @@
 import {
   decryptRoomPin,
   type RoomPinCryptoConfig,
+  RoomPinCryptoError,
   type RoomPinEnvelope,
 } from "./room-pin-crypto.js";
 import {
+  approvedRoomPinSheetTarget,
   assertApprovedRoomPinSheetTarget,
   type GoogleSheetsServiceAccount,
   RoomPinSheetProviderError,
   type RoomPinSheetRow,
   type RoomPinSheetTarget,
+  roomPinSheetTargetDigest,
 } from "./google-sheets-pin.js";
 
 export const ROOM_PIN_SHEET_SYNC_BATCH_LIMIT = 10;
@@ -31,6 +34,10 @@ export interface RoomPinSheetProvider {
     deadlineAt: number,
   ): Promise<{ outcome: "current" | "write"; sheetRow: number }>;
   write(row: RoomPinSheetRow, deadlineAt: number): Promise<void>;
+  writeFullBoard?(
+    rows: readonly RoomPinSheetRow[],
+    deadlineAt: number,
+  ): Promise<void>;
 }
 export interface RoomPinSheetSyncResult {
   claimed: number;
@@ -57,6 +64,21 @@ interface Context {
   reasonCode: string;
   leaseFence: number;
   envelope: RoomPinEnvelope;
+}
+interface FullResyncItem {
+  roomId: string;
+  roomNumber: string;
+  sheetRow: number;
+  pinVersion: number;
+  effectiveAt: string;
+  syncStatus: string;
+  reasonCode: string;
+  envelope?: RoomPinEnvelope;
+}
+interface FullResyncOperation {
+  runId: string;
+  leaseFence: number;
+  items: FullResyncItem[];
 }
 class DeadlineError extends Error {
   constructor() {
@@ -162,6 +184,62 @@ function context(value: unknown): Context {
     },
   };
 }
+function fullResyncOperation(value: unknown): FullResyncOperation {
+  const operation = object(value);
+  if (!Array.isArray(operation.items) || operation.items.length !== 121) {
+    return failed();
+  }
+  const items = operation.items.map((raw): FullResyncItem => {
+    const item = object(raw);
+    const pinVersion = integer(item.pinVersion, 0);
+    const rawEnvelope = item.envelope;
+    const envelope = rawEnvelope === undefined ? undefined : (() => {
+      const parsed = object(rawEnvelope);
+      return {
+        envelopeFormat: integer(parsed.envelopeFormat, 1, 1) as 1,
+        keyVersion: text(parsed.keyVersion, /^[A-Za-z0-9._-]{1,32}$/),
+        ciphertextBase64: text(
+          parsed.ciphertextBase64,
+          /^[A-Za-z0-9+/]+={0,2}$/,
+        ),
+        nonceBase64: text(parsed.nonceBase64, /^[A-Za-z0-9+/]+={0,2}$/),
+        authTagBase64: text(
+          parsed.authTagBase64,
+          /^[A-Za-z0-9+/]+={0,2}$/,
+        ),
+        aadEnvironment: text(
+          parsed.aadEnvironment,
+          /^[A-Za-z0-9._:-]{1,80}$/,
+        ),
+        aadProjectRef: text(
+          parsed.aadProjectRef,
+          /^[A-Za-z0-9._:-]{1,80}$/,
+        ),
+      };
+    })();
+    if ((pinVersion === 0) !== (envelope === undefined)) return failed();
+    return {
+      roomId: uuid(item.roomId),
+      roomNumber: text(item.roomNumber, /^[A-Za-z0-9]{1,32}$/),
+      sheetRow: integer(item.sheetRow, 2, 122),
+      pinVersion,
+      effectiveAt: text(item.effectiveAt, /^\d{4}-\d{2}-\d{2}T/),
+      syncStatus: text(item.syncStatus, /^(verified|mismatch|unconfigured)$/),
+      reasonCode: text(item.reasonCode, /^FULL_RESYNC_REPAIR$/),
+      ...(envelope ? { envelope } : {}),
+    };
+  });
+  if (
+    items.some((item, index) => item.sheetRow !== index + 2) ||
+    new Set(items.map((item) => item.roomId)).size !== 121 ||
+    new Set(items.map((item) => item.roomNumber)).size !== 121
+  ) return failed();
+  return {
+    runId: uuid(operation.runId),
+    leaseFence: integer(operation.leaseFence, 1),
+    items,
+  };
+}
 export class RoomPinSheetSyncWorker {
   readonly #db: RoomPinSheetRpc;
   readonly #provider: RoomPinSheetProvider;
@@ -234,6 +312,223 @@ export class RoomPinSheetSyncWorker {
     );
     return text(value.status, /^[a-z_]{2,40}$/);
   }
+  async #heartbeat(
+    claimId: string,
+    fence: number,
+    result: RoomPinSheetSyncResult,
+    status: "succeeded" | "degraded" | "failed" | "operator_blocked",
+    errorCode: string | null,
+    deadline: number,
+  ): Promise<void> {
+    await this.#rpc(
+      "record_room_pin_sheet_sync_heartbeat",
+      {
+        p_claim_id: claimId,
+        p_lease_fence: fence,
+        p_status: status,
+        p_claimed: result.claimed,
+        p_projected: result.projected,
+        p_already_current: result.alreadyCurrent,
+        p_superseded: result.superseded,
+        p_retrying: result.retrying,
+        p_blocked: result.blocked,
+        p_error_code: errorCode,
+      },
+      deadline,
+    );
+  }
+  async #runFullResync(
+    operation: FullResyncOperation,
+    claimId: string,
+    fence: number,
+    result: RoomPinSheetSyncResult,
+    providerDeadline: number,
+    settleDeadline: number,
+    runDeadline: number,
+  ): Promise<RoomPinSheetSyncResult> {
+    result.claimed = 1;
+    let providerWriteSucceeded = false;
+    try {
+      if (!this.#provider.writeFullBoard) return failed();
+      await this.#rpc(
+        "renew_room_pin_sheet_full_resync",
+        {
+          p_run_id: operation.runId,
+          p_claim_id: claimId,
+          p_lease_fence: fence,
+        },
+        providerDeadline,
+      );
+      if (this.#provider.validateConfiguration) {
+        await this.#provider.validateConfiguration(providerDeadline);
+      }
+      const rows: RoomPinSheetRow[] = [];
+      for (const item of operation.items) {
+        const canonicalPin = item.pinVersion === 0 ? "" : await decryptRoomPin(
+          item.envelope as RoomPinEnvelope,
+          item.roomId,
+          item.roomNumber,
+          item.pinVersion,
+          this.#cryptoConfig,
+        );
+        rows.push({
+          sheetRow: item.sheetRow,
+          roomNumber: item.roomNumber,
+          canonicalPin,
+          pinVersion: item.pinVersion,
+          effectiveAt: new Date(item.effectiveAt).toISOString(),
+          syncStatus: item.syncStatus,
+          reasonCode: item.reasonCode,
+          environment: this.#cryptoConfig.environment,
+        });
+      }
+      // Decryption of the complete 121-room snapshot is bounded but can consume
+      // most of the provider budget. Never create the write marker unless the
+      // provider still has the same minimum start reserve as incremental work.
+      if (this.#remaining(providerDeadline) < PROVIDER_START_RESERVE_MS) {
+        throw new DeadlineError();
+      }
+      const authorization = object(
+        await this.#rpc(
+          "authorize_room_pin_sheet_full_resync_write",
+          {
+            p_run_id: operation.runId,
+            p_claim_id: claimId,
+            p_lease_fence: fence,
+          },
+          providerDeadline,
+        ),
+      );
+      const authorized = text(authorization.status, /^[a-z_]{2,40}$/);
+      if (authorized === "superseded") {
+        result.superseded = 1;
+        await this.#heartbeat(
+          claimId,
+          fence,
+          result,
+          "succeeded",
+          null,
+          runDeadline,
+        );
+        return result;
+      }
+      if (authorized === "operator_blocked") {
+        result.blocked = 1;
+        await this.#heartbeat(
+          claimId,
+          fence,
+          result,
+          "operator_blocked",
+          "SNAPSHOT_STALE",
+          runDeadline,
+        );
+        return result;
+      }
+      if (authorized !== "authorized") return failed();
+      await this.#provider.writeFullBoard(rows, providerDeadline);
+      providerWriteSucceeded = true;
+      const settled = object(
+        await this.#rpc(
+          "settle_room_pin_sheet_full_resync",
+          {
+            p_run_id: operation.runId,
+            p_claim_id: claimId,
+            p_lease_fence: fence,
+            p_outcome: "succeeded",
+            p_reason_code: null,
+          },
+          settleDeadline,
+        ),
+      );
+      if (settled.status === "operator_blocked") {
+        result.blocked = 1;
+        await this.#heartbeat(
+          claimId,
+          fence,
+          result,
+          "operator_blocked",
+          "DB_SETTLE_UNCERTAIN",
+          runDeadline,
+        );
+        return result;
+      }
+      if (settled.status !== "succeeded") return failed();
+      result.projected = 1;
+      await this.#heartbeat(
+        claimId,
+        fence,
+        result,
+        "succeeded",
+        null,
+        runDeadline,
+      );
+      return result;
+    } catch (error) {
+      if (providerWriteSucceeded) {
+        try {
+          const blocked = object(
+            await this.#rpc(
+              "block_room_pin_sheet_full_resync_after_settle_failure",
+              {
+                p_run_id: operation.runId,
+                p_claim_id: claimId,
+                p_lease_fence: fence,
+              },
+              runDeadline,
+            ),
+          );
+          if (blocked.status !== "operator_blocked") return failed();
+          result.blocked = 1;
+          await this.#heartbeat(
+            claimId,
+            fence,
+            result,
+            "operator_blocked",
+            "DB_SETTLE_UNCERTAIN",
+            runDeadline,
+          );
+          return result;
+        } catch {
+          throw error;
+        }
+      }
+      const reason = error instanceof RoomPinSheetProviderError
+        ? error.reason
+        : error instanceof RoomPinCryptoError
+        ? "PROVIDER_CONFIGURATION_ERROR"
+        : error instanceof DeadlineError
+        ? "PROVIDER_UNAVAILABLE"
+        : "PROVIDER_RESPONSE_INVALID";
+      const retryable = reason === "RATE_LIMITED" ||
+        reason === "PROVIDER_UNAVAILABLE";
+      const settled = object(
+        await this.#rpc(
+          "settle_room_pin_sheet_full_resync",
+          {
+            p_run_id: operation.runId,
+            p_claim_id: claimId,
+            p_lease_fence: fence,
+            p_outcome: retryable ? "retryable" : "operator_blocked",
+            p_reason_code: reason,
+          },
+          settleDeadline,
+        ),
+      );
+      const status = text(settled.status, /^[a-z_]{2,40}$/);
+      if (status === "operator_blocked") result.blocked = 1;
+      else if (status === "failed" && retryable) result.retrying = 1;
+      else return failed();
+      await this.#heartbeat(
+        claimId,
+        fence,
+        result,
+        result.blocked > 0 ? "operator_blocked" : "degraded",
+        reason,
+        runDeadline,
+      );
+      return result;
+    }
+  }
   async run(): Promise<RoomPinSheetSyncResult> {
     const started = this.#clock(),
       providerDeadline = started + ROOM_PIN_SHEET_SYNC_PROVIDER_MS;
@@ -251,6 +546,50 @@ export class RoomPinSheetSyncWorker {
       };
     let fence = 0;
     try {
+      const approvedTarget = approvedRoomPinSheetTarget(
+        this.#cryptoConfig.environment,
+        this.#cryptoConfig.projectRef,
+      );
+      const targetIdentityDigest = await roomPinSheetTargetDigest(
+        approvedTarget,
+      );
+      const fullClaimed = object(
+        await this.#rpc(
+          "claim_room_pin_sheet_full_resync",
+          {
+            p_claim_id: claimId,
+            p_expected_environment: this.#cryptoConfig.environment,
+            p_expected_project_ref: this.#cryptoConfig.projectRef,
+            p_expected_target_identity_digest: targetIdentityDigest,
+          },
+          providerDeadline,
+        ),
+      );
+      const fullStatus = text(fullClaimed.status, /^[a-z_]{2,40}$/);
+      fence = integer(fullClaimed.leaseFence, 0);
+      if (fullStatus === "busy") {
+        result.busy = true;
+        return result;
+      }
+      if (fullStatus === "operator_blocked") {
+        result.blocked = 1;
+        return result;
+      }
+      if (fullStatus === "claimed") {
+        const operation = fullResyncOperation(fullClaimed.operation);
+        if (operation.leaseFence !== fence || fence < 1) return failed();
+        return await this.#runFullResync(
+          operation,
+          claimId,
+          fence,
+          result,
+          providerDeadline,
+          settleDeadline,
+          runDeadline,
+        );
+      }
+      if (fullStatus !== "empty") return failed();
+      fence = 0;
       const claimed = object(
         await this.#rpc(
           "claim_room_pin_sheet_sync",

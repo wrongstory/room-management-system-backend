@@ -56,6 +56,8 @@ class DeveloperAuditEventType(str, Enum):
     ROOM_PIN_CHANGE_CONFIRMED = "room.pin_change_confirmed"
     ROOM_PIN_CHANGE_PREPARED = "room.pin_change_prepared"
     ROOM_PIN_MISMATCH_RESOLVED = "room.pin_mismatch_resolved"
+    ROOM_PIN_SHEET_FULL_RESYNC_REQUESTED = "room_pin_sheet.full_resync_requested"
+    ROOM_PIN_SHEET_FULL_RESYNC_SUCCEEDED = "room_pin_sheet.full_resync_succeeded"
     ROOM_RECORD_PIN_SYNC = "room.record_pin_sync"
     ROOM_RELEASE_BLOCK = "room.release_block"
     ROOM_REPORT_ISSUE = "room.report_issue"

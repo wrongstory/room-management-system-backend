@@ -108,6 +108,8 @@ class DeveloperAuditEventSummary:
         pin_sync_event_id (UUID | Unset):
         sync_status (str | Unset):
         pin_version (int | Unset):
+        room_count (int | Unset):
+        reconciliation (bool | Unset):
         complaint_id (UUID | Unset):
         source_complaint_decision_id (UUID | Unset):
         compensation_decision_id (UUID | Unset):
@@ -200,6 +202,8 @@ class DeveloperAuditEventSummary:
     pin_sync_event_id: UUID | Unset = UNSET
     sync_status: str | Unset = UNSET
     pin_version: int | Unset = UNSET
+    room_count: int | Unset = UNSET
+    reconciliation: bool | Unset = UNSET
     complaint_id: UUID | Unset = UNSET
     source_complaint_decision_id: UUID | Unset = UNSET
     compensation_decision_id: UUID | Unset = UNSET
@@ -452,6 +456,10 @@ class DeveloperAuditEventSummary:
 
         pin_version = self.pin_version
 
+        room_count = self.room_count
+
+        reconciliation = self.reconciliation
+
         complaint_id: str | Unset = UNSET
         if not isinstance(self.complaint_id, Unset):
             complaint_id = str(self.complaint_id)
@@ -649,6 +657,10 @@ class DeveloperAuditEventSummary:
             field_dict["syncStatus"] = sync_status
         if pin_version is not UNSET:
             field_dict["pinVersion"] = pin_version
+        if room_count is not UNSET:
+            field_dict["roomCount"] = room_count
+        if reconciliation is not UNSET:
+            field_dict["reconciliation"] = reconciliation
         if complaint_id is not UNSET:
             field_dict["complaintId"] = complaint_id
         if source_complaint_decision_id is not UNSET:
@@ -1040,6 +1052,10 @@ class DeveloperAuditEventSummary:
 
         pin_version = d.pop("pinVersion", UNSET)
 
+        room_count = d.pop("roomCount", UNSET)
+
+        reconciliation = d.pop("reconciliation", UNSET)
+
         _complaint_id = d.pop("complaintId", UNSET)
         complaint_id: UUID | Unset
         if isinstance(_complaint_id, Unset):
@@ -1178,6 +1194,8 @@ class DeveloperAuditEventSummary:
             pin_sync_event_id=pin_sync_event_id,
             sync_status=sync_status,
             pin_version=pin_version,
+            room_count=room_count,
+            reconciliation=reconciliation,
             complaint_id=complaint_id,
             source_complaint_decision_id=source_complaint_decision_id,
             compensation_decision_id=compensation_decision_id,

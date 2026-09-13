@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_pin_sheet_sync_worker'
+    'room_pin_sheet_full_resync'
   ) ->> 'currentMigration',
-  'room_pin_sheet_sync_worker',
+  'room_pin_sheet_full_resync',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_pin_sheet_sync_worker'
+    'room_pin_sheet_full_resync'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'

@@ -23,6 +23,10 @@ from room_management_console.generated.api.developer import (
     list_developer_audit_events,
     run_developer_diagnostics,
 )
+from room_management_console.generated.api.rooms import (
+    get_room_pin_sheet_sync_status,
+    request_room_pin_sheet_full_resync,
+)
 from room_management_console.generated.models import (
     DeveloperDatabaseStatusNotificationDelivery,
     DeveloperDatabaseStatusNotificationDeliveryActivation,
@@ -73,8 +77,10 @@ def test_phase_a_openapi_operations_are_generated() -> None:
         list_developer_activity_events.sync_detailed,
         list_developer_audit_events.sync_detailed,
         run_developer_diagnostics.sync_detailed,
+        get_room_pin_sheet_sync_status.sync_detailed,
+        request_room_pin_sheet_full_resync.sync_detailed,
     ]
-    assert len(operations) == 16
+    assert len(operations) == 18
 
 
 def test_password_change_replay_errors_are_generated() -> None:
@@ -184,7 +190,7 @@ def test_photo_upload_and_original_read_are_not_developer_console_capabilities()
     from room_management_console.generated import api
 
     groups = {entry.name for entry in pkgutil.iter_modules(api.__path__)}
-    assert groups == {"accounts", "auth", "developer"}
+    assert groups == {"accounts", "auth", "developer", "rooms"}
     assert {"photos", "attempts", "photo_uploads", "payroll", "notifications"}.isdisjoint(groups)
 
 
@@ -266,6 +272,50 @@ def test_room_pin_audit_contract_is_generated_without_sensitive_material() -> No
     }.isdisjoint(field_names)
 
 
+def test_room_pin_full_resync_contract_is_generated_as_safe_bounded_metadata() -> None:
+    from room_management_console.generated.models import (
+        RoomPinSheetFullResyncAccepted,
+        RoomPinSheetFullResyncRequest,
+        RoomPinSheetOperatorStatus,
+    )
+
+    assert {
+        "room_pin_sheet.full_resync_requested",
+        "room_pin_sheet.full_resync_succeeded",
+    } <= {event.value for event in DeveloperAuditEventType}
+    assert {field.name for field in fields(RoomPinSheetOperatorStatus)} == {
+        "pending",
+        "failed",
+        "operator_blocked",
+        "oldest_pending_at",
+        "last_success_at",
+        "last_error_code",
+        "version",
+        "checked_at",
+    }
+    assert {field.name for field in fields(RoomPinSheetFullResyncRequest)} == {
+        "expected_version",
+    }
+    assert {field.name for field in fields(RoomPinSheetFullResyncAccepted)} == {
+        "status",
+        "room_count",
+        "version",
+    }
+    summary_fields = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {"room_count", "reconciliation", "status"} <= summary_fields
+    assert {
+        "request_hash",
+        "target_identity_digest",
+        "spreadsheet_id",
+        "tab",
+        "credential",
+        "token",
+        "pin_digits",
+        "ciphertext",
+        "envelope",
+    }.isdisjoint(summary_fields)
+
+
 def test_room_pin_error_codes_are_generated() -> None:
     from room_management_console.generated.models.error_code import ErrorCode
 
@@ -287,6 +337,14 @@ def test_room_pin_error_codes_are_generated() -> None:
         "ROOM_PIN_UNCONFIGURED",
         "PIN_ACCESS_LEASE_REQUIRED",
         "PIN_ACCESS_REQUIRED",
+        "ROOM_PIN_SHEET_OPERATOR_REQUIRED",
+        "ROOM_PIN_SHEET_NOT_CONFIGURED",
+        "ROOM_PIN_SHEET_OPERATION_FAILED",
+        "ROOM_PIN_SHEET_RESPONSE_TOO_LARGE",
+        "ROOM_PIN_SHEET_FULL_RESYNC_STALE",
+        "ROOM_PIN_SHEET_WORKER_BUSY",
+        "ROOM_PIN_SHEET_FULL_RESYNC_PENDING",
+        "ROOM_PIN_SHEET_ROOM_MASTER_INVALID",
     }
     assert expected <= {code.value for code in ErrorCode}
 
@@ -342,11 +400,11 @@ def test_attempt_lifecycle_audit_contract_preserves_only_safe_generated_fields()
         assert DeveloperAuditEventSummary.from_dict(expired_summary).to_dict() == expired_summary
 
 
-def test_phase_a_generated_client_contains_only_sixteen_authorized_operations() -> None:
+def test_generated_client_contains_only_eighteen_authorized_operations() -> None:
     from room_management_console.generated import api
 
     generated_groups = {module.name for module in pkgutil.iter_modules(api.__path__)}
-    assert generated_groups == {"auth", "accounts", "developer"}
+    assert generated_groups == {"auth", "accounts", "developer", "rooms"}
     operation_names = set()
     for group in generated_groups:
         group_module = import_module(f"{api.__name__}.{group}")
@@ -370,6 +428,8 @@ def test_phase_a_generated_client_contains_only_sixteen_authorized_operations() 
         "developer.list_developer_activity_events",
         "developer.list_developer_audit_events",
         "developer.run_developer_diagnostics",
+        "rooms.get_room_pin_sheet_sync_status",
+        "rooms.request_room_pin_sheet_full_resync",
     }
 
 

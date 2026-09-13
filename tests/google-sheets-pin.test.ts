@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { assertApprovedRoomPinSheetTarget, GoogleSheetsPinProvider, LOCAL_ROOM_PIN_SHEET_TARGET, ROOM_PIN_SHEET_HEADERS, RoomPinSheetProviderError, type RoomPinSheetRow } from '../src/modules/rooms/google-sheets-pin.js';
+import { approvedRoomPinSheetTarget, assertApprovedRoomPinSheetTarget, GoogleSheetsPinProvider, LOCAL_ROOM_PIN_SHEET_TARGET, ROOM_PIN_SHEET_HEADERS, RoomPinSheetProviderError, roomPinSheetTargetDigest, type RoomPinSheetRow } from '../src/modules/rooms/google-sheets-pin.js';
 
 const encode = (value: Uint8Array): string => { let raw = ''; for (const part of value) raw += String.fromCharCode(part); return btoa(raw); };
 async function privatePem(): Promise<string> {
@@ -19,7 +19,11 @@ async function harness(sheetCells: unknown[] | unknown[][] = [], writeStatus = 2
     const url = new URL(String(input)); calls.push({ url, init }); expect(init.redirect).toBe('error');
     if (url.hostname === 'oauth2.googleapis.com') return Response.json({ access_token: 'synthetic_access_token_long_enough', expires_in: 3600, token_type: 'Bearer' });
     expect(url.hostname).toBe('sheets.googleapis.com'); expect(new Headers(init.headers).get('authorization')).toBe('Bearer synthetic_access_token_long_enough');
-    if (init.method === 'POST') return writeStatus === 200 ? Response.json({ totalUpdatedRows: 2 }) : new Response(null, { status: writeStatus });
+    if (init.method === 'POST') {
+      const payload = JSON.parse(String(init.body)) as { data?: Array<{ range?: string }> };
+      const fullBoard = payload.data?.some(item => item.range?.includes('A2:H122')) ?? false;
+      return writeStatus === 200 ? Response.json({ totalUpdatedRows: fullBoard ? 122 : 2 }) : new Response(null, { status: writeStatus });
+    }
     const board = sheetCells.length && Array.isArray(sheetCells[0]) ? sheetCells : sheetCells.length ? [sheetCells] : [];
     return Response.json({ valueRanges: [{ values: [[...ROOM_PIN_SHEET_HEADERS]] }, { values: board }] });
   };
@@ -32,6 +36,11 @@ describe('Google Sheets PIN projection adapter', () => {
     expect(() => assertApprovedRoomPinSheetTarget({ ...target, environment: 'production', projectRef: 'prod', spreadsheetId: 'same-looking-hosted-id-00000001' })).toThrowError(new RoomPinSheetProviderError('PROVIDER_CONFIGURATION_ERROR'));
     expect(() => assertApprovedRoomPinSheetTarget({ ...target, projectRef: '127.0.0.1' })).toThrowError(new RoomPinSheetProviderError('PROVIDER_CONFIGURATION_ERROR'));
     expect(() => assertApprovedRoomPinSheetTarget(target)).not.toThrow();
+  });
+  it('derives one stable source-approved target marker and rejects aliases', async () => {
+    expect(approvedRoomPinSheetTarget('local', 'local')).toEqual(target);
+    await expect(roomPinSheetTargetDigest(target)).resolves.toMatch(/^[0-9a-f]{64}$/);
+    await expect(roomPinSheetTargetDigest({ ...target, tab: 'alias' })).rejects.toMatchObject({ reason: 'PROVIDER_CONFIGURATION_ERROR' });
   });
   it('uses a signed service-account assertion with only the Sheets scope', async () => {
     const value = await harness([]); await value.provider.inspect(row, Date.now() + 5000);
@@ -99,6 +108,31 @@ describe('Google Sheets PIN projection adapter', () => {
     const body = JSON.parse(String(write?.init.body));
     expect(body).toMatchObject({ valueInputOption: 'RAW', includeValuesInResponse: false });
     expect(body.data[1].range).toContain('A2:H2'); expect(body.data[1].values[0]).toContain(row.canonicalPin);
+  });
+  it('repairs the exact 121-room board from DB rows without reading Sheet values', async () => {
+    const { provider, calls } = await harness([['tampered', 'sheet-input-is-ignored']]);
+    const rows = Array.from({ length: 121 }, (_, index): RoomPinSheetRow => ({
+      sheetRow: index + 2,
+      roomNumber: String(1001 + index),
+      canonicalPin: index === 120 ? '' : `${1001 + index}-1234`,
+      pinVersion: index === 120 ? 0 : 1,
+      effectiveAt: '2026-09-13T00:00:00.000Z',
+      syncStatus: index === 120 ? 'unconfigured' : 'verified',
+      reasonCode: 'FULL_RESYNC_REPAIR',
+      environment: 'local'
+    }));
+    await provider.writeFullBoard(rows, Date.now() + 5000);
+    expect(calls.some(call => call.init.method === 'GET')).toBe(false);
+    const write = calls.find(call => call.init.method === 'POST' && call.url.hostname === 'sheets.googleapis.com');
+    const body = JSON.parse(String(write?.init.body));
+    expect(body.data).toHaveLength(2);
+    expect(body.data[1].range).toContain('A2:H122');
+    expect(body.data[1].values).toHaveLength(121);
+    expect(body.data[1].values[0][0]).toBe('1001');
+    expect(body.data[1].values[120].slice(0, 4)).toEqual(['1121', '', '0', 'unconfigured']);
+    const invalid = await harness([]);
+    await expect(invalid.provider.writeFullBoard(rows.slice(0, 120), Date.now() + 5000)).rejects.toMatchObject({ reason: 'PROVIDER_CONFIGURATION_ERROR' });
+    expect(invalid.calls).toHaveLength(0);
   });
   it('blocks a sheet-ahead version and wrong room/environment identity', async () => {
     for (const cells of [

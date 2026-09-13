@@ -4,7 +4,7 @@
 Python 3.12+ 데스크톱 도구다. Phase A에는 DB 연결, SQL 실행기, service-role key가 없다.
 
 #84 사진 업로드/슬롯/원본4 operations는 business maid/admin 권한이며 developer 콘솔에 추가하지 않는다.
-filtered OpenAPI와 생성 client는 auth/accounts/developer16 operations만 유지한다. 사진 업로드 감사는 기존 `photo.upload_accepted` safe summary로 확인하며 Drive ID/OAuth/원본 내용을 노출하지 않는다.
+filtered OpenAPI와 생성 client는 auth/accounts/developer 및 #137의 room PIN Sheet 안전 조회·전체 복구를 합친 18 operations만 유지한다. 사진 업로드 감사는 기존 `photo.upload_accepted` safe summary로 확인하며 Drive ID/OAuth/원본 내용을 노출하지 않는다. PIN/ciphertext/envelope, Google raw response, credential/token, spreadsheet/tab 식별자는 콘솔 계약에 포함하지 않는다.
 주급 API도 business admin/maid 업무 capability이므로 이 developer 콘솔의 filtered client와 GUI에는 넣지 않는다. 대신 전체 source OpenAPI를 임시 디렉터리에 Python client로 생성·컴파일하는 CI smoke로 `GET /v1/payroll`과 `POST /v1/payroll/start`의 codegen 호환성을 검증하며, 생성 결과는 운영 콘솔 artifact나 Git에 포함하지 않는다.
 runtime-status는 Drive CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN/ROOT_FOLDER_ID와 PHOTO_PURGE_INVOKE_SECRET의 configured boolean만 표시한다. database-status의 photoPurge는 최대 1,000건으로 제한한 backlog와 마지막 heartbeat의 안전한 집계만 제공한다. false나 누락 heartbeat가 있으면 운영 provider 준비 미완료이며, 모두 정상이어도 실제 Google 인증/hosted purge smoke 통과를 의미하지 않는다. 자격증명·Drive locator·claim digest를 입력하거나 출력하는 콘솔 기능은 없다.
 
@@ -48,6 +48,11 @@ uv run --python 3.12 python scripts/generate_client.py
 
 생성 코드는 직접 수정하지 않는다. 인증 갱신·멱등성·redaction은 생성 코드 바깥의
 `api_client.py`가 담당한다.
+
+#137 source는 developer/admin이 안전한 room PIN Sheet 동기화 상태를 조회하고 DB 정본의
+121실 snapshot으로 전체 복구를 요청하는 2 operations를 추가한다. 요청은 strict
+`{expectedVersion}` body와 `Idempotency-Key`를 사용하며, source-controlled exact target과
+일치하지 않으면 fail-closed 한다. Sheet에서 DB로 쓰는 역방향 기능은 없다.
 
 #27 source는 시작 전 변경/해제/취소 요청/결정 감사 event 4종과 safe summary를 생성 모델에
 추가한다. 상세 사유·request hash·원본 state는 포함하지 않으며, 콘솔에 admin 업무 변경

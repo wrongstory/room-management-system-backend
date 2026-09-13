@@ -1,10 +1,10 @@
-# 객실 PIN Phase A/B 운영 인계
+# 객실 PIN Phase A/B/C 운영 인계
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A와 Issue #136 Phase B source 계약을 설명한다. 통합 기준은 `dev@d9b6ce90fa8f924a4a62cea6566fc8e7754f054b`, 49 migrations / 102 paths / 109 operations이고 Phase B candidate는 50번째 append-only migration을 추가하되 공개 OpenAPI 수는 유지한다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B와 Issue #137 Phase C source 계약을 설명한다. 통합 기준은 `dev@3e54e3ebfe09ea7ef206c4997cc0a907e010e431`, 50 migrations / 102 paths / 109 operations이고 Phase C candidate는 51번째 append-only migration과 공개 2 operations를 추가해 104 paths / 111 operations가 된다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
 
-Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. full resync·운영 승인 target mapping·Google hosted ACL/Cron은 #137 및 release gate로 남긴다.
+Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다.
 
 ## Phase B Google Sheets projection
 
@@ -14,9 +14,33 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 - 한 실행은 최대 10개 room identity, provider 시작 33초, DB settle 39초, heartbeat 포함 전체 45초 absolute deadline을 공유한다. 명시적 HTTP 429/5xx는 bounded backoff retry이고, write 시작 뒤 network timeout/abort는 결과 불확실이므로 global operator-blocked다.
 - claim/authorize/settle은 global singleton lease와 증가 fence를 사용한다. 새 PIN version은 과거 pending outbox를 supersede하며 mid-write 변경은 stale settle 후 다음 current outbox로 수렴한다. 불확실 write와 retry 소진은 자동 성공 처리하지 않고 reconciliation 전까지 멈춘다.
 - Google OAuth는 별도 service account, fixed token endpoint, `https://www.googleapis.com/auth/spreadsheets` 단일 scope와 RS256 assertion만 쓴다. Sheet endpoint·private key·OAuth assertion/access token·PIN/envelope·provider raw error는 로그, heartbeat, developer projection, audit에 남기지 않는다.
-- source-controlled approved target에는 현재 local/test synthetic mapping만 있다. 승인되지 않은 hosted environment/projectRef/spreadsheet/tab은 PIN 복호화와 OAuth token exchange 전에 fail-closed한다. production mapping은 #137/release 승인 PR에서만 추가한다.
+- source-controlled approved target에는 현재 local/test synthetic mapping만 있다. 승인되지 않은 hosted environment/projectRef/spreadsheet/tab은 PIN 복호화와 OAuth token exchange 전에 fail-closed한다. production mapping은 release 승인 PR에서만 추가한다.
 - local worker adapter 테스트는 `RUNTIME_ENVIRONMENT=local`, `SUPABASE_PROJECT_REF=local`, synthetic spreadsheet ID, exact `객실_PIN_현황` tab을 함께 써야 한다. 공용 `.env.example`의 빈 project ref를 그대로 두고 worker를 실행할 수 없으며, 다른 local API의 target 계약을 바꾸려고 전역 예시를 임의 수정하지 않는다.
 - developer database status는 secret configured boolean, target approved boolean, safe status/count/time/stable error만 제공한다. raw outbox ID, room ID, PIN, Sheet cell/payload, provider credential은 제공하지 않는다.
+
+## Phase C status와 full resync
+
+- `GET /v1/room-pin-sheet-sync/status`는 active developer/admin, 변경 완료 비밀번호와 live session을 요구한다. 응답은 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`, `version`, `checkedAt`만 포함한다. local credential 또는 approved target이 현재 invalid이면 과거 성공 heartbeat가 있어도 healthy로 해석하지 않는다.
+- `POST /v1/room-pin-sheet-sync/full-resync`는 strict `{expectedVersion}` body, `Idempotency-Key`, status에서 읽은 `version` CAS를 요구한다. 서버만 room/PIN snapshot, target identity와 request hash를 만든다. 같은 actor/key/hash는 replay하고 retryable failed run을 포함한 logical active run이 있으면 다른 key는 충돌한다.
+- snapshot은 요청 transaction에서 정확한 121실을 `room_number,id` 순으로 row 2..122에 고정한다. worker는 PIN current revision reference만 claim 시 복호화하고 `A1:H122`를 한 번에 DB 값으로 재작성한다. Sheet의 삭제·정렬·변조 값은 입력으로 채택하지 않으며 Sheet→DB 경로는 없다.
+- environment/project/spreadsheet/tab의 canonical SHA-256 marker를 run에 immutable하게 저장한다. claim 시 source mapping의 marker와 다르면 credential 검증, OAuth와 Sheets 호출 전에 operator-blocked한다. raw spreadsheet/tab, request hash, PIN, envelope, assertion/token, Google response는 공개 상태·감사에 없다.
+- incremental worker와 full writer는 같은 singleton lease/fence를 사용한다. authorize 직전에 121실 room identity/number/current pin version을 다시 확인해 stale snapshot에는 provider permit을 주지 않는다. full write 성공 뒤에는 snapshot room에 속하고 `created_at <= provider_write_started_at`인 pending/processing/failed outbox만 supersede한다. 따라서 fence가 이미 지워진 `DB_SETTLE_UNCERTAIN` 과거 작업도 수렴하지만 authorize 이후 생긴 새 PIN outbox는 보존된다.
+- full write 성공 뒤 DB settle 실패는 `DB_SETTLE_UNCERTAIN`으로 operator-blocked하고 같은 run을 자동 재-write하지 않는다. lease expiry reconciliation은 provider marker를 근거로 uncertain 상태에 수렴한다. 명시적 operator full resync만 새 snapshot과 새 fence로 복구한다.
+- 일반 run은 immutable self-FK recovery root를 만들고, recovery는 exact singleton fence로 잠근 직전 blocked run의 기존 root만 상속한다. root는 claim/permit CAS를 대체하지 않는다. target mismatch, retry 8회 소진, provider block, `DB_SETTLE_UNCERTAIN`, marker lease expiry, recovery `SNAPSHOT_STALE`도 root를 보존한다.
+- 성공 settle은 같은 root이면서 recovery 요청보다 과거인 `operator_blocked` run만 한 번에 최대 32건 supersede한다. 32건을 초과하거나 부분 정리가 감지되면 성공 audit/healthy를 만들지 않고 현재 marker를 보존한 `DB_SETTLE_UNCERTAIN` block으로 전환한다. 같은 run은 재claim하지 않으며 다음 명시 recovery가 남은 bounded prefix를 처리한다.
+- developer audit은 `room_pin_sheet.full_resync_requested/succeeded`를 허용하되 summary는 `status`, `roomCount`, 요청 시 `reconciliation`만 포함한다.
+
+### Production 활성화 체크리스트
+
+1. 승인된 release source에 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
+2. 기존 production DB backup과 51번째 migration 적용 순서를 확인한다.
+3. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
+4. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.
+5. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포한다.
+6. read-only status, 빈 큐 heartbeat, 121실 full resync, 삭제·정렬·변조 repair, duplicate-write 0을 hosted에서 확인한다.
+7. Cron/Vault를 마지막에 활성화하고 연속 heartbeat와 operator-blocked alert를 관찰한다.
+
+서비스 계정 key 회전은 새 key 배치→local 구조 검증→OAuth/Sheets smoke→이전 key 폐기 순서다. PC/credential 유출 또는 ACL 오배치 시 Cron과 Function 호출을 중단하고 key를 즉시 폐기하며, target ACL을 회수하고 status/operator-blocked evidence와 audit을 보존한 채 승인된 새 credential로만 복구한다.
 
 ## Secret과 암호화
 
@@ -60,4 +84,4 @@ DB의 `room_pin_sync_events`와 private sheet outbox에는 room/version/status/s
 
 ## Rollback
 
-Source rollback은 애플리케이션과 해당 append-only migration을 함께 다루는 release 절차에서만 검토한다. 이미 encrypted revision/physical change가 존재하면 schema를 먼저 제거하지 않는다. 배포 중단 시에는 새 PIN endpoint 트래픽을 차단하고 mismatch 객실을 실제 re-entry/rollback 절차로 해소한 뒤 keyring과 DB backup을 보존한다. Phase B에서 write 결과가 불확실하면 Sheet와 DB current version/PIN을 사람이 대조한 후에만 service-owned reconciliation으로 재개하며, 자동 full resync나 추정 성공 처리는 하지 않는다.
+Source rollback은 애플리케이션과 해당 append-only migration을 함께 다루는 release 절차에서만 검토한다. 이미 encrypted revision/physical change가 존재하면 schema를 먼저 제거하지 않는다. 배포 중단 시에는 새 PIN endpoint 트래픽을 차단하고 mismatch 객실을 실제 re-entry/rollback 절차로 해소한 뒤 keyring과 DB backup을 보존한다. write 결과가 불확실하면 자동 재-write하지 않고 Phase C operator full resync로 새 121실 snapshot을 승인해 복구한다. full resync 자체의 provider 성공 뒤 settle이 불확실하면 그 run의 marker/evidence를 보존하고 또 쓰지 않는다.
