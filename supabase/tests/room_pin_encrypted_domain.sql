@@ -31,11 +31,11 @@ insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_c
 values(pg_temp.room_id(1),'verified',1,'LEGACY_VERIFIED_FIXTURE',pg_temp.pid(1),clock_timestamp());
 select is(private.current_pin_sync_status(pg_temp.room_id(1)),'unconfigured',
   'legacy verified event without encrypted current pointer is never ready');
-select is((select allocation_ready from public.get_room_operational_projection(pg_temp.pid(1),pg_temp.room_id(1))),false,
-  'legacy sync-only room is blocked by the authoritative allocation readiness projection');
+select is((select allocation_ready from public.get_room_operational_projection(pg_temp.pid(1),pg_temp.room_id(1))),true,
+  'legacy sync-only room remains reservation-ready while PIN is an explicit warning');
 select ok(array_position((select reason_codes
-  from public.get_room_operational_projection(pg_temp.pid(1),pg_temp.room_id(1))),'DATA_UNCONFIRMED') is not null,
-  'legacy sync-only room reports the stable unconfigured readiness reason');
+  from public.get_room_operational_projection(pg_temp.pid(1),pg_temp.room_id(1))),'DATA_UNCONFIRMED') is null,
+  'legacy sync-only room does not conflate PIN warning with room master confirmation');
 
 create temp table pin_results(label text primary key,value jsonb);
 insert into pin_results values('initial',public.prepare_room_pin_change(
@@ -217,7 +217,7 @@ insert into pin_results values('maid-change',public.prepare_room_pin_change(
   pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),1,pg_temp.room_number(1),pg_temp.pid(401),pg_temp.pid(501),pg_temp.pid(601),
   'MAID_CLEANING_CHANGE',1::smallint,'Y2FuZGlkYXRlMg==','AgICAgICAgICAgIC','AAAAAAAAAAAAAAAAAAAAAA==',
   'v1','test','local','pin-maid-0001',repeat('e',64)));
-select is(private.current_pin_sync_status(pg_temp.room_id(1)),'mismatch','maid prepare blocks reveal and readiness immediately');
+select is(private.current_pin_sync_status(pg_temp.room_id(1)),'mismatch','maid prepare blocks reveal and check-in readiness immediately');
 select throws_ok($$select public.begin_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
   pg_temp.pid(401),pg_temp.pid(501),pg_temp.pid(601),pg_temp.pid(702))$$,
   '55000','ROOM_PIN_MISMATCH_UNRESOLVED','unresolved physical mismatch blocks PIN reveal');

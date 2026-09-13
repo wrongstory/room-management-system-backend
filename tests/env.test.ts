@@ -170,4 +170,12 @@ describe('environment contract', () => {
       {ROOM_PIN_KEYRING_JSON:JSON.stringify({'pin-old-v1':localEnv.RESERVATION_PII_KEY_BASE64})}
     ]) expect(()=>loadEnv({...localEnv,...override})).toThrow();
   });
+
+  it('keeps initial PIN bootstrap optional but validates configured digits', () => {
+    expect(loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: '' }).ROOM_PIN_INITIAL_DIGITS).toBeUndefined();
+    expect(loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: '0'.repeat(4) }).ROOM_PIN_INITIAL_DIGITS).toBe('0'.repeat(4));
+    for (const value of ['123', '123456789', '12ab']) {
+      expect(() => loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: value })).toThrow();
+    }
+  });
 });

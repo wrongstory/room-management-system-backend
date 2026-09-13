@@ -1,6 +1,6 @@
 Project room_management_system {
   database_type: 'PostgreSQL'
-  Note: 'ERD review draft v4. P0/account baseline is on main; issue #1 room/reservation additions are represented as a proposed append-only migration.'
+  Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers and never stores plaintext in this schema.'
 }
 
 Enum app_role {

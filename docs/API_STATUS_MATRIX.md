@@ -68,12 +68,12 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). 개발 통합 기준 갱신: **2026-09-12 KST**. 이번 개발에서 운영을 재검증하거나 변경하지 않았다.
+production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). 개발 통합 기준 갱신: **2026-09-13 KST**. 이번 개발에서 운영을 재검증하거나 변경하지 않았다.
 
 - 현재 GitHub 운영 릴리즈 정본: `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - production Edge 배포 bundle source: diagnostics zero-byte hosted 호환 hotfix PR #64 / `main@cd635b116f451a39481f496f2bd368776385a409`
-- 이 문서 갱신의 integration base: `dev@d9b6ce90fa8f924a4a62cea6566fc8e7754f054b`; base는 **49 migrations / 102 paths / 109 operations**이며 #131 Phase A source/dev가 완료됐다. #136 Phase B candidate는 50번째 append-only migration과 private Sheet projection worker를 추가하고 공개 OpenAPI 수는 유지한다. PR required CI와 독립 exact-head QA·`dev` 병합은 아직 완료되지 않았다. Issue #112는 hosted 활성화 완료까지 OPEN이며 main/recovery/production은 변경하지 않았다.
+- 이 문서 갱신의 integration base: `dev@3e54e3ebfe09ea7ef206c4997cc0a907e010e431`; base는 **50 migrations / 102 paths / 109 operations**이며 #131 Phase A와 #136 Phase B worker source/dev가 완료됐다. #140 candidate는 51번째 append-only migration과 PIN bootstrap API를 추가해 **103 paths / 110 operations**가 된다. #140 PR required CI·독립 exact-head QA·`dev` 병합은 아직 완료되지 않았다. Issue #112/#137 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - 개발 통합 기능 기준: #25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 전체 제출·폭탄방 신고/선판정·관리자 검수·반려 재청소의 Fastify/Edge source와 OpenAPI를 포함한다. production 배포·현재 사용은 아직 ❌이다.
@@ -81,7 +81,8 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - #96은 PR #97로 source/dev 병합 완료했다. bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 포함한 개발 통합 계약은 **36 migrations / 77 paths / 83 operations**이다. Python developer 콘솔 16 operations는 유지하며 production에는 아직 승격하지 않았다.
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #131은 #69 승인 PIN 계약의 Phase A source/dev 정본이다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. private immutable revision/current pointer, physical-change mismatch lifecycle, authoritative maid access lease, 30초 이하 reveal과 safe sync/audit/outbox를 포함하며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
-- 현재 critical path는 **#136 Sheet projection worker source gate → #137 full resync/운영 activation**이다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
+- #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
+- 현재 critical path는 **#140 source gate → #137 full resync/운영 activation → release/main 승격**이다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 - 운영 migration: **19건** (`developer_operations_projections`, `actor_activity_audit_contract` 포함)
 - 운영 Edge Functions readback:
   - `api` version 9 — ACTIVE, 배포 source는 위 `main@cd635b1` bundle 기준
@@ -614,7 +615,8 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | VAPID/provider HTTP source 계약 | source/dev 완료 | #10 / #112 / PR #119 | 45 migrations / 98 paths / 105 operations; 승인 head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`, `dev@dfc98b1474f9f890851d49bd904869181d0d7880`; Issue #112 OPEN, Cron/Vault/production hosted 활성화 미완료 |
 | [x] | 배정 변경·취소 및 청소 완료 알림 coverage | source/dev 완료 | #128 | base 48 migrations / 98 paths / 105 operations; informational push/action 분리, active-admin completion fanout, exact notified replan/revocation provenance; production 미승격·미사용 |
 | [x] | encrypted room PIN Phase A | source/dev 완료 | #69 / #131 | 49 migrations / 102 paths / 109 operations; physical change/reveal/authoritative access lease; production 미승격 |
-| [ ] | Google Sheets PIN projection worker Phase B | source candidate | #69 / #136 | candidate 50 migrations, 공개 102 paths / 109 operations 유지; singleton lease/fence, room-number keyed one-way projection, retry/operator-blocked; PR CI·독립 QA·dev 병합 전, hosted target/Cron/full resync 미포함 |
+| [x] | Google Sheets PIN projection worker Phase B | source/dev 완료 | #69 / #136 | 50 migrations, 공개 102 paths / 109 operations 유지; singleton lease/fence, room-number keyed one-way projection, retry/operator-blocked; hosted target/Cron/full resync 미포함 |
+| [ ] | 초기 PIN bootstrap·예약 readiness 분리 | source candidate | #140 | candidate 51 migrations / 103 paths / 110 operations; secret 기반 최대 25건 초기화, 예약은 PIN 경고 비차단·실제 체크인은 verified-only; production 미승격 |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
 
@@ -1082,7 +1084,18 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `dev@1eca96393bb353124c099f6f3923298df20d9bb5` 병합
 - [ ] release/main 및 production Edge 승격 — 이번 feature PR 범위 밖
 
-현재 critical path는 **#136 exact-head source gate → #137 PIN Sheets full resync/운영 activation**이다.
+### #140 초기 PIN bootstrap·예약 readiness 분리 — source candidate
+
+- [x] 예약 생성·변경·객실 projection에서 `unconfigured`/`mismatch` PIN 경고를 allocation blocker와 분리
+- [x] actual check-in preparation context와 reveal/change의 verified-only fail-closed 유지
+- [x] active admin 전용 `POST /v1/rooms/pins/bootstrap`, 최대 25건, idempotent receipt, 기존 current/mismatch 비덮어쓰기
+- [x] 초기 숫자는 `ROOM_PIN_INITIAL_DIGITS` deployment secret에서만 읽고 DB에는 encrypted envelope만 전달
+- [x] Fastify/Edge/OpenAPI 및 frontend handoff 계약 정합화; legacy `pin-sync-events` deprecated
+- [x] fresh local DB reset, 41 SQL files / 2,419 assertions, 전체 concurrency, DB lint, Edge 222 tests·bundle gate PASS
+- [ ] exact-head 독립 QA와 required `application` / `migration` PASS
+- [ ] `dev` 병합 및 별도 release/main·production secret/Edge/migration 승격
+
+현재 critical path는 **#140 exact-head source gate → #137 PIN Sheets full resync/운영 activation → release/main 승격**이다.
 #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

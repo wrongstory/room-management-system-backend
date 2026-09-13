@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 102 &&
+    Object.keys(document.paths).length === 103 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 109,
-    "candidate contract 102/109",
+        ).length === 110,
+    "candidate contract 103/110",
   );
 });
 
@@ -997,20 +997,37 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
 Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts", async () => {
   const doc = await openApiResponse({}).json() as typeof openApiDocument;
   const paths = [
+    "/v1/rooms/pins/bootstrap",
     "/v1/rooms/{roomId}/pin-changes/prepare",
     "/v1/rooms/{roomId}/pin-changes/{leaseId}/confirm",
     "/v1/rooms/{roomId}/pin-changes/{leaseId}/rollback",
     "/v1/rooms/{roomId}/pin/reveal",
   ];
-  assert(paths.every((path) => path in doc.paths), "four exact PIN paths");
+  assert(paths.every((path) => path in doc.paths), "five exact PIN paths");
   assert(!("/v1/rooms/{roomId}/pin" in doc.paths), "no reveal alias");
 
   const prepare = doc.components.schemas.RoomPinChangePrepareRequest;
+  const bootstrap = doc.components.schemas.RoomPinBootstrapResult;
   assert(
     prepare.properties.pinDigits.writeOnly === true &&
       prepare.properties.pinDigits.pattern === "^[0-9]{4,8}$" &&
       "accessLeaseId" in prepare.properties,
     "request retains write-only digits and maid lease binding",
+  );
+  assert(
+    bootstrap.properties.initializedRoomIds.maxItems === 25 &&
+      bootstrap.properties.remainingCount.maximum === 121 &&
+      !Object.hasOwn(bootstrap.properties, "credential") &&
+      !Object.hasOwn(bootstrap.properties, "ciphertext"),
+    "bootstrap is bounded and returns only safe progress",
+  );
+  assert(
+    !(doc.components.schemas.RoomReasonCode.enum as readonly string[]).includes(
+      "PIN_MISMATCH",
+    ) &&
+      doc.components.schemas.RoomProjection.properties.pinSyncStatus.description
+        .includes("예약 등록을 막지 않습니다"),
+    "PIN warning is separate from reservation allocation blockers",
   );
   const reveal = doc.components.schemas.RoomPinReveal;
   const change = doc.components.schemas.RoomPinChangeResult;

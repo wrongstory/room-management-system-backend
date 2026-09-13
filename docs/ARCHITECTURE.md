@@ -23,11 +23,11 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@d9b6ce90fa8f924a4a62cea6566fc8e7754f054b`이며 base snapshot은 49 migrations / OpenAPI 102 paths / 109 operations다. #131 Phase A는 source/dev 완료 상태다. #136 Phase B candidate는 기존 49개 blob을 수정하지 않는 50번째 append-only migration과 private worker Edge Function을 추가하며 공개 OpenAPI 수는 유지한다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@3e54e3ebfe09ea7ef206c4997cc0a907e010e431`이며 base snapshot은 50 migrations / OpenAPI 102 paths / 109 operations다. #131 Phase A와 #136 Phase B worker source는 dev에 통합됐다. #140 candidate는 기존 migration을 수정하지 않는 51번째 append-only migration과 PIN bootstrap API를 추가해 103 paths / 110 operations가 된다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
 
-### #131 encrypted room PIN Phase A — source candidate
+### #131 encrypted room PIN Phase A — source/dev 완료
 
 Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinDigits`는 선행 0을 보존하는 4~8자리 문자열이고, 서버가 global lifecycle lock과 room lock 아래 다시 읽은 `room_number` snapshot으로만 canonical credential을 만든다. envelope마다 12-byte random nonce를 생성하며 private change-lease 원장의 `(key_version, nonce)` unique가 생성 envelope 재사용을 fail-closed한다. immutable revision에는 key가 아닌 bounded AAD environment/projectRef를 저장해 recovery restore가 저장 당시 context로 복호화할 수 있다.
 
@@ -35,13 +35,19 @@ Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinD
 
 private revision/current/change/reveal/outbox tables는 FORCE RLS와 explicit revoke로 Data API를 닫는다. Phase-B outbox와 public sync event에는 room/version/status/source-controlled reason만 있고 envelope/PIN/AAD bytes는 없다. 모든 PIN RPC는 `reservation-command` global advisory lock을 가장 먼저 획득해 cancel/handover/complete와 동일한 lock graph를 사용한다. Google provider, worker, full resync, Cron/Vault/production secret 설정은 이 Phase A에 포함하지 않는다.
 
-### #136 Google Sheets PIN projection worker — source candidate
+### #136 Google Sheets PIN projection worker — source/dev 완료
 
 Phase B worker는 outbox의 current room/version만 global singleton lease/fence 아래 claim하고, 그때만 private encrypted revision context를 service-role RPC로 받는다. 런타임은 승인된 environment/projectRef/spreadsheet/tab mapping을 PIN 복호화와 Google OAuth 전에 확인한다. hosted mapping은 의도적으로 비어 있어 release 승인 전에는 fail-closed한다.
 
 Google Sheets에서는 `room_number`를 business identity로 하여 최대 121행을 bounded read한다. 행 이동은 실제 room-number 행을 갱신하고, 중복 identity·상위 Sheet version·다른 객실이 차지한 deterministic slot은 덮어쓰지 않는다. equal version도 canonical PIN과 safe marker가 다르면 DB 정본으로 repair한다. provider 시작 33초, settle 39초, 전체 45초의 하나의 absolute deadline을 DB/OAuth/Sheets response stream에 전달한다. HTTP 429/5xx는 bounded retry이고 write 시작 후 transport 불확실, retry 소진, schema/ACL/config 오류는 operator reconciliation 전 global block이다.
 
 private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 직접 접근을 막는다. developer database projection은 configured/approved boolean, safe counters/timestamp/stable error만 노출한다. full resync와 운영 mapping/ACL/Cron은 #137 범위다.
+
+### #140 초기 PIN bootstrap과 예약 readiness 분리 — source candidate
+
+`pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. reveal/change의 기존 current revision·lease 권한 검사도 유지한다.
+
+초기 데이터가 없는 환경에서는 active admin만 `POST /v1/rooms/pins/bootstrap`을 호출한다. 런타임은 secret manager의 `ROOM_PIN_INITIAL_DIGITS`를 읽고 DB가 반환한 최대 25개 후보의 현재 객실번호와 서버 안에서 canonical credential을 조합·AES-GCM 암호화한 뒤 service-role RPC에 envelope만 전달한다. RPC는 global lifecycle lock, sorted room lock, immutable version 1 revision, current pointer, verified sync event, Sheet outbox, safe audit와 command receipt를 한 transaction에 기록한다. current PIN이나 unresolved mismatch가 있으면 덮어쓰지 않는다. 평문 초기 숫자는 source/migration/DB/API/log/audit/notification에 존재하지 않는다.
 
 ### #84/#85 사진 HTTP adapter와 보존 정리 worker — source/dev 완료
 

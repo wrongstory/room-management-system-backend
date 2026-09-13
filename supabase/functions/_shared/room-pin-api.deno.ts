@@ -1,4 +1,5 @@
 import {
+  bootstrapRoomPins,
   finishRoomPinChange,
   prepareRoomPinChange,
   revealRoomPin,
@@ -34,6 +35,7 @@ function configure(): void {
   Deno.env.set("ROOM_PIN_KEY_BASE64", key);
   Deno.env.set("ROOM_PIN_KEY_VERSION", "key-v1");
   Deno.env.set("ROOM_PIN_KEYRING_JSON", "{}");
+  Deno.env.set("ROOM_PIN_INITIAL_DIGITS", "0".repeat(4));
   Deno.env.set("RESERVATION_PII_KEY_BASE64", reservationKey);
   Deno.env.set("RESERVATION_PII_KEYRING_JSON", "{}");
   Deno.env.set("WEB_PUSH_SUBSCRIPTION_KEY_BASE64", webPushKey);
@@ -184,6 +186,76 @@ Deno.test("prepare binds room snapshot and maid access authority without hashing
     !response.includes("0012") && !response.includes("ciphertext") &&
       !response.includes("nonce"),
     "safe prepare response",
+  );
+});
+
+Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN material", async () => {
+  configure();
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        if (name === "get_room_pin_bootstrap_context") {
+          return Promise.resolve({
+            data: {
+              candidates: [{
+                room_id: roomId,
+                room_number: "0101",
+                proposed_pin_version: 1,
+              }],
+              remaining_count: 1,
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({
+          data: {
+            initialized_room_ids: [roomId],
+            skipped_room_ids: [],
+            initialized_count: 1,
+            skipped_count: 0,
+            remaining_count: 0,
+            completed_at: "2026-09-13T00:00:00Z",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const result = await bootstrapRoomPins(
+    command(
+      "/v1/rooms/pins/bootstrap",
+      { limit: 1 },
+      "pin-bootstrap-test-0001",
+    ),
+    clients,
+    actor,
+    sessionId,
+  );
+  assert(
+    calls.map((call) => call.name).join(",") ===
+      "get_room_pin_bootstrap_context,bootstrap_room_pins",
+    "bounded bootstrap RPC order",
+  );
+  const candidate =
+    (calls[1].args.p_candidates as Array<Record<string, unknown>>)[0];
+  assert(
+    typeof candidate.ciphertextBase64 === "string",
+    "runtime sends encrypted material",
+  );
+  assert(
+    !("pinDigits" in candidate) && !("credential" in candidate),
+    "database payload contains no plaintext field",
+  );
+  assert(
+    result.initializedCount === 1 && result.remainingCount === 0,
+    "safe bootstrap result",
+  );
+  assert(
+    !/pinDigits|credential|ciphertext/i.test(JSON.stringify(result)),
+    "response contains no PIN material",
   );
 });
 

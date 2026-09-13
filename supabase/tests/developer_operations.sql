@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_pin_sheet_sync_worker'
+    'pin_bootstrap_reservation_readiness'
   ) ->> 'currentMigration',
-  'room_pin_sheet_sync_worker',
+  'pin_bootstrap_reservation_readiness',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_pin_sheet_sync_worker'
+    'pin_bootstrap_reservation_readiness'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
