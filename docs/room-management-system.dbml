@@ -1,6 +1,6 @@
 Project room_management_system {
   database_type: 'PostgreSQL'
-  Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers and never stores plaintext in this schema.'
+  Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers; a FORCE-RLS cross-flow nonce reservation prevents different AES-GCM encryptions from sharing one key-version/nonce pair.'
 }
 
 Enum app_role {
@@ -431,6 +431,17 @@ Table private.room_pin_change_leases {
 
   indexes { (key_version, nonce) [unique] }
   Note: '#131 prepare is the first envelope ledger and immediately creates mismatch without changing current. Confirm, actual re-entry, or confirmed rollback resolves physical state.'
+}
+
+Table private.room_pin_nonce_reservations {
+  id uuid [pk]
+  key_version text [not null]
+  nonce bytea [not null]
+  envelope_fingerprint bytea [not null]
+  reserved_at timestamptz [not null]
+
+  indexes { (key_version, nonce) [unique] }
+  Note: 'FORCE RLS, no Data API grants, append-only. Shared by regular prepare and bootstrap. Matching prepare-confirm envelope uses one logical reservation; 52-to-53 historical conflicts fail closed without rewriting source ledgers.'
 }
 
 Table private.room_pin_reveal_leases {

@@ -23,13 +23,13 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@45d18f1c12928340a80ef21d58d7edb3d6529ad8`이며 base snapshot은 51 migrations / OpenAPI 104 paths / 111 operations다. #131 Phase A, #136 Phase B, #137 Phase C는 source/dev에 통합됐다. #140 candidate는 기존 migration을 수정하지 않는 52번째 append-only migration과 PIN bootstrap API를 추가해 105 paths / 112 operations가 된다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+이 문서 갱신의 integration base는 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578`이며 base snapshot은 52 migrations / OpenAPI 105 paths / 112 operations다. #131 Phase A, #136 Phase B, #137 Phase C와 #140 bootstrap/readiness는 source/dev에 통합됐다. 현재 #140 보완 candidate는 기존 52 migrations를 수정하지 않는 53번째 append-only nonce reservation migration만 추가하며 공개 API 수를 유지한다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
 
 ### #131 encrypted room PIN Phase A — source/dev 완료
 
-Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinDigits`는 선행 0을 보존하는 4~8자리 문자열이고, 서버가 global lifecycle lock과 room lock 아래 다시 읽은 `room_number` snapshot으로만 canonical credential을 만든다. envelope마다 12-byte random nonce를 생성하며 private change-lease 원장의 `(key_version, nonce)` unique가 생성 envelope 재사용을 fail-closed한다. immutable revision에는 key가 아닌 bounded AAD environment/projectRef를 저장해 recovery restore가 저장 당시 context로 복호화할 수 있다.
+Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinDigits`는 선행 0을 보존하는 4~8자리 문자열이고, 서버가 global lifecycle lock과 room lock 아래 다시 읽은 `room_number` snapshot으로만 canonical credential을 만든다. envelope마다 12-byte random nonce를 생성하며 regular prepare와 bootstrap이 공유하는 private `(key_version, nonce)` reservation이 객실/AAD를 가로지른 다른 암호화 재사용을 fail-closed한다. prepare→confirm의 동일 envelope는 한 논리 reservation이다. immutable revision에는 key가 아닌 bounded AAD environment/projectRef를 저장해 recovery restore가 저장 당시 context로 복호화할 수 있다.
 
 물리 변경은 `prepare → physical lock change → confirm`이며 prepare가 즉시 mismatch를 기록하지만 current pointer는 confirm까지 유지한다. expired/uncertain mismatch는 actual PIN re-entry confirm 또는 기존 current의 confirmed physical rollback으로만 해소한다. maid read/change는 기존 public access lease의 exact room/target/current assignment/current attempt/maid/current pin version을 authority로 사용하고, change는 in-progress에서만 허용한다. maid confirm은 기존 lease를 revoke하고 동일 작업 권한·만료 시각의 새 pin version lease를 원자 재발급한다. reveal은 30초 이하 private 보조 lease, 최종 DB authorization recheck, authoritative lease `revealed_at`, `sensitive.read` append가 모두 성공한 뒤 남은 TTL 안에서만 plaintext를 반환한다.
 
@@ -43,11 +43,13 @@ Google Sheets에서는 `room_number`를 business identity로 하여 최대 121�
 
 private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 직접 접근을 막는다. developer database projection은 configured/approved boolean, safe counters/timestamp/stable error만 노출한다. full resync와 운영 mapping/ACL/Cron은 #137 범위다.
 
-### #140 초기 PIN bootstrap과 예약 readiness 분리 — source candidate
+### #140 초기 PIN bootstrap과 예약 readiness 분리 — source/dev 완료, nonce 보완 candidate
 
 `pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. reveal/change의 기존 current revision·lease 권한 검사도 유지한다.
 
 초기 데이터가 없는 환경에서는 active admin만 `POST /v1/rooms/pins/bootstrap`을 호출한다. 런타임은 secret manager의 `ROOM_PIN_INITIAL_DIGITS`를 읽고 DB가 반환한 최대 25개 후보의 현재 객실번호와 서버 안에서 canonical credential을 조합·AES-GCM 암호화한 뒤 service-role RPC에 envelope만 전달한다. RPC는 global lifecycle lock, sorted room lock, immutable version 1 revision, current pointer, verified sync event, Sheet outbox, safe audit와 command receipt를 한 transaction에 기록한다. current PIN이나 unresolved mismatch가 있으면 덮어쓰지 않는다. 평문 초기 숫자는 source/migration/DB/API/log/audit/notification에 존재하지 않는다.
+
+성공의 initialized는 위 원장 전체가 commit된 객실, skipped는 기존 current/unresolved 물리 변경을 보존한 객실이다. DB validation 실패는 batch 전체 rollback이며 오류를 skipped로 은폐하지 않는다. timeout/응답 유실은 commit 여부가 불확실하므로 rollback으로 단정하지 않고 같은 key의 receipt replay로 확인한다. 53번째 보완 migration은 기존 lease/revision을 보존해 registry를 backfill하고, matching confirmed lease/revision만 같은 논리 암호화로 인정한다. 다른 과거 key-version/nonce 충돌은 이력을 고치지 않고 upgrade를 fail-closed한다.
 ### #137 PIN Sheet full resync와 운영 상태 — source/dev 완료
 
 공개 `GET /v1/room-pin-sheet-sync/status`는 변경 완료 비밀번호와 active developer/admin session을 매번 확인하고 `pending/failed/operatorBlocked/oldestPendingAt/lastSuccessAt/lastErrorCode/version`만 반환한다. 현재 local credential 또는 target mapping이 invalid이면 과거 successful heartbeat보다 우선해 false-green을 차단한다. `POST /v1/room-pin-sheet-sync/full-resync`는 strict `{expectedVersion}` body, scoped idempotency key와 status version CAS를 요구한다.

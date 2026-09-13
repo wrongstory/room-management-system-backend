@@ -2,7 +2,7 @@
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 통합 기준은 `dev@45d18f1c12928340a80ef21d58d7edb3d6529ad8`, 51 migrations / 104 paths / 111 operations이고 #140 candidate는 52번째 append-only migration과 1개 공개 operation을 추가해 105 paths / 112 operations가 된다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 통합 기준은 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578`, 52 migrations / 105 paths / 112 operations이고 현재 보완 candidate는 기존 52개를 수정하지 않는 53번째 nonce reservation migration만 추가한다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Secrets, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
 
 Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다.
 
@@ -12,7 +12,8 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 - 실제 체크인 전이와 PIN reveal/change는 current PIN이 `verified`가 될 때까지 계속 fail-closed한다. `mismatch`도 예약 경고로는 표시하지만 실제 입실과 PIN 접근을 막는다.
 - active admin은 `POST /v1/rooms/pins/bootstrap`에 선택적 `limit`(기본 20, 최대 25)만 보낸다. PIN 숫자는 요청하지 않으며 응답에도 PIN·credential·envelope가 없다.
 - 런타임은 secret manager의 `ROOM_PIN_INITIAL_DIGITS`(4~8자리)를 읽어 DB 후보의 current room number와 결합한 뒤 AES-GCM으로 암호화한다. 실제 값은 Git, migration, `.env.example`, API payload, 로그, 감사 또는 알림에 기록하지 않는다.
-- command는 current PIN이나 unresolved mismatch가 없는 객실만 version 1로 초기화한다. 기존 current/mismatch를 자동 덮어쓰지 않으며 한 번에 최대 25개, 동일 `Idempotency-Key`와 payload는 exact response를 재생한다. `remainingCount`가 0이 될 때까지 새 key로 반복할 수 있다.
+- command는 current PIN이나 unresolved mismatch가 없는 객실만 version 1로 초기화한다. 기존 current/mismatch를 자동 덮어쓰지 않으며 한 번에 최대 25개, 동일 `Idempotency-Key`와 payload는 최초 완료 receipt의 exact response를 재생한다. `remainingCount`가 0이 될 때까지 새 key로 반복할 수 있다.
+- 성공 응답의 `initialized`는 이 batch에서 revision/current/verified sync/Sheet outbox/audit가 함께 확정된 객실이고, `skipped`는 기존 current 또는 unresolved 물리 변경을 보존해 의도적으로 건너뛴 객실이다. 검증 오류를 skipped로 바꾸지 않으며 DB validation 오류는 batch 전체를 rollback한다. HTTP timeout·응답 유실은 rollback을 뜻하지 않으므로 같은 `Idempotency-Key`로 receipt 결과를 확인한다.
 
 ## Phase B Google Sheets projection
 
@@ -40,13 +41,17 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 ### Production 활성화 체크리스트
 
-1. 승인된 release source에 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
-2. 기존 production DB backup과 51번째 migration 적용 순서를 확인한다.
-3. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
-4. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.
-5. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포한다.
-6. read-only status, 빈 큐 heartbeat, 121실 full resync, 삭제·정렬·변조 repair, duplicate-write 0을 hosted에서 확인한다.
-7. Cron/Vault를 마지막에 활성화하고 연속 heartbeat와 operator-blocked alert를 관찰한다.
+1. 기존 production DB backup과 적용된 52개 migration 및 PIN 원장 evidence를 확인한다. 이미 적용된 52개 파일은 수정·삭제하지 않는다.
+2. 승인된 release에서 53번째 migration을 파일에 명시된 단일 transaction으로 적용한다. transaction 시작 직후 첫 DDL인 table lock이 lease/revision 양쪽을 잠그며, lock 대기·timeout 또는 historical nonce conflict가 발생하면 적용을 중단한다. 오류를 무시하거나 `SKIP LOCKED`로 이력을 제외하지 않으며 registry/helper/trigger와 migration history는 반쪽 설치되지 않고 기존 원장 evidence는 그대로 남아야 한다.
+3. registry backfill 수와 history 정합성, 양쪽 INSERT trigger, lease identity guard, FORCE RLS와 최소 grant를 확인한다. 이 확인 전에는 bootstrap을 실행하지 않는다.
+4. 별도 release/운영 승인을 받은 뒤에만 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
+5. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
+6. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.
+7. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포한다.
+8. 별도 승인된 bootstrap을 실행하고 read-only status, 빈 큐 heartbeat, 121실 full resync, 삭제·정렬·변조 repair, duplicate-write 0을 hosted에서 확인한다.
+9. Cron/Vault를 마지막에 활성화하고 연속 heartbeat와 operator-blocked alert를 관찰한다.
+
+53번째 migration의 lock wait/timeout, validation conflict 또는 transaction 중간 실패는 hosted 적용 실패로 취급한다. 기존 lease/revision/current pointer/sync event/Sheet outbox/audit/completed receipt를 삭제·보정하지 말고 원 evidence를 보존한 채 조사한다. 현재 source/dev 검증 완료는 이 production 적용·bootstrap 승인과 별개다.
 
 서비스 계정 key 회전은 새 key 배치→local 구조 검증→OAuth/Sheets smoke→이전 key 폐기 순서다. PC/credential 유출 또는 ACL 오배치 시 Cron과 Function 호출을 중단하고 key를 즉시 폐기하며, target ACL을 회수하고 status/operator-blocked evidence와 audit을 보존한 채 승인된 새 credential로만 복구한다.
 
@@ -55,7 +60,8 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 - `ROOM_PIN_KEY_BASE64`는 canonical Base64 32-byte AES-256 key이고 `ROOM_PIN_KEY_VERSION`은 1~32자의 source-controlled version이다.
 - `ROOM_PIN_KEYRING_JSON`은 최대 5개의 prior version→canonical Base64 32-byte key를 가진다. current version을 중복 선언하거나 같은 key를 재사용할 수 없다.
 - reservation PII, Web Push current/prior key와 PIN current/prior key를 재사용하지 않는다. Node 환경 계약은 cursor/pepper 등 다른 목적 secret과의 재사용도 거부한다.
-- 새 encryption마다 12-byte random nonce를 사용한다. private change-lease 원장의 `(key_version, nonce)` unique가 서로 다른 생성 envelope의 재사용을 추가로 차단한다. confirm이 같은 lease envelope를 immutable revision으로 승격하는 것은 새 encryption이 아니다.
+- 새 encryption마다 12-byte random nonce를 사용한다. private nonce reservation의 `(key_version, nonce)` unique를 regular prepare와 bootstrap이 공유해 객실/AAD가 달라도 다른 생성 envelope의 재사용을 차단한다. confirm이 같은 lease envelope를 immutable revision으로 승격하는 것은 새 encryption이 아니므로 같은 reservation을 사용한다. keyring parser는 같은 실제 AES key를 여러 version에 등록하는 것도 거부한다.
+- 52→53 upgrade는 prepared/confirmed/expired/rolled-back lease와 revision 이력을 수정하지 않는다. confirmed lease와 byte-for-byte matching revision은 하나의 논리 암호화로 backfill하고, 동일 key version/nonce에 다른 ciphertext·tag·AAD·room/version evidence가 있으면 원 이력을 보존한 채 migration 전체를 `ROOM_PIN_HISTORICAL_NONCE_REUSE`로 중단한다.
 - AAD는 source-controlled format/environment/projectRef/roomId/pinVersion으로 만든다. immutable lease/revision에는 bounded nonsecret environment/projectRef만 저장하며 full AAD bytes나 key는 저장하지 않는다. 복구 환경은 현재 runtime 값이 아니라 저장된 exact context로 복호화한다.
 
 키 회전은 새 current key/version을 배치하고 기존 current를 prior keyring에 둔 상태에서 시작한다. 모든 live revision을 새 PIN revision으로 재발급하기 전 prior key를 제거하면 해당 revision은 fail-closed한다. key나 실제 envelope/PIN 값을 로그, Issue, PR, audit, notification에 붙이지 않는다.

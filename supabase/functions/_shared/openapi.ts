@@ -3437,7 +3437,7 @@ export const openApiDocument = {
         operationId: "bootstrapRoomPins",
         summary: "누락된 객실 current PIN 암호화 초기화",
         description:
-          "active business admin 전용 bounded command입니다. request body로 PIN을 받지 않고 배포 환경의 ROOM_PIN_INITIAL_DIGITS secret을 사용합니다. current PIN이 없고 unresolved 물리 변경도 없는 객실만 한 번에 최대 25실씩 version 1로 초기화합니다. 같은 Idempotency-Key 재시도는 동일 batch 응답을 반환하며 기존 current PIN이나 mismatch를 덮지 않습니다. 응답·로그·감사·알림에는 PIN 또는 envelope가 포함되지 않습니다.",
+          "active business admin 전용 원자적 bounded command입니다. request body로 PIN을 받지 않고 배포 환경의 ROOM_PIN_INITIAL_DIGITS secret을 사용합니다. current PIN이 없고 unresolved 물리 변경도 없는 객실만 한 번에 최대 25실씩 version 1로 초기화합니다. initialized는 이 transaction에서 신규 PIN 원장 전체가 확정된 객실이고 skipped는 기존 current 또는 unresolved 물리 변경을 보존한 객실이며 오류 은폐용이 아닙니다. DB validation 오류는 batch 전체를 rollback하지만 timeout·응답 유실만으로 rollback을 단정할 수 없으므로 같은 Idempotency-Key로 최초 완료 receipt를 확인합니다. 기존 current PIN이나 mismatch를 덮지 않으며 응답·로그·감사·알림에는 PIN 또는 envelope가 포함되지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -7402,11 +7402,15 @@ export const openApiDocument = {
             type: "array",
             maxItems: 25,
             items: { type: "string", format: "uuid" },
+            description:
+              "이 batch transaction에서 신규 PIN 원장 전체가 확정된 객실 ID",
           },
           skippedRoomIds: {
             type: "array",
             maxItems: 25,
             items: { type: "string", format: "uuid" },
+            description:
+              "기존 current PIN 또는 미해결 물리 변경을 보존해 의도적으로 건너뛴 객실 ID",
           },
           initializedCount: { type: "integer", minimum: 0, maximum: 25 },
           skippedCount: { type: "integer", minimum: 0, maximum: 25 },
@@ -7414,7 +7418,7 @@ export const openApiDocument = {
           completedAt: { type: "string", format: "date-time" },
         },
         description:
-          "PIN, credential, ciphertext 또는 provider 정보가 없는 초기화 진행 결과입니다.",
+          "PIN, credential, ciphertext 또는 provider 정보가 없는 원자적 초기화 결과입니다. DB validation 실패는 성공 응답의 skipped가 아니며 전체 batch가 rollback됩니다. timeout·응답 유실 뒤에는 같은 Idempotency-Key로 완료 receipt를 확인합니다.",
       },
       RoomPinBootstrapEnvelope: {
         type: "object",

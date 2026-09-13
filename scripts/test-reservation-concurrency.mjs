@@ -18,6 +18,7 @@ import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-oper
 import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
 import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
+import { testRoomPinBootstrapConcurrency } from './test-room-pin-bootstrap-concurrency.mjs';
 import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
 import { testRoomPinSheetSyncConcurrency } from './test-room-pin-sheet-sync-concurrency.mjs';
 import { testWebPushConcurrency } from './test-web-push-concurrency.mjs';
@@ -987,6 +988,7 @@ await testWebPushConcurrency(client);
 await testNotificationDeliveryConcurrency(client);
 await testPasswordChangeConcurrency(client);
 await testRoomPinConcurrency(client);
+await testRoomPinBootstrapConcurrency(client);
 await testRoomPinSheetSyncConcurrency();
 
 console.log(
