@@ -628,6 +628,81 @@ describe("room PIN Sheet sync worker", () => {
       "record_room_pin_sheet_sync_heartbeat",
     ]);
   });
+  it("keeps a recovery lineage operator-blocked when authorization finds a stale snapshot", async () => {
+    const operation = await fullResyncFixture();
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let writes = 0;
+    const db: RoomPinSheetRpc = { rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "claim_room_pin_sheet_full_resync") {
+        return { data: { status: "claimed", leaseFence: 8, operation }, error: null };
+      }
+      if (name === "renew_room_pin_sheet_full_resync") {
+        return { data: { status: "leased", leaseFence: 8 }, error: null };
+      }
+      if (name === "authorize_room_pin_sheet_full_resync_write") {
+        return { data: { status: "operator_blocked", leaseFence: 8 }, error: null };
+      }
+      return { data: { status: args.p_status }, error: null };
+    } };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => { throw new Error("no Sheet read"); },
+      write: async () => { throw new Error("no incremental write"); },
+      validateConfiguration: async () => undefined,
+      writeFullBoard: async () => { writes++; },
+    };
+    await expect(new RoomPinSheetSyncWorker(db, provider, config).run()).resolves.toMatchObject({
+      claimed: 1,
+      blocked: 1,
+      projected: 0,
+    });
+    expect(writes).toBe(0);
+    expect(calls.map(call => call.name)).not.toContain("settle_room_pin_sheet_full_resync");
+    expect(calls.find(call => call.name === "record_room_pin_sheet_sync_heartbeat")?.args).toMatchObject({
+      p_status: "operator_blocked",
+      p_blocked: 1,
+      p_error_code: "SNAPSHOT_STALE",
+    });
+  });
+  it("does not report success when bounded lineage cleanup requires another recovery", async () => {
+    const operation = await fullResyncFixture();
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let writes = 0;
+    const db: RoomPinSheetRpc = { rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "claim_room_pin_sheet_full_resync") {
+        return { data: { status: "claimed", leaseFence: 8, operation }, error: null };
+      }
+      if (name === "renew_room_pin_sheet_full_resync") {
+        return { data: { status: "leased", leaseFence: 8 }, error: null };
+      }
+      if (name === "authorize_room_pin_sheet_full_resync_write") {
+        return { data: { status: "authorized", leaseFence: 8 }, error: null };
+      }
+      if (name === "settle_room_pin_sheet_full_resync") {
+        return { data: { status: "operator_blocked", roomCount: 121 }, error: null };
+      }
+      return { data: { status: args.p_status }, error: null };
+    } };
+    const provider: RoomPinSheetProvider = {
+      inspect: async () => { throw new Error("no Sheet read"); },
+      write: async () => { throw new Error("no incremental write"); },
+      validateConfiguration: async () => undefined,
+      writeFullBoard: async () => { writes++; },
+    };
+    await expect(new RoomPinSheetSyncWorker(db, provider, config).run()).resolves.toMatchObject({
+      claimed: 1,
+      blocked: 1,
+      projected: 0,
+    });
+    expect(writes).toBe(1);
+    expect(calls.map(call => call.name)).not.toContain("block_room_pin_sheet_full_resync_after_settle_failure");
+    expect(calls.find(call => call.name === "record_room_pin_sheet_sync_heartbeat")?.args).toMatchObject({
+      p_status: "operator_blocked",
+      p_blocked: 1,
+      p_error_code: "DB_SETTLE_UNCERTAIN",
+    });
+  });
   it("does not authorize a full-board write when snapshot preparation exhausts the provider reserve", async () => {
     const operation = await fullResyncFixture();
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];

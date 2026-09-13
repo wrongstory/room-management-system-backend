@@ -501,6 +501,7 @@ Table private.room_pin_sheet_full_resync_runs {
   actor_role_snapshot app_role [not null]
   expected_fence bigint [not null]
   reconciles_blocked_fence bigint
+  recovery_root_run_id uuid [not null]
   aad_environment text [not null]
   aad_project_ref text [not null]
   target_identity_digest text [not null]
@@ -520,7 +521,7 @@ Table private.room_pin_sheet_full_resync_runs {
   completed_at timestamptz
 
   indexes { (actor_profile_id, idempotency_key) [unique] }
-  Note: '#137 immutable operator command identity and exact target digest. FORCE RLS; public status/audit never expose hashes or target/provider material.'
+  Note: '#137 immutable operator command identity and exact target digest. Normal runs self-root; recovery inherits the exact blocked predecessor root while execution still requires claim/lease fence CAS. Successful recovery cleans at most 32 temporal same-root blocks; partial cleanup remains operator-blocked. FORCE RLS; public status/audit never expose hashes or target/provider material.'
 }
 
 Table private.room_pin_sheet_full_resync_items {
@@ -1973,6 +1974,11 @@ Ref: private.room_pin_reveal_leases.assignment_id > public.cleaning_assignments.
 Ref: private.room_pin_reveal_leases.attempt_id > public.cleaning_attempts.id
 Ref: private.room_pin_reveal_leases.authoritative_access_lease_id > public.room_pin_access_leases.id
 Ref: private.room_pin_sheet_sync_outbox.room_id > public.rooms.id
+Ref: private.room_pin_sheet_full_resync_runs.actor_profile_id > public.profiles.id
+Ref: private.room_pin_sheet_full_resync_runs.recovery_root_run_id > private.room_pin_sheet_full_resync_runs.id
+Ref: private.room_pin_sheet_full_resync_items.run_id > private.room_pin_sheet_full_resync_runs.id
+Ref: private.room_pin_sheet_full_resync_items.room_id > public.rooms.id
+Ref: private.room_pin_sheet_full_resync_items.pin_revision_id > private.room_pin_revisions.id
 Ref: public.cleaning_template_versions.room_type_id > public.room_types.id
 Ref: public.cleaning_template_versions.created_by > public.profiles.id
 Ref: private.photo_template_slots.template_version_id > public.cleaning_template_versions.id

@@ -592,11 +592,17 @@ describe('initial migration contract', () => {
     expect(sql).toContain('create table private.room_pin_sheet_full_resync_items');
     expect(sql).toContain('snapshot_room_count integer not null check (snapshot_room_count = 121)');
     expect(sql).toContain('target_identity_digest text not null');
+    expect(sql).toContain('recovery_root_run_id uuid not null');
+    expect(sql).toContain('new.recovery_root_run_id=new.id');
+    expect(sql).toContain('new.recovery_root_run_id<>old.recovery_root_run_id');
     expect(sql).toContain('create function public.request_room_pin_sheet_full_resync(');
     expect(sql).toContain('create function public.claim_room_pin_sheet_full_resync(');
     expect(sql).toContain('create function public.authorize_room_pin_sheet_full_resync_write(');
     expect(sql).toContain('create function public.settle_room_pin_sheet_full_resync(');
     expect(sql).toContain('outbox.created_at<=run.provider_write_started_at');
+    expect(sql).toContain('cleanup_limit constant integer:=32');
+    expect(sql).toContain("last_error_code='SNAPSHOT_STALE'");
+    expect(sql).toContain("last_error_code='DB_SETTLE_UNCERTAIN'");
     expect(sql).toContain("where status in ('pending','processing','failed')");
     expect(sql).toContain("'room_pin_sheet.full_resync_requested'");
     expect(sql).toContain("'room_pin_sheet.full_resync_succeeded'");

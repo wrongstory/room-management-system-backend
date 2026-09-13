@@ -2,12 +2,22 @@
 -- DB-authoritative 121-room full-board repair. Hosted mappings, secrets, ACL,
 -- Edge deployment and Cron remain release/production gates.
 
+alter table private.room_pin_sheet_sync_worker_state
+  drop constraint room_pin_sheet_sync_worker_state_blocked_reason_code_check,
+  add constraint room_pin_sheet_sync_worker_state_blocked_reason_code_check
+  check (blocked_reason_code is null or blocked_reason_code in (
+    'AUTHENTICATION_FAILED','AUTHORIZATION_FAILED','PROVIDER_CONFIGURATION_ERROR',
+    'WRITE_OUTCOME_UNCERTAIN','PROVIDER_RESPONSE_INVALID','DB_SETTLE_UNCERTAIN',
+    'RETRY_EXHAUSTED','SNAPSHOT_STALE'
+  ));
+
 create table private.room_pin_sheet_full_resync_runs (
   id uuid primary key default gen_random_uuid(),
   actor_profile_id uuid not null references public.profiles(id) on delete restrict,
   actor_role_snapshot public.app_role not null check (actor_role_snapshot in ('developer','admin')),
   expected_fence bigint not null check (expected_fence >= 0),
   reconciles_blocked_fence bigint check (reconciles_blocked_fence is null or reconciles_blocked_fence >= 0),
+  recovery_root_run_id uuid not null,
   aad_environment text not null check (aad_environment ~ '^[A-Za-z0-9._:-]{1,80}$'),
   aad_project_ref text not null check (aad_project_ref ~ '^[A-Za-z0-9._:-]{1,80}$'),
   target_identity_digest text not null check (target_identity_digest ~ '^[0-9a-f]{64}$'),
@@ -32,6 +42,8 @@ create table private.room_pin_sheet_full_resync_runs (
   requested_at timestamptz not null default clock_timestamp(),
   completed_at timestamptz,
   unique (actor_profile_id,idempotency_key),
+  foreign key (recovery_root_run_id)
+    references private.room_pin_sheet_full_resync_runs(id) on delete restrict,
   check ((claim_id is null)=(claimed_at is null)),
   check (claim_expires_at is null or claimed_at is not null and claim_expires_at>claimed_at),
   check (status<>'processing' or claim_id is not null and claim_expires_at is not null and lease_fence is not null),
@@ -65,6 +77,8 @@ create index room_pin_sheet_full_resync_claim_idx
 on private.room_pin_sheet_full_resync_runs(status,next_attempt_at,requested_at,id);
 create index room_pin_sheet_full_resync_actor_idx
 on private.room_pin_sheet_full_resync_runs(actor_profile_id,requested_at desc);
+create index room_pin_sheet_full_resync_recovery_root_idx
+on private.room_pin_sheet_full_resync_runs(recovery_root_run_id,status,requested_at,id);
 create index room_pin_sheet_full_resync_item_room_idx
 on private.room_pin_sheet_full_resync_items(room_id);
 create index room_pin_sheet_full_resync_item_revision_idx
@@ -79,10 +93,51 @@ revoke all on table private.room_pin_sheet_full_resync_items from public,anon,au
 
 create function private.guard_room_pin_sheet_full_resync_run() returns trigger
 language plpgsql security definer set search_path='' as $$
+declare
+  root_run private.room_pin_sheet_full_resync_runs;
+  state private.room_pin_sheet_sync_worker_state;
 begin
+  if tg_op='INSERT' then
+    if new.recovery_root_run_id=new.id then
+      if new.reconciles_blocked_fence is not null then
+        select * into state from private.room_pin_sheet_sync_worker_state where singleton=true;
+        if state.status<>'operator_blocked'
+          or state.lease_fence<>new.reconciles_blocked_fence
+          or exists(
+            select 1 from private.room_pin_sheet_full_resync_runs blocked
+            where blocked.status='operator_blocked'
+              and blocked.lease_fence=new.reconciles_blocked_fence
+          ) then
+          raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+        end if;
+      end if;
+      return new;
+    end if;
+    if new.reconciles_blocked_fence is null then
+      raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+    end if;
+    select * into root_run from private.room_pin_sheet_full_resync_runs
+    where id=new.recovery_root_run_id;
+    select * into state from private.room_pin_sheet_sync_worker_state where singleton=true;
+    if root_run.id is null or root_run.recovery_root_run_id<>root_run.id
+      or root_run.requested_at>new.requested_at
+      or state.status<>'operator_blocked'
+      or state.lease_fence<>new.reconciles_blocked_fence
+      or (select count(*) from private.room_pin_sheet_full_resync_runs blocked
+        where blocked.recovery_root_run_id=new.recovery_root_run_id
+          and blocked.status='operator_blocked'
+          and blocked.lease_fence=new.reconciles_blocked_fence
+          and blocked.requested_at<new.requested_at
+          and blocked.completed_at is not null
+          and blocked.completed_at<=new.requested_at)<>1 then
+      raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+    end if;
+    return new;
+  end if;
   if tg_op='DELETE' or new.id<>old.id or new.actor_profile_id<>old.actor_profile_id
     or new.actor_role_snapshot<>old.actor_role_snapshot or new.expected_fence<>old.expected_fence
     or new.reconciles_blocked_fence is distinct from old.reconciles_blocked_fence
+    or new.recovery_root_run_id<>old.recovery_root_run_id
     or new.aad_environment<>old.aad_environment or new.aad_project_ref<>old.aad_project_ref
     or new.target_identity_digest<>old.target_identity_digest
     or new.snapshot_room_count<>old.snapshot_room_count or new.idempotency_key<>old.idempotency_key
@@ -94,7 +149,7 @@ begin
 end $$;
 revoke all on function private.guard_room_pin_sheet_full_resync_run()
 from public,anon,authenticated,service_role;
-create trigger room_pin_sheet_full_resync_run_guard before update or delete
+create trigger room_pin_sheet_full_resync_run_guard before insert or update or delete
 on private.room_pin_sheet_full_resync_runs for each row
 execute function private.guard_room_pin_sheet_full_resync_run();
 
@@ -132,7 +187,10 @@ create function public.request_room_pin_sheet_full_resync(
 declare
   actor public.profiles;
   state private.room_pin_sheet_sync_worker_state;
+  blocked_run private.room_pin_sheet_full_resync_runs;
+  root_run private.room_pin_sheet_full_resync_runs;
   v_run_id uuid:=gen_random_uuid();
+  v_recovery_root_run_id uuid;
   at_time timestamptz:=clock_timestamp();
   response jsonb;
   room_count integer;
@@ -184,9 +242,42 @@ begin
     where singleton=true returning * into state;
   end if;
   if state.status='operator_blocked' then
+    select count(*)::integer into pending_count
+    from private.room_pin_sheet_full_resync_runs
+    where status in ('pending','processing','failed')
+      and reconciles_blocked_fence=state.lease_fence
+      and coalesce(last_error_code,'')<>'RETRY_EXHAUSTED';
+    if pending_count>0 then
+      raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_PENDING';
+    end if;
     update private.room_pin_sheet_full_resync_runs set status='superseded',completed_at=at_time
     where status in ('pending','failed') and provider_write_started_at is null;
+    select * into blocked_run from private.room_pin_sheet_full_resync_runs
+    where status='operator_blocked' and lease_fence=state.lease_fence
+    order by completed_at desc,requested_at desc,id desc limit 1 for update;
+    if blocked_run.id is not null then
+      if exists(
+        select 1 from private.room_pin_sheet_full_resync_runs duplicate_block
+        where duplicate_block.id<>blocked_run.id
+          and duplicate_block.status='operator_blocked'
+          and duplicate_block.lease_fence=state.lease_fence
+      ) then
+        raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+      end if;
+      select * into root_run from private.room_pin_sheet_full_resync_runs
+      where id=blocked_run.recovery_root_run_id for key share;
+      if root_run.id is null or root_run.recovery_root_run_id<>root_run.id
+        or root_run.requested_at>blocked_run.requested_at then
+        raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+      end if;
+      v_recovery_root_run_id:=root_run.id;
+    else
+      -- An incremental outbox block starts a new full-resync lineage because
+      -- there is no prior full run from which a root can be inherited.
+      v_recovery_root_run_id:=v_run_id;
+    end if;
   else
+    v_recovery_root_run_id:=v_run_id;
     select count(*)::integer into pending_count
     from private.room_pin_sheet_full_resync_runs
     where status in ('pending','processing','failed')
@@ -201,11 +292,12 @@ begin
   end if;
 
   insert into private.room_pin_sheet_full_resync_runs(
-    id,actor_profile_id,actor_role_snapshot,expected_fence,reconciles_blocked_fence,
+    id,actor_profile_id,actor_role_snapshot,expected_fence,reconciles_blocked_fence,recovery_root_run_id,
     aad_environment,aad_project_ref,target_identity_digest,snapshot_room_count,idempotency_key,request_hash,requested_at
   ) values(
     v_run_id,actor.id,actor.role,p_expected_fence,
     case when state.status='operator_blocked' then state.lease_fence else null end,
+    v_recovery_root_run_id,
     p_expected_environment,p_expected_project_ref,p_expected_target_identity_digest,room_count,p_idempotency_key,p_request_hash,at_time
   );
 
@@ -275,6 +367,8 @@ declare
   at_time timestamptz:=clock_timestamp();
   state private.room_pin_sheet_sync_worker_state;
   run private.room_pin_sheet_full_resync_runs;
+  root_run private.room_pin_sheet_full_resync_runs;
+  predecessor_count integer;
 begin
   if p_claim_id is null or p_expected_environment is null or p_expected_project_ref is null
     or p_expected_environment !~ '^[A-Za-z0-9._:-]{1,80}$'
@@ -324,6 +418,31 @@ begin
   end if;
   if state.status='operator_blocked' and run.reconciles_blocked_fence is distinct from state.lease_fence then
     return jsonb_build_object('status','operator_blocked','leaseFence',state.lease_fence);
+  end if;
+  select * into root_run from private.room_pin_sheet_full_resync_runs
+  where id=run.recovery_root_run_id for key share;
+  if root_run.id is null or root_run.recovery_root_run_id<>root_run.id
+    or root_run.requested_at>run.requested_at
+    or (run.reconciles_blocked_fence is null and run.recovery_root_run_id<>run.id)
+    or (run.reconciles_blocked_fence is not null and (
+      not (state.status='operator_blocked' and state.lease_fence=run.reconciles_blocked_fence)
+      and not (run.status='failed' and run.retry_count>0 and state.status='idle')
+    )) then
+    raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+  end if;
+  if run.reconciles_blocked_fence is not null then
+    select count(*)::integer into predecessor_count
+    from private.room_pin_sheet_full_resync_runs blocked
+    where blocked.status='operator_blocked'
+      and blocked.lease_fence=run.reconciles_blocked_fence
+      and blocked.requested_at<run.requested_at
+      and blocked.completed_at is not null
+      and blocked.completed_at<=run.requested_at
+      and blocked.recovery_root_run_id=run.recovery_root_run_id;
+    if (run.recovery_root_run_id=run.id and predecessor_count<>0)
+      or (run.recovery_root_run_id<>run.id and predecessor_count<>1) then
+      raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+    end if;
   end if;
   if run.aad_environment<>p_expected_environment or run.aad_project_ref<>p_expected_project_ref
     or run.target_identity_digest<>p_expected_target_identity_digest then
@@ -403,10 +522,22 @@ begin
     or (select count(*) from private.room_pin_sheet_full_resync_items where run_id=p_run_id)<>121
   into changed;
   if changed then
-    update private.room_pin_sheet_full_resync_runs set status='superseded',claim_id=null,
-      claimed_at=null,claim_expires_at=null,lease_fence=null,last_error_code='SNAPSHOT_STALE',completed_at=at_time
-      where id=p_run_id;
-    return jsonb_build_object('status','superseded');
+    if run.reconciles_blocked_fence is not null then
+      -- A stale recovery snapshot has not repaired the lineage's original
+      -- uncertainty. Preserve the root and current execution fence, and keep
+      -- the singleton blocked until a new exact-fence recovery is requested.
+      update private.room_pin_sheet_full_resync_runs set status='operator_blocked',
+        last_error_code='SNAPSHOT_STALE',completed_at=at_time where id=p_run_id;
+      update private.room_pin_sheet_sync_worker_state set status='operator_blocked',claim_id=null,
+        lease_expires_at=null,blocked_reason_code='SNAPSHOT_STALE',updated_at=at_time
+      where singleton=true;
+      return jsonb_build_object('status','operator_blocked','leaseFence',p_lease_fence);
+    else
+      update private.room_pin_sheet_full_resync_runs set status='superseded',claim_id=null,
+        claimed_at=null,claim_expires_at=null,lease_fence=null,last_error_code='SNAPSHOT_STALE',completed_at=at_time
+        where id=p_run_id;
+      return jsonb_build_object('status','superseded');
+    end if;
   end if;
   update private.room_pin_sheet_full_resync_runs set provider_write_started_at=at_time where id=p_run_id;
   return jsonb_build_object('status','authorized','leaseFence',p_lease_fence);
@@ -419,7 +550,13 @@ declare
   at_time timestamptz:=clock_timestamp();
   state private.room_pin_sheet_sync_worker_state;
   run private.room_pin_sheet_full_resync_runs;
+  root_run private.room_pin_sheet_full_resync_runs;
+  predecessor_count integer;
+  eligible_cleanup_count integer;
+  cleaned_count integer;
+  remaining_cleanup_exists boolean;
   delay_seconds integer;
+  cleanup_limit constant integer:=32;
 begin
   if p_run_id is null or p_claim_id is null or p_lease_fence is null or p_lease_fence<1
     or p_outcome not in ('succeeded','retryable','operator_blocked')
@@ -443,9 +580,28 @@ begin
   if p_outcome='succeeded' and run.provider_write_started_at is null then
     raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_NOT_AUTHORIZED';
   end if;
+  select * into root_run from private.room_pin_sheet_full_resync_runs
+  where id=run.recovery_root_run_id for key share;
+  if root_run.id is null or root_run.recovery_root_run_id<>root_run.id
+    or root_run.requested_at>run.requested_at
+    or (run.reconciles_blocked_fence is null and run.recovery_root_run_id<>run.id) then
+    raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+  end if;
+  if run.reconciles_blocked_fence is not null then
+    select count(*)::integer into predecessor_count
+    from private.room_pin_sheet_full_resync_runs blocked
+    where blocked.status='operator_blocked'
+      and blocked.lease_fence=run.reconciles_blocked_fence
+      and blocked.requested_at<run.requested_at
+      and blocked.completed_at is not null
+      and blocked.completed_at<=run.requested_at
+      and blocked.recovery_root_run_id=run.recovery_root_run_id;
+    if (run.recovery_root_run_id=run.id and predecessor_count<>0)
+      or (run.recovery_root_run_id<>run.id and predecessor_count<>1) then
+      raise exception using errcode='55000',message='ROOM_PIN_SHEET_FULL_RESYNC_LINEAGE_INVALID';
+    end if;
+  end if;
   if p_outcome='succeeded' then
-    update private.room_pin_sheet_full_resync_runs set status='succeeded',completed_at=at_time,
-      last_error_code=null where id=p_run_id;
     -- The full-board write repairs exactly the snapshot authorized immediately
     -- before the provider call. A v50 uncertain settle clears lease_fence, so
     -- fence equality alone cannot identify every repaired outbox row. Match the
@@ -463,15 +619,57 @@ begin
         where item.run_id=p_run_id and item.room_id=outbox.room_id
       );
     if run.reconciles_blocked_fence is not null then
-      -- The singleton fence is globally monotonic, but keep the temporal bound
-      -- explicit so a malformed/newer ledger row can never be swept into this
-      -- recovery. Retry exhaustion retains this exact fence below.
-      update private.room_pin_sheet_full_resync_runs set status='superseded',completed_at=at_time
-      where id<>p_run_id and status='operator_blocked'
-        and lease_fence=run.reconciles_blocked_fence
-        and requested_at<run.requested_at
-        and completed_at is not null and completed_at<=run.requested_at;
+      -- A recovery may span several failed attempts and execution fences. The
+      -- immutable root binds only that lineage; the exact state/claim/fence CAS
+      -- above still authorizes this settle. Clean a bounded, temporal prefix so
+      -- unrelated or later blocks can never be swept into this success.
+      select count(*)::integer into eligible_cleanup_count from (
+        select 1
+        from private.room_pin_sheet_full_resync_runs blocked
+        where blocked.id<>p_run_id and blocked.status='operator_blocked'
+          and blocked.recovery_root_run_id=run.recovery_root_run_id
+          and blocked.requested_at<run.requested_at
+          and blocked.completed_at is not null and blocked.completed_at<=run.requested_at
+        order by blocked.completed_at,blocked.requested_at,blocked.id
+        limit cleanup_limit+1
+      ) bounded_cleanup;
+      with cleanup_candidates as (
+        select blocked.id
+        from private.room_pin_sheet_full_resync_runs blocked
+        where blocked.id<>p_run_id and blocked.status='operator_blocked'
+          and blocked.recovery_root_run_id=run.recovery_root_run_id
+          and blocked.requested_at<run.requested_at
+          and blocked.completed_at is not null and blocked.completed_at<=run.requested_at
+        order by blocked.completed_at,blocked.requested_at,blocked.id
+        limit cleanup_limit for update
+      )
+      update private.room_pin_sheet_full_resync_runs blocked set status='superseded'
+      from cleanup_candidates candidate where blocked.id=candidate.id;
+      get diagnostics cleaned_count=row_count;
+      select exists(
+        select 1 from private.room_pin_sheet_full_resync_runs blocked
+        where blocked.id<>p_run_id and blocked.status='operator_blocked'
+          and blocked.recovery_root_run_id=run.recovery_root_run_id
+          and blocked.requested_at<run.requested_at
+          and blocked.completed_at is not null and blocked.completed_at<=run.requested_at
+      ) into remaining_cleanup_exists;
+      if eligible_cleanup_count>cleanup_limit
+        or cleaned_count<>least(eligible_cleanup_count,cleanup_limit)
+        or remaining_cleanup_exists then
+        -- The provider write is already linearized, so preserve its marker and
+        -- make this run the next exact-fence reconciliation predecessor. The
+        -- operator-blocked status prevents this same run from being reclaimed
+        -- or automatically re-written.
+        update private.room_pin_sheet_full_resync_runs set status='operator_blocked',
+          last_error_code='DB_SETTLE_UNCERTAIN',completed_at=at_time where id=p_run_id;
+        update private.room_pin_sheet_sync_worker_state set status='operator_blocked',claim_id=null,
+          lease_expires_at=null,blocked_reason_code='DB_SETTLE_UNCERTAIN',updated_at=at_time
+        where singleton=true;
+        return jsonb_build_object('status','operator_blocked','roomCount',run.snapshot_room_count);
+      end if;
     end if;
+    update private.room_pin_sheet_full_resync_runs set status='succeeded',completed_at=at_time,
+      last_error_code=null where id=p_run_id;
     insert into public.audit_events(
       actor_profile_id,actor_display_name_snapshot,event_type,entity_type,entity_id,
       effective_at,reason_code,after_state,idempotency_key
@@ -538,7 +736,6 @@ end $$;
 create function public.get_room_pin_sheet_sync_status(p_actor_profile_id uuid,p_session_id uuid)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare
-  actor public.profiles;
   state private.room_pin_sheet_sync_worker_state;
   pending_count integer;
   failed_count integer;
@@ -547,7 +744,7 @@ declare
   last_error text;
   at_time timestamptz:=clock_timestamp();
 begin
-  actor:=private.assert_room_pin_sheet_operator(p_actor_profile_id,p_session_id);
+  perform private.assert_room_pin_sheet_operator(p_actor_profile_id,p_session_id);
   select * into state from private.room_pin_sheet_sync_worker_state where singleton=true;
   select least(coalesce(sum(value),0),1000)::integer,min(pending_at) into pending_count,oldest_pending
   from (

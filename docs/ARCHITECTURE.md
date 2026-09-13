@@ -49,6 +49,8 @@ private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 
 
 요청은 121실 room master와 current PIN revision reference를 deterministic row 2..122 snapshot으로 고정한다. canonical environment/project/spreadsheet/tab SHA-256 marker가 request/run/claim 전 구간에서 일치해야 하며 raw spreadsheet/tab과 provider material은 DB/API/audit에 노출하지 않는다. full writer와 incremental writer는 같은 singleton fence를 사용해 provider permit 한 건만 얻는다. full write 성공 시 `provider_write_started_at` 이전에 만들어진 snapshot-room outbox만 version과 무관하게 supersede하고 marker 이후 PIN 변경은 남겨 최종 수렴한다. retryable failed run도 logical active command이므로 다른 key가 중복 full write를 예약할 수 없다. developer audit은 requested/succeeded의 `status/roomCount/reconciliation`만 투영한다.
 
+각 일반 run은 immutable self-FK `recovery_root_run_id`로 자신을 root로 삼고, 명시 recovery는 잠근 exact-fence `operator_blocked` predecessor의 기존 root만 상속한다. root는 cleanup 범위를 식별할 뿐 claim/authorize/settle 권한을 주지 않으며 매 단계의 singleton claim·lease fence CAS는 그대로 필요하다. recovery의 target mismatch, retry 소진, provider/DB 불확실, marker lease expiry와 `SNAPSHOT_STALE`은 같은 root의 새 block으로 남는다. 성공 settle은 요청 시점보다 과거인 같은-root block을 최대 32건만 정리하며, 초과 또는 부분 정리는 성공 audit 없이 현재 provider marker를 보존한 `DB_SETTLE_UNCERTAIN` block으로 닫아 다음 명시 recovery만 허용한다.
+
 ### #84/#85 사진 HTTP adapter와 보존 정리 worker — source/dev 완료
 
 `src/modules/photos`의 순수 binary validator/Drive adapter/application service를 Fastify와 generated Deno bridge가 공유한다.

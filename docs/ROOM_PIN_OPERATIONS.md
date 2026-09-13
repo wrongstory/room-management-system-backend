@@ -26,6 +26,8 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 - environment/project/spreadsheet/tab의 canonical SHA-256 marker를 run에 immutable하게 저장한다. claim 시 source mapping의 marker와 다르면 credential 검증, OAuth와 Sheets 호출 전에 operator-blocked한다. raw spreadsheet/tab, request hash, PIN, envelope, assertion/token, Google response는 공개 상태·감사에 없다.
 - incremental worker와 full writer는 같은 singleton lease/fence를 사용한다. authorize 직전에 121실 room identity/number/current pin version을 다시 확인해 stale snapshot에는 provider permit을 주지 않는다. full write 성공 뒤에는 snapshot room에 속하고 `created_at <= provider_write_started_at`인 pending/processing/failed outbox만 supersede한다. 따라서 fence가 이미 지워진 `DB_SETTLE_UNCERTAIN` 과거 작업도 수렴하지만 authorize 이후 생긴 새 PIN outbox는 보존된다.
 - full write 성공 뒤 DB settle 실패는 `DB_SETTLE_UNCERTAIN`으로 operator-blocked하고 같은 run을 자동 재-write하지 않는다. lease expiry reconciliation은 provider marker를 근거로 uncertain 상태에 수렴한다. 명시적 operator full resync만 새 snapshot과 새 fence로 복구한다.
+- 일반 run은 immutable self-FK recovery root를 만들고, recovery는 exact singleton fence로 잠근 직전 blocked run의 기존 root만 상속한다. root는 claim/permit CAS를 대체하지 않는다. target mismatch, retry 8회 소진, provider block, `DB_SETTLE_UNCERTAIN`, marker lease expiry, recovery `SNAPSHOT_STALE`도 root를 보존한다.
+- 성공 settle은 같은 root이면서 recovery 요청보다 과거인 `operator_blocked` run만 한 번에 최대 32건 supersede한다. 32건을 초과하거나 부분 정리가 감지되면 성공 audit/healthy를 만들지 않고 현재 marker를 보존한 `DB_SETTLE_UNCERTAIN` block으로 전환한다. 같은 run은 재claim하지 않으며 다음 명시 recovery가 남은 bounded prefix를 처리한다.
 - developer audit은 `room_pin_sheet.full_resync_requested/succeeded`를 허용하되 summary는 `status`, `roomCount`, 요청 시 `reconciliation`만 포함한다.
 
 ### Production 활성화 체크리스트

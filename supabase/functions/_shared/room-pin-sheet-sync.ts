@@ -413,6 +413,18 @@ export class RoomPinSheetSyncWorker {
         );
         return result;
       }
+      if (authorized === "operator_blocked") {
+        result.blocked = 1;
+        await this.#heartbeat(
+          claimId,
+          fence,
+          result,
+          "operator_blocked",
+          "SNAPSHOT_STALE",
+          runDeadline,
+        );
+        return result;
+      }
       if (authorized !== "authorized") return failed();
       await this.#provider.writeFullBoard(rows, providerDeadline);
       providerWriteSucceeded = true;
@@ -429,6 +441,18 @@ export class RoomPinSheetSyncWorker {
           settleDeadline,
         ),
       );
+      if (settled.status === "operator_blocked") {
+        result.blocked = 1;
+        await this.#heartbeat(
+          claimId,
+          fence,
+          result,
+          "operator_blocked",
+          "DB_SETTLE_UNCERTAIN",
+          runDeadline,
+        );
+        return result;
+      }
       if (settled.status !== "succeeded") return failed();
       result.projected = 1;
       await this.#heartbeat(

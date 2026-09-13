@@ -46,6 +46,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   assert(identical.every(result => !result.error), `same-key full requests converge: ${JSON.stringify(identical)}`);
   assert(JSON.stringify(identical[0].data) === JSON.stringify(identical[1].data), 'same-key full requests replay one response');
   assert(sql(`select count(*) from private.room_pin_sheet_full_resync_runs where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${identicalKey}'`) === '1', 'same-key full requests create one run');
+  assert(sql(`select (id=recovery_root_run_id)::text from private.room_pin_sheet_full_resync_runs where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${identicalKey}'`) === 'true', 'ordinary concurrent request winner self-roots exactly once');
 
   sql(`update private.room_pin_sheet_full_resync_runs set status='superseded',completed_at=clock_timestamp()
     where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${identicalKey}'`);
@@ -123,16 +124,23 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   assert(exhausted.status === 'operator_blocked', 'eighth retry enters operator-blocked');
   assert(sql(`select lease_fence from private.room_pin_sheet_full_resync_runs where id='${exhaustedRunId}'::uuid`) === String(blockedFence), 'retry exhaustion preserves the recovery fence');
 
-  const recoveryKey = `full-recovery-${randomUUID()}`;
-  const recoveryRequest = await client.rpc('request_room_pin_sheet_full_resync', {
-    ...identicalArgs,
-    p_expected_fence: blockedFence,
-    p_idempotency_key: recoveryKey,
-    p_request_hash: '8'.repeat(64),
-  });
-  assert(!recoveryRequest.error, `fenced recovery request is accepted: ${JSON.stringify(recoveryRequest)}`);
+  const recoveryKeys = [`full-recovery-a-${randomUUID()}`, `full-recovery-b-${randomUUID()}`];
+  const recoveryRequests = await Promise.all(recoveryKeys.map((key, index) => client.rpc(
+    'request_room_pin_sheet_full_resync',
+    {
+      ...identicalArgs,
+      p_expected_fence: blockedFence,
+      p_idempotency_key: key,
+      p_request_hash: String(index + 8).repeat(64),
+    },
+  )));
+  assert(recoveryRequests.every(result => result.error?.code !== '40P01'), 'same-root recovery requests have no deadlock');
+  assert(recoveryRequests.filter(result => !result.error).length === 1, `same-root recovery requests have one winner: ${JSON.stringify(recoveryRequests)}`);
+  assert(recoveryRequests.filter(result => result.error?.message === 'ROOM_PIN_SHEET_FULL_RESYNC_PENDING').length === 1, 'same-root recovery request loser gets the bounded active-run conflict');
+  const recoveryKey = recoveryKeys[recoveryRequests.findIndex(result => !result.error)];
   const recoveryRunId = sql(`select id from private.room_pin_sheet_full_resync_runs
     where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${recoveryKey}'`);
+  assert(sql(`select (recovery_root_run_id='${exhaustedRunId}'::uuid)::text from private.room_pin_sheet_full_resync_runs where id='${recoveryRunId}'::uuid`) === 'true', 'same-root request winner inherits the exhausted root exactly');
   const recoveryClaimIds = [randomUUID(), randomUUID()];
   const recoveryClaims = await Promise.all(recoveryClaimIds.map(claimId => sqlAsync(
     `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'local','local','${targetDigest}')::text`,
@@ -167,6 +175,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   assert(!mismatchRequest.error, `target-drift concurrency fixture is accepted: ${JSON.stringify(mismatchRequest)}`);
   const mismatchRunId = sql(`select id from private.room_pin_sheet_full_resync_runs
     where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${mismatchKey}'`);
+  assert(sql(`select (id=recovery_root_run_id)::text from private.room_pin_sheet_full_resync_runs where id='${mismatchRunId}'::uuid`) === 'true', 'target-drift source run retains its self root');
   const mismatchClaimIds = [randomUUID(), randomUUID()];
   const mismatchClaims = await Promise.all(mismatchClaimIds.map(claimId => sqlAsync(
     `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'local','local','${targetDigest}')::text`,
@@ -196,6 +205,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   const mismatchRecoveryRunId = sql(`select id from private.room_pin_sheet_full_resync_runs
     where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${mismatchRecoveryKey}'`);
   assert(sql(`select reconciles_blocked_fence from private.room_pin_sheet_full_resync_runs where id='${mismatchRecoveryRunId}'::uuid`) === String(mismatchFence), 'target recovery binds the exact dedicated mismatch fence');
+  assert(sql(`select (recovery_root_run_id='${mismatchRunId}'::uuid)::text from private.room_pin_sheet_full_resync_runs where id='${mismatchRecoveryRunId}'::uuid`) === 'true', 'target recovery inherits the original mismatch root');
   const mismatchRecoveryClaimIds = [randomUUID(), randomUUID()];
   const mismatchRecoveryClaims = await Promise.all(mismatchRecoveryClaimIds.map(claimId => sqlAsync(
     `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'local','local','${targetDigest}')::text`,
@@ -226,7 +236,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   assert(sql("select count(*) from private.room_pin_sheet_full_resync_runs where status in ('pending','processing','failed')") === '0', 'no active full-resync run is orphaned');
   assert(sql("select count(*) from private.room_pin_sheet_full_resync_runs where status='operator_blocked'") === '0', 'no reconciled operator-blocked full run is orphaned');
   assert(sql("select count(*) from private.room_pin_sheet_sync_outbox where status='processing'") === '0', 'no incremental processing row is orphaned');
-  console.log('Room PIN Sheet full-resync concurrency passed: same-key=1/2 replay, different-key=1/2 active, full-vs-incremental=1 permit, retry and target-drift recoveries each=1/2 claim and 1 provider permit, 40P01/generic errors=0.');
+  console.log('Room PIN Sheet full-resync concurrency passed: same-key replay=1 run, different-key active/recovery=1 winner, full-vs-incremental=1 permit, retry and target-drift recoveries each=1/2 claim and 1 provider permit, 40P01/generic errors=0.');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -286,10 +286,10 @@ select is((select reconciles_blocked_fence from private.room_pin_sheet_full_resy
   'recovery command binds the exact retained blocked fence');
 
 insert into private.room_pin_sheet_full_resync_runs(
-  id,actor_profile_id,actor_role_snapshot,expected_fence,aad_environment,aad_project_ref,
+  id,actor_profile_id,actor_role_snapshot,expected_fence,recovery_root_run_id,aad_environment,aad_project_ref,
   target_identity_digest,snapshot_room_count,status,lease_fence,retry_count,last_error_code,
   idempotency_key,request_hash,requested_at,completed_at
-) select pg_temp.fid(499),pg_temp.fid(3),'admin',blocked_fence,'local','local',repeat('a',64),
+) select pg_temp.fid(499),pg_temp.fid(3),'admin',blocked_fence,pg_temp.fid(499),'local','local',repeat('a',64),
   121,'operator_blocked',blocked_fence,8,'RETRY_EXHAUSTED','newer-blocked-0001',repeat('9',64),
   clock_timestamp()+interval '1 second',clock_timestamp()+interval '1 second'
 from exhausted_recovery_evidence;
