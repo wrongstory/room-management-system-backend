@@ -23,7 +23,12 @@ function required(name: string): string {
   return value;
 }
 
-async function hasNonEmptyRequestBody(request: Request): Promise<boolean> {
+const REQUEST_BODY_READ_DEADLINE_MS = 1_000;
+
+async function hasNonEmptyRequestBody(
+  request: Request,
+  readDeadlineMs: number,
+): Promise<boolean> {
   const contentLength = request.headers.get("content-length")?.trim();
   if (
     contentLength !== undefined &&
@@ -35,18 +40,36 @@ async function hasNonEmptyRequestBody(request: Request): Promise<boolean> {
 
   const reader = request.body.getReader();
   let streamEnded = false;
+  const deadline = Date.now() + Math.max(1, readDeadlineMs);
   try {
     for (let emptyChunks = 0; emptyChunks < 8; emptyChunks += 1) {
-      const chunk = await reader.read();
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return true;
+      let timeoutId: number | undefined;
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<null>((resolve) => {
+          timeoutId = setTimeout(() => resolve(null), remainingMs);
+        }),
+      ]).finally(() => {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      });
+      if (chunk === null) return true;
       if (chunk.done) {
         streamEnded = true;
         break;
       }
       if ((chunk.value?.byteLength ?? 0) > 0) return true;
     }
+  } catch {
+    return true;
   } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
+    void reader.cancel().catch(() => undefined);
+    try {
+      reader.releaseLock();
+    } catch {
+      // A timed-out pending read remains locked until cancellation settles.
+    }
   }
   return !streamEnded;
 }
@@ -226,6 +249,7 @@ const response = (status: number, id: string, result: unknown) =>
   );
 export interface NotificationDeliveryHandlerDependencies {
   loadInvokeSecret?: () => string;
+  bodyReadDeadlineMs?: number;
   loadConfig?: typeof notificationDeliveryConfig;
   run?: (
     config: ReturnType<typeof notificationDeliveryConfig>,
@@ -275,14 +299,6 @@ export async function handleNotificationDelivery(
         },
       });
     }
-    if (await hasNonEmptyRequestBody(request)) {
-      return response(400, id, {
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "요청 본문은 허용되지 않습니다.",
-        },
-      });
-    }
     const invokeSecret = (dependencies.loadInvokeSecret ?? (() =>
       required("NOTIFICATION_DELIVERY_INVOKE_SECRET")))();
     if (utf8(invokeSecret).length < 32) {
@@ -298,6 +314,19 @@ export async function handleNotificationDelivery(
         error: {
           code: "INVALID_INVOKE_SECRET",
           message: "호출 인증에 실패했습니다.",
+        },
+      });
+    }
+    if (
+      await hasNonEmptyRequestBody(
+        request,
+        dependencies.bodyReadDeadlineMs ?? REQUEST_BODY_READ_DEADLINE_MS,
+      )
+    ) {
+      return response(400, id, {
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "요청 본문은 허용되지 않습니다.",
         },
       });
     }

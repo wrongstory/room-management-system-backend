@@ -151,6 +151,74 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
   assert(!(await oversizedResponse.text()).includes(secret));
   assert(runs === 1);
 });
+Deno.test("notification delivery authenticates before bounded body inspection", async () => {
+  let configLoads = 0;
+  let runs = 0;
+  const neverEndingBody = () =>
+    new ReadableStream<Uint8Array>({
+      pull: () => new Promise<void>(() => undefined),
+    });
+  const invalidRequest = new Request(
+    "http://localhost/functions/v1/notification-delivery",
+    {
+      method: "POST",
+      headers: {
+        "x-notification-delivery-invoke-secret":
+          "wrong-secret-that-is-long-enough-000",
+      },
+      body: neverEndingBody(),
+    },
+  );
+  let invalidTimeoutId: number | undefined;
+  const invalidSecretResponse = await Promise.race([
+    handleNotificationDelivery(invalidRequest, {
+      loadInvokeSecret: () => secret,
+      loadConfig: () => {
+        configLoads++;
+        return config;
+      },
+      run: async () => {
+        runs++;
+        return {};
+      },
+    }),
+    new Promise<null>((resolve) => {
+      invalidTimeoutId = setTimeout(() => resolve(null), 100);
+    }),
+  ]).finally(() => {
+    if (invalidTimeoutId !== undefined) clearTimeout(invalidTimeoutId);
+  });
+  await invalidRequest.body?.cancel();
+  assert(
+    invalidSecretResponse?.status === 401,
+    "unauthenticated streams must not be read before secret rejection",
+  );
+
+  const timedOutBodyResponse = await handleNotificationDelivery(
+    new Request("http://localhost/functions/v1/notification-delivery", {
+      method: "POST",
+      headers: { "x-notification-delivery-invoke-secret": secret },
+      body: neverEndingBody(),
+    }),
+    {
+      loadInvokeSecret: () => secret,
+      bodyReadDeadlineMs: 20,
+      loadConfig: () => {
+        configLoads++;
+        return config;
+      },
+      run: async () => {
+        runs++;
+        return {};
+      },
+    },
+  );
+  assert(
+    timedOutBodyResponse.status === 400,
+    "authenticated non-terminating streams must fail closed at the body deadline",
+  );
+  assert(configLoads === 0 && runs === 0);
+});
 Deno.test("notification delivery Edge accepts the distinct invoke secret and returns bounded aggregate only", async () => {
   for (
     const url of [
