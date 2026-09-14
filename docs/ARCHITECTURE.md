@@ -708,8 +708,21 @@ domain lock과 상태 재검증 뒤 `clock_timestamp()`로 다시 확인하고, 
 `serviceDate` 일치, 서비스일 다음 날 00:00 KST 상한, 다음 유효 예약 체크인 30분 전 상한을 같은 잠금 안에서
 검증합니다. Fastify와 Edge는 incident timestamp 요청·DB projection 모두 초와 UTC offset이 있는 strict RFC 3339로
 검증하고 잘못된 달력 날짜나 DB 값을 안전하게 차단합니다. 중단 구간에는 earning·벌점을 생성하지 않습니다.
-Fastify/Edge/OpenAPI candidate는 3개 route를
-추가한 108 paths / 115 operations이고 production에는 아직 승격되지 않았습니다.
+Fastify/Edge/OpenAPI의 #133 통합 기준은 108 paths / 115 operations입니다. #156 candidate는 여기에
+`GET·POST /v1/cleaning-templates` 한 path와 두 operation을 추가한 109 paths / 117 operations이며
+production에는 아직 승격되지 않았습니다.
+
+### #156 checkout template 운영 게시 경계
+
+예약 command의 `CLEANING_TEMPLATE_NOT_CONFIGURED`는 제거하지 않습니다. active/password-complete business
+admin의 live session만 네 room type의 current checkout template을 조회하고, 한 타입씩 expected-version CAS로
+새 immutable version을 게시합니다. actor/command/key/request-hash receipt와 room-type advisory lock이 replay와
+경쟁을 직렬화하며, 이전 published row는 retired 이력으로 남고 published partial unique가 exactly-one을 보장합니다.
+최초 version은 기존 max 다음 값과 7 중 큰 값이고, 현행 photo 증빙 계약의 정확한 타입별 slot 수·필수 수·required
+`tv-on`을 우회하지 않습니다. duration은 운영 입력값이지만 계산 overflow 방지를 위해 1..10,080분으로 제한합니다.
+raw template table은 Data API role에 열지 않고 service-only RPC가 actor/session/password/role을 다시 검증합니다.
+audit에는 slot label/description이나 raw state/hash를 복제하지 않습니다. 설정 게시 자체는 행동 수신자가 없으므로
+notification/outbox를 만들지 않으며, production seed와 stayover/additional/reclean 계약은 이 candidate 범위 밖입니다.
 
 ## API 단계
 

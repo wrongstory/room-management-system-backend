@@ -75,7 +75,7 @@ production 최종 확인: **2026-09-03 KST** (아래 기존 운영 evidence). �
 - 현재 GitHub 운영 릴리즈 정본: `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`
   - v0.2.0 통합 source 승격: `main@2a683fa`
   - production Edge 배포 bundle source: diagnostics zero-byte hosted 호환 hotfix PR #64 / `main@cd635b116f451a39481f496f2bd368776385a409`
-- 이 문서 갱신의 integration base: `dev@7b3835f0461986f3f7d9bfdb0228875a5422a798`; base는 **53 migrations / 105 paths / 112 operations**이며 #140 nonce/concurrency 보완까지 source/dev가 완료됐다. 현재 #133 feature candidate는 기존 53 migrations를 수정하지 않는 54번째 checkout incident migration과 3 paths / 3 operations를 추가해 **108 paths / 115 operations**다. Issue #112/#137/#140 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
+- 이 문서 갱신의 integration base: `dev@7c05eda9cffb293208081794be2d8b2bdd354d76`; base는 #133과 v0.3 역반영까지 포함한 **54 migrations / 108 paths / 115 operations**다. 현재 #156 feature candidate는 기존 54개를 수정하지 않는 55번째 checkout template admin migration과 1 path / 2 operations를 추가해 **109 paths / 117 operations**다. Issue #112/#137/#140 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #137 Phase C는 developer/admin 안전 상태 조회와 121실 DB-authoritative full resync source를 통합했지만, source-controlled local exact target 외 hosted mapping, secret, ACL, Edge/Cron 배포와 Google 호출은 별도 release gate다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
 - 개발 통합 기능 기준: #25~#31, #4, #7A/B/C, #83/#84/#85 및 #93/#95/#96 source/dev 완료, production 미승격
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
@@ -1140,7 +1140,24 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [ ] `dev` squash merge 및 승인 tree 대조
 - [ ] v0.3.0 release/main·production migration/Edge/hosted role·mutation smoke
 
-현재 critical path는 **#133 exact-head source gate → dev 병합 → v0.3.0 release/main 검증·승격**이다.
+### #156 퇴실 청소 템플릿 운영 게시 — feature candidate
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/cleaning-templates?cleaningKind=checkout` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ |
+| [x] | `POST /v1/cleaning-templates` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ |
+
+- [x] 네 stable `roomTypeCode`를 한 번에 조회하며 미설정은 `configured=false/currentPublished=null/expectedVersion=0`으로 명시하고 fallback·seed를 만들지 않음
+- [x] 한 객실 타입씩 `expectedVersion` CAS와 actor/command/key/request-hash scoped idempotency로 새 immutable version 게시
+- [x] 첫 version은 `greatest(existing max + 1, 7)`, 이후 단조 증가; 기존 published는 retired로 보존하고 타입/kind별 published exactly-one 유지
+- [x] checkout 슬롯은 10/11/13/15개, 필수 총수-1, required `tv-on` 1개, 연속 순서·중복·문자열 경계를 DB/Fastify/Edge에서 검증
+- [x] raw template Data API DML/SELECT 차단, service-only RPC에서 최신 actor/session/password/role 재검증
+- [x] audit은 `roomTypeCode`, `cleaningKind`, `version`, `durationMinutes`, `slotCount`만 저장·노출; 게시 자체는 수신자 행동이 없어 notification/outbox 미생성
+- [x] 예약 전 409 fail-closed를 유지하고 게시 뒤 예약당 planned target 1건과 불변 template/slot snapshot 생성
+- [ ] exact-head 독립 QA·required GitHub `application` / `migration` PASS 및 `dev` 병합
+- [ ] release/main·production migration/Edge/hosted admin smoke
+
+현재 critical path는 **#156 exact-head source gate → dev 병합 → v0.3.0 release/main 검증·승격**이다.
 #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고
@@ -1187,6 +1204,7 @@ Swagger/OpenAPI에 표시된 operation 수와 이 문서의 **Production Edge �
 - Availability Edge parity: #51 (P0)
 - Reservation Edge parity: #52 (P1)
 - Room Edge parity: #53 (P1)
+- checkout cleaning template admin: #156 (P0)
 - Assignment Core: #25
 - `docs/AI_BACKEND_PRODUCT_GUIDE.md`
 - `docs/FRONTEND_API_INTEGRATION.md`

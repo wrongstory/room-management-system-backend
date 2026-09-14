@@ -210,16 +210,18 @@ export async function testAttemptActivationConcurrency(client, actor) {
   const sourceRooms = ok(await client.from('rooms').select('id,room_number,room_type_id,state_version')
     .order('room_number').range(110, 112), 'source window race rooms');
   for (const roomTypeId of new Set(sourceRooms.map((room) => room.room_type_id))) {
-    const published = ok(await client.from('cleaning_template_versions').select('id')
-      .eq('room_type_id', roomTypeId).eq('cleaning_kind', 'stayover').eq('status', 'published'),
-    'source window stayover template');
-    if (published.length === 0) {
-      ok(await client.from('cleaning_template_versions').insert({
-        room_type_id: roomTypeId, cleaning_kind: 'stayover', version: 1,
-        status: 'published', duration_minutes: 60, photo_slots: [],
-        published_at: now.toISOString(), created_by: actorProfileId
-      }), 'source window published local template fixture');
-    }
+    // stayover is not part of #156's confirmed admin API. Install this older
+    // synthetic fixture through the local postgres test harness, never by
+    // reopening raw Data API template DML.
+    execFileSync('docker', [
+      'exec', '-i', 'supabase_db_room-management-system-backend',
+      'psql', '-X', '-q', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      '-c', `insert into public.cleaning_template_versions(
+        room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,published_at,created_by
+      ) select '${roomTypeId}'::uuid,'stayover',1,'published',60,'[]'::jsonb,clock_timestamp(),'${actorProfileId}'::uuid
+      where not exists(select 1 from public.cleaning_template_versions where room_type_id='${roomTypeId}'::uuid
+        and cleaning_kind='stayover' and status='published')`
+    ], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 15000 });
   }
   const stayCheckIn = '2039-10-01T16:00:00+09:00';
   const stayCheckOut = '2039-10-03T11:00:00+09:00';

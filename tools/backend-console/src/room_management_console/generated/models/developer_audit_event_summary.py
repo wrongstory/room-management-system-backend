@@ -8,6 +8,7 @@ from uuid import UUID
 from attrs import define as _attrs_define
 
 from ..models.app_role import AppRole
+from ..models.cleaning_template_room_type_code import CleaningTemplateRoomTypeCode
 from ..models.developer_audit_event_summary_capability_kind import (
     DeveloperAuditEventSummaryCapabilityKind,
 )
@@ -95,6 +96,9 @@ class DeveloperAuditEventSummary:
         rollover_to_date (datetime.date | Unset):
         carryover_count (int | Unset):
         policy_version (int | Unset):
+        room_type_code (CleaningTemplateRoomTypeCode | Unset):
+        duration_minutes (int | Unset):
+        slot_count (int | Unset):
         standard_minutes (int | Unset):
         premium_minutes (int | Unset):
         ocean_premium_minutes (int | Unset):
@@ -193,6 +197,9 @@ class DeveloperAuditEventSummary:
     rollover_to_date: datetime.date | Unset = UNSET
     carryover_count: int | Unset = UNSET
     policy_version: int | Unset = UNSET
+    room_type_code: CleaningTemplateRoomTypeCode | Unset = UNSET
+    duration_minutes: int | Unset = UNSET
+    slot_count: int | Unset = UNSET
     standard_minutes: int | Unset = UNSET
     premium_minutes: int | Unset = UNSET
     ocean_premium_minutes: int | Unset = UNSET
@@ -433,6 +440,14 @@ class DeveloperAuditEventSummary:
 
         policy_version = self.policy_version
 
+        room_type_code: str | Unset = UNSET
+        if not isinstance(self.room_type_code, Unset):
+            room_type_code = self.room_type_code.value
+
+        duration_minutes = self.duration_minutes
+
+        slot_count = self.slot_count
+
         standard_minutes = self.standard_minutes
 
         premium_minutes = self.premium_minutes
@@ -652,6 +667,12 @@ class DeveloperAuditEventSummary:
             field_dict["carryoverCount"] = carryover_count
         if policy_version is not UNSET:
             field_dict["policyVersion"] = policy_version
+        if room_type_code is not UNSET:
+            field_dict["roomTypeCode"] = room_type_code
+        if duration_minutes is not UNSET:
+            field_dict["durationMinutes"] = duration_minutes
+        if slot_count is not UNSET:
+            field_dict["slotCount"] = slot_count
         if standard_minutes is not UNSET:
             field_dict["standardMinutes"] = standard_minutes
         if premium_minutes is not UNSET:
@@ -1050,6 +1071,17 @@ class DeveloperAuditEventSummary:
 
         policy_version = d.pop("policyVersion", UNSET)
 
+        _room_type_code = d.pop("roomTypeCode", UNSET)
+        room_type_code: CleaningTemplateRoomTypeCode | Unset
+        if isinstance(_room_type_code, Unset):
+            room_type_code = UNSET
+        else:
+            room_type_code = CleaningTemplateRoomTypeCode(_room_type_code)
+
+        duration_minutes = d.pop("durationMinutes", UNSET)
+
+        slot_count = d.pop("slotCount", UNSET)
+
         standard_minutes = d.pop("standardMinutes", UNSET)
 
         premium_minutes = d.pop("premiumMinutes", UNSET)
@@ -1241,6 +1273,9 @@ class DeveloperAuditEventSummary:
             rollover_to_date=rollover_to_date,
             carryover_count=carryover_count,
             policy_version=policy_version,
+            room_type_code=room_type_code,
+            duration_minutes=duration_minutes,
+            slot_count=slot_count,
             standard_minutes=standard_minutes,
             premium_minutes=premium_minutes,
             ocean_premium_minutes=ocean_premium_minutes,

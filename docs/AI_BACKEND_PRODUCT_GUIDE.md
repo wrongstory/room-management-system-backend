@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서 갱신의 `dev` integration base: `7b3835f0461986f3f7d9bfdb0228875a5422a798` — #140 보완까지 반영된 기준 53 migrations / OpenAPI 105 paths / 112 operations. 현재 #133 feature candidate는 기존 53개를 수정하지 않는 54번째 checkout incident migration과 3 paths / 3 operations를 추가한다.
+- 이 문서 갱신의 `dev` integration base: `7c05eda9cffb293208081794be2d8b2bdd354d76` — #133과 v0.3 역반영까지 반영된 기준 54 migrations / OpenAPI 108 paths / 115 operations. 현재 #156 feature candidate는 기존 54개를 수정하지 않는 55번째 checkout template admin migration과 1 path / 2 operations를 추가한다.
 - 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -771,10 +771,11 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140 보완까지 source/dev에 통합됐다. 현재 #133은 기존 53 migrations를 보존하는 54번째 checkout incident workflow와 3개 API candidate다. source 검증과 운영 승격을 섞지 않는다.
+P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133까지 source/dev에 통합됐다. 예약 생성의 `CLEANING_TEMPLATE_NOT_CONFIGURED`를 운영 입력으로 해소하는 #156을 release보다 먼저 진행한다. #156은 checkout만 지원하며 네 room type의 current published 상태 조회와 한 타입씩 immutable publish를 제공한다. first version은 v7 증빙 계약을 충족하고 raw Data API DML, seed, fallback, stayover/additional/reclean 추측을 허용하지 않는다. source 검증과 운영 승격을 섞지 않는다.
 
-1. Issue #133의 신고·동결·관리자 결정·재배정 source를 독립 검토해 `dev`에 통합한다.
-2. 확정된 `dev`에서 v0.3.0 release를 구성하고 전체 QA·migration manifest·복구 가능성을 검증한 뒤 `main`과 production으로 승격한다.
+1. Issue #156의 checkout template 조회·immutable 게시 source를 exact-head 독립 검토한다.
+2. required application/migration CI와 리뷰를 통과한 #156을 `dev`에 통합한다.
+3. 확정된 `dev`에서 v0.3.0 release를 구성하고 전체 QA·migration manifest·복구 가능성을 검증한 뒤 `main`과 production으로 승격한다.
 3. Issue #34의 GitHub Actions runtime 경고는 별도 CI 유지보수 PR로 관리한다.
 4. Issue #137 hosted Google Sheets 활성화는 실제 대상/서비스 계정/ACL/Secrets/Edge/Cron/smoke 승인 뒤에만 진행한다.
 5. Issue #12 backup/recovery source는 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.

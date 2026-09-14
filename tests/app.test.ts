@@ -150,6 +150,28 @@ function services(): AppServices {
       createManualCleaningRequest: vi.fn(),
       cancelManualCleaningRequest: vi.fn()
     },
+    cleaningTemplates: {
+      listCheckout: vi.fn(async () => ({
+        cleaningKind: 'checkout' as const,
+        roomTypes: ['standard', 'premium', 'oceanPremium', 'oceanFamily'].map((roomTypeCode) => ({
+          roomTypeCode: roomTypeCode as 'standard' | 'premium' | 'oceanPremium' | 'oceanFamily',
+          roomTypeName: roomTypeCode,
+          cleaningKind: 'checkout' as const,
+          configured: false,
+          expectedVersion: 0,
+          currentPublished: null
+        }))
+      })),
+      publishCheckout: vi.fn(async (_actor, input) => ({
+        id: '54000000-0000-4000-8000-000000000001',
+        version: 7,
+        status: 'published' as const,
+        durationMinutes: input.durationMinutes,
+        slots: input.slots,
+        publishedAt: '2026-09-14T00:00:00.000Z',
+        createdAt: '2026-09-14T00:00:00.000Z'
+      }))
+    },
     payroll: {
       list: vi.fn(async () => ({ payroll: [], nextCursor: null })),
       listEntries: vi.fn(async () => ({
@@ -531,6 +553,64 @@ describe('application', () => {
     });
     expect(JSON.stringify(response.json())).not.toContain('guest_name_encrypted');
     expect(JSON.stringify(response.json())).not.toContain('홍길동');
+    await app.close();
+  });
+
+  it('lists and publishes strict checkout templates for active business admins', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/v1/cleaning-templates?cleaningKind=checkout',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers['cache-control']).toBe('no-store');
+    expect(listed.json().templates.roomTypes).toHaveLength(4);
+
+    const slots = Array.from({ length: 10 }, (_, displayOrder) => ({
+      slotKey: displayOrder === 0 ? 'tv-on' : `slot-${displayOrder}`,
+      displayOrder,
+      required: displayOrder < 9,
+      label: `사진 ${displayOrder + 1}`
+    }));
+    const published = await app.inject({
+      method: 'POST',
+      url: '/v1/cleaning-templates',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'cleaning-template-publish-0001'
+      },
+      payload: {
+        roomTypeCode: 'standard', cleaningKind: 'checkout', expectedVersion: 0,
+        durationMinutes: 60, slots
+      }
+    });
+    expect(published.statusCode).toBe(201);
+    expect(published.headers['cache-control']).toBe('no-store');
+    expect(published.json().template).toMatchObject({ version: 7, status: 'published' });
+    expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ roomTypeCode: 'standard', idempotencyKey: 'cleaning-template-publish-0001' })
+    );
+
+    const firstSlot = slots[0];
+    if (!firstSlot) throw new Error('slot fixture is empty');
+    const invalidRows: typeof slots = [
+      { ...firstSlot, displayOrder: 1 },
+      { ...firstSlot, slotKey: 'TV_ON' },
+      { ...firstSlot, label: '' }
+    ];
+    for (const invalid of invalidRows) {
+      const badSlots = [...slots]; badSlots[0] = invalid;
+      const response = await app.inject({
+        method: 'POST', url: '/v1/cleaning-templates',
+        headers: { authorization: 'Bearer access-token', 'idempotency-key': `template-invalid-${invalid.slotKey}` },
+        payload: { roomTypeCode: 'standard', cleaningKind: 'checkout', expectedVersion: 0, durationMinutes: 60, slots: badSlots }
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledTimes(1);
     await app.close();
   });
 

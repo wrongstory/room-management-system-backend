@@ -619,6 +619,7 @@ Table public.cleaning_template_versions {
   Indexes {
     (room_type_id, cleaning_kind, version) [unique]
   }
+  Note: '#156 RPC-only checkout catalog. Active password-complete business admin publishes immutable v7+ versions with live-session, expected-version CAS and scoped idempotency; prior published rows retire and exactly one current published row remains. No source seed or fallback.'
 }
 
 Table private.photo_template_slots {
