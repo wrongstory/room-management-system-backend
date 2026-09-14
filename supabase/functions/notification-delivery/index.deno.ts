@@ -58,18 +58,34 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
   );
   assert(
     (await handleNotificationDelivery(
-      new Request("http://localhost/notification-delivery", {
+      new Request("http://localhost/notification-delivery/", {
         method: "POST",
         headers: { "x-notification-delivery-invoke-secret": secret },
       }),
       dependencies,
     )).status === 404,
   );
+  for (
+    const url of [
+      "http://localhost/notification-delivery/extra",
+      "http://localhost/notification-delivery?alias=1",
+    ]
+  ) {
+    assert(
+      (await handleNotificationDelivery(
+        new Request(url, {
+          method: "POST",
+          headers: { "x-notification-delivery-invoke-secret": secret },
+        }),
+        dependencies,
+      )).status === 404,
+      "runtime path aliases must remain unavailable",
+    );
+  }
   assert(
     (await handleNotificationDelivery(request("POST", "", "{}"), dependencies))
       .status === 400,
   );
-  let declaredEmptyPulls = 0;
   const declaredEmpty = new Request(
     "http://localhost/functions/v1/notification-delivery",
     {
@@ -78,21 +94,29 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
         "x-notification-delivery-invoke-secret": secret,
         "content-length": "0",
       },
-      body: new ReadableStream({
-        pull() {
-          declaredEmptyPulls++;
-        },
-      }),
+      body: "",
     },
   );
-  await Promise.resolve();
-  const declaredEmptyPullsBeforeHandler = declaredEmptyPulls;
   assert(
     (await handleNotificationDelivery(declaredEmpty, dependencies)).status ===
-        400 && declaredEmptyPulls === declaredEmptyPullsBeforeHandler,
-    "Content-Length: 0 cannot hide a non-null body and body is not read",
+      200,
+    "hosted-style zero-byte streams must remain valid empty requests",
   );
-  await declaredEmpty.body?.cancel();
+  assert(runs === 1, "hosted-style empty request must invoke the worker once");
+  assert(
+    (await handleNotificationDelivery(
+      new Request("http://localhost/functions/v1/notification-delivery", {
+        method: "POST",
+        headers: {
+          "x-notification-delivery-invoke-secret": secret,
+          "content-length": "0",
+        },
+        body: "{}",
+      }),
+      dependencies,
+    )).status === 400,
+    "Content-Length: 0 cannot hide actual body bytes",
+  );
   assert(
     (await handleNotificationDelivery(
       request("POST", "", undefined, "wrong-secret-that-is-long-enough-000"),
@@ -120,38 +144,119 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
     dependencies,
   );
   assert(
-    oversizedResponse.status === 400 && pulled === pullsBeforeHandler,
-    "chunked request must be rejected without reading more body bytes",
+    oversizedResponse.status === 400 && pulled <= pullsBeforeHandler + 1,
+    "chunked request must be rejected after at most one non-empty chunk",
   );
   await oversizedChunked.body?.cancel();
   assert(!(await oversizedResponse.text()).includes(secret));
-  assert(runs === 0);
+  assert(runs === 1);
+});
+Deno.test("notification delivery authenticates before bounded body inspection", async () => {
+  let configLoads = 0;
+  let runs = 0;
+  const neverEndingBody = () =>
+    new ReadableStream<Uint8Array>({
+      pull: () => new Promise<void>(() => undefined),
+    });
+  const invalidRequest = new Request(
+    "http://localhost/functions/v1/notification-delivery",
+    {
+      method: "POST",
+      headers: {
+        "x-notification-delivery-invoke-secret":
+          "wrong-secret-that-is-long-enough-000",
+      },
+      body: neverEndingBody(),
+    },
+  );
+  let invalidTimeoutId: number | undefined;
+  const invalidSecretResponse = await Promise.race([
+    handleNotificationDelivery(invalidRequest, {
+      loadInvokeSecret: () => secret,
+      loadConfig: () => {
+        configLoads++;
+        return config;
+      },
+      run: async () => {
+        runs++;
+        return {};
+      },
+    }),
+    new Promise<null>((resolve) => {
+      invalidTimeoutId = setTimeout(() => resolve(null), 100);
+    }),
+  ]).finally(() => {
+    if (invalidTimeoutId !== undefined) clearTimeout(invalidTimeoutId);
+  });
+  await invalidRequest.body?.cancel();
+  assert(
+    invalidSecretResponse?.status === 401,
+    "unauthenticated streams must not be read before secret rejection",
+  );
+
+  const timedOutBodyResponse = await handleNotificationDelivery(
+    new Request("http://localhost/functions/v1/notification-delivery", {
+      method: "POST",
+      headers: { "x-notification-delivery-invoke-secret": secret },
+      body: neverEndingBody(),
+    }),
+    {
+      loadInvokeSecret: () => secret,
+      bodyReadDeadlineMs: 20,
+      loadConfig: () => {
+        configLoads++;
+        return config;
+      },
+      run: async () => {
+        runs++;
+        return {};
+      },
+    },
+  );
+  assert(
+    timedOutBodyResponse.status === 400,
+    "authenticated non-terminating streams must fail closed at the body deadline",
+  );
+  assert(configLoads === 0 && runs === 0);
 });
 Deno.test("notification delivery Edge accepts the distinct invoke secret and returns bounded aggregate only", async () => {
-  const response = await handleNotificationDelivery(request(), {
-    loadInvokeSecret: () => secret,
-    loadConfig: () => config,
-    validateConfig: () => Promise.resolve(),
-    run: async () => ({
-      claimed: 1,
-      delivered: 1,
-      retrying: 0,
-      suppressed: 0,
-      deadLetter: 0,
-      blocked: 0,
-      deferred: 0,
-    }),
-  });
-  const body = await response.json();
-  assert(
-    response.status === 200 &&
-      response.headers.get("cache-control") === "no-store",
-  );
-  assert(
-    body.claimed === 1 && body.delivered === 1 &&
-      typeof body.requestId === "string",
-  );
-  assert(!JSON.stringify(body).includes(secret));
+  for (
+    const url of [
+      "http://localhost/functions/v1/notification-delivery",
+      "http://localhost/notification-delivery",
+    ]
+  ) {
+    const response = await handleNotificationDelivery(
+      new Request(url, {
+        method: "POST",
+        headers: { "x-notification-delivery-invoke-secret": secret },
+      }),
+      {
+        loadInvokeSecret: () => secret,
+        loadConfig: () => config,
+        validateConfig: () => Promise.resolve(),
+        run: async () => ({
+          claimed: 1,
+          delivered: 1,
+          retrying: 0,
+          suppressed: 0,
+          deadLetter: 0,
+          blocked: 0,
+          deferred: 0,
+        }),
+      },
+    );
+    const body = await response.json();
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+    );
+    assert(
+      body.claimed === 1 && body.delivered === 1 &&
+        typeof body.requestId === "string",
+    );
+    assert(!JSON.stringify(body).includes(secret));
+  }
 });
 Deno.test("notification delivery Edge durably degrades invalid provider config without leaking detail", async () => {
   let recorded = 0, runs = 0;
