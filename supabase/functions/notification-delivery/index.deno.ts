@@ -86,7 +86,6 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
     (await handleNotificationDelivery(request("POST", "", "{}"), dependencies))
       .status === 400,
   );
-  let declaredEmptyPulls = 0;
   const declaredEmpty = new Request(
     "http://localhost/functions/v1/notification-delivery",
     {
@@ -95,21 +94,29 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
         "x-notification-delivery-invoke-secret": secret,
         "content-length": "0",
       },
-      body: new ReadableStream({
-        pull() {
-          declaredEmptyPulls++;
-        },
-      }),
+      body: "",
     },
   );
-  await Promise.resolve();
-  const declaredEmptyPullsBeforeHandler = declaredEmptyPulls;
   assert(
     (await handleNotificationDelivery(declaredEmpty, dependencies)).status ===
-        400 && declaredEmptyPulls === declaredEmptyPullsBeforeHandler,
-    "Content-Length: 0 cannot hide a non-null body and body is not read",
+      200,
+    "hosted-style zero-byte streams must remain valid empty requests",
   );
-  await declaredEmpty.body?.cancel();
+  assert(runs === 1, "hosted-style empty request must invoke the worker once");
+  assert(
+    (await handleNotificationDelivery(
+      new Request("http://localhost/functions/v1/notification-delivery", {
+        method: "POST",
+        headers: {
+          "x-notification-delivery-invoke-secret": secret,
+          "content-length": "0",
+        },
+        body: "{}",
+      }),
+      dependencies,
+    )).status === 400,
+    "Content-Length: 0 cannot hide actual body bytes",
+  );
   assert(
     (await handleNotificationDelivery(
       request("POST", "", undefined, "wrong-secret-that-is-long-enough-000"),
@@ -137,12 +144,12 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
     dependencies,
   );
   assert(
-    oversizedResponse.status === 400 && pulled === pullsBeforeHandler,
-    "chunked request must be rejected without reading more body bytes",
+    oversizedResponse.status === 400 && pulled <= pullsBeforeHandler + 1,
+    "chunked request must be rejected after at most one non-empty chunk",
   );
   await oversizedChunked.body?.cancel();
   assert(!(await oversizedResponse.text()).includes(secret));
-  assert(runs === 0);
+  assert(runs === 1);
 });
 Deno.test("notification delivery Edge accepts the distinct invoke secret and returns bounded aggregate only", async () => {
   for (

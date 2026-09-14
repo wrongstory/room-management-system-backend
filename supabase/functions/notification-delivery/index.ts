@@ -22,6 +22,34 @@ function required(name: string): string {
   if (!value) throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
   return value;
 }
+
+async function hasNonEmptyRequestBody(request: Request): Promise<boolean> {
+  const contentLength = request.headers.get("content-length")?.trim();
+  if (
+    contentLength !== undefined &&
+    (!/^\d+$/.test(contentLength) || Number(contentLength) > 0)
+  ) {
+    return true;
+  }
+  if (request.body === null) return false;
+
+  const reader = request.body.getReader();
+  let streamEnded = false;
+  try {
+    for (let emptyChunks = 0; emptyChunks < 8; emptyChunks += 1) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        streamEnded = true;
+        break;
+      }
+      if ((chunk.value?.byteLength ?? 0) > 0) return true;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  return !streamEnded;
+}
 function base64(value: string): Uint8Array {
   let raw: string;
   try {
@@ -247,11 +275,7 @@ export async function handleNotificationDelivery(
         },
       });
     }
-    const contentLength = request.headers.get("content-length")?.trim();
-    if (
-      request.body !== null ||
-      (contentLength !== undefined && contentLength !== "0")
-    ) {
+    if (await hasNonEmptyRequestBody(request)) {
       return response(400, id, {
         error: {
           code: "VALIDATION_ERROR",
