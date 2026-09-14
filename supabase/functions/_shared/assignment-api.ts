@@ -1,3 +1,4 @@
+import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import {
   bearerToken,
@@ -5,7 +6,6 @@ import {
   requireBusinessAdmin,
   requirePasswordChanged,
 } from "./runtime.ts";
-import { idempotencyKey, readJsonBody } from "./account-api.ts";
 
 interface AssignmentRow {
   id: string;
@@ -261,6 +261,7 @@ export function prestartDatabaseError(error: { message?: string } | null) {
     "ASSIGNMENT_QUERY_INVALID",
     "ASSIGNMENT_INPUT_INVALID",
     "ASSIGNMENT_REASON_INVALID",
+    "CHECKOUT_INCIDENT_OPEN",
     "ADMIN_REQUIRED",
     "MAID_REQUIRED",
   ];
@@ -570,6 +571,12 @@ export function assignmentDatabaseError(
 ): EdgeError {
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
+    [
+      "CHECKOUT_INCIDENT_OPEN",
+      409,
+      "CHECKOUT_INCIDENT_OPEN",
+      "퇴실 미진행 사건을 관리자가 처리한 뒤 배정을 변경해 주세요.",
+    ],
     [
       "ADMIN_REQUIRED",
       403,

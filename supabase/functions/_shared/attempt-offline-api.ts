@@ -129,6 +129,7 @@ export function offlineDatabaseError(error: { message?: string } | null) {
     OFFLINE_EVENT_ALREADY_RESOLVED: 409,
     OFFLINE_LEASE_ISSUANCE_CLOSED: 409,
     OFFLINE_CLOCK_UNVERIFIABLE: 409,
+    CHECKOUT_INCIDENT_OPEN: 409,
   };
   const code = error?.message ?? "";
   if (Object.hasOwn(codes, code)) {

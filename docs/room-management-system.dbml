@@ -296,6 +296,56 @@ Table public.checkout_cleaning_obligations {
   Note: 'planned target is created with the reservation; private requires no current target and forbids execution. Actual checkout promotes the same planned identity to materialized/current. Cancellation preserves identity and soft cancels target/assignments. Composite FK ties planned target to obligation/reservation/room.'
 }
 
+Table public.checkout_presence_incidents {
+  id uuid [pk]
+  reservation_id uuid [not null]
+  room_id uuid [not null]
+  checkout_obligation_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null]
+  attempt_id uuid [not null, unique]
+  reported_by uuid [not null]
+  reason_code text [not null, note: 'GUEST_STILL_PRESENT only']
+  status text [not null, note: 'open/resolved']
+  reservation_version bigint [not null]
+  target_assignment_version bigint [not null]
+  assignment_revision bigint [not null]
+  attempt_execution_version bigint [not null]
+  pin_version_snapshot bigint
+  version bigint [not null]
+  current_decision_id uuid
+  reported_at timestamptz [not null]
+  resolved_at timestamptz
+  created_at timestamptz [not null]
+
+  Indexes {
+    cleaning_target_id [note: 'Unique where status=open']
+    (reservation_id, reported_at, id)
+    (room_id, status, reported_at, id)
+    (reported_by, reported_at, id)
+  }
+  Note: '#133 immutable report identity. An open incident freezes later execution/PIN/offline/submission/inspection/general reassignment and actual next check-in. Only the resolved pointer/version projection may advance.'
+}
+
+Table public.checkout_presence_incident_decisions {
+  id uuid [pk]
+  incident_id uuid [not null]
+  incident_version bigint [not null]
+  decision text [not null, note: 'EXTEND_CHECKOUT/CONFIRM_DEPARTED/FALSE_REPORT']
+  reason_code text [not null]
+  decided_by uuid [not null]
+  decided_at timestamptz [not null]
+  new_checkout_at timestamptz
+  next_assignment_id uuid
+  next_attempt_id uuid
+
+  Indexes {
+    (incident_id, incident_version) [unique]
+    (decided_by, decided_at, id)
+  }
+  Note: '#133 immutable business-admin decision. Existing checkout target and old assignment/attempt history are retained; extension adds occupancy-resumed history.'
+}
+
 Table public.room_occupancy_events {
   id uuid [pk]
   event_key text [not null, unique]
@@ -1947,6 +1997,18 @@ Ref: public.checkout_cleaning_obligations.room_id > public.rooms.id
 Ref: public.checkout_cleaning_obligations.current_cleaning_target_id - public.cleaning_targets.id
 Ref: public.checkout_cleaning_obligations.(planned_cleaning_target_id, id, reservation_id, room_id) - public.cleaning_targets.(id, checkout_obligation_id, reservation_id, room_id)
 Ref: public.checkout_cleaning_obligations.created_by > public.profiles.id
+Ref: public.checkout_presence_incidents.reservation_id > public.reservations.id
+Ref: public.checkout_presence_incidents.room_id > public.rooms.id
+Ref: public.checkout_presence_incidents.checkout_obligation_id > public.checkout_cleaning_obligations.id
+Ref: public.checkout_presence_incidents.cleaning_target_id > public.cleaning_targets.id
+Ref: public.checkout_presence_incidents.assignment_id > public.cleaning_assignments.id
+Ref: public.checkout_presence_incidents.attempt_id - public.cleaning_attempts.id
+Ref: public.checkout_presence_incidents.reported_by > public.profiles.id
+Ref: public.checkout_presence_incidents.(current_decision_id, id) - public.checkout_presence_incident_decisions.(id, incident_id)
+Ref: public.checkout_presence_incident_decisions.incident_id > public.checkout_presence_incidents.id
+Ref: public.checkout_presence_incident_decisions.decided_by > public.profiles.id
+Ref: public.checkout_presence_incident_decisions.next_assignment_id > public.cleaning_assignments.id
+Ref: public.checkout_presence_incident_decisions.next_attempt_id > public.cleaning_attempts.id
 Ref: public.room_occupancy_events.room_id > public.rooms.id
 Ref: public.room_occupancy_events.reservation_id > public.reservations.id
 Ref: public.room_occupancy_events.actor_profile_id > public.profiles.id

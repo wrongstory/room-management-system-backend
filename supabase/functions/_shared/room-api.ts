@@ -224,6 +224,12 @@ export function roomDatabaseError(
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
     [
+      "CHECKOUT_INCIDENT_OPEN",
+      409,
+      "CHECKOUT_INCIDENT_OPEN",
+      "퇴실 미진행 사건을 관리자가 처리한 뒤 PIN 작업을 진행해 주세요.",
+    ],
+    [
       "STALE_VERSION",
       409,
       "STALE_VERSION",

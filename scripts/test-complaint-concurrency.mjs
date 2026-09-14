@@ -101,8 +101,13 @@ export async function testComplaintConcurrency(client, adminProfileId) {
     }),
     "compensation maid",
   );
-  sql(`insert into public.availability_versions(id,maid_profile_id,week_start,version,status,is_current,submitted_at)
-    values(gen_random_uuid(),'${compensationMaidId}',current_date-(extract(isodow from current_date)::integer-1),1,'submitted',true,clock_timestamp());
+  sql(`with kst_today as (
+      select (clock_timestamp() at time zone 'Asia/Seoul')::date as value
+    )
+    insert into public.availability_versions(id,maid_profile_id,week_start,version,status,is_current,submitted_at)
+    select gen_random_uuid(),'${compensationMaidId}',
+      value-(extract(isodow from value)::integer-1),1,'submitted',true,clock_timestamp()
+    from kst_today;
     insert into public.availability_days(availability_version_id,work_date,available)
     select version.id,version.week_start+day_offset,true
     from public.availability_versions version cross join generate_series(0,6) day_offset

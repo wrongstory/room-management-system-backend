@@ -74,8 +74,16 @@ Issue #58에서 현재 성공 mutation의 append 지점을 전수 확인했다. 
 | cleaning request | `cleaning.manual_request.created`, `cleaning.manual_request.cancelled` |
 | room | `room.master_data_changed`, `room.create_block`, `room.release_block`, `room.set_candle_count`, `room.report_issue`, `room.resolve_issue`, `room.record_pin_sync` |
 | submission / inspection | `submission.bomb_reported`, `submission.created`, `inspection.bomb_decided`, `inspection.approved`, `inspection.rejected` |
+| checkout incident | `checkout.presence_reported`, `checkout.presence_decided` |
 
 scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `reservation.scheduled_check_in`/`reservation.scheduled_checkout`으로 같은 domain 원장에 기록된다. scheduler 실행 상태 자체는 `private.scheduler_invocation_heartbeats`의 bounded 운영 projection이다. 현재 구현된 성공 mutation 중 audit append 누락은 발견되지 않았다. 업무 API는 이 event 이름과 공통 activity helper를 재사용하며 자유문 event/source를 추가하지 않는다.
+
+#133 candidate의 checkout incident summary는
+`incidentId/reservationId/roomId/cleaningTargetId/assignmentId/attemptId/status/version/decisionId/checkoutDecision/nextAssignmentId/nextAttemptId`
+중 event별 필요한 필드만 반환합니다. `checkoutDecision`은 generic complaint/inspection decision과 분리된
+`EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` enum입니다. raw before/after state, request hash,
+PIN version·암호문·평문, 고객명·전화번호·session/token, 알림 body는 projection과 Python generated model에
+존재하지 않습니다. source candidate의 두 event가 production allowlist에도 배포됐다고 간주하지 않습니다.
 
 #29 source의 audit allowlist는 총 36개였습니다. #27 pre-start 필드에
 `assignment.attempt_activated`와 `assignment.rolled_over`를 더하고, attempt/rollover summary는

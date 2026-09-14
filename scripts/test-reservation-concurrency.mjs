@@ -7,6 +7,7 @@ import { testAttemptExecutionConcurrency } from './test-attempt-execution-concur
 import { testAttemptLifecycleConcurrency } from './test-attempt-lifecycle-concurrency.mjs';
 import { testAttemptOfflineConcurrency } from './test-attempt-offline-concurrency.mjs';
 import { testAttemptOfflineExpiryConcurrency } from './test-attempt-offline-expiry-concurrency.mjs';
+import { testCheckoutIncidentConcurrency } from './test-checkout-incident-concurrency.mjs';
 import { testComplaintConcurrency } from './test-complaint-concurrency.mjs';
 import { testNotificationConcurrency } from './test-notification-concurrency.mjs';
 import { testNotificationDeliveryConcurrency } from './test-notification-delivery-concurrency.mjs';
@@ -17,8 +18,8 @@ import { testPhotoDriveQuotaConcurrency } from './test-photo-drive-quota-concurr
 import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-operations-concurrency.mjs';
 import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
-import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
 import { testRoomPinBootstrapConcurrency } from './test-room-pin-bootstrap-concurrency.mjs';
+import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
 import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
 import { testRoomPinSheetSyncConcurrency } from './test-room-pin-sheet-sync-concurrency.mjs';
 import { testWebPushConcurrency } from './test-web-push-concurrency.mjs';
@@ -980,6 +981,7 @@ await testAttemptOfflineConcurrency(client);
 await testAttemptOfflineExpiryConcurrency(client);
 await testPayrollConcurrency(client,actorProfileId);
 await testComplaintConcurrency(client,actorProfileId);
+await testCheckoutIncidentConcurrency(client,actorProfileId);
 await testPhotoSubmissionConcurrency(client);
 await testPhotoStorageOperationsConcurrency(client);
 await testPhotoDriveQuotaConcurrency(client);

@@ -113,6 +113,7 @@ export function submissionDatabaseError(
     INVALID_BOMB_REPORT: 400,
     INVALID_BOMB_DECISION: 400,
     SUBMISSION_NOT_FOUND: 404,
+    CHECKOUT_INCIDENT_OPEN: 409,
   };
   if (Object.hasOwn(status, code)) {
     return new EdgeError(

@@ -1,12 +1,19 @@
 import {
-  availabilityDecisionRequestId,
-  decideAvailabilityChange,
-  listAvailability,
-  listAvailabilityCandidates,
-  listAvailabilityChangeRequests,
-  requestAvailabilityChange,
-  submitAvailability,
-} from "../_shared/availability-api.ts";
+  changeAccountRole,
+  changeAccountStatus,
+  changePassword,
+  createAccount,
+  listAccounts,
+  login,
+  profileIdFromPath,
+  resetAccountPassword,
+  unlockAccount,
+} from "../_shared/account-api.ts";
+import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
+import {
+  authorizationSourceForPath,
+  isAuthorizationDeniedCode,
+} from "../_shared/activity-contract.ts";
 import {
   assignmentCommitImpact,
   assignmentHistory,
@@ -27,7 +34,6 @@ import {
   currentAttempt,
   executeAttempt,
 } from "../_shared/attempt-api.ts";
-import { requirePasswordChanged } from "../_shared/runtime.ts";
 import {
   completeLimitedAttempt,
   getLimitedAttempt,
@@ -46,16 +52,29 @@ import {
   syncOfflineEvent,
 } from "../_shared/attempt-offline-api.ts";
 import {
-  changeAccountRole,
-  changeAccountStatus,
-  changePassword,
-  createAccount,
-  listAccounts,
-  login,
-  profileIdFromPath,
-  resetAccountPassword,
-  unlockAccount,
-} from "../_shared/account-api.ts";
+  availabilityDecisionRequestId,
+  decideAvailabilityChange,
+  listAvailability,
+  listAvailabilityCandidates,
+  listAvailabilityChangeRequests,
+  requestAvailabilityChange,
+  submitAvailability,
+} from "../_shared/availability-api.ts";
+import {
+  checkoutIncidentPath,
+  decideCheckoutIncident,
+  getCheckoutIncident,
+  reportCheckoutIncident,
+} from "../_shared/checkout-incident-api.ts";
+import {
+  complaintDetail,
+  complaintHistory,
+  complaintPath,
+  createComplaint,
+  listComplaints,
+  mutateComplaint,
+} from "../_shared/complaint-api.ts";
+import { assertComplaintResponseSize } from "../_shared/complaint-cursor.ts";
 import {
   developerActivityEvents,
   developerAuditEvents,
@@ -66,10 +85,10 @@ import {
   runDeveloperDiagnostics,
 } from "../_shared/developer-api.ts";
 import {
-  authorizationSourceForPath,
-  isAuthorizationDeniedCode,
-} from "../_shared/activity-contract.ts";
-import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
+  listNotifications,
+  markNotificationRead,
+  notificationReadPath,
+} from "../_shared/notification-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
 import {
   carryForwardPayroll,
@@ -84,37 +103,14 @@ import {
   startPayroll,
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
+import { createPhotoService } from "../_shared/photo-api.ts";
+import { PhotoError } from "../_shared/photo-binary.ts";
 import {
-  complaintDetail,
-  complaintHistory,
-  complaintPath,
-  createComplaint,
-  listComplaints,
-  mutateComplaint,
-} from "../_shared/complaint-api.ts";
-import { assertComplaintResponseSize } from "../_shared/complaint-cursor.ts";
-import {
-  listNotifications,
-  markNotificationRead,
-  notificationReadPath,
-} from "../_shared/notification-api.ts";
-import {
-  registerWebPushSubscription,
-  retireWebPushSubscription,
-  type WebPushCryptoConfig,
-  webPushPublicConfig,
-  webPushRetirePath,
-} from "../_shared/web-push-subscription-api.ts";
-
-import {
-  createSubmission,
-  decideBombRoom,
-  decideSubmission,
-  getSubmission,
-  listSubmissions,
-  reportBombRoom,
-  submissionPath,
-} from "../_shared/submission-api.ts";
+  photoError,
+  photoRoute,
+  type PhotoService,
+} from "../_shared/photo-service.ts";
+import { PhotoUploadContractError } from "../_shared/photo-upload-contract.ts";
 import {
   cancelManualCleaningRequest,
   cancelReservation,
@@ -164,16 +160,25 @@ import {
   jsonResponse,
   requestId,
   requireDeveloper,
+  requirePasswordChanged,
   verifiedRequestSessionId,
 } from "../_shared/runtime.ts";
-import { createPhotoService } from "../_shared/photo-api.ts";
 import {
-  photoError,
-  photoRoute,
-  type PhotoService,
-} from "../_shared/photo-service.ts";
-import { PhotoError } from "../_shared/photo-binary.ts";
-import { PhotoUploadContractError } from "../_shared/photo-upload-contract.ts";
+  createSubmission,
+  decideBombRoom,
+  decideSubmission,
+  getSubmission,
+  listSubmissions,
+  reportBombRoom,
+  submissionPath,
+} from "../_shared/submission-api.ts";
+import {
+  registerWebPushSubscription,
+  retireWebPushSubscription,
+  type WebPushCryptoConfig,
+  webPushPublicConfig,
+  webPushRetirePath,
+} from "../_shared/web-push-subscription-api.ts";
 
 function routePath(url: string): string {
   const segments = new URL(url).pathname.split("/").filter(Boolean);
@@ -838,6 +843,21 @@ export async function handleApiRequest(
       );
     }
     if (request.method === "POST") {
+      const incidentRoute = checkoutIncidentPath(path);
+      if (incidentRoute?.kind === "report") {
+        return jsonResponse(
+          {
+            incident: await reportCheckoutIncident(
+              request,
+              clients,
+              actor,
+              incidentRoute.id,
+            ),
+          },
+          201,
+          corsHeaders,
+        );
+      }
       const attemptRoute = attemptCommandPath(path);
       if (attemptRoute) {
         return jsonResponse(
@@ -854,6 +874,35 @@ export async function handleApiRequest(
           corsHeaders,
         );
       }
+    }
+    const incidentRoute = checkoutIncidentPath(path);
+    if (request.method === "GET" && incidentRoute?.kind === "detail") {
+      return jsonResponse(
+        {
+          incident: await getCheckoutIncident(
+            request,
+            clients,
+            actor,
+            incidentRoute.id,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && incidentRoute?.kind === "decision") {
+      return jsonResponse(
+        {
+          incident: await decideCheckoutIncident(
+            request,
+            clients,
+            actor,
+            incidentRoute.id,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
     }
 
     if (request.method === "GET" && path === "/v1/assignments") {

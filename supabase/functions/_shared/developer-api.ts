@@ -1,11 +1,11 @@
-import type { EdgeActor, EdgeClients } from "./runtime.ts";
-import { EdgeError, requireDeveloper } from "./runtime.ts";
 import { notificationDeliveryConfig } from "../notification-delivery/index.ts";
-import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 import {
   assertApprovedRoomPinSheetTarget,
   validateGoogleSheetsServiceAccount,
 } from "./google-sheets-pin.ts";
+import type { EdgeActor, EdgeClients } from "./runtime.ts";
+import { EdgeError, requireDeveloper } from "./runtime.ts";
+import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
 export const expectedMigrationName = "room_pin_nonce_reservation_hardening";
 
@@ -468,7 +468,7 @@ function auditQuery(request: Request): {
     );
   }
   const eventTypes = parameters.getAll("eventType");
-  if (eventTypes.length > 63 || eventTypes.some((value) => value.length > 80)) {
+  if (eventTypes.length > 65 || eventTypes.some((value) => value.length > 80)) {
     throw new EdgeError(
       400,
       "VALIDATION_ERROR",

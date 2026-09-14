@@ -107,6 +107,7 @@ export function lifecycleDatabaseError(
     ASSIGNMENT_SEQUENCE_CONFLICT: 409,
     CLEANING_WINDOW_NOT_EXPIRED: 409,
     ROLLOVER_NOT_ALLOWED: 409,
+    CHECKOUT_INCIDENT_OPEN: 409,
   };
   const code = error?.message ?? "";
   return Object.hasOwn(codes, code)

@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서 갱신의 `dev` integration base: `322eb363ae9fe6d3f4a497437e4d38f7e3694578` — #140까지 반영된 기준 52 migrations / OpenAPI 105 paths / 112 operations. 현재 #140 보완 candidate는 기존 52개를 수정하지 않는 53번째 nonce reservation migration만 추가하며 공개 API 수를 바꾸지 않는다.
+- 이 문서 갱신의 `dev` integration base: `7b3835f0461986f3f7d9bfdb0228875a5422a798` — #140 보완까지 반영된 기준 53 migrations / OpenAPI 105 paths / 112 operations. 현재 #133 feature candidate는 기존 53개를 수정하지 않는 54번째 checkout incident migration과 3 paths / 3 operations를 추가한다.
 - 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -198,6 +198,10 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 체크인 예정 시각에 입실 준비 조건이 모두 충족되면 예약상 점유 시작 event를 멱등적으로 한 번 만든다. 조건이 남아 있으면 `입실 시각 도달·객실 미준비`로 두고, 유효 예약 중 조건이 모두 해소된 시점에 같은 전이를 원자적으로 한 번 실행한다.
 - 실제 checkout event가 없으면 예정 체크아웃 시각에 scheduler가 점유 종료, 퇴실 청소 활성화, 유효 담당의 PIN 조회·시작 가능 시각 개방을 멱등적으로 실행한다. 예정 전 수동 checkout이 이미 있으면 다시 종료하거나 청소를 복제하지 않는다.
 - 자동 종료 뒤 예정 체크아웃을 미래로 늦추면 기존 종료 event를 삭제하지 않고 점유 재개 보정 event를 추가한다. PIN을 아무도 조회하지 않았고 청소도 시작 전이면 미시작 작업·PIN 권한·offline lease를 같은 transaction에서 폐기·재잠금한다. PIN 공개 또는 수행 시작 뒤라면 출입 충돌로 격리해 현장 조율·PIN 교체·작업 중단/재계획 command 전에는 정상화하지 않는다.
+- **#133 확정:** 자동 checkout 뒤 현재 notified 담당 메이드가 현장 완료 전에 손님 잔류를 확인하면 PIN 조회·청소 시작 여부와 무관하게 `GUEST_STILL_PRESENT` 사건을 한 번 신고할 수 있다. 신고는 예약·객실·checkout obligation·기존 target·현재 assignment·attempt·신고자를 immutable identity로 묶고, 미해결 동안 새 시작·완료·제출·검수·PIN 조회/lease·offline replay·일반 재배정·실제 다음 체크인을 각 실행 경로에서 fail-closed한다. 이미 공개된 PIN을 회수했다고 표현하지 않고 이후 서버 권한만 폐기한다.
+- 관리자는 사건마다 `EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` 중 하나를 version CAS, 조회 시 서버가 계산한 영향 범위 fingerprint, 멱등 command로 확정한다. fingerprint는 사건·예약·checkout obligation·target·원 assignment/attempt의 현재 version과 실행 상태를 묶으며, 하나라도 바뀌면 결정을 fail-closed한다. 연장은 과거 checkout을 삭제하지 않고 `occupancy_resumed` 보정 이력을 추가하며, 나머지 결정도 현재 예약·접근 조건을 재검증한다. 모든 결정은 기존 checkout target을 재사용하고 이전 assignment/attempt를 보존한 채 새 책임 revision을 만들며, 손님 잔류로 중단된 구간에는 earning·벌점을 만들지 않는다.
+- 사건 결정의 새 책임 구간은 기존 공통 일정 계약을 재사용해 `availableFrom`의 KST 날짜와 `serviceDate` 일치, 서비스일 다음 날 00:00 KST 상한, 다음 유효 예약 체크인 30분 전 상한을 잠금·현재 상태 재검증 뒤 강제한다. 모든 incident timestamp API 값은 초와 UTC offset이 있는 strict RFC 3339이며, 실제 달력에 존재하지 않는 날짜를 허용하지 않는다.
+- 신고와 동결·감사·전체 active/password-complete business admin 행동 알림/outbox는 한 transaction이다. 결정은 행동 알림을 resolve하고 기존/새 담당에게 필요한 회수·배정 통지만 원자적으로 남긴다. PIN·고객 PII·민감 자유문은 사건 projection, audit, notification, outbox에 저장하지 않는다.
 - 예약 추가·수정·취소는 객실 일정 row를 잠그고 앞뒤 예약의 직전 점유와 `preparation_obligation` 연결을 다시 계산한다. 기존 승인·반려 이력은 보존하고, 새 점유·오염으로 기존 청결 근거가 무효가 되면 새 준비 작업 필요 상태를 만든다.
 
 권장 유일키와 실행 잠금:
@@ -767,13 +771,14 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140까지 source/dev에 통합됐다. 현재 #140 보완은 기존 52 migrations와 공개 API를 보존한 53번째 nonce reservation·병렬 회귀 candidate다. 다음 작업도 운영 승격과 섞지 않는다.
+P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140 보완까지 source/dev에 통합됐다. 현재 #133은 기존 53 migrations를 보존하는 54번째 checkout incident workflow와 3개 API candidate다. source 검증과 운영 승격을 섞지 않는다.
 
-1. Issue #140 보완 candidate의 53번째 append-only nonce reservation과 bootstrap 전용 병렬/응답 유실 회귀를 독립 검토해 `dev`에 통합한다.
-2. Issue #34의 GitHub Actions runtime 경고는 별도 CI 유지보수 PR로 관리한다.
-3. Issue #137 hosted Google Sheets 활성화는 실제 대상/서비스 계정/ACL/Secrets/Edge/Cron/smoke 승인 뒤에만 진행한다.
-4. Issue #12 backup/recovery source는 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
-5. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
+1. Issue #133의 신고·동결·관리자 결정·재배정 source를 독립 검토해 `dev`에 통합한다.
+2. 확정된 `dev`에서 v0.3.0 release를 구성하고 전체 QA·migration manifest·복구 가능성을 검증한 뒤 `main`과 production으로 승격한다.
+3. Issue #34의 GitHub Actions runtime 경고는 별도 CI 유지보수 PR로 관리한다.
+4. Issue #137 hosted Google Sheets 활성화는 실제 대상/서비스 계정/ACL/Secrets/Edge/Cron/smoke 승인 뒤에만 진행한다.
+5. Issue #12 backup/recovery source는 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
+6. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
 
 source/dev 완료, release/main 승격, production migration/secret/Edge/Cron 활성화는 서로 다른 gate다. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 
