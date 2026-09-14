@@ -1152,6 +1152,17 @@ erDiagram
   상반 결정은 stable domain conflict로 수렴한다. `dev@5798e882495e42763db6c227b7cb804527ccde47`에
   source 통합됐지만 production/recovery에는 아직 적용되지 않았다.
 
+### #156 개발 소스: checkout template 운영 게시
+
+`20260914094126_cleaning_template_admin_api.sql`은 기존 54개 migration을 수정하지 않는 55번째 append-only
+feature migration이다. `cleaning_template_versions`는 `(room_type_id,cleaning_kind,version)` 이력과 published
+partial unique를 유지하며, publish command가 동일 타입/kind advisory lock 안에서 current expected version을
+검사하고 이전 row를 retired로 전이한 뒤 v7+ 새 row를 추가한다. `private.photo_template_slots`는 새 JSON의
+정규화된 immutable row를 같은 transaction에서 materialize한다. 과거 `cleaning_targets.template_snapshot`은
+current pointer를 다시 읽거나 backfill하지 않으므로 이후 게시에도 변하지 않는다. raw template table은 RLS를
+활성화한 채 Data API policy/grant가 없고, service-only 조회/게시 RPC가 live session과 active/password-complete
+business admin을 매 요청 확인한다. production 운영값·seed·notification/outbox는 이 migration에 포함하지 않는다.
+
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.

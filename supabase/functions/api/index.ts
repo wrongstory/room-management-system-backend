@@ -66,6 +66,7 @@ import {
   getCheckoutIncident,
   reportCheckoutIncident,
 } from "../_shared/checkout-incident-api.ts";
+import { cleaningTemplates } from "../_shared/cleaning-template-api.ts";
 import {
   complaintDetail,
   complaintHistory,
@@ -493,6 +494,17 @@ export async function handleApiRequest(
           ),
         },
         200,
+        corsHeaders,
+      );
+    }
+    if (
+      (request.method === "GET" || request.method === "POST") &&
+      path === "/v1/cleaning-templates"
+    ) {
+      const result = await cleaningTemplates(request, clients, actor);
+      return jsonResponse(
+        request.method === "GET" ? { templates: result } : { template: result },
+        request.method === "GET" ? 200 : 201,
         corsHeaders,
       );
     }

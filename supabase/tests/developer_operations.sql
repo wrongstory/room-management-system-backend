@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'checkout_not_completed_incident_workflow'
+    'cleaning_template_admin_api'
   ) ->> 'currentMigration',
-  'checkout_not_completed_incident_workflow',
+  'cleaning_template_admin_api',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'checkout_not_completed_incident_workflow'
+    'cleaning_template_admin_api'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'checkout_not_completed_incident_workflow';
+where name = 'cleaning_template_admin_api';
 
 delete from supabase_migrations.schema_migrations
-where name = 'checkout_not_completed_incident_workflow';
+where name = 'cleaning_template_admin_api';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'checkout_not_completed_incident_workflow'
+    'cleaning_template_admin_api'
   ) ->> 'currentMigration',
-  'room_pin_nonce_reservation_hardening',
-  'database status exposes migration 53 when migration 54 is absent'
+  'checkout_not_completed_incident_workflow',
+  'database status exposes migration 54 when migration 55 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'checkout_not_completed_incident_workflow'
+    'cleaning_template_admin_api'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 53 behind source migration 54'
+  'database status reports migration 54 behind source migration 55'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

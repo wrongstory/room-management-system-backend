@@ -123,6 +123,113 @@ Deno.test("preview exact routes: admin success is read-only, other roles denied 
   );
 });
 
+Deno.test("cleaning template router exposes only exact checkout GET and POST routes", async () => {
+  const sessionId = "51000000-0000-4000-8000-000000000001";
+  const payload = btoa(JSON.stringify({ session_id: sessionId }))
+    .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  const token = `e30.${payload}.signature`;
+  const slots = Array.from({ length: 10 }, (_, displayOrder) => ({
+    slotKey: displayOrder === 0 ? "tv-on" : `slot-${displayOrder}`,
+    displayOrder,
+    required: displayOrder < 9,
+    label: `사진 ${displayOrder + 1}`,
+  }));
+  const roomTypes = ["standard", "premium", "oceanPremium", "oceanFamily"].map(
+    (roomTypeCode) => ({
+      roomTypeCode,
+      roomTypeName: roomTypeCode,
+      cleaningKind: "checkout",
+      configured: false,
+      expectedVersion: 0,
+      currentPublished: null,
+    }),
+  );
+  const published = {
+    id: "30000000-0000-4000-8000-000000000001",
+    version: 7,
+    status: "published",
+    durationMinutes: 60,
+    slots,
+    publishedAt: "2030-01-01T00:00:00Z",
+    createdAt: "2030-01-01T00:00:00Z",
+  };
+  const calls: string[] = [];
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => ({
+      admin: {
+        rpc(name: string) {
+          calls.push(name);
+          return Promise.resolve({
+            data: name === "list_checkout_cleaning_templates"
+              ? { cleaningKind: "checkout", roomTypes }
+              : published,
+            error: null,
+          });
+        },
+      },
+    } as unknown as EdgeClients),
+    authenticateRequest: () => Promise.resolve(actor),
+  };
+  const headers = {
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+    "idempotency-key": "template-route-0001",
+  };
+  const listed = await handleApiRequest(
+    new Request(
+      "http://localhost/functions/v1/api/v1/cleaning-templates?cleaningKind=checkout",
+      { headers },
+    ),
+    dependencies,
+  );
+  assert(
+    listed.status === 200 &&
+      (await listed.json()).templates.roomTypes.length === 4,
+    "exact checkout catalog GET is reachable",
+  );
+  const posted = await handleApiRequest(
+    new Request(
+      "http://localhost/functions/v1/api/v1/cleaning-templates",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          roomTypeCode: "standard",
+          cleaningKind: "checkout",
+          expectedVersion: 0,
+          durationMinutes: 60,
+          slots,
+        }),
+      },
+    ),
+    dependencies,
+  );
+  assert(
+    posted.status === 201 && (await posted.json()).template.version === 7,
+    "exact template publish POST is reachable",
+  );
+  for (
+    const [method, path] of [
+      ["PUT", "/v1/cleaning-templates"],
+      ["GET", "/v1/cleaning-templates/standard"],
+    ]
+  ) {
+    const response = await handleApiRequest(
+      new Request(
+        `http://localhost/functions/v1/api${path}`,
+        { method, headers },
+      ),
+      dependencies,
+    );
+    assert(response.status === 404, "template route aliases remain closed");
+  }
+  assert(
+    calls.join(",") ===
+      "list_checkout_cleaning_templates,publish_checkout_cleaning_template",
+    "only the two exact template RPCs are dispatched",
+  );
+});
+
 Deno.test("room PIN Edge route binds verified session, returns no-store safe shape, and maps database denial", async () => {
   const sessionId = "51000000-0000-4000-8000-000000000001";
   const payload = btoa(JSON.stringify({ session_id: sessionId }))
