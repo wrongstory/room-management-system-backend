@@ -12,7 +12,7 @@
 | production/main | `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`, v0.2.0 | 유지, 변경 없음 |
 | source/dev | `dev@5798e882495e42763db6c227b7cb804527ccde47`, 54 migrations, OpenAPI 108/115 | #133 및 #146/#147 보완 완료 |
 | release | `release/v0.3.0`, main ancestry 포함, release 계약 변경 외 dev tree 보존 | 준비 중 |
-| target | `release/v0.3.0 → main` PR | 미생성·미병합 |
+| target | `release/v0.3.0 → main` PR #151 | 생성·미병합 |
 
 - `dev` 또는 `main`에 직접 push하지 않는다.
 - release exact head에서 `application`과 `migration`, 독립 QA 90점 이상, P0/P1=0, 충돌 없음,
