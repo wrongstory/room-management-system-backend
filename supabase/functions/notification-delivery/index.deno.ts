@@ -58,13 +58,30 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
   );
   assert(
     (await handleNotificationDelivery(
-      new Request("http://localhost/notification-delivery", {
+      new Request("http://localhost/notification-delivery/", {
         method: "POST",
         headers: { "x-notification-delivery-invoke-secret": secret },
       }),
       dependencies,
     )).status === 404,
   );
+  for (
+    const url of [
+      "http://localhost/notification-delivery/extra",
+      "http://localhost/notification-delivery?alias=1",
+    ]
+  ) {
+    assert(
+      (await handleNotificationDelivery(
+        new Request(url, {
+          method: "POST",
+          headers: { "x-notification-delivery-invoke-secret": secret },
+        }),
+        dependencies,
+      )).status === 404,
+      "runtime path aliases must remain unavailable",
+    );
+  }
   assert(
     (await handleNotificationDelivery(request("POST", "", "{}"), dependencies))
       .status === 400,
@@ -128,30 +145,43 @@ Deno.test("notification delivery Edge rejects method, query, body and bad secret
   assert(runs === 0);
 });
 Deno.test("notification delivery Edge accepts the distinct invoke secret and returns bounded aggregate only", async () => {
-  const response = await handleNotificationDelivery(request(), {
-    loadInvokeSecret: () => secret,
-    loadConfig: () => config,
-    validateConfig: () => Promise.resolve(),
-    run: async () => ({
-      claimed: 1,
-      delivered: 1,
-      retrying: 0,
-      suppressed: 0,
-      deadLetter: 0,
-      blocked: 0,
-      deferred: 0,
-    }),
-  });
-  const body = await response.json();
-  assert(
-    response.status === 200 &&
-      response.headers.get("cache-control") === "no-store",
-  );
-  assert(
-    body.claimed === 1 && body.delivered === 1 &&
-      typeof body.requestId === "string",
-  );
-  assert(!JSON.stringify(body).includes(secret));
+  for (
+    const url of [
+      "http://localhost/functions/v1/notification-delivery",
+      "http://localhost/notification-delivery",
+    ]
+  ) {
+    const response = await handleNotificationDelivery(
+      new Request(url, {
+        method: "POST",
+        headers: { "x-notification-delivery-invoke-secret": secret },
+      }),
+      {
+        loadInvokeSecret: () => secret,
+        loadConfig: () => config,
+        validateConfig: () => Promise.resolve(),
+        run: async () => ({
+          claimed: 1,
+          delivered: 1,
+          retrying: 0,
+          suppressed: 0,
+          deadLetter: 0,
+          blocked: 0,
+          deferred: 0,
+        }),
+      },
+    );
+    const body = await response.json();
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+    );
+    assert(
+      body.claimed === 1 && body.delivered === 1 &&
+        typeof body.requestId === "string",
+    );
+    assert(!JSON.stringify(body).includes(secret));
+  }
 });
 Deno.test("notification delivery Edge durably degrades invalid provider config without leaking detail", async () => {
   let recorded = 0, runs = 0;
