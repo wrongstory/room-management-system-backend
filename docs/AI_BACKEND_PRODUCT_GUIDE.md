@@ -4,8 +4,8 @@
 
 검토 기준:
 
-- 이 문서 갱신의 `dev` integration base: `5798e882495e42763db6c227b7cb804527ccde47` — #133과 #146/#147 release blocker 보완까지 완료된 54 migrations / OpenAPI 108 paths / 115 operations. 현재 `release/v0.3.0`은 이 source를 main에 승격하기 위한 release gate이며 production은 아직 v0.2.0이다.
-- 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
+- 이 문서 갱신의 `dev` integration base: `897c4b845c657401873a08136bd31f351fdb04a8` — #156/PR #157까지 통합된 55 migrations / OpenAPI 109 paths / 117 operations. #156은 source/dev 완료지만 아직 `main`/production에는 포함되지 않는다.
+- 백엔드 운영 source 정본 `main`: `e3397e00e5538871d80610c9f0c7ab88535d7be0` — Issue #148/#152의 production readback은 54 migrations / OpenAPI `0.3.0` 108 paths / 115 operations와 `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 Edge bundle이다. annotated `v0.3.0` tag/GitHub Release와 일부 provider·Google·Cron hosted 활성화는 아직 별도 pending이며, #156 source/dev 변경은 이 production snapshot에 포함되지 않는다.
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
 - 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
@@ -657,22 +657,24 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - application/migration GitHub Actions의 fresh DB reset과 SQL test
 - 운영·복구검증 Supabase에 같은 기준 스키마가 적용돼 있으나, 초기 수동 적용 과정에서 Git과 서로 다른 migration version으로 기록됨
 
-### `v0.2.0` 포함 후 남은 차이
+### `v0.2.0` 이후 source 통합 이력과 현재 `v0.3.0` 차이
+
+아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production 정본은 이 절 후반과 문서 상단의 Issue #148/#152 snapshot을 우선하며, source/bundle 반영과 hosted provider·Google·Cron 활성화를 별도 상태로 해석한다.
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
-- #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview는 source/dev 완료다. #4 notified-only 조회도 PR #74의 독립 검토·CI·위임 승인 후 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에 병합되어 #7A 선행 gate를 충족했다. production에는 승격되지 않았다.
+- #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview와 #4 notified-only 조회는 source/dev 완료 후 현재 `main`/production source에 반영됐다. 다만 #28 lifecycle effect를 포함한 hosted 역할별 positive smoke는 별도 미완료 gate다.
 - #7A 실행 → #7B 인계/limited capability → #7C offline, #30 photo slot → #83/#84 Drive 원장·HTTP → #85 purge worker와 #31 제출·검수까지 source/dev 완료했다. #7C는 PR #79로 `dev@e2648de4e40a84e60d19cbb1e4d01974a2f3d369`에 통합됐고 production purge 주기·hosted/client offline E2E는 별도 운영 gate다.
-- #30~#31 개발 통합 기준은 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`, 34 migrations / 74 paths / 80 operations이며 production에는 승격하지 않았다. #31은 전체 제출·폭탄방 신고/선판정·검수 승인/반려·원 maid 재청소를 append-only 34번째 migration과 Fastify/Edge source로 구현했고, exact-head 독립 QA P0/P1=0·required CI·96/100 위임 승인 뒤 PR #91로 `dev`에 병합됐다. release/main·production은 미완료이며 inspection queue pagination은 비차단 P2 후속이다. 이 `[현재 구현]` snapshot은 §8의 `[확정]` 정책을 변경하거나 production 사용 가능을 뜻하지 않는다.
+- #30~#31의 당시 개발 통합 기준은 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`, 34 migrations / 74 paths / 80 operations이었다. #31의 전체 제출·폭탄방 신고/선판정·검수 승인/반려·원 maid 재청소 source는 현재 `main`/production `api` bundle에 반영됐지만 hosted 역할별 positive smoke는 미확인이고 inspection queue pagination은 비차단 P2 후속이다.
 - #93/#95/#96의 원청소 earning 기반 주차 조회·`OPEN → PAYING`·bounded pagination은 `dev@e55f0e9be2f26a1a3700b8d31ba1958dcbe65b3d`, 36 migrations / 77 paths / 83 operations에 source 통합됐다. #94는 typed compensation provenance, complaint/appeal/correction, signed adjustment/carry-forward, 외부 지급 결과·`CHECK/PAID` command 정책을 확정했고, source 구현 상태는 아래 #100과 후속 #101~#103 항목에서 각각 추적한다. main/recovery/production을 변경하거나 향후 병합 SHA를 선기록하지 않는다.
-- #100 complaint/appeal/correction source는 PR #104로 `dev@88d1865bdaafb6dc2afa556452ae80c91569f393`에 통합됐다. 37 migrations / 85 paths / 92 operations이며 원 승인 수익의 typed FK chain과 original-cleaning source allowlist, 30일 접수, immutable decision/response/event와 current pointer CAS, 7일 1회 maid 응답, 종결·correction을 구현한다. complaint Data API SELECT는 JWT 세션과 같은 사용자의 live `auth.sessions` row를 함께 확인하고, correction 알림은 새 응답을 요구하지 않으며, 모든 complaint HTTP 응답은 `no-store`다. exact-head 독립 QA와 required `application`/`migration`은 PASS했지만 main/recovery/production에는 승격하지 않았고 현재 사용 가능을 뜻하지 않는다.
+- #100 complaint/appeal/correction source는 PR #104로 통합됐고 현재 `main`/production source에도 반영됐다. 원 승인 수익의 typed FK chain, 30일 접수, immutable decision/response/event와 current pointer CAS, live-session RLS 및 `no-store` 계약을 유지한다. hosted 역할별 read/positive mutation smoke는 미확인이므로 source 배포만으로 현재 사용 ✅로 판정하지 않는다.
 - #101 complaint 재작업/typed compensation earning은 PR #105로 `dev@a5c48673ff339e5a338356c77ce83e8cf40ee21a`에 통합됐으며 38 migrations / 86 paths / 93 operations다. confirmed current decision을 typed `post_approval_complaint_reclean` target과 연결하고 server가 안전한 당일 접근 창을 증명한 경우에만 published template·notified assignment·assignee·amount를 admin CAS로 고정한다. 같은 maid는 amount 0 decision만 보존하고 earning 0건, 다른 maid는 현장 완료와 승인 뒤 amount가 0이어도 typed entitlement/earning 각 1건을 생성한다. 원청소/compensation earning은 nullable typed FK exactly-one CHECK이고 기존 #31 identity를 보존한다. pre-start semantic correction과 generic reassignment는 ghost/assignee drift를 막으며, 시작 뒤 correction은 operational source/current divergence를 노출한다. raw compensation decision은 live-session admin만 읽고 maid projection은 cross-maid UUID/타 보상액을 숨긴다. developer 감사에는 두 #101 event의 safe summary만 노출하고 raw state/request hash/maid cross-sensitive 필드는 제외한다. main/recovery/production은 변경하지 않았고 현재 사용 가능을 뜻하지 않는다.
 - #102 signed adjustment/carry-forward는 PR #106으로 `dev@cb26650221b3e47804edafd51cad5bfc8872c349`에 통합됐으며 39 migrations / 90 paths / 97 operations다. correction은 earning 또는 adjustment 한 건의 typed FK와 signed delta를 보존하고, reversal은 source의 미반전 전액을 정확히 반대 부호로 한 번만 기록하며 root cumulative entitlement가 0 아래로 내려가지 않는다. payment-start와 adjustment command는 receipt → global advisory → actor → adjustment book → cycle → sorted source 순으로 잠근다. net이 0 이하면 payment event 없이 immutable offset settlement로 OPEN cycle을 경제적으로 동결하고, 음수 크기만 바로 다음 KST 주차로 한 칸씩 이월한다. PAID/offset-settled cycle의 late earning은 명시적 admin command가 원본을 수정하지 않고 다음 주차의 positive `late_earning_carry` adjustment로 한 번만 옮긴다. 공개 조회는 signed adjustment/carry/payable과 `offsetSettled`를 bounded projection으로 제공하며 live-session RLS, audit/outbox, Fastify/Edge/OpenAPI parity를 유지한다. main/recovery/production에는 승격하지 않았다.
 - #103 외부 전액 지급 결과는 PR #107로 `dev@3297679ca2e903e68cfa2dd9e7bc137341c5b27d`에 source/dev 통합됐으며 40 migrations / 93 paths / 100 operations다. 기존 `payment_started` event를 immutable attempt identity로 연결하고, `TRANSFER_RESULT_UNCERTAIN` CHECK, `NO_TRANSFER_CONFIRMED` OPEN 복귀, 양수 locked snapshot 전액 PAID result를 typed append-only evidence로 보존한다. 40번째 migration 이후의 payment projection transition과 event/attempt/result 양쪽은 deferred commit invariant로 서로를 exact하게 요구하며 과거 CHECK/PAID evidence는 추측 backfill하지 않는다. client amount/`paidAt`은 받지 않고 server time과 cycle CAS를 사용하며 OPEN 복귀 뒤 재시작은 새 attempt다. 최초 method는 `bank_transfer`, reference는 8~64 ASCII allowlist·영문/숫자 필수·7자리 연속 숫자/URL-like 거부 뒤 uppercase canonical global unique다. 이 형식은 실제 provider 계약 미확정 동안의 fail-closed source 계약이며 canonical reference는 admin result에만 보이고 maid/developer/audit/notification에는 숨긴다. provider HTTP, 영수증·계좌·수취인 PII·secret/raw payload 저장은 없고 main/recovery/production은 변경하지 않았다.
 - #108 알림함, #109 typed catalog/grouping/writer, #110 encrypted Web Push subscription, #111 delivery ledger/worker와 #112 VAPID/provider HTTP source까지 순차적으로 dev에 통합됐다. #112 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 PR #119 병합 commit `dfc98b1474f9f890851d49bd904869181d0d7880`의 tree는 동일하고 독립 QA 98/100, P0/P1/P2 0, required `application`/`migration` PASS다. PR #122 문서 동기화와 #124 pgTAP fixture 안정화를 반영한 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / 98 paths / 105 operations다.
 - #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
 - #46은 기존 46 migrations를 수정하지 않은 47번째 append-only private password-change receipt와 password-specific shadow version으로 source/dev에 통합됐다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. release/main·production 승격은 별도 gate다.
-- 위 source/dev 완료는 운영 사용 가능 선언이 아니다. Issue #112는 release/main 뒤 Function Secrets, 승인된 `api`/`notification-delivery` Edge bundle, negative/positive hosted smoke, Vault/`pg_cron`/`pg_net`, 5회 연속 heartbeat, 실제 기기 Web Push smoke가 끝날 때까지 OPEN이다. 현재 `main`/production/recovery는 v0.2.0 상태로 변경되지 않았다.
-- #46, #128, #131, #136, #137, #140과 #133은 source/dev에 통합됐고 #146 deterministic concurrency fixture와 #147 developer migration head 보완까지 `dev@5798e882495e42763db6c227b7cb804527ccde47`에서 완료됐다. #137의 안전 상태 조회·121실 full resync와 #133의 checkout incident/reassignment도 source/dev 완료지만 hosted target/서비스 계정/ACL/Secrets/Edge/Cron/smoke는 미완료다. 현재 gate는 **v0.3.0 release exact-head 전체 검증과 main 승격 준비**다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
+- Issue #148/#152로 `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`, production 54 migrations / OpenAPI `0.3.0` 108 paths / 115 operations와 5개 Edge bundle까지 반영됐다. 다만 annotated `v0.3.0` tag/GitHub Release, Issue #112의 provider invoke secret·positive Web Push/heartbeat, Issue #137의 hosted Google target·서비스 계정·ACL·full resync/Cron smoke는 아직 완료 증거가 없다. source·bundle 배포와 외부 provider/Google/Cron 활성화를 같은 완료 상태로 표시하지 않는다.
+- #46, #128, #131, #136, #137, #140, #133의 source는 `dev`와 v0.3.0 production source에 반영됐다. #137의 API와 `room-pin-sheet-sync` bundle도 배포됐지만 hosted target/서비스 계정/ACL/Secrets/Cron/positive smoke는 미완료다. #156 checkout template admin은 PR #157로 `dev@897c4b845c657401873a08136bd31f351fdb04a8`에 통합됐지만, 별도 release/main/production 55번째 migration/API 배포·네 타입 게시·예약 smoke 전에는 운영 `CLEANING_TEMPLATE_NOT_CONFIGURED`가 해소됐다고 선언하지 않는다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
 
@@ -773,14 +775,16 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140 보완과 #133 checkout incident까지 source/dev에 통합됐다. 현재 개발 정본은 기존 53 migrations를 보존한 54 migrations / OpenAPI 108 paths / 115 operations이며, source 완료와 운영 승격을 섞지 않는다.
+P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133까지 production source에 반영됐고, #156은 PR #157로 `dev`에 통합됐다. production은 아직 54 migrations / OpenAPI 0.3.0 108 paths / 115 operations이며 #156 두 operation을 포함하지 않는다. 예약 생성의 `CLEANING_TEMPLATE_NOT_CONFIGURED`를 운영 입력으로 해소할 #156은 checkout만 지원하고 seed/fallback 없이 네 타입의 immutable published template을 요구한다.
 
-1. 완료된 Issue #146/#147 보완을 포함한 v0.3.0 release exact head에서 전체 application·migration·누적 upgrade gate를 다시 통과한다.
-2. 확정된 `dev`에서 구성한 v0.3.0 release의 migration manifest·복구 가능성·main ancestry를 검증한 뒤 승인된 순서로 `main`과 production에 승격한다.
-3. Issue #34의 GitHub Actions runtime 경고는 별도 CI 유지보수 PR로 관리한다.
-4. Issue #137 hosted Google Sheets 활성화는 실제 대상/서비스 계정/ACL/Secrets/Edge/Cron/smoke 승인 뒤에만 진행한다.
-5. Issue #12 backup/recovery source는 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
-6. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
+1. Issue #158에서 production source bundle 배포와 hosted activation/current use를 분리해 상태 정본을 맞춘다.
+2. #156은 별도 release 승인에서 전체 QA·migration manifest·rollback을 다시 검증한 뒤에만 `main`과 production 55번째 migration/API로 승격한다. 버전은 여기서 추측하지 않는다.
+3. active business admin이 네 객실 타입의 checkout template을 게시한 뒤 예약 생성의 409→성공과 planned target/snapshot을 hosted smoke로 확인한다.
+4. Issue #148에 남은 annotated `v0.3.0` tag/GitHub Release는 위 운영 복구 증거 뒤 별도 완료 상태로 기록한다.
+5. Issue #34의 GitHub Actions runtime 경고는 별도 CI 유지보수 PR로 관리한다.
+6. Issue #137 hosted Google Sheets 활성화는 실제 대상/서비스 계정/ACL/Secrets/Edge/Cron/smoke 승인 뒤에만 진행한다.
+7. Issue #12 backup/recovery source는 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
+8. Issue #13 generated client와 전체 browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 
 source/dev 완료, release/main 승격, production migration/secret/Edge/Cron 활성화는 서로 다른 gate다. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 

@@ -1,3 +1,18 @@
+-- A positive complaint-rework fixture needs at least one whole minute before the
+-- KST service-day boundary. If this file starts inside that mathematically
+-- invalid window, wait for the next day before fixing transaction_timestamp().
+do $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_next_kst_midnight timestamptz;
+begin
+  v_next_kst_midnight := (((v_now at time zone 'Asia/Seoul')::date + 1)::timestamp
+    at time zone 'Asia/Seoul');
+  if v_next_kst_midnight - v_now <= interval '2 minutes' then
+    perform pg_sleep(extract(epoch from (v_next_kst_midnight - v_now)) + 1);
+  end if;
+end $$;
+
 begin;
 select no_plan();
 
@@ -37,7 +52,7 @@ order by room.room_number limit 5;
 insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,
   duration_minutes,photo_slots,published_at,created_by)
 select pg_temp.cid((800+row_number() over(order by room_type_id))::integer),room_type_id,'reclean',1,
-  'published',30,'[]'::jsonb,clock_timestamp(),pg_temp.cid(1)
+  'published',1,'[]'::jsonb,clock_timestamp(),pg_temp.cid(1)
 from (select distinct room_type_id from comp_rooms) types;
 
 create function pg_temp.make_complaint(p_n integer,p_rework boolean default true)

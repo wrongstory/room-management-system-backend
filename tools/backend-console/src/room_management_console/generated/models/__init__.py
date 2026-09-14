@@ -9,6 +9,11 @@ from .actor import Actor
 from .app_role import AppRole
 from .change_account_role_response_200 import ChangeAccountRoleResponse200
 from .change_account_status_response_200 import ChangeAccountStatusResponse200
+from .cleaning_template_catalog import CleaningTemplateCatalog
+from .cleaning_template_catalog_envelope import CleaningTemplateCatalogEnvelope
+from .cleaning_template_room_type_code import CleaningTemplateRoomTypeCode
+from .cleaning_template_room_type_state import CleaningTemplateRoomTypeState
+from .cleaning_template_slot import CleaningTemplateSlot
 from .create_account_request import CreateAccountRequest
 from .create_account_response_201 import CreateAccountResponse201
 from .developer_activity_event import DeveloperActivityEvent
@@ -203,6 +208,9 @@ from .login_request import LoginRequest
 from .login_response import LoginResponse
 from .managed_role import ManagedRole
 from .password_change_request import PasswordChangeRequest
+from .publish_cleaning_template_request import PublishCleaningTemplateRequest
+from .published_cleaning_template import PublishedCleaningTemplate
+from .published_cleaning_template_envelope import PublishedCleaningTemplateEnvelope
 from .request_room_pin_sheet_full_resync_response_202 import (
     RequestRoomPinSheetFullResyncResponse202,
 )
@@ -237,6 +245,11 @@ __all__ = (
     "AppRole",
     "ChangeAccountRoleResponse200",
     "ChangeAccountStatusResponse200",
+    "CleaningTemplateCatalog",
+    "CleaningTemplateCatalogEnvelope",
+    "CleaningTemplateRoomTypeCode",
+    "CleaningTemplateRoomTypeState",
+    "CleaningTemplateSlot",
     "CreateAccountRequest",
     "CreateAccountResponse201",
     "DeveloperActivityEvent",
@@ -337,6 +350,9 @@ __all__ = (
     "LoginResponse",
     "ManagedRole",
     "PasswordChangeRequest",
+    "PublishCleaningTemplateRequest",
+    "PublishedCleaningTemplate",
+    "PublishedCleaningTemplateEnvelope",
     "RequestRoomPinSheetFullResyncResponse202",
     "ResetAccountPasswordResponse200",
     "RoleChangeRequest",

@@ -1159,7 +1159,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 65,
+              maxItems: 66,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -2209,6 +2209,78 @@ export const openApiDocument = {
               "application/json": {
                 schema: {
                   $ref: "#/components/schemas/AssignmentDurationPolicyEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/cleaning-templates": {
+      get: {
+        tags: ["Cleaning Templates"],
+        operationId: "listCleaningTemplates",
+        summary: "객실 유형별 현재 퇴실 청소 템플릿 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin의 live session 전용입니다. 네 객실 유형을 항상 반환하고 미설정 유형은 configured=false/currentPublished=null입니다. 예약 차단을 숨기는 fallback이나 운영 seed를 만들지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [{
+          name: "cleaningKind",
+          in: "query",
+          required: true,
+          schema: { const: "checkout" },
+          description: "현재 확정 범위는 checkout만 지원합니다.",
+        }],
+        responses: {
+          "200": {
+            description: "네 객실 유형의 현재 게시 상태",
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/CleaningTemplateCatalogEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+      post: {
+        tags: ["Cleaning Templates"],
+        operationId: "publishCleaningTemplate",
+        summary: "퇴실 청소 템플릿의 불변 새 버전 게시",
+        description:
+          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 v7 이상 immutable version과 normalized slot rows를 원자 게시합니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/PublishCleaningTemplateRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "새로 게시된 불변 템플릿 버전",
+            content: {
+              "application/json": {
+                schema: {
+                  $ref:
+                    "#/components/schemas/PublishedCleaningTemplateEnvelope",
                 },
               },
             },
@@ -4453,6 +4525,146 @@ export const openApiDocument = {
           },
         },
       },
+      CleaningTemplateRoomTypeCode: {
+        type: "string",
+        enum: ["standard", "premium", "oceanPremium", "oceanFamily"],
+      },
+      CleaningTemplateSlot: {
+        type: "object",
+        additionalProperties: false,
+        required: ["slotKey", "displayOrder", "required", "label"],
+        properties: {
+          slotKey: {
+            type: "string",
+            pattern: "^[a-z][a-z0-9-]{0,79}$",
+            maxLength: 80,
+          },
+          displayOrder: { type: "integer", minimum: 0, maximum: 99 },
+          required: { type: "boolean" },
+          label: { type: "string", minLength: 1, maxLength: 80 },
+          description: { type: "string", minLength: 1, maxLength: 200 },
+          section: { type: "string", minLength: 1, maxLength: 80 },
+          instanceKey: {
+            type: "string",
+            pattern: "^[a-z][a-z0-9-]{0,79}$",
+            maxLength: 80,
+          },
+        },
+      },
+      PublishCleaningTemplateRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomTypeCode",
+          "cleaningKind",
+          "expectedVersion",
+          "durationMinutes",
+          "slots",
+        ],
+        properties: {
+          roomTypeCode: {
+            $ref: "#/components/schemas/CleaningTemplateRoomTypeCode",
+          },
+          cleaningKind: { const: "checkout" },
+          expectedVersion: { type: "integer", minimum: 0, maximum: 2147483647 },
+          durationMinutes: { type: "integer", minimum: 1, maximum: 10080 },
+          slots: {
+            type: "array",
+            minItems: 10,
+            maxItems: 15,
+            uniqueItems: true,
+            items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
+            description:
+              "v7+ checkout 계약: standard/premium/oceanPremium/oceanFamily 순으로 정확히 10/11/13/15개, 필수는 총수-1, required tv-on은 정확히 한 개입니다. displayOrder는 0부터 연속입니다.",
+          },
+        },
+      },
+      PublishedCleaningTemplate: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "version",
+          "status",
+          "durationMinutes",
+          "slots",
+          "publishedAt",
+          "createdAt",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          version: { type: "integer", minimum: 7, maximum: 2147483647 },
+          status: { const: "published" },
+          durationMinutes: { type: "integer", minimum: 1, maximum: 10080 },
+          slots: {
+            type: "array",
+            minItems: 10,
+            maxItems: 15,
+            items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
+          },
+          publishedAt: { type: "string", format: "date-time" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      CleaningTemplateRoomTypeState: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomTypeCode",
+          "roomTypeName",
+          "cleaningKind",
+          "configured",
+          "expectedVersion",
+          "currentPublished",
+        ],
+        properties: {
+          roomTypeCode: {
+            $ref: "#/components/schemas/CleaningTemplateRoomTypeCode",
+          },
+          roomTypeName: { type: "string" },
+          cleaningKind: { const: "checkout" },
+          configured: { type: "boolean" },
+          expectedVersion: { type: "integer", minimum: 0 },
+          currentPublished: {
+            anyOf: [
+              { $ref: "#/components/schemas/PublishedCleaningTemplate" },
+              { type: "null" },
+            ],
+          },
+        },
+      },
+      CleaningTemplateCatalog: {
+        type: "object",
+        additionalProperties: false,
+        required: ["cleaningKind", "roomTypes"],
+        properties: {
+          cleaningKind: { const: "checkout" },
+          roomTypes: {
+            type: "array",
+            minItems: 4,
+            maxItems: 4,
+            items: {
+              $ref: "#/components/schemas/CleaningTemplateRoomTypeState",
+            },
+          },
+        },
+      },
+      CleaningTemplateCatalogEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["templates"],
+        properties: {
+          templates: { $ref: "#/components/schemas/CleaningTemplateCatalog" },
+        },
+      },
+      PublishedCleaningTemplateEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["template"],
+        properties: {
+          template: { $ref: "#/components/schemas/PublishedCleaningTemplate" },
+        },
+      },
       AssignmentPreviewRow: {
         type: "object",
         additionalProperties: false,
@@ -4781,6 +4993,10 @@ export const openApiDocument = {
           "RESERVATION_NOT_FOUND",
           "CLEANING_REQUEST_NOT_FOUND",
           "CLEANING_TEMPLATE_NOT_CONFIGURED",
+          "INVALID_CLEANING_TEMPLATE",
+          "INVALID_CLEANING_TEMPLATE_SLOTS",
+          "CLEANING_TEMPLATE_VERSION_CONFLICT",
+          "CLEANING_TEMPLATE_COMMAND_FAILED",
           "INVALID_MANUAL_CLEANING_REQUEST",
           "ACTIVE_STAY_RESERVATION_REQUIRED",
           "STAYOVER_ACCESS_WINDOW_INVALID",
@@ -5162,6 +5378,7 @@ export const openApiDocument = {
           "assignment.attempt_activated",
           "assignment.rolled_over",
           "assignment.duration_policy_confirmed",
+          "cleaning_template.published",
           "cleaning.attempt_started",
           "cleaning.field_completed",
           "cleaning.finish_current_allowed",
@@ -5878,6 +6095,11 @@ export const openApiDocument = {
               rolloverToDate: { type: "string", format: "date" },
               carryoverCount: { type: "integer", minimum: 0 },
               policyVersion: { type: "integer", minimum: 1 },
+              roomTypeCode: {
+                $ref: "#/components/schemas/CleaningTemplateRoomTypeCode",
+              },
+              durationMinutes: { type: "integer", minimum: 1 },
+              slotCount: { type: "integer", minimum: 1, maximum: 100 },
               standardMinutes: { type: "integer", minimum: 1 },
               premiumMinutes: { type: "integer", minimum: 1 },
               oceanPremiumMinutes: { type: "integer", minimum: 1 },

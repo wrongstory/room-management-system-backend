@@ -32,6 +32,7 @@ class DeveloperAuditEventType(str, Enum):
     CLEANING_MANUAL_REQUEST_CREATED = "cleaning.manual_request.created"
     CLEANING_OFFLINE_EVENT_RESOLVED = "cleaning.offline_event_resolved"
     CLEANING_SCHEDULED_EXPIRED = "cleaning.scheduled_expired"
+    CLEANING_TEMPLATE_PUBLISHED = "cleaning_template.published"
     CLEANING_UPLOAD_ONLY_ALLOWED = "cleaning.upload_only_allowed"
     COMPENSATION_EARNED = "compensation.earned"
     COMPLAINT_REWORK_MATERIALIZED = "complaint.rework_materialized"

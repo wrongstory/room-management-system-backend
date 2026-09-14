@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "v0.3.0",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 54,
+  "totalCount": 55,
   "baseline": {
-    "count": 19,
-    "head": "actor_activity_audit_contract"
-  },
-  "pending": {
-    "count": 35,
-    "first": "assignment_core",
+    "count": 54,
     "head": "checkout_not_completed_incident_workflow"
   },
-  "head": "checkout_not_completed_incident_workflow",
+  "pending": {
+    "count": 1,
+    "first": "cleaning_template_admin_api",
+    "head": "cleaning_template_admin_api"
+  },
+  "head": "cleaning_template_admin_api",
   "migrations": [
     { "order": 1, "name": "initial_core_schema", "sha256": "34fa4c12bf62e984607d36d20bb1f71366b4b9b8a11a7bdfa4cb2f1cef4f4a5b" },
     { "order": 2, "name": "harden_data_api_grants", "sha256": "0b0959d6d4d63e1859d22d21a3b72c2367f8c42a45d9aab82e7835b44905949c" },
@@ -67,6 +67,7 @@
     { "order": 51, "name": "room_pin_sheet_full_resync", "sha256": "5734c3b471e1460056a6c5937238928792319b4f097d2dc473b505d9f56e8147" },
     { "order": 52, "name": "pin_bootstrap_reservation_readiness", "sha256": "3ecb665895cb1bb2611389eb5122a7835ce59674575d2c9c527c97e095239b37" },
     { "order": 53, "name": "room_pin_nonce_reservation_hardening", "sha256": "500eb882d8d82fdbc0f9748376d7c3e8c5613ba9a351552cf9ef292287e27b31" },
-    { "order": 54, "name": "checkout_not_completed_incident_workflow", "sha256": "f2af0b1ca5ba4af19417618f7db838f95c67970c9d04aa4319ae7b2ce0a08937" }
+    { "order": 54, "name": "checkout_not_completed_incident_workflow", "sha256": "f2af0b1ca5ba4af19417618f7db838f95c67970c9d04aa4319ae7b2ce0a08937" },
+    { "order": 55, "name": "cleaning_template_admin_api", "sha256": "b6e1441d215078708062b1ee8ab9983bdea668113f80d6cbea1ec9031b21ae3c" }
   ]
 }

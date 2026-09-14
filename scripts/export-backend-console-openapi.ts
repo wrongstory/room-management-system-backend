@@ -12,13 +12,15 @@ const outputPath = resolve(
   "backend-console-openapi.json",
 );
 
-// developer 운영 콘솔은 business admin 배정/preview/config API를 생성하지 않는다.
-// 새 duration config는 developer 감사 enum/summary를 통해서만 읽기 노출된다.
+// developer 운영 콘솔은 일반 business admin 업무 API를 생성하지 않는다.
+// #156의 checkout template은 운영 예약 차단을 해소하는 bounded config이므로
+// active business admin용 조회/게시 client만 명시적으로 포함한다.
 const allowedPrefixes = [
   "/v1/auth/",
   "/v1/accounts",
   "/v1/developer/",
   "/v1/room-pin-sheet-sync/",
+  "/v1/cleaning-templates",
 ];
 const source = structuredClone(openApiDocument) as Record<string, unknown> & {
   paths: Record<string, unknown>;

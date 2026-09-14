@@ -3,11 +3,12 @@ import {
   assertApprovedRoomPinSheetTarget,
   validateGoogleSheetsServiceAccount,
 } from "./google-sheets-pin.ts";
+import { openApiDocument } from "./openapi.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "checkout_not_completed_incident_workflow";
+export const expectedMigrationName = "cleaning_template_admin_api";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -220,7 +221,7 @@ export function developerRuntimeStatus(): Record<string, unknown> {
       version: Deno.version.deno,
     },
     source: {
-      apiVersion: "0.3.0",
+      apiVersion: openApiDocument.info.version,
       expectedMigration: expectedMigrationName,
       fastifyRollbackBaseline: "available",
     },
@@ -468,7 +469,7 @@ function auditQuery(request: Request): {
     );
   }
   const eventTypes = parameters.getAll("eventType");
-  if (eventTypes.length > 65 || eventTypes.some((value) => value.length > 80)) {
+  if (eventTypes.length > 66 || eventTypes.some((value) => value.length > 80)) {
     throw new EdgeError(
       400,
       "VALIDATION_ERROR",
