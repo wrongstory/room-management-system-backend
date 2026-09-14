@@ -1,6 +1,6 @@
 begin;
 
-select plan(30);
+select plan(32);
 
 insert into auth.users (id) values
   ('16000000-0000-4000-8000-000000000001'),
@@ -93,6 +93,36 @@ select is(
   'equal',
   'database status matches the source migration name'
 );
+
+create temporary table developer_expected_migration_head as
+select version, statements, name
+from supabase_migrations.schema_migrations
+where name = 'checkout_not_completed_incident_workflow';
+
+delete from supabase_migrations.schema_migrations
+where name = 'checkout_not_completed_incident_workflow';
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'checkout_not_completed_incident_workflow'
+  ) ->> 'currentMigration',
+  'room_pin_nonce_reservation_hardening',
+  'database status exposes migration 53 when migration 54 is absent'
+);
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'checkout_not_completed_incident_workflow'
+  ) ->> 'migrationDrift',
+  'behind',
+  'database status reports migration 53 behind source migration 54'
+);
+
+insert into supabase_migrations.schema_migrations (version, statements, name)
+select version, statements, name
+from developer_expected_migration_head;
 
 update supabase_migrations.schema_migrations
 set version = '20991231235958'
