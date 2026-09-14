@@ -56,6 +56,9 @@ function kstDate(date = new Date()) {
 function minute(date = new Date()) {
   return new Date(Math.floor(date.getTime() / 60_000) * 60_000).toISOString();
 }
+function kstTime(date, time) {
+  return new Date(`${date}T${time}:00+09:00`).toISOString();
+}
 
 export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
   const admin = ok(
@@ -138,12 +141,39 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     ),
   ), "checkout incident availability days");
 
+  async function ensureAvailability(profileId, serviceDate) {
+    const weekday = new Date(`${serviceDate}T00:00:00Z`).getUTCDay() || 7;
+    const serviceWeek = new Date(
+      Date.parse(`${serviceDate}T00:00:00Z`) - (weekday - 1) * 86_400_000,
+    ).toISOString().slice(0, 10);
+    const existing = ok(await client.from("availability_versions").select("id")
+      .eq("maid_profile_id", profileId).eq("week_start", serviceWeek).eq("is_current", true),
+    "checkout incident availability lookup");
+    if (existing.length > 0) return;
+    const versionId = randomUUID();
+    ok(await client.from("availability_versions").insert({
+      id: versionId,
+      maid_profile_id: profileId,
+      week_start: serviceWeek,
+      version: 1,
+      submitted_at: new Date().toISOString(),
+    }), "checkout incident boundary availability fixture");
+    ok(await client.from("availability_days").insert(
+      Array.from({ length: 7 }, (_, offset) => ({
+        availability_version_id: versionId,
+        work_date: new Date(Date.parse(`${serviceWeek}T00:00:00Z`) + offset * 86_400_000)
+          .toISOString().slice(0, 10),
+        available: true,
+      })),
+    ), "checkout incident boundary availability days");
+  }
+
   const roomType = ok(
     await client.from("room_types").select("id").limit(1).single(),
     "checkout incident room type",
   );
   let sequence = 9000;
-  async function fixture({ checkoutMode = "scheduled" } = {}) {
+  async function fixture({ checkoutMode = "scheduled", nextReservation = null } = {}) {
     sequence += 1;
     const roomId = randomUUID();
     const reservationId = randomUUID();
@@ -174,26 +204,50 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
       "checkout incident obligation",
     );
     const targetId = obligation.planned_cleaning_target_id;
+    const serviceDate = kstDate(checkoutAt);
+    await ensureAvailability(maidProfileId, serviceDate);
+    await ensureAvailability(nextMaidProfileId, serviceDate);
+    let nextReservationId = null;
+    if (nextReservation) {
+      nextReservationId = randomUUID();
+      const currentRoom = ok(await client.from("rooms").select("state_version")
+        .eq("id", roomId).single(), "checkout incident next-reservation room version");
+      ok(await client.rpc("create_reservation", {
+        p_actor_profile_id: adminProfileId,
+        p_reservation_id: nextReservationId,
+        p_room_id: roomId,
+        p_check_in_at: nextReservation.checkInAt,
+        p_check_out_at: nextReservation.checkOutAt,
+        p_guest_count: 2,
+        p_guest_name_encrypted: null,
+        p_expected_room_version: currentRoom.state_version,
+        p_idempotency_key: `checkout-incident-next-reservation-${nextReservationId}`,
+        p_request_hash: "a".repeat(64),
+      }), "checkout incident next reservation fixture");
+    }
+    const targetVersion = ok(await client.from("cleaning_targets")
+      .select("assignment_version").eq("id", targetId).single(),
+    "checkout incident target version after next-reservation planning");
     ok(await client.rpc("save_cleaning_assignment_draft", {
       p_actor_profile_id: adminProfileId,
       p_cleaning_target_id: targetId,
       p_maid_profile_id: maidProfileId,
       p_sequence_number: sequence,
-      p_expected_assignment_version: 1,
+      p_expected_assignment_version: targetVersion.assignment_version,
       p_idempotency_key: `checkout-incident-draft-${reservationId}`,
       p_request_hash: "2".repeat(64),
     }), "checkout incident assignment draft");
     const impact = ok(await client.rpc("get_assignment_commit_impact", {
       p_actor_profile_id: adminProfileId,
-      p_service_date: today,
+      p_service_date: serviceDate,
     }), "checkout incident assignment preflight");
     ok(await client.rpc("commit_and_notify_assignments", {
       p_actor_profile_id: adminProfileId,
-      p_service_date: today,
+      p_service_date: serviceDate,
       p_expected_impact_fingerprint: impact.impactFingerprint,
       p_items: [{
         cleaningTargetId: targetId,
-        expectedAssignmentVersion: 2,
+        expectedAssignmentVersion: targetVersion.assignment_version + 1,
         expectedAvailabilityVersion: 1,
       }],
       p_idempotency_key: `checkout-incident-notify-${reservationId}`,
@@ -224,9 +278,10 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
         p_request_hash: "4".repeat(64),
       }), "checkout incident manual checkout");
     }
+    const activationAt = new Date(Date.parse(checkoutTime) + 60_000).toISOString();
     ok(await client.rpc("process_due_assignment_lifecycle", {
       p_actor_profile_id: adminProfileId,
-      p_as_of: new Date(Date.parse(checkoutTime) + 60_000).toISOString(),
+      p_as_of: activationAt,
       p_idempotency_key: `checkout-incident-lifecycle-${reservationId}`,
       p_request_hash: "5".repeat(64),
     }), "checkout incident attempt activation");
@@ -236,7 +291,8 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     const attempt = ok(await client.from("cleaning_attempts")
       .select("id,execution_version").eq("cleaning_target_id", targetId).eq("status", "scheduled").single(),
     "checkout incident scheduled attempt");
-    return { reservationId, targetId, assignment, attempt, schedulerArgs };
+    return { roomId, reservationId, targetId, assignment, attempt, schedulerArgs,
+      serviceDate, nextReservationId };
   }
   const reportArgs = (item, key, hash = "6".repeat(64)) => ({
     p_actor_profile_id: maidProfileId,
@@ -270,7 +326,7 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
       maidProfileId,
       sequenceNumber: nextSequence,
       serviceDate: today,
-      availableFrom: minute(new Date(Date.now() - 60_000)),
+      availableFrom: minute(),
       dueAt: minute(new Date(Date.now() + 60 * 60_000)),
     },
     p_idempotency_key: key,
@@ -425,6 +481,211 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
       order by id)::text,'[]') from public.notifications
       where cleaning_target_id='${manualFixture.targetId}'::uuid`) === manualNotificationState,
     "manual checkout rejection leaves the existing notification state untouched");
+
+  const boundaryDate = kstDate(new Date(Date.now() + 24 * 60 * 60_000));
+  const boundaryCheckoutAt = kstTime(boundaryDate, "09:00");
+  const boundaryCheckInAt = kstTime(boundaryDate, "16:00");
+  const boundaryCheckOutAt = kstTime(
+    kstDate(new Date(Date.parse(boundaryCheckInAt) + 24 * 60 * 60_000)),
+    "11:00",
+  );
+  const boundaryDue = kstTime(boundaryDate, "15:30");
+  const boundaryFixture = await fixture({
+    nextReservation: { checkInAt: boundaryCheckInAt, checkOutAt: boundaryCheckOutAt },
+  });
+  const boundaryReport = ok(await client.rpc(
+    "report_checkout_presence_incident",
+    reportArgs(boundaryFixture, `checkout-incident-boundary-report-${randomUUID()}`),
+  ), "checkout incident exact boundary report");
+  const boundaryDecision = {
+    p_actor_profile_id: adminProfileId,
+    p_session_id: adminSessionId,
+    p_incident_id: boundaryReport.incidentId,
+    p_expected_version: 1,
+    p_expected_impact_fingerprint: boundaryReport.impactFingerprint,
+    p_decision: "EXTEND_CHECKOUT",
+    p_reason_code: "GUEST_STILL_PRESENT_EXTENDED",
+    p_new_checkout_at: boundaryCheckoutAt,
+    p_reassignment: {
+      maidProfileId,
+      sequenceNumber: 20_012,
+      serviceDate: boundaryDate,
+      availableFrom: boundaryCheckoutAt,
+      dueAt: boundaryDue,
+    },
+    p_idempotency_key: `checkout-incident-boundary-decision-${randomUUID()}`,
+    p_request_hash: "7".repeat(64),
+  };
+  ok(await client.rpc("decide_checkout_presence_incident", boundaryDecision),
+    "next check-in minus 30 minutes is an accepted exact boundary");
+
+  const beyondBoundaryFixture = await fixture({
+    nextReservation: { checkInAt: boundaryCheckInAt, checkOutAt: boundaryCheckOutAt },
+  });
+  const beyondBoundaryReport = ok(await client.rpc(
+    "report_checkout_presence_incident",
+    reportArgs(beyondBoundaryFixture, `checkout-incident-beyond-boundary-report-${randomUUID()}`),
+  ), "checkout incident beyond boundary report");
+  const beyondBoundaryDecision = {
+    ...boundaryDecision,
+    p_incident_id: beyondBoundaryReport.incidentId,
+    p_expected_impact_fingerprint: beyondBoundaryReport.impactFingerprint,
+    p_reassignment: {
+      ...boundaryDecision.p_reassignment,
+      sequenceNumber: 20_013,
+      dueAt: kstTime(boundaryDate, "15:31"),
+    },
+    p_idempotency_key: `checkout-incident-beyond-boundary-${randomUUID()}`,
+    p_request_hash: "8".repeat(64),
+  };
+  const beyondBoundaryStateSql = `select jsonb_build_object(
+      'incident',(select jsonb_build_object('status',status,'version',version,
+        'currentDecisionId',current_decision_id,'resolvedAt',resolved_at)
+        from public.checkout_presence_incidents
+        where id='${beyondBoundaryReport.incidentId}'::uuid),
+      'assignments',(select count(*) from public.cleaning_assignments
+        where cleaning_target_id='${beyondBoundaryFixture.targetId}'::uuid),
+      'attempts',(select count(*) from public.cleaning_attempts
+        where cleaning_target_id='${beyondBoundaryFixture.targetId}'::uuid),
+      'pinRevoked',(select count(*) from public.room_pin_access_leases
+        where attempt_id='${beyondBoundaryFixture.attempt.id}'::uuid and revoked_at is not null),
+      'offlineRevoked',(select count(*) from private.offline_work_lease_revocations revocation
+        join private.offline_work_leases lease on lease.id=revocation.lease_id
+        where lease.attempt_id='${beyondBoundaryFixture.attempt.id}'::uuid),
+      'capabilityRevoked',(select count(*) from private.attempt_capability_revocations revocation
+        join private.attempt_capability_grants grant_row on grant_row.id=revocation.capability_id
+        where grant_row.attempt_id='${beyondBoundaryFixture.attempt.id}'::uuid),
+      'notifications',(select jsonb_agg(jsonb_build_object('id',id,'resolvedAt',resolved_at,
+        'requiresAction',requires_action,'eventFamily',event_family) order by id)
+        from public.notifications where cleaning_target_id='${beyondBoundaryFixture.targetId}'::uuid),
+      'receipt',(select count(*) from private.command_executions
+        where actor_profile_id='${adminProfileId}'::uuid
+          and command_type='checkout.presence.decision'
+          and idempotency_key='${beyondBoundaryDecision.p_idempotency_key}')
+    )::text`;
+  const beyondBoundaryState = psql(beyondBoundaryStateSql);
+  const beyondBoundary = await client.rpc(
+    "decide_checkout_presence_incident",
+    beyondBoundaryDecision,
+  );
+  assert(beyondBoundary.error?.message === "ASSIGNMENT_SCHEDULE_INVALID",
+    "one minute beyond the next check-in buffer is rejected");
+  assert(psql(`select count(*) from public.checkout_presence_incident_decisions
+      where incident_id='${beyondBoundaryReport.incidentId}'::uuid`) === "0" &&
+    psql(`select count(*) from public.checkout_presence_incidents
+      where id='${beyondBoundaryReport.incidentId}'::uuid and status='open'`) === "1",
+  "invalid next-reservation boundary leaves the incident open without a decision");
+  assert(psql(beyondBoundaryStateSql) === beyondBoundaryState,
+    "invalid schedule rolls back assignment, attempt, notification, receipt, and prior revocation state");
+
+  const createRaceFixture = await fixture();
+  const createRaceReport = ok(await client.rpc(
+    "report_checkout_presence_incident",
+    reportArgs(createRaceFixture, `checkout-incident-create-race-report-${randomUUID()}`),
+  ), "checkout incident next-reservation create race report");
+  const createRaceRoom = ok(await client.from("rooms").select("state_version")
+    .eq("id", createRaceFixture.roomId).single(),
+  "checkout incident create race room version");
+  const createRaceReservationId = randomUUID();
+  const createRaceDecision = {
+    ...boundaryDecision,
+    p_incident_id: createRaceReport.incidentId,
+    p_expected_impact_fingerprint: createRaceReport.impactFingerprint,
+    p_reassignment: {
+      ...boundaryDecision.p_reassignment,
+      sequenceNumber: 20_014,
+      dueAt: kstTime(boundaryDate, "15:31"),
+    },
+    p_idempotency_key: `checkout-incident-create-race-decision-${randomUUID()}`,
+    p_request_hash: "9".repeat(64),
+  };
+  const createRace = await Promise.all([
+    client.rpc("decide_checkout_presence_incident", createRaceDecision),
+    client.rpc("create_reservation", {
+      p_actor_profile_id: adminProfileId,
+      p_reservation_id: createRaceReservationId,
+      p_room_id: createRaceFixture.roomId,
+      p_check_in_at: boundaryCheckInAt,
+      p_check_out_at: boundaryCheckOutAt,
+      p_guest_count: 2,
+      p_guest_name_encrypted: null,
+      p_expected_room_version: createRaceRoom.state_version,
+      p_idempotency_key: `checkout-incident-create-race-${randomUUID()}`,
+      p_request_hash: "a".repeat(64),
+    }),
+  ]);
+  assert(createRace.filter((result) => !result.error).length === 1,
+    "decision versus next-reservation create has one serialized winner");
+  assert(createRace.filter((result) => result.error).every((result) =>
+    ["ASSIGNMENT_SCHEDULE_INVALID", "CLEANING_DUE_REPLAN_REQUIRED"].includes(result.error.message)
+  ), `create-race loser is a stable schedule/domain conflict without deadlock or generic error: ${
+    JSON.stringify(createRace.map((result) => result.error?.message ?? "SUCCESS"))
+  }`);
+  const createDecisionWon = !createRace[0].error;
+  assert(psql(`select count(*) from public.checkout_presence_incident_decisions
+      where incident_id='${createRaceReport.incidentId}'::uuid`) === (createDecisionWon ? "1" : "0") &&
+    psql(`select count(*) from public.checkout_presence_incidents
+      where id='${createRaceReport.incidentId}'::uuid
+        and status='${createDecisionWon ? "resolved" : "open"}'`) === "1" &&
+    psql(`select count(*) from public.reservations
+      where id='${createRaceReservationId}'::uuid`) === (createDecisionWon ? "0" : "1"),
+  "create race commits exactly the winning serial order and rolls back every loser side effect");
+
+  const changeRaceCheckInAt = kstTime(boundaryDate, "17:00");
+  const changeRaceFixture = await fixture({
+    nextReservation: { checkInAt: changeRaceCheckInAt, checkOutAt: boundaryCheckOutAt },
+  });
+  const changeRaceReport = ok(await client.rpc(
+    "report_checkout_presence_incident",
+    reportArgs(changeRaceFixture, `checkout-incident-change-race-report-${randomUUID()}`),
+  ), "checkout incident next-reservation change race report");
+  const changeRaceDecision = {
+    ...boundaryDecision,
+    p_incident_id: changeRaceReport.incidentId,
+    p_expected_impact_fingerprint: changeRaceReport.impactFingerprint,
+    p_reassignment: {
+      ...boundaryDecision.p_reassignment,
+      sequenceNumber: 20_015,
+      dueAt: kstTime(boundaryDate, "16:00"),
+    },
+    p_idempotency_key: `checkout-incident-change-race-decision-${randomUUID()}`,
+    p_request_hash: "b".repeat(64),
+  };
+  const changeRace = await Promise.all([
+    client.rpc("decide_checkout_presence_incident", changeRaceDecision),
+    client.rpc("change_reservation", {
+      p_actor_profile_id: adminProfileId,
+      p_reservation_id: changeRaceFixture.nextReservationId,
+      p_room_id: changeRaceFixture.roomId,
+      p_check_in_at: boundaryCheckInAt,
+      p_check_out_at: boundaryCheckOutAt,
+      p_guest_count: 2,
+      p_guest_name_mode: "keep",
+      p_guest_name_encrypted: null,
+      p_expected_version: 1,
+      p_reason_code: "TEST_CHECK_IN_CHANGED",
+      p_idempotency_key: `checkout-incident-change-race-${randomUUID()}`,
+      p_request_hash: "c".repeat(64),
+    }),
+  ]);
+  assert(changeRace.filter((result) => !result.error).length === 1,
+    "decision versus next-reservation schedule change has one serialized winner");
+  assert(changeRace.filter((result) => result.error).every((result) =>
+    ["ASSIGNMENT_SCHEDULE_INVALID", "CLEANING_DUE_REPLAN_REQUIRED"].includes(result.error.message)
+  ), `change-race loser is a stable schedule/domain conflict without deadlock or generic error: ${
+    JSON.stringify(changeRace.map((result) => result.error?.message ?? "SUCCESS"))
+  }`);
+  const changeDecisionWon = !changeRace[0].error;
+  const expectedCheckInAt = changeDecisionWon ? changeRaceCheckInAt : boundaryCheckInAt;
+  assert(psql(`select count(*) from public.checkout_presence_incident_decisions
+      where incident_id='${changeRaceReport.incidentId}'::uuid`) === (changeDecisionWon ? "1" : "0") &&
+    psql(`select count(*) from public.checkout_presence_incidents
+      where id='${changeRaceReport.incidentId}'::uuid
+        and status='${changeDecisionWon ? "resolved" : "open"}'`) === "1" &&
+    psql(`select count(*) from public.reservations
+      where id='${changeRaceFixture.nextReservationId}'::uuid
+        and check_in_at='${expectedCheckInAt}'::timestamptz`) === "1",
+  "schedule-change race commits exactly the winning serial order without partial drift");
 
   const extensionFixture = await fixture();
   const extensionReport = ok(await client.rpc(
@@ -630,9 +891,9 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     reportArgs(expiredDueFixture, `checkout-incident-expired-due-report-${randomUUID()}`),
   ), "checkout incident expired due report");
   const nowMs = Date.now();
-  let boundaryDueMs = Date.parse(minute(new Date(nowMs + 60_000)));
-  if (boundaryDueMs - nowMs < 10_000) boundaryDueMs += 60_000;
-  const boundaryDue = new Date(boundaryDueMs).toISOString();
+  let clockBoundaryDueMs = Date.parse(minute(new Date(nowMs + 60_000)));
+  if (clockBoundaryDueMs - nowMs < 10_000) clockBoundaryDueMs += 60_000;
+  const clockBoundaryDue = new Date(clockBoundaryDueMs).toISOString();
   const replayAfterDueKey = `checkout-incident-due-replay-${randomUUID()}`;
   const replayAfterDueArgs = decisionArgs(
     replayAfterDueReport.incidentId,
@@ -642,7 +903,7 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     "CONFIRM_DEPARTED",
     "3".repeat(64),
   );
-  replayAfterDueArgs.p_reassignment.dueAt = boundaryDue;
+  replayAfterDueArgs.p_reassignment.dueAt = clockBoundaryDue;
   const firstDecision = ok(await client.rpc(
     "decide_checkout_presence_incident",
     replayAfterDueArgs,
@@ -656,20 +917,48 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     "CONFIRM_DEPARTED",
     "4".repeat(64),
   );
-  expiredDueArgs.p_reassignment.dueAt = boundaryDue;
-  const expiredDueState = psql(`select jsonb_build_object(
+  expiredDueArgs.p_reassignment.dueAt = clockBoundaryDue;
+  const expiredDueStateSql = `select jsonb_build_object(
+      'incident',(select jsonb_build_object('status',status,'version',version,
+        'currentDecisionId',current_decision_id,'resolvedAt',resolved_at)
+        from public.checkout_presence_incidents
+        where id='${expiredDueReport.incidentId}'::uuid),
+      'target',(select jsonb_build_object('status',status,'assignmentVersion',assignment_version,
+        'serviceDate',effective_service_date,'availableFrom',available_from,'dueAt',due_at)
+        from public.cleaning_targets where id='${expiredDueFixture.targetId}'::uuid),
       'assignments',(select count(*) from public.cleaning_assignments
         where cleaning_target_id='${expiredDueFixture.targetId}'::uuid),
       'attempts',(select count(*) from public.cleaning_attempts
         where cleaning_target_id='${expiredDueFixture.targetId}'::uuid),
+      'attemptState',(select jsonb_agg(jsonb_build_object('id',id,'status',status,
+        'executionVersion',execution_version,'endedAt',ended_at,'endReason',end_reason) order by id)
+        from public.cleaning_attempts where cleaning_target_id='${expiredDueFixture.targetId}'::uuid),
+      'pinRevocations',(select jsonb_agg(jsonb_build_object('id',id,'revokedAt',revoked_at,
+        'reason',revoke_reason_code) order by id) from public.room_pin_access_leases
+        where attempt_id='${expiredDueFixture.attempt.id}'::uuid),
+      'offlineRevocations',(select jsonb_agg(jsonb_build_object('leaseId',revocation.lease_id,
+        'revokedAt',revocation.revoked_at,'reason',revocation.reason_code) order by revocation.lease_id)
+        from private.offline_work_lease_revocations revocation
+        join private.offline_work_leases lease on lease.id=revocation.lease_id
+        where lease.attempt_id='${expiredDueFixture.attempt.id}'::uuid),
+      'capabilityRevocations',(select jsonb_agg(jsonb_build_object('capabilityId',revocation.capability_id,
+        'revokedAt',revocation.revoked_at,'reason',revocation.reason_code) order by revocation.capability_id)
+        from private.attempt_capability_revocations revocation
+        join private.attempt_capability_grants grant_row on grant_row.id=revocation.capability_id
+        where grant_row.attempt_id='${expiredDueFixture.attempt.id}'::uuid),
       'audits',(select count(*) from public.audit_events
         where entity_id='${expiredDueReport.incidentId}'::uuid and event_type='checkout.presence_decided'),
       'notifications',(select count(*) from public.notifications
-        where cleaning_target_id='${expiredDueFixture.targetId}'::uuid)
-    )::text`);
+        where cleaning_target_id='${expiredDueFixture.targetId}'::uuid),
+      'receipt',(select count(*) from private.command_executions
+        where actor_profile_id='${adminProfileId}'::uuid
+          and command_type='checkout.presence.decision'
+          and idempotency_key='${expiredDueArgs.p_idempotency_key}')
+    )::text`;
+  const expiredDueState = psql(expiredDueStateSql);
   const lock = await holdReservationCommandLock();
   const delayedDecision = client.rpc("decide_checkout_presence_incident", expiredDueArgs);
-  await waitUntil(Date.parse(boundaryDue) + 250);
+  await waitUntil(Date.parse(clockBoundaryDue) + 250);
   await lock.release();
   const expiredDecision = await delayedDecision;
   assert(expiredDecision.error?.message === "INVALID_CHECKOUT_INCIDENT_DECISION",
@@ -679,17 +968,8 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     psql(`select count(*) from public.checkout_presence_incidents
       where id='${expiredDueReport.incidentId}'::uuid and status='open'`) === "1",
   "expired dueAt rolls back the decision, reassignment, audit, and notification transaction");
-  assert(psql(`select jsonb_build_object(
-      'assignments',(select count(*) from public.cleaning_assignments
-        where cleaning_target_id='${expiredDueFixture.targetId}'::uuid),
-      'attempts',(select count(*) from public.cleaning_attempts
-        where cleaning_target_id='${expiredDueFixture.targetId}'::uuid),
-      'audits',(select count(*) from public.audit_events
-        where entity_id='${expiredDueReport.incidentId}'::uuid and event_type='checkout.presence_decided'),
-      'notifications',(select count(*) from public.notifications
-        where cleaning_target_id='${expiredDueFixture.targetId}'::uuid)
-    )::text`) === expiredDueState,
-  "lock-wait expiry preserves the complete pre-decision state");
+  assert(psql(expiredDueStateSql) === expiredDueState,
+  "lock-wait expiry preserves incident, target, prior revocations, notifications, and receipt state");
   const replayAfterDue = ok(await client.rpc(
     "decide_checkout_presence_incident",
     replayAfterDueArgs,

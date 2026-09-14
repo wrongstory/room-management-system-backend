@@ -704,7 +704,11 @@ assignment·attempt snapshot을 고정하고, open 동안 실행·PIN·offline·
 두 알림과 outbox를 중복 생성하지 않습니다. global reservation advisory lock → scoped command receipt → domain row lock
 순서와 version CAS·서버 계산 impact fingerprint가 replay/상반 결정을 직렬화합니다. 신규 결정의 마감 시각은 모든
 domain lock과 상태 재검증 뒤 `clock_timestamp()`로 다시 확인하고, 이미 완료된 receipt replay에는 이 시간 검사를
-재적용하지 않습니다. 중단 구간에는 earning·벌점을 생성하지 않습니다. Fastify/Edge/OpenAPI candidate는 3개 route를
+재적용하지 않습니다. 재배정 구간은 기존 `assert_handover_schedule()`을 재사용해 `availableFrom`의 KST 날짜와
+`serviceDate` 일치, 서비스일 다음 날 00:00 KST 상한, 다음 유효 예약 체크인 30분 전 상한을 같은 잠금 안에서
+검증합니다. Fastify와 Edge는 incident timestamp 요청·DB projection 모두 초와 UTC offset이 있는 strict RFC 3339로
+검증하고 잘못된 달력 날짜나 DB 값을 안전하게 차단합니다. 중단 구간에는 earning·벌점을 생성하지 않습니다.
+Fastify/Edge/OpenAPI candidate는 3개 route를
 추가한 108 paths / 115 operations이고 production에는 아직 승격되지 않았습니다.
 
 ## API 단계

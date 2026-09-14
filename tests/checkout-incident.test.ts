@@ -82,6 +82,9 @@ describe("checkout incident service", () => {
   });
 
   it("projects only typed decision fields and fails closed on malformed rows", () => {
+    const preciseReportedAt = "2028-02-29T06:10:00.123456789+09:00";
+    expect(checkoutIncidentProjection({ ...incident, reportedAt: preciseReportedAt }))
+      .toMatchObject({ reportedAt: preciseReportedAt });
     expect(checkoutIncidentProjection({
       ...incident,
       status: "resolved",
@@ -101,13 +104,34 @@ describe("checkout incident service", () => {
       },
       before_state: { raw: true },
     })).not.toHaveProperty("before_state");
-    expect(() => checkoutIncidentProjection({ ...incident, reportedAt: "not-time" }))
-      .toThrowError(expect.objectContaining({ code: "CHECKOUT_INCIDENT_COMMAND_FAILED" }));
+    for (const reportedAt of [
+      "2026-02-29T06:10:00Z",
+      "2026-04-31T06:10:00Z",
+      "2026-09-13T06:10Z",
+      "2026-09-13T06:10:00",
+      "2026-09-13T06:10:00z",
+      "2026-09-13T06:10:00+24:00",
+      "2026-09-13T06:10:00.Z",
+    ]) {
+      let error: unknown;
+      try {
+        checkoutIncidentProjection({ ...incident, reportedAt });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toMatchObject({
+        code: "CHECKOUT_INCIDENT_COMMAND_FAILED",
+        statusCode: 500,
+      });
+      expect((error as Error).message).not.toContain(reportedAt);
+    }
   });
 
   it("maps stable domain errors and redacts unknown database detail", () => {
     expect(checkoutIncidentDatabaseError({ message: "CHECKOUT_INCIDENT_OPEN" }))
       .toMatchObject({ statusCode: 409, code: "CHECKOUT_INCIDENT_OPEN" });
+    expect(checkoutIncidentDatabaseError({ message: "ASSIGNMENT_SCHEDULE_INVALID" }))
+      .toMatchObject({ statusCode: 409, code: "ASSIGNMENT_SCHEDULE_INVALID" });
     expect(checkoutIncidentDatabaseError({ message: "raw PIN SQL token" }))
       .toMatchObject({ statusCode: 500, code: "CHECKOUT_INCIDENT_COMMAND_FAILED" });
     expect(checkoutIncidentDatabaseError({ message: "raw PIN SQL token" }).message)
@@ -117,6 +141,7 @@ describe("checkout incident service", () => {
 
 async function appFor(role: Actor["role"] = "maid") {
   const calls: string[] = [];
+  const decisions: unknown[] = [];
   const service: CheckoutIncidentService = {
     async report() {
       calls.push("report");
@@ -126,8 +151,9 @@ async function appFor(role: Actor["role"] = "maid") {
       calls.push("get");
       return incident;
     },
-    async decide() {
+    async decide(_actor, _incidentId, input) {
       calls.push("decide");
+      decisions.push(input);
       return {
         ...incident,
         status: "resolved",
@@ -148,7 +174,7 @@ async function appFor(role: Actor["role"] = "maid") {
     })
   );
   await app.register(createCheckoutIncidentRoutes(service));
-  return { app, calls };
+  return { app, calls, decisions };
 }
 
 describe("checkout incident Fastify contract", () => {
@@ -206,5 +232,54 @@ describe("checkout incident Fastify contract", () => {
     expect(detail.json().error.code).toBe("CHECKOUT_INCIDENT_ACCESS_REQUIRED");
     expect(developerCalls).toEqual([]);
     await developerApp.close();
+  });
+
+  it("requires strict second-precision offset timestamps and preserves fractions", async () => {
+    const { app, calls, decisions } = await appFor("admin");
+    const precise = {
+      ...decisionBody,
+      decision: "EXTEND_CHECKOUT" as const,
+      reasonCode: "GUEST_STILL_PRESENT_EXTENDED",
+      newCheckoutAt: "2028-02-29T08:10:00.987654321+09:00",
+      reassignment: {
+        ...decisionBody.reassignment,
+        serviceDate: "2028-02-29",
+        availableFrom: "2028-02-29T06:10:00Z",
+        dueAt: "2028-02-29T07:10:00.123456789+09:00",
+      },
+    };
+    const valid = await app.inject({
+      method: "POST",
+      url: `/v1/checkout-incidents/${id(10)}/decision`,
+      headers: { "idempotency-key": "checkout-time-valid" },
+      payload: precise,
+    });
+    expect(valid.statusCode).toBe(200);
+    expect(decisions).toEqual([precise]);
+
+    for (const dueAt of [
+      "2026-02-29T06:10:00Z",
+      "2026-04-31T06:10:00Z",
+      "2026-09-13T06:10Z",
+      "2026-09-13T06:10:00",
+      "2026-09-13T06:10:00z",
+      "2026-09-13T06:10:00+24:00",
+      "2026-09-13T06:10:60Z",
+      "2026-09-13T06:10:00.Z",
+    ]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/v1/checkout-incidents/${id(10)}/decision`,
+        headers: { "idempotency-key": "checkout-time-invalid" },
+        payload: {
+          ...decisionBody,
+          reassignment: { ...decisionBody.reassignment, dueAt },
+        },
+      });
+      expect(response.statusCode, dueAt).toBe(400);
+      expect(response.json().error.code, dueAt).toBe("VALIDATION_ERROR");
+    }
+    expect(calls).toEqual(["decide"]);
+    await app.close();
   });
 });

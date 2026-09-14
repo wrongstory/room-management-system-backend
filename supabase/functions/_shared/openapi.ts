@@ -47,6 +47,13 @@ const noStoreHeader = {
   schema: { const: "no-store" },
 };
 
+const checkoutIncidentTimestampSchema = {
+  type: "string",
+  format: "date-time",
+  pattern:
+    "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)$",
+} as const;
+
 const complaintErrorResponse = {
   ...errorResponse,
   headers: { "Cache-Control": noStoreHeader },
@@ -3784,8 +3791,8 @@ export const openApiDocument = {
           maidProfileId: { type: "string", format: "uuid" },
           sequenceNumber: { type: "integer", minimum: 1 },
           serviceDate: { type: "string", format: "date" },
-          availableFrom: { type: "string", format: "date-time" },
-          dueAt: { type: "string", format: "date-time" },
+          availableFrom: { ...checkoutIncidentTimestampSchema },
+          dueAt: { ...checkoutIncidentTimestampSchema },
         },
       },
       CheckoutIncidentDecisionRequest: {
@@ -3819,7 +3826,7 @@ export const openApiDocument = {
             ],
           },
           newCheckoutAt: {
-            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+            anyOf: [{ ...checkoutIncidentTimestampSchema }, { type: "null" }],
           },
           reassignment: {
             $ref: "#/components/schemas/CheckoutIncidentReassignment",
@@ -3855,9 +3862,9 @@ export const openApiDocument = {
           status: { type: "string", enum: ["open", "resolved"] },
           version: { type: "integer", minimum: 1 },
           impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
-          reportedAt: { type: "string", format: "date-time" },
+          reportedAt: { ...checkoutIncidentTimestampSchema },
           resolvedAt: {
-            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+            anyOf: [{ ...checkoutIncidentTimestampSchema }, { type: "null" }],
           },
           currentDecisionId: {
             anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
@@ -3892,8 +3899,8 @@ export const openApiDocument = {
           },
           reasonCode: { type: "string" },
           decidedBy: { type: "string", format: "uuid" },
-          decidedAt: { type: "string", format: "date-time" },
-          newCheckoutAt: { type: "string", format: "date-time" },
+          decidedAt: { ...checkoutIncidentTimestampSchema },
+          newCheckoutAt: { ...checkoutIncidentTimestampSchema },
           nextAssignmentId: { type: "string", format: "uuid" },
           nextAttemptId: { type: "string", format: "uuid" },
         },

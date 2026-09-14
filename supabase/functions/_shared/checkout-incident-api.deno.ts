@@ -221,19 +221,19 @@ Deno.test("checkout incident decision is exact admin-only and nested projection 
   );
 });
 
-Deno.test("checkout incident request timestamps match Fastify offset ISO datetime validation", async () => {
+Deno.test("checkout incident request timestamps require seconds and match Fastify validation", async () => {
   const admin = { ...maid, role: "admin" as const };
   const base = {
     expectedVersion: 1,
     expectedImpactFingerprint: "a".repeat(64),
-    decision: "CONFIRM_DEPARTED",
-    reasonCode: "GUEST_DEPARTURE_CONFIRMED",
-    newCheckoutAt: null,
+    decision: "EXTEND_CHECKOUT",
+    reasonCode: "GUEST_STILL_PRESENT_EXTENDED",
+    newCheckoutAt: "2028-02-29T08:10:00.987654321+09:00",
     reassignment: {
       maidProfileId: ids.actor,
       sequenceNumber: 1,
       serviceDate: "2028-02-29",
-      availableFrom: "2028-02-29T06:10Z",
+      availableFrom: "2028-02-29T06:10:00Z",
       dueAt: "2028-02-29T07:10:00.123456789+09:00",
     },
   };
@@ -245,14 +245,19 @@ Deno.test("checkout incident request timestamps match Fastify offset ISO datetim
     ids.incident,
   );
   assert(
-    valid.calls[0].args.p_reassignment !== undefined,
-    "minute precision, leap date, fractional seconds, UTC and offset are accepted",
+    (valid.calls[0].args.p_reassignment as Record<string, unknown>).dueAt ===
+        base.reassignment.dueAt &&
+      (valid.calls[0].args.p_reassignment as Record<string, unknown>)
+          .availableFrom === base.reassignment.availableFrom &&
+      valid.calls[0].args.p_new_checkout_at === base.newCheckoutAt,
+    "leap date, fractional seconds, UTC and offset are accepted without truncation",
   );
 
   for (
     const invalidTimestamp of [
       "2026-02-29T06:10:00Z",
       "2026-04-31T06:10:00Z",
+      "2026-09-13T06:10Z",
       "2026-09-13T06:10:00",
       "2026-09-13T06:10:00z",
       "2026-09-13T06:10:00+24:00",
@@ -281,25 +286,40 @@ Deno.test("checkout incident request timestamps match Fastify offset ISO datetim
 
 Deno.test("checkout incident database timestamps stay strict and fail closed", async () => {
   const admin = { ...maid, role: "admin" as const };
+  const preciseReportedAt = "2028-02-29T06:10:00.123456789+09:00";
+  const precise = clientsFor(incident({ reportedAt: preciseReportedAt }));
+  const projected = await getCheckoutIncident(
+    request(`/v1/checkout-incidents/${ids.incident}`),
+    precise.clients,
+    admin,
+    ids.incident,
+  ) as Record<string, unknown>;
+  assert(
+    projected.reportedAt === preciseReportedAt,
+    "database timestamp fractions are preserved without truncation",
+  );
   for (
     const reportedAt of [
       "2026-02-29T06:10:00Z",
       "2026-04-31T06:10:00Z",
       "2026-09-13T06:10Z",
+      "2026-09-13T06:10:00",
       "2026-09-13T06:10:00z",
       "2026-09-13T06:10:00+24:00",
     ]
   ) {
     const malformed = clientsFor(incident({ reportedAt }));
+    const error = await failure(() =>
+      getCheckoutIncident(
+        request(`/v1/checkout-incidents/${ids.incident}`),
+        malformed.clients,
+        admin,
+        ids.incident,
+      )
+    );
     assert(
-      (await failure(() =>
-        getCheckoutIncident(
-          request(`/v1/checkout-incidents/${ids.incident}`),
-          malformed.clients,
-          admin,
-          ids.incident,
-        )
-      )).code === "CHECKOUT_INCIDENT_COMMAND_FAILED",
+      error.code === "CHECKOUT_INCIDENT_COMMAND_FAILED" &&
+        !error.message.includes(reportedAt),
       `invalid database timestamp fails closed: ${reportedAt}`,
     );
   }
@@ -336,6 +356,14 @@ Deno.test("checkout incident validation and database errors fail closed without 
     checkoutIncidentDatabaseError({ message: "CHECKOUT_INCIDENT_OPEN" })
       .status === 409,
     "stable conflict",
+  );
+  const invalidSchedule = checkoutIncidentDatabaseError({
+    message: "ASSIGNMENT_SCHEDULE_INVALID",
+  });
+  assert(
+    invalidSchedule.status === 409 &&
+      invalidSchedule.code === "ASSIGNMENT_SCHEDULE_INVALID",
+    "canonical schedule rejection remains a stable conflict",
   );
   const hidden = checkoutIncidentDatabaseError({
     message: "raw SQL PIN token phone",

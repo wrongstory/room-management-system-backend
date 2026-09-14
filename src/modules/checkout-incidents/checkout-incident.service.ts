@@ -4,7 +4,8 @@ import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+export const checkoutIncidentTimestampPattern =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
 export type CheckoutIncidentDecision = 'EXTEND_CHECKOUT' | 'CONFIRM_DEPARTED' | 'FALSE_REPORT';
 export interface CheckoutIncidentReassignment {
@@ -53,8 +54,22 @@ function uuid(value: unknown): string {
   if (typeof value !== 'string' || !uuidPattern.test(value)) projectionError();
   return value.toLowerCase();
 }
+export function isCheckoutIncidentTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = checkoutIncidentTimestampPattern.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 && day <= (days[month - 1] ?? 0)
+    && Number(match[4]) <= 23 && Number(match[5]) <= 59 && Number(match[6]) <= 59
+    && (match[8] === 'Z' || (Number(match[10]) <= 23 && Number(match[11]) <= 59))
+    && Number.isFinite(Date.parse(value));
+}
 function timestamp(value: unknown): string {
-  if (typeof value !== 'string' || !timestampPattern.test(value) || !Number.isFinite(Date.parse(value))) projectionError();
+  if (!isCheckoutIncidentTimestamp(value)) projectionError();
   return value;
 }
 function projectDecision(value: unknown): Record<string, unknown> {
@@ -100,6 +115,7 @@ export function checkoutIncidentDatabaseError(error: { message?: string } | null
     CHECKOUT_INCIDENT_REPORT_CONFLICT: 409, CHECKOUT_INCIDENT_VERSION_CONFLICT: 409,
     CHECKOUT_INCIDENT_IMPACT_CHANGED: 409,
     ASSIGNMENT_MAID_UNAVAILABLE: 409, ASSIGNMENT_SEQUENCE_CONFLICT: 409,
+    ASSIGNMENT_SCHEDULE_INVALID: 409,
     IDEMPOTENCY_KEY_REUSED: 409, INVALID_CHECKOUT_INCIDENT_REPORT: 400,
     INVALID_CHECKOUT_INCIDENT_DECISION: 400
   };

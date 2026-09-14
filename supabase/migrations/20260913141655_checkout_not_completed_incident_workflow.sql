@@ -718,7 +718,12 @@ begin
   select * into t from public.cleaning_targets where id=i.cleaning_target_id for update;
   select * into s from public.cleaning_assignments where id=i.assignment_id for update;
   select * into a from public.cleaning_attempts where id=i.attempt_id for update;
-  perform 1 from public.profiles where id in (p_actor_profile_id,next_maid) order by id for no key update;
+  -- assert_room_pin_actor_session() already holds the actor row FOR SHARE for
+  -- the transaction. Re-locking that row FOR NO KEY UPDATE after the global
+  -- reservation lock inverts the legacy reservation command order
+  -- (actor SHARE -> global lock) and can deadlock. Lock only the assignee here;
+  -- the actor's role/status remains protected by the existing SHARE lock.
+  perform 1 from public.profiles where id=next_maid for no key update;
   actor:=private.assert_room_pin_actor_session(p_actor_profile_id,p_session_id);
   select * into maid from public.profiles where id=next_maid;
   if i.status<>'open' or i.version<>p_expected_version
@@ -744,6 +749,11 @@ begin
     and x.sequence_number=next_sequence and x.id<>s.id) then
     raise exception using errcode='23514',message='ASSIGNMENT_SEQUENCE_CONFLICT';
   end if;
+  -- Reuse the canonical execution/handover interval contract after every
+  -- reservation/target/assignment/availability lock and current-state check.
+  -- This preserves the KST service-day boundary and the next check-in buffer
+  -- before any incident, assignment, attempt, notification, or receipt write.
+  perform private.assert_handover_schedule(t,next_date,next_from,next_due);
   -- This clock sample deliberately occurs after every domain lock and current
   -- state/fingerprint revalidation. A request that waited on a lock cannot
   -- materialize an assignment whose due boundary elapsed while it waited.

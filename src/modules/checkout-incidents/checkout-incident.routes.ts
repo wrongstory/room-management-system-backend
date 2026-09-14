@@ -1,15 +1,19 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../../lib/app-error.js';
-import type { CheckoutIncidentService } from './checkout-incident.service.js';
+import {
+  type CheckoutIncidentService,
+  isCheckoutIncidentTimestamp,
+} from './checkout-incident.service.js';
 
 const uuid = z.uuid();
 const version = z.int().min(1);
+const timestamp = z.string().refine(isCheckoutIncidentTimestamp);
 const idempotencyKey = (request: FastifyRequest) => z.string().min(8).max(128)
   .regex(/^[A-Za-z0-9._:-]+$/).parse(request.headers['idempotency-key']);
 const reassignment = z.object({
   maidProfileId: uuid, sequenceNumber: z.int().min(1), serviceDate: z.iso.date(),
-  availableFrom: z.iso.datetime({ offset: true }), dueAt: z.iso.datetime({ offset: true })
+  availableFrom: timestamp, dueAt: timestamp
 }).strict();
 const reasons = {
   EXTEND_CHECKOUT: 'GUEST_STILL_PRESENT_EXTENDED',
@@ -52,7 +56,7 @@ export function createCheckoutIncidentRoutes(service: CheckoutIncidentService): 
         expectedImpactFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
         decision: z.enum(['EXTEND_CHECKOUT','CONFIRM_DEPARTED','FALSE_REPORT']),
         reasonCode: z.string().regex(/^[A-Z0-9_]{2,80}$/),
-        newCheckoutAt: z.iso.datetime({ offset: true }).nullable(), reassignment }).strict().parse(request.body);
+        newCheckoutAt: timestamp.nullable(), reassignment }).strict().parse(request.body);
       if (body.reasonCode !== reasons[body.decision]
         || (body.decision === 'EXTEND_CHECKOUT') !== (body.newCheckoutAt !== null)) {
         throw new AppError(400, 'VALIDATION_ERROR', '결정 사유와 체크아웃 시각을 확인해 주세요.');

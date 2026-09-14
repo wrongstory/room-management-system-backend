@@ -10,9 +10,7 @@ import {
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-const requestTimestampPattern =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2}):(\d{2}))$/;
-const responseTimestampPattern =
+const timestampPattern =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
 const reasons = {
   EXTEND_CHECKOUT: "GUEST_STILL_PRESENT_EXTENDED",
@@ -61,7 +59,7 @@ function isStrictRfc3339(
     Number.isFinite(Date.parse(value));
 }
 function time(value: unknown): string {
-  if (!isStrictRfc3339(value, requestTimestampPattern)) invalid();
+  if (!isStrictRfc3339(value, timestampPattern)) invalid();
   return value;
 }
 function exactKeys(value: Record<string, unknown>, keys: string[]): void {
@@ -71,7 +69,7 @@ function exactKeys(value: Record<string, unknown>, keys: string[]): void {
   ) invalid();
 }
 function strictTime(value: unknown): string {
-  if (!isStrictRfc3339(value, responseTimestampPattern)) {
+  if (!isStrictRfc3339(value, timestampPattern)) {
     throw checkoutIncidentDatabaseError(null);
   }
   return value;
@@ -124,6 +122,7 @@ export function checkoutIncidentDatabaseError(
     CHECKOUT_INCIDENT_IMPACT_CHANGED: 409,
     ASSIGNMENT_MAID_UNAVAILABLE: 409,
     ASSIGNMENT_SEQUENCE_CONFLICT: 409,
+    ASSIGNMENT_SCHEDULE_INVALID: 409,
     IDEMPOTENCY_KEY_REUSED: 409,
     INVALID_CHECKOUT_INCIDENT_REPORT: 400,
     INVALID_CHECKOUT_INCIDENT_DECISION: 400,

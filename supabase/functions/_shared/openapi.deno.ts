@@ -812,6 +812,51 @@ Deno.test("checkout presence incident OpenAPI keeps typed roles and safe develop
       ),
     "decision binds the server-computed impact fingerprint",
   );
+  type TimestampSchema = {
+    type?: string;
+    format?: string;
+    pattern?: string;
+    anyOf?: readonly TimestampSchema[];
+  };
+  const reassignment = doc.components.schemas.CheckoutIncidentReassignment
+    .properties as Record<string, TimestampSchema>;
+  const decisionRequest = doc.components.schemas
+    .CheckoutIncidentDecisionRequest.properties as Record<
+      string,
+      TimestampSchema
+    >;
+  const incident = doc.components.schemas.CheckoutIncident.properties as Record<
+    string,
+    TimestampSchema
+  >;
+  const decision = doc.components.schemas.CheckoutIncidentDecision
+    .properties as Record<string, TimestampSchema>;
+  const timestampSchemas = [
+    reassignment.availableFrom,
+    reassignment.dueAt,
+    decisionRequest.newCheckoutAt.anyOf?.[0],
+    incident.reportedAt,
+    incident.resolvedAt.anyOf?.[0],
+    decision.decidedAt,
+    decision.newCheckoutAt,
+  ];
+  for (const schema of timestampSchemas) {
+    assert(
+      schema?.type === "string" && schema.format === "date-time" &&
+        typeof schema.pattern === "string" &&
+        new RegExp(schema.pattern).test(
+          "2028-02-29T07:10:00.123456789+09:00",
+        ) &&
+        !new RegExp(schema.pattern).test("2028-02-29T07:10+09:00") &&
+        !new RegExp(schema.pattern).test("2028-02-29T07:10:00+24:00"),
+      "checkout timestamps require seconds and a bounded RFC3339 offset",
+    );
+  }
+  assert(
+    reassignment.serviceDate.format === "date" &&
+      reassignment.serviceDate.pattern === undefined,
+    "serviceDate remains a date-only field",
+  );
   const auditTypes = doc.components.schemas.DeveloperAuditEventType.enum;
   assert(
     auditTypes.includes("checkout.presence_reported") &&

@@ -45,7 +45,11 @@ declare
   v_target_id uuid;
   v_assignment_id uuid;
   v_attempt_id uuid;
-  v_at timestamptz:=date_trunc('minute',clock_timestamp());
+  -- Keep the authoritative scheduled checkout far enough in the past that an
+  -- otherwise-valid reassignment interval can exercise the post-lock hard
+  -- deadline check without violating the checkout target's available-from
+  -- invariant first.
+  v_at timestamptz:=date_trunc('minute',clock_timestamp())-interval '5 minutes';
   v_service_date date:=(clock_timestamp() at time zone 'Asia/Seoul')::date;
   v_planned_date date:=((clock_timestamp() at time zone 'Asia/Seoul')::date);
   v_week date;
@@ -347,6 +351,43 @@ select is((select status from public.checkout_presence_incidents
   'expired-due rejection rolls back without resolving the incident');
 select is((select count(*)::integer from public.checkout_presence_incident_decisions),0,
   'expired-due rejection creates no immutable decision');
+
+select throws_ok(
+  (select format(
+    'select public.decide_checkout_presence_incident(%L,%L,%L,1,%L,%L,%L,null,%L::jsonb,%L,%L)',
+    pg_temp.iid(1),pg_temp.iid(201),incident_id,report_result->>'impactFingerprint',
+    'CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
+    jsonb_build_object(
+      'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
+      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
+      'availableFrom',at_time+interval '1 day',
+      'dueAt',at_time+interval '1 day 1 hour'
+    )::text,'checkout-incident-service-date-mismatch',repeat('2',64)
+  ) from incident_fixture),
+  '23514','ASSIGNMENT_SCHEDULE_INVALID',
+  'reassignment serviceDate must match availableFrom in KST'
+);
+select throws_ok(
+  (select format(
+    'select public.decide_checkout_presence_incident(%L,%L,%L,1,%L,%L,%L,null,%L::jsonb,%L,%L)',
+    pg_temp.iid(1),pg_temp.iid(201),incident_id,report_result->>'impactFingerprint',
+    'CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
+    jsonb_build_object(
+      'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
+      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
+      'availableFrom',at_time,
+      'dueAt',(((at_time at time zone 'Asia/Seoul')::date+1)::timestamp
+        at time zone 'Asia/Seoul')+interval '1 minute'
+    )::text,'checkout-incident-after-service-day',repeat('3',64)
+  ) from incident_fixture),
+  '23514','ASSIGNMENT_SCHEDULE_INVALID',
+  'reassignment dueAt cannot exceed the next KST midnight boundary'
+);
+select is((select status from public.checkout_presence_incidents
+  where id=(select incident_id from incident_fixture)),'open',
+  'invalid schedule attempts preserve the open frozen incident');
+select is((select count(*)::integer from public.checkout_presence_incident_decisions),0,
+  'invalid schedule attempts append no decision history');
 
 update incident_fixture f set decision_result=public.decide_checkout_presence_incident(
   pg_temp.iid(1),pg_temp.iid(201),f.incident_id,1,
