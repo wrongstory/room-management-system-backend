@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 108:
-        raise RuntimeError("전체 source OpenAPI path 수가 108이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 109:
+        raise RuntimeError("전체 source OpenAPI path 수가 109가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 115:
-        raise RuntimeError("전체 source OpenAPI operation 수가 115가 아닙니다.")
+    if operation_count != 117:
+        raise RuntimeError("전체 source OpenAPI operation 수가 117이 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -59,6 +59,13 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "cleaning_templates" / "list_cleaning_templates.py",
+            package / "api" / "cleaning_templates" / "publish_cleaning_template.py",
+            package / "models" / "cleaning_template_catalog.py",
+            package / "models" / "cleaning_template_room_type_state.py",
+            package / "models" / "cleaning_template_slot.py",
+            package / "models" / "publish_cleaning_template_request.py",
+            package / "models" / "published_cleaning_template.py",
             package / "api" / "checkout_incidents" / "report_checkout_not_completed.py",
             package / "api" / "checkout_incidents" / "get_checkout_incident.py",
             package / "api" / "checkout_incidents" / "decide_checkout_incident.py",

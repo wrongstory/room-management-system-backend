@@ -174,17 +174,62 @@ const { error: profileError } = await client.from('profiles').insert({
 });
 assert(!profileError, `profile fixture failed: ${profileError?.message}`);
 
-// Local synthetic configuration; planned checkout creation requires a published snapshot.
-const { data: templateRoomTypes, error: templateRoomTypesError } =
-  await client.from('room_types').select('id');
-assert(!templateRoomTypesError && templateRoomTypes, 'checkout template room types');
-const { error: checkoutTemplatesError } = await client.from('cleaning_template_versions')
-  .insert(templateRoomTypes.map(({ id }) => ({
-    room_type_id: id, cleaning_kind: 'checkout', version: 1, status: 'published',
-    duration_minutes: 60, photo_slots: [], published_at: new Date().toISOString(),
-    created_by: actorProfileId
-  })));
-assert(!checkoutTemplatesError, 'checkout template fixtures');
+// Local synthetic operational input goes through the same session-bound immutable
+// publication command as production. Raw Data API template DML is intentionally denied.
+const loginClient = createClient(status.API_URL, status.ANON_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false }
+});
+const { data: signedIn, error: signInError } = await loginClient.auth.signInWithPassword({ email, password });
+assert(!signInError && signedIn.session, `template publisher session failed: ${signInError?.message}`);
+const sessionPayload = JSON.parse(Buffer.from(
+  signedIn.session.access_token.split('.')[1], 'base64url'
+).toString('utf8'));
+assert(typeof sessionPayload.session_id === 'string', 'template publisher JWT session id');
+const templateSessionId = sessionPayload.session_id;
+const templateSlots = (count) => Array.from({ length: count }, (_, displayOrder) => ({
+  slotKey: displayOrder === 0 ? 'tv-on' : `slot-${displayOrder}`,
+  displayOrder,
+  required: displayOrder < count - 1,
+  label: `동시성 사진 ${displayOrder + 1}`
+}));
+const templatePublishArgs = (roomTypeCode, count, key, hash) => ({
+  p_actor_profile_id: actorProfileId,
+  p_session_id: templateSessionId,
+  p_room_type_code: roomTypeCode,
+  p_expected_version: 0,
+  p_duration_minutes: 60,
+  p_slots: templateSlots(count),
+  p_idempotency_key: key,
+  p_request_hash: hash
+});
+const standardPublishRace = await Promise.all([
+  client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
+    'standard', 10, `template-standard-${randomUUID()}`, 'a'.repeat(64)
+  )),
+  client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
+    'standard', 10, `template-standard-${randomUUID()}`, 'b'.repeat(64)
+  ))
+]);
+assert(standardPublishRace.filter((result) => !result.error).length === 1,
+  'concurrent template CAS must publish exactly one winner');
+assert(standardPublishRace.filter((result) => result.error).every((result) =>
+  result.error.message === 'CLEANING_TEMPLATE_VERSION_CONFLICT'),
+  'concurrent template CAS loser must fail with the stable stale-version error');
+for (const [roomTypeCode, count] of [
+  ['premium', 11], ['oceanPremium', 13], ['oceanFamily', 15]
+]) {
+  const result = await client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
+    roomTypeCode, count, `template-${roomTypeCode}-${randomUUID()}`,
+    createHash('sha256').update(`template-${roomTypeCode}-${randomUUID()}`).digest('hex')
+  ));
+  assert(!result.error && result.data?.version === 7, `${roomTypeCode} checkout template publication`);
+}
+const templateCatalog = await client.rpc('list_checkout_cleaning_templates', {
+  p_actor_profile_id: actorProfileId, p_session_id: templateSessionId
+});
+assert(!templateCatalog.error && templateCatalog.data.roomTypes.length === 4 &&
+  templateCatalog.data.roomTypes.every((roomType) => roomType.configured),
+  'session-bound catalog confirms all four explicit template publications');
 
 const accountCandidateIds = [randomUUID(), randomUUID()];
 const accountDisplayName = `동시생성${randomUUID().slice(0, 8)}`;
@@ -994,5 +1039,5 @@ await testRoomPinBootstrapConcurrency(client);
 await testRoomPinSheetSyncConcurrency();
 
 console.log(
-  'Concurrency checks passed: login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2, assignment-commit-replay=1 logical/2 calls, assignment-save-vs-commit=1/2, availability-vs-commit=1/2.'
+  'Concurrency checks passed: template-publish-CAS=1/2, login=10/20, attacker=40/200, isolated-normal-client=1/1, account-create=1/2, authorization-denial=600/1000 with actor isolation, room-operation-replay=1 logical/2 calls, reservation-replay=1 logical/2 calls, reservation-overlap=1/2, manual-checkout=1/2, assignment-target-CAS=1/2, assignment-sequence=1/2, assignment-commit-replay=1 logical/2 calls, assignment-save-vs-commit=1/2, availability-vs-commit=1/2.'
 );

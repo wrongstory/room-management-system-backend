@@ -14,6 +14,10 @@ from room_management_console.generated.api.accounts import (
     unlock_account,
 )
 from room_management_console.generated.api.auth import change_password, get_current_user, login
+from room_management_console.generated.api.cleaning_templates import (
+    list_cleaning_templates,
+    publish_cleaning_template,
+)
 from room_management_console.generated.api.developer import (
     get_developer_database_status,
     get_developer_overview,
@@ -28,9 +32,12 @@ from room_management_console.generated.api.rooms import (
     request_room_pin_sheet_full_resync,
 )
 from room_management_console.generated.models import (
+    CleaningTemplateCatalog,
     DeveloperDatabaseStatusNotificationDelivery,
     DeveloperDatabaseStatusNotificationDeliveryActivation,
     DeveloperDatabaseStatusNotificationDeliveryBacklog,
+    PublishCleaningTemplateRequest,
+    PublishedCleaningTemplate,
     RoomPinSheetSyncStatus,
     RoomPinSheetSyncStatusActivation,
     RoomPinSheetSyncStatusBacklog,
@@ -79,8 +86,10 @@ def test_phase_a_openapi_operations_are_generated() -> None:
         run_developer_diagnostics.sync_detailed,
         get_room_pin_sheet_sync_status.sync_detailed,
         request_room_pin_sheet_full_resync.sync_detailed,
+        list_cleaning_templates.sync_detailed,
+        publish_cleaning_template.sync_detailed,
     ]
-    assert len(operations) == 18
+    assert len(operations) == 20
 
 
 def test_password_change_replay_errors_are_generated() -> None:
@@ -190,8 +199,58 @@ def test_photo_upload_and_original_read_are_not_developer_console_capabilities()
     from room_management_console.generated import api
 
     groups = {entry.name for entry in pkgutil.iter_modules(api.__path__)}
-    assert groups == {"accounts", "auth", "developer", "rooms"}
+    assert groups == {"accounts", "auth", "cleaning_templates", "developer", "rooms"}
     assert {"photos", "attempts", "photo_uploads", "payroll", "notifications"}.isdisjoint(groups)
+
+
+def test_cleaning_template_admin_contract_is_generated_and_bounded() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert DeveloperAuditEventType.CLEANING_TEMPLATE_PUBLISHED.value == (
+        "cleaning_template.published"
+    )
+    assert {
+        ErrorCode.INVALID_CLEANING_TEMPLATE.value,
+        ErrorCode.INVALID_CLEANING_TEMPLATE_SLOTS.value,
+        ErrorCode.CLEANING_TEMPLATE_VERSION_CONFLICT.value,
+        ErrorCode.CLEANING_TEMPLATE_COMMAND_FAILED.value,
+    } == {
+        "INVALID_CLEANING_TEMPLATE",
+        "INVALID_CLEANING_TEMPLATE_SLOTS",
+        "CLEANING_TEMPLATE_VERSION_CONFLICT",
+        "CLEANING_TEMPLATE_COMMAND_FAILED",
+    }
+    assert {"cleaning_kind", "room_types"} == {
+        field.name for field in fields(CleaningTemplateCatalog)
+    }
+    assert {"room_type_code", "cleaning_kind", "expected_version", "duration_minutes", "slots"} == {
+        field.name for field in fields(PublishCleaningTemplateRequest)
+    }
+    assert {
+        "id",
+        "version",
+        "status",
+        "duration_minutes",
+        "slots",
+        "published_at",
+        "created_at",
+    } == {field.name for field in fields(PublishedCleaningTemplate)}
+    audit_fields = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {
+        "room_type_code",
+        "cleaning_kind",
+        "version",
+        "duration_minutes",
+        "slot_count",
+    } <= audit_fields
+    assert {
+        "slots",
+        "label",
+        "description",
+        "request_hash",
+        "before_state",
+        "after_state",
+    }.isdisjoint(audit_fields)
 
 
 def test_account_response_and_status_command_use_distinct_enums() -> None:
@@ -448,11 +507,11 @@ def test_attempt_lifecycle_audit_contract_preserves_only_safe_generated_fields()
         assert DeveloperAuditEventSummary.from_dict(expired_summary).to_dict() == expired_summary
 
 
-def test_generated_client_contains_only_eighteen_authorized_operations() -> None:
+def test_generated_client_contains_only_twenty_authorized_operations() -> None:
     from room_management_console.generated import api
 
     generated_groups = {module.name for module in pkgutil.iter_modules(api.__path__)}
-    assert generated_groups == {"auth", "accounts", "developer", "rooms"}
+    assert generated_groups == {"auth", "accounts", "cleaning_templates", "developer", "rooms"}
     operation_names = set()
     for group in generated_groups:
         group_module = import_module(f"{api.__name__}.{group}")
@@ -469,6 +528,8 @@ def test_generated_client_contains_only_eighteen_authorized_operations() -> None
         "accounts.change_account_status",
         "accounts.unlock_account",
         "accounts.reset_account_password",
+        "cleaning_templates.list_cleaning_templates",
+        "cleaning_templates.publish_cleaning_template",
         "developer.get_developer_overview",
         "developer.get_developer_runtime_status",
         "developer.get_developer_database_status",

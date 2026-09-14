@@ -71,13 +71,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 108 &&
+    Object.keys(document.paths).length === 109 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 115,
-    "candidate contract 108/115",
+        ).length === 117,
+    "candidate contract 109/117",
   );
 });
 
@@ -992,6 +992,69 @@ Deno.test("preview OpenAPI documents pure admin preview and separate versioned c
   );
 });
 
+Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publication", async () => {
+  const doc = await openApiResponse({}).json() as typeof openApiDocument;
+  const route = doc.paths["/v1/cleaning-templates"];
+  assert(
+    route.get.operationId === "listCleaningTemplates",
+    "stable list operation",
+  );
+  assert(
+    route.post.operationId === "publishCleaningTemplate",
+    "stable publish operation",
+  );
+  assert(
+    route.get["x-required-roles"].join() === "admin" &&
+      route.post["x-required-roles"].join() === "admin",
+    "business admin only",
+  );
+  assert(
+    route.post.parameters[0].name === "Idempotency-Key",
+    "publish receipt required",
+  );
+  const schemas = doc.components.schemas;
+  assert(
+    schemas.PublishCleaningTemplateRequest.additionalProperties === false &&
+      schemas.CleaningTemplateSlot.additionalProperties === false,
+    "strict request and slots",
+  );
+  assert(
+    schemas.CleaningTemplateCatalog.properties.roomTypes.minItems === 4 &&
+      schemas.CleaningTemplateCatalog.properties.roomTypes.maxItems === 4,
+    "all room types returned",
+  );
+  assert(
+    schemas.DeveloperAuditEventType.enum.includes(
+      "cleaning_template.published",
+    ),
+    "safe audit event enum",
+  );
+  const summary = schemas.DeveloperAuditEvent.properties.summary.properties;
+  for (
+    const field of [
+      "roomTypeCode",
+      "cleaningKind",
+      "version",
+      "durationMinutes",
+      "slotCount",
+    ]
+  ) {
+    assert(field in summary, `${field} safe summary field`);
+  }
+  for (
+    const field of [
+      "slots",
+      "label",
+      "description",
+      "requestHash",
+      "before_state",
+      "after_state",
+    ]
+  ) {
+    assert(!(field in summary), `${field} stays private from developer audit`);
+  }
+});
+
 Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and future media contracts", async () => {
   const doc = await openApiResponse({}).json() as typeof openApiDocument;
   const impact = doc.paths["/v1/attempts/lifecycle-impact"].get;
@@ -1090,7 +1153,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 65,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 66,
     "actual audit allowlist count",
   );
   assert(

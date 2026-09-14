@@ -311,7 +311,7 @@ select throws_ok(
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
       'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time+interval '1 hour','dueAt',at_time+interval '5 hours'
+      'availableFrom',at_time+interval '10 minutes','dueAt',at_time+interval '11 minutes'
     )::text,'checkout-incident-future-departed',repeat('f',64)
   ) from incident_fixture),
   '22023','INVALID_CHECKOUT_INCIDENT_DECISION',

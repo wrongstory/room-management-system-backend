@@ -19,6 +19,11 @@ import {
 } from './modules/availability/availability.service.js';
 import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
 import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
+import { createCleaningTemplateRoutes } from './modules/cleaning-templates/cleaning-template.routes.js';
+import {
+  type CleaningTemplateService,
+  SupabaseCleaningTemplateService
+} from './modules/cleaning-templates/cleaning-template.service.js';
 import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
 import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
 import { createNotificationRoutes } from './modules/notifications/notification.routes.js';
@@ -59,6 +64,7 @@ export interface AppServices {
   notifications?: NotificationService;
   webPushSubscriptions?: WebPushSubscriptionService;
   checkoutIncidents?: CheckoutIncidentService;
+  cleaningTemplates?: CleaningTemplateService;
 }
 
 export interface BuildAppOptions {
@@ -144,7 +150,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         vapidPublicKey: options.env.VAPID_PUBLIC_KEY,
         vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
       }),
-      checkoutIncidents: new SupabaseCheckoutIncidentService(clients)
+      checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
+      cleaningTemplates: new SupabaseCleaningTemplateService(clients)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -238,6 +245,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   if (services.checkoutIncidents) {
     await app.register(createCheckoutIncidentRoutes(services.checkoutIncidents));
+  }
+  if (services.cleaningTemplates) {
+    await app.register(createCleaningTemplateRoutes(services.cleaningTemplates), {
+      prefix: '/v1/cleaning-templates'
+    });
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
   await app.register(createPhotoRoutes(photoServices));

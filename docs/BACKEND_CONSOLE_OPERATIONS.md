@@ -104,3 +104,18 @@ developer 계정, 마지막 active business admin, developer로의 승격은 서
 - API 상태: `docs/API_STATUS_MATRIX.md`
 - DB 복구: `docs/BACKUP_AND_RECOVERY.md`
 - Phase B/C 보안 범위: GitHub Issue #44
+
+## 퇴실 청소 템플릿 운영 게시 (#156 candidate)
+
+운영 예약 생성 전에 active business admin 계정으로 `GET /v1/cleaning-templates?cleaningKind=checkout`을
+조회합니다. `configured=false`인 room type은 `POST /v1/cleaning-templates`에 해당 `roomTypeCode`,
+`cleaningKind=checkout`, 조회한 `expectedVersion`, 1..10,080의 `durationMinutes`, 타입별 정확한 슬롯과 새
+`Idempotency-Key`를 보내 게시합니다. 응답 version과 재조회한 current published version이 같은지 확인한 뒤
+예약을 재시도합니다. 409 version conflict는 최신 catalog를 다시 읽어 사용자가 의도한 전체 payload로 새 key를
+사용해야 하며, 같은 key에 다른 payload를 보내지 않습니다.
+
+rollback은 과거 row를 수정하거나 삭제하는 방식이 아닙니다. 직전 retired 내용을 검토해 다시 새 version으로
+게시합니다. 이미 생성된 planned target은 당시 snapshot을 계속 사용합니다. 이 source candidate는 production
+migration/Edge 배포나 운영 템플릿 값 설정을 완료했다는 뜻이 아니며, release 승인 뒤 네 타입을 명시적으로 입력하고
+hosted admin/role/session/예약 smoke를 별도로 수행해야 합니다. 게시에는 수신자 행동이 없어 notification/outbox가
+생성되지 않는 것이 정상입니다.
