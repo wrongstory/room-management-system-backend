@@ -11,6 +11,11 @@ function ok(result, message) {
   return result.data;
 }
 
+export const roomPinConcurrencyTargetIdentity = Object.freeze({
+  environment: "test",
+  projectRef: "local",
+});
+
 export async function configureRoomPinForConcurrency(client, actor, item) {
   const loginClient = createClient(client.supabaseUrl, client.supabaseKey, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -44,8 +49,8 @@ export async function configureRoomPinForConcurrency(client, actor, item) {
       p_nonce_base64: randomBytes(12).toString("base64"),
       p_auth_tag_base64: randomBytes(16).toString("base64"),
       p_key_version: "concurrency-v1",
-      p_aad_environment: "test",
-      p_aad_project_ref: "local",
+      p_aad_environment: roomPinConcurrencyTargetIdentity.environment,
+      p_aad_project_ref: roomPinConcurrencyTargetIdentity.projectRef,
       p_idempotency_key: `pin-${randomUUID()}`,
       p_request_hash: randomBytes(32).toString("hex"),
     }),
