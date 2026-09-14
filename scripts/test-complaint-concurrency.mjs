@@ -27,12 +27,33 @@ const psqlArgs = [
   "ON_ERROR_STOP=1",
 ];
 
+async function waitForPositiveReworkWindow() {
+  const now = Date.now();
+  const kstNow = new Date(now + 9 * 60 * 60_000);
+  const nextKstMidnight = Date.UTC(
+    kstNow.getUTCFullYear(),
+    kstNow.getUTCMonth(),
+    kstNow.getUTCDate() + 1,
+  ) - 9 * 60 * 60_000;
+  const remainingMs = nextKstMidnight - now;
+
+  // A valid published template must last at least one minute. When the
+  // service day cannot fit that positive fixture, start it on the next KST day
+  // instead of weakening the production day-end guard.
+  if (remainingMs <= 2 * 60_000) {
+    await new Promise((resolve) => setTimeout(resolve, remainingMs + 1_000));
+  }
+}
+
 export async function testComplaintConcurrency(client, adminProfileId) {
   const url = new URL(client.supabaseUrl);
   assert(
     ["localhost", "127.0.0.1"].includes(url.hostname),
     "complaint races require local Supabase",
   );
+  // Anchor availability and every later materialization to the same KST day,
+  // including the Sunday-to-Monday week boundary.
+  await waitForPositiveReworkWindow();
   function sql(statement) {
     try {
       return execFileSync("docker", psqlArgs, {
@@ -113,7 +134,7 @@ export async function testComplaintConcurrency(client, adminProfileId) {
     from public.availability_versions version cross join generate_series(0,6) day_offset
     where version.maid_profile_id='${compensationMaidId}' and version.is_current;
     insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,published_at,created_by)
-    select gen_random_uuid(),room_type.id,'reclean',coalesce(max(template.version),0)+1,'published',30,'[]',clock_timestamp(),'${adminProfileId}'
+    select gen_random_uuid(),room_type.id,'reclean',coalesce(max(template.version),0)+1,'published',1,'[]',clock_timestamp(),'${adminProfileId}'
     from public.room_types room_type left join public.cleaning_template_versions template
       on template.room_type_id=room_type.id and template.cleaning_kind='reclean'
     group by room_type.id having count(*) filter(where template.status='published')=0;`);
@@ -267,6 +288,7 @@ export async function testComplaintConcurrency(client, adminProfileId) {
     p_idempotency_key: sameMaterializeKey,
     p_request_hash: "9".repeat(64),
   };
+  await waitForPositiveReworkWindow();
   const materialized = await Promise.all([
     client.rpc("materialize_complaint_rework", materializeArgs),
     client.rpc("materialize_complaint_rework", materializeArgs),
@@ -348,6 +370,7 @@ export async function testComplaintConcurrency(client, adminProfileId) {
   }
   async function materializedRaceFixture(label) {
     const fixture = await decidedReworkCase(label);
+    await waitForPositiveReworkWindow();
     const materializedResult = ok(await client.rpc("materialize_complaint_rework", {
       p_actor_profile_id: adminProfileId,
       p_complaint_id: fixture.complaintId,
@@ -377,6 +400,7 @@ export async function testComplaintConcurrency(client, adminProfileId) {
     p_idempotency_key: `complaint-comp-race-decide-${randomUUID()}`,
     p_request_hash: "a".repeat(64),
   }), "correction race decision");
+  await waitForPositiveReworkWindow();
   const materializeVsCorrection = await Promise.all([
     client.rpc("materialize_complaint_rework", {
       p_actor_profile_id: adminProfileId,
@@ -413,6 +437,7 @@ export async function testComplaintConcurrency(client, adminProfileId) {
   for (let iteration = 0; iteration < 4; iteration += 1) {
     const label = `complaint-comp-repeat-materialize-${iteration}`;
     const fixture = await decidedReworkCase(label);
+    await waitForPositiveReworkWindow();
     const results = await Promise.all([
       client.rpc("materialize_complaint_rework", {
         p_actor_profile_id: adminProfileId,
