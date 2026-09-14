@@ -220,7 +220,7 @@ export function developerRuntimeStatus(): Record<string, unknown> {
       version: Deno.version.deno,
     },
     source: {
-      apiVersion: "0.2.0",
+      apiVersion: "0.3.0",
       expectedMigration: expectedMigrationName,
       fastifyRollbackBaseline: "available",
     },
