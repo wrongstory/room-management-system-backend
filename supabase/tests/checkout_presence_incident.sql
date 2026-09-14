@@ -27,7 +27,8 @@ insert into public.profiles(
 
 create temp table incident_fixture(
   room_id uuid,reservation_id uuid,target_id uuid,assignment_id uuid,attempt_id uuid,
-  incident_id uuid,report_result jsonb,decision_result jsonb,at_time timestamptz
+  incident_id uuid,report_result jsonb,decision_result jsonb,at_time timestamptz,
+  decision_available_from timestamptz,decision_due_at timestamptz
 );
 
 create function pg_temp.incident_slots() returns jsonb language sql immutable as $$
@@ -56,7 +57,17 @@ declare
   v_availability uuid;
   v_result jsonb;
   v_commit_at timestamptz:=((v_planned_date-1)+time '09:00') at time zone 'Asia/Seoul';
+  v_decision_available_from timestamptz;
+  v_decision_due_at timestamptz;
 begin
+  -- Keep the successful decision window valid at every KST wall-clock hour.
+  -- In the first five minutes after midnight v_at belongs to the prior service
+  -- date, so clamp only this normal-decision fixture to today's KST boundary.
+  v_decision_available_from:=greatest(
+    v_at,
+    v_service_date::timestamp at time zone 'Asia/Seoul'
+  );
+  v_decision_due_at:=(v_service_date+1)::timestamp at time zone 'Asia/Seoul';
   select * into v_room from public.rooms order by room_number limit 1;
   insert into public.room_pin_sync_events(
     room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at
@@ -129,8 +140,13 @@ begin
   where cleaning_target_id=v_target_id and is_current;
   select id into v_attempt_id from public.cleaning_attempts
   where cleaning_target_id=v_target_id and status='scheduled';
-  insert into incident_fixture(room_id,reservation_id,target_id,assignment_id,attempt_id,at_time)
-  values(v_room.id,v_reservation_id,v_target_id,v_assignment_id,v_attempt_id,v_at);
+  insert into incident_fixture(
+    room_id,reservation_id,target_id,assignment_id,attempt_id,at_time,
+    decision_available_from,decision_due_at
+  ) values(
+    v_room.id,v_reservation_id,v_target_id,v_assignment_id,v_attempt_id,v_at,
+    v_decision_available_from,v_decision_due_at
+  );
 end $$;
 
 select ok((select attempt_id is not null from incident_fixture),
@@ -258,8 +274,8 @@ select throws_ok(
     pg_temp.iid(4),pg_temp.iid(204),incident_id,report_result->>'impactFingerprint','CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time,'dueAt',at_time+interval '4 hours'
+      'serviceDate',(decision_available_from at time zone 'Asia/Seoul')::date,
+      'availableFrom',decision_available_from,'dueAt',decision_due_at
     )::text,'checkout-incident-temp-admin',repeat('0',64)
   ) from incident_fixture),
   '42501','PASSWORD_CHANGE_REQUIRED','temporary-password admin cannot decide an incident'
@@ -270,8 +286,8 @@ select throws_ok(
     pg_temp.iid(3),pg_temp.iid(203),incident_id,report_result->>'impactFingerprint','CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time,'dueAt',at_time+interval '4 hours'
+      'serviceDate',(decision_available_from at time zone 'Asia/Seoul')::date,
+      'availableFrom',decision_available_from,'dueAt',decision_due_at
     )::text,'checkout-incident-maid-decision',repeat('0',64)
   ) from incident_fixture),
   '42501','ADMIN_REQUIRED','maid cannot decide an incident'
@@ -282,8 +298,8 @@ select throws_ok(
     pg_temp.iid(6),pg_temp.iid(206),incident_id,report_result->>'impactFingerprint','CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time,'dueAt',at_time+interval '4 hours'
+      'serviceDate',(decision_available_from at time zone 'Asia/Seoul')::date,
+      'availableFrom',decision_available_from,'dueAt',decision_due_at
     )::text,'checkout-incident-developer-decision',repeat('0',64)
   ) from incident_fixture),
   '42501','ADMIN_REQUIRED','developer cannot decide an incident'
@@ -296,8 +312,8 @@ select throws_ok(
     'CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time,'dueAt',at_time+interval '4 hours'
+      'serviceDate',(decision_available_from at time zone 'Asia/Seoul')::date,
+      'availableFrom',decision_available_from,'dueAt',decision_due_at
     )::text,'checkout-incident-stale-impact',repeat('d',64)
   ) from incident_fixture),
   '40001','CHECKOUT_INCIDENT_IMPACT_CHANGED',
@@ -323,8 +339,8 @@ select throws_ok(
     pg_temp.iid(1),pg_temp.iid(201),incident_id,report_result->>'impactFingerprint','EXTEND_CHECKOUT','GUEST_STILL_PRESENT_EXTENDED',at_time,
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time,'dueAt',at_time+interval '4 hours'
+      'serviceDate',(decision_available_from at time zone 'Asia/Seoul')::date,
+      'availableFrom',decision_available_from,'dueAt',decision_due_at
     )::text,'checkout-incident-past-extension',repeat('e',64)
   ) from incident_fixture),
   '22023','INVALID_CHECKOUT_INCIDENT_DECISION',
@@ -396,9 +412,9 @@ update incident_fixture f set decision_result=public.decide_checkout_presence_in
   jsonb_build_object(
     'maidProfileId',pg_temp.iid(3),
     'sequenceNumber',1,
-    'serviceDate',(f.at_time at time zone 'Asia/Seoul')::date,
-    'availableFrom',f.at_time,
-    'dueAt',f.at_time+interval '4 hours'
+    'serviceDate',(f.decision_available_from at time zone 'Asia/Seoul')::date,
+    'availableFrom',f.decision_available_from,
+    'dueAt',f.decision_due_at
   ),
   'checkout-incident-decision',repeat('9',64)
 );
@@ -452,8 +468,8 @@ select is(
     'GUEST_DEPARTURE_CONFIRMED',null,
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time,'dueAt',at_time+interval '4 hours'
+      'serviceDate',(decision_available_from at time zone 'Asia/Seoul')::date,
+      'availableFrom',decision_available_from,'dueAt',decision_due_at
     ),'checkout-incident-decision',repeat('9',64)
   ) from incident_fixture),
   (select decision_result from incident_fixture),
