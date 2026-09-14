@@ -59,6 +59,22 @@ function minute(date = new Date()) {
 function kstTime(date, time) {
   return new Date(`${date}T${time}:00+09:00`).toISOString();
 }
+function nextKstMidnight(date) {
+  return kstTime(
+    kstDate(new Date(date.getTime() + 24 * 60 * 60_000)),
+    "00:00",
+  );
+}
+async function waitForCheckoutFixtureWindow() {
+  const now = new Date();
+  const remainingMs = Date.parse(nextKstMidnight(now)) - now.getTime();
+
+  // Scheduled checkout activation is one minute after checkout. If that
+  // positive fixture cannot fit in today's KST window, start it next day.
+  if (remainingMs <= 2 * 60_000) {
+    await waitUntil(now.getTime() + remainingMs + 1_000);
+  }
+}
 
 export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
   const admin = ok(
@@ -174,22 +190,28 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
   );
   let sequence = 9000;
   async function fixture({ checkoutMode = "scheduled", nextReservation = null } = {}) {
+    await waitForCheckoutFixtureWindow();
+    const fixtureAt = new Date();
     sequence += 1;
     const roomId = randomUUID();
     const reservationId = randomUUID();
-    const roomNumber = `${Date.now()}${sequence}`;
+    const roomNumber = `${fixtureAt.getTime()}${sequence}`;
     ok(await client.from("rooms").insert({
       id: roomId,
       room_number: roomNumber,
       room_type_id: roomType.id,
       elevator_zone: "A",
     }), "checkout incident isolated room");
-    const checkoutAt = new Date(Date.now() + (checkoutMode === "manual" ? 60 * 60_000 : 0));
+    const checkoutAt = new Date(
+      fixtureAt.getTime() + (checkoutMode === "manual" ? 60 * 60_000 : 0),
+    );
     ok(await client.rpc("create_reservation", {
       p_actor_profile_id: adminProfileId,
       p_reservation_id: reservationId,
       p_room_id: roomId,
-      p_check_in_at: minute(new Date(Date.now() - 24 * 60 * 60_000)),
+      p_check_in_at: minute(
+        new Date(fixtureAt.getTime() - 24 * 60 * 60_000),
+      ),
       p_check_out_at: minute(checkoutAt),
       p_guest_count: 2,
       p_guest_name_encrypted: null,
@@ -254,10 +276,14 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
       p_request_hash: "3".repeat(64),
     }), "checkout incident assignment notify");
     ok(await client.from("reservations").update({
-      actual_check_in_at: minute(new Date(Date.now() - 23 * 60 * 60_000)),
+      actual_check_in_at: minute(
+        new Date(fixtureAt.getTime() - 23 * 60 * 60_000),
+      ),
     }).eq("id", reservationId), "checkout incident checked-in fixture");
     const scheduledCheckoutTime = minute(checkoutAt);
-    const checkoutTime = checkoutMode === "manual" ? minute() : scheduledCheckoutTime;
+    const checkoutTime = checkoutMode === "manual"
+      ? minute(fixtureAt)
+      : scheduledCheckoutTime;
     const schedulerArgs = {
       p_actor_profile_id: adminProfileId,
       p_as_of: scheduledCheckoutTime,
@@ -311,27 +337,31 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     nextSequence,
     decision = "CONFIRM_DEPARTED",
     hash = "7".repeat(64),
-  ) => ({
-    p_actor_profile_id: adminProfileId,
-    p_session_id: adminSessionId,
-    p_incident_id: incidentId,
-    p_expected_version: 1,
-    p_expected_impact_fingerprint: impactFingerprint,
-    p_decision: decision,
-    p_reason_code: decision === "CONFIRM_DEPARTED"
-      ? "GUEST_DEPARTURE_CONFIRMED"
-      : "REPORT_FALSE_CONFIRMED",
-    p_new_checkout_at: null,
-    p_reassignment: {
-      maidProfileId,
-      sequenceNumber: nextSequence,
-      serviceDate: today,
-      availableFrom: minute(),
-      dueAt: minute(new Date(Date.now() + 60 * 60_000)),
-    },
-    p_idempotency_key: key,
-    p_request_hash: hash,
-  });
+  ) => {
+    const requestedAt = new Date();
+    const serviceDate = kstDate(requestedAt);
+    return {
+      p_actor_profile_id: adminProfileId,
+      p_session_id: adminSessionId,
+      p_incident_id: incidentId,
+      p_expected_version: 1,
+      p_expected_impact_fingerprint: impactFingerprint,
+      p_decision: decision,
+      p_reason_code: decision === "CONFIRM_DEPARTED"
+        ? "GUEST_DEPARTURE_CONFIRMED"
+        : "REPORT_FALSE_CONFIRMED",
+      p_new_checkout_at: null,
+      p_reassignment: {
+        maidProfileId,
+        sequenceNumber: nextSequence,
+        serviceDate,
+        availableFrom: minute(requestedAt),
+        dueAt: nextKstMidnight(requestedAt),
+      },
+      p_idempotency_key: key,
+      p_request_hash: hash,
+    };
+  };
   const attemptArgs = (item, version, key, hash) => ({
     p_actor_profile_id: maidProfileId,
     p_attempt_id: item.attempt.id,
@@ -985,6 +1015,9 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     "c".repeat(64),
   )), "checkout incident handover-race start");
   handoverFixture.attempt.execution_version = 2;
+  const handoverAt = new Date();
+  const handoverServiceDate = kstDate(handoverAt);
+  await ensureAvailability(nextMaidProfileId, handoverServiceDate);
   const reportVsHandover = await Promise.all([
     client.rpc("report_checkout_presence_incident", reportArgs(
       handoverFixture,
@@ -1003,9 +1036,9 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
       p_payload: {
         maidProfileId: nextMaidProfileId,
         sequenceNumber: 20_020,
-        serviceDate: today,
-        availableFrom: minute(new Date(Date.now() - 60_000)),
-        dueAt: minute(new Date(Date.now() + 60 * 60_000)),
+        serviceDate: handoverServiceDate,
+        availableFrom: minute(handoverAt),
+        dueAt: nextKstMidnight(handoverAt),
         deactivateOld: false,
       },
       p_reason_code: "ADMIN_HANDOVER",
