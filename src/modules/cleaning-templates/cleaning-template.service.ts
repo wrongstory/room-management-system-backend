@@ -73,14 +73,37 @@ const slotSchema = z.object({
   section: z.string().min(1).max(80).optional(),
   instanceKey: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/).optional()
 }).strict();
+const timestampPattern =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+function isStrictRfc3339(value: string): boolean {
+  const match = timestampPattern.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const offsetHour = match[10] === undefined ? 0 : Number(match[10]);
+  const offsetMinute = match[11] === undefined ? 0 : Number(match[11]);
+  return year >= 1 && month >= 1 && month <= 12 && day >= 1 &&
+    day <= (daysInMonth[month - 1] ?? 0) && hour <= 23 && minute <= 59 &&
+    second <= 59 && offsetHour <= 23 && offsetMinute <= 59 &&
+    Number.isFinite(Date.parse(value));
+}
+
+const timestampSchema = z.string().refine(isStrictRfc3339);
 const publishedTemplateSchema = z.object({
   id: z.uuid(),
   version: z.number().int().min(7).max(2_147_483_647),
   status: z.literal('published'),
   durationMinutes: z.number().int().min(1).max(10_080),
   slots: z.array(slotSchema).min(10).max(15),
-  publishedAt: z.iso.datetime({ offset: true }),
-  createdAt: z.iso.datetime({ offset: true })
+  publishedAt: timestampSchema,
+  createdAt: timestampSchema
 }).strict().superRefine((template, context) => {
   if (![10, 11, 13, 15].includes(template.slots.length) ||
     template.slots.some((slot, index) => slot.displayOrder !== index ||

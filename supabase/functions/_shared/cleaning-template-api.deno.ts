@@ -238,6 +238,56 @@ Deno.test("cleaning template response parsing fails closed on malformed database
   );
 });
 
+Deno.test("cleaning template response timestamps reject impossible RFC 3339 values", async () => {
+  const base = {
+    id: "30000000-0000-4000-8000-000000000001",
+    version: 7,
+    status: "published",
+    durationMinutes: 60,
+    slots: slots().map((slot) => ({ ...slot, label: slot.label.trim() })),
+    publishedAt: "2028-02-29T23:59:59.123456789+09:00",
+    createdAt: "2028-02-29T23:59:59.123456789+09:00",
+  };
+  const body = {
+    roomTypeCode: "standard",
+    cleaningKind: "checkout",
+    expectedVersion: 0,
+    durationMinutes: 60,
+    slots: slots(),
+  };
+  const valid = await cleaningTemplates(
+    request("POST", body),
+    clients(base).value,
+    admin,
+  );
+  assert(
+    "version" in valid && valid.version === 7,
+    "valid leap timestamp accepted",
+  );
+  for (const field of ["publishedAt", "createdAt"] as const) {
+    for (
+      const value of [
+        "2027-02-29T00:00:00Z",
+        "2030-04-31T00:00:00Z",
+        "2030-01-01T24:00:00Z",
+        "2030-01-01T00:60:00Z",
+        "2030-01-01T00:00:60Z",
+        "2030-01-01T00:00:00+24:00",
+      ]
+    ) {
+      await failure(
+        () =>
+          cleaningTemplates(
+            request("POST", body),
+            clients({ ...base, [field]: value }).value,
+            admin,
+          ),
+        "CLEANING_TEMPLATE_COMMAND_FAILED",
+      );
+    }
+  }
+});
+
 Deno.test("cleaning template errors preserve stable status and redact raw database failures", () => {
   assert(
     templateDatabaseError({ message: "CLEANING_TEMPLATE_VERSION_CONFLICT" })

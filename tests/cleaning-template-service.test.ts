@@ -111,6 +111,36 @@ describe('SupabaseCleaningTemplateService', () => {
     });
   });
 
+  it('fails closed on impossible RFC 3339 database timestamps', async () => {
+    const base = {
+      id: '30000000-0000-4000-8000-000000000001', version: 7, status: 'published',
+      durationMinutes: 60, slots: slots(), publishedAt: '2028-02-29T23:59:59.123456789+09:00',
+      createdAt: '2028-02-29T23:59:59.123456789+09:00'
+    };
+    const input = {
+      roomTypeCode: 'standard' as const, cleaningKind: 'checkout' as const,
+      expectedVersion: 0, durationMinutes: 60, slots: slots(),
+      idempotencyKey: 'template-publish-timestamp'
+    };
+    await expect(setup(base).service.publishCheckout(actor, input)).resolves.toMatchObject({ version: 7 });
+    for (const field of ['publishedAt', 'createdAt'] as const) {
+      for (const value of [
+        '2027-02-29T00:00:00Z',
+        '2030-04-31T00:00:00Z',
+        '2030-01-01T24:00:00Z',
+        '2030-01-01T00:60:00Z',
+        '2030-01-01T00:00:60Z',
+        '2030-01-01T00:00:00+24:00'
+      ]) {
+        await expect(setup({ ...base, [field]: value }).service.publishCheckout(actor, input))
+          .rejects.toMatchObject({
+            statusCode: 500,
+            code: 'CLEANING_TEMPLATE_COMMAND_FAILED'
+          });
+      }
+    }
+  });
+
   it('rejects non-admin and tokens without a session before RPC', async () => {
     const { calls, service } = setup({});
     await expect(service.listCheckout({ ...actor, role: 'maid' })).rejects.toMatchObject({ code: 'ADMIN_REQUIRED' });
