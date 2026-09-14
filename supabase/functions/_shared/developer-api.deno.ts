@@ -149,6 +149,22 @@ Deno.test("developer source migration head uses a stable migration name", () => 
     expectedMigrationName === "checkout_not_completed_incident_workflow",
     "expected migration must not depend on a remote execution timestamp",
   );
+  const get = Deno.env.get;
+  try {
+    Deno.env.get = (key: string) =>
+      key === "RUNTIME_ENVIRONMENT"
+        ? "local"
+        : key === "SUPABASE_URL"
+        ? "http://127.0.0.1:54321"
+        : undefined;
+    assert(
+      (developerRuntimeStatus().source as Record<string, unknown>)
+        .apiVersion === openApiDocument.info.version,
+      "runtime source version must match the deployed OpenAPI contract",
+    );
+  } finally {
+    Deno.env.get = get;
+  }
 });
 
 Deno.test("developer database status degrades a fresh healthy heartbeat for a malformed prior envelope key", async () => {

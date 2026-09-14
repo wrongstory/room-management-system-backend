@@ -3,6 +3,7 @@ import {
   assertApprovedRoomPinSheetTarget,
   validateGoogleSheetsServiceAccount,
 } from "./google-sheets-pin.ts";
+import { openApiDocument } from "./openapi.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
@@ -220,7 +221,7 @@ export function developerRuntimeStatus(): Record<string, unknown> {
       version: Deno.version.deno,
     },
     source: {
-      apiVersion: "0.2.0",
+      apiVersion: openApiDocument.info.version,
       expectedMigration: expectedMigrationName,
       fastifyRollbackBaseline: "available",
     },

@@ -230,11 +230,15 @@ export async function handleNotificationDelivery(
 ): Promise<Response> {
   const id = requestId(request);
   try {
+    const url = new URL(request.url);
+    const exactRuntimePaths = new Set([
+      "/functions/v1/notification-delivery",
+      "/notification-delivery",
+    ]);
     if (
       request.method !== "POST" ||
-      new URL(request.url).pathname !==
-        "/functions/v1/notification-delivery" ||
-      [...new URL(request.url).searchParams.keys()].length
+      !exactRuntimePaths.has(url.pathname) ||
+      [...url.searchParams.keys()].length
     ) {
       return response(404, id, {
         error: {
