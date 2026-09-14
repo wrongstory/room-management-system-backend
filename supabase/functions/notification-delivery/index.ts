@@ -22,6 +22,57 @@ function required(name: string): string {
   if (!value) throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
   return value;
 }
+
+const REQUEST_BODY_READ_DEADLINE_MS = 1_000;
+
+async function hasNonEmptyRequestBody(
+  request: Request,
+  readDeadlineMs: number,
+): Promise<boolean> {
+  const contentLength = request.headers.get("content-length")?.trim();
+  if (
+    contentLength !== undefined &&
+    (!/^\d+$/.test(contentLength) || Number(contentLength) > 0)
+  ) {
+    return true;
+  }
+  if (request.body === null) return false;
+
+  const reader = request.body.getReader();
+  let streamEnded = false;
+  const deadline = Date.now() + Math.max(1, readDeadlineMs);
+  try {
+    for (let emptyChunks = 0; emptyChunks < 8; emptyChunks += 1) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return true;
+      let timeoutId: number | undefined;
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<null>((resolve) => {
+          timeoutId = setTimeout(() => resolve(null), remainingMs);
+        }),
+      ]).finally(() => {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      });
+      if (chunk === null) return true;
+      if (chunk.done) {
+        streamEnded = true;
+        break;
+      }
+      if ((chunk.value?.byteLength ?? 0) > 0) return true;
+    }
+  } catch {
+    return true;
+  } finally {
+    void reader.cancel().catch(() => undefined);
+    try {
+      reader.releaseLock();
+    } catch {
+      // A timed-out pending read remains locked until cancellation settles.
+    }
+  }
+  return !streamEnded;
+}
 function base64(value: string): Uint8Array {
   let raw: string;
   try {
@@ -198,6 +249,7 @@ const response = (status: number, id: string, result: unknown) =>
   );
 export interface NotificationDeliveryHandlerDependencies {
   loadInvokeSecret?: () => string;
+  bodyReadDeadlineMs?: number;
   loadConfig?: typeof notificationDeliveryConfig;
   run?: (
     config: ReturnType<typeof notificationDeliveryConfig>,
@@ -247,18 +299,6 @@ export async function handleNotificationDelivery(
         },
       });
     }
-    const contentLength = request.headers.get("content-length")?.trim();
-    if (
-      request.body !== null ||
-      (contentLength !== undefined && contentLength !== "0")
-    ) {
-      return response(400, id, {
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "요청 본문은 허용되지 않습니다.",
-        },
-      });
-    }
     const invokeSecret = (dependencies.loadInvokeSecret ?? (() =>
       required("NOTIFICATION_DELIVERY_INVOKE_SECRET")))();
     if (utf8(invokeSecret).length < 32) {
@@ -274,6 +314,19 @@ export async function handleNotificationDelivery(
         error: {
           code: "INVALID_INVOKE_SECRET",
           message: "호출 인증에 실패했습니다.",
+        },
+      });
+    }
+    if (
+      await hasNonEmptyRequestBody(
+        request,
+        dependencies.bodyReadDeadlineMs ?? REQUEST_BODY_READ_DEADLINE_MS,
+      )
+    ) {
+      return response(400, id, {
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "요청 본문은 허용되지 않습니다.",
         },
       });
     }
