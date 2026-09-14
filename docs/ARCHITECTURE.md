@@ -23,7 +23,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 문서 갱신의 integration base는 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578`이며 base snapshot은 52 migrations / OpenAPI 105 paths / 112 operations다. #131 Phase A, #136 Phase B, #137 Phase C와 #140 bootstrap/readiness는 source/dev에 통합됐다. 현재 #140 보완 candidate는 기존 52 migrations를 수정하지 않는 53번째 append-only nonce reservation migration만 추가하며 공개 API 수를 유지한다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
+현재 integration base는 `dev@ab10249aaf1d671419389615ad8a22984c9849ac`의 55 migrations / OpenAPI 109 paths / 117 operations다. 운영 source 정본과 readback 기준은 `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`의 54 migrations / OpenAPI `0.3.0` 108 paths / 115 operations 및 5개 Edge bundle이다. #156의 55번째 `cleaning_template_admin_api`와 1 path / 2 operations는 source/dev 완료·release/production pending이다. 아래 개별 절의 `source/dev 완료, production 미승격` 제목은 각 기능 통합 시점의 이력이며 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다. source나 bundle 반영과 provider·Google·Cron hosted 활성화를 같은 완료 상태로 해석하지 않는다.
 
 ## 신뢰 경계
 
@@ -43,7 +43,7 @@ Google Sheets에서는 `room_number`를 business identity로 하여 최대 121�
 
 private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 직접 접근을 막는다. developer database projection은 configured/approved boolean, safe counters/timestamp/stable error만 노출한다. full resync와 운영 mapping/ACL/Cron은 #137 범위다.
 
-### #140 초기 PIN bootstrap과 예약 readiness 분리 — source/dev 완료, nonce 보완 candidate
+### #140 초기 PIN bootstrap과 예약 readiness 분리 — source/main·production 반영
 
 `pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. reveal/change의 기존 current revision·lease 권한 검사도 유지한다.
 
@@ -685,7 +685,7 @@ malformed curve·pair mismatch·ring drift는 fetch 0이고 stable degraded hear
 status는 조회 시점의 같은 current VAPID config parser·crypto validation 결과를 `providerConfigurationValid` boolean으로만
 결합하므로, 최근 성공 heartbeat가 있어도 현재 설정이 유효하지 않으면 health는 `degraded`입니다.
 
-### #133 자동 checkout 후 퇴실 미진행 사건 — feature candidate
+### #133 자동 checkout 후 퇴실 미진행 사건 — source/main·production 반영
 
 54번째 append-only migration은 자동 checkout 뒤 손님 잔류를 발견한 현재 notified 메이드의 신고를
 `checkout_presence_incidents`에, business admin의 최종 판단을
@@ -708,9 +708,9 @@ domain lock과 상태 재검증 뒤 `clock_timestamp()`로 다시 확인하고, 
 `serviceDate` 일치, 서비스일 다음 날 00:00 KST 상한, 다음 유효 예약 체크인 30분 전 상한을 같은 잠금 안에서
 검증합니다. Fastify와 Edge는 incident timestamp 요청·DB projection 모두 초와 UTC offset이 있는 strict RFC 3339로
 검증하고 잘못된 달력 날짜나 DB 값을 안전하게 차단합니다. 중단 구간에는 earning·벌점을 생성하지 않습니다.
-Fastify/Edge/OpenAPI의 #133 통합 기준은 108 paths / 115 operations입니다. #156 candidate는 여기에
+Fastify/Edge/OpenAPI의 #133 production 기준은 108 paths / 115 operations입니다. #156 source/dev는 여기에
 `GET·POST /v1/cleaning-templates` 한 path와 두 operation을 추가한 109 paths / 117 operations이며
-production에는 아직 승격되지 않았습니다.
+release/main/production에는 아직 승격되지 않았습니다.
 
 ### #156 checkout template 운영 게시 경계
 
@@ -722,7 +722,7 @@ admin의 live session만 네 room type의 current checkout template을 조회하
 `tv-on`을 우회하지 않습니다. duration은 운영 입력값이지만 계산 overflow 방지를 위해 1..10,080분으로 제한합니다.
 raw template table은 Data API role에 열지 않고 service-only RPC가 actor/session/password/role을 다시 검증합니다.
 audit에는 slot label/description이나 raw state/hash를 복제하지 않습니다. 설정 게시 자체는 행동 수신자가 없으므로
-notification/outbox를 만들지 않으며, production seed와 stayover/additional/reclean 계약은 이 candidate 범위 밖입니다.
+notification/outbox를 만들지 않으며, production seed와 stayover/additional/reclean 계약은 #156 범위 밖입니다.
 
 ## API 단계
 
@@ -753,17 +753,21 @@ notification/outbox를 만들지 않으며, production seed와 stayover/addition
 - `GET·POST /v1/availability/change-requests`, 관리자 승인·반려
 - `GET /v1/availability/candidates` 활성·가능 메이드 후보 조회
 
-현재 source/dev 완료·production 미승격:
+현재 main/production source·bundle 반영:
 
 - #25~#29 배정·통보·activation·preview와 #7A/B/C 수행·offline
 - #30/#83~#85/#31 사진·Drive adapter·7일 purge·제출·검수·재청소
 - #93/#96/#100~#103 수익·정정·지급 결과
 - #108~#112 알림함·typed writer·구독·delivery worker·VAPID/provider HTTP
-- #133 자동 checkout 후 퇴실 미진행 신고·조회·관리자 결정 candidate
+- #133 자동 checkout 후 퇴실 미진행 신고·조회·관리자 결정
+
+현재 source/dev 완료·release/production pending:
+
+- #156 checkout cleaning template admin 조회·immutable 게시
 
 #112 source는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 같은 tree로 PR #119에 병합됐다. Issue는 Function Secrets → 승인된 `api`/`notification-delivery` Edge bundle → negative/positive hosted smoke → Vault/`pg_cron`/`pg_net` → 5회 연속 heartbeat → 실제 기기 Web Push smoke까지 OPEN이다.
 
-#73 source 이후 critical path는 `#34 → #46 → #69 Phase A`다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
+현재 critical path는 #156 release exact-head 검증 → main 승인 → production 55번째 migration과 `api` bundle → 네 room type 승인값 게시 → 예약 gate smoke다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 
 Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·촛불·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`만 재사용하며 raw table DML을 하지 않는다. actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 
@@ -780,14 +784,14 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 - 복구검증: 뭄바이 기존 프로젝트 (`matalcofimnhuzslfhdd`), 사용자 트래픽 금지
 - 두 프로젝트 생성 비용은 월 `$0`로 확인
 
-다음 release/운영 활성화에서 필요한 설정:
+다음 release/운영 활성화에서 필요한 작업:
 
-- dev의 pending migration과 Data API 노출·권한 재검증
-- dev 45 migrations에 대응하는 승인 Edge bundle과 Function Secrets
+- production 54개 history/content 재대조 뒤 #156의 55번째 migration 1건과 Data API 비노출·권한 재검증
+- OpenAPI 0.3.0 109/117의 승인 `api` bundle과 template admin role/CAS/idempotency smoke
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
 - Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
 
-예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 4~8자리 `pinDigits`만 받고 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는 source candidate이며 production에는 승격하지 않았다.
+예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 4~8자리 `pinDigits`만 받고 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는다. PIN source/schema와 Edge bundle은 production에 반영됐지만 Google target·ACL·Cron/worker hosted 활성화는 별도 pending이다.
 
 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`는 production에서 활성 관리자 profile ID로 설정한다. Fastify 기준선은 시작 시 첫 실행으로 actor를 검증하고, Supabase-only runtime은 Cron이 1분마다 별도 secret으로 scheduler Function을 호출하며 DB command가 actor의 최신 역할·상태를 매 실행 재검증한다. 어느 runtime이든 퇴실을 먼저 처리하므로 반개구간 경계의 다음 입실이 같은 batch에서 진행되고, 중단 기간 전체가 지난 미입실 예약도 가짜 check-in 없이 예정 checkout으로 종결된다. 자세한 운영·rollback 계약은 [Edge runtime PoC](./EDGE_RUNTIME_POC.md)를 따른다.
 
@@ -795,7 +799,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-09-03에 v0.2.0 운영 활성화를 완료한 현재 `main`은 `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`이며 production은 19 migrations / OpenAPI 39 paths / 43 operations다. 이후 이 문서의 `dev@9ec073e6908cd90768fad3f1c6841f8130f39a88` integration base가 가진 #73 전 45 migrations / 98 paths / 105 operations와 #25~#112 source는 main/recovery/production에 승격하지 않았다. #73 source candidate는 46번째 migration만 추가하고 public API 수를 유지한다. 이 문서 갱신에서는 원격 환경을 재검증하거나 변경하지 않았으며 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
+2026-09-14 readback 기준 현재 `main`은 `e3397e00e5538871d80610c9f0c7ab88535d7be0`이며 production은 54 migrations / OpenAPI `0.3.0` 108 paths / 115 operations와 5개 Edge bundle이다. `dev@ab10249aaf1d671419389615ad8a22984c9849ac`의 #156은 55 migrations / 109 paths / 117 operations이며 release/main/production에는 아직 승격되지 않았다. 이 문서 갱신에서는 원격 환경을 변경하지 않았으며 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 

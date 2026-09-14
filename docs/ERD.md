@@ -1149,8 +1149,8 @@ erDiagram
   결정은 기존 target을 재사용하고 새 current assignment 및 필요 시 새 scheduled attempt를 만들며 과거
   assignment/attempt는 보존한다. 연장은 occupancy resumed 이력을 추가하고 중단 작업의 earning·벌점은 0이다.
 - command lock은 global reservation advisory → scoped receipt → domain row 순서이며 report/decision replay와
-  상반 결정은 stable domain conflict로 수렴한다. `dev@5798e882495e42763db6c227b7cb804527ccde47`에
-  source 통합됐지만 production/recovery에는 아직 적용되지 않았다.
+  상반 결정은 stable domain conflict로 수렴한다. #133은
+  `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`과 production 54-migration 기준선에 반영됐다.
 
 ### #156 개발 소스: checkout template 운영 게시
 
