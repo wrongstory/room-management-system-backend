@@ -71,13 +71,14 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 108 &&
+    document.info.version === "0.3.0" &&
+      Object.keys(document.paths).length === 108 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
         ).length === 115,
-    "candidate contract 108/115",
+    "v0.3.0 release source contract 108/115",
   );
 });
 

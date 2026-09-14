@@ -1122,7 +1122,7 @@ erDiagram
   source 검증 실패는 전체 rollback이며 reclean 원담당 불변, NULL due 보존, 실제 점유와 다음 입실 경계를 유지한다.
 - 사진 실업로드/제출·offline lease/PIN은 여기서 구현하지 않는다. capability 권한 계약과 실제 구현을 구분한다.
 
-### #133 개발 소스: 자동 checkout 후 퇴실 미진행 사건
+### #133 source/dev 완료, release pending: 자동 checkout 후 퇴실 미진행 사건
 
 `20260913141655_checkout_not_completed_incident_workflow.sql`은 기존 53개 migration을 수정하지 않는
 54번째 append-only feature migration이다.
@@ -1149,7 +1149,8 @@ erDiagram
   결정은 기존 target을 재사용하고 새 current assignment 및 필요 시 새 scheduled attempt를 만들며 과거
   assignment/attempt는 보존한다. 연장은 occupancy resumed 이력을 추가하고 중단 작업의 earning·벌점은 0이다.
 - command lock은 global reservation advisory → scoped receipt → domain row 순서이며 report/decision replay와
-  상반 결정은 stable domain conflict로 수렴한다. production/recovery 적용 상태와 무관한 source candidate다.
+  상반 결정은 stable domain conflict로 수렴한다. `dev@5798e882495e42763db6c227b7cb804527ccde47`에
+  source 통합됐지만 production/recovery에는 아직 적용되지 않았다.
 
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
