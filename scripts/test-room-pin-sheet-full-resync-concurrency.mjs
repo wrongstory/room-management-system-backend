@@ -1,7 +1,8 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { roomPinConcurrencyTargetIdentity } from './test-room-pin-concurrency.mjs';
 
 const execFileAsync = promisify(execFile);
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -19,9 +20,107 @@ async function sqlAsync(value) {
   } catch (error) { return { value: '', error: `${error.stderr ?? error.message}` }; }
 }
 
+async function holdWorkerStateLock() {
+  const process = spawn('docker', [
+    'exec', '-i', 'supabase_db_room-management-system-backend', 'psql', '-X', '-A', '-t', '-q',
+    '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let ready = false;
+  let output = '';
+  let stderr = '';
+  const exited = new Promise(resolve => process.once('close', resolve));
+  process.stderr.on('data', chunk => { stderr += chunk.toString(); });
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      process.kill();
+      reject(new Error('PIN Sheet worker-state lock barrier timed out'));
+    }, 10_000);
+    process.once('error', () => {
+      clearTimeout(timeout);
+      reject(new Error('PIN Sheet worker-state lock process failed'));
+    });
+    process.once('close', () => {
+      if (!ready) {
+        clearTimeout(timeout);
+        reject(new Error('PIN Sheet worker-state lock setup failed'));
+      }
+    });
+    process.stdout.on('data', chunk => {
+      output += chunk.toString();
+      if (!ready && output.includes('WORKER_STATE_LOCK_READY')) {
+        ready = true;
+        output = '';
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+    process.stdin.write(
+      "begin; set local statement_timeout='40s'; set local idle_in_transaction_session_timeout='45s'; " +
+      'select singleton from private.room_pin_sheet_sync_worker_state where singleton=true for update;\n' +
+      '\\echo WORKER_STATE_LOCK_READY\n',
+    );
+  });
+  let releasePromise;
+  return () => {
+    if (!releasePromise) {
+      releasePromise = (async () => {
+        process.stdin.end('commit;\n\\q\n');
+        const exitCode = await exited;
+        if (exitCode !== 0) {
+          const reason = stderr.split(/\r?\n/).find(line => line.trim()) ?? 'unknown';
+          throw new Error(`PIN Sheet worker-state lock transaction failed: ${reason}`);
+        }
+      })();
+    }
+    return releasePromise;
+  };
+}
+
+async function waitForWorkerStateLock(applicationName) {
+  assert(/^[a-z0-9-]{1,63}$/.test(applicationName), 'source-controlled PIN Sheet barrier name');
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const waiting = sql(
+      `select exists(select 1 from pg_stat_activity where application_name='${applicationName}' ` +
+      "and state='active' and wait_event_type='Lock')",
+    );
+    if (waiting === 't') return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`${applicationName} did not reach the worker-state lock barrier`);
+}
+
+async function runOrderedClaimRace(firstKind, fullSql, incrementalSql) {
+  const suffix = randomUUID().slice(0, 8);
+  const applicationNames = {
+    full: `pin-sheet-full-${firstKind}-${suffix}`,
+    incremental: `pin-sheet-incremental-${firstKind}-${suffix}`,
+  };
+  const invocations = {
+    full: () => sqlAsync(`set application_name='${applicationNames.full}'; ${fullSql}`),
+    incremental: () => sqlAsync(`set application_name='${applicationNames.incremental}'; ${incrementalSql}`),
+  };
+  const secondKind = firstKind === 'full' ? 'incremental' : 'full';
+  const release = await holdWorkerStateLock();
+  const pending = {};
+  try {
+    pending[firstKind] = invocations[firstKind]();
+    await waitForWorkerStateLock(applicationNames[firstKind]);
+    pending[secondKind] = invocations[secondKind]();
+    await waitForWorkerStateLock(applicationNames[secondKind]);
+    await release();
+    const [full, incremental] = await Promise.all([pending.full, pending.incremental]);
+    return { full, incremental };
+  } catch (error) {
+    await release();
+    await Promise.allSettled(Object.values(pending));
+    throw error;
+  }
+}
+
 const targetDigest = 'a'.repeat(64);
 
 export async function testRoomPinSheetFullResyncConcurrency(client, actorProfileId) {
+  const { environment, projectRef } = roomPinConcurrencyTargetIdentity;
   const sessionId = randomUUID();
   const actorUserId = sql(`select auth_user_id from public.profiles where id='${actorProfileId}'::uuid`);
   sql(`begin;
@@ -35,7 +134,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   const identicalKey = `full-same-${randomUUID()}`;
   const identicalArgs = {
     p_actor_profile_id: actorProfileId, p_session_id: sessionId, p_expected_fence: fence,
-    p_expected_environment: 'local', p_expected_project_ref: 'local',
+    p_expected_environment: environment, p_expected_project_ref: projectRef,
     p_expected_target_identity_digest: targetDigest, p_idempotency_key: identicalKey,
     p_request_hash: '1'.repeat(64),
   };
@@ -65,44 +164,67 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   assert(different.filter(result => result.error?.message === 'ROOM_PIN_SHEET_FULL_RESYNC_PENDING').length === 1, 'different-key loser gets the bounded active-run conflict');
   assert(sql(`select count(*) from private.room_pin_sheet_full_resync_runs where actor_profile_id='${actorProfileId}'::uuid and idempotency_key in ('${differentKeys[0]}','${differentKeys[1]}')`) === '1', 'different-key race keeps one logical active run');
 
-  const fullClaim = randomUUID();
-  const incrementalClaim = randomUUID();
-  const claimRace = await Promise.all([
-    sqlAsync(`select public.claim_room_pin_sheet_full_resync('${fullClaim}'::uuid,'local','local','${targetDigest}')::text`),
-    sqlAsync(`select public.claim_room_pin_sheet_sync('${incrementalClaim}'::uuid,10,'local','local')::text`),
-  ]);
-  assert(claimRace.every(result => !/40P01|deadlock detected/i.test(result.error)), 'full versus incremental claim has no deadlock');
-  assert(claimRace.every(result => !result.error), `full versus incremental claim has no generic failure: ${JSON.stringify(claimRace)}`);
-  const [fullResult, incrementalResult] = claimRace.map(result => JSON.parse(result.value));
-  const fullWon = fullResult.status === 'claimed';
-  const incrementalWon = incrementalResult.items?.some(item => item.outboxId === outboxId) === true;
-  assert(Number(fullWon) + Number(incrementalWon) === 1, `global fence grants one claim: ${JSON.stringify([fullResult, incrementalResult])}`);
-  assert([fullResult, incrementalResult].filter(result => result.status === 'busy').length === 1, 'global fence returns one bounded busy loser');
-  if (fullWon) {
-    const permit = await sqlAsync(`select public.authorize_room_pin_sheet_full_resync_write('${fullResult.operation.runId}'::uuid,'${fullClaim}'::uuid,${fullResult.leaseFence})::text`);
-    assert(!permit.error && JSON.parse(permit.value).status === 'authorized', 'full winner obtains the sole provider permit');
-    const settled = await sqlAsync(`select public.settle_room_pin_sheet_full_resync('${fullResult.operation.runId}'::uuid,'${fullClaim}'::uuid,${fullResult.leaseFence},'succeeded',null)::text`);
-    assert(!settled.error && JSON.parse(settled.value).status === 'succeeded', 'full winner settles its provider success');
-    const heartbeat = await sqlAsync(`select public.record_room_pin_sheet_sync_heartbeat('${fullClaim}'::uuid,${fullResult.leaseFence},'succeeded',1,1,0,0,0,0,null)::text`);
-    assert(!heartbeat.error, 'full winner releases the singleton with a durable heartbeat');
-  } else {
-    const permit = await sqlAsync(`select public.authorize_room_pin_sheet_write('${outboxId}'::uuid,'${incrementalClaim}'::uuid,${incrementalResult.leaseFence},${pinVersion})::text`);
-    assert(!permit.error && JSON.parse(permit.value).status === 'authorized', 'incremental winner obtains the sole provider permit');
-    const settled = await sqlAsync(`select public.settle_room_pin_sheet_sync('${outboxId}'::uuid,'${incrementalClaim}'::uuid,${incrementalResult.leaseFence},${pinVersion},'succeeded',null)::text`);
-    assert(!settled.error && JSON.parse(settled.value).status === 'succeeded', 'incremental winner settles its provider success');
-    const heartbeat = await sqlAsync(`select public.record_room_pin_sheet_sync_heartbeat('${incrementalClaim}'::uuid,${incrementalResult.leaseFence},'succeeded',1,1,0,0,0,0,null)::text`);
-    assert(!heartbeat.error, 'incremental winner releases the singleton with a durable heartbeat');
-    const followupFullClaim = randomUUID();
-    const followupClaim = await sqlAsync(`select public.claim_room_pin_sheet_full_resync('${followupFullClaim}'::uuid,'local','local','${targetDigest}')::text`);
-    assert(!followupClaim.error && JSON.parse(followupClaim.value).status === 'claimed', 'pending full run is reclaimed after the incremental winner');
-    const followup = JSON.parse(followupClaim.value);
-    const followupPermit = await sqlAsync(`select public.authorize_room_pin_sheet_full_resync_write('${followup.operation.runId}'::uuid,'${followupFullClaim}'::uuid,${followup.leaseFence})::text`);
-    assert(!followupPermit.error && JSON.parse(followupPermit.value).status === 'authorized', 'pending full run obtains its later sequential permit');
-    const followupSettle = await sqlAsync(`select public.settle_room_pin_sheet_full_resync('${followup.operation.runId}'::uuid,'${followupFullClaim}'::uuid,${followup.leaseFence},'succeeded',null)::text`);
-    assert(!followupSettle.error && JSON.parse(followupSettle.value).status === 'succeeded', 'pending full run settles after the incremental winner');
-    const followupHeartbeat = await sqlAsync(`select public.record_room_pin_sheet_sync_heartbeat('${followupFullClaim}'::uuid,${followup.leaseFence},'succeeded',1,1,0,0,0,0,null)::text`);
-    assert(!followupHeartbeat.error, 'sequential full run releases the singleton');
-  }
+  const fullFirstClaim = randomUUID();
+  const fullFirstIncrementalClaim = randomUUID();
+  const fullFirstRace = await runOrderedClaimRace(
+    'full',
+    `select public.claim_room_pin_sheet_full_resync('${fullFirstClaim}'::uuid,'${environment}','${projectRef}','${targetDigest}')::text`,
+    `select public.claim_room_pin_sheet_sync('${fullFirstIncrementalClaim}'::uuid,10,'${environment}','${projectRef}')::text`,
+  );
+  assert(!/40P01|deadlock detected/i.test(fullFirstRace.full.error + fullFirstRace.incremental.error), 'full-first claim barrier has no deadlock');
+  assert(!fullFirstRace.full.error && !fullFirstRace.incremental.error, `full-first claim barrier has no generic failure: ${JSON.stringify(fullFirstRace)}`);
+  const fullFirstResult = JSON.parse(fullFirstRace.full.value);
+  const fullFirstIncrementalResult = JSON.parse(fullFirstRace.incremental.value);
+  assert(fullFirstResult.status === 'claimed', `full-first barrier grants the full claim: ${JSON.stringify(fullFirstResult)}`);
+  assert(fullFirstIncrementalResult.status === 'busy' && fullFirstIncrementalResult.items.length === 0, 'full-first barrier returns one bounded incremental busy loser');
+  const fullFirstPermit = await sqlAsync(`select public.authorize_room_pin_sheet_full_resync_write('${fullFirstResult.operation.runId}'::uuid,'${fullFirstClaim}'::uuid,${fullFirstResult.leaseFence})::text`);
+  assert(!fullFirstPermit.error && JSON.parse(fullFirstPermit.value).status === 'authorized', 'full-first winner obtains the sole provider permit');
+  const fullFirstSettle = await sqlAsync(`select public.settle_room_pin_sheet_full_resync('${fullFirstResult.operation.runId}'::uuid,'${fullFirstClaim}'::uuid,${fullFirstResult.leaseFence},'succeeded',null)::text`);
+  assert(!fullFirstSettle.error && JSON.parse(fullFirstSettle.value).status === 'succeeded', 'full-first winner settles its provider success');
+  const fullFirstHeartbeat = await sqlAsync(`select public.record_room_pin_sheet_sync_heartbeat('${fullFirstClaim}'::uuid,${fullFirstResult.leaseFence},'succeeded',1,1,0,0,0,0,null)::text`);
+  assert(!fullFirstHeartbeat.error, 'full-first winner releases the singleton with a durable heartbeat');
+
+  sql(`update private.room_pin_sheet_sync_outbox set status='pending',completed_at=null,claim_id=null,
+    claimed_at=null,claim_expires_at=null,lease_fence=null,provider_write_started_at=null,
+    retry_count=0,next_attempt_at=clock_timestamp(),last_error_code=null where id='${outboxId}'::uuid`);
+  const incrementalFirstFence = Number(sql('select lease_fence from private.room_pin_sheet_sync_worker_state where singleton=true'));
+  const incrementalFirstKey = `full-incremental-first-${randomUUID()}`;
+  const incrementalFirstRequest = await client.rpc('request_room_pin_sheet_full_resync', {
+    ...identicalArgs,
+    p_expected_fence: incrementalFirstFence,
+    p_idempotency_key: incrementalFirstKey,
+    p_request_hash: '6'.repeat(64),
+  });
+  assert(!incrementalFirstRequest.error, `incremental-first full run fixture is accepted: ${JSON.stringify(incrementalFirstRequest)}`);
+  const incrementalFirstFullClaim = randomUUID();
+  const incrementalFirstClaim = randomUUID();
+  const incrementalFirstRace = await runOrderedClaimRace(
+    'incremental',
+    `select public.claim_room_pin_sheet_full_resync('${incrementalFirstFullClaim}'::uuid,'${environment}','${projectRef}','${targetDigest}')::text`,
+    `select public.claim_room_pin_sheet_sync('${incrementalFirstClaim}'::uuid,10,'${environment}','${projectRef}')::text`,
+  );
+  assert(!/40P01|deadlock detected/i.test(incrementalFirstRace.full.error + incrementalFirstRace.incremental.error), 'incremental-first claim barrier has no deadlock');
+  assert(!incrementalFirstRace.full.error && !incrementalFirstRace.incremental.error, `incremental-first claim barrier has no generic failure: ${JSON.stringify(incrementalFirstRace)}`);
+  const incrementalFirstFullResult = JSON.parse(incrementalFirstRace.full.value);
+  const incrementalFirstResult = JSON.parse(incrementalFirstRace.incremental.value);
+  assert(incrementalFirstResult.status === 'claimed' && incrementalFirstResult.items.some(item => item.outboxId === outboxId), `incremental-first barrier grants the incremental claim: ${JSON.stringify(incrementalFirstResult)}`);
+  assert(incrementalFirstFullResult.status === 'busy', 'incremental-first barrier returns one bounded full busy loser');
+  const incrementalFirstPermit = await sqlAsync(`select public.authorize_room_pin_sheet_write('${outboxId}'::uuid,'${incrementalFirstClaim}'::uuid,${incrementalFirstResult.leaseFence},${pinVersion})::text`);
+  assert(!incrementalFirstPermit.error && JSON.parse(incrementalFirstPermit.value).status === 'authorized', 'incremental-first winner obtains the sole provider permit');
+  const incrementalFirstSettle = await sqlAsync(`select public.settle_room_pin_sheet_sync('${outboxId}'::uuid,'${incrementalFirstClaim}'::uuid,${incrementalFirstResult.leaseFence},${pinVersion},'succeeded',null)::text`);
+  assert(!incrementalFirstSettle.error && JSON.parse(incrementalFirstSettle.value).status === 'succeeded', 'incremental-first winner settles its provider success');
+  const incrementalFirstHeartbeat = await sqlAsync(`select public.record_room_pin_sheet_sync_heartbeat('${incrementalFirstClaim}'::uuid,${incrementalFirstResult.leaseFence},'succeeded',1,1,0,0,0,0,null)::text`);
+  assert(!incrementalFirstHeartbeat.error, 'incremental-first winner releases the singleton with a durable heartbeat');
+  const followupFullClaim = randomUUID();
+  const followupClaim = await sqlAsync(`select public.claim_room_pin_sheet_full_resync('${followupFullClaim}'::uuid,'${environment}','${projectRef}','${targetDigest}')::text`);
+  assert(!followupClaim.error && JSON.parse(followupClaim.value).status === 'claimed', 'pending full run is reclaimed after the incremental-first winner');
+  const followup = JSON.parse(followupClaim.value);
+  const followupPermit = await sqlAsync(`select public.authorize_room_pin_sheet_full_resync_write('${followup.operation.runId}'::uuid,'${followupFullClaim}'::uuid,${followup.leaseFence})::text`);
+  assert(!followupPermit.error && JSON.parse(followupPermit.value).status === 'authorized', 'pending full run obtains its later sequential permit');
+  const followupSettle = await sqlAsync(`select public.settle_room_pin_sheet_full_resync('${followup.operation.runId}'::uuid,'${followupFullClaim}'::uuid,${followup.leaseFence},'succeeded',null)::text`);
+  assert(!followupSettle.error && JSON.parse(followupSettle.value).status === 'succeeded', 'pending full run settles after the incremental-first winner');
+  const followupHeartbeat = await sqlAsync(`select public.record_room_pin_sheet_sync_heartbeat('${followupFullClaim}'::uuid,${followup.leaseFence},'succeeded',1,1,0,0,0,0,null)::text`);
+  assert(!followupHeartbeat.error, 'sequential full run releases the singleton');
 
   const exhaustionFence = Number(sql('select lease_fence from private.room_pin_sheet_sync_worker_state where singleton=true'));
   const exhaustionKey = `full-exhaust-${randomUUID()}`;
@@ -116,7 +238,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   sql(`update private.room_pin_sheet_full_resync_runs set retry_count=7
     where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${exhaustionKey}'`);
   const exhaustionClaimId = randomUUID();
-  const exhaustionClaim = JSON.parse(sql(`select public.claim_room_pin_sheet_full_resync('${exhaustionClaimId}'::uuid,'local','local','${targetDigest}')::text`));
+  const exhaustionClaim = JSON.parse(sql(`select public.claim_room_pin_sheet_full_resync('${exhaustionClaimId}'::uuid,'${environment}','${projectRef}','${targetDigest}')::text`));
   assert(exhaustionClaim.status === 'claimed', 'eighth retry fixture claims the singleton');
   const exhaustedRunId = exhaustionClaim.operation.runId;
   const blockedFence = exhaustionClaim.leaseFence;
@@ -143,7 +265,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   assert(sql(`select (recovery_root_run_id='${exhaustedRunId}'::uuid)::text from private.room_pin_sheet_full_resync_runs where id='${recoveryRunId}'::uuid`) === 'true', 'same-root request winner inherits the exhausted root exactly');
   const recoveryClaimIds = [randomUUID(), randomUUID()];
   const recoveryClaims = await Promise.all(recoveryClaimIds.map(claimId => sqlAsync(
-    `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'local','local','${targetDigest}')::text`,
+    `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'${environment}','${projectRef}','${targetDigest}')::text`,
   )));
   assert(recoveryClaims.every(result => !/40P01|deadlock detected/i.test(result.error)), 'concurrent recovery claims have no deadlock');
   assert(recoveryClaims.every(result => !result.error), `concurrent recovery claims have no generic failure: ${JSON.stringify(recoveryClaims)}`);
@@ -176,14 +298,17 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   const mismatchRunId = sql(`select id from private.room_pin_sheet_full_resync_runs
     where actor_profile_id='${actorProfileId}'::uuid and idempotency_key='${mismatchKey}'`);
   assert(sql(`select (id=recovery_root_run_id)::text from private.room_pin_sheet_full_resync_runs where id='${mismatchRunId}'::uuid`) === 'true', 'target-drift source run retains its self root');
-  const mismatchClaimIds = [randomUUID(), randomUUID()];
-  const mismatchClaims = await Promise.all(mismatchClaimIds.map(claimId => sqlAsync(
-    `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'local','local','${targetDigest}')::text`,
-  )));
-  assert(mismatchClaims.every(result => !/40P01|deadlock detected/i.test(result.error)), 'concurrent target-mismatch claims have no deadlock');
-  assert(mismatchClaims.every(result => !result.error), `concurrent target-mismatch claims have no generic failure: ${JSON.stringify(mismatchClaims)}`);
-  const mismatchResults = mismatchClaims.map(result => JSON.parse(result.value));
-  assert(mismatchResults.every(result => result.status === 'operator_blocked'), `target mismatch blocks every claimant: ${JSON.stringify(mismatchResults)}`);
+  const mismatchFullClaimId = randomUUID();
+  const mismatchIncrementalClaimId = randomUUID();
+  const mismatchClaims = await runOrderedClaimRace(
+    'full',
+    `select public.claim_room_pin_sheet_full_resync('${mismatchFullClaimId}'::uuid,'${environment}','${projectRef}','${targetDigest}')::text`,
+    `select public.claim_room_pin_sheet_sync('${mismatchIncrementalClaimId}'::uuid,10,'mismatched-environment','${projectRef}')::text`,
+  );
+  assert(!/40P01|deadlock detected/i.test(mismatchClaims.full.error + mismatchClaims.incremental.error), 'full/incremental target-mismatch claims have no deadlock');
+  assert(!mismatchClaims.full.error && !mismatchClaims.incremental.error, `full/incremental target-mismatch claims have no generic failure: ${JSON.stringify(mismatchClaims)}`);
+  const mismatchResults = [mismatchClaims.full, mismatchClaims.incremental].map(result => JSON.parse(result.value));
+  assert(mismatchResults.every(result => result.status === 'operator_blocked'), `target mismatch blocks full and incremental claimants: ${JSON.stringify(mismatchResults)}`);
   const mismatchFence = Number(sql(`select lease_fence from private.room_pin_sheet_full_resync_runs where id='${mismatchRunId}'::uuid`));
   assert(mismatchFence === mismatchBaseFence + 1, 'concurrent target mismatch advances the singleton fence exactly once');
   assert(sql('select lease_fence from private.room_pin_sheet_sync_worker_state where singleton=true') === String(mismatchFence), 'target-mismatched run and singleton retain one exact fence');
@@ -208,7 +333,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   assert(sql(`select (recovery_root_run_id='${mismatchRunId}'::uuid)::text from private.room_pin_sheet_full_resync_runs where id='${mismatchRecoveryRunId}'::uuid`) === 'true', 'target recovery inherits the original mismatch root');
   const mismatchRecoveryClaimIds = [randomUUID(), randomUUID()];
   const mismatchRecoveryClaims = await Promise.all(mismatchRecoveryClaimIds.map(claimId => sqlAsync(
-    `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'local','local','${targetDigest}')::text`,
+    `select public.claim_room_pin_sheet_full_resync('${claimId}'::uuid,'${environment}','${projectRef}','${targetDigest}')::text`,
   )));
   assert(mismatchRecoveryClaims.every(result => !/40P01|deadlock detected/i.test(result.error)), 'concurrent target recovery claims have no deadlock');
   assert(mismatchRecoveryClaims.every(result => !result.error), `concurrent target recovery claims have no generic failure: ${JSON.stringify(mismatchRecoveryClaims)}`);
@@ -236,7 +361,7 @@ export async function testRoomPinSheetFullResyncConcurrency(client, actorProfile
   assert(sql("select count(*) from private.room_pin_sheet_full_resync_runs where status in ('pending','processing','failed')") === '0', 'no active full-resync run is orphaned');
   assert(sql("select count(*) from private.room_pin_sheet_full_resync_runs where status='operator_blocked'") === '0', 'no reconciled operator-blocked full run is orphaned');
   assert(sql("select count(*) from private.room_pin_sheet_sync_outbox where status='processing'") === '0', 'no incremental processing row is orphaned');
-  console.log('Room PIN Sheet full-resync concurrency passed: same-key replay=1 run, different-key active/recovery=1 winner, full-vs-incremental=1 permit, retry and target-drift recoveries each=1/2 claim and 1 provider permit, 40P01/generic errors=0.');
+  console.log('Room PIN Sheet full-resync concurrency passed: same-key replay=1 run, different-key active/recovery=1 winner, explicit full-first and incremental-first barriers each=1 winner + 1 busy loser, mismatch fail-closed=2 claimants, retry and target-drift recoveries each=1/2 claim and 1 provider permit, 40P01/generic errors=0.');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
