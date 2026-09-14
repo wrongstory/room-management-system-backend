@@ -11,7 +11,12 @@ from ..models.developer_database_status_migration_drift import DeveloperDatabase
 
 if TYPE_CHECKING:
     from ..models.developer_database_status_critical_rpcs import DeveloperDatabaseStatusCriticalRpcs
+    from ..models.developer_database_status_notification_delivery import (
+        DeveloperDatabaseStatusNotificationDelivery,
+    )
+    from ..models.developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
     from ..models.developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
+    from ..models.room_pin_sheet_sync_status import RoomPinSheetSyncStatus
 
 
 T = TypeVar("T", bound="DeveloperDatabaseStatus")
@@ -30,6 +35,9 @@ class DeveloperDatabaseStatus:
         rls_valid (bool):
         critical_rpcs (DeveloperDatabaseStatusCriticalRpcs):
         row_counts (DeveloperDatabaseStatusRowCounts):
+        photo_purge (DeveloperDatabaseStatusPhotoPurge):
+        notification_delivery (DeveloperDatabaseStatusNotificationDelivery):
+        room_pin_sheet_sync (RoomPinSheetSyncStatus):
         environment (DeveloperDatabaseStatusEnvironment):
         project_ref (str):
         checked_at (datetime.datetime):
@@ -44,6 +52,9 @@ class DeveloperDatabaseStatus:
     rls_valid: bool
     critical_rpcs: DeveloperDatabaseStatusCriticalRpcs
     row_counts: DeveloperDatabaseStatusRowCounts
+    photo_purge: DeveloperDatabaseStatusPhotoPurge
+    notification_delivery: DeveloperDatabaseStatusNotificationDelivery
+    room_pin_sheet_sync: RoomPinSheetSyncStatus
     environment: DeveloperDatabaseStatusEnvironment
     project_ref: str
     checked_at: datetime.datetime
@@ -69,6 +80,12 @@ class DeveloperDatabaseStatus:
 
         row_counts = self.row_counts.to_dict()
 
+        photo_purge = self.photo_purge.to_dict()
+
+        notification_delivery = self.notification_delivery.to_dict()
+
+        room_pin_sheet_sync = self.room_pin_sheet_sync.to_dict()
+
         environment = self.environment.value
 
         project_ref = self.project_ref
@@ -88,6 +105,9 @@ class DeveloperDatabaseStatus:
                 "rlsValid": rls_valid,
                 "criticalRpcs": critical_rpcs,
                 "rowCounts": row_counts,
+                "photoPurge": photo_purge,
+                "notificationDelivery": notification_delivery,
+                "roomPinSheetSync": room_pin_sheet_sync,
                 "environment": environment,
                 "projectRef": project_ref,
                 "checkedAt": checked_at,
@@ -101,7 +121,12 @@ class DeveloperDatabaseStatus:
         from ..models.developer_database_status_critical_rpcs import (
             DeveloperDatabaseStatusCriticalRpcs,
         )
+        from ..models.developer_database_status_notification_delivery import (
+            DeveloperDatabaseStatusNotificationDelivery,
+        )
+        from ..models.developer_database_status_photo_purge import DeveloperDatabaseStatusPhotoPurge
         from ..models.developer_database_status_row_counts import DeveloperDatabaseStatusRowCounts
+        from ..models.room_pin_sheet_sync_status import RoomPinSheetSyncStatus
 
         d = dict(src_dict)
         database_reachable = d.pop("databaseReachable")
@@ -134,6 +159,14 @@ class DeveloperDatabaseStatus:
 
         row_counts = DeveloperDatabaseStatusRowCounts.from_dict(d.pop("rowCounts"))
 
+        photo_purge = DeveloperDatabaseStatusPhotoPurge.from_dict(d.pop("photoPurge"))
+
+        notification_delivery = DeveloperDatabaseStatusNotificationDelivery.from_dict(
+            d.pop("notificationDelivery")
+        )
+
+        room_pin_sheet_sync = RoomPinSheetSyncStatus.from_dict(d.pop("roomPinSheetSync"))
+
         environment = DeveloperDatabaseStatusEnvironment(d.pop("environment"))
 
         project_ref = d.pop("projectRef")
@@ -150,6 +183,9 @@ class DeveloperDatabaseStatus:
             rls_valid=rls_valid,
             critical_rpcs=critical_rpcs,
             row_counts=row_counts,
+            photo_purge=photo_purge,
+            notification_delivery=notification_delivery,
+            room_pin_sheet_sync=room_pin_sheet_sync,
             environment=environment,
             project_ref=project_ref,
             checked_at=checked_at,

@@ -25,17 +25,20 @@
     "db:start:ci": "supabase start --exclude studio,imgproxy,storage-api,realtime,edge-runtime,logflare,vector,supavisor",
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
+    "db:manifest:verify": "node scripts/verify-migration-manifest.mjs",
     "db:verify": "supabase db reset --local --no-seed",
-    "db:test": "supabase test db supabase/tests --local",
+    "db:test": "node scripts/test-production-baseline-upgrade.mjs && node scripts/test-payroll-payment-upgrade.mjs && node scripts/test-room-pin-nonce-upgrade.mjs && node scripts/test-checkout-incident-upgrade.mjs && supabase test db supabase/tests --local",
     "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs",
     "edge:check": "node scripts/check-edge-functions.mjs",
     "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
-    "console:openapi:export": "tsx scripts/export-backend-console-openapi.ts"
+    "console:openapi:export": "tsx scripts/export-backend-console-openapi.ts",
+    "openapi:export:full": "tsx scripts/export-full-openapi.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",
     "@fastify/helmet": "13.1.1",
     "@fastify/rate-limit": "11.2.0",
+    "@imagemagick/magick-wasm": "0.0.43",
     "@supabase/supabase-js": "2.112.4",
     "dotenv": "17.2.3",
     "fastify": "5.12.1",

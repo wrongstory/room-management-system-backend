@@ -1,4 +1,7 @@
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const image = 'denoland/deno:2.1.4@sha256:3bf75873714baa410dcf7fabaf76d806d20f0ac8a7579df11577b4ed97416e34';
 const sourcePaths = [
@@ -7,30 +10,87 @@ const sourcePaths = [
   'supabase/functions/_shared/activity-api.ts',
   'supabase/functions/_shared/account-api.ts',
   'supabase/functions/_shared/availability-api.ts',
+  'supabase/functions/_shared/assignment-api.ts',
+  'supabase/functions/_shared/attempt-api.ts',
+  'supabase/functions/_shared/attempt-lifecycle-api.ts',
+  'supabase/functions/_shared/attempt-offline-api.ts',
+  'supabase/functions/_shared/checkout-incident-api.ts',
+  'supabase/functions/_shared/photo-submission-contract.ts',
+  'supabase/functions/_shared/photo-upload-contract.ts',
+  'supabase/functions/_shared/photo-binary.ts',
+  'supabase/functions/_shared/google-drive.ts',
+  'supabase/functions/_shared/photo-service.ts',
+  'supabase/functions/_shared/photo-purge.ts',
+  'supabase/functions/_shared/photo-api.ts',
+  'supabase/functions/_shared/submission-api.ts',
+  'supabase/functions/_shared/assignment-preview-core.ts',
+  'supabase/functions/_shared/assignment-preview-api.ts',
   'supabase/functions/_shared/reservation-api.ts',
+  'supabase/functions/_shared/payroll-cursor.ts',
+  'supabase/functions/_shared/payroll-api.ts',
+  'supabase/functions/_shared/complaint-cursor.ts',
+  'supabase/functions/_shared/complaint-api.ts',
+  'supabase/functions/_shared/notification-cursor.ts',
+  'supabase/functions/_shared/notification-api.ts',
+  'supabase/functions/_shared/web-push-binding-proof.ts',
+  'supabase/functions/_shared/web-push-subscription-api.ts',
+  'supabase/functions/_shared/notification-delivery-worker.ts',
+  'supabase/functions/_shared/web-push-provider.ts',
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/openapi.ts',
   'supabase/functions/_shared/room-api.ts',
+  'supabase/functions/_shared/room-pin-crypto.ts',
+  'supabase/functions/_shared/room-pin-api.ts',
+  'supabase/functions/_shared/room-pin-sheet-operations-api.ts',
+  'supabase/functions/_shared/google-sheets-pin.ts',
+  'supabase/functions/_shared/room-pin-sheet-sync.ts',
   'supabase/functions/api/index.ts',
-  'supabase/functions/reservation-scheduler/index.ts'
+  'supabase/functions/reservation-scheduler/index.ts',
+  'supabase/functions/photo-purge/index.ts'
+  ,'supabase/functions/notification-delivery/index.ts',
+  'supabase/functions/room-pin-sheet-sync/index.ts'
 ];
 const testPaths = [
   'supabase/functions/_shared/activity-api.deno.ts',
   'supabase/functions/_shared/account-api.deno.ts',
   'supabase/functions/_shared/availability-api.deno.ts',
+  'supabase/functions/_shared/assignment-api.deno.ts',
+  'supabase/functions/_shared/attempt-api.deno.ts',
+  'supabase/functions/_shared/attempt-lifecycle-api.deno.ts',
+  'supabase/functions/_shared/attempt-offline-api.deno.ts',
+  'supabase/functions/_shared/checkout-incident-api.deno.ts',
+  'supabase/functions/_shared/photo-submission-contract.deno.ts',
+  'supabase/functions/_shared/photo-upload-contract.deno.ts',
+  'supabase/functions/_shared/photo-api.deno.ts',
+  'supabase/functions/_shared/submission-api.deno.ts',
+  'supabase/functions/_shared/photo-purge.deno.ts',
+  'supabase/functions/_shared/photo-binary.deno.ts',
+  'supabase/functions/_shared/assignment-preview-core.deno.ts',
+  'supabase/functions/_shared/assignment-preview-api.deno.ts',
   'supabase/functions/_shared/reservation-api.deno.ts',
+  'supabase/functions/_shared/payroll-api.deno.ts',
+  'supabase/functions/_shared/complaint-api.deno.ts',
+  'supabase/functions/_shared/notification-api.deno.ts',
+  'supabase/functions/_shared/web-push-binding-proof.deno.ts',
+  'supabase/functions/_shared/web-push-subscription-api.deno.ts',
+  'supabase/functions/_shared/notification-delivery-worker.deno.ts',
+  'supabase/functions/_shared/web-push-provider.deno.ts',
   'supabase/functions/_shared/developer-api.deno.ts',
   'supabase/functions/_shared/openapi.deno.ts',
   'supabase/functions/_shared/room-api.deno.ts',
+  'supabase/functions/_shared/room-pin-crypto.deno.ts',
+  'supabase/functions/_shared/room-pin-api.deno.ts',
+  'supabase/functions/_shared/room-pin-sheet-operations-api.deno.ts',
   'supabase/functions/api/index.deno.ts'
+  ,'supabase/functions/notification-delivery/index.deno.ts'
 ];
 
-function runDeno(args) {
+function runDeno(args, mountRoot = process.cwd()) {
   const result = spawnSync('docker', [
     'run',
     '--rm',
     '-v',
-    `${process.cwd()}:/workspace`,
+    `${mountRoot}:/workspace`,
     '-w',
     '/workspace',
     image,
@@ -42,11 +102,66 @@ function runDeno(args) {
     throw result.error;
   }
   if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    throw new Error(`Deno validation failed (${result.status ?? 1})`);
   }
 }
 
-runDeno(['fmt', '--check', ...sourcePaths, ...testPaths]);
+/** CRLF checkout portability only: no syntax/spacing changes and never rewrite tracked sources. */
+function cleanupFormatCopy(temporary, base) {
+  if (dirname(temporary) !== base || !basename(temporary).startsWith('edge-fmt-') || realpathSync(temporary) !== temporary) throw new Error('Unsafe format cleanup target');
+  rmSync(temporary, { recursive: true, force: false });
+}
+export function withLfFormatCopy(paths, check, workspace = process.cwd()) {
+  const root = realpathSync(workspace), base = resolve(root, '.tmp');
+  mkdirSync(base, { recursive: true });
+  if (realpathSync(base) !== base) throw new Error('Unsafe format temporary base');
+  const temporary = mkdtempSync(resolve(base, 'edge-fmt-'));
+  try {
+    for (const path of paths) {
+      const source = resolve(root, path), sourceRelative = relative(root, source);
+      if (isAbsolute(path) || !sourceRelative || sourceRelative.startsWith(`..${sep}`) || sourceRelative === '..' || isAbsolute(sourceRelative)) throw new Error('Unsafe format source path');
+      const destination = resolve(temporary, sourceRelative);
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, readFileSync(source, 'utf8').replaceAll('\r\n', '\n'));
+    }
+    return check(temporary);
+  } finally {
+    // Delete only the exact mkdtemp directory after rechecking its real absolute boundary.
+    cleanupFormatCopy(temporary, base);
+  }
+}
+
+export function verifyEdgeBundle() {
+  withLfFormatCopy([], temporary => {
+    const output = resolve(temporary, 'api.eszip');
+    const relativeOutput = relative(process.cwd(), output).split(sep).join('/');
+    const result = spawnSync('docker', ['run', '--rm', '-v', `${process.cwd()}:/workspace`, '-w', '/workspace/supabase/functions',
+      'public.ecr.aws/supabase/edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c',
+      'bundle', '--entrypoint', 'api/index.ts',
+      '--static', 'api/assets/magick.wasm.gz',
+      '--static', 'api/assets/magick.NOTICE',
+      '--output', `/workspace/${relativeOutput}`, '--checksum', 'sha256', '--timeout', '60'], { stdio: 'inherit', timeout: 70000 });
+    if (result.error || result.status !== 0) throw new Error('Pinned Edge bundle failed');
+    const size = statSync(output).size;
+    if (!Number.isSafeInteger(size) || size <= 0 || size >= 20000000) throw new Error('Edge bundle must remain below 20,000,000 bytes');
+    console.log(`Edge bundle size gate PASS: ${size} bytes`);
+  });
+}
+
+function main() {
+for (const args of [['--assets-only'], ['--check']]) {
+  const generated = spawnSync(process.execPath, ['scripts/generate-photo-edge.mjs', ...args], { stdio: 'inherit' });
+  if (generated.status !== 0) throw new Error('Photo generated asset verification failed');
+}
+for (const args of [[], ['--check']]) {
+  const generated = spawnSync(process.execPath, ['scripts/generate-web-push-edge.mjs', ...args], { stdio: 'inherit' });
+  if (generated.status !== 0) throw new Error('Web Push provider generated source verification failed');
+}
+for (const args of [[], ['--check']]) {
+  const generated = spawnSync(process.execPath, ['scripts/generate-room-pin-sheet-edge.mjs', ...args], { stdio: 'inherit' });
+  if (generated.status !== 0) throw new Error('Room PIN Sheet generated source verification failed');
+}
+withLfFormatCopy([...sourcePaths, ...testPaths], temporary => runDeno(['fmt', '--check', ...sourcePaths, ...testPaths], temporary));
 runDeno([
   'check',
   '--frozen',
@@ -56,9 +171,13 @@ runDeno([
 ]);
 runDeno([
   'test',
-  '--allow-env=ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER',
+  '--allow-read=supabase/functions/api/assets',
+  '--allow-env=SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET,VAPID_SUBJECT,VAPID_CURRENT_KEY_VERSION,VAPID_PUBLIC_KEY,VAPID_PUBLIC_KEYRING_JSON,VAPID_PRIVATE_KEY,VAPID_KEYRING_JSON,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_KEY_BASE64,ROOM_PIN_KEY_VERSION,ROOM_PIN_KEYRING_JSON,ROOM_PIN_INITIAL_DIGITS,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,GOOGLE_SHEETS_SPREADSHEET_ID,GOOGLE_SHEETS_ROOM_PIN_TAB,RUNTIME_ENVIRONMENT,SUPABASE_PROJECT_REF',
   '--frozen',
   '--config',
   'supabase/functions/deno.json',
   ...testPaths
 ]);
+verifyEdgeBundle();
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main();

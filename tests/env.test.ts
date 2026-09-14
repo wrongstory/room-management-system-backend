@@ -11,7 +11,19 @@ const localEnv = {
   RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
   RESERVATION_PII_KEY_VERSION: 'test-v1',
   RESERVATION_PII_KEYRING_JSON: '{}',
-  RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value'
+  RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
+  ROOM_PIN_KEY_BASE64: Buffer.alloc(32, 8).toString('base64'),
+  ROOM_PIN_KEY_VERSION: 'pin-v1',
+  ROOM_PIN_KEYRING_JSON: '{}',
+  PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456',
+  NOTIFICATION_CURSOR_HMAC_SECRET: 'notification-cursor-secret-tests-123456'
+  ,WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(32, 4).toString('base64')
+  ,WEB_PUSH_SUBSCRIPTION_KEY_VERSION: 'v1'
+  ,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{}'
+  ,WEB_PUSH_BINDING_DIGEST_SECRET: 'web-push-binding-secret-tests-123456789'
+  ,VAPID_CURRENT_KEY_VERSION: 'vapid-v1'
+  ,VAPID_PUBLIC_KEY: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4'
+  ,VAPID_PUBLIC_KEYRING_JSON: '{}'
 };
 
 describe('environment contract', () => {
@@ -87,5 +99,83 @@ describe('environment contract', () => {
       ...localEnv,
       RESERVATION_PII_KEY_BASE64: `${localEnv.RESERVATION_PII_KEY_BASE64}!!`
     })).toThrow();
+  });
+
+  it('requires a purpose-specific payroll cursor secret of at least 32 UTF-8 bytes', () => {
+    for (const value of [
+      undefined,
+      'short',
+      ' '.repeat(32),
+      localEnv.ACCOUNT_PHONE_PEPPER,
+      localEnv.RESERVATION_GUEST_NAME_PEPPER,
+      localEnv.RESERVATION_PII_KEY_BASE64,
+      localEnv.SUPABASE_SECRET_KEY,
+      localEnv.SUPABASE_PUBLISHABLE_KEY
+    ]) {
+      expect(() => loadEnv({
+        ...localEnv,
+        PAYROLL_CURSOR_HMAC_SECRET: value
+      })).toThrow();
+    }
+  });
+
+  it('requires a distinct notification cursor secret of at least 32 UTF-8 bytes', () => {
+    for (const value of [
+      undefined,
+      'short',
+      ' '.repeat(32),
+      localEnv.PAYROLL_CURSOR_HMAC_SECRET,
+      localEnv.ACCOUNT_PHONE_PEPPER,
+      localEnv.RESERVATION_GUEST_NAME_PEPPER,
+      localEnv.RESERVATION_PII_KEY_BASE64,
+      localEnv.SUPABASE_SECRET_KEY,
+      localEnv.SUPABASE_PUBLISHABLE_KEY
+    ]) {
+      expect(() => loadEnv({
+        ...localEnv,
+        NOTIFICATION_CURSOR_HMAC_SECRET: value
+      })).toThrow();
+    }
+  });
+
+  it('requires canonical distinct Web Push keys and a separate current key version', () => {
+    expect(loadEnv({ ...localEnv, WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '' }).WEB_PUSH_SUBSCRIPTION_KEYRING_JSON).toBe('{}');
+    for (const override of [
+      { WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(16, 4).toString('base64') },
+      { WEB_PUSH_SUBSCRIPTION_KEY_BASE64: localEnv.RESERVATION_PII_KEY_BASE64 },
+      { WEB_PUSH_BINDING_DIGEST_SECRET: 'short' },
+      { WEB_PUSH_BINDING_DIGEST_SECRET: localEnv.NOTIFICATION_CURSOR_HMAC_SECRET },
+      {
+        WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: JSON.stringify({
+          v1: Buffer.alloc(32, 5).toString('base64')
+        })
+      },
+      { WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{"old":"not-base64"}' },
+      { VAPID_PUBLIC_KEYRING_JSON: JSON.stringify(Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`old-${index}`, localEnv.VAPID_PUBLIC_KEY]))) }
+    ]) {
+      expect(() => loadEnv({ ...localEnv, ...override })).toThrow();
+    }
+  });
+
+  it('requires purpose-specific room PIN current and prior keys', () => {
+    const reservationPrior=Buffer.alloc(32,9).toString('base64');
+    const webPushPrior=Buffer.alloc(32,10).toString('base64');
+    const roomPrior=Buffer.alloc(32,11).toString('base64');
+    expect(loadEnv({...localEnv,ROOM_PIN_KEYRING_JSON:JSON.stringify({'pin-old-v1':roomPrior})})).toBeTruthy();
+    for(const override of [
+      {ROOM_PIN_KEY_BASE64:localEnv.RESERVATION_PII_KEY_BASE64},
+      {ROOM_PIN_KEY_BASE64:localEnv.WEB_PUSH_SUBSCRIPTION_KEY_BASE64},
+      {ROOM_PIN_KEY_BASE64:reservationPrior,RESERVATION_PII_KEYRING_JSON:JSON.stringify({'old-v1':reservationPrior})},
+      {ROOM_PIN_KEY_BASE64:webPushPrior,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON:JSON.stringify({'old-v1':webPushPrior})},
+      {ROOM_PIN_KEYRING_JSON:JSON.stringify({'pin-old-v1':localEnv.RESERVATION_PII_KEY_BASE64})}
+    ]) expect(()=>loadEnv({...localEnv,...override})).toThrow();
+  });
+
+  it('keeps initial PIN bootstrap optional but validates configured digits', () => {
+    expect(loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: '' }).ROOM_PIN_INITIAL_DIGITS).toBeUndefined();
+    expect(loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: '0'.repeat(4) }).ROOM_PIN_INITIAL_DIGITS).toBe('0'.repeat(4));
+    for (const value of ['123', '123456789', '12ab']) {
+      expect(() => loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: value })).toThrow();
+    }
   });
 });

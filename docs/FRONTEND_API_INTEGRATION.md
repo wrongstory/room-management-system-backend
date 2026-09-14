@@ -30,7 +30,31 @@ Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있�
 
 production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. source에는 #43 developer operation과 #51~#53 가능일·예약·객실 상세/mutation path가 추가됐지만, 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
 
+### #131/#140 객실 PIN source 계약
+
+source OpenAPI에는 prepare/confirm/rollback/reveal과 admin 초기화 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+
+Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 실제 초기 숫자는 배포 secret이므로 프런트가 보유·전송하지 않는다. 이 기능들은 production OpenAPI에 각 path가 나타날 때까지 켜지 않는다.
+
 ## 2. 로컬 백엔드 준비
+
+### #84 사진 연동 후보 — 아직 production 기능을 켜지 않는다
+
+source에는 사진4 operations가 추가됐지만 운영 OpenAPI에 나타나고 OAuth/역할별 hosted smoke가 끝나기 전에는 production에서 사용하지 않는다.
+
+1. `GET /v1/attempts/{attemptId}/photo-slots`로 immutable slotId와 currentRevision을 받는다. 슬롯 key만으로 UUID를 추측하지 않는다.
+2. `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload?assignmentId=...&assignmentRevision=...&expectedPhotoRevision=...`에 JPEG/WebP **raw bytes**를 전송한다. `Content-Type`은 정확히 image/jpeg 또는 image/webp, 원문307200 bytes 이하이며 multipart/base64는 지원하지 않는다.
+3. 같은 사용자 동작 재시도는 같은 `Idempotency-Key`와 같은 효과 입력을 보낸다. `PHOTO_VERSION_CONFLICT`는 최신 슬롯 revision을 다시 확인하고 사용자 결정을 받는다. `PHOTO_UPLOAD_IN_FLIGHT`/429에서 key를 무한 교체하지 않는다.
+4. `GET /v1/photo-uploads/{operationId}`로 확인하고 accepted만 current 사진 저장 완료로 표시한다. provider_succeeded/reconciliation_pending은 제출 가능한 성공으로 표현하지 않는다.
+5. `GET /v1/photos/{photoId}/content`는 인증 proxy다. 공개URL이나 Drive ID를 저장하지 않고 no-store 응답을 영구 브라우저 cache에 넣지 않는다. limited 계정은 photoId=null이며 업로드 권한으로 원본을 읽을 수 없다.
+
+서버가 metadata를 제거하고 output을 재검증하므로 프론트 압축 성공만으로 업로드 성공을 가정하지 않는다.
+408 PHOTO_BODY_TIMEOUT은 본문 수신 시간 초과, 413은 원문/출력 크기 또는 decoder 기술상한, 415는 MIME, 409는 CAS/작업·quota·KST clock 경계, 503은 provider/환경 준비 상태를 구분한다. 업로드 initial/retry 응답의 `quotaWarning:boolean`이 true면 용량 경고를 표시한다. Google raw 사용량은 제공하지 않는다.
+사진 accepted가 field_completed/전체 제출/검수/ready로 자동 전이되지 않는다. Python developer 운영 콘솔은 이 business upload/read API를 생성하거나 호출하지 않는다.
+
+### #137 PIN Sheet 운영 source/dev 완료
+
+active developer/admin만 `GET /v1/room-pin-sheet-sync/status`를 호출한다. UI는 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 `version`만 표시하고 healthy를 별도로 추측하지 않는다. 전체 복구는 strict `{expectedVersion}` body와 새 `Idempotency-Key`로 `POST /v1/room-pin-sheet-sync/full-resync`를 호출한다. 409 stale/pending/busy이면 status를 다시 읽고 운영자가 판단하며 자동 반복하지 않는다. 응답과 클라이언트 상태에 PIN, spreadsheet/tab identity, credential/provider 원문을 저장하지 않는다. production OpenAPI에 두 path가 나타나고 hosted mapping/ACL/smoke가 끝날 때까지 기능을 켜지 않는다.
 
 백엔드 저장소에서:
 
@@ -107,7 +131,7 @@ const idempotencyKey = crypto.randomUUID();
 - request body가 바뀌면 새 키를 만든다.
 - 같은 키를 다른 payload에 쓰면 `IDEMPOTENCY_KEY_REUSED`가 반환된다.
 - 키를 analytics, 오류 수집 payload, 사용자 화면에 노출하지 않는다.
-- 현재 `POST /v1/auth/password`는 #46에서 receipt 재시도 계약을 별도로 보강할 예정이다. 응답 유실·timeout 때 기존 요청을 자동 반복하지 말고 결과 미확정 상태로 처리한다. 나머지 계정 변경 API는 같은 payload 재시도에 기존 logical 결과를 반환한다.
+- `POST /v1/auth/password`의 timeout·응답 유실은 **동일 Idempotency-Key와 원 요청 body**로만 재시도한다. 서버는 비밀번호 파생 fingerprint를 저장하지 않아 `currentPassword` byte equality를 durable receipt로 비교하지 않으며, replay에서는 서버가 Auth 비밀번호 변경에 결합한 private effect version과 재전송한 `newPassword`가 모두 현재 상태와 일치할 때만 같은 의도 효과로 보고 204를 반환한다. 후속 변경·관리자 초기화·별도 Auth password 변경 뒤 과거 key는 현재 비밀번호가 같아도 409다. `PASSWORD_CHANGE_IN_PROGRESS`는 짧게 대기 후 같은 요청을 재시도하고, `PASSWORD_STATE_UPDATE_FAILED`도 같은 key 재시도로 DB 완료를 복구한다. `PASSWORD_VERIFICATION_RATE_LIMITED`는 새 key/session으로 우회하지 말고 `Retry-After` 뒤 재시도한다. `PASSWORD_STATE_INCONSISTENT`는 자동 재시도하지 않고 운영자에게 문의한다.
 
 ### 응답과 오류
 
@@ -177,7 +201,8 @@ const idempotencyKey = crypto.randomUUID();
 | 촛불 수량 기록 | `POST /v1/rooms/{roomId}/candles` | count 0 이상, physicallyVerified 기본 false |
 | 객실 이슈 등록 | `POST /v1/rooms/{roomId}/issues` | description 연락처 입력 금지, raw 문구를 오류 로그에 남기지 않음 |
 | 객실 이슈 해결 | `POST /v1/rooms/{roomId}/issues/{issueId}/resolve` | hard delete 없이 해결 이력 기록 |
-| PIN 동기화 상태 | `POST /v1/rooms/{roomId}/pin-sync-events` | 상태·version만 전송, PIN/door code/credential 전송 금지 |
+| PIN 초기화 | `POST /v1/rooms/pins/bootstrap` | active admin, 선택적 limit만 전송; PIN은 서버 secret에서만 읽음 |
+| PIN 동기화 상태(legacy) | `POST /v1/rooms/{roomId}/pin-sync-events` | 신규 프런트 사용 금지; 상태 기록만으로 current PIN이 생성되지 않음 |
 | 현재 가능일 | `GET /v1/availability?weekStart=...` | maid는 본인만, admin은 maidProfileId 선택 가능 |
 | 가능일 제출 | `POST /v1/availability/submissions` | maid만, KST 일요일 제출창·CAS·Idempotency-Key |
 | 마감 후 변경 요청 | `POST /v1/availability/change-requests` | maid만, pending 1건·이력 보존 |
@@ -194,9 +219,9 @@ const idempotencyKey = crypto.randomUUID();
 | 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel |
 | 예약 전이 수동 실행 | `POST /v1/reservations/transitions/process` | admin 운영 명령. scheduler secret endpoint와 별도 |
 
-객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다.
+객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다. `pinSyncStatus=unconfigured|mismatch`는 별도 경고이며 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건으로 사용하지 않는다. 실제 체크인·PIN 접근 화면만 `verified` 전까지 차단한다.
 
-객실 mutation은 최신 상세/목록의 `stateVersion`을 `expectedVersion` 또는 `expectedRoomVersion`으로 그대로 보낸다. `STALE_VERSION`이면 현재 객실을 다시 읽어 사용자 확인을 받고, 키를 바꿔 자동 덮어쓰지 않는다. 동일 payload의 통신 재시도에만 같은 Idempotency-Key를 사용한다. PIN 관련 화면은 `pinSyncStatus`와 `pinVersion`만 취급하며 `pin`, `rawPin`, `pinCode`, `doorCode`, `credential`, `providerSecret` 필드를 만들거나 analytics·오류 수집에 보내지 않는다.
+객실 mutation은 최신 상세/목록의 `stateVersion`을 `expectedVersion` 또는 `expectedRoomVersion`으로 그대로 보낸다. `STALE_VERSION`이면 현재 객실을 다시 읽어 사용자 확인을 받고, 키를 바꿔 자동 덮어쓰지 않는다. 동일 payload의 통신 재시도에만 같은 Idempotency-Key를 사용한다. 수동 `PIN 동기화 상태 기록` 화면은 제거하고 bootstrap·prepare/confirm/rollback/reveal API만 사용한다. PIN 관련 목록은 `pinSyncStatus`와 `pinVersion`만 취급하며 `pin`, `rawPin`, `pinCode`, `doorCode`, `credential`, `providerSecret` 필드를 만들거나 analytics·오류 수집에 보내지 않는다.
 
 가능일의 `weekStart`와 날짜는 `YYYY-MM-DD`로 보내며 client timezone으로 날짜를 다시 변환하지 않는다. `version`은 화면 로컬 카운터가 아니라 서버 응답값을 그대로 다음 `expectedVersion`에 사용한다. 제출 가능 시간과 마감 전/후 구분은 서버의 KST 판정을 따르고, 409를 받은 요청을 다른 Idempotency-Key로 자동 반복하지 않는다.
 
@@ -231,4 +256,13 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 
 ## 9. 현재 범위 제한
 
-현재 source Swagger 범위는 인증·계정·developer 운영 projection·객실 목록/상세/운영 mutation·주간 가능일·예약/청소요청이다. #51~#53 source operation은 존재하지만 production Edge와 GitHub Pages snapshot에서 release → main 승격, Edge 재배포, hosted 역할·CAS·PII/PIN redaction smoke가 끝날 때까지 프론트 기능을 활성화하지 않는다. Python 운영도구의 generated client는 운영 관리 surface만 유지하며 업무 예약·객실 operation을 자동 포함하지 않는다.
+### 주급 pagination source 계약 (#96 후보)
+
+- `GET /v1/payroll`은 `payroll` 최대 10개와 `nextCursor`를 반환한다. `maidProfileId`를 생략한 admin-all에서만 여러 cycle page를 순회하며 정렬은 `maidProfileId ASC`로 고정한다.
+- 각 cycle의 `itemCount`, `totalAmount`, `lateEarningCount`, `lateEarningAmount`는 전체 exact 값이다. `items`와 `lateEarnings`는 최대 10개 preview이므로 배열 길이를 total로 해석하지 않는다.
+- `itemsNextCursor` 또는 `lateEarningsNextCursor`가 있으면 `GET /v1/payroll/entries`에 같은 `weekStart`, `maidProfileId`, 맞는 `kind`와 함께 보낸다. 상세 page는 기본 25, 최대 50이고 `earnedOn ASC, earningId ASC` 순서다.
+- cursor는 opaque 서명값이다. decode/수정/합성하거나 사용자·role·주차·maid filter·kind 사이에서 재사용하지 않는다. scope 변경 시 첫 page부터 다시 요청한다.
+- list/entries/start/replay 응답은 UTF-8 JSON 128 KiB 상한을 갖는다. `PAYROLL_CURSOR_INVALID`, `PAYROLL_CURSOR_NOT_CONFIGURED`, `PAYROLL_RESPONSE_TOO_LARGE`는 message가 아니라 code로 분기한다.
+- 이 계약은 feature source 후보이며 `dev` 병합과 release/main·production Edge 재배포 전에는 production에서 활성화하지 않는다.
+
+현재 source Swagger 범위는 인증·계정·developer 운영 projection·객실 목록/상세/운영 mutation·주간 가능일·예약/청소요청·주급 조회/시작이다. source operation이 존재해도 production Edge와 GitHub Pages snapshot에서 release → main 승격, Edge 재배포, hosted 역할·CAS·redaction smoke가 끝날 때까지 해당 프론트 기능을 활성화하지 않는다. Python 운영도구의 generated client는 운영 관리 surface만 유지하며 업무 예약·객실·주급 operation을 자동 포함하지 않는다.

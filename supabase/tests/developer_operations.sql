@@ -1,6 +1,6 @@
 begin;
 
-select plan(30);
+select plan(32);
 
 insert into auth.users (id) values
   ('16000000-0000-4000-8000-000000000001'),
@@ -79,29 +79,59 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'checkout_not_completed_incident_workflow'
   ) ->> 'currentMigration',
-  'actor_activity_audit_contract',
+  'checkout_not_completed_incident_workflow',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'checkout_not_completed_incident_workflow'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
 );
 
-update supabase_migrations.schema_migrations
-set version = '20991231235958'
-where name = 'actor_activity_audit_contract';
+create temporary table developer_expected_migration_head as
+select version, statements, name
+from supabase_migrations.schema_migrations
+where name = 'checkout_not_completed_incident_workflow';
+
+delete from supabase_migrations.schema_migrations
+where name = 'checkout_not_completed_incident_workflow';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'checkout_not_completed_incident_workflow'
+  ) ->> 'currentMigration',
+  'room_pin_nonce_reservation_hardening',
+  'database status exposes migration 53 when migration 54 is absent'
+);
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'checkout_not_completed_incident_workflow'
+  ) ->> 'migrationDrift',
+  'behind',
+  'database status reports migration 53 behind source migration 54'
+);
+
+insert into supabase_migrations.schema_migrations (version, statements, name)
+select version, statements, name
+from developer_expected_migration_head;
+
+update supabase_migrations.schema_migrations
+set version = '20991231235958'
+where name = 'photo_drive_upload_read';
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'photo_drive_upload_read'
   ) ->> 'migrationDrift',
   'equal',
   'remote execution version remapping does not create false drift'
@@ -113,7 +143,7 @@ values ('20991231235959', array[]::text[], 'developer_operations_future');
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'photo_drive_upload_read'
   ) ->> 'migrationDrift',
   'ahead',
   'a migration after the expected named migration reports ahead'
@@ -134,7 +164,7 @@ select is(
 select is(
   (public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'photo_drive_upload_read'
   ) ->> 'rlsMissingCount')::integer,
   0,
   'database status reports no public base table without RLS'
@@ -143,7 +173,7 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'photo_drive_upload_read'
   ) #>> '{criticalRpcs,create_account_profile}',
   'true',
   'critical RPC requires the current account-create signature and safe grants'
@@ -163,7 +193,7 @@ revoke execute on function public.create_account_profile(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'photo_drive_upload_read'
   ) #>> '{criticalRpcs,create_account_profile}',
   'false',
   'legacy overload cannot mask missing service-role EXECUTE on the secure signature'
@@ -180,7 +210,7 @@ grant execute on function public.create_account_profile(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'photo_drive_upload_read'
   ) #>> '{criticalRpcs,create_account_profile}',
   'false',
   'critical RPC becomes unhealthy when authenticated can execute it'
@@ -194,7 +224,7 @@ alter table public.notifications disable row level security;
 select is(
   (public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'actor_activity_audit_contract'
+    'photo_drive_upload_read'
   ) ->> 'rlsMissingCount')::integer,
   1,
   'database status detects a public base table without RLS'
@@ -222,13 +252,16 @@ select is(
 select lives_ok(
   $$ select public.record_scheduler_heartbeat(
     '26000000-0000-4000-8000-000000000002',
-    'reservation-scheduler-202608301200',
-    '2026-08-30T12:00:00Z',
+    -- Keep this fixture inside the seven-day retention window as calendar time advances.
+    'reservation-scheduler-' || to_char(
+      (date_trunc('minute', now()) - interval '1 minute') at time zone 'UTC', 'YYYYMMDDHH24MI'
+    ),
+    date_trunc('minute', now()) - interval '1 minute',
     'succeeded',
     0,
     null,
-    '2026-08-30T12:00:01Z',
-    '2026-08-30T12:00:02Z',
+    date_trunc('minute', now()) - interval '1 minute' + interval '1 second',
+    date_trunc('minute', now()) - interval '1 minute' + interval '2 seconds',
     'developer-operations-heartbeat-request'
   ) $$,
   'active business admin can record an app-owned scheduler heartbeat'

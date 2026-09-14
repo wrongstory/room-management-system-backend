@@ -386,8 +386,18 @@ deno_version = 2
 
 [functions.api]
 verify_jwt = false
+static_files = ["./functions/api/assets/magick.wasm.gz", "./functions/api/assets/magick.NOTICE"]
 
 [functions.reservation-scheduler]
+verify_jwt = false
+
+[functions.photo-purge]
+verify_jwt = false
+
+[functions.notification-delivery]
+verify_jwt = false
+
+[functions.room-pin-sheet-sync]
 verify_jwt = false
 
 # [edge_runtime.secrets]

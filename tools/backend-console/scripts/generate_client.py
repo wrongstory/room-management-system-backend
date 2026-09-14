@@ -44,6 +44,11 @@ def main() -> None:
     if destination.exists():
         shutil.rmtree(destination)
     shutil.copytree(generated_project / "generated", destination)
+    subprocess.run(  # noqa: S603
+        [uv, "run", "--python", "3.12", "ruff", "format", str(destination)],
+        cwd=console_root,
+        check=True,
+    )
     print(f"generated client: {destination}")
 
 

@@ -14,29 +14,59 @@ import { createAuthRoutes } from './modules/auth/auth.routes.js';
 import { type AuthService, SupabaseAuthService } from './modules/auth/auth.service.js';
 import { createAvailabilityRoutes } from './modules/availability/availability.routes.js';
 import {
-  SupabaseAvailabilityService,
-  type AvailabilityService
+  type AvailabilityService,
+  SupabaseAvailabilityService
 } from './modules/availability/availability.service.js';
+import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
+import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
+import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
+import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
+import { createNotificationRoutes } from './modules/notifications/notification.routes.js';
+import {
+  type NotificationService,
+  SupabaseNotificationService
+} from './modules/notifications/notification.service.js';
+import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
+import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
+import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
+import { photoError } from './modules/photos/photo-service.js';
+import { createWebPushSubscriptionRoutes } from './modules/push-subscriptions/web-push-subscription.routes.js';
+import { SupabaseWebPushSubscriptionService, type WebPushSubscriptionService } from './modules/push-subscriptions/web-push-subscription.service.js';
 import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
 import {
-  SupabaseReservationService,
-  type ReservationService
+  type ReservationService,
+  SupabaseReservationService
 } from './modules/reservations/reservation.service.js';
 import { createRoomRoutes } from './modules/rooms/room.routes.js';
 import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
+import { createRoomPinSheetOperationsRoutes } from './modules/rooms/room-pin-sheet-operations.routes.js';
+import {
+  type RoomPinSheetOperationsService,
+  SupabaseRoomPinSheetOperationsService
+} from './modules/rooms/room-pin-sheet-operations.service.js';
+import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
+import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
 
 export interface AppServices {
   auth: AuthService;
   accounts: AccountService;
   availability: AvailabilityService;
   rooms: RoomService;
+  roomPinSheetOperations?: RoomPinSheetOperationsService;
   reservations: ReservationService;
+  payroll: PayrollService;
+  complaints?: ComplaintService;
+  notifications?: NotificationService;
+  webPushSubscriptions?: WebPushSubscriptionService;
+  checkoutIncidents?: CheckoutIncidentService;
 }
 
 export interface BuildAppOptions {
   env: AppEnv;
   services?: AppServices;
   logger?: boolean;
+  photoServices?: PhotoHttpServices;
+  submissionService?: SubmissionService;
 }
 
 function bearerToken(authorization: string | undefined): string {
@@ -59,21 +89,64 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   let services = options.services;
+  let submissionService = options.submissionService;
   if (!services) {
     const clients = createSupabaseClients(options.env);
     services = {
-      auth: new SupabaseAuthService(clients),
+      auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
-      rooms: new SupabaseRoomService(clients),
+      rooms: new SupabaseRoomService(clients, {
+        key: options.env.ROOM_PIN_KEY_BASE64,
+        keyVersion: options.env.ROOM_PIN_KEY_VERSION,
+        keyring: JSON.parse(options.env.ROOM_PIN_KEYRING_JSON) as Record<string, string>,
+        environment: options.env.APP_ENV,
+        projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
+      }, options.env.ROOM_PIN_INITIAL_DIGITS),
+      roomPinSheetOperations: new SupabaseRoomPinSheetOperationsService(clients, {
+        target: {
+          environment: options.env.APP_ENV,
+          projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local',
+          spreadsheetId: options.env.GOOGLE_SHEETS_SPREADSHEET_ID ?? '',
+          tab: options.env.GOOGLE_SHEETS_ROOM_PIN_TAB ?? ''
+        },
+        serviceAccount: {
+          email: options.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL ?? '',
+          privateKeyPem: options.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY ?? ''
+        },
+        crypto: {
+          key: options.env.ROOM_PIN_KEY_BASE64,
+          keyVersion: options.env.ROOM_PIN_KEY_VERSION,
+          keyring: JSON.parse(options.env.ROOM_PIN_KEYRING_JSON) as Record<string, string>,
+          environment: options.env.APP_ENV,
+          projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
+        }
+      }),
       reservations: new SupabaseReservationService(
         clients,
         options.env.RESERVATION_PII_KEY_BASE64,
         options.env.RESERVATION_PII_KEY_VERSION,
         options.env.RESERVATION_GUEST_NAME_PEPPER,
         JSON.parse(options.env.RESERVATION_PII_KEYRING_JSON) as Record<string, string>
-      )
+      ),
+      payroll: new SupabasePayrollService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET),
+      complaints: new SupabaseComplaintService(clients, options.env.PAYROLL_CURSOR_HMAC_SECRET),
+      notifications: new SupabaseNotificationService(
+        clients,
+        options.env.NOTIFICATION_CURSOR_HMAC_SECRET
+      ),
+      webPushSubscriptions: new SupabaseWebPushSubscriptionService(clients, {
+        key: options.env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64,
+        keyVersion: options.env.WEB_PUSH_SUBSCRIPTION_KEY_VERSION,
+        keyring: JSON.parse(options.env.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON) as Record<string,string>,
+        bindingSecret: options.env.WEB_PUSH_BINDING_DIGEST_SECRET,
+        vapidKeyVersion: options.env.VAPID_CURRENT_KEY_VERSION,
+        vapidPublicKey: options.env.VAPID_PUBLIC_KEY,
+        vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
+      }),
+      checkoutIncidents: new SupabaseCheckoutIncidentService(clients)
     };
+    submissionService ??= new SupabaseSubmissionService(clients);
   }
 
   await app.register(helmet, { global: true });
@@ -121,6 +194,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
     if (error instanceof AppError) {
+      if (error.headers) {
+        reply.headers(error.headers);
+      }
       return reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message },
         requestId: request.id
@@ -144,7 +220,38 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  if (services.roomPinSheetOperations) {
+    await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {
+      prefix: '/v1/room-pin-sheet-sync'
+    });
+  }
   await app.register(createReservationRoutes(services.reservations), { prefix: '/v1/reservations' });
+  await app.register(createPayrollRoutes(services.payroll), { prefix: '/v1/payroll' });
+  if (services.complaints) {
+    await app.register(createComplaintRoutes(services.complaints), { prefix: '/v1/complaints' });
+  }
+  if (services.notifications) {
+    await app.register(createNotificationRoutes(services.notifications), { prefix: '/v1/notifications' });
+  }
+  if (services.webPushSubscriptions) {
+    await app.register(createWebPushSubscriptionRoutes(services.webPushSubscriptions), { prefix: '/v1/push-subscriptions' });
+  }
+  if (services.checkoutIncidents) {
+    await app.register(createCheckoutIncidentRoutes(services.checkoutIncidents));
+  }
+  const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
+  await app.register(createPhotoRoutes(photoServices));
+  if (submissionService) {
+    await app.register(createSubmissionRoutes(submissionService, async (request) => {
+      try {
+        const identity = await photoServices.authenticate(webRequest(request), false);
+        return { profileId: identity.profileId, role: identity.role, mustChangePassword: false };
+      } catch (error) {
+        const safe = photoError(error);
+        throw new AppError(safe.statusCode, safe.code, '허용된 제한 수행 권한이 필요합니다.');
+      }
+    }));
+  }
 
   const schedulerActorId = options.env.RESERVATION_SCHEDULER_ACTOR_PROFILE_ID;
   if (schedulerActorId) {

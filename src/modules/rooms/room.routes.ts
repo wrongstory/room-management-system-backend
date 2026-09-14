@@ -46,6 +46,27 @@ const pinSyncSchema = operationDecisionSchema.extend({
   pinVersion: z.number().int().positive().nullable().optional()
 });
 
+const pinWorkBinding = {
+  assignmentId: z.uuid().optional(),
+  attemptId: z.uuid().optional()
+};
+const preparePinChangeSchema = z.object({
+  pinDigits: z.string().regex(/^[0-9]{4,8}$/),
+  expectedPinVersion: z.number().int().nonnegative(),
+  reasonCode: z.enum(['ADMIN_INITIAL_PIN', 'ADMIN_PHYSICAL_CHANGE', 'MAID_CLEANING_CHANGE', 'ACTUAL_PIN_REENTRY']),
+  ...pinWorkBinding,
+  accessLeaseId: z.uuid().optional()
+}).strict();
+const pinLeaseParamsSchema = z.object({ roomId: z.uuid(), leaseId: z.uuid() });
+const confirmPinChangeSchema = z.object({ expectedPinVersion: z.number().int().nonnegative() }).strict();
+const revealPinSchema = z.object({
+  ...pinWorkBinding,
+  accessLeaseId: z.uuid().optional()
+}).strict();
+const bootstrapPinsSchema = z.object({
+  limit: z.number().int().min(1).max(25).default(20)
+}).strict();
+
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
     .min(8)
@@ -62,6 +83,16 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
     app.get('/', { preHandler: admin }, async (request) => ({
       rooms: await roomService.list(request.actor)
     }));
+
+    app.post('/pins/bootstrap', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const input = bootstrapPinsSchema.parse(request.body);
+      const bootstrap = await roomService.bootstrapPins(request.actor, {
+        limit: input.limit,
+        idempotencyKey: idempotencyKey(request)
+      });
+      return reply.header('Cache-Control', 'no-store').send({ bootstrap });
+    });
 
     app.get('/:roomId', { preHandler: admin }, async (request) => {
       const { roomId } = roomIdSchema.parse(request.params);
@@ -176,6 +207,54 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ operation });
+    });
+
+    app.post('/:roomId/pin-changes/prepare', { preHandler: authenticated }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const { roomId } = roomIdSchema.parse(request.params);
+      const input = preparePinChangeSchema.parse(request.body);
+      const change = await roomService.preparePinChange(request.actor, {
+        roomId, pinDigits: input.pinDigits, expectedPinVersion: input.expectedPinVersion,
+        reasonCode: input.reasonCode,
+        ...(input.assignmentId === undefined ? {} : { assignmentId: input.assignmentId }),
+        ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),
+        ...(input.accessLeaseId === undefined ? {} : { accessLeaseId: input.accessLeaseId }),
+        idempotencyKey: idempotencyKey(request)
+      });
+      return reply.header('Cache-Control', 'no-store').code(201).send({ change });
+    });
+
+    app.post('/:roomId/pin-changes/:leaseId/confirm', { preHandler: authenticated }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const { roomId, leaseId } = pinLeaseParamsSchema.parse(request.params);
+      const input = confirmPinChangeSchema.parse(request.body);
+      const change = await roomService.confirmPinChange(request.actor, {
+        roomId, leaseId, expectedPinVersion: input.expectedPinVersion, idempotencyKey: idempotencyKey(request)
+      });
+      return reply.header('Cache-Control', 'no-store').send({ change });
+    });
+
+    app.post('/:roomId/pin-changes/:leaseId/rollback', { preHandler: authenticated }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const { roomId, leaseId } = pinLeaseParamsSchema.parse(request.params);
+      const input = confirmPinChangeSchema.parse(request.body);
+      const change = await roomService.rollbackPinChange(request.actor, {
+        roomId, leaseId, expectedPinVersion: input.expectedPinVersion, idempotencyKey: idempotencyKey(request)
+      });
+      return reply.header('Cache-Control', 'no-store').send({ change });
+    });
+
+    app.post('/:roomId/pin/reveal', { preHandler: authenticated }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const { roomId } = roomIdSchema.parse(request.params);
+      const input = revealPinSchema.parse(request.body);
+      const pin = await roomService.revealPin(request.actor, {
+        roomId,
+        ...(input.assignmentId === undefined ? {} : { assignmentId: input.assignmentId }),
+        ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),
+        ...(input.accessLeaseId === undefined ? {} : { accessLeaseId: input.accessLeaseId })
+      });
+      return reply.header('Cache-Control', 'no-store').send({ pin });
     });
   };
 }

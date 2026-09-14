@@ -12,7 +12,14 @@ const outputPath = resolve(
   "backend-console-openapi.json",
 );
 
-const allowedPrefixes = ["/v1/auth/", "/v1/accounts", "/v1/developer/"];
+// developer 운영 콘솔은 business admin 배정/preview/config API를 생성하지 않는다.
+// 새 duration config는 developer 감사 enum/summary를 통해서만 읽기 노출된다.
+const allowedPrefixes = [
+  "/v1/auth/",
+  "/v1/accounts",
+  "/v1/developer/",
+  "/v1/room-pin-sheet-sync/",
+];
 const source = structuredClone(openApiDocument) as Record<string, unknown> & {
   paths: Record<string, unknown>;
 };

@@ -1,0 +1,18 @@
+-- Test-only encrypted current PIN fixture. Production migrations never invent envelope material.
+create function pg_temp.install_room_pin_fixture(p_room uuid,p_actor uuid,p_version bigint default 1)
+returns void language plpgsql as $$
+declare revision_id uuid:=gen_random_uuid();
+begin
+  insert into private.room_pin_revisions(id,room_id,pin_version,envelope_format,ciphertext,nonce,auth_tag,
+    key_version,aad_environment,aad_project_ref,recorded_by,recorded_by_role,source)
+  values(revision_id,p_room,p_version,1,digest(p_room::text||':'||p_version::text||':cipher','sha256'),
+    substring(digest(p_room::text||':'||p_version::text||':nonce','sha256') for 12),
+    substring(digest(p_room::text||':'||p_version::text||':tag','sha256') for 16),
+    'test-fixture','test','local',p_actor,'admin','admin_initial_entry')
+  on conflict(room_id,pin_version) do nothing;
+  select id into revision_id from private.room_pin_revisions where room_id=p_room and pin_version=p_version;
+  insert into private.room_current_pin(room_id,pin_revision_id,pin_version)
+  values(p_room,revision_id,p_version)
+  on conflict(room_id) do update set pin_revision_id=excluded.pin_revision_id,pin_version=excluded.pin_version,
+    updated_at=clock_timestamp();
+end $$;

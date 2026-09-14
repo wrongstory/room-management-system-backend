@@ -194,6 +194,7 @@ begin
       '2027-01-02', '2027-01-02', '{}'::jsonb, 16000, '{}'::jsonb,
       '20000000-0000-4000-8000-000000000001'
     );
+    set constraints cleaning_targets_reservation_room_fk immediate;
     raise exception 'RESERVATION_ROOM_MISMATCH_ACCEPTED';
   exception when foreign_key_violation then
     null;
@@ -213,7 +214,7 @@ insert into public.cleaning_assignments (
   (
     '50000000-0000-4000-8000-000000000002',
     '40000000-0000-4000-8000-000000000002',
-    '20000000-0000-4000-8000-000000000002', 1, 1,
+    '20000000-0000-4000-8000-000000000003', 1, 1,
     '20000000-0000-4000-8000-000000000001'
   );
 
@@ -233,6 +234,12 @@ begin
   end;
 end;
 $$;
+
+-- This fixture represents completed checkout, not future planning.
+update public.reservations set status='checked_out', actual_checkout_at=now()-interval '1 day'
+where id in ('30000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002');
+update public.cleaning_targets set available_from=now()-interval '1 day'
+where id in ('40000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000002');
 
 insert into public.cleaning_attempts (
   id, cleaning_target_id, assignment_id, maid_profile_id,
@@ -263,10 +270,6 @@ begin
   end;
 end;
 $$;
-
-update public.cleaning_assignments
-set maid_profile_id = '20000000-0000-4000-8000-000000000003'
-where id = '50000000-0000-4000-8000-000000000002';
 
 insert into public.cleaning_attempts (
   id, cleaning_target_id, assignment_id, maid_profile_id,
@@ -306,6 +309,17 @@ insert into public.cleaning_submissions (
   '70000000-0000-4000-8000-000000000002', 1, '{}'::jsonb,
   '20000000-0000-4000-8000-000000000002'
 );
+
+-- Synthetic approved bomb provenance for the valid 2x earning fixture below.
+-- Public commands enforce evidence cardinality; this lower-level integrity test
+-- focuses on the immutable decision-to-earning FK.
+insert into private.bomb_room_reports(id,cleaning_attempt_id,reported_by,memo)
+values('71000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000002','synthetic integrity fixture');
+insert into private.bomb_room_report_seals(report_id,submission_id)
+values('71000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000002');
+insert into private.bomb_room_decisions(id,report_id,submission_id,decision,reason_code,decided_by)
+values('71000000-0000-4000-8000-000000000002','71000000-0000-4000-8000-000000000001',
+ '70000000-0000-4000-8000-000000000002','approved','BOMB_CONFIRMED','20000000-0000-4000-8000-000000000001');
 
 do $$
 begin
@@ -347,13 +361,13 @@ $$;
 
 insert into public.earnings (
   id, earning_entitlement_id, submission_id, maid_profile_id,
-  earned_on, base_amount, bomb_room_bonus
+  earned_on, base_amount, bomb_room_bonus, bomb_room_decision_id
 ) values (
   '80000000-0000-4000-8000-000000000003',
   '80000000-0000-4000-8000-000000000003',
   '70000000-0000-4000-8000-000000000002',
   '20000000-0000-4000-8000-000000000002',
-  '2027-01-02', 16000, 16000
+  '2027-01-02', 16000, 16000, '71000000-0000-4000-8000-000000000002'
 );
 
 insert into public.payroll_cycles (
@@ -378,6 +392,16 @@ set status = 'paying',
     payment_started_by = '20000000-0000-4000-8000-000000000001',
     payment_started_at = now()
 where id = '90000000-0000-4000-8000-000000000001';
+
+insert into public.payroll_events(payroll_cycle_id,maid_profile_id,event_type,before_status,after_status,
+  actor_profile_id,cycle_version,locked_amount,occurred_at)
+select id,maid_profile_id,'payment_started','open','paying',payment_started_by,version,locked_amount,
+  payment_started_at from public.payroll_cycles where id='90000000-0000-4000-8000-000000000001';
+insert into public.payroll_payment_attempts(payroll_cycle_id,maid_profile_id,attempt_number,start_event_id,
+  start_cycle_version,locked_amount,started_by,started_at)
+select event.payroll_cycle_id,event.maid_profile_id,1,event.id,event.cycle_version,event.locked_amount,
+  event.actor_profile_id,event.occurred_at from public.payroll_events event
+where event.payroll_cycle_id='90000000-0000-4000-8000-000000000001' and event.cycle_version=1;
 
 do $$
 begin
@@ -412,23 +436,51 @@ set status = 'open',
     locked_amount = null,
     payment_started_by = null,
     payment_started_at = null,
-    last_reopen_reason = 'transfer_not_sent',
+    last_reopen_reason = 'NO_TRANSFER_CONFIRMED',
     last_reopened_by = '20000000-0000-4000-8000-000000000001',
     last_reopened_at = now(),
     version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
 
+insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
+  before_status,after_status,cycle_version,locked_amount,reason_code,actor_profile_id,occurred_at)
+select attempt.id,cycle.id,cycle.maid_profile_id,'reopened','paying','open',cycle.version,attempt.locked_amount,
+  'NO_TRANSFER_CONFIRMED',cycle.last_reopened_by,cycle.last_reopened_at
+from public.payroll_cycles cycle join public.payroll_payment_attempts attempt
+  on attempt.payroll_cycle_id=cycle.id and attempt.attempt_number=1
+where cycle.id='90000000-0000-4000-8000-000000000001';
+
 update public.payroll_cycles
 set status = 'paying',
     locked_amount = 32000,
     payment_started_by = '20000000-0000-4000-8000-000000000001',
-    payment_started_at = now()
+    payment_started_at = now(),
+    version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
+
+insert into public.payroll_events(payroll_cycle_id,maid_profile_id,event_type,before_status,after_status,
+  actor_profile_id,cycle_version,locked_amount,occurred_at)
+select id,maid_profile_id,'payment_started','open','paying',payment_started_by,version,locked_amount,
+  payment_started_at from public.payroll_cycles where id='90000000-0000-4000-8000-000000000001';
+insert into public.payroll_payment_attempts(payroll_cycle_id,maid_profile_id,attempt_number,start_event_id,
+  start_cycle_version,locked_amount,started_by,started_at)
+select event.payroll_cycle_id,event.maid_profile_id,2,event.id,event.cycle_version,event.locked_amount,
+  event.actor_profile_id,event.occurred_at from public.payroll_events event
+where event.payroll_cycle_id='90000000-0000-4000-8000-000000000001' and event.cycle_version=3;
 
 update public.payroll_cycles
 set status = 'check',
-    check_reason = 'transfer_result_unknown'
+    check_reason = 'TRANSFER_RESULT_UNCERTAIN',
+    version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
+
+insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
+  before_status,after_status,cycle_version,locked_amount,reason_code,actor_profile_id,occurred_at)
+select attempt.id,cycle.id,cycle.maid_profile_id,'check','paying','check',cycle.version,cycle.locked_amount,
+  'TRANSFER_RESULT_UNCERTAIN','20000000-0000-4000-8000-000000000001',now()
+from public.payroll_cycles cycle join public.payroll_payment_attempts attempt
+  on attempt.payroll_cycle_id=cycle.id and attempt.attempt_number=2
+where cycle.id='90000000-0000-4000-8000-000000000001';
 
 update public.payroll_cycles
 set status = 'open',
@@ -436,22 +488,50 @@ set status = 'open',
     payment_started_by = null,
     payment_started_at = null,
     check_reason = null,
-    last_reopen_reason = 'bank_confirmed_not_sent',
+    last_reopen_reason = 'NO_TRANSFER_CONFIRMED',
     last_reopened_by = '20000000-0000-4000-8000-000000000001',
     last_reopened_at = now(),
     version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
 
+insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
+  before_status,after_status,cycle_version,locked_amount,reason_code,actor_profile_id,occurred_at)
+select attempt.id,cycle.id,cycle.maid_profile_id,'reopened','check','open',cycle.version,attempt.locked_amount,
+  'NO_TRANSFER_CONFIRMED',cycle.last_reopened_by,cycle.last_reopened_at
+from public.payroll_cycles cycle join public.payroll_payment_attempts attempt
+  on attempt.payroll_cycle_id=cycle.id and attempt.attempt_number=2
+where cycle.id='90000000-0000-4000-8000-000000000001';
+
 update public.payroll_cycles
 set status = 'paying',
     locked_amount = 32000,
     payment_started_by = '20000000-0000-4000-8000-000000000001',
-    payment_started_at = now()
+    payment_started_at = now(),
+    version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
 
+insert into public.payroll_events(payroll_cycle_id,maid_profile_id,event_type,before_status,after_status,
+  actor_profile_id,cycle_version,locked_amount,occurred_at)
+select id,maid_profile_id,'payment_started','open','paying',payment_started_by,version,locked_amount,
+  payment_started_at from public.payroll_cycles where id='90000000-0000-4000-8000-000000000001';
+insert into public.payroll_payment_attempts(payroll_cycle_id,maid_profile_id,attempt_number,start_event_id,
+  start_cycle_version,locked_amount,started_by,started_at)
+select event.payroll_cycle_id,event.maid_profile_id,3,event.id,event.cycle_version,event.locked_amount,
+  event.actor_profile_id,event.occurred_at from public.payroll_events event
+where event.payroll_cycle_id='90000000-0000-4000-8000-000000000001' and event.cycle_version=6;
+
 update public.payroll_cycles
-set status = 'paid', paid_at = now()
+set status = 'paid', paid_at = now(), version = version + 1
 where id = '90000000-0000-4000-8000-000000000001';
+
+insert into public.payroll_payment_results(payment_attempt_id,payroll_cycle_id,maid_profile_id,result_type,
+  before_status,after_status,cycle_version,locked_amount,payment_method,canonical_reference,
+  actor_profile_id,occurred_at)
+select attempt.id,cycle.id,cycle.maid_profile_id,'paid','paying','paid',cycle.version,cycle.locked_amount,
+  'bank_transfer','DOMAIN-12','20000000-0000-4000-8000-000000000001',cycle.paid_at
+from public.payroll_cycles cycle join public.payroll_payment_attempts attempt
+  on attempt.payroll_cycle_id=cycle.id and attempt.attempt_number=3
+where cycle.id='90000000-0000-4000-8000-000000000001';
 
 do $$
 begin
@@ -544,9 +624,25 @@ begin
 end;
 $$;
 
+insert into public.cleaning_submissions (
+  id, cleaning_attempt_id, client_submission_id, version, status, photo_manifest, submitted_by
+) values (
+  '70000000-0000-4000-8000-000000000003',
+  '60000000-0000-4000-8000-000000000001',
+  '70000000-0000-4000-8000-000000000004',
+  2, 'rejected', '{}'::jsonb, '20000000-0000-4000-8000-000000000002'
+);
+insert into public.inspection_decisions (id, submission_id, decision, reason_code, decided_by)
+values (
+  '70000000-0000-4000-8000-000000000005',
+  '70000000-0000-4000-8000-000000000003',
+  'rejected', 'QUALITY_REWORK', '20000000-0000-4000-8000-000000000001'
+);
+
 insert into public.cleaning_targets (
   id, room_id, cleaning_kind, source, source_key,
   reclean_of_attempt_id, reclean_maid_profile_id,
+  reclean_of_submission_id, reclean_of_inspection_decision_id,
   original_service_date, effective_service_date,
   room_type_snapshot, fee_snapshot, template_snapshot, created_by
 ) values (
@@ -555,6 +651,8 @@ insert into public.cleaning_targets (
   'reclean', 'inspection_reclean', 'test:inspection-reclean:1',
   '60000000-0000-4000-8000-000000000001',
   '20000000-0000-4000-8000-000000000002',
+  '70000000-0000-4000-8000-000000000003',
+  '70000000-0000-4000-8000-000000000005',
   '2027-01-02', '2027-01-02', '{}'::jsonb, 0, '{}'::jsonb,
   '20000000-0000-4000-8000-000000000001'
 );

@@ -1,7 +1,13 @@
+import { notificationDeliveryConfig } from "../notification-delivery/index.ts";
+import {
+  assertApprovedRoomPinSheetTarget,
+  validateGoogleSheetsServiceAccount,
+} from "./google-sheets-pin.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
+import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "actor_activity_audit_contract";
+export const expectedMigrationName = "checkout_not_completed_incident_workflow";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -43,9 +49,57 @@ const secretConfigurationAllowlist = [
   "RESERVATION_PII_KEY_VERSION",
   "RESERVATION_PII_KEYRING_JSON",
   "RESERVATION_GUEST_NAME_PEPPER",
+  "PAYROLL_CURSOR_HMAC_SECRET",
+  "NOTIFICATION_CURSOR_HMAC_SECRET",
   "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
   "SCHEDULER_INVOKE_SECRET",
   "CORS_ORIGINS",
+  "GOOGLE_DRIVE_CLIENT_ID",
+  "GOOGLE_DRIVE_CLIENT_SECRET",
+  "GOOGLE_DRIVE_REFRESH_TOKEN",
+  "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+  "PHOTO_PURGE_INVOKE_SECRET",
+  "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+  "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
+  "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+  "WEB_PUSH_BINDING_DIGEST_SECRET",
+  "VAPID_SUBJECT",
+  "VAPID_CURRENT_KEY_VERSION",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PUBLIC_KEYRING_JSON",
+  "VAPID_PRIVATE_KEY",
+  "VAPID_KEYRING_JSON",
+  "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+  "ROOM_PIN_KEY_BASE64",
+  "ROOM_PIN_KEY_VERSION",
+  "ROOM_PIN_KEYRING_JSON",
+  "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+  "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL",
+  "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+  "GOOGLE_SHEETS_SPREADSHEET_ID",
+  "GOOGLE_SHEETS_ROOM_PIN_TAB",
+] as const;
+const roomPinSheetSecretNames = [
+  "ROOM_PIN_KEY_BASE64",
+  "ROOM_PIN_KEY_VERSION",
+  "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+  "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL",
+  "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+  "GOOGLE_SHEETS_SPREADSHEET_ID",
+  "GOOGLE_SHEETS_ROOM_PIN_TAB",
+] as const;
+const notificationDeliverySecretNames = [
+  "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+  "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
+  "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+  "WEB_PUSH_BINDING_DIGEST_SECRET",
+  "VAPID_SUBJECT",
+  "VAPID_CURRENT_KEY_VERSION",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PUBLIC_KEYRING_JSON",
+  "VAPID_PRIVATE_KEY",
+  "VAPID_KEYRING_JSON",
+  "NOTIFICATION_DELIVERY_INVOKE_SECRET",
 ] as const;
 
 interface AuditRow {
@@ -185,13 +239,109 @@ export async function developerDatabaseStatus(
   actor: EdgeActor,
 ): Promise<Record<string, unknown>> {
   requireDeveloper(actor);
-  const database = await rpcJson(clients, "get_developer_database_status", {
-    p_actor_profile_id: actor.profileId,
-    p_expected_migration_name: expectedMigrationName,
-  });
+  const [
+    database,
+    photoPurge,
+    notificationDelivery,
+    roomPinSheetSync,
+    providerConfigurationValid,
+  ] = await Promise.all([
+    rpcJson(clients, "get_developer_database_status", {
+      p_actor_profile_id: actor.profileId,
+      p_expected_migration_name: expectedMigrationName,
+    }),
+    rpcJson(clients, "get_developer_photo_purge_status", {
+      p_actor_profile_id: actor.profileId,
+    }),
+    rpcJson(clients, "get_developer_notification_delivery_status", {
+      p_actor_profile_id: actor.profileId,
+    }),
+    rpcJson(clients, "get_developer_room_pin_sheet_sync_status", {
+      p_actor_profile_id: actor.profileId,
+    }),
+    (async () => {
+      try {
+        const config = notificationDeliveryConfig();
+        await validateWebPushProviderConfig(config.vapid);
+        return true;
+      } catch {
+        return false;
+      }
+    })(),
+  ]);
   const runtime = developerRuntimeStatus();
+  const configuration = runtime.configuration as Record<
+    string,
+    { configured?: boolean }
+  >;
+  const functionSecretsConfigured = notificationDeliverySecretNames.every(
+    (name) => configuration[name]?.configured === true,
+  );
+  const delivery = notificationDelivery as Record<string, unknown>;
+  const activation = delivery.activation &&
+      typeof delivery.activation === "object" &&
+      !Array.isArray(delivery.activation)
+    ? delivery.activation as Record<string, unknown>
+    : {};
+  let targetApproved = false;
+  try {
+    assertApprovedRoomPinSheetTarget({
+      environment: Deno.env.get("RUNTIME_ENVIRONMENT")?.trim() ?? "",
+      projectRef: Deno.env.get("SUPABASE_PROJECT_REF")?.trim() ?? "",
+      spreadsheetId: Deno.env.get("GOOGLE_SHEETS_SPREADSHEET_ID")?.trim() ?? "",
+      tab: Deno.env.get("GOOGLE_SHEETS_ROOM_PIN_TAB")?.trim() ?? "",
+    });
+    targetApproved = true;
+  } catch {
+    /* source-controlled hosted target mapping intentionally remains empty */
+  }
+  const roomPinSecretsPresent = roomPinSheetSecretNames.every(
+    (name) => Boolean(Deno.env.get(name)?.trim()),
+  );
+  let roomPinProviderConfigurationValid = false;
+  if (roomPinSecretsPresent) {
+    try {
+      await validateGoogleSheetsServiceAccount({
+        email: Deno.env.get("GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL")?.trim() ??
+          "",
+        privateKeyPem:
+          Deno.env.get("GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY")?.trim() ??
+            "",
+      });
+      roomPinProviderConfigurationValid = true;
+    } catch {
+      /* expose only the aggregate configured boolean */
+    }
+  }
+  const roomPinConfigurationReady = roomPinSecretsPresent &&
+    roomPinProviderConfigurationValid;
+  const sheet = roomPinSheetSync as Record<string, unknown>;
   return {
     ...database,
+    photoPurge,
+    notificationDelivery: {
+      ...delivery,
+      status: functionSecretsConfigured && providerConfigurationValid
+        ? delivery.status
+        : "degraded",
+      activation: {
+        ...activation,
+        functionSecretsConfigured,
+        providerConfigurationValid,
+      },
+    },
+    roomPinSheetSync: {
+      ...sheet,
+      status: roomPinConfigurationReady && targetApproved
+        ? sheet.status
+        : sheet.status === "operator_blocked"
+        ? "operator_blocked"
+        : "degraded",
+      activation: {
+        functionSecretsConfigured: roomPinConfigurationReady,
+        targetApproved,
+      },
+    },
     environment: runtime.environment,
     projectRef: runtime.projectRef,
   };
@@ -318,7 +468,7 @@ function auditQuery(request: Request): {
     );
   }
   const eventTypes = parameters.getAll("eventType");
-  if (eventTypes.length > 27 || eventTypes.some((value) => value.length > 80)) {
+  if (eventTypes.length > 65 || eventTypes.some((value) => value.length > 80)) {
     throw new EdgeError(
       400,
       "VALIDATION_ERROR",

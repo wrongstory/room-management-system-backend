@@ -56,7 +56,7 @@ uv run --python 3.12 python scripts/build.py
 
 1. 상단의 `환경: PRODUCTION|RECOVERY|LOCAL`과 `PROJECT`를 색이 아닌 텍스트로 확인한다.
 2. 고정 developer ID `admin`과 사용자가 직접 입력한 비밀번호로 로그인한다.
-3. 운영 대시보드에서 migration drift, RLS, scheduler, secret configured 여부를 확인한다.
+3. 운영 대시보드에서 migration drift, RLS, scheduler, 사진 purge의 bounded backlog/heartbeat, secret configured 여부를 확인한다. purge secret·Drive locator·claim digest 원문은 콘솔이나 보고서에서 조회하지 않는다.
 4. 계정 목록에서 business admin/maid만 생성·변경한다.
 5. `감사 이벤트`에서는 성공한 업무 상태 변경을, `활동/보안 로그`에서는 로그인·권한 거부·민감접근만 확인한다. 두 목록을 같은 의미로 해석하지 않는다.
 6. 계정 생성 입력의 휴대전화는 요청 시작과 동시에 화면에서 지워진다.

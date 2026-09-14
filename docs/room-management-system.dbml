@@ -1,12 +1,31 @@
 Project room_management_system {
   database_type: 'PostgreSQL'
-  Note: 'ERD review draft v4. P0/account baseline is on main; issue #1 room/reservation additions are represented as a proposed append-only migration.'
+  Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers; a FORCE-RLS cross-flow nonce reservation prevents different AES-GCM encryptions from sharing one key-version/nonce pair.'
 }
 
 Enum app_role {
   developer
   admin
   maid
+}
+
+Table assignment_duration_policy_versions {
+  id uuid [pk]
+  version bigint [not null, unique, note: 'Positive append-only version; admin expectedVersion CAS']
+  status text [not null, note: 'draft | confirmed | retired; partial unique confirmed <=1']
+  standard_minutes int [not null, note: '>0; no default/demo fallback']
+  premium_minutes int [not null, note: '>0']
+  ocean_premium_minutes int [not null, note: '>0']
+  ocean_family_minutes int [not null, note: '>0']
+  created_by uuid [not null, ref: > profiles.id]
+  created_at timestamptz [not null]
+  confirmed_by uuid [ref: > profiles.id]
+  confirmed_at timestamptz
+  indexes {
+    created_by
+    confirmed_by
+  }
+  Note: 'Issue #29 feature. RLS RPC-only. Confirmed/retired require confirmation metadata. Immutable values, no DELETE; only confirmed→retired lifecycle update. No confirmed seed. Preview reads without writes.'
 }
 
 Enum account_status {
@@ -66,7 +85,7 @@ Enum submission_status {
   rejected
 }
 
-Enum payroll_status {
+Enum payment_status {
   open
   paying
   check
@@ -87,6 +106,7 @@ Table public.profiles {
   login_sequence int [not null]
   role app_role [not null]
   status account_status [not null, default: 'active']
+  account_lifecycle_version bigint [not null, default: 1, note: '#7B role/status CAS; trigger-owned increment, never caller overwrite']
   phone_last_four text
   phone_lookup_hash text [unique]
   must_change_password boolean [not null, default: true]
@@ -263,7 +283,9 @@ Table public.checkout_cleaning_obligations {
   effective_service_date date [not null]
   available_from timestamptz [not null]
   due_at timestamptz
+  planned_cleaning_target_id uuid [unique]
   current_cleaning_target_id uuid [unique]
+  completion_submission_id uuid [unique, ref: - public.cleaning_submissions.id]
   version bigint [not null]
   cancelled_at timestamptz
   cancellation_reason_code text
@@ -271,7 +293,57 @@ Table public.checkout_cleaning_obligations {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'materialized requires a current target; private/available require no current target. Cancelled obligations may retain the historical target pointer.'
+  Note: 'planned target is created with the reservation; private requires no current target and forbids execution. Actual checkout promotes the same planned identity to materialized/current. Cancellation preserves identity and soft cancels target/assignments. Composite FK ties planned target to obligation/reservation/room.'
+}
+
+Table public.checkout_presence_incidents {
+  id uuid [pk]
+  reservation_id uuid [not null]
+  room_id uuid [not null]
+  checkout_obligation_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null]
+  attempt_id uuid [not null, unique]
+  reported_by uuid [not null]
+  reason_code text [not null, note: 'GUEST_STILL_PRESENT only']
+  status text [not null, note: 'open/resolved']
+  reservation_version bigint [not null]
+  target_assignment_version bigint [not null]
+  assignment_revision bigint [not null]
+  attempt_execution_version bigint [not null]
+  pin_version_snapshot bigint
+  version bigint [not null]
+  current_decision_id uuid
+  reported_at timestamptz [not null]
+  resolved_at timestamptz
+  created_at timestamptz [not null]
+
+  Indexes {
+    cleaning_target_id [note: 'Unique where status=open']
+    (reservation_id, reported_at, id)
+    (room_id, status, reported_at, id)
+    (reported_by, reported_at, id)
+  }
+  Note: '#133 immutable report identity. An open incident freezes later execution/PIN/offline/submission/inspection/general reassignment and actual next check-in. Only the resolved pointer/version projection may advance.'
+}
+
+Table public.checkout_presence_incident_decisions {
+  id uuid [pk]
+  incident_id uuid [not null]
+  incident_version bigint [not null]
+  decision text [not null, note: 'EXTEND_CHECKOUT/CONFIRM_DEPARTED/FALSE_REPORT']
+  reason_code text [not null]
+  decided_by uuid [not null]
+  decided_at timestamptz [not null]
+  new_checkout_at timestamptz
+  next_assignment_id uuid
+  next_attempt_id uuid
+
+  Indexes {
+    (incident_id, incident_version) [unique]
+    (decided_by, decided_at, id)
+  }
+  Note: '#133 immutable business-admin decision. Existing checkout target and old assignment/attempt history are retained; extension adds occupancy-resumed history.'
 }
 
 Table public.room_occupancy_events {
@@ -359,6 +431,179 @@ Table public.room_pin_access_leases {
   Note: 'Room/reservation/target/current assignment/current attempt/maid/latest verified PIN version are one enforced work contract.'
 }
 
+Table private.room_pin_revisions {
+  id uuid [pk]
+  room_id uuid [not null]
+  pin_version bigint [not null]
+  envelope_format smallint [not null]
+  ciphertext bytea [not null]
+  nonce bytea [not null]
+  auth_tag bytea [not null]
+  key_version text [not null]
+  aad_environment text [not null]
+  aad_project_ref text [not null]
+  recorded_by uuid [not null]
+  assignment_id uuid
+  attempt_id uuid
+  authoritative_access_lease_id uuid
+
+  indexes { (room_id, pin_version) [unique] }
+  Note: '#131 immutable AES-256-GCM revision. Nonsecret bounded AAD context is stored for recovery-context decrypt; plaintext/key/verifier/session is forbidden. FORCE RLS and no Data API grants.'
+}
+
+Table private.room_current_pin {
+  room_id uuid [pk]
+  pin_revision_id uuid [not null, unique]
+  pin_version bigint [not null]
+  updated_at timestamptz [not null]
+
+  Note: '#131 CAS current pointer; readiness also requires exact latest verified public sync version and no unresolved change lease.'
+}
+
+Table private.room_pin_change_leases {
+  id uuid [pk]
+  room_id uuid [not null]
+  expected_pin_version bigint [not null]
+  proposed_pin_version bigint [not null]
+  actor_profile_id uuid [not null]
+  assignment_id uuid
+  attempt_id uuid
+  authoritative_access_lease_id uuid
+  reason_code text [not null]
+  ciphertext bytea [not null]
+  nonce bytea [not null]
+  auth_tag bytea [not null]
+  key_version text [not null]
+  aad_environment text [not null]
+  aad_project_ref text [not null]
+  status text [not null]
+  expires_at timestamptz [not null]
+
+  indexes { (key_version, nonce) [unique] }
+  Note: '#131 prepare is the first envelope ledger and immediately creates mismatch without changing current. Confirm, actual re-entry, or confirmed rollback resolves physical state.'
+}
+
+Table private.room_pin_nonce_reservations {
+  id uuid [pk]
+  key_version text [not null]
+  nonce bytea [not null]
+  envelope_fingerprint bytea [not null]
+  reserved_at timestamptz [not null]
+
+  indexes { (key_version, nonce) [unique] }
+  Note: 'FORCE RLS, no Data API grants, append-only. Shared by regular prepare and bootstrap. Matching prepare-confirm envelope uses one logical reservation; 52-to-53 historical conflicts fail closed without rewriting source ledgers.'
+}
+
+Table private.room_pin_reveal_leases {
+  id uuid [pk]
+  room_id uuid [not null]
+  pin_revision_id uuid [not null]
+  pin_version bigint [not null]
+  actor_profile_id uuid [not null]
+  assignment_id uuid
+  attempt_id uuid
+  authoritative_access_lease_id uuid
+  issued_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  finalized_at timestamptz
+  request_id uuid [not null]
+
+  Note: '#131 max-30s private supplement. Maid authority remains the exact existing public access lease, whose revealed_at is set at final authorization.'
+}
+
+Table private.room_pin_sheet_sync_outbox {
+  id uuid [pk]
+  room_id uuid [not null]
+  pin_version bigint [not null]
+  sync_status text [not null]
+  reason_code text [not null]
+  status text [not null]
+  claim_id uuid
+  claimed_at timestamptz
+  claim_expires_at timestamptz
+  lease_fence bigint
+  provider_write_started_at timestamptz
+  retry_count int [not null]
+  last_error_code text
+
+  Note: '#131 foundation + #136 fenced worker authority. Contains safe identity/status/reason/claim metadata only; no PIN, Google credential/token, or provider payload.'
+}
+
+Table private.room_pin_sheet_sync_worker_state {
+  singleton boolean [pk]
+  status text [not null, note: 'idle/leased/operator_blocked']
+  claim_id uuid
+  lease_fence bigint [not null]
+  lease_expires_at timestamptz
+  blocked_reason_code text
+  updated_at timestamptz [not null]
+
+  Note: '#136 global singleton fence. Uncertain provider write or retry exhaustion requires explicit reconciliation; FORCE RLS/no direct Data API access.'
+}
+
+Table private.room_pin_sheet_sync_heartbeat {
+  singleton boolean [pk]
+  status text [not null]
+  claimed int [not null]
+  projected int [not null]
+  already_current int [not null]
+  superseded int [not null]
+  retrying int [not null]
+  blocked int [not null]
+  error_code text
+  recorded_at timestamptz [not null]
+
+  Note: '#136 bounded safe observability only. No room/outbox ID, PIN, Sheet cell, provider response, assertion, token, or secret.'
+}
+
+Table private.room_pin_sheet_full_resync_runs {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  actor_role_snapshot app_role [not null]
+  expected_fence bigint [not null]
+  reconciles_blocked_fence bigint
+  recovery_root_run_id uuid [not null]
+  aad_environment text [not null]
+  aad_project_ref text [not null]
+  target_identity_digest text [not null]
+  snapshot_room_count int [not null, note: 'exactly 121']
+  status text [not null, note: 'pending/processing/succeeded/failed/operator_blocked/superseded']
+  claim_id uuid
+  claimed_at timestamptz
+  claim_expires_at timestamptz
+  lease_fence bigint
+  provider_write_started_at timestamptz
+  retry_count int [not null]
+  next_attempt_at timestamptz [not null]
+  last_error_code text
+  idempotency_key text [not null]
+  request_hash text [not null]
+  requested_at timestamptz [not null]
+  completed_at timestamptz
+
+  indexes { (actor_profile_id, idempotency_key) [unique] }
+  Note: '#137 immutable operator command identity and exact target digest. Normal runs self-root; recovery inherits the exact blocked predecessor root while execution still requires claim/lease fence CAS. Successful recovery cleans at most 32 temporal same-root blocks; partial cleanup remains operator-blocked. FORCE RLS; public status/audit never expose hashes or target/provider material.'
+}
+
+Table private.room_pin_sheet_full_resync_items {
+  run_id uuid [not null]
+  room_id uuid [not null]
+  room_number_snapshot text [not null]
+  sheet_row int [not null, note: '2..122']
+  pin_revision_id uuid
+  pin_version bigint [not null]
+  sync_status text [not null]
+  effective_at timestamptz [not null]
+  reason_code text [not null, note: 'FULL_RESYNC_REPAIR']
+
+  indexes {
+    (run_id, room_id) [pk]
+    (run_id, room_number_snapshot) [unique]
+    (run_id, sheet_row) [unique]
+  }
+  Note: '#137 append-only 121-room snapshot. Holds revision references and safe row metadata, never plaintext PIN or copied envelope.'
+}
+
 Table public.cleaning_template_versions {
   id uuid [pk]
   room_type_id uuid [not null]
@@ -366,6 +611,7 @@ Table public.cleaning_template_versions {
   version int [not null]
   status text [not null]
   duration_minutes int [not null]
+  photo_slots jsonb [not null, note: 'Legacy JSON retained. Published payload immutable; explicit v7+ checkout counts/required tv-on validated. No implicit duration-policy confirmation.']
   published_at timestamptz
   created_by uuid [not null]
   created_at timestamptz [not null]
@@ -375,20 +621,140 @@ Table public.cleaning_template_versions {
   }
 }
 
-Table public.cleaning_photo_slots {
+Table private.photo_template_slots {
   id uuid [pk]
   template_version_id uuid [not null]
   slot_key text [not null]
-  section_key text [not null]
-  label text [not null]
-  description text
   display_order int [not null]
   required boolean [not null, default: true]
+  slot_snapshot jsonb [not null, note: 'Exact original slot object including section/label/description/repeated instance metadata; absent legacy values not invented.']
 
   Indexes {
     (template_version_id, slot_key) [unique]
     (template_version_id, display_order) [unique]
   }
+  Note: '#30 immutable rows; private RLS/no client or service-role grants. No photo HTTP is exposed.'
+}
+
+Table private.target_photo_snapshot_contracts {
+  cleaning_target_id uuid [pk, ref: > public.cleaning_targets.id]
+  ready boolean [not null]
+  frozen_snapshot jsonb [not null]
+  created_at timestamptz [not null]
+  Note: 'Immutable target-creation JSON bridge. Existing empty/unprovable JSON stays ready=false, never latest-template backfill or zero-photo completion.'
+}
+
+Table private.target_photo_slot_snapshots {
+  id uuid [pk]
+  cleaning_target_id uuid [not null, ref: > private.target_photo_snapshot_contracts.cleaning_target_id]
+  template_version_id uuid [not null, note: 'Historical snapshot identity, intentionally not current catalog FK.']
+  slot_key text [not null]
+  display_order int [not null]
+  required boolean [not null]
+  slot_snapshot jsonb [not null]
+  Indexes {
+    (id, cleaning_target_id) [unique]
+    (cleaning_target_id, slot_key) [unique]
+    (cleaning_target_id, display_order) [unique]
+    template_version_id
+  }
+}
+
+Table private.attempt_photo_versions {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  version bigint [not null]
+  validation_status text [not null, note: 'pending / verified / failed; verified is owner-only model metadata, not client or real byte verification in #30.']
+  sha256 text [not null]
+  mime_type text [not null]
+  size_bytes int [not null]
+  uploaded_at timestamptz [not null]
+  purge_after timestamptz [not null, note: 'Immutable uploaded_at + 168 hours; resubmission does not reset.']
+  Indexes {
+    (id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version) [unique]
+    (cleaning_attempt_id, target_photo_slot_id, version) [unique]
+    (target_photo_slot_id, cleaning_target_id)
+    cleaning_target_id
+    (purge_after, id)
+  }
+  Note: 'Immutable attempt-scoped metadata. No Drive locator or binary. Old interrupted and new current attempt have different photo versions/pointers even on the same target slot.'
+}
+
+Table private.attempt_photo_purge_states {
+  photo_version_id uuid [pk, ref: > private.attempt_photo_versions.id]
+  purged_at timestamptz [not null]
+  Note: 'Append-only purge marker separated from immutable photo version; #9 owns actual provider deletion.'
+}
+
+Table private.attempt_photo_current {
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  revision bigint [not null]
+  photo_version_id uuid
+  photo_version bigint
+  Indexes {
+    (cleaning_attempt_id, target_photo_slot_id) [pk]
+    (photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version)
+    (target_photo_slot_id, cleaning_target_id)
+    cleaning_target_id
+  }
+  Note: 'CAS revision +1; a null pointer means cleared, not deleted history. Mutations automatically append attempt_photo_changes.'
+}
+
+Table private.attempt_photo_changes {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  revision bigint [not null]
+  photo_version_id uuid
+  photo_version bigint
+  occurred_at timestamptz [not null]
+  Indexes {
+    (cleaning_attempt_id, target_photo_slot_id, revision) [unique]
+    (photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version)
+    (target_photo_slot_id, cleaning_target_id)
+    cleaning_target_id
+  }
+}
+
+Table private.submission_photo_bindings {
+  submission_id uuid [not null]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  photo_version_id uuid [not null]
+  photo_version bigint [not null]
+  Indexes {
+    (submission_id, target_photo_slot_id) [pk]
+    (photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version)
+    cleaning_attempt_id
+    cleaning_target_id
+    target_photo_slot_id
+  }
+  Note: 'Immutable membership references canonical cleaning_submissions and exact attempt/target/slot/photo version; no provider object or raw payload copy.'
+}
+
+Table private.submission_photo_binding_sets {
+  submission_id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  photo_count int [not null]
+  sealed_at timestamptz [not null]
+  Indexes {
+    (submission_id, cleaning_attempt_id) [unique]
+    cleaning_attempt_id
+  }
+  Note: 'Immutable membership seal, not a duplicate submission entity. Exact current-photo set and completeness required; no later append.'
+}
+
+Table private.submission_current_pointers {
+  cleaning_attempt_id uuid [pk, ref: > public.cleaning_attempts.id]
+  submission_id uuid [not null, unique]
+  revision bigint [not null]
+  Note: 'CAS references an already existing, sealed canonical submission. #30 does not create a public business submit command or transition attempt/review/ready/earning.'
 }
 
 Table public.cleaning_targets {
@@ -414,11 +780,14 @@ Table public.cleaning_targets {
   cancellation_reason_code text
   reclean_of_attempt_id uuid [unique]
   reclean_maid_profile_id uuid
+  reclean_of_submission_id uuid [unique, ref: - public.cleaning_submissions.id]
+  reclean_of_inspection_decision_id uuid [unique, ref: - public.inspection_decisions.id]
+  complaint_compensation_decision_id uuid [unique]
   created_by uuid [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Checkout targets are unique per reservation. Stayover/additional manual requests use stable target IDs and soft cancellation. Inspection recleans keep an immutable original attempt and maid link.'
+  Note: 'Checkout targets are unique per reservation. The reservation-room composite FK remains enforced but is deferred to commit so an allowed reservation/obligation/planned-target room move is atomic; partial graph changes fail. Inspection rejection reclean and #101 post-approval complaint reclean are distinct typed sources. A complaint rework freezes one confirmed source decision, zero-fee target, published template and notified assignee; generic reassignment/handover is forbidden.'
 }
 
 Table public.cleaning_target_schedule_revisions {
@@ -441,10 +810,15 @@ Table public.cleaning_assignments {
   id uuid [pk]
   cleaning_target_id uuid [not null]
   maid_profile_id uuid [not null]
+  service_date date [not null]
   sequence_number int [not null]
   revision bigint [not null]
   is_current boolean [not null, default: true]
+  available_from_snapshot timestamptz
+  due_at_snapshot timestamptz
   notified_at timestamptz
+  notified_room_id_snapshot uuid [ref: > public.rooms.id, note: 'Captured on first notification; immutable. Legacy unknown stays null, never current-target fallback.']
+  notified_room_number_snapshot text [note: 'Room number at notification; nullable legacy metadata.']
   ended_at timestamptz
   change_reason_code text
   changed_by uuid [not null]
@@ -452,10 +826,42 @@ Table public.cleaning_assignments {
 
   Indexes {
     (cleaning_target_id, revision) [unique]
+    (maid_profile_id, service_date, sequence_number) [unique, note: 'Partial where is_current']
+    (maid_profile_id, cleaning_target_id, revision) [note: 'Partial where notified_at is not null; maid notified history lookup']
+    notified_room_id_snapshot [note: 'Partial where not null; snapshot FK lookup']
   }
 
-  Note: 'A partial unique index permits one current assignment per target.'
+  Note: 'Partial unique indexes permit one current assignment per target and one current sequence per maid/service date. Target, maid, sequence, revision, schedule snapshots, changer, and created time are immutable. Maid SELECT requires active self plus notified_at; notified superseded history remains visible, unnotified drafts never do. Notification room snapshots never hydrate from later target state.'
 }
+
+Table public.assignment_change_requests {
+  id uuid [pk]
+  cleaning_target_id uuid [not null, ref: > public.cleaning_targets.id]
+  assignment_id uuid [not null]
+  maid_profile_id uuid [not null, ref: > public.profiles.id]
+  request_type text [not null, default: 'cancel_assignment']
+  reason_code text [not null]
+  reason_detail text [note: '1-200 chars; no sensitive input; admin/self response only, never audit/notification']
+  status text [not null, default: 'pending', note: 'pending/approved/rejected/superseded']
+  source_assignment_revision bigint [not null]
+  source_target_assignment_version bigint [not null]
+  requested_at timestamptz [not null]
+  decided_by uuid [ref: > public.profiles.id]
+  decided_at timestamptz
+  decision_reason_code text
+  created_at timestamptz [not null]
+
+  Indexes {
+    assignment_id [unique, note: 'Partial where status=pending; separate full FK index']
+    cleaning_target_id
+    (maid_profile_id, requested_at, id)
+    (requested_at, id)
+    decided_by
+  }
+  Note: '#27 source identity/terminal decisions immutable, DELETE forbidden. Active admin all/maid self RLS; service-owned command writes. Source assignment ending supersedes pending requests. Schedule narrowing allows exact manual_room_request+additional or stayover_request+stayover only; stayover rechecks active occupied reservation.'
+}
+
+Ref: public.assignment_change_requests.(assignment_id, cleaning_target_id, maid_profile_id, source_assignment_revision) > public.cleaning_assignments.(id, cleaning_target_id, maid_profile_id, revision)
 
 Table public.cleaning_attempts {
   id uuid [pk]
@@ -465,6 +871,7 @@ Table public.cleaning_attempts {
   attempt_number int [not null]
   status attempt_status [not null]
   assignment_revision bigint [not null]
+  execution_version bigint [not null, default: 1, note: '#7A positive CAS version; start/complete increments once, retry does not increment']
   started_at timestamptz
   field_completed_at timestamptz
   ended_at timestamptz
@@ -476,7 +883,121 @@ Table public.cleaning_attempts {
 
   Indexes {
     (cleaning_target_id, attempt_number) [unique]
+    (id, cleaning_target_id) [unique]
   }
+  Note: '#28 activates scheduled once. #7A own active maid execution; #7B limited completion/handover/expired scheduled retirement advance CAS. One in_progress per maid. No physical completion implies submission/readiness/earning. Attempt identity and snapshots immutable. Only proven interrupted handover history is excluded from current-work checks; superseded expiry preserves history. #7C adds online-issued lease/offline completion/quarantine and current-attempt admin correction; PIN runtime remains excluded.'
+}
+
+Table private.offline_work_leases {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  attempt_id uuid [not null, unique, ref: > public.cleaning_attempts.id]
+  assignment_id uuid [not null, ref: > public.cleaning_assignments.id]
+  assignment_revision bigint [not null]
+  execution_version bigint [not null]
+  profile_version bigint [not null]
+  version bigint [not null, default: 1]
+  issued_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  metadata_expires_at timestamptz [not null]
+  Indexes {
+    (actor_profile_id, attempt_id)
+    assignment_id
+    (metadata_expires_at, id)
+    (id, actor_profile_id, metadata_expires_at) [unique]
+    (id, metadata_expires_at) [unique]
+  }
+  Note: '#7C online start-with-lease atomically issues exactly one completion lease per attempt; TTL=[issued_at,issued_at+2h), metadata/replay horizon=issued_at+90d. No renewal by changing request key. Separate from PIN and limited grants. Private RLS/no direct grants, immutable until bounded authorized expiry purge.'
+}
+
+Table private.offline_work_lease_revocations {
+  lease_id uuid [pk, ref: > private.offline_work_leases.id]
+  revoked_at timestamptz [not null]
+  reason_code text [not null, note: 'ACCOUNT_CHANGED / ATTEMPT_CHANGED']
+  metadata_expires_at timestamptz [not null]
+  Note: 'Append-only revocation until lease metadata horizon. Profile lifecycle or attempt transition revokes the original lease permanently; normal account restoration cannot restore it.'
+}
+
+Table private.offline_completion_events {
+  id uuid [pk, note: 'Server-owned record/quarantine identity']
+  lease_id uuid [not null, unique, ref: > private.offline_work_leases.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  event_id uuid [not null, note: 'Client stable UUID, expiring metadata only']
+  request_hash text [not null]
+  occurred_at timestamptz [not null, note: 'Client time claim, never permanent audit payload']
+  server_offset_ms bigint [not null]
+  normalized_occurred_at timestamptz [not null]
+  received_at timestamptz [not null]
+  metadata_expires_at timestamptz [not null]
+  outcome text [not null, note: 'applied / quarantined']
+  reason_code text [note: 'LEASE_EXPIRED / LEASE_REVOKED / ASSIGNMENT_CHANGED / CLOCK_CONFLICT / KST_DATE_CONFLICT']
+  response_payload jsonb [not null, note: 'Replay response only until original lease metadata horizon']
+  Indexes {
+    (actor_profile_id, event_id) [unique]
+    (id, metadata_expires_at) [unique]
+    (metadata_expires_at, id)
+    (received_at, id) [note: 'Descending partial index WHERE outcome=quarantined']
+  }
+  Note: 'One canonical completion slot per lease bounds rotating UUID attacks. Unknown/foreign lease has no event row. Successful retry replays; changed payload/second UUID conflicts; quarantined retries never auto-promote. Raw UUID/clock/hash/response cannot be copied to permanent command_executions/audit. Strictly no PII/PIN/body/token/IP.'
+}
+
+Table private.offline_event_resolutions {
+  id uuid [pk]
+  event_record_id uuid [not null, unique, ref: > private.offline_completion_events.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  resolution text [not null, note: 'record_only / reject_effect / correction_link']
+  idempotency_key text [not null]
+  request_hash text [not null]
+  response_payload jsonb [not null]
+  metadata_expires_at timestamptz [not null]
+  Indexes {
+    (actor_profile_id, idempotency_key) [unique]
+    (metadata_expires_at, id)
+  }
+  Note: 'One immutable final admin decision. correction_link is a new validated admin command on the same current in_progress attempt, confirming the pre-existing normalized completion time; no arbitrary correctedAt, no resurrection/submission/earning. Only server quarantine ID + fixed resolution remain in permanent domain audit. Expiring resolution receipt is deleted with event metadata.'
+}
+
+Ref: private.offline_work_lease_revocations.(lease_id, metadata_expires_at) > private.offline_work_leases.(id, metadata_expires_at)
+Ref: private.offline_completion_events.(lease_id, actor_profile_id, metadata_expires_at) > private.offline_work_leases.(id, actor_profile_id, metadata_expires_at)
+Ref: private.offline_event_resolutions.(event_record_id, metadata_expires_at) > private.offline_completion_events.(id, metadata_expires_at)
+
+Table private.attempt_capability_grants {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  attempt_id uuid [not null, ref: > public.cleaning_attempts.id]
+  assignment_id uuid [not null, ref: > public.cleaning_assignments.id]
+  assignment_revision bigint [not null]
+  kind text [not null, note: 'finish_current / upload_submit / evidence_upload']
+  allowed_actions text[] [not null, note: 'Fixed by kind, never arbitrary caller actions']
+  issued_at timestamptz [not null]
+  expires_at timestamptz [not null, note: 'issued_at + 2h finish; +24h upload; immutable']
+  granted_by uuid [not null, ref: > public.profiles.id]
+  Indexes {
+    (attempt_id, kind) [unique]
+    (actor_profile_id, attempt_id)
+    assignment_id
+    granted_by
+  }
+  Note: '#7B private immutable ledger. No Data API/direct service-role table access. No token/session ID stored. Latest valid Supabase session + role/status + exact attempt/revision/action + unrevoked hard expiry required every dedicated API call. Different command key cannot renew TTL.'
+}
+
+Table private.attempt_capability_revocations {
+  capability_id uuid [pk, ref: > private.attempt_capability_grants.id]
+  revoked_at timestamptz [not null]
+  reason_code text [not null, note: 'FIELD_COMPLETED / HANDOVER / ACCOUNT_CHANGED']
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  Indexes { actor_profile_id }
+  Note: 'Immutable append-only revocation; restoring account status never revives a revoked grant.'
+}
+
+Table private.attempt_handover_events {
+  previous_attempt_id uuid [pk, ref: > public.cleaning_attempts.id]
+  next_attempt_id uuid [not null, unique, ref: > public.cleaning_attempts.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  reason_code text [not null, note: 'ADMIN_HANDOVER / DEACTIVATION_HANDOVER']
+  occurred_at timestamptz [not null]
+  Indexes { actor_profile_id }
+  Note: 'Immutable same-target provenance; old interrupted+ended/noncurrent -> new notified scheduled/higher attempt and assignment revisions. No cycles, deletion or snapshot rewrites. Current descendant still blocks scheduling; orphan interrupted is not ignored.'
 }
 
 Table public.cleaning_submissions {
@@ -485,15 +1006,19 @@ Table public.cleaning_submissions {
   client_submission_id uuid [not null, unique]
   version int [not null]
   status submission_status [not null]
+  photo_manifest jsonb [not null, note: 'Legacy presentation payload is immutable, never proof of verified upload.']
   issue_snapshot jsonb [not null]
   candle_count int [not null, default: 0]
+  bomb_room_snapshot jsonb
   submitted_by uuid [not null]
   submitted_at timestamptz [not null]
   superseded_at timestamptz
 
   Indexes {
     (cleaning_attempt_id, version) [unique]
+    (id, cleaning_attempt_id) [unique]
   }
+  Note: '#31 canonical immutable submission versions. Current pointer uses CAS; only the current submitted version is reviewable. General resubmission supersedes history, while a sealed bomb report never moves to another version.'
 }
 
 Table public.submission_photos {
@@ -524,19 +1049,41 @@ Table public.submission_photos {
     (submission_id, photo_slot_key) [unique]
   }
 
-  Note: 'The private object lives only in Google Drive. The backend enforces a 307200-byte limit and permanently deletes it 7 days after uploaded_at.'
+  Note: 'Legacy provider-shaped table retained, not the #30 evidence source. Nullable slot key/default uploaded cannot establish verified evidence. Service-role direct writes revoked. Actual provider upload/delete remains #9.'
 }
 
-Table public.bomb_room_reports {
+Table private.bomb_room_reports {
   id uuid [pk]
-  submission_id uuid [not null, unique]
-  note text
-  status text [not null]
-  decision text
-  decision_reason_code text
-  decided_by uuid
-  decided_at timestamptz
-  created_at timestamptz [not null]
+  cleaning_attempt_id uuid [not null, unique, ref: - public.cleaning_attempts.id]
+  reported_by uuid [not null, ref: > public.profiles.id]
+  memo text [not null, note: '1..500 raw length; admin detail only, never audit.']
+  reported_at timestamptz [not null]
+  Note: 'Attempt-bound immutable pre-submission report. Private RLS; no Data API or service-role table DML.'
+}
+
+Table private.bomb_room_report_evidence {
+  report_id uuid [not null, ref: > private.bomb_room_reports.id]
+  photo_version_id uuid [not null, ref: > private.attempt_photo_versions.id]
+  Indexes { (report_id, photo_version_id) [pk] }
+  Note: 'Selected immutable evidence versions from the same attempt only.'
+}
+
+Table private.bomb_room_report_seals {
+  report_id uuid [pk, ref: - private.bomb_room_reports.id]
+  submission_id uuid [not null, unique, ref: - public.cleaning_submissions.id]
+  sealed_at timestamptz [not null]
+  Note: 'A report/evidence set is sealed to exactly one immutable submission and never moves to a resubmission.'
+}
+
+Table private.bomb_room_decisions {
+  id uuid [pk]
+  report_id uuid [not null, unique, ref: - private.bomb_room_reports.id]
+  submission_id uuid [not null, unique, ref: - public.cleaning_submissions.id]
+  decision text [not null, note: 'approved / rejected']
+  reason_code text [not null]
+  decided_by uuid [not null, ref: > public.profiles.id]
+  decided_at timestamptz [not null]
+  Note: 'One immutable predecision for the report sealed to the current submission.'
 }
 
 Table public.inspection_decisions {
@@ -551,21 +1098,128 @@ Table public.inspection_decisions {
 
 Table public.earnings {
   id uuid [pk]
-  earning_entitlement_id uuid [not null, unique]
+  earning_entitlement_id uuid [unique]
+  compensation_entitlement_id uuid [unique]
   submission_id uuid [not null, unique]
   maid_profile_id uuid [not null]
   earned_on date [not null]
   base_amount int [not null]
   bomb_room_bonus int [not null, default: 0]
+  bomb_room_decision_id uuid [unique, ref: - private.bomb_room_decisions.id]
   total_amount int [not null, note: 'Generated as base_amount + bomb_room_bonus in SQL']
   created_at timestamptz [not null]
+
+  Indexes {
+    (maid_profile_id, earned_on, id) [note: '#96 keyset payroll items/lateEarnings page; SQL INCLUDE(total_amount)']
+  }
+
+  Note: '#101 preserves original entitlement identity and requires exactly one typed entitlement FK. Other-maid zero-KRW compensation keeps one ledger row but does not increase payroll totals.'
+}
+
+Table public.complaint_cases {
+  id uuid [pk]
+  room_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  cleaning_attempt_id uuid [not null]
+  submission_id uuid [not null]
+  inspection_decision_id uuid [not null]
+  original_earning_id uuid [not null]
+  maid_profile_id uuid [not null]
+  category text [not null, note: 'Exact #100 eight-code allowlist; no free text']
+  status text [not null, note: 'received / under_review / decided / acknowledged / appealed / closed']
+  version bigint [not null]
+  current_decision_id uuid
+  current_compensation_decision_id uuid
+  first_decided_at timestamptz
+  response_deadline timestamptz
+  received_by uuid [not null]
+  received_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Note: '#100 mutable current projection only. Source identity is immutable and requires an original-cleaning allowlist target plus a non-null exact approved-submission earning entitlement; every transition and pointer swap is CAS.'
+}
+
+Table public.complaint_decisions {
+  id uuid [pk]
+  complaint_case_id uuid [not null]
+  decision_version int [not null]
+  decision_kind text [not null, note: 'initial / correction']
+  prior_decision_id uuid [unique]
+  finding text [not null, note: 'confirmed / unverifiable / false']
+  penalty_score int [not null, note: '0..10 evaluation-only; never automatic payroll deduction']
+  rework_required boolean [not null]
+  decided_by uuid [not null]
+  decided_at timestamptz [not null]
+  Indexes { (complaint_case_id, decision_version) [unique] }
+  Note: '#100 append-only decision chain; correction points to the actual prior decision.'
+}
+
+Table public.complaint_maid_responses {
+  id uuid [pk]
+  complaint_case_id uuid [not null, unique]
+  decision_id uuid [not null]
+  maid_profile_id uuid [not null]
+  response_type text [not null, note: 'acknowledged / appealed']
+  appeal_reason_code text [note: 'Exact #100 four-code allowlist; null only for acknowledgement']
+  responded_at timestamptz [not null]
+  Note: '#100 append-only one response to the first decision within the inclusive seven-day window.'
+}
+
+Table public.complaint_case_events {
+  id bigint [pk, increment]
+  complaint_case_id uuid [not null]
+  event_type text [not null]
+  from_status text
+  to_status text [not null]
+  case_version bigint [not null]
+  actor_profile_id uuid [not null]
+  decision_id uuid
+  maid_response_id uuid
+  compensation_decision_id uuid
+  occurred_at timestamptz [not null]
+  Indexes { (complaint_case_id, case_version) [unique] }
+  Note: '#100 append-only lifecycle history. No raw request, customer, PIN, photo locator or provider payload.'
+}
+
+Table public.complaint_compensation_decisions {
+  id uuid [pk]
+  complaint_case_id uuid [not null, unique]
+  complaint_decision_id uuid [not null, unique]
+  original_cleaning_target_id uuid [not null]
+  rework_cleaning_target_id uuid [not null, unique]
+  original_maid_profile_id uuid [not null]
+  assignee_maid_profile_id uuid [not null]
+  original_base_fee_snapshot int [not null]
+  compensation_amount int [not null, note: 'integer KRW 0..original base fee; same maid must be 0']
+  currency text [not null, default: 'KRW']
+  source_case_version bigint [not null]
+  decision_version int [not null, default: 1]
+  decided_by uuid [not null]
+  decided_at timestamptz [not null]
+  Note: '#101 append-only operational decision. Later complaint correction does not rewrite started work; projection exposes source/current divergence.'
+}
+
+Table public.compensation_entitlements {
+  id uuid [pk]
+  compensation_decision_id uuid [not null, unique]
+  complaint_case_id uuid [not null]
+  complaint_decision_id uuid [not null]
+  original_cleaning_target_id uuid [not null]
+  rework_cleaning_target_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  cleaning_attempt_id uuid [not null, unique]
+  submission_id uuid [not null, unique]
+  inspection_decision_id uuid [not null, unique]
+  amount int [not null]
+  currency text [not null, default: 'KRW']
+  entitled_at timestamptz [not null]
+  Note: '#101 other-maid approved work proof. Exact decision/target/maid/attempt/submission/inspection/amount provenance; zero amount remains a real entitlement.'
 }
 
 Table public.payroll_cycles {
   id uuid [pk]
   maid_profile_id uuid [not null]
   week_start date [not null]
-  status payroll_status [not null]
+  status payment_status [not null]
   locked_amount int
   payment_started_by uuid
   payment_started_at timestamptz
@@ -574,6 +1228,8 @@ Table public.payroll_cycles {
   last_reopen_reason text
   last_reopened_by uuid [ref: > public.profiles.id]
   last_reopened_at timestamptz
+  offset_settled_at timestamptz
+  offset_settled_by uuid [ref: > public.profiles.id]
   version bigint [not null]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
@@ -603,21 +1259,149 @@ Table public.payroll_items {
 Table public.payroll_events {
   id bigint [pk, increment]
   payroll_cycle_id uuid [not null]
-  event_type text [not null]
-  before_status payroll_status
-  after_status payroll_status [not null]
+  maid_profile_id uuid [not null]
+  event_type text [not null, note: 'Current #93 contract allows payment_started only']
+  before_status payment_status [not null, note: 'Current #93 contract requires open']
+  after_status payment_status [not null, note: 'Current #93 contract requires paying']
   actor_profile_id uuid [not null]
-  reason_code text
-  created_at timestamptz [not null]
+  cycle_version bigint [not null, note: 'Positive version captured after OPEN -> PAYING']
+  locked_amount int [not null, note: 'Positive immutable amount captured by the event']
+  occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  Indexes {
+    (payroll_cycle_id, cycle_version, event_type) [unique]
+    (maid_profile_id, occurred_at, id)
+    (actor_profile_id, occurred_at)
+  }
+
+  Note: '#93 append-only payment-start ledger. #103 uses every start event as one immutable typed payment attempt source.'
+}
+
+Table public.payroll_payment_attempts {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null]
+  maid_profile_id uuid [not null]
+  attempt_number int [not null]
+  start_event_id bigint [not null, unique]
+  start_cycle_version bigint [not null]
+  locked_amount int [not null, note: 'Positive immutable payable snapshot']
+  started_by uuid [not null]
+  started_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+
+  Indexes {
+    (payroll_cycle_id, attempt_number) [unique]
+    (id, payroll_cycle_id, maid_profile_id) [unique]
+    (maid_profile_id, started_at, id)
+  }
+
+  Note: '#103 immutable payment attempt. One typed payment_started event; reopen followed by start creates the next attempt number.'
+}
+
+Table public.payroll_payment_results {
+  id uuid [pk]
+  payment_attempt_id uuid [not null]
+  payroll_cycle_id uuid [not null]
+  maid_profile_id uuid [not null]
+  result_type text [not null, note: 'check/paid/reopened']
+  before_status payment_status [not null]
+  after_status payment_status [not null]
+  cycle_version bigint [not null]
+  locked_amount int [not null]
+  payment_method text [note: 'paid only: bank_transfer']
+  canonical_reference text [note: 'paid only: strict uppercase ASCII; admin-only evidence']
+  reason_code text [note: 'check: TRANSFER_RESULT_UNCERTAIN; reopened: NO_TRANSFER_CONFIRMED']
+  actor_profile_id uuid [not null]
+  occurred_at timestamptz [not null, note: 'DB server time']
+  recorded_at timestamptz [not null]
+
+  Indexes {
+    (payment_attempt_id, result_type) [unique]
+    (payment_method, canonical_reference) [unique]
+    (payroll_cycle_id, occurred_at, id)
+    (maid_profile_id, occurred_at, id)
+  }
+
+  Note: '#103 immutable CHECK/PAID/reopen result. A terminal paid/reopened result is unique per attempt; PAID equals the locked full amount.'
 }
 
 Table public.payroll_adjustments {
   id uuid [pk]
-  payroll_cycle_id uuid [not null]
-  amount int [not null]
-  reason_code text [not null]
+  maid_profile_id uuid [not null]
+  book_version bigint [not null]
+  amount int [not null, note: 'Signed, non-zero KRW delta']
+  currency text [not null, default: 'KRW']
+  reason_code text [not null, note: 'earning_correction/adjustment_correction/earning_reversal/adjustment_reversal/late_earning_carry']
+  root_earning_id uuid [not null]
+  correction_of_earning_id uuid
+  correction_of_adjustment_id uuid
+  reversal_of_earning_id uuid [unique]
+  reversal_of_adjustment_id uuid [unique]
+  late_carried_earning_id uuid [unique]
+  available_week_start date [not null]
   created_by uuid [not null]
   created_at timestamptz [not null]
+
+  Indexes {
+    (maid_profile_id, book_version) [unique]
+    (maid_profile_id, available_week_start, created_at, id)
+    (root_earning_id, created_at, id)
+  }
+
+  Note: '#102 immutable typed signed ledger. Exactly one source FK is non-null; exact full reversal is unique and root cumulative entitlement cannot become negative.'
+}
+
+Table public.payroll_adjustment_books {
+  maid_profile_id uuid [pk]
+  version bigint [not null]
+  updated_at timestamptz [not null]
+}
+
+Table public.payroll_adjustment_items {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null]
+  adjustment_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  locked_amount int [not null]
+  created_at timestamptz [not null]
+}
+
+Table public.payroll_residual_carries {
+  id uuid [pk]
+  maid_profile_id uuid [not null]
+  source_settlement_id uuid [not null, unique]
+  available_week_start date [not null]
+  amount int [not null, note: 'Positive magnitude of prior negative residual']
+  currency text [not null, default: 'KRW']
+  created_at timestamptz [not null]
+}
+
+Table public.payroll_carry_items {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null]
+  carry_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  locked_amount int [not null]
+  created_at timestamptz [not null]
+}
+
+Table public.payroll_offset_settlements {
+  id uuid [pk]
+  payroll_cycle_id uuid [not null, unique]
+  maid_profile_id uuid [not null]
+  week_start date [not null]
+  cycle_version bigint [not null]
+  earning_amount int [not null]
+  adjustment_amount int [not null]
+  carry_in_amount int [not null]
+  net_amount int [not null, note: 'Zero or negative']
+  carry_out_id uuid [unique]
+  settled_by uuid [not null]
+  settled_at timestamptz [not null]
+  currency text [not null, default: 'KRW']
+
+  Note: '#102 immutable non-positive offset settlement. No PAYING/PAID event; negative magnitude moves only to the immediately following KST week.'
 }
 
 Table public.notifications {
@@ -630,11 +1414,220 @@ Table public.notifications {
   cleaning_target_id uuid
   dedupe_key text
   group_key text
+  contract_version smallint [note: 'NULL legacy or 1 typed']
+  actor_profile_id uuid
+  event_family text
+  source_entity_kind text
+  source_entity_id text
+  deep_link_kind text [note: 'Six approved public deep-link kinds only']
+  deep_link_entity_id uuid
+  notification_group_id uuid
   requires_action boolean [not null, default: false]
   read_at timestamptz
   resolved_at timestamptz
   occurred_at timestamptz [not null]
   created_at timestamptz [not null]
+
+  indexes {
+    (recipient_profile_id, occurred_at, id) [name: 'notifications_recipient_occurred_id_idx', note: 'DESC occurred_at/id keyset order']
+    (recipient_profile_id, dedupe_key) [unique, name: 'notifications_recipient_logical_event_dedupe_uq', note: 'Partial where dedupe_key is not null; logical event exactly-once, independent of grouping']
+  }
+
+  Note: '#108 immutable inbox ledger plus #109 typed provenance. Raw Data API SELECT/UPDATE is revoked; service-only own-list and server-time markRead RPCs revalidate exact live actor/session. resolved_at requires the catalog exact resolver.'
+}
+
+Table private.notification_event_catalog {
+  event_family text [pk]
+  category text [not null]
+  source_entity_kind text [not null]
+  recipient_capability text [not null]
+  requires_action boolean [not null]
+  push_eligible boolean [not null]
+  resolver_kind text [not null]
+  deep_link_kind text [not null]
+  group_family text [not null]
+  group_scope_kind text [not null]
+
+  Note: '#109/#128 immutable source-controlled 48 event-family / 32 public-category contract. push_eligible is independent from requires_action; self push is suppressed.'
+}
+
+Table private.notification_groups {
+  id uuid [pk]
+  recipient_profile_id uuid [not null]
+  group_family text [not null]
+  scope_kind text [not null]
+  scope_id uuid [not null]
+  started_at timestamptz [not null]
+  ends_at timestamptz [not null, note: 'Exactly started_at + 10 minutes']
+  created_at timestamptz [not null]
+
+  indexes {
+    (recipient_profile_id, group_family, scope_kind, scope_id, ends_at, id) [name: 'notification_groups_fixed_lookup_idx']
+  }
+
+  Note: '#109 immutable fixed first-event half-open grouping ledger; public API exposes only id as groupId.'
+}
+
+Table private.notification_delivery_outbox {
+  id uuid [pk]
+  notification_id uuid [not null, unique]
+  event_family text [not null]
+  delivery_status text [not null, default: 'pending']
+  enqueued_at timestamptz [not null]
+
+  Note: '#109 immutable typed intent and #111 sole worker input. Raw service_role access is denied.'
+}
+
+Table private.notification_delivery_jobs {
+  outbox_id uuid [pk]
+  status text [not null, note: 'pending/materialized/completed/suppressed/dead_letter/operator_blocked']
+  snapshot_at timestamptz
+  terminal_at timestamptz
+  terminal_reason text
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Note: '#111 one first-fanout snapshot per immutable typed outbox; no late subscription expansion.'
+}
+
+Table private.notification_delivery_targets {
+  id uuid [pk]
+  outbox_id uuid [not null]
+  notification_id uuid [not null]
+  recipient_profile_id uuid [not null]
+  subscription_id uuid [not null]
+  subscription_version int [not null]
+  subscription_revision_id uuid [not null]
+  status text [not null]
+  lease_version int [not null, note: '0..8']
+  claim_digest text
+  lease_expires_at timestamptz
+  next_attempt_at timestamptz [not null]
+  terminal_at timestamptz
+  reason_code text
+  indexes {
+    (outbox_id, subscription_id) [unique]
+    (next_attempt_at, id) [name: 'notification_delivery_targets_due_idx']
+  }
+  Note: '#111 exact subscription/version/revision target; 2-minute fenced lease, no envelope copy.'
+}
+
+Table private.notification_delivery_attempts {
+  id uuid [pk]
+  target_id uuid [not null]
+  attempt_no int [not null, note: '1..8']
+  lease_version int [not null]
+  claim_digest text [not null]
+  started_at timestamptz [not null]
+  indexes { (target_id, attempt_no) [unique] }
+  Note: '#111 append-only external attempt start; crash-after-send is at-least-once.'
+}
+
+Table private.notification_delivery_permits {
+  attempt_id uuid [pk]
+  subscription_revision_id uuid [not null]
+  permitted_at timestamptz [not null]
+  Note: '#111 exact-current/live-session send authorization linearization evidence.'
+}
+
+Table private.notification_delivery_attempt_results {
+  attempt_id uuid [pk]
+  outcome text [not null]
+  reason_code text
+  request_reason_code text
+  requested_retry_after_seconds int
+  retry_at timestamptz
+  completed_at timestamptz [not null]
+  Note: '#111 append-only provider-neutral result; no raw response/header/endpoint/key/session.'
+}
+
+Table private.notification_delivery_events {
+  id uuid [pk]
+  outbox_id uuid [not null]
+  target_id uuid
+  state text [not null]
+  reason_code text
+  occurred_at timestamptz [not null]
+  Note: '#111 append-only safe lifecycle, bounded 90-day terminal retention.'
+}
+
+Table private.notification_delivery_heartbeat {
+  singleton boolean [pk]
+  status text [not null]
+  claimed int [not null]
+  delivered int [not null]
+  retrying int [not null]
+  suppressed int [not null]
+  dead_letter int [not null]
+  blocked int [not null]
+  deferred int [not null]
+  error_code text
+  recorded_at timestamptz [not null]
+  Note: '#111 bounded non-sensitive worker health; source exists without #112 production activation.'
+}
+
+Table private.web_push_subscriptions {
+  id uuid [pk]
+  profile_id uuid [not null]
+  status text [not null, note: 'active/retired; no resurrection']
+  version int [not null]
+  current_revision_id uuid
+  active_endpoint_digest text
+  active_session_digest text
+  expiration_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  retired_at timestamptz
+  indexes {
+    active_endpoint_digest [unique, note: 'Partial active only; global endpoint capability ownership']
+    (profile_id, active_session_digest) [unique, note: 'Partial active only; live session max one']
+    (profile_id, status, updated_at, id)
+    current_revision_id [note: 'Partial non-null current revision FK lookup']
+  }
+  Note: '#110 private logical/current projection. Profile active max five is transactionally enforced; raw Data API denied.'
+}
+
+Table private.web_push_subscription_revisions {
+  id uuid [pk]
+  subscription_id uuid [not null]
+  revision_no int [not null]
+  profile_id uuid [not null]
+  endpoint_digest text [not null]
+  session_digest text [not null]
+  material_digest text [not null]
+  expiration_at timestamptz
+  key_version text [not null]
+  vapid_key_version text [note: '#112 immutable server-selected VAPID binding; NULL means legacy unbound and is never guessed/backfilled']
+  created_at timestamptz [not null]
+  indexes {
+    (subscription_id, revision_no) [unique]
+    (profile_id, created_at, id)
+  }
+  Note: '#110 immutable non-plaintext provenance, retained 90 days after logical retirement. #112 delivery uses only the exact bound VAPID key version; legacy NULL fails closed.'
+}
+
+Table private.web_push_subscription_secrets {
+  revision_id uuid [pk]
+  ciphertext bytea [not null]
+  nonce bytea [not null]
+  auth_tag bytea [not null]
+  created_at timestamptz [not null]
+  Note: 'Current AES-256-GCM envelope only, including the encrypted Auth session binding needed for later send-time eligibility checks. Rotation/retire crypto-shreds the previous row in the same transaction.'
+}
+
+Table private.web_push_subscription_events {
+  id uuid [pk]
+  subscription_id uuid [not null]
+  reason_code text [not null]
+  occurred_at timestamptz [not null]
+  Note: 'Minimal append-only lifecycle: opaque subscription UUID/reason/server time; no raw endpoint/key/session/digest.'
+}
+
+Table private.web_push_registration_limits {
+  profile_id uuid [pk]
+  window_started_at timestamptz [not null]
+  accepted_count int [not null, note: 'Saturated 0..10 per server minute']
+  updated_at timestamptz [not null]
+  Note: 'Durable profile-scoped register limiter; no endpoint activity rows.'
 }
 
 Table private.notification_outbox {
@@ -647,6 +1640,8 @@ Table private.notification_outbox {
   delivered_at timestamptz
   last_error_code text
   created_at timestamptz [not null]
+
+  Note: 'LEGACY_DO_NOT_DELIVER: provenance-less pre-#109 history. No worker may read or claim this table.'
 }
 
 Table public.audit_events {
@@ -666,6 +1661,65 @@ Table public.audit_events {
   idempotency_key text [unique]
 
   Note: 'UPDATE and DELETE are rejected by an append-only trigger.'
+}
+
+Table private.password_change_commands {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  auth_user_id uuid [not null]
+  command_type text [not null, note: 'account.password.change']
+  idempotency_key text [not null]
+  request_hash text [not null, note: 'Safe actor+command fingerprint; contains no password-derived evidence']
+  effect_marker text [not null, note: 'Nonsecret password effect version bound by the auth.users password-hash trigger']
+  session_digest text [not null, note: 'Domain-separated SHA-256 binding; raw session ID is not stored']
+  state text [not null, note: 'auth_pending/completed/failed/inconsistent/reset_pending/superseded']
+  claim_digest text [note: 'Random claim digest; not a credential or password verifier']
+  lease_expires_at timestamptz
+  attempt_count int [not null]
+  failure_code text
+  reset_command_execution_id uuid
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  completed_at timestamptz
+
+  indexes {
+    (actor_profile_id, command_type, idempotency_key) [unique]
+    (actor_profile_id) [unique, note: 'Partial: unresolved state only']
+  }
+
+  Note: '#46 private response-loss receipt. Replay requires matching private password version and current password effect. Raw Data API access denied; password, password-derived verifier, token, and raw session ID are forbidden.'
+}
+
+Table private.password_verification_rate_limits {
+  actor_profile_id uuid [pk]
+  session_digest text [not null, note: 'Evidence only; not a budget dimension']
+  client_digest text [not null, note: 'Server HMAC evidence only; raw IP is forbidden']
+  window_started_at timestamptz [not null]
+  attempt_count int [not null]
+  expires_at timestamptz [not null]
+
+  Note: 'One authoritative bounded row per actor. Session/client/idempotency rotation cannot increase the Auth password verification allowance.'
+}
+
+Table private.password_reset_auth_markers {
+  command_execution_id uuid [pk]
+  actor_profile_id uuid [not null]
+  target_profile_id uuid [not null]
+  effect_marker text [not null, note: 'Nonsecret password effect version prepared before Auth reset']
+  state text [not null, note: 'prepared/completed']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  completed_at timestamptz
+
+  Note: 'Admin reset recovery is completed only after external Auth success and exact private version verification.'
+}
+
+Table private.auth_password_versions {
+  auth_user_id uuid [pk]
+  password_version text [not null, note: 'Random nonsecret identity; never an Auth hash or password-derived value']
+  rotated_at timestamptz [not null]
+
+  Note: 'Private password-specific provenance. A minimal auth.users trigger rotates it only when encrypted_password actually changes; raw Data API and service-role table access are denied.'
 }
 
 Table private.actor_activity_events {
@@ -773,6 +1827,163 @@ Ref: public.reservation_schedule_revisions.reservation_id > public.reservations.
 Ref: public.reservation_schedule_revisions.room_id > public.rooms.id
 Ref: public.reservation_schedule_revisions.actor_profile_id > public.profiles.id
 Ref: public.preparation_obligations.reservation_id - public.reservations.id
+// #83 private storage operations. Service-only RPCs, no direct grants; actual Drive is #84.
+Table private.photo_storage_quota_snapshot {
+  provider text [pk, note: 'google_drive only; one configured account per deployment']
+  request_started_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+  usage_bytes bigint [not null]
+  revision bigint [not null]
+  Note: 'Private mutable full about.storageQuota.usage snapshot. Strictly increasing request-start watermark; unknown or age>=60s fail closed. Decimal10GB warning/12GB new upload block including pending.'
+}
+Table private.photo_upload_admissions {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null, ref: > public.cleaning_assignments.id]
+  assignment_revision bigint [not null]
+  target_photo_slot_id uuid [not null]
+  expected_photo_revision bigint [not null]
+  idempotency_key_digest text [not null]
+  reserved_bytes integer [not null, note: 'Exactly307200; before decoding']
+  created_at timestamptz [not null]
+  expires_at timestamptz [not null, note: 'Created+5min; never extend on retry']
+  quota_revision bigint [not null]
+  indexes {
+    (actor_profile_id,idempotency_key_digest) [unique]
+    (id,actor_profile_id) [unique]
+    (cleaning_attempt_id,target_photo_slot_id,expires_at)
+    (actor_profile_id,expires_at)
+    cleaning_target_id
+    assignment_id
+    (target_photo_slot_id,cleaning_target_id)
+  }
+  Note: 'Immutable private admission. Bound/unknown reservations survive expiry; accepted bytes remain pending until refresh starts after BOTH Google createdTime and first DB provider-success event. Late acknowledgement cannot debit an older snapshot. Latest actor/session/capability and CAS validation.'
+}
+Table private.photo_upload_admission_bindings {
+  admission_id uuid [pk, ref: - private.photo_upload_admissions.id]
+  operation_id uuid [not null, unique, ref: - private.photo_upload_operations.id]
+  bound_at timestamptz [not null]
+  Note: 'Immutable same actor/attempt/target/assignment/slot/CAS/digest binding, created before admission expiry. No raw credentials/locator.'
+}
+Table private.photo_upload_admission_limits {
+  actor_profile_id uuid [pk, ref: - public.profiles.id]
+  minute_started_at timestamptz [not null]
+  occurrence_count integer [not null]
+  Note: 'One mutable30/min saturated counter per actor, including same-key pre-decode retries; no individual denied rows.'
+}
+Table private.photo_drive_identities {
+  object_id uuid [pk]
+  operation_id uuid [not null, unique]
+  provider_file_id text [not null, unique]
+  provider_folder_id text [not null]
+  upload_date date [not null]
+  room_number text [not null]
+  reserved_at timestamptz [not null]
+  Note: 'Immutable private files.generateIds result persisted before external create; global fileID uniqueness including legacy provider objects. Validated parent chain stays server-only; reservation is not success. Finalize requires upload_date = Google createdTime KST date; cross-midnight candidates can only reconcile/compensate, never rewrite identity/clock or move folders.'
+}
+Table private.photo_drive_folder_identities {
+  id uuid [pk]
+  upload_date date [not null]
+  scope_room_number text [not null, note: 'Empty=date scope, three digits=room scope']
+  provider_folder_id text [not null, unique]
+  parent_folder_id text [not null]
+  parent_registry_id uuid [ref: > private.photo_drive_folder_identities.id]
+  created_at timestamptz [not null]
+  indexes {
+    (upload_date, scope_room_number) [unique]
+    parent_registry_id
+  }
+  Note: 'Immutable private pre-create folder winner. Date binds root; room binds same-date date winner. Service-only latest-authorized reservation returns existing winner on conflict, never registers losing candidate. File identity must use exact room winner. Raw provider IDs are not HTTP/Data API fields.'
+}
+Ref: private.photo_upload_admissions.(cleaning_attempt_id,cleaning_target_id) > public.cleaning_attempts.(id,cleaning_target_id)
+Ref: private.photo_upload_admissions.(target_photo_slot_id,cleaning_target_id) > private.target_photo_slot_snapshots.(id,cleaning_target_id)
+Ref: private.photo_drive_identities.(object_id,operation_id) - private.photo_provider_objects.(id,operation_id)
+
+Table private.photo_upload_operations {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  command_type text [not null, note: 'photo.upload only']
+  idempotency_key_digest text [not null, note: '64 lower hex; never raw key']
+  request_hash text [not null]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null, ref: > public.cleaning_assignments.id]
+  assignment_revision bigint [not null]
+  target_photo_slot_id uuid [not null]
+  expected_photo_revision bigint [not null]
+  sha256 text [not null]
+  mime_type text [not null]
+  size_bytes integer [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (actor_profile_id, command_type, idempotency_key_digest) [unique]
+    (cleaning_attempt_id, created_at)
+    cleaning_target_id
+    assignment_id
+    (target_photo_slot_id, cleaning_target_id)
+  }
+  Note: 'Immutable operation binding and scoped receipt. No session/raw body. 300KiB JPEG/WebP metadata is not actual byte/provider proof.'
+}
+Table private.photo_provider_objects {
+  id uuid [pk]
+  operation_id uuid [not null, unique, ref: - private.photo_upload_operations.id]
+  provider text [not null, note: 'google_drive only']
+  provider_locator text
+  uploaded_at timestamptz
+  purge_after timestamptz
+  indexes {
+    (provider, provider_locator) [unique]
+    (id, operation_id) [unique]
+  }
+  Note: 'One server UUID per operation; locator/first success clock write-once. Provider locator never publicly projected. Exactly uploaded_at+168h.'
+}
+Table private.photo_upload_states {
+  operation_id uuid [pk, ref: - private.photo_upload_operations.id]
+  cleaning_attempt_id uuid [not null, ref: > public.cleaning_attempts.id]
+  target_photo_slot_id uuid [not null, ref: > private.target_photo_slot_snapshots.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  status text [not null]
+  lease_version integer [not null]
+  lease_claim_digest text
+  lease_expires_at timestamptz
+  revision integer [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (actor_profile_id,status)
+    (status,lease_expires_at,operation_id)
+    target_photo_slot_id
+  }
+  Note: 'Mutable projection. Partial unique attempt/slot for reserved/provider_succeeded. Claims max8 and5min with exact worker digest; accepted terminal, unknown no delete permission.'
+}
+Table private.photo_upload_acceptances {
+  operation_id uuid [pk, ref: - private.photo_upload_operations.id]
+  object_id uuid [not null, unique]
+  photo_version_id uuid [not null, unique, ref: - private.attempt_photo_versions.id]
+  accepted_at timestamptz [not null]
+  Note: 'Immutable EVER-accepted evidence, independent of current photo pointer. Never compensation after clear/replace/handover.'
+}
+Table private.photo_upload_events {
+  id uuid [pk]
+  operation_id uuid [not null, ref: > private.photo_upload_operations.id]
+  revision integer [not null]
+  state text [not null]
+  lease_version integer [not null]
+  occurred_at timestamptz [not null]
+  indexes { (operation_id,revision) [unique] }
+  Note: 'Append-only state/fencing events; no locator, claim digest, key or user payload.'
+}
+Table private.photo_upload_rate_limits {
+  actor_profile_id uuid [pk, ref: - public.profiles.id]
+  minute_started_at timestamptz [not null]
+  occurrence_count integer [not null]
+  Note: 'One mutable minute row per existing actor; saturation30 does not append denial rows.'
+}
+Ref: private.photo_upload_operations.(cleaning_attempt_id,cleaning_target_id) > public.cleaning_attempts.(id,cleaning_target_id)
+Ref: private.photo_upload_operations.(target_photo_slot_id,cleaning_target_id) > private.target_photo_slot_snapshots.(id,cleaning_target_id)
+Ref: private.photo_upload_acceptances.(object_id,operation_id) - private.photo_provider_objects.(id,operation_id)
+
 Ref: public.preparation_obligations.room_id > public.rooms.id
 Ref: public.preparation_obligations.current_attempt_id > public.cleaning_attempts.id
 Ref: public.preparation_obligations.approved_submission_id > public.cleaning_submissions.id
@@ -784,7 +1995,20 @@ Ref: private.preparation_proof_usages.cleaning_attempt_id > public.cleaning_atte
 Ref: public.checkout_cleaning_obligations.reservation_id - public.reservations.id
 Ref: public.checkout_cleaning_obligations.room_id > public.rooms.id
 Ref: public.checkout_cleaning_obligations.current_cleaning_target_id - public.cleaning_targets.id
+Ref: public.checkout_cleaning_obligations.(planned_cleaning_target_id, id, reservation_id, room_id) - public.cleaning_targets.(id, checkout_obligation_id, reservation_id, room_id)
 Ref: public.checkout_cleaning_obligations.created_by > public.profiles.id
+Ref: public.checkout_presence_incidents.reservation_id > public.reservations.id
+Ref: public.checkout_presence_incidents.room_id > public.rooms.id
+Ref: public.checkout_presence_incidents.checkout_obligation_id > public.checkout_cleaning_obligations.id
+Ref: public.checkout_presence_incidents.cleaning_target_id > public.cleaning_targets.id
+Ref: public.checkout_presence_incidents.assignment_id > public.cleaning_assignments.id
+Ref: public.checkout_presence_incidents.attempt_id - public.cleaning_attempts.id
+Ref: public.checkout_presence_incidents.reported_by > public.profiles.id
+Ref: public.checkout_presence_incidents.(current_decision_id, id) - public.checkout_presence_incident_decisions.(id, incident_id)
+Ref: public.checkout_presence_incident_decisions.incident_id > public.checkout_presence_incidents.id
+Ref: public.checkout_presence_incident_decisions.decided_by > public.profiles.id
+Ref: public.checkout_presence_incident_decisions.next_assignment_id > public.cleaning_assignments.id
+Ref: public.checkout_presence_incident_decisions.next_attempt_id > public.cleaning_attempts.id
 Ref: public.room_occupancy_events.room_id > public.rooms.id
 Ref: public.room_occupancy_events.reservation_id > public.reservations.id
 Ref: public.room_occupancy_events.actor_profile_id > public.profiles.id
@@ -804,9 +2028,46 @@ Ref: public.room_pin_access_leases.cleaning_target_id > public.cleaning_targets.
 Ref: public.room_pin_access_leases.assignment_id > public.cleaning_assignments.id
 Ref: public.room_pin_access_leases.attempt_id > public.cleaning_attempts.id
 Ref: public.room_pin_access_leases.issued_to > public.profiles.id
+Ref: private.room_pin_revisions.room_id > public.rooms.id
+Ref: private.room_pin_revisions.recorded_by > public.profiles.id
+Ref: private.room_pin_revisions.assignment_id > public.cleaning_assignments.id
+Ref: private.room_pin_revisions.attempt_id > public.cleaning_attempts.id
+Ref: private.room_pin_revisions.authoritative_access_lease_id > public.room_pin_access_leases.id
+Ref: private.room_current_pin.room_id > public.rooms.id
+Ref: private.room_current_pin.pin_revision_id > private.room_pin_revisions.id
+Ref: private.room_pin_change_leases.room_id > public.rooms.id
+Ref: private.room_pin_change_leases.actor_profile_id > public.profiles.id
+Ref: private.room_pin_change_leases.assignment_id > public.cleaning_assignments.id
+Ref: private.room_pin_change_leases.attempt_id > public.cleaning_attempts.id
+Ref: private.room_pin_change_leases.authoritative_access_lease_id > public.room_pin_access_leases.id
+Ref: private.room_pin_reveal_leases.room_id > public.rooms.id
+Ref: private.room_pin_reveal_leases.pin_revision_id > private.room_pin_revisions.id
+Ref: private.room_pin_reveal_leases.actor_profile_id > public.profiles.id
+Ref: private.room_pin_reveal_leases.assignment_id > public.cleaning_assignments.id
+Ref: private.room_pin_reveal_leases.attempt_id > public.cleaning_attempts.id
+Ref: private.room_pin_reveal_leases.authoritative_access_lease_id > public.room_pin_access_leases.id
+Ref: private.room_pin_sheet_sync_outbox.room_id > public.rooms.id
+Ref: private.room_pin_sheet_full_resync_runs.actor_profile_id > public.profiles.id
+Ref: private.room_pin_sheet_full_resync_runs.recovery_root_run_id > private.room_pin_sheet_full_resync_runs.id
+Ref: private.room_pin_sheet_full_resync_items.run_id > private.room_pin_sheet_full_resync_runs.id
+Ref: private.room_pin_sheet_full_resync_items.room_id > public.rooms.id
+Ref: private.room_pin_sheet_full_resync_items.pin_revision_id > private.room_pin_revisions.id
 Ref: public.cleaning_template_versions.room_type_id > public.room_types.id
 Ref: public.cleaning_template_versions.created_by > public.profiles.id
-Ref: public.cleaning_photo_slots.template_version_id > public.cleaning_template_versions.id
+Ref: private.photo_template_slots.template_version_id > public.cleaning_template_versions.id
+Ref: private.attempt_photo_versions.(cleaning_attempt_id, cleaning_target_id) > public.cleaning_attempts.(id, cleaning_target_id)
+Ref: private.attempt_photo_versions.(target_photo_slot_id, cleaning_target_id) > private.target_photo_slot_snapshots.(id, cleaning_target_id)
+Ref: private.attempt_photo_current.(cleaning_attempt_id, cleaning_target_id) > public.cleaning_attempts.(id, cleaning_target_id)
+Ref: private.attempt_photo_current.(target_photo_slot_id, cleaning_target_id) > private.target_photo_slot_snapshots.(id, cleaning_target_id)
+Ref: private.attempt_photo_current.(photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version) > private.attempt_photo_versions.(id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)
+Ref: private.attempt_photo_changes.(cleaning_attempt_id, cleaning_target_id) > public.cleaning_attempts.(id, cleaning_target_id)
+Ref: private.attempt_photo_changes.(target_photo_slot_id, cleaning_target_id) > private.target_photo_slot_snapshots.(id, cleaning_target_id)
+Ref: private.attempt_photo_changes.(photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version) > private.attempt_photo_versions.(id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)
+Ref: private.submission_photo_bindings.(submission_id, cleaning_attempt_id) > public.cleaning_submissions.(id, cleaning_attempt_id)
+Ref: private.submission_photo_bindings.(photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version) > private.attempt_photo_versions.(id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)
+Ref: private.submission_photo_binding_sets.(submission_id, cleaning_attempt_id) > public.cleaning_submissions.(id, cleaning_attempt_id)
+Ref: private.submission_current_pointers.(submission_id, cleaning_attempt_id) > public.cleaning_submissions.(id, cleaning_attempt_id)
+Ref: private.submission_current_pointers.(submission_id, cleaning_attempt_id) > private.submission_photo_binding_sets.(submission_id, cleaning_attempt_id)
 Ref: public.cleaning_targets.room_id > public.rooms.id
 Ref: public.cleaning_targets.reservation_id > public.reservations.id
 Ref: public.cleaning_targets.checkout_obligation_id - public.checkout_cleaning_obligations.id
@@ -814,6 +2075,7 @@ Ref: public.cleaning_targets.cancelled_by > public.profiles.id
 Ref: public.cleaning_targets.created_by > public.profiles.id
 Ref: public.cleaning_targets.reclean_of_attempt_id - public.cleaning_attempts.id
 Ref: public.cleaning_targets.reclean_maid_profile_id > public.profiles.id
+Ref: public.cleaning_targets.complaint_compensation_decision_id - public.complaint_compensation_decisions.id
 Ref: public.cleaning_target_schedule_revisions.cleaning_target_id > public.cleaning_targets.id
 Ref: public.cleaning_target_schedule_revisions.changed_by > public.profiles.id
 Ref: public.cleaning_assignments.cleaning_target_id > public.cleaning_targets.id
@@ -825,27 +2087,162 @@ Ref: public.cleaning_attempts.maid_profile_id > public.profiles.id
 Ref: public.cleaning_submissions.cleaning_attempt_id > public.cleaning_attempts.id
 Ref: public.cleaning_submissions.submitted_by > public.profiles.id
 Ref: public.submission_photos.submission_id > public.cleaning_submissions.id
-Ref: public.bomb_room_reports.submission_id - public.cleaning_submissions.id
-Ref: public.bomb_room_reports.decided_by > public.profiles.id
 Ref: public.inspection_decisions.submission_id - public.cleaning_submissions.id
 Ref: public.inspection_decisions.decided_by > public.profiles.id
 Ref: public.earnings.submission_id - public.cleaning_submissions.id
 Ref: public.earnings.maid_profile_id > public.profiles.id
+Ref: public.earnings.compensation_entitlement_id - public.compensation_entitlements.id
+Ref: public.complaint_cases.room_id > public.rooms.id
+Ref: public.complaint_cases.cleaning_target_id > public.cleaning_targets.id
+Ref: public.complaint_cases.cleaning_attempt_id > public.cleaning_attempts.id
+Ref: public.complaint_cases.submission_id > public.cleaning_submissions.id
+Ref: public.complaint_cases.inspection_decision_id > public.inspection_decisions.id
+Ref: public.complaint_cases.original_earning_id > public.earnings.id
+Ref: public.complaint_cases.maid_profile_id > public.profiles.id
+Ref: public.complaint_cases.current_decision_id > public.complaint_decisions.id
+Ref: public.complaint_cases.current_compensation_decision_id - public.complaint_compensation_decisions.id
+Ref: public.complaint_cases.received_by > public.profiles.id
+Ref: public.complaint_decisions.complaint_case_id > public.complaint_cases.id
+Ref: public.complaint_decisions.prior_decision_id - public.complaint_decisions.id
+Ref: public.complaint_decisions.decided_by > public.profiles.id
+Ref: public.complaint_maid_responses.complaint_case_id - public.complaint_cases.id
+Ref: public.complaint_maid_responses.decision_id > public.complaint_decisions.id
+Ref: public.complaint_maid_responses.maid_profile_id > public.profiles.id
+Ref: public.complaint_case_events.complaint_case_id > public.complaint_cases.id
+Ref: public.complaint_case_events.actor_profile_id > public.profiles.id
+Ref: public.complaint_case_events.decision_id > public.complaint_decisions.id
+Ref: public.complaint_case_events.maid_response_id > public.complaint_maid_responses.id
+Ref: public.complaint_case_events.compensation_decision_id > public.complaint_compensation_decisions.id
+Ref: public.complaint_compensation_decisions.complaint_case_id - public.complaint_cases.id
+Ref: public.complaint_compensation_decisions.complaint_decision_id - public.complaint_decisions.id
+Ref: public.complaint_compensation_decisions.original_cleaning_target_id > public.cleaning_targets.id
+Ref: public.complaint_compensation_decisions.rework_cleaning_target_id - public.cleaning_targets.id
+Ref: public.complaint_compensation_decisions.original_maid_profile_id > public.profiles.id
+Ref: public.complaint_compensation_decisions.assignee_maid_profile_id > public.profiles.id
+Ref: public.complaint_compensation_decisions.decided_by > public.profiles.id
+Ref: public.compensation_entitlements.compensation_decision_id - public.complaint_compensation_decisions.id
+Ref: public.compensation_entitlements.complaint_case_id > public.complaint_cases.id
+Ref: public.compensation_entitlements.complaint_decision_id > public.complaint_decisions.id
+Ref: public.compensation_entitlements.original_cleaning_target_id > public.cleaning_targets.id
+Ref: public.compensation_entitlements.rework_cleaning_target_id - public.cleaning_targets.id
+Ref: public.compensation_entitlements.maid_profile_id > public.profiles.id
+Ref: public.compensation_entitlements.cleaning_attempt_id - public.cleaning_attempts.id
+Ref: public.compensation_entitlements.submission_id - public.cleaning_submissions.id
+Ref: public.compensation_entitlements.inspection_decision_id - public.inspection_decisions.id
 Ref: public.payroll_cycles.maid_profile_id > public.profiles.id
 Ref: public.payroll_cycles.payment_started_by > public.profiles.id
+Ref: public.payroll_cycles.offset_settled_by > public.profiles.id
 Ref: public.payroll_items.payroll_cycle_id > public.payroll_cycles.id
 Ref: public.payroll_items.earning_id > public.earnings.id
 Ref: public.payroll_items.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_events.maid_profile_id > public.profiles.id
 Ref: public.payroll_events.actor_profile_id > public.profiles.id
-Ref: public.payroll_adjustments.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_payment_attempts.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_payment_attempts.maid_profile_id > public.profiles.id
+Ref: public.payroll_payment_attempts.start_event_id - public.payroll_events.id
+Ref: public.payroll_payment_attempts.started_by > public.profiles.id
+Ref: public.payroll_payment_results.payment_attempt_id > public.payroll_payment_attempts.id
+Ref: public.payroll_payment_results.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_payment_results.maid_profile_id > public.profiles.id
+Ref: public.payroll_payment_results.actor_profile_id > public.profiles.id
+Ref: public.payroll_adjustment_books.maid_profile_id - public.profiles.id
+Ref: public.payroll_adjustments.maid_profile_id > public.profiles.id
+Ref: public.payroll_adjustments.root_earning_id > public.earnings.id
+Ref: public.payroll_adjustments.correction_of_earning_id > public.earnings.id
+Ref: public.payroll_adjustments.correction_of_adjustment_id > public.payroll_adjustments.id
+Ref: public.payroll_adjustments.reversal_of_earning_id > public.earnings.id
+Ref: public.payroll_adjustments.reversal_of_adjustment_id > public.payroll_adjustments.id
+Ref: public.payroll_adjustments.late_carried_earning_id > public.earnings.id
 Ref: public.payroll_adjustments.created_by > public.profiles.id
+Ref: public.payroll_adjustment_items.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_adjustment_items.adjustment_id - public.payroll_adjustments.id
+Ref: public.payroll_adjustment_items.maid_profile_id > public.profiles.id
+Ref: public.payroll_residual_carries.maid_profile_id > public.profiles.id
+Ref: public.payroll_residual_carries.source_settlement_id - public.payroll_offset_settlements.id
+Ref: public.payroll_carry_items.payroll_cycle_id > public.payroll_cycles.id
+Ref: public.payroll_carry_items.carry_id - public.payroll_residual_carries.id
+Ref: public.payroll_carry_items.maid_profile_id > public.profiles.id
+Ref: public.payroll_offset_settlements.payroll_cycle_id - public.payroll_cycles.id
+Ref: public.payroll_offset_settlements.maid_profile_id > public.profiles.id
+Ref: public.payroll_offset_settlements.carry_out_id - public.payroll_residual_carries.id
+Ref: public.payroll_offset_settlements.settled_by > public.profiles.id
 Ref: public.notifications.recipient_profile_id > public.profiles.id
 Ref: public.notifications.room_id > public.rooms.id
 Ref: public.notifications.cleaning_target_id > public.cleaning_targets.id
+Ref: public.notifications.actor_profile_id > public.profiles.id
+Ref: public.notifications.event_family > private.notification_event_catalog.event_family
+Ref: public.notifications.notification_group_id > private.notification_groups.id
+Ref: private.notification_groups.recipient_profile_id > public.profiles.id
 Ref: private.notification_outbox.notification_id > public.notifications.id
+Ref: private.notification_delivery_outbox.notification_id > public.notifications.id
+Ref: private.notification_delivery_outbox.event_family > private.notification_event_catalog.event_family
+Ref: private.notification_delivery_jobs.outbox_id - private.notification_delivery_outbox.id
+Ref: private.notification_delivery_targets.outbox_id > private.notification_delivery_jobs.outbox_id
+Ref: private.notification_delivery_targets.notification_id > public.notifications.id
+Ref: private.notification_delivery_targets.recipient_profile_id > public.profiles.id
+Ref: private.notification_delivery_targets.subscription_id > private.web_push_subscriptions.id
+Ref: private.notification_delivery_targets.subscription_revision_id > private.web_push_subscription_revisions.id
+Ref: private.notification_delivery_attempts.target_id > private.notification_delivery_targets.id
+Ref: private.notification_delivery_permits.attempt_id - private.notification_delivery_attempts.id
+Ref: private.notification_delivery_permits.subscription_revision_id > private.web_push_subscription_revisions.id
+Ref: private.notification_delivery_attempt_results.attempt_id - private.notification_delivery_attempts.id
+Ref: private.notification_delivery_events.outbox_id > private.notification_delivery_jobs.outbox_id
+Ref: private.notification_delivery_events.target_id > private.notification_delivery_targets.id
+Ref: private.web_push_subscriptions.profile_id > public.profiles.id
+Ref: private.web_push_subscriptions.current_revision_id - private.web_push_subscription_revisions.id
+Ref: private.web_push_subscription_revisions.subscription_id > private.web_push_subscriptions.id
+Ref: private.web_push_subscription_revisions.profile_id > public.profiles.id
+Ref: private.web_push_subscription_secrets.revision_id - private.web_push_subscription_revisions.id
+Ref: private.web_push_registration_limits.profile_id - public.profiles.id
 Ref: public.audit_events.actor_profile_id > public.profiles.id
+Ref: private.password_change_commands.actor_profile_id > public.profiles.id
+Ref: private.password_change_commands.reset_command_execution_id > private.command_executions.id
+Ref: private.password_verification_rate_limits.actor_profile_id > public.profiles.id
+Ref: private.password_reset_auth_markers.command_execution_id > private.command_executions.id
+Ref: private.password_reset_auth_markers.actor_profile_id > public.profiles.id
+Ref: private.password_reset_auth_markers.target_profile_id > public.profiles.id
 Ref: private.actor_activity_events.actor_profile_id > public.profiles.id
 Ref: private.actor_authorization_denial_aggregates.actor_profile_id > public.profiles.id
 Ref: private.scheduler_invocation_heartbeats.actor_profile_id > public.profiles.id
 Ref: private.developer_diagnostic_rate_limits.actor_profile_id - public.profiles.id
+
+// #85 private retention/reconciliation ledgers. No Data API or business HTTP exposure.
+Table private.photo_purge_jobs {
+  object_id uuid [pk, ref: - private.photo_provider_objects.id]
+  operation_id uuid [not null, unique, ref: - private.photo_upload_operations.id]
+  photo_version_id uuid [not null, unique, ref: - private.attempt_photo_versions.id]
+  purge_after timestamptz [not null, note: 'Exactly provider uploaded_at + 168 hours']
+  status text [not null, note: 'pending/claimed/retry/blocked/purged']
+  lease_version integer [not null]
+  next_attempt_at timestamptz [not null]
+  purged_at timestamptz
+  outcome text
+  Note: 'Accepted-only durable purge authority. Raw provider locator is cleared on terminal settle; immutable clocks and private digest tombstone remain.'
+}
+Table private.photo_orphan_purge_jobs {
+  operation_id uuid [pk, ref: - private.photo_upload_operations.id]
+  object_id uuid [not null, unique, ref: - private.photo_provider_objects.id]
+  status text [not null]
+  lease_version integer [not null]
+  next_attempt_at timestamptz [not null]
+  purged_at timestamptz
+  outcome text
+  Note: 'Never-accepted compensation authority, separate from accepted 168-hour retention.'
+}
+Table private.photo_drive_folder_bindings {
+  operation_id uuid [pk, ref: - private.photo_upload_operations.id]
+  folder_registry_id uuid [not null, ref: > private.photo_drive_folder_identities.id]
+  bound_at timestamptz [not null]
+  Note: 'Immutable reserve-to-identity barrier. Migration backfills exact provider folder/date/room matches.'
+}
+Table private.photo_folder_purge_jobs {
+  folder_registry_id uuid [pk, ref: - private.photo_drive_folder_identities.id]
+  status text [not null, note: 'retiring/claimed/retry/blocked/purged']
+  retired_at timestamptz [not null]
+  lease_version integer [not null]
+  next_attempt_at timestamptz [not null]
+  purged_at timestamptz
+  outcome text
+  Note: 'Verified empty room first, date only after every child is terminal. Provider emptiness is never the sole DB authority.'
+}

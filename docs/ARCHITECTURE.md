@@ -5,17 +5,266 @@
 ## 기술 선택
 
 - 개발 기준 API: Node.js 22, Fastify 5, TypeScript
-- production PoC: Supabase Edge Functions(Deno 2) + Supabase Cron
+- production runtime: Supabase Edge Functions(Deno 2) + Supabase Cron
 - 데이터·인증: Supabase Auth, PostgreSQL 17
 - 사진 파일: Google Drive API, 전용 비공개 폴더
 - 입력 검증: Zod
 - API 계약: OpenAPI 3.1 + 로컬 pinned Swagger UI + GitHub Pages 읽기 전용 운영 snapshot + [프론트·Codex 연동 가이드](./FRONTEND_API_INTEGRATION.md)
 - 테스트: Vitest, Fastify injection, Deno Edge type check
-- 배포 후보: 운영 Supabase의 Edge Functions·Cron + Supabase 복구검증 프로젝트
+- 배포 환경: 운영 Supabase의 Edge Functions·Cron + Supabase 복구검증 프로젝트
 
-Fastify는 현재 개발 기준선이며 Edge PoC가 실패할 때의 rollback 경로다. 월 `$0` 운영을 위해 Issue #36에서 HTTP adapter만 Edge Functions로 교체할 수 있는지 검증한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
+### GitHub Actions 런타임과 공급망 고정
+
+- `actions/checkout`은 공식 `v6.1.0`, `actions/setup-node`는 공식 `v6.5.0`, `actions/setup-python`은 공식 `v6.3.0`의 전체 40자 commit SHA로 모든 workflow에서 고정한다. 가변 major tag만 사용하지 않는다.
+- 세 action의 `runs.using`은 Node.js 24다. 이는 GitHub가 action 구현 자체를 실행하는 내부 런타임이며, 저장소 애플리케이션과 Python 도구 런타임과 별개다.
+- 애플리케이션과 DB 검증은 계속 `setup-node`의 `node-version: 22`를 사용한다. `package.json`의 Node.js 22 계약을 action 내부 Node.js 24로 올린 것으로 해석하지 않는다.
+- quality workflow의 npm cache는 `cache: npm`과 `cache-dependency-path: package-lock.json`으로 명시하고 설치는 `npm ci`만 사용한다. npm 설치가 없는 Swagger Pages workflow는 action의 자동 package-manager cache를 명시적으로 끈다.
+- action revision을 변경할 때는 공식 release와 해당 revision의 `action.yml` 런타임을 확인하고, source-controlled 회귀 테스트와 required CI를 함께 갱신한다.
+
+Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
+
+이 문서 갱신의 integration base는 `dev@5798e882495e42763db6c227b7cb804527ccde47`이며 #131 Phase A, #136 Phase B, #137 Phase C, #140 bootstrap/nonce 보완과 #133 checkout incident, #146/#147 release blocker 보완까지 source/dev에 통합된 54 migrations / OpenAPI 108 paths / 115 operations다. 현재 `release/v0.3.0`은 이 source의 main ancestry와 release 계약을 준비 중이다. 운영 릴리즈 정본은 `main@035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`의 v0.2.0이며 production은 19 migrations / 39 paths / 43 operations다. 아래 source/dev 설계가 존재한다는 사실은 release/main 승격, production migration, Function Secrets, Edge/Cron 배포 또는 hosted 사용 가능을 뜻하지 않는다.
 
 ## 신뢰 경계
+
+### #131 encrypted room PIN Phase A — source/dev 완료
+
+Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinDigits`는 선행 0을 보존하는 4~8자리 문자열이고, 서버가 global lifecycle lock과 room lock 아래 다시 읽은 `room_number` snapshot으로만 canonical credential을 만든다. envelope마다 12-byte random nonce를 생성하며 regular prepare와 bootstrap이 공유하는 private `(key_version, nonce)` reservation이 객실/AAD를 가로지른 다른 암호화 재사용을 fail-closed한다. prepare→confirm의 동일 envelope는 한 논리 reservation이다. immutable revision에는 key가 아닌 bounded AAD environment/projectRef를 저장해 recovery restore가 저장 당시 context로 복호화할 수 있다.
+
+물리 변경은 `prepare → physical lock change → confirm`이며 prepare가 즉시 mismatch를 기록하지만 current pointer는 confirm까지 유지한다. expired/uncertain mismatch는 actual PIN re-entry confirm 또는 기존 current의 confirmed physical rollback으로만 해소한다. maid read/change는 기존 public access lease의 exact room/target/current assignment/current attempt/maid/current pin version을 authority로 사용하고, change는 in-progress에서만 허용한다. maid confirm은 기존 lease를 revoke하고 동일 작업 권한·만료 시각의 새 pin version lease를 원자 재발급한다. reveal은 30초 이하 private 보조 lease, 최종 DB authorization recheck, authoritative lease `revealed_at`, `sensitive.read` append가 모두 성공한 뒤 남은 TTL 안에서만 plaintext를 반환한다.
+
+private revision/current/change/reveal/outbox tables는 FORCE RLS와 explicit revoke로 Data API를 닫는다. Phase-B outbox와 public sync event에는 room/version/status/source-controlled reason만 있고 envelope/PIN/AAD bytes는 없다. 모든 PIN RPC는 `reservation-command` global advisory lock을 가장 먼저 획득해 cancel/handover/complete와 동일한 lock graph를 사용한다. Google provider, worker, full resync, Cron/Vault/production secret 설정은 이 Phase A에 포함하지 않는다.
+
+### #136 Google Sheets PIN projection worker — source/dev 완료
+
+Phase B worker는 outbox의 current room/version만 global singleton lease/fence 아래 claim하고, 그때만 private encrypted revision context를 service-role RPC로 받는다. 런타임은 승인된 environment/projectRef/spreadsheet/tab mapping을 PIN 복호화와 Google OAuth 전에 확인한다. hosted mapping은 의도적으로 비어 있어 release 승인 전에는 fail-closed한다.
+
+Google Sheets에서는 `room_number`를 business identity로 하여 최대 121행을 bounded read한다. 행 이동은 실제 room-number 행을 갱신하고, 중복 identity·상위 Sheet version·다른 객실이 차지한 deterministic slot은 덮어쓰지 않는다. equal version도 canonical PIN과 safe marker가 다르면 DB 정본으로 repair한다. provider 시작 33초, settle 39초, 전체 45초의 하나의 absolute deadline을 DB/OAuth/Sheets response stream에 전달한다. HTTP 429/5xx는 bounded retry이고 write 시작 후 transport 불확실, retry 소진, schema/ACL/config 오류는 operator reconciliation 전 global block이다.
+
+private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 직접 접근을 막는다. developer database projection은 configured/approved boolean, safe counters/timestamp/stable error만 노출한다. full resync와 운영 mapping/ACL/Cron은 #137 범위다.
+
+### #140 초기 PIN bootstrap과 예약 readiness 분리 — source/dev 완료, production 미승격
+
+`pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. reveal/change의 기존 current revision·lease 권한 검사도 유지한다.
+
+초기 데이터가 없는 환경에서는 active admin만 `POST /v1/rooms/pins/bootstrap`을 호출한다. 런타임은 secret manager의 `ROOM_PIN_INITIAL_DIGITS`를 읽고 DB가 반환한 최대 25개 후보의 현재 객실번호와 서버 안에서 canonical credential을 조합·AES-GCM 암호화한 뒤 service-role RPC에 envelope만 전달한다. RPC는 global lifecycle lock, sorted room lock, immutable version 1 revision, current pointer, verified sync event, Sheet outbox, safe audit와 command receipt를 한 transaction에 기록한다. current PIN이나 unresolved mismatch가 있으면 덮어쓰지 않는다. 평문 초기 숫자는 source/migration/DB/API/log/audit/notification에 존재하지 않는다.
+
+성공의 initialized는 위 원장 전체가 commit된 객실, skipped는 기존 current/unresolved 물리 변경을 보존한 객실이다. DB validation 실패는 batch 전체 rollback이며 오류를 skipped로 은폐하지 않는다. timeout/응답 유실은 commit 여부가 불확실하므로 rollback으로 단정하지 않고 같은 key의 receipt replay로 확인한다. 53번째 보완 migration은 기존 lease/revision을 보존해 registry를 backfill하고, matching confirmed lease/revision만 같은 논리 암호화로 인정한다. 다른 과거 key-version/nonce 충돌은 이력을 고치지 않고 upgrade를 fail-closed한다.
+### #137 PIN Sheet full resync와 운영 상태 — source/dev 완료
+
+공개 `GET /v1/room-pin-sheet-sync/status`는 변경 완료 비밀번호와 active developer/admin session을 매번 확인하고 `pending/failed/operatorBlocked/oldestPendingAt/lastSuccessAt/lastErrorCode/version`만 반환한다. 현재 local credential 또는 target mapping이 invalid이면 과거 successful heartbeat보다 우선해 false-green을 차단한다. `POST /v1/room-pin-sheet-sync/full-resync`는 strict `{expectedVersion}` body, scoped idempotency key와 status version CAS를 요구한다.
+
+요청은 121실 room master와 current PIN revision reference를 deterministic row 2..122 snapshot으로 고정한다. canonical environment/project/spreadsheet/tab SHA-256 marker가 request/run/claim 전 구간에서 일치해야 하며 raw spreadsheet/tab과 provider material은 DB/API/audit에 노출하지 않는다. full writer와 incremental writer는 같은 singleton fence를 사용해 provider permit 한 건만 얻는다. full write 성공 시 `provider_write_started_at` 이전에 만들어진 snapshot-room outbox만 version과 무관하게 supersede하고 marker 이후 PIN 변경은 남겨 최종 수렴한다. retryable failed run도 logical active command이므로 다른 key가 중복 full write를 예약할 수 없다. developer audit은 requested/succeeded의 `status/roomCount/reconciliation`만 투영한다.
+
+각 일반 run은 immutable self-FK `recovery_root_run_id`로 자신을 root로 삼고, 명시 recovery는 잠근 exact-fence `operator_blocked` predecessor의 기존 root만 상속한다. root는 cleanup 범위를 식별할 뿐 claim/authorize/settle 권한을 주지 않으며 매 단계의 singleton claim·lease fence CAS는 그대로 필요하다. recovery의 target mismatch, retry 소진, provider/DB 불확실, marker lease expiry와 `SNAPSHOT_STALE`은 같은 root의 새 block으로 남는다. 성공 settle은 요청 시점보다 과거인 같은-root block을 최대 32건만 정리하며, 초과 또는 부분 정리는 성공 audit 없이 현재 provider marker를 보존한 `DB_SETTLE_UNCERTAIN` block으로 닫아 다음 명시 recovery만 허용한다.
+
+### #84/#85 사진 HTTP adapter와 보존 정리 worker — source/dev 완료
+
+`src/modules/photos`의 순수 binary validator/Drive adapter/application service를 Fastify와 generated Deno bridge가 공유한다.
+인증→DB durable admission/quota→bounded raw body/실파일 검증→begin/claim→사전 provider identity 저장→외부 HTTP→provider 성공 기록→finalize 순서이며 외부 요청 중 DB transaction을 유지하지 않는다.
+#83 legacy primitive service-role grant는 #84 migration에서 회수하고 admitted wrapper만 HTTP 서비스 경계로 사용한다.
+slot/status metadata와 original content 권한은 분리한다. limited upload는 일반 active guard를 완화하지 않으며 content는 provider wait 이후에도 최신 권한을 재검증한다.
+decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생성 검증이며 runtime CDN fallback이 없다. actual local worker(memory256MB/CPU2초) 합성4MP JPEG/WebP gate는 통과했으며 운영 Google/hosted 검증은 release 후 별도다. ignored asset 재생성 때문에 배포 전 `npm ci`와 `npm run edge:check`가 모두 성공해야 한다. 실패/누락 시 deploy 금지다.
+상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [사진 상태 gate](./API_STATUS_MATRIX.md)를 따른다. #84 업로드·열람, #85 별도 `photo-purge` Function과 #31 제출·검수는 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`까지 병합됐다. 원격 Google·production 검증은 별도 release gate다.
+
+#85 worker는 accepted 보존 만료, never-accepted orphan 보상, 확인된 빈 room/date 폴더를 서로 다른 durable 원장으로 처리한다. 한 실행의 세 단계 claim 합계는 blocked 전환을 포함해 10 이하이고 DB RPC·OAuth·Drive 호출·settle·heartbeat가 같은 45초 absolute deadline을 공유하며 Edge에서 sleep하지 않는다. provider DELETE는 settle/heartbeat 여유시간이 보장될 때만 시작하고, retry exhaustion으로 blocked가 생기면 heartbeat와 developer status를 degraded로 기록한다. provider `204/404`만 성공이고 retry는 DB `next_attempt_at`이 결정한다. 폴더 retirement는 operation→room-folder binding 및 upload state를 함께 잠가 reserve/provider-success/finalize와 경쟁해도 진행 중 업로드를 삭제하지 않는다. room 폴더를 먼저 정리하고 모든 child가 terminal인 경우에만 date 폴더를 정리한다. raw Drive locator는 terminal settle에서 지우고 private digest tombstone과 immutable cleanup event만 남긴다.
+
+### #31 전체 제출·검수·반려 재청소 — source/dev 완료, production 미승격
+
+`submission_inspection_reclean` append-only migration이 #30의 slot/current-photo/binding 원장을 실제 업무 command로 연결한다. 메이드 제출은 물리 완료, 본인 current notified attempt, 최신 assignment version, 필수 verified·미만료·미삭제 photo set을 같은 attempt lock에서 다시 확인하고 immutable submission version과 exact photo binding set을 만든다. current pointer는 expected revision CAS이며 일반 재제출은 과거 version을 `superseded`로 보존한다. 폭탄방 신고와 선택 증빙은 제출 전에 attempt에 불변 기록한 뒤 최초 submission에 seal하며 제품 계약상 다른 submission version으로 이동하지 않는다.
+
+관리자 queue/detail은 current `inspection_pending` 제출만 대상으로 하며 live room master 대신 notified assignment의 immutable room snapshot과 sealed photo ID/slot/version을 반환한다. provider locator/hash/file name, PIN, PII, request hash, raw before/after state는 공개하지 않는다. stale pointer의 폭탄 선판정·승인·반려는 `STALE_VERSION`으로 실패하고 서로 다른 key의 동시 폭탄 판정은 정확히 한 건만 승리한다.
+
+승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다.
+
+### #93 주급 주차 조회·PAYING 시작 — source/dev 완료, production 미승격
+
+Fastify와 Edge는 동일한 app-owned `list_payroll_cycles` / `start_payroll_cycle` RPC만 호출한다.
+GET은 종료된 KST 주차에서 active admin 전체·선택 조회와 active maid 본인 조회만 허용하며,
+cycle이 없으면 쓰기 없이 `cycleId=null`, `version=0` conceptual OPEN을 반환한다. POST는 active
+business admin만 실행하고 client amount/earning ID를 받지 않으며 expected version CAS와
+`(actor, payroll.start, Idempotency-Key, canonical request hash)` receipt를 사용한다.
+
+OPEN→PAYING은 확정 positive earning item, locked amount, immutable payroll event, domain audit,
+maid notification/outbox를 짧은 transaction 하나로 기록한다. 실제 송금 provider는 호출하지 않는다.
+PAYING 이후 늦게 확정된 earning은 locked snapshot에 섞지 않고 별도 late projection으로 표시한다.
+Edge 권한 거부는 raw route 대신 `edge.authorization.payroll` bounded source로 집계한다. Fastify
+rollback adapter는 같은 role/error 계약을 유지하지만 기존 전역 activity persistence 기반이 없으므로
+payroll만 별도 영속 로그를 만들지 않는다.
+
+Python developer 운영 콘솔의 auth/accounts/developer 16-operation allowlist는 유지한다. 대신 전체
+source OpenAPI를 CI 임시 디렉터리에 Python client로 생성·컴파일해 payroll codegen 호환성을 검사한다.
+#93/#95는 35 migrations / 76 paths / 82 operations로 `dev@c3bdece5e5e35fe693212b0c974df19d0e112e42`에
+병합됐다. production 19 / 39 / 43과 Pages는 변경하지 않았다.
+
+### #96 주급 keyset pagination·응답 상한 — source/dev 완료, production 미승격
+
+Fastify와 Edge의 `GET /v1/payroll`은 app-owned `list_payroll_cycles_page` RPC를 호출하며 admin-all을
+`maidProfileId ASC`로 keyset 순회한다. 기본/최대 page size는 10이고 DB도 최대값을 독립 강제한다.
+각 cycle의 `itemCount/totalAmount/lateEarningCount/lateEarningAmount`는 전체 집합의 정확한 값이지만
+`items`와 `lateEarnings` preview는 각각 최대 10개다. 나머지는 `GET /v1/payroll/entries`에서
+`earnedOn ASC, earningId ASC` keyset으로 기본 25, 최대 50개를 조회하며 OFFSET은 사용하지 않는다.
+
+continuation은 `base64url(payload).base64url(HMAC-SHA256)` opaque cursor다. 별도
+`PAYROLL_CURSOR_HMAC_SECRET`(UTF-8 32 bytes 이상)이 없거나 짧으면 fail-closed하고, version·exact schema·
+canonical base64url·길이 1,024·서명을 검증한다. payload scope는 actor profile ID와 정확한 role,
+weekStart, maid에게 강제한 self를 포함한 effective maid filter, stream kind와 source-controlled sort를
+묶는다. cursor 내부 last key/hasMore는 공개 projection에 노출하지 않는다.
+
+기존 `list_payroll_cycles` RPC는 service-role에서 unbounded aggregate를 만들지 않도록 최대 10개 nested
+preview를 반환하는 bounded compatibility projection으로 교체했다. 따라서 `start_payroll_cycle`의 최초
+receipt와 동일 command replay도 전체 earning JSON을 먼저 생성하거나 저장하지 않으며, exact totals와
+bounded preview만 반환한다. Fastify/Edge는 list/entries/start/replay의 최종 HTTP envelope를 UTF-8 JSON
+128 KiB로 측정해 초과 시 `PAYROLL_RESPONSE_TOO_LARGE`로 실패한다. 36 migrations / 77 paths /
+83 operations가 `dev@e55f0e9be2f26a1a3700b8d31ba1958dcbe65b3d` 기준 source에 통합됐으며
+production/main/recovery/Pages/Cron/Vault는 변경하지 않았다.
+
+### #94 컴플레인·보상·정정·외부 지급 증거 — 정책 확정
+
+Decision Issue #94는 아래 도메인 경계를 확정했다. 이 절은 후속 schema/API/migration의 설계 계약이며,
+기존 #31 원청소 earning과 #93/#96의
+주차 조회·`OPEN → PAYING`·pagination identity는 future append-only migration에서 보존한다.
+
+- 원청소 entitlement와 타 메이드 compensation entitlement는 각각 실제 typed table/FK다. `earnings`는
+  source별 nullable FK와 exactly-one CHECK를 사용하고 임의 polymorphic UUID를 받지 않는다.
+- 컴플레인은 원 청소 승인 뒤 30일 안에 source-controlled reason code로 접수한다. 자유형 고객 정보와
+  PII를 저장하지 않는다. immutable decision version/current pointer CAS로 `confirmed / unverifiable / false`,
+  정수 0~10 평가 벌점, 재작업 결정을 보존한다. 본인 maid appeal은 최초 decision 뒤 7일 안에 한 번뿐이고,
+  종결 뒤 reopen 없이 active business admin correction version만 추가한다.
+- 같은 maid의 승인 후 재작업은 earning 0원이다. 다른 maid의 보상은 0원 이상 원 target base fee snapshot
+  이하의 정수 원화 immutable decision이며, 해당 maid의 field completion과 승인 뒤 exactly-once earning을 만든다.
+- adjustment는 signed append-only 원장이다. 음수는 실제 prior entitlement/adjustment의 correction/reversal만
+  허용하고 `reversal_of`의 provenance·maid·currency·amount를 검증한다. complaint penalty는 자동 음수
+  adjustment가 아니다. `PAID` cycle은 바꾸지 않고 이후 cycle에 adjustment를 추가한다.
+- adjustment 포함 payable amount가 0 이하이면 `OPEN → PAYING`과 0원 `PAID` event를 금지하고 residual을
+  다음 positive cycle로 이월한다.
+- 시스템은 송금 provider를 호출하지 않는다. active business admin이 외부 전액 송금을 확인한 결과만
+  `OPEN → PAYING → PAID`로 기록하고 불확실한 결과는 `PAYING → CHECK`로 둔다. `NO_TRANSFER_CONFIRMED`와
+  확인 actor/time이 있을 때만 `PAYING/CHECK → OPEN`이며 재시도는 새 event다. `PAID → OPEN`은 금지한다.
+- payment method는 source-controlled code다. provider/reference ID는 제한된 형식·길이로 PII/secret을
+  금지하고 `paidAt`은 server 시각이다. 영수증·계좌·수취인 PII를 저장하지 않는다. 모든 관리자 command는
+  actor, `expectedVersion`, scoped idempotency/request hash와 audit을 요구한다.
+
+#100 complaint/appeal/correction과 #101 compensation provenance는 각각 PR #104/#105로 dev에 통합됐다.
+#102 adjustment/carry-forward는 PR #106으로 `dev@cb26650221b3e47804edafd51cad5bfc8872c349`에
+통합됐다. `CHECK/PAID` command와 지급 evidence도 아래 #103으로 source/dev 완료됐으며
+main/recovery/production에는 적용되지 않았다.
+
+### #100 컴플레인·이의·정정 수명주기 — source/dev 완료, production 미승격
+
+`complaint_cases`는 원 room/target/attempt/submission/approved inspection/current original earning/maid를
+실제 FK로 묶고 status/version/current decision만 갱신하는 projection이다. `complaint_decisions`,
+`complaint_maid_responses`, `complaint_case_events`는 UPDATE/DELETE가 금지된 append-only 원장이다.
+접수 원천은 `scheduled_checkout|manual_checkout|stayover_request|manual_room_request` target과
+승인 submission에 non-null로 정확히 귀속된 original earning만 허용한다. 따라서 inspection/post-approval
+reclean과 향후 alternate compensation source는 SQL NULL까지 fail-closed로 거부한다. 접수는 승인 시각부터
+30일 경계를 포함하고, 최초 판정부터 7일 경계를 포함해 원 담당 maid가
+`acknowledged` 또는 allowlist appeal을 정확히 한 번만 기록한다.
+
+상태는 `received → under_review → decided → acknowledged|appealed → closed`다. 미응답 사건은 7일
+응답 창이 지난 뒤에만 종결하고, appealed 사건은 appeal event 뒤에 current decision을 prior FK correction으로 교체한 뒤에만
+종결한다. closed는 reopen하지 않으며 post-close correction도 status와 최초 응답 창을 유지한다. correction
+알림은 새 응답 창을 열지 않는 informational event(`requires_action=false`)다. 벌점 0..10은 평가 전용이고
+migration/RPC는 earning/payroll/adjustment를 쓰지 않는다.
+
+Fastify와 Edge는 동일한 service-role-only RPC와 stable error mapping을 사용한다. 모든 mutation은 actor,
+expectedVersion, scoped Idempotency-Key, canonical request hash receipt, bounded audit와 필요한 notification/outbox를
+한 transaction에 기록한다. 목록은 최대 31일·100건, 이력은 최대 100건이며 HMAC cursor를 actor/range 또는
+actor/complaint stream에 고정하고 HTTP JSON은 128 KiB를 넘으면 실패한다. 계약은 37 migrations /
+85 paths / 92 operations이며 PR #104가 `dev@88d1865bdaafb6dc2afa556452ae80c91569f393`에 통합됐다.
+네 public complaint table의 SELECT RLS는 최신 profile 권한뿐 아니라 JWT `session_id`가 같은 사용자에게
+귀속된 현재 `auth.sessions` row와 정확히 일치해야 통과한다. claim 누락·malformed·삭제된 세션·타 사용자
+세션은 cast 오류나 정보 노출 없이 0행으로 실패한다. 모든 Fastify/Edge 성공·오류 응답은
+`Cache-Control: no-store`이며 빈 cursor도 `INVALID_COMPLAINT_CURSOR` 400으로 동일하게 거부한다.
+
+### #101 컴플레인 재작업·typed compensation earning — source/dev 완료, production 미승격
+
+38번째 append-only migration은 기존 37개와 #31 원청소 earning identity를 수정하지 않는다.
+`post_approval_complaint_reclean` target은 confirmed current complaint decision과 immutable typed FK로 연결하며
+`inspection_reclean` provenance와 혼용하지 않는다. active password-complete business admin의 명시적 command가
+assignee와 amount를 결정하되, server가 current occupancy/next check-in, 다른 active room target, published
+reclean template, 당일 maid availability로 안전한 현재 접근 창을 증명한 경우에만 target과 notified assignment를
+원자 materialize한다. client가 `availableFrom`, `dueAt`, fee snapshot을 보내는 API는 없다.
+
+같은 원 maid는 compensation decision amount 0 이력만 보존하고 entitlement/earning은 만들지 않는다. 다른
+active maid는 정수 KRW `0..originalBaseFeeSnapshot`을 immutable decision으로 보존하며, 실제 current attempt의
+field completion과 current submission 승인 뒤 typed `compensation_entitlements`와 earning을 정확히 한 건 만든다.
+0원도 provenance/ledger 한 건을 유지하지만 기존 positive payroll candidate 합계를 늘리지 않는다. 폭탄방
+report/bonus는 재생성하지 않는다. approval RPC는 original/inspection reclean/complaint reclean을 명시적으로
+분기하며 실제 compensation `earningId`를 receipt/audit/HTTP에 돌려준다.
+complaint reclean 자체가 inspection에서 다시 반려되면 entitlement/earning 없이 종료하고 nested
+`inspection_reclean` target을 자동 생성하지 않는다. #94/#101은 재귀 재작업 정책을 확정하지 않았으므로
+후속 Decision 전까지 fail-closed한다.
+
+materialize와 correction/close/start/approval은 동일 domain lock과 case/target CAS로 경합한다. materialize 전
+semantic correction은 stale materialize를 막고, materialize 후 start 전 finding/reworkRequired correction은 ghost
+assignment 방지를 위해 `COMPLAINT_REWORK_PRESTART_FROZEN`으로 거부한다. penalty-only correction은 current
+confirmed+rework 의미가 유지되어 activation/start가 가능하다. 시작 뒤 correction은 과거 work/compensation
+provenance를 무효화하지 않고 actor-aware projection의 `sourceDecisionIsCurrent=false`로 차이를 드러낸다.
+generic pre-start change/handover는 frozen assignee를 바꿀 수 없다. raw compensation decision RLS는 live-session
+business admin만 허용하고 original/assignee maid HTTP projection은 서로의 profile UUID와 타인의 보상액을
+노출하지 않는다. developer 감사 목록은 `complaint.rework_materialized`와 `compensation.earned`의 source-controlled
+safe summary만 추가하며 raw state/request hash/idempotency key/maid cross-sensitive 식별자는 반환하지 않는다.
+Fastify/Edge/OpenAPI 후보는 86 paths / 93 operations이며 production은 변경하지 않았다.
+
+### #102 signed adjustment·순차 carry-forward — source/dev 완료, production 미승격
+
+39번째 append-only migration은 기존 38개 migration과 earning/compensation provenance를 수정하지 않는다.
+`payroll_adjustments`는 correction/reversal/late carry source 중 정확히 하나의 typed FK를 가지며 client reason을
+받지 않는다. correction은 signed delta이고 reversal은 source의 미반전 전액을 정확히 반대 부호로 한 번만
+기록한다. reversal-of-reversal은 같은 규칙의 append-only inverse chain으로 허용하되 root earning의 누적
+entitlement는 0 미만이 될 수 없다. complaint penalty는 이 원장을 자동 생성하지 않는다.
+
+모든 payroll mutation은 scoped receipt, global advisory lock, actor, maid별 adjustment book, cycle, 정렬된 source
+순으로 잠근다. `start`는 earning + adjustment - carry의 payable이 0 이하면 쓰기 없이
+`PAYROLL_NONPOSITIVE_REQUIRES_CARRY`로 실패한다. 별도 carry-forward command만 OPEN candidate를 claim해
+immutable offset settlement를 기록하고 cycle version을 증가시키며 payment event는 만들지 않는다. net 0은
+carry row가 없고, net 음수의 절댓값만 바로 다음 KST 월요일 주차에 immutable residual로 생성한다. 그 다음
+주차도 non-positive면 같은 command를 다시 실행해야 하며 더 늦은 주차가 residual을 건너뛰어 선점할 수 없다.
+
+offset settlement가 있는 OPEN cycle은 경제적으로 동결되어 이후 PAYING 전환을 거부한다. PAID 또는
+offset-settled cycle에 늦게 승인된 earning은 late projection에 남고, active password-complete business admin의
+명시적 command가 원 earning을 수정하지 않은 채 바로 다음 주차에 positive `late_earning_carry` adjustment를
+exactly once 만든 뒤에만 원 주차 late projection에서 제외된다. PAYING/CHECK는 #103 결과 확정 전 fail-closed다.
+여기서 late earning은 source 주차 cycle이 이미 PAYING/CHECK/PAID 또는 offset-settled로 동결된 뒤 확정된
+positive earning만 뜻한다. source cycle이 없거나 일반 OPEN이면 그 earning은 원 주차의 정상 candidate이며,
+다음 주차가 먼저 동결됐더라도 원 주차를 독립적으로 start/carry할 수 있으므로 prior-late fence 대상이 아니다.
+
+Fastify와 Edge는 동일한 4개 command route와 bounded cycle/entry projection을 사용한다. 응답은
+`offsetSettled`, signed `adjustmentAmount/carryInAmount/carryOutAmount/payableAmount`를 포함하고 128 KiB 상한,
+signed cursor, `Cache-Control: no-store`를 유지한다. 새 여섯 public ledger table은 live `auth.sessions`와 최신
+role/password/maid-self를 함께 확인하는 RLS만 허용한다. 감사 API는 네 source-controlled payroll event의 금액,
+maid 식별자, raw state/request hash를 제거한 safe summary만 제공한다. 통합 계약은 39 migrations / 90 paths /
+97 operations이며 production/main/recovery는 변경하지 않는다.
+
+### #103 외부 전액 지급 결과·CHECK·PAID — source/dev 완료, production 미승격
+
+40번째 append-only migration은 기존 39개 migration을 수정하지 않는다. 각 `payment_started` event는
+immutable `payroll_payment_attempts` 한 건의 typed source가 되고, `check`/`paid`/`reopened` 결과는 attempt,
+cycle, maid, locked amount, actor, server time을 함께 보존한다. 기존 start event는 attempt만 deterministic하게
+backfill하며 과거 CHECK/PAID evidence는 추측해 만들지 않는다. OPEN 복귀 뒤 재시작은 같은 cycle의 다음
+attempt number와 새 start event를 만든다.
+40번째 migration 이후 발생하는 payment status transition은 private append-only marker에만 기록한다. cycle
+projection과 start event/attempt/result 양쪽에 걸린 deferred constraint가 commit 시 exact version, locked amount,
+actor, server time, before/after status를 검증하므로 privileged direct DML도 evidence 없는 projection 변경이나
+transition 없는 evidence 삽입을 남길 수 없다. migration 이전 CHECK/PAID에는 marker나 결과를 추측 backfill하지 않는다.
+
+active password-complete business admin만 `PAYING → CHECK`, `PAYING/CHECK → PAID`,
+`PAYING/CHECK → OPEN`을 실행한다. CHECK 사유는 `TRANSFER_RESULT_UNCERTAIN`, reopen 사유는
+`NO_TRANSFER_CONFIRMED`로 고정하고 cycle `expectedVersion`과 scoped idempotency를 검증한다. PAID는 client
+amount나 `paidAt`을 받지 않고 current attempt의 양수 locked payable 전액과 DB server 시각만 기록하며 이후
+cycle/evidence UPDATE·DELETE·OPEN 복귀를 금지한다. 상태·결과·audit·maid notification/outbox는 한 transaction이다.
+지급 start/result와 승인에 의한 earning 생성은 모두 scoped receipt → global advisory → actor/domain row 순서로
+잠근다. 특히 inspection approval이 actor row를 global fence보다 먼저 잠그지 않아 late earning과 다음 cycle
+freeze 경합에서도 deadlock 대신 하나의 정상 결과 또는 stable domain loser만 남긴다.
+
+현재 payment method는 `bank_transfer` 하나다. reference는 8~64 ASCII allowlist, 영문/숫자 포함, 7자리 연속
+숫자와 URL-like 구문을 거부한 뒤 uppercase canonical 값으로 `(method, reference)` 전역 중복을 막는다. 이
+형식은 실제 은행/provider 계약이 미확정인 동안의 fail-closed source 계약이며 확장은 별도 migration이
+필요하다. canonical reference는 admin command/result에만 반환하고 maid 목록, developer audit, 알림에는
+노출하지 않는다. 영수증·계좌·수취인 PII·secret·raw body/error를 저장하지 않으며 provider HTTP를 호출하지
+않는다. Fastify/Edge/OpenAPI 93 paths / 100 operations source가 PR #107로
+`dev@3297679ca2e903e68cfa2dd9e7bc137341c5b27d`에 통합됐고 production은 변경하지 않았다.
 
 ```mermaid
 flowchart LR
@@ -82,6 +331,55 @@ erDiagram
 
 ## 동시성과 멱등성
 
+### #83 사진 업로드 작업 원장 — source/dev 완료, production 미승격
+
+[PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)은 exact head
+`3dfbb70176533a69257c68c2b2af2ee19cc9bd22`의 독립 QA P0/P1/P2=0·required CI·Codex 96/100 승인 후
+`dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다. 이후 #84/#85도
+`dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`까지 #31 포함 source/dev 완료했다. 개발 정본은
+34 migrations / 74 paths / 80 operations이며 기존 production 19 migrations / 39 paths / 43 operations는
+변경하지 않았다. 운영 Drive/HTTP/purge hosted 검증은 별도 release gate다.
+
+`photo_storage_operations`는 #30 뒤의 append-only 개발 migration이다. private operation/object,
+mutable lease/state, immutable acceptance/event를 분리한다. scoped key digest + canonical request hash와
+실제 binding tuple 비교로 retry를 동일 작업에 수렴시킨다. raw key/session/provider locator는 공개 응답이나
+audit에 복제하지 않는다. provider object UUID는 작업당 하나이고 locator는 provider 전체에서 unique다.
+
+외부 업로드 전 작업 identity와 claim/fence를 commit한다. 실제 Drive 호출은 #84가 DB transaction 밖에서
+수행한 뒤 최초 성공 시각을 기록한다. finalize는 최신 actor/session/capability와 photo CAS를 재검증하고,
+verified photo/current/history/acceptance/`photo.upload_accepted` audit를 한 transaction으로 확정한다.
+helper의 metadata 주장은 실제 bytes/provider 검증을 대체하지 않는다.
+
+DB 응답 유실은 실패 확정이 아니다. worker reconciliation은 기존 사용자의 session 폐기와 무관하게
+accepted 연결을 조회하며, 과거 current 사진·submission에서도 사용된 파일을 고아로 판정하지 않는다.
+unknown provider 결과는 reconciliation_pending으로 보존한다. never-accepted임을 확인하고 비즈니스 finalize를
+차단하는 compensation_pending fence를 획득한 candidate만 후속 adapter의 보상 대상이다.
+accepted 파일의 7일 삭제 worker/Cron과 HTTP 열람은 #85/#84 후속이며 이번에 구현하지 않는다.
+
+서비스 RPC만 private 원장을 쓴다. global domain lock → profile NO KEY UPDATE → live Auth session SHARE →
+attempt → storage state/object 순서와 마지막 clock을 사용한다. actor당 30/min 포화 row, provider 호출 가능한 in-flight 8건,
+slot당 1건, lease 5분·최대8회 claim은 구현 자원 상한이고 제품 capability TTL은 그대로다.
+lease claim digest와 fence를 모두 검사하며 다른 worker가 유효 claim을 공유하거나 만료 claim으로 확정하지 못한다.
+세부 state/권한/후속 범위는 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
+
+### #30 사진·제출 기반 모델 — source/dev 완료, production 미승격
+
+[PR #81](https://github.com/wrongstory/room-management-system-backend/pull/81)은 독립 QA P0/P1=0,
+required CI와 Codex 위임 평가96/100 승인을 거쳐 `dev@a4f8cb5b3c551b6df641491f5ac02c209d71f26d`에
+병합됐다. 당시 개발 통합은 30 migrations / 63 paths / 68 operations였으며, 기존 production
+19 migrations / 39 paths / 43 operations는 변경하지 않았다. 최신 통합 상태는 문서 상단의 현재 정본과 API 상태표를 따른다.
+
+사진 객체의 업로드, 제출본 작성, 검수와 물리 현장 완료는 분리한다.
+target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참조하고,
+현재 사진 pointer와 불변 제출본의 사진 binding은 서로 다른 관계로 관리한다.
+인계 전 사진이 새 maid의 attempt로 승계되거나 재촬영으로 과거 제출 증빙이 바뀌면 안 된다.
+
+이번 #30은 모델과 내부 완전성 검증 기반이며 새 HTTP API나 Drive worker를 제공하지 않는다.
+서버 내부 metadata 검증은 파일의 magic bytes·EXIF·Drive 업로드 성공 검증을 대체하지 않는다.
+빈/불명확한 legacy template은 보존하면서 새 제출은 fail-closed하고, 현재 v7을 과거 작업에
+자동 적용하지 않는다. 기존 사진 없는 물리적 현장 완료 계약은 유지한다.
+상세 범위와 검증 상태는 [사진·제출 기반 모델](./PHOTO_SUBMISSION_BASE.md)을 따른다.
+
 | 작업 | 서버 보장 |
 |---|---|
 | 계정 명령 | `(actor_profile_id, command_type, idempotency_key)` receipt + canonical request hash. 같은 scope·같은 payload는 동일 결과를 재생하고, 같은 scope·다른 payload는 거부하며, 서로 다른 actor/command의 동일 raw key는 충돌하지 않음. 동시 계정 생성에서 DB winner 외 Auth 사용자는 보상 삭제 |
@@ -94,16 +392,174 @@ erDiagram
 | 입실 준비 증명 | preparation obligation의 current attempt와 approved submission을 같은 수행으로 묶고, target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서가 직전 점유 종료 이후부터 해당 체크인 이전까지 같은 객실에서 완결된 경우만 `approved` 허용. submission 소비 원장은 append-only·전역 unique라 다른 예약에 재사용할 수 없음 |
 | PIN lease | 객실·예약·target·현재 assignment·현재 attempt·담당 메이드·최신 verified PIN version을 한 계약으로 묶음. 수동 checkout은 stale lease를 폐기하고 현재 verified version으로 현재 미공개 lease 한 건만 새 revision으로 재발급 |
 | 담당 변경 | 대상 `assignment_version` CAS + 현재 담당 partial unique |
+| 미통보 draft 배정 | target row lock + immutable assignment revision + 현재 `(maid, service_date, sequence)` partial unique. 저장 시 target 날짜·접근 가능·마감 시각 snapshot 고정 |
+| 배정 알림 확정 | 서비스 날짜 global lock + target/assignment row lock + maid/week availability advisory lock + impact fingerprint + assignment/availability version CAS. 선택 부분집합 전체를 한 transaction으로 notification/outbox/audit와 함께 확정 |
 | 청소 시작 | 메이드별 `in_progress` partial unique |
 | 제출 | `client_submission_id` unique + 회차별 현재 제출 unique |
 | 검수 | 제출별 decision unique, 현재 `submitted` 버전만 조건부 전이 |
-| 수익 | submission/entitlement unique |
-| 지급 | `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + PAYING 이후 snapshot 불변 + 미송금 사유 기록 reopen + version CAS |
-| 알림 | 수신자별 dedupe key unique, 10분 group key |
+| 수익 | 현재 #31 submission/원청소 entitlement unique. #94 후속은 원청소/타 메이드 compensation typed FK + exactly-one source CHECK를 append-only로 추가 |
+| 지급 | 현재 `(maid_profile_id, week_start)` unique + earning의 `earned_on` 주차 일치 + `payroll_items.earning_id` exclusive claim + `OPEN → PAYING` snapshot 불변 + version CAS. #94 후속은 signed adjustment/carry-forward, `CHECK/PAID`, `NO_TRANSFER_CONFIRMED` reopen과 외부 전액 지급 증거를 추가 |
+| 알림 | `(recipient,dedupeKey)`는 logical event exactly-once, `groupId`는 `(recipient,groupFamily,scope)`별 첫 event 시각에서 고정된 10분 window로 분리. typed source/recipient/deep-link provenance와 exact terminal resolver를 DB가 검증 |
 
-복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃은 현재 SQL RPC에서 짧은 transaction으로 예약, obligation, revision/event, 감사 원장을 함께 커밋합니다. 배정 통보·검수·지급도 같은 원칙으로 후속 구현합니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
+복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃, 배정 알림 확정과 #31 검수는 SQL RPC의 짧은 transaction으로 원장, projection, 감사 이벤트를 함께 커밋합니다. 지급 API는 같은 원칙의 후속 구현입니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
+
+#25의 미통보 draft 배정은 기존 `cleaning_targets`와 `cleaning_assignments`를 재사용합니다. active business admin만 service-role RPC를 호출하며 DB가 actor를 다시 검사합니다. target의 `assignment_version`을 CAS로 잠근 뒤 기존 current draft를 `DRAFT_REVISED`로 닫고 새 immutable revision을 추가합니다. 이 단계는 `draft_assigned`까지만 전이하며 notification, outbox, cleaning attempt는 생성하지 않습니다.
+
+### #4 통보된 배정 조회 경계 — 2026-09-08 승인
+
+메이드 조회는 active profile/self ownership/notified revision을 모두 요구합니다. current 목록과
+history 모두 미통보 draft를 제외하며, 본인에게 실제 통보됐던 종료·superseded revision은
+history에 남깁니다. 다른 maid와 한 번도 본인에게 통보되지 않은 revision은 숨깁니다.
+RLS 외에도 Edge query에서 self/notified를 다시 제한하며 파생 target·schedule·attempt 조회가
+새 계획을 노출하는지 함께 검증합니다. 읽기 권한은 activation/start/PIN 권한이 아닙니다.
+
+통보 시점의 객실 ID/번호는 assignment에 immutable snapshot으로 저장합니다. 메이드 history는
+현재 target의 이동된 객실이나 최신 assignment version을 service-role hydration으로 읽지 않습니다.
+근거 없는 legacy 통보 행의 객실 snapshot은 null이며 현재 객실로 추측해서 채우지 않습니다.
+메이드 `targetAssignmentVersion`은 해당 통보 revision의 version이고 관리자는 현재 CAS를 봅니다.
+별도 Fastify assignment route는 기존에 없으므로 이번에 만들지 않습니다.
+
+PR #74는 기존 25개 migration을 그대로 두고 `20260908101844_maid_assignment_visibility.sql`만
+추가해 dev에 병합됐습니다. 그 PR에는 #7A/B/C의 실행/lease/limited session을 포함하지 않았습니다.
+field_completed는 물리적 완료 선언, 필수사진은 submission gate라는 최신 제품 가이드를 따릅니다.
+
+#73의 46번째 append-only migration은 `cleaning_targets_reservation_room_fk`를 다른 planned graph
+복합 FK와 같은 `DEFERRABLE INITIALLY DEFERRED` 검사 시점으로 맞춥니다. `change_reservation`은
+reservation → obligation → 동일 planned target을 기존 reservation-command lock 안에서 갱신하고,
+commit 시 FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` trigger가 최종 graph를 다시 검증합니다.
+제약 비활성화나 새 target 생성은 없습니다. unassigned/미통보 draft만 이동 가능하고 draft는 stale,
+notified와 checked-in은 stable domain error로 거부됩니다. 과거 notified room snapshot은 불변입니다.
+
+### #7A 온라인 실행 경계
+
+시작/물리 완료와 실행 version은 [Attempt Execution Core](./ATTEMPT_EXECUTION_CORE.md)를 따릅니다.
+기존 #28 활성화는 scheduled 회차를 만들고 #7A의 exact own active maid 명령이 실행합니다.
+일반 active/session guard를 완화하지 않으며, physical completion과 사진/submission/검수/ready는
+별도 축으로 유지합니다. 시간창·source·실제 점유는 시작 시 다시 검증하되 정상 시작 후 자정·마감·
+scheduled checkout만으로 물리 완료를 막지 않습니다. #7B 전 일반 계정 변경이 진행 업무를 고립시키지
+않도록 DB에서 거부하며 #7A 자체에는 limited capability/Auth 방법을 포함하지 않았습니다.
+
+### #7B 인계·제한 권한 경계 — source/dev 완료
+
+[Attempt Lifecycle](./ATTEMPT_LIFECYCLE.md)은 일반 active-only 인증/RLS와 별도로 기존 Auth
+session을 검증하는 limited 경로를 정의합니다. private grant와 revocation 원장은 불변이며
+2시간 실행/최대24시간 증빙 권한을 attempt·assignment revision·action에 묶습니다. 별도 로그인
+token을 발급하지 않고 만료·완료·인계·회수 뒤 권한을 복원하거나 다른 key로 TTL을 연장하지 않습니다.
+admin 전용 명령이 account lifecycle CAS, 실행 전이, 알림/outbox, 감사, receipt를 함께 commit합니다.
+일반 인계는 계정 비활성화와 구분하고 명시한 경우에만 이전 담당 계정을 제한 상태로 변경합니다.
+
+미착수 만료 scheduled는 관리자 명령으로 superseded 보존 후 다음날 재배정·재통보할 수 있습니다.
+진행 회차의 인계는 새 일정과 실제 source/점유/예약·접근창을 다시 검증합니다. reclean은 다른
+maid에게 이관하지 않습니다. #7C offline, 사진/PIN/제출 구현이나 production 활성화는 포함하지 않습니다.
+
+source/dev 승인·서브에이전트 독립 리뷰는 [오케스트레이션 기준](./DEVELOPMENT_ORCHESTRATION.md)을
+따릅니다. 점수 90점 이상도 운영 승격 권한을 뜻하지 않습니다.
+
+### #7C 오프라인 완료 경계 — source/dev 완료, production 미승격
+
+[Offline 계약](./ATTEMPT_OFFLINE.md)에 따라 온라인 시작과 work lease 발급을 원자적으로
+처리하고, 오프라인에서는 완료 1종만 기록합니다. 기존 온라인 start DTO를 바꾸지 않는 별도
+start-with-lease 경로를 사용합니다. PIN lease나 별도 bearer credential을 재사용하지 않습니다.
+
+서버가 발급한 lease와 본인 Auth/session을 확인한 뒤 현재 유효한 완료는 실행하고, 알려진
+만료/회수/재배정 완료는 제한된 metadata로 격리합니다. unknown/다른 사람의 lease는 해당
+원장을 만들지 않습니다. lease별 canonical completion 한 건으로 UUID 변경 공격의 row 증가를
+제한하고, 모든 잠금 뒤 시각으로 2시간 및 서버발급 후90일 한도를 검사합니다.
+
+90일 metadata/replay 이후에는 재실행하지 않습니다. 영구 command receipt나 audit로 client
+UUID/시각/offset/hash/응답을 복제하는 예외는 없습니다. 관리자 correction은 현재 유효한
+진행 회차의 물리완료만 별도 불변 결정/provenance로 기록하고 과거 회차를 복구하지 않습니다.
+PR #79로 `dev@e2648de4e40a84e60d19cbb1e4d01974a2f3d369`에 통합됐다. 이 source 완료는
+production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검수/수익을 만드는 작업이 아닙니다.
+
+#26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 typed `notifications`, private `notification_delivery_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
+
+## 시작 전 배정 변경 — #27
+
+네 개의 service-only RPC(change/unassign/cancellation request/decision)가 같은 private command helper를 사용합니다. Edge는 Auth user → active profile → active session → 비밀번호 변경 완료 → exact admin/maid를 확인하고, DB는 actor·ownership·current assignment·target version·transition을 다시 검증합니다.
+
+잠금 순서는 scoped command receipt → 기존 reservation-command advisory lock → target → current assignment → 요청 row이며, 담당 변경은 그 뒤 maid/week availability lock을 사용합니다. attempt INSERT 경계도 같은 reservation/target/assignment 순서를 사용하고 stale assignment revision을 차단합니다. non-superseded attempt가 하나라도 있으면 네 명령 모두 실패합니다. activation 기능 자체는 추가하지 않습니다.
+
+`assignment_change_requests`는 source identity 불변, assignment별 pending partial unique, terminal 수정/DELETE 금지입니다. authenticated에는 SELECT만 주며 RLS는 active admin 전체/maid 자기 요청만 허용합니다. developer는 business 요청을 읽지 못합니다. source assignment 종료 trigger가 pending을 superseded로 바꾸므로 예약 취소/조기 checkout 같은 기존 command도 ghost pending을 남기지 않습니다.
+
+변경은 과거 snapshot을 수정하지 않고 current 종료와 새 revision을 기록합니다. draft에는 알림이 없고 notified에는 기존 actionable notice resolve 및 새 notification/outbox가 receipt/audit와 함께 commit됩니다. 승인 결정은 request를 terminal로 만든 뒤 담당을 해제하며 반려는 담당을 유지합니다. source가 바뀐 요청은 새 assignment를 해제할 수 없습니다.
+
+일정 변경은 생성 command의 정확한 `manual_room_request + additional` 또는 `stayover_request + stayover` 조합에서 같은 날짜의 기존 창 축소만 구현합니다. stayover는 actual check-in 이후 active reservation의 같은 객실·점유 구간을 다시 검증합니다. source-kind 불일치와 checkout 원장 시간 변경은 거부합니다. 미래 planned checkout 재배정도 target identity를 그대로 쓰며 실제 checkout/PIN/attempt를 활성화하지 않습니다.
+
+요청 목록은 최대 31일/100건, `(requested_at,id)` cursor와 maid/page indexes로 제한합니다. reason detail은 길이/형식 제한된 business 데이터이며 관리자/본인에게만 반환하고 감사/알림에서 제외합니다. 4개 audit event는 developer safe projection/OpenAPI/Python 생성 모델에 동기화합니다. 운영/recovery/Pages 및 #7/#69/#10 실행 기능에는 변경이 없습니다.
+
+## 수행 회차 활성화와 이월 — #28
+
+기존 `reservation-scheduler`는 예약 전이와 같은 실제 실행 시각을 사용해 service-only
+`process_due_assignment_lifecycle`을 이어서 호출합니다. command receipt는 예약 전이와 별도
+`assignment.process_due_lifecycle` scope를 사용하며, target별 core는 #27과 같은
+reservation-command advisory lock → target → current assignment 순서로 재검증합니다. public admin/maid
+activation route는 추가하지 않았고 메이드의 실제 `in_progress` 시작은 #7 소유입니다.
+
+오늘 KST의 notified current assignment만 접근 가능 시각과 source별 실행 조건을 통과하면
+`scheduled` attempt를 정확히 한 건 만듭니다. attempt는 current assignment/maid/revision과 target의
+template/room snapshot을 고정합니다. 미래 날짜와 실제 checkout 전 planned target은 attempt 0이며,
+checkout obligation이 materialized/current가 되고 reservation actual checkout까지 확인된 뒤에만 같은
+target으로 활성화합니다. 같은 객실의 이전 active workflow가 있으면 assignment를 유지한 채
+`PREVIOUS_ROOM_WORKFLOW_ACTIVE`로 보류합니다.
+
+실행 창이 끝난 unassigned 또는 notified attempt-0 target은 ID와 original service date를 유지하고
+effective service date를 하루 이동하며 carryover/version/schedule revision을 한 번만 증가시킵니다.
+notified assignment는 이력으로 종료하고 actionable 알림을 resolve한 뒤 informational notification과
+outbox만 append합니다. active attempt가 있는 업무는 이월하지 않습니다. activation/rollover 감사에는
+승인된 ID·revision·날짜·count만 노출하며 request hash와 raw state는 developer projection에서 제외합니다.
+
+이월 write 전 다음 schedule을 계산하고 source-domain을 검증합니다. 연박은 exact
+`stayover_request + stayover`이며 같은 객실의 active/actual check-in/미퇴실 예약에
+다음 접근·마감 창이 포함되고 접근 KST 날짜가 다음 service date와 같아야 합니다.
+추가 청소는 activation과 동일한 active reservation overlap 검사를 다음 창에 적용합니다.
+실패하면 stable blocked reason만 반환하고 assignment/notification/outbox/target/version/revision/audit는
+변경하지 않습니다. 자동 취소·종류 변환도 없습니다. reservation-command lock 아래 검증하므로 예약 전이와 직렬화됩니다.
+
+## 미래 checkout 계획과 실행 경계 — #1/#4/#26/#28
+
+`checkout_cleaning_obligations.planned_cleaning_target_id`는 예약 생성 시점의 배정 identity이고,
+`current_cleaning_target_id`는 실제 checkout 이후 운영 pointer입니다. private 의무도 계획 target으로
+오늘/내일 배정·통보할 수 있지만 점유/입실 준비 projection은 바꾸지 않습니다. 예정/수동 checkout은
+같은 target을 materialized/current로 승격하고, 수동 조기 퇴실의 일정 변경은 새 schedule/assignment
+revision 및 변경 notification/outbox로 보존합니다. #28은 materialization·actual checkout·접근 시각을
+다시 확인한 뒤에만 이 current revision을 scheduled attempt로 활성화합니다.
+
+예약 변경·취소와 draft/commit은 동일 reservation-command transaction lock을 먼저 취득합니다.
+미통보 draft는 일정 변경 후 stale이며 재저장이 필요합니다. notified checkout의 같은 객실 퇴실 연장은
+미착수·PIN 미발급·offline lease 미발급일 때만 기존 assignment를 종료하고 schedule/assignment immutable
+revision, 이전 actionable resolve, 새 typed notification/outbox를 한 transaction에서 추가합니다. 그 밖의
+started/PIN/offline 경계와 notified 객실 변경은 `CLEANING_WORKFLOW_REPLAN_REQUIRED`로 원자 실패합니다. 취소 시
+current assignment 종료와 informational push 회수 통보를 함께 기록합니다. checkout attempt/PIN
+테이블의 실행 guard는 실제 checkout/current pointer/access 시각을 재검증합니다.
+
+append-only `20260904144209_planned_checkout_targets.sql`은 기존 target identity를 재사용하며
+private 기존 의무만 계획 target으로 backfill합니다. 새 target에는 해당 객실 타입의 published
+checkout template이 필수이며 누락 시 migration/예약 저장을 fail-closed합니다. 운영 템플릿을
+임의 seed하지 않습니다. 생성 시 fee/template/room snapshot은 이후 예약 일정 수정에도 보존합니다.
 
 ## RLS 원칙
+
+### #29 Assignment Preview: snapshot과 순수 계산 분리
+
+`get_assignment_preview_snapshot`은 `STABLE SECURITY DEFINER` 조회 RPC다. exact active business
+admin을 DB에서 재검증하고 고정 search_path/EXECUTE 최소 권한 아래 한 statement snapshot의
+정책·가능일·target·기존 배정·attempt·원 domain schedule을 반환한다. 이 RPC는 업무 DML,
+advisory write lock, audit, command receipt, outbox를 만들지 않는다.
+
+Edge의 platform-neutral `assignment-preview-core`는 snapshot만 입력으로 받는 bounded 순수
+계산 모듈이다. DB가 source lifecycle 유효성을 판정하고 optimizer가 고정 부하·capacity·fee·route를
+계산한다. 계획만 반환하며 저장은 기존 #25/#26 CAS 명령으로 분리한다. Fastify preview route는
+이번 범위가 아니므로 Edge source와 Fastify rollback parity를 같다고 표시하지 않는다.
+
+`assignment_duration_policy_versions`는 네 타입의 양수 minute 값과 version/상태/확정자를
+보존한다. 확정 정책은 최대 한 건이며 새 관리자 확정 command는 전역 policy lock과 expectedVersion
+CAS, actor/command/key + request hash receipt를 사용해 기존 confirmed를 retired로 전환하고
+새 version 및 `assignment.duration_policy_confirmed` 감사만 append한다. 기존 확정 값 변경·삭제,
+직접 Data API DML은 금지된다. 정책 확정은 preview 자체와 별도 명령이다. confirmed seed나
+template/default 시간 fallback은 없고 production 운영값 설정은 이번 PR에서 하지 않는다.
+
+상세 입력·출력·계산 한계는 [배정 Preview API 계약](./ASSIGNMENT_PREVIEW.md)을 따른다.
 
 - `public`의 모든 테이블은 RLS를 활성화합니다.
 - `anon`에는 테이블 권한을 주지 않습니다.
@@ -111,12 +567,149 @@ erDiagram
 - developer는 계정 수명주기만 관리하고 업무 권한을 상속하지 않습니다. active admin은 운영 테이블을 관리하지만 객실 PIN 원문은 전용 조회 함수로만 받습니다.
 - view는 `security_invoker = true`를 사용합니다.
 - 일반 Data API RLS의 profile/role 보조 함수는 `active` 계정만 식별합니다. `deactivation_pending`과 `upload_only`는 일반 역할이 아니라 만료 가능하고 업무 revision에 묶인 서버 전용 제한 capability로만 처리합니다.
-- 알림 수신자가 직접 바꿀 수 있는 필드는 `read_at`뿐입니다. `resolved_at`은 관련 업무 command만 service-role transaction에서 변경합니다.
+- 알림 원본 Data API SELECT/UPDATE는 서비스 역할에도 노출하지 않습니다. 본인 조회와 `read_at` 최초 기록은 live session을 재검증하는 service-role 전용 RPC만 사용하고, `resolved_at`은 관련 SECURITY DEFINER 업무 command만 변경합니다.
 - 내부 권한 함수는 `private` 스키마, 고정 `search_path`, 최소 반환값, 명시적 EXECUTE 권한을 사용합니다.
 - 사진 파일은 Drive에서 공개 공유하지 않습니다. API가 사용자 역할과 제출 소유권을 검사한 뒤 업로드·열람·삭제를 대행합니다.
 - Supabase에는 Drive 파일 ID·해시·크기·삭제예정일만 저장하고, 사진 레코드 쓰기는 서버 역할에만 허용합니다.
-- 인증 사용자의 직접 DML은 본인 알림의 `read_at`으로 제한합니다. `resolved_at`과 업무 상태 변경은 서버 명령/RPC만 사용합니다.
+- 인증 사용자의 직접 알림 DML은 금지합니다. `read_at`은 좁은 markRead RPC, `resolved_at`과 업무 상태 변경은 검증된 서버 명령/RPC만 사용합니다.
 - 상세 역할 매트릭스와 상태 변경 규칙은 [Auth·RLS 계약](./AUTH_RLS_CONTRACT.md)을 따릅니다.
+
+### #109 typed 알림 writer 계약 — source/dev 완료, production 미승격
+
+[notification catalog](./NOTIFICATION_CATALOG.md)이 32 category/48 event family의 recipient capability,
+source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
+모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
+DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
+재검수 요청은 active admin 전체의 inbox로 fan-out하고, 수동 checkout은 동일 logical
+schedule event를 한 번만 추가합니다.
+
+#128은 `push_eligible`을 `requiresAction`과 분리해 취소·회수·결정 informational event도 전달합니다.
+`cleaning.field_completed`는 online/limited/offline correction 모두 active admin에게 typed inbox를 fan-out하고,
+actor 자신에게만 push를 생략합니다. 통보 후 예약 인원, 운영 차단, 배정에 영향을 주는 blocking room issue,
+PIN sync 상태 변화는 exact current notified assignment에만 audit-event/assignment provenance로 전달합니다.
+
+`dedupeKey`는 recipient별 logical event exactly-once이고 `groupId`는 이와 분리된 비민감
+UUID입니다. 그룹은 `(recipient,groupFamily,scopeKind,scopeId)`별 첫 event에서
+고정된 `[startedAt,startedAt+10m)`을 쓰며 정확한 경계는 새 그룹입니다. self-action,
+inactive, 임시 비밀번호 수신자도 inbox history는 남지만 push enqueue는 fail-closed합니다.
+provenance가 없는 `private.notification_outbox`는 legacy history로 격리하고 어떤 worker도
+읽지 않습니다. `private.notification_delivery_outbox`만 #111 worker의 유일 입력이며,
+#109 자체 범위에서는 pending append와 raw 권한 차단만 정의했습니다.
+
+### #110 encrypted Web Push subscription 계약 — source/dev 완료, production 미승격
+
+Web Push capability URL과 `p256dh`/`auth`, Auth session binding은 API adapter에서 canonical 검증한 뒤 전용
+AES-256-GCM key로 암호화하고, endpoint equality와 live session binding은 서로 domain-separated
+HMAC digest로 판정합니다. private 저장소는 logical/current pointer, immutable revision,
+current secret envelope, append-only lifecycle event, profile minute limiter를 분리합니다.
+endpoint는 raw/canonical 양쪽 UTF-8 4096-byte 상한을 확인하고 hostname 소문자화와 기본 `:443`
+제거 후 path/query 의미를 유지한 HTTPS canonical form 하나만 envelope·digest·request hash·RPC에 사용합니다.
+actor/profile/session/subscription UUID도 parse 후 소문자 canonical form 하나만 AAD·hash·RPC에 사용합니다.
+원문 endpoint·host/path·key·cipher/nonce/tag·digest·session은 응답·알림·감사·로그에 넣지 않습니다.
+session UUID는 평문 column이나 metadata에 저장하지 않고 current envelope 안에서만 인증 암호화하여,
+#111이 exact revision을 claim할 때 실제 `auth.sessions` 생존 여부를 다시 확인할 수 있게 합니다.
+
+active/password-complete admin 또는 maid 본인과 실제 `auth.sessions(id,user_id)`가 일치할 때만
+service-role 전용 command RPC가 동작합니다. session당 active 1, profile당 최대 5, endpoint digest
+전역 active 1이며 교차 profile endpoint는 소유자 정보 없는 409입니다. 같은 material replay는
+동일 logical result, 변경은 기존 ID/version CAS의 immutable revision입니다. retire는 logical 상태와
+version을 전이하면서 current secret을 같은 transaction에서 삭제하며 재활성화하지 않습니다.
+retired 비민감 metadata는 90일 뒤 최대 100건 bounded purge 대상이지만 #110은 Cron을 활성화하지 않습니다.
+#110의 register/rotation/retire membership mutation은 모두 receipt replay 확인 뒤 하나의 transaction-scoped
+global advisory lock을 먼저 잡고 subscription row를 잠급니다. 이는 endpoint swap과 rotate/retire 사이의
+cross-row lock cycle을 제거하는 대신 구독 membership write를 전역 직렬화하는 의도적 병목입니다.
+profile별 10/min 제한과 낮은 빈도의 기기 등록 경로에만 적용하며 inbox 조회와 향후 delivery claim은 이 lock을 사용하지 않습니다.
+#111만 exact current revision을 delivery target에 고정할 수 있고 #112만 VAPID/provider HTTP와 outbound
+host 정책 및 production secret 주입을 소유합니다.
+
+### #111 notification delivery worker 계약 — source/dev 완료, production 미승격
+
+typed outbox는 immutable intent로 유지하고 private job/target projection과 append-only
+attempt/result/permit/event를 별도로 둡니다. 최초 claim transaction이 active subscription의 exact
+logical ID/version/revision을 한 번만 snapshot합니다. active target이 없으면 즉시 terminal이고,
+24시간 TTL 이후 또는 이미 resolve된 notification은 inbox를 지우지 않고 push만 suppress합니다.
+
+claim은 `(nextAttemptAt,enqueuedAt,id)` 순서의 `FOR UPDATE SKIP LOCKED`, 최대 10건, 2분 lease,
+`leaseVersion + claimDigest + expiry` fence를 사용합니다. 동일 claim replay는 같은 attempt를 반환하고
+expired takeover만 새 append-only attempt를 만듭니다. 외부 provider 성공 뒤 settle 전 crash는 재전송될 수
+있으므로 exactly-once를 주장하지 않으며 payload의 stable `notificationId`가 client dedupe identity입니다.
+claim의 `limit=10`은 반환 target과 target 없이 terminal 처리한 job의 합계 상한입니다. 최초 fanout이 10개를
+넘어도 한 run은 target을 최대 10개만 claim하고 나머지는 다음 run에 남깁니다. parent job이
+`operator_blocked`이면 lease 만료 여부와 무관하게 모든 non-terminal sibling을 claim에서 제외하며, bounded
+service-only resume만 job과 그 sibling target 전체를 함께 다시 엽니다.
+
+worker는 encrypted context를 fenced RPC로 받고 메모리에서만 복호화한 뒤 live Auth session과 exact-current
+revision을 permit RPC에서 다시 확인합니다. 이 permit 성공이 send authorization의 선형화점입니다. 직후
+동시 retire가 있으면 old endpoint로 최대 한 번 전송될 수 있으나 DB transaction에서 외부 HTTP를 기다리지
+않습니다. expired/session-revoked exact current는 same membership-lock protocol로 retire하고 secret만
+crypto-shred합니다. envelope는 delivery ledger에 복제하지 않습니다.
+
+retry는 max 8, 30초 지수 backoff(최대 1시간)+deterministic 0~15초 jitter입니다. provider configuration
+오류는 endpoint를 retire하지 않고 operator-blocked로 batch를 중단하며 service-only bounded resume만
+허용합니다. 45초 core는 provider start 33초, settle 39초, heartbeat 45초 absolute deadline을 지킵니다.
+실제 provider adapter/HTTP/VAPID/Cron/invoke secret/production activation은 #112입니다.
+developer health는 target dead-letter와 fanout 전 `DELIVERY_CONTRACT_INVALID` job-only dead-letter를 별도로
+포화 집계하므로 빈 성공 heartbeat가 unresolved job-only failure를 healthy로 숨길 수 없습니다.
+
+### #112 VAPID Web Push provider source 계약 — source/dev 완료, production 활성화 대기
+
+45번째 append-only migration은 각 immutable subscription revision에 생성 당시 서버의
+`vapid_key_version`을 exactly-once로 묶습니다. 과거 unbound revision은 현재 키를 추측하지 않고
+`VAPID_KEY_UNBOUND` dead-letter로 push만 종결하며 inbox는 유지합니다. 클라이언트는 key version을 보내거나
+선택하지 않고, authenticated active/password-complete admin·maid가
+`GET /v1/push-subscriptions/config`의 `{keyVersion,publicKey,bindingProof,proofExpiresAt}`만 no-store로 조회합니다.
+10분 proof는 actor/profile/live session과 public-key identity를 HMAC으로 결합하며 registration/rotation adapter는
+검증된 proof version만 service-only RPC와 request hash에 전달합니다. current가 바뀌어도 prior public/private
+ring에 남은 proof는 동일 재시도에 유효하고, removed/unknown/expired/tampered/cross-session proof와 기존 unbound
+overload 권한은 fail-closed입니다.
+
+provider adapter는 RFC 8030/8291/8292의 `aes128gcm`과 ES256 VAPID를 Node/Deno 공용 source에서 구현합니다.
+VAPID audience는 endpoint origin, subject는 strict `mailto:` 또는 HTTPS, expiration은 12시간으로 24시간을
+넘지 않습니다. outbound는 HTTPS 기본 443의 exact `fcm.googleapis.com`, exact
+`updates.push.services.mozilla.com`, `*.push.apple.com`, `*.notify.windows.com`만 허용하고 credential,
+fragment, IP literal, redirect를 전송 전에 거부합니다. provider 응답 body/status text/header는 읽거나
+저장하지 않으며, `Retry-After`만 1..3600초로 정규화합니다.
+
+잠금화면 title/body는 항상 `새 업무 알림`/`앱에서 확인해 주세요`이고 provider plaintext에는
+`payloadVersion=1`, stable `notificationId`, catalog가 허용한 same-origin typed deep link만 포함합니다.
+plaintext 3072 bytes와 encrypted body 4096 bytes 상한을 fail-closed로 적용합니다. provider의
+201/202/204는 push service accepted일 뿐 device delivered가 아니며 at-least-once 재전송은 service worker의
+stable notification ID dedupe로 수렴합니다.
+
+`notification-delivery` Edge Function은 strict empty POST와 별도 32-byte 이상 invoke secret을 먼저
+constant-time 검증한 뒤에만 VAPID/envelope keyring을 읽습니다. 33초 provider-start, 39초 settle, 45초 hard
+budget을 기존 worker에 그대로 전달합니다. source migration은 Cron/Vault/`pg_net`을 만들지 않으며 실제
+secret 주입·Edge 배포·scheduler 활성화는 release runbook의 production gate입니다.
+Public proof ring은 최대 5개이며 delivery의 private pair ring과 exact version set/public identity가 같아야 합니다.
+malformed curve·pair mismatch·ring drift는 fetch 0이고 stable degraded heartbeat를 새로 기록합니다. 또한 developer
+status는 조회 시점의 같은 current VAPID config parser·crypto validation 결과를 `providerConfigurationValid` boolean으로만
+결합하므로, 최근 성공 heartbeat가 있어도 현재 설정이 유효하지 않으면 health는 `degraded`입니다.
+
+### #133 자동 checkout 후 퇴실 미진행 사건 — source/dev 완료, release pending
+
+54번째 append-only migration은 자동 checkout 뒤 손님 잔류를 발견한 현재 notified 메이드의 신고를
+`checkout_presence_incidents`에, business admin의 최종 판단을
+`checkout_presence_incident_decisions`에 분리해 기록합니다. 사건은 예약·객실·checkout obligation·기존 target·
+assignment·attempt snapshot을 고정하고, open 동안 실행·PIN·offline·제출·검수·일반 재배정·실제 다음 체크인을
+각 command trigger에서 fail-closed합니다. raw PIN·고객 PII·session/token/request body는 두 원장과 audit/notification에
+저장하지 않습니다.
+
+신고 command는 현재 예약·객실·checkout target과 동일한 최신 checkout 종료 원장이 정확히
+`scheduled_checkout`인지 확인하므로 수동 checkout이나 다른 예약·과거 주기의 자동 종료 증거로는 열리지 않습니다.
+신고와 동결, 기존 capability/lease revoke, immutable audit, 모든 active/password-complete business admin의
+행동 알림/outbox는 한 transaction으로 확정합니다. 결정은 `EXTEND_CHECKOUT`, `CONFIRM_DEPARTED`, `FALSE_REPORT`
+세 가지뿐이고 기존 checkout target을 재사용하면서 과거 assignment/attempt를 보존한 새 책임 revision을 만듭니다.
+연장은 과거 checkout을 지우지 않고 occupancy resumed 이력을 추가합니다. 사건 해결 안내는 정보성이고, 새 책임자는
+기존 `assignment.commit_notified` 행동 알림과 assignment terminal resolver를 그대로 사용합니다. 같은 command replay는
+두 알림과 outbox를 중복 생성하지 않습니다. global reservation advisory lock → scoped command receipt → domain row lock
+순서와 version CAS·서버 계산 impact fingerprint가 replay/상반 결정을 직렬화합니다. 신규 결정의 마감 시각은 모든
+domain lock과 상태 재검증 뒤 `clock_timestamp()`로 다시 확인하고, 이미 완료된 receipt replay에는 이 시간 검사를
+재적용하지 않습니다. 재배정 구간은 기존 `assert_handover_schedule()`을 재사용해 `availableFrom`의 KST 날짜와
+`serviceDate` 일치, 서비스일 다음 날 00:00 KST 상한, 다음 유효 예약 체크인 30분 전 상한을 같은 잠금 안에서
+검증합니다. Fastify와 Edge는 incident timestamp 요청·DB projection 모두 초와 UTC offset이 있는 strict RFC 3339로
+검증하고 잘못된 달력 날짜나 DB 값을 안전하게 차단합니다. 중단 구간에는 earning·벌점을 생성하지 않습니다.
+Fastify/Edge/OpenAPI source는 3개 route를 추가한 108 paths / 115 operations로 PR #145를 거쳐
+`dev@0411f04f2c4abd74b969f826365dc2d4b678b473`에 통합됐고 production에는 아직 승격되지 않았습니다.
 
 ## API 단계
 
@@ -124,6 +717,10 @@ erDiagram
 
 - `GET /health`
 - `GET /openapi.json`, `GET /docs` (OpenAPI 3.1·pinned Swagger UI)
+- `GET /v1/notifications`는 admin/maid 각자의 inbox를 `(occurredAt DESC,id DESC)`로 최대 100건 조회합니다. 전용 HMAC cursor는 actor·role·stream·sort에 묶이고 128 KiB를 넘는 legacy 응답은 fail-closed합니다. 공개 projection은 비민감 `deepLink`/`groupId`만 더하고 source, event family, recipient, actor, dedupe를 숨깁니다.
+- `POST /v1/notifications/{notificationId}/read`는 client timestamp 없이 DB server 시각을 한 번만 기록하며 재시도·동시 요청은 같은 최초 `readAt`을 반환합니다. 타 수신자 ID는 동일한 404입니다.
+- `POST /v1/push-subscriptions`는 본인 브라우저 subscription의 최초 등록·exact replay·명시적 CAS rotation만 수행합니다.
+- `POST /v1/push-subscriptions/{subscriptionId}/retire`는 본인 current version을 폐기하고 암호문을 즉시 crypto-shred합니다. 두 API 모두 no-store이고 safe logical ID/version/status/server timestamp만 반환합니다.
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
 - `POST /v1/auth/password`
@@ -143,17 +740,23 @@ erDiagram
 - `GET·POST /v1/availability/change-requests`, 관리자 승인·반려
 - `GET /v1/availability/candidates` 활성·가능 메이드 후보 조회
 
-다음 구현:
+현재 source/dev 완료·production 미승격:
 
-- 오늘/내일 청소 대상, 배정·순서 통보
-- 300KiB 사진 업로드, 인증된 사진 스트리밍, 현장 완료, 전체 제출
-- 검수 승인/반려, 폭탄방 판정, 재청소
-- 메이드별 주급과 지급 상태
-- 역할별 알림함과 푸시 구독
+- #25~#29 배정·통보·activation·preview와 #7A/B/C 수행·offline
+- #30/#83~#85/#31 사진·Drive adapter·7일 purge·제출·검수·재청소
+- #93/#96/#100~#103 수익·정정·지급 결과
+- #108~#112 알림함·typed writer·구독·delivery worker·VAPID/provider HTTP
+- #133 자동 checkout 후 퇴실 미진행 신고·조회·관리자 결정 source/dev 완료
+
+#112 source는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 같은 tree로 PR #119에 병합됐다. Issue는 Function Secrets → 승인된 `api`/`notification-delivery` Edge bundle → negative/positive hosted smoke → Vault/`pg_cron`/`pg_net` → 5회 연속 heartbeat → 실제 기기 Web Push smoke까지 OPEN이다.
+
+현재 critical path는 완료된 #146/#147 보완을 포함한 `v0.3.0 release exact-head 검증 → main/production 승격`이다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 대조 뒤 진행한다.
 
 Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·촛불·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`만 재사용하며 raw table DML을 하지 않는다. actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 
 Edge `/v1/reservations*`도 기존 예약·청소요청 RPC 9개만 재사용하며 raw DML을 허용하지 않는다. actor는 exact active business admin이고 최초 비밀번호 변경과 active session까지 매 요청 확인한다. 목록·mutation projection에는 고객명과 암호문이 없고, 단건 상세에서 고객명을 실제 복호화할 때만 server-generated request ID를 가진 `sensitive.read` activity를 append한다. activity append가 실패하면 상세 응답도 fail-closed한다. Edge Web Crypto AES-256-GCM envelope와 HMAC request fingerprint는 Fastify 계약과 호환하며, scheduler와 관리자 수동 전이의 인증·멱등성 namespace는 분리한다.
+
+비밀번호 변경은 일반 account command와 분리된 private receipt state machine을 사용한다. actor 단위 advisory lock과 미완료 partial unique constraint로 동시에 한 요청만 Auth mutation claim을 얻고, 시작 session의 domain-separated SHA-256 digest로 다른 live session takeover를 차단한다. receipt는 `auth_pending | completed | failed | inconsistent | reset_pending | superseded` 상태, 안전한 command fingerprint, session digest, 무작위 claim digest, 비밀이 아닌 password effect version, bounded lease만 저장하며 비밀번호/파생 verifier/token/raw session ID는 저장하지 않는다. `auth.users.encrypted_password`의 INSERT/실제 변경에만 동작하는 최소 trigger가 hash를 복사하지 않고 `private.auth_password_versions`의 무작위 version을 회전한다. 준비된 self-change 또는 admin-reset이 있으면 그 command의 effect version을 결합하며, 로그인·last-sign-in 같은 비밀번호 외 Auth 갱신은 version을 바꾸지 않는다. Auth 성공 뒤 DB/HTTP 실패 복구는 현재 private version과 caller가 다시 보낸 새 비밀번호를 함께 검증하여 same-effect를 증명하고, DB completion transaction은 profile gate 해제·다른 session 폐기·audit exactly-once·receipt 완료를 함께 처리한다. 후속 변경, 관리자 reset, adapter 밖 GoTrue 비밀번호 변경은 version을 회전시켜 과거 key를 무효화한다. lease 만료 시 version/새 비밀번호가 함께 일치하지 않으면 crash-before-Auth와 payload 변경을 안전하게 구분할 evidence가 없으므로 rollback/실패 추정 대신 inconsistent로 고정한다. 관리자 reset은 global reset lock → target password advisory lock → row lock 순서로 직렬화하고, 외부 Auth 성공 뒤 별도 finalize RPC에서만 inconsistent receipt를 supersede한다. Auth 성공 뒤 HTTP 응답이 유실된 prepared reset은 private version의 일치, 의도한 임시 비밀번호의 Auth 검증, 검증 session 즉시 폐기, version 재확인을 모두 통과할 때만 finalize하며 같은 key 재시도에서 Auth password를 다시 변경하지 않는다. 완료된 reset key replay는 현재 private version이 동일할 때만 no-op이며, version이 바뀐 뒤에는 더 최신 self-change receipt를 건드리지 않고 stale conflict로 끝난다. Auth password 검증은 session/client를 row dimension으로 사용하지 않는 actor당 1행의 durable 10회/분 limiter를 먼저 거치며 포화 뒤 window 만료까지 write를 멈춘다.
 
 developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migration version이 아니라 안정적인 Git migration name으로 source head를 찾은 뒤 실제 원격 순서를 `ahead | equal | behind | unknown`으로 정규화한다. public base table RLS 누락 수와 allowlist RPC 상태만 제공하며, critical RPC는 exact signature와 `service_role` 전용 EXECUTE 경계를 모두 만족해야 정상이다. scheduler 상태는 Cron SQL·Vault·`pg_net` 응답 본문 대신 정규화된 Cron metadata와 `private.scheduler_invocation_heartbeats` projection을 사용한다. domain 감사와 활동/보안 조회는 각각 최대 31일·100건 cursor pagination이고 raw state·request body·자격증명·PII를 노출하지 않는다. diagnostics는 임의 URL·SQL·RPC 이름을 받지 않으며 durable 10회/분 제한을 적용한다.
 
@@ -164,22 +767,22 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 - 복구검증: 뭄바이 기존 프로젝트 (`matalcofimnhuzslfhdd`), 사용자 트래픽 금지
 - 두 프로젝트 생성 비용은 월 `$0`로 확인
 
-아직 필요한 설정:
+다음 release/운영 활성화에서 필요한 설정:
 
-- Data API 노출 스키마 확인
-- publishable/secret key를 로컬·배포 환경에 각각 저장
-- 단일 developer bootstrap 후 별도 업무 관리자 생성·로그인·RLS 통합 테스트
-- Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token 설정
+- dev의 pending migration과 Data API 노출·권한 재검증
+- dev 45 migrations에 대응하는 승인 Edge bundle과 Function Secrets
+- Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
+- Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
 
-예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. 객실 PIN도 원문 대신 동기화 상태와 PIN version만 일반 업무 원장에 기록합니다.
+예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 4~8자리 `pinDigits`만 받고 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는 source/dev 구현이며 production에는 승격하지 않았다.
 
-`RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`는 production에서 활성 관리자 profile ID로 반드시 설정합니다. 현재 Fastify 기준선은 시작 시 첫 실행으로 actor를 검증하지만, Supabase-only PoC는 Cron이 1분마다 별도 secret으로 scheduler Function을 호출하고 DB command가 actor의 최신 역할·상태를 매 실행 재검증한다. 어느 runtime이든 퇴실을 먼저 처리하므로 반개구간 경계의 다음 입실이 같은 batch에서 진행되고, 중단 기간 전체가 지난 미입실 예약도 가짜 check-in 없이 예정 checkout으로 종결된다. 자세한 PoC/rollback 계약은 [Edge runtime PoC](./EDGE_RUNTIME_POC.md)를 따른다.
+`RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`는 production에서 활성 관리자 profile ID로 설정한다. Fastify 기준선은 시작 시 첫 실행으로 actor를 검증하고, Supabase-only runtime은 Cron이 1분마다 별도 secret으로 scheduler Function을 호출하며 DB command가 actor의 최신 역할·상태를 매 실행 재검증한다. 어느 runtime이든 퇴실을 먼저 처리하므로 반개구간 경계의 다음 입실이 같은 batch에서 진행되고, 중단 기간 전체가 지난 미입실 예약도 가짜 check-in 없이 예정 checkout으로 종결된다. 자세한 운영·rollback 계약은 [Edge runtime PoC](./EDGE_RUNTIME_POC.md)를 따른다.
 
 다음 예약이 바뀌면 앞 예약의 준비 마감은 종결되지 않은 obligation만 다시 계산합니다. 아직 미배정인 materialized target은 CAS version과 schedule revision을 함께 올리고, 이미 배정·통보된 target은 암묵적으로 덮어쓰지 않고 `CLEANING_DUE_REPLAN_REQUIRED`로 거부해 명시적 재계획을 요구합니다.
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-08-28에 운영·복구검증 프로젝트에 P0·계정 수명주기·도메인 무결성 migration을 적용했다. 두 프로젝트에서 구조 검사 22건과 rollback DML 검사 17건이 통과했고 Security Advisor 경고는 0건이다. Performance Advisor에는 아직 업무 데이터가 없어 예상되는 unused-index 정보만 남아 있다. Issue #1 객실·예약 migration은 아직 두 원격 프로젝트에 적용하지 않았다.
+2026-09-03에 v0.2.0 운영 활성화를 완료한 현재 `main`은 `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b`이며 production은 19 migrations / OpenAPI 39 paths / 43 operations다. 이후 `dev@5798e882495e42763db6c227b7cb804527ccde47`까지 #25~#140과 #133 source 및 #146/#147 보완이 54 migrations / 108 paths / 115 operations로 통합됐지만 main/recovery/production에는 아직 승격하지 않았다. 이 문서 갱신에서는 원격 환경을 변경하지 않았으며 실제 운영 상태 판정은 v0.3.0 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 

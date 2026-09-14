@@ -1,4 +1,5 @@
 begin;
+\ir room_pin_fixture.psql
 
 select no_plan();
 
@@ -50,6 +51,14 @@ insert into public.room_pin_sync_events (
 select id, 'verified', 1, 'TEST_VERIFIED',
   '27000000-0000-4000-8000-000000000002', clock_timestamp()
 from public.rooms order by room_number limit 1;
+select pg_temp.install_room_pin_fixture(id,'27000000-0000-4000-8000-000000000002',1)
+from public.rooms order by room_number limit 1;
+
+-- Synthetic published checkout templates: production configuration is never seeded here.
+insert into public.cleaning_template_versions (
+  room_type_id, cleaning_kind, version, status, duration_minutes, photo_slots, published_at, created_by
+) select id, 'checkout', 1, 'published', 60, '[]'::jsonb, now(), '27000000-0000-4000-8000-000000000002'
+from public.room_types;
 
 select public.create_reservation(
   '27000000-0000-4000-8000-000000000002',

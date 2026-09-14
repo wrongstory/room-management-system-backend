@@ -1,16 +1,128 @@
 import {
   assertEmptyDiagnosticRequestBody,
+  developerAuditEvents,
+  developerDatabaseStatus,
+  developerRuntimeStatus,
   expectedMigrationName,
   toDeveloperActivityEvent,
   toDeveloperAuditEvent,
 } from "./developer-api.ts";
-import { EdgeError, requireDeveloper } from "./runtime.ts";
+import { openApiDocument } from "./openapi.ts";
+import { type EdgeClients, EdgeError, requireDeveloper } from "./runtime.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
 }
+
+Deno.test("developer runtime reports Google and purge configuration booleans only without environment enumeration", () => {
+  const get = Deno.env.get;
+  const keys = [
+    "GOOGLE_DRIVE_CLIENT_ID",
+    "GOOGLE_DRIVE_CLIENT_SECRET",
+    "GOOGLE_DRIVE_REFRESH_TOKEN",
+    "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+    "PHOTO_PURGE_INVOKE_SECRET",
+  ];
+  const configured = new Set<string>();
+  const allowed: readonly string[] =
+    openApiDocument.components.schemas.DeveloperRuntimeStatus.properties
+      .configuration.required;
+  try {
+    Deno.env.get = (key: string) => {
+      assert(
+        allowed.includes(key) ||
+          ["RUNTIME_ENVIRONMENT", "SUPABASE_URL"].includes(key),
+        "only fixed environment names are read",
+      );
+      return configured.has(key) ? "synthetic-private-value" : undefined;
+    };
+    for (const present of [false, true]) {
+      if (present) {
+        keys.forEach((key) => {
+          configured.add(key);
+        });
+      }
+      const result = developerRuntimeStatus();
+      const configuration = result.configuration as Record<
+        string,
+        { configured: boolean }
+      >;
+      assert(
+        Object.keys(configuration).sort().join() === [...allowed].sort().join(),
+        "OpenAPI exact configuration keys",
+      );
+      for (const key of keys) {
+        assert(
+          JSON.stringify(configuration[key]) ===
+            JSON.stringify({ configured: present }),
+          "only configured boolean for Google field",
+        );
+      }
+      assert(
+        !JSON.stringify(result).includes("synthetic-private-value"),
+        "no raw configured value",
+      );
+    }
+  } finally {
+    Deno.env.get = get;
+  }
+});
+
+Deno.test("developer audit query accepts all 65 approved event types and rejects 66 before RPC", async () => {
+  let calls = 0;
+  const clients = {
+    admin: {
+      rpc: (_name: string, args: Record<string, unknown>) => {
+        calls += 1;
+        assert(
+          (args.p_event_types as unknown[]).length === 65,
+          "full current inventory passed",
+        );
+        return Promise.resolve({ data: [], error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const actor = {
+    authUserId: "10000000-0000-4000-8000-000000000001",
+    profileId: "20000000-0000-4000-8000-000000000001",
+    displayName: "개발자",
+    role: "developer" as const,
+    mustChangePassword: false,
+  };
+  const query = new URLSearchParams();
+  for (
+    const event of openApiDocument.components.schemas.DeveloperAuditEventType
+      .enum
+  ) query.append("eventType", event);
+  assert(query.size === 65, "actual source enum inventory");
+  await developerAuditEvents(
+    new Request(
+      `https://example.invalid/functions/v1/api/v1/developer/audit-events?${query}`,
+    ),
+    clients,
+    actor,
+  );
+  assert(calls === 1, "all 65 accepted");
+  query.append("eventType", "cleaning.offline_event_resolved");
+  try {
+    await developerAuditEvents(
+      new Request(
+        `https://example.invalid/functions/v1/api/v1/developer/audit-events?${query}`,
+      ),
+      clients,
+      actor,
+    );
+    throw new Error("66 must fail");
+  } catch (error) {
+    assert(
+      error instanceof EdgeError && error.status === 400,
+      "66 rejected with stable validation",
+    );
+  }
+  assert(calls === 1, "over-limit query never reaches DB");
+});
 
 Deno.test("developer audit mapper exposes only the bounded camelCase projection", () => {
   const event = toDeveloperAuditEvent({
@@ -34,9 +146,253 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "actor_activity_audit_contract",
+    expectedMigrationName === "checkout_not_completed_incident_workflow",
     "expected migration must not depend on a remote execution timestamp",
   );
+});
+
+Deno.test("developer database status degrades a fresh healthy heartbeat for a malformed prior envelope key", async () => {
+  const names: string[] = [];
+  const get = Deno.env.get;
+  const pair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+  const publicRaw = new Uint8Array(
+    await crypto.subtle.exportKey("raw", pair.publicKey),
+  );
+  const base64 = (value: Uint8Array) => btoa(String.fromCharCode(...value));
+  const base64url = (value: Uint8Array) =>
+    base64(value).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const malformedPriorKey = base64(new Uint8Array(31).fill(9));
+  const environment: Record<string, string> = {
+    RUNTIME_ENVIRONMENT: "local",
+    SUPABASE_URL: "http://127.0.0.1:54321",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role-status-test-secret-123456",
+    WEB_PUSH_BINDING_DIGEST_SECRET: "binding-status-test-secret-1234567890",
+    WEB_PUSH_SUBSCRIPTION_KEY_BASE64: base64(new Uint8Array(32).fill(7)),
+    WEB_PUSH_SUBSCRIPTION_KEY_VERSION: "envelope-v2",
+    WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: JSON.stringify({
+      "envelope-v1": malformedPriorKey,
+    }),
+    VAPID_SUBJECT: "mailto:push@example.com",
+    VAPID_CURRENT_KEY_VERSION: "vapid-v1",
+    VAPID_PUBLIC_KEY: base64url(publicRaw),
+    VAPID_PUBLIC_KEYRING_JSON: "{}",
+    VAPID_PRIVATE_KEY: String(privateJwk.d),
+    VAPID_KEYRING_JSON: "{}",
+    NOTIFICATION_DELIVERY_INVOKE_SECRET:
+      "notification-delivery-status-test-123456",
+  };
+  const clients = {
+    admin: {
+      rpc: (name: string) => {
+        names.push(name);
+        if (name === "get_developer_notification_delivery_status") {
+          return Promise.resolve({
+            data: {
+              status: "healthy",
+              lastHeartbeat: "2026-09-11T00:00:30.000Z",
+              backlog: {
+                due: 1,
+                retrying: 0,
+                deadLetter: 0,
+                jobOnlyDeadLetter: 1,
+                blocked: 0,
+                expiredLeases: 0,
+                oldestDueAt: "2026-09-11T00:00:00.000Z",
+              },
+              activation: { cronConfigured: true, cronActive: true },
+              checkedAt: "2026-09-11T00:01:00.000Z",
+            },
+            error: null,
+          });
+        }
+        if (name === "get_developer_room_pin_sheet_sync_status") {
+          return Promise.resolve({
+            data: {
+              status: "operator_blocked",
+              lastHeartbeat: null,
+              backlog: {
+                due: 1,
+                retrying: 0,
+                blocked: 1,
+                expiredLeases: 0,
+                oldestDueAt: null,
+              },
+              worker: {
+                operatorBlocked: true,
+                blockedReasonCode: "WRITE_OUTCOME_UNCERTAIN",
+              },
+              checkedAt: "2026-09-13T00:00:00.000Z",
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: {}, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  let result: Record<string, unknown>;
+  try {
+    Deno.env.get = (key: string) => environment[key] ?? "configured";
+    result = await developerDatabaseStatus(clients, {
+      authUserId: "10000000-0000-4000-8000-000000000001",
+      profileId: "20000000-0000-4000-8000-000000000001",
+      displayName: "개발자",
+      role: "developer",
+      mustChangePassword: false,
+    });
+  } finally {
+    Deno.env.get = get;
+  }
+  assert(
+    names.length === 4,
+    "database status uses four app-owned projections",
+  );
+  assert(
+    "notificationDelivery" in result,
+    "bounded delivery health is present",
+  );
+  const sheet = result.roomPinSheetSync as Record<string, unknown>;
+  assert(
+    sheet.status === "operator_blocked",
+    "PIN Sheet operator block remains visible",
+  );
+  assert(
+    (sheet.activation as Record<string, unknown>).targetApproved === false,
+    "hosted target stays unapproved in Phase B",
+  );
+  const delivery = result.notificationDelivery as Record<string, unknown>;
+  assert(
+    delivery.status === "degraded",
+    "malformed prior envelope key overrides a fresh healthy heartbeat",
+  );
+  assert(
+    (delivery.activation as Record<string, unknown>)
+      .functionSecretsConfigured === true,
+    "Function Secrets expose only an aggregate configured boolean",
+  );
+  assert(
+    (delivery.activation as Record<string, unknown>)
+      .providerConfigurationValid === false,
+    "current config validity exposes only a safe boolean",
+  );
+  const serialized = JSON.stringify(result).toLowerCase();
+  for (
+    const forbidden of [
+      "endpoint",
+      "sessiondigest",
+      "claimdigest",
+      "ciphertext",
+      "providererror",
+      malformedPriorKey.toLowerCase(),
+    ]
+  ) {
+    assert(!serialized.includes(forbidden), `${forbidden} must not leak`);
+  }
+});
+
+Deno.test("developer database status never reports healthy for malformed Sheet service-account configuration", async () => {
+  const originalGet = Deno.env.get;
+  const actor = {
+    authUserId: "10000000-0000-4000-8000-000000000001",
+    profileId: "20000000-0000-4000-8000-000000000001",
+    displayName: "개발자",
+    role: "developer" as const,
+    mustChangePassword: false,
+  };
+  const clients = {
+    admin: {
+      rpc: (name: string) => {
+        if (name === "get_developer_room_pin_sheet_sync_status") {
+          return Promise.resolve({
+            data: {
+              status: "healthy",
+              lastHeartbeat: {
+                status: "succeeded",
+                recordedAt: "2026-09-13T00:00:00.000Z",
+              },
+              backlog: {
+                due: 0,
+                retrying: 0,
+                blocked: 0,
+                expiredLeases: 0,
+                oldestDueAt: null,
+              },
+              worker: { operatorBlocked: false, blockedReasonCode: null },
+              checkedAt: "2026-09-13T00:00:10.000Z",
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: {}, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const baseEnvironment: Record<string, string> = {
+    RUNTIME_ENVIRONMENT: "local",
+    SUPABASE_PROJECT_REF: "local",
+    ROOM_PIN_KEY_BASE64: "configured-room-pin-key",
+    ROOM_PIN_KEY_VERSION: "room-pin-v1",
+    ROOM_PIN_SHEET_SYNC_INVOKE_SECRET: "configured-sheet-secret",
+    GOOGLE_SHEETS_SPREADSHEET_ID: "test-room-pin-sheet-projection-00001",
+    GOOGLE_SHEETS_ROOM_PIN_TAB: "객실_PIN_현황",
+  };
+
+  try {
+    for (
+      const malformed of [
+        {
+          email: "not-a-service-account-email",
+          privateKey: [
+            "-----BEGIN PRIVATE",
+            "KEY-----\ninvalid\n-----END PRIVATE",
+            "KEY-----",
+          ].join(" "),
+        },
+        {
+          email: "sheet-worker@example.iam.gserviceaccount.com",
+          privateKey: "not-a-pkcs8-private-key",
+        },
+      ]
+    ) {
+      const environment: Record<string, string> = {
+        ...baseEnvironment,
+        GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: malformed.email,
+        GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY: malformed.privateKey,
+      };
+      Deno.env.get = (key: string) => environment[key];
+      const result = await developerDatabaseStatus(clients, actor);
+      const sheet = result.roomPinSheetSync as Record<string, unknown>;
+      const activation = sheet.activation as Record<string, unknown>;
+      assert(
+        sheet.status === "degraded",
+        "malformed config must override healthy",
+      );
+      assert(
+        activation.functionSecretsConfigured === false,
+        "malformed service account must not be configuration-ready",
+      );
+      assert(
+        activation.targetApproved === true,
+        "local target must remain approved",
+      );
+      const serialized = JSON.stringify(result);
+      assert(
+        !serialized.includes(malformed.email),
+        "service-account email must not leak",
+      );
+      assert(
+        !serialized.includes(malformed.privateKey),
+        "private key must not leak",
+      );
+    }
+  } finally {
+    Deno.env.get = originalGet;
+  }
 });
 
 Deno.test("developer activity mapper exposes only the safe projection", () => {

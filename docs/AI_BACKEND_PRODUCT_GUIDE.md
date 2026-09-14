@@ -4,7 +4,8 @@
 
 검토 기준:
 
-- 백엔드 `main`: `7e229c2c1fabd4efd9c77e6032a8ffea09b16cd4`
+- 이 문서 갱신의 `dev` integration base: `5798e882495e42763db6c227b7cb804527ccde47` — #133과 #146/#147 release blocker 보완까지 완료된 54 migrations / OpenAPI 108 paths / 115 operations. 현재 `release/v0.3.0`은 이 source를 main에 승격하기 위한 release gate이며 production은 아직 v0.2.0이다.
+- 백엔드 운영 릴리즈 정본 `main`: `035f3b2f3b4a88340e70ef6dc1d6e6a3def8231b` — production v0.2.0은 19 migrations / OpenAPI 39 paths / 43 operations
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
 - 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
@@ -173,7 +174,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 백엔드는 `occupied`, `cleaning_required`, `allocation_blocked`, `allocation_ready` 같은 독립 predicate와 사유를 제공한다. 필터와 집계도 서로 겹칠 수 있다. 프런트 `DOCS/17`은 대표 카드 우선순위를 `배정 불가 → 청소 필요 → 투숙 중 → 배정 가능`으로 적었지만, 더 구체적인 `DOCS/20`과 현재 wireframe은 투숙 중 연박 청소를 `투숙 중` 주 상태 + `청소 필요` 하위 상태로 표시한다. 이 UI 충돌은 아직 해소되지 않았다. 백엔드 schema/API는 한쪽 대표 문자열을 영구 상태로 고정하지 말고 독립 축을 제공하며, 표시 우선순위 변경은 프런트 계약으로 격리한다.
 
-`allocation_ready`는 공실, 현재 preparation obligation 승인, 촛불 0, 운영 정상, 미해결 입실 차단 이슈 없음, PIN 일치, 기준정보·점유 확인 완료를 모두 만족할 때만 true다. false이면 `OCCUPIED`, `CLEANING_REQUIRED`, `CANDLE_PRESENT`, `OPERATION_BLOCKED`, `ROOM_ISSUE_BLOCKED`, `PIN_MISMATCH`, `DATA_UNCONFIRMED` 같은 안정적인 reason code 목록을 함께 반환한다.
+`allocation_ready`는 예약 배정 가능 여부다. 공실, 현재 preparation obligation 승인, 촛불 0, 운영 정상, 미해결 입실 차단 이슈 없음, 기준정보·점유 확인 완료를 모두 만족할 때만 true다. false이면 `OCCUPIED`, `CLEANING_REQUIRED`, `CANDLE_PRESENT`, `OPERATION_BLOCKED`, `ROOM_ISSUE_BLOCKED`, `DATA_UNCONFIRMED` 같은 안정적인 reason code 목록을 함께 반환한다. `pin_sync_status`는 별도 경고 축이며 `unconfigured` 또는 `mismatch`만으로 예약 생성·변경·배정을 막지 않는다. 다만 실제 체크인 전이와 PIN 조회·변경은 current PIN이 `verified`가 될 때까지 fail-closed한다.
 
 ---
 
@@ -188,10 +189,19 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 체크인 전 예약 취소만 허용하고 soft cancel과 사유 code를 남긴다. 과거 예약과 연결 이력을 삭제하지 않는다.
 - 예약 변경은 연결된 청소 일정, 이미 통보한 담당 snapshot, PIN 접근, 진행 중 attempt의 영향을 같은 command에서 재검증한다.
 - 각 예약은 해당 체크아웃의 비공개 퇴실 청소 의무를 정확히 하나 가진다. 재시도해도 중복 생성하지 않는다.
+- **#1/#4/#26/#28 확정 보강:** 예약 저장 transaction에서 배정용 checkout target도 정확히 하나 생성하고 `planned_cleaning_target_id`로 연결한다. 비공개 의무의 lifecycle과 배정 계획은 별개 축이다. `private` 의무의 `current_cleaning_target_id`는 계속 null이며, 계획 target 때문에 점유·입실 준비·cleaning_required를 활성화하지 않는다.
+- 미래 계획은 예약 active·actual checkout 없음·예정 checkout/접근 시각/서비스 날짜/snapshot 일치 조건에서 오늘/내일 draft 저장과 통보가 가능하다. 실제 checkout 전 attempt 생성, PIN 발급·공개, 현장 시작은 금지한다.
+- 예정/수동 checkout은 기존 planned identity를 current로 승격하고 의무를 materialized로 만든다. target·최초 서비스 날짜·요금/템플릿/객실 생성 snapshot은 보존한다. 조기 수동 checkout은 schedule 및 현재 담당 revision과 변경 통보를 추가하며 attempt를 미리 만들지 않는다.
+- 예약 일정 변경 시 미배정 계획은 schedule CAS/revision으로 갱신한다. 미통보 draft의 기존 snapshot은 보존하여 stale로 만들고 재저장해야 통보할 수 있다. 통보된 계획은 암묵 변경하지 않고 explicit replan을 요구한다. 예약 취소는 target soft cancel, current assignment 종료, 통보 이력이 있으면 회수 알림/outbox를 원자적으로 추가한다.
+- **#73 확정 보강:** 예약·비공개 checkout 의무·planned target의 객실 복합 FK는 command transaction 안의 일시적인 update 순서만 허용하도록 `DEFERRABLE INITIALLY DEFERRED`로 맞추고 commit에서 정확히 같은 `(reservation_id, room_id)`를 다시 강제한다. 제약을 끄거나 target을 복제하지 않는다. 미배정 또는 미통보 draft만 같은 planned identity로 객실 이동할 수 있고 draft는 stale이 된다. 현재 notified 계획은 explicit replan 전 변경을 거부하며, 실제 check-in 뒤 객실 변경도 거부한다. 과거 notified assignment의 객실 snapshot은 새 객실로 덮지 않는다.
 - 한 객실의 여러 미래 예약은 각각 자기 퇴실 청소 의무를 가질 수 있다. 따라서 “객실당 모든 비종결 target 1건” 제약을 두면 안 된다.
 - 체크인 예정 시각에 입실 준비 조건이 모두 충족되면 예약상 점유 시작 event를 멱등적으로 한 번 만든다. 조건이 남아 있으면 `입실 시각 도달·객실 미준비`로 두고, 유효 예약 중 조건이 모두 해소된 시점에 같은 전이를 원자적으로 한 번 실행한다.
 - 실제 checkout event가 없으면 예정 체크아웃 시각에 scheduler가 점유 종료, 퇴실 청소 활성화, 유효 담당의 PIN 조회·시작 가능 시각 개방을 멱등적으로 실행한다. 예정 전 수동 checkout이 이미 있으면 다시 종료하거나 청소를 복제하지 않는다.
 - 자동 종료 뒤 예정 체크아웃을 미래로 늦추면 기존 종료 event를 삭제하지 않고 점유 재개 보정 event를 추가한다. PIN을 아무도 조회하지 않았고 청소도 시작 전이면 미시작 작업·PIN 권한·offline lease를 같은 transaction에서 폐기·재잠금한다. PIN 공개 또는 수행 시작 뒤라면 출입 충돌로 격리해 현장 조율·PIN 교체·작업 중단/재계획 command 전에는 정상화하지 않는다.
+- **#133 확정:** 자동 checkout 뒤 현재 notified 담당 메이드가 현장 완료 전에 손님 잔류를 확인하면 PIN 조회·청소 시작 여부와 무관하게 `GUEST_STILL_PRESENT` 사건을 한 번 신고할 수 있다. 신고는 예약·객실·checkout obligation·기존 target·현재 assignment·attempt·신고자를 immutable identity로 묶고, 미해결 동안 새 시작·완료·제출·검수·PIN 조회/lease·offline replay·일반 재배정·실제 다음 체크인을 각 실행 경로에서 fail-closed한다. 이미 공개된 PIN을 회수했다고 표현하지 않고 이후 서버 권한만 폐기한다.
+- 관리자는 사건마다 `EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` 중 하나를 version CAS, 조회 시 서버가 계산한 영향 범위 fingerprint, 멱등 command로 확정한다. fingerprint는 사건·예약·checkout obligation·target·원 assignment/attempt의 현재 version과 실행 상태를 묶으며, 하나라도 바뀌면 결정을 fail-closed한다. 연장은 과거 checkout을 삭제하지 않고 `occupancy_resumed` 보정 이력을 추가하며, 나머지 결정도 현재 예약·접근 조건을 재검증한다. 모든 결정은 기존 checkout target을 재사용하고 이전 assignment/attempt를 보존한 채 새 책임 revision을 만들며, 손님 잔류로 중단된 구간에는 earning·벌점을 만들지 않는다.
+- 사건 결정의 새 책임 구간은 기존 공통 일정 계약을 재사용해 `availableFrom`의 KST 날짜와 `serviceDate` 일치, 서비스일 다음 날 00:00 KST 상한, 다음 유효 예약 체크인 30분 전 상한을 잠금·현재 상태 재검증 뒤 강제한다. 모든 incident timestamp API 값은 초와 UTC offset이 있는 strict RFC 3339이며, 실제 달력에 존재하지 않는 날짜를 허용하지 않는다.
+- 신고와 동결·감사·전체 active/password-complete business admin 행동 알림/outbox는 한 transaction이다. 결정은 행동 알림을 resolve하고 기존/새 담당에게 필요한 회수·배정 통지만 원자적으로 남긴다. PIN·고객 PII·민감 자유문은 사건 projection, audit, notification, outbox에 저장하지 않는다.
 - 예약 추가·수정·취소는 객실 일정 row를 잠그고 앞뒤 예약의 직전 점유와 `preparation_obligation` 연결을 다시 계산한다. 기존 승인·반려 이력은 보존하고, 새 점유·오염으로 기존 청결 근거가 무효가 되면 새 준비 작업 필요 상태를 만든다.
 
 권장 유일키와 실행 잠금:
@@ -231,6 +241,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 마감 뒤 수정은 원본을 덮지 않고 변경 요청과 승인/반려 이력으로 남긴다.
 - 관리자는 가능 메이드만 후보로 오늘/내일 청소를 배정한다.
 - 관리자가 메이드별 작업 순서 1–N을 정하고 저장·통보한다.
+- **[확정 — 2026-09-08 #4 A안]** 메이드는 본인에게 실제 통보된 assignment revision만 조회한다. 과거 superseded/종료 revision도 본인에게 실제 통보됐으면 history에 포함한다. 미통보 draft, 다른 maid의 배정, 자신에게 한 번도 통보되지 않은 revision은 금지한다. 과거 조회 권한은 현재 target 일정·새 담당·새 revision 조회나 수행 권한을 뜻하지 않는다.
 - 랜덤 배정은 먼저 마감 안에 완료 가능한 객실 수를 최대화하고, 그 후보 중 메이드별 기본 청소요금 총액의 최대·최소 격차와 전체 편차를 최소화한다. 금액 점수가 같을 때만 같은 엘리베이터 구역·가까운 호수를 보조 기준으로 쓰고, 그래도 같으면 랜덤으로 고른다. 최종 동률 결과가 반복 실행마다 같을 필요는 없다.
 - 완료 가능 객실 수 계산에는 타입별 예상시간이 필요하다. 예상시간이 운영값으로 확정되기 전에는 이 알고리즘을 production 자동결정으로 사용하지 않는다.
 - 랜덤 결과는 저장 전 초안이다. 실행만으로 담당·attempt·알림·감사 이력을 만들거나 기존 통보/관리자 수동 배정을 덮지 않는다.
@@ -241,10 +252,56 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 한 메이드는 하루에 여러 업무를 가질 수 있지만 동시에 `청소 중`인 attempt는 최대 한 건이다.
 - 전날 미배정 업무는 같은 target ID와 최초 계획일을 유지해 다음 날 재배정한다. 통보됐지만 미착수인 업무는 이전 담당 이력을 남긴 뒤 현재 담당을 풀고 다음 날 가능 여부로 다시 배정한다.
 - 이미 시작한 미완료 업무는 새 attempt나 새 담당을 만들지 않고 같은 attempt·담당·사진 진행을 유지한다. 현장 완료 뒤 업로드/제출 대기와 검수 대기는 배정 이월에서 제외한다.
-- 오늘 저장·통보는 실행 가능한 미시작 attempt를 정확히 한 번 만든다. 내일 저장·통보는 계획 상태로 남겼다가 대상일에 같은 target·담당·순서·snapshot으로 정확히 한 번 활성화한다.
+- 실행 가능한 오늘 작업의 attempt exactly-once 활성화는 #28 소유다. #25/#26 저장·통보 자체는 attempt를 만들지 않는다. 내일 작업이나 아직 실제 checkout 전인 오늘 퇴실 계획은 대기하며, #28이 대상일·실제 checkout·current materialization·접근 가능 시각을 모두 확인한 뒤 같은 target·담당·순서·snapshot으로 활성화한다.
 - 같은 객실의 이전 attempt가 진행·업로드·검수 중이면 새 당일 attempt 활성화를 보류하고 `관리자 확인 대기·시작 불가`로 둔다. 이전 workflow가 종결된 뒤 원 통보 revision을 기준으로 한 번만 활성화한다.
 
 배정 가능 여부는 API나 RLS가 최종 저장 시점에 다시 검증한다. 브라우저에서 후보 목록을 봤다는 사실은 권한이나 최신 상태의 증거가 아니다.
+
+### [확정] #29 Preview 경계 — 2026-09-07 구현 착수 계약
+
+- Preview는 active business admin의 오늘/내일 계획 조회·계산이며, 기존 target/assignment/attempt/알림/outbox/audit/command receipt를 쓰지 않는다. 자동 저장·통보·attempt 활성화 API가 아니다. 확인·편집한 제안은 #25 draft 저장 → #26 commit/notify에서 최신 CAS/가능일/source를 다시 검증한다.
+- 소요시간은 네 객실 타입을 모두 포함한 versioned duration policy의 `confirmed` 값만 사용한다. fresh DB의 confirmed 0건은 정상이며 `ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED`, `decisionReady=false`로 fail-closed한다. 55/65/70/80분은 계속 `[데모]`이고 template 값·평균·고정 시간으로 대체하지 않는다. 실제 시간의 확정은 별도 관리자 운영 입력이며 이번 feature에서 production 값을 설정하지 않는다.
+- 유효한 미배정 target만 새로 제안한다. 기존 draft/notified 및 진행 업무는 고정 fee/time 부하이며 담당·순서를 변경하지 않는다. reclean은 원 메이드만 가능하고 부재 시 blocked로 남긴다. planned checkout은 배정 계획에만 포함하며 materialization/현장 실행 경계는 #28이 계속 소유한다.
+- 비교는 완료 가능한 수 → 기본 청소요금 spread → 전체 편차 → 동선 → 최종 동률 seed 순서다. previewSeed는 상위 목적함수를 약화하거나 fingerprint를 바꾸지 않는다. 제한된 탐색은 전역 최적해 증명이 아닌 휴리스틱임을 API 운영 문서에 명시한다.
+- 임의 근무시간·휴게시간·하루 최대 객실 수를 만들지 않는다. 실제 진행 attempt의 남은 시간을 알 수 없으면 추가 용량을 추정하지 않고 보류한다. target/maid 자원 상한 초과는 부분 자동결정이 아니라 `ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED`로 거부한다.
+- 입력 fingerprint는 정책 version과 후보/고정 부하/가능일/source schedule snapshot을 포함한다. 이는 읽은 상태의 식별자이지 저장 권한이나 예약 lock이 아니다.
+
+### [확정] #27 시작 전 변경 경계 — 2026-09-05 구현 착수 계약
+
+- 일반 pre-start command는 target에 `status <> superseded` attempt가 하나라도 있으면 `ASSIGNMENT_ALREADY_STARTED`로 거부한다. `started_at` 유무로 우회하지 않는다. 이후 수행·인계는 #28/#7 소유다.
+- active business admin만 draft/notified의 담당·순서를 새 assignment revision으로 바꾸거나 현재 담당을 해제할 수 있다. target version과 current assignment ID를 함께 CAS 검증한다. active maid/current availability와 reclean 원 maid 불변식도 재검증한다.
+- unassign은 target을 `unassigned`로 돌리는 명령이지 청소 의무 자체의 취소가 아니다. target 취소는 예약/수동 청소 원 domain이 소유한다.
+- 메이드는 본인 notified assignment에만 취소를 요청한다. pending 요청은 assignment당 최대 한 건이며 결정 전 담당은 유지된다. 관리자 승인/반려도 현재 source revision과 attempt 경계를 다시 검사한다. source가 종료되면 pending은 superseded, 결정된 요청은 수정·삭제 금지다.
+- draft 변경은 통보하지 않는다. notified 변경은 기존 알림을 보존/resolve하고 이전·새 담당에게 필요한 변경/회수 알림과 outbox를 같은 transaction으로 한 번만 기록한다. 외부 push worker는 #10이다.
+- 미래 checkout의 재배정은 기존 planned target ID 안에서만 이루어진다. obligation materialization, 실제 checkout, attempt/PIN 활성화는 하지 않는다.
+
+### [현재 구현] #27 일정 변경의 제한
+
+- 생성 command가 만든 `manual_room_request + additional` 또는 `stayover_request + stayover` 조합만 같은 service date에서 기존 non-null 접근/마감 창을 좁힐 수 있다. 연박은 actual check-in 이후이고 아직 checkout하지 않은 active reservation의 같은 객실·점유 구간도 벗어나지 않아야 한다. source-kind 불일치, 날짜 이동·접근 창 확장·checkout 원장 시간 변경은 #27 API로 허용하지 않는다.
+- 요청 사유는 고정 reason code를 사용한다. 선택 detail은 1–200자이며 숫자·주소/URL형 구분자는 차단한다. 이는 모든 민감정보를 판별하는 필터가 아니므로 고객명·전화번호·PIN·token을 입력하지 않는다. detail은 관리자/요청 당사자에게만 보이며 감사 projection·알림에는 복제하지 않는다.
+- source 구현/검증과 운영 배포는 별도 gate다. #27의 production API는 아직 사용할 수 없다.
+
+### [현재 구현] #28 수행 회차 활성화·이월 경계
+
+- 기존 scheduler의 exact active business admin·secret·분 단위 invocation을 재사용하되, 예약 전이와 배정 lifecycle은 서로 다른 command scope/request hash로 멱등 처리한다. public activation API와 메이드 activation API는 만들지 않는다.
+- 오늘 KST의 notified current assignment만 active maid, current target/version, schedule snapshot, 접근/마감 창, source별 예약·checkout·reclean 계약을 transaction 안에서 다시 확인한 후 `scheduled` attempt를 exactly-once 생성한다. 내일 작업과 private planned checkout은 attempt 0이다.
+- checkout은 planned target이 obligation의 current pointer로 materialize되고 reservation actual checkout이 기록된 뒤에만 같은 target/current assignment revision으로 활성화한다. snapshot은 target의 template/room snapshot을 우선 사용하며 생성 뒤 바꾸지 않는다.
+- 같은 객실의 이전 non-terminal attempt가 있으면 `PREVIOUS_ROOM_WORKFLOW_ACTIVE`로 보류하고 target·assignment를 유지한다. blocked event는 scheduler 매 실행마다 쌓지 않는다.
+- 실행 창이 끝난 unassigned와 notified attempt-0 target만 같은 identity로 다음 KST 날짜에 이월한다. original date는 불변이고 effective date, carryover count, assignment version, schedule revision만 증가한다. notified assignment는 종료하고 기존 알림을 resolve하며 새 maid를 자동 배정하지 않는다.
+- active attempt는 자정을 넘어도 같은 attempt/assignment를 유지한다. 실제 시작·중단·인계는 #7, 자동 배정은 #29다. source 구현은 production/recovery에 아직 배포되지 않았다.
+- 이월은 다음 schedule을 먼저 계산하고 source window가 유효할 때만 저장한다. `stayover_request + stayover`는 같은 객실의 active·실제 입실·미퇴실 예약 안에 다음 접근/마감 창이 모두 포함되고 KST 날짜가 일치해야 한다. 실패하면 `STAYOVER_ROLLOVER_NOT_ALLOWED`로 blocked이며 배정 종료·알림 resolve·일정/version/이력 변경은 모두 0이다. 자동 취소나 cleaning kind 변환은 하지 않는다. 추가 청소도 다음 창이 기존 활성화 규칙의 active 예약 점유와 겹치면 `ADDITIONAL_ROLLOVER_NOT_ALLOWED`로 변경 없이 차단한다.
+
+### [확정] #7B 만료 회차 해소·인계 — 2026-09-08 사용자 승인
+
+이 절은 기존 #27/#28의 구현 제한과 아래 새 회차 생성 제한에 대한 좁은 예외다.
+
+- 실제 시작하지 않은 채 만료된 `scheduled` 회차는 `superseded`로 보존하고 다음날 재배정·재통보 후 새 회차를 생성할 수 있다. 기존 target ID·최초 계획일·assignment/attempt snapshot·통보 이력은 보존한다. 기존 회차를 삭제하거나 시작/중단된 것처럼 위장하지 않는다.
+- 인계 뒤 새 scheduled가 만료된 경우에도 같은 해소 계약을 따른다. 불변 인계 관계로 새 책임 구간이 증명된 과거 interrupted는 live 회차로 오인하지 않되, 대체 증명 없는 interrupted나 현재 미종결 회차는 계속 재배정 차단 근거다. 과거 회차의 status를 변경하거나 전체 interrupted 이력을 무시하지 않는다.
+- 관리자 전용 해소 command가 현재 identity/version과 다음 source 일정을 검증한 뒤 기존 담당 종료·통보 회수·회차 supersede·schedule revision을 원자적으로 처리한다. 다음날 담당을 자동 선택하거나 통보 전에 새 회차를 만들지 않는다. 새 통보 후 #28의 실제 실행 가능 조건에서 exactly-once 활성화한다.
+- 만료된 `in_progress`의 인계는 관리자가 새 접근/마감 일정을 명시 확정하고, 현재 점유·예약·source·접근 조건을 재검증한 경우에만 새 담당이 시작할 수 있다. 인계 자체가 시간창·실제 checkout·점유 검사를 우회하는 권한이 아니다. 재계획 불가능한 source는 fail-closed로 관리자 확인 대상에 남긴다.
+- 이미 시작한 기존 회차는 `interrupted`로 보존하며 새 assignment/attempt가 새 책임 구간을 가진다. 이전 완료/현재 제출/수익 연결을 되살리지 않는다. 재청소의 원 maid 불변 및 다른 maid 이관 금지는 그대로 유지한다.
+- 해소/인계와 동시 시작·완료·계정 변경은 CAS·scoped receipt·공통 잠금·원자 audit/outbox로 직렬화한다. TTL을 새 idempotency key나 재시도로 연장하지 않는다.
+- 이 승인은 #7B source 개발 범위이며 #7C/offline, 사진/제출 구현 또는 production 승격 승인이 아니다.
 
 ---
 
@@ -254,7 +311,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 1. **청소 의무/target**: 왜, 어느 객실을, 어느 운영일에 청소해야 하는가
 2. **assignment revision**: 누가 몇 번째 순서로 책임지는가
-3. **attempt**: 실제 수행 회차. 시작 전 담당 변경·순서 변경은 같은 미시작 업무 연결을 갱신하고, 시작한 업무의 이월은 같은 회차를 유지한다. 검수 반려 재청소 또는 명시적 중단·인계만 새 회차를 만든다.
+3. **attempt**: 실제 수행 회차. 시작 전 담당 변경·순서 변경은 같은 미시작 업무 연결을 갱신하고, 시작한 업무의 이월은 같은 회차를 유지한다. 검수 반려 재청소 또는 명시적 중단·인계가 새 회차를 만든다. 추가로 위 #7B 승인에 한해 실제 미착수 만료 scheduled를 superseded로 보존하고 다음날 재통보 후 새 회차를 활성화할 수 있다.
 4. **submission version**: 메이드가 검수 요청한 불변 제출본
 5. **photo slot snapshot**: target 생성 시 고정되어 해당 attempt가 사용하는 템플릿 version의 필수/선택 증빙
 6. **inspection decision**: 관리자의 승인/반려
@@ -284,19 +341,31 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 앱은 JPEG/WebP를 EXIF 제거 후 사진당 최대 300KiB(307,200 bytes)로 압축한다. 서버도 본문 크기와 허용 형식을 독립적으로 강제한다.
 - 서버는 파일 확장자나 client MIME만 믿지 않고 magic bytes, 허용 MIME, 크기, hash, 현재 담당/attempt/version을 검증한다.
 - 현장 완료, 미전송 업로드, 전체 제출, 검수 요청은 별도 상태다.
-- 모든 필수 slot이 서버에서 유효하게 처리되기 전에는 현장 완료와 전체 제출을 허용하지 않는다.
+- **[확정 — 2026-09-08 정책 변경]** `field_completed`는 물리적인 현장 청소 완료 선언이다. 필수 photo slot 충족은 현장 완료의 선행조건이 아니며 #30/#9/#31의 전체 submission gate에서 검증한다. 현장 완료만으로 room ready, cleaning/review approval, earning, payroll entitlement를 생성하지 않는다.
 - 메이드 화면 행동명은 `검수 요청`, 제출 상태명은 `검수 요청됨`, 관리자 목록명은 `검수 대상 목록`이다. API enum/code는 안정적인 영문값을 사용하고 표시 문구와 분리한다.
 - 재제출은 기존 row를 덮지 않는다. 새 immutable submission version을 만들고 이전 version을 `SUPERSEDED`로 표시하며 current pointer를 CAS로 전환한다.
 - 관리자와 메이드는 현재 version을 기준으로 작업하되 과거 version은 감사용으로 조회할 수 있다.
 
 ### `[확정]` 오프라인 동기화
 
-- 오프라인 수행은 현재 assignment/work version에 묶인 만료 가능한 work lease가 있을 때만 허용한다.
+- Offline v1은 온라인 `startCleaning` → 서버 attempt/lease 발급 → 오프라인 completion 기록 → 재연결 재검증으로 제한한다. offline 신규 start/claim/assignment 선택·변경은 금지한다.
+- work lease TTL은 2시간, clock skew는 ±5분이다. profile, attempt, assignment revision, issued/expires timestamp, allowed actions, lease identity/version에 bind한다.
 - lease와 offline queue에 객실 PIN 평문, 고객 개인정보, 다른 메이드 정보는 넣지 않는다.
 - 현장 완료 event는 client 시각, 마지막 server 시각 offset, stable event UUID를 함께 보존한다.
 - 서버는 event를 순서대로 재생하며 같은 submission/client UUID를 한 번만 반영한다.
-- offline 현장 완료만으로 객실을 배정 가능으로 만들거나 검수·earning을 생성하지 않는다. 서버가 현재 담당/version·필수 사진·권한을 검증해 수용한 뒤에만 효력이 생긴다.
-- 담당 또는 version이 달라진 event는 정상 완료로 강제 연결하지 않고 충돌로 격리한다. 관리자는 `과거 수행 기록으로만 수용`, `운영 효력 기각`, `정정으로 유효 작업에 연결` 중 명시적 command로 종결한다.
+- offline 현장 완료만으로 객실 ready·검수·earning을 생성하지 않는다. 서버가 현재 담당/version·lease·권한을 검증해야 현장 완료 효력이 생긴다. 사진 완전성은 이후 submission 단계에서 별도 검증한다.
+- 이미 성공한 event UUID는 기존 성공 receipt를 replay한다. 발급 당시 유효했지만 만료 후 도착하거나 revoke/reassign된 lease의 event는 quarantine한다. unknown/위조/발급 사실 없는 lease는 reject하고 domain quarantine을 만들지 않는다. 필요 시 bounded security activity만 기록한다. quarantine 재전송은 자동 승격하지 않는다.
+- quarantine에는 event UUID, actor/attempt/assignment revision/lease 식별자, occurred/received timestamps, stable reason, safe canonical hash, resolution state만 저장한다. PIN·guest PII·phone·token·Authorization·photo bytes·raw body·자유형 payload·secret은 금지한다.
+- 관리자 resolution은 `record_only`, `reject_effect`, `correction_link`다. correction_link는 새 검증된 correction command에서 원 quarantine ID를 provenance로 연결하며 원 event를 정상 event로 바꾸지 않는다. event metadata는 최대 90일, resolution은 별도 append-only audit에 기록하고 audit retention에 따른다.
+- 이 절과 아래 limited capability는 승인된 #7A/B/C 후속 계약이다. #4 조회정책 PR에서 실행·lease·quarantine 기능을 구현한 것으로 표시하지 않는다.
+
+### `[확정 — 2026-09-08 #7C 추가 승인]` 재시도 보존·관리자 정정
+
+- offline event metadata뿐 아니라 성공 응답 replay 보장도 최대 90일로 제한한다. 이후 오래된 이벤트는 재실행 없이 만료 거부한다. 원 event UUID, client 시각/offset, hash, 응답을 영구 command receipt나 audit에 복제하거나 영구 tombstone 예외를 만들어 보존 제한을 우회하지 않는다.
+- 구현상 최종 ingest/replay/metadata 보존선은 서버 `lease.issued_at + 90 days`로 고정한다. 늦은 최초 수신·새 UUID·재시도로 연장하지 않으므로 실제 개별 event 보존은 90일보다 짧을 수 있다. 이는 최대 90일 규칙의 구현이며 수신 후 정확히 90일 보장을 추가하지 않는다.
+- 관리자 완료 정정은 현재 유효한 원 담당자의 `in_progress` 회차만 대상으로 한다. 현재 actor·owner·assignment/revision·execution version·source를 재검증한 별도 correction command로 물리적 완료 효력과 불변 결정/provenance를 원자적으로 기록한다.
+- 인계·종료·superseded·재배정된 과거 회차 복구, 기존 완료 시각 덮어쓰기, ready·검수·수익 생성은 금지한다. 원 quarantine event는 성공 event로 변경하지 않고 `correction_link`로 새 결정과 연결한다.
+- 두 정책은 #7C source/dev 개발 승인이다. production/recovery/main/release/배포 승인이 아니다.
 
 ### `[확정]` 객실 특이사항
 
@@ -338,44 +407,52 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 검수 반려 재청소와 승인 이후 고객 컴플레인으로 생기는 보상/재작업은 같은 종류가 아니다. 후자는 별도 정책·엔티티로 분리하고 아래 규칙을 적용한다.
 
-### `[확정]` 승인 후 컴플레인과 재작업
+### `[확정 — 2026-09-10 #94]` 승인 후 컴플레인과 재작업
 
 - 컴플레인은 `접수 → 확인 중 → 판정 → 메이드 확인/이의 → 종결` 사건으로 관리한다.
-- 관리자가 관련 객실·원 청소·증빙을 연결하고 `확인됨 / 확인 불가 / 사실 아님`, 벌점, 재작업 필요를 결정한다.
-- 메이드는 본인 건을 확인하거나 이의 메모를 남길 수 있지만 판정·벌점·재작업을 직접 바꾸지 못한다.
-- 청소 반려가 자동 벌점이 되지 않으며, 컴플레인·벌점을 주급에서 자동 차감하지 않는다.
-- 정정은 기존 판정을 삭제하지 않고 새 decision version/event로 남긴다.
+- 접수는 원 청소 승인 시각부터 30일 안에만 허용한다. 관련 객실·원 청소·승인 결정·증빙을 실제 FK로 연결하며, 접수·판정·이의 사유는 source-controlled reason code를 사용한다. 자유형 고객 정보와 고객·직원 PII를 입력하거나 감사·알림 payload에 복제하지 않는다.
+- 관리자는 immutable decision version과 current pointer를 분리하고 `expectedVersion` CAS로 `확인됨 / 확인 불가 / 사실 아님`, 벌점, 재작업 필요를 결정한다. 과거 decision을 수정·삭제하지 않는다.
+- 벌점은 0~10의 정수이고 평가 전용 데이터다. 청소 반려가 자동 벌점이 되지 않으며, 컴플레인·벌점이 음수 adjustment나 주급 차감을 자동 생성해서는 안 된다.
+- 메이드는 본인 건의 최초 판정 뒤 7일 안에 한 번만 이의를 제기할 수 있다. 판정·벌점·재작업을 직접 바꾸지 못한다.
+- 종결 뒤 reopen은 금지한다. 판정 오류는 active business admin이 기존 판정을 보존한 새 correction decision version으로만 바로잡는다.
+- 판정·이의 처리·종결·정정 command는 한 명의 active business admin이 처리하며 actor, `expectedVersion`, actor/command 범위 idempotency key와 canonical request hash, audit을 필수로 한다.
 - 이미 승인된 원 청소의 earning은 컴플레인 때문에 취소하거나 귀속일을 바꾸지 않는다.
-- 같은 메이드가 재작업하면 추가 earning은 없다. 다른 메이드가 맡으면 관리자가 명시한 보상 결정 ID에 연결된 금액을 새 재작업 현장 완료일에 정확히 한 번 적립할 수 있다.
-- 이 보상은 `reclean_compensation_decision_id` 같은 실제 FK/unique source를 가져야 하며, 최초 검수 반려 재청소에 재사용하면 안 된다.
+- 같은 메이드가 재작업하면 추가 earning은 0원이다. 다른 메이드가 맡으면 active business admin이 0원 이상, 원 target base fee snapshot 이하의 정수 원화 보상을 immutable compensation decision으로 확정한다.
+- 타 메이드 보상 earning은 해당 compensation decision과 타 메이드 재작업의 현장 완료·승인 근거를 실제 FK로 연결한 뒤 정확히 한 번만 생성한다. 최초 검수 반려 재청소나 현장 완료·승인 전에는 만들지 않는다.
 
 ---
 
 ## 9. 수익과 주급
 
-### `[확정]` 수익
+### `[확정 — 2026-09-10 #94 보강]` 수익
 
 - earning은 승인된 유상 청소 entitlement에서 정확히 한 번 생성되는 불변 원장이다.
+- 원청소 entitlement와 타 메이드 재작업 compensation entitlement는 서로 다른 실제 typed table/FK로 표현한다. `earnings`에는 임의 UUID polymorphic source를 두지 않고 source별 nullable FK와 exactly-one CHECK로 출처를 강제한다.
+- 이미 구현된 #31 원청소 earning identity와 이력은 미래 append-only migration에서 보존한다. 적용된 migration이나 기존 earning을 고쳐 써서 provenance를 바꾸지 않는다.
 - 금액은 작업 당시 base fee snapshot과 승인된 bonus에서 서버/DB가 계산한다.
 - `earned_on`은 최종 승인까지 이어진 성공 수행 회차의 **현장 완료 KST 날짜**다. 원 계획일, 이월 대상일, 업로드일, 검수일로 바꾸지 않는다.
 - 자정 또는 일요일/월요일 경계에서 offline client 시각과 server 기준이 충돌하면 자동 귀속하지 않고 관리자 확인 상태로 둔다.
 - 지급 전후를 막론하고 earning 원본 금액을 덮어쓰지 않는다.
-- 정정은 별도 adjustment event로 추가한다.
+- 정정은 signed append-only adjustment event로 추가한다. 음수 adjustment는 실제 선행 entitlement/adjustment의 오류 정정 또는 reversal에만 허용한다.
+- `reversal_of`는 실제 선행 원장을 FK로 참조하고 같은 provenance·maid·통화와 금액 관계를 검증한다. 존재하지 않거나 다른 메이드·통화·출처의 원장을 임의로 상계하지 않는다.
+- 컴플레인 벌점은 음수 adjustment를 자동 생성하지 않는다.
 
-### `[확정]` 지급
+### `[확정 — 2026-09-10 #94 보강]` 지급
 
 - 메이드·주차별 payroll cycle은 한 건이다.
 - `locked_earning_ids uuid[]` 같은 배열이 아니라 `payroll_items`로 earning을 정규화한다.
 - `payroll_items.earning_id`는 전 cycle에 걸쳐 UNIQUE여야 같은 수익을 두 번 지급하지 않는다.
 - 지급 snapshot 금액은 포함 item의 DB 합계와 같아야 한다.
 - 지난주 cycle이 아직 `OPEN`이면 늦게 승인된 해당 주 earning을 지난주 cycle에 포함한다. 이미 `PAID`라면 원 지급을 바꾸지 않고 다음 주 adjustment로 넘긴다.
-- 현재 진행 중인 주차와 확정액 0원 cycle에는 지급 command를 허용하지 않는다.
+- 현재 진행 중인 KST 주차에는 지급 command를 허용하지 않는다.
+- earning과 adjustment를 합산한 payable amount가 0 이하이면 `OPEN → PAYING`을 허용하지 않고, 0원 `PAID` event도 만들지 않는다. 남은 음수·0원 residual adjustment는 다음 positive cycle로 이월한다.
 - 기본 전이는 `OPEN → PAYING → PAID`다.
-- 송금 결과가 불확실하면 `PAYING → CHECK`로 둔다. 외부 송금이 없었음을 확인하고 필수 사유를 기록한 경우에만 `PAYING → OPEN` 또는 `CHECK → OPEN`으로 되돌린다.
-- UI에서 “미지급으로 되돌리기”를 제공하더라도 이미 실제 송금된 기록을 삭제하거나 조용히 OPEN으로 바꾸지 않는다. 정정/상계 event가 필요하다.
+- 송금 결과가 불확실하면 `PAYING → CHECK`로 둔다. 외부 송금이 없었음을 재확인한 actor와 시각, `NO_TRANSFER_CONFIRMED` reason을 기록한 경우에만 `PAYING → OPEN` 또는 `CHECK → OPEN`으로 되돌린다.
+- OPEN 복귀 뒤 재시도는 기존 지급 event를 재사용하지 않고 새 payment attempt/event로 시작한다. `PAID → OPEN`은 금지한다.
+- UI에서 “미지급으로 되돌리기”를 제공하더라도 이미 실제 송금된 기록을 삭제하거나 조용히 OPEN으로 바꾸지 않는다. `PAID` cycle은 불변이며 이후 cycle의 정정/상계 adjustment로만 바로잡는다.
 - 외부 송금 연동 전에는 실제 지급이 실행된 것처럼 응답하지 않는다.
 
-현재 제품은 은행/provider에 송금을 요청하지 않는다. 관리자가 외부에서 전액 송금한 결과만 기록한다. 향후 실제 provider 연동이 별도로 확정되면 lock/pay command는 대상 earning을 일정한 순서로 잠그고, 외부 호출을 DB transaction 안에서 기다리지 않으며 idempotency key와 provider reference로 결과를 조정한다.
+현재 제품은 은행/provider에 송금을 요청하지 않는다. active business admin이 외부에서 잠긴 payable 전액을 송금했음을 확인한 결과만 기록하며 일부 지급을 `PAID`로 확정하지 않는다. payment method는 source-controlled code를 사용하고 provider/reference ID는 형식·길이를 제한하며 PII·secret을 금지한다. `paidAt`은 server 시각이고 actor, cycle `expectedVersion`, idempotency key/request hash, audit을 필수로 한다. 영수증 파일·계좌번호·수취인 개인정보는 저장하지 않으며 실제 송금을 확인하기 전 `PAID` 응답을 반환하지 않는다. 향후 실제 provider 연동이 별도로 확정되면 lock/pay command는 대상 earning을 일정한 순서로 잠그고, 외부 호출을 DB transaction 안에서 기다리지 않으며 idempotency key와 provider reference로 결과를 조정한다.
 
 ---
 
@@ -401,21 +478,30 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 - 새 업무 배정은 즉시 막는다.
 - 정상 현장 완료 후 미제출인 업무에는 capability 발급 시각부터 최대 24시간, 동결된 assignment revision 범위에서 사진 업로드·검증·유효한 전체 제출을 허용할 수 있다.
-- 청소 진행 중 비활성화는 관리자가 `현재 한 건 마무리` 또는 `즉시 중단·인계`를 선택한다. 전자는 지정한 한 회차만 완료하게 한다.
+- 청소 진행 중 비활성화는 관리자가 `현재 한 건 마무리` 또는 `즉시 중단·인계`를 선택한다. 전자는 현재 in_progress 한 건만 허용하며 새 시작·다른 assignment는 금지한다. execution capability는 발급 후 2시간 hard expiry이고 field_completed 시 즉시 종료한다. 만료 후 수행 권한은 종료하며 관리자 handover가 필요하다.
+- 즉시 중단·인계는 기존 attempt를 interrupted로 종결하고 execution capability를 회수하며 새 maid의 새 scheduled attempt를 만든다. 이전 maid의 complete·current attempt 재활성화는 금지한다.
 - 즉시 중단·인계된 이전 메이드에게는 증빙 업로드만 허용한다. current submission 생성, 검수, earning 연결은 금지한다.
 - 어떤 제한 capability도 일반 maid 권한이나 관리자 권한을 주지 않는다.
+- 별도 opaque login secret/bearer capability token/복구 인증키를 만들지 않는다. 기존 Supabase Auth user와 유효·미폐기 session, 허용 limited profile state, 미만료 DB capability, 정확한 attempt/revision, allowed action을 전용 endpoint에서 모두 검증한다. upload/submit capability도 profile/attempt/revision/발급·만료/actions에 bind한다.
+- 일반 API의 active-profile guard는 유지한다. session이 revoke됐거나 refresh 불가능하면 우회 credential을 발급하지 않고 관리자 handover/reassignment로 처리한다. 현재 일반 비활성화의 session 폐기/Auth ban 계약 변경은 #7B에서 별도 검증하며 #4에서 변경하지 않는다.
 - API와 RLS가 같은 capability matrix를 사용해야 한다.
 
-### `[확정]` 객실 PIN
+### `[확정 — 2026-09-04 #69]` 객실 PIN
 
 - 로그인 비밀번호와 별도 암호키/수명주기로 관리한다.
-- 객실 PIN은 선행 0을 허용하는 4자리 숫자 문자열이다.
-- DB에는 authenticated encryption(AES-GCM 또는 XChaCha20-Poly1305)의 암호문, nonce, authentication tag, key version과 변경 이력을 저장한다. 키는 DB와 분리된 secret manager에 두고 평문을 저장하지 않는다.
+- 프런트 입력은 PIN 숫자 부분만 받으며 `^[0-9]{4,8}$`를 만족하는 문자열이어야 한다. 숫자형으로 변환하지 않고 `0256`, `00000001` 같은 선행 0을 보존한다.
+- 서버는 요청의 `room_id`로 현재 `rooms.room_number`를 다시 조회하고 저장·표시용 canonical credential을 `<room_number>-<pin_digits>`로 조합한다. 클라이언트가 보낸 객실번호 prefix를 신뢰하거나 다른 객실 credential 생성에 사용하지 않는다.
+- DB에는 canonical credential 전체를 AES-256-GCM으로 암호화한 ciphertext, 12-byte random nonce, authentication tag, key version과 bounded nonsecret AAD context(`format/environment/projectRef/roomId/pinVersion`)를 private immutable revision으로 저장하고 current pointer만 CAS 갱신한다. 복구 프로젝트에서는 runtime context가 아니라 revision에 저장된 exact context로 복호화한다. 키는 DB와 분리된 secret manager에 두며 public table, 감사, outbox, 로그에는 평문이나 암호문을 저장하지 않는다.
 - 권한 있는 사용자가 특정 객실·현재 assignment/attempt에 대해 명시적으로 조회할 때만 서버가 복호화한다. 메이드는 담당뿐 아니라 해당 청소 유형의 출입 허용 시각 도달도 검증한다.
-- 응답은 `Cache-Control: no-store`를 사용하고 클라이언트는 최대 30초 뒤, 화면 이동, background/pagehide, 기기 잠금, 담당 해제, 출입 재잠금 때 평문을 메모리에서 지운다. clipboard, service worker cache, offline queue, 영속 브라우저 저장소에 넣지 않는다.
-- PIN 조회·변경은 객실, PIN version, actor, assignment/attempt에 묶인 lease/CAS와 감사 event를 남긴다.
-- 관리자 변경은 PIN 변경 lease 선점 → 실제 도어락 변경 → 앱 저장 순서로 조정한다. 저장 실패로 물리 도어락과 앱 값이 어긋나면 입실과 PIN 조회를 차단하고, 실제 PIN 재입력 또는 물리적 원복 확인 + 사유로만 종결한다.
+- 응답은 `Cache-Control: no-store`를 사용하고 클라이언트는 응답의 남은 TTL(최대 30초)과 `expiresAt` 중 더 이른 시점, 화면 이동, background/pagehide, 기기 잠금, 담당 해제, 출입 재잠금 때 평문을 메모리에서 지운다. 만료된 reveal은 평문을 반환하지 않는다. clipboard, service worker cache, offline queue, 영속 브라우저 저장소에 넣지 않는다.
+- PIN 조회·변경은 객실, PIN version, actor, current notified assignment/current nonterminal attempt와 기존 `room_pin_access_leases`의 exact unrevoked authoritative lease에 묶인 lease/CAS와 감사 event를 남긴다. 메이드 변경은 exact `in_progress`에서만 허용한다.
+- 관리자 변경은 PIN 변경 lease 선점 → 실제 도어락 변경 → confirm/save 순서로 조정한다. prepare 즉시 mismatch가 되어 실제 체크인 전이와 PIN 조회를 차단하지만 예약 생성·변경·배정은 차단하지 않으며, confirm 전에는 current pointer를 바꾸지 않는다. 만료·불확실 상태는 실제 PIN 재입력 후 새 revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결한다. current가 없는 최초 변경이 만료된 경우에도 실제 PIN 재입력으로 version 1을 수립할 수 있다.
 - PIN 평문을 URL, 로그, error, audit payload, notification, analytics, Git, 브라우저 저장소에 넣지 않는다.
+- `[확정 — 2026-09-13 #136]` Google Sheets는 DB PIN current revision의 단방향 운영 projection이다. `room_number`를 business identity로 bounded board에서 정확히 한 행만 갱신하고, equal-version 변조는 DB 정본으로 복구하며 Sheet-ahead/중복 identity/불확실 write는 operator-blocked한다. 전용 service account는 spreadsheets-only scope를 쓰며 source-controlled approved target 검증을 PIN 복호화·OAuth보다 먼저 수행한다. hosted target mapping과 full resync/운영 활성화는 #137/release 승인 전에는 없다.
+- `[확정 — 2026-09-13 #140]` 빈 DB의 PIN 미설정 상태는 예약 업무를 중단시키지 않는다. 배포 시 secret manager에 주입한 4~8자리 초기 숫자를 active admin 전용 bounded bootstrap command가 서버 안에서 객실번호와 조합·암호화해 version 1로 수립한다. 초기 숫자 평문은 source, migration, request/response, 로그, 감사, 알림에 넣지 않는다. bootstrap은 current PIN 또는 unresolved mismatch가 있는 객실을 덮어쓰지 않고 건너뛰며, batch 최대 25건·멱등 receipt·객실별 immutable revision/outbox를 사용한다.
+- `[확정 — 2026-09-13 #140 보강]` 일반 PIN prepare와 bootstrap은 private `(key_version, nonce)` reservation을 공유한다. 같은 실제 PIN 암호키는 keyring 구성에서 여러 version 이름으로 중복 등록할 수 없고, 같은 key version과 12-byte nonce는 객실·AAD가 달라도 서로 다른 암호화에 재사용할 수 없다. prepare가 만든 envelope를 confirm이 그대로 revision으로 승격하는 것은 같은 논리 암호화이므로 reservation을 재사용한다. 52→53 upgrade에서 matching confirmed lease/revision은 한 reservation으로 backfill하며, 서로 다른 과거 암호화의 충돌이 발견되면 원 이력을 삭제·변환하지 않고 migration 전체를 fail-closed한다.
+- bootstrap 성공의 `initialized`는 그 batch transaction에서 신규 revision/current/verified sync/Sheet outbox/audit가 확정된 객실이고, `skipped`는 기존 current PIN 또는 미해결 물리 변경을 보존하기 위해 의도적으로 건너뛴 객실이다. 검증 오류를 `skipped`로 숨기지 않으며 DB validation 오류는 batch transaction 전체를 rollback해 업무 원장 변경 0건으로 끝난다. 반면 timeout·응답 유실은 rollback 증거가 아니므로 같은 `Idempotency-Key`로 완료 receipt를 재조회해 최초 결과를 확인한다.
+- `[확정 — 2026-09-13 #137 source]` developer/admin은 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 CAS version만 조회한다. full resync는 서버가 요청 시점의 정확한 121실 room/PIN current snapshot을 만들고 global singleton fence의 유일한 provider permit으로 `A1:H122`를 DB 정본에서 재작성한다. 요청·claim은 environment/project/spreadsheet/tab 전체의 source-controlled SHA-256 target identity에 묶이며 mapping 변경·stale snapshot·경쟁은 fail-closed한다. 성공 marker 이전에 생성된 snapshot-room incremental/uncertain 작업만 supersede하고 이후 PIN 변경은 보존한다. Sheet→DB 입력, PIN/envelope/credential/token/raw Google response 공개, production mapping·활성화는 금지한다.
 
 ### `[확정]` 개인정보 보존
 
@@ -450,6 +536,15 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제다. 자격증명 없이 provider가 연결됐다고 가정하거나 worker를 배포하지 않는다. 용량 보호 기준은 현재 #9의 10GB 경고/12GB 업로드 차단 계약을 따른다.
 
+### `[확정: #84 착수 승인]` 서버 중계·응답 유실 복구 경계
+
+- 파일명은 서버 사전발급 opaque app `object_id`이며 canonical photo version은 finalize에서 연결한다. Drive ID를 브라우저에 노출하지 않는다.
+- raw body는307200 bytes까지이며 MIME/magic·전체 decode·metadata 제거·최종 출력 검증을 서버가 수행한다. decoder pixel/frame/CPU/memory 상한은 기술상한으로 검증하고 제품 사진 개수 정책으로 승격하지 않는다.
+- 서버가 preallocated identity/부모/MIME/size/실제SHA를 검증한 Google immutable `createdTime`을 최초 업로드 성공시각으로 사용한다. create에서 시간값을 지정하지 않고 응답 유실/409에서도 같은 clock을 복구한다. 원문 client 촬영시각·retry 수신시각으로 보존기한을 연장하지 않는다.
+- 사전예약 KST 폴더 날짜와 실제 provider 생성 날짜가 다르면 acceptance를 거부한다. 이미 생성된 identity는 move/rebind하지 않고 미수락 여부와 fence를 확인한 보상 경로만 사용한다.
+- limited upload_evidence는 슬롯/업로드/상태 접근만 허용하며 사진 원본 read 권한이 아니다. 원본은 active admin 또는 본인 현재 회차의 active maid를 응답 직전까지 재검증한다.
+- 업로드 accepted는 물리적 완료/전체 제출/검수/ready/수익 상태를 암묵 생성하지 않는다. #85 7일 purge 운영 gate와 #31 제출·검수는 별도다.
+
 ---
 
 ## 12. 알림과 감사 이력
@@ -459,12 +554,23 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 앱 알림함은 영속 데이터다. 푸시는 그중 즉시 행동이 필요한 사건의 전달 수단이다.
 - 관리자와 메이드의 수신 대상을 분리한다.
 - 사용자가 자기 행동으로 만든 변화는 자신에게 푸시하지 않는다.
+- `requiresAction`과 즉시 push 전달 가치는 독립 축이다. `requiresAction=false`인 취소·회수·결정·현장 완료 같은 정보성 알림도 source-controlled catalog의 `push_eligible=true`이면 push할 수 있으며, 이를 위해 inbox의 행동 필요 상태를 거짓으로 올리지 않는다.
+- push outbox는 catalog의 `push_eligible`, actor와 recipient가 다름, 수신자의 active·비밀번호 변경 완료 상태를 모두 만족할 때만 만든다. inbox 원장은 계정 상태와 무관하게 domain transaction에서 보존하고, inactive 또는 임시 비밀번호 상태에는 push를 전달하지 않는다.
 - 같은 객실·같은 사건 종류의 10분 이내 업데이트는 group key로 묶을 수 있다.
 - deep link payload에는 안정적인 entity ID만 넣고 PIN·고객 개인정보·민감 메모를 넣지 않는다.
 - notification의 recipient, title, body, category, deep link는 생성 뒤 수신자가 수정하지 못한다. 수신자는 본인 `read_at`만 좁은 command로 바꿀 수 있고 `resolved_at`은 관련 domain command만 갱신한다. 해결된 알림도 삭제하지 않는다.
 - notification 원장과 delivery outbox/device subscription을 분리한다.
 - outbox는 재시도, provider response, 최종 실패를 기록한다.
 - push 거부·지연·최종 실패는 담당, 수행, 검수 같은 domain 상태를 되돌리거나 바꾸지 않는다.
+
+### `[확정: #110]` Web Push 구독 원장
+
+- 구독은 exact active/password-complete admin·maid 본인과 live Auth session에만 결합한다.
+- 원문 endpoint와 `p256dh`/`auth`, exact Auth session binding은 private AES-256-GCM current envelope에만 두고 API·알림·감사·로그에는 노출하지 않는다. session UUID 평문 metadata column은 만들지 않는다.
+- session당 active 1, profile당 최대 5이며 자동 LRU나 교차 profile endpoint 이전은 하지 않는다.
+- 같은 material replay는 같은 logical result를 반환하고, 변경은 현재 logical ID/version CAS의 새 immutable revision이다.
+- retire는 같은 transaction에서 current secret을 crypto-shred하며 retired logical subscription은 재활성화하지 않는다.
+- 구독 원장/API는 provider 전송과 분리한다. delivery worker는 #111, VAPID/provider/외부 HTTP/Cron/production secret은 #112만 소유한다.
 
 ### `[확정]` 감사 이력
 
@@ -554,16 +660,27 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 ### `v0.2.0` 포함 후 남은 차이
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
-- 담당 배정 revision/current pointer·순서·preview·activation, 현장 attempt/offline lease, 정규화 photo slot, Drive worker, 검수·재청소, bomb report, complaint/penalty/appeal, payroll event/adjustment, notification outbox와 프런트 실제 연동이 남아 있다.
-- initial migration과 테스트에는 확정된 `purge_after NOT NULL` 및 업로드 후 7일 계약이 들어 있지만, 실제 Google Drive 업로드·조회·purge worker는 아직 구현되지 않았다.
+- #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview는 source/dev 완료다. #4 notified-only 조회도 PR #74의 독립 검토·CI·위임 승인 후 `dev@7bdc2a3981e55e235de569527f7cc68f5ef80db1`에 병합되어 #7A 선행 gate를 충족했다. production에는 승격되지 않았다.
+- #7A 실행 → #7B 인계/limited capability → #7C offline, #30 photo slot → #83/#84 Drive 원장·HTTP → #85 purge worker와 #31 제출·검수까지 source/dev 완료했다. #7C는 PR #79로 `dev@e2648de4e40a84e60d19cbb1e4d01974a2f3d369`에 통합됐고 production purge 주기·hosted/client offline E2E는 별도 운영 gate다.
+- #30~#31 개발 통합 기준은 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`, 34 migrations / 74 paths / 80 operations이며 production에는 승격하지 않았다. #31은 전체 제출·폭탄방 신고/선판정·검수 승인/반려·원 maid 재청소를 append-only 34번째 migration과 Fastify/Edge source로 구현했고, exact-head 독립 QA P0/P1=0·required CI·96/100 위임 승인 뒤 PR #91로 `dev`에 병합됐다. release/main·production은 미완료이며 inspection queue pagination은 비차단 P2 후속이다. 이 `[현재 구현]` snapshot은 §8의 `[확정]` 정책을 변경하거나 production 사용 가능을 뜻하지 않는다.
+- #93/#95/#96의 원청소 earning 기반 주차 조회·`OPEN → PAYING`·bounded pagination은 `dev@e55f0e9be2f26a1a3700b8d31ba1958dcbe65b3d`, 36 migrations / 77 paths / 83 operations에 source 통합됐다. #94는 typed compensation provenance, complaint/appeal/correction, signed adjustment/carry-forward, 외부 지급 결과·`CHECK/PAID` command 정책을 확정했고, source 구현 상태는 아래 #100과 후속 #101~#103 항목에서 각각 추적한다. main/recovery/production을 변경하거나 향후 병합 SHA를 선기록하지 않는다.
+- #100 complaint/appeal/correction source는 PR #104로 `dev@88d1865bdaafb6dc2afa556452ae80c91569f393`에 통합됐다. 37 migrations / 85 paths / 92 operations이며 원 승인 수익의 typed FK chain과 original-cleaning source allowlist, 30일 접수, immutable decision/response/event와 current pointer CAS, 7일 1회 maid 응답, 종결·correction을 구현한다. complaint Data API SELECT는 JWT 세션과 같은 사용자의 live `auth.sessions` row를 함께 확인하고, correction 알림은 새 응답을 요구하지 않으며, 모든 complaint HTTP 응답은 `no-store`다. exact-head 독립 QA와 required `application`/`migration`은 PASS했지만 main/recovery/production에는 승격하지 않았고 현재 사용 가능을 뜻하지 않는다.
+- #101 complaint 재작업/typed compensation earning은 PR #105로 `dev@a5c48673ff339e5a338356c77ce83e8cf40ee21a`에 통합됐으며 38 migrations / 86 paths / 93 operations다. confirmed current decision을 typed `post_approval_complaint_reclean` target과 연결하고 server가 안전한 당일 접근 창을 증명한 경우에만 published template·notified assignment·assignee·amount를 admin CAS로 고정한다. 같은 maid는 amount 0 decision만 보존하고 earning 0건, 다른 maid는 현장 완료와 승인 뒤 amount가 0이어도 typed entitlement/earning 각 1건을 생성한다. 원청소/compensation earning은 nullable typed FK exactly-one CHECK이고 기존 #31 identity를 보존한다. pre-start semantic correction과 generic reassignment는 ghost/assignee drift를 막으며, 시작 뒤 correction은 operational source/current divergence를 노출한다. raw compensation decision은 live-session admin만 읽고 maid projection은 cross-maid UUID/타 보상액을 숨긴다. developer 감사에는 두 #101 event의 safe summary만 노출하고 raw state/request hash/maid cross-sensitive 필드는 제외한다. main/recovery/production은 변경하지 않았고 현재 사용 가능을 뜻하지 않는다.
+- #102 signed adjustment/carry-forward는 PR #106으로 `dev@cb26650221b3e47804edafd51cad5bfc8872c349`에 통합됐으며 39 migrations / 90 paths / 97 operations다. correction은 earning 또는 adjustment 한 건의 typed FK와 signed delta를 보존하고, reversal은 source의 미반전 전액을 정확히 반대 부호로 한 번만 기록하며 root cumulative entitlement가 0 아래로 내려가지 않는다. payment-start와 adjustment command는 receipt → global advisory → actor → adjustment book → cycle → sorted source 순으로 잠근다. net이 0 이하면 payment event 없이 immutable offset settlement로 OPEN cycle을 경제적으로 동결하고, 음수 크기만 바로 다음 KST 주차로 한 칸씩 이월한다. PAID/offset-settled cycle의 late earning은 명시적 admin command가 원본을 수정하지 않고 다음 주차의 positive `late_earning_carry` adjustment로 한 번만 옮긴다. 공개 조회는 signed adjustment/carry/payable과 `offsetSettled`를 bounded projection으로 제공하며 live-session RLS, audit/outbox, Fastify/Edge/OpenAPI parity를 유지한다. main/recovery/production에는 승격하지 않았다.
+- #103 외부 전액 지급 결과는 PR #107로 `dev@3297679ca2e903e68cfa2dd9e7bc137341c5b27d`에 source/dev 통합됐으며 40 migrations / 93 paths / 100 operations다. 기존 `payment_started` event를 immutable attempt identity로 연결하고, `TRANSFER_RESULT_UNCERTAIN` CHECK, `NO_TRANSFER_CONFIRMED` OPEN 복귀, 양수 locked snapshot 전액 PAID result를 typed append-only evidence로 보존한다. 40번째 migration 이후의 payment projection transition과 event/attempt/result 양쪽은 deferred commit invariant로 서로를 exact하게 요구하며 과거 CHECK/PAID evidence는 추측 backfill하지 않는다. client amount/`paidAt`은 받지 않고 server time과 cycle CAS를 사용하며 OPEN 복귀 뒤 재시작은 새 attempt다. 최초 method는 `bank_transfer`, reference는 8~64 ASCII allowlist·영문/숫자 필수·7자리 연속 숫자/URL-like 거부 뒤 uppercase canonical global unique다. 이 형식은 실제 provider 계약 미확정 동안의 fail-closed source 계약이며 canonical reference는 admin result에만 보이고 maid/developer/audit/notification에는 숨긴다. provider HTTP, 영수증·계좌·수취인 PII·secret/raw payload 저장은 없고 main/recovery/production은 변경하지 않았다.
+- #108 알림함, #109 typed catalog/grouping/writer, #110 encrypted Web Push subscription, #111 delivery ledger/worker와 #112 VAPID/provider HTTP source까지 순차적으로 dev에 통합됐다. #112 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 PR #119 병합 commit `dfc98b1474f9f890851d49bd904869181d0d7880`의 tree는 동일하고 독립 QA 98/100, P0/P1/P2 0, required `application`/`migration` PASS다. PR #122 문서 동기화와 #124 pgTAP fixture 안정화를 반영한 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / 98 paths / 105 operations다.
+- #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
+- #46은 기존 46 migrations를 수정하지 않은 47번째 append-only private password-change receipt와 password-specific shadow version으로 source/dev에 통합됐다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. release/main·production 승격은 별도 gate다.
+- 위 source/dev 완료는 운영 사용 가능 선언이 아니다. Issue #112는 release/main 뒤 Function Secrets, 승인된 `api`/`notification-delivery` Edge bundle, negative/positive hosted smoke, Vault/`pg_cron`/`pg_net`, 5회 연속 heartbeat, 실제 기기 Web Push smoke가 끝날 때까지 OPEN이다. 현재 `main`/production/recovery는 v0.2.0 상태로 변경되지 않았다.
+- #46, #128, #131, #136, #137, #140과 #133은 source/dev에 통합됐고 #146 deterministic concurrency fixture와 #147 developer migration head 보완까지 `dev@5798e882495e42763db6c227b7cb804527ccde47`에서 완료됐다. #137의 안전 상태 조회·121실 full resync와 #133의 checkout incident/reassignment도 source/dev 완료지만 hosted target/서비스 계정/ACL/Secrets/Edge/Cron/smoke는 미완료다. 현재 gate는 **v0.3.0 release exact-head 전체 검증과 main 승격 준비**다. #12 backup/recovery는 병행 가능하지만 실제 운영·복구 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 release와 프런트 정본 작업 뒤 진행한다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
-- Issue #36에서 Supabase Edge Functions `api`의 health/Auth/rooms RPC와 Cron용 예약 scheduler Function을 로컬 PoC로 검증한다. 운영 smoke와 독립 리뷰 전에는 Supabase-only production runtime을 확정하거나 Fastify를 삭제하지 않는다.
+- Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
 
 원격 운영·복구검증 프로젝트는 Git과 SQL 내용은 대응하지만 migration version은 서로 다르다. `supabase db push`로 자동 추론하지 않고 `docs/RELEASE_V0.2.0.md`의 검증된 mapping과 MCP 순차 적용 절차를 사용한다. 2026-08-29 기준 운영 Security Advisor는 0건이며, 실제 source 병합·원격 적용·tag 상태는 Release Issue #24가 추적한다.
 
-### Issue #1 `v0.2.0` source release 범위
+### Issue #1 `v0.2.0` 당시 source release 범위
 
-다음 항목은 release candidate `4da80cb`에 포함된다. source가 `main`에 병합됐는지, 운영 migration까지 적용됐는지는 서로 다른 상태이며 Release Issue #24에서 확인한다.
+다음 항목은 release candidate `4da80cb` 당시 계약이다. source가 `main`에 병합됐는지, 운영 migration까지 적용됐는지는 서로 다른 상태이며 Release Issue #24에서 확인한다. 특히 당시의 PIN 배정 차단 문구는 #140 이후 계약으로 대체됐고, 이 문서 갱신만으로 production 동작이 바뀌었다는 뜻은 아니다.
 
 - 객실 목록·상세는 점유, 청소 필요, 배정 차단/가능과 안정적인 reason code를 독립 축으로 반환한다.
 - 객실 기준정보, 운영 차단, 촛불, 이슈, PIN 동기화는 최신 active admin과 객실 `state_version`을 재검증하는 원자 명령이다.
@@ -572,12 +689,12 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 고객명은 API 서버가 AES-256-GCM으로 암호화하며 명령 응답·감사 payload에 원문이나 암호문을 포함하지 않는다.
 - 고객명 idempotency fingerprint는 암호화 키와 분리된 안정적 server HMAC pepper를 사용해 key rotation 전후 request hash를 보존한다.
 - 예약 목록은 고객명을 반환하지 않고 관리자 단건 상세에서만 복호화한다. 체크아웃/취소 후 180일 보존 만료는 예약 전이 worker가 처리하며 멱등성 hash에는 암호화 키와 분리된 HMAC pepper fingerprint만 사용한다.
-- PIN 원문은 저장하지 않고 동기화 상태와 version만 기록한다. `verified`가 아닌 객실은 고객 배정을 차단한다.
+- 당시에는 PIN 원문을 저장하지 않고 동기화 상태와 version만 기록하며 `verified`가 아닌 객실의 고객 배정을 차단했다. **#140 이후 source 계약은 이를 대체해** `unconfigured`/`mismatch`를 예약 생성·변경·배정의 비차단 경고로 유지하고, 실제 체크인과 maid PIN lease/reveal/change만 `verified` 및 권한·lease 검증까지 fail-closed한다. production 적용은 별도 release/운영 승인 전까지 완료로 간주하지 않는다.
 - 객실 전체 운영 projection은 관리자 전용이다. 메이드는 자신의 현재 배정·수행 범위 projection만 후속 업무 API에서 제공받는다.
 - 연박/추가 수동 청소 요청은 안정적인 target ID로 생성하고 시작·PIN 공개 전까지만 CAS soft cancel한다.
 - 예정 전이 worker는 production에서 활성 관리자 actor를 필수로 하며 시작 시 검증 실패를 숨기지 않는다. catch-up은 퇴실을 입실보다 먼저 처리해 같은 instant의 인접 예약을 한 batch에서 전이하고, 완전히 지난 미입실 예약은 가짜 check-in 없이 종결한다.
 - checkout obligation↔target은 deferred commit-time 검증까지 포함해 종료 상태가 반쪽만 저장되지 않게 하고, preparation obligation↔승인 submission/attempt는 직전 점유 종료 이후·해당 체크인 이전 시간창 안에서 target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서를 검증하며 append-only 1회 소비 원장까지 강제한다. PIN lease↔현재 assignment/attempt는 최신 verified PIN version까지 업무 동일성을 복합키와 DB 검증으로 강제한다.
-- 다음 예약 변경은 종결된 과거 의무를 덮지 않는다. 미배정 target은 schedule revision과 함께 마감을 갱신하고 배정·통보된 target은 명시적 재계획 전까지 충돌로 거부한다.
+- 다음 예약 변경은 종결된 과거 의무를 덮지 않는다. 미배정 target은 schedule revision으로 마감을 갱신하며 private 미통보 draft는 stale로 처리한다. 통보된 target은 명시적 재계획 전까지 충돌로 거부한다.
 - 타입별 인원 상한, 프런트 대표 상태, 퇴실점검 lifecycle은 이번 변경에서 확정하지 않는다.
 - Docker Desktop 복구 후 fresh local DB reset, 역할별 SQL 회귀 검사, DB advisor를 실행할 수 있다. 각 변경은 실제 실행 결과를 PR에 기록하며 실행하지 않은 검증은 완료로 표현하지 않는다.
 
@@ -600,11 +717,10 @@ AI는 아래 항목을 암묵적으로 확정하지 않는다.
 2. 타입별 예상시간과 기본/최대 숙박 인원을 운영 정본으로 확정할지
 3. current role 단일값과 역할 이력/복수 역할 구조 중 어느 모델을 채택할지. 단, `upload_only`는 별도 역할이 아니라 제한 capability다.
 4. 최초 검수 반려 뒤 원 메이드가 퇴사·부상 등으로 재청소할 수 없는 예외 처리
-5. 승인 후 컴플레인 재작업을 다른 메이드가 맡을 때 관리자 보상금의 선택 기준
-6. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
-7. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
-8. 운영 시작 시 608호 차단이 여전히 유효한지
-9. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
+5. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
+6. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
+7. 운영 시작 시 608호 차단이 여전히 유효한지
+8. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
 
 미확정 항목도 확장 가능한 schema는 설계할 수 있다. 다만 한쪽 정책을 강제하는 irreversible migration, purge, 지급 로직은 결정 전 배포하지 않는다.
 
@@ -657,13 +773,15 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-1. Issue #1 객실·예약·점유·수동 체크아웃 command를 fresh DB CI와 독립 리뷰 후 반영한다.
-2. 가능일 제출과 assignment revision을 구현한다. 객실 readiness와 예약별 preparation/checkout obligation은 Issue #1 구현을 확장해 사용한다.
-3. offline work lease와 수행 상태를 구현한다.
-4. 7일 Drive 저장 worker, 사진 slot, submission version, 검수·재청소·폭탄방을 원자 command로 구현한다.
-5. earning, payroll item/event/adjustment와 이중 지급 방지를 구현한다.
-6. notification outbox와 외부 worker를 연결한다.
-7. OpenAPI/생성 client로 프런트와 계약을 고정한다.
-8. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
+P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140 보완과 #133 checkout incident까지 source/dev에 통합됐다. 현재 개발 정본은 기존 53 migrations를 보존한 54 migrations / OpenAPI 108 paths / 115 operations이며, source 완료와 운영 승격을 섞지 않는다.
+
+1. 완료된 Issue #146/#147 보완을 포함한 v0.3.0 release exact head에서 전체 application·migration·누적 upgrade gate를 다시 통과한다.
+2. 확정된 `dev`에서 구성한 v0.3.0 release의 migration manifest·복구 가능성·main ancestry를 검증한 뒤 승인된 순서로 `main`과 production에 승격한다.
+3. Issue #34의 GitHub Actions runtime 경고는 별도 CI 유지보수 PR로 관리한다.
+4. Issue #137 hosted Google Sheets 활성화는 실제 대상/서비스 계정/ACL/Secrets/Edge/Cron/smoke 승인 뒤에만 진행한다.
+5. Issue #12 backup/recovery source는 병행할 수 있으나 production/recovery restore·secret 활성화는 별도 승인 단위로 관리한다.
+6. Issue #13 generated client와 전체 browser E2E는 release/main 승격 및 프런트 정본 대조 뒤 진행한다.
+
+source/dev 완료, release/main 승격, production migration/secret/Edge/Cron 활성화는 서로 다른 gate다. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 
 기능 수를 빨리 늘리는 것보다 **삭제 불가 이력, 돈, 권한, 중복 방지**를 먼저 맞추는 것이 우선이다.

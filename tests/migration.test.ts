@@ -74,6 +74,38 @@ const actorActivityMigrationUrl = new URL(
   '../supabase/migrations/20260831124140_actor_activity_audit_contract.sql',
   import.meta.url
 );
+const assignmentCoreMigrationUrl = new URL(
+  '../supabase/migrations/20260903102758_assignment_core.sql',
+  import.meta.url
+);
+const assignmentCommitMigrationUrl = new URL(
+  '../supabase/migrations/20260903141742_assignment_commit.sql',
+  import.meta.url
+);
+const assignmentAttemptActivationMigrationUrl = new URL(
+  '../supabase/migrations/20260905002657_assignment_attempt_activation.sql',
+  import.meta.url
+);
+const plannedCheckoutRoomChangeMigrationUrl = new URL(
+  '../supabase/migrations/20260912082738_planned_checkout_room_change_fk.sql',
+  import.meta.url
+);
+const payrollPaymentResultsMigrationUrl = new URL(
+  '../supabase/migrations/20260910114525_payroll_payment_results.sql',
+  import.meta.url
+);
+const notificationInboxMigrationUrl = new URL(
+  '../supabase/migrations/20260911004142_notification_inbox_read_contract.sql',
+  import.meta.url
+);
+const webPushSubscriptionMigrationUrl = new URL(
+  '../supabase/migrations/20260911050151_web_push_subscription_revisions.sql',
+  import.meta.url
+);
+const roomPinSheetFullResyncMigrationUrl = new URL(
+  '../supabase/migrations/20260912225031_room_pin_sheet_full_resync.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('seeds 121 unique room numbers', async () => {
@@ -334,6 +366,79 @@ describe('initial migration contract', () => {
     expect(sql).toContain('to service_role');
   });
 
+  it('keeps assignment drafts revisioned, snapshot-bound, and service-only', async () => {
+    const sql = await readFile(assignmentCoreMigrationUrl, 'utf8');
+
+    expect(sql).toContain('add column service_date date');
+    expect(sql).toContain('alter column service_date set not null');
+    expect(sql).toContain('cleaning_assignments_current_maid_date_sequence');
+    expect(sql).toContain('ASSIGNMENT_SNAPSHOT_IMMUTABLE');
+    expect(sql).toContain('ASSIGNMENT_SNAPSHOT_MISMATCH');
+    expect(sql).toContain('create function public.save_cleaning_assignment_draft(');
+    expect(sql).toContain("'assignment.save_draft'");
+    expect(sql).toContain("'assignment.draft_saved'");
+    expect(sql).toContain("change_reason_code = 'DRAFT_REVISED'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('private.audit_command_key(');
+    expect(sql).toContain('for update');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
+  });
+
+  it('commits assignment notification subsets atomically through a private outbox', async () => {
+    const sql = await readFile(assignmentCommitMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.notification_outbox');
+    expect(sql).toContain('alter table private.notification_outbox enable row level security');
+    expect(sql).toContain('create function public.get_assignment_commit_impact(');
+    expect(sql).toContain('create function public.commit_and_notify_assignments(');
+    expect(sql).toContain("'assignment.commit_notify'");
+    expect(sql).toContain("'assignment.notified'");
+    expect(sql).toContain('ASSIGNMENT_IMPACT_CHANGED');
+    expect(sql).toContain('ASSIGNMENT_AVAILABILITY_STALE');
+    expect(sql).toContain("at time zone 'Asia/Seoul'");
+    expect(sql).toContain('pg_advisory_xact_lock');
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
+    expect(sql).not.toContain('http_post');
+  });
+
+  it('activates notified assignments and rolls missed targets through one scheduler command', async () => {
+    const sql = await readFile(assignmentAttemptActivationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create function private.activate_cleaning_attempt_at(');
+    expect(sql).toContain('create function private.rollover_cleaning_target_at(');
+    expect(sql).toContain('create function public.process_due_assignment_lifecycle(');
+    expect(sql).toContain("'assignment.process_due_lifecycle'");
+    expect(sql).toContain("'assignment.attempt_activated'");
+    expect(sql).toContain("'assignment.rolled_over'");
+    expect(sql).toContain("status = 'notified'");
+    expect(sql).toContain("obligation.status in ('materialized', 'completed')");
+    expect(sql).toContain('planned_cleaning_target_id');
+    expect(sql).toContain('for update');
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant execute[\s\S]*to authenticated/);
+  });
+
+  it('defers the planned checkout reservation-room FK without removing commit enforcement', async () => {
+    const sql = await readFile(plannedCheckoutRoomChangeMigrationUrl, 'utf8');
+
+    expect(sql).toContain('alter table public.cleaning_targets');
+    expect(sql).toContain('alter constraint cleaning_targets_reservation_room_fk');
+    expect(sql).toContain('deferrable initially deferred');
+    expect(sql).not.toContain('drop constraint cleaning_targets_reservation_room_fk');
+    expect(sql).not.toContain('not valid');
+    expect(sql).not.toContain('disable trigger');
+  });
+
   it('adds reservation history, obligations, occupancy ledgers, and CAS commands', async () => {
     const sql = await readFile(roomReservationMigrationUrl, 'utf8');
 
@@ -384,5 +489,126 @@ describe('initial migration contract', () => {
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/for all to authenticated/);
     expect(sql).not.toMatch(/grant (insert|delete|update) on public\.(reservation|room_)/);
+  });
+
+  it('keeps external payroll payment results typed, immutable, and provider-free', async () => {
+    const sql = await readFile(payrollPaymentResultsMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table public.payroll_payment_attempts');
+    expect(sql).toContain('create table public.payroll_payment_results');
+    expect(sql).toContain('payroll_payment_results_terminal_attempt_unique');
+    expect(sql).toContain('payroll_payment_results_reference_unique');
+    expect(sql).toContain('PAYROLL_PAYMENT_EVIDENCE_IMMUTABLE');
+    expect(sql).toContain('private.payroll_payment_projection_transitions');
+    expect(sql).toContain('payroll_payment_projection_requires_evidence');
+    expect(sql).toContain('payroll_payment_attempt_requires_transition');
+    expect(sql).toContain('payroll_payment_result_requires_transition');
+    expect(sql).toContain('PAYROLL_PAYMENT_EVIDENCE_REQUIRED');
+    expect(sql).toContain('new.check_reason is distinct from old.check_reason');
+    expect(sql).toContain('new.last_reopen_reason is distinct from old.last_reopen_reason');
+    expect(sql).toContain("old.status='check' and new.status='paid'");
+    expect(sql).toContain('private.current_payroll_attempt_has_typed_check');
+    expect(sql.match(/private\.current_payroll_attempt_has_typed_check/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(sql).toContain("when v_cycle.status='check' and not v_has_typed_check");
+    expect(sql).toContain('revoke select on public.payroll_cycles from authenticated');
+    expect(sql).toContain('revoke select(check_reason,last_reopen_reason) on public.payroll_cycles from authenticated');
+    expect(sql).toContain("else 'TRANSFER_RESULT_UNCERTAIN' end");
+    expect(sql).toContain("else 'NO_TRANSFER_CONFIRMED' end");
+    expect(sql).toContain("'TRANSFER_RESULT_UNCERTAIN'");
+    expect(sql).toContain("'NO_TRANSFER_CONFIRMED'");
+    expect(sql).toContain("'bank_transfer'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('alter table public.payroll_payment_results enable row level security');
+    expect(sql).toContain('from public,anon,authenticated,service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/https?:\/\//);
+    expect(sql).not.toMatch(/\b(?:http_post|net\.http_post)\b/);
+  });
+
+  it('keeps notification inbox reads service-only, bounded, and immutable', async () => {
+    const sql = await readFile(notificationInboxMigrationUrl, 'utf8');
+
+    expect(sql).toContain('notifications_recipient_occurred_id_idx');
+    expect(sql).toContain('recipient_profile_id, occurred_at desc, id desc');
+    expect(sql).toContain('create function public.list_notifications_page(');
+    expect(sql).toContain('create function public.mark_notification_read(');
+    expect(sql).toContain('private.assert_notification_actor');
+    expect(sql).toContain('auth.sessions');
+    expect(sql).toContain('not actor.must_change_password');
+    expect(sql).toContain("actor.role in ('admin', 'maid')");
+    expect(sql).toContain('NOTIFICATION_NOT_FOUND');
+    expect(sql).toContain('app.notification_write_mode');
+    expect(sql).toContain('clock_timestamp()');
+    expect(sql).toContain('NOTIFICATION_CONTENT_IMMUTABLE');
+    expect(sql).toContain('NOTIFICATION_READ_AT_IMMUTABLE');
+    expect(sql).toContain('NOTIFICATION_RESOLVED_AT_IMMUTABLE');
+    expect(sql).toContain('revoke select, update on table public.notifications');
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).toContain('grant execute on function public.list_notifications_page');
+    expect(sql).toContain('public.mark_notification_read(uuid, uuid, uuid)');
+    expect(sql).toContain('to service_role');
+  });
+
+  it('keeps Web Push subscriptions encrypted, revisioned, service-only, and provider-free', async () => {
+    const sql = await readFile(webPushSubscriptionMigrationUrl, 'utf8');
+
+    for (const table of [
+      'web_push_subscriptions',
+      'web_push_subscription_revisions',
+      'web_push_subscription_secrets',
+      'web_push_subscription_events',
+      'web_push_registration_limits'
+    ]) {
+      expect(sql).toContain(`create table private.${table}`);
+      expect(sql).toContain(`alter table private.${table} enable row level security`);
+    }
+    expect(sql).toContain('web_push_subscriptions_active_endpoint_uidx');
+    expect(sql).toContain('web_push_subscriptions_active_session_uidx');
+    expect(sql).toContain('web_push_subscriptions_current_revision_idx');
+    expect(sql).toContain('web_push_subscription_revisions_profile_idx');
+    expect(sql).toContain("coalesce(current_setting('app.web_push_writer_mode',true),'') <> 'typed_v1'");
+    expect(sql).toContain('create function public.register_web_push_subscription(');
+    expect(sql).toContain('create function public.retire_web_push_subscription(');
+    expect(sql).toContain('create function public.purge_retired_web_push_subscription_metadata(');
+    expect(sql).toContain('auth.sessions');
+    expect(sql).toContain('v_profile.must_change_password');
+    expect(sql).toContain("v_profile.role::text not in ('admin','maid')");
+    expect(sql.match(/pg_advisory_xact_lock\(hashtextextended\('web-push:membership:v1',0\)\)/g)).toHaveLength(2);
+    expect(sql).not.toContain("'web-push:endpoint:'||p_endpoint_digest");
+    expect(sql).toContain('delete from private.web_push_subscription_secrets');
+    expect(sql).toContain("interval '90 days'");
+    expect(sql).toContain('p_limit not between 1 and 100');
+    expect(sql).toContain('from public,anon,authenticated,service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.web_push/);
+    expect(sql).not.toMatch(/\b(?:http_post|net\.http_post|vapid)\b/i);
+  });
+
+  it('keeps full PIN Sheet repair immutable, fenced, bounded, and provider-free', async () => {
+    const sql = await readFile(roomPinSheetFullResyncMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.room_pin_sheet_full_resync_runs');
+    expect(sql).toContain('create table private.room_pin_sheet_full_resync_items');
+    expect(sql).toContain('snapshot_room_count integer not null check (snapshot_room_count = 121)');
+    expect(sql).toContain('target_identity_digest text not null');
+    expect(sql).toContain('recovery_root_run_id uuid not null');
+    expect(sql).toContain('new.recovery_root_run_id=new.id');
+    expect(sql).toContain('new.recovery_root_run_id<>old.recovery_root_run_id');
+    expect(sql).toContain('create function public.request_room_pin_sheet_full_resync(');
+    expect(sql).toContain('create function public.claim_room_pin_sheet_full_resync(');
+    expect(sql).toContain('create function public.authorize_room_pin_sheet_full_resync_write(');
+    expect(sql).toContain('create function public.settle_room_pin_sheet_full_resync(');
+    expect(sql).toContain('outbox.created_at<=run.provider_write_started_at');
+    expect(sql).toContain('cleanup_limit constant integer:=32');
+    expect(sql).toContain("last_error_code='SNAPSHOT_STALE'");
+    expect(sql).toContain("last_error_code='DB_SETTLE_UNCERTAIN'");
+    expect(sql).toContain("where status in ('pending','processing','failed')");
+    expect(sql).toContain("'room_pin_sheet.full_resync_requested'");
+    expect(sql).toContain("'room_pin_sheet.full_resync_succeeded'");
+    expect(sql).toContain('from public,anon,authenticated,service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_pin_sheet_full_resync/);
+    expect(sql).not.toMatch(/\b(?:http_post|net\.http_post|oauth|private_key|access_token)\b/i);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildApp, type AppServices } from '../src/app.js';
+import { type AppServices, buildApp } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
+import { AppError } from '../src/lib/app-error.js';
 
 const env: AppEnv = {
   APP_ENV: 'local',
@@ -14,9 +15,21 @@ const env: AppEnv = {
   SUPABASE_SECRET_KEY: 'secret-test',
   ACCOUNT_PHONE_PEPPER: 'test-phone-pepper-at-least-32-characters',
   RESERVATION_PII_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
+  ROOM_PIN_KEY_BASE64: Buffer.alloc(32, 8).toString('base64'),
+  ROOM_PIN_KEY_VERSION: 'pin-v1',
+  ROOM_PIN_KEYRING_JSON: '{}',
   RESERVATION_PII_KEY_VERSION: 'test-v1',
   RESERVATION_PII_KEYRING_JSON: '{}',
   RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
+  PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456',
+  NOTIFICATION_CURSOR_HMAC_SECRET: 'notification-cursor-secret-tests-123456',
+  WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(32, 4).toString('base64'),
+  WEB_PUSH_SUBSCRIPTION_KEY_VERSION: 'v1',
+  WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{}',
+  WEB_PUSH_BINDING_DIGEST_SECRET: 'web-push-binding-secret-tests-123456789',
+  VAPID_CURRENT_KEY_VERSION: 'vapid-v1',
+  VAPID_PUBLIC_KEY: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4',
+  VAPID_PUBLIC_KEYRING_JSON: '{}',
   RESERVATION_SCHEDULER_INTERVAL_SECONDS: 60,
   corsOrigins: ['http://127.0.0.1:4173']
 };
@@ -90,13 +103,25 @@ function services(): AppServices {
         cleaningRequired: false,
         candleCount: 0,
         pinSyncStatus: 'unconfigured' as const,
-        allocationBlocked: true,
-        allocationReady: false,
-        reasonCodes: ['DATA_UNCONFIRMED' as const]
+        allocationBlocked: false,
+        allocationReady: true,
+        reasonCodes: []
       }]),
       get: vi.fn(),
       changeMasterData: vi.fn(),
-      mutateOperation: vi.fn()
+      mutateOperation: vi.fn(),
+      preparePinChange: vi.fn(),
+      confirmPinChange: vi.fn(),
+      rollbackPinChange: vi.fn(),
+      revealPin: vi.fn(),
+      bootstrapPins: vi.fn(async () => ({
+        initializedRoomIds: ['11111111-1111-4111-8111-111111111111'],
+        skippedRoomIds: [],
+        initializedCount: 1,
+        skippedCount: 0,
+        remainingCount: 120,
+        completedAt: '2026-09-13T00:00:00.000Z'
+      }))
     },
     reservations: {
       list: vi.fn(async () => []),
@@ -124,6 +149,17 @@ function services(): AppServices {
       processDue: vi.fn(),
       createManualCleaningRequest: vi.fn(),
       cancelManualCleaningRequest: vi.fn()
+    },
+    payroll: {
+      list: vi.fn(async () => ({ payroll: [], nextCursor: null })),
+      listEntries: vi.fn(async () => ({
+        kind: 'items' as const,
+        entries: [],
+        nextCursor: null
+      })),
+      start: vi.fn()
+      , correct: vi.fn(), reverse: vi.fn(), carryForward: vi.fn(), carryLateEarning: vi.fn(),
+      recordPaymentCheck: vi.fn(), recordPaymentPaid: vi.fn(), reopenPayment: vi.fn()
     }
   };
 }
@@ -147,6 +183,33 @@ describe('application', () => {
     await app.close();
   });
 
+  it('returns Retry-After for durable password-verification limits', async () => {
+    const appServices = services();
+    appServices.auth.changePassword = vi.fn(async () => {
+      throw new AppError(
+        429,
+        'PASSWORD_VERIFICATION_RATE_LIMITED',
+        '비밀번호 확인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+        { 'Retry-After': '37' }
+      );
+    });
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'password-retry-after-0001'
+      },
+      payload: { currentPassword: '1234', newPassword: '654321' }
+    });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['retry-after']).toBe('37');
+    expect(response.json().error.code).toBe('PASSWORD_VERIFICATION_RATE_LIMITED');
+    await app.close();
+  });
+
   it('returns rooms for an authenticated administrator', async () => {
     const app = await buildApp({ env, services: services(), logger: false });
     const response = await app.inject({
@@ -158,6 +221,39 @@ describe('application', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().rooms).toHaveLength(1);
     expect(response.json().rooms[0].roomNumber).toBe('117');
+    await app.close();
+  });
+
+  it('bootstraps a bounded initial PIN batch without returning PIN material', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/rooms/pins/bootstrap',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'room-pin-bootstrap-test-0001'
+      },
+      payload: { limit: 1 }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual({
+      bootstrap: {
+        initializedRoomIds: ['11111111-1111-4111-8111-111111111111'],
+        skippedRoomIds: [],
+        initializedCount: 1,
+        skippedCount: 0,
+        remainingCount: 120,
+        completedAt: '2026-09-13T00:00:00.000Z'
+      }
+    });
+    expect(JSON.stringify(response.json())).not.toMatch(/credential|pinDigits|ciphertext/i);
+    expect(appServices.rooms.bootstrapPins).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      { limit: 1, idempotencyKey: 'room-pin-bootstrap-test-0001' }
+    );
     await app.close();
   });
 
@@ -435,6 +531,363 @@ describe('application', () => {
     });
     expect(JSON.stringify(response.json())).not.toContain('guest_name_encrypted');
     expect(JSON.stringify(response.json())).not.toContain('홍길동');
+    await app.close();
+  });
+
+  it('lists payroll projections for an authenticated reader without side effects', async () => {
+    const appServices = services();
+    appServices.payroll.list = vi.fn(async () => ({ payroll: [], nextCursor: null }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/payroll?weekStart=2026-08-24',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ payroll: [], nextCursor: null });
+    expect(appServices.payroll.list).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ weekStart: '2026-08-24' })
+    );
+
+    for (const url of [
+      '/v1/payroll/?weekStart=2026-08-24',
+      '/v1/payroll/extra?weekStart=2026-08-24'
+    ]) {
+      const alias = await app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: 'Bearer access-token' }
+      });
+      expect(alias.statusCode).toBe(404);
+    }
+    await app.close();
+  });
+
+  it('keeps Fastify payroll query parsing identical to the strict Edge contract', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    for (const url of [
+      '/v1/payroll?weekStart=2026-08-24&limit=1e1',
+      '/v1/payroll?weekStart=2026-08-24&limit=1.0',
+      '/v1/payroll?weekStart=2026-08-24&limit=%2010%20',
+      '/v1/payroll?weekStart=2026-08-24&limit=10&limit=9',
+      '/v1/payroll?weekStart=2026-08-24&unknown=1',
+      '/v1/payroll/entries?weekStart=2026-08-24&maidProfileId=62000000-0000-4000-8000-000000000001&kind=items&limit=25&kind=lateEarnings'
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: 'Bearer access-token' }
+      });
+      expect(response.statusCode, url).toBe(400);
+      expect(response.json().error.code, url).toBe('VALIDATION_ERROR');
+    }
+    expect(appServices.payroll.list).not.toHaveBeenCalled();
+    expect(appServices.payroll.listEntries).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('pages payroll entries through the authenticated reader contract', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/payroll/entries?weekStart=2026-08-24&maidProfileId=62000000-0000-4000-8000-000000000001&kind=items&limit=25',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ kind: 'items', entries: [], nextCursor: null });
+    expect(appServices.payroll.listEntries).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ kind: 'items', limit: 25 })
+    );
+    await app.close();
+  });
+
+  it('fails closed when any payroll HTTP envelope exceeds 128 KiB', async () => {
+    const huge = '가'.repeat(128 * 1024);
+    const appServices = services();
+    appServices.payroll.list = vi.fn(async () => ({ payroll: [{ huge }] as never, nextCursor: null }));
+    appServices.payroll.listEntries = vi.fn(async () => ({
+      kind: 'items' as const,
+      entries: [{ huge }] as never,
+      nextCursor: null
+    }));
+    appServices.payroll.start = vi.fn(async () => ({ huge } as never));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const requests = [
+      app.inject({
+        method: 'GET',
+        url: '/v1/payroll?weekStart=2026-08-24',
+        headers: { authorization: 'Bearer access-token' }
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/v1/payroll/entries?weekStart=2026-08-24&maidProfileId=62000000-0000-4000-8000-000000000001&kind=items',
+        headers: { authorization: 'Bearer access-token' }
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/payroll/start',
+        headers: {
+          authorization: 'Bearer access-token',
+          'idempotency-key': 'payroll-start-size-cap'
+        },
+        payload: {
+          maidProfileId: '62000000-0000-4000-8000-000000000001',
+          weekStart: '2026-08-24',
+          expectedVersion: 0
+        }
+      })
+    ];
+    for (const request of requests) {
+      const response = await request;
+      expect(response.statusCode).toBe(500);
+      expect(response.json().error.code).toBe('PAYROLL_RESPONSE_TOO_LARGE');
+    }
+    await app.close();
+  });
+
+  it('starts payroll with an exact body and Idempotency-Key', async () => {
+    const appServices = services();
+    appServices.payroll.start = vi.fn(async (_actor, input) => ({
+      cycleId: '61000000-0000-4000-8000-000000000001',
+      maidProfileId: input.maidProfileId,
+      weekStart: input.weekStart,
+      status: 'paying' as const,
+      version: 1,
+      lockedAmount: 30000,
+      paymentStartedAt: '2026-09-10T00:00:00Z',
+      itemCount: 1,
+      totalAmount: 30000,
+      items: [],
+      itemsNextCursor: null,
+      lateEarningCount: 0,
+      lateEarningAmount: 0,
+      lateEarnings: [],
+      lateEarningsNextCursor: null
+      , offsetSettled: false, adjustmentAmount: 0, carryInAmount: 0,
+      carryOutAmount: 0, payableAmount: 30000, adjustmentCount: 0
+      , paymentAttemptId: '61500000-0000-4000-8000-000000000001', paymentAttemptNumber: 1,
+      paidAt: null, checkReasonCode: null, lastReopenReasonCode: null
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/start',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'payroll-start-0001'
+      },
+      payload: {
+        maidProfileId: '62000000-0000-4000-8000-000000000001',
+        weekStart: '2026-08-24',
+        expectedVersion: 0
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().payroll.status).toBe('paying');
+    expect(appServices.payroll.start).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ idempotencyKey: 'payroll-start-0001' })
+    );
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/start',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'payroll-start-0002'
+      },
+      payload: {
+        maidProfileId: '62000000-0000-4000-8000-000000000001',
+        weekStart: '2026-08-24',
+        expectedVersion: 0,
+        amount: 30000
+      }
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error.code).toBe('VALIDATION_ERROR');
+    const queryAlias = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/start?amount=30000',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'payroll-start-0004'
+      },
+      payload: {
+        maidProfileId: '62000000-0000-4000-8000-000000000001',
+        weekStart: '2026-08-24',
+        expectedVersion: 0
+      }
+    });
+    expect(queryAlias.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('ports signed correction, reversal, carry-forward and late earning carry with no-store', async () => {
+    const appServices = services();
+    const adjustment = {
+      adjustmentId: '71000000-0000-4000-8000-000000000001', maidProfileId: '62000000-0000-4000-8000-000000000001',
+      bookVersion: 1, amount: -1000, currency: 'KRW' as const, reasonCode: 'earning_correction' as const,
+      rootEarningId: '72000000-0000-4000-8000-000000000001', correctionOfEarningId: '72000000-0000-4000-8000-000000000001',
+      availableWeekStart: '2026-08-24', createdAt: '2026-09-10T00:00:00Z', alreadyClaimed: false
+    };
+    appServices.payroll.correct = vi.fn(async () => adjustment);
+    appServices.payroll.reverse = vi.fn(async () => ({ ...adjustment, bookVersion: 2, amount: 1000,
+      reasonCode: 'adjustment_reversal' as const, correctionOfEarningId: undefined,
+      reversalOfAdjustmentId: adjustment.adjustmentId }));
+    appServices.payroll.carryLateEarning = vi.fn(async () => ({ ...adjustment, amount: 1000,
+      reasonCode: 'late_earning_carry' as const, correctionOfEarningId: undefined,
+      lateCarriedEarningId: adjustment.rootEarningId }));
+    appServices.payroll.carryForward = vi.fn(async () => ({
+      cycleId: '73000000-0000-4000-8000-000000000001', maidProfileId: adjustment.maidProfileId,
+      weekStart: '2026-08-24', status: 'open' as const, version: 1, lockedAmount: null,
+      paymentStartedAt: null, itemCount: 0, totalAmount: 0, items: [], itemsNextCursor: null,
+      lateEarningCount: 0, lateEarningAmount: 0, lateEarnings: [], lateEarningsNextCursor: null,
+      offsetSettled: true, adjustmentAmount: -1000, carryInAmount: 0, carryOutAmount: -1000,
+      payableAmount: -1000, adjustmentCount: 1
+      , paymentAttemptId: null, paymentAttemptNumber: null, paidAt: null,
+      checkReasonCode: null, lastReopenReasonCode: null
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const requests = [
+      ['POST', '/v1/payroll/adjustments/corrections', { sourceEarningId: adjustment.rootEarningId, amount: -1000, expectedVersion: 0 }, 201],
+      ['POST', '/v1/payroll/adjustments/reversals', { sourceAdjustmentId: adjustment.adjustmentId, expectedVersion: 1 }, 201],
+      ['POST', '/v1/payroll/carry-forward', { maidProfileId: adjustment.maidProfileId, weekStart: '2026-08-24', expectedVersion: 0 }, 200],
+      ['POST', `/v1/payroll/late-earnings/${adjustment.rootEarningId}/carry`, { expectedVersion: 1 }, 201]
+    ] as const;
+    for (const [method, url, payload, status] of requests) {
+      const response = await app.inject({ method, url, payload, headers: {
+        authorization: 'Bearer access-token', 'idempotency-key': `payroll-${status}-${url.length}`
+      } });
+      expect(response.statusCode, url).toBe(status);
+      expect(response.headers['cache-control'], url).toBe('no-store');
+    }
+    const unauthorized = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/carry-forward',
+      headers: { 'idempotency-key': 'payroll-no-store-error' },
+      payload: { maidProfileId: adjustment.maidProfileId, weekStart: '2026-08-24', expectedVersion: 0 }
+    });
+    expect(unauthorized.statusCode).toBe(401);
+    expect(unauthorized.headers['cache-control']).toBe('no-store');
+    await app.close();
+  });
+
+  it('records only exact external payment result bodies with no-store', async () => {
+    const appServices = services();
+    const paymentResult = {
+      paymentResultId: '74000000-0000-4000-8000-000000000001',
+      paymentAttemptId: '75000000-0000-4000-8000-000000000001',
+      payrollCycleId: '76000000-0000-4000-8000-000000000001', resultType: 'paid' as const,
+      beforeStatus: 'paying' as const, afterStatus: 'paid' as const, cycleVersion: 2,
+      lockedAmount: 30000, paymentMethod: 'bank_transfer' as const,
+      providerReferenceId: 'BANK.AB12', occurredAt: '2026-09-10T00:00:00Z'
+    };
+    appServices.payroll.recordPaymentPaid = vi.fn(async () => paymentResult);
+    appServices.payroll.recordPaymentCheck = vi.fn(async () => ({ ...paymentResult, resultType: 'check' as const,
+      afterStatus: 'check' as const, paymentMethod: undefined, providerReferenceId: undefined,
+      reasonCode: 'TRANSFER_RESULT_UNCERTAIN' as const }));
+    appServices.payroll.reopenPayment = vi.fn(async () => ({ ...paymentResult, resultType: 'reopened' as const,
+      afterStatus: 'open' as const, paymentMethod: undefined, providerReferenceId: undefined,
+      reasonCode: 'NO_TRANSFER_CONFIRMED' as const }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    for (const [suffix, payload] of [
+      ['check', { expectedVersion: 1, reasonCode: 'TRANSFER_RESULT_UNCERTAIN' }],
+      ['paid', { expectedVersion: 1, paymentMethod: 'bank_transfer', providerReferenceId: 'bank.ab12' }],
+      ['reopen', { expectedVersion: 1, reasonCode: 'NO_TRANSFER_CONFIRMED' }]
+    ] as const) {
+      const response = await app.inject({ method: 'POST',
+        url: `/v1/payroll/payment-attempts/${paymentResult.paymentAttemptId}/${suffix}`,
+        headers: { authorization: 'Bearer access-token', 'idempotency-key': `payment-${suffix}-result` }, payload });
+      expect(response.statusCode, suffix).toBe(200);
+      expect(response.headers['cache-control'], suffix).toBe('no-store');
+    }
+    for (const extra of [{ amount: 1 }, { paidAt: '2026-09-10T00:00:00Z' },
+      { receipt: 'secret' }, { payeeAccount: 'private' }]) {
+      const response = await app.inject({ method: 'POST',
+        url: `/v1/payroll/payment-attempts/${paymentResult.paymentAttemptId}/paid`,
+        headers: { authorization: 'Bearer access-token', 'idempotency-key': `payment-reject-${Object.keys(extra)[0]}` },
+        payload: { expectedVersion: 1, paymentMethod: 'bank_transfer', providerReferenceId: 'BANK.AB12', ...extra } });
+      expect(response.statusCode).toBe(400);
+      expect(response.headers['cache-control']).toBe('no-store');
+    }
+    const zeroVersion = await app.inject({ method: 'POST',
+      url: `/v1/payroll/payment-attempts/${paymentResult.paymentAttemptId}/check`,
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'payment-zero-version' },
+      payload: { expectedVersion: 0, reasonCode: 'TRANSFER_RESULT_UNCERTAIN' } });
+    expect(zeroVersion.statusCode).toBe(400);
+    expect(zeroVersion.headers['cache-control']).toBe('no-store');
+    expect(appServices.payroll.recordPaymentCheck).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('requires exact business admin role for payroll start', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-maid-1',
+      profileId: '62000000-0000-4000-8000-000000000001',
+      displayName: '메이드',
+      role: 'maid' as const,
+      mustChangePassword: false,
+      accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll/start',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'payroll-start-0003'
+      },
+      payload: {
+        maidProfileId: '62000000-0000-4000-8000-000000000001',
+        weekStart: '2026-08-24',
+        expectedVersion: 0
+      }
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ADMIN_REQUIRED');
+    expect(appServices.payroll.start).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('exposes bounded developer/admin PIN Sheet status and fenced full-resync routes', async () => {
+    const appServices = services();
+    appServices.roomPinSheetOperations = {
+      status: vi.fn(async () => ({
+        pending: 0, failed: 0, operatorBlocked: false, oldestPendingAt: null,
+        lastSuccessAt: null, lastErrorCode: null, version: 4,
+        checkedAt: '2026-09-13T00:00:00.000Z'
+      })),
+      requestFullResync: vi.fn(async () => ({ status: 'pending' as const, roomCount: 121 as const, version: 4 }))
+    };
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const status = await app.inject({ method: 'GET', url: '/v1/room-pin-sheet-sync/status',
+      headers: { authorization: 'Bearer access-token' } });
+    expect(status.statusCode).toBe(200);
+    expect(status.headers['cache-control']).toBe('no-store');
+    expect(Object.keys(status.json().sync).sort()).toEqual([
+      'checkedAt', 'failed', 'lastErrorCode', 'lastSuccessAt', 'oldestPendingAt',
+      'operatorBlocked', 'pending', 'version'
+    ]);
+    const accepted = await app.inject({ method: 'POST', url: '/v1/room-pin-sheet-sync/full-resync',
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'full-resync-route-0001' },
+      payload: { expectedVersion: 4 } });
+    expect(accepted.statusCode).toBe(202);
+    expect(accepted.headers['cache-control']).toBe('no-store');
+    expect(accepted.json()).toEqual({ sync: { status: 'pending', roomCount: 121, version: 4 } });
+    expect(appServices.roomPinSheetOperations.requestFullResync).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }), 4, 'full-resync-route-0001'
+    );
+    const extra = await app.inject({ method: 'POST', url: '/v1/room-pin-sheet-sync/full-resync',
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'full-resync-route-0002' },
+      payload: { expectedVersion: 4, spreadsheetId: 'forbidden' } });
+    expect(extra.statusCode).toBe(400);
     await app.close();
   });
 });

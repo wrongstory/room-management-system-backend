@@ -97,6 +97,82 @@ function sessionId(accessToken: string): string | null {
   }
 }
 
+// Auth가 검증한 bearer에서만 호출한다. 이 값은 RPC 내부 인자이며 공개 actor/로그에 넣지 않는다.
+export function verifiedRequestSessionId(request: Request): string {
+  const value = sessionId(bearerToken(request));
+  if (
+    !value ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      .test(value)
+  ) {
+    throw new EdgeError(401, "INVALID_ACCESS_TOKEN", "로그인이 필요합니다.");
+  }
+  return value;
+}
+
+export interface LimitedAttemptIdentity {
+  actor: EdgeActor;
+  sessionId: string;
+  profileStatus: "active" | "deactivation_pending" | "upload_only";
+}
+
+// 일반 authenticate()는 active-only로 유지한다. 이 인증 결과 자체는 capability 권한이 아니다.
+// limited 전용 RPC가 동일 transaction에서 actor/session/attempt/revision/action/expiry를 재검증한다.
+export async function authenticateLimitedAttempt(
+  request: Request,
+  clients: EdgeClients,
+): Promise<LimitedAttemptIdentity> {
+  const accessToken = bearerToken(request);
+  const { data: userData, error: userError } = await clients.publicClient.auth
+    .getUser(accessToken);
+  if (userError || !userData.user) {
+    throw new EdgeError(401, "INVALID_ACCESS_TOKEN", "로그인이 필요합니다.");
+  }
+  const { data, error } = await clients.admin.from("profiles")
+    .select("id,auth_user_id,display_name,role,status,must_change_password")
+    .eq("auth_user_id", userData.user.id).single();
+  if (error || !data) {
+    throw new EdgeError(
+      401,
+      "PROFILE_NOT_FOUND",
+      "계정 프로필을 찾을 수 없습니다.",
+    );
+  }
+  const profile = data as ProfileRow;
+  if (
+    profile.auth_user_id !== userData.user.id || profile.role !== "maid" ||
+    (profile.status !== "active" && profile.status !== "deactivation_pending" &&
+      profile.status !== "upload_only")
+  ) {
+    throw new EdgeError(
+      403,
+      "CAPABILITY_ACCESS_REQUIRED",
+      "허용된 제한 수행 권한이 필요합니다.",
+    );
+  }
+  const actor: EdgeActor = {
+    authUserId: profile.auth_user_id,
+    profileId: profile.id,
+    displayName: profile.display_name,
+    role: profile.role,
+    mustChangePassword: profile.must_change_password,
+  };
+  requirePasswordChanged(actor);
+  const activeSessionId = verifiedRequestSessionId(request);
+  const { data: active, error: sessionError } = await clients.admin.rpc(
+    "is_active_auth_session",
+    { p_auth_user_id: actor.authUserId, p_session_id: activeSessionId },
+  );
+  if (sessionError || active !== true) {
+    throw new EdgeError(
+      401,
+      "SESSION_REVOKED",
+      "로그인이 만료되었습니다. 관리자에게 문의해 주세요.",
+    );
+  }
+  return { actor, sessionId: activeSessionId, profileStatus: profile.status };
+}
+
 export async function authenticate(
   request: Request,
   clients: ReturnType<typeof createEdgeClients>,

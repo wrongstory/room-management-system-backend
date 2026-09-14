@@ -9,6 +9,10 @@ const availabilityApiUrl = new URL(
   '../supabase/functions/_shared/availability-api.ts',
   import.meta.url
 );
+const assignmentApiUrl = new URL(
+  '../supabase/functions/_shared/assignment-api.ts',
+  import.meta.url
+);
 const reservationApiUrl = new URL(
   '../supabase/functions/_shared/reservation-api.ts',
   import.meta.url
@@ -52,8 +56,20 @@ const actorActivityMigrationUrl = new URL(
   '../supabase/migrations/20260831124140_actor_activity_audit_contract.sql',
   import.meta.url
 );
+const photoPurgeMigrationUrl = new URL(
+  '../supabase/migrations/20260908195510_photo_purge_reconciliation.sql',
+  import.meta.url
+);
 
 describe('Supabase Edge runtime PoC contract', () => {
+  it('backfills existing Drive identities into the exact folder retirement barrier', async () => {
+    const migration = await readFile(photoPurgeMigrationUrl, 'utf8');
+    expect(migration).toContain('insert into private.photo_drive_folder_bindings(operation_id,folder_registry_id)');
+    expect(migration).toContain('on f.provider_folder_id=i.provider_folder_id');
+    expect(migration).toContain('and f.upload_date=i.upload_date');
+    expect(migration).toContain('and f.scope_room_number=i.room_number');
+    expect(migration).toContain("message='PHOTO_FOLDER_BINDING_BACKFILL_FAILED'");
+  });
   it('allows existing email accounts to sign in while public signup remains disabled', async () => {
     const config = await readFile(configUrl, 'utf8');
 
@@ -85,13 +101,20 @@ describe('Supabase Edge runtime PoC contract', () => {
       /requiredEnv\(\s*["']RESERVATION_SCHEDULER_ACTOR_PROFILE_ID["']/
     );
     const command = scheduler.search(/["']process_due_reservation_transitions["']/);
+    const assignmentCommand = scheduler.search(
+      /["']process_due_assignment_lifecycle["']/
+    );
 
     expect(secretCheck).toBeGreaterThan(0);
     expect(actorCheck).toBeGreaterThan(secretCheck);
     expect(command).toBeGreaterThan(actorCheck);
+    expect(assignmentCommand).toBeGreaterThan(command);
     expect(scheduler).toContain('crypto.subtle.verify');
     expect(scheduler).toContain('reservation-scheduler-$' + '{bucket}');
-    expect(scheduler).toMatch(/p_as_of:\s*new Date\(\)\.toISOString\(\)/);
+    expect(scheduler).toContain("const commandAt = new Date().toISOString()");
+    expect(scheduler).toMatch(/p_as_of:\s*commandAt/);
+    expect(scheduler).toContain('"assignment.process_due_lifecycle"');
+    expect(scheduler).toContain("assignments: assignmentData");
   });
 
   it('uses a durable database-backed limiter before looking up a login alias', async () => {
@@ -199,8 +222,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/activity-events"');
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
-    expect(developerApi).toContain(
-      'expectedMigrationName = "actor_activity_audit_contract"'
+    expect(developerApi).toMatch(
+      /expectedMigrationName\s*=\s*["']checkout_not_completed_incident_workflow["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -219,6 +242,38 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(openApi).toContain('DIAGNOSTICS_RATE_LIMITED');
   });
 
+  it('ports payroll through exact actor-bound RPCs and a bounded denial source', async () => {
+    const payrollApi = await readFile(
+      new URL('../supabase/functions/_shared/payroll-api.ts', import.meta.url),
+      'utf8'
+    );
+    const edgeIndex = await readFile(
+      new URL('../supabase/functions/api/index.ts', import.meta.url),
+      'utf8'
+    );
+    const activity = await readFile(
+      new URL('../supabase/functions/_shared/activity-contract.ts', import.meta.url),
+      'utf8'
+    );
+    const openApi = await readFile(
+      new URL('../supabase/functions/_shared/openapi.ts', import.meta.url),
+      'utf8'
+    );
+    expect(payrollApi).toContain('list_payroll_cycles');
+    expect(payrollApi).toContain('start_payroll_cycle');
+    expect(payrollApi).toContain('record_payroll_payment_check');
+    expect(payrollApi).toContain('record_payroll_payment_paid');
+    expect(payrollApi).toContain('reopen_payroll_payment_attempt');
+    expect(payrollApi).toContain('PAYROLL_ACCESS_REQUIRED');
+    expect(edgeIndex).toContain('path === "/v1/payroll"');
+    expect(edgeIndex).toContain('path === "/v1/payroll/start"');
+    expect(edgeIndex).toContain('const paymentResultMatch = path.match(');
+    expect(activity).toContain('edge.authorization.payroll');
+    expect(openApi).toContain('operationId: "listPayrollCycles"');
+    expect(openApi).toContain('operationId: "startPayrollCycle"');
+    expect(openApi).toContain('operationId: "recordPayrollPaymentPaid"');
+  });
+
   it('records only source-controlled security activity through server-owned RPCs', async () => {
     const [api, accountApi, activityApi, contract, migration] = await Promise.all([
       readFile(apiUrl, 'utf8'),
@@ -231,9 +286,10 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(accountApi).toContain('recordUnknownLoginFailed(clients)');
     expect(accountApi).toContain('recordLoginSucceeded(');
     expect(accountApi).toContain('recordKnownLoginFailed(');
-    expect(api).toContain('recordAuthorizationDenied(clients, actor, source, error.code)');
+    expect(api).toMatch(/recordAuthorizationDenied\(\s*clients,\s*actor,\s*source,\s*responseError\.code,?\s*\)/);
     expect(contract).toContain('edge.authorization.reservations');
     expect(contract).toContain('edge.authorization.rooms');
+    expect(contract).toContain('edge.authorization.assignments');
     expect(activityApi).toContain('record_actor_activity_event');
     expect(activityApi).toContain('record_unknown_login_failure');
     expect(activityApi).toContain('record_authorization_denial');
@@ -271,6 +327,32 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(openApi).toContain('AvailabilityChangeRequestInput');
     expect(openApi).toContain('"OUTSIDE_AVAILABILITY_WINDOW"');
     expect(openApi).toContain('"STALE_VERSION"');
+  });
+
+  it('ports assignment draft revisions through RLS reads and an actor-bound command', async () => {
+    const [api, assignmentApi, openApi] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(assignmentApiUrl, 'utf8'),
+      readFile(openApiUrl, 'utf8')
+    ]);
+
+    expect(api).toContain('path === "/v1/assignments"');
+    expect(api).toContain('path === "/v1/assignments/drafts"');
+    expect(api).toContain('path === "/v1/assignments/commit-impact"');
+    expect(api).toContain('path === "/v1/assignments/commit"');
+    expect(api).toContain('assignmentTargetIdFromPath(path)');
+    expect(assignmentApi).toContain('clients.forAccessToken(bearerToken(request))');
+    expect(assignmentApi).toContain('"save_cleaning_assignment_draft"');
+    expect(assignmentApi).toContain('"get_assignment_commit_impact"');
+    expect(assignmentApi).toContain('"commit_and_notify_assignments"');
+    expect(assignmentApi).toContain('p_actor_profile_id: actor.profileId');
+    expect(assignmentApi).toContain('requireBusinessAdmin(actor)');
+    expect(assignmentApi).toContain('requirePasswordChanged(actor)');
+    expect(openApi).toContain('operationId: "listAssignments"');
+    expect(openApi).toContain('operationId: "getAssignmentHistory"');
+    expect(openApi).toContain('operationId: "saveAssignmentDraft"');
+    expect(openApi).toContain('operationId: "getAssignmentCommitImpact"');
+    expect(openApi).toContain('operationId: "commitAndNotifyAssignments"');
   });
 
   it('ports all reservation operations through the existing actor-bound RPCs', async () => {
