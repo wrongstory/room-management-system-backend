@@ -73,12 +73,12 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 source/readback evidence: **2026-09-15 KST** (Issue #148/#152/#156). 문서 integration 기준: **2026-09-15 KST** (`main@6604b221...` 및 `dev@ab10249a...`에서 시작한 #165 backport candidate).
+production 최종 source/readback evidence: **2026-09-15 KST** (Issue #148/#152/#156). 기능 integration 기준: **2026-09-15 KST** (`main@6604b221...`, PR #167의 `dev@75983b3...`; 이후 문서 전용 commit은 기능 기준에 포함하지 않음).
 
 - 현재 GitHub 운영 source 정본: `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`
   - Issue #148의 v0.3.0 source/schema/API/Edge production 승격, Issue #152 notification-delivery hosted 호환 hotfix, Issue #156 cleaning-template admin API와 Issue #165 duration 선택화 hotfix source까지 반영됐다.
   - annotated `v0.3.0` tag/GitHub Release는 아직 없으므로 `main`/production source 상태와 GitHub Release 완료를 구분한다.
-- 일반 개발 integration base는 `dev@ab10249aaf1d671419389615ad8a22984c9849ac`이고, #165 역반영 후보는 **56번째 append-only migration**을 추가하되 API 수를 바꾸지 않는다. GitHub `main`에는 source가 병합됐지만 production은 별도 운영 승격 전까지 **55 migrations / OpenAPI 0.3.0 109 paths / 117 operations**와 기존 Edge bundle을 유지한다. #156 API는 production Edge에 배포됐지만 네 checkout template이 미게시라 현재 사용은 ❌이다.
+- PR #167의 기능 통합 지점은 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이며 #165의 **56번째 append-only migration**과 선택형 duration 계약이 역반영됐다. GitHub `main`과 `dev` 모두 같은 hotfix source를 포함하지만 production은 별도 운영 승격 전까지 **55 migrations / OpenAPI 0.3.0 109 paths / 117 operations**와 기존 Edge bundle을 유지한다. #156 API는 production Edge에 배포됐지만 네 checkout template이 미게시라 현재 사용은 ❌이다.
 - #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
 - 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. 현재 production source 포함 여부는 이 §2의 55 migrations / 109 paths / 117 operations와 5개 Edge bundle snapshot을 우선하고, hosted provider·Google·Cron 및 positive mutation 사용 가능 여부는 별도 gate로 판정한다.
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
@@ -88,7 +88,7 @@ production 최종 source/readback evidence: **2026-09-15 KST** (Issue #148/#152/
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #131은 #69 승인 PIN 계약의 Phase A source/dev 정본이다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. private immutable revision/current pointer, physical-change mismatch lifecycle, authoritative maid access lease, 30초 이하 reveal과 safe sync/audit/outbox를 포함하며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
-- 현재 critical path는 **#165 hotfix의 dev 역반영 검토·병합 → production 56번째 migration/API 재배포 → 네 객실 타입 slot-only template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. source bundle 배포와 provider·Google·Cron hosted activation/current use를 분리한다.
+- 현재 critical path는 **production 56번째 migration/API 재배포 → 네 객실 타입 slot-only template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. source bundle 배포와 provider·Google·Cron hosted activation/current use를 분리한다.
 - 운영 migration: **55건**
 - 운영 Edge Functions readback:
   - `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 bundle 배포
@@ -1195,10 +1195,10 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] #165 checkout `durationMinutes` 선택화 source 구현: 56번째 append-only migration, 기존 값 보존, 미확정 시간·1분 종료 추정 금지, 계획과 동일 객실 실행 충돌 분리
 - [x] #165 exact head required GitHub `application` / `migration` PASS와 독립 QA P0/P1=0·90점 이상
 - [x] #165 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` hotfix squash 병합 — 승인·병합 tree 동일
-- [ ] #165 hotfix를 별도 PR로 `dev`에 역반영
+- [x] PR #167로 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`에 squash 역반영 — QA 97/100, P0/P1=0, required CI PASS, 승인·병합 tree 동일
 - [ ] production 56번째 migration/API 재배포, 네 타입 slot-only 게시, 예약 success hosted smoke
 
-현재 critical path는 **#165 dev 역반영 → production 56번째 migration/API 재배포 → 네 객실 타입 slot-only template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다.
+현재 critical path는 **production 56번째 migration/API 재배포 → 네 객실 타입 slot-only template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다.
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고
