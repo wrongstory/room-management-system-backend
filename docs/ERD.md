@@ -1163,6 +1163,19 @@ current pointer를 다시 읽거나 backfill하지 않으므로 이후 게시에
 활성화한 채 Data API policy/grant가 없고, service-only 조회/게시 RPC가 live session과 active/password-complete
 business admin을 매 요청 확인한다. production 운영값·seed·notification/outbox는 이 migration에 포함하지 않는다.
 
+### #165 checkout 예상시간 선택화
+
+`20260915000628_cleaning_template_duration_optional.sql`은 이미 적용된 55개 migration을 수정하지 않는
+56번째 append-only hotfix다. `cleaning_template_versions.duration_minutes`는 checkout에서만 nullable이고,
+stayover/additional/reclean 등 비-checkout row는 constraint로 non-null을 유지한다. 게시 RPC는 null을 허용하되
+값이 있으면 기존 1..10,080 범위를 그대로 검증한다. 기존 template·planned target snapshot·audit·receipt는
+backfill하거나 다시 쓰지 않는다.
+
+실제 청소 수행시간은 `cleaning_attempts.started_at`과 `field_completed_at`의 차이이며, turnaround는 실제
+checkout 시각부터 field completion까지다. 배정 preview는 `assignment_duration_policy_versions`의 confirmed
+정책만 사용한다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도
+추정하지 않는다.
+
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.

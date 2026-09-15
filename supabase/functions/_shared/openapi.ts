@@ -4558,7 +4558,6 @@ export const openApiDocument = {
           "roomTypeCode",
           "cleaningKind",
           "expectedVersion",
-          "durationMinutes",
           "slots",
         ],
         properties: {
@@ -4567,7 +4566,14 @@ export const openApiDocument = {
           },
           cleaningKind: { const: "checkout" },
           expectedVersion: { type: "integer", minimum: 0, maximum: 2147483647 },
-          durationMinutes: { type: "integer", minimum: 1, maximum: 10080 },
+          durationMinutes: {
+            anyOf: [
+              { type: "integer", minimum: 1, maximum: 10080 },
+              { type: "null" },
+            ],
+            description:
+              "선택적인 과거 호환 메타데이터입니다. 미입력/null이어도 예약을 차단하지 않으며 실제 청소시간은 attempt.startedAt부터 fieldCompletedAt까지 계산합니다. 배정 Preview는 별도 확정 duration policy를 사용합니다.",
+          },
           slots: {
             type: "array",
             minItems: 10,
@@ -4595,7 +4601,14 @@ export const openApiDocument = {
           id: { type: "string", format: "uuid" },
           version: { type: "integer", minimum: 7, maximum: 2147483647 },
           status: { const: "published" },
-          durationMinutes: { type: "integer", minimum: 1, maximum: 10080 },
+          durationMinutes: {
+            anyOf: [
+              { type: "integer", minimum: 1, maximum: 10080 },
+              { type: "null" },
+            ],
+            description:
+              "미설정 가능. 실제 청소시간이나 배정 Preview 정책의 정본이 아닙니다.",
+          },
           slots: {
             type: "array",
             minItems: 10,

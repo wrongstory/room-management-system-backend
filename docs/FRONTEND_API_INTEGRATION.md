@@ -218,6 +218,7 @@ const idempotencyKey = crypto.randomUUID();
 | 청소 요청 | `POST /v1/reservations/cleaning-requests` | 연박/추가 요청, 객실 version CAS |
 | 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel |
 | 예약 전이 수동 실행 | `POST /v1/reservations/transitions/process` | admin 운영 명령. scheduler secret endpoint와 별도 |
+| 퇴실 청소 템플릿 게시 | `POST /v1/cleaning-templates` | 사진 슬롯은 필수, `durationMinutes`는 선택. 모르면 생략하며 임의 기본값을 보내지 않음 |
 
 객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다. `pinSyncStatus=unconfigured|mismatch`는 별도 경고이며 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건으로 사용하지 않는다. 실제 체크인·PIN 접근 화면만 `verified` 전까지 차단한다.
 
@@ -228,6 +229,10 @@ const idempotencyKey = crypto.randomUUID();
 예약 목록에는 `guestName`이 없으며 UI가 이름을 표시해야 할 때만 단건 상세를 호출한다. 예약 응답의 `version`은 예약 변경 command의 `expectedVersion`으로 사용하고, command 응답에 `roomStateVersion`이 있으면 후속 객실 기준 command의 CAS 입력으로 사용한다. 고객명은 브라우저 저장소·analytics·오류 수집에 보존하지 않고, 상세 화면을 벗어나면 메모리 상태에서도 제거한다. 암호화 설정 장애에서 평문 저장이나 빈 이름으로 성공 처리하지 않는다.
 
 예약 전이 수동 실행의 `Idempotency-Key`에는 `reservation-scheduler-` 접두사를 사용하지 않는다. 이 namespace는 scheduler invocation 전용이며 수동 API는 `RESERVED_IDEMPOTENCY_KEY`로 fail-closed한다. 고객명은 원문과 NFKC·trim·공백 축약 결과가 모두 1~80자여야 하므로, 화면에서도 원문 80자 제한을 먼저 적용하되 서버 오류 코드를 최종 판정으로 사용한다.
+
+퇴실 청소 템플릿의 `durationMinutes`는 실제 청소 완료시간이나 배정 preview 계산값이 아니다. 실제 수행시간은
+메이드의 attempt 시작~현장완료 기록에서 계산하고, 배정 preview는 별도 confirmed duration policy만 사용한다.
+프런트는 duration 미확정 시 필드를 생략하거나 `null`로 보내며 55/65/70/80 같은 데모값을 자동 주입하지 않는다.
 
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
 

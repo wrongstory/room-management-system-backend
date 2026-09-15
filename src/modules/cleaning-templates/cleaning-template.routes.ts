@@ -19,7 +19,7 @@ const publishSchema = z.object({
   roomTypeCode: roomTypeCodeSchema,
   cleaningKind: z.literal('checkout'),
   expectedVersion: z.number().int().min(0).max(2_147_483_647),
-  durationMinutes: z.number().int().positive().max(10_080),
+  durationMinutes: z.number().int().positive().max(10_080).nullable().optional(),
   slots: z.array(slotSchema).min(1).max(100)
 }).strict().superRefine((input, context) => {
   const keys = new Set<string>();
@@ -72,6 +72,7 @@ export function createCleaningTemplateRoutes(service: CleaningTemplateService): 
       const input = publishSchema.parse(request.body);
       const template = await service.publishCheckout(request.actor, {
         ...input,
+        durationMinutes: input.durationMinutes ?? null,
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ template });

@@ -1,0 +1,98 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const root = new URL("..", import.meta.url);
+const fixture = readFileSync(
+  new URL("fixtures/cleaning-template-duration-upgrade-v55.sql", import.meta.url),
+);
+const supabaseCli = fileURLToPath(
+  new URL("../node_modules/supabase/dist/supabase.js", import.meta.url),
+);
+const container = "supabase_db_room-management-system-backend";
+const migrationVersion = "20260915000628";
+const baselineVersion = "20260914094126";
+const adminId = "e1650000-0000-4000-8000-000000000001";
+const sessionId = "e1650000-0000-4000-8000-000000000201";
+const reservationId = "e1650000-0000-4000-8000-000000000301";
+const psqlArgs = [
+  "exec", "-i", container, "psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1",
+  "-U", "postgres", "-d", "postgres",
+];
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+function run(command, args, options = {}) {
+  return execFileSync(command, args, { cwd: root, encoding: "utf8", ...options });
+}
+function psql(input) {
+  return run("docker", psqlArgs, { input, stdio: ["pipe", "pipe", "pipe"] }).trim();
+}
+function reset(version) {
+  const args = [supabaseCli, "db", "reset", "--local", "--no-seed"];
+  if (version) args.push("--version", version);
+  run(process.execPath, args, { stdio: "inherit" });
+}
+function snapshot() {
+  return psql(`with template as (
+      select id from public.cleaning_template_versions
+      where room_type_id=(select id from public.room_types where code='standard')
+        and cleaning_kind='checkout'
+    ), target as (
+      select id from public.cleaning_targets where reservation_id='${reservationId}'
+    ), payload as (
+      select jsonb_build_object(
+        'template',(select jsonb_agg(to_jsonb(x) order by id) from public.cleaning_template_versions x where id in (select id from template)),
+        'slots',(select jsonb_agg(to_jsonb(x) order by template_version_id,display_order) from private.photo_template_slots x where template_version_id in (select id from template)),
+        'reservation',(select to_jsonb(x) from public.reservations x where id='${reservationId}'),
+        'obligation',(select to_jsonb(x) from public.checkout_cleaning_obligations x where reservation_id='${reservationId}'),
+        'target',(select jsonb_agg(to_jsonb(x) order by id) from public.cleaning_targets x where id in (select id from target)),
+        'audit',(select jsonb_agg(to_jsonb(x) order by id) from public.audit_events x where actor_profile_id='${adminId}'),
+        'receipts',(select jsonb_agg(to_jsonb(x) order by command_type,idempotency_key) from private.command_executions x where actor_profile_id='${adminId}')
+      ) value
+    ) select encode(extensions.digest(convert_to(value::text,'UTF8'),'sha256'),'hex') from payload`);
+}
+
+let passed = false;
+try {
+  reset(baselineVersion);
+  psql(fixture);
+  const before = snapshot();
+
+  run(process.execPath, [supabaseCli, "migration", "up", "--local"], { stdio: "inherit" });
+  assert(before === snapshot(), "55 -> 56 upgrade must preserve existing template/reservation ledgers");
+  assert(
+    psql(`select concat_ws('|',
+      exists(select 1 from supabase_migrations.schema_migrations where version='${migrationVersion}'),
+      (select duration_minutes from public.cleaning_template_versions
+       where room_type_id=(select id from public.room_types where code='standard')
+         and cleaning_kind='checkout' and status='published'),
+      (select count(*) from public.cleaning_targets where reservation_id='${reservationId}'),
+      (select is_nullable from information_schema.columns
+       where table_schema='public' and table_name='cleaning_template_versions'
+         and column_name='duration_minutes'))`) === "t|60|1|YES",
+    "upgrade must retain configured duration and enable only the checkout nullable contract",
+  );
+
+  const publication = JSON.parse(psql(`select public.publish_checkout_cleaning_template(
+    '${adminId}','${sessionId}','premium',0,null,
+    (select jsonb_agg(jsonb_build_object(
+      'slotKey',case when display_order=0 then 'tv-on' else 'slot-'||display_order end,
+      'displayOrder',display_order,
+      'required',display_order<10,
+      'label','사진 '||(display_order+1)
+    ) order by display_order) from generate_series(0,10) display_order),
+    'duration-upgrade-null',repeat('c',64))`));
+  assert(publication.durationMinutes === null, "upgraded RPC must publish an explicit null duration");
+
+  passed = true;
+  process.stdout.write("cleaning-template duration 55 -> 56 ledger preservation: PASS\n");
+} finally {
+  try {
+    reset();
+  } catch (error) {
+    process.stderr.write(`failed to restore full local migration state: ${error}\n`);
+    if (passed) process.exitCode = 1;
+  }
+}

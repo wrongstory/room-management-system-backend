@@ -106,8 +106,26 @@ const roomPinSheetFullResyncMigrationUrl = new URL(
   '../supabase/migrations/20260912225031_room_pin_sheet_full_resync.sql',
   import.meta.url
 );
+const cleaningTemplateDurationMigrationUrl = new URL(
+  '../supabase/migrations/20260915000628_cleaning_template_duration_optional.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
+  it('allows an unestimated checkout template without weakening other template kinds', async () => {
+    const sql = await readFile(cleaningTemplateDurationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('alter column duration_minutes drop not null');
+    expect(sql).toContain("check (cleaning_kind = 'checkout' or duration_minutes is not null)");
+    expect(sql).toContain('p_duration_minutes is not null');
+    expect(sql).toContain('p_duration_minutes not between 1 and 10080');
+    expect(sql).toContain('jsonb_strip_nulls');
+    expect(sql).toContain('cleaning_attempts.started_at and field_completed_at');
+    expect(sql).toContain('assignment_duration_policy_versions');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+  });
+
   it('seeds 121 unique room numbers', async () => {
     const sql = await readFile(initialMigrationUrl, 'utf8');
     const catalogSection = sql.slice(sql.indexOf('with catalog('), sql.indexOf('insert into public.rooms'));

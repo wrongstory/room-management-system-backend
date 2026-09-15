@@ -83,6 +83,23 @@ describe('SupabaseCleaningTemplateService', () => {
     expect(String(firstCall.args.p_request_hash)).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it('publishes photo slots without inventing a template duration', async () => {
+    const data = {
+      id: '30000000-0000-4000-8000-000000000001', version: 7, status: 'published',
+      durationMinutes: null, slots: slots(), publishedAt: '2030-01-01T00:00:00Z', createdAt: '2030-01-01T00:00:00Z'
+    };
+    const omitted = setup(data);
+    const explicitNull = setup(data);
+    const base = {
+      roomTypeCode: 'standard' as const, cleaningKind: 'checkout' as const,
+      expectedVersion: 0, slots: slots(), idempotencyKey: 'template-slots-only-0001'
+    };
+    await expect(omitted.service.publishCheckout(actor, base)).resolves.toMatchObject({ durationMinutes: null });
+    await explicitNull.service.publishCheckout(actor, { ...base, durationMinutes: null });
+    expect(omitted.calls[0]?.args.p_duration_minutes).toBeNull();
+    expect(omitted.calls[0]?.args.p_request_hash).toBe(explicitNull.calls[0]?.args.p_request_hash);
+  });
+
   it('maps stale/replay/session errors and redacts unknown database details', async () => {
     for (const [message, status, code] of [
       ['CLEANING_TEMPLATE_VERSION_CONFLICT', 409, 'CLEANING_TEMPLATE_VERSION_CONFLICT'],

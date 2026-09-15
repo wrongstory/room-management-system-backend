@@ -35,14 +35,14 @@ export async function verifyMigrationManifest() {
   invariant(manifest.release === "v0.3.0", "release must be v0.3.0");
   invariant(manifest.hashAlgorithm === "sha256-lf-utf8", "unexpected hash algorithm");
   invariant(Array.isArray(manifest.migrations), "migrations must be an array");
-  invariant(manifest.totalCount === 55, "totalCount must be 55");
-  invariant(files.length === manifest.totalCount, `expected 55 SQL files, found ${files.length}`);
+  invariant(manifest.totalCount === 56, "totalCount must be 56");
+  invariant(files.length === manifest.totalCount, `expected 56 SQL files, found ${files.length}`);
   invariant(manifest.migrations.length === manifest.totalCount, "manifest entry count mismatch");
-  invariant(manifest.baseline?.count === 54, "baseline count must be 54");
+  invariant(manifest.baseline?.count === 55, "baseline count must be 55");
   invariant(manifest.pending?.count === 1, "pending count must be 1");
   invariant(
     manifest.baseline.count + manifest.pending.count === manifest.totalCount,
-    "baseline and pending counts must total 55",
+    "baseline and pending counts must total 56",
   );
 
   const names = new Set();

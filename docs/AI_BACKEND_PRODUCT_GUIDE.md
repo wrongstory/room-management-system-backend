@@ -4,8 +4,8 @@
 
 검토 기준:
 
-- 이 문서 갱신의 `dev` integration base: `897c4b845c657401873a08136bd31f351fdb04a8` — #156/PR #157까지 통합된 55 migrations / OpenAPI 109 paths / 117 operations. #156은 source/dev 완료지만 아직 `main`/production에는 포함되지 않는다.
-- 백엔드 운영 source 정본 `main`: `e3397e00e5538871d80610c9f0c7ab88535d7be0` — Issue #148/#152의 production readback은 54 migrations / OpenAPI `0.3.0` 108 paths / 115 operations와 `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 Edge bundle이다. annotated `v0.3.0` tag/GitHub Release와 일부 provider·Google·Cron hosted 활성화는 아직 별도 pending이며, #156 source/dev 변경은 이 production snapshot에 포함되지 않는다.
+- 이 문서 갱신의 일반 개발 integration base: `dev@ab10249aaf1d671419389615ad8a22984c9849ac` — 55 migrations / OpenAPI 109 paths / 117 operations. #165 긴급 보완은 운영 정본에서 분리한 hotfix branch의 56번째 append-only candidate다.
+- 백엔드 운영 source 정본 `main`: `f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51` — production은 55 migrations / OpenAPI `0.3.0` 109 paths / 117 operations와 기존 5개 Edge bundle이다. 네 checkout template은 아직 게시되지 않았고, #165 보완·운영 게시·예약 smoke와 annotated `v0.3.0` tag/GitHub Release는 별도 pending이다.
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
 - 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
@@ -260,7 +260,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 ### [확정] #29 Preview 경계 — 2026-09-07 구현 착수 계약
 
 - Preview는 active business admin의 오늘/내일 계획 조회·계산이며, 기존 target/assignment/attempt/알림/outbox/audit/command receipt를 쓰지 않는다. 자동 저장·통보·attempt 활성화 API가 아니다. 확인·편집한 제안은 #25 draft 저장 → #26 commit/notify에서 최신 CAS/가능일/source를 다시 검증한다.
-- 소요시간은 네 객실 타입을 모두 포함한 versioned duration policy의 `confirmed` 값만 사용한다. fresh DB의 confirmed 0건은 정상이며 `ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED`, `decisionReady=false`로 fail-closed한다. 55/65/70/80분은 계속 `[데모]`이고 template 값·평균·고정 시간으로 대체하지 않는다. 실제 시간의 확정은 별도 관리자 운영 입력이며 이번 feature에서 production 값을 설정하지 않는다.
+- 배정 계획 소요시간은 네 객실 타입을 모두 포함한 versioned duration policy의 `confirmed` 값만 사용한다. fresh DB의 confirmed 0건은 정상이며 `ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED`, `decisionReady=false`로 fail-closed한다. 55/65/70/80분은 계속 `[데모]`이고 template 값·평균·고정 시간으로 대체하지 않는다. 실제 청소 수행시간은 `cleaning_attempts.started_at → field_completed_at`, 객실 turnaround는 실제 checkout 시각 → `field_completed_at`으로 사후 계산한다. checkout 사진 템플릿의 `durationMinutes`는 선택적인 legacy/planning metadata일 뿐 배정·실행 완료 조건이 아니다.
 - 유효한 미배정 target만 새로 제안한다. 기존 draft/notified 및 진행 업무는 고정 fee/time 부하이며 담당·순서를 변경하지 않는다. reclean은 원 메이드만 가능하고 부재 시 blocked로 남긴다. planned checkout은 배정 계획에만 포함하며 materialization/현장 실행 경계는 #28이 계속 소유한다.
 - 비교는 완료 가능한 수 → 기본 청소요금 spread → 전체 편차 → 동선 → 최종 동률 seed 순서다. previewSeed는 상위 목적함수를 약화하거나 fingerprint를 바꾸지 않는다. 제한된 탐색은 전역 최적해 증명이 아닌 휴리스틱임을 API 운영 문서에 명시한다.
 - 임의 근무시간·휴게시간·하루 최대 객실 수를 만들지 않는다. 실제 진행 attempt의 남은 시간을 알 수 없으면 추가 용량을 추정하지 않고 보류한다. target/maid 자원 상한 초과는 부분 자동결정이 아니라 `ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED`로 거부한다.
@@ -673,8 +673,8 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #108 알림함, #109 typed catalog/grouping/writer, #110 encrypted Web Push subscription, #111 delivery ledger/worker와 #112 VAPID/provider HTTP source까지 순차적으로 dev에 통합됐다. #112 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 PR #119 병합 commit `dfc98b1474f9f890851d49bd904869181d0d7880`의 tree는 동일하고 독립 QA 98/100, P0/P1/P2 0, required `application`/`migration` PASS다. PR #122 문서 동기화와 #124 pgTAP fixture 안정화를 반영한 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / 98 paths / 105 operations다.
 - #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
 - #46은 기존 46 migrations를 수정하지 않은 47번째 append-only private password-change receipt와 password-specific shadow version으로 source/dev에 통합됐다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. release/main·production 승격은 별도 gate다.
-- Issue #148/#152로 `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`, production 54 migrations / OpenAPI `0.3.0` 108 paths / 115 operations와 5개 Edge bundle까지 반영됐다. 다만 annotated `v0.3.0` tag/GitHub Release, Issue #112의 provider invoke secret·positive Web Push/heartbeat, Issue #137의 hosted Google target·서비스 계정·ACL·full resync/Cron smoke는 아직 완료 증거가 없다. source·bundle 배포와 외부 provider/Google/Cron 활성화를 같은 완료 상태로 표시하지 않는다.
-- #46, #128, #131, #136, #137, #140, #133의 source는 `dev`와 v0.3.0 production source에 반영됐다. #137의 API와 `room-pin-sheet-sync` bundle도 배포됐지만 hosted target/서비스 계정/ACL/Secrets/Cron/positive smoke는 미완료다. #156 checkout template admin은 PR #157로 `dev@897c4b845c657401873a08136bd31f351fdb04a8`에 통합됐지만, 별도 release/main/production 55번째 migration/API 배포·네 타입 게시·예약 smoke 전에는 운영 `CLEANING_TEMPLATE_NOT_CONFIGURED`가 해소됐다고 선언하지 않는다.
+- Issue #148/#152/#156 후속으로 `main@f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51`, production 55 migrations / OpenAPI `0.3.0` 109 paths / 117 operations와 5개 Edge bundle까지 반영됐다. 다만 annotated `v0.3.0` tag/GitHub Release, checkout template 게시·예약 success smoke, Issue #112의 provider invoke secret·positive Web Push/heartbeat, Issue #137의 hosted Google target·서비스 계정·ACL·full resync/Cron smoke는 아직 완료 증거가 없다. source·bundle 배포와 운영 데이터/provider 활성화를 같은 완료 상태로 표시하지 않는다.
+- #46, #128, #131, #136, #137, #140, #133의 source는 `dev`와 v0.3.0 production source에 반영됐다. #137의 API와 `room-pin-sheet-sync` bundle도 배포됐지만 hosted target/서비스 계정/ACL/Secrets/Cron/positive smoke는 미완료다. #156 checkout template admin의 55번째 migration/API도 production에 반영됐지만 네 타입은 아직 미게시다. #165는 duration 추정 없이 슬롯만 게시할 수 있게 하는 56번째 hotfix candidate이며, 승인·배포·네 타입 게시·예약 smoke 전에는 운영 `CLEANING_TEMPLATE_NOT_CONFIGURED`가 해소됐다고 선언하지 않는다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
 
@@ -775,10 +775,10 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133까지 production source에 반영됐고, #156은 PR #157로 `dev`에 통합됐다. production은 아직 54 migrations / OpenAPI 0.3.0 108 paths / 115 operations이며 #156 두 operation을 포함하지 않는다. 예약 생성의 `CLEANING_TEMPLATE_NOT_CONFIGURED`를 운영 입력으로 해소할 #156은 checkout만 지원하고 seed/fallback 없이 네 타입의 immutable published template을 요구한다.
+P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#156까지 production source에 반영됐다. production은 55 migrations / OpenAPI 0.3.0 109 paths / 117 operations지만 네 checkout template이 미게시라 예약은 계속 `CLEANING_TEMPLATE_NOT_CONFIGURED`로 차단된다. #165는 source seed/fallback이나 임의 시간값 없이 네 타입의 immutable 슬롯 template을 게시할 수 있도록 duration만 선택화한다.
 
 1. Issue #158에서 production source bundle 배포와 hosted activation/current use를 분리해 상태 정본을 맞춘다.
-2. #156은 별도 release 승인에서 전체 QA·migration manifest·rollback을 다시 검증한 뒤에만 `main`과 production 55번째 migration/API로 승격한다. 버전은 여기서 추측하지 않는다.
+2. #156은 `main`과 production 55번째 migration/API까지 승격됐다. #165의 duration 선택화는 별도 hotfix exact-head QA·manifest·rollback 검증 뒤에만 56번째 migration/API로 승격하며, 네 타입 template 게시와 예약 smoke는 그 이후 별도 운영 단계다.
 3. active business admin이 네 객실 타입의 checkout template을 게시한 뒤 예약 생성의 409→성공과 planned target/snapshot을 hosted smoke로 확인한다.
 4. Issue #148에 남은 annotated `v0.3.0` tag/GitHub Release는 위 운영 복구 증거 뒤 별도 완료 상태로 기록한다.
 5. Issue #34의 GitHub Actions runtime 경고는 별도 CI 유지보수 PR로 관리한다.
