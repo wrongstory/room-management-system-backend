@@ -28,7 +28,7 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 현재 `main@f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51` 기준 OpenAPI `0.3.0` 109 paths / 117 operations와 55 migrations를 사용한다. #156 청소 템플릿 API까지 배포됐지만 네 객실 유형의 checkout template은 아직 게시되지 않았다. #165의 `durationMinutes` 선택화는 hotfix candidate `43e9f6de6939ab793754274caeb93f1aec163f9c`에서 required CI만 통과한 상태이며, 독립 QA·`main` 병합·56번째 migration·production `api` 재배포·운영 template 게시와 예약 smoke 전에는 프론트 기능을 운영에서 활성화하지 않는다.
+production Edge는 현재 `main@f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51` 기준 OpenAPI `0.3.0` 109 paths / 117 operations와 55 migrations를 사용한다. #156 청소 템플릿 API까지 배포됐지만 네 객실 유형의 checkout template은 아직 게시되지 않았다. #165의 `durationMinutes` 선택화는 별도 hotfix candidate이며, 최종 exact head의 required CI·독립 QA·`main` 병합·56번째 migration·production `api` 재배포·운영 template 게시와 예약 smoke 전에는 프론트 기능을 운영에서 활성화하지 않는다.
 
 ### #131/#140 객실 PIN source 계약
 
