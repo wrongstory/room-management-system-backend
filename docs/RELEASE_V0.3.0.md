@@ -97,13 +97,13 @@ Supabase가 관리하는 URL/service-role 환경과 위 application secret을 �
 1. 승인된 release exact head와 manifest를 고정하고 production backup 및 recovery restore evidence를 확인한다.
 2. 현재 55개 stable migration과 head를 read-only로 재대조한 뒤 56번 `cleaning_template_duration_optional`만 적용한다.
 3. migration history, RLS/grant, critical RPC, Security Advisor를 확인한다. 실패 시 Edge 배포로 진행하지 않는다.
-4. #156 exact release source의 `api` bundle만 배포한다. 나머지 4개 bundle과 provider·Google·Cron 설정은 이 변경 때문에 재배포하거나 활성화하지 않는다.
+4. 독립 QA와 required CI를 통과한 #165 hotfix가 포함된 **병합 후 `main` exact SHA**에서 `api` bundle을 빌드·배포한다. 과거 #156 bundle이나 hotfix branch를 직접 배포하지 않는다. 나머지 4개 bundle과 provider·Google·Cron 설정은 이 변경 때문에 재배포하거나 활성화하지 않는다.
 5. active business admin의 positive catalog read와 developer/maid/inactive/temp-password/revoked-session 권한 negative smoke, 잘못된 body/query 차단을 구분해 확인한다.
 6. `standard`, `premium`, `oceanPremium`, `oceanFamily` 네 room type의 checkout catalog를 읽고 모두 unpublished임을 확인한다.
 7. 운영 책임자가 승인한 photo slot 값만 한 타입씩 새 idempotency key와 현재 expected version으로 게시한다. duration은 승인값이 있을 때만 보내고, 미확정이면 생략한다. migration seed, 빈 template, fallback, 임의 추정값을 사용하지 않는다.
 8. 네 타입이 각각 current published version exactly-one인지 재조회하고, 동일 key replay·stale version·key reuse conflict를 확인한다.
 9. 승인된 되돌릴 수 있는 예약 fixture가 있을 때만 게시 전 `CLEANING_TEMPLATE_NOT_CONFIGURED` 409, 게시 후 예약 성공과 planned checkout target snapshot을 확인한다. fixture가 없으면 skip 사유를 남기며 PASS로 쓰지 않는다.
-10. production OpenAPI가 0.3.0 / 109 / 117인지 확인한다. main-only `workflow_dispatch`의 읽기 전용 Swagger Pages 배포와 parity 대조는 별도 운영 승인을 받은 경우에만 수행하며 이번 source 승격만으로 실행하지 않는다.
+10. production OpenAPI가 0.3.0 / 109 / 117인지 확인하고, 개수와 별도로 checkout template 요청에서 `durationMinutes` 생략·`null`이 허용되며 RPC에는 `NULL`이 전달되고 게시·조회 응답에서도 `null`이 보존되는지 확인한다. main-only `workflow_dispatch`의 읽기 전용 Swagger Pages 배포와 parity 대조는 별도 운영 승인을 받은 경우에만 수행하며 이번 source 승격만으로 실행하지 않는다.
 
 ## 6. Hosted smoke와 명시적 제외
 

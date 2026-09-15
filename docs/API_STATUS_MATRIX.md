@@ -1192,7 +1192,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `publishedAt`/`createdAt` DB projection은 Fastify/Edge 모두 실제 달력·시간·offset을 검사하는 strict RFC 3339로 fail-closed
 - [x] PR #157 exact-head 독립 QA·required GitHub `application` / `migration` PASS 및 `dev@897c4b845c657401873a08136bd31f351fdb04a8` 병합
 - [x] #156 main·production 55번째 migration/API Edge 배포 — 네 타입 게시와 예약 success smoke는 미완료
-- [ ] #165 checkout `durationMinutes` 선택화: 56번째 append-only migration, 기존 값 보존, 미확정 시간 추정 금지
+- [ ] #165 checkout `durationMinutes` 선택화: 56번째 append-only migration, 기존 값 보존, 미확정 시간·1분 종료 추정 금지, 계획과 동일 객실 실행 충돌 분리
 - [ ] #165 exact-head 독립 QA·required CI·main hotfix 병합
 - [ ] production 56번째 migration/API 재배포, 네 타입 slot-only 게시, 예약 success hosted smoke
 

@@ -202,6 +202,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 관리자는 사건마다 `EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` 중 하나를 version CAS, 조회 시 서버가 계산한 영향 범위 fingerprint, 멱등 command로 확정한다. fingerprint는 사건·예약·checkout obligation·target·원 assignment/attempt의 현재 version과 실행 상태를 묶으며, 하나라도 바뀌면 결정을 fail-closed한다. 연장은 과거 checkout을 삭제하지 않고 `occupancy_resumed` 보정 이력을 추가하며, 나머지 결정도 현재 예약·접근 조건을 재검증한다. 모든 결정은 기존 checkout target을 재사용하고 이전 assignment/attempt를 보존한 채 새 책임 revision을 만들며, 손님 잔류로 중단된 구간에는 earning·벌점을 만들지 않는다.
 - 사건 결정의 새 책임 구간은 기존 공통 일정 계약을 재사용해 `availableFrom`의 KST 날짜와 `serviceDate` 일치, 서비스일 다음 날 00:00 KST 상한, 다음 유효 예약 체크인 30분 전 상한을 잠금·현재 상태 재검증 뒤 강제한다. 모든 incident timestamp API 값은 초와 UTC offset이 있는 strict RFC 3339이며, 실제 달력에 존재하지 않는 날짜를 허용하지 않는다.
 - 신고와 동결·감사·전체 active/password-complete business admin 행동 알림/outbox는 한 transaction이다. 결정은 행동 알림을 resolve하고 기존/새 담당에게 필요한 회수·배정 통지만 원자적으로 남긴다. PIN·고객 PII·민감 자유문은 사건 projection, audit, notification, outbox에 저장하지 않는다.
+- 청소 가능 여부를 예상시간이나 1분 주기 추측으로 자동 해제하지 않는다. 메이드 신고, 관리자 결정, 배정 변경, 작업 시작·완료처럼 상태가 바뀌는 command에서 최신 사건·점유·담당·실행 상태를 다시 확인한다.
 - 예약 추가·수정·취소는 객실 일정 row를 잠그고 앞뒤 예약의 직전 점유와 `preparation_obligation` 연결을 다시 계산한다. 기존 승인·반려 이력은 보존하고, 새 점유·오염으로 기존 청결 근거가 무효가 되면 새 준비 작업 필요 상태를 만든다.
 
 권장 유일키와 실행 잠금:
@@ -209,6 +210,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 퇴실 청소: `(reservation_id, cleaning_kind)`
 - 수동/연박 요청: 안정적인 source request ID
 - 실행 중 충돌 방지: 객실 실행 lock/원자 command를 사용한다. 현재 `cleaning_attempts`에 없는 `room_id`를 단순 중복 추가해 부분 index를 만들면 target과 객실이 어긋날 수 있다. denormalize한다면 `(target_id, room_id)` 복합 FK/제약으로 동일성을 강제하고, 아니면 constraint trigger/advisory lock 등 실제 schema에 맞는 수단을 쓴다.
+- 예상시간이 없거나 `dueAt`이 열린 checkout target을 1분짜리 구간으로 바꾸지 않는다. 수동 요청은 명시된 두 일정 구간이 있을 때만 계획 충돌을 비교하고, 열린 계획은 생성할 수 있다. 실제 시작은 공통 객실 lock 아래 동일 객실의 현재 `in_progress`와 미해결 #133 사건을 다시 검사해 차단한다. 계획 대기와 실행 충돌은 별개 축이다.
 
 ### `[확정]` 예정 전 수동 체크아웃
 
@@ -227,7 +229,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 투숙 객실의 수동 요청은 연박 청소, 공실 객실의 요청은 추가 청소다.
 - 연박 청소는 예약 점유 구간 안에서 `access_start < requested_complete_at <= access_end`를 검증한다.
 - 다음 체크인이 있는 퇴실·재청소의 준비 마감은 체크인 30분 전이다.
-- 현재 요청의 service date·점유·접근 구간과 충돌하는 활성 수동 요청, 자동 퇴실 의무, 예정 작업, 수행 회차, 미승인 제출이 있으면 새 요청을 만들지 않는다. 충돌하지 않는 미래 예약의 퇴실 의무와 과거 승인 완료 제출만으로 오늘의 연박/추가 요청을 막지 않는다.
+- 현재 요청의 service date·점유·명시된 접근 구간과 겹치는 활성 수동 요청·자동 퇴실 의무·예정 작업은 새 요청을 만들지 않는다. 다만 종료시각과 예상시간이 모두 없는 열린 checkout 계획을 임의 구간으로 환산해 계획 생성을 막지 않는다. 실제 수행 회차·미승인 제출·미해결 #133 사건은 계획과 분리해 실행 시작 시 최신 상태로 차단한다. 충돌하지 않는 미래 예약의 퇴실 의무와 과거 승인 완료 제출만으로 오늘의 연박/추가 요청을 막지 않는다.
 - 수동 요청은 아직 미배정·미공개·미착수일 때만 soft cancel하며 사유·행위자·시각을 보존한다.
 
 ---

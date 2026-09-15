@@ -69,6 +69,6 @@
     { "order": 53, "name": "room_pin_nonce_reservation_hardening", "sha256": "500eb882d8d82fdbc0f9748376d7c3e8c5613ba9a351552cf9ef292287e27b31" },
     { "order": 54, "name": "checkout_not_completed_incident_workflow", "sha256": "f2af0b1ca5ba4af19417618f7db838f95c67970c9d04aa4319ae7b2ce0a08937" },
     { "order": 55, "name": "cleaning_template_admin_api", "sha256": "b6e1441d215078708062b1ee8ab9983bdea668113f80d6cbea1ec9031b21ae3c" },
-    { "order": 56, "name": "cleaning_template_duration_optional", "sha256": "bfe76ff473dba3f1594995494e4c82c6ec7e2d9e6a2f88c4c155f0093e597a22" }
+    { "order": 56, "name": "cleaning_template_duration_optional", "sha256": "1fb6e282c891b44f74d5d764bc4a7db88857282bd4d85affa99f7c2293b7f760" }
   ]
 }

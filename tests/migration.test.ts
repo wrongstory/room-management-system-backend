@@ -122,6 +122,11 @@ describe('initial migration contract', () => {
     expect(sql).toContain('jsonb_strip_nulls');
     expect(sql).toContain('cleaning_attempts.started_at and field_completed_at');
     expect(sql).toContain('assignment_duration_policy_versions');
+    expect(sql).toContain('t.available_from is not null');
+    expect(sql).toContain('t.due_at is not null');
+    expect(sql).not.toContain("coalesce((t.template_snapshot ->> 'durationMinutes')::integer, 1)");
+    expect(sql).toContain("incident.status = 'open'");
+    expect(sql).toContain("running_attempt.status = 'in_progress'");
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
   });

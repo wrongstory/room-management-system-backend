@@ -1176,6 +1176,12 @@ checkout 시각부터 field completion까지다. 배정 preview는 `assignment_d
 정책만 사용한다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도
 추정하지 않는다.
 
+수동 청소 계획은 기존 target과 새 target에 명시된 종료시각이 모두 있을 때만 일정 구간 충돌을 비교한다.
+`durationMinutes=NULL`이고 `dueAt=NULL`인 checkout을 1분짜리로 환산하지 않으며 열린 계획이라는 이유만으로
+새 target 생성을 막지도 않는다. 실제 시작 시에는 reservation command 공통 lock 아래 같은 객실의 다른
+`in_progress`와 미해결 `checkout_presence_incidents`를 검사한다. 실패는 attempt·audit·receipt를 함께 0건으로
+유지하므로 예상시간 원장과 실행 권한 원장이 섞이지 않는다.
+
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.
