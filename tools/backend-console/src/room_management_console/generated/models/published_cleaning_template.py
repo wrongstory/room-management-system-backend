@@ -21,7 +21,7 @@ class PublishedCleaningTemplate:
         id (UUID):
         version (int):
         status (Literal['published']):
-        duration_minutes (int):
+        duration_minutes (int | None): 미설정 가능. 실제 청소시간이나 배정 Preview 정책의 정본이 아닙니다.
         slots (list[CleaningTemplateSlot]):
         published_at (datetime.datetime):
         created_at (datetime.datetime):
@@ -30,7 +30,7 @@ class PublishedCleaningTemplate:
     id: UUID
     version: int
     status: Literal["published"]
-    duration_minutes: int
+    duration_minutes: int | None
     slots: list[CleaningTemplateSlot]
     published_at: datetime.datetime
     created_at: datetime.datetime
@@ -42,6 +42,7 @@ class PublishedCleaningTemplate:
 
         status = self.status
 
+        duration_minutes: int | None
         duration_minutes = self.duration_minutes
 
         slots = []
@@ -82,7 +83,12 @@ class PublishedCleaningTemplate:
         if status != "published":
             raise ValueError(f"status must match const 'published', got '{status}'")
 
-        duration_minutes = d.pop("durationMinutes")
+        def _parse_duration_minutes(data: object) -> int | None:
+            if data is None:
+                return data
+            return cast(int | None, data)
+
+        duration_minutes = _parse_duration_minutes(d.pop("durationMinutes"))
 
         slots = []
         _slots = d.pop("slots")
