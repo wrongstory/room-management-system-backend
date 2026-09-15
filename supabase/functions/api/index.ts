@@ -151,6 +151,7 @@ import {
 } from "../_shared/room-api.ts";
 import {
   bootstrapRoomPins,
+  confirmGeneratedRoomPin,
   finishRoomPinChange,
   prepareRoomPinChange,
   revealRoomPin,
@@ -420,6 +421,14 @@ export async function handleApiRequest(
           sessionId,
           roomPinRoute.roomId,
         )
+        : roomPinRoute.kind === "generated-confirm"
+        ? await confirmGeneratedRoomPin(
+          request,
+          clients,
+          actor,
+          sessionId,
+          roomPinRoute.roomId,
+        )
         : await finishRoomPinChange(
           request,
           clients,
@@ -428,7 +437,11 @@ export async function handleApiRequest(
           roomPinRoute,
         );
       const response = jsonResponse(
-        roomPinRoute.kind === "reveal" ? { pin: result } : { change: result },
+        roomPinRoute.kind === "reveal"
+          ? { pin: result }
+          : roomPinRoute.kind === "generated-confirm"
+          ? { confirmation: result }
+          : { change: result },
         roomPinRoute.kind === "prepare" ? 201 : 200,
         corsHeaders,
       );

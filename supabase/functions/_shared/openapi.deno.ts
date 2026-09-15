@@ -159,13 +159,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 119 &&
+    Object.keys(document.paths).length === 120 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 129,
-    "combined candidate contract 119/129",
+        ).length === 130,
+    "combined candidate contract 120/130",
   );
 });
 
@@ -1416,7 +1416,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 68,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 70,
     "actual audit allowlist count",
   );
   assert(
@@ -1437,12 +1437,13 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
   const doc = await openApiResponse({}).json() as typeof openApiDocument;
   const paths = [
     "/v1/rooms/pins/bootstrap",
+    "/v1/rooms/{roomId}/pin/generated/confirm",
     "/v1/rooms/{roomId}/pin-changes/prepare",
     "/v1/rooms/{roomId}/pin-changes/{leaseId}/confirm",
     "/v1/rooms/{roomId}/pin-changes/{leaseId}/rollback",
     "/v1/rooms/{roomId}/pin/reveal",
   ];
-  assert(paths.every((path) => path in doc.paths), "five exact PIN paths");
+  assert(paths.every((path) => path in doc.paths), "six exact PIN paths");
   assert(!("/v1/rooms/{roomId}/pin" in doc.paths), "no reveal alias");
 
   const prepare = doc.components.schemas.RoomPinChangePrepareRequest;
@@ -1456,9 +1457,11 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
   assert(
     bootstrap.properties.initializedRoomIds.maxItems === 25 &&
       bootstrap.properties.remainingCount.maximum === 121 &&
+      bootstrap.properties.generatedPins.items.$ref ===
+        "#/components/schemas/RoomPinReveal" &&
       !Object.hasOwn(bootstrap.properties, "credential") &&
       !Object.hasOwn(bootstrap.properties, "ciphertext"),
-    "bootstrap is bounded and returns only safe progress",
+    "bootstrap is bounded and limits plaintext to short-lived reveal items",
   );
   assert(
     !(doc.components.schemas.RoomReasonCode.enum as readonly string[]).includes(
@@ -1542,6 +1545,8 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
       "PIN_CHANGE_LEASE_EXPIRED",
       "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
       "PIN_REVEAL_AUTHORIZATION_CHANGED",
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
       "ROOM_PIN_UNCONFIGURED",
       "PIN_ACCESS_LEASE_REQUIRED",
       "PIN_ENTITLEMENT_REQUIRED",

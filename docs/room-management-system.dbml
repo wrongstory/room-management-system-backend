@@ -460,7 +460,7 @@ Table private.room_current_pin {
   pin_version bigint [not null]
   updated_at timestamptz [not null]
 
-  Note: '#131 CAS current pointer; readiness also requires exact latest verified public sync version and no unresolved change lease.'
+  Note: '#131/#169 CAS current pointer; generated initial revision starts mismatch and readiness requires exact latest verified public sync version plus no unresolved change lease.'
 }
 
 Table private.room_pin_change_leases {
@@ -515,7 +515,7 @@ Table private.room_pin_reveal_leases {
   revoked_at timestamptz
   revoke_reason_code text
 
-  Note: '#194 max-30s private reveal window. Maid authority is the exact active assignment entitlement; legacy attempt/access lease columns remain only for finalized/revoked pre-64 history. Open windows are revoked on entitlement end or PIN rotation.'
+  Note: '#131/#169/#194 max-30s private reveal window. Maid authority is the exact active assignment entitlement; generated-pending reveal is admin-only. Legacy attempt/access lease columns remain only for finalized/revoked pre-64 history.'
 }
 
 Table private.room_pin_assignment_entitlements {
@@ -557,7 +557,7 @@ Table private.room_pin_sheet_sync_outbox {
   retry_count int [not null]
   last_error_code text
 
-  Note: '#131 foundation + #136 fenced worker authority. Contains safe identity/status/reason/claim metadata only; no PIN, Google credential/token, or provider payload.'
+  Note: '#131/#136/#169 fenced worker authority. Generated PIN creates no row until physical confirmation; then GENERATED_PIN_PHYSICALLY_CONFIRMED is queued. Contains no PIN, Google credential/token, or provider payload.'
 }
 
 Table private.room_pin_sheet_sync_worker_state {

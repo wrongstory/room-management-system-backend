@@ -111,8 +111,10 @@ async function roomLedger(item) {
     'revisions',(select count(*) from private.room_pin_revisions where room_id=${literal(item.id)}::uuid),
     'current',(select count(*) from private.room_current_pin where room_id=${literal(item.id)}::uuid),
     'verified',(select count(*) from public.room_pin_sync_events where room_id=${literal(item.id)}::uuid and sync_status='verified'),
+    'mismatch',(select count(*) from public.room_pin_sync_events where room_id=${literal(item.id)}::uuid and sync_status='mismatch'),
     'outbox',(select count(*) from private.room_pin_sheet_sync_outbox where room_id=${literal(item.id)}::uuid),
     'audit',(select count(*) from public.audit_events where entity_id=${literal(item.id)}::uuid and event_type='room.pin_change_confirmed'),
+    'generatedAudit',(select count(*) from public.audit_events where entity_id=${literal(item.id)}::uuid and event_type='room.pin_generated'),
     'unresolved',(select count(*) from private.room_pin_change_leases where room_id=${literal(item.id)}::uuid and status in ('prepared','expired'))
   )::text`);
   assert(!result.code, 'room PIN ledger query succeeds');
@@ -196,8 +198,8 @@ export async function testRoomPinBootstrapConcurrency(client) {
   assert(!changedReplay.code && changedReplay.value === sameRace[0].value, 'response-loss replay returns the first receipt after candidates change');
   const sameLedger = await roomLedger(sameKeyRoom);
   assert(
-    sameLedger.revisions === 1 && sameLedger.current === 1 && sameLedger.verified === 1 &&
-      sameLedger.outbox === 1 && sameLedger.audit === 1,
+    sameLedger.revisions === 1 && sameLedger.current === 1 && sameLedger.mismatch === 1 &&
+      sameLedger.verified === 0 && sameLedger.outbox === 0 && sameLedger.generatedAudit === 1,
     'same-key bootstrap creates each room ledger exactly once',
   );
   assert((await roomLedger(replayCandidateRoom)).revisions === 0, 'receipt replay does not initialize a newly supplied candidate');
@@ -224,8 +226,8 @@ export async function testRoomPinBootstrapConcurrency(client) {
   );
   const differentLedger = await roomLedger(differentKeyRoom);
   assert(
-    differentLedger.revisions === 1 && differentLedger.current === 1 && differentLedger.verified === 1 &&
-      differentLedger.outbox === 1 && differentLedger.audit === 1,
+    differentLedger.revisions === 1 && differentLedger.current === 1 && differentLedger.mismatch === 1 &&
+      differentLedger.verified === 0 && differentLedger.outbox === 0 && differentLedger.generatedAudit === 1,
     'different-key bootstrap still creates one room ledger',
   );
   assert(
@@ -234,7 +236,7 @@ export async function testRoomPinBootstrapConcurrency(client) {
   );
 
   // bootstrap versus prepare on one room preserves whichever valid state wins:
-  // either a verified current PIN or one unresolved physical-change lease.
+  // either an unverified generated current PIN or one unresolved physical-change lease.
   const prepareRaceRoom = await createRoom();
   const bootstrapMaterial = envelope();
   const prepareMaterial = envelope();
@@ -252,11 +254,13 @@ export async function testRoomPinBootstrapConcurrency(client) {
   const prepareRaceLedger = await roomLedger(prepareRaceRoom);
   assert(
     (prepareRaceLedger.revisions === 1 && prepareRaceLedger.current === 1 &&
-      prepareRaceLedger.verified === 1 && prepareRaceLedger.outbox === 1 &&
-      prepareRaceLedger.audit === 1 && prepareRaceLedger.unresolved === 0) ||
+      prepareRaceLedger.mismatch === 1 && prepareRaceLedger.verified === 0 &&
+      prepareRaceLedger.outbox === 0 && prepareRaceLedger.generatedAudit === 1 &&
+      prepareRaceLedger.unresolved === 0) ||
       (prepareRaceLedger.revisions === 0 && prepareRaceLedger.current === 0 &&
-        prepareRaceLedger.verified === 0 && prepareRaceLedger.outbox === 0 &&
-        prepareRaceLedger.audit === 0 && prepareRaceLedger.unresolved === 1),
+        prepareRaceLedger.mismatch === 0 && prepareRaceLedger.verified === 0 &&
+        prepareRaceLedger.outbox === 0 && prepareRaceLedger.generatedAudit === 0 &&
+        prepareRaceLedger.unresolved === 1),
     'bootstrap versus prepare preserves exactly one complete current ledger or one unresolved physical change',
   );
   assert(
@@ -323,9 +327,10 @@ export async function testRoomPinBootstrapConcurrency(client) {
   assert(
     collisionLedgers.reduce((sum, ledger) => sum + ledger.revisions, 0) === 1 &&
       collisionLedgers.reduce((sum, ledger) => sum + ledger.current, 0) === 1 &&
-      collisionLedgers.reduce((sum, ledger) => sum + ledger.verified, 0) === 1 &&
-      collisionLedgers.reduce((sum, ledger) => sum + ledger.outbox, 0) === 1 &&
-      collisionLedgers.reduce((sum, ledger) => sum + ledger.audit, 0) === 1,
+      collisionLedgers.reduce((sum, ledger) => sum + ledger.mismatch, 0) === 1 &&
+      collisionLedgers.reduce((sum, ledger) => sum + ledger.verified, 0) === 0 &&
+      collisionLedgers.reduce((sum, ledger) => sum + ledger.outbox, 0) === 0 &&
+      collisionLedgers.reduce((sum, ledger) => sum + ledger.generatedAudit, 0) === 1,
     'parallel bootstrap collision creates one complete room ledger and no partial loser state',
   );
   assert(
