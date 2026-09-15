@@ -110,13 +110,15 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     const schemas=openApiDocument.components.schemas;
     expect(schemas.DeveloperAuditEventType.enum).toContain('photo.upload_accepted');
     expect(schemas.DeveloperAuditEventType.enum).toContain('cleaning_template.published');
-    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(66);
+    expect(schemas.DeveloperAuditEventType.enum).toContain('room.pin_generated');
+    expect(schemas.DeveloperAuditEventType.enum).toContain('room.generated_pin_confirmed');
+    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(68);
     const sample={cleaningTargetId:id(1),attemptId:id(2),targetSlotId:id(3),photoId:id(4),photoVersion:1,...uploaded};
     const summary=schemas.DeveloperAuditEvent.properties.summary;
     expect(summary.additionalProperties).toBe(false);
     for(const key of Object.keys(sample))expect(summary.properties).toHaveProperty(key);
     for(const key of ['requestHash','idempotencyKey','providerLocator','claimDigest','token','rawAfterState'])
       expect(summary.properties).not.toHaveProperty(key);
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(109);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(110);
   });
 });

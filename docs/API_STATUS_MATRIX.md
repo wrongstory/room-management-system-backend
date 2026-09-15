@@ -631,7 +631,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | encrypted room PIN Phase A | production source 반영 | #69 / #131 | physical change/reveal/authoritative access lease; hosted role/positive mutation smoke 미확인 |
 | [x] | Google Sheets PIN projection worker Phase B | production bundle 반영 | #69 / #136 / PR #138 | `room-pin-sheet-sync` source 배포; hosted target/secret/ACL/Google/Cron activation 미완료 |
 | [x] | PIN Sheet 안전 상태·full resync Phase C | source/dev 완료 | #69 / #137 | 51 migrations / 104 paths / 111 operations; exact target digest, 121실 snapshot, singleton fence/CAS/audit; production activation은 Issue OPEN |
-| [x] | 초기 PIN bootstrap·예약 readiness 분리 | production source 반영 | #140 / PR #141 / PR #142 | 공통 nonce reservation 반영; production secret/hosted positive smoke 미확인 |
+| [~] | 초기 PIN 자동 생성·현장 확인 | source candidate | #169 | 57 migrations / 110 paths / 118 operations; production 미승격 |
 | [x] | 자동 checkout 후 퇴실 미진행 신고·관리자 재배정 | source/main·production bundle 반영 | #133 | 54 migrations / 108 paths / 115 operations; Issue #148/#152 production source에 포함, 전체 hosted positive mutation smoke는 별도 pending |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
@@ -1139,11 +1139,15 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
 | [x] | `POST /v1/rooms/pins/bootstrap` | active password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; secret과 positive bootstrap smoke 미확인 |
+| [~] | `POST /v1/rooms/{roomId}/pin/generated/confirm` | active password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | #169 source candidate; release/main·production 미승격 |
 
 - [x] 예약 생성·변경·객실 projection에서 `unconfigured`/`mismatch` PIN 경고를 allocation blocker와 분리
 - [x] actual check-in preparation context와 reveal/change의 verified-only fail-closed 유지
 - [x] active admin 전용 `POST /v1/rooms/pins/bootstrap`, 최대 25건, idempotent receipt, 기존 current/mismatch 비덮어쓰기
-- [x] 초기 숫자는 `ROOM_PIN_INITIAL_DIGITS` deployment secret에서만 읽고 DB에는 encrypted envelope만 전달
+- [x] #169 candidate에서 고정 초기 PIN secret을 제거하고 CSPRNG batch-unique 4자리 자동 생성으로 교체
+- [x] 생성 직후 mismatch/no Sheet, admin 30초 no-store reveal, 현장 확인 후 verified/Sheet outbox 계약 추가
+- [x] `POST /v1/rooms/{roomId}/pin/generated/confirm` 추가; source 57 migrations / 110 paths / 118 operations
+- [x] #169 exact source에서 application 409, Edge 244, DB 47 files / 2,692 assertions, 전체 concurrency, fresh 57 migrations reset·build·typecheck·lint·secret scan PASS
 - [x] Fastify/Edge/OpenAPI 및 frontend handoff 계약 정합화; legacy `pin-sync-events` deprecated
 - [x] 최신 `dev` 병합 후 fresh local DB reset, 43 SQL files / 2,536 assertions, 전체 concurrency, DB lint, Edge 226 tests·bundle gate PASS
 - [x] PR #141 exact-head required `application` / `migration` PASS와 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578` 병합

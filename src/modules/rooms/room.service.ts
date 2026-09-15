@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
@@ -130,6 +130,20 @@ export interface RoomPinBootstrapResult {
   skippedCount: number;
   remainingCount: number;
   completedAt: string;
+  generatedPins: RevealedRoomPin[];
+}
+
+export interface ConfirmGeneratedRoomPinInput {
+  roomId: string;
+  expectedPinVersion: number;
+  idempotencyKey: string;
+}
+
+export interface GeneratedRoomPinConfirmation {
+  roomId: string;
+  pinVersion: number;
+  status: 'verified';
+  confirmedAt: string;
 }
 
 export interface RoomService {
@@ -142,6 +156,7 @@ export interface RoomService {
   rollbackPinChange(actor: Actor, input: ConfirmRoomPinChangeInput): Promise<RoomPinChangeResult>;
   revealPin(actor: Actor, input: RevealRoomPinInput): Promise<RevealedRoomPin>;
   bootstrapPins(actor: Actor, input: BootstrapRoomPinsInput): Promise<RoomPinBootstrapResult>;
+  confirmGeneratedPin(actor: Actor, input: ConfirmGeneratedRoomPinInput): Promise<GeneratedRoomPinConfirmation>;
 }
 
 interface RoomProjectionRow {
@@ -184,6 +199,24 @@ function ensureAdmin(actor: Actor): void {
   if (actor.role !== 'admin') {
     throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 객실 운영 현황을 조회할 수 있습니다.');
   }
+}
+
+export function generateUniqueFourDigitPins(
+  count: number,
+  draw: () => number = () => randomInt(10_000)
+): string[] {
+  if (!Number.isSafeInteger(count) || count < 0 || count > 25) {
+    throw new RangeError('PIN generation count must be between 0 and 25');
+  }
+  const values = new Set<number>();
+  while (values.size < count) {
+    const value = draw();
+    if (!Number.isSafeInteger(value) || value < 0 || value >= 10_000) {
+      throw new RangeError('PIN generator returned a value outside 0000-9999');
+    }
+    values.add(value);
+  }
+  return [...values].map((value) => value.toString().padStart(4, '0'));
 }
 
 function roomError(error: { message?: string } | null): AppError {
@@ -229,6 +262,12 @@ function roomError(error: { message?: string } | null): AppError {
   }
   if (message.includes('PIN_REVEAL_AUTHORIZATION_CHANGED')) {
     return new AppError(403, 'PIN_REVEAL_AUTHORIZATION_CHANGED', 'PIN 응답 전 권한 또는 업무 상태가 변경되었습니다.');
+  }
+  if (message.includes('GENERATED_PIN_REVEAL_NOT_ALLOWED')) {
+    return new AppError(409, 'GENERATED_PIN_REVEAL_NOT_ALLOWED', '생성된 PIN의 초기 열람 가능 상태가 아닙니다.');
+  }
+  if (message.includes('GENERATED_PIN_CONFIRMATION_NOT_ALLOWED')) {
+    return new AppError(409, 'GENERATED_PIN_CONFIRMATION_NOT_ALLOWED', '생성된 PIN을 물리 도어락에 확인할 수 있는 상태가 아닙니다.');
   }
   if (message.includes('ROOM_PIN_UNCONFIGURED')) {
     return new AppError(404, 'ROOM_PIN_UNCONFIGURED', '등록된 객실 PIN이 없습니다.');
@@ -308,8 +347,7 @@ export function assertNoContactInformation(value: string | undefined): void {
 export class SupabaseRoomService implements RoomService {
   constructor(
     private readonly clients: SupabaseClients,
-    private readonly pinConfig?: RoomPinCryptoConfig,
-    private readonly initialPinDigits?: string
+    private readonly pinConfig?: RoomPinCryptoConfig
   ) {}
 
   private cryptoConfig(): RoomPinCryptoConfig {
@@ -317,11 +355,46 @@ export class SupabaseRoomService implements RoomService {
     return this.pinConfig;
   }
 
-  private bootstrapDigits(): string {
-    if (!this.initialPinDigits || !/^[0-9]{4,8}$/.test(this.initialPinDigits)) {
-      throw new AppError(503, 'ROOM_PIN_BOOTSTRAP_CONFIG_INVALID', '객실 초기 PIN 설정을 확인해 주세요.');
+  private async revealGeneratedPin(
+    actor: Actor,
+    sessionId: string,
+    roomId: string
+  ): Promise<RevealedRoomPin> {
+    const requestId = randomUUID();
+    const { data, error } = await this.clients.admin.rpc('begin_generated_room_pin_reveal', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_room_id: roomId,
+      p_request_id: requestId
+    });
+    if (error || !data) throw roomError(error);
+    const row = data as Record<string, unknown>;
+    let credential: string;
+    try {
+      credential = await decryptRoomPin(
+        envelopeFromRow(row),
+        roomId,
+        String(row.room_number),
+        Number(row.pin_version),
+        this.cryptoConfig()
+      );
+    } catch (cryptoError) {
+      throw pinCryptoError(cryptoError);
     }
-    return this.initialPinDigits;
+    const { error: finalError } = await this.clients.admin.rpc('finalize_generated_room_pin_reveal', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_room_id: roomId,
+      p_reveal_lease_id: row.lease_id,
+      p_request_id: requestId
+    });
+    if (finalError) throw roomError(finalError);
+    const expiresAt = String(row.expires_at);
+    const clearAfterSeconds = Math.min(30, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+    if (!Number.isFinite(clearAfterSeconds) || clearAfterSeconds <= 0) {
+      throw new AppError(403, 'PIN_REVEAL_AUTHORIZATION_CHANGED', 'PIN 열람 권한이 변경되었습니다.');
+    }
+    return { roomId, credential, pinVersion: Number(row.pin_version), clearAfterSeconds, expiresAt };
   }
 
   async list(actor: Actor): Promise<RoomSummary[]> {
@@ -563,7 +636,6 @@ export class SupabaseRoomService implements RoomService {
     if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 25) {
       throw new AppError(400, 'INVALID_PIN_BOOTSTRAP_LIMIT', '초기화 batch 크기는 1~25여야 합니다.');
     }
-    const digits = this.bootstrapDigits();
     const sessionId = verifiedSessionId(actor.accessToken);
     const { data: contextData, error: contextError } = await this.clients.admin.rpc(
       'get_room_pin_bootstrap_context',
@@ -578,18 +650,20 @@ export class SupabaseRoomService implements RoomService {
     if (!Array.isArray(context.candidates)) {
       throw new AppError(500, 'ROOM_PIN_BOOTSTRAP_FAILED', '객실 초기 PIN 대상을 확인하지 못했습니다.');
     }
-    const candidates = await Promise.all(context.candidates.map(async (value) => {
+    const digitsByCandidate = generateUniqueFourDigitPins(context.candidates.length);
+    const candidates = await Promise.all(context.candidates.map(async (value, index) => {
       const candidate = value as Record<string, unknown>;
       const roomId = String(candidate.room_id ?? '');
       const roomNumber = String(candidate.room_number ?? '');
       const proposedPinVersion = Number(candidate.proposed_pin_version);
-      if (!/^[0-9a-f-]{36}$/i.test(roomId) || !roomNumber || proposedPinVersion !== 1) {
+      const pinDigits = digitsByCandidate[index];
+      if (!/^[0-9a-f-]{36}$/i.test(roomId) || !roomNumber || proposedPinVersion !== 1 || !pinDigits) {
         throw new AppError(500, 'ROOM_PIN_BOOTSTRAP_FAILED', '객실 초기 PIN 대상이 올바르지 않습니다.');
       }
       let envelope: RoomPinEnvelope;
       try {
         envelope = await encryptRoomPin(
-          canonicalRoomPin(roomNumber, digits),
+          canonicalRoomPin(roomNumber, pinDigits),
           roomId,
           proposedPinVersion,
           this.cryptoConfig()
@@ -618,13 +692,45 @@ export class SupabaseRoomService implements RoomService {
     });
     if (error || !data) throw roomError(error);
     const result = data as Record<string, unknown>;
+    const initializedRoomIds = result.initialized_room_ids as string[];
+    const generatedPins = await Promise.all(
+      initializedRoomIds.map((roomId) => this.revealGeneratedPin(actor, sessionId, roomId))
+    );
     return {
-      initializedRoomIds: result.initialized_room_ids as string[],
+      initializedRoomIds,
       skippedRoomIds: result.skipped_room_ids as string[],
       initializedCount: Number(result.initialized_count),
       skippedCount: Number(result.skipped_count),
       remainingCount: Number(result.remaining_count),
-      completedAt: String(result.completed_at)
+      completedAt: String(result.completed_at),
+      generatedPins
+    };
+  }
+
+  async confirmGeneratedPin(
+    actor: Actor,
+    input: ConfirmGeneratedRoomPinInput
+  ): Promise<GeneratedRoomPinConfirmation> {
+    ensureAdmin(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      expectedPinVersion: input.expectedPinVersion
+    };
+    const { data, error } = await this.clients.admin.rpc('confirm_generated_room_pin', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: input.roomId,
+      p_expected_pin_version: input.expectedPinVersion,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    const result = data as Record<string, unknown>;
+    return {
+      roomId: String(result.room_id),
+      pinVersion: Number(result.pin_version),
+      status: 'verified',
+      confirmedAt: String(result.confirmed_at)
     };
   }
 }

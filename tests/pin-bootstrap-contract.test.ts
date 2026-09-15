@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
+import { generateUniqueFourDigitPins } from '../src/modules/rooms/room.service.js';
 
 function readSqlFixture(path: string): string {
   return readFileSync(join(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
@@ -13,8 +14,20 @@ const migration = readSqlFixture(
 const nonceHardeningMigration = readSqlFixture(
   'supabase/migrations/20260913075134_room_pin_nonce_reservation_hardening.sql',
 );
+const generatedPinMigration = readSqlFixture(
+  'supabase/migrations/20260915155048_generated_room_pin_confirmation.sql',
+);
 
 describe('PIN bootstrap and reservation readiness contract', () => {
+  it('generates unique fixed-width values and retries collisions', () => {
+    const draws = [0, 0, 42, 9999];
+    expect(generateUniqueFourDigitPins(3, () => draws.shift() ?? 1234)).toEqual([
+      '0000',
+      '0042',
+      '9999',
+    ]);
+    expect(() => generateUniqueFourDigitPins(26)).toThrow(RangeError);
+  });
   it('keeps PIN warnings out of reservation allocation while retaining the check-in gate', () => {
     expect(migration).toContain('p_preparation_reservation_id is not null');
     expect(migration).toContain("array_append(v_reasons, 'PIN_MISMATCH')");
@@ -25,7 +38,7 @@ describe('PIN bootstrap and reservation readiness contract', () => {
     expect(roomReasonCodes).toContain('DATA_UNCONFIRMED');
   });
 
-  it('exposes only a bounded admin bootstrap operation without PIN input or output', () => {
+  it('exposes a bounded admin bootstrap with only short-lived generated credentials', () => {
     const operation = openApiDocument.paths['/v1/rooms/pins/bootstrap'].post;
     expect(operation.operationId).toBe('bootstrapRoomPins');
     expect(operation.security).toEqual([{ bearerAuth: [] }]);
@@ -43,7 +56,11 @@ describe('PIN bootstrap and reservation readiness contract', () => {
       'skippedCount',
       'remainingCount',
       'completedAt',
+      'generatedPins',
     ]);
+    expect(result.properties.generatedPins.items.$ref).toBe('#/components/schemas/RoomPinReveal');
+    expect(openApiDocument.paths['/v1/rooms/{roomId}/pin/generated/confirm'].post.operationId)
+      .toBe('confirmGeneratedRoomPin');
   });
 
   it('accepts encrypted envelopes only and restricts both RPCs to service role', () => {
@@ -64,6 +81,19 @@ describe('PIN bootstrap and reservation readiness contract', () => {
     expect(migration).toContain("status in ('prepared', 'expired')");
     expect(migration).toContain('v_skipped_ids := array_append(v_skipped_ids, v_room.id)');
     expect(migration).toContain('continue;');
+  });
+
+  it('keeps generated revisions mismatched until physical confirmation', () => {
+    expect(generatedPinMigration).toContain("'GENERATED_PIN_AWAITING_PHYSICAL_CONFIRMATION'");
+    expect(generatedPinMigration).toContain("v_room.id, 'mismatch', 1");
+    expect(generatedPinMigration).toContain('create function public.begin_generated_room_pin_reveal');
+    expect(generatedPinMigration).toContain('create function public.finalize_generated_room_pin_reveal');
+    expect(generatedPinMigration).toContain('create function public.confirm_generated_room_pin');
+    expect(generatedPinMigration).toContain("'GENERATED_PIN_PHYSICALLY_CONFIRMED'");
+    expect(generatedPinMigration).toMatch(
+      /private\.room_pin_sheet_sync_outbox[\s\S]*?'verified',[\s\n]*'GENERATED_PIN_PHYSICALLY_CONFIRMED'/,
+    );
+    expect(generatedPinMigration).not.toContain('ROOM_PIN_INITIAL_DIGITS');
   });
 
   it('reserves AES-GCM nonces across prepare and bootstrap without exposing the registry', () => {

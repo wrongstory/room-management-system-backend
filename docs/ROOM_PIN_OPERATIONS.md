@@ -2,7 +2,7 @@
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 통합 기준은 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578`, 52 migrations / 105 paths / 112 operations이고 현재 보완 candidate는 기존 52개를 수정하지 않는 53번째 nonce reservation migration만 추가한다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Secrets, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C, Issue #140 초기화와 Issue #169 자동 생성·현장 확인 계약을 설명한다. 현재 #169 source candidate는 57 migrations / 110 paths / 118 operations이며 기존 migration을 수정하지 않고 `generated_room_pin_confirmation`을 추가한다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Secrets, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
 
 Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다.
 
@@ -10,10 +10,11 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 - 초기 DB에서 `pinSyncStatus=unconfigured`여도 예약 생성·변경·배정은 가능하다. `allocationReady`와 `reasonCodes`는 예약 업무의 점유·청소·촛불·운영 차단·입실 차단 이슈·기준정보 확인만 나타낸다.
 - 실제 체크인 전이와 PIN reveal/change는 current PIN이 `verified`가 될 때까지 계속 fail-closed한다. `mismatch`도 예약 경고로는 표시하지만 실제 입실과 PIN 접근을 막는다.
-- active admin은 `POST /v1/rooms/pins/bootstrap`에 선택적 `limit`(기본 20, 최대 25)만 보낸다. PIN 숫자는 요청하지 않으며 응답에도 PIN·credential·envelope가 없다.
-- 런타임은 secret manager의 `ROOM_PIN_INITIAL_DIGITS`(4~8자리)를 읽어 DB 후보의 current room number와 결합한 뒤 AES-GCM으로 암호화한다. 실제 값은 Git, migration, `.env.example`, API payload, 로그, 감사 또는 알림에 기록하지 않는다.
-- command는 current PIN이나 unresolved mismatch가 없는 객실만 version 1로 초기화한다. 기존 current/mismatch를 자동 덮어쓰지 않으며 한 번에 최대 25개, 동일 `Idempotency-Key`와 payload는 최초 완료 receipt의 exact response를 재생한다. `remainingCount`가 0이 될 때까지 새 key로 반복할 수 있다.
-- 성공 응답의 `initialized`는 이 batch에서 revision/current/verified sync/Sheet outbox/audit가 함께 확정된 객실이고, `skipped`는 기존 current 또는 unresolved 물리 변경을 보존해 의도적으로 건너뛴 객실이다. 검증 오류를 skipped로 바꾸지 않으며 DB validation 오류는 batch 전체를 rollback한다. HTTP timeout·응답 유실은 rollback을 뜻하지 않으므로 같은 `Idempotency-Key`로 receipt 결과를 확인한다.
+- active admin은 `POST /v1/rooms/pins/bootstrap`에 선택적 `limit`(기본 20, 최대 25)만 보낸다. 런타임 CSPRNG가 batch 안에서 중복되지 않는 정확히 4자리 PIN을 생성하며 선행 0을 보존한다. 고정 초기 PIN secret이나 클라이언트 PIN 입력은 없다.
+- command는 current PIN이나 unresolved mismatch가 없는 객실만 version 1 `mismatch`로 초기화한다. 기존 current/mismatch를 자동 덮어쓰지 않으며 동일 `Idempotency-Key`와 payload는 최초 완료 receipt를 재생한다. `remainingCount`가 0이 될 때까지 새 key로 반복할 수 있다.
+- 성공 응답의 `generatedPins`는 admin 전용 30초 reveal lease에서만 복호화하며 `Cache-Control: no-store`를 사용한다. credential을 화면 메모리 밖에 저장하지 않고 `clearAfterSeconds`/`expiresAt` 중 빠른 시점에 지운다. 일반 reveal과 maid 접근은 현장 확인 전까지 거부된다.
+- 관리자가 실제 도어락에 적용한 뒤 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 `expectedPinVersion`과 새 `Idempotency-Key`를 보내야 verified sync와 Sheet outbox가 생긴다. 확인 전에는 실제 체크인이 fail-closed다.
+- 성공 응답의 `initialized`는 이 batch에서 revision/current/mismatch sync/audit가 함께 확정된 객실이고, `skipped`는 기존 current 또는 unresolved 물리 변경을 보존해 의도적으로 건너뛴 객실이다. 검증 오류를 skipped로 바꾸지 않으며 DB validation 오류는 batch 전체를 rollback한다. HTTP timeout·응답 유실은 rollback을 뜻하지 않으므로 같은 key로 receipt를 재생하고 generated-pending credential을 새 30초 lease로 다시 확인한다.
 
 ## Phase B Google Sheets projection
 
@@ -41,17 +42,15 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 ### Production 활성화 체크리스트
 
-1. 기존 production DB backup과 적용된 52개 migration 및 PIN 원장 evidence를 확인한다. 이미 적용된 52개 파일은 수정·삭제하지 않는다.
-2. 승인된 release에서 53번째 migration을 파일에 명시된 단일 transaction으로 적용한다. transaction 시작 직후 첫 DDL인 table lock이 lease/revision 양쪽을 잠그며, lock 대기·timeout 또는 historical nonce conflict가 발생하면 적용을 중단한다. 오류를 무시하거나 `SKIP LOCKED`로 이력을 제외하지 않으며 registry/helper/trigger와 migration history는 반쪽 설치되지 않고 기존 원장 evidence는 그대로 남아야 한다.
-3. registry backfill 수와 history 정합성, 양쪽 INSERT trigger, lease identity guard, FORCE RLS와 최소 grant를 확인한다. 이 확인 전에는 bootstrap을 실행하지 않는다.
-4. 별도 release/운영 승인을 받은 뒤에만 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
-5. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
-6. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.
-7. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포한다.
-8. 별도 승인된 bootstrap을 실행하고 read-only status, 빈 큐 heartbeat, 121실 full resync, 삭제·정렬·변조 repair, duplicate-write 0을 hosted에서 확인한다.
-9. Cron/Vault를 마지막에 활성화하고 연속 heartbeat와 operator-blocked alert를 관찰한다.
+1. 기존 production DB backup과 적용된 55개 migration 및 PIN 원장 evidence를 확인한다. 이미 적용된 migration 파일은 수정·삭제하지 않는다.
+2. 승인된 release에서 pending 56·57번째 migration을 정확한 순서로 전체 적용한다. 중간 실패나 migration history 불일치는 hosted 적용 실패로 취급하고 기존 원장 evidence를 보존한다.
+3. `bootstrap_room_pins`, generated reveal begin/finalize, `confirm_generated_room_pin`의 service-role 전용 EXECUTE와 actor/session/admin 재검증, Sheet outbox reason constraint를 확인한다.
+4. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포하고 production OpenAPI가 110 paths / 118 operations인지 확인한다.
+5. 별도 release/운영 승인을 받은 뒤에만 테스트 대상 객실로 생성→mismatch/no Sheet→admin no-store reveal→물리 도어락 적용→version CAS confirm→verified/outbox 흐름을 smoke한다.
+6. 일반 reveal과 maid 접근, 확인 전 체크인, 다른 version 확인이 모두 거부되는지 확인한다. PIN 원문은 로그·Issue·PR·브라우저 저장소에 기록하지 않는다.
+7. 승인된 target mapping, 최소 권한 service account, full resync와 Cron/Vault 활성화는 기존 Phase B/C release gate를 그대로 따른다.
 
-53번째 migration의 lock wait/timeout, validation conflict 또는 transaction 중간 실패는 hosted 적용 실패로 취급한다. 기존 lease/revision/current pointer/sync event/Sheet outbox/audit/completed receipt를 삭제·보정하지 말고 원 evidence를 보존한 채 조사한다. 현재 source/dev 검증 완료는 이 production 적용·bootstrap 승인과 별개다.
+57번째 migration의 lock wait/timeout, validation conflict 또는 transaction 중간 실패는 hosted 적용 실패로 취급한다. 기존 lease/revision/current pointer/sync event/Sheet outbox/audit/completed receipt를 삭제·보정하지 말고 원 evidence를 보존한 채 조사한다. 현재 source 검증 완료는 이 production 적용·bootstrap 승인과 별개다.
 
 서비스 계정 key 회전은 새 key 배치→local 구조 검증→OAuth/Sheets smoke→이전 key 폐기 순서다. PC/credential 유출 또는 ACL 오배치 시 Cron과 Function 호출을 중단하고 key를 즉시 폐기하며, target ACL을 회수하고 status/operator-blocked evidence와 audit을 보존한 채 승인된 새 credential로만 복구한다.
 
@@ -89,7 +88,8 @@ Reveal은 기존 public access lease를 대체하지 않는 30초 이하 private
 ## 장애 확인
 
 - `ROOM_PIN_MISMATCH_UNRESOLVED`: 실제 체크인과 reveal을 계속 차단하고 실제 물리 상태를 확인한다. 예약 배정은 별도 경고를 표시한 채 허용한다.
-- `ROOM_PIN_BOOTSTRAP_CONFIG_INVALID`: 배포 secret이 없거나 형식이 잘못됐다. 실제 값을 로그/Issue에 남기지 말고 secret manager 설정을 복구한다.
+- `GENERATED_PIN_REVEAL_NOT_ALLOWED`: 이미 현장 확인됐거나 generated-pending 상태가 아니므로 초기화 응답을 재사용하지 않고 최신 객실 PIN 상태를 조회한다.
+- `GENERATED_PIN_CONFIRMATION_NOT_ALLOWED`: generated-pending/current version 조건이 바뀌었으므로 물리 상태를 임의 확정하지 않고 최신 상태를 확인한다.
 - `PIN_CHANGE_IN_PROGRESS` / `PIN_CHANGE_LEASE_EXPIRED`: 새 변경으로 덮지 말고 기존 lease의 물리 결과를 resolve한다.
 - `STALE_PIN_VERSION` / `ROOM_NUMBER_CHANGED`: 최신 객실/version을 다시 조회하고 새로운 idempotency key로 재시도한다.
 - `PIN_ACCESS_REQUIRED` / `PIN_ACCESS_LEASE_REQUIRED` / `PIN_REVEAL_AUTHORIZATION_CHANGED`: assignment, attempt, session, access lease가 바뀐 것이므로 plaintext를 폐기하고 다시 권한을 얻는다.

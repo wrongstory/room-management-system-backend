@@ -66,6 +66,9 @@ const revealPinSchema = z.object({
 const bootstrapPinsSchema = z.object({
   limit: z.number().int().min(1).max(25).default(20)
 }).strict();
+const confirmGeneratedPinSchema = z.object({
+  expectedPinVersion: z.number().int().positive()
+}).strict();
 
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
@@ -92,6 +95,18 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         idempotencyKey: idempotencyKey(request)
       });
       return reply.header('Cache-Control', 'no-store').send({ bootstrap });
+    });
+
+    app.post('/:roomId/pin/generated/confirm', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const { roomId } = roomIdSchema.parse(request.params);
+      const input = confirmGeneratedPinSchema.parse(request.body);
+      const confirmation = await roomService.confirmGeneratedPin(request.actor, {
+        roomId,
+        expectedPinVersion: input.expectedPinVersion,
+        idempotencyKey: idempotencyKey(request)
+      });
+      return reply.header('Cache-Control', 'no-store').send({ confirmation });
     });
 
     app.get('/:roomId', { preHandler: admin }, async (request) => {

@@ -322,6 +322,7 @@ erDiagram
     uuid authoritative_access_lease_id FK
     timestamptz expires_at
     timestamptz finalized_at
+    uuid request_id
   }
   ROOM_PIN_SHEET_SYNC_OUTBOX {
     uuid id PK
@@ -358,6 +359,8 @@ erDiagram
 ```
 
 핵심 제약:
+
+- #169 generated initial revision은 current pointer를 만들되 latest sync를 `mismatch`로 기록하고 Sheet outbox를 만들지 않는다. admin의 30초 reveal lease가 평문을 저장하지 않고 암호문을 전달하며, 현장 확인 RPC가 current version을 CAS 검증한 뒤에만 `verified` event와 `GENERATED_PIN_PHYSICALLY_CONFIRMED` outbox를 추가한다.
 
 - 활성 예약 구간은 `[check_in_at, check_out_at)` 반개구간이며 GiST exclusion으로 객실별 겹침을 막는다. KST 날짜가 다음 날 이상이고 분 단위인 일정만 허용한다.
 - 예약마다 입실 준비 의무와 비공개 퇴실 청소 의무를 정확히 하나씩 만든다. 퇴실 청소 대상은 필요 시 같은 의무에서 한 번만 공개한다.

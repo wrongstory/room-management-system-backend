@@ -43,13 +43,15 @@ Google Sheets에서는 `room_number`를 business identity로 하여 최대 121�
 
 private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 직접 접근을 막는다. developer database projection은 configured/approved boolean, safe counters/timestamp/stable error만 노출한다. full resync와 운영 mapping/ACL/Cron은 #137 범위다.
 
-### #140 초기 PIN bootstrap과 예약 readiness 분리 — source/dev 완료, nonce 보완 candidate
+### #140/#169 초기 PIN bootstrap과 예약 readiness 분리 — 자동 생성 candidate
 
 `pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. reveal/change의 기존 current revision·lease 권한 검사도 유지한다.
 
-초기 데이터가 없는 환경에서는 active admin만 `POST /v1/rooms/pins/bootstrap`을 호출한다. 런타임은 secret manager의 `ROOM_PIN_INITIAL_DIGITS`를 읽고 DB가 반환한 최대 25개 후보의 현재 객실번호와 서버 안에서 canonical credential을 조합·AES-GCM 암호화한 뒤 service-role RPC에 envelope만 전달한다. RPC는 global lifecycle lock, sorted room lock, immutable version 1 revision, current pointer, verified sync event, Sheet outbox, safe audit와 command receipt를 한 transaction에 기록한다. current PIN이나 unresolved mismatch가 있으면 덮어쓰지 않는다. 평문 초기 숫자는 source/migration/DB/API/log/audit/notification에 존재하지 않는다.
+초기 데이터가 없는 환경에서는 active admin만 `POST /v1/rooms/pins/bootstrap`을 호출한다. 런타임 CSPRNG는 최대 25개 후보마다 batch-unique 4자리 숫자를 만들고 선행 0을 보존해 현재 객실번호와 canonical credential을 조합·AES-GCM 암호화한 뒤 service-role RPC에 envelope만 전달한다. RPC는 global lifecycle lock, sorted room lock, immutable version 1 revision, current pointer, mismatch sync event, safe audit와 command receipt를 한 transaction에 기록한다. current PIN이나 unresolved mismatch가 있으면 덮어쓰지 않으며 고정 초기 PIN secret은 없다.
 
-성공의 initialized는 위 원장 전체가 commit된 객실, skipped는 기존 current/unresolved 물리 변경을 보존한 객실이다. DB validation 실패는 batch 전체 rollback이며 오류를 skipped로 은폐하지 않는다. timeout/응답 유실은 commit 여부가 불확실하므로 rollback으로 단정하지 않고 같은 key의 receipt replay로 확인한다. 53번째 보완 migration은 기존 lease/revision을 보존해 registry를 backfill하고, matching confirmed lease/revision만 같은 논리 암호화로 인정한다. 다른 과거 key-version/nonce 충돌은 이력을 고치지 않고 upgrade를 fail-closed한다.
+bootstrap 응답은 initialized room마다 별도 30초 admin reveal lease로 암호문을 복호화·최종 재검증하고 `sensitive.read`를 남긴 뒤 no-store credential만 일시 반환한다. 응답 유실 재시도는 비밀 없는 receipt로 같은 initialized IDs를 찾고 아직 generated-pending이면 새 reveal lease를 발급한다. 일반 reveal과 maid는 mismatch credential을 볼 수 없다. `POST /v1/rooms/{roomId}/pin/generated/confirm`이 current version과 generated-pending 상태를 CAS 재검증한 뒤에만 verified sync event와 Sheet outbox를 기록한다.
+
+성공의 initialized는 generated revision/current/mismatch/audit가 commit된 객실, skipped는 기존 current/unresolved 물리 변경을 보존한 객실이다. DB validation 실패는 batch 전체 rollback이며 오류를 skipped로 은폐하지 않는다. timeout/응답 유실은 commit 여부가 불확실하므로 rollback으로 단정하지 않고 같은 key의 receipt replay로 확인한다. 53번째 보완 migration은 기존 lease/revision을 보존해 registry를 backfill하고, matching confirmed lease/revision만 같은 논리 암호화로 인정한다. 다른 과거 key-version/nonce 충돌은 이력을 고치지 않고 upgrade를 fail-closed한다.
 ### #137 PIN Sheet full resync와 운영 상태 — source/dev 완료
 
 공개 `GET /v1/room-pin-sheet-sync/status`는 변경 완료 비밀번호와 active developer/admin session을 매번 확인하고 `pending/failed/operatorBlocked/oldestPendingAt/lastSuccessAt/lastErrorCode/version`만 반환한다. 현재 local credential 또는 target mapping이 invalid이면 과거 successful heartbeat보다 우선해 false-green을 차단한다. `POST /v1/room-pin-sheet-sync/full-resync`는 strict `{expectedVersion}` body, scoped idempotency key와 status version CAS를 요구한다.
