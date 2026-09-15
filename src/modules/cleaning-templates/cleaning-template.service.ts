@@ -20,7 +20,7 @@ export interface PublishedCleaningTemplate {
   id: string;
   version: number;
   status: 'published';
-  durationMinutes: number;
+  durationMinutes: number | null;
   slots: CleaningTemplateSlot[];
   publishedAt: string;
   createdAt: string;
@@ -44,7 +44,7 @@ export interface PublishCheckoutCleaningTemplateInput {
   roomTypeCode: CheckoutRoomTypeCode;
   cleaningKind: 'checkout';
   expectedVersion: number;
-  durationMinutes: number;
+  durationMinutes?: number | null;
   slots: CleaningTemplateSlot[];
   idempotencyKey: string;
 }
@@ -100,7 +100,7 @@ const publishedTemplateSchema = z.object({
   id: z.uuid(),
   version: z.number().int().min(7).max(2_147_483_647),
   status: z.literal('published'),
-  durationMinutes: z.number().int().min(1).max(10_080),
+  durationMinutes: z.number().int().min(1).max(10_080).nullable(),
   slots: z.array(slotSchema).min(10).max(15),
   publishedAt: timestampSchema,
   createdAt: timestampSchema
@@ -236,12 +236,13 @@ export class SupabaseCleaningTemplateService implements CleaningTemplateService 
   ): Promise<PublishedCleaningTemplate> {
     ensureAdmin(actor);
     const slots = normalizedSlots(input.slots);
+    const durationMinutes = input.durationMinutes ?? null;
     const fingerprint = {
       command: 'cleaning_template.publish_checkout',
       roomTypeCode: input.roomTypeCode,
       cleaningKind: input.cleaningKind,
       expectedVersion: input.expectedVersion,
-      durationMinutes: input.durationMinutes,
+      durationMinutes,
       slots
     };
     const { data, error } = await this.clients.admin.rpc('publish_checkout_cleaning_template', {
@@ -249,7 +250,7 @@ export class SupabaseCleaningTemplateService implements CleaningTemplateService 
       p_session_id: sessionId(actor.accessToken),
       p_room_type_code: input.roomTypeCode,
       p_expected_version: input.expectedVersion,
-      p_duration_minutes: input.durationMinutes,
+      p_duration_minutes: durationMinutes,
       p_slots: slots,
       p_idempotency_key: input.idempotencyKey,
       p_request_hash: requestHash(fingerprint)

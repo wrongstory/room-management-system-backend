@@ -205,9 +205,11 @@ function publishedProjection(value: unknown, roomTypeCode: RoomTypeCode) {
     !Number.isSafeInteger(row.version) || (row.version as number) < 7 ||
     (row.version as number) > 2_147_483_647 ||
     row.status !== "published" ||
-    !Number.isSafeInteger(row.durationMinutes) ||
-    (row.durationMinutes as number) < 1 ||
-    (row.durationMinutes as number) > 10_080 ||
+    (row.durationMinutes !== null && (
+      !Number.isSafeInteger(row.durationMinutes) ||
+      (row.durationMinutes as number) < 1 ||
+      (row.durationMinutes as number) > 10_080
+    )) ||
     !isStrictRfc3339(row.publishedAt) ||
     !isStrictRfc3339(row.createdAt)
   ) {
@@ -323,7 +325,7 @@ export async function cleaningTemplates(
   }
   if (url.search) invalid();
   const body = await readJsonBody(request);
-  const expectedKeys = [
+  const allowedKeys = [
     "roomTypeCode",
     "cleaningKind",
     "expectedVersion",
@@ -331,28 +333,33 @@ export async function cleaningTemplates(
     "slots",
   ];
   if (
-    Object.keys(body).some((key) => !expectedKeys.includes(key)) ||
-    expectedKeys.some((key) => !Object.hasOwn(body, key)) ||
+    Object.keys(body).some((key) => !allowedKeys.includes(key)) ||
+    ["roomTypeCode", "cleaningKind", "expectedVersion", "slots"].some((key) =>
+      !Object.hasOwn(body, key)
+    ) ||
     typeof body.roomTypeCode !== "string" ||
     !roomTypeCodes.includes(body.roomTypeCode as RoomTypeCode) ||
     body.cleaningKind !== "checkout" ||
     !Number.isSafeInteger(body.expectedVersion) ||
     (body.expectedVersion as number) < 0 ||
     (body.expectedVersion as number) > 2_147_483_647 ||
-    !Number.isSafeInteger(body.durationMinutes) ||
-    (body.durationMinutes as number) < 1 ||
-    (body.durationMinutes as number) > 10_080
+    (body.durationMinutes !== undefined && body.durationMinutes !== null && (
+      !Number.isSafeInteger(body.durationMinutes) ||
+      (body.durationMinutes as number) < 1 ||
+      (body.durationMinutes as number) > 10_080
+    ))
   ) {
     invalid();
   }
   const roomTypeCode = body.roomTypeCode as RoomTypeCode;
   const slots = normalizeSlots(body.slots, roomTypeCode);
+  const durationMinutes = body.durationMinutes ?? null;
   const fingerprint = {
     command: "cleaning_template.publish_checkout",
     roomTypeCode,
     cleaningKind: "checkout",
     expectedVersion: body.expectedVersion,
-    durationMinutes: body.durationMinutes,
+    durationMinutes,
     slots,
   };
   const { data, error } = await clients.admin.rpc(
@@ -362,7 +369,7 @@ export async function cleaningTemplates(
       p_session_id: verifiedRequestSessionId(request),
       p_room_type_code: roomTypeCode,
       p_expected_version: body.expectedVersion,
-      p_duration_minutes: body.durationMinutes,
+      p_duration_minutes: durationMinutes,
       p_slots: slots,
       p_idempotency_key: idempotencyKey(request),
       p_request_hash: await requestHash(fingerprint),

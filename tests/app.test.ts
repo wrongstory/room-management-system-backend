@@ -166,7 +166,7 @@ function services(): AppServices {
         id: '54000000-0000-4000-8000-000000000001',
         version: 7,
         status: 'published' as const,
-        durationMinutes: input.durationMinutes,
+        durationMinutes: input.durationMinutes ?? null,
         slots: input.slots,
         publishedAt: '2026-09-14T00:00:00.000Z',
         createdAt: '2026-09-14T00:00:00.000Z'
@@ -582,8 +582,7 @@ describe('application', () => {
         'idempotency-key': 'cleaning-template-publish-0001'
       },
       payload: {
-        roomTypeCode: 'standard', cleaningKind: 'checkout', expectedVersion: 0,
-        durationMinutes: 60, slots
+        roomTypeCode: 'standard', cleaningKind: 'checkout', expectedVersion: 0, slots
       }
     });
     expect(published.statusCode).toBe(201);
@@ -591,7 +590,11 @@ describe('application', () => {
     expect(published.json().template).toMatchObject({ version: 7, status: 'published' });
     expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'admin' }),
-      expect.objectContaining({ roomTypeCode: 'standard', idempotencyKey: 'cleaning-template-publish-0001' })
+      expect.objectContaining({
+        roomTypeCode: 'standard',
+        durationMinutes: null,
+        idempotencyKey: 'cleaning-template-publish-0001'
+      })
     );
 
     const firstSlot = slots[0];
