@@ -30,11 +30,11 @@ Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있�
 
 GitHub source 정본은 #165가 병합된 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`이지만, production Edge는 아직 OpenAPI `0.3.0` 109 paths / 117 operations와 55 migrations를 사용한다. #156 청소 템플릿 API까지 배포됐지만 네 객실 유형의 checkout template은 아직 게시되지 않았다. #165의 `durationMinutes` 선택화는 production 56번째 migration·병합된 `main`의 `api` 재배포·운영 template 게시와 예약 smoke 전에는 운영에서 활성화하지 않는다.
 
-### #131/#140 객실 PIN source 계약
+### #131/#140/#169 객실 PIN source 계약
 
-source OpenAPI에는 prepare/confirm/rollback/reveal과 admin 초기화 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+source OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
 
-Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 실제 초기 숫자는 배포 secret이므로 프런트가 보유·전송하지 않는다. 이 기능들은 production OpenAPI에 각 path가 나타날 때까지 켜지 않는다.
+Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 서버가 batch-unique 4자리 값을 생성한다. 응답의 `generatedPins`를 객실별로 표시하고 현장 도어락 적용 후 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 해당 `pinVersion`을 보낸다. 확인 성공 전에는 mismatch 경고와 체크인 차단을 유지하고 메이드에게 표시하지 않는다. 이 기능들은 production OpenAPI에 각 path가 나타날 때까지 켜지 않는다.
 
 ## 2. 로컬 백엔드 준비
 

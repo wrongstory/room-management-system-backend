@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 109:
-        raise RuntimeError("전체 source OpenAPI path 수가 109가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 110:
+        raise RuntimeError("전체 source OpenAPI path 수가 110이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 117:
-        raise RuntimeError("전체 source OpenAPI operation 수가 117이 아닙니다.")
+    if operation_count != 118:
+        raise RuntimeError("전체 source OpenAPI operation 수가 118이 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -140,10 +140,14 @@ def main() -> None:
             package / "api" / "rooms" / "confirm_room_pin_change.py",
             package / "api" / "rooms" / "rollback_room_pin_change.py",
             package / "api" / "rooms" / "reveal_room_pin.py",
+            package / "api" / "rooms" / "confirm_generated_room_pin.py",
             package / "api" / "rooms" / "get_room_pin_sheet_sync_status.py",
             package / "api" / "rooms" / "request_room_pin_sheet_full_resync.py",
             package / "models" / "room_pin_change_prepare_request.py",
             package / "models" / "room_pin_reveal.py",
+            package / "models" / "generated_room_pin_confirm_request.py",
+            package / "models" / "generated_room_pin_confirmation.py",
+            package / "models" / "generated_room_pin_confirmation_envelope.py",
             package / "models" / "room_pin_sheet_operator_status.py",
             package / "models" / "room_pin_sheet_full_resync_request.py",
             package / "models" / "room_pin_sheet_full_resync_accepted.py",

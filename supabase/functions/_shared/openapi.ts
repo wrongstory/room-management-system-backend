@@ -1159,7 +1159,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 66,
+              maxItems: 68,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -3624,9 +3624,9 @@ export const openApiDocument = {
       post: {
         tags: ["Rooms"],
         operationId: "bootstrapRoomPins",
-        summary: "누락된 객실 current PIN 암호화 초기화",
+        summary: "누락된 객실 initial PIN 자동 생성",
         description:
-          "active business admin 전용 원자적 bounded command입니다. request body로 PIN을 받지 않고 배포 환경의 ROOM_PIN_INITIAL_DIGITS secret을 사용합니다. current PIN이 없고 unresolved 물리 변경도 없는 객실만 한 번에 최대 25실씩 version 1로 초기화합니다. initialized는 이 transaction에서 신규 PIN 원장 전체가 확정된 객실이고 skipped는 기존 current 또는 unresolved 물리 변경을 보존한 객실이며 오류 은폐용이 아닙니다. DB validation 오류는 batch 전체를 rollback하지만 timeout·응답 유실만으로 rollback을 단정할 수 없으므로 같은 Idempotency-Key로 최초 완료 receipt를 확인합니다. 기존 current PIN이나 mismatch를 덮지 않으며 응답·로그·감사·알림에는 PIN 또는 envelope가 포함되지 않습니다.",
+          "active business admin 전용 원자적 bounded command입니다. 서버 CSPRNG가 batch 안에서 중복되지 않는 4자리 PIN을 생성하고 current PIN이 없으며 unresolved 물리 변경도 없는 객실만 최대 25실씩 version 1 mismatch 상태로 초기화합니다. initialized는 이 transaction에서 신규 PIN 원장 전체가 확정된 객실이고 skipped는 기존 current 또는 unresolved 물리 변경을 보존한 객실이며 오류 은폐용이 아닙니다. 생성 credential은 관리자 전용 30초 reveal lease와 no-store 응답으로만 반환되며 DB receipt·로그·감사·알림에는 평문이나 envelope를 저장하지 않습니다. 응답 유실 시 같은 Idempotency-Key로 receipt를 재생하고 아직 현장 확인 전인 generated PIN을 다시 열람할 수 있습니다. 현장 도어락 설정 후 generated confirm을 완료해야 verified 및 Sheet 동기화 상태가 됩니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -3640,7 +3640,8 @@ export const openApiDocument = {
         },
         responses: {
           "200": {
-            description: "PIN 원문이 없는 bounded 초기화 결과",
+            description:
+              "30초 표시용 generated credential을 포함한 bounded 초기화 결과",
             headers: { "Cache-Control": noStoreHeader },
             content: {
               "application/json": {
@@ -3656,6 +3657,48 @@ export const openApiDocument = {
           "409": errorResponse,
           "500": errorResponse,
           "503": errorResponse,
+        },
+      },
+    },
+    "/v1/rooms/{roomId}/pin/generated/confirm": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "confirmGeneratedRoomPin",
+        summary: "자동 생성 PIN 현장 적용 확인",
+        description:
+          "active business admin이 generated PIN을 실제 도어락에 설정한 뒤 호출합니다. current version과 generated-pending mismatch를 CAS로 재검증하고 verified sync event와 Sheet outbox를 한 transaction에 기록합니다. 같은 Idempotency-Key 재시도는 최초 confirmation receipt를 반환합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [roomIdParameter(), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/GeneratedRoomPinConfirmRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "현장 적용 확인 결과",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref:
+                    "#/components/schemas/GeneratedRoomPinConfirmationEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
         },
       },
     },
@@ -5116,6 +5159,8 @@ export const openApiDocument = {
           "PIN_CHANGE_LEASE_EXPIRED",
           "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
           "PIN_REVEAL_AUTHORIZATION_CHANGED",
+          "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+          "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
           "ROOM_PIN_UNCONFIGURED",
           "ROOM_PIN_SHEET_OPERATOR_REQUIRED",
           "ROOM_PIN_SHEET_NOT_CONFIGURED",
@@ -5421,6 +5466,8 @@ export const openApiDocument = {
           "room.pin_change_prepared",
           "room.pin_change_confirmed",
           "room.pin_mismatch_resolved",
+          "room.pin_generated",
+          "room.generated_pin_confirmed",
           "room_pin_sheet.full_resync_requested",
           "room_pin_sheet.full_resync_succeeded",
           "submission.bomb_reported",
@@ -7911,6 +7958,7 @@ export const openApiDocument = {
           "skippedCount",
           "remainingCount",
           "completedAt",
+          "generatedPins",
         ],
         properties: {
           initializedRoomIds: {
@@ -7931,9 +7979,16 @@ export const openApiDocument = {
           skippedCount: { type: "integer", minimum: 0, maximum: 25 },
           remainingCount: { type: "integer", minimum: 0, maximum: 121 },
           completedAt: { type: "string", format: "date-time" },
+          generatedPins: {
+            type: "array",
+            maxItems: 25,
+            items: { $ref: "#/components/schemas/RoomPinReveal" },
+            description:
+              "관리자에게만 30초 동안 표시할 generated credential. initializedRoomIds와 같은 객실 집합이며 순서는 보장하지 않습니다.",
+          },
         },
         description:
-          "PIN, credential, ciphertext 또는 provider 정보가 없는 원자적 초기화 결과입니다. DB validation 실패는 성공 응답의 skipped가 아니며 전체 batch가 rollback됩니다. timeout·응답 유실 뒤에는 같은 Idempotency-Key로 완료 receipt를 확인합니다.",
+          "generatedPins 외에는 PIN, ciphertext 또는 provider 정보가 없는 원자적 초기화 결과입니다. generatedPins는 no-store 응답 전용이며 DB receipt에는 포함되지 않고, DB validation 실패는 성공 응답의 skipped가 아니며 전체 batch가 rollback됩니다.",
       },
       RoomPinBootstrapEnvelope: {
         type: "object",
@@ -7941,6 +7996,35 @@ export const openApiDocument = {
         required: ["bootstrap"],
         properties: {
           bootstrap: { $ref: "#/components/schemas/RoomPinBootstrapResult" },
+        },
+      },
+      GeneratedRoomPinConfirmRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedPinVersion"],
+        properties: {
+          expectedPinVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      GeneratedRoomPinConfirmation: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomId", "pinVersion", "status", "confirmedAt"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          pinVersion: { type: "integer", minimum: 1 },
+          status: { type: "string", enum: ["verified"] },
+          confirmedAt: { type: "string", format: "date-time" },
+        },
+      },
+      GeneratedRoomPinConfirmationEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["confirmation"],
+        properties: {
+          confirmation: {
+            $ref: "#/components/schemas/GeneratedRoomPinConfirmation",
+          },
         },
       },
       RoomPinChangeResult: {

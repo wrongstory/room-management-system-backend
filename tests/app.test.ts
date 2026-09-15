@@ -120,7 +120,20 @@ function services(): AppServices {
         initializedCount: 1,
         skippedCount: 0,
         remainingCount: 120,
-        completedAt: '2026-09-13T00:00:00.000Z'
+        completedAt: '2026-09-13T00:00:00.000Z',
+        generatedPins: [{
+          roomId: '11111111-1111-4111-8111-111111111111',
+          credential: '117-0042',
+          pinVersion: 1,
+          clearAfterSeconds: 30,
+          expiresAt: '2026-09-13T00:00:30.000Z'
+        }]
+      })),
+      confirmGeneratedPin: vi.fn(async () => ({
+        roomId: '11111111-1111-4111-8111-111111111111',
+        pinVersion: 1,
+        status: 'verified' as const,
+        confirmedAt: '2026-09-13T00:01:00.000Z'
       }))
     },
     reservations: {
@@ -246,7 +259,7 @@ describe('application', () => {
     await app.close();
   });
 
-  it('bootstraps a bounded initial PIN batch without returning PIN material', async () => {
+  it('returns generated PIN material only in a no-store bootstrap response', async () => {
     const appServices = services();
     const app = await buildApp({ env, services: appServices, logger: false });
     const response = await app.inject({
@@ -268,13 +281,48 @@ describe('application', () => {
         initializedCount: 1,
         skippedCount: 0,
         remainingCount: 120,
-        completedAt: '2026-09-13T00:00:00.000Z'
+        completedAt: '2026-09-13T00:00:00.000Z',
+        generatedPins: [{
+          roomId: '11111111-1111-4111-8111-111111111111',
+          credential: '117-0042',
+          pinVersion: 1,
+          clearAfterSeconds: 30,
+          expiresAt: '2026-09-13T00:00:30.000Z'
+        }]
       }
     });
-    expect(JSON.stringify(response.json())).not.toMatch(/credential|pinDigits|ciphertext/i);
+    expect(response.json().bootstrap.generatedPins[0].credential).toBe('117-0042');
+    expect(JSON.stringify(response.json())).not.toMatch(/ciphertext|nonce|authTag/i);
     expect(appServices.rooms.bootstrapPins).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'admin' }),
       { limit: 1, idempotencyKey: 'room-pin-bootstrap-test-0001' }
+    );
+    await app.close();
+  });
+
+  it('confirms a generated PIN only through the admin no-store route', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/pin/generated/confirm',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'generated-pin-confirm-test-0001'
+      },
+      payload: { expectedPinVersion: 1 }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json().confirmation).toMatchObject({ pinVersion: 1, status: 'verified' });
+    expect(appServices.rooms.confirmGeneratedPin).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      {
+        roomId: '11111111-1111-4111-8111-111111111111',
+        expectedPinVersion: 1,
+        idempotencyKey: 'generated-pin-confirm-test-0001'
+      }
     );
     await app.close();
   });

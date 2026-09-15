@@ -314,6 +314,18 @@ export function roomDatabaseError(
       "PIN 응답 전 권한 또는 업무 상태가 변경되었습니다.",
     ],
     [
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+      409,
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+      "생성된 PIN의 초기 열람 가능 상태가 아닙니다.",
+    ],
+    [
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
+      409,
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
+      "생성된 PIN을 물리 도어락에 확인할 수 있는 상태가 아닙니다.",
+    ],
+    [
       "PIN_ACCESS_LEASE_REQUIRED",
       403,
       "PIN_ACCESS_LEASE_REQUIRED",
