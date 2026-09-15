@@ -86,8 +86,8 @@ PIN version·암호문·평문, 고객명·전화번호·session/token, 알림 b
 존재하지 않습니다. 두 event는 production
 allowlist에 반영됐습니다. #156은 production runtime의 `expectedMigration`을 55번째
 `cleaning_template_admin_api`까지 전진시켰습니다. #165 source는 이를 56번째
-`cleaning_template_duration_optional`로 전진시키며, production 56번 적용 전에는 새 source runtime에서
-drift가 `behind`인 것이 정상입니다.
+`cleaning_template_duration_optional`로, #170 source는 57번째 `inspection_queue_pagination`으로
+전진시킵니다. production 57번 적용 전에는 새 source runtime에서 drift가 `behind`인 것이 정상입니다.
 
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,

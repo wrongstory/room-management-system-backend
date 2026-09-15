@@ -3,6 +3,7 @@ import {
   decideBombRoom,
   decideSubmission,
   getSubmission,
+  listPendingInspections,
   listSubmissions,
   reportBombRoom,
   submissionDatabaseError,
@@ -17,6 +18,10 @@ function assert(condition: unknown, message: string): asserts condition {
 const attemptId = "30000000-0000-4000-8000-000000000001";
 const submissionId = "40000000-0000-4000-8000-000000000001";
 const photoId = "50000000-0000-4000-8000-000000000001";
+const sessionId = "60000000-0000-4000-8000-000000000099";
+const accessToken = `header.${
+  btoa(JSON.stringify({ session_id: sessionId }))
+}.signature`;
 const maid: EdgeActor = {
   authUserId: "10000000-0000-4000-8000-000000000001",
   profileId: "20000000-0000-4000-8000-000000000001",
@@ -33,9 +38,11 @@ const admin: EdgeActor = {
 function request(path: string, body?: unknown, key = "submission-safe-key-01") {
   return new Request(`https://example.invalid${path}`, {
     method: body === undefined ? "GET" : "POST",
-    headers: body === undefined
-      ? undefined
-      : { "content-type": "application/json", "idempotency-key": key },
+    headers: body === undefined ? { authorization: `Bearer ${accessToken}` } : {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+      "idempotency-key": key,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
@@ -334,4 +341,83 @@ Deno.test("admin inspection queue exposes only immutable safe review context", a
     !JSON.stringify(maidResult).includes("roomNumber"),
     "maid history strips context",
   );
+});
+
+Deno.test("admin inspection queue emits a signed bounded continuation", async () => {
+  const previous = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET");
+  Deno.env.set(
+    "INSPECTION_CURSOR_HMAC_SECRET",
+    "inspection-edge-cursor-secret-tests-123456",
+  );
+  try {
+    const submittedAt = "2026-09-09T03:00:00Z";
+    const firstPage = clientsFor({
+      submissions: [{
+        id: submissionId,
+        attemptId,
+        version: 1,
+        status: "submitted",
+        submittedBy: maid.profileId,
+        submittedAt,
+        currentRevision: 1,
+        current: true,
+        photoCount: 1,
+        candleCount: 0,
+        reviewContext: {
+          cleaningTargetId: "70000000-0000-4000-8000-000000000001",
+          cleaningKind: "additional",
+          roomNumber: "101",
+          serviceDate: "2026-09-09",
+          maidProfileId: maid.profileId,
+        },
+      }],
+      hasMore: true,
+      lastSubmittedAt: submittedAt,
+      lastId: submissionId,
+    });
+    const first = await listPendingInspections(
+      request("/v1/inspections?limit=1"),
+      firstPage.clients,
+      admin,
+    );
+    assert(first.hasMore === true, "continuation is explicit");
+    assert(typeof first.nextCursor === "string", "signed cursor emitted");
+    assert(
+      firstPage.calls[0]?.args.p_session_id === sessionId,
+      "session bound RPC",
+    );
+    const secondPage = clientsFor({
+      submissions: [],
+      hasMore: false,
+      lastSubmittedAt: null,
+      lastId: null,
+    });
+    const second = await listPendingInspections(
+      request(`/v1/inspections?limit=1&cursor=${first.nextCursor}`),
+      secondPage.clients,
+      admin,
+    );
+    assert(
+      second.hasMore === false && second.nextCursor === null,
+      "final page has no continuation",
+    );
+    assert(
+      secondPage.calls[0]?.args.p_after_submitted_at === submittedAt &&
+        secondPage.calls[0]?.args.p_after_id === submissionId,
+      "keyset position forwarded",
+    );
+    const altered = `${first.nextCursor.slice(0, -1)}A`;
+    const denied = await failure(() =>
+      listPendingInspections(
+        request(`/v1/inspections?cursor=${altered}`),
+        clientsFor(null).clients,
+        admin,
+      )
+    );
+    assert(denied.code === "INVALID_INSPECTION_CURSOR", "tamper rejected");
+  } finally {
+    if (previous === undefined) {
+      Deno.env.delete("INSPECTION_CURSOR_HMAC_SECRET");
+    } else Deno.env.set("INSPECTION_CURSOR_HMAC_SECRET", previous);
+  }
 });

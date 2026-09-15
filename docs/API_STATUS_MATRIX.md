@@ -614,7 +614,8 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | 사진 업로드 작업 원장·권한 계약 | production schema 반영 | #83 / PR #86 | 실제 Google/HTTP/purge activation 별도 |
 | [x] | Google Drive 업로드·조회 | production source 반영 | #9 / #84 | OAuth·Google hosted positive smoke 미완료 |
 | [x] | 7일 영구삭제·orphan 운영 worker | production bundle 반영 | #9 / #85 / PR #90 | provider/Cron hosted purge activation 미완료 |
-| [x] | 제출·검수·재청소 | production source 반영 | #31 / PR #91 | hosted role/positive mutation smoke 미확인; pagination P2 후속 |
+| [x] | 제출·검수·재청소 | production source 반영 | #31 / PR #91 | hosted role/positive mutation smoke 미확인 |
+| [x] | 검수 대기열 pagination·응답 상한 | source 계약 | #170 | 57 migrations / 109 paths / 117 operations; production 승격·hosted admin read smoke 미확인 |
 | [x] | earning/payroll 주차 조회·PAYING 시작 | production source 반영 | #8 / #93 / PR #95 | hosted role/positive mutation smoke 미확인 |
 | [x] | payroll pagination·응답 크기 상한 | production source 반영 | #96 / PR #97 | hosted role read/mutation smoke 미확인; 비차단 P2 2건 후속 |
 | [x] | complaint·appeal·correction | production source 반영 | #8 / #94 / #100 / PR #104 | hosted role/positive mutation smoke 미확인 |
@@ -643,13 +644,15 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | `POST /v1/attempts/{attemptId}/bomb-room-reports` | own active maid | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; hosted positive mutation smoke 미확인 |
 | [x] | `GET /v1/attempts/{attemptId}/submissions` | own maid | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; hosted maid read smoke 미확인 |
 | [x] | `POST /v1/attempts/{attemptId}/submissions` | own maid / exact `upload_submit` capability | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; hosted positive mutation smoke 미확인 |
-| [x] | `GET /v1/inspections` | business admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; hosted admin read smoke 미확인 |
+| [x] | `GET /v1/inspections` | business admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | #170 keyset cursor·최대 100건·128 KiB/no-store source 계약; production 승격·hosted admin read smoke 미확인 |
 | [x] | `GET /v1/inspections/{submissionId}` | business admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; hosted admin read smoke 미확인 |
 | [x] | `POST /v1/inspections/{submissionId}/bomb-room-decision` | business admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; hosted positive mutation smoke 미확인 |
 | [x] | `POST /v1/inspections/{submissionId}/approve` | business admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; hosted positive mutation smoke 미확인 |
 | [x] | `POST /v1/inspections/{submissionId}/reject` | business admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; hosted positive mutation smoke 미확인 |
 
 - [x] append-only `submission_inspection_reclean` migration 및 8개 Fastify/Edge operation 구현
+- [x] append-only `inspection_queue_pagination` migration, live session guard, `(submitted_at,id)` index/keyset, actor-bound signed cursor 구현
+- [x] page 기본 50·최대 100건, Fastify/Edge no-store 및 128 KiB fail-closed 응답 계약
 - [x] role/capability/CAS/idempotency/concurrency/redaction 로컬 검증
 - [x] field_completed 단독 상태에서 submission/readiness/earning 0 유지
 - [x] 폭탄방 report·증빙은 최초 immutable submission에 seal되고 다른 version으로 이동 금지

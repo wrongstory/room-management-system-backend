@@ -1170,6 +1170,14 @@ stayover/additional/reclean 등 비-checkout row는 constraint로 non-null을 �
 값이 있으면 기존 1..10,080 범위를 그대로 검증한다. 기존 template·planned target snapshot·audit·receipt는
 backfill하거나 다시 쓰지 않는다.
 
+### #170 검수 대기열 bounded pagination
+
+`20260916070500_inspection_queue_pagination.sql`은 기존 56개 migration을 수정하지 않는 57번째 append-only
+migration이다. current `submitted` 제출의 `(submitted_at,id)` partial index와 같은 tuple의 oldest-first keyset을
+사용한다. page는 기본 50·최대 100건이며 service-role RPC 안에서도 actor profile과 live `auth.sessions`를 함께
+검증한다. cursor 서명·actor/role/stream/sort scope와 128 KiB HTTP 상한은 Fastify/Edge adapter가 동일하게
+적용하며 기존 immutable submission, decision, earning 원장은 다시 쓰지 않는다.
+
 실제 청소 수행시간은 `cleaning_attempts.started_at`과 `field_completed_at`의 차이이며, turnaround는 실제
 checkout 시각부터 field completion까지다. 배정 preview는 `assignment_duration_policy_versions`의 confirmed
 정책만 사용한다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도

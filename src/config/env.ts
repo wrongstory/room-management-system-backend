@@ -36,6 +36,10 @@ const envSchema = z.object({
     (value) => Buffer.byteLength(value, 'utf8') >= 32,
     '알림 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
   ),
+  INSPECTION_CURSOR_HMAC_SECRET: z.string().trim().refine(
+    (value) => Buffer.byteLength(value, 'utf8') >= 32,
+    '검수 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
+  ),
   WEB_PUSH_SUBSCRIPTION_KEY_BASE64: z.string().min(1),
   WEB_PUSH_SUBSCRIPTION_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/),
   WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: z.string().default('{}').transform((value) => value.trim() || '{}'),
@@ -117,7 +121,8 @@ const envSchema = z.object({
     roomPinKeyringSecrets=[...seen];
     const otherPurposeSecrets=[env.SUPABASE_PUBLISHABLE_KEY,env.SUPABASE_SECRET_KEY,env.ACCOUNT_PHONE_PEPPER,
       env.RESERVATION_PII_KEY_BASE64,env.RESERVATION_GUEST_NAME_PEPPER,env.PAYROLL_CURSOR_HMAC_SECRET,
-      env.NOTIFICATION_CURSOR_HMAC_SECRET,env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64,env.WEB_PUSH_BINDING_DIGEST_SECRET,
+      env.NOTIFICATION_CURSOR_HMAC_SECRET,env.INSPECTION_CURSOR_HMAC_SECRET,
+      env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64,env.WEB_PUSH_BINDING_DIGEST_SECRET,
       env.GOOGLE_DRIVE_CLIENT_ID,env.GOOGLE_DRIVE_CLIENT_SECRET,env.GOOGLE_DRIVE_REFRESH_TOKEN,
       env.GOOGLE_DRIVE_ROOT_FOLDER_ID,...reservationPiiKeyringSecrets,...webPushKeyringSecrets];
     if(roomPinKeyringSecrets.some((secret)=>otherPurposeSecrets.includes(secret))) throw new Error();
@@ -131,6 +136,7 @@ const envSchema = z.object({
     env.ACCOUNT_PHONE_PEPPER,
     env.RESERVATION_PII_KEY_BASE64,
     env.RESERVATION_GUEST_NAME_PEPPER,
+    env.INSPECTION_CURSOR_HMAC_SECRET,
     env.GOOGLE_DRIVE_CLIENT_ID,
     env.GOOGLE_DRIVE_CLIENT_SECRET,
     env.GOOGLE_DRIVE_REFRESH_TOKEN,
@@ -166,10 +172,36 @@ const envSchema = z.object({
     });
   }
 
+  if ([
+    env.SUPABASE_PUBLISHABLE_KEY,
+    env.SUPABASE_SECRET_KEY,
+    env.ACCOUNT_PHONE_PEPPER,
+    env.RESERVATION_PII_KEY_BASE64,
+    env.RESERVATION_GUEST_NAME_PEPPER,
+    env.PAYROLL_CURSOR_HMAC_SECRET,
+    env.NOTIFICATION_CURSOR_HMAC_SECRET,
+    env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64,
+    env.WEB_PUSH_BINDING_DIGEST_SECRET,
+    env.GOOGLE_DRIVE_CLIENT_ID,
+    env.GOOGLE_DRIVE_CLIENT_SECRET,
+    env.GOOGLE_DRIVE_REFRESH_TOKEN,
+    env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
+    ...reservationPiiKeyringSecrets,
+    ...roomPinKeyringSecrets,
+    ...webPushKeyringSecrets
+  ].includes(env.INSPECTION_CURSOR_HMAC_SECRET)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['INSPECTION_CURSOR_HMAC_SECRET'],
+      message: '검수 cursor HMAC 비밀값은 다른 key/pepper와 분리해야 합니다.'
+    });
+  }
+
   const webPushSecrets = [env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64, env.WEB_PUSH_BINDING_DIGEST_SECRET, ...webPushKeyringSecrets];
   const existingSecrets = [env.SUPABASE_PUBLISHABLE_KEY,env.SUPABASE_SECRET_KEY,env.ACCOUNT_PHONE_PEPPER,
     env.RESERVATION_PII_KEY_BASE64,env.RESERVATION_GUEST_NAME_PEPPER,env.PAYROLL_CURSOR_HMAC_SECRET,
-    env.NOTIFICATION_CURSOR_HMAC_SECRET,env.GOOGLE_DRIVE_CLIENT_ID,env.GOOGLE_DRIVE_CLIENT_SECRET,
+    env.NOTIFICATION_CURSOR_HMAC_SECRET,env.INSPECTION_CURSOR_HMAC_SECRET,
+    env.GOOGLE_DRIVE_CLIENT_ID,env.GOOGLE_DRIVE_CLIENT_SECRET,
     env.GOOGLE_DRIVE_REFRESH_TOKEN,env.GOOGLE_DRIVE_ROOT_FOLDER_ID,...reservationPiiKeyringSecrets,
     ...roomPinKeyringSecrets];
   if (webPushSecrets.some((value,index) => existingSecrets.includes(value) || webPushSecrets.indexOf(value)!==index)) {

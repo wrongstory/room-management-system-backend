@@ -8,7 +8,7 @@ import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError, requireDeveloper } from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "cleaning_template_duration_optional";
+export const expectedMigrationName = "inspection_queue_pagination";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -52,6 +52,7 @@ const secretConfigurationAllowlist = [
   "RESERVATION_GUEST_NAME_PEPPER",
   "PAYROLL_CURSOR_HMAC_SECRET",
   "NOTIFICATION_CURSOR_HMAC_SECRET",
+  "INSPECTION_CURSOR_HMAC_SECRET",
   "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
   "SCHEDULER_INVOKE_SECRET",
   "CORS_ORIGINS",

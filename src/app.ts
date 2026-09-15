@@ -153,7 +153,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
       cleaningTemplates: new SupabaseCleaningTemplateService(clients)
     };
-    submissionService ??= new SupabaseSubmissionService(clients);
+    submissionService ??= new SupabaseSubmissionService(
+      clients,
+      options.env.INSPECTION_CURSOR_HMAC_SECRET
+    );
   }
 
   await app.register(helmet, { global: true });
