@@ -1020,6 +1020,18 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
     "strict request and slots",
   );
   assert(
+    !(schemas.PublishCleaningTemplateRequest.required as readonly string[])
+      .includes(
+        "durationMinutes",
+      ) &&
+      schemas.PublishCleaningTemplateRequest.properties.durationMinutes
+        .anyOf.some((item: { type?: string }) => item.type === "null") &&
+      schemas.PublishedCleaningTemplate.properties.durationMinutes.anyOf.some(
+        (item: { type?: string }) => item.type === "null",
+      ),
+    "template duration is optional/null and never inferred",
+  );
+  assert(
     schemas.CleaningTemplateCatalog.properties.roomTypes.minItems === 4 &&
       schemas.CleaningTemplateCatalog.properties.roomTypes.maxItems === 4,
     "all room types returned",

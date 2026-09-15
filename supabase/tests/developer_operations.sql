@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_template_admin_api'
+    'cleaning_template_duration_optional'
   ) ->> 'currentMigration',
-  'cleaning_template_admin_api',
+  'cleaning_template_duration_optional',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_template_admin_api'
+    'cleaning_template_duration_optional'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'cleaning_template_admin_api';
+where name = 'cleaning_template_duration_optional';
 
 delete from supabase_migrations.schema_migrations
-where name = 'cleaning_template_admin_api';
+where name = 'cleaning_template_duration_optional';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_template_admin_api'
+    'cleaning_template_duration_optional'
   ) ->> 'currentMigration',
-  'checkout_not_completed_incident_workflow',
-  'database status exposes migration 54 when migration 55 is absent'
+  'cleaning_template_admin_api',
+  'database status exposes migration 55 when migration 56 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_template_admin_api'
+    'cleaning_template_duration_optional'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 54 behind source migration 55'
+  'database status reports migration 55 behind source migration 56'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

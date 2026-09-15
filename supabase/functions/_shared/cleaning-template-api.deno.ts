@@ -156,6 +156,49 @@ Deno.test("cleaning template publish normalizes slots and hashes canonical paylo
   );
 });
 
+Deno.test("cleaning template publish accepts omitted duration without inventing a value", async () => {
+  const published = {
+    id: "30000000-0000-4000-8000-000000000001",
+    version: 7,
+    status: "published",
+    durationMinutes: null,
+    slots: slots().map((slot) => ({ ...slot, label: slot.label.trim() })),
+    publishedAt: "2030-01-01T00:00:00Z",
+    createdAt: "2030-01-01T00:00:00Z",
+  };
+  const withoutDuration = clients(published);
+  const withNull = clients(published);
+  const base = {
+    roomTypeCode: "standard",
+    cleaningKind: "checkout",
+    expectedVersion: 0,
+    slots: slots(),
+  };
+  const result = await cleaningTemplates(
+    request("POST", base),
+    withoutDuration.value,
+    admin,
+  );
+  await cleaningTemplates(
+    request("POST", { ...base, durationMinutes: null }),
+    withNull.value,
+    admin,
+  );
+  assert(
+    "durationMinutes" in result && result.durationMinutes === null,
+    "projection preserves an explicit unconfigured duration",
+  );
+  assert(
+    withoutDuration.calls[0]?.args.p_duration_minutes === null,
+    "RPC receives NULL rather than an inferred duration",
+  );
+  assert(
+    withoutDuration.calls[0]?.args.p_request_hash ===
+      withNull.calls[0]?.args.p_request_hash,
+    "omitted and explicit NULL normalize to one idempotency fingerprint",
+  );
+});
+
 Deno.test("cleaning template validation rejects malformed duplicate missing and role boundaries", async () => {
   const mock = clients({});
   const base = {

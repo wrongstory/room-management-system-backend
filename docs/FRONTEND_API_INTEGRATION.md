@@ -28,7 +28,7 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 현재 auth/accounts/객실 목록 중심의 부분 HTTP surface다. source에는 #43 developer operation과 #51~#53 가능일·예약·객실 상세/mutation path가 추가됐지만, 각 source가 release를 거쳐 production에 배포된 OpenAPI에 실제로 나타난 뒤에만 프론트 기능을 활성화한다.
+production Edge는 현재 `main@f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51` 기준 OpenAPI `0.3.0` 109 paths / 117 operations와 55 migrations를 사용한다. #156 청소 템플릿 API까지 배포됐지만 네 객실 유형의 checkout template은 아직 게시되지 않았다. #165의 `durationMinutes` 선택화는 별도 hotfix candidate이며, 최종 exact head의 required CI·독립 QA·`main` 병합·56번째 migration·production `api` 재배포·운영 template 게시와 예약 smoke 전에는 프론트 기능을 운영에서 활성화하지 않는다.
 
 ### #131/#140 객실 PIN source 계약
 
@@ -158,6 +158,9 @@ const idempotencyKey = crypto.randomUUID();
 | 처리 중 변경 요청 존재 | `PENDING_CHANGE_REQUEST_EXISTS` | 기존 pending 요청을 표시하고 중복 요청 금지 |
 | 예약·객실 동시 변경 | `STALE_VERSION`, `ROOM_STATE_CHANGED` | 예약·객실을 다시 조회하고 서버 version으로 사용자 재확인 |
 | 예약 일정 충돌 | `RESERVATION_OVERLAP` | 겹치는 예약을 표시하고 임의 자동 재시도 금지 |
+| 퇴실 청소 템플릿 미게시 | `CLEANING_TEMPLATE_NOT_CONFIGURED` | 예상시간 누락으로 해석하지 않고 해당 객실 유형의 게시된 checkout template 설정 안내 |
+| 같은 객실의 이전 수행 진행 중 | `PREVIOUS_ROOM_WORKFLOW_ACTIVE` | 기존 수행 상태를 다시 조회하고 종료·중단 처리 전 새 시작 금지 |
+| 고객 미퇴실 사건 처리 중 | `CHECKOUT_INCIDENT_OPEN` | 자동 해제하지 않고 사건 상태와 관리자 결정 결과를 다시 조회 |
 | 고객명 보호 설정 장애 | `RESERVATION_PII_*` | 평문 fallback 금지, requestId로 운영 확인 |
 
 ## 5. 역할별 화면 경계
@@ -218,6 +221,12 @@ const idempotencyKey = crypto.randomUUID();
 | 청소 요청 | `POST /v1/reservations/cleaning-requests` | 연박/추가 요청, 객실 version CAS |
 | 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel |
 | 예약 전이 수동 실행 | `POST /v1/reservations/transitions/process` | admin 운영 명령. scheduler secret endpoint와 별도 |
+| 퇴실 청소 템플릿 조회 | `GET /v1/cleaning-templates?cleaningKind=checkout` | `durationMinutes=null`을 미설정 선택값으로 표시하고 0분·1분으로 변환하지 않음 |
+| 퇴실 청소 템플릿 게시 | `POST /v1/cleaning-templates` | 사진 슬롯은 필수, `durationMinutes`는 선택. 모르면 생략하며 임의 기본값을 보내지 않음 |
+| 온라인 청소 시작 | `POST /v1/attempts/{attemptId}/start` | 최신 assignment/attempt version을 보내고 같은 객실 수행·미해결 사건 충돌은 서버 409를 최종 판정으로 사용 |
+| 고객 미퇴실 신고 | `POST /v1/attempts/{attemptId}/checkout-not-completed` | maid의 current/notified checkout attempt만 가능. 신고 뒤 관리자 확인 대기 상태 표시 |
+| 고객 미퇴실 사건 조회 | `GET /v1/checkout-incidents/{incidentId}` | admin 또는 사건에 연결된 maid만 조회. version과 impactFingerprint를 결정 요청에 재사용 |
+| 고객 미퇴실 사건 결정 | `POST /v1/checkout-incidents/{incidentId}/decision` | admin만 `EXTEND_CHECKOUT`, `CONFIRM_DEPARTED`, `FALSE_REPORT`; stale version/fingerprint면 재조회 |
 
 객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다. `pinSyncStatus=unconfigured|mismatch`는 별도 경고이며 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건으로 사용하지 않는다. 실제 체크인·PIN 접근 화면만 `verified` 전까지 차단한다.
 
@@ -228,6 +237,54 @@ const idempotencyKey = crypto.randomUUID();
 예약 목록에는 `guestName`이 없으며 UI가 이름을 표시해야 할 때만 단건 상세를 호출한다. 예약 응답의 `version`은 예약 변경 command의 `expectedVersion`으로 사용하고, command 응답에 `roomStateVersion`이 있으면 후속 객실 기준 command의 CAS 입력으로 사용한다. 고객명은 브라우저 저장소·analytics·오류 수집에 보존하지 않고, 상세 화면을 벗어나면 메모리 상태에서도 제거한다. 암호화 설정 장애에서 평문 저장이나 빈 이름으로 성공 처리하지 않는다.
 
 예약 전이 수동 실행의 `Idempotency-Key`에는 `reservation-scheduler-` 접두사를 사용하지 않는다. 이 namespace는 scheduler invocation 전용이며 수동 API는 `RESERVED_IDEMPOTENCY_KEY`로 fail-closed한다. 고객명은 원문과 NFKC·trim·공백 축약 결과가 모두 1~80자여야 하므로, 화면에서도 원문 80자 제한을 먼저 적용하되 서버 오류 코드를 최종 판정으로 사용한다.
+
+퇴실 청소 템플릿의 `durationMinutes`는 실제 청소 완료시간이나 배정 preview 계산값이 아니다. 실제 수행시간은
+메이드의 attempt 시작~현장완료 기록에서 계산하고, 배정 preview는 별도 confirmed duration policy만 사용한다.
+프런트는 duration 미확정 시 필드를 생략하거나 `null`로 보내며 55/65/70/80 같은 데모값을 자동 주입하지 않는다.
+
+### #165 예상시간 선택화 프론트 적용 체크리스트
+
+아래는 `makee-ham/room-management-system`에서 구현할 source 체크리스트다. 구현은 먼저 할 수 있지만 production 활성화는 이 절 마지막의 배포 gate를 통과한 뒤에만 한다.
+
+#### 타입·템플릿 관리자 화면
+
+- [ ] production 배포가 끝난 뒤 production Edge `/openapi.json`에서 타입을 다시 생성한다. candidate JSON이나 수기 interface를 운영 정본으로 고정하지 않는다.
+- [ ] `PublishCleaningTemplateRequest.durationMinutes`를 `number | null | undefined`, 게시·조회 응답을 `number | null`로 처리한다.
+- [ ] 예상시간 필수 표시와 필수 validation을 제거한다. 빈 값은 생략 또는 `null`로 보내며 두 입력은 같은 의미로 취급한다.
+- [ ] 양수 입력은 1~10080 범위를 유지하고, `null`을 0분·1분 또는 55/65/70/80분으로 치환하지 않는다.
+- [ ] 게시 상태에서 `null`은 `미설정(선택사항)`으로 표시한다. 사진 slot 수·필수 slot·`expectedVersion` CAS·`Idempotency-Key`는 기존 계약을 유지한다.
+
+#### 예약·청소 계획 화면
+
+- [ ] 게시된 checkout template과 유효한 사진 slot이 있으면 duration이 없어도 예약 생성·변경 요청을 보낸다. `CLEANING_TEMPLATE_NOT_CONFIGURED`는 duration 누락이 아니라 template 미게시로 안내한다.
+- [ ] 예약의 checkout 시각은 퇴실 청소의 시작 가능 시각이고, 다음 check-in 30분 전 등의 `dueAt`은 별도 업무 마감이다. 둘의 차이를 예상 청소시간으로 표시하지 않는다.
+- [ ] `durationMinutes=null`이고 `dueAt=null`인 checkout 계획에 임의 종료시각을 만들지 않는다.
+- [ ] 열린 checkout 계획이 있어도 수동 청소 계획 등록 자체를 프론트에서 막지 않는다. 명시된 두 구간의 충돌과 실제 시작 가능 여부는 서버 응답을 정본으로 사용한다.
+- [ ] 배정 preview의 확정 duration policy가 없다는 이유로 일반 예약·수동 계획·현장 workflow까지 비활성화하지 않는다.
+
+#### 메이드 수행·고객 미퇴실 화면
+
+- [ ] 청소 시작 가능 여부는 `POST /v1/attempts/{attemptId}/start` 결과로 판정한다. 로컬 타이머나 예상시간으로 자동 시작·자동 해제하지 않는다.
+- [ ] `PREVIOUS_ROOM_WORKFLOW_ACTIVE`이면 같은 객실의 현재 수행을, `CHECKOUT_INCIDENT_OPEN`이면 미해결 사건을 다시 조회하고 사용자가 임의로 우회하지 못하게 한다.
+- [ ] PIN 조회는 청소 시작이 아니다. 실제 수행시간은 `startedAt → fieldCompletedAt`으로 표시하고, 중단된 여러 attempt를 임의로 이어 붙이지 않는다.
+- [ ] 고객이 남아 있으면 `POST /v1/attempts/{attemptId}/checkout-not-completed`에 최신 executionVersion·assignment ID/revision과 `Idempotency-Key`를 보낸다.
+- [ ] 신고 뒤 `관리자 확인 대기`를 표시하고 이후 PIN 접근·시작·완료·제출 관련 동작은 최신 서버 상태에 따라 차단한다. 이미 화면에 표시된 PIN을 회수했다고 표현하지 않는다.
+
+#### 관리자 사건 처리·공통 오류
+
+- [ ] 사건 조회 응답의 `version`과 `impactFingerprint`를 그대로 결정 요청에 사용하고, `EXTEND_CHECKOUT`, `CONFIRM_DEPARTED`, `FALSE_REPORT`만 제공한다.
+- [ ] version/fingerprint 409에서는 자동 덮어쓰기하지 않고 사건을 다시 조회해 영향 범위를 관리자에게 다시 확인받는다.
+- [ ] 예약·배정·attempt·사건 409 후 관련 projection을 재조회한다. notification 문구나 브라우저의 이전 상태를 권한·성공의 근거로 사용하지 않는다.
+- [ ] timeout·응답 유실은 같은 body와 같은 `Idempotency-Key`로 결과를 확인한다. body를 바꾸면 새 key를 사용한다.
+- [ ] 오류 수집에는 allowlist code와 `requestId`만 남기고 token·PIN·고객명·전화번호·request body를 보내지 않는다.
+
+#### 프론트 회귀와 운영 활성화 gate
+
+- [ ] duration 생략과 명시적 `null` 게시, 조회의 `null` 보존, 양수 기존 입력을 모두 검증한다.
+- [ ] duration 없는 게시 template으로 예약 생성이 성공하고 planned checkout target이 생성되는 흐름을 검증한다.
+- [ ] 같은 객실 동시 시작은 정확히 한 요청만 성공하고, 미해결 고객 미퇴실 사건 중에는 시작·완료·제출이 성공으로 표시되지 않는지 검증한다.
+- [ ] #165 독립 QA P0/P1=0 → `main` 병합 → production 56번째 migration → 병합된 `main` exact source의 `api` 배포 → production OpenAPI nullable 의미 확인 → 네 template 게시 → 역할별 hosted smoke 순서가 끝난 뒤에만 기능 flag를 켠다.
+- [ ] OpenAPI 109 paths / 117 operations 개수만 보지 말고, 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인한다.
 
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
 

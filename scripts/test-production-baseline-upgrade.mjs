@@ -12,7 +12,7 @@ const supabaseCli = fileURLToPath(
 );
 const container = "supabase_db_room-management-system-backend";
 const baselineVersion = "20260831124140";
-const finalVersion = "20260914094126";
+const finalVersion = "20260915000628";
 const migrationPattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
 const fixtureUserIds = [
   "f0190000-0000-4000-8000-000000000101",
@@ -172,7 +172,7 @@ function assertHistory(actual, expected, label) {
 let passed = false;
 try {
   const expectedMigrations = migrationFiles();
-  assert(expectedMigrations.length === 55, "release candidate must contain exactly 55 migrations");
+  assert(expectedMigrations.length === 56, "release candidate must contain exactly 56 migrations");
   assert(
     expectedMigrations[18]?.version === baselineVersion &&
       expectedMigrations[18]?.name === "actor_activity_audit_contract",
@@ -180,8 +180,8 @@ try {
   );
   assert(
     expectedMigrations.at(-1)?.version === finalVersion &&
-      expectedMigrations.at(-1)?.name === "cleaning_template_admin_api",
-    "migration 55 must be cleaning_template_admin_api",
+      expectedMigrations.at(-1)?.name === "cleaning_template_duration_optional",
+    "migration 56 must be cleaning_template_duration_optional",
   );
 
   reset(baselineVersion);
@@ -201,11 +201,11 @@ try {
   const after = captureBaseline(shape);
   const afterComposite = compositeFingerprint(after);
   for (const [table, fingerprint] of Object.entries(before)) {
-    assert(after[table] === fingerprint, `migration 20 -> 55 changed ${table}`);
+    assert(after[table] === fingerprint, `migration 20 -> 56 changed ${table}`);
   }
   assert(
     beforeComposite === afterComposite,
-    "migration 20 -> 55 changed a pre-existing v19 domain or ledger row",
+    "migration 20 -> 56 changed a pre-existing v19 domain or ledger row",
   );
 
   const finalState = psql(`select concat_ws('|',
@@ -229,7 +229,7 @@ try {
 
   passed = true;
   process.stdout.write(
-    `production-baseline 19 -> 55 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
+    `production-baseline 19 -> 56 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
   );
 } finally {
   try {

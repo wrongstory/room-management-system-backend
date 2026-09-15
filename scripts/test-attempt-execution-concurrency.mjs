@@ -36,16 +36,18 @@ export async function testAttemptExecutionConcurrency(client, actorProfileId) {
     }), 'execution maid fixture');
     return id;
   }
-  async function fixture(maidId = null) {
+  async function fixture(maidId = null, existingRoomId = null) {
     const owner = maidId ?? await maid();
     const targetId = randomUUID();
     const assignmentId = randomUUID();
     const attemptId = randomUUID();
-    const roomId = randomUUID();
+    const roomId = existingRoomId ?? randomUUID();
     sequence += 1;
-    ok(await client.from('rooms').insert({
-      id: roomId, room_number: `${Date.now()}${sequence}`, room_type_id: roomType.id, elevator_zone: 'A'
-    }), 'execution isolated local room');
+    if (!existingRoomId) {
+      ok(await client.from('rooms').insert({
+        id: roomId, room_number: `${Date.now()}${sequence}`, room_type_id: roomType.id, elevator_zone: 'A'
+      }), 'execution isolated local room');
+    }
     ok(await client.from('cleaning_targets').insert({
       id: targetId, room_id: roomId, cleaning_kind: 'additional', source: 'manual_room_request',
       source_key: `execution-${targetId}`, original_service_date: day, effective_service_date: day,
@@ -126,6 +128,19 @@ export async function testAttemptExecutionConcurrency(client, actorProfileId) {
     'one maid cannot acquire two running rooms concurrently');
   ok(await complete(twoRooms[0].error ? second : first), 'finish two-room winner');
 
+  const sharedRoomId = randomUUID();
+  sequence += 1;
+  ok(await client.from('rooms').insert({
+    id: sharedRoomId, room_number: `${Date.now()}${sequence}`, room_type_id: roomType.id, elevator_zone: 'A'
+  }), 'same-room execution fixture');
+  const sameRoomFirst = await fixture(null, sharedRoomId);
+  const sameRoomSecond = await fixture(null, sharedRoomId);
+  const sameRoomStarts = await Promise.all([start(sameRoomFirst), start(sameRoomSecond)]);
+  assert(sameRoomStarts.filter((result) => !result.error).length === 1 &&
+    sameRoomStarts.some((result) => result.error?.message === 'PREVIOUS_ROOM_WORKFLOW_ACTIVE'),
+  'two maids cannot start two workflows in the same room concurrently');
+  ok(await complete(sameRoomStarts[0].error ? sameRoomSecond : sameRoomFirst), 'finish same-room winner');
+
   // Exercise both dispatch orders repeatedly; assert whole states, not just errors.
   for (let index = 0; index < 4; index += 1) {
     const item = await fixture();
@@ -158,5 +173,5 @@ export async function testAttemptExecutionConcurrency(client, actorProfileId) {
   assert((await deactivate(startFirst)).error?.message === 'ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED', 'serial start first blocks generic deactivate');
   ok(await complete(startFirst), 'complete first');
   ok(await deactivate(startFirst), 'serial complete allows later deactivate');
-  console.log('Attempt execution concurrency passed: resolver-only start preserves first resolvedAt under replay, scoped replay, CAS winner, one running job/maid, start/deactivate and complete/deactivate both orders.');
+  console.log('Attempt execution concurrency passed: resolver-only replay, CAS winner, one running job per maid and room, start/deactivate and complete/deactivate both orders.');
 }
