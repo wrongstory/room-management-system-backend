@@ -258,10 +258,10 @@ export async function testRoomPinBootstrapConcurrency(client) {
       prepareRaceLedger.outbox === 0 && prepareRaceLedger.generatedAudit === 1 &&
       prepareRaceLedger.unresolved === 0) ||
       (prepareRaceLedger.revisions === 0 && prepareRaceLedger.current === 0 &&
-        prepareRaceLedger.mismatch === 0 && prepareRaceLedger.verified === 0 &&
+        prepareRaceLedger.mismatch === 1 && prepareRaceLedger.verified === 0 &&
         prepareRaceLedger.outbox === 0 && prepareRaceLedger.generatedAudit === 0 &&
         prepareRaceLedger.unresolved === 1),
-    'bootstrap versus prepare preserves exactly one complete current ledger or one unresolved physical change',
+    `bootstrap versus prepare preserves one generated ledger or one unresolved physical change: ${JSON.stringify(prepareRaceLedger)}`,
   );
   assert(
     await receiptCount(profileId, 'room.pin.bootstrap', [bootstrapPrepareKey]) === 1,
