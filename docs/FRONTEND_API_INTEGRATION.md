@@ -2,6 +2,8 @@
 
 이 문서는 `makee-ham/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다.
 
+2026-09-16 대조 기준은 프런트 `main@8c1c14da93294a36ce5fc842143bf668ad9cf373`, 차기 후보 `dev@a0d6c07f5bd6cc86e02b2644abc4addc414adfc5`, 백엔드 `dev@c32aa9eec3945334ddda956afc62cc92d801c410`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. 프런트 `dev`와 백엔드 source 제공을 production 활성화로 표현하지 않는다.
+
 ## 1. 계약을 받는 위치
 
 운영 배포 계약:

@@ -7,11 +7,12 @@
 - 이 문서 갱신의 기능 통합 기준: PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925` — 56 migrations / OpenAPI 109 paths / 117 operations. #165 긴급 보완은 `main`과 `dev`에 source 통합됐다. 이후 문서 전용 commit은 이 기능 기준을 바꾸지 않는다.
 - 백엔드 GitHub source 정본 `main`: `6604b2215e06b9e9ebf0b3138e3716a000c57ddb`. production은 별도 운영 승격 전까지 55 migrations / OpenAPI `0.3.0` 109 paths / 117 operations와 기존 5개 Edge bundle이다. 네 checkout template은 아직 게시되지 않았고, #165 운영 적용·게시·예약 smoke와 annotated `v0.3.0` tag/GitHub Release는 별도 pending이다.
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
-- 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
+- 프런트엔드 현재 `main`: `8c1c14da93294a36ce5fc842143bf668ad9cf373`
+- 프런트엔드 차기 후보 `dev`: `a0d6c07f5bd6cc86e02b2644abc4addc414adfc5` (`main`보다 2 commit ahead, 배포 정본 아님)
 - 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
-- 기준일: 2026-08-29 KST
+- 기준일: 2026-09-16 KST
 
-프런트엔드는 실제 API 소비자가 아니라 단일 HTML로 만든 고충실도 업무 시뮬레이터다. 화면 객체, fixture, dead code를 그대로 API나 테이블로 옮기지 않는다.
+프런트엔드는 단일 HTML 중심의 고충실도 업무 시뮬레이터이며 현재 `main`은 인증·계정·개발자 상태·가능일·예약·객실의 운영 API subset을 실제 소비한다. 그 밖의 화면 객체, fixture, dead code를 실제 API나 테이블로 옮기지 않는다.
 
 ---
 
@@ -40,9 +41,12 @@
 | 사건·알림 | [`DOCS/19`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/19_EVENT_NOTIFICATION_POLICY.md) |
 | 객실 청소 요청·취소 | [`DOCS/20`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/20_ROOM_CLEANING_REQUEST_FLOW.md) |
 | 전체 도메인 안전 규칙 | [`FINAL_UX_AUDIT`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/FINAL_UX_AUDIT.md) |
-| 현재 상호작용 구현 | [`WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/f70efc862e7f0973ef0a1327441f152745768253/WIREFRAME/index.html) |
+| 현재 배포 상호작용 구현 | [`main WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/8c1c14da93294a36ce5fc842143bf668ad9cf373/WIREFRAME/index.html) |
+| 차기 후보 상호작용 구현 | [`dev WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/a0d6c07f5bd6cc86e02b2644abc4addc414adfc5/WIREFRAME/index.html) |
 
-2026-08-29 재대조 결과, 이전 `b517fb7` 이후 현재 `f70efc8`까지 35개 commit이 추가됐지만 `DOCS/16~20`과 `FINAL_UX_AUDIT`의 고정 정책은 변경되지 않았다. 변경은 `WIREFRAME/README.md`, `WIREFRAME/QA.md`, `WIREFRAME/index.html` 등 현재 상호작용 구현과 검증 보강에 집중되어 있다. 따라서 기존 `[확정]` 백엔드 불변식은 유지하고 최신 `WIREFRAME`은 상호작용 snapshot으로만 해석한다. 데모 객실 수·상태·랜덤 배정 결과 같은 fixture 변화는 production seed나 정책으로 승격하지 않는다.
+2026-09-16 재대조 결과, 이전 현재점 `f70efc8`보다 프런트 `main@8c1c14d`가 16 commit 전진해 백엔드 `v0.2.0` 39 paths / 43 operations 소비, `DOCS/17`·`18`, 신규 PIN/사진 `DOCS/19`, 운영 연동 `DOCS/21` 변경을 포함한다. `dev@a0d6c07`은 여기에 예상 청소시간 선택형과 미퇴실 사건 후보를 기능 플래그 OFF로 추가했다. `main`은 배포 정본, `dev`는 차기 후보로 분리하며 자세한 분류·호환표는 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
+
+프런트 신규 `DOCS/19`의 “검수 결정부터 7일”은 2026-08-26 사용자 확정 계약인 `uploaded_at + 7 days`와 충돌했다. 기존 사용자 결정을 우선해 프런트 문서·화면 설명을 업로드 기준으로 정합화하며, 재시도·제출·승인·반려는 보관기한을 연장하지 않는다. 데모 fixture의 과거 만료시각은 production invariant가 아니다.
 
 프런트엔드 기준 commit을 바꾸면 관련 범위의 가이드, 알려진 충돌, 테스트 계약을 같은 PR에서 다시 대조한다.
 
