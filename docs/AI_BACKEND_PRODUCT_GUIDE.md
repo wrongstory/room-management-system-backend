@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서 갱신의 일반 개발 integration base: `dev@ab10249aaf1d671419389615ad8a22984c9849ac` — 55 migrations / OpenAPI 109 paths / 117 operations. #165 긴급 보완은 `main` 병합 뒤 56번째 append-only migration을 포함한 별도 `dev` backport candidate다.
+- 이 문서 갱신의 일반 개발 정본: `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925` — 56 migrations / OpenAPI 109 paths / 117 operations. #165 긴급 보완은 `main`과 `dev`에 source 통합됐다.
 - 백엔드 GitHub source 정본 `main`: `6604b2215e06b9e9ebf0b3138e3716a000c57ddb`. production은 별도 운영 승격 전까지 55 migrations / OpenAPI `0.3.0` 109 paths / 117 operations와 기존 5개 Edge bundle이다. 네 checkout template은 아직 게시되지 않았고, #165 운영 적용·게시·예약 smoke와 annotated `v0.3.0` tag/GitHub Release는 별도 pending이다.
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`

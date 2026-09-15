@@ -23,7 +23,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-이 backport의 integration base는 `dev@ab10249aaf1d671419389615ad8a22984c9849ac`의 55 migrations / OpenAPI 109 paths / 117 operations이며, #165의 56번째 append-only migration과 선택형 duration 계약을 추가하되 공개 API 수는 바꾸지 않는다. GitHub `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`에는 같은 hotfix source가 병합됐지만 production readback은 별도 운영 승격 전까지 55 migrations / OpenAPI `0.3.0` 109 paths / 117 operations 및 기존 5개 Edge bundle로 유지한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+현재 개발 정본은 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`의 56 migrations / OpenAPI 109 paths / 117 operations이며, #165의 선택형 duration 계약이 `main`과 `dev`에 source 통합됐다. GitHub `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`도 같은 hotfix source를 포함하지만 production readback은 별도 운영 승격 전까지 55 migrations / OpenAPI `0.3.0` 109 paths / 117 operations 및 기존 5개 Edge bundle로 유지한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 ## 신뢰 경계
 
@@ -766,7 +766,7 @@ notification/outbox를 만들지 않으며, production seed와 stayover/addition
 
 #112 source는 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 같은 tree로 PR #119에 병합됐다. Issue는 Function Secrets → 승인된 `api`/`notification-delivery` Edge bundle → negative/positive hosted smoke → Vault/`pg_cron`/`pg_net` → 5회 연속 heartbeat → 실제 기기 Web Push smoke까지 OPEN이다.
 
-현재 critical path는 #165 hotfix의 `dev` backport 검토·병합 → production 56번째 migration과 병합된 `main`의 `api` bundle → 네 room type slot-only template 게시 → 예약 gate smoke다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
+현재 critical path는 production 56번째 migration과 병합된 `main`의 `api` bundle → 네 room type slot-only template 게시 → 예약 gate smoke다. #12 backup/recovery는 병행 가능하되 실제 production/recovery 실행은 별도 승인이고, #13 전체 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 
 Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·촛불·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`만 재사용하며 raw table DML을 하지 않는다. actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
 

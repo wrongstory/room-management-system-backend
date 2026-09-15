@@ -284,7 +284,8 @@ const idempotencyKey = crypto.randomUUID();
 - [ ] duration 없는 게시 template으로 예약 생성이 성공하고 planned checkout target이 생성되는 흐름을 검증한다.
 - [ ] 같은 객실 동시 시작은 정확히 한 요청만 성공하고, 미해결 고객 미퇴실 사건 중에는 시작·완료·제출이 성공으로 표시되지 않는지 검증한다.
 - [x] #165 독립 QA P0/P1=0 및 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` 병합 완료.
-- [ ] `dev` 역반영 → production 56번째 migration → 병합된 `main` exact source의 `api` 배포 → production OpenAPI nullable 의미 확인 → 네 template 게시 → 역할별 hosted smoke 순서가 끝난 뒤에만 기능 flag를 켠다.
+- [x] PR #167로 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925` 역반영 완료.
+- [ ] production 56번째 migration → 병합된 `main` exact source의 `api` 배포 → production OpenAPI nullable 의미 확인 → 네 template 게시 → 역할별 hosted smoke 순서가 끝난 뒤에만 기능 flag를 켠다.
 - [ ] OpenAPI 109 paths / 117 operations 개수만 보지 말고, 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인한다.
 
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
