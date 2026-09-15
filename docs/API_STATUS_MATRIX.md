@@ -73,12 +73,12 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 source/readback evidence: **2026-09-15 KST** (Issue #148/#152/#156). 문서 integration 기준: **2026-09-15 KST** (`main@6604b221...`, `dev@75983b3...`).
+production 최종 source/readback evidence: **2026-09-15 KST** (Issue #148/#152/#156). 기능 integration 기준: **2026-09-15 KST** (`main@6604b221...`, PR #167의 `dev@75983b3...`; 이후 문서 전용 commit은 기능 기준에 포함하지 않음).
 
 - 현재 GitHub 운영 source 정본: `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`
   - Issue #148의 v0.3.0 source/schema/API/Edge production 승격, Issue #152 notification-delivery hosted 호환 hotfix, Issue #156 cleaning-template admin API와 Issue #165 duration 선택화 hotfix source까지 반영됐다.
   - annotated `v0.3.0` tag/GitHub Release는 아직 없으므로 `main`/production source 상태와 GitHub Release 완료를 구분한다.
-- 현재 개발 정본은 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이며 #165의 **56번째 append-only migration**과 선택형 duration 계약이 역반영됐다. GitHub `main`과 `dev` 모두 같은 hotfix source를 포함하지만 production은 별도 운영 승격 전까지 **55 migrations / OpenAPI 0.3.0 109 paths / 117 operations**와 기존 Edge bundle을 유지한다. #156 API는 production Edge에 배포됐지만 네 checkout template이 미게시라 현재 사용은 ❌이다.
+- PR #167의 기능 통합 지점은 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이며 #165의 **56번째 append-only migration**과 선택형 duration 계약이 역반영됐다. GitHub `main`과 `dev` 모두 같은 hotfix source를 포함하지만 production은 별도 운영 승격 전까지 **55 migrations / OpenAPI 0.3.0 109 paths / 117 operations**와 기존 Edge bundle을 유지한다. #156 API는 production Edge에 배포됐지만 네 checkout template이 미게시라 현재 사용은 ❌이다.
 - #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
 - 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. 현재 production source 포함 여부는 이 §2의 55 migrations / 109 paths / 117 operations와 5개 Edge bundle snapshot을 우선하고, hosted provider·Google·Cron 및 positive mutation 사용 가능 여부는 별도 gate로 판정한다.
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.

@@ -23,7 +23,7 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-현재 개발 정본은 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`의 56 migrations / OpenAPI 109 paths / 117 operations이며, #165의 선택형 duration 계약이 `main`과 `dev`에 source 통합됐다. GitHub `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`도 같은 hotfix source를 포함하지만 production readback은 별도 운영 승격 전까지 55 migrations / OpenAPI `0.3.0` 109 paths / 117 operations 및 기존 5개 Edge bundle로 유지한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+PR #167의 기능 통합 지점은 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`의 56 migrations / OpenAPI 109 paths / 117 operations이며, #165의 선택형 duration 계약이 `main`과 `dev`에 source 통합됐다. 이후 문서 전용 commit은 이 기능 기준을 바꾸지 않는다. GitHub `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`도 같은 hotfix source를 포함하지만 production readback은 별도 운영 승격 전까지 55 migrations / OpenAPI `0.3.0` 109 paths / 117 operations 및 기존 5개 Edge bundle로 유지한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 ## 신뢰 경계
 
