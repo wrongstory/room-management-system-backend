@@ -2,13 +2,13 @@
 
 > 문서 지위: 프런트엔드 분석 snapshot이다. 제품 규칙이나 현재 구현과 충돌하면 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)의 우선순위와 `[미확정]` 표시를 먼저 따른다.
 
-분석 대상: `makee-ham/room-management-system` `main@f70efc862e7f0973ef0a1327441f152745768253`
+분석 대상: `wrongstory/room-management-system` 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`
 
-최신화 메모(2026-08-29 KST): 이전 프런트 snapshot `b517fb7`에서 현재 `f70efc8`까지 35개 commit을 재대조했다. `DOCS/16~20`과 `DOCS/FINAL_UX_AUDIT.md`는 변경되지 않았고, `WIREFRAME/README.md`, `WIREFRAME/QA.md`, `WIREFRAME/index.html` 등 상호작용 구현이 갱신됐다. 따라서 이번 최신화는 제품 불변식을 새로 확정하지 않고 정본 저장소·snapshot과 현재 상호작용 구현 기준만 갱신한다.
+최신화 메모(2026-09-17 KST): exact snapshot `165fed2`의 정본을 재대조했다. 객실 대표 상태와 객실 이동은 백엔드 `dev@70154e9`에 source 구현됐지만 production 미배포다. 사진 보존은 최종 결정+168시간/해결+180일/orphan+30일, PIN은 통보부터 최종 종결까지의 durable entitlement가 최신 확정 계약이며 현재 backend source와 충돌한다. 자세한 해결·미해결·후속 migration 계획은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
 
 ## 결론
 
-원본은 실제 서비스가 아니라 관리자·메이드 업무를 검증하는 고충실도 정적 와이어프레임입니다. `WIREFRAME/index.html` 한 파일이 약 1.1MB이며 CSS, 화면, 데모 원장, 상태 전이를 모두 포함합니다. 서버·DB·실제 로그인·사진 업로드·푸시·송금은 연결되어 있지 않고 상태는 탭 메모리에서만 유지됩니다.
+원본의 중심은 관리자·메이드 업무를 검증하는 단일 HTML 고충실도 와이어프레임입니다. 현재 `main`은 인증·계정·개발자 상태·가능일·예약·객실의 운영 API subset을 연결했지만, 청소 배정·사진·검수·주급·신규 PIN·Web Push는 여전히 미소비 또는 데모다. 따라서 화면 객체와 fixture를 DB/API 정본으로 옮기지 않는다.
 
 따라서 HTML의 현재 객체 구조를 그대로 DB 테이블로 옮기면 안 됩니다. 화면의 복합 상태를 예약, 점유, 청소 대상, 담당 revision, 수행 회차, 업로드, 제출 버전, 검수, 수익, 지급, 알림, 감사 이벤트로 분리해야 합니다.
 
@@ -46,7 +46,7 @@
 - 폭탄방 승인과 전체 청소 승인이 모두 있어야 해당 한 객실의 요금만 정확히 2배가 됩니다.
 - `(maid_id, week_start)` 지급 레코드는 한 건이며 `OPEN → PAYING → CHECK/PAID`를 CAS로 전이합니다.
 - 과거 기록을 덮어쓰지 않고 정정 이벤트를 추가합니다.
-- 고객명, 전화번호, 객실 PIN, 사진은 각각 별도 보존·노출 정책을 적용합니다.
+- 고객명, 전화번호, 객실 PIN, 사진은 각각 별도 보존·노출 정책을 적용합니다. 청소 제출 사진은 최종 검사 전 보존하고 결정+168시간에 만료하며, PIN entitlement는 통보 시 시작해 최종 결정·취소·재배정·비활성화 정리 때 끝납니다.
 
 ## 발견한 정책 주의점
 

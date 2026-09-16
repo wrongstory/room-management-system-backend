@@ -4,7 +4,7 @@
 
 이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 현재 production source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`, 전체 56 migrations / 109 paths / 117 operations이고 PIN 범위의 49~53번째 migration과 #146 deterministic concurrency fixture는 변경 없이 보존된다. PIN source와 `room-pin-sheet-sync` bundle은 production에 반영됐지만 target mapping·Google ACL/Secrets/Cron/hosted activation은 여전히 별도 pending이다. #156/#165의 55~56번째 migration과 API는 PIN schema·worker 계약을 바꾸지 않는다.
 
-Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다.
+Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다. 2026-09-17 확정된 통보 기반 durable assignment entitlement는 아직 source에 없으며 아래 legacy access-lease 규칙을 새 append-only migration으로 대체해야 한다.
 
 ## 초기 PIN bootstrap과 예약 계약
 
@@ -79,7 +79,9 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 ## Maid 권한과 reveal
 
-Maid reveal/change는 본인의 exact current notified assignment, 동일 current nonterminal attempt, access 시각 도달, current pin version의 기존 unrevoked/unexpired `room_pin_access_leases`를 모두 요구한다. change prepare/confirm은 attempt가 exact `in_progress`여야 한다. 알려진 다른 maid/과거/revoked/stale lease ID를 조합해도 권한이 생기지 않는다.
+최신 제품 계약에서 PIN 접근 자격은 assignment 통보와 outbox가 확정되는 시점부터 시작하며 `availableFrom` 전에도 본인에게 알림된 담당이면 유효하다. 현장 완료·업로드 대기·제출·검수 대기 동안 유지하고 최종 승인·반려, 취소 승인, 재배정, 비활성화 workflow의 권한 정리 때 종료한다. 이 durable entitlement는 exact assignment/room/maid/PIN revision에 귀속하고 30초 reveal lease와 분리한다.
+
+현재 source의 `room_pin_access_leases`는 attempt가 필수이고 access 시각 도달 및 `scheduled|in_progress`를 요구하므로 위 계약을 아직 충족하지 않는다. 후속 migration 전까지 이를 목표 정책으로 문서화하거나 `field_completed` 이후 접근 가능하다고 표시하지 않는다. change prepare/confirm의 exact `in_progress` 제한은 별도 변경 정책으로 유지한다. 알려진 다른 maid/과거/revoked/stale entitlement 또는 lease ID를 조합해도 권한이 생기지 않는다.
 
 Maid confirm이 PIN version을 올리면 서버는 변경을 승인한 기존 authoritative lease를 `PIN_VERSION_SUPERSEDED`로 폐기하고, 동일 room/target/assignment/attempt/maid/만료 시각을 새 version으로 원자 재발급한다. confirm 응답의 `accessLeaseId`를 새 reveal 권한으로 사용한다. revision의 provenance는 변경 승인에 쓴 기존 lease ID를 보존한다.
 

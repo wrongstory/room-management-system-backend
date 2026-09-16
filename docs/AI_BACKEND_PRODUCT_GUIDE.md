@@ -4,15 +4,15 @@
 
 검토 기준:
 
-- 이 문서 갱신의 기능 통합 기준: PR #190의 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3` — 62 migrations / OpenAPI 113 paths / 121 operations. #187 Phase A~C의 예약 임박 projection, 체크인 전 객실 변경, 투숙 중 객실 이동 source 계약이 모두 `dev`에 통합됐다.
+- 이 문서 갱신의 개발 통합 기준: `dev@70154e90eaa633dedbd872b394e4ca51ee25bdf6` — 62 migrations / OpenAPI 113 paths / 121 operations. #187 Phase A~C의 예약 임박 projection, 체크인 전 객실 변경, 투숙 중 객실 이동 source 계약과 후속 상태 문서가 `dev`에 통합됐다.
 - 개발 migration 순서는 57번째 `photo_slot_contract_v8` → 58번째 `extra_proof_photo_collection` → 59번째 `current_room_status_projection` → 60번째 `reservation_arrival_lifecycle_projection` → 61번째 `reservation_room_change_before_checkin` → 62번째 `reservation_during_stay_room_move`다. 기존 61개 migration은 변경하지 않았다. 이 개발 snapshot은 아직 `main`/production 정본이 아니며 release 승인 전 운영 template·DB·Edge를 변경하지 않는다.
-- 백엔드 운영 source 정본: `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`. 2026-09-16 production readback은 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations와 기존 5개 Edge bundle이다. 네 checkout template은 모두 immutable v7로 게시됐고 `durationMinutes=null`을 보존한다. 안전한 운영 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, annotated `v0.3.0` tag/GitHub Release와 provider·Google hosted activation은 별도 pending이다.
-- 프런트엔드 정본 저장소: `makee-ham/room-management-system`
-- 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
-- 프런트 고정 정책 snapshot: `b517fb79922f97426b41bf33e2f15cbbc003b136`
-- 기준일: 2026-08-29 KST
+- 백엔드 저장소 `main`: `a12595edf68644b94215c4792e0d3aadd64772c6`. 마지막으로 직접 검증한 production 배포 source는 별도인 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`이며 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations였다. 저장소 `main`, 배포 source, `dev`를 같은 상태로 표현하지 않는다.
+- 프런트엔드 정본 저장소: `wrongstory/room-management-system`
+- 프런트엔드 제품·운영 연결 snapshot: `dev@165fed2d62a763d64ac62539e1475c1b3e42868f` (`기능: 운영 API 연결을 완성하라`). 원격 `dev` ref는 삭제됐으나 exact commit과 문서 blob은 재현 가능하다.
+- 프런트엔드 현재 원격 `main`: `afeb0898879bf8d381ee2e218938dc3160fd6ac0`. 이는 위 snapshot의 후속 정본으로 자동 승격하지 않고 별도 영향 대조 후 채택한다.
+- 기준일: 2026-09-17 KST
 
-프런트엔드는 실제 API 소비자가 아니라 단일 HTML로 만든 고충실도 업무 시뮬레이터다. 화면 객체, fixture, dead code를 그대로 API나 테이블로 옮기지 않는다.
+프런트엔드는 단일 HTML 중심의 고충실도 업무 시뮬레이터이며 기준 snapshot은 운영 API를 실제 소비한다. 화면 객체, fixture, dead code를 그대로 실제 API나 테이블로 옮기지 않는다.
 
 ---
 
@@ -35,15 +35,24 @@
 
 | 범위 | 고정 문서 |
 |---|---|
-| 가능일·배정·이월·폭탄방·주급 | [`DOCS/16`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/16_WEEKLY_AVAILABILITY_ASSIGNMENT_POLICY.md) |
-| 객실 마스터·점유·수동 체크아웃 | [`DOCS/17`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/17_ROOM_CATALOG_LONG_STAY_DECISIONS.md) |
-| 타입·사진 템플릿 | [`DOCS/18`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/18_TYPE_PHOTO_TEMPLATE_POLICY.md) |
-| 사건·알림 | [`DOCS/19`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/19_EVENT_NOTIFICATION_POLICY.md) |
-| 객실 청소 요청·취소 | [`DOCS/20`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/20_ROOM_CLEANING_REQUEST_FLOW.md) |
-| 전체 도메인 안전 규칙 | [`FINAL_UX_AUDIT`](https://github.com/makee-ham/room-management-system/blob/b517fb79922f97426b41bf33e2f15cbbc003b136/DOCS/FINAL_UX_AUDIT.md) |
-| 현재 상호작용 구현 | [`WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/f70efc862e7f0973ef0a1327441f152745768253/WIREFRAME/index.html) |
+| 객실 PIN·사진 이력 | [`DOCS/19`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/19_ROOM_PIN_SHEET_CLEANING_HISTORY_DECISIONS.md) |
+| 가능일·배정·이월·폭탄방·주급 | [`DOCS/16`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/16_WEEKLY_AVAILABILITY_ASSIGNMENT_POLICY.md) |
+| 객실 마스터·점유·장기 투숙 | [`DOCS/17`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/17_ROOM_CATALOG_LONG_STAY_DECISIONS.md) |
+| 전체 도메인 안전 규칙 | [`FINAL_UX_AUDIT`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/FINAL_UX_AUDIT.md) |
+| 클릭형 와이어프레임 인계 | [`DOCS/14`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/14_CLICKABLE_WIREFRAME_HANDOFF.md) |
+| 예약·객실 이동 | [`DOCS/24`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/24_RESERVATION_ARRIVAL_ROOM_MOVE_BACKEND_HANDOFF.md) |
+| 청소 API 연동 | [`DOCS/23`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/23_CLEANING_API_INTEGRATION.md) |
+| 운영 API·PWA 연동 | [`DOCS/21`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/21_PRODUCTION_API_PWA_INTEGRATION.md) |
+| 상호작용 설명 | [`WIREFRAME/README`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/WIREFRAME/README.md) |
+| 상호작용 QA | [`WIREFRAME/QA`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/WIREFRAME/QA.md) |
+| 상호작용 source | [`WIREFRAME/index.html`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/WIREFRAME/index.html) |
+| 와이어프레임 작업 인계 | [`WIREFRAME_TASK_PROMPT`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/WIREFRAME_TASK_PROMPT.md) |
 
-2026-08-29 재대조 결과, 이전 `b517fb7` 이후 현재 `f70efc8`까지 35개 commit이 추가됐지만 `DOCS/16~20`과 `FINAL_UX_AUDIT`의 고정 정책은 변경되지 않았다. 변경은 `WIREFRAME/README.md`, `WIREFRAME/QA.md`, `WIREFRAME/index.html` 등 현재 상호작용 구현과 검증 보강에 집중되어 있다. 따라서 기존 `[확정]` 백엔드 불변식은 유지하고 최신 `WIREFRAME`은 상호작용 snapshot으로만 해석한다. 데모 객실 수·상태·랜덤 배정 결과 같은 fixture 변화는 production seed나 정책으로 승격하지 않는다.
+이 snapshot 안의 충돌 우선순위는 `현재 사용자의 명시적 결정 → DOCS/19 객실 PIN·청소 사진 → DOCS/16 배정 → DOCS/17 객실·점유 → FINAL_UX_AUDIT → DOCS/24 예약·객실 이동 → 나머지 최신 인계 문서 → 과거 백엔드 가정`이다. 따라서 `DOCS/14` 등에 남은 `availableFrom` 이후 PIN 접근 문구는 DOCS/19와 2026-09-17 사용자 결정으로 대체한다.
+
+2026-09-17 재대조 결과, `dev@165fed2`가 이번 백엔드 정합화의 exact 프런트 snapshot이다. 객실 대표 상태와 체크인 전·투숙 중 객실 이동은 백엔드 `dev`에 이미 구현돼 중복 개발하지 않는다. 반면 사진 보존과 maid PIN 접근 수명주기는 현재 source가 아래 확정 계약과 반대로 동작하므로 후속 append-only migration/API PR이 필요하다. 자세한 해결/미해결 표는 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
+
+현재 사용자는 과거의 “모든 사진을 업로드 후 7일에 삭제” 결정을 대체했다. 청소 제출 사진은 최종 검사 결정 전 보존하고 결정 시각부터 정확히 168시간 뒤 삭제한다. 이슈·컴플레인·중단/동기화 충돌 증빙은 해결·종결 후 180일, 진짜 orphan은 업로드 후 30일이다. 이미 삭제된 원본을 복구됐다고 표시하지 않으며 metadata는 영구 보존한다.
 
 프런트엔드 기준 commit을 바꾸면 관련 범위의 가이드, 알려진 충돌, 테스트 계약을 같은 PR에서 다시 대조한다.
 
@@ -177,6 +186,8 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 백엔드는 기존 `reservation_phase`, `occupied`, `cleaning_required`, `allocation_blocked`, `allocation_ready`와 사유를 호환 유지하고, #187 Phase A에서 `occupancy_status`, `reservation_lifecycle`, `readiness_status`, `primary_display_status`를 독립 projection 축으로 추가한다. 한 호출은 서버 시각을 한 번만 캡처하며 `server_time`은 기존 `evaluated_at`과 정확히 같은 값이다. 현재 일정은 `[check_in_at, check_out_at)` 반개구간이고 실제 active occupancy도 `OCCUPIED`다. current가 없으면 가장 이른 미래 active 예약의 KST 체크인 날짜가 오늘이면 `ARRIVAL_PENDING`, 내일이면 `RESERVATION_PRESENT`, 모레 이후이면 `FUTURE`, 예약이 없으면 `NONE`이다. 현재가 있어도 별도의 `next_reservation_id`, `next_check_in_at`, `next_check_out_at`에는 가장 이른 미래 active 예약을 반환할 수 있다.
 
 `primary_display_status` 우선순위는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY`다. `BLOCKED`는 청소 외 실제 운영·입실·데이터 차단이 있을 때만 사용하고, 청소만으로 만들지 않는다. `FUTURE`는 현재 readiness 대표 상태를 유지한다. `blocking_reason_codes`와 `readiness_reason_codes`는 분리하며, `PIN_MISMATCH`와 `PIN_UNCONFIGURED`는 current check-in의 readiness 사유로만 노출하고 예약 bookability 차단으로 사용하지 않는다. 이 값들은 저장된 단일 상태가 아니라 동일 snapshot에서 계산한 표시 projection이며, 기존 reason/PIN 경고도 보존한다.
+
+객실 예약·준비 판단은 세 축을 합치지 않는다. `intervalBookable`은 요청한 미래 반개구간의 예약 가능성, `readinessStatus`/`checkInReady`는 현재 체크인·배정 준비, `pinSyncStatus`는 현재 PIN 동기화 상태다. 현재 source는 readiness/PIN 분리 projection만 제공하며 일반 예약용 `intervalBookable` preview와 from/to 범위 조회는 아직 없다. `allocation_ready`를 그 대체값으로 사용하지 않는다. 미래 기간은 예약 가능하면서 현재 체크인 준비는 불가할 수 있으며, preview 결과는 commit 성공 보장이 아니다.
 
 `allocation_ready`는 현재 시각의 예약 배정 가능 여부다. 공실, 현재 preparation obligation 승인, 촛불 0, 운영 정상, 미해결 입실 차단 이슈 없음, 기준정보·점유 확인 완료를 모두 만족할 때만 true다. 현재 예약 구간이면 실제 체크인 event가 아직 없어도 `RESERVATION_CURRENT`로 차단한다. false이면 `OCCUPIED`, `RESERVATION_CURRENT`, `CLEANING_REQUIRED`, `CANDLE_PRESENT`, `OPERATION_BLOCKED`, `ROOM_ISSUE_BLOCKED`, `DATA_UNCONFIRMED` 같은 안정적인 reason code 목록을 함께 반환한다. `pin_sync_status`는 별도 경고 축이며 `unconfigured` 또는 `mismatch`만으로 예약 생성·변경·배정을 막지 않는다. 다만 실제 체크인 전이와 PIN 조회·변경은 current PIN이 `verified`가 될 때까지 fail-closed한다. 미래 예약의 pending preparation obligation과 private planned checkout target은 현재 `cleaning_required`를 활성화하지 않으며, 실제 checkout으로 current target이 materialize됐거나 현재 실행 가능한 비-checkout 청소가 있을 때만 현재 청소 축에 반영한다.
 
@@ -503,9 +514,11 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 프런트 입력은 PIN 숫자 부분만 받으며 `^[0-9]{4,8}$`를 만족하는 문자열이어야 한다. 숫자형으로 변환하지 않고 `0256`, `00000001` 같은 선행 0을 보존한다.
 - 서버는 요청의 `room_id`로 현재 `rooms.room_number`를 다시 조회하고 저장·표시용 canonical credential을 `<room_number>-<pin_digits>`로 조합한다. 클라이언트가 보낸 객실번호 prefix를 신뢰하거나 다른 객실 credential 생성에 사용하지 않는다.
 - DB에는 canonical credential 전체를 AES-256-GCM으로 암호화한 ciphertext, 12-byte random nonce, authentication tag, key version과 bounded nonsecret AAD context(`format/environment/projectRef/roomId/pinVersion`)를 private immutable revision으로 저장하고 current pointer만 CAS 갱신한다. 복구 프로젝트에서는 runtime context가 아니라 revision에 저장된 exact context로 복호화한다. 키는 DB와 분리된 secret manager에 두며 public table, 감사, outbox, 로그에는 평문이나 암호문을 저장하지 않는다.
-- 권한 있는 사용자가 특정 객실·현재 assignment/attempt에 대해 명시적으로 조회할 때만 서버가 복호화한다. 메이드는 담당뿐 아니라 해당 청소 유형의 출입 허용 시각 도달도 검증한다.
+- PIN 접근 자격(entitlement)과 최대 30초 원문 reveal lease를 분리한다. entitlement는 assignment 저장·알림 outbox가 같은 transaction에서 확정되는 시점부터 정확한 assignment/room/maid/PIN revision에 귀속되며 `availableFrom` 전이라도 이미 알림된 본인 담당이면 유효하다.
+- entitlement는 현장 완료, 업로드 대기, 제출 완료, 검수 대기 동안 유지한다. 최종 승인·반려, 취소 승인, 재배정으로 담당 교체, 계정 비활성화 workflow의 권한 정리 중 하나가 확정되면 원자적으로 종료한다. 알림되지 않은 다른 메이드와 과거 담당자는 접근할 수 없다.
+- 권한 있는 사용자가 특정 객실에 명시적으로 조회할 때만 서버가 복호화한다. reveal은 매번 live session, 현재 entitlement 소유권, room/assignment/PIN revision과 종료 여부를 재검증한다. `availableFrom`과 attempt `scheduled|in_progress`만으로 장기 자격을 제한하지 않는다.
 - 응답은 `Cache-Control: no-store`를 사용하고 클라이언트는 응답의 남은 TTL(최대 30초)과 `expiresAt` 중 더 이른 시점, 화면 이동, background/pagehide, 기기 잠금, 담당 해제, 출입 재잠금 때 평문을 메모리에서 지운다. 만료된 reveal은 평문을 반환하지 않는다. clipboard, service worker cache, offline queue, 영속 브라우저 저장소에 넣지 않는다.
-- PIN 조회·변경은 객실, PIN version, actor, current notified assignment/current nonterminal attempt와 기존 `room_pin_access_leases`의 exact unrevoked authoritative lease에 묶인 lease/CAS와 감사 event를 남긴다. 메이드 변경은 exact `in_progress`에서만 허용한다.
+- reveal lease는 entitlement에서 파생되는 최대 30초의 별도 단기 원장이다. PIN 변경은 열려 있는 reveal lease와 과거 revision을 즉시 무효화하고, 현재 담당자 및 이미 알림된 다음 근무일 담당자의 entitlement를 새 revision으로 원자 갱신한다. PIN 조회·변경은 CAS와 감사 event를 남기며 메이드 변경은 기존 정책대로 exact `in_progress`에서만 허용한다.
 - 관리자 변경은 PIN 변경 lease 선점 → 실제 도어락 변경 → confirm/save 순서로 조정한다. prepare 즉시 mismatch가 되어 실제 체크인 전이와 PIN 조회를 차단하지만 예약 생성·변경·배정은 차단하지 않으며, confirm 전에는 current pointer를 바꾸지 않는다. 만료·불확실 상태는 실제 PIN 재입력 후 새 revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결한다. current가 없는 최초 변경이 만료된 경우에도 실제 PIN 재입력으로 version 1을 수립할 수 있다.
 - PIN 평문을 URL, 로그, error, audit payload, notification, analytics, Git, 브라우저 저장소에 넣지 않는다.
 - `[확정 — 2026-09-13 #136]` Google Sheets는 DB PIN current revision의 단방향 운영 projection이다. `room_number`를 business identity로 bounded board에서 정확히 한 행만 갱신하고, equal-version 변조는 DB 정본으로 복구하며 Sheet-ahead/중복 identity/불확실 write는 operator-blocked한다. 전용 service account는 spreadsheets-only scope를 쓰며 source-controlled approved target 검증을 PIN 복호화·OAuth보다 먼저 수행한다. hosted target mapping과 full resync/운영 활성화는 #137/release 승인 전에는 없다.
@@ -534,15 +547,16 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 사진 record 작성과 purge는 서버 command/worker만 수행한다.
 - 삭제 worker는 DB 상태, 만료 시각, 참조 관계를 다시 확인하고 멱등적으로 원본·파생본·캐시를 정리한다.
 
-### `[확정]` 보존 기간
-
-사용자가 2026-08-26 대화에서 다음 정책을 명시적으로 확정했다. 이 결정은 프런트 문서의 180일/hold 초안보다 우선한다.
+### `[확정 — 2026-09-17]` 도메인별 보존 기간
 
 - Google Drive에만 저장한다. Supabase Storage에는 사진 객체를 저장하지 않는다.
 - 프런트에서 JPEG/WebP를 300KiB 이하로 압축하고 서버도 크기·magic bytes·MIME·EXIF 제거를 검증한다.
 - 비공개 KST 업로드 일자/객실 폴더에 정리한다.
-- `purge_after`는 검수 상태와 무관하게 정확히 `uploaded_at + 7 days`다.
-- 7일 보존에는 retention hold나 180일 예외를 두지 않는다.
+- 청소 제출 사진은 최종 검사 결정 전 원본·미리보기·캐시를 보존하고 승인 또는 반려의 `decided_at + 168 hours`에 삭제한다. 검수 대기 시간이 길어져도 먼저 삭제하지 않는다.
+- 객실 이슈·컴플레인 증빙은 해결 또는 종결 시각부터 180일, 중단 업무·동기화 충돌 증빙은 관리자 해결 시각부터 180일 보존한다.
+- 어떤 도메인에도 연결되지 않은 진짜 orphan만 provider 업로드 시각부터 30일 뒤 삭제한다. 늦게 연결되는 업로드와 worker claim의 race를 CAS/fence로 막는다.
+- 사진 record는 정책 종류, 기산 사건, `retentionStartsAt`, `expiresAt`, `purgedAt`, `mediaAvailability`를 설명하며 원본 삭제 뒤에도 제출·slot·검사·수행자·시각 metadata를 영구 보존한다.
+- 실제 수행 메이드와 권한 있는 admin은 만료 전까지 content를 읽을 수 있다. 다른 maid와 권한 없는 actor는 거부하고 모든 content 응답은 `Cache-Control: no-store`다.
 - worker는 Drive `files.delete`로 영구삭제하고 404를 멱등 성공으로 처리한다.
 
 Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제다. 자격증명 없이 provider가 연결됐다고 가정하거나 worker를 배포하지 않는다. 용량 보호 기준은 현재 #9의 10GB 경고/12GB 업로드 차단 계약을 따른다.
