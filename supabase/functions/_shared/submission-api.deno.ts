@@ -421,3 +421,64 @@ Deno.test("admin inspection queue emits a signed bounded continuation", async ()
     } else Deno.env.set("INSPECTION_CURSOR_HMAC_SECRET", previous);
   }
 });
+
+Deno.test("inspection cursor rejects secrets reused by Edge keyrings and workers", async () => {
+  const names = [
+    "INSPECTION_CURSOR_HMAC_SECRET",
+    "RESERVATION_PII_KEYRING_JSON",
+    "ROOM_PIN_KEYRING_JSON",
+    "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+    "VAPID_KEYRING_JSON",
+    "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+    "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+    "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  const cursorSecret = "inspection-reused-edge-secret-test-123456";
+  const cases: Array<[string, string]> = [
+    ["RESERVATION_PII_KEYRING_JSON", JSON.stringify({ prior: cursorSecret })],
+    ["ROOM_PIN_KEYRING_JSON", JSON.stringify({ prior: cursorSecret })],
+    [
+      "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+      JSON.stringify({ prior: cursorSecret }),
+    ],
+    [
+      "VAPID_KEYRING_JSON",
+      JSON.stringify({
+        prior: { publicKey: "public", privateKey: cursorSecret },
+      }),
+    ],
+    ["NOTIFICATION_DELIVERY_INVOKE_SECRET", cursorSecret],
+    ["ROOM_PIN_SHEET_SYNC_INVOKE_SECRET", cursorSecret],
+    ["GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY", cursorSecret],
+  ];
+  try {
+    Deno.env.set("INSPECTION_CURSOR_HMAC_SECRET", cursorSecret);
+    for (const name of names.slice(1)) Deno.env.delete(name);
+    for (const [name, reusedValue] of cases) {
+      Deno.env.set(name, reusedValue);
+      const denied = await failure(() =>
+        listPendingInspections(
+          request("/v1/inspections?limit=1"),
+          clientsFor({
+            submissions: [],
+            hasMore: true,
+            lastSubmittedAt: "2026-09-09T03:00:00Z",
+            lastId: submissionId,
+          }).clients,
+          admin,
+        )
+      );
+      assert(
+        denied.code === "INSPECTION_CURSOR_NOT_CONFIGURED",
+        `${name} reuse rejected`,
+      );
+      Deno.env.delete(name);
+    }
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});

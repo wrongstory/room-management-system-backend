@@ -54,6 +54,32 @@ function decodeBase64url(value: string): Uint8Array {
   if (base64url(bytes) !== value) invalid();
   return bytes;
 }
+function jsonStringValues(name: string): string[] {
+  const raw = Deno.env.get(name)?.trim();
+  if (!raw) return [];
+  try {
+    const values: string[] = [];
+    const collect = (candidate: unknown): void => {
+      if (typeof candidate === "string") {
+        const trimmed = candidate.trim();
+        if (trimmed) values.push(trimmed);
+        return;
+      }
+      if (Array.isArray(candidate)) {
+        candidate.forEach(collect);
+        return;
+      }
+      if (candidate && typeof candidate === "object") {
+        Object.values(candidate).forEach(collect);
+      }
+    };
+    collect(JSON.parse(raw));
+    return values;
+  } catch {
+    // The owning feature validates malformed keyrings at startup.
+    return [];
+  }
+}
 function secret(): Uint8Array {
   const value = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET")?.trim() ?? "";
   const bytes = new TextEncoder().encode(value);
@@ -70,17 +96,27 @@ function secret(): Uint8Array {
     "ROOM_PIN_KEY_BASE64",
     "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
     "WEB_PUSH_BINDING_DIGEST_SECRET",
+    "VAPID_PRIVATE_KEY",
+    "NOTIFICATION_DELIVERY_INVOKE_SECRET",
     "SCHEDULER_INVOKE_SECRET",
     "GOOGLE_DRIVE_CLIENT_ID",
     "GOOGLE_DRIVE_CLIENT_SECRET",
     "GOOGLE_DRIVE_REFRESH_TOKEN",
     "GOOGLE_DRIVE_ROOT_FOLDER_ID",
     "PHOTO_PURGE_INVOKE_SECRET",
+    "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+    "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
   ].some((name) => {
     const existing = Deno.env.get(name)?.trim();
     return existing !== undefined && existing !== "" && existing === value;
   });
-  if (bytes.byteLength < 32 || reused) {
+  const reusedKeyringSecret = [
+    "RESERVATION_PII_KEYRING_JSON",
+    "ROOM_PIN_KEYRING_JSON",
+    "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+    "VAPID_KEYRING_JSON",
+  ].some((name) => jsonStringValues(name).includes(value));
+  if (bytes.byteLength < 32 || reused || reusedKeyringSecret) {
     throw new EdgeError(
       503,
       "INSPECTION_CURSOR_NOT_CONFIGURED",
