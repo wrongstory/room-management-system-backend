@@ -17,8 +17,8 @@
 
 | 문서 | 원문 표기 | 백엔드에서의 해석 | 처리 |
 |---|---|---|---|
-| `DOCS/17_ROOM_CATALOG_LONG_STAY_DECISIONS.md` | 현재 정본 | 객실 마스터·점유·수동 체크아웃의 확정 정책. 객실 수와 초기 점유값은 운영 초기값이지 영구 불변식이 아니다. | 정책 근거로 사용하되 복합 화면 상태는 독립 DB 축으로 유지한다. |
-| `DOCS/18_TYPE_PHOTO_TEMPLATE_POLICY.md` | 구현 정본 | 타입별 고정 슬롯과 작업 snapshot 정책. 프런트 fixture의 슬롯 수를 production 게시 완료로 해석하지 않는다. | immutable template version과 작업 snapshot 계약으로 사용한다. |
+| `DOCS/17_ROOM_CATALOG_LONG_STAY_DECISIONS.md` | 현재 정본 | 121개 객실과 타입별 22/51/13/35 분포는 확정 객실 카탈로그다. 최초 투숙 11실과 762호 확인 표시는 운영 시작 fixture다. | 고정 마스터와 초기 점유 fixture를 분리하고 복합 화면 상태는 독립 DB 축으로 유지한다. |
+| `DOCS/18_TYPE_PHOTO_TEMPLATE_POLICY.md` | 구현 정본 | 프런트는 타입별 총 9/10/12/14 슬롯을 정본으로 두지만 백엔드 가이드·현재 template은 최소 10/11/13/15를 전제로 한다. | #179에서 결정할 때까지 충돌로 기록하고 어느 쪽도 조용히 승격하지 않는다. |
 | `DOCS/19_EVENT_NOTIFICATION_POLICY.md` | 원칙/정적 데모 범위 | 알림 분류 정책과 데모 범위가 혼재한다. | 수신자·원장·outbox 정책만 근거로 사용하고 데모 발송은 운영 완료로 보지 않는다. |
 | `DOCS/19_ROOM_PIN_SHEET_CLEANING_HISTORY_DECISIONS.md` | 확정 | PIN 접근·브라우저 비저장 규칙은 일치한다. 사진 보관 시작점은 기존 사용자 확정 계약과 충돌했다. | 사진은 `uploaded_at + 7일`로 정합화하고 검수 시각으로 연장하지 않는다. |
 | `DOCS/19_TEMPLATE_PARITY_AUDIT.md` | 감사 보고서 | 과거 오류를 설명하는 근거 문서다. | 현재 타입/슬롯 정책의 보조 근거로만 사용한다. |
@@ -48,7 +48,7 @@
 | PIN·Sheets | legacy 상태 기록만 소비 | 신규 PIN/Sheets API 미소비 | source 제공 | 민감정보 경계 유지, hosted 활성화와 소비는 별도 |
 | 검수 대기열 pagination | 미소비 | 미소비 | PR #176 후보 | 병합 뒤 generated client 갱신 대상 |
 
-프런트 `main`의 `scripts/check-api-integration.mjs`는 39 paths / 43 operations의 운영 `v0.2.0` subset을 고정 검사한다. 프런트 `dev`의 청소 후보는 백엔드 PR #166 exact source를 기준으로 만든 수기 후보 타입과 intercepted API fixture이며 generated client 정본이 아니다.
+프런트 `main`의 `scripts/check-api-integration.mjs`는 운영 `v0.2.0` 계약 검사면 39 paths / 43 operations를 고정한다. 이 수치는 실제 UI 호출 수가 아니다. `WIREFRAME/index.html`의 literal request 호출을 대조한 현재 UI 소비면은 31 paths / 35 operations이며, `/health`, `/openapi.json`, `/docs`, 개발자 감사·활동·진단 일부, 예약 전이 processor, 객실 master-data 명령은 UI가 호출하지 않는다. 프런트 `dev`의 청소 후보는 백엔드 PR #166 exact source를 기준으로 만든 수기 후보 타입과 intercepted API fixture이며 generated client 정본이 아니다.
 
 ## 공통 연동 불변식
 
@@ -69,4 +69,3 @@
 4. 새 프런트 정책이 기존 사용자 확정 계약과 충돌하면 조용히 승격하지 않고 양 저장소 Issue에 충돌과 처리 결정을 기록한다.
 5. 백엔드 OpenAPI의 path 수만 비교하지 않고 role, status, error code, idempotency, CAS, nullable 의미를 함께 비교한다.
 6. generated client와 breaking diff CI 구현은 #173, 전체 adapter 전환과 browser E2E는 #13에서 진행한다.
-
