@@ -1,8 +1,8 @@
 # 프론트엔드·Codex API 연동 가이드
 
-이 문서는 `makee-ham/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다.
+이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다.
 
-2026-09-16 대조 기준은 프런트 `main@8c1c14da93294a36ce5fc842143bf668ad9cf373`, 차기 후보 `dev@a0d6c07f5bd6cc86e02b2644abc4addc414adfc5`, 백엔드 `dev@c32aa9eec3945334ddda956afc62cc92d801c410`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. 프런트 `dev`와 백엔드 source 제공을 production 활성화로 표현하지 않는다.
+2026-09-17 대조 기준은 프런트 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`, 백엔드 `dev@70154e90eaa633dedbd872b394e4ca51ee25bdf6`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. 프런트 source와 백엔드 source 제공을 production 활성화로 표현하지 않는다.
 
 ## 1. 계약을 받는 위치
 
@@ -36,13 +36,13 @@ production Edge는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` 기준 56 mig
 
 source OpenAPI에는 prepare/confirm/rollback/reveal과 admin 초기화 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
 
-Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 실제 초기 숫자는 배포 secret이므로 프런트가 보유·전송하지 않는다. 관련 path는 production OpenAPI에 이미 존재하지만, 실제 PIN 초기화·Sheets 동기화 기능은 승인된 target mapping·ACL·secret·Cron·hosted smoke가 끝날 때까지 켜지 않는다.
+Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 이 entitlement 계약은 아직 source 미구현이므로 프런트는 기존 reveal 성공을 장기 자격 증명으로 캐시하지 않는다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 실제 초기 숫자는 배포 secret이므로 프런트가 보유·전송하지 않는다. 관련 path는 production OpenAPI에 이미 존재하지만, 실제 PIN 초기화·Sheets 동기화 기능은 승인된 target mapping·ACL·secret·Cron·hosted smoke가 끝날 때까지 켜지 않는다.
 
 ## 2. 로컬 백엔드 준비
 
 ### #84 사진 연동 — API source/bundle 배포, 실제 Google provider 활성화 대기
 
-사진 operation은 운영 OpenAPI와 `api` bundle에 반영됐다. 다만 Google Drive 운영 계정·OAuth·대상 폴더와 역할별 hosted smoke가 끝나기 전에는 실제 업로드/삭제 기능을 production-ready로 표시하지 않는다.
+사진 operation은 운영 OpenAPI와 `api` bundle에 반영됐다. 다만 현재 배포 계약은 업로드 후 7일 고정이며, 최신 확정 계약인 검수 결정+168시간·해결+180일·orphan+30일을 아직 구현하지 않았다. 이 후속 migration/API와 Google Drive 운영 계정·OAuth·대상 폴더·역할별 hosted smoke가 끝나기 전에는 실제 업로드/삭제 기능을 production-ready로 표시하지 않는다.
 
 1. `GET /v1/attempts/{attemptId}/photo-slots`로 immutable slotId와 currentRevision을 받는다. 슬롯 key만으로 UUID를 추측하지 않는다.
 2. `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload?assignmentId=...&assignmentRevision=...&expectedPhotoRevision=...`에 JPEG/WebP **raw bytes**를 전송한다. `Content-Type`은 정확히 image/jpeg 또는 image/webp, 원문307200 bytes 이하이며 multipart/base64는 지원하지 않는다.
@@ -258,7 +258,7 @@ const idempotencyKey = crypto.randomUUID();
 
 ### #165 예상시간 선택화 프론트 적용 체크리스트
 
-아래는 `makee-ham/room-management-system`에서 구현할 source 체크리스트다. 백엔드 배포 gate는 완료됐지만 프런트 연결과 안전한 예약 E2E는 별도다.
+아래는 `wrongstory/room-management-system`에서 구현할 source 체크리스트다. 백엔드 배포 gate는 완료됐지만 프런트 연결과 안전한 예약 E2E는 별도다.
 
 #### 타입·템플릿 관리자 화면
 

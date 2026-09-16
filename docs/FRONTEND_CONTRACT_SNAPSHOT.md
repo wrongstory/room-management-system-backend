@@ -1,54 +1,79 @@
 # 프런트엔드 계약 snapshot
 
-이 문서는 `makee-ham/room-management-system`의 배포 정본과 차기 개발 후보를 백엔드 계약에 대조한 재현 가능한 기록이다. 제품 정책의 최종 우선순위는 [AI 백엔드 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
+이 문서는 `wrongstory/room-management-system`의 exact 제품 snapshot을 백엔드 계약에 대조한 재현 가능한 기록이다. 제품 정책의 최종 우선순위는 [AI 백엔드 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-## 2026-09-16 확인점
+## 2026-09-17 확인점
 
 | 구분 | commit | 용도 |
 |---|---|---|
-| 프런트 `main` | `8c1c14da93294a36ce5fc842143bf668ad9cf373` | 현재 배포 정본. 백엔드 `v0.2.0` 연동을 포함한다. |
-| 프런트 `dev` | `a0d6c07f5bd6cc86e02b2644abc4addc414adfc5` | `main`보다 2 commit 앞선 차기 후보. 선택형 청소시간과 미퇴실 사건 UI는 기능 플래그 OFF 상태다. |
-| 백엔드 `dev` | `c32aa9eec3945334ddda956afc62cc92d801c410` | 이번 대조 기준. source OpenAPI `0.2.0`, 109 paths / 117 operations다. |
-| 백엔드 `main` | `6604b2215e06b9e9ebf0b3138e3716a000c57ddb` | 예상 청소시간 선택화를 포함한 GitHub release source 정본이다. |
+| 프런트 제품 snapshot | `165fed2d62a763d64ac62539e1475c1b3e42868f` | 이번 정합화의 exact 기준. 원격 `dev` ref는 삭제됐지만 commit은 재현 가능하다. |
+| 프런트 현재 원격 `main` | `afeb0898879bf8d381ee2e218938dc3160fd6ac0` | 관찰 대상. 위 snapshot의 정책을 자동 대체하지 않는다. |
+| 백엔드 `dev` | `70154e90eaa633dedbd872b394e4ca51ee25bdf6` | 이번 대조 기준. 62 migrations / OpenAPI 113 paths / 121 operations다. |
+| 백엔드 저장소 `main` | `a12595edf68644b94215c4792e0d3aadd64772c6` | 저장소 release line. 마지막 검증된 production 배포 source와 구분한다. |
 
-프런트 `dev`의 기능 또는 문서를 `main` 배포 상태로 표현하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.
+프런트 snapshot의 기능을 현재 원격 `main` 배포 상태로 추정하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.
 
 ## 프런트 문서 분류
 
 | 문서 | 원문 표기 | 백엔드에서의 해석 | 처리 |
 |---|---|---|---|
 | `DOCS/17_ROOM_CATALOG_LONG_STAY_DECISIONS.md` | 현재 정본 | 121개 객실과 타입별 22/51/13/35 분포는 확정 객실 카탈로그다. 최초 투숙 11실과 762호 확인 표시는 운영 시작 fixture다. | 고정 마스터와 초기 점유 fixture를 분리하고 복합 화면 상태는 독립 DB 축으로 유지한다. |
-| `DOCS/18_TYPE_PHOTO_TEMPLATE_POLICY.md` | 구현 정본 | 프런트는 타입별 총 9/10/12/14 슬롯을 정본으로 두지만 백엔드 가이드·현재 template은 최소 10/11/13/15를 전제로 한다. | #179에서 결정할 때까지 충돌로 기록하고 어느 쪽도 조용히 승격하지 않는다. |
+| `DOCS/18_TYPE_PHOTO_TEMPLATE_POLICY.md` | 과거 구현 근거 | v8+ Decision A의 타입별 9/10/12/14 slot은 이미 백엔드 `dev`에 반영됐다. | pre-A 10/11/13/15 snapshot은 이력 보존하고 backfill하지 않는다. |
 | `DOCS/19_EVENT_NOTIFICATION_POLICY.md` | 원칙/정적 데모 범위 | 알림 분류 정책과 데모 범위가 혼재한다. | 수신자·원장·outbox 정책만 근거로 사용하고 데모 발송은 운영 완료로 보지 않는다. |
-| `DOCS/19_ROOM_PIN_SHEET_CLEANING_HISTORY_DECISIONS.md` | 확정 | PIN 접근·브라우저 비저장 규칙은 일치한다. 사진 보관 시작점은 기존 사용자 확정 계약과 충돌했다. | 사진은 `uploaded_at + 7일`로 정합화하고 검수 시각으로 연장하지 않는다. |
+| `DOCS/19_ROOM_PIN_SHEET_CLEANING_HISTORY_DECISIONS.md` | 최우선 확정 | 사진 보존 기산점과 PIN entitlement 수명주기가 현재 백엔드 source와 충돌한다. | 최신 사용자 결정과 함께 아래 계약으로 고정하고 후속 append-only migration/API로 수정한다. |
 | `DOCS/19_TEMPLATE_PARITY_AUDIT.md` | 감사 보고서 | 과거 오류를 설명하는 근거 문서다. | 현재 타입/슬롯 정책의 보조 근거로만 사용한다. |
 | `DOCS/21_PRODUCTION_API_PWA_INTEGRATION.md` | 운영 연결 기록 | 실제 소비 계약과 당시 운영 snapshot을 기록한다. 시간이 지나면 stale할 수 있다. | 아래 호환표와 exact commit을 함께 갱신한다. |
 | `WIREFRAME/*` | 현재 구현·QA | 고충실도 UI와 fixture다. | API·DB 정본이나 production seed로 승격하지 않는다. |
 
-## 사진 보관 충돌 결정
+## Stage 0 확정 계약과 source gap
 
-- 기존 사용자 확정 계약은 검수 상태와 무관한 `purge_after = uploaded_at + 7 days`다.
-- 최초 업로드 성공시각은 서버가 검증한 provider의 immutable 생성시각을 사용한다.
-- 재시도, 전체 제출, 승인, 반려는 보관기한을 다시 시작하거나 연장하지 않는다.
-- 7일이 검수 전에 지나면 사진은 삭제될 수 있으며, 제출·검수 텍스트 이력은 유지한다.
-- 프런트의 과거 “검수 결정부터 7일” fixture와 QA 기록은 당시 데모 증거일 뿐 현재 정책 근거가 아니다.
+### 사진 보존
+
+- 청소 제출 사진은 최종 검사 결정 전 삭제하지 않고 승인·반려 `decidedAt + 168시간`에 만료한다.
+- 이슈·컴플레인 및 중단/동기화 충돌 증빙은 해결·종결 후 180일, 진짜 orphan은 업로드 후 30일이다.
+- metadata는 원본 만료 뒤에도 영구 보존하고, 이미 삭제된 사진을 복구됐다고 표시하지 않는다.
+- 현재 source의 accepted 사진 `uploadedAt + 168시간` 고정과 즉시 orphan queue는 **미해결**이다.
+
+### PIN 접근
+
+- assignment 통보/outbox 확정 시 durable entitlement가 시작되고 `availableFrom` 전에도 본인 담당이면 유효하다.
+- field complete, upload pending, submitted, review pending 동안 유지하며 최종 결정·취소 승인·재배정·비활성화 정리 때 종료한다.
+- 최대 30초 reveal lease는 entitlement와 별도다. PIN 변경은 구 reveal/revision을 즉시 무효화하고 이미 알림된 현재·다음 담당의 entitlement를 새 revision으로 갱신한다.
+- 현재 source의 `availableFrom` 및 `scheduled|in_progress` attempt 중심 접근은 **미해결**이다.
+
+### 객실 표시·예약 준비 3축
+
+- `intervalBookable`: 요청한 미래 `[checkInAt, checkOutAt)` 구간의 예약 가능성.
+- `readinessStatus`/`checkInReady`: 현재 체크인·배정 준비 상태.
+- `pinSyncStatus`: PIN 동기화 상태. 미래 예약 bookability와 합치지 않는다.
+- 대표 상태는 `BLOCKED > OCCUPIED > ARRIVAL_PENDING > RESERVATION_PRESENT > CLEANING_REQUIRED > READY`다. 이 projection은 백엔드 `dev`에 이미 구현돼 **해결됨**이다.
+
+## 후속 구현 계획
+
+| 범위 | OpenAPI | migration/backfill | 고정할 회귀 이름 |
+|---|---|---|---|
+| 사진 retention | 의미·nullable 확장이므로 계약 버전을 `0.4.0`으로 올림 | 현재 62개 이후 새 append-only migration. pending review는 유지하고 이미 purged는 `unavailable`, accepted/linked/orphan은 실제 evidence로 분류 | `pending_review_photo_survives_upload_plus_7d`, `decision_photo_expires_at_168h_boundary`, `orphan_expires_after_30d`, `resolved_evidence_expires_after_180d` |
+| PIN entitlement | entitlement/reveal ID와 안정 오류를 `0.4.0`에 추가 | durable assignment entitlement 원장과 terminal cleanup을 새 migration으로 추가. 구 lease를 장기 자격으로 backfill하지 않고 current notified assignment를 안전하게 재계산 | `notified_assignment_pin_before_available_from`, `pin_access_survives_field_complete_until_decision`, `pin_revision_rotation_revokes_old_reveal`, `terminal_assignment_revokes_entitlement` |
+| 객실 3축 | 기존 additive source 계약 유지 | 기존 59~60번째 projection 유지, 중복 migration 없음 | `room_primary_status_priority`, `pin_warning_does_not_change_interval_bookability` |
+
+정확한 migration timestamp는 각 구현 PR에서 현재 `dev`를 다시 확인해 확정한다. 현재 source의 OpenAPI `info.version`은 여전히 `0.2.0`이라 개발 snapshot과도 맞지 않으며, 첫 의미 변경 PR에서 `0.4.0`으로 올리고 migration note를 함께 제공한다. 기존 62개 migration과 삭제된 provider 원본을 수정·복원하지 않는다.
 
 ## API 소비·제공 호환표
 
-| 영역 | 프런트 `main` 실제 소비 | 프런트 `dev` 차기 후보 | 백엔드 `dev` 제공 | 판정 |
+| 영역 | 프런트 snapshot 실제 소비 | 최신 정본 요구 | 백엔드 `dev` 제공 | 판정 |
 |---|---|---|---|---|
 | 인증·세션 | login, me, password, Supabase refresh | 동일 | 제공 | 호환 |
 | 계정·개발자 상태 | account CRUD 일부, developer 상태/로그 | 동일 | 제공 | 호환. 역할·상태는 매 요청 최신 서버값 사용 |
 | 가능일 | 제출·변경 요청·결정·후보 | 동일 | 제공 | 호환. KST·CAS·멱등 키 유지 |
 | 예약·객실 | 예약 CRUD/취소/체크아웃, 객실 projection·운영 명령 | 동일 | 제공 | 호환. `stateVersion`/`version`과 409 재조회 필수 |
-| 청소 템플릿·수행·미퇴실 사건 | 미소비 | 기능 플래그 OFF, intercepted fixture로만 검증 | 제공 | source 후보. production 활성화 완료가 아님 |
-| 배정·사진·제출·검수 | 데모 화면 | 일부 조회/수행 후보 외 대부분 미소비 | 제공 | 연동 대기. #13/#173 범위 |
+| 청소 템플릿·수행·미퇴실 사건 | 운영 API 연결 | 상태 기반 수행과 사건 동결 유지 | 제공 | source/dev. production 상태와 별도 |
+| 배정·사진·제출·검수 | 운영 API 연결 | 도메인별 retention과 본인 이력 조회 | lifecycle 제공, retention gap | 사진 안전 계약 후속 필요 |
 | 알림·Web Push | 권한/PWA shell만 사용 | 동일 | source 제공 | hosted provider 활성화와 실제 소비는 별도 |
 | 주급·컴플레인 | 데모 화면 | 동일 | 제공 | 연동 대기 |
-| PIN·Sheets | legacy 상태 기록만 소비 | 신규 PIN/Sheets API 미소비 | source 제공 | 민감정보 경계 유지, hosted 활성화와 소비는 별도 |
+| PIN·Sheets | 신규 PIN API 연결 | 통보 기반 entitlement와 30초 reveal 분리 | reveal/source 제공, entitlement gap | entitlement 후속 필요; hosted 활성화와 별도 |
 | 검수 대기열 pagination | 미소비 | 미소비 | PR #176 후보 | 병합 뒤 generated client 갱신 대상 |
 
-프런트 `main`의 `scripts/check-api-integration.mjs`는 운영 `v0.2.0` 계약 검사면 39 paths / 43 operations를 고정한다. 이 수치는 실제 UI 호출 수가 아니다. `WIREFRAME/index.html`의 literal request 호출을 대조한 현재 UI 소비면은 31 paths / 35 operations이며, `/health`, `/openapi.json`, `/docs`, 개발자 감사·활동·진단 일부, 예약 전이 processor, 객실 master-data 명령은 UI가 호출하지 않는다. 프런트 `dev`의 청소 후보는 백엔드 PR #166 exact source를 기준으로 만든 수기 후보 타입과 intercepted API fixture이며 generated client 정본이 아니다.
+프런트 snapshot의 `scripts/check-api-integration.mjs`는 운영 OpenAPI 계약면을 검사한다. 이 수치는 실제 UI 호출 수가 아니며, 백엔드 `dev`의 113 paths / 121 operations도 production 배포 상태를 뜻하지 않는다. literal request와 generated contract는 후속 PR마다 함께 대조한다.
 
 ## 공통 연동 불변식
 
@@ -63,8 +88,8 @@
 
 ## 변경 감시 규칙
 
-1. 연동 작업 시작과 PR 준비 직전에 프런트 `origin/main`과 `origin/dev` SHA를 각각 기록한다.
-2. `main`만 현재 배포 정본으로 취급하고 `dev`는 차기 후보로 분리한다.
+1. 연동 작업 시작과 PR 준비 직전에 승인된 exact snapshot SHA와 현재 원격 ref를 각각 기록한다.
+2. 원격 ref가 삭제되거나 분기됐으면 exact snapshot을 유지하고 다른 branch를 선형 후속으로 추정하지 않는다.
 3. `AGENTS.md`, `DOCS/16~22`, `FINAL_UX_AUDIT.md`, `WIREFRAME/README.md`, API client/check script 변경을 우선 대조한다.
 4. 새 프런트 정책이 기존 사용자 확정 계약과 충돌하면 조용히 승격하지 않고 양 저장소 Issue에 충돌과 처리 결정을 기록한다.
 5. 백엔드 OpenAPI의 path 수만 비교하지 않고 role, status, error code, idempotency, CAS, nullable 의미를 함께 비교한다.

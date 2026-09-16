@@ -1,9 +1,9 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **확정 제품 정책 / #83·#84·#85·#31 source와 production bundle 반영 완료, 실제 운영 Drive 자격증명·provider/Cron smoke 미완료**
-> 사용자가 확정한 계약은 Google Drive 전용·300KiB 이하·비공개 저장과 `uploaded_at + 7 days` 영구삭제다. 7일 보존에는 검수 상태, 분쟁, retention hold 또는 180일 보존 예외를 두지 않는다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
+> 상태: **기존 #83·#84·#85·#31 source와 production bundle 기록 / 2026-09-17 도메인별 retention 후속 source 미구현 / 실제 Drive 자격증명·provider/Cron smoke 미완료**
+> 최신 확정 계약은 Google Drive 전용·300KiB 이하·비공개 저장을 유지하되, 청소 제출은 최종 검사 결정+168시간, 이슈·컴플레인·중단/충돌 증빙은 해결·종결+180일, 진짜 orphan은 업로드+30일에 삭제한다. 아래 `uploaded_at + 7 days` 절은 현재 배포된 legacy 구현을 설명하는 기록이며 목표 정책이 아니다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-아래 압축·업로드·삭제 흐름과 용량 보호 기준은 운영 계약이다. #84의 Drive HTTP adapter와 업로드·열람 API, #85의 7일 purge worker source 및 Edge bundle은 production에 반영됐다. 운영 OAuth·Google provider hosted smoke·주기 실행 활성화는 아직 미완료이므로 실제 사진 저장을 사용 가능으로 표시하지 않는다.
+아래 압축·업로드 흐름과 용량 보호 기준은 유지한다. #84의 Drive HTTP adapter와 업로드·열람 API, #85의 legacy 7일 purge worker source 및 Edge bundle은 production에 반영됐지만 새 retention anchor·권한·projection은 아직 없다. 운영 OAuth·Google provider hosted smoke·주기 실행 활성화도 미완료이므로 실제 사진 저장을 사용 가능으로 표시하지 않는다.
 
 #83은 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)의 독립 QA·required CI·
 Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다.
@@ -117,7 +117,9 @@ known object와 accepted 부재를 확인하고 finalize를 차단하는 전이�
 client가 검증했다고 주장한 값으로 채우면 안 되며, 합성 metadata DB 테스트를 실파일 검증 PASS로 표현하지 않는다.
 서버가 관측·검증한 최초 업로드 성공 시각을 retry/DB finalize 시각으로 교체하지 않고 정확히 168시간 뒤 만료시킨다.
 
-## 7일 자동삭제
+## Legacy current source: 업로드 기준 7일 자동삭제
+
+이 절은 새 append-only retention migration 전의 현재 worker 동작이다. 후속 구현은 이미 accepted된 업무 이력을 삭제·backfill로 왜곡하지 않고 도메인별 기산점과 `mediaAvailability`를 추가해야 한다.
 
 - 삭제 기준은 날짜 폴더명이 아니라 각 파일의 `uploaded_at + 7일`이다.
 - 정리 작업은 최소 1시간마다 `purge_after <= now()`이며 `purged_at is null`인 행을 제한 수량으로 가져온다.

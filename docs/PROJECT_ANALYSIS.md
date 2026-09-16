@@ -2,9 +2,9 @@
 
 > 문서 지위: 프런트엔드 분석 snapshot이다. 제품 규칙이나 현재 구현과 충돌하면 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)의 우선순위와 `[미확정]` 표시를 먼저 따른다.
 
-분석 대상: `makee-ham/room-management-system` `main@8c1c14da93294a36ce5fc842143bf668ad9cf373`
+분석 대상: `wrongstory/room-management-system` 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`
 
-최신화 메모(2026-09-16 KST): 이전 현재점 `f70efc8`보다 `main@8c1c14d`가 16 commit 전진했다. 현재 `main`의 계약 검사면은 백엔드 운영 `v0.2.0`의 39 paths / 43 operations이고 실제 UI 호출면은 31 paths / 35 operations다. `dev@a0d6c07`은 `main`보다 2 commit 앞선 기능 플래그 OFF 후보를 포함한다. `DOCS/17`의 객실 카탈로그는 정본이지만 초기 점유는 fixture이며, `DOCS/18`의 슬롯 수는 백엔드와 충돌해 #179에서 결정한다. 신규 PIN/사진 `DOCS/19`는 사진 보관 시작점 충돌을 정합화할 대상, `DOCS/21`은 시점이 붙은 연동 기록으로 분류한다. 자세한 exact commit·호환표는 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
+최신화 메모(2026-09-17 KST): exact snapshot `165fed2`의 정본을 재대조했다. 객실 대표 상태와 객실 이동은 백엔드 `dev@70154e9`에 source 구현됐지만 production 미배포다. 사진 보존은 최종 결정+168시간/해결+180일/orphan+30일, PIN은 통보부터 최종 종결까지의 durable entitlement가 최신 확정 계약이며 현재 backend source와 충돌한다. 자세한 해결·미해결·후속 migration 계획은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
 
 ## 결론
 
@@ -46,7 +46,7 @@
 - 폭탄방 승인과 전체 청소 승인이 모두 있어야 해당 한 객실의 요금만 정확히 2배가 됩니다.
 - `(maid_id, week_start)` 지급 레코드는 한 건이며 `OPEN → PAYING → CHECK/PAID`를 CAS로 전이합니다.
 - 과거 기록을 덮어쓰지 않고 정정 이벤트를 추가합니다.
-- 고객명, 전화번호, 객실 PIN, 사진은 각각 별도 보존·노출 정책을 적용합니다.
+- 고객명, 전화번호, 객실 PIN, 사진은 각각 별도 보존·노출 정책을 적용합니다. 청소 제출 사진은 최종 검사 전 보존하고 결정+168시간에 만료하며, PIN entitlement는 통보 시 시작해 최종 결정·취소·재배정·비활성화 정리 때 끝납니다.
 
 ## 발견한 정책 주의점
 
