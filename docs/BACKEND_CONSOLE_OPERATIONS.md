@@ -105,7 +105,7 @@ developer 계정, 마지막 active business admin, developer로의 승격은 서
 - DB 복구: `docs/BACKUP_AND_RECOVERY.md`
 - Phase B/C 보안 범위: GitHub Issue #44
 
-## 퇴실 청소 템플릿 운영 게시 (#156 candidate)
+## 퇴실 청소 템플릿 운영 게시 (#156/#165)
 
 운영 예약 생성 전에 active business admin 계정으로 `GET /v1/cleaning-templates?cleaningKind=checkout`을
 조회합니다. `configured=false`인 room type은 `POST /v1/cleaning-templates`에 해당 `roomTypeCode`,
@@ -116,8 +116,8 @@ developer 계정, 마지막 active business admin, developer로의 승격은 서
 사용해야 하며, 같은 key에 다른 payload를 보내지 않습니다.
 
 rollback은 과거 row를 수정하거나 삭제하는 방식이 아닙니다. 직전 retired 내용을 검토해 다시 새 version으로
-게시합니다. 이미 생성된 planned target은 당시 snapshot을 계속 사용합니다. 이 source candidate는 production
-migration/Edge 배포나 운영 템플릿 값 설정을 완료했다는 뜻이 아니며, release 승인 뒤 네 타입을 명시적으로 입력하고
-hosted admin/role/session/예약 smoke를 별도로 수행해야 합니다. 실제 청소시간은 메이드 attempt 시작부터 현장완료까지
-계산하며 template duration이나 assignment preview 정책으로 대체하지 않습니다. 게시에는 수신자 행동이 없어 notification/outbox가
-생성되지 않는 것이 정상입니다.
+게시합니다. 이미 생성된 planned target은 당시 snapshot을 계속 사용합니다. 2026-09-16 production에는 네 타입이
+각각 v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes=null`입니다. 실제 청소시간은 메이드
+attempt 시작부터 현장완료까지 계산하며 template duration이나 assignment preview 정책으로 대체하지 않습니다.
+게시에는 수신자 행동이 없어 notification/outbox가 생성되지 않는 것이 정상입니다. 예약 success mutation은 안전한
+fixture 부재로 아직 SKIPPED이므로 템플릿 게시 완료와 전체 예약 E2E 완료를 같은 상태로 표시하지 않습니다.

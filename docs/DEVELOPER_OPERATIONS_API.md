@@ -84,18 +84,16 @@ scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `res
 중 event별 필요한 필드만 반환합니다. `checkoutDecision`은 generic complaint/inspection decision과 분리된
 `EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` enum입니다. raw before/after state, request hash,
 PIN version·암호문·평문, 고객명·전화번호·session/token, 알림 body는 projection과 Python generated model에
-존재하지 않습니다. 두 event는 `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`과 production
-allowlist에 반영됐습니다. #156은 production runtime의 `expectedMigration`을 55번째
-`cleaning_template_admin_api`까지 전진시켰습니다. #165 hotfix candidate는 이를 56번째
-`cleaning_template_duration_optional`로 전진시키며, production 56번 적용 전에는 candidate runtime에서
-drift가 `behind`인 것이 정상입니다.
+존재하지 않습니다. 두 event는 현재 production allowlist에 반영됐습니다. #156/#165 후속 production runtime의
+`expectedMigration`과 DB head는 56번째 `cleaning_template_duration_optional`로 일치합니다. 현재 운영에서
+이 head가 `behind`이면 정상 상태가 아니라 배포 drift로 처리합니다.
 
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,
 전체 slots, request hash, raw before/after state는 developer projection에 포함하지 않습니다. 이 event를
-포함한 source allowlist는 66개이며 `dev@ab10249aaf1d671419389615ad8a22984c9849ac`와
-production `main@f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51`에 반영됐습니다. #165는 이 event allowlist를
-바꾸지 않고 checkout template의 선택형 duration 계약과 runtime migration head만 갱신합니다.
+포함한 source allowlist는 66개이며 production source `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`에
+반영됐습니다. #165는 이 event allowlist를 바꾸지 않고 checkout template의 선택형 duration 계약과 runtime
+migration head만 56번으로 갱신했으며, 운영 네 타입 게시 event도 safe summary만 노출합니다.
 
 #29 source의 audit allowlist는 총 36개였습니다. #27 pre-start 필드에
 `assignment.attempt_activated`와 `assignment.rolled_over`를 더하고, attempt/rollover summary는

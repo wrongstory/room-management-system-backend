@@ -1,6 +1,6 @@
 # v0.3.0 릴리즈·운영 승격 계획
 
-> 상태: #156 main/production API 반영 완료, 네 template 미게시. #165 duration 선택화 hotfix 검증 중
+> 상태: #165 `main`·production 56번째 migration·`api` v16·네 template v7·Pages 109/117 반영 완료. 예약 success mutation과 tag/GitHub Release는 대기
 
 이 문서는 Issue #148의 release gate와 운영 활성화 순서를 기록한다. v0.2.0의 과거 evidence는
 [`RELEASE_V0.2.0.md`](./RELEASE_V0.2.0.md)에 그대로 보존하며 이 문서에서 소급 수정하지 않는다.
@@ -9,55 +9,56 @@
 
 | 경계 | 승인 기준 | 현재 상태 |
 |---|---|---|
-| production/main | `main@f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51`, 55 migrations, OpenAPI 0.3.0 109/117 | #156 source·migration·api 배포, template 게시/tag/Release pending |
-| source/dev | `dev@ab10249aaf1d671419389615ad8a22984c9849ac`, 55 migrations, OpenAPI source 109/117 | 일반 개발 통합 기준 |
-| hotfix | `hotfix/165-cleaning-template-duration-optional`, 56 migrations, OpenAPI 109/117 | checkout duration 선택화 검증 중 |
-| target | `hotfix/165-cleaning-template-duration-optional → main` | 독립 QA·required CI 뒤 별도 병합 승인 |
+| production/main source | `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`, 56 migrations, OpenAPI 0.3.0 109/117 | #165 source·migration·`api` v16·template 게시 완료 |
+| source/dev 기능 통합 | PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`, 56 migrations, OpenAPI 109/117 | 이후 문서 commit은 기능 기준을 바꾸지 않음 |
+| hotfix | `hotfix/165-cleaning-template-duration-optional` | 독립 QA·required CI·main 병합·dev 역반영 완료 |
+| 남은 release gate | Issue #148 | 예약 success mutation 결과, 제외 범위 정리, annotated tag/GitHub Release |
 
 - `dev` 또는 `main`에 직접 push하지 않는다.
 - release exact head에서 `application`과 `migration`, 독립 QA 90점 이상, P0/P1=0, 충돌 없음,
   migration manifest 일치를 확인한 뒤에만 main 승격을 요청한다.
-- hotfix 병합 전에는 production 56번째 migration, Edge, 운영 템플릿, Cron/Vault, Pages를 변경하지 않는다.
-- main 병합 뒤에도 backup/recovery evidence와 운영 승인 없이는 production을 변경하지 않는다.
+- #165 배포는 승인된 backup/recovery와 운영 실행 순서를 거쳐 완료됐다. 이후 적용된 56번째 migration을 수정하거나 재적용하지 않는다.
+- 추가 production 변경은 다시 별도 승인하며 Google/Push/PIN/Cron activation을 이번 완료 범위에 소급 포함하지 않는다.
 - production smoke 완료 뒤에만 annotated `v0.3.0` tag와 GitHub Release를 발행한다.
 
 ## 2. 현재 production read-only 기준선
 
-Issue #148/#152 완료 뒤 운영 환경을 변경하지 않는 readback으로 확인한 현재 기준선이다.
+Issue #148/#152/#156/#165 후속 운영 적용 뒤 readback으로 확인한 현재 기준선이다.
 
 | 항목 | 실제 read-only 결과 |
 |---|---|
-| stable migrations | 55, head `cleaning_template_admin_api` |
+| stable migrations | 56, head `cleaning_template_duration_optional` |
 | Edge Functions | 5 bundles: `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` |
+| `api` runtime | ACTIVE v16, source `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` |
 | OpenAPI | version 0.3.0, 109 paths / 117 operations |
 | 객실 / 예약 | 121 / 0 |
+| checkout template | 네 room type 각각 v7 exactly-one, 슬롯 10/11/13/15, `durationMinutes=null` |
 | reservation Cron | healthy |
 
-이 값은 운영 예약 차단이 해소됐다는 뜻이 아니다. template API는 배포됐지만 duration이 필수인 현재 계약에서
-네 타입이 미게시 상태다. #165 56번째 migration/API 보완, 운영 게시와 예약 smoke, provider·Google·Cron 활성화,
-annotated `v0.3.0` tag/GitHub Release는 각각 별도 gate로 남는다.
+템플릿 미게시로 발생하던 `CLEANING_TEMPLATE_NOT_CONFIGURED` 구성 원인은 해소됐다. 다만 운영 예약은 0건이고
+안전하게 되돌릴 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
+provider·Google·Cron 활성화와 annotated `v0.3.0` tag/GitHub Release는 각각 별도 gate로 남는다.
 
 ## 3. Migration manifest와 적용 범위
 
 정본은 [`migration-manifest.v0.3.0.json`](../supabase/migration-manifest.v0.3.0.json)이다.
 각 SQL은 Git timestamp가 아닌 stable name, 정렬된 order, LF-normalized UTF-8 content SHA-256으로
-고정한다. `npm run db:manifest:verify`는 전체 history 56개의 order/name/content SHA와 이번 hotfix
-baseline 55개, pending 1개, 최종 head `cleaning_template_duration_optional`을 검증한다. baseline head는
-`cleaning_template_admin_api`이고 pending first/head는 모두 `cleaning_template_duration_optional`이다.
+고정한다. `npm run db:manifest:verify`는 전체 history 56개의 order/name/content SHA와 #165 배포 계획 당시의
+baseline 55개, pending 1개, 최종 head `cleaning_template_duration_optional`을 검증한다. 당시 baseline head는
+`cleaning_template_admin_api`이고 pending first/head는 모두 `cleaning_template_duration_optional`이었다.
 원격 적용 version이 Git timestamp와 달라도 stable name과 실제 SQL 내용을 대조하며 자동 `db push`,
 history repair, 재적용을 사용하지 않는다.
 
-manifest의 1~55번 entry는 이미 배포된 전체 history reference이며 이번 적용 범위가 아니다. 별도
-`test-production-baseline-upgrade.mjs`는 v0.2.0 synthetic baseline의 19→56 누적 호환성을, 전용 회귀는
-실제 55→56 template/reservation 원장 보존을 검증한다. 운영 적용 대상은 다음 **56번 1건만**이다.
+manifest의 1~56번 entry는 현재 모두 production에 적용된 history reference다. 별도
+`test-production-baseline-upgrade.mjs`는 배포 전에 v0.2.0 synthetic baseline의 19→56 누적 호환성을, 전용 회귀는
+55→56 template/reservation 원장 보존을 검증했다. 현재 이 릴리즈 manifest의 미적용 migration은 없다.
 
 | 적용 순서 | stable migration name | production 상태 |
 |---:|---|---|
-| 56 | `cleaning_template_duration_optional` | pending |
+| 56 | `cleaning_template_duration_optional` | production 적용 완료 |
 
-현재 55번 history/content를 먼저 재대조한 뒤 56번만 적용한다. 실패하면 다음 단계로 진행하지 않는다.
-56번 적용 뒤 manifest head, RLS/FORCE RLS, service-role-only RPC grant, Security Advisor와 별도
-19→56 및 55→56 upgrade evidence를 다시 확인한다.
+운영 적용에서는 기존 55번 history/content를 먼저 재대조한 뒤 56번만 적용했다. 이후에는 56번을 수정·재적용하거나
+history를 강제 보정하지 않는다. 추가 DB 보완은 새 append-only migration과 별도 승인으로 진행한다.
 
 ## 4. Edge Functions와 필수 설정
 
@@ -92,18 +93,18 @@ Pages artifact에 넣지 않는다.
 Supabase가 관리하는 URL/service-role 환경과 위 application secret을 구분한다. 서로 다른 목적의
 암호키, HMAC, invoke secret을 재사용하지 않는다. `.env.example` 파일에는 placeholder만 둔다.
 
-## 5. Production 활성화 순서
+## 5. Production 활성화 순서와 실행 결과
 
-1. 승인된 release exact head와 manifest를 고정하고 production backup 및 recovery restore evidence를 확인한다.
-2. 현재 55개 stable migration과 head를 read-only로 재대조한 뒤 56번 `cleaning_template_duration_optional`만 적용한다.
-3. migration history, RLS/grant, critical RPC, Security Advisor를 확인한다. 실패 시 Edge 배포로 진행하지 않는다.
-4. 독립 QA와 required CI를 통과한 #165 hotfix가 포함된 **병합 후 `main` exact SHA**에서 `api` bundle을 빌드·배포한다. 과거 #156 bundle이나 hotfix branch를 직접 배포하지 않는다. 나머지 4개 bundle과 provider·Google·Cron 설정은 이 변경 때문에 재배포하거나 활성화하지 않는다.
-5. active business admin의 positive catalog read와 developer/maid/inactive/temp-password/revoked-session 권한 negative smoke, 잘못된 body/query 차단을 구분해 확인한다.
-6. `standard`, `premium`, `oceanPremium`, `oceanFamily` 네 room type의 checkout catalog를 읽고 모두 unpublished임을 확인한다.
-7. 운영 책임자가 승인한 photo slot 값만 한 타입씩 새 idempotency key와 현재 expected version으로 게시한다. duration은 승인값이 있을 때만 보내고, 미확정이면 생략한다. migration seed, 빈 template, fallback, 임의 추정값을 사용하지 않는다.
-8. 네 타입이 각각 current published version exactly-one인지 재조회하고, 동일 key replay·stale version·key reuse conflict를 확인한다.
-9. 승인된 되돌릴 수 있는 예약 fixture가 있을 때만 게시 전 `CLEANING_TEMPLATE_NOT_CONFIGURED` 409, 게시 후 예약 성공과 planned checkout target snapshot을 확인한다. fixture가 없으면 skip 사유를 남기며 PASS로 쓰지 않는다.
-10. production OpenAPI가 0.3.0 / 109 / 117인지 확인하고, 개수와 별도로 checkout template 요청에서 `durationMinutes` 생략·`null`이 허용되며 RPC에는 `NULL`이 전달되고 게시·조회 응답에서도 `null`이 보존되는지 확인한다. main-only `workflow_dispatch`의 읽기 전용 Swagger Pages 배포와 parity 대조는 별도 운영 승인을 받은 경우에만 수행하며 이번 source 승격만으로 실행하지 않는다.
+1. 승인된 release exact head와 manifest를 고정하고 production backup 및 recovery restore gate 뒤에만 적용을 진행했다.
+2. 기존 55개 stable migration과 head를 read-only로 재대조한 뒤 56번 `cleaning_template_duration_optional`만 적용했다.
+3. migration 적용 결과와 주요 함수·권한을 확인한 뒤에만 Edge 배포로 진행했다.
+4. 독립 QA와 required CI를 통과한 #165 hotfix의 **병합 후 `main@6604b221...` exact source**에서 `api` bundle만 빌드·배포했다. 나머지 4개 bundle과 provider·Google·Cron 설정은 변경하지 않았다.
+5. active business admin catalog read/publish와 선택형 duration 계약을 확인했고 raw secret·profile UUID를 결과에 남기지 않았다.
+6. 게시 전 네 room type catalog가 unpublished임을 확인하고, 승인된 photo slot 값만 타입별 새 idempotency key와 현재 expected version으로 게시했다. duration은 미확정이므로 생략해 `null`로 보존했다.
+7. 재조회 결과 `standard`, `premium`, `oceanPremium`, `oceanFamily`가 각각 current v7 exactly-one이며 슬롯 수 10/11/13/15, audit 4건, notification/outbox 0건임을 확인했다.
+8. production OpenAPI 0.3.0 / 109 / 117, duration 생략·`null` 요청과 조회의 `null` 보존을 확인했다.
+9. 예약 0건이고 안전하게 되돌릴 fixture가 없어 예약 성공과 planned checkout target snapshot은 실행하지 않았다. `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며 PASS가 아니다.
+10. 별도 승인된 main-only `workflow_dispatch` run `35051144073`으로 읽기 전용 Swagger Pages를 배포하고 production Edge와 path·operationId parity를 확인했다. Pages manifest SHA-256은 배포된 `openapi.json` artifact와 일치한다.
 
 ## 6. Hosted smoke와 명시적 제외
 
@@ -119,8 +120,10 @@ Supabase가 관리하는 URL/service-role 환경과 위 application secret을 �
 PIN/photo mutation과 새 Cron 생성·변경·실행은 각각 별도 승인 gate이며 이번 release source 검증 범위가 아니다.
 기존 bounded status/heartbeat 증거를 참조하되 재실행하지 않은 항목을 PASS로 새로 기록하지 않는다.
 
-Swagger Pages artifact build/deploy와 Edge parity는 별도 승인 optional gate다. 이번 필수 hosted smoke나
-source 승격만으로 Pages를 배포하지 않으며, 미실행 상태를 PASS로 기록하지 않는다.
+Swagger Pages artifact는 별도 승인된 main-only workflow run `35051144073`에서 재배포했다. 공개 index,
+`openapi.json`, `portal-manifest.json`은 모두 200이며 production Edge와 0.3.0 / 109 / 117 및
+path·operationId set이 일치한다. manifest SHA-256은 공개 Pages `openapi.json` artifact와 일치하며,
+build 시각 metadata 때문에 raw production JSON과 artifact byte hash가 같다는 의미는 아니다.
 
 현재 production은 예약 0건이고 안전하게 되돌릴 수 있는 실제 업무 fixture가 없다. 따라서 예약·배정·
 attempt·offline·제출·검수·earning/payroll·complaint·checkout incident의 성공 mutation과 guest PII read는
@@ -130,7 +133,7 @@ attempt·offline·제출·검수·earning/payroll·complaint·checkout incident�
 
 ## 7. 중단·rollback·forward-fix
 
-- migration 실패 시 즉시 후속 적용을 중단하고 transaction rollback 여부와 기존 55개 원장을 확인한다.
+- 이후 새 append-only migration이 실패하면 즉시 후속 적용을 중단하고 transaction rollback 여부와 현재 56개 원장을 확인한다.
 - 적용된 migration과 migration history, audit/domain/earning/payment/PIN 원장은 rewind·삭제·repair하지 않는다.
   DB 결함은 새 Issue와 append-only forward-fix migration으로 해결한다.
 - worker 오류, non-200 반복, stale heartbeat, operator-blocked가 발생하면 해당 Cron/Vault invocation을 먼저
@@ -160,21 +163,25 @@ attempt·offline·제출·검수·earning/payroll·complaint·checkout incident�
 
 ## 9. Closure checklist
 
+production 변경은 별도 승인된 backup/recovery gate 뒤에 진행됐다. 아래 evidence 항목의 미완료 표시는 gate를
+건너뛰었다는 뜻이 아니라, Issue #148에서 다시 확인할 수 있는 영구 backup/restore artifact reference가 아직
+이 문서에 연결되지 않았다는 뜻이다.
+
 - [x] #156/#158/#162 source/dev 병합: `dev@ab10249aaf1d671419389615ad8a22984c9849ac`
-- [x] #156 release를 `main@f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51`과 production 55번/API에 반영
+- [x] #156 release를 production 55번/API에 반영
 - [x] OpenAPI source version 0.3.0, Pages expected 109/117 계약 작성
 - [x] 56개 migration stable name/order/content SHA manifest 작성
 - [x] #132 / #146 / #147 문서·fixture 계약 보존
 - [x] synthetic production baseline 19→56 누적 upgrade와 55→56 template/reservation 원장 보존 회귀 작성
 - [x] #156 release exact-head 전체 application/migration 재검증
-- [ ] 독립 QA 90점 이상, P0/P1=0, required CI PASS
-- [ ] `hotfix/165-cleaning-template-duration-optional → main` 승인·병합
+- [x] #165 독립 QA 90점 이상, P0/P1=0, required CI PASS
+- [x] `hotfix/165-cleaning-template-duration-optional → main` 승인·병합 — `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`
 - [ ] production backup/recovery evidence
 - [x] production migration 55와 #156 `api` bundle 반영
-- [ ] production migration 56 1건 적용과 Security Advisor, `api` bundle 재배포
-- [ ] 네 room type checkout template 승인값 게시와 exactly-one 확인
-- [ ] 승인 fixture 기반 reservation 409→success/snapshot smoke 또는 명시적 skip
+- [x] production migration 56 1건 적용과 `api` ACTIVE v16 재배포
+- [x] 네 room type checkout template v7 게시와 exactly-one 확인 — `durationMinutes=null`
+- [x] 예약 mutation을 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`로 명시; PASS로 표현하지 않음
 - [ ] provider/Google/Cron 활성화는 별도 Issue evidence와 분리
-- [ ] Swagger Pages main-only manual deploy와 0.3.0 / 109 / 117 parity
-- [ ] hosted smoke와 rollback readiness 확인
+- [x] Swagger Pages main-only manual deploy와 0.3.0 / 109 / 117 parity — run `35051144073`
+- [x] production health/OpenAPI와 template hosted read/publish smoke 확인
 - [ ] annotated tag/GitHub Release
