@@ -1250,6 +1250,38 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
         .includes("RESERVATION_CURRENT"),
     "room projection exposes the authoritative evaluation instant and phase",
   );
+  assert(
+    roomProjection.required.includes("serverTime") &&
+      roomProjection.properties.serverTime.description.includes(
+        "evaluatedAt",
+      ) &&
+      roomProjection.required.includes("reservationLifecycle") &&
+      JSON.stringify(
+          doc.components.schemas.RoomReservationLifecycle.enum,
+        ) ===
+        JSON.stringify([
+          "NONE",
+          "FUTURE",
+          "RESERVATION_PRESENT",
+          "ARRIVAL_PENDING",
+          "OCCUPIED",
+        ]) &&
+      roomProjection.required.includes("readinessStatus") &&
+      roomProjection.required.includes("primaryDisplayStatus") &&
+      roomProjection.required.includes("nextReservationId") &&
+      roomProjection.required.includes("blockingReasonCodes") &&
+      roomProjection.required.includes("readinessReasonCodes"),
+    "room projection exposes arrival, readiness, display, and next reservation axes",
+  );
+  assert(
+    (doc.components.schemas.RoomReadinessReasonCode.enum as readonly string[])
+      .includes("PIN_MISMATCH") &&
+      (doc.components.schemas.RoomReadinessReasonCode.enum as readonly string[])
+        .includes("PIN_UNCONFIGURED") &&
+      !(doc.components.schemas.RoomBlockingReasonCode.enum as readonly string[])
+        .includes("PIN_MISMATCH"),
+    "PIN readiness warnings do not become reservation allocation blockers",
+  );
   const reveal = doc.components.schemas.RoomPinReveal;
   const change = doc.components.schemas.RoomPinChangeResult;
   assert(

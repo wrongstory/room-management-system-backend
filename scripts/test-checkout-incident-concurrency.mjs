@@ -722,7 +722,13 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     "report_checkout_presence_incident",
     reportArgs(extensionFixture, `checkout-incident-extension-report-${randomUUID()}`, "3".repeat(64)),
   ), "checkout extension report");
-  const extendedAt = minute(new Date(Date.now() + 2 * 60 * 60_000));
+  const extensionNow = new Date();
+  const extensionMidnight = Date.parse(nextKstMidnight(extensionNow));
+  const extensionStartMs = extensionMidnight - extensionNow.getTime() > 35 * 60_000
+    ? extensionNow.getTime() + 15 * 60_000
+    : extensionMidnight + 15 * 60_000;
+  const extendedAt = minute(new Date(extensionStartMs));
+  const extendedDueAt = minute(new Date(extensionStartMs + 15 * 60_000));
   ok(await client.rpc("decide_checkout_presence_incident", {
     p_actor_profile_id: adminProfileId,
     p_session_id: adminSessionId,
@@ -737,7 +743,7 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
       sequenceNumber: 20_010,
       serviceDate: kstDate(new Date(extendedAt)),
       availableFrom: extendedAt,
-      dueAt: minute(new Date(Date.parse(extendedAt) + 60 * 60_000)),
+      dueAt: extendedDueAt,
     },
     p_idempotency_key: `checkout-incident-extension-${randomUUID()}`,
     p_request_hash: "4".repeat(64),
