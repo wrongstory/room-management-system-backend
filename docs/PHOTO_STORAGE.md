@@ -1,9 +1,9 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **확정 제품 정책 / #83·#84·#85·#31 source/dev 완료·production 미승격, 실제 운영 Drive 미연결**
+> 상태: **확정 제품 정책 / #83·#84·#85·#31 source와 production bundle 반영 완료, 실제 운영 Drive 자격증명·provider/Cron smoke 미완료**
 > 사용자가 확정한 계약은 Google Drive 전용·300KiB 이하·비공개 저장과 `uploaded_at + 7 days` 영구삭제다. 7일 보존에는 검수 상태, 분쟁, retention hold 또는 180일 보존 예외를 두지 않는다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-아래 압축·업로드·삭제 흐름과 용량 보호 기준은 구현 시 따라야 하는 운영 계약이다. #84의 Drive HTTP adapter와 업로드·열람 API, #85의 7일 purge worker는 source/dev 완료했다. 운영 OAuth·Google/hosted smoke·주기 실행 활성화는 아직 미완료다.
+아래 압축·업로드·삭제 흐름과 용량 보호 기준은 운영 계약이다. #84의 Drive HTTP adapter와 업로드·열람 API, #85의 7일 purge worker source 및 Edge bundle은 production에 반영됐다. 운영 OAuth·Google provider hosted smoke·주기 실행 활성화는 아직 미완료이므로 실제 사진 저장을 사용 가능으로 표시하지 않는다.
 
 #83은 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)의 독립 QA·required CI·
 Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다.
@@ -12,8 +12,7 @@ Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합
 `dev@520abe7b80501ed9a4573e2251b9b640476d87b5`에 병합됐다. 이어 #85는 PR #90으로
 `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`에 병합됐다. 이 개발 통합은 **33 migrations / 67 paths / 72 operations**이며,
 사진 슬롯·업로드·작업 상태·원본 열람과 accepted 168시간 purge, never-accepted orphan 보상, 빈 room/date 폴더 retirement source가 완료됐다.
-PR #91로 #31 전체 제출·검수·반려 재청소까지 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`에 병합됐다. 개발 정본은 **34 migrations / 74 paths / 80 operations**이며 production 배포·현재 사용은 아직 ❌다.
-production은 기존 19 migrations / 39 paths / 43 operations를 유지하며 DB/Edge/Pages/Google 환경을 변경하지 않았다.
+PR #91로 #31 전체 제출·검수·반려 재청소까지 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`에 병합됐다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**였다. 2026-09-16 production 정본은 56 migrations / OpenAPI 109 paths / 117 operations이고 관련 API 및 `photo-purge` bundle source가 반영됐다. 다만 실제 Google 환경은 아직 활성화하지 않았다.
 상세 exact head·동일 tree·CI 재실행 및 source/dev 승인 증거는 [API 상태 정본의 #83/#84/#85/#31 gate](./API_STATUS_MATRIX.md)를 따른다.
 
 ## 저장 위치와 폴더
@@ -98,7 +97,7 @@ begin/claim/finalize/user 조회는 최신 role/status·Auth session·attempt ow
 `get_photo_upload`는 사용자 권한 기반 상태이며 `reconcile_photo_upload`는 worker의 내구성 확인·후보 retire command다.
 `settle_photo_compensation`은 검증된 worker의 deleted/not_found 결과만 기록한다. #83 자체에는 실제 DELETE 호출이 없었고,
 #84는 admission-bound wrapper와 Drive adapter를 통해 미수락 candidate의 fenced compensation만 구현했다.
-#85 accepted 7일 purge worker는 candidate 보상과 별도 원장·권한으로 구현되어 source/dev 병합까지 완료됐다. production 활성화·Google hosted purge smoke는 아직 미완료이며, candidate 보상 삭제를 accepted 보존 만료로 간주하지 않는다.
+#85 accepted 7일 purge worker는 candidate 보상과 별도 원장·권한으로 구현되어 production source/bundle에 반영됐다. Google hosted purge smoke와 Cron 활성화는 아직 미완료이며, candidate 보상 삭제를 accepted 보존 만료로 간주하지 않는다.
 
 worker는 비밀 인증키가 아닌 서버 claim identity의 digest와 fence를 함께 전달한다. 유효 lease를 다른 claimant에게
 공유하지 않고, 같은 claim retry만 동일 expiry를 반환한다. 만료 뒤 새 fence는 이전 지연 callback을 거부한다.
