@@ -18,6 +18,16 @@ const errorResponse = {
   },
 };
 
+const roomChangeConflictResponse = {
+  description:
+    "객실 변경 충돌입니다. error.code로 분기하고 error.conflict의 허용된 리소스와 최신 version만 다시 조회합니다.",
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/RoomChangeConflictEnvelope" },
+    },
+  },
+};
+
 const idempotencyHeader = {
   name: "Idempotency-Key",
   in: "header",
@@ -1287,7 +1297,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 67,
+              maxItems: 68,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -3532,14 +3542,95 @@ export const openApiDocument = {
       patch: {
         tags: ["Reservations"],
         operationId: "changeReservation",
-        summary: "예약 일정·객실·고객정보 변경",
+        summary: "예약 일정·고객정보 변경",
         description:
-          "active business admin이 expectedVersion CAS로 예약을 변경합니다. guestName 필드 생략은 기존값 유지, null은 삭제, 문자열은 새 암호문 설정을 뜻합니다. 이미 배정·시작된 작업과 충돌하면 409로 거부됩니다.",
+          "active business admin이 expectedVersion CAS로 예약을 변경합니다. guestName 필드 생략은 기존값 유지, null은 삭제, 문자열은 새 암호문 설정을 뜻합니다. roomId는 하위 호환을 위해 전달하지만 기존 객실과 같아야 하며, 실제 객실 변경은 전용 preview/commit API만 허용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [reservationIdParameter(), idempotencyHeader],
         requestBody: reservationRequestBody("ReservationChangeRequest"),
         responses: reservationMutationResponses(),
+      },
+    },
+    "/v1/reservations/{reservationId}/room-change/preview": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "previewReservationRoomMove",
+        summary: "체크인 전 객실 변경 영향 미리보기",
+        description:
+          "active business admin 전용 read-only 미리보기입니다. reasonCode는 필수이며 effectiveAt은 생략 시 예약 checkInAt을 사용하고, 제공하면 checkInAt과 정확히 같아야 합니다. 5분 TTL의 evaluatedAt/expiresAt과 상태 fingerprint를 반환합니다. inactive 또는 투숙 중 예약도 200 ineligible projection과 안정적인 rejection code를 반환하고 변경하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [reservationIdParameter()],
+        requestBody: reservationRequestBody(
+          "ReservationRoomMovePreviewRequest",
+        ),
+        responses: {
+          "200": {
+            description: "객실 변경 가능 여부와 원자적 commit 입력",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["preview"],
+                  properties: {
+                    preview: {
+                      $ref: "#/components/schemas/ReservationRoomMovePreview",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": roomChangeConflictResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/reservations/{reservationId}/room-change": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "commitReservationRoomMove",
+        summary: "체크인 전 객실 변경 확정",
+        description:
+          "preview payload의 reasonCode/effectiveAt과 발급된 정확한 evaluatedAt/expiresAt/fingerprint, 세 CAS version을 검증합니다. 동일 Idempotency-Key와 동일 payload의 성공 응답은 TTL 이후에도 replay되며, 같은 key의 다른 payload는 안전한 최신 version metadata를 포함한 IDEMPOTENCY_KEY_REUSED 409입니다. 새 만료 요청과 상태 변경은 ROOM_CHANGE_PREVIEW_STALE로 거부됩니다. 다른 key로 이미 같은 target에 이동한 상태는 MOVE_ALREADY_APPLIED 409입니다. 기존 private planned checkout target만 원자적으로 이동합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [reservationIdParameter(), idempotencyHeader],
+        requestBody: reservationRequestBody("ReservationRoomMoveCommitRequest"),
+        responses: {
+          "200": {
+            description:
+              "체크인 전 객실 변경 결과 또는 동일 성공 receipt replay",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["result"],
+                  properties: {
+                    result: {
+                      $ref: "#/components/schemas/ReservationRoomMoveResult",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": roomChangeConflictResponse,
+          "500": errorResponse,
+        },
       },
     },
     "/v1/reservations/{reservationId}/cancel": reservationCommandPath(
@@ -5418,6 +5509,77 @@ export const openApiDocument = {
           "INTERNAL_SERVER_ERROR",
         ],
       },
+      RoomChangeConflict: {
+        type: "object",
+        additionalProperties: false,
+        required: ["reloadResources", "latestVersions"],
+        properties: {
+          reloadResources: {
+            type: "array",
+            minItems: 1,
+            maxItems: 4,
+            uniqueItems: true,
+            items: {
+              type: "string",
+              enum: [
+                "reservation",
+                "sourceRoom",
+                "targetRoom",
+                "roomMovePreview",
+              ],
+            },
+          },
+          latestVersions: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "reservationVersion",
+              "sourceRoomVersion",
+              "targetRoomVersion",
+            ],
+            properties: {
+              reservationVersion: {
+                anyOf: [
+                  { type: "integer", minimum: 1 },
+                  { type: "null" },
+                ],
+              },
+              sourceRoomVersion: {
+                anyOf: [
+                  { type: "integer", minimum: 1 },
+                  { type: "null" },
+                ],
+              },
+              targetRoomVersion: {
+                anyOf: [
+                  { type: "integer", minimum: 1 },
+                  { type: "null" },
+                ],
+              },
+            },
+          },
+        },
+      },
+      RoomChangeConflictEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["error", "requestId"],
+        properties: {
+          error: {
+            type: "object",
+            additionalProperties: false,
+            required: ["code", "message", "conflict"],
+            properties: {
+              code: { $ref: "#/components/schemas/ErrorCode" },
+              message: { type: "string" },
+              conflict: {
+                $ref: "#/components/schemas/RoomChangeConflict",
+              },
+            },
+          },
+          requestId: { type: "string" },
+        },
+      },
       ErrorEnvelope: {
         type: "object",
         required: ["error", "requestId"],
@@ -5685,6 +5847,7 @@ export const openApiDocument = {
           "photo.collection_item_deleted",
           "reservation.created",
           "reservation.changed",
+          "reservation.room_moved",
           "reservation.cancelled",
           "reservation.manual_checkout",
           "reservation.scheduled_check_in",
@@ -7856,6 +8019,246 @@ export const openApiDocument = {
         properties: {
           expectedVersion: { type: "integer", minimum: 1 },
           reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ReservationRoomMoveReasonCode: {
+        type: "string",
+        enum: ["GUEST_REQUEST", "ROOM_UNAVAILABLE", "OPERATIONAL_ADJUSTMENT"],
+        description: "체크인 전 객실 변경의 source-controlled 감사 사유",
+      },
+      ReservationRoomMoveMode: {
+        type: "string",
+        enum: ["BEFORE_CHECKIN", "DURING_STAY"],
+      },
+      ReservationRoomMoveRejectionReasonCode: {
+        type: "string",
+        enum: [
+          "DURING_STAY_NOT_SUPPORTED",
+          "RESERVATION_NOT_ACTIVE",
+          "SAME_ROOM",
+          "CLEANING_WORKFLOW_PUBLIC",
+          "PLANNED_CHECKOUT_NOT_PRIVATE",
+          "CLEANING_WORKFLOW_ASSIGNED",
+          "CLEANING_WORKFLOW_NOTIFIED",
+          "CLEANING_WORKFLOW_STARTED",
+          "ACTIVE_PIN_ACCESS_EXISTS",
+          "TARGET_ROOM_BLOCKED",
+          "RESERVATION_OVERLAP",
+        ],
+      },
+      ReservationRoomMoveBlockingReasonCode: {
+        type: "string",
+        enum: [
+          "DURING_STAY_NOT_SUPPORTED",
+          "RESERVATION_VERSION_CONFLICT",
+          "SOURCE_ROOM_VERSION_CONFLICT",
+          "TARGET_ROOM_VERSION_CONFLICT",
+          "TARGET_ROOM_OVERLAP",
+          "ROOM_CHANGE_PREVIEW_STALE",
+          "CLEANING_ASSIGNMENT_LOCKED",
+          "PIN_LEASE_ACTIVE",
+          "TARGET_ROOM_BLOCKED",
+        ],
+        description:
+          "commit HTTP 오류 taxonomy와 같은 고수준 차단 코드입니다. rejectionReasonCodes는 안전한 세부 진단 축입니다.",
+      },
+      ReservationRoomMoveOutcome: {
+        type: "object",
+        additionalProperties: false,
+        required: ["occupancyStatus", "readinessStatus", "stateVersion"],
+        properties: {
+          occupancyStatus: { $ref: "#/components/schemas/RoomOccupancyStatus" },
+          readinessStatus: { $ref: "#/components/schemas/RoomReadinessStatus" },
+          stateVersion: { type: "integer", minimum: 1 },
+        },
+        description: "동일 snapshot의 PII/PIN 비노출 객실 영향 projection",
+      },
+      ReservationRoomMovePreviewRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "targetRoomId",
+          "reasonCode",
+          "expectedReservationVersion",
+          "expectedSourceRoomVersion",
+          "expectedTargetRoomVersion",
+        ],
+        properties: {
+          targetRoomId: { type: "string", format: "uuid" },
+          effectiveAt: {
+            type: "string",
+            format: "date-time",
+            description:
+              "생략 시 예약 checkInAt. Phase B에서는 제공 시 checkInAt과 정확히 같아야 합니다.",
+          },
+          reasonCode: {
+            $ref: "#/components/schemas/ReservationRoomMoveReasonCode",
+          },
+          expectedReservationVersion: { type: "integer", minimum: 1 },
+          expectedSourceRoomVersion: { type: "integer", minimum: 1 },
+          expectedTargetRoomVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      ReservationRoomMoveCommitRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "targetRoomId",
+          "expectedReservationVersion",
+          "expectedSourceRoomVersion",
+          "expectedTargetRoomVersion",
+          "evaluatedAt",
+          "expiresAt",
+          "effectiveAt",
+          "impactFingerprint",
+          "reasonCode",
+        ],
+        properties: {
+          targetRoomId: { type: "string", format: "uuid" },
+          expectedReservationVersion: { type: "integer", minimum: 1 },
+          expectedSourceRoomVersion: { type: "integer", minimum: 1 },
+          expectedTargetRoomVersion: { type: "integer", minimum: 1 },
+          evaluatedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+          effectiveAt: { type: "string", format: "date-time" },
+          impactFingerprint: {
+            type: "string",
+            pattern: "^[0-9a-f]{64}$",
+          },
+          reasonCode: {
+            $ref: "#/components/schemas/ReservationRoomMoveReasonCode",
+          },
+        },
+      },
+      ReservationRoomMovePreview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "mode",
+          "eligible",
+          "rejectionReasonCodes",
+          "blockingReasonCodes",
+          "warnings",
+          "targetBlockReasonCodes",
+          "sourceOutcome",
+          "targetOutcome",
+          "impactFingerprint",
+          "evaluatedAt",
+          "expiresAt",
+          "effectiveAt",
+          "reservationId",
+          "reservationVersion",
+          "sourceRoomId",
+          "sourceRoomVersion",
+          "targetRoomId",
+          "targetRoomVersion",
+          "checkInAt",
+          "checkOutAt",
+          "guestCount",
+          "preparationObligationId",
+          "checkoutObligationId",
+          "checkoutObligationVersion",
+          "plannedCheckoutTargetId",
+          "plannedCheckoutTargetVersion",
+        ],
+        properties: {
+          mode: { $ref: "#/components/schemas/ReservationRoomMoveMode" },
+          eligible: { type: "boolean" },
+          rejectionReasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: {
+              $ref:
+                "#/components/schemas/ReservationRoomMoveRejectionReasonCode",
+            },
+          },
+          blockingReasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: {
+              $ref:
+                "#/components/schemas/ReservationRoomMoveBlockingReasonCode",
+            },
+          },
+          warnings: {
+            type: "array",
+            maxItems: 0,
+            items: { type: "string" },
+            description:
+              "Phase B source-controlled 경고. 현재 정의된 경고는 없어 빈 배열입니다.",
+          },
+          targetBlockReasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: { $ref: "#/components/schemas/RoomBlockingReasonCode" },
+          },
+          sourceOutcome: {
+            $ref: "#/components/schemas/ReservationRoomMoveOutcome",
+          },
+          targetOutcome: {
+            $ref: "#/components/schemas/ReservationRoomMoveOutcome",
+          },
+          impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          evaluatedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+          effectiveAt: { type: "string", format: "date-time" },
+          reservationId: { type: "string", format: "uuid" },
+          reservationVersion: { type: "integer", minimum: 1 },
+          sourceRoomId: { type: "string", format: "uuid" },
+          sourceRoomVersion: { type: "integer", minimum: 1 },
+          targetRoomId: { type: "string", format: "uuid" },
+          targetRoomVersion: { type: "integer", minimum: 1 },
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
+          preparationObligationId: { type: "string", format: "uuid" },
+          checkoutObligationId: { type: "string", format: "uuid" },
+          checkoutObligationVersion: { type: "integer", minimum: 1 },
+          plannedCheckoutTargetId: { type: ["string", "null"], format: "uuid" },
+          plannedCheckoutTargetVersion: {
+            type: ["integer", "null"],
+            minimum: 1,
+          },
+        },
+      },
+      ReservationRoomMoveResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "reservation",
+          "mode",
+          "evaluatedAt",
+          "expiresAt",
+          "effectiveAt",
+          "movedAt",
+          "sourceRoomId",
+          "targetRoomId",
+          "sourceRoomVersion",
+          "targetRoomVersion",
+          "plannedCheckoutTargetId",
+          "plannedCheckoutTargetVersion",
+          "sourceOutcome",
+          "targetOutcome",
+        ],
+        properties: {
+          reservation: { $ref: "#/components/schemas/Reservation" },
+          mode: { type: "string", const: "BEFORE_CHECKIN" },
+          evaluatedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+          effectiveAt: { type: "string", format: "date-time" },
+          movedAt: { type: "string", format: "date-time" },
+          sourceRoomId: { type: "string", format: "uuid" },
+          targetRoomId: { type: "string", format: "uuid" },
+          sourceRoomVersion: { type: "integer", minimum: 1 },
+          targetRoomVersion: { type: "integer", minimum: 1 },
+          plannedCheckoutTargetId: { type: "string", format: "uuid" },
+          plannedCheckoutTargetVersion: { type: "integer", minimum: 1 },
+          sourceOutcome: {
+            $ref: "#/components/schemas/ReservationRoomMoveOutcome",
+          },
+          targetOutcome: {
+            $ref: "#/components/schemas/ReservationRoomMoveOutcome",
+          },
         },
       },
       ManualCleaningRequestCreate: {

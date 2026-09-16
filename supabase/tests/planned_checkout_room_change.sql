@@ -71,6 +71,37 @@ begin
 end;
 $$;
 
+create function pg_temp.preview_room_change(
+  p_reservation_id uuid,p_target_room_id uuid
+) returns jsonb language sql volatile as $$
+  select public.preview_reservation_room_move(
+    pg_temp.rid(1),reservation.id,p_target_room_id,reservation.version,
+    source_room.state_version,target_room.state_version,null,
+    'OPERATIONAL_ADJUSTMENT'
+  )
+  from public.reservations reservation
+  join public.rooms source_room on source_room.id=reservation.room_id
+  join public.rooms target_room on target_room.id=p_target_room_id
+  where reservation.id=p_reservation_id
+$$;
+
+create function pg_temp.commit_room_change(
+  p_preview jsonb,p_idempotency_key text,p_request_hash text
+) returns jsonb language sql volatile as $$
+  select public.commit_reservation_room_move(
+    pg_temp.rid(1),(p_preview->>'reservationId')::uuid,
+    (p_preview->>'targetRoomId')::uuid,
+    (p_preview->>'reservationVersion')::bigint,
+    (p_preview->>'sourceRoomVersion')::bigint,
+    (p_preview->>'targetRoomVersion')::bigint,
+    (p_preview->>'evaluatedAt')::timestamptz,
+    (p_preview->>'expiresAt')::timestamptz,
+    (p_preview->>'effectiveAt')::timestamptz,
+    p_preview->>'impactFingerprint','OPERATIONAL_ADJUSTMENT',
+    p_idempotency_key,p_request_hash
+  )
+$$;
+
 select pg_temp.make_room_change_case(
   'unassigned',200,70,'2041-01-01 16:00+09','2041-01-02 11:00+09'
 );
@@ -88,22 +119,24 @@ select pg_temp.make_room_change_case(
   date_trunc('minute',now())+interval '1 day'
 );
 
--- Unassigned: the reservation, obligation and same planned target move together.
-create temporary table unassigned_result as
-select public.change_reservation(
-  pg_temp.rid(1),c.reservation_id,c.new_room_id,c.check_in_at,c.check_out_at,2,
-  'keep',null,1,'ROOM_CHANGED','room-change-unassigned',repeat('2',64)
-) as response
+-- Unassigned: the dedicated command moves the reservation, obligation and same
+-- planned target together. Generic reservation change is tested separately as a
+-- fail-closed bypass regression.
+create temporary table unassigned_preview as
+select pg_temp.preview_room_change(c.reservation_id,c.new_room_id) as value
 from room_change_cases c where c.label='unassigned';
+create temporary table unassigned_result as
+select pg_temp.commit_room_change(
+  preview.value,'room-change-unassigned',repeat('2',64)
+) as response from unassigned_preview preview;
 select is(
-  public.change_reservation(
-    pg_temp.rid(1),c.reservation_id,c.new_room_id,c.check_in_at,c.check_out_at,2,
-    'keep',null,1,'ROOM_CHANGED','room-change-unassigned',repeat('2',64)
+  pg_temp.commit_room_change(
+    preview.value,'room-change-unassigned',repeat('2',64)
   ),
   (select response from unassigned_result),
   'same room-change command replays the same logical response'
 )
-from room_change_cases c where c.label='unassigned';
+from unassigned_preview preview;
 select ok((
   select r.room_id=c.new_room_id and o.room_id=c.new_room_id and t.room_id=c.new_room_id
     and o.planned_cleaning_target_id=c.target_id and o.current_cleaning_target_id is null
@@ -127,17 +160,16 @@ select ok((
   where c.label='unassigned'
 ),'room change preserves immutable target creation snapshots');
 select is((select count(*)::integer from public.audit_events a join room_change_cases c
-  on a.entity_id=c.reservation_id where c.label='unassigned' and a.event_type='reservation.changed'),1,
+  on a.entity_id=c.reservation_id where c.label='unassigned' and a.event_type='reservation.room_moved'),1,
   'room-change replay appends one audit event');
 select is((select count(*)::integer from private.command_executions e
-  where e.actor_profile_id=pg_temp.rid(1) and e.command_type='reservation.change'
+  where e.actor_profile_id=pg_temp.rid(1) and e.command_type='reservation.room_move'
     and e.idempotency_key='room-change-unassigned'),1,
   'room-change replay retains one scoped receipt');
 select throws_ok($test$
-  select public.change_reservation(
-    pg_temp.rid(1),c.reservation_id,c.new_room_id,c.check_in_at,c.check_out_at,2,
-    'keep',null,1,'ROOM_CHANGED','room-change-unassigned',repeat('9',64)
-  ) from room_change_cases c where c.label='unassigned'
+  select pg_temp.commit_room_change(
+    preview.value,'room-change-unassigned',repeat('9',64)
+  ) from unassigned_preview preview
 $test$,'23505','IDEMPOTENCY_KEY_REUSED','same idempotency key with another hash is rejected');
 
 -- Draft: keep the immutable draft revision, but make it explicitly stale.
@@ -154,25 +186,25 @@ where c.label='draft';
 update room_change_cases c set assignment_id=a.id
 from public.cleaning_assignments a
 where c.label='draft' and a.cleaning_target_id=c.target_id and a.is_current;
-select lives_ok($test$
-  select public.change_reservation(
-    pg_temp.rid(1),c.reservation_id,c.new_room_id,c.check_in_at,c.check_out_at,2,
-    'keep',null,1,'ROOM_CHANGED','room-change-draft',repeat('4',64)
-  ) from room_change_cases c where c.label='draft'
-$test$,'unnotified draft room change succeeds');
+create temporary table draft_preview as
+select pg_temp.preview_room_change(c.reservation_id,c.new_room_id) as value
+from room_change_cases c where c.label='draft';
+select ok((select not (value->>'eligible')::boolean
+  and (value->'blockingReasonCodes') ? 'CLEANING_ASSIGNMENT_LOCKED'
+  from draft_preview),'unnotified draft is an ineligible assigned-workflow preview');
+select throws_ok($test$
+  select pg_temp.commit_room_change(
+    preview.value,'room-change-draft',repeat('4',64)
+  ) from draft_preview preview
+$test$,'23514','CLEANING_ASSIGNMENT_LOCKED','unnotified draft room move fails closed');
 select ok((
   select a.is_current and a.notified_at is null and a.notified_room_id_snapshot is null
-    and a.revision<t.assignment_version and t.room_id=c.new_room_id
+    and a.revision=t.assignment_version and t.room_id=c.old_room_id
   from room_change_cases c
   join public.cleaning_assignments a on a.id=c.assignment_id
   join public.cleaning_targets t on t.id=c.target_id
   where c.label='draft'
-),'unnotified draft remains immutable and stale after room move');
-select is((
-  select reason_code from private.assignment_commit_candidates_at(
-    date '2041-02-02','2041-02-01 09:00+09'
-  ) q join room_change_cases c on c.target_id=q.target_id where c.label='draft'
-),'ASSIGNMENT_DRAFT_STALE_SCHEDULE','stale draft cannot be notified without a new revision');
+),'rejected draft move preserves the current private assignment and old room');
 
 -- Notified: implicit relocation is rejected and all graph/side-effect state rolls back.
 insert into public.availability_versions(id,maid_profile_id,week_start,version,submitted_at)

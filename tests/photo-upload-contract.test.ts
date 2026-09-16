@@ -126,14 +126,15 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     expect(schemas.DeveloperAuditEventType.enum).toContain('photo.upload_accepted');
     expect(schemas.DeveloperAuditEventType.enum).toContain('photo.collection_item_deleted');
     expect(schemas.DeveloperAuditEventType.enum).toContain('cleaning_template.published');
-    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(67);
+    expect(schemas.DeveloperAuditEventType.enum).toContain('reservation.room_moved');
+    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(68);
     const sample={cleaningTargetId:id(1),attemptId:id(2),targetSlotId:id(3),photoId:id(4),photoItemId:id(5),photoVersion:1,collectionRevision:1,itemRevision:1,...uploaded};
     const summary=schemas.DeveloperAuditEvent.properties.summary;
     expect(summary.additionalProperties).toBe(false);
     for(const key of Object.keys(sample))expect(summary.properties).toHaveProperty(key);
     for(const key of ['requestHash','idempotencyKey','providerLocator','claimDigest','token','rawAfterState'])
       expect(summary.properties).not.toHaveProperty(key);
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(111);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(113);
     const removal = openApiDocument.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}"]?.delete;
     for (const name of ["assignmentRevision", "expectedCollectionRevision", "expectedItemRevision"]) {
       const parameter = removal?.parameters?.find((value) => "name" in value && value.name === name);

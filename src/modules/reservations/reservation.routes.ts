@@ -9,6 +9,11 @@ const targetIdSchema = z.object({ targetId: z.uuid() });
 const listQuerySchema = z.object({ roomId: z.uuid().optional() });
 const timestampSchema = z.string().datetime({ offset: true });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
+const roomMoveReasonCodeSchema = z.enum([
+  'GUEST_REQUEST',
+  'ROOM_UNAVAILABLE',
+  'OPERATIONAL_ADJUSTMENT'
+]);
 
 const createSchema = z.object({
   roomId: z.uuid(),
@@ -57,6 +62,22 @@ const cancelCleaningRequestSchema = z.object({
   expectedVersion: z.number().int().positive(),
   reasonCode: reasonCodeSchema
 });
+
+const roomMovePreviewSchema = z.object({
+  targetRoomId: z.uuid(),
+  effectiveAt: timestampSchema.optional(),
+  reasonCode: roomMoveReasonCodeSchema,
+  expectedReservationVersion: z.number().int().positive(),
+  expectedSourceRoomVersion: z.number().int().positive(),
+  expectedTargetRoomVersion: z.number().int().positive()
+}).strict();
+
+const roomMoveCommitSchema = roomMovePreviewSchema.extend({
+  effectiveAt: timestampSchema,
+  evaluatedAt: timestampSchema,
+  expiresAt: timestampSchema,
+  impactFingerprint: z.string().regex(/^[0-9a-f]{64}$/)
+}).strict();
 
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
@@ -146,6 +167,37 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
         transitions: await service.processDue(request.actor, manualTransitionIdempotencyKey(request))
       };
     });
+
+    app.post(
+      '/:reservationId/room-change/preview',
+      { preHandler: adminPreHandler },
+      async (request) => {
+        const { reservationId } = reservationIdSchema.parse(request.params);
+        const input = roomMovePreviewSchema.parse(request.body);
+        return {
+          preview: await service.previewRoomMove(request.actor, {
+            reservationId,
+            ...input
+          })
+        };
+      }
+    );
+
+    app.post(
+      '/:reservationId/room-change',
+      { preHandler: adminPreHandler },
+      async (request) => {
+        const { reservationId } = reservationIdSchema.parse(request.params);
+        const input = roomMoveCommitSchema.parse(request.body);
+        return {
+          result: await service.commitRoomMove(request.actor, {
+            reservationId,
+            ...input,
+            idempotencyKey: idempotencyKey(request)
+          })
+        };
+      }
+    );
 
     app.patch('/:reservationId', { preHandler: adminPreHandler }, async (request) => {
       const { reservationId } = reservationIdSchema.parse(request.params);

@@ -156,6 +156,8 @@ function services(): AppServices {
         updatedAt: '2026-08-28T00:00:00.000Z'
       })),
       change: vi.fn(),
+      previewRoomMove: vi.fn(),
+      commitRoomMove: vi.fn(),
       cancel: vi.fn(),
       manualCheckout: vi.fn(),
       processDue: vi.fn(),
@@ -214,6 +216,104 @@ describe('application', () => {
 
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('MISSING_ACCESS_TOKEN');
+    await app.close();
+  });
+
+  it('serializes only explicit room-move conflict metadata', async () => {
+    const appServices = services();
+    const conflict = {
+      reloadResources: ['reservation', 'sourceRoom', 'targetRoom', 'roomMovePreview'] as const,
+      latestVersions: {
+        reservationVersion: 5,
+        sourceRoomVersion: 8,
+        targetRoomVersion: 13
+      }
+    };
+    appServices.reservations.previewRoomMove = vi.fn(async () => {
+      throw new AppError(
+        409,
+        'TARGET_ROOM_VERSION_CONFLICT',
+        '도착 객실 상태가 변경됐습니다. 다시 확인해 주세요.',
+        undefined,
+        { ...conflict, reloadResources: [...conflict.reloadResources] }
+      );
+    });
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/11000000-0000-4000-8000-000000000001/room-change/preview',
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        targetRoomId: '12000000-0000-4000-8000-000000000001',
+        reasonCode: 'GUEST_REQUEST',
+        expectedReservationVersion: 4,
+        expectedSourceRoomVersion: 8,
+        expectedTargetRoomVersion: 12
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'TARGET_ROOM_VERSION_CONFLICT',
+        message: '도착 객실 상태가 변경됐습니다. 다시 확인해 주세요.',
+        conflict
+      },
+      requestId: response.json().requestId
+    });
+    expect(Object.keys(response.json().error).sort()).toEqual(['code', 'conflict', 'message']);
+    await app.close();
+  });
+
+  it('serializes room-move idempotency reuse with the exact conflict envelope', async () => {
+    const appServices = services();
+    const conflict = {
+      reloadResources: ['reservation', 'sourceRoom', 'targetRoom', 'roomMovePreview'] as const,
+      latestVersions: {
+        reservationVersion: 5,
+        sourceRoomVersion: 8,
+        targetRoomVersion: 13
+      }
+    };
+    appServices.reservations.commitRoomMove = vi.fn(async () => {
+      throw new AppError(
+        409,
+        'IDEMPOTENCY_KEY_REUSED',
+        '이미 다른 요청에 사용한 Idempotency-Key입니다.',
+        undefined,
+        { ...conflict, reloadResources: [...conflict.reloadResources] }
+      );
+    });
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/11000000-0000-4000-8000-000000000001/room-change',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'room-move-reused-0001'
+      },
+      payload: {
+        targetRoomId: '12000000-0000-4000-8000-000000000001',
+        expectedReservationVersion: 4,
+        expectedSourceRoomVersion: 8,
+        expectedTargetRoomVersion: 12,
+        evaluatedAt: '2026-09-16T08:00:00Z',
+        expiresAt: '2026-09-16T08:05:00Z',
+        effectiveAt: '2026-09-17T07:00:00Z',
+        impactFingerprint: 'a'.repeat(64),
+        reasonCode: 'GUEST_REQUEST'
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: '이미 다른 요청에 사용한 Idempotency-Key입니다.',
+        conflict
+      },
+      requestId: response.json().requestId
+    });
     await app.close();
   });
 
@@ -577,6 +677,146 @@ describe('application', () => {
     });
     expect(JSON.stringify(response.json())).not.toContain('guest_name_encrypted');
     expect(JSON.stringify(response.json())).not.toContain('홍길동');
+    await app.close();
+  });
+
+  it('previews and commits a strict before-check-in room move', async () => {
+    const appServices = services();
+    const reservationId = '41000000-0000-4000-8000-000000000001';
+    const targetRoomId = '51000000-0000-4000-8000-000000000002';
+    const evaluatedAt = '2026-09-16T08:00:00.000Z';
+    const expiresAt = '2026-09-16T08:05:00.000Z';
+    const impactFingerprint = 'a'.repeat(64);
+    const preview = {
+      mode: 'BEFORE_CHECKIN' as const,
+      eligible: true,
+      rejectionReasonCodes: [],
+      blockingReasonCodes: [],
+      warnings: [],
+      targetBlockReasonCodes: [],
+      sourceOutcome: { occupancyStatus: 'VACANT' as const, readinessStatus: 'READY' as const, stateVersion: 1 },
+      targetOutcome: { occupancyStatus: 'VACANT' as const, readinessStatus: 'READY' as const, stateVersion: 1 },
+      impactFingerprint,
+      evaluatedAt,
+      expiresAt,
+      effectiveAt: '2026-09-17T07:00:00.000Z',
+      reservationId,
+      reservationVersion: 1,
+      sourceRoomId: '51000000-0000-4000-8000-000000000001',
+      sourceRoomVersion: 1,
+      targetRoomId,
+      targetRoomVersion: 1,
+      checkInAt: '2026-09-17T07:00:00.000Z',
+      checkOutAt: '2026-09-18T02:00:00.000Z',
+      guestCount: 2,
+      preparationObligationId: '42000000-0000-4000-8000-000000000001',
+      checkoutObligationId: '43000000-0000-4000-8000-000000000001',
+      checkoutObligationVersion: 1,
+      plannedCheckoutTargetId: '44000000-0000-4000-8000-000000000001',
+      plannedCheckoutTargetVersion: 1
+    };
+    appServices.reservations.previewRoomMove = vi.fn(async () => preview);
+    appServices.reservations.commitRoomMove = vi.fn(async () => ({
+      reservation: {
+        id: reservationId,
+        roomId: targetRoomId,
+        checkInAt: preview.checkInAt,
+        checkOutAt: preview.checkOutAt,
+        guestCount: 2,
+        status: 'active' as const,
+        preparationObligationId: preview.preparationObligationId,
+        checkoutObligationId: preview.checkoutObligationId,
+        version: 2,
+        actualCheckInAt: null,
+        actualCheckoutAt: null,
+        cancelledAt: null,
+        createdAt: evaluatedAt,
+        updatedAt: evaluatedAt
+      },
+      mode: 'BEFORE_CHECKIN' as const,
+      evaluatedAt,
+      expiresAt,
+      effectiveAt: preview.effectiveAt,
+      movedAt: '2026-09-16T08:01:00.000Z',
+      sourceRoomId: preview.sourceRoomId,
+      targetRoomId,
+      sourceRoomVersion: 2,
+      targetRoomVersion: 2,
+      plannedCheckoutTargetId: preview.plannedCheckoutTargetId,
+      plannedCheckoutTargetVersion: 2,
+      sourceOutcome: { ...preview.sourceOutcome, stateVersion: 2 },
+      targetOutcome: { ...preview.targetOutcome, stateVersion: 2 }
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change/preview`,
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        targetRoomId,
+        reasonCode: 'GUEST_REQUEST',
+        expectedReservationVersion: 1,
+        expectedSourceRoomVersion: 1,
+        expectedTargetRoomVersion: 1
+      }
+    });
+    const commitResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change`,
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'reservation-room-move-0001'
+      },
+      payload: {
+        targetRoomId,
+        expectedReservationVersion: 1,
+        expectedSourceRoomVersion: 1,
+        expectedTargetRoomVersion: 1,
+        evaluatedAt,
+        expiresAt,
+        effectiveAt: preview.effectiveAt,
+        impactFingerprint,
+        reasonCode: 'GUEST_REQUEST'
+      }
+    });
+    const legacyCommitResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change/commit`,
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'reservation-room-move-legacy'
+      },
+      payload: {
+        targetRoomId,
+        expectedReservationVersion: 1,
+        expectedSourceRoomVersion: 1,
+        expectedTargetRoomVersion: 1,
+        evaluatedAt,
+        expiresAt,
+        effectiveAt: preview.effectiveAt,
+        impactFingerprint,
+        reasonCode: 'GUEST_REQUEST'
+      }
+    });
+
+    expect(previewResponse.statusCode).toBe(200);
+    expect(previewResponse.json().preview).toEqual(preview);
+    expect(commitResponse.statusCode).toBe(200);
+    expect(legacyCommitResponse.statusCode).toBe(404);
+    expect(commitResponse.json().result).toMatchObject({
+      evaluatedAt,
+      expiresAt,
+      effectiveAt: preview.effectiveAt,
+      targetRoomId
+    });
+    expect(appServices.reservations.commitRoomMove).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({
+        reservationId,
+        reasonCode: 'GUEST_REQUEST',
+        idempotencyKey: 'reservation-room-move-0001'
+      })
+    );
     await app.close();
   });
 
