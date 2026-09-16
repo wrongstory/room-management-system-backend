@@ -3556,9 +3556,9 @@ export const openApiDocument = {
       post: {
         tags: ["Reservations"],
         operationId: "previewReservationRoomMove",
-        summary: "체크인 전 객실 변경 영향 미리보기",
+        summary: "예약 객실 변경 영향 미리보기",
         description:
-          "active business admin 전용 read-only 미리보기입니다. reasonCode는 필수이며 effectiveAt은 생략 시 예약 checkInAt을 사용하고, 제공하면 checkInAt과 정확히 같아야 합니다. 5분 TTL의 evaluatedAt/expiresAt과 상태 fingerprint를 반환합니다. inactive 또는 투숙 중 예약도 200 ineligible projection과 안정적인 rejection code를 반환하고 변경하지 않습니다.",
+          "active business admin 전용 read-only 미리보기입니다. 체크인 전 effectiveAt은 생략 시 예약 checkInAt이며, 투숙 중에는 필수이고 서버 현재 이후·예약 checkOutAt 이전이어야 합니다. 5분 TTL의 evaluatedAt/expiresAt과 stay/segment까지 묶은 fingerprint를 반환합니다. 변경 불가 상태는 200 ineligible projection과 안정적인 rejection code로 반환하고 아무 원장도 변경하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [reservationIdParameter()],
@@ -3597,9 +3597,9 @@ export const openApiDocument = {
       post: {
         tags: ["Reservations"],
         operationId: "commitReservationRoomMove",
-        summary: "체크인 전 객실 변경 확정",
+        summary: "예약 객실 변경 확정",
         description:
-          "preview payload의 reasonCode/effectiveAt과 발급된 정확한 evaluatedAt/expiresAt/fingerprint, 세 CAS version을 검증합니다. 동일 Idempotency-Key와 동일 payload의 성공 응답은 TTL 이후에도 replay되며, 같은 key의 다른 payload는 안전한 최신 version metadata를 포함한 IDEMPOTENCY_KEY_REUSED 409입니다. 새 만료 요청과 상태 변경은 ROOM_CHANGE_PREVIEW_STALE로 거부됩니다. 다른 key로 이미 같은 target에 이동한 상태는 MOVE_ALREADY_APPLIED 409입니다. 기존 private planned checkout target만 원자적으로 이동합니다.",
+          "preview payload의 reasonCode/effectiveAt과 발급된 정확한 evaluatedAt/expiresAt/fingerprint, 세 CAS version을 검증합니다. 체크인 전에는 기존 private planned checkout graph를 이동하고, 투숙 중에는 과거 segment를 닫고 새 segment·원 객실 checkout 청소 target·PIN 접근 종료를 한 transaction에 기록합니다. 동일 Idempotency-Key와 동일 payload의 성공 응답은 TTL 이후에도 replay됩니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [reservationIdParameter(), idempotencyHeader],
@@ -3607,7 +3607,7 @@ export const openApiDocument = {
         responses: {
           "200": {
             description:
-              "체크인 전 객실 변경 결과 또는 동일 성공 receipt replay",
+              "체크인 전 또는 투숙 중 객실 변경 결과와 동일 성공 receipt replay",
             headers: { "Cache-Control": noStoreHeader },
             content: {
               "application/json": {
@@ -5374,7 +5374,13 @@ export const openApiDocument = {
           "INVALID_GUEST_NAME",
           "INVALID_GUEST_COUNT",
           "INVALID_RESERVATION_SCHEDULE",
+          "INVALID_MOVE_EFFECTIVE_AT",
           "RESERVATION_OVERLAP",
+          "TARGET_ROOM_OVERLAP",
+          "TARGET_ROOM_BLOCKED",
+          "TARGET_ROOM_NOT_READY",
+          "PIN_LEASE_ACTIVE",
+          "OPEN_ENDED_STAY_REQUIRES_END",
           "ROOM_ALLOCATION_BLOCKED",
           "RESERVATION_NOT_FOUND",
           "CLEANING_REQUEST_NOT_FOUND",
@@ -8024,7 +8030,8 @@ export const openApiDocument = {
       ReservationRoomMoveReasonCode: {
         type: "string",
         enum: ["GUEST_REQUEST", "ROOM_UNAVAILABLE", "OPERATIONAL_ADJUSTMENT"],
-        description: "체크인 전 객실 변경의 source-controlled 감사 사유",
+        description:
+          "체크인 전·투숙 중 객실 변경의 source-controlled 감사 사유",
       },
       ReservationRoomMoveMode: {
         type: "string",
@@ -8033,9 +8040,10 @@ export const openApiDocument = {
       ReservationRoomMoveRejectionReasonCode: {
         type: "string",
         enum: [
-          "DURING_STAY_NOT_SUPPORTED",
           "RESERVATION_NOT_ACTIVE",
           "SAME_ROOM",
+          "INVALID_MOVE_EFFECTIVE_AT",
+          "OPEN_ENDED_STAY_REQUIRES_END",
           "CLEANING_WORKFLOW_PUBLIC",
           "PLANNED_CHECKOUT_NOT_PRIVATE",
           "CLEANING_WORKFLOW_ASSIGNED",
@@ -8043,13 +8051,13 @@ export const openApiDocument = {
           "CLEANING_WORKFLOW_STARTED",
           "ACTIVE_PIN_ACCESS_EXISTS",
           "TARGET_ROOM_BLOCKED",
+          "TARGET_ROOM_NOT_READY",
           "RESERVATION_OVERLAP",
         ],
       },
       ReservationRoomMoveBlockingReasonCode: {
         type: "string",
         enum: [
-          "DURING_STAY_NOT_SUPPORTED",
           "RESERVATION_VERSION_CONFLICT",
           "SOURCE_ROOM_VERSION_CONFLICT",
           "TARGET_ROOM_VERSION_CONFLICT",
@@ -8058,6 +8066,7 @@ export const openApiDocument = {
           "CLEANING_ASSIGNMENT_LOCKED",
           "PIN_LEASE_ACTIVE",
           "TARGET_ROOM_BLOCKED",
+          "TARGET_ROOM_NOT_READY",
         ],
         description:
           "commit HTTP 오류 taxonomy와 같은 고수준 차단 코드입니다. rejectionReasonCodes는 안전한 세부 진단 축입니다.",
@@ -8071,7 +8080,8 @@ export const openApiDocument = {
           readinessStatus: { $ref: "#/components/schemas/RoomReadinessStatus" },
           stateVersion: { type: "integer", minimum: 1 },
         },
-        description: "동일 snapshot의 PII/PIN 비노출 객실 영향 projection",
+        description:
+          "preview와 commit 모두 이동 발효시각 effectiveAt 기준으로 계산한 PII/PIN 비노출 객실 결과입니다. 미래 이동의 현재 객실은 stay.currentRoomId로 별도 확인합니다.",
       },
       ReservationRoomMovePreviewRequest: {
         type: "object",
@@ -8089,7 +8099,7 @@ export const openApiDocument = {
             type: "string",
             format: "date-time",
             description:
-              "생략 시 예약 checkInAt. Phase B에서는 제공 시 checkInAt과 정확히 같아야 합니다.",
+              "체크인 전에는 생략 시 예약 checkInAt이며 제공 시 그 값과 같아야 합니다. 투숙 중에는 필수이며 현재 이후·checkOutAt 이전이어야 합니다.",
           },
           reasonCode: {
             $ref: "#/components/schemas/ReservationRoomMoveReasonCode",
@@ -8148,6 +8158,10 @@ export const openApiDocument = {
           "effectiveAt",
           "reservationId",
           "reservationVersion",
+          "stayId",
+          "stayVersion",
+          "sourceSegmentId",
+          "sourceSegmentVersion",
           "sourceRoomId",
           "sourceRoomVersion",
           "targetRoomId",
@@ -8204,6 +8218,10 @@ export const openApiDocument = {
           effectiveAt: { type: "string", format: "date-time" },
           reservationId: { type: "string", format: "uuid" },
           reservationVersion: { type: "integer", minimum: 1 },
+          stayId: { type: "string", format: "uuid" },
+          stayVersion: { type: "integer", minimum: 1 },
+          sourceSegmentId: { type: "string", format: "uuid" },
+          sourceSegmentVersion: { type: "integer", minimum: 1 },
           sourceRoomId: { type: "string", format: "uuid" },
           sourceRoomVersion: { type: "integer", minimum: 1 },
           targetRoomId: { type: "string", format: "uuid" },
@@ -8242,7 +8260,7 @@ export const openApiDocument = {
         ],
         properties: {
           reservation: { $ref: "#/components/schemas/Reservation" },
-          mode: { type: "string", const: "BEFORE_CHECKIN" },
+          mode: { $ref: "#/components/schemas/ReservationRoomMoveMode" },
           evaluatedAt: { type: "string", format: "date-time" },
           expiresAt: { type: "string", format: "date-time" },
           effectiveAt: { type: "string", format: "date-time" },
@@ -8259,6 +8277,51 @@ export const openApiDocument = {
           targetOutcome: {
             $ref: "#/components/schemas/ReservationRoomMoveOutcome",
           },
+          stay: {
+            $ref: "#/components/schemas/ReservationRoomMoveStay",
+            description: "DURING_STAY 성공에서만 반환되는 현재 stay 요약",
+          },
+          segments: {
+            type: "array",
+            minItems: 2,
+            maxItems: 2,
+            items: {
+              $ref: "#/components/schemas/ReservationRoomMoveSegment",
+            },
+            description: "DURING_STAY 성공에서 닫힌 원 segment와 새 segment",
+          },
+          sourceCleaningTargetId: {
+            type: "string",
+            format: "uuid",
+            description:
+              "DURING_STAY 이동으로 원 객실에 생성된 checkout 청소 target",
+          },
+          pinAccessEndsAt: {
+            type: "string",
+            format: "date-time",
+            description: "DURING_STAY 원 객실 PIN 접근 권한의 유효 종료 시각",
+          },
+        },
+      },
+      ReservationRoomMoveStay: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "version", "currentRoomId"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          version: { type: "integer", minimum: 1 },
+          currentRoomId: { type: "string", format: "uuid" },
+        },
+      },
+      ReservationRoomMoveSegment: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "roomId", "startsAt", "endsAt"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          startsAt: { type: "string", format: "date-time" },
+          endsAt: { type: "string", format: "date-time" },
         },
       },
       ManualCleaningRequestCreate: {

@@ -122,6 +122,10 @@ const reservationRoomMoveMigrationUrl = new URL(
   '../supabase/migrations/20260916204500_reservation_room_change_before_checkin.sql',
   import.meta.url
 );
+const reservationDuringStayMoveMigrationUrl = new URL(
+  '../supabase/migrations/20260916210000_reservation_during_stay_room_move.sql',
+  import.meta.url
+);
 const photoSlotContractV8MigrationUrl = new URL(
   '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
   import.meta.url
@@ -242,6 +246,31 @@ describe('initial migration contract', () => {
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/\b(?:http_post|net\.http_post)\b/);
+  });
+
+  it('moves checked-in stays through immutable room segments and bounded cleanup', async () => {
+    const sql = await readFile(reservationDuringStayMoveMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.reservation_stays');
+    expect(sql).toContain('create table private.stay_room_segments');
+    expect(sql).toContain('stay_room_segments_no_room_overlap');
+    expect(sql).toContain("mode='DURING_STAY'");
+    expect(sql).toContain("message='INVALID_MOVE_EFFECTIVE_AT'");
+    expect(sql).toContain("'stay_room_move_checkout'");
+    expect(sql).toContain('room_pin_access_scheduled_revocations');
+    expect(sql).toContain('set ends_at=p_effective_at');
+    expect(sql).toContain('p_effective_at,reservation.check_out_at');
+    expect(sql).toContain('private.assignment_preview_source_reason_before_stay_segments');
+    expect(sql).toContain('private.assignment_commit_candidates_at_before_stay_segments');
+    expect(sql).toContain("segment.ends_at>p_checkout_at-interval '1 microsecond'");
+    expect(sql).toContain('update private.stay_segment_checkout_obligations');
+    expect(sql).toContain("'stay_room_move_checkout')");
+    expect(sql).toContain('v_earning.compensation_entitlement_id is not null');
+    // The v61 reservation command parity intentionally keeps the encrypted
+    // guest-name input/retention path. What must never enter the new move
+    // ledger, audit or response projection is a plaintext/public guest-name
+    // field, PIN plaintext, or authorization material.
+    expect(sql).not.toMatch(/['"]guestName['"]|\bpin_plain\b|authorization header/i);
   });
 
   it('seeds 121 unique room numbers', async () => {

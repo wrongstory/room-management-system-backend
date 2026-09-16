@@ -735,6 +735,10 @@ Deno.test("room move preview and commit preserve strict CAS, fingerprint and tim
     effectiveAt: reservationRow.check_in_at,
     reservationId: reservationRow.id,
     reservationVersion: 1,
+    stayId: "45000000-0000-4000-8000-000000000001",
+    stayVersion: 1,
+    sourceSegmentId: "46000000-0000-4000-8000-000000000001",
+    sourceSegmentVersion: 1,
     sourceRoomId: reservationRow.room_id,
     sourceRoomVersion: 2,
     targetRoomId,
@@ -817,6 +821,11 @@ Deno.test("room move preview and commit preserve strict CAS, fingerprint and tim
   assert(
     !("guestName" in resultPreview) && !("pin" in resultCommit),
     "room move projections allowlist fields and redact extras",
+  );
+  assert(
+    resultPreview.preparationObligationId ===
+      reservationRow.preparation_obligation_id,
+    "the real RPC preview shape includes the required preparation obligation identity",
   );
   assert(
     (resultCommit.reservation as { roomId: string }).roomId === targetRoomId,
@@ -924,6 +933,192 @@ Deno.test("room move preview and commit preserve strict CAS, fingerprint and tim
     malformedUuid.status === 500 &&
       malformedUuid.code === "RESERVATION_PROJECTION_INVALID",
     "malformed DB UUIDs fail closed without raw detail",
+  );
+  preview.reservationId = reservationRow.id;
+  preview.eligible = false;
+  (preview as { rejectionReasonCodes: string[] }).rejectionReasonCodes = [
+    "RESERVATION_NOT_ACTIVE",
+  ];
+  for (
+    const [caseName, historicalSegmentId] of [
+      ["same-instant checked-out", "46000000-0000-4000-8000-000000000001"],
+      ["cancelled retired", "46000000-0000-4000-8000-000000000009"],
+    ] as const
+  ) {
+    preview.sourceSegmentId = historicalSegmentId;
+    const inactivePreview = await previewReservationRoomMove(
+      commandRequest(
+        `/v1/reservations/${reservationRow.id}/room-change/preview`,
+        cas,
+      ),
+      clients,
+      admin,
+      reservationRow.id,
+    );
+    assert(
+      !inactivePreview.eligible &&
+        inactivePreview.sourceSegmentId === historicalSegmentId &&
+        inactivePreview.rejectionReasonCodes.includes("RESERVATION_NOT_ACTIVE"),
+      `${caseName} reservation remains a 200 ineligible projection`,
+    );
+  }
+});
+
+Deno.test("during-stay room move exposes only bounded stay, segment, cleaning and PIN metadata", async () => {
+  const targetRoomId = "50000000-0000-4000-8000-000000000002";
+  const effectiveAt = "2026-09-01T01:00:00.000Z";
+  const evaluatedAt = "2026-09-01T00:59:00.000Z";
+  const expiresAt = "2026-09-01T01:04:00.000Z";
+  const stayId = "45000000-0000-4000-8000-000000000001";
+  const sourceSegmentId = "46000000-0000-4000-8000-000000000001";
+  const targetSegmentId = "46000000-0000-4000-8000-000000000002";
+  const sourceCleaningTargetId = "80000000-0000-4000-8000-000000000002";
+  const clients = {
+    admin: {
+      rpc(name: string) {
+        if (name === "preview_reservation_room_move") {
+          return Promise.resolve({
+            data: {
+              mode: "DURING_STAY",
+              eligible: true,
+              rejectionReasonCodes: [],
+              blockingReasonCodes: [],
+              warnings: [],
+              targetBlockReasonCodes: [],
+              sourceOutcome: {
+                occupancyStatus: "OCCUPIED",
+                readinessStatus: "READY",
+                stateVersion: 2,
+              },
+              targetOutcome: {
+                occupancyStatus: "VACANT",
+                readinessStatus: "READY",
+                stateVersion: 3,
+              },
+              impactFingerprint: "b".repeat(64),
+              evaluatedAt,
+              expiresAt,
+              effectiveAt,
+              reservationId: reservationRow.id,
+              reservationVersion: 1,
+              stayId,
+              stayVersion: 1,
+              sourceSegmentId,
+              sourceSegmentVersion: 1,
+              sourceRoomId: reservationRow.room_id,
+              sourceRoomVersion: 2,
+              targetRoomId,
+              targetRoomVersion: 3,
+              checkInAt: reservationRow.check_in_at,
+              checkOutAt: reservationRow.check_out_at,
+              guestCount: 2,
+              preparationObligationId: reservationRow.preparation_obligation_id,
+              checkoutObligationId: reservationRow.checkout_obligation_id,
+              checkoutObligationVersion: 1,
+              plannedCheckoutTargetId: "80000000-0000-4000-8000-000000000001",
+              plannedCheckoutTargetVersion: 1,
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({
+          data: {
+            reservation: { ...reservationRow, version: 2 },
+            mode: "DURING_STAY",
+            evaluatedAt,
+            expiresAt,
+            effectiveAt,
+            movedAt: effectiveAt,
+            sourceRoomId: reservationRow.room_id,
+            targetRoomId,
+            sourceRoomVersion: 3,
+            targetRoomVersion: 4,
+            plannedCheckoutTargetId: "80000000-0000-4000-8000-000000000001",
+            plannedCheckoutTargetVersion: 2,
+            sourceOutcome: {
+              occupancyStatus: "VACANT",
+              readinessStatus: "CLEANING_REQUIRED",
+              stateVersion: 3,
+            },
+            targetOutcome: {
+              occupancyStatus: "OCCUPIED",
+              readinessStatus: "READY",
+              stateVersion: 4,
+            },
+            stay: {
+              id: stayId,
+              version: 2,
+              currentRoomId: reservationRow.room_id,
+            },
+            segments: [
+              {
+                id: sourceSegmentId,
+                roomId: reservationRow.room_id,
+                startsAt: reservationRow.check_in_at,
+                endsAt: effectiveAt,
+              },
+              {
+                id: targetSegmentId,
+                roomId: targetRoomId,
+                startsAt: effectiveAt,
+                endsAt: reservationRow.check_out_at,
+              },
+            ],
+            sourceCleaningTargetId,
+            pinAccessEndsAt: effectiveAt,
+            pin: "must-not-leak",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const common = {
+    targetRoomId,
+    effectiveAt,
+    reasonCode: "GUEST_REQUEST",
+    expectedReservationVersion: 1,
+    expectedSourceRoomVersion: 2,
+    expectedTargetRoomVersion: 3,
+  };
+
+  const preview = await previewReservationRoomMove(
+    commandRequest(
+      `/v1/reservations/${reservationRow.id}/room-change/preview`,
+      common,
+    ),
+    clients,
+    admin,
+    reservationRow.id,
+  );
+  const result = await commitReservationRoomMove(
+    commandRequest(
+      `/v1/reservations/${reservationRow.id}/room-change`,
+      { ...common, evaluatedAt, expiresAt, impactFingerprint: "b".repeat(64) },
+      "POST",
+      "during-stay-room-move-0001",
+    ),
+    clients,
+    admin,
+    reservationRow.id,
+  );
+
+  assert(
+    preview.mode === "DURING_STAY" && preview.stayId === stayId,
+    "during-stay preview identity",
+  );
+  assert(result.mode === "DURING_STAY", "during-stay commit mode");
+  assert(
+    result.stay?.id === stayId && result.segments?.length === 2,
+    "bounded stay segment result",
+  );
+  assert(
+    result.sourceCleaningTargetId === sourceCleaningTargetId,
+    "source checkout target result",
+  );
+  assert(
+    result.pinAccessEndsAt === effectiveAt && !("pin" in result),
+    "PIN cutoff without material",
   );
 });
 
@@ -1044,6 +1239,8 @@ Deno.test("reservation database errors redact unknown details", async () => {
       "CLEANING_ASSIGNMENT_LOCKED",
       "PIN_LEASE_ACTIVE",
       "TARGET_ROOM_BLOCKED",
+      "TARGET_ROOM_NOT_READY",
+      "OPEN_ENDED_STAY_REQUIRES_END",
       "MOVE_ALREADY_APPLIED",
     ]
   ) {
@@ -1052,6 +1249,14 @@ Deno.test("reservation database errors redact unknown details", async () => {
       `${code} remains stable`,
     );
   }
+  const invalidEffectiveAt = reservationDatabaseError({
+    message: "INVALID_MOVE_EFFECTIVE_AT",
+  });
+  assert(
+    invalidEffectiveAt.status === 400 &&
+      invalidEffectiveAt.code === "INVALID_MOVE_EFFECTIVE_AT",
+    "invalid effectiveAt remains a stable validation error",
+  );
   assert(
     unknown.status === 500 && unknown.code === "RESERVATION_COMMAND_FAILED" &&
       !unknown.message.includes("private database detail"),

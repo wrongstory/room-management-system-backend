@@ -86,14 +86,14 @@ scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `res
 PIN version·암호문·평문, 고객명·전화번호·session/token, 알림 body는 projection과 Python generated model에
 존재하지 않습니다. 두 event는 현재 production allowlist에 반영됐습니다. #156/#165 후속 production runtime의
 production `expectedMigration`과 DB head는 현재 56번째 `cleaning_template_duration_optional`로 일치합니다. 합산 개발 source는
-57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`, Phase B source 후보 61번째 `reservation_room_change_before_checkin` 순서이므로, 이 source를 production에 배포하기 전에는 migration을 먼저 승인된
+57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`, Phase B 61번째 `reservation_room_change_before_checkin`, Phase C 후보 62번째 `reservation_during_stay_room_move` 순서이므로, 이 source를 production에 배포하기 전에는 migration을 먼저 승인된
 release 순서로 적용해야 합니다. source와 DB head가 다르면 정상 상태가 아니라 배포 drift로 처리합니다.
 
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,
 전체 slots, request hash, raw before/after state는 developer projection에 포함하지 않습니다. 이 event를
 포함한 production source allowlist는 66개이며 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`에
-반영됐습니다. #180 개발 정본은 `photo.collection_item_deleted`를 더해 67개이고, Phase B candidate는 safe `reservation.room_moved` summary를 추가해 68개입니다. summary는 `mode/reservationId/reservationVersion/sourceRoomId/targetRoomId/plannedCheckoutTargetId`만 허용하고 고객명·PIN·request hash·impact fingerprint는 제외합니다. #165는 기존 event allowlist를 바꾸지 않고 checkout template의 선택형 duration 계약과 runtime
+반영됐습니다. #180 개발 정본은 `photo.collection_item_deleted`를 더해 67개이고, Phase B/Phase C candidate는 같은 safe `reservation.room_moved` summary를 사용해 68개를 유지합니다. summary는 `mode/reservationId/reservationVersion/sourceRoomId/targetRoomId/plannedCheckoutTargetId`만 허용하고 stay/segment/obligation 같은 private ID, 고객명·PIN·request hash·impact fingerprint는 제외합니다. Phase C는 아직 production 미배포이며 source 후보만으로 운영 event 사용 가능 상태가 되지 않습니다. #165는 기존 event allowlist를 바꾸지 않고 checkout template의 선택형 duration 계약과 runtime
 migration head만 56번으로 갱신했으며, 운영 네 타입 게시 event도 safe summary만 노출합니다.
 
 #29 source의 audit allowlist는 총 36개였습니다. #27 pre-start 필드에

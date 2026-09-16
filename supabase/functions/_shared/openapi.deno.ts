@@ -15,6 +15,7 @@ Deno.test("room move OpenAPI publishes bounded 409 conflict recovery metadata", 
     "/v1/reservations/{reservationId}/room-change"
   ].post;
   const conflict = document.components.schemas.RoomChangeConflict;
+  const outcome = document.components.schemas.ReservationRoomMoveOutcome;
   const errorCodes = document.components.schemas.ErrorCode.enum;
   const serialized = JSON.stringify(conflict);
 
@@ -40,6 +41,11 @@ Deno.test("room move OpenAPI publishes bounded 409 conflict recovery metadata", 
       !serialized.includes("pin") &&
       !serialized.includes("requestHash"),
     "latest versions are nullable and sensitive metadata is absent",
+  );
+  assert(
+    outcome.description.includes("effectiveAt") &&
+      outcome.description.includes("stay.currentRoomId"),
+    "move outcomes are evaluated at effectiveAt while current room is separate",
   );
 });
 Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and opaque projections", async () => {

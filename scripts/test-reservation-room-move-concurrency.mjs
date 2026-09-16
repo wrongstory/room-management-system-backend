@@ -43,7 +43,14 @@ async function createReservation(client, actorProfileId, source, checkInAt, chec
   return data;
 }
 
-async function preview(client, actorProfileId, reservation, sourceRoomId, targetRoomId) {
+async function preview(
+  client,
+  actorProfileId,
+  reservation,
+  sourceRoomId,
+  targetRoomId,
+  effectiveAt = null
+) {
   const [sourceResult, targetResult] = await Promise.all([
     client.from('rooms').select('state_version').eq('id', sourceRoomId).single(),
     client.from('rooms').select('state_version').eq('id', targetRoomId).single()
@@ -65,7 +72,7 @@ async function preview(client, actorProfileId, reservation, sourceRoomId, target
     p_expected_reservation_version: reservation.version,
     p_expected_source_room_version: source.state_version,
     p_expected_target_room_version: target.state_version,
-    p_effective_at: null,
+    p_effective_at: effectiveAt,
     p_reason_code: 'OPERATIONAL_ADJUSTMENT'
   });
   assert(!error && data?.eligible === true, `room-move preview failed: ${error?.message}`);
@@ -289,5 +296,62 @@ export async function testReservationRoomMoveConcurrency(
     'losing command must not partially move either cleaning obligation'
   );
 
-  console.log('reservation room-move replay, UUID-order, and shared-target concurrency PASS');
+  const duringSourceA = await room(primaryClient, '531');
+  const duringSourceB = await room(primaryClient, '534');
+  const duringTarget = await room(primaryClient, '536');
+  const duringA = await createReservation(
+    primaryClient,
+    actorProfileId,
+    duringSourceA,
+    '2049-01-01T07:00:00.000Z',
+    '2049-01-04T02:00:00.000Z'
+  );
+  const duringB = await createReservation(
+    primaryClient,
+    actorProfileId,
+    duringSourceB,
+    '2049-01-01T07:00:00.000Z',
+    '2049-01-04T02:00:00.000Z'
+  );
+  const checkInResults = await Promise.all([
+    primaryClient.from('reservations').update({ actual_check_in_at: '2049-01-01T07:00:00.000Z' })
+      .eq('id', duringA.id),
+    secondClient.from('reservations').update({ actual_check_in_at: '2049-01-01T07:00:00.000Z' })
+      .eq('id', duringB.id)
+  ]);
+  assert(checkInResults.every((result) => !result.error), 'during-stay check-in fixture failed');
+  const effectiveAt = '2049-01-02T03:00:00.000Z';
+  const [duringPreviewA, duringPreviewB] = await Promise.all([
+    preview(primaryClient, actorProfileId, duringA, duringSourceA.id, duringTarget.id, effectiveAt),
+    preview(secondClient, actorProfileId, duringB, duringSourceB.id, duringTarget.id, effectiveAt)
+  ]);
+  assert(
+    duringPreviewA.mode === 'DURING_STAY' && duringPreviewB.mode === 'DURING_STAY',
+    'checked-in contenders must use DURING_STAY mode'
+  );
+  const duringResults = await Promise.all([
+    primaryClient.rpc('commit_reservation_room_move', commitArguments(
+      actorProfileId,duringPreviewA,`during-stay-shared-a-${randomUUID()}`,'f'.repeat(64)
+    )),
+    secondClient.rpc('commit_reservation_room_move', commitArguments(
+      actorProfileId,duringPreviewB,`during-stay-shared-b-${randomUUID()}`,'1'.repeat(64)
+    ))
+  ]);
+  assert(
+    duringResults.filter((result) => !result.error).length === 1,
+    `same-target DURING_STAY moves must have one winner: ${duringResults.map((result) => result.error?.message ?? 'OK').join(',')}`
+  );
+  const duringLoser = duringResults.find((result) => result.error)?.error;
+  assert(
+    ['TARGET_ROOM_VERSION_CONFLICT','TARGET_ROOM_OVERLAP','ROOM_CHANGE_PREVIEW_STALE'].includes(duringLoser?.message),
+    `DURING_STAY loser must be a stable CAS/overlap code: ${duringLoser?.message}`
+  );
+  const targetSegmentCount = Number(execFileSync('docker', [
+    'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
+    '-v','ON_ERROR_STOP=1','-c',
+    `select count(*) from private.stay_room_segments where room_id='${duringTarget.id}'::uuid and starts_at='${effectiveAt}'::timestamptz and retired_at is null`
+  ], { encoding: 'utf8', stdio: ['ignore','pipe','inherit'] }).trim());
+  assert(targetSegmentCount === 1, 'DURING_STAY target exclusion must leave one segment');
+
+  console.log('reservation room-move replay, UUID-order, shared-target, and DURING_STAY concurrency PASS');
 }
