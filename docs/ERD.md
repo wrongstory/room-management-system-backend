@@ -1149,10 +1149,11 @@ erDiagram
   결정은 기존 target을 재사용하고 새 current assignment 및 필요 시 새 scheduled attempt를 만들며 과거
   assignment/attempt는 보존한다. 연장은 occupancy resumed 이력을 추가하고 중단 작업의 earning·벌점은 0이다.
 - command lock은 global reservation advisory → scoped receipt → domain row 순서이며 report/decision replay와
-  상반 결정은 stable domain conflict로 수렴한다. #133은
-  `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`과 production 54-migration 기준선에 반영됐다.
+  상반 결정은 stable domain conflict로 수렴한다. #133 통합 당시 기준은
+  `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`과 production 54 migrations였고, 현재 운영 기준은
+  `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` / 56 migrations다.
 
-### #156 개발 소스: checkout template 운영 게시
+### #156 checkout template 운영 게시 — production 반영 완료
 
 `20260914094126_cleaning_template_admin_api.sql`은 기존 54개 migration을 수정하지 않는 55번째 append-only
 feature migration이다. `cleaning_template_versions`는 `(room_type_id,cleaning_kind,version)` 이력과 published
@@ -1161,7 +1162,8 @@ partial unique를 유지하며, publish command가 동일 타입/kind advisory l
 정규화된 immutable row를 같은 transaction에서 materialize한다. 과거 `cleaning_targets.template_snapshot`은
 current pointer를 다시 읽거나 backfill하지 않으므로 이후 게시에도 변하지 않는다. raw template table은 RLS를
 활성화한 채 Data API policy/grant가 없고, service-only 조회/게시 RPC가 live session과 active/password-complete
-business admin을 매 요청 확인한다. production 운영값·seed·notification/outbox는 이 migration에 포함하지 않는다.
+business admin을 매 요청 확인한다. migration 자체에는 production 운영값·seed·notification/outbox가 없으며,
+운영 게시 명령으로 네 객실 유형의 checkout template v7이 별도 생성됐다.
 
 ### #165 checkout 예상시간 선택화
 
@@ -1170,6 +1172,10 @@ business admin을 매 요청 확인한다. production 운영값·seed·notificat
 stayover/additional/reclean 등 비-checkout row는 constraint로 non-null을 유지한다. 게시 RPC는 null을 허용하되
 값이 있으면 기존 1..10,080 범위를 그대로 검증한다. 기존 template·planned target snapshot·audit·receipt는
 backfill하거나 다시 쓰지 않는다.
+
+현재 production은 이 56번째 migration까지 적용됐고, 네 checkout template v7은 `durationMinutes=NULL`과
+승인된 사진 슬롯 수(standard 10 / premium 11 / oceanPremium 13 / oceanFamily 15)를 보존한다. 안전한
+운영 fixture 부재로 예약 성공 mutation smoke만 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 
 실제 청소 수행시간은 `cleaning_attempts.started_at`과 `field_completed_at`의 차이이며, turnaround는 실제
 checkout 시각부터 field completion까지다. 배정 preview는 `assignment_duration_policy_versions`의 confirmed
