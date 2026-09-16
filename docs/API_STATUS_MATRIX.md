@@ -1223,7 +1223,22 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [ ] 별도 release/main 승인 뒤 production 57·58번째 migration/API 배포와 hosted 예약 회귀 확인
 - [ ] 프런트 정본의 카드·요약·필터 5단계 mapper 반영과 browser E2E
 
-현재 critical path는 **#184 exact-head gate와 #180 collection gate → 승인된 production 57·58번째 migration/API 배포와 A template 게시 → 안전한 fixture가 승인되면 예약 생성·동일 요청 replay·planned target/snapshot smoke → 프런트 5단계 상태 mapper/browser E2E → Issue #148의 남은 tag/GitHub Release**다.
+### #187 예약 임박 lifecycle projection Phase A — source 후보
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 59번째 migration 후보; 기존 필드 호환, 공개 path/operation 109/117 유지 |
+| [x] | `GET /v1/rooms/{roomId}` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 목록과 동일한 lifecycle/readiness/next reservation projection |
+
+- [x] `serverTime === evaluatedAt` 단일 snapshot과 KST D-day/D+1/D+2 lifecycle 분류 추가
+- [x] `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus` 독립 축 및 next future reservation 요약 추가
+- [x] 청소-only 상태를 `BLOCKED`에서 제외하고, current check-in PIN 경고만 readiness 사유로 분리
+- [x] 기존 58 migrations 불변, 신규 59번째 append-only migration 및 SECURITY DEFINER fixed search path/execute revoke 적용
+- [x] route·stay/segment·room-change preview/commit·Python codegen 변경 없음
+- [ ] local fresh DB reset·SQL 회귀 및 exact-head application/migration CI
+- [ ] 별도 release/main 승인 뒤 production 59번째 migration/API 배포
+
+현재 critical path는 **#187 Phase A exact-head 검증과 #180 collection gate → 승인된 production 57·58·59번째 migration/API 배포와 A template 게시 → 안전한 fixture가 승인되면 예약 생성·동일 요청 replay·planned target/snapshot smoke → 프런트 lifecycle mapper/browser E2E → Issue #148의 남은 tag/GitHub Release**다.
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

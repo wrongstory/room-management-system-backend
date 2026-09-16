@@ -23,6 +23,16 @@ const roomRow = {
   state_version: 3,
   evaluated_at: '2026-09-16T08:00:00.000Z',
   reservation_phase: 'upcoming',
+  server_time: '2026-09-16T08:00:00.000Z',
+  occupancy_status: 'VACANT',
+  reservation_lifecycle: 'FUTURE',
+  readiness_status: 'READY',
+  primary_display_status: 'READY',
+  next_reservation_id: '40000000-0000-4000-8000-000000000001',
+  next_check_in_at: '2026-09-18T07:00:00.000Z',
+  next_check_out_at: '2026-09-19T02:00:00.000Z',
+  blocking_reason_codes: [],
+  readiness_reason_codes: [],
   occupied: false,
   cleaning_required: false,
   candle_count: 0,
@@ -46,6 +56,12 @@ describe('current room status public contract', () => {
       expect.objectContaining({
         evaluatedAt: '2026-09-16T08:00:00.000Z',
         reservationPhase: 'upcoming',
+        serverTime: '2026-09-16T08:00:00.000Z',
+        occupancyStatus: 'VACANT',
+        reservationLifecycle: 'FUTURE',
+        readinessStatus: 'READY',
+        primaryDisplayStatus: 'READY',
+        nextReservationId: '40000000-0000-4000-8000-000000000001',
         occupied: false,
         cleaningRequired: false,
         allocationReady: true
@@ -53,10 +69,21 @@ describe('current room status public contract', () => {
     ]);
   });
 
-  it('publishes the timestamp and closed reservation phase vocabulary in OpenAPI', () => {
+  it('publishes compatible and independent current room axes in OpenAPI', () => {
     const schema = openApiDocument.components.schemas.RoomProjection;
 
-    expect(schema.required).toEqual(expect.arrayContaining(['evaluatedAt', 'reservationPhase']));
+    expect(schema.required).toEqual(expect.arrayContaining([
+      'evaluatedAt',
+      'reservationPhase',
+      'serverTime',
+      'occupancyStatus',
+      'reservationLifecycle',
+      'readinessStatus',
+      'primaryDisplayStatus',
+      'nextReservationId',
+      'blockingReasonCodes',
+      'readinessReasonCodes'
+    ]));
     expect(schema.properties.evaluatedAt).toMatchObject({
       type: 'string',
       format: 'date-time'
@@ -65,6 +92,25 @@ describe('current room status public contract', () => {
       type: 'string',
       enum: ['none', 'upcoming', 'current']
     });
+    expect(openApiDocument.components.schemas.RoomReservationLifecycle.enum).toEqual([
+      'NONE',
+      'FUTURE',
+      'RESERVATION_PRESENT',
+      'ARRIVAL_PENDING',
+      'OCCUPIED'
+    ]);
+    expect(openApiDocument.components.schemas.RoomPrimaryDisplayStatus.enum).toEqual([
+      'BLOCKED',
+      'OCCUPIED',
+      'ARRIVAL_PENDING',
+      'RESERVATION_PRESENT',
+      'CLEANING_REQUIRED',
+      'READY'
+    ]);
+    expect(schema.properties.serverTime.description).toContain('evaluatedAt');
+    expect(openApiDocument.components.schemas.RoomReadinessReasonCode.enum).toEqual(
+      expect.arrayContaining(['CLEANING_REQUIRED', 'PIN_MISMATCH', 'PIN_UNCONFIGURED'])
+    );
     expect(openApiDocument.components.schemas.RoomReasonCode.enum).toContain(
       'RESERVATION_CURRENT'
     );
