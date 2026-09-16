@@ -76,13 +76,26 @@ select ok(not ('RESERVATION_CURRENT'=any(private.room_block_reason_codes(
   (select reservation_id from plans where label='notified')))),
   'check-in preparation validation excludes the reservation being transitioned from the room-level current-stay block');
 select is(private.room_reservation_phase_at(
-  (select room_id from plans where label='notified'),'2034-10-02 13:00:00+09'),
+  (select room_id from plans where label='notified'),'2034-10-02 11:00:00+09'),
   'none','reservation phase excludes the exact checkout boundary');
-select ok((select reservation_phase='upcoming' and not cleaning_required and allocation_ready
-  and not ('CLEANING_REQUIRED'=any(reason_codes)) and evaluated_at is not null
+savepoint actual_occupancy_checkout_boundary;
+update public.reservations
+set actual_check_in_at=check_in_at
+where id=(select reservation_id from plans where label='notified');
+select is(private.room_reservation_phase_at(
+  (select room_id from plans where label='notified'),'2034-10-02 11:00:00+09'),
+  'none','actual occupancy does not extend the scheduled reservation phase past the checkout boundary');
+select ok('OCCUPIED'=any(private.room_block_reason_codes(
+  (select room_id from plans where label='notified'),'2034-10-02 11:00:00+09',true,true)),
+  'late checkout processing remains visible through the independent occupied axis');
+rollback to savepoint actual_occupancy_checkout_boundary;
+select ok((select evaluated_at is not null
+  and reservation_phase=private.room_reservation_phase_at(id,evaluated_at)
+  and cleaning_required=('CLEANING_REQUIRED'=any(reason_codes))
+  and allocation_ready=(array_length(reason_codes,1) is null)
   from public.get_room_operational_projection(
     'a2000000-0000-4000-8000-000000000001',(select room_id from plans where label='notified'))),
-  'future reservation is upcoming without activating current cleaning or blocking current allocation');
+  'public projection uses one evaluated-at snapshot without a wall-clock-dependent fixture');
 select throws_ok($test$ insert into public.cleaning_attempts(cleaning_target_id,assignment_id,maid_profile_id,attempt_number,assignment_revision,status,template_snapshot,room_snapshot)
 select target_id,assignment_id,'a2000000-0000-4000-8000-000000000002',1,2,'superseded','{}','{}' from plans where label='notified' $test$,'23514','CHECKOUT_NOT_MATERIALIZED','superseded label cannot bypass pre-checkout attempt creation guard');
 
@@ -238,6 +251,13 @@ select public.manual_checkout_reservation('a2000000-0000-4000-8000-000000000001'
 select is((select count(*)::int from public.cleaning_targets where reservation_id=(select reservation_id from plans where label='manual')),1,'D early manual checkout reuses one target');
 select ok((select not is_current from public.cleaning_assignments where id=(select assignment_id from plans where label='manual')),'D old assignment immutable revision closed');
 select ok((select effective_service_date=(now() at time zone 'Asia/Seoul')::date and original_service_date=(now() at time zone 'Asia/Seoul')::date+1 from public.cleaning_targets where id=(select target_id from plans where label='manual')),'D original plan retained and actual service date updated');
+select ok(private.room_reservation_phase_at(
+  (select room_id from plans where label='manual'),date_trunc('minute',now()))='none'
+  and not ('OCCUPIED'=any(private.room_block_reason_codes(
+    (select room_id from plans where label='manual'),date_trunc('minute',now()),true,true)))
+  and 'CLEANING_REQUIRED'=any(private.room_block_reason_codes(
+    (select room_id from plans where label='manual'),date_trunc('minute',now()),true,true)),
+  'actual checkout clears occupancy and activates checkout cleaning without extending reservation phase');
 select is((select count(*)::int from public.cleaning_target_schedule_revisions where cleaning_target_id=(select target_id from plans where label='manual') and reason_code='MANUAL_CHECKOUT'),1,'D one access schedule revision');
 select is((select count(*)::int from public.cleaning_attempts),0,'D no attempt creation before #28 activation');
 

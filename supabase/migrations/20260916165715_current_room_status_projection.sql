@@ -68,16 +68,8 @@ as $$
       where reservation.room_id = p_room_id
         and reservation.status = 'active'
         and reservation.actual_checkout_at is null
-        and (
-      (
-        reservation.actual_check_in_at is not null
-        and reservation.actual_check_in_at <= p_at
-      )
-      or (
-            reservation.check_in_at <= p_at
-            and reservation.check_out_at > p_at
-          )
-        )
+        and reservation.check_in_at <= p_at
+        and reservation.check_out_at > p_at
     ) then 'current'
     when exists (
       select 1
@@ -274,4 +266,4 @@ from public, anon, authenticated;
 grant execute on function public.get_room_operational_projection(uuid, uuid) to service_role;
 
 comment on function public.get_room_operational_projection(uuid, uuid) is
-'Current-time room projection. reservation_phase is evaluated once per response; future checkout planning never activates cleaning_required.';
+'Current-time room projection. reservation_phase is the scheduled [check-in, check-out) interval evaluated once per response; actual occupancy remains an independent occupied axis and future checkout planning never activates cleaning_required.';
