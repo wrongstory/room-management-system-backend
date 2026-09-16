@@ -28,7 +28,7 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 현재 `main@f290f6d2bbba33b1c2e57cbf64ac4df2554c8d51` 기준 OpenAPI `0.3.0` 109 paths / 117 operations와 55 migrations를 사용한다. #156 청소 템플릿 API까지 배포됐지만 네 객실 유형의 checkout template은 아직 게시되지 않았다. #165의 `durationMinutes` 선택화는 별도 hotfix candidate이며, 최종 exact head의 required CI·독립 QA·`main` 병합·56번째 migration·production `api` 재배포·운영 template 게시와 예약 smoke 전에는 프론트 기능을 운영에서 활성화하지 않는다.
+production Edge는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` 기준 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations를 사용한다. `standard`, `premium`, `oceanPremium`, `oceanFamily` checkout template은 각각 v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes=null`이다. GitHub Pages도 workflow run `35051144073`에서 production Edge와 path·operationId 및 manifest SHA-256 parity를 확인했다. 다만 안전한 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, 이를 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
 
 ### #131/#140 객실 PIN source 계약
 
@@ -38,9 +38,9 @@ Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모�
 
 ## 2. 로컬 백엔드 준비
 
-### #84 사진 연동 후보 — 아직 production 기능을 켜지 않는다
+### #84 사진 연동 — API source/bundle 배포, 실제 Google provider 활성화 대기
 
-source에는 사진4 operations가 추가됐지만 운영 OpenAPI에 나타나고 OAuth/역할별 hosted smoke가 끝나기 전에는 production에서 사용하지 않는다.
+사진 operation은 운영 OpenAPI와 `api` bundle에 반영됐다. 다만 Google Drive 운영 계정·OAuth·대상 폴더와 역할별 hosted smoke가 끝나기 전에는 실제 업로드/삭제 기능을 production-ready로 표시하지 않는다.
 
 1. `GET /v1/attempts/{attemptId}/photo-slots`로 immutable slotId와 currentRevision을 받는다. 슬롯 key만으로 UUID를 추측하지 않는다.
 2. `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload?assignmentId=...&assignmentRevision=...&expectedPhotoRevision=...`에 JPEG/WebP **raw bytes**를 전송한다. `Content-Type`은 정확히 image/jpeg 또는 image/webp, 원문307200 bytes 이하이며 multipart/base64는 지원하지 않는다.
@@ -52,9 +52,9 @@ source에는 사진4 operations가 추가됐지만 운영 OpenAPI에 나타나�
 408 PHOTO_BODY_TIMEOUT은 본문 수신 시간 초과, 413은 원문/출력 크기 또는 decoder 기술상한, 415는 MIME, 409는 CAS/작업·quota·KST clock 경계, 503은 provider/환경 준비 상태를 구분한다. 업로드 initial/retry 응답의 `quotaWarning:boolean`이 true면 용량 경고를 표시한다. Google raw 사용량은 제공하지 않는다.
 사진 accepted가 field_completed/전체 제출/검수/ready로 자동 전이되지 않는다. Python developer 운영 콘솔은 이 business upload/read API를 생성하거나 호출하지 않는다.
 
-### #137 PIN Sheet 운영 source/dev 완료
+### #137 PIN Sheet 운영 source/bundle 배포, hosted Google 활성화 대기
 
-active developer/admin만 `GET /v1/room-pin-sheet-sync/status`를 호출한다. UI는 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 `version`만 표시하고 healthy를 별도로 추측하지 않는다. 전체 복구는 strict `{expectedVersion}` body와 새 `Idempotency-Key`로 `POST /v1/room-pin-sheet-sync/full-resync`를 호출한다. 409 stale/pending/busy이면 status를 다시 읽고 운영자가 판단하며 자동 반복하지 않는다. 응답과 클라이언트 상태에 PIN, spreadsheet/tab identity, credential/provider 원문을 저장하지 않는다. production OpenAPI에 두 path가 나타나고 hosted mapping/ACL/smoke가 끝날 때까지 기능을 켜지 않는다.
+active developer/admin만 `GET /v1/room-pin-sheet-sync/status`를 호출한다. UI는 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 `version`만 표시하고 healthy를 별도로 추측하지 않는다. 전체 복구는 strict `{expectedVersion}` body와 새 `Idempotency-Key`로 `POST /v1/room-pin-sheet-sync/full-resync`를 호출한다. 409 stale/pending/busy이면 status를 다시 읽고 운영자가 판단하며 자동 반복하지 않는다. 응답과 클라이언트 상태에 PIN, spreadsheet/tab identity, credential/provider 원문을 저장하지 않는다. 두 path는 production OpenAPI에 존재하지만 hosted mapping/ACL/secret/Cron/smoke가 끝날 때까지 실제 Google 동기화 기능을 켜지 않는다.
 
 백엔드 저장소에서:
 
@@ -244,11 +244,11 @@ const idempotencyKey = crypto.randomUUID();
 
 ### #165 예상시간 선택화 프론트 적용 체크리스트
 
-아래는 `makee-ham/room-management-system`에서 구현할 source 체크리스트다. 구현은 먼저 할 수 있지만 production 활성화는 이 절 마지막의 배포 gate를 통과한 뒤에만 한다.
+아래는 `makee-ham/room-management-system`에서 구현할 source 체크리스트다. 백엔드 배포 gate는 완료됐지만 프런트 연결과 안전한 예약 E2E는 별도다.
 
 #### 타입·템플릿 관리자 화면
 
-- [ ] production 배포가 끝난 뒤 production Edge `/openapi.json`에서 타입을 다시 생성한다. candidate JSON이나 수기 interface를 운영 정본으로 고정하지 않는다.
+- [ ] 최신 production Edge 또는 Pages `/openapi.json`에서 타입을 다시 생성한다. candidate JSON이나 수기 interface를 운영 정본으로 고정하지 않는다.
 - [ ] `PublishCleaningTemplateRequest.durationMinutes`를 `number | null | undefined`, 게시·조회 응답을 `number | null`로 처리한다.
 - [ ] 예상시간 필수 표시와 필수 validation을 제거한다. 빈 값은 생략 또는 `null`로 보내며 두 입력은 같은 의미로 취급한다.
 - [ ] 양수 입력은 1~10080 범위를 유지하고, `null`을 0분·1분 또는 55/65/70/80분으로 치환하지 않는다.
@@ -283,8 +283,9 @@ const idempotencyKey = crypto.randomUUID();
 - [ ] duration 생략과 명시적 `null` 게시, 조회의 `null` 보존, 양수 기존 입력을 모두 검증한다.
 - [ ] duration 없는 게시 template으로 예약 생성이 성공하고 planned checkout target이 생성되는 흐름을 검증한다.
 - [ ] 같은 객실 동시 시작은 정확히 한 요청만 성공하고, 미해결 고객 미퇴실 사건 중에는 시작·완료·제출이 성공으로 표시되지 않는지 검증한다.
-- [ ] #165 독립 QA P0/P1=0 → `main` 병합 → production 56번째 migration → 병합된 `main` exact source의 `api` 배포 → production OpenAPI nullable 의미 확인 → 네 template 게시 → 역할별 hosted smoke 순서가 끝난 뒤에만 기능 flag를 켠다.
-- [ ] OpenAPI 109 paths / 117 operations 개수만 보지 말고, 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인한다.
+- [x] #165 독립 QA P0/P1=0 → `main` 병합 → production 56번째 migration → 승인 `main` exact source의 `api` 배포 → production OpenAPI nullable 의미 확인 → 네 template 게시 완료.
+- [x] OpenAPI 109 paths / 117 operations, 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인.
+- [ ] 안전한 운영 fixture에서 예약 생성·동일 요청 replay·planned checkout target/snapshot을 확인. 현재는 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
 
@@ -313,13 +314,13 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 
 ## 9. 현재 범위 제한
 
-### 주급 pagination source 계약 (#96 후보)
+### 주급 pagination 운영 계약 (#96)
 
 - `GET /v1/payroll`은 `payroll` 최대 10개와 `nextCursor`를 반환한다. `maidProfileId`를 생략한 admin-all에서만 여러 cycle page를 순회하며 정렬은 `maidProfileId ASC`로 고정한다.
 - 각 cycle의 `itemCount`, `totalAmount`, `lateEarningCount`, `lateEarningAmount`는 전체 exact 값이다. `items`와 `lateEarnings`는 최대 10개 preview이므로 배열 길이를 total로 해석하지 않는다.
 - `itemsNextCursor` 또는 `lateEarningsNextCursor`가 있으면 `GET /v1/payroll/entries`에 같은 `weekStart`, `maidProfileId`, 맞는 `kind`와 함께 보낸다. 상세 page는 기본 25, 최대 50이고 `earnedOn ASC, earningId ASC` 순서다.
 - cursor는 opaque 서명값이다. decode/수정/합성하거나 사용자·role·주차·maid filter·kind 사이에서 재사용하지 않는다. scope 변경 시 첫 page부터 다시 요청한다.
 - list/entries/start/replay 응답은 UTF-8 JSON 128 KiB 상한을 갖는다. `PAYROLL_CURSOR_INVALID`, `PAYROLL_CURSOR_NOT_CONFIGURED`, `PAYROLL_RESPONSE_TOO_LARGE`는 message가 아니라 code로 분기한다.
-- 이 계약은 feature source 후보이며 `dev` 병합과 release/main·production Edge 재배포 전에는 production에서 활성화하지 않는다.
+- 이 계약은 production OpenAPI와 `api` bundle에 반영됐다. 실제 역할별 hosted read/mutation smoke가 없는 경로는 배포 여부와 별도로 표시한다.
 
-현재 source Swagger 범위는 인증·계정·developer 운영 projection·객실 목록/상세/운영 mutation·주간 가능일·예약/청소요청·주급 조회/시작이다. source operation이 존재해도 production Edge와 GitHub Pages snapshot에서 release → main 승격, Edge 재배포, hosted 역할·CAS·redaction smoke가 끝날 때까지 해당 프론트 기능을 활성화하지 않는다. Python 운영도구의 generated client는 운영 관리 surface만 유지하며 업무 예약·객실·주급 operation을 자동 포함하지 않는다.
+현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 109 paths / 117 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.

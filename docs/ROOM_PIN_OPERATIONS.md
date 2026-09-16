@@ -2,7 +2,7 @@
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 현재 개발 통합 기준은 `dev@ab10249aaf1d671419389615ad8a22984c9849ac`, 전체 55 migrations / 109 paths / 117 operations이고 PIN 범위의 49~53번째 migration과 #146 deterministic concurrency fixture는 변경 없이 보존된다. PIN source와 49~53번은 `main@e3397e00e5538871d80610c9f0c7ab88535d7be0` 및 production 54-migration 기준선에 반영됐지만, production target mapping·Google ACL/Cron/activation은 여전히 별도 pending이다. #156의 55번째 migration과 API는 PIN schema·worker 계약을 바꾸지 않는다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 현재 production source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`, 전체 56 migrations / 109 paths / 117 operations이고 PIN 범위의 49~53번째 migration과 #146 deterministic concurrency fixture는 변경 없이 보존된다. PIN source와 `room-pin-sheet-sync` bundle은 production에 반영됐지만 target mapping·Google ACL/Secrets/Cron/hosted activation은 여전히 별도 pending이다. #156/#165의 55~56번째 migration과 API는 PIN schema·worker 계약을 바꾸지 않는다.
 
 Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다.
 
