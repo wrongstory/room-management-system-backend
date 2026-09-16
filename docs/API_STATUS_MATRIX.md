@@ -1201,6 +1201,23 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] 운영 OpenAPI와 GitHub Pages 0.3.0 / 109 / 117 parity — workflow run `35051144073`
 - [ ] 예약 success hosted smoke — `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`; 임의 운영 예약을 만들지 않음
 
+### #184 현재일 기준 객실 현황 projection — source gate 진행 중
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 57번째 migration 후보; production은 기존 56번째 계약 유지 |
+| [x] | `GET /v1/rooms/{roomId}` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 목록과 동일한 `evaluatedAt`/`reservationPhase` 계약 |
+
+- [x] 미래 active 예약의 pending preparation obligation을 현재 `CLEANING_REQUIRED`로 오인하던 projection 수정
+- [x] 서버 snapshot 시각 `evaluatedAt`과 `[checkInAt, checkOutAt)` 기반 `reservationPhase=none|upcoming|current` 추가
+- [x] 미래 planned checkout은 현재 청소·배정 차단을 활성화하지 않고, 실제 checkout materialization 뒤에만 청소 필요로 전환
+- [x] Fastify/Edge/OpenAPI 계약 및 프런트 5단계 대표 mapper 문서화 — 공개 path/operation은 109/117 유지
+- [x] 기존 56 migrations 불변, 신규 57번째 append-only migration과 future/current/checkout 경계 회귀 추가
+- [ ] exact-head 독립 QA P0/P1=0·90점 이상과 required GitHub `application` / `migration` PASS
+- [ ] `dev` 병합
+- [ ] 별도 release/main 승인 뒤 production 57번째 migration/API 배포와 hosted 예약 회귀 확인
+- [ ] 프런트 정본의 카드·요약·필터 5단계 mapper 반영과 browser E2E
+
 현재 critical path는 **안전한 fixture가 승인되면 예약 생성·동일 요청 replay·planned target/snapshot smoke → 프런트 청소관리 API 연결 → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다.
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.

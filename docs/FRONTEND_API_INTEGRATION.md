@@ -196,8 +196,8 @@ const idempotencyKey = crypto.randomUUID();
 | 업무 감사 | `GET /v1/developer/audit-events` | 성공한 domain mutation, 최대 31일·100건 cursor pagination, raw state 없음 |
 | 활동·보안 로그 | `GET /v1/developer/activity-events` | 로그인·민감접근 및 분 단위 권한거부 집계, 최대 31일·100건 cursor pagination |
 | 운영 진단 | `POST /v1/developer/diagnostics` | body 없음, 임의 URL/SQL/RPC 입력 없음, 10회/분 |
-| 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 독립 상태 축 사용 |
-| 객실 운영 상세 | `GET /v1/rooms/{roomId}` | 목록과 동일한 camelCase projection, PIN 원문 없음 |
+| 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, `evaluatedAt` 기준 독립 상태 축과 `reservationPhase` 사용 |
+| 객실 운영 상세 | `GET /v1/rooms/{roomId}` | 목록과 동일한 현재 시각 camelCase projection, PIN 원문 없음 |
 | 객실 기준정보 변경 | `PATCH /v1/rooms/{roomId}/master-data` | room state `expectedVersion` CAS와 Idempotency-Key |
 | 객실 운영 차단 | `POST /v1/rooms/{roomId}/operation-blocks` | 시작/종료 시각은 RFC 3339 offset, 생성 결과 ID는 서버 결정 |
 | 객실 운영 차단 해제 | `POST /v1/rooms/{roomId}/operation-blocks/{blockId}/release` | 삭제가 아닌 release 이력 append |
@@ -228,7 +228,17 @@ const idempotencyKey = crypto.randomUUID();
 | 고객 미퇴실 사건 조회 | `GET /v1/checkout-incidents/{incidentId}` | admin 또는 사건에 연결된 maid만 조회. version과 impactFingerprint를 결정 요청에 재사용 |
 | 고객 미퇴실 사건 결정 | `POST /v1/checkout-incidents/{incidentId}/decision` | admin만 `EXTEND_CHECKOUT`, `CONFIRM_DEPARTED`, `FALSE_REPORT`; stale version/fingerprint면 재조회 |
 
-객실은 `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 status로 합치지 않는다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, UI 대표 색상·문구는 별도 mapper에서 결정한다. `pinSyncStatus=unconfigured|mismatch`는 별도 경고이며 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건으로 사용하지 않는다. 실제 체크인·PIN 접근 화면만 `verified` 전까지 차단한다.
+객실 응답의 `evaluatedAt`은 서버가 해당 projection을 계산한 RFC 3339 timestamp이고, `reservationPhase`는 그 시각을 기준으로 한 예약 일정 축이다. 값은 `none | upcoming | current`이며 `current` 범위는 `checkInAt <= evaluatedAt < checkOutAt`이다. 같은 목록 응답의 모든 객실은 동일한 `evaluatedAt` snapshot을 사용한다. 미래 예약은 `reservationPhase=upcoming`으로 표시하되 그 사실만으로 현재 `cleaningRequired` 또는 `allocationBlocked`를 활성화하지 않는다.
+
+객실은 `reservationPhase`, `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`를 하나의 영구 status로 합치지 않는다. 현재 예약 구간은 실제 체크인 event가 아직 없어도 `reasonCodes`에 `RESERVATION_CURRENT`가 포함되고 `allocationReady=false`다. `allocationReady=false`이면 `reasonCodes` 전체를 보존하고, 객실 현황의 대표 색상·문구만 다음 순서의 별도 프런트 mapper에서 결정한다.
+
+1. `reservationPhase=current` 또는 `occupied=true` → **투숙 중**
+2. `cleaningRequired=true` → **청소 필요**
+3. `reservationPhase=upcoming` → **투숙 예정**
+4. `allocationReady=true` → **배정 가능**
+5. 나머지 → **배정 불가**
+
+이 mapper는 현재 화면을 위한 표현 규칙이며 API나 DB에 단일 status로 저장하지 않는다. `pinSyncStatus=unconfigured|mismatch`는 별도 경고이며 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건으로 사용하지 않는다. 실제 체크인·PIN 접근 화면만 `verified` 전까지 차단한다.
 
 객실 mutation은 최신 상세/목록의 `stateVersion`을 `expectedVersion` 또는 `expectedRoomVersion`으로 그대로 보낸다. `STALE_VERSION`이면 현재 객실을 다시 읽어 사용자 확인을 받고, 키를 바꿔 자동 덮어쓰지 않는다. 동일 payload의 통신 재시도에만 같은 Idempotency-Key를 사용한다. 수동 `PIN 동기화 상태 기록` 화면은 제거하고 bootstrap·prepare/confirm/rollback/reveal API만 사용한다. PIN 관련 목록은 `pinSyncStatus`와 `pinVersion`만 취급하며 `pin`, `rawPin`, `pinCode`, `doorCode`, `credential`, `providerSecret` 필드를 만들거나 analytics·오류 수집에 보내지 않는다.
 
