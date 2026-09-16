@@ -110,6 +110,10 @@ const cleaningTemplateDurationMigrationUrl = new URL(
   '../supabase/migrations/20260915000628_cleaning_template_duration_optional.sql',
   import.meta.url
 );
+const currentRoomStatusMigrationUrl = new URL(
+  '../supabase/migrations/20260916165715_current_room_status_projection.sql',
+  import.meta.url
+);
 const photoSlotContractV8MigrationUrl = new URL(
   '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
   import.meta.url
@@ -150,6 +154,26 @@ describe('initial migration contract', () => {
     expect(sql).toContain("running_attempt.status = 'in_progress'");
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
+  });
+
+  it('separates future reservation schedules from current cleaning state', async () => {
+    const sql = await readFile(currentRoomStatusMigrationUrl, 'utf8');
+
+    expect(sql).toContain('private.room_current_cleaning_required_at');
+    expect(sql).toContain('obligation.current_cleaning_target_id = target.id');
+    expect(sql).toContain("obligation.status = 'materialized'");
+    expect(sql).toContain('reservation.actual_checkout_at <= p_at');
+    expect(sql).toContain('private.room_reservation_phase_at');
+    expect(sql).toContain("then 'current'");
+    expect(sql).toContain("then 'upcoming'");
+    expect(sql).toContain("array_append(v_reasons, 'RESERVATION_CURRENT')");
+    expect(sql).toContain('and p_preparation_reservation_id is null');
+    expect(sql).toContain('v_evaluated_at timestamptz := clock_timestamp()');
+    expect(sql).toContain('p_preparation_reservation_id is not null');
+    expect(sql).toContain('obligation.reservation_id = p_preparation_reservation_id');
+    expect(sql).toContain('drop function public.get_room_operational_projection(uuid, uuid)');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toContain('current_date');
   });
 
   it('seeds 121 unique room numbers', async () => {

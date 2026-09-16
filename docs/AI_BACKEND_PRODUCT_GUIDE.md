@@ -5,7 +5,7 @@
 검토 기준:
 
 - 이 문서 갱신의 기능 통합 기준: PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925` — 56 migrations / OpenAPI 109 paths / 117 operations. #165 긴급 보완은 `main`과 `dev`에 source 통합됐다. 이후 문서 전용 commit은 이 기능 기준을 바꾸지 않는다.
-- 현재 작업 후보 #179/#180은 Decision A의 v8 슬롯 계약과 58번째 append-only collection migration을 연결한다. #180 source 후보는 `extra-proof` 0~10장 append/replace/개별 삭제/제출 봉인을 구현했지만 아직 `dev`/`main`/production 정본이 아니며, 독립 QA·required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
+- #179 Decision A의 57번째 append-only migration과 v8 사진 슬롯 계약, #184 현재 시각 객실 projection은 `dev@fb50775289b14f16b27679af471e282504b5f5f6`까지 통합됐다. #180 source 후보는 그 위에 `extra-proof` 0~10장 append/replace/개별 삭제/제출 봉인을 추가하며, 병합 후 source는 59 migrations / OpenAPI 111 paths / 119 operations가 된다. 아직 `main`/production 정본이 아니며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 - 백엔드 운영 source 정본: `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`. 2026-09-16 production readback은 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations와 기존 5개 Edge bundle이다. 네 checkout template은 모두 immutable v7로 게시됐고 `durationMinutes=null`을 보존한다. 안전한 운영 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, annotated `v0.3.0` tag/GitHub Release와 provider·Google hosted activation은 별도 pending이다.
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -172,11 +172,13 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 
 DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하지 않는다. 조회 view 또는 projection service가 축을 조합한다. 정책 우선순위가 바뀌어도 원본 이력은 그대로 남아야 한다.
 
-### `[확정]` 백엔드 projection / `[미확정]` 카드 대표 표현
+### `[확정]` 백엔드 projection / `[확정 — 2026-09-16]` 현재 객실 대표 표현
 
-백엔드는 `occupied`, `cleaning_required`, `allocation_blocked`, `allocation_ready` 같은 독립 predicate와 사유를 제공한다. 필터와 집계도 서로 겹칠 수 있다. 프런트 `DOCS/17`은 대표 카드 우선순위를 `배정 불가 → 청소 필요 → 투숙 중 → 배정 가능`으로 적었지만, 더 구체적인 `DOCS/20`과 현재 wireframe은 투숙 중 연박 청소를 `투숙 중` 주 상태 + `청소 필요` 하위 상태로 표시한다. 이 UI 충돌은 아직 해소되지 않았다. 백엔드 schema/API는 한쪽 대표 문자열을 영구 상태로 고정하지 말고 독립 축을 제공하며, 표시 우선순위 변경은 프런트 계약으로 격리한다.
+백엔드는 `reservation_phase`, `occupied`, `cleaning_required`, `allocation_blocked`, `allocation_ready` 같은 독립 predicate와 사유를 제공한다. `reservation_phase=none|upcoming|current`는 응답의 동일한 서버 `evaluated_at`을 기준으로 계산하고, current 일정은 `[check_in_at, check_out_at)` 반개구간이다. 미래 예약의 pending preparation obligation과 private planned checkout target은 현재 `cleaning_required`를 활성화하지 않는다. 실제 checkout으로 current target이 materialize됐거나 현재 실행 가능한 비-checkout 청소가 있을 때만 현재 청소 축에 반영한다.
 
-`allocation_ready`는 예약 배정 가능 여부다. 공실, 현재 preparation obligation 승인, 촛불 0, 운영 정상, 미해결 입실 차단 이슈 없음, 기준정보·점유 확인 완료를 모두 만족할 때만 true다. false이면 `OCCUPIED`, `CLEANING_REQUIRED`, `CANDLE_PRESENT`, `OPERATION_BLOCKED`, `ROOM_ISSUE_BLOCKED`, `DATA_UNCONFIRMED` 같은 안정적인 reason code 목록을 함께 반환한다. `pin_sync_status`는 별도 경고 축이며 `unconfigured` 또는 `mismatch`만으로 예약 생성·변경·배정을 막지 않는다. 다만 실제 체크인 전이와 PIN 조회·변경은 current PIN이 `verified`가 될 때까지 fail-closed한다.
+객실 현황 화면의 대표 문구는 `current 또는 occupied → 투숙 중`, `cleaning_required → 청소 필요`, `upcoming → 투숙 예정`, `allocation_ready → 배정 가능`, 나머지 `배정 불가` 순서로 정한다. 이는 프런트 표시 mapper이며 DB나 API에 단일 영구 status로 저장하지 않는다. 필터·집계는 같은 mapper를 사용해 5개 대표 상태가 상호 배타적으로 보이게 하고, 독립 reason/pin 경고는 별도로 보존한다.
+
+`allocation_ready`는 현재 시각의 예약 배정 가능 여부다. 공실, 현재 preparation obligation 승인, 촛불 0, 운영 정상, 미해결 입실 차단 이슈 없음, 기준정보·점유 확인 완료를 모두 만족할 때만 true다. 현재 예약 구간이면 실제 체크인 event가 아직 없어도 `RESERVATION_CURRENT`로 차단한다. false이면 `OCCUPIED`, `RESERVATION_CURRENT`, `CLEANING_REQUIRED`, `CANDLE_PRESENT`, `OPERATION_BLOCKED`, `ROOM_ISSUE_BLOCKED`, `DATA_UNCONFIRMED` 같은 안정적인 reason code 목록을 함께 반환한다. `pin_sync_status`는 별도 경고 축이며 `unconfigured` 또는 `mismatch`만으로 예약 생성·변경·배정을 막지 않는다. 다만 실제 체크인 전이와 PIN 조회·변경은 current PIN이 `verified`가 될 때까지 fail-closed한다.
 
 ---
 

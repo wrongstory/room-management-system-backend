@@ -3620,7 +3620,7 @@ export const openApiDocument = {
         operationId: "listRooms",
         summary: "전체 객실 운영 projection 조회",
         description:
-          "active business admin 전용입니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 프론트에서 하나의 status enum으로 합치지 않습니다. `allocationReady=false`의 근거는 `reasonCodes`로 표시하세요. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
+          "active business admin 전용입니다. `evaluatedAt`의 서버 시각을 기준으로 `reservationPhase`와 현재 점유·청소·배정 가능 축을 계산합니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 하나의 영구 status enum으로 합치지 않습니다. `allocationReady=false`의 근거는 `reasonCodes`로 표시하세요. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         responses: {
@@ -3654,7 +3654,7 @@ export const openApiDocument = {
         operationId: "getRoom",
         summary: "객실 단건 운영 projection 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록과 동일한 camelCase projection만 반환하며 객실 PIN 원문이나 provider 인증정보는 반환하지 않습니다.",
+          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록과 동일하게 `evaluatedAt` 시점의 camelCase projection만 반환하며 객실 PIN 원문이나 provider 인증정보는 반환하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [roomIdParameter()],
@@ -7920,6 +7920,7 @@ export const openApiDocument = {
         type: "string",
         enum: [
           "OCCUPIED",
+          "RESERVATION_CURRENT",
           "CLEANING_REQUIRED",
           "CANDLE_PRESENT",
           "OPERATION_BLOCKED",
@@ -7927,7 +7928,7 @@ export const openApiDocument = {
           "DATA_UNCONFIRMED",
         ],
         description:
-          "객실 예약 배정이 준비되지 않은 독립 사유입니다. 여러 값이 동시에 올 수 있습니다. PIN 상태는 이 enum이 아니라 RoomProjection.pinSyncStatus의 별도 경고 축입니다.",
+          "객실 예약 배정이 준비되지 않은 독립 사유입니다. RESERVATION_CURRENT는 evaluatedAt이 예약의 [checkInAt, checkOutAt) 구간에 있음을 뜻합니다. 여러 값이 동시에 올 수 있습니다. PIN 상태는 이 enum이 아니라 RoomProjection.pinSyncStatus의 별도 경고 축입니다.",
       },
       RoomProjection: {
         type: "object",
@@ -7940,6 +7941,8 @@ export const openApiDocument = {
           "elevatorZone",
           "dataStatus",
           "stateVersion",
+          "evaluatedAt",
+          "reservationPhase",
           "occupied",
           "cleaningRequired",
           "candleCount",
@@ -7978,10 +7981,26 @@ export const openApiDocument = {
             description:
               "후속 객실 변경 command에서 expectedVersion으로 사용할 CAS version",
           },
-          occupied: { type: "boolean", description: "현재 점유 여부" },
+          evaluatedAt: {
+            type: "string",
+            format: "date-time",
+            description:
+              "이 projection의 모든 현재 시각 판정에 사용한 서버 RFC 3339 timestamp",
+          },
+          reservationPhase: {
+            type: "string",
+            enum: ["none", "upcoming", "current"],
+            description:
+              "evaluatedAt 기준 예약 일정 축. current는 checkInAt <= evaluatedAt < checkOutAt, upcoming은 아직 시작하지 않은 active 예약, none은 현재·향후 active 예약이 없음을 뜻합니다.",
+          },
+          occupied: {
+            type: "boolean",
+            description: "evaluatedAt 기준 현재 점유 여부",
+          },
           cleaningRequired: {
             type: "boolean",
-            description: "현재 청소 의무 존재 여부",
+            description:
+              "evaluatedAt 기준 현재 활성화된 청소 의무 존재 여부. 미래 예약의 준비 의무만으로 true가 되지 않습니다.",
           },
           candleCount: {
             type: "integer",
@@ -7996,11 +8015,13 @@ export const openApiDocument = {
           },
           allocationBlocked: {
             type: "boolean",
-            description: "하나 이상의 고객 배정 차단 사유가 있는지 여부",
+            description:
+              "evaluatedAt 기준 하나 이상의 현재 고객 배정 차단 사유가 있는지 여부",
           },
           allocationReady: {
             type: "boolean",
-            description: "현재 고객 배정 준비 조건을 모두 만족하는지 여부",
+            description:
+              "evaluatedAt 기준 현재 고객 배정 준비 조건을 모두 만족하는지 여부",
           },
           reasonCodes: {
             type: "array",

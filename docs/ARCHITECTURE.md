@@ -25,9 +25,15 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 기능 integration 기준은 PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이고, 운영 source 정본은 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`다. 2026-09-16 production readback은 56 migrations / `api` ACTIVE v16 / OpenAPI `0.3.0` 109 paths / 117 operations 및 5개 Edge bundle이다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
-#179/#180의 현재 작업 후보는 v8 슬롯 계약과 58번째 append-only `extra-proof` collection migration을 추가한다. 병합·운영 반영 전 source candidate이며 독립 QA·required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
+#179의 57번째 append-only migration과 v8 슬롯 계약, #184 현재 시각 객실 projection은 `dev@fb50775289b14f16b27679af471e282504b5f5f6`까지 통합됐다. #180 source 후보는 그 위에 append-only `extra-proof` collection migration을 추가하며, 합산 source는 59 migrations / OpenAPI 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
 ## 신뢰 경계
+
+### #184 현재 시각 객실 projection
+
+`get_room_operational_projection`은 호출마다 서버 시각을 한 번만 캡처해 모든 행에 `evaluated_at`으로 반환한다. Fastify와 Edge adapter는 이를 RFC 3339 `evaluatedAt`으로 동일하게 공개하며, 예약 일정 축은 `reservationPhase=none|upcoming|current`로 반환한다. `current`는 반개구간 `checkInAt <= evaluatedAt < checkOutAt`이고, 미래 active 예약은 `upcoming`이다.
+
+현재 객실 현황은 이 snapshot 시각에 실제로 활성화된 점유·청소 의무·운영 차단만 계산한다. 미래 예약의 준비 의무는 일정과 작업 계획에는 남지만 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `reservationPhase`, `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`, `reasonCodes`, `pinSyncStatus`는 계속 독립 축이며 새 영구 `status` 컬럼이나 단일 API status를 만들지 않는다. 프런트의 5단계 대표 문구는 이 축을 읽는 표시 mapper일 뿐 정본 상태가 아니다.
 
 ### #131 encrypted room PIN Phase A — source/dev 완료
 

@@ -51,6 +51,8 @@ const roomRow = {
   elevator_zone: "A" as const,
   data_status: "verified" as const,
   state_version: 3,
+  evaluated_at: "2026-09-16T08:00:00.000Z",
+  reservation_phase: "current" as const,
   occupied: true,
   cleaning_required: false,
   candle_count: 0,
@@ -462,6 +464,11 @@ Deno.test("room projection mapper exposes only the allowlisted fields", () => {
   const [room] = toRoomProjections([{ ...roomRow, raw_pin: "must-not-leak" }]);
   assert(room.roomNumber === "101", "roomNumber mapped");
   assert(room.stateVersion === 3, "stateVersion mapped");
+  assert(
+    room.evaluatedAt === "2026-09-16T08:00:00.000Z",
+    "evaluatedAt mapped",
+  );
+  assert(room.reservationPhase === "current", "reservationPhase mapped");
   assert(!("raw_pin" in room), "unknown DB field removed");
   assert(!JSON.stringify(room).includes("must-not-leak"), "raw PIN removed");
 });
