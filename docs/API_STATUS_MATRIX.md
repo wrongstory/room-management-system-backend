@@ -88,7 +88,7 @@ production 최종 source/readback evidence: **2026-09-16 KST** (Issue #148/#156/
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #131은 #69 승인 PIN 계약의 Phase A source/dev 정본이다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. private immutable revision/current pointer, physical-change mismatch lifecycle, authoritative maid access lease, 30초 이하 reveal과 safe sync/audit/outbox를 포함하며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
-- 현재 critical path는 **#179 exact-head QA·CI·사람 리뷰 → #180 `extra-proof` 0~10장 collection 완료 → 승인된 release에서 57번째 migration/API 배포와 기존 v7→A template 신규 게시 → 안전한 fixture 승인 시 reservation/planned-target hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. 현재 production v7 이력은 release 전에 덮어쓰지 않는다.
+- 현재 critical path는 **#184 현재 시각 객실 projection gate와 #180 `extra-proof` 0~10장 collection 완료 → 승인된 release에서 57·58번째 migration/API 배포와 기존 v7→A template 신규 게시 → 안전한 fixture 승인 시 reservation/planned-target hosted smoke → 프런트 5단계 상태 mapper/browser E2E → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. 현재 production v7 이력은 release 전에 덮어쓰지 않는다.
 - 운영 migration: **56건**
 - 운영 Edge Functions readback:
   - `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 bundle 배포
@@ -1201,12 +1201,29 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] 네 타입 checkout template v7 exactly-one 게시 — 슬롯 10/11/13/15, `durationMinutes=null`, audit 4건, notification/outbox 0건
 - [x] 운영 OpenAPI와 GitHub Pages 0.3.0 / 109 / 117 parity — workflow run `35051144073`
 - [ ] 예약 success hosted smoke — `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`; 임의 운영 예약을 만들지 않음
-- [x] #179 Decision A source 후보: 57번째 append-only migration, pre-A v7+ 이력 보존, v8 A-contract 슬롯 수·key·`maxPhotos` DB/Fastify/Edge/OpenAPI parity
-- [ ] #179 exact-head 독립 QA·required CI·사람 리뷰와 `dev` 병합
+- [x] #179 Decision A source/dev 완료: 57번째 append-only migration, pre-A v7+ 이력 보존, v8 A-contract 슬롯 수·key·`maxPhotos` DB/Fastify/Edge/OpenAPI parity — `dev@3587761b12d97c977bf874ab5e9ac0db1b971ab4`
+- [x] #179 exact-head 독립 QA·required CI·사람 리뷰와 `dev` 병합
 - [ ] #180 `extra-proof` 실제 0~10장 collection·개별 삭제·제출 봉인 구현
 - [ ] 승인된 release의 production 57번째 migration/API 배포, 기존 v7→A template 신규 게시, 예약 success hosted smoke
 
-현재 critical path는 **#179 exact-head gate → #180 collection gate → 승인된 production 57번째 migration/API 배포와 A template 게시 → 안전한 fixture가 승인되면 예약 생성·동일 요청 replay·planned target/snapshot smoke → 프런트 청소관리 API 연결 → Issue #148의 남은 tag/GitHub Release**다.
+### #184 현재일 기준 객실 현황 projection — source gate 진행 중
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 58번째 migration 후보; production은 기존 56번째 계약 유지 |
+| [x] | `GET /v1/rooms/{roomId}` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 목록과 동일한 `evaluatedAt`/`reservationPhase` 계약 |
+
+- [x] 미래 active 예약의 pending preparation obligation을 현재 `CLEANING_REQUIRED`로 오인하던 projection 수정
+- [x] 서버 snapshot 시각 `evaluatedAt`과 `[checkInAt, checkOutAt)` 기반 `reservationPhase=none|upcoming|current` 추가
+- [x] 미래 planned checkout은 현재 청소·배정 차단을 활성화하지 않고, 실제 checkout materialization 뒤에만 청소 필요로 전환
+- [x] Fastify/Edge/OpenAPI 계약 및 프런트 5단계 대표 mapper 문서화 — 공개 path/operation은 109/117 유지
+- [x] 기존 57 migrations 불변, 신규 58번째 append-only migration과 future/current/checkout 경계 회귀 추가
+- [ ] exact-head 독립 QA P0/P1=0·90점 이상과 required GitHub `application` / `migration` PASS
+- [ ] `dev` 병합
+- [ ] 별도 release/main 승인 뒤 production 57·58번째 migration/API 배포와 hosted 예약 회귀 확인
+- [ ] 프런트 정본의 카드·요약·필터 5단계 mapper 반영과 browser E2E
+
+현재 critical path는 **#184 exact-head gate와 #180 collection gate → 승인된 production 57·58번째 migration/API 배포와 A template 게시 → 안전한 fixture가 승인되면 예약 생성·동일 요청 replay·planned target/snapshot smoke → 프런트 5단계 상태 mapper/browser E2E → Issue #148의 남은 tag/GitHub Release**다.
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_slot_contract_v8'
+    'current_room_status_projection'
   ) ->> 'currentMigration',
-  'photo_slot_contract_v8',
+  'current_room_status_projection',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_slot_contract_v8'
+    'current_room_status_projection'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'photo_slot_contract_v8';
+where name = 'current_room_status_projection';
 
 delete from supabase_migrations.schema_migrations
-where name = 'photo_slot_contract_v8';
+where name = 'current_room_status_projection';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_slot_contract_v8'
+    'current_room_status_projection'
   ) ->> 'currentMigration',
-  'cleaning_template_duration_optional',
-  'database status exposes migration 56 when migration 57 is absent'
+  'photo_slot_contract_v8',
+  'database status exposes migration 57 when migration 58 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_slot_contract_v8'
+    'current_room_status_projection'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 56 behind source migration 57'
+  'database status reports migration 57 behind source migration 58'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

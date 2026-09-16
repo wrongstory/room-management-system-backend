@@ -1222,6 +1222,17 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
         .includes("예약 등록을 막지 않습니다"),
     "PIN warning is separate from reservation allocation blockers",
   );
+  const roomProjection = doc.components.schemas.RoomProjection;
+  assert(
+    roomProjection.required.includes("evaluatedAt") &&
+      roomProjection.properties.evaluatedAt.format === "date-time" &&
+      roomProjection.required.includes("reservationPhase") &&
+      JSON.stringify(roomProjection.properties.reservationPhase.enum) ===
+        JSON.stringify(["none", "upcoming", "current"]) &&
+      (doc.components.schemas.RoomReasonCode.enum as readonly string[])
+        .includes("RESERVATION_CURRENT"),
+    "room projection exposes the authoritative evaluation instant and phase",
+  );
   const reveal = doc.components.schemas.RoomPinReveal;
   const change = doc.components.schemas.RoomPinChangeResult;
   assert(

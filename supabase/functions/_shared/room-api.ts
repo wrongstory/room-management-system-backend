@@ -8,11 +8,14 @@ import {
 
 export type RoomReasonCode =
   | "OCCUPIED"
+  | "RESERVATION_CURRENT"
   | "CLEANING_REQUIRED"
   | "CANDLE_PRESENT"
   | "OPERATION_BLOCKED"
   | "ROOM_ISSUE_BLOCKED"
   | "DATA_UNCONFIRMED";
+
+export type RoomReservationPhase = "none" | "upcoming" | "current";
 
 interface RoomProjectionRow {
   id: string;
@@ -22,6 +25,8 @@ interface RoomProjectionRow {
   elevator_zone: "A" | "B" | "C" | null;
   data_status: "verified" | "verification_required";
   state_version: number;
+  evaluated_at: string;
+  reservation_phase: RoomReservationPhase;
   occupied: boolean;
   cleaning_required: boolean;
   candle_count: number;
@@ -39,6 +44,8 @@ export interface RoomProjection {
   elevatorZone: "A" | "B" | "C" | null;
   dataStatus: "verified" | "verification_required";
   stateVersion: number;
+  evaluatedAt: string;
+  reservationPhase: RoomReservationPhase;
   occupied: boolean;
   cleaningRequired: boolean;
   candleCount: number;
@@ -58,6 +65,8 @@ export function toRoomProjection(row: RoomProjectionRow): RoomProjection {
     elevatorZone: row.elevator_zone,
     dataStatus: row.data_status,
     stateVersion: row.state_version,
+    evaluatedAt: row.evaluated_at,
+    reservationPhase: row.reservation_phase,
     occupied: row.occupied,
     cleaningRequired: row.cleaning_required,
     candleCount: row.candle_count,

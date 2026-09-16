@@ -99,6 +99,8 @@ function services(): AppServices {
         elevatorZone: 'A' as const,
         dataStatus: 'verified' as const,
         stateVersion: 1,
+        evaluatedAt: '2026-09-16T08:00:00.000Z',
+        reservationPhase: 'upcoming' as const,
         occupied: false,
         cleaningRequired: false,
         candleCount: 0,
@@ -242,7 +244,14 @@ describe('application', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().rooms).toHaveLength(1);
-    expect(response.json().rooms[0].roomNumber).toBe('117');
+    expect(response.json().rooms[0]).toMatchObject({
+      roomNumber: '117',
+      evaluatedAt: '2026-09-16T08:00:00.000Z',
+      reservationPhase: 'upcoming',
+      occupied: false,
+      cleaningRequired: false,
+      allocationReady: true
+    });
     await app.close();
   });
 
