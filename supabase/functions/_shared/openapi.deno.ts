@@ -6,7 +6,7 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
-Deno.test("photo OpenAPI four operations retain raw body boundary, role separation and opaque projections", async () => {
+Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and opaque projections", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const upload =
     document.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/upload"].post;
@@ -24,6 +24,20 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     upload.parameters.filter((p) => p.in === "query").length === 3 &&
       upload["x-required-roles"].join() === "maid",
     "exact binding query and maid",
+  );
+  const collectionUpload = document.paths[
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}/upload"
+  ].post;
+  const collectionDelete = document.paths[
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}"
+  ].delete;
+  assert(
+    collectionUpload.parameters.filter((p) => p.in === "query").length === 4 &&
+      collectionDelete.parameters.filter((p) => p.in === "query").length ===
+        4 &&
+      collectionUpload["x-required-roles"].join() === "maid" &&
+      collectionDelete["x-required-roles"].join() === "maid",
+    "collection upload and delete require exact item and collection CAS",
   );
   assert(
     document.paths["/v1/photos/{photoId}/content"].get["x-required-roles"]
@@ -71,13 +85,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 109 &&
+    Object.keys(document.paths).length === 111 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 117,
-    "candidate contract 109/117",
+        ).length === 119,
+    "candidate contract 111/119",
   );
 });
 
@@ -1173,7 +1187,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 66,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 67,
     "actual audit allowlist count",
   );
   assert(
@@ -1182,6 +1196,9 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     ) &&
       doc.components.schemas.DeveloperAuditEventType.enum.includes(
         "compensation.earned",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "photo.collection_item_deleted",
       ),
     "complaint compensation events are operator-visible",
   );

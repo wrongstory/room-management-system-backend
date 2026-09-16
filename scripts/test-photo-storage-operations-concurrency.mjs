@@ -6,7 +6,8 @@ function ok(result, label) {
   if (result.error) throw new Error(`${label} failed (${String(result.error.code ?? 'DB_ERROR')})`);
   return result.data;
 }
-const container = 'supabase_db_room-management-system-backend';
+const container = process.env.SUPABASE_DB_CONTAINER ?? 'supabase_db_room-management-system-backend';
+assert(/^supabase_db_[a-z0-9-]+$/.test(container), 'trusted local Supabase database container name');
 const args = ['exec', '-i', container, 'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'];
 
 /** Photo operation commands, exercised through real local PostgreSQL transactions.
@@ -35,7 +36,7 @@ export async function testPhotoStorageOperationsConcurrency(client) {
       child.once('error', () => { clearTimeout(timer); reject(new Error('photo race process failed')); });
       child.once('close', (code) => {
         clearTimeout(timer);
-        const reason = ['PHOTO_UPLOAD_IN_FLIGHT', 'PHOTO_UPLOAD_FENCE_CONFLICT', 'PHOTO_OPERATION_TERMINAL', 'PHOTO_OPERATION_ACCEPTED', 'IDEMPOTENCY_KEY_REUSED', 'PHOTO_VERSION_CONFLICT', 'SESSION_REVOKED', 'CAPABILITY_ACCESS_REQUIRED'].find((known) => errors.includes(known)) ?? null;
+        const reason = ['PHOTO_UPLOAD_IN_FLIGHT', 'PHOTO_UPLOAD_FENCE_CONFLICT', 'PHOTO_OPERATION_TERMINAL', 'PHOTO_OPERATION_ACCEPTED', 'IDEMPOTENCY_KEY_REUSED', 'PHOTO_VERSION_CONFLICT', 'PHOTO_COLLECTION_VERSION_CONFLICT', 'PHOTO_ITEM_VERSION_CONFLICT', 'PHOTO_COLLECTION_LIMIT_EXCEEDED', 'SESSION_REVOKED', 'CAPABILITY_ACCESS_REQUIRED'].find((known) => errors.includes(known)) ?? null;
         resolve({ success: code === 0, output: output.trim(), reason });
       });
     });
@@ -305,5 +306,127 @@ export async function testPhotoStorageOperationsConcurrency(client) {
       'real handover preserves old evidence-only scope and leaves new scheduled attempt photo pointer empty');
     verifyDisposition(item,currentOp,true,1);
   }
-  console.log('Photo storage concurrency passed: begin/cardinality, claimant/expiry fencing, provider retry, finalize/reconcile/clear/session/account/handover races, accepted preservation.');
+
+  // #180 collection races use the real collection helper/delete/bind functions
+  // in parallel owner transactions. The synthetic fixture promotes only its
+  // frozen optional slot to a collection; it does not create an operational
+  // checkout template or weaken runtime grants.
+  async function collectionFixture() {
+    const item=await fixture();
+    const collectionSlot=sql(`select id from private.target_photo_slot_snapshots where cleaning_target_id='${item.target}' and not required;`);
+    assert(/^[0-9a-f-]{36}$/.test(collectionSlot),'collection fixture has one optional slot');
+    sql(`begin;
+      alter table private.target_photo_snapshot_contracts disable trigger photo_model_append_only;
+      alter table private.target_photo_slot_snapshots disable trigger photo_model_append_only;
+      update private.target_photo_slot_snapshots
+        set slot_key='tv-on',display_order=0,required=true,
+          slot_snapshot=jsonb_build_object('slotKey','tv-on','required',true,'displayOrder',0,'maxPhotos',1,'label','synthetic')
+        where id='${item.slot}';
+      update private.target_photo_slot_snapshots
+        set slot_key='extra-proof',display_order=8,required=false,
+          slot_snapshot=jsonb_build_object('slotKey','extra-proof','required',false,'displayOrder',8,'maxPhotos',10,'label','synthetic')
+        where id='${collectionSlot}';
+      update private.target_photo_snapshot_contracts
+        set frozen_snapshot=jsonb_set(jsonb_set(jsonb_set(
+          frozen_snapshot,'{version}',to_jsonb(8)),'{cleaningKind}',to_jsonb('checkout'::text)),'{slots}',(
+            select jsonb_agg(jsonb_build_object(
+              'slotKey',case when i=1 then 'tv-on' when i=2 then 'entry-storage' when i=9 then 'extra-proof' else 'slot-'||i end,
+              'required',i<9,'displayOrder',i-1,'maxPhotos',case when i=9 then 10 else 1 end,'label','synthetic') order by i)
+            from generate_series(1,9)i))
+        where cleaning_target_id='${item.target}';
+      insert into private.target_photo_slot_snapshots(
+        cleaning_target_id,template_version_id,slot_key,display_order,required,slot_snapshot)
+      select '${item.target}',template_version_id,
+        case when i=2 then 'entry-storage' else 'slot-'||i end,i-1,true,
+        jsonb_build_object('slotKey',case when i=2 then 'entry-storage' else 'slot-'||i end,
+          'required',true,'displayOrder',i-1,'maxPhotos',1,'label','synthetic')
+      from private.target_photo_slot_snapshots cross join generate_series(2,8)i
+      where id='${item.slot}';
+      alter table private.target_photo_slot_snapshots enable trigger photo_model_append_only;
+      alter table private.target_photo_snapshot_contracts enable trigger photo_model_append_only;
+      commit;
+      do $fixture$ declare required_slot record; begin
+        for required_slot in select id from private.target_photo_slot_snapshots
+          where cleaning_target_id='${item.target}' and required order by display_order loop
+          perform private.record_validated_attempt_photo('${maid}','${item.attempt}',required_slot.id,0,repeat('a',64),'image/jpeg',100,clock_timestamp());
+        end loop;
+      end $fixture$;`);
+    assert(sql(`select private.photo_slot_max_photos('${collectionSlot}','${item.target}');`)==='10','synthetic optional slot exercises collection path');
+    return {...item,collectionSlot};
+  }
+  const collectionRecord=(item,photoItem,collectionRevision,itemRevision,hex='b')=>
+    `select private.record_validated_collection_photo('${maid}','${item.attempt}','${item.collectionSlot}','${photoItem}',${collectionRevision},${itemRevision},repeat('${hex}',64),'image/jpeg',100,clock_timestamp())`;
+  const collectionDelete=(item,photoItem,collectionRevision,itemRevision,key,hash='f')=>
+    `select public.delete_photo_collection_item('${maid}','${session}','${item.attempt}','${item.assignment}',2,'${item.collectionSlot}','${photoItem}',${collectionRevision},${itemRevision},'${digest(key)}','${digest(hash)}')`;
+  function collectionState(item,active,revision,changes) {
+    assert(sql(`select
+      (select count(*) from private.attempt_photo_collection_items where cleaning_attempt_id='${item.attempt}' and active)=${active}
+      and (select revision from private.attempt_photo_collection_states where cleaning_attempt_id='${item.attempt}' and target_photo_slot_id='${item.collectionSlot}')=${revision}
+      and (select count(*) from private.attempt_photo_collection_changes where cleaning_attempt_id='${item.attempt}')=${changes};`)==='t',
+    'collection race leaves exact active count, revision and append-only history');
+  }
+  function newSubmission(item) {
+    const submission=randomUUID();
+    sql(`insert into public.cleaning_submissions(id,cleaning_attempt_id,client_submission_id,version,photo_manifest,submitted_by)
+      values('${submission}','${item.attempt}','${randomUUID()}',1,'[]','${maid}');`);
+    return {submission,bind:`select private.bind_submission_photo_model('${maid}','${submission}',0)`};
+  }
+
+  const initialCollection=await collectionFixture();
+  const initialWinner=randomUUID(),initialLoser=randomUUID();
+  const initialRace=await race(collectionRecord(initialCollection,initialWinner,0,0),collectionRecord(initialCollection,initialLoser,0,0));
+  assert(!initialRace.success&&initialRace.reason==='PHOTO_COLLECTION_VERSION_CONFLICT','two first appends serialize and one stale CAS loses');
+  collectionState(initialCollection,1,1,1);
+
+  const cappedCollection=await collectionFixture();
+  for(let index=0;index<9;index+=1)sql(collectionRecord(cappedCollection,randomUUID(),index,0,(index+1).toString(16)));
+  const capRace=await race(collectionRecord(cappedCollection,randomUUID(),9,0,'a'),collectionRecord(cappedCollection,randomUUID(),9,0,'b'));
+  assert(!capRace.success&&capRace.reason==='PHOTO_COLLECTION_VERSION_CONFLICT','concurrent tenth/eleventh append admits one CAS winner');
+  const overCap=await execute(collectionRecord(cappedCollection,randomUUID(),10,0,'c'),`photo83-${randomUUID()}`);
+  assert(!overCap.success&&overCap.reason==='PHOTO_COLLECTION_LIMIT_EXCEEDED','ten-item collection rejects a fresh eleventh append');
+  collectionState(cappedCollection,10,10,10);
+
+  for(const uploadFirst of [true,false]) {
+    const item=await collectionFixture(),photoItem=randomUUID();
+    sql(collectionRecord(item,photoItem,0,0));
+    const upload=collectionRecord(item,photoItem,1,1,'d');
+    const remove=collectionDelete(item,photoItem,1,1,`${item.attempt}-delete`);
+    const result=await race(uploadFirst?upload:remove,uploadFirst?remove:upload);
+    assert(!result.success&&['PHOTO_COLLECTION_VERSION_CONFLICT','PHOTO_ITEM_VERSION_CONFLICT'].includes(result.reason),
+      'replace and delete serialize on collection/item CAS');
+    collectionState(item,uploadFirst?1:0,2,2);
+  }
+
+  for(const uploadFirst of [true,false]) {
+    const item=await collectionFixture(),photoItem=randomUUID();
+    sql(collectionRecord(item,photoItem,0,0));
+    const submission=newSubmission(item);
+    const replace=collectionRecord(item,photoItem,1,1,'e');
+    const result=await race(uploadFirst?replace:submission.bind,uploadFirst?submission.bind:replace);
+    assert(result.success,'collection replace and submission binding both finish after serial lock ordering');
+    const boundRevision=Number(sql(`select item_revision from private.submission_photo_bindings where submission_id='${submission.submission}' and collection_item_id='${photoItem}';`));
+    assert(boundRevision===(uploadFirst?2:1),'submission seals exactly the collection revision visible at its lock point');
+  }
+
+  for(const deleteFirst of [true,false]) {
+    const item=await collectionFixture(),photoItem=randomUUID();
+    sql(collectionRecord(item,photoItem,0,0));
+    const submission=newSubmission(item);
+    const remove=collectionDelete(item,photoItem,1,1,`${item.attempt}-submit-delete`);
+    const result=await race(deleteFirst?remove:submission.bind,deleteFirst?submission.bind:remove);
+    assert(result.success,'collection delete and submission binding both finish after serial lock ordering');
+    const bound=sql(`select exists(select 1 from private.submission_photo_bindings where submission_id='${submission.submission}' and collection_item_id='${photoItem}');`)==='t';
+    assert(bound===!deleteFirst,'submission binding keeps the exact pre-delete item or excludes the already-deleted item');
+  }
+
+  const replayCollection=await collectionFixture(),replayItem=randomUUID();
+  sql(collectionRecord(replayCollection,replayItem,0,0));
+  const replayDelete=collectionDelete(replayCollection,replayItem,1,1,`${replayCollection.attempt}-replay`);
+  const replayRace=await race(replayDelete,replayDelete);
+  assert(replayRace.success&&JSON.parse(replayRace.output).collectionRevision===2,'same delete key replays one committed response after waiting');
+  const reused=await execute(collectionDelete(replayCollection,replayItem,1,1,`${replayCollection.attempt}-replay`,'different'),`photo83-${randomUUID()}`);
+  assert(!reused.success&&reused.reason==='IDEMPOTENCY_KEY_REUSED','same delete key with a different request hash fails closed');
+  collectionState(replayCollection,0,2,2);
+
+  console.log('Photo storage concurrency passed: begin/cardinality, claimant/expiry fencing, provider retry, finalize/reconcile/clear/session/account/handover and collection append/limit/replace/delete/submit/idempotency races.');
 }

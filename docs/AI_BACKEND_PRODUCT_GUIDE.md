@@ -5,7 +5,7 @@
 검토 기준:
 
 - 이 문서 갱신의 기능 통합 기준: PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925` — 56 migrations / OpenAPI 109 paths / 117 operations. #165 긴급 보완은 `main`과 `dev`에 source 통합됐다. 이후 문서 전용 commit은 이 기능 기준을 바꾸지 않는다.
-- #179 Decision A의 57번째 append-only migration과 v8 사진 슬롯 계약은 `dev@3587761b12d97c977bf874ab5e9ac0db1b971ab4`에 통합됐다. 아직 `main`/production 정본은 아니며 실제 `extra-proof` 0~10장 collection 처리는 #180 완료 전 release하지 않는다.
+- #179 Decision A의 v8 사진 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보는 이 정본에 `extra-proof` 0~10장 append/replace/개별 삭제/제출 봉인을 추가하며, 합산 source는 60 migrations / OpenAPI 111 paths / 119 operations가 된다. migration 순서는 `photo_slot_contract_v8` → `extra_proof_photo_collection` → `current_room_status_projection` → `reservation_arrival_lifecycle_projection`이다. 아직 `main`/production 정본이 아니며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 - 백엔드 운영 source 정본: `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`. 2026-09-16 production readback은 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations와 기존 5개 Edge bundle이다. 네 checkout template은 모두 immutable v7로 게시됐고 `durationMinutes=null`을 보존한다. 안전한 운영 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, annotated `v0.3.0` tag/GitHub Release와 provider·Google hosted activation은 별도 pending이다.
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -344,7 +344,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - template evidence 사진은 유효한 slot snapshot을 반드시 참조한다. NULL slot key로 유일 제약을 우회할 수 없어야 한다.
 - 일반 slot의 current 사진은 한 장이다. 재촬영은 current pointer를 CAS로 교체하며, 이전 업로드/교체 이력은 보존 정책에 따라 추적한다.
 - `maxPhotos` 없는 pre-A 퇴실 청소 snapshot은 v7 및 그보다 높은 historical version도 타입별 10/11/13/15개와 필수 `tv-on`을 유지한다. Decision A snapshot은 v8 이상이면서 모든 slot에 `maxPhotos`가 있고, 9/10/12/14개·필수 8/9/11/13개·required `tv-on`·`entry-storage`를 강제하며 `entry-number`를 제외한다. 마지막 `extra-proof`는 선택 slot, `maxPhotos=10`이다.
-- **[현재 구현 경계]** v8 template metadata와 validator는 위 계약을 보존하지만 `extra-proof`의 실제 0~10장 append/개별 삭제/제출 봉인은 #180 완료 전까지 제공하지 않는다. 따라서 release·운영 template 재게시는 #180과 함께 검증한다.
+- **[현재 source 후보]** v8 `extra-proof`는 안정적인 client item UUID, collection/item CAS revision, 최대 10장, append·동일 item replace·개별 tombstone delete를 제공한다. 제출은 당시 active item을 표시 순서대로 불변 binding하며 이후 교체·삭제가 과거 제출을 바꾸지 않는다. active collection 사진은 폭탄방 신고의 현재 verified 증빙으로 선택할 수 있고, append/replace의 item identity와 삭제 event는 제한된 developer audit projection에 남는다. 최초 append·10장 상한·replace/delete·submit·멱등 key 경쟁은 실제 병렬 DB transaction으로 검증하며 신규 private table/helper의 direct runtime 접근은 금지한다. 기존 pre-A와 일반 slot의 단일 current pointer는 그대로 유지한다. 운영 사용은 #180 독립 QA·CI·사람 리뷰와 release 검증 뒤에만 허용한다.
 - 앱은 JPEG/WebP를 EXIF 제거 후 사진당 최대 300KiB(307,200 bytes)로 압축한다. 서버도 본문 크기와 허용 형식을 독립적으로 강제한다.
 - 서버는 파일 확장자나 client MIME만 믿지 않고 magic bytes, 허용 MIME, 크기, hash, 현재 담당/attempt/version을 검증한다.
 - 현장 완료, 미전송 업로드, 전체 제출, 검수 요청은 별도 상태다.

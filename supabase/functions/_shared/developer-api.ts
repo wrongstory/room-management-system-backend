@@ -469,7 +469,7 @@ function auditQuery(request: Request): {
     );
   }
   const eventTypes = parameters.getAll("eventType");
-  if (eventTypes.length > 66 || eventTypes.some((value) => value.length > 80)) {
+  if (eventTypes.length > 67 || eventTypes.some((value) => value.length > 80)) {
     throw new EdgeError(
       400,
       "VALIDATION_ERROR",

@@ -191,7 +191,7 @@ describe('initial migration contract', () => {
     expect(sql).toContain("when v_current then 'OCCUPIED'");
     expect(sql).toContain('order by reservation.check_in_at, reservation.id');
     expect(sql).toContain('v_evaluated_at timestamptz := clock_timestamp()');
-    expect(sql).toContain('v_evaluated_at,\n    case when state.occupied');
+    expect(sql).toMatch(/v_evaluated_at,\r?\n {4}case when state\.occupied/);
     expect(sql).toContain("when readiness.readiness_status = 'CHECKIN_BLOCKED' then 'BLOCKED'");
     expect(sql).toContain("when lifecycle.reservation_lifecycle = 'OCCUPIED' then 'OCCUPIED'");
     expect(sql).toContain("when state.cleaning_required then 'CLEANING_REQUIRED'");

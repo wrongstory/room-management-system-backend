@@ -41,6 +41,8 @@ room-management-system-photos/
 6. 업로드 성공 후 Supabase에 파일 메타데이터와 `purge_after = uploaded_at + 7 days`를 기록한다.
 7. DB 응답이 없으면 원자 확정의 성공 여부부터 작업 원장으로 재조회한다. 수락 이력이 있는 파일은 current 사진에서 빠졌거나 계정/session이 폐기돼도 보상 삭제하지 않는다. 미수락 candidate만 reconciliation fence로 finalize를 영구 차단한 뒤 보상 대상으로 삼는다. provider 결과가 불명확하면 삭제하지 않고 동일 object identity를 재조정한다.
 
+v8 checkout의 선택 `extra-proof`만 별도 collection 경로를 사용한다. client가 만든 안정적 item UUID에 collection/item expected revision을 함께 보내며, append는 새 UUID와 item revision 0, replace는 기존 UUID와 현재 item revision을 사용한다. 활성 item은 최대 10개이고 개별 삭제는 tombstone 이력만 추가한다. 삭제·교체는 accepted 파일의 7일 보존 원장을 지우거나 즉시 provider 삭제하지 않으며, 일반 slot과 pre-A snapshot은 기존 단일 사진 경로를 계속 사용한다.
+
 브라우저에는 Google OAuth access token, refresh token, Drive 루트 폴더 ID를 주지 않는다. 서버는 앱이 생성·관리한 파일에 한정되는 `drive.file` 범위를 우선 사용한다.
 
 ### #84 실제 adapter와 운영 전 gate
@@ -72,13 +74,14 @@ gzip은 `scripts/photo-gzip.mjs`에서 optional header를 금지하고 mtime=0/O
 
 ## Supabase에 남기는 값
 
-#30의 `private.attempt_photo_versions`와 `(attempt,target slot)` current pointer가 증빙 정본이다.
+#30의 `private.attempt_photo_versions`와 일반 slot의 `(attempt,target slot)` current pointer, #180 `extra-proof`의 collection state/item/change 원장이 증빙 정본이다.
 과거 `public.submission_photos`는 새 upload 경로로 사용하지 않고, 업로드를 위해 가짜 submission을 생성하지 않는다.
 실제 제출은 #31의 canonical submission과 immutable photo-version binding을 사용한다.
 
 #83에서 source/dev 완료한 원장은 다음처럼 분리한다. 운영 반영은 별도 release/main gate다.
 
 - `photo_upload_operations`: actor/attempt/assignment revision/slot/expected photo revision, 검증 metadata와 scoped key digest/request hash를 고정한다. 원문 key·session·body를 저장하지 않는다.
+- collection upload operation은 같은 원장에 stable item UUID와 expected collection/item revision을 추가하며 `photo.collection.upload`로 ordinary upload와 명확히 분리한다. 개별 삭제는 별도 immutable command receipt가 같은-key replay와 다른-payload 충돌을 구분한다.
 - `photo_provider_objects`: operation마다 서버 UUID 하나. provider locator는 private에만 두고 provider 내 전역 unique로 다른 작업에 재사용하지 못하게 한다. 최초 성공의 uploaded_at/purge_after는 불변이다.
 - `photo_upload_states`: current state, worker claim digest, fencing version/expiry. claim identity는 safe projection에 반환하지 않는다.
 - `photo_upload_acceptances`: object와 verified photo version의 영구 1:1 연결. replace/clear/인계/계정 폐기로 지우거나 고아로 재분류하지 않는다.

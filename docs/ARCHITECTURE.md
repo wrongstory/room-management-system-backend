@@ -25,7 +25,7 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 기능 integration 기준은 PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이고, 운영 source 정본은 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`다. 2026-09-16 production readback은 56 migrations / `api` ACTIVE v16 / OpenAPI `0.3.0` 109 paths / 117 operations 및 5개 Edge bundle이다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
-#179의 57번째 append-only migration과 v8 슬롯 계약은 `dev@3587761b12d97c977bf874ab5e9ac0db1b971ab4`에 통합됐다. 아직 운영에는 반영하지 않았으며 #180 다중 선택 사진 모델 완료 전 운영 template을 재게시하지 않는다. #184의 현재 시각 객실 projection은 이 정본 위에 58번째 append-only migration으로 추가했고, #187 Phase A는 기존 58개를 변경하지 않는 59번째 `reservation_arrival_lifecycle_projection`으로 응답 projection만 확장한다.
+#179의 v8 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보를 합친 migration 순서는 57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`이며 OpenAPI는 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
 ## 신뢰 경계
 
@@ -746,8 +746,8 @@ notification/outbox를 만들지 않으며, production seed와 stayover/addition
 
 `20260916030930_photo_slot_contract_v8.sql`은 이 전환을 append-only로 적용한다. validator가 v7과 v8+를
 version과 완전한 `maxPhotos` metadata로 분기하므로 과거 target/attempt/submission/inspection snapshot은 재해석하지 않는다. Fastify·Edge·
-OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. 운영 DB 적용과 template 재게시는 포함하지 않으며,
-`extra-proof`의 실제 0~10장 current collection·사진별 삭제·제출 봉인은 #180 완료 전 release gate다.
+OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. `20260916090000_extra_proof_photo_collection.sql`은 v8 checkout의
+`extra-proof`에만 0~10장 current collection을 열고, client item UUID·collection/item CAS·append/replace/개별 tombstone delete·표시 순서 보존·불변 제출 binding을 적용한다. 일반 slot과 pre-A snapshot은 단일 current pointer를 유지한다. Node/Edge는 collection upload·delete 경로와 slot/submission projection을 같은 계약으로 제공한다. 운영 DB 적용과 template 재게시는 포함하지 않는다.
 
 ## API 단계
 
@@ -770,6 +770,7 @@ OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. 운영 DB 적용과 t
 - `GET /v1/rooms`, `GET /v1/rooms/:roomId` (관리자 전용 운영 projection)
 - `GET /v1/developer/overview`, `/runtime-status`, `/database-status`, `/scheduler-status`
 - `GET /v1/developer/audit-events`, `GET /v1/developer/activity-events`, `POST /v1/developer/diagnostics` (singleton developer 전용 bounded projection)
+- `POST /v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId/upload`, `DELETE /v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId` (#180 v8 `extra-proof` source 후보; production 미배포)
 - 객실 기준정보 변경, 운영 차단·해제, 촛불 수량 event, 이슈 등록·해결, PIN 동기화 결과 기록
 - `GET·POST /v1/reservations`, `GET /v1/reservations/:reservationId`
 - `POST /v1/reservations/cleaning-requests`, `POST /v1/reservations/cleaning-requests/:targetId/cancel`

@@ -4,7 +4,7 @@ import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
 import {
   createPhotoUploadClaim, decidePhotoCompensation, isPhotoUploadTransitionAllowed,PhotoUploadContractError,
   photoUploadDatabaseError, photoUploadStatuses,
-  preparePhotoUploadBegin, projectPhotoUploadOperation, validatePhotoCompensationSettlement,
+  preparePhotoCollectionDelete, preparePhotoCollectionUploadBegin, preparePhotoUploadBegin, projectPhotoUploadOperation, validatePhotoCompensationSettlement,
   validatePhotoProviderSuccess, validatePhotoUploadBegin, validatePhotoUploadOperationCommand
 } from '../supabase/functions/_shared/photo-upload-contract.js';
 
@@ -13,7 +13,8 @@ const input = () => ({ attemptId:id(1), assignmentId:id(2), assignmentRevision:1
   targetSlotId:id(3), expectedPhotoRevision:0, sha256:'a'.repeat(64), mime:'image/jpeg', sizeBytes:307200 });
 const row = () => ({ operationId:id(4), objectId:id(5), attemptId:id(1), targetSlotId:id(3),
   status:'reserved', leaseVersion:1, leaseExpiresAt:'2037-01-01T00:05:00Z', photoId:null,
-  photoVersion:null, uploadedAt:null, purgeAfter:null, compensationAllowed:false });
+  photoVersion:null, photoItemId:null, collectionRevision:null, itemRevision:null,
+  uploadedAt:null, purgeAfter:null, compensationAllowed:false });
 const uploaded = {uploadedAt:'2037-01-01T00:00:00.123456Z',purgeAfter:'2037-01-08T00:00:00.123456Z'};
 
 describe('photo upload pure application contract (no provider or HTTP calls)', () => {
@@ -49,6 +50,20 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
   it('rejects invalid raw key before returning loggable material', async () => {
     for(const key of ['', 'short', 'x'.repeat(129), 'Bearer x', {key:'test'}])
       await expect(preparePhotoUploadBegin(id(8),input(),key)).rejects.toMatchObject({code:'VALIDATION_ERROR'});
+  });
+  it('separates collection append/replace/delete retry identity and revisions', async () => {
+    const collection={...input(),photoItemId:id(7),expectedCollectionRevision:0,expectedItemRevision:0};
+    delete (collection as Partial<typeof collection>).expectedPhotoRevision;
+    const append=await preparePhotoCollectionUploadBegin(id(8),collection,'synthetic-key-123');
+    const replay=await preparePhotoCollectionUploadBegin(id(8),collection,'synthetic-key-123');
+    const replace=await preparePhotoCollectionUploadBegin(id(8),{...collection,expectedCollectionRevision:1,expectedItemRevision:1},'synthetic-key-123');
+    expect(replay).toEqual(append);
+    expect(replace.idempotencyKeyDigest).toBe(append.idempotencyKeyDigest);
+    expect(replace.requestHash).not.toBe(append.requestHash);
+    const removal={attemptId:id(1),assignmentId:id(2),assignmentRevision:1,targetSlotId:id(3),photoItemId:id(7),expectedCollectionRevision:2,expectedItemRevision:2};
+    const deleted=await preparePhotoCollectionDelete(id(8),removal,'synthetic-key-456');
+    expect(deleted).toEqual(await preparePhotoCollectionDelete(id(8),removal,'synthetic-key-456'));
+    expect(deleted.requestHash).not.toBe(append.requestHash);
   });
   it('generates isolated server claim identities, requires claim digest and never projects it', async () => {
     const [a,b]=await Promise.all([createPhotoUploadClaim(id(4)),createPhotoUploadClaim(id(4))]);
@@ -109,14 +124,20 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
   it('retains the complete safe DB photo audit summary alongside four photo HTTP routes', () => {
     const schemas=openApiDocument.components.schemas;
     expect(schemas.DeveloperAuditEventType.enum).toContain('photo.upload_accepted');
+    expect(schemas.DeveloperAuditEventType.enum).toContain('photo.collection_item_deleted');
     expect(schemas.DeveloperAuditEventType.enum).toContain('cleaning_template.published');
-    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(66);
-    const sample={cleaningTargetId:id(1),attemptId:id(2),targetSlotId:id(3),photoId:id(4),photoVersion:1,...uploaded};
+    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(67);
+    const sample={cleaningTargetId:id(1),attemptId:id(2),targetSlotId:id(3),photoId:id(4),photoItemId:id(5),photoVersion:1,collectionRevision:1,itemRevision:1,...uploaded};
     const summary=schemas.DeveloperAuditEvent.properties.summary;
     expect(summary.additionalProperties).toBe(false);
     for(const key of Object.keys(sample))expect(summary.properties).toHaveProperty(key);
     for(const key of ['requestHash','idempotencyKey','providerLocator','claimDigest','token','rawAfterState'])
       expect(summary.properties).not.toHaveProperty(key);
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(109);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(111);
+    const removal = openApiDocument.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}"]?.delete;
+    for (const name of ["assignmentRevision", "expectedCollectionRevision", "expectedItemRevision"]) {
+      const parameter = removal?.parameters?.find((value) => "name" in value && value.name === name);
+      expect(parameter && "schema" in parameter ? parameter.schema : null).toMatchObject({ maximum: Number.MAX_SAFE_INTEGER - 1 });
+    }
   });
 });

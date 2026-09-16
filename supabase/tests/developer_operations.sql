@@ -108,7 +108,7 @@ select is(
     'reservation_arrival_lifecycle_projection'
   ) ->> 'currentMigration',
   'current_room_status_projection',
-  'database status exposes migration 58 when migration 59 is absent'
+  'database status exposes migration 59 when migration 60 is absent'
 );
 
 select is(
@@ -117,7 +117,7 @@ select is(
     'reservation_arrival_lifecycle_projection'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 58 behind source migration 59'
+  'database status reports migration 59 behind source migration 60'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)
