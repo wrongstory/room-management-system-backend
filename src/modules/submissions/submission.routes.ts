@@ -1,6 +1,11 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../../lib/app-error.js';
+import {
+  assertInspectionResponseSize,
+  INSPECTION_CURSOR_MAX_LENGTH,
+  INSPECTION_PAGE_MAX
+} from './inspection-cursor.js';
 import type { SubmissionActor, SubmissionService } from './submission.service.js';
 
 const id = z.uuid();
@@ -16,11 +21,33 @@ const inspectionReason = {
 const key = (request: FastifyRequest) => z.string().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/).parse(request.headers['idempotency-key']);
 const attemptParams = z.object({ attemptId: id });
 const submissionParams = z.object({ submissionId: id });
+const inspectionListQuery = z.object({
+  limit: z.union([
+    z.number().int().min(1).max(INSPECTION_PAGE_MAX),
+    z.string().regex(/^[1-9]\d*$/).transform(Number).refine((value) => value <= INSPECTION_PAGE_MAX)
+  ]).optional(),
+  cursor: z.string().min(1).max(INSPECTION_CURSOR_MAX_LENGTH).optional()
+}).strict();
 const bombMemo = z.string().min(1).max(500).refine((value) => value.trim().length > 0);
 function noQuery(request: FastifyRequest): void {
   if (Object.keys(request.query as Record<string, unknown>).length > 0) {
     throw new AppError(400, 'VALIDATION_ERROR', '이 경로는 query parameter를 허용하지 않습니다.');
   }
+}
+function exactInspectionQuery(request: FastifyRequest): void {
+  const query = new URL(request.raw.url ?? '/', 'http://backend.internal').searchParams;
+  for (const name of query.keys()) {
+    if (!['limit', 'cursor'].includes(name) || query.getAll(name).length !== 1) {
+      throw new AppError(400, 'VALIDATION_ERROR', '허용되지 않거나 중복된 query 항목입니다.');
+    }
+    if (name === 'cursor' && query.get(name) === '') {
+      throw new AppError(400, 'INVALID_INSPECTION_CURSOR', '검수 cursor가 올바르지 않습니다.');
+    }
+  }
+}
+function bounded(body: unknown): unknown {
+  assertInspectionResponseSize(body);
+  return body;
 }
 async function requireMaid(request: FastifyRequest): Promise<void> {
   if (request.actor.role !== 'maid') throw new AppError(403, 'MAID_REQUIRED', '담당 메이드만 제출할 수 있습니다.');
@@ -33,6 +60,9 @@ export function createSubmissionRoutes(
   authenticateLimitedSubmission?: AuthenticateLimitedSubmission
 ): FastifyPluginAsync {
   return async (app) => {
+    app.addHook('onRequest', async (_request, reply) => {
+      reply.header('cache-control', 'no-store');
+    });
     const authenticated = [app.authenticate, app.requirePasswordChanged];
     const maid = [...authenticated, requireMaid];
     const admin = [...authenticated, app.requireAdmin];
@@ -64,8 +94,11 @@ export function createSubmissionRoutes(
       return { submissions: await service.list(request.actor, attemptId) };
     });
     app.get('/v1/inspections', { preHandler: admin }, async (request) => {
-      noQuery(request);
-      return { submissions: await service.list(request.actor) };
+      exactInspectionQuery(request);
+      return bounded(await service.listPending(
+        request.actor,
+        inspectionListQuery.parse(request.query)
+      ));
     });
     app.get('/v1/inspections/:submissionId', { preHandler: admin }, async (request) => {
       noQuery(request);

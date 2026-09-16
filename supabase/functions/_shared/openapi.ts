@@ -504,10 +504,26 @@ export const openApiDocument = {
           "listPendingInspections",
           "검수 대상 목록 조회",
           "admin",
-          "SubmissionListEnvelope",
+          "InspectionPageEnvelope",
         ),
         description:
-          "current submitted version만 오래된 제출부터 최대 100건 반환합니다. 각 항목에는 immutable 검수 reviewContext가 포함됩니다. developer/maid는 관리자 전체 queue를 볼 수 없습니다. 100건 초과 cursor pagination은 후속 hardening 범위입니다.",
+          "current submitted version만 submittedAt, id 오름차순 keyset으로 반환합니다. limit 기본 50, 최대 100이며 opaque cursor는 관리자 ID·역할·검수 queue·고정 정렬에 서명됩니다. 각 항목에는 immutable 검수 reviewContext가 포함되고 전체 응답은 UTF-8 JSON 128 KiB로 제한됩니다. developer/maid, 비활성·비밀번호 변경 필요·폐기 session은 관리자 queue를 볼 수 없습니다.",
+        parameters: [
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description:
+              "직전 응답 nextCursor의 opaque 서명값. 다른 관리자·queue·정렬에 재사용하거나 수정하지 않습니다.",
+          },
+        ],
       },
     },
     "/v1/inspections/{submissionId}": {
@@ -4200,6 +4216,28 @@ export const openApiDocument = {
           },
         },
       },
+      InspectionPageEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["submissions", "hasMore", "nextCursor"],
+        properties: {
+          submissions: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/CleaningSubmission" },
+          },
+          hasMore: {
+            type: "boolean",
+            description: "후속 page가 존재하는지 여부",
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            maxLength: 1024,
+            description:
+              "다음 페이지가 있을 때만 반환하는 opaque signed cursor",
+          },
+        },
+      },
       BombRoomReportEnvelope: {
         type: "object",
         additionalProperties: false,
@@ -5054,6 +5092,10 @@ export const openApiDocument = {
           "RECLEAN_TEMPLATE_NOT_CONFIGURED",
           "COMPLAINT_INVALID_TRANSITION",
           "COMPLAINT_COMMAND_FAILED",
+          "INVALID_INSPECTION_CURSOR",
+          "INSPECTION_CURSOR_NOT_CONFIGURED",
+          "INSPECTION_PAGE_LIMIT_INVALID",
+          "INSPECTION_RESPONSE_TOO_LARGE",
           "NOTIFICATION_ACCESS_REQUIRED",
           "NOTIFICATION_NOT_FOUND",
           "INVALID_NOTIFICATION_CURSOR",
@@ -5518,6 +5560,7 @@ export const openApiDocument = {
               "PHOTO_PURGE_INVOKE_SECRET",
               "PAYROLL_CURSOR_HMAC_SECRET",
               "NOTIFICATION_CURSOR_HMAC_SECRET",
+              "INSPECTION_CURSOR_HMAC_SECRET",
               "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
               "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
               "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
@@ -5555,6 +5598,7 @@ export const openApiDocument = {
                 "PHOTO_PURGE_INVOKE_SECRET",
                 "PAYROLL_CURSOR_HMAC_SECRET",
                 "NOTIFICATION_CURSOR_HMAC_SECRET",
+                "INSPECTION_CURSOR_HMAC_SECRET",
                 "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
                 "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
                 "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",

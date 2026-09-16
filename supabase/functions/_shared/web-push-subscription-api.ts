@@ -172,6 +172,7 @@ function config(): WebPushCryptoConfig {
     "RESERVATION_GUEST_NAME_PEPPER",
     "PAYROLL_CURSOR_HMAC_SECRET",
     "NOTIFICATION_CURSOR_HMAC_SECRET",
+    "INSPECTION_CURSOR_HMAC_SECRET",
   ].map((n) => Deno.env.get(n)?.trim()).filter(Boolean);
   let keyring: Record<string, unknown>;
   try {

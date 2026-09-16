@@ -30,6 +30,7 @@ const sensitiveLogPaths = [
   '*.RESERVATION_GUEST_NAME_PEPPER',
   '*.PAYROLL_CURSOR_HMAC_SECRET',
   '*.NOTIFICATION_CURSOR_HMAC_SECRET',
+  '*.INSPECTION_CURSOR_HMAC_SECRET',
   '*.endpoint','*.p256dh','*.auth','*.ciphertext','*.ciphertextBase64','*.nonce','*.nonceBase64','*.authTag','*.authTagBase64',
   '*.endpointDigest','*.sessionDigest','*.materialDigest','*.WEB_PUSH_SUBSCRIPTION_KEY_BASE64',
   '*.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON','*.WEB_PUSH_BINDING_DIGEST_SECRET',
