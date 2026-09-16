@@ -131,6 +131,7 @@ begin
   end if;
 
   if p_include_occupancy
+    and p_preparation_reservation_id is null
     and private.room_reservation_phase_at(p_room_id, p_at) = 'current'
   then
     v_reasons := array_append(v_reasons, 'RESERVATION_CURRENT');

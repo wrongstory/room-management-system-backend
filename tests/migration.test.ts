@@ -167,6 +167,7 @@ describe('initial migration contract', () => {
     expect(sql).toContain("then 'current'");
     expect(sql).toContain("then 'upcoming'");
     expect(sql).toContain("array_append(v_reasons, 'RESERVATION_CURRENT')");
+    expect(sql).toContain('and p_preparation_reservation_id is null');
     expect(sql).toContain('v_evaluated_at timestamptz := clock_timestamp()');
     expect(sql).toContain('p_preparation_reservation_id is not null');
     expect(sql).toContain('obligation.reservation_id = p_preparation_reservation_id');

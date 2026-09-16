@@ -71,6 +71,10 @@ select is(private.room_reservation_phase_at(
 select ok('RESERVATION_CURRENT'=any(private.room_block_reason_codes(
   (select room_id from plans where label='notified'),'2034-10-01 16:00:00+09',true,true)),
   'current reservation interval blocks current allocation without pretending actual occupancy');
+select ok(not ('RESERVATION_CURRENT'=any(private.room_block_reason_codes(
+  (select room_id from plans where label='notified'),'2034-10-01 16:00:00+09',true,true,
+  (select reservation_id from plans where label='notified')))),
+  'check-in preparation validation excludes the reservation being transitioned from the room-level current-stay block');
 select is(private.room_reservation_phase_at(
   (select room_id from plans where label='notified'),'2034-10-02 13:00:00+09'),
   'none','reservation phase excludes the exact checkout boundary');
