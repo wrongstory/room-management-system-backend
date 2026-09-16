@@ -702,6 +702,10 @@ describe('application', () => {
       effectiveAt: '2026-09-17T07:00:00.000Z',
       reservationId,
       reservationVersion: 1,
+      stayId: '45000000-0000-4000-8000-000000000001',
+      stayVersion: 1,
+      sourceSegmentId: '46000000-0000-4000-8000-000000000001',
+      sourceSegmentVersion: 1,
       sourceRoomId: '51000000-0000-4000-8000-000000000001',
       sourceRoomVersion: 1,
       targetRoomId,
@@ -816,6 +820,143 @@ describe('application', () => {
         reasonCode: 'GUEST_REQUEST',
         idempotencyKey: 'reservation-room-move-0001'
       })
+    );
+    for (const [caseName, historicalSegmentId] of [
+      ['same-instant checked-out', '46000000-0000-4000-8000-000000000001'],
+      ['cancelled retired', '46000000-0000-4000-8000-000000000009']
+    ] as const) {
+      appServices.reservations.previewRoomMove = vi.fn(async () => ({
+        ...preview,
+        mode: 'DURING_STAY' as const,
+        sourceSegmentId: historicalSegmentId,
+        eligible: false,
+        rejectionReasonCodes: ['RESERVATION_NOT_ACTIVE' as const]
+      }));
+      const inactivePreviewResponse = await app.inject({
+        method: 'POST',
+        url: `/v1/reservations/${reservationId}/room-change/preview`,
+        headers: { authorization: 'Bearer access-token' },
+        payload: {
+          targetRoomId,
+          reasonCode: 'GUEST_REQUEST',
+          expectedReservationVersion: 1,
+          expectedSourceRoomVersion: 1,
+          expectedTargetRoomVersion: 1
+        }
+      });
+      expect(inactivePreviewResponse.statusCode, caseName).toBe(200);
+      expect(inactivePreviewResponse.json().preview, caseName).toMatchObject({
+        eligible: false,
+        sourceSegmentId: historicalSegmentId,
+        rejectionReasonCodes: ['RESERVATION_NOT_ACTIVE']
+      });
+    }
+    await app.close();
+  });
+
+  it('passes through the during-stay room-move contract on the existing routes', async () => {
+    const appServices = services();
+    const reservationId = '41000000-0000-4000-8000-000000000001';
+    const sourceRoomId = '51000000-0000-4000-8000-000000000001';
+    const targetRoomId = '51000000-0000-4000-8000-000000000002';
+    const effectiveAt = '2026-09-17T09:20:00.000Z';
+    const evaluatedAt = '2026-09-17T09:19:00.000Z';
+    const expiresAt = '2026-09-17T09:24:00.000Z';
+    const sourceSegmentId = '46000000-0000-4000-8000-000000000001';
+    const targetSegmentId = '46000000-0000-4000-8000-000000000002';
+    const stayId = '45000000-0000-4000-8000-000000000001';
+    const sourceCleaningTargetId = '44000000-0000-4000-8000-000000000002';
+    appServices.reservations.previewRoomMove = vi.fn(async () => ({
+      mode: 'DURING_STAY' as const,
+      eligible: true,
+      rejectionReasonCodes: [],
+      blockingReasonCodes: [],
+      warnings: [],
+      targetBlockReasonCodes: [],
+      sourceOutcome: { occupancyStatus: 'OCCUPIED' as const, readinessStatus: 'READY' as const, stateVersion: 3 },
+      targetOutcome: { occupancyStatus: 'VACANT' as const, readinessStatus: 'READY' as const, stateVersion: 4 },
+      impactFingerprint: 'b'.repeat(64),
+      evaluatedAt,
+      expiresAt,
+      effectiveAt,
+      reservationId,
+      reservationVersion: 2,
+      stayId,
+      stayVersion: 2,
+      sourceSegmentId,
+      sourceSegmentVersion: 1,
+      sourceRoomId,
+      sourceRoomVersion: 3,
+      targetRoomId,
+      targetRoomVersion: 4,
+      checkInAt: '2026-09-16T07:00:00.000Z',
+      checkOutAt: '2026-09-18T02:00:00.000Z',
+      guestCount: 2,
+      preparationObligationId: '42000000-0000-4000-8000-000000000001',
+      checkoutObligationId: '43000000-0000-4000-8000-000000000001',
+      checkoutObligationVersion: 1,
+      plannedCheckoutTargetId: '44000000-0000-4000-8000-000000000001',
+      plannedCheckoutTargetVersion: 1
+    }));
+    appServices.reservations.commitRoomMove = vi.fn(async () => ({
+      reservation: {
+        id: reservationId, roomId: sourceRoomId,
+        checkInAt: '2026-09-16T07:00:00.000Z', checkOutAt: '2026-09-18T02:00:00.000Z',
+        guestCount: 2, status: 'active' as const,
+        preparationObligationId: '42000000-0000-4000-8000-000000000001',
+        checkoutObligationId: '43000000-0000-4000-8000-000000000001', version: 3,
+        actualCheckInAt: '2026-09-16T07:00:00.000Z', actualCheckoutAt: null,
+        cancelledAt: null, createdAt: evaluatedAt, updatedAt: effectiveAt
+      },
+      mode: 'DURING_STAY' as const,
+      evaluatedAt, expiresAt, effectiveAt, movedAt: effectiveAt,
+      sourceRoomId, targetRoomId, sourceRoomVersion: 4, targetRoomVersion: 5,
+      plannedCheckoutTargetId: '44000000-0000-4000-8000-000000000001',
+      plannedCheckoutTargetVersion: 2,
+      sourceOutcome: { occupancyStatus: 'VACANT' as const, readinessStatus: 'CLEANING_REQUIRED' as const, stateVersion: 4 },
+      targetOutcome: { occupancyStatus: 'OCCUPIED' as const, readinessStatus: 'READY' as const, stateVersion: 5 },
+      stay: { id: stayId, version: 3, currentRoomId: sourceRoomId },
+      segments: [
+        { id: sourceSegmentId, roomId: sourceRoomId, startsAt: '2026-09-16T07:00:00.000Z', endsAt: effectiveAt },
+        { id: targetSegmentId, roomId: targetRoomId, startsAt: effectiveAt, endsAt: '2026-09-18T02:00:00.000Z' }
+      ],
+      sourceCleaningTargetId,
+      pinAccessEndsAt: effectiveAt
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change/preview`,
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        targetRoomId, effectiveAt, reasonCode: 'GUEST_REQUEST',
+        expectedReservationVersion: 2, expectedSourceRoomVersion: 3,
+        expectedTargetRoomVersion: 4
+      }
+    });
+    const commitResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change`,
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'during-stay-move-0001' },
+      payload: {
+        targetRoomId, effectiveAt, evaluatedAt, expiresAt,
+        impactFingerprint: 'b'.repeat(64), reasonCode: 'GUEST_REQUEST',
+        expectedReservationVersion: 2, expectedSourceRoomVersion: 3,
+        expectedTargetRoomVersion: 4
+      }
+    });
+
+    expect(previewResponse.statusCode).toBe(200);
+    expect(previewResponse.json().preview).toMatchObject({ mode: 'DURING_STAY', stayId, sourceSegmentId });
+    expect(commitResponse.statusCode).toBe(200);
+    expect(commitResponse.json().result).toMatchObject({
+      mode: 'DURING_STAY', stay: { id: stayId, currentRoomId: sourceRoomId },
+      sourceCleaningTargetId, pinAccessEndsAt: effectiveAt
+    });
+    expect(appServices.reservations.previewRoomMove).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ reservationId, targetRoomId, effectiveAt })
     );
     await app.close();
   });

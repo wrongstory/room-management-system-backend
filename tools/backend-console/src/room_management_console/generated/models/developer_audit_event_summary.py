@@ -87,7 +87,10 @@ class DeveloperAuditEventSummary:
         next_attempt_id (UUID | Unset):
         target_slot_id (UUID | Unset):
         photo_id (UUID | Unset):
+        photo_item_id (UUID | Unset):
         photo_version (int | Unset):
+        collection_revision (int | Unset):
+        item_revision (int | Unset):
         uploaded_at (datetime.datetime | Unset):
         purge_after (datetime.datetime | Unset):
         offline_quarantine_id (UUID | Unset): 서버 발급 격리 기록 ID. 원 client event UUID가 아닙니다.
@@ -188,7 +191,10 @@ class DeveloperAuditEventSummary:
     next_attempt_id: UUID | Unset = UNSET
     target_slot_id: UUID | Unset = UNSET
     photo_id: UUID | Unset = UNSET
+    photo_item_id: UUID | Unset = UNSET
     photo_version: int | Unset = UNSET
+    collection_revision: int | Unset = UNSET
+    item_revision: int | Unset = UNSET
     uploaded_at: datetime.datetime | Unset = UNSET
     purge_after: datetime.datetime | Unset = UNSET
     offline_quarantine_id: UUID | Unset = UNSET
@@ -410,7 +416,15 @@ class DeveloperAuditEventSummary:
         if not isinstance(self.photo_id, Unset):
             photo_id = str(self.photo_id)
 
+        photo_item_id: str | Unset = UNSET
+        if not isinstance(self.photo_item_id, Unset):
+            photo_item_id = str(self.photo_item_id)
+
         photo_version = self.photo_version
+
+        collection_revision = self.collection_revision
+
+        item_revision = self.item_revision
 
         uploaded_at: str | Unset = UNSET
         if not isinstance(self.uploaded_at, Unset):
@@ -649,8 +663,14 @@ class DeveloperAuditEventSummary:
             field_dict["targetSlotId"] = target_slot_id
         if photo_id is not UNSET:
             field_dict["photoId"] = photo_id
+        if photo_item_id is not UNSET:
+            field_dict["photoItemId"] = photo_item_id
         if photo_version is not UNSET:
             field_dict["photoVersion"] = photo_version
+        if collection_revision is not UNSET:
+            field_dict["collectionRevision"] = collection_revision
+        if item_revision is not UNSET:
+            field_dict["itemRevision"] = item_revision
         if uploaded_at is not UNSET:
             field_dict["uploadedAt"] = uploaded_at
         if purge_after is not UNSET:
@@ -1023,7 +1043,18 @@ class DeveloperAuditEventSummary:
         else:
             photo_id = UUID(_photo_id)
 
+        _photo_item_id = d.pop("photoItemId", UNSET)
+        photo_item_id: UUID | Unset
+        if isinstance(_photo_item_id, Unset):
+            photo_item_id = UNSET
+        else:
+            photo_item_id = UUID(_photo_item_id)
+
         photo_version = d.pop("photoVersion", UNSET)
+
+        collection_revision = d.pop("collectionRevision", UNSET)
+
+        item_revision = d.pop("itemRevision", UNSET)
 
         _uploaded_at = d.pop("uploadedAt", UNSET)
         uploaded_at: datetime.datetime | Unset
@@ -1264,7 +1295,10 @@ class DeveloperAuditEventSummary:
             next_attempt_id=next_attempt_id,
             target_slot_id=target_slot_id,
             photo_id=photo_id,
+            photo_item_id=photo_item_id,
             photo_version=photo_version,
+            collection_revision=collection_revision,
+            item_revision=item_revision,
             uploaded_at=uploaded_at,
             purge_after=purge_after,
             offline_quarantine_id=offline_quarantine_id,

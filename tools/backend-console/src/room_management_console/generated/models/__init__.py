@@ -9,6 +9,7 @@ from .actor import Actor
 from .app_role import AppRole
 from .change_account_role_response_200 import ChangeAccountRoleResponse200
 from .change_account_status_response_200 import ChangeAccountStatusResponse200
+from .checkout_cleaning_template_v8_slot import CheckoutCleaningTemplateV8Slot
 from .cleaning_template_catalog import CleaningTemplateCatalog
 from .cleaning_template_catalog_envelope import CleaningTemplateCatalogEnvelope
 from .cleaning_template_room_type_code import CleaningTemplateRoomTypeCode
@@ -245,6 +246,7 @@ __all__ = (
     "AppRole",
     "ChangeAccountRoleResponse200",
     "ChangeAccountStatusResponse200",
+    "CheckoutCleaningTemplateV8Slot",
     "CleaningTemplateCatalog",
     "CleaningTemplateCatalogEnvelope",
     "CleaningTemplateRoomTypeCode",

@@ -254,8 +254,8 @@ select throws_ok($test$
     pg_temp.rid(1),c.reservation_id,c.new_room_id,c.check_in_at,c.check_out_at,2,
     'keep',null,1,'ROOM_CHANGED','room-change-notified',repeat('7',64)
   ) from room_change_cases c where c.label='notified'
-$test$,'23514','CLEANING_WORKFLOW_REPLAN_REQUIRED',
-  'notified planned checkout requires explicit replan');
+$test$,'23514','RESERVATION_ROOM_CHANGE_DEDICATED_COMMAND_REQUIRED',
+  'generic schedule change cannot bypass the dedicated room-move command');
 select ok((
   select b.reservation=to_jsonb(r) and b.obligation=to_jsonb(o) and b.target=to_jsonb(t)
     and b.assignment=to_jsonb(a)
@@ -278,8 +278,8 @@ select throws_ok($test$
     pg_temp.rid(1),c.reservation_id,c.new_room_id,c.check_in_at,c.check_out_at,2,
     'keep',null,1,'ROOM_CHANGED','room-change-checked-in',repeat('8',64)
   ) from room_change_cases c where c.label='checked-in'
-$test$,'23514','OCCUPIED_RESERVATION_SCHEDULE_LOCKED',
-  'checked-in reservation cannot move rooms');
+$test$,'23514','RESERVATION_ROOM_CHANGE_DEDICATED_COMMAND_REQUIRED',
+  'checked-in reservation room identity is immutable outside the dedicated command');
 select ok((
   select r.room_id=c.old_room_id and o.room_id=c.old_room_id and t.room_id=c.old_room_id
   from room_change_cases c
@@ -299,13 +299,16 @@ select throws_ok($test$
     set constraints all immediate;
   end
   $body$
-$test$,'23514','CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC',
-  'deferred graph contract still rejects a partial reservation-only room move');
+$test$,'23514','RESERVATION_ROOM_CHANGE_DEDICATED_COMMAND_REQUIRED',
+  'direct SQL cannot bypass the dedicated room-move authority');
 
-select ok((select condeferrable and condeferred from pg_constraint
-  where conname='cleaning_targets_reservation_room_fk'
-    and conrelid='public.cleaning_targets'::regclass),
-  'production FK is deferred, not disabled or dropped');
+select ok(
+  (select condeferrable and condeferred from pg_constraint
+    where conname='cleaning_targets_checkout_obligation_contract_fk'
+      and conrelid='public.cleaning_targets'::regclass)
+  and exists(select 1 from pg_trigger where tgrelid='public.cleaning_targets'::regclass
+    and tgname='cleaning_target_room_provenance_validate' and not tgisinternal),
+  'final checkout provenance remains deferred and segment-aware');
 select is((select count(*)::integer from public.cleaning_attempts),0,
   'reservation room changes never create execution attempts');
 

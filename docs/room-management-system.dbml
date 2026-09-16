@@ -2315,3 +2315,62 @@ Table private.photo_folder_purge_jobs {
   outcome text
   Note: 'Verified empty room first, date only after every child is terminal. Provider emptiness is never the sole DB authority.'
 }
+
+// #187 Phase C candidate. Private stay/segment history is the occupancy authority;
+// public.reservations.room_id remains the original check-in contract room.
+Table private.reservation_stays {
+  id uuid [pk]
+  reservation_id uuid [not null, unique, ref: - public.reservations.id]
+  status text [not null, note: 'scheduled/active/completed/cancelled']
+  scheduled_check_in_at timestamptz [not null]
+  scheduled_check_out_at timestamptz [not null]
+  actual_check_in_at timestamptz
+  actual_checkout_at timestamptz
+  version bigint [not null]
+}
+Table private.stay_room_segments {
+  id uuid [pk]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  room_id uuid [not null, ref: > public.rooms.id]
+  starts_at timestamptz [not null]
+  ends_at timestamptz [not null]
+  source_reservation_id uuid [not null, ref: > public.reservations.id]
+  move_event_id uuid
+  retired_at timestamptz
+  version bigint [not null]
+  Note: 'Non-retired [starts_at,ends_at) segments have a GiST room exclusion. Source end and target start share one effectiveAt.'
+}
+Table private.reservation_room_move_events {
+  id uuid [pk]
+  reservation_id uuid [not null, ref: > public.reservations.id]
+  stay_id uuid [ref: > private.reservation_stays.id]
+  from_room_id uuid [not null, ref: > public.rooms.id]
+  to_room_id uuid [not null, ref: > public.rooms.id]
+  effective_at timestamptz [not null]
+  mode text [not null, note: 'BEFORE_CHECKIN/DURING_STAY']
+  reason_code text [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  command_key text [not null, unique]
+  Note: 'Immutable safe event; guest name, PIN, photo locator and raw request are forbidden.'
+}
+Table private.stay_segment_checkout_obligations {
+  id uuid [pk]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  source_segment_id uuid [not null, unique, ref: - private.stay_room_segments.id]
+  room_id uuid [not null, ref: > public.rooms.id]
+  cleaning_target_id uuid [unique, ref: - public.cleaning_targets.id]
+  effective_service_date date [not null]
+  available_from timestamptz [not null]
+  due_at timestamptz
+  status text [not null]
+  version bigint [not null]
+}
+Table private.room_pin_access_scheduled_revocations {
+  lease_id uuid [pk, ref: - public.room_pin_access_leases.id]
+  reservation_id uuid [not null, ref: > public.reservations.id]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  move_event_id uuid [not null, ref: > private.reservation_room_move_events.id]
+  effective_at timestamptz [not null]
+  reason_code text [not null]
+  Note: 'Preserves access before a future move and denies query-time authority at/after effectiveAt.'
+}

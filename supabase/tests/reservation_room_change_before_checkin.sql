@@ -1,6 +1,6 @@
 begin;
 
-select plan(36);
+select plan(38);
 
 create function pg_temp.capture_room_move_error_detail(p_statement text)
 returns jsonb
@@ -326,7 +326,7 @@ insert into room_move_previews
 select fixture.label, public.preview_reservation_room_move(
   '87100000-0000-4000-8000-000000000001', fixture.reservation_id,
   fixture.target_room_id, reservation.version, source.state_version,
-  target.state_version, fixture.check_in_at, 'GUEST_REQUEST'
+  target.state_version, fixture.check_in_at + interval '1 hour', 'GUEST_REQUEST'
 )
 from room_move_fixtures fixture
 join public.reservations reservation on reservation.id = fixture.reservation_id
@@ -335,24 +335,21 @@ join public.rooms target on target.id = fixture.target_room_id
 where fixture.label = 'during';
 
 select ok(
-  (select not (preview.value ->> 'eligible')::boolean
+  (select (preview.value ->> 'eligible')::boolean
      and preview.value ->> 'mode' = 'DURING_STAY'
-     and preview.value -> 'rejectionReasonCodes' ? 'DURING_STAY_NOT_SUPPORTED'
    from room_move_previews preview where preview.label = 'during'),
-  'actual check-in returns a 200 DURING_STAY ineligible preview'
+  'actual check-in returns an eligible DURING_STAY preview for a bounded future effectiveAt'
 );
 
 select throws_ok(
   format(
-    $sql$select public.commit_reservation_room_move(%L,%L,%L,%s,%s,%s,%L,%L,%L,%L,%L,%L,%L)$sql$,
+    $sql$select public.preview_reservation_room_move(%L,%L,%L,%s,%s,%s,%L,%L)$sql$,
     '87100000-0000-4000-8000-000000000001', fixture.reservation_id,
     fixture.target_room_id, preview.value ->> 'reservationVersion',
     preview.value ->> 'sourceRoomVersion', preview.value ->> 'targetRoomVersion',
-    preview.value ->> 'evaluatedAt', preview.value ->> 'expiresAt',
-    preview.value ->> 'effectiveAt', preview.value ->> 'impactFingerprint',
-    'GUEST_REQUEST', 'room-move-during-stay-rejected', repeat('7', 64)
-  ), '23514', 'DURING_STAY_NOT_SUPPORTED',
-  'DURING_STAY commit returns the dedicated stable 409 domain code'
+    fixture.check_out_at, 'GUEST_REQUEST'
+  ), '22023', 'INVALID_MOVE_EFFECTIVE_AT',
+  'DURING_STAY exact checkout boundary fails closed because it would create a zero-length segment'
 )
 from room_move_fixtures fixture join room_move_previews preview using (label)
 where fixture.label = 'during';
@@ -425,6 +422,32 @@ select ok(
      and bool_and(not (after_state ?| array['guestName', 'pin', 'impactFingerprint']))
    from public.audit_events where event_type = 'reservation.room_moved'),
   'move audit is exactly once and excludes guest, PIN, and raw fingerprint'
+);
+select is(
+  (select count(*) from private.reservation_room_move_events event
+   join room_move_fixtures fixture on fixture.reservation_id=event.reservation_id
+   where fixture.label='success' and event.mode='BEFORE_CHECKIN'),
+  1::bigint,
+  'BEFORE_CHECKIN commit appends one typed immutable move event'
+);
+select ok(
+  (select public.commit_reservation_room_move(
+      '87100000-0000-4000-8000-000000000001',fixture.reservation_id,
+      fixture.target_room_id,(preview.value->>'reservationVersion')::bigint,
+      (preview.value->>'sourceRoomVersion')::bigint,
+      (preview.value->>'targetRoomVersion')::bigint,
+      (preview.value->>'evaluatedAt')::timestamptz,
+      (preview.value->>'expiresAt')::timestamptz,
+      (preview.value->>'effectiveAt')::timestamptz,
+      preview.value->>'impactFingerprint','GUEST_REQUEST',
+      'room-move-commit-success',repeat('a',64)
+    )=(select value from room_move_results)
+   from room_move_fixtures fixture join room_move_previews preview using(label)
+   where fixture.label='success')
+  and (select count(*) from private.reservation_room_move_events event
+       join room_move_fixtures fixture on fixture.reservation_id=event.reservation_id
+       where fixture.label='success' and event.mode='BEFORE_CHECKIN')=1,
+  'BEFORE_CHECKIN replay returns the original result without duplicating its ledger event'
 );
 
 select throws_ok(

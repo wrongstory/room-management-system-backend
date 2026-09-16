@@ -1192,6 +1192,20 @@ checkout 시각부터 field completion까지다. 배정 preview는 `assignment_d
 `in_progress`와 미해결 `checkout_presence_incidents`를 검사한다. 실패는 attempt·audit·receipt를 함께 0건으로
 유지하므로 예상시간 원장과 실행 권한 원장이 섞이지 않는다.
 
+### #187 Phase C stay/room segment 후보
+
+62번째 append-only 후보는 `private.reservation_stays` 아래 immutable room segment 이력을 둔다. 기존
+`reservations.room_id`는 최초 입실 계약 객실을 보존하고, 현재 객실은 현재 시각을 포함하는 non-retired
+segment, 최종 checkout 객실은 가장 마지막 예정 segment로 계산한다. non-retired segment의 `[startsAt,
+endsAt)` 범위는 객실별 GiST exclusion으로 겹칠 수 없다. 기존 active reservation은 migration에서 한 stay와
+한 segment로 backfill하며 겹침이 발견되면 전체 migration을 fail-closed한다.
+
+투숙 중 이동은 source segment를 `effectiveAt`에서 끝내고 target segment를 같은 시각에 시작한다. 원 객실의
+checkout cleaning은 `stay_segment_checkout_obligations`와 별도 target으로 exactly-once 기록되고, 최종
+checkout obligation/target은 target room으로 이동한다. 미래 이동은 PIN lease를 즉시 폐기하지 않고
+`room_pin_access_scheduled_revocations`에 cutoff를 기록해 effectiveAt 전 접근을 유지하고 이후 reveal/change,
+rotation 및 Data API RLS에서 차단한다. 모든 새 private table은 FORCE RLS이며 raw Data API 권한이 없다.
+
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.

@@ -81,8 +81,11 @@ select ok((select a.notified_at is not null and a.notified_room_id_snapshot=x.ol
   'historical notification captures the original room identity and number');
 select is((select count(*)::integer from public.cleaning_attempts),0,'planned notification creates no execution attempt');
 select ok((select condeferrable and condeferred from pg_constraint
-  where conname='cleaning_targets_reservation_room_fk' and conrelid='public.cleaning_targets'::regclass),
-  'reservation room FK remains enforced and is deferred by the production migration');
+  where conname='cleaning_targets_checkout_obligation_contract_fk'
+    and conrelid='public.cleaning_targets'::regclass)
+  and exists(select 1 from pg_trigger where tgrelid='public.cleaning_targets'::regclass
+    and tgname='cleaning_target_room_provenance_validate' and not tgisinternal),
+  'final checkout provenance remains deferred and segment-aware');
 create temporary table relocation_preview as
 select pg_temp.preview_relocation_room_move() as value;
 select ok((select not (value->>'eligible')::boolean

@@ -76,9 +76,10 @@ const roomMoveReasonCodes = new Set([
 ]);
 const roomMoveModes = new Set(["BEFORE_CHECKIN", "DURING_STAY"]);
 const roomMoveRejections = new Set([
-  "DURING_STAY_NOT_SUPPORTED",
   "RESERVATION_NOT_ACTIVE",
   "SAME_ROOM",
+  "INVALID_MOVE_EFFECTIVE_AT",
+  "OPEN_ENDED_STAY_REQUIRES_END",
   "CLEANING_WORKFLOW_PUBLIC",
   "PLANNED_CHECKOUT_NOT_PRIVATE",
   "CLEANING_WORKFLOW_ASSIGNED",
@@ -86,10 +87,10 @@ const roomMoveRejections = new Set([
   "CLEANING_WORKFLOW_STARTED",
   "ACTIVE_PIN_ACCESS_EXISTS",
   "TARGET_ROOM_BLOCKED",
+  "TARGET_ROOM_NOT_READY",
   "RESERVATION_OVERLAP",
 ]);
 const roomMoveBlockingReasons = new Set([
-  "DURING_STAY_NOT_SUPPORTED",
   "RESERVATION_VERSION_CONFLICT",
   "SOURCE_ROOM_VERSION_CONFLICT",
   "TARGET_ROOM_VERSION_CONFLICT",
@@ -98,6 +99,7 @@ const roomMoveBlockingReasons = new Set([
   "CLEANING_ASSIGNMENT_LOCKED",
   "PIN_LEASE_ACTIVE",
   "TARGET_ROOM_BLOCKED",
+  "TARGET_ROOM_NOT_READY",
 ]);
 const roomMoveTargetBlockReasons = new Set([
   "OCCUPIED",
@@ -420,6 +422,8 @@ const roomMoveConflictCodes = new Set([
   "CLEANING_ASSIGNMENT_LOCKED",
   "PIN_LEASE_ACTIVE",
   "TARGET_ROOM_BLOCKED",
+  "TARGET_ROOM_NOT_READY",
+  "OPEN_ENDED_STAY_REQUIRES_END",
   "DURING_STAY_NOT_SUPPORTED",
   "MOVE_ALREADY_APPLIED",
   "RESERVATION_ROOM_CHANGE_DEDICATED_COMMAND_REQUIRED",
@@ -589,6 +593,18 @@ export function reservationDatabaseError(
       409,
       "TARGET_ROOM_BLOCKED",
       "도착 객실이 운영상 차단되어 있습니다.",
+    ],
+    [
+      "TARGET_ROOM_NOT_READY",
+      409,
+      "TARGET_ROOM_NOT_READY",
+      "도착 객실이 아직 입실 가능한 상태가 아닙니다.",
+    ],
+    [
+      "OPEN_ENDED_STAY_REQUIRES_END",
+      409,
+      "OPEN_ENDED_STAY_REQUIRES_END",
+      "투숙 중 객실 이동에는 확정된 퇴실 시각이 필요합니다.",
     ],
     [
       "RESERVATION_ROOM_CHANGE_DEDICATED_COMMAND_REQUIRED",
@@ -955,6 +971,10 @@ function roomMovePreviewProjection(value: unknown) {
     effectiveAt: projectionTimestamp(row.effectiveAt),
     reservationId: projectionString(row.reservationId, uuidPattern),
     reservationVersion: projectionPositiveInteger(row.reservationVersion),
+    stayId: projectionString(row.stayId, uuidPattern),
+    stayVersion: projectionPositiveInteger(row.stayVersion),
+    sourceSegmentId: projectionString(row.sourceSegmentId, uuidPattern),
+    sourceSegmentVersion: projectionPositiveInteger(row.sourceSegmentVersion),
     sourceRoomId: projectionString(row.sourceRoomId, uuidPattern),
     sourceRoomVersion: projectionPositiveInteger(row.sourceRoomVersion),
     targetRoomId: projectionString(row.targetRoomId, uuidPattern),
@@ -987,6 +1007,57 @@ function roomMoveCommitProjection(value: unknown) {
   const reservation = projectionRecord(row.reservation);
   const nullableTimestamp = (item: unknown) =>
     item === null ? null : projectionTimestamp(item);
+  const mode = projectionEnum(row.mode, roomMoveModes);
+  const duringStayFields = [
+    row.stay,
+    row.segments,
+    row.sourceCleaningTargetId,
+    row.pinAccessEndsAt,
+  ];
+  if (
+    mode === "BEFORE_CHECKIN" &&
+    duringStayFields.some((item) => item !== undefined)
+  ) {
+    roomMoveProjectionError();
+  }
+  let duringStay: {
+    stay?: { id: string; version: number; currentRoomId: string };
+    segments?: Array<{
+      id: string;
+      roomId: string;
+      startsAt: string;
+      endsAt: string;
+    }>;
+    sourceCleaningTargetId?: string;
+    pinAccessEndsAt?: string;
+  } = {};
+  if (mode === "DURING_STAY") {
+    const stay = projectionRecord(row.stay);
+    if (!Array.isArray(row.segments) || row.segments.length !== 2) {
+      roomMoveProjectionError();
+    }
+    duringStay = {
+      stay: {
+        id: projectionString(stay.id, uuidPattern),
+        version: projectionPositiveInteger(stay.version),
+        currentRoomId: projectionString(stay.currentRoomId, uuidPattern),
+      },
+      segments: row.segments.map((item) => {
+        const segment = projectionRecord(item);
+        return {
+          id: projectionString(segment.id, uuidPattern),
+          roomId: projectionString(segment.roomId, uuidPattern),
+          startsAt: projectionTimestamp(segment.startsAt),
+          endsAt: projectionTimestamp(segment.endsAt),
+        };
+      }),
+      sourceCleaningTargetId: projectionString(
+        row.sourceCleaningTargetId,
+        uuidPattern,
+      ),
+      pinAccessEndsAt: projectionTimestamp(row.pinAccessEndsAt),
+    };
+  }
   return {
     reservation: toReservation({
       id: projectionString(reservation.id, uuidPattern),
@@ -1013,7 +1084,7 @@ function roomMoveCommitProjection(value: unknown) {
       created_at: projectionTimestamp(reservation.created_at),
       updated_at: projectionTimestamp(reservation.updated_at),
     }),
-    mode: projectionEnum(row.mode, new Set(["BEFORE_CHECKIN"])),
+    mode,
     evaluatedAt: projectionTimestamp(row.evaluatedAt),
     expiresAt: projectionTimestamp(row.expiresAt),
     effectiveAt: projectionTimestamp(row.effectiveAt),
@@ -1031,6 +1102,7 @@ function roomMoveCommitProjection(value: unknown) {
     ),
     sourceOutcome: roomMoveOutcome(row.sourceOutcome),
     targetOutcome: roomMoveOutcome(row.targetOutcome),
+    ...duringStay,
   };
 }
 
