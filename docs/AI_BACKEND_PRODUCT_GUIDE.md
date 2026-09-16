@@ -44,7 +44,7 @@
 | 현재 배포 상호작용 구현 | [`main WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/8c1c14da93294a36ce5fc842143bf668ad9cf373/WIREFRAME/index.html) |
 | 차기 후보 상호작용 구현 | [`dev WIREFRAME/index.html`](https://github.com/makee-ham/room-management-system/blob/a0d6c07f5bd6cc86e02b2644abc4addc414adfc5/WIREFRAME/index.html) |
 
-2026-09-16 재대조 결과, 이전 현재점 `f70efc8`보다 프런트 `main@8c1c14d`가 16 commit 전진해 백엔드 `v0.2.0` 39 paths / 43 operations 소비, `DOCS/17`·`18`, 신규 PIN/사진 `DOCS/19`, 운영 연동 `DOCS/21` 변경을 포함한다. `dev@a0d6c07`은 여기에 예상 청소시간 선택형과 미퇴실 사건 후보를 기능 플래그 OFF로 추가했다. `main`은 배포 정본, `dev`는 차기 후보로 분리하며 자세한 분류·호환표는 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
+2026-09-16 재대조 결과, 이전 현재점 `f70efc8`보다 프런트 `main@8c1c14d`가 16 commit 전진했다. 운영 `v0.2.0`의 계약 검사면은 39 paths / 43 operations이고 실제 UI 호출면은 31 paths / 35 operations다. 이 변경에는 `DOCS/17`·`18`, 신규 PIN/사진 `DOCS/19`, 운영 연동 `DOCS/21`도 포함된다. `dev@a0d6c07`은 여기에 예상 청소시간 선택형과 미퇴실 사건 후보를 기능 플래그 OFF로 추가했다. `main`은 배포 정본, `dev`는 차기 후보로 분리하며 자세한 분류·호환표는 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
 
 프런트 신규 `DOCS/19`의 “검수 결정부터 7일”은 2026-08-26 사용자 확정 계약인 `uploaded_at + 7 days`와 충돌했다. 기존 사용자 결정을 우선해 프런트 문서·화면 설명을 업로드 기준으로 정합화하며, 재시도·제출·승인·반려는 보관기한을 연장하지 않는다. 데모 fixture의 과거 만료시각은 production invariant가 아니다.
 
