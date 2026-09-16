@@ -2,13 +2,13 @@
 
 ## 목표와 상태
 
-월 비용 `$0`을 우선해 Fastify production process를 Supabase Edge Functions와 Cron으로 대체할 수 있는지 검증한다. 이 문서와 `supabase/functions/` 코드는 Issue #36의 PoC이며, 운영 smoke와 독립 리뷰가 끝나기 전에는 Fastify를 제거하거나 production runtime 전환이 완료됐다고 간주하지 않는다.
+월 비용 `$0`을 우선해 Fastify production process를 Supabase Edge Functions와 Cron으로 대체할 수 있는지 검증한 Issue #36의 PoC 기록이다. Supabase-only production runtime은 후속 운영 smoke로 채택됐고 Fastify는 개발·회귀 및 rollback 기준선으로 유지한다. 현재 운영 상태는 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 PoC source의 `dev` 병합 조건은 최신 head 독립 리뷰 P0/P1 0과 required CI PASS다. 운영 smoke는 `dev` 병합 선행조건이 아니라 `release → main` 뒤 운영 migration과 계정·secret 준비를 마친 다음 수행하는 runtime 채택 조건이다. 따라서 source가 병합돼도 Issue #36은 운영 smoke가 완료될 때까지 닫지 않으며 기존 Fastify를 rollback 기준선으로 유지한다.
 
-현재 production은 source·migration 17건·Edge API/OpenAPI 배포와 gateway/JWT/CORS 1차 smoke까지 완료됐다. Supabase 기본 도메인은 HTML 응답을 `text/plain`으로 바꾸므로 production `/docs` route 자체는 존재하지만 인터넷 Swagger UI로 렌더링되지 않는다. 사람용 운영 문서는 GitHub Pages 읽기 전용 Swagger 포털에서 제공한다.
+아래 17 migration·부분 Edge 설명은 PoC 당시 snapshot이다. 2026-09-16 현재 production은 `main@6604b221...`, 56 migrations, `api` ACTIVE v16, OpenAPI 0.3.0 109 paths / 117 operations와 5개 Edge bundle이다. Supabase 기본 도메인의 `/docs` route는 200이지만 사람용 운영 문서는 GitHub Pages 읽기 전용 Swagger 포털을 사용하며 run `35051144073`에서 production 계약과 parity를 확인했다.
 
-운영 `api`의 HTTP surface는 아직 auth/accounts/객실 목록 중심의 부분 이식 상태다. source에는 Fastify와 운영 DB에 이미 존재하는 주간 가능일·예약·객실 상세/mutation의 #51~#53 Edge parity가 포함됐지만 release/main·production 재배포 전에는 운영 route로 간주하지 않는다. business admin과 scheduler/Cron은 #43과 #44 Phase A 뒤 활성화하므로 scheduler 503 fail-closed는 현재 정상이다. `v0.2.0` tag/release는 parity와 operational activation smoke가 끝날 때까지 발행하지 않는다.
+auth/accounts/객실 목록 중심의 부분 이식 설명도 PoC 당시 기록이다. 현재 운영 `api`는 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 계약을 포함한다. 각 source/bundle 배포와 Google Drive·Sheets, Web Push, 실기기 및 positive mutation hosted smoke 완료 여부는 계속 분리한다.
 
 ```text
 Frontend
