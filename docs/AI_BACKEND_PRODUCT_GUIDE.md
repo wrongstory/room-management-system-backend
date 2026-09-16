@@ -39,10 +39,16 @@
 | 가능일·배정·이월·폭탄방·주급 | [`DOCS/16`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/16_WEEKLY_AVAILABILITY_ASSIGNMENT_POLICY.md) |
 | 객실 마스터·점유·장기 투숙 | [`DOCS/17`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/17_ROOM_CATALOG_LONG_STAY_DECISIONS.md) |
 | 전체 도메인 안전 규칙 | [`FINAL_UX_AUDIT`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/FINAL_UX_AUDIT.md) |
+| 클릭형 와이어프레임 인계 | [`DOCS/14`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/14_CLICKABLE_WIREFRAME_HANDOFF.md) |
 | 예약·객실 이동 | [`DOCS/24`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/24_RESERVATION_ARRIVAL_ROOM_MOVE_BACKEND_HANDOFF.md) |
 | 청소 API 연동 | [`DOCS/23`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/23_CLEANING_API_INTEGRATION.md) |
 | 운영 API·PWA 연동 | [`DOCS/21`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/21_PRODUCTION_API_PWA_INTEGRATION.md) |
-| 상호작용 구현 | [`WIREFRAME`](https://github.com/wrongstory/room-management-system/tree/165fed2d62a763d64ac62539e1475c1b3e42868f/WIREFRAME) |
+| 상호작용 설명 | [`WIREFRAME/README`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/WIREFRAME/README.md) |
+| 상호작용 QA | [`WIREFRAME/QA`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/WIREFRAME/QA.md) |
+| 상호작용 source | [`WIREFRAME/index.html`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/WIREFRAME/index.html) |
+| 와이어프레임 작업 인계 | [`WIREFRAME_TASK_PROMPT`](https://github.com/wrongstory/room-management-system/blob/165fed2d62a763d64ac62539e1475c1b3e42868f/DOCS/WIREFRAME_TASK_PROMPT.md) |
+
+이 snapshot 안의 충돌 우선순위는 `현재 사용자의 명시적 결정 → DOCS/19 객실 PIN·청소 사진 → DOCS/16 배정 → DOCS/17 객실·점유 → FINAL_UX_AUDIT → DOCS/24 예약·객실 이동 → 나머지 최신 인계 문서 → 과거 백엔드 가정`이다. 따라서 `DOCS/14` 등에 남은 `availableFrom` 이후 PIN 접근 문구는 DOCS/19와 2026-09-17 사용자 결정으로 대체한다.
 
 2026-09-17 재대조 결과, `dev@165fed2`가 이번 백엔드 정합화의 exact 프런트 snapshot이다. 객실 대표 상태와 체크인 전·투숙 중 객실 이동은 백엔드 `dev`에 이미 구현돼 중복 개발하지 않는다. 반면 사진 보존과 maid PIN 접근 수명주기는 현재 source가 아래 확정 계약과 반대로 동작하므로 후속 append-only migration/API PR이 필요하다. 자세한 해결/미해결 표는 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
 
@@ -181,7 +187,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 `primary_display_status` 우선순위는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY`다. `BLOCKED`는 청소 외 실제 운영·입실·데이터 차단이 있을 때만 사용하고, 청소만으로 만들지 않는다. `FUTURE`는 현재 readiness 대표 상태를 유지한다. `blocking_reason_codes`와 `readiness_reason_codes`는 분리하며, `PIN_MISMATCH`와 `PIN_UNCONFIGURED`는 current check-in의 readiness 사유로만 노출하고 예약 bookability 차단으로 사용하지 않는다. 이 값들은 저장된 단일 상태가 아니라 동일 snapshot에서 계산한 표시 projection이며, 기존 reason/PIN 경고도 보존한다.
 
-객실 예약·준비 판단은 세 축을 합치지 않는다. `intervalBookable`은 요청한 미래 반개구간의 예약 가능성, `readinessStatus`/`checkInReady`는 현재 체크인·배정 준비, `pinSyncStatus`는 현재 PIN 동기화 상태다. 미래 기간은 예약 가능하면서 현재 체크인 준비는 불가할 수 있으며, preview 결과는 commit 성공 보장이 아니다.
+객실 예약·준비 판단은 세 축을 합치지 않는다. `intervalBookable`은 요청한 미래 반개구간의 예약 가능성, `readinessStatus`/`checkInReady`는 현재 체크인·배정 준비, `pinSyncStatus`는 현재 PIN 동기화 상태다. 현재 source는 readiness/PIN 분리 projection만 제공하며 일반 예약용 `intervalBookable` preview와 from/to 범위 조회는 아직 없다. `allocation_ready`를 그 대체값으로 사용하지 않는다. 미래 기간은 예약 가능하면서 현재 체크인 준비는 불가할 수 있으며, preview 결과는 commit 성공 보장이 아니다.
 
 `allocation_ready`는 현재 시각의 예약 배정 가능 여부다. 공실, 현재 preparation obligation 승인, 촛불 0, 운영 정상, 미해결 입실 차단 이슈 없음, 기준정보·점유 확인 완료를 모두 만족할 때만 true다. 현재 예약 구간이면 실제 체크인 event가 아직 없어도 `RESERVATION_CURRENT`로 차단한다. false이면 `OCCUPIED`, `RESERVATION_CURRENT`, `CLEANING_REQUIRED`, `CANDLE_PRESENT`, `OPERATION_BLOCKED`, `ROOM_ISSUE_BLOCKED`, `DATA_UNCONFIRMED` 같은 안정적인 reason code 목록을 함께 반환한다. `pin_sync_status`는 별도 경고 축이며 `unconfigured` 또는 `mismatch`만으로 예약 생성·변경·배정을 막지 않는다. 다만 실제 체크인 전이와 PIN 조회·변경은 current PIN이 `verified`가 될 때까지 fail-closed한다. 미래 예약의 pending preparation obligation과 private planned checkout target은 현재 `cleaning_required`를 활성화하지 않으며, 실제 checkout으로 current target이 materialize됐거나 현재 실행 가능한 비-checkout 청소가 있을 때만 현재 청소 축에 반영한다.
 

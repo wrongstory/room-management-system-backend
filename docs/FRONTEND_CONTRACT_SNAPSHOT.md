@@ -43,20 +43,37 @@
 
 ### 객실 표시·예약 준비 3축
 
-- `intervalBookable`: 요청한 미래 `[checkInAt, checkOutAt)` 구간의 예약 가능성.
+- `intervalBookable`: 요청한 미래 `[checkInAt, checkOutAt)` 구간의 예약 가능성. **일반 예약용 preview/range API는 현재 미구현**이다.
 - `readinessStatus`/`checkInReady`: 현재 체크인·배정 준비 상태.
 - `pinSyncStatus`: PIN 동기화 상태. 미래 예약 bookability와 합치지 않는다.
-- 대표 상태는 `BLOCKED > OCCUPIED > ARRIVAL_PENDING > RESERVATION_PRESENT > CLEANING_REQUIRED > READY`다. 이 projection은 백엔드 `dev`에 이미 구현돼 **해결됨**이다.
+- 대표 상태는 `BLOCKED > OCCUPIED > ARRIVAL_PENDING > RESERVATION_PRESENT > CLEANING_REQUIRED > READY`다. 현재 시각의 lifecycle/readiness/PIN 분리 projection은 백엔드 `dev`에 이미 구현돼 **해결됨**이나, 이를 미래 `intervalBookable`로 재사용하면 안 된다.
 
 ## 후속 구현 계획
 
 | 범위 | OpenAPI | migration/backfill | 고정할 회귀 이름 |
 |---|---|---|---|
-| 사진 retention | 의미·nullable 확장이므로 계약 버전을 `0.4.0`으로 올림 | 현재 62개 이후 새 append-only migration. pending review는 유지하고 이미 purged는 `unavailable`, accepted/linked/orphan은 실제 evidence로 분류 | `pending_review_photo_survives_upload_plus_7d`, `decision_photo_expires_at_168h_boundary`, `orphan_expires_after_30d`, `resolved_evidence_expires_after_180d` |
-| PIN entitlement | entitlement/reveal ID와 안정 오류를 `0.4.0`에 추가 | durable assignment entitlement 원장과 terminal cleanup을 새 migration으로 추가. 구 lease를 장기 자격으로 backfill하지 않고 current notified assignment를 안전하게 재계산 | `notified_assignment_pin_before_available_from`, `pin_access_survives_field_complete_until_decision`, `pin_revision_rotation_revokes_old_reveal`, `terminal_assignment_revokes_entitlement` |
-| 객실 3축 | 기존 additive source 계약 유지 | 기존 59~60번째 projection 유지, 중복 migration 없음 | `room_primary_status_priority`, `pin_warning_does_not_change_interval_bookability` |
+| 사진 retention | 의미·nullable 확장이므로 다음 승인 계약 버전(현재 후보 `0.4.0`)에 반영 | 현재 62개 이후 새 append-only migration. pending review는 유지하고 이미 purged는 `unavailable`, accepted/linked/orphan은 실제 evidence로 분류 | `pending_review_photo_survives_upload_plus_7d`, `decision_photo_expires_at_168h_boundary`, `orphan_expires_after_30d`, `resolved_evidence_expires_after_180d` |
+| PIN entitlement | entitlement/reveal ID와 안정 오류를 다음 승인 계약 버전(현재 후보 `0.4.0`)에 추가 | durable assignment entitlement 원장과 terminal cleanup을 새 migration으로 추가. 구 attempt lease를 장기 자격으로 backfill하지 않는다. backfill 후보는 (1) `cleaning_assignments.is_current=true`, `notified_at IS NOT NULL`, `ended_at IS NULL`인 exact assignment/maid/room/revision, (2) target `status`가 `notified|in_progress|upload_pending|inspection_pending`이고 `cancelled_at IS NULL`, (3) attempt가 없거나 exact assignment revision의 current attempt `status`가 `scheduled|in_progress|field_completed|upload_pending|submitted`, (4) current submission이 있으면 `status=submitted`이고 final inspection decision이 아직 없는지를 서로 다른 테이블 축으로 각각 확인한다. `approved|rejected|cancelled` target/submission, noncurrent·종료·재배정 assignment, inactive/departed 또는 비활성화가 최종화된 maid는 제외한다. PIN rotation은 동일 entitlement identity의 exact revision을 갱신하고 과거 reveal lease를 무효화한다. 구현 PR은 실제 FK/current-pointer와 authoritative join을 다시 검증해야 한다. | `notified_assignment_pin_before_available_from`, `pin_access_survives_field_complete_until_decision`, `pin_revision_rotation_revokes_old_reveal`, `terminal_assignment_revokes_entitlement` |
+| 현재 객실 projection | 기존 additive source 계약 유지 | 기존 59~60번째 projection 유지, 중복 migration 없음 | `room_primary_status_priority`, `pin_warning_does_not_change_current_readiness` |
+| 미래 interval bookability·범위 조회 | preview/list 계약을 다음 승인 계약 버전(현재 후보 `0.4.0`)에 추가 | 생성·변경과 같은 `[in,out)` 최종 검증을 재사용하는 app-owned RPC/route. 기존 constraint로 충분한지 구현 PR에서 확인하고 필요할 때만 append-only migration 추가 | `pin_warning_does_not_change_interval_bookability`, `preview_does_not_guarantee_commit`, `reservation_range_cursor_has_no_gap_or_duplicate` |
 
-정확한 migration timestamp는 각 구현 PR에서 현재 `dev`를 다시 확인해 확정한다. 현재 source의 OpenAPI `info.version`은 여전히 `0.2.0`이라 개발 snapshot과도 맞지 않으며, 첫 의미 변경 PR에서 `0.4.0`으로 올리고 migration note를 함께 제공한다. 기존 62개 migration과 삭제된 provider 원본을 수정·복원하지 않는다.
+정확한 migration timestamp는 각 구현 PR에서 현재 `dev`를 다시 확인해 확정한다. 현재 source의 OpenAPI `info.version`은 여전히 `0.2.0`이라 개발 snapshot과도 맞지 않는다. 공개 계약은 production `0.3.0` 이후 minor 의미 확장에 해당하므로 `0.4.0`을 후보로 두되, 첫 의미 변경 PR에서 Issue/release decision으로 최종 승인한 버전과 migration note를 함께 제공한다. 기존 62개 migration과 삭제된 provider 원본을 수정·복원하지 않는다.
+
+## 해결·미해결 inventory
+
+| 영역 | 상태 | 근거/후속 |
+|---|---|---|
+| 현재 객실 lifecycle/readiness/대표 상태 | 해결됨(source/dev) | 59~60번째 projection 유지. production 승격과 별도 |
+| 체크인 전·투숙 중 객실 이동 | 해결됨(source/dev) | 61~62번째 migration 및 preview/commit 유지. production 승격과 별도 |
+| payroll adjustment `bookVersion` | 해결됨(source/dev) | 기존 payroll projection 유지 |
+| 임의 기간 bookability preview·예약 범위 조회 | 미구현 | Stage 2 additive route/RPC/cursor 계약 |
+| `standard | long_stay`와 종료 미정 | 미구현·정책 검증 필요 | nullable checkout, obligation 생성 시점, 이동 제약을 별도 Decision/PR로 처리 |
+| 객실 타입 catalog | 부분 구현 | 내부 master는 있으나 app-owned `GET /v1/room-types` 없음 |
+| 청소 완료·주간 근무 이력 | 미구현 | availability/assignment/field completion을 합치지 않는 bounded role-scoped projection 필요 |
+| operation block·issue 목록과 room event timeline | 미구현 | command는 있으나 새 세션에서 entity를 재조회할 목록 없음 |
+| payroll cycle/deep-link by-ID resolver | 미구현 | typed notification이 발행한 entityId의 역할·소유권 기반 resolver 필요 |
+
+계정 비활성화 제한 capability와 complaint lifecycle 핵심은 source/dev에 이미 있으므로 중복 구현하지 않는다. complaint 자유문 content/notes는 기존 PII·자유문 금지 결정과 충돌하므로 별도 제품 결정 전 추가하지 않는다.
 
 ## API 소비·제공 호환표
 
@@ -65,7 +82,7 @@
 | 인증·세션 | login, me, password, Supabase refresh | 동일 | 제공 | 호환 |
 | 계정·개발자 상태 | account CRUD 일부, developer 상태/로그 | 동일 | 제공 | 호환. 역할·상태는 매 요청 최신 서버값 사용 |
 | 가능일 | 제출·변경 요청·결정·후보 | 동일 | 제공 | 호환. KST·CAS·멱등 키 유지 |
-| 예약·객실 | 예약 CRUD/취소/체크아웃, 객실 projection·운영 명령 | 동일 | 제공 | 호환. `stateVersion`/`version`과 409 재조회 필수 |
+| 예약·객실 | 예약 CRUD/취소/체크아웃, 현재 객실 projection·운영 명령 | 미래 기간 preview와 from/to/cursor 범위 조회 | 현재 projection 제공, 일반 interval preview/range 조회 미제공 | 부분 호환. `stateVersion`/`version`과 409 재조회 필수 |
 | 청소 템플릿·수행·미퇴실 사건 | 운영 API 연결 | 상태 기반 수행과 사건 동결 유지 | 제공 | source/dev. production 상태와 별도 |
 | 배정·사진·제출·검수 | 운영 API 연결 | 도메인별 retention과 본인 이력 조회 | lifecycle 제공, retention gap | 사진 안전 계약 후속 필요 |
 | 알림·Web Push | 권한/PWA shell만 사용 | 동일 | source 제공 | hosted provider 활성화와 실제 소비는 별도 |
