@@ -41,6 +41,14 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 대표 상태는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY` 우선순위다. 청소는 readiness 사유지만 `BLOCKED`를 만들지 않고, `FUTURE`는 현재 readiness 대표 상태를 유지한다. PIN mismatch/unconfigured는 current check-in readiness 경고로만 추가하며 예약 bookability와 기존 #140 권한 계약은 바꾸지 않는다. public projection RPC만 service role에 열고 private SECURITY DEFINER helper는 fixed `search_path`와 PUBLIC/anon/authenticated/service_role EXECUTE revoke를 적용한다. Phase A는 route, reservation move preview/commit, stay/segment 저장, Python codegen을 추가하지 않는다.
 
+### #187 체크인 전 객실 변경 Phase B
+
+60번째 append-only `reservation_room_change_before_checkin`은 admin 전용 preview/commit command authority를 추가한다. preview는 source-controlled reasonCode를 필수로 받고 optional effectiveAt을 예약 checkInAt으로 정규화한다. 제공된 effectiveAt은 strict RFC 3339이고 checkInAt과 정확히 같아야 한다. 서버 시각을 한 번 캡처해 5분 TTL, authoritative effectiveAt, reasonCode, reservation/source/target CAS version, 기존 private obligation/planned target과 cleaning assignment·attempt·PIN lease·target block·반개구간 overlap을 묶은 SHA-256 fingerprint를 반환한다. `DURING_STAY`는 안전한 rejection으로만 반환하며 stay/segment 저장은 Phase C까지 없다.
+
+commit은 완료 receipt replay를 시각 검증보다 먼저 수행하고, reservation global command lock 뒤 source/target room을 UUID 순서로 잠근다. 새 첫 시도는 preview의 reasonCode/effectiveAt·TTL·fingerprint·세 CAS version을 다시 검사하며 reservation, preparation obligation, checkout obligation, 기존 planned target만 한 transaction에서 이동한다. 다른 key로 이미 같은 target에 이동한 상태는 reservation row lock 뒤 version CAS보다 먼저 `MOVE_ALREADY_APPLIED`로 닫는다. generic reservation change와 direct update는 transaction-local `before_checkin_v1` 표식이 없는 한 trigger가 fail-closed한다. 성공 감사 `reservation.room_moved`는 source/target room, mode, version, planned target ID만 developer allowlist로 투영하고 고객명·PIN·request body·fingerprint는 노출하지 않는다. private never-assigned 계획에는 승인된 비자기 수신자가 없으므로 notification/outbox는 추가하지 않는다. #180 dev와 Phase B를 합친 candidate OpenAPI는 113 paths / 121 operations이고 production 109/117 snapshot과 구분한다.
+
+전용 객실 변경 409의 DB `DETAIL`은 source-controlled JSON만 만들고 런타임이 exact allowlist로 재검증한다. 응답의 `error.conflict`에는 다시 읽을 `reservation/sourceRoom/targetRoom/roomMovePreview`와 최신 세 version(미확정은 `null`)만 포함하며 식별자·PII·PIN·원문 오류·request hash를 전달하지 않는다.
+
 ### #131 encrypted room PIN Phase A — source/dev 완료
 
 Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinDigits`는 선행 0을 보존하는 4~8자리 문자열이고, 서버가 global lifecycle lock과 room lock 아래 다시 읽은 `room_number` snapshot으로만 canonical credential을 만든다. envelope마다 12-byte random nonce를 생성하며 regular prepare와 bootstrap이 공유하는 private `(key_version, nonce)` reservation이 객실/AAD를 가로지른 다른 암호화 재사용을 fail-closed한다. prepare→confirm의 동일 envelope는 한 논리 reservation이다. immutable revision에는 key가 아닌 bounded AAD environment/projectRef를 저장해 recovery restore가 저장 당시 context로 복호화할 수 있다.

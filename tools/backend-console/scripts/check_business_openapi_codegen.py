@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 111:
-        raise RuntimeError("전체 source OpenAPI path 수가 111이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 113:
+        raise RuntimeError("전체 source OpenAPI path 수가 113이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 119:
-        raise RuntimeError("전체 source OpenAPI operation 수가 119가 아닙니다.")
+    if operation_count != 121:
+        raise RuntimeError("전체 source OpenAPI operation 수가 121이 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -59,6 +59,12 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "reservations" / "preview_reservation_room_move.py",
+            package / "api" / "reservations" / "commit_reservation_room_move.py",
+            package / "models" / "reservation_room_move_preview_request.py",
+            package / "models" / "reservation_room_move_commit_request.py",
+            package / "models" / "reservation_room_move_preview.py",
+            package / "models" / "reservation_room_move_result.py",
             package / "api" / "cleaning_templates" / "list_cleaning_templates.py",
             package / "api" / "cleaning_templates" / "publish_cleaning_template.py",
             package / "models" / "cleaning_template_catalog.py",

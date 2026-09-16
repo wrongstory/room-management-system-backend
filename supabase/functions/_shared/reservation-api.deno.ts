@@ -3,20 +3,23 @@ import {
   cancelReservation,
   changeReservation,
   cleaningTargetIdFromPath,
+  commitReservationRoomMove,
   createManualCleaningRequest,
   createReservation,
   getReservation,
   listReservations,
   manualCheckoutReservation,
+  previewReservationRoomMove,
   processReservationTransitions,
   reservationDatabaseError,
   reservationIdFromPath,
+  reservationRoomMoveIdFromPath,
   type ReservationRow,
   toManualCleaningRequest,
   toReservation,
 } from "./reservation-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
-import { authenticate, EdgeError } from "./runtime.ts";
+import { authenticate, EdgeError, errorResponse } from "./runtime.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -703,7 +706,228 @@ Deno.test("manual transitions reject the scheduler idempotency namespace", async
   );
 });
 
-Deno.test("reservation database errors redact unknown details", () => {
+Deno.test("room move preview and commit preserve strict CAS, fingerprint and timestamps", async () => {
+  const targetRoomId = "50000000-0000-4000-8000-000000000002";
+  const evaluatedAt = "2026-09-01T00:00:00.000Z";
+  const expiresAt = "2026-09-01T00:05:00.000Z";
+  const impactFingerprint = "a".repeat(64);
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const preview = {
+    mode: "BEFORE_CHECKIN",
+    eligible: true,
+    rejectionReasonCodes: [],
+    blockingReasonCodes: [],
+    warnings: [],
+    targetBlockReasonCodes: [],
+    sourceOutcome: {
+      occupancyStatus: "VACANT",
+      readinessStatus: "READY",
+      stateVersion: 2,
+    },
+    targetOutcome: {
+      occupancyStatus: "VACANT",
+      readinessStatus: "READY",
+      stateVersion: 3,
+    },
+    impactFingerprint,
+    evaluatedAt,
+    expiresAt,
+    effectiveAt: reservationRow.check_in_at,
+    reservationId: reservationRow.id,
+    reservationVersion: 1,
+    sourceRoomId: reservationRow.room_id,
+    sourceRoomVersion: 2,
+    targetRoomId,
+    targetRoomVersion: 3,
+    checkInAt: reservationRow.check_in_at,
+    checkOutAt: reservationRow.check_out_at,
+    guestCount: reservationRow.guest_count,
+    preparationObligationId: reservationRow.preparation_obligation_id,
+    checkoutObligationId: reservationRow.checkout_obligation_id,
+    checkoutObligationVersion: 1,
+    plannedCheckoutTargetId: "50000000-0000-4000-8000-000000000003",
+    plannedCheckoutTargetVersion: 1,
+    guestName: "must-not-leak",
+  };
+  const clients = {
+    admin: {
+      async rpc(name: string, argumentsValue: Record<string, unknown>) {
+        calls.push([name, argumentsValue]);
+        return name === "preview_reservation_room_move"
+          ? { data: preview, error: null }
+          : {
+            data: {
+              reservation: { ...reservationRow, room_id: targetRoomId },
+              mode: "BEFORE_CHECKIN",
+              evaluatedAt,
+              expiresAt,
+              effectiveAt: reservationRow.check_in_at,
+              movedAt: "2026-09-01T00:01:00.000Z",
+              sourceRoomId: reservationRow.room_id,
+              targetRoomId,
+              sourceRoomVersion: 3,
+              targetRoomVersion: 4,
+              plannedCheckoutTargetId: preview.plannedCheckoutTargetId,
+              plannedCheckoutTargetVersion: 2,
+              sourceOutcome: { ...preview.sourceOutcome, stateVersion: 3 },
+              targetOutcome: { ...preview.targetOutcome, stateVersion: 4 },
+              pin: "must-not-leak",
+            },
+            error: null,
+          };
+      },
+    },
+  } as unknown as EdgeClients;
+  const cas = {
+    targetRoomId,
+    expectedReservationVersion: 1,
+    expectedSourceRoomVersion: 2,
+    expectedTargetRoomVersion: 3,
+    reasonCode: "GUEST_REQUEST",
+  };
+
+  const resultPreview = await previewReservationRoomMove(
+    commandRequest(
+      `/v1/reservations/${reservationRow.id}/room-change/preview`,
+      cas,
+    ),
+    clients,
+    admin,
+    reservationRow.id,
+  );
+  const resultCommit = await commitReservationRoomMove(
+    commandRequest(
+      `/v1/reservations/${reservationRow.id}/room-change`,
+      {
+        ...cas,
+        evaluatedAt,
+        expiresAt,
+        effectiveAt: reservationRow.check_in_at,
+        impactFingerprint,
+        reasonCode: "GUEST_REQUEST",
+      },
+      "POST",
+      "reservation-room-move-0001",
+    ),
+    clients,
+    admin,
+    reservationRow.id,
+  );
+
+  assert(
+    !("guestName" in resultPreview) && !("pin" in resultCommit),
+    "room move projections allowlist fields and redact extras",
+  );
+  assert(
+    (resultCommit.reservation as { roomId: string }).roomId === targetRoomId,
+    "nested reservation is redacted and mapped",
+  );
+  assert(calls[0][0] === "preview_reservation_room_move", "preview RPC");
+  assert(calls[1][0] === "commit_reservation_room_move", "commit RPC");
+  assert(
+    calls[1][1].p_preview_evaluated_at === evaluatedAt &&
+      calls[1][1].p_preview_expires_at === expiresAt &&
+      calls[1][1].p_effective_at === reservationRow.check_in_at,
+    "authoritative timestamps are echoed",
+  );
+  assert(
+    typeof calls[1][1].p_request_hash === "string" &&
+      /^[0-9a-f]{64}$/.test(calls[1][1].p_request_hash as string),
+    "commit has a canonical request hash",
+  );
+
+  const invalidReason = await captureEdgeError(() =>
+    commitReservationRoomMove(
+      commandRequest(
+        `/v1/reservations/${reservationRow.id}/room-change`,
+        {
+          ...cas,
+          evaluatedAt,
+          expiresAt,
+          effectiveAt: reservationRow.check_in_at,
+          impactFingerprint,
+          reasonCode: "ARBITRARY_TEXT",
+        },
+      ),
+      clients,
+      admin,
+      reservationRow.id,
+    )
+  );
+  assert(invalidReason.code === "VALIDATION_ERROR", "reason allowlist");
+  assert(calls.length === 2, "invalid requests do not reach the database");
+
+  for (
+    const invalidTimestamp of [
+      "2026-02-29T00:00:00Z",
+      "2026-04-31T00:00:00Z",
+      "2026-09-01T00:00Z",
+      "2026-09-01T00:00:00",
+      "2026-09-01T00:00:00+24:00",
+    ]
+  ) {
+    const invalidTime = await captureEdgeError(() =>
+      commitReservationRoomMove(
+        commandRequest(
+          `/v1/reservations/${reservationRow.id}/room-change`,
+          {
+            ...cas,
+            evaluatedAt: invalidTimestamp,
+            expiresAt,
+            effectiveAt: reservationRow.check_in_at,
+            impactFingerprint,
+            reasonCode: "GUEST_REQUEST",
+          },
+        ),
+        clients,
+        admin,
+        reservationRow.id,
+      )
+    );
+    assert(
+      invalidTime.code === "VALIDATION_ERROR",
+      `strict RFC3339 ${invalidTimestamp}`,
+    );
+  }
+
+  preview.evaluatedAt = "2026-02-29T00:00:00Z";
+  const malformedTimestamp = await captureEdgeError(() =>
+    previewReservationRoomMove(
+      commandRequest(
+        `/v1/reservations/${reservationRow.id}/room-change/preview`,
+        cas,
+      ),
+      clients,
+      admin,
+      reservationRow.id,
+    )
+  );
+  assert(
+    malformedTimestamp.status === 500 &&
+      malformedTimestamp.code === "RESERVATION_PROJECTION_INVALID",
+    "malformed DB timestamps fail closed without raw detail",
+  );
+  preview.evaluatedAt = evaluatedAt;
+  preview.reservationId = "not-a-uuid";
+  const malformedUuid = await captureEdgeError(() =>
+    previewReservationRoomMove(
+      commandRequest(
+        `/v1/reservations/${reservationRow.id}/room-change/preview`,
+        cas,
+      ),
+      clients,
+      admin,
+      reservationRow.id,
+    )
+  );
+  assert(
+    malformedUuid.status === 500 &&
+      malformedUuid.code === "RESERVATION_PROJECTION_INVALID",
+    "malformed DB UUIDs fail closed without raw detail",
+  );
+});
+
+Deno.test("reservation database errors redact unknown details", async () => {
   const stale = reservationDatabaseError({ message: "STALE_VERSION" });
   const overlap = reservationDatabaseError({
     code: "23P01",
@@ -712,13 +936,152 @@ Deno.test("reservation database errors redact unknown details", () => {
   const unknown = reservationDatabaseError({
     message: "private database detail",
   });
+  const conflictDetail = {
+    reloadResources: [
+      "reservation",
+      "sourceRoom",
+      "targetRoom",
+      "roomMovePreview",
+    ],
+    latestVersions: {
+      reservationVersion: 4,
+      sourceRoomVersion: 7,
+      targetRoomVersion: 9,
+    },
+  };
+  const conflict = reservationDatabaseError({
+    message: "TARGET_ROOM_VERSION_CONFLICT",
+    details: JSON.stringify(conflictDetail),
+  });
+  const malformedConflict = reservationDatabaseError({
+    message: "ROOM_CHANGE_PREVIEW_STALE",
+    details: JSON.stringify({
+      ...conflictDetail,
+      reservationId: reservationRow.id,
+      pin: "1234",
+      rawError: "private database detail",
+    }),
+  });
+  const roomMoveIdempotencyConflict = reservationDatabaseError({
+    message: "IDEMPOTENCY_KEY_REUSED",
+    details: JSON.stringify(conflictDetail),
+  }, true);
+  const genericIdempotencyConflict = reservationDatabaseError({
+    message: "IDEMPOTENCY_KEY_REUSED",
+    details: JSON.stringify(conflictDetail),
+  });
 
   assert(stale.status === 409 && stale.code === "STALE_VERSION", "stale CAS");
   assert(overlap.code === "RESERVATION_OVERLAP", "overlap constraint");
   assert(
+    JSON.stringify(conflict.conflict) === JSON.stringify(conflictDetail),
+    "valid conflict detail is allowlisted exactly",
+  );
+  assert(
+    JSON.stringify(roomMoveIdempotencyConflict.conflict) ===
+        JSON.stringify(conflictDetail) &&
+      genericIdempotencyConflict.conflict === undefined,
+    "idempotency reuse metadata is scoped to the room move command",
+  );
+  assert(
+    JSON.stringify(malformedConflict.conflict) === JSON.stringify({
+      reloadResources: [
+        "reservation",
+        "sourceRoom",
+        "targetRoom",
+        "roomMovePreview",
+      ],
+      latestVersions: {
+        reservationVersion: null,
+        sourceRoomVersion: null,
+        targetRoomVersion: null,
+      },
+    }),
+    "malformed conflict detail is replaced with a safe reload contract",
+  );
+  const serializedConflict = await errorResponse(conflict, "request-1", {})
+    .json();
+  assert(
+    JSON.stringify(serializedConflict) === JSON.stringify({
+      error: {
+        code: "TARGET_ROOM_VERSION_CONFLICT",
+        message: "도착 객실 상태가 변경됐습니다. 다시 확인해 주세요.",
+        conflict: conflictDetail,
+      },
+      requestId: "request-1",
+    }),
+    "edge error response emits the exact safe conflict object",
+  );
+  const serializedIdempotencyConflict = await errorResponse(
+    roomMoveIdempotencyConflict,
+    "request-2",
+    {},
+  ).json();
+  assert(
+    JSON.stringify(serializedIdempotencyConflict) === JSON.stringify({
+      error: {
+        code: "IDEMPOTENCY_KEY_REUSED",
+        message: "이미 다른 요청에 사용한 Idempotency-Key입니다.",
+        conflict: conflictDetail,
+      },
+      requestId: "request-2",
+    }),
+    "room move idempotency reuse emits the exact safe conflict object",
+  );
+  assert(
+    !JSON.stringify(malformedConflict).includes(reservationRow.id) &&
+      !JSON.stringify(malformedConflict).includes("1234") &&
+      !JSON.stringify(malformedConflict).includes("private database detail"),
+    "malformed conflict detail does not leak identifiers, PINs, or raw errors",
+  );
+  for (
+    const code of [
+      "RESERVATION_VERSION_CONFLICT",
+      "SOURCE_ROOM_VERSION_CONFLICT",
+      "TARGET_ROOM_VERSION_CONFLICT",
+      "TARGET_ROOM_OVERLAP",
+      "ROOM_CHANGE_PREVIEW_STALE",
+      "CLEANING_ASSIGNMENT_LOCKED",
+      "PIN_LEASE_ACTIVE",
+      "TARGET_ROOM_BLOCKED",
+      "MOVE_ALREADY_APPLIED",
+    ]
+  ) {
+    assert(
+      reservationDatabaseError({ message: code }).code === code,
+      `${code} remains stable`,
+    );
+  }
+  assert(
     unknown.status === 500 && unknown.code === "RESERVATION_COMMAND_FAILED" &&
       !unknown.message.includes("private database detail"),
     "unknown DB errors are redacted",
+  );
+  assert(
+    reservationRoomMoveIdFromPath(
+      `/v1/reservations/${reservationRow.id}/room-change/preview`,
+      "preview",
+    ) === reservationRow.id,
+    "room move preview route",
+  );
+  assert(
+    reservationRoomMoveIdFromPath(
+      `/v1/reservations/${reservationRow.id}/room-change`,
+      "commit",
+    ) === reservationRow.id,
+    "room move commit route",
+  );
+  const legacyCommitRoute = await captureEdgeError(() =>
+    Promise.resolve(
+      reservationRoomMoveIdFromPath(
+        `/v1/reservations/${reservationRow.id}/room-change/commit`,
+        "commit",
+      ),
+    )
+  );
+  assert(
+    legacyCommitRoute.code === "VALIDATION_ERROR",
+    "legacy room move commit route is not an alias",
   );
 });
 

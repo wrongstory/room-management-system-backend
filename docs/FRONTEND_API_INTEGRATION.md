@@ -215,7 +215,9 @@ const idempotencyKey = crypto.randomUUID();
 | 예약 목록 | `GET /v1/reservations` | active admin만, 고객명과 암호문은 응답하지 않음 |
 | 예약 상세 | `GET /v1/reservations/{reservationId}` | active admin만 고객명 복호화, 실제 민감조회 activity 기록 |
 | 예약 생성 | `POST /v1/reservations` | 객실 version CAS, Idempotency-Key, 고객명 서버 암호화 |
-| 예약 변경 | `PATCH /v1/reservations/{reservationId}` | 예약 expectedVersion과 최신 예약 전체 입력 필요 |
+| 예약 변경 | `PATCH /v1/reservations/{reservationId}` | 일정·고객정보만 변경. roomId는 현재 값과 같아야 하며 객실 변경 우회 금지 |
+| 객실 변경 미리보기 | `POST /v1/reservations/{reservationId}/room-change/preview` | admin, source-controlled reasonCode와 reservation/source/target version 필요; effectiveAt은 생략하거나 checkInAt과 정확히 같게 전송; read-only 5분 TTL |
+| 체크인 전 객실 변경 확정 | `POST /v1/reservations/{reservationId}/room-change` | preview payload의 reasonCode와 authoritative effectiveAt, evaluatedAt/expiresAt/fingerprint와 version을 그대로 echo, Idempotency-Key 필수 |
 | 예약 취소 | `POST /v1/reservations/{reservationId}/cancel` | reasonCode와 expectedVersion 필요, hard delete 없음 |
 | 수동 체크아웃 | `POST /v1/reservations/{reservationId}/manual-checkout` | 실제 입실 중인 예약만, 청소 obligation과 함께 원자 처리 |
 | 청소 요청 | `POST /v1/reservations/cleaning-requests` | 연박/추가 요청, 객실 version CAS |
@@ -243,6 +245,10 @@ const idempotencyKey = crypto.randomUUID();
 예약 목록에는 `guestName`이 없으며 UI가 이름을 표시해야 할 때만 단건 상세를 호출한다. 예약 응답의 `version`은 예약 변경 command의 `expectedVersion`으로 사용하고, command 응답에 `roomStateVersion`이 있으면 후속 객실 기준 command의 CAS 입력으로 사용한다. 고객명은 브라우저 저장소·analytics·오류 수집에 보존하지 않고, 상세 화면을 벗어나면 메모리 상태에서도 제거한다. 암호화 설정 장애에서 평문 저장이나 빈 이름으로 성공 처리하지 않는다.
 
 예약 전이 수동 실행의 `Idempotency-Key`에는 `reservation-scheduler-` 접두사를 사용하지 않는다. 이 namespace는 scheduler invocation 전용이며 수동 API는 `RESERVED_IDEMPOTENCY_KEY`로 fail-closed한다. 고객명은 원문과 NFKC·trim·공백 축약 결과가 모두 1~80자여야 하므로, 화면에서도 원문 80자 제한을 먼저 적용하되 서버 오류 코드를 최종 판정으로 사용한다.
+
+객실 변경 화면은 source-controlled `reasonCode`와 optional `effectiveAt`을 포함해 먼저 preview를 호출한다. 체크인 전 effectiveAt을 생략하면 서버가 `checkInAt`을 authoritative 값으로 반환하며, 직접 보내면 strict RFC 3339 checkInAt과 정확히 같아야 한다. `mode=DURING_STAY` 또는 `eligible=false`이면 commit 버튼을 비활성화하고, inactive 예약도 오류가 아니라 ineligible preview로 표시한다. 성공 preview의 `effectiveAt`, `reasonCode`, `evaluatedAt`, `expiresAt`, `impactFingerprint`, 세 expected version을 수정·재계산하지 말고 commit에 그대로 보낸다. `ROOM_CHANGE_PREVIEW_STALE`이나 `RESERVATION_VERSION_CONFLICT`/`SOURCE_ROOM_VERSION_CONFLICT`/`TARGET_ROOM_VERSION_CONFLICT`이면 새 preview를 받아 사용자가 다시 확인해야 한다. `TARGET_ROOM_OVERLAP`, `TARGET_ROOM_BLOCKED`, `CLEANING_ASSIGNMENT_LOCKED`, `PIN_LEASE_ACTIVE`를 다른 key로 자동 우회하지 않는다. 다른 key로 이미 같은 객실에 이동했다면 원 preview version이 stale이어도 `MOVE_ALREADY_APPLIED` 409를 표시한다. 동일 commit 응답을 잃은 네트워크 재시도에만 같은 Idempotency-Key와 같은 payload를 사용하며, replay는 expiresAt 이후에도 성공 응답을 돌려줄 수 있다. 같은 key에 다른 payload를 보내면 `IDEMPOTENCY_KEY_REUSED`와 동일한 안전한 `error.conflict` 복구 정보가 오며 새 preview부터 다시 시작한다.
+
+전용 객실 변경 409에서는 `error.conflict.reloadResources`에 포함된 `reservation | sourceRoom | targetRoom | roomMovePreview`만 다시 읽고, `latestVersions`의 세 version을 다음 preview의 기준으로 사용한다. version이 `null`이면 추측하지 말고 해당 리소스를 다시 조회한다. conflict payload에는 UUID나 고객/PIN 정보가 오지 않는다.
 
 퇴실 청소 템플릿의 `durationMinutes`는 실제 청소 완료시간이나 배정 preview 계산값이 아니다. 실제 수행시간은
 메이드의 attempt 시작~현장완료 기록에서 계산하고, 배정 preview는 별도 confirmed duration policy만 사용한다.

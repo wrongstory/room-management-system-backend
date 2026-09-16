@@ -118,6 +118,10 @@ const reservationArrivalLifecycleMigrationUrl = new URL(
   '../supabase/migrations/20260916194539_reservation_arrival_lifecycle_projection.sql',
   import.meta.url
 );
+const reservationRoomMoveMigrationUrl = new URL(
+  '../supabase/migrations/20260916204500_reservation_room_change_before_checkin.sql',
+  import.meta.url
+);
 const photoSlotContractV8MigrationUrl = new URL(
   '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
   import.meta.url
@@ -191,7 +195,7 @@ describe('initial migration contract', () => {
     expect(sql).toContain("when v_current then 'OCCUPIED'");
     expect(sql).toContain('order by reservation.check_in_at, reservation.id');
     expect(sql).toContain('v_evaluated_at timestamptz := clock_timestamp()');
-    expect(sql).toMatch(/v_evaluated_at,\r?\n {4}case when state\.occupied/);
+    expect(sql).toMatch(/v_evaluated_at,\r?\n\s+case when state\.occupied/);
     expect(sql).toContain("when readiness.readiness_status = 'CHECKIN_BLOCKED' then 'BLOCKED'");
     expect(sql).toContain("when lifecycle.reservation_lifecycle = 'OCCUPIED' then 'OCCUPIED'");
     expect(sql).toContain("when state.cleaning_required then 'CLEANING_REQUIRED'");
@@ -200,6 +204,44 @@ describe('initial migration contract', () => {
     expect(sql).toContain('from public, anon, authenticated, service_role');
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/create table|alter table|insert into|update public\./);
+  });
+
+  it('moves pre-check-in reservations only through a replay-safe dedicated command', async () => {
+    const sql = await readFile(reservationRoomMoveMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create function public.preview_reservation_room_move(');
+    expect(sql).toContain('create function public.commit_reservation_room_move(');
+    expect(sql).toContain('private.replay_command(');
+    expect(sql.indexOf('private.replay_command(')).toBeLessThan(
+      sql.indexOf("message = 'ROOM_CHANGE_PREVIEW_STALE'")
+    );
+    expect(sql).toMatch(
+      /v_response := private\.replay_command\([\s\S]+when unique_violation then[\s\S]+message = 'IDEMPOTENCY_KEY_REUSED'[\s\S]+detail = private\.reservation_room_move_conflict_detail\(/
+    );
+    expect(sql).toMatch(
+      /coalesce\(\r?\n\s+current_setting\('app\.reservation_room_move_writer_mode', true\)/
+    );
+    expect(sql).toContain("'before_checkin_v1'");
+    expect(sql).toContain('order by room.id');
+    expect(sql).toContain("message = 'RESERVATION_VERSION_CONFLICT'");
+    expect(sql).toContain("message = 'SOURCE_ROOM_VERSION_CONFLICT'");
+    expect(sql).toContain("message = 'TARGET_ROOM_VERSION_CONFLICT'");
+    expect(sql).toContain("message = 'TARGET_ROOM_OVERLAP'");
+    expect(sql).toContain("message = 'CLEANING_ASSIGNMENT_LOCKED'");
+    expect(sql).toContain("message = 'PIN_LEASE_ACTIVE'");
+    expect(sql).toContain('create function private.reservation_room_move_conflict_detail(');
+    expect(sql).toContain("'reloadResources', jsonb_build_array(");
+    expect(sql).toContain("'reservationVersion', v_reservation_version");
+    expect(sql).toContain("'sourceRoomVersion', v_source_room_version");
+    expect(sql).toContain("'targetRoomVersion', v_target_room_version");
+    expect(sql).toContain('detail = private.reservation_room_move_conflict_detail(');
+    expect(sql).toMatch(
+      /revoke all on function private\.reservation_room_move_conflict_detail\(\r?\n\s+uuid, uuid, uuid\r?\n\) from public, anon, authenticated, service_role/
+    );
+    expect(sql).toContain("'reservation.room_moved'");
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/\b(?:http_post|net\.http_post)\b/);
   });
 
   it('seeds 121 unique room numbers', async () => {

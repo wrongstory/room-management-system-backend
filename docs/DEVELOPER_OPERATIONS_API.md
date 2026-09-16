@@ -70,7 +70,7 @@ Issue #58에서 현재 성공 mutation의 append 지점을 전수 확인했다. 
 | account | `account.bootstrap_developer_created`, `account.bootstrap_admin_created`, `account.created`, `account.role_changed`, `account.status_changed`, `account.unlocked`, `account.password_reset_requested`, `account.password_changed` |
 | availability | `availability.submitted`, `availability.change_requested`, `availability.change_decided` |
 | assignment | `assignment.draft_saved`, `assignment.notified`, `assignment.prestart_changed`, `assignment.prestart_unassigned`, `assignment.cancellation_requested`, `assignment.cancellation_decided` |
-| reservation | `reservation.created`, `reservation.changed`, `reservation.cancelled`, `reservation.manual_checkout`, `reservation.scheduled_check_in`, `reservation.scheduled_checkout`, `reservation.guest_name_retention_purged` |
+| reservation | `reservation.created`, `reservation.changed`, `reservation.room_moved`, `reservation.cancelled`, `reservation.manual_checkout`, `reservation.scheduled_check_in`, `reservation.scheduled_checkout`, `reservation.guest_name_retention_purged` |
 | cleaning request | `cleaning.manual_request.created`, `cleaning.manual_request.cancelled` |
 | cleaning template | `cleaning_template.published` |
 | room | `room.master_data_changed`, `room.create_block`, `room.release_block`, `room.set_candle_count`, `room.report_issue`, `room.resolve_issue`, `room.record_pin_sync` |
@@ -86,14 +86,14 @@ scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `res
 PIN version·암호문·평문, 고객명·전화번호·session/token, 알림 body는 projection과 Python generated model에
 존재하지 않습니다. 두 event는 현재 production allowlist에 반영됐습니다. #156/#165 후속 production runtime의
 production `expectedMigration`과 DB head는 현재 56번째 `cleaning_template_duration_optional`로 일치합니다. 합산 개발 source는
-57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection` 순서이므로, 이 source를 production에 배포하기 전에는 migration을 먼저 승인된
+57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`, Phase B source 후보 61번째 `reservation_room_change_before_checkin` 순서이므로, 이 source를 production에 배포하기 전에는 migration을 먼저 승인된
 release 순서로 적용해야 합니다. source와 DB head가 다르면 정상 상태가 아니라 배포 drift로 처리합니다.
 
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,
 전체 slots, request hash, raw before/after state는 developer projection에 포함하지 않습니다. 이 event를
-포함한 source allowlist는 66개이며 production source `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`에
-반영됐습니다. #165는 이 event allowlist를 바꾸지 않고 checkout template의 선택형 duration 계약과 runtime
+포함한 production source allowlist는 66개이며 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`에
+반영됐습니다. #180 개발 정본은 `photo.collection_item_deleted`를 더해 67개이고, Phase B candidate는 safe `reservation.room_moved` summary를 추가해 68개입니다. summary는 `mode/reservationId/reservationVersion/sourceRoomId/targetRoomId/plannedCheckoutTargetId`만 허용하고 고객명·PIN·request hash·impact fingerprint는 제외합니다. #165는 기존 event allowlist를 바꾸지 않고 checkout template의 선택형 duration 계약과 runtime
 migration head만 56번으로 갱신했으며, 운영 네 타입 게시 event도 safe summary만 노출합니다.
 
 #29 source의 audit allowlist는 총 36개였습니다. #27 pre-start 필드에

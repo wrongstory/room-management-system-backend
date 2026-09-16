@@ -6,6 +6,42 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
+Deno.test("room move OpenAPI publishes bounded 409 conflict recovery metadata", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const preview = document.paths[
+    "/v1/reservations/{reservationId}/room-change/preview"
+  ].post;
+  const commit = document.paths[
+    "/v1/reservations/{reservationId}/room-change"
+  ].post;
+  const conflict = document.components.schemas.RoomChangeConflict;
+  const errorCodes = document.components.schemas.ErrorCode.enum;
+  const serialized = JSON.stringify(conflict);
+
+  assert(
+    preview.responses["409"].content["application/json"].schema.$ref ===
+        "#/components/schemas/RoomChangeConflictEnvelope" &&
+      commit.responses["409"].content["application/json"].schema.$ref ===
+        "#/components/schemas/RoomChangeConflictEnvelope",
+    "both room move commands use the dedicated conflict envelope",
+  );
+  assert(
+    conflict.additionalProperties === false &&
+      conflict.properties.reloadResources.uniqueItems === true &&
+      conflict.properties.reloadResources.items.enum.join(",") ===
+        "reservation,sourceRoom,targetRoom,roomMovePreview",
+    "reload resources are an exact source-controlled allowlist",
+  );
+  assert(
+    conflict.properties.latestVersions.additionalProperties === false &&
+      errorCodes.includes("IDEMPOTENCY_KEY_REUSED") &&
+      serialized.includes('"type":"null"') &&
+      !serialized.includes("uuid") &&
+      !serialized.includes("pin") &&
+      !serialized.includes("requestHash"),
+    "latest versions are nullable and sensitive metadata is absent",
+  );
+});
 Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and opaque projections", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const upload =
@@ -85,13 +121,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 111 &&
+    Object.keys(document.paths).length === 113 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 119,
-    "candidate contract 111/119",
+        ).length === 121,
+    "combined candidate contract 113/121",
   );
 });
 
@@ -1187,7 +1223,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 67,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 68,
     "actual audit allowlist count",
   );
   assert(
