@@ -163,6 +163,10 @@ attempt·offline·제출·검수·earning/payroll·complaint·checkout incident�
 
 ## 9. Closure checklist
 
+production 변경은 별도 승인된 backup/recovery gate 뒤에 진행됐다. 아래 evidence 항목의 미완료 표시는 gate를
+건너뛰었다는 뜻이 아니라, Issue #148에서 다시 확인할 수 있는 영구 backup/restore artifact reference가 아직
+이 문서에 연결되지 않았다는 뜻이다.
+
 - [x] #156/#158/#162 source/dev 병합: `dev@ab10249aaf1d671419389615ad8a22984c9849ac`
 - [x] #156 release를 production 55번/API에 반영
 - [x] OpenAPI source version 0.3.0, Pages expected 109/117 계약 작성
