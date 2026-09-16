@@ -135,8 +135,17 @@ describe('photo application admission/provider/finalize boundary', () => {
   });
   it('four exact route shapes and strict upload query; aliases never accepted', async () => {
     expect(photoRoute('GET', `/v1/attempts/${id(3)}/photo-slots`)?.kind).toBe('slots');
+    expect(photoRoute('POST', `/v1/attempts/${id(3)}/photo-slots/${id(4)}/photos/${id(7)}/upload`)).toMatchObject({ kind: 'upload', photoItemId: id(7) });
+    expect(photoRoute('DELETE', `/v1/attempts/${id(3)}/photo-slots/${id(4)}/photos/${id(7)}`)).toMatchObject({ kind: 'delete-item', photoItemId: id(7) });
     for (const path of [`/v1/photos/${id(7)}/content/extra`, `/v1/photos/${id(7)}/content/`, `/v1/attempts/${id(3)}/photo-slots/${id(4)}/upload`]) expect(photoRoute('GET', path)).toBeNull();
-    const s = setup(); const req = request(); const duplicate = new Request(req.url + '&assignmentRevision=1', req);
+    const s = setup(); const req = request(); const duplicate = new Request(`${req.url}&assignmentRevision=1`, req);
     await expect(s.service.upload(duplicate, identity, id(3), id(4))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' }); expect(s.calls).toEqual([]);
+  });
+  it('deletes one collection item with collection and item CAS revisions', async () => {
+    const s=setup(name=>name==='delete_photo_collection_item'?{data:{attemptId:id(3),targetSlotId:id(4),photoItemId:id(7),collectionRevision:3,itemRevision:2,deleted:true},error:null}:undefined);
+    const req=new Request(`http://local/v1/attempts/${id(3)}/photo-slots/${id(4)}/photos/${id(7)}?assignmentId=${id(8)}&assignmentRevision=1&expectedCollectionRevision=2&expectedItemRevision=1`,
+      {method:'DELETE',headers:{'idempotency-key':'delete-key-0001'}});
+    await expect(s.service.deleteItem(req,identity,id(3),id(4),id(7))).resolves.toEqual({attemptId:id(3),targetSlotId:id(4),photoItemId:id(7),collectionRevision:3,itemRevision:2,deleted:true});
+    expect(s.calls).toContain('delete_photo_collection_item');
   });
 });

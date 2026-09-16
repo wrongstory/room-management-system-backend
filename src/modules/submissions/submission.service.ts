@@ -68,8 +68,18 @@ export class SupabaseSubmissionService implements SubmissionService {
       const photos = (value as Record<string, unknown>).photos;
       if (!Array.isArray(photos)) throw submissionDatabaseError(null);
       row.photos = photos.map((photo) => this.project(photo, [
-        'photoId', 'targetPhotoSlotId', 'slotKey', 'label', 'displayOrder', 'required', 'photoVersion'
+        'photoId', 'photoItemId', 'itemRevision', 'photoDisplayOrder', 'targetPhotoSlotId', 'slotKey', 'label', 'displayOrder', 'required', 'photoVersion'
       ]));
+    }
+    if (includeBombDetail && value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'photoSlots')) {
+      const slots = (value as Record<string, unknown>).photoSlots;
+      if (!Array.isArray(slots)) throw submissionDatabaseError(null);
+      row.photoSlots = slots.map((slot) => {
+        const projected = this.project(slot, ['targetPhotoSlotId', 'slotKey', 'label', 'displayOrder', 'required', 'photos']);
+        if (!Array.isArray(projected.photos)) throw submissionDatabaseError(null);
+        projected.photos = projected.photos.map((photo) => this.project(photo, ['photoId', 'photoItemId', 'itemRevision', 'displayOrder', 'photoVersion']));
+        return projected;
+      });
     }
     if (includeBombDetail && value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'reviewContext')) {
       row.reviewContext = this.project((value as Record<string, unknown>).reviewContext, [

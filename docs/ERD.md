@@ -517,6 +517,9 @@ erDiagram
   CLEANING_ATTEMPTS ||--o{ ATTEMPT_PHOTO_CURRENT : "회차 + 슬롯 CAS"
   ATTEMPT_PHOTO_VERSIONS ||--o{ ATTEMPT_PHOTO_CURRENT : "null은 비움"
   ATTEMPT_PHOTO_VERSIONS ||--o{ ATTEMPT_PHOTO_CHANGES : "교체·비움 이력"
+  CLEANING_ATTEMPTS ||--o| ATTEMPT_PHOTO_COLLECTION_STATES : "extra-proof collection CAS"
+  ATTEMPT_PHOTO_COLLECTION_STATES ||--o{ ATTEMPT_PHOTO_COLLECTION_ITEMS : "stable item/order"
+  ATTEMPT_PHOTO_COLLECTION_ITEMS ||--o{ ATTEMPT_PHOTO_COLLECTION_CHANGES : "append/replace/delete history"
   CLEANING_SUBMISSIONS ||--o{ SUBMISSION_PHOTO_BINDINGS : "특정 photo version 불변 연결"
   ATTEMPT_PHOTO_VERSIONS ||--o{ SUBMISSION_PHOTO_BINDINGS : "파일 복제 없음"
   CLEANING_SUBMISSIONS ||--o| SUBMISSION_PHOTO_BINDING_SETS : "전체 연결 집합 봉인"
@@ -527,6 +530,7 @@ erDiagram
 - 기존 `cleaning_template_versions.photo_slots`, `cleaning_targets.template_snapshot`, `cleaning_attempts.template_snapshot`은 제거하지 않는다. 새 슬롯 row는 `slot_snapshot`에 구역·이름·설명·반복 인스턴스를 포함한 정확한 원본 객체를 보존하고, 식별자·필수 여부·표시 순서는 정규화 컬럼으로 검증한다.
 - 기존 v1 `[]` 또는 복원 근거가 없는 JSON은 `ready=false`다. 이 때문에 기존 예약/배정/물리적 완료가 막히지는 않지만 사진 완전성·제출 연결은 실패한다. 최신 템플릿으로 보간하거나 사진 0장을 완료로 인정하지 않는다. v6 명시 슬롯에는 v7 `tv-on`이나 개수를 소급하지 않는다.
 - `maxPhotos` 없는 pre-A checkout 템플릿은 v7보다 높은 historical version도 타입별 10/11/13/15개 계약을 이력으로 유지한다. 모든 slot에 metadata가 있는 새 v8+ A-contract는 9/10/12/14개, 필수 8/9/11/13개를 검증하고 required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지를 강제한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
+- #180은 v8 checkout `extra-proof`에만 0~10장 collection을 연다. item UUID와 display order는 형제 교체 때 유지되고, collection/item revision을 함께 CAS한다. 삭제된 item은 tombstone으로 남아 재사용하지 않으며, submission은 active item의 exact photo version/revision/order를 봉인한다. 기존 pre-A와 일반 slot은 단일 current pointer를 계속 사용한다.
 - 증빙 identity는 `(cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)`이다. 구 담당자의 interrupted 사진과 새 담당자의 사진은 같은 target slot을 쓰더라도 서로 다른 current pointer를 가진다. NULL/다른 target/다른 attempt 연결은 복합 FK로 거부한다.
 - `attempt_photo_versions`는 불변이다. `uploaded_at + 168시간` 만료는 교체·재제출·retry로 연장하지 않으며, 실제 provider 삭제 확인은 별도 append-only purge marker로 관리한다. #30에서 bytes/Drive 업로드나 삭제를 실제 수행하지 않는다.
 - 필수 슬롯이 전부 verified·미만료·미삭제 사진을 가져야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. frozen JSON과 normalized 슬롯의 전체 집합도 다시 대조한다.

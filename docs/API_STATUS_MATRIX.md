@@ -79,6 +79,7 @@ production 최종 source/readback evidence: **2026-09-16 KST** (Issue #148/#156/
   - Issue #148의 v0.3.0 승격, Issue #152 notification-delivery hosted 호환, Issue #156 cleaning-template admin API와 Issue #165 선택형 duration hotfix까지 반영됐다.
   - annotated `v0.3.0` tag/GitHub Release는 아직 없으므로 `main`/production source 상태와 GitHub Release 완료를 구분한다.
 - production은 **56 migrations / `api` ACTIVE v16 / OpenAPI 0.3.0 109 paths / 117 operations**다. `standard`, `premium`, `oceanPremium`, `oceanFamily` checkout template은 각각 immutable v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes=null`이다. 게시 API와 조회는 운영에서 검증됐지만 안전한 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`로 남는다.
+- 현재 백엔드 source 후보는 #179/#180의 **58 migrations / OpenAPI 111 paths / 119 operations**다. 이 숫자는 아직 `dev`/`main`/production 정본이 아니며 exact-head QA·required CI·사람 리뷰 전에는 운영 수치로 승격하지 않는다.
 - #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
 - 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. 현재 production source 포함 여부는 이 §2의 56 migrations / 109 paths / 117 operations와 5개 Edge bundle snapshot을 우선하고, hosted provider·Google·Cron 및 positive mutation 사용 가능 여부는 별도 gate로 판정한다.
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
@@ -88,7 +89,7 @@ production 최종 source/readback evidence: **2026-09-16 KST** (Issue #148/#156/
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #131은 #69 승인 PIN 계약의 Phase A source/dev 정본이다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. private immutable revision/current pointer, physical-change mismatch lifecycle, authoritative maid access lease, 30초 이하 reveal과 safe sync/audit/outbox를 포함하며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
-- 현재 critical path는 **#179 exact-head QA·CI·사람 리뷰 → #180 `extra-proof` 0~10장 collection 완료 → 승인된 release에서 57번째 migration/API 배포와 기존 v7→A template 신규 게시 → 안전한 fixture 승인 시 reservation/planned-target hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. 현재 production v7 이력은 release 전에 덮어쓰지 않는다.
+- 현재 critical path는 **#179/#180 source 후보 exact-head QA·CI·사람 리뷰 → 승인된 release에서 57·58번째 migration/API 배포와 기존 v7→A template 신규 게시 → 안전한 fixture 승인 시 reservation/planned-target hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. 현재 production v7 이력은 release 전에 덮어쓰지 않는다.
 - 운영 migration: **56건**
 - 운영 Edge Functions readback:
   - `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 bundle 배포
@@ -1099,6 +1100,8 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 |---|---|---|---|---|---|
 | `GET /v1/attempts/{attemptId}/photo-slots` | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 | `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload` | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}/upload` | ✅ | ✅ | ✅ | ❌ | source 후보 |
+| `DELETE /v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}` | ✅ | ✅ | ✅ | ❌ | source 후보 |
 | `GET /v1/photo-uploads/{operationId}` | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 | `GET /v1/photos/{photoId}/content` | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 
@@ -1203,10 +1206,11 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [ ] 예약 success hosted smoke — `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`; 임의 운영 예약을 만들지 않음
 - [x] #179 Decision A source 후보: 57번째 append-only migration, pre-A v7+ 이력 보존, v8 A-contract 슬롯 수·key·`maxPhotos` DB/Fastify/Edge/OpenAPI parity
 - [ ] #179 exact-head 독립 QA·required CI·사람 리뷰와 `dev` 병합
-- [ ] #180 `extra-proof` 실제 0~10장 collection·개별 삭제·제출 봉인 구현
-- [ ] 승인된 release의 production 57번째 migration/API 배포, 기존 v7→A template 신규 게시, 예약 success hosted smoke
+- [x] #180 source 후보: `extra-proof` 0~10장 collection, stable item/order, append·replace·개별 삭제 CAS/멱등, 과거 제출 binding 불변, collection 폭탄방 증빙·bounded developer audit, 실제 병렬 transaction 경쟁 회귀, Node/Edge/OpenAPI parity
+- [ ] #180 exact-head 독립 QA·required CI·사람 리뷰와 `dev` 병합
+- [ ] 승인된 release의 production 57·58번째 migration/API 배포, 기존 v7→A template 신규 게시, 예약 success hosted smoke
 
-현재 critical path는 **#179 exact-head gate → #180 collection gate → 승인된 production 57번째 migration/API 배포와 A template 게시 → 안전한 fixture가 승인되면 예약 생성·동일 요청 replay·planned target/snapshot smoke → 프런트 청소관리 API 연결 → Issue #148의 남은 tag/GitHub Release**다.
+현재 critical path는 **#179/#180 exact-head gate → 승인된 release의 production 57·58번째 migration/API 배포와 A template 게시 → 안전한 fixture가 승인되면 예약 생성·동일 요청 replay·planned target/snapshot smoke → Issue #148의 남은 tag/GitHub Release**다. 프런트 개발·연결은 프런트 담당 범위이며 이 백엔드 작업에서 추적하거나 변경하지 않는다.
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

@@ -15,6 +15,9 @@ import {
   PhotoUploadContractError,
   photoUploadDatabaseError,
   type PhotoUploadOperationProjection,
+  preparePhotoCollectionDelete,
+  preparePhotoCollectionUploadBegin,
+  preparePhotoCollectionUploadKey,
   preparePhotoUploadBegin,
   preparePhotoUploadKey,
   projectPhotoUploadOperation,
@@ -36,7 +39,13 @@ export type PhotoUploadResponse = PhotoUploadOperationProjection & {
   quotaWarning: boolean;
 };
 export type PhotoRoute =
-  | { kind: "upload"; attemptId: string; slotId: string }
+  | { kind: "upload"; attemptId: string; slotId: string; photoItemId?: string }
+  | {
+    kind: "delete-item";
+    attemptId: string;
+    slotId: string;
+    photoItemId: string;
+  }
   | { kind: "slots"; attemptId: string }
   | { kind: "status"; operationId: string }
   | { kind: "content"; photoId: string };
@@ -77,6 +86,12 @@ export function photoRoute(method: string, path: string): PhotoRoute | null {
   const upload = path.match(
     /^\/v1\/attempts\/([^/]+)\/photo-slots\/([^/]+)\/upload$/,
   );
+  const collectionUpload = path.match(
+    /^\/v1\/attempts\/([^/]+)\/photo-slots\/([^/]+)\/photos\/([^/]+)\/upload$/,
+  );
+  const collectionItem = path.match(
+    /^\/v1\/attempts\/([^/]+)\/photo-slots\/([^/]+)\/photos\/([^/]+)$/,
+  );
   const slots = path.match(/^\/v1\/attempts\/([^/]+)\/photo-slots$/);
   const status = path.match(/^\/v1\/photo-uploads\/([^/]+)$/);
   const content = path.match(/^\/v1\/photos\/([^/]+)\/content$/);
@@ -85,6 +100,22 @@ export function photoRoute(method: string, path: string): PhotoRoute | null {
       kind: "upload",
       attemptId: uuid(upload[1]),
       slotId: uuid(upload[2]),
+    };
+  }
+  if (method === "POST" && collectionUpload) {
+    return {
+      kind: "upload",
+      attemptId: uuid(collectionUpload[1]),
+      slotId: uuid(collectionUpload[2]),
+      photoItemId: uuid(collectionUpload[3]),
+    };
+  }
+  if (method === "DELETE" && collectionItem) {
+    return {
+      kind: "delete-item",
+      attemptId: uuid(collectionItem[1]),
+      slotId: uuid(collectionItem[2]),
+      photoItemId: uuid(collectionItem[3]),
     };
   }
   if (method === "GET" && slots) {
@@ -208,6 +239,7 @@ export class PhotoService {
     i: PhotoIdentity,
     attemptId: string,
     slotId: string,
+    photoItemId?: string,
   ): Promise<PhotoUploadResponse> {
     this.#uploadActor(i);
     const mime = photoMime(request.headers.get("content-type"));
@@ -215,43 +247,78 @@ export class PhotoService {
       request.headers.has("content-encoding") ||
       request.headers.has("content-range")
     ) invalid();
+    const collection = photoItemId !== undefined;
+    const revisionKeys = collection
+      ? ["expectedCollectionRevision", "expectedItemRevision"]
+      : ["expectedPhotoRevision"];
     const params = query(request, [
       "assignmentId",
       "assignmentRevision",
-      "expectedPhotoRevision",
+      ...revisionKeys,
     ]);
-    for (const key of ["assignmentRevision", "expectedPhotoRevision"]) {
+    for (const key of ["assignmentRevision", ...revisionKeys]) {
       if (!/^(0|[1-9]\d{0,15})$/.test(params.get(key) ?? "")) invalid();
     }
-    const binding = {
+    const common = {
       attemptId: uuid(attemptId),
       targetSlotId: uuid(slotId),
       assignmentId: uuid(params.get("assignmentId")),
       assignmentRevision: integer(Number(params.get("assignmentRevision")), 1),
-      expectedPhotoRevision: integer(
-        Number(params.get("expectedPhotoRevision")),
-      ),
     };
+    const binding = collection
+      ? {
+        ...common,
+        photoItemId: uuid(photoItemId),
+        expectedCollectionRevision: integer(
+          Number(params.get("expectedCollectionRevision")),
+        ),
+        expectedItemRevision: integer(
+          Number(params.get("expectedItemRevision")),
+        ),
+      }
+      : {
+        ...common,
+        expectedPhotoRevision: integer(
+          Number(params.get("expectedPhotoRevision")),
+        ),
+      };
     const key = request.headers.get("idempotency-key");
-    const keyDigest = await preparePhotoUploadKey(i.profileId, key);
-    const admissionArgs = {
-      ...this.#actor(i),
-      p_attempt_id: binding.attemptId,
-      p_assignment_id: binding.assignmentId,
-      p_assignment_revision: binding.assignmentRevision,
-      p_target_slot_id: binding.targetSlotId,
-      p_expected_photo_revision: binding.expectedPhotoRevision,
-      p_idempotency_key_digest: keyDigest,
-    };
+    const keyDigest = collection
+      ? await preparePhotoCollectionUploadKey(i.profileId, key)
+      : await preparePhotoUploadKey(i.profileId, key);
+    const admissionArgs = "photoItemId" in binding
+      ? {
+        ...this.#actor(i),
+        p_attempt_id: binding.attemptId,
+        p_assignment_id: binding.assignmentId,
+        p_assignment_revision: binding.assignmentRevision,
+        p_target_slot_id: binding.targetSlotId,
+        p_photo_item_id: binding.photoItemId,
+        p_expected_collection_revision: binding.expectedCollectionRevision,
+        p_expected_item_revision: binding.expectedItemRevision,
+        p_idempotency_key_digest: keyDigest,
+      }
+      : {
+        ...this.#actor(i),
+        p_attempt_id: binding.attemptId,
+        p_assignment_id: binding.assignmentId,
+        p_assignment_revision: binding.assignmentRevision,
+        p_target_slot_id: binding.targetSlotId,
+        p_expected_photo_revision: binding.expectedPhotoRevision,
+        p_idempotency_key_digest: keyDigest,
+      };
+    const admissionRpc = collection
+      ? "admit_photo_collection_upload"
+      : "admit_photo_upload";
     let admission: unknown;
     try {
-      admission = await this.#rpc("admit_photo_upload", admissionArgs);
+      admission = await this.#rpc(admissionRpc, admissionArgs);
     } catch (error) {
       if (photoError(error).code !== "PHOTO_STORAGE_QUOTA_UNAVAILABLE") {
         throw error;
       }
       await this.#refreshQuota();
-      admission = await this.#rpc("admit_photo_upload", admissionArgs);
+      admission = await this.#rpc(admissionRpc, admissionArgs);
     }
     const quotaWarning = row(admission).quotaWarning;
     if (typeof quotaWarning !== "boolean") return failed();
@@ -265,22 +332,34 @@ export class PhotoService {
     );
     await this.initializeDecoder();
     const verified = await verifyPhotoBinary(raw, mime);
-    const prepared = await preparePhotoUploadBegin(i.profileId, {
-      ...binding,
-      sha256: verified.sha256,
-      mime: verified.mime,
-      sizeBytes: verified.sizeBytes,
-    }, key);
+    const prepared = "photoItemId" in binding
+      ? await preparePhotoCollectionUploadBegin(i.profileId, {
+        ...binding,
+        sha256: verified.sha256,
+        mime: verified.mime,
+        sizeBytes: verified.sizeBytes,
+      }, key)
+      : await preparePhotoUploadBegin(i.profileId, {
+        ...binding,
+        sha256: verified.sha256,
+        mime: verified.mime,
+        sizeBytes: verified.sizeBytes,
+      }, key);
     const begin = projectPhotoUploadOperation(
-      await this.#rpc("begin_admitted_photo_upload", {
-        ...this.#actor(i),
-        p_admission_id: uuid(row(admission).admissionId),
-        p_sha256: verified.sha256,
-        p_mime_type: verified.mime,
-        p_size_bytes: verified.sizeBytes,
-        p_idempotency_key_digest: prepared.idempotencyKeyDigest,
-        p_request_hash: prepared.requestHash,
-      }),
+      await this.#rpc(
+        collection
+          ? "begin_admitted_photo_collection_upload"
+          : "begin_admitted_photo_upload",
+        {
+          ...this.#actor(i),
+          p_admission_id: uuid(row(admission).admissionId),
+          p_sha256: verified.sha256,
+          p_mime_type: verified.mime,
+          p_size_bytes: verified.sizeBytes,
+          p_idempotency_key_digest: prepared.idempotencyKeyDigest,
+          p_request_hash: prepared.requestHash,
+        },
+      ),
     );
     if (begin.status === "accepted") return response(begin);
     const { claimDigest } = await createPhotoUploadClaim(begin.operationId);
@@ -388,6 +467,71 @@ export class PhotoService {
       throw photoError(error);
     }
   }
+  async deleteItem(
+    request: Request,
+    i: PhotoIdentity,
+    attemptId: string,
+    slotId: string,
+    photoItemId: string,
+  ): Promise<unknown> {
+    this.#uploadActor(i);
+    const params = query(request, [
+      "assignmentId",
+      "assignmentRevision",
+      "expectedCollectionRevision",
+      "expectedItemRevision",
+    ]);
+    for (
+      const key of [
+        "assignmentRevision",
+        "expectedCollectionRevision",
+        "expectedItemRevision",
+      ]
+    ) if (!/^[1-9]\d{0,15}$/.test(params.get(key) ?? "")) invalid();
+    const input = {
+      attemptId: uuid(attemptId),
+      targetSlotId: uuid(slotId),
+      photoItemId: uuid(photoItemId),
+      assignmentId: uuid(params.get("assignmentId")),
+      assignmentRevision: integer(Number(params.get("assignmentRevision")), 1),
+      expectedCollectionRevision: integer(
+        Number(params.get("expectedCollectionRevision")),
+        1,
+      ),
+      expectedItemRevision: integer(
+        Number(params.get("expectedItemRevision")),
+        1,
+      ),
+    };
+    const prepared = await preparePhotoCollectionDelete(
+      i.profileId,
+      input,
+      request.headers.get("idempotency-key"),
+    );
+    const result = row(
+      await this.#rpc("delete_photo_collection_item", {
+        ...this.#actor(i),
+        p_attempt_id: input.attemptId,
+        p_assignment_id: input.assignmentId,
+        p_assignment_revision: input.assignmentRevision,
+        p_target_slot_id: input.targetSlotId,
+        p_photo_item_id: input.photoItemId,
+        p_expected_collection_revision: input.expectedCollectionRevision,
+        p_expected_item_revision: input.expectedItemRevision,
+        p_idempotency_key_digest: prepared.idempotencyKeyDigest,
+        p_request_hash: prepared.requestHash,
+      }),
+    );
+    if (result.deleted !== true) return failed();
+    return {
+      attemptId: uuid(result.attemptId),
+      targetSlotId: uuid(result.targetSlotId),
+      photoItemId: uuid(result.photoItemId),
+      collectionRevision: integer(result.collectionRevision, 1),
+      itemRevision: integer(result.itemRevision, 1),
+      deleted: true,
+    };
+  }
   async status(
     request: Request,
     i: PhotoIdentity,
@@ -438,16 +582,61 @@ export class PhotoService {
             "expired",
           ].includes(String(r.uploadStatus))
         ) return failed();
+        const maxPhotos = r.maxPhotos === undefined
+          ? 1
+          : integer(r.maxPhotos, 1);
+        if (![1, 10].includes(maxPhotos)) return failed();
+        const legacyPhotos = r.photoId === null || r.photoId === undefined
+          ? []
+          : [{
+            photoItemId: null,
+            itemRevision: integer(r.currentRevision, 1),
+            displayOrder: 0,
+            photoId: r.photoId,
+            photoVersion: integer(r.currentRevision, 1),
+            uploadStatus: r.uploadStatus,
+          }];
+        const photos = r.photos === undefined ? legacyPhotos : r.photos;
+        if (!Array.isArray(photos) || photos.length > 10) return failed();
         return {
           slotId: uuid(r.slotId),
           slotKey: r.slotKey,
           required: r.required,
           displayOrder: integer(r.displayOrder),
+          maxPhotos,
           currentRevision: integer(r.currentRevision),
+          collectionRevision:
+            r.collectionRevision === null || r.collectionRevision === undefined
+              ? null
+              : integer(r.collectionRevision),
+          photoCount: r.photoCount === undefined
+            ? photos.length
+            : integer(r.photoCount),
           uploadStatus: r.uploadStatus,
-          photoId: i.profileStatus === "active" && r.photoId !== null
+          photoId: i.profileStatus === "active" && r.photoId !== null &&
+              r.photoId !== undefined
             ? uuid(r.photoId)
             : null,
+          photos: photos.map((value) => {
+            const photo = row(value);
+            if (
+              !["verified", "pending", "failed", "purged", "expired"].includes(
+                String(photo.uploadStatus),
+              )
+            ) return failed();
+            return {
+              photoItemId: photo.photoItemId === null
+                ? null
+                : uuid(photo.photoItemId),
+              itemRevision: integer(photo.itemRevision, 1),
+              displayOrder: integer(photo.displayOrder),
+              photoId: i.profileStatus === "active" && photo.photoId !== null
+                ? uuid(photo.photoId)
+                : null,
+              photoVersion: integer(photo.photoVersion, 1),
+              uploadStatus: photo.uploadStatus,
+            };
+          }),
         };
       }),
     };

@@ -673,6 +673,8 @@ Table private.attempt_photo_versions {
   size_bytes int [not null]
   uploaded_at timestamptz [not null]
   purge_after timestamptz [not null, note: 'Immutable uploaded_at + 168 hours; resubmission does not reset.']
+  collection_item_id uuid
+  item_revision bigint
   Indexes {
     (id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version) [unique]
     (cleaning_attempt_id, target_photo_slot_id, version) [unique]
@@ -722,6 +724,65 @@ Table private.attempt_photo_changes {
   }
 }
 
+Table private.attempt_photo_collection_states {
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  revision bigint [not null]
+  Indexes { (cleaning_attempt_id, target_photo_slot_id) [pk] }
+  Note: '#180 v8 checkout extra-proof only. Collection-wide CAS revision advances once per append, replace, or delete.'
+}
+
+Table private.attempt_photo_collection_items {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  display_order int [not null, note: '0..9; stable for item lifetime']
+  revision bigint [not null]
+  active boolean [not null]
+  photo_version_id uuid
+  photo_version bigint
+  Indexes {
+    (id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id) [unique]
+    (cleaning_attempt_id, target_photo_slot_id, display_order) [unique, note: 'active rows only']
+    photo_version_id
+  }
+  Note: '#180 stable client item UUID. Replace preserves identity/order; delete leaves an inactive tombstone and the UUID cannot be reused.'
+}
+
+Table private.attempt_photo_collection_changes {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  collection_revision bigint [not null]
+  photo_item_id uuid [not null]
+  item_revision bigint [not null]
+  display_order int [not null]
+  change_type text [not null, note: 'appended / replaced / deleted']
+  photo_version_id uuid
+  photo_version bigint
+  occurred_at timestamptz [not null]
+  Indexes {
+    (cleaning_attempt_id, target_photo_slot_id, collection_revision) [unique]
+    (photo_item_id, item_revision) [unique]
+  }
+  Note: '#180 immutable collection history; delete carries no current photo pointer.'
+}
+
+Table private.photo_collection_commands {
+  actor_profile_id uuid [not null]
+  command_type text [not null, note: 'photo.collection.delete']
+  idempotency_key_digest text [not null]
+  request_hash text [not null]
+  photo_item_id uuid [not null]
+  response_payload jsonb [not null]
+  completed_at timestamptz [not null]
+  Indexes { (actor_profile_id, command_type, idempotency_key_digest) [pk] }
+  Note: '#180 immutable delete replay receipt. Raw idempotency key is never stored.'
+}
+
 Table private.submission_photo_bindings {
   submission_id uuid [not null]
   cleaning_attempt_id uuid [not null]
@@ -729,14 +790,17 @@ Table private.submission_photo_bindings {
   target_photo_slot_id uuid [not null]
   photo_version_id uuid [not null]
   photo_version bigint [not null]
+  collection_item_id uuid
+  item_revision bigint
+  item_display_order int
   Indexes {
-    (submission_id, target_photo_slot_id) [pk]
+    (submission_id, target_photo_slot_id, photo_version_id) [pk]
     (photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version)
     cleaning_attempt_id
     cleaning_target_id
     target_photo_slot_id
   }
-  Note: 'Immutable membership references canonical cleaning_submissions and exact attempt/target/slot/photo version; no provider object or raw payload copy.'
+  Note: 'Immutable membership references canonical cleaning_submissions and exact attempt/target/slot/photo version. #180 collection rows also seal item identity/revision/order; no provider object or raw payload copy.'
 }
 
 Table private.submission_photo_binding_sets {
@@ -1846,6 +1910,8 @@ Table private.photo_upload_admissions {
   assignment_revision bigint [not null]
   target_photo_slot_id uuid [not null]
   expected_photo_revision bigint [not null]
+  collection_item_id uuid
+  expected_item_revision bigint
   idempotency_key_digest text [not null]
   reserved_bytes integer [not null, note: 'Exactly307200; before decoding']
   created_at timestamptz [not null]
@@ -1905,7 +1971,7 @@ Ref: private.photo_drive_identities.(object_id,operation_id) - private.photo_pro
 Table private.photo_upload_operations {
   id uuid [pk]
   actor_profile_id uuid [not null, ref: > public.profiles.id]
-  command_type text [not null, note: 'photo.upload only']
+  command_type text [not null, note: 'photo.upload / photo.collection.upload']
   idempotency_key_digest text [not null, note: '64 lower hex; never raw key']
   request_hash text [not null]
   cleaning_attempt_id uuid [not null]
@@ -1914,6 +1980,8 @@ Table private.photo_upload_operations {
   assignment_revision bigint [not null]
   target_photo_slot_id uuid [not null]
   expected_photo_revision bigint [not null]
+  collection_item_id uuid
+  expected_item_revision bigint
   sha256 text [not null]
   mime_type text [not null]
   size_bytes integer [not null]

@@ -281,7 +281,21 @@ export async function handleApiRequest(
         profileStatus: identity.profileStatus,
       };
       const result = photo.kind === "upload"
-        ? await service.upload(request, context, photo.attemptId, photo.slotId)
+        ? await service.upload(
+          request,
+          context,
+          photo.attemptId,
+          photo.slotId,
+          photo.photoItemId,
+        )
+        : photo.kind === "delete-item"
+        ? await service.deleteItem(
+          request,
+          context,
+          photo.attemptId,
+          photo.slotId,
+          photo.photoItemId,
+        )
         : photo.kind === "slots"
         ? await service.slots(request, context, photo.attemptId)
         : await service.status(request, context, photo.operationId);

@@ -677,6 +677,122 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}/upload":
+      {
+        post: {
+          ...photoOperation(
+            "uploadAttemptPhotoCollectionItem",
+            "extra-proof 사진 추가 또는 교체",
+            "PhotoUploadResponse",
+          ),
+          description:
+            "v8+ extra-proof 전용 raw binary 업로드입니다. 새 UUID와 expectedItemRevision=0은 append, 기존 UUID와 최신 item revision은 replace입니다. expectedCollectionRevision도 함께 일치해야 하며 active item 10장 상태에서 append는 PHOTO_COLLECTION_LIMIT_EXCEEDED로 실패합니다. 일반 슬롯과 pre-A snapshot에는 사용할 수 없습니다.",
+          parameters: [
+            photoPathId("attemptId"),
+            photoPathId("slotId"),
+            photoPathId("photoItemId"),
+            idempotencyHeader,
+            {
+              name: "assignmentId",
+              in: "query",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+            {
+              name: "assignmentRevision",
+              in: "query",
+              required: true,
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: Number.MAX_SAFE_INTEGER - 1,
+              },
+            },
+            {
+              name: "expectedCollectionRevision",
+              in: "query",
+              required: true,
+              schema: {
+                type: "integer",
+                minimum: 0,
+                maximum: Number.MAX_SAFE_INTEGER - 1,
+              },
+            },
+            {
+              name: "expectedItemRevision",
+              in: "query",
+              required: true,
+              schema: {
+                type: "integer",
+                minimum: 0,
+                maximum: Number.MAX_SAFE_INTEGER - 1,
+              },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "image/jpeg": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                  maxLength: 307200,
+                  "x-max-bytes": 307200,
+                },
+              },
+              "image/webp": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                  maxLength: 307200,
+                  "x-max-bytes": 307200,
+                },
+              },
+            },
+          },
+        },
+      },
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}": {
+      delete: {
+        ...photoOperation(
+          "deleteAttemptPhotoCollectionItem",
+          "extra-proof 사진 개별 삭제",
+          "PhotoCollectionDeleteResponse",
+        ),
+        description:
+          "v8+ extra-proof current collection의 한 item만 tombstone 처리합니다. collection/item CAS와 Idempotency-Key가 필수이며 형제 item 및 이미 봉인된 제출 binding은 변경하지 않습니다.",
+        parameters: [
+          photoPathId("attemptId"),
+          photoPathId("slotId"),
+          photoPathId("photoItemId"),
+          idempotencyHeader,
+          {
+            name: "assignmentId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "assignmentRevision",
+            in: "query",
+            required: true,
+            schema: { type: "integer", minimum: 1 },
+          },
+          {
+            name: "expectedCollectionRevision",
+            in: "query",
+            required: true,
+            schema: { type: "integer", minimum: 1 },
+          },
+          {
+            name: "expectedItemRevision",
+            in: "query",
+            required: true,
+            schema: { type: "integer", minimum: 1 },
+          },
+        ],
+      },
+    },
     "/v1/photo-uploads/{operationId}": {
       get: {
         ...photoOperation(
@@ -1159,7 +1275,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 66,
+              maxItems: 67,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -4132,6 +4248,13 @@ export const openApiDocument = {
               "관리자 검수 상세에만 포함되는 immutable 제출 증빙 목록입니다. photoId는 기존 사진 content API 조회에 사용하며 provider locator/hash는 노출하지 않습니다.",
             items: { $ref: "#/components/schemas/SubmissionPhotoBinding" },
           },
+          photoSlots: {
+            type: "array",
+            maxItems: 100,
+            description:
+              "관리자 검수 상세의 슬롯별 immutable 사진 배열. 같은 슬롯에서는 사진 displayOrder를 보존합니다.",
+            items: { $ref: "#/components/schemas/SubmissionPhotoSlot" },
+          },
           reviewContext: {
             $ref: "#/components/schemas/SubmissionReviewContext",
           },
@@ -4151,12 +4274,69 @@ export const openApiDocument = {
         ],
         properties: {
           photoId: { type: "string", format: "uuid" },
+          photoItemId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          itemRevision: {
+            anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+          },
+          photoDisplayOrder: {
+            anyOf: [{ type: "integer", minimum: 0, maximum: 9 }, {
+              type: "null",
+            }],
+          },
           targetPhotoSlotId: { type: "string", format: "uuid" },
           slotKey: { type: "string" },
           label: { type: "string" },
           displayOrder: { type: "integer", minimum: 0, maximum: 99 },
           required: { type: "boolean" },
           photoVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      SubmissionPhotoSlot: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "targetPhotoSlotId",
+          "slotKey",
+          "label",
+          "displayOrder",
+          "required",
+          "photos",
+        ],
+        properties: {
+          targetPhotoSlotId: { type: "string", format: "uuid" },
+          slotKey: { type: "string" },
+          label: { type: "string" },
+          displayOrder: { type: "integer", minimum: 0, maximum: 99 },
+          required: { type: "boolean" },
+          photos: {
+            type: "array",
+            minItems: 1,
+            maxItems: 10,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "photoId",
+                "photoItemId",
+                "itemRevision",
+                "displayOrder",
+                "photoVersion",
+              ],
+              properties: {
+                photoId: { type: "string", format: "uuid" },
+                photoItemId: {
+                  anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+                },
+                itemRevision: {
+                  anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+                },
+                displayOrder: { type: "integer", minimum: 0, maximum: 9 },
+                photoVersion: { type: "integer", minimum: 1 },
+              },
+            },
+          },
         },
       },
       SubmissionReviewContext: {
@@ -4296,16 +4476,25 @@ export const openApiDocument = {
                 "slotKey",
                 "required",
                 "displayOrder",
+                "maxPhotos",
                 "currentRevision",
+                "collectionRevision",
+                "photoCount",
                 "uploadStatus",
                 "photoId",
+                "photos",
               ],
               properties: {
                 slotId: { type: "string", format: "uuid" },
                 slotKey: { type: "string", pattern: "^[a-z][a-z0-9-]{0,79}$" },
                 required: { type: "boolean" },
                 displayOrder: { type: "integer", minimum: 0, maximum: 99 },
+                maxPhotos: { type: "integer", enum: [1, 10] },
                 currentRevision: { type: "integer", minimum: 0 },
+                collectionRevision: {
+                  anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
+                },
+                photoCount: { type: "integer", minimum: 0, maximum: 10 },
                 uploadStatus: {
                   type: "string",
                   enum: [
@@ -4323,6 +4512,11 @@ export const openApiDocument = {
                   description:
                     "원본 읽기 권한이 있는 active 현재 회차+accepted+미만료 사진만 ID를 반환합니다. 업로드 전용 권한에는 null.",
                 },
+                photos: {
+                  type: "array",
+                  maxItems: 10,
+                  items: { $ref: "#/components/schemas/AttemptPhotoItem" },
+                },
               },
             },
           },
@@ -4336,6 +4530,53 @@ export const openApiDocument = {
         description:
           "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
       },
+      AttemptPhotoItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "photoItemId",
+          "itemRevision",
+          "displayOrder",
+          "photoId",
+          "photoVersion",
+          "uploadStatus",
+        ],
+        properties: {
+          photoItemId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          itemRevision: { type: "integer", minimum: 1 },
+          displayOrder: { type: "integer", minimum: 0, maximum: 9 },
+          photoId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          photoVersion: { type: "integer", minimum: 1 },
+          uploadStatus: {
+            type: "string",
+            enum: ["verified", "pending", "failed", "purged", "expired"],
+          },
+        },
+      },
+      PhotoCollectionDeleteResponse: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "attemptId",
+          "targetSlotId",
+          "photoItemId",
+          "collectionRevision",
+          "itemRevision",
+          "deleted",
+        ],
+        properties: {
+          attemptId: { type: "string", format: "uuid" },
+          targetSlotId: { type: "string", format: "uuid" },
+          photoItemId: { type: "string", format: "uuid" },
+          collectionRevision: { type: "integer", minimum: 1 },
+          itemRevision: { type: "integer", minimum: 2 },
+          deleted: { const: true },
+        },
+      },
       PhotoUploadOperation: {
         type: "object",
         additionalProperties: false,
@@ -4344,11 +4585,14 @@ export const openApiDocument = {
           "objectId",
           "attemptId",
           "targetSlotId",
+          "photoItemId",
           "status",
           "leaseVersion",
           "leaseExpiresAt",
           "photoId",
           "photoVersion",
+          "collectionRevision",
+          "itemRevision",
           "uploadedAt",
           "purgeAfter",
           "compensationAllowed",
@@ -4362,6 +4606,9 @@ export const openApiDocument = {
           },
           attemptId: { type: "string", format: "uuid" },
           targetSlotId: { type: "string", format: "uuid" },
+          photoItemId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
           status: {
             type: "string",
             enum: [
@@ -4382,6 +4629,12 @@ export const openApiDocument = {
           },
           photoVersion: {
             anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+          },
+          collectionRevision: {
+            anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
+          },
+          itemRevision: {
+            anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
           },
           uploadedAt: {
             anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
@@ -5417,6 +5670,7 @@ export const openApiDocument = {
           "cleaning.scheduled_expired",
           "cleaning.offline_event_resolved",
           "photo.upload_accepted",
+          "photo.collection_item_deleted",
           "reservation.created",
           "reservation.changed",
           "reservation.cancelled",
@@ -6108,7 +6362,10 @@ export const openApiDocument = {
               nextAttemptId: { type: "string", format: "uuid" },
               targetSlotId: { type: "string", format: "uuid" },
               photoId: { type: "string", format: "uuid" },
+              photoItemId: { type: "string", format: "uuid" },
               photoVersion: { type: "integer", minimum: 1 },
+              collectionRevision: { type: "integer", minimum: 1 },
+              itemRevision: { type: "integer", minimum: 1 },
               uploadedAt: { type: "string", format: "date-time" },
               purgeAfter: { type: "string", format: "date-time" },
               offlineQuarantineId: {
