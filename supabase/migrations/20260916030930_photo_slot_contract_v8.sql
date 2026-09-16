@@ -90,7 +90,14 @@ revoke all on function private.normalized_checkout_template_slots(jsonb)
 
 create or replace function private.photo_snapshot_valid(p_snapshot jsonb)
 returns boolean language plpgsql immutable set search_path='' as $$
-declare s jsonb; n integer; expected integer; version_number integer;
+declare
+  s jsonb;
+  n integer;
+  expected integer;
+  version_number integer;
+  has_any_max_photos boolean;
+  has_all_max_photos boolean;
+  uses_a_contract boolean;
 begin
   if jsonb_typeof(p_snapshot) is distinct from 'object'
     or jsonb_typeof(p_snapshot->'templateVersionId') is distinct from 'string'
@@ -106,6 +113,15 @@ begin
   version_number:=(p_snapshot->>'version')::integer;
   n:=jsonb_array_length(p_snapshot->'slots');
   if n<1 or n>100 then return false; end if;
+  select bool_or(value ? 'maxPhotos'), bool_and(value ? 'maxPhotos')
+  into has_any_max_photos, has_all_max_photos
+  from jsonb_array_elements(p_snapshot->'slots');
+  if p_snapshot->>'cleaningKind'='checkout' and version_number>=7 and (
+    has_any_max_photos is distinct from has_all_max_photos
+    or (version_number<8 and has_any_max_photos)
+  ) then return false; end if;
+  uses_a_contract:=p_snapshot->>'cleaningKind'='checkout'
+    and version_number>=8 and has_all_max_photos;
   for s in select value from jsonb_array_elements(p_snapshot->'slots') loop
     if jsonb_typeof(s) is distinct from 'object'
       or not(s ?& array['slotKey','required','displayOrder'])
@@ -114,20 +130,25 @@ begin
       or jsonb_typeof(s->'required') is distinct from 'boolean'
       or jsonb_typeof(s->'displayOrder') is distinct from 'number'
       or (s->>'displayOrder') !~ '^(0|[1-9][0-9]*)$'
-      or (s->>'displayOrder')::integer>99 then return false; end if;
+      or (s->>'displayOrder')::integer>99
+      or (s ? 'maxPhotos' and (
+        jsonb_typeof(s->'maxPhotos') is distinct from 'number'
+        or (s->>'maxPhotos') !~ '^[1-9][0-9]*$'
+        or (s->>'maxPhotos')::integer>10
+      )) then return false; end if;
   end loop;
   if (select count(distinct value->>'slotKey') from jsonb_array_elements(p_snapshot->'slots'))<>n
     or (select count(distinct (value->>'displayOrder')::integer) from jsonb_array_elements(p_snapshot->'slots'))<>n then return false; end if;
   if not exists(select 1 from jsonb_array_elements(p_snapshot->'slots') where (value->>'required')::boolean) then return false; end if;
   if p_snapshot->>'cleaningKind'='checkout' and version_number>=7 then
     expected:=case p_snapshot->>'roomTypeCode'
-      when 'standard' then case when version_number=7 then 10 else 9 end
-      when 'premium' then case when version_number=7 then 11 else 10 end
-      when 'oceanPremium' then case when version_number=7 then 13 else 12 end
-      else case when version_number=7 then 15 else 14 end end;
+      when 'standard' then case when uses_a_contract then 9 else 10 end
+      when 'premium' then case when uses_a_contract then 10 else 11 end
+      when 'oceanPremium' then case when uses_a_contract then 12 else 13 end
+      else case when uses_a_contract then 14 else 15 end end;
     if n<>expected or (select count(*) from jsonb_array_elements(p_snapshot->'slots') where (value->>'required')::boolean)<>expected-1 then return false; end if;
     if (select count(*) from jsonb_array_elements(p_snapshot->'slots') where value->>'slotKey'='tv-on' and (value->>'required')::boolean)<>1 then return false; end if;
-    if version_number>=8 and (
+    if uses_a_contract and (
       exists(select 1 from jsonb_array_elements(p_snapshot->'slots') where value->>'slotKey'='entry-number')
       or (select count(*) from jsonb_array_elements(p_snapshot->'slots') where value->>'slotKey'='entry-storage' and (value->>'required')::boolean)<>1
       or (select count(*) from jsonb_array_elements(p_snapshot->'slots') where value->>'slotKey'='extra-proof' and not (value->>'required')::boolean and (value->>'displayOrder')::integer=expected-1 and jsonb_typeof(value->'maxPhotos')='number' and value->>'maxPhotos'='10')<>1
@@ -261,4 +282,4 @@ grant execute on function public.publish_checkout_cleaning_template(
 
 comment on function public.publish_checkout_cleaning_template(
   uuid, uuid, text, integer, integer, jsonb, text, text
-) is '#179 scoped CAS/idempotent immutable checkout photo-template publication. New publications start at v8 and use 9/10/12/14 slots; v7 history remains valid and untouched.';
+) is '#179 scoped CAS/idempotent immutable checkout photo-template publication. New A-contract publications start at v8 and use 9/10/12/14 slots; pre-A v7+ history without maxPhotos remains valid and untouched.';

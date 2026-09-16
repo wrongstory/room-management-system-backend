@@ -32,6 +32,8 @@ select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,10)),'v7 standard requ
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,11,true,'premium')),'v7 premium requires 11 slots');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,13,true,'oceanPremium')),'v7 ocean premium requires 13 slots');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,15,true,'oceanFamily')),'v7 ocean family requires 15 slots');
+select ok(private.photo_snapshot_valid(pg_temp.snapshot(8,10)),'pre-A v8 standard snapshot remains a valid legacy contract');
+select ok(private.photo_snapshot_valid(pg_temp.snapshot(12,10)),'pre-A higher-version standard snapshot remains a valid legacy contract');
 select ok(not private.photo_snapshot_valid(pg_temp.snapshot(7,9)),'v7 wrong count fails closed');
 select ok(not private.photo_snapshot_valid(pg_temp.snapshot(7,10,false)),'v7 missing required tv-on fails closed');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(6,9,false)),'v6 explicit historical slots are not retrofitted with tv-on or v7 count');

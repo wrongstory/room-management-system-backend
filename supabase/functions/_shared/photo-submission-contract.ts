@@ -148,16 +148,26 @@ export function validatePhotoTemplateSnapshot(
       .roomTypeCode as PhotoTemplateValidationSnapshot["roomTypeCode"],
     cleaningKind = row
       .cleaningKind as PhotoTemplateValidationSnapshot["cleaningKind"];
+  const metadataCount =
+    row.slots.filter((value) =>
+      value !== null && typeof value === "object" && !Array.isArray(value) &&
+      Object.hasOwn(value, "maxPhotos")
+    ).length;
+  if (
+    (metadataCount !== 0 && metadataCount !== row.slots.length) ||
+    (version < 8 && metadataCount > 0)
+  ) fail();
+  const usesAContract = version >= 8 && metadataCount === row.slots.length;
   const seenKeys = new Set<string>(), seenOrders = new Set<number>();
   const slots = row.slots.map((value) => {
     const slot = record(
       value,
-      version >= 8
+      usesAContract
         ? ["slotKey", "required", "displayOrder", "maxPhotos"]
         : ["slotKey", "required", "displayOrder"],
     );
     const key = slotKey(slot.slotKey), order = integer(slot.displayOrder, 0);
-    const maxPhotos = version >= 8 ? integer(slot.maxPhotos) : undefined;
+    const maxPhotos = usesAContract ? integer(slot.maxPhotos) : undefined;
     if (
       typeof slot.required !== "boolean" || order > 99 || seenKeys.has(key) ||
       seenOrders.has(order) || (maxPhotos !== undefined && maxPhotos > 10)
@@ -173,15 +183,15 @@ export function validatePhotoTemplateSnapshot(
   }).sort((a, b) => a.displayOrder - b.displayOrder);
   if (!slots.some((slot) => slot.required)) fail();
   if (cleaningKind === "checkout" && version >= 7) {
-    const expectedCount = version === 7
-      ? CHECKOUT_V7_COUNTS[roomTypeCode]
-      : CHECKOUT_V8_COUNTS[roomTypeCode];
+    const expectedCount = usesAContract
+      ? CHECKOUT_V8_COUNTS[roomTypeCode]
+      : CHECKOUT_V7_COUNTS[roomTypeCode];
     if (
       slots.length !== expectedCount ||
       slots.filter((slot) => slot.required).length !== slots.length - 1
     ) fail();
     if (
-      version >= 8 && (
+      usesAContract && (
         slots.some((slot) => slot.slotKey === "entry-number") ||
         slots.filter((slot) =>
             slot.slotKey === "entry-storage" && slot.required
@@ -238,7 +248,7 @@ export function projectPhotoTemplateForValidation(
         slotKey: slot.slotKey,
         required: slot.required,
         displayOrder: slot.displayOrder,
-        ...(typeof row.version === "number" && row.version >= 8
+        ...(Object.hasOwn(slot, "maxPhotos")
           ? { maxPhotos: slot.maxPhotos }
           : {}),
       };

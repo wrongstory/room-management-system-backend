@@ -68,6 +68,11 @@ describe('platform-neutral photo contract under Node', () => {
       expect(() => validatePhotoTemplateSnapshot(badOptional)).toThrow(PhotoSubmissionContractError);
     }
   );
+  it.each([8, 12])('preserves historical pre-A v%s snapshots without maxPhotos', (version) => {
+    const legacy = template(version, 10);
+    expect(validatePhotoTemplateSnapshot(legacy).slots).toHaveLength(10);
+    expect(projectPhotoTemplateForValidation(legacy).slots).toHaveLength(10);
+  });
   it('preserves original legacy snapshot and rejects unconfigured required slots', () => {
     const legacy = template(6, 9), before = JSON.stringify(legacy);
     expect(validatePhotoTemplateSnapshot(legacy).slots).toHaveLength(9);

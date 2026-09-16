@@ -120,7 +120,10 @@ describe('initial migration contract', () => {
     const sql = await readFile(photoSlotContractV8MigrationUrl, 'utf8');
 
     expect(sql).toContain('create or replace function private.photo_snapshot_valid');
-    expect(sql).toContain('when version_number=7 then 10 else 9');
+    expect(sql).toContain('when uses_a_contract then 9 else 10');
+    expect(sql).toContain("bool_and(value ? 'maxPhotos')");
+    expect(sql).toContain("if p_snapshot->>'cleaningKind'='checkout' and version_number>=7 and (");
+    expect(sql).toContain("uses_a_contract:=p_snapshot->>'cleaningKind'='checkout'");
     expect(sql).toContain("value->>'slotKey'='entry-number'");
     expect(sql).toContain("value->>'slotKey'='entry-storage'");
     expect(sql).toContain("value->>'slotKey'='extra-proof'");

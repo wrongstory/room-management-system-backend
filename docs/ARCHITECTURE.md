@@ -720,8 +720,9 @@ production에는 아직 승격되지 않았습니다.
 admin의 live session만 네 room type의 current checkout template을 조회하고, 한 타입씩 expected-version CAS로
 새 immutable version을 게시합니다. actor/command/key/request-hash receipt와 room-type advisory lock이 replay와
 경쟁을 직렬화하며, 이전 published row는 retired 이력으로 남고 published partial unique가 exactly-one을 보장합니다.
-Decision #179 이후 새 version은 기존 max 다음 값과 8 중 큰 값입니다. v7의 10/11/13/15개 이력은 계속
-검증하고, v8+는 9/10/12/14개와 필수 8/9/11/13개, required `tv-on`·`entry-storage`, 마지막 optional
+Decision #179 이후 새 version은 기존 max 다음 값과 8 중 큰 값입니다. 기존 publisher가 만든 `maxPhotos` 없는
+pre-A v7+의 10/11/13/15개 이력은 계속 검증하고, 모든 slot에 `maxPhotos`가 있는 v8+ A-contract는
+9/10/12/14개와 필수 8/9/11/13개, required `tv-on`·`entry-storage`, 마지막 optional
 `extra-proof(maxPhotos=10)`, `entry-number` 금지를 우회하지 않습니다. checkout duration은 선택값이며 제공할
 때만 1..10,080분으로 제한합니다.
 실제 수행시간은 attempt의 `started_at → field_completed_at`, turnaround는 실제 checkout → field completion에서
@@ -732,7 +733,7 @@ audit에는 slot label/description이나 raw state/hash를 복제하지 않습�
 notification/outbox를 만들지 않으며, production seed와 stayover/additional/reclean 계약은 이 candidate 범위 밖입니다.
 
 `20260916030930_photo_slot_contract_v8.sql`은 이 전환을 append-only로 적용한다. validator가 v7과 v8+를
-version으로 분기하므로 과거 target/attempt/submission/inspection snapshot은 재해석하지 않는다. Fastify·Edge·
+version과 완전한 `maxPhotos` metadata로 분기하므로 과거 target/attempt/submission/inspection snapshot은 재해석하지 않는다. Fastify·Edge·
 OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. 운영 DB 적용과 template 재게시는 포함하지 않으며,
 `extra-proof`의 실제 0~10장 current collection·사진별 삭제·제출 봉인은 #180 완료 전 release gate다.
 

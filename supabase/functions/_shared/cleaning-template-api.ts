@@ -119,14 +119,25 @@ function normalizeSlots(
   roomTypeCode: RoomTypeCode,
   version = 8,
 ) {
-  const expectedCount = version === 7
-    ? legacyV7SlotCounts[roomTypeCode]
-    : currentSlotCounts[roomTypeCode];
-  if (
-    !Array.isArray(value) || value.length !== expectedCount
-  ) {
+  if (!Array.isArray(value)) {
     invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   }
+  const metadataCount =
+    value.filter((raw) =>
+      raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
+      Object.hasOwn(raw, "maxPhotos")
+    ).length;
+  if (metadataCount !== 0 && metadataCount !== value.length) {
+    invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
+  }
+  const usesAContract = version >= 8 && metadataCount === value.length;
+  if (
+    (version < 8 && metadataCount > 0) || value.length !== (
+        usesAContract
+          ? currentSlotCounts[roomTypeCode]
+          : legacyV7SlotCounts[roomTypeCode]
+      )
+  ) invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   const keys = new Set<string>();
   const orders = new Set<number>();
   const slots = value.map((raw) => {
@@ -141,7 +152,7 @@ function normalizeSlots(
         "displayOrder",
         "required",
         "label",
-        ...(version >= 8 ? ["maxPhotos"] : []),
+        ...(usesAContract ? ["maxPhotos"] : []),
       ].every((key) => Object.hasOwn(row, key)) ||
       typeof row.slotKey !== "string" ||
       !/^[a-z][a-z0-9-]{0,79}$/.test(row.slotKey) ||
@@ -195,7 +206,7 @@ function normalizeSlots(
     invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   }
   if (
-    version >= 8 && (
+    usesAContract && (
       slots.some((slot) => slot.slotKey === "entry-number") ||
       slots.filter((slot) => slot.slotKey === "entry-storage" && slot.required)
           .length !== 1 ||

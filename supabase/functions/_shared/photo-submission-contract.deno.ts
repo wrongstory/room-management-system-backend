@@ -192,6 +192,18 @@ export function registerPhotoContractTests(
     },
   );
   register(
+    "pre-A v8 and higher snapshots remain legacy without maxPhotos metadata",
+    () => {
+      for (const version of [8, 12]) {
+        const historical = template("standard", 10, version);
+        assert(validatePhotoTemplateSnapshot(historical).slots.length === 10);
+        assert(
+          projectPhotoTemplateForValidation(historical).slots.length === 10,
+        );
+      }
+    },
+  );
+  register(
     "templates reject absent empty malformed duplicate and unconfirmed inputs",
     () => {
       for (

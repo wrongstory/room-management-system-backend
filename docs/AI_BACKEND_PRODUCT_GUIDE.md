@@ -117,7 +117,7 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 | `oceanFamily` | 파셜 오션뷰 패밀리 투룸 로프트 | 35 | 30,000원 | v8+: 14개(필수 13 + 선택 1) |
 
 객실별 타입·구역의 전체 매핑은 migration seed가 현재 정본과 일치한다. 사람이 읽는 표시명은 바뀔 수 있으므로 code와 이력을 기준으로 연결한다.
-사진 슬롯 표는 2026-09-16 Decision #179의 A안을 반영한다. 기존 v7 template/snapshot의 10/11/13/15개 계약은 이력으로 계속 유효하며 backfill하지 않는다.
+사진 슬롯 표는 2026-09-16 Decision #179의 A안을 반영한다. 기존 publisher가 만든 `maxPhotos` 없는 pre-A template/snapshot은 version이 v7보다 높아도 10/11/13/15개 계약으로 계속 유효하며 backfill하지 않는다.
 
 ### `[확정]` 기본 운영 시각
 
@@ -341,7 +341,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 템플릿 slot은 JSON 문구만 저장하지 말고 stable slot key와 version을 가진 row로 관리한다.
 - template evidence 사진은 유효한 slot snapshot을 반드시 참조한다. NULL slot key로 유일 제약을 우회할 수 없어야 한다.
 - 일반 slot의 current 사진은 한 장이다. 재촬영은 current pointer를 CAS로 교체하며, 이전 업로드/교체 이력은 보존 정책에 따라 추적한다.
-- 퇴실 청소 template v7에는 타입별 10/11/13/15개와 필수 `tv-on`을 유지한다. v8 이상은 9/10/12/14개, 필수 8/9/11/13개이며 required `tv-on`·`entry-storage`를 각각 하나 유지하고 `entry-number`는 제외한다. 마지막 `extra-proof`는 선택 slot, `maxPhotos=10`이다.
+- `maxPhotos` 없는 pre-A 퇴실 청소 snapshot은 v7 및 그보다 높은 historical version도 타입별 10/11/13/15개와 필수 `tv-on`을 유지한다. Decision A snapshot은 v8 이상이면서 모든 slot에 `maxPhotos`가 있고, 9/10/12/14개·필수 8/9/11/13개·required `tv-on`·`entry-storage`를 강제하며 `entry-number`를 제외한다. 마지막 `extra-proof`는 선택 slot, `maxPhotos=10`이다.
 - **[현재 구현 경계]** v8 template metadata와 validator는 위 계약을 보존하지만 `extra-proof`의 실제 0~10장 append/개별 삭제/제출 봉인은 #180 완료 전까지 제공하지 않는다. 따라서 release·운영 template 재게시는 #180과 함께 검증한다.
 - 앱은 JPEG/WebP를 EXIF 제거 후 사진당 최대 300KiB(307,200 bytes)로 압축한다. 서버도 본문 크기와 허용 형식을 독립적으로 강제한다.
 - 서버는 파일 확장자나 client MIME만 믿지 않고 magic bytes, 허용 MIME, 크기, hash, 현재 담당/attempt/version을 검증한다.

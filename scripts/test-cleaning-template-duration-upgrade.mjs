@@ -67,30 +67,30 @@ try {
     psql(`select concat_ws('|',
       exists(select 1 from supabase_migrations.schema_migrations where version='${migrationVersion}'),
       exists(select 1 from supabase_migrations.schema_migrations where version='${currentMigrationVersion}'),
-      (select duration_minutes from public.cleaning_template_versions
+      (select concat_ws(':',version,duration_minutes) from public.cleaning_template_versions
        where room_type_id=(select id from public.room_types where code='standard')
          and cleaning_kind='checkout' and status='published'),
       (select count(*) from public.cleaning_targets where reservation_id='${reservationId}'),
       (select is_nullable from information_schema.columns
        where table_schema='public' and table_name='cleaning_template_versions'
-         and column_name='duration_minutes'))`) === "t|t|60|1|YES",
+         and column_name='duration_minutes'))`) === "t|t|8:60|1|YES",
     "upgrade must retain configured duration and enable the checkout nullable plus v8 slot contracts",
   );
 
   const historicalReplay = JSON.parse(psql(`select public.publish_checkout_cleaning_template(
-    '${adminId}','${sessionId}','standard',0,60,
+    '${adminId}','${sessionId}','standard',7,60,
     (select jsonb_agg(jsonb_build_object(
       'slotKey',case when display_order=0 then 'tv-on' else 'slot-'||display_order end,
       'displayOrder',display_order,
       'required',display_order<9,
       'label','사진 '||(display_order+1)
     ) order by display_order) from generate_series(0,9) display_order),
-    'duration-upgrade-publish',repeat('a',64))`));
-  assert(historicalReplay.version === 7 && historicalReplay.durationMinutes === 60,
-    "upgrade must replay the exact completed v7 publication without revalidation as v8");
+    'duration-upgrade-publish-v8',repeat('d',64))`));
+  assert(historicalReplay.version === 8 && historicalReplay.durationMinutes === 60,
+    "upgrade must replay the exact completed pre-A v8 publication without A-contract revalidation");
 
   const publication = JSON.parse(psql(`select public.publish_checkout_cleaning_template(
-    '${adminId}','${sessionId}','standard',7,null,
+    '${adminId}','${sessionId}','standard',8,null,
     (select jsonb_agg(jsonb_build_object(
       'slotKey',case when display_order=0 then 'tv-on' when display_order=1 then 'entry-storage'
         when display_order=8 then 'extra-proof' else 'slot-'||display_order end,
@@ -100,8 +100,8 @@ try {
       'maxPhotos',case when display_order=8 then 10 else 1 end
     ) order by display_order) from generate_series(0,8) display_order),
     'duration-upgrade-null',repeat('c',64))`));
-  assert(publication.durationMinutes === null && publication.version === 8,
-    "upgraded RPC must transition historical v7 to an explicit null-duration v8");
+  assert(publication.durationMinutes === null && publication.version === 9,
+    "upgraded RPC must transition historical pre-A v8 to an explicit null-duration A-contract v9");
 
   passed = true;
   process.stdout.write("cleaning-template duration 55 -> current ledger preservation: PASS\n");

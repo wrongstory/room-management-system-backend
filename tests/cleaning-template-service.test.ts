@@ -69,16 +69,16 @@ describe('SupabaseCleaningTemplateService', () => {
     }]);
   });
 
-  it('keeps historical v7 catalog projections readable without inventing v8 metadata', async () => {
+  it.each([7, 8, 12])('keeps historical v%s catalog projections readable without A metadata', async (version) => {
     const data = catalog();
     const room = data.roomTypes[0];
     if (!room) throw new Error('catalog fixture is empty');
     const currentPublished = {
-      id: '30000000-0000-4000-8000-000000000007', version: 7, status: 'published' as const,
+      id: '30000000-0000-4000-8000-000000000007', version, status: 'published' as const,
       durationMinutes: 60, slots: legacyV7Slots(),
       publishedAt: '2030-01-01T00:00:00Z', createdAt: '2030-01-01T00:00:00Z'
     };
-    Object.assign(room, { configured: true, expectedVersion: 7, currentPublished });
+    Object.assign(room, { configured: true, expectedVersion: version, currentPublished });
     await expect(setup(data).service.listCheckout(actor)).resolves.toEqual(data);
   });
 

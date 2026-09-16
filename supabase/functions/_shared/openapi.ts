@@ -2259,7 +2259,7 @@ export const openApiDocument = {
         operationId: "publishCleaningTemplate",
         summary: "퇴실 청소 템플릿의 불변 새 버전 게시",
         description:
-          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 v8 이상 immutable version과 normalized slot rows를 원자 게시합니다. 기존 v7 snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
+          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과 normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -4547,7 +4547,7 @@ export const openApiDocument = {
             minimum: 1,
             maximum: 10,
             description:
-              "v8+ 필수 메타데이터입니다. v7 historical projection에는 없을 수 있습니다.",
+              "Decision A v8+ 필수 메타데이터입니다. pre-A historical v7+ projection에는 없을 수 있습니다.",
           },
           description: { type: "string", minLength: 1, maxLength: 200 },
           section: { type: "string", minLength: 1, maxLength: 80 },
@@ -4630,7 +4630,7 @@ export const openApiDocument = {
             maxItems: 15,
             items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
             description:
-              "v7 historical template은 10/11/13/15개일 수 있고, v8+ template은 9/10/12/14개입니다.",
+              "maxPhotos 없는 pre-A historical v7+ template은 10/11/13/15개이고, 모든 slot에 metadata가 있는 A-contract v8+ template은 9/10/12/14개입니다.",
           },
           publishedAt: { type: "string", format: "date-time" },
           createdAt: { type: "string", format: "date-time" },

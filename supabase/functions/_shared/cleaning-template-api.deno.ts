@@ -100,10 +100,10 @@ Deno.test("cleaning template GET returns four explicit configured states with li
   roomTypes[0] = {
     ...roomTypes[0],
     configured: true,
-    expectedVersion: 7,
+    expectedVersion: 12,
     currentPublished: {
       id: "30000000-0000-4000-8000-000000000007",
-      version: 7,
+      version: 12,
       status: "published",
       durationMinutes: 60,
       slots: legacyV7Slots(),
@@ -122,8 +122,8 @@ Deno.test("cleaning template GET returns four explicit configured states with li
     "all room types are visible",
   );
   assert(
-    result.roomTypes[0]?.currentPublished?.version === 7,
-    "historical v7 projection remains readable",
+    result.roomTypes[0]?.currentPublished?.version === 12,
+    "historical pre-A higher-version projection remains readable",
   );
   assert(
     mock.calls[0]?.name === "list_checkout_cleaning_templates",
@@ -196,10 +196,10 @@ Deno.test("cleaning template publish normalizes slots and hashes canonical paylo
   );
 });
 
-Deno.test("cleaning template publish preserves the exact v7 receipt replay envelope", async () => {
+Deno.test("cleaning template publish preserves a pre-A higher-version receipt replay envelope", async () => {
   const published = {
     id: "30000000-0000-4000-8000-000000000007",
-    version: 7,
+    version: 12,
     status: "published",
     durationMinutes: 60,
     slots: legacyV7Slots(),
@@ -218,7 +218,10 @@ Deno.test("cleaning template publish preserves the exact v7 receipt replay envel
     mock.value,
     admin,
   );
-  assert("version" in result && result.version === 7, "v7 replay projection");
+  assert(
+    "version" in result && result.version === 12,
+    "historical replay projection",
+  );
   const sent = mock.calls[0]?.args.p_slots as Array<Record<string, unknown>>;
   assert(
     sent.length === 10 &&

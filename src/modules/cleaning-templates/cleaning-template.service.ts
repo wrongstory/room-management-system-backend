@@ -65,12 +65,9 @@ const currentSlotCounts: Record<CheckoutRoomTypeCode, number> = {
   oceanPremium: 12,
   oceanFamily: 14
 };
-const legacyV7SlotCounts: Record<CheckoutRoomTypeCode, number> = {
+const legacySlotCounts: Record<CheckoutRoomTypeCode, number> = {
   standard: 10, premium: 11, oceanPremium: 13, oceanFamily: 15
 };
-function expectedSlotCount(roomTypeCode: CheckoutRoomTypeCode, version: number): number {
-  return version === 7 ? legacyV7SlotCounts[roomTypeCode] : currentSlotCounts[roomTypeCode];
-}
 const slotSchema = z.object({
   slotKey: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/),
   displayOrder: z.number().int().min(0).max(99),
@@ -113,23 +110,40 @@ const publishedTemplateSchema = z.object({
   publishedAt: timestampSchema,
   createdAt: timestampSchema
 }).strict().superRefine((template, context) => {
-  const expectedCount = expectedSlotCountForLength(template.version, template.slots.length);
-  if (!expectedCount ||
+  const contract = templateContract(template.version, template.slots);
+  const allowedCounts = contract === 'a'
+    ? Object.values(currentSlotCounts)
+    : Object.values(legacySlotCounts);
+  if (contract === null || !allowedCounts.includes(template.slots.length) ||
     template.slots.some((slot, index) => slot.displayOrder !== index ||
       slot.label.trim() !== slot.label || slot.description?.trim() !== slot.description ||
       slot.section?.trim() !== slot.section) ||
     new Set(template.slots.map((slot) => slot.slotKey)).size !== template.slots.length ||
     template.slots.filter((slot) => slot.required).length !== template.slots.length - 1 ||
     template.slots.filter((slot) => slot.slotKey === 'tv-on' && slot.required).length !== 1 ||
-    (template.version >= 8 && !validV8Slots(template.slots))) {
+    (contract === 'a' && !validAContractSlots(template.slots))) {
     context.addIssue({ code: 'custom', message: 'invalid published template slots' });
   }
 });
-function expectedSlotCountForLength(version: number, length: number): boolean {
-  const counts = version === 7 ? Object.values(legacyV7SlotCounts) : Object.values(currentSlotCounts);
-  return counts.includes(length);
+function templateContract(
+  version: number,
+  slots: CleaningTemplateSlot[]
+): 'legacy' | 'a' | null {
+  const metadataCount = slots.filter((slot) => slot.maxPhotos !== undefined).length;
+  if (metadataCount === 0) return 'legacy';
+  if (version >= 8 && metadataCount === slots.length) return 'a';
+  return null;
 }
-function validV8Slots(slots: CleaningTemplateSlot[]): boolean {
+function expectedSlotCount(
+  roomTypeCode: CheckoutRoomTypeCode,
+  version: number,
+  slots: CleaningTemplateSlot[]
+): number | null {
+  const contract = templateContract(version, slots);
+  if (contract === null) return null;
+  return contract === 'a' ? currentSlotCounts[roomTypeCode] : legacySlotCounts[roomTypeCode];
+}
+function validAContractSlots(slots: CleaningTemplateSlot[]): boolean {
   return !slots.some((slot) => slot.slotKey === 'entry-number') &&
     slots.filter((slot) => slot.slotKey === 'entry-storage' && slot.required).length === 1 &&
     slots.filter((slot) => slot.slotKey === 'extra-proof' && !slot.required &&
@@ -149,7 +163,8 @@ const roomTypeSchema = z.object({
     (room.currentPublished !== null &&
       room.currentPublished.slots.length !== expectedSlotCount(
         room.roomTypeCode,
-        room.currentPublished.version
+        room.currentPublished.version,
+        room.currentPublished.slots
       ))) {
     context.addIssue({ code: 'custom', message: 'inconsistent template projection' });
   }
@@ -175,7 +190,7 @@ function parsePublishedTemplate(
   roomTypeCode: CheckoutRoomTypeCode
 ): PublishedCleaningTemplate {
   const template = parseDatabaseResponse(publishedTemplateSchema, data);
-  if (template.slots.length !== expectedSlotCount(roomTypeCode, template.version)) {
+  if (template.slots.length !== expectedSlotCount(roomTypeCode, template.version, template.slots)) {
     throw templateError(null);
   }
   return template;

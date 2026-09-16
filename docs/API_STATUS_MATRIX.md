@@ -1184,8 +1184,8 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 
 - [x] 네 stable `roomTypeCode`를 한 번에 조회하며 미설정은 `configured=false/currentPublished=null/expectedVersion=0`으로 명시하고 fallback·seed를 만들지 않음
 - [x] 한 객실 타입씩 `expectedVersion` CAS와 actor/command/key/request-hash scoped idempotency로 새 immutable version 게시
-- [x] 새 publication은 `greatest(existing max + 1, 8)`, 이후 단조 증가; 기존 v7/published는 retired 이력과 frozen snapshot으로 보존하고 타입/kind별 published exactly-one 유지
-- [x] v7 checkout은 10/11/13/15개를 계속 검증하고 v8+는 9/10/12/14개, 필수 8/9/11/13개, required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지와 연속 순서·중복·문자열 경계를 DB/Fastify/Edge에서 검증
+- [x] 새 publication은 `greatest(existing max + 1, 8)`, 이후 단조 증가; 기존 pre-A v7+ published는 retired 이력과 frozen snapshot으로 보존하고 타입/kind별 published exactly-one 유지
+- [x] `maxPhotos` 없는 pre-A checkout은 version 8 이상도 10/11/13/15개로 계속 검증하고, 모든 slot에 metadata가 있는 v8+ A-contract는 9/10/12/14개, 필수 8/9/11/13개, required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지와 연속 순서·중복·문자열 경계를 DB/Fastify/Edge에서 검증
 - [x] raw template Data API DML/SELECT 차단, service-only RPC에서 최신 actor/session/password/role 재검증
 - [x] audit은 `roomTypeCode`, `cleaningKind`, `version`, `durationMinutes`, `slotCount`만 저장·노출; 게시 자체는 수신자 행동이 없어 notification/outbox 미생성
 - [x] 예약 전 409 fail-closed를 유지하고 게시 뒤 예약당 planned target 1건과 불변 template/slot snapshot 생성
@@ -1196,7 +1196,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] #165 exact head required GitHub `application` / `migration` PASS와 독립 QA P0/P1=0·90점 이상
 - [x] #165 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` hotfix squash 병합 — 승인·병합 tree 동일
 - [x] PR #167로 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`에 squash 역반영 — QA 97/100, P0/P1=0, required CI PASS, 승인·병합 tree 동일
-- [x] #179 Decision A source 후보: 57번째 append-only migration, v7 이력 보존, v8 슬롯 수·key·`maxPhotos` DB/Fastify/Edge/OpenAPI parity
+- [x] #179 Decision A source 후보: 57번째 append-only migration, pre-A v7+ 이력 보존, v8 A-contract 슬롯 수·key·`maxPhotos` DB/Fastify/Edge/OpenAPI parity
 - [ ] #179 exact-head 독립 QA·required CI·사람 리뷰와 `dev` 병합
 - [ ] #180 `extra-proof` 실제 0~10장 collection·개별 삭제·제출 봉인 구현
 - [ ] 승인된 release의 production 56/57번째 migration/API 배포, 네 타입 v8 게시, 예약 success hosted smoke

@@ -22,7 +22,7 @@
 
 ## 템플릿·기존 데이터 처리 원칙
 
-- 기존 퇴실 template v7은 타입별 10/11/13/15개, 필수 9/10/12/14개와 required `tv-on`을 그대로 유지한다.
+- 기존 `maxPhotos` 없는 pre-A 퇴실 template은 version이 v7보다 높아도 타입별 10/11/13/15개, 필수 9/10/12/14개와 required `tv-on`을 그대로 유지한다.
 - Decision #179의 새 v8+ 계약은 9/10/12/14개, 필수 8/9/11/13개다. required `tv-on`·`entry-storage`를 유지하고 `entry-number`를 제외하며 마지막 `extra-proof`만 선택·`maxPhotos=10`이다. v8 metadata는 이번 변경에서 고정하지만 실제 다중 current-photo collection은 #180에서 완성한다.
 - 과거 v6 이하 snapshot에 `tv-on`을 소급 추가하지 않는다.
 - 연박·재청소 슬롯과 예상시간의 프런트 데모 값을 운영 정본이나 seed로 승격하지 않는다. 추가 청소의 미확정 구성을 추측하지 않는다.
