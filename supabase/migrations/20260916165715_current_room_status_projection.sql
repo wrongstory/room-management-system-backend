@@ -69,9 +69,11 @@ as $$
         and reservation.status = 'active'
         and reservation.actual_checkout_at is null
         and (
-          reservation.actual_check_in_at is not null
-          and reservation.actual_check_in_at <= p_at
-          or (
+      (
+        reservation.actual_check_in_at is not null
+        and reservation.actual_check_in_at <= p_at
+      )
+      or (
             reservation.check_in_at <= p_at
             and reservation.check_out_at > p_at
           )

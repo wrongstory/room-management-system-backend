@@ -4,7 +4,8 @@
 
 검토 기준:
 
-- 이 문서 갱신의 기능 통합 기준: PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925` — 56 migrations / OpenAPI 109 paths / 117 operations. 이후 문서 전용 commit은 기능 기준을 바꾸지 않는다.
+- 이 문서 갱신의 기능 통합 기준: PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925` — 56 migrations / OpenAPI 109 paths / 117 operations. #165 긴급 보완은 `main`과 `dev`에 source 통합됐다. 이후 문서 전용 commit은 이 기능 기준을 바꾸지 않는다.
+- #179 Decision A의 57번째 append-only migration과 v8 사진 슬롯 계약은 `dev@3587761b12d97c977bf874ab5e9ac0db1b971ab4`에 통합됐다. 아직 `main`/production 정본은 아니며 실제 `extra-proof` 0~10장 collection 처리는 #180 완료 전 release하지 않는다.
 - 백엔드 운영 source 정본: `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`. 2026-09-16 production readback은 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations와 기존 5개 Edge bundle이다. 네 checkout template은 모두 immutable v7로 게시됐고 `durationMinutes=null`을 보존한다. 안전한 운영 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, annotated `v0.3.0` tag/GitHub Release와 provider·Google hosted activation은 별도 pending이다.
 - 프런트엔드 정본 저장소: `makee-ham/room-management-system`
 - 프런트엔드 현재 `main`: `f70efc862e7f0973ef0a1327441f152745768253`
@@ -110,12 +111,13 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 
 | code | 표시명 | 객실 수 | 기본 청소요금 | 퇴실 청소 사진 슬롯 |
 |---|---|---:|---:|---:|
-| `standard` | 스탠다드 더블 로프트 | 22 | 16,000원 | 10개: 필수 9 + 선택 1 |
-| `premium` | 프리미어 더블 로프트 | 51 | 20,000원 | 11개: 필수 10 + 선택 1 |
-| `oceanPremium` | 파셜 오션뷰 프리미어 더블 로프트 | 13 | 20,000원 | 13개: 필수 12 + 선택 1 |
-| `oceanFamily` | 파셜 오션뷰 패밀리 투룸 로프트 | 35 | 30,000원 | 15개: 필수 14 + 선택 1 |
+| `standard` | 스탠다드 더블 로프트 | 22 | 16,000원 | v8+: 9개(필수 8 + 선택 1) |
+| `premium` | 프리미어 더블 로프트 | 51 | 20,000원 | v8+: 10개(필수 9 + 선택 1) |
+| `oceanPremium` | 파셜 오션뷰 프리미어 더블 로프트 | 13 | 20,000원 | v8+: 12개(필수 11 + 선택 1) |
+| `oceanFamily` | 파셜 오션뷰 패밀리 투룸 로프트 | 35 | 30,000원 | v8+: 14개(필수 13 + 선택 1) |
 
 객실별 타입·구역의 전체 매핑은 migration seed가 현재 정본과 일치한다. 사람이 읽는 표시명은 바뀔 수 있으므로 code와 이력을 기준으로 연결한다.
+사진 슬롯 표는 2026-09-16 Decision #179의 A안을 반영한다. 기존 publisher가 만든 `maxPhotos` 없는 pre-A template/snapshot은 version이 v7보다 높아도 10/11/13/15개 계약으로 계속 유효하며 backfill하지 않는다.
 
 ### `[확정]` 기본 운영 시각
 
@@ -340,8 +342,9 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 현재 범위의 청소 완료 증빙은 **체크리스트 없이 사진 slot만** 사용한다. 과거 checklist JSON을 필수 계약으로 되살리지 않는다.
 - 템플릿 slot은 JSON 문구만 저장하지 말고 stable slot key와 version을 가진 row로 관리한다.
 - template evidence 사진은 유효한 slot snapshot을 반드시 참조한다. NULL slot key로 유일 제약을 우회할 수 없어야 한다.
-- 한 slot의 current 사진은 한 장이다. 재촬영은 current pointer를 CAS로 교체하며, 이전 업로드/교체 이력은 보존 정책에 따라 추적한다.
-- 퇴실 청소 template v7 이상에는 필수 `tv-on` slot이 정확히 하나 있어야 한다. v6 이하 과거 snapshot에는 소급 추가하지 않는다.
+- 일반 slot의 current 사진은 한 장이다. 재촬영은 current pointer를 CAS로 교체하며, 이전 업로드/교체 이력은 보존 정책에 따라 추적한다.
+- `maxPhotos` 없는 pre-A 퇴실 청소 snapshot은 v7 및 그보다 높은 historical version도 타입별 10/11/13/15개와 필수 `tv-on`을 유지한다. Decision A snapshot은 v8 이상이면서 모든 slot에 `maxPhotos`가 있고, 9/10/12/14개·필수 8/9/11/13개·required `tv-on`·`entry-storage`를 강제하며 `entry-number`를 제외한다. 마지막 `extra-proof`는 선택 slot, `maxPhotos=10`이다.
+- **[현재 구현 경계]** v8 template metadata와 validator는 위 계약을 보존하지만 `extra-proof`의 실제 0~10장 append/개별 삭제/제출 봉인은 #180 완료 전까지 제공하지 않는다. 따라서 release·운영 template 재게시는 #180과 함께 검증한다.
 - 앱은 JPEG/WebP를 EXIF 제거 후 사진당 최대 300KiB(307,200 bytes)로 압축한다. 서버도 본문 크기와 허용 형식을 독립적으로 강제한다.
 - 서버는 파일 확장자나 client MIME만 믿지 않고 magic bytes, 허용 MIME, 크기, hash, 현재 담당/attempt/version을 검증한다.
 - 현장 완료, 미전송 업로드, 전체 제출, 검수 요청은 별도 상태다.

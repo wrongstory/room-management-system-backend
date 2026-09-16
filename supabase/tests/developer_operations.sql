@@ -107,8 +107,8 @@ select is(
     '26000000-0000-4000-8000-000000000001',
     'current_room_status_projection'
   ) ->> 'currentMigration',
-  'cleaning_template_duration_optional',
-  'database status exposes migration 56 when migration 57 is absent'
+  'photo_slot_contract_v8',
+  'database status exposes migration 57 when migration 58 is absent'
 );
 
 select is(
@@ -117,7 +117,7 @@ select is(
     'current_room_status_projection'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 56 behind source migration 57'
+  'database status reports migration 57 behind source migration 58'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

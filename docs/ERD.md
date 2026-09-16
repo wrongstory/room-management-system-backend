@@ -526,7 +526,7 @@ erDiagram
 - 새 사진 모델 10개 테이블은 모두 `private` + RLS이며 `PUBLIC/anon/authenticated/service_role`의 읽기·직접 DML 권한이 없다. 모델 helper도 owner-only다. #9/#31의 세션·실제 파일 검증 경로가 생기기 전 사진/제출 HTTP는 추가하지 않는다.
 - 기존 `cleaning_template_versions.photo_slots`, `cleaning_targets.template_snapshot`, `cleaning_attempts.template_snapshot`은 제거하지 않는다. 새 슬롯 row는 `slot_snapshot`에 구역·이름·설명·반복 인스턴스를 포함한 정확한 원본 객체를 보존하고, 식별자·필수 여부·표시 순서는 정규화 컬럼으로 검증한다.
 - 기존 v1 `[]` 또는 복원 근거가 없는 JSON은 `ready=false`다. 이 때문에 기존 예약/배정/물리적 완료가 막히지는 않지만 사진 완전성·제출 연결은 실패한다. 최신 템플릿으로 보간하거나 사진 0장을 완료로 인정하지 않는다. v6 명시 슬롯에는 v7 `tv-on`이나 개수를 소급하지 않는다.
-- 새 v7+ checkout 템플릿은 타입별 10/11/13/15개, 그중 선택 1개와 필수 `tv-on` 정확히 1개를 검증한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
+- `maxPhotos` 없는 pre-A checkout 템플릿은 v7보다 높은 historical version도 타입별 10/11/13/15개 계약을 이력으로 유지한다. 모든 slot에 metadata가 있는 새 v8+ A-contract는 9/10/12/14개, 필수 8/9/11/13개를 검증하고 required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지를 강제한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
 - 증빙 identity는 `(cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)`이다. 구 담당자의 interrupted 사진과 새 담당자의 사진은 같은 target slot을 쓰더라도 서로 다른 current pointer를 가진다. NULL/다른 target/다른 attempt 연결은 복합 FK로 거부한다.
 - `attempt_photo_versions`는 불변이다. `uploaded_at + 168시간` 만료는 교체·재제출·retry로 연장하지 않으며, 실제 provider 삭제 확인은 별도 append-only purge marker로 관리한다. #30에서 bytes/Drive 업로드나 삭제를 실제 수행하지 않는다.
 - 필수 슬롯이 전부 verified·미만료·미삭제 사진을 가져야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. frozen JSON과 normalized 슬롯의 전체 집합도 다시 대조한다.
@@ -948,7 +948,7 @@ migration을 수정하지 않는다. 운영·recovery 적용 상태와 무관한
 
 사진은 프론트 앱에서 **최대 300KiB(307,200바이트)** JPEG/WebP로 압축하고 EXIF를 제거한 뒤 API에 전송한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜를 사용하며, 중복 방지를 위해 실제 파일명에는 수행 회차·사진 슬롯·사진 UUID를 포함한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
 
-현재 121개 객실을 모두 하루에 한 번 청소하고 타입별 필수 슬롯 수(10·11·13·15장)를 그대로 적용하면 하루 최대 1,475장, 7일 보관량은 약 **3.17GB**다. 모든 객실에 가장 큰 15장 기준을 적용한 보수적 최악값도 하루 1,815장, 약 **3.90GB**다. Google 개인 계정 기본 15GB 중 20% 여유를 남긴 12GB를 사진에 쓴다고 보면 이론상 약 5,580장/일까지 가능하므로 객실 운영 최대치보다 충분하다. 단, 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
+현재 121개 객실을 모두 하루에 한 번 청소하면 v8 필수 슬롯(8·9·11·13장)은 하루 1,233장이다. 모든 객실의 선택 `extra-proof`를 10장까지 채운 상한은 하루 2,443장, 7일 약 **4.89GiB**다. 모든 객실에 가장 큰 타입의 필수 13장과 선택 10장을 적용한 보수적 상한은 하루 2,783장, 7일 약 **5.57GiB**다. Google 개인 계정 기본 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
 
 각 사진의 `purge_after`는 폴더 날짜가 아니라 정확히 `uploaded_at + 7일`이다. 정리 작업은 주기적으로 만료 레코드를 잠그고 Drive `files.delete`를 호출해 휴지통을 거치지 않고 영구삭제한다. 성공 또는 이미 없는 파일(404)은 `purged`로 완료하고, 일시 오류는 지수 백오프로 재시도한다. 빈 객실·날짜 폴더는 그 안의 관리 대상 파일이 모두 삭제된 뒤 정리한다. 메타데이터·해시·검수 결과는 DB 감사 근거로 유지한다. 상세 규칙은 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
 
@@ -1158,7 +1158,7 @@ erDiagram
 `20260914094126_cleaning_template_admin_api.sql`은 기존 54개 migration을 수정하지 않는 55번째 append-only
 feature migration이다. `cleaning_template_versions`는 `(room_type_id,cleaning_kind,version)` 이력과 published
 partial unique를 유지하며, publish command가 동일 타입/kind advisory lock 안에서 current expected version을
-검사하고 이전 row를 retired로 전이한 뒤 v7+ 새 row를 추가한다. `private.photo_template_slots`는 새 JSON의
+검사하고 이전 row를 retired로 전이한 뒤 v8+ 새 row를 추가한다. 기존 pre-A v7+ row와 frozen snapshot은 그대로 유효하다. `private.photo_template_slots`는 새 JSON의
 정규화된 immutable row를 같은 transaction에서 materialize한다. 과거 `cleaning_targets.template_snapshot`은
 current pointer를 다시 읽거나 backfill하지 않으므로 이후 게시에도 변하지 않는다. raw template table은 RLS를
 활성화한 채 Data API policy/grant가 없고, service-only 조회/게시 RPC가 live session과 active/password-complete

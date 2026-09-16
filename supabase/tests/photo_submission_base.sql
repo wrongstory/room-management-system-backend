@@ -18,10 +18,22 @@ $$;
 create function pg_temp.snapshot(v integer,n integer,p_tv boolean default true,p_type text default 'standard') returns jsonb language sql immutable as $$
  select jsonb_build_object('templateVersionId',pg_temp.pid(200),'version',v,'roomTypeCode',p_type,'cleaningKind','checkout','slots',pg_temp.slots(n,p_tv))
 $$;
+create function pg_temp.v8_slots(n integer) returns jsonb language sql immutable as $$
+ select jsonb_agg(jsonb_build_object(
+  'slotKey',case when i=1 then 'tv-on' when i=2 then 'entry-storage' when i=n then 'extra-proof' else 'slot-'||i end,
+  'required',i<n,'displayOrder',i-1,'maxPhotos',case when i=n then 10 else 1 end,
+  'sectionKey','synthetic-section','label','합성 사진','description','정책 seed 아님') order by i)
+ from generate_series(1,n)i
+$$;
+create function pg_temp.v8_snapshot(n integer,p_type text default 'standard') returns jsonb language sql immutable as $$
+ select jsonb_build_object('templateVersionId',pg_temp.pid(201),'version',8,'roomTypeCode',p_type,'cleaningKind','checkout','slots',pg_temp.v8_slots(n))
+$$;
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,10)),'v7 standard requires 10 slots');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,11,true,'premium')),'v7 premium requires 11 slots');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,13,true,'oceanPremium')),'v7 ocean premium requires 13 slots');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,15,true,'oceanFamily')),'v7 ocean family requires 15 slots');
+select ok(private.photo_snapshot_valid(pg_temp.snapshot(8,10)),'pre-A v8 standard snapshot remains a valid legacy contract');
+select ok(private.photo_snapshot_valid(pg_temp.snapshot(12,10)),'pre-A higher-version standard snapshot remains a valid legacy contract');
 select ok(not private.photo_snapshot_valid(pg_temp.snapshot(7,9)),'v7 wrong count fails closed');
 select ok(not private.photo_snapshot_valid(pg_temp.snapshot(7,10,false)),'v7 missing required tv-on fails closed');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(6,9,false)),'v6 explicit historical slots are not retrofitted with tv-on or v7 count');
@@ -33,6 +45,13 @@ select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.snapshot(6,1),'{slo
 select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.snapshot(7,10),'{slots,1,slotKey}','"tv-on"')),'duplicate slot key rejected');
 select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.snapshot(7,10),'{slots,1,displayOrder}','0')),'duplicate display order rejected');
 select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.snapshot(7,10),'{slots,1,displayOrder}','100')),'technical display order cap enforced');
+select ok(private.photo_snapshot_valid(pg_temp.v8_snapshot(9)),'v8 standard adopts 9-slot A-contract');
+select ok(private.photo_snapshot_valid(pg_temp.v8_snapshot(10,'premium')),'v8 premium adopts 10-slot A-contract');
+select ok(private.photo_snapshot_valid(pg_temp.v8_snapshot(12,'oceanPremium')),'v8 ocean premium adopts 12-slot A-contract');
+select ok(private.photo_snapshot_valid(pg_temp.v8_snapshot(14,'oceanFamily')),'v8 ocean family adopts 14-slot A-contract');
+select ok(not private.photo_snapshot_valid(pg_temp.v8_snapshot(10)),'v8 rejects the former standard total');
+select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.v8_snapshot(9),'{slots,2,slotKey}','"entry-number"')),'v8 excludes redundant entry-number');
+select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.v8_snapshot(9),'{slots,8,maxPhotos}','9')),'v8 extra-proof requires maxPhotos 10');
 
 -- Synthetic non-checkout slots test the generic model, not an approved operational template.
 insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by)
