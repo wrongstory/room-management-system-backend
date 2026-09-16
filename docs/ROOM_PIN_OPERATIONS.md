@@ -41,10 +41,10 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 ### Production 활성화 체크리스트
 
-1. production DB backup과 현재 적용된 54개 stable migration 및 원장 evidence를 확인한다. 이미 적용된 1~54번 파일은 수정·삭제하거나 재적용하지 않는다.
-2. 승인된 release manifest는 전체 55개 SHA 목록과 deployment baseline 54개/pending 1개를 고정한다. 현재 production pending은 PIN과 무관한 55번 `cleaning_template_admin_api`뿐이며, PIN 활성화를 이유로 자동 `db push`, history repair 또는 49~53번 재적용을 하지 않는다.
-3. 53번째 `room_pin_nonce_reservation_hardening`은 파일에 명시된 단일 transaction으로 적용한다. transaction 시작 직후 첫 DDL인 table lock이 lease/revision 양쪽을 잠그며, lock 대기·timeout 또는 historical nonce conflict가 발생하면 적용을 중단한다. 오류를 무시하거나 `SKIP LOCKED`로 이력을 제외하지 않으며 registry/helper/trigger와 migration history는 반쪽 설치되지 않고 기존 원장 evidence는 그대로 남아야 한다.
-4. registry backfill 수와 history 정합성, 양쪽 INSERT trigger, lease identity guard, FORCE RLS와 최소 grant를 확인한다. 이 확인 전에는 bootstrap을 실행하지 않는다.
+1. production은 현재 56개 stable migration까지 적용됐다. PIN 범위의 49~53번과 이후 54~56번 파일 및 기존 원장 evidence를 수정·삭제하거나 재적용하지 않는다.
+2. 승인된 v0.3.0 manifest는 전체 56개 SHA 목록을 고정한다. 현재 이 manifest의 production pending migration은 없으며, PIN 활성화를 이유로 자동 `db push`, history repair 또는 49~53번 재적용을 하지 않는다.
+3. 53번째 `room_pin_nonce_reservation_hardening` 적용 당시에는 단일 transaction의 첫 DDL table lock이 lease/revision 양쪽을 잠갔고, lock 대기·timeout 또는 historical nonce conflict는 전체 적용 중단 조건이었다. 운영 evidence에서 partial installation이나 이력 충돌이 발견되면 기존 원장을 보정하지 말고 PIN 활성화를 중단한다.
+4. 이미 설치된 registry backfill 정합성, 양쪽 INSERT trigger, lease identity guard, FORCE RLS와 최소 grant를 read-only로 확인한다. 이 확인 전에는 bootstrap을 실행하지 않는다.
 5. 별도 release/운영 승인을 받은 뒤에만 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
 6. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
 7. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.

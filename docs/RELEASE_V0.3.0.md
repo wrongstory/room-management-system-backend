@@ -43,15 +43,15 @@ provider·Google·Cron 활성화와 annotated `v0.3.0` tag/GitHub Release는 각
 
 정본은 [`migration-manifest.v0.3.0.json`](../supabase/migration-manifest.v0.3.0.json)이다.
 각 SQL은 Git timestamp가 아닌 stable name, 정렬된 order, LF-normalized UTF-8 content SHA-256으로
-고정한다. `npm run db:manifest:verify`는 전체 history 56개의 order/name/content SHA와 이번 hotfix
-baseline 55개, pending 1개, 최종 head `cleaning_template_duration_optional`을 검증한다. baseline head는
-`cleaning_template_admin_api`이고 pending first/head는 모두 `cleaning_template_duration_optional`이다.
+고정한다. `npm run db:manifest:verify`는 전체 history 56개의 order/name/content SHA와 #165 배포 계획 당시의
+baseline 55개, pending 1개, 최종 head `cleaning_template_duration_optional`을 검증한다. 당시 baseline head는
+`cleaning_template_admin_api`이고 pending first/head는 모두 `cleaning_template_duration_optional`이었다.
 원격 적용 version이 Git timestamp와 달라도 stable name과 실제 SQL 내용을 대조하며 자동 `db push`,
 history repair, 재적용을 사용하지 않는다.
 
-manifest의 1~55번 entry는 이미 배포된 전체 history reference이며 이번 적용 범위가 아니다. 별도
-`test-production-baseline-upgrade.mjs`는 v0.2.0 synthetic baseline의 19→56 누적 호환성을, 전용 회귀는
-실제 55→56 template/reservation 원장 보존을 검증한다. 운영 적용 대상은 다음 **56번 1건만**이다.
+manifest의 1~56번 entry는 현재 모두 production에 적용된 history reference다. 별도
+`test-production-baseline-upgrade.mjs`는 배포 전에 v0.2.0 synthetic baseline의 19→56 누적 호환성을, 전용 회귀는
+55→56 template/reservation 원장 보존을 검증했다. 현재 이 릴리즈 manifest의 미적용 migration은 없다.
 
 | 적용 순서 | stable migration name | production 상태 |
 |---:|---|---|
@@ -133,7 +133,7 @@ attempt·offline·제출·검수·earning/payroll·complaint·checkout incident�
 
 ## 7. 중단·rollback·forward-fix
 
-- migration 실패 시 즉시 후속 적용을 중단하고 transaction rollback 여부와 기존 55개 원장을 확인한다.
+- 이후 새 append-only migration이 실패하면 즉시 후속 적용을 중단하고 transaction rollback 여부와 현재 56개 원장을 확인한다.
 - 적용된 migration과 migration history, audit/domain/earning/payment/PIN 원장은 rewind·삭제·repair하지 않는다.
   DB 결함은 새 Issue와 append-only forward-fix migration으로 해결한다.
 - worker 오류, non-200 반복, stale heartbeat, operator-blocked가 발생하면 해당 Cron/Vault invocation을 먼저
