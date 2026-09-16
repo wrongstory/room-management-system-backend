@@ -114,6 +114,10 @@ const currentRoomStatusMigrationUrl = new URL(
   '../supabase/migrations/20260916165715_current_room_status_projection.sql',
   import.meta.url
 );
+const reservationArrivalLifecycleMigrationUrl = new URL(
+  '../supabase/migrations/20260916194539_reservation_arrival_lifecycle_projection.sql',
+  import.meta.url
+);
 const photoSlotContractV8MigrationUrl = new URL(
   '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
   import.meta.url
@@ -174,6 +178,28 @@ describe('initial migration contract', () => {
     expect(sql).toContain('drop function public.get_room_operational_projection(uuid, uuid)');
     expect(sql).toContain('to service_role');
     expect(sql).not.toContain('current_date');
+  });
+
+  it('adds KST arrival lifecycle axes without replacing the compatible room projection', async () => {
+    const sql = await readFile(reservationArrivalLifecycleMigrationUrl, 'utf8');
+
+    expect(sql).toContain('private.room_reservation_lifecycle_at');
+    expect(sql).toContain("p_at at time zone 'Asia/Seoul'");
+    expect(sql).toContain("then 'ARRIVAL_PENDING'");
+    expect(sql).toContain("then 'RESERVATION_PRESENT'");
+    expect(sql).toContain("else 'FUTURE'");
+    expect(sql).toContain("when v_current then 'OCCUPIED'");
+    expect(sql).toContain('order by reservation.check_in_at, reservation.id');
+    expect(sql).toContain('v_evaluated_at timestamptz := clock_timestamp()');
+    expect(sql).toContain('v_evaluated_at,\n    case when state.occupied');
+    expect(sql).toContain("when readiness.readiness_status = 'CHECKIN_BLOCKED' then 'BLOCKED'");
+    expect(sql).toContain("when lifecycle.reservation_lifecycle = 'OCCUPIED' then 'OCCUPIED'");
+    expect(sql).toContain("when state.cleaning_required then 'CLEANING_REQUIRED'");
+    expect(sql).toContain("when p_pin_sync_status = 'mismatch' then 'PIN_MISMATCH'");
+    expect(sql).toContain("when p_pin_sync_status = 'unconfigured' then 'PIN_UNCONFIGURED'");
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/create table|alter table|insert into|update public\./);
   });
 
   it('seeds 121 unique room numbers', async () => {

@@ -7673,6 +7673,66 @@ export const openApiDocument = {
         description:
           "객실 예약 배정이 준비되지 않은 독립 사유입니다. RESERVATION_CURRENT는 evaluatedAt이 예약의 [checkInAt, checkOutAt) 구간에 있음을 뜻합니다. 여러 값이 동시에 올 수 있습니다. PIN 상태는 이 enum이 아니라 RoomProjection.pinSyncStatus의 별도 경고 축입니다.",
       },
+      RoomOccupancyStatus: {
+        type: "string",
+        enum: ["VACANT", "OCCUPIED"],
+        description: "실제 check-in/out 이력 기준 현재 점유 축입니다.",
+      },
+      RoomReservationLifecycle: {
+        type: "string",
+        enum: [
+          "NONE",
+          "FUTURE",
+          "RESERVATION_PRESENT",
+          "ARRIVAL_PENDING",
+          "OCCUPIED",
+        ],
+        description:
+          "Asia/Seoul 날짜와 serverTime을 기준으로 계산한 예약 임박 축입니다. 현재 [checkInAt, checkOutAt) 또는 실제 active 점유는 OCCUPIED가 우선합니다.",
+      },
+      RoomReadinessStatus: {
+        type: "string",
+        enum: ["READY", "CLEANING_REQUIRED", "CHECKIN_BLOCKED"],
+        description:
+          "현재 준비 축입니다. PIN 경고는 예약 가능 여부가 아니라 현재 check-in 준비에만 반영됩니다.",
+      },
+      RoomPrimaryDisplayStatus: {
+        type: "string",
+        enum: [
+          "BLOCKED",
+          "OCCUPIED",
+          "ARRIVAL_PENDING",
+          "RESERVATION_PRESENT",
+          "CLEANING_REQUIRED",
+          "READY",
+        ],
+        description:
+          "BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY 우선순위의 파생 표시값입니다. DB 원본 상태가 아닙니다.",
+      },
+      RoomBlockingReasonCode: {
+        type: "string",
+        enum: [
+          "CANDLE_PRESENT",
+          "OPERATION_BLOCKED",
+          "ROOM_ISSUE_BLOCKED",
+          "DATA_UNCONFIRMED",
+        ],
+        description: "청소·예약 일정과 분리된 현재 운영/입실 차단 사유입니다.",
+      },
+      RoomReadinessReasonCode: {
+        type: "string",
+        enum: [
+          "CANDLE_PRESENT",
+          "OPERATION_BLOCKED",
+          "ROOM_ISSUE_BLOCKED",
+          "DATA_UNCONFIRMED",
+          "CLEANING_REQUIRED",
+          "PIN_MISMATCH",
+          "PIN_UNCONFIGURED",
+        ],
+        description:
+          "현재 준비 상태의 사유입니다. PIN_MISMATCH/PIN_UNCONFIGURED는 current check-in에만 나타나며 예약 bookability 사유가 아닙니다.",
+      },
       RoomProjection: {
         type: "object",
         additionalProperties: false,
@@ -7686,6 +7746,16 @@ export const openApiDocument = {
           "stateVersion",
           "evaluatedAt",
           "reservationPhase",
+          "serverTime",
+          "occupancyStatus",
+          "reservationLifecycle",
+          "readinessStatus",
+          "primaryDisplayStatus",
+          "nextReservationId",
+          "nextCheckInAt",
+          "nextCheckOutAt",
+          "blockingReasonCodes",
+          "readinessReasonCodes",
           "occupied",
           "cleaningRequired",
           "candleCount",
@@ -7735,6 +7805,50 @@ export const openApiDocument = {
             enum: ["none", "upcoming", "current"],
             description:
               "evaluatedAt 기준 예약 일정 축. current는 checkInAt <= evaluatedAt < checkOutAt, upcoming은 아직 시작하지 않은 active 예약, none은 현재·향후 active 예약이 없음을 뜻합니다.",
+          },
+          serverTime: {
+            type: "string",
+            format: "date-time",
+            description:
+              "evaluatedAt과 byte-for-byte 같은 서버 snapshot timestamp입니다.",
+          },
+          occupancyStatus: {
+            $ref: "#/components/schemas/RoomOccupancyStatus",
+          },
+          reservationLifecycle: {
+            $ref: "#/components/schemas/RoomReservationLifecycle",
+          },
+          readinessStatus: {
+            $ref: "#/components/schemas/RoomReadinessStatus",
+          },
+          primaryDisplayStatus: {
+            $ref: "#/components/schemas/RoomPrimaryDisplayStatus",
+          },
+          nextReservationId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "serverTime 뒤 가장 이른 future active 예약 ID. 현재 예약 자체는 포함하지 않습니다.",
+          },
+          nextCheckInAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+          nextCheckOutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+          blockingReasonCodes: {
+            type: "array",
+            items: { $ref: "#/components/schemas/RoomBlockingReasonCode" },
+            description:
+              "청소·점유·예약 임박과 분리된 현재 운영/입실 차단 사유입니다.",
+          },
+          readinessReasonCodes: {
+            type: "array",
+            items: { $ref: "#/components/schemas/RoomReadinessReasonCode" },
+            description:
+              "readinessStatus의 근거입니다. PIN 경고는 current check-in일 때만 여기에 나타납니다.",
           },
           occupied: {
             type: "boolean",

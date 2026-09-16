@@ -53,6 +53,16 @@ const roomRow = {
   state_version: 3,
   evaluated_at: "2026-09-16T08:00:00.000Z",
   reservation_phase: "current" as const,
+  server_time: "2026-09-16T08:00:00.000Z",
+  occupancy_status: "OCCUPIED" as const,
+  reservation_lifecycle: "OCCUPIED" as const,
+  readiness_status: "READY" as const,
+  primary_display_status: "OCCUPIED" as const,
+  next_reservation_id: "30000000-0000-4000-8000-000000000010",
+  next_check_in_at: "2026-09-17T07:00:00.000Z",
+  next_check_out_at: "2026-09-18T02:00:00.000Z",
+  blocking_reason_codes: [],
+  readiness_reason_codes: [],
   occupied: true,
   cleaning_required: false,
   candle_count: 0,
@@ -469,6 +479,17 @@ Deno.test("room projection mapper exposes only the allowlisted fields", () => {
     "evaluatedAt mapped",
   );
   assert(room.reservationPhase === "current", "reservationPhase mapped");
+  assert(room.serverTime === room.evaluatedAt, "one server snapshot mapped");
+  assert(room.occupancyStatus === "OCCUPIED", "occupancyStatus mapped");
+  assert(
+    room.reservationLifecycle === "OCCUPIED",
+    "reservationLifecycle mapped",
+  );
+  assert(room.primaryDisplayStatus === "OCCUPIED", "display status mapped");
+  assert(
+    room.nextReservationId === "30000000-0000-4000-8000-000000000010",
+    "next future reservation mapped",
+  );
   assert(!("raw_pin" in room), "unknown DB field removed");
   assert(!JSON.stringify(room).includes("must-not-leak"), "raw PIN removed");
 });
