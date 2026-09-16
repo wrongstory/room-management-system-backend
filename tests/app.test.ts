@@ -99,6 +99,18 @@ function services(): AppServices {
         elevatorZone: 'A' as const,
         dataStatus: 'verified' as const,
         stateVersion: 1,
+        evaluatedAt: '2026-09-16T08:00:00.000Z',
+        reservationPhase: 'upcoming' as const,
+        serverTime: '2026-09-16T08:00:00.000Z',
+        occupancyStatus: 'VACANT' as const,
+        reservationLifecycle: 'FUTURE' as const,
+        readinessStatus: 'READY' as const,
+        primaryDisplayStatus: 'READY' as const,
+        nextReservationId: '40000000-0000-4000-8000-000000000001',
+        nextCheckInAt: '2026-09-18T07:00:00.000Z',
+        nextCheckOutAt: '2026-09-19T02:00:00.000Z',
+        blockingReasonCodes: [],
+        readinessReasonCodes: [],
         occupied: false,
         cleaningRequired: false,
         candleCount: 0,
@@ -144,6 +156,8 @@ function services(): AppServices {
         updatedAt: '2026-08-28T00:00:00.000Z'
       })),
       change: vi.fn(),
+      previewRoomMove: vi.fn(),
+      commitRoomMove: vi.fn(),
       cancel: vi.fn(),
       manualCheckout: vi.fn(),
       processDue: vi.fn(),
@@ -164,7 +178,7 @@ function services(): AppServices {
       })),
       publishCheckout: vi.fn(async (_actor, input) => ({
         id: '54000000-0000-4000-8000-000000000001',
-        version: 7,
+        version: 8,
         status: 'published' as const,
         durationMinutes: input.durationMinutes ?? null,
         slots: input.slots,
@@ -205,6 +219,104 @@ describe('application', () => {
     await app.close();
   });
 
+  it('serializes only explicit room-move conflict metadata', async () => {
+    const appServices = services();
+    const conflict = {
+      reloadResources: ['reservation', 'sourceRoom', 'targetRoom', 'roomMovePreview'] as const,
+      latestVersions: {
+        reservationVersion: 5,
+        sourceRoomVersion: 8,
+        targetRoomVersion: 13
+      }
+    };
+    appServices.reservations.previewRoomMove = vi.fn(async () => {
+      throw new AppError(
+        409,
+        'TARGET_ROOM_VERSION_CONFLICT',
+        '도착 객실 상태가 변경됐습니다. 다시 확인해 주세요.',
+        undefined,
+        { ...conflict, reloadResources: [...conflict.reloadResources] }
+      );
+    });
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/11000000-0000-4000-8000-000000000001/room-change/preview',
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        targetRoomId: '12000000-0000-4000-8000-000000000001',
+        reasonCode: 'GUEST_REQUEST',
+        expectedReservationVersion: 4,
+        expectedSourceRoomVersion: 8,
+        expectedTargetRoomVersion: 12
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'TARGET_ROOM_VERSION_CONFLICT',
+        message: '도착 객실 상태가 변경됐습니다. 다시 확인해 주세요.',
+        conflict
+      },
+      requestId: response.json().requestId
+    });
+    expect(Object.keys(response.json().error).sort()).toEqual(['code', 'conflict', 'message']);
+    await app.close();
+  });
+
+  it('serializes room-move idempotency reuse with the exact conflict envelope', async () => {
+    const appServices = services();
+    const conflict = {
+      reloadResources: ['reservation', 'sourceRoom', 'targetRoom', 'roomMovePreview'] as const,
+      latestVersions: {
+        reservationVersion: 5,
+        sourceRoomVersion: 8,
+        targetRoomVersion: 13
+      }
+    };
+    appServices.reservations.commitRoomMove = vi.fn(async () => {
+      throw new AppError(
+        409,
+        'IDEMPOTENCY_KEY_REUSED',
+        '이미 다른 요청에 사용한 Idempotency-Key입니다.',
+        undefined,
+        { ...conflict, reloadResources: [...conflict.reloadResources] }
+      );
+    });
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/11000000-0000-4000-8000-000000000001/room-change',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'room-move-reused-0001'
+      },
+      payload: {
+        targetRoomId: '12000000-0000-4000-8000-000000000001',
+        expectedReservationVersion: 4,
+        expectedSourceRoomVersion: 8,
+        expectedTargetRoomVersion: 12,
+        evaluatedAt: '2026-09-16T08:00:00Z',
+        expiresAt: '2026-09-16T08:05:00Z',
+        effectiveAt: '2026-09-17T07:00:00Z',
+        impactFingerprint: 'a'.repeat(64),
+        reasonCode: 'GUEST_REQUEST'
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: '이미 다른 요청에 사용한 Idempotency-Key입니다.',
+        conflict
+      },
+      requestId: response.json().requestId
+    });
+    await app.close();
+  });
+
   it('returns Retry-After for durable password-verification limits', async () => {
     const appServices = services();
     appServices.auth.changePassword = vi.fn(async () => {
@@ -242,7 +354,19 @@ describe('application', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().rooms).toHaveLength(1);
-    expect(response.json().rooms[0].roomNumber).toBe('117');
+    expect(response.json().rooms[0]).toMatchObject({
+      roomNumber: '117',
+      evaluatedAt: '2026-09-16T08:00:00.000Z',
+      reservationPhase: 'upcoming',
+      serverTime: '2026-09-16T08:00:00.000Z',
+      occupancyStatus: 'VACANT',
+      reservationLifecycle: 'FUTURE',
+      readinessStatus: 'READY',
+      primaryDisplayStatus: 'READY',
+      occupied: false,
+      cleaningRequired: false,
+      allocationReady: true
+    });
     await app.close();
   });
 
@@ -556,6 +680,287 @@ describe('application', () => {
     await app.close();
   });
 
+  it('previews and commits a strict before-check-in room move', async () => {
+    const appServices = services();
+    const reservationId = '41000000-0000-4000-8000-000000000001';
+    const targetRoomId = '51000000-0000-4000-8000-000000000002';
+    const evaluatedAt = '2026-09-16T08:00:00.000Z';
+    const expiresAt = '2026-09-16T08:05:00.000Z';
+    const impactFingerprint = 'a'.repeat(64);
+    const preview = {
+      mode: 'BEFORE_CHECKIN' as const,
+      eligible: true,
+      rejectionReasonCodes: [],
+      blockingReasonCodes: [],
+      warnings: [],
+      targetBlockReasonCodes: [],
+      sourceOutcome: { occupancyStatus: 'VACANT' as const, readinessStatus: 'READY' as const, stateVersion: 1 },
+      targetOutcome: { occupancyStatus: 'VACANT' as const, readinessStatus: 'READY' as const, stateVersion: 1 },
+      impactFingerprint,
+      evaluatedAt,
+      expiresAt,
+      effectiveAt: '2026-09-17T07:00:00.000Z',
+      reservationId,
+      reservationVersion: 1,
+      stayId: '45000000-0000-4000-8000-000000000001',
+      stayVersion: 1,
+      sourceSegmentId: '46000000-0000-4000-8000-000000000001',
+      sourceSegmentVersion: 1,
+      sourceRoomId: '51000000-0000-4000-8000-000000000001',
+      sourceRoomVersion: 1,
+      targetRoomId,
+      targetRoomVersion: 1,
+      checkInAt: '2026-09-17T07:00:00.000Z',
+      checkOutAt: '2026-09-18T02:00:00.000Z',
+      guestCount: 2,
+      preparationObligationId: '42000000-0000-4000-8000-000000000001',
+      checkoutObligationId: '43000000-0000-4000-8000-000000000001',
+      checkoutObligationVersion: 1,
+      plannedCheckoutTargetId: '44000000-0000-4000-8000-000000000001',
+      plannedCheckoutTargetVersion: 1
+    };
+    appServices.reservations.previewRoomMove = vi.fn(async () => preview);
+    appServices.reservations.commitRoomMove = vi.fn(async () => ({
+      reservation: {
+        id: reservationId,
+        roomId: targetRoomId,
+        checkInAt: preview.checkInAt,
+        checkOutAt: preview.checkOutAt,
+        guestCount: 2,
+        status: 'active' as const,
+        preparationObligationId: preview.preparationObligationId,
+        checkoutObligationId: preview.checkoutObligationId,
+        version: 2,
+        actualCheckInAt: null,
+        actualCheckoutAt: null,
+        cancelledAt: null,
+        createdAt: evaluatedAt,
+        updatedAt: evaluatedAt
+      },
+      mode: 'BEFORE_CHECKIN' as const,
+      evaluatedAt,
+      expiresAt,
+      effectiveAt: preview.effectiveAt,
+      movedAt: '2026-09-16T08:01:00.000Z',
+      sourceRoomId: preview.sourceRoomId,
+      targetRoomId,
+      sourceRoomVersion: 2,
+      targetRoomVersion: 2,
+      plannedCheckoutTargetId: preview.plannedCheckoutTargetId,
+      plannedCheckoutTargetVersion: 2,
+      sourceOutcome: { ...preview.sourceOutcome, stateVersion: 2 },
+      targetOutcome: { ...preview.targetOutcome, stateVersion: 2 }
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change/preview`,
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        targetRoomId,
+        reasonCode: 'GUEST_REQUEST',
+        expectedReservationVersion: 1,
+        expectedSourceRoomVersion: 1,
+        expectedTargetRoomVersion: 1
+      }
+    });
+    const commitResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change`,
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'reservation-room-move-0001'
+      },
+      payload: {
+        targetRoomId,
+        expectedReservationVersion: 1,
+        expectedSourceRoomVersion: 1,
+        expectedTargetRoomVersion: 1,
+        evaluatedAt,
+        expiresAt,
+        effectiveAt: preview.effectiveAt,
+        impactFingerprint,
+        reasonCode: 'GUEST_REQUEST'
+      }
+    });
+    const legacyCommitResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change/commit`,
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'reservation-room-move-legacy'
+      },
+      payload: {
+        targetRoomId,
+        expectedReservationVersion: 1,
+        expectedSourceRoomVersion: 1,
+        expectedTargetRoomVersion: 1,
+        evaluatedAt,
+        expiresAt,
+        effectiveAt: preview.effectiveAt,
+        impactFingerprint,
+        reasonCode: 'GUEST_REQUEST'
+      }
+    });
+
+    expect(previewResponse.statusCode).toBe(200);
+    expect(previewResponse.json().preview).toEqual(preview);
+    expect(commitResponse.statusCode).toBe(200);
+    expect(legacyCommitResponse.statusCode).toBe(404);
+    expect(commitResponse.json().result).toMatchObject({
+      evaluatedAt,
+      expiresAt,
+      effectiveAt: preview.effectiveAt,
+      targetRoomId
+    });
+    expect(appServices.reservations.commitRoomMove).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({
+        reservationId,
+        reasonCode: 'GUEST_REQUEST',
+        idempotencyKey: 'reservation-room-move-0001'
+      })
+    );
+    for (const [caseName, historicalSegmentId] of [
+      ['same-instant checked-out', '46000000-0000-4000-8000-000000000001'],
+      ['cancelled retired', '46000000-0000-4000-8000-000000000009']
+    ] as const) {
+      appServices.reservations.previewRoomMove = vi.fn(async () => ({
+        ...preview,
+        mode: 'DURING_STAY' as const,
+        sourceSegmentId: historicalSegmentId,
+        eligible: false,
+        rejectionReasonCodes: ['RESERVATION_NOT_ACTIVE' as const]
+      }));
+      const inactivePreviewResponse = await app.inject({
+        method: 'POST',
+        url: `/v1/reservations/${reservationId}/room-change/preview`,
+        headers: { authorization: 'Bearer access-token' },
+        payload: {
+          targetRoomId,
+          reasonCode: 'GUEST_REQUEST',
+          expectedReservationVersion: 1,
+          expectedSourceRoomVersion: 1,
+          expectedTargetRoomVersion: 1
+        }
+      });
+      expect(inactivePreviewResponse.statusCode, caseName).toBe(200);
+      expect(inactivePreviewResponse.json().preview, caseName).toMatchObject({
+        eligible: false,
+        sourceSegmentId: historicalSegmentId,
+        rejectionReasonCodes: ['RESERVATION_NOT_ACTIVE']
+      });
+    }
+    await app.close();
+  });
+
+  it('passes through the during-stay room-move contract on the existing routes', async () => {
+    const appServices = services();
+    const reservationId = '41000000-0000-4000-8000-000000000001';
+    const sourceRoomId = '51000000-0000-4000-8000-000000000001';
+    const targetRoomId = '51000000-0000-4000-8000-000000000002';
+    const effectiveAt = '2026-09-17T09:20:00.000Z';
+    const evaluatedAt = '2026-09-17T09:19:00.000Z';
+    const expiresAt = '2026-09-17T09:24:00.000Z';
+    const sourceSegmentId = '46000000-0000-4000-8000-000000000001';
+    const targetSegmentId = '46000000-0000-4000-8000-000000000002';
+    const stayId = '45000000-0000-4000-8000-000000000001';
+    const sourceCleaningTargetId = '44000000-0000-4000-8000-000000000002';
+    appServices.reservations.previewRoomMove = vi.fn(async () => ({
+      mode: 'DURING_STAY' as const,
+      eligible: true,
+      rejectionReasonCodes: [],
+      blockingReasonCodes: [],
+      warnings: [],
+      targetBlockReasonCodes: [],
+      sourceOutcome: { occupancyStatus: 'OCCUPIED' as const, readinessStatus: 'READY' as const, stateVersion: 3 },
+      targetOutcome: { occupancyStatus: 'VACANT' as const, readinessStatus: 'READY' as const, stateVersion: 4 },
+      impactFingerprint: 'b'.repeat(64),
+      evaluatedAt,
+      expiresAt,
+      effectiveAt,
+      reservationId,
+      reservationVersion: 2,
+      stayId,
+      stayVersion: 2,
+      sourceSegmentId,
+      sourceSegmentVersion: 1,
+      sourceRoomId,
+      sourceRoomVersion: 3,
+      targetRoomId,
+      targetRoomVersion: 4,
+      checkInAt: '2026-09-16T07:00:00.000Z',
+      checkOutAt: '2026-09-18T02:00:00.000Z',
+      guestCount: 2,
+      preparationObligationId: '42000000-0000-4000-8000-000000000001',
+      checkoutObligationId: '43000000-0000-4000-8000-000000000001',
+      checkoutObligationVersion: 1,
+      plannedCheckoutTargetId: '44000000-0000-4000-8000-000000000001',
+      plannedCheckoutTargetVersion: 1
+    }));
+    appServices.reservations.commitRoomMove = vi.fn(async () => ({
+      reservation: {
+        id: reservationId, roomId: sourceRoomId,
+        checkInAt: '2026-09-16T07:00:00.000Z', checkOutAt: '2026-09-18T02:00:00.000Z',
+        guestCount: 2, status: 'active' as const,
+        preparationObligationId: '42000000-0000-4000-8000-000000000001',
+        checkoutObligationId: '43000000-0000-4000-8000-000000000001', version: 3,
+        actualCheckInAt: '2026-09-16T07:00:00.000Z', actualCheckoutAt: null,
+        cancelledAt: null, createdAt: evaluatedAt, updatedAt: effectiveAt
+      },
+      mode: 'DURING_STAY' as const,
+      evaluatedAt, expiresAt, effectiveAt, movedAt: effectiveAt,
+      sourceRoomId, targetRoomId, sourceRoomVersion: 4, targetRoomVersion: 5,
+      plannedCheckoutTargetId: '44000000-0000-4000-8000-000000000001',
+      plannedCheckoutTargetVersion: 2,
+      sourceOutcome: { occupancyStatus: 'VACANT' as const, readinessStatus: 'CLEANING_REQUIRED' as const, stateVersion: 4 },
+      targetOutcome: { occupancyStatus: 'OCCUPIED' as const, readinessStatus: 'READY' as const, stateVersion: 5 },
+      stay: { id: stayId, version: 3, currentRoomId: sourceRoomId },
+      segments: [
+        { id: sourceSegmentId, roomId: sourceRoomId, startsAt: '2026-09-16T07:00:00.000Z', endsAt: effectiveAt },
+        { id: targetSegmentId, roomId: targetRoomId, startsAt: effectiveAt, endsAt: '2026-09-18T02:00:00.000Z' }
+      ],
+      sourceCleaningTargetId,
+      pinAccessEndsAt: effectiveAt
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+
+    const previewResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change/preview`,
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        targetRoomId, effectiveAt, reasonCode: 'GUEST_REQUEST',
+        expectedReservationVersion: 2, expectedSourceRoomVersion: 3,
+        expectedTargetRoomVersion: 4
+      }
+    });
+    const commitResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/room-change`,
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'during-stay-move-0001' },
+      payload: {
+        targetRoomId, effectiveAt, evaluatedAt, expiresAt,
+        impactFingerprint: 'b'.repeat(64), reasonCode: 'GUEST_REQUEST',
+        expectedReservationVersion: 2, expectedSourceRoomVersion: 3,
+        expectedTargetRoomVersion: 4
+      }
+    });
+
+    expect(previewResponse.statusCode).toBe(200);
+    expect(previewResponse.json().preview).toMatchObject({ mode: 'DURING_STAY', stayId, sourceSegmentId });
+    expect(commitResponse.statusCode).toBe(200);
+    expect(commitResponse.json().result).toMatchObject({
+      mode: 'DURING_STAY', stay: { id: stayId, currentRoomId: sourceRoomId },
+      sourceCleaningTargetId, pinAccessEndsAt: effectiveAt
+    });
+    expect(appServices.reservations.previewRoomMove).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ reservationId, targetRoomId, effectiveAt })
+    );
+    await app.close();
+  });
+
   it('lists and publishes strict checkout templates for active business admins', async () => {
     const appServices = services();
     const app = await buildApp({ env, services: appServices, logger: false });
@@ -568,11 +973,13 @@ describe('application', () => {
     expect(listed.headers['cache-control']).toBe('no-store');
     expect(listed.json().templates.roomTypes).toHaveLength(4);
 
-    const slots = Array.from({ length: 10 }, (_, displayOrder) => ({
-      slotKey: displayOrder === 0 ? 'tv-on' : `slot-${displayOrder}`,
+    const slots = Array.from({ length: 9 }, (_, displayOrder) => ({
+      slotKey: displayOrder === 0 ? 'tv-on' : displayOrder === 1 ? 'entry-storage' :
+        displayOrder === 8 ? 'extra-proof' : `slot-${displayOrder}`,
       displayOrder,
-      required: displayOrder < 9,
-      label: `사진 ${displayOrder + 1}`
+      required: displayOrder < 8,
+      label: `사진 ${displayOrder + 1}`,
+      maxPhotos: displayOrder === 8 ? 10 : 1
     }));
     const published = await app.inject({
       method: 'POST',
@@ -587,7 +994,7 @@ describe('application', () => {
     });
     expect(published.statusCode).toBe(201);
     expect(published.headers['cache-control']).toBe('no-store');
-    expect(published.json().template).toMatchObject({ version: 7, status: 'published' });
+    expect(published.json().template).toMatchObject({ version: 8, status: 'published' });
     expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'admin' }),
       expect.objectContaining({
@@ -596,6 +1003,22 @@ describe('application', () => {
         idempotencyKey: 'cleaning-template-publish-0001'
       })
     );
+
+    const legacyReplaySlots = Array.from({ length: 10 }, (_, displayOrder) => ({
+      slotKey: displayOrder === 0 ? 'tv-on' : `legacy-${displayOrder}`,
+      displayOrder,
+      required: displayOrder < 9,
+      label: `과거 사진 ${displayOrder + 1}`
+    }));
+    const legacyReplay = await app.inject({
+      method: 'POST', url: '/v1/cleaning-templates',
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-v7-replay' },
+      payload: {
+        roomTypeCode: 'standard', cleaningKind: 'checkout', expectedVersion: 0,
+        durationMinutes: 60, slots: legacyReplaySlots
+      }
+    });
+    expect(legacyReplay.statusCode).toBe(201);
 
     const firstSlot = slots[0];
     if (!firstSlot) throw new Error('slot fixture is empty');
@@ -613,7 +1036,19 @@ describe('application', () => {
       });
       expect(response.statusCode).toBe(400);
     }
-    expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledTimes(1);
+    for (const [name, invalidSlots] of [
+      ['entry-number', slots.map((slot, index) => index === 2 ? { ...slot, slotKey: 'entry-number' } : slot)],
+      ['former-v7-count', [...slots, { ...firstSlot, slotKey: 'slot-9', displayOrder: 9 }]],
+      ['bad-extra-limit', slots.map((slot) => slot.slotKey === 'extra-proof' ? { ...slot, maxPhotos: 9 } : slot)]
+    ] as const) {
+      const response = await app.inject({
+        method: 'POST', url: '/v1/cleaning-templates',
+        headers: { authorization: 'Bearer access-token', 'idempotency-key': `template-invalid-${name}` },
+        payload: { roomTypeCode: 'standard', cleaningKind: 'checkout', expectedVersion: 0, slots: invalidSlots }
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledTimes(2);
     await app.close();
   });
 

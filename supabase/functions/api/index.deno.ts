@@ -128,11 +128,18 @@ Deno.test("cleaning template router exposes only exact checkout GET and POST rou
   const payload = btoa(JSON.stringify({ session_id: sessionId }))
     .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   const token = `e30.${payload}.signature`;
-  const slots = Array.from({ length: 10 }, (_, displayOrder) => ({
-    slotKey: displayOrder === 0 ? "tv-on" : `slot-${displayOrder}`,
+  const slots = Array.from({ length: 9 }, (_, displayOrder) => ({
+    slotKey: displayOrder === 0
+      ? "tv-on"
+      : displayOrder === 1
+      ? "entry-storage"
+      : displayOrder === 8
+      ? "extra-proof"
+      : `slot-${displayOrder}`,
     displayOrder,
-    required: displayOrder < 9,
+    required: displayOrder < 8,
     label: `사진 ${displayOrder + 1}`,
+    maxPhotos: displayOrder === 8 ? 10 : 1,
   }));
   const roomTypes = ["standard", "premium", "oceanPremium", "oceanFamily"].map(
     (roomTypeCode) => ({
@@ -146,7 +153,7 @@ Deno.test("cleaning template router exposes only exact checkout GET and POST rou
   );
   const published = {
     id: "30000000-0000-4000-8000-000000000001",
-    version: 7,
+    version: 8,
     status: "published",
     durationMinutes: 60,
     slots,
@@ -205,7 +212,7 @@ Deno.test("cleaning template router exposes only exact checkout GET and POST rou
     dependencies,
   );
   assert(
-    posted.status === 201 && (await posted.json()).template.version === 7,
+    posted.status === 201 && (await posted.json()).template.version === 8,
     "exact template publish POST is reachable",
   );
   for (

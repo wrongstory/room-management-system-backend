@@ -61,7 +61,103 @@ select is((select count(*)::int from private.notification_delivery_outbox),1,'on
 select is((select count(*)::int from public.cleaning_attempts),0,'notify never creates attempts');
 
 select ok(not ('CLEANING_REQUIRED'=any(private.room_block_reason_codes(
- (select room_id from plans where label='notified'),'2034-09-30 09:00+09',false,false))),'private planned target does not activate room cleaning-required projection');
+ (select room_id from plans where label='notified'),'2034-09-30 09:00+09',false,true))),'private planned target does not activate room cleaning-required projection');
+savepoint arrival_lifecycle_boundaries;
+insert into public.reservations(
+  id,room_id,check_in_at,check_out_at,guest_count,status,created_by,updated_by
+)
+values (
+  'a3000000-0000-4000-8000-000000000010',
+  (select room_id from plans where label='notified'),
+  '2034-10-03 14:00+09','2034-10-04 13:00+09',2,'active',
+  'a2000000-0000-4000-8000-000000000001',
+  'a2000000-0000-4000-8000-000000000001'
+);
+select is((select reservation_lifecycle from private.room_reservation_lifecycle_at(
+  (select room_id from plans where label='notified'),'2034-09-29 23:59:59+09')),
+  'FUTURE','D+2 reservation preserves the current readiness display lifecycle');
+select is((select reservation_lifecycle from private.room_reservation_lifecycle_at(
+  (select room_id from plans where label='notified'),'2034-09-30 23:59:59+09')),
+  'RESERVATION_PRESENT','D-1 23:59:59 is reservation-present in Asia/Seoul');
+select is((select reservation_lifecycle from private.room_reservation_lifecycle_at(
+  (select room_id from plans where label='notified'),'2034-10-01 00:00:00+09')),
+  'ARRIVAL_PENDING','D-day midnight starts arrival-pending in Asia/Seoul');
+select is((select reservation_lifecycle from private.room_reservation_lifecycle_at(
+  (select room_id from plans where label='notified'),'2034-10-01 15:59:59+09')),
+  'ARRIVAL_PENDING','arrival-pending lasts until the exact check-in instant');
+select ok((select reservation_lifecycle='OCCUPIED'
+    and next_reservation_id='a3000000-0000-4000-8000-000000000010'::uuid
+    and next_check_in_at='2034-10-03 14:00+09'::timestamptz
+    and next_check_out_at='2034-10-04 13:00+09'::timestamptz
+  from private.room_reservation_lifecycle_at(
+    (select room_id from plans where label='notified'),'2034-10-01 16:00:00+09')),
+  'exact check-in is occupied while next fields select the later future reservation');
+select is((select reservation_lifecycle from private.room_reservation_lifecycle_at(
+  (select room_id from plans where label='notified'),'2034-10-02 11:00:00+09')),
+  'RESERVATION_PRESENT','exact checkout excludes the old interval and sees tomorrow next arrival');
+select is((select reservation_lifecycle from private.room_reservation_lifecycle_at(
+  (select room_id from plans where label='notified'),'2034-10-03 13:59:59+09')),
+  'ARRIVAL_PENDING','custom early check-in time remains arrival-pending until its stored instant');
+select is((select reservation_lifecycle from private.room_reservation_lifecycle_at(
+  (select room_id from plans where label='notified'),'2034-10-03 14:00:00+09')),
+  'OCCUPIED','custom early check-in time becomes occupied at the stored instant');
+select is((select reservation_lifecycle from private.room_reservation_lifecycle_at(
+  (select room_id from plans where label='notified'),'2034-10-04 13:00:00+09')),
+  'NONE','custom late checkout time uses the exact half-open boundary');
+rollback to savepoint arrival_lifecycle_boundaries;
+select ok((select cardinality(blocking_reason_codes)=0
+    and readiness_reason_codes=array['CLEANING_REQUIRED']::text[]
+    and readiness_status='CLEANING_REQUIRED'
+  from private.room_readiness_axes_at(
+    array['CLEANING_REQUIRED']::text[],'verified',false)),
+  'cleaning is a readiness reason and never becomes BLOCKED by itself');
+select ok((select cardinality(blocking_reason_codes)=0
+    and readiness_reason_codes=array['PIN_UNCONFIGURED']::text[]
+    and readiness_status='CHECKIN_BLOCKED'
+  from private.room_readiness_axes_at(array[]::text[],'unconfigured',true)),
+  'unconfigured PIN is a current check-in readiness reason, not a bookability blocker');
+select ok((select cardinality(readiness_reason_codes)=0 and readiness_status='READY'
+  from private.room_readiness_axes_at(array[]::text[],'mismatch',false)),
+  'future PIN mismatch remains outside readiness until the current check-in window');
+select is(private.room_reservation_phase_at(
+  (select room_id from plans where label='notified'),'2034-10-01 15:59:59+09'),
+  'upcoming','reservation phase is upcoming before the exact check-in boundary');
+select is(private.room_reservation_phase_at(
+  (select room_id from plans where label='notified'),'2034-10-01 16:00:00+09'),
+  'current','reservation phase is current at the inclusive check-in boundary');
+select ok('RESERVATION_CURRENT'=any(private.room_block_reason_codes(
+  (select room_id from plans where label='notified'),'2034-10-01 16:00:00+09',true,true)),
+  'current reservation interval blocks current allocation without pretending actual occupancy');
+select ok(not ('RESERVATION_CURRENT'=any(private.room_block_reason_codes(
+  (select room_id from plans where label='notified'),'2034-10-01 16:00:00+09',true,true,
+  (select reservation_id from plans where label='notified')))),
+  'check-in preparation validation excludes the reservation being transitioned from the room-level current-stay block');
+select is(private.room_reservation_phase_at(
+  (select room_id from plans where label='notified'),'2034-10-02 11:00:00+09'),
+  'none','reservation phase excludes the exact checkout boundary');
+savepoint actual_occupancy_checkout_boundary;
+update public.reservations
+set actual_check_in_at=check_in_at
+where id=(select reservation_id from plans where label='notified');
+select is(private.room_reservation_phase_at(
+  (select room_id from plans where label='notified'),'2034-10-02 11:00:00+09'),
+  'none','actual occupancy does not extend the scheduled reservation phase past the checkout boundary');
+select ok('OCCUPIED'=any(private.room_block_reason_codes(
+  (select room_id from plans where label='notified'),'2034-10-02 11:00:00+09',true,true)),
+  'late checkout processing remains visible through the independent occupied axis');
+rollback to savepoint actual_occupancy_checkout_boundary;
+select ok((select evaluated_at is not null
+  and server_time=evaluated_at
+  and reservation_phase=private.room_reservation_phase_at(id,evaluated_at)
+  and occupancy_status=case when occupied then 'OCCUPIED' else 'VACANT' end
+  and reservation_lifecycle in ('NONE','FUTURE','RESERVATION_PRESENT','ARRIVAL_PENDING','OCCUPIED')
+  and readiness_status in ('READY','CLEANING_REQUIRED','CHECKIN_BLOCKED')
+  and primary_display_status in ('BLOCKED','OCCUPIED','ARRIVAL_PENDING','RESERVATION_PRESENT','CLEANING_REQUIRED','READY')
+  and cleaning_required=('CLEANING_REQUIRED'=any(reason_codes))
+  and allocation_ready=(array_length(reason_codes,1) is null)
+  from public.get_room_operational_projection(
+    'a2000000-0000-4000-8000-000000000001',(select room_id from plans where label='notified'))),
+  'public projection uses one evaluated-at snapshot without a wall-clock-dependent fixture');
 select throws_ok($test$ insert into public.cleaning_attempts(cleaning_target_id,assignment_id,maid_profile_id,attempt_number,assignment_revision,status,template_snapshot,room_snapshot)
 select target_id,assignment_id,'a2000000-0000-4000-8000-000000000002',1,2,'superseded','{}','{}' from plans where label='notified' $test$,'23514','CHECKOUT_NOT_MATERIALIZED','superseded label cannot bypass pre-checkout attempt creation guard');
 
@@ -155,6 +251,9 @@ select ok((select count(*)=3 and bool_and(not requires_action)
   'exact blocking issue, PIN status change, and operation block each emit one informational notification');
 select public.process_due_reservation_transitions('a2000000-0000-4000-8000-000000000001','2034-10-02 13:00+09','planning-scheduler-1',repeat('e',64));
 select ok((select current_cleaning_target_id=planned_cleaning_target_id and status='materialized' from public.checkout_cleaning_obligations where reservation_id=(select reservation_id from plans where label='notified')),'C scheduled checkout promotes exactly the same identity');
+select ok(private.room_current_cleaning_required_at(
+  (select room_id from plans where label='notified'),'2034-10-02 13:00+09'),
+  'materialized checkout activates current room cleaning-required projection');
 select ok((select not is_current and notified_at is not null from public.cleaning_assignments where id=(select assignment_id from plans where label='notified'))
   and (select count(*)=1 from public.cleaning_assignments where cleaning_target_id=(select target_id from plans where label='notified')
     and is_current and notified_at is not null),'C promotion preserves old history and the replacement current notified revision');
@@ -214,6 +313,13 @@ select public.manual_checkout_reservation('a2000000-0000-4000-8000-000000000001'
 select is((select count(*)::int from public.cleaning_targets where reservation_id=(select reservation_id from plans where label='manual')),1,'D early manual checkout reuses one target');
 select ok((select not is_current from public.cleaning_assignments where id=(select assignment_id from plans where label='manual')),'D old assignment immutable revision closed');
 select ok((select effective_service_date=(now() at time zone 'Asia/Seoul')::date and original_service_date=(now() at time zone 'Asia/Seoul')::date+1 from public.cleaning_targets where id=(select target_id from plans where label='manual')),'D original plan retained and actual service date updated');
+select ok(private.room_reservation_phase_at(
+  (select room_id from plans where label='manual'),date_trunc('minute',now()))='none'
+  and not ('OCCUPIED'=any(private.room_block_reason_codes(
+    (select room_id from plans where label='manual'),date_trunc('minute',now()),true,true)))
+  and 'CLEANING_REQUIRED'=any(private.room_block_reason_codes(
+    (select room_id from plans where label='manual'),date_trunc('minute',now()),true,true)),
+  'actual checkout clears occupancy and activates checkout cleaning without extending reservation phase');
 select is((select count(*)::int from public.cleaning_target_schedule_revisions where cleaning_target_id=(select target_id from plans where label='manual') and reason_code='MANUAL_CHECKOUT'),1,'D one access schedule revision');
 select is((select count(*)::int from public.cleaning_attempts),0,'D no attempt creation before #28 activation');
 

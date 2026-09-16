@@ -611,7 +611,7 @@ Table public.cleaning_template_versions {
   version int [not null]
   status text [not null]
   duration_minutes int [note: '#165 checkout은 선택값이며 제공 시 1..10080. 비-checkout은 DB constraint로 non-null 유지. 실제 수행시간과 assignment preview 시간의 정본이 아님.']
-  photo_slots jsonb [not null, note: 'Legacy JSON retained. Published payload immutable; explicit v7+ checkout counts/required tv-on validated. No implicit duration-policy confirmation.']
+  photo_slots jsonb [not null, note: 'Legacy JSON retained. Published payload immutable. Pre-A v7+ without maxPhotos keeps 10/11/13/15; A-contract v8+ with complete metadata enforces 9/10/12/14, required tv-on/entry-storage, optional extra-proof maxPhotos 10, and no entry-number.']
   published_at timestamptz
   created_by uuid [not null]
   created_at timestamptz [not null]
@@ -619,7 +619,7 @@ Table public.cleaning_template_versions {
   Indexes {
     (room_type_id, cleaning_kind, version) [unique]
   }
-  Note: '#156/#165 RPC-only checkout catalog. Active password-complete business admin publishes immutable v7+ slot versions with live-session, expected-version CAS and scoped idempotency; checkout duration is optional and never inferred. Prior published rows retire and exactly one current published row remains. No source seed or fallback.'
+  Note: '#156/#165/#179 RPC-only checkout catalog. Active password-complete business admin publishes immutable A-contract v8+ slot versions with live-session, expected-version CAS and scoped idempotency; checkout duration is optional and never inferred. Pre-A v7+ rows without maxPhotos and frozen snapshots remain historical. Prior published rows retire and exactly one current published row remains. No source seed or fallback.'
 }
 
 Table private.photo_template_slots {
@@ -673,6 +673,8 @@ Table private.attempt_photo_versions {
   size_bytes int [not null]
   uploaded_at timestamptz [not null]
   purge_after timestamptz [not null, note: 'Immutable uploaded_at + 168 hours; resubmission does not reset.']
+  collection_item_id uuid
+  item_revision bigint
   Indexes {
     (id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version) [unique]
     (cleaning_attempt_id, target_photo_slot_id, version) [unique]
@@ -722,6 +724,65 @@ Table private.attempt_photo_changes {
   }
 }
 
+Table private.attempt_photo_collection_states {
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  revision bigint [not null]
+  Indexes { (cleaning_attempt_id, target_photo_slot_id) [pk] }
+  Note: '#180 v8 checkout extra-proof only. Collection-wide CAS revision advances once per append, replace, or delete.'
+}
+
+Table private.attempt_photo_collection_items {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  display_order int [not null, note: '0..9; stable for item lifetime']
+  revision bigint [not null]
+  active boolean [not null]
+  photo_version_id uuid
+  photo_version bigint
+  Indexes {
+    (id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id) [unique]
+    (cleaning_attempt_id, target_photo_slot_id, display_order) [unique, note: 'active rows only']
+    photo_version_id
+  }
+  Note: '#180 stable client item UUID. Replace preserves identity/order; delete leaves an inactive tombstone and the UUID cannot be reused.'
+}
+
+Table private.attempt_photo_collection_changes {
+  id uuid [pk]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  target_photo_slot_id uuid [not null]
+  collection_revision bigint [not null]
+  photo_item_id uuid [not null]
+  item_revision bigint [not null]
+  display_order int [not null]
+  change_type text [not null, note: 'appended / replaced / deleted']
+  photo_version_id uuid
+  photo_version bigint
+  occurred_at timestamptz [not null]
+  Indexes {
+    (cleaning_attempt_id, target_photo_slot_id, collection_revision) [unique]
+    (photo_item_id, item_revision) [unique]
+  }
+  Note: '#180 immutable collection history; delete carries no current photo pointer.'
+}
+
+Table private.photo_collection_commands {
+  actor_profile_id uuid [not null]
+  command_type text [not null, note: 'photo.collection.delete']
+  idempotency_key_digest text [not null]
+  request_hash text [not null]
+  photo_item_id uuid [not null]
+  response_payload jsonb [not null]
+  completed_at timestamptz [not null]
+  Indexes { (actor_profile_id, command_type, idempotency_key_digest) [pk] }
+  Note: '#180 immutable delete replay receipt. Raw idempotency key is never stored.'
+}
+
 Table private.submission_photo_bindings {
   submission_id uuid [not null]
   cleaning_attempt_id uuid [not null]
@@ -729,14 +790,17 @@ Table private.submission_photo_bindings {
   target_photo_slot_id uuid [not null]
   photo_version_id uuid [not null]
   photo_version bigint [not null]
+  collection_item_id uuid
+  item_revision bigint
+  item_display_order int
   Indexes {
-    (submission_id, target_photo_slot_id) [pk]
+    (submission_id, target_photo_slot_id, photo_version_id) [pk]
     (photo_version_id, cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, photo_version)
     cleaning_attempt_id
     cleaning_target_id
     target_photo_slot_id
   }
-  Note: 'Immutable membership references canonical cleaning_submissions and exact attempt/target/slot/photo version; no provider object or raw payload copy.'
+  Note: 'Immutable membership references canonical cleaning_submissions and exact attempt/target/slot/photo version. #180 collection rows also seal item identity/revision/order; no provider object or raw payload copy.'
 }
 
 Table private.submission_photo_binding_sets {
@@ -1846,6 +1910,8 @@ Table private.photo_upload_admissions {
   assignment_revision bigint [not null]
   target_photo_slot_id uuid [not null]
   expected_photo_revision bigint [not null]
+  collection_item_id uuid
+  expected_item_revision bigint
   idempotency_key_digest text [not null]
   reserved_bytes integer [not null, note: 'Exactly307200; before decoding']
   created_at timestamptz [not null]
@@ -1905,7 +1971,7 @@ Ref: private.photo_drive_identities.(object_id,operation_id) - private.photo_pro
 Table private.photo_upload_operations {
   id uuid [pk]
   actor_profile_id uuid [not null, ref: > public.profiles.id]
-  command_type text [not null, note: 'photo.upload only']
+  command_type text [not null, note: 'photo.upload / photo.collection.upload']
   idempotency_key_digest text [not null, note: '64 lower hex; never raw key']
   request_hash text [not null]
   cleaning_attempt_id uuid [not null]
@@ -1914,6 +1980,8 @@ Table private.photo_upload_operations {
   assignment_revision bigint [not null]
   target_photo_slot_id uuid [not null]
   expected_photo_revision bigint [not null]
+  collection_item_id uuid
+  expected_item_revision bigint
   sha256 text [not null]
   mime_type text [not null]
   size_bytes integer [not null]
@@ -2246,4 +2314,63 @@ Table private.photo_folder_purge_jobs {
   purged_at timestamptz
   outcome text
   Note: 'Verified empty room first, date only after every child is terminal. Provider emptiness is never the sole DB authority.'
+}
+
+// #187 Phase C candidate. Private stay/segment history is the occupancy authority;
+// public.reservations.room_id remains the original check-in contract room.
+Table private.reservation_stays {
+  id uuid [pk]
+  reservation_id uuid [not null, unique, ref: - public.reservations.id]
+  status text [not null, note: 'scheduled/active/completed/cancelled']
+  scheduled_check_in_at timestamptz [not null]
+  scheduled_check_out_at timestamptz [not null]
+  actual_check_in_at timestamptz
+  actual_checkout_at timestamptz
+  version bigint [not null]
+}
+Table private.stay_room_segments {
+  id uuid [pk]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  room_id uuid [not null, ref: > public.rooms.id]
+  starts_at timestamptz [not null]
+  ends_at timestamptz [not null]
+  source_reservation_id uuid [not null, ref: > public.reservations.id]
+  move_event_id uuid
+  retired_at timestamptz
+  version bigint [not null]
+  Note: 'Non-retired [starts_at,ends_at) segments have a GiST room exclusion. Source end and target start share one effectiveAt.'
+}
+Table private.reservation_room_move_events {
+  id uuid [pk]
+  reservation_id uuid [not null, ref: > public.reservations.id]
+  stay_id uuid [ref: > private.reservation_stays.id]
+  from_room_id uuid [not null, ref: > public.rooms.id]
+  to_room_id uuid [not null, ref: > public.rooms.id]
+  effective_at timestamptz [not null]
+  mode text [not null, note: 'BEFORE_CHECKIN/DURING_STAY']
+  reason_code text [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  command_key text [not null, unique]
+  Note: 'Immutable safe event; guest name, PIN, photo locator and raw request are forbidden.'
+}
+Table private.stay_segment_checkout_obligations {
+  id uuid [pk]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  source_segment_id uuid [not null, unique, ref: - private.stay_room_segments.id]
+  room_id uuid [not null, ref: > public.rooms.id]
+  cleaning_target_id uuid [unique, ref: - public.cleaning_targets.id]
+  effective_service_date date [not null]
+  available_from timestamptz [not null]
+  due_at timestamptz
+  status text [not null]
+  version bigint [not null]
+}
+Table private.room_pin_access_scheduled_revocations {
+  lease_id uuid [pk, ref: - public.room_pin_access_leases.id]
+  reservation_id uuid [not null, ref: > public.reservations.id]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  move_event_id uuid [not null, ref: > private.reservation_room_move_events.id]
+  effective_at timestamptz [not null]
+  reason_code text [not null]
+  Note: 'Preserves access before a future move and denies query-time authority at/after effectiveAt.'
 }

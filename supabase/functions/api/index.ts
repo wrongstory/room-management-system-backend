@@ -117,13 +117,16 @@ import {
   cancelReservation,
   changeReservation,
   cleaningTargetIdFromPath,
+  commitReservationRoomMove,
   createManualCleaningRequest,
   createReservation,
   getReservation,
   listReservations,
   manualCheckoutReservation,
+  previewReservationRoomMove,
   processReservationTransitions,
   reservationIdFromPath,
+  reservationRoomMoveIdFromPath,
 } from "../_shared/reservation-api.ts";
 import {
   changeRoomMasterData,
@@ -281,7 +284,21 @@ export async function handleApiRequest(
         profileStatus: identity.profileStatus,
       };
       const result = photo.kind === "upload"
-        ? await service.upload(request, context, photo.attemptId, photo.slotId)
+        ? await service.upload(
+          request,
+          context,
+          photo.attemptId,
+          photo.slotId,
+          photo.photoItemId,
+        )
+        : photo.kind === "delete-item"
+        ? await service.deleteItem(
+          request,
+          context,
+          photo.attemptId,
+          photo.slotId,
+          photo.photoItemId,
+        )
         : photo.kind === "slots"
         ? await service.slots(request, context, photo.attemptId)
         : await service.status(request, context, photo.operationId);
@@ -1229,6 +1246,42 @@ export async function handleApiRequest(
             request,
             clients,
             actor,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/reservations/") &&
+      path.endsWith("/room-change/preview")
+    ) {
+      return jsonResponse(
+        {
+          preview: await previewReservationRoomMove(
+            request,
+            clients,
+            actor,
+            reservationRoomMoveIdFromPath(path, "preview"),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/reservations/") &&
+      /^\/v1\/reservations\/[^/]+\/room-change$/.test(path)
+    ) {
+      return jsonResponse(
+        {
+          result: await commitReservationRoomMove(
+            request,
+            clients,
+            actor,
+            reservationRoomMoveIdFromPath(path, "commit"),
           ),
         },
         200,

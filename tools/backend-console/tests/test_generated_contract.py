@@ -114,6 +114,26 @@ def test_password_change_replay_errors_are_generated() -> None:
     }
 
 
+def test_during_stay_room_move_errors_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert {
+        ErrorCode.OPEN_ENDED_STAY_REQUIRES_END.value,
+        ErrorCode.INVALID_MOVE_EFFECTIVE_AT.value,
+        ErrorCode.TARGET_ROOM_NOT_READY.value,
+        ErrorCode.TARGET_ROOM_OVERLAP.value,
+        ErrorCode.TARGET_ROOM_BLOCKED.value,
+        ErrorCode.PIN_LEASE_ACTIVE.value,
+    } == {
+        "OPEN_ENDED_STAY_REQUIRES_END",
+        "INVALID_MOVE_EFFECTIVE_AT",
+        "TARGET_ROOM_NOT_READY",
+        "TARGET_ROOM_OVERLAP",
+        "TARGET_ROOM_BLOCKED",
+        "PIN_LEASE_ACTIVE",
+    }
+
+
 def test_photo_purge_status_is_generated_as_bounded_metadata_only() -> None:
     assert "photo_purge" in {field.name for field in fields(DeveloperDatabaseStatus)}
     assert {"status", "last_heartbeat", "backlog", "checked_at"} <= {

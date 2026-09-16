@@ -18,8 +18,9 @@ jobs:
     timeout-minutes: 5
     env:
       PUBLIC_API_BASE_URL: ${{ vars.PUBLIC_API_BASE_URL }}
-      EXPECTED_OPENAPI_PATH_COUNT: "39"
-      EXPECTED_OPENAPI_OPERATION_COUNT: "43"
+      EXPECTED_OPENAPI_VERSION: "0.3.0"
+      EXPECTED_OPENAPI_PATH_COUNT: "109"
+      EXPECTED_OPENAPI_OPERATION_COUNT: "117"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
@@ -31,6 +32,7 @@ jobs:
         run: >-
           npm run swagger:pages:build --
           --source-url "$PUBLIC_API_BASE_URL/openapi.json"
+          --expected-version "$EXPECTED_OPENAPI_VERSION"
           --expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"
           --expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"
           --output-dir .tmp/swagger-site

@@ -14,11 +14,21 @@ const actor: Actor = {
   accessToken: token
 };
 function slots() {
+  return Array.from({ length: 9 }, (_, displayOrder) => ({
+    slotKey: displayOrder === 0 ? 'tv-on' : displayOrder === 1 ? 'entry-storage' :
+      displayOrder === 8 ? 'extra-proof' : `slot-${displayOrder}`,
+    displayOrder,
+    required: displayOrder < 8,
+    label: `사진 ${displayOrder + 1}`,
+    maxPhotos: displayOrder === 8 ? 10 : 1
+  }));
+}
+function legacyV7Slots() {
   return Array.from({ length: 10 }, (_, displayOrder) => ({
-    slotKey: displayOrder === 0 ? 'tv-on' : `slot-${displayOrder}`,
+    slotKey: displayOrder === 0 ? 'tv-on' : `legacy-${displayOrder}`,
     displayOrder,
     required: displayOrder < 9,
-    label: `사진 ${displayOrder + 1}`
+    label: `과거 사진 ${displayOrder + 1}`
   }));
 }
 function setup(data: unknown, message?: string) {
@@ -59,9 +69,22 @@ describe('SupabaseCleaningTemplateService', () => {
     }]);
   });
 
+  it.each([7, 8, 12])('keeps historical v%s catalog projections readable without A metadata', async (version) => {
+    const data = catalog();
+    const room = data.roomTypes[0];
+    if (!room) throw new Error('catalog fixture is empty');
+    const currentPublished = {
+      id: '30000000-0000-4000-8000-000000000007', version, status: 'published' as const,
+      durationMinutes: 60, slots: legacyV7Slots(),
+      publishedAt: '2030-01-01T00:00:00Z', createdAt: '2030-01-01T00:00:00Z'
+    };
+    Object.assign(room, { configured: true, expectedVersion: version, currentPublished });
+    await expect(setup(data).service.listCheckout(actor)).resolves.toEqual(data);
+  });
+
   it('sorts immutable slots and sends a stable scoped request hash', async () => {
     const data = {
-      id: '30000000-0000-4000-8000-000000000001', version: 7, status: 'published',
+      id: '30000000-0000-4000-8000-000000000001', version: 8, status: 'published',
       durationMinutes: 60, slots: slots(), publishedAt: '2030-01-01T00:00:00Z', createdAt: '2030-01-01T00:00:00Z'
     };
     const first = setup(data);
@@ -78,14 +101,14 @@ describe('SupabaseCleaningTemplateService', () => {
     expect(firstCall.name).toBe('publish_checkout_cleaning_template');
     expect(firstCall.args.p_session_id).toBe(sessionId);
     expect((firstCall.args.p_slots as Array<{ displayOrder: number }>).map((slot) => slot.displayOrder))
-      .toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      .toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     expect(firstCall.args.p_request_hash).toBe(second.calls[0]?.args.p_request_hash);
     expect(String(firstCall.args.p_request_hash)).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it('publishes photo slots without inventing a template duration', async () => {
     const data = {
-      id: '30000000-0000-4000-8000-000000000001', version: 7, status: 'published',
+      id: '30000000-0000-4000-8000-000000000001', version: 8, status: 'published',
       durationMinutes: null, slots: slots(), publishedAt: '2030-01-01T00:00:00Z', createdAt: '2030-01-01T00:00:00Z'
     };
     const omitted = setup(data);
@@ -130,7 +153,7 @@ describe('SupabaseCleaningTemplateService', () => {
 
   it('fails closed on impossible RFC 3339 database timestamps', async () => {
     const base = {
-      id: '30000000-0000-4000-8000-000000000001', version: 7, status: 'published',
+      id: '30000000-0000-4000-8000-000000000001', version: 8, status: 'published',
       durationMinutes: 60, slots: slots(), publishedAt: '2028-02-29T23:59:59.123456789+09:00',
       createdAt: '2028-02-29T23:59:59.123456789+09:00'
     };
@@ -139,7 +162,7 @@ describe('SupabaseCleaningTemplateService', () => {
       expectedVersion: 0, durationMinutes: 60, slots: slots(),
       idempotencyKey: 'template-publish-timestamp'
     };
-    await expect(setup(base).service.publishCheckout(actor, input)).resolves.toMatchObject({ version: 7 });
+    await expect(setup(base).service.publishCheckout(actor, input)).resolves.toMatchObject({ version: 8 });
     for (const field of ['publishedAt', 'createdAt'] as const) {
       for (const value of [
         '2027-02-29T00:00:00Z',

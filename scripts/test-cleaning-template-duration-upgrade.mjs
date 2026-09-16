@@ -11,6 +11,7 @@ const supabaseCli = fileURLToPath(
 );
 const container = "supabase_db_room-management-system-backend";
 const migrationVersion = "20260915000628";
+const currentMigrationVersion = "20260916030930";
 const baselineVersion = "20260914094126";
 const adminId = "e1650000-0000-4000-8000-000000000001";
 const sessionId = "e1650000-0000-4000-8000-000000000201";
@@ -47,7 +48,7 @@ function snapshot() {
         'slots',(select jsonb_agg(to_jsonb(x) order by template_version_id,display_order) from private.photo_template_slots x where template_version_id in (select id from template)),
         'reservation',(select to_jsonb(x) from public.reservations x where id='${reservationId}'),
         'obligation',(select to_jsonb(x) from public.checkout_cleaning_obligations x where reservation_id='${reservationId}'),
-        'target',(select jsonb_agg(to_jsonb(x) order by id) from public.cleaning_targets x where id in (select id from target)),
+        'target',(select jsonb_agg(to_jsonb(x)-'stay_segment_checkout_obligation_id' order by id) from public.cleaning_targets x where id in (select id from target)),
         'audit',(select jsonb_agg(to_jsonb(x) order by id) from public.audit_events x where actor_profile_id='${adminId}'),
         'receipts',(select jsonb_agg(to_jsonb(x) order by command_type,idempotency_key) from private.command_executions x where actor_profile_id='${adminId}')
       ) value
@@ -61,33 +62,49 @@ try {
   const before = snapshot();
 
   run(process.execPath, [supabaseCli, "migration", "up", "--local"], { stdio: "inherit" });
-  assert(before === snapshot(), "55 -> 56 upgrade must preserve existing template/reservation ledgers");
+  assert(before === snapshot(), "55 -> current upgrade must preserve existing template/reservation ledgers");
   assert(
     psql(`select concat_ws('|',
       exists(select 1 from supabase_migrations.schema_migrations where version='${migrationVersion}'),
-      (select duration_minutes from public.cleaning_template_versions
+      exists(select 1 from supabase_migrations.schema_migrations where version='${currentMigrationVersion}'),
+      (select concat_ws(':',version,duration_minutes) from public.cleaning_template_versions
        where room_type_id=(select id from public.room_types where code='standard')
          and cleaning_kind='checkout' and status='published'),
       (select count(*) from public.cleaning_targets where reservation_id='${reservationId}'),
       (select is_nullable from information_schema.columns
        where table_schema='public' and table_name='cleaning_template_versions'
-         and column_name='duration_minutes'))`) === "t|60|1|YES",
-    "upgrade must retain configured duration and enable only the checkout nullable contract",
+         and column_name='duration_minutes'))`) === "t|t|8:60|1|YES",
+    "upgrade must retain configured duration and enable the checkout nullable plus v8 slot contracts",
   );
 
-  const publication = JSON.parse(psql(`select public.publish_checkout_cleaning_template(
-    '${adminId}','${sessionId}','premium',0,null,
+  const historicalReplay = JSON.parse(psql(`select public.publish_checkout_cleaning_template(
+    '${adminId}','${sessionId}','standard',7,60,
     (select jsonb_agg(jsonb_build_object(
       'slotKey',case when display_order=0 then 'tv-on' else 'slot-'||display_order end,
       'displayOrder',display_order,
-      'required',display_order<10,
+      'required',display_order<9,
       'label','사진 '||(display_order+1)
-    ) order by display_order) from generate_series(0,10) display_order),
+    ) order by display_order) from generate_series(0,9) display_order),
+    'duration-upgrade-publish-v8',repeat('d',64))`));
+  assert(historicalReplay.version === 8 && historicalReplay.durationMinutes === 60,
+    "upgrade must replay the exact completed pre-A v8 publication without A-contract revalidation");
+
+  const publication = JSON.parse(psql(`select public.publish_checkout_cleaning_template(
+    '${adminId}','${sessionId}','standard',8,null,
+    (select jsonb_agg(jsonb_build_object(
+      'slotKey',case when display_order=0 then 'tv-on' when display_order=1 then 'entry-storage'
+        when display_order=8 then 'extra-proof' else 'slot-'||display_order end,
+      'displayOrder',display_order,
+      'required',display_order<8,
+      'label','사진 '||(display_order+1),
+      'maxPhotos',case when display_order=8 then 10 else 1 end
+    ) order by display_order) from generate_series(0,8) display_order),
     'duration-upgrade-null',repeat('c',64))`));
-  assert(publication.durationMinutes === null, "upgraded RPC must publish an explicit null duration");
+  assert(publication.durationMinutes === null && publication.version === 9,
+    "upgraded RPC must transition historical pre-A v8 to an explicit null-duration A-contract v9");
 
   passed = true;
-  process.stdout.write("cleaning-template duration 55 -> 56 ledger preservation: PASS\n");
+  process.stdout.write("cleaning-template duration 55 -> current ledger preservation: PASS\n");
 } finally {
   try {
     reset();

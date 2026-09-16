@@ -14,11 +14,40 @@ import {
 
 export type RoomReasonCode =
   | 'OCCUPIED'
+  | 'RESERVATION_CURRENT'
   | 'CLEANING_REQUIRED'
   | 'CANDLE_PRESENT'
   | 'OPERATION_BLOCKED'
   | 'ROOM_ISSUE_BLOCKED'
   | 'DATA_UNCONFIRMED';
+
+export type RoomReservationPhase = 'none' | 'upcoming' | 'current';
+
+export type RoomOccupancyStatus = 'VACANT' | 'OCCUPIED';
+export type RoomReservationLifecycle =
+  | 'NONE'
+  | 'FUTURE'
+  | 'RESERVATION_PRESENT'
+  | 'ARRIVAL_PENDING'
+  | 'OCCUPIED';
+export type RoomReadinessStatus = 'READY' | 'CLEANING_REQUIRED' | 'CHECKIN_BLOCKED';
+export type RoomPrimaryDisplayStatus =
+  | 'BLOCKED'
+  | 'OCCUPIED'
+  | 'ARRIVAL_PENDING'
+  | 'RESERVATION_PRESENT'
+  | 'CLEANING_REQUIRED'
+  | 'READY';
+export type RoomBlockingReasonCode =
+  | 'CANDLE_PRESENT'
+  | 'OPERATION_BLOCKED'
+  | 'ROOM_ISSUE_BLOCKED'
+  | 'DATA_UNCONFIRMED';
+export type RoomReadinessReasonCode =
+  | RoomBlockingReasonCode
+  | 'CLEANING_REQUIRED'
+  | 'PIN_MISMATCH'
+  | 'PIN_UNCONFIGURED';
 
 export interface RoomSummary {
   id: string;
@@ -28,6 +57,18 @@ export interface RoomSummary {
   elevatorZone: 'A' | 'B' | 'C' | null;
   dataStatus: 'verified' | 'verification_required';
   stateVersion: number;
+  evaluatedAt: string;
+  reservationPhase: RoomReservationPhase;
+  serverTime: string;
+  occupancyStatus: RoomOccupancyStatus;
+  reservationLifecycle: RoomReservationLifecycle;
+  readinessStatus: RoomReadinessStatus;
+  primaryDisplayStatus: RoomPrimaryDisplayStatus;
+  nextReservationId: string | null;
+  nextCheckInAt: string | null;
+  nextCheckOutAt: string | null;
+  blockingReasonCodes: RoomBlockingReasonCode[];
+  readinessReasonCodes: RoomReadinessReasonCode[];
   occupied: boolean;
   cleaningRequired: boolean;
   candleCount: number;
@@ -152,6 +193,18 @@ interface RoomProjectionRow {
   elevator_zone: 'A' | 'B' | 'C' | null;
   data_status: 'verified' | 'verification_required';
   state_version: number;
+  evaluated_at: string;
+  reservation_phase: RoomReservationPhase;
+  server_time: string;
+  occupancy_status: RoomOccupancyStatus;
+  reservation_lifecycle: RoomReservationLifecycle;
+  readiness_status: RoomReadinessStatus;
+  primary_display_status: RoomPrimaryDisplayStatus;
+  next_reservation_id: string | null;
+  next_check_in_at: string | null;
+  next_check_out_at: string | null;
+  blocking_reason_codes: RoomBlockingReasonCode[];
+  readiness_reason_codes: RoomReadinessReasonCode[];
   occupied: boolean;
   cleaning_required: boolean;
   candle_count: number;
@@ -170,6 +223,18 @@ function toRoom(row: RoomProjectionRow): RoomSummary {
     elevatorZone: row.elevator_zone,
     dataStatus: row.data_status,
     stateVersion: row.state_version,
+    evaluatedAt: row.evaluated_at,
+    reservationPhase: row.reservation_phase,
+    serverTime: row.server_time,
+    occupancyStatus: row.occupancy_status,
+    reservationLifecycle: row.reservation_lifecycle,
+    readinessStatus: row.readiness_status,
+    primaryDisplayStatus: row.primary_display_status,
+    nextReservationId: row.next_reservation_id,
+    nextCheckInAt: row.next_check_in_at,
+    nextCheckOutAt: row.next_check_out_at,
+    blockingReasonCodes: row.blocking_reason_codes,
+    readinessReasonCodes: row.readiness_reason_codes,
     occupied: row.occupied,
     cleaningRequired: row.cleaning_required,
     candleCount: row.candle_count,

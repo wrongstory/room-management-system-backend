@@ -205,7 +205,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         reply.headers(error.headers);
       }
       return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message },
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.conflict ? { conflict: error.conflict } : {})
+        },
         requestId: request.id
       });
     }

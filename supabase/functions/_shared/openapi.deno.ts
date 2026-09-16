@@ -6,7 +6,49 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
-Deno.test("photo OpenAPI four operations retain raw body boundary, role separation and opaque projections", async () => {
+Deno.test("room move OpenAPI publishes bounded 409 conflict recovery metadata", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const preview = document.paths[
+    "/v1/reservations/{reservationId}/room-change/preview"
+  ].post;
+  const commit = document.paths[
+    "/v1/reservations/{reservationId}/room-change"
+  ].post;
+  const conflict = document.components.schemas.RoomChangeConflict;
+  const outcome = document.components.schemas.ReservationRoomMoveOutcome;
+  const errorCodes = document.components.schemas.ErrorCode.enum;
+  const serialized = JSON.stringify(conflict);
+
+  assert(
+    preview.responses["409"].content["application/json"].schema.$ref ===
+        "#/components/schemas/RoomChangeConflictEnvelope" &&
+      commit.responses["409"].content["application/json"].schema.$ref ===
+        "#/components/schemas/RoomChangeConflictEnvelope",
+    "both room move commands use the dedicated conflict envelope",
+  );
+  assert(
+    conflict.additionalProperties === false &&
+      conflict.properties.reloadResources.uniqueItems === true &&
+      conflict.properties.reloadResources.items.enum.join(",") ===
+        "reservation,sourceRoom,targetRoom,roomMovePreview",
+    "reload resources are an exact source-controlled allowlist",
+  );
+  assert(
+    conflict.properties.latestVersions.additionalProperties === false &&
+      errorCodes.includes("IDEMPOTENCY_KEY_REUSED") &&
+      serialized.includes('"type":"null"') &&
+      !serialized.includes("uuid") &&
+      !serialized.includes("pin") &&
+      !serialized.includes("requestHash"),
+    "latest versions are nullable and sensitive metadata is absent",
+  );
+  assert(
+    outcome.description.includes("effectiveAt") &&
+      outcome.description.includes("stay.currentRoomId"),
+    "move outcomes are evaluated at effectiveAt while current room is separate",
+  );
+});
+Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and opaque projections", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const upload =
     document.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/upload"].post;
@@ -24,6 +66,20 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     upload.parameters.filter((p) => p.in === "query").length === 3 &&
       upload["x-required-roles"].join() === "maid",
     "exact binding query and maid",
+  );
+  const collectionUpload = document.paths[
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}/upload"
+  ].post;
+  const collectionDelete = document.paths[
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}"
+  ].delete;
+  assert(
+    collectionUpload.parameters.filter((p) => p.in === "query").length === 4 &&
+      collectionDelete.parameters.filter((p) => p.in === "query").length ===
+        4 &&
+      collectionUpload["x-required-roles"].join() === "maid" &&
+      collectionDelete["x-required-roles"].join() === "maid",
+    "collection upload and delete require exact item and collection CAS",
   );
   assert(
     document.paths["/v1/photos/{photoId}/content"].get["x-required-roles"]
@@ -71,13 +127,13 @@ Deno.test("photo OpenAPI four operations retain raw body boundary, role separati
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 109 &&
+    Object.keys(document.paths).length === 113 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 117,
-    "candidate contract 109/117",
+        ).length === 121,
+    "combined candidate contract 113/121",
   );
 });
 
@@ -1019,6 +1075,14 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
     "strict request and slots",
   );
   assert(
+    schemas.PublishCleaningTemplateRequest.properties.slots.minItems === 9 &&
+      schemas.PublishCleaningTemplateRequest.properties.slots.maxItems === 14 &&
+      schemas.CheckoutCleaningTemplateV8Slot.allOf[1].required.includes(
+        "maxPhotos",
+      ) && schemas.CleaningTemplateSlot.properties.maxPhotos.maximum === 10,
+    "v8 A-contract publishes bounded slot and photo counts",
+  );
+  assert(
     !(schemas.PublishCleaningTemplateRequest.required as readonly string[])
       .includes(
         "durationMinutes",
@@ -1165,7 +1229,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 66,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 68,
     "actual audit allowlist count",
   );
   assert(
@@ -1174,6 +1238,9 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     ) &&
       doc.components.schemas.DeveloperAuditEventType.enum.includes(
         "compensation.earned",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "photo.collection_item_deleted",
       ),
     "complaint compensation events are operator-visible",
   );
@@ -1213,6 +1280,49 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
       doc.components.schemas.RoomProjection.properties.pinSyncStatus.description
         .includes("예약 등록을 막지 않습니다"),
     "PIN warning is separate from reservation allocation blockers",
+  );
+  const roomProjection = doc.components.schemas.RoomProjection;
+  assert(
+    roomProjection.required.includes("evaluatedAt") &&
+      roomProjection.properties.evaluatedAt.format === "date-time" &&
+      roomProjection.required.includes("reservationPhase") &&
+      JSON.stringify(roomProjection.properties.reservationPhase.enum) ===
+        JSON.stringify(["none", "upcoming", "current"]) &&
+      (doc.components.schemas.RoomReasonCode.enum as readonly string[])
+        .includes("RESERVATION_CURRENT"),
+    "room projection exposes the authoritative evaluation instant and phase",
+  );
+  assert(
+    roomProjection.required.includes("serverTime") &&
+      roomProjection.properties.serverTime.description.includes(
+        "evaluatedAt",
+      ) &&
+      roomProjection.required.includes("reservationLifecycle") &&
+      JSON.stringify(
+          doc.components.schemas.RoomReservationLifecycle.enum,
+        ) ===
+        JSON.stringify([
+          "NONE",
+          "FUTURE",
+          "RESERVATION_PRESENT",
+          "ARRIVAL_PENDING",
+          "OCCUPIED",
+        ]) &&
+      roomProjection.required.includes("readinessStatus") &&
+      roomProjection.required.includes("primaryDisplayStatus") &&
+      roomProjection.required.includes("nextReservationId") &&
+      roomProjection.required.includes("blockingReasonCodes") &&
+      roomProjection.required.includes("readinessReasonCodes"),
+    "room projection exposes arrival, readiness, display, and next reservation axes",
+  );
+  assert(
+    (doc.components.schemas.RoomReadinessReasonCode.enum as readonly string[])
+      .includes("PIN_MISMATCH") &&
+      (doc.components.schemas.RoomReadinessReasonCode.enum as readonly string[])
+        .includes("PIN_UNCONFIGURED") &&
+      !(doc.components.schemas.RoomBlockingReasonCode.enum as readonly string[])
+        .includes("PIN_MISMATCH"),
+    "PIN readiness warnings do not become reservation allocation blockers",
   );
   const reveal = doc.components.schemas.RoomPinReveal;
   const change = doc.components.schemas.RoomPinChangeResult;

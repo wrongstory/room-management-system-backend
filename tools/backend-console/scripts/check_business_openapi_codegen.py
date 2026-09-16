@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 109:
-        raise RuntimeError("전체 source OpenAPI path 수가 109가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 113:
+        raise RuntimeError("전체 source OpenAPI path 수가 113이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 117:
-        raise RuntimeError("전체 source OpenAPI operation 수가 117이 아닙니다.")
+    if operation_count != 121:
+        raise RuntimeError("전체 source OpenAPI operation 수가 121이 아닙니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -59,6 +59,14 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "reservations" / "preview_reservation_room_move.py",
+            package / "api" / "reservations" / "commit_reservation_room_move.py",
+            package / "models" / "reservation_room_move_preview_request.py",
+            package / "models" / "reservation_room_move_commit_request.py",
+            package / "models" / "reservation_room_move_preview.py",
+            package / "models" / "reservation_room_move_result.py",
+            package / "models" / "reservation_room_move_stay.py",
+            package / "models" / "reservation_room_move_segment.py",
             package / "api" / "cleaning_templates" / "list_cleaning_templates.py",
             package / "api" / "cleaning_templates" / "publish_cleaning_template.py",
             package / "models" / "cleaning_template_catalog.py",
@@ -159,6 +167,27 @@ def main() -> None:
             raise RuntimeError("PIN prepare codegen request에 pinDigits가 누락됐습니다.")
         if "credential: str" not in reveal_model or '"credential": credential' not in reveal_model:
             raise RuntimeError("PIN reveal codegen response에 credential이 누락됐습니다.")
+        room_move_preview_path = package / "models" / "reservation_room_move_preview.py"
+        room_move_preview_model = room_move_preview_path.read_text(encoding="utf-8")
+        room_move_result_model = (package / "models" / "reservation_room_move_result.py").read_text(
+            encoding="utf-8"
+        )
+        for field in (
+            "stay_id: UUID",
+            "stay_version: int",
+            "source_segment_id: UUID",
+            "source_segment_version: int",
+        ):
+            if field not in room_move_preview_model:
+                raise RuntimeError(f"객실 변경 preview codegen 필드가 누락됐습니다: {field}")
+        for field in (
+            "stay: ReservationRoomMoveStay | Unset",
+            "segments: list[ReservationRoomMoveSegment] | Unset",
+            "source_cleaning_target_id: UUID | Unset",
+            "pin_access_ends_at: datetime.datetime | Unset",
+        ):
+            if field not in room_move_result_model:
+                raise RuntimeError(f"투숙 중 객실 변경 result codegen 필드가 누락됐습니다: {field}")
         if not compileall.compile_dir(package, quiet=1):
             raise RuntimeError("업무 Python codegen 결과를 컴파일할 수 없습니다.")
 

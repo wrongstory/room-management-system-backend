@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_template_duration_optional'
+    'reservation_during_stay_room_move'
   ) ->> 'currentMigration',
-  'cleaning_template_duration_optional',
+  'reservation_during_stay_room_move',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_template_duration_optional'
+    'reservation_during_stay_room_move'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'cleaning_template_duration_optional';
+where name = 'reservation_during_stay_room_move';
 
 delete from supabase_migrations.schema_migrations
-where name = 'cleaning_template_duration_optional';
+where name = 'reservation_during_stay_room_move';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_template_duration_optional'
+    'reservation_during_stay_room_move'
   ) ->> 'currentMigration',
-  'cleaning_template_admin_api',
-  'database status exposes migration 55 when migration 56 is absent'
+  'reservation_room_change_before_checkin',
+  'database status exposes migration 61 when migration 62 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_template_duration_optional'
+    'reservation_during_stay_room_move'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 55 behind source migration 56'
+  'database status reports migration 61 behind source migration 62'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

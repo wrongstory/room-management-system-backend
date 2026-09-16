@@ -517,6 +517,9 @@ erDiagram
   CLEANING_ATTEMPTS ||--o{ ATTEMPT_PHOTO_CURRENT : "회차 + 슬롯 CAS"
   ATTEMPT_PHOTO_VERSIONS ||--o{ ATTEMPT_PHOTO_CURRENT : "null은 비움"
   ATTEMPT_PHOTO_VERSIONS ||--o{ ATTEMPT_PHOTO_CHANGES : "교체·비움 이력"
+  CLEANING_ATTEMPTS ||--o| ATTEMPT_PHOTO_COLLECTION_STATES : "extra-proof collection CAS"
+  ATTEMPT_PHOTO_COLLECTION_STATES ||--o{ ATTEMPT_PHOTO_COLLECTION_ITEMS : "stable item/order"
+  ATTEMPT_PHOTO_COLLECTION_ITEMS ||--o{ ATTEMPT_PHOTO_COLLECTION_CHANGES : "append/replace/delete history"
   CLEANING_SUBMISSIONS ||--o{ SUBMISSION_PHOTO_BINDINGS : "특정 photo version 불변 연결"
   ATTEMPT_PHOTO_VERSIONS ||--o{ SUBMISSION_PHOTO_BINDINGS : "파일 복제 없음"
   CLEANING_SUBMISSIONS ||--o| SUBMISSION_PHOTO_BINDING_SETS : "전체 연결 집합 봉인"
@@ -526,7 +529,8 @@ erDiagram
 - 새 사진 모델 10개 테이블은 모두 `private` + RLS이며 `PUBLIC/anon/authenticated/service_role`의 읽기·직접 DML 권한이 없다. 모델 helper도 owner-only다. #9/#31의 세션·실제 파일 검증 경로가 생기기 전 사진/제출 HTTP는 추가하지 않는다.
 - 기존 `cleaning_template_versions.photo_slots`, `cleaning_targets.template_snapshot`, `cleaning_attempts.template_snapshot`은 제거하지 않는다. 새 슬롯 row는 `slot_snapshot`에 구역·이름·설명·반복 인스턴스를 포함한 정확한 원본 객체를 보존하고, 식별자·필수 여부·표시 순서는 정규화 컬럼으로 검증한다.
 - 기존 v1 `[]` 또는 복원 근거가 없는 JSON은 `ready=false`다. 이 때문에 기존 예약/배정/물리적 완료가 막히지는 않지만 사진 완전성·제출 연결은 실패한다. 최신 템플릿으로 보간하거나 사진 0장을 완료로 인정하지 않는다. v6 명시 슬롯에는 v7 `tv-on`이나 개수를 소급하지 않는다.
-- 새 v7+ checkout 템플릿은 타입별 10/11/13/15개, 그중 선택 1개와 필수 `tv-on` 정확히 1개를 검증한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
+- `maxPhotos` 없는 pre-A checkout 템플릿은 v7보다 높은 historical version도 타입별 10/11/13/15개 계약을 이력으로 유지한다. 모든 slot에 metadata가 있는 새 v8+ A-contract는 9/10/12/14개, 필수 8/9/11/13개를 검증하고 required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지를 강제한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
+- #180은 v8 checkout `extra-proof`에만 0~10장 collection을 연다. item UUID와 display order는 형제 교체 때 유지되고, collection/item revision을 함께 CAS한다. 삭제된 item은 tombstone으로 남아 재사용하지 않으며, submission은 active item의 exact photo version/revision/order를 봉인한다. 기존 pre-A와 일반 slot은 단일 current pointer를 계속 사용한다.
 - 증빙 identity는 `(cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)`이다. 구 담당자의 interrupted 사진과 새 담당자의 사진은 같은 target slot을 쓰더라도 서로 다른 current pointer를 가진다. NULL/다른 target/다른 attempt 연결은 복합 FK로 거부한다.
 - `attempt_photo_versions`는 불변이다. `uploaded_at + 168시간` 만료는 교체·재제출·retry로 연장하지 않으며, 실제 provider 삭제 확인은 별도 append-only purge marker로 관리한다. #30에서 bytes/Drive 업로드나 삭제를 실제 수행하지 않는다.
 - 필수 슬롯이 전부 verified·미만료·미삭제 사진을 가져야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. frozen JSON과 normalized 슬롯의 전체 집합도 다시 대조한다.
@@ -948,7 +952,7 @@ migration을 수정하지 않는다. 운영·recovery 적용 상태와 무관한
 
 사진은 프론트 앱에서 **최대 300KiB(307,200바이트)** JPEG/WebP로 압축하고 EXIF를 제거한 뒤 API에 전송한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜를 사용하며, 중복 방지를 위해 실제 파일명에는 수행 회차·사진 슬롯·사진 UUID를 포함한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
 
-현재 121개 객실을 모두 하루에 한 번 청소하고 타입별 필수 슬롯 수(10·11·13·15장)를 그대로 적용하면 하루 최대 1,475장, 7일 보관량은 약 **3.17GB**다. 모든 객실에 가장 큰 15장 기준을 적용한 보수적 최악값도 하루 1,815장, 약 **3.90GB**다. Google 개인 계정 기본 15GB 중 20% 여유를 남긴 12GB를 사진에 쓴다고 보면 이론상 약 5,580장/일까지 가능하므로 객실 운영 최대치보다 충분하다. 단, 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
+현재 121개 객실을 모두 하루에 한 번 청소하면 v8 필수 슬롯(8·9·11·13장)은 하루 1,233장이다. 모든 객실의 선택 `extra-proof`를 10장까지 채운 상한은 하루 2,443장, 7일 약 **4.89GiB**다. 모든 객실에 가장 큰 타입의 필수 13장과 선택 10장을 적용한 보수적 상한은 하루 2,783장, 7일 약 **5.57GiB**다. Google 개인 계정 기본 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
 
 각 사진의 `purge_after`는 폴더 날짜가 아니라 정확히 `uploaded_at + 7일`이다. 정리 작업은 주기적으로 만료 레코드를 잠그고 Drive `files.delete`를 호출해 휴지통을 거치지 않고 영구삭제한다. 성공 또는 이미 없는 파일(404)은 `purged`로 완료하고, 일시 오류는 지수 백오프로 재시도한다. 빈 객실·날짜 폴더는 그 안의 관리 대상 파일이 모두 삭제된 뒤 정리한다. 메타데이터·해시·검수 결과는 DB 감사 근거로 유지한다. 상세 규칙은 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
 
@@ -1122,7 +1126,7 @@ erDiagram
   source 검증 실패는 전체 rollback이며 reclean 원담당 불변, NULL due 보존, 실제 점유와 다음 입실 경계를 유지한다.
 - 사진 실업로드/제출·offline lease/PIN은 여기서 구현하지 않는다. capability 권한 계약과 실제 구현을 구분한다.
 
-### #133 개발 소스: 자동 checkout 후 퇴실 미진행 사건
+### #133 source/dev 완료, release pending: 자동 checkout 후 퇴실 미진행 사건
 
 `20260913141655_checkout_not_completed_incident_workflow.sql`은 기존 53개 migration을 수정하지 않는
 54번째 append-only feature migration이다.
@@ -1149,18 +1153,21 @@ erDiagram
   결정은 기존 target을 재사용하고 새 current assignment 및 필요 시 새 scheduled attempt를 만들며 과거
   assignment/attempt는 보존한다. 연장은 occupancy resumed 이력을 추가하고 중단 작업의 earning·벌점은 0이다.
 - command lock은 global reservation advisory → scoped receipt → domain row 순서이며 report/decision replay와
-  상반 결정은 stable domain conflict로 수렴한다. production/recovery 적용 상태와 무관한 source candidate다.
+  상반 결정은 stable domain conflict로 수렴한다. #133 통합 당시 기준은
+  `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`과 production 54 migrations였고, 현재 운영 기준은
+  `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` / 56 migrations다.
 
-### #156 개발 소스: checkout template 운영 게시
+### #156 checkout template 운영 게시 — production 반영 완료
 
 `20260914094126_cleaning_template_admin_api.sql`은 기존 54개 migration을 수정하지 않는 55번째 append-only
 feature migration이다. `cleaning_template_versions`는 `(room_type_id,cleaning_kind,version)` 이력과 published
 partial unique를 유지하며, publish command가 동일 타입/kind advisory lock 안에서 current expected version을
-검사하고 이전 row를 retired로 전이한 뒤 v7+ 새 row를 추가한다. `private.photo_template_slots`는 새 JSON의
+검사하고 이전 row를 retired로 전이한 뒤 v8+ 새 row를 추가한다. 기존 pre-A v7+ row와 frozen snapshot은 그대로 유효하다. `private.photo_template_slots`는 새 JSON의
 정규화된 immutable row를 같은 transaction에서 materialize한다. 과거 `cleaning_targets.template_snapshot`은
 current pointer를 다시 읽거나 backfill하지 않으므로 이후 게시에도 변하지 않는다. raw template table은 RLS를
 활성화한 채 Data API policy/grant가 없고, service-only 조회/게시 RPC가 live session과 active/password-complete
-business admin을 매 요청 확인한다. production 운영값·seed·notification/outbox는 이 migration에 포함하지 않는다.
+business admin을 매 요청 확인한다. migration 자체에는 production 운영값·seed·notification/outbox가 없으며,
+운영 게시 명령으로 네 객실 유형의 checkout template v7이 별도 생성됐다.
 
 ### #165 checkout 예상시간 선택화
 
@@ -1169,6 +1176,10 @@ business admin을 매 요청 확인한다. production 운영값·seed·notificat
 stayover/additional/reclean 등 비-checkout row는 constraint로 non-null을 유지한다. 게시 RPC는 null을 허용하되
 값이 있으면 기존 1..10,080 범위를 그대로 검증한다. 기존 template·planned target snapshot·audit·receipt는
 backfill하거나 다시 쓰지 않는다.
+
+현재 production은 이 56번째 migration까지 적용됐고, 네 checkout template v7은 `durationMinutes=NULL`과
+승인된 사진 슬롯 수(standard 10 / premium 11 / oceanPremium 13 / oceanFamily 15)를 보존한다. 안전한
+운영 fixture 부재로 예약 성공 mutation smoke만 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 
 실제 청소 수행시간은 `cleaning_attempts.started_at`과 `field_completed_at`의 차이이며, turnaround는 실제
 checkout 시각부터 field completion까지다. 배정 preview는 `assignment_duration_policy_versions`의 confirmed
@@ -1180,6 +1191,20 @@ checkout 시각부터 field completion까지다. 배정 preview는 `assignment_d
 새 target 생성을 막지도 않는다. 실제 시작 시에는 reservation command 공통 lock 아래 같은 객실의 다른
 `in_progress`와 미해결 `checkout_presence_incidents`를 검사한다. 실패는 attempt·audit·receipt를 함께 0건으로
 유지하므로 예상시간 원장과 실행 권한 원장이 섞이지 않는다.
+
+### #187 Phase C stay/room segment 후보
+
+62번째 append-only 후보는 `private.reservation_stays` 아래 immutable room segment 이력을 둔다. 기존
+`reservations.room_id`는 최초 입실 계약 객실을 보존하고, 현재 객실은 현재 시각을 포함하는 non-retired
+segment, 최종 checkout 객실은 가장 마지막 예정 segment로 계산한다. non-retired segment의 `[startsAt,
+endsAt)` 범위는 객실별 GiST exclusion으로 겹칠 수 없다. 기존 active reservation은 migration에서 한 stay와
+한 segment로 backfill하며 겹침이 발견되면 전체 migration을 fail-closed한다.
+
+투숙 중 이동은 source segment를 `effectiveAt`에서 끝내고 target segment를 같은 시각에 시작한다. 원 객실의
+checkout cleaning은 `stay_segment_checkout_obligations`와 별도 target으로 exactly-once 기록되고, 최종
+checkout obligation/target은 target room으로 이동한다. 미래 이동은 PIN lease를 즉시 폐기하지 않고
+`room_pin_access_scheduled_revocations`에 cutoff를 기록해 effectiveAt 전 접근을 유지하고 이후 reveal/change,
+rotation 및 Data API RLS에서 차단한다. 모든 새 private table은 FORCE RLS이며 raw Data API 권한이 없다.
 
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)

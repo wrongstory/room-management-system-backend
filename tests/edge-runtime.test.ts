@@ -195,6 +195,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(openApi).toContain('openapi: "3.1.1"');
     expect(openApi).toMatch(/bearerAuth:\s*\{[\s\S]*?type:\s*"http"[\s\S]*?scheme:\s*"bearer"/);
     expect(openApi).toContain('name: "Idempotency-Key"');
+    expect(openApi).toContain('"/v1/reservations/{reservationId}/room-change":');
+    expect(openApi).not.toContain('"/v1/reservations/{reservationId}/room-change/commit":');
     expect(openApi).toContain('const swaggerUiVersion = "5.32.11"');
     expect(openApi).toMatch(/swagger-ui-dist@\$\{swaggerUiVersion\}/);
     expect(openApi).toContain('persistAuthorization: false');
@@ -223,7 +225,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']cleaning_template_duration_optional["']/
+      /expectedMigrationName\s*=\s*["']reservation_during_stay_room_move["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);

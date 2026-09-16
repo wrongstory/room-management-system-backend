@@ -18,6 +18,16 @@ const errorResponse = {
   },
 };
 
+const roomChangeConflictResponse = {
+  description:
+    "객실 변경 충돌입니다. error.code로 분기하고 error.conflict의 허용된 리소스와 최신 version만 다시 조회합니다.",
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/RoomChangeConflictEnvelope" },
+    },
+  },
+};
+
 const idempotencyHeader = {
   name: "Idempotency-Key",
   in: "header",
@@ -677,6 +687,134 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}/upload":
+      {
+        post: {
+          ...photoOperation(
+            "uploadAttemptPhotoCollectionItem",
+            "extra-proof 사진 추가 또는 교체",
+            "PhotoUploadResponse",
+          ),
+          description:
+            "v8+ extra-proof 전용 raw binary 업로드입니다. 새 UUID와 expectedItemRevision=0은 append, 기존 UUID와 최신 item revision은 replace입니다. expectedCollectionRevision도 함께 일치해야 하며 active item 10장 상태에서 append는 PHOTO_COLLECTION_LIMIT_EXCEEDED로 실패합니다. 일반 슬롯과 pre-A snapshot에는 사용할 수 없습니다.",
+          parameters: [
+            photoPathId("attemptId"),
+            photoPathId("slotId"),
+            photoPathId("photoItemId"),
+            idempotencyHeader,
+            {
+              name: "assignmentId",
+              in: "query",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+            {
+              name: "assignmentRevision",
+              in: "query",
+              required: true,
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: Number.MAX_SAFE_INTEGER - 1,
+              },
+            },
+            {
+              name: "expectedCollectionRevision",
+              in: "query",
+              required: true,
+              schema: {
+                type: "integer",
+                minimum: 0,
+                maximum: Number.MAX_SAFE_INTEGER - 1,
+              },
+            },
+            {
+              name: "expectedItemRevision",
+              in: "query",
+              required: true,
+              schema: {
+                type: "integer",
+                minimum: 0,
+                maximum: Number.MAX_SAFE_INTEGER - 1,
+              },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "image/jpeg": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                  maxLength: 307200,
+                  "x-max-bytes": 307200,
+                },
+              },
+              "image/webp": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                  maxLength: 307200,
+                  "x-max-bytes": 307200,
+                },
+              },
+            },
+          },
+        },
+      },
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}": {
+      delete: {
+        ...photoOperation(
+          "deleteAttemptPhotoCollectionItem",
+          "extra-proof 사진 개별 삭제",
+          "PhotoCollectionDeleteResponse",
+        ),
+        description:
+          "v8+ extra-proof current collection의 한 item만 tombstone 처리합니다. collection/item CAS와 Idempotency-Key가 필수이며 형제 item 및 이미 봉인된 제출 binding은 변경하지 않습니다.",
+        parameters: [
+          photoPathId("attemptId"),
+          photoPathId("slotId"),
+          photoPathId("photoItemId"),
+          idempotencyHeader,
+          {
+            name: "assignmentId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "assignmentRevision",
+            in: "query",
+            required: true,
+            schema: {
+              type: "integer",
+              minimum: 1,
+              maximum: Number.MAX_SAFE_INTEGER - 1,
+            },
+          },
+          {
+            name: "expectedCollectionRevision",
+            in: "query",
+            required: true,
+            schema: {
+              type: "integer",
+              minimum: 1,
+              maximum: Number.MAX_SAFE_INTEGER - 1,
+            },
+          },
+          {
+            name: "expectedItemRevision",
+            in: "query",
+            required: true,
+            schema: {
+              type: "integer",
+              minimum: 1,
+              maximum: Number.MAX_SAFE_INTEGER - 1,
+            },
+          },
+        ],
+      },
+    },
     "/v1/photo-uploads/{operationId}": {
       get: {
         ...photoOperation(
@@ -1159,7 +1297,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 66,
+              maxItems: 68,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -2259,7 +2397,7 @@ export const openApiDocument = {
         operationId: "publishCleaningTemplate",
         summary: "퇴실 청소 템플릿의 불변 새 버전 게시",
         description:
-          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 v7 이상 immutable version과 normalized slot rows를 원자 게시합니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
+          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과 normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -3404,14 +3542,95 @@ export const openApiDocument = {
       patch: {
         tags: ["Reservations"],
         operationId: "changeReservation",
-        summary: "예약 일정·객실·고객정보 변경",
+        summary: "예약 일정·고객정보 변경",
         description:
-          "active business admin이 expectedVersion CAS로 예약을 변경합니다. guestName 필드 생략은 기존값 유지, null은 삭제, 문자열은 새 암호문 설정을 뜻합니다. 이미 배정·시작된 작업과 충돌하면 409로 거부됩니다.",
+          "active business admin이 expectedVersion CAS로 예약을 변경합니다. guestName 필드 생략은 기존값 유지, null은 삭제, 문자열은 새 암호문 설정을 뜻합니다. roomId는 하위 호환을 위해 전달하지만 기존 객실과 같아야 하며, 실제 객실 변경은 전용 preview/commit API만 허용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [reservationIdParameter(), idempotencyHeader],
         requestBody: reservationRequestBody("ReservationChangeRequest"),
         responses: reservationMutationResponses(),
+      },
+    },
+    "/v1/reservations/{reservationId}/room-change/preview": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "previewReservationRoomMove",
+        summary: "예약 객실 변경 영향 미리보기",
+        description:
+          "active business admin 전용 read-only 미리보기입니다. 체크인 전 effectiveAt은 생략 시 예약 checkInAt이며, 투숙 중에는 필수이고 서버 현재 이후·예약 checkOutAt 이전이어야 합니다. 5분 TTL의 evaluatedAt/expiresAt과 stay/segment까지 묶은 fingerprint를 반환합니다. 변경 불가 상태는 200 ineligible projection과 안정적인 rejection code로 반환하고 아무 원장도 변경하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [reservationIdParameter()],
+        requestBody: reservationRequestBody(
+          "ReservationRoomMovePreviewRequest",
+        ),
+        responses: {
+          "200": {
+            description: "객실 변경 가능 여부와 원자적 commit 입력",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["preview"],
+                  properties: {
+                    preview: {
+                      $ref: "#/components/schemas/ReservationRoomMovePreview",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": roomChangeConflictResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/reservations/{reservationId}/room-change": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "commitReservationRoomMove",
+        summary: "예약 객실 변경 확정",
+        description:
+          "preview payload의 reasonCode/effectiveAt과 발급된 정확한 evaluatedAt/expiresAt/fingerprint, 세 CAS version을 검증합니다. 체크인 전에는 기존 private planned checkout graph를 이동하고, 투숙 중에는 과거 segment를 닫고 새 segment·원 객실 checkout 청소 target·PIN 접근 종료를 한 transaction에 기록합니다. 동일 Idempotency-Key와 동일 payload의 성공 응답은 TTL 이후에도 replay됩니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [reservationIdParameter(), idempotencyHeader],
+        requestBody: reservationRequestBody("ReservationRoomMoveCommitRequest"),
+        responses: {
+          "200": {
+            description:
+              "체크인 전 또는 투숙 중 객실 변경 결과와 동일 성공 receipt replay",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["result"],
+                  properties: {
+                    result: {
+                      $ref: "#/components/schemas/ReservationRoomMoveResult",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": roomChangeConflictResponse,
+          "500": errorResponse,
+        },
       },
     },
     "/v1/reservations/{reservationId}/cancel": reservationCommandPath(
@@ -3504,7 +3723,7 @@ export const openApiDocument = {
         operationId: "listRooms",
         summary: "전체 객실 운영 projection 조회",
         description:
-          "active business admin 전용입니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 프론트에서 하나의 status enum으로 합치지 않습니다. `allocationReady=false`의 근거는 `reasonCodes`로 표시하세요. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
+          "active business admin 전용입니다. `evaluatedAt`의 서버 시각을 기준으로 `reservationPhase`와 현재 점유·청소·배정 가능 축을 계산합니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 하나의 영구 status enum으로 합치지 않습니다. `allocationReady=false`의 근거는 `reasonCodes`로 표시하세요. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         responses: {
@@ -3538,7 +3757,7 @@ export const openApiDocument = {
         operationId: "getRoom",
         summary: "객실 단건 운영 projection 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록과 동일한 camelCase projection만 반환하며 객실 PIN 원문이나 provider 인증정보는 반환하지 않습니다.",
+          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록과 동일하게 `evaluatedAt` 시점의 camelCase projection만 반환하며 객실 PIN 원문이나 provider 인증정보는 반환하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [roomIdParameter()],
@@ -4132,6 +4351,13 @@ export const openApiDocument = {
               "관리자 검수 상세에만 포함되는 immutable 제출 증빙 목록입니다. photoId는 기존 사진 content API 조회에 사용하며 provider locator/hash는 노출하지 않습니다.",
             items: { $ref: "#/components/schemas/SubmissionPhotoBinding" },
           },
+          photoSlots: {
+            type: "array",
+            maxItems: 100,
+            description:
+              "관리자 검수 상세의 슬롯별 immutable 사진 배열. 같은 슬롯에서는 사진 displayOrder를 보존합니다.",
+            items: { $ref: "#/components/schemas/SubmissionPhotoSlot" },
+          },
           reviewContext: {
             $ref: "#/components/schemas/SubmissionReviewContext",
           },
@@ -4151,12 +4377,69 @@ export const openApiDocument = {
         ],
         properties: {
           photoId: { type: "string", format: "uuid" },
+          photoItemId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          itemRevision: {
+            anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+          },
+          photoDisplayOrder: {
+            anyOf: [{ type: "integer", minimum: 0, maximum: 9 }, {
+              type: "null",
+            }],
+          },
           targetPhotoSlotId: { type: "string", format: "uuid" },
           slotKey: { type: "string" },
           label: { type: "string" },
           displayOrder: { type: "integer", minimum: 0, maximum: 99 },
           required: { type: "boolean" },
           photoVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      SubmissionPhotoSlot: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "targetPhotoSlotId",
+          "slotKey",
+          "label",
+          "displayOrder",
+          "required",
+          "photos",
+        ],
+        properties: {
+          targetPhotoSlotId: { type: "string", format: "uuid" },
+          slotKey: { type: "string" },
+          label: { type: "string" },
+          displayOrder: { type: "integer", minimum: 0, maximum: 99 },
+          required: { type: "boolean" },
+          photos: {
+            type: "array",
+            minItems: 1,
+            maxItems: 10,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "photoId",
+                "photoItemId",
+                "itemRevision",
+                "displayOrder",
+                "photoVersion",
+              ],
+              properties: {
+                photoId: { type: "string", format: "uuid" },
+                photoItemId: {
+                  anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+                },
+                itemRevision: {
+                  anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+                },
+                displayOrder: { type: "integer", minimum: 0, maximum: 9 },
+                photoVersion: { type: "integer", minimum: 1 },
+              },
+            },
+          },
         },
       },
       SubmissionReviewContext: {
@@ -4296,16 +4579,25 @@ export const openApiDocument = {
                 "slotKey",
                 "required",
                 "displayOrder",
+                "maxPhotos",
                 "currentRevision",
+                "collectionRevision",
+                "photoCount",
                 "uploadStatus",
                 "photoId",
+                "photos",
               ],
               properties: {
                 slotId: { type: "string", format: "uuid" },
                 slotKey: { type: "string", pattern: "^[a-z][a-z0-9-]{0,79}$" },
                 required: { type: "boolean" },
                 displayOrder: { type: "integer", minimum: 0, maximum: 99 },
+                maxPhotos: { type: "integer", enum: [1, 10] },
                 currentRevision: { type: "integer", minimum: 0 },
+                collectionRevision: {
+                  anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
+                },
+                photoCount: { type: "integer", minimum: 0, maximum: 10 },
                 uploadStatus: {
                   type: "string",
                   enum: [
@@ -4323,6 +4615,11 @@ export const openApiDocument = {
                   description:
                     "원본 읽기 권한이 있는 active 현재 회차+accepted+미만료 사진만 ID를 반환합니다. 업로드 전용 권한에는 null.",
                 },
+                photos: {
+                  type: "array",
+                  maxItems: 10,
+                  items: { $ref: "#/components/schemas/AttemptPhotoItem" },
+                },
               },
             },
           },
@@ -4336,6 +4633,53 @@ export const openApiDocument = {
         description:
           "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
       },
+      AttemptPhotoItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "photoItemId",
+          "itemRevision",
+          "displayOrder",
+          "photoId",
+          "photoVersion",
+          "uploadStatus",
+        ],
+        properties: {
+          photoItemId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          itemRevision: { type: "integer", minimum: 1 },
+          displayOrder: { type: "integer", minimum: 0, maximum: 9 },
+          photoId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          photoVersion: { type: "integer", minimum: 1 },
+          uploadStatus: {
+            type: "string",
+            enum: ["verified", "pending", "failed", "purged", "expired"],
+          },
+        },
+      },
+      PhotoCollectionDeleteResponse: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "attemptId",
+          "targetSlotId",
+          "photoItemId",
+          "collectionRevision",
+          "itemRevision",
+          "deleted",
+        ],
+        properties: {
+          attemptId: { type: "string", format: "uuid" },
+          targetSlotId: { type: "string", format: "uuid" },
+          photoItemId: { type: "string", format: "uuid" },
+          collectionRevision: { type: "integer", minimum: 1 },
+          itemRevision: { type: "integer", minimum: 2 },
+          deleted: { const: true },
+        },
+      },
       PhotoUploadOperation: {
         type: "object",
         additionalProperties: false,
@@ -4344,11 +4688,14 @@ export const openApiDocument = {
           "objectId",
           "attemptId",
           "targetSlotId",
+          "photoItemId",
           "status",
           "leaseVersion",
           "leaseExpiresAt",
           "photoId",
           "photoVersion",
+          "collectionRevision",
+          "itemRevision",
           "uploadedAt",
           "purgeAfter",
           "compensationAllowed",
@@ -4362,6 +4709,9 @@ export const openApiDocument = {
           },
           attemptId: { type: "string", format: "uuid" },
           targetSlotId: { type: "string", format: "uuid" },
+          photoItemId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
           status: {
             type: "string",
             enum: [
@@ -4382,6 +4732,12 @@ export const openApiDocument = {
           },
           photoVersion: {
             anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+          },
+          collectionRevision: {
+            anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
+          },
+          itemRevision: {
+            anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
           },
           uploadedAt: {
             anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
@@ -4542,6 +4898,13 @@ export const openApiDocument = {
           displayOrder: { type: "integer", minimum: 0, maximum: 99 },
           required: { type: "boolean" },
           label: { type: "string", minLength: 1, maxLength: 80 },
+          maxPhotos: {
+            type: "integer",
+            minimum: 1,
+            maximum: 10,
+            description:
+              "Decision A v8+ 필수 메타데이터입니다. pre-A historical v7+ projection에는 없을 수 있습니다.",
+          },
           description: { type: "string", minLength: 1, maxLength: 200 },
           section: { type: "string", minLength: 1, maxLength: 80 },
           instanceKey: {
@@ -4550,6 +4913,12 @@ export const openApiDocument = {
             maxLength: 80,
           },
         },
+      },
+      CheckoutCleaningTemplateV8Slot: {
+        allOf: [{ $ref: "#/components/schemas/CleaningTemplateSlot" }, {
+          type: "object",
+          required: ["maxPhotos"],
+        }],
       },
       PublishCleaningTemplateRequest: {
         type: "object",
@@ -4576,12 +4945,14 @@ export const openApiDocument = {
           },
           slots: {
             type: "array",
-            minItems: 10,
-            maxItems: 15,
+            minItems: 9,
+            maxItems: 14,
             uniqueItems: true,
-            items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
+            items: {
+              $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slot",
+            },
             description:
-              "v7+ checkout 계약: standard/premium/oceanPremium/oceanFamily 순으로 정확히 10/11/13/15개, 필수는 총수-1, required tv-on은 정확히 한 개입니다. displayOrder는 0부터 연속입니다.",
+              "v8+ checkout 계약: standard/premium/oceanPremium/oceanFamily 순으로 정확히 9/10/12/14개, 필수는 8/9/11/13개입니다. required tv-on과 entry-storage는 각각 정확히 한 개, 마지막 extra-proof는 선택·maxPhotos 10이며 entry-number는 금지됩니다. 나머지 슬롯은 maxPhotos 1이고 displayOrder는 0부터 연속입니다.",
           },
         },
       },
@@ -4611,9 +4982,11 @@ export const openApiDocument = {
           },
           slots: {
             type: "array",
-            minItems: 10,
+            minItems: 9,
             maxItems: 15,
             items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
+            description:
+              "maxPhotos 없는 pre-A historical v7+ template은 10/11/13/15개이고, 모든 slot에 metadata가 있는 A-contract v8+ template은 9/10/12/14개입니다.",
           },
           publishedAt: { type: "string", format: "date-time" },
           createdAt: { type: "string", format: "date-time" },
@@ -5001,7 +5374,13 @@ export const openApiDocument = {
           "INVALID_GUEST_NAME",
           "INVALID_GUEST_COUNT",
           "INVALID_RESERVATION_SCHEDULE",
+          "INVALID_MOVE_EFFECTIVE_AT",
           "RESERVATION_OVERLAP",
+          "TARGET_ROOM_OVERLAP",
+          "TARGET_ROOM_BLOCKED",
+          "TARGET_ROOM_NOT_READY",
+          "PIN_LEASE_ACTIVE",
+          "OPEN_ENDED_STAY_REQUIRES_END",
           "ROOM_ALLOCATION_BLOCKED",
           "RESERVATION_NOT_FOUND",
           "CLEANING_REQUEST_NOT_FOUND",
@@ -5135,6 +5514,77 @@ export const openApiDocument = {
           "RUNTIME_NOT_CONFIGURED",
           "INTERNAL_SERVER_ERROR",
         ],
+      },
+      RoomChangeConflict: {
+        type: "object",
+        additionalProperties: false,
+        required: ["reloadResources", "latestVersions"],
+        properties: {
+          reloadResources: {
+            type: "array",
+            minItems: 1,
+            maxItems: 4,
+            uniqueItems: true,
+            items: {
+              type: "string",
+              enum: [
+                "reservation",
+                "sourceRoom",
+                "targetRoom",
+                "roomMovePreview",
+              ],
+            },
+          },
+          latestVersions: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "reservationVersion",
+              "sourceRoomVersion",
+              "targetRoomVersion",
+            ],
+            properties: {
+              reservationVersion: {
+                anyOf: [
+                  { type: "integer", minimum: 1 },
+                  { type: "null" },
+                ],
+              },
+              sourceRoomVersion: {
+                anyOf: [
+                  { type: "integer", minimum: 1 },
+                  { type: "null" },
+                ],
+              },
+              targetRoomVersion: {
+                anyOf: [
+                  { type: "integer", minimum: 1 },
+                  { type: "null" },
+                ],
+              },
+            },
+          },
+        },
+      },
+      RoomChangeConflictEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["error", "requestId"],
+        properties: {
+          error: {
+            type: "object",
+            additionalProperties: false,
+            required: ["code", "message", "conflict"],
+            properties: {
+              code: { $ref: "#/components/schemas/ErrorCode" },
+              message: { type: "string" },
+              conflict: {
+                $ref: "#/components/schemas/RoomChangeConflict",
+              },
+            },
+          },
+          requestId: { type: "string" },
+        },
       },
       ErrorEnvelope: {
         type: "object",
@@ -5400,8 +5850,10 @@ export const openApiDocument = {
           "cleaning.scheduled_expired",
           "cleaning.offline_event_resolved",
           "photo.upload_accepted",
+          "photo.collection_item_deleted",
           "reservation.created",
           "reservation.changed",
+          "reservation.room_moved",
           "reservation.cancelled",
           "reservation.manual_checkout",
           "reservation.scheduled_check_in",
@@ -6091,7 +6543,10 @@ export const openApiDocument = {
               nextAttemptId: { type: "string", format: "uuid" },
               targetSlotId: { type: "string", format: "uuid" },
               photoId: { type: "string", format: "uuid" },
+              photoItemId: { type: "string", format: "uuid" },
               photoVersion: { type: "integer", minimum: 1 },
+              collectionRevision: { type: "integer", minimum: 1 },
+              itemRevision: { type: "integer", minimum: 1 },
               uploadedAt: { type: "string", format: "date-time" },
               purgeAfter: { type: "string", format: "date-time" },
               offlineQuarantineId: {
@@ -7572,6 +8027,303 @@ export const openApiDocument = {
           reasonCode: { $ref: "#/components/schemas/ReasonCode" },
         },
       },
+      ReservationRoomMoveReasonCode: {
+        type: "string",
+        enum: ["GUEST_REQUEST", "ROOM_UNAVAILABLE", "OPERATIONAL_ADJUSTMENT"],
+        description:
+          "체크인 전·투숙 중 객실 변경의 source-controlled 감사 사유",
+      },
+      ReservationRoomMoveMode: {
+        type: "string",
+        enum: ["BEFORE_CHECKIN", "DURING_STAY"],
+      },
+      ReservationRoomMoveRejectionReasonCode: {
+        type: "string",
+        enum: [
+          "RESERVATION_NOT_ACTIVE",
+          "SAME_ROOM",
+          "INVALID_MOVE_EFFECTIVE_AT",
+          "OPEN_ENDED_STAY_REQUIRES_END",
+          "CLEANING_WORKFLOW_PUBLIC",
+          "PLANNED_CHECKOUT_NOT_PRIVATE",
+          "CLEANING_WORKFLOW_ASSIGNED",
+          "CLEANING_WORKFLOW_NOTIFIED",
+          "CLEANING_WORKFLOW_STARTED",
+          "ACTIVE_PIN_ACCESS_EXISTS",
+          "TARGET_ROOM_BLOCKED",
+          "TARGET_ROOM_NOT_READY",
+          "RESERVATION_OVERLAP",
+        ],
+      },
+      ReservationRoomMoveBlockingReasonCode: {
+        type: "string",
+        enum: [
+          "RESERVATION_VERSION_CONFLICT",
+          "SOURCE_ROOM_VERSION_CONFLICT",
+          "TARGET_ROOM_VERSION_CONFLICT",
+          "TARGET_ROOM_OVERLAP",
+          "ROOM_CHANGE_PREVIEW_STALE",
+          "CLEANING_ASSIGNMENT_LOCKED",
+          "PIN_LEASE_ACTIVE",
+          "TARGET_ROOM_BLOCKED",
+          "TARGET_ROOM_NOT_READY",
+        ],
+        description:
+          "commit HTTP 오류 taxonomy와 같은 고수준 차단 코드입니다. rejectionReasonCodes는 안전한 세부 진단 축입니다.",
+      },
+      ReservationRoomMoveOutcome: {
+        type: "object",
+        additionalProperties: false,
+        required: ["occupancyStatus", "readinessStatus", "stateVersion"],
+        properties: {
+          occupancyStatus: { $ref: "#/components/schemas/RoomOccupancyStatus" },
+          readinessStatus: { $ref: "#/components/schemas/RoomReadinessStatus" },
+          stateVersion: { type: "integer", minimum: 1 },
+        },
+        description:
+          "preview와 commit 모두 이동 발효시각 effectiveAt 기준으로 계산한 PII/PIN 비노출 객실 결과입니다. 미래 이동의 현재 객실은 stay.currentRoomId로 별도 확인합니다.",
+      },
+      ReservationRoomMovePreviewRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "targetRoomId",
+          "reasonCode",
+          "expectedReservationVersion",
+          "expectedSourceRoomVersion",
+          "expectedTargetRoomVersion",
+        ],
+        properties: {
+          targetRoomId: { type: "string", format: "uuid" },
+          effectiveAt: {
+            type: "string",
+            format: "date-time",
+            description:
+              "체크인 전에는 생략 시 예약 checkInAt이며 제공 시 그 값과 같아야 합니다. 투숙 중에는 필수이며 현재 이후·checkOutAt 이전이어야 합니다.",
+          },
+          reasonCode: {
+            $ref: "#/components/schemas/ReservationRoomMoveReasonCode",
+          },
+          expectedReservationVersion: { type: "integer", minimum: 1 },
+          expectedSourceRoomVersion: { type: "integer", minimum: 1 },
+          expectedTargetRoomVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      ReservationRoomMoveCommitRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "targetRoomId",
+          "expectedReservationVersion",
+          "expectedSourceRoomVersion",
+          "expectedTargetRoomVersion",
+          "evaluatedAt",
+          "expiresAt",
+          "effectiveAt",
+          "impactFingerprint",
+          "reasonCode",
+        ],
+        properties: {
+          targetRoomId: { type: "string", format: "uuid" },
+          expectedReservationVersion: { type: "integer", minimum: 1 },
+          expectedSourceRoomVersion: { type: "integer", minimum: 1 },
+          expectedTargetRoomVersion: { type: "integer", minimum: 1 },
+          evaluatedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+          effectiveAt: { type: "string", format: "date-time" },
+          impactFingerprint: {
+            type: "string",
+            pattern: "^[0-9a-f]{64}$",
+          },
+          reasonCode: {
+            $ref: "#/components/schemas/ReservationRoomMoveReasonCode",
+          },
+        },
+      },
+      ReservationRoomMovePreview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "mode",
+          "eligible",
+          "rejectionReasonCodes",
+          "blockingReasonCodes",
+          "warnings",
+          "targetBlockReasonCodes",
+          "sourceOutcome",
+          "targetOutcome",
+          "impactFingerprint",
+          "evaluatedAt",
+          "expiresAt",
+          "effectiveAt",
+          "reservationId",
+          "reservationVersion",
+          "stayId",
+          "stayVersion",
+          "sourceSegmentId",
+          "sourceSegmentVersion",
+          "sourceRoomId",
+          "sourceRoomVersion",
+          "targetRoomId",
+          "targetRoomVersion",
+          "checkInAt",
+          "checkOutAt",
+          "guestCount",
+          "preparationObligationId",
+          "checkoutObligationId",
+          "checkoutObligationVersion",
+          "plannedCheckoutTargetId",
+          "plannedCheckoutTargetVersion",
+        ],
+        properties: {
+          mode: { $ref: "#/components/schemas/ReservationRoomMoveMode" },
+          eligible: { type: "boolean" },
+          rejectionReasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: {
+              $ref:
+                "#/components/schemas/ReservationRoomMoveRejectionReasonCode",
+            },
+          },
+          blockingReasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: {
+              $ref:
+                "#/components/schemas/ReservationRoomMoveBlockingReasonCode",
+            },
+          },
+          warnings: {
+            type: "array",
+            maxItems: 0,
+            items: { type: "string" },
+            description:
+              "Phase B source-controlled 경고. 현재 정의된 경고는 없어 빈 배열입니다.",
+          },
+          targetBlockReasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: { $ref: "#/components/schemas/RoomBlockingReasonCode" },
+          },
+          sourceOutcome: {
+            $ref: "#/components/schemas/ReservationRoomMoveOutcome",
+          },
+          targetOutcome: {
+            $ref: "#/components/schemas/ReservationRoomMoveOutcome",
+          },
+          impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          evaluatedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+          effectiveAt: { type: "string", format: "date-time" },
+          reservationId: { type: "string", format: "uuid" },
+          reservationVersion: { type: "integer", minimum: 1 },
+          stayId: { type: "string", format: "uuid" },
+          stayVersion: { type: "integer", minimum: 1 },
+          sourceSegmentId: { type: "string", format: "uuid" },
+          sourceSegmentVersion: { type: "integer", minimum: 1 },
+          sourceRoomId: { type: "string", format: "uuid" },
+          sourceRoomVersion: { type: "integer", minimum: 1 },
+          targetRoomId: { type: "string", format: "uuid" },
+          targetRoomVersion: { type: "integer", minimum: 1 },
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
+          preparationObligationId: { type: "string", format: "uuid" },
+          checkoutObligationId: { type: "string", format: "uuid" },
+          checkoutObligationVersion: { type: "integer", minimum: 1 },
+          plannedCheckoutTargetId: { type: ["string", "null"], format: "uuid" },
+          plannedCheckoutTargetVersion: {
+            type: ["integer", "null"],
+            minimum: 1,
+          },
+        },
+      },
+      ReservationRoomMoveResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "reservation",
+          "mode",
+          "evaluatedAt",
+          "expiresAt",
+          "effectiveAt",
+          "movedAt",
+          "sourceRoomId",
+          "targetRoomId",
+          "sourceRoomVersion",
+          "targetRoomVersion",
+          "plannedCheckoutTargetId",
+          "plannedCheckoutTargetVersion",
+          "sourceOutcome",
+          "targetOutcome",
+        ],
+        properties: {
+          reservation: { $ref: "#/components/schemas/Reservation" },
+          mode: { $ref: "#/components/schemas/ReservationRoomMoveMode" },
+          evaluatedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+          effectiveAt: { type: "string", format: "date-time" },
+          movedAt: { type: "string", format: "date-time" },
+          sourceRoomId: { type: "string", format: "uuid" },
+          targetRoomId: { type: "string", format: "uuid" },
+          sourceRoomVersion: { type: "integer", minimum: 1 },
+          targetRoomVersion: { type: "integer", minimum: 1 },
+          plannedCheckoutTargetId: { type: "string", format: "uuid" },
+          plannedCheckoutTargetVersion: { type: "integer", minimum: 1 },
+          sourceOutcome: {
+            $ref: "#/components/schemas/ReservationRoomMoveOutcome",
+          },
+          targetOutcome: {
+            $ref: "#/components/schemas/ReservationRoomMoveOutcome",
+          },
+          stay: {
+            $ref: "#/components/schemas/ReservationRoomMoveStay",
+            description: "DURING_STAY 성공에서만 반환되는 현재 stay 요약",
+          },
+          segments: {
+            type: "array",
+            minItems: 2,
+            maxItems: 2,
+            items: {
+              $ref: "#/components/schemas/ReservationRoomMoveSegment",
+            },
+            description: "DURING_STAY 성공에서 닫힌 원 segment와 새 segment",
+          },
+          sourceCleaningTargetId: {
+            type: "string",
+            format: "uuid",
+            description:
+              "DURING_STAY 이동으로 원 객실에 생성된 checkout 청소 target",
+          },
+          pinAccessEndsAt: {
+            type: "string",
+            format: "date-time",
+            description: "DURING_STAY 원 객실 PIN 접근 권한의 유효 종료 시각",
+          },
+        },
+      },
+      ReservationRoomMoveStay: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "version", "currentRoomId"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          version: { type: "integer", minimum: 1 },
+          currentRoomId: { type: "string", format: "uuid" },
+        },
+      },
+      ReservationRoomMoveSegment: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "roomId", "startsAt", "endsAt"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          startsAt: { type: "string", format: "date-time" },
+          endsAt: { type: "string", format: "date-time" },
+        },
+      },
       ManualCleaningRequestCreate: {
         type: "object",
         additionalProperties: false,
@@ -7646,6 +8398,7 @@ export const openApiDocument = {
         type: "string",
         enum: [
           "OCCUPIED",
+          "RESERVATION_CURRENT",
           "CLEANING_REQUIRED",
           "CANDLE_PRESENT",
           "OPERATION_BLOCKED",
@@ -7653,7 +8406,67 @@ export const openApiDocument = {
           "DATA_UNCONFIRMED",
         ],
         description:
-          "객실 예약 배정이 준비되지 않은 독립 사유입니다. 여러 값이 동시에 올 수 있습니다. PIN 상태는 이 enum이 아니라 RoomProjection.pinSyncStatus의 별도 경고 축입니다.",
+          "객실 예약 배정이 준비되지 않은 독립 사유입니다. RESERVATION_CURRENT는 evaluatedAt이 예약의 [checkInAt, checkOutAt) 구간에 있음을 뜻합니다. 여러 값이 동시에 올 수 있습니다. PIN 상태는 이 enum이 아니라 RoomProjection.pinSyncStatus의 별도 경고 축입니다.",
+      },
+      RoomOccupancyStatus: {
+        type: "string",
+        enum: ["VACANT", "OCCUPIED"],
+        description: "실제 check-in/out 이력 기준 현재 점유 축입니다.",
+      },
+      RoomReservationLifecycle: {
+        type: "string",
+        enum: [
+          "NONE",
+          "FUTURE",
+          "RESERVATION_PRESENT",
+          "ARRIVAL_PENDING",
+          "OCCUPIED",
+        ],
+        description:
+          "Asia/Seoul 날짜와 serverTime을 기준으로 계산한 예약 임박 축입니다. 현재 [checkInAt, checkOutAt) 또는 실제 active 점유는 OCCUPIED가 우선합니다.",
+      },
+      RoomReadinessStatus: {
+        type: "string",
+        enum: ["READY", "CLEANING_REQUIRED", "CHECKIN_BLOCKED"],
+        description:
+          "현재 준비 축입니다. PIN 경고는 예약 가능 여부가 아니라 현재 check-in 준비에만 반영됩니다.",
+      },
+      RoomPrimaryDisplayStatus: {
+        type: "string",
+        enum: [
+          "BLOCKED",
+          "OCCUPIED",
+          "ARRIVAL_PENDING",
+          "RESERVATION_PRESENT",
+          "CLEANING_REQUIRED",
+          "READY",
+        ],
+        description:
+          "BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY 우선순위의 파생 표시값입니다. DB 원본 상태가 아닙니다.",
+      },
+      RoomBlockingReasonCode: {
+        type: "string",
+        enum: [
+          "CANDLE_PRESENT",
+          "OPERATION_BLOCKED",
+          "ROOM_ISSUE_BLOCKED",
+          "DATA_UNCONFIRMED",
+        ],
+        description: "청소·예약 일정과 분리된 현재 운영/입실 차단 사유입니다.",
+      },
+      RoomReadinessReasonCode: {
+        type: "string",
+        enum: [
+          "CANDLE_PRESENT",
+          "OPERATION_BLOCKED",
+          "ROOM_ISSUE_BLOCKED",
+          "DATA_UNCONFIRMED",
+          "CLEANING_REQUIRED",
+          "PIN_MISMATCH",
+          "PIN_UNCONFIGURED",
+        ],
+        description:
+          "현재 준비 상태의 사유입니다. PIN_MISMATCH/PIN_UNCONFIGURED는 current check-in에만 나타나며 예약 bookability 사유가 아닙니다.",
       },
       RoomProjection: {
         type: "object",
@@ -7666,6 +8479,18 @@ export const openApiDocument = {
           "elevatorZone",
           "dataStatus",
           "stateVersion",
+          "evaluatedAt",
+          "reservationPhase",
+          "serverTime",
+          "occupancyStatus",
+          "reservationLifecycle",
+          "readinessStatus",
+          "primaryDisplayStatus",
+          "nextReservationId",
+          "nextCheckInAt",
+          "nextCheckOutAt",
+          "blockingReasonCodes",
+          "readinessReasonCodes",
           "occupied",
           "cleaningRequired",
           "candleCount",
@@ -7704,10 +8529,70 @@ export const openApiDocument = {
             description:
               "후속 객실 변경 command에서 expectedVersion으로 사용할 CAS version",
           },
-          occupied: { type: "boolean", description: "현재 점유 여부" },
+          evaluatedAt: {
+            type: "string",
+            format: "date-time",
+            description:
+              "이 projection의 모든 현재 시각 판정에 사용한 서버 RFC 3339 timestamp",
+          },
+          reservationPhase: {
+            type: "string",
+            enum: ["none", "upcoming", "current"],
+            description:
+              "evaluatedAt 기준 예약 일정 축. current는 checkInAt <= evaluatedAt < checkOutAt, upcoming은 아직 시작하지 않은 active 예약, none은 현재·향후 active 예약이 없음을 뜻합니다.",
+          },
+          serverTime: {
+            type: "string",
+            format: "date-time",
+            description:
+              "evaluatedAt과 byte-for-byte 같은 서버 snapshot timestamp입니다.",
+          },
+          occupancyStatus: {
+            $ref: "#/components/schemas/RoomOccupancyStatus",
+          },
+          reservationLifecycle: {
+            $ref: "#/components/schemas/RoomReservationLifecycle",
+          },
+          readinessStatus: {
+            $ref: "#/components/schemas/RoomReadinessStatus",
+          },
+          primaryDisplayStatus: {
+            $ref: "#/components/schemas/RoomPrimaryDisplayStatus",
+          },
+          nextReservationId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "serverTime 뒤 가장 이른 future active 예약 ID. 현재 예약 자체는 포함하지 않습니다.",
+          },
+          nextCheckInAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+          nextCheckOutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+          blockingReasonCodes: {
+            type: "array",
+            items: { $ref: "#/components/schemas/RoomBlockingReasonCode" },
+            description:
+              "청소·점유·예약 임박과 분리된 현재 운영/입실 차단 사유입니다.",
+          },
+          readinessReasonCodes: {
+            type: "array",
+            items: { $ref: "#/components/schemas/RoomReadinessReasonCode" },
+            description:
+              "readinessStatus의 근거입니다. PIN 경고는 current check-in일 때만 여기에 나타납니다.",
+          },
+          occupied: {
+            type: "boolean",
+            description: "evaluatedAt 기준 현재 점유 여부",
+          },
           cleaningRequired: {
             type: "boolean",
-            description: "현재 청소 의무 존재 여부",
+            description:
+              "evaluatedAt 기준 현재 활성화된 청소 의무 존재 여부. 미래 예약의 준비 의무만으로 true가 되지 않습니다.",
           },
           candleCount: {
             type: "integer",
@@ -7722,11 +8607,13 @@ export const openApiDocument = {
           },
           allocationBlocked: {
             type: "boolean",
-            description: "하나 이상의 고객 배정 차단 사유가 있는지 여부",
+            description:
+              "evaluatedAt 기준 하나 이상의 현재 고객 배정 차단 사유가 있는지 여부",
           },
           allocationReady: {
             type: "boolean",
-            description: "현재 고객 배정 준비 조건을 모두 만족하는지 여부",
+            description:
+              "evaluatedAt 기준 현재 고객 배정 준비 조건을 모두 만족하는지 여부",
           },
           reasonCodes: {
             type: "array",

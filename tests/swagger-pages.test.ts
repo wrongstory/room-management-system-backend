@@ -14,10 +14,12 @@ const initializerUrl = new URL('../docs/swagger-portal/swagger-initializer.js', 
 const temporaryDirectories: string[] = [];
 const apiBaseUrl = 'https://abcdefghijklmnopqrst.supabase.co/functions/v1/api';
 const releaseContractArguments = [
+  '--expected-version',
+  '0.3.0',
   '--expected-path-count',
-  '39',
+  '109',
   '--expected-operation-count',
-  '43'
+  '117'
 ];
 
 interface FixtureOptions {
@@ -27,9 +29,9 @@ interface FixtureOptions {
 }
 
 async function createFixture({
-  version = '0.2.0',
-  pathCount = 39,
-  operationCount = 43
+  version = '0.3.0',
+  pathCount = 109,
+  operationCount = 117
 }: FixtureOptions = {}): Promise<string> {
   if (pathCount < 3 || operationCount < 3) {
     throw new Error('fixture path/operation count가 올바르지 않습니다.');
@@ -95,8 +97,10 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).not.toContain('branches: [main]');
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "39"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "43"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.3.0"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "109"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "117"');
+    expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
     expect(workflow).toContain('pages: write');
@@ -134,7 +138,11 @@ describe('GitHub Pages Swagger portal', () => {
       readFile(join(outputDirectory, 'openapi.json'), 'utf8'),
       readFile(join(outputDirectory, 'portal-manifest.json'), 'utf8')
     ]);
-    const spec = JSON.parse(specText) as { servers: Array<{ url: string }>; paths: object };
+    const spec = JSON.parse(specText) as {
+      info: { version: string };
+      servers: Array<{ url: string }>;
+      paths: object;
+    };
     const manifest = JSON.parse(manifestText) as {
       apiBaseUrl: string;
       pathCount: number;
@@ -144,25 +152,26 @@ describe('GitHub Pages Swagger portal', () => {
     };
 
     expect(index).toContain('CASTLE THE ART API');
-    expect(index).toContain('0.2.0');
-    expect(index).toContain('39개');
+    expect(index).toContain('0.3.0');
+    expect(index).toContain('109개');
     expect(index).not.toMatch(/__[A-Z0-9_]+__/);
     expect(initializer).toContain('supportedSubmitMethods: []');
     expect(initializer).toContain('persistAuthorization: false');
     expect(initializer).toContain('tryItOutEnabled: false');
+    expect(spec.info.version).toBe('0.3.0');
     expect(spec.servers).toEqual([{ url: apiBaseUrl, description: '운영 Supabase Edge API' }]);
-    expect(Object.keys(spec.paths)).toHaveLength(39);
+    expect(Object.keys(spec.paths)).toHaveLength(109);
     expect(manifest).toMatchObject({
       apiBaseUrl,
-      pathCount: 39,
-      operationCount: 43,
+      pathCount: 109,
+      operationCount: 117,
       readOnly: true
     });
     expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it('rejects the stale 13-operation production contract', async () => {
-    const fixturePath = await createFixture({ pathCount: 39, operationCount: 13 });
+  it('rejects the stale v0.2.0 production contract', async () => {
+    const fixturePath = await createFixture({ version: '0.2.0', pathCount: 39, operationCount: 43 });
     const outputDirectory = await mkdtemp(join(tmpdir(), 'swagger-pages-output-'));
     temporaryDirectories.push(outputDirectory);
 

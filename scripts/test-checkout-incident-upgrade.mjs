@@ -51,7 +51,7 @@ function snapshot() {
       select jsonb_build_object(
         'reservation',(select to_jsonb(x) from public.reservations x where id='${reservation}'),
         'obligation',(select to_jsonb(x) from public.checkout_cleaning_obligations x where reservation_id='${reservation}'),
-        'targets',(select jsonb_agg(to_jsonb(x) order by id) from public.cleaning_targets x where id in (select id from target)),
+        'targets',(select jsonb_agg(to_jsonb(x)-'stay_segment_checkout_obligation_id' order by id) from public.cleaning_targets x where id in (select id from target)),
         'assignments',(select jsonb_agg(to_jsonb(x) order by id) from public.cleaning_assignments x where id in (select id from assignment)),
         'attempts',(select jsonb_agg(to_jsonb(x) order by id) from public.cleaning_attempts x where id in (select id from attempt)),
         'pinRevision',(select to_jsonb(x) from private.room_pin_revisions x where id='${id(700)}'),
