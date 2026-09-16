@@ -21,6 +21,14 @@ const resolveRef = (value, seen = new Set()) => {
   assert(resolved, `OpenAPI reference does not resolve: ${value.$ref}.`);
   return resolveRef(resolved, seen);
 };
+const effectiveParameters = (pathItem, operation) => {
+  const parameters = new Map();
+  for (const parameterInput of [...(pathItem.parameters ?? []), ...(operation.parameters ?? [])]) {
+    const parameter = resolveRef(parameterInput);
+    parameters.set(`${parameter.in}:${parameter.name}`, parameter);
+  }
+  return [...parameters.values()];
+};
 
 assert(document.openapi === '3.1.1', `Frontend generator requires OpenAPI 3.1.1, received ${document.openapi}.`);
 assert(document.info.version === '0.2.0', `Unexpected source API version ${document.info.version}.`);
@@ -48,7 +56,7 @@ for (const [area, pattern] of Object.entries(requiredAreas)) assert(operations.s
 
 const allowedWithoutIdempotency = new Set(['login', 'runDeveloperDiagnostics', 'syncOfflineCompletion', 'previewAssignments', 'markNotificationRead', 'revealRoomPin']);
 for (const { operation, pathItem } of operations.filter(({ method }) => method !== 'get')) {
-  const parameters = [...(pathItem.parameters ?? []), ...(operation.parameters ?? [])].map((parameter) => resolveRef(parameter));
+  const parameters = effectiveParameters(pathItem, operation);
   assert(
     allowedWithoutIdempotency.has(operation.operationId) || parameters.some((parameter) => parameter.name === 'Idempotency-Key' && parameter.in === 'header' && parameter.required === true),
     `${operation.operationId} is missing the frontend Idempotency-Key contract.`,
