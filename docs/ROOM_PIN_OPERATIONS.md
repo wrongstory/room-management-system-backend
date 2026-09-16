@@ -2,7 +2,7 @@
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 통합 기준은 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578`, 52 migrations / 105 paths / 112 operations이고 현재 보완 candidate는 기존 52개를 수정하지 않는 53번째 nonce reservation migration만 추가한다. feature → `dev` 검증만 수행하며 production/main/recovery migration, Secrets, Edge, Cron, Vault, Google hosted 설정은 변경하지 않는다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 현재 production source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`, 전체 56 migrations / 109 paths / 117 operations이고 PIN 범위의 49~53번째 migration과 #146 deterministic concurrency fixture는 변경 없이 보존된다. PIN source와 `room-pin-sheet-sync` bundle은 production에 반영됐지만 target mapping·Google ACL/Secrets/Cron/hosted activation은 여전히 별도 pending이다. #156/#165의 55~56번째 migration과 API는 PIN schema·worker 계약을 바꾸지 않는다.
 
 Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다.
 
@@ -41,17 +41,18 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 ### Production 활성화 체크리스트
 
-1. 기존 production DB backup과 적용된 52개 migration 및 PIN 원장 evidence를 확인한다. 이미 적용된 52개 파일은 수정·삭제하지 않는다.
-2. 승인된 release에서 53번째 migration을 파일에 명시된 단일 transaction으로 적용한다. transaction 시작 직후 첫 DDL인 table lock이 lease/revision 양쪽을 잠그며, lock 대기·timeout 또는 historical nonce conflict가 발생하면 적용을 중단한다. 오류를 무시하거나 `SKIP LOCKED`로 이력을 제외하지 않으며 registry/helper/trigger와 migration history는 반쪽 설치되지 않고 기존 원장 evidence는 그대로 남아야 한다.
-3. registry backfill 수와 history 정합성, 양쪽 INSERT trigger, lease identity guard, FORCE RLS와 최소 grant를 확인한다. 이 확인 전에는 bootstrap을 실행하지 않는다.
-4. 별도 release/운영 승인을 받은 뒤에만 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
-5. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
-6. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.
-7. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포한다.
-8. 별도 승인된 bootstrap을 실행하고 read-only status, 빈 큐 heartbeat, 121실 full resync, 삭제·정렬·변조 repair, duplicate-write 0을 hosted에서 확인한다.
-9. Cron/Vault를 마지막에 활성화하고 연속 heartbeat와 operator-blocked alert를 관찰한다.
+1. production은 현재 56개 stable migration까지 적용됐다. PIN 범위의 49~53번과 이후 54~56번 파일 및 기존 원장 evidence를 수정·삭제하거나 재적용하지 않는다.
+2. 승인된 v0.3.0 manifest는 전체 56개 SHA 목록을 고정한다. 현재 이 manifest의 production pending migration은 없으며, PIN 활성화를 이유로 자동 `db push`, history repair 또는 49~53번 재적용을 하지 않는다.
+3. 53번째 `room_pin_nonce_reservation_hardening` 적용 당시에는 단일 transaction의 첫 DDL table lock이 lease/revision 양쪽을 잠갔고, lock 대기·timeout 또는 historical nonce conflict는 전체 적용 중단 조건이었다. 운영 evidence에서 partial installation이나 이력 충돌이 발견되면 기존 원장을 보정하지 말고 PIN 활성화를 중단한다.
+4. 이미 설치된 registry backfill 정합성, 양쪽 INSERT trigger, lease identity guard, FORCE RLS와 최소 grant를 read-only로 확인한다. 이 확인 전에는 bootstrap을 실행하지 않는다.
+5. 별도 release/운영 승인을 받은 뒤에만 production environment/project/spreadsheet/tab exact mapping을 추가하고 독립 검토한다.
+6. 최소 권한 service account를 대상 spreadsheet에만 공유하고 다른 문서 ACL이 없는지 확인한다.
+7. Function Secrets를 배치한 뒤 credential email/PKCS8 local validation, target approved, role denial을 먼저 smoke한다.
+8. `api`와 `room-pin-sheet-sync`를 같은 승인 exact source로 배포한다.
+9. 별도 승인된 bootstrap을 실행하고 read-only status, 빈 큐 heartbeat, 121실 full resync, 삭제·정렬·변조 repair, duplicate-write 0을 hosted에서 확인한다.
+10. Cron/Vault를 마지막에 활성화하고 연속 heartbeat와 operator-blocked alert를 관찰한다.
 
-53번째 migration의 lock wait/timeout, validation conflict 또는 transaction 중간 실패는 hosted 적용 실패로 취급한다. 기존 lease/revision/current pointer/sync event/Sheet outbox/audit/completed receipt를 삭제·보정하지 말고 원 evidence를 보존한 채 조사한다. 현재 source/dev 검증 완료는 이 production 적용·bootstrap 승인과 별개다.
+53번째 migration의 기존 적용 evidence에서 lock wait/timeout, validation conflict 또는 transaction 중간 실패 흔적이 발견되면 hosted 활성화를 중단한다. 기존 lease/revision/current pointer/sync event/Sheet outbox/audit/completed receipt를 삭제·보정하지 말고 원 evidence를 보존한 채 조사한다. source/main·production schema 반영과 Google target·bootstrap 활성화 승인은 별개다.
 
 서비스 계정 key 회전은 새 key 배치→local 구조 검증→OAuth/Sheets smoke→이전 key 폐기 순서다. PC/credential 유출 또는 ACL 오배치 시 Cron과 Function 호출을 중단하고 key를 즉시 폐기하며, target ACL을 회수하고 status/operator-blocked evidence와 audit을 보존한 채 승인된 새 credential로만 복구한다.
 
