@@ -2259,7 +2259,7 @@ export const openApiDocument = {
         operationId: "publishCleaningTemplate",
         summary: "퇴실 청소 템플릿의 불변 새 버전 게시",
         description:
-          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 v7 이상 immutable version과 normalized slot rows를 원자 게시합니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
+          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과 normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -4542,6 +4542,13 @@ export const openApiDocument = {
           displayOrder: { type: "integer", minimum: 0, maximum: 99 },
           required: { type: "boolean" },
           label: { type: "string", minLength: 1, maxLength: 80 },
+          maxPhotos: {
+            type: "integer",
+            minimum: 1,
+            maximum: 10,
+            description:
+              "Decision A v8+ 필수 메타데이터입니다. pre-A historical v7+ projection에는 없을 수 있습니다.",
+          },
           description: { type: "string", minLength: 1, maxLength: 200 },
           section: { type: "string", minLength: 1, maxLength: 80 },
           instanceKey: {
@@ -4550,6 +4557,12 @@ export const openApiDocument = {
             maxLength: 80,
           },
         },
+      },
+      CheckoutCleaningTemplateV8Slot: {
+        allOf: [{ $ref: "#/components/schemas/CleaningTemplateSlot" }, {
+          type: "object",
+          required: ["maxPhotos"],
+        }],
       },
       PublishCleaningTemplateRequest: {
         type: "object",
@@ -4576,12 +4589,14 @@ export const openApiDocument = {
           },
           slots: {
             type: "array",
-            minItems: 10,
-            maxItems: 15,
+            minItems: 9,
+            maxItems: 14,
             uniqueItems: true,
-            items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
+            items: {
+              $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slot",
+            },
             description:
-              "v7+ checkout 계약: standard/premium/oceanPremium/oceanFamily 순으로 정확히 10/11/13/15개, 필수는 총수-1, required tv-on은 정확히 한 개입니다. displayOrder는 0부터 연속입니다.",
+              "v8+ checkout 계약: standard/premium/oceanPremium/oceanFamily 순으로 정확히 9/10/12/14개, 필수는 8/9/11/13개입니다. required tv-on과 entry-storage는 각각 정확히 한 개, 마지막 extra-proof는 선택·maxPhotos 10이며 entry-number는 금지됩니다. 나머지 슬롯은 maxPhotos 1이고 displayOrder는 0부터 연속입니다.",
           },
         },
       },
@@ -4611,9 +4626,11 @@ export const openApiDocument = {
           },
           slots: {
             type: "array",
-            minItems: 10,
+            minItems: 9,
             maxItems: 15,
             items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
+            description:
+              "maxPhotos 없는 pre-A historical v7+ template은 10/11/13/15개이고, 모든 slot에 metadata가 있는 A-contract v8+ template은 9/10/12/14개입니다.",
           },
           publishedAt: { type: "string", format: "date-time" },
           createdAt: { type: "string", format: "date-time" },

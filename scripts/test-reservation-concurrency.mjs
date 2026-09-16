@@ -187,10 +187,12 @@ const sessionPayload = JSON.parse(Buffer.from(
 assert(typeof sessionPayload.session_id === 'string', 'template publisher JWT session id');
 const templateSessionId = sessionPayload.session_id;
 const templateSlots = (count) => Array.from({ length: count }, (_, displayOrder) => ({
-  slotKey: displayOrder === 0 ? 'tv-on' : `slot-${displayOrder}`,
+  slotKey: displayOrder === 0 ? 'tv-on' : displayOrder === 1 ? 'entry-storage' :
+    displayOrder === count - 1 ? 'extra-proof' : `slot-${displayOrder}`,
   displayOrder,
   required: displayOrder < count - 1,
-  label: `동시성 사진 ${displayOrder + 1}`
+  label: `동시성 사진 ${displayOrder + 1}`,
+  maxPhotos: displayOrder === count - 1 ? 10 : 1
 }));
 const templatePublishArgs = (roomTypeCode, count, key, hash) => ({
   p_actor_profile_id: actorProfileId,
@@ -204,10 +206,10 @@ const templatePublishArgs = (roomTypeCode, count, key, hash) => ({
 });
 const standardPublishRace = await Promise.all([
   client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
-    'standard', 10, `template-standard-${randomUUID()}`, 'a'.repeat(64)
+    'standard', 9, `template-standard-${randomUUID()}`, 'a'.repeat(64)
   )),
   client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
-    'standard', 10, `template-standard-${randomUUID()}`, 'b'.repeat(64)
+    'standard', 9, `template-standard-${randomUUID()}`, 'b'.repeat(64)
   ))
 ]);
 assert(standardPublishRace.filter((result) => !result.error).length === 1,
@@ -216,13 +218,13 @@ assert(standardPublishRace.filter((result) => result.error).every((result) =>
   result.error.message === 'CLEANING_TEMPLATE_VERSION_CONFLICT'),
   'concurrent template CAS loser must fail with the stable stale-version error');
 for (const [roomTypeCode, count] of [
-  ['premium', 11], ['oceanPremium', 13], ['oceanFamily', 15]
+  ['premium', 10], ['oceanPremium', 12], ['oceanFamily', 14]
 ]) {
   const result = await client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
     roomTypeCode, count, `template-${roomTypeCode}-${randomUUID()}`,
     createHash('sha256').update(`template-${roomTypeCode}-${randomUUID()}`).digest('hex')
   ));
-  assert(!result.error && result.data?.version === 7, `${roomTypeCode} checkout template publication`);
+  assert(!result.error && result.data?.version === 8, `${roomTypeCode} checkout template publication`);
 }
 const templateCatalog = await client.rpc('list_checkout_cleaning_templates', {
   p_actor_profile_id: actorProfileId, p_session_id: templateSessionId

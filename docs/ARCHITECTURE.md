@@ -25,6 +25,8 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 기능 integration 기준은 PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이고, 운영 source 정본은 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`다. 2026-09-16 production readback은 56 migrations / `api` ACTIVE v16 / OpenAPI `0.3.0` 109 paths / 117 operations 및 5개 Edge bundle이다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
+#179의 현재 작업 후보는 57번째 append-only migration으로 v8 슬롯 계약을 추가한다. 병합·운영 반영 전 source candidate이며 #180 다중 선택 사진 모델 완료 전 운영 template을 재게시하지 않는다.
+
 ## 신뢰 경계
 
 ### #131 encrypted room PIN Phase A — source/dev 완료
@@ -376,7 +378,7 @@ target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참
 
 이번 #30은 모델과 내부 완전성 검증 기반이며 새 HTTP API나 Drive worker를 제공하지 않는다.
 서버 내부 metadata 검증은 파일의 magic bytes·EXIF·Drive 업로드 성공 검증을 대체하지 않는다.
-빈/불명확한 legacy template은 보존하면서 새 제출은 fail-closed하고, 현재 v7을 과거 작업에
+빈/불명확한 legacy template은 보존하면서 새 제출은 fail-closed하고, 현재 계약을 과거 작업에
 자동 적용하지 않는다. 기존 사진 없는 물리적 현장 완료 계약은 유지한다.
 상세 범위와 검증 상태는 [사진·제출 기반 모델](./PHOTO_SUBMISSION_BASE.md)을 따른다.
 
@@ -718,14 +720,22 @@ Fastify/Edge/OpenAPI의 #133 통합 당시 기준은 108 paths / 115 operations�
 admin의 live session만 네 room type의 current checkout template을 조회하고, 한 타입씩 expected-version CAS로
 새 immutable version을 게시합니다. actor/command/key/request-hash receipt와 room-type advisory lock이 replay와
 경쟁을 직렬화하며, 이전 published row는 retired 이력으로 남고 published partial unique가 exactly-one을 보장합니다.
-최초 version은 기존 max 다음 값과 7 중 큰 값이고, 현행 photo 증빙 계약의 정확한 타입별 slot 수·필수 수·required
-`tv-on`을 우회하지 않습니다. checkout duration은 선택값이며 제공할 때만 1..10,080분으로 제한합니다.
+Decision #179 이후 새 version은 기존 max 다음 값과 8 중 큰 값입니다. 기존 publisher가 만든 `maxPhotos` 없는
+pre-A v7+의 10/11/13/15개 이력은 계속 검증하고, 모든 slot에 `maxPhotos`가 있는 v8+ A-contract는
+9/10/12/14개와 필수 8/9/11/13개, required `tv-on`·`entry-storage`, 마지막 optional
+`extra-proof(maxPhotos=10)`, `entry-number` 금지를 우회하지 않습니다. checkout duration은 선택값이며 제공할
+때만 1..10,080분으로 제한합니다.
 실제 수행시간은 attempt의 `started_at → field_completed_at`, turnaround는 실제 checkout → field completion에서
 사후 계산합니다. 배정 preview는 별도 confirmed duration-policy 원장만 사용하므로 template null을 fallback으로
 대체하지 않습니다. stayover/additional 등 기존 비-checkout template duration의 non-null 계약은 유지합니다.
 raw template table은 Data API role에 열지 않고 service-only RPC가 actor/session/password/role을 다시 검증합니다.
 audit에는 slot label/description이나 raw state/hash를 복제하지 않습니다. 설정 게시 자체는 행동 수신자가 없으므로
 notification/outbox를 만들지 않으며, production seed와 stayover/additional/reclean 계약은 #156 범위 밖입니다.
+
+`20260916030930_photo_slot_contract_v8.sql`은 이 전환을 append-only로 적용한다. validator가 v7과 v8+를
+version과 완전한 `maxPhotos` metadata로 분기하므로 과거 target/attempt/submission/inspection snapshot은 재해석하지 않는다. Fastify·Edge·
+OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. 운영 DB 적용과 template 재게시는 포함하지 않으며,
+`extra-proof`의 실제 0~10장 current collection·사진별 삭제·제출 봉인은 #180 완료 전 release gate다.
 
 ## API 단계
 

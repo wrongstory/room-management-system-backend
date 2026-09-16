@@ -39,6 +39,17 @@ begin
     'duration-upgrade-publish',repeat('a',64)
   );
 
+  perform public.publish_checkout_cleaning_template(
+    v_admin,v_session,'standard',7,60,
+    (select jsonb_agg(jsonb_build_object(
+      'slotKey',case when display_order=0 then 'tv-on' else 'slot-'||display_order end,
+      'displayOrder',display_order,
+      'required',display_order<9,
+      'label','사진 '||(display_order+1)
+    ) order by display_order) from generate_series(0,9) display_order),
+    'duration-upgrade-publish-v8',repeat('d',64)
+  );
+
   select room.* into v_room
   from public.rooms room
   join public.room_types room_type on room_type.id=room.room_type_id
