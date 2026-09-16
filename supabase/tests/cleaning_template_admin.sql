@@ -92,6 +92,15 @@ select throws_ok(
 select throws_ok(
   $$select public.publish_checkout_cleaning_template(
     pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,
+    (select jsonb_agg(value - 'maxPhotos' order by (value->>'displayOrder')::integer)
+       from jsonb_array_elements(pg_temp.checkout_slots(10))),
+    'template-fresh-legacy-shape',repeat('3',64))$$,
+  '23514','INVALID_CLEANING_TEMPLATE_SLOTS',
+  'fresh publication cannot use a maxPhotos-less pre-A shape'
+);
+select throws_ok(
+  $$select public.publish_checkout_cleaning_template(
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,
     pg_temp.checkout_slots(9) #- '{0,maxPhotos}',
     'template-missing-max-photos',repeat('3',64))$$,
   '23514','INVALID_CLEANING_TEMPLATE_SLOTS',

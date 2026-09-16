@@ -204,6 +204,17 @@ begin
   );
   if v_response is not null then return v_response; end if;
 
+  -- A completed pre-A command may replay above with its exact maxPhotos-less
+  -- request. Once no receipt exists, every fresh publication must use the
+  -- complete A-contract metadata; historical shape is never a publication
+  -- fallback merely because its version/count remains readable.
+  if exists (
+    select 1 from jsonb_array_elements(v_slots) slot
+    where not (slot ? 'maxPhotos')
+  ) then
+    raise exception using errcode = '23514', message = 'INVALID_CLEANING_TEMPLATE_SLOTS';
+  end if;
+
   perform pg_advisory_xact_lock(hashtextextended('cleaning-template:checkout:' || p_room_type_code, 0));
   select * into v_room_type from public.room_types where code = p_room_type_code for share;
   if not found then raise exception using errcode = 'P0002', message = 'ROOM_TYPE_NOT_FOUND'; end if;

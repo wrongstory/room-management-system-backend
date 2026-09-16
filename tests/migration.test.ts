@@ -124,6 +124,7 @@ describe('initial migration contract', () => {
     expect(sql).toContain("bool_and(value ? 'maxPhotos')");
     expect(sql).toContain("if p_snapshot->>'cleaningKind'='checkout' and version_number>=7 and (");
     expect(sql).toContain("uses_a_contract:=p_snapshot->>'cleaningKind'='checkout'");
+    expect(sql).toContain("where not (slot ? 'maxPhotos')");
     expect(sql).toContain("value->>'slotKey'='entry-number'");
     expect(sql).toContain("value->>'slotKey'='entry-storage'");
     expect(sql).toContain("value->>'slotKey'='extra-proof'");
