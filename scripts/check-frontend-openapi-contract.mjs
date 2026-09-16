@@ -9,9 +9,18 @@ const assert = (condition, message) => {
 const operations = [];
 for (const [path, pathItem] of Object.entries(document.paths)) {
   for (const [method, operation] of Object.entries(pathItem)) {
-    if (['get', 'post', 'put', 'patch', 'delete'].includes(method)) operations.push({ path, method, operation });
+    if (['get', 'post', 'put', 'patch', 'delete'].includes(method)) operations.push({ path, method, operation, pathItem });
   }
 }
+
+const resolveRef = (value, seen = new Set()) => {
+  if (!value?.$ref) return value;
+  assert(!seen.has(value.$ref), `Circular OpenAPI reference while resolving ${value.$ref}.`);
+  seen.add(value.$ref);
+  const resolved = value.$ref.slice(2).split('/').reduce((current, key) => current?.[key], document);
+  assert(resolved, `OpenAPI reference does not resolve: ${value.$ref}.`);
+  return resolveRef(resolved, seen);
+};
 
 assert(document.openapi === '3.1.1', `Frontend generator requires OpenAPI 3.1.1, received ${document.openapi}.`);
 assert(document.info.version === '0.2.0', `Unexpected source API version ${document.info.version}.`);
@@ -38,9 +47,10 @@ const requiredAreas = {
 for (const [area, pattern] of Object.entries(requiredAreas)) assert(operations.some(({ path }) => pattern.test(path)), `Frontend ${area} API area is missing.`);
 
 const allowedWithoutIdempotency = new Set(['login', 'runDeveloperDiagnostics', 'syncOfflineCompletion', 'previewAssignments', 'markNotificationRead', 'revealRoomPin']);
-for (const { operation } of operations.filter(({ method }) => method !== 'get')) {
+for (const { operation, pathItem } of operations.filter(({ method }) => method !== 'get')) {
+  const parameters = [...(pathItem.parameters ?? []), ...(operation.parameters ?? [])].map((parameter) => resolveRef(parameter));
   assert(
-    allowedWithoutIdempotency.has(operation.operationId) || operation.parameters?.some((parameter) => parameter.name === 'Idempotency-Key' && parameter.in === 'header'),
+    allowedWithoutIdempotency.has(operation.operationId) || parameters.some((parameter) => parameter.name === 'Idempotency-Key' && parameter.in === 'header' && parameter.required === true),
     `${operation.operationId} is missing the frontend Idempotency-Key contract.`,
   );
 }
