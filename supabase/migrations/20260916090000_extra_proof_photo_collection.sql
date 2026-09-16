@@ -736,6 +736,7 @@ begin
       'cleaningTargetId', o.cleaning_target_id, 'attemptId', o.cleaning_attempt_id,
       'photoId', photo, 'targetSlotId', o.target_photo_slot_id,
       'photoItemId', o.collection_item_id, 'photoVersion', o.expected_photo_revision + 1,
+      'collectionRevision', case when o.collection_item_id is null then null else o.expected_photo_revision + 1 end,
       'itemRevision', case when o.collection_item_id is null then null else o.expected_item_revision + 1 end,
       'uploadedAt', obj.uploaded_at, 'purgeAfter', obj.purge_after
     ))

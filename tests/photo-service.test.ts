@@ -7,9 +7,10 @@ import type { PhotoProvider } from '../src/modules/photos/google-drive.js';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const identity: PhotoIdentity = { profileId: id(1), sessionId: id(2), role: 'maid', profileStatus: 'active' };
 const now = new Date().toISOString(), purgeAfter = new Date(Date.parse(now) + 604800000).toISOString();
-const operation = (status = 'reserved') => ({ operationId: id(5), objectId: id(6), attemptId: id(3), targetSlotId: id(4), status,
+const operation = (status = 'reserved', photoItemId: string | null = null) => ({ operationId: id(5), objectId: id(6), attemptId: id(3), targetSlotId: id(4), photoItemId, status,
   leaseVersion: 1, leaseExpiresAt: new Date(Date.now() + 300000).toISOString(), photoId: status === 'accepted' ? id(7) : null,
-  photoVersion: status === 'accepted' ? 1 : null, uploadedAt: ['reserved', 'reconciliation_pending'].includes(status) ? null : now,
+  photoVersion: status === 'accepted' ? 1 : null, collectionRevision: photoItemId === null ? null : status === 'accepted' ? 1 : 0,
+  itemRevision: photoItemId === null ? null : status === 'accepted' ? 1 : 0, uploadedAt: ['reserved', 'reconciliation_pending'].includes(status) ? null : now,
   purgeAfter: ['reserved', 'reconciliation_pending'].includes(status) ? null : purgeAfter, compensationAllowed: status === 'compensation_pending' });
 let bytes: Uint8Array;
 beforeAll(async () => {
@@ -20,7 +21,7 @@ function request(raw = bytes) { return new Request(`http://local/v1/attempts/${i
   method: 'POST', headers: { 'content-type': 'image/jpeg', 'idempotency-key': 'test-key-0001' }, body: Uint8Array.from(raw)
 }); }
 function setup(override: (name: string, args: Record<string, unknown>) => unknown = () => undefined) {
-  const calls: string[] = []; let context: Record<string, unknown> = {};
+  const calls: string[] = []; let context: Record<string, unknown> = {}; let collectionItemId: string | null = null;
   const provider: PhotoProvider = { quota: vi.fn(async () => ({ refreshStartedAt: now, usageBytes: '0' })), generateId: vi.fn(async () => 'provider_file_123'),
     rootFolderId: () => 'provider_root_123', ensureFolder: vi.fn(async () => {}), upload: vi.fn(async () => ({ uploadedAt: now })), inspect: vi.fn(async () => ({ uploadedAt: now })),
     read: vi.fn(async () => bytes), remove: vi.fn(async () => 'deleted' as const) };
@@ -28,14 +29,17 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
     calls.push(name); const supplied = override(name, args); if (supplied !== undefined) return await supplied as {data:unknown;error:unknown};
     let data: unknown = null;
     if (name === 'admit_photo_upload') data = { admissionId: id(9), quotaWarning: false };
+    if (name === 'admit_photo_collection_upload') { collectionItemId = String(args.p_photo_item_id); data = { admissionId: id(9), quotaWarning: false }; }
     if (name === 'reserve_photo_drive_folder') data = { scope: args.p_scope, folderId: args.p_scope === 'date' ? 'provider_date_123' : 'provider_folder_123', parentFolderId: args.p_scope === 'date' ? 'provider_root_123' : 'provider_date_123', uploadDate: context.uploadDate, roomNumber: args.p_scope === 'date' ? null : '101' };
     if (name === 'begin_admitted_photo_upload') { context = { objectId: id(6), sha256: args.p_sha256, mimeType: args.p_mime_type, sizeBytes: args.p_size_bytes,
       roomNumber: '101', uploadDate: new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10), providerFileId: null, providerFolderId: null }; data = operation(); }
-    if (name === 'claim_admitted_photo_upload') data = operation();
+    if (name === 'begin_admitted_photo_collection_upload') { context = { objectId: id(6), sha256: args.p_sha256, mimeType: args.p_mime_type, sizeBytes: args.p_size_bytes,
+      roomNumber: '101', uploadDate: new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10), providerFileId: null, providerFolderId: null }; data = operation('reserved', collectionItemId); }
+    if (name === 'claim_admitted_photo_upload') data = operation('reserved', collectionItemId);
     if (name === 'get_photo_provider_context') data = context;
     if (name === 'reserve_photo_provider_identity') { context = { ...context, providerFileId: args.p_provider_file_id, providerFolderId: args.p_provider_folder_id }; data = context; }
-    if (name === 'record_admitted_photo_provider_success') data = operation('provider_succeeded');
-    if (name === 'finalize_admitted_photo_upload' || name === 'get_admitted_photo_upload' || name === 'reconcile_admitted_photo_upload') data = operation('accepted');
+    if (name === 'record_admitted_photo_provider_success') data = operation('provider_succeeded', collectionItemId);
+    if (name === 'finalize_admitted_photo_upload' || name === 'get_admitted_photo_upload' || name === 'reconcile_admitted_photo_upload') data = operation('accepted', collectionItemId);
     if (name === 'authorize_photo_read') data = { photoId: id(7), providerFileId: 'provider_file_123', sha256: 'a'.repeat(64), mimeType: 'image/jpeg', sizeBytes: bytes.length, purgeAfter };
     return { data, error: null };
   } };
@@ -147,5 +151,13 @@ describe('photo application admission/provider/finalize boundary', () => {
       {method:'DELETE',headers:{'idempotency-key':'delete-key-0001'}});
     await expect(s.service.deleteItem(req,identity,id(3),id(4),id(7))).resolves.toEqual({attemptId:id(3),targetSlotId:id(4),photoItemId:id(7),collectionRevision:3,itemRevision:2,deleted:true});
     expect(s.calls).toContain('delete_photo_collection_item');
+  });
+  it('runs collection upload through dedicated admission and begin RPCs', async () => {
+    const s=setup();
+    const req=new Request(`http://local/v1/attempts/${id(3)}/photo-slots/${id(4)}/photos/${id(7)}/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedCollectionRevision=0&expectedItemRevision=0`,
+      {method:'POST',headers:{'content-type':'image/jpeg','idempotency-key':'collection-key-0001'},body:Uint8Array.from(bytes)});
+    await expect(s.service.upload(req,identity,id(3),id(4),id(7))).resolves.toMatchObject({status:'accepted',photoItemId:id(7),collectionRevision:1,itemRevision:1});
+    expect(s.calls.slice(0,3)).toEqual(['admit_photo_collection_upload','decode','begin_admitted_photo_collection_upload']);
+    expect(s.calls).toContain('finalize_admitted_photo_upload');
   });
 });

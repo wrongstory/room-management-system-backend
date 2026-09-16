@@ -134,5 +134,10 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     for(const key of ['requestHash','idempotencyKey','providerLocator','claimDigest','token','rawAfterState'])
       expect(summary.properties).not.toHaveProperty(key);
     expect(Object.keys(openApiDocument.paths)).toHaveLength(111);
+    const removal = openApiDocument.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}"]?.delete;
+    for (const name of ["assignmentRevision", "expectedCollectionRevision", "expectedItemRevision"]) {
+      const parameter = removal?.parameters?.find((value) => "name" in value && value.name === name);
+      expect(parameter && "schema" in parameter ? parameter.schema : null).toMatchObject({ maximum: Number.MAX_SAFE_INTEGER - 1 });
+    }
   });
 });

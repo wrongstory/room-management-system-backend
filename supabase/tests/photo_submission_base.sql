@@ -361,6 +361,9 @@ select is((select count(*) from public.list_developer_audit_events(
 select is((select summary->>'photoItemId' from public.list_developer_audit_events(
  pg_temp.pid(4),array['photo.collection_item_deleted'],null,null,null,null,null,50) limit 1),pg_temp.pid(922)::text,
  'collection delete audit keeps the safe item identity projection');
+select ok(pg_get_functiondef('public.finalize_photo_upload(uuid,uuid,uuid,integer,text)'::regprocedure)
+  like '%''collectionRevision'', case when o.collection_item_id is null then null else o.expected_photo_revision + 1 end%',
+  'collection upload acceptance audit preserves the global collection revision');
 
 select ok(bool_and(c.relrowsecurity),'all private model tables have RLS') from pg_class c join pg_namespace n on n.oid=c.relnamespace
 where n.nspname='private' and c.relname in ('photo_template_slots','target_photo_snapshot_contracts','target_photo_slot_snapshots','attempt_photo_versions','attempt_photo_purge_states','attempt_photo_current','attempt_photo_changes','submission_photo_bindings','submission_photo_binding_sets','submission_current_pointers','attempt_photo_collection_states','attempt_photo_collection_items','attempt_photo_collection_changes','photo_collection_commands');
