@@ -16,6 +16,7 @@ export interface PhotoTemplateValidationSlot {
   readonly slotKey: string;
   readonly required: boolean;
   readonly displayOrder: number;
+  readonly maxPhotos?: number;
 }
 export interface PhotoTemplateValidationSnapshot {
   readonly templateVersionId: string;
@@ -49,11 +50,17 @@ export interface PhotoCompleteness {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CHECKOUT_COUNTS = {
+const CHECKOUT_V7_COUNTS = {
   standard: 10,
   premium: 11,
   oceanPremium: 13,
   oceanFamily: 15,
+} as const;
+const CHECKOUT_V8_COUNTS = {
+  standard: 9,
+  premium: 10,
+  oceanPremium: 12,
+  oceanFamily: 14,
 } as const;
 const KINDS = ["checkout", "stayover", "additional", "reclean"] as const;
 function fail(): never {
@@ -131,7 +138,7 @@ export function validatePhotoTemplateSnapshot(
   // 100/80/99는 DB와 일치하는 구조적 자원 상한이며 필수 사진 개수 정책이 아니다.
   if (
     typeof row.roomTypeCode !== "string" ||
-    !Object.hasOwn(CHECKOUT_COUNTS, row.roomTypeCode) ||
+    !Object.hasOwn(CHECKOUT_V8_COUNTS, row.roomTypeCode) ||
     !KINDS.includes(
       row.cleaningKind as PhotoTemplateValidationSnapshot["cleaningKind"],
     ) || !Array.isArray(row.slots) || row.slots.length === 0 ||
@@ -143,11 +150,17 @@ export function validatePhotoTemplateSnapshot(
       .cleaningKind as PhotoTemplateValidationSnapshot["cleaningKind"];
   const seenKeys = new Set<string>(), seenOrders = new Set<number>();
   const slots = row.slots.map((value) => {
-    const slot = record(value, ["slotKey", "required", "displayOrder"]);
+    const slot = record(
+      value,
+      version >= 8
+        ? ["slotKey", "required", "displayOrder", "maxPhotos"]
+        : ["slotKey", "required", "displayOrder"],
+    );
     const key = slotKey(slot.slotKey), order = integer(slot.displayOrder, 0);
+    const maxPhotos = version >= 8 ? integer(slot.maxPhotos) : undefined;
     if (
       typeof slot.required !== "boolean" || order > 99 || seenKeys.has(key) ||
-      seenOrders.has(order)
+      seenOrders.has(order) || (maxPhotos !== undefined && maxPhotos > 10)
     ) fail();
     seenKeys.add(key);
     seenOrders.add(order);
@@ -155,13 +168,32 @@ export function validatePhotoTemplateSnapshot(
       slotKey: key,
       required: slot.required,
       displayOrder: order,
+      ...(maxPhotos === undefined ? {} : { maxPhotos }),
     });
   }).sort((a, b) => a.displayOrder - b.displayOrder);
   if (!slots.some((slot) => slot.required)) fail();
   if (cleaningKind === "checkout" && version >= 7) {
+    const expectedCount = version === 7
+      ? CHECKOUT_V7_COUNTS[roomTypeCode]
+      : CHECKOUT_V8_COUNTS[roomTypeCode];
     if (
-      slots.length !== CHECKOUT_COUNTS[roomTypeCode] ||
+      slots.length !== expectedCount ||
       slots.filter((slot) => slot.required).length !== slots.length - 1
+    ) fail();
+    if (
+      version >= 8 && (
+        slots.some((slot) => slot.slotKey === "entry-number") ||
+        slots.filter((slot) =>
+            slot.slotKey === "entry-storage" && slot.required
+          ).length !== 1 ||
+        slots.filter((slot) =>
+            slot.slotKey === "extra-proof" && !slot.required &&
+            slot.displayOrder === slots.length - 1 && slot.maxPhotos === 10
+          ).length !== 1 ||
+        slots.some((slot) =>
+          slot.slotKey !== "extra-proof" && slot.maxPhotos !== 1
+        )
+      )
     ) fail();
     if (
       slots.filter((slot) => slot.slotKey === "tv-on" && slot.required)
@@ -206,6 +238,9 @@ export function projectPhotoTemplateForValidation(
         slotKey: slot.slotKey,
         required: slot.required,
         displayOrder: slot.displayOrder,
+        ...(typeof row.version === "number" && row.version >= 8
+          ? { maxPhotos: slot.maxPhotos }
+          : {}),
       };
     }),
   });

@@ -164,7 +164,7 @@ function services(): AppServices {
       })),
       publishCheckout: vi.fn(async (_actor, input) => ({
         id: '54000000-0000-4000-8000-000000000001',
-        version: 7,
+        version: 8,
         status: 'published' as const,
         durationMinutes: input.durationMinutes ?? null,
         slots: input.slots,
@@ -568,11 +568,13 @@ describe('application', () => {
     expect(listed.headers['cache-control']).toBe('no-store');
     expect(listed.json().templates.roomTypes).toHaveLength(4);
 
-    const slots = Array.from({ length: 10 }, (_, displayOrder) => ({
-      slotKey: displayOrder === 0 ? 'tv-on' : `slot-${displayOrder}`,
+    const slots = Array.from({ length: 9 }, (_, displayOrder) => ({
+      slotKey: displayOrder === 0 ? 'tv-on' : displayOrder === 1 ? 'entry-storage' :
+        displayOrder === 8 ? 'extra-proof' : `slot-${displayOrder}`,
       displayOrder,
-      required: displayOrder < 9,
-      label: `사진 ${displayOrder + 1}`
+      required: displayOrder < 8,
+      label: `사진 ${displayOrder + 1}`,
+      maxPhotos: displayOrder === 8 ? 10 : 1
     }));
     const published = await app.inject({
       method: 'POST',
@@ -587,7 +589,7 @@ describe('application', () => {
     });
     expect(published.statusCode).toBe(201);
     expect(published.headers['cache-control']).toBe('no-store');
-    expect(published.json().template).toMatchObject({ version: 7, status: 'published' });
+    expect(published.json().template).toMatchObject({ version: 8, status: 'published' });
     expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'admin' }),
       expect.objectContaining({
@@ -596,6 +598,22 @@ describe('application', () => {
         idempotencyKey: 'cleaning-template-publish-0001'
       })
     );
+
+    const legacyReplaySlots = Array.from({ length: 10 }, (_, displayOrder) => ({
+      slotKey: displayOrder === 0 ? 'tv-on' : `legacy-${displayOrder}`,
+      displayOrder,
+      required: displayOrder < 9,
+      label: `과거 사진 ${displayOrder + 1}`
+    }));
+    const legacyReplay = await app.inject({
+      method: 'POST', url: '/v1/cleaning-templates',
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-v7-replay' },
+      payload: {
+        roomTypeCode: 'standard', cleaningKind: 'checkout', expectedVersion: 0,
+        durationMinutes: 60, slots: legacyReplaySlots
+      }
+    });
+    expect(legacyReplay.statusCode).toBe(201);
 
     const firstSlot = slots[0];
     if (!firstSlot) throw new Error('slot fixture is empty');
@@ -613,7 +631,19 @@ describe('application', () => {
       });
       expect(response.statusCode).toBe(400);
     }
-    expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledTimes(1);
+    for (const [name, invalidSlots] of [
+      ['entry-number', slots.map((slot, index) => index === 2 ? { ...slot, slotKey: 'entry-number' } : slot)],
+      ['former-v7-count', [...slots, { ...firstSlot, slotKey: 'slot-9', displayOrder: 9 }]],
+      ['bad-extra-limit', slots.map((slot) => slot.slotKey === 'extra-proof' ? { ...slot, maxPhotos: 9 } : slot)]
+    ] as const) {
+      const response = await app.inject({
+        method: 'POST', url: '/v1/cleaning-templates',
+        headers: { authorization: 'Bearer access-token', 'idempotency-key': `template-invalid-${name}` },
+        payload: { roomTypeCode: 'standard', cleaningKind: 'checkout', expectedVersion: 0, slots: invalidSlots }
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(appServices.cleaningTemplates?.publishCheckout).toHaveBeenCalledTimes(2);
     await app.close();
   });
 

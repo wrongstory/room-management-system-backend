@@ -110,8 +110,25 @@ const cleaningTemplateDurationMigrationUrl = new URL(
   '../supabase/migrations/20260915000628_cleaning_template_duration_optional.sql',
   import.meta.url
 );
+const photoSlotContractV8MigrationUrl = new URL(
+  '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
+  it('versions the A-contract without rewriting v7 photo evidence', async () => {
+    const sql = await readFile(photoSlotContractV8MigrationUrl, 'utf8');
+
+    expect(sql).toContain('create or replace function private.photo_snapshot_valid');
+    expect(sql).toContain('when version_number=7 then 10 else 9');
+    expect(sql).toContain("value->>'slotKey'='entry-number'");
+    expect(sql).toContain("value->>'slotKey'='entry-storage'");
+    expect(sql).toContain("value->>'slotKey'='extra-proof'");
+    expect(sql).toContain("value->>'maxPhotos'='10'");
+    expect(sql).toContain('greatest(v_max_version + 1, 8)');
+    expect(sql).not.toMatch(/update public\.cleaning_targets|update public\.cleaning_attempts|update public\.cleaning_submissions/);
+  });
+
   it('allows an unestimated checkout template without weakening other template kinds', async () => {
     const sql = await readFile(cleaningTemplateDurationMigrationUrl, 'utf8');
 

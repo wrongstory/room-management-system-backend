@@ -88,7 +88,7 @@ production 최종 source/readback evidence: **2026-09-15 KST** (Issue #148/#152/
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #131은 #69 승인 PIN 계약의 Phase A source/dev 정본이다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. private immutable revision/current pointer, physical-change mismatch lifecycle, authoritative maid access lease, 30초 이하 reveal과 safe sync/audit/outbox를 포함하며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
-- 현재 critical path는 **production 56번째 migration/API 재배포 → 네 객실 타입 slot-only template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. source bundle 배포와 provider·Google·Cron hosted activation/current use를 분리한다.
+- 현재 critical path는 **#179 v8 슬롯 source + #180 `extra-proof` 0~10장 모델 완료·QA → 승인된 release에서 production 56/57 migration과 API 배포 → 네 객실 타입 v8 template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 tag/GitHub Release**다. 기존 v7 게시를 중간 단계로 실행하지 않는다.
 - 운영 migration: **55건**
 - 운영 Edge Functions readback:
   - `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 bundle 배포
@@ -1184,8 +1184,8 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 
 - [x] 네 stable `roomTypeCode`를 한 번에 조회하며 미설정은 `configured=false/currentPublished=null/expectedVersion=0`으로 명시하고 fallback·seed를 만들지 않음
 - [x] 한 객실 타입씩 `expectedVersion` CAS와 actor/command/key/request-hash scoped idempotency로 새 immutable version 게시
-- [x] 첫 version은 `greatest(existing max + 1, 7)`, 이후 단조 증가; 기존 published는 retired로 보존하고 타입/kind별 published exactly-one 유지
-- [x] checkout 슬롯은 10/11/13/15개, 필수 총수-1, required `tv-on` 1개, 연속 순서·중복·문자열 경계를 DB/Fastify/Edge에서 검증
+- [x] 새 publication은 `greatest(existing max + 1, 8)`, 이후 단조 증가; 기존 v7/published는 retired 이력과 frozen snapshot으로 보존하고 타입/kind별 published exactly-one 유지
+- [x] v7 checkout은 10/11/13/15개를 계속 검증하고 v8+는 9/10/12/14개, 필수 8/9/11/13개, required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지와 연속 순서·중복·문자열 경계를 DB/Fastify/Edge에서 검증
 - [x] raw template Data API DML/SELECT 차단, service-only RPC에서 최신 actor/session/password/role 재검증
 - [x] audit은 `roomTypeCode`, `cleaningKind`, `version`, `durationMinutes`, `slotCount`만 저장·노출; 게시 자체는 수신자 행동이 없어 notification/outbox 미생성
 - [x] 예약 전 409 fail-closed를 유지하고 게시 뒤 예약당 planned target 1건과 불변 template/slot snapshot 생성
@@ -1196,9 +1196,12 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] #165 exact head required GitHub `application` / `migration` PASS와 독립 QA P0/P1=0·90점 이상
 - [x] #165 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` hotfix squash 병합 — 승인·병합 tree 동일
 - [x] PR #167로 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`에 squash 역반영 — QA 97/100, P0/P1=0, required CI PASS, 승인·병합 tree 동일
-- [ ] production 56번째 migration/API 재배포, 네 타입 slot-only 게시, 예약 success hosted smoke
+- [x] #179 Decision A source 후보: 57번째 append-only migration, v7 이력 보존, v8 슬롯 수·key·`maxPhotos` DB/Fastify/Edge/OpenAPI parity
+- [ ] #179 exact-head 독립 QA·required CI·사람 리뷰와 `dev` 병합
+- [ ] #180 `extra-proof` 실제 0~10장 collection·개별 삭제·제출 봉인 구현
+- [ ] 승인된 release의 production 56/57번째 migration/API 배포, 네 타입 v8 게시, 예약 success hosted smoke
 
-현재 critical path는 **production 56번째 migration/API 재배포 → 네 객실 타입 slot-only template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다.
+현재 critical path는 **#179/#180 source gate → 승인된 production 56/57 migration/API 배포 → 네 객실 타입 v8 게시 → 예약 생성 hosted smoke → Issue #148의 남은 tag/GitHub Release**다.
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

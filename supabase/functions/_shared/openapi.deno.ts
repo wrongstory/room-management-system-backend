@@ -1019,6 +1019,14 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
     "strict request and slots",
   );
   assert(
+    schemas.PublishCleaningTemplateRequest.properties.slots.minItems === 9 &&
+      schemas.PublishCleaningTemplateRequest.properties.slots.maxItems === 14 &&
+      schemas.CheckoutCleaningTemplateV8Slot.allOf[1].required.includes(
+        "maxPhotos",
+      ) && schemas.CleaningTemplateSlot.properties.maxPhotos.maximum === 10,
+    "v8 A-contract publishes bounded slot and photo counts",
+  );
+  assert(
     !(schemas.PublishCleaningTemplateRequest.required as readonly string[])
       .includes(
         "durationMinutes",

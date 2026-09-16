@@ -611,7 +611,7 @@ Table public.cleaning_template_versions {
   version int [not null]
   status text [not null]
   duration_minutes int [note: '#165 checkout은 선택값이며 제공 시 1..10080. 비-checkout은 DB constraint로 non-null 유지. 실제 수행시간과 assignment preview 시간의 정본이 아님.']
-  photo_slots jsonb [not null, note: 'Legacy JSON retained. Published payload immutable; explicit v7+ checkout counts/required tv-on validated. No implicit duration-policy confirmation.']
+  photo_slots jsonb [not null, note: 'Legacy JSON retained. Published payload immutable. v7 historical counts remain valid; v8+ enforces 9/10/12/14, required tv-on/entry-storage, optional extra-proof maxPhotos 10, and no entry-number.']
   published_at timestamptz
   created_by uuid [not null]
   created_at timestamptz [not null]
@@ -619,7 +619,7 @@ Table public.cleaning_template_versions {
   Indexes {
     (room_type_id, cleaning_kind, version) [unique]
   }
-  Note: '#156/#165 RPC-only checkout catalog. Active password-complete business admin publishes immutable v7+ slot versions with live-session, expected-version CAS and scoped idempotency; checkout duration is optional and never inferred. Prior published rows retire and exactly one current published row remains. No source seed or fallback.'
+  Note: '#156/#165/#179 RPC-only checkout catalog. Active password-complete business admin publishes immutable v8+ slot versions with live-session, expected-version CAS and scoped idempotency; checkout duration is optional and never inferred. v7 rows and frozen snapshots remain historical. Prior published rows retire and exactly one current published row remains. No source seed or fallback.'
 }
 
 Table private.photo_template_slots {

@@ -20,6 +20,16 @@ function template(version = 7, count = 10, roomTypeCode = 'standard') {
     }))
   };
 }
+function v8Template(count = 9, roomTypeCode = 'standard') {
+  return {
+    templateVersionId: id(1), version: 8, roomTypeCode, cleaningKind: 'checkout',
+    slots: Array.from({ length: count }, (_, i) => ({
+      slotKey: i === 0 ? 'tv-on' : i === 1 ? 'entry-storage' :
+        i === count - 1 ? 'extra-proof' : `fixture-${i}`,
+      required: i < count - 1, displayOrder: i, maxPhotos: i === count - 1 ? 10 : 1
+    }))
+  };
+}
 function fixture() {
   const snapshot = template();
   return {
@@ -44,6 +54,18 @@ describe('platform-neutral photo contract under Node', () => {
       const noTv = template(7, count, type);
       required(noTv.slots[0]).slotKey = 'fixture-without-tv';
       expect(() => validatePhotoTemplateSnapshot(noTv)).toThrow(PhotoSubmissionContractError);
+    }
+  );
+  it.each([['standard', 9], ['premium', 10], ['oceanPremium', 12], ['oceanFamily', 14]] as const)(
+    'validates v8 %s A-contract while preserving v7 history', (type, count) => {
+      expect(validatePhotoTemplateSnapshot(v8Template(count, type)).slots).toHaveLength(count);
+      expect(() => validatePhotoTemplateSnapshot(v8Template(count + 1, type))).toThrow(PhotoSubmissionContractError);
+      const removedSlot = v8Template(count, type);
+      required(removedSlot.slots[2]).slotKey = 'entry-number';
+      expect(() => validatePhotoTemplateSnapshot(removedSlot)).toThrow(PhotoSubmissionContractError);
+      const badOptional = v8Template(count, type);
+      required(badOptional.slots[count - 1]).maxPhotos = 9;
+      expect(() => validatePhotoTemplateSnapshot(badOptional)).toThrow(PhotoSubmissionContractError);
     }
   );
   it('preserves original legacy snapshot and rejects unconfigured required slots', () => {

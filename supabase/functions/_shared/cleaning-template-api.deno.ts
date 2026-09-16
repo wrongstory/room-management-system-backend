@@ -18,12 +18,27 @@ const admin: EdgeActor = {
   displayName: "관리자",
   mustChangePassword: false,
 };
-function slots(count = 10) {
+function slots(count = 9) {
   return Array.from({ length: count }, (_, displayOrder) => ({
-    slotKey: displayOrder === 0 ? "tv-on" : `slot-${displayOrder}`,
+    slotKey: displayOrder === 0
+      ? "tv-on"
+      : displayOrder === 1
+      ? "entry-storage"
+      : displayOrder === count - 1
+      ? "extra-proof"
+      : `slot-${displayOrder}`,
     displayOrder,
     required: displayOrder < count - 1,
     label: ` 사진 ${displayOrder + 1} `,
+    maxPhotos: displayOrder === count - 1 ? 10 : 1,
+  }));
+}
+function legacyV7Slots() {
+  return Array.from({ length: 10 }, (_, displayOrder) => ({
+    slotKey: displayOrder === 0 ? "tv-on" : `legacy-${displayOrder}`,
+    displayOrder,
+    required: displayOrder < 9,
+    label: `과거 사진 ${displayOrder + 1}`,
   }));
 }
 function request(method: string, body?: unknown, query = "") {
@@ -65,7 +80,14 @@ async function failure(run: () => Promise<unknown>, code: string) {
 }
 
 Deno.test("cleaning template GET returns four explicit configured states with live session binding", async () => {
-  const roomTypes = ["standard", "premium", "oceanPremium", "oceanFamily"].map((
+  const roomTypes: Array<{
+    roomTypeCode: string;
+    roomTypeName: string;
+    cleaningKind: string;
+    configured: boolean;
+    expectedVersion: number;
+    currentPublished: Record<string, unknown> | null;
+  }> = ["standard", "premium", "oceanPremium", "oceanFamily"].map((
     roomTypeCode,
   ) => ({
     roomTypeCode,
@@ -75,6 +97,20 @@ Deno.test("cleaning template GET returns four explicit configured states with li
     expectedVersion: 0,
     currentPublished: null,
   }));
+  roomTypes[0] = {
+    ...roomTypes[0],
+    configured: true,
+    expectedVersion: 7,
+    currentPublished: {
+      id: "30000000-0000-4000-8000-000000000007",
+      version: 7,
+      status: "published",
+      durationMinutes: 60,
+      slots: legacyV7Slots(),
+      publishedAt: "2030-01-01T00:00:00Z",
+      createdAt: "2030-01-01T00:00:00Z",
+    },
+  };
   const mock = clients({ cleaningKind: "checkout", roomTypes });
   const result = await cleaningTemplates(
     request("GET", undefined, "?cleaningKind=checkout"),
@@ -84,6 +120,10 @@ Deno.test("cleaning template GET returns four explicit configured states with li
   assert(
     "roomTypes" in result && result.roomTypes.length === 4,
     "all room types are visible",
+  );
+  assert(
+    result.roomTypes[0]?.currentPublished?.version === 7,
+    "historical v7 projection remains readable",
   );
   assert(
     mock.calls[0]?.name === "list_checkout_cleaning_templates",
@@ -112,7 +152,7 @@ Deno.test("cleaning template GET returns four explicit configured states with li
 Deno.test("cleaning template publish normalizes slots and hashes canonical payload", async () => {
   const published = {
     id: "30000000-0000-4000-8000-000000000001",
-    version: 7,
+    version: 8,
     status: "published",
     durationMinutes: 60,
     slots: slots().map((slot) => ({ ...slot, label: slot.label.trim() })),
@@ -132,7 +172,7 @@ Deno.test("cleaning template publish normalizes slots and hashes canonical paylo
     mock.value,
     admin,
   );
-  assert("version" in result && result.version === 7, "strict safe projection");
+  assert("version" in result && result.version === 8, "strict safe projection");
   assert(
     mock.calls[0]?.name === "publish_checkout_cleaning_template",
     "exact write RPC",
@@ -156,10 +196,41 @@ Deno.test("cleaning template publish normalizes slots and hashes canonical paylo
   );
 });
 
+Deno.test("cleaning template publish preserves the exact v7 receipt replay envelope", async () => {
+  const published = {
+    id: "30000000-0000-4000-8000-000000000007",
+    version: 7,
+    status: "published",
+    durationMinutes: 60,
+    slots: legacyV7Slots(),
+    publishedAt: "2030-01-01T00:00:00Z",
+    createdAt: "2030-01-01T00:00:00Z",
+  };
+  const mock = clients(published);
+  const result = await cleaningTemplates(
+    request("POST", {
+      roomTypeCode: "standard",
+      cleaningKind: "checkout",
+      expectedVersion: 0,
+      durationMinutes: 60,
+      slots: legacyV7Slots(),
+    }),
+    mock.value,
+    admin,
+  );
+  assert("version" in result && result.version === 7, "v7 replay projection");
+  const sent = mock.calls[0]?.args.p_slots as Array<Record<string, unknown>>;
+  assert(
+    sent.length === 10 &&
+      sent.every((slot) => !Object.hasOwn(slot, "maxPhotos")),
+    "historical payload reaches the database receipt boundary unchanged",
+  );
+});
+
 Deno.test("cleaning template publish accepts omitted duration without inventing a value", async () => {
   const published = {
     id: "30000000-0000-4000-8000-000000000001",
-    version: 7,
+    version: 8,
     status: "published",
     durationMinutes: null,
     slots: slots().map((slot) => ({ ...slot, label: slot.label.trim() })),
@@ -214,11 +285,27 @@ Deno.test("cleaning template validation rejects malformed duplicate missing and 
     ...slot,
     slotKey: slot.slotKey === "tv-on" ? "television" : slot.slotKey,
   }));
+  const entryNumber = slots().map((slot, index) => ({
+    ...slot,
+    slotKey: index === 2 ? "entry-number" : slot.slotKey,
+  }));
+  const missingMaxPhotos = slots().map((slot, index) =>
+    index === 0
+      ? {
+        slotKey: slot.slotKey,
+        displayOrder: slot.displayOrder,
+        required: slot.required,
+        label: slot.label,
+      }
+      : slot
+  );
   for (
     const [body, code] of [
-      [{ ...base, slots: slots(9) }, "INVALID_CLEANING_TEMPLATE_SLOTS"],
+      [{ ...base, slots: slots(8) }, "INVALID_CLEANING_TEMPLATE_SLOTS"],
       [{ ...base, slots: duplicate }, "INVALID_CLEANING_TEMPLATE_SLOTS"],
       [{ ...base, slots: noTv }, "INVALID_CLEANING_TEMPLATE_SLOTS"],
+      [{ ...base, slots: entryNumber }, "INVALID_CLEANING_TEMPLATE_SLOTS"],
+      [{ ...base, slots: missingMaxPhotos }, "INVALID_CLEANING_TEMPLATE_SLOTS"],
       [{
         ...base,
         slots: slots().map((slot, index) => ({
@@ -256,7 +343,7 @@ Deno.test("cleaning template validation rejects malformed duplicate missing and 
 Deno.test("cleaning template response parsing fails closed on malformed database projections", async () => {
   const published = {
     id: "30000000-0000-4000-8000-000000000001",
-    version: 7,
+    version: 8,
     status: "published",
     durationMinutes: 60,
     slots: slots().map((slot) => ({ ...slot, label: slot.label.trim() })),
@@ -284,7 +371,7 @@ Deno.test("cleaning template response parsing fails closed on malformed database
 Deno.test("cleaning template response timestamps reject impossible RFC 3339 values", async () => {
   const base = {
     id: "30000000-0000-4000-8000-000000000001",
-    version: 7,
+    version: 8,
     status: "published",
     durationMinutes: 60,
     slots: slots().map((slot) => ({ ...slot, label: slot.label.trim() })),
@@ -304,7 +391,7 @@ Deno.test("cleaning template response timestamps reject impossible RFC 3339 valu
     admin,
   );
   assert(
-    "version" in valid && valid.version === 7,
+    "version" in valid && valid.version === 8,
     "valid leap timestamp accepted",
   );
   for (const field of ["publishedAt", "createdAt"] as const) {

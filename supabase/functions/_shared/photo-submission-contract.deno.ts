@@ -37,6 +37,26 @@ function template(roomTypeCode = "standard", count = 10, version = 7) {
     })),
   };
 }
+function v8Template(roomTypeCode = "standard", count = 9) {
+  return {
+    templateVersionId: id(1),
+    version: 8,
+    roomTypeCode,
+    cleaningKind: "checkout",
+    slots: Array.from({ length: count }, (_, index) => ({
+      slotKey: index === 0
+        ? "tv-on"
+        : index === 1
+        ? "entry-storage"
+        : index === count - 1
+        ? "extra-proof"
+        : `fixture-${index}`,
+      required: index < count - 1,
+      displayOrder: index,
+      maxPhotos: index === count - 1 ? 10 : 1,
+    })),
+  };
+}
 function fixture() {
   const snapshot = template();
   return {
@@ -142,6 +162,32 @@ export function registerPhotoContractTests(
         assert(result.version === 6 && result.slots.length === count);
         assert(!result.slots.some((slot) => slot.slotKey === "tv-on"));
         assert(JSON.stringify(input) === original);
+      }
+    },
+  );
+  register(
+    "photo template v8 adopts exact frontend A-contract without rewriting v7",
+    () => {
+      for (
+        const [type, count] of [["standard", 9], ["premium", 10], [
+          "oceanPremium",
+          12,
+        ], ["oceanFamily", 14]] as const
+      ) {
+        assert(
+          validatePhotoTemplateSnapshot(v8Template(type, count)).slots
+            .length ===
+            count,
+        );
+        rejects(() =>
+          validatePhotoTemplateSnapshot(v8Template(type, count + 1))
+        );
+        const entryNumber = v8Template(type, count);
+        required(entryNumber.slots[2]).slotKey = "entry-number";
+        rejects(() => validatePhotoTemplateSnapshot(entryNumber));
+        const badOptional = v8Template(type, count);
+        required(badOptional.slots[count - 1]).maxPhotos = 9;
+        rejects(() => validatePhotoTemplateSnapshot(badOptional));
       }
     },
   );
