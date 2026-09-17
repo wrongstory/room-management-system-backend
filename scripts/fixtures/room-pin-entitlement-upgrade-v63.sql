@@ -44,7 +44,7 @@ begin
     case when p_current then null else 'UPGRADE_NONCURRENT' end,pg_temp.eid(1));
   insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
   values(group_id,p_maid,'cleaning_assignment_notified','room',pg_temp.e_room(),
-    date_trunc('minute',clock_timestamp()),date_trunc('minute',clock_timestamp())+interval '10 minutes');
+    date_trunc('minute',statement_timestamp()),date_trunc('minute',statement_timestamp())+interval '10 minutes');
   insert into public.notifications(id,recipient_profile_id,category,title,body,room_id,cleaning_target_id,
     dedupe_key,requires_action,occurred_at,contract_version,actor_profile_id,event_family,
     source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id)
@@ -100,5 +100,5 @@ insert into private.room_pin_reveal_leases(id,room_id,pin_revision_id,pin_versio
   issued_at,expires_at,finalized_at,request_id)
 select pg_temp.eid(803),pin.room_id,pin.pin_revision_id,pin.pin_version,pg_temp.eid(2),'maid',
   pg_temp.eid(401),pg_temp.eid(850),pg_temp.eid(851),
-  clock_timestamp()-interval '2 minutes',clock_timestamp()-interval '90 seconds',null,pg_temp.eid(903)
+  statement_timestamp()-interval '2 minutes',statement_timestamp()-interval '90 seconds',null,pg_temp.eid(903)
 from private.room_current_pin pin where pin.room_id=pg_temp.e_room();
