@@ -60,6 +60,56 @@ create function pg_temp.submit(n integer,p_actor integer default 2,p_revision bi
    coalesce(p_key,'submission-key-'||n),repeat(substr(n::text,1,1),64))
 $$;
 
+-- This domain suite records model photos directly. Mirror the exact accepted
+-- provider identity created by the real upload finalizer so the retention
+-- trigger validates the same storage-backed evidence contract.
+create function pg_temp.accept_direct_submission_photo() returns trigger
+language plpgsql as $$
+declare
+  attempt_row public.cleaning_attempts;
+  v_operation_id uuid := gen_random_uuid();
+  v_object_id uuid := gen_random_uuid();
+begin
+  select * into strict attempt_row from public.cleaning_attempts where id = new.cleaning_attempt_id;
+  insert into private.photo_upload_operations(
+    id, actor_profile_id, command_type, idempotency_key_digest, request_hash,
+    cleaning_attempt_id, cleaning_target_id, assignment_id, assignment_revision,
+    target_photo_slot_id, expected_photo_revision, sha256, mime_type, size_bytes,
+    collection_item_id, expected_item_revision
+  ) values (
+    v_operation_id, attempt_row.maid_profile_id,
+    case when new.collection_item_id is null then 'photo.upload' else 'photo.collection.upload' end,
+    encode(extensions.digest(new.id::text || ':submission-fixture-key', 'sha256'), 'hex'),
+    encode(extensions.digest(new.id::text || ':submission-fixture-request', 'sha256'), 'hex'),
+    new.cleaning_attempt_id, new.cleaning_target_id, attempt_row.assignment_id,
+    attempt_row.assignment_revision, new.target_photo_slot_id, new.version - 1,
+    new.sha256, new.mime_type, new.size_bytes, new.collection_item_id,
+    case when new.collection_item_id is null then null else new.item_revision - 1 end
+  );
+  insert into private.photo_provider_objects(
+    id, operation_id, provider_locator, uploaded_at, purge_after
+  ) values (
+    v_object_id, v_operation_id, 'fixture_' || replace(new.id::text, '-', ''),
+    new.uploaded_at, new.purge_after
+  );
+  insert into private.photo_upload_states(
+    operation_id, cleaning_attempt_id, target_photo_slot_id, actor_profile_id,
+    status, lease_version, revision
+  ) values (
+    v_operation_id, new.cleaning_attempt_id, new.target_photo_slot_id,
+    attempt_row.maid_profile_id, 'provider_succeeded', 0, 1
+  );
+  insert into private.photo_upload_acceptances(operation_id, object_id, photo_version_id)
+  values(v_operation_id, v_object_id, new.id);
+  update private.photo_upload_states
+  set status = 'accepted', revision = revision + 1
+  where private.photo_upload_states.operation_id = v_operation_id;
+  return new;
+end $$;
+create trigger accept_direct_submission_photo
+after insert on private.attempt_photo_versions
+for each row execute function pg_temp.accept_direct_submission_photo();
+
 select pg_temp.fixture(1); select pg_temp.fixture(2); select pg_temp.fixture(3); select pg_temp.fixture(4);
 select pg_temp.fixture(5); select pg_temp.fixture(6,2,'scheduled'); select pg_temp.fixture(7); select pg_temp.fixture(8,3);
 select pg_temp.fixture(14,2,'field_completed',0);

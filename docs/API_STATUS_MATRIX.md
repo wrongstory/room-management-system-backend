@@ -1063,6 +1063,22 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 완전한 사진 증빙으로 간주하지 않으며, #7 물리 완료에 사진 선행조건을 추가하지 않는다.
 후속 #83 / PR #86, #84 / PR #88, #85 / PR #90과 #31 / PR #91도 source/dev 완료했으며 현재 본선은 #8 earning/payroll 정산이다. #30 내부 모델 검증과 #84의 실제 decoder·HTTP adapter 합성 검증은 별개이며, 운영 Google 업로드/삭제 검증 완료로 표현하지 않는다.
 
+### #9 Stage 1 사진 retention v2 — source candidate / production 미반영
+
+- [x] 신규 63번째 append-only migration으로 policy/anchor/`retentionStartsAt`/`expiresAt`/`purgedAt`/`mediaAvailability` private 원장 추가
+- [x] pending inspection `expiresAt=NULL`, final approve/reject+168시간, complaint close·admin interruption/offline resolution+180일, true orphan uploadedAt+30일 계약 구현
+- [x] 기존 62 migrations와 PIN/사진/audit 이력 불변인 62→63 upgrade fixture 및 hash 보존 검증
+- [x] actual performer maid+admin content 권한, no-store, provider read 전후 재인가와 stable unavailable/expired/purged 오류
+- [x] claim/settle 직전 late binding 재검증, expiry 변경 시 stale fence 무효화, unchanged claim/retry/blocked 상태 보존
+- [x] provider DELETE 전 exact object/fence/claim/authoritative expiry permit 영구 기록과 공통 barrier 적용; permit 뒤 late binding 및 purged resurrection 차단
+- [x] current pointer가 이동한 historical decided submission도 자체 `decidedAt+168h`까지 active evidence로 보존하며 superseded pending은 final decision 전 무기한 보호
+- [x] Fastify/Edge/OpenAPI/Python 생성 계약에 permanent retention metadata와 승인된 source candidate version `0.4.0` 반영
+- [ ] 독립 exact-head QA와 source/dev 병합
+- [ ] release/main 및 production 63번째 migration/API·photo-purge 배포
+- [ ] 운영 Google provider/Cron hosted smoke
+
+`room_issue`는 실제 resolved entity anchor 검증은 있으나 현재 대응 attachment source가 없어 schema-ready policy enum일 뿐이다. complaint closed event, admin interruption handover, server-owned offline resolution anchor는 실제 domain row로 검증한다. Issue/complaint/interruption/sync-conflict 종류를 attachment API/hosted 완료로 과대평가하지 않는다. 공개 path/operation 수는 변경하지 않으며 `0.4.0`은 production `0.3.0`과 구분되는 source candidate다.
+
 ### #83 사진 업로드 작업 원장 — production schema 반영, provider smoke 미확인
 
 개발 시작 기준(당시 base)은 `dev@b7cf567238d162a80841c4dcbca94fc23ee82a01`이고,

@@ -80,8 +80,11 @@ function fixture() {
       version: 1,
       validationStatus: "verified",
       uploadedAt: "2037-01-05T12:00:00Z" as string | null,
-      purgeAfter: "2037-01-12T12:00:00Z" as string | null,
+      retentionPolicy: "cleaning_submission",
+      retentionStartsAt: null as string | null,
+      expiresAt: null as string | null,
       purgedAt: null as string | null,
+      mediaAvailability: "available",
     })),
     asOf: "2037-01-06T00:00:00Z",
   };
@@ -316,16 +319,19 @@ export function registerPhotoContractTests(
     () => {
       for (
         const fields of [
-          { validationStatus: "pending", uploadedAt: null, purgeAfter: null },
+          { validationStatus: "pending", uploadedAt: null },
           { validationStatus: "failed" },
-          { purgedAt: "2037-01-05T13:00:00Z" },
+          {
+            purgedAt: "2037-01-05T13:00:00Z",
+            mediaAvailability: "purged",
+          },
           {
             uploadedAt: "2036-12-29T12:00:00Z",
-            purgeAfter: "2037-01-05T12:00:00Z",
+            retentionStartsAt: "2036-12-29T12:00:00Z",
+            expiresAt: "2037-01-05T12:00:00Z",
           },
           {
             uploadedAt: "2037-01-07T12:00:00Z",
-            purgeAfter: "2037-01-14T12:00:00Z",
           },
         ]
       ) {
@@ -337,6 +343,9 @@ export function registerPhotoContractTests(
         );
       }
       const boundary = fixture();
+      required(boundary.currentPhotos[0]).retentionStartsAt =
+        "2037-01-05T12:00:00Z";
+      required(boundary.currentPhotos[0]).expiresAt = "2037-01-12T12:00:00Z";
       boundary.asOf = "2037-01-12T12:00:00Z";
       assert(!assessPhotoCompleteness(boundary).complete);
     },
@@ -346,11 +355,16 @@ export function registerPhotoContractTests(
     () => {
       for (
         const fields of [
-          { uploadedAt: null, purgeAfter: null },
-          { purgeAfter: "2037-01-13T12:00:00Z" },
+          { uploadedAt: null },
+          {
+            retentionStartsAt: "2037-01-05T12:00:00Z",
+            expiresAt: "2037-01-13T12:00:00Z",
+          },
           { uploadedAt: "2037-02-30T12:00:00Z" },
           { uploadedAt: "0000-01-01T12:00:00Z" },
           { purgedAt: "2037-01-04T12:00:00Z" },
+          { mediaAvailability: "deleted" },
+          { retentionPolicy: "orphan" },
         ]
       ) {
         const input = fixture();
@@ -386,10 +400,12 @@ export function registerPhotoContractTests(
       const input = fixture();
       required(input.currentPhotos[0]).uploadedAt =
         "2037-01-05T12:00:00.000001Z";
-      required(input.currentPhotos[0]).purgeAfter =
+      required(input.currentPhotos[0]).retentionStartsAt =
+        "2037-01-05T12:00:00.000001Z";
+      required(input.currentPhotos[0]).expiresAt =
         "2037-01-12T12:00:00.000002Z";
       rejects(() => assessPhotoCompleteness(input));
-      required(input.currentPhotos[0]).purgeAfter =
+      required(input.currentPhotos[0]).expiresAt =
         "2037-01-12T12:00:00.000001Z";
       input.asOf = "2037-01-12T12:00:00.000000Z";
       assert(

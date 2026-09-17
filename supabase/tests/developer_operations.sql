@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'reservation_during_stay_room_move'
+    'photo_retention_v2'
   ) ->> 'currentMigration',
-  'reservation_during_stay_room_move',
+  'photo_retention_v2',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'reservation_during_stay_room_move'
+    'photo_retention_v2'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'reservation_during_stay_room_move';
+where name = 'photo_retention_v2';
 
 delete from supabase_migrations.schema_migrations
-where name = 'reservation_during_stay_room_move';
+where name = 'photo_retention_v2';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'reservation_during_stay_room_move'
+    'photo_retention_v2'
   ) ->> 'currentMigration',
-  'reservation_room_change_before_checkin',
-  'database status exposes migration 61 when migration 62 is absent'
+  'reservation_during_stay_room_move',
+  'database status exposes migration 62 when migration 63 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'reservation_during_stay_room_move'
+    'photo_retention_v2'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 61 behind source migration 62'
+  'database status reports migration 62 behind source migration 63'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

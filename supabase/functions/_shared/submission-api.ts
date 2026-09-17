@@ -96,6 +96,7 @@ export function submissionDatabaseError(
     SUBMISSION_ACCESS_REQUIRED: 403,
     BOMB_REPORT_ACCESS_REQUIRED: 403,
     PHOTO_EVIDENCE_INCOMPLETE: 409,
+    PHOTO_RETENTION_DELETE_PREPARED: 409,
     BOMB_EVIDENCE_INVALID: 409,
     BOMB_REPORT_NOT_ALLOWED: 409,
     BOMB_REPORT_SEALED: 409,
@@ -192,6 +193,11 @@ function publicProjection(
           "displayOrder",
           "required",
           "photoVersion",
+          "retentionPolicy",
+          "retentionStartsAt",
+          "expiresAt",
+          "purgedAt",
+          "mediaAvailability",
         ].filter((key) => Object.hasOwn(photo, key)).map((key) => [
           key,
           photo[key],
@@ -226,6 +232,11 @@ function publicProjection(
             "itemRevision",
             "displayOrder",
             "photoVersion",
+            "retentionPolicy",
+            "retentionStartsAt",
+            "expiresAt",
+            "purgedAt",
+            "mediaAvailability",
           ]
             .filter((key) => Object.hasOwn(photo, key)).map((
               key,

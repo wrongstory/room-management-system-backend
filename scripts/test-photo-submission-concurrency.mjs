@@ -116,7 +116,30 @@ export async function testPhotoSubmissionConcurrency(client) {
   }
   function photo(item, revision, hash = 'a') {
     assert(['a', 'b', 'c'].includes(hash), 'fixed synthetic photo hash');
-    return `select private.record_validated_attempt_photo('${maid}','${item.attempt}','${item.slot}',${revision},repeat('${hash}',64),'image/jpeg',100,clock_timestamp()-interval '1 minute')`;
+    const operationId = randomUUID();
+    const objectId = randomUUID();
+    return `do $fixture$ declare photo_id uuid; uploaded_at timestamptz:=clock_timestamp()-interval '1 minute'; begin ` +
+      `insert into private.photo_upload_operations(` +
+      `id,actor_profile_id,command_type,idempotency_key_digest,request_hash,cleaning_attempt_id,` +
+      `cleaning_target_id,assignment_id,assignment_revision,target_photo_slot_id,expected_photo_revision,` +
+      `sha256,mime_type,size_bytes)` +
+      ` values('${operationId}','${maid}','photo.upload',` +
+      `encode(extensions.digest('${operationId}:photo-fixture-key','sha256'),'hex'),` +
+      `encode(extensions.digest('${operationId}:photo-fixture-request','sha256'),'hex'),` +
+      `'${item.attempt}','${item.target}','${item.assignment}',2,'${item.slot}',${revision},` +
+      `repeat('${hash}',64),'image/jpeg',100);` +
+      `insert into private.photo_provider_objects(id,operation_id,provider_locator,uploaded_at,purge_after)` +
+      ` values('${objectId}','${operationId}','fixture_${objectId.replaceAll('-', '')}',` +
+      `uploaded_at,uploaded_at+interval '168 hours');` +
+      `insert into private.photo_upload_states(` +
+      `operation_id,cleaning_attempt_id,target_photo_slot_id,actor_profile_id,status,lease_version,revision)` +
+      ` values('${operationId}','${item.attempt}','${item.slot}','${maid}','provider_succeeded',0,1);` +
+      `photo_id:=private.record_validated_attempt_photo('${maid}','${item.attempt}','${item.slot}',` +
+      `${revision},repeat('${hash}',64),'image/jpeg',100,uploaded_at);` +
+      `insert into private.photo_upload_acceptances(operation_id,object_id,photo_version_id)` +
+      ` values('${operationId}','${objectId}',photo_id);` +
+      `update private.photo_upload_states set status='accepted',revision=revision+1 ` +
+      `where operation_id='${operationId}'; end $fixture$`;
   }
   function submission(item, versionNumber) {
     const id = randomUUID();

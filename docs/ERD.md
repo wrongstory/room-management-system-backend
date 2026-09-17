@@ -501,8 +501,8 @@ erDiagram
 - #7B 전 일반 role/status 변경으로 in_progress 수행자가 고립되지 않도록 DB guard로 거부한다.
   제한 capability/인계/offline lease는 별도 후속이며 active/session 경계를 완화하지 않는다.
 - 제출은 `client_submission_id`로 멱등 처리하며, 수행 회차별 현재 제출은 한 건이다.
-- 사진 파일은 비공개 Google Drive 폴더에만 저장하고 DB에는 Drive 파일 ID·해시·크기·삭제예정일·삭제 결과만 둔다.
-- `purge_after`는 서버가 `uploaded_at + 7일`로 강제하며, 삭제 작업이 Drive 파일을 영구삭제한 뒤 `purged_at`을 기록한다.
+- 사진 파일은 비공개 Google Drive 폴더에만 저장하고 DB에는 opaque locator·해시·크기·도메인 retention·삭제 결과만 둔다.
+- `attempt_photo_versions.purge_after`와 provider의 legacy clock은 이력 호환용이다. Stage 1 runtime은 `photo_retention_records.expires_at/media_availability`를 authoritative하게 사용하며 Drive 영구삭제 뒤 `purged_at`을 기록한다.
 - 템플릿과 슬롯은 **target 생성 시** 고정하고 attempt가 같은 계약을 사용한다. 제출에서는 그 슬롯의 특정 사진 버전 연결만 봉인하여 이후 교체가 과거 검수에 소급되지 않게 한다.
 
 ### #30 사진 슬롯·제출 버전 모델
@@ -532,8 +532,8 @@ erDiagram
 - `maxPhotos` 없는 pre-A checkout 템플릿은 v7보다 높은 historical version도 타입별 10/11/13/15개 계약을 이력으로 유지한다. 모든 slot에 metadata가 있는 새 v8+ A-contract는 9/10/12/14개, 필수 8/9/11/13개를 검증하고 required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지를 강제한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
 - #180은 v8 checkout `extra-proof`에만 0~10장 collection을 연다. item UUID와 display order는 형제 교체 때 유지되고, collection/item revision을 함께 CAS한다. 삭제된 item은 tombstone으로 남아 재사용하지 않으며, submission은 active item의 exact photo version/revision/order를 봉인한다. 기존 pre-A와 일반 slot은 단일 current pointer를 계속 사용한다.
 - 증빙 identity는 `(cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)`이다. 구 담당자의 interrupted 사진과 새 담당자의 사진은 같은 target slot을 쓰더라도 서로 다른 current pointer를 가진다. NULL/다른 target/다른 attempt 연결은 복합 FK로 거부한다.
-- `attempt_photo_versions`는 불변이다. `uploaded_at + 168시간` 만료는 교체·재제출·retry로 연장하지 않으며, 실제 provider 삭제 확인은 별도 append-only purge marker로 관리한다. #30에서 bytes/Drive 업로드나 삭제를 실제 수행하지 않는다.
-- 필수 슬롯이 전부 verified·미만료·미삭제 사진을 가져야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. frozen JSON과 normalized 슬롯의 전체 집합도 다시 대조한다.
+- `attempt_photo_versions`는 불변이다. 청소 제출 evidence는 최종 inspection 결정 전 만료하지 않고 결정 시각+168시간을 사용한다. 교체·재제출·retry는 clock을 연장하지 않으며 provider 삭제 확인은 별도 append-only marker로 관리한다.
+- 필수 슬롯이 전부 verified이며 authoritative media availability상 사용 가능해야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. legacy `purge_after`만으로 pending inspection을 만료시키지 않는다.
 - `cleaning_submissions`가 계속 제출 버전 정본이다. 미소비 제출도 identity/manifest/업무 snapshot/제출자·시각은 수정·삭제할 수 없고 `status/superseded_at`만 기존 lifecycle projection으로 남긴다. `submission_photo_binding_sets`는 정본을 복제하는 제출 테이블이 아니라 연결 봉인 marker다.
 - 봉인 시 현재 photo set과 양방향 동일성을 검증하고, 이후 membership INSERT/UPDATE/DELETE를 금지한다. 사진 교체와 연결은 같은 attempt lock에서 직렬화한다. current pointer는 CAS로 바뀌지만 과거 제출의 특정 photo version은 유지된다.
 - #30 단계 자체는 모델 연결까지만 소유했으며, #31의 후속 append-only migration이 business 전체제출·검수·수익·재청소 명령을 연결한다. canonical `cleaning_submissions` 및 legacy `submission_photos`에 대한 service-role raw DML 차단은 계속 유지한다. legacy manifest/default `uploaded`만으로 verified 증빙을 만들지 않는다.
@@ -954,7 +954,7 @@ migration을 수정하지 않는다. 운영·recovery 적용 상태와 무관한
 
 현재 121개 객실을 모두 하루에 한 번 청소하면 v8 필수 슬롯(8·9·11·13장)은 하루 1,233장이다. 모든 객실의 선택 `extra-proof`를 10장까지 채운 상한은 하루 2,443장, 7일 약 **4.89GiB**다. 모든 객실에 가장 큰 타입의 필수 13장과 선택 10장을 적용한 보수적 상한은 하루 2,783장, 7일 약 **5.57GiB**다. Google 개인 계정 기본 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
 
-각 사진의 `purge_after`는 폴더 날짜가 아니라 정확히 `uploaded_at + 7일`이다. 정리 작업은 주기적으로 만료 레코드를 잠그고 Drive `files.delete`를 호출해 휴지통을 거치지 않고 영구삭제한다. 성공 또는 이미 없는 파일(404)은 `purged`로 완료하고, 일시 오류는 지수 백오프로 재시도한다. 빈 객실·날짜 폴더는 그 안의 관리 대상 파일이 모두 삭제된 뒤 정리한다. 메타데이터·해시·검수 결과는 DB 감사 근거로 유지한다. 상세 규칙은 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
+legacy `purge_after`는 기존 이력으로 남지만 삭제 판단은 도메인별 `expires_at`을 사용한다. 청소 제출은 final decision+168시간, 이슈·컴플레인·중단/충돌 증빙은 해결/종결+180일, true orphan은 uploadedAt+30일이다. worker는 만료 레코드를 잠그고 Drive `files.delete`를 호출하며 성공/404를 `purged`로 멱등 완료한다. 메타데이터·해시·검수 결과는 영구 감사 근거로 유지한다. 상세 규칙은 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
 
 Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있고 공식 일일 백업 보장·PITR·DB branching·SLA가 없다. 마이그레이션 정본은 Git에 보관하고, 두 번째 Free 프로젝트에는 주기적으로 최신 논리 백업을 복원해 실제 복구 가능성을 검증한다. 구체적인 절차는 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)을 따른다.
 
@@ -993,7 +993,7 @@ erDiagram
   photo_purge_jobs ||--o{ photo_cleanup_events : "immutable lifecycle"
 ```
 
-- accepted 사진은 DB가 정확히 `uploaded_at + 168 hours`를 due로 판정하고 만료 즉시 읽기 불가다. never-accepted candidate는 별도 orphan ledger로만 정리한다.
+- #85의 accepted `uploaded_at + 168 hours` clock은 legacy production 기록이다. Stage 1 candidate는 accepted object를 domain retention record로 backfill하고 최종 inspection/사건 종결 anchor를 authoritative하게 사용한다. historical submission은 current pointer와 무관하게 자체 final decision clock을 유지하며, provider DELETE는 exact fence/claim/expiry permit 뒤에만 시작한다. never-accepted provider candidate 보상 ledger는 계속 분리한다.
 - 기존 및 신규 upload operation은 exact room-folder binding을 가진다. retirement가 시작되면 reserve/provider-success/finalize가 fail-closed하며, pending upload state 또는 identity가 있으면 folder retirement를 시작할 수 없다.
 - Drive 삭제 `204/404`만 terminal success다. raw locator는 terminal settle 때 제거하고 private SHA-256 tombstone과 append-only cleanup event를 남긴다.
 - room 폴더를 먼저 확인·삭제하고 모든 child가 terminal일 때 date 폴더를 처리한다. provider list emptiness만을 DB authority로 사용하지 않는다.

@@ -259,7 +259,7 @@ export function projectPhotoTemplateForValidation(
 /**
  * 단일 target/attempt의 frozen slot과 서버 current-photo projection만 받는다.
  * currentPhotos는 이력 전체가 아니다. 슬롯당 하나, 사진 버전당 불변 binding을 검증한다.
- * pending/failed/purged/7일 만료 사진은 필수 사진을 채우지 못한다.
+ * pending/failed/purged/authoritative retention 만료 사진은 필수 사진을 채우지 못한다.
  */
 export function assessPhotoCompleteness(input: unknown): PhotoCompleteness {
   const row = record(input, [
@@ -315,8 +315,11 @@ export function assessPhotoCompleteness(input: unknown): PhotoCompleteness {
       "version",
       "validationStatus",
       "uploadedAt",
-      "purgeAfter",
+      "retentionPolicy",
+      "retentionStartsAt",
+      "expiresAt",
       "purgedAt",
+      "mediaAvailability",
     ]);
     const photoId = id(photo.id),
       targetSlotId = id(photo.targetSlotId),
@@ -334,20 +337,31 @@ export function assessPhotoCompleteness(input: unknown): PhotoCompleteness {
     const uploadedAt = photo.uploadedAt === null
       ? null
       : timestamp(photo.uploadedAt);
-    const purgeAfter = photo.purgeAfter === null
+    const retentionStartsAt = photo.retentionStartsAt === null
       ? null
-      : timestamp(photo.purgeAfter);
+      : timestamp(photo.retentionStartsAt);
+    const expiresAt = photo.expiresAt === null
+      ? null
+      : timestamp(photo.expiresAt);
     const purgedAt = photo.purgedAt === null ? null : timestamp(photo.purgedAt);
     if (
-      (uploadedAt === null) !== (purgeAfter === null) ||
-      (uploadedAt !== null && purgeAfter !== uploadedAt + 604800000000n) ||
-      (purgedAt !== null && (uploadedAt === null || purgedAt < uploadedAt))
+      photo.retentionPolicy !== "cleaning_submission" ||
+      !["available", "purged", "unavailable"].includes(
+        photo.mediaAvailability as string,
+      ) ||
+      (expiresAt === null) !== (retentionStartsAt === null) ||
+      (expiresAt !== null &&
+        (retentionStartsAt === null ||
+          expiresAt !== retentionStartsAt + 604800000000n)) ||
+      (purgedAt !== null && (uploadedAt === null || purgedAt < uploadedAt)) ||
+      (photo.mediaAvailability === "purged") !== (purgedAt !== null)
     ) fail();
     if (photo.validationStatus === "verified" && uploadedAt === null) fail();
     if (
       photo.validationStatus === "verified" && uploadedAt !== null &&
-      purgeAfter !== null && uploadedAt <= asOf && asOf < purgeAfter &&
-      purgedAt === null
+      uploadedAt <= asOf &&
+      (expiresAt === null || asOf < expiresAt) &&
+      photo.mediaAvailability === "available" && purgedAt === null
     ) {
       references.push(
         Object.freeze({

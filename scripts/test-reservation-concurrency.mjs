@@ -15,6 +15,7 @@ import { testNotifiedReplanConcurrency } from './test-notified-replan-concurrenc
 import { testPasswordChangeConcurrency } from './test-password-change-concurrency.mjs';
 import { testPayrollConcurrency } from './test-payroll-concurrency.mjs';
 import { testPhotoDriveQuotaConcurrency } from './test-photo-drive-quota-concurrency.mjs';
+import { testPhotoRetentionConcurrency } from './test-photo-retention-concurrency.mjs';
 import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-operations-concurrency.mjs';
 import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
@@ -1100,6 +1101,7 @@ await testCheckoutIncidentConcurrency(client,actorProfileId);
 await testPhotoSubmissionConcurrency(client);
 await testPhotoStorageOperationsConcurrency(client);
 await testPhotoDriveQuotaConcurrency(client);
+await testPhotoRetentionConcurrency(client);
 await testNotificationConcurrency(client);
 await testWebPushConcurrency(client);
 await testNotificationDeliveryConcurrency(client);

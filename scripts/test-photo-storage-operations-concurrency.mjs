@@ -311,6 +311,35 @@ export async function testPhotoStorageOperationsConcurrency(client) {
   // in parallel owner transactions. The synthetic fixture promotes only its
   // frozen optional slot to a collection; it does not create an operational
   // checkout template or weaken runtime grants.
+  function acceptedPhoto(item,slot,photoItem,collectionRevision,itemRevision,hex='a') {
+    const operationId=randomUUID(),objectId=randomUUID();
+    const collectionColumns=photoItem===null?'null,null':`'${photoItem}',${itemRevision}`;
+    const record=photoItem===null
+      ? `private.record_validated_attempt_photo('${maid}','${item.attempt}','${slot}',${collectionRevision},repeat('${hex}',64),'image/jpeg',100,uploaded_at)`
+      : `private.record_validated_collection_photo('${maid}','${item.attempt}','${slot}','${photoItem}',${collectionRevision},${itemRevision},repeat('${hex}',64),'image/jpeg',100,uploaded_at)`;
+    return `do $fixture$ declare photo_id uuid; uploaded_at timestamptz:=clock_timestamp(); begin
+      insert into private.photo_upload_operations(
+        id,actor_profile_id,command_type,idempotency_key_digest,request_hash,
+        cleaning_attempt_id,cleaning_target_id,assignment_id,assignment_revision,
+        target_photo_slot_id,expected_photo_revision,sha256,mime_type,size_bytes,
+        collection_item_id,expected_item_revision)
+      values('${operationId}','${maid}',${photoItem===null?"'photo.upload'":"'photo.collection.upload'"},
+        encode(extensions.digest('${operationId}:collection-fixture-key','sha256'),'hex'),
+        encode(extensions.digest('${operationId}:collection-fixture-request','sha256'),'hex'),
+        '${item.attempt}','${item.target}','${item.assignment}',2,'${slot}',${collectionRevision},
+        repeat('${hex}',64),'image/jpeg',100,${collectionColumns});
+      insert into private.photo_provider_objects(id,operation_id,provider_locator,uploaded_at,purge_after)
+      values('${objectId}','${operationId}','fixture_${objectId.replaceAll('-','')}',uploaded_at,uploaded_at+interval '168 hours');
+      insert into private.photo_upload_states(
+        operation_id,cleaning_attempt_id,target_photo_slot_id,actor_profile_id,status,lease_version,revision)
+      values('${operationId}','${item.attempt}','${slot}','${maid}','provider_succeeded',0,1);
+      photo_id:=${record};
+      insert into private.photo_upload_acceptances(operation_id,object_id,photo_version_id)
+      values('${operationId}','${objectId}',photo_id);
+      update private.photo_upload_states set status='accepted',revision=revision+1
+      where operation_id='${operationId}';
+    end $fixture$`;
+  }
   async function collectionFixture() {
     const item=await fixture();
     const collectionSlot=sql(`select id from private.target_photo_slot_snapshots where cleaning_target_id='${item.target}' and not required;`);
@@ -344,18 +373,15 @@ export async function testPhotoStorageOperationsConcurrency(client) {
       where id='${item.slot}';
       alter table private.target_photo_slot_snapshots enable trigger photo_model_append_only;
       alter table private.target_photo_snapshot_contracts enable trigger photo_model_append_only;
-      commit;
-      do $fixture$ declare required_slot record; begin
-        for required_slot in select id from private.target_photo_slot_snapshots
-          where cleaning_target_id='${item.target}' and required order by display_order loop
-          perform private.record_validated_attempt_photo('${maid}','${item.attempt}',required_slot.id,0,repeat('a',64),'image/jpeg',100,clock_timestamp());
-        end loop;
-      end $fixture$;`);
+      commit;`);
+    const requiredSlots=JSON.parse(sql(`select json_agg(id::text order by display_order)::text
+      from private.target_photo_slot_snapshots where cleaning_target_id='${item.target}' and required;`));
+    for(const requiredSlot of requiredSlots)sql(acceptedPhoto(item,requiredSlot,null,0,null,'a'));
     assert(sql(`select private.photo_slot_max_photos('${collectionSlot}','${item.target}');`)==='10','synthetic optional slot exercises collection path');
     return {...item,collectionSlot};
   }
   const collectionRecord=(item,photoItem,collectionRevision,itemRevision,hex='b')=>
-    `select private.record_validated_collection_photo('${maid}','${item.attempt}','${item.collectionSlot}','${photoItem}',${collectionRevision},${itemRevision},repeat('${hex}',64),'image/jpeg',100,clock_timestamp())`;
+    acceptedPhoto(item,item.collectionSlot,photoItem,collectionRevision,itemRevision,hex);
   const collectionDelete=(item,photoItem,collectionRevision,itemRevision,key,hash='f')=>
     `select public.delete_photo_collection_item('${maid}','${session}','${item.attempt}','${item.assignment}',2,'${item.collectionSlot}','${photoItem}',${collectionRevision},${itemRevision},'${digest(key)}','${digest(hash)}')`;
   function collectionState(item,active,revision,changes) {

@@ -270,6 +270,10 @@ Deno.test("admin detail preserves sealed evidence IDs only and DB failures stay 
   assert(
     submissionDatabaseError({ message: "STALE_VERSION" }).code ===
         "STALE_VERSION" &&
+      submissionDatabaseError({ message: "PHOTO_RETENTION_DELETE_PREPARED" })
+          .status === 409 &&
+      submissionDatabaseError({ message: "PHOTO_RETENTION_DELETE_PREPARED" })
+          .code === "PHOTO_RETENTION_DELETE_PREPARED" &&
       submissionDatabaseError({ message: "raw SQL password token" }).code ===
         "SUBMISSION_COMMAND_FAILED",
     "stable redaction",

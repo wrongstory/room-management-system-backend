@@ -672,7 +672,7 @@ Table private.attempt_photo_versions {
   mime_type text [not null]
   size_bytes int [not null]
   uploaded_at timestamptz [not null]
-  purge_after timestamptz [not null, note: 'Immutable uploaded_at + 168 hours; resubmission does not reset.']
+  purge_after timestamptz [not null, note: 'Legacy immutable upload clock; retained for history. Stage 1 runtime uses photo_retention_records.']
   collection_item_id uuid
   item_revision bigint
   Indexes {
@@ -2281,13 +2281,46 @@ Table private.photo_purge_jobs {
   object_id uuid [pk, ref: - private.photo_provider_objects.id]
   operation_id uuid [not null, unique, ref: - private.photo_upload_operations.id]
   photo_version_id uuid [not null, unique, ref: - private.attempt_photo_versions.id]
-  purge_after timestamptz [not null, note: 'Exactly provider uploaded_at + 168 hours']
+  purge_after timestamptz [not null, note: 'Queue projection of authoritative retention expires_at; legacy rows are rescheduled by Stage 1.']
   status text [not null, note: 'pending/claimed/retry/blocked/purged']
   lease_version integer [not null]
+  delete_prepared_version integer [note: 'Persistent exact provider DELETE permit fence; never cleared after an uncertain external call.']
+  delete_prepared_claim_digest text
+  delete_prepared_expires_at timestamptz
+  delete_prepared_at timestamptz
   next_attempt_at timestamptz [not null]
   purged_at timestamptz
   outcome text
-  Note: 'Accepted-only durable purge authority. Raw provider locator is cleared on terminal settle; immutable clocks and private digest tombstone remain.'
+  Note: 'Accepted-only durable purge authority. Provider DELETE starts only after an exact object/fence/claim/authoritative-expiry permit is committed. Raw locator is cleared on terminal settle; immutable clocks and private digest tombstone remain.'
+}
+Table private.photo_retention_records {
+  object_id uuid [pk, ref: - private.photo_provider_objects.id]
+  operation_id uuid [not null, unique, ref: - private.photo_upload_operations.id]
+  photo_version_id uuid [unique, ref: - private.attempt_photo_versions.id]
+  performer_maid_profile_id uuid [ref: > public.profiles.id]
+  effective_policy_kind text [not null, note: 'cleaning_submission/room_issue/complaint/interruption/sync_conflict/mixed/orphan']
+  retention_starts_at timestamptz
+  expires_at timestamptz
+  purged_at timestamptz
+  media_availability text [not null, note: 'available/purged/unavailable']
+  revision bigint [not null]
+  updated_at timestamptz [not null]
+  Note: '#9 Stage 1 authoritative media lifetime and permanent safe metadata. Private RLS, no direct PUBLIC/anon/authenticated/service_role grants.'
+}
+Table private.photo_retention_links {
+  id uuid [pk]
+  object_id uuid [not null, ref: > private.photo_retention_records.object_id]
+  policy_kind text [not null]
+  domain_kind text [not null]
+  domain_id uuid [not null]
+  performer_maid_profile_id uuid [ref: > public.profiles.id]
+  retention_starts_at timestamptz
+  expires_at timestamptz
+  active boolean [not null]
+  created_at timestamptz [not null]
+  retired_at timestamptz
+  Indexes { (object_id, policy_kind, domain_kind, domain_id) [unique] }
+  Note: '#9 typed domain evidence links. Cleaning pending has no expiry; immutable final decision or admin resolution anchors the bounded expiry. Historical submissions remain active independently of the mutable current pointer.'
 }
 Table private.photo_orphan_purge_jobs {
   operation_id uuid [pk, ref: - private.photo_upload_operations.id]

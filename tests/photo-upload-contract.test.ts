@@ -14,8 +14,17 @@ const input = () => ({ attemptId:id(1), assignmentId:id(2), assignmentRevision:1
 const row = () => ({ operationId:id(4), objectId:id(5), attemptId:id(1), targetSlotId:id(3),
   status:'reserved', leaseVersion:1, leaseExpiresAt:'2037-01-01T00:05:00Z', photoId:null,
   photoVersion:null, photoItemId:null, collectionRevision:null, itemRevision:null,
-  uploadedAt:null, purgeAfter:null, compensationAllowed:false });
-const uploaded = {uploadedAt:'2037-01-01T00:00:00.123456Z',purgeAfter:'2037-01-08T00:00:00.123456Z'};
+  uploadedAt:null, purgeAfter:null, retentionPolicy:null, retentionStartsAt:null,
+  expiresAt:null, purgedAt:null, mediaAvailability:null, compensationAllowed:false });
+const uploaded = {
+  uploadedAt:'2037-01-01T00:00:00.123456Z',
+  purgeAfter:'2037-01-08T00:00:00.123456Z',
+  retentionPolicy:'cleaning_submission',
+  retentionStartsAt:'2037-01-01T00:00:00.123456Z',
+  expiresAt:'2037-01-08T00:00:00.123456Z',
+  purgedAt:null,
+  mediaAvailability:'available'
+};
 
 describe('photo upload pure application contract (no provider or HTTP calls)', () => {
   it('accepts exactly 307200 bytes JPEG/WebP and rejects untrusted extra assertions', () => {
@@ -88,6 +97,8 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     expect(projectPhotoUploadOperation({...row(),...secret})).toEqual(row());
     for(const patch of [{status:'accepted'},{compensationAllowed:true},{photoId:id(6)},
       {status:'provider_succeeded'},{...uploaded,purgeAfter:'2037-01-08T00:00:00.123455Z'},
+      {...uploaded,expiresAt:'2037-01-08T00:00:00.123455Z'},
+      {...uploaded,mediaAvailability:'purged'},
       {leaseVersion:NaN},{leaseExpiresAt:'2037-02-30T00:00:00Z'}])
       expect(() => projectPhotoUploadOperation({...row(),...patch})).toThrow(PhotoUploadContractError);
   });
@@ -113,7 +124,7 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     expect(isPhotoUploadTransitionAllowed('provider_succeeded','compensated')).toBe(false);
   });
   it('maps stable errors without reflecting arbitrary provider or DB raw errors', () => {
-    for(const [code,statusCode] of [['SESSION_REVOKED',401],['PHOTO_ACCESS_REQUIRED',403],['PHOTO_UPLOAD_INVALID',400],['IDEMPOTENCY_KEY_REUSED',409],['PHOTO_UPLOAD_FENCE_CONFLICT',409],['PHOTO_UPLOAD_RATE_LIMITED',429]] as const)
+    for(const [code,statusCode] of [['SESSION_REVOKED',401],['PHOTO_ACCESS_REQUIRED',403],['PHOTO_UPLOAD_INVALID',400],['IDEMPOTENCY_KEY_REUSED',409],['PHOTO_UPLOAD_FENCE_CONFLICT',409],['PHOTO_RETENTION_DELETE_PREPARED',409],['PHOTO_UPLOAD_RATE_LIMITED',429]] as const)
       expect(photoUploadDatabaseError({message:code,details:'hidden'})).toMatchObject({code,statusCode});
     for(const message of ['raw SQL private value','toString','__proto__']) {
       const error=photoUploadDatabaseError({message,details:'hidden'});
@@ -128,7 +139,7 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     expect(schemas.DeveloperAuditEventType.enum).toContain('cleaning_template.published');
     expect(schemas.DeveloperAuditEventType.enum).toContain('reservation.room_moved');
     expect(schemas.DeveloperAuditEventType.enum).toHaveLength(68);
-    const sample={cleaningTargetId:id(1),attemptId:id(2),targetSlotId:id(3),photoId:id(4),photoItemId:id(5),photoVersion:1,collectionRevision:1,itemRevision:1,...uploaded};
+    const sample={cleaningTargetId:id(1),attemptId:id(2),targetSlotId:id(3),photoId:id(4),photoItemId:id(5),photoVersion:1,collectionRevision:1,itemRevision:1,uploadedAt:uploaded.uploadedAt,purgeAfter:uploaded.purgeAfter};
     const summary=schemas.DeveloperAuditEvent.properties.summary;
     expect(summary.additionalProperties).toBe(false);
     for(const key of Object.keys(sample))expect(summary.properties).toHaveProperty(key);

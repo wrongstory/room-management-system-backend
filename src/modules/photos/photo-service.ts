@@ -12,7 +12,11 @@ import type {
 import {
   createPhotoUploadClaim,
   PhotoUploadContractError,
+  photoMediaAvailabilities,
+  photoRetentionPolicies,
   photoUploadDatabaseError,
+  type PhotoMediaAvailability,
+  type PhotoRetentionPolicy,
   type PhotoUploadOperationProjection,
   preparePhotoCollectionDelete,
   preparePhotoCollectionUploadBegin,
@@ -74,6 +78,41 @@ function integer(v: unknown, min = 0): number {
 function time(v: unknown): string {
   if (typeof v !== "string" || !Number.isFinite(Date.parse(v))) return failed();
   return v;
+}
+interface PhotoRetentionMetadata {
+  readonly retentionPolicy: PhotoRetentionPolicy;
+  readonly retentionStartsAt: string | null;
+  readonly expiresAt: string | null;
+  readonly purgedAt: string | null;
+  readonly mediaAvailability: PhotoMediaAvailability;
+}
+function nullableTime(v: unknown): string | null {
+  return v === null ? null : time(v);
+}
+function retentionMetadata(value: unknown): PhotoRetentionMetadata {
+  const r = row(value);
+  if (
+    !photoRetentionPolicies.includes(r.retentionPolicy as PhotoRetentionPolicy) ||
+    !photoMediaAvailabilities.includes(
+      r.mediaAvailability as PhotoMediaAvailability,
+    )
+  ) return failed();
+  const metadata = {
+    retentionPolicy: r.retentionPolicy as PhotoRetentionPolicy,
+    retentionStartsAt: nullableTime(r.retentionStartsAt),
+    expiresAt: nullableTime(r.expiresAt),
+    purgedAt: nullableTime(r.purgedAt),
+    mediaAvailability: r.mediaAvailability as PhotoMediaAvailability,
+  };
+  if (
+    (metadata.mediaAvailability === "purged") !==
+      (metadata.purgedAt !== null) ||
+    (metadata.expiresAt !== null &&
+      (metadata.retentionStartsAt === null ||
+        Date.parse(metadata.expiresAt) <
+          Date.parse(metadata.retentionStartsAt)))
+  ) return failed();
+  return metadata;
 }
 function locator(v: unknown): string {
   if (typeof v !== "string" || !/^[A-Za-z0-9_-]{10,200}$/.test(v)) {
@@ -579,6 +618,7 @@ export class PhotoService {
             "failed",
             "purged",
             "expired",
+            "unavailable",
           ].includes(String(r.uploadStatus))
         ) return failed();
         const maxPhotos = r.maxPhotos === undefined
@@ -594,6 +634,11 @@ export class PhotoService {
             photoId: r.photoId,
             photoVersion: integer(r.currentRevision, 1),
             uploadStatus: r.uploadStatus,
+            retentionPolicy: r.retentionPolicy,
+            retentionStartsAt: r.retentionStartsAt,
+            expiresAt: r.expiresAt,
+            purgedAt: r.purgedAt,
+            mediaAvailability: r.mediaAvailability,
           }];
         const photos = r.photos === undefined ? legacyPhotos : r.photos;
         if (!Array.isArray(photos) || photos.length > 10) return failed();
@@ -616,10 +661,18 @@ export class PhotoService {
               r.photoId !== undefined
             ? uuid(r.photoId)
             : null,
+          ...(photos.length === 1 ? retentionMetadata(r) : {}),
           photos: photos.map((value) => {
             const photo = row(value);
             if (
-              !["verified", "pending", "failed", "purged", "expired"].includes(
+              ![
+                "verified",
+                "pending",
+                "failed",
+                "purged",
+                "expired",
+                "unavailable",
+              ].includes(
                 String(photo.uploadStatus),
               )
             ) return failed();
@@ -634,6 +687,7 @@ export class PhotoService {
                 : null,
               photoVersion: integer(photo.photoVersion, 1),
               uploadStatus: photo.uploadStatus,
+              ...retentionMetadata(photo),
             };
           }),
         };
@@ -653,12 +707,22 @@ export class PhotoService {
     const args = { ...this.#actor(i), p_photo_id: uuid(photoId) };
     const first = row(await this.#rpc("authorize_photo_read", args));
     const object = readObject(first);
+    const firstRetention = retentionMetadata(first);
+    if (
+      firstRetention.mediaAvailability !== "available" ||
+      (firstRetention.expiresAt !== null &&
+        Date.parse(firstRetention.expiresAt) <= Date.now())
+    ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
     const bytes = await this.provider().read(object);
     const latest = row(await this.#rpc("authorize_photo_read", args));
+    const latestRetention = retentionMetadata(latest);
     if (
       latest.providerFileId !== first.providerFileId ||
       latest.sha256 !== first.sha256 ||
-      Date.parse(time(latest.purgeAfter)) <= Date.now()
+      JSON.stringify(latestRetention) !== JSON.stringify(firstRetention) ||
+      latestRetention.mediaAvailability !== "available" ||
+      (latestRetention.expiresAt !== null &&
+        Date.parse(latestRetention.expiresAt) <= Date.now())
     ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
     return new Response(Uint8Array.from(bytes), {
       headers: {
