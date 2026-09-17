@@ -554,7 +554,7 @@ export async function testRoomPinConcurrency(client) {
     const outboxId = randomUUID();
     sql(
       `insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at) values (` +
-        `'${notificationGroupId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','room','${item.id}'::uuid,clock_timestamp(),clock_timestamp()+interval '10 minutes');` +
+        `'${notificationGroupId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','room','${item.id}'::uuid,statement_timestamp(),statement_timestamp()+interval '10 minutes');` +
         `insert into public.notifications(id,recipient_profile_id,category,title,body,room_id,cleaning_target_id,dedupe_key,requires_action,occurred_at,contract_version,actor_profile_id,event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id) values (` +
         `'${notificationId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','assignment','assignment','${item.id}'::uuid,'${targetId}'::uuid,'room-pin-${notificationId}',true,clock_timestamp(),1,'${admin.profileId}'::uuid,'assignment.commit_notified','cleaning_assignment','${assignmentId}','cleaningTarget','${targetId}'::uuid,'${notificationGroupId}'::uuid);` +
         `insert into private.notification_delivery_outbox(id,notification_id,event_family) values (` +
@@ -635,7 +635,7 @@ export async function testRoomPinConcurrency(client) {
     }), "room PIN notified assignment fixture");
     sql(
       `insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at) values (` +
-        `'${groupId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','room','${item.id}'::uuid,clock_timestamp(),clock_timestamp()+interval '10 minutes');` +
+        `'${groupId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','room','${item.id}'::uuid,statement_timestamp(),statement_timestamp()+interval '10 minutes');` +
         `insert into public.notifications(id,recipient_profile_id,category,title,body,room_id,cleaning_target_id,dedupe_key,requires_action,occurred_at,contract_version,actor_profile_id,event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id) values (` +
         `'${notificationId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','assignment','assignment','${item.id}'::uuid,'${targetId}'::uuid,'room-pin-${notificationId}',true,clock_timestamp(),1,'${admin.profileId}'::uuid,'assignment.commit_notified','cleaning_assignment','${assignmentId}','cleaningTarget','${targetId}'::uuid,'${groupId}'::uuid);` +
         `insert into private.notification_delivery_outbox(id,notification_id,event_family) values (` +
