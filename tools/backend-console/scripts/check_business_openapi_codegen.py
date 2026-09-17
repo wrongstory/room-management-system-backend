@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 113:
-        raise RuntimeError("전체 source OpenAPI path 수가 113이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 114:
+        raise RuntimeError("전체 source OpenAPI path 수가 114가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,19 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 121:
-        raise RuntimeError("전체 source OpenAPI operation 수가 121이 아닙니다.")
+    if operation_count != 122:
+        raise RuntimeError("전체 source OpenAPI operation 수가 122가 아닙니다.")
+    schemas = document.get("components", {}).get("schemas", {})
+    legacy_list = schemas.get("ReservationListEnvelope", {})
+    range_page = schemas.get("ReservationRangePageEnvelope", {})
+    legacy_reservations = legacy_list.get("properties", {}).get("reservations", {})
+    range_reservations = range_page.get("properties", {}).get("reservations", {})
+    if "maxItems" in legacy_reservations:
+        raise RuntimeError("legacy 예약 목록에 range page 크기 제한이 적용됐습니다.")
+    if range_reservations.get("maxItems") != 50:
+        raise RuntimeError("예약 범위 page의 50건 제한이 누락됐습니다.")
+    if range_page.get("required") != ["reservations", "nextCursor", "serverTime"]:
+        raise RuntimeError("예약 범위 page의 필수 envelope 필드가 올바르지 않습니다.")
     with tempfile.TemporaryDirectory(prefix="business-openapi-codegen-") as temporary:
         destination = Path(temporary) / "generated-project"
         subprocess.run(  # noqa: S603
@@ -59,6 +70,14 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "reservations" / "list_reservations.py",
+            package / "api" / "reservations" / "preview_reservation_bookability.py",
+            package / "models" / "reservation_list_envelope.py",
+            package / "models" / "reservation_range_page_envelope.py",
+            package / "models" / "reservation_bookability_preview_request.py",
+            package / "models" / "reservation_bookability_candidate.py",
+            package / "models" / "reservation_bookability_preview.py",
+            package / "models" / "reservation_bookability_preview_envelope.py",
             package / "api" / "reservations" / "preview_reservation_room_move.py",
             package / "api" / "reservations" / "commit_reservation_room_move.py",
             package / "models" / "reservation_room_move_preview_request.py",
@@ -188,10 +207,54 @@ def main() -> None:
         ):
             if field not in room_move_result_model:
                 raise RuntimeError(f"투숙 중 객실 변경 result codegen 필드가 누락됐습니다: {field}")
+        bookability_candidate = (
+            package / "models" / "reservation_bookability_candidate.py"
+        ).read_text(encoding="utf-8")
+        bookability_request = (
+            package / "models" / "reservation_bookability_preview_request.py"
+        ).read_text(encoding="utf-8")
+        reservation_type_field = (
+            "reservation_type: ReservationBookabilityPreviewRequestReservationType"
+        )
+        if reservation_type_field not in bookability_request:
+            raise RuntimeError("예약 가능성 request의 standard reservationType이 누락됐습니다.")
+        if "room_type_ids: list[UUID] | Unset" not in bookability_request:
+            raise RuntimeError("예약 가능성 request의 optional roomTypeIds가 누락됐습니다.")
+        if not all(
+            token in bookability_request
+            for token in ("exclude_reservation_id:", "UUID", "None", "Unset")
+        ):
+            raise RuntimeError(
+                "예약 가능성 request의 nullable excludeReservationId가 누락됐습니다."
+            )
+        for field in (
+            "room_id: UUID",
+            "room_number: str",
+            "room_type_id: UUID",
+            "room_state_version: int",
+            "interval_bookable: bool",
+            "check_in_ready: bool",
+            "reason_codes: list[ReservationBookabilityReasonCode]",
+            "evaluated_at: datetime.datetime",
+        ):
+            if field not in bookability_candidate:
+                raise RuntimeError(f"예약 가능성 candidate codegen 필드가 누락됐습니다: {field}")
+        reservation_list = (package / "models" / "reservation_list_envelope.py").read_text(
+            encoding="utf-8"
+        )
+        reservation_range_page = (
+            package / "models" / "reservation_range_page_envelope.py"
+        ).read_text(encoding="utf-8")
+        if "server_time" in reservation_list or "next_cursor" in reservation_list:
+            raise RuntimeError("legacy 예약 목록 codegen에 range 필드가 섞였습니다.")
+        if "server_time: datetime.datetime" not in reservation_range_page:
+            raise RuntimeError("예약 범위 조회 codegen serverTime이 누락됐습니다.")
+        if "next_cursor: None | str" not in reservation_range_page:
+            raise RuntimeError("예약 범위 조회 codegen nextCursor가 누락됐습니다.")
         if not compileall.compile_dir(package, quiet=1):
             raise RuntimeError("업무 Python codegen 결과를 컴파일할 수 없습니다.")
 
-    print("full OpenAPI push/payroll/complaint/room-PIN Python ephemeral codegen PASS")
+    print("full OpenAPI reservation/push/payroll/complaint/room-PIN Python ephemeral codegen PASS")
 
 
 if __name__ == "__main__":

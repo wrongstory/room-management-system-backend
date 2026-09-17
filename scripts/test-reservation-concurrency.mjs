@@ -482,6 +482,20 @@ const { data: roomAfterDuplicate, error: roomAfterDuplicateError } = await clien
 assert(!roomAfterDuplicateError && roomAfterDuplicate, 'room version after replay failed');
 
 const reservationIds = [randomUUID(), randomUUID()];
+const previewRaceResults = await Promise.all([0, 1].map(() => (
+  client.rpc('preview_reservation_bookability', {
+    p_actor_profile_id: actorProfileId,
+    p_check_in_at: '2035-01-01T07:00:00.000Z',
+    p_check_out_at: '2035-01-02T02:00:00.000Z',
+    p_exclude_reservation_id: null,
+    p_room_type_ids: null
+  })
+)));
+assert(
+  previewRaceResults.every((result) => !result.error &&
+    result.data.candidates.find((candidate) => candidate.room_id === room.id)?.interval_bookable === true),
+  'both concurrent callers may observe the same non-authoritative bookability preview'
+);
 const createResults = await Promise.all(reservationIds.map((reservationId, index) => (
   client.rpc('create_reservation', {
     p_actor_profile_id: actorProfileId,
@@ -500,6 +514,86 @@ const createSuccesses = createResults.filter((result) => !result.error);
 const createFailures = createResults.filter((result) => result.error);
 assert(createSuccesses.length === 1, 'concurrent overlapping create must have exactly one winner');
 assert(createFailures.length === 1, 'concurrent overlapping create must reject exactly one loser');
+assert(
+  createFailures[0].error?.message?.includes('STALE_VERSION'),
+  'serialized concurrent loser must fail closed on room CAS'
+);
+const { data: roomAfterPreviewRace, error: roomAfterPreviewRaceError } = await client
+  .from('rooms')
+  .select('state_version')
+  .eq('id', room.id)
+  .single();
+assert(
+  !roomAfterPreviewRaceError && roomAfterPreviewRace,
+  'room version after preview race failed'
+);
+const losingReservationIndex = createResults.findIndex((result) => result.error);
+const overlapRetry = await client.rpc('create_reservation', {
+  p_actor_profile_id: actorProfileId,
+  p_reservation_id: reservationIds[losingReservationIndex],
+  p_room_id: room.id,
+  p_check_in_at: '2035-01-01T07:00:00.000Z',
+  p_check_out_at: '2035-01-02T02:00:00.000Z',
+  p_guest_count: 2,
+  p_guest_name_encrypted: null,
+  p_expected_room_version: roomAfterPreviewRace.state_version,
+  p_idempotency_key: `create-overlap-retry-${randomUUID()}`,
+  p_request_hash: 'd'.repeat(64)
+});
+assert(
+  overlapRetry.error?.message?.includes('RESERVATION_OVERLAP'),
+  'commit overlap authority must reject a fresh-version retry after preview race'
+);
+
+const sequentialPreview = await client.rpc('preview_reservation_bookability', {
+  p_actor_profile_id: actorProfileId,
+  p_check_in_at: '2037-01-01T07:00:00.000Z',
+  p_check_out_at: '2037-01-02T02:00:00.000Z',
+  p_exclude_reservation_id: null,
+  p_room_type_ids: null
+});
+assert(!sequentialPreview.error &&
+  sequentialPreview.data.candidates.find((candidate) => candidate.room_id === room.id)?.interval_bookable === true,
+  'preview reports a future interval before the competing commit'
+);
+const competingCommit = await client.rpc('create_reservation', {
+  p_actor_profile_id: actorProfileId,
+  p_reservation_id: randomUUID(),
+  p_room_id: room.id,
+  p_check_in_at: '2037-01-01T07:00:00.000Z',
+  p_check_out_at: '2037-01-02T02:00:00.000Z',
+  p_guest_count: 2,
+  p_guest_name_encrypted: null,
+  p_expected_room_version: roomAfterPreviewRace.state_version,
+  p_idempotency_key: `preview-competitor-${randomUUID()}`,
+  p_request_hash: 'e'.repeat(64)
+});
+assert(!competingCommit.error, `preview competitor fixture failed: ${competingCommit.error?.message}`);
+const { data: roomAfterCompetingCommit, error: roomAfterCompetingCommitError } = await client
+  .from('rooms')
+  .select('state_version')
+  .eq('id', room.id)
+  .single();
+assert(
+  !roomAfterCompetingCommitError && roomAfterCompetingCommit,
+  'room version after competing preview commit failed'
+);
+const stalePreviewCommit = await client.rpc('create_reservation', {
+  p_actor_profile_id: actorProfileId,
+  p_reservation_id: randomUUID(),
+  p_room_id: room.id,
+  p_check_in_at: '2037-01-01T07:00:00.000Z',
+  p_check_out_at: '2037-01-02T02:00:00.000Z',
+  p_guest_count: 2,
+  p_guest_name_encrypted: null,
+  p_expected_room_version: roomAfterCompetingCommit.state_version,
+  p_idempotency_key: `preview-stale-${randomUUID()}`,
+  p_request_hash: 'f'.repeat(64)
+});
+assert(
+  stalePreviewCommit.error?.message?.includes('RESERVATION_OVERLAP'),
+  'a competing reservation after preview must make the later commit fail closed'
+);
 
 const winner = createSuccesses[0].data;
 const { error: checkInFixtureError } = await client

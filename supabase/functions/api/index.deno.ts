@@ -867,6 +867,47 @@ async function errorCode(response: Response): Promise<string | undefined> {
   return payload.error?.code;
 }
 
+Deno.test("reservation bookability static route wins over reservation detail dispatch", async () => {
+  const calls: string[] = [];
+  const dependencies: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve(actor),
+    createClients: () => ({
+      admin: {
+        rpc(name: string) {
+          calls.push(name);
+          return Promise.resolve({
+            data: {
+              evaluated_at: "2026-09-17T00:00:00Z",
+              candidates: [],
+            },
+            error: null,
+          });
+        },
+      },
+    } as unknown as EdgeClients),
+  };
+  const response = await handleApiRequest(
+    request("POST", "/v1/reservations/bookability/preview", {
+      reservationType: "standard",
+      checkInAt: "2026-10-01T16:00:00+09:00",
+      checkOutAt: "2026-10-02T11:00:00+09:00",
+      roomTypeIds: [],
+      excludeReservationId: null,
+    }),
+    dependencies,
+  );
+  const body = await response.json();
+  assert(response.status === 200, "static preview route is reachable");
+  assert(
+    body.preview.candidates.length === 0,
+    "empty candidate preview is valid",
+  );
+  assert(
+    calls.join(",") === "preview_reservation_bookability",
+    "preview path cannot fall through to reservation detail",
+  );
+});
+
 Deno.test("limited upload_only submission route uses capability auth and preserves stable denial responses", async () => {
   const attemptId = "93000000-0000-4000-8000-000000000001";
   const submissionId = "93000000-0000-4000-8000-000000000002";

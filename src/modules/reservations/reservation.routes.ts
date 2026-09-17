@@ -2,12 +2,18 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../../lib/app-error.js';
 import { normalizeGuestName } from './guest-name-crypto.js';
+import { RESERVATION_CURSOR_MAX_LENGTH, RESERVATION_RANGE_MAX_DAYS } from './reservation-cursor.js';
 import type { ReservationService } from './reservation.service.js';
 
 const reservationIdSchema = z.object({ reservationId: z.uuid() });
 const targetIdSchema = z.object({ targetId: z.uuid() });
-const listQuerySchema = z.object({ roomId: z.uuid().optional() });
 const timestampSchema = z.string().datetime({ offset: true });
+const listQuerySchema = z.object({
+  from: timestampSchema.optional(),
+  to: timestampSchema.optional(),
+  roomId: z.uuid().optional(),
+  cursor: z.string().min(1).max(RESERVATION_CURSOR_MAX_LENGTH).optional()
+}).strict();
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
 const roomMoveReasonCodeSchema = z.enum([
   'GUEST_REQUEST',
@@ -79,6 +85,17 @@ const roomMoveCommitSchema = roomMovePreviewSchema.extend({
   impactFingerprint: z.string().regex(/^[0-9a-f]{64}$/)
 }).strict();
 
+const bookabilityPreviewSchema = z.object({
+  reservationType: z.literal('standard'),
+  checkInAt: timestampSchema,
+  checkOutAt: timestampSchema,
+  excludeReservationId: z.uuid().nullable().optional(),
+  roomTypeIds: z.array(z.uuid()).max(20).refine(
+    (ids) => new Set(ids).size === ids.length,
+    'roomTypeIds에는 중복 UUID를 사용할 수 없습니다.'
+  ).optional()
+}).strict();
+
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
     .min(8)
@@ -104,8 +121,47 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
     const adminPreHandler = [app.authenticate, app.requirePasswordChanged, app.requireAdmin];
 
     app.get('/', { preHandler: adminPreHandler }, async (request) => {
-      const { roomId } = listQuerySchema.parse(request.query);
-      return { reservations: await service.list(request.actor, roomId) };
+      const { from, to, roomId, cursor } = listQuerySchema.parse(request.query);
+      const rangeRequested = from !== undefined || to !== undefined || cursor !== undefined;
+      if (!rangeRequested) {
+        return { reservations: await service.list(request.actor, roomId) };
+      }
+      if (!from || !to) {
+        throw new AppError(400, 'INVALID_RESERVATION_RANGE', 'from과 to를 함께 전달해야 합니다.');
+      }
+      const fromTime = Date.parse(from);
+      const toTime = Date.parse(to);
+      if (
+        !Number.isFinite(fromTime) || !Number.isFinite(toTime) || toTime <= fromTime
+        || toTime - fromTime > RESERVATION_RANGE_MAX_DAYS * 24 * 60 * 60 * 1000
+      ) {
+        throw new AppError(
+          400,
+          toTime - fromTime > RESERVATION_RANGE_MAX_DAYS * 24 * 60 * 60 * 1000
+            ? 'RESERVATION_RANGE_TOO_LARGE'
+            : 'INVALID_RESERVATION_RANGE',
+          `예약 조회 범위는 0일 초과 ${RESERVATION_RANGE_MAX_DAYS}일 이하여야 합니다.`
+        );
+      }
+      return service.listPage(request.actor, {
+        from,
+        to,
+        ...(roomId ? { roomId } : {}),
+        ...(cursor ? { cursor } : {})
+      });
+    });
+
+    app.post('/bookability/preview', { preHandler: adminPreHandler }, async (request) => {
+      const input = bookabilityPreviewSchema.parse(request.body);
+      return {
+        preview: await service.previewBookability(request.actor, {
+          reservationType: input.reservationType,
+          checkInAt: input.checkInAt,
+          checkOutAt: input.checkOutAt,
+          excludeReservationId: input.excludeReservationId ?? null,
+          ...(input.roomTypeIds ? { roomTypeIds: input.roomTypeIds } : {})
+        })
+      };
     });
 
     app.post('/cleaning-requests', { preHandler: adminPreHandler }, async (request, reply) => {

@@ -9,6 +9,7 @@ import {
   getReservation,
   listReservations,
   manualCheckoutReservation,
+  previewReservationBookability,
   previewReservationRoomMove,
   processReservationTransitions,
   reservationDatabaseError,
@@ -227,6 +228,7 @@ Deno.test("reservation authentication blocks inactive and revoked identities", a
     authenticated,
   );
   assert(authenticated.role === "admin", "active admin authenticates");
+  assert(Array.isArray(reservations), "legacy read keeps array response");
   assert(reservations.length === 1, "active admin reaches reservation read");
 
   for (const status of ["inactive", "upload_only", "deactivation_pending"]) {
@@ -271,6 +273,7 @@ Deno.test("reservation list never returns guest names and supports the room filt
     admin,
   );
 
+  assert(Array.isArray(result), "legacy room filter keeps array response");
   assert(result.length === 1, "one reservation");
   assert(!("guestName" in result[0]), "guest name is detail-only");
   assert(
@@ -278,6 +281,170 @@ Deno.test("reservation list never returns guest names and supports the room filt
     "actor must reach the DB command",
   );
   assert(rpcArguments.p_room_id === reservationRow.room_id, "room filter");
+});
+
+Deno.test("reservation range list emits a scoped opaque cursor and rejects tampering", async () => {
+  configurePii();
+  const calls: Array<Record<string, unknown>> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, argumentsValue: Record<string, unknown>) {
+        assert(
+          name === "list_reservations_page",
+          "range mode uses bounded page RPC",
+        );
+        calls.push(argumentsValue);
+        return Promise.resolve({
+          data: {
+            server_time: "2026-09-01T00:00:00Z",
+            reservations: [{
+              ...reservationRow,
+              guest_name_encrypted: "never-return",
+            }],
+            has_more: calls.length === 1,
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const range =
+    `from=2026-09-01T00%3A00%3A00Z&to=2026-09-30T00%3A00%3A00Z&roomId=${reservationRow.room_id}`;
+  const first = await listReservations(
+    new Request(`http://localhost/v1/reservations?${range}`),
+    clients,
+    admin,
+  );
+  assert(!Array.isArray(first), "range mode returns page envelope");
+  assert(
+    first.reservations.length === 1 && first.nextCursor,
+    "first page has cursor",
+  );
+  assert(
+    !JSON.stringify(first).includes("never-return"),
+    "range page excludes guest PII",
+  );
+
+  const second = await listReservations(
+    new Request(
+      `http://localhost/v1/reservations?${range}&cursor=${
+        encodeURIComponent(first.nextCursor)
+      }`,
+    ),
+    clients,
+    admin,
+  );
+  assert(
+    !Array.isArray(second) && second.nextCursor === null,
+    "last page closes cursor",
+  );
+  assert(
+    calls[1].p_after_check_in_at === reservationRow.check_in_at,
+    "cursor binds keyset timestamp",
+  );
+  assert(calls[1].p_after_id === reservationRow.id, "cursor binds keyset id");
+
+  const tampered = `${first.nextCursor.slice(0, -1)}${
+    first.nextCursor.endsWith("A") ? "B" : "A"
+  }`;
+  const error = await captureEdgeError(() =>
+    listReservations(
+      new Request(
+        `http://localhost/v1/reservations?${range}&cursor=${tampered}`,
+      ),
+      clients,
+      admin,
+    )
+  );
+  assert(
+    error.code === "INVALID_RESERVATION_CURSOR",
+    "tampered cursor is stable 400",
+  );
+  assert(calls.length === 2, "invalid cursor never reaches the database");
+});
+
+Deno.test("reservation bookability keeps PIN readiness separate and supports empty candidates", async () => {
+  let empty = false;
+  const rpcInputs: Array<Record<string, unknown>> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        assert(
+          name === "preview_reservation_bookability",
+          "preview uses exact RPC",
+        );
+        rpcInputs.push(args);
+        return Promise.resolve({
+          data: {
+            evaluated_at: "2026-09-01T00:00:00Z",
+            candidates: empty ? [] : [{
+              room_id: reservationRow.room_id,
+              room_number: "117",
+              room_type_id: "51000000-0000-4000-8000-000000000001",
+              room_state_version: 2,
+              interval_bookable: true,
+              check_in_ready: false,
+              reason_codes: ["PIN_UNCONFIGURED"],
+              evaluated_at: "2026-09-01T00:00:00Z",
+            }],
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const body = {
+    reservationType: "standard",
+    checkInAt: "2026-10-01T16:00:00+09:00",
+    checkOutAt: "2026-10-02T11:00:00+09:00",
+    roomTypeIds: [],
+    excludeReservationId: null,
+  };
+  const preview = await previewReservationBookability(
+    commandRequest("/v1/reservations/bookability/preview", body),
+    clients,
+    admin,
+  );
+  assert(
+    preview.candidates[0].intervalBookable,
+    "PIN does not alter interval bookability",
+  );
+  assert(
+    !preview.candidates[0].checkInReady,
+    "PIN remains a readiness concern",
+  );
+  assert(
+    preview.commitAuthority === "CREATE_OR_CHANGE_REVALIDATES",
+    "commit is final authority",
+  );
+
+  empty = true;
+  const none = await previewReservationBookability(
+    commandRequest("/v1/reservations/bookability/preview", {
+      reservationType: "standard",
+      checkInAt: body.checkInAt,
+      checkOutAt: body.checkOutAt,
+    }),
+    clients,
+    admin,
+  );
+  assert(
+    none.candidates.length === 0,
+    "zero matching rooms remains a successful preview",
+  );
+  assert(
+    none.evaluatedAt === "2026-09-01T00:00:00Z",
+    "empty result keeps evaluatedAt",
+  );
+  assert(
+    rpcInputs.length === 2 &&
+      rpcInputs.every((input) =>
+        input.p_room_type_ids === null &&
+        input.p_exclude_reservation_id === null &&
+        input.p_reservation_type === "standard"
+      ),
+    "empty and omitted roomTypeIds normalize to the same all-types RPC input",
+  );
 });
 
 Deno.test("guest-name create is randomized but keeps a stable request fingerprint", async () => {

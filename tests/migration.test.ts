@@ -126,6 +126,10 @@ const reservationDuringStayMoveMigrationUrl = new URL(
   '../supabase/migrations/20260916210000_reservation_during_stay_room_move.sql',
   import.meta.url
 );
+const reservationBookabilityMigrationUrl = new URL(
+  '../supabase/migrations/20260918010000_reservation_bookability.sql',
+  import.meta.url
+);
 const photoRetentionV2MigrationUrl = new URL(
   '../supabase/migrations/20260917090000_photo_retention_v2.sql',
   import.meta.url
@@ -275,6 +279,36 @@ describe('initial migration contract', () => {
     // ledger, audit or response projection is a plaintext/public guest-name
     // field, PIN plaintext, or authorization material.
     expect(sql).not.toMatch(/['"]guestName['"]|\bpin_plain\b|authorization header/i);
+  });
+
+  it('adds bounded reservation reads and a non-authoritative interval preview', async () => {
+    const sql = await readFile(reservationBookabilityMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create index reservations_calendar_range_idx');
+    expect(sql).toContain('create function public.preview_reservation_bookability(');
+    expect(sql).toContain('create function public.list_reservations_page(');
+    expect(sql).toContain("p_reservation_type is distinct from 'standard'");
+    expect(sql).toContain("v_room_type_ids uuid[] := nullif(p_room_type_ids, array[]::uuid[])");
+    expect(sql).toContain('private.room_reservation_lifecycle_at(');
+    expect(sql).toContain('lifecycle.current_checkin_pending');
+    expect(sql).toContain("tstzrange(p_check_in_at, p_check_out_at, '[)')");
+    expect(sql).toContain('segment.retired_at is null');
+    expect(sql).toContain('segment.source_reservation_id is distinct from p_exclude_reservation_id');
+    expect(sql).toContain("v_excluded.status <> 'active'");
+    expect(sql).toContain("'interval_bookable', candidate.interval_bookable");
+    expect(sql).toContain("'check_in_ready', candidate.check_in_ready");
+    expect(sql).toContain("'evaluated_at', v_evaluated_at");
+    expect(sql).toContain("p_to - p_from > interval '31 days'");
+    expect(sql).toContain('p_limit < 1 or p_limit > 50');
+    expect(sql).toContain('(reservation.check_in_at, reservation.id) > (p_after_check_in_at, p_after_id)');
+    expect(sql).toContain("tstzrange(segment.starts_at, segment.ends_at, '[)')");
+    expect(sql).toContain('private.reservation_projected_room_id(');
+    expect(sql).toContain('v_server_time');
+    expect(sql).toContain("'server_time', v_server_time");
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/['"]guest_name['"]|guest_name_(?:ciphertext|iv|auth_tag)/i);
+    expect(sql).not.toMatch(/\blong_stay\b|open[-_ ]ended/i);
   });
 
   it('seeds 121 unique room numbers', async () => {

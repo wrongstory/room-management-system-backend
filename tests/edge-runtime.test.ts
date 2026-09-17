@@ -226,7 +226,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']assignment_pin_entitlement["']/
+      /expectedMigrationName\s*=\s*["']reservation_bookability["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -376,6 +376,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     ]);
     for (const path of [
       '/v1/reservations',
+      '/v1/reservations/bookability/preview',
       '/v1/reservations/cleaning-requests',
       '/v1/reservations/transitions/process'
     ]) {
@@ -383,6 +384,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     }
     for (const rpc of [
       'list_reservations',
+      'list_reservations_page',
+      'preview_reservation_bookability',
       'get_reservation_detail',
       'create_reservation',
       'change_reservation',
@@ -398,6 +401,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(reservationApi).toContain('requireBusinessAdmin(actor)');
     expect(reservationApi).toContain('requirePasswordChanged(actor)');
     expect(openApi).toContain('operationId: "listReservations"');
+    expect(openApi).toContain('operationId: "previewReservationBookability"');
     expect(openApi).toContain('operationId: "processReservationTransitions"');
     expect(reservationApi).toContain('startsWith("reservation-scheduler-")');
     expect(fastifyReservationRoutes).toContain("startsWith('reservation-scheduler-')");

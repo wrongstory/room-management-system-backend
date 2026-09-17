@@ -110,6 +110,21 @@ const roomMoveTargetBlockReasons = new Set([
   "ROOM_ISSUE_BLOCKED",
   "DATA_UNCONFIRMED",
 ]);
+const reservationBookabilityReasons = new Set([
+  "RESERVATION_OVERLAP",
+  "OCCUPIED",
+  "RESERVATION_CURRENT",
+  "CLEANING_REQUIRED",
+  "CANDLE_PRESENT",
+  "OPERATION_BLOCKED",
+  "ROOM_ISSUE_BLOCKED",
+  "DATA_UNCONFIRMED",
+  "PIN_MISMATCH",
+  "PIN_UNCONFIGURED",
+]);
+const reservationPageSize = 50;
+const reservationRangeMaxMs = 31 * 24 * 60 * 60 * 1000;
+const reservationCursorMaxLength = 1024;
 
 function validationError(message: string): never {
   throw new EdgeError(400, "VALIDATION_ERROR", message);
@@ -268,6 +283,179 @@ function decodeBase64(value: string): Uint8Array {
     return bytes;
   } catch {
     throw new Error("INVALID_BASE64");
+  }
+}
+
+function base64UrlFromBytes(bytes: Uint8Array): string {
+  return base64FromBytes(bytes)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+function decodeBase64Url(value: string): Uint8Array {
+  if (!value || !/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error("INVALID_BASE64URL");
+  }
+  const standard = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = `${standard}${"=".repeat((4 - standard.length % 4) % 4)}`;
+  const bytes = decodeBase64(padded);
+  if (base64UrlFromBytes(bytes) !== value) {
+    throw new Error("NON_CANONICAL_BASE64URL");
+  }
+  return bytes;
+}
+
+interface ReservationCursorScope {
+  actorProfileId: string;
+  actorRole: "admin";
+  from: string;
+  to: string;
+  roomId: string | null;
+  sort: "checkInAt:asc,id:asc";
+}
+
+interface ReservationCursorPosition {
+  checkInAt: string;
+  id: string;
+}
+
+function invalidReservationCursor(): EdgeError {
+  return new EdgeError(
+    400,
+    "INVALID_RESERVATION_CURSOR",
+    "예약 cursor가 올바르지 않습니다.",
+  );
+}
+
+function reservationCursorScope(
+  actor: EdgeActor,
+  from: string,
+  to: string,
+  roomId: string | null,
+): ReservationCursorScope {
+  return {
+    actorProfileId: actor.profileId.toLowerCase(),
+    actorRole: "admin",
+    from,
+    to,
+    roomId: roomId?.toLowerCase() ?? null,
+    sort: "checkInAt:asc,id:asc",
+  };
+}
+
+async function reservationCursorKey(): Promise<CryptoKey> {
+  const root = new TextEncoder().encode(
+    requiredEnv("RESERVATION_GUEST_NAME_PEPPER"),
+  );
+  if (root.byteLength < 32) {
+    throw new EdgeError(
+      503,
+      "RESERVATION_CURSOR_NOT_CONFIGURED",
+      "예약 cursor 서명 설정이 필요합니다.",
+    );
+  }
+  const rootKey = await crypto.subtle.importKey(
+    "raw",
+    root,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const derived = await crypto.subtle.sign(
+    "HMAC",
+    rootKey,
+    new TextEncoder().encode("room-management:reservation-range-cursor:v1"),
+  );
+  return crypto.subtle.importKey(
+    "raw",
+    derived,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+}
+
+async function encodeReservationCursor(
+  scope: ReservationCursorScope,
+  after: ReservationCursorPosition,
+): Promise<string> {
+  const payload = base64UrlFromBytes(
+    new TextEncoder().encode(JSON.stringify({ v: 1, scope, after })),
+  );
+  const signature = base64UrlFromBytes(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        await reservationCursorKey(),
+        new TextEncoder().encode(payload),
+      ),
+    ),
+  );
+  const cursor = `${payload}.${signature}`;
+  if (cursor.length > reservationCursorMaxLength) {
+    throw invalidReservationCursor();
+  }
+  return cursor;
+}
+
+async function decodeReservationCursor(
+  cursor: string,
+  expectedScope: ReservationCursorScope,
+): Promise<ReservationCursorPosition> {
+  if (!cursor || cursor.length > reservationCursorMaxLength) {
+    throw invalidReservationCursor();
+  }
+  const parts = cursor.split(".");
+  if (parts.length !== 2) throw invalidReservationCursor();
+  try {
+    const [payloadEncoded = "", signatureEncoded = ""] = parts;
+    const signature = decodeBase64Url(signatureEncoded);
+    if (
+      signature.byteLength !== 32 ||
+      !await crypto.subtle.verify(
+        "HMAC",
+        await reservationCursorKey(),
+        signature,
+        new TextEncoder().encode(payloadEncoded),
+      )
+    ) throw invalidReservationCursor();
+    const parsed: unknown = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(
+        decodeBase64Url(payloadEncoded),
+      ),
+    );
+    if (
+      !isRecord(parsed) || !hasExactKeys(parsed, ["after", "scope", "v"]) ||
+      parsed.v !== 1
+    ) {
+      throw invalidReservationCursor();
+    }
+    if (
+      !isRecord(parsed.scope) ||
+      !hasExactKeys(parsed.scope, [
+        "actorProfileId",
+        "actorRole",
+        "from",
+        "roomId",
+        "sort",
+        "to",
+      ]) ||
+      JSON.stringify(parsed.scope) !== JSON.stringify(expectedScope) ||
+      !isRecord(parsed.after) ||
+      !hasExactKeys(parsed.after, ["checkInAt", "id"]) ||
+      typeof parsed.after.checkInAt !== "string" ||
+      !strictTimestamp(parsed.after.checkInAt) ||
+      typeof parsed.after.id !== "string" ||
+      !uuidPattern.test(parsed.after.id)
+    ) throw invalidReservationCursor();
+    return {
+      checkInAt: parsed.after.checkInAt,
+      id: parsed.after.id.toLowerCase(),
+    };
+  } catch (error) {
+    if (error instanceof EdgeError) throw error;
+    throw invalidReservationCursor();
   }
 }
 
@@ -662,6 +850,48 @@ export function reservationDatabaseError(
       "예약을 찾을 수 없습니다.",
     ],
     [
+      "EXCLUDE_RESERVATION_NOT_FOUND",
+      404,
+      "EXCLUDE_RESERVATION_NOT_FOUND",
+      "제외할 예약을 찾을 수 없습니다.",
+    ],
+    [
+      "EXCLUDE_RESERVATION_NOT_ELIGIBLE",
+      409,
+      "EXCLUDE_RESERVATION_NOT_ELIGIBLE",
+      "현재 상태에서는 해당 예약을 preview 제외 대상으로 사용할 수 없습니다.",
+    ],
+    [
+      "BOOKABILITY_RANGE_TOO_LARGE",
+      400,
+      "BOOKABILITY_RANGE_TOO_LARGE",
+      "예약 가능성 preview는 최대 366일입니다.",
+    ],
+    [
+      "INVALID_ROOM_TYPE_FILTER",
+      400,
+      "INVALID_ROOM_TYPE_FILTER",
+      "객실 유형 필터가 올바르지 않습니다.",
+    ],
+    [
+      "RESERVATION_RANGE_TOO_LARGE",
+      400,
+      "RESERVATION_RANGE_TOO_LARGE",
+      "예약 조회 범위는 최대 31일입니다.",
+    ],
+    [
+      "INVALID_RESERVATION_RANGE",
+      400,
+      "INVALID_RESERVATION_RANGE",
+      "예약 조회 범위가 올바르지 않습니다.",
+    ],
+    [
+      "INVALID_RESERVATION_CURSOR",
+      400,
+      "INVALID_RESERVATION_CURSOR",
+      "예약 cursor가 올바르지 않습니다.",
+    ],
+    [
       "CLEANING_REQUEST_NOT_FOUND",
       404,
       "CLEANING_REQUEST_NOT_FOUND",
@@ -921,6 +1151,63 @@ function projectionArray(
   return value.map((item) => projectionEnum(item, allowed));
 }
 
+function reservationPageRow(value: unknown) {
+  const row = projectionRecord(value);
+  return toReservation({
+    id: projectionString(row.id, uuidPattern),
+    room_id: projectionString(row.room_id, uuidPattern),
+    check_in_at: projectionTimestamp(row.check_in_at),
+    check_out_at: projectionTimestamp(row.check_out_at),
+    guest_count: projectionPositiveInteger(row.guest_count),
+    status: projectionEnum(
+      row.status,
+      new Set(["active", "cancelled", "checked_out"]),
+    ) as ReservationStatus,
+    preparation_obligation_id: projectionString(
+      row.preparation_obligation_id,
+      uuidPattern,
+    ),
+    checkout_obligation_id: projectionString(
+      row.checkout_obligation_id,
+      uuidPattern,
+    ),
+    version: projectionPositiveInteger(row.version),
+    actual_check_in_at: row.actual_check_in_at === null
+      ? null
+      : projectionTimestamp(row.actual_check_in_at),
+    actual_checkout_at: row.actual_checkout_at === null
+      ? null
+      : projectionTimestamp(row.actual_checkout_at),
+    cancelled_at: row.cancelled_at === null
+      ? null
+      : projectionTimestamp(row.cancelled_at),
+    created_at: projectionTimestamp(row.created_at),
+    updated_at: projectionTimestamp(row.updated_at),
+  });
+}
+
+function bookabilityCandidate(value: unknown) {
+  const row = projectionRecord(value);
+  if (
+    typeof row.room_number !== "string" || row.room_number.length < 1 ||
+    row.room_number.length > 20 || typeof row.interval_bookable !== "boolean" ||
+    typeof row.check_in_ready !== "boolean"
+  ) roomMoveProjectionError();
+  return {
+    roomId: projectionString(row.room_id, uuidPattern),
+    roomNumber: row.room_number,
+    roomTypeId: projectionString(row.room_type_id, uuidPattern),
+    roomStateVersion: projectionPositiveInteger(row.room_state_version),
+    intervalBookable: row.interval_bookable,
+    checkInReady: row.check_in_ready,
+    reasonCodes: projectionArray(
+      row.reason_codes,
+      reservationBookabilityReasons,
+    ),
+    evaluatedAt: projectionTimestamp(row.evaluated_at),
+  };
+}
+
 function roomMoveOutcome(value: unknown) {
   const row = projectionRecord(value);
   return {
@@ -1132,14 +1419,155 @@ export async function listReservations(
   actor: EdgeActor,
 ) {
   requireReservationAdmin(actor);
-  const search = queryValues(request, ["roomId"]);
+  const search = queryValues(request, ["from", "to", "roomId", "cursor"]);
+  const from = search.get("from");
+  const to = search.get("to");
   const roomId = search.get("roomId");
-  const { data, error } = await clients.admin.rpc("list_reservations", {
+  const cursor = search.get("cursor");
+  const rangeRequested = from !== null || to !== null || cursor !== null;
+  const normalizedRoomId = roomId === null ? null : uuidValue(roomId, "roomId");
+  if (!rangeRequested) {
+    const { data, error } = await clients.admin.rpc("list_reservations", {
+      p_actor_profile_id: actor.profileId,
+      p_room_id: normalizedRoomId,
+    });
+    if (error) throw reservationDatabaseError(error);
+    return ((data ?? []) as ReservationRow[]).map(toReservation);
+  }
+  if (from === null || to === null) {
+    throw new EdgeError(
+      400,
+      "INVALID_RESERVATION_RANGE",
+      "from과 to를 함께 전달해야 합니다.",
+    );
+  }
+  const normalizedFrom = timestampValue(from, "from");
+  const normalizedTo = timestampValue(to, "to");
+  const rangeMs = Date.parse(normalizedTo) - Date.parse(normalizedFrom);
+  if (!(rangeMs > 0)) {
+    throw new EdgeError(
+      400,
+      "INVALID_RESERVATION_RANGE",
+      "예약 조회 범위가 올바르지 않습니다.",
+    );
+  }
+  if (rangeMs > reservationRangeMaxMs) {
+    throw new EdgeError(
+      400,
+      "RESERVATION_RANGE_TOO_LARGE",
+      "예약 조회 범위는 최대 31일입니다.",
+    );
+  }
+  const scope = reservationCursorScope(
+    actor,
+    normalizedFrom,
+    normalizedTo,
+    normalizedRoomId,
+  );
+  const after = cursor === null
+    ? null
+    : await decodeReservationCursor(cursor, scope);
+  const { data, error } = await clients.admin.rpc("list_reservations_page", {
     p_actor_profile_id: actor.profileId,
-    p_room_id: roomId === null ? null : uuidValue(roomId, "roomId"),
+    p_from: normalizedFrom,
+    p_to: normalizedTo,
+    p_room_id: normalizedRoomId,
+    p_after_check_in_at: after?.checkInAt ?? null,
+    p_after_id: after?.id ?? null,
+    p_limit: reservationPageSize,
   });
-  if (error) throw reservationDatabaseError(error);
-  return ((data ?? []) as ReservationRow[]).map(toReservation);
+  if (error || !data) throw reservationDatabaseError(error);
+  const result = projectionRecord(data);
+  if (
+    !Array.isArray(result.reservations) || typeof result.has_more !== "boolean"
+  ) {
+    roomMoveProjectionError();
+  }
+  const reservations = result.reservations.map(reservationPageRow);
+  const serverTime = projectionTimestamp(result.server_time);
+  const last = reservations.at(-1);
+  if (result.has_more && !last) roomMoveProjectionError();
+  return {
+    reservations,
+    nextCursor: result.has_more && last
+      ? await encodeReservationCursor(scope, {
+        checkInAt: last.checkInAt,
+        id: last.id,
+      })
+      : null,
+    serverTime,
+  };
+}
+
+export async function previewReservationBookability(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+) {
+  requireReservationAdmin(actor);
+  const body = await readJsonBody(request);
+  assertOnlyFields(body, [
+    "reservationType",
+    "checkInAt",
+    "checkOutAt",
+    "excludeReservationId",
+    "roomTypeIds",
+  ]);
+  if (body.reservationType !== "standard") {
+    validationError("reservationType은 현재 standard만 지원합니다.");
+  }
+  const checkInAt = timestampValue(body.checkInAt, "checkInAt");
+  const checkOutAt = timestampValue(body.checkOutAt, "checkOutAt");
+  const excludeReservationId = body.excludeReservationId == null
+    ? null
+    : uuidValue(body.excludeReservationId, "excludeReservationId");
+  let roomTypeIds: string[] | null = null;
+  if (body.roomTypeIds !== undefined) {
+    if (
+      !Array.isArray(body.roomTypeIds) ||
+      body.roomTypeIds.length > 20
+    ) {
+      validationError(
+        "roomTypeIds는 최대 20개의 UUID 배열이어야 합니다.",
+      );
+    }
+    roomTypeIds = body.roomTypeIds.map((value) =>
+      uuidValue(value, "roomTypeIds")
+    );
+    if (new Set(roomTypeIds).size !== roomTypeIds.length) {
+      validationError("roomTypeIds에는 중복 UUID를 사용할 수 없습니다.");
+    }
+    if (roomTypeIds.length === 0) roomTypeIds = null;
+  }
+  const previewResult = await clients.admin.rpc(
+    "preview_reservation_bookability",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_check_in_at: checkInAt,
+      p_check_out_at: checkOutAt,
+      p_exclude_reservation_id: excludeReservationId,
+      p_room_type_ids: roomTypeIds,
+      p_reservation_type: body.reservationType,
+    },
+  );
+  if (previewResult.error || !previewResult.data) {
+    throw reservationDatabaseError(previewResult.error);
+  }
+  const result = projectionRecord(previewResult.data);
+  if (!Array.isArray(result.candidates)) roomMoveProjectionError();
+  const evaluatedAt = projectionTimestamp(result.evaluated_at);
+  const candidates = result.candidates.map(bookabilityCandidate);
+  if (candidates.some((candidate) => candidate.evaluatedAt !== evaluatedAt)) {
+    roomMoveProjectionError();
+  }
+  return {
+    checkInAt,
+    checkOutAt,
+    excludeReservationId,
+    evaluatedAt,
+    candidates,
+    commitAuthority: "CREATE_OR_CHANGE_REVALIDATES" as const,
+  };
 }
 
 export async function getReservation(

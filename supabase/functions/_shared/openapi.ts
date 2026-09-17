@@ -3536,15 +3536,36 @@ export const openApiDocument = {
         operationId: "listReservations",
         summary: "예약 목록 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin만 조회합니다. 목록은 예약·점유·청소 연결에 필요한 필드만 반환하며 guestName과 암호문을 절대 포함하지 않습니다.",
+          "비밀번호 변경을 완료한 active business admin만 조회합니다. from/to를 모두 생략하면 기존 전체 목록 응답을 그대로 유지합니다. from/to를 함께 보내면 최대 31일의 [from,to) 구간과 겹치는 예약을 checkInAt ASC, id ASC로 최대 50개 반환하며 serverTime과 다음 opaque cursor를 제공합니다. roomId는 해당 구간과 겹치는 과거·현재 stay segment 기준으로 필터합니다. 목록은 guestName과 암호문을 절대 포함하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
           {
+            name: "from",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+            description:
+              "범위 모드 시작 시각(포함). to와 함께 전달하며 최대 31일",
+          },
+          {
+            name: "to",
+            in: "query",
+            schema: { type: "string", format: "date-time" },
+            description: "범위 모드 종료 시각(미포함). from과 함께 전달",
+          },
+          {
             name: "roomId",
             in: "query",
             schema: { type: "string", format: "uuid" },
-            description: "특정 객실의 예약만 조회하는 선택 필터",
+            description:
+              "특정 객실 stay segment가 요청 구간과 겹치는 예약만 조회하는 선택 필터",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description:
+              "직전 범위 응답의 opaque cursor. actor/from/to/roomId/sort에 고정되어 다른 조회에 재사용할 수 없습니다.",
           },
         ],
         responses: {
@@ -3566,6 +3587,55 @@ export const openApiDocument = {
         parameters: [idempotencyHeader],
         requestBody: reservationRequestBody("ReservationCreateRequest"),
         responses: reservationMutationResponses(201),
+      },
+    },
+    "/v1/reservations/bookability/preview": {
+      post: {
+        tags: ["Reservations"],
+        operationId: "previewReservationBookability",
+        summary: "임의 기간 객실 예약 가능성 미리보기",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용 read-only preview입니다. 미래 [checkInAt,checkOutAt) 구간의 canonical stay-segment overlap과 create/change의 운영 차단 축을 intervalBookable로 계산합니다. PIN mismatch/unconfigured는 evaluatedAt에 실제 current check-in pending인 경우에만 checkInReady와 reasonCodes에 나타나며 intervalBookable을 바꾸지 않습니다. excludeReservationId 생략/null은 무제외이고, UUID는 존재하고 아직 체크인하지 않은 active 예약 하나만 정확히 제외합니다. 이 결과는 commit 성공 보장이 아니며 create/change transaction이 최종 overlap 권위입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref:
+                  "#/components/schemas/ReservationBookabilityPreviewRequest",
+              },
+              example: {
+                reservationType: "standard",
+                checkInAt: "2026-10-01T16:00:00+09:00",
+                checkOutAt: "2026-10-02T11:00:00+09:00",
+                roomTypeIds: [],
+                excludeReservationId: null,
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "객실별 기간 가용성과 현재 체크인 준비 축",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref:
+                    "#/components/schemas/ReservationBookabilityPreviewEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
       },
     },
     "/v1/reservations/{reservationId}": {
@@ -5445,6 +5515,14 @@ export const openApiDocument = {
           "INVALID_GUEST_NAME",
           "INVALID_GUEST_COUNT",
           "INVALID_RESERVATION_SCHEDULE",
+          "BOOKABILITY_RANGE_TOO_LARGE",
+          "INVALID_ROOM_TYPE_FILTER",
+          "EXCLUDE_RESERVATION_NOT_FOUND",
+          "EXCLUDE_RESERVATION_NOT_ELIGIBLE",
+          "INVALID_RESERVATION_RANGE",
+          "RESERVATION_RANGE_TOO_LARGE",
+          "INVALID_RESERVATION_CURSOR",
+          "RESERVATION_CURSOR_NOT_CONFIGURED",
           "INVALID_MOVE_EFFECTIVE_AT",
           "RESERVATION_OVERLAP",
           "TARGET_ROOM_OVERLAP",
@@ -8045,6 +8123,175 @@ export const openApiDocument = {
           },
         },
       },
+      ReservationListEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["reservations"],
+        properties: {
+          reservations: {
+            type: "array",
+            items: { $ref: "#/components/schemas/Reservation" },
+          },
+        },
+        description:
+          "from/to/cursor를 생략한 legacy 조회 응답입니다. 기존 전체 목록과 roomId-only 목록은 50건 제한을 적용하지 않습니다.",
+      },
+      ReservationRangePageEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["reservations", "nextCursor", "serverTime"],
+        properties: {
+          reservations: {
+            type: "array",
+            maxItems: 50,
+            items: { $ref: "#/components/schemas/Reservation" },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+            description:
+              "다음 범위 페이지 opaque cursor. null이면 마지막 페이지",
+          },
+          serverTime: {
+            type: "string",
+            format: "date-time",
+            description:
+              "범위 페이지와 roomId projection을 평가한 단일 서버 snapshot 시각",
+          },
+        },
+        description: "from/to 범위 조회의 최대 50건 bounded page입니다.",
+      },
+      ReservationBookabilityReasonCode: {
+        type: "string",
+        enum: [
+          "RESERVATION_OVERLAP",
+          "OCCUPIED",
+          "RESERVATION_CURRENT",
+          "CLEANING_REQUIRED",
+          "CANDLE_PRESENT",
+          "OPERATION_BLOCKED",
+          "ROOM_ISSUE_BLOCKED",
+          "DATA_UNCONFIRMED",
+          "PIN_MISMATCH",
+          "PIN_UNCONFIGURED",
+        ],
+      },
+      ReservationBookabilityPreviewRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["reservationType", "checkInAt", "checkOutAt"],
+        properties: {
+          reservationType: {
+            type: "string",
+            enum: ["standard"],
+            description:
+              "현재 후보는 standard만 지원합니다. long_stay/종료 미정 계약은 후속 버전에서 확장합니다.",
+          },
+          checkInAt: {
+            type: "string",
+            format: "date-time",
+            description: "예약 구간 시작(포함), 분 단위 RFC 3339",
+          },
+          checkOutAt: {
+            type: "string",
+            format: "date-time",
+            description: "예약 구간 종료(미포함), KST 날짜 기준 최소 1박",
+          },
+          excludeReservationId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "자기 예약 변경 preview에서만 사용하는 active·체크인 전 예약 ID",
+          },
+          roomTypeIds: {
+            type: "array",
+            minItems: 0,
+            maxItems: 20,
+            uniqueItems: true,
+            items: { type: "string", format: "uuid" },
+            description: "생략하거나 빈 배열이면 모든 객실 유형",
+          },
+        },
+      },
+      ReservationBookabilityCandidate: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "roomNumber",
+          "roomTypeId",
+          "roomStateVersion",
+          "intervalBookable",
+          "checkInReady",
+          "reasonCodes",
+          "evaluatedAt",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string", minLength: 1, maxLength: 20 },
+          roomTypeId: { type: "string", format: "uuid" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          intervalBookable: {
+            type: "boolean",
+            description:
+              "요청 기간 overlap·운영 차단 축 결과. PIN 상태는 이 값을 바꾸지 않음",
+          },
+          checkInReady: {
+            type: "boolean",
+            description:
+              "evaluatedAt 현재 시점의 별도 입실 준비 축. PIN 사유는 실제 current check-in pending일 때만 반영",
+          },
+          reasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: {
+              $ref: "#/components/schemas/ReservationBookabilityReasonCode",
+            },
+          },
+          evaluatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      ReservationBookabilityPreview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "checkInAt",
+          "checkOutAt",
+          "excludeReservationId",
+          "evaluatedAt",
+          "candidates",
+          "commitAuthority",
+        ],
+        properties: {
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          excludeReservationId: { type: ["string", "null"], format: "uuid" },
+          evaluatedAt: { type: "string", format: "date-time" },
+          candidates: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/ReservationBookabilityCandidate",
+            },
+          },
+          commitAuthority: {
+            type: "string",
+            const: "CREATE_OR_CHANGE_REVALIDATES",
+            description:
+              "preview는 보장이 아니며 create/change가 transaction 안에서 최종 재검증",
+          },
+        },
+      },
+      ReservationBookabilityPreviewEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["preview"],
+        properties: {
+          preview: {
+            $ref: "#/components/schemas/ReservationBookabilityPreview",
+          },
+        },
+      },
       ReservationCreateRequest: {
         type: "object",
         additionalProperties: false,
@@ -10204,15 +10451,10 @@ function reservationListResponse(): Record<string, unknown> {
     content: {
       "application/json": {
         schema: {
-          type: "object",
-          additionalProperties: false,
-          required: ["reservations"],
-          properties: {
-            reservations: {
-              type: "array",
-              items: { $ref: "#/components/schemas/Reservation" },
-            },
-          },
+          oneOf: [
+            { $ref: "#/components/schemas/ReservationListEnvelope" },
+            { $ref: "#/components/schemas/ReservationRangePageEnvelope" },
+          ],
         },
       },
     },

@@ -149,13 +149,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 113 &&
+    Object.keys(document.paths).length === 114 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 121,
-    "combined candidate contract 113/121",
+        ).length === 122,
+    "combined candidate contract 114/122",
   );
 });
 
@@ -734,6 +734,7 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       "/v1/assignments/commit-impact",
       "/v1/assignments/commit",
       "/v1/reservations",
+      "/v1/reservations/bookability/preview",
       "/v1/reservations/{reservationId}",
       "/v1/reservations/{reservationId}/cancel",
       "/v1/reservations/{reservationId}/manual-checkout",
@@ -789,6 +790,57 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     !("guestName" in reservationSchema.properties) &&
       !("guestNameEncrypted" in reservationSchema.properties),
     "reservation list schema must not expose guest PII",
+  );
+  const reservationList = document.paths["/v1/reservations"].get;
+  const reservationListResponse = reservationList.responses["200"] as {
+    content: {
+      "application/json": {
+        schema: { oneOf: Array<{ $ref: string }> };
+      };
+    };
+  };
+  const legacyReservationList = document.components.schemas
+    .ReservationListEnvelope;
+  const reservationRangePage = document.components.schemas
+    .ReservationRangePageEnvelope;
+  const bookability = document.paths["/v1/reservations/bookability/preview"]
+    .post;
+  const bookabilityRequest = document.components.schemas
+    .ReservationBookabilityPreviewRequest;
+  const bookabilityExample = bookability.requestBody.content["application/json"]
+    .example;
+  assert(
+    reservationList.parameters.some((parameter: { name?: string }) =>
+      parameter.name === "cursor"
+    ) &&
+      reservationListResponse.content["application/json"].schema.oneOf.map(
+          (schema) => schema.$ref,
+        ).join(",") ===
+        "#/components/schemas/ReservationListEnvelope,#/components/schemas/ReservationRangePageEnvelope" &&
+      !("maxItems" in legacyReservationList.properties.reservations) &&
+      reservationRangePage.properties.reservations.maxItems === 50 &&
+      reservationRangePage.required.join(",") ===
+        "reservations,nextCursor,serverTime",
+    "reservation list separates unbounded legacy and bounded range envelopes",
+  );
+  assert(
+    bookability.operationId === "previewReservationBookability" &&
+      bookability.requestBody.content["application/json"].schema.$ref ===
+        "#/components/schemas/ReservationBookabilityPreviewRequest" &&
+      bookabilityRequest.required.includes("reservationType") &&
+      bookabilityRequest.properties.reservationType.enum.join() ===
+        "standard" &&
+      bookabilityRequest.properties.roomTypeIds.minItems === 0 &&
+      bookabilityExample.reservationType === "standard" &&
+      Array.isArray(bookabilityExample.roomTypeIds) &&
+      bookabilityExample.roomTypeIds.length === 0 &&
+      bookabilityExample.excludeReservationId === null &&
+      bookabilityRequest.properties.excludeReservationId.type.includes(
+        "null",
+      ) &&
+      document.components.schemas.ReservationBookabilityCandidate.properties
+        .intervalBookable.description.includes("PIN"),
+    "reservation bookability publishes separate interval and readiness axes",
   );
   assert(
     !serialized.includes('"before_state"') &&

@@ -123,6 +123,7 @@ import {
   getReservation,
   listReservations,
   manualCheckoutReservation,
+  previewReservationBookability,
   previewReservationRoomMove,
   processReservationTransitions,
   reservationIdFromPath,
@@ -1189,8 +1190,9 @@ export async function handleApiRequest(
     }
 
     if (request.method === "GET" && path === "/v1/reservations") {
+      const result = await listReservations(request, clients, actor);
       return jsonResponse(
-        { reservations: await listReservations(request, clients, actor) },
+        Array.isArray(result) ? { reservations: result } : result,
         200,
         corsHeaders,
       );
@@ -1199,6 +1201,22 @@ export async function handleApiRequest(
       return jsonResponse(
         { reservation: await createReservation(request, clients, actor) },
         201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path === "/v1/reservations/bookability/preview"
+    ) {
+      return jsonResponse(
+        {
+          preview: await previewReservationBookability(
+            request,
+            clients,
+            actor,
+          ),
+        },
+        200,
         corsHeaders,
       );
     }
