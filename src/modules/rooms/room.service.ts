@@ -295,6 +295,9 @@ function roomError(error: { message?: string } | null): AppError {
   if (message.includes('PIN_REVEAL_AUTHORIZATION_CHANGED')) {
     return new AppError(403, 'PIN_REVEAL_AUTHORIZATION_CHANGED', 'PIN 응답 전 권한 또는 업무 상태가 변경되었습니다.');
   }
+  if (message.includes('PIN_ENTITLEMENT_REQUIRED')) {
+    return new AppError(403, 'PIN_ENTITLEMENT_REQUIRED', '현재 통보된 배정의 PIN 열람 권한이 필요합니다.');
+  }
   if (message.includes('ROOM_PIN_UNCONFIGURED')) {
     return new AppError(404, 'ROOM_PIN_UNCONFIGURED', '등록된 객실 PIN이 없습니다.');
   }

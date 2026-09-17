@@ -4,7 +4,7 @@
 
 이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C와 Issue #140 초기화 계약을 설명한다. 현재 production source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`, 전체 56 migrations / 109 paths / 117 operations이고 PIN 범위의 49~53번째 migration과 #146 deterministic concurrency fixture는 변경 없이 보존된다. PIN source와 `room-pin-sheet-sync` bundle은 production에 반영됐지만 target mapping·Google ACL/Secrets/Cron/hosted activation은 여전히 별도 pending이다. #156/#165의 55~56번째 migration과 API는 PIN schema·worker 계약을 바꾸지 않는다.
 
-Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다. 2026-09-17 확정된 통보 기반 durable assignment entitlement는 아직 source에 없으며 아래 legacy access-lease 규칙을 새 append-only migration으로 대체해야 한다.
+Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다. Issue #194의 64번째 append-only migration은 통보 기반 durable assignment entitlement와 최대 30초 reveal lease를 분리한 source/dev 계약이며 production 적용을 뜻하지 않는다.
 
 ## 초기 PIN bootstrap과 예약 계약
 
@@ -81,11 +81,11 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 최신 제품 계약에서 PIN 접근 자격은 assignment 통보와 outbox가 확정되는 시점부터 시작하며 `availableFrom` 전에도 본인에게 알림된 담당이면 유효하다. 현장 완료·업로드 대기·제출·검수 대기 동안 유지하고 최종 승인·반려, 취소 승인, 재배정, 비활성화 workflow의 권한 정리 때 종료한다. 이 durable entitlement는 exact assignment/room/maid/PIN revision에 귀속하고 30초 reveal lease와 분리한다.
 
-현재 source의 `room_pin_access_leases`는 attempt가 필수이고 access 시각 도달 및 `scheduled|in_progress`를 요구하므로 위 계약을 아직 충족하지 않는다. 후속 migration 전까지 이를 목표 정책으로 문서화하거나 `field_completed` 이후 접근 가능하다고 표시하지 않는다. change prepare/confirm의 exact `in_progress` 제한은 별도 변경 정책으로 유지한다. 알려진 다른 maid/과거/revoked/stale entitlement 또는 lease ID를 조합해도 권한이 생기지 않는다.
+64번째 source 계약의 private entitlement는 exact current/notified assignment, maid, room, assignment revision, current PIN revision과 **그 grant를 발생시킨 exact typed delivery outbox ID**를 함께 고정한다. 물리 불일치 중에도 이 원장은 알림과 함께 생성하되 실제 reveal은 불일치가 해소될 때까지 차단한다. 최초 알림 grant는 active/password-complete maid만 허용한다. `deactivation_pending`/`upload_only`에서는 기존 원장 row를 final cleanup 전까지 보존할 수 있지만 actual reveal은 active-session gate로 막고 신규/rotation successor grant를 만들지 않는다. inactive/departed 최종 정리는 entitlement와 열린 reveal을 함께 종료한다. change prepare/confirm의 exact `in_progress` + authoritative access lease 제한은 별도 물리 변경 정책으로 유지한다.
 
-Maid confirm이 PIN version을 올리면 서버는 변경을 승인한 기존 authoritative lease를 `PIN_VERSION_SUPERSEDED`로 폐기하고, 동일 room/target/assignment/attempt/maid/만료 시각을 새 version으로 원자 재발급한다. confirm 응답의 `accessLeaseId`를 새 reveal 권한으로 사용한다. revision의 provenance는 변경 승인에 쓴 기존 lease ID를 보존한다.
+PIN version이 오르면 열린 30초 reveal과 이전 revision entitlement를 원자 폐기한다. successor entitlement는 현재 수행 workflow와 이미 통보된 **객실별 최소 미래 service date(다음 근무일)** 담당에게만 발급하며, 더 먼 미래 배정·비활성화 진행/종료 계정은 제외한다. 기존 public access lease 재발급은 물리 PIN 변경 command의 provenance로만 보존되며 reveal 권한 자체는 아니다.
 
-Reveal은 기존 public access lease를 대체하지 않는 30초 이하 private 보조 lease다. 서버는 복호화 후 DB에서 session/profile/current revision/mismatch/assignment/attempt/access lease를 다시 확인하고 authoritative public lease의 `revealed_at`과 safe `sensitive.read` event를 원자 기록한다. 그 append가 실패하거나 TTL이 0이면 plaintext를 반환하지 않는다.
+Reveal은 durable entitlement에서 파생되는 30초 이하 private 단기 lease다. 서버는 복호화 후 DB에서 live session/profile/password gate, current revision/mismatch, exact assignment ownership/revision과 entitlement 종료 여부를 다시 확인하고 safe `sensitive.read` event를 원자 기록한다. 그 append가 실패하거나 TTL이 0이면 plaintext를 반환하지 않는다. legacy `attemptId/accessLeaseId` 요청 필드는 호환 입력일 뿐 reveal authority가 아니다.
 
 응답은 항상 `Cache-Control: no-store`다. 클라이언트는 `clearAfterSeconds`와 `expiresAt` 중 더 이른 시점 또는 navigation, background, pagehide, device lock, assignment removal, relock 즉시 credential을 메모리에서 지운다. clipboard, cache, service worker, offline queue, analytics, persistent storage에 저장하지 않는다.
 
@@ -95,7 +95,8 @@ Reveal은 기존 public access lease를 대체하지 않는 30초 이하 private
 - `ROOM_PIN_BOOTSTRAP_CONFIG_INVALID`: 배포 secret이 없거나 형식이 잘못됐다. 실제 값을 로그/Issue에 남기지 말고 secret manager 설정을 복구한다.
 - `PIN_CHANGE_IN_PROGRESS` / `PIN_CHANGE_LEASE_EXPIRED`: 새 변경으로 덮지 말고 기존 lease의 물리 결과를 resolve한다.
 - `STALE_PIN_VERSION` / `ROOM_NUMBER_CHANGED`: 최신 객실/version을 다시 조회하고 새로운 idempotency key로 재시도한다.
-- `PIN_ACCESS_REQUIRED` / `PIN_ACCESS_LEASE_REQUIRED` / `PIN_REVEAL_AUTHORIZATION_CHANGED`: assignment, attempt, session, access lease가 바뀐 것이므로 plaintext를 폐기하고 다시 권한을 얻는다.
+- `PIN_ENTITLEMENT_REQUIRED` / `PIN_REVEAL_AUTHORIZATION_CHANGED`: 현재 notified assignment entitlement, session, assignment/PIN revision 또는 종료 상태가 바뀐 것이므로 plaintext를 폐기하고 최신 배정 상태를 다시 조회한다.
+- `PIN_ACCESS_REQUIRED` / `PIN_ACCESS_LEASE_REQUIRED`: 물리 PIN 변경용 exact in-progress attempt/access lease가 없으므로 변경을 진행하지 않는다.
 - `ROOM_PIN_KEY_UNAVAILABLE` / `ROOM_PIN_CRYPTO_CONFIG_INVALID`: keyring을 복구하기 전 reveal/change를 중단한다. 오류 응답이나 로그에 key/envelope/PIN을 남기지 않는다.
 
 DB의 `room_pin_sync_events`와 private sheet outbox에는 room/version/status/source-controlled reason만 있어야 한다. audit developer projection은 `roomId`, `leaseId`, `pinVersion`, `status` 같은 승인 필드만 표시하며 raw state/request hash/envelope을 노출하지 않는다.

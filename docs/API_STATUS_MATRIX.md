@@ -87,7 +87,7 @@ production 최종 source/readback evidence: **2026-09-16 KST** (Issue #148/#156/
 - #93/#95는 PR #95로 source/dev 병합 완료했다. 개발 통합 계약은 **35 migrations / 76 paths / 82 operations**이며 conceptual OPEN 조회, OPEN→PAYING 잠금과 4개 payroll table의 active+비밀번호 변경 완료+admin/maid-self RLS를 포함한다.
 - #96은 PR #97로 source/dev 병합 완료했다. bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 포함한 당시 개발 통합 계약은 **36 migrations / 77 paths / 83 operations**다. 해당 API source는 production `api` bundle에 반영됐지만 hosted 역할별 read/mutation smoke는 미확인이다.
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
-- #131은 #69 승인 PIN 계약의 Phase A source/dev 정본이다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. private immutable revision/current pointer, physical-change mismatch lifecycle, authoritative maid access lease, 30초 이하 reveal과 safe sync/audit/outbox를 포함하며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
+- #131은 현재 **production 56-migration historical snapshot**에 반영된 #69 PIN Phase A다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. 이 운영 snapshot은 private immutable revision/current pointer, physical-change mismatch lifecycle과 authoritative maid access lease를 change/reveal 양쪽에 사용한다. #194의 64번째 source candidate는 물리 PIN change의 exact in-progress access-lease 경계는 유지하되 reveal만 exact current/notified assignment entitlement + 30초 lease로 대체하며 아직 production 사용 가능 계약이 아니다. 양쪽 모두 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
 - #184 현재 시각 객실 projection은 `dev@fb50775289b14f16b27679af471e282504b5f5f6`, #187 Phase A~C 예약 임박·체크인 전 변경·투숙 중 이동은 PR #188/#189/#190을 거쳐 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`에 source/dev 병합 완료했다. 모두 production에는 아직 배포하지 않았다.
 - #180 `extra-proof` 0~10장 collection은 `dev@0f58d4778523ea2a2e6dfe05a3aa8cb80bb0052e`에 source/dev 병합 완료했고 production에는 아직 배포하지 않았다.
@@ -632,7 +632,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | claim/resume 교차 동시성 회귀 | source/dev 완료 | #10 / #117 | 기능·migration 변경 없이 실제 RPC Promise.all 경합 고정; `dev@cc15f47a74959943cf72a95e69da278243020f15` |
 | [x] | VAPID/provider HTTP source 계약 | source/dev 완료 | #10 / #112 / PR #119 | 45 migrations / 98 paths / 105 operations; 승인 head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`, `dev@dfc98b1474f9f890851d49bd904869181d0d7880`; Issue #112 OPEN, Cron/Vault/production hosted 활성화 미완료 |
 | [x] | 배정 변경·취소 및 청소 완료 알림 coverage | source/dev 완료 | #128 | base 48 migrations / 98 paths / 105 operations; informational push/action 분리, active-admin completion fanout, exact notified replan/revocation provenance; production 미승격·미사용 |
-| [x] | encrypted room PIN Phase A | production source 반영 | #69 / #131 | physical change/reveal/authoritative access lease; hosted role/positive mutation smoke 미확인 |
+| [x] | encrypted room PIN Phase A | production source 반영 | #69 / #131 | **production 56-migration historical 계약**은 physical change/reveal 모두 authoritative access lease; #194 source candidate는 change만 유지하고 reveal을 durable assignment entitlement로 대체; hosted role/positive mutation smoke 미확인 |
 | [x] | Google Sheets PIN projection worker Phase B | production bundle 반영 | #69 / #136 / PR #138 | `room-pin-sheet-sync` source 배포; hosted target/secret/ACL/Google/Cron activation 미완료 |
 | [x] | PIN Sheet 안전 상태·full resync Phase C | source/dev 완료 | #69 / #137 | 51 migrations / 104 paths / 111 operations; exact target digest, 121실 snapshot, singleton fence/CAS/audit; production activation은 Issue OPEN |
 | [x] | 초기 PIN bootstrap·예약 readiness 분리 | production source 반영 | #140 / PR #141 / PR #142 | 공통 nonce reservation 반영; production secret/hosted positive smoke 미확인 |
@@ -687,10 +687,25 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 | [x] | `POST /v1/rooms/{roomId}/pin-changes/prepare` | active business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 | [x] | `POST /v1/rooms/{roomId}/pin-changes/{leaseId}/confirm` | preparing admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 | [x] | `POST /v1/rooms/{roomId}/pin-changes/{leaseId}/rollback` | preparing admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
-| [x] | `POST /v1/rooms/{roomId}/pin/reveal` | current notified maid + authoritative lease/session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| [x] | `POST /v1/rooms/{roomId}/pin/reveal` | current notified maid + durable assignment entitlement + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 
 Production `api` bundle에는 네 operation이 포함됐지만 PIN 원문이 필요한 hosted positive mutation을
 안전한 운영 fixture 없이 실행하지 않았으므로 현재 사용을 ✅로 올리지 않는다.
+
+### #194 assignment PIN entitlement — source candidate, production 미승격
+
+- [x] 기존 63개 migration 불변 + 64번째 append-only migration
+- [x] exact typed delivery outbox와 같은 transaction에서 current/notified assignment entitlement grant
+- [x] `availableFrom` 전부터 field/upload/submission/inspection pending까지 durable authority 유지
+- [x] final approve/reject/cancel, 재배정/revision 교체, inactive/departed 최종 정리에서 atomic end/reveal revoke
+- [x] PIN rotation 시 current workflow + 이미 통보된 객실별 다음 근무일만 successor; 더 먼 미래·비활성화 진행/종료 actor 제외
+- [x] maid PIN 변경의 exact in-progress attempt + authoritative access lease 경계 유지
+- [x] 63→64 이력 보존/backfill, RLS, replay/rotation/account concurrency source 검증
+- [ ] feature/dev 병합 및 exact-head independent QA
+- [ ] release/main·production migration/API 배포·hosted role smoke
+
+이 source 후보는 공개 path/operation 수를 늘리지 않고 OpenAPI `0.4.0`의 기존 PIN reveal 설명과 stable
+`PIN_ENTITLEMENT_REQUIRED` 오류를 정합화한다. production은 현 §2 snapshot을 유지한다.
 
 ### #44 Phase A source gate
 

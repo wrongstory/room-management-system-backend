@@ -460,6 +460,7 @@ def test_room_pin_error_codes_are_generated() -> None:
         "PIN_CHANGE_IN_PROGRESS",
         "PIN_CHANGE_LEASE_EXPIRED",
         "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
+        "PIN_ENTITLEMENT_REQUIRED",
         "PIN_REVEAL_AUTHORIZATION_CHANGED",
         "ROOM_PIN_UNCONFIGURED",
         "PIN_ACCESS_LEASE_REQUIRED",

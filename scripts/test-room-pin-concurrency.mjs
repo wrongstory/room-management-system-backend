@@ -165,6 +165,44 @@ export async function testRoomPinConcurrency(client) {
       return releasePromise;
     };
   }
+  async function holdProfileLock(profileId) {
+    const process = spawn("docker", psqlArgs, { stdio: ["pipe", "pipe", "pipe"] });
+    let output = "";
+    let stderr = "";
+    const exited = new Promise((resolve) => process.once("close", resolve));
+    process.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        process.kill();
+        reject(new Error("room PIN profile lock barrier timed out"));
+      }, 10_000);
+      process.once("error", () => {
+        clearTimeout(timeout);
+        reject(new Error("room PIN profile lock process failed"));
+      });
+      process.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+        if (output.includes("PROFILE_LOCK_READY")) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+      process.stdin.write(
+        `begin; set local statement_timeout='40s'; select 1 from public.profiles where id='${profileId}'::uuid for update;\n` +
+          "\\echo PROFILE_LOCK_READY\n",
+      );
+    });
+    return async () => {
+      process.stdin.end(
+        `update public.profiles set status='inactive' where id='${profileId}'::uuid; commit;\n\\q\n`,
+      );
+      const exitCode = await exited;
+      if (exitCode !== 0) {
+        const reason = stderr.split(/\r?\n/).find((line) => line.trim()) ?? "unknown";
+        throw new Error(`room PIN profile transition failed: ${reason}`);
+      }
+    };
+  }
   async function waitForAdvisoryLock(rpcName) {
     assert(
       /^[a-z_]+$/.test(rpcName),
@@ -511,6 +549,17 @@ export async function testRoomPinConcurrency(client) {
       }),
       "room PIN assignment fixture",
     );
+    const notificationGroupId = randomUUID();
+    const notificationId = randomUUID();
+    const outboxId = randomUUID();
+    sql(
+      `insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at) values (` +
+        `'${notificationGroupId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','room','${item.id}'::uuid,clock_timestamp(),clock_timestamp()+interval '10 minutes');` +
+        `insert into public.notifications(id,recipient_profile_id,category,title,body,room_id,cleaning_target_id,dedupe_key,requires_action,occurred_at,contract_version,actor_profile_id,event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id) values (` +
+        `'${notificationId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','assignment','assignment','${item.id}'::uuid,'${targetId}'::uuid,'room-pin-${notificationId}',true,clock_timestamp(),1,'${admin.profileId}'::uuid,'assignment.commit_notified','cleaning_assignment','${assignmentId}','cleaningTarget','${targetId}'::uuid,'${notificationGroupId}'::uuid);` +
+        `insert into private.notification_delivery_outbox(id,notification_id,event_family) values (` +
+        `'${outboxId}'::uuid,'${notificationId}'::uuid,'assignment.commit_notified');`,
+    );
     ok(
       await client.from("cleaning_attempts").insert({
         id: attemptId,
@@ -561,6 +610,39 @@ export async function testRoomPinConcurrency(client) {
       pinVersion: 1,
     };
   }
+  async function notifiedMaidFixture() {
+    const owner = await account("maid");
+    const item = await room();
+    await installCurrent(item);
+    const targetId = randomUUID();
+    const assignmentId = randomUUID();
+    const groupId = randomUUID();
+    const notificationId = randomUUID();
+    const outboxId = randomUUID();
+    ok(await client.from("cleaning_targets").insert({
+      id: targetId, room_id: item.id, cleaning_kind: "additional",
+      source: "manual_room_request", source_key: `room-pin-${targetId}`,
+      original_service_date: day, effective_service_date: day,
+      available_from: new Date(now.getTime() + 60_000).toISOString(),
+      due_at: new Date(now.getTime() + 3_600_000).toISOString(), status: "notified",
+      assignment_version: 2, room_type_snapshot: {}, template_snapshot: {},
+      fee_snapshot: 10000, created_by: admin.profileId,
+    }), "room PIN notified target fixture");
+    ok(await client.from("cleaning_assignments").insert({
+      id: assignmentId, cleaning_target_id: targetId,
+      maid_profile_id: owner.profileId, sequence_number: ++sequence,
+      revision: 2, notified_at: now.toISOString(), changed_by: admin.profileId,
+    }), "room PIN notified assignment fixture");
+    sql(
+      `insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at) values (` +
+        `'${groupId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','room','${item.id}'::uuid,clock_timestamp(),clock_timestamp()+interval '10 minutes');` +
+        `insert into public.notifications(id,recipient_profile_id,category,title,body,room_id,cleaning_target_id,dedupe_key,requires_action,occurred_at,contract_version,actor_profile_id,event_family,source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id) values (` +
+        `'${notificationId}'::uuid,'${owner.profileId}'::uuid,'cleaning_assignment_notified','assignment','assignment','${item.id}'::uuid,'${targetId}'::uuid,'room-pin-${notificationId}',true,clock_timestamp(),1,'${admin.profileId}'::uuid,'assignment.commit_notified','cleaning_assignment','${assignmentId}','cleaningTarget','${targetId}'::uuid,'${groupId}'::uuid);` +
+        `insert into private.notification_delivery_outbox(id,notification_id,event_family) values (` +
+        `'${outboxId}'::uuid,'${notificationId}'::uuid,'assignment.commit_notified');`,
+    );
+    return { ...item, ...owner, targetId, assignmentId };
+  }
   function completionSql(item) {
     return (
       `select public.complete_cleaning_attempt_field_work(` +
@@ -572,7 +654,6 @@ export async function testRoomPinConcurrency(client) {
     "PIN_ACCESS_REQUIRED",
     "PIN_ACCESS_LEASE_REQUIRED",
     "PIN_CHANGE_IN_PROGRESS_REQUIRED",
-    "PIN_REVEAL_AUTHORIZATION_CHANGED",
   ]);
   async function completeWins(label, rpcName, item, invoke) {
     const result = await behindGlobalLock(rpcName, invoke, completionSql(item));
@@ -581,6 +662,24 @@ export async function testRoomPinConcurrency(client) {
         stableRaceErrors.has(result.error.message) &&
         !/40P01|deadlock|500|internal/i.test(result.error.message),
       `${label} versus completion fails closed with a stable domain error`,
+    );
+  }
+  async function waitForRowLock(rpcName) {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const waiting = sql(
+        "select exists(select 1 from pg_stat_activity where usename='authenticator' " +
+          "and state='active' and wait_event_type='Lock')",
+      );
+      if (waiting === "t") return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`${rpcName} did not reach the profile row lock barrier`);
+  }
+  async function completionPreservesReveal(label, rpcName, item, invoke) {
+    const result = await behindGlobalLock(rpcName, invoke, completionSql(item));
+    assert(
+      !result.error,
+      `${label} remains authorized through field completion: ${result.error?.message}`,
     );
   }
 
@@ -658,7 +757,7 @@ export async function testRoomPinConcurrency(client) {
   );
 
   const beginWorkRace = await maidFixture();
-  await completeWins(
+  await completionPreservesReveal(
     "begin reveal",
     "begin_room_pin_reveal",
     beginWorkRace,
@@ -688,7 +787,7 @@ export async function testRoomPinConcurrency(client) {
     }),
     "maid finalize race begin",
   );
-  await completeWins(
+  await completionPreservesReveal(
     "finalize reveal",
     "finalize_room_pin_reveal",
     finalizeWorkRace,
@@ -702,7 +801,34 @@ export async function testRoomPinConcurrency(client) {
       }),
   );
 
+  const deactivateRace = await notifiedMaidFixture();
+  const rotationPrepared = ok(
+    await client.rpc(
+      "prepare_room_pin_change",
+      prepareArgs(deactivateRace, admin, {}, 1, "ADMIN_PHYSICAL_CHANGE"),
+    ),
+    "rotation versus deactivation prepare",
+  );
+  const releaseProfile = await holdProfileLock(deactivateRace.profileId);
+  const rotationPending = Promise.resolve(client.rpc("confirm_room_pin_change", {
+    p_actor_profile_id: admin.profileId,
+    p_session_id: admin.sessionId,
+    p_room_id: deactivateRace.id,
+    p_lease_id: rotationPrepared.lease_id,
+    p_expected_pin_version: 1,
+    p_idempotency_key: `pin-${randomUUID()}`,
+    p_request_hash: randomBytes(32).toString("hex"),
+  }));
+  await waitForRowLock("confirm_room_pin_change");
+  await releaseProfile();
+  const rotationResult = await rotationPending;
+  assert(
+    !rotationResult.error &&
+      sql(`select count(*) from private.room_pin_assignment_entitlements where maid_profile_id='${deactivateRace.profileId}'::uuid and ended_at is null`) === "0",
+    "rotation versus inactive finalization has no deadlock and grants no inactive successor",
+  );
+
   console.log(
-    "Room PIN concurrency passed: six global-first RPC barriers, prepare/confirm single winners, and five actual completion conflict paths without deadlock.",
+    "Room PIN concurrency passed: six global-first RPC barriers, prepare/confirm single winners, three PIN-change completion conflicts, two durable-entitlement reveal paths, and rotation versus inactive finalization without deadlock.",
   );
 }

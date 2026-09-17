@@ -13,6 +13,16 @@ const adminActor: Actor = {
   accessToken: 'access-token'
 };
 
+const maidSessionId = '50000000-0000-4000-8000-000000000001';
+const maidActor: Actor = {
+  authUserId: '10000000-0000-4000-8000-000000000002',
+  profileId: '20000000-0000-4000-8000-000000000002',
+  displayName: '담당 메이드',
+  role: 'maid',
+  mustChangePassword: false,
+  accessToken: `e30.${Buffer.from(JSON.stringify({ session_id: maidSessionId })).toString('base64url')}.signature`
+};
+
 const roomRow = {
   id: '30000000-0000-4000-8000-000000000001',
   room_number: '101',
@@ -43,6 +53,32 @@ const roomRow = {
 };
 
 describe('current room status public contract', () => {
+  it('maps a missing durable PIN entitlement to the stable Fastify contract', async () => {
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { message: 'PIN_ENTITLEMENT_REQUIRED' }
+    }));
+    const clients = {
+      admin: { rpc },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseRoomService(clients);
+
+    await expect(service.revealPin(maidActor, {
+      roomId: roomRow.id,
+      assignmentId: '60000000-0000-4000-8000-000000000001'
+    })).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PIN_ENTITLEMENT_REQUIRED'
+    });
+    expect(rpc).toHaveBeenCalledWith('begin_room_pin_reveal', expect.objectContaining({
+      p_actor_profile_id: maidActor.profileId,
+      p_session_id: maidSessionId,
+      p_assignment_id: '60000000-0000-4000-8000-000000000001'
+    }));
+  });
+
   it('maps the authoritative evaluation instant and reservation phase in Fastify', async () => {
     const rpc = vi.fn(async () => ({ data: [roomRow], error: null }));
     const clients = {

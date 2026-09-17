@@ -4061,7 +4061,7 @@ export const openApiDocument = {
         operationId: "revealRoomPin",
         summary: "현재 객실 PIN 일시 표시",
         description:
-          "30초 이하의 private reveal lease로 복호화한 뒤 세션·역할·current revision·불일치 상태와 maid의 정확한 assignment·nonterminal attempt·authoritative access lease를 DB에서 최종 재검증하고 sensitive.read append가 성공한 경우에만 plaintext credential을 반환합니다. 클라이언트는 clearAfterSeconds와 expiresAt 중 더 이른 시점 또는 화면 이동·background·pagehide·device lock·assignment removal·relock 즉시 plaintext를 지워야 하며 clipboard, cache, offline 또는 영구 저장소에 기록하면 안 됩니다.",
+          "30초 이하의 private reveal lease로 복호화한 뒤 세션·비밀번호·current PIN revision과 maid의 exact current/notified assignment entitlement를 DB에서 최종 재검증하고 sensitive.read append가 성공한 경우에만 plaintext credential을 반환합니다. entitlement는 통보 delivery outbox와 함께 확정되어 availableFrom 전에도 유효하고 field completion·upload·submission·inspection pending 동안 유지되며, 최종 승인/반려·승인 취소·재배정·계정 비활성화 workflow의 최종 정리·PIN rotation 때 즉시 종료됩니다. deactivation_pending/upload_only 동안 원장 이력은 유지되지만 active가 아닌 계정의 실제 reveal은 차단됩니다. 클라이언트는 clearAfterSeconds와 expiresAt 중 더 이른 시점 또는 화면 이동·background·pagehide·device lock·assignment removal·relock 즉시 plaintext를 지워야 하며 URL, clipboard, cache, offline 또는 영구 저장소에 기록하면 안 됩니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter()],
@@ -5576,6 +5576,7 @@ export const openApiDocument = {
           "ROOM_PIN_SHEET_FULL_RESYNC_PENDING",
           "ROOM_PIN_SHEET_ROOM_MASTER_INVALID",
           "PIN_ACCESS_LEASE_REQUIRED",
+          "PIN_ENTITLEMENT_REQUIRED",
           "PIN_ACCESS_REQUIRED",
           "SENSITIVE_TEXT_NOT_ALLOWED",
           "PIN_MATERIAL_NOT_ALLOWED",
@@ -8939,11 +8940,11 @@ export const openApiDocument = {
         additionalProperties: false,
         properties: {
           assignmentId: { type: "string", format: "uuid" },
-          attemptId: { type: "string", format: "uuid" },
-          accessLeaseId: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid", deprecated: true },
+          accessLeaseId: { type: "string", format: "uuid", deprecated: true },
         },
         description:
-          "admin은 빈 객체, maid는 exact assignmentId/attemptId/accessLeaseId를 전송합니다.",
+          "admin은 빈 객체, maid는 exact current/notified assignmentId를 전송합니다. attemptId/accessLeaseId는 이전 클라이언트 호환 입력이며 PIN 공개 권한으로 사용하지 않습니다.",
       },
       RoomPinReveal: {
         type: "object",

@@ -55,7 +55,7 @@ commit은 완료 receipt replay를 시각 검증보다 먼저 수행하고, rese
 
 Fastify와 Edge는 같은 Web Crypto AES-256-GCM envelope를 사용한다. `pinDigits`는 선행 0을 보존하는 4~8자리 문자열이고, 서버가 global lifecycle lock과 room lock 아래 다시 읽은 `room_number` snapshot으로만 canonical credential을 만든다. envelope마다 12-byte random nonce를 생성하며 regular prepare와 bootstrap이 공유하는 private `(key_version, nonce)` reservation이 객실/AAD를 가로지른 다른 암호화 재사용을 fail-closed한다. prepare→confirm의 동일 envelope는 한 논리 reservation이다. immutable revision에는 key가 아닌 bounded AAD environment/projectRef를 저장해 recovery restore가 저장 당시 context로 복호화할 수 있다.
 
-물리 변경은 `prepare → physical lock change → confirm`이며 prepare가 즉시 mismatch를 기록하지만 current pointer는 confirm까지 유지한다. expired/uncertain mismatch는 actual PIN re-entry confirm 또는 기존 current의 confirmed physical rollback으로만 해소한다. maid read/change는 기존 public access lease의 exact room/target/current assignment/current attempt/maid/current pin version을 authority로 사용하고, change는 in-progress에서만 허용한다. maid confirm은 기존 lease를 revoke하고 동일 작업 권한·만료 시각의 새 pin version lease를 원자 재발급한다. reveal은 30초 이하 private 보조 lease, 최종 DB authorization recheck, authoritative lease `revealed_at`, `sensitive.read` append가 모두 성공한 뒤 남은 TTL 안에서만 plaintext를 반환한다.
+물리 변경은 `prepare → physical lock change → confirm`이며 prepare가 즉시 mismatch를 기록하지만 current pointer는 confirm까지 유지한다. expired/uncertain mismatch는 actual PIN re-entry confirm 또는 기존 current의 confirmed physical rollback으로만 해소한다. maid PIN **change**는 기존 public access lease의 exact room/target/current assignment/current attempt/maid/current pin version을 authority로 사용하고 in-progress에서만 허용한다. 반면 #194 이후 maid PIN **reveal** authority는 exact typed delivery outbox에서 시작한 durable assignment entitlement이며, historical access lease와 `revealed_at`은 더 이상 reveal 권한이 아니다. reveal은 매 요청 live session/profile/password/current assignment revision/current PIN revision을 다시 검증해 30초 이하 private window만 만들고, finalize authorization recheck와 `sensitive.read` append가 모두 성공한 뒤 남은 TTL 안에서만 plaintext를 반환한다. PIN rotation은 admin을 포함한 이전 revision의 모든 열린 reveal을 즉시 durable revoke한다.
 
 private revision/current/change/reveal/outbox tables는 FORCE RLS와 explicit revoke로 Data API를 닫는다. Phase-B outbox와 public sync event에는 room/version/status/source-controlled reason만 있고 envelope/PIN/AAD bytes는 없다. 모든 PIN RPC는 `reservation-command` global advisory lock을 가장 먼저 획득해 cancel/handover/complete와 동일한 lock graph를 사용한다. Google provider, worker, full resync, Cron/Vault/production secret 설정은 이 Phase A에 포함하지 않는다.
 
@@ -846,3 +846,16 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 - 매일 roles·schema·data dump를 만들고 recovery 프로젝트에 복원한 뒤 핵심 행 수·RLS·관리자·객실 seed를 검사한다.
 - DB dump는 Google Drive 사진 bytes를 포함하지 않는다. metadata·retention ledger는 DB backup 대상이며, provider bytes는 청소 최종 검사+168시간, 사건 해결/종결+180일, true orphan 업로드+30일 정책으로 별도 purge한다.
 - 전체 주기와 복원 명령은 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)에 정의한다.
+
+## Assignment PIN entitlement 경계 (#194 source/dev)
+
+64번째 append-only migration은 장기 업무 권한과 plaintext 복호화 창을 분리한다. typed assignment
+notification과 exact delivery outbox가 확정될 때 private immutable entitlement를 생성하고, 각 reveal은 그
+entitlement에서 최대 30초 lease를 파생한다. reveal은 매번 live session, active/password-complete profile,
+current assignment/room/revision, current PIN revision, verified/mismatch 상태와 entitlement 종료 여부를 DB에서 다시 확인한다. 알림 outbox 시점이 물리 불일치 중이어도 durable 원장은 current revision에 생성하지만 plaintext reveal은 verified 복구 전까지 fail-closed다.
+
+PIN rotation은 이전 entitlement와 열린 reveal을 먼저 폐기하고 current workflow 및 이미 통보된 다음 근무일
+assignment에만 새 PIN revision successor를 발급한다. 물리 PIN 변경의 maid 권한은 기존 exact in-progress
+attempt와 authoritative access lease를 그대로 요구한다. entitlement/outbox/audit에는 PIN, envelope, raw session,
+token, request body 또는 idempotency payload를 저장하지 않는다. 이 source 계약은 production PIN/Sheets/Cron
+활성화를 포함하지 않는다.
