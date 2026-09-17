@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_retention_v2'
+    'assignment_pin_entitlement'
   ) ->> 'currentMigration',
-  'photo_retention_v2',
+  'assignment_pin_entitlement',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_retention_v2'
+    'assignment_pin_entitlement'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'photo_retention_v2';
+where name = 'assignment_pin_entitlement';
 
 delete from supabase_migrations.schema_migrations
-where name = 'photo_retention_v2';
+where name = 'assignment_pin_entitlement';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_retention_v2'
+    'assignment_pin_entitlement'
   ) ->> 'currentMigration',
-  'reservation_during_stay_room_move',
-  'database status exposes migration 62 when migration 63 is absent'
+  'photo_retention_v2',
+  'database status exposes migration 63 when migration 64 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'photo_retention_v2'
+    'assignment_pin_entitlement'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 62 behind source migration 63'
+  'database status reports migration 63 behind source migration 64'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

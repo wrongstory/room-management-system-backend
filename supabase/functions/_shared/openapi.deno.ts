@@ -1379,6 +1379,7 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
       "PIN_REVEAL_AUTHORIZATION_CHANGED",
       "ROOM_PIN_UNCONFIGURED",
       "PIN_ACCESS_LEASE_REQUIRED",
+      "PIN_ENTITLEMENT_REQUIRED",
       "PIN_ACCESS_REQUIRED",
     ] as const
   ) {

@@ -507,8 +507,36 @@ Table private.room_pin_reveal_leases {
   expires_at timestamptz [not null]
   finalized_at timestamptz
   request_id uuid [not null]
+  entitlement_id uuid
+  assignment_revision bigint
+  revoked_at timestamptz
+  revoke_reason_code text
 
-  Note: '#131 max-30s private supplement. Maid authority remains the exact existing public access lease, whose revealed_at is set at final authorization.'
+  Note: '#194 max-30s private reveal window. Maid authority is the exact active assignment entitlement; legacy attempt/access lease columns remain only for finalized/revoked pre-64 history. Open windows are revoked on entitlement end or PIN rotation.'
+}
+
+Table private.room_pin_assignment_entitlements {
+  id uuid [pk]
+  assignment_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  room_id uuid [not null]
+  maid_profile_id uuid [not null]
+  assignment_revision bigint [not null]
+  pin_revision_id uuid [not null]
+  pin_version bigint [not null]
+  source_notification_id uuid [not null]
+  source_outbox_id uuid [not null]
+  predecessor_entitlement_id uuid
+  granted_at timestamptz [not null]
+  ended_at timestamptz
+  end_reason_code text
+  created_at timestamptz [not null]
+
+  indexes {
+    (assignment_id, assignment_revision, pin_revision_id) [unique]
+    (source_outbox_id, pin_revision_id) [unique]
+  }
+  Note: '#194 FORCE-RLS immutable assignment/PIN authority. Exact typed delivery outbox grants active notified work; identity is immutable and only open-to-ended transition is allowed. No PIN, session, token, request body, or idempotency payload.'
 }
 
 Table private.room_pin_sheet_sync_outbox {
@@ -2115,6 +2143,15 @@ Ref: private.room_pin_reveal_leases.actor_profile_id > public.profiles.id
 Ref: private.room_pin_reveal_leases.assignment_id > public.cleaning_assignments.id
 Ref: private.room_pin_reveal_leases.attempt_id > public.cleaning_attempts.id
 Ref: private.room_pin_reveal_leases.authoritative_access_lease_id > public.room_pin_access_leases.id
+Ref: private.room_pin_reveal_leases.entitlement_id > private.room_pin_assignment_entitlements.id
+Ref: private.room_pin_assignment_entitlements.assignment_id > public.cleaning_assignments.id
+Ref: private.room_pin_assignment_entitlements.cleaning_target_id > public.cleaning_targets.id
+Ref: private.room_pin_assignment_entitlements.room_id > public.rooms.id
+Ref: private.room_pin_assignment_entitlements.maid_profile_id > public.profiles.id
+Ref: private.room_pin_assignment_entitlements.pin_revision_id > private.room_pin_revisions.id
+Ref: private.room_pin_assignment_entitlements.source_notification_id > public.notifications.id
+Ref: private.room_pin_assignment_entitlements.source_outbox_id > private.notification_delivery_outbox.id
+Ref: private.room_pin_assignment_entitlements.predecessor_entitlement_id > private.room_pin_assignment_entitlements.id
 Ref: private.room_pin_sheet_sync_outbox.room_id > public.rooms.id
 Ref: private.room_pin_sheet_full_resync_runs.actor_profile_id > public.profiles.id
 Ref: private.room_pin_sheet_full_resync_runs.recovery_root_run_id > private.room_pin_sheet_full_resync_runs.id

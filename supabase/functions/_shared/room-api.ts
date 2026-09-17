@@ -381,6 +381,12 @@ export function roomDatabaseError(
       "PIN 응답 전 권한 또는 업무 상태가 변경되었습니다.",
     ],
     [
+      "PIN_ENTITLEMENT_REQUIRED",
+      403,
+      "PIN_ENTITLEMENT_REQUIRED",
+      "현재 통보된 배정의 PIN 열람 권한이 필요합니다.",
+    ],
+    [
       "PIN_ACCESS_LEASE_REQUIRED",
       403,
       "PIN_ACCESS_LEASE_REQUIRED",

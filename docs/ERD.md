@@ -1211,3 +1211,25 @@ rotation 및 Data API RLS에서 차단한다. 모든 새 private table은 FORCE 
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.
 4. 지급 명령에서 `payroll_items` 잠금 합계와 cycle 상태를 원자적으로 전이한다.
 5. 도메인별 서버 명령과 상태 전이 테스트를 추가한다.
+
+## #194 Assignment-bound PIN entitlement (64번째 source migration)
+
+`20260918000000_assignment_pin_entitlement.sql`은 기존 63개 migration을 수정하지 않는 append-only
+source migration이다. `private.room_pin_assignment_entitlements`는 exact current/notified assignment,
+target/room/maid, assignment revision, current PIN revision/version과 grant를 발생시킨 typed notification
+delivery outbox를 immutable identity로 보존한다. raw Data API grant는 없고 identity UPDATE/DELETE를 금지하며
+open→ended만 허용한다.
+
+최초 grant는 active/password-complete maid와 exact delivery outbox가 같은 transaction에서 확정된 경우만
+생긴다. `availableFrom` 또는 attempt/access lease는 entitlement 시작 조건이 아니다. field completion,
+upload pending, submission, inspection pending 동안 유지하고 final approve/reject/cancel, current assignment
+종료·revision 교체, inactive/departed 최종 정리에서 entitlement와 열린 reveal lease를 함께 종료한다.
+`deactivation_pending`/`upload_only`에서는 원장 row를 final cleanup 전까지 보존하지만 기존 active-only session
+predicate가 actual reveal을 차단하고 신규/rotation successor grant도 만들지 않는다.
+
+PIN rotation은 assignment→target→profile→entitlement→open reveal 순서로 잠그며 이전 revision authority를
+끝낸 뒤 현재 workflow와 객실별 최소 미래 service date의 이미 통보된 assignment에만 successor를 만든다.
+더 먼 미래 assignment와 inactive/departed/deactivation 진행 계정은 제외한다. 63→64 backfill도 active,
+password-complete, current/notified, nonterminal target, exact typed outbox와 current PIN revision 존재가 모두
+일치하는 row만 생성하고 기존 PIN/assignment/notification/audit/receipt/reveal 이력을 수정하지 않는다.
+물리 mismatch는 durable backfill을 제거하지 않고 실제 reveal에서만 verified 복구 전까지 차단한다.
