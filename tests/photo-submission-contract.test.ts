@@ -40,7 +40,9 @@ function fixture() {
     currentPhotos: snapshot.slots.filter((slot) => slot.required).map((_, i) => ({
       id: id(100 + i), attemptId: id(3), targetId: id(2), targetSlotId: id(10 + i),
       version: 1, validationStatus: 'verified', uploadedAt: '2037-01-05T12:00:00Z',
-      purgeAfter: '2037-01-12T12:00:00Z', purgedAt: null as string | null
+      retentionPolicy: 'cleaning_submission', retentionStartsAt: null as string | null,
+      expiresAt: null as string | null, purgedAt: null as string | null,
+      mediaAvailability: 'available'
     })),
     asOf: '2037-01-06T00:00:00Z'
   };
@@ -120,13 +122,20 @@ describe('platform-neutral photo contract under Node', () => {
   it('retains PostgreSQL microsecond expiry precision and exact seven-day retention', () => {
     const input = fixture();
     required(input.currentPhotos[0]).uploadedAt = '2037-01-05T12:00:00.000001Z';
-    required(input.currentPhotos[0]).purgeAfter = '2037-01-12T12:00:00.000002Z';
+    required(input.currentPhotos[0]).retentionStartsAt = '2037-01-05T12:00:00.000001Z';
+    required(input.currentPhotos[0]).expiresAt = '2037-01-12T12:00:00.000002Z';
     expect(() => assessPhotoCompleteness(input)).toThrow(PhotoSubmissionContractError);
-    required(input.currentPhotos[0]).purgeAfter = '2037-01-12T12:00:00.000001Z';
+    required(input.currentPhotos[0]).expiresAt = '2037-01-12T12:00:00.000001Z';
     input.asOf = '2037-01-12T12:00:00.000000Z';
     expect(assessPhotoCompleteness(input).photoReferences.some((photo) => photo.slotKey === 'tv-on')).toBe(true);
     input.asOf = '2037-01-12T12:00:00.000001Z';
-    expect(assessPhotoCompleteness(input).photoReferences).toHaveLength(0);
+    expect(assessPhotoCompleteness(input).photoReferences.some((photo) => photo.slotKey === 'tv-on')).toBe(false);
+    expect(assessPhotoCompleteness(input).photoReferences).toHaveLength(8);
+  });
+  it('keeps pending-inspection cleaning photos usable beyond legacy upload plus seven days', () => {
+    const input = fixture();
+    input.asOf = '2037-02-05T12:00:00Z';
+    expect(assessPhotoCompleteness(input).complete).toBe(true);
   });
   it('applies resource bounds separately from legacy photo-count policy', () => {
     const legacy = template(6, 100);

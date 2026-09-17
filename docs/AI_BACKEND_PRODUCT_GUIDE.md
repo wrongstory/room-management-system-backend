@@ -50,7 +50,7 @@
 
 이 snapshot 안의 충돌 우선순위는 `현재 사용자의 명시적 결정 → DOCS/19 객실 PIN·청소 사진 → DOCS/16 배정 → DOCS/17 객실·점유 → FINAL_UX_AUDIT → DOCS/24 예약·객실 이동 → 나머지 최신 인계 문서 → 과거 백엔드 가정`이다. 따라서 `DOCS/14` 등에 남은 `availableFrom` 이후 PIN 접근 문구는 DOCS/19와 2026-09-17 사용자 결정으로 대체한다.
 
-2026-09-17 재대조 결과, `dev@165fed2`가 이번 백엔드 정합화의 exact 프런트 snapshot이다. 객실 대표 상태와 체크인 전·투숙 중 객실 이동은 백엔드 `dev`에 이미 구현돼 중복 개발하지 않는다. 반면 사진 보존과 maid PIN 접근 수명주기는 현재 source가 아래 확정 계약과 반대로 동작하므로 후속 append-only migration/API PR이 필요하다. 자세한 해결/미해결 표는 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
+2026-09-17 재대조 결과, `dev@165fed2`가 이번 백엔드 정합화의 exact 프런트 snapshot이다. 객실 대표 상태와 체크인 전·투숙 중 객실 이동은 백엔드 `dev`에 이미 구현돼 중복 개발하지 않는다. 사진 보존은 Issue #9 Stage 1의 63번째 append-only migration/API 후보에서 아래 확정 계약을 구현하며, source/dev 통합과 production Google/Cron 활성화는 별도 gate다. maid PIN 접근 수명주기는 별도 후속이다. 자세한 해결/미해결 표는 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.
 
 현재 사용자는 과거의 “모든 사진을 업로드 후 7일에 삭제” 결정을 대체했다. 청소 제출 사진은 최종 검사 결정 전 보존하고 결정 시각부터 정확히 168시간 뒤 삭제한다. 이슈·컴플레인·중단/동기화 충돌 증빙은 해결·종결 후 180일, 진짜 orphan은 업로드 후 30일이다. 이미 삭제된 원본을 복구됐다고 표시하지 않으며 metadata는 영구 보존한다.
 
@@ -568,7 +568,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 서버가 preallocated identity/부모/MIME/size/실제SHA를 검증한 Google immutable `createdTime`을 최초 업로드 성공시각으로 사용한다. create에서 시간값을 지정하지 않고 응답 유실/409에서도 같은 clock을 복구한다. 원문 client 촬영시각·retry 수신시각으로 보존기한을 연장하지 않는다.
 - 사전예약 KST 폴더 날짜와 실제 provider 생성 날짜가 다르면 acceptance를 거부한다. 이미 생성된 identity는 move/rebind하지 않고 미수락 여부와 fence를 확인한 보상 경로만 사용한다.
 - limited upload_evidence는 슬롯/업로드/상태 접근만 허용하며 사진 원본 read 권한이 아니다. 원본은 active admin 또는 본인 현재 회차의 active maid를 응답 직전까지 재검증한다.
-- 업로드 accepted는 물리적 완료/전체 제출/검수/ready/수익 상태를 암묵 생성하지 않는다. #85 7일 purge 운영 gate와 #31 제출·검수는 별도다.
+- 업로드 accepted는 물리적 완료/전체 제출/검수/ready/수익 상태를 암묵 생성하지 않는다. 63번째 retention v2 candidate는 #31 최종 검사 결정과 사건 종결을 anchor로 사용하지만, Google provider/Cron 운영 활성화는 별도 gate다.
 
 ---
 

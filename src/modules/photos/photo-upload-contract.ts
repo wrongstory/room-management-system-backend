@@ -19,6 +19,23 @@ export const photoUploadStatuses = [
 ] as const;
 export type PhotoUploadStatus = typeof photoUploadStatuses[number];
 export type PhotoMime = "image/jpeg" | "image/webp";
+export const photoRetentionPolicies = [
+  "cleaning_submission",
+  "room_issue",
+  "complaint",
+  "interruption",
+  "sync_conflict",
+  "mixed",
+  "orphan",
+  "legacy_upload",
+] as const;
+export type PhotoRetentionPolicy = typeof photoRetentionPolicies[number];
+export const photoMediaAvailabilities = [
+  "available",
+  "purged",
+  "unavailable",
+] as const;
+export type PhotoMediaAvailability = typeof photoMediaAvailabilities[number];
 
 export class PhotoUploadContractError extends Error {
   constructor(
@@ -462,6 +479,7 @@ export function photoUploadDatabaseError(
     PHOTO_ITEM_VERSION_CONFLICT: 409,
     PHOTO_UPLOAD_IN_FLIGHT: 409,
     PHOTO_UPLOAD_FENCE_CONFLICT: 409,
+    PHOTO_RETENTION_DELETE_PREPARED: 409,
     PHOTO_PROVIDER_IDENTITY_CONFLICT: 409,
     PHOTO_OPERATION_TERMINAL: 409,
     PHOTO_OPERATION_ACCEPTED: 409,
@@ -470,6 +488,9 @@ export function photoUploadDatabaseError(
     PHOTO_UPLOAD_RATE_LIMITED: 429,
     PHOTO_UPLOAD_LEASE_LIMIT: 429,
     PHOTO_COLLECTION_LIMIT_EXCEEDED: 409,
+    PHOTO_MEDIA_EXPIRED: 410,
+    PHOTO_MEDIA_PURGED: 410,
+    PHOTO_MEDIA_UNAVAILABLE: 503,
   };
   const status = typeof code === "string" && Object.hasOwn(statuses, code)
     ? statuses[code]
@@ -502,7 +523,13 @@ export interface PhotoUploadOperationProjection {
   readonly collectionRevision: number | null;
   readonly itemRevision: number | null;
   readonly uploadedAt: string | null;
+  /** @deprecated Use expiresAt. */
   readonly purgeAfter: string | null;
+  readonly retentionPolicy: PhotoRetentionPolicy | null;
+  readonly retentionStartsAt: string | null;
+  readonly expiresAt: string | null;
+  readonly purgedAt: string | null;
+  readonly mediaAvailability: PhotoMediaAvailability | null;
   readonly compensationAllowed: boolean;
 }
 /** 서버 command 응답 전용 allowlist. raw key/hash/locator/credential 추가 필드는 버린다. */
@@ -542,10 +569,58 @@ export function projectPhotoUploadOperation(
       (status === "accepted") !== (photoId !== null)
     ) failed();
     const uploaded = row.uploadedAt === null ? null : time(row.uploadedAt);
+    const expires = row.expiresAt === null || row.expiresAt === undefined
+      ? null
+      : time(row.expiresAt);
     const purge = row.purgeAfter === null ? null : time(row.purgeAfter);
+    const starts =
+      row.retentionStartsAt === null || row.retentionStartsAt === undefined
+        ? null
+        : time(row.retentionStartsAt);
+    const purged = row.purgedAt === null || row.purgedAt === undefined
+      ? null
+      : time(row.purgedAt);
+    const retentionPolicy =
+      row.retentionPolicy === null || row.retentionPolicy === undefined
+        ? null
+        : row.retentionPolicy as PhotoRetentionPolicy;
+    const mediaAvailability =
+      row.mediaAvailability === null || row.mediaAvailability === undefined
+        ? null
+        : row.mediaAvailability as PhotoMediaAvailability;
+    if ((purge === null) !== (expires === null) || purge !== expires) failed();
     if (
-      (uploaded === null) !== (purge === null) ||
-      (uploaded !== null && purge !== uploaded + 604800000000n)
+      retentionPolicy !== null &&
+      !photoRetentionPolicies.includes(retentionPolicy)
+    ) failed();
+    if (
+      mediaAvailability !== null &&
+      !photoMediaAvailabilities.includes(mediaAvailability)
+    ) failed();
+    if ((retentionPolicy === null) !== (mediaAvailability === null)) failed();
+    if (
+      ["provider_succeeded", "accepted", "compensation_pending", "compensated"]
+        .includes(status) && retentionPolicy === null
+    ) failed();
+    if (mediaAvailability === "purged" ? purged === null : purged !== null) {
+      failed();
+    }
+    if (expires !== null && (starts === null || expires < starts)) failed();
+    if (
+      retentionPolicy === "orphan" &&
+      (uploaded === null || starts !== uploaded ||
+        expires !== uploaded + 2592000000000n)
+    ) failed();
+    if (
+      retentionPolicy === "cleaning_submission" && expires !== null &&
+      (starts === null || expires !== starts + 604800000000n)
+    ) failed();
+    if (
+      ["room_issue", "complaint", "interruption", "sync_conflict"].includes(
+        String(retentionPolicy),
+      ) &&
+      expires !== null &&
+      (starts === null || expires !== starts + 15552000000000n)
     ) failed();
     if (
       ["provider_succeeded", "accepted", "compensation_pending", "compensated"]
@@ -568,6 +643,13 @@ export function projectPhotoUploadOperation(
       itemRevision,
       uploadedAt: row.uploadedAt as string | null,
       purgeAfter: row.purgeAfter as string | null,
+      retentionPolicy,
+      retentionStartsAt: starts === null
+        ? null
+        : row.retentionStartsAt as string,
+      expiresAt: expires === null ? null : row.expiresAt as string,
+      purgedAt: purged === null ? null : row.purgedAt as string,
+      mediaAvailability,
       compensationAllowed: row.compensationAllowed,
     });
   } catch {

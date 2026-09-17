@@ -7,11 +7,16 @@ import type { PhotoProvider } from '../src/modules/photos/google-drive.js';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const identity: PhotoIdentity = { profileId: id(1), sessionId: id(2), role: 'maid', profileStatus: 'active' };
 const now = new Date().toISOString(), purgeAfter = new Date(Date.parse(now) + 604800000).toISOString();
+const retention = { retentionPolicy: 'cleaning_submission', retentionStartsAt: now,
+  expiresAt: purgeAfter, purgedAt: null, mediaAvailability: 'available' };
 const operation = (status = 'reserved', photoItemId: string | null = null) => ({ operationId: id(5), objectId: id(6), attemptId: id(3), targetSlotId: id(4), photoItemId, status,
   leaseVersion: 1, leaseExpiresAt: new Date(Date.now() + 300000).toISOString(), photoId: status === 'accepted' ? id(7) : null,
   photoVersion: status === 'accepted' ? 1 : null, collectionRevision: photoItemId === null ? null : status === 'accepted' ? 1 : 0,
   itemRevision: photoItemId === null ? null : status === 'accepted' ? 1 : 0, uploadedAt: ['reserved', 'reconciliation_pending'].includes(status) ? null : now,
-  purgeAfter: ['reserved', 'reconciliation_pending'].includes(status) ? null : purgeAfter, compensationAllowed: status === 'compensation_pending' });
+  purgeAfter: ['reserved', 'reconciliation_pending'].includes(status) ? null : purgeAfter,
+  ...(['reserved', 'reconciliation_pending'].includes(status)
+    ? { retentionPolicy: null, retentionStartsAt: null, expiresAt: null, purgedAt: null, mediaAvailability: null }
+    : retention), compensationAllowed: status === 'compensation_pending' });
 let bytes: Uint8Array;
 beforeAll(async () => {
   await initializePhotoDecoder(await readFile(new URL(import.meta.resolve('@imagemagick/magick-wasm/magick.wasm'))));
@@ -40,7 +45,7 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
     if (name === 'reserve_photo_provider_identity') { context = { ...context, providerFileId: args.p_provider_file_id, providerFolderId: args.p_provider_folder_id }; data = context; }
     if (name === 'record_admitted_photo_provider_success') data = operation('provider_succeeded', collectionItemId);
     if (name === 'finalize_admitted_photo_upload' || name === 'get_admitted_photo_upload' || name === 'reconcile_admitted_photo_upload') data = operation('accepted', collectionItemId);
-    if (name === 'authorize_photo_read') data = { photoId: id(7), providerFileId: 'provider_file_123', sha256: 'a'.repeat(64), mimeType: 'image/jpeg', sizeBytes: bytes.length, purgeAfter };
+    if (name === 'authorize_photo_read') data = { photoId: id(7), providerFileId: 'provider_file_123', sha256: 'a'.repeat(64), mimeType: 'image/jpeg', sizeBytes: bytes.length, ...retention };
     return { data, error: null };
   } };
   return { calls, provider, service: new PhotoService(db, () => provider, async () => { calls.push('decode'); }) };
@@ -131,11 +136,36 @@ describe('photo application admission/provider/finalize boundary', () => {
   });
   it('safe read headers and slot metadata separate upload-only from original content', async () => {
     const s = setup(name => name === 'get_attempt_photo_slots' ? { data: { attemptId: id(3), assignmentId: id(8), assignmentRevision: 1,
-      slots: [{ slotId: id(4), slotKey: 'tv', required: true, displayOrder: 0, currentRevision: 1, uploadStatus: 'verified', photoId: id(7), providerFileId: 'do_not_expose' }] }, error: null } : undefined);
+      slots: [{ slotId: id(4), slotKey: 'tv', required: true, displayOrder: 0, currentRevision: 1, uploadStatus: 'verified', photoId: id(7), providerFileId: 'do_not_expose', ...retention }] }, error: null } : undefined);
     const res = await s.service.content(new Request('http://local/'), identity, id(7));
     expect(res.headers.get('cache-control')).toBe('no-store'); expect(res.headers.get('x-content-type-options')).toBe('nosniff'); expect(res.headers.has('location')).toBe(false);
     const result = await s.service.slots(new Request('http://local/'), { ...identity, profileStatus: 'upload_only' }, id(3));
     expect(JSON.stringify(result)).not.toContain('do_not_expose'); expect(result).toMatchObject({ slots: [{ photoId: null }] });
+  });
+  it('accepts an empty slot without retention metadata and requires metadata for an existing hidden photo', async () => {
+    const slotBase = { slotId: id(4), slotKey: 'tv', required: true, displayOrder: 0,
+      maxPhotos: 1, collectionRevision: null, photoCount: 0 };
+    const empty = setup(name => name === 'get_attempt_photo_slots' ? { data: {
+      attemptId: id(3), assignmentId: id(8), assignmentRevision: 1,
+      slots: [{ ...slotBase, currentRevision: 0, uploadStatus: 'missing', photoId: null, photos: [] }]
+    }, error: null } : undefined);
+    await expect(empty.service.slots(new Request('http://local/'), identity, id(3)))
+      .resolves.toMatchObject({ slots: [{ uploadStatus: 'missing', photoId: null, photos: [] }] });
+    const hidden = setup(name => name === 'get_attempt_photo_slots' ? { data: {
+      attemptId: id(3), assignmentId: id(8), assignmentRevision: 1,
+      slots: [{ ...slotBase, currentRevision: 1, photoCount: 1, uploadStatus: 'verified', photoId: null,
+        photos: [{ photoItemId: null, itemRevision: 1, displayOrder: 0, photoId: null,
+          photoVersion: 1, uploadStatus: 'verified', ...retention }], ...retention }]
+    }, error: null } : undefined);
+    await expect(hidden.service.slots(new Request('http://local/'), { ...identity, profileStatus: 'upload_only' }, id(3)))
+      .resolves.toMatchObject({ slots: [{ photoId: null, photos: [{ photoId: null, mediaAvailability: 'available' }] }] });
+    const malformed = setup(name => name === 'get_attempt_photo_slots' ? { data: {
+      attemptId: id(3), assignmentId: id(8), assignmentRevision: 1,
+      slots: [{ ...slotBase, currentRevision: 1, photoCount: 1, uploadStatus: 'verified', photoId: null,
+        photos: [{ photoItemId: null, itemRevision: 1, displayOrder: 0, photoId: null, photoVersion: 1, uploadStatus: 'verified' }] }]
+    }, error: null } : undefined);
+    await expect(malformed.service.slots(new Request('http://local/'), identity, id(3)))
+      .rejects.toMatchObject({ code: 'PHOTO_UPLOAD_FAILED' });
   });
   it('four exact route shapes and strict upload query; aliases never accepted', async () => {
     expect(photoRoute('GET', `/v1/attempts/${id(3)}/photo-slots`)?.kind).toBe('slots');

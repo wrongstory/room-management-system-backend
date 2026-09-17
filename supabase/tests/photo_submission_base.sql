@@ -106,6 +106,57 @@ select throws_ok($$insert into private.photo_template_slots(template_version_id,
 select throws_ok($$update public.cleaning_targets set template_snapshot='{}' where id=pg_temp.pid(301)$$,'55000','PHOTO_TARGET_SNAPSHOT_IMMUTABLE','target JSON snapshot cannot be rewritten');
 
 create temp table photo_results(label text primary key,id uuid);
+-- This model-level suite predates the provider workflow. Give every successful
+-- direct model insert the same exact accepted object identity that the real
+-- upload finalizer creates, so submission retention never relies on a
+-- storage-less synthetic photo.
+create function pg_temp.accept_direct_photo_model() returns trigger
+language plpgsql as $$
+declare
+  attempt_row public.cleaning_attempts;
+  v_operation_id uuid := gen_random_uuid();
+  v_object_id uuid := gen_random_uuid();
+begin
+  select * into strict attempt_row from public.cleaning_attempts where id = new.cleaning_attempt_id;
+  insert into private.photo_upload_operations(
+    id, actor_profile_id, command_type, idempotency_key_digest, request_hash,
+    cleaning_attempt_id, cleaning_target_id, assignment_id, assignment_revision,
+    target_photo_slot_id, expected_photo_revision, sha256, mime_type, size_bytes,
+    collection_item_id, expected_item_revision
+  ) values (
+    v_operation_id, attempt_row.maid_profile_id,
+    case when new.collection_item_id is null then 'photo.upload' else 'photo.collection.upload' end,
+    encode(extensions.digest(new.id::text || ':fixture-key', 'sha256'), 'hex'),
+    encode(extensions.digest(new.id::text || ':fixture-request', 'sha256'), 'hex'),
+    new.cleaning_attempt_id, new.cleaning_target_id, attempt_row.assignment_id,
+    attempt_row.assignment_revision, new.target_photo_slot_id, new.version - 1,
+    new.sha256, new.mime_type, new.size_bytes,
+    new.collection_item_id,
+    case when new.collection_item_id is null then null else new.item_revision - 1 end
+  );
+  insert into private.photo_provider_objects(
+    id, operation_id, provider_locator, uploaded_at, purge_after
+  ) values (
+    v_object_id, v_operation_id, 'fixture_' || replace(new.id::text, '-', ''),
+    new.uploaded_at, new.purge_after
+  );
+  insert into private.photo_upload_states(
+    operation_id, cleaning_attempt_id, target_photo_slot_id, actor_profile_id,
+    status, lease_version, revision
+  ) values (
+    v_operation_id, new.cleaning_attempt_id, new.target_photo_slot_id,
+    attempt_row.maid_profile_id, 'provider_succeeded', 0, 1
+  );
+  insert into private.photo_upload_acceptances(operation_id, object_id, photo_version_id)
+  values(v_operation_id, v_object_id, new.id);
+  update private.photo_upload_states
+  set status = 'accepted', revision = revision + 1
+  where private.photo_upload_states.operation_id = v_operation_id;
+  return new;
+end $$;
+create trigger accept_direct_photo_model
+after insert on private.attempt_photo_versions
+for each row execute function pg_temp.accept_direct_photo_model();
 insert into photo_results values('first',private.record_validated_attempt_photo(pg_temp.pid(2),pg_temp.pid(501),pg_temp.slot(1),0,repeat('a',64),'image/jpeg',100,clock_timestamp()-interval '30 minutes'));
 select ok(private.photo_attempt_complete(pg_temp.pid(501),clock_timestamp()),'verified required photo completes model even with optional slot empty');
 -- Explicit corruption drill, not a production path: restore the append-only trigger immediately.
@@ -159,7 +210,7 @@ select is((select count(*) from private.submission_photo_bindings where submissi
 select is((select count(*) from private.attempt_photo_changes where cleaning_attempt_id=pg_temp.pid(501)),3::bigint,'replace/clear history is append-only');
 
 insert into photo_results values('third',private.record_validated_attempt_photo(pg_temp.pid(2),pg_temp.pid(501),pg_temp.slot(1),3,repeat('c',64),'image/jpeg',150,clock_timestamp()-interval '1 minute'));
-select ok(not private.photo_attempt_complete(pg_temp.pid(501),(select purge_after from private.attempt_photo_versions where id=(select id from photo_results where label='third'))),'exact seven-day expiry is incomplete');
+select ok(private.photo_attempt_complete(pg_temp.pid(501),(select purge_after from private.attempt_photo_versions where id=(select id from photo_results where label='third'))),'pending evidence stays complete at the deprecated seven-day clock');
 select throws_ok($$insert into private.attempt_photo_purge_states values((select id from photo_results where label='third'),clock_timestamp())$$,'23514','PHOTO_PURGE_TIME_INVALID','purge cannot be recorded before deadline');
 insert into private.attempt_photo_purge_states select id,purge_after from private.attempt_photo_versions where id=(select id from photo_results where label='third');
 select ok(not private.photo_attempt_complete(pg_temp.pid(501),clock_timestamp()),'purged current version cannot count as evidence');

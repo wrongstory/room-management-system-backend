@@ -126,6 +126,10 @@ const reservationDuringStayMoveMigrationUrl = new URL(
   '../supabase/migrations/20260916210000_reservation_during_stay_room_move.sql',
   import.meta.url
 );
+const photoRetentionV2MigrationUrl = new URL(
+  '../supabase/migrations/20260917090000_photo_retention_v2.sql',
+  import.meta.url
+);
 const photoSlotContractV8MigrationUrl = new URL(
   '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
   import.meta.url
@@ -775,5 +779,23 @@ describe('initial migration contract', () => {
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_pin_sheet_full_resync/);
     expect(sql).not.toMatch(/\b(?:http_post|net\.http_post|oauth|private_key|access_token)\b/i);
+  });
+
+  it('keeps photo retention domain-bound, private, and independent from legacy purge_after', async () => {
+    const sql = await readFile(photoRetentionV2MigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.photo_retention_records');
+    expect(sql).toContain('create table private.photo_retention_links');
+    expect(sql).toContain("'cleaning_submission','room_issue','complaint','interruption','sync_conflict','mixed','orphan'");
+    expect(sql).toContain("'retentionPolicy', 'legacy_upload'");
+    expect(sql).toContain("event.event_type = 'closed'");
+    expect(sql).toContain("interval '168 hours'");
+    expect(sql).toContain("interval '180 days'");
+    expect(sql).toContain("interval '30 days'");
+    expect(sql).toContain('private.photo_media_usable');
+    expect(sql).toContain('create or replace function public.authorize_photo_read');
+    expect(sql).toContain('create or replace function public.claim_due_photo_purges');
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.photo_retention/);
   });
 });

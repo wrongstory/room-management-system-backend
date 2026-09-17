@@ -6,6 +6,13 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
+Deno.test("OpenAPI publishes the approved v0.4.0 candidate version", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  assert(
+    document.info.version === "0.4.0",
+    "approved semantic contract version",
+  );
+});
 Deno.test("room move OpenAPI publishes bounded 409 conflict recovery metadata", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const preview = document.paths[
@@ -90,6 +97,21 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
   assert(
     upload.responses["408"].description.includes("PHOTO_BODY_TIMEOUT"),
     "bounded body timeout is documented",
+  );
+  assert(
+    document.components.schemas.ErrorCode.enum.includes(
+      "PHOTO_RETENTION_DELETE_PREPARED",
+    ) &&
+      upload.responses["409"].description.includes(
+        "PHOTO_RETENTION_DELETE_PREPARED",
+      ) &&
+      document.paths["/v1/attempts/{attemptId}/submissions"].post.responses[
+        "409"
+      ].description.includes("PHOTO_RETENTION_DELETE_PREPARED") &&
+      document.paths["/v1/inspections/{submissionId}/approve"].post.responses[
+        "409"
+      ].description.includes("PHOTO_RETENTION_DELETE_PREPARED"),
+    "prepared purge barrier is one stable 409 across upload, submission and inspection",
   );
   assert(
     schemas.PhotoUploadResponse.allOf.some((value) =>

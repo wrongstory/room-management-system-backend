@@ -64,6 +64,50 @@ const checkoutIncidentTimestampSchema = {
     "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)$",
 } as const;
 
+const photoRetentionRequired = [
+  "retentionPolicy",
+  "retentionStartsAt",
+  "expiresAt",
+  "purgedAt",
+  "mediaAvailability",
+] as const;
+const photoRetentionProperties = {
+  retentionPolicy: {
+    type: "string",
+    enum: [
+      "cleaning_submission",
+      "room_issue",
+      "complaint",
+      "interruption",
+      "sync_conflict",
+      "mixed",
+      "orphan",
+      "legacy_upload",
+    ],
+    description:
+      "서버가 domain binding과 immutable 종료 사건으로 계산한 보존 정책입니다.",
+  },
+  retentionStartsAt: {
+    anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    description:
+      "보존 기산점입니다. 검수 대기 중인 청소 제출 사진은 null입니다.",
+  },
+  expiresAt: {
+    anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    description:
+      "원본 media 만료 시각입니다. null은 아직 최종 검사 결정을 기다리는 보존 상태입니다.",
+  },
+  purgedAt: {
+    anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+  },
+  mediaAvailability: {
+    type: "string",
+    enum: ["available", "purged", "unavailable"],
+    description:
+      "메타데이터는 영구 보존되며 원본 media의 현재 가용성만 별도로 나타냅니다.",
+  },
+} as const;
+
 const complaintErrorResponse = {
   ...errorResponse,
   headers: { "Cache-Control": noStoreHeader },
@@ -103,7 +147,11 @@ function photoOperation(
       "401": errorResponse,
       "403": errorResponse,
       "404": errorResponse,
-      "409": errorResponse,
+      "409": {
+        ...errorResponse,
+        description:
+          "상태·version 충돌. provider 삭제 permit 이후 보호 링크 경합은 PHOTO_RETENTION_DELETE_PREPARED로 반환합니다.",
+      },
       "413": errorResponse,
       "415": errorResponse,
       "429": errorResponse,
@@ -143,7 +191,11 @@ function submissionOperation(
       "401": errorResponse,
       "403": errorResponse,
       "404": errorResponse,
-      "409": errorResponse,
+      "409": {
+        ...errorResponse,
+        description:
+          "제출·검수 상태 충돌. provider 삭제 permit 이후 증빙 binding 경합은 PHOTO_RETENTION_DELETE_PREPARED로 반환합니다.",
+      },
       "500": errorResponse,
     },
   };
@@ -355,7 +407,7 @@ export const openApiDocument = {
   openapi: "3.1.1",
   info: {
     title: "CASTLE THE ART Room Management API",
-    version: "0.2.0",
+    version: "0.4.0",
     description: [
       "Supabase Edge API의 인증·계정·객실·주간 가능일·예약 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
       "",
@@ -4374,6 +4426,7 @@ export const openApiDocument = {
           "displayOrder",
           "required",
           "photoVersion",
+          ...photoRetentionRequired,
         ],
         properties: {
           photoId: { type: "string", format: "uuid" },
@@ -4394,6 +4447,7 @@ export const openApiDocument = {
           displayOrder: { type: "integer", minimum: 0, maximum: 99 },
           required: { type: "boolean" },
           photoVersion: { type: "integer", minimum: 1 },
+          ...photoRetentionProperties,
         },
       },
       SubmissionPhotoSlot: {
@@ -4426,6 +4480,7 @@ export const openApiDocument = {
                 "itemRevision",
                 "displayOrder",
                 "photoVersion",
+                ...photoRetentionRequired,
               ],
               properties: {
                 photoId: { type: "string", format: "uuid" },
@@ -4437,6 +4492,7 @@ export const openApiDocument = {
                 },
                 displayOrder: { type: "integer", minimum: 0, maximum: 9 },
                 photoVersion: { type: "integer", minimum: 1 },
+                ...photoRetentionProperties,
               },
             },
           },
@@ -4608,6 +4664,7 @@ export const openApiDocument = {
                     "failed",
                     "purged",
                     "expired",
+                    "unavailable",
                   ],
                 },
                 photoId: {
@@ -4620,6 +4677,7 @@ export const openApiDocument = {
                   maxItems: 10,
                   items: { $ref: "#/components/schemas/AttemptPhotoItem" },
                 },
+                ...photoRetentionProperties,
               },
             },
           },
@@ -4643,6 +4701,7 @@ export const openApiDocument = {
           "photoId",
           "photoVersion",
           "uploadStatus",
+          ...photoRetentionRequired,
         ],
         properties: {
           photoItemId: {
@@ -4656,8 +4715,16 @@ export const openApiDocument = {
           photoVersion: { type: "integer", minimum: 1 },
           uploadStatus: {
             type: "string",
-            enum: ["verified", "pending", "failed", "purged", "expired"],
+            enum: [
+              "verified",
+              "pending",
+              "failed",
+              "purged",
+              "expired",
+              "unavailable",
+            ],
           },
+          ...photoRetentionProperties,
         },
       },
       PhotoCollectionDeleteResponse: {
@@ -4698,6 +4765,7 @@ export const openApiDocument = {
           "itemRevision",
           "uploadedAt",
           "purgeAfter",
+          ...photoRetentionRequired,
           "compensationAllowed",
         ],
         properties: {
@@ -4746,9 +4814,11 @@ export const openApiDocument = {
           },
           purgeAfter: {
             anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+            deprecated: true,
             description:
-              "uploadedAt+정확한7일. 응답 재전송/교체 시 연장되지 않습니다.",
+              "호환 별칭입니다. 새 클라이언트는 expiresAt을 사용합니다.",
           },
+          ...photoRetentionProperties,
           compensationAllowed: {
             type: "boolean",
             description:
@@ -5272,6 +5342,7 @@ export const openApiDocument = {
           "MAID_ALREADY_IN_PROGRESS",
           "ATTEMPT_COMMAND_FAILED",
           "CAPABILITY_ACCESS_REQUIRED",
+          "PHOTO_RETENTION_DELETE_PREPARED",
           "ACCOUNT_VERSION_CONFLICT",
           "CLEANING_WINDOW_NOT_EXPIRED",
           "ASSIGNMENT_SCHEDULE_INVALID",

@@ -792,7 +792,7 @@ OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. `20260916090000_extra
 현재 main/production source·bundle 반영:
 
 - #25~#29 배정·통보·activation·preview와 #7A/B/C 수행·offline
-- #30/#83~#85/#31 사진·Drive adapter·7일 purge·제출·검수·재청소
+- #30/#83~#85/#31 사진·Drive adapter·legacy purge·제출·검수·재청소. Issue #9 Stage 1의 63번째 candidate는 최종 검사/사건 종결 기반 retention v2, historical submission 보존과 provider DELETE permit barrier를 추가하고 OpenAPI source candidate를 `0.4.0`으로 고정하되 운영 Google/Cron 활성화와 분리한다.
 - #93/#96/#100~#103 수익·정정·지급 결과
 - #108~#112 알림함·typed writer·구독·delivery worker·VAPID/provider HTTP
 - #133 자동 checkout 후 퇴실 미진행 신고·조회·관리자 결정
@@ -844,5 +844,5 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 - 마이그레이션 SQL은 GitHub의 `supabase/migrations/`를 정본으로 사용한다.
 - Free Plan의 두 번째 프로젝트는 최신 논리 dump를 실제로 복원하는 warm recovery copy로 사용한다.
 - 매일 roles·schema·data dump를 만들고 recovery 프로젝트에 복원한 뒤 핵심 행 수·RLS·관리자·객실 seed를 검사한다.
-- DB dump는 Google Drive 사진 파일을 포함하지 않으므로 사진은 업로드 후 7일 자동삭제 정책으로 별도 운영한다.
+- DB dump는 Google Drive 사진 bytes를 포함하지 않는다. metadata·retention ledger는 DB backup 대상이며, provider bytes는 청소 최종 검사+168시간, 사건 해결/종결+180일, true orphan 업로드+30일 정책으로 별도 purge한다.
 - 전체 주기와 복원 명령은 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)에 정의한다.

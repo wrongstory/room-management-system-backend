@@ -1,9 +1,9 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **기존 #83·#84·#85·#31 source와 production bundle 기록 / 2026-09-17 도메인별 retention 후속 source 미구현 / 실제 Drive 자격증명·provider/Cron smoke 미완료**
+> 상태: **기존 #83·#84·#85·#31 production 기록 / Issue #9 Stage 1 도메인별 retention v2 63번째 migration·API source 후보 구현 / 실제 Drive 자격증명·provider/Cron smoke 미완료**
 > 최신 확정 계약은 Google Drive 전용·300KiB 이하·비공개 저장을 유지하되, 청소 제출은 최종 검사 결정+168시간, 이슈·컴플레인·중단/충돌 증빙은 해결·종결+180일, 진짜 orphan은 업로드+30일에 삭제한다. 아래 `uploaded_at + 7 days` 절은 현재 배포된 legacy 구현을 설명하는 기록이며 목표 정책이 아니다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-아래 압축·업로드 흐름과 용량 보호 기준은 유지한다. #84의 Drive HTTP adapter와 업로드·열람 API, #85의 legacy 7일 purge worker source 및 Edge bundle은 production에 반영됐지만 새 retention anchor·권한·projection은 아직 없다. 운영 OAuth·Google provider hosted smoke·주기 실행 활성화도 미완료이므로 실제 사진 저장을 사용 가능으로 표시하지 않는다.
+아래 압축·업로드 흐름과 용량 보호 기준은 유지한다. #84의 Drive HTTP adapter와 업로드·열람 API, #85의 legacy 7일 purge worker source 및 Edge bundle은 production에 반영됐다. Issue #9 Stage 1 candidate는 별도 private retention record/link, 권한 projection, late-binding fence와 기존 purge worker의 authoritative expiry 전환을 추가한다. 아직 source/dev 통합·운영 OAuth·Google provider hosted smoke·주기 실행 활성화는 미완료이므로 production 사용 가능으로 표시하지 않는다.
 
 #83은 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)의 독립 QA·required CI·
 Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다.
@@ -57,7 +57,7 @@ Edge의 업로드/슬롯/상태는 valid Auth+현재 profile+session 후 DB의 e
 4. Drive `generateIds`의 파일 ID와 검증된 부모 폴더를 DB에 먼저 고정한다. timeout/409는 **같은 ID**의 부모/MIME/size/실제 SHA만 확인한다. `appProperties` 자체 hash는 증거가 아니며 provider checksum이 없으면 bounded download+서버SHA로 대조한다.
 5. `uploadedAt`은 검증된 Google immutable `createdTime`이다. create 요청에서 이를 지정하지 않으며 DB operation 생성시각≤createdTime≤관측now를 검증한다. 응답 유실은 같은 metadata의 clock을 재사용하고 기존 DB clock을 변경하지 않는다. KST 폴더 날짜와 생성 날짜가 자정 경합으로 다르면 finalize를 거부하고 known candidate만 fenced compensation으로 처리한다. move/rebind하지 않는다.
 6. finalize 응답 유실 시 accepted 원장을 재조회한다. unknown은 삭제하지 않고 같은 사전발급 identity를 read-only 검증한 후 retire fence를 얻는다. accepted는 계정/session 폐기나 current clear와 무관하게 보상 삭제하지 않는다.
-7. read는 bounded download/해시 확인 후 응답 첫 byte 직전에 session, 실제 수행자/관리자 권한, 정책별 `expiresAt`, `mediaAvailability`를 다시 확인한다. redirect·Range·공개URL·Drive header 전달은 없고 no-store/nosniff/고정 filename만 반환한다.
+7. read는 bounded download/해시 확인 후 응답 첫 byte 직전에 session, **사진을 실제 생성한 performer maid** 또는 관리자 권한, 정책별 `expiresAt`, `mediaAvailability`를 다시 확인한다. current assignment 변경은 과거 performer의 만료 전 접근을 제거하지 않는다. redirect·Range·공개URL·Drive header 전달은 없고 no-store/nosniff/고정 filename만 반환한다.
 
 source/dev 검증을 마친 decoder는 pinned `@imagemagick/magick-wasm@0.0.43`이며 Node는 npm, Edge는 검증된 JS glue+gzip WASM 단일 자산을 사용한다.
 `node scripts/generate-photo-edge.mjs`로 생성하고 `--check`로 원본/생성물 drift를 검사한다. compressed/uncompressed SHA-256과 크기는 스크립트에 고정하며 NOTICE를 함께 복사한다.
@@ -82,7 +82,7 @@ gzip은 `scripts/photo-gzip.mjs`에서 optional header를 금지하고 mtime=0/O
 
 - `photo_upload_operations`: actor/attempt/assignment revision/slot/expected photo revision, 검증 metadata와 scoped key digest/request hash를 고정한다. 원문 key·session·body를 저장하지 않는다.
 - collection upload operation은 같은 원장에 stable item UUID와 expected collection/item revision을 추가하며 `photo.collection.upload`로 ordinary upload와 명확히 분리한다. 개별 삭제는 별도 immutable command receipt가 같은-key replay와 다른-payload 충돌을 구분한다.
-- `photo_provider_objects`: operation마다 서버 UUID 하나. provider locator는 private에만 두고 provider 내 전역 unique로 다른 작업에 재사용하지 못하게 한다. 최초 성공의 `uploaded_at`은 불변이다. 현재 `purge_after`는 legacy 업로드+7일 값이며 후속 migration은 별도 policy/anchor/expiry 원장으로 해석을 확장한다.
+- `photo_provider_objects`: operation마다 서버 UUID 하나. provider locator는 private에만 두고 provider 내 전역 unique로 다른 작업에 재사용하지 못하게 한다. 최초 성공의 `uploaded_at`은 불변이다. `purge_after`는 legacy 이력 호환 컬럼이며 Stage 1 이후 runtime 판단은 `photo_retention_records.expires_at/media_availability`만 사용한다.
 - `photo_upload_states`: current state, worker claim digest, fencing version/expiry. claim identity는 safe projection에 반환하지 않는다.
 - `photo_upload_acceptances`: object와 verified photo version의 영구 1:1 연결. replace/clear/인계/계정 폐기로 지우거나 고아로 재분류하지 않는다.
 - `photo_upload_events`: state/fence 변경의 append-only 운영 이력. payload·provider locator를 복제하지 않는다.
@@ -100,7 +100,7 @@ begin/claim/finalize/user 조회는 최신 role/status·Auth session·attempt ow
 `get_photo_upload`는 사용자 권한 기반 상태이며 `reconcile_photo_upload`는 worker의 내구성 확인·후보 retire command다.
 `settle_photo_compensation`은 검증된 worker의 deleted/not_found 결과만 기록한다. #83 자체에는 실제 DELETE 호출이 없었고,
 #84는 admission-bound wrapper와 Drive adapter를 통해 미수락 candidate의 fenced compensation만 구현했다.
-#85 legacy accepted 7일 purge worker는 candidate 보상과 별도 원장·권한으로 구현되어 production source/bundle에 반영됐다. 최신 도메인별 retention worker는 아직 source 미구현이다. Google hosted purge smoke와 Cron 활성화도 미완료이며, candidate 보상 삭제를 accepted 보존 만료로 간주하지 않는다.
+#85 legacy accepted 7일 purge worker는 candidate 보상과 별도 원장·권한으로 구현되어 production source/bundle에 반영됐다. Issue #9 Stage 1 candidate는 같은 worker를 도메인별 authoritative expiry와 late-binding CAS/fence에 연결한다. Google hosted purge smoke와 Cron 활성화는 미완료이며, candidate 보상 삭제를 accepted 보존 만료로 간주하지 않는다.
 
 worker는 비밀 인증키가 아닌 서버 claim identity의 digest와 fence를 함께 전달한다. 유효 lease를 다른 claimant에게
 공유하지 않고, 같은 claim retry만 동일 expiry를 반환한다. 만료 뒤 새 fence는 이전 지연 callback을 거부한다.
@@ -117,9 +117,18 @@ known object와 accepted 부재를 확인하고 finalize를 차단하는 전이�
 client가 검증했다고 주장한 값으로 채우면 안 되며, 합성 metadata DB 테스트를 실파일 검증 PASS로 표현하지 않는다.
 서버가 관측·검증한 최초 업로드 성공 시각을 retry/DB finalize 시각으로 교체하지 않는다. 이 시각은 true orphan의 30일 anchor가 될 수 있지만, 청소 제출은 최종 검사 결정, 사건 증빙은 해결·종결 시각을 별도 authoritative anchor로 사용한다.
 
-## Legacy current source: 업로드 기준 7일 자동삭제
+## Legacy production source: 업로드 기준 7일 자동삭제
 
-이 절은 새 append-only retention migration 전의 현재 worker 동작이다. 후속 구현은 이미 accepted된 업무 이력을 삭제·backfill로 왜곡하지 않고 도메인별 기산점과 `mediaAvailability`를 추가해야 한다.
+이 절은 새 append-only retention migration 전 production worker 동작의 이력이다. 63번째 source candidate는 이미 accepted된 업무 이력을 삭제·변환하지 않고 도메인별 기산점과 `mediaAvailability`를 별도 원장에 추가한다.
+
+## Stage 1 source candidate: 도메인별 retention v2
+
+- `private.photo_retention_records`는 object별 effective policy, performer, 기산·만료·삭제 시각과 media availability를 보존한다. `photo_retention_links`는 실제 존재하는 cleaning submission/complaint/interruption/offline resolution만 typed wrapper로 연결한다.
+- final inspection 전 cleaning evidence는 `expiresAt=NULL`이고 승인·반려의 immutable `decided_at + 168 hours`에 만료된다. complaint는 immutable closed event, interruption은 admin handover event, sync conflict는 server-owned resolution timestamp를 사용한다.
+- 대응 domain source가 아직 없는 `room_issue`는 schema-ready enum일 뿐 API/hosted 완료가 아니다. unsupported kind/entity와 generic caller는 fail-closed하며 helper EXECUTE는 service role까지 revoke한다.
+- accepted지만 아직 domain link가 없는 true orphan만 provider `uploadedAt + 30 days`다. claim 직전 authoritative retention을 다시 계산하고 provider DELETE 직전 exact object/fence/claim/expiry permit을 DB에 영구 기록한다. link가 먼저 공통 barrier를 획득하면 claim을 무효화하며, permit이 먼저 확정되면 이후 link는 fail-closed한다. uncertain DELETE 뒤에도 permit barrier를 보존한다. unchanged clock은 claim/retry/operator-blocked 상태를 보존하고 blocked를 자동 resume하지 않는다.
+- submission evidence 수명은 mutable current pointer와 분리한다. 과거 approved/rejected submission도 자신의 `decidedAt + 168 hours`까지 active link이며, superseded됐지만 final decision이 없는 submission은 임의 orphan clock으로 축소하지 않고 `expiresAt=NULL`로 보존한다.
+- metadata는 purge 뒤에도 남고 `mediaAvailability=purged`가 된다. 이미 purged evidence를 available로 되살리지 않는다.
 
 - 삭제 기준은 날짜 폴더명이 아니라 각 파일의 `uploaded_at + 7일`이다.
 - 정리 작업은 최소 1시간마다 `purge_after <= now()`이며 `purged_at is null`인 행을 제한 수량으로 가져온다.
