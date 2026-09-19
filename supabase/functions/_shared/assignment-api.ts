@@ -20,6 +20,7 @@ interface AssignmentRow {
   notified_at: string | null;
   notified_room_id_snapshot: string | null;
   notified_room_number_snapshot: string | null;
+  change_reason_code: string | null;
   ended_at: string | null;
   created_at: string;
 }
@@ -27,8 +28,35 @@ interface AssignmentRow {
 interface TargetRow {
   id: string;
   room_id: string;
+  cleaning_kind: string;
+  original_service_date: string;
+  effective_service_date: string;
+  status: string;
   assignment_version: number;
+  room_type_snapshot: unknown;
+  fee_snapshot: number;
+  template_snapshot: unknown;
   rooms?: { room_number: string } | Array<{ room_number: string }> | null;
+}
+
+interface TargetScheduleRow {
+  cleaning_target_id: string;
+  revision: number;
+  effective_service_date: string;
+  reason_code: string;
+}
+
+interface AttemptRow {
+  id: string;
+  assignment_id: string;
+  attempt_number: number;
+  status: string;
+}
+
+interface SubmissionRow {
+  cleaning_attempt_id: string;
+  version: number;
+  status: string;
 }
 
 interface MaidRow {
@@ -53,6 +81,21 @@ export interface AssignmentProjection {
   notifiedAt: string | null;
   endedAt: string | null;
   createdAt: string;
+}
+
+export interface AssignmentCardProjection extends AssignmentProjection {
+  cleaningKind: string;
+  roomTypeCode: string | null;
+  roomTypeName: string | null;
+  elevatorZone: string | null;
+  feeSnapshot: number;
+  durationMinutes: number | null;
+  originalServiceDate: string;
+  rolloverCount: number;
+  rolloverReason: string | null;
+  targetStatus: string | null;
+  attemptStatus: string | null;
+  submissionStatus: string | null;
 }
 
 // 사용자가 입력한 상세 사유는 감사·알림으로 복제하지 않는다.
@@ -446,6 +489,7 @@ const assignmentColumns = [
   "notified_at",
   "notified_room_id_snapshot",
   "notified_room_number_snapshot",
+  "change_reason_code",
   "ended_at",
   "created_at",
 ].join(",");
@@ -846,48 +890,96 @@ function roomNumber(target: TargetRow): string {
   return room.room_number;
 }
 
+function snapshotObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw assignmentDatabaseError(null);
+  }
+  return value as Record<string, unknown>;
+}
+
+function snapshotText(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function assignmentCardSnapshot(target: TargetRow) {
+  const roomType = snapshotObject(target.room_type_snapshot);
+  const template = snapshotObject(target.template_snapshot);
+  const duration = template.durationMinutes;
+  if (
+    !Number.isSafeInteger(target.fee_snapshot) || target.fee_snapshot < 0 ||
+    (duration !== null && duration !== undefined &&
+      (!Number.isSafeInteger(duration) || (duration as number) <= 0))
+  ) {
+    throw assignmentDatabaseError(null);
+  }
+  return {
+    cleaningKind: target.cleaning_kind,
+    roomTypeCode: snapshotText(roomType.code),
+    roomTypeName: snapshotText(roomType.name),
+    elevatorZone: snapshotText(roomType.elevatorZone),
+    feeSnapshot: target.fee_snapshot,
+    durationMinutes: duration === null || duration === undefined
+      ? null
+      : duration as number,
+    originalServiceDate: dateValue(
+      target.original_service_date,
+      "originalServiceDate",
+    ),
+  };
+}
+
+function dateDistance(from: string, to: string): number {
+  const milliseconds = Date.parse(`${to}T00:00:00Z`) -
+    Date.parse(`${from}T00:00:00Z`);
+  const days = milliseconds / 86_400_000;
+  if (!Number.isSafeInteger(days) || days < 0) {
+    throw assignmentDatabaseError(null);
+  }
+  return days;
+}
+
 async function hydrateAssignments(
   clients: EdgeClients,
   rows: AssignmentRow[],
   actor: EdgeActor,
-): Promise<AssignmentProjection[]> {
+): Promise<AssignmentCardProjection[]> {
   if (rows.length === 0) return [];
-  if (actor.role === "maid") {
-    // 통보 당시 snapshot만 공개한다. 과거 담당의 조회로 현재 target/새 담당을
-    // hydrate하지 않으며, 복원 근거가 없는 과거 객실 정보는 null로 남긴다.
-    return rows.map((row) => ({
-      assignmentId: row.id,
-      cleaningTargetId: row.cleaning_target_id,
-      roomId: row.notified_room_id_snapshot ?? null,
-      roomNumber: row.notified_room_number_snapshot ?? null,
-      maidProfileId: row.maid_profile_id,
-      maidDisplayName: actor.displayName,
-      serviceDate: row.service_date,
-      sequenceNumber: row.sequence_number,
-      revision: row.revision,
-      isCurrent: row.is_current,
-      targetAssignmentVersion: row.revision,
-      availableFrom: row.available_from_snapshot,
-      dueAt: row.due_at_snapshot,
-      notifiedAt: row.notified_at,
-      endedAt: row.ended_at,
-      createdAt: row.created_at,
-    }));
-  }
   const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
   const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
-  const [targetResult, maidResult] = await Promise.all([
-    clients.admin
-      .from("cleaning_targets")
-      .select("id,room_id,assignment_version,rooms!inner(room_number)")
-      .in("id", targetIds),
-    clients.admin
-      .from("profiles")
-      .select("id,display_name")
-      .in("id", maidIds),
-  ]);
-  if (targetResult.error || maidResult.error) {
-    throw assignmentDatabaseError(targetResult.error ?? maidResult.error);
+  const assignmentIds = rows.map((row) => row.id);
+  const [targetResult, maidResult, attemptResult, scheduleResult] =
+    await Promise.all([
+      clients.admin
+        .from("cleaning_targets")
+        .select(
+          "id,room_id,cleaning_kind,original_service_date,effective_service_date,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
+        )
+        .in("id", targetIds),
+      clients.admin
+        .from("profiles")
+        .select("id,display_name")
+        .in("id", maidIds),
+      clients.admin
+        .from("cleaning_attempts")
+        .select("id,assignment_id,attempt_number,status")
+        .in("assignment_id", assignmentIds)
+        .order("attempt_number", { ascending: false }),
+      clients.admin
+        .from("cleaning_target_schedule_revisions")
+        .select(
+          "cleaning_target_id,revision,effective_service_date,reason_code",
+        )
+        .in("cleaning_target_id", targetIds)
+        .order("revision", { ascending: false }),
+    ]);
+  if (
+    targetResult.error || maidResult.error || attemptResult.error ||
+    scheduleResult.error
+  ) {
+    throw assignmentDatabaseError(
+      targetResult.error ?? maidResult.error ?? attemptResult.error ??
+        scheduleResult.error,
+    );
   }
   const targets = new Map(
     ((targetResult.data ?? []) as unknown as TargetRow[]).map((row) => [
@@ -898,6 +990,30 @@ async function hydrateAssignments(
   const maids = new Map(
     ((maidResult.data ?? []) as MaidRow[]).map((row) => [row.id, row]),
   );
+  const attempts = new Map<string, AttemptRow>();
+  for (const attempt of (attemptResult.data ?? []) as AttemptRow[]) {
+    if (!attempts.has(attempt.assignment_id)) {
+      attempts.set(attempt.assignment_id, attempt);
+    }
+  }
+  const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
+  const submissionResult = attemptIds.length === 0
+    ? { data: [] as SubmissionRow[], error: null }
+    : await clients.admin
+      .from("cleaning_submissions")
+      .select("cleaning_attempt_id,version,status")
+      .in("cleaning_attempt_id", attemptIds)
+      .order("version", { ascending: false });
+  if (submissionResult.error) {
+    throw assignmentDatabaseError(submissionResult.error);
+  }
+  const submissions = new Map<string, SubmissionRow>();
+  for (const submission of (submissionResult.data ?? []) as SubmissionRow[]) {
+    if (!submissions.has(submission.cleaning_attempt_id)) {
+      submissions.set(submission.cleaning_attempt_id, submission);
+    }
+  }
+  const schedules = (scheduleResult.data ?? []) as TargetScheduleRow[];
 
   return rows.map((row) => {
     const target = targets.get(row.cleaning_target_id);
@@ -909,18 +1025,51 @@ async function hydrateAssignments(
         "청소 배정 정보를 처리하지 못했습니다.",
       );
     }
+    const attempt = attempts.get(row.id);
+    const submission = attempt ? submissions.get(attempt.id) : undefined;
+    const card = assignmentCardSnapshot(target);
+    const rolloverCount = dateDistance(
+      card.originalServiceDate,
+      row.service_date,
+    );
+    const schedule = schedules.find((candidate) =>
+      candidate.cleaning_target_id === row.cleaning_target_id &&
+      candidate.effective_service_date === row.service_date &&
+      candidate.revision <= row.revision
+    );
+    const targetMatchesRevision = row.is_current &&
+      target.assignment_version === row.revision &&
+      target.effective_service_date === row.service_date;
     return {
       assignmentId: row.id,
       cleaningTargetId: row.cleaning_target_id,
-      roomId: target.room_id,
-      roomNumber: roomNumber(target),
+      roomId: actor.role === "maid"
+        ? row.notified_room_id_snapshot ?? null
+        : target.room_id,
+      roomNumber: actor.role === "maid"
+        ? row.notified_room_number_snapshot ?? null
+        : roomNumber(target),
       maidProfileId: row.maid_profile_id,
-      maidDisplayName: maid.display_name,
+      maidDisplayName: actor.role === "maid"
+        ? actor.displayName
+        : maid.display_name,
       serviceDate: row.service_date,
       sequenceNumber: row.sequence_number,
       revision: row.revision,
       isCurrent: row.is_current,
-      targetAssignmentVersion: target.assignment_version,
+      targetAssignmentVersion: actor.role === "maid"
+        ? row.revision
+        : target.assignment_version,
+      ...card,
+      rolloverCount,
+      rolloverReason: rolloverCount === 0
+        ? null
+        : schedule?.reason_code ?? row.change_reason_code ?? null,
+      targetStatus: actor.role === "admin" || targetMatchesRevision
+        ? target.status
+        : null,
+      attemptStatus: attempt?.status ?? null,
+      submissionStatus: submission?.status ?? null,
       availableFrom: row.available_from_snapshot,
       dueAt: row.due_at_snapshot,
       notifiedAt: row.notified_at,

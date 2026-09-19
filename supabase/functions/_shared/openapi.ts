@@ -2224,7 +2224,7 @@ export const openApiDocument = {
         operationId: "listAssignments",
         summary: "서비스 날짜별 청소 배정 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 본인에게 실제 통보된 revision만 조회합니다. includeHistory=false가 기본이며 현재 통보 배정만 반환합니다. true이면 본인의 과거 실제 통보된 superseded revision도 포함하지만 미통보 draft와 다른 메이드의 revision은 숨깁니다. developer는 업무 배정을 조회할 수 없습니다.",
+          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 본인에게 실제 통보된 revision만 조회합니다. includeHistory=false가 기본이며 현재 통보 배정만 반환합니다. true이면 본인의 과거 실제 통보된 superseded revision도 포함하지만 미통보 draft와 다른 메이드의 revision은 숨깁니다. 카드에는 target 생성 당시 종류·객실 타입·구역·요금·nullable 예상시간과 assignment별 이월·attempt·submission 상태를 함께 반환합니다. developer는 업무 배정을 조회할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -2265,7 +2265,7 @@ export const openApiDocument = {
         operationId: "getAssignmentHistory",
         summary: "청소 대상의 배정 revision 이력 조회",
         description:
-          "active business admin은 전체 revision을 조회하고 active maid는 본인에게 실제 통보된 revision만 조회합니다. 과거 superseded revision도 통보 사실이 있으면 읽기 전용으로 보존합니다. 한 번 통보받은 target이라도 미통보 draft·다른 메이드의 revision·현재 target version은 공개하지 않습니다. 본인의 실제 통보 이력이 없으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
+          "active business admin은 전체 revision을 조회하고 active maid는 본인에게 실제 통보된 revision만 조회합니다. 과거 superseded revision도 통보 사실이 있으면 읽기 전용으로 보존합니다. 한 번 통보받은 target이라도 미통보 draft·다른 메이드의 revision·현재 target version은 공개하지 않습니다. 객실 ID/번호는 당시 notified snapshot이고 타입·요금·template은 target 생성 snapshot이므로 현재 master-data로 덮지 않습니다. 본인의 실제 통보 이력이 없으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -8053,6 +8053,136 @@ export const openApiDocument = {
         description:
           "배정 당시 서비스 날짜·접근 가능 시각·마감 시각을 보존하는 revision projection입니다. 전화번호, 고객명, PIN, provider 식별자는 포함하지 않습니다.",
       },
+      AssignmentCard: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "assignmentId",
+          "cleaningTargetId",
+          "roomId",
+          "roomNumber",
+          "maidProfileId",
+          "maidDisplayName",
+          "serviceDate",
+          "sequenceNumber",
+          "revision",
+          "isCurrent",
+          "targetAssignmentVersion",
+          "cleaningKind",
+          "roomTypeCode",
+          "roomTypeName",
+          "elevatorZone",
+          "feeSnapshot",
+          "durationMinutes",
+          "originalServiceDate",
+          "rolloverCount",
+          "rolloverReason",
+          "targetStatus",
+          "attemptStatus",
+          "submissionStatus",
+          "availableFrom",
+          "dueAt",
+          "notifiedAt",
+          "endedAt",
+          "createdAt",
+        ],
+        properties: {
+          assignmentId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "maid는 통보 당시 객실 snapshot입니다. 복원 근거가 없는 과거 이력은 null이며 현재 target 객실로 대체하지 않습니다. admin은 현재 객실 ID입니다.",
+          },
+          roomNumber: {
+            type: ["string", "null"],
+            description:
+              "maid는 통보 당시 객실 번호이며 과거 snapshot 부재 시 null입니다. admin은 현재 객실 번호입니다.",
+          },
+          maidProfileId: { type: "string", format: "uuid" },
+          maidDisplayName: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          sequenceNumber: { type: "integer", minimum: 1 },
+          revision: { type: "integer", minimum: 1 },
+          isCurrent: { type: "boolean" },
+          targetAssignmentVersion: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "admin은 현재 target CAS 값입니다. maid는 본인 통보 revision에 고정된 값이며 과거 조회는 mutation 권한이 아닙니다.",
+          },
+          cleaningKind: {
+            type: "string",
+            enum: ["checkout", "stayover", "additional", "reclean"],
+          },
+          roomTypeCode: { type: ["string", "null"] },
+          roomTypeName: { type: ["string", "null"] },
+          elevatorZone: { type: ["string", "null"] },
+          feeSnapshot: { type: "integer", minimum: 0 },
+          durationMinutes: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description:
+              "target 생성 당시 template snapshot 값입니다. 예상시간 미확정 checkout은 null이며 임의 기본값을 넣지 않습니다.",
+          },
+          originalServiceDate: { type: "string", format: "date" },
+          rolloverCount: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "assignment의 serviceDate와 target originalServiceDate 사이의 immutable 업무일 이동 횟수입니다.",
+          },
+          rolloverReason: {
+            type: ["string", "null"],
+            description:
+              "이월된 revision의 schedule reason code입니다. 이월이 아니거나 legacy 근거가 없으면 null입니다.",
+          },
+          targetStatus: {
+            type: ["string", "null"],
+            enum: [
+              "unassigned",
+              "draft_assigned",
+              "notified",
+              "in_progress",
+              "upload_pending",
+              "inspection_pending",
+              "approved",
+              "rejected",
+              "cancelled",
+              null,
+            ],
+            description:
+              "admin은 현재 target 상태를 봅니다. maid 과거 revision은 새 계획을 노출하지 않도록 null입니다.",
+          },
+          attemptStatus: {
+            type: ["string", "null"],
+            enum: [
+              "scheduled",
+              "in_progress",
+              "field_completed",
+              "upload_pending",
+              "submitted",
+              "approved",
+              "rejected",
+              "interrupted",
+              "superseded",
+              null,
+            ],
+          },
+          submissionStatus: {
+            type: ["string", "null"],
+            enum: ["submitted", "superseded", "approved", "rejected", null],
+          },
+          availableFrom: { type: ["string", "null"], format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+          notifiedAt: { type: ["string", "null"], format: "date-time" },
+          endedAt: { type: ["string", "null"], format: "date-time" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+        description:
+          "배정 카드용 additive projection입니다. 객실·타입·요금·template은 업무 snapshot을 사용하고 PIN·고객 PII·사진 locator를 포함하지 않습니다.",
+      },
       AssignmentDraftRequest: {
         type: "object",
         additionalProperties: false,
@@ -11338,7 +11468,7 @@ function assignmentListResponse(): Record<string, unknown> {
           properties: {
             assignments: {
               type: "array",
-              items: { $ref: "#/components/schemas/Assignment" },
+              items: { $ref: "#/components/schemas/AssignmentCard" },
             },
           },
         },

@@ -323,8 +323,8 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [x] | `GET /v1/assignments?serviceDate=...` | maid / admin | ✅ | ❌ | ✅ | ✅ | ⚠️ | production source 배포, hosted role read smoke 미확인 |
-| [x] | `GET /v1/assignments/{cleaningTargetId}/history` | maid / admin | ✅ | ❌ | ✅ | ✅ | ⚠️ | maid self revision 경계의 hosted smoke 미확인 |
+| [x] | `GET /v1/assignments?serviceDate=...` | maid / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | #213 카드 snapshot 계약 추가; production hosted card read smoke 미확인 |
+| [x] | `GET /v1/assignments/{cleaningTargetId}/history` | maid / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | #213 과거 notified 객실 snapshot 보존; production hosted smoke 미확인 |
 | [x] | `POST /v1/assignments/drafts` | admin | ✅ | ❌ | ✅ | ✅ | ⚠️ | positive mutation fixture 미확인; notification/outbox/attempt 없음 |
 
 ### #25 source gate
@@ -334,6 +334,7 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 - [x] target row lock + assignmentVersion CAS + scoped request hash/idempotency 구현
 - [x] admin write, maid own read, developer/direct DML 차단 구현
 - [x] OpenAPI 3 operation·한글 연동 계약 반영
+- [x] #213 카드용 immutable target snapshot·이월·attempt/submission projection 및 Fastify parity
 - [x] local Edge/application/DB/concurrency 전체 검증
 - [x] feature PR 독립 보안/API 리뷰 P0/P1=0
 - [x] feature PR `dev` 병합 (`dev@c7e0b03` 기준)
