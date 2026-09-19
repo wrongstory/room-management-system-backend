@@ -107,8 +107,8 @@ select is(
     '26000000-0000-4000-8000-000000000001',
     'weekly_work_history_projection'
   ) ->> 'currentMigration',
-  'room_type_catalog',
-  'database status exposes migration 67 when migration 68 is absent'
+  'cleaning_history_projection',
+  'database status exposes migration 68 when migration 69 is absent'
 );
 
 select is(
@@ -117,7 +117,7 @@ select is(
     'weekly_work_history_projection'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 67 behind source migration 68'
+  'database status reports migration 68 behind source migration 69'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)
