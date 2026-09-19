@@ -812,6 +812,43 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
         if (name === "get_room_operational_projection") {
           return { data: [roomRow], error: null };
         }
+        if (name === "list_room_operation_blocks") {
+          return {
+            data: {
+              roomId,
+              roomStateVersion: 3,
+              evaluatedAt: "2026-09-20T00:00:00Z",
+              items: [{
+                id: blockId,
+                reasonCode: "MAINTENANCE",
+                startsAt: "2026-09-19T00:00:00Z",
+                endsAt: null,
+                status: "active",
+                createdAt: "2026-09-19T00:00:00Z",
+              }],
+            },
+            error: null,
+          };
+        }
+        if (name === "list_room_issues") {
+          return {
+            data: {
+              roomId,
+              roomStateVersion: 3,
+              evaluatedAt: "2026-09-20T00:00:00Z",
+              items: [{
+                id: issueId,
+                category: "FACILITY",
+                severity: "warning",
+                blocksGuestAssignment: true,
+                description: null,
+                status: "open",
+                reportedAt: "2026-09-19T00:00:00Z",
+              }],
+            },
+            error: null,
+          };
+        }
         if (name === "change_room_master_data") {
           return { data: null, error: null };
         }
@@ -1446,9 +1483,7 @@ Deno.test("complaint exact routes preserve admin commands, maid response, and bo
 Deno.test("Room GET detail route rejects every mutation-shaped alias", async () => {
   const forbiddenGetPaths = [
     `/v1/rooms/${roomId}/master-data`,
-    `/v1/rooms/${roomId}/operation-blocks`,
     `/v1/rooms/${roomId}/candles`,
-    `/v1/rooms/${roomId}/issues`,
     `/v1/rooms/${roomId}/pin-sync-events`,
     `/v1/rooms/${roomId}/operation-blocks/${blockId}/release`,
     `/v1/rooms/${roomId}/issues/${issueId}/resolve`,
@@ -1531,6 +1566,16 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
     { method: "GET", path: "/v1/room-types", status: 200 },
     { method: "GET", path: "/v1/rooms", status: 200 },
     { method: "GET", path: `/v1/rooms/${roomId}`, status: 200 },
+    {
+      method: "GET",
+      path: `/v1/rooms/${roomId}/operation-blocks?status=actionable`,
+      status: 200,
+    },
+    {
+      method: "GET",
+      path: `/v1/rooms/${roomId}/issues?status=open`,
+      status: 200,
+    },
     {
       method: "PATCH",
       path: `/v1/rooms/${roomId}/master-data`,

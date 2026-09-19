@@ -41,6 +41,12 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 `GET /v1/work-history`는 한 KST 업무 주의 `current availability available=true`, 모든 immutable notified assignment revision의 `service_date`, `cleaning_attempts.field_completed_at` KST 날짜를 별도 CTE에서 집계한다. 세 축은 서로 대체하지 않으며 같은 메이드·날짜의 여러 작업은 각 축에서 하루로 dedupe한다. 재배정·종료된 notified revision도 과거 통보 사실로 남고, `field_completed_at`이 없는 scheduled/in-progress attempt는 실제 완료가 아니다. admin은 전체 또는 maid 필터, maid는 본인만 조회하며, summary는 cursor page가 아니라 전체 필터 범위에 고정된다. 메이드 표시명은 현재 profile label이고 과거 snapshot으로 해석하지 않는다.
 
+### #210 객실 운영 차단·이슈 조회
+
+70번째 append-only `room_operations_read`는 기존 `room_operation_blocks`, `room_issues`, `rooms`만 읽는 service-role app-owned projection RPC 두 개를 추가한다. 두 조회는 active/password-complete business admin의 live session을 DB에서 다시 검증하고, 한 DB 평가 시각의 `roomId`, 현재 `roomStateVersion`, `evaluatedAt`, 안전한 item 목록을 반환한다. raw table, PIN, guest PII, audit before/after state는 반환하지 않는다.
+
+`actionable` 운영 차단은 `released_at is null`인 모든 항목이다. 미래 시작은 `scheduled`, 평가 시각에 유효하면 `active`, 종료 시각이 지났지만 명시적으로 release되지 않았으면 `expired`로 분류한다. 시간이 지났다는 이유로 원장을 숨기거나 자동 해제하지 않는다. 이슈 조회는 `status=open`만 반환한다. 프런트는 조회된 block/issue ID와 같은 envelope의 최신 `roomStateVersion`을 기존 release/resolve mutation의 `expectedRoomVersion`으로 사용하고, version conflict에서는 다시 조회한다.
+
 ### #184 현재 시각 객실 projection
 
 `get_room_operational_projection`은 호출마다 서버 시각을 한 번만 캡처해 모든 행에 `evaluated_at`으로 반환한다. Fastify와 Edge adapter는 이를 RFC 3339 `evaluatedAt`으로 동일하게 공개하며, 예약 일정 축은 `reservationPhase=none|upcoming|current`로 반환한다. `current`는 반개구간 `checkInAt <= evaluatedAt < checkOutAt`이고, 미래 active 예약은 `upcoming`이다.

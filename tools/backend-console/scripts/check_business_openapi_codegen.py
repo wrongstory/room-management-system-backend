@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 125:
-        raise RuntimeError("전체 source OpenAPI operation 수가 125가 아닙니다.")
+    if operation_count != 127:
+        raise RuntimeError("전체 source OpenAPI operation 수가 127이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     legacy_list = schemas.get("ReservationListEnvelope", {})
     range_page = schemas.get("ReservationRangePageEnvelope", {})

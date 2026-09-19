@@ -154,8 +154,8 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 125,
-    "combined candidate contract 117/125",
+        ).length === 127,
+    "combined candidate contract 117/127",
   );
 });
 
