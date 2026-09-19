@@ -520,6 +520,7 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     "11:00",
   );
   const boundaryDue = kstTime(boundaryDate, "15:30");
+  await ensureAvailability(maidProfileId, boundaryDate);
   const boundaryFixture = await fixture({
     nextReservation: { checkInAt: boundaryCheckInAt, checkOutAt: boundaryCheckOutAt },
   });
