@@ -56,6 +56,58 @@ select pg_temp.make_history_attempt(2,(select id from public.rooms order by room
 select pg_temp.make_history_attempt(3,(select id from public.rooms order by room_number offset 2 limit 1),pg_temp.hid(3),'2026-09-19 12:00:00+09');
 select pg_temp.make_history_attempt(4,(select id from public.rooms order by room_number offset 3 limit 1),pg_temp.hid(2),'2026-09-20 00:00:00+09');
 
+-- Projection-only media fixtures. Replica mode avoids exercising upload/submission
+-- commands here; their own suites cover those workflows. The first binding has a
+-- retention-v2 row whose NULL expiry is meaningful while the second represents a
+-- legacy binding with no retention row and therefore uses purge_after.
+set local session_replication_role = replica;
+insert into public.cleaning_submissions(
+  id,cleaning_attempt_id,client_submission_id,version,status,photo_manifest,
+  issue_snapshot,candle_count,submitted_by,submitted_at
+) values
+  (pg_temp.hid(4001),pg_temp.hid(3001),pg_temp.hid(4101),1,'submitted','{}','[]',0,pg_temp.hid(2),'2026-09-13 00:05:00+09'),
+  (pg_temp.hid(4002),pg_temp.hid(3002),pg_temp.hid(4102),1,'submitted','{}','[]',0,pg_temp.hid(2),'2026-09-20 00:04:59+09');
+insert into private.attempt_photo_versions(
+  id,cleaning_attempt_id,cleaning_target_id,target_photo_slot_id,version,
+  validation_status,sha256,mime_type,size_bytes,uploaded_at,purge_after
+) values
+  (pg_temp.hid(5201),pg_temp.hid(3001),pg_temp.hid(1001),pg_temp.hid(5101),1,
+    'verified',repeat('a',64),'image/jpeg',100,'2026-09-13 00:03:00+09','2026-09-20 00:03:00+09'),
+  (pg_temp.hid(5202),pg_temp.hid(3002),pg_temp.hid(1002),pg_temp.hid(5102),1,
+    'verified',repeat('b',64),'image/jpeg',100,'2026-09-20 00:02:00+09','2026-09-27 00:02:00+09');
+insert into private.submission_photo_bindings(
+  submission_id,cleaning_attempt_id,cleaning_target_id,target_photo_slot_id,photo_version_id,photo_version
+) values
+  (pg_temp.hid(4001),pg_temp.hid(3001),pg_temp.hid(1001),pg_temp.hid(5101),pg_temp.hid(5201),1),
+  (pg_temp.hid(4002),pg_temp.hid(3002),pg_temp.hid(1002),pg_temp.hid(5102),pg_temp.hid(5202),1);
+insert into private.submission_photo_binding_sets(submission_id,cleaning_attempt_id,photo_count,sealed_at) values
+  (pg_temp.hid(4001),pg_temp.hid(3001),1,'2026-09-13 00:05:00+09'),
+  (pg_temp.hid(4002),pg_temp.hid(3002),1,'2026-09-20 00:04:59+09');
+insert into private.submission_current_pointers(cleaning_attempt_id,submission_id,revision) values
+  (pg_temp.hid(3001),pg_temp.hid(4001),1),(pg_temp.hid(3002),pg_temp.hid(4002),1);
+insert into private.photo_upload_operations(
+  id,actor_profile_id,idempotency_key_digest,request_hash,cleaning_attempt_id,
+  cleaning_target_id,assignment_id,assignment_revision,target_photo_slot_id,
+  expected_photo_revision,sha256,mime_type,size_bytes
+) values(
+  pg_temp.hid(5301),pg_temp.hid(2),repeat('c',64),repeat('d',64),pg_temp.hid(3001),
+  pg_temp.hid(1001),pg_temp.hid(2001),1,pg_temp.hid(5101),0,repeat('a',64),'image/jpeg',100
+);
+insert into private.photo_provider_objects(id,operation_id,provider_locator,uploaded_at,purge_after) values(
+  pg_temp.hid(5401),pg_temp.hid(5301),'history-object-001','2026-09-13 00:03:00+09','2026-09-20 00:03:00+09'
+);
+insert into private.photo_upload_acceptances(operation_id,object_id,photo_version_id,accepted_at) values(
+  pg_temp.hid(5301),pg_temp.hid(5401),pg_temp.hid(5201),'2026-09-13 00:04:00+09'
+);
+insert into private.photo_retention_records(
+  object_id,operation_id,photo_version_id,performer_maid_profile_id,effective_policy_kind,
+  retention_starts_at,expires_at,purged_at,media_availability
+) values(
+  pg_temp.hid(5401),pg_temp.hid(5301),pg_temp.hid(5201),pg_temp.hid(2),'cleaning_submission',
+  null,null,null,'available'
+);
+set local session_replication_role = origin;
+
 select is(
   jsonb_array_length(public.list_cleaning_history(pg_temp.hid(1),pg_temp.hid(201),'2026-09-19',null,null,100,null,null)->'items'),
   3,
@@ -88,6 +140,24 @@ select is(
   )->'items'),
   1,
   'admin query searches the immutable room snapshot'
+);
+select is(
+  (select item ->> 'expiresAt'
+   from jsonb_array_elements(public.list_cleaning_history(
+     pg_temp.hid(1),pg_temp.hid(201),'2026-09-19',null,null,100,null,null
+   )->'items') item
+   where item ->> 'attemptId' = pg_temp.hid(3001)::text),
+  null::text,
+  'retention-v2 row preserves meaningful NULL expiry instead of using legacy purge_after'
+);
+select is(
+  (select (item ->> 'expiresAt')::timestamptz
+   from jsonb_array_elements(public.list_cleaning_history(
+     pg_temp.hid(1),pg_temp.hid(201),'2026-09-19',null,null,100,null,null
+   )->'items') item
+   where item ->> 'attemptId' = pg_temp.hid(3002)::text),
+  '2026-09-27 00:02:00+09'::timestamptz,
+  'legacy binding without a retention row falls back to immutable purge_after'
 );
 select ok(
   (public.list_cleaning_history(pg_temp.hid(1),pg_temp.hid(201),'2026-09-19',null,null,1,null,null)->>'nextCursor') is not null,

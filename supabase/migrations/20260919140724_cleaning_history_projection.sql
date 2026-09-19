@@ -155,7 +155,10 @@ begin
           case when purge.photo_version_id is not null then 'purged'
                when pv.purge_after > clock_timestamp() then 'available'
                else 'unavailable' end) = 'purged')::integer as purged_count,
-        min(coalesce(r.expires_at, pv.purge_after)) as expires_at
+        case
+          when count(*) filter (where r.object_id is not null and r.expires_at is null) > 0 then null
+          else min(case when r.object_id is null then pv.purge_after else r.expires_at end)
+        end as expires_at
       from private.submission_photo_bindings b
       join private.attempt_photo_versions pv on pv.id = b.photo_version_id
       left join private.photo_upload_acceptances acceptance on acceptance.photo_version_id = pv.id

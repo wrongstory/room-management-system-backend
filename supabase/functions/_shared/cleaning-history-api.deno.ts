@@ -83,6 +83,10 @@ Deno.test("cleaning history Edge adapter binds KST date, session, projection and
     Array.isArray(result.items) && result.items.length === 1,
     "one safe item",
   );
+  assert(
+    (result.items as Record<string, unknown>[])[0].expiresAt === null,
+    "a meaningful null retention expiry remains null",
+  );
   assert(typeof result.nextCursor === "string", "opaque cursor");
   assert(
     JSON.stringify(result).includes("스탠다드") &&
