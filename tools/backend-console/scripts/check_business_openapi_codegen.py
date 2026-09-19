@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 115:
-        raise RuntimeError("전체 source OpenAPI path 수가 115가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 116:
+        raise RuntimeError("전체 source OpenAPI path 수가 116이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 123:
-        raise RuntimeError("전체 source OpenAPI operation 수가 123이 아닙니다.")
+    if operation_count != 124:
+        raise RuntimeError("전체 source OpenAPI operation 수가 124가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     legacy_list = schemas.get("ReservationListEnvelope", {})
     range_page = schemas.get("ReservationRangePageEnvelope", {})
@@ -93,6 +93,9 @@ def main() -> None:
             package / "models" / "reservation_room_move_segment.py",
             package / "api" / "cleaning_templates" / "list_cleaning_templates.py",
             package / "api" / "cleaning_templates" / "publish_cleaning_template.py",
+            package / "api" / "cleaning_history" / "list_cleaning_history.py",
+            package / "models" / "cleaning_history_item.py",
+            package / "models" / "cleaning_history_page.py",
             package / "models" / "cleaning_template_catalog.py",
             package / "models" / "cleaning_template_room_type_state.py",
             package / "models" / "cleaning_template_slot.py",

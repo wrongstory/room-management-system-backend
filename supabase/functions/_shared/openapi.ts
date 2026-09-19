@@ -2493,6 +2493,70 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/cleaning-history": {
+      get: {
+        tags: ["Cleaning History"],
+        operationId: "listCleaningHistory",
+        summary: "최근 7일 청소 완료 이력 조회",
+        description:
+          "active/password-complete admin과 maid의 live session 전용입니다. date의 KST D-6..D에서 fieldCompletedAt이 발생한 실제 수행 이력을 최신순으로 반환합니다. admin은 maidProfileId/query 필터를 사용할 수 있고 maid는 본인 이력만 조회합니다. 객실 표시는 완료 attempt의 불변 snapshot만 사용합니다. performerDisplayName은 과거 snapshot이 아니라 현재 profile 표시명입니다. PIN·고객 PII·사진 locator/content는 반환하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "date",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description:
+              "조회 기준 KST 날짜. 범위는 이 날짜를 포함한 최근 7일입니다.",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "admin 선택 필터입니다. maid는 본인 ID만 허용됩니다.",
+          },
+          {
+            name: "query",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 80 },
+            description:
+              "객실 snapshot 번호·타입 code/name 또는 현재 수행자 표시명 검색",
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description: "응답 nextCursor를 그대로 전달합니다.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "청소 완료 이력",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/CleaningHistoryPage" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/assignments/commit-impact": {
       get: {
         tags: ["Assignments"],
@@ -4624,6 +4688,107 @@ export const openApiDocument = {
           roomNumber: { type: "string" },
           serviceDate: { type: "string", format: "date" },
           maidProfileId: { type: "string", format: "uuid" },
+        },
+      },
+      CleaningHistoryItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "submissionId",
+          "attemptId",
+          "cleaningTargetId",
+          "roomId",
+          "roomNumber",
+          "roomTypeCode",
+          "roomTypeName",
+          "performerProfileId",
+          "performerDisplayName",
+          "cleaningKind",
+          "originalServiceDate",
+          "serviceDate",
+          "startedAt",
+          "fieldCompletedAt",
+          "submittedAt",
+          "inspectionStatus",
+          "decidedAt",
+          "photoCount",
+          "mediaAvailability",
+          "expiresAt",
+          "baseFeeSnapshot",
+          "earningTotalAmount",
+        ],
+        properties: {
+          submissionId: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+          attemptId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+            description:
+              "완료 attempt room snapshot 값이며 누락 시 현재 객실로 보정하지 않습니다.",
+          },
+          roomTypeCode: { anyOf: [{ type: "string" }, { type: "null" }] },
+          roomTypeName: { anyOf: [{ type: "string" }, { type: "null" }] },
+          performerProfileId: { type: "string", format: "uuid" },
+          performerDisplayName: {
+            type: "string",
+            description:
+              "현재 프로필 표시명입니다. 과거 수행 시점의 불변 snapshot은 아닙니다.",
+          },
+          cleaningKind: {
+            type: "string",
+            enum: ["checkout", "stayover", "additional", "reclean"],
+          },
+          originalServiceDate: { type: "string", format: "date" },
+          serviceDate: { type: "string", format: "date" },
+          startedAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+          },
+          fieldCompletedAt: { type: "string", format: "date-time" },
+          submittedAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+          },
+          inspectionStatus: {
+            type: "string",
+            enum: ["not_submitted", "pending", "approved", "rejected"],
+          },
+          decidedAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+          },
+          photoCount: { type: "integer", minimum: 0, maximum: 100 },
+          mediaAvailability: {
+            type: "string",
+            enum: ["not_submitted", "available", "purged", "unavailable"],
+          },
+          expiresAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+          },
+          baseFeeSnapshot: { type: "integer", minimum: 0 },
+          earningTotalAmount: {
+            anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
+          },
+        },
+      },
+      CleaningHistoryPage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["date", "fromDate", "toDate", "items", "nextCursor"],
+        properties: {
+          date: { type: "string", format: "date" },
+          fromDate: { type: "string", format: "date" },
+          toDate: { type: "string", format: "date" },
+          items: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/CleaningHistoryItem" },
+          },
+          nextCursor: {
+            anyOf: [{ type: "string", minLength: 1, maxLength: 1024 }, {
+              type: "null",
+            }],
+          },
         },
       },
       SubmissionEnvelope: {
