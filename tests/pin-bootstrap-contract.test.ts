@@ -15,7 +15,7 @@ const nonceHardeningMigration = readSqlFixture(
   'supabase/migrations/20260913075134_room_pin_nonce_reservation_hardening.sql',
 );
 const generatedPinMigration = readSqlFixture(
-  'supabase/migrations/20260915155048_generated_room_pin_confirmation.sql',
+  'supabase/migrations/20260919230733_generated_room_pin_confirmation.sql',
 );
 
 describe('PIN bootstrap and reservation readiness contract', () => {
