@@ -11,16 +11,18 @@ import {
 } from './reservation-cursor.js';
 
 export type ReservationStatus = 'active' | 'cancelled' | 'checked_out';
+export type ReservationType = 'standard' | 'long_stay';
 
 export interface Reservation {
   id: string;
   roomId: string;
+  reservationType: ReservationType;
   checkInAt: string;
-  checkOutAt: string;
+  checkOutAt: string | null;
   guestCount: number;
   status: ReservationStatus;
   preparationObligationId: string;
-  checkoutObligationId: string;
+  checkoutObligationId: string | null;
   version: number;
   actualCheckInAt: string | null;
   actualCheckoutAt: string | null;
@@ -57,16 +59,16 @@ export interface ReservationBookabilityCandidate {
 }
 
 export interface ReservationBookabilityPreviewInput {
-  reservationType: 'standard';
+  reservationType: ReservationType;
   checkInAt: string;
-  checkOutAt: string;
+  checkOutAt: string | null;
   excludeReservationId?: string | null;
   roomTypeIds?: string[];
 }
 
 export interface ReservationBookabilityPreview {
   checkInAt: string;
-  checkOutAt: string;
+  checkOutAt: string | null;
   excludeReservationId: string | null;
   evaluatedAt: string;
   candidates: ReservationBookabilityCandidate[];
@@ -92,8 +94,9 @@ export type ReservationCommandResult = Reservation & {
 
 export interface CreateReservationInput {
   roomId: string;
+  reservationType: ReservationType;
   checkInAt: string;
-  checkOutAt: string;
+  checkOutAt: string | null;
   guestCount: number;
   guestName?: string | null;
   expectedRoomVersion: number;
@@ -103,8 +106,9 @@ export interface CreateReservationInput {
 export interface ChangeReservationInput {
   reservationId: string;
   roomId: string;
+  reservationType: ReservationType;
   checkInAt: string;
-  checkOutAt: string;
+  checkOutAt: string | null;
   guestCount: number;
   guestName?: string | null;
   expectedVersion: number;
@@ -174,12 +178,13 @@ export interface ReservationRoomMovePreview {
   sourceRoomVersion: number;
   targetRoomId: string;
   targetRoomVersion: number;
+  reservationType: ReservationType;
   checkInAt: string;
-  checkOutAt: string;
+  checkOutAt: string | null;
   guestCount: number;
   preparationObligationId: string;
-  checkoutObligationId: string;
-  checkoutObligationVersion: number;
+  checkoutObligationId: string | null;
+  checkoutObligationVersion: number | null;
   plannedCheckoutTargetId: string | null;
   plannedCheckoutTargetVersion: number | null;
 }
@@ -214,8 +219,8 @@ export interface ReservationRoomMoveCommitResult {
   targetRoomId: string;
   sourceRoomVersion: number;
   targetRoomVersion: number;
-  plannedCheckoutTargetId: string;
-  plannedCheckoutTargetVersion: number;
+  plannedCheckoutTargetId: string | null;
+  plannedCheckoutTargetVersion: number | null;
   sourceOutcome: ReservationRoomMoveOutcome;
   targetOutcome: ReservationRoomMoveOutcome;
   stay?: {
@@ -227,7 +232,7 @@ export interface ReservationRoomMoveCommitResult {
     id: string;
     roomId: string;
     startsAt: string;
-    endsAt: string;
+    endsAt: string | null;
   }>;
   sourceCleaningTargetId?: string;
   pinAccessEndsAt?: string;
@@ -313,13 +318,14 @@ export interface ReservationService {
 interface ReservationRow {
   id: string;
   room_id: string;
+  reservation_type: ReservationType;
   check_in_at: string;
-  check_out_at: string;
+  check_out_at: string | null;
   guest_count: number;
   guest_name_encrypted: string | null;
   status: ReservationStatus;
   preparation_obligation_id: string;
-  checkout_obligation_id: string;
+  checkout_obligation_id: string | null;
   version: number;
   actual_check_in_at: string | null;
   actual_checkout_at: string | null;
@@ -349,12 +355,13 @@ function guestNameFingerprint(value: string | null, pepper: string): string | nu
 interface ReservationCommandRow {
   id: string;
   room_id: string;
+  reservation_type: ReservationType;
   check_in_at: string;
-  check_out_at: string;
+  check_out_at: string | null;
   guest_count: number;
   status: ReservationStatus;
   preparation_obligation_id: string;
-  checkout_obligation_id: string;
+  checkout_obligation_id: string | null;
   version: number;
   actual_check_in_at: string | null;
   actual_checkout_at: string | null;
@@ -555,6 +562,15 @@ function reservationError(
   if (message.includes('INVALID_RESERVATION_SCHEDULE')) {
     return new AppError(400, 'INVALID_RESERVATION_SCHEDULE', '예약은 분 단위이며 최소 1박이어야 합니다.');
   }
+  if (message.includes('STANDARD_RESERVATION_REQUIRES_END')) {
+    return new AppError(400, 'STANDARD_RESERVATION_REQUIRES_END', '일반 예약에는 퇴실 시각이 필요합니다.');
+  }
+  if (message.includes('RESERVATION_TYPE_IMMUTABLE')) {
+    return new AppError(409, 'RESERVATION_TYPE_IMMUTABLE', '예약 유형은 생성 후 변경할 수 없습니다.');
+  }
+  if (message.includes('RESERVATION_END_IMMUTABLE')) {
+    return new AppError(409, 'RESERVATION_END_IMMUTABLE', '확정한 장기 투숙 종료 시각을 다시 미정으로 되돌릴 수 없습니다.');
+  }
   if (message.includes('INVALID_MANUAL_CLEANING_REQUEST')) {
     return new AppError(400, 'INVALID_MANUAL_CLEANING_REQUEST', '수동 청소 요청의 종류와 시간 값을 확인해 주세요.');
   }
@@ -584,6 +600,7 @@ function toCommandResult(row: ReservationCommandRow): ReservationCommandResult {
   return {
     id: row.id,
     roomId: row.room_id,
+    reservationType: row.reservation_type,
     checkInAt: row.check_in_at,
     checkOutAt: row.check_out_at,
     guestCount: row.guest_count,
@@ -698,12 +715,15 @@ function reservationPageRow(value: unknown): Reservation {
   return toCommandResult({
     id: projectionString(row.id, projectionUuidPattern),
     room_id: projectionString(row.room_id, projectionUuidPattern),
+    reservation_type: projectionEnum(row.reservation_type, new Set<ReservationType>(['standard', 'long_stay'])),
     check_in_at: projectionTimestamp(row.check_in_at),
-    check_out_at: projectionTimestamp(row.check_out_at),
+    check_out_at: row.check_out_at === null ? null : projectionTimestamp(row.check_out_at),
     guest_count: projectionPositiveInteger(row.guest_count),
     status: projectionEnum(row.status, new Set<ReservationStatus>(['active', 'cancelled', 'checked_out'])),
     preparation_obligation_id: projectionString(row.preparation_obligation_id, projectionUuidPattern),
-    checkout_obligation_id: projectionString(row.checkout_obligation_id, projectionUuidPattern),
+    checkout_obligation_id: row.checkout_obligation_id === null
+      ? null
+      : projectionString(row.checkout_obligation_id, projectionUuidPattern),
     version: projectionPositiveInteger(row.version),
     actual_check_in_at: row.actual_check_in_at === null ? null : projectionTimestamp(row.actual_check_in_at),
     actual_checkout_at: row.actual_checkout_at === null ? null : projectionTimestamp(row.actual_checkout_at),
@@ -756,12 +776,20 @@ function roomMovePreviewProjection(value: unknown): ReservationRoomMovePreview {
     sourceRoomVersion: projectionPositiveInteger(row.sourceRoomVersion),
     targetRoomId: projectionString(row.targetRoomId, projectionUuidPattern),
     targetRoomVersion: projectionPositiveInteger(row.targetRoomVersion),
+    reservationType: projectionEnum(
+      row.reservationType,
+      new Set<ReservationType>(['standard', 'long_stay'])
+    ),
     checkInAt: projectionTimestamp(row.checkInAt),
-    checkOutAt: projectionTimestamp(row.checkOutAt),
+    checkOutAt: row.checkOutAt === null ? null : projectionTimestamp(row.checkOutAt),
     guestCount: projectionPositiveInteger(row.guestCount),
     preparationObligationId: projectionString(row.preparationObligationId, projectionUuidPattern),
-    checkoutObligationId: projectionString(row.checkoutObligationId, projectionUuidPattern),
-    checkoutObligationVersion: projectionPositiveInteger(row.checkoutObligationVersion),
+    checkoutObligationId: row.checkoutObligationId === null
+      ? null
+      : projectionString(row.checkoutObligationId, projectionUuidPattern),
+    checkoutObligationVersion: row.checkoutObligationVersion === null
+      ? null
+      : projectionPositiveInteger(row.checkoutObligationVersion),
     plannedCheckoutTargetId: row.plannedCheckoutTargetId === null
       ? null
       : projectionString(row.plannedCheckoutTargetId, projectionUuidPattern),
@@ -803,7 +831,7 @@ function roomMoveCommitProjection(value: unknown): ReservationRoomMoveCommitResu
           id: projectionString(segment.id, projectionUuidPattern),
           roomId: projectionString(segment.roomId, projectionUuidPattern),
           startsAt: projectionTimestamp(segment.startsAt),
-          endsAt: projectionTimestamp(segment.endsAt)
+          endsAt: segment.endsAt === null ? null : projectionTimestamp(segment.endsAt)
         };
       }),
       sourceCleaningTargetId: projectionString(row.sourceCleaningTargetId, projectionUuidPattern),
@@ -814,12 +842,20 @@ function roomMoveCommitProjection(value: unknown): ReservationRoomMoveCommitResu
     reservation: toCommandResult({
       id: projectionString(reservation.id, projectionUuidPattern),
       room_id: projectionString(reservation.room_id, projectionUuidPattern),
+      reservation_type: projectionEnum(
+        reservation.reservation_type,
+        new Set<ReservationType>(['standard', 'long_stay'])
+      ),
       check_in_at: projectionTimestamp(reservation.check_in_at),
-      check_out_at: projectionTimestamp(reservation.check_out_at),
+      check_out_at: reservation.check_out_at === null
+        ? null
+        : projectionTimestamp(reservation.check_out_at),
       guest_count: projectionPositiveInteger(reservation.guest_count),
       status: projectionEnum(reservation.status, new Set(['active', 'cancelled', 'checked_out'])),
       preparation_obligation_id: projectionString(reservation.preparation_obligation_id, projectionUuidPattern),
-      checkout_obligation_id: projectionString(reservation.checkout_obligation_id, projectionUuidPattern),
+      checkout_obligation_id: reservation.checkout_obligation_id === null
+        ? null
+        : projectionString(reservation.checkout_obligation_id, projectionUuidPattern),
       version: projectionPositiveInteger(reservation.version),
       actual_check_in_at: reservation.actual_check_in_at === null ? null : projectionTimestamp(reservation.actual_check_in_at),
       actual_checkout_at: reservation.actual_checkout_at === null ? null : projectionTimestamp(reservation.actual_checkout_at),
@@ -836,8 +872,12 @@ function roomMoveCommitProjection(value: unknown): ReservationRoomMoveCommitResu
     targetRoomId: projectionString(row.targetRoomId, projectionUuidPattern),
     sourceRoomVersion: projectionPositiveInteger(row.sourceRoomVersion),
     targetRoomVersion: projectionPositiveInteger(row.targetRoomVersion),
-    plannedCheckoutTargetId: projectionString(row.plannedCheckoutTargetId, projectionUuidPattern),
-    plannedCheckoutTargetVersion: projectionPositiveInteger(row.plannedCheckoutTargetVersion),
+    plannedCheckoutTargetId: row.plannedCheckoutTargetId === null
+      ? null
+      : projectionString(row.plannedCheckoutTargetId, projectionUuidPattern),
+    plannedCheckoutTargetVersion: row.plannedCheckoutTargetVersion === null
+      ? null
+      : projectionPositiveInteger(row.plannedCheckoutTargetVersion),
     sourceOutcome: roomMoveOutcome(row.sourceOutcome),
     targetOutcome: roomMoveOutcome(row.targetOutcome),
     ...duringStay
@@ -883,6 +923,7 @@ export class SupabaseReservationService implements ReservationService {
     return ((data ?? []) as ReservationRow[]).map((row) => ({
       id: row.id,
       roomId: row.room_id,
+      reservationType: row.reservation_type,
       checkInAt: row.check_in_at,
       checkOutAt: row.check_out_at,
       guestCount: row.guest_count,
@@ -978,6 +1019,7 @@ export class SupabaseReservationService implements ReservationService {
     return {
       id: row.id,
       roomId: row.room_id,
+      reservationType: row.reservation_type,
       checkInAt: row.check_in_at,
       checkOutAt: row.check_out_at,
       guestCount: row.guest_count,
@@ -1006,16 +1048,18 @@ export class SupabaseReservationService implements ReservationService {
     const guestName = input.guestName == null ? null : normalizeGuestName(input.guestName);
     const fingerprint = {
       roomId: input.roomId,
+      reservationType: input.reservationType,
       checkInAt: input.checkInAt,
       checkOutAt: input.checkOutAt,
       guestCount: input.guestCount,
       guestNameFingerprint: guestNameFingerprint(guestName, this.guestNamePepper),
       expectedRoomVersion: input.expectedRoomVersion
     };
-    const { data, error } = await this.clients.admin.rpc('create_reservation', {
+    const { data, error } = await this.clients.admin.rpc('create_reservation_v2', {
       p_actor_profile_id: actor.profileId,
       p_reservation_id: randomUUID(),
       p_room_id: input.roomId,
+      p_reservation_type: input.reservationType,
       p_check_in_at: input.checkInAt,
       p_check_out_at: input.checkOutAt,
       p_guest_count: input.guestCount,
@@ -1042,6 +1086,7 @@ export class SupabaseReservationService implements ReservationService {
     const fingerprint = {
       reservationId: input.reservationId,
       roomId: input.roomId,
+      reservationType: input.reservationType,
       checkInAt: input.checkInAt,
       checkOutAt: input.checkOutAt,
       guestCount: input.guestCount,
@@ -1050,10 +1095,11 @@ export class SupabaseReservationService implements ReservationService {
       expectedVersion: input.expectedVersion,
       reasonCode: input.reasonCode
     };
-    const { data, error } = await this.clients.admin.rpc('change_reservation', {
+    const { data, error } = await this.clients.admin.rpc('change_reservation_v2', {
       p_actor_profile_id: actor.profileId,
       p_reservation_id: input.reservationId,
       p_room_id: input.roomId,
+      p_reservation_type: input.reservationType,
       p_check_in_at: input.checkInAt,
       p_check_out_at: input.checkOutAt,
       p_guest_count: input.guestCount,

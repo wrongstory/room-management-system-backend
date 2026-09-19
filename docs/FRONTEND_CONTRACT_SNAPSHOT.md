@@ -2,13 +2,13 @@
 
 이 문서는 `wrongstory/room-management-system`의 exact 제품 snapshot을 백엔드 계약에 대조한 재현 가능한 기록이다. 제품 정책의 최종 우선순위는 [AI 백엔드 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-## 2026-09-17 확인점
+## 2026-09-19 확인점
 
 | 구분 | commit | 용도 |
 |---|---|---|
 | 프런트 제품 snapshot | `165fed2d62a763d64ac62539e1475c1b3e42868f` | 이번 정합화의 exact 기준. 원격 `dev` ref는 삭제됐지만 commit은 재현 가능하다. |
 | 프런트 현재 원격 `main` | `afeb0898879bf8d381ee2e218938dc3160fd6ac0` | 관찰 대상. 위 snapshot의 정책을 자동 대체하지 않는다. |
-| 백엔드 `dev` | `298a16294ad047bad11d7b84057acc1f61fe6423` | 이번 대조 기준. 64 migrations / OpenAPI 113 paths / 121 operations다. #196의 65번째 migration / 114 paths / 122 operations는 미병합 작업 후보로 별도 표기한다. |
+| 백엔드 `dev` | `3a3409bd38458796126fb5ea2590949c8b807985` | 이번 대조 기준. 65 migrations / OpenAPI 114 paths / 122 operations이며 #196이 통합됐다. #200의 66번째 migration은 미병합 작업 후보로 별도 표기한다. |
 | 백엔드 저장소 `main` | `a12595edf68644b94215c4792e0d3aadd64772c6` | 저장소 release line. 마지막 검증된 production 배포 source와 구분한다. |
 
 프런트 snapshot의 기능을 현재 원격 `main` 배포 상태로 추정하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.
@@ -43,7 +43,7 @@
 
 ### 객실 표시·예약 준비 3축
 
-- `intervalBookable`: 요청한 미래 `[checkInAt, checkOutAt)` 구간의 예약 가능성. 통합된 `dev`에는 없고, Issue #196 작업 브랜치가 필수 `reservationType=standard`와 optional `roomTypeIds`(생략/`[]`=전체)를 가진 일반 예약용 preview/range API를 **미병합 source 후보**로 구현한다. `long_stay`/종료 미정은 후속 계약이다.
+- `intervalBookable`: 요청한 미래 예약 구간의 예약 가능성. Issue #196의 standard preview/range API는 `dev`에 통합됐다. Issue #200 후보는 `reservationType=long_stay`와 nullable checkout을 같은 API에 확장하며, null end는 check-in 이후 객실을 무한 점유하는 것으로 평가한다.
 - `readinessStatus`/`checkInReady`: 현재 체크인·배정 준비 상태.
 - `pinSyncStatus`: PIN 동기화 상태. 미래 예약 bookability와 합치지 않는다.
 - 대표 상태는 `BLOCKED > OCCUPIED > ARRIVAL_PENDING > RESERVATION_PRESENT > CLEANING_REQUIRED > READY`다. 현재 시각의 lifecycle/readiness/PIN 분리 projection은 백엔드 `dev`에 이미 구현돼 **해결됨**이나, 이를 미래 `intervalBookable`로 재사용하면 안 된다.
@@ -55,7 +55,8 @@
 | 사진 retention | 승인된 개발 계약 버전 `0.4.0`에 source/dev 반영 완료 | 63번째 `photo_retention_v2`. pending review는 유지하고 이미 purged는 `unavailable`, accepted/linked/orphan은 실제 evidence로 분류 | `pending_review_photo_survives_upload_plus_7d`, `decision_photo_expires_at_168h_boundary`, `orphan_expires_after_30d`, `resolved_evidence_expires_after_180d` |
 | PIN entitlement | entitlement/reveal ID와 안정 오류를 개발 계약 버전 `0.4.0`에 source/dev 반영 완료 | 64번째 `assignment_pin_entitlement`. durable assignment entitlement 원장과 terminal cleanup을 추가하고 구 attempt lease를 장기 자격으로 backfill하지 않는다. exact notified current assignment/workflow/PIN revision만 grant하며 terminal 상태와 inactive/departed 정리에서 닫는다. PIN rotation은 동일 entitlement identity의 exact revision을 갱신하고 과거 reveal lease를 무효화한다. | `notified_assignment_pin_before_available_from`, `pin_access_survives_field_complete_until_decision`, `pin_revision_rotation_revokes_old_reveal`, `terminal_assignment_revokes_entitlement` |
 | 현재 객실 projection | 기존 additive source 계약 유지 | 기존 59~60번째 projection 유지, 중복 migration 없음 | `room_primary_status_priority`, `pin_warning_does_not_change_current_readiness` |
-| 미래 interval bookability·범위 조회 | Issue #196 작업 브랜치에 preview/list 계약과 OpenAPI 후보 `0.4.0` 추가, required gate·리뷰·`dev` 병합 대기 | 65번째 append-only migration의 app-owned read RPC/route. canonical stay segment와 기존 생성·변경 차단 사유를 재사용하되 commit의 최종 검증은 그대로 유지 | `pin_warning_does_not_change_interval_bookability`, `preview_does_not_guarantee_commit`, `reservation_range_cursor_has_no_gap_or_duplicate` |
+| 미래 interval bookability·범위 조회 | Issue #196 계약이 `dev`에 통합됨 | 65번째 append-only migration의 app-owned read RPC/route. commit 최종 검증은 그대로 유지 | `pin_warning_does_not_change_interval_bookability`, `preview_does_not_guarantee_commit`, `reservation_range_cursor_has_no_gap_or_duplicate` |
+| 장기 투숙·종료 미정 | Issue #200 source 후보. 기존 114/122 API 면에 nullable 계약 추가 | 66번째 append-only migration. open-ended future block, checkout graph 지연 생성, scheduler/manual checkout과 move 제약 | `open_ended_long_stay_blocks_future`, `open_ended_to_fixed_materializes_once`, `open_ended_scheduler_never_checks_out` |
 
 정확한 migration timestamp는 각 구현 PR에서 현재 `dev`를 다시 확인해 확정한다. Issue #9 Stage 1은 production `0.3.0` 이후의 nullable retention metadata 의미 확장에 해당하므로 source OpenAPI `info.version=0.4.0`을 승인된 release candidate로 고정한다. 이는 source/dev 계약 버전이며 main·production 배포 완료를 뜻하지 않는다. 기준 `dev`의 기존 64개 migration과 삭제된 provider 원본을 수정·복원하지 않는다.
 
@@ -68,8 +69,8 @@
 | 사진 retention | 해결됨(source/dev) | #193, 63번째 migration. hosted purge worker 배포·주기와 production 승격은 별도 |
 | assignment PIN entitlement | 해결됨(source/dev) | #194, 64번째 migration. hosted provider·Sheets/Cron 활성화와 production 승격은 별도 |
 | payroll adjustment `bookVersion` | 해결됨(source/dev) | 기존 payroll projection 유지 |
-| 임의 기간 bookability preview·예약 범위 조회 | source 후보·미병합 | Issue #196의 additive route/RPC/cursor 구현. required gate·독립 리뷰·`dev` 병합·production 배포가 남음 |
-| `standard | long_stay`와 종료 미정 | 미구현·정책 검증 필요 | nullable checkout, obligation 생성 시점, 이동 제약을 별도 Decision/PR로 처리 |
+| 임의 기간 bookability preview·예약 범위 조회 | 해결됨(source/dev) | Issue #196의 additive route/RPC/cursor 구현. production 배포는 별도 |
+| `standard | long_stay`와 종료 미정 | source 후보·미병합 | Issue #200의 nullable checkout, obligation exactly-once, move/scheduler 제약. required gate·독립 리뷰·`dev` 병합·production 배포가 남음 |
 | 객실 타입 catalog | 부분 구현 | 내부 master는 있으나 app-owned `GET /v1/room-types` 없음 |
 | 청소 완료·주간 근무 이력 | 미구현 | availability/assignment/field completion을 합치지 않는 bounded role-scoped projection 필요 |
 | operation block·issue 목록과 room event timeline | 미구현 | command는 있으나 새 세션에서 entity를 재조회할 목록 없음 |
@@ -84,7 +85,7 @@
 | 인증·세션 | login, me, password, Supabase refresh | 동일 | 제공 | 호환 |
 | 계정·개발자 상태 | account CRUD 일부, developer 상태/로그 | 동일 | 제공 | 호환. 역할·상태는 매 요청 최신 서버값 사용 |
 | 가능일 | 제출·변경 요청·결정·후보 | 동일 | 제공 | 호환. KST·CAS·멱등 키 유지 |
-| 예약·객실 | 예약 CRUD/취소/체크아웃, 현재 객실 projection·운영 명령 | 미래 기간 preview와 from/to/cursor 범위 조회 | 통합 `dev`는 현재 projection만 제공. #196 작업 브랜치에 preview/range 후보 구현 | 미병합 부분 호환. required gate 뒤 generated client·프런트 연결 필요, `stateVersion`/`version`과 409 재조회 필수 |
+| 예약·객실 | 예약 CRUD/취소/체크아웃, 현재 객실 projection·운영 명령 | 미래 기간 preview/range와 장기 투숙 nullable checkout | #196 preview/range는 통합됨. #200은 같은 API 면에 long_stay 후보 구현 | #200은 미병합 부분 호환. generated client·프런트 연결 전 `reservationType`/nullable end와 409 재조회 필요 |
 | 청소 템플릿·수행·미퇴실 사건 | 운영 API 연결 | 상태 기반 수행과 사건 동결 유지 | 제공 | source/dev. production 상태와 별도 |
 | 배정·사진·제출·검수 | 운영 API 연결 | 도메인별 retention과 본인 이력 조회 | lifecycle·retention source/dev 제공 | production worker 활성화와 본인 이력 조회 후속 필요 |
 | 알림·Web Push | 권한/PWA shell만 사용 | 동일 | source 제공 | hosted provider 활성화와 실제 소비는 별도 |
@@ -92,7 +93,7 @@
 | PIN·Sheets | 신규 PIN API 연결 | 통보 기반 entitlement와 30초 reveal 분리 | #194 source/dev 제공 | hosted provider·Sheets/Cron 활성화와 production 승격은 별도 |
 | 검수 대기열 pagination | 미소비 | 미소비 | PR #176 후보 | 병합 뒤 generated client 갱신 대상 |
 
-프런트 snapshot의 `scripts/check-api-integration.mjs`는 운영 OpenAPI 계약면을 검사한다. 이 수치는 실제 UI 호출 수가 아니며, 백엔드 `dev`의 113 paths / 121 operations도 production 배포 상태를 뜻하지 않는다. #196 작업 브랜치의 `0.4.0` 114 paths / 122 operations 역시 source 후보일 뿐 required gate·리뷰·병합·배포 완료를 뜻하지 않는다. literal request와 generated contract는 후속 PR마다 함께 대조한다.
+프런트 snapshot의 `scripts/check-api-integration.mjs`는 운영 OpenAPI 계약면을 검사한다. 이 수치는 실제 UI 호출 수가 아니며, 백엔드 `dev`의 114 paths / 122 operations도 production 배포 상태를 뜻하지 않는다. #200 작업 브랜치는 path/operation 수를 늘리지 않고 nullable 의미만 확장하는 source 후보다. literal request와 generated contract는 후속 PR마다 함께 대조한다.
 
 ## 공통 연동 불변식
 

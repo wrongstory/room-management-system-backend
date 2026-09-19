@@ -20,6 +20,7 @@ import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-oper
 import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
 import { testReservationRoomMoveConcurrency } from './test-reservation-room-move-concurrency.mjs';
+import { testReservationLongStayConcurrency } from './test-reservation-long-stay-concurrency.mjs';
 import { testRoomPinBootstrapConcurrency } from './test-room-pin-bootstrap-concurrency.mjs';
 import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
 import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
@@ -1181,6 +1182,7 @@ for (const plan of [scheduledPlan,manualPlan]) {
     'checkout race: same identity, one occupancy event, zero premature attempts');
 }
 console.log('Planning races passed: room-change/notify, cancel/notify, scheduled/retry, room-change/checkout, manual/scheduled; one target and zero premature attempts.');
+await testReservationLongStayConcurrency({ client, actorProfileId });
 await testNotifiedReplanConcurrency(client, { profileId: actorProfileId, email, password });
 await testPrestartConcurrency(client,actorProfileId);
 await testAttemptActivationConcurrency(client,{ profileId: actorProfileId, email, password });

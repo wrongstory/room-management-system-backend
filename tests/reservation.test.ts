@@ -29,6 +29,7 @@ const guestNamePepper = 'reservation-guest-name-pepper-test-value';
 const commandResult = {
   id: '41000000-0000-4000-8000-000000000001',
   room_id: '51000000-0000-4000-8000-000000000001',
+  reservation_type: 'standard' as const,
   check_in_at: '2026-09-01T07:00:00+00:00',
   check_out_at: '2026-09-02T02:00:00+00:00',
   guest_count: 2,
@@ -89,6 +90,7 @@ describe('reservation privacy and idempotency', () => {
     );
     const input = {
       roomId: commandResult.room_id,
+      reservationType: 'standard' as const,
       checkInAt: '2026-09-01T16:00:00+09:00',
       checkOutAt: '2026-09-02T11:00:00+09:00',
       guestCount: 2,
@@ -112,6 +114,40 @@ describe('reservation privacy and idempotency', () => {
       guestCount: input.guestCount,
       guestName: '홍길동',
       expectedRoomVersion: input.expectedRoomVersion
+    }));
+  });
+
+  it('passes long-stay identity and null checkout to the v2 command without inventing a checkout graph', async () => {
+    const openEnded = {
+      ...commandResult,
+      reservation_type: 'long_stay' as const,
+      check_out_at: null,
+      checkout_obligation_id: null
+    };
+    const rpc = vi.fn(async () => ({ data: openEnded, error: null }));
+    const clients = {
+      admin: { rpc }, publicClient: {}, forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseReservationService(clients, piiKey, 'test-v1', guestNamePepper);
+
+    const result = await service.create(actor, {
+      roomId: openEnded.room_id,
+      reservationType: 'long_stay',
+      checkInAt: openEnded.check_in_at,
+      checkOutAt: null,
+      guestCount: 1,
+      expectedRoomVersion: 1,
+      idempotencyKey: 'reservation-open-ended-service-0001'
+    });
+
+    expect(result).toMatchObject({
+      reservationType: 'long_stay',
+      checkOutAt: null,
+      checkoutObligationId: null
+    });
+    expect(rpc).toHaveBeenCalledWith('create_reservation_v2', expect.objectContaining({
+      p_reservation_type: 'long_stay',
+      p_check_out_at: null
     }));
   });
 
@@ -148,6 +184,7 @@ describe('reservation privacy and idempotency', () => {
     );
     const input = {
       roomId: commandResult.room_id,
+      reservationType: 'standard' as const,
       checkInAt: '2026-09-01T16:00:00+09:00',
       checkOutAt: '2026-09-02T11:00:00+09:00',
       guestCount: 2,
@@ -308,6 +345,7 @@ describe('reservation privacy and idempotency', () => {
       sourceSegmentId: '46000000-0000-4000-8000-000000000001', sourceSegmentVersion: 1,
       sourceRoomId: commandResult.room_id, sourceRoomVersion: 2,
       targetRoomId: '51000000-0000-4000-8000-000000000002', targetRoomVersion: 3,
+      reservationType: 'standard',
       checkInAt: commandResult.check_in_at, checkOutAt: commandResult.check_out_at,
       guestCount: 2, preparationObligationId: commandResult.preparation_obligation_id,
       checkoutObligationId: commandResult.checkout_obligation_id,
@@ -573,6 +611,29 @@ describe('reservation privacy and idempotency', () => {
       impactFingerprint: 'a'.repeat(64),
       reasonCode: 'GUEST_REQUEST',
       idempotencyKey: `room-move-${message.toLowerCase()}`
+    })).rejects.toMatchObject({ statusCode, code: message });
+  });
+
+  it.each([
+    ['STANDARD_RESERVATION_REQUIRES_END', 400],
+    ['RESERVATION_TYPE_IMMUTABLE', 409],
+    ['RESERVATION_END_IMMUTABLE', 409]
+  ])('maps long-stay contract error %s to its stable status', async (message, statusCode) => {
+    const rpc = vi.fn(async () => ({ data: null, error: { code: '23514', message } }));
+    const clients = {
+      admin: { rpc }, publicClient: {}, forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseReservationService(clients, piiKey, 'test-v1', guestNamePepper);
+    await expect(service.change(actor, {
+      reservationId: commandResult.id,
+      roomId: commandResult.room_id,
+      reservationType: 'standard',
+      checkInAt: commandResult.check_in_at,
+      checkOutAt: commandResult.check_out_at,
+      guestCount: 2,
+      expectedVersion: 1,
+      reasonCode: 'SCHEDULE_CHANGED',
+      idempotencyKey: `reservation-contract-${message.toLowerCase()}`
     })).rejects.toMatchObject({ statusCode, code: message });
   });
 

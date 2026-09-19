@@ -21,24 +21,27 @@ const roomMoveReasonCodeSchema = z.enum([
   'OPERATIONAL_ADJUSTMENT'
 ]);
 
-const createSchema = z.object({
+const reservationScheduleSchema = z.discriminatedUnion('reservationType', [
+  z.object({ reservationType: z.literal('standard'), checkOutAt: timestampSchema }),
+  z.object({ reservationType: z.literal('long_stay'), checkOutAt: timestampSchema.nullable() })
+]);
+
+const createSchema = z.intersection(z.object({
   roomId: z.uuid(),
   checkInAt: timestampSchema,
-  checkOutAt: timestampSchema,
   guestCount: z.number().int().positive(),
   guestName: z.string().nullable().optional(),
   expectedRoomVersion: z.number().int().positive()
-});
+}), reservationScheduleSchema);
 
-const changeSchema = z.object({
+const changeSchema = z.intersection(z.object({
   roomId: z.uuid(),
   checkInAt: timestampSchema,
-  checkOutAt: timestampSchema,
   guestCount: z.number().int().positive(),
   guestName: z.string().nullable().optional(),
   expectedVersion: z.number().int().positive(),
   reasonCode: reasonCodeSchema
-});
+}), reservationScheduleSchema);
 
 const mutationSchema = z.object({
   expectedVersion: z.number().int().positive(),
@@ -85,16 +88,14 @@ const roomMoveCommitSchema = roomMovePreviewSchema.extend({
   impactFingerprint: z.string().regex(/^[0-9a-f]{64}$/)
 }).strict();
 
-const bookabilityPreviewSchema = z.object({
-  reservationType: z.literal('standard'),
+const bookabilityPreviewSchema = z.intersection(z.object({
   checkInAt: timestampSchema,
-  checkOutAt: timestampSchema,
   excludeReservationId: z.uuid().nullable().optional(),
   roomTypeIds: z.array(z.uuid()).max(20).refine(
     (ids) => new Set(ids).size === ids.length,
     'roomTypeIds에는 중복 UUID를 사용할 수 없습니다.'
   ).optional()
-}).strict();
+}), reservationScheduleSchema);
 
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
@@ -208,6 +209,7 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
         : input.guestName;
       const reservation = await service.create(request.actor, {
         roomId: input.roomId,
+        reservationType: input.reservationType,
         checkInAt: input.checkInAt,
         checkOutAt: input.checkOutAt,
         guestCount: input.guestCount,
@@ -265,6 +267,7 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
         reservation: await service.change(request.actor, {
           reservationId,
           roomId: input.roomId,
+          reservationType: input.reservationType,
           checkInAt: input.checkInAt,
           checkOutAt: input.checkOutAt,
           guestCount: input.guestCount,

@@ -363,6 +363,7 @@ function lifecycleRequestVariant(
 const reservationRequired = [
   "id",
   "roomId",
+  "reservationType",
   "checkInAt",
   "checkOutAt",
   "guestCount",
@@ -380,12 +381,21 @@ const reservationRequired = [
 const reservationProperties = {
   id: { type: "string", format: "uuid" },
   roomId: { type: "string", format: "uuid" },
+  reservationType: { $ref: "#/components/schemas/ReservationType" },
   checkInAt: { type: "string", format: "date-time" },
-  checkOutAt: { type: "string", format: "date-time" },
+  checkOutAt: {
+    type: ["string", "null"],
+    format: "date-time",
+    description: "standard에서는 필수 시각, 종료 미정 long_stay에서는 null",
+  },
   guestCount: { type: "integer", minimum: 1 },
   status: { $ref: "#/components/schemas/ReservationStatus" },
   preparationObligationId: { type: "string", format: "uuid" },
-  checkoutObligationId: { type: "string", format: "uuid" },
+  checkoutObligationId: {
+    type: ["string", "null"],
+    format: "uuid",
+    description: "종료 미정 long_stay에서는 checkout graph가 아직 없어 null",
+  },
   version: {
     type: "integer",
     minimum: 1,
@@ -3581,7 +3591,7 @@ export const openApiDocument = {
         operationId: "createReservation",
         summary: "예약 생성",
         description:
-          "active business admin이 객실 일정을 생성합니다. expectedRoomVersion은 객실 CAS 값이며 활성 예약은 [checkInAt, checkOutAt) 반개구간으로 겹치지 않아야 합니다. guestName은 Edge에서 AES-256-GCM으로 암호화되며 명령 응답에 돌려주지 않습니다.",
+          "active business admin이 객실 일정을 생성합니다. standard는 checkOutAt이 필수이고 long_stay는 null인 종료 미정 예약을 허용합니다. 종료 미정 예약은 checkInAt 이후 객실을 무기한 점유하지만 checkout 의무·청소 target은 종료 확정 또는 수동 퇴실 전까지 만들지 않습니다. expectedRoomVersion은 객실 CAS 값이며 guestName은 Edge에서 AES-256-GCM으로 암호화되고 명령 응답에 돌려주지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -3595,7 +3605,7 @@ export const openApiDocument = {
         operationId: "previewReservationBookability",
         summary: "임의 기간 객실 예약 가능성 미리보기",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용 read-only preview입니다. 미래 [checkInAt,checkOutAt) 구간의 canonical stay-segment overlap과 create/change의 운영 차단 축을 intervalBookable로 계산합니다. PIN mismatch/unconfigured는 evaluatedAt에 실제 current check-in pending인 경우에만 checkInReady와 reasonCodes에 나타나며 intervalBookable을 바꾸지 않습니다. excludeReservationId 생략/null은 무제외이고, UUID는 존재하고 아직 체크인하지 않은 active 예약 하나만 정확히 제외합니다. 이 결과는 commit 성공 보장이 아니며 create/change transaction이 최종 overlap 권위입니다.",
+          "비밀번호 변경을 완료한 active business admin 전용 read-only preview입니다. standard는 미래 [checkInAt,checkOutAt) 구간을, checkOutAt=null인 long_stay는 checkInAt 이후 무기한 점유 구간을 canonical stay-segment overlap과 create/change 운영 차단 축으로 계산합니다. PIN mismatch/unconfigured는 evaluatedAt에 실제 current check-in pending인 경우에만 checkInReady와 reasonCodes에 나타나며 intervalBookable을 바꾸지 않습니다. excludeReservationId 생략/null은 무제외이고, UUID는 존재하고 아직 체크인하지 않은 active 예약 하나만 정확히 제외합니다. 이 결과는 commit 성공 보장이 아니며 create/change transaction이 최종 overlap 권위입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         requestBody: {
@@ -3666,7 +3676,7 @@ export const openApiDocument = {
         operationId: "changeReservation",
         summary: "예약 일정·고객정보 변경",
         description:
-          "active business admin이 expectedVersion CAS로 예약을 변경합니다. guestName 필드 생략은 기존값 유지, null은 삭제, 문자열은 새 암호문 설정을 뜻합니다. roomId는 하위 호환을 위해 전달하지만 기존 객실과 같아야 하며, 실제 객실 변경은 전용 preview/commit API만 허용합니다.",
+          "active business admin이 expectedVersion CAS로 예약을 변경합니다. reservationType은 생성 후 불변이며 종료 미정 long_stay는 이 명령으로 fixed end를 확정할 수 있지만 다시 null로 되돌릴 수 없습니다. 종료 확정 시 checkout 의무·planned target을 exactly-once로 만듭니다. guestName 필드 생략은 기존값 유지, null은 삭제, 문자열은 새 암호문 설정을 뜻합니다. roomId는 하위 호환을 위해 전달하지만 기존 객실과 같아야 하며, 실제 객실 변경은 전용 preview/commit API만 허용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [reservationIdParameter(), idempotencyHeader],
@@ -5515,6 +5525,9 @@ export const openApiDocument = {
           "INVALID_GUEST_NAME",
           "INVALID_GUEST_COUNT",
           "INVALID_RESERVATION_SCHEDULE",
+          "STANDARD_RESERVATION_REQUIRES_END",
+          "RESERVATION_TYPE_IMMUTABLE",
+          "RESERVATION_END_IMMUTABLE",
           "BOOKABILITY_RANGE_TOO_LARGE",
           "INVALID_ROOM_TYPE_FILTER",
           "EXCLUDE_RESERVATION_NOT_FOUND",
@@ -8100,6 +8113,12 @@ export const openApiDocument = {
         enum: ["active", "cancelled", "checked_out"],
         description: "예약 일정 상태. 점유·청소 상태와 합치지 않습니다.",
       },
+      ReservationType: {
+        type: "string",
+        enum: ["standard", "long_stay"],
+        description:
+          "standard는 checkOutAt 필수, long_stay는 확정 종료 또는 null을 허용합니다. 생성 후 변경할 수 없습니다.",
+      },
       Reservation: {
         type: "object",
         additionalProperties: false,
@@ -8181,12 +8200,28 @@ export const openApiDocument = {
         type: "object",
         additionalProperties: false,
         required: ["reservationType", "checkInAt", "checkOutAt"],
+        oneOf: [
+          {
+            properties: {
+              reservationType: { const: "standard" },
+              checkOutAt: { type: "string", format: "date-time" },
+            },
+            required: ["reservationType", "checkOutAt"],
+          },
+          {
+            properties: {
+              reservationType: { const: "long_stay" },
+              checkOutAt: {
+                type: ["string", "null"],
+                format: "date-time",
+              },
+            },
+            required: ["reservationType", "checkOutAt"],
+          },
+        ],
         properties: {
           reservationType: {
-            type: "string",
-            enum: ["standard"],
-            description:
-              "현재 후보는 standard만 지원합니다. long_stay/종료 미정 계약은 후속 버전에서 확장합니다.",
+            $ref: "#/components/schemas/ReservationType",
           },
           checkInAt: {
             type: "string",
@@ -8194,9 +8229,10 @@ export const openApiDocument = {
             description: "예약 구간 시작(포함), 분 단위 RFC 3339",
           },
           checkOutAt: {
-            type: "string",
+            type: ["string", "null"],
             format: "date-time",
-            description: "예약 구간 종료(미포함), KST 날짜 기준 최소 1박",
+            description:
+              "예약 구간 종료(미포함). standard는 필수, long_stay는 null이면 미래 무한 점유 preview",
           },
           excludeReservationId: {
             type: ["string", "null"],
@@ -8256,6 +8292,7 @@ export const openApiDocument = {
         type: "object",
         additionalProperties: false,
         required: [
+          "reservationType",
           "checkInAt",
           "checkOutAt",
           "excludeReservationId",
@@ -8264,8 +8301,9 @@ export const openApiDocument = {
           "commitAuthority",
         ],
         properties: {
+          reservationType: { $ref: "#/components/schemas/ReservationType" },
           checkInAt: { type: "string", format: "date-time" },
-          checkOutAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: ["string", "null"], format: "date-time" },
           excludeReservationId: { type: ["string", "null"], format: "uuid" },
           evaluatedAt: { type: "string", format: "date-time" },
           candidates: {
@@ -8297,15 +8335,36 @@ export const openApiDocument = {
         additionalProperties: false,
         required: [
           "roomId",
+          "reservationType",
           "checkInAt",
           "checkOutAt",
           "guestCount",
           "expectedRoomVersion",
         ],
+        oneOf: [
+          {
+            properties: {
+              reservationType: { const: "standard" },
+              checkOutAt: { type: "string", format: "date-time" },
+            },
+            required: ["reservationType", "checkOutAt"],
+          },
+          {
+            properties: {
+              reservationType: { const: "long_stay" },
+              checkOutAt: {
+                type: ["string", "null"],
+                format: "date-time",
+              },
+            },
+            required: ["reservationType", "checkOutAt"],
+          },
+        ],
         properties: {
           roomId: { type: "string", format: "uuid" },
+          reservationType: { $ref: "#/components/schemas/ReservationType" },
           checkInAt: { type: "string", format: "date-time" },
-          checkOutAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: ["string", "null"], format: "date-time" },
           guestCount: { type: "integer", minimum: 1 },
           guestName: { type: ["string", "null"], minLength: 1, maxLength: 80 },
           expectedRoomVersion: { type: "integer", minimum: 1 },
@@ -8316,16 +8375,37 @@ export const openApiDocument = {
         additionalProperties: false,
         required: [
           "roomId",
+          "reservationType",
           "checkInAt",
           "checkOutAt",
           "guestCount",
           "expectedVersion",
           "reasonCode",
         ],
+        oneOf: [
+          {
+            properties: {
+              reservationType: { const: "standard" },
+              checkOutAt: { type: "string", format: "date-time" },
+            },
+            required: ["reservationType", "checkOutAt"],
+          },
+          {
+            properties: {
+              reservationType: { const: "long_stay" },
+              checkOutAt: {
+                type: ["string", "null"],
+                format: "date-time",
+              },
+            },
+            required: ["reservationType", "checkOutAt"],
+          },
+        ],
         properties: {
           roomId: { type: "string", format: "uuid" },
+          reservationType: { $ref: "#/components/schemas/ReservationType" },
           checkInAt: { type: "string", format: "date-time" },
-          checkOutAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: ["string", "null"], format: "date-time" },
           guestCount: { type: "integer", minimum: 1 },
           guestName: {
             type: ["string", "null"],
@@ -8485,6 +8565,7 @@ export const openApiDocument = {
           "sourceRoomVersion",
           "targetRoomId",
           "targetRoomVersion",
+          "reservationType",
           "checkInAt",
           "checkOutAt",
           "guestCount",
@@ -8545,12 +8626,13 @@ export const openApiDocument = {
           sourceRoomVersion: { type: "integer", minimum: 1 },
           targetRoomId: { type: "string", format: "uuid" },
           targetRoomVersion: { type: "integer", minimum: 1 },
+          reservationType: { $ref: "#/components/schemas/ReservationType" },
           checkInAt: { type: "string", format: "date-time" },
-          checkOutAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: ["string", "null"], format: "date-time" },
           guestCount: { type: "integer", minimum: 1 },
           preparationObligationId: { type: "string", format: "uuid" },
-          checkoutObligationId: { type: "string", format: "uuid" },
-          checkoutObligationVersion: { type: "integer", minimum: 1 },
+          checkoutObligationId: { type: ["string", "null"], format: "uuid" },
+          checkoutObligationVersion: { type: ["integer", "null"], minimum: 1 },
           plannedCheckoutTargetId: { type: ["string", "null"], format: "uuid" },
           plannedCheckoutTargetVersion: {
             type: ["integer", "null"],
@@ -8588,8 +8670,11 @@ export const openApiDocument = {
           targetRoomId: { type: "string", format: "uuid" },
           sourceRoomVersion: { type: "integer", minimum: 1 },
           targetRoomVersion: { type: "integer", minimum: 1 },
-          plannedCheckoutTargetId: { type: "string", format: "uuid" },
-          plannedCheckoutTargetVersion: { type: "integer", minimum: 1 },
+          plannedCheckoutTargetId: { type: ["string", "null"], format: "uuid" },
+          plannedCheckoutTargetVersion: {
+            type: ["integer", "null"],
+            minimum: 1,
+          },
           sourceOutcome: {
             $ref: "#/components/schemas/ReservationRoomMoveOutcome",
           },
@@ -8640,7 +8725,7 @@ export const openApiDocument = {
           id: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
           startsAt: { type: "string", format: "date-time" },
-          endsAt: { type: "string", format: "date-time" },
+          endsAt: { type: ["string", "null"], format: "date-time" },
         },
       },
       ManualCleaningRequestCreate: {

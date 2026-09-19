@@ -25,10 +25,10 @@ function reset(version) {
 }
 function snapshot() {
   return psql(`select encode(extensions.digest(convert_to(jsonb_build_object(
-    'reservation',(select to_jsonb(row) from public.reservations row where id='${reservationId}'),
+    'reservation',(select to_jsonb(row)-'reservation_type' from public.reservations row where id='${reservationId}'),
     'obligation',(select to_jsonb(row) from public.checkout_cleaning_obligations row where reservation_id='${reservationId}'),
     'target',(select jsonb_agg(to_jsonb(row)-'stay_segment_checkout_obligation_id' order by id) from public.cleaning_targets row where reservation_id='${reservationId}'),
-    'schedule',(select jsonb_agg(to_jsonb(row) order by version) from public.reservation_schedule_revisions row where reservation_id='${reservationId}'),
+    'schedule',(select jsonb_agg(to_jsonb(row)-'reservation_type' order by version) from public.reservation_schedule_revisions row where reservation_id='${reservationId}'),
     'audit',(select jsonb_agg(to_jsonb(row) order by id) from public.audit_events row where entity_id='${reservationId}'),
     'receipt',(select jsonb_agg(to_jsonb(row) order by command_type,idempotency_key) from private.command_executions row where entity_id='${reservationId}')
   )::text,'UTF8'),'sha256'),'hex')`);
