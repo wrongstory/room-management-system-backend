@@ -41,6 +41,7 @@ const entriesSchema = z.object({
   limit: pageLimitSchema(PAYROLL_ENTRY_PAGE_MAX).optional(),
   cursor: z.string().min(1).max(PAYROLL_CURSOR_MAX_LENGTH).optional()
 }).strict();
+const cycleParamsSchema = z.object({ cycleId: z.uuid() }).strict();
 
 const startSchema = z.object({
   maidProfileId: z.uuid(),
@@ -115,6 +116,15 @@ export function createPayrollRoutes(service: PayrollService): FastifyPluginAsync
       requireExactQuery(request, ['weekStart', 'maidProfileId', 'kind', 'limit', 'cursor']);
       const query = entriesSchema.parse(request.query);
       const response = await service.listEntries(request.actor, query);
+      assertPayrollResponseSize(response);
+      return response;
+    });
+
+    app.get('/:cycleId(^[0-9A-Fa-f-]{36}$)', { preHandler: authenticated }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      requireExactQuery(request, []);
+      const params = cycleParamsSchema.parse(request.params);
+      const response = { payroll: await service.get(request.actor, params.cycleId) };
       assertPayrollResponseSize(response);
       return response;
     });

@@ -223,6 +223,7 @@ function services(): AppServices {
     },
     payroll: {
       list: vi.fn(async () => ({ payroll: [], nextCursor: null })),
+      get: vi.fn(),
       listEntries: vi.fn(async () => ({
         kind: 'items' as const,
         entries: [],
@@ -1432,6 +1433,37 @@ describe('application', () => {
     await app.close();
   });
 
+  it('resolves one materialized payroll cycle by stable ID without side effects', async () => {
+    const appServices = services();
+    const cycleId = '76000000-0000-4000-8000-000000000001';
+    appServices.payroll.get = vi.fn(async () => ({ cycleId, status: 'check' } as never));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/payroll/${cycleId}`,
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual({ payroll: { cycleId, status: 'check' } });
+    expect(appServices.payroll.get).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      cycleId
+    );
+
+    for (const [url, expected] of [
+      [`/v1/payroll/${cycleId}?extra=1`, 400],
+      ['/v1/payroll/not-a-uuid', 404]
+    ] as const) {
+      const invalid = await app.inject({
+        method: 'GET', url, headers: { authorization: 'Bearer access-token' }
+      });
+      expect(invalid.statusCode).toBe(expected);
+    }
+    await app.close();
+  });
+
   it('pages payroll entries through the authenticated reader contract', async () => {
     const appServices = services();
     const app = await buildApp({ env, services: appServices, logger: false });
@@ -1458,6 +1490,7 @@ describe('application', () => {
       entries: [{ huge }] as never,
       nextCursor: null
     }));
+    appServices.payroll.get = vi.fn(async () => ({ huge } as never));
     appServices.payroll.start = vi.fn(async () => ({ huge } as never));
     const app = await buildApp({ env, services: appServices, logger: false });
     const requests = [
@@ -1469,6 +1502,11 @@ describe('application', () => {
       app.inject({
         method: 'GET',
         url: '/v1/payroll/entries?weekStart=2026-08-24&maidProfileId=62000000-0000-4000-8000-000000000001&kind=items',
+        headers: { authorization: 'Bearer access-token' }
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/v1/payroll/76000000-0000-4000-8000-000000000001',
         headers: { authorization: 'Bearer access-token' }
       }),
       app.inject({

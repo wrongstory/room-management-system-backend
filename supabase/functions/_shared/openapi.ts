@@ -3271,6 +3271,42 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/payroll/{cycleId}": {
+      get: {
+        tags: ["Payroll"],
+        operationId: "getPayrollCycle",
+        summary: "주급 주기 단건 조회",
+        description:
+          "이미 생성된 주급 주기를 stable cycleId로 조회합니다. 비밀번호 변경을 완료한 active admin은 모든 메이드 주기를, active maid는 본인 주기만 조회합니다. conceptual OPEN은 cycle ID가 없으므로 이 경로의 대상이 아닙니다. 기존 PayrollCycle과 nested preview/continuation 계약, UTF-8 JSON 128 KiB 상한을 그대로 사용합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [{
+          name: "cycleId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "이미 materialize된 주급 주기의 불변 ID",
+        }],
+        responses: {
+          "200": {
+            description: "bounded 주급 주기 projection",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/PayrollCycleEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/payroll/entries": {
       get: {
         tags: ["Payroll"],

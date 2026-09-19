@@ -1213,6 +1213,18 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
     "admin list",
   );
 
+  const cycleId = "96000000-0000-4000-8000-000000000001";
+  const detail = await handleApiRequest(
+    request("GET", `/v1/payroll/${cycleId}`),
+    dependencies,
+  );
+  assert(
+    detail.status === 200 &&
+      (await detail.json()).payroll.cycleId === cycleId &&
+      calls.at(-1)?.name === "get_payroll_cycle",
+    "admin detail uses exact resolver",
+  );
+
   const started = await handleApiRequest(
     request("POST", "/v1/payroll/start", {
       maidProfileId,
@@ -1255,6 +1267,11 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
     { ...dependencies, authenticateRequest: () => Promise.resolve(maidActor) },
   );
   assert(maidList.status === 200, "maid self list");
+  const maidDetail = await handleApiRequest(
+    request("GET", `/v1/payroll/${cycleId}`),
+    { ...dependencies, authenticateRequest: () => Promise.resolve(maidActor) },
+  );
+  assert(maidDetail.status === 200, "maid self detail");
   const deniedStart = await handleApiRequest(
     request("POST", "/v1/payroll/start", {
       maidProfileId,
