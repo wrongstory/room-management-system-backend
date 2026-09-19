@@ -67,6 +67,7 @@ export interface ReservationBookabilityPreviewInput {
 }
 
 export interface ReservationBookabilityPreview {
+  reservationType: ReservationType;
   checkInAt: string;
   checkOutAt: string | null;
   excludeReservationId: string | null;
@@ -994,6 +995,7 @@ export class SupabaseReservationService implements ReservationService {
       roomMoveProjectionError();
     }
     return {
+      reservationType: input.reservationType,
       checkInAt: input.checkInAt,
       checkOutAt: input.checkOutAt,
       excludeReservationId: input.excludeReservationId ?? null,

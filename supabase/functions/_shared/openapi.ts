@@ -8196,43 +8196,22 @@ export const openApiDocument = {
           "PIN_UNCONFIGURED",
         ],
       },
-      ReservationBookabilityPreviewRequest: {
+      ReservationBookabilityStandardPreviewRequest: {
         type: "object",
         additionalProperties: false,
         required: ["reservationType", "checkInAt", "checkOutAt"],
-        oneOf: [
-          {
-            properties: {
-              reservationType: { const: "standard" },
-              checkOutAt: { type: "string", format: "date-time" },
-            },
-            required: ["reservationType", "checkOutAt"],
-          },
-          {
-            properties: {
-              reservationType: { const: "long_stay" },
-              checkOutAt: {
-                type: ["string", "null"],
-                format: "date-time",
-              },
-            },
-            required: ["reservationType", "checkOutAt"],
-          },
-        ],
         properties: {
-          reservationType: {
-            $ref: "#/components/schemas/ReservationType",
-          },
+          reservationType: { type: "string", const: "standard" },
           checkInAt: {
             type: "string",
             format: "date-time",
             description: "예약 구간 시작(포함), 분 단위 RFC 3339",
           },
           checkOutAt: {
-            type: ["string", "null"],
+            type: "string",
             format: "date-time",
             description:
-              "예약 구간 종료(미포함). standard는 필수, long_stay는 null이면 미래 무한 점유 preview",
+              "예약 구간 종료(미포함). standard는 null을 허용하지 않음",
           },
           excludeReservationId: {
             type: ["string", "null"],
@@ -8247,6 +8226,59 @@ export const openApiDocument = {
             uniqueItems: true,
             items: { type: "string", format: "uuid" },
             description: "생략하거나 빈 배열이면 모든 객실 유형",
+          },
+        },
+      },
+      ReservationBookabilityLongStayPreviewRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["reservationType", "checkInAt", "checkOutAt"],
+        properties: {
+          reservationType: { type: "string", const: "long_stay" },
+          checkInAt: {
+            type: "string",
+            format: "date-time",
+            description: "예약 구간 시작(포함), 분 단위 RFC 3339",
+          },
+          checkOutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description: "null이면 checkInAt 이후 미래 전체를 점유하는 preview",
+          },
+          excludeReservationId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "자기 예약 변경 preview에서만 사용하는 active·체크인 전 예약 ID",
+          },
+          roomTypeIds: {
+            type: "array",
+            minItems: 0,
+            maxItems: 20,
+            uniqueItems: true,
+            items: { type: "string", format: "uuid" },
+            description: "생략하거나 빈 배열이면 모든 객실 유형",
+          },
+        },
+      },
+      ReservationBookabilityPreviewRequest: {
+        oneOf: [
+          {
+            $ref:
+              "#/components/schemas/ReservationBookabilityStandardPreviewRequest",
+          },
+          {
+            $ref:
+              "#/components/schemas/ReservationBookabilityLongStayPreviewRequest",
+          },
+        ],
+        discriminator: {
+          propertyName: "reservationType",
+          mapping: {
+            standard:
+              "#/components/schemas/ReservationBookabilityStandardPreviewRequest",
+            long_stay:
+              "#/components/schemas/ReservationBookabilityLongStayPreviewRequest",
           },
         },
       },
@@ -8330,7 +8362,7 @@ export const openApiDocument = {
           },
         },
       },
-      ReservationCreateRequest: {
+      ReservationStandardCreateRequest: {
         type: "object",
         additionalProperties: false,
         required: [
@@ -8341,28 +8373,30 @@ export const openApiDocument = {
           "guestCount",
           "expectedRoomVersion",
         ],
-        oneOf: [
-          {
-            properties: {
-              reservationType: { const: "standard" },
-              checkOutAt: { type: "string", format: "date-time" },
-            },
-            required: ["reservationType", "checkOutAt"],
-          },
-          {
-            properties: {
-              reservationType: { const: "long_stay" },
-              checkOutAt: {
-                type: ["string", "null"],
-                format: "date-time",
-              },
-            },
-            required: ["reservationType", "checkOutAt"],
-          },
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          reservationType: { type: "string", const: "standard" },
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
+          guestName: { type: ["string", "null"], minLength: 1, maxLength: 80 },
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      ReservationLongStayCreateRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "reservationType",
+          "checkInAt",
+          "checkOutAt",
+          "guestCount",
+          "expectedRoomVersion",
         ],
         properties: {
           roomId: { type: "string", format: "uuid" },
-          reservationType: { $ref: "#/components/schemas/ReservationType" },
+          reservationType: { type: "string", const: "long_stay" },
           checkInAt: { type: "string", format: "date-time" },
           checkOutAt: { type: ["string", "null"], format: "date-time" },
           guestCount: { type: "integer", minimum: 1 },
@@ -8370,7 +8404,20 @@ export const openApiDocument = {
           expectedRoomVersion: { type: "integer", minimum: 1 },
         },
       },
-      ReservationChangeRequest: {
+      ReservationCreateRequest: {
+        oneOf: [
+          { $ref: "#/components/schemas/ReservationStandardCreateRequest" },
+          { $ref: "#/components/schemas/ReservationLongStayCreateRequest" },
+        ],
+        discriminator: {
+          propertyName: "reservationType",
+          mapping: {
+            standard: "#/components/schemas/ReservationStandardCreateRequest",
+            long_stay: "#/components/schemas/ReservationLongStayCreateRequest",
+          },
+        },
+      },
+      ReservationStandardChangeRequest: {
         type: "object",
         additionalProperties: false,
         required: [
@@ -8382,28 +8429,37 @@ export const openApiDocument = {
           "expectedVersion",
           "reasonCode",
         ],
-        oneOf: [
-          {
-            properties: {
-              reservationType: { const: "standard" },
-              checkOutAt: { type: "string", format: "date-time" },
-            },
-            required: ["reservationType", "checkOutAt"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          reservationType: { type: "string", const: "standard" },
+          checkInAt: { type: "string", format: "date-time" },
+          checkOutAt: { type: "string", format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
+          guestName: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 80,
+            description: "생략하면 유지, null이면 삭제, 문자열이면 재암호화",
           },
-          {
-            properties: {
-              reservationType: { const: "long_stay" },
-              checkOutAt: {
-                type: ["string", "null"],
-                format: "date-time",
-              },
-            },
-            required: ["reservationType", "checkOutAt"],
-          },
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ReservationLongStayChangeRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "reservationType",
+          "checkInAt",
+          "checkOutAt",
+          "guestCount",
+          "expectedVersion",
+          "reasonCode",
         ],
         properties: {
           roomId: { type: "string", format: "uuid" },
-          reservationType: { $ref: "#/components/schemas/ReservationType" },
+          reservationType: { type: "string", const: "long_stay" },
           checkInAt: { type: "string", format: "date-time" },
           checkOutAt: { type: ["string", "null"], format: "date-time" },
           guestCount: { type: "integer", minimum: 1 },
@@ -8415,6 +8471,19 @@ export const openApiDocument = {
           },
           expectedVersion: { type: "integer", minimum: 1 },
           reasonCode: { $ref: "#/components/schemas/ReasonCode" },
+        },
+      },
+      ReservationChangeRequest: {
+        oneOf: [
+          { $ref: "#/components/schemas/ReservationStandardChangeRequest" },
+          { $ref: "#/components/schemas/ReservationLongStayChangeRequest" },
+        ],
+        discriminator: {
+          propertyName: "reservationType",
+          mapping: {
+            standard: "#/components/schemas/ReservationStandardChangeRequest",
+            long_stay: "#/components/schemas/ReservationLongStayChangeRequest",
+          },
         },
       },
       ReservationMutationRequest: {

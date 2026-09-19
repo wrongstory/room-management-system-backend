@@ -74,7 +74,12 @@ def main() -> None:
             package / "api" / "reservations" / "preview_reservation_bookability.py",
             package / "models" / "reservation_list_envelope.py",
             package / "models" / "reservation_range_page_envelope.py",
-            package / "models" / "reservation_bookability_preview_request.py",
+            package / "models" / "reservation_bookability_standard_preview_request.py",
+            package / "models" / "reservation_bookability_long_stay_preview_request.py",
+            package / "models" / "reservation_standard_create_request.py",
+            package / "models" / "reservation_long_stay_create_request.py",
+            package / "models" / "reservation_standard_change_request.py",
+            package / "models" / "reservation_long_stay_change_request.py",
             package / "models" / "reservation_bookability_candidate.py",
             package / "models" / "reservation_bookability_preview.py",
             package / "models" / "reservation_bookability_preview_envelope.py",
@@ -210,23 +215,32 @@ def main() -> None:
         bookability_candidate = (
             package / "models" / "reservation_bookability_candidate.py"
         ).read_text(encoding="utf-8")
-        bookability_request = (
-            package / "models" / "reservation_bookability_preview_request.py"
+        standard_bookability_request = (
+            package / "models" / "reservation_bookability_standard_preview_request.py"
         ).read_text(encoding="utf-8")
-        reservation_type_field = (
-            "reservation_type: ReservationBookabilityPreviewRequestReservationType"
-        )
-        if reservation_type_field not in bookability_request:
-            raise RuntimeError("예약 가능성 request의 standard reservationType이 누락됐습니다.")
-        if "room_type_ids: list[UUID] | Unset" not in bookability_request:
-            raise RuntimeError("예약 가능성 request의 optional roomTypeIds가 누락됐습니다.")
-        if not all(
-            token in bookability_request
-            for token in ("exclude_reservation_id:", "UUID", "None", "Unset")
-        ):
-            raise RuntimeError(
-                "예약 가능성 request의 nullable excludeReservationId가 누락됐습니다."
-            )
+        long_stay_bookability_request = (
+            package / "models" / "reservation_bookability_long_stay_preview_request.py"
+        ).read_text(encoding="utf-8")
+        if 'reservation_type: Literal["standard"]' not in standard_bookability_request:
+            raise RuntimeError("예약 가능성 standard request의 reservationType이 누락됐습니다.")
+        if "check_out_at: datetime.datetime" not in standard_bookability_request:
+            raise RuntimeError("예약 가능성 standard request의 필수 checkout이 누락됐습니다.")
+        if 'reservation_type: Literal["long_stay"]' not in long_stay_bookability_request:
+            raise RuntimeError("예약 가능성 long-stay request의 reservationType이 누락됐습니다.")
+        if "check_out_at: datetime.datetime | None" not in long_stay_bookability_request:
+            raise RuntimeError("예약 가능성 long-stay request의 nullable checkout이 누락됐습니다.")
+        for request_model in (standard_bookability_request, long_stay_bookability_request):
+            if "check_in_at: datetime.datetime" not in request_model:
+                raise RuntimeError("예약 가능성 request의 checkInAt이 누락됐습니다.")
+            if "room_type_ids: list[UUID] | Unset" not in request_model:
+                raise RuntimeError("예약 가능성 request의 optional roomTypeIds가 누락됐습니다.")
+            if not all(
+                token in request_model
+                for token in ("exclude_reservation_id:", "UUID", "None", "Unset")
+            ):
+                raise RuntimeError(
+                    "예약 가능성 request의 nullable excludeReservationId가 누락됐습니다."
+                )
         for field in (
             "room_id: UUID",
             "room_number: str",

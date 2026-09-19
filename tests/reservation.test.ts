@@ -312,6 +312,7 @@ describe('reservation privacy and idempotency', () => {
       excludeReservationId: null
     };
     const preview = await service.previewBookability(actor, input);
+    expect(preview.reservationType).toBe('standard');
     expect(preview.candidates[0]).toMatchObject({
       intervalBookable: true,
       checkInReady: false,

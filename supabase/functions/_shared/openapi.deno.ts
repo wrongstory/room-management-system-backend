@@ -812,6 +812,18 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     .ReservationBookabilityPreviewRequest;
   const createRequest = document.components.schemas.ReservationCreateRequest;
   const changeRequest = document.components.schemas.ReservationChangeRequest;
+  const bookabilityStandard = document.components.schemas
+    .ReservationBookabilityStandardPreviewRequest;
+  const bookabilityLongStay = document.components.schemas
+    .ReservationBookabilityLongStayPreviewRequest;
+  const createStandard = document.components.schemas
+    .ReservationStandardCreateRequest;
+  const createLongStay = document.components.schemas
+    .ReservationLongStayCreateRequest;
+  const changeStandard = document.components.schemas
+    .ReservationStandardChangeRequest;
+  const changeLongStay = document.components.schemas
+    .ReservationLongStayChangeRequest;
   const bookabilityExample = bookability.requestBody.content["application/json"]
     .example;
   assert(
@@ -832,30 +844,42 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     bookability.operationId === "previewReservationBookability" &&
       bookability.requestBody.content["application/json"].schema.$ref ===
         "#/components/schemas/ReservationBookabilityPreviewRequest" &&
-      bookabilityRequest.required.includes("reservationType") &&
-      bookabilityRequest.properties.reservationType.$ref ===
-        "#/components/schemas/ReservationType" &&
-      bookabilityRequest.properties.roomTypeIds.minItems === 0 &&
+      bookabilityRequest.oneOf[0].$ref ===
+        "#/components/schemas/ReservationBookabilityStandardPreviewRequest" &&
+      bookabilityRequest.oneOf[1].$ref ===
+        "#/components/schemas/ReservationBookabilityLongStayPreviewRequest" &&
+      bookabilityStandard.properties.roomTypeIds.minItems === 0 &&
       bookabilityExample.reservationType === "standard" &&
       Array.isArray(bookabilityExample.roomTypeIds) &&
       bookabilityExample.roomTypeIds.length === 0 &&
       bookabilityExample.excludeReservationId === null &&
-      bookabilityRequest.properties.excludeReservationId.type.includes(
+      bookabilityLongStay.properties.excludeReservationId.type.includes(
         "null",
       ) &&
       document.components.schemas.ReservationBookabilityCandidate.properties
         .intervalBookable.description.includes("PIN"),
     "reservation bookability publishes separate interval and readiness axes",
   );
-  for (const schema of [bookabilityRequest, createRequest, changeRequest]) {
+  assert(
+    createRequest.oneOf.length === 2 && changeRequest.oneOf.length === 2,
+    "create and change publish discriminated reservation schedule variants",
+  );
+  for (
+    const [standardSchema, longStaySchema] of [
+      [bookabilityStandard, bookabilityLongStay],
+      [createStandard, createLongStay],
+      [changeStandard, changeLongStay],
+    ] as const
+  ) {
     assert(
-      schema.required.includes("reservationType") &&
-        schema.required.includes("checkOutAt") &&
-        schema.properties.checkOutAt.type.includes("null") &&
-        schema.oneOf[0].properties.reservationType.const === "standard" &&
-        schema.oneOf[0].properties.checkOutAt.type === "string" &&
-        schema.oneOf[1].properties.reservationType.const === "long_stay" &&
-        schema.oneOf[1].properties.checkOutAt.type.includes("null"),
+      standardSchema.required.includes("reservationType") &&
+        standardSchema.required.includes("checkOutAt") &&
+        standardSchema.properties.reservationType.const === "standard" &&
+        standardSchema.properties.checkOutAt.type === "string" &&
+        longStaySchema.required.includes("reservationType") &&
+        longStaySchema.required.includes("checkOutAt") &&
+        longStaySchema.properties.reservationType.const === "long_stay" &&
+        longStaySchema.properties.checkOutAt.type.includes("null"),
       "standard requires a timestamp while long_stay permits an explicit null end",
     );
   }
