@@ -4,6 +4,11 @@ import { AppError, type RoomMoveConflict, type RoomMoveReloadResource } from '..
 import { requestHash } from '../../lib/command.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { decryptGuestName, encryptGuestName, normalizeGuestName } from './guest-name-crypto.js';
+import {
+  RESERVATION_PAGE_SIZE,
+  ReservationCursorCodec,
+  reservationCursorScope
+} from './reservation-cursor.js';
 
 export type ReservationStatus = 'active' | 'cancelled' | 'checked_out';
 
@@ -26,6 +31,59 @@ export interface Reservation {
 
 export interface ReservationDetail extends Reservation {
   guestName: string | null;
+}
+
+export type ReservationBookabilityReason =
+  | 'RESERVATION_OVERLAP'
+  | 'OCCUPIED'
+  | 'RESERVATION_CURRENT'
+  | 'CLEANING_REQUIRED'
+  | 'CANDLE_PRESENT'
+  | 'OPERATION_BLOCKED'
+  | 'ROOM_ISSUE_BLOCKED'
+  | 'DATA_UNCONFIRMED'
+  | 'PIN_MISMATCH'
+  | 'PIN_UNCONFIGURED';
+
+export interface ReservationBookabilityCandidate {
+  roomId: string;
+  roomNumber: string;
+  roomTypeId: string;
+  roomStateVersion: number;
+  intervalBookable: boolean;
+  checkInReady: boolean;
+  reasonCodes: ReservationBookabilityReason[];
+  evaluatedAt: string;
+}
+
+export interface ReservationBookabilityPreviewInput {
+  reservationType: 'standard';
+  checkInAt: string;
+  checkOutAt: string;
+  excludeReservationId?: string | null;
+  roomTypeIds?: string[];
+}
+
+export interface ReservationBookabilityPreview {
+  checkInAt: string;
+  checkOutAt: string;
+  excludeReservationId: string | null;
+  evaluatedAt: string;
+  candidates: ReservationBookabilityCandidate[];
+  commitAuthority: 'CREATE_OR_CHANGE_REVALIDATES';
+}
+
+export interface ReservationListPageInput {
+  from: string;
+  to: string;
+  roomId?: string;
+  cursor?: string;
+}
+
+export interface ReservationListPage {
+  reservations: Reservation[];
+  nextCursor: string | null;
+  serverTime: string;
 }
 
 export type ReservationCommandResult = Reservation & {
@@ -223,6 +281,11 @@ export interface TransitionResult {
 
 export interface ReservationService {
   list(actor: Actor, roomId?: string): Promise<Reservation[]>;
+  listPage(actor: Actor, input: ReservationListPageInput): Promise<ReservationListPage>;
+  previewBookability(
+    actor: Actor,
+    input: ReservationBookabilityPreviewInput
+  ): Promise<ReservationBookabilityPreview>;
   get(actor: Actor, reservationId: string): Promise<ReservationDetail>;
   create(actor: Actor, input: CreateReservationInput): Promise<ReservationCommandResult>;
   change(actor: Actor, input: ChangeReservationInput): Promise<ReservationCommandResult>;
@@ -263,6 +326,17 @@ interface ReservationRow {
   cancelled_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface ReservationBookabilityRow {
+  room_id: string;
+  room_number: string;
+  room_type_id: string;
+  room_state_version: number;
+  interval_bookable: boolean;
+  check_in_ready: boolean;
+  reason_codes: string[];
+  evaluated_at: string;
 }
 
 function guestNameFingerprint(value: string | null, pepper: string): string | null {
@@ -429,6 +503,31 @@ function reservationError(
   if (message.includes('RESERVATION_OVERLAP') || error?.code === '23P01') {
     return new AppError(409, 'RESERVATION_OVERLAP', '같은 객실의 활성 예약 시간이 겹칩니다.');
   }
+  if (message.includes('EXCLUDE_RESERVATION_NOT_FOUND')) {
+    return new AppError(404, 'EXCLUDE_RESERVATION_NOT_FOUND', '제외할 예약을 찾을 수 없습니다.');
+  }
+  if (message.includes('EXCLUDE_RESERVATION_NOT_ELIGIBLE')) {
+    return new AppError(
+      409,
+      'EXCLUDE_RESERVATION_NOT_ELIGIBLE',
+      '현재 상태에서는 해당 예약을 preview 제외 대상으로 사용할 수 없습니다.'
+    );
+  }
+  if (message.includes('BOOKABILITY_RANGE_TOO_LARGE')) {
+    return new AppError(400, 'BOOKABILITY_RANGE_TOO_LARGE', '예약 가능성 preview는 최대 366일입니다.');
+  }
+  if (message.includes('INVALID_ROOM_TYPE_FILTER')) {
+    return new AppError(400, 'INVALID_ROOM_TYPE_FILTER', '객실 유형 필터가 올바르지 않습니다.');
+  }
+  if (message.includes('RESERVATION_RANGE_TOO_LARGE')) {
+    return new AppError(400, 'RESERVATION_RANGE_TOO_LARGE', '예약 조회 범위는 최대 31일입니다.');
+  }
+  if (message.includes('INVALID_RESERVATION_RANGE')) {
+    return new AppError(400, 'INVALID_RESERVATION_RANGE', '예약 조회 범위가 올바르지 않습니다.');
+  }
+  if (message.includes('INVALID_RESERVATION_CURSOR')) {
+    return new AppError(400, 'INVALID_RESERVATION_CURSOR', '예약 cursor가 올바르지 않습니다.');
+  }
   if (message.includes('ROOM_ALLOCATION_BLOCKED')) {
     return new AppError(409, 'ROOM_ALLOCATION_BLOCKED', '현재 객실 차단 사유를 해소한 뒤 예약해 주세요.');
   }
@@ -521,6 +620,11 @@ const roomMoveBlockingReasons = new Set<ReservationRoomMoveBlockingReason>([
   'CLEANING_ASSIGNMENT_LOCKED', 'PIN_LEASE_ACTIVE', 'TARGET_ROOM_BLOCKED',
   'TARGET_ROOM_NOT_READY'
 ]);
+const bookabilityReasons = new Set<ReservationBookabilityReason>([
+  'RESERVATION_OVERLAP', 'OCCUPIED', 'RESERVATION_CURRENT', 'CLEANING_REQUIRED',
+  'CANDLE_PRESENT', 'OPERATION_BLOCKED', 'ROOM_ISSUE_BLOCKED', 'DATA_UNCONFIRMED',
+  'PIN_MISMATCH', 'PIN_UNCONFIGURED'
+]);
 
 function roomMoveProjectionError(): never {
   throw new AppError(500, 'RESERVATION_PROJECTION_INVALID', '예약 응답을 안전하게 확인하지 못했습니다.');
@@ -570,6 +674,43 @@ function projectionEnum<T extends string>(value: unknown, allowed: ReadonlySet<T
 function projectionArray<T extends string>(value: unknown, allowed: ReadonlySet<T>): T[] {
   if (!Array.isArray(value)) roomMoveProjectionError();
   return value.map((item) => projectionEnum(item, allowed));
+}
+
+function bookabilityCandidate(row: ReservationBookabilityRow): ReservationBookabilityCandidate {
+  if (
+    typeof row.room_number !== 'string' || row.room_number.length < 1 || row.room_number.length > 20
+    || typeof row.interval_bookable !== 'boolean' || typeof row.check_in_ready !== 'boolean'
+  ) roomMoveProjectionError();
+  return {
+    roomId: projectionString(row.room_id, projectionUuidPattern),
+    roomNumber: row.room_number,
+    roomTypeId: projectionString(row.room_type_id, projectionUuidPattern),
+    roomStateVersion: projectionPositiveInteger(row.room_state_version),
+    intervalBookable: row.interval_bookable,
+    checkInReady: row.check_in_ready,
+    reasonCodes: projectionArray(row.reason_codes, bookabilityReasons),
+    evaluatedAt: projectionTimestamp(row.evaluated_at)
+  };
+}
+
+function reservationPageRow(value: unknown): Reservation {
+  const row = projectionRecord(value);
+  return toCommandResult({
+    id: projectionString(row.id, projectionUuidPattern),
+    room_id: projectionString(row.room_id, projectionUuidPattern),
+    check_in_at: projectionTimestamp(row.check_in_at),
+    check_out_at: projectionTimestamp(row.check_out_at),
+    guest_count: projectionPositiveInteger(row.guest_count),
+    status: projectionEnum(row.status, new Set<ReservationStatus>(['active', 'cancelled', 'checked_out'])),
+    preparation_obligation_id: projectionString(row.preparation_obligation_id, projectionUuidPattern),
+    checkout_obligation_id: projectionString(row.checkout_obligation_id, projectionUuidPattern),
+    version: projectionPositiveInteger(row.version),
+    actual_check_in_at: row.actual_check_in_at === null ? null : projectionTimestamp(row.actual_check_in_at),
+    actual_checkout_at: row.actual_checkout_at === null ? null : projectionTimestamp(row.actual_checkout_at),
+    cancelled_at: row.cancelled_at === null ? null : projectionTimestamp(row.cancelled_at),
+    created_at: projectionTimestamp(row.created_at),
+    updated_at: projectionTimestamp(row.updated_at)
+  });
 }
 
 function roomMoveOutcome(value: unknown): ReservationRoomMoveOutcome {
@@ -718,13 +859,17 @@ function toManualCleaningRequest(row: ManualCleaningRequestRow): ManualCleaningR
 }
 
 export class SupabaseReservationService implements ReservationService {
+  private readonly reservationCursors: ReservationCursorCodec;
+
   constructor(
     private readonly clients: SupabaseClients,
     private readonly piiKey: string,
     private readonly piiKeyVersion: string,
     private readonly guestNamePepper: string,
     private readonly previousPiiKeys: Record<string, string> = {}
-  ) {}
+  ) {
+    this.reservationCursors = new ReservationCursorCodec(guestNamePepper);
+  }
 
   async list(actor: Actor, roomId?: string): Promise<Reservation[]> {
     ensureAdmin(actor);
@@ -751,6 +896,70 @@ export class SupabaseReservationService implements ReservationService {
       createdAt: row.created_at,
       updatedAt: row.updated_at
     }));
+  }
+
+  async listPage(actor: Actor, input: ReservationListPageInput): Promise<ReservationListPage> {
+    ensureAdmin(actor);
+    const scope = reservationCursorScope(actor, input);
+    const after = input.cursor
+      ? this.reservationCursors.decode(input.cursor, scope)
+      : null;
+    const { data, error } = await this.clients.admin.rpc('list_reservations_page', {
+      p_actor_profile_id: actor.profileId,
+      p_from: input.from,
+      p_to: input.to,
+      p_room_id: input.roomId ?? null,
+      p_after_check_in_at: after?.checkInAt ?? null,
+      p_after_id: after?.id ?? null,
+      p_limit: RESERVATION_PAGE_SIZE
+    });
+    if (error || !data) throw reservationError(error);
+    const result = projectionRecord(data);
+    if (!Array.isArray(result.reservations) || typeof result.has_more !== 'boolean') {
+      roomMoveProjectionError();
+    }
+    const reservations = result.reservations.map(reservationPageRow);
+    const serverTime = projectionTimestamp(result.server_time);
+    const last = reservations.at(-1);
+    if (result.has_more && !last) roomMoveProjectionError();
+    return {
+      reservations,
+      nextCursor: result.has_more && last
+        ? this.reservationCursors.encode(scope, { checkInAt: last.checkInAt, id: last.id })
+        : null,
+      serverTime
+    };
+  }
+
+  async previewBookability(
+    actor: Actor,
+    input: ReservationBookabilityPreviewInput
+  ): Promise<ReservationBookabilityPreview> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('preview_reservation_bookability', {
+      p_actor_profile_id: actor.profileId,
+      p_check_in_at: input.checkInAt,
+      p_check_out_at: input.checkOutAt,
+      p_exclude_reservation_id: input.excludeReservationId ?? null,
+      p_room_type_ids: input.roomTypeIds?.length ? input.roomTypeIds : null,
+      p_reservation_type: input.reservationType
+    });
+    if (error || !data) throw reservationError(error);
+    const result = projectionRecord(data);
+    if (!Array.isArray(result.candidates)) roomMoveProjectionError();
+    const evaluatedAt = projectionTimestamp(result.evaluated_at);
+    const candidates = (result.candidates as ReservationBookabilityRow[]).map(bookabilityCandidate);
+    if (candidates.some((candidate) => candidate.evaluatedAt !== evaluatedAt)) {
+      roomMoveProjectionError();
+    }
+    return {
+      checkInAt: input.checkInAt,
+      checkOutAt: input.checkOutAt,
+      excludeReservationId: input.excludeReservationId ?? null,
+      evaluatedAt,
+      candidates,
+      commitAuthority: 'CREATE_OR_CHANGE_REVALIDATES'
+    };
   }
 
   async get(actor: Actor, reservationId: string): Promise<ReservationDetail> {

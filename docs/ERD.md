@@ -1233,3 +1233,18 @@ PIN rotation은 assignment→target→profile→entitlement→open reveal 순서
 password-complete, current/notified, nonterminal target, exact typed outbox와 current PIN revision 존재가 모두
 일치하는 row만 생성하고 기존 PIN/assignment/notification/audit/receipt/reveal 이력을 수정하지 않는다.
 물리 mismatch는 durable backfill을 제거하지 않고 실제 reveal에서만 verified 복구 전까지 차단한다.
+
+## #196 Reservation bookability read projection (65번째 source migration)
+
+`20260918010000_reservation_bookability.sql`은 기존 64개 migration을 수정하지 않는다. 새 원장이나 상태
+컬럼은 만들지 않고 `reservations(check_in_at, id)` calendar index와 service-role read RPC 두 개만 추가한다.
+`preview_reservation_bookability`는 `reservationType=standard`만 허용하고 빈/생략 room type filter를 전체로
+정규화한 뒤 canonical non-retired scheduled/active `stay_room_segments`의 반개구간
+overlap과 기존 room block reason을 재사용한다. PIN/현재 readiness는 `check_in_ready` 축으로만 계산하며
+`interval_bookable`을 바꾸지 않는다. 정확히 검증된 active·체크인 전 예약만 exclusion 대상으로 허용한다.
+
+`list_reservations_page`는 최대 31일·50건의 `[from,to)` overlap을 `(check_in_at,id)` keyset으로 읽고,
+한 `server_time` snapshot으로 각 예약의 projected room을 계산한다. optional room filter는 현재 row pointer가
+아니라 범위와 겹친 stay segment 이력을 사용하므로 retired/cancelled segment도 calendar history에 남는다.
+두 RPC 모두 고객명 암호화 필드와 maid identity를 projection하지 않고 PUBLIC/anon/authenticated execute를
+회수한다. HTTP cursor 서명은 DB 원장에 저장하지 않으며 adapter에서 actor와 filter scope를 검증한다.

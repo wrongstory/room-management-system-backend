@@ -7,6 +7,10 @@ import {
   encryptGuestName,
   normalizeGuestName
 } from '../src/modules/reservations/guest-name-crypto.js';
+import {
+  ReservationCursorCodec,
+  reservationCursorScope
+} from '../src/modules/reservations/reservation-cursor.js';
 import { SupabaseReservationService } from '../src/modules/reservations/reservation.service.js';
 import { assertNoContactInformation } from '../src/modules/rooms/room.service.js';
 
@@ -189,6 +193,105 @@ describe('reservation privacy and idempotency', () => {
       'list_reservations',
       'get_reservation_detail'
     ]);
+  });
+
+  it('pages bounded reservation ranges with an actor/filter scoped cursor and no PII', async () => {
+    const rpc = vi.fn(async (_name: string, parameters: Record<string, unknown>) => ({
+      data: {
+        server_time: '2026-09-01T00:00:00Z',
+        reservations: [{ ...commandResult, guest_name_encrypted: 'must-not-leak' }],
+        has_more: parameters.p_after_id === null
+      },
+      error: null
+    }));
+    const clients = {
+      admin: { rpc }, publicClient: {}, forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseReservationService(clients, piiKey, 'test-v1', guestNamePepper);
+    const input = {
+      from: '2026-09-01T00:00:00Z',
+      to: '2026-09-30T00:00:00Z',
+      roomId: commandResult.room_id
+    };
+
+    const first = await service.listPage(actor, input);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(JSON.stringify(first)).not.toContain('must-not-leak');
+    if (!first.nextCursor) throw new Error('expected cursor');
+    const second = await service.listPage(actor, { ...input, cursor: first.nextCursor });
+    expect(second.nextCursor).toBeNull();
+    expect(rpc.mock.calls[1]?.[1]).toMatchObject({
+      p_after_check_in_at: commandResult.check_in_at,
+      p_after_id: commandResult.id,
+      p_limit: 50
+    });
+    await expect(service.listPage(actor, {
+      ...input,
+      roomId: '51000000-0000-4000-8000-000000000002',
+      cursor: first.nextCursor
+    })).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_RESERVATION_CURSOR' });
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects signed cursors whose keyset timestamp or UUID is malformed', () => {
+    const codec = new ReservationCursorCodec(guestNamePepper);
+    const scope = reservationCursorScope(actor, {
+      from: '2026-09-01T00:00:00Z',
+      to: '2026-09-30T00:00:00Z'
+    });
+    const malformed = codec.encode(scope, { checkInAt: 'not-a-timestamp', id: 'not-a-uuid' });
+    expect(() => codec.decode(malformed, scope)).toThrowError(
+      expect.objectContaining({ statusCode: 400, code: 'INVALID_RESERVATION_CURSOR' })
+    );
+  });
+
+  it('keeps PIN readiness separate from interval bookability and permits no matches', async () => {
+    let empty = false;
+    const rpc = vi.fn(async () => ({
+      data: {
+        evaluated_at: '2026-09-01T00:00:00Z',
+        candidates: empty ? [] : [{
+          room_id: commandResult.room_id,
+          room_number: '117',
+          room_type_id: '52000000-0000-4000-8000-000000000001',
+          room_state_version: 2,
+          interval_bookable: true,
+          check_in_ready: false,
+          reason_codes: ['PIN_MISMATCH'],
+          evaluated_at: '2026-09-01T00:00:00Z'
+        }]
+      },
+      error: null
+    }));
+    const clients = {
+      admin: { rpc }, publicClient: {}, forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseReservationService(clients, piiKey, 'test-v1', guestNamePepper);
+    const input = {
+      reservationType: 'standard' as const,
+      checkInAt: '2026-10-01T16:00:00+09:00',
+      checkOutAt: '2026-10-02T11:00:00+09:00',
+      roomTypeIds: [],
+      excludeReservationId: null
+    };
+    const preview = await service.previewBookability(actor, input);
+    expect(preview.candidates[0]).toMatchObject({
+      intervalBookable: true,
+      checkInReady: false,
+      reasonCodes: ['PIN_MISMATCH']
+    });
+    expect(preview.commitAuthority).toBe('CREATE_OR_CHANGE_REVALIDATES');
+    expect(rpc).toHaveBeenLastCalledWith('preview_reservation_bookability', expect.objectContaining({
+      p_reservation_type: 'standard',
+      p_room_type_ids: null,
+      p_exclude_reservation_id: null
+    }));
+
+    empty = true;
+    await expect(service.previewBookability(actor, input)).resolves.toMatchObject({
+      evaluatedAt: '2026-09-01T00:00:00Z',
+      candidates: []
+    });
   });
 
   it('allowlists room-move projections and fails closed on malformed DB values', async () => {

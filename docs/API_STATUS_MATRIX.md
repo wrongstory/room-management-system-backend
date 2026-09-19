@@ -1309,6 +1309,27 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [ ] release/main 승인 및 production migration/API/hosted smoke
 
 Phase C는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**다. dev 병합이나 CI PASS를 운영 사용 가능 근거로 사용하지 않는다.
+
+### #196 예약 bookability preview·bounded calendar — source 후보
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `POST /v1/reservations/bookability/preview` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 필수 `reservationType=standard`, strict RFC 3339 `[in,out)`, roomTypeIds 생략/`[]`=전체, exclusion 생략/`null`=없음, non-null UUID exact 검증, read-only/non-authoritative |
+| [x] | `GET /v1/reservations?from&to&roomId&cursor` | 동일 | ✅ | ✅ | ✅ | ❌ | ❌ | 최대 31일·50건, `(checkInAt,id)` cursor, 단일 serverTime snapshot, 고객/메이드 PII 없음 |
+
+- [x] 기존 64 migrations 불변, 65번째 append-only `reservation_bookability` migration과 range index/read RPC 2개 추가
+- [x] query 없는 기존 `GET /v1/reservations`의 `{reservations}` 응답 호환 유지; range query response만 `nextCursor`/`serverTime`을 additive하게 제공
+- [x] `intervalBookable`과 `checkInReady` 분리; PIN mismatch/unconfigured는 readiness만 변경하며 create/change의 최종 overlap authority 유지
+- [x] cursor는 신규 배포 secret 없이 기존 `RESERVATION_GUEST_NAME_PEPPER`에서 목적 분리한 HMAC key 사용; actor/from/to/roomId/sort/keyset scope와 tamper 검증
+- [x] room filter는 요청 범위와 겹친 stay segment history를 기준으로 cancelled/retired segment도 보존; preview overlap은 non-retired scheduled/active segment만 사용
+- [x] OpenAPI `0.4.0` 후보 114 paths / 122 operations와 ephemeral Python generated contract 갱신
+- [x] local fresh 65 migration, 신규 pgTAP, Fastify/Edge contract 검증
+- [x] 전체 local application/DB/concurrency quality gate
+- [x] 독립 리뷰 — working tree QA 98/100, P0/P1/P2=0/0/0; exact-head CI는 PR에서 별도 확인
+- [ ] release/main 승인 뒤 production migration/API 배포 및 hosted smoke
+
+#196은 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. preview 성공을 예약 확정으로 표시하지 않고 실제 생성·변경 409를 최종 판정으로 사용한다.
+
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

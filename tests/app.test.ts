@@ -137,6 +137,19 @@ function services(): AppServices {
     },
     reservations: {
       list: vi.fn(async () => []),
+      listPage: vi.fn(async () => ({
+        reservations: [],
+        nextCursor: null,
+        serverTime: '2026-09-16T08:00:00.000Z'
+      })),
+      previewBookability: vi.fn(async (_actor, input) => ({
+        checkInAt: input.checkInAt,
+        checkOutAt: input.checkOutAt,
+        excludeReservationId: input.excludeReservationId ?? null,
+        evaluatedAt: '2026-09-16T08:00:00.000Z',
+        candidates: [],
+        commitAuthority: 'CREATE_OR_CHANGE_REVALIDATES' as const
+      })),
       get: vi.fn(),
       create: vi.fn(async (_actor, input) => ({
         id: '41000000-0000-4000-8000-000000000001',
@@ -677,6 +690,83 @@ describe('application', () => {
     });
     expect(JSON.stringify(response.json())).not.toContain('guest_name_encrypted');
     expect(JSON.stringify(response.json())).not.toContain('홍길동');
+    await app.close();
+  });
+
+  it('keeps the legacy reservation list envelope and adds bounded range mode', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const legacy = await app.inject({
+      method: 'GET',
+      url: '/v1/reservations',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    expect(legacy.statusCode).toBe(200);
+    expect(legacy.json()).toEqual({ reservations: [] });
+    expect(appServices.reservations.list).toHaveBeenCalledTimes(1);
+    expect(appServices.reservations.listPage).not.toHaveBeenCalled();
+
+    const ranged = await app.inject({
+      method: 'GET',
+      url: '/v1/reservations?from=2026-09-01T00%3A00%3A00Z&to=2026-09-30T00%3A00%3A00Z',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    expect(ranged.statusCode).toBe(200);
+    expect(ranged.json()).toEqual({
+      reservations: [],
+      nextCursor: null,
+      serverTime: '2026-09-16T08:00:00.000Z'
+    });
+    expect(appServices.reservations.listPage).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      {
+        from: '2026-09-01T00:00:00Z',
+        to: '2026-09-30T00:00:00Z'
+      }
+    );
+    await app.close();
+  });
+
+  it('dispatches the static reservation bookability preview before detail routes', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/bookability/preview',
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        reservationType: 'standard',
+        checkInAt: '2026-10-01T16:00:00+09:00',
+        checkOutAt: '2026-10-02T11:00:00+09:00',
+        roomTypeIds: [],
+        excludeReservationId: null
+      }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().preview).toMatchObject({
+      candidates: [],
+      commitAuthority: 'CREATE_OR_CHANGE_REVALIDATES'
+    });
+    expect(appServices.reservations.previewBookability).toHaveBeenCalledTimes(1);
+    expect(appServices.reservations.previewBookability).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({
+        reservationType: 'standard', roomTypeIds: [], excludeReservationId: null
+      })
+    );
+    expect(appServices.reservations.get).not.toHaveBeenCalled();
+    const unsupported = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/bookability/preview',
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        reservationType: 'long_stay',
+        checkInAt: '2026-10-01T16:00:00+09:00',
+        checkOutAt: '2026-10-02T11:00:00+09:00'
+      }
+    });
+    expect(unsupported.statusCode).toBe(400);
+    expect(appServices.reservations.previewBookability).toHaveBeenCalledTimes(1);
     await app.close();
   });
 
