@@ -8131,7 +8131,7 @@ export const openApiDocument = {
             type: "integer",
             minimum: 0,
             description:
-              "assignment의 serviceDate와 target originalServiceDate 사이의 immutable 업무일 이동 횟수입니다.",
+              "target carryoverCount를 상한으로 삼아 해당 assignment revision까지 확인된 ROLLED_OVER schedule evidence만 센 값입니다. 예약 일정 변경이나 근거 없는 날짜 차이는 0입니다.",
           },
           rolloverReason: {
             type: ["string", "null"],

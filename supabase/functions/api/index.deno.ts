@@ -552,7 +552,6 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
       | string
       | null,
     notified_room_number_snapshot: "109" as string | null,
-    change_reason_code: null,
     ended_at: null,
     created_at: "2026-09-03T10:00:00Z",
   };
@@ -612,6 +611,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
               cleaning_kind: "checkout",
               original_service_date: "2026-09-04",
               effective_service_date: "2026-09-04",
+              carryover_count: 0,
               status: "notified",
               assignment_version: 999,
               room_type_snapshot: {
@@ -713,6 +713,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
                   cleaning_kind: "checkout",
                   original_service_date: "2026-09-04",
                   effective_service_date: "2026-09-04",
+                  carryover_count: 0,
                   status: "notified",
                   assignment_version: 999,
                   room_type_snapshot: {

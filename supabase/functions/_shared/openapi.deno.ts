@@ -648,6 +648,9 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
   assert(
     card.properties.durationMinutes.type.includes("null") &&
       card.properties.targetStatus.type.includes("null") &&
+      card.properties.targetStatus.enum.filter((value) => value !== null)
+          .join(",") ===
+        "unassigned,draft_assigned,notified,in_progress,upload_pending,inspection_pending,approved,rejected,cancelled" &&
       JSON.stringify(assignments.responses["200"]).includes(
         "#/components/schemas/AssignmentCard",
       ) &&

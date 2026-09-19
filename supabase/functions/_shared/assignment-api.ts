@@ -20,7 +20,6 @@ interface AssignmentRow {
   notified_at: string | null;
   notified_room_id_snapshot: string | null;
   notified_room_number_snapshot: string | null;
-  change_reason_code: string | null;
   ended_at: string | null;
   created_at: string;
 }
@@ -31,6 +30,7 @@ interface TargetRow {
   cleaning_kind: string;
   original_service_date: string;
   effective_service_date: string;
+  carryover_count: number;
   status: string;
   assignment_version: number;
   room_type_snapshot: unknown;
@@ -489,7 +489,6 @@ const assignmentColumns = [
   "notified_at",
   "notified_room_id_snapshot",
   "notified_room_number_snapshot",
-  "change_reason_code",
   "ended_at",
   "created_at",
 ].join(",");
@@ -928,14 +927,36 @@ function assignmentCardSnapshot(target: TargetRow) {
   };
 }
 
-function dateDistance(from: string, to: string): number {
-  const milliseconds = Date.parse(`${to}T00:00:00Z`) -
-    Date.parse(`${from}T00:00:00Z`);
-  const days = milliseconds / 86_400_000;
-  if (!Number.isSafeInteger(days) || days < 0) {
+const rolloverReasonCodes = new Set([
+  "ROLLED_OVER_UNASSIGNED",
+  "ROLLED_OVER_NOT_STARTED",
+]);
+
+function assignmentRolloverSnapshot(
+  target: TargetRow,
+  row: AssignmentRow,
+  schedules: TargetScheduleRow[],
+) {
+  if (
+    !Number.isSafeInteger(target.carryover_count) ||
+    target.carryover_count < 0
+  ) {
     throw assignmentDatabaseError(null);
   }
-  return days;
+  const evidence = schedules
+    .filter((candidate) =>
+      candidate.cleaning_target_id === row.cleaning_target_id &&
+      candidate.revision <= row.revision &&
+      rolloverReasonCodes.has(candidate.reason_code)
+    )
+    .sort((left, right) => right.revision - left.revision);
+  const rolloverCount = Math.min(target.carryover_count, evidence.length);
+  return {
+    rolloverCount,
+    rolloverReason: rolloverCount === 0
+      ? null
+      : evidence[0]?.reason_code ?? null,
+  };
 }
 
 async function hydrateAssignments(
@@ -952,7 +973,7 @@ async function hydrateAssignments(
       clients.admin
         .from("cleaning_targets")
         .select(
-          "id,room_id,cleaning_kind,original_service_date,effective_service_date,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
+          "id,room_id,cleaning_kind,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
         )
         .in("id", targetIds),
       clients.admin
@@ -1028,15 +1049,7 @@ async function hydrateAssignments(
     const attempt = attempts.get(row.id);
     const submission = attempt ? submissions.get(attempt.id) : undefined;
     const card = assignmentCardSnapshot(target);
-    const rolloverCount = dateDistance(
-      card.originalServiceDate,
-      row.service_date,
-    );
-    const schedule = schedules.find((candidate) =>
-      candidate.cleaning_target_id === row.cleaning_target_id &&
-      candidate.effective_service_date === row.service_date &&
-      candidate.revision <= row.revision
-    );
+    const rollover = assignmentRolloverSnapshot(target, row, schedules);
     const targetMatchesRevision = row.is_current &&
       target.assignment_version === row.revision &&
       target.effective_service_date === row.service_date;
@@ -1061,10 +1074,7 @@ async function hydrateAssignments(
         ? row.revision
         : target.assignment_version,
       ...card,
-      rolloverCount,
-      rolloverReason: rolloverCount === 0
-        ? null
-        : schedule?.reason_code ?? row.change_reason_code ?? null,
+      ...rollover,
       targetStatus: actor.role === "admin" || targetMatchesRevision
         ? target.status
         : null,

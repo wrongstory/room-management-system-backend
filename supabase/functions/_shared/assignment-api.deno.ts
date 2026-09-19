@@ -473,14 +473,19 @@ function assignmentRow(overrides: Record<string, unknown> = {}) {
     notified_at: "2026-09-03T12:00:00Z",
     notified_room_id_snapshot: roomId,
     notified_room_number_snapshot: "101",
-    change_reason_code: null,
     ended_at: null,
     created_at: "2026-09-03T10:00:00Z",
     ...overrides,
   };
 }
 
-function readClients(rows: unknown[]) {
+function readClients(
+  rows: unknown[],
+  options: {
+    target?: Record<string, unknown>;
+    schedules?: Record<string, unknown>[];
+  } = {},
+) {
   const access = queryResult(rows);
   const targets = queryResult([
     {
@@ -489,6 +494,7 @@ function readClients(rows: unknown[]) {
       cleaning_kind: "checkout",
       original_service_date: "2026-09-03",
       effective_service_date: "2026-09-04",
+      carryover_count: 4,
       status: "notified",
       assignment_version: 999,
       room_type_snapshot: {
@@ -499,6 +505,7 @@ function readClients(rows: unknown[]) {
       fee_snapshot: 16000,
       template_snapshot: { durationMinutes: null },
       rooms: { room_number: "101" },
+      ...options.target,
     },
   ]);
   const maids = queryResult([
@@ -515,12 +522,14 @@ function readClients(rows: unknown[]) {
     version: 1,
     status: "submitted",
   }]);
-  const schedules = queryResult([{
-    cleaning_target_id: targetId,
-    revision: 2,
-    effective_service_date: "2026-09-04",
-    reason_code: "ROLLED_OVER_NOT_STARTED",
-  }]);
+  const schedules = queryResult(
+    options.schedules ?? [{
+      cleaning_target_id: targetId,
+      revision: 2,
+      effective_service_date: "2026-09-04",
+      reason_code: "ROLLED_OVER_NOT_STARTED",
+    }],
+  );
   const clients = {
     forAccessToken: () => ({ from: () => access.query }),
     admin: {
@@ -708,6 +717,46 @@ Deno.test("maid list and history preserve own notified revisions only, without c
     denied.code === "ASSIGNMENT_ACCESS_REQUIRED",
     "unpublished target history forbidden",
   );
+});
+
+Deno.test("assignment cards count only rollover evidence visible at that revision", async () => {
+  for (const serviceDate of ["2026-09-02", "2026-09-06"]) {
+    const { clients } = readClients([
+      assignmentRow({ service_date: serviceDate, revision: 4 }),
+    ], {
+      target: {
+        effective_service_date: "2026-09-08",
+        carryover_count: 2,
+        assignment_version: 6,
+      },
+      schedules: [{
+        cleaning_target_id: targetId,
+        revision: 4,
+        effective_service_date: serviceDate,
+        reason_code: "RESERVATION_CHANGED",
+      }, {
+        cleaning_target_id: targetId,
+        revision: 5,
+        effective_service_date: "2026-09-07",
+        reason_code: "ROLLED_OVER_NOT_STARTED",
+      }, {
+        cleaning_target_id: targetId,
+        revision: 6,
+        effective_service_date: "2026-09-08",
+        reason_code: "ROLLED_OVER_UNASSIGNED",
+      }],
+    });
+    const result = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      admin,
+      targetId,
+    );
+    assert(
+      result[0].rolloverCount === 0 && result[0].rolloverReason === null,
+      "reservation date changes never become rollover",
+    );
+  }
 });
 
 Deno.test("legacy notified assignment without a proven room snapshot remains null", async () => {

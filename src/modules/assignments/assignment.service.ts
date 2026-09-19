@@ -18,12 +18,12 @@ interface AssignmentRow {
   service_date: string; sequence_number: number; revision: number; is_current: boolean;
   available_from_snapshot: string | null; due_at_snapshot: string | null;
   notified_at: string | null; notified_room_id_snapshot: string | null;
-  notified_room_number_snapshot: string | null; change_reason_code: string | null;
+  notified_room_number_snapshot: string | null;
   ended_at: string | null; created_at: string;
 }
 interface TargetRow {
   id: string; room_id: string; cleaning_kind: string; original_service_date: string;
-  effective_service_date: string; status: string; assignment_version: number;
+  effective_service_date: string; carryover_count: number; status: string; assignment_version: number;
   room_type_snapshot: unknown; fee_snapshot: number; template_snapshot: unknown;
   rooms?: { room_number: string } | Array<{ room_number: string }> | null;
 }
@@ -55,10 +55,21 @@ function roomNumber(target: TargetRow): string {
   return room.room_number;
 }
 
-function dayDistance(from: string, to: string): number {
-  const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
-  if (!Number.isSafeInteger(days) || days < 0) throw databaseError(null);
-  return days;
+const rolloverReasonCodes = new Set(['ROLLED_OVER_UNASSIGNED', 'ROLLED_OVER_NOT_STARTED']);
+
+function rolloverSnapshot(target: TargetRow, row: AssignmentRow, schedules: ScheduleRow[]) {
+  if (!Number.isSafeInteger(target.carryover_count) || target.carryover_count < 0) {
+    throw databaseError(null);
+  }
+  const evidence = schedules
+    .filter((candidate) => candidate.cleaning_target_id === row.cleaning_target_id &&
+      candidate.revision <= row.revision && rolloverReasonCodes.has(candidate.reason_code))
+    .sort((left, right) => right.revision - left.revision);
+  const rolloverCount = Math.min(target.carryover_count, evidence.length);
+  return {
+    rolloverCount,
+    rolloverReason: rolloverCount === 0 ? null : evidence[0]?.reason_code ?? null
+  };
 }
 
 export class SupabaseAssignmentService implements AssignmentService {
@@ -116,7 +127,7 @@ export class SupabaseAssignmentService implements AssignmentService {
     return [
       'id', 'cleaning_target_id', 'maid_profile_id', 'service_date', 'sequence_number', 'revision',
       'is_current', 'available_from_snapshot', 'due_at_snapshot', 'notified_at',
-      'notified_room_id_snapshot', 'notified_room_number_snapshot', 'change_reason_code', 'ended_at', 'created_at'
+      'notified_room_id_snapshot', 'notified_room_number_snapshot', 'ended_at', 'created_at'
     ].join(',');
   }
 
@@ -127,7 +138,7 @@ export class SupabaseAssignmentService implements AssignmentService {
     const assignmentIds = rows.map((row) => row.id);
     const [targetsResult, profilesResult, attemptsResult, schedulesResult] = await Promise.all([
       this.clients.admin.from('cleaning_targets').select(
-        'id,room_id,cleaning_kind,original_service_date,effective_service_date,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)'
+        'id,room_id,cleaning_kind,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)'
       ).in('id', targetIds),
       this.clients.admin.from('profiles').select('id,display_name').in('id', maidIds),
       this.clients.admin.from('cleaning_attempts').select('id,assignment_id,attempt_number,status')
@@ -166,9 +177,7 @@ export class SupabaseAssignmentService implements AssignmentService {
         (duration !== null && duration !== undefined && (!Number.isSafeInteger(duration) || (duration as number) <= 0))) {
         throw databaseError(null);
       }
-      const rolloverCount = dayDistance(target.original_service_date, row.service_date);
-      const schedule = schedules.find((candidate) => candidate.cleaning_target_id === row.cleaning_target_id &&
-        candidate.effective_service_date === row.service_date && candidate.revision <= row.revision);
+      const rollover = rolloverSnapshot(target, row, schedules);
       const attempt = attempts.get(row.id);
       const submission = attempt ? submissions.get(attempt.id) : undefined;
       const targetMatchesRevision = row.is_current && target.assignment_version === row.revision &&
@@ -185,8 +194,7 @@ export class SupabaseAssignmentService implements AssignmentService {
         cleaningKind: target.cleaning_kind, roomTypeCode: text(roomType.code), roomTypeName: text(roomType.name),
         elevatorZone: text(roomType.elevatorZone), feeSnapshot: target.fee_snapshot,
         durationMinutes: duration === null || duration === undefined ? null : duration,
-        originalServiceDate: target.original_service_date, rolloverCount,
-        rolloverReason: rolloverCount === 0 ? null : schedule?.reason_code ?? row.change_reason_code ?? null,
+        originalServiceDate: target.original_service_date, ...rollover,
         targetStatus: actor.role === 'admin' || targetMatchesRevision ? target.status : null,
         attemptStatus: attempt?.status ?? null, submissionStatus: submission?.status ?? null,
         availableFrom: row.available_from_snapshot, dueAt: row.due_at_snapshot,

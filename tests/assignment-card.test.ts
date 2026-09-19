@@ -43,7 +43,6 @@ const assignments = assignmentIds.map((id, index) => ({
   notified_at: '2026-09-19T00:00:00Z',
   notified_room_id_snapshot: `60000000-0000-4000-8000-00000000000${index + 1}`,
   notified_room_number_snapshot: `통보-${index + 1}`,
-  change_reason_code: index === 3 ? 'MISSED_SERVICE_DATE' : null,
   ended_at: index === 3 ? '2026-09-20T15:00:00Z' : null,
   created_at: '2026-09-19T00:00:00Z'
 }));
@@ -55,7 +54,8 @@ const targets = targetIds.map((id, index) => ({
   cleaning_kind: kinds[index],
   original_service_date: '2026-09-20',
   effective_service_date: index === 3 ? '2026-09-22' : '2026-09-20',
-  status: index === 3 ? 'assigned' : 'planned',
+  carryover_count: index === 3 ? 2 : 0,
+  status: index === 3 ? 'draft_assigned' : 'unassigned',
   assignment_version: index === 3 ? 3 : 1,
   room_type_snapshot: {
     code: `TYPE-${index + 1}`,
@@ -93,7 +93,7 @@ function query(initialRows: Row[]) {
   return builder;
 }
 
-function service() {
+function service(overrides: Partial<Record<string, Row[]>> = {}) {
   const tables: Record<string, Row[]> = {
     cleaning_assignments: assignments,
     cleaning_targets: targets,
@@ -113,8 +113,14 @@ function service() {
       cleaning_target_id: targetIds[3],
       revision: 2,
       effective_service_date: '2026-09-21',
-      reason_code: 'MISSED_SERVICE_DATE'
-    }]
+      reason_code: 'ROLLED_OVER_NOT_STARTED'
+    }, {
+      cleaning_target_id: targetIds[3],
+      revision: 3,
+      effective_service_date: '2026-09-22',
+      reason_code: 'ROLLED_OVER_UNASSIGNED'
+    }],
+    ...overrides
   };
   const from = (table: string) => query(tables[table] ?? []);
   return new SupabaseAssignmentService({
@@ -147,7 +153,7 @@ describe('assignment card projection', () => {
       originalServiceDate: '2026-09-20',
       rolloverCount: 0,
       rolloverReason: null,
-      targetStatus: 'planned',
+      targetStatus: 'unassigned',
       attemptStatus: 'in_progress',
       submissionStatus: 'submitted'
     });
@@ -165,10 +171,53 @@ describe('assignment card projection', () => {
       targetAssignmentVersion: 2,
       originalServiceDate: '2026-09-20',
       rolloverCount: 1,
-      rolloverReason: 'MISSED_SERVICE_DATE',
+      rolloverReason: 'ROLLED_OVER_NOT_STARTED',
       targetStatus: null
     });
     expect(result[0]).not.toMatchObject({ roomNumber: '현재-4', targetAssignmentVersion: 3 });
+  });
+
+  it('does not infer rollover from reservation schedule dates moving backward or forward', async () => {
+    for (const serviceDate of ['2026-09-19', '2026-09-22']) {
+      const row = {
+        ...(assignments[0] ?? {}),
+        service_date: serviceDate,
+        revision: 4
+      } as Row;
+      const target = {
+        ...(targets[0] ?? {}),
+        effective_service_date: serviceDate,
+        carryover_count: 2,
+        assignment_version: 6
+      } as Row;
+      const result = await service({
+        cleaning_assignments: [row],
+        cleaning_targets: [target],
+        cleaning_target_schedule_revisions: [{
+          cleaning_target_id: targetIds[0],
+          revision: 4,
+          effective_service_date: serviceDate,
+          reason_code: 'RESERVATION_CHANGED'
+        }, {
+          cleaning_target_id: targetIds[0],
+          revision: 5,
+          effective_service_date: '2026-09-23',
+          reason_code: 'ROLLED_OVER_NOT_STARTED'
+        }, {
+          cleaning_target_id: targetIds[0],
+          revision: 6,
+          effective_service_date: '2026-09-24',
+          reason_code: 'ROLLED_OVER_UNASSIGNED'
+        }]
+      }).history(admin, '20000000-0000-4000-8000-000000000001');
+
+      expect(result[0]).toMatchObject({
+        serviceDate,
+        originalServiceDate: '2026-09-20',
+        rolloverCount: 0,
+        rolloverReason: null
+      });
+    }
   });
 
   it('keeps developer and cross-maid reads denied', async () => {
