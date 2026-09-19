@@ -216,7 +216,7 @@ const idempotencyKey = crypto.randomUUID();
 | 배정 가능 후보 | `GET /v1/availability/candidates?workDate=...` | active admin만, 현재 가능일의 active maid |
 | 예약 목록 | `GET /v1/reservations` | active admin만, 고객명과 암호문은 응답하지 않음. query 없음은 기존 `{reservations}` 호환 응답 |
 | 예약 calendar 범위 | `GET /v1/reservations?from=...&to=...&roomId=...&cursor=...` | from/to 필수 쌍, 최대 31일·50건, opaque cursor와 serverTime 사용 |
-| 예약 가능 객실 미리보기 | `POST /v1/reservations/bookability/preview` | 필수 `reservationType=standard`, strict RFC 3339 `[checkInAt,checkOutAt)`, optional roomTypeIds/excludeReservationId, 예약 성공 보장 아님 |
+| 예약 가능 객실 미리보기 | `POST /v1/reservations/bookability/preview` | 필수 `reservationType=standard|long_stay`; standard는 checkout 필수, long_stay는 nullable checkout, optional roomTypeIds/excludeReservationId, 예약 성공 보장 아님 |
 | 예약 상세 | `GET /v1/reservations/{reservationId}` | active admin만 고객명 복호화, 실제 민감조회 activity 기록 |
 | 예약 생성 | `POST /v1/reservations` | 객실 version CAS, Idempotency-Key, 고객명 서버 암호화 |
 | 예약 변경 | `PATCH /v1/reservations/{reservationId}` | 일정·고객정보만 변경. roomId는 현재 값과 같아야 하며 객실 변경 우회 금지 |
@@ -250,7 +250,9 @@ const idempotencyKey = crypto.randomUUID();
 
 calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내고 `[from,to)`가 31일을 넘지 않게 자른다. 다음 페이지는 응답의 opaque `nextCursor`를 수정하거나 해석하지 않고 같은 `from`/`to`/`roomId`에만 재사용한다. cursor는 actor와 filter에 묶이므로 날짜·객실을 바꾸면 버리고 첫 페이지부터 요청한다. 정렬은 `(checkInAt,id)`이며 각 page의 `serverTime`은 그 page projection의 DB snapshot이다. `roomId` filter는 이동·취소된 예약의 겹치는 객실 segment history도 포함하므로 프런트가 현재 객실만으로 다시 필터링해 과거 기록을 숨기지 않는다. query 없는 legacy 목록 소비자는 `nextCursor`나 `serverTime`을 기대하지 않는다.
 
-새 예약 또는 체크인 전 일정 변경 화면은 먼저 `POST /v1/reservations/bookability/preview`를 호출할 수 있다. 요청에는 `reservationType: "standard"`를 반드시 보내고, `roomTypeIds` 생략과 `[]`는 모두 전체 유형으로 취급한다. 이번 계약에서 `long_stay`를 보내거나 종료 시각을 생략하지 않는다. candidate의 `intervalBookable`만 요청 구간 예약 가능 축으로 사용하고, `checkInReady`는 현재 청소·PIN 준비 상태의 별도 안내로 표시한다. `PIN_UNCONFIGURED`/`PIN_MISMATCH`는 `evaluatedAt`에 실제 current check-in pending일 때만 이 안내에 나타나며, 미래 예약만 있다는 이유로 readiness를 낮추지 않는다. 이 사유 때문에 `intervalBookable=true`를 false로 덮어쓰거나 예약 요청을 생략하지 않는다. `excludeReservationId`는 신규 예약에서 생략 또는 `null`, 편집에서는 exact active·체크인 전 예약 ID만 보낸다. `evaluatedAt`은 후보가 0건이어도 응답에 존재한다. preview와 commit 사이에는 다른 예약이 생길 수 있으므로 성공 문구는 “현재 조회 기준 가능”으로 제한하고, 실제 create/change의 overlap 409를 최종 판정으로 다시 표시한다.
+새 예약 또는 체크인 전 일정 변경 화면은 먼저 `POST /v1/reservations/bookability/preview`를 호출할 수 있다. 요청에는 `reservationType: "standard" | "long_stay"`를 반드시 보낸다. standard는 strict RFC 3339 `checkOutAt` 필수이고, long_stay는 고정 end 또는 명시적 `null`을 보낸다. 종료 미정 long-stay는 check-in 이후 객실을 무기한 점유하는 것으로 평가되므로 이후 예약 후보가 될 수 없다. `roomTypeIds` 생략과 `[]`는 모두 전체 유형이다. candidate의 `intervalBookable`만 요청 구간 예약 가능 축으로 사용하고, `checkInReady`는 현재 청소·PIN 준비 상태의 별도 안내로 표시한다. `PIN_UNCONFIGURED`/`PIN_MISMATCH`는 `evaluatedAt`에 실제 current check-in pending일 때만 이 안내에 나타나며 interval bookability를 바꾸지 않는다. `excludeReservationId`는 신규 예약에서 생략 또는 `null`, 편집에서는 exact active·체크인 전 예약 ID만 보낸다. preview와 commit 사이에는 다른 예약이 생길 수 있으므로 성공 문구는 “현재 조회 기준 가능”으로 제한하고, 실제 create/change의 overlap 409를 최종 판정으로 다시 표시한다.
+
+예약 응답의 `reservationType`과 nullable `checkOutAt`은 함께 해석한다. 종료 미정 long-stay에는 checkout obligation/청소 target이 아직 없으므로 클라이언트가 가짜 checkout·청소 계획을 만들지 않는다. type은 생성 후 바꿀 수 없고, 고정 checkout을 다시 null로 되돌릴 수 없다. open-ended 예약에 end를 확정하는 change는 최신 `version`과 같은 Idempotency-Key replay 규칙을 사용한다. 체크인 전 객실 변경은 open-ended 상태를 보존하지만, 투숙 중 객실 변경은 먼저 end를 확정해야 하며 `OPEN_ENDED_STAY_REQUIRES_END`를 다른 key로 자동 우회하지 않는다. scheduler가 open-ended 예약을 자동 checkout한다고 가정하지 말고 실제 종료는 관리자 수동 checkout 결과를 정본으로 사용한다.
 
 예약 전이 수동 실행의 `Idempotency-Key`에는 `reservation-scheduler-` 접두사를 사용하지 않는다. 이 namespace는 scheduler invocation 전용이며 수동 API는 `RESERVED_IDEMPOTENCY_KEY`로 fail-closed한다. 고객명은 원문과 NFKC·trim·공백 축약 결과가 모두 1~80자여야 하므로, 화면에서도 원문 80자 제한을 먼저 적용하되 서버 오류 코드를 최종 판정으로 사용한다.
 

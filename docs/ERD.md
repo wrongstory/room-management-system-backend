@@ -1248,3 +1248,17 @@ overlap과 기존 room block reason을 재사용한다. PIN/현재 readiness는 
 아니라 범위와 겹친 stay segment 이력을 사용하므로 retired/cancelled segment도 calendar history에 남는다.
 두 RPC 모두 고객명 암호화 필드와 maid identity를 projection하지 않고 PUBLIC/anon/authenticated execute를
 회수한다. HTTP cursor 서명은 DB 원장에 저장하지 않으며 adapter에서 actor와 filter scope를 검증한다.
+
+## #200 Long-stay open-ended reservation contract (66번째 source migration)
+
+`public.reservations.reservation_type`은 `standard|long_stay`이며 기존 행은 `standard`로 보존한다. standard의
+`check_out_at`은 필수이고 long-stay만 null을 허용한다. type은 생성 후 불변이고 고정된 checkout을 다시 null로
+되돌리지 않는다. `public.reservation_schedule_revisions`, `private.reservation_stays`,
+`private.stay_room_segments`도 reservation type과 nullable end를 같은 의미로 보존한다.
+
+종료 미정 long-stay의 current segment는 check-in 이후를 무한 상한처럼 점유하여 새 예약과 precheckin move의
+대상 구간을 차단한다. checkout 시각이 없을 때 `checkout_obligation_id`와 checkout cleaning graph는 null이며,
+null→고정 일정 변경 또는 수동 checkout transaction에서 정확히 하나 생성한다. deferred checkout graph validator가
+commit 시 예약 end, obligation, planned/current target의 일치를 검증한다. 투숙 중 종료 미정 move는
+`OPEN_ENDED_STAY_REQUIRES_END`, standard의 null checkout은 `STANDARD_RESERVATION_REQUIRES_END`로 닫는다.
+Scheduler는 null checkout 예약을 자동 checkout하지 않는다.

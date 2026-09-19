@@ -14,18 +14,20 @@ import {
 } from "./runtime.ts";
 
 type ReservationStatus = "active" | "cancelled" | "checked_out";
+type ReservationType = "standard" | "long_stay";
 type CleaningKind = "stayover" | "additional";
 
 export interface ReservationRow {
   id: string;
   room_id: string;
+  reservation_type: ReservationType;
   check_in_at: string;
-  check_out_at: string;
+  check_out_at: string | null;
   guest_count: number;
   guest_name_encrypted?: string | null;
   status: ReservationStatus;
   preparation_obligation_id: string;
-  checkout_obligation_id: string;
+  checkout_obligation_id: string | null;
   version: number;
   actual_check_in_at: string | null;
   actual_checkout_at: string | null;
@@ -147,6 +149,28 @@ function timestampValue(value: unknown, name: string): string {
     validationError(`${name}은 offset이 포함된 RFC 3339 시각이어야 합니다.`);
   }
   return value;
+}
+
+function reservationScheduleValues(body: Record<string, unknown>): {
+  reservationType: ReservationType;
+  checkOutAt: string | null;
+} {
+  if (
+    body.reservationType !== "standard" && body.reservationType !== "long_stay"
+  ) {
+    validationError("reservationType은 standard 또는 long_stay여야 합니다.");
+  }
+  const reservationType = body.reservationType as ReservationType;
+  if (body.checkOutAt === null) {
+    if (reservationType === "standard") {
+      validationError("standard 예약에는 checkOutAt이 필요합니다.");
+    }
+    return { reservationType, checkOutAt: null };
+  }
+  return {
+    reservationType,
+    checkOutAt: timestampValue(body.checkOutAt, "checkOutAt"),
+  };
 }
 
 function dateValue(value: unknown, name: string): string {
@@ -910,6 +934,24 @@ export function reservationDatabaseError(
       "예약은 분 단위이며 최소 1박이어야 합니다.",
     ],
     [
+      "STANDARD_RESERVATION_REQUIRES_END",
+      400,
+      "STANDARD_RESERVATION_REQUIRES_END",
+      "일반 예약에는 퇴실 시각이 필요합니다.",
+    ],
+    [
+      "RESERVATION_TYPE_IMMUTABLE",
+      409,
+      "RESERVATION_TYPE_IMMUTABLE",
+      "예약 유형은 생성 후 변경할 수 없습니다.",
+    ],
+    [
+      "RESERVATION_END_IMMUTABLE",
+      409,
+      "RESERVATION_END_IMMUTABLE",
+      "확정한 장기 투숙 종료 시각을 다시 미정으로 되돌릴 수 없습니다.",
+    ],
+    [
       "INVALID_GUEST_COUNT",
       400,
       "INVALID_GUEST_COUNT",
@@ -1022,6 +1064,7 @@ export function toReservation(row: ReservationRow) {
   return {
     id: row.id,
     roomId: row.room_id,
+    reservationType: row.reservation_type,
     checkInAt: row.check_in_at,
     checkOutAt: row.check_out_at,
     guestCount: row.guest_count,
@@ -1156,8 +1199,14 @@ function reservationPageRow(value: unknown) {
   return toReservation({
     id: projectionString(row.id, uuidPattern),
     room_id: projectionString(row.room_id, uuidPattern),
+    reservation_type: projectionEnum(
+      row.reservation_type,
+      new Set(["standard", "long_stay"]),
+    ) as ReservationType,
     check_in_at: projectionTimestamp(row.check_in_at),
-    check_out_at: projectionTimestamp(row.check_out_at),
+    check_out_at: row.check_out_at === null
+      ? null
+      : projectionTimestamp(row.check_out_at),
     guest_count: projectionPositiveInteger(row.guest_count),
     status: projectionEnum(
       row.status,
@@ -1167,10 +1216,9 @@ function reservationPageRow(value: unknown) {
       row.preparation_obligation_id,
       uuidPattern,
     ),
-    checkout_obligation_id: projectionString(
-      row.checkout_obligation_id,
-      uuidPattern,
-    ),
+    checkout_obligation_id: row.checkout_obligation_id === null
+      ? null
+      : projectionString(row.checkout_obligation_id, uuidPattern),
     version: projectionPositiveInteger(row.version),
     actual_check_in_at: row.actual_check_in_at === null
       ? null
@@ -1267,19 +1315,24 @@ function roomMovePreviewProjection(value: unknown) {
     targetRoomId: projectionString(row.targetRoomId, uuidPattern),
     targetRoomVersion: projectionPositiveInteger(row.targetRoomVersion),
     checkInAt: projectionTimestamp(row.checkInAt),
-    checkOutAt: projectionTimestamp(row.checkOutAt),
+    reservationType: projectionEnum(
+      row.reservationType,
+      new Set(["standard", "long_stay"]),
+    ),
+    checkOutAt: row.checkOutAt === null
+      ? null
+      : projectionTimestamp(row.checkOutAt),
     guestCount: projectionPositiveInteger(row.guestCount),
     preparationObligationId: projectionString(
       row.preparationObligationId,
       uuidPattern,
     ),
-    checkoutObligationId: projectionString(
-      row.checkoutObligationId,
-      uuidPattern,
-    ),
-    checkoutObligationVersion: projectionPositiveInteger(
-      row.checkoutObligationVersion,
-    ),
+    checkoutObligationId: row.checkoutObligationId === null
+      ? null
+      : projectionString(row.checkoutObligationId, uuidPattern),
+    checkoutObligationVersion: row.checkoutObligationVersion === null
+      ? null
+      : projectionPositiveInteger(row.checkoutObligationVersion),
     plannedCheckoutTargetId: row.plannedCheckoutTargetId === null
       ? null
       : projectionString(row.plannedCheckoutTargetId, uuidPattern),
@@ -1313,7 +1366,7 @@ function roomMoveCommitProjection(value: unknown) {
       id: string;
       roomId: string;
       startsAt: string;
-      endsAt: string;
+      endsAt: string | null;
     }>;
     sourceCleaningTargetId?: string;
     pinAccessEndsAt?: string;
@@ -1335,7 +1388,9 @@ function roomMoveCommitProjection(value: unknown) {
           id: projectionString(segment.id, uuidPattern),
           roomId: projectionString(segment.roomId, uuidPattern),
           startsAt: projectionTimestamp(segment.startsAt),
-          endsAt: projectionTimestamp(segment.endsAt),
+          endsAt: segment.endsAt === null
+            ? null
+            : projectionTimestamp(segment.endsAt),
         };
       }),
       sourceCleaningTargetId: projectionString(
@@ -1349,8 +1404,14 @@ function roomMoveCommitProjection(value: unknown) {
     reservation: toReservation({
       id: projectionString(reservation.id, uuidPattern),
       room_id: projectionString(reservation.room_id, uuidPattern),
+      reservation_type: projectionEnum(
+        reservation.reservation_type,
+        new Set(["standard", "long_stay"]),
+      ) as ReservationType,
       check_in_at: projectionTimestamp(reservation.check_in_at),
-      check_out_at: projectionTimestamp(reservation.check_out_at),
+      check_out_at: reservation.check_out_at === null
+        ? null
+        : projectionTimestamp(reservation.check_out_at),
       guest_count: projectionPositiveInteger(reservation.guest_count),
       status: projectionEnum(
         reservation.status,
@@ -1360,10 +1421,9 @@ function roomMoveCommitProjection(value: unknown) {
         reservation.preparation_obligation_id,
         uuidPattern,
       ),
-      checkout_obligation_id: projectionString(
-        reservation.checkout_obligation_id,
-        uuidPattern,
-      ),
+      checkout_obligation_id: reservation.checkout_obligation_id === null
+        ? null
+        : projectionString(reservation.checkout_obligation_id, uuidPattern),
       version: projectionPositiveInteger(reservation.version),
       actual_check_in_at: nullableTimestamp(reservation.actual_check_in_at),
       actual_checkout_at: nullableTimestamp(reservation.actual_checkout_at),
@@ -1380,13 +1440,12 @@ function roomMoveCommitProjection(value: unknown) {
     targetRoomId: projectionString(row.targetRoomId, uuidPattern),
     sourceRoomVersion: projectionPositiveInteger(row.sourceRoomVersion),
     targetRoomVersion: projectionPositiveInteger(row.targetRoomVersion),
-    plannedCheckoutTargetId: projectionString(
-      row.plannedCheckoutTargetId,
-      uuidPattern,
-    ),
-    plannedCheckoutTargetVersion: projectionPositiveInteger(
-      row.plannedCheckoutTargetVersion,
-    ),
+    plannedCheckoutTargetId: row.plannedCheckoutTargetId === null
+      ? null
+      : projectionString(row.plannedCheckoutTargetId, uuidPattern),
+    plannedCheckoutTargetVersion: row.plannedCheckoutTargetVersion === null
+      ? null
+      : projectionPositiveInteger(row.plannedCheckoutTargetVersion),
     sourceOutcome: roomMoveOutcome(row.sourceOutcome),
     targetOutcome: roomMoveOutcome(row.targetOutcome),
     ...duringStay,
@@ -1513,11 +1572,8 @@ export async function previewReservationBookability(
     "excludeReservationId",
     "roomTypeIds",
   ]);
-  if (body.reservationType !== "standard") {
-    validationError("reservationType은 현재 standard만 지원합니다.");
-  }
   const checkInAt = timestampValue(body.checkInAt, "checkInAt");
-  const checkOutAt = timestampValue(body.checkOutAt, "checkOutAt");
+  const { reservationType, checkOutAt } = reservationScheduleValues(body);
   const excludeReservationId = body.excludeReservationId == null
     ? null
     : uuidValue(body.excludeReservationId, "excludeReservationId");
@@ -1547,7 +1603,7 @@ export async function previewReservationBookability(
       p_check_out_at: checkOutAt,
       p_exclude_reservation_id: excludeReservationId,
       p_room_type_ids: roomTypeIds,
-      p_reservation_type: body.reservationType,
+      p_reservation_type: reservationType,
     },
   );
   if (previewResult.error || !previewResult.data) {
@@ -1561,6 +1617,7 @@ export async function previewReservationBookability(
     roomMoveProjectionError();
   }
   return {
+    reservationType,
     checkInAt,
     checkOutAt,
     excludeReservationId,
@@ -1609,6 +1666,7 @@ export async function createReservation(
   const body = await readJsonBody(request);
   assertOnlyFields(body, [
     "roomId",
+    "reservationType",
     "checkInAt",
     "checkOutAt",
     "guestCount",
@@ -1617,7 +1675,7 @@ export async function createReservation(
   ]);
   const roomId = uuidValue(body.roomId, "roomId");
   const checkInAt = timestampValue(body.checkInAt, "checkInAt");
-  const checkOutAt = timestampValue(body.checkOutAt, "checkOutAt");
+  const { reservationType, checkOutAt } = reservationScheduleValues(body);
   const guestCount = positiveInteger(body.guestCount, "guestCount");
   const expectedRoomVersion = positiveInteger(
     body.expectedRoomVersion,
@@ -1627,10 +1685,11 @@ export async function createReservation(
     ? null
     : normalizeGuestName(body.guestName);
   const configuration = piiConfiguration();
-  const { data, error } = await clients.admin.rpc("create_reservation", {
+  const { data, error } = await clients.admin.rpc("create_reservation_v2", {
     p_actor_profile_id: actor.profileId,
     p_reservation_id: crypto.randomUUID(),
     p_room_id: roomId,
+    p_reservation_type: reservationType,
     p_check_in_at: checkInAt,
     p_check_out_at: checkOutAt,
     p_guest_count: guestCount,
@@ -1641,6 +1700,7 @@ export async function createReservation(
     p_idempotency_key: idempotencyKey(request),
     p_request_hash: await requestHash({
       roomId,
+      reservationType,
       checkInAt,
       checkOutAt,
       guestCount,
@@ -1665,6 +1725,7 @@ export async function changeReservation(
   const body = await readJsonBody(request);
   assertOnlyFields(body, [
     "roomId",
+    "reservationType",
     "checkInAt",
     "checkOutAt",
     "guestCount",
@@ -1675,7 +1736,7 @@ export async function changeReservation(
   const normalizedReservationId = uuidValue(reservationId, "reservationId");
   const roomId = uuidValue(body.roomId, "roomId");
   const checkInAt = timestampValue(body.checkInAt, "checkInAt");
-  const checkOutAt = timestampValue(body.checkOutAt, "checkOutAt");
+  const { reservationType, checkOutAt } = reservationScheduleValues(body);
   const guestCount = positiveInteger(body.guestCount, "guestCount");
   const expectedVersion = positiveInteger(
     body.expectedVersion,
@@ -1692,10 +1753,11 @@ export async function changeReservation(
     ? "clear"
     : "set";
   const configuration = piiConfiguration();
-  const { data, error } = await clients.admin.rpc("change_reservation", {
+  const { data, error } = await clients.admin.rpc("change_reservation_v2", {
     p_actor_profile_id: actor.profileId,
     p_reservation_id: normalizedReservationId,
     p_room_id: roomId,
+    p_reservation_type: reservationType,
     p_check_in_at: checkInAt,
     p_check_out_at: checkOutAt,
     p_guest_count: guestCount,
@@ -1709,6 +1771,7 @@ export async function changeReservation(
     p_request_hash: await requestHash({
       reservationId: normalizedReservationId,
       roomId,
+      reservationType,
       checkInAt,
       checkOutAt,
       guestCount,

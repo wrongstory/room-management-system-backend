@@ -222,13 +222,12 @@ select is(
   'empty and omitted room type filters both mean all room types'
 );
 
-select throws_ok(
+select lives_ok(
   $$select public.preview_reservation_bookability(
     '72000000-0000-4000-8000-000000000001',
     '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,null,'long_stay'
   )$$,
-  '22023','UNSUPPORTED_RESERVATION_TYPE',
-  'long-stay preview remains outside this source contract'
+  'long-stay preview is part of the nullable checkout contract'
 );
 
 select is(

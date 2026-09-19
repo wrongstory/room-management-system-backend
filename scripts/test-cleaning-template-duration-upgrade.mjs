@@ -46,7 +46,7 @@ function snapshot() {
       select jsonb_build_object(
         'template',(select jsonb_agg(to_jsonb(x) order by id) from public.cleaning_template_versions x where id in (select id from template)),
         'slots',(select jsonb_agg(to_jsonb(x) order by template_version_id,display_order) from private.photo_template_slots x where template_version_id in (select id from template)),
-        'reservation',(select to_jsonb(x) from public.reservations x where id='${reservationId}'),
+        'reservation',(select to_jsonb(x)-'reservation_type' from public.reservations x where id='${reservationId}'),
         'obligation',(select to_jsonb(x) from public.checkout_cleaning_obligations x where reservation_id='${reservationId}'),
         'target',(select jsonb_agg(to_jsonb(x)-'stay_segment_checkout_obligation_id' order by id) from public.cleaning_targets x where id in (select id from target)),
         'audit',(select jsonb_agg(to_jsonb(x) order by id) from public.audit_events x where actor_profile_id='${adminId}'),

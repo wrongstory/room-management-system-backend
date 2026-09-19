@@ -143,6 +143,7 @@ function services(): AppServices {
         serverTime: '2026-09-16T08:00:00.000Z'
       })),
       previewBookability: vi.fn(async (_actor, input) => ({
+        reservationType: input.reservationType,
         checkInAt: input.checkInAt,
         checkOutAt: input.checkOutAt,
         excludeReservationId: input.excludeReservationId ?? null,
@@ -154,12 +155,15 @@ function services(): AppServices {
       create: vi.fn(async (_actor, input) => ({
         id: '41000000-0000-4000-8000-000000000001',
         roomId: input.roomId,
+        reservationType: input.reservationType,
         checkInAt: input.checkInAt,
         checkOutAt: input.checkOutAt,
         guestCount: input.guestCount,
         status: 'active' as const,
         preparationObligationId: '42000000-0000-4000-8000-000000000001',
-        checkoutObligationId: '43000000-0000-4000-8000-000000000001',
+        checkoutObligationId: input.checkOutAt === null
+          ? null
+          : '43000000-0000-4000-8000-000000000001',
         version: 1,
         roomStateVersion: 2,
         actualCheckInAt: null,
@@ -674,6 +678,7 @@ describe('application', () => {
       },
       payload: {
         roomId: '51000000-0000-4000-8000-000000000001',
+        reservationType: 'standard',
         checkInAt: '2026-09-01T16:00:00+09:00',
         checkOutAt: '2026-09-02T11:00:00+09:00',
         guestCount: 2,
@@ -690,6 +695,52 @@ describe('application', () => {
     });
     expect(JSON.stringify(response.json())).not.toContain('guest_name_encrypted');
     expect(JSON.stringify(response.json())).not.toContain('홍길동');
+    await app.close();
+  });
+
+  it('creates an open-ended long-stay and rejects a standard reservation without checkout', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const payload = {
+      roomId: '51000000-0000-4000-8000-000000000001',
+      reservationType: 'long_stay',
+      checkInAt: '2026-09-01T16:00:00+09:00',
+      checkOutAt: null,
+      guestCount: 1,
+      expectedRoomVersion: 1
+    };
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'reservation-open-ended-create-0001'
+      },
+      payload
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().reservation).toMatchObject({
+      reservationType: 'long_stay',
+      checkOutAt: null,
+      checkoutObligationId: null
+    });
+    expect(appServices.reservations.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ reservationType: 'long_stay', checkOutAt: null })
+    );
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'reservation-standard-without-end-0001'
+      },
+      payload: { ...payload, reservationType: 'standard' }
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(appServices.reservations.create).toHaveBeenCalledTimes(1);
     await app.close();
   });
 
@@ -755,18 +806,33 @@ describe('application', () => {
       })
     );
     expect(appServices.reservations.get).not.toHaveBeenCalled();
-    const unsupported = await app.inject({
+    const openEnded = await app.inject({
       method: 'POST',
       url: '/v1/reservations/bookability/preview',
       headers: { authorization: 'Bearer access-token' },
       payload: {
         reservationType: 'long_stay',
         checkInAt: '2026-10-01T16:00:00+09:00',
-        checkOutAt: '2026-10-02T11:00:00+09:00'
+        checkOutAt: null
       }
     });
-    expect(unsupported.statusCode).toBe(400);
-    expect(appServices.reservations.previewBookability).toHaveBeenCalledTimes(1);
+    expect(openEnded.statusCode).toBe(200);
+    expect(openEnded.json().preview).toMatchObject({
+      reservationType: 'long_stay',
+      checkOutAt: null
+    });
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/bookability/preview',
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        reservationType: 'standard',
+        checkInAt: '2026-10-01T16:00:00+09:00',
+        checkOutAt: null
+      }
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(appServices.reservations.previewBookability).toHaveBeenCalledTimes(2);
     await app.close();
   });
 
@@ -779,6 +845,7 @@ describe('application', () => {
     const impactFingerprint = 'a'.repeat(64);
     const preview = {
       mode: 'BEFORE_CHECKIN' as const,
+      reservationType: 'standard' as const,
       eligible: true,
       rejectionReasonCodes: [],
       blockingReasonCodes: [],
@@ -814,6 +881,7 @@ describe('application', () => {
       reservation: {
         id: reservationId,
         roomId: targetRoomId,
+        reservationType: 'standard' as const,
         checkInAt: preview.checkInAt,
         checkOutAt: preview.checkOutAt,
         guestCount: 2,
@@ -958,6 +1026,7 @@ describe('application', () => {
     const sourceCleaningTargetId = '44000000-0000-4000-8000-000000000002';
     appServices.reservations.previewRoomMove = vi.fn(async () => ({
       mode: 'DURING_STAY' as const,
+      reservationType: 'standard' as const,
       eligible: true,
       rejectionReasonCodes: [],
       blockingReasonCodes: [],
@@ -991,6 +1060,7 @@ describe('application', () => {
     appServices.reservations.commitRoomMove = vi.fn(async () => ({
       reservation: {
         id: reservationId, roomId: sourceRoomId,
+        reservationType: 'standard' as const,
         checkInAt: '2026-09-16T07:00:00.000Z', checkOutAt: '2026-09-18T02:00:00.000Z',
         guestCount: 2, status: 'active' as const,
         preparationObligationId: '42000000-0000-4000-8000-000000000001',

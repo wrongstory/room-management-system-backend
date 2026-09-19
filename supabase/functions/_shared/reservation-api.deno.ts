@@ -63,6 +63,7 @@ const maid: EdgeActor = {
 const reservationRow: ReservationRow = {
   id: "40000000-0000-4000-8000-000000000001",
   room_id: "50000000-0000-4000-8000-000000000001",
+  reservation_type: "standard",
   check_in_at: "2026-09-01T16:00:00+09:00",
   check_out_at: "2026-09-02T11:00:00+09:00",
   guest_count: 2,
@@ -447,6 +448,111 @@ Deno.test("reservation bookability keeps PIN readiness separate and supports emp
   );
 });
 
+Deno.test("open-ended long-stay requests keep null checkout across preview, create and change", async () => {
+  const openEndedRow: ReservationRow = {
+    ...reservationRow,
+    reservation_type: "long_stay",
+    check_out_at: null,
+    checkout_obligation_id: null,
+  };
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        if (name === "preview_reservation_bookability") {
+          return Promise.resolve({
+            data: {
+              evaluated_at: "2026-09-01T00:00:00Z",
+              candidates: [],
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: openEndedRow, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const preview = await previewReservationBookability(
+    commandRequest("/v1/reservations/bookability/preview", {
+      reservationType: "long_stay",
+      checkInAt: openEndedRow.check_in_at,
+      checkOutAt: null,
+    }),
+    clients,
+    admin,
+  );
+  const created = await createReservation(
+    commandRequest("/v1/reservations", {
+      roomId: openEndedRow.room_id,
+      reservationType: "long_stay",
+      checkInAt: openEndedRow.check_in_at,
+      checkOutAt: null,
+      guestCount: 2,
+      expectedRoomVersion: 1,
+    }),
+    clients,
+    admin,
+  );
+  const changed = await changeReservation(
+    commandRequest(`/v1/reservations/${openEndedRow.id}`, {
+      roomId: openEndedRow.room_id,
+      reservationType: "long_stay",
+      checkInAt: openEndedRow.check_in_at,
+      checkOutAt: null,
+      guestCount: 2,
+      expectedVersion: 1,
+      reasonCode: "GUEST_COUNT_CHANGED",
+    }, "PATCH"),
+    clients,
+    admin,
+    openEndedRow.id,
+  );
+
+  assert(
+    preview.reservationType === "long_stay" && preview.checkOutAt === null,
+    "preview preserves open-ended identity",
+  );
+  assert(
+    created.reservationType === "long_stay" && created.checkOutAt === null &&
+      created.checkoutObligationId === null,
+    "create projection preserves open-ended identity and absent checkout graph",
+  );
+  assert(
+    changed.reservationType === "long_stay" && changed.checkOutAt === null,
+    "change projection preserves open-ended identity",
+  );
+  assert(
+    calls.map(([name]) => name).join(",") ===
+        "preview_reservation_bookability,create_reservation_v2,change_reservation_v2" &&
+      calls.every(([, args]) =>
+        args.p_reservation_type === "long_stay" && args.p_check_out_at === null
+      ),
+    "all runtime paths pass the same type and null checkout to the database",
+  );
+
+  const invalid = await captureEdgeError(() =>
+    createReservation(
+      commandRequest("/v1/reservations", {
+        roomId: openEndedRow.room_id,
+        reservationType: "standard",
+        checkInAt: openEndedRow.check_in_at,
+        checkOutAt: null,
+        guestCount: 2,
+        expectedRoomVersion: 1,
+      }),
+      clients,
+      admin,
+    )
+  );
+  assert(invalid.status === 400, "standard null checkout fails before RPC");
+  assert(
+    calls.length === 3,
+    "invalid standard request does not reach database",
+  );
+});
+
 Deno.test("guest-name create is randomized but keeps a stable request fingerprint", async () => {
   configurePii();
   const calls: Array<Record<string, unknown>> = [];
@@ -460,6 +566,7 @@ Deno.test("guest-name create is randomized but keeps a stable request fingerprin
   } as unknown as EdgeClients;
   const body = {
     roomId: reservationRow.room_id,
+    reservationType: "standard",
     checkInAt: reservationRow.check_in_at,
     checkOutAt: reservationRow.check_out_at,
     guestCount: 2,
@@ -508,6 +615,7 @@ Deno.test("guest-name validation enforces raw and normalized 80-character limits
   } as unknown as EdgeClients;
   const createBody = (guestName: unknown) => ({
     roomId: reservationRow.room_id,
+    reservationType: "standard",
     checkInAt: reservationRow.check_in_at,
     checkOutAt: reservationRow.check_out_at,
     guestCount: 2,
@@ -554,6 +662,7 @@ Deno.test("guest-name validation enforces raw and normalized 80-character limits
       `/v1/reservations/${reservationRow.id}`,
       {
         roomId: reservationRow.room_id,
+        reservationType: "standard",
         checkInAt: reservationRow.check_in_at,
         checkOutAt: reservationRow.check_out_at,
         guestCount: 2,
@@ -570,8 +679,8 @@ Deno.test("guest-name validation enforces raw and normalized 80-character limits
   );
 
   assert(calls.length === 2, "only valid create and change reach RPC");
-  assert(calls[0][0] === "create_reservation", "raw length 80 create");
-  assert(calls[1][0] === "change_reservation", "Korean name change");
+  assert(calls[0][0] === "create_reservation_v2", "raw length 80 create");
+  assert(calls[1][0] === "change_reservation_v2", "Korean name change");
   assert(
     !JSON.stringify(calls).includes("김   영희"),
     "normalized plaintext must not enter RPC parameters",
@@ -592,6 +701,7 @@ Deno.test("detail records sensitive activity only when a decrypted name is retur
   await createReservation(
     commandRequest("/v1/reservations", {
       roomId: reservationRow.room_id,
+      reservationType: "standard",
       checkInAt: reservationRow.check_in_at,
       checkOutAt: reservationRow.check_out_at,
       guestCount: 2,
@@ -639,7 +749,7 @@ Deno.test("sensitive detail fails closed when activity recording fails", async (
   const clients = {
     admin: {
       async rpc(name: string, argumentsValue: Record<string, unknown>) {
-        if (name === "create_reservation") {
+        if (name === "create_reservation_v2") {
           encrypted = String(argumentsValue.p_guest_name_encrypted);
           return { data: reservationRow, error: null };
         }
@@ -656,6 +766,7 @@ Deno.test("sensitive detail fails closed when activity recording fails", async (
   await createReservation(
     commandRequest("/v1/reservations", {
       roomId: reservationRow.room_id,
+      reservationType: "standard",
       checkInAt: reservationRow.check_in_at,
       checkOutAt: reservationRow.check_out_at,
       guestCount: 2,
@@ -701,6 +812,7 @@ Deno.test("reservation mutations preserve RPC, actor, CAS and idempotency", asyn
   await changeReservation(
     commandRequest(`/v1/reservations/${reservationRow.id}`, {
       roomId: reservationRow.room_id,
+      reservationType: "standard",
       checkInAt: reservationRow.check_in_at,
       checkOutAt: reservationRow.check_out_at,
       guestCount: 2,
@@ -760,7 +872,7 @@ Deno.test("reservation mutations preserve RPC, actor, CAS and idempotency", asyn
 
   assert(
     calls.map(([name]) => name).join(",") === [
-      "change_reservation",
+      "change_reservation_v2",
       "cancel_reservation",
       "manual_checkout_reservation",
       "create_manual_cleaning_request",
@@ -881,6 +993,7 @@ Deno.test("room move preview and commit preserve strict CAS, fingerprint and tim
   const calls: Array<[string, Record<string, unknown>]> = [];
   const preview = {
     mode: "BEFORE_CHECKIN",
+    reservationType: "standard",
     eligible: true,
     rejectionReasonCodes: [],
     blockingReasonCodes: [],
@@ -1147,6 +1260,7 @@ Deno.test("during-stay room move exposes only bounded stay, segment, cleaning an
           return Promise.resolve({
             data: {
               mode: "DURING_STAY",
+              reservationType: "standard",
               eligible: true,
               rejectionReasonCodes: [],
               blockingReasonCodes: [],
