@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'long_stay_open_ended_reservations'
+    'room_type_catalog'
   ) ->> 'currentMigration',
-  'long_stay_open_ended_reservations',
+  'room_type_catalog',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'long_stay_open_ended_reservations'
+    'room_type_catalog'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'long_stay_open_ended_reservations';
+where name = 'room_type_catalog';
 
 delete from supabase_migrations.schema_migrations
-where name = 'long_stay_open_ended_reservations';
+where name = 'room_type_catalog';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'long_stay_open_ended_reservations'
+    'room_type_catalog'
   ) ->> 'currentMigration',
-  'reservation_bookability',
-  'database status exposes migration 65 when migration 66 is absent'
+  'long_stay_open_ended_reservations',
+  'database status exposes migration 66 when migration 67 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'long_stay_open_ended_reservations'
+    'room_type_catalog'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 65 behind source migration 66'
+  'database status reports migration 66 behind source migration 67'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

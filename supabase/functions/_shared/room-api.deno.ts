@@ -3,6 +3,7 @@ import {
   createRoomOperationBlock,
   getRoom,
   listRooms,
+  listRoomTypes,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -43,6 +44,15 @@ const roomId = "30000000-0000-4000-8000-000000000001";
 const roomTypeId = "40000000-0000-4000-8000-000000000001";
 const blockId = "50000000-0000-4000-8000-000000000001";
 const issueId = "60000000-0000-4000-8000-000000000001";
+const sessionId = "70000000-0000-4000-8000-000000000001";
+
+function readRequest(): Request {
+  const encoded = btoa(JSON.stringify({ session_id: sessionId }))
+    .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  return new Request("http://localhost/v1/room-types", {
+    headers: { authorization: `Bearer header.${encoded}.signature` },
+  });
+}
 const roomRow = {
   id: roomId,
   room_number: "101",
@@ -120,6 +130,55 @@ function operationClients(calls: Array<[string, Record<string, unknown>]>) {
     },
   } as unknown as EdgeClients;
 }
+
+Deno.test("room type catalog maps the app-owned admin projection", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      async rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        return {
+          data: [{
+            id: roomTypeId,
+            code: "standard",
+            display_name: "스탠다드 더블 로프트",
+            base_cleaning_fee: 16000,
+            active: true,
+            version: 2,
+            room_count: 22,
+          }],
+          error: null,
+        };
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const items = await listRoomTypes(readRequest(), clients, admin);
+  assert(items.length === 1, "one catalog item");
+  assert(items[0].displayName === "스탠다드 더블 로프트", "display name");
+  assert(items[0].baseCleaningFee === 16000, "integer KRW fee");
+  assert(
+    items[0].roomCount === 22 && items[0].version === 2,
+    "count and version",
+  );
+  assert(calls[0][0] === "list_room_type_catalog", "app-owned RPC");
+  assert(calls[0][1].p_actor_profile_id === admin.profileId, "actor bound");
+  assert(calls[0][1].p_session_id === sessionId, "session bound");
+});
+
+Deno.test("room type catalog rejects non-admin and temporary-password actors", async () => {
+  const maidError = await captureEdgeError(() =>
+    listRoomTypes(readRequest(), {} as EdgeClients, { ...admin, role: "maid" })
+  );
+  assert(maidError.status === 403, "maid denied");
+  const passwordError = await captureEdgeError(() =>
+    listRoomTypes(readRequest(), {} as EdgeClients, {
+      ...admin,
+      mustChangePassword: true,
+    })
+  );
+  assert(passwordError.code === "PASSWORD_CHANGE_REQUIRED", "password gate");
+});
 
 Deno.test("room list and detail use one exact camelCase projection", async () => {
   const rows = Array.from({ length: 121 }, (_, index) => ({

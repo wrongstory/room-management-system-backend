@@ -91,6 +91,12 @@ function services(): AppServices {
       listCandidates: vi.fn(async () => [])
     },
     rooms: {
+      listTypes: vi.fn(async () => [
+        { id: '10000000-0000-4000-8000-000000000001', code: 'oceanFamily', displayName: '파셜 오션뷰 패밀리 투룸 로프트', baseCleaningFee: 30000, active: true, version: 1, roomCount: 35 },
+        { id: '10000000-0000-4000-8000-000000000002', code: 'oceanPremium', displayName: '파셜 오션뷰 프리미어 더블 로프트', baseCleaningFee: 20000, active: true, version: 1, roomCount: 13 },
+        { id: '10000000-0000-4000-8000-000000000003', code: 'premium', displayName: '프리미어 더블 로프트', baseCleaningFee: 20000, active: true, version: 1, roomCount: 51 },
+        { id: '10000000-0000-4000-8000-000000000004', code: 'standard', displayName: '스탠다드 더블 로프트', baseCleaningFee: 16000, active: true, version: 1, roomCount: 22 }
+      ]),
       list: vi.fn(async () => [{
         id: 'room-1',
         roomNumber: '117',
@@ -384,6 +390,41 @@ describe('application', () => {
       cleaningRequired: false,
       allocationReady: true
     });
+    await app.close();
+  });
+
+  it('returns the four room types with room counts for an administrator', async () => {
+    const app = await buildApp({ env, services: services(), logger: false });
+    const response = await app.inject({
+      method: 'GET', url: '/v1/room-types',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json().items).toHaveLength(4);
+    expect(response.json().items).toContainEqual(expect.objectContaining({
+      code: 'standard', displayName: '스탠다드 더블 로프트',
+      baseCleaningFee: 16000, active: true, version: 1, roomCount: 22
+    }));
+    await app.close();
+  });
+
+  it('does not expose room types to a maid', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-maid-1', profileId: 'maid-1', displayName: '메이드',
+      role: 'maid' as const, mustChangePassword: false, accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET', url: '/v1/room-types',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ADMIN_REQUIRED');
+    expect(appServices.rooms.listTypes).not.toHaveBeenCalled();
     await app.close();
   });
 

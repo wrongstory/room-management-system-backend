@@ -191,6 +191,7 @@ Table public.room_types {
   default_guest_count int [not null]
   max_guest_count int [not null]
   active boolean [not null, default: true]
+  version bigint [not null, default: 1, note: 'managed catalog CAS version']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 }

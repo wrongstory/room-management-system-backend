@@ -3849,6 +3849,33 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/room-types": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomTypes",
+        summary: "객실 타입 카탈로그 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 비활성 타입도 기존 객실 참조 현황을 위해 포함하지만 신규 객실 기준정보 선택에는 사용할 수 없습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        responses: {
+          "200": {
+            description: "객실 타입 카탈로그",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/RoomTypeCatalogEnvelope",
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/rooms": {
       get: {
         tags: ["Rooms"],
@@ -8940,6 +8967,58 @@ export const openApiDocument = {
         ],
         description:
           "현재 준비 상태의 사유입니다. PIN_MISMATCH/PIN_UNCONFIGURED는 current check-in에만 나타나며 예약 bookability 사유가 아닙니다.",
+      },
+      RoomTypeCatalogItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "code",
+          "displayName",
+          "baseCleaningFee",
+          "active",
+          "version",
+          "roomCount",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          code: { type: "string", minLength: 1, description: "불변 타입 코드" },
+          displayName: {
+            type: "string",
+            minLength: 1,
+            description: "현재 표시명",
+          },
+          baseCleaningFee: {
+            type: "integer",
+            minimum: 0,
+            description: "원 단위 기본 청소비",
+          },
+          active: {
+            type: "boolean",
+            description: "신규 객실 기준정보 선택 가능 여부",
+          },
+          version: {
+            type: "integer",
+            minimum: 1,
+            description: "실제 객실 타입 변경 시 증가하는 버전",
+          },
+          roomCount: {
+            type: "integer",
+            minimum: 0,
+            description: "현재 참조 객실 수",
+          },
+        },
+      },
+      RoomTypeCatalogEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["items"],
+        properties: {
+          items: {
+            type: "array",
+            items: { $ref: "#/components/schemas/RoomTypeCatalogItem" },
+          },
+        },
       },
       RoomProjection: {
         type: "object",

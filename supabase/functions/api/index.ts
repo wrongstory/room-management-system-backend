@@ -134,6 +134,7 @@ import {
   createRoomOperationBlock,
   getRoom,
   listRooms,
+  listRoomTypes,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -1376,6 +1377,15 @@ export async function handleApiRequest(
       );
     }
 
+    if (request.method === "GET" && path === "/v1/room-types") {
+      const response = jsonResponse(
+        { items: await listRoomTypes(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     if (request.method === "GET" && path === "/v1/rooms") {
       return jsonResponse(
         { rooms: await listRooms(clients, actor) },

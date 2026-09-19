@@ -258,3 +258,14 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
     });
   };
 }
+
+export function createRoomTypeRoutes(roomService: RoomService): FastifyPluginAsync {
+  return async (app) => {
+    app.get('/', {
+      preHandler: [app.authenticate, app.requirePasswordChanged, app.requireAdmin]
+    }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      return { items: await roomService.listTypes(request.actor) };
+    });
+  };
+}

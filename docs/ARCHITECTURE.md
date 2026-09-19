@@ -29,6 +29,10 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 ## 신뢰 경계
 
+### #202 객실 타입 카탈로그
+
+`GET /v1/room-types`는 비밀번호 변경을 완료한 active business admin의 live session만 허용하는 app-owned projection이다. 안정적인 `code`, 현재 `displayName`, 원 단위 `baseCleaningFee`, 관리형 `version`, 현재 참조 `roomCount`를 camelCase로 반환한다. 비활성 타입도 기존 객실 참조를 설명하기 위해 목록에는 남지만 기존 `change_room_master_data` command는 신규 선택을 계속 거부한다. `version`은 표시 시각에서 만든 가짜 값이 아니라 객실 타입 업무 필드가 실제 변경될 때만 DB trigger가 증가시킨다.
+
 ### #184 현재 시각 객실 projection
 
 `get_room_operational_projection`은 호출마다 서버 시각을 한 번만 캡처해 모든 행에 `evaluated_at`으로 반환한다. Fastify와 Edge adapter는 이를 RFC 3339 `evaluatedAt`으로 동일하게 공개하며, 예약 일정 축은 `reservationPhase=none|upcoming|current`로 반환한다. `current`는 반개구간 `checkInAt <= evaluatedAt < checkOutAt`이고, 미래 active 예약은 `upcoming`이다.
