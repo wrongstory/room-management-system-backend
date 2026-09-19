@@ -33,6 +33,10 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 `GET /v1/room-types`는 비밀번호 변경을 완료한 active business admin의 live session만 허용하는 app-owned projection이다. 안정적인 `code`, 현재 `displayName`, 원 단위 `baseCleaningFee`, 관리형 `version`, 현재 참조 `roomCount`를 camelCase로 반환한다. 비활성 타입도 기존 객실 참조를 설명하기 위해 목록에는 남지만 기존 `change_room_master_data` command는 신규 선택을 계속 거부한다. `version`은 표시 시각에서 만든 가짜 값이 아니라 객실 타입 업무 필드가 실제 변경될 때만 DB trigger가 증가시킨다.
 
+### #204 최근 7일 청소 완료 이력
+
+`GET /v1/cleaning-history`는 `public.list_cleaning_history` app-owned projection을 통해 `field_completed_at`의 KST 기준 D-6..D만 반환한다. 정렬과 pagination은 `(field_completed_at, attempt_id)` 역순 cursor이고, admin은 전체·maid·검색 필터를 사용하며 maid는 본인 실제 수행 attempt만 볼 수 있다. 객실 번호·타입은 attempt의 불변 `room_snapshot`만 사용한다. 수행자 표시명은 과거 snapshot이 없어 현재 profile의 안전한 label로 명시해서 반환하며, 이 값을 과거 시점의 이름으로 해석하지 않는다. 사진은 count·media availability·expiry metadata만 포함하고 PIN·guest PII·provider locator/content는 포함하지 않는다.
+
 ### #184 현재 시각 객실 projection
 
 `get_room_operational_projection`은 호출마다 서버 시각을 한 번만 캡처해 모든 행에 `evaluated_at`으로 반환한다. Fastify와 Edge adapter는 이를 RFC 3339 `evaluatedAt`으로 동일하게 공개하며, 예약 일정 축은 `reservationPhase=none|upcoming|current`로 반환한다. `current`는 반개구간 `checkInAt <= evaluatedAt < checkOutAt`이고, 미래 active 예약은 `upcoming`이다.

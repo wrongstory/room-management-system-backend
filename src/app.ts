@@ -24,6 +24,8 @@ import {
   type CleaningTemplateService,
   SupabaseCleaningTemplateService
 } from './modules/cleaning-templates/cleaning-template.service.js';
+import { createCleaningHistoryRoutes } from './modules/cleaning-history/cleaning-history.routes.js';
+import { type CleaningHistoryService, SupabaseCleaningHistoryService } from './modules/cleaning-history/cleaning-history.service.js';
 import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
 import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
 import { createNotificationRoutes } from './modules/notifications/notification.routes.js';
@@ -65,6 +67,7 @@ export interface AppServices {
   webPushSubscriptions?: WebPushSubscriptionService;
   checkoutIncidents?: CheckoutIncidentService;
   cleaningTemplates?: CleaningTemplateService;
+  cleaningHistory?: CleaningHistoryService;
 }
 
 export interface BuildAppOptions {
@@ -151,7 +154,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
       }),
       checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
-      cleaningTemplates: new SupabaseCleaningTemplateService(clients)
+      cleaningTemplates: new SupabaseCleaningTemplateService(clients),
+      cleaningHistory: new SupabaseCleaningHistoryService(clients)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -254,6 +258,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   if (services.cleaningTemplates) {
     await app.register(createCleaningTemplateRoutes(services.cleaningTemplates), {
       prefix: '/v1/cleaning-templates'
+    });
+  }
+  if (services.cleaningHistory) {
+    await app.register(createCleaningHistoryRoutes(services.cleaningHistory), {
+      prefix: '/v1/cleaning-history'
     });
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);

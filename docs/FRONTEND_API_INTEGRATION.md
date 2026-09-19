@@ -297,6 +297,10 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] 청소 시작 가능 여부는 `POST /v1/attempts/{attemptId}/start` 결과로 판정한다. 로컬 타이머나 예상시간으로 자동 시작·자동 해제하지 않는다.
 - [ ] `PREVIOUS_ROOM_WORKFLOW_ACTIVE`이면 같은 객실의 현재 수행을, `CHECKOUT_INCIDENT_OPEN`이면 미해결 사건을 다시 조회하고 사용자가 임의로 우회하지 못하게 한다.
 - [ ] PIN 조회는 청소 시작이 아니다. 실제 수행시간은 `startedAt → fieldCompletedAt`으로 표시하고, 중단된 여러 attempt를 임의로 이어 붙이지 않는다.
+- [ ] 완료 탭은 `GET /v1/cleaning-history?date=YYYY-MM-DD`를 사용한다. 서버가 KST D-6..D를 계산하므로 클라이언트가 UTC 구간을 만들지 않는다.
+- [ ] admin은 선택적으로 `maidProfileId`, `query`, `limit`, `cursor`를 사용하고 maid는 본인 이력만 조회한다. 다음 페이지는 `nextCursor`를 그대로 전달한다.
+- [ ] `roomNumber/roomTypeCode/roomTypeName`은 완료 attempt snapshot이다. `performerDisplayName`은 현재 프로필 표시명이며 과거 이름 snapshot이 아님을 UI 도움말에서 구분한다.
+- [ ] `mediaAvailability`가 `purged/unavailable`이어도 완료 이력 metadata는 유지한다. 사진 원본 URL·provider locator·PIN·고객 PII를 이 응답에서 기대하지 않는다.
 - [ ] 고객이 남아 있으면 `POST /v1/attempts/{attemptId}/checkout-not-completed`에 최신 executionVersion·assignment ID/revision과 `Idempotency-Key`를 보낸다.
 - [ ] 신고 뒤 `관리자 확인 대기`를 표시하고 이후 PIN 접근·시작·완료·제출 관련 동작은 최신 서버 상태에 따라 차단한다. 이미 화면에 표시된 PIN을 회수했다고 표현하지 않는다.
 
