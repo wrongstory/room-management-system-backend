@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 117:
-        raise RuntimeError("전체 source OpenAPI path 수가 117이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 118:
+        raise RuntimeError("전체 source OpenAPI path 수가 118이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 127:
-        raise RuntimeError("전체 source OpenAPI operation 수가 127이 아닙니다.")
+    if operation_count != 128:
+        raise RuntimeError("전체 source OpenAPI operation 수가 128이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     legacy_list = schemas.get("ReservationListEnvelope", {})
     range_page = schemas.get("ReservationRangePageEnvelope", {})
@@ -177,6 +177,13 @@ def main() -> None:
             package / "api" / "rooms" / "reveal_room_pin.py",
             package / "api" / "rooms" / "get_room_pin_sheet_sync_status.py",
             package / "api" / "rooms" / "request_room_pin_sheet_full_resync.py",
+            package / "api" / "rooms" / "list_room_events.py",
+            package / "models" / "room_event.py",
+            package / "models" / "room_event_category.py",
+            package / "models" / "room_event_source.py",
+            package / "models" / "room_event_summary.py",
+            package / "models" / "room_event_type.py",
+            package / "models" / "room_events_envelope.py",
             package / "models" / "room_pin_change_prepare_request.py",
             package / "models" / "room_pin_reveal.py",
             package / "models" / "room_pin_sheet_operator_status.py",
@@ -186,6 +193,21 @@ def main() -> None:
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
             raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+        room_event_model = (package / "models" / "room_event.py").read_text(encoding="utf-8")
+        for field in (
+            "event_key: str",
+            "category: RoomEventCategory",
+            "actor_profile_id: None | UUID",
+            "actor_display_name: None | str",
+            "entity_id: UUID",
+        ):
+            if field not in room_event_model:
+                raise RuntimeError(f"객실 이벤트 codegen 필드가 누락됐습니다: {field}")
+        room_event_api = (package / "api" / "rooms" / "list_room_events.py").read_text(
+            encoding="utf-8"
+        )
+        if 'limit: str | Unset = "30"' not in room_event_api:
+            raise RuntimeError("객실 이벤트 limit의 canonical decimal codegen 계약이 누락됐습니다.")
         prepare_model = (package / "models" / "room_pin_change_prepare_request.py").read_text(
             encoding="utf-8"
         )

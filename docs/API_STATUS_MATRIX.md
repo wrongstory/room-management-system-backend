@@ -1419,6 +1419,23 @@ Phase C는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**�
 
 #210은 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. `actionable`은 아직 release되지 않아 운영자가 처리할 수 있는 차단을 뜻하며, 시간이 지난 차단도 `expired`로 남아 명시적 release 대상이다.
 
+### #215 객실 이벤트 타임라인 — source 후보
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms/{roomId}/events?limit=30` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 객실 command 감사 + 실제 점유 전이, limit 1~50 최신순 |
+
+- [x] 기존 70 migrations 불변, 71번째 append-only `room_event_timeline`
+- [x] 새 테이블·backfill·index 없이 기존 두 immutable 원장의 safe projection
+- [x] 다른 객실 격리, command replay 중복 0, 최대 50건, unknown room 404 SQL 회귀
+- [x] PIN·guest PII·raw audit before/after·request hash 비노출
+- [x] Fastify/Edge/OpenAPI parity, 공개 API 후보 118 paths / 128 operations
+- [ ] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [ ] `dev` 병합
+- [ ] release/main 승인 뒤 production migration/API 배포 및 hosted smoke
+
+#215는 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. 청소·근무 이력 합산과 cursor·기간 통계는 이 endpoint에 포함하지 않는다.
+
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

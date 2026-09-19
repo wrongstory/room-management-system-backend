@@ -150,6 +150,6 @@ describe('current room status public contract', () => {
     expect(openApiDocument.components.schemas.RoomReasonCode.enum).toContain(
       'RESERVATION_CURRENT'
     );
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(117);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(118);
   });
 });

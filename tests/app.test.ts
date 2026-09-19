@@ -105,6 +105,10 @@ function services(): AppServices {
         roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 5, evaluatedAt: '2026-09-20T00:00:00.000Z',
         items: [{ id: '60000000-0000-4000-8000-000000000001', category: 'FACILITY', severity: 'warning' as const, blocksGuestAssignment: true, description: '창문 점검', status: 'open' as const, reportedAt: '2026-09-19T00:00:00.000Z' }]
       })),
+      listEvents: vi.fn(async () => ({
+        roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 6, evaluatedAt: '2026-09-20T00:00:00.000Z',
+        items: [{ id: '70000000-0000-4000-8000-000000000001', eventKey: 'occupancy:70000000-0000-4000-8000-000000000001', source: 'occupancy' as const, category: 'occupancy' as const, eventType: 'scheduled_check_in', actorProfileId: '10000000-0000-4000-8000-000000000001', actorDisplayName: null, entityId: '80000000-0000-4000-8000-000000000001', reasonCode: 'SCHEDULED_TRANSITION', effectiveAt: '2026-09-20T00:00:00.000Z', recordedAt: '2026-09-20T00:00:01.000Z', reservationId: '80000000-0000-4000-8000-000000000001', summary: { occupiedBefore: false, occupiedAfter: true } }]
+      })),
       list: vi.fn(async () => [{
         id: 'room-1',
         roomNumber: '117',
@@ -453,6 +457,44 @@ describe('application', () => {
     });
     expect(invalid.statusCode).toBe(400);
     expect(appServices.rooms.listOperationBlocks).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns the bounded room event timeline and rejects an invalid limit', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/events?limit=12',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    const invalidResponses = await Promise.all(
+      ['51', '01', '1.0', '%2B1'].map((limit) => app.inject({
+        method: 'GET',
+        url: `/v1/rooms/11111111-1111-4111-8111-111111111111/events?limit=${limit}`,
+        headers: { authorization: 'Bearer access-token' }
+      }))
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toMatchObject({
+      roomId: '11111111-1111-4111-8111-111111111111',
+      roomStateVersion: 6,
+      items: [{
+        eventKey: 'occupancy:70000000-0000-4000-8000-000000000001',
+        source: 'occupancy', category: 'occupancy', eventType: 'scheduled_check_in',
+        actorDisplayName: null,
+        entityId: '80000000-0000-4000-8000-000000000001'
+      }]
+    });
+    expect(appServices.rooms.listEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      '11111111-1111-4111-8111-111111111111',
+      12
+    );
+    expect(invalidResponses.map((item) => item.statusCode)).toEqual([400, 400, 400, 400]);
+    expect(appServices.rooms.listEvents).toHaveBeenCalledTimes(1);
     await app.close();
   });
 

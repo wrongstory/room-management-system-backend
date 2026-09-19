@@ -702,6 +702,150 @@ export async function listRoomIssues(
   };
 }
 
+const roomCommandSummaryFields = new Set([
+  "roomTypeId",
+  "elevatorZone",
+  "dataStatus",
+  "stateVersion",
+  "blockId",
+  "startsAt",
+  "endsAt",
+  "active",
+  "candleEventId",
+  "count",
+  "issueId",
+  "category",
+  "severity",
+  "blocksGuestAssignment",
+  "status",
+  "pinSyncEventId",
+  "syncStatus",
+  "pinVersion",
+]);
+const occupancySummaryFields = new Set(["occupiedBefore", "occupiedAfter"]);
+const roomEventCategoryByType = new Map<string, string>([
+  ["room.master_data_changed", "room_configuration"],
+  ["room.create_block", "room_block"],
+  ["room.release_block", "room_block"],
+  ["room.set_candle_count", "room_candle"],
+  ["room.report_issue", "room_issue"],
+  ["room.resolve_issue", "room_issue"],
+  ["room.record_pin_sync", "room_pin"],
+  ["room.pin_change_prepared", "room_pin"],
+  ["room.pin_change_confirmed", "room_pin"],
+  ["room.pin_mismatch_resolved", "room_pin"],
+  ["scheduled_check_in", "occupancy"],
+  ["manual_checkout", "occupancy"],
+  ["scheduled_checkout", "occupancy"],
+  ["occupancy_resumed", "occupancy"],
+  ["occupancy_correction", "occupancy"],
+]);
+
+function safeRoomEventSummary(
+  value: unknown,
+  source: "room_command" | "occupancy",
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 이벤트 요약 형식이 올바르지 않습니다.",
+    );
+  }
+  const allowed = source === "room_command"
+    ? roomCommandSummaryFields
+    : occupancySummaryFields;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(([key]) =>
+      allowed.has(key)
+    ),
+  );
+}
+
+export async function listRoomEvents(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+  limit: number,
+) {
+  requireRoomAdmin(actor);
+  const normalizedRoomId = uuidValue(roomId, "roomId");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    validationError("limit은 1~50의 정수여야 합니다.");
+  }
+  const { data, error } = await clients.admin.rpc("list_room_events", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: verifiedRequestSessionId(request),
+    p_room_id: normalizedRoomId,
+    p_limit: limit,
+  });
+  if (error) throw roomDatabaseError(error);
+  const value = data as Record<string, unknown>;
+  if (!value || !Array.isArray(value.items)) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 이벤트 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  return {
+    roomId: uuidValue(value.roomId, "roomId"),
+    roomStateVersion: positiveInteger(
+      value.roomStateVersion,
+      "roomStateVersion",
+    ),
+    evaluatedAt: responseTimestamp(value.evaluatedAt, "evaluatedAt"),
+    items: value.items.map((item) => {
+      const row = item as Record<string, unknown>;
+      const source = responseText(row.source, "source");
+      if (source !== "room_command" && source !== "occupancy") {
+        throw new EdgeError(
+          500,
+          "ROOM_PROJECTION_INVALID",
+          "객실 이벤트 source가 올바르지 않습니다.",
+        );
+      }
+      const id = uuidValue(row.id, "id");
+      const eventType = responseText(row.eventType, "eventType");
+      const category = responseText(row.category, "category");
+      if (
+        roomEventCategoryByType.get(eventType) !== category ||
+        row.eventKey !== `${source}:${id}`
+      ) {
+        throw new EdgeError(
+          500,
+          "ROOM_PROJECTION_INVALID",
+          "객실 이벤트 식별자 또는 분류가 올바르지 않습니다.",
+        );
+      }
+      return {
+        id,
+        eventKey: responseText(row.eventKey, "eventKey"),
+        source,
+        category,
+        eventType,
+        actorProfileId: row.actorProfileId === null
+          ? null
+          : uuidValue(row.actorProfileId, "actorProfileId"),
+        actorDisplayName: row.actorDisplayName === null
+          ? null
+          : responseText(row.actorDisplayName, "actorDisplayName"),
+        entityId: uuidValue(row.entityId, "entityId"),
+        reasonCode: row.reasonCode === null
+          ? null
+          : responseText(row.reasonCode, "reasonCode"),
+        effectiveAt: responseTimestamp(row.effectiveAt, "effectiveAt"),
+        recordedAt: responseTimestamp(row.recordedAt, "recordedAt"),
+        reservationId: row.reservationId === null
+          ? null
+          : uuidValue(row.reservationId, "reservationId"),
+        summary: safeRoomEventSummary(row.summary, source),
+      };
+    }),
+  };
+}
+
 export async function getRoom(
   clients: EdgeClients,
   actor: EdgeActor,

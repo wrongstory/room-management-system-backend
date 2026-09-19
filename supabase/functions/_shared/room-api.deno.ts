@@ -2,6 +2,7 @@ import {
   changeRoomMasterData,
   createRoomOperationBlock,
   getRoom,
+  listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
   listRooms,
@@ -624,5 +625,72 @@ Deno.test("room operation reads map only safe fields and bind the live session",
   assert(
     calls.every(([, args]) => args.p_session_id === sessionId),
     "both reads bind the verified JWT session",
+  );
+});
+
+Deno.test("room event timeline maps the bounded safe projection", async () => {
+  const reservationId = "80000000-0000-4000-8000-000000000001";
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        assert(name === "list_room_events", "event projection RPC");
+        assert(args.p_session_id === sessionId, "live session bound");
+        assert(args.p_limit === 30, "bounded limit forwarded");
+        return Promise.resolve({
+          error: null,
+          data: {
+            roomId,
+            roomStateVersion: 11,
+            evaluatedAt: "2026-09-20T01:00:00.000Z",
+            items: [{
+              id: "90000000-0000-4000-8000-000000000001",
+              eventKey: "occupancy:90000000-0000-4000-8000-000000000001",
+              source: "occupancy",
+              category: "occupancy",
+              eventType: "scheduled_check_in",
+              actorProfileId: admin.profileId,
+              actorDisplayName: null,
+              entityId: reservationId,
+              reasonCode: "SCHEDULED_TRANSITION",
+              effectiveAt: "2026-09-20T00:00:00.000Z",
+              recordedAt: "2026-09-20T00:00:01.000Z",
+              reservationId,
+              summary: {
+                occupiedBefore: false,
+                occupiedAfter: true,
+                guestName: "must-not-leak",
+              },
+              requestHash: "must-not-leak",
+            }],
+          },
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const timeline = await listRoomEvents(
+    readRequest(),
+    clients,
+    admin,
+    roomId,
+    30,
+  );
+  assert(timeline.roomStateVersion === 11, "room version mapped");
+  assert(
+    timeline.items[0]?.reservationId === reservationId,
+    "reservation mapped",
+  );
+  assert(
+    timeline.items[0]?.eventKey ===
+        "occupancy:90000000-0000-4000-8000-000000000001" &&
+      timeline.items[0]?.category === "occupancy" &&
+      timeline.items[0]?.actorProfileId === admin.profileId &&
+      timeline.items[0]?.actorDisplayName === null &&
+      timeline.items[0]?.entityId === reservationId,
+    "stable identity, catalog category, actor and entity mapped",
+  );
+  assert(
+    !JSON.stringify(timeline).includes("must-not-leak"),
+    "raw and unknown summary fields removed",
   );
 });
