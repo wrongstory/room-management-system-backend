@@ -1365,7 +1365,7 @@ Phase C는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**�
 
 #202는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**다. 비활성 타입을 목록에 포함하는 것은 새 선택 허용이 아니다.
 
-### #204 최근 7일 청소 완료 이력 — source 후보
+### #204 최근 7일 청소 완료 이력 — source/dev 완료
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
@@ -1377,11 +1377,29 @@ Phase C는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**�
 - [x] PIN·guest PII·사진 locator/content 비노출, 사진은 count/availability/expiry metadata만 반환
 - [x] Fastify/Edge/OpenAPI 및 ephemeral Python business codegen parity
 - [x] 공개 API 후보 116 paths / 124 operations
+- [x] PR #205 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev@c12c773d1ba427254fdd36faeede54c0c844a7c5` 병합 — 68 migrations / 116 paths / 124 operations
+- [ ] release/main 승인 뒤 production migration/API 배포 및 hosted smoke
+
+#204는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**다. 완료 이력은 실제 `fieldCompletedAt`만 포함하고 현재 객실 master-data로 과거 표시를 보정하지 않는다.
+
+### #206 주간 업무 기록 — source 후보
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/work-history` | active/password-complete admin·maid + live session | ✅ | ✅ | ✅ | ❌ | ❌ | KST 월~일의 가능일/실제 통보/실제 완료를 독립 flag로 반환; maid self-only |
+
+- [x] 기존 68 migrations 불변, 69번째 append-only `weekly_work_history_projection`
+- [x] current availability, immutable notified assignment history, `fieldCompletedAt` KST 날짜를 독립 집계
+- [x] 같은 메이드·날짜 다중 작업 1일 dedupe, 전체 필터 summary와 bounded opaque cursor
+- [x] 메이드별 availability `submittedAt/currentVersion/versionCount`와 월~일 flags
+- [x] 표시명은 현재 profile label임을 계약에 명시; Fastify/Edge/OpenAPI parity
+- [x] 공개 API 후보 117 paths / 125 operations
 - [ ] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
 - [ ] `dev` 병합
 - [ ] release/main 승인 뒤 production migration/API 배포 및 hosted smoke
 
-#204는 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. 완료 이력은 실제 `fieldCompletedAt`만 포함하고 현재 객실 master-data로 과거 표시를 보정하지 않는다.
+#206은 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. 통보·가능일을 실제 완료로 해석하지 않고, 객실/작업 상세는 #204를 사용한다.
 
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.

@@ -301,6 +301,10 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] admin은 선택적으로 `maidProfileId`, `query`, `limit`, `cursor`를 사용하고 maid는 본인 이력만 조회한다. 다음 페이지는 `nextCursor`를 그대로 전달한다.
 - [ ] `roomNumber/roomTypeCode/roomTypeName`은 완료 attempt snapshot이다. `performerDisplayName`은 현재 프로필 표시명이며 과거 이름 snapshot이 아님을 UI 도움말에서 구분한다.
 - [ ] `mediaAvailability`가 `purged/unavailable`이어도 완료 이력 metadata는 유지한다. 사진 원본 URL·provider locator·PIN·고객 PII를 이 응답에서 기대하지 않는다.
+- [ ] 주간 업무 기록은 `GET /v1/work-history?weekStart=YYYY-MM-DD`를 사용하고 `weekStart`는 KST 월요일을 보낸다.
+- [ ] `availableSubmitted`, `assignmentNotified`, `fieldCompleted`를 서로 독립된 flag로 표시한다. 가능일이나 통보만으로 실제 완료·근무로 합치지 않는다.
+- [ ] admin은 `maidProfileId/limit/cursor`를 사용할 수 있고 maid는 본인 기록만 조회한다. `summary`는 현재 page가 아니라 전체 필터 범위이므로 다음 page에서도 같은 값으로 취급한다.
+- [ ] `maidDisplayNameSource=current_profile`은 현재 표시명이라는 뜻이다. 과거 통보·완료 시점의 이름 snapshot으로 표시하지 않고, 상세 작업은 `/v1/cleaning-history`로 이동한다.
 - [ ] 고객이 남아 있으면 `POST /v1/attempts/{attemptId}/checkout-not-completed`에 최신 executionVersion·assignment ID/revision과 `Idempotency-Key`를 보낸다.
 - [ ] 신고 뒤 `관리자 확인 대기`를 표시하고 이후 PIN 접근·시작·완료·제출 관련 동작은 최신 서버 상태에 따라 차단한다. 이미 화면에 표시된 PIN을 회수했다고 표현하지 않는다.
 
