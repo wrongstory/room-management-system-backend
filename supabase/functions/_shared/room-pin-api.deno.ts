@@ -1,6 +1,8 @@
 import {
   bootstrapRoomPins,
+  confirmGeneratedRoomPin,
   finishRoomPinChange,
+  generateUniqueFourDigitPins,
   prepareRoomPinChange,
   revealRoomPin,
   roomPinPath,
@@ -35,7 +37,6 @@ function configure(): void {
   Deno.env.set("ROOM_PIN_KEY_BASE64", key);
   Deno.env.set("ROOM_PIN_KEY_VERSION", "key-v1");
   Deno.env.set("ROOM_PIN_KEYRING_JSON", "{}");
-  Deno.env.set("ROOM_PIN_INITIAL_DIGITS", "0".repeat(4));
   Deno.env.set("RESERVATION_PII_KEY_BASE64", reservationKey);
   Deno.env.set("RESERVATION_PII_KEYRING_JSON", "{}");
   Deno.env.set("WEB_PUSH_SUBSCRIPTION_KEY_BASE64", webPushKey);
@@ -121,6 +122,11 @@ Deno.test("room PIN paths are exact and reject aliases", () => {
     roomPinPath(`/v1/rooms/${roomId}/pin/reveal`)?.kind === "reveal",
     "reveal path",
   );
+  assert(
+    roomPinPath(`/v1/rooms/${roomId}/pin/generated/confirm`)?.kind ===
+      "generated-confirm",
+    "generated confirm path",
+  );
   assert(roomPinPath(`/v1/rooms/${roomId}/pin`) === null, "no reveal alias");
 });
 
@@ -189,9 +195,19 @@ Deno.test("prepare binds room snapshot and maid access authority without hashing
   );
 });
 
-Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN material", async () => {
+Deno.test("four-digit generation preserves leading zeros and retries collisions", () => {
+  const draws = [0, 0, 42];
+  assert(
+    generateUniqueFourDigitPins(2, () => draws.shift() ?? 9999).join(",") ===
+      "0000,0042",
+    "unique fixed-width PIN values",
+  );
+});
+
+Deno.test("bootstrap encrypts a bounded admin-only batch and reveals generated credentials briefly", async () => {
   configure();
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let encryptedCandidate: Record<string, unknown> | undefined;
   const clients = {
     admin: {
       rpc(name: string, args: Record<string, unknown>) {
@@ -209,16 +225,47 @@ Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN mate
             error: null,
           });
         }
+        if (name === "bootstrap_room_pins") {
+          encryptedCandidate =
+            (args.p_candidates as Array<Record<string, unknown>>)[0];
+          return Promise.resolve({
+            data: {
+              initialized_room_ids: [roomId],
+              skipped_room_ids: [],
+              initialized_count: 1,
+              skipped_count: 0,
+              remaining_count: 0,
+              completed_at: "2026-09-13T00:00:00Z",
+            },
+            error: null,
+          });
+        }
+        if (name === "begin_generated_room_pin_reveal") {
+          assert(encryptedCandidate, "encrypted candidate captured");
+          return Promise.resolve({
+            data: {
+              lease_id: leaseId,
+              room_id: roomId,
+              room_number: "0101",
+              pin_version: 1,
+              expires_at: new Date(Date.now() + 30_000).toISOString(),
+              envelope_format: encryptedCandidate.envelopeFormat,
+              ciphertext_base64: encryptedCandidate.ciphertextBase64,
+              nonce_base64: encryptedCandidate.nonceBase64,
+              auth_tag_base64: encryptedCandidate.authTagBase64,
+              key_version: encryptedCandidate.keyVersion,
+              aad_environment: encryptedCandidate.aadEnvironment,
+              aad_project_ref: encryptedCandidate.aadProjectRef,
+            },
+            error: null,
+          });
+        }
+        if (name === "finalize_generated_room_pin_reveal") {
+          return Promise.resolve({ data: { finalized: true }, error: null });
+        }
         return Promise.resolve({
-          data: {
-            initialized_room_ids: [roomId],
-            skipped_room_ids: [],
-            initialized_count: 1,
-            skipped_count: 0,
-            remaining_count: 0,
-            completed_at: "2026-09-13T00:00:00Z",
-          },
-          error: null,
+          data: null,
+          error: { message: "unexpected RPC" },
         });
       },
     },
@@ -236,7 +283,8 @@ Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN mate
   );
   assert(
     calls.map((call) => call.name).join(",") ===
-      "get_room_pin_bootstrap_context,bootstrap_room_pins",
+      "get_room_pin_bootstrap_context,bootstrap_room_pins," +
+        "begin_generated_room_pin_reveal,finalize_generated_room_pin_reveal",
     "bounded bootstrap RPC order",
   );
   const candidate =
@@ -251,12 +299,50 @@ Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN mate
   );
   assert(
     result.initializedCount === 1 && result.remainingCount === 0,
-    "safe bootstrap result",
+    "bounded bootstrap result",
   );
   assert(
-    !/pinDigits|credential|ciphertext/i.test(JSON.stringify(result)),
-    "response contains no PIN material",
+    /^0101-[0-9]{4}$/.test(result.generatedPins[0]?.credential ?? "") &&
+      (result.generatedPins[0]?.clearAfterSeconds ?? 0) >= 1 &&
+      (result.generatedPins[0]?.clearAfterSeconds ?? 0) <= 30,
+    "response contains only the short-lived generated credential",
   );
+  assert(
+    !/ciphertext|nonce|authTag/i.test(JSON.stringify(result)),
+    "response excludes encrypted envelope material",
+  );
+});
+
+Deno.test("generated PIN confirmation uses an admin-only idempotent RPC", async () => {
+  let call: { name: string; args: Record<string, unknown> } | undefined;
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        call = { name, args };
+        return Promise.resolve({
+          data: {
+            room_id: roomId,
+            pin_version: 1,
+            status: "verified",
+            confirmed_at: "2026-09-15T00:00:00Z",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const result = await confirmGeneratedRoomPin(
+    command(`/v1/rooms/${roomId}/pin/generated/confirm`, {
+      expectedPinVersion: 1,
+    }),
+    clients,
+    actor,
+    sessionId,
+    roomId,
+  );
+  assert(call?.name === "confirm_generated_room_pin", "confirmation RPC");
+  assert(call?.args.p_expected_pin_version === 1, "version CAS");
+  assert(result.status === "verified", "verified result");
 });
 
 Deno.test("confirm and rollback map database fields to exact camelCase contracts", async () => {
@@ -437,6 +523,16 @@ Deno.test("PIN database errors remain stable and never expose raw details", () =
       "PIN_REVEAL_AUTHORIZATION_CHANGED",
       403,
       "PIN_REVEAL_AUTHORIZATION_CHANGED",
+    ],
+    [
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+      409,
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+    ],
+    [
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
+      409,
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
     ],
     ["ROOM_PIN_UNCONFIGURED", 404, "ROOM_PIN_UNCONFIGURED"],
   ];

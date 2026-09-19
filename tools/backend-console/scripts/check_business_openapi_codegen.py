@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 119:
-        raise RuntimeError("전체 source OpenAPI path 수가 119가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 120:
+        raise RuntimeError("전체 source OpenAPI path 수가 120이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 129:
-        raise RuntimeError("전체 source OpenAPI operation 수가 129가 아닙니다.")
+    if operation_count != 130:
+        raise RuntimeError("전체 source OpenAPI operation 수가 130이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     legacy_list = schemas.get("ReservationListEnvelope", {})
     range_page = schemas.get("ReservationRangePageEnvelope", {})
@@ -176,6 +176,7 @@ def main() -> None:
             package / "api" / "rooms" / "confirm_room_pin_change.py",
             package / "api" / "rooms" / "rollback_room_pin_change.py",
             package / "api" / "rooms" / "reveal_room_pin.py",
+            package / "api" / "rooms" / "confirm_generated_room_pin.py",
             package / "api" / "rooms" / "get_room_pin_sheet_sync_status.py",
             package / "api" / "rooms" / "request_room_pin_sheet_full_resync.py",
             package / "api" / "rooms" / "list_room_events.py",
@@ -187,6 +188,9 @@ def main() -> None:
             package / "models" / "room_events_envelope.py",
             package / "models" / "room_pin_change_prepare_request.py",
             package / "models" / "room_pin_reveal.py",
+            package / "models" / "generated_room_pin_confirm_request.py",
+            package / "models" / "generated_room_pin_confirmation.py",
+            package / "models" / "generated_room_pin_confirmation_envelope.py",
             package / "models" / "room_pin_sheet_operator_status.py",
             package / "models" / "room_pin_sheet_full_resync_request.py",
             package / "models" / "room_pin_sheet_full_resync_accepted.py",

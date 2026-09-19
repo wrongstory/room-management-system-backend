@@ -32,11 +32,11 @@ Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있�
 
 production Edge는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` 기준 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations를 사용한다. `standard`, `premium`, `oceanPremium`, `oceanFamily` checkout template은 각각 v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes=null`이다. GitHub Pages도 workflow run `35051144073`에서 production Edge와 path·operationId parity를 확인했으며 Pages manifest SHA-256은 공개 `openapi.json` artifact와 일치한다. 다만 안전한 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, 이를 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
 
-### #131/#140 객실 PIN source 계약
+### #131/#140/#169 객실 PIN source 계약
 
-source OpenAPI에는 prepare/confirm/rollback/reveal과 admin 초기화 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+source OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
 
-Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 이 entitlement 계약은 아직 source 미구현이므로 프런트는 기존 reveal 성공을 장기 자격 증명으로 캐시하지 않는다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 실제 초기 숫자는 배포 secret이므로 프런트가 보유·전송하지 않는다. 관련 path는 production OpenAPI에 이미 존재하지만, 실제 PIN 초기화·Sheets 동기화 기능은 승인된 target mapping·ACL·secret·Cron·hosted smoke가 끝날 때까지 켜지 않는다.
+Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 서버가 batch-unique 4자리 값을 생성한다. 응답의 `generatedPins`를 객실별로 표시하고 현장 도어락 적용 후 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 해당 `pinVersion`을 보낸다. 확인 성공 전에는 mismatch 경고와 체크인 차단을 유지하고 메이드에게 표시하지 않는다. 이 기능들은 production OpenAPI에 각 path가 나타날 때까지 켜지 않는다.
 
 ## 2. 로컬 백엔드 준비
 

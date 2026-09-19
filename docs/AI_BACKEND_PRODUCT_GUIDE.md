@@ -4,13 +4,13 @@
 
 검토 기준:
 
-- 이 문서 갱신의 개발 통합 기준: `dev@3a3409bd38458796126fb5ea2590949c8b807985` — 65 migrations / OpenAPI 114 paths / 122 operations. #196 예약 bookability와 bounded calendar가 `dev`에 통합됐다. Issue #200 작업 브랜치의 66번째 migration은 이 통합 기준과 구분하는 미병합 후보다.
-- 개발 migration 순서는 57번째 `photo_slot_contract_v8`부터 64번째 `assignment_pin_entitlement`, 65번째 `reservation_bookability`까지다. 기존 65개 migration은 변경하지 않고 #200 후보는 66번째 `long_stay_open_ended_reservations`만 append한다. 공개 API 면은 114 paths / 122 operations를 유지한다. 이 개발 snapshot과 작업 후보는 아직 `main`/production 정본이 아니며 release 승인 전 운영 template·DB·Edge를 변경하지 않는다.
-- 백엔드 저장소 `main`: `a12595edf68644b94215c4792e0d3aadd64772c6`. 마지막으로 직접 검증한 production 배포 source는 별도인 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`이며 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations였다. 저장소 `main`, 배포 source, `dev`를 같은 상태로 표현하지 않는다.
+- 이 문서 갱신의 개발 통합 기준: `dev@3bb0cd5b84434f2e2ec92fff2d7732f56f27555c` — 72 migrations / OpenAPI 119 paths / 129 operations.
+- Issue #169 통합 후보는 기존 72개 migration을 보존하고 73번째 `generated_room_pin_confirmation`과 PIN 확인 API를 추가해 OpenAPI 120 paths / 130 operations가 된다. `dev` 병합 및 release 승인 전에는 production 계약으로 표현하지 않는다.
+- 백엔드 저장소 `main`: `a12595edf68644b94215c4792e0d3aadd64772c6`. 마지막으로 직접 검증한 production 배포 source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`이며 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations였다.
 - 프런트엔드 정본 저장소: `wrongstory/room-management-system`
-- 프런트엔드 제품·운영 연결 snapshot: `dev@165fed2d62a763d64ac62539e1475c1b3e42868f` (`기능: 운영 API 연결을 완성하라`). 원격 `dev` ref는 삭제됐으나 exact commit과 문서 blob은 재현 가능하다.
-- 프런트엔드 현재 원격 `main`: `afeb0898879bf8d381ee2e218938dc3160fd6ac0`. 이는 위 snapshot의 후속 정본으로 자동 승격하지 않고 별도 영향 대조 후 채택한다.
-- 기준일: 2026-09-17 KST
+- 프런트엔드 제품·운영 연결 snapshot: `dev@165fed2d62a763d64ac62539e1475c1b3e42868f` (`기능: 운영 API 연결을 완성하라`).
+- 프런트엔드 현재 원격 `main`: `afeb0898879bf8d381ee2e218938dc3160fd6ac0`. 별도 영향 대조 전에는 위 snapshot의 후속 정본으로 자동 승격하지 않는다.
+- 기준일: 2026-09-20 KST
 
 프런트엔드는 단일 HTML 중심의 고충실도 업무 시뮬레이터이며 기준 snapshot은 운영 API를 실제 소비한다. 화면 객체, fixture, dead code를 그대로 실제 API나 테이블로 옮기지 않는다.
 
@@ -524,9 +524,10 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 관리자 변경은 PIN 변경 lease 선점 → 실제 도어락 변경 → confirm/save 순서로 조정한다. prepare 즉시 mismatch가 되어 실제 체크인 전이와 PIN 조회를 차단하지만 예약 생성·변경·배정은 차단하지 않으며, confirm 전에는 current pointer를 바꾸지 않는다. 만료·불확실 상태는 실제 PIN 재입력 후 새 revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결한다. current가 없는 최초 변경이 만료된 경우에도 실제 PIN 재입력으로 version 1을 수립할 수 있다.
 - PIN 평문을 URL, 로그, error, audit payload, notification, analytics, Git, 브라우저 저장소에 넣지 않는다.
 - `[확정 — 2026-09-13 #136]` Google Sheets는 DB PIN current revision의 단방향 운영 projection이다. `room_number`를 business identity로 bounded board에서 정확히 한 행만 갱신하고, equal-version 변조는 DB 정본으로 복구하며 Sheet-ahead/중복 identity/불확실 write는 operator-blocked한다. 전용 service account는 spreadsheets-only scope를 쓰며 source-controlled approved target 검증을 PIN 복호화·OAuth보다 먼저 수행한다. hosted target mapping과 full resync/운영 활성화는 #137/release 승인 전에는 없다.
-- `[확정 — 2026-09-13 #140]` 빈 DB의 PIN 미설정 상태는 예약 업무를 중단시키지 않는다. 배포 시 secret manager에 주입한 4~8자리 초기 숫자를 active admin 전용 bounded bootstrap command가 서버 안에서 객실번호와 조합·암호화해 version 1로 수립한다. 초기 숫자 평문은 source, migration, request/response, 로그, 감사, 알림에 넣지 않는다. bootstrap은 current PIN 또는 unresolved mismatch가 있는 객실을 덮어쓰지 않고 건너뛰며, batch 최대 25건·멱등 receipt·객실별 immutable revision/outbox를 사용한다.
+- `[확정 — 2026-09-16 #169]` 빈 DB의 PIN 미설정 상태는 예약 업무를 중단시키지 않는다. active admin 전용 bounded bootstrap command는 서버 CSPRNG로 batch 안에서 중복되지 않는 정확히 4자리 숫자를 생성하고 선행 0을 보존해 객실번호와 조합·암호화한 version 1 revision/current를 수립한다. 고정 초기 PIN deployment secret은 사용하지 않는다. bootstrap은 current PIN 또는 unresolved mismatch가 있는 객실을 덮어쓰지 않고 건너뛰며 batch 최대 25건과 멱등 receipt를 유지한다.
+- `[확정 — 2026-09-16 #169]` generated PIN은 생성 직후 `mismatch`이며 Sheet outbox를 만들지 않는다. admin만 30초 reveal lease와 `Cache-Control: no-store` 응답에서 credential을 확인할 수 있고, 평문/envelope는 command receipt·로그·감사·알림에 저장하지 않는다. 메이드와 일반 reveal은 이 상태를 열람할 수 없다. 관리자가 실제 도어락 적용을 version CAS와 새 idempotency key로 확인한 뒤에만 `verified` sync event와 Sheet outbox를 원자적으로 기록한다.
 - `[확정 — 2026-09-13 #140 보강]` 일반 PIN prepare와 bootstrap은 private `(key_version, nonce)` reservation을 공유한다. 같은 실제 PIN 암호키는 keyring 구성에서 여러 version 이름으로 중복 등록할 수 없고, 같은 key version과 12-byte nonce는 객실·AAD가 달라도 서로 다른 암호화에 재사용할 수 없다. prepare가 만든 envelope를 confirm이 그대로 revision으로 승격하는 것은 같은 논리 암호화이므로 reservation을 재사용한다. 52→53 upgrade에서 matching confirmed lease/revision은 한 reservation으로 backfill하며, 서로 다른 과거 암호화의 충돌이 발견되면 원 이력을 삭제·변환하지 않고 migration 전체를 fail-closed한다.
-- bootstrap 성공의 `initialized`는 그 batch transaction에서 신규 revision/current/verified sync/Sheet outbox/audit가 확정된 객실이고, `skipped`는 기존 current PIN 또는 미해결 물리 변경을 보존하기 위해 의도적으로 건너뛴 객실이다. 검증 오류를 `skipped`로 숨기지 않으며 DB validation 오류는 batch transaction 전체를 rollback해 업무 원장 변경 0건으로 끝난다. 반면 timeout·응답 유실은 rollback 증거가 아니므로 같은 `Idempotency-Key`로 완료 receipt를 재조회해 최초 결과를 확인한다.
+- bootstrap 성공의 `initialized`는 그 batch transaction에서 신규 revision/current/mismatch sync/audit가 확정된 객실이고, `skipped`는 기존 current PIN 또는 미해결 물리 변경을 보존하기 위해 의도적으로 건너뛴 객실이다. 검증 오류를 `skipped`로 숨기지 않으며 DB validation 오류는 batch transaction 전체를 rollback해 업무 원장 변경 0건으로 끝난다. timeout·응답 유실은 rollback 증거가 아니므로 같은 `Idempotency-Key`로 receipt를 재생하고, 아직 현장 확인 전이면 새 30초 admin reveal lease로 같은 암호화 revision을 다시 확인한다.
 - `[확정 — 2026-09-13 #137 source]` developer/admin은 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 CAS version만 조회한다. full resync는 서버가 요청 시점의 정확한 121실 room/PIN current snapshot을 만들고 global singleton fence의 유일한 provider permit으로 `A1:H122`를 DB 정본에서 재작성한다. 요청·claim은 environment/project/spreadsheet/tab 전체의 source-controlled SHA-256 target identity에 묶이며 mapping 변경·stale snapshot·경쟁은 fail-closed한다. 성공 marker 이전에 생성된 snapshot-room incremental/uncertain 작업만 supersede하고 이후 PIN 변경은 보존한다. Sheet→DB 입력, PIN/envelope/credential/token/raw Google response 공개, production mapping·활성화는 금지한다.
 - `[현재 구현 — Issue #194 source/dev 완료, production 미배포]` 64번째 append-only migration은 exact typed delivery outbox를 source evidence로 고정한 private immutable entitlement ledger와 30초 reveal lease를 연결한다. 최초 grant는 active/password-complete actor만 허용하고, PIN rotation successor는 current workflow와 객실별 최소 미래 service date의 이미 통보된 assignment만 허용한다. deactivation 진행 상태에는 신규 successor를 만들지 않고 inactive/departed 최종 정리에서 남은 entitlement/reveal을 닫는다. source/dev 완료는 hosted provider·Google Sheets/Cron 활성화나 production 배포 완료를 뜻하지 않는다.
 

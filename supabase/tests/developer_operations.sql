@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'payroll_cycle_resolver'
+    'generated_room_pin_confirmation'
   ) ->> 'currentMigration',
-  'payroll_cycle_resolver',
+  'generated_room_pin_confirmation',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'payroll_cycle_resolver'
+    'generated_room_pin_confirmation'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'payroll_cycle_resolver';
+where name = 'generated_room_pin_confirmation';
 
 delete from supabase_migrations.schema_migrations
-where name = 'payroll_cycle_resolver';
+where name = 'generated_room_pin_confirmation';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'payroll_cycle_resolver'
+    'generated_room_pin_confirmation'
   ) ->> 'currentMigration',
-  'room_event_timeline',
-  'database status exposes migration 71 when migration 72 is absent'
+  'payroll_cycle_resolver',
+  'database status exposes migration 72 when migration 73 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'payroll_cycle_resolver'
+    'generated_room_pin_confirmation'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 71 behind source migration 72'
+  'database status reports migration 72 behind source migration 73'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)
