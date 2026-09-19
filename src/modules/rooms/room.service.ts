@@ -173,7 +173,18 @@ export interface RoomPinBootstrapResult {
   completedAt: string;
 }
 
+export interface RoomTypeCatalogItem {
+  id: string;
+  code: string;
+  displayName: string;
+  baseCleaningFee: number;
+  active: boolean;
+  version: number;
+  roomCount: number;
+}
+
 export interface RoomService {
+  listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
   list(actor: Actor): Promise<RoomSummary[]>;
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
   changeMasterData(actor: Actor, input: ChangeRoomMasterDataInput): Promise<RoomSummary>;
@@ -212,6 +223,28 @@ interface RoomProjectionRow {
   allocation_blocked: boolean;
   allocation_ready: boolean;
   reason_codes: RoomReasonCode[];
+}
+
+interface RoomTypeCatalogRow {
+  id: string;
+  code: string;
+  display_name: string;
+  base_cleaning_fee: number;
+  active: boolean;
+  version: number;
+  room_count: number;
+}
+
+function toRoomTypeCatalogItem(row: RoomTypeCatalogRow): RoomTypeCatalogItem {
+  return {
+    id: row.id,
+    code: row.code,
+    displayName: row.display_name,
+    baseCleaningFee: row.base_cleaning_fee,
+    active: row.active,
+    version: row.version,
+    roomCount: row.room_count
+  };
 }
 
 function toRoom(row: RoomProjectionRow): RoomSummary {
@@ -390,6 +423,18 @@ export class SupabaseRoomService implements RoomService {
       throw new AppError(503, 'ROOM_PIN_BOOTSTRAP_CONFIG_INVALID', '객실 초기 PIN 설정을 확인해 주세요.');
     }
     return this.initialPinDigits;
+  }
+
+  async listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('list_room_type_catalog', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken)
+    });
+    if (error) {
+      throw roomError(error);
+    }
+    return ((data ?? []) as RoomTypeCatalogRow[]).map(toRoomTypeCatalogItem);
   }
 
   async list(actor: Actor): Promise<RoomSummary[]> {

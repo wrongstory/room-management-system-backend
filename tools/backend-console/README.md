@@ -5,7 +5,7 @@ Python 3.12+ 데스크톱 도구다. Phase A에는 DB 연결, SQL 실행기, ser
 
 #84 사진 업로드/슬롯/원본4 operations는 business maid/admin 권한이며 developer 콘솔에 추가하지 않는다.
 filtered OpenAPI와 생성 client는 auth/accounts/developer, #137의 room PIN Sheet 안전 조회·전체 복구,
-#156의 checkout 청소 템플릿 조회·게시를 합친 20 operations만 유지한다. 사진 업로드 감사는 기존
+#156의 checkout 청소 템플릿 조회·게시와 #202 객실 타입 catalog 조회를 합친 21 operations만 유지한다. 사진 업로드 감사는 기존
 `photo.upload_accepted` safe summary로 확인하며 Drive ID/OAuth/원본 내용을 노출하지 않는다.
 PIN/ciphertext/envelope, Google raw response, credential/token, spreadsheet/tab 식별자는 콘솔 계약에
 포함하지 않는다.

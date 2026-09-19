@@ -231,6 +231,8 @@ from .room_pin_sheet_sync_status_last_heartbeat_type_0_status import (
 )
 from .room_pin_sheet_sync_status_status import RoomPinSheetSyncStatusStatus
 from .room_pin_sheet_sync_status_worker import RoomPinSheetSyncStatusWorker
+from .room_type_catalog_envelope import RoomTypeCatalogEnvelope
+from .room_type_catalog_item import RoomTypeCatalogItem
 from .run_developer_diagnostics_response_200 import RunDeveloperDiagnosticsResponse200
 from .status_change_request import StatusChangeRequest
 from .status_change_request_status import StatusChangeRequestStatus
@@ -368,6 +370,8 @@ __all__ = (
     "RoomPinSheetSyncStatusLastHeartbeatType0Status",
     "RoomPinSheetSyncStatusStatus",
     "RoomPinSheetSyncStatusWorker",
+    "RoomTypeCatalogEnvelope",
+    "RoomTypeCatalogItem",
     "RunDeveloperDiagnosticsResponse200",
     "StatusChangeRequest",
     "StatusChangeRequestStatus",

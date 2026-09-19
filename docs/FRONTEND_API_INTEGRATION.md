@@ -268,6 +268,14 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 
 아래는 `wrongstory/room-management-system`에서 구현할 source 체크리스트다. 백엔드 배포 gate는 완료됐지만 프런트 연결과 안전한 예약 E2E는 별도다.
 
+#### 객실 타입 카탈로그 (#202 source 후보)
+
+- [ ] active/password-complete business admin 세션에서 `GET /v1/room-types`를 호출하고 `{ items }`를 사용한다.
+- [ ] 각 항목의 `id`, 안정적인 `code`, `displayName`, 원 단위 정수 `baseCleaningFee`, `active`, `version`, `roomCount`를 수기 fixture 대신 표시한다.
+- [ ] `active=false`도 기존 객실 참조 현황을 위해 목록에는 표시하되 신규 객실 기준정보 선택지에서는 비활성화한다.
+- [ ] 수정 화면의 이후 CAS 연결은 서버가 반환한 실제 `version`을 사용한다. `updatedAt`이나 목록 index에서 임의 버전을 만들지 않는다.
+- [ ] 이 endpoint는 source/dev 후보이며 운영 Edge 배포 전에는 production에서 사용 가능하다고 표시하지 않는다.
+
 #### 타입·템플릿 관리자 화면
 
 - [ ] 최신 production Edge 또는 Pages `/openapi.json`에서 타입을 다시 생성한다. candidate JSON이나 수기 interface를 운영 정본으로 고정하지 않는다.

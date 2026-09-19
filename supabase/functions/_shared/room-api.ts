@@ -4,6 +4,7 @@ import {
   EdgeError,
   requireBusinessAdmin,
   requirePasswordChanged,
+  verifiedRequestSessionId,
 } from "./runtime.ts";
 
 export type RoomReasonCode =
@@ -518,6 +519,41 @@ export async function listRooms(clients: EdgeClients, actor: EdgeActor) {
   );
   if (error) throw roomDatabaseError(error);
   return toRoomProjections(data);
+}
+
+function booleanValue(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") {
+    validationError(`${name}은 boolean이어야 합니다.`);
+  }
+  return value;
+}
+
+export async function listRoomTypes(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+) {
+  requireRoomAdmin(actor);
+  const { data, error } = await clients.admin.rpc(
+    "list_room_type_catalog",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+    },
+  );
+  if (error) throw roomDatabaseError(error);
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: uuidValue(row.id, "id"),
+    code: String(row.code),
+    displayName: String(row.display_name),
+    baseCleaningFee: nonNegativeInteger(
+      row.base_cleaning_fee,
+      "baseCleaningFee",
+    ),
+    active: booleanValue(row.active, "active"),
+    version: positiveInteger(row.version, "version"),
+    roomCount: nonNegativeInteger(row.room_count, "roomCount"),
+  }));
 }
 
 export async function getRoom(

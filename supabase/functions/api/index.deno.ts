@@ -795,6 +795,20 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
     admin: {
       async rpc(name: string, args: Record<string, unknown>) {
         calls.push(name);
+        if (name === "list_room_type_catalog") {
+          return {
+            data: [{
+              id: roomTypeId,
+              code: "standard",
+              display_name: "스탠다드 더블 로프트",
+              base_cleaning_fee: 16000,
+              active: true,
+              version: 1,
+              room_count: 22,
+            }],
+            error: null,
+          };
+        }
         if (name === "get_room_operational_projection") {
           return { data: [roomRow], error: null };
         }
@@ -850,14 +864,20 @@ function request(
   path: string,
   body?: Record<string, unknown>,
 ): Request {
+  const tokenPayload = btoa(JSON.stringify({
+    session_id: "70000000-0000-4000-8000-000000000001",
+  })).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   return new Request(`http://localhost/functions/v1/api${path}`, {
     method,
-    headers: body
-      ? {
-        "content-type": "application/json",
-        "idempotency-key": "room-route-regression-0001",
-      }
-      : undefined,
+    headers: {
+      authorization: `Bearer header.${tokenPayload}.signature`,
+      ...(body
+        ? {
+          "content-type": "application/json",
+          "idempotency-key": "room-route-regression-0001",
+        }
+        : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
 }
@@ -1508,6 +1528,7 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
     status: number;
     body?: Record<string, unknown>;
   }> = [
+    { method: "GET", path: "/v1/room-types", status: 200 },
     { method: "GET", path: "/v1/rooms", status: 200 },
     { method: "GET", path: `/v1/rooms/${roomId}`, status: 200 },
     {

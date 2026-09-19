@@ -1350,6 +1350,21 @@ Phase C는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**�
 
 #200은 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. #196 경로 수를 늘리지 않고 nullable 의미만 확장한다.
 
+### #202 객실 타입 카탈로그 — source 후보
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/room-types` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 비활성 타입도 참조 현황을 위해 포함; 신규 master-data 선택은 기존 command가 차단 |
+
+- [x] 기존 66 migrations 불변, 67번째 append-only `room_type_catalog`에 실제 관리형 `version`과 app-owned projection 추가
+- [x] `id/code/displayName/baseCleaningFee/active/version/roomCount` camelCase 계약 및 Fastify/Edge/OpenAPI/Python parity
+- [x] 공개 API 후보 115 paths / 123 operations
+- [ ] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [ ] `dev` 병합
+- [ ] release/main 승인 뒤 production migration/API 배포 및 hosted smoke
+
+#202는 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. 비활성 타입을 목록에 포함하는 것은 새 선택 허용이 아니다.
+
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

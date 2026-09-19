@@ -174,6 +174,7 @@ erDiagram
     text code UK
     int base_cleaning_fee
     boolean active
+    bigint version
   }
   ROOMS {
     uuid id PK

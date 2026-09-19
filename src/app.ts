@@ -42,7 +42,7 @@ import {
   type ReservationService,
   SupabaseReservationService
 } from './modules/reservations/reservation.service.js';
-import { createRoomRoutes } from './modules/rooms/room.routes.js';
+import { createRoomRoutes, createRoomTypeRoutes } from './modules/rooms/room.routes.js';
 import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
 import { createRoomPinSheetOperationsRoutes } from './modules/rooms/room-pin-sheet-operations.routes.js';
 import {
@@ -230,6 +230,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAuthRoutes(services.auth), { prefix: '/v1/auth' });
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
+  await app.register(createRoomTypeRoutes(services.rooms), { prefix: '/v1/room-types' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
   if (services.roomPinSheetOperations) {
     await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {
