@@ -1436,6 +1436,23 @@ Phase C는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**�
 
 #215는 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. 청소·근무 이력 합산과 cursor·기간 통계는 이 endpoint에 포함하지 않는다.
 
+### #217 주급 주기 stable-ID 조회 — source 후보
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/payroll/{cycleId}` | active/password-complete admin·maid + live session | ✅ | ✅ | ✅ | ❌ | ❌ | admin 전체, maid self; materialized closed cycle만 조회 |
+
+- [x] 기존 71 migrations 불변, 72번째 append-only `payroll_cycle_resolver`
+- [x] 기존 `PayrollCycleEnvelope`와 bounded projector 재사용, conceptual OPEN 제외
+- [x] PAYING/CHECK/PAID/offset-settled projection parity와 stable 404
+- [x] `Cache-Control: no-store`, UTF-8 JSON 128 KiB 상한, read side effect 0
+- [x] Fastify/Edge/OpenAPI/Python 생성 계약 정합화, 공개 API 후보 119 paths / 129 operations
+- [ ] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [ ] `dev` 병합
+- [ ] release/main 승인 뒤 production migration/API 배포 및 hosted smoke
+
+#217은 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. 지급 mutation, complaint, cursor 계약을 변경하지 않는다.
+
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고

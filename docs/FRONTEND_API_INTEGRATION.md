@@ -361,6 +361,7 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 - `GET /v1/payroll`은 `payroll` 최대 10개와 `nextCursor`를 반환한다. `maidProfileId`를 생략한 admin-all에서만 여러 cycle page를 순회하며 정렬은 `maidProfileId ASC`로 고정한다.
 - 각 cycle의 `itemCount`, `totalAmount`, `lateEarningCount`, `lateEarningAmount`는 전체 exact 값이다. `items`와 `lateEarnings`는 최대 10개 preview이므로 배열 길이를 total로 해석하지 않는다.
 - `itemsNextCursor` 또는 `lateEarningsNextCursor`가 있으면 `GET /v1/payroll/entries`에 같은 `weekStart`, `maidProfileId`, 맞는 `kind`와 함께 보낸다. 상세 page는 기본 25, 최대 50이고 `earnedOn ASC, earningId ASC` 순서다.
+- 목록에서 `cycleId`가 non-null이면 `GET /v1/payroll/{cycleId}`로 동일 bounded envelope를 다시 조회할 수 있다. admin은 모든 materialized cycle, maid는 본인 cycle만 허용되며 conceptual OPEN은 stable ID가 없어 이 경로로 조회하지 않는다.
 - cursor는 opaque 서명값이다. decode/수정/합성하거나 사용자·role·주차·maid filter·kind 사이에서 재사용하지 않는다. scope 변경 시 첫 page부터 다시 요청한다.
 - list/entries/start/replay 응답은 UTF-8 JSON 128 KiB 상한을 갖는다. `PAYROLL_CURSOR_INVALID`, `PAYROLL_CURSOR_NOT_CONFIGURED`, `PAYROLL_RESPONSE_TOO_LARGE`는 message가 아니라 code로 분기한다.
 - 이 계약은 production OpenAPI와 `api` bundle에 반영됐다. 실제 역할별 hosted read/mutation smoke가 없는 경로는 배포 여부와 별도로 표시한다.

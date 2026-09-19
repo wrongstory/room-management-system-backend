@@ -226,7 +226,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']room_event_timeline["']/
+      /expectedMigrationName\s*=\s*["']payroll_cycle_resolver["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -263,16 +263,19 @@ describe('Supabase Edge runtime PoC contract', () => {
       'utf8'
     );
     expect(payrollApi).toContain('list_payroll_cycles');
+    expect(payrollApi).toContain('get_payroll_cycle');
     expect(payrollApi).toContain('start_payroll_cycle');
     expect(payrollApi).toContain('record_payroll_payment_check');
     expect(payrollApi).toContain('record_payroll_payment_paid');
     expect(payrollApi).toContain('reopen_payroll_payment_attempt');
     expect(payrollApi).toContain('PAYROLL_ACCESS_REQUIRED');
     expect(edgeIndex).toContain('path === "/v1/payroll"');
+    expect(edgeIndex).toContain('payrollCycleMatch');
     expect(edgeIndex).toContain('path === "/v1/payroll/start"');
     expect(edgeIndex).toContain('const paymentResultMatch = path.match(');
     expect(activity).toContain('edge.authorization.payroll');
     expect(openApi).toContain('operationId: "listPayrollCycles"');
+    expect(openApi).toContain('operationId: "getPayrollCycle"');
     expect(openApi).toContain('operationId: "startPayrollCycle"');
     expect(openApi).toContain('operationId: "recordPayrollPaymentPaid"');
   });

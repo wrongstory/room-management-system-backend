@@ -97,6 +97,7 @@ import {
   carryForwardPayroll,
   carryLatePayrollEarning,
   correctPayrollAdjustment,
+  getPayrollCycle,
   listPayroll,
   listPayrollEntries,
   recordPayrollPaymentCheck,
@@ -1078,6 +1079,19 @@ export async function handleApiRequest(
     }
     if (request.method === "GET" && path === "/v1/payroll/entries") {
       const response = await listPayrollEntries(request, clients, actor);
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    const payrollCycleMatch = path.match(/^\/v1\/payroll\/([0-9A-Fa-f-]{36})$/);
+    if (request.method === "GET" && payrollCycleMatch) {
+      const response = {
+        payroll: await getPayrollCycle(
+          request,
+          clients,
+          actor,
+          payrollCycleMatch[1] ?? "",
+        ),
+      };
       assertPayrollResponseSize(response);
       return jsonResponse(response, 200, corsHeaders);
     }

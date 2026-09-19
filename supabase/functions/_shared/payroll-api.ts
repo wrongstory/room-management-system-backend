@@ -249,6 +249,7 @@ export function payrollDatabaseError(
     ["PAYROLL_ACCESS_REQUIRED", 403, "주급 조회 권한이 필요합니다."],
     ["ADMIN_REQUIRED", 403, "관리자만 주급 지급 처리를 시작할 수 있습니다."],
     ["PAYROLL_MAID_NOT_FOUND", 404, "메이드 계정을 찾을 수 없습니다."],
+    ["PAYROLL_CYCLE_NOT_FOUND", 404, "주급 주기를 찾을 수 없습니다."],
     ["PAYROLL_WEEK_MUST_START_MONDAY", 400, "weekStart는 월요일이어야 합니다."],
     [
       "PAYROLL_PAGE_LIMIT_INVALID",
@@ -802,6 +803,25 @@ export async function listPayrollEntries(
       })
       : null,
   };
+}
+
+export async function getPayrollCycle(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  cycleId: string,
+): Promise<Record<string, unknown>> {
+  reader(actor, null);
+  assertPayrollCursorConfigured();
+  noQuery(request);
+  const normalizedCycleId = uuid(cycleId, "cycleId");
+  const { data, error } = await clients.admin.rpc("get_payroll_cycle", {
+    p_actor_profile_id: actor.profileId,
+    p_cycle_id: normalizedCycleId,
+  });
+  if (error || !data) throw payrollDatabaseError(error);
+  const row = object(data);
+  return await publicProjection(data, actor, projectedDate(row.weekStart));
 }
 
 export async function startPayroll(

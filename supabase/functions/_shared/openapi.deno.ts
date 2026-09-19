@@ -13,6 +13,16 @@ Deno.test("OpenAPI publishes the approved v0.4.0 candidate version", async () =>
     "approved semantic contract version",
   );
 });
+Deno.test("payroll cycle resolver reuses the bounded payroll envelope", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const operation = document.paths["/v1/payroll/{cycleId}"].get;
+  assert(operation.operationId === "getPayrollCycle", "stable operation ID");
+  assert(
+    operation.responses["200"].content["application/json"].schema.$ref ===
+      "#/components/schemas/PayrollCycleEnvelope",
+    "bounded payroll envelope reused",
+  );
+});
 Deno.test("room move OpenAPI publishes bounded 409 conflict recovery metadata", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const preview = document.paths[
@@ -149,13 +159,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 118 &&
+    Object.keys(document.paths).length === 119 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 128,
-    "combined candidate contract 118/128",
+        ).length === 129,
+    "combined candidate contract 119/129",
   );
 });
 

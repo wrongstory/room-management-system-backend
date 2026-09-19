@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 118:
-        raise RuntimeError("전체 source OpenAPI path 수가 118이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 119:
+        raise RuntimeError("전체 source OpenAPI path 수가 119가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 128:
-        raise RuntimeError("전체 source OpenAPI operation 수가 128이 아닙니다.")
+    if operation_count != 129:
+        raise RuntimeError("전체 source OpenAPI operation 수가 129가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     legacy_list = schemas.get("ReservationListEnvelope", {})
     range_page = schemas.get("ReservationRangePageEnvelope", {})
@@ -123,6 +123,7 @@ def main() -> None:
             package / "models" / "notification_envelope.py",
             package / "models" / "notification_list_envelope.py",
             package / "api" / "payroll" / "list_payroll_cycles.py",
+            package / "api" / "payroll" / "get_payroll_cycle.py",
             package / "api" / "payroll" / "list_payroll_entries.py",
             package / "api" / "payroll" / "start_payroll_cycle.py",
             package / "api" / "payroll" / "record_payroll_correction.py",

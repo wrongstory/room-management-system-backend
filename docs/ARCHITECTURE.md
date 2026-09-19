@@ -179,6 +179,17 @@ bounded preview만 반환한다. Fastify/Edge는 list/entries/start/replay의 �
 83 operations가 `dev@e55f0e9be2f26a1a3700b8d31ba1958dcbe65b3d` 기준 source에 통합됐으며
 production/main/recovery/Pages/Cron/Vault는 변경하지 않았다.
 
+### #217 주급 주기 stable-ID resolver — source 후보
+
+`GET /v1/payroll/{cycleId}`는 이미 materialize된 주급 주기를 stable ID로 다시 여는 app-owned read다.
+72번째 append-only migration의 `public.get_payroll_cycle`은 기존 `private.assert_payroll_reader`와 종료 주차
+검증을 재사용하고, admin 전체·maid self만 `private.project_payroll_cycle_bounded` 결과를 받는다. cycle이 없는
+conceptual OPEN은 stable ID가 없으므로 대상이 아니며 unknown ID는 `PAYROLL_CYCLE_NOT_FOUND`다.
+
+Fastify/Edge/OpenAPI는 기존 `PayrollCycleEnvelope`, nested preview continuation, `Cache-Control: no-store`,
+UTF-8 JSON 128 KiB 상한을 그대로 사용한다. 조회는 cycle/event/audit/notification/receipt를 쓰지 않고,
+지급 mutation·complaint·cursor 계약은 변경하지 않는다. source/dev 통합과 production 배포는 별도 gate다.
+
 ### #94 컴플레인·보상·정정·외부 지급 증거 — 정책 확정
 
 Decision Issue #94는 아래 도메인 경계를 확정했다. 이 절은 후속 schema/API/migration의 설계 계약이며,
