@@ -149,13 +149,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 117 &&
+    Object.keys(document.paths).length === 118 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 127,
-    "combined candidate contract 117/127",
+        ).length === 128,
+    "combined candidate contract 118/128",
   );
 });
 
@@ -786,6 +786,7 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       "/v1/rooms/{roomId}/operation-blocks/{blockId}/release",
       "/v1/rooms/{roomId}/candles",
       "/v1/rooms/{roomId}/issues",
+      "/v1/rooms/{roomId}/events",
       "/v1/rooms/{roomId}/issues/{issueId}/resolve",
       "/v1/rooms/{roomId}/pin-sync-events",
     ]

@@ -11,6 +11,7 @@ const operationBlockQuerySchema = z
   .object({ status: z.literal('actionable').default('actionable') })
   .strict();
 const roomIssueQuerySchema = z.object({ status: z.literal('open').default('open') }).strict();
+const roomEventQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(50).default(30) }).strict();
 
 const masterDataSchema = z.object({
   roomTypeId: z.uuid(),
@@ -101,6 +102,14 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
     app.get('/:roomId', { preHandler: admin }, async (request) => {
       const { roomId } = roomIdSchema.parse(request.params);
       return { room: await roomService.get(request.actor, roomId) };
+    });
+
+    app.get('/:roomId/events', { preHandler: admin }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      const { limit } = roomEventQuerySchema.parse(request.query);
+      return reply
+        .header('Cache-Control', 'no-store')
+        .send(await roomService.listEvents(request.actor, roomId, limit));
     });
 
     app.patch('/:roomId/master-data', { preHandler: admin }, async (request) => {

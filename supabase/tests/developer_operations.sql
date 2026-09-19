@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_operations_read'
+    'room_event_timeline'
   ) ->> 'currentMigration',
-  'room_operations_read',
+  'room_event_timeline',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_operations_read'
+    'room_event_timeline'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'room_operations_read';
+where name = 'room_event_timeline';
 
 delete from supabase_migrations.schema_migrations
-where name = 'room_operations_read';
+where name = 'room_event_timeline';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_operations_read'
+    'room_event_timeline'
   ) ->> 'currentMigration',
-  'weekly_work_history_projection',
-  'database status exposes migration 69 when migration 70 is absent'
+  'room_operations_read',
+  'database status exposes migration 70 when migration 71 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_operations_read'
+    'room_event_timeline'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 69 behind source migration 70'
+  'database status reports migration 70 behind source migration 71'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

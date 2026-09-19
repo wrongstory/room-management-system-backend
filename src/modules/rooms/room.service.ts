@@ -216,10 +216,29 @@ export interface RoomIssuesResult {
   items: RoomIssueItem[];
 }
 
+export interface RoomEventItem {
+  id: string;
+  source: 'room_command' | 'occupancy';
+  eventType: string;
+  reasonCode: string | null;
+  effectiveAt: string;
+  recordedAt: string;
+  reservationId: string | null;
+  summary: Record<string, unknown>;
+}
+
+export interface RoomEventsResult {
+  roomId: string;
+  roomStateVersion: number;
+  evaluatedAt: string;
+  items: RoomEventItem[];
+}
+
 export interface RoomService {
   listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
   listOperationBlocks(actor: Actor, roomId: string): Promise<RoomOperationBlocksResult>;
   listIssues(actor: Actor, roomId: string): Promise<RoomIssuesResult>;
+  listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult>;
   list(actor: Actor): Promise<RoomSummary[]>;
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
   changeMasterData(actor: Actor, input: ChangeRoomMasterDataInput): Promise<RoomSummary>;
@@ -494,6 +513,18 @@ export class SupabaseRoomService implements RoomService {
     });
     if (error) throw roomError(error);
     return data as unknown as RoomIssuesResult;
+  }
+
+  async listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('list_room_events', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: roomId,
+      p_limit: limit
+    });
+    if (error) throw roomError(error);
+    return data as unknown as RoomEventsResult;
   }
 
   async list(actor: Actor): Promise<RoomSummary[]> {

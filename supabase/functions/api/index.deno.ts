@@ -882,6 +882,26 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
             error: null,
           };
         }
+        if (name === "list_room_events") {
+          return {
+            data: {
+              roomId,
+              roomStateVersion: 3,
+              evaluatedAt: "2026-09-20T00:00:00Z",
+              items: [{
+                id: "87000000-0000-4000-8000-000000000001",
+                source: "room_command",
+                eventType: "room.set_candle_count",
+                reasonCode: "PHYSICAL_CHECK",
+                effectiveAt: "2026-09-19T00:00:00Z",
+                recordedAt: "2026-09-19T00:00:01Z",
+                reservationId: null,
+                summary: { count: 0 },
+              }],
+            },
+            error: null,
+          };
+        }
         if (name === "change_room_master_data") {
           return { data: null, error: null };
         }
@@ -1610,6 +1630,11 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
       status: 200,
     },
     {
+      method: "GET",
+      path: `/v1/rooms/${roomId}/events?limit=30`,
+      status: 200,
+    },
+    {
       method: "PATCH",
       path: `/v1/rooms/${roomId}/master-data`,
       status: 200,
@@ -1696,6 +1721,23 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
       calls.length > 0,
       `${route.method} ${route.path} must call a Room RPC`,
     );
+  }
+});
+
+Deno.test("room event route rejects out-of-range and duplicate limits", async () => {
+  for (
+    const path of [
+      `/v1/rooms/${roomId}/events?limit=51`,
+      `/v1/rooms/${roomId}/events?limit=10&limit=20`,
+    ]
+  ) {
+    const calls: string[] = [];
+    const response = await handleApiRequest(
+      request("GET", path),
+      routeDependencies(calls),
+    );
+    assert(response.status === 400, `${path} must fail validation`);
+    assert(calls.length === 0, "invalid limit must not call the DB");
   }
 });
 

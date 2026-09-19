@@ -135,6 +135,7 @@ import {
   changeRoomMasterData,
   createRoomOperationBlock,
   getRoom,
+  listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
   listRooms,
@@ -1460,6 +1461,52 @@ export async function handleApiRequest(
           clients,
           actor,
           roomIssuesReadMatch[1],
+        ),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    const roomEventsReadMatch = request.method === "GET"
+      ? /^\/v1\/rooms\/([^/]+)\/events$/.exec(path)
+      : null;
+    if (roomEventsReadMatch) {
+      const params = new URL(request.url).searchParams;
+      const limitValues = params.getAll("limit");
+      if (
+        [...params.keys()].some((key) => key !== "limit") ||
+        limitValues.length > 1
+      ) {
+        throw new EdgeError(
+          400,
+          "VALIDATION_ERROR",
+          "limit 외의 query 또는 중복 limit은 사용할 수 없습니다.",
+        );
+      }
+      const rawLimit = limitValues[0] ?? "30";
+      if (!/^[1-9]\d*$/.test(rawLimit)) {
+        throw new EdgeError(
+          400,
+          "VALIDATION_ERROR",
+          "limit은 1~50의 정수여야 합니다.",
+        );
+      }
+      const limit = Number(rawLimit);
+      if (limit > 50) {
+        throw new EdgeError(
+          400,
+          "VALIDATION_ERROR",
+          "limit은 1~50의 정수여야 합니다.",
+        );
+      }
+      const response = jsonResponse(
+        await listRoomEvents(
+          request,
+          clients,
+          actor,
+          roomEventsReadMatch[1],
+          limit,
         ),
         200,
         corsHeaders,

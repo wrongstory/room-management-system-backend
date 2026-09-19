@@ -4047,6 +4047,45 @@ export const openApiDocument = {
         responses: roomReadResponses(),
       },
     },
+    "/v1/rooms/{roomId}/events": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomEvents",
+        summary: "객실 업무 이벤트 타임라인 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 객실 command 감사 원장과 실제 점유 전이 원장을 최신순으로 합쳐 반환합니다. raw beforeState/afterState, request hash, PIN, 고객 개인정보는 노출하지 않으며 청소·근무 이력은 이 API 범위가 아닙니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          roomIdParameter(),
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 50, default: 30 },
+            description:
+              "최신순 반환 개수. cursor/기간 통계는 지원하지 않습니다.",
+          },
+        ],
+        responses: {
+          "200": {
+            description:
+              "객실 command와 실제 점유 전이의 안전한 최신순 projection",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomEventsEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/rooms/{roomId}/master-data": {
       patch: roomMutationOperation(
         "changeRoomMasterData",
@@ -9862,6 +9901,104 @@ export const openApiDocument = {
           items: {
             type: "array",
             items: { $ref: "#/components/schemas/RoomIssue" },
+          },
+        },
+      },
+      RoomEventSource: {
+        type: "string",
+        enum: ["room_command", "occupancy"],
+      },
+      RoomEventType: {
+        type: "string",
+        enum: [
+          "room.master_data_changed",
+          "room.create_block",
+          "room.release_block",
+          "room.set_candle_count",
+          "room.report_issue",
+          "room.resolve_issue",
+          "room.record_pin_sync",
+          "room.pin_change_prepared",
+          "room.pin_change_confirmed",
+          "room.pin_mismatch_resolved",
+          "scheduled_check_in",
+          "manual_checkout",
+          "scheduled_checkout",
+          "occupancy_resumed",
+          "occupancy_correction",
+        ],
+      },
+      RoomEventSummary: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          roomTypeId: { type: "string", format: "uuid" },
+          elevatorZone: {
+            type: ["string", "null"],
+            enum: ["A", "B", "C", null],
+          },
+          dataStatus: {
+            type: "string",
+            enum: ["verified", "verification_required"],
+          },
+          stateVersion: { type: "integer", minimum: 1 },
+          blockId: { type: "string", format: "uuid" },
+          startsAt: { type: "string", format: "date-time" },
+          endsAt: { type: ["string", "null"], format: "date-time" },
+          active: { type: "boolean" },
+          candleEventId: { type: "string", format: "uuid" },
+          count: { type: "integer", minimum: 0 },
+          issueId: { type: "string", format: "uuid" },
+          category: { type: "string" },
+          severity: { type: "string", enum: ["info", "warning", "critical"] },
+          blocksGuestAssignment: { type: "boolean" },
+          status: { type: "string" },
+          pinSyncEventId: { type: "string", format: "uuid" },
+          syncStatus: {
+            type: "string",
+            enum: ["verified", "mismatch", "unconfigured"],
+          },
+          pinVersion: { type: ["integer", "null"], minimum: 1 },
+          occupiedBefore: { type: ["boolean", "null"] },
+          occupiedAfter: { type: "boolean" },
+        },
+      },
+      RoomEvent: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "source",
+          "eventType",
+          "reasonCode",
+          "effectiveAt",
+          "recordedAt",
+          "reservationId",
+          "summary",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          source: { $ref: "#/components/schemas/RoomEventSource" },
+          eventType: { $ref: "#/components/schemas/RoomEventType" },
+          reasonCode: { type: ["string", "null"] },
+          effectiveAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+          reservationId: { type: ["string", "null"], format: "uuid" },
+          summary: { $ref: "#/components/schemas/RoomEventSummary" },
+        },
+      },
+      RoomEventsEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomId", "roomStateVersion", "evaluatedAt", "items"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          evaluatedAt: { type: "string", format: "date-time" },
+          items: {
+            type: "array",
+            maxItems: 50,
+            items: { $ref: "#/components/schemas/RoomEvent" },
           },
         },
       },
