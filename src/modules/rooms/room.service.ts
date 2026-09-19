@@ -218,8 +218,13 @@ export interface RoomIssuesResult {
 
 export interface RoomEventItem {
   id: string;
+  eventKey: string;
   source: 'room_command' | 'occupancy';
+  category: 'room_configuration' | 'room_block' | 'room_issue' | 'room_candle' | 'room_pin' | 'occupancy';
   eventType: string;
+  actorProfileId: string | null;
+  actorDisplayName: string | null;
+  entityId: string;
   reasonCode: string | null;
   effectiveAt: string;
   recordedAt: string;

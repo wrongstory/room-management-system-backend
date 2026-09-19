@@ -47,8 +47,24 @@ begin
         audit.recorded_at,
         jsonb_build_object(
           'id', audit.id,
+          'eventKey', 'room_command:' || audit.id::text,
           'source', 'room_command',
+          'category', case audit.event_type
+            when 'room.master_data_changed' then 'room_configuration'
+            when 'room.create_block' then 'room_block'
+            when 'room.release_block' then 'room_block'
+            when 'room.set_candle_count' then 'room_candle'
+            when 'room.report_issue' then 'room_issue'
+            when 'room.resolve_issue' then 'room_issue'
+            when 'room.record_pin_sync' then 'room_pin'
+            when 'room.pin_change_prepared' then 'room_pin'
+            when 'room.pin_change_confirmed' then 'room_pin'
+            when 'room.pin_mismatch_resolved' then 'room_pin'
+          end,
           'eventType', audit.event_type,
+          'actorProfileId', audit.actor_profile_id,
+          'actorDisplayName', audit.actor_display_name_snapshot,
+          'entityId', audit.entity_id,
           'reasonCode', audit.reason_code,
           'effectiveAt', audit.effective_at,
           'recordedAt', audit.recorded_at,
@@ -129,8 +145,13 @@ begin
         occupancy.recorded_at,
         jsonb_build_object(
           'id', occupancy.id,
+          'eventKey', 'occupancy:' || occupancy.id::text,
           'source', 'occupancy',
+          'category', 'occupancy',
           'eventType', occupancy.event_type,
+          'actorProfileId', occupancy.actor_profile_id,
+          'actorDisplayName', null,
+          'entityId', occupancy.reservation_id,
           'reasonCode', occupancy.reason_code,
           'effectiveAt', occupancy.effective_at,
           'recordedAt', occupancy.recorded_at,

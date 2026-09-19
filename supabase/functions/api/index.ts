@@ -1485,7 +1485,7 @@ export async function handleApiRequest(
         );
       }
       const rawLimit = limitValues[0] ?? "30";
-      if (!/^[1-9]\d*$/.test(rawLimit)) {
+      if (!/^(?:[1-9]|[1-4]\d|50)$/.test(rawLimit)) {
         throw new EdgeError(
           400,
           "VALIDATION_ERROR",
@@ -1493,13 +1493,6 @@ export async function handleApiRequest(
         );
       }
       const limit = Number(rawLimit);
-      if (limit > 50) {
-        throw new EdgeError(
-          400,
-          "VALIDATION_ERROR",
-          "limit은 1~50의 정수여야 합니다.",
-        );
-      }
       const response = jsonResponse(
         await listRoomEvents(
           request,

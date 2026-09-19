@@ -809,6 +809,15 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "assignment codegen schemas must be reusable",
   );
   assert(
+    serialized.includes('"#/components/schemas/RoomEventCategory"') &&
+      serialized.includes('"eventKey"') &&
+      serialized.includes('"actorProfileId"') &&
+      serialized.includes('"actorDisplayName"') &&
+      serialized.includes('"entityId"') &&
+      serialized.includes('"^(?:[1-9]|[1-4][0-9]|50)$"'),
+    "room event contract must publish stable identity, actor/entity fields, and canonical limit",
+  );
+  assert(
     serialized.includes('"ASSIGNMENT_VERSION_CONFLICT"') &&
       serialized.includes('"ASSIGNMENT_SEQUENCE_CONFLICT"') &&
       serialized.includes('"ASSIGNMENT_IMPACT_CHANGED"') &&

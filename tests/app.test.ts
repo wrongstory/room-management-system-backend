@@ -107,7 +107,7 @@ function services(): AppServices {
       })),
       listEvents: vi.fn(async () => ({
         roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 6, evaluatedAt: '2026-09-20T00:00:00.000Z',
-        items: [{ id: '70000000-0000-4000-8000-000000000001', source: 'occupancy' as const, eventType: 'scheduled_check_in', reasonCode: 'SCHEDULED_TRANSITION', effectiveAt: '2026-09-20T00:00:00.000Z', recordedAt: '2026-09-20T00:00:01.000Z', reservationId: '80000000-0000-4000-8000-000000000001', summary: { occupiedBefore: false, occupiedAfter: true } }]
+        items: [{ id: '70000000-0000-4000-8000-000000000001', eventKey: 'occupancy:70000000-0000-4000-8000-000000000001', source: 'occupancy' as const, category: 'occupancy' as const, eventType: 'scheduled_check_in', actorProfileId: '10000000-0000-4000-8000-000000000001', actorDisplayName: null, entityId: '80000000-0000-4000-8000-000000000001', reasonCode: 'SCHEDULED_TRANSITION', effectiveAt: '2026-09-20T00:00:00.000Z', recordedAt: '2026-09-20T00:00:01.000Z', reservationId: '80000000-0000-4000-8000-000000000001', summary: { occupiedBefore: false, occupiedAfter: true } }]
       })),
       list: vi.fn(async () => [{
         id: 'room-1',
@@ -468,25 +468,32 @@ describe('application', () => {
       url: '/v1/rooms/11111111-1111-4111-8111-111111111111/events?limit=12',
       headers: { authorization: 'Bearer access-token' }
     });
-    const invalid = await app.inject({
-      method: 'GET',
-      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/events?limit=51',
-      headers: { authorization: 'Bearer access-token' }
-    });
+    const invalidResponses = await Promise.all(
+      ['51', '01', '1.0', '%2B1'].map((limit) => app.inject({
+        method: 'GET',
+        url: `/v1/rooms/11111111-1111-4111-8111-111111111111/events?limit=${limit}`,
+        headers: { authorization: 'Bearer access-token' }
+      }))
+    );
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.json()).toMatchObject({
       roomId: '11111111-1111-4111-8111-111111111111',
       roomStateVersion: 6,
-      items: [{ source: 'occupancy', eventType: 'scheduled_check_in' }]
+      items: [{
+        eventKey: 'occupancy:70000000-0000-4000-8000-000000000001',
+        source: 'occupancy', category: 'occupancy', eventType: 'scheduled_check_in',
+        actorDisplayName: null,
+        entityId: '80000000-0000-4000-8000-000000000001'
+      }]
     });
     expect(appServices.rooms.listEvents).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'admin' }),
       '11111111-1111-4111-8111-111111111111',
       12
     );
-    expect(invalid.statusCode).toBe(400);
+    expect(invalidResponses.map((item) => item.statusCode)).toEqual([400, 400, 400, 400]);
     expect(appServices.rooms.listEvents).toHaveBeenCalledTimes(1);
     await app.close();
   });

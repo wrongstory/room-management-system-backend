@@ -644,8 +644,13 @@ Deno.test("room event timeline maps the bounded safe projection", async () => {
             evaluatedAt: "2026-09-20T01:00:00.000Z",
             items: [{
               id: "90000000-0000-4000-8000-000000000001",
+              eventKey: "occupancy:90000000-0000-4000-8000-000000000001",
               source: "occupancy",
+              category: "occupancy",
               eventType: "scheduled_check_in",
+              actorProfileId: admin.profileId,
+              actorDisplayName: null,
+              entityId: reservationId,
               reasonCode: "SCHEDULED_TRANSITION",
               effectiveAt: "2026-09-20T00:00:00.000Z",
               recordedAt: "2026-09-20T00:00:01.000Z",
@@ -674,6 +679,15 @@ Deno.test("room event timeline maps the bounded safe projection", async () => {
   assert(
     timeline.items[0]?.reservationId === reservationId,
     "reservation mapped",
+  );
+  assert(
+    timeline.items[0]?.eventKey ===
+        "occupancy:90000000-0000-4000-8000-000000000001" &&
+      timeline.items[0]?.category === "occupancy" &&
+      timeline.items[0]?.actorProfileId === admin.profileId &&
+      timeline.items[0]?.actorDisplayName === null &&
+      timeline.items[0]?.entityId === reservationId,
+    "stable identity, catalog category, actor and entity mapped",
   );
   assert(
     !JSON.stringify(timeline).includes("must-not-leak"),

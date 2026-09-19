@@ -723,6 +723,23 @@ const roomCommandSummaryFields = new Set([
   "pinVersion",
 ]);
 const occupancySummaryFields = new Set(["occupiedBefore", "occupiedAfter"]);
+const roomEventCategoryByType = new Map<string, string>([
+  ["room.master_data_changed", "room_configuration"],
+  ["room.create_block", "room_block"],
+  ["room.release_block", "room_block"],
+  ["room.set_candle_count", "room_candle"],
+  ["room.report_issue", "room_issue"],
+  ["room.resolve_issue", "room_issue"],
+  ["room.record_pin_sync", "room_pin"],
+  ["room.pin_change_prepared", "room_pin"],
+  ["room.pin_change_confirmed", "room_pin"],
+  ["room.pin_mismatch_resolved", "room_pin"],
+  ["scheduled_check_in", "occupancy"],
+  ["manual_checkout", "occupancy"],
+  ["scheduled_checkout", "occupancy"],
+  ["occupancy_resumed", "occupancy"],
+  ["occupancy_correction", "occupancy"],
+]);
 
 function safeRoomEventSummary(
   value: unknown,
@@ -789,10 +806,32 @@ export async function listRoomEvents(
           "객실 이벤트 source가 올바르지 않습니다.",
         );
       }
+      const id = uuidValue(row.id, "id");
+      const eventType = responseText(row.eventType, "eventType");
+      const category = responseText(row.category, "category");
+      if (
+        roomEventCategoryByType.get(eventType) !== category ||
+        row.eventKey !== `${source}:${id}`
+      ) {
+        throw new EdgeError(
+          500,
+          "ROOM_PROJECTION_INVALID",
+          "객실 이벤트 식별자 또는 분류가 올바르지 않습니다.",
+        );
+      }
       return {
-        id: uuidValue(row.id, "id"),
+        id,
+        eventKey: responseText(row.eventKey, "eventKey"),
         source,
-        eventType: responseText(row.eventType, "eventType"),
+        category,
+        eventType,
+        actorProfileId: row.actorProfileId === null
+          ? null
+          : uuidValue(row.actorProfileId, "actorProfileId"),
+        actorDisplayName: row.actorDisplayName === null
+          ? null
+          : responseText(row.actorDisplayName, "actorDisplayName"),
+        entityId: uuidValue(row.entityId, "entityId"),
         reasonCode: row.reasonCode === null
           ? null
           : responseText(row.reasonCode, "reasonCode"),

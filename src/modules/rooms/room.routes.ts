@@ -11,7 +11,14 @@ const operationBlockQuerySchema = z
   .object({ status: z.literal('actionable').default('actionable') })
   .strict();
 const roomIssueQuerySchema = z.object({ status: z.literal('open').default('open') }).strict();
-const roomEventQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(50).default(30) }).strict();
+const roomEventQuerySchema = z
+  .object({
+    limit: z.preprocess(
+      (value) => value ?? '30',
+      z.string().regex(/^(?:[1-9]|[1-4]\d|50)$/).transform(Number)
+    )
+  })
+  .strict();
 
 const masterDataSchema = z.object({
   roomTypeId: z.uuid(),

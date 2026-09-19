@@ -1,6 +1,6 @@
 begin;
 
-select plan(16);
+select plan(20);
 
 insert into auth.users (id) values
   ('71000000-0000-4000-8000-000000000101'),
@@ -116,6 +116,15 @@ insert into room_event_results values (
   )
 );
 
+insert into room_event_results values (
+  'timeline-replay',
+  public.list_room_events(
+    '71000000-0000-4000-8000-000000000201',
+    '71000000-0000-4000-8000-000000000301',
+    (select room_id from room_event_fixture), 50
+  )
+);
+
 select is(
   (select value ->> 'roomId' from room_event_results where name = 'timeline'),
   (select room_id::text from room_event_fixture),
@@ -150,6 +159,57 @@ select is(
      and reason_code = 'TIMELINE_REPLAY'),
   1,
   'command replay does not duplicate the audit event'
+);
+select is(
+  (select item ->> 'eventKey'
+   from room_event_results result,
+     lateral jsonb_array_elements(result.value -> 'items') item
+   where result.name = 'timeline' and item ->> 'reasonCode' = 'TIMELINE_REPLAY'),
+  (select item ->> 'eventKey'
+   from room_event_results result,
+     lateral jsonb_array_elements(result.value -> 'items') item
+   where result.name = 'timeline-replay' and item ->> 'reasonCode' = 'TIMELINE_REPLAY'),
+  'command replay keeps the stable source-qualified event key'
+);
+select ok(
+  (select
+     item ->> 'eventKey' = 'room_command:' || audit.id::text
+     and item ->> 'category' = 'room_candle'
+     and item ->> 'actorProfileId' = audit.actor_profile_id::text
+     and item ->> 'actorDisplayName' = audit.actor_display_name_snapshot
+     and item ->> 'entityId' = audit.entity_id::text
+     and (item ->> 'effectiveAt')::timestamptz = audit.effective_at
+     and (item ->> 'recordedAt')::timestamptz = audit.recorded_at
+   from room_event_results result,
+     lateral jsonb_array_elements(result.value -> 'items') item
+     join public.audit_events audit
+       on item ->> 'eventKey' = 'room_command:' || audit.id::text
+   where result.name = 'timeline' and item ->> 'reasonCode' = 'TIMELINE_REPLAY'),
+  'command projection identity, category, actor, entity, and timestamps match the audit ledger'
+);
+select is(
+  (select item ->> 'eventKey'
+   from room_event_results result,
+     lateral jsonb_array_elements(result.value -> 'items') item
+   where result.name = 'timeline' and item ->> 'source' = 'occupancy'),
+  'occupancy:71000000-0000-4000-8000-000000000501',
+  'occupancy event key is stable and source-qualified'
+);
+select ok(
+  (select
+     item ->> 'category' = 'occupancy'
+     and item ->> 'actorProfileId' = occupancy.actor_profile_id::text
+     and (item -> 'actorDisplayName') = 'null'::jsonb
+     and item ->> 'entityId' = occupancy.reservation_id::text
+     and item ->> 'reservationId' = occupancy.reservation_id::text
+     and (item ->> 'effectiveAt')::timestamptz = occupancy.effective_at
+     and (item ->> 'recordedAt')::timestamptz = occupancy.recorded_at
+   from room_event_results result,
+     lateral jsonb_array_elements(result.value -> 'items') item
+     join public.room_occupancy_events occupancy
+       on item ->> 'eventKey' = 'occupancy:' || occupancy.id::text
+   where result.name = 'timeline' and item ->> 'source' = 'occupancy'),
+  'occupancy projection actor, entity, reservation, and timestamps match the occupancy ledger'
 );
 select ok(
   (select value::text not like '%must-not-leak%' from room_event_results where name = 'timeline'),

@@ -4062,9 +4062,13 @@ export const openApiDocument = {
             name: "limit",
             in: "query",
             required: false,
-            schema: { type: "integer", minimum: 1, maximum: 50, default: 30 },
+            schema: {
+              type: "string",
+              pattern: "^(?:[1-9]|[1-4][0-9]|50)$",
+              default: "30",
+            },
             description:
-              "최신순 반환 개수. cursor/기간 통계는 지원하지 않습니다.",
+              "최신순 반환 개수. 1~50의 canonical decimal만 허용하며 01, 1.0, +1은 거부합니다. cursor/기간 통계는 지원하지 않습니다.",
           },
         ],
         responses: {
@@ -9908,6 +9912,17 @@ export const openApiDocument = {
         type: "string",
         enum: ["room_command", "occupancy"],
       },
+      RoomEventCategory: {
+        type: "string",
+        enum: [
+          "room_configuration",
+          "room_block",
+          "room_issue",
+          "room_candle",
+          "room_pin",
+          "occupancy",
+        ],
+      },
       RoomEventType: {
         type: "string",
         enum: [
@@ -9968,8 +9983,13 @@ export const openApiDocument = {
         additionalProperties: false,
         required: [
           "id",
+          "eventKey",
           "source",
+          "category",
           "eventType",
+          "actorProfileId",
+          "actorDisplayName",
+          "entityId",
           "reasonCode",
           "effectiveAt",
           "recordedAt",
@@ -9978,8 +9998,17 @@ export const openApiDocument = {
         ],
         properties: {
           id: { type: "string", format: "uuid" },
+          eventKey: {
+            type: "string",
+            pattern:
+              "^(?:room_command|occupancy):[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          },
           source: { $ref: "#/components/schemas/RoomEventSource" },
+          category: { $ref: "#/components/schemas/RoomEventCategory" },
           eventType: { $ref: "#/components/schemas/RoomEventType" },
+          actorProfileId: { type: ["string", "null"], format: "uuid" },
+          actorDisplayName: { type: ["string", "null"] },
+          entityId: { type: "string", format: "uuid" },
           reasonCode: { type: ["string", "null"] },
           effectiveAt: { type: "string", format: "date-time" },
           recordedAt: { type: "string", format: "date-time" },
