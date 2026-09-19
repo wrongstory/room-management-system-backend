@@ -37,6 +37,10 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 `GET /v1/cleaning-history`는 `public.list_cleaning_history` app-owned projection을 통해 `field_completed_at`의 KST 기준 D-6..D만 반환한다. 정렬과 pagination은 `(field_completed_at, attempt_id)` 역순 cursor이고, admin은 전체·maid·검색 필터를 사용하며 maid는 본인 실제 수행 attempt만 볼 수 있다. 객실 번호·타입은 attempt의 불변 `room_snapshot`만 사용한다. 수행자 표시명은 과거 snapshot이 없어 현재 profile의 안전한 label로 명시해서 반환하며, 이 값을 과거 시점의 이름으로 해석하지 않는다. 사진은 count·media availability·expiry metadata만 포함하고 PIN·guest PII·provider locator/content는 포함하지 않는다.
 
+### #206 주간 업무 기록
+
+`GET /v1/work-history`는 한 KST 업무 주의 `current availability available=true`, 모든 immutable notified assignment revision의 `service_date`, `cleaning_attempts.field_completed_at` KST 날짜를 별도 CTE에서 집계한다. 세 축은 서로 대체하지 않으며 같은 메이드·날짜의 여러 작업은 각 축에서 하루로 dedupe한다. 재배정·종료된 notified revision도 과거 통보 사실로 남고, `field_completed_at`이 없는 scheduled/in-progress attempt는 실제 완료가 아니다. admin은 전체 또는 maid 필터, maid는 본인만 조회하며, summary는 cursor page가 아니라 전체 필터 범위에 고정된다. 메이드 표시명은 현재 profile label이고 과거 snapshot으로 해석하지 않는다.
+
 ### #184 현재 시각 객실 projection
 
 `get_room_operational_projection`은 호출마다 서버 시각을 한 번만 캡처해 모든 행에 `evaluated_at`으로 반환한다. Fastify와 Edge adapter는 이를 RFC 3339 `evaluatedAt`으로 동일하게 공개하며, 예약 일정 축은 `reservationPhase=none|upcoming|current`로 반환한다. `current`는 반개구간 `checkInAt <= evaluatedAt < checkOutAt`이고, 미래 active 예약은 `upcoming`이다.

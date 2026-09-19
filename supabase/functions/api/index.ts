@@ -68,6 +68,7 @@ import {
 } from "../_shared/checkout-incident-api.ts";
 import { cleaningTemplates } from "../_shared/cleaning-template-api.ts";
 import { listCleaningHistory } from "../_shared/cleaning-history-api.ts";
+import { listWorkHistory } from "../_shared/work-history-api.ts";
 import {
   complaintDetail,
   complaintHistory,
@@ -531,6 +532,13 @@ export async function handleApiRequest(
     if (request.method === "GET" && path === "/v1/cleaning-history") {
       return jsonResponse(
         await listCleaningHistory(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/work-history") {
+      return jsonResponse(
+        await listWorkHistory(request, clients, actor),
         200,
         corsHeaders,
       );

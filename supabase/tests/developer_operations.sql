@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_history_projection'
+    'weekly_work_history_projection'
   ) ->> 'currentMigration',
-  'cleaning_history_projection',
+  'weekly_work_history_projection',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_history_projection'
+    'weekly_work_history_projection'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'cleaning_history_projection';
+where name = 'weekly_work_history_projection';
 
 delete from supabase_migrations.schema_migrations
-where name = 'cleaning_history_projection';
+where name = 'weekly_work_history_projection';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_history_projection'
+    'weekly_work_history_projection'
   ) ->> 'currentMigration',
-  'room_type_catalog',
-  'database status exposes migration 67 when migration 68 is absent'
+  'cleaning_history_projection',
+  'database status exposes migration 68 when migration 69 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_history_projection'
+    'weekly_work_history_projection'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 67 behind source migration 68'
+  'database status reports migration 68 behind source migration 69'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

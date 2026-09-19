@@ -484,6 +484,11 @@ export const openApiDocument = {
         "메이드의 다음 주 가능일 제출·변경 요청과 관리자의 승인·후보 조회 API입니다. 제출창은 일요일 12:00–23:59 KST이며 서버가 DB 시각으로 판정합니다.",
     },
     {
+      name: "Work History",
+      description:
+        "한 주의 가능일 제출, 실제 통보, 현장 완료를 합치지 않고 메이드별 날짜 축으로 조회합니다.",
+    },
+    {
       name: "Attempts",
       description:
         "통보된 본인 업무의 온라인 시작·물리 완료 및 실행 version 조회입니다. 오프라인 lease·인계·사진 제출·검수·수익은 후속 단계입니다.",
@@ -2547,6 +2552,61 @@ export const openApiDocument = {
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/CleaningHistoryPage" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/work-history": {
+      get: {
+        tags: ["Work History"],
+        operationId: "listWorkHistory",
+        summary: "주간 업무 기록 조회",
+        description:
+          "active/password-complete admin과 maid의 live session 전용입니다. KST 월요일부터 일요일까지 current availability의 가능일, immutable notified assignment 이력, fieldCompletedAt의 실제 KST 완료일을 독립 flag로 반환합니다. 같은 메이드·날짜의 여러 작업은 1일로 집계합니다. maidDisplayName은 과거 snapshot이 아니라 현재 profile 표시명입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "date" },
+            description: "Asia/Seoul 업무 주차의 월요일 날짜",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+            description: "admin 선택 필터입니다. maid는 본인 ID만 허용됩니다.",
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description: "응답 nextCursor를 그대로 전달합니다.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "주간 업무 기록",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/WorkHistoryPage" },
               },
             },
           },
@@ -4783,6 +4843,107 @@ export const openApiDocument = {
             type: "array",
             maxItems: 100,
             items: { $ref: "#/components/schemas/CleaningHistoryItem" },
+          },
+          nextCursor: {
+            anyOf: [{ type: "string", minLength: 1, maxLength: 1024 }, {
+              type: "null",
+            }],
+          },
+        },
+      },
+      WorkHistoryDay: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "date",
+          "availableSubmitted",
+          "assignmentNotified",
+          "fieldCompleted",
+        ],
+        properties: {
+          date: { type: "string", format: "date" },
+          availableSubmitted: { type: "boolean" },
+          assignmentNotified: { type: "boolean" },
+          fieldCompleted: { type: "boolean" },
+        },
+      },
+      WorkHistoryItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "maidProfileId",
+          "maidDisplayName",
+          "maidDisplayNameSource",
+          "availabilitySubmittedAt",
+          "availabilityCurrentVersion",
+          "availabilityVersionCount",
+          "days",
+        ],
+        properties: {
+          maidProfileId: { type: "string", format: "uuid" },
+          maidDisplayName: {
+            type: "string",
+            description:
+              "현재 프로필 표시명이며 과거 시점의 불변 이름 snapshot이 아닙니다.",
+          },
+          maidDisplayNameSource: { type: "string", enum: ["current_profile"] },
+          availabilitySubmittedAt: {
+            anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+          },
+          availabilityCurrentVersion: {
+            anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+          },
+          availabilityVersionCount: { type: "integer", minimum: 0 },
+          days: {
+            type: "array",
+            minItems: 7,
+            maxItems: 7,
+            items: { $ref: "#/components/schemas/WorkHistoryDay" },
+          },
+        },
+      },
+      WorkHistorySummary: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "maidCount",
+          "availabilityMaidCount",
+          "availabilityDayCount",
+          "notifiedMaidCount",
+          "notifiedDayCount",
+          "fieldCompletedMaidCount",
+          "fieldCompletedDayCount",
+        ],
+        properties: {
+          maidCount: { type: "integer", minimum: 0 },
+          availabilityMaidCount: { type: "integer", minimum: 0 },
+          availabilityDayCount: { type: "integer", minimum: 0 },
+          notifiedMaidCount: { type: "integer", minimum: 0 },
+          notifiedDayCount: { type: "integer", minimum: 0 },
+          fieldCompletedMaidCount: { type: "integer", minimum: 0 },
+          fieldCompletedDayCount: { type: "integer", minimum: 0 },
+        },
+      },
+      WorkHistoryPage: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "weekStart",
+          "weekEnd",
+          "timezone",
+          "summary",
+          "items",
+          "nextCursor",
+        ],
+        properties: {
+          weekStart: { type: "string", format: "date" },
+          weekEnd: { type: "string", format: "date" },
+          timezone: { type: "string", enum: ["Asia/Seoul"] },
+          summary: { $ref: "#/components/schemas/WorkHistorySummary" },
+          items: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/WorkHistoryItem" },
           },
           nextCursor: {
             anyOf: [{ type: "string", minLength: 1, maxLength: 1024 }, {

@@ -26,6 +26,8 @@ import {
 } from './modules/cleaning-templates/cleaning-template.service.js';
 import { createCleaningHistoryRoutes } from './modules/cleaning-history/cleaning-history.routes.js';
 import { type CleaningHistoryService, SupabaseCleaningHistoryService } from './modules/cleaning-history/cleaning-history.service.js';
+import { createWorkHistoryRoutes } from './modules/work-history/work-history.routes.js';
+import { type WorkHistoryService, SupabaseWorkHistoryService } from './modules/work-history/work-history.service.js';
 import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
 import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
 import { createNotificationRoutes } from './modules/notifications/notification.routes.js';
@@ -68,6 +70,7 @@ export interface AppServices {
   checkoutIncidents?: CheckoutIncidentService;
   cleaningTemplates?: CleaningTemplateService;
   cleaningHistory?: CleaningHistoryService;
+  workHistory?: WorkHistoryService;
 }
 
 export interface BuildAppOptions {
@@ -155,7 +158,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       }),
       checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
       cleaningTemplates: new SupabaseCleaningTemplateService(clients),
-      cleaningHistory: new SupabaseCleaningHistoryService(clients)
+      cleaningHistory: new SupabaseCleaningHistoryService(clients),
+      workHistory: new SupabaseWorkHistoryService(clients)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -263,6 +267,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   if (services.cleaningHistory) {
     await app.register(createCleaningHistoryRoutes(services.cleaningHistory), {
       prefix: '/v1/cleaning-history'
+    });
+  }
+  if (services.workHistory) {
+    await app.register(createWorkHistoryRoutes(services.workHistory), {
+      prefix: '/v1/work-history'
     });
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
