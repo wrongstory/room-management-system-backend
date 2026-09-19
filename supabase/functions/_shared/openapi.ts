@@ -4058,6 +4058,46 @@ export const openApiDocument = {
       ),
     },
     "/v1/rooms/{roomId}/operation-blocks": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomOperationBlocks",
+        summary: "객실 운영 차단 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. actionable은 해제되지 않은 차단 전체를 뜻하며 미래 scheduled, 현재 active, 시간이 지난 expired 항목을 모두 반환합니다. 반환된 id와 roomStateVersion은 차단 해제 명령에 그대로 사용합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          roomIdParameter(),
+          {
+            name: "status",
+            in: "query",
+            required: false,
+            schema: {
+              type: "string",
+              enum: ["actionable"],
+              default: "actionable",
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "해제되지 않은 객실 운영 차단과 현재 room CAS version",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/RoomOperationBlocksEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+        },
+      },
       post: roomMutationOperation(
         "createRoomOperationBlock",
         "객실 운영 차단 생성",
@@ -4089,6 +4129,40 @@ export const openApiDocument = {
       ),
     },
     "/v1/rooms/{roomId}/issues": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomIssues",
+        summary: "객실 미해결 이슈 조회",
+        description:
+          "비밀번호 변경을 완료한 active business admin 전용입니다. status=open인 미해결 이슈만 반환하며 반환된 id와 roomStateVersion은 이슈 해결 명령에 그대로 사용합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          roomIdParameter(),
+          {
+            name: "status",
+            in: "query",
+            required: false,
+            schema: { type: "string", enum: ["open"], default: "open" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "객실 미해결 이슈와 현재 room CAS version",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomIssuesEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+        },
+      },
       post: roomMutationOperation(
         "reportRoomIssue",
         "객실 이슈 등록",
@@ -9552,6 +9626,44 @@ export const openApiDocument = {
           endsAt: { type: ["string", "null"], format: "date-time" },
         },
       },
+      RoomOperationBlockStatus: {
+        type: "string",
+        enum: ["scheduled", "active", "expired"],
+      },
+      RoomOperationBlock: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "reasonCode",
+          "startsAt",
+          "endsAt",
+          "status",
+          "createdAt",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+          startsAt: { type: "string", format: "date-time" },
+          endsAt: { type: ["string", "null"], format: "date-time" },
+          status: { $ref: "#/components/schemas/RoomOperationBlockStatus" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomOperationBlocksEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomId", "roomStateVersion", "evaluatedAt", "items"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          evaluatedAt: { type: "string", format: "date-time" },
+          items: {
+            type: "array",
+            items: { $ref: "#/components/schemas/RoomOperationBlock" },
+          },
+        },
+      },
       RoomCandleRequest: {
         type: "object",
         additionalProperties: false,
@@ -9584,6 +9696,42 @@ export const openApiDocument = {
             maxLength: 500,
             description:
               "선택적 운영 설명. 전화번호·이메일은 허용하지 않습니다.",
+          },
+        },
+      },
+      RoomIssue: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "category",
+          "severity",
+          "blocksGuestAssignment",
+          "description",
+          "status",
+          "reportedAt",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          category: { type: "string", pattern: "^[A-Z0-9_]{2,80}$" },
+          severity: { type: "string", enum: ["info", "warning", "critical"] },
+          blocksGuestAssignment: { type: "boolean" },
+          description: { type: ["string", "null"], maxLength: 500 },
+          status: { type: "string", enum: ["open"] },
+          reportedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomIssuesEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomId", "roomStateVersion", "evaluatedAt", "items"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          evaluatedAt: { type: "string", format: "date-time" },
+          items: {
+            type: "array",
+            items: { $ref: "#/components/schemas/RoomIssue" },
           },
         },
       },

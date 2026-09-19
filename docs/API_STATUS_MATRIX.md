@@ -1383,7 +1383,7 @@ Phase C는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**�
 
 #204는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**다. 완료 이력은 실제 `fieldCompletedAt`만 포함하고 현재 객실 master-data로 과거 표시를 보정하지 않는다.
 
-### #206 주간 업무 기록 — source 후보
+### #206 주간 업무 기록 — source/dev 완료
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
@@ -1395,11 +1395,28 @@ Phase C는 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**�
 - [x] 메이드별 availability `submittedAt/currentVersion/versionCount`와 월~일 flags
 - [x] 표시명은 현재 profile label임을 계약에 명시; Fastify/Edge/OpenAPI parity
 - [x] 공개 API 후보 117 paths / 125 operations
+- [x] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev@12f51b131fa6f616d204ef3bee814dae02cd337d` 병합 — 69 migrations / 117 paths / 125 operations
+- [ ] release/main 승인 뒤 production migration/API 배포 및 hosted smoke
+
+#206은 source/dev 완료지만 **Production Edge ❌ / 현재 사용 ❌**다. 통보·가능일을 실제 완료로 해석하지 않고, 객실/작업 상세는 #204를 사용한다.
+
+### #210 객실 운영 차단·이슈 조회 — source 후보
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms/{roomId}/operation-blocks?status=actionable` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 미해제 scheduled/active/expired 전체, ID·room version 반환 |
+| [x] | `GET /v1/rooms/{roomId}/issues?status=open` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 미해결 이슈만, ID·room version 반환 |
+
+- [x] 기존 69 migrations 불변, 70번째 append-only `room_operations_read`
+- [x] 새 세션에서 조회한 entity ID와 `roomStateVersion`으로 기존 release/resolve mutation 연결
+- [x] PIN·guest PII·raw audit state를 포함하지 않는 app-owned projection
+- [x] Fastify/Edge/OpenAPI parity, 공개 API 후보 117 paths / 127 operations
 - [ ] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
 - [ ] `dev` 병합
 - [ ] release/main 승인 뒤 production migration/API 배포 및 hosted smoke
 
-#206은 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. 통보·가능일을 실제 완료로 해석하지 않고, 객실/작업 상세는 #204를 사용한다.
+#210은 미병합 source 후보이므로 **Production Edge ❌ / 현재 사용 ❌**다. `actionable`은 아직 release되지 않아 운영자가 처리할 수 있는 차단을 뜻하며, 시간이 지난 차단도 `expired`로 남아 명시적 release 대상이다.
 
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.

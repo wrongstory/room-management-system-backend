@@ -7,6 +7,10 @@ const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
 const issueIdSchema = z.object({ roomId: z.uuid(), issueId: z.uuid() });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
 const expectedVersionSchema = z.number().int().positive();
+const operationBlockQuerySchema = z
+  .object({ status: z.literal('actionable').default('actionable') })
+  .strict();
+const roomIssueQuerySchema = z.object({ status: z.literal('open').default('open') }).strict();
 
 const masterDataSchema = z.object({
   roomTypeId: z.uuid(),
@@ -132,6 +136,14 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       return reply.code(201).send({ operation });
     });
 
+    app.get('/:roomId/operation-blocks', { preHandler: admin }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      operationBlockQuerySchema.parse(request.query);
+      return reply
+        .header('Cache-Control', 'no-store')
+        .send(await roomService.listOperationBlocks(request.actor, roomId));
+    });
+
     app.post('/:roomId/operation-blocks/:blockId/release', { preHandler: admin }, async (request) => {
       const { roomId, blockId } = blockIdSchema.parse(request.params);
       const input = operationDecisionSchema.parse(request.body);
@@ -178,6 +190,14 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ operation });
+    });
+
+    app.get('/:roomId/issues', { preHandler: admin }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      roomIssueQuerySchema.parse(request.query);
+      return reply
+        .header('Cache-Control', 'no-store')
+        .send(await roomService.listIssues(request.actor, roomId));
     });
 
     app.post('/:roomId/issues/:issueId/resolve', { preHandler: admin }, async (request) => {
