@@ -471,7 +471,12 @@ RLS 외에도 Edge query에서 self/notified를 다시 제한하며 파생 targe
 현재 target의 이동된 객실이나 최신 assignment version을 service-role hydration으로 읽지 않습니다.
 근거 없는 legacy 통보 행의 객실 snapshot은 null이며 현재 객실로 추측해서 채우지 않습니다.
 메이드 `targetAssignmentVersion`은 해당 통보 revision의 version이고 관리자는 현재 CAS를 봅니다.
-별도 Fastify assignment route는 기존에 없으므로 이번에 만들지 않습니다.
+Issue #213부터 Edge와 Fastify의 목록·이력 조회는 같은 카드 projection을 제공합니다. 카드의 청소
+유형·객실 유형·엘리베이터 구역·요금·예상시간은 `cleaning_targets`에 저장된 immutable snapshot을
+사용합니다. 이월은 target의 `carryover_count`를 상한으로 삼되 해당 assignment revision 이전의
+`ROLLED_OVER_*` schedule evidence만 집계하며, 예약 일정 변경이나 근거 없는 날짜 차이는 0/null입니다.
+attempt/submission은 그 assignment에 연결된 최신 회차·제출만 표시합니다. 메이드의 과거 카드는
+통보 당시 객실 ID/번호를 유지하며 현재 target 상태나 이후 assignment version으로 덮지 않습니다.
 
 PR #74는 기존 25개 migration을 그대로 두고 `20260908101844_maid_assignment_visibility.sql`만
 추가해 dev에 병합됐습니다. 그 PR에는 #7A/B/C의 실행/lease/limited session을 포함하지 않았습니다.

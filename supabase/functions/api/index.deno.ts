@@ -608,9 +608,25 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             ? [{
               id: cleaningTargetId,
               room_id: roomId,
+              cleaning_kind: "checkout",
+              original_service_date: "2026-09-04",
+              effective_service_date: "2026-09-04",
+              carryover_count: 0,
+              status: "notified",
               assignment_version: 999,
+              room_type_snapshot: {
+                code: "standard",
+                name: "스탠다드 더블 로프트",
+                elevatorZone: "A",
+              },
+              fee_snapshot: 16000,
+              template_snapshot: { durationMinutes: null },
               rooms: { room_number: "101" },
             }]
+            : table === "cleaning_target_schedule_revisions"
+            ? []
+            : table === "cleaning_attempts" || table === "cleaning_submissions"
+            ? []
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
       rpc: () => Promise.resolve({ data: null, error: null }),
@@ -694,9 +710,26 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
                 ? [{
                   id: cleaningTargetId,
                   room_id: roomId,
+                  cleaning_kind: "checkout",
+                  original_service_date: "2026-09-04",
+                  effective_service_date: "2026-09-04",
+                  carryover_count: 0,
+                  status: "notified",
                   assignment_version: 999,
+                  room_type_snapshot: {
+                    code: "standard",
+                    name: "스탠다드 더블 로프트",
+                    elevatorZone: "A",
+                  },
+                  fee_snapshot: 16000,
+                  template_snapshot: { durationMinutes: null },
                   rooms: { room_number: "101" },
                 }]
+                : table === "cleaning_target_schedule_revisions"
+                ? []
+                : table === "cleaning_attempts" ||
+                    table === "cleaning_submissions"
+                ? []
                 : [{ id: maid.profileId, display_name: "메이드" }, {
                   id: otherId,
                   display_name: "다른 메이드",

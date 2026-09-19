@@ -623,6 +623,42 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
         .includes("현재 target 객실로 대체하지 않습니다"),
     "legacy unknown notification room snapshots are nullable, never current room fallbacks",
   );
+  const card = document.components.schemas.AssignmentCard;
+  for (
+    const field of [
+      "cleaningKind",
+      "roomTypeCode",
+      "roomTypeName",
+      "elevatorZone",
+      "feeSnapshot",
+      "durationMinutes",
+      "originalServiceDate",
+      "rolloverCount",
+      "rolloverReason",
+      "targetStatus",
+      "attemptStatus",
+      "submissionStatus",
+    ]
+  ) {
+    assert(
+      (card.required as readonly string[]).includes(field),
+      `assignment card requires ${field}`,
+    );
+  }
+  assert(
+    card.properties.durationMinutes.type.includes("null") &&
+      card.properties.targetStatus.type.includes("null") &&
+      card.properties.targetStatus.enum.filter((value) => value !== null)
+          .join(",") ===
+        "unassigned,draft_assigned,notified,in_progress,upload_pending,inspection_pending,approved,rejected,cancelled" &&
+      JSON.stringify(assignments.responses["200"]).includes(
+        "#/components/schemas/AssignmentCard",
+      ) &&
+      JSON.stringify(history.responses["200"]).includes(
+        "#/components/schemas/AssignmentCard",
+      ),
+    "list and history publish the nullable assignment card snapshot",
+  );
 
   assert(document.openapi === "3.1.1", "OpenAPI version must be 3.1.1");
   assert(serialized.includes('"bearerAuth"'), "bearerAuth must be documented");

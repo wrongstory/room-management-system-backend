@@ -17,6 +17,8 @@ import {
   type AvailabilityService,
   SupabaseAvailabilityService
 } from './modules/availability/availability.service.js';
+import { createAssignmentRoutes } from './modules/assignments/assignment.routes.js';
+import { type AssignmentService, SupabaseAssignmentService } from './modules/assignments/assignment.service.js';
 import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
 import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
 import { createCleaningTemplateRoutes } from './modules/cleaning-templates/cleaning-template.routes.js';
@@ -60,6 +62,7 @@ export interface AppServices {
   auth: AuthService;
   accounts: AccountService;
   availability: AvailabilityService;
+  assignments?: AssignmentService;
   rooms: RoomService;
   roomPinSheetOperations?: RoomPinSheetOperationsService;
   reservations: ReservationService;
@@ -108,6 +111,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
+      assignments: new SupabaseAssignmentService(clients),
       rooms: new SupabaseRoomService(clients, {
         key: options.env.ROOM_PIN_KEY_BASE64,
         keyVersion: options.env.ROOM_PIN_KEY_VERSION,
@@ -238,6 +242,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAuthRoutes(services.auth), { prefix: '/v1/auth' });
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
+  if (services.assignments) {
+    await app.register(createAssignmentRoutes(services.assignments), { prefix: '/v1/assignments' });
+  }
   await app.register(createRoomTypeRoutes(services.rooms), { prefix: '/v1/room-types' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
   if (services.roomPinSheetOperations) {
