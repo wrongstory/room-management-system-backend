@@ -2,6 +2,8 @@ import {
   changeRoomMasterData,
   createRoomOperationBlock,
   getRoom,
+  listRoomIssues,
+  listRoomOperationBlocks,
   listRooms,
   listRoomTypes,
   recordRoomPinSync,
@@ -551,4 +553,76 @@ Deno.test("room projection mapper exposes only the allowlisted fields", () => {
   );
   assert(!("raw_pin" in room), "unknown DB field removed");
   assert(!JSON.stringify(room).includes("must-not-leak"), "raw PIN removed");
+});
+
+Deno.test("room operation reads map only safe fields and bind the live session", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        if (name === "list_room_operation_blocks") {
+          return Promise.resolve({
+            error: null,
+            data: {
+              roomId,
+              roomStateVersion: 9,
+              evaluatedAt: "2026-09-20T01:00:00.000Z",
+              items: [{
+                id: blockId,
+                reasonCode: "MAINTENANCE",
+                startsAt: "2026-09-20T00:00:00.000Z",
+                endsAt: null,
+                status: "active",
+                createdAt: "2026-09-19T00:00:00.000Z",
+                raw_pin: "must-not-leak",
+              }],
+            },
+          });
+        }
+        return Promise.resolve({
+          error: null,
+          data: {
+            roomId,
+            roomStateVersion: 10,
+            evaluatedAt: "2026-09-20T01:00:00.000Z",
+            items: [{
+              id: issueId,
+              category: "FACILITY",
+              severity: "warning",
+              blocksGuestAssignment: true,
+              description: "창문 점검",
+              status: "open",
+              reportedAt: "2026-09-19T00:00:00.000Z",
+              guestName: "must-not-leak",
+            }],
+          },
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const blocks = await listRoomOperationBlocks(
+    readRequest(),
+    clients,
+    admin,
+    roomId,
+  );
+  const issues = await listRoomIssues(readRequest(), clients, admin, roomId);
+
+  assert(blocks.roomStateVersion === 9, "block CAS version mapped");
+  assert(blocks.items[0]?.status === "active", "derived status mapped");
+  assert(issues.roomStateVersion === 10, "issue CAS version mapped");
+  assert(issues.items[0]?.status === "open", "open issue mapped");
+  assert(
+    !JSON.stringify(blocks).includes("must-not-leak"),
+    "PIN field removed",
+  );
+  assert(
+    !JSON.stringify(issues).includes("must-not-leak"),
+    "guest field removed",
+  );
+  assert(
+    calls.every(([, args]) => args.p_session_id === sessionId),
+    "both reads bind the verified JWT session",
+  );
 });

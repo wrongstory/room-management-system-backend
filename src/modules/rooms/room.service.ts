@@ -183,8 +183,43 @@ export interface RoomTypeCatalogItem {
   roomCount: number;
 }
 
+export interface RoomOperationBlockItem {
+  id: string;
+  reasonCode: string;
+  startsAt: string;
+  endsAt: string | null;
+  status: 'scheduled' | 'active' | 'expired';
+  createdAt: string;
+}
+
+export interface RoomIssueItem {
+  id: string;
+  category: string;
+  severity: 'info' | 'warning' | 'critical';
+  blocksGuestAssignment: boolean;
+  description: string | null;
+  status: 'open';
+  reportedAt: string;
+}
+
+export interface RoomOperationBlocksResult {
+  roomId: string;
+  roomStateVersion: number;
+  evaluatedAt: string;
+  items: RoomOperationBlockItem[];
+}
+
+export interface RoomIssuesResult {
+  roomId: string;
+  roomStateVersion: number;
+  evaluatedAt: string;
+  items: RoomIssueItem[];
+}
+
 export interface RoomService {
   listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
+  listOperationBlocks(actor: Actor, roomId: string): Promise<RoomOperationBlocksResult>;
+  listIssues(actor: Actor, roomId: string): Promise<RoomIssuesResult>;
   list(actor: Actor): Promise<RoomSummary[]>;
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
   changeMasterData(actor: Actor, input: ChangeRoomMasterDataInput): Promise<RoomSummary>;
@@ -435,6 +470,30 @@ export class SupabaseRoomService implements RoomService {
       throw roomError(error);
     }
     return ((data ?? []) as RoomTypeCatalogRow[]).map(toRoomTypeCatalogItem);
+  }
+
+  async listOperationBlocks(actor: Actor, roomId: string): Promise<RoomOperationBlocksResult> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('list_room_operation_blocks', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: roomId,
+      p_status: 'actionable'
+    });
+    if (error) throw roomError(error);
+    return data as unknown as RoomOperationBlocksResult;
+  }
+
+  async listIssues(actor: Actor, roomId: string): Promise<RoomIssuesResult> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('list_room_issues', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: roomId,
+      p_status: 'open'
+    });
+    if (error) throw roomError(error);
+    return data as unknown as RoomIssuesResult;
   }
 
   async list(actor: Actor): Promise<RoomSummary[]> {

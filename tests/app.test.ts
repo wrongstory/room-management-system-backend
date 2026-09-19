@@ -97,6 +97,14 @@ function services(): AppServices {
         { id: '10000000-0000-4000-8000-000000000003', code: 'premium', displayName: '프리미어 더블 로프트', baseCleaningFee: 20000, active: true, version: 1, roomCount: 51 },
         { id: '10000000-0000-4000-8000-000000000004', code: 'standard', displayName: '스탠다드 더블 로프트', baseCleaningFee: 16000, active: true, version: 1, roomCount: 22 }
       ]),
+      listOperationBlocks: vi.fn(async () => ({
+        roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 4, evaluatedAt: '2026-09-20T00:00:00.000Z',
+        items: [{ id: '50000000-0000-4000-8000-000000000001', reasonCode: 'MAINTENANCE', startsAt: '2026-09-20T00:00:00.000Z', endsAt: null, status: 'active' as const, createdAt: '2026-09-19T00:00:00.000Z' }]
+      })),
+      listIssues: vi.fn(async () => ({
+        roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 5, evaluatedAt: '2026-09-20T00:00:00.000Z',
+        items: [{ id: '60000000-0000-4000-8000-000000000001', category: 'FACILITY', severity: 'warning' as const, blocksGuestAssignment: true, description: '창문 점검', status: 'open' as const, reportedAt: '2026-09-19T00:00:00.000Z' }]
+      })),
       list: vi.fn(async () => [{
         id: 'room-1',
         roomNumber: '117',
@@ -390,6 +398,80 @@ describe('application', () => {
       cleaningRequired: false,
       allocationReady: true
     });
+    await app.close();
+  });
+
+  it('returns actionable operation blocks with the current room version', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/operation-blocks?status=actionable',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toMatchObject({
+      roomId: '11111111-1111-4111-8111-111111111111',
+      roomStateVersion: 4,
+      items: [{
+        id: '50000000-0000-4000-8000-000000000001',
+        status: 'active'
+      }]
+    });
+    expect(appServices.rooms.listOperationBlocks).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      '11111111-1111-4111-8111-111111111111'
+    );
+    await app.close();
+  });
+
+  it('returns open issues and rejects unsupported room-operation filters', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/issues?status=open',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    const invalid = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/operation-blocks?status=active',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toMatchObject({
+      roomId: '11111111-1111-4111-8111-111111111111',
+      roomStateVersion: 5,
+      items: [{
+        id: '60000000-0000-4000-8000-000000000001',
+        status: 'open'
+      }]
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(appServices.rooms.listOperationBlocks).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('does not expose room operation reads to a maid', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-maid-1', profileId: 'maid-1', displayName: '메이드',
+      role: 'maid' as const, mustChangePassword: false, accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/issues?status=open',
+      headers: { authorization: 'Bearer access-token' }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ADMIN_REQUIRED');
+    expect(appServices.rooms.listIssues).not.toHaveBeenCalled();
     await app.close();
   });
 
