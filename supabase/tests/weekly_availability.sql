@@ -261,6 +261,13 @@ begin
           where maid_profile_id = '22000000-0000-4000-8000-000000000003'
             and week_start = '2026-08-24'
             and is_current)
+        and not exists (
+          select 1
+          from private.command_executions
+          where actor_profile_id = '22000000-0000-4000-8000-000000000003'
+            and command_type = 'availability.submit'
+            and idempotency_key = 'availability-notified-conflict'
+        )
     );
   end;
 
