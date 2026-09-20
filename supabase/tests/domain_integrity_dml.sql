@@ -194,9 +194,10 @@ begin
       '2027-01-02', '2027-01-02', '{}'::jsonb, 16000, '{}'::jsonb,
       '20000000-0000-4000-8000-000000000001'
     );
-    set constraints cleaning_targets_reservation_room_fk immediate;
+    set constraints all immediate;
     raise exception 'RESERVATION_ROOM_MISMATCH_ACCEPTED';
-  exception when foreign_key_violation then
+  exception when check_violation then
+    if sqlerrm <> 'CLEANING_TARGET_ROOM_PROVENANCE_INVALID' then raise; end if;
     null;
   end;
 end;

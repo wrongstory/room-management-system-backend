@@ -2,6 +2,7 @@ import {
   carryForwardPayroll,
   carryLatePayrollEarning,
   correctPayrollAdjustment,
+  getPayrollCycle,
   listPayroll,
   listPayrollEntries,
   payrollDatabaseError,
@@ -378,6 +379,26 @@ Deno.test("payroll list is side-effect free and maid access is self-only", async
       "maid IDOR denied",
     );
   }
+});
+
+Deno.test("payroll cycle resolver uses the exact bounded read RPC", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const cycleId = "40000000-0000-4000-8000-000000000001";
+  const result = await getPayrollCycle(
+    new Request(`http://localhost/v1/payroll/${cycleId}`),
+    clients(calls, { ...projection, cycleId, status: "paid", version: 3 }),
+    admin,
+    cycleId,
+  );
+  assert(
+    result.cycleId === cycleId && result.status === "paid",
+    "cycle projected",
+  );
+  assert(
+    calls.length === 1 && calls[0]?.[0] === "get_payroll_cycle",
+    "read RPC only",
+  );
+  assert(calls[0]?.[1].p_cycle_id === cycleId, "stable cycle ID forwarded");
 });
 
 Deno.test("payroll list rejects unknown, duplicate and invalid query values", async () => {

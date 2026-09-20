@@ -9,6 +9,7 @@ from .actor import Actor
 from .app_role import AppRole
 from .change_account_role_response_200 import ChangeAccountRoleResponse200
 from .change_account_status_response_200 import ChangeAccountStatusResponse200
+from .checkout_cleaning_template_v8_slot import CheckoutCleaningTemplateV8Slot
 from .cleaning_template_catalog import CleaningTemplateCatalog
 from .cleaning_template_catalog_envelope import CleaningTemplateCatalogEnvelope
 from .cleaning_template_room_type_code import CleaningTemplateRoomTypeCode
@@ -230,6 +231,8 @@ from .room_pin_sheet_sync_status_last_heartbeat_type_0_status import (
 )
 from .room_pin_sheet_sync_status_status import RoomPinSheetSyncStatusStatus
 from .room_pin_sheet_sync_status_worker import RoomPinSheetSyncStatusWorker
+from .room_type_catalog_envelope import RoomTypeCatalogEnvelope
+from .room_type_catalog_item import RoomTypeCatalogItem
 from .run_developer_diagnostics_response_200 import RunDeveloperDiagnosticsResponse200
 from .status_change_request import StatusChangeRequest
 from .status_change_request_status import StatusChangeRequestStatus
@@ -245,6 +248,7 @@ __all__ = (
     "AppRole",
     "ChangeAccountRoleResponse200",
     "ChangeAccountStatusResponse200",
+    "CheckoutCleaningTemplateV8Slot",
     "CleaningTemplateCatalog",
     "CleaningTemplateCatalogEnvelope",
     "CleaningTemplateRoomTypeCode",
@@ -366,6 +370,8 @@ __all__ = (
     "RoomPinSheetSyncStatusLastHeartbeatType0Status",
     "RoomPinSheetSyncStatusStatus",
     "RoomPinSheetSyncStatusWorker",
+    "RoomTypeCatalogEnvelope",
+    "RoomTypeCatalogItem",
     "RunDeveloperDiagnosticsResponse200",
     "StatusChangeRequest",
     "StatusChangeRequestStatus",

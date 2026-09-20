@@ -6,6 +6,8 @@
  */
 export const PHOTO_UPLOAD_MAX_BYTES = 307200;
 export const PHOTO_UPLOAD_COMMAND = "photo.upload";
+export const PHOTO_COLLECTION_UPLOAD_COMMAND = "photo.collection.upload";
+export const PHOTO_COLLECTION_DELETE_COMMAND = "photo.collection.delete";
 export const photoUploadStatuses = [
   "reserved",
   "provider_succeeded",
@@ -16,6 +18,23 @@ export const photoUploadStatuses = [
 ] as const;
 export type PhotoUploadStatus = typeof photoUploadStatuses[number];
 export type PhotoMime = "image/jpeg" | "image/webp";
+export const photoRetentionPolicies = [
+  "cleaning_submission",
+  "room_issue",
+  "complaint",
+  "interruption",
+  "sync_conflict",
+  "mixed",
+  "orphan",
+  "legacy_upload",
+] as const;
+export type PhotoRetentionPolicy = typeof photoRetentionPolicies[number];
+export const photoMediaAvailabilities = [
+  "available",
+  "purged",
+  "unavailable",
+] as const;
+export type PhotoMediaAvailability = typeof photoMediaAvailabilities[number];
 
 export class PhotoUploadContractError extends Error {
   constructor(
@@ -202,6 +221,119 @@ export async function preparePhotoUploadKey(
   });
 }
 
+export interface PhotoCollectionUploadBeginInput {
+  readonly attemptId: string;
+  readonly assignmentId: string;
+  readonly assignmentRevision: number;
+  readonly targetSlotId: string;
+  readonly photoItemId: string;
+  readonly expectedCollectionRevision: number;
+  readonly expectedItemRevision: number;
+  readonly sha256: string;
+  readonly mime: PhotoMime;
+  readonly sizeBytes: number;
+}
+function validatePhotoCollectionUploadBegin(
+  input: unknown,
+): PhotoCollectionUploadBeginInput {
+  const row = exact(input, [
+    "attemptId",
+    "assignmentId",
+    "assignmentRevision",
+    "targetSlotId",
+    "photoItemId",
+    "expectedCollectionRevision",
+    "expectedItemRevision",
+    "sha256",
+    "mime",
+    "sizeBytes",
+  ]);
+  if (
+    typeof row.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(row.sha256) ||
+    (row.mime !== "image/jpeg" && row.mime !== "image/webp")
+  ) invalid();
+  const sizeBytes = integer(row.sizeBytes, 1);
+  const expectedCollectionRevision = integer(row.expectedCollectionRevision, 0);
+  const expectedItemRevision = integer(row.expectedItemRevision, 0);
+  if (
+    sizeBytes > PHOTO_UPLOAD_MAX_BYTES ||
+    expectedCollectionRevision >= Number.MAX_SAFE_INTEGER ||
+    expectedItemRevision >= Number.MAX_SAFE_INTEGER
+  ) invalid();
+  return Object.freeze({
+    attemptId: uuid(row.attemptId),
+    assignmentId: uuid(row.assignmentId),
+    assignmentRevision: integer(row.assignmentRevision, 1),
+    targetSlotId: uuid(row.targetSlotId),
+    photoItemId: uuid(row.photoItemId),
+    expectedCollectionRevision,
+    expectedItemRevision,
+    sha256: row.sha256,
+    mime: row.mime,
+    sizeBytes,
+  });
+}
+export async function preparePhotoCollectionUploadKey(
+  actorProfileId: unknown,
+  rawIdempotencyKey: unknown,
+): Promise<string> {
+  const actor = uuid(actorProfileId);
+  if (
+    typeof rawIdempotencyKey !== "string" ||
+    !/^[A-Za-z0-9._:-]{8,128}$/.test(rawIdempotencyKey)
+  ) invalid();
+  return digest({
+    actorProfileId: actor,
+    command: PHOTO_COLLECTION_UPLOAD_COMMAND,
+    idempotencyKey: rawIdempotencyKey,
+  });
+}
+export async function preparePhotoCollectionUploadBegin(
+  actorProfileId: unknown,
+  input: unknown,
+  rawIdempotencyKey: unknown,
+): Promise<
+  { readonly idempotencyKeyDigest: string; readonly requestHash: string }
+> {
+  const actor = uuid(actorProfileId),
+    parsed = validatePhotoCollectionUploadBegin(input);
+  if (
+    typeof rawIdempotencyKey !== "string" ||
+    !/^[A-Za-z0-9._:-]{8,128}$/.test(rawIdempotencyKey)
+  ) invalid();
+  const scope = {
+    actorProfileId: actor,
+    command: PHOTO_COLLECTION_UPLOAD_COMMAND,
+  };
+  const [idempotencyKeyDigest, requestHash] = await Promise.all([
+    digest({ ...scope, idempotencyKey: rawIdempotencyKey }),
+    digest({ ...scope, ...parsed }),
+  ]);
+  return Object.freeze({ idempotencyKeyDigest, requestHash });
+}
+export async function preparePhotoCollectionDelete(
+  actorProfileId: unknown,
+  input: Readonly<Record<string, unknown>>,
+  rawIdempotencyKey: unknown,
+): Promise<
+  { readonly idempotencyKeyDigest: string; readonly requestHash: string }
+> {
+  const actor = uuid(actorProfileId);
+  if (
+    typeof rawIdempotencyKey !== "string" ||
+    !/^[A-Za-z0-9._:-]{8,128}$/.test(rawIdempotencyKey)
+  ) invalid();
+  const scope = {
+    actorProfileId: actor,
+    command: PHOTO_COLLECTION_DELETE_COMMAND,
+  };
+  const [idempotencyKeyDigest, requestHash] = await Promise.all([
+    digest({ ...scope, idempotencyKey: rawIdempotencyKey }),
+    digest({ ...scope, ...input }),
+  ]);
+  return Object.freeze({ idempotencyKeyDigest, requestHash });
+}
+
 export type PhotoUploadOperationCommand =
   | { readonly command: "get"; readonly operationId: string }
   | {
@@ -336,11 +468,17 @@ export function photoUploadDatabaseError(
     PHOTO_PROVIDER_RESULT_INVALID: 400,
     PHOTO_COMPENSATION_INVALID: 400,
     PHOTO_UPLOAD_TIME_INVALID: 400,
+    PHOTO_COLLECTION_DELETE_INVALID: 400,
+    PHOTO_COLLECTION_NOT_ALLOWED: 400,
+    PHOTO_COLLECTION_ROUTE_REQUIRED: 409,
     IDEMPOTENCY_KEY_REUSED: 409,
     ASSIGNMENT_VERSION_CONFLICT: 409,
     PHOTO_VERSION_CONFLICT: 409,
+    PHOTO_COLLECTION_VERSION_CONFLICT: 409,
+    PHOTO_ITEM_VERSION_CONFLICT: 409,
     PHOTO_UPLOAD_IN_FLIGHT: 409,
     PHOTO_UPLOAD_FENCE_CONFLICT: 409,
+    PHOTO_RETENTION_DELETE_PREPARED: 409,
     PHOTO_PROVIDER_IDENTITY_CONFLICT: 409,
     PHOTO_OPERATION_TERMINAL: 409,
     PHOTO_OPERATION_ACCEPTED: 409,
@@ -348,6 +486,10 @@ export function photoUploadDatabaseError(
     PHOTO_UPLOAD_LIMIT_EXCEEDED: 429,
     PHOTO_UPLOAD_RATE_LIMITED: 429,
     PHOTO_UPLOAD_LEASE_LIMIT: 429,
+    PHOTO_COLLECTION_LIMIT_EXCEEDED: 409,
+    PHOTO_MEDIA_EXPIRED: 410,
+    PHOTO_MEDIA_PURGED: 410,
+    PHOTO_MEDIA_UNAVAILABLE: 503,
   };
   const status = typeof code === "string" && Object.hasOwn(statuses, code)
     ? statuses[code]
@@ -371,13 +513,22 @@ export interface PhotoUploadOperationProjection {
   readonly objectId: string;
   readonly attemptId: string;
   readonly targetSlotId: string;
+  readonly photoItemId: string | null;
   readonly status: PhotoUploadStatus;
   readonly leaseVersion: number;
   readonly leaseExpiresAt: string | null;
   readonly photoId: string | null;
   readonly photoVersion: number | null;
+  readonly collectionRevision: number | null;
+  readonly itemRevision: number | null;
   readonly uploadedAt: string | null;
+  /** @deprecated Use expiresAt. */
   readonly purgeAfter: string | null;
+  readonly retentionPolicy: PhotoRetentionPolicy | null;
+  readonly retentionStartsAt: string | null;
+  readonly expiresAt: string | null;
+  readonly purgedAt: string | null;
+  readonly mediaAvailability: PhotoMediaAvailability | null;
   readonly compensationAllowed: boolean;
 }
 /** 서버 command 응답 전용 allowlist. raw key/hash/locator/credential 추가 필드는 버린다. */
@@ -396,15 +547,79 @@ export function projectPhotoUploadOperation(
     const photoVersion = row.photoVersion === null
       ? null
       : integer(row.photoVersion, 1);
+    const photoItemId =
+      row.photoItemId === null || row.photoItemId === undefined
+        ? null
+        : uuid(row.photoItemId);
+    const collectionRevision =
+      row.collectionRevision === null || row.collectionRevision === undefined
+        ? null
+        : integer(row.collectionRevision, 0);
+    const itemRevision =
+      row.itemRevision === null || row.itemRevision === undefined
+        ? null
+        : integer(row.itemRevision, 0);
+    if (
+      (photoItemId === null) !== (collectionRevision === null) ||
+      (photoItemId === null) !== (itemRevision === null)
+    ) failed();
     if (
       (photoId === null) !== (photoVersion === null) ||
       (status === "accepted") !== (photoId !== null)
     ) failed();
     const uploaded = row.uploadedAt === null ? null : time(row.uploadedAt);
+    const expires = row.expiresAt === null || row.expiresAt === undefined
+      ? null
+      : time(row.expiresAt);
     const purge = row.purgeAfter === null ? null : time(row.purgeAfter);
+    const starts =
+      row.retentionStartsAt === null || row.retentionStartsAt === undefined
+        ? null
+        : time(row.retentionStartsAt);
+    const purged = row.purgedAt === null || row.purgedAt === undefined
+      ? null
+      : time(row.purgedAt);
+    const retentionPolicy =
+      row.retentionPolicy === null || row.retentionPolicy === undefined
+        ? null
+        : row.retentionPolicy as PhotoRetentionPolicy;
+    const mediaAvailability =
+      row.mediaAvailability === null || row.mediaAvailability === undefined
+        ? null
+        : row.mediaAvailability as PhotoMediaAvailability;
+    if ((purge === null) !== (expires === null) || purge !== expires) failed();
     if (
-      (uploaded === null) !== (purge === null) ||
-      (uploaded !== null && purge !== uploaded + 604800000000n)
+      retentionPolicy !== null &&
+      !photoRetentionPolicies.includes(retentionPolicy)
+    ) failed();
+    if (
+      mediaAvailability !== null &&
+      !photoMediaAvailabilities.includes(mediaAvailability)
+    ) failed();
+    if ((retentionPolicy === null) !== (mediaAvailability === null)) failed();
+    if (
+      ["provider_succeeded", "accepted", "compensation_pending", "compensated"]
+        .includes(status) && retentionPolicy === null
+    ) failed();
+    if (mediaAvailability === "purged" ? purged === null : purged !== null) {
+      failed();
+    }
+    if (expires !== null && (starts === null || expires < starts)) failed();
+    if (
+      retentionPolicy === "orphan" &&
+      (uploaded === null || starts !== uploaded ||
+        expires !== uploaded + 2592000000000n)
+    ) failed();
+    if (
+      retentionPolicy === "cleaning_submission" && expires !== null &&
+      (starts === null || expires !== starts + 604800000000n)
+    ) failed();
+    if (
+      ["room_issue", "complaint", "interruption", "sync_conflict"].includes(
+        String(retentionPolicy),
+      ) &&
+      expires !== null &&
+      (starts === null || expires !== starts + 15552000000000n)
     ) failed();
     if (
       ["provider_succeeded", "accepted", "compensation_pending", "compensated"]
@@ -417,13 +632,23 @@ export function projectPhotoUploadOperation(
       objectId: uuid(row.objectId),
       attemptId: uuid(row.attemptId),
       targetSlotId: uuid(row.targetSlotId),
+      photoItemId,
       status,
       leaseVersion,
       leaseExpiresAt: row.leaseExpiresAt as string | null,
       photoId,
       photoVersion,
+      collectionRevision,
+      itemRevision,
       uploadedAt: row.uploadedAt as string | null,
       purgeAfter: row.purgeAfter as string | null,
+      retentionPolicy,
+      retentionStartsAt: starts === null
+        ? null
+        : row.retentionStartsAt as string,
+      expiresAt: expires === null ? null : row.expiresAt as string,
+      purgedAt: purged === null ? null : row.purgedAt as string,
+      mediaAvailability,
       compensationAllowed: row.compensationAllowed,
     });
   } catch {

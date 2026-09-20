@@ -161,13 +161,30 @@ select throws_ok(format($sql$select public.prepare_room_pin_change(
   (select room_number from public.rooms where id=(select room_id from room_race)),repeat('d',64)),
   '23505',null,'separate prepare cannot reuse a key-version and nonce pair');
 
--- Current, notified, in-progress maid work and its public access lease are authoritative.
+-- The typed assignment notification and delivery outbox create durable PIN
+-- authority before availableFrom. Attempt/access leases remain change-only.
 insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
   available_from,due_at,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
 values(pg_temp.pid(301),pg_temp.room_id(1),'additional','manual_room_request','pin-work-1',current_date,current_date,
   clock_timestamp()-interval '1 hour',clock_timestamp()+interval '1 day','notified',2,'{}',10000,'{}',pg_temp.pid(1));
 insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,notified_at,changed_by)
 values(pg_temp.pid(401),pg_temp.pid(301),pg_temp.pid(2),1,2,clock_timestamp()-interval '1 hour',pg_temp.pid(1));
+insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
+values(pg_temp.pid(450),pg_temp.pid(2),'cleaning_assignment_notified','room',pg_temp.room_id(1),
+  date_trunc('minute',clock_timestamp())-interval '1 minute',
+  date_trunc('minute',clock_timestamp())+interval '9 minutes');
+insert into public.notifications(id,recipient_profile_id,category,title,body,room_id,cleaning_target_id,
+  dedupe_key,requires_action,occurred_at,contract_version,actor_profile_id,event_family,
+  source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id)
+values(pg_temp.pid(451),pg_temp.pid(2),'cleaning_assignment_notified','청소 배정','배정됨',
+  pg_temp.room_id(1),pg_temp.pid(301),'pin-entitlement-fixture',true,clock_timestamp(),1,
+  pg_temp.pid(1),'assignment.commit_notified','cleaning_assignment',pg_temp.pid(401)::text,
+  'cleaningTarget',pg_temp.pid(301),pg_temp.pid(450));
+insert into private.notification_delivery_outbox(id,notification_id,event_family)
+values(pg_temp.pid(452),pg_temp.pid(451),'assignment.commit_notified');
+select is((select count(*)::int from private.room_pin_assignment_entitlements
+  where assignment_id=pg_temp.pid(401) and ended_at is null),1,
+  'typed delivery outbox atomically grants one durable assignment entitlement');
 insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,
   assignment_revision,template_snapshot,room_snapshot,started_at,execution_version)
 values(pg_temp.pid(501),pg_temp.pid(301),pg_temp.pid(401),pg_temp.pid(2),1,'scheduled',2,'{}',
@@ -186,9 +203,11 @@ select throws_ok($$select public.get_room_pin_change_context(pg_temp.pid(2),pg_t
 update public.cleaning_attempts set status='in_progress',started_at=clock_timestamp()-interval '30 minutes',execution_version=2
 where id=pg_temp.pid(501);
 update public.cleaning_targets set available_from=clock_timestamp()+interval '1 hour' where id=pg_temp.pid(301);
-select throws_ok($$select public.begin_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
-  pg_temp.pid(401),pg_temp.pid(501),pg_temp.pid(601),pg_temp.pid(799))$$,'42501','PIN_ACCESS_REQUIRED',
-  'maid cannot reveal before available_from');
+insert into pin_results values('pre-available-reveal',public.begin_room_pin_reveal(
+  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
+  pg_temp.pid(401),null,null,pg_temp.pid(799)));
+select ok((select value->>'lease_id' from pin_results where label='pre-available-reveal') is not null,
+  'notified maid can reveal before available_from without an attempt or long access lease');
 update public.cleaning_targets set available_from=clock_timestamp()-interval '1 hour' where id=pg_temp.pid(301);
 
 select throws_ok($$select public.get_room_pin_change_context(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),1,
@@ -208,8 +227,8 @@ select is((select value->>'aad_environment' from pin_results where label='reveal
 select lives_ok($$select public.finalize_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
   ((select value->>'lease_id' from pin_results where label='reveal'))::uuid,pg_temp.pid(701))$$,
   'final authorization recheck and sensitive read append succeed together');
-select ok((select revealed_at is not null from public.room_pin_access_leases where id=pg_temp.pid(601)),
-  'successful maid reveal marks the existing authoritative access lease');
+select ok((select revealed_at is null from public.room_pin_access_leases where id=pg_temp.pid(601)),
+  'successful reveal does not derive authority from or mutate the historical access lease');
 select is((select count(*)::int from private.actor_activity_events where source='edge.sensitive.room_pin'
   and resource_id=pg_temp.room_id(1)),1,'successful reveal appends one safe sensitive.read event');
 
@@ -218,9 +237,37 @@ insert into pin_results values('maid-change',public.prepare_room_pin_change(
   'MAID_CLEANING_CHANGE',1::smallint,'Y2FuZGlkYXRlMg==','AgICAgICAgICAgIC','AAAAAAAAAAAAAAAAAAAAAA==',
   'v1','test','local','pin-maid-0001',repeat('e',64)));
 select is(private.current_pin_sync_status(pg_temp.room_id(1)),'mismatch','maid prepare blocks reveal and check-in readiness immediately');
+
+-- Durable authority is committed with the exact typed outbox even while a
+-- physical mismatch blocks plaintext reveal. Rolling back to the unchanged
+-- current PIN revision must not require a pointer rotation to repair it.
+insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
+  available_from,due_at,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
+values(pg_temp.pid(302),pg_temp.room_id(1),'additional','manual_room_request','pin-work-mismatch',current_date,current_date,
+  clock_timestamp()+interval '2 hours',clock_timestamp()+interval '1 day','notified',1,'{}',10000,'{}',pg_temp.pid(1));
+insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,notified_at,changed_by)
+values(pg_temp.pid(402),pg_temp.pid(302),pg_temp.pid(2),2,1,clock_timestamp(),pg_temp.pid(1));
+insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)
+values(pg_temp.pid(460),pg_temp.pid(2),'cleaning_assignment_notified','room',pg_temp.room_id(1),
+  date_trunc('minute',clock_timestamp()),date_trunc('minute',clock_timestamp())+interval '10 minutes');
+insert into public.notifications(id,recipient_profile_id,category,title,body,room_id,cleaning_target_id,
+  dedupe_key,requires_action,occurred_at,contract_version,actor_profile_id,event_family,
+  source_entity_kind,source_entity_id,deep_link_kind,deep_link_entity_id,notification_group_id)
+values(pg_temp.pid(461),pg_temp.pid(2),'cleaning_assignment_notified','청소 배정','배정됨',
+  pg_temp.room_id(1),pg_temp.pid(302),'pin-entitlement-mismatch-fixture',true,clock_timestamp(),1,
+  pg_temp.pid(1),'assignment.commit_notified','cleaning_assignment',pg_temp.pid(402)::text,
+  'cleaningTarget',pg_temp.pid(302),pg_temp.pid(460));
+insert into private.notification_delivery_outbox(id,notification_id,event_family)
+values(pg_temp.pid(462),pg_temp.pid(461),'assignment.commit_notified');
+select is((select count(*)::int from private.room_pin_assignment_entitlements
+  where assignment_id=pg_temp.pid(402) and ended_at is null and pin_version=1),1,
+  'typed outbox grants durable authority during a transient physical mismatch');
 select throws_ok($$select public.begin_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
   pg_temp.pid(401),pg_temp.pid(501),pg_temp.pid(601),pg_temp.pid(702))$$,
   '55000','ROOM_PIN_MISMATCH_UNRESOLVED','unresolved physical mismatch blocks PIN reveal');
+select throws_ok($$select public.begin_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
+  pg_temp.pid(402),null,null,pg_temp.pid(703))$$,
+  '55000','ROOM_PIN_MISMATCH_UNRESOLVED','mismatch blocks reveal even when durable entitlement exists');
 
 delete from auth.sessions where id=pg_temp.pid(202);
 select ok(not exists(select 1 from auth.sessions where id=pg_temp.pid(202)),
@@ -234,6 +281,11 @@ select lives_ok($$select public.rollback_room_pin_change(pg_temp.pid(1),pg_temp.
   ((select value->>'lease_id' from pin_results where label='maid-change'))::uuid,1,'pin-rollback-0001',repeat('1',64))$$,
   'confirmed physical rollback resolves the mismatch against existing current revision');
 select is(private.current_pin_sync_status(pg_temp.room_id(1)),'verified','rollback returns exact current version to verified');
+select lives_ok($$select public.begin_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
+  pg_temp.pid(402),null,null,pg_temp.pid(704))$$,
+  'rollback makes the already granted mismatch-time entitlement revealable');
+insert into pin_results values('admin-pre-rotation-reveal',public.begin_room_pin_reveal(
+  pg_temp.pid(1),pg_temp.pid(201),pg_temp.room_id(1),null,null,null,pg_temp.pid(705)));
 
 insert into pin_results values('maid-confirmed-change',public.prepare_room_pin_change(
   pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),1,pg_temp.room_number(1),pg_temp.pid(401),pg_temp.pid(501),pg_temp.pid(601),
@@ -270,19 +322,46 @@ select is((select count(*)::int from public.audit_events where entity_id=pg_temp
   and event_type='room.pin_change_confirmed'),2,'maid confirm replay appends no duplicate audit event');
 select is((select count(*)::int from private.room_pin_sheet_sync_outbox where room_id=pg_temp.room_id(1)),3,
   'maid confirm replay appends no duplicate sheet outbox item');
-select lives_ok(format($sql$select public.begin_room_pin_reveal(%L,%L,%L,%L,%L,%L,%L)$sql$,
-  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),pg_temp.pid(401),pg_temp.pid(501),
-  ((select value->>'access_lease_id' from pin_results where label='maid-confirmed-result'))::uuid,pg_temp.pid(797)),
-  'same in-progress maid can reveal the new PIN through the reissued authoritative lease');
+select lives_ok(format($sql$select public.begin_room_pin_reveal(%L,%L,%L,%L,null,null,%L)$sql$,
+  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),pg_temp.pid(401),pg_temp.pid(797)),
+  'PIN rotation moves the current assignment entitlement to the new exact PIN revision');
+select is((select count(*)::int from private.room_pin_assignment_entitlements
+  where assignment_id=pg_temp.pid(401) and ended_at is null and pin_version=2),1,
+  'rotation leaves exactly one active entitlement on the new revision');
+select is((select count(*)::int from private.room_pin_assignment_entitlements
+  where assignment_id=pg_temp.pid(401) and ended_at is not null and pin_version=1),1,
+  'rotation preserves the superseded entitlement as immutable history');
+select ok((select revoked_at is not null and revoke_reason_code='PIN_VERSION_SUPERSEDED'
+  from private.room_pin_reveal_leases where id=(
+    (select value->>'lease_id' from pin_results where label='pre-available-reveal')::uuid)),
+  'rotation revokes the still-open pre-available reveal lease immediately');
+select ok((select revoked_at is not null and revoke_reason_code='PIN_VERSION_SUPERSEDED'
+  from private.room_pin_reveal_leases where id=(
+    (select value->>'lease_id' from pin_results where label='admin-pre-rotation-reveal')::uuid)),
+  'rotation durably revokes an open admin reveal bound to the old PIN revision');
+select throws_ok(format($sql$select public.finalize_room_pin_reveal(%L,%L,%L,%L,%L)$sql$,
+  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
+  (select value->>'lease_id' from pin_results where label='pre-available-reveal'),pg_temp.pid(799)),
+  '42501','PIN_REVEAL_AUTHORIZATION_CHANGED',
+  'superseded reveal cannot finalize during its original 30-second window');
+select throws_ok(format($sql$select public.finalize_room_pin_reveal(%L,%L,%L,%L,%L)$sql$,
+  pg_temp.pid(1),pg_temp.pid(201),pg_temp.room_id(1),
+  (select value->>'lease_id' from pin_results where label='admin-pre-rotation-reveal'),pg_temp.pid(705)),
+  '42501','PIN_REVEAL_AUTHORIZATION_CHANGED',
+  'superseded admin reveal cannot finalize during its original 30-second window');
 
 update public.cleaning_attempts set status='field_completed',field_completed_at=statement_timestamp(),ended_at=statement_timestamp(),
   execution_version=3
 where id=pg_temp.pid(501);
-select throws_ok(format($sql$select public.begin_room_pin_reveal(%L,%L,%L,%L,%L,%L,%L)$sql$,
-  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),pg_temp.pid(401),pg_temp.pid(501),
-  ((select value->>'access_lease_id' from pin_results where label='maid-confirmed-result'))::uuid,pg_temp.pid(798)),
-  '42501','PIN_ACCESS_REQUIRED',
-  'maid reveal fails closed after the attempt terminal boundary');
+update public.cleaning_targets set status='upload_pending' where id=pg_temp.pid(301);
+select lives_ok(format($sql$select public.begin_room_pin_reveal(%L,%L,%L,%L,null,null,%L)$sql$,
+  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),pg_temp.pid(401),pg_temp.pid(798)),
+  'durable entitlement survives field completion and upload pending');
+update public.cleaning_targets set status='approved' where id=pg_temp.pid(301);
+select throws_ok(format($sql$select public.begin_room_pin_reveal(%L,%L,%L,%L,null,null,%L)$sql$,
+  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),pg_temp.pid(401),pg_temp.pid(796)),
+  '42501','PIN_ENTITLEMENT_REQUIRED',
+  'final approval atomically ends the durable entitlement');
 
 select is((select summary from public.list_developer_audit_events(pg_temp.developer_id(),
   array['room.pin_mismatch_resolved'],null,null,null,null,null,10)
@@ -300,13 +379,16 @@ select ok(not has_table_privilege(role_name,table_name,'SELECT,INSERT,UPDATE,DEL
 from unnest(array['anon','authenticated','service_role']) role_name
 cross join unnest(array[
   'private.room_pin_revisions','private.room_current_pin','private.room_pin_change_leases',
-  'private.room_pin_reveal_leases','private.room_pin_sheet_sync_outbox']) table_name;
+  'private.room_pin_reveal_leases','private.room_pin_sheet_sync_outbox',
+  'private.room_pin_assignment_entitlements']) table_name;
 select ok(to_regclass('private.'||index_name) is not null,index_name||' covers a new private FK path')
 from unnest(array[
   'room_pin_revision_recorded_by_idx','room_pin_revision_assignment_idx','room_pin_revision_attempt_idx',
   'room_pin_revision_access_lease_idx','room_pin_change_room_idx','room_pin_change_access_lease_idx',
   'room_pin_reveal_revision_idx','room_pin_reveal_assignment_idx','room_pin_reveal_attempt_idx',
-  'room_pin_reveal_access_lease_idx']) index_name;
+  'room_pin_reveal_access_lease_idx','room_pin_reveal_entitlement_idx',
+  'room_pin_assignment_entitlement_actor_idx','room_pin_assignment_entitlement_room_idx',
+  'room_pin_assignment_entitlement_target_idx']) index_name;
 select ok(not has_function_privilege(role_name,function_name,'EXECUTE'),role_name||' cannot call '||function_name)
 from unnest(array['anon','authenticated']) role_name
 cross join unnest(array[

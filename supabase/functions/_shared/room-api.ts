@@ -4,15 +4,47 @@ import {
   EdgeError,
   requireBusinessAdmin,
   requirePasswordChanged,
+  verifiedRequestSessionId,
 } from "./runtime.ts";
 
 export type RoomReasonCode =
   | "OCCUPIED"
+  | "RESERVATION_CURRENT"
   | "CLEANING_REQUIRED"
   | "CANDLE_PRESENT"
   | "OPERATION_BLOCKED"
   | "ROOM_ISSUE_BLOCKED"
   | "DATA_UNCONFIRMED";
+
+export type RoomReservationPhase = "none" | "upcoming" | "current";
+export type RoomOccupancyStatus = "VACANT" | "OCCUPIED";
+export type RoomReservationLifecycle =
+  | "NONE"
+  | "FUTURE"
+  | "RESERVATION_PRESENT"
+  | "ARRIVAL_PENDING"
+  | "OCCUPIED";
+export type RoomReadinessStatus =
+  | "READY"
+  | "CLEANING_REQUIRED"
+  | "CHECKIN_BLOCKED";
+export type RoomPrimaryDisplayStatus =
+  | "BLOCKED"
+  | "OCCUPIED"
+  | "ARRIVAL_PENDING"
+  | "RESERVATION_PRESENT"
+  | "CLEANING_REQUIRED"
+  | "READY";
+export type RoomBlockingReasonCode =
+  | "CANDLE_PRESENT"
+  | "OPERATION_BLOCKED"
+  | "ROOM_ISSUE_BLOCKED"
+  | "DATA_UNCONFIRMED";
+export type RoomReadinessReasonCode =
+  | RoomBlockingReasonCode
+  | "CLEANING_REQUIRED"
+  | "PIN_MISMATCH"
+  | "PIN_UNCONFIGURED";
 
 interface RoomProjectionRow {
   id: string;
@@ -22,6 +54,18 @@ interface RoomProjectionRow {
   elevator_zone: "A" | "B" | "C" | null;
   data_status: "verified" | "verification_required";
   state_version: number;
+  evaluated_at: string;
+  reservation_phase: RoomReservationPhase;
+  server_time: string;
+  occupancy_status: RoomOccupancyStatus;
+  reservation_lifecycle: RoomReservationLifecycle;
+  readiness_status: RoomReadinessStatus;
+  primary_display_status: RoomPrimaryDisplayStatus;
+  next_reservation_id: string | null;
+  next_check_in_at: string | null;
+  next_check_out_at: string | null;
+  blocking_reason_codes: RoomBlockingReasonCode[];
+  readiness_reason_codes: RoomReadinessReasonCode[];
   occupied: boolean;
   cleaning_required: boolean;
   candle_count: number;
@@ -39,6 +83,18 @@ export interface RoomProjection {
   elevatorZone: "A" | "B" | "C" | null;
   dataStatus: "verified" | "verification_required";
   stateVersion: number;
+  evaluatedAt: string;
+  reservationPhase: RoomReservationPhase;
+  serverTime: string;
+  occupancyStatus: RoomOccupancyStatus;
+  reservationLifecycle: RoomReservationLifecycle;
+  readinessStatus: RoomReadinessStatus;
+  primaryDisplayStatus: RoomPrimaryDisplayStatus;
+  nextReservationId: string | null;
+  nextCheckInAt: string | null;
+  nextCheckOutAt: string | null;
+  blockingReasonCodes: RoomBlockingReasonCode[];
+  readinessReasonCodes: RoomReadinessReasonCode[];
   occupied: boolean;
   cleaningRequired: boolean;
   candleCount: number;
@@ -58,6 +114,18 @@ export function toRoomProjection(row: RoomProjectionRow): RoomProjection {
     elevatorZone: row.elevator_zone,
     dataStatus: row.data_status,
     stateVersion: row.state_version,
+    evaluatedAt: row.evaluated_at,
+    reservationPhase: row.reservation_phase,
+    serverTime: row.server_time,
+    occupancyStatus: row.occupancy_status,
+    reservationLifecycle: row.reservation_lifecycle,
+    readinessStatus: row.readiness_status,
+    primaryDisplayStatus: row.primary_display_status,
+    nextReservationId: row.next_reservation_id,
+    nextCheckInAt: row.next_check_in_at,
+    nextCheckOutAt: row.next_check_out_at,
+    blockingReasonCodes: row.blocking_reason_codes,
+    readinessReasonCodes: row.readiness_reason_codes,
     occupied: row.occupied,
     cleaningRequired: row.cleaning_required,
     candleCount: row.candle_count,
@@ -149,6 +217,31 @@ function nonNegativeInteger(value: unknown, name: string): number {
     validationError(`${name}은 0 이상의 정수여야 합니다.`);
   }
   return value as number;
+}
+
+function responseTimestamp(value: unknown, name: string): string {
+  if (
+    typeof value !== "string" || !timestampPattern.test(value) ||
+    !Number.isFinite(Date.parse(value))
+  ) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      `객실 운영 조회 결과의 ${name} 형식이 올바르지 않습니다.`,
+    );
+  }
+  return value;
+}
+
+function responseText(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      `객실 운영 조회 결과의 ${name} 형식이 올바르지 않습니다.`,
+    );
+  }
+  return value;
 }
 
 function reasonCodeValue(value: unknown): string {
@@ -314,6 +407,24 @@ export function roomDatabaseError(
       "PIN 응답 전 권한 또는 업무 상태가 변경되었습니다.",
     ],
     [
+      "PIN_ENTITLEMENT_REQUIRED",
+      403,
+      "PIN_ENTITLEMENT_REQUIRED",
+      "현재 통보된 배정의 PIN 열람 권한이 필요합니다.",
+    ],
+    [
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+      409,
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+      "생성된 PIN의 초기 열람 가능 상태가 아닙니다.",
+    ],
+    [
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
+      409,
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
+      "생성된 PIN을 물리 도어락에 확인할 수 있는 상태가 아닙니다.",
+    ],
+    [
       "PIN_ACCESS_LEASE_REQUIRED",
       403,
       "PIN_ACCESS_LEASE_REQUIRED",
@@ -445,6 +556,306 @@ export async function listRooms(clients: EdgeClients, actor: EdgeActor) {
   );
   if (error) throw roomDatabaseError(error);
   return toRoomProjections(data);
+}
+
+function booleanValue(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") {
+    validationError(`${name}은 boolean이어야 합니다.`);
+  }
+  return value;
+}
+
+export async function listRoomTypes(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+) {
+  requireRoomAdmin(actor);
+  const { data, error } = await clients.admin.rpc(
+    "list_room_type_catalog",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+    },
+  );
+  if (error) throw roomDatabaseError(error);
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: uuidValue(row.id, "id"),
+    code: String(row.code),
+    displayName: String(row.display_name),
+    baseCleaningFee: nonNegativeInteger(
+      row.base_cleaning_fee,
+      "baseCleaningFee",
+    ),
+    active: booleanValue(row.active, "active"),
+    version: positiveInteger(row.version, "version"),
+    roomCount: nonNegativeInteger(row.room_count, "roomCount"),
+  }));
+}
+
+export async function listRoomOperationBlocks(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+) {
+  requireRoomAdmin(actor);
+  const normalizedRoomId = uuidValue(roomId, "roomId");
+  const { data, error } = await clients.admin.rpc(
+    "list_room_operation_blocks",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+      p_room_id: normalizedRoomId,
+      p_status: "actionable",
+    },
+  );
+  if (error) throw roomDatabaseError(error);
+  const value = data as Record<string, unknown>;
+  if (!value || !Array.isArray(value.items)) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 운영 차단 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  return {
+    roomId: uuidValue(value.roomId, "roomId"),
+    roomStateVersion: positiveInteger(
+      value.roomStateVersion,
+      "roomStateVersion",
+    ),
+    evaluatedAt: responseTimestamp(value.evaluatedAt, "evaluatedAt"),
+    items: value.items.map((item) => {
+      const row = item as Record<string, unknown>;
+      const status = responseText(row.status, "status");
+      if (!["scheduled", "active", "expired"].includes(status)) {
+        throw new EdgeError(
+          500,
+          "ROOM_PROJECTION_INVALID",
+          "객실 운영 차단 상태가 올바르지 않습니다.",
+        );
+      }
+      return {
+        id: uuidValue(row.id, "id"),
+        reasonCode: responseText(row.reasonCode, "reasonCode"),
+        startsAt: responseTimestamp(row.startsAt, "startsAt"),
+        endsAt: row.endsAt === null
+          ? null
+          : responseTimestamp(row.endsAt, "endsAt"),
+        status,
+        createdAt: responseTimestamp(row.createdAt, "createdAt"),
+      };
+    }),
+  };
+}
+
+export async function listRoomIssues(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+) {
+  requireRoomAdmin(actor);
+  const normalizedRoomId = uuidValue(roomId, "roomId");
+  const { data, error } = await clients.admin.rpc("list_room_issues", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: verifiedRequestSessionId(request),
+    p_room_id: normalizedRoomId,
+    p_status: "open",
+  });
+  if (error) throw roomDatabaseError(error);
+  const value = data as Record<string, unknown>;
+  if (!value || !Array.isArray(value.items)) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 이슈 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  return {
+    roomId: uuidValue(value.roomId, "roomId"),
+    roomStateVersion: positiveInteger(
+      value.roomStateVersion,
+      "roomStateVersion",
+    ),
+    evaluatedAt: responseTimestamp(value.evaluatedAt, "evaluatedAt"),
+    items: value.items.map((item) => {
+      const row = item as Record<string, unknown>;
+      const severity = responseText(row.severity, "severity");
+      if (!["info", "warning", "critical"].includes(severity)) {
+        throw new EdgeError(
+          500,
+          "ROOM_PROJECTION_INVALID",
+          "객실 이슈 중요도가 올바르지 않습니다.",
+        );
+      }
+      if (
+        row.status !== "open" || typeof row.blocksGuestAssignment !== "boolean"
+      ) {
+        throw new EdgeError(
+          500,
+          "ROOM_PROJECTION_INVALID",
+          "객실 이슈 상태가 올바르지 않습니다.",
+        );
+      }
+      return {
+        id: uuidValue(row.id, "id"),
+        category: responseText(row.category, "category"),
+        severity,
+        blocksGuestAssignment: row.blocksGuestAssignment,
+        description: row.description === null
+          ? null
+          : responseText(row.description, "description"),
+        status: "open",
+        reportedAt: responseTimestamp(row.reportedAt, "reportedAt"),
+      };
+    }),
+  };
+}
+
+const roomCommandSummaryFields = new Set([
+  "roomTypeId",
+  "elevatorZone",
+  "dataStatus",
+  "stateVersion",
+  "blockId",
+  "startsAt",
+  "endsAt",
+  "active",
+  "candleEventId",
+  "count",
+  "issueId",
+  "category",
+  "severity",
+  "blocksGuestAssignment",
+  "status",
+  "pinSyncEventId",
+  "syncStatus",
+  "pinVersion",
+]);
+const occupancySummaryFields = new Set(["occupiedBefore", "occupiedAfter"]);
+const roomEventCategoryByType = new Map<string, string>([
+  ["room.master_data_changed", "room_configuration"],
+  ["room.create_block", "room_block"],
+  ["room.release_block", "room_block"],
+  ["room.set_candle_count", "room_candle"],
+  ["room.report_issue", "room_issue"],
+  ["room.resolve_issue", "room_issue"],
+  ["room.record_pin_sync", "room_pin"],
+  ["room.pin_change_prepared", "room_pin"],
+  ["room.pin_change_confirmed", "room_pin"],
+  ["room.pin_mismatch_resolved", "room_pin"],
+  ["scheduled_check_in", "occupancy"],
+  ["manual_checkout", "occupancy"],
+  ["scheduled_checkout", "occupancy"],
+  ["occupancy_resumed", "occupancy"],
+  ["occupancy_correction", "occupancy"],
+]);
+
+function safeRoomEventSummary(
+  value: unknown,
+  source: "room_command" | "occupancy",
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 이벤트 요약 형식이 올바르지 않습니다.",
+    );
+  }
+  const allowed = source === "room_command"
+    ? roomCommandSummaryFields
+    : occupancySummaryFields;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(([key]) =>
+      allowed.has(key)
+    ),
+  );
+}
+
+export async function listRoomEvents(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+  limit: number,
+) {
+  requireRoomAdmin(actor);
+  const normalizedRoomId = uuidValue(roomId, "roomId");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    validationError("limit은 1~50의 정수여야 합니다.");
+  }
+  const { data, error } = await clients.admin.rpc("list_room_events", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: verifiedRequestSessionId(request),
+    p_room_id: normalizedRoomId,
+    p_limit: limit,
+  });
+  if (error) throw roomDatabaseError(error);
+  const value = data as Record<string, unknown>;
+  if (!value || !Array.isArray(value.items)) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 이벤트 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  return {
+    roomId: uuidValue(value.roomId, "roomId"),
+    roomStateVersion: positiveInteger(
+      value.roomStateVersion,
+      "roomStateVersion",
+    ),
+    evaluatedAt: responseTimestamp(value.evaluatedAt, "evaluatedAt"),
+    items: value.items.map((item) => {
+      const row = item as Record<string, unknown>;
+      const source = responseText(row.source, "source");
+      if (source !== "room_command" && source !== "occupancy") {
+        throw new EdgeError(
+          500,
+          "ROOM_PROJECTION_INVALID",
+          "객실 이벤트 source가 올바르지 않습니다.",
+        );
+      }
+      const id = uuidValue(row.id, "id");
+      const eventType = responseText(row.eventType, "eventType");
+      const category = responseText(row.category, "category");
+      if (
+        roomEventCategoryByType.get(eventType) !== category ||
+        row.eventKey !== `${source}:${id}`
+      ) {
+        throw new EdgeError(
+          500,
+          "ROOM_PROJECTION_INVALID",
+          "객실 이벤트 식별자 또는 분류가 올바르지 않습니다.",
+        );
+      }
+      return {
+        id,
+        eventKey: responseText(row.eventKey, "eventKey"),
+        source,
+        category,
+        eventType,
+        actorProfileId: row.actorProfileId === null
+          ? null
+          : uuidValue(row.actorProfileId, "actorProfileId"),
+        actorDisplayName: row.actorDisplayName === null
+          ? null
+          : responseText(row.actorDisplayName, "actorDisplayName"),
+        entityId: uuidValue(row.entityId, "entityId"),
+        reasonCode: row.reasonCode === null
+          ? null
+          : responseText(row.reasonCode, "reasonCode"),
+        effectiveAt: responseTimestamp(row.effectiveAt, "effectiveAt"),
+        recordedAt: responseTimestamp(row.recordedAt, "recordedAt"),
+        reservationId: row.reservationId === null
+          ? null
+          : uuidValue(row.reservationId, "reservationId"),
+        summary: safeRoomEventSummary(row.summary, source),
+      };
+    }),
+  };
 }
 
 export async function getRoom(

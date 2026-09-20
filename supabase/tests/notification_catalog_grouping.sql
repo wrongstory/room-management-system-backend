@@ -2,10 +2,10 @@ begin;
 
 select plan(64);
 
-select is((select count(*) from private.notification_event_catalog),51::bigint,
+select is((select count(*) from private.notification_event_catalog),52::bigint,
   'source-controlled catalog contains every approved event family');
-select is((select count(distinct category) from private.notification_event_catalog),34::bigint,
-  'event families map to exactly 32 public categories');
+select is((select count(distinct category) from private.notification_event_catalog),35::bigint,
+  'event families map to exactly 35 public categories');
 select ok(bool_and(deep_link_kind in ('cleaningTarget','assignmentRequest','submission','complaintCase','payrollCycle','payrollProfile')),
   'catalog deep links use only the six approved kinds') from private.notification_event_catalog;
 select ok((select bool_and(push_eligible and not requires_action)

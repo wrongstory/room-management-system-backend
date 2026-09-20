@@ -29,6 +29,7 @@ from room_management_console.generated.api.developer import (
 )
 from room_management_console.generated.api.rooms import (
     get_room_pin_sheet_sync_status,
+    list_room_types,
     request_room_pin_sheet_full_resync,
 )
 from room_management_console.generated.models import (
@@ -41,6 +42,7 @@ from room_management_console.generated.models import (
     RoomPinSheetSyncStatus,
     RoomPinSheetSyncStatusActivation,
     RoomPinSheetSyncStatusBacklog,
+    RoomTypeCatalogItem,
 )
 from room_management_console.generated.models.account_status import AccountStatus
 from room_management_console.generated.models.developer_audit_event_summary import (
@@ -86,10 +88,11 @@ def test_phase_a_openapi_operations_are_generated() -> None:
         run_developer_diagnostics.sync_detailed,
         get_room_pin_sheet_sync_status.sync_detailed,
         request_room_pin_sheet_full_resync.sync_detailed,
+        list_room_types.sync_detailed,
         list_cleaning_templates.sync_detailed,
         publish_cleaning_template.sync_detailed,
     ]
-    assert len(operations) == 20
+    assert len(operations) == 21
 
 
 def test_password_change_replay_errors_are_generated() -> None:
@@ -111,6 +114,26 @@ def test_password_change_replay_errors_are_generated() -> None:
         "PASSWORD_VERIFICATION_RATE_LIMIT_UNAVAILABLE",
         "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
         "PASSWORD_RESET_STATE_UPDATE_FAILED",
+    }
+
+
+def test_during_stay_room_move_errors_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert {
+        ErrorCode.OPEN_ENDED_STAY_REQUIRES_END.value,
+        ErrorCode.INVALID_MOVE_EFFECTIVE_AT.value,
+        ErrorCode.TARGET_ROOM_NOT_READY.value,
+        ErrorCode.TARGET_ROOM_OVERLAP.value,
+        ErrorCode.TARGET_ROOM_BLOCKED.value,
+        ErrorCode.PIN_LEASE_ACTIVE.value,
+    } == {
+        "OPEN_ENDED_STAY_REQUIRES_END",
+        "INVALID_MOVE_EFFECTIVE_AT",
+        "TARGET_ROOM_NOT_READY",
+        "TARGET_ROOM_OVERLAP",
+        "TARGET_ROOM_BLOCKED",
+        "PIN_LEASE_ACTIVE",
     }
 
 
@@ -440,6 +463,7 @@ def test_room_pin_error_codes_are_generated() -> None:
         "PIN_CHANGE_IN_PROGRESS",
         "PIN_CHANGE_LEASE_EXPIRED",
         "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
+        "PIN_ENTITLEMENT_REQUIRED",
         "PIN_REVEAL_AUTHORIZATION_CHANGED",
         "ROOM_PIN_UNCONFIGURED",
         "PIN_ACCESS_LEASE_REQUIRED",
@@ -507,7 +531,7 @@ def test_attempt_lifecycle_audit_contract_preserves_only_safe_generated_fields()
         assert DeveloperAuditEventSummary.from_dict(expired_summary).to_dict() == expired_summary
 
 
-def test_generated_client_contains_only_twenty_authorized_operations() -> None:
+def test_generated_client_contains_only_twenty_one_authorized_operations() -> None:
     from room_management_console.generated import api
 
     generated_groups = {module.name for module in pkgutil.iter_modules(api.__path__)}
@@ -538,8 +562,25 @@ def test_generated_client_contains_only_twenty_authorized_operations() -> None:
         "developer.list_developer_audit_events",
         "developer.run_developer_diagnostics",
         "rooms.get_room_pin_sheet_sync_status",
+        "rooms.list_room_types",
         "rooms.request_room_pin_sheet_full_resync",
     }
+
+
+def test_room_type_catalog_generated_model_preserves_the_camel_case_contract() -> None:
+    item = RoomTypeCatalogItem.from_dict(
+        {
+            "id": "10000000-0000-4000-8000-000000000001",
+            "code": "standard",
+            "displayName": "스탠다드 더블 로프트",
+            "baseCleaningFee": 16000,
+            "active": True,
+            "version": 2,
+            "roomCount": 22,
+        }
+    )
+    assert item.to_dict()["displayName"] == "스탠다드 더블 로프트"
+    assert item.to_dict()["roomCount"] == 22
 
 
 def test_offline_resolution_generated_audit_excludes_ninety_day_client_metadata() -> None:

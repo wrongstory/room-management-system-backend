@@ -91,9 +91,10 @@ def sync_detailed(
     """퇴실 청소 템플릿의 불변 새 버전 게시
 
      active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을
-    expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 v7 이상 immutable version과 normalized
-    slot rows를 원자 게시합니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload
-    재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.
+    expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과
+    normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은
+    actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의
+    행동을 요구하지 않아 notification/outbox를 만들지 않습니다.
 
     Args:
         idempotency_key (str):
@@ -128,9 +129,10 @@ def sync(
     """퇴실 청소 템플릿의 불변 새 버전 게시
 
      active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을
-    expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 v7 이상 immutable version과 normalized
-    slot rows를 원자 게시합니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload
-    재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.
+    expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과
+    normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은
+    actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의
+    행동을 요구하지 않아 notification/outbox를 만들지 않습니다.
 
     Args:
         idempotency_key (str):
@@ -160,9 +162,10 @@ async def asyncio_detailed(
     """퇴실 청소 템플릿의 불변 새 버전 게시
 
      active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을
-    expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 v7 이상 immutable version과 normalized
-    slot rows를 원자 게시합니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload
-    재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.
+    expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과
+    normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은
+    actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의
+    행동을 요구하지 않아 notification/outbox를 만들지 않습니다.
 
     Args:
         idempotency_key (str):
@@ -195,9 +198,10 @@ async def asyncio(
     """퇴실 청소 템플릿의 불변 새 버전 게시
 
      active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을
-    expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 v7 이상 immutable version과 normalized
-    slot rows를 원자 게시합니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload
-    재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.
+    expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과
+    normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은
+    actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의
+    행동을 요구하지 않아 notification/outbox를 만들지 않습니다.
 
     Args:
         idempotency_key (str):

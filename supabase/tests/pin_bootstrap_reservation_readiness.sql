@@ -10,10 +10,17 @@ $$;
 create function pg_temp.room_number(n integer) returns text language sql stable as $$
   select room_number from public.rooms where id = pg_temp.room_id(n)
 $$;
-
 insert into auth.users(id) values
   (pg_temp.pid(101)),
-  (pg_temp.pid(102));
+  (pg_temp.pid(102)),
+  (pg_temp.pid(103));
+set local role service_role;
+select public.bootstrap_first_developer_profile(
+  pg_temp.pid(3), pg_temp.pid(103), 'PIN 감사 개발자',
+  'pin audit developer', '0169', 'pin-audit-developer-phone-hash',
+  'pin-audit-developer-bootstrap-0001'
+);
+reset role;
 insert into public.profiles(
   id, auth_user_id, display_name, display_name_normalized,
   login_id, login_id_normalized, login_sequence, role, status,
@@ -174,8 +181,8 @@ select is(
 );
 select is(
   private.current_pin_sync_status(pg_temp.room_id(1)),
-  'verified',
-  'bootstrap establishes the verified current PIN projection'
+  'mismatch',
+  'generated bootstrap remains mismatched before physical confirmation'
 );
 select is(
   (select count(*)::integer
@@ -186,8 +193,8 @@ select is(
 select is(
   (select count(*)::integer
    from private.room_pin_sheet_sync_outbox where room_id = pg_temp.room_id(1)),
-  1,
-  'bootstrap creates exactly one safe Sheet projection item'
+  0,
+  'bootstrap does not publish an unconfirmed PIN to Sheet'
 );
 select is(
   (select count(*)::integer
@@ -195,8 +202,17 @@ select is(
    where entity_id = pg_temp.room_id(1)
      and event_type = 'room.pin_change_confirmed'
      and after_state = jsonb_build_object('pinVersion', 1, 'status', 'verified')),
+  0,
+  'bootstrap does not claim physical confirmation'
+);
+select is(
+  (select count(*)::integer
+   from public.audit_events
+   where entity_id = pg_temp.room_id(1)
+     and event_type = 'room.pin_generated'
+     and after_state = jsonb_build_object('pinVersion', 1, 'status', 'mismatch')),
   1,
-  'bootstrap audit contains only safe version and status metadata'
+  'bootstrap audit contains only safe generated-version metadata'
 );
 select ok(
   not exists(
@@ -215,6 +231,94 @@ select is(
      and idempotency_key = 'pin-bootstrap-batch-0001'),
   1,
   'bootstrap retry creates one scoped command receipt'
+);
+
+select throws_ok(
+  format(
+    'select public.begin_room_pin_reveal(%L,%L,%L,null,null,null,%L)',
+    pg_temp.pid(1), pg_temp.pid(201), pg_temp.room_id(1), pg_temp.pid(400)
+  ),
+  '55000',
+  'ROOM_PIN_MISMATCH_UNRESOLVED',
+  'ordinary reveal remains closed for an unconfirmed generated PIN'
+);
+select throws_ok(
+  format(
+    'select public.begin_generated_room_pin_reveal(%L,%L,%L,%L)',
+    pg_temp.pid(2), pg_temp.pid(202), pg_temp.room_id(1), pg_temp.pid(401)
+  ),
+  '42501',
+  'ADMIN_REQUIRED',
+  'maid cannot reveal an unconfirmed generated PIN'
+);
+
+create temp table generated_reveal(value jsonb);
+insert into generated_reveal
+select public.begin_generated_room_pin_reveal(
+  pg_temp.pid(1), pg_temp.pid(201), pg_temp.room_id(1), pg_temp.pid(402)
+);
+select is(
+  (select value->>'pin_version' from generated_reveal),
+  '1',
+  'admin generated reveal is bound to the current PIN version'
+);
+select lives_ok(
+  format(
+    'select public.finalize_generated_room_pin_reveal(%L,%L,%L,%L,%L)',
+    pg_temp.pid(1), pg_temp.pid(201), pg_temp.room_id(1),
+    (select value->>'lease_id' from generated_reveal), pg_temp.pid(402)
+  ),
+  'generated reveal rechecks authorization and records sensitive access'
+);
+
+create temp table generated_confirmation(value jsonb);
+insert into generated_confirmation
+select public.confirm_generated_room_pin(
+  pg_temp.pid(1), pg_temp.pid(201), pg_temp.room_id(1), 1,
+  'generated-pin-confirm-0001', repeat('9', 64)
+);
+select is(
+  private.current_pin_sync_status(pg_temp.room_id(1)),
+  'verified',
+  'physical confirmation changes the generated PIN to verified'
+);
+select is(
+  (select count(*)::integer
+   from private.room_pin_sheet_sync_outbox
+   where room_id = pg_temp.room_id(1)
+     and reason_code = 'GENERATED_PIN_PHYSICALLY_CONFIRMED'),
+  1,
+  'physical confirmation enqueues one verified Sheet projection item'
+);
+select is(
+  public.confirm_generated_room_pin(
+    pg_temp.pid(1), pg_temp.pid(201), pg_temp.room_id(1), 1,
+    'generated-pin-confirm-0001', repeat('9', 64)
+  ),
+  (select value from generated_confirmation),
+  'generated confirmation replay returns the original receipt'
+);
+select throws_ok(
+  format(
+    'select public.begin_generated_room_pin_reveal(%L,%L,%L,%L)',
+    pg_temp.pid(1), pg_temp.pid(201), pg_temp.room_id(1), pg_temp.pid(403)
+  ),
+  '42501',
+  'GENERATED_PIN_REVEAL_NOT_ALLOWED',
+  'generated-only reveal closes after physical confirmation'
+);
+select is(
+  (select count(*)::integer
+   from public.list_developer_audit_events(
+     pg_temp.pid(3),
+     array['room.pin_generated', 'room.generated_pin_confirmed'],
+     pg_temp.pid(1), null, null, null, null, 10
+   )
+   where entity_id = pg_temp.room_id(1)
+     and summary ?& array['pinVersion', 'status']
+     and summary - array['pinVersion', 'status'] = '{}'::jsonb),
+  2,
+  'developer audit exposes both generated lifecycle events with safe metadata only'
 );
 
 select throws_ok(
@@ -278,6 +382,22 @@ select ok(
   ) and not has_function_privilege(
     'authenticated',
     'public.bootstrap_room_pins(uuid,uuid,jsonb,text,text)',
+    'execute'
+  ) and has_function_privilege(
+    'service_role',
+    'public.begin_generated_room_pin_reveal(uuid,uuid,uuid,uuid)',
+    'execute'
+  ) and has_function_privilege(
+    'service_role',
+    'public.finalize_generated_room_pin_reveal(uuid,uuid,uuid,uuid,uuid)',
+    'execute'
+  ) and has_function_privilege(
+    'service_role',
+    'public.confirm_generated_room_pin(uuid,uuid,uuid,bigint,text,text)',
+    'execute'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.confirm_generated_room_pin(uuid,uuid,uuid,bigint,text,text)',
     'execute'
   ),
   'bootstrap RPCs are callable only through the service adapter'

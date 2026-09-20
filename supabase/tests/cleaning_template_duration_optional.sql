@@ -7,10 +7,14 @@ $$;
 create function pg_temp.checkout_slots(p_count integer) returns jsonb
 language sql immutable as $$
   select jsonb_agg(jsonb_build_object(
-    'slotKey', case when display_order = 0 then 'tv-on' else 'slot-' || display_order end,
+    'slotKey', case when display_order = 0 then 'tv-on'
+      when display_order = 1 then 'entry-storage'
+      when p_count >= 9 and display_order = p_count - 1 then 'extra-proof'
+      else 'slot-' || display_order end,
     'displayOrder', display_order,
     'required', display_order < p_count - 1,
-    'label', '사진 ' || (display_order + 1)
+    'label', '사진 ' || (display_order + 1),
+    'maxPhotos', case when p_count >= 9 and display_order = p_count - 1 then 10 else 1 end
   ) order by display_order)
   from generate_series(0, p_count - 1) display_order
 $$;
@@ -37,7 +41,7 @@ create temp table publication(response jsonb);
 insert into publication
 select public.publish_checkout_cleaning_template(
   pg_temp.tid(1), pg_temp.tid(201), 'standard', 0, null,
-  pg_temp.checkout_slots(10), 'duration-optional-publish', repeat('a',64)
+  pg_temp.checkout_slots(9), 'duration-optional-publish', repeat('a',64)
 );
 
 select is((select response->'durationMinutes' from publication),'null'::jsonb,

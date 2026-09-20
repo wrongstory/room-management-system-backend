@@ -7,6 +7,18 @@ const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
 const issueIdSchema = z.object({ roomId: z.uuid(), issueId: z.uuid() });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
 const expectedVersionSchema = z.number().int().positive();
+const operationBlockQuerySchema = z
+  .object({ status: z.literal('actionable').default('actionable') })
+  .strict();
+const roomIssueQuerySchema = z.object({ status: z.literal('open').default('open') }).strict();
+const roomEventQuerySchema = z
+  .object({
+    limit: z.preprocess(
+      (value) => value ?? '30',
+      z.string().regex(/^(?:[1-9]|[1-4]\d|50)$/).transform(Number)
+    )
+  })
+  .strict();
 
 const masterDataSchema = z.object({
   roomTypeId: z.uuid(),
@@ -66,6 +78,9 @@ const revealPinSchema = z.object({
 const bootstrapPinsSchema = z.object({
   limit: z.number().int().min(1).max(25).default(20)
 }).strict();
+const confirmGeneratedPinSchema = z.object({
+  expectedPinVersion: z.number().int().positive()
+}).strict();
 
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
@@ -94,9 +109,29 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       return reply.header('Cache-Control', 'no-store').send({ bootstrap });
     });
 
+    app.post('/:roomId/pin/generated/confirm', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const { roomId } = roomIdSchema.parse(request.params);
+      const input = confirmGeneratedPinSchema.parse(request.body);
+      const confirmation = await roomService.confirmGeneratedPin(request.actor, {
+        roomId,
+        expectedPinVersion: input.expectedPinVersion,
+        idempotencyKey: idempotencyKey(request)
+      });
+      return reply.header('Cache-Control', 'no-store').send({ confirmation });
+    });
+
     app.get('/:roomId', { preHandler: admin }, async (request) => {
       const { roomId } = roomIdSchema.parse(request.params);
       return { room: await roomService.get(request.actor, roomId) };
+    });
+
+    app.get('/:roomId/events', { preHandler: admin }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      const { limit } = roomEventQuerySchema.parse(request.query);
+      return reply
+        .header('Cache-Control', 'no-store')
+        .send(await roomService.listEvents(request.actor, roomId, limit));
     });
 
     app.patch('/:roomId/master-data', { preHandler: admin }, async (request) => {
@@ -130,6 +165,14 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ operation });
+    });
+
+    app.get('/:roomId/operation-blocks', { preHandler: admin }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      operationBlockQuerySchema.parse(request.query);
+      return reply
+        .header('Cache-Control', 'no-store')
+        .send(await roomService.listOperationBlocks(request.actor, roomId));
     });
 
     app.post('/:roomId/operation-blocks/:blockId/release', { preHandler: admin }, async (request) => {
@@ -178,6 +221,14 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ operation });
+    });
+
+    app.get('/:roomId/issues', { preHandler: admin }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      roomIssueQuerySchema.parse(request.query);
+      return reply
+        .header('Cache-Control', 'no-store')
+        .send(await roomService.listIssues(request.actor, roomId));
     });
 
     app.post('/:roomId/issues/:issueId/resolve', { preHandler: admin }, async (request) => {
@@ -255,6 +306,17 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         ...(input.accessLeaseId === undefined ? {} : { accessLeaseId: input.accessLeaseId })
       });
       return reply.header('Cache-Control', 'no-store').send({ pin });
+    });
+  };
+}
+
+export function createRoomTypeRoutes(roomService: RoomService): FastifyPluginAsync {
+  return async (app) => {
+    app.get('/', {
+      preHandler: [app.authenticate, app.requirePasswordChanged, app.requireAdmin]
+    }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      return { items: await roomService.listTypes(request.actor) };
     });
   };
 }

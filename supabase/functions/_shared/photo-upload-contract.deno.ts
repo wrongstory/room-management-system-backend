@@ -46,11 +46,21 @@ const row = () => ({
   photoVersion: null,
   uploadedAt: null,
   purgeAfter: null,
+  retentionPolicy: null,
+  retentionStartsAt: null,
+  expiresAt: null,
+  purgedAt: null,
+  mediaAvailability: null,
   compensationAllowed: false,
 });
 const uploaded = {
   uploadedAt: "2037-01-01T00:00:00.123456Z",
   purgeAfter: "2037-01-08T00:00:00.123456Z",
+  retentionPolicy: "cleaning_submission",
+  retentionStartsAt: "2037-01-01T00:00:00.123456Z",
+  expiresAt: "2037-01-08T00:00:00.123456Z",
+  purgedAt: null,
+  mediaAvailability: "available",
 };
 Deno.test("photo upload exact metadata boundary and request key hash are Deno compatible", async () => {
   assert(validatePhotoUploadBegin(input()).sizeBytes === 307200);
@@ -138,6 +148,13 @@ Deno.test("photo result projection redacts provider identity and enforces exact 
       purgeAfter: "2037-01-08T00:00:00.123455Z",
     })
   );
+  rejects(() =>
+    projectPhotoUploadOperation({
+      ...row(),
+      ...uploaded,
+      expiresAt: "2037-01-08T00:00:00.123455Z",
+    })
+  );
 });
 Deno.test("photo compensation never treats timeout or accepted result as deletion authority", () => {
   assert(decidePhotoCompensation(null, 1) === "reconcile");
@@ -211,6 +228,12 @@ Deno.test("photo internal provider command validates identity and stable errors 
   assert(
     photoUploadDatabaseError({ message: "PHOTO_UPLOAD_FENCE_CONFLICT" })
       .statusCode === 409,
+  );
+  assert(
+    photoUploadDatabaseError({ message: "PHOTO_RETENTION_DELETE_PREPARED" })
+          .statusCode === 409 &&
+      photoUploadDatabaseError({ message: "PHOTO_RETENTION_DELETE_PREPARED" })
+          .code === "PHOTO_RETENTION_DELETE_PREPARED",
   );
   assert(
     photoUploadDatabaseError({ message: "raw private SQL" }).code ===

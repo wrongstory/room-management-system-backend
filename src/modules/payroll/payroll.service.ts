@@ -87,6 +87,7 @@ export interface PayrollAdjustmentProjection extends PayrollAdjustmentEntry {
 export interface PayrollService {
   list(actor: Actor, input: PayrollListInput): Promise<PayrollListPage>;
   listEntries(actor: Actor, input: PayrollEntriesInput): Promise<PayrollEntriesPage>;
+  get(actor: Actor, cycleId: string): Promise<PayrollCycleProjection>;
   start(actor: Actor, input: StartPayrollInput): Promise<PayrollCycleProjection>;
   correct(actor: Actor, input: PayrollAdjustmentInput): Promise<PayrollAdjustmentProjection>;
   reverse(actor: Actor, input: PayrollReversalInput): Promise<PayrollAdjustmentProjection>;
@@ -275,6 +276,7 @@ export function payrollDatabaseError(error: { message?: string } | null): AppErr
     ['PAYROLL_ACCESS_REQUIRED', 403, 'PAYROLL_ACCESS_REQUIRED', '주급 조회 권한이 필요합니다.'],
     ['ADMIN_REQUIRED', 403, 'ADMIN_REQUIRED', '관리자만 주급 지급 처리를 시작할 수 있습니다.'],
     ['PAYROLL_MAID_NOT_FOUND', 404, 'PAYROLL_MAID_NOT_FOUND', '메이드 계정을 찾을 수 없습니다.'],
+    ['PAYROLL_CYCLE_NOT_FOUND', 404, 'PAYROLL_CYCLE_NOT_FOUND', '주급 주기를 찾을 수 없습니다.'],
     ['PAYROLL_WEEK_MUST_START_MONDAY', 400, 'PAYROLL_WEEK_MUST_START_MONDAY', 'weekStart는 월요일이어야 합니다.'],
     ['PAYROLL_PAGE_LIMIT_INVALID', 400, 'PAYROLL_PAGE_LIMIT_INVALID', '주급 page size가 허용 범위를 벗어났습니다.'],
     ['PAYROLL_PAGE_KIND_INVALID', 400, 'PAYROLL_PAGE_KIND_INVALID', '주급 상세 page 종류가 올바르지 않습니다.'],
@@ -383,6 +385,17 @@ export class SupabasePayrollService implements PayrollService {
       kind: input.kind, entries,
       nextCursor: hasMore && lastDate && lastId ? this.cursors.encode(scope, { earnedOn: lastDate, earningId: lastId }) : null
     };
+  }
+
+  async get(actor: Actor, cycleId: string): Promise<PayrollCycleProjection> {
+    payrollReader(actor);
+    const { data, error } = await this.clients.admin.rpc('get_payroll_cycle', {
+      p_actor_profile_id: actor.profileId,
+      p_cycle_id: cycleId
+    });
+    if (error || !data) throw payrollDatabaseError(error);
+    const row = object(data);
+    return this.projectCycle(row, actor, date(row.weekStart));
   }
 
   async start(actor: Actor, input: StartPayrollInput): Promise<PayrollCycleProjection> {

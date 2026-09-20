@@ -16,6 +16,7 @@ export interface PhotoTemplateValidationSlot {
   readonly slotKey: string;
   readonly required: boolean;
   readonly displayOrder: number;
+  readonly maxPhotos?: number;
 }
 export interface PhotoTemplateValidationSnapshot {
   readonly templateVersionId: string;
@@ -49,11 +50,17 @@ export interface PhotoCompleteness {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CHECKOUT_COUNTS = {
+const CHECKOUT_V7_COUNTS = {
   standard: 10,
   premium: 11,
   oceanPremium: 13,
   oceanFamily: 15,
+} as const;
+const CHECKOUT_V8_COUNTS = {
+  standard: 9,
+  premium: 10,
+  oceanPremium: 12,
+  oceanFamily: 14,
 } as const;
 const KINDS = ["checkout", "stayover", "additional", "reclean"] as const;
 function fail(): never {
@@ -131,7 +138,7 @@ export function validatePhotoTemplateSnapshot(
   // 100/80/99는 DB와 일치하는 구조적 자원 상한이며 필수 사진 개수 정책이 아니다.
   if (
     typeof row.roomTypeCode !== "string" ||
-    !Object.hasOwn(CHECKOUT_COUNTS, row.roomTypeCode) ||
+    !Object.hasOwn(CHECKOUT_V8_COUNTS, row.roomTypeCode) ||
     !KINDS.includes(
       row.cleaningKind as PhotoTemplateValidationSnapshot["cleaningKind"],
     ) || !Array.isArray(row.slots) || row.slots.length === 0 ||
@@ -141,13 +148,29 @@ export function validatePhotoTemplateSnapshot(
       .roomTypeCode as PhotoTemplateValidationSnapshot["roomTypeCode"],
     cleaningKind = row
       .cleaningKind as PhotoTemplateValidationSnapshot["cleaningKind"];
+  const metadataCount =
+    row.slots.filter((value) =>
+      value !== null && typeof value === "object" && !Array.isArray(value) &&
+      Object.hasOwn(value, "maxPhotos")
+    ).length;
+  if (
+    (metadataCount !== 0 && metadataCount !== row.slots.length) ||
+    (version < 8 && metadataCount > 0)
+  ) fail();
+  const usesAContract = version >= 8 && metadataCount === row.slots.length;
   const seenKeys = new Set<string>(), seenOrders = new Set<number>();
   const slots = row.slots.map((value) => {
-    const slot = record(value, ["slotKey", "required", "displayOrder"]);
+    const slot = record(
+      value,
+      usesAContract
+        ? ["slotKey", "required", "displayOrder", "maxPhotos"]
+        : ["slotKey", "required", "displayOrder"],
+    );
     const key = slotKey(slot.slotKey), order = integer(slot.displayOrder, 0);
+    const maxPhotos = usesAContract ? integer(slot.maxPhotos) : undefined;
     if (
       typeof slot.required !== "boolean" || order > 99 || seenKeys.has(key) ||
-      seenOrders.has(order)
+      seenOrders.has(order) || (maxPhotos !== undefined && maxPhotos > 10)
     ) fail();
     seenKeys.add(key);
     seenOrders.add(order);
@@ -155,13 +178,32 @@ export function validatePhotoTemplateSnapshot(
       slotKey: key,
       required: slot.required,
       displayOrder: order,
+      ...(maxPhotos === undefined ? {} : { maxPhotos }),
     });
   }).sort((a, b) => a.displayOrder - b.displayOrder);
   if (!slots.some((slot) => slot.required)) fail();
   if (cleaningKind === "checkout" && version >= 7) {
+    const expectedCount = usesAContract
+      ? CHECKOUT_V8_COUNTS[roomTypeCode]
+      : CHECKOUT_V7_COUNTS[roomTypeCode];
     if (
-      slots.length !== CHECKOUT_COUNTS[roomTypeCode] ||
+      slots.length !== expectedCount ||
       slots.filter((slot) => slot.required).length !== slots.length - 1
+    ) fail();
+    if (
+      usesAContract && (
+        slots.some((slot) => slot.slotKey === "entry-number") ||
+        slots.filter((slot) =>
+            slot.slotKey === "entry-storage" && slot.required
+          ).length !== 1 ||
+        slots.filter((slot) =>
+            slot.slotKey === "extra-proof" && !slot.required &&
+            slot.displayOrder === slots.length - 1 && slot.maxPhotos === 10
+          ).length !== 1 ||
+        slots.some((slot) =>
+          slot.slotKey !== "extra-proof" && slot.maxPhotos !== 1
+        )
+      )
     ) fail();
     if (
       slots.filter((slot) => slot.slotKey === "tv-on" && slot.required)
@@ -206,6 +248,9 @@ export function projectPhotoTemplateForValidation(
         slotKey: slot.slotKey,
         required: slot.required,
         displayOrder: slot.displayOrder,
+        ...(Object.hasOwn(slot, "maxPhotos")
+          ? { maxPhotos: slot.maxPhotos }
+          : {}),
       };
     }),
   });
@@ -214,7 +259,7 @@ export function projectPhotoTemplateForValidation(
 /**
  * 단일 target/attempt의 frozen slot과 서버 current-photo projection만 받는다.
  * currentPhotos는 이력 전체가 아니다. 슬롯당 하나, 사진 버전당 불변 binding을 검증한다.
- * pending/failed/purged/7일 만료 사진은 필수 사진을 채우지 못한다.
+ * pending/failed/purged/authoritative retention 만료 사진은 필수 사진을 채우지 못한다.
  */
 export function assessPhotoCompleteness(input: unknown): PhotoCompleteness {
   const row = record(input, [
@@ -270,8 +315,11 @@ export function assessPhotoCompleteness(input: unknown): PhotoCompleteness {
       "version",
       "validationStatus",
       "uploadedAt",
-      "purgeAfter",
+      "retentionPolicy",
+      "retentionStartsAt",
+      "expiresAt",
       "purgedAt",
+      "mediaAvailability",
     ]);
     const photoId = id(photo.id),
       targetSlotId = id(photo.targetSlotId),
@@ -289,20 +337,31 @@ export function assessPhotoCompleteness(input: unknown): PhotoCompleteness {
     const uploadedAt = photo.uploadedAt === null
       ? null
       : timestamp(photo.uploadedAt);
-    const purgeAfter = photo.purgeAfter === null
+    const retentionStartsAt = photo.retentionStartsAt === null
       ? null
-      : timestamp(photo.purgeAfter);
+      : timestamp(photo.retentionStartsAt);
+    const expiresAt = photo.expiresAt === null
+      ? null
+      : timestamp(photo.expiresAt);
     const purgedAt = photo.purgedAt === null ? null : timestamp(photo.purgedAt);
     if (
-      (uploadedAt === null) !== (purgeAfter === null) ||
-      (uploadedAt !== null && purgeAfter !== uploadedAt + 604800000000n) ||
-      (purgedAt !== null && (uploadedAt === null || purgedAt < uploadedAt))
+      photo.retentionPolicy !== "cleaning_submission" ||
+      !["available", "purged", "unavailable"].includes(
+        photo.mediaAvailability as string,
+      ) ||
+      (expiresAt === null) !== (retentionStartsAt === null) ||
+      (expiresAt !== null &&
+        (retentionStartsAt === null ||
+          expiresAt !== retentionStartsAt + 604800000000n)) ||
+      (purgedAt !== null && (uploadedAt === null || purgedAt < uploadedAt)) ||
+      (photo.mediaAvailability === "purged") !== (purgedAt !== null)
     ) fail();
     if (photo.validationStatus === "verified" && uploadedAt === null) fail();
     if (
       photo.validationStatus === "verified" && uploadedAt !== null &&
-      purgeAfter !== null && uploadedAt <= asOf && asOf < purgeAfter &&
-      purgedAt === null
+      uploadedAt <= asOf &&
+      (expiresAt === null || asOf < expiresAt) &&
+      photo.mediaAvailability === "available" && purgedAt === null
     ) {
       references.push(
         Object.freeze({

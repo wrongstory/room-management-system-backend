@@ -15,11 +15,11 @@ const temporaryDirectories: string[] = [];
 const apiBaseUrl = 'https://abcdefghijklmnopqrst.supabase.co/functions/v1/api';
 const releaseContractArguments = [
   '--expected-version',
-  '0.3.0',
+  '0.4.0',
   '--expected-path-count',
-  '109',
+  '120',
   '--expected-operation-count',
-  '117'
+  '130'
 ];
 
 interface FixtureOptions {
@@ -29,9 +29,9 @@ interface FixtureOptions {
 }
 
 async function createFixture({
-  version = '0.3.0',
-  pathCount = 109,
-  operationCount = 117
+  version = '0.4.0',
+  pathCount = 120,
+  operationCount = 130
 }: FixtureOptions = {}): Promise<string> {
   if (pathCount < 3 || operationCount < 3) {
     throw new Error('fixture path/operation count가 올바르지 않습니다.');
@@ -97,9 +97,9 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).not.toContain('branches: [main]');
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
-    expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.3.0"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "109"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "117"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.4.0"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "120"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "130"');
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
@@ -152,19 +152,19 @@ describe('GitHub Pages Swagger portal', () => {
     };
 
     expect(index).toContain('CASTLE THE ART API');
-    expect(index).toContain('0.3.0');
-    expect(index).toContain('109개');
+    expect(index).toContain('0.4.0');
+    expect(index).toContain('120개');
     expect(index).not.toMatch(/__[A-Z0-9_]+__/);
     expect(initializer).toContain('supportedSubmitMethods: []');
     expect(initializer).toContain('persistAuthorization: false');
     expect(initializer).toContain('tryItOutEnabled: false');
-    expect(spec.info.version).toBe('0.3.0');
+    expect(spec.info.version).toBe('0.4.0');
     expect(spec.servers).toEqual([{ url: apiBaseUrl, description: '운영 Supabase Edge API' }]);
-    expect(Object.keys(spec.paths)).toHaveLength(109);
+    expect(Object.keys(spec.paths)).toHaveLength(120);
     expect(manifest).toMatchObject({
       apiBaseUrl,
-      pathCount: 109,
-      operationCount: 117,
+      pathCount: 120,
+      operationCount: 130,
       readOnly: true
     });
     expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);

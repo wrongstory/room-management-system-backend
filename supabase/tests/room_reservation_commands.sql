@@ -396,7 +396,7 @@ insert into room_reservation_test_results values
     select count(*) = 1
     from private.command_executions
     where actor_profile_id = '62000000-0000-4000-8000-000000000001'
-      and command_type = 'reservation.process_due_transitions'
+      and command_type = 'reservation.process_due_transitions.v66'
       and idempotency_key = 'manual-transition-retry-0001'
   ));
 
