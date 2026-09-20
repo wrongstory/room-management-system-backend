@@ -69,6 +69,7 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 ## 물리 변경 절차
 
 1. 권한 있는 사용자가 `POST /v1/rooms/{roomId}/pin-changes/prepare`를 호출한다. 클라이언트는 선행 0을 보존한 `pinDigits`만 보낸다. 서버가 global lifecycle lock과 room lock 아래 current room number snapshot을 확인하고 `<room_number>-<pin_digits>`를 암호화한다.
+   - current PIN version이 0인 최초 등록에서 admin 화면이 일반 수정 사유 `ADMIN_PHYSICAL_CHANGE`를 보내도 Fastify/Edge가 DB context를 확인한 뒤 `ADMIN_INITIAL_PIN`으로 정규화한다. request hash와 RPC/audit 사유도 정규화된 값만 사용한다. 명시적 `ADMIN_INITIAL_PIN`은 그대로 유지하고 version 1 이상의 일반 물리 변경, maid 변경, `ACTUAL_PIN_REENTRY`는 정규화하지 않는다.
 2. prepare 성공 즉시 객실은 mismatch다. current pointer는 그대로이고 실제 체크인과 모든 reveal은 차단되지만 예약 생성·변경·배정은 차단하지 않는다.
 3. 운영자가 실제 도어락 PIN을 변경한다.
 4. 실제 변경이 확실할 때만 confirm한다. confirm이 immutable revision/current pointer, exact verified sync event, safe sheet outbox, audit/receipt를 한 transaction에서 기록한다.
@@ -91,6 +92,7 @@ Reveal은 durable entitlement에서 파생되는 30초 이하 private 단기 lea
 ## 장애 확인
 
 - `ROOM_PIN_MISMATCH_UNRESOLVED`: 실제 체크인과 reveal을 계속 차단하고 실제 물리 상태를 확인한다. 예약 배정은 별도 경고를 표시한 채 허용한다.
+- `INVALID_PIN_CHANGE_REASON`: 현재 PIN version과 변경 사유 조합이 맞지 않는다. 최신 객실 PIN 상태를 다시 읽고 최초 등록, 일반 물리 변경, 실제 PIN 재입력 중 올바른 절차를 선택한다. 서버는 원문 DB 오류 대신 안정적인 409 코드만 반환한다.
 - `GENERATED_PIN_REVEAL_NOT_ALLOWED`: 이미 현장 확인됐거나 generated-pending 상태가 아니므로 초기화 응답을 재사용하지 않고 최신 객실 PIN 상태를 조회한다.
 - `GENERATED_PIN_CONFIRMATION_NOT_ALLOWED`: generated-pending/current version 조건이 바뀌었으므로 물리 상태를 임의 확정하지 않고 최신 상태를 확인한다.
 - `PIN_CHANGE_IN_PROGRESS` / `PIN_CHANGE_LEASE_EXPIRED`: 새 변경으로 덮지 말고 기존 lease의 물리 결과를 resolve한다.
