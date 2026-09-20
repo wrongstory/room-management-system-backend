@@ -2427,6 +2427,23 @@ Table private.reservation_room_move_events {
   command_key text [not null, unique]
   Note: 'Immutable safe event; guest name, PIN, photo locator and raw request are forbidden.'
 }
+Table private.room_occupancy_corrections {
+  id uuid [pk]
+  command_key text [not null, unique]
+  room_id uuid [not null, ref: > public.rooms.id]
+  reservation_id uuid [not null, ref: > public.reservations.id]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  replaced_segment_id uuid [ref: > private.stay_room_segments.id]
+  successor_segment_id uuid [ref: > private.stay_room_segments.id]
+  occupied boolean [not null]
+  effective_at timestamptz [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  reason_code text [not null]
+  room_state_version bigint [not null]
+  request_hash text [not null]
+  recorded_at timestamptz [not null]
+  Note: '#228 immutable provenance for an admin canonical stay-segment correction; never a composite room status override.'
+}
 Table private.stay_segment_checkout_obligations {
   id uuid [pk]
   stay_id uuid [not null, ref: > private.reservation_stays.id]

@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서 갱신의 release source 기준: `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7` — 73 migrations / OpenAPI 120 paths / 130 operations.
+- 이 문서의 production release 기준은 `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7` — 73 migrations / OpenAPI 120 paths / 130 operations이다. Issue #228 source 후보는 기존 73개를 수정하지 않는 74번째 migration과 OpenAPI 121 paths / 131 operations이며 아직 production 사용 가능 상태가 아니다.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
 - 백엔드 저장소와 직접 검증한 production 배포 source는 `main@80f935016d5581d500136fba29c206f6ee797bc0`이다. production은 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations이며 공개 Health/OpenAPI smoke를 통과했다.
 - 프런트엔드 정본 저장소: `wrongstory/room-management-system`
@@ -189,7 +189,9 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 객실 예약·준비 판단은 세 축을 합치지 않는다. `intervalBookable`은 요청한 미래 반개구간 또는 종료 미정 시작점 이후의 예약 가능성, `readinessStatus`/`checkInReady`는 현재 체크인·배정 준비, `pinSyncStatus`는 현재 PIN 동기화 상태다. 통합된 `dev`는 #196 일반 예약 bookability preview와 bounded from/to/cursor 범위 조회까지 제공한다. Issue #200 작업 브랜치는 같은 경로에 `long_stay`와 nullable checkout 의미를 더하는 source 후보다. `allocation_ready`를 그 대체값으로 사용하지 않는다. 미래 기간은 예약 가능하면서 현재 체크인 준비는 불가할 수 있으며, preview 결과는 commit 성공 보장이 아니다.
 
-`allocation_ready`는 현재 시각의 예약 배정 가능 여부다. 공실, 현재 preparation obligation 승인, 촛불 0, 운영 정상, 미해결 입실 차단 이슈 없음, 기준정보·점유 확인 완료를 모두 만족할 때만 true다. 현재 예약 구간이면 실제 체크인 event가 아직 없어도 `RESERVATION_CURRENT`로 차단한다. false이면 `OCCUPIED`, `RESERVATION_CURRENT`, `CLEANING_REQUIRED`, `CANDLE_PRESENT`, `OPERATION_BLOCKED`, `ROOM_ISSUE_BLOCKED`, `DATA_UNCONFIRMED` 같은 안정적인 reason code 목록을 함께 반환한다. `pin_sync_status`는 별도 경고 축이며 `unconfigured` 또는 `mismatch`만으로 예약 생성·변경·배정을 막지 않는다. 다만 실제 체크인 전이와 PIN 조회·변경은 current PIN이 `verified`가 될 때까지 fail-closed한다. 미래 예약의 pending preparation obligation과 private planned checkout target은 현재 `cleaning_required`를 활성화하지 않으며, 실제 checkout으로 current target이 materialize됐거나 현재 실행 가능한 비-checkout 청소가 있을 때만 현재 청소 축에 반영한다.
+`allocation_ready`는 현재 시각의 전체 배정 준비 여부다. canonical stay segment가 평가 시각을 `[startsAt,endsAt)`로 포함하지 않는 공실이고, 현재 preparation/청소 의무와 PIN/current-check-in readiness 경고가 없으며, 촛불 0·운영 정상·미해결 입실 차단 이슈 없음·기준정보 확인 완료를 모두 만족할 때만 true다. `allocation_blocked`는 이 중 객실 문제 축인 `CANDLE_PRESENT`, `OPERATION_BLOCKED`, `ROOM_ISSUE_BLOCKED`, `DATA_UNCONFIRMED`만 뜻하며 `OCCUPIED`, `RESERVATION_CURRENT`, `CLEANING_REQUIRED`는 단독으로 blocked를 만들지 않는다. 실제 조기 checkout 또는 관리자 보정으로 segment end가 닫히면 그 instant부터 occupied는 false이고, null end 장기투숙은 명시 종료 전까지 true다. `pin_sync_status`는 별도 경고 축이며 `unconfigured` 또는 `mismatch`만으로 예약 생성·변경·배정을 막지 않는다. 다만 실제 체크인 전이와 PIN 조회·변경은 current PIN이 `verified`가 될 때까지 fail-closed한다. 미래 예약의 pending preparation obligation과 private planned checkout target은 현재 `cleaning_required`를 활성화하지 않으며, 실제 checkout으로 current target이 materialize됐거나 현재 실행 가능한 비-checkout 청소가 있을 때만 현재 청소 축에 반영한다.
+
+관리자의 점유 상태 보정은 `primary_display_status`나 복합 status를 직접 저장하지 않는다. `POST /v1/rooms/{roomId}/occupancy-corrections`가 예약 ID, 목표 `occupied`, 과거/현재 `effectiveAt`, room CAS version, source-controlled reason과 Idempotency-Key를 받아 canonical segment를 retire/successor append하고 private correction 원장·safe occupancy event·audit·receipt를 같은 transaction에 남긴다. segment 시작과 같은 vacant 보정은 zero-length successor 없이 전체 segment를 retire하며, 미래 다른 객실 segment와 겹치는 occupied 보정은 거부한다. active/password-complete business admin만 허용하고 maid/developer는 거부한다.
 
 ---
 

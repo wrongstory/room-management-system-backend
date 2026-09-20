@@ -138,6 +138,10 @@ const photoSlotContractV8MigrationUrl = new URL(
   '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
   import.meta.url
 );
+const roomStatusAdminCorrectionMigrationUrl = new URL(
+  '../supabase/migrations/20260920091807_room_status_admin_correction.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
   it('versions the A-contract without rewriting v7 photo evidence', async () => {
@@ -216,6 +220,30 @@ describe('initial migration contract', () => {
     expect(sql).toContain('from public, anon, authenticated, service_role');
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/create table|alter table|insert into|update public\./);
+  });
+
+  it('separates canonical occupancy, room blocking, and readiness with an admin correction ledger', async () => {
+    const sql = await readFile(roomStatusAdminCorrectionMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.room_occupancy_corrections');
+    expect(sql).toContain('create or replace function private.room_occupied_at');
+    expect(sql).toContain('segment.starts_at <= p_at');
+    expect(sql).toContain('(segment.ends_at is null or segment.ends_at > p_at)');
+    expect(sql).toContain('reservation.actual_checkout_at is null');
+    expect(sql).toContain('create or replace function public.correct_room_occupancy(');
+    expect(sql).toContain('private.assert_attempt_actor_session(p_actor_profile_id, p_session_id, true)');
+    expect(sql).toContain("'room.occupancy_correction'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('p_expected_room_version');
+    expect(sql).toContain('p_effective_at');
+    expect(sql).toContain('p_reason_code');
+    expect(sql).toContain('room_occupancy_corrections_immutable');
+    expect(sql).toContain('cardinality(readiness.blocking_reason_codes) > 0');
+    expect(sql).toContain('not state.occupied and cardinality(readiness.readiness_reason_codes) = 0');
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_occupancy_corrections to (anon|authenticated)/);
   });
 
   it('moves pre-check-in reservations only through a replay-safe dedicated command', async () => {

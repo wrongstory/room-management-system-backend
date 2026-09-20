@@ -113,6 +113,26 @@ export interface RoomOperationResult {
   recordedAt: string;
 }
 
+export interface CorrectRoomOccupancyInput {
+  roomId: string;
+  reservationId: string;
+  occupied: boolean;
+  effectiveAt: string;
+  expectedRoomVersion: number;
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface RoomOccupancyCorrectionResult {
+  correctionId: string;
+  roomId: string;
+  reservationId: string;
+  occupied: boolean;
+  effectiveAt: string;
+  roomStateVersion: number;
+  recordedAt: string;
+}
+
 export interface RoomPinWorkBinding {
   assignmentId?: string;
   attemptId?: string;
@@ -262,6 +282,7 @@ export interface RoomService {
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
   changeMasterData(actor: Actor, input: ChangeRoomMasterDataInput): Promise<RoomSummary>;
   mutateOperation(actor: Actor, input: RoomOperationInput): Promise<RoomOperationResult>;
+  correctOccupancy(actor: Actor, input: CorrectRoomOccupancyInput): Promise<RoomOccupancyCorrectionResult>;
   preparePinChange(actor: Actor, input: PrepareRoomPinChangeInput): Promise<RoomPinChangeResult>;
   confirmPinChange(actor: Actor, input: ConfirmRoomPinChangeInput): Promise<RoomPinChangeResult>;
   rollbackPinChange(actor: Actor, input: ConfirmRoomPinChangeInput): Promise<RoomPinChangeResult>;
@@ -383,6 +404,27 @@ function roomError(error: { message?: string } | null): AppError {
   }
   if (message.includes('STALE_VERSION')) {
     return new AppError(409, 'STALE_VERSION', '다른 객실 변경이 먼저 반영됐습니다.');
+  }
+  if (message.includes('OCCUPANCY_CORRECTION_ALREADY_APPLIED')) {
+    return new AppError(409, 'OCCUPANCY_CORRECTION_ALREADY_APPLIED', '이미 요청한 점유 상태가 반영되어 있습니다.');
+  }
+  if (message.includes('OCCUPANCY_CORRECTION_ROOM_MISMATCH')) {
+    return new AppError(409, 'OCCUPANCY_CORRECTION_ROOM_MISMATCH', '해당 시각의 투숙 객실과 요청 객실이 일치하지 않습니다.');
+  }
+  if (message.includes('ROOM_OCCUPANCY_CONFLICT')) {
+    return new AppError(409, 'ROOM_OCCUPANCY_CONFLICT', '해당 시간에는 다른 예약이 객실을 점유하고 있습니다.');
+  }
+  if (message.includes('OCCUPANCY_CORRECTION_NOT_ALLOWED')) {
+    return new AppError(409, 'OCCUPANCY_CORRECTION_NOT_ALLOWED', '현재 예약 상태에서는 점유 상태를 보정할 수 없습니다.');
+  }
+  if (message.includes('INVALID_OCCUPANCY_CORRECTION')) {
+    return new AppError(400, 'INVALID_OCCUPANCY_CORRECTION', '점유 보정 요청이 올바르지 않습니다.');
+  }
+  if (message.includes('RESERVATION_NOT_FOUND')) {
+    return new AppError(404, 'RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다.');
+  }
+  if (message.includes('STAY_SEGMENT_CONTRACT_MISMATCH')) {
+    return new AppError(409, 'STAY_SEGMENT_CONTRACT_MISMATCH', '예약의 투숙 구간 정보가 현재 상태와 일치하지 않습니다.');
   }
   if (message.includes('IDEMPOTENCY_KEY_REUSED')) {
     return new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 요청에 사용한 Idempotency-Key입니다.');
@@ -700,6 +742,44 @@ export class SupabaseRoomService implements RoomService {
       roomId: row.room_id,
       roomStateVersion: row.room_state_version,
       recordedAt: row.recorded_at
+    };
+  }
+
+  async correctOccupancy(
+    actor: Actor,
+    input: CorrectRoomOccupancyInput
+  ): Promise<RoomOccupancyCorrectionResult> {
+    ensureAdmin(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      reservationId: input.reservationId,
+      occupied: input.occupied,
+      effectiveAt: input.effectiveAt,
+      expectedRoomVersion: input.expectedRoomVersion,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('correct_room_occupancy', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: input.roomId,
+      p_reservation_id: input.reservationId,
+      p_occupied: input.occupied,
+      p_effective_at: input.effectiveAt,
+      p_expected_room_version: input.expectedRoomVersion,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    const row = data as Record<string, unknown>;
+    return {
+      correctionId: String(row.correction_id),
+      roomId: String(row.room_id),
+      reservationId: String(row.reservation_id),
+      occupied: Boolean(row.occupied),
+      effectiveAt: String(row.effective_at),
+      roomStateVersion: Number(row.room_state_version),
+      recordedAt: String(row.recorded_at)
     };
   }
 

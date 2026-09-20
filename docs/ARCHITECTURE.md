@@ -59,6 +59,14 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 
 현재 객실 현황은 이 snapshot 시각에 실제로 활성화된 점유·청소 의무·운영 차단만 계산한다. 미래 예약의 준비 의무는 일정과 작업 계획에는 남지만 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `reservationPhase`, `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`, `reasonCodes`, `pinSyncStatus`는 계속 독립 축이며 새 영구 `status` 컬럼이나 단일 API status를 만들지 않는다. 프런트의 5단계 대표 문구는 이 축을 읽는 표시 mapper일 뿐 정본 상태가 아니다.
 
+### #228 점유·객실 문제·배정 준비 분리
+
+74번째 append-only `room_status_admin_correction`은 `occupied`를 canonical non-retired stay segment의 서버 snapshot 반개구간 `[startsAt, endsAt)` 포함 여부로만 계산한다. 시작 직전은 비점유, 시작 시각은 점유, 종료 시각은 비점유이며 null end인 장기투숙 segment는 실제 종료/보정 전까지 계속 점유다. 조기 실제 checkout과 관리자 vacant 보정은 segment를 닫으므로 즉시 projection에서 빠진다.
+
+`allocationBlocked`는 운영 차단·배정 차단 이슈·촛불·기준정보 오류처럼 객실 문제 축만 반영한다. 점유와 청소 의무는 단독으로 blocked를 만들지 않는다. `allocationReady`는 점유가 없고 청소·PIN/current-check-in 경고를 포함한 readiness 사유와 객실 문제 사유가 모두 없을 때만 true다.
+
+`POST /v1/rooms/{roomId}/occupancy-corrections`는 active/password-complete business admin의 live session만 허용한다. 예약 ID, 목표 occupied, 과거/현재 effectiveAt, room CAS version, reasonCode와 Idempotency-Key를 받고 UI 대표 status를 덮어쓰지 않는다. 기존 canonical segment를 retire하고 successor를 append하며 private correction 원장, public safe occupancy event, audit, command receipt를 같은 transaction에 기록한다. segment 시작과 같은 vacant 보정은 zero-length successor를 만들지 않고 전체 segment를 retire한다. 미래 다른 객실 segment와 충돌하는 occupied 보정은 fail-closed한다. maid/developer는 DB와 HTTP 양쪽에서 거부한다.
+
 ### #187 예약 임박 lifecycle projection Phase A
 
 기존 GET 경로와 필드는 그대로 두고 `serverTime`, `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus`, `nextReservationId/nextCheckInAt/nextCheckOutAt`, `blockingReasonCodes`, `readinessReasonCodes`를 추가한다. `serverTime`과 `evaluatedAt`은 같은 DB snapshot timestamp다. lifecycle은 current 반개구간 또는 실제 active occupancy를 `OCCUPIED`로 우선하고, current가 없을 때 가장 이른 미래 active 예약의 KST 체크인 날짜를 오늘 `ARRIVAL_PENDING`, 내일 `RESERVATION_PRESENT`, 모레 이후 `FUTURE`, 없음 `NONE`으로 분류한다. next 필드는 current가 아닌 가장 이른 미래 active 예약만 가리킨다.

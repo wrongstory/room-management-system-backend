@@ -1216,6 +1216,10 @@ rotation 및 Data API RLS에서 차단한다. 모든 새 private table은 FORCE 
 4. 지급 명령에서 `payroll_items` 잠금 합계와 cycle 상태를 원자적으로 전이한다.
 5. 도메인별 서버 명령과 상태 전이 테스트를 추가한다.
 
+### #228 관리자 점유 보정 원장
+
+`private.room_occupancy_corrections`는 관리자 보정 command마다 room/reservation/stay, 교체된 segment와 successor segment, 목표 occupied, effective timestamp, actor/reason, 적용 뒤 room state version, command key/request hash를 한 번만 기록한다. UPDATE/DELETE는 trigger로 거부하고 raw Data API grant는 없다. 이 원장은 projection을 직접 덮어쓰는 override가 아니라 canonical `stay_room_segments` revision을 설명하는 provenance다. vacant 보정은 기존 segment를 retire하고 필요할 때만 `[oldStart,effectiveAt)` successor를 남기며, 시작 경계 보정은 zero-length successor 없이 전체 retire한다.
+
 ## #194 Assignment-bound PIN entitlement (64번째 source migration)
 
 `20260918000000_assignment_pin_entitlement.sql`은 기존 63개 migration을 수정하지 않는 append-only

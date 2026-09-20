@@ -329,6 +329,48 @@ export function roomDatabaseError(
       "다른 객실 변경이 먼저 반영됐습니다.",
     ],
     [
+      "OCCUPANCY_CORRECTION_ALREADY_APPLIED",
+      409,
+      "OCCUPANCY_CORRECTION_ALREADY_APPLIED",
+      "이미 요청한 점유 상태가 반영되어 있습니다.",
+    ],
+    [
+      "OCCUPANCY_CORRECTION_ROOM_MISMATCH",
+      409,
+      "OCCUPANCY_CORRECTION_ROOM_MISMATCH",
+      "해당 시각의 투숙 객실과 요청 객실이 일치하지 않습니다.",
+    ],
+    [
+      "ROOM_OCCUPANCY_CONFLICT",
+      409,
+      "ROOM_OCCUPANCY_CONFLICT",
+      "해당 시간에는 다른 예약이 객실을 점유하고 있습니다.",
+    ],
+    [
+      "OCCUPANCY_CORRECTION_NOT_ALLOWED",
+      409,
+      "OCCUPANCY_CORRECTION_NOT_ALLOWED",
+      "현재 예약 상태에서는 점유 상태를 보정할 수 없습니다.",
+    ],
+    [
+      "INVALID_OCCUPANCY_CORRECTION",
+      400,
+      "INVALID_OCCUPANCY_CORRECTION",
+      "점유 보정 요청이 올바르지 않습니다.",
+    ],
+    [
+      "RESERVATION_NOT_FOUND",
+      404,
+      "RESERVATION_NOT_FOUND",
+      "예약을 찾을 수 없습니다.",
+    ],
+    [
+      "STAY_SEGMENT_CONTRACT_MISMATCH",
+      409,
+      "STAY_SEGMENT_CONTRACT_MISMATCH",
+      "예약의 투숙 구간 정보가 현재 상태와 일치하지 않습니다.",
+    ],
+    [
       "IDEMPOTENCY_KEY_REUSED",
       409,
       "IDEMPOTENCY_KEY_REUSED",
@@ -518,7 +560,7 @@ export function roomPathIds(path: string): {
   const patterns = [
     /^\/v1\/rooms\/([^/]+)\/operation-blocks\/([^/]+)\/release$/,
     /^\/v1\/rooms\/([^/]+)\/issues\/([^/]+)\/resolve$/,
-    /^\/v1\/rooms\/([^/]+)\/(?:master-data|operation-blocks|candles|issues|pin-sync-events)$/,
+    /^\/v1\/rooms\/([^/]+)\/(?:master-data|operation-blocks|occupancy-corrections|candles|issues|pin-sync-events)$/,
   ];
   const match = patterns[0].exec(path);
   if (match) {
@@ -939,6 +981,67 @@ export async function changeRoomMasterData(
   });
   if (error) throw roomDatabaseError(error);
   return getRoom(clients, actor, normalizedRoomId);
+}
+
+export async function correctRoomOccupancy(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+) {
+  requireRoomAdmin(actor);
+  const normalizedRoomId = uuidValue(roomId, "roomId");
+  const body = await readJsonBody(request);
+  assertOnlyFields(body, [
+    "reservationId",
+    "occupied",
+    "effectiveAt",
+    "expectedRoomVersion",
+    "reasonCode",
+  ]);
+  const reservationId = uuidValue(body.reservationId, "reservationId");
+  const occupied = booleanValue(body.occupied, "occupied");
+  const effectiveAt = optionalTimestamp(body, "effectiveAt", false);
+  if (!effectiveAt) validationError("effectiveAt이 필요합니다.");
+  const expectedRoomVersion = positiveInteger(
+    body.expectedRoomVersion,
+    "expectedRoomVersion",
+  );
+  const reasonCode = reasonCodeValue(body.reasonCode);
+  const fingerprint = {
+    roomId: normalizedRoomId,
+    reservationId,
+    occupied,
+    effectiveAt,
+    expectedRoomVersion,
+    reasonCode,
+  };
+  const { data, error } = await clients.admin.rpc("correct_room_occupancy", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: verifiedRequestSessionId(request),
+    p_room_id: normalizedRoomId,
+    p_reservation_id: reservationId,
+    p_occupied: occupied,
+    p_effective_at: effectiveAt,
+    p_expected_room_version: expectedRoomVersion,
+    p_reason_code: reasonCode,
+    p_idempotency_key: idempotencyKey(request),
+    p_request_hash: await requestHash(fingerprint),
+  });
+  if (error || !data) throw roomDatabaseError(error);
+  const row = data as Record<string, unknown>;
+  return {
+    correctionId: uuidValue(row.correction_id, "correctionId"),
+    roomId: uuidValue(row.room_id, "roomId"),
+    reservationId: uuidValue(row.reservation_id, "reservationId"),
+    occupied: booleanValue(row.occupied, "occupied"),
+    effectiveAt: responseTimestamp(row.effective_at, "effectiveAt"),
+    roomStateVersion: positiveInteger(
+      row.room_state_version,
+      "roomStateVersion",
+    ),
+    recordedAt: responseTimestamp(row.recorded_at, "recordedAt"),
+  };
 }
 
 async function mutateRoomOperation(

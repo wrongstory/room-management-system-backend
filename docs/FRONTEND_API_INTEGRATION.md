@@ -204,6 +204,7 @@ const idempotencyKey = crypto.randomUUID();
 | 객실 운영 차단 조회 | `GET /v1/rooms/{roomId}/operation-blocks?status=actionable` | 미해제 scheduled/active/expired 전체; 반환 ID와 roomStateVersion을 해제에 사용 |
 | 객실 운영 차단 | `POST /v1/rooms/{roomId}/operation-blocks` | 시작/종료 시각은 RFC 3339 offset, 생성 결과 ID는 서버 결정 |
 | 객실 운영 차단 해제 | `POST /v1/rooms/{roomId}/operation-blocks/{blockId}/release` | 삭제가 아닌 release 이력 append |
+| 객실 점유 보정 | `POST /v1/rooms/{roomId}/occupancy-corrections` | admin 전용; reservationId·occupied·effectiveAt·expectedRoomVersion·reasonCode와 Idempotency-Key 필수. 복합 표시 status를 덮지 않고 canonical stay segment 이력을 보정 |
 | 촛불 수량 기록 | `POST /v1/rooms/{roomId}/candles` | count 0 이상, physicallyVerified 기본 false |
 | 객실 이슈 조회 | `GET /v1/rooms/{roomId}/issues?status=open` | 미해결 이슈만; 반환 ID와 roomStateVersion을 해결에 사용 |
 | 객실 이슈 등록 | `POST /v1/rooms/{roomId}/issues` | description 연락처 입력 금지, raw 문구를 오류 로그에 남기지 않음 |
@@ -242,7 +243,7 @@ const idempotencyKey = crypto.randomUUID();
 
 카드·필터·집계의 대표 값은 서버의 `primaryDisplayStatus`를 사용한다. 우선순위는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY`다. 청소만으로 `BLOCKED`를 만들지 않고 `FUTURE`는 현재 readiness 대표 상태를 유지한다. 상세 설명에는 `blockingReasonCodes`와 `readinessReasonCodes`를 사용하되, 기존 `reasonCodes`도 호환 필드로 보존한다.
 
-이 projection은 저장된 단일 status가 아니다. 미래 예약과 planned checkout만으로 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `pinSyncStatus=unconfigured|mismatch`는 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건이 아니며, current check-in 시점에만 readiness 경고로 표시한다. 실제 체크인·PIN 접근 화면은 기존 #140 계약대로 `verified` 전까지 차단한다.
+이 projection은 저장된 단일 status가 아니다. `occupied`는 서버 평가 시각이 canonical stay segment의 `[startsAt,endsAt)` 안에 있을 때만 true이고, 종료 미정 end=null은 명시 종료 전까지 유지된다. `allocationBlocked`는 운영 차단·배정 차단 이슈·촛불·기준정보 오류 같은 객실 문제만 뜻하므로 점유나 청소만으로 true가 되지 않는다. `allocationReady`는 점유·청소·객실 문제와 current-check-in readiness 경고를 모두 통과할 때만 true다. 미래 예약과 planned checkout만으로 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `pinSyncStatus=unconfigured|mismatch`는 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건이 아니며, current check-in 시점에만 readiness 경고로 표시한다. 실제 체크인·PIN 접근 화면은 기존 #140 계약대로 `verified` 전까지 차단한다.
 
 객실 mutation은 최신 상세/목록의 `stateVersion`을 `expectedVersion` 또는 `expectedRoomVersion`으로 그대로 보낸다. `STALE_VERSION`이면 현재 객실을 다시 읽어 사용자 확인을 받고, 키를 바꿔 자동 덮어쓰지 않는다. 동일 payload의 통신 재시도에만 같은 Idempotency-Key를 사용한다. 수동 `PIN 동기화 상태 기록` 화면은 제거하고 bootstrap·prepare/confirm/rollback/reveal API만 사용한다. PIN 관련 목록은 `pinSyncStatus`와 `pinVersion`만 취급하며 `pin`, `rawPin`, `pinCode`, `doorCode`, `credential`, `providerSecret` 필드를 만들거나 analytics·오류 수집에 보내지 않는다.
 

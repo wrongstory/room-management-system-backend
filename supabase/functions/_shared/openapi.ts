@@ -4197,6 +4197,16 @@ export const openApiDocument = {
         roomEntityIdParameter("blockId", "해제할 운영 차단 ID"),
       ),
     },
+    "/v1/rooms/{roomId}/occupancy-corrections": {
+      post: roomMutationOperation(
+        "correctRoomOccupancy",
+        "객실 점유 상태 보정",
+        "RoomOccupancyCorrectionRequest",
+        "correction",
+        201,
+        "예약·투숙 segment의 현재 점유 경계를 관리자 보정 이력으로 append합니다. UI 대표 status를 덮어쓰지 않으며 reasonCode, effectiveAt, room CAS, 멱등 receipt와 감사를 보존합니다.",
+      ),
+    },
     "/v1/rooms/{roomId}/candles": {
       post: roomMutationOperation(
         "setRoomCandleCount",
@@ -9795,7 +9805,8 @@ export const openApiDocument = {
           },
           occupied: {
             type: "boolean",
-            description: "evaluatedAt 기준 현재 점유 여부",
+            description:
+              "evaluatedAt이 canonical non-retired stay segment의 [startsAt,endsAt) 안에 있는지 여부. null end는 명시 종료 전까지 점유입니다.",
           },
           cleaningRequired: {
             type: "boolean",
@@ -9816,12 +9827,12 @@ export const openApiDocument = {
           allocationBlocked: {
             type: "boolean",
             description:
-              "evaluatedAt 기준 하나 이상의 현재 고객 배정 차단 사유가 있는지 여부",
+              "운영 차단·배정 차단 이슈·촛불·기준정보 오류 같은 객실 문제 사유 존재 여부. 점유와 청소만으로 true가 되지 않습니다.",
           },
           allocationReady: {
             type: "boolean",
             description:
-              "evaluatedAt 기준 현재 고객 배정 준비 조건을 모두 만족하는지 여부",
+              "점유·청소·객실 문제와 current-check-in readiness 경고를 모두 통과했는지 여부",
           },
           reasonCodes: {
             type: "array",
@@ -9867,6 +9878,28 @@ export const openApiDocument = {
         additionalProperties: false,
         required: ["expectedRoomVersion", "reasonCode"],
         properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+        },
+      },
+      RoomOccupancyCorrectionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "reservationId",
+          "occupied",
+          "effectiveAt",
+          "expectedRoomVersion",
+          "reasonCode",
+        ],
+        properties: {
+          reservationId: { type: "string", format: "uuid" },
+          occupied: { type: "boolean" },
+          effectiveAt: {
+            type: "string",
+            format: "date-time",
+            description: "현재 또는 과거의 실제 점유 경계 시각",
+          },
           expectedRoomVersion: { type: "integer", minimum: 1 },
           reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
         },
@@ -10364,6 +10397,28 @@ export const openApiDocument = {
         properties: {
           entityId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomOccupancyCorrection: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "correctionId",
+          "roomId",
+          "reservationId",
+          "occupied",
+          "effectiveAt",
+          "roomStateVersion",
+          "recordedAt",
+        ],
+        properties: {
+          correctionId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          reservationId: { type: "string", format: "uuid" },
+          occupied: { type: "boolean" },
+          effectiveAt: { type: "string", format: "date-time" },
           roomStateVersion: { type: "integer", minimum: 1 },
           recordedAt: { type: "string", format: "date-time" },
         },
@@ -11472,13 +11527,15 @@ function roomMutationOperation(
   operationId: string,
   summary: string,
   requestSchema: string,
-  responseKey: "room" | "operation",
+  responseKey: "room" | "operation" | "correction",
   successStatus: 200 | 201,
   description: string,
   entityParameter?: Record<string, unknown>,
 ): Record<string, unknown> {
   const responseSchema = responseKey === "room"
     ? "#/components/schemas/RoomProjection"
+    : responseKey === "correction"
+    ? "#/components/schemas/RoomOccupancyCorrection"
     : "#/components/schemas/RoomOperationResult";
   return {
     tags: ["Rooms"],

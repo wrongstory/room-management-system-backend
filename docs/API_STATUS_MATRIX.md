@@ -99,6 +99,7 @@ production 최종 source/readback evidence: **2026-09-20 KST** (Issue #220, PR #
   - Issue #152에서 `notification-delivery` zero-byte 요청을 의도한 503 fail-closed로 보강했으며, provider invoke secret/credential 미활성 상태를 성공으로 표시하지 않는다.
   - version 증가는 source 변경 외 Function Secret 환경 revision도 포함하므로 source identity로 사용하지 않는다.
 - production OpenAPI: **120 paths / 130 operations**, version `0.4.0`
+- Issue #228 source 후보는 기존 production 73개 migration을 수정하지 않는 **74 migrations / 121 paths / 131 operations**다. 관리자 전용 occupancy correction과 canonical segment 기반 점유, 객실 문제 전용 `allocationBlocked`, 전체 readiness인 `allocationReady`를 포함하며 production DB/Edge에는 아직 적용하지 않았다.
 - production `/health`, `/docs`, `/openapi.json` HTTP 200과 OpenAPI readback은 확인됐다. 전체 hosted role/domain positive mutation smoke는 안전한 fixture 부재로 미완료이며, Issue #112/#137의 provider/Google target·credential·Vault/Cron/실기기 smoke도 별도 activation gate다.
 - GitHub Pages portal은 run `35481531782`에서 `main@80f9350...`의 fail-closed build를 사용해 production Edge와 0.4.0 / 120 / 130 parity를 확인했다. `portal-manifest.json`의 SHA-256은 공개 `openapi.json` artifact와 일치한다. build 시각 metadata 때문에 raw production JSON과 artifact byte hash가 같다는 뜻은 아니다.
 - production `/docs`는 HTTP 200이지만 hosted 기본 domain의 HTML 렌더링 제약 때문에
