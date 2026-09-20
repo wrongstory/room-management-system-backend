@@ -4,7 +4,7 @@
 
 검토 기준:
 
-- 이 문서의 production release 기준은 `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7` — 73 migrations / OpenAPI 120 paths / 130 operations이다. Issue #228 source 후보는 기존 73개를 수정하지 않는 74번째 migration과 OpenAPI 121 paths / 131 operations이며 아직 production 사용 가능 상태가 아니다.
+- production release 기준은 73 migrations / OpenAPI 120 paths / 130 operations이고, Issue #229가 통합된 source 기준은 `dev@2d13610f34de600299264a88af3e4897741e2c3b` — 74 migrations / OpenAPI 120 paths / 130 operations이다. Issue #228 source 후보는 기존 74개를 수정하지 않는 75번째 migration과 OpenAPI 121 paths / 131 operations이며 아직 production 사용 가능 상태가 아니다.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
 - 백엔드 저장소와 직접 검증한 production 배포 source는 `main@80f935016d5581d500136fba29c206f6ee797bc0`이다. production은 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations이며 공개 Health/OpenAPI smoke를 통과했다.
 - 프런트엔드 정본 저장소: `wrongstory/room-management-system`

@@ -143,7 +143,7 @@ const photoSlotContractV8MigrationUrl = new URL(
   import.meta.url
 );
 const roomStatusAdminCorrectionMigrationUrl = new URL(
-  '../supabase/migrations/20260920091807_room_status_admin_correction.sql',
+  '../supabase/migrations/20260920143711_room_status_admin_correction.sql',
   import.meta.url
 );
 

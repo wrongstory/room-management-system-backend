@@ -61,7 +61,7 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 
 ### #228 점유·객실 문제·배정 준비 분리
 
-74번째 append-only `room_status_admin_correction`은 `occupied`를 canonical non-retired stay segment의 서버 snapshot 반개구간 `[startsAt, endsAt)` 포함 여부로만 계산한다. 시작 직전은 비점유, 시작 시각은 점유, 종료 시각은 비점유이며 null end인 장기투숙 segment는 실제 종료/보정 전까지 계속 점유다. 조기 실제 checkout과 관리자 vacant 보정은 segment를 닫으므로 즉시 projection에서 빠진다.
+75번째 append-only `room_status_admin_correction`은 #229의 74번째 `availability_any_day_submission` 뒤에 적용되며, `occupied`를 canonical non-retired stay segment의 서버 snapshot 반개구간 `[startsAt, endsAt)` 포함 여부로만 계산한다. 시작 직전은 비점유, 시작 시각은 점유, 종료 시각은 비점유이며 null end인 장기투숙 segment는 실제 종료/보정 전까지 계속 점유다. 조기 실제 checkout과 관리자 vacant 보정은 segment를 닫으므로 즉시 projection에서 빠진다.
 
 `allocationBlocked`는 운영 차단·배정 차단 이슈·촛불·기준정보 오류처럼 객실 문제 축만 반영한다. 점유와 청소 의무는 단독으로 blocked를 만들지 않는다. `allocationReady`는 점유가 없고 청소·PIN/current-check-in 경고를 포함한 readiness 사유와 객실 문제 사유가 모두 없을 때만 true다.
 

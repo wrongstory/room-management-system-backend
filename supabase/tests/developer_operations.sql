@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'availability_any_day_submission'
+    'room_status_admin_correction'
   ) ->> 'currentMigration',
-  'availability_any_day_submission',
+  'room_status_admin_correction',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'availability_any_day_submission'
+    'room_status_admin_correction'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'availability_any_day_submission';
+where name = 'room_status_admin_correction';
 
 delete from supabase_migrations.schema_migrations
-where name = 'availability_any_day_submission';
+where name = 'room_status_admin_correction';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'availability_any_day_submission'
+    'room_status_admin_correction'
   ) ->> 'currentMigration',
-  'generated_room_pin_confirmation',
-  'database status exposes migration 73 when migration 74 is absent'
+  'availability_any_day_submission',
+  'database status exposes migration 74 when migration 75 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'availability_any_day_submission'
+    'room_status_admin_correction'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 73 behind source migration 74'
+  'database status reports migration 74 behind source migration 75'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)
