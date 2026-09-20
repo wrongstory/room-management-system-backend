@@ -653,6 +653,52 @@ describe('application', () => {
     await developerApp.close();
   });
 
+  it('accepts a version-zero PIN edit through the no-store prepare route', async () => {
+    const appServices = services();
+    appServices.rooms.preparePinChange = vi.fn(async () => ({
+      leaseId: '40000000-0000-4000-8000-000000000001',
+      roomId: '11111111-1111-4111-8111-111111111111',
+      currentPinVersion: 0,
+      proposedPinVersion: 1,
+      status: 'prepared',
+      expiresAt: '2026-09-21T00:05:00.000Z'
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/pin-changes/prepare',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'room-pin-initial-test-0001'
+      },
+      payload: {
+        pinDigits: '0012',
+        expectedPinVersion: 0,
+        reasonCode: 'ADMIN_PHYSICAL_CHANGE'
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json().change).toMatchObject({
+      currentPinVersion: 0,
+      proposedPinVersion: 1,
+      status: 'prepared'
+    });
+    expect(JSON.stringify(response.json())).not.toContain('0012');
+    expect(appServices.rooms.preparePinChange).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      {
+        roomId: '11111111-1111-4111-8111-111111111111',
+        pinDigits: '0012',
+        expectedPinVersion: 0,
+        reasonCode: 'ADMIN_PHYSICAL_CHANGE',
+        idempotencyKey: 'room-pin-initial-test-0001'
+      }
+    );
+    await app.close();
+  });
+
   it('returns generated PIN material only in a no-store bootstrap response', async () => {
     const appServices = services();
     const app = await buildApp({ env, services: appServices, logger: false });

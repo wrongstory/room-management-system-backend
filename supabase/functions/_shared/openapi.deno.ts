@@ -1572,6 +1572,7 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
       "ROOM_NUMBER_CHANGED",
       "ROOM_PIN_REISSUE_REQUIRED",
       "ROOM_PIN_MISMATCH_UNRESOLVED",
+      "INVALID_PIN_CHANGE_REASON",
       "PIN_CHANGE_IN_PROGRESS_REQUIRED",
       "PIN_CHANGE_IN_PROGRESS",
       "PIN_CHANGE_LEASE_EXPIRED",

@@ -36,7 +36,7 @@ Issue #236의 로컬 source candidate는 OpenAPI `0.5.0` 126 paths / 136 operati
 
 ### #131/#140/#169 객실 PIN source 계약
 
-production OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+production OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. 미등록 객실의 admin 수정 요청이 `expectedPinVersion=0`, `reasonCode=ADMIN_PHYSICAL_CHANGE`를 보내도 서버가 최초 등록 사유로 정규화하므로 client가 PIN 존재 여부와 버튼 이름을 별도 command로 분기할 필요는 없다. 명시적 `ADMIN_INITIAL_PIN`도 계속 유효하다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
 
 Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 서버가 batch-unique 4자리 값을 생성한다. 응답의 `generatedPins`를 객실별로 표시하고 현장 도어락 적용 후 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 해당 `pinVersion`을 보낸다. 확인 성공 전에는 mismatch 경고와 체크인 차단을 유지하고 메이드에게 표시하지 않는다. 두 path는 production OpenAPI에 반영됐지만 실제 운영 bootstrap·물리 확인 실행은 별도 승인 전까지 시작하지 않는다.
 
