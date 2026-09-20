@@ -55,7 +55,8 @@
 
 1. production migration history·schema·backup/recovery evidence read-only 재대조
 2. manifest의 pending 57~73을 순서대로 적용하고 중간 실패 시 후속 중단
-3. 병합된 `main` exact SHA에서 `api` 및 승인된 worker bundle만 배포
+3. 병합된 `main` exact SHA에서 `api` Function만 재배포
+   - `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync`는 이번 release에서 source diff가 없으므로 재배포하지 않고 현재 production bundle을 유지
 4. health, OpenAPI 0.4.0 / 120 / 130, role/read-only smoke
 5. 승인된 안전 fixture로 예약·객실 상태·PIN lifecycle smoke; fixture가 없으면 SKIPPED_WITH_REASON로 남김
 6. hosted provider·Google·Cron·Web Push는 각 Issue의 자격증명·대상·주기 승인 후 별도 활성화

@@ -1187,7 +1187,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] 생성 직후 mismatch/no Sheet, admin 30초 no-store reveal, 현장 확인 후 verified/Sheet outbox 계약 추가
 - [x] `POST /v1/rooms/{roomId}/pin/generated/confirm` 추가; 최신 dev 통합 candidate는 73 migrations / 120 paths / 130 operations
 - [x] 최초 #169 exact source에서 application 409, Edge 244, DB 47 files / 2,692 assertions, 전체 concurrency, fresh 57 migrations reset·build·typecheck·lint·secret scan PASS
-- [ ] 최신 dev 통합 candidate의 fresh 73 migrations·전체 application/migration·동시성 재검증
+- [x] `release/v0.4.0` 통합 candidate의 fresh 73 migrations·production 56→73 누적 upgrade·전체 application/Edge/Python/DB·동시성 로컬 재검증 PASS
 - [x] Fastify/Edge/OpenAPI 및 frontend handoff 계약 정합화; legacy `pin-sync-events` deprecated
 - [x] 최신 `dev` 병합 후 fresh local DB reset, 43 SQL files / 2,536 assertions, 전체 concurrency, DB lint, Edge 226 tests·bundle gate PASS
 - [x] PR #141 exact-head required `application` / `migration` PASS와 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578` 병합
