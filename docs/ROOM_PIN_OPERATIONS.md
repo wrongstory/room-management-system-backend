@@ -2,9 +2,9 @@
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C, Issue #140 초기화와 Issue #169 자동 생성·현장 확인 계약을 설명한다. 현재 production source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`, 전체 56 migrations / 109 paths / 117 operations다. 최신 `dev`는 72 migrations / 119 paths / 129 operations이며, #169 통합 후보는 기존 migration을 수정하지 않고 73번째 `generated_room_pin_confirmation`과 120 paths / 130 operations 계약을 추가한다. PIN source와 `room-pin-sheet-sync` bundle은 production에 반영됐지만 target mapping·Google ACL/Secrets/Cron/hosted activation은 별도 pending이다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C, Issue #140 초기화와 Issue #169 자동 생성·현장 확인 계약을 설명한다. 현재 production source는 `main@80f935016d5581d500136fba29c206f6ee797bc0`, 전체 73 migrations / OpenAPI 0.4.0 120 paths / 130 operations이며 `api` ACTIVE v17이다. 73번째 `generated_room_pin_confirmation`까지 production DB/API에 반영됐다. PIN source와 `room-pin-sheet-sync` bundle은 존재하지만 실제 PIN bootstrap·물리 확인, target mapping·Google ACL/Secrets/Cron/hosted activation은 별도 pending이다.
 
-Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다. Issue #194의 64번째 append-only migration은 통보 기반 durable assignment entitlement와 최대 30초 reveal lease를 분리한 source/dev 계약이며 production 적용을 뜻하지 않는다.
+Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다. Issue #194의 64번째 append-only migration은 통보 기반 durable assignment entitlement와 최대 30초 reveal lease를 분리하며 production DB/API에 반영됐다. 실제 hosted PIN mutation은 아직 별도다.
 
 ## 초기 PIN bootstrap과 예약 계약
 

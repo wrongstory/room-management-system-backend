@@ -1,6 +1,6 @@
 # 프론트엔드·Codex API 연동 가이드
 
-이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다.
+이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 바로 실행할 작업 범위와 화면 검증 순서는 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)를 사용한다.
 
 2026-09-20 대조 기준은 프런트 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`, 백엔드 production source `main@80f935016d5581d500136fba29c206f6ee797bc0`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. production source 제공과 hosted provider·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
 
@@ -326,7 +326,7 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] duration 없는 게시 template으로 예약 생성이 성공하고 planned checkout target이 생성되는 흐름을 검증한다.
 - [ ] 같은 객실 동시 시작은 정확히 한 요청만 성공하고, 미해결 고객 미퇴실 사건 중에는 시작·완료·제출이 성공으로 표시되지 않는지 검증한다.
 - [x] #165 독립 QA P0/P1=0 → `main` 병합 → production 56번째 migration → 승인 `main` exact source의 `api` 배포 → production OpenAPI nullable 의미 확인 → 네 template 게시 완료.
-- [x] OpenAPI 109 paths / 117 operations, 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인.
+- [x] 당시 v0.3.0 OpenAPI 109 paths / 117 operations에서 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인. 현재 정본은 v0.4.0 120 paths / 130 operations다.
 - [ ] 안전한 운영 fixture에서 예약 생성·동일 요청 replay·planned checkout target/snapshot을 확인. 현재는 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
@@ -341,7 +341,7 @@ developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 
 
 ## 8. 프론트 Codex에 전달할 작업 문구
 
-아래 내용을 프론트 작업 요청에 함께 제공하면 된다.
+짧은 작업 요청에는 아래 원칙을 붙이고, 실제 구현 작업에는 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)의 전체 프롬프트를 그대로 전달한다.
 
 ```text
 백엔드 HTTP 계약은 제공된 OpenAPI 3.1 JSON을 정본으로 사용한다.
@@ -352,6 +352,8 @@ mutation마다 Idempotency-Key를 만들고 같은 payload 재시도에만 같�
 오류 분기는 한국어 message가 아니라 HTTP status와 error.code를 사용한다.
 token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·테스트 캡처에 넣지 않는다.
 구현 후 생성 타입 기준 typecheck와 역할별 401/403/409/429 UI 처리를 검증한다.
+객실 현재 상태는 primaryDisplayStatus를 사용하고 미래 기간 예약 가능 여부는 bookability preview의 intervalBookable을 사용한다.
+미래 예약을 현재 cleaningRequired로 바꾸거나 현재 allocationReady를 미래 모든 날짜의 예약 가능 여부로 재사용하지 않는다.
 ```
 
 ## 9. 현재 범위 제한
@@ -366,4 +368,4 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 - list/entries/start/replay 응답은 UTF-8 JSON 128 KiB 상한을 갖는다. `PAYROLL_CURSOR_INVALID`, `PAYROLL_CURSOR_NOT_CONFIGURED`, `PAYROLL_RESPONSE_TOO_LARGE`는 message가 아니라 code로 분기한다.
 - 이 계약은 production OpenAPI와 `api` bundle에 반영됐다. 실제 역할별 hosted read/mutation smoke가 없는 경로는 배포 여부와 별도로 표시한다.
 
-현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 109 paths / 117 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.
+현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 OpenAPI 0.4.0, 120 paths / 130 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.

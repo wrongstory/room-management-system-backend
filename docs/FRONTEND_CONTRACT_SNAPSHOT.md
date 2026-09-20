@@ -10,8 +10,11 @@
 | 프런트 현재 원격 `main` | `afeb0898879bf8d381ee2e218938dc3160fd6ac0` | 관찰 대상. 위 snapshot의 정책을 자동 대체하지 않는다. |
 | 백엔드 release source `dev` | `9c197ad12ed5cb45db0b451f69f9f91053b139d7` | v0.4.0 기능 통합 기준. 73 migrations / OpenAPI 120 paths / 130 operations이며 #169까지 포함한다. |
 | 백엔드 저장소·production `main` | `80f935016d5581d500136fba29c206f6ee797bc0` | PR #221로 승격되고 production DB/API와 Pages에 배포된 exact source. 보호 API 역할별 read 및 mutation smoke는 별도다. |
+| 백엔드 현재 문서 정본 `dev` | `b2419bba728c9902f8027d1e304b98fb655d2a01` | PR #223으로 production 결과와 release gate를 역반영한 문서 기준. 기능 release source와 구분한다. |
 
 프런트 snapshot의 기능을 현재 원격 `main` 배포 상태로 추정하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.
+
+프런트 구현의 실행 순서·금지사항·사용자 확인 체크리스트는 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)를 사용한다. endpoint와 schema는 계속 production OpenAPI가 최종 정본이다.
 
 ## 프런트 문서 분류
 
@@ -91,7 +94,7 @@ Issue #9 Stage 1을 포함한 nullable retention metadata와 후속 계약은 pr
 | 알림·Web Push | 권한/PWA shell만 사용 | 동일 | source 제공 | hosted provider 활성화와 실제 소비는 별도 |
 | 주급·컴플레인 | 데모 화면 | 동일 | 제공 | 연동 대기 |
 | PIN·Sheets | 신규 PIN API 연결 | 통보 기반 entitlement와 30초 reveal 분리 | #194 및 #169 production OpenAPI 제공 | hosted provider·Sheets/Cron 활성화와 실제 bootstrap/reveal mutation은 별도 |
-| 검수 대기열 pagination | 미소비 | 미소비 | PR #176 후보 | 병합 뒤 generated client 갱신 대상 |
+| 검수 대기열 pagination | 미소비 | bounded 목록·상세 | production OpenAPI 제공 | generated client를 갱신하고 실제 화면 소비 여부를 프런트 PR에서 기록 |
 
 프런트 snapshot의 `scripts/check-api-integration.mjs`는 운영 OpenAPI 계약면을 검사한다. 이 수치는 실제 UI 호출 수가 아니다. 현재 production 계약은 OpenAPI 0.4.0 / 120 paths / 130 operations이며 literal request와 generated contract를 후속 PR마다 함께 대조한다.
 
