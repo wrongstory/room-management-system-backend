@@ -4373,7 +4373,7 @@ export const openApiDocument = {
         operationId: "prepareRoomPinChange",
         summary: "물리 도어락 PIN 변경 준비",
         description:
-          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 모든 PIN reveal이 차단되지만 예약 등록은 차단하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 모든 PIN reveal이 차단되지만 예약 등록은 차단하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter(), idempotencyHeader],
@@ -6212,6 +6212,7 @@ export const openApiDocument = {
           "ROOM_NUMBER_CHANGED",
           "ROOM_PIN_REISSUE_REQUIRED",
           "ROOM_PIN_MISMATCH_UNRESOLVED",
+          "INVALID_PIN_CHANGE_REASON",
           "PIN_CHANGE_IN_PROGRESS_REQUIRED",
           "PIN_CHANGE_IN_PROGRESS",
           "PIN_CHANGE_LEASE_EXPIRED",
@@ -10187,6 +10188,8 @@ export const openApiDocument = {
               "MAID_CLEANING_CHANGE",
               "ACTUAL_PIN_REENTRY",
             ],
+            description:
+              "현재 PIN version 0에서 ADMIN_PHYSICAL_CHANGE는 서버가 ADMIN_INITIAL_PIN으로 정규화합니다. 그 밖의 사유와 maid/re-entry 계약은 그대로 검증합니다.",
           },
           assignmentId: {
             type: "string",
