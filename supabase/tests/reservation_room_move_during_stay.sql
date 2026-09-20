@@ -257,7 +257,9 @@ begin
     p_reservation_id,source_room.id,v_check_in_at,v_check_out_at,2,null,source_room.state_version,
     p_key||'-create',p_hash);
   if p_checkout_soon then
-    v_check_out_at:=date_trunc('minute',clock_timestamp())+interval '1 minute';
+    -- Keep the fixture near checkout while leaving enough room for setup at a
+    -- minute boundary before the move preview validates effectiveAt.
+    v_check_out_at:=date_trunc('minute',clock_timestamp())+interval '2 minutes';
     perform set_config('app.reservation_segment_writer_mode','schedule_change_v1',true);
     update public.reservations
     set check_out_at=v_check_out_at,updated_at=clock_timestamp()

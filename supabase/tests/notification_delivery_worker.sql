@@ -163,8 +163,11 @@ select lives_ok($$select public.settle_notification_delivery((select id from ret
   'same retryable settlement input replays idempotently');
 select throws_ok($$select public.settle_notification_delivery((select id from retry_id),1,repeat('6',64),'retryable','NETWORK_ERROR',60)$$,
   '23505','NOTIFICATION_DELIVERY_SETTLE_CONFLICT','different retry-after cannot reuse an attempt settlement');
-select ok((select next_attempt_at between updated_at+interval '30 seconds' and updated_at+interval '45 seconds'
-  from private.notification_delivery_targets where id=(select id from retry_id)),'first retry uses 30 seconds plus deterministic 0..15 second jitter');
+select is((select ceil(extract(epoch from (next_attempt_at-updated_at)))::integer
+  from private.notification_delivery_targets where id=(select id from retry_id)),
+  (select 30+(get_byte(extensions.digest(convert_to(id::text||':'||lease_version::text,'UTF8'),'sha256'),0)%16)
+  from private.notification_delivery_targets where id=(select id from retry_id)),
+  'first retry uses 30 seconds plus deterministic 0..15 second jitter');
 select set_config('app.notification_delivery_writer_mode','typed_v1',true);
 update private.notification_delivery_targets set next_attempt_at=clock_timestamp()-interval '1 second' where id=(select id from retry_id);
 select set_config('app.notification_delivery_writer_mode','',true);

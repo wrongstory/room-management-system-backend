@@ -40,7 +40,7 @@ erDiagram
   PROFILES ||--o| MAID_PROFILES : "메이드일 때만"
   PROFILES ||--o{ AVAILABILITY_VERSIONS : "주차별 제출 버전"
   AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_DAYS : "월~일 선택"
-  AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_CHANGE_REQUESTS : "마감 후 변경 요청"
+  AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_CHANGE_REQUESTS : "승인형 변경 요청"
   PROFILES ||--o{ AVAILABILITY_CHANGE_REQUESTS : "관리자 처리"
   PROFILES ||--o{ PASSWORD_CHANGE_COMMANDS : "응답 유실 복구 receipt"
 
@@ -135,8 +135,9 @@ erDiagram
 - 활성 메이드만 근무 가능일을 제출할 수 있다.
 - `(maid_profile_id, week_start, version)`은 유일하고, 주차별 현재 제출 버전은 한 건이다.
 - version은 7개 날짜 row를 명시적으로 가지며, 새 제출·승인 version이 생겨도 이전 version과 날짜는 삭제하지 않는다.
-- 일요일 12:00–23:59 KST의 일반 제출은 `expectedVersion` CAS와 idempotency key로 직렬화한다.
-- 마감 뒤 변경은 pending 요청을 만들고 활성 관리자의 승인 시에만 새 current version으로 전환한다.
+- 일요일은 다음 주 계획의 주 제출일이지만, KST 기준 현재 주 또는 다음 주는 어느 요일이든 `expectedVersion` CAS와 idempotency key로 직접 제출·변경한다.
+- 현재 주의 지난 날짜는 기존 current version의 `available=true`만 보존할 수 있고 새로 true로 소급 변경할 수 없다.
+- 승인형 변경 요청은 pending 요청과 관리자 승인/반려 이력을 보존하는 별도 호환 흐름이다.
 - 메이드 후보 목록은 `활성 계정 + 활성 maid 역할 + 해당 날짜 available`을 모두 만족해야 한다.
 
 ## 4. 객실·예약·운영

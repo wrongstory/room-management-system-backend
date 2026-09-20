@@ -121,7 +121,7 @@ function assertRowsPreserved(before, after, table) {
   for (const hash of after) remaining.set(hash, (remaining.get(hash) ?? 0) + 1);
   for (const hash of before) {
     const count = remaining.get(hash) ?? 0;
-    assert(count > 0, `migration 57 -> 74 changed or removed an existing ${table} row`);
+    assert(count > 0, `migration 57 -> 75 changed or removed an existing ${table} row`);
     remaining.set(hash, count - 1);
   }
 }
@@ -139,7 +139,7 @@ function assertHistory(actual, expected, label) {
 let passed = false;
 try {
   const expectedMigrations = migrationFiles();
-  assert(expectedMigrations.length === 74, "release candidate must contain exactly 74 migrations");
+    assert(expectedMigrations.length === 75, "release candidate must contain exactly 75 migrations");
   assert(
     expectedMigrations[55]?.version === baselineVersion &&
       expectedMigrations[55]?.name === "cleaning_template_duration_optional",
@@ -147,8 +147,8 @@ try {
   );
   assert(
     expectedMigrations.at(-1)?.version === finalVersion &&
-      expectedMigrations.at(-1)?.name === "developer_room_catalog_capacity",
-    "migration 74 must be developer_room_catalog_capacity",
+        expectedMigrations.at(-1)?.name === "developer_room_catalog_capacity",
+      "migration 75 must be developer_room_catalog_capacity",
   );
 
   reset(baselineVersion);
@@ -190,7 +190,7 @@ try {
 
   passed = true;
   process.stdout.write(
-    `production-baseline 56 -> 74 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
+      `production-baseline 56 -> 75 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
   );
 } finally {
   try {

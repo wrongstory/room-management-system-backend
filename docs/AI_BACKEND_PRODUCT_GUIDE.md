@@ -7,7 +7,7 @@
 - 이 문서 갱신의 release source 기준: `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7` — 73 migrations / OpenAPI 120 paths / 130 operations.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
 - 백엔드 저장소와 직접 검증한 production 배포 source는 `main@80f935016d5581d500136fba29c206f6ee797bc0`이다. production은 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations이며 공개 Health/OpenAPI smoke를 통과했다.
-- Issue #236 작업 브랜치의 source candidate는 기존 production을 변경하지 않은 74번째 append-only migration과 OpenAPI `0.5.0` 126 paths / 136 operations다. 이는 아직 `dev` 병합·production 배포·운영 데이터 변경을 뜻하지 않는다.
+- Issue #236 작업 브랜치의 source candidate는 최신 `dev`의 74개 migration을 보존한 75번째 append-only migration과 OpenAPI `0.5.0` 126 paths / 136 operations다. 이는 아직 `dev` 병합·production 배포·운영 데이터 변경을 뜻하지 않는다.
 - 프런트엔드 정본 저장소: `wrongstory/room-management-system`
 - 프런트엔드 제품·운영 연결 snapshot: `dev@165fed2d62a763d64ac62539e1475c1b3e42868f` (`기능: 운영 API 연결을 완성하라`).
 - 프런트엔드 현재 원격 `main`: `afeb0898879bf8d381ee2e218938dc3160fd6ac0`. 별도 영향 대조 전에는 위 snapshot의 후속 정본으로 자동 승격하지 않는다.
@@ -270,8 +270,9 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 ### `[확정]` 현재 정책
 
 - 과거의 공개 일감과 메이드 선점/claim 모델은 폐기됐다.
-- 메이드는 일요일 12:00–23:59 KST에 다음 월요일–일요일의 가능일을 version으로 제출한다.
-- 마감 뒤 수정은 원본을 덮지 않고 변경 요청과 승인/반려 이력으로 남긴다.
+- 일요일은 다음 주 계획의 주 제출일이지만, 메이드는 어느 요일이든 KST 기준 현재 주 또는 다음 주의 가능일을 직접 version으로 제출·변경할 수 있다.
+- 현재 주의 지난 날짜는 기존 current version에서 이미 가능했던 값을 보존할 수 있지만, 불가능·미제출 날짜를 `available=true`로 소급 변경할 수 없다. 모든 재제출은 원본을 덮지 않고 새 immutable version을 만든다.
+- 관리자 승인형 변경 요청과 승인/반려 이력은 별도 호환 흐름으로 유지한다.
 - 관리자는 가능 메이드만 후보로 오늘/내일 청소를 배정한다.
 - 관리자가 메이드별 작업 순서 1–N을 정하고 저장·통보한다.
 - **[확정 — 2026-09-08 #4 A안]** 메이드는 본인에게 실제 통보된 assignment revision만 조회한다. 과거 superseded/종료 revision도 본인에게 실제 통보됐으면 history에 포함한다. 미통보 draft, 다른 maid의 배정, 자신에게 한 번도 통보되지 않은 revision은 금지한다. 과거 조회 권한은 현재 target 일정·새 담당·새 revision 조회나 수행 권한을 뜻하지 않는다.
@@ -713,7 +714,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
 - #46은 기존 46 migrations를 수정하지 않은 47번째 append-only private password-change receipt와 password-specific shadow version으로 source/dev에 통합됐다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. release/main·production 승격은 별도 gate다.
 - Issue #220/PR #221 후속으로 `main@80f935016d5581d500136fba29c206f6ee797bc0`, production 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations와 기존 5개 Edge bundle 구성이 반영됐다. 이번 release에서는 `api`만 재배포했고 다른 네 Worker 버전은 유지했다. GitHub Pages도 workflow run `35481531782`에서 같은 production OpenAPI를 다시 고정해 120/130 parity와 artifact hash 일치를 확인했다. 다만 tag/GitHub Release, 예약·PIN success mutation, Issue #112의 provider invoke secret·positive Web Push/heartbeat, Issue #137의 hosted Google target·서비스 계정·ACL·full resync/Cron smoke는 아직 완료 증거가 없다. source·bundle 배포와 운영 데이터/provider 활성화를 같은 완료 상태로 표시하지 않는다.
-- Issue #236 source candidate는 74번째 `developer_room_catalog_capacity` migration으로 developer 전용 안전 카탈로그, 객실 유형 인원 preview/commit, 객실 추가, 객실 비활성화 preview/commit과 예약 인원 상한 재검증을 추가한다. 기존 인원 값과 기존 이력은 보존하며 OpenAPI 후보는 `0.5.0` 126 paths / 136 operations다. 아직 `dev`/`main` 병합, production migration/API 배포, hosted 역할 smoke는 완료되지 않았다.
+- Issue #236 source candidate는 75번째 `developer_room_catalog_capacity` migration으로 developer 전용 안전 카탈로그, 객실 유형 인원 preview/commit, 객실 추가, 객실 비활성화 preview/commit과 예약 인원 상한 재검증을 추가한다. 기존 인원 값과 기존 이력은 보존하며 OpenAPI 후보는 `0.5.0` 126 paths / 136 operations다. 아직 `dev`/`main` 병합, production migration/API 배포, hosted 역할 smoke는 완료되지 않았다.
 - #46, #128, #131, #136, #137, #140, #133의 source는 `dev`와 v0.3.0 production source에 반영됐다. #137의 API와 `room-pin-sheet-sync` bundle도 배포됐지만 hosted target/서비스 계정/ACL/Secrets/Cron/positive smoke는 미완료다. #156/#165 checkout template API와 선택형 duration 계약은 56번째 migration 및 `api` v16으로 production에 반영됐다. `standard`, `premium`, `oceanPremium`, `oceanFamily`의 checkout template은 각각 v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes`는 모두 `null`이다. 이 게시 완료는 예약 success smoke의 대체가 아니며 안전한 fixture 부재로 해당 mutation은 명시적으로 SKIPPED 상태다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
@@ -742,7 +743,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 ### Issue #6 `v0.2.0` source release 범위
 
-- 가능일 제출은 일요일 12:00–23:59 KST와 다음 월요일 `week_start`를 DB command에서 검증한다.
+- 당시 가능일 제출은 일요일 12:00–23:59 KST와 다음 월요일 `week_start`만 허용했다. 이 시간창은 Issue #229의 현재·다음 주 상시 직접 제출 계약으로 대체됐다.
 - 메이드·주차별 current version은 `expectedVersion` CAS와 advisory lock으로 직렬화하며 과거 version과 7개 날짜 row를 삭제하지 않는다.
 - 마감 뒤에는 pending 변경 요청을 만들고 활성 관리자의 승인 시에만 새 current version을 추가한다. 반려도 결정·사유·행위자·시각을 보존한다.
 - idempotency receipt는 `(actor_id, command_type, idempotency_key)` 범위다. 같은 범위의 같은 payload는 기존 결과를 반환하고 다른 payload 재사용은 거절하며, 다른 actor 또는 command의 같은 raw key는 독립 요청이다.

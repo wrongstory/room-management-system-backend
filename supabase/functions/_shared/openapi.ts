@@ -481,7 +481,7 @@ export const openApiDocument = {
     {
       name: "Availability",
       description:
-        "메이드의 다음 주 가능일 제출·변경 요청과 관리자의 승인·후보 조회 API입니다. 제출창은 일요일 12:00–23:59 KST이며 서버가 DB 시각으로 판정합니다.",
+        "메이드의 현재·다음 주 가능일 직접 제출·변경과 관리자의 변경 요청 승인·후보 조회 API입니다. 일요일은 주간 계획의 주 제출일이지만 제출 자체는 어느 요일이든 가능합니다.",
     },
     {
       name: "Work History",
@@ -1792,9 +1792,9 @@ export const openApiDocument = {
       post: {
         tags: ["Availability"],
         operationId: "submitAvailability",
-        summary: "다음 주 가능일 제출",
+        summary: "현재·다음 주 가능일 제출 또는 변경",
         description:
-          "비밀번호 변경을 완료한 active maid만 일요일 12:00–23:59 KST에 다음 월요일 주차를 제출할 수 있습니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
+          "비밀번호 변경을 완료한 active maid가 KST 기준 현재 주 또는 다음 주를 어느 요일이든 직접 제출·변경합니다. 현재 주의 지난 날짜는 기존 version에서 이미 available이었던 값만 보존할 수 있고 새로 available로 소급 변경할 수 없습니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [idempotencyHeader],
@@ -1822,9 +1822,9 @@ export const openApiDocument = {
       post: {
         tags: ["Availability"],
         operationId: "requestAvailabilityChange",
-        summary: "마감 후 가능일 변경 요청",
+        summary: "관리자 승인형 가능일 변경 요청",
         description:
-          "비밀번호 변경을 완료한 active maid가 제출 마감 후 현재 version의 변경을 요청합니다. 기존 가능일 원장은 보존되고 pending 요청이 append되며, 같은 주차에는 pending 요청 하나만 허용됩니다.",
+          "비밀번호 변경을 완료한 active maid가 대상 주 시작 후 현재 version의 관리자 승인형 변경을 요청합니다. 기존 가능일 원장은 보존되고 pending 요청이 append되며, 같은 주차에는 pending 요청 하나만 허용됩니다. 일반적인 현재·다음 주 수정은 submissions endpoint의 direct version 재제출을 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [idempotencyHeader],
@@ -6272,7 +6272,8 @@ export const openApiDocument = {
           "INVALID_ASSIGNMENT_DURATION_POLICY",
           "ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT",
           "ACTIVE_ADMIN_REQUIRED",
-          "OUTSIDE_AVAILABILITY_WINDOW",
+          "AVAILABILITY_WEEK_OUT_OF_RANGE",
+          "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
           "CHANGE_REQUEST_BEFORE_DEADLINE",
           "STALE_VERSION",
           "PENDING_CHANGE_REQUEST_EXISTS",
@@ -8951,7 +8952,7 @@ export const openApiDocument = {
           weekStart: {
             type: "string",
             format: "date",
-            description: "다음 주 월요일",
+            description: "KST 기준 현재 주 또는 다음 주의 월요일",
           },
           availableDates: {
             type: "array",

@@ -7,7 +7,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationDirectory = resolve(projectRoot, "supabase", "migrations");
 const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.5.0.json");
 const migrationFilePattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
-const baselineCount = 73;
+const baselineCount = 74;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(`Migration manifest generation failed: ${message}`);
@@ -38,7 +38,7 @@ for (const [index, fileName] of files.entries()) {
   previousVersion = match[1];
 }
 
-invariant(migrations.length === 74, `expected 74 migrations, found ${migrations.length}`);
+invariant(migrations.length === 75, `expected 75 migrations, found ${migrations.length}`);
 invariant(baselineCount < migrations.length, "baseline must precede the release head");
 
 const manifest = {

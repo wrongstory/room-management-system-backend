@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_room_catalog_capacity'
-  ) ->> 'currentMigration',
-  'developer_room_catalog_capacity',
+      'developer_room_catalog_capacity'
+    ) ->> 'currentMigration',
+    'developer_room_catalog_capacity',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_room_catalog_capacity'
+      'developer_room_catalog_capacity'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -105,19 +105,19 @@ where name = 'developer_room_catalog_capacity';
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_room_catalog_capacity'
-  ) ->> 'currentMigration',
-  'generated_room_pin_confirmation',
-  'database status exposes migration 73 when migration 74 is absent'
+      'developer_room_catalog_capacity'
+    ) ->> 'currentMigration',
+    'availability_any_day_submission',
+    'database status exposes migration 74 when migration 75 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'developer_room_catalog_capacity'
+      'developer_room_catalog_capacity'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 73 behind source migration 74'
+    'database status reports migration 74 behind source migration 75'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)
