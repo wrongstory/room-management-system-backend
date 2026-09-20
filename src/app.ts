@@ -19,6 +19,14 @@ import {
 } from './modules/availability/availability.service.js';
 import { createAssignmentRoutes } from './modules/assignments/assignment.routes.js';
 import { type AssignmentService, SupabaseAssignmentService } from './modules/assignments/assignment.service.js';
+import {
+  createAssignmentDurationPolicyRoutes,
+  createAssignmentPreviewRoutes
+} from './modules/assignments/assignment-preview.routes.js';
+import {
+  type AssignmentPreviewService,
+  SupabaseAssignmentPreviewService
+} from './modules/assignments/assignment-preview.service.js';
 import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
 import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
 import { createCleaningTemplateRoutes } from './modules/cleaning-templates/cleaning-template.routes.js';
@@ -63,6 +71,7 @@ export interface AppServices {
   accounts: AccountService;
   availability: AvailabilityService;
   assignments?: AssignmentService;
+  assignmentPreview?: AssignmentPreviewService;
   rooms: RoomService;
   roomPinSheetOperations?: RoomPinSheetOperationsService;
   reservations: ReservationService;
@@ -112,6 +121,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
       assignments: new SupabaseAssignmentService(clients),
+      assignmentPreview: new SupabaseAssignmentPreviewService(clients),
       rooms: new SupabaseRoomService(clients, {
         key: options.env.ROOM_PIN_KEY_BASE64,
         keyVersion: options.env.ROOM_PIN_KEY_VERSION,
@@ -249,6 +259,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
   if (services.assignments) {
     await app.register(createAssignmentRoutes(services.assignments), { prefix: '/v1/assignments' });
+  }
+  if (services.assignmentPreview) {
+    await app.register(createAssignmentPreviewRoutes(services.assignmentPreview), {
+      prefix: '/v1/assignments'
+    });
+    await app.register(createAssignmentDurationPolicyRoutes(services.assignmentPreview), {
+      prefix: '/v1/assignment-preview'
+    });
   }
   await app.register(createRoomTypeRoutes(services.rooms), { prefix: '/v1/room-types' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });

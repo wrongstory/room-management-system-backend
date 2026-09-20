@@ -114,6 +114,10 @@ const cleaningTemplateDurationMigrationUrl = new URL(
   '../supabase/migrations/20260915000628_cleaning_template_duration_optional.sql',
   import.meta.url
 );
+const retiredAssignmentDurationMigrationUrl = new URL(
+  '../supabase/migrations/20260920094931_retire_assignment_duration_policy.sql',
+  import.meta.url
+);
 const currentRoomStatusMigrationUrl = new URL(
   '../supabase/migrations/20260916165715_current_room_status_projection.sql',
   import.meta.url
@@ -182,6 +186,19 @@ describe('initial migration contract', () => {
     expect(sql).toContain("running_attempt.status = 'in_progress'");
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
+  });
+
+  it('retires estimated-time preview decisions without rewriting history', async () => {
+    const sql = await readFile(retiredAssignmentDurationMigrationUrl, 'utf8');
+
+    expect(sql).toContain("message='ASSIGNMENT_DURATION_POLICY_RETIRED'");
+    expect(sql).toContain("'durationPolicyStatus','retired'");
+    expect(sql).toContain("'durationPolicyRequired',false");
+    expect(sql).toContain('private.assignment_preview_source_reason(t,null,p_command_at)');
+    expect(sql).toContain("if p_target.due_at is not null and exists(");
+    expect(sql).not.toContain('make_interval');
+    expect(sql).not.toMatch(/update public\.assignment_duration_policy_versions|delete from public\.assignment_duration_policy_versions/);
+    expect(sql).not.toMatch(/insert into public\.assignment_duration_policy_versions|insert into public\.audit_events|complete_command/);
   });
 
   it('separates future reservation schedules from current cleaning state', async () => {

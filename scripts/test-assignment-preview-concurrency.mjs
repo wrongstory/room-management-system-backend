@@ -5,17 +5,19 @@ function assert(condition, message) {
 }
 
 // Local integration runner supplies a service client and a synthetic admin.
-// Configuration is deliberately a separate command from the zero-write snapshot.
+// Historical policy remains readable, but every new confirmation is retired.
 export async function testAssignmentPreviewConcurrency(client, actorProfileId) {
-  const current = await client.rpc('get_assignment_duration_policy', {
+  const before = await client.rpc('get_assignment_duration_policy', {
     p_actor_profile_id: actorProfileId
   });
-  assert(!current.error, 'preview policy current read failed');
-  const version = current.data?.version ?? 0;
+  assert(!before.error, 'historical preview policy read failed');
+  const auditBefore = await client.from('audit_events').select('id', { count: 'exact', head: true })
+    .eq('event_type', 'assignment.duration_policy_confirmed');
+  assert(!auditBefore.error, 'duration policy audit baseline read failed');
   const key = `preview-policy-concurrent-${randomUUID()}`;
   const input = {
     p_actor_profile_id: actorProfileId,
-    p_expected_version: version,
+    p_expected_version: before.data?.version ?? 0,
     p_standard_minutes: 30,
     p_premium_minutes: 40,
     p_ocean_premium_minutes: 50,
@@ -25,24 +27,23 @@ export async function testAssignmentPreviewConcurrency(client, actorProfileId) {
   };
   const duplicates = await Promise.all(Array.from({ length: 8 }, () =>
     client.rpc('confirm_assignment_duration_policy', input)));
-  assert(duplicates.every((result) => !result.error), 'same-policy concurrent replay must succeed');
-  assert(duplicates.every((result) => result.data.id === duplicates[0].data.id),
-    'same-policy concurrency creates one logical policy');
-  const contenders = await Promise.all([2, 3].map((value) =>
+  assert(duplicates.every((result) => result.error?.message === 'ASSIGNMENT_DURATION_POLICY_RETIRED'),
+    'same-key concurrent confirmations must all fail with retired policy');
+  const distinct = await Promise.all([2, 3].map((value) =>
     client.rpc('confirm_assignment_duration_policy', {
       ...input,
-      p_expected_version: version + 1,
       p_standard_minutes: 30 + value,
       p_idempotency_key: `preview-policy-contender-${randomUUID()}`,
       p_request_hash: String(value).repeat(64)
     })));
-  assert(contenders.filter((result) => !result.error).length === 1, 'policy CAS has exactly one winner');
-  assert(contenders.some((result) => result.error?.message === 'ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT'),
-    'policy CAS loser fails closed');
+  assert(distinct.every((result) => result.error?.message === 'ASSIGNMENT_DURATION_POLICY_RETIRED'),
+    'distinct concurrent confirmations must all fail with retired policy');
   const after = await client.rpc('get_assignment_duration_policy', { p_actor_profile_id: actorProfileId });
-  assert(!after.error && after.data.version === version + 2, 'policy version advances once per logical update');
-  const event = await client.from('audit_events').select('id').eq('event_type', 'assignment.duration_policy_confirmed')
-    .eq('entity_id', duplicates[0].data.id);
-  assert(!event.error && event.data.length === 1, 'idempotent policy has exactly one audit event');
-  console.log('assignment preview duration policy CAS / duplicate retry concurrency PASS');
+  assert(!after.error && JSON.stringify(after.data) === JSON.stringify(before.data),
+    'retired confirmation concurrency preserves historical policy');
+  const auditAfter = await client.from('audit_events').select('id', { count: 'exact', head: true })
+    .eq('event_type', 'assignment.duration_policy_confirmed');
+  assert(!auditAfter.error && auditAfter.count === auditBefore.count,
+    'retired confirmation concurrency creates no audit event');
+  console.log('assignment preview retired duration policy concurrency PASS');
 }

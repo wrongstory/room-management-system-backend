@@ -641,17 +641,16 @@ admin을 DB에서 재검증하고 고정 search_path/EXECUTE 최소 권한 아�
 정책·가능일·target·기존 배정·attempt·원 domain schedule을 반환한다. 이 RPC는 업무 DML,
 advisory write lock, audit, command receipt, outbox를 만들지 않는다.
 
-Edge의 platform-neutral `assignment-preview-core`는 snapshot만 입력으로 받는 bounded 순수
+Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 snapshot만 입력으로 받는 bounded 순수
 계산 모듈이다. DB가 source lifecycle 유효성을 판정하고 optimizer가 고정 부하·capacity·fee·route를
-계산한다. 계획만 반환하며 저장은 기존 #25/#26 CAS 명령으로 분리한다. Fastify preview route는
-이번 범위가 아니므로 Edge source와 Fastify rollback parity를 같다고 표시하지 않는다.
+계산한다. #231 이후 capacity는 예상시간 구간이 아니라 명시된 target/source 사실만 뜻하며 가상 종료시각을
+만들지 않는다. 계획만 반환하며 저장은 기존 #25/#26 CAS 명령으로 분리한다. 두 HTTP adapter는
+동일한 세 preview 경로, active admin/session/password gate, camelCase 계약과 error redaction을 유지한다.
 
-`assignment_duration_policy_versions`는 네 타입의 양수 minute 값과 version/상태/확정자를
-보존한다. 확정 정책은 최대 한 건이며 새 관리자 확정 command는 전역 policy lock과 expectedVersion
-CAS, actor/command/key + request hash receipt를 사용해 기존 confirmed를 retired로 전환하고
-새 version 및 `assignment.duration_policy_confirmed` 감사만 append한다. 기존 확정 값 변경·삭제,
-직접 Data API DML은 금지된다. 정책 확정은 preview 자체와 별도 명령이다. confirmed seed나
-template/default 시간 fallback은 없고 production 운영값 설정은 이번 PR에서 하지 않는다.
+`assignment_duration_policy_versions`는 폐기 전 네 타입 minute/version/확정자 이력과 관련 감사·receipt를
+그대로 보존한다. 직접 Data API DML과 기존 값 변경·삭제는 계속 금지된다. 과거 GET은 deprecated read-only로
+남지만 confirm command는 `ASSIGNMENT_DURATION_POLICY_RETIRED`로 차단한다. Preview는 confirmed 유무와 무관하게
+실행하며 정책·template/default/1분 시간을 입력, fingerprint, capacity 또는 예약 충돌 계산에 사용하지 않는다.
 
 상세 입력·출력·계산 한계는 [배정 Preview API 계약](./ASSIGNMENT_PREVIEW.md)을 따른다.
 
@@ -818,8 +817,8 @@ pre-A v7+의 10/11/13/15개 이력은 계속 검증하고, 모든 slot에 `maxPh
 `extra-proof(maxPhotos=10)`, `entry-number` 금지를 우회하지 않습니다. checkout duration은 선택값이며 제공할
 때만 1..10,080분으로 제한합니다.
 실제 수행시간은 attempt의 `started_at → field_completed_at`, turnaround는 실제 checkout → field completion에서
-사후 계산합니다. 배정 preview는 별도 confirmed duration-policy 원장만 사용하므로 template null을 fallback으로
-대체하지 않습니다. stayover/additional 등 기존 비-checkout template duration의 non-null 계약은 유지합니다.
+사후 계산합니다. 배정 preview는 duration-policy 원장과 template duration을 모두 사용하지 않으며 template null을
+fallback으로 대체하지 않습니다. stayover/additional 등 기존 비-checkout template duration의 저장 계약은 유지합니다.
 raw template table은 Data API role에 열지 않고 service-only RPC가 actor/session/password/role을 다시 검증합니다.
 audit에는 slot label/description이나 raw state/hash를 복제하지 않습니다. 설정 게시 자체는 행동 수신자가 없으므로
 notification/outbox를 만들지 않으며, production seed와 stayover/additional/reclean 계약은 #156 범위 밖입니다.

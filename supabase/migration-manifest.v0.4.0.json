@@ -10,9 +10,9 @@
   "pending": {
     "count": 19,
     "first": "photo_slot_contract_v8",
-    "head": "room_status_admin_correction"
+    "head": "retire_assignment_duration_policy"
   },
-  "head": "room_status_admin_correction",
+  "head": "retire_assignment_duration_policy",
   "migrations": [
     {
       "order": 1,
@@ -386,8 +386,8 @@
     },
     {
       "order": 75,
-      "name": "room_status_admin_correction",
-      "sha256": "ccab00e5a358b4e1dbbcbba84d2ff30f31b53ba83995af955f0f0094e7f8b105"
+      "name": "retire_assignment_duration_policy",
+      "sha256": "5ff8920aa6ad55ab3c3b0c798c1ca9d6d74d66584d3b444205a7f5a8fdd7c8b0"
     }
   ]
 }

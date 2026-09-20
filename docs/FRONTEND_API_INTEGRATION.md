@@ -278,7 +278,7 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 전용 객실 변경 409에서는 `error.conflict.reloadResources`에 포함된 `reservation | sourceRoom | targetRoom | roomMovePreview`만 다시 읽고, `latestVersions`의 세 version을 다음 preview의 기준으로 사용한다. version이 `null`이면 추측하지 말고 해당 리소스를 다시 조회한다. conflict payload에는 UUID나 고객/PIN 정보가 오지 않는다.
 
 퇴실 청소 템플릿의 `durationMinutes`는 실제 청소 완료시간이나 배정 preview 계산값이 아니다. 실제 수행시간은
-메이드의 attempt 시작~현장완료 기록에서 계산하고, 배정 preview는 별도 confirmed duration policy만 사용한다.
+메이드의 attempt 시작~현장완료 기록에서 계산하고, 배정 preview는 예상시간 정책이나 template 값을 사용하지 않는다.
 프런트는 duration 미확정 시 필드를 생략하거나 `null`로 보내며 55/65/70/80 같은 데모값을 자동 주입하지 않는다.
 
 ### #165 예상시간 선택화 프론트 적용 체크리스트
@@ -307,7 +307,7 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] 예약의 checkout 시각은 퇴실 청소의 시작 가능 시각이고, 다음 check-in 30분 전 등의 `dueAt`은 별도 업무 마감이다. 둘의 차이를 예상 청소시간으로 표시하지 않는다.
 - [ ] `durationMinutes=null`이고 `dueAt=null`인 checkout 계획에 임의 종료시각을 만들지 않는다.
 - [ ] 열린 checkout 계획이 있어도 수동 청소 계획 등록 자체를 프론트에서 막지 않는다. 명시된 두 구간의 충돌과 실제 시작 가능 여부는 서버 응답을 정본으로 사용한다.
-- [ ] 배정 preview의 확정 duration policy가 없다는 이유로 일반 예약·수동 계획·현장 workflow까지 비활성화하지 않는다.
+- [ ] 배정 preview는 duration policy 없이도 실행한다. 응답의 `durationPolicyStatus=retired`, `durationPolicyRequired=false`, `durationMinutes=null`을 정상 상태로 처리한다.
 
 #### 메이드 수행·고객 미퇴실 화면
 

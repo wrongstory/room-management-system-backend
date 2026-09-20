@@ -2531,9 +2531,9 @@ export const openApiDocument = {
       post: {
         tags: ["Assignments"],
         operationId: "previewAssignments",
-        summary: "동선 고려 랜덤 배정 초안 계산",
+        summary: "배정 가능 수·요금 균형·동선 기반 배정 초안 계산",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. KST 오늘/내일만 허용합니다. 확정 duration policy가 없으면 ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED(409)로 실패하며 데모 시간은 사용하지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 기존 고정 workload를 보존하고 완료 객실 수 → 요금 격차/편차 → 구역/호수 → seed 동률 순서로 비교합니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
+          "비밀번호 변경을 완료한 active business admin 전용이며 KST 오늘/내일만 허용합니다. 예상 시간 정책은 폐기되어 없어도 실행되며 template durationMinutes, 객실 타입 기본값, 임의 1분을 판단에 사용하지 않습니다. availableFrom/dueAt과 실제 예약 구간처럼 명시된 사실만 검증하고 가상 종료시각을 만들지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 배정 가능 target 수 → 요금 격차/편차와 기존/reclean 제약 → 구역/호수 → 결정적 동률 순서로 비교합니다. previewSeed는 상관관계 호환 필드이며 동률 결정을 바꾸지 않습니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         requestBody: {
@@ -2558,16 +2558,7 @@ export const openApiDocument = {
           "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
-          "409": {
-            description: "청소시간 미확정: 결정 불가이며 제안은 항상 빈 배열",
-            content: {
-              "application/json": {
-                schema: {
-                  $ref: "#/components/schemas/AssignmentPreviewUnconfirmed",
-                },
-              },
-            },
-          },
+          "409": errorResponse,
           "422": errorResponse,
           "500": errorResponse,
         },
@@ -2577,9 +2568,10 @@ export const openApiDocument = {
       get: {
         tags: ["Assignments"],
         operationId: "getAssignmentDurationPolicy",
-        summary: "현재 확정 청소시간 정책 조회",
+        summary: "폐기된 청소시간 정책의 과거 확정본 조회",
+        deprecated: true,
         description:
-          "active business admin 전용. 미확정 상태는 durationPolicy=null입니다. 데모 55/65/70/80분을 운영값으로 승격하지 않습니다.",
+          "active business admin 전용 과거 호환 read-only API입니다. 반환되는 정책은 신규 배정 preview 판단에 사용되지 않으며 미확정 이력은 durationPolicy=null입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         responses: {
@@ -2602,12 +2594,12 @@ export const openApiDocument = {
       post: {
         tags: ["Assignments"],
         operationId: "confirmAssignmentDurationPolicy",
-        summary: "네 객실 타입의 청소시간 정책을 함께 확정",
+        summary: "폐기된 청소시간 정책 확정 API",
+        deprecated: true,
         description:
-          "active business admin 전용 별도 config command입니다. 4개 positive integer를 완전하게 입력하고 expectedVersion(최초 0), Idempotency-Key로 CAS/재시도를 검증합니다. 과거 정책을 보존하고 새 version과 안전한 감사 이벤트를 생성합니다. preview 계산에서는 호출하지 않습니다.",
+          "예상 시간 정책 폐기로 더 이상 새 version을 생성하지 않습니다. 과거 client 호환을 위해 경로만 유지하고 active business admin 요청에 ASSIGNMENT_DURATION_POLICY_RETIRED(410)를 반환합니다. 기존 정책·감사·receipt 이력은 변경하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
-        parameters: [idempotencyHeader],
         requestBody: {
           required: true,
           content: {
@@ -2619,20 +2611,10 @@ export const openApiDocument = {
           },
         },
         responses: {
-          "200": {
-            description: "확정 정책",
-            content: {
-              "application/json": {
-                schema: {
-                  $ref: "#/components/schemas/AssignmentDurationPolicyEnvelope",
-                },
-              },
-            },
-          },
           "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
-          "409": errorResponse,
+          "410": errorResponse,
           "500": errorResponse,
         },
       },
@@ -5698,39 +5680,7 @@ export const openApiDocument = {
             maxLength: 128,
             pattern: "^[A-Za-z0-9_-]{1,128}$",
             description:
-              "동일 snapshot+seed 결과 재현용. 생략하면 서버 UUID 생성, 개인정보 입력 금지",
-          },
-        },
-      },
-      AssignmentPreviewUnconfirmed: {
-        type: "object",
-        additionalProperties: false,
-        required: [
-          "serviceDate",
-          "previewSeed",
-          "decisionReady",
-          "durationPolicyStatus",
-          "proposedAssignments",
-          "error",
-        ],
-        properties: {
-          serviceDate: { type: "string", format: "date" },
-          previewSeed: { type: "string" },
-          decisionReady: { const: false },
-          durationPolicyStatus: { const: "unconfirmed" },
-          proposedAssignments: {
-            type: "array",
-            maxItems: 0,
-            items: { $ref: "#/components/schemas/AssignmentPreviewRow" },
-          },
-          error: {
-            type: "object",
-            additionalProperties: false,
-            required: ["code", "message"],
-            properties: {
-              code: { const: "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED" },
-              message: { type: "string" },
-            },
+              "응답 상관관계 호환 필드. 생략하면 서버 UUID 생성. 배정 판단이나 동률 결정에는 사용하지 않으며 개인정보 입력 금지",
           },
         },
       },
@@ -5862,7 +5812,7 @@ export const openApiDocument = {
               { type: "null" },
             ],
             description:
-              "선택적인 과거 호환 메타데이터입니다. 미입력/null이어도 예약을 차단하지 않으며 실제 청소시간은 attempt.startedAt부터 fieldCompletedAt까지 계산합니다. 배정 Preview는 별도 확정 duration policy를 사용합니다.",
+              "선택적인 과거 호환 메타데이터입니다. 미입력/null이어도 예약을 차단하지 않으며 실제 청소시간은 attempt.startedAt부터 fieldCompletedAt까지 계산합니다. 배정 Preview는 이 값을 사용하지 않습니다.",
           },
           slots: {
             type: "array",
@@ -6023,10 +5973,9 @@ export const openApiDocument = {
           },
           feeSnapshot: { type: "integer", minimum: 0 },
           durationMinutes: {
-            type: ["integer", "null"],
-            minimum: 1,
+            type: "null",
             description:
-              "신규 제안은 확정 정책의 양수 시간. 고정 업무의 미지원 타입은 null이며 해당 메이드 신규 제안을 차단합니다.",
+              "과거 client 호환 필드이며 preview에서는 항상 null입니다. 예상 시간은 배정 판단에 사용하지 않습니다.",
           },
           availableFrom: { type: "string", format: "date-time" },
           dueAt: { type: ["string", "null"], format: "date-time" },
@@ -6051,6 +6000,8 @@ export const openApiDocument = {
           "serviceDate",
           "previewSeed",
           "durationPolicy",
+          "durationPolicyStatus",
+          "durationPolicyRequired",
           "decisionReady",
           "inputFingerprint",
           "fixedAssignments",
@@ -6064,14 +6015,16 @@ export const openApiDocument = {
           serviceDate: { type: "string", format: "date" },
           previewSeed: { type: "string" },
           durationPolicy: {
-            $ref: "#/components/schemas/AssignmentDurationPolicy",
+            type: "null",
           },
+          durationPolicyStatus: { const: "retired" },
+          durationPolicyRequired: { const: false },
           decisionReady: { const: true },
           inputFingerprint: {
             type: "string",
             pattern: "^[a-f0-9]{64}$",
             description:
-              "seed를 제외한 정렬된 정책 입력 snapshot SHA-256; 최종 DB CAS 대체 불가",
+              "정렬된 현재 업무 snapshot SHA-256. 폐기된 duration policy와 previewSeed는 제외하며 최종 DB CAS를 대체하지 않음",
           },
           fixedAssignments: {
             type: "array",
@@ -6276,7 +6229,7 @@ export const openApiDocument = {
           "ASSIGNMENT_COMMIT_NOT_ALLOWED",
           "ASSIGNMENT_COMMAND_FAILED",
           "ASSIGNMENT_PREVIEW_DATE_NOT_ALLOWED",
-          "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
+          "ASSIGNMENT_DURATION_POLICY_RETIRED",
           "ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED",
           "ASSIGNMENT_PREVIEW_FAILED",
           "INVALID_ASSIGNMENT_DURATION_POLICY",
