@@ -1201,7 +1201,7 @@ Deno.test("cleaning field-completed audit projection fits the full strict summar
   }
 });
 
-Deno.test("preview OpenAPI documents pure admin preview and separate versioned config", async () => {
+Deno.test("preview OpenAPI documents retired duration policy", async () => {
   const doc = await openApiResponse({}).json() as typeof openApiDocument;
   const operation = doc.paths["/v1/assignments/preview"].post;
   assert(
@@ -1218,9 +1218,22 @@ Deno.test("preview OpenAPI documents pure admin preview and separate versioned c
     "strict preview body",
   );
   assert(
-    doc.paths["/v1/assignment-preview/duration-policy"].post.parameters[0]
-      .name === "Idempotency-Key",
-    "config mutation has own receipt",
+    doc.components.schemas.AssignmentPreviewResult.properties.durationPolicy
+          .type === "null" &&
+      doc.components.schemas.AssignmentPreviewResult.properties
+          .durationPolicyStatus.const === "retired" &&
+      doc.components.schemas.AssignmentPreviewResult.properties
+          .durationPolicyRequired.const === false,
+    "preview needs no duration policy",
+  );
+  const durationRoute = doc.paths["/v1/assignment-preview/duration-policy"];
+  assert(
+    durationRoute.get.deprecated === true &&
+      durationRoute.post.deprecated === true &&
+      "410" in durationRoute.post.responses &&
+      !("200" in durationRoute.post.responses) &&
+      !("parameters" in durationRoute.post),
+    "historical GET remains while mutation is retired",
   );
   assert(
     doc.components.schemas.DeveloperAuditEventType.enum.includes(

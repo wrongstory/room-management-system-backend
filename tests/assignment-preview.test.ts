@@ -82,7 +82,7 @@ function fixed(
   };
 }
 describe("assignment preview pure optimizer", () => {
-  it("has no duration fallback including existing demo room/template input", async () => {
+  it("works without a policy and ignores historical/demo duration inputs", async () => {
     const s = {
       ...snapshot([target("1")]),
       durationPolicy: null,
@@ -90,9 +90,21 @@ describe("assignment preview pure optimizer", () => {
       templateSnapshot: { durationMinutes: 60 },
     };
     const before = JSON.stringify(s);
-    await expect(optimizeAssignmentPreview(s, "seed")).rejects.toMatchObject({
-      code: "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
+    const withoutPolicy = await optimizeAssignmentPreview(s, "seed");
+    const withHistoricalPolicy = await optimizeAssignmentPreview(
+      snapshot([target("1")]),
+      "other-seed",
+    );
+    expect(withoutPolicy).toMatchObject({
+      decisionReady: true,
+      durationPolicy: null,
+      durationPolicyStatus: "retired",
+      durationPolicyRequired: false,
     });
+    expect(withoutPolicy.proposedAssignments[0]?.durationMinutes).toBeNull();
+    expect(withoutPolicy.inputFingerprint).toBe(
+      withHistoricalPolicy.inputFingerprint,
+    );
     expect(JSON.stringify(s)).toBe(before);
   });
   it("preserves its entire input and canonical fingerprint excludes seed and array ordering", async () => {
@@ -113,7 +125,7 @@ describe("assignment preview pure optimizer", () => {
       }, "one")).inputFingerprint,
     ).not.toBe(a.inputFingerprint);
   });
-  it("maximizes count before balancing fees, replacing long-first greedy with feasible short jobs", async () => {
+  it("maximizes assignable count without estimated-time capacity", async () => {
     const s = snapshot([
       target("long", {
         roomTypeCode: "premium",
@@ -125,9 +137,9 @@ describe("assignment preview pure optimizer", () => {
     ]);
     s.maids = s.maids.slice(0, 1);
     const r = await optimizeAssignmentPreview(s, "a");
-    expect(r.objectiveScore.completedTargetCount).toBe(2);
+    expect(r.objectiveScore.completedTargetCount).toBe(3);
     expect(r.proposedAssignments.map((x) => x.cleaningTargetId).sort()).toEqual(
-      ["short1", "short2"],
+      ["long", "short1", "short2"],
     );
   });
   it("counts fixed fee load in fairness and never proposes fixed assignments", async () => {
@@ -146,7 +158,7 @@ describe("assignment preview pure optimizer", () => {
     expect(r.fixedAssignments[0]?.maidProfileId).toBe("a");
     expect(r.objectiveScore.feeSpread).toBe(30000);
   });
-  it("fixed time consumes capacity and new sequences append after max fixed sequence", async () => {
+  it("fixed work does not fabricate capacity and new sequences append after it", async () => {
     const s = snapshot([
       fixed("fixed", "a", 3, {
         availableFrom: time("10:00"),
@@ -156,8 +168,10 @@ describe("assignment preview pure optimizer", () => {
       target("new", { dueAt: time("10:30") }),
     ]);
     s.maids = s.maids.slice(0, 1);
-    expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
-      .toHaveLength(0);
+    expect(
+      (await optimizeAssignmentPreview(s, "s")).proposedAssignments[0]
+        ?.proposedSequenceNumber,
+    ).toBe(4);
     s.targets[1] = target("new", { dueAt: time("12:00") });
     expect(
       (await optimizeAssignmentPreview(s, "s")).proposedAssignments[0]
@@ -218,23 +232,24 @@ describe("assignment preview pure optimizer", () => {
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
       .toHaveLength(0);
   });
-  it("honors availableFrom and dueAt without inventing a null deadline", async () => {
+  it("preserves explicit windows without fabricating duration or day-end", async () => {
     const s = snapshot([
       target("late", { availableFrom: time("17:45"), dueAt: time("18:00") }),
       target("null", { dueAt: null, availableFrom: time("22:00") }),
     ]);
     const r = await optimizeAssignmentPreview(s, "s");
-    expect(r.proposedAssignments.map((x) => x.cleaningTargetId)).toEqual([
+    expect(r.proposedAssignments.map((x) => x.cleaningTargetId).sort()).toEqual([
+      "late",
       "null",
     ]);
-    expect(r.proposedAssignments[0]?.dueAt).toBeNull();
+    expect(r.proposedAssignments.find((x) => x.cleaningTargetId === "null")?.dueAt).toBeNull();
     const cross = await optimizeAssignmentPreview(
       snapshot([
         target("cross", { dueAt: null, availableFrom: time("23:45") }),
       ]),
       "s",
     );
-    expect(cross.proposedAssignments).toHaveLength(0);
+    expect(cross.proposedAssignments).toHaveLength(1);
   });
   it("zone then room proximity only break equal fee scores", async () => {
     const s = snapshot([
@@ -255,7 +270,7 @@ describe("assignment preview pure optimizer", () => {
         ?.maidProfileId,
     ).toBe("a");
   });
-  it("seed only changes final exact ties; same snapshot+seed is reproducible", async () => {
+  it("uses a deterministic final tie-break independent of seed", async () => {
     const s = snapshot([target("new")]),
       results = await Promise.all(
         Array.from(
@@ -265,7 +280,7 @@ describe("assignment preview pure optimizer", () => {
       );
     expect(
       new Set(results.map((r) => r.proposedAssignments[0]?.maidProfileId)).size,
-    ).toBe(2);
+    ).toBe(1);
     for (const r of results) {
       expect(r.objectiveScore).toEqual(required(results[0]).objectiveScore);
     }
@@ -323,7 +338,7 @@ describe("assignment preview pure optimizer", () => {
     const result = await optimizeAssignmentPreview(s, "load");
     expect(result.objectiveScore.completedTargetCount).toBe(121);
   });
-  it("does not simulate past start and includes overdue fixed unstarted work", async () => {
+  it("does not simulate fixed duration and still blocks an explicitly expired candidate", async () => {
     const s = snapshot([
       fixed("old", "a", 1, { dueAt: time("18:00") }),
       target("new", { dueAt: time("12:30") }),
@@ -331,12 +346,12 @@ describe("assignment preview pure optimizer", () => {
     s.maids = s.maids.slice(0, 1);
     s.planningAt = time("12:00");
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
-      .toHaveLength(0);
+      .toHaveLength(1);
     s.targets = [target("past", { dueAt: time("11:00") })];
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
       .toHaveLength(0);
   });
-  it("validates actual delayed additional execution interval against reservation occupancy", async () => {
+  it("does not infer an interval for open-deadline reservation occupancy", async () => {
     const s = snapshot([
       fixed("old", "a", 1, {
         availableFrom: time("11:00"),
@@ -359,9 +374,9 @@ describe("assignment preview pure optimizer", () => {
     ]);
     s.maids = s.maids.slice(0, 1);
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
-      .toHaveLength(0);
+      .toHaveLength(1);
   });
-  it("preserves unknown type as blocked and confines unknown fixed capacity to its maid", async () => {
+  it("does not require a room type duration", async () => {
     const s = snapshot([
       fixed("old", "a", 1, { roomTypeCode: "unknown" }),
       target("bad", { roomTypeCode: "unknown" }),
@@ -369,8 +384,9 @@ describe("assignment preview pure optimizer", () => {
     ]);
     const r = await optimizeAssignmentPreview(s, "s");
     expect(r.fixedAssignments[0]?.durationMinutes).toBeNull();
-    expect(r.blockedTargets[0]?.reason).toBe("ROOM_TYPE_DURATION_UNAVAILABLE");
-    expect(r.proposedAssignments[0]?.maidProfileId).toBe("b");
+    expect(r.blockedTargets).toHaveLength(0);
+    expect(r.proposedAssignments).toHaveLength(2);
+    expect(r.proposedAssignments.every((row) => row.durationMinutes === null)).toBe(true);
   });
   it("future scheduled assignment does not consume today's capacity", async () => {
     const f = fixed("tomorrow", "a", 1, {
@@ -423,7 +439,7 @@ describe("assignment preview pure optimizer", () => {
     expect(r.objectiveScore.feeSpread).toBe(4000);
     expect(r.objectiveScore.feeDeviation).toBe("140000000");
   });
-  it("blocks fixed additional work whose actual delayed interval collides", async () => {
+  it("does not block a maid using a fabricated delayed interval", async () => {
     const s = snapshot([
       fixed("old", "a", 1, {
         availableFrom: time("11:00"),
@@ -443,6 +459,6 @@ describe("assignment preview pure optimizer", () => {
     s.planningAt = time("12:00");
     s.maids = s.maids.slice(0, 1);
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
-      .toHaveLength(0);
+      .toHaveLength(1);
   });
 });

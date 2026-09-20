@@ -74,7 +74,10 @@ export interface PreviewTarget {
 export interface PreviewSnapshot {
   serviceDate: string;
   planningAt: string;
-  durationPolicy: PreviewPolicy | null;
+  /** @deprecated Historical input is accepted but never used for preview decisions. */
+  durationPolicy?: PreviewPolicy | null;
+  durationPolicyStatus?: "retired";
+  durationPolicyRequired?: false;
   maids: PreviewMaid[];
   targets: PreviewTarget[];
 }
@@ -106,7 +109,9 @@ export interface PreviewAssignmentRow {
 export interface AssignmentPreviewResult {
   serviceDate: string;
   previewSeed: string;
-  durationPolicy: PreviewPolicy;
+  durationPolicy: null;
+  durationPolicyStatus: "retired";
+  durationPolicyRequired: false;
   decisionReady: true;
   inputFingerprint: string;
   fixedAssignments: PreviewAssignmentRow[];
@@ -205,19 +210,8 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
     s.targets.length > PREVIEW_LIMITS.targets ||
     s.maids.length > PREVIEW_LIMITS.maids
   ) limited();
-  let policy: PreviewPolicy | null = null;
-  if (s.durationPolicy != null) {
-    const p = record(s.durationPolicy);
-    if (p.status !== "confirmed") invalid();
-    policy = {
-      version: integer(p.version, 1, Number.MAX_SAFE_INTEGER),
-      status: "confirmed",
-      standardMinutes: integer(p.standardMinutes, 1, 2147483647),
-      premiumMinutes: integer(p.premiumMinutes, 1, 2147483647),
-      oceanPremiumMinutes: integer(p.oceanPremiumMinutes, 1, 2147483647),
-      oceanFamilyMinutes: integer(p.oceanFamilyMinutes, 1, 2147483647),
-    };
-  }
+  // Historical policy payloads remain wire-compatible, but deliberately do not
+  // participate in validation, fingerprinting, ordering, or feasibility.
   const maids = s.maids.map((value): PreviewMaid => {
     const m = record(value);
     if (typeof m.available !== "boolean") invalid();
@@ -307,7 +301,9 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
   return {
     serviceDate: date(s.serviceDate),
     planningAt: timestamp(s.planningAt),
-    durationPolicy: policy,
+    durationPolicy: null,
+    durationPolicyStatus: "retired",
+    durationPolicyRequired: false,
     maids,
     targets,
   };
@@ -328,10 +324,6 @@ function boardKey(board: Board): string {
 function clone(board: Board): Board {
   return board.map((rows) => [...rows]);
 }
-function kstDate(time: number): string {
-  return new Date(time + 9 * 3600000).toISOString().slice(0, 10);
-}
-
 /** 有界 heuristic: deterministic 4-start greedy + 3 improvement passes. 전역 최적성 보증은 하지 않는다. */
 export async function optimizeAssignmentPreview(
   input: unknown,
@@ -340,18 +332,7 @@ export async function optimizeAssignmentPreview(
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(previewSeed)) {
     throw new AssignmentPreviewError("INVALID_PREVIEW_SEED");
   }
-  const snapshot = parseSnapshot(input), policy = snapshot.durationPolicy;
-  if (!policy) {
-    throw new AssignmentPreviewError(
-      "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
-    );
-  }
-  const duration = (t: PreviewTarget): number | null =>
-    t.roomTypeCode === "unknown"
-      ? null
-      : policy[`${t.roomTypeCode}Minutes` as keyof PreviewPolicy] as number;
-  const requiredDuration = (t: PreviewTarget): number =>
-    duration(t) ?? Infinity;
+  const snapshot = parseSnapshot(input);
   const maids = snapshot.maids.filter((m) =>
     m.role === "maid" && m.status === "active" && m.available &&
     m.availabilityVersion !== null
@@ -379,7 +360,7 @@ export async function optimizeAssignmentPreview(
     for (const t of rows) {
       const a = t.currentAssignment;
       if (
-        !a || duration(t) === null || seen.has(a.sequenceNumber) ||
+        !a || seen.has(a.sequenceNumber) ||
         t.serviceDate !== snapshot.serviceDate ||
         a.serviceDate !== snapshot.serviceDate ||
         a.targetAssignmentVersion !== t.assignmentVersion ||
@@ -394,12 +375,15 @@ export async function optimizeAssignmentPreview(
   const candidates = snapshot.targets.filter((t) => {
     if (t.currentAssignment || t.activeAttempt) return false;
     const reason = t.blockedReason ??
-      (duration(t) === null
-        ? "ROOM_TYPE_DURATION_UNAVAILABLE"
-        : t.serviceDate !== snapshot.serviceDate
+      (t.serviceDate !== snapshot.serviceDate
         ? "SERVICE_DATE_MISMATCH"
         : t.status !== "unassigned"
         ? "TARGET_NOT_UNASSIGNED"
+        : Date.parse(t.availableFrom) >= Date.parse(t.dueAt ?? "9999-12-31")
+        ? "ASSIGNMENT_PREVIEW_INVALID_SCHEDULE"
+        : t.dueAt !== null &&
+            Date.parse(t.dueAt) <= Date.parse(snapshot.planningAt)
+        ? "ASSIGNMENT_WINDOW_EXPIRED"
         : (t.cleaningKind === "reclean" || t.source === "inspection_reclean") &&
             (!t.recleanMaidProfileId || t.cleaningKind !== "reclean" ||
               t.source !== "inspection_reclean")
@@ -413,73 +397,17 @@ export async function optimizeAssignmentPreview(
   });
   if (candidates.length > PREVIEW_LIMITS.candidates) limited();
   let evaluations = 0;
-  const planningAt = Date.parse(snapshot.planningAt);
-  const dayStart = Date.parse(`${snapshot.serviceDate}T00:00:00+09:00`),
-    nextDay = dayStart + 86400000;
-  const timing = new Map(
+  const roomNumbers = new Map(
     snapshot.targets.map(
-      (t) => [t.cleaningTargetId, {
-        start: Date.parse(t.availableFrom),
-        due: t.dueAt === null ? Infinity : Date.parse(t.dueAt),
-        duration: requiredDuration(t) * 60000,
-        room: Number(t.roomNumber),
-      }],
+      (t) => [t.cleaningTargetId, Number(t.roomNumber)],
     ),
-  );
-  const roomConflicts = new Map<string, { start: number; end: number }[]>();
-  for (const t of [...candidates, ...fixed]) {
-    if (t.source !== "manual_room_request" || t.cleaningKind !== "additional") {
-      continue;
-    }
-    const domain = record(t.domainIdentity);
-    if (
-      !Array.isArray(domain.roomReservations) ||
-      domain.roomReservations.length > 250
-    ) invalid();
-    roomConflicts.set(
-      t.cleaningTargetId,
-      domain.roomReservations.map((value) => {
-        const r = record(value);
-        if (r.status !== "active") invalid();
-        const start = Date.parse(timestamp(r.actualCheckInAt ?? r.checkInAt));
-        const end = r.actualCheckInAt != null && r.actualCheckoutAt == null
-          ? Infinity
-          : Date.parse(timestamp(r.actualCheckoutAt ?? r.checkOutAt));
-        if (end <= start) invalid();
-        return { start, end };
-      }),
-    );
-  }
-  function simulate(rows: PreviewTarget[], isFixed: boolean): number | null {
-    let cursor = planningAt;
-    for (const t of rows) {
-      const info = required(timing.get(t.cleaningTargetId)),
-        start = Math.max(cursor, info.start),
-        end = start + info.duration;
-      if (!Number.isFinite(end) || end > info.due) return null;
-      if (
-        roomConflicts.get(t.cleaningTargetId)?.some((r) =>
-          r.start < end && start < r.end
-        )
-      ) return null;
-      // 마감 null은 보존한다. 날짜를 넘기는 신규 수행은 #7 계약 확정 전 결정하지 않는다.
-      if (!isFixed && kstDate(end) !== snapshot.serviceDate) return null;
-      cursor = end;
-    }
-    return cursor;
-  }
-  fixedByMaid.forEach((rows, i) => {
-    if (simulate(rows, true) === null) unavailable.add(i);
-  });
-  const fixedCursor = fixedByMaid.map((rows) =>
-    Math.max(planningAt, simulate(rows, true) ?? Infinity)
   );
   const fixedFees = fixedByMaid.map((rows) =>
     rows.reduce((sum, t) => sum + t.feeSnapshot, 0)
   );
   const routeDelta = (prev: PreviewTarget, t: PreviewTarget) => {
-    const p = required(timing.get(prev.cleaningTargetId)).room,
-      n = required(timing.get(t.cleaningTargetId)).room;
+    const p = required(roomNumbers.get(prev.cleaningTargetId)),
+      n = required(roomNumbers.get(t.cleaningTargetId));
     if (!Number.isSafeInteger(p) || !Number.isSafeInteger(n)) invalid();
     return {
       zones: prev.elevatorZone === t.elevatorZone ? 0 : 1,
@@ -505,22 +433,11 @@ export async function optimizeAssignmentPreview(
           t.recleanMaidProfileId !== required(maids[i]).maidProfileId
         )
       ) return null;
-      let cursor = required(fixedCursor[i]),
-        fee = required(fixedFees[i]),
+      let fee = required(fixedFees[i]),
         prev = required(fixedByMaid[i]).at(-1);
       zones += required(fixedRoute[i]).zones;
       distance += required(fixedRoute[i]).distance;
       for (const t of newRows) {
-        const info = required(timing.get(t.cleaningTargetId)),
-          start = Math.max(cursor, info.start),
-          end = start + info.duration;
-        if (end > info.due || end < dayStart || end >= nextDay) return null;
-        if (
-          roomConflicts.get(t.cleaningTargetId)?.some((r) =>
-            r.start < end && start < r.end
-          )
-        ) return null;
-        cursor = end;
         fee += t.feeSnapshot;
         if (prev) {
           const delta = routeDelta(prev, t);
@@ -547,39 +464,34 @@ export async function optimizeAssignmentPreview(
   }
   const empty = (): Board => maids.map(() => []);
   let best = empty(), bestScore = required(evaluate(best));
-  const ties = new Map<string, Board>();
-  ties.set(boardKey(best), best);
   function remember(board: Board, score: Score) {
     const c = compare(score, bestScore);
-    if (c < 0) {
+    if (c < 0 || (c === 0 && boardKey(board) < boardKey(best))) {
       best = board;
       bestScore = score;
-      ties.clear();
     }
-    if (c <= 0 && ties.size < 256) ties.set(boardKey(board), board);
   }
   const orders = [
     [...candidates].sort((a, b) =>
-      requiredDuration(a) - requiredDuration(b) ||
+      Number(b.recleanMaidProfileId !== null) -
+        Number(a.recleanMaidProfileId !== null) ||
       Date.parse(a.dueAt ?? "9999-01-01") -
         Date.parse(b.dueAt ?? "9999-01-01") ||
+      Date.parse(a.availableFrom) - Date.parse(b.availableFrom) ||
       a.cleaningTargetId.localeCompare(b.cleaningTargetId)
     ),
     [...candidates].sort((a, b) =>
       Date.parse(a.dueAt ?? "9999-01-01") -
         Date.parse(b.dueAt ?? "9999-01-01") ||
-      requiredDuration(a) - requiredDuration(b) ||
       a.cleaningTargetId.localeCompare(b.cleaningTargetId)
     ),
     [...candidates].sort((a, b) =>
       Number(b.recleanMaidProfileId !== null) -
         Number(a.recleanMaidProfileId !== null) ||
-      requiredDuration(a) - requiredDuration(b) ||
       a.cleaningTargetId.localeCompare(b.cleaningTargetId)
     ),
     [...candidates].sort((a, b) =>
       Date.parse(a.availableFrom) - Date.parse(b.availableFrom) ||
-      requiredDuration(a) - requiredDuration(b) ||
       a.cleaningTargetId.localeCompare(b.cleaningTargetId)
     ),
   ];
@@ -647,18 +559,7 @@ export async function optimizeAssignmentPreview(
     }
     if (boardKey(best) === before) break;
   }
-  // seed는 탐색/점수 비교에 쓰지 않고, 최종 동일 점수 후보 선택에만 사용한다.
-  const ranked = await Promise.all(
-    [...ties.entries()].map(async ([key, board]) => ({
-      hash: await sha(`${previewSeed}\n${key}`),
-      key,
-      board,
-    })),
-  );
-  ranked.sort((a, b) =>
-    a.hash.localeCompare(b.hash) || a.key.localeCompare(b.key)
-  );
-  best = required(ranked[0]).board;
+  // previewSeed는 응답 상관관계 호환 필드일 뿐 결정 입력이 아니다.
   function row(
     t: PreviewTarget,
     maidId: string,
@@ -678,7 +579,7 @@ export async function optimizeAssignmentPreview(
       expectedAssignmentVersion: t.assignmentVersion,
       expectedAvailabilityVersion: m?.availabilityVersion ?? null,
       feeSnapshot: t.feeSnapshot,
-      durationMinutes: duration(t),
+      durationMinutes: null,
       availableFrom: t.availableFrom,
       dueAt: t.dueAt,
     };
@@ -701,12 +602,14 @@ export async function optimizeAssignmentPreview(
       reason: t.recleanMaidProfileId &&
           !maids.some((m) => m.maidProfileId === t.recleanMaidProfileId)
         ? "RECLEAN_MAID_UNAVAILABLE"
-        : "NO_FEASIBLE_PREVIEW_CAPACITY",
+        : "NO_ELIGIBLE_MAID",
     }));
   return {
     serviceDate: snapshot.serviceDate,
     previewSeed,
-    durationPolicy: policy,
+    durationPolicy: null,
+    durationPolicyStatus: "retired",
+    durationPolicyRequired: false,
     decisionReady: true,
     inputFingerprint: await sha(canonical(snapshot)),
     fixedAssignments: fixed.map((t) =>

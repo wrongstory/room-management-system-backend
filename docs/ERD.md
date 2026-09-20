@@ -925,22 +925,22 @@ source 후보 schema다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 
-### #29 versioned duration policy (feature source)
+### #29/#231 historical duration policy (retired decision input)
 
 `profiles`의 관리자 생성자·확정자는 `assignment_duration_policy_versions`의 FK로 보존한다.
-정책은 target/assignment에 새 write pointer를 추가하지 않는다. Preview 응답의 policy version과
-input fingerprint만 조회 시점의 입력을 식별하며, 실제 배정 snapshot 저장은 #25/#26 책임이다.
+정책은 target/assignment에 새 write pointer를 추가하지 않는다. #231 이후 이 원장은 과거 이력만
+보존하며 신규 Preview 응답·fingerprint·배정 판단의 입력이 아니다. 실제 배정 snapshot 저장은 #25/#26 책임이다.
 
 - `id`, 양수 unique `version`, `status = draft | confirmed | retired`
 - `standard_minutes`, `premium_minutes`, `ocean_premium_minutes`, `ocean_family_minutes`: 모두 양수
 - `created_by/created_at`, `confirmed_by/confirmed_at`; confirmed/retired는 확정자·시각 필수
 - confirmed partial unique index로 현재 확정 정책 최대 한 건, FK 자식 index 두 개
-- RLS 활성화·직접 SELECT/DML revoke; 관리자용 read/confirm RPC만 허용
+- RLS 활성화·직접 SELECT/DML revoke; 관리자용 과거 read RPC만 허용하고 confirm RPC는 retired 오류
 - 기존 값 immutable, DELETE 금지; 기존 confirmed의 retired 전환 외 UPDATE 금지
-- fresh confirmed 0건, 55/65/70/80 seed 없음, preview DML 0
+- fresh confirmed 0건 허용, 55/65/70/80 seed 없음, preview DML 0
 
-실제 DDL 정본은 `20260907143843_assignment_preview_duration_policy.sql`이며 기존 24개
-migration을 수정하지 않는다. 운영·recovery 적용 상태와 무관한 feature schema다.
+초기 DDL은 `20260907143843_assignment_preview_duration_policy.sql`, 폐기 전환은 append-only
+`20260920094931_retire_assignment_duration_policy.sql`이다. 과거 row·audit·receipt는 수정하지 않는다.
 
 2026-08-25 기준 공식 Free Plan 범위 안에서만 사용한다.
 
@@ -1186,8 +1186,8 @@ backfill하거나 다시 쓰지 않는다.
 운영 fixture 부재로 예약 성공 mutation smoke만 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 
 실제 청소 수행시간은 `cleaning_attempts.started_at`과 `field_completed_at`의 차이이며, turnaround는 실제
-checkout 시각부터 field completion까지다. 배정 preview는 `assignment_duration_policy_versions`의 confirmed
-정책만 사용한다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도
+checkout 시각부터 field completion까지다. 배정 preview는 예상시간 정책과 template duration을 모두
+사용하지 않는다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도
 추정하지 않는다.
 
 수동 청소 계획은 기존 target과 새 target에 명시된 종료시각이 모두 있을 때만 일정 구간 충돌을 비교한다.

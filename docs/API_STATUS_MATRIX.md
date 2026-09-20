@@ -427,7 +427,7 @@ reservation-command → target → assignment 잠금 순서를 사용한다.
 OpenAPI operation은 추가하지 않아 source 49 paths / 53 operations를 유지한다. 실제 메이드 시작,
 중단·인계(#7), PIN(#69), 자동 배정(#29)은 포함하지 않는다.
 
-### #29 Assignment Preview — production source 반영, hosted smoke 미확인
+### #29/#231 Assignment Preview — 예상시간 폐기 source 후보, production 미승격
 
 PR #72는 `dev@8bdb5db2cd65359adca13e132959bcdf5f808324`에 병합됐다.
 source/dev 완료와 운영 배포는 별도 gate다.
@@ -438,26 +438,28 @@ source/dev 완료와 운영 배포는 별도 gate다.
 | `GET /v1/assignment-preview/duration-policy` | admin | ✅ | ❌ | ✅ | ✅ | ⚠️ |
 | `POST /v1/assignment-preview/duration-policy` | admin | ✅ | ❌ | ✅ | ✅ | ⚠️ |
 
-- [x] confirmed versioned duration 정책 / 데모·fallback·confirmed seed 없음
+- [x] 과거 duration 정책·template snapshot·audit 보존 / 신규 confirm 차단 / confirmed 0건 허용
 - [x] STABLE snapshot + 순수 bounded optimizer / 기존 고정 부하와 reclean 원 maid 보존
-- [x] count → fee spread/deviation → route → seed 최종 동률 비교
-- [x] 오늘/내일·source schedule·actual interval 재검증 / fingerprint와 expected versions
+- [x] assignable count → fee spread/deviation·기존/reclean 제약 → route → 결정적 동률 비교
+- [x] 오늘/내일·명시된 source schedule/interval 재검증 / fingerprint와 expected versions
 - [x] 한국어 OpenAPI / safe duration policy 감사 / Python developer filtered generated contract
-- [x] local fresh 25 migrations·DB/RLS 575건(Preview 65건)·동시성·Edge 84건·application 122건·Python 34건·package source 검증
+- [x] local fresh 74 migrations·DB/RLS 3,150건(Preview 65건)·동시성·Edge 268건·application 480건·package source 검증
 - [x] PR #72 exact head GitHub application / migration PASS
 - [x] #29 독립 보안/API 리뷰 P0/P1=0
 - [x] #29 PR #72 `dev` 병합
 - [x] release/main 후 production migration·Edge source 반영
-- [ ] 역할별 hosted smoke 및 운영 소요시간 별도 확정
+- [ ] #231 release/main·production migration/Edge 승격 및 역할별 hosted smoke
 
-신규 migration은 `20260907143843_assignment_preview_duration_policy.sql` 하나이며 기존
-24개는 변경하지 않는다. Source OpenAPI는 51 paths / 56 operations, production은 계속
+초기 migration은 `20260907143843_assignment_preview_duration_policy.sql`, #231 전환은 기존 73개를
+고치지 않는 `20260920094931_retire_assignment_duration_policy.sql`이다. Source OpenAPI operation 수는
+유지되며 production은 아직 기존 동작이다. 과거 GET은 deprecated read-only, POST는 410 retired다.
+기존 release 이력상 Source OpenAPI는 51 paths / 56 operations, production은 계속
 39 paths / 43 operations다. 성공 Preview의 assignment/attempt/알림/outbox/audit/receipt write는
-0이며, 설정 확정 POST만 별도 audit/receipt를 기록한다. `55/65/70/80`분은 운영값이 아니다.
-정책 미확정은 409 / `decisionReady=false` / 빈 제안이다. 상세 한계는
+0이며, 폐기된 설정 확정 POST도 policy/audit/receipt를 만들지 않는다. `55/65/70/80`분은 운영값이 아니다.
+정책 미확정은 정상 상태이며 `decisionReady=true`로 제안을 계산한다. 상세 한계는
 [Preview 계약](./ASSIGNMENT_PREVIEW.md)을 따른다. 자동 apply/notify/PIN/#7 실행은 포함하지 않는다.
 DB lint 오류 0, local Security Advisor WARN/ERROR 0이다. `notification_outbox`와 새 duration
-정책의 RLS/no-policy INFO 2건은 직접 접근을 막고 RPC만 허용하는 의도된 경계다.
+정책 이력의 RLS INFO는 직접 접근을 막고 deprecated read-only RPC만 허용하는 의도된 경계다.
 
 ### #4 Maid Assignment Visibility — production source 반영, hosted smoke 미확인
 
