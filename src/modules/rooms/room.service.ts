@@ -212,9 +212,106 @@ export interface RoomTypeCatalogItem {
   code: string;
   displayName: string;
   baseCleaningFee: number;
+  baseOccupancy: number;
+  maxOccupancy: number;
   active: boolean;
   version: number;
   roomCount: number;
+}
+
+export interface DeveloperRoomCatalogRoom {
+  id: string;
+  roomNumber: string;
+  roomTypeId: string;
+  roomTypeCode: string;
+  active: boolean;
+  version: number;
+}
+
+export type DeveloperRoomTypeCatalogItem = Omit<RoomTypeCatalogItem, 'baseCleaningFee'>;
+
+export interface DeveloperRoomCatalog {
+  generatedAt: string;
+  summary: {
+    total: number;
+    active: number;
+    inactive: number;
+  };
+  roomTypes: DeveloperRoomTypeCatalogItem[];
+  rooms: DeveloperRoomCatalogRoom[];
+}
+
+export interface PreviewRoomTypeCapacityInput {
+  roomTypeId: string;
+  baseOccupancy: number;
+  maxOccupancy: number;
+  expectedVersion: number;
+}
+
+export interface RoomTypeCapacityPreview {
+  roomTypeId: string;
+  current: { baseOccupancy: number; maxOccupancy: number; version: number };
+  proposed: { baseOccupancy: number; maxOccupancy: number };
+  roomCount: number;
+  activeReservationCount: number;
+  exceedingActiveReservationCount: number;
+  reasonCodes: string[];
+  impactFingerprint: string;
+  evaluatedAt: string;
+  expiresAt: string;
+}
+
+export interface ChangeRoomTypeCapacityInput extends PreviewRoomTypeCapacityInput {
+  impactFingerprint: string;
+  reasonCode: 'CAPACITY_POLICY_CHANGE';
+  idempotencyKey: string;
+}
+
+export interface CreateDeveloperRoomInput {
+  roomNumber: string;
+  roomTypeId: string;
+  expectedRoomTypeVersion: number;
+  reasonCode: 'ROOM_CATALOG_ADD';
+  idempotencyKey: string;
+}
+
+export interface PreviewRoomDeactivationInput {
+  roomId: string;
+  expectedVersion: number;
+}
+
+export interface RoomDeactivationPreview {
+  roomId: string;
+  currentlyOccupied: boolean;
+  activeFutureReservationCount: number;
+  activeCleaningTargetCount: number;
+  activeAssignmentCount: number;
+  activeAttemptCount: number;
+  activePinChangeLease: boolean;
+  unresolvedOperationCount: number;
+  canDeactivate: boolean;
+  reasonCodes: string[];
+  impactFingerprint: string;
+  evaluatedAt: string;
+  expiresAt: string;
+}
+
+export interface DeactivateDeveloperRoomInput extends PreviewRoomDeactivationInput {
+  impactFingerprint: string;
+  reasonCode: 'ROOM_CATALOG_REMOVE';
+  idempotencyKey: string;
+}
+
+export interface DeveloperRoomMutationResult {
+  room: DeveloperRoomCatalogRoom;
+  summary: DeveloperRoomCatalog['summary'];
+  roomType?: DeveloperRoomTypeCatalogItem;
+  effectiveAt: string;
+}
+
+export interface RoomTypeCapacityChangeResult {
+  roomType: DeveloperRoomTypeCatalogItem;
+  effectiveAt: string;
 }
 
 export interface RoomOperationBlockItem {
@@ -289,6 +386,12 @@ export interface RoomService {
   revealPin(actor: Actor, input: RevealRoomPinInput): Promise<RevealedRoomPin>;
   bootstrapPins(actor: Actor, input: BootstrapRoomPinsInput): Promise<RoomPinBootstrapResult>;
   confirmGeneratedPin(actor: Actor, input: ConfirmGeneratedRoomPinInput): Promise<GeneratedRoomPinConfirmation>;
+  getDeveloperCatalog(actor: Actor): Promise<DeveloperRoomCatalog>;
+  previewRoomTypeCapacity(actor: Actor, input: PreviewRoomTypeCapacityInput): Promise<RoomTypeCapacityPreview>;
+  changeRoomTypeCapacity(actor: Actor, input: ChangeRoomTypeCapacityInput): Promise<RoomTypeCapacityChangeResult>;
+  createDeveloperRoom(actor: Actor, input: CreateDeveloperRoomInput): Promise<DeveloperRoomMutationResult>;
+  previewRoomDeactivation(actor: Actor, input: PreviewRoomDeactivationInput): Promise<RoomDeactivationPreview>;
+  deactivateDeveloperRoom(actor: Actor, input: DeactivateDeveloperRoomInput): Promise<DeveloperRoomMutationResult>;
 }
 
 interface RoomProjectionRow {
@@ -325,6 +428,8 @@ interface RoomTypeCatalogRow {
   code: string;
   display_name: string;
   base_cleaning_fee: number;
+  base_occupancy: number;
+  max_occupancy: number;
   active: boolean;
   version: number;
   room_count: number;
@@ -336,6 +441,8 @@ function toRoomTypeCatalogItem(row: RoomTypeCatalogRow): RoomTypeCatalogItem {
     code: row.code,
     displayName: row.display_name,
     baseCleaningFee: row.base_cleaning_fee,
+    baseOccupancy: row.base_occupancy,
+    maxOccupancy: row.max_occupancy,
     active: row.active,
     version: row.version,
     roomCount: row.room_count
@@ -379,6 +486,12 @@ function ensureAdmin(actor: Actor): void {
   }
 }
 
+function ensureDeveloper(actor: Actor): void {
+  if (actor.role !== 'developer') {
+    throw new AppError(403, 'DEVELOPER_REQUIRED', '개발자 권한이 필요합니다.');
+  }
+}
+
 export function generateUniqueFourDigitPins(
   count: number,
   draw: () => number = () => randomInt(10_000)
@@ -399,6 +512,42 @@ export function generateUniqueFourDigitPins(
 
 function roomError(error: { message?: string } | null): AppError {
   const message = error?.message ?? '';
+  if (message.includes('ROOM_TYPE_CAPACITY_INVALID')) {
+    return new AppError(400, 'ROOM_TYPE_CAPACITY_INVALID', '기본 인원은 1명 이상이고 최대 인원을 넘을 수 없습니다.');
+  }
+  if (message.includes('ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT')) {
+    return new AppError(409, 'ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT', '새 최대 인원을 초과하는 활성 예약이 있습니다.');
+  }
+  if (message.includes('ROOM_TYPE_CAPACITY_PREVIEW_STALE')) {
+    return new AppError(409, 'ROOM_TYPE_CAPACITY_PREVIEW_STALE', '정원 변경 미리보기가 만료되었거나 영향 범위가 달라졌습니다.');
+  }
+  if (message.includes('ROOM_DEACTIVATION_PREVIEW_STALE')) {
+    return new AppError(409, 'ROOM_DEACTIVATION_PREVIEW_STALE', '객실 비활성화 미리보기가 만료되었거나 영향 범위가 달라졌습니다.');
+  }
+  if (message.includes('ROOM_DEACTIVATION_BLOCKED')) {
+    return new AppError(409, 'ROOM_DEACTIVATION_BLOCKED', '활성 예약 또는 진행 중인 운영 업무가 있어 객실을 비활성화할 수 없습니다.');
+  }
+  if (message.includes('ROOM_TYPE_VERSION_CONFLICT')) {
+    return new AppError(409, 'ROOM_TYPE_VERSION_CONFLICT', '다른 객실 유형 변경이 먼저 반영됐습니다.');
+  }
+  if (message.includes('ROOM_VERSION_CONFLICT')) {
+    return new AppError(409, 'ROOM_VERSION_CONFLICT', '다른 객실 변경이 먼저 반영됐습니다.');
+  }
+  if (message.includes('ROOM_NUMBER_ALREADY_EXISTS')) {
+    return new AppError(409, 'ROOM_NUMBER_ALREADY_EXISTS', '이미 사용 중인 객실 번호입니다.');
+  }
+  if (message.includes('ROOM_TYPE_INACTIVE')) {
+    return new AppError(409, 'ROOM_TYPE_INACTIVE', '비활성 객실 유형에는 객실을 추가할 수 없습니다.');
+  }
+  if (message.includes('ROOM_ALREADY_INACTIVE')) {
+    return new AppError(409, 'ROOM_ALREADY_INACTIVE', '이미 비활성화된 객실입니다.');
+  }
+  if (message.includes('ROOM_TYPE_NOT_FOUND')) {
+    return new AppError(404, 'ROOM_TYPE_NOT_FOUND', '객실 유형을 찾을 수 없습니다.');
+  }
+  if (message.includes('INVALID_ROOM_NUMBER')) {
+    return new AppError(400, 'INVALID_ROOM_NUMBER', '객실 번호는 1~20자리 숫자여야 합니다.');
+  }
   if (message.includes('CHECKOUT_INCIDENT_OPEN')) {
     return new AppError(409, 'CHECKOUT_INCIDENT_OPEN', '퇴실 미진행 사건을 관리자가 처리한 뒤 PIN 작업을 진행해 주세요.');
   }
@@ -497,6 +646,9 @@ function roomError(error: { message?: string } | null): AppError {
   }
   if (message.includes('ADMIN_REQUIRED') || message.includes('ACTIVE_ACCOUNT_REQUIRED')) {
     return new AppError(403, 'FORBIDDEN', '현재 계정으로 객실을 변경할 수 없습니다.');
+  }
+  if (message.includes('DEVELOPER_REQUIRED') || message.includes('PASSWORD_CHANGE_REQUIRED')) {
+    return new AppError(403, 'DEVELOPER_REQUIRED', '개발자 권한이 필요합니다.');
   }
   return new AppError(500, 'ROOM_COMMAND_FAILED', '객실 정보를 처리하지 못했습니다.');
 }
@@ -612,6 +764,122 @@ export class SupabaseRoomService implements RoomService {
       throw roomError(error);
     }
     return ((data ?? []) as RoomTypeCatalogRow[]).map(toRoomTypeCatalogItem);
+  }
+
+  async getDeveloperCatalog(actor: Actor): Promise<DeveloperRoomCatalog> {
+    ensureDeveloper(actor);
+    const { data, error } = await this.clients.admin.rpc('get_developer_room_catalog', {
+      p_actor_profile_id: actor.profileId
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as DeveloperRoomCatalog;
+  }
+
+  async previewRoomTypeCapacity(
+    actor: Actor,
+    input: PreviewRoomTypeCapacityInput
+  ): Promise<RoomTypeCapacityPreview> {
+    ensureDeveloper(actor);
+    const { data, error } = await this.clients.admin.rpc('preview_developer_room_type_capacity', {
+      p_actor_profile_id: actor.profileId,
+      p_room_type_id: input.roomTypeId,
+      p_base_occupancy: input.baseOccupancy,
+      p_max_occupancy: input.maxOccupancy,
+      p_expected_version: input.expectedVersion
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as RoomTypeCapacityPreview;
+  }
+
+  async changeRoomTypeCapacity(
+    actor: Actor,
+    input: ChangeRoomTypeCapacityInput
+  ): Promise<RoomTypeCapacityChangeResult> {
+    ensureDeveloper(actor);
+    const fingerprint = {
+      roomTypeId: input.roomTypeId,
+      baseOccupancy: input.baseOccupancy,
+      maxOccupancy: input.maxOccupancy,
+      expectedVersion: input.expectedVersion,
+      impactFingerprint: input.impactFingerprint,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('change_developer_room_type_capacity', {
+      p_actor_profile_id: actor.profileId,
+      p_room_type_id: input.roomTypeId,
+      p_base_occupancy: input.baseOccupancy,
+      p_max_occupancy: input.maxOccupancy,
+      p_expected_version: input.expectedVersion,
+      p_impact_fingerprint: input.impactFingerprint,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as RoomTypeCapacityChangeResult;
+  }
+
+  async createDeveloperRoom(
+    actor: Actor,
+    input: CreateDeveloperRoomInput
+  ): Promise<DeveloperRoomMutationResult> {
+    ensureDeveloper(actor);
+    const fingerprint = {
+      roomNumber: input.roomNumber,
+      roomTypeId: input.roomTypeId,
+      expectedRoomTypeVersion: input.expectedRoomTypeVersion,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('create_developer_room', {
+      p_actor_profile_id: actor.profileId,
+      p_room_id: randomUUID(),
+      p_room_number: input.roomNumber,
+      p_room_type_id: input.roomTypeId,
+      p_expected_room_type_version: input.expectedRoomTypeVersion,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as DeveloperRoomMutationResult;
+  }
+
+  async previewRoomDeactivation(
+    actor: Actor,
+    input: PreviewRoomDeactivationInput
+  ): Promise<RoomDeactivationPreview> {
+    ensureDeveloper(actor);
+    const { data, error } = await this.clients.admin.rpc('preview_developer_room_deactivation', {
+      p_actor_profile_id: actor.profileId,
+      p_room_id: input.roomId,
+      p_expected_version: input.expectedVersion
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as RoomDeactivationPreview;
+  }
+
+  async deactivateDeveloperRoom(
+    actor: Actor,
+    input: DeactivateDeveloperRoomInput
+  ): Promise<DeveloperRoomMutationResult> {
+    ensureDeveloper(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      expectedVersion: input.expectedVersion,
+      impactFingerprint: input.impactFingerprint,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('deactivate_developer_room', {
+      p_actor_profile_id: actor.profileId,
+      p_room_id: input.roomId,
+      p_expected_version: input.expectedVersion,
+      p_impact_fingerprint: input.impactFingerprint,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as DeveloperRoomMutationResult;
   }
 
   async listOperationBlocks(actor: Actor, roomId: string): Promise<RoomOperationBlocksResult> {

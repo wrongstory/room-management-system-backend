@@ -89,6 +89,32 @@ const bootstrapPinsSchema = z.object({
 const confirmGeneratedPinSchema = z.object({
   expectedPinVersion: z.number().int().positive()
 }).strict();
+const developerRoomTypeParamsSchema = z.object({ roomTypeId: z.uuid() }).strict();
+const developerCapacitySchema = z.object({
+  baseOccupancy: z.number().int().positive(),
+  maxOccupancy: z.number().int().positive(),
+  expectedVersion: expectedVersionSchema
+}).strict().refine(
+  (input) => input.baseOccupancy <= input.maxOccupancy,
+  { message: 'baseOccupancy는 maxOccupancy보다 클 수 없습니다.', path: ['baseOccupancy'] }
+);
+const developerCapacityCommitSchema = developerCapacitySchema.and(z.object({
+  impactFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  reasonCode: z.literal('CAPACITY_POLICY_CHANGE')
+}).strict());
+const developerRoomCreateSchema = z.object({
+  roomNumber: z.string().trim().regex(/^[0-9]{1,20}$/),
+  roomTypeId: z.uuid(),
+  expectedRoomTypeVersion: expectedVersionSchema,
+  reasonCode: z.literal('ROOM_CATALOG_ADD')
+}).strict();
+const developerRoomDeactivationPreviewSchema = z.object({
+  expectedVersion: expectedVersionSchema
+}).strict();
+const developerRoomDeactivationCommitSchema = developerRoomDeactivationPreviewSchema.extend({
+  impactFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  reasonCode: z.literal('ROOM_CATALOG_REMOVE')
+}).strict();
 
 function idempotencyKey(request: FastifyRequest): string {
   return z.string()
@@ -336,6 +362,68 @@ export function createRoomTypeRoutes(roomService: RoomService): FastifyPluginAsy
     }, async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
       return { items: await roomService.listTypes(request.actor) };
+    });
+  };
+}
+
+export function createDeveloperRoomCatalogRoutes(roomService: RoomService): FastifyPluginAsync {
+  return async (app) => {
+    const developer = [app.authenticate, app.requirePasswordChanged, app.requireDeveloper];
+
+    app.get('/room-catalog', { preHandler: developer }, async (request, reply) => {
+      return reply.header('Cache-Control', 'no-store').send({
+        catalog: await roomService.getDeveloperCatalog(request.actor)
+      });
+    });
+
+    app.post('/room-types/:roomTypeId/capacity/preview', { preHandler: developer }, async (request, reply) => {
+      const { roomTypeId } = developerRoomTypeParamsSchema.parse(request.params);
+      const input = developerCapacitySchema.parse(request.body);
+      return reply.header('Cache-Control', 'no-store').send({
+        preview: await roomService.previewRoomTypeCapacity(request.actor, { roomTypeId, ...input })
+      });
+    });
+
+    app.patch('/room-types/:roomTypeId/capacity', { preHandler: developer }, async (request, reply) => {
+      const { roomTypeId } = developerRoomTypeParamsSchema.parse(request.params);
+      const input = developerCapacityCommitSchema.parse(request.body);
+      return reply.header('Cache-Control', 'no-store').send({
+        change: await roomService.changeRoomTypeCapacity(request.actor, {
+          roomTypeId,
+          ...input,
+          idempotencyKey: idempotencyKey(request)
+        })
+      });
+    });
+
+    app.post('/rooms', { preHandler: developer }, async (request, reply) => {
+      const input = developerRoomCreateSchema.parse(request.body);
+      return reply.code(201).header('Cache-Control', 'no-store').send({
+        creation: await roomService.createDeveloperRoom(request.actor, {
+          ...input,
+          idempotencyKey: idempotencyKey(request)
+        })
+      });
+    });
+
+    app.post('/rooms/:roomId/deactivation/preview', { preHandler: developer }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      const input = developerRoomDeactivationPreviewSchema.parse(request.body);
+      return reply.header('Cache-Control', 'no-store').send({
+        preview: await roomService.previewRoomDeactivation(request.actor, { roomId, ...input })
+      });
+    });
+
+    app.post('/rooms/:roomId/deactivate', { preHandler: developer }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      const input = developerRoomDeactivationCommitSchema.parse(request.body);
+      return reply.header('Cache-Control', 'no-store').send({
+        deactivation: await roomService.deactivateDeveloperRoom(request.actor, {
+          roomId,
+          ...input,
+          idempotencyKey: idempotencyKey(request)
+        })
+      });
     });
   };
 }

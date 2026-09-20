@@ -417,7 +417,7 @@ export const openApiDocument = {
   openapi: "3.1.1",
   info: {
     title: "CASTLE THE ART Room Management API",
-    version: "0.4.0",
+    version: "0.5.0",
     description: [
       "Supabase Edge API의 인증·계정·객실·주간 가능일·예약 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
       "",
@@ -429,7 +429,7 @@ export const openApiDocument = {
       "5. 실패 처리는 HTTP 상태와 함께 안정적인 `error.code`를 기준으로 분기합니다.",
       "",
       "## 역할 경계",
-      "- `developer`: 계정 관리만 가능하며 객실 업무는 금지됩니다.",
+      "- `developer`: 계정 관리·운영 상태와 별도의 안전한 객실 기준정보 카탈로그만 관리할 수 있으며 예약·점유·청소·PIN 운영 데이터는 금지됩니다.",
       "- `admin`: 계정 관리와 객실 업무가 가능합니다.",
       "- `maid`: 계정·전체 객실 API는 사용할 수 없고 본인의 주간 가능일만 조회·제출·변경 요청할 수 있습니다.",
       "",
@@ -1191,6 +1191,217 @@ export const openApiDocument = {
     "/v1/accounts/{profileId}/password-reset": accountMutationPath(
       "resetAccountPassword",
     ),
+    "/v1/developer/room-catalog": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperRoomCatalog",
+        summary: "개발자 객실 기준정보 조회",
+        description:
+          "비밀번호 변경을 완료한 active developer 전용입니다. 객실 유형 정원과 객실 번호·유형·활성 여부·CAS version만 반환하며 예약, 점유, 청소, PIN, 고객·메이드 정보는 포함하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("객실 기준정보", "catalog", {
+            $ref: "#/components/schemas/DeveloperRoomCatalog",
+          }),
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/room-types/{roomTypeId}/capacity/preview": {
+      post: {
+        tags: ["Developer"],
+        operationId: "previewDeveloperRoomTypeCapacity",
+        summary: "객실 유형 정원 변경 영향 확인",
+        description:
+          "active developer가 변경할 기준·최대 인원과 expectedVersion을 검증합니다. 현재·미래 active 예약 가운데 새 최대 인원을 초과할 건수를 PII 없이 계산하고 5분 TTL fingerprint를 반환하며 상태는 변경하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [photoPathId("roomTypeId")],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref:
+                  "#/components/schemas/DeveloperRoomTypeCapacityPreviewRequest",
+              },
+              example: {
+                baseOccupancy: 2,
+                maxOccupancy: 4,
+                expectedVersion: 3,
+              },
+            },
+          },
+        },
+        responses: {
+          "200": developerResponse("정원 변경 영향", "preview", {
+            $ref: "#/components/schemas/DeveloperRoomTypeCapacityPreview",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/room-types/{roomTypeId}/capacity": {
+      patch: {
+        tags: ["Developer"],
+        operationId: "changeDeveloperRoomTypeCapacity",
+        summary: "객실 유형 정원 변경 확정",
+        description:
+          "active developer가 preview와 동일한 값·version·영향 fingerprint를 Idempotency-Key와 함께 확정합니다. 초과 active 예약이 있거나 영향이 변하면 409이며 기존 예약 인원은 소급 변경하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [photoPathId("roomTypeId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref:
+                  "#/components/schemas/DeveloperRoomTypeCapacityChangeRequest",
+              },
+              example: {
+                baseOccupancy: 2,
+                maxOccupancy: 4,
+                expectedVersion: 3,
+                impactFingerprint: "a".repeat(64),
+                reasonCode: "CAPACITY_POLICY_CHANGE",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": developerResponse("정원 변경 결과", "change", {
+            $ref: "#/components/schemas/DeveloperRoomTypeCapacityChange",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/rooms": {
+      post: {
+        tags: ["Developer"],
+        operationId: "createDeveloperRoom",
+        summary: "객실 기준정보 추가",
+        description:
+          "active developer가 숫자 문자열 객실 번호와 active 객실 유형을 지정해 객실을 추가합니다. 객실 유형 version을 CAS로 확인하고 새 객실은 운영 준비 확인이 필요한 verification_required 상태로 시작합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/DeveloperRoomCreateRequest",
+              },
+              example: {
+                roomNumber: "516",
+                roomTypeId: "10000000-0000-4000-8000-000000000004",
+                expectedRoomTypeVersion: 3,
+                reasonCode: "ROOM_CATALOG_ADD",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": developerResponse("객실 추가 결과", "creation", {
+            $ref: "#/components/schemas/DeveloperRoomMutationResult",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/rooms/{roomId}/deactivation/preview": {
+      post: {
+        tags: ["Developer"],
+        operationId: "previewDeveloperRoomDeactivation",
+        summary: "객실 비활성화 영향 확인",
+        description:
+          "active developer가 객실 version을 CAS로 확인하고 현재 점유, active·future 예약, 진행 중 청소, PIN 변경 lease, 미해결 운영 건수를 PII 없이 조회합니다. 5분 TTL fingerprint만 만들며 이력이나 상태는 변경하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [photoPathId("roomId")],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref:
+                  "#/components/schemas/DeveloperRoomDeactivationPreviewRequest",
+              },
+              example: { expectedVersion: 4 },
+            },
+          },
+        },
+        responses: {
+          "200": developerResponse("객실 비활성화 영향", "preview", {
+            $ref: "#/components/schemas/DeveloperRoomDeactivationPreview",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/rooms/{roomId}/deactivate": {
+      post: {
+        tags: ["Developer"],
+        operationId: "deactivateDeveloperRoom",
+        summary: "객실 안전 비활성화",
+        description:
+          "active developer가 preview fingerprint와 expectedVersion을 Idempotency-Key로 확정합니다. blocker가 있으면 409이며 성공 시 hard delete 없이 inactive로 전환해 기존 예약·청소·PIN·감사 참조를 보존합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [photoPathId("roomId"), idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/DeveloperRoomDeactivationRequest",
+              },
+              example: {
+                expectedVersion: 4,
+                impactFingerprint: "a".repeat(64),
+                reasonCode: "ROOM_CATALOG_REMOVE",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": developerResponse("객실 비활성화 결과", "deactivation", {
+            $ref: "#/components/schemas/DeveloperRoomMutationResult",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/developer/overview": {
       get: {
         tags: ["Developer"],
@@ -3780,6 +3991,7 @@ export const openApiDocument = {
                 reservationType: "standard",
                 checkInAt: "2026-10-01T16:00:00+09:00",
                 checkOutAt: "2026-10-02T11:00:00+09:00",
+                guestCount: 2,
                 roomTypeIds: [],
                 excludeReservationId: null,
               },
@@ -6198,6 +6410,19 @@ export const openApiDocument = {
           "PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH",
           "PAYROLL_COMMAND_FAILED",
           "ROOM_NOT_FOUND",
+          "ROOM_TYPE_NOT_FOUND",
+          "ROOM_TYPE_CAPACITY_INVALID",
+          "ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT",
+          "ROOM_TYPE_CAPACITY_PREVIEW_STALE",
+          "ROOM_TYPE_VERSION_CONFLICT",
+          "ROOM_NUMBER_ALREADY_EXISTS",
+          "ROOM_TYPE_INACTIVE",
+          "ROOM_INACTIVE",
+          "ROOM_ALREADY_INACTIVE",
+          "ROOM_DEACTIVATION_BLOCKED",
+          "ROOM_DEACTIVATION_PREVIEW_STALE",
+          "ROOM_VERSION_CONFLICT",
+          "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
           "ROOM_OPERATION_NOT_FOUND",
           "INVALID_ROOM_PIN",
           "INVALID_PIN_BOOTSTRAP_LIMIT",
@@ -8889,12 +9114,13 @@ export const openApiDocument = {
           "DATA_UNCONFIRMED",
           "PIN_MISMATCH",
           "PIN_UNCONFIGURED",
+          "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
         ],
       },
       ReservationBookabilityStandardPreviewRequest: {
         type: "object",
         additionalProperties: false,
-        required: ["reservationType", "checkInAt", "checkOutAt"],
+        required: ["reservationType", "checkInAt", "checkOutAt", "guestCount"],
         properties: {
           reservationType: { type: "string", const: "standard" },
           checkInAt: {
@@ -8907,6 +9133,11 @@ export const openApiDocument = {
             format: "date-time",
             description:
               "예약 구간 종료(미포함). standard는 null을 허용하지 않음",
+          },
+          guestCount: {
+            type: "integer",
+            minimum: 1,
+            description: "객실 유형 최대 인원 판정에 사용할 예약 총 인원",
           },
           excludeReservationId: {
             type: ["string", "null"],
@@ -8927,7 +9158,7 @@ export const openApiDocument = {
       ReservationBookabilityLongStayPreviewRequest: {
         type: "object",
         additionalProperties: false,
-        required: ["reservationType", "checkInAt", "checkOutAt"],
+        required: ["reservationType", "checkInAt", "checkOutAt", "guestCount"],
         properties: {
           reservationType: { type: "string", const: "long_stay" },
           checkInAt: {
@@ -8939,6 +9170,11 @@ export const openApiDocument = {
             type: ["string", "null"],
             format: "date-time",
             description: "null이면 checkInAt 이후 미래 전체를 점유하는 preview",
+          },
+          guestCount: {
+            type: "integer",
+            minimum: 1,
+            description: "객실 유형 최대 인원 판정에 사용할 예약 총 인원",
           },
           excludeReservationId: {
             type: ["string", "null"],
@@ -9022,6 +9258,7 @@ export const openApiDocument = {
           "reservationType",
           "checkInAt",
           "checkOutAt",
+          "guestCount",
           "excludeReservationId",
           "evaluatedAt",
           "candidates",
@@ -9031,6 +9268,7 @@ export const openApiDocument = {
           reservationType: { $ref: "#/components/schemas/ReservationType" },
           checkInAt: { type: "string", format: "date-time" },
           checkOutAt: { type: ["string", "null"], format: "date-time" },
+          guestCount: { type: "integer", minimum: 1 },
           excludeReservationId: { type: ["string", "null"], format: "uuid" },
           evaluatedAt: { type: "string", format: "date-time" },
           candidates: {
@@ -9644,6 +9882,8 @@ export const openApiDocument = {
           "code",
           "displayName",
           "baseCleaningFee",
+          "baseOccupancy",
+          "maxOccupancy",
           "active",
           "version",
           "roomCount",
@@ -9660,6 +9900,17 @@ export const openApiDocument = {
             type: "integer",
             minimum: 0,
             description: "원 단위 기본 청소비",
+          },
+          baseOccupancy: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "기준 인원. 이를 넘겨도 예약 가능하며 프런트 강조 기준으로만 사용합니다.",
+          },
+          maxOccupancy: {
+            type: "integer",
+            minimum: 1,
+            description: "이 객실 유형에 허용되는 예약 총 인원 상한입니다.",
           },
           active: {
             type: "boolean",
@@ -9686,6 +9937,265 @@ export const openApiDocument = {
             type: "array",
             items: { $ref: "#/components/schemas/RoomTypeCatalogItem" },
           },
+        },
+      },
+      DeveloperRoomCatalogSummary: {
+        type: "object",
+        additionalProperties: false,
+        required: ["total", "active", "inactive"],
+        properties: {
+          total: { type: "integer", minimum: 0 },
+          active: { type: "integer", minimum: 0 },
+          inactive: { type: "integer", minimum: 0 },
+        },
+      },
+      DeveloperRoomTypeCatalogItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "code",
+          "displayName",
+          "baseOccupancy",
+          "maxOccupancy",
+          "active",
+          "version",
+          "roomCount",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          code: { type: "string", minLength: 1 },
+          displayName: { type: "string", minLength: 1 },
+          baseOccupancy: { type: "integer", minimum: 1 },
+          maxOccupancy: { type: "integer", minimum: 1 },
+          active: { type: "boolean" },
+          version: { type: "integer", minimum: 1 },
+          roomCount: { type: "integer", minimum: 0 },
+        },
+      },
+      DeveloperRoomCatalogItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "roomNumber",
+          "roomTypeId",
+          "roomTypeCode",
+          "active",
+          "version",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          roomNumber: { type: "string", pattern: "^[0-9]{1,20}$" },
+          roomTypeId: { type: "string", format: "uuid" },
+          roomTypeCode: { type: "string", minLength: 1 },
+          active: { type: "boolean" },
+          version: { type: "integer", minimum: 1 },
+        },
+      },
+      DeveloperRoomCatalog: {
+        type: "object",
+        additionalProperties: false,
+        required: ["generatedAt", "summary", "roomTypes", "rooms"],
+        properties: {
+          generatedAt: { type: "string", format: "date-time" },
+          summary: { $ref: "#/components/schemas/DeveloperRoomCatalogSummary" },
+          roomTypes: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/DeveloperRoomTypeCatalogItem",
+            },
+          },
+          rooms: {
+            type: "array",
+            items: { $ref: "#/components/schemas/DeveloperRoomCatalogItem" },
+          },
+        },
+      },
+      DeveloperRoomTypeCapacityPreviewRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["baseOccupancy", "maxOccupancy", "expectedVersion"],
+        properties: {
+          baseOccupancy: { type: "integer", minimum: 1 },
+          maxOccupancy: { type: "integer", minimum: 1 },
+          expectedVersion: { type: "integer", minimum: 1 },
+        },
+        description: "baseOccupancy는 maxOccupancy 이하여야 합니다.",
+      },
+      DeveloperRoomTypeCapacityChangeRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "baseOccupancy",
+          "maxOccupancy",
+          "expectedVersion",
+          "impactFingerprint",
+          "reasonCode",
+        ],
+        properties: {
+          baseOccupancy: { type: "integer", minimum: 1 },
+          maxOccupancy: { type: "integer", minimum: 1 },
+          expectedVersion: { type: "integer", minimum: 1 },
+          impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          reasonCode: { type: "string", const: "CAPACITY_POLICY_CHANGE" },
+        },
+        description:
+          "baseOccupancy는 maxOccupancy 이하여야 하며 preview와 모든 값이 같아야 합니다.",
+      },
+      DeveloperRoomTypeCapacityPreview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomTypeId",
+          "current",
+          "proposed",
+          "roomCount",
+          "activeReservationCount",
+          "exceedingActiveReservationCount",
+          "reasonCodes",
+          "impactFingerprint",
+          "evaluatedAt",
+          "expiresAt",
+        ],
+        properties: {
+          roomTypeId: { type: "string", format: "uuid" },
+          current: {
+            type: "object",
+            additionalProperties: false,
+            required: ["baseOccupancy", "maxOccupancy", "version"],
+            properties: {
+              baseOccupancy: { type: "integer", minimum: 1 },
+              maxOccupancy: { type: "integer", minimum: 1 },
+              version: { type: "integer", minimum: 1 },
+            },
+          },
+          proposed: {
+            type: "object",
+            additionalProperties: false,
+            required: ["baseOccupancy", "maxOccupancy"],
+            properties: {
+              baseOccupancy: { type: "integer", minimum: 1 },
+              maxOccupancy: { type: "integer", minimum: 1 },
+            },
+          },
+          roomCount: { type: "integer", minimum: 0 },
+          activeReservationCount: { type: "integer", minimum: 0 },
+          exceedingActiveReservationCount: { type: "integer", minimum: 0 },
+          reasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: {
+              type: "string",
+              enum: ["ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT"],
+            },
+          },
+          impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          evaluatedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperRoomTypeCapacityChange: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomType", "effectiveAt"],
+        properties: {
+          roomType: {
+            $ref: "#/components/schemas/DeveloperRoomTypeCatalogItem",
+          },
+          effectiveAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperRoomCreateRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomNumber",
+          "roomTypeId",
+          "expectedRoomTypeVersion",
+          "reasonCode",
+        ],
+        properties: {
+          roomNumber: { type: "string", pattern: "^[0-9]{1,20}$" },
+          roomTypeId: { type: "string", format: "uuid" },
+          expectedRoomTypeVersion: { type: "integer", minimum: 1 },
+          reasonCode: { type: "string", const: "ROOM_CATALOG_ADD" },
+        },
+      },
+      DeveloperRoomDeactivationPreviewRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion"],
+        properties: { expectedVersion: { type: "integer", minimum: 1 } },
+      },
+      DeveloperRoomDeactivationRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion", "impactFingerprint", "reasonCode"],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          reasonCode: { type: "string", const: "ROOM_CATALOG_REMOVE" },
+        },
+      },
+      DeveloperRoomDeactivationPreview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomId",
+          "currentlyOccupied",
+          "activeFutureReservationCount",
+          "activeCleaningTargetCount",
+          "activeAssignmentCount",
+          "activeAttemptCount",
+          "activePinChangeLease",
+          "unresolvedOperationCount",
+          "canDeactivate",
+          "reasonCodes",
+          "impactFingerprint",
+          "evaluatedAt",
+          "expiresAt",
+        ],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          currentlyOccupied: { type: "boolean" },
+          activeFutureReservationCount: { type: "integer", minimum: 0 },
+          activeCleaningTargetCount: { type: "integer", minimum: 0 },
+          activeAssignmentCount: { type: "integer", minimum: 0 },
+          activeAttemptCount: { type: "integer", minimum: 0 },
+          activePinChangeLease: { type: "boolean" },
+          unresolvedOperationCount: { type: "integer", minimum: 0 },
+          canDeactivate: { type: "boolean" },
+          reasonCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: {
+              type: "string",
+              enum: [
+                "ROOM_CURRENTLY_OCCUPIED",
+                "ROOM_ACTIVE_OR_FUTURE_RESERVATION_EXISTS",
+                "ROOM_CLEANING_WORKFLOW_ACTIVE",
+                "ROOM_PIN_CHANGE_ACTIVE",
+                "ROOM_OPERATION_UNRESOLVED",
+              ],
+            },
+          },
+          impactFingerprint: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          evaluatedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+        },
+      },
+      DeveloperRoomMutationResult: {
+        type: "object",
+        additionalProperties: false,
+        required: ["room", "summary", "effectiveAt"],
+        properties: {
+          room: { $ref: "#/components/schemas/DeveloperRoomCatalogItem" },
+          summary: { $ref: "#/components/schemas/DeveloperRoomCatalogSummary" },
+          roomType: {
+            $ref: "#/components/schemas/DeveloperRoomTypeCatalogItem",
+          },
+          effectiveAt: { type: "string", format: "date-time" },
         },
       },
       RoomProjection: {

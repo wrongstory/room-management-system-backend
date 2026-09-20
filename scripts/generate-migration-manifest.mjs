@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationDirectory = resolve(projectRoot, "supabase", "migrations");
-const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.4.0.json");
+const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.5.0.json");
 const migrationFilePattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
-const baselineCount = 56;
+const baselineCount = 74;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(`Migration manifest generation failed: ${message}`);
@@ -43,7 +43,7 @@ invariant(baselineCount < migrations.length, "baseline must precede the release 
 
 const manifest = {
   schemaVersion: 1,
-  release: "v0.4.0",
+  release: "v0.5.0",
   hashAlgorithm: "sha256-lf-utf8",
   totalCount: migrations.length,
   baseline: {

@@ -6,11 +6,42 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
-Deno.test("OpenAPI publishes the approved v0.4.0 candidate version", async () => {
+Deno.test("OpenAPI publishes the v0.5.0 developer room catalog candidate", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   assert(
-    document.info.version === "0.4.0",
+    document.info.version === "0.5.0",
     "approved semantic contract version",
+  );
+});
+
+Deno.test("developer room catalog OpenAPI exposes six developer-only safe operations", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const operations = [
+    document.paths["/v1/developer/room-catalog"].get,
+    document.paths["/v1/developer/room-types/{roomTypeId}/capacity/preview"]
+      .post,
+    document.paths["/v1/developer/room-types/{roomTypeId}/capacity"].patch,
+    document.paths["/v1/developer/rooms"].post,
+    document.paths["/v1/developer/rooms/{roomId}/deactivation/preview"].post,
+    document.paths["/v1/developer/rooms/{roomId}/deactivate"].post,
+  ];
+  assert(
+    operations.every((operation) =>
+      operation["x-required-roles"].join(",") === "developer"
+    ),
+    "all catalog operations are developer-only",
+  );
+  const roomType = document.components.schemas.RoomTypeCatalogItem;
+  assert(
+    roomType.required.includes("baseOccupancy") &&
+      roomType.required.includes("maxOccupancy"),
+    "admin catalog includes both occupancy fields",
+  );
+  const request =
+    document.components.schemas.ReservationBookabilityStandardPreviewRequest;
+  assert(
+    request.required.includes("guestCount"),
+    "bookability requires guestCount",
   );
 });
 Deno.test("payroll cycle resolver reuses the bounded payroll envelope", async () => {
@@ -159,13 +190,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 121 &&
+    Object.keys(document.paths).length === 126 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 131,
-    "combined candidate contract 121/131",
+        ).length === 136,
+    "combined candidate contract 126/136",
   );
 });
 

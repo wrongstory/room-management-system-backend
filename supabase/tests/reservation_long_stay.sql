@@ -106,7 +106,7 @@ select is(
   (select (candidate->>'interval_bookable')::boolean
     from jsonb_array_elements(public.preview_reservation_bookability(
       '82000000-0000-4000-8000-000000000001',
-      '2035-01-01 15:00:00+09','2035-01-02 11:00:00+09',null,null,'standard'
+      '2035-01-01 15:00:00+09','2035-01-02 11:00:00+09',2,null,null,'standard'
     )->'candidates') candidate where candidate->>'room_id'='83000000-0000-4000-8000-000000000001'),
   false,'open-ended stay blocks arbitrarily distant future intervals'
 );

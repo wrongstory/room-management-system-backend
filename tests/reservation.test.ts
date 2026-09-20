@@ -308,6 +308,7 @@ describe('reservation privacy and idempotency', () => {
       reservationType: 'standard' as const,
       checkInAt: '2026-10-01T16:00:00+09:00',
       checkOutAt: '2026-10-02T11:00:00+09:00',
+      guestCount: 2,
       roomTypeIds: [],
       excludeReservationId: null
     };

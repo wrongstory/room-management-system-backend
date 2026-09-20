@@ -488,6 +488,7 @@ const previewRaceResults = await Promise.all([0, 1].map(() => (
     p_actor_profile_id: actorProfileId,
     p_check_in_at: '2035-01-01T07:00:00.000Z',
     p_check_out_at: '2035-01-02T02:00:00.000Z',
+    p_guest_count: 2,
     p_exclude_reservation_id: null,
     p_room_type_ids: null
   })
@@ -550,6 +551,7 @@ const sequentialPreview = await client.rpc('preview_reservation_bookability', {
   p_actor_profile_id: actorProfileId,
   p_check_in_at: '2037-01-01T07:00:00.000Z',
   p_check_out_at: '2037-01-02T02:00:00.000Z',
+  p_guest_count: 2,
   p_exclude_reservation_id: null,
   p_room_type_ids: null
 });

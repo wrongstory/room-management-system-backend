@@ -1,14 +1,19 @@
 import { notificationDeliveryConfig } from "../notification-delivery/index.ts";
+import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
   assertApprovedRoomPinSheetTarget,
   validateGoogleSheetsServiceAccount,
 } from "./google-sheets-pin.ts";
 import { openApiDocument } from "./openapi.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
-import { EdgeError, requireDeveloper } from "./runtime.ts";
+import {
+  EdgeError,
+  requireDeveloper,
+  requirePasswordChanged,
+} from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "room_status_admin_correction";
+export const expectedMigrationName = "developer_room_catalog_capacity";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -102,6 +107,361 @@ const notificationDeliverySecretNames = [
   "VAPID_KEYRING_JSON",
   "NOTIFICATION_DELIVERY_INVOKE_SECRET",
 ] as const;
+
+const catalogReasonPattern = /^[A-Z0-9_]{2,80}$/;
+const impactFingerprintPattern = /^[0-9a-f]{64}$/;
+
+function catalogValidation(message: string): never {
+  throw new EdgeError(400, "VALIDATION_ERROR", message);
+}
+
+function catalogObject(value: unknown): Record<string, unknown> {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    catalogValidation("올바른 JSON 객체가 필요합니다.");
+  }
+  return value as Record<string, unknown>;
+}
+
+function catalogOnlyFields(
+  body: Record<string, unknown>,
+  allowed: readonly string[],
+): void {
+  if (Object.keys(body).some((key) => !allowed.includes(key))) {
+    catalogValidation("허용되지 않은 요청 필드가 있습니다.");
+  }
+}
+
+function catalogPositiveInteger(value: unknown, name: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    catalogValidation(`${name}은 1 이상의 정수여야 합니다.`);
+  }
+  return value as number;
+}
+
+function catalogReason(value: unknown, expected: string): string {
+  if (
+    typeof value !== "string" || !catalogReasonPattern.test(value) ||
+    value !== expected
+  ) {
+    catalogValidation(`reasonCode는 ${expected}여야 합니다.`);
+  }
+  return value;
+}
+
+function catalogFingerprint(value: unknown): string {
+  if (typeof value !== "string" || !impactFingerprintPattern.test(value)) {
+    catalogValidation("유효한 impactFingerprint가 필요합니다.");
+  }
+  return value;
+}
+
+function canonicalizeCatalog(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeCatalog);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalizeCatalog(nested)]),
+    );
+  }
+  return value;
+}
+
+async function catalogRequestHash(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(canonicalizeCatalog(value))),
+  );
+  return [...new Uint8Array(digest)].map((byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function catalogDatabaseError(error: { message?: string } | null): never {
+  const message = error?.message ?? "";
+  const mappings: Array<[string, number, string]> = [
+    [
+      "ROOM_TYPE_CAPACITY_INVALID",
+      400,
+      "객실 유형 정원 값이 올바르지 않습니다.",
+    ],
+    [
+      "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
+      400,
+      "예약 인원이 객실 유형 최대 인원을 초과합니다.",
+    ],
+    [
+      "ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT",
+      409,
+      "새 최대 인원을 초과하는 활성 예약이 있습니다.",
+    ],
+    [
+      "ROOM_TYPE_CAPACITY_PREVIEW_STALE",
+      409,
+      "정원 변경 미리보기가 만료되었거나 영향 범위가 달라졌습니다.",
+    ],
+    [
+      "ROOM_DEACTIVATION_PREVIEW_STALE",
+      409,
+      "객실 비활성화 미리보기가 만료되었거나 영향 범위가 달라졌습니다.",
+    ],
+    [
+      "ROOM_DEACTIVATION_BLOCKED",
+      409,
+      "활성 예약 또는 진행 중인 운영 업무가 있어 객실을 비활성화할 수 없습니다.",
+    ],
+    [
+      "ROOM_TYPE_VERSION_CONFLICT",
+      409,
+      "다른 객실 유형 변경이 먼저 반영됐습니다.",
+    ],
+    ["ROOM_VERSION_CONFLICT", 409, "다른 객실 변경이 먼저 반영됐습니다."],
+    ["ROOM_NUMBER_ALREADY_EXISTS", 409, "이미 사용 중인 객실 번호입니다."],
+    [
+      "ROOM_TYPE_INACTIVE",
+      409,
+      "비활성 객실 유형에는 객실을 추가할 수 없습니다.",
+    ],
+    ["ROOM_ALREADY_INACTIVE", 409, "이미 비활성화된 객실입니다."],
+    ["ROOM_TYPE_NOT_FOUND", 404, "객실 유형을 찾을 수 없습니다."],
+    ["ROOM_NOT_FOUND", 404, "객실을 찾을 수 없습니다."],
+    [
+      "IDEMPOTENCY_KEY_REUSED",
+      409,
+      "이미 다른 요청에 사용한 Idempotency-Key입니다.",
+    ],
+    ["DEVELOPER_REQUIRED", 403, "개발자 권한이 필요합니다."],
+  ];
+  const mapping = mappings.find(([code]) => message.includes(code));
+  if (mapping) throw new EdgeError(mapping[1], mapping[0], mapping[2]);
+  throw new EdgeError(
+    500,
+    "DEVELOPER_ROOM_CATALOG_FAILED",
+    "객실 카탈로그 요청을 처리하지 못했습니다.",
+  );
+}
+
+async function catalogRpc(
+  clients: EdgeClients,
+  name: string,
+  parameters: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await clients.admin.rpc(name, parameters);
+  if (error || !data || Array.isArray(data) || typeof data !== "object") {
+    catalogDatabaseError(error);
+  }
+  return data as Record<string, unknown>;
+}
+
+function requireDeveloperCatalog(actor: EdgeActor): void {
+  requirePasswordChanged(actor);
+  requireDeveloper(actor);
+}
+
+export function developerRoomTypeCapacityPath(
+  path: string,
+): { roomTypeId: string; preview: boolean } | null {
+  const match = path.match(
+    /^\/v1\/developer\/room-types\/([^/]+)\/capacity(\/preview)?$/,
+  );
+  if (!match) return null;
+  if (!match[1] || !uuidPattern.test(match[1])) {
+    catalogValidation("roomTypeId에 UUID가 필요합니다.");
+  }
+  return { roomTypeId: match[1], preview: match[2] === "/preview" };
+}
+
+export function developerRoomCatalogActionPath(
+  path: string,
+): { roomId: string; preview: boolean } | null {
+  const match = path.match(
+    /^\/v1\/developer\/rooms\/([^/]+)\/deactivat(?:ion\/preview|e)$/,
+  );
+  if (!match) return null;
+  if (!match[1] || !uuidPattern.test(match[1])) {
+    catalogValidation("roomId에 UUID가 필요합니다.");
+  }
+  return { roomId: match[1], preview: path.endsWith("/deactivation/preview") };
+}
+
+export async function developerRoomCatalog(
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<Record<string, unknown>> {
+  requireDeveloperCatalog(actor);
+  return await catalogRpc(clients, "get_developer_room_catalog", {
+    p_actor_profile_id: actor.profileId,
+  });
+}
+
+export async function previewDeveloperRoomTypeCapacity(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomTypeId: string,
+): Promise<Record<string, unknown>> {
+  requireDeveloperCatalog(actor);
+  const body = catalogObject(await readJsonBody(request));
+  catalogOnlyFields(body, ["baseOccupancy", "maxOccupancy", "expectedVersion"]);
+  const baseOccupancy = catalogPositiveInteger(
+    body.baseOccupancy,
+    "baseOccupancy",
+  );
+  const maxOccupancy = catalogPositiveInteger(
+    body.maxOccupancy,
+    "maxOccupancy",
+  );
+  if (baseOccupancy > maxOccupancy) {
+    catalogValidation("baseOccupancy는 maxOccupancy보다 클 수 없습니다.");
+  }
+  return await catalogRpc(clients, "preview_developer_room_type_capacity", {
+    p_actor_profile_id: actor.profileId,
+    p_room_type_id: roomTypeId,
+    p_base_occupancy: baseOccupancy,
+    p_max_occupancy: maxOccupancy,
+    p_expected_version: catalogPositiveInteger(
+      body.expectedVersion,
+      "expectedVersion",
+    ),
+  });
+}
+
+export async function changeDeveloperRoomTypeCapacity(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomTypeId: string,
+): Promise<Record<string, unknown>> {
+  requireDeveloperCatalog(actor);
+  const body = catalogObject(await readJsonBody(request));
+  catalogOnlyFields(body, [
+    "baseOccupancy",
+    "maxOccupancy",
+    "expectedVersion",
+    "impactFingerprint",
+    "reasonCode",
+  ]);
+  const fingerprint = {
+    roomTypeId,
+    baseOccupancy: catalogPositiveInteger(body.baseOccupancy, "baseOccupancy"),
+    maxOccupancy: catalogPositiveInteger(body.maxOccupancy, "maxOccupancy"),
+    expectedVersion: catalogPositiveInteger(
+      body.expectedVersion,
+      "expectedVersion",
+    ),
+    impactFingerprint: catalogFingerprint(body.impactFingerprint),
+    reasonCode: catalogReason(body.reasonCode, "CAPACITY_POLICY_CHANGE"),
+  };
+  if (fingerprint.baseOccupancy > fingerprint.maxOccupancy) {
+    catalogValidation("baseOccupancy는 maxOccupancy보다 클 수 없습니다.");
+  }
+  return await catalogRpc(clients, "change_developer_room_type_capacity", {
+    p_actor_profile_id: actor.profileId,
+    p_room_type_id: roomTypeId,
+    p_base_occupancy: fingerprint.baseOccupancy,
+    p_max_occupancy: fingerprint.maxOccupancy,
+    p_expected_version: fingerprint.expectedVersion,
+    p_impact_fingerprint: fingerprint.impactFingerprint,
+    p_reason_code: fingerprint.reasonCode,
+    p_idempotency_key: idempotencyKey(request),
+    p_request_hash: await catalogRequestHash(fingerprint),
+  });
+}
+
+export async function createDeveloperRoom(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<Record<string, unknown>> {
+  requireDeveloperCatalog(actor);
+  const body = catalogObject(await readJsonBody(request));
+  catalogOnlyFields(body, [
+    "roomNumber",
+    "roomTypeId",
+    "expectedRoomTypeVersion",
+    "reasonCode",
+  ]);
+  if (
+    typeof body.roomNumber !== "string" ||
+    !/^[0-9]{1,20}$/.test(body.roomNumber.trim())
+  ) {
+    catalogValidation("roomNumber는 1~20자리 숫자여야 합니다.");
+  }
+  if (
+    typeof body.roomTypeId !== "string" || !uuidPattern.test(body.roomTypeId)
+  ) catalogValidation("roomTypeId에 UUID가 필요합니다.");
+  const fingerprint = {
+    roomNumber: body.roomNumber.trim(),
+    roomTypeId: body.roomTypeId,
+    expectedRoomTypeVersion: catalogPositiveInteger(
+      body.expectedRoomTypeVersion,
+      "expectedRoomTypeVersion",
+    ),
+    reasonCode: catalogReason(body.reasonCode, "ROOM_CATALOG_ADD"),
+  };
+  return await catalogRpc(clients, "create_developer_room", {
+    p_actor_profile_id: actor.profileId,
+    p_room_id: crypto.randomUUID(),
+    p_room_number: fingerprint.roomNumber,
+    p_room_type_id: fingerprint.roomTypeId,
+    p_expected_room_type_version: fingerprint.expectedRoomTypeVersion,
+    p_reason_code: fingerprint.reasonCode,
+    p_idempotency_key: idempotencyKey(request),
+    p_request_hash: await catalogRequestHash(fingerprint),
+  });
+}
+
+export async function previewDeveloperRoomDeactivation(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+): Promise<Record<string, unknown>> {
+  requireDeveloperCatalog(actor);
+  const body = catalogObject(await readJsonBody(request));
+  catalogOnlyFields(body, ["expectedVersion"]);
+  return await catalogRpc(clients, "preview_developer_room_deactivation", {
+    p_actor_profile_id: actor.profileId,
+    p_room_id: roomId,
+    p_expected_version: catalogPositiveInteger(
+      body.expectedVersion,
+      "expectedVersion",
+    ),
+  });
+}
+
+export async function deactivateDeveloperRoom(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+): Promise<Record<string, unknown>> {
+  requireDeveloperCatalog(actor);
+  const body = catalogObject(await readJsonBody(request));
+  catalogOnlyFields(body, [
+    "expectedVersion",
+    "impactFingerprint",
+    "reasonCode",
+  ]);
+  const fingerprint = {
+    roomId,
+    expectedVersion: catalogPositiveInteger(
+      body.expectedVersion,
+      "expectedVersion",
+    ),
+    impactFingerprint: catalogFingerprint(body.impactFingerprint),
+    reasonCode: catalogReason(body.reasonCode, "ROOM_CATALOG_REMOVE"),
+  };
+  return await catalogRpc(clients, "deactivate_developer_room", {
+    p_actor_profile_id: actor.profileId,
+    p_room_id: roomId,
+    p_expected_version: fingerprint.expectedVersion,
+    p_impact_fingerprint: fingerprint.impactFingerprint,
+    p_reason_code: fingerprint.reasonCode,
+    p_idempotency_key: idempotencyKey(request),
+    p_request_hash: await catalogRequestHash(fingerprint),
+  });
+}
 
 interface AuditRow {
   id: string;

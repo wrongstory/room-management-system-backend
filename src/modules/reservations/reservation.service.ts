@@ -45,7 +45,8 @@ export type ReservationBookabilityReason =
   | 'ROOM_ISSUE_BLOCKED'
   | 'DATA_UNCONFIRMED'
   | 'PIN_MISMATCH'
-  | 'PIN_UNCONFIGURED';
+  | 'PIN_UNCONFIGURED'
+  | 'GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY';
 
 export interface ReservationBookabilityCandidate {
   roomId: string;
@@ -62,6 +63,7 @@ export interface ReservationBookabilityPreviewInput {
   reservationType: ReservationType;
   checkInAt: string;
   checkOutAt: string | null;
+  guestCount: number;
   excludeReservationId?: string | null;
   roomTypeIds?: string[];
 }
@@ -70,6 +72,7 @@ export interface ReservationBookabilityPreview {
   reservationType: ReservationType;
   checkInAt: string;
   checkOutAt: string | null;
+  guestCount: number;
   excludeReservationId: string | null;
   evaluatedAt: string;
   candidates: ReservationBookabilityCandidate[];
@@ -471,6 +474,15 @@ function reservationError(
   roomMoveCommand = false
 ): AppError {
   const message = error?.message ?? '';
+  if (message.includes('GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY')) {
+    return new AppError(400, 'GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY', '예약 인원이 객실 유형의 최대 인원을 초과합니다.');
+  }
+  if (message.includes('ROOM_INACTIVE')) {
+    return new AppError(409, 'ROOM_INACTIVE', '비활성 객실에는 예약할 수 없습니다.');
+  }
+  if (message.includes('ROOM_TYPE_INACTIVE')) {
+    return new AppError(409, 'ROOM_TYPE_INACTIVE', '비활성 객실 유형에는 예약할 수 없습니다.');
+  }
   const roomMoveErrors: Array<[string, string]> = [
     ['RESERVATION_VERSION_CONFLICT', '예약이 변경됐습니다. 다시 확인해 주세요.'],
     ['SOURCE_ROOM_VERSION_CONFLICT', '출발 객실 상태가 변경됐습니다. 다시 확인해 주세요.'],
@@ -641,7 +653,7 @@ const roomMoveBlockingReasons = new Set<ReservationRoomMoveBlockingReason>([
 const bookabilityReasons = new Set<ReservationBookabilityReason>([
   'RESERVATION_OVERLAP', 'OCCUPIED', 'RESERVATION_CURRENT', 'CLEANING_REQUIRED',
   'CANDLE_PRESENT', 'OPERATION_BLOCKED', 'ROOM_ISSUE_BLOCKED', 'DATA_UNCONFIRMED',
-  'PIN_MISMATCH', 'PIN_UNCONFIGURED'
+  'PIN_MISMATCH', 'PIN_UNCONFIGURED', 'GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY'
 ]);
 
 function roomMoveProjectionError(): never {
@@ -982,6 +994,7 @@ export class SupabaseReservationService implements ReservationService {
       p_actor_profile_id: actor.profileId,
       p_check_in_at: input.checkInAt,
       p_check_out_at: input.checkOutAt,
+      p_guest_count: input.guestCount,
       p_exclude_reservation_id: input.excludeReservationId ?? null,
       p_room_type_ids: input.roomTypeIds?.length ? input.roomTypeIds : null,
       p_reservation_type: input.reservationType
@@ -998,6 +1011,7 @@ export class SupabaseReservationService implements ReservationService {
       reservationType: input.reservationType,
       checkInAt: input.checkInAt,
       checkOutAt: input.checkOutAt,
+      guestCount: input.guestCount,
       excludeReservationId: input.excludeReservationId ?? null,
       evaluatedAt,
       candidates,
