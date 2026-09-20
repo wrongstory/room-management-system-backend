@@ -147,6 +147,9 @@ Deno.test("availability database errors keep the Fastify reason-code contract", 
   const pastDate = availabilityDatabaseError({
     message: "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
   });
+  const assignmentConflict = availabilityDatabaseError({
+    message: "ASSIGNMENT_AVAILABILITY_STALE",
+  });
   const unknown = availabilityDatabaseError({ message: "internal detail" });
 
   assert(stale.status === 409 && stale.code === "STALE_VERSION", "stale CAS");
@@ -159,6 +162,11 @@ Deno.test("availability database errors keep the Fastify reason-code contract", 
     pastDate.status === 409 &&
       pastDate.code === "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
     "past availability cannot be added retroactively",
+  );
+  assert(
+    assignmentConflict.status === 409 &&
+      assignmentConflict.code === "ASSIGNMENT_AVAILABILITY_STALE",
+    "notified assignments keep a stable availability conflict",
   );
   assert(
     unknown.status === 500 && unknown.code === "AVAILABILITY_COMMAND_FAILED",

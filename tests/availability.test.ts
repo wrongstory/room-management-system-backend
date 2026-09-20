@@ -52,6 +52,10 @@ describe('availability service authorization and errors', () => {
       statusCode: 409,
       code: 'PAST_AVAILABILITY_DATE_NOT_ALLOWED'
     });
+    expect(availabilityDatabaseError({ message: 'ASSIGNMENT_AVAILABILITY_STALE' })).toMatchObject({
+      statusCode: 409,
+      code: 'ASSIGNMENT_AVAILABILITY_STALE'
+    });
   });
 
   it('rejects administrator submission before using the service-role client', async () => {

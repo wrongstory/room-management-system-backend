@@ -249,7 +249,7 @@ const idempotencyKey = crypto.randomUUID();
 
 운영 차단·이슈 화면은 상세 projection의 reason code만으로 ID를 추측하지 않고 전용 GET 두 개를 사용한다. `actionable`에는 미래 scheduled, 현재 active, 종료 시각이 지난 expired 차단이 모두 포함되며 `expired`도 관리자가 명시적으로 release할 때까지 처리 대상이다. release/resolve 버튼은 목록 item의 `id`와 envelope의 `roomStateVersion`을 함께 보내고, `STALE_VERSION`이면 두 목록을 다시 조회한다. 응답의 `evaluatedAt`은 상태 badge의 서버 평가 시각이며 브라우저 시각으로 상태를 다시 분류하지 않는다.
 
-가능일의 `weekStart`와 날짜는 `YYYY-MM-DD`로 보내며 client timezone으로 날짜를 다시 변환하지 않는다. `version`은 화면 로컬 카운터가 아니라 서버 응답값을 그대로 다음 `expectedVersion`에 사용한다. 제출 가능 시간과 마감 전/후 구분은 서버의 KST 판정을 따르고, 409를 받은 요청을 다른 Idempotency-Key로 자동 반복하지 않는다.
+가능일의 `weekStart`와 날짜는 `YYYY-MM-DD`로 보내며 client timezone으로 날짜를 다시 변환하지 않는다. `version`은 화면 로컬 카운터가 아니라 서버 응답값을 그대로 다음 `expectedVersion`에 사용한다. 일요일은 주 제출 알림의 기준일일 뿐 서버 허용창이 아니며, KST 어느 요일이든 현재 주와 다음 주를 직접 제출·변경할 수 있다. 409를 받은 요청을 다른 Idempotency-Key로 자동 반복하지 않는다.
 
 예약 목록에는 `guestName`이 없으며 UI가 이름을 표시해야 할 때만 단건 상세를 호출한다. 예약 응답의 `version`은 예약 변경 command의 `expectedVersion`으로 사용하고, command 응답에 `roomStateVersion`이 있으면 후속 객실 기준 command의 CAS 입력으로 사용한다. 고객명은 브라우저 저장소·analytics·오류 수집에 보존하지 않고, 상세 화면을 벗어나면 메모리 상태에서도 제거한다. 암호화 설정 장애에서 평문 저장이나 빈 이름으로 성공 처리하지 않는다.
 

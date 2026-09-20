@@ -280,6 +280,12 @@ export function availabilityDatabaseError(
       "지난 날짜를 새로 근무 가능으로 변경할 수 없습니다.",
     ],
     [
+      "ASSIGNMENT_AVAILABILITY_STALE",
+      409,
+      "ASSIGNMENT_AVAILABILITY_STALE",
+      "통보된 배정과 충돌해 가능일을 변경할 수 없습니다. 최신 배정을 다시 확인해 주세요.",
+    ],
+    [
       "CHANGE_REQUEST_BEFORE_DEADLINE",
       409,
       "CHANGE_REQUEST_BEFORE_DEADLINE",
