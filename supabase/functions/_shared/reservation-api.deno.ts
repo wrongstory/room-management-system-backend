@@ -398,6 +398,7 @@ Deno.test("reservation bookability keeps PIN readiness separate and supports emp
     reservationType: "standard",
     checkInAt: "2026-10-01T16:00:00+09:00",
     checkOutAt: "2026-10-02T11:00:00+09:00",
+    guestCount: 2,
     roomTypeIds: [],
     excludeReservationId: null,
   };
@@ -425,6 +426,7 @@ Deno.test("reservation bookability keeps PIN readiness separate and supports emp
       reservationType: "standard",
       checkInAt: body.checkInAt,
       checkOutAt: body.checkOutAt,
+      guestCount: body.guestCount,
     }),
     clients,
     admin,
@@ -479,6 +481,7 @@ Deno.test("open-ended long-stay requests keep null checkout across preview, crea
       reservationType: "long_stay",
       checkInAt: openEndedRow.check_in_at,
       checkOutAt: null,
+      guestCount: 2,
     }),
     clients,
     admin,

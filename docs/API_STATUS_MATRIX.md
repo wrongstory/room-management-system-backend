@@ -79,6 +79,7 @@ production 최종 source/readback evidence: **2026-09-20 KST** (Issue #220, PR #
   - PR #221의 v0.4.0 release source가 `main`에 병합됐고 승인 release tree와 병합 tree가 일치한다.
   - tag/GitHub Release 발행 여부와 `main`/production source 배포 완료는 별도 상태로 관리한다.
 - production은 **73 migrations / `api` ACTIVE v17 / OpenAPI 0.4.0 120 paths / 130 operations**다. 기존 56개 이력과 업무 원장을 보존한 채 manifest의 57~73을 순서대로 적용했고, public RLS 49/49, FK 384건 위반 0, DB lint error 0을 read-only로 확인했다.
+- Issue #236 작업 브랜치의 source candidate는 **75 migrations / OpenAPI 0.5.0 126 paths / 136 operations**다. developer 객실 카탈로그·인원 관리와 예약 인원 상한을 포함하지만 아직 `dev`/`main` 병합, production DB/API 적용, hosted role smoke가 없어 production 수치는 위 73/120/130을 유지한다.
 - v0.4.0의 공개 `/health`, `/docs`, `/openapi.json`은 HTTP 200이다. Health와 OpenAPI 계약은 직접 확인했지만 보호 API의 역할별 hosted read와 실제 예약·PIN mutation은 이번 배포에서 재실행하지 않았으므로 별도 완료로 표시하지 않는다.
 - #187 Phase C는 PR #190으로 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`에 source/dev 병합 완료했다. 현재 개발 정본은 기존 61개를 수정하지 않은 **62 migrations / OpenAPI 113 paths / 121 operations**이며 `reservation_stays`/`stay_room_segments`, DURING_STAY preview·commit, source-room checkout cleanup 및 미래 PIN cutoff를 포함한다. `main`/production에는 아직 반영하지 않았으므로 운영 수치와 사용 가능 상태는 기존 production readback을 유지한다.
 - #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
@@ -163,6 +164,24 @@ login 이후 같은 메모리 세션에서 전체 projection·diagnostics·업�
 | [x] | `GET /v1/developer/audit-events` | developer only | ✅ | — | ✅ | ✅ | ✅ | 승인된 domain summary만 반환 |
 | [x] | `GET /v1/developer/activity-events` | developer only | ✅ | — | ✅ | ✅ | ✅ | 권한 거부 aggregate hosted readback PASS |
 | [x] | `POST /v1/developer/diagnostics` | developer only | ✅ | — | ✅ | ✅ | ✅ | PR #64 zero-byte hosted hotfix 후 200 |
+| [ ] | `GET /v1/developer/room-catalog` | developer only | ✅ | ✅ | ✅ | ❌ | ❌ | #236 safe catalog source candidate; production 미배포 |
+| [ ] | `POST /v1/developer/room-types/{roomTypeId}/capacity/preview` | developer only | ✅ | ✅ | ✅ | ❌ | ❌ | 5분 영향 preview·CAS source candidate |
+| [ ] | `PATCH /v1/developer/room-types/{roomTypeId}/capacity` | developer only | ✅ | ✅ | ✅ | ❌ | ❌ | fingerprint·CAS·idempotency; 기존 예약 자동 변경 없음 |
+| [ ] | `POST /v1/developer/rooms` | developer only | ✅ | ✅ | ✅ | ❌ | ❌ | verification-required 객실 추가 source candidate |
+| [ ] | `POST /v1/developer/rooms/{roomId}/deactivation/preview` | developer only | ✅ | ✅ | ✅ | ❌ | ❌ | 점유·예약·청소·PIN·운영 영향 preview |
+| [ ] | `POST /v1/developer/rooms/{roomId}/deactivate` | developer only | ✅ | ✅ | ✅ | ❌ | ❌ | hard delete 없는 versioned inactive 전이 |
+
+### #236 Developer 객실·유형별 인원 관리 — source candidate
+
+- [x] 75번째 append-only `developer_room_catalog_capacity` migration, private FORCE RLS preview 원장, service-role-only actor-bound RPC
+- [x] 기존 `default_guest_count/max_guest_count` 보존 및 `baseOccupancy/maxOccupancy` safe projection; 예시 값 backfill 없음
+- [x] 인원 변경·객실 비활성화 preview/commit의 5분 fingerprint, CAS, reason code, idempotency, audit
+- [x] 객실 추가의 숫자 문자열·유형 version·중복 검사와 `verification_required` 초기 상태
+- [x] 객실 hard delete 차단, inactive 객실의 신규 예약/segment/cleaning target 차단, 과거 이력 보존
+- [x] bookability `guestCount` 필수 및 create/change DB 최종 최대 인원 재검증
+- [x] Fastify/Edge/OpenAPI `0.5.0` 126 paths / 136 operations source parity
+- [ ] `dev` 병합과 production release/migration/API 배포
+- [ ] hosted developer/admin/maid 권한 및 safe mutation fixture smoke
 
 ### #43 production 반영 조건
 

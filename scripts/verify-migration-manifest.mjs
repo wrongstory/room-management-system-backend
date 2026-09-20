@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationDirectory = resolve(projectRoot, "supabase", "migrations");
-const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.4.0.json");
+const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.5.0.json");
 const migrationFilePattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
 const sha256Pattern = /^[a-f0-9]{64}$/;
 
@@ -32,17 +32,17 @@ export async function verifyMigrationManifest() {
     .sort();
 
   invariant(manifest.schemaVersion === 1, "schemaVersion must be 1");
-  invariant(manifest.release === "v0.4.0", "release must be v0.4.0");
+  invariant(manifest.release === "v0.5.0", "release must be v0.5.0");
   invariant(manifest.hashAlgorithm === "sha256-lf-utf8", "unexpected hash algorithm");
   invariant(Array.isArray(manifest.migrations), "migrations must be an array");
-  invariant(manifest.totalCount === 74, "totalCount must be 74");
-  invariant(files.length === manifest.totalCount, `expected 74 SQL files, found ${files.length}`);
+  invariant(manifest.totalCount === 75, "totalCount must be 75");
+  invariant(files.length === manifest.totalCount, `expected 75 SQL files, found ${files.length}`);
   invariant(manifest.migrations.length === manifest.totalCount, "manifest entry count mismatch");
-  invariant(manifest.baseline?.count === 56, "baseline count must be 56");
-  invariant(manifest.pending?.count === 18, "pending count must be 18");
+  invariant(manifest.baseline?.count === 74, "baseline count must be 74");
+  invariant(manifest.pending?.count === 1, "pending count must be 1");
   invariant(
     manifest.baseline.count + manifest.pending.count === manifest.totalCount,
-    "baseline and pending counts must total 74",
+    "baseline and pending counts must total 75",
   );
 
   const names = new Set();

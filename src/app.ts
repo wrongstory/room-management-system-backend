@@ -48,7 +48,7 @@ import {
   type ReservationService,
   SupabaseReservationService
 } from './modules/reservations/reservation.service.js';
-import { createRoomRoutes, createRoomTypeRoutes } from './modules/rooms/room.routes.js';
+import { createDeveloperRoomCatalogRoutes, createRoomRoutes, createRoomTypeRoutes } from './modules/rooms/room.routes.js';
 import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
 import { createRoomPinSheetOperationsRoutes } from './modules/rooms/room-pin-sheet-operations.routes.js';
 import {
@@ -200,6 +200,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 접근할 수 있습니다.');
     }
   });
+  app.decorate('requireDeveloper', async (request) => {
+    if (request.actor.role !== 'developer') {
+      throw new AppError(403, 'DEVELOPER_REQUIRED', '개발자만 접근할 수 있습니다.');
+    }
+  });
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -247,6 +252,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   await app.register(createRoomTypeRoutes(services.rooms), { prefix: '/v1/room-types' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  await app.register(createDeveloperRoomCatalogRoutes(services.rooms), { prefix: '/v1/developer' });
   if (services.roomPinSheetOperations) {
     await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {
       prefix: '/v1/room-pin-sheet-sync'

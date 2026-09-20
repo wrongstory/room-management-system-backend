@@ -1,9 +1,15 @@
 import {
   assertEmptyDiagnosticRequestBody,
+  changeDeveloperRoomTypeCapacity,
+  createDeveloperRoom,
   developerAuditEvents,
   developerDatabaseStatus,
+  developerRoomCatalog,
+  developerRoomCatalogActionPath,
+  developerRoomTypeCapacityPath,
   developerRuntimeStatus,
   expectedMigrationName,
+  previewDeveloperRoomTypeCapacity,
   toDeveloperActivityEvent,
   toDeveloperAuditEvent,
 } from "./developer-api.ts";
@@ -146,7 +152,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "availability_any_day_submission",
+    expectedMigrationName === "developer_room_catalog_capacity",
     "expected migration must not depend on a remote execution timestamp",
   );
   const get = Deno.env.get;
@@ -525,4 +531,157 @@ Deno.test("developer diagnostics rejects positive or malformed content lengths",
       );
     }
   }
+});
+
+Deno.test("developer room catalog routes are exact and developer-only", async () => {
+  const roomTypeId = "10000000-0000-4000-8000-000000000001";
+  const roomId = "20000000-0000-4000-8000-000000000001";
+  assert(
+    developerRoomTypeCapacityPath(
+      `/v1/developer/room-types/${roomTypeId}/capacity/preview`,
+    )?.preview === true,
+    "capacity preview path",
+  );
+  assert(
+    developerRoomTypeCapacityPath(
+      `/v1/developer/room-types/${roomTypeId}/capacity`,
+    )?.preview === false,
+    "capacity commit path",
+  );
+  assert(
+    developerRoomCatalogActionPath(
+      `/v1/developer/rooms/${roomId}/deactivation/preview`,
+    )?.preview === true,
+    "deactivation preview path",
+  );
+  assert(
+    developerRoomCatalogActionPath(`/v1/developer/rooms/${roomId}/deactivate`)
+      ?.preview === false,
+    "deactivation commit path",
+  );
+  assert(
+    developerRoomTypeCapacityPath(
+      `/v1/developer/room-types/${roomTypeId}/capacity/preview/`,
+    ) === null,
+    "trailing alias rejected",
+  );
+
+  const actor = {
+    authUserId: roomTypeId,
+    profileId: roomId,
+    displayName: "개발자",
+    role: "developer" as const,
+    mustChangePassword: false,
+  };
+  let calls = 0;
+  const clients = {
+    admin: {
+      rpc: () => {
+        calls += 1;
+        return Promise.resolve({
+          data: {
+            generatedAt: "2026-09-21T00:00:00Z",
+            summary: {},
+            roomTypes: [],
+            rooms: [],
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  await developerRoomCatalog(clients, actor);
+  assert(calls === 1, "developer catalog uses one RPC");
+  for (const role of ["admin", "maid"] as const) {
+    try {
+      await developerRoomCatalog(clients, { ...actor, role });
+      throw new Error("business role must be denied");
+    } catch (error) {
+      assert(
+        error instanceof EdgeError && error.code === "DEVELOPER_REQUIRED",
+        "stable role denial",
+      );
+    }
+  }
+});
+
+Deno.test("developer capacity and room creation preserve CAS and idempotency inputs", async () => {
+  const actor = {
+    authUserId: "10000000-0000-4000-8000-000000000001",
+    profileId: "20000000-0000-4000-8000-000000000001",
+    displayName: "개발자",
+    role: "developer" as const,
+    mustChangePassword: false,
+  };
+  const calls: Array<{ name: string; parameters: Record<string, unknown> }> =
+    [];
+  const clients = {
+    admin: {
+      rpc: (name: string, parameters: Record<string, unknown>) => {
+        calls.push({ name, parameters });
+        return Promise.resolve({ data: { ok: true }, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const roomTypeId = "30000000-0000-4000-8000-000000000001";
+  await previewDeveloperRoomTypeCapacity(
+    new Request("https://example.test", {
+      method: "POST",
+      body: JSON.stringify({
+        baseOccupancy: 2,
+        maxOccupancy: 4,
+        expectedVersion: 3,
+      }),
+    }),
+    clients,
+    actor,
+    roomTypeId,
+  );
+  await changeDeveloperRoomTypeCapacity(
+    new Request("https://example.test", {
+      method: "PATCH",
+      headers: { "idempotency-key": "capacity-001" },
+      body: JSON.stringify({
+        baseOccupancy: 2,
+        maxOccupancy: 4,
+        expectedVersion: 3,
+        impactFingerprint: "a".repeat(64),
+        reasonCode: "CAPACITY_POLICY_CHANGE",
+      }),
+    }),
+    clients,
+    actor,
+    roomTypeId,
+  );
+  await createDeveloperRoom(
+    new Request("https://example.test", {
+      method: "POST",
+      headers: { "idempotency-key": "room-create-001" },
+      body: JSON.stringify({
+        roomNumber: "516",
+        roomTypeId,
+        expectedRoomTypeVersion: 3,
+        reasonCode: "ROOM_CATALOG_ADD",
+      }),
+    }),
+    clients,
+    actor,
+  );
+  assert(calls[0].parameters.p_expected_version === 3, "preview CAS");
+  assert(
+    calls[1].parameters.p_idempotency_key === "capacity-001",
+    "capacity idempotency",
+  );
+  assert(
+    typeof calls[1].parameters.p_request_hash === "string",
+    "capacity request hash",
+  );
+  assert(
+    calls[2].parameters.p_room_number === "516",
+    "room number stays a string",
+  );
+  assert(
+    typeof calls[2].parameters.p_room_id === "string",
+    "server creates immutable room id",
+  );
 });
