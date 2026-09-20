@@ -481,7 +481,7 @@ export const openApiDocument = {
     {
       name: "Availability",
       description:
-        "메이드의 다음 주 가능일 제출·변경 요청과 관리자의 승인·후보 조회 API입니다. 제출창은 일요일 12:00–23:59 KST이며 서버가 DB 시각으로 판정합니다.",
+        "메이드의 현재·다음 주 가능일 직접 제출·변경과 관리자의 변경 요청 승인·후보 조회 API입니다. 일요일은 주간 계획의 주 제출일이지만 제출 자체는 어느 요일이든 가능합니다.",
     },
     {
       name: "Work History",
@@ -1581,9 +1581,9 @@ export const openApiDocument = {
       post: {
         tags: ["Availability"],
         operationId: "submitAvailability",
-        summary: "다음 주 가능일 제출",
+        summary: "현재·다음 주 가능일 제출 또는 변경",
         description:
-          "비밀번호 변경을 완료한 active maid만 일요일 12:00–23:59 KST에 다음 월요일 주차를 제출할 수 있습니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
+          "비밀번호 변경을 완료한 active maid가 KST 기준 현재 주 또는 다음 주를 어느 요일이든 직접 제출·변경합니다. 현재 주의 지난 날짜는 기존 version에서 이미 available이었던 값만 보존할 수 있고 새로 available로 소급 변경할 수 없습니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [idempotencyHeader],
@@ -1611,9 +1611,9 @@ export const openApiDocument = {
       post: {
         tags: ["Availability"],
         operationId: "requestAvailabilityChange",
-        summary: "마감 후 가능일 변경 요청",
+        summary: "관리자 승인형 가능일 변경 요청",
         description:
-          "비밀번호 변경을 완료한 active maid가 제출 마감 후 현재 version의 변경을 요청합니다. 기존 가능일 원장은 보존되고 pending 요청이 append되며, 같은 주차에는 pending 요청 하나만 허용됩니다.",
+          "비밀번호 변경을 완료한 active maid가 대상 주 시작 후 현재 version의 관리자 승인형 변경을 요청합니다. 기존 가능일 원장은 보존되고 pending 요청이 append되며, 같은 주차에는 pending 요청 하나만 허용됩니다. 일반적인 현재·다음 주 수정은 submissions endpoint의 direct version 재제출을 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [idempotencyHeader],
@@ -4345,7 +4345,7 @@ export const openApiDocument = {
         operationId: "prepareRoomPinChange",
         summary: "물리 도어락 PIN 변경 준비",
         description:
-          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 모든 PIN reveal이 차단되지만 예약 등록은 차단하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 모든 PIN reveal이 차단되지만 예약 등록은 차단하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter(), idempotencyHeader],
@@ -6013,7 +6013,8 @@ export const openApiDocument = {
           "INVALID_ASSIGNMENT_DURATION_POLICY",
           "ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT",
           "ACTIVE_ADMIN_REQUIRED",
-          "OUTSIDE_AVAILABILITY_WINDOW",
+          "AVAILABILITY_WEEK_OUT_OF_RANGE",
+          "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
           "CHANGE_REQUEST_BEFORE_DEADLINE",
           "STALE_VERSION",
           "PENDING_CHANGE_REQUEST_EXISTS",
@@ -6154,6 +6155,7 @@ export const openApiDocument = {
           "ROOM_NUMBER_CHANGED",
           "ROOM_PIN_REISSUE_REQUIRED",
           "ROOM_PIN_MISMATCH_UNRESOLVED",
+          "INVALID_PIN_CHANGE_REASON",
           "PIN_CHANGE_IN_PROGRESS_REQUIRED",
           "PIN_CHANGE_IN_PROGRESS",
           "PIN_CHANGE_LEASE_EXPIRED",
@@ -8679,7 +8681,7 @@ export const openApiDocument = {
           weekStart: {
             type: "string",
             format: "date",
-            description: "다음 주 월요일",
+            description: "KST 기준 현재 주 또는 다음 주의 월요일",
           },
           availableDates: {
             type: "array",
@@ -10106,6 +10108,8 @@ export const openApiDocument = {
               "MAID_CLEANING_CHANGE",
               "ACTUAL_PIN_REENTRY",
             ],
+            description:
+              "현재 PIN version 0에서 ADMIN_PHYSICAL_CHANGE는 서버가 ADMIN_INITIAL_PIN으로 정규화합니다. 그 밖의 사유와 maid/re-entry 계약은 그대로 검증합니다.",
           },
           assignmentId: {
             type: "string",

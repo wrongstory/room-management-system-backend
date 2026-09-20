@@ -42,6 +42,10 @@ const availabilityMigrationUrl = new URL(
   '../supabase/migrations/20260828220417_weekly_availability_contract.sql',
   import.meta.url
 );
+const availabilityAnyDayMigrationUrl = new URL(
+  '../supabase/migrations/20260920091536_availability_any_day_submission.sql',
+  import.meta.url
+);
 
 const developerRoleMigrationUrl = new URL(
   '../supabase/migrations/20260829120003_add_developer_role.sql',
@@ -569,11 +573,13 @@ describe('initial migration contract', () => {
   });
 
   it('keeps weekly availability versioned, service-only, and RLS scoped', async () => {
-    const sql = await readFile(availabilityMigrationUrl, 'utf8');
+    const [sql, policySql] = await Promise.all([
+      readFile(availabilityMigrationUrl, 'utf8'),
+      readFile(availabilityAnyDayMigrationUrl, 'utf8')
+    ]);
 
     expect(sql).toContain('availability_versions_one_current_per_week');
     expect(sql).toContain('AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS');
-    expect(sql).toContain('OUTSIDE_AVAILABILITY_WINDOW');
     expect(sql).toContain('STALE_VERSION');
     expect(sql).toContain('private.replay_command(');
     expect(sql).toContain('private.complete_command(');
@@ -584,6 +590,15 @@ describe('initial migration contract', () => {
     expect(sql).toContain('alter table public.availability_versions enable row level security');
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
+    expect(policySql).toContain(
+      'create or replace function private.submit_weekly_availability_at('
+    );
+    expect(policySql).toContain('AVAILABILITY_WEEK_OUT_OF_RANGE');
+    expect(policySql).toContain('PAST_AVAILABILITY_DATE_NOT_ALLOWED');
+    expect(policySql).toContain("at time zone 'Asia/Seoul'");
+    expect(policySql).toContain('private.replay_command(');
+    expect(policySql).toContain('private.complete_command(');
+    expect(policySql).not.toContain('OUTSIDE_AVAILABILITY_WINDOW');
   });
 
   it('keeps assignment drafts revisioned, snapshot-bound, and service-only', async () => {

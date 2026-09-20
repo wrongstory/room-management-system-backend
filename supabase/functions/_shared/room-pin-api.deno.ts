@@ -130,6 +130,161 @@ Deno.test("room PIN paths are exact and reject aliases", () => {
   assert(roomPinPath(`/v1/rooms/${roomId}/pin`) === null, "no reveal alias");
 });
 
+Deno.test("version-zero admin physical edits canonicalize to initial registration with safe replay", async () => {
+  configure();
+  const prepareCalls: Array<Record<string, unknown>> = [];
+  let saved: Record<string, unknown> | undefined;
+  const clients = {
+    admin: {
+      async rpc(name: string, args: Record<string, unknown>) {
+        if (name === "get_room_pin_change_context") {
+          return {
+            data: {
+              room_number: "0101",
+              current_pin_version: 0,
+              proposed_pin_version: 1,
+            },
+            error: null,
+          };
+        }
+        assert(name === "prepare_room_pin_change", "prepare RPC only");
+        prepareCalls.push(args);
+        if (!saved) {
+          saved = {
+            lease_id: leaseId,
+            room_id: roomId,
+            current_pin_version: 0,
+            proposed_pin_version: 1,
+            status: "prepared",
+            expires_at: new Date(Date.now() + 300_000).toISOString(),
+            envelope_format: args.p_envelope_format,
+            ciphertext_base64: args.p_ciphertext_base64,
+            nonce_base64: args.p_nonce_base64,
+            auth_tag_base64: args.p_auth_tag_base64,
+            key_version: args.p_key_version,
+            aad_environment: args.p_aad_environment,
+            aad_project_ref: args.p_aad_project_ref,
+          };
+          return { data: { ...saved, replay: false }, error: null };
+        }
+        return { data: { ...saved, replay: true }, error: null };
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const physical = await prepareRoomPinChange(
+    command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+      pinDigits: "0012",
+      expectedPinVersion: 0,
+      reasonCode: "ADMIN_PHYSICAL_CHANGE",
+    }, "pin-initial-canonical-0001"),
+    clients,
+    actor,
+    sessionId,
+    roomId,
+  );
+  const explicit = await prepareRoomPinChange(
+    command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+      pinDigits: "0012",
+      expectedPinVersion: 0,
+      reasonCode: "ADMIN_INITIAL_PIN",
+    }, "pin-initial-canonical-0001"),
+    clients,
+    actor,
+    sessionId,
+    roomId,
+  );
+
+  assert(
+    JSON.stringify(physical) === JSON.stringify(explicit),
+    "same canonical replay",
+  );
+  assert(
+    prepareCalls.every((call) => call.p_reason_code === "ADMIN_INITIAL_PIN"),
+    "both client reasons use the effective initial reason",
+  );
+  assert(
+    prepareCalls[0]?.p_request_hash === prepareCalls[1]?.p_request_hash,
+    "effective reason is included in a stable request hash",
+  );
+  assert(
+    !JSON.stringify(physical).includes("0012"),
+    "raw PIN absent from response",
+  );
+
+  try {
+    await prepareRoomPinChange(
+      command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+        pinDigits: "0013",
+        expectedPinVersion: 0,
+        reasonCode: "ADMIN_PHYSICAL_CHANGE",
+      }, "pin-initial-canonical-0001"),
+      clients,
+      actor,
+      sessionId,
+      roomId,
+    );
+    throw new Error("expected replay mismatch");
+  } catch (error) {
+    assert(error instanceof EdgeError, "stable replay error");
+    assert(
+      error.status === 409 && error.code === "IDEMPOTENCY_KEY_REUSED",
+      "different PIN rejected",
+    );
+    assert(!error.message.includes("0013"), "different raw PIN not reflected");
+  }
+});
+
+Deno.test("existing-current admin physical edits keep their physical-change reason", async () => {
+  configure();
+  let prepareArgs: Record<string, unknown> | undefined;
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        if (name === "get_room_pin_change_context") {
+          return Promise.resolve({
+            data: {
+              room_number: "0101",
+              current_pin_version: 1,
+              proposed_pin_version: 2,
+            },
+            error: null,
+          });
+        }
+        prepareArgs = args;
+        return Promise.resolve({
+          data: {
+            lease_id: leaseId,
+            room_id: roomId,
+            current_pin_version: 1,
+            proposed_pin_version: 2,
+            status: "prepared",
+            expires_at: new Date(Date.now() + 300_000).toISOString(),
+            replay: false,
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+
+  await prepareRoomPinChange(
+    command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+      pinDigits: "0012",
+      expectedPinVersion: 1,
+      reasonCode: "ADMIN_PHYSICAL_CHANGE",
+    }),
+    clients,
+    actor,
+    sessionId,
+    roomId,
+  );
+  assert(
+    prepareArgs?.p_reason_code === "ADMIN_PHYSICAL_CHANGE",
+    "existing current keeps the requested physical-change reason",
+  );
+});
+
 Deno.test("prepare binds room snapshot and maid access authority without hashing PIN material", async () => {
   configure();
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];

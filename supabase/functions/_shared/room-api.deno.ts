@@ -503,6 +503,15 @@ Deno.test("room validation and database errors use stable redacted codes", async
     roomDatabaseError({ message: "ROOM_BLOCK_NOT_FOUND" }).status === 404,
     "operation 404",
   );
+  const invalidPinReason = roomDatabaseError({
+    message: "INVALID_PIN_CHANGE_REASON: private detail",
+  });
+  assert(
+    invalidPinReason.status === 409 &&
+      invalidPinReason.code === "INVALID_PIN_CHANGE_REASON" &&
+      !invalidPinReason.message.includes("private detail"),
+    "invalid PIN reason is a stable redacted conflict",
+  );
   const unknown = roomDatabaseError({ message: "private database detail" });
   assert(unknown.code === "ROOM_COMMAND_FAILED", "unknown stable code");
   assert(

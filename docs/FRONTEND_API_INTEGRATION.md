@@ -34,7 +34,7 @@ production Edge는 `main@80f935016d5581d500136fba29c206f6ee797bc0` 기준 73 mig
 
 ### #131/#140/#169 객실 PIN source 계약
 
-production OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+production OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. 미등록 객실의 admin 수정 요청이 `expectedPinVersion=0`, `reasonCode=ADMIN_PHYSICAL_CHANGE`를 보내도 서버가 최초 등록 사유로 정규화하므로 client가 PIN 존재 여부와 버튼 이름을 별도 command로 분기할 필요는 없다. 명시적 `ADMIN_INITIAL_PIN`도 계속 유효하다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
 
 Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 서버가 batch-unique 4자리 값을 생성한다. 응답의 `generatedPins`를 객실별로 표시하고 현장 도어락 적용 후 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 해당 `pinVersion`을 보낸다. 확인 성공 전에는 mismatch 경고와 체크인 차단을 유지하고 메이드에게 표시하지 않는다. 두 path는 production OpenAPI에 반영됐지만 실제 운영 bootstrap·물리 확인 실행은 별도 승인 전까지 시작하지 않는다.
 
@@ -155,7 +155,8 @@ const idempotencyKey = crypto.randomUUID();
 | 동시 변경/업무 충돌 | `IDEMPOTENCY_KEY_REUSED`, `LAST_ACTIVE_ADMIN_REQUIRED` 등 409 | 최신 목록 재조회 후 사용자 확인 |
 | 서버 상태 불일치 | `ACCOUNT_AUTH_STATE_INCONSISTENT`, `PASSWORD_STATE_INCONSISTENT` | 자동 성공 처리 금지, requestId로 운영 확인 |
 | 진단 요청 과다 | `DIAGNOSTICS_RATE_LIMITED` | `Retry-After` 뒤 사용자가 다시 실행 |
-| 가능일 제출 시간 아님 | `OUTSIDE_AVAILABILITY_WINDOW` | KST 일요일 12:00–23:59 안내, 클라이언트 시각으로 우회 금지 |
+| 가능일 대상 주차 범위 밖 | `AVAILABILITY_WEEK_OUT_OF_RANGE` | KST 기준 현재 주 또는 다음 주 월요일로 다시 선택 |
+| 과거 가능일 소급 변경 | `PAST_AVAILABILITY_DATE_NOT_ALLOWED` | 현재 주의 지난 날짜를 새로 가능으로 바꾸지 말고 최신 version 재조회 |
 | 가능일 동시 변경 | `STALE_VERSION` | 현재 가능일·요청 목록을 다시 조회하고 expectedVersion 갱신 |
 | 처리 중 변경 요청 존재 | `PENDING_CHANGE_REQUEST_EXISTS` | 기존 pending 요청을 표시하고 중복 요청 금지 |
 | 예약·객실 동시 변경 | `STALE_VERSION`, `ROOM_STATE_CHANGED` | 예약·객실을 다시 조회하고 서버 version으로 사용자 재확인 |
@@ -211,8 +212,8 @@ const idempotencyKey = crypto.randomUUID();
 | PIN 초기화 | `POST /v1/rooms/pins/bootstrap` | active admin, 선택적 limit만 전송; PIN은 서버 secret에서만 읽음 |
 | PIN 동기화 상태(legacy) | `POST /v1/rooms/{roomId}/pin-sync-events` | 신규 프런트 사용 금지; 상태 기록만으로 current PIN이 생성되지 않음 |
 | 현재 가능일 | `GET /v1/availability?weekStart=...` | maid는 본인만, admin은 maidProfileId 선택 가능 |
-| 가능일 제출 | `POST /v1/availability/submissions` | maid만, KST 일요일 제출창·CAS·Idempotency-Key |
-| 마감 후 변경 요청 | `POST /v1/availability/change-requests` | maid만, pending 1건·이력 보존 |
+| 가능일 제출·직접 변경 | `POST /v1/availability/submissions` | maid만, KST 현재·다음 주, 요일 무관, 과거 날짜 신규 true 금지, CAS·Idempotency-Key |
+| 승인형 변경 요청 | `POST /v1/availability/change-requests` | maid만, 대상 주 시작 후 pending 1건·이력 보존 |
 | 변경 요청 목록 | `GET /v1/availability/change-requests` | maid 본인만, admin은 status/weekStart/maid 필터 |
 | 변경 요청 결정 | `POST /v1/availability/change-requests/{requestId}/decision` | active admin만, 승인 시 새 version 생성 |
 | 배정 가능 후보 | `GET /v1/availability/candidates?workDate=...` | active admin만, 현재 가능일의 active maid |
@@ -248,7 +249,7 @@ const idempotencyKey = crypto.randomUUID();
 
 운영 차단·이슈 화면은 상세 projection의 reason code만으로 ID를 추측하지 않고 전용 GET 두 개를 사용한다. `actionable`에는 미래 scheduled, 현재 active, 종료 시각이 지난 expired 차단이 모두 포함되며 `expired`도 관리자가 명시적으로 release할 때까지 처리 대상이다. release/resolve 버튼은 목록 item의 `id`와 envelope의 `roomStateVersion`을 함께 보내고, `STALE_VERSION`이면 두 목록을 다시 조회한다. 응답의 `evaluatedAt`은 상태 badge의 서버 평가 시각이며 브라우저 시각으로 상태를 다시 분류하지 않는다.
 
-가능일의 `weekStart`와 날짜는 `YYYY-MM-DD`로 보내며 client timezone으로 날짜를 다시 변환하지 않는다. `version`은 화면 로컬 카운터가 아니라 서버 응답값을 그대로 다음 `expectedVersion`에 사용한다. 제출 가능 시간과 마감 전/후 구분은 서버의 KST 판정을 따르고, 409를 받은 요청을 다른 Idempotency-Key로 자동 반복하지 않는다.
+가능일의 `weekStart`와 날짜는 `YYYY-MM-DD`로 보내며 client timezone으로 날짜를 다시 변환하지 않는다. `version`은 화면 로컬 카운터가 아니라 서버 응답값을 그대로 다음 `expectedVersion`에 사용한다. 일요일은 주 제출 알림의 기준일일 뿐 서버 허용창이 아니며, KST 어느 요일이든 현재 주와 다음 주를 직접 제출·변경할 수 있다. 409를 받은 요청을 다른 Idempotency-Key로 자동 반복하지 않는다.
 
 예약 목록에는 `guestName`이 없으며 UI가 이름을 표시해야 할 때만 단건 상세를 호출한다. 예약 응답의 `version`은 예약 변경 command의 `expectedVersion`으로 사용하고, command 응답에 `roomStateVersion`이 있으면 후속 객실 기준 command의 CAS 입력으로 사용한다. 고객명은 브라우저 저장소·analytics·오류 수집에 보존하지 않고, 상세 화면을 벗어나면 메모리 상태에서도 제거한다. 암호화 설정 장애에서 평문 저장이나 빈 이름으로 성공 처리하지 않는다.
 

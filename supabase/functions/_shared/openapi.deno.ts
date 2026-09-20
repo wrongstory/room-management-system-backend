@@ -835,9 +835,10 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "assignment draft and commit concurrency errors must be documented",
   );
   assert(
-    serialized.includes('"OUTSIDE_AVAILABILITY_WINDOW"') &&
+    serialized.includes('"AVAILABILITY_WEEK_OUT_OF_RANGE"') &&
+      serialized.includes('"PAST_AVAILABILITY_DATE_NOT_ALLOWED"') &&
       serialized.includes('"STALE_VERSION"'),
-    "availability KST and CAS errors must be documented",
+    "availability KST week, past-date, and CAS errors must be documented",
   );
   assert(
     serialized.includes('"#/components/schemas/ReservationDetail"') &&
@@ -1553,6 +1554,7 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
       "ROOM_NUMBER_CHANGED",
       "ROOM_PIN_REISSUE_REQUIRED",
       "ROOM_PIN_MISMATCH_UNRESOLVED",
+      "INVALID_PIN_CHANGE_REASON",
       "PIN_CHANGE_IN_PROGRESS_REQUIRED",
       "PIN_CHANGE_IN_PROGRESS",
       "PIN_CHANGE_LEASE_EXPIRED",

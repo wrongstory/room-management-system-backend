@@ -107,8 +107,8 @@ select is(
     '26000000-0000-4000-8000-000000000001',
     'retire_assignment_duration_policy'
   ) ->> 'currentMigration',
-  'generated_room_pin_confirmation',
-  'database status exposes migration 73 when migration 74 is absent'
+  'availability_any_day_submission',
+  'database status exposes migration 74 when migration 75 is absent'
 );
 
 select is(
@@ -117,7 +117,7 @@ select is(
     'retire_assignment_duration_policy'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 73 behind source migration 74'
+  'database status reports migration 74 behind source migration 75'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

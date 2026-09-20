@@ -279,7 +279,7 @@ Deno.test("room PIN Edge route binds verified session, returns no-store safe sha
         body: JSON.stringify({
           pinDigits: "0012",
           expectedPinVersion: 0,
-          reasonCode: "ADMIN_INITIAL_PIN",
+          reasonCode: "ADMIN_PHYSICAL_CHANGE",
         }),
       },
     );
@@ -302,6 +302,10 @@ Deno.test("room PIN Edge route binds verified session, returns no-store safe sha
   assert(
     calls[1].args.p_room_number_snapshot === "0101",
     "room snapshot reaches prepare RPC",
+  );
+  assert(
+    calls[1].args.p_reason_code === "ADMIN_INITIAL_PIN",
+    "version-zero physical edit reaches the RPC as an initial registration",
   );
 
   denial = "ROOM_NUMBER_CHANGED: internal ciphertext detail";
