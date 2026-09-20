@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 120:
-        raise RuntimeError("전체 source OpenAPI path 수가 120이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 126:
+        raise RuntimeError("전체 source OpenAPI path 수가 126이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 130:
-        raise RuntimeError("전체 source OpenAPI operation 수가 130이 아닙니다.")
+    if operation_count != 136:
+        raise RuntimeError("전체 source OpenAPI operation 수가 136이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     legacy_list = schemas.get("ReservationListEnvelope", {})
     range_page = schemas.get("ReservationRangePageEnvelope", {})
@@ -194,6 +194,25 @@ def main() -> None:
             package / "models" / "room_pin_sheet_operator_status.py",
             package / "models" / "room_pin_sheet_full_resync_request.py",
             package / "models" / "room_pin_sheet_full_resync_accepted.py",
+            package / "api" / "developer" / "get_developer_room_catalog.py",
+            package / "api" / "developer" / "preview_developer_room_type_capacity.py",
+            package / "api" / "developer" / "change_developer_room_type_capacity.py",
+            package / "api" / "developer" / "create_developer_room.py",
+            package / "api" / "developer" / "preview_developer_room_deactivation.py",
+            package / "api" / "developer" / "deactivate_developer_room.py",
+            package / "models" / "developer_room_catalog.py",
+            package / "models" / "developer_room_catalog_item.py",
+            package / "models" / "developer_room_catalog_summary.py",
+            package / "models" / "developer_room_type_catalog_item.py",
+            package / "models" / "developer_room_type_capacity_preview_request.py",
+            package / "models" / "developer_room_type_capacity_change_request.py",
+            package / "models" / "developer_room_type_capacity_preview.py",
+            package / "models" / "developer_room_type_capacity_change.py",
+            package / "models" / "developer_room_create_request.py",
+            package / "models" / "developer_room_deactivation_preview_request.py",
+            package / "models" / "developer_room_deactivation_request.py",
+            package / "models" / "developer_room_deactivation_preview.py",
+            package / "models" / "developer_room_mutation_result.py",
         ]
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
@@ -262,6 +281,8 @@ def main() -> None:
         for request_model in (standard_bookability_request, long_stay_bookability_request):
             if "check_in_at: datetime.datetime" not in request_model:
                 raise RuntimeError("예약 가능성 request의 checkInAt이 누락됐습니다.")
+            if "guest_count: int" not in request_model:
+                raise RuntimeError("예약 가능성 request의 guestCount가 누락됐습니다.")
             if "room_type_ids: list[UUID] | Unset" not in request_model:
                 raise RuntimeError("예약 가능성 request의 optional roomTypeIds가 누락됐습니다.")
             if not all(
@@ -295,6 +316,12 @@ def main() -> None:
             raise RuntimeError("예약 범위 조회 codegen serverTime이 누락됐습니다.")
         if "next_cursor: None | str" not in reservation_range_page:
             raise RuntimeError("예약 범위 조회 codegen nextCursor가 누락됐습니다.")
+        developer_room_type = (
+            package / "models" / "developer_room_type_catalog_item.py"
+        ).read_text(encoding="utf-8")
+        for field in ("base_occupancy: int", "max_occupancy: int", "version: int"):
+            if field not in developer_room_type:
+                raise RuntimeError(f"개발자 객실 유형 codegen 필드가 누락됐습니다: {field}")
         if not compileall.compile_dir(package, quiet=1):
             raise RuntimeError("업무 Python codegen 결과를 컴파일할 수 없습니다.")
 
