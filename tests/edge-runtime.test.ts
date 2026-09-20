@@ -226,7 +226,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']generated_room_pin_confirmation["']/
+      /expectedMigrationName\s*=\s*["']availability_any_day_submission["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -331,7 +331,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(availabilityApi).toContain('requirePasswordChanged(actor)');
     expect(openApi).toContain('operationId: "submitAvailability"');
     expect(openApi).toContain('AvailabilityChangeRequestInput');
-    expect(openApi).toContain('"OUTSIDE_AVAILABILITY_WINDOW"');
+    expect(openApi).toContain('"AVAILABILITY_WEEK_OUT_OF_RANGE"');
+    expect(openApi).toContain('"PAST_AVAILABILITY_DATE_NOT_ALLOWED"');
     expect(openApi).toContain('"STALE_VERSION"');
   });
 

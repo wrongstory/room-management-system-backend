@@ -262,8 +262,9 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 ### `[확정]` 현재 정책
 
 - 과거의 공개 일감과 메이드 선점/claim 모델은 폐기됐다.
-- 메이드는 일요일 12:00–23:59 KST에 다음 월요일–일요일의 가능일을 version으로 제출한다.
-- 마감 뒤 수정은 원본을 덮지 않고 변경 요청과 승인/반려 이력으로 남긴다.
+- 일요일은 다음 주 계획의 주 제출일이지만, 메이드는 어느 요일이든 KST 기준 현재 주 또는 다음 주의 가능일을 직접 version으로 제출·변경할 수 있다.
+- 현재 주의 지난 날짜는 기존 current version에서 이미 가능했던 값을 보존할 수 있지만, 불가능·미제출 날짜를 `available=true`로 소급 변경할 수 없다. 모든 재제출은 원본을 덮지 않고 새 immutable version을 만든다.
+- 관리자 승인형 변경 요청과 승인/반려 이력은 별도 호환 흐름으로 유지한다.
 - 관리자는 가능 메이드만 후보로 오늘/내일 청소를 배정한다.
 - 관리자가 메이드별 작업 순서 1–N을 정하고 저장·통보한다.
 - **[확정 — 2026-09-08 #4 A안]** 메이드는 본인에게 실제 통보된 assignment revision만 조회한다. 과거 superseded/종료 revision도 본인에게 실제 통보됐으면 history에 포함한다. 미통보 draft, 다른 maid의 배정, 자신에게 한 번도 통보되지 않은 revision은 금지한다. 과거 조회 권한은 현재 target 일정·새 담당·새 revision 조회나 수행 권한을 뜻하지 않는다.
@@ -733,7 +734,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 ### Issue #6 `v0.2.0` source release 범위
 
-- 가능일 제출은 일요일 12:00–23:59 KST와 다음 월요일 `week_start`를 DB command에서 검증한다.
+- 당시 가능일 제출은 일요일 12:00–23:59 KST와 다음 월요일 `week_start`만 허용했다. 이 시간창은 Issue #229의 현재·다음 주 상시 직접 제출 계약으로 대체됐다.
 - 메이드·주차별 current version은 `expectedVersion` CAS와 advisory lock으로 직렬화하며 과거 version과 7개 날짜 row를 삭제하지 않는다.
 - 마감 뒤에는 pending 변경 요청을 만들고 활성 관리자의 승인 시에만 새 current version을 추가한다. 반려도 결정·사유·행위자·시각을 보존한다.
 - idempotency receipt는 `(actor_id, command_type, idempotency_key)` 범위다. 같은 범위의 같은 payload는 기존 결과를 반환하고 다른 payload 재사용은 거절하며, 다른 actor 또는 command의 같은 raw key는 독립 요청이다.

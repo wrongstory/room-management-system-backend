@@ -257,7 +257,7 @@ maid/admin/developer read·role smoke와 Pages snapshot을 완료했다.
 - [x] Fastify 계약과 동일한 validation/error code/camelCase projection
 - [x] maid self-only / admin exact-role / developer 차단 회귀
 - [x] must-change/inactive/revoked/upload-only 차단
-- [x] KST 제출창, CAS version, Idempotency-Key 계약 유지
+- [x] KST 현재/다음 주 any-day 직접 제출·변경, 일요일 primary reminder, CAS version, Idempotency-Key 계약 유지
 - [x] OpenAPI/Swagger/codegen 갱신
 - [x] Edge Deno tests + required CI + 독립 리뷰 P0/P1=0
 - [x] `dev` 병합

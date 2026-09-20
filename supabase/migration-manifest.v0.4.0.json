@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "v0.4.0",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 73,
+  "totalCount": 74,
   "baseline": {
     "count": 56,
     "head": "cleaning_template_duration_optional"
   },
   "pending": {
-    "count": 17,
+    "count": 18,
     "first": "photo_slot_contract_v8",
-    "head": "generated_room_pin_confirmation"
+    "head": "availability_any_day_submission"
   },
-  "head": "generated_room_pin_confirmation",
+  "head": "availability_any_day_submission",
   "migrations": [
     {
       "order": 1,
@@ -378,6 +378,11 @@
       "order": 73,
       "name": "generated_room_pin_confirmation",
       "sha256": "ed0daa9e163e4cf500c8e6996bfff33c71eb37918e8bd1fb2fdaeabe9d35a0f9"
+    },
+    {
+      "order": 74,
+      "name": "availability_any_day_submission",
+      "sha256": "711e752f07841c241dfd35ca4cd0dafda0d09ed0b5ef8f57760d935fd53b792f"
     }
   ]
 }
