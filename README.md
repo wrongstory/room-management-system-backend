@@ -64,7 +64,7 @@ npm run edge:check
 
 Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge runtime PoC](docs/EDGE_RUNTIME_POC.md)에 정리했습니다. 운영 smoke가 끝나기 전까지 기존 Fastify 구현은 개발 기준선으로 유지합니다.
 
-로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 운영 문서는 [GitHub Pages Swagger 포털](https://wrongstory.github.io/room-management-system-backend/)에서 읽고, [정적 OpenAPI JSON](https://wrongstory.github.io/room-management-system-backend/openapi.json)을 타입 생성에 사용할 수 있습니다. Pages artifact는 실제 운영 Edge OpenAPI를 배포 시점에 내려받아 만들며 공개 포털에서는 `Try it out`과 Authorization 입력을 비활성화합니다. 인증·멱등성·오류 처리는 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md)를 따릅니다.
+로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 운영 문서는 [GitHub Pages Swagger 포털](https://wrongstory.github.io/room-management-system-backend/)에서 읽고, [정적 OpenAPI JSON](https://wrongstory.github.io/room-management-system-backend/openapi.json)을 타입 생성에 사용할 수 있습니다. Pages artifact는 실제 운영 Edge OpenAPI를 배포 시점에 내려받아 만들며 공개 포털에서는 `Try it out`과 Authorization 입력을 비활성화합니다. 인증·멱등성·오류 처리는 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md), 실제 구현 순서와 화면 검증은 [v0.4.0 프런트 Codex 인계](docs/FRONTEND_CODEX_HANDOFF_V0.4.0.md)를 따릅니다.
 
 ## 보안 경계
 
@@ -72,7 +72,7 @@ Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge r
 - 브라우저는 객실 PIN 원문, 내부 Auth 이메일, 다른 메이드 데이터에 직접 접근하지 않습니다.
 - 사용자 인증정보는 `user_metadata`가 아니라 DB 프로필과 서버 검증 결과로 권한을 결정합니다.
 - 휴대전화 원문은 저장하지 않고 서버 비밀값으로 만든 HMAC과 마지막 4자리만 저장합니다.
-- 사진은 앱에서 300KiB 이하로 압축해 Google Drive 비공개 폴더에만 저장하고, 업로드 시각부터 정확히 7일 뒤 영구삭제하는 것이 확정 계약입니다. 180일 보존이나 retention hold 예외는 두지 않습니다. 업로드·삭제 worker와 운영 OAuth 자격증명은 아직 구현·배포 전이며, token과 locator를 브라우저에 노출하지 않습니다.
+- 사진은 앱에서 300KiB 이하로 압축해 Google Drive 비공개 폴더에만 저장합니다. 청소 제출 사진은 최종 검사 결정 뒤 168시간, 해결된 이슈·컴플레인·충돌 증빙은 종결 뒤 180일, 실제 orphan은 업로드 뒤 30일의 분리된 retention 계약을 사용합니다. metadata는 원본 만료 뒤에도 보존하고 token과 provider locator를 브라우저에 노출하지 않습니다. 실제 Google Drive OAuth·purge Cron hosted 활성화는 별도 운영 gate입니다.
 - 예약 고객명은 서버에서만 암복호화하고 DB·로그·감사 payload에 평문을 저장하지 않습니다. 목록에서는 제외하고 관리자 단건 상세에서만 표시하며 체크아웃/취소 180일 뒤 worker가 암호문을 제거합니다. 암호화 키를 바꿀 때는 이전 키를 `RESERVATION_PII_KEYRING_JSON`에 유지한 채 새 key version으로 쓰기를 전환하고 기존 암호문을 계획적으로 재암호화해야 합니다.
 - 고객명 idempotency fingerprint는 암호화 키와 분리된 `RESERVATION_GUEST_NAME_PEPPER`를 사용해 암호화 키 회전 전후에도 같은 요청 hash를 유지합니다.
 - 운영·복구검증 Supabase에는 P0·계정 수명주기·도메인 무결성 migration이 적용됐습니다. 정확한 구현·배포 구분은 제품·도메인 가이드의 구현 현황 절을 따릅니다.

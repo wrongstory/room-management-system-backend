@@ -1,6 +1,6 @@
-# v0.4.0 릴리즈 후보 계획
+# v0.4.0 릴리즈·운영 적용 기록
 
-> 상태: `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7`을 기준으로 release/main 충돌 해소와 검증 진행 중. production 미변경.
+> 상태: `main@80f935016d5581d500136fba29c206f6ee797bc0`을 production DB/API와 GitHub Pages에 반영 완료. 보호 API 역할별 read와 안전 fixture 기반 mutation smoke는 별도 대기.
 
 이 문서는 Issue #220의 `release/v0.4.0 → main` source gate와, 그 이후 별도 승인이 필요한 Supabase 운영 적용 순서를 구분한다.
 
@@ -8,11 +8,11 @@
 
 | 경계 | 기준 |
 |---|---|
-| production DB | 56 migrations, head `cleaning_template_duration_optional` |
-| production API | `api` ACTIVE v16, OpenAPI 0.3.0 / 109 paths / 117 operations |
-| repository `main` | `a12595edf68644b94215c4792e0d3aadd64772c6` |
+| production DB | 73 migrations, head `generated_room_pin_confirmation` |
+| production API | `api` ACTIVE v17, OpenAPI 0.4.0 / 120 paths / 130 operations |
+| repository·production `main` | `80f935016d5581d500136fba29c206f6ee797bc0` |
 | release source | `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7` |
-| release candidate | 73 migrations, OpenAPI 0.4.0 / 120 paths / 130 operations |
+| release result | 73 migrations, OpenAPI 0.4.0 / 120 paths / 130 operations |
 
 `dev` 코드나 release 브랜치를 운영 Supabase에 직접 배포하지 않는다. required CI와 release QA를 통과한 `release/v0.4.0`을 `main`에 병합한 후에만 별도 운영 승인으로 적용한다.
 
@@ -21,13 +21,13 @@
 정본은 [`migration-manifest.v0.4.0.json`](../supabase/migration-manifest.v0.4.0.json)이다.
 
 - 전체: 73개
-- production baseline: 56개, head `cleaning_template_duration_optional`
-- pending: 17개
+- 적용 전 production baseline: 56개, head `cleaning_template_duration_optional`
+- 적용 완료: 17개
 - pending first: `photo_slot_contract_v8`
 - release head: `generated_room_pin_confirmation`
 - 검증: stable name, 순서, LF-normalized UTF-8 SHA-256
 
-적용 대상은 57~73번 정확한 append-only migration이다. 기존 56개를 수정·재적용·history repair하지 않고, 운영 readback이 56개와 다르면 적용 전 중단한다.
+57~73번 정확한 append-only migration을 적용했다. 기존 56개를 수정·재적용·history repair하지 않았고, 적용 전 production data를 recovery 프로젝트에 복원한 뒤 동일 누적 upgrade를 먼저 검증했다.
 
 ## 3. 포함 기능
 
@@ -51,16 +51,16 @@
 
 ## 5. 운영 적용 순서
 
-`main` 병합 후에도 아래는 별도 운영 승인 대상이다.
+아래 순서로 운영 적용을 완료했다.
 
-1. production migration history·schema·backup/recovery evidence read-only 재대조
-2. manifest의 pending 57~73을 순서대로 적용하고 중간 실패 시 후속 중단
-3. 병합된 `main` exact SHA에서 `api` Function만 재배포
+1. production migration history·schema를 read-only로 대조하고 logical backup을 암호화 보관했다. recovery 프로젝트에 production app data를 복원해 56→73 누적 upgrade와 원장 보존을 검증했다.
+2. manifest의 57~73을 순서대로 적용했다. production은 73개, public RLS 49/49, FK 384건 위반 0, DB lint error 0이다.
+3. 병합된 `main@80f935016d5581d500136fba29c206f6ee797bc0`에서 `api` Function만 재배포했다.
    - `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync`는 이번 release에서 source diff가 없으므로 재배포하지 않고 현재 production bundle을 유지
-4. health, OpenAPI 0.4.0 / 120 / 130, role/read-only smoke
-5. 승인된 안전 fixture로 예약·객실 상태·PIN lifecycle smoke; fixture가 없으면 SKIPPED_WITH_REASON로 남김
+4. `/health`, `/docs`, `/openapi.json` HTTP 200과 OpenAPI 0.4.0 / 120 / 130을 확인했다. 기존 네 Worker 버전은 변경되지 않았다.
+5. 보호 API 역할별 read와 예약·객실 상태·PIN lifecycle mutation은 이번 실행에서 재검증하지 않았다. 안전 fixture가 없으므로 mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 6. hosted provider·Google·Cron·Web Push는 각 Issue의 자격증명·대상·주기 승인 후 별도 활성화
-7. production API parity 확인 후에만 Pages workflow를 수동 실행
+7. production API parity 확인 후 Pages workflow run `35481531782`를 수동 실행했다. 공개 portal/OpenAPI/manifest는 HTTP 200이고 0.4.0 / 120 / 130 및 artifact SHA-256이 일치한다.
 
 ## 6. 중단·rollback
 
@@ -76,7 +76,11 @@
 - [x] 73-migration manifest·Pages 0.4.0/120/130 source gate 작성
 - [x] production 56→73 upgrade 회귀 PASS
 - [x] 전체 application/Edge/Python/DB/concurrency PASS
-- [ ] required CI PASS
-- [ ] exact-head QA 90점 이상, P0/P1=0
-- [ ] `release/v0.4.0 → main` 병합
-- [ ] production migration/Edge/Pages/hosted smoke
+- [x] required CI PASS
+- [x] exact-head QA 96점, P0/P1=0
+- [x] `release/v0.4.0 → main` 병합 — `main@80f935016d5581d500136fba29c206f6ee797bc0`
+- [x] production 57~73 migration 적용
+- [x] production `api` v17, Health/OpenAPI 0.4.0 / 120 / 130
+- [x] GitHub Pages run `35481531782`, portal/OpenAPI/manifest smoke
+- [ ] 보호 API 역할별 hosted read 재검증
+- [ ] 안전 fixture 기반 예약·PIN mutation smoke — `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`
