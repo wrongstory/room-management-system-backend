@@ -1304,7 +1304,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] v0.4.0 production 57~73 migration/API 배포
 - [ ] 안전 fixture 기반 hosted smoke
 
-현재 critical path는 **Issue #222 운영 결과의 `dev` 정본 역반영 → 안전 fixture가 승인되면 예약 생성·동일 요청 replay·BEFORE_CHECKIN/DURING_STAY room-move·초기 PIN snapshot smoke → 프런트 lifecycle/room-move mapper와 browser E2E → tag/GitHub Release**다.
+현재 critical path는 **Issue #224 프런트 v0.4.0 인계 정본 → generated client 갱신과 lifecycle/bookability/room-move/청소관리 연결 → 사용자의 browser 기능 확인 → 안전 fixture가 승인되면 예약·객실 이동·PIN hosted mutation smoke → tag/GitHub Release**다.
 
 ### #187 Phase C — DURING_STAY room move source/dev 완료
 
@@ -1522,6 +1522,7 @@ Swagger/OpenAPI에 표시된 operation 수와 이 문서의 **Production Edge �
 - Assignment Core: #25
 - `docs/AI_BACKEND_PRODUCT_GUIDE.md`
 - `docs/FRONTEND_API_INTEGRATION.md`
+- `docs/FRONTEND_CODEX_HANDOFF_V0.4.0.md`
 - `docs/DEVELOPER_OPERATIONS_API.md`
 - `docs/EDGE_RUNTIME_POC.md`
 - `docs/RELEASE_V0.2.0.md`
