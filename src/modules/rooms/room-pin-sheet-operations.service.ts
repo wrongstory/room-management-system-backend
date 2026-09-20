@@ -30,7 +30,7 @@ export interface RoomPinSheetStatus {
 export interface RoomPinSheetOperationsService {
   status(actor: Actor): Promise<RoomPinSheetStatus>;
   requestFullResync(actor: Actor, expectedVersion: number, idempotencyKey: string): Promise<{
-    status: 'pending'; roomCount: 121; version: number;
+    status: 'pending'; roomCount: number; version: number;
   }>;
 }
 
@@ -57,7 +57,7 @@ function dbError(error: { message?: string } | null): AppError {
     ['ROOM_PIN_SHEET_FULL_RESYNC_STALE', 409, 'ROOM_PIN_SHEET_FULL_RESYNC_STALE', 'PIN Sheet 상태가 변경되었습니다. 새 상태를 조회해 주세요.'],
     ['ROOM_PIN_SHEET_WORKER_BUSY', 409, 'ROOM_PIN_SHEET_WORKER_BUSY', 'PIN Sheet worker가 실행 중입니다.'],
     ['ROOM_PIN_SHEET_FULL_RESYNC_PENDING', 409, 'ROOM_PIN_SHEET_FULL_RESYNC_PENDING', '이미 전체 동기화가 대기 중입니다.'],
-    ['ROOM_PIN_SHEET_ROOM_MASTER_INVALID', 503, 'ROOM_PIN_SHEET_ROOM_MASTER_INVALID', '121실 객실 정본을 확인해 주세요.'],
+    ['ROOM_PIN_SHEET_ROOM_MASTER_INVALID', 503, 'ROOM_PIN_SHEET_ROOM_MASTER_INVALID', '활성 객실 정본을 확인해 주세요.'],
     ['IDEMPOTENCY_KEY_REUSED', 409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 요청에 사용한 Idempotency-Key입니다.']
   ];
   for (const [needle, status, code, korean] of mappings) {
@@ -86,12 +86,13 @@ function statusProjection(value: unknown): RoomPinSheetStatus {
   return row as unknown as RoomPinSheetStatus;
 }
 
-function pendingProjection(value: unknown): { status: 'pending'; roomCount: 121; version: number } {
+function pendingProjection(value: unknown): { status: 'pending'; roomCount: number; version: number } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw dbError(null);
   const row = value as Record<string, unknown>;
-  if (Object.keys(row).sort().join(',') !== 'roomCount,status,version' || row.status !== 'pending' || row.roomCount !== 121 ||
+  if (Object.keys(row).sort().join(',') !== 'roomCount,status,version' || row.status !== 'pending' ||
+    !Number.isSafeInteger(row.roomCount) || (row.roomCount as number) < 1 || (row.roomCount as number) > 500 ||
     !Number.isSafeInteger(row.version) || (row.version as number) < 0) throw dbError(null);
-  return row as unknown as { status: 'pending'; roomCount: 121; version: number };
+  return row as unknown as { status: 'pending'; roomCount: number; version: number };
 }
 
 function assertSize(value: unknown): void {

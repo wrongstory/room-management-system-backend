@@ -21,8 +21,8 @@ async function harness(sheetCells: unknown[] | unknown[][] = [], writeStatus = 2
     expect(url.hostname).toBe('sheets.googleapis.com'); expect(new Headers(init.headers).get('authorization')).toBe('Bearer synthetic_access_token_long_enough');
     if (init.method === 'POST') {
       const payload = JSON.parse(String(init.body)) as { data?: Array<{ range?: string }> };
-      const fullBoard = payload.data?.some(item => item.range?.includes('A2:H122')) ?? false;
-      return writeStatus === 200 ? Response.json({ totalUpdatedRows: fullBoard ? 122 : 2 }) : new Response(null, { status: writeStatus });
+      const fullBoard = payload.data?.some(item => item.range?.includes('A2:H501')) ?? false;
+      return writeStatus === 200 ? Response.json({ totalUpdatedRows: fullBoard ? 501 : 2 }) : new Response(null, { status: writeStatus });
     }
     const board = sheetCells.length && Array.isArray(sheetCells[0]) ? sheetCells : sheetCells.length ? [sheetCells] : [];
     return Response.json({ valueRanges: [{ values: [[...ROOM_PIN_SHEET_HEADERS]] }, { values: board }] });
@@ -91,14 +91,14 @@ describe('Google Sheets PIN projection adapter', () => {
     const occupied = await harness([['102']]);
     await expect(occupied.provider.inspect(row, Date.now() + 5000)).rejects.toMatchObject({ reason: 'PROVIDER_CONFIGURATION_ERROR' });
   });
-  it('bounds the complete 121-room board read and still finds the final room identity', async () => {
-    const board = Array.from({ length: 121 }, (_, index) => index === 120
+  it('bounds the complete 500-room board read and still finds the final room identity', async () => {
+    const board = Array.from({ length: 500 }, (_, index) => index === 499
       ? [row.roomNumber, row.canonicalPin, '2', row.syncStatus, row.effectiveAt, '', row.reasonCode, row.environment]
       : [String(200 + index)]);
     const value = await harness(board);
-    expect(await value.provider.inspect(row, Date.now() + 5000)).toEqual({ outcome: 'write', sheetRow: 122 });
+    expect(await value.provider.inspect(row, Date.now() + 5000)).toEqual({ outcome: 'write', sheetRow: 501 });
     const read = value.calls.find(call => call.init.method === 'GET' && call.url.hostname === 'sheets.googleapis.com');
-    expect(read?.url.searchParams.getAll('ranges')).toContain("'객실_PIN_현황'!A2:H122");
+    expect(read?.url.searchParams.getAll('ranges')).toContain("'객실_PIN_현황'!A2:H501");
     await expect((await harness([...board, ['overflow']])).provider.inspect(row, Date.now() + 5000)).rejects.toMatchObject({ reason: 'PROVIDER_RESPONSE_INVALID' });
   });
   it('writes stale/blank rows with deterministic headers and room-number row identity', async () => {
@@ -109,7 +109,7 @@ describe('Google Sheets PIN projection adapter', () => {
     expect(body).toMatchObject({ valueInputOption: 'RAW', includeValuesInResponse: false });
     expect(body.data[1].range).toContain('A2:H2'); expect(body.data[1].values[0]).toContain(row.canonicalPin);
   });
-  it('repairs the exact 121-room board from DB rows without reading Sheet values', async () => {
+  it('repairs a dynamic active-room board and clears the bounded remainder without reading Sheet values', async () => {
     const { provider, calls } = await harness([['tampered', 'sheet-input-is-ignored']]);
     const rows = Array.from({ length: 121 }, (_, index): RoomPinSheetRow => ({
       sheetRow: index + 2,
@@ -126,12 +126,13 @@ describe('Google Sheets PIN projection adapter', () => {
     const write = calls.find(call => call.init.method === 'POST' && call.url.hostname === 'sheets.googleapis.com');
     const body = JSON.parse(String(write?.init.body));
     expect(body.data).toHaveLength(2);
-    expect(body.data[1].range).toContain('A2:H122');
-    expect(body.data[1].values).toHaveLength(121);
+    expect(body.data[1].range).toContain('A2:H501');
+    expect(body.data[1].values).toHaveLength(500);
     expect(body.data[1].values[0][0]).toBe('1001');
     expect(body.data[1].values[120].slice(0, 4)).toEqual(['1121', '', '0', 'unconfigured']);
+    expect(body.data[1].values[121]).toEqual(['', '', '', '', '', '', '', '']);
     const invalid = await harness([]);
-    await expect(invalid.provider.writeFullBoard(rows.slice(0, 120), Date.now() + 5000)).rejects.toMatchObject({ reason: 'PROVIDER_CONFIGURATION_ERROR' });
+    await expect(invalid.provider.writeFullBoard([], Date.now() + 5000)).rejects.toMatchObject({ reason: 'PROVIDER_CONFIGURATION_ERROR' });
     expect(invalid.calls).toHaveLength(0);
   });
   it('blocks a sheet-ahead version and wrong room/environment identity', async () => {

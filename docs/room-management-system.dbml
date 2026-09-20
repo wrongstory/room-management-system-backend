@@ -206,6 +206,10 @@ Table public.rooms {
   state_version bigint [not null, default: 1]
   operation_suspended_at timestamptz
   operation_suspended_reason text
+  catalog_status text [not null, default: 'active', note: 'active/retired; no resurrection']
+  retired_at timestamptz
+  retired_by uuid
+  retirement_reason_code text
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 }
@@ -597,7 +601,7 @@ Table private.room_pin_sheet_full_resync_runs {
   aad_environment text [not null]
   aad_project_ref text [not null]
   target_identity_digest text [not null]
-  snapshot_room_count int [not null, note: 'exactly 121']
+  snapshot_room_count int [not null, note: 'exact active count, 1..500']
   status text [not null, note: 'pending/processing/succeeded/failed/operator_blocked/superseded']
   claim_id uuid
   claimed_at timestamptz
@@ -620,7 +624,7 @@ Table private.room_pin_sheet_full_resync_items {
   run_id uuid [not null]
   room_id uuid [not null]
   room_number_snapshot text [not null]
-  sheet_row int [not null, note: '2..122']
+  sheet_row int [not null, note: '2..501']
   pin_revision_id uuid
   pin_version bigint [not null]
   sync_status text [not null]
@@ -632,7 +636,7 @@ Table private.room_pin_sheet_full_resync_items {
     (run_id, room_number_snapshot) [unique]
     (run_id, sheet_row) [unique]
   }
-  Note: '#137 append-only 121-room snapshot. Holds revision references and safe row metadata, never plaintext PIN or copied envelope.'
+  Note: '#137/#230 append-only active-room snapshot, bounded to 500. Holds revision references and safe row metadata, never plaintext PIN or copied envelope.'
 }
 
 Table public.cleaning_template_versions {

@@ -44,9 +44,10 @@ export async function testAttemptExecutionConcurrency(client, actorProfileId) {
     const roomId = existingRoomId ?? randomUUID();
     sequence += 1;
     if (!existingRoomId) {
-      ok(await client.from('rooms').insert({
-        id: roomId, room_number: `${Date.now()}${sequence}`, room_type_id: roomType.id, elevator_zone: 'A'
-      }), 'execution isolated local room');
+      psqlScalar(`begin; set local app.room_catalog_command='v1';
+        insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+        values('${roomId}','${Date.now()}${sequence}','${roomType.id}','A');
+        commit`);
     }
     ok(await client.from('cleaning_targets').insert({
       id: targetId, room_id: roomId, cleaning_kind: 'additional', source: 'manual_room_request',
@@ -130,9 +131,10 @@ export async function testAttemptExecutionConcurrency(client, actorProfileId) {
 
   const sharedRoomId = randomUUID();
   sequence += 1;
-  ok(await client.from('rooms').insert({
-    id: sharedRoomId, room_number: `${Date.now()}${sequence}`, room_type_id: roomType.id, elevator_zone: 'A'
-  }), 'same-room execution fixture');
+  psqlScalar(`begin; set local app.room_catalog_command='v1';
+    insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+    values('${sharedRoomId}','${Date.now()}${sequence}','${roomType.id}','A');
+    commit`);
   const sameRoomFirst = await fixture(null, sharedRoomId);
   const sameRoomSecond = await fixture(null, sharedRoomId);
   const sameRoomStarts = await Promise.all([start(sameRoomFirst), start(sameRoomSecond)]);

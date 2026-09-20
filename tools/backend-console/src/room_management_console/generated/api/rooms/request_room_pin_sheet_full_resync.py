@@ -90,10 +90,10 @@ def sync_detailed(
     body: RoomPinSheetFullResyncRequest,
     idempotency_key: str,
 ) -> Response[ErrorEnvelope | RequestRoomPinSheetFullResyncResponse202]:
-    """PIN Sheet 121실 전체 복구 요청
+    """PIN Sheet 활성 객실 전체 복구 요청
 
-     Supabase 121실 정본 snapshot으로 삭제·정렬·변조된 Sheet 행을 deterministic A2:H122 범위에 복구하는 server-owned
-    command입니다. source-approved exact target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.
+     요청 시점의 활성 객실 1~500실 exact snapshot으로 Sheet를 복구하는 server-owned command입니다. source-approved exact
+    target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.
 
     Args:
         idempotency_key (str):
@@ -125,10 +125,10 @@ def sync(
     body: RoomPinSheetFullResyncRequest,
     idempotency_key: str,
 ) -> ErrorEnvelope | RequestRoomPinSheetFullResyncResponse202 | None:
-    """PIN Sheet 121실 전체 복구 요청
+    """PIN Sheet 활성 객실 전체 복구 요청
 
-     Supabase 121실 정본 snapshot으로 삭제·정렬·변조된 Sheet 행을 deterministic A2:H122 범위에 복구하는 server-owned
-    command입니다. source-approved exact target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.
+     요청 시점의 활성 객실 1~500실 exact snapshot으로 Sheet를 복구하는 server-owned command입니다. source-approved exact
+    target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.
 
     Args:
         idempotency_key (str):
@@ -155,10 +155,10 @@ async def asyncio_detailed(
     body: RoomPinSheetFullResyncRequest,
     idempotency_key: str,
 ) -> Response[ErrorEnvelope | RequestRoomPinSheetFullResyncResponse202]:
-    """PIN Sheet 121실 전체 복구 요청
+    """PIN Sheet 활성 객실 전체 복구 요청
 
-     Supabase 121실 정본 snapshot으로 삭제·정렬·변조된 Sheet 행을 deterministic A2:H122 범위에 복구하는 server-owned
-    command입니다. source-approved exact target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.
+     요청 시점의 활성 객실 1~500실 exact snapshot으로 Sheet를 복구하는 server-owned command입니다. source-approved exact
+    target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.
 
     Args:
         idempotency_key (str):
@@ -188,10 +188,10 @@ async def asyncio(
     body: RoomPinSheetFullResyncRequest,
     idempotency_key: str,
 ) -> ErrorEnvelope | RequestRoomPinSheetFullResyncResponse202 | None:
-    """PIN Sheet 121실 전체 복구 요청
+    """PIN Sheet 활성 객실 전체 복구 요청
 
-     Supabase 121실 정본 snapshot으로 삭제·정렬·변조된 Sheet 행을 deterministic A2:H122 범위에 복구하는 server-owned
-    command입니다. source-approved exact target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.
+     요청 시점의 활성 객실 1~500실 exact snapshot으로 Sheet를 복구하는 server-owned command입니다. source-approved exact
+    target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.
 
     Args:
         idempotency_key (str):

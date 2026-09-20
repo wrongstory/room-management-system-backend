@@ -1266,6 +1266,153 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/developer/rooms": {
+      get: {
+        tags: ["Developer"],
+        operationId: "listDeveloperRooms",
+        summary: "개발자 객실 카탈로그 조회",
+        description:
+          "active developer 전용 bounded cursor 목록입니다. 활성·은퇴·전체 수와 이력을 보존한 객실 기준정보를 반환합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [
+          {
+            name: "status",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["all", "active", "retired"],
+              default: "all",
+            },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", maxLength: 256 },
+          },
+          {
+            name: "limit",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "객실 카탈로그 페이지",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/DeveloperRoomCatalogPage",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+      post: {
+        tags: ["Developer"],
+        operationId: "createDeveloperRoom",
+        summary: "개발자 객실 추가",
+        description:
+          "published room type의 version을 CAS 검증하고 active 500실 상한 안에서 새 immutable room ID를 생성합니다. 과거에 사용한 roomNumber는 재사용하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/CreateDeveloperRoomRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "생성된 객실 또는 동일 receipt replay",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["room"],
+                  properties: {
+                    room: {
+                      $ref: "#/components/schemas/DeveloperRoomCatalogItem",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+    "/v1/developer/rooms/{roomId}/retire": {
+      post: {
+        tags: ["Developer"],
+        operationId: "retireDeveloperRoom",
+        summary: "개발자 객실 논리 은퇴",
+        description:
+          "물리 삭제 없이 expectedVersion CAS로 은퇴합니다. 활성 예약·청소·이슈·차단·PIN workflow가 남아 있으면 원자적으로 거부합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        parameters: [idempotencyHeader, {
+          name: "roomId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/RetireDeveloperRoomRequest",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "은퇴된 객실 또는 동일 receipt replay",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["room"],
+                  properties: {
+                    room: {
+                      $ref: "#/components/schemas/DeveloperRoomCatalogItem",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/room-pin-sheet-sync/status": {
       get: {
         tags: ["Rooms"],
@@ -1305,9 +1452,9 @@ export const openApiDocument = {
       post: {
         tags: ["Rooms"],
         operationId: "requestRoomPinSheetFullResync",
-        summary: "PIN Sheet 121실 전체 복구 요청",
+        summary: "PIN Sheet 활성 객실 전체 복구 요청",
         description:
-          "Supabase 121실 정본 snapshot으로 삭제·정렬·변조된 Sheet 행을 deterministic A2:H122 범위에 복구하는 server-owned command입니다. source-approved exact target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.",
+          "요청 시점의 활성 객실 1~500실 exact snapshot으로 Sheet를 복구하는 server-owned command입니다. source-approved exact target identity와 singleton fence를 검증하고 Sheet 값을 DB로 읽어들이지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["developer", "admin"],
         parameters: [idempotencyHeader],
@@ -1364,7 +1511,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 70,
+              maxItems: 72,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -6011,6 +6158,23 @@ export const openApiDocument = {
           "ASSIGNMENT_ACCESS_REQUIRED",
           "DEVELOPER_REQUIRED",
           "DEVELOPER_PROJECTION_FAILED",
+          "INVALID_ROOM_CATALOG_STATUS",
+          "INVALID_ROOM_CATALOG_PAGE_SIZE",
+          "INVALID_ROOM_CATALOG_CURSOR",
+          "INVALID_ROOM_CATALOG_ENTRY",
+          "INVALID_ROOM_RETIREMENT_REASON",
+          "ROOM_CATALOG_COMMAND_FAILED",
+          "ROOM_CATALOG_ACTIVE_LIMIT_EXCEEDED",
+          "ROOM_NUMBER_ALREADY_USED",
+          "ROOM_TYPE_NOT_PUBLISHED",
+          "STALE_ROOM_TYPE_VERSION",
+          "ROOM_ALREADY_RETIRED",
+          "ROOM_RETIRED",
+          "ROOM_RETIRE_RESERVATION_CONFLICT",
+          "ROOM_RETIRE_CLEANING_CONFLICT",
+          "ROOM_RETIRE_ISSUE_CONFLICT",
+          "ROOM_RETIRE_OPERATION_BLOCK_CONFLICT",
+          "ROOM_RETIRE_PIN_WORKFLOW_CONFLICT",
           "DATABASE_UNREACHABLE",
           "MIGRATION_DRIFT",
           "RLS_CONFIGURATION_INVALID",
@@ -6589,6 +6753,8 @@ export const openApiDocument = {
           "room.pin_mismatch_resolved",
           "room.pin_generated",
           "room.generated_pin_confirmed",
+          "room.catalog_created",
+          "room.catalog_retired",
           "room_pin_sheet.full_resync_requested",
           "room_pin_sheet.full_resync_succeeded",
           "submission.bomb_reported",
@@ -6799,8 +6965,101 @@ export const openApiDocument = {
         required: ["status", "roomCount", "version"],
         properties: {
           status: { const: "pending" },
-          roomCount: { const: 121 },
+          roomCount: { type: "integer", minimum: 1, maximum: 500 },
           version: { type: "integer", minimum: 0 },
+        },
+      },
+      DeveloperRoomCatalogItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "roomNumber",
+          "status",
+          "version",
+          "roomTypeId",
+          "roomTypeCode",
+          "roomTypeName",
+          "roomTypeVersion",
+          "elevatorZone",
+          "createdAt",
+          "retiredAt",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          roomNumber: { type: "string", pattern: "^[0-9]{1,8}$" },
+          status: { type: "string", enum: ["active", "retired"] },
+          version: { type: "integer", minimum: 1 },
+          roomTypeId: { type: "string", format: "uuid" },
+          roomTypeCode: { type: "string" },
+          roomTypeName: { type: "string" },
+          roomTypeVersion: { type: "integer", minimum: 1 },
+          elevatorZone: {
+            type: ["string", "null"],
+            enum: ["A", "B", "C", null],
+          },
+          createdAt: { type: "string", format: "date-time" },
+          retiredAt: { type: ["string", "null"], format: "date-time" },
+          retirementReasonCode: {
+            type: ["string", "null"],
+            pattern: "^[A-Z0-9_]{2,80}$",
+          },
+        },
+      },
+      DeveloperRoomCatalogPage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["counts", "items", "nextCursor"],
+        properties: {
+          counts: {
+            type: "object",
+            additionalProperties: false,
+            required: ["active", "retired", "total"],
+            properties: {
+              active: { type: "integer", minimum: 0, maximum: 500 },
+              retired: { type: "integer", minimum: 0 },
+              total: { type: "integer", minimum: 0 },
+            },
+          },
+          items: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/DeveloperRoomCatalogItem" },
+          },
+          nextCursor: { type: ["string", "null"], maxLength: 256 },
+        },
+      },
+      CreateDeveloperRoomRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "roomNumber",
+          "roomTypeId",
+          "expectedRoomTypeVersion",
+          "elevatorZone",
+        ],
+        properties: {
+          roomNumber: { type: "string", pattern: "^[0-9]{1,8}$" },
+          roomTypeId: { type: "string", format: "uuid" },
+          expectedRoomTypeVersion: { type: "integer", minimum: 1 },
+          elevatorZone: {
+            type: ["string", "null"],
+            enum: ["A", "B", "C", null],
+          },
+        },
+      },
+      RetireDeveloperRoomRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["expectedVersion", "reasonCode"],
+        properties: {
+          expectedVersion: { type: "integer", minimum: 1 },
+          reasonCode: {
+            type: "string",
+            pattern: "^[A-Z0-9_]{2,80}$",
+            minLength: 2,
+            maxLength: 80,
+          },
         },
       },
       RoomPinSheetSyncStatus: {
@@ -7304,7 +7563,7 @@ export const openApiDocument = {
               pinSyncEventId: { type: "string", format: "uuid" },
               syncStatus: { type: "string" },
               pinVersion: { type: "integer", minimum: 0 },
-              roomCount: { type: "integer", minimum: 0, maximum: 121 },
+              roomCount: { type: "integer", minimum: 0, maximum: 500 },
               reconciliation: { type: "boolean" },
               complaintId: { type: "string", format: "uuid" },
               sourceComplaintDecisionId: { type: "string", format: "uuid" },
@@ -10222,7 +10481,7 @@ export const openApiDocument = {
           },
           initializedCount: { type: "integer", minimum: 0, maximum: 25 },
           skippedCount: { type: "integer", minimum: 0, maximum: 25 },
-          remainingCount: { type: "integer", minimum: 0, maximum: 121 },
+          remainingCount: { type: "integer", minimum: 0, maximum: 500 },
           completedAt: { type: "string", format: "date-time" },
           generatedPins: {
             type: "array",

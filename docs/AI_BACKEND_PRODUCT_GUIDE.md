@@ -112,11 +112,13 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 
 ### `[확정]` 객실 마스터
 
-- 객실은 총 121실이다.
-- 타입별 객실 수는 22 / 51 / 13 / 35실이다.
-- 엘리베이터 구역은 A 33실 / B 29실 / C 59실이다.
+- 초기 검증 seed/current snapshot은 총 121실이다. #230 이후 총량은 developer 객실 카탈로그에서 동적으로 관리하며 active 객실은 source-controlled 상한 500실이다.
+- 초기 seed의 타입별 객실 수는 22 / 51 / 13 / 35실이다.
+- 초기 seed의 엘리베이터 구역은 A 33실 / B 29실 / C 59실이다.
 - 객실 번호는 사람이 보는 안정적인 업무키다. 내부 PK는 별도 불변 UUID를 사용한다.
 - 타입이나 엘리베이터가 바뀌어도 과거 작업 snapshot은 바뀌지 않는다.
+- active/password-complete developer만 bounded cursor 목록과 active/retired/total count를 조회하고 published room type version CAS로 객실을 추가하거나 room state version CAS로 논리 은퇴한다. 물리 DELETE와 retired room number 자동 재사용은 금지한다.
+- active/future reservation, non-terminal cleaning, unresolved issue/operation block/PIN workflow가 남은 객실은 은퇴할 수 없다. retired room은 현재 객실 현황·예약 후보·배정·Google current snapshot에서 제외하되 과거 이력과 FK identity는 보존한다.
 
 | code | 표시명 | 객실 수 | 기본 청소요금 | 퇴실 청소 사진 슬롯 |
 |---|---|---:|---:|---:|
@@ -528,7 +530,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - `[확정 — 2026-09-16 #169]` generated PIN은 생성 직후 `mismatch`이며 Sheet outbox를 만들지 않는다. admin만 30초 reveal lease와 `Cache-Control: no-store` 응답에서 credential을 확인할 수 있고, 평문/envelope는 command receipt·로그·감사·알림에 저장하지 않는다. 메이드와 일반 reveal은 이 상태를 열람할 수 없다. 관리자가 실제 도어락 적용을 version CAS와 새 idempotency key로 확인한 뒤에만 `verified` sync event와 Sheet outbox를 원자적으로 기록한다.
 - `[확정 — 2026-09-13 #140 보강]` 일반 PIN prepare와 bootstrap은 private `(key_version, nonce)` reservation을 공유한다. 같은 실제 PIN 암호키는 keyring 구성에서 여러 version 이름으로 중복 등록할 수 없고, 같은 key version과 12-byte nonce는 객실·AAD가 달라도 서로 다른 암호화에 재사용할 수 없다. prepare가 만든 envelope를 confirm이 그대로 revision으로 승격하는 것은 같은 논리 암호화이므로 reservation을 재사용한다. 52→53 upgrade에서 matching confirmed lease/revision은 한 reservation으로 backfill하며, 서로 다른 과거 암호화의 충돌이 발견되면 원 이력을 삭제·변환하지 않고 migration 전체를 fail-closed한다.
 - bootstrap 성공의 `initialized`는 그 batch transaction에서 신규 revision/current/mismatch sync/audit가 확정된 객실이고, `skipped`는 기존 current PIN 또는 미해결 물리 변경을 보존하기 위해 의도적으로 건너뛴 객실이다. 검증 오류를 `skipped`로 숨기지 않으며 DB validation 오류는 batch transaction 전체를 rollback해 업무 원장 변경 0건으로 끝난다. timeout·응답 유실은 rollback 증거가 아니므로 같은 `Idempotency-Key`로 receipt를 재생하고, 아직 현장 확인 전이면 새 30초 admin reveal lease로 같은 암호화 revision을 다시 확인한다.
-- `[확정 — 2026-09-13 #137 source]` developer/admin은 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 CAS version만 조회한다. full resync는 서버가 요청 시점의 정확한 121실 room/PIN current snapshot을 만들고 global singleton fence의 유일한 provider permit으로 `A1:H122`를 DB 정본에서 재작성한다. 요청·claim은 environment/project/spreadsheet/tab 전체의 source-controlled SHA-256 target identity에 묶이며 mapping 변경·stale snapshot·경쟁은 fail-closed한다. 성공 marker 이전에 생성된 snapshot-room incremental/uncertain 작업만 supersede하고 이후 PIN 변경은 보존한다. Sheet→DB 입력, PIN/envelope/credential/token/raw Google response 공개, production mapping·활성화는 금지한다.
+- `[확정 — 2026-09-20 #230 보강]` developer/admin은 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 CAS version만 조회한다. full resync는 서버가 요청 시점의 정확한 active room/PIN current snapshot(1~500실)을 만들고 global singleton fence의 유일한 provider permit으로 bounded `A1:H501`을 DB 정본에서 재작성한다. 요청·claim은 environment/project/spreadsheet/tab 전체의 source-controlled SHA-256 target identity에 묶이며 mapping 변경·stale snapshot·경쟁은 fail-closed한다. 성공 marker 이전에 생성된 snapshot-room incremental/uncertain 작업만 supersede하고 이후 PIN 변경은 보존한다. Sheet→DB 입력, PIN/envelope/credential/token/raw Google response 공개, production mapping·활성화는 금지한다.
 - `[현재 구현 — Issue #194 production source 배포, hosted 활성화 별도]` 64번째 append-only migration은 exact typed delivery outbox를 source evidence로 고정한 private immutable entitlement ledger와 30초 reveal lease를 연결한다. 최초 grant는 active/password-complete actor만 허용하고, PIN rotation successor는 current workflow와 객실별 최소 미래 service date의 이미 통보된 assignment만 허용한다. deactivation 진행 상태에는 신규 successor를 만들지 않고 inactive/departed 최종 정리에서 남은 entitlement/reveal을 닫는다. DB/API 배포 완료는 hosted provider·Google Sheets/Cron 활성화나 실제 PIN mutation smoke 완료를 뜻하지 않는다.
 
 ### `[확정]` 개인정보 보존

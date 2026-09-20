@@ -1,9 +1,12 @@
 import {
   assertEmptyDiagnosticRequestBody,
+  createDeveloperRoom,
   developerAuditEvents,
   developerDatabaseStatus,
   developerRuntimeStatus,
   expectedMigrationName,
+  listDeveloperRoomCatalog,
+  retireDeveloperRoom,
   toDeveloperActivityEvent,
   toDeveloperAuditEvent,
 } from "./developer-api.ts";
@@ -70,14 +73,14 @@ Deno.test("developer runtime reports Google and purge configuration booleans onl
   }
 });
 
-Deno.test("developer audit query accepts all 70 approved event types and rejects 71 before RPC", async () => {
+Deno.test("developer audit query accepts all 72 approved event types and rejects 73 before RPC", async () => {
   let calls = 0;
   const clients = {
     admin: {
       rpc: (_name: string, args: Record<string, unknown>) => {
         calls += 1;
         assert(
-          (args.p_event_types as unknown[]).length === 70,
+          (args.p_event_types as unknown[]).length === 72,
           "full current inventory passed",
         );
         return Promise.resolve({ data: [], error: null });
@@ -96,7 +99,7 @@ Deno.test("developer audit query accepts all 70 approved event types and rejects
     const event of openApiDocument.components.schemas.DeveloperAuditEventType
       .enum
   ) query.append("eventType", event);
-  assert(query.size === 70, "actual source enum inventory");
+  assert(query.size === 72, "actual source enum inventory");
   await developerAuditEvents(
     new Request(
       `https://example.invalid/functions/v1/api/v1/developer/audit-events?${query}`,
@@ -104,7 +107,7 @@ Deno.test("developer audit query accepts all 70 approved event types and rejects
     clients,
     actor,
   );
-  assert(calls === 1, "all 70 accepted");
+  assert(calls === 1, "all 72 accepted");
   query.append("eventType", "cleaning.offline_event_resolved");
   try {
     await developerAuditEvents(
@@ -114,11 +117,11 @@ Deno.test("developer audit query accepts all 70 approved event types and rejects
       clients,
       actor,
     );
-    throw new Error("71 must fail");
+    throw new Error("73 must fail");
   } catch (error) {
     assert(
       error instanceof EdgeError && error.status === 400,
-      "71 rejected with stable validation",
+      "73 rejected with stable validation",
     );
   }
   assert(calls === 1, "over-limit query never reaches DB");
@@ -146,7 +149,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "generated_room_pin_confirmation",
+    expectedMigrationName === "room_catalog_lifecycle",
     "expected migration must not depend on a remote execution timestamp",
   );
   const get = Deno.env.get;
@@ -165,6 +168,106 @@ Deno.test("developer source migration head uses a stable migration name", () => 
   } finally {
     Deno.env.get = get;
   }
+});
+
+Deno.test("developer room catalog binds session, pagination, CAS and idempotency", async () => {
+  const sessionId = "51000000-0000-4000-8000-000000000230";
+  const payload = btoa(JSON.stringify({ session_id: sessionId })).replaceAll(
+    "=",
+    "",
+  );
+  const headers = {
+    authorization: `Bearer e30.${payload}.signature`,
+    "idempotency-key": "room-catalog-edge-0230",
+    "content-type": "application/json",
+  };
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const clients = {
+    admin: {
+      rpc: (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        if (name === "list_developer_room_catalog") {
+          return Promise.resolve({
+            data: {
+              counts: { active: 121, retired: 0, total: 121 },
+              items: [],
+              hasMore: false,
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({
+          data: { id: "30000000-0000-4000-8000-000000000230" },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const actor = {
+    authUserId: "10000000-0000-4000-8000-000000000230",
+    profileId: "20000000-0000-4000-8000-000000000230",
+    displayName: "개발자",
+    role: "developer" as const,
+    mustChangePassword: false,
+  };
+  await listDeveloperRoomCatalog(
+    new Request(
+      "https://example.test/v1/developer/rooms?status=active&limit=100",
+      {
+        headers,
+      },
+    ),
+    clients,
+    actor,
+  );
+  await createDeveloperRoom(
+    new Request("https://example.test/v1/developer/rooms", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        roomNumber: "999",
+        roomTypeId: "40000000-0000-4000-8000-000000000230",
+        expectedRoomTypeVersion: 2,
+        elevatorZone: "A",
+      }),
+    }),
+    clients,
+    actor,
+  );
+  await retireDeveloperRoom(
+    new Request(
+      "https://example.test/v1/developer/rooms/30000000-0000-4000-8000-000000000230/retire",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          expectedVersion: 1,
+          reasonCode: "ROOM_REMOVED",
+        }),
+      },
+    ),
+    clients,
+    actor,
+    "30000000-0000-4000-8000-000000000230",
+  );
+  assert(calls.length === 3, "all room catalog operations dispatched");
+  assert(
+    calls.every((call) => call.args.p_session_id === sessionId),
+    "all operations bind the verified session",
+  );
+  assert(calls[0].args.p_limit === 100, "list remains bounded");
+  assert(
+    calls[1].args.p_expected_room_type_version === 2 &&
+      calls[2].args.p_expected_version === 1,
+    "create and retire preserve CAS",
+  );
+  assert(
+    calls.slice(1).every((call) =>
+      call.args.p_idempotency_key === "room-catalog-edge-0230" &&
+      typeof call.args.p_request_hash === "string"
+    ),
+    "commands bind idempotency and stable request hashes",
+  );
 });
 
 Deno.test("developer database status degrades a fresh healthy heartbeat for a malformed prior envelope key", async () => {

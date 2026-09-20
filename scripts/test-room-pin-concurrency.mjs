@@ -302,15 +302,10 @@ export async function testRoomPinConcurrency(client) {
     sequence += 1;
     const id = randomUUID();
     const roomNumber = `${Date.now()}${sequence}`;
-    ok(
-      await client.from("rooms").insert({
-        id,
-        room_number: roomNumber,
-        room_type_id: roomType.id,
-        elevator_zone: "A",
-      }),
-      "room PIN room fixture",
-    );
+    sql(`begin; set local app.room_catalog_command='v1';
+      insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+      values('${id}','${roomNumber}','${roomType.id}','A');
+      commit;`);
     return { id, roomNumber };
   }
   function envelope() {

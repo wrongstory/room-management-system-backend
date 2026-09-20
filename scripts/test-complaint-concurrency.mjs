@@ -145,8 +145,10 @@ export async function testComplaintConcurrency(client, adminProfileId) {
       "select id||'|'||code from public.room_types order by code limit 1;",
     ).split("|");
     const roomId = randomUUID();
-    sql(`insert into public.rooms(id,room_number,room_type_id)
-      values('${roomId}','${Date.now()}${sequence}','${roomTypeId}');`);
+    sql(`begin; set local app.room_catalog_command='v1';
+      insert into public.rooms(id,room_number,room_type_id)
+      values('${roomId}','${Date.now()}${sequence}','${roomTypeId}');
+      commit;`);
     const target = randomUUID(),
       assignment = randomUUID(),
       attempt = randomUUID(),

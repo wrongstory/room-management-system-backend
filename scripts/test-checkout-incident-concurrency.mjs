@@ -196,12 +196,10 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
     const roomId = randomUUID();
     const reservationId = randomUUID();
     const roomNumber = `${fixtureAt.getTime()}${sequence}`;
-    ok(await client.from("rooms").insert({
-      id: roomId,
-      room_number: roomNumber,
-      room_type_id: roomType.id,
-      elevator_zone: "A",
-    }), "checkout incident isolated room");
+    psql(`begin; set local app.room_catalog_command='v1';
+      insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+      values('${roomId}','${roomNumber}','${roomType.id}','A');
+      commit`);
     const checkoutAt = new Date(
       fixtureAt.getTime() + (checkoutMode === "manual" ? 60 * 60_000 : 0),
     );

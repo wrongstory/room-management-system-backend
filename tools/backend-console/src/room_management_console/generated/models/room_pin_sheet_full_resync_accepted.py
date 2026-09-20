@@ -13,12 +13,12 @@ class RoomPinSheetFullResyncAccepted:
     """
     Attributes:
         status (Literal['pending']):
-        room_count (Literal[121]):
+        room_count (int):
         version (int):
     """
 
     status: Literal["pending"]
-    room_count: Literal[121]
+    room_count: int
     version: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -47,9 +47,7 @@ class RoomPinSheetFullResyncAccepted:
         if status != "pending":
             raise ValueError(f"status must match const 'pending', got '{status}'")
 
-        room_count = cast(Literal[121], d.pop("roomCount"))
-        if room_count != 121:
-            raise ValueError(f"roomCount must match const 121, got '{room_count}'")
+        room_count = d.pop("roomCount")
 
         version = d.pop("version")
 

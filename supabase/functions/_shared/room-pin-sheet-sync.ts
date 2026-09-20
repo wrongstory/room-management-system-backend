@@ -168,7 +168,7 @@ function context(value: unknown): Context {
     outboxId: uuid(row.outboxId),
     roomId: uuid(row.roomId),
     roomNumber: text(row.roomNumber, /^[A-Za-z0-9]{1,32}$/),
-    sheetRow: integer(row.sheetRow, 2, 122),
+    sheetRow: integer(row.sheetRow, 2, 501),
     pinVersion: integer(row.pinVersion, 1),
     effectiveAt: text(row.effectiveAt, /^\d{4}-\d{2}-\d{2}T/),
     syncStatus: text(row.syncStatus, /^[a-z_]{2,40}$/),
@@ -187,7 +187,10 @@ function context(value: unknown): Context {
 }
 function fullResyncOperation(value: unknown): FullResyncOperation {
   const operation = object(value);
-  if (!Array.isArray(operation.items) || operation.items.length !== 121) {
+  if (
+    !Array.isArray(operation.items) || operation.items.length < 1 ||
+    operation.items.length > 500
+  ) {
     return failed();
   }
   const items = operation.items.map((raw): FullResyncItem => {
@@ -222,7 +225,7 @@ function fullResyncOperation(value: unknown): FullResyncOperation {
     return {
       roomId: uuid(item.roomId),
       roomNumber: text(item.roomNumber, /^[A-Za-z0-9]{1,32}$/),
-      sheetRow: integer(item.sheetRow, 2, 122),
+      sheetRow: integer(item.sheetRow, 2, 501),
       pinVersion,
       effectiveAt: text(item.effectiveAt, /^\d{4}-\d{2}-\d{2}T/),
       syncStatus: text(item.syncStatus, /^(verified|mismatch|unconfigured)$/),
@@ -232,8 +235,8 @@ function fullResyncOperation(value: unknown): FullResyncOperation {
   });
   if (
     items.some((item, index) => item.sheetRow !== index + 2) ||
-    new Set(items.map((item) => item.roomId)).size !== 121 ||
-    new Set(items.map((item) => item.roomNumber)).size !== 121
+    new Set(items.map((item) => item.roomId)).size !== items.length ||
+    new Set(items.map((item) => item.roomNumber)).size !== items.length
   ) return failed();
   return {
     runId: uuid(operation.runId),
@@ -383,7 +386,7 @@ export class RoomPinSheetSyncWorker {
           environment: this.#cryptoConfig.environment,
         });
       }
-      // Decryption of the complete 121-room snapshot is bounded but can consume
+      // Decryption of the complete active-room snapshot is bounded but can consume
       // most of the provider budget. Never create the write marker unless the
       // provider still has the same minimum start reserve as incremental work.
       if (this.#remaining(providerDeadline) < PROVIDER_START_RESERVE_MS) {
@@ -689,7 +692,7 @@ export class RoomPinSheetSyncWorker {
           if (
             !Number.isSafeInteger(inspection.sheetRow) ||
             inspection.sheetRow < 2 ||
-            inspection.sheetRow > 122
+            inspection.sheetRow > 501
           ) {
             return failed();
           }

@@ -116,7 +116,7 @@ bootstrap 응답은 initialized room마다 별도 30초 admin reveal lease로 �
 
 공개 `GET /v1/room-pin-sheet-sync/status`는 변경 완료 비밀번호와 active developer/admin session을 매번 확인하고 `pending/failed/operatorBlocked/oldestPendingAt/lastSuccessAt/lastErrorCode/version`만 반환한다. 현재 local credential 또는 target mapping이 invalid이면 과거 successful heartbeat보다 우선해 false-green을 차단한다. `POST /v1/room-pin-sheet-sync/full-resync`는 strict `{expectedVersion}` body, scoped idempotency key와 status version CAS를 요구한다.
 
-요청은 121실 room master와 current PIN revision reference를 deterministic row 2..122 snapshot으로 고정한다. canonical environment/project/spreadsheet/tab SHA-256 marker가 request/run/claim 전 구간에서 일치해야 하며 raw spreadsheet/tab과 provider material은 DB/API/audit에 노출하지 않는다. full writer와 incremental writer는 같은 singleton fence를 사용해 provider permit 한 건만 얻는다. full write 성공 시 `provider_write_started_at` 이전에 만들어진 snapshot-room outbox만 version과 무관하게 supersede하고 marker 이후 PIN 변경은 남겨 최종 수렴한다. retryable failed run도 logical active command이므로 다른 key가 중복 full write를 예약할 수 없다. developer audit은 requested/succeeded의 `status/roomCount/reconciliation`만 투영한다.
+요청은 실제 active room master 1~500실과 current PIN revision reference를 deterministic row 2..501 bounded snapshot으로 고정한다. 초기 121실은 seed/current snapshot이며 영구 총량 불변식이 아니다. canonical environment/project/spreadsheet/tab SHA-256 marker가 request/run/claim 전 구간에서 일치해야 하며 raw spreadsheet/tab과 provider material은 DB/API/audit에 노출하지 않는다. full writer와 incremental writer는 같은 singleton fence를 사용해 provider permit 한 건만 얻는다. full write 성공 시 `provider_write_started_at` 이전에 만들어진 snapshot-room outbox만 version과 무관하게 supersede하고 marker 이후 PIN 변경은 남겨 최종 수렴한다. retryable failed run도 logical active command이므로 다른 key가 중복 full write를 예약할 수 없다. developer audit은 requested/succeeded의 `status/roomCount/reconciliation`만 투영한다.
 
 각 일반 run은 immutable self-FK `recovery_root_run_id`로 자신을 root로 삼고, 명시 recovery는 잠근 exact-fence `operator_blocked` predecessor의 기존 root만 상속한다. root는 cleanup 범위를 식별할 뿐 claim/authorize/settle 권한을 주지 않으며 매 단계의 singleton claim·lease fence CAS는 그대로 필요하다. recovery의 target mismatch, retry 소진, provider/DB 불확실, marker lease expiry와 `SNAPSHOT_STALE`은 같은 root의 새 block으로 남는다. 성공 settle은 요청 시점보다 과거인 같은-root block을 최대 32건만 정리하며, 초과 또는 부분 정리는 성공 audit 없이 현재 provider marker를 보존한 `DB_SETTLE_UNCERTAIN` block으로 닫아 다음 명시 recovery만 허용한다.
 
@@ -913,3 +913,17 @@ assignment에만 새 PIN revision successor를 발급한다. 물리 PIN 변경�
 attempt와 authoritative access lease를 그대로 요구한다. entitlement/outbox/audit에는 PIN, envelope, raw session,
 token, request body 또는 idempotency payload를 저장하지 않는다. 이 source 계약은 production PIN/Sheets/Cron
 활성화를 포함하지 않는다.
+
+## #230 Developer room catalog lifecycle (74번째 source migration)
+
+초기 121실은 seed/current snapshot이지 영구 총량 불변식이 아니다. `rooms.catalog_status`는
+`active → retired` 단방향이며 객실 UUID와 room number, 예약·청소·PIN·감사 이력은 물리 삭제하지 않는다.
+active/password-complete singleton developer만 live session으로 최대 100건 cursor 목록과
+active/retired/total count를 조회하고, published room type version CAS·idempotency key로 객실을 추가하거나
+room state version CAS로 논리 은퇴할 수 있다. 활성 객실은 최대 500실이며 과거 room number는 자동 재사용하지 않는다.
+
+은퇴는 active reservation/stay segment, non-terminal cleaning target/attempt/current assignment, unresolved issue,
+operation block 또는 PIN change/reveal/entitlement/Sheet outbox가 남아 있으면 stable conflict로 실패한다.
+DB trigger는 retired room을 새 reservation, stay segment, cleaning target/current assignment 및 새 room/PIN operation의
+대상으로 다시 사용하는 것을 막는다. 일반 관리자 객실 현황, 예약 bookability와 Google current/full-resync snapshot은
+active만 사용하며 full-resync는 요청 시점 exact active count 1~500과 동적 `A2:H501` 자원 상한을 검증한다.

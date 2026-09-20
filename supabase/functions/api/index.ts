@@ -79,12 +79,15 @@ import {
 } from "../_shared/complaint-api.ts";
 import { assertComplaintResponseSize } from "../_shared/complaint-cursor.ts";
 import {
+  createDeveloperRoom,
   developerActivityEvents,
   developerAuditEvents,
   developerDatabaseStatus,
   developerOverview,
   developerRuntimeStatus,
   developerSchedulerStatus,
+  listDeveloperRoomCatalog,
+  retireDeveloperRoom,
   runDeveloperDiagnostics,
 } from "../_shared/developer-api.ts";
 import {
@@ -811,6 +814,37 @@ export async function handleApiRequest(
         { diagnostics: await runDeveloperDiagnostics(request, clients, actor) },
         200,
         corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/developer/rooms") {
+      return jsonResponse(
+        await listDeveloperRoomCatalog(request, clients, actor),
+        200,
+        { ...corsHeaders, "cache-control": "no-store" },
+      );
+    }
+    if (request.method === "POST" && path === "/v1/developer/rooms") {
+      return jsonResponse(
+        { room: await createDeveloperRoom(request, clients, actor) },
+        201,
+        { ...corsHeaders, "cache-control": "no-store" },
+      );
+    }
+    const developerRoomRetire = path.match(
+      /^\/v1\/developer\/rooms\/([0-9a-fA-F-]{36})\/retire$/,
+    );
+    if (request.method === "POST" && developerRoomRetire) {
+      return jsonResponse(
+        {
+          room: await retireDeveloperRoom(
+            request,
+            clients,
+            actor,
+            developerRoomRetire[1] ?? "",
+          ),
+        },
+        200,
+        { ...corsHeaders, "cache-control": "no-store" },
       );
     }
 

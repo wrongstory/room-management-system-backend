@@ -166,6 +166,40 @@ function services(): AppServices {
         confirmedAt: '2026-09-13T00:01:00.000Z'
       }))
     },
+    developerRoomCatalog: {
+      list: vi.fn(async () => ({
+        counts: { active: 121, retired: 0, total: 121 },
+        items: [],
+        nextCursor: null
+      })),
+      create: vi.fn(async (_actor, input) => ({
+        id: '30000000-0000-4000-8000-000000000230',
+        roomNumber: input.roomNumber,
+        status: 'active' as const,
+        version: 1,
+        roomTypeId: input.roomTypeId,
+        roomTypeCode: 'standard',
+        roomTypeName: '스탠다드 더블 로프트',
+        roomTypeVersion: input.expectedRoomTypeVersion,
+        elevatorZone: input.elevatorZone,
+        createdAt: '2026-09-20T00:00:00.000Z',
+        retiredAt: null
+      })),
+      retire: vi.fn(async (_actor, input) => ({
+        id: input.roomId,
+        roomNumber: '999',
+        status: 'retired' as const,
+        version: input.expectedVersion + 1,
+        roomTypeId: '10000000-0000-4000-8000-000000000004',
+        roomTypeCode: 'standard',
+        roomTypeName: '스탠다드 더블 로프트',
+        roomTypeVersion: 1,
+        elevatorZone: 'A' as const,
+        createdAt: '2026-09-20T00:00:00.000Z',
+        retiredAt: '2026-09-20T01:00:00.000Z',
+        retirementReasonCode: input.reasonCode
+      }))
+    },
     reservations: {
       list: vi.fn(async () => []),
       listPage: vi.fn(async () => ({
@@ -1818,5 +1852,66 @@ describe('application', () => {
       payload: { expectedVersion: 4, spreadsheetId: 'forbidden' } });
     expect(extra.statusCode).toBe(400);
     await app.close();
+  });
+
+  it('keeps room catalog list, create, and retire routes developer-only', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-developer-1',
+      profileId: '20000000-0000-4000-8000-000000000230',
+      displayName: '개발자',
+      role: 'developer' as const,
+      mustChangePassword: false,
+      accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const list = await app.inject({
+      method: 'GET',
+      url: '/v1/developer/rooms?status=active&limit=100',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.headers['cache-control']).toBe('no-store');
+    expect(list.json().counts).toEqual({ active: 121, retired: 0, total: 121 });
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/developer/rooms',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'room-create-route-0230'
+      },
+      payload: {
+        roomNumber: '999',
+        roomTypeId: '10000000-0000-4000-8000-000000000004',
+        expectedRoomTypeVersion: 1,
+        elevatorZone: 'A'
+      }
+    });
+    expect(create.statusCode).toBe(201);
+    expect(create.json().room).toMatchObject({ roomNumber: '999', status: 'active' });
+    const retire = await app.inject({
+      method: 'POST',
+      url: '/v1/developer/rooms/30000000-0000-4000-8000-000000000230/retire',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'room-retire-route-0230'
+      },
+      payload: { expectedVersion: 1, reasonCode: 'ROOM_REMOVED' }
+    });
+    expect(retire.statusCode).toBe(200);
+    expect(retire.json().room).toMatchObject({ status: 'retired', version: 2 });
+    await app.close();
+
+    const deniedServices = services();
+    const denied = await buildApp({ env, services: deniedServices, logger: false });
+    const response = await denied.inject({
+      method: 'GET',
+      url: '/v1/developer/rooms',
+      headers: { authorization: 'Bearer access-token' }
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('DEVELOPER_REQUIRED');
+    expect(deniedServices.developerRoomCatalog?.list).not.toHaveBeenCalled();
+    await denied.close();
   });
 });

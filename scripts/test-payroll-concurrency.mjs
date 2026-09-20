@@ -172,12 +172,10 @@ export async function testPayrollConcurrency(client, adminProfileId) {
     const attemptId = randomUUID();
     const photoOperationId = randomUUID();
     const photoObjectId = randomUUID();
-    ok(await client.from('rooms').insert({
-      id: roomId,
-      room_number: `${Date.now()}${sequence}`,
-      room_type_id: roomType.id,
-      elevator_zone: 'A'
-    }), 'payroll synthetic room');
+    sql(`begin; set local app.room_catalog_command='v1';
+      insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+      values('${roomId}','${Date.now()}${sequence}','${roomType.id}','A');
+      commit;`);
 
     sql(
       `insert into public.cleaning_targets(` +

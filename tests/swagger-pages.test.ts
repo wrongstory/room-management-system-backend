@@ -17,9 +17,9 @@ const releaseContractArguments = [
   '--expected-version',
   '0.4.0',
   '--expected-path-count',
-  '120',
+  '122',
   '--expected-operation-count',
-  '130'
+  '133'
 ];
 
 interface FixtureOptions {
@@ -30,8 +30,8 @@ interface FixtureOptions {
 
 async function createFixture({
   version = '0.4.0',
-  pathCount = 120,
-  operationCount = 130
+  pathCount = 122,
+  operationCount = 133
 }: FixtureOptions = {}): Promise<string> {
   if (pathCount < 3 || operationCount < 3) {
     throw new Error('fixture path/operation count가 올바르지 않습니다.');
@@ -98,8 +98,8 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
     expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.4.0"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "120"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "130"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "122"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "133"');
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
@@ -153,18 +153,18 @@ describe('GitHub Pages Swagger portal', () => {
 
     expect(index).toContain('CASTLE THE ART API');
     expect(index).toContain('0.4.0');
-    expect(index).toContain('120개');
+    expect(index).toContain('122개');
     expect(index).not.toMatch(/__[A-Z0-9_]+__/);
     expect(initializer).toContain('supportedSubmitMethods: []');
     expect(initializer).toContain('persistAuthorization: false');
     expect(initializer).toContain('tryItOutEnabled: false');
     expect(spec.info.version).toBe('0.4.0');
     expect(spec.servers).toEqual([{ url: apiBaseUrl, description: '운영 Supabase Edge API' }]);
-    expect(Object.keys(spec.paths)).toHaveLength(120);
+    expect(Object.keys(spec.paths)).toHaveLength(122);
     expect(manifest).toMatchObject({
       apiBaseUrl,
-      pathCount: 120,
-      operationCount: 130,
+      pathCount: 122,
+      operationCount: 133,
       readOnly: true
     });
     expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);

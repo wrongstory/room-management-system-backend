@@ -159,13 +159,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 120 &&
+    Object.keys(document.paths).length === 122 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 130,
-    "combined candidate contract 120/130",
+        ).length === 133,
+    "combined candidate contract 122/133",
   );
 });
 
@@ -1416,7 +1416,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 70,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 72,
     "actual audit allowlist count",
   );
   assert(
@@ -1456,7 +1456,7 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
   );
   assert(
     bootstrap.properties.initializedRoomIds.maxItems === 25 &&
-      bootstrap.properties.remainingCount.maximum === 121 &&
+      bootstrap.properties.remainingCount.maximum === 500 &&
       bootstrap.properties.generatedPins.items.$ref ===
         "#/components/schemas/RoomPinReveal" &&
       !Object.hasOwn(bootstrap.properties, "credential") &&
@@ -1627,7 +1627,7 @@ Deno.test("room PIN Sheet operator OpenAPI exposes only bounded status and fence
   );
   assert(
     doc.components.schemas.RoomPinSheetFullResyncAccepted.properties.roomCount
-      .const === 121,
+      .maximum === 500,
     "exact room count",
   );
   const auditTypes = doc.components.schemas.DeveloperAuditEventType.enum;

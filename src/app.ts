@@ -57,6 +57,8 @@ import {
 } from './modules/rooms/room-pin-sheet-operations.service.js';
 import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
 import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
+import { createDeveloperRoomCatalogRoutes } from './modules/developer-room-catalog/developer-room-catalog.routes.js';
+import { type DeveloperRoomCatalogService, SupabaseDeveloperRoomCatalogService } from './modules/developer-room-catalog/developer-room-catalog.service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -74,6 +76,7 @@ export interface AppServices {
   cleaningTemplates?: CleaningTemplateService;
   cleaningHistory?: CleaningHistoryService;
   workHistory?: WorkHistoryService;
+  developerRoomCatalog?: DeveloperRoomCatalogService;
 }
 
 export interface BuildAppOptions {
@@ -163,7 +166,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
       cleaningTemplates: new SupabaseCleaningTemplateService(clients),
       cleaningHistory: new SupabaseCleaningHistoryService(clients),
-      workHistory: new SupabaseWorkHistoryService(clients)
+      workHistory: new SupabaseWorkHistoryService(clients),
+      developerRoomCatalog: new SupabaseDeveloperRoomCatalogService(clients)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -198,6 +202,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.decorate('requireAdmin', async (request) => {
     if (request.actor.role !== 'admin') {
       throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 접근할 수 있습니다.');
+    }
+  });
+  app.decorate('requireDeveloper', async (request) => {
+    if (request.actor.role !== 'developer') {
+      throw new AppError(403, 'DEVELOPER_REQUIRED', '개발자만 접근할 수 있습니다.');
     }
   });
 
@@ -247,6 +256,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   await app.register(createRoomTypeRoutes(services.rooms), { prefix: '/v1/room-types' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  if (services.developerRoomCatalog) {
+    await app.register(createDeveloperRoomCatalogRoutes(services.developerRoomCatalog), {
+      prefix: '/v1/developer/rooms'
+    });
+  }
   if (services.roomPinSheetOperations) {
     await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {
       prefix: '/v1/room-pin-sheet-sync'

@@ -61,7 +61,10 @@ export async function testAttemptOfflineExpiryConcurrency(client) {
     const owner = await account('maid');
     const roomId = randomUUID(); const targetId = randomUUID(); const assignmentId = randomUUID(); const attemptId = randomUUID();
     const now = startAt ? new Date(startAt) : new Date(); const day = new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10);
-    ok(await client.from('rooms').insert({ id: roomId, room_number: `${Date.now()}${++sequence}`, room_type_id: roomType.id, elevator_zone: 'A' }), 'offline room');
+    sql(`begin; set local app.room_catalog_command='v1';
+      insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+      values('${roomId}','${Date.now()}${++sequence}','${roomType.id}','A');
+      commit;`);
     ok(await client.from('cleaning_targets').insert({ id: targetId, room_id: roomId, cleaning_kind: 'additional', source: 'manual_room_request', source_key: `offline-expiry-${targetId}`, original_service_date: day, effective_service_date: day, available_from: `${day}T00:00:00+09:00`, due_at: `${day}T23:59:59+09:00`, status: 'notified', assignment_version: 2, room_type_snapshot: {}, template_snapshot: {}, fee_snapshot: 10000, created_by: admin.id }), 'offline target');
     ok(await client.from('cleaning_assignments').insert({ id: assignmentId, cleaning_target_id: targetId, maid_profile_id: owner.id, sequence_number: 1, revision: 2, notified_at: now.toISOString(), changed_by: admin.id }), 'offline assignment');
     ok(await client.from('cleaning_attempts').insert({ id: attemptId, cleaning_target_id: targetId, assignment_id: assignmentId, maid_profile_id: owner.id, attempt_number: 1, status: 'scheduled', assignment_revision: 2, room_snapshot: { roomId }, template_snapshot: {} }), 'offline attempt');

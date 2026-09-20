@@ -84,8 +84,10 @@ export async function testAttemptLifecycleConcurrency(client) {
     const assignmentId = randomUUID();
     const attemptId = randomUUID();
     seq += 1;
-    ok(await client.from('rooms').insert({ id: roomId, room_number: `${Date.now()}${seq}`,
-      room_type_id: type.id, elevator_zone: 'A' }), 'lifecycle room fixture');
+    sql(`begin; set local app.room_catalog_command='v1';
+      insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+      values('${roomId}','${Date.now()}${seq}','${type.id}','A');
+      commit;`);
     ok(await client.from('cleaning_targets').insert({ id: targetId, room_id: roomId, cleaning_kind: 'additional',
       source: 'manual_room_request', source_key: `lifecycle-${targetId}`, original_service_date: day, effective_service_date: day,
       available_from: from, due_at: options.dueAt ?? due, status: 'notified', assignment_version: 2,

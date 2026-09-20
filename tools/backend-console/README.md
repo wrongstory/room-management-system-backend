@@ -54,9 +54,14 @@ uv run --python 3.12 python scripts/generate_client.py
 `api_client.py`가 담당한다.
 
 #137 source는 developer/admin이 안전한 room PIN Sheet 동기화 상태를 조회하고 DB 정본의
-121실 snapshot으로 전체 복구를 요청하는 2 operations를 추가한다. 요청은 strict
+동적 active-room snapshot(1~500실)으로 전체 복구를 요청하는 2 operations를 추가한다. 요청은 strict
 `{expectedVersion}` body와 `Idempotency-Key`를 사용하며, source-controlled exact target과
 일치하지 않으면 fail-closed 한다. Sheet에서 DB로 쓰는 역방향 기능은 없다.
+
+#230 source는 developer 전용 객실 카탈로그 목록/count/create/logical-retire 3 operations를
+generated client에 추가한다. 목록은 cursor와 page size 100으로 제한하며, 생성은 게시된 객실
+타입 version CAS와 멱등성 키를 요구한다. retire는 물리 삭제가 아니며 활성·미래 예약, 청소,
+issue/block/PIN workflow가 남아 있으면 stable conflict로 실패한다.
 
 #27 source는 시작 전 변경/해제/취소 요청/결정 감사 event 4종과 safe summary를 생성 모델에
 추가한다. 상세 사유·request hash·원본 state는 포함하지 않으며, 콘솔에 admin 업무 변경

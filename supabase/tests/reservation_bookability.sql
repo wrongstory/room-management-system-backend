@@ -23,6 +23,7 @@ insert into public.profiles(
     'maid','active',false
   );
 
+select set_config('app.room_catalog_command','v1',true);
 insert into public.rooms(id,room_number,room_type_id,elevator_zone)
 select fixture.id,fixture.room_number,room_type.id,'A'
 from (values
@@ -33,6 +34,7 @@ from (values
 cross join lateral (
   select id from public.room_types where code='standard'
 ) room_type;
+select set_config('app.room_catalog_command','',true);
 
 insert into public.cleaning_template_versions(
   room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,

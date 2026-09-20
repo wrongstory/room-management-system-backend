@@ -78,7 +78,7 @@ function dbError(error: { message?: string } | null): EdgeError {
       "ROOM_PIN_SHEET_ROOM_MASTER_INVALID",
       503,
       "ROOM_PIN_SHEET_ROOM_MASTER_INVALID",
-      "121실 객실 정본을 확인해 주세요.",
+      "활성 객실 정본을 확인해 주세요.",
     ],
     [
       "IDEMPOTENCY_KEY_REUSED",
@@ -277,7 +277,8 @@ export async function requestRoomPinSheetFullResync(
   const row = data as Record<string, unknown>;
   if (
     Object.keys(row).sort().join(",") !== "roomCount,status,version" ||
-    row.status !== "pending" || row.roomCount !== 121 ||
+    row.status !== "pending" || !Number.isSafeInteger(row.roomCount) ||
+    Number(row.roomCount) < 1 || Number(row.roomCount) > 500 ||
     !Number.isSafeInteger(row.version) || (row.version as number) < 0
   ) throw dbError(null);
   assertSize(row);

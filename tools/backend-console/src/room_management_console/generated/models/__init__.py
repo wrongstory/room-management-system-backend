@@ -17,6 +17,17 @@ from .cleaning_template_room_type_state import CleaningTemplateRoomTypeState
 from .cleaning_template_slot import CleaningTemplateSlot
 from .create_account_request import CreateAccountRequest
 from .create_account_response_201 import CreateAccountResponse201
+from .create_developer_room_request import CreateDeveloperRoomRequest
+from .create_developer_room_request_elevator_zone_type_1 import (
+    CreateDeveloperRoomRequestElevatorZoneType1,
+)
+from .create_developer_room_request_elevator_zone_type_2_type_1 import (
+    CreateDeveloperRoomRequestElevatorZoneType2Type1,
+)
+from .create_developer_room_request_elevator_zone_type_3_type_1 import (
+    CreateDeveloperRoomRequestElevatorZoneType3Type1,
+)
+from .create_developer_room_response_201 import CreateDeveloperRoomResponse201
 from .developer_activity_event import DeveloperActivityEvent
 from .developer_activity_event_summary import DeveloperActivityEventSummary
 from .developer_activity_page import DeveloperActivityPage
@@ -74,6 +85,19 @@ from .developer_overview import DeveloperOverview
 from .developer_overview_accounts import DeveloperOverviewAccounts
 from .developer_overview_accounts_by_role import DeveloperOverviewAccountsByRole
 from .developer_overview_rooms import DeveloperOverviewRooms
+from .developer_room_catalog_item import DeveloperRoomCatalogItem
+from .developer_room_catalog_item_elevator_zone_type_1 import (
+    DeveloperRoomCatalogItemElevatorZoneType1,
+)
+from .developer_room_catalog_item_elevator_zone_type_2_type_1 import (
+    DeveloperRoomCatalogItemElevatorZoneType2Type1,
+)
+from .developer_room_catalog_item_elevator_zone_type_3_type_1 import (
+    DeveloperRoomCatalogItemElevatorZoneType3Type1,
+)
+from .developer_room_catalog_item_status import DeveloperRoomCatalogItemStatus
+from .developer_room_catalog_page import DeveloperRoomCatalogPage
+from .developer_room_catalog_page_counts import DeveloperRoomCatalogPageCounts
 from .developer_runtime_status import DeveloperRuntimeStatus
 from .developer_runtime_status_configuration import DeveloperRuntimeStatusConfiguration
 from .developer_runtime_status_configuration_accountphonepepper import (
@@ -205,6 +229,7 @@ from .get_developer_runtime_status_response_200 import GetDeveloperRuntimeStatus
 from .get_developer_scheduler_status_response_200 import GetDeveloperSchedulerStatusResponse200
 from .get_room_pin_sheet_sync_status_response_200 import GetRoomPinSheetSyncStatusResponse200
 from .list_accounts_response_200 import ListAccountsResponse200
+from .list_developer_rooms_status import ListDeveloperRoomsStatus
 from .login_request import LoginRequest
 from .login_response import LoginResponse
 from .managed_role import ManagedRole
@@ -216,6 +241,8 @@ from .request_room_pin_sheet_full_resync_response_202 import (
     RequestRoomPinSheetFullResyncResponse202,
 )
 from .reset_account_password_response_200 import ResetAccountPasswordResponse200
+from .retire_developer_room_request import RetireDeveloperRoomRequest
+from .retire_developer_room_response_200 import RetireDeveloperRoomResponse200
 from .role_change_request import RoleChangeRequest
 from .room_pin_sheet_full_resync_accepted import RoomPinSheetFullResyncAccepted
 from .room_pin_sheet_full_resync_request import RoomPinSheetFullResyncRequest
@@ -256,6 +283,11 @@ __all__ = (
     "CleaningTemplateSlot",
     "CreateAccountRequest",
     "CreateAccountResponse201",
+    "CreateDeveloperRoomRequest",
+    "CreateDeveloperRoomRequestElevatorZoneType1",
+    "CreateDeveloperRoomRequestElevatorZoneType2Type1",
+    "CreateDeveloperRoomRequestElevatorZoneType3Type1",
+    "CreateDeveloperRoomResponse201",
     "DeveloperActivityEvent",
     "DeveloperActivityEventSummary",
     "DeveloperActivityPage",
@@ -295,6 +327,13 @@ __all__ = (
     "DeveloperOverviewAccounts",
     "DeveloperOverviewAccountsByRole",
     "DeveloperOverviewRooms",
+    "DeveloperRoomCatalogItem",
+    "DeveloperRoomCatalogItemElevatorZoneType1",
+    "DeveloperRoomCatalogItemElevatorZoneType2Type1",
+    "DeveloperRoomCatalogItemElevatorZoneType3Type1",
+    "DeveloperRoomCatalogItemStatus",
+    "DeveloperRoomCatalogPage",
+    "DeveloperRoomCatalogPageCounts",
     "DeveloperRuntimeStatus",
     "DeveloperRuntimeStatusConfiguration",
     "DeveloperRuntimeStatusConfigurationACCOUNTPHONEPEPPER",
@@ -350,6 +389,7 @@ __all__ = (
     "GetDeveloperSchedulerStatusResponse200",
     "GetRoomPinSheetSyncStatusResponse200",
     "ListAccountsResponse200",
+    "ListDeveloperRoomsStatus",
     "LoginRequest",
     "LoginResponse",
     "ManagedRole",
@@ -359,6 +399,8 @@ __all__ = (
     "PublishedCleaningTemplateEnvelope",
     "RequestRoomPinSheetFullResyncResponse202",
     "ResetAccountPasswordResponse200",
+    "RetireDeveloperRoomRequest",
+    "RetireDeveloperRoomResponse200",
     "RoleChangeRequest",
     "RoomPinSheetFullResyncAccepted",
     "RoomPinSheetFullResyncRequest",

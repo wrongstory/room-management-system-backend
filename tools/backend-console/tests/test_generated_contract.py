@@ -19,12 +19,15 @@ from room_management_console.generated.api.cleaning_templates import (
     publish_cleaning_template,
 )
 from room_management_console.generated.api.developer import (
+    create_developer_room,
     get_developer_database_status,
     get_developer_overview,
     get_developer_runtime_status,
     get_developer_scheduler_status,
     list_developer_activity_events,
     list_developer_audit_events,
+    list_developer_rooms,
+    retire_developer_room,
     run_developer_diagnostics,
 )
 from room_management_console.generated.api.rooms import (
@@ -34,10 +37,13 @@ from room_management_console.generated.api.rooms import (
 )
 from room_management_console.generated.models import (
     CleaningTemplateCatalog,
+    CreateDeveloperRoomRequest,
+    DeveloperRoomCatalogPage,
     DeveloperDatabaseStatusNotificationDelivery,
     DeveloperDatabaseStatusNotificationDeliveryActivation,
     DeveloperDatabaseStatusNotificationDeliveryBacklog,
     PublishCleaningTemplateRequest,
+    RetireDeveloperRoomRequest,
     PublishedCleaningTemplate,
     RoomPinSheetSyncStatus,
     RoomPinSheetSyncStatusActivation,
@@ -86,13 +92,44 @@ def test_phase_a_openapi_operations_are_generated() -> None:
         list_developer_activity_events.sync_detailed,
         list_developer_audit_events.sync_detailed,
         run_developer_diagnostics.sync_detailed,
+        list_developer_rooms.sync_detailed,
+        create_developer_room.sync_detailed,
+        retire_developer_room.sync_detailed,
         get_room_pin_sheet_sync_status.sync_detailed,
         request_room_pin_sheet_full_resync.sync_detailed,
         list_room_types.sync_detailed,
         list_cleaning_templates.sync_detailed,
         publish_cleaning_template.sync_detailed,
     ]
-    assert len(operations) == 21
+    assert len(operations) == 24
+
+
+def test_developer_room_catalog_contract_is_generated() -> None:
+    page = DeveloperRoomCatalogPage.from_dict(
+        {
+            "counts": {"active": 121, "retired": 1, "total": 122},
+            "items": [],
+            "nextCursor": None,
+        }
+    )
+    assert page.to_dict()["counts"] == {"active": 121, "retired": 1, "total": 122}
+    create = CreateDeveloperRoomRequest.from_dict(
+        {
+            "roomNumber": "999",
+            "roomTypeId": "10000000-0000-4000-8000-000000000001",
+            "expectedRoomTypeVersion": 2,
+            "elevatorZone": "A",
+        }
+    )
+    assert create.to_dict()["roomNumber"] == "999"
+    retire = RetireDeveloperRoomRequest.from_dict(
+        {"expectedVersion": 1, "reasonCode": "ROOM_REMOVED"}
+    )
+    assert retire.to_dict() == {"expectedVersion": 1, "reasonCode": "ROOM_REMOVED"}
+    assert {
+        "room.catalog_created",
+        "room.catalog_retired",
+    } <= {event.value for event in DeveloperAuditEventType}
 
 
 def test_password_change_replay_errors_are_generated() -> None:
@@ -531,7 +568,7 @@ def test_attempt_lifecycle_audit_contract_preserves_only_safe_generated_fields()
         assert DeveloperAuditEventSummary.from_dict(expired_summary).to_dict() == expired_summary
 
 
-def test_generated_client_contains_only_twenty_one_authorized_operations() -> None:
+def test_generated_client_contains_only_twenty_four_authorized_operations() -> None:
     from room_management_console.generated import api
 
     generated_groups = {module.name for module in pkgutil.iter_modules(api.__path__)}
@@ -561,6 +598,9 @@ def test_generated_client_contains_only_twenty_one_authorized_operations() -> No
         "developer.list_developer_activity_events",
         "developer.list_developer_audit_events",
         "developer.run_developer_diagnostics",
+        "developer.list_developer_rooms",
+        "developer.create_developer_room",
+        "developer.retire_developer_room",
         "rooms.get_room_pin_sheet_sync_status",
         "rooms.list_room_types",
         "rooms.request_room_pin_sheet_full_resync",

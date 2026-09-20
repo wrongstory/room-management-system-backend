@@ -169,12 +169,11 @@ export async function testRoomPinBootstrapConcurrency(client) {
   async function createRoom() {
     roomSequence += 1;
     const item = { id: randomUUID(), roomNumber: `${Date.now()}${roomSequence}` };
-    ok(await client.from('rooms').insert({
-      id: item.id,
-      room_number: item.roomNumber,
-      room_type_id: roomType.id,
-      elevator_zone: 'A',
-    }), 'bootstrap race room fixture');
+    const inserted = await sqlSession(`begin; set local app.room_catalog_command='v1';
+      insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+      values(${literal(item.id)},${literal(item.roomNumber)},${literal(roomType.id)},'A');
+      commit;`);
+    assert(inserted.code === null, 'bootstrap race room fixture');
     return item;
   }
 

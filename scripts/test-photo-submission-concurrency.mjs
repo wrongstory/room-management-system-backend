@@ -100,7 +100,10 @@ export async function testPhotoSubmissionConcurrency(client) {
   let sequence = 0;
   async function fixture() {
     const room = randomUUID(), target = randomUUID(), assignment = randomUUID(), attempt = randomUUID();
-    ok(await client.from('rooms').insert({ id: room, room_number: `${Date.now()}${++sequence}`, room_type_id: roomType.id, elevator_zone: 'A' }), 'photo room');
+    sql(`begin; set local app.room_catalog_command='v1';
+      insert into public.rooms(id,room_number,room_type_id,elevator_zone)
+      values('${room}','${Date.now()}${++sequence}','${roomType.id}','A');
+      commit;`);
     sql(`insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
       select '${target}','${room}','additional','manual_room_request','photo-${target}',current_date,current_date,'notified',2,
       '{"code":"standard"}',10000,jsonb_build_object('id',id,'version',version,'photoSlots',photo_slots,'durationMinutes',1),'${admin}'

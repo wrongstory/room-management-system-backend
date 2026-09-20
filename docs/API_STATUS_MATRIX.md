@@ -163,6 +163,9 @@ login 이후 같은 메모리 세션에서 전체 projection·diagnostics·업�
 | [x] | `GET /v1/developer/audit-events` | developer only | ✅ | — | ✅ | ✅ | ✅ | 승인된 domain summary만 반환 |
 | [x] | `GET /v1/developer/activity-events` | developer only | ✅ | — | ✅ | ✅ | ✅ | 권한 거부 aggregate hosted readback PASS |
 | [x] | `POST /v1/developer/diagnostics` | developer only | ✅ | — | ✅ | ✅ | ✅ | PR #64 zero-byte hosted hotfix 후 200 |
+| [ ] | `GET /v1/developer/rooms` | developer only | ✅ | ✅ | ✅ | ❌ | ⚠️ | #230 source candidate; active/retired/total + cursor<=100, hosted 미승격 |
+| [ ] | `POST /v1/developer/rooms` | developer only | ✅ | ✅ | ✅ | ❌ | ⚠️ | published type CAS/idempotency, active cap 500; 운영 객실 추가 제외 |
+| [ ] | `POST /v1/developer/rooms/{roomId}/retire` | developer only | ✅ | ✅ | ✅ | ❌ | ⚠️ | logical retire only; reservation/cleaning/issue/block/PIN conflict fail-closed |
 
 ### #43 production 반영 조건
 
@@ -215,7 +218,7 @@ hosted PASS이며 성공 mutation은 release acceptance exception을 적용한�
 
 - [x] 51번째 append-only migration; 기존 50 migrations 무수정
 - [x] environment/project/spreadsheet/tab exact target digest를 request/run/claim에 immutable binding
-- [x] Sheet 삭제·정렬·변조를 DB 정본으로만 `A1:H122` repair; Sheet→DB 0
+- [x] Sheet 삭제·정렬·변조를 DB 정본으로만 repair; #230 source는 exact active 1~500 snapshot과 bounded `A1:H501`, Sheet→DB 0
 - [x] retryable failed full run 중복 차단, incremental/full claim 1-winner fence, provider marker 이전 outbox만 안전 supersede
 - [x] requested/succeeded developer audit safe summary와 PIN/envelope/credential/token/raw response 비노출
 - [x] independent QA와 required CI 및 release/main source·54번째 production migration·API/worker bundle 반영
@@ -635,7 +638,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | 배정 변경·취소 및 청소 완료 알림 coverage | production source 반영 | #128 | informational push/action 분리, active-admin completion fanout, exact notified replan/revocation provenance; provider 미활성 |
 | [x] | encrypted room PIN Phase A | production source 반영 | #69 / #131 | **production 56-migration historical 계약**은 physical change/reveal 모두 authoritative access lease; #194 source candidate는 change만 유지하고 reveal을 durable assignment entitlement로 대체; hosted role/positive mutation smoke 미확인 |
 | [x] | Google Sheets PIN projection worker Phase B | production bundle 반영 | #69 / #136 / PR #138 | `room-pin-sheet-sync` source 배포; hosted target/secret/ACL/Google/Cron activation 미완료 |
-| [x] | PIN Sheet 안전 상태·full resync Phase C | production source 반영 | #69 / #137 | exact target digest, 121실 snapshot, singleton fence/CAS/audit; Google target/secret/ACL/Cron activation은 Issue OPEN |
+| [x] | PIN Sheet 안전 상태·full resync Phase C | production source 반영; #230 source candidate는 dynamic active count | #69 / #137 / #230 | exact target digest, initial 121 seed/current snapshot에서 active 1~500 bounded snapshot으로 확장, singleton fence/CAS/audit; Google target/secret/ACL/Cron activation은 Issue OPEN |
 | [~] | 초기 PIN 자동 생성·현장 확인 | production source 반영 | #169 | 73번째 append-only 및 API 배포 완료; 실제 bootstrap·물리 확인 mutation 미실행 |
 | [x] | 자동 checkout 후 퇴실 미진행 신고·관리자 재배정 | source/main·production bundle 반영 | #133 | 54 migrations / 108 paths / 115 operations; Issue #148/#152 production source에 포함, 전체 hosted positive mutation smoke는 별도 pending |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |

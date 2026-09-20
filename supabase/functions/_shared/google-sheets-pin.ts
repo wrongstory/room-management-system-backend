@@ -11,7 +11,7 @@ export const ROOM_PIN_SHEET_HEADERS = [
   "reason_code",
   "environment",
 ] as const;
-export const ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT = 121;
+export const ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT = 500;
 export const LOCAL_ROOM_PIN_SHEET_TARGET = Object.freeze({
   environment: "local",
   projectRef: "local",
@@ -406,7 +406,7 @@ export class GoogleSheetsPinProvider {
   ): Promise<SheetInspection> {
     const ranges = [
       `'${this.#target.tab}'!A1:H1`,
-      `'${this.#target.tab}'!A2:H122`,
+      `'${this.#target.tab}'!A2:H501`,
     ];
     const query = new URLSearchParams();
     for (const range of ranges) query.append("ranges", range);
@@ -439,7 +439,10 @@ export class GoogleSheetsPinProvider {
         header.some((v, i) => v !== ROOM_PIN_SHEET_HEADERS[i]))
     ) return fail("PROVIDER_CONFIGURATION_ERROR");
     const board = Array.isArray(rows[1]) ? rows[1] as unknown[] : [];
-    if (board.length > 121 || board.some((value) => !Array.isArray(value))) {
+    if (
+      board.length > ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT ||
+      board.some((value) => !Array.isArray(value))
+    ) {
       return fail("PROVIDER_RESPONSE_INVALID");
     }
     const matches = board.map((value, index) => ({
@@ -565,7 +568,7 @@ export class GoogleSheetsPinProvider {
     deadlineAt: number,
   ): Promise<void> {
     if (
-      rows.length !== ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT ||
+      rows.length < 1 || rows.length > ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT ||
       new Set(rows.map((row) => row.roomNumber)).size !== rows.length ||
       rows.some((row, index) =>
         row.sheetRow !== index + 2 ||
@@ -585,13 +588,18 @@ export class GoogleSheetsPinProvider {
           values: [ROOM_PIN_SHEET_HEADERS],
         },
         {
-          range: `'${this.#target.tab}'!A2:H122`,
+          range: `'${this.#target.tab}'!A2:H501`,
           majorDimension: "ROWS",
-          values: rows.map((row) => this.#rowValues(row, syncedAt)),
+          values: [
+            ...rows.map((row) => this.#rowValues(row, syncedAt)),
+            ...Array.from({
+              length: ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT - rows.length,
+            }, () => Array(8).fill("")),
+          ],
         },
       ],
       deadlineAt,
-      ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT,
+      rows.length,
       ROOM_PIN_SHEET_FULL_RESYNC_ROOM_COUNT + 1,
     );
   }

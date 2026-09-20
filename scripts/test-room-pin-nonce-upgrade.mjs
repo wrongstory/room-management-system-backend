@@ -81,7 +81,12 @@ function ledgerSnapshot() {
       union select room_id from private.room_pin_revisions where recorded_by='${actorId}'
     ), exact_ledger as (
       select jsonb_build_object(
-        'rooms', coalesce((select jsonb_agg(to_jsonb(x) order by id) from (select * from public.rooms where id in (select room_id from fixture_rooms)) x), '[]'),
+        'rooms', coalesce((select jsonb_agg(to_jsonb(x) order by id) from (
+          select id,room_number,room_type_id,elevator_zone,data_status,data_status_reason,
+            occupancy_override,occupancy_override_reason,state_version,operation_suspended_at,
+            operation_suspended_reason,created_at,updated_at
+          from public.rooms where id in (select room_id from fixture_rooms)
+        ) x), '[]'),
         'leases', coalesce((select jsonb_agg(to_jsonb(x) order by id) from (select * from private.room_pin_change_leases where actor_profile_id='${actorId}') x), '[]'),
         'revisions', coalesce((select jsonb_agg(to_jsonb(x) order by id) from (select * from private.room_pin_revisions where recorded_by='${actorId}') x), '[]'),
         'currentPointers', coalesce((select jsonb_agg(to_jsonb(x) order by room_id) from (select * from private.room_current_pin where room_id in (select room_id from fixture_rooms)) x), '[]'),
@@ -115,6 +120,19 @@ function migrationRecorded() {
   return psql(
     `select exists(select 1 from supabase_migrations.schema_migrations where version='${migrationVersion}')`,
   );
+}
+
+function roomCatalogDefaults() {
+  return psql(`with fixture_rooms as (
+      select room_id from private.room_pin_change_leases where actor_profile_id='${actorId}'
+      union select room_id from private.room_pin_revisions where recorded_by='${actorId}'
+    ) select concat_ws('|',
+      count(*),
+      count(*) filter (where catalog_status='active'),
+      count(*) filter (where retired_at is null),
+      count(*) filter (where retired_by is null),
+      count(*) filter (where retirement_reason_code is null)
+    ) from public.rooms where id in (select room_id from fixture_rooms)`);
 }
 
 function newArtifactShape() {
@@ -262,6 +280,10 @@ async function verifyCleanUpgradePreservesCompleteLedger() {
   assert(
     ledgerSnapshot() === before,
     "successful upgrade must preserve the exact complete v52 ledger",
+  );
+  assert(
+    roomCatalogDefaults() === "5|5|5|5|5",
+    "later room catalog columns must backfill v52 fixture rooms as active with null retirement metadata",
   );
   assert(
     migrationRecorded() === "t",

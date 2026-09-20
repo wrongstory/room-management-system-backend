@@ -167,11 +167,11 @@ const idempotencyKey = crypto.randomUUID();
 
 ## 5. 역할별 화면 경계
 
-| 역할 | `/auth/me` | 계정 목록·변경 | developer 운영 상태 | 전체 객실 목록 | 예약 | 가능일 조회 | 가능일 제출·요청 | 가능일 결정·후보 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `developer` | 허용 | 허용 | 허용 | 금지 | 금지 | 금지 | 금지 | 금지 |
-| `admin` | 허용 | 허용 | 금지 | 허용 | 허용 | 전체 허용 | 금지 | 허용 |
-| `maid` | 허용 | 금지 | 금지 | 금지 | 금지 | 본인만 | 허용 | 금지 |
+| 역할 | `/auth/me` | 계정 목록·변경 | developer 운영 상태 | developer 객실 카탈로그 | 전체 객실 목록 | 예약 | 가능일 조회 | 가능일 제출·요청 | 가능일 결정·후보 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `developer` | 허용 | 허용 | 허용 | 허용 | 금지 | 금지 | 금지 | 금지 | 금지 |
+| `admin` | 허용 | 허용 | 금지 | 금지 | 허용 | 허용 | 전체 허용 | 금지 | 허용 |
+| `maid` | 허용 | 금지 | 금지 | 금지 | 금지 | 금지 | 본인만 | 허용 | 금지 |
 
 - `developer`는 최상위 백엔드·계정 운영자이며 business admin이 아니다.
 - 계정 생성·역할 변경 입력에는 `admin | maid`만 사용한다.
@@ -198,6 +198,9 @@ const idempotencyKey = crypto.randomUUID();
 | 업무 감사 | `GET /v1/developer/audit-events` | 성공한 domain mutation, 최대 31일·100건 cursor pagination, raw state 없음 |
 | 활동·보안 로그 | `GET /v1/developer/activity-events` | 로그인·민감접근 및 분 단위 권한거부 집계, 최대 31일·100건 cursor pagination |
 | 운영 진단 | `POST /v1/developer/diagnostics` | body 없음, 임의 URL/SQL/RPC 입력 없음, 10회/분 |
+| 객실 카탈로그 | `GET /v1/developer/rooms?status=&cursor=&limit=` | developer 전용, active/retired/total count와 최대 100건 cursor 목록 |
+| 객실 추가 | `POST /v1/developer/rooms` | Idempotency-Key와 published room type `expectedRoomTypeVersion`; active 500실 상한 |
+| 객실 은퇴 | `POST /v1/developer/rooms/{roomId}/retire` | 물리 삭제 아님; `expectedVersion` CAS와 reasonCode, 업무/PIN conflict는 409 |
 | 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 동일한 `evaluatedAt`/`serverTime` snapshot의 lifecycle·readiness 독립 축 사용 |
 | 객실 운영 상세 | `GET /v1/rooms/{roomId}` | 목록과 동일한 camelCase projection·next reservation 요약, PIN 원문 없음 |
 | 객실 기준정보 변경 | `PATCH /v1/rooms/{roomId}/master-data` | room state `expectedVersion` CAS와 Idempotency-Key |
@@ -368,4 +371,4 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 - list/entries/start/replay 응답은 UTF-8 JSON 128 KiB 상한을 갖는다. `PAYROLL_CURSOR_INVALID`, `PAYROLL_CURSOR_NOT_CONFIGURED`, `PAYROLL_RESPONSE_TOO_LARGE`는 message가 아니라 code로 분기한다.
 - 이 계약은 production OpenAPI와 `api` bundle에 반영됐다. 실제 역할별 hosted read/mutation smoke가 없는 경로는 배포 여부와 별도로 표시한다.
 
-현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 OpenAPI 0.4.0, 120 paths / 130 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.
+현재 production Swagger는 OpenAPI 0.4.0, 120 paths / 130 operations다. #230 source candidate는 developer 객실 카탈로그 2 paths / 3 operations를 더한 122 paths / 133 operations이며 release/production 승격 전에는 hosted 사용 가능으로 표시하지 않는다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.

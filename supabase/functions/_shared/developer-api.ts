@@ -1,14 +1,276 @@
 import { notificationDeliveryConfig } from "../notification-delivery/index.ts";
+import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
   assertApprovedRoomPinSheetTarget,
   validateGoogleSheetsServiceAccount,
 } from "./google-sheets-pin.ts";
 import { openApiDocument } from "./openapi.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
-import { EdgeError, requireDeveloper } from "./runtime.ts";
+import {
+  EdgeError,
+  requireDeveloper,
+  requirePasswordChanged,
+  verifiedRequestSessionId,
+} from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "generated_room_pin_confirmation";
+export const expectedMigrationName = "room_catalog_lifecycle";
+
+interface RoomCatalogCursor {
+  roomNumber: string;
+  id: string;
+}
+function decodeRoomCatalogCursor(value: string): RoomCatalogCursor {
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const parsed = JSON.parse(
+      atob(normalized + "=".repeat((4 - normalized.length % 4) % 4)),
+    ) as Record<string, unknown>;
+    if (
+      Object.keys(parsed).sort().join(",") !== "id,roomNumber" ||
+      typeof parsed.roomNumber !== "string" ||
+      !/^[0-9]{1,8}$/.test(parsed.roomNumber) ||
+      typeof parsed.id !== "string" || !uuidPattern.test(parsed.id)
+    ) throw new Error();
+    return parsed as unknown as RoomCatalogCursor;
+  } catch {
+    throw new EdgeError(
+      400,
+      "INVALID_ROOM_CATALOG_CURSOR",
+      "객실 목록 cursor가 올바르지 않습니다.",
+    );
+  }
+}
+function encodeRoomCatalogCursor(value: RoomCatalogCursor): string {
+  return btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+function canonicalizeRoomCatalog(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeRoomCatalog);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right)).map((
+          [key, nested],
+        ) => [key, canonicalizeRoomCatalog(nested)]),
+    );
+  }
+  return value;
+}
+async function roomCatalogRequestHash(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(canonicalizeRoomCatalog(value))),
+  );
+  return [...new Uint8Array(digest)].map((byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+function roomCatalogError(error: { message?: string } | null): EdgeError {
+  const message = error?.message ?? "";
+  const invalid = [
+    "INVALID_ROOM_CATALOG_STATUS",
+    "INVALID_ROOM_CATALOG_PAGE_SIZE",
+    "INVALID_ROOM_CATALOG_CURSOR",
+    "INVALID_ROOM_CATALOG_ENTRY",
+    "INVALID_ROOM_RETIREMENT_REASON",
+  ].find((code) => message.includes(code));
+  if (invalid) {
+    return new EdgeError(
+      400,
+      invalid,
+      "객실 카탈로그 요청이 올바르지 않습니다.",
+    );
+  }
+  if (message.includes("ROOM_NOT_FOUND")) {
+    return new EdgeError(404, "ROOM_NOT_FOUND", "객실을 찾을 수 없습니다.");
+  }
+  if (message.includes("SESSION_REVOKED")) {
+    return new EdgeError(401, "SESSION_REVOKED", "로그인이 만료되었습니다.");
+  }
+  const conflict = [
+    "STALE_VERSION",
+    "STALE_ROOM_TYPE_VERSION",
+    "IDEMPOTENCY_KEY_REUSED",
+    "ROOM_NUMBER_ALREADY_USED",
+    "ROOM_TYPE_NOT_PUBLISHED",
+    "ROOM_ALREADY_RETIRED",
+    "ROOM_RETIRE_RESERVATION_CONFLICT",
+    "ROOM_RETIRE_CLEANING_CONFLICT",
+    "ROOM_RETIRE_ISSUE_CONFLICT",
+    "ROOM_RETIRE_OPERATION_BLOCK_CONFLICT",
+    "ROOM_RETIRE_PIN_WORKFLOW_CONFLICT",
+    "ROOM_CATALOG_ACTIVE_LIMIT_EXCEEDED",
+  ].find((code) => message.includes(code));
+  if (conflict) {
+    return new EdgeError(
+      409,
+      conflict,
+      "현재 객실 카탈로그 상태와 요청이 충돌합니다.",
+    );
+  }
+  if (message.includes("DEVELOPER_REQUIRED")) {
+    return new EdgeError(
+      403,
+      "DEVELOPER_REQUIRED",
+      "개발자만 접근할 수 있습니다.",
+    );
+  }
+  return new EdgeError(
+    500,
+    "ROOM_CATALOG_COMMAND_FAILED",
+    "객실 카탈로그를 처리하지 못했습니다.",
+  );
+}
+export async function listDeveloperRoomCatalog(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+) {
+  requireDeveloper(actor);
+  requirePasswordChanged(actor);
+  const parameters = new URL(request.url).searchParams;
+  if (
+    [...parameters.keys()].some((key) =>
+      !["status", "cursor", "limit"].includes(key)
+    )
+  ) {
+    throw new EdgeError(
+      400,
+      "VALIDATION_ERROR",
+      "허용되지 않은 query 항목입니다.",
+    );
+  }
+  const status = parameters.get("status") ?? "all";
+  if (!["all", "active", "retired"].includes(status)) {
+    throw new EdgeError(
+      400,
+      "INVALID_ROOM_CATALOG_STATUS",
+      "status가 올바르지 않습니다.",
+    );
+  }
+  const rawLimit = parameters.get("limit") ?? "50";
+  if (!/^(?:[1-9]|[1-9]\d|100)$/.test(rawLimit)) {
+    throw new EdgeError(
+      400,
+      "INVALID_ROOM_CATALOG_PAGE_SIZE",
+      "limit은 1~100이어야 합니다.",
+    );
+  }
+  const cursor = parameters.get("cursor")
+    ? decodeRoomCatalogCursor(parameters.get("cursor") as string)
+    : null;
+  const { data, error } = await clients.admin.rpc(
+    "list_developer_room_catalog",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+      p_status: status,
+      p_after_room_number: cursor?.roomNumber ?? null,
+      p_after_id: cursor?.id ?? null,
+      p_limit: Number(rawLimit),
+    },
+  );
+  if (error || !data || typeof data !== "object") throw roomCatalogError(error);
+  const result = data as Record<string, unknown>;
+  return {
+    counts: result.counts,
+    items: result.items,
+    nextCursor: result.hasMore === true &&
+        typeof result.nextRoomNumber === "string" &&
+        typeof result.nextId === "string"
+      ? encodeRoomCatalogCursor({
+        roomNumber: result.nextRoomNumber,
+        id: result.nextId,
+      })
+      : null,
+  };
+}
+export async function createDeveloperRoom(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+) {
+  requireDeveloper(actor);
+  requirePasswordChanged(actor);
+  const body = await readJsonBody(request);
+  if (
+    Object.keys(body).sort().join(",") !==
+      "elevatorZone,expectedRoomTypeVersion,roomNumber,roomTypeId" ||
+    typeof body.roomNumber !== "string" ||
+    !/^[0-9]{1,8}$/.test(body.roomNumber) ||
+    typeof body.roomTypeId !== "string" || !uuidPattern.test(body.roomTypeId) ||
+    !Number.isSafeInteger(body.expectedRoomTypeVersion) ||
+    Number(body.expectedRoomTypeVersion) < 1 ||
+    !(body.elevatorZone === null ||
+      ["A", "B", "C"].includes(String(body.elevatorZone)))
+  ) {
+    throw new EdgeError(
+      400,
+      "INVALID_ROOM_CATALOG_ENTRY",
+      "객실 정보가 올바르지 않습니다.",
+    );
+  }
+  const payload = {
+    roomNumber: body.roomNumber,
+    roomTypeId: body.roomTypeId,
+    expectedRoomTypeVersion: body.expectedRoomTypeVersion,
+    elevatorZone: body.elevatorZone,
+  };
+  const { data, error } = await clients.admin.rpc("create_room_catalog_entry", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: verifiedRequestSessionId(request),
+    p_room_number: body.roomNumber,
+    p_room_type_id: body.roomTypeId,
+    p_expected_room_type_version: body.expectedRoomTypeVersion,
+    p_elevator_zone: body.elevatorZone,
+    p_idempotency_key: idempotencyKey(request),
+    p_request_hash: await roomCatalogRequestHash(payload),
+  });
+  if (error || !data) throw roomCatalogError(error);
+  return data;
+}
+export async function retireDeveloperRoom(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+) {
+  requireDeveloper(actor);
+  requirePasswordChanged(actor);
+  if (!uuidPattern.test(roomId)) {
+    throw new EdgeError(400, "VALIDATION_ERROR", "roomId가 올바르지 않습니다.");
+  }
+  const body = await readJsonBody(request);
+  if (
+    Object.keys(body).sort().join(",") !== "expectedVersion,reasonCode" ||
+    !Number.isSafeInteger(body.expectedVersion) ||
+    Number(body.expectedVersion) < 1 || typeof body.reasonCode !== "string" ||
+    !/^[A-Z0-9_]{2,80}$/.test(body.reasonCode)
+  ) {
+    throw new EdgeError(
+      400,
+      "INVALID_ROOM_RETIREMENT_REASON",
+      "객실 비활성화 요청이 올바르지 않습니다.",
+    );
+  }
+  const payload = {
+    roomId,
+    expectedVersion: body.expectedVersion,
+    reasonCode: body.reasonCode,
+  };
+  const { data, error } = await clients.admin.rpc("retire_room_catalog_entry", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: verifiedRequestSessionId(request),
+    p_room_id: roomId,
+    p_expected_version: body.expectedVersion,
+    p_reason_code: body.reasonCode,
+    p_idempotency_key: idempotencyKey(request),
+    p_request_hash: await roomCatalogRequestHash(payload),
+  });
+  if (error || !data) throw roomCatalogError(error);
+  return data;
+}
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -469,7 +731,7 @@ function auditQuery(request: Request): {
     );
   }
   const eventTypes = parameters.getAll("eventType");
-  if (eventTypes.length > 70 || eventTypes.some((value) => value.length > 80)) {
+  if (eventTypes.length > 72 || eventTypes.some((value) => value.length > 80)) {
     throw new EdgeError(
       400,
       "VALIDATION_ERROR",
