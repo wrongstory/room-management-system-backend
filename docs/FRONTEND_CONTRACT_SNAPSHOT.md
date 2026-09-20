@@ -8,7 +8,7 @@
 |---|---|---|
 | 프런트 제품 snapshot | `165fed2d62a763d64ac62539e1475c1b3e42868f` | 이번 정합화의 exact 기준. 원격 `dev` ref는 삭제됐지만 commit은 재현 가능하다. |
 | 프런트 현재 원격 `main` | `afeb0898879bf8d381ee2e218938dc3160fd6ac0` | 관찰 대상. 위 snapshot의 정책을 자동 대체하지 않는다. |
-| 백엔드 `dev` | `3a3409bd38458796126fb5ea2590949c8b807985` | 이번 대조 기준. 65 migrations / OpenAPI 114 paths / 122 operations이며 #196이 통합됐다. #200의 66번째 migration은 미병합 작업 후보로 별도 표기한다. |
+| 백엔드 `dev` | `9c197ad12ed5cb45db0b451f69f9f91053b139d7` | 현재 통합 기준. 73 migrations / OpenAPI 120 paths / 130 operations이며 #169까지 `dev`에 반영됐다. production/main 승격은 Issue #220의 별도 release gate다. |
 | 백엔드 저장소 `main` | `a12595edf68644b94215c4792e0d3aadd64772c6` | 저장소 release line. 마지막 검증된 production 배포 source와 구분한다. |
 
 프런트 snapshot의 기능을 현재 원격 `main` 배포 상태로 추정하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.

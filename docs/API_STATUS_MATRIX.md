@@ -73,12 +73,13 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 source/readback evidence: **2026-09-16 KST** (Issue #148/#156/#165 및 Pages run `35051144073`). 현재 개발 기능 integration 기준은 PR #190의 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`이며 production source/readback과 구분한다.
+production 최종 source/readback evidence: **2026-09-16 KST** (Issue #148/#156/#165 및 Pages run `35051144073`). 현재 개발·release 통합 기준은 PR #219의 `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7`이며 production source/readback과 구분한다.
 
 - 현재 GitHub·production API source 정본: `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`
   - Issue #148의 v0.3.0 승격, Issue #152 notification-delivery hosted 호환, Issue #156 cleaning-template admin API와 Issue #165 선택형 duration hotfix까지 반영됐다.
   - annotated `v0.3.0` tag/GitHub Release는 아직 없으므로 `main`/production source 상태와 GitHub Release 완료를 구분한다.
 - production은 **56 migrations / `api` ACTIVE v16 / OpenAPI 0.3.0 109 paths / 117 operations**다. `standard`, `premium`, `oceanPremium`, `oceanFamily` checkout template은 각각 immutable v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes=null`이다. 게시 API와 조회는 운영에서 검증됐지만 안전한 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`로 남는다.
+- v0.4.0 release candidate는 **73 migrations / OpenAPI 0.4.0 120 paths / 130 operations**다. production 56번을 baseline으로 57~73 순서·content SHA를 manifest로 고정하며, `main` 병합·운영 migration·Edge·Pages 배포 전까지 현재 사용은 현행 production 0.3.0 계약을 유지한다.
 - #187 Phase C는 PR #190으로 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`에 source/dev 병합 완료했다. 현재 개발 정본은 기존 61개를 수정하지 않은 **62 migrations / OpenAPI 113 paths / 121 operations**이며 `reservation_stays`/`stay_room_segments`, DURING_STAY preview·commit, source-room checkout cleanup 및 미래 PIN cutoff를 포함한다. `main`/production에는 아직 반영하지 않았으므로 운영 수치와 사용 가능 상태는 기존 production readback을 유지한다.
 - #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
 - 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. 현재 production source 포함 여부는 이 §2의 56 migrations / 109 paths / 117 operations와 5개 Edge bundle snapshot을 우선하고, hosted provider·Google·Cron 및 positive mutation 사용 가능 여부는 별도 gate로 판정한다.
@@ -91,7 +92,7 @@ production 최종 source/readback evidence: **2026-09-16 KST** (Issue #148/#156/
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
 - #184 현재 시각 객실 projection은 `dev@fb50775289b14f16b27679af471e282504b5f5f6`, #187 Phase A~C 예약 임박·체크인 전 변경·투숙 중 이동은 PR #188/#189/#190을 거쳐 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`에 source/dev 병합 완료했다. 모두 production에는 아직 배포하지 않았다.
 - #180 `extra-proof` 0~10장 collection은 `dev@0f58d4778523ea2a2e6dfe05a3aa8cb80bb0052e`에 source/dev 병합 완료했고 production에는 아직 배포하지 않았다.
-- 현재 critical path는 **승인된 release에서 pending 57~62 migration/API 배포와 기존 v7→A template 신규 게시 → 안전한 fixture 승인 시 BEFORE_CHECKIN/DURING_STAY room-move hosted smoke → 프런트 lifecycle/room-move mapper와 browser E2E → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. 현재 production v7 이력은 release 전에 덮어쓰지 않는다.
+- 현재 critical path는 **Issue #220 release/v0.4.0 충돌 해소·검증 → `main` 승격 → production 57~73 migration/API 배포 → Pages 0.4.0 120/130 재배포 → 승인된 hosted smoke**다. production v7 template과 56개 migration 이력은 운영 승인 전에 덮어쓰지 않는다.
 - 운영 migration: **56건**
 - 운영 Edge Functions readback:
   - `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 bundle 배포

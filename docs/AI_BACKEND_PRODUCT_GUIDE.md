@@ -4,8 +4,8 @@
 
 검토 기준:
 
-- 이 문서 갱신의 개발 통합 기준: `dev@3bb0cd5b84434f2e2ec92fff2d7732f56f27555c` — 72 migrations / OpenAPI 119 paths / 129 operations.
-- Issue #169 통합 후보는 기존 72개 migration을 보존하고 73번째 `generated_room_pin_confirmation`과 PIN 확인 API를 추가해 OpenAPI 120 paths / 130 operations가 된다. `dev` 병합 및 release 승인 전에는 production 계약으로 표현하지 않는다.
+- 이 문서 갱신의 개발 통합 기준: `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7` — 73 migrations / OpenAPI 120 paths / 130 operations.
+- Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합됐다. 73번째 `generated_room_pin_confirmation`은 release/main·production 승격 전이므로 production 사용 계약으로 표현하지 않는다.
 - 백엔드 저장소 `main`: `a12595edf68644b94215c4792e0d3aadd64772c6`. 마지막으로 직접 검증한 production 배포 source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`이며 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations였다.
 - 프런트엔드 정본 저장소: `wrongstory/room-management-system`
 - 프런트엔드 제품·운영 연결 snapshot: `dev@165fed2d62a763d64ac62539e1475c1b3e42868f` (`기능: 운영 API 연결을 완성하라`).
