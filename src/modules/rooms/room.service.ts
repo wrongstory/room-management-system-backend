@@ -405,6 +405,9 @@ function roomError(error: { message?: string } | null): AppError {
   if (message.includes('ROOM_PIN_MISMATCH_UNRESOLVED')) {
     return new AppError(409, 'ROOM_PIN_MISMATCH_UNRESOLVED', '물리 도어락과 저장 상태의 불일치를 먼저 해소해 주세요.');
   }
+  if (message.includes('INVALID_PIN_CHANGE_REASON')) {
+    return new AppError(409, 'INVALID_PIN_CHANGE_REASON', '현재 PIN 상태와 변경 사유가 일치하지 않습니다.');
+  }
   if (message.includes('PIN_CHANGE_IN_PROGRESS_REQUIRED')) {
     return new AppError(403, 'PIN_CHANGE_IN_PROGRESS_REQUIRED', 'PIN 변경은 현재 청소가 진행 중일 때만 가능합니다.');
   }
@@ -720,7 +723,11 @@ export class SupabaseRoomService implements RoomService {
     if (contextError || !contextData) throw roomError(contextError);
     const context = contextData as Record<string, unknown>;
     const roomNumber = String(context.room_number);
+    const currentPinVersion = Number(context.current_pin_version);
     const proposedVersion = Number(context.proposed_pin_version);
+    const effectiveReasonCode = currentPinVersion === 0 && input.reasonCode === 'ADMIN_PHYSICAL_CHANGE'
+      ? 'ADMIN_INITIAL_PIN'
+      : input.reasonCode;
     let canonical: string;
     let envelope: RoomPinEnvelope;
     try {
@@ -736,7 +743,7 @@ export class SupabaseRoomService implements RoomService {
       assignmentId: input.assignmentId ?? null,
       attemptId: input.attemptId ?? null,
       accessLeaseId: input.accessLeaseId ?? null,
-      reasonCode: input.reasonCode
+      reasonCode: effectiveReasonCode
     };
     const { data, error } = await this.clients.admin.rpc('prepare_room_pin_change', {
       p_actor_profile_id: actor.profileId,
@@ -745,7 +752,7 @@ export class SupabaseRoomService implements RoomService {
       p_expected_pin_version: input.expectedPinVersion,
       p_room_number_snapshot: roomNumber,
       ...binding,
-      p_reason_code: input.reasonCode,
+      p_reason_code: effectiveReasonCode,
       p_envelope_format: envelope.envelopeFormat,
       p_ciphertext_base64: envelope.ciphertextBase64,
       p_nonce_base64: envelope.nonceBase64,
