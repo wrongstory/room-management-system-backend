@@ -141,15 +141,24 @@ Deno.test("availability projections expose the Fastify camelCase contract", () =
 
 Deno.test("availability database errors keep the Fastify reason-code contract", () => {
   const stale = availabilityDatabaseError({ message: "STALE_VERSION" });
-  const window = availabilityDatabaseError({
-    message: "OUTSIDE_AVAILABILITY_WINDOW",
+  const weekRange = availabilityDatabaseError({
+    message: "AVAILABILITY_WEEK_OUT_OF_RANGE",
+  });
+  const pastDate = availabilityDatabaseError({
+    message: "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
   });
   const unknown = availabilityDatabaseError({ message: "internal detail" });
 
   assert(stale.status === 409 && stale.code === "STALE_VERSION", "stale CAS");
   assert(
-    window.status === 409 && window.code === "OUTSIDE_AVAILABILITY_WINDOW",
-    "KST submission window",
+    weekRange.status === 409 &&
+      weekRange.code === "AVAILABILITY_WEEK_OUT_OF_RANGE",
+    "current or next KST week",
+  );
+  assert(
+    pastDate.status === 409 &&
+      pastDate.code === "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
+    "past availability cannot be added retroactively",
   );
   assert(
     unknown.status === 500 && unknown.code === "AVAILABILITY_COMMAND_FAILED",

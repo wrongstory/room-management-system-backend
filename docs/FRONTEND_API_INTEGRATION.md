@@ -155,7 +155,8 @@ const idempotencyKey = crypto.randomUUID();
 | 동시 변경/업무 충돌 | `IDEMPOTENCY_KEY_REUSED`, `LAST_ACTIVE_ADMIN_REQUIRED` 등 409 | 최신 목록 재조회 후 사용자 확인 |
 | 서버 상태 불일치 | `ACCOUNT_AUTH_STATE_INCONSISTENT`, `PASSWORD_STATE_INCONSISTENT` | 자동 성공 처리 금지, requestId로 운영 확인 |
 | 진단 요청 과다 | `DIAGNOSTICS_RATE_LIMITED` | `Retry-After` 뒤 사용자가 다시 실행 |
-| 가능일 제출 시간 아님 | `OUTSIDE_AVAILABILITY_WINDOW` | KST 일요일 12:00–23:59 안내, 클라이언트 시각으로 우회 금지 |
+| 가능일 대상 주차 범위 밖 | `AVAILABILITY_WEEK_OUT_OF_RANGE` | KST 기준 현재 주 또는 다음 주 월요일로 다시 선택 |
+| 과거 가능일 소급 변경 | `PAST_AVAILABILITY_DATE_NOT_ALLOWED` | 현재 주의 지난 날짜를 새로 가능으로 바꾸지 말고 최신 version 재조회 |
 | 가능일 동시 변경 | `STALE_VERSION` | 현재 가능일·요청 목록을 다시 조회하고 expectedVersion 갱신 |
 | 처리 중 변경 요청 존재 | `PENDING_CHANGE_REQUEST_EXISTS` | 기존 pending 요청을 표시하고 중복 요청 금지 |
 | 예약·객실 동시 변경 | `STALE_VERSION`, `ROOM_STATE_CHANGED` | 예약·객실을 다시 조회하고 서버 version으로 사용자 재확인 |
@@ -211,8 +212,8 @@ const idempotencyKey = crypto.randomUUID();
 | PIN 초기화 | `POST /v1/rooms/pins/bootstrap` | active admin, 선택적 limit만 전송; PIN은 서버 secret에서만 읽음 |
 | PIN 동기화 상태(legacy) | `POST /v1/rooms/{roomId}/pin-sync-events` | 신규 프런트 사용 금지; 상태 기록만으로 current PIN이 생성되지 않음 |
 | 현재 가능일 | `GET /v1/availability?weekStart=...` | maid는 본인만, admin은 maidProfileId 선택 가능 |
-| 가능일 제출 | `POST /v1/availability/submissions` | maid만, KST 일요일 제출창·CAS·Idempotency-Key |
-| 마감 후 변경 요청 | `POST /v1/availability/change-requests` | maid만, pending 1건·이력 보존 |
+| 가능일 제출·직접 변경 | `POST /v1/availability/submissions` | maid만, KST 현재·다음 주, 요일 무관, 과거 날짜 신규 true 금지, CAS·Idempotency-Key |
+| 승인형 변경 요청 | `POST /v1/availability/change-requests` | maid만, 대상 주 시작 후 pending 1건·이력 보존 |
 | 변경 요청 목록 | `GET /v1/availability/change-requests` | maid 본인만, admin은 status/weekStart/maid 필터 |
 | 변경 요청 결정 | `POST /v1/availability/change-requests/{requestId}/decision` | active admin만, 승인 시 새 version 생성 |
 | 배정 가능 후보 | `GET /v1/availability/candidates?workDate=...` | active admin만, 현재 가능일의 active maid |
