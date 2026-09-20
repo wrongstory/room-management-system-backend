@@ -1248,7 +1248,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] #179 exact-head 독립 QA·required CI·사람 리뷰와 `dev` 병합
 - [x] #180 `extra-proof` 0~10장 collection, stable item/order, append·replace·개별 삭제 CAS/멱등, 과거 제출 binding 불변, collection 폭탄방 증빙·bounded developer audit, 실제 병렬 transaction 경쟁 회귀, Node/Edge/OpenAPI parity
 - [x] #180 exact-head required CI·사람 리뷰와 `dev@0f58d4778523ea2a2e6dfe05a3aa8cb80bb0052e` 병합
-- [ ] 승인된 release의 production pending 57~62 migration/API 배포, 기존 v7→A template 신규 게시, 예약/객실이동 success hosted smoke
+- [ ] 승인된 v0.4.0 release의 production pending 57~73 migration/API 배포, 기존 v7→A template 신규 게시, 예약/객실이동·PIN success hosted smoke
 
 ### #184 현재일 기준 객실 현황 projection — source/dev 완료, production 미배포
 
@@ -1264,7 +1264,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] append-only `current_room_status_projection` migration과 future/current/checkout 경계 회귀 추가
 - [x] exact-head 독립 QA 98/100·P0/P1/P2=0과 required GitHub `application` / `migration` PASS
 - [x] `dev@fb50775289b14f16b27679af471e282504b5f5f6` 병합
-- [ ] 별도 release/main 승인 뒤 production pending 57~62 migration/API 배포와 hosted 예약·객실이동 회귀 확인
+- [ ] 별도 release/main 승인 뒤 이 기능을 포함한 production pending 57~73 migration/API 배포와 hosted 예약·객실이동 회귀 확인
 - 프런트 카드·요약·필터 mapper/browser E2E는 프런트 담당 저장소에서 별도 진행한다.
 
 ### #187 예약 임박 lifecycle projection Phase A — source/dev 완료
@@ -1298,9 +1298,9 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] #180 dev와 Phase B를 합친 candidate OpenAPI 113 paths / 121 operations와 ephemeral Python codegen 계약 추가; production 109/117은 미변경
 - [x] local fresh DB pgTAP·별도 세션 concurrency·application/migration 전체 검증
 - [x] Phase C DURING_STAY stay/segment 모델과 별도 승인 — PR #190 / `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`
-- [ ] 별도 release/main 승인 뒤 production 합산 62번째 migration/API 배포 및 hosted smoke
+- [ ] 별도 release/main 승인 뒤 이 기능을 포함한 v0.4.0 pending 57~73 migration/API 배포 및 hosted smoke
 
-현재 critical path는 **승인된 production pending 57~62 migration/API 배포와 A template 게시 → 안전한 fixture가 승인되면 예약 생성·동일 요청 replay·BEFORE_CHECKIN/DURING_STAY room-move snapshot smoke → 프런트 lifecycle/room-move mapper와 browser E2E → Issue #148의 남은 tag/GitHub Release**다.
+현재 critical path는 **Issue #220의 v0.4.0 release 승인 → production pending 57~73 migration/API 배포와 A template 게시 → 안전한 fixture가 승인되면 예약 생성·동일 요청 replay·BEFORE_CHECKIN/DURING_STAY room-move·초기 PIN snapshot smoke → 프런트 lifecycle/room-move mapper와 browser E2E → tag/GitHub Release**다.
 
 ### #187 Phase C — DURING_STAY room move source/dev 완료
 
