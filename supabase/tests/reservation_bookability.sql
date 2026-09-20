@@ -91,7 +91,7 @@ select is(
     select (candidate->>'interval_bookable')::boolean
     from jsonb_array_elements(public.preview_reservation_bookability(
       '72000000-0000-4000-8000-000000000001',
-      '2027-02-02 11:00:00+09','2027-02-03 11:00:00+09',null,null
+      '2027-02-02 11:00:00+09','2027-02-03 11:00:00+09',2,null,null
     )->'candidates') candidate
     where candidate->>'room_number'='117'
   ),
@@ -104,7 +104,7 @@ select is(
     select (candidate->>'interval_bookable')::boolean
     from jsonb_array_elements(public.preview_reservation_bookability(
       '72000000-0000-4000-8000-000000000001',
-      '2027-02-02 10:59:00+09','2027-02-03 11:00:00+09',null,null
+      '2027-02-02 10:59:00+09','2027-02-03 11:00:00+09',2,null,null
     )->'candidates') candidate
     where candidate->>'room_number'='117'
   ),
@@ -117,7 +117,7 @@ select ok(
     select candidate->'reason_codes' ? 'RESERVATION_OVERLAP'
     from jsonb_array_elements(public.preview_reservation_bookability(
       '72000000-0000-4000-8000-000000000001',
-      '2027-02-02 10:59:00+09','2027-02-03 11:00:00+09',null,null
+      '2027-02-02 10:59:00+09','2027-02-03 11:00:00+09',2,null,null
     )->'candidates') candidate
     where candidate->>'room_number'='117'
   ),
@@ -130,7 +130,7 @@ select is(
     from jsonb_array_elements(public.preview_reservation_bookability(
       '72000000-0000-4000-8000-000000000001',
       '2027-02-01 16:00:00+09','2027-02-02 11:00:00+09',
-      '73000000-0000-4000-8000-000000000001',null
+      2,'73000000-0000-4000-8000-000000000001',null
     )->'candidates') candidate
     where candidate->>'room_number'='117'
   ),
@@ -144,7 +144,7 @@ select is(
     from jsonb_array_elements(public.preview_reservation_bookability(
       '72000000-0000-4000-8000-000000000001',
       '2027-02-01 16:00:00+09','2027-02-02 11:00:00+09',
-      '73000000-0000-4000-8000-000000000001',null
+      2,'73000000-0000-4000-8000-000000000001',null
     )->'candidates') candidate
     where candidate->>'room_number'='118'
   ),
@@ -156,7 +156,7 @@ select throws_ok(
   $$select public.preview_reservation_bookability(
     '72000000-0000-4000-8000-000000000001',
     '2027-02-01 16:00:00+09','2027-02-02 11:00:00+09',
-    '73000000-0000-4000-8000-000000000099',null
+    2,'73000000-0000-4000-8000-000000000099',null
   )$$,
   'P0002','EXCLUDE_RESERVATION_NOT_FOUND',
   'unknown exclusion is rejected'
@@ -166,7 +166,7 @@ select throws_ok(
   $$select public.preview_reservation_bookability(
     '72000000-0000-4000-8000-000000000001',
     '2027-02-05 16:00:00+09','2027-02-06 11:00:00+09',
-    '73000000-0000-4000-8000-000000000003',null
+    2,'73000000-0000-4000-8000-000000000003',null
   )$$,
   '23514','EXCLUDE_RESERVATION_NOT_ELIGIBLE',
   'cancelled reservation cannot be an exclusion authority'
@@ -179,7 +179,7 @@ select ok(
       and candidate->'reason_codes' ? 'PIN_UNCONFIGURED'
     from jsonb_array_elements(public.preview_reservation_bookability(
       '72000000-0000-4000-8000-000000000001',
-      '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,null
+      '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',2,null,null
     )->'candidates') candidate
     where candidate->>'room_number'='120'
   ),
@@ -193,7 +193,7 @@ select ok(
       and not (candidate->'reason_codes' ? 'PIN_UNCONFIGURED')
     from jsonb_array_elements(public.preview_reservation_bookability(
       '72000000-0000-4000-8000-000000000001',
-      '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,null
+      '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',2,null,null
     )->'candidates') candidate
     where candidate->>'room_number'='118'
   ),
@@ -203,7 +203,7 @@ select ok(
 select ok(
   jsonb_typeof(public.preview_reservation_bookability(
     '72000000-0000-4000-8000-000000000001',
-    '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,null
+    '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',2,null,null
   )->'evaluated_at')='string',
   'preview envelope always carries evaluatedAt authority'
 );
@@ -212,12 +212,12 @@ select is(
   (select jsonb_agg(candidate - 'evaluated_at' order by candidate->>'room_number')
    from jsonb_array_elements(public.preview_reservation_bookability(
      '72000000-0000-4000-8000-000000000001',
-     '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,array[]::uuid[],'standard'
+     '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',2,null,array[]::uuid[],'standard'
    )->'candidates') candidate),
   (select jsonb_agg(candidate - 'evaluated_at' order by candidate->>'room_number')
    from jsonb_array_elements(public.preview_reservation_bookability(
      '72000000-0000-4000-8000-000000000001',
-     '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,null,'standard'
+     '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',2,null,null,'standard'
    )->'candidates') candidate),
   'empty and omitted room type filters both mean all room types'
 );
@@ -225,7 +225,7 @@ select is(
 select lives_ok(
   $$select public.preview_reservation_bookability(
     '72000000-0000-4000-8000-000000000001',
-    '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,null,'long_stay'
+    '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',2,null,null,'long_stay'
   )$$,
   'long-stay preview is part of the nullable checkout contract'
 );
@@ -295,7 +295,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.preview_reservation_bookability(uuid,timestamptz,timestamptz,uuid,uuid[],text)',
+    'public.preview_reservation_bookability(uuid,timestamptz,timestamptz,integer,uuid,uuid[],text)',
     'execute'
   ) and not has_function_privilege(
     'authenticated',
@@ -308,7 +308,7 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.preview_reservation_bookability(uuid,timestamptz,timestamptz,uuid,uuid[],text)',
+    'public.preview_reservation_bookability(uuid,timestamptz,timestamptz,integer,uuid,uuid[],text)',
     'execute'
   ) and has_function_privilege(
     'service_role',
@@ -321,7 +321,7 @@ select ok(
 select throws_ok(
   $$select public.preview_reservation_bookability(
     '72000000-0000-4000-8000-000000000002',
-    '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,null
+    '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',2,null,null
   )$$,
   '42501','ADMIN_REQUIRED',
   'maid actor cannot preview the room inventory'

@@ -8,7 +8,7 @@ const supabaseCli = fileURLToPath(
 );
 const container = "supabase_db_room-management-system-backend";
 const baselineVersion = "20260915000628";
-const finalVersion = "20260919230733";
+const finalVersion = "20260920144042";
 const migrationPattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
 const psqlArgs = [
   "exec",
@@ -121,7 +121,7 @@ function assertRowsPreserved(before, after, table) {
   for (const hash of after) remaining.set(hash, (remaining.get(hash) ?? 0) + 1);
   for (const hash of before) {
     const count = remaining.get(hash) ?? 0;
-    assert(count > 0, `migration 57 -> 73 changed or removed an existing ${table} row`);
+    assert(count > 0, `migration 57 -> 74 changed or removed an existing ${table} row`);
     remaining.set(hash, count - 1);
   }
 }
@@ -139,7 +139,7 @@ function assertHistory(actual, expected, label) {
 let passed = false;
 try {
   const expectedMigrations = migrationFiles();
-  assert(expectedMigrations.length === 73, "release candidate must contain exactly 73 migrations");
+  assert(expectedMigrations.length === 74, "release candidate must contain exactly 74 migrations");
   assert(
     expectedMigrations[55]?.version === baselineVersion &&
       expectedMigrations[55]?.name === "cleaning_template_duration_optional",
@@ -147,8 +147,8 @@ try {
   );
   assert(
     expectedMigrations.at(-1)?.version === finalVersion &&
-      expectedMigrations.at(-1)?.name === "generated_room_pin_confirmation",
-    "migration 73 must be generated_room_pin_confirmation",
+      expectedMigrations.at(-1)?.name === "developer_room_catalog_capacity",
+    "migration 74 must be developer_room_catalog_capacity",
   );
 
   reset(baselineVersion);
@@ -185,12 +185,12 @@ try {
   )`);
   assert(
     finalState === "121|0|t|t|0",
-    "upgraded schema/cardinality/RLS state is not the approved v0.4.0 contract",
+    "upgraded schema/cardinality/RLS state is not the approved v0.5.0 candidate contract",
   );
 
   passed = true;
   process.stdout.write(
-    `production-baseline 56 -> 73 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
+    `production-baseline 56 -> 74 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
   );
 } finally {
   try {

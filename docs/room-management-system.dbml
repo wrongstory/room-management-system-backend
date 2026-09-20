@@ -188,8 +188,8 @@ Table public.room_types {
   name text [not null]
   base_cleaning_fee int [not null, note: 'KRW integer']
   default_duration_minutes int [not null]
-  default_guest_count int [not null]
-  max_guest_count int [not null]
+  default_guest_count int [not null, note: 'API baseOccupancy; >= 1']
+  max_guest_count int [not null, note: 'API maxOccupancy; >= default_guest_count; reservation authority']
   active boolean [not null, default: true]
   version bigint [not null, default: 1, note: 'managed catalog CAS version']
   created_at timestamptz [not null]
@@ -204,10 +204,30 @@ Table public.rooms {
   data_status text [not null]
   occupancy_override text
   state_version bigint [not null, default: 1]
+  active boolean [not null, default: true]
+  deactivated_at timestamptz
+  deactivated_by uuid
+  deactivation_reason_code text
   operation_suspended_at timestamptz
   operation_suspended_reason text
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
+}
+
+Table private.developer_catalog_previews {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  preview_kind text [not null, note: 'room_type_capacity/room_deactivation']
+  entity_id uuid [not null]
+  expected_version bigint [not null]
+  request_payload jsonb [not null]
+  impact_payload jsonb [not null]
+  impact_fingerprint text [not null, unique]
+  evaluated_at timestamptz [not null]
+  expires_at timestamptz [not null, note: 'evaluated_at + 5 minutes']
+  consumed_at timestamptz
+
+  Note: '#236 private FORCE RLS preview authority; no direct public/anon/authenticated/service_role grants.'
 }
 
 Table public.reservations {

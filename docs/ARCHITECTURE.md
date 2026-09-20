@@ -31,7 +31,15 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 ### #202 객실 타입 카탈로그
 
-`GET /v1/room-types`는 비밀번호 변경을 완료한 active business admin의 live session만 허용하는 app-owned projection이다. 안정적인 `code`, 현재 `displayName`, 원 단위 `baseCleaningFee`, 관리형 `version`, 현재 참조 `roomCount`를 camelCase로 반환한다. 비활성 타입도 기존 객실 참조를 설명하기 위해 목록에는 남지만 기존 `change_room_master_data` command는 신규 선택을 계속 거부한다. `version`은 표시 시각에서 만든 가짜 값이 아니라 객실 타입 업무 필드가 실제 변경될 때만 DB trigger가 증가시킨다.
+`GET /v1/room-types`는 비밀번호 변경을 완료한 active business admin의 live session만 허용하는 app-owned projection이다. 안정적인 `code`, 현재 `displayName`, 원 단위 `baseCleaningFee`, 저장된 `baseOccupancy/maxOccupancy`, 관리형 `version`, 현재 참조 `roomCount`를 camelCase로 반환한다. 비활성 타입도 기존 객실 참조를 설명하기 위해 목록에는 남지만 기존 `change_room_master_data` command는 신규 선택을 계속 거부한다. `version`은 표시 시각에서 만든 가짜 값이 아니라 객실 타입 업무 필드가 실제 변경될 때만 DB trigger가 증가시킨다.
+
+### #236 Developer 객실·인원 카탈로그 — source candidate
+
+74번째 append-only migration은 singleton developer만 사용할 수 있는 `GET /v1/developer/room-catalog`와 객실 유형 인원 변경·객실 추가·객실 비활성화 command를 추가한다. 응답은 객실 UUID/번호/유형/active/version과 유형의 code/displayName/인원/version/roomCount 및 집계만 반환하며 예약·고객·PIN·청소·감사 raw state를 섞지 않는다. 모든 응답은 `no-store`다.
+
+인원 변경과 비활성화는 5분 TTL preview를 private FORCE RLS table에 고정한 뒤 actor, entity, CAS version, 요청 payload, 최신 영향 범위, opaque fingerprint를 commit에서 다시 확인한다. mutation은 Idempotency-Key receipt와 source-controlled reason code를 사용하며 기존 활성 예약이 새 최대 인원을 초과하거나 객실에 점유·예약·청소·PIN·미해결 운영 업무가 있으면 fail-closed한다. 객실 추가는 활성 유형의 최신 version을 요구하고 `verification_required`로 시작한다. 객실 제거는 hard delete 없이 inactive metadata와 audit event를 남긴다.
+
+예약 bookability 요청은 `guestCount`를 필수로 받고 candidate마다 최신 유형 최대 인원을 검사한다. preview는 안내일 뿐이며 예약·segment DB trigger와 create/change command가 최종 재검증한다. 이 migration은 현재 `default_guest_count/max_guest_count`를 변경하거나 예시 값으로 backfill하지 않는다.
 
 ### #204 최근 7일 청소 완료 이력
 
@@ -834,6 +842,7 @@ OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. `20260916090000_extra
 - `GET /v1/rooms`, `GET /v1/rooms/:roomId` (관리자 전용 운영 projection)
 - `GET /v1/developer/overview`, `/runtime-status`, `/database-status`, `/scheduler-status`
 - `GET /v1/developer/audit-events`, `GET /v1/developer/activity-events`, `POST /v1/developer/diagnostics` (singleton developer 전용 bounded projection)
+- `GET /v1/developer/room-catalog`, 객실 유형 인원 preview/commit, 객실 추가, 객실 비활성화 preview/commit (#236 source candidate)
 - `POST /v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId/upload`, `DELETE /v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId` (#180 v8 `extra-proof` source 후보; production 미배포)
 - 객실 기준정보 변경, 운영 차단·해제, 촛불 수량 event, 이슈 등록·해결, PIN 동기화 결과 기록
 - `GET·POST /v1/reservations`, `GET /v1/reservations/:reservationId`

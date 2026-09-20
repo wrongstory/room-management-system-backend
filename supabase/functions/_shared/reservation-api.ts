@@ -123,6 +123,7 @@ const reservationBookabilityReasons = new Set([
   "DATA_UNCONFIRMED",
   "PIN_MISMATCH",
   "PIN_UNCONFIGURED",
+  "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
 ]);
 const reservationPageSize = 50;
 const reservationRangeMaxMs = 31 * 24 * 60 * 60 * 1000;
@@ -746,6 +747,24 @@ export function reservationDatabaseError(
 ): EdgeError {
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
+    [
+      "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
+      400,
+      "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
+      "예약 인원이 객실 유형의 최대 인원을 초과합니다.",
+    ],
+    [
+      "ROOM_INACTIVE",
+      409,
+      "ROOM_INACTIVE",
+      "비활성 객실에는 예약할 수 없습니다.",
+    ],
+    [
+      "ROOM_TYPE_INACTIVE",
+      409,
+      "ROOM_TYPE_INACTIVE",
+      "비활성 객실 유형에는 예약할 수 없습니다.",
+    ],
     [
       "RESERVATION_VERSION_CONFLICT",
       409,
@@ -1569,10 +1588,12 @@ export async function previewReservationBookability(
     "reservationType",
     "checkInAt",
     "checkOutAt",
+    "guestCount",
     "excludeReservationId",
     "roomTypeIds",
   ]);
   const checkInAt = timestampValue(body.checkInAt, "checkInAt");
+  const guestCount = positiveInteger(body.guestCount, "guestCount");
   const { reservationType, checkOutAt } = reservationScheduleValues(body);
   const excludeReservationId = body.excludeReservationId == null
     ? null
@@ -1601,6 +1622,7 @@ export async function previewReservationBookability(
       p_actor_profile_id: actor.profileId,
       p_check_in_at: checkInAt,
       p_check_out_at: checkOutAt,
+      p_guest_count: guestCount,
       p_exclude_reservation_id: excludeReservationId,
       p_room_type_ids: roomTypeIds,
       p_reservation_type: reservationType,
@@ -1620,6 +1642,7 @@ export async function previewReservationBookability(
     reservationType,
     checkInAt,
     checkOutAt,
+    guestCount,
     excludeReservationId,
     evaluatedAt,
     candidates,

@@ -173,6 +173,8 @@ erDiagram
     uuid id PK
     text code UK
     int base_cleaning_fee
+    int default_guest_count
+    int max_guest_count
     boolean active
     bigint version
   }
@@ -182,6 +184,10 @@ erDiagram
     uuid room_type_id FK
     text elevator_zone
     bigint state_version
+    boolean active
+    timestamptz deactivated_at
+    uuid deactivated_by FK
+    text deactivation_reason_code
   }
   RESERVATIONS {
     uuid id PK
@@ -360,6 +366,9 @@ erDiagram
 ```
 
 핵심 제약:
+
+- #236의 `default_guest_count/max_guest_count`는 API에서 `baseOccupancy/maxOccupancy`로 표시하며 1 이상·기본값 이하 최대값 제약을 유지한다. 예약 preview와 reservation/segment insert·update는 최신 최대 인원을 재검증한다. 현재 저장값은 보존하고 예시 숫자를 backfill하지 않는다.
+- 객실 카탈로그 제거는 `rooms.active=false` 전이만 허용하고 hard delete를 차단한다. developer의 5분 preview는 private FORCE RLS 원장에 actor·entity·CAS version·영향·opaque fingerprint를 고정한다. 현재 점유, 활성/미래 예약, 진행 중 청소, PIN 변경, 미해결 운영 업무가 있으면 비활성화할 수 없다.
 
 - #169 generated initial revision은 current pointer를 만들되 latest sync를 `mismatch`로 기록하고 Sheet outbox를 만들지 않는다. admin의 30초 reveal lease가 평문을 저장하지 않고 암호문을 전달하며, 현장 확인 RPC가 current version을 CAS 검증한 뒤에만 `verified` event와 `GENERATED_PIN_PHYSICALLY_CONFIRMED` outbox를 추가한다.
 

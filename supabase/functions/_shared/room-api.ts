@@ -587,6 +587,8 @@ export async function listRoomTypes(
       row.base_cleaning_fee,
       "baseCleaningFee",
     ),
+    baseOccupancy: positiveInteger(row.base_occupancy, "baseOccupancy"),
+    maxOccupancy: positiveInteger(row.max_occupancy, "maxOccupancy"),
     active: booleanValue(row.active, "active"),
     version: positiveInteger(row.version, "version"),
     roomCount: nonNegativeInteger(row.room_count, "roomCount"),

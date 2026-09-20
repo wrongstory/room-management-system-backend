@@ -146,6 +146,8 @@ Deno.test("room type catalog maps the app-owned admin projection", async () => {
             code: "standard",
             display_name: "스탠다드 더블 로프트",
             base_cleaning_fee: 16000,
+            base_occupancy: 2,
+            max_occupancy: 2,
             active: true,
             version: 2,
             room_count: 22,
