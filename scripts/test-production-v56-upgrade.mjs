@@ -8,7 +8,7 @@ const supabaseCli = fileURLToPath(
 );
 const container = "supabase_db_room-management-system-backend";
 const baselineVersion = "20260915000628";
-const finalVersion = "20260920094931";
+const finalVersion = "20260920144042";
 const migrationPattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
 const psqlArgs = [
   "exec",
@@ -139,7 +139,7 @@ function assertHistory(actual, expected, label) {
 let passed = false;
 try {
   const expectedMigrations = migrationFiles();
-  assert(expectedMigrations.length === 75, "release candidate must contain exactly 75 migrations");
+  assert(expectedMigrations.length === 76, "release candidate must contain exactly 76 migrations");
   assert(
     expectedMigrations[55]?.version === baselineVersion &&
       expectedMigrations[55]?.name === "cleaning_template_duration_optional",
@@ -147,8 +147,8 @@ try {
   );
   assert(
     expectedMigrations.at(-1)?.version === finalVersion &&
-      expectedMigrations.at(-1)?.name === "retire_assignment_duration_policy",
-    "migration 75 must be retire_assignment_duration_policy",
+      expectedMigrations.at(-1)?.name === "developer_room_catalog_capacity",
+    "migration 76 must be developer_room_catalog_capacity",
   );
 
   reset(baselineVersion);
@@ -185,12 +185,12 @@ try {
   )`);
   assert(
     finalState === "121|0|t|t|0",
-    "upgraded schema/cardinality/RLS state is not the approved v0.4.0 contract",
+    "upgraded schema/cardinality/RLS state is not the approved v0.5.0 candidate contract",
   );
 
   passed = true;
   process.stdout.write(
-    `production-baseline 56 -> 75 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
+    `production-baseline 56 -> 76 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
   );
 } finally {
   try {

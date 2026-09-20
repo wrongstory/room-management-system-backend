@@ -32,6 +32,8 @@ Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있�
 
 production Edge는 `main@80f935016d5581d500136fba29c206f6ee797bc0` 기준 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations를 사용한다. GitHub Pages도 workflow run `35481531782`에서 production Edge와 0.4.0 / 120 / 130 parity를 확인했으며 Pages manifest SHA-256은 공개 `openapi.json` artifact와 일치한다. 기존 checkout template 운영 데이터는 보존됐다. 안전한 fixture가 없어 이번 release의 예약·PIN success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, 이를 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
 
+Issue #236의 로컬 source candidate는 OpenAPI `0.5.0` 126 paths / 136 operations이며 아직 production URL이나 Pages 정본이 아니다. 아래 객실 카탈로그·인원 endpoint는 해당 candidate가 `dev`/release/main/production gate를 통과한 뒤에만 운영에서 활성화한다.
+
 ### #131/#140/#169 객실 PIN source 계약
 
 production OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. 미등록 객실의 admin 수정 요청이 `expectedPinVersion=0`, `reasonCode=ADMIN_PHYSICAL_CHANGE`를 보내도 서버가 최초 등록 사유로 정규화하므로 client가 PIN 존재 여부와 버튼 이름을 별도 command로 분기할 필요는 없다. 명시적 `ADMIN_INITIAL_PIN`도 계속 유효하다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
@@ -161,6 +163,9 @@ const idempotencyKey = crypto.randomUUID();
 | 처리 중 변경 요청 존재 | `PENDING_CHANGE_REQUEST_EXISTS` | 기존 pending 요청을 표시하고 중복 요청 금지 |
 | 예약·객실 동시 변경 | `STALE_VERSION`, `ROOM_STATE_CHANGED` | 예약·객실을 다시 조회하고 서버 version으로 사용자 재확인 |
 | 예약 일정 충돌 | `RESERVATION_OVERLAP` | 겹치는 예약을 표시하고 임의 자동 재시도 금지 |
+| 객실 최대 인원 초과 | `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY` | 최신 객실 유형 정보를 다시 읽고 인원 또는 객실 유형을 변경 |
+| 객실 유형 인원 변경 충돌 | `ROOM_TYPE_VERSION_CONFLICT`, `ROOM_TYPE_CAPACITY_PREVIEW_STALE`, `ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT` | 새 preview를 받고 영향 대상과 최신 version을 다시 확인; 기존 예약 자동 변경 금지 |
+| 객실 비활성화 충돌 | `ROOM_VERSION_CONFLICT`, `ROOM_DEACTIVATION_PREVIEW_STALE`, `ROOM_DEACTIVATION_BLOCKED` | 최신 카탈로그와 preview 재조회; 예약·청소·PIN·운영 업무를 먼저 해소 |
 | 퇴실 청소 템플릿 미게시 | `CLEANING_TEMPLATE_NOT_CONFIGURED` | 예상시간 누락으로 해석하지 않고 해당 객실 유형의 게시된 checkout template 설정 안내 |
 | 같은 객실의 이전 수행 진행 중 | `PREVIOUS_ROOM_WORKFLOW_ACTIVE` | 기존 수행 상태를 다시 조회하고 종료·중단 처리 전 새 시작 금지 |
 | 고객 미퇴실 사건 처리 중 | `CHECKOUT_INCIDENT_OPEN` | 자동 해제하지 않고 사건 상태와 관리자 결정 결과를 다시 조회 |
@@ -199,6 +204,12 @@ const idempotencyKey = crypto.randomUUID();
 | 업무 감사 | `GET /v1/developer/audit-events` | 성공한 domain mutation, 최대 31일·100건 cursor pagination, raw state 없음 |
 | 활동·보안 로그 | `GET /v1/developer/activity-events` | 로그인·민감접근 및 분 단위 권한거부 집계, 최대 31일·100건 cursor pagination |
 | 운영 진단 | `POST /v1/developer/diagnostics` | body 없음, 임의 URL/SQL/RPC 입력 없음, 10회/분 |
+| 개발자 객실 카탈로그 | `GET /v1/developer/room-catalog` | developer 전용 safe projection; 예약·고객·PIN·청소 raw 상태 없음 |
+| 객실 유형 인원 변경 미리보기 | `POST /v1/developer/room-types/{roomTypeId}/capacity/preview` | `baseOccupancy/maxOccupancy/expectedVersion`; read-only 5분 TTL |
+| 객실 유형 인원 변경 확정 | `PATCH /v1/developer/room-types/{roomTypeId}/capacity` | preview fingerprint·CAS·`CAPACITY_POLICY_CHANGE`·Idempotency-Key 필수 |
+| 객실 추가 | `POST /v1/developer/rooms` | 숫자 문자열 객실번호, 활성 유형과 최신 유형 version; `verification_required`로 생성 |
+| 객실 비활성화 미리보기 | `POST /v1/developer/rooms/{roomId}/deactivation/preview` | 최신 객실 version으로 점유·예약·청소·PIN·운영 영향 확인 |
+| 객실 비활성화 확정 | `POST /v1/developer/rooms/{roomId}/deactivate` | hard delete 없음; fingerprint·CAS·`ROOM_CATALOG_REMOVE`·Idempotency-Key 필수 |
 | 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 동일한 `evaluatedAt`/`serverTime` snapshot의 lifecycle·readiness 독립 축 사용 |
 | 객실 운영 상세 | `GET /v1/rooms/{roomId}` | 목록과 동일한 camelCase projection·next reservation 요약, PIN 원문 없음 |
 | 객실 기준정보 변경 | `PATCH /v1/rooms/{roomId}/master-data` | room state `expectedVersion` CAS와 Idempotency-Key |
@@ -219,7 +230,7 @@ const idempotencyKey = crypto.randomUUID();
 | 배정 가능 후보 | `GET /v1/availability/candidates?workDate=...` | active admin만, 현재 가능일의 active maid |
 | 예약 목록 | `GET /v1/reservations` | active admin만, 고객명과 암호문은 응답하지 않음. query 없음은 기존 `{reservations}` 호환 응답 |
 | 예약 calendar 범위 | `GET /v1/reservations?from=...&to=...&roomId=...&cursor=...` | from/to 필수 쌍, 최대 31일·50건, opaque cursor와 serverTime 사용 |
-| 예약 가능 객실 미리보기 | `POST /v1/reservations/bookability/preview` | 필수 `reservationType=standard|long_stay`; standard는 checkout 필수, long_stay는 nullable checkout, optional roomTypeIds/excludeReservationId, 예약 성공 보장 아님 |
+| 예약 가능 객실 미리보기 | `POST /v1/reservations/bookability/preview` | 필수 `reservationType=standard|long_stay`, `guestCount`; standard는 checkout 필수, long_stay는 nullable checkout, optional roomTypeIds/excludeReservationId, 예약 성공 보장 아님 |
 | 예약 상세 | `GET /v1/reservations/{reservationId}` | active admin만 고객명 복호화, 실제 민감조회 activity 기록 |
 | 예약 생성 | `POST /v1/reservations` | 객실 version CAS, Idempotency-Key, 고객명 서버 암호화 |
 | 예약 변경 | `PATCH /v1/reservations/{reservationId}` | 일정·고객정보만 변경. roomId는 현재 값과 같아야 하며 객실 변경 우회 금지 |
@@ -255,7 +266,7 @@ const idempotencyKey = crypto.randomUUID();
 
 calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내고 `[from,to)`가 31일을 넘지 않게 자른다. 다음 페이지는 응답의 opaque `nextCursor`를 수정하거나 해석하지 않고 같은 `from`/`to`/`roomId`에만 재사용한다. cursor는 actor와 filter에 묶이므로 날짜·객실을 바꾸면 버리고 첫 페이지부터 요청한다. 정렬은 `(checkInAt,id)`이며 각 page의 `serverTime`은 그 page projection의 DB snapshot이다. `roomId` filter는 이동·취소된 예약의 겹치는 객실 segment history도 포함하므로 프런트가 현재 객실만으로 다시 필터링해 과거 기록을 숨기지 않는다. query 없는 legacy 목록 소비자는 `nextCursor`나 `serverTime`을 기대하지 않는다.
 
-새 예약 또는 체크인 전 일정 변경 화면은 먼저 `POST /v1/reservations/bookability/preview`를 호출할 수 있다. 요청에는 `reservationType: "standard" | "long_stay"`를 반드시 보낸다. standard는 strict RFC 3339 `checkOutAt` 필수이고, long_stay는 고정 end 또는 명시적 `null`을 보낸다. 종료 미정 long-stay는 check-in 이후 객실을 무기한 점유하는 것으로 평가되므로 이후 예약 후보가 될 수 없다. `roomTypeIds` 생략과 `[]`는 모두 전체 유형이다. candidate의 `intervalBookable`만 요청 구간 예약 가능 축으로 사용하고, `checkInReady`는 현재 청소·PIN 준비 상태의 별도 안내로 표시한다. `PIN_UNCONFIGURED`/`PIN_MISMATCH`는 `evaluatedAt`에 실제 current check-in pending일 때만 이 안내에 나타나며 interval bookability를 바꾸지 않는다. `excludeReservationId`는 신규 예약에서 생략 또는 `null`, 편집에서는 exact active·체크인 전 예약 ID만 보낸다. preview와 commit 사이에는 다른 예약이 생길 수 있으므로 성공 문구는 “현재 조회 기준 가능”으로 제한하고, 실제 create/change의 overlap 409를 최종 판정으로 다시 표시한다.
+새 예약 또는 체크인 전 일정 변경 화면은 먼저 `POST /v1/reservations/bookability/preview`를 호출할 수 있다. 요청에는 `reservationType: "standard" | "long_stay"`와 1 이상의 정수 `guestCount`를 반드시 보낸다. standard는 strict RFC 3339 `checkOutAt` 필수이고, long_stay는 고정 end 또는 명시적 `null`을 보낸다. 종료 미정 long-stay는 check-in 이후 객실을 무기한 점유하는 것으로 평가되므로 이후 예약 후보가 될 수 없다. `roomTypeIds` 생략과 `[]`는 모두 전체 유형이다. candidate의 `intervalBookable`만 요청 구간 예약 가능 축으로 사용하고, `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`가 있으면 해당 유형의 최신 `maxOccupancy`를 초과한 것이다. `checkInReady`는 현재 청소·PIN 준비 상태의 별도 안내로 표시한다. `PIN_UNCONFIGURED`/`PIN_MISMATCH`는 `evaluatedAt`에 실제 current check-in pending일 때만 이 안내에 나타나며 interval bookability를 바꾸지 않는다. `excludeReservationId`는 신규 예약에서 생략 또는 `null`, 편집에서는 exact active·체크인 전 예약 ID만 보낸다. preview와 commit 사이에는 최대 인원이나 다른 예약이 바뀔 수 있으므로 성공 문구는 “현재 조회 기준 가능”으로 제한하고, 실제 create/change의 capacity/overlap 오류를 최종 판정으로 다시 표시한다.
 
 예약 응답의 `reservationType`과 nullable `checkOutAt`은 함께 해석한다. 종료 미정 long-stay에는 checkout obligation/청소 target이 아직 없으므로 클라이언트가 가짜 checkout·청소 계획을 만들지 않는다. type은 생성 후 바꿀 수 없고, 고정 checkout을 다시 null로 되돌릴 수 없다. open-ended 예약에 end를 확정하는 change는 최신 `version`과 같은 Idempotency-Key replay 규칙을 사용한다. 체크인 전 객실 변경은 open-ended 상태를 보존하지만, 투숙 중 객실 변경은 먼저 end를 확정해야 하며 `OPEN_ENDED_STAY_REQUIRES_END`를 다른 key로 자동 우회하지 않는다. scheduler가 open-ended 예약을 자동 checkout한다고 가정하지 말고 실제 종료는 관리자 수동 checkout 결과를 정본으로 사용한다.
 

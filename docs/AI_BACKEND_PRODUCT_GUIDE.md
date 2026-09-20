@@ -7,10 +7,11 @@
 - 이 문서 갱신의 release source 기준: `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7` — 73 migrations / OpenAPI 120 paths / 130 operations.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
 - 백엔드 저장소와 직접 검증한 production 배포 source는 `main@80f935016d5581d500136fba29c206f6ee797bc0`이다. production은 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations이며 공개 Health/OpenAPI smoke를 통과했다.
+- Issue #236 작업 브랜치의 source candidate는 최신 `dev`의 74개 migration을 보존한 75번째 append-only migration과 OpenAPI `0.5.0` 126 paths / 136 operations다. 이는 아직 `dev` 병합·production 배포·운영 데이터 변경을 뜻하지 않는다.
 - 프런트엔드 정본 저장소: `wrongstory/room-management-system`
 - 프런트엔드 제품·운영 연결 snapshot: `dev@165fed2d62a763d64ac62539e1475c1b3e42868f` (`기능: 운영 API 연결을 완성하라`).
 - 프런트엔드 현재 원격 `main`: `afeb0898879bf8d381ee2e218938dc3160fd6ac0`. 별도 영향 대조 전에는 위 snapshot의 후속 정본으로 자동 승격하지 않는다.
-- 기준일: 2026-09-20 KST
+- 기준일: 2026-09-21 KST
 
 프런트엔드는 단일 HTML 중심의 고충실도 업무 시뮬레이터이며 기준 snapshot은 운영 API를 실제 소비한다. 화면 객체, fixture, dead code를 그대로 실제 API나 테이블로 옮기지 않는다.
 
@@ -128,6 +129,15 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 객실별 타입·구역의 전체 매핑은 migration seed가 현재 정본과 일치한다. 사람이 읽는 표시명은 바뀔 수 있으므로 code와 이력을 기준으로 연결한다.
 사진 슬롯 표는 2026-09-16 Decision #179의 A안을 반영한다. 기존 publisher가 만든 `maxPhotos` 없는 pre-A template/snapshot은 version이 v7보다 높아도 10/11/13/15개 계약으로 계속 유효하며 backfill하지 않는다.
 
+### `[확정 — 2026-09-21 #236]` 객실 인원 기준과 개발자 카탈로그
+
+- `room_types.default_guest_count`와 `max_guest_count`를 API의 `baseOccupancy`와 `maxOccupancy`로 공개한다. 두 값은 1 이상의 정수이며 `baseOccupancy <= maxOccupancy`다.
+- 예약 가능 미리보기와 예약 생성·일정 변경은 최신 `maxOccupancy`를 DB에서 다시 확인한다. 초과 요청은 `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`로 거부하고 기존 예약을 자동 변경하지 않는다.
+- 현재 DB에 저장된 인원 값은 그대로 보존한다. 화면 예시 숫자를 새 production 기준값이나 backfill 값으로 승격하지 않는다.
+- 객실 유형 인원 변경은 singleton developer만 수행한다. 먼저 5분 유효 impact preview를 받고, 동일 fingerprint와 room-type CAS version, source-controlled reason code, Idempotency-Key로 확정한다. 새 최대 인원을 초과하는 활성 예약이 있으면 확정하지 않는다.
+- 객실 추가는 숫자 문자열 room number, 활성 객실 유형, 최신 객실 유형 version을 요구한다. 새 객실은 `verification_required`로 시작한다.
+- 객실 제거는 hard delete가 아니라 versioned inactive 전이다. 현재 점유, 활성·미래 예약, 진행 중 청소, PIN 변경, 미해결 운영 업무가 있으면 preview/commit이 막히며 과거 예약·청소·감사 이력은 유지한다.
+
 ### `[확정]` 기본 운영 시각
 
 - 기본 체크인: 16:00 KST
@@ -156,9 +166,9 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 - 메이드 9명과 이름
 - 샘플 예약, 점유, 청소 단계, PIN, 사진, 폭탄방 판정, 수익, 지급 이력
 - 폐기 전 화면에 있던 타입별 예상 청소시간 55 / 65 / 70 / 80분
-- 기본/최대 숙박 인원 2/2, 2/3, 2/4, 4/6
+- 화면 예시의 기본/최대 숙박 인원 2/2, 2/3, 2/4, 4/6
 
-121실 마스터와 확정된 타입·구역·단가는 검증된 초기 기준정보로 반입할 수 있다. 반면 인명·PIN·사진·예약·청소·폭탄방·수익·지급 fixture는 production 반입을 금지한다. 최초 투숙 11실과 762호 상태도 배포 시점의 운영자 확인 없이 production seed로 넣지 않는다. 인원 상한은 확정 전 예약 거부 조건으로 사용하지 않으며 예상시간 정책은 폐기됐다.
+121실 마스터와 확정된 타입·구역·단가는 검증된 초기 기준정보로 반입할 수 있다. 반면 인명·PIN·사진·예약·청소·폭탄방·수익·지급 fixture는 production 반입을 금지한다. 최초 투숙 11실과 762호 상태도 배포 시점의 운영자 확인 없이 production seed로 넣지 않는다. #236 이후 예약은 DB에 이미 저장된 최신 최대 인원을 집행하지만 위 예시 숫자를 새 기준값으로 backfill하지 않는다. 예상시간 정책은 폐기됐으며 확정 전 배정 용량 계산의 입력으로 사용하지 않는다.
 
 ---
 
@@ -705,6 +715,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
 - #46은 기존 46 migrations를 수정하지 않은 47번째 append-only private password-change receipt와 password-specific shadow version으로 source/dev에 통합됐다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. release/main·production 승격은 별도 gate다.
 - Issue #220/PR #221 후속으로 `main@80f935016d5581d500136fba29c206f6ee797bc0`, production 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations와 기존 5개 Edge bundle 구성이 반영됐다. 이번 release에서는 `api`만 재배포했고 다른 네 Worker 버전은 유지했다. GitHub Pages도 workflow run `35481531782`에서 같은 production OpenAPI를 다시 고정해 120/130 parity와 artifact hash 일치를 확인했다. 다만 tag/GitHub Release, 예약·PIN success mutation, Issue #112의 provider invoke secret·positive Web Push/heartbeat, Issue #137의 hosted Google target·서비스 계정·ACL·full resync/Cron smoke는 아직 완료 증거가 없다. source·bundle 배포와 운영 데이터/provider 활성화를 같은 완료 상태로 표시하지 않는다.
+- Issue #236 source candidate는 75번째 `developer_room_catalog_capacity` migration으로 developer 전용 안전 카탈로그, 객실 유형 인원 preview/commit, 객실 추가, 객실 비활성화 preview/commit과 예약 인원 상한 재검증을 추가한다. 기존 인원 값과 기존 이력은 보존하며 OpenAPI 후보는 `0.5.0` 126 paths / 136 operations다. 아직 `dev`/`main` 병합, production migration/API 배포, hosted 역할 smoke는 완료되지 않았다.
 - #46, #128, #131, #136, #137, #140, #133의 source는 `dev`와 v0.3.0 production source에 반영됐다. #137의 API와 `room-pin-sheet-sync` bundle도 배포됐지만 hosted target/서비스 계정/ACL/Secrets/Cron/positive smoke는 미완료다. #156/#165 checkout template API와 선택형 duration 계약은 56번째 migration 및 `api` v16으로 production에 반영됐다. `standard`, `premium`, `oceanPremium`, `oceanFamily`의 checkout template은 각각 v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes`는 모두 `null`이다. 이 게시 완료는 예약 success smoke의 대체가 아니며 안전한 fixture 부재로 해당 mutation은 명시적으로 SKIPPED 상태다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.

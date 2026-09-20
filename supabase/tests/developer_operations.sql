@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'retire_assignment_duration_policy'
+    'developer_room_catalog_capacity'
   ) ->> 'currentMigration',
-  'retire_assignment_duration_policy',
+  'developer_room_catalog_capacity',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'retire_assignment_duration_policy'
+    'developer_room_catalog_capacity'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'retire_assignment_duration_policy';
+where name = 'developer_room_catalog_capacity';
 
 delete from supabase_migrations.schema_migrations
-where name = 'retire_assignment_duration_policy';
+where name = 'developer_room_catalog_capacity';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'retire_assignment_duration_policy'
+    'developer_room_catalog_capacity'
   ) ->> 'currentMigration',
-  'availability_any_day_submission',
-  'database status exposes migration 74 when migration 75 is absent'
+  'retire_assignment_duration_policy',
+  'database status exposes migration 75 when migration 76 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'retire_assignment_duration_policy'
+    'developer_room_catalog_capacity'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 74 behind source migration 75'
+  'database status reports migration 75 behind source migration 76'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

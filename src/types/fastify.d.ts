@@ -10,5 +10,6 @@ declare module 'fastify' {
     requirePasswordChanged: (request: FastifyRequest) => Promise<void>;
     requireAccountManager: (request: FastifyRequest) => Promise<void>;
     requireAdmin: (request: FastifyRequest) => Promise<void>;
+    requireDeveloper: (request: FastifyRequest) => Promise<void>;
   }
 }
