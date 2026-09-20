@@ -13,11 +13,12 @@ HTTP 기계 판독 정본은 source OpenAPI, 운영 상태 정본은 [API 상태
 | `POST /v1/assignment-preview/duration-policy` | 폐기된 호환 경로, 항상 410 | 없음 |
 
 세 operation 모두 최신 active business admin, 비밀번호 변경 완료, 유효 Auth/session을 요구한다.
-developer/maid는 업무 권한을 상속하지 않는다. DB에서도 exact admin을 다시 검증한다. Fastify
-동일 route와 Python 관리자 업무 UI는 이번 범위 밖이다.
+developer/maid는 업무 권한을 상속하지 않는다. DB에서도 exact admin을 다시 검증한다. Edge와
+Fastify rollback adapter는 같은 세 경로, RPC, 순수 optimizer, camelCase 응답과 오류 code를 사용한다.
+Python 관리자 업무 UI는 이번 범위 밖이다.
 
 Preview body는 `serviceDate`(KST 오늘/내일)와 선택 `previewSeed`만 허용한다. Seed는
-1~128자의 영문·숫자·`_`·`-`이며 생략하면 Edge가 UUID를 생성해 반환한다. Preview에 멱등성
+1~128자의 영문·숫자·`_`·`-`이며 생략하면 HTTP adapter가 UUID를 생성해 반환한다. Preview에 멱등성
 receipt를 만들지 않으며 저장을 자동 수행하지 않는다.
 
 ## 예상시간 정책 폐기

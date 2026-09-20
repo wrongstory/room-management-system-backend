@@ -4,7 +4,7 @@ import {
   PREVIEW_LIMITS,
   type PreviewSnapshot,
   type PreviewTarget,
-} from "../supabase/functions/_shared/assignment-preview-core.js";
+} from "../src/modules/assignments/assignment-preview-core.js";
 
 const time = (h: string) => `2037-01-05T${h}:00+09:00`;
 function required<T>(value: T | undefined): T {

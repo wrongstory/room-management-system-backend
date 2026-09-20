@@ -625,11 +625,11 @@ admin을 DB에서 재검증하고 고정 search_path/EXECUTE 최소 권한 아�
 정책·가능일·target·기존 배정·attempt·원 domain schedule을 반환한다. 이 RPC는 업무 DML,
 advisory write lock, audit, command receipt, outbox를 만들지 않는다.
 
-Edge의 platform-neutral `assignment-preview-core`는 snapshot만 입력으로 받는 bounded 순수
+Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 snapshot만 입력으로 받는 bounded 순수
 계산 모듈이다. DB가 source lifecycle 유효성을 판정하고 optimizer가 고정 부하·capacity·fee·route를
 계산한다. #231 이후 capacity는 예상시간 구간이 아니라 명시된 target/source 사실만 뜻하며 가상 종료시각을
-만들지 않는다. 계획만 반환하며 저장은 기존 #25/#26 CAS 명령으로 분리한다. Fastify preview route는
-이번 범위가 아니므로 Edge source와 Fastify rollback parity를 같다고 표시하지 않는다.
+만들지 않는다. 계획만 반환하며 저장은 기존 #25/#26 CAS 명령으로 분리한다. 두 HTTP adapter는
+동일한 세 preview 경로, active admin/session/password gate, camelCase 계약과 error redaction을 유지한다.
 
 `assignment_duration_policy_versions`는 폐기 전 네 타입 minute/version/확정자 이력과 관련 감사·receipt를
 그대로 보존한다. 직접 Data API DML과 기존 값 변경·삭제는 계속 금지된다. 과거 GET은 deprecated read-only로
