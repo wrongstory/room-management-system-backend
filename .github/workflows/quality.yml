@@ -60,6 +60,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - run: npm run db:manifest:verify
       - run: npm run db:start:ci
       - run: npm run db:verify
       - run: npm run db:test

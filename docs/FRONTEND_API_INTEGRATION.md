@@ -2,7 +2,7 @@
 
 이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다.
 
-2026-09-17 대조 기준은 프런트 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`, 백엔드 `dev@70154e90eaa633dedbd872b394e4ca51ee25bdf6`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. 프런트 source와 백엔드 source 제공을 production 활성화로 표현하지 않는다.
+2026-09-20 대조 기준은 프런트 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`, 백엔드 production source `main@80f935016d5581d500136fba29c206f6ee797bc0`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. production source 제공과 hosted provider·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
 
 ## 1. 계약을 받는 위치
 
@@ -30,19 +30,19 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` 기준 56 migrations, `api` ACTIVE v16, OpenAPI `0.3.0` 109 paths / 117 operations를 사용한다. `standard`, `premium`, `oceanPremium`, `oceanFamily` checkout template은 각각 v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes=null`이다. GitHub Pages도 workflow run `35051144073`에서 production Edge와 path·operationId parity를 확인했으며 Pages manifest SHA-256은 공개 `openapi.json` artifact와 일치한다. 다만 안전한 fixture가 없어 예약 success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, 이를 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
+production Edge는 `main@80f935016d5581d500136fba29c206f6ee797bc0` 기준 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations를 사용한다. GitHub Pages도 workflow run `35481531782`에서 production Edge와 0.4.0 / 120 / 130 parity를 확인했으며 Pages manifest SHA-256은 공개 `openapi.json` artifact와 일치한다. 기존 checkout template 운영 데이터는 보존됐다. 안전한 fixture가 없어 이번 release의 예약·PIN success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, 이를 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
 
 ### #131/#140/#169 객실 PIN source 계약
 
-source OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+production OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
 
-Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 서버가 batch-unique 4자리 값을 생성한다. 응답의 `generatedPins`를 객실별로 표시하고 현장 도어락 적용 후 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 해당 `pinVersion`을 보낸다. 확인 성공 전에는 mismatch 경고와 체크인 차단을 유지하고 메이드에게 표시하지 않는다. 이 기능들은 production OpenAPI에 각 path가 나타날 때까지 켜지 않는다.
+Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 서버가 batch-unique 4자리 값을 생성한다. 응답의 `generatedPins`를 객실별로 표시하고 현장 도어락 적용 후 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 해당 `pinVersion`을 보낸다. 확인 성공 전에는 mismatch 경고와 체크인 차단을 유지하고 메이드에게 표시하지 않는다. 두 path는 production OpenAPI에 반영됐지만 실제 운영 bootstrap·물리 확인 실행은 별도 승인 전까지 시작하지 않는다.
 
 ## 2. 로컬 백엔드 준비
 
 ### #84 사진 연동 — API source/bundle 배포, 실제 Google provider 활성화 대기
 
-사진 operation은 운영 OpenAPI와 `api` bundle에 반영됐다. 다만 현재 배포 계약은 업로드 후 7일 고정이며, 최신 확정 계약인 검수 결정+168시간·해결+180일·orphan+30일을 아직 구현하지 않았다. 이 후속 migration/API와 Google Drive 운영 계정·OAuth·대상 폴더·역할별 hosted smoke가 끝나기 전에는 실제 업로드/삭제 기능을 production-ready로 표시하지 않는다.
+사진 operation과 retention v2 schema/API는 운영 OpenAPI와 production DB/API에 반영됐다. 검수 결정+168시간·해결+180일·orphan+30일 계약이 정본이며, 업로드 후 7일 고정 정책을 사용하지 않는다. 다만 Google Drive 운영 계정·OAuth·대상 폴더·purge Cron과 역할별 hosted smoke가 끝나기 전에는 실제 업로드/삭제 기능을 production-ready로 표시하지 않는다.
 
 1. `GET /v1/attempts/{attemptId}/photo-slots`로 immutable slotId와 currentRevision을 받는다. 슬롯 key만으로 UUID를 추측하지 않는다.
 2. `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload?assignmentId=...&assignmentRevision=...&expectedPhotoRevision=...`에 JPEG/WebP **raw bytes**를 전송한다. `Content-Type`은 정확히 image/jpeg 또는 image/webp, 원문307200 bytes 이하이며 multipart/base64는 지원하지 않는다.
@@ -272,13 +272,13 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 
 아래는 `wrongstory/room-management-system`에서 구현할 source 체크리스트다. 백엔드 배포 gate는 완료됐지만 프런트 연결과 안전한 예약 E2E는 별도다.
 
-#### 객실 타입 카탈로그 (#202 source 후보)
+#### 객실 타입 카탈로그 (#202 production source)
 
 - [ ] active/password-complete business admin 세션에서 `GET /v1/room-types`를 호출하고 `{ items }`를 사용한다.
 - [ ] 각 항목의 `id`, 안정적인 `code`, `displayName`, 원 단위 정수 `baseCleaningFee`, `active`, `version`, `roomCount`를 수기 fixture 대신 표시한다.
 - [ ] `active=false`도 기존 객실 참조 현황을 위해 목록에는 표시하되 신규 객실 기준정보 선택지에서는 비활성화한다.
 - [ ] 수정 화면의 이후 CAS 연결은 서버가 반환한 실제 `version`을 사용한다. `updatedAt`이나 목록 index에서 임의 버전을 만들지 않는다.
-- [ ] 이 endpoint는 source/dev 후보이며 운영 Edge 배포 전에는 production에서 사용 가능하다고 표시하지 않는다.
+- [ ] 이 endpoint는 production OpenAPI에 포함됐다. 401/403/5xx 또는 계약 불일치는 fixture fallback으로 숨기지 않고 표시한다.
 
 #### 타입·템플릿 관리자 화면
 
