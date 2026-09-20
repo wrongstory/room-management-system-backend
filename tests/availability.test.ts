@@ -42,6 +42,20 @@ describe('availability service authorization and errors', () => {
       statusCode: 409,
       code: 'IDEMPOTENCY_KEY_REUSED'
     });
+    expect(availabilityDatabaseError({ message: 'AVAILABILITY_WEEK_OUT_OF_RANGE' })).toMatchObject({
+      statusCode: 409,
+      code: 'AVAILABILITY_WEEK_OUT_OF_RANGE'
+    });
+    expect(
+      availabilityDatabaseError({ message: 'PAST_AVAILABILITY_DATE_NOT_ALLOWED' })
+    ).toMatchObject({
+      statusCode: 409,
+      code: 'PAST_AVAILABILITY_DATE_NOT_ALLOWED'
+    });
+    expect(availabilityDatabaseError({ message: 'ASSIGNMENT_AVAILABILITY_STALE' })).toMatchObject({
+      statusCode: 409,
+      code: 'ASSIGNMENT_AVAILABILITY_STALE'
+    });
   });
 
   it('rejects administrator submission before using the service-role client', async () => {

@@ -53,14 +53,14 @@ declare
 begin
   begin
     perform private.submit_weekly_availability_at(
-      '22000000-0000-4000-8000-000000000002', '2026-08-31',
-      array['2026-08-31'::date], 0, 'availability-boundary-1159',
+      '22000000-0000-4000-8000-000000000002', '2026-09-07',
+      array['2026-09-07'::date], 0, 'availability-week-too-far',
       '2026-08-30 11:59:59+09'
     );
-    insert into availability_test_results values (1, 'Sunday 11:59 is outside the submission window', false);
+    insert into availability_test_results values (1, 'availability outside the current or next KST week is rejected', false);
   exception when others then
     insert into availability_test_results values (
-      1, 'Sunday 11:59 is outside the submission window', sqlerrm like '%OUTSIDE_AVAILABILITY_WINDOW%'
+      1, 'availability outside the current or next KST week is rejected', sqlerrm like '%AVAILABILITY_WEEK_OUT_OF_RANGE%'
     );
   end;
 
@@ -70,7 +70,7 @@ begin
     'availability-submit-maid1-v1', '2026-08-30 12:00:00+09'
   )).id into v_first_id;
   insert into availability_test_results values (
-    2, 'Sunday 12:00 creates version one',
+    2, 'the primary Sunday submission creates version one',
     (select version = 1 and is_current from public.availability_versions where id = v_first_id)
   );
   insert into availability_test_results values (
@@ -133,16 +133,30 @@ begin
         and week_start = '2026-08-31')
   );
 
+  perform private.submit_weekly_availability_at(
+    '22000000-0000-4000-8000-000000000002', '2026-08-31',
+    array['2026-08-31'::date, '2026-09-03'::date], 2,
+    'availability-boundary-monday', '2026-08-31 00:00:00+09'
+  );
+  insert into availability_test_results values (
+    8, 'Monday direct resubmission creates a new current version',
+    (select count(*) = 3 and count(*) filter (where is_current and version = 3) = 1
+      from public.availability_versions
+      where maid_profile_id = '22000000-0000-4000-8000-000000000002'
+        and week_start = '2026-08-31')
+  );
+
   begin
     perform private.submit_weekly_availability_at(
       '22000000-0000-4000-8000-000000000002', '2026-08-31',
-      array['2026-08-31'::date], 2,
-      'availability-boundary-monday', '2026-08-31 00:00:00+09'
+      array['2026-08-31'::date, '2026-09-01'::date], 3,
+      'availability-retroactive-past', '2026-09-02 09:00:00+09'
     );
-    insert into availability_test_results values (8, 'Monday 00:00 rejects normal submission', false);
+    insert into availability_test_results values (9, 'a past unavailable date cannot be made available retroactively', false);
   exception when others then
     insert into availability_test_results values (
-      8, 'Monday 00:00 rejects normal submission', sqlerrm like '%OUTSIDE_AVAILABILITY_WINDOW%'
+      9, 'a past unavailable date cannot be made available retroactively',
+      sqlerrm like '%PAST_AVAILABILITY_DATE_NOT_ALLOWED%'
     );
   end;
 
@@ -152,10 +166,10 @@ begin
       array['2026-08-31'::date], 0,
       'availability-inactive-maid', '2026-08-30 12:00:00+09'
     );
-    insert into availability_test_results values (9, 'inactive maid submission is rejected', false);
+    insert into availability_test_results values (10, 'inactive maid submission is rejected', false);
   exception when insufficient_privilege then
     insert into availability_test_results values (
-      9, 'inactive maid submission is rejected', sqlerrm like '%ACTIVE_MAID_REQUIRED%'
+      10, 'inactive maid submission is rejected', sqlerrm like '%ACTIVE_MAID_REQUIRED%'
     );
   end;
 
@@ -165,64 +179,163 @@ begin
       array['2026-08-31'::date], 0,
       'availability-upload-only', '2026-08-30 12:00:00+09'
     );
-    insert into availability_test_results values (10, 'upload-only capability cannot submit availability', false);
+    insert into availability_test_results values (11, 'upload-only capability cannot submit availability', false);
   exception when insufficient_privilege then
     insert into availability_test_results values (
-      10, 'upload-only capability cannot submit availability', sqlerrm like '%ACTIVE_MAID_REQUIRED%'
+      11, 'upload-only capability cannot submit availability', sqlerrm like '%ACTIVE_MAID_REQUIRED%'
+    );
+  end;
+
+  perform private.submit_weekly_availability_at(
+    '22000000-0000-4000-8000-000000000003', '2026-08-24',
+    array['2026-08-26'::date, '2026-08-28'::date], 0,
+    'availability-weekday-new-hire', '2026-08-26 09:00:00+09'
+  );
+  insert into availability_test_results values (
+    12, 'a weekday new hire can submit the current KST week',
+    (select version = 1 and is_current
+      from public.availability_versions
+      where maid_profile_id = '22000000-0000-4000-8000-000000000003'
+        and week_start = '2026-08-24')
+  );
+
+  perform private.submit_weekly_availability_at(
+    '22000000-0000-4000-8000-000000000003', '2026-08-24',
+    array['2026-08-26'::date, '2026-08-28'::date, '2026-08-29'::date], 1,
+    'availability-current-past-true', '2026-08-27 09:00:00+09'
+  );
+  insert into availability_test_results values (
+    13, 'a current-week resubmission preserves an already-available past date',
+    (select version = 2 and is_current
+      from public.availability_versions
+      where maid_profile_id = '22000000-0000-4000-8000-000000000003'
+        and week_start = '2026-08-24'
+        and is_current)
+      and (select available
+        from public.availability_days day
+        join public.availability_versions version
+          on version.id = day.availability_version_id
+        where version.maid_profile_id = '22000000-0000-4000-8000-000000000003'
+          and version.week_start = '2026-08-24'
+          and version.is_current
+          and day.work_date = '2026-08-26')
+  );
+
+  insert into public.cleaning_targets (
+    id, room_id, cleaning_kind, source, source_key,
+    original_service_date, effective_service_date, available_from, due_at,
+    status, assignment_version, room_type_snapshot, fee_snapshot,
+    template_snapshot, created_by
+  ) values (
+    '32000000-0000-4000-8000-000000000001',
+    (select id from public.rooms order by room_number limit 1),
+    'additional', 'manual_room_request', 'availability-notified-conflict',
+    '2026-08-28', '2026-08-28',
+    '2026-08-28 09:00:00+09', '2026-08-28 15:00:00+09',
+    'notified', 2, '{}'::jsonb, 10000, '{"durationMinutes":60}'::jsonb,
+    '22000000-0000-4000-8000-000000000001'
+  );
+  insert into public.cleaning_assignments (
+    id, cleaning_target_id, maid_profile_id, sequence_number, revision,
+    changed_by, notified_at
+  ) values (
+    '42000000-0000-4000-8000-000000000001',
+    '32000000-0000-4000-8000-000000000001',
+    '22000000-0000-4000-8000-000000000003', 1, 2,
+    '22000000-0000-4000-8000-000000000001', '2026-08-27 10:00:00+09'
+  );
+
+  begin
+    perform private.submit_weekly_availability_at(
+      '22000000-0000-4000-8000-000000000003', '2026-08-24',
+      array['2026-08-26'::date, '2026-08-29'::date], 2,
+      'availability-notified-conflict', '2026-08-27 11:00:00+09'
+    );
+    insert into availability_test_results values (14, 'a direct resubmission cannot invalidate a notified assignment', false);
+  exception when serialization_failure then
+    insert into availability_test_results values (
+      14, 'a direct resubmission cannot invalidate a notified assignment',
+      sqlerrm like '%ASSIGNMENT_AVAILABILITY_STALE%'
+        and (select version = 2 and is_current
+          from public.availability_versions
+          where maid_profile_id = '22000000-0000-4000-8000-000000000003'
+            and week_start = '2026-08-24'
+            and is_current)
+        and not exists (
+          select 1
+          from private.command_executions
+          where actor_profile_id = '22000000-0000-4000-8000-000000000003'
+            and command_type = 'availability.submit'
+            and idempotency_key = 'availability-notified-conflict'
+        )
     );
   end;
 
   perform private.submit_weekly_availability_at(
     '22000000-0000-4000-8000-000000000003', '2026-08-31',
     array['2026-08-31'::date, '2026-09-04'::date], 0,
-    'availability-submit-maid1-v1', '2026-08-30 12:05:00+09'
+    'availability-submit-maid1-v1', '2026-08-29 08:00:00+09'
+  );
+  perform private.submit_weekly_availability_at(
+    '22000000-0000-4000-8000-000000000003', '2026-08-31',
+    array['2026-08-31'::date, '2026-09-01'::date, '2026-09-04'::date], 1,
+    'availability-weekday-next-resubmit', '2026-08-29 08:05:00+09'
+  );
+  insert into availability_test_results values (
+    15, 'a weekday next-week resubmission creates a new current version',
+    (select count(*) = 2
+      and count(*) filter (where is_current and version = 2) = 1
+      and count(*) filter (where status = 'superseded' and version = 1) = 1
+      from public.availability_versions
+      where maid_profile_id = '22000000-0000-4000-8000-000000000003'
+        and week_start = '2026-08-31')
   );
 
   select (private.request_availability_change_at(
     '22000000-0000-4000-8000-000000000002', '2026-08-31',
-    array['2026-08-31'::date, '2026-09-04'::date], 'SCHEDULE_CHANGED', 2,
+    array['2026-08-31'::date, '2026-09-04'::date], 'SCHEDULE_CHANGED', 3,
     'availability-submit-maid1-v1', '2026-08-31 00:00:00+09'
   )).id into v_change_id;
   insert into availability_test_results values (
-    11, 'post-deadline change creates a pending immutable request',
-    (select status = 'pending' and source_version = 2
+    16, 'post-start change creates a pending immutable request',
+    (select status = 'pending' and source_version = 3
       from public.availability_change_requests where id = v_change_id)
   );
 
   begin
     perform private.request_availability_change_at(
       '22000000-0000-4000-8000-000000000002', '2026-08-31',
-      array['2026-09-02'::date], 'ANOTHER_CHANGE', 2,
+      array['2026-09-02'::date], 'ANOTHER_CHANGE', 3,
       'availability-change-maid1-second', '2026-08-31 00:01:00+09'
     );
-    insert into availability_test_results values (12, 'a second pending request for the week is rejected', false);
+    insert into availability_test_results values (17, 'a second pending request for the week is rejected', false);
   exception when unique_violation then
     insert into availability_test_results values (
-      12, 'a second pending request for the week is rejected', sqlerrm like '%PENDING_CHANGE_REQUEST_EXISTS%'
+      17, 'a second pending request for the week is rejected', sqlerrm like '%PENDING_CHANGE_REQUEST_EXISTS%'
     );
   end;
 
   select (private.decide_availability_change_at(
     '22000000-0000-4000-8000-000000000001', v_change_id, 'approved',
-    'STAFFING_CONFIRMED', 2, 'availability-decision-maid1', '2026-08-31 08:00:00+09'
+    'STAFFING_CONFIRMED', 3, 'availability-decision-maid1', '2026-08-31 08:00:00+09'
   )).id into v_decision_id;
   insert into availability_test_results values (
-    13, 'administrator approval creates version three and records the decision',
+    18, 'administrator approval creates version four and records the decision',
     v_decision_id = v_change_id
       and (select status = 'approved' and approved_version_id is not null
         from public.availability_change_requests where id = v_change_id)
       and (select count(*) = 1 from public.availability_versions
         where maid_profile_id = '22000000-0000-4000-8000-000000000002'
-          and week_start = '2026-08-31' and is_current and version = 3)
+          and week_start = '2026-08-31' and is_current and version = 4)
   );
 
   perform private.decide_availability_change_at(
     '22000000-0000-4000-8000-000000000001', v_change_id, 'approved',
-    'STAFFING_CONFIRMED', 2, 'availability-decision-maid1', '2026-08-31 08:00:00+09'
+    'STAFFING_CONFIRMED', 3, 'availability-decision-maid1', '2026-08-31 08:00:00+09'
   );
   insert into availability_test_results values (
-    14, 'an exact decision retry does not create another version',
-    (select count(*) = 3 from public.availability_versions
+    19, 'an exact decision retry does not create another version',
+    (select count(*) = 4 from public.availability_versions
       where maid_profile_id = '22000000-0000-4000-8000-000000000002'
         and week_start = '2026-08-31')
   );
@@ -230,22 +343,22 @@ begin
   begin
     perform private.decide_availability_change_at(
       '22000000-0000-4000-8000-000000000001', v_change_id, 'rejected',
-      'STAFFING_REJECTED', 2, 'availability-decision-maid1', '2026-08-31 08:01:00+09'
+      'STAFFING_REJECTED', 3, 'availability-decision-maid1', '2026-08-31 08:01:00+09'
     );
-    insert into availability_test_results values (15, 'decision key reuse with another payload is rejected', false);
+    insert into availability_test_results values (20, 'decision key reuse with another payload is rejected', false);
   exception when unique_violation then
     insert into availability_test_results values (
-      15, 'decision key reuse with another payload is rejected', sqlerrm like '%IDEMPOTENCY_KEY_REUSED%'
+      20, 'decision key reuse with another payload is rejected', sqlerrm like '%IDEMPOTENCY_KEY_REUSED%'
     );
   end;
 end;
 $$;
 
 insert into availability_test_results values (
-  16,
+  21,
   'availability commands persist canonical request hashes in the audit ledger',
   (
-    select count(*) = 5
+    select count(*) = 9
       and bool_and(length(after_state ->> 'requestHash') = 64)
     from public.audit_events
     where event_type like 'availability.%'
@@ -253,7 +366,7 @@ insert into availability_test_results values (
 );
 
 insert into availability_test_results values (
-  17,
+  22,
   'authenticated and anon roles cannot mutate availability tables directly',
   not has_table_privilege('authenticated', 'public.availability_versions', 'INSERT')
     and not has_table_privilege('authenticated', 'public.availability_days', 'UPDATE')
@@ -261,7 +374,7 @@ insert into availability_test_results values (
     and not has_table_privilege('anon', 'public.availability_versions', 'SELECT')
 );
 
-select '1..22';
+select '1..27';
 select case when passed then 'ok ' else 'not ok ' end
   || test_number || ' - ' || description
 from availability_test_results
@@ -272,16 +385,16 @@ select set_config('request.jwt.claim.sub', '12000000-0000-4000-8000-000000000001
 
 select case
   when (select count(*) from public.availability_candidates where work_date = '2026-08-31') = 2
-    then 'ok 18 - active administrator sees only active available maid candidates'
-  else 'not ok 18 - active administrator sees only active available maid candidates'
+    then 'ok 23 - active administrator sees only active available maid candidates'
+  else 'not ok 23 - active administrator sees only active available maid candidates'
 end;
 
 select set_config('request.jwt.claim.sub', '12000000-0000-4000-8000-000000000002', true);
 
 select case
   when (select count(*) from public.availability_versions where is_current) = 1
-    then 'ok 19 - maid reads exactly her own current availability version'
-  else 'not ok 19 - maid reads exactly her own current availability version'
+    then 'ok 24 - maid reads exactly her own current availability version'
+  else 'not ok 24 - maid reads exactly her own current availability version'
 end;
 
 select case
@@ -289,8 +402,8 @@ select case
     select count(*) from public.availability_versions
     where maid_profile_id = '22000000-0000-4000-8000-000000000003'
   ) = 0
-    then 'ok 20 - maid cannot read another maid availability through RLS'
-  else 'not ok 20 - maid cannot read another maid availability through RLS'
+    then 'ok 25 - maid cannot read another maid availability through RLS'
+  else 'not ok 25 - maid cannot read another maid availability through RLS'
 end;
 
 reset role;
@@ -301,8 +414,8 @@ select case
     from private.command_executions
     where idempotency_key = 'availability-submit-maid1-v1'
   ) = 3
-    then 'ok 21 - the same raw key is independent across actors and command types'
-  else 'not ok 21 - the same raw key is independent across actors and command types'
+    then 'ok 26 - the same raw key is independent across actors and command types'
+  else 'not ok 26 - the same raw key is independent across actors and command types'
 end;
 
 select case
@@ -315,8 +428,8 @@ select case
       '22000000-0000-4000-8000-000000000002:availability.change_requested:availability-submit-maid1-v1'
     )
   ) = 3
-    then 'ok 22 - audit idempotency keys preserve actor and command namespaces'
-  else 'not ok 22 - audit idempotency keys preserve actor and command namespaces'
+    then 'ok 27 - audit idempotency keys preserve actor and command namespaces'
+  else 'not ok 27 - audit idempotency keys preserve actor and command namespaces'
 end;
 
 rollback;

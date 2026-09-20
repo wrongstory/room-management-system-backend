@@ -268,16 +268,28 @@ export function availabilityDatabaseError(
       "활성 관리자만 변경 요청을 처리할 수 있습니다.",
     ],
     [
-      "OUTSIDE_AVAILABILITY_WINDOW",
+      "AVAILABILITY_WEEK_OUT_OF_RANGE",
       409,
-      "OUTSIDE_AVAILABILITY_WINDOW",
-      "가능일은 일요일 12:00–23:59 KST에 제출할 수 있습니다.",
+      "AVAILABILITY_WEEK_OUT_OF_RANGE",
+      "가능일은 KST 기준 현재 주 또는 다음 주만 제출할 수 있습니다.",
+    ],
+    [
+      "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
+      409,
+      "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
+      "지난 날짜를 새로 근무 가능으로 변경할 수 없습니다.",
+    ],
+    [
+      "ASSIGNMENT_AVAILABILITY_STALE",
+      409,
+      "ASSIGNMENT_AVAILABILITY_STALE",
+      "통보된 배정과 충돌해 가능일을 변경할 수 없습니다. 최신 배정을 다시 확인해 주세요.",
     ],
     [
       "CHANGE_REQUEST_BEFORE_DEADLINE",
       409,
       "CHANGE_REQUEST_BEFORE_DEADLINE",
-      "제출 마감 전에는 새 version으로 다시 제출해 주세요.",
+      "대상 주 시작 전에는 가능일을 직접 다시 제출해 주세요.",
     ],
     [
       "STALE_VERSION",
