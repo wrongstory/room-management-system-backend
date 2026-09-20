@@ -289,6 +289,11 @@ export async function prepareRoomPinChange(
   if (contextError || !contextData) throw roomDatabaseError(contextError);
   const context = contextData as Record<string, unknown>;
   const roomNumber = String(context.room_number);
+  const currentPinVersion = Number(context.current_pin_version);
+  const effectiveReasonCode = currentPinVersion === 0 &&
+      body.reasonCode === "ADMIN_PHYSICAL_CHANGE"
+    ? "ADMIN_INITIAL_PIN"
+    : body.reasonCode;
   const canonical = canonicalRoomPin(roomNumber, body.pinDigits);
   let encrypted: RoomPinEnvelope;
   try {
@@ -308,11 +313,11 @@ export async function prepareRoomPinChange(
     assignmentId,
     attemptId,
     accessLeaseId,
-    reasonCode: body.reasonCode,
+    reasonCode: effectiveReasonCode,
   });
   const { data, error } = await clients.admin.rpc("prepare_room_pin_change", {
     ...args,
-    p_reason_code: body.reasonCode,
+    p_reason_code: effectiveReasonCode,
     p_room_number_snapshot: roomNumber,
     p_envelope_format: encrypted.envelopeFormat,
     p_ciphertext_base64: encrypted.ciphertextBase64,

@@ -371,6 +371,12 @@ export function roomDatabaseError(
       "물리 도어락과 저장 상태의 불일치를 먼저 해소해 주세요.",
     ],
     [
+      "INVALID_PIN_CHANGE_REASON",
+      409,
+      "INVALID_PIN_CHANGE_REASON",
+      "현재 PIN 상태와 변경 사유가 일치하지 않습니다.",
+    ],
+    [
       "PIN_CHANGE_IN_PROGRESS_REQUIRED",
       403,
       "PIN_CHANGE_IN_PROGRESS_REQUIRED",
