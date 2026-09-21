@@ -103,6 +103,14 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
+    const normalizedWorkflow = workflow.replaceAll('\r\n', '\n');
+    const buildJob = normalizedWorkflow.match(/ {2}build:\n([\s\S]*?)(?=\n {2}deploy:\n)/)?.[1];
+    const deployJob = normalizedWorkflow.match(/ {2}deploy:\n([\s\S]*)$/)?.[1];
+    expect(buildJob).toContain('timeout-minutes: 5');
+    const deployTimeoutMinutes = Number(
+      deployJob?.match(/timeout-minutes:\s*(\d+)/)?.[1]
+    );
+    expect(deployTimeoutMinutes).toBeGreaterThanOrEqual(10);
     expect(workflow).toContain('pages: write');
     expect(workflow).toContain('id-token: write');
     expect(workflow).toContain('actions/configure-pages@v5');
