@@ -1,8 +1,8 @@
 # 프론트엔드·Codex API 연동 가이드
 
-이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 바로 실행할 작업 범위와 화면 검증 순서는 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)를 사용한다.
+이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 과거 v0.4.0 인계는 historical workflow 참고용이고, 현재 계약은 production OpenAPI 0.5.1과 이 문서를 우선한다.
 
-2026-09-20 대조 기준은 프런트 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`, 백엔드 production source `main@80f935016d5581d500136fba29c206f6ee797bc0`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. production source 제공과 hosted provider·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
+2026-09-22 백엔드 production source는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 production source 제공과 hosted provider·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
 
 ## 1. 계약을 받는 위치
 
@@ -30,9 +30,9 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 `main@80f935016d5581d500136fba29c206f6ee797bc0` 기준 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations를 사용한다. GitHub Pages도 workflow run `35481531782`에서 production Edge와 0.4.0 / 120 / 130 parity를 확인했으며 Pages manifest SHA-256은 공개 `openapi.json` artifact와 일치한다. 기존 checkout template 운영 데이터는 보존됐다. 안전한 fixture가 없어 이번 release의 예약·PIN success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, 이를 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
+production Edge는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf` 기준 78 migrations, `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations를 사용한다. GitHub Pages v0.5.1 parity는 공개 readback 완료 전까지 pending이다. 안전한 fixture가 없어 실행하지 않은 예약·PIN mutation은 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
 
-Issue #236까지 통합된 `dev`는 OpenAPI `0.5.0` 126 paths / 136 operations이고 Issue #228 source 후보는 점유 보정과 표시 분류 override 두 경로를 더한 128 paths / 138 operations다. 둘 다 아직 production URL이나 Pages 정본이 아니다. 아래 객실 카탈로그·인원 endpoint는 release/main/production gate를 통과한 뒤에만 운영에서 활성화한다.
+Issue #236/#228의 객실 카탈로그·상태 계약은 v0.5.0으로 production에 반영됐고, #245가 preview의 optional/null `guestCount` 계약만 추가해 OpenAPI 0.5.1 / 128 / 138을 유지한다. 실제 예약 create/change의 `guestCount` 필수 계약은 바뀌지 않는다.
 
 ### #131/#140/#169 객실 PIN source 계약
 
@@ -232,7 +232,7 @@ const idempotencyKey = crypto.randomUUID();
 | 배정 가능 후보 | `GET /v1/availability/candidates?workDate=...` | active admin만, 현재 가능일의 active maid |
 | 예약 목록 | `GET /v1/reservations` | active admin만, 고객명과 암호문은 응답하지 않음. query 없음은 기존 `{reservations}` 호환 응답 |
 | 예약 calendar 범위 | `GET /v1/reservations?from=...&to=...&roomId=...&cursor=...` | from/to 필수 쌍, 최대 31일·50건, opaque cursor와 serverTime 사용 |
-| 예약 가능 객실 미리보기 | `POST /v1/reservations/bookability/preview` | 필수 `reservationType=standard|long_stay`, `guestCount`; standard는 checkout 필수, long_stay는 nullable checkout, optional roomTypeIds/excludeReservationId, 예약 성공 보장 아님 |
+| 예약 가능 객실 미리보기 | `POST /v1/reservations/bookability/preview` | 필수 `reservationType=standard|long_stay`; `guestCount`는 optional/nullable, standard는 checkout 필수, long_stay는 nullable checkout, optional roomTypeIds/excludeReservationId, 예약 성공 보장 아님 |
 | 예약 상세 | `GET /v1/reservations/{reservationId}` | active admin만 고객명 복호화, 실제 민감조회 activity 기록 |
 | 예약 생성 | `POST /v1/reservations` | 객실 version CAS, Idempotency-Key, 고객명 서버 암호화 |
 | 예약 변경 | `PATCH /v1/reservations/{reservationId}` | 일정·고객정보만 변경. roomId는 현재 값과 같아야 하며 객실 변경 우회 금지 |
@@ -268,7 +268,7 @@ const idempotencyKey = crypto.randomUUID();
 
 calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내고 `[from,to)`가 31일을 넘지 않게 자른다. 다음 페이지는 응답의 opaque `nextCursor`를 수정하거나 해석하지 않고 같은 `from`/`to`/`roomId`에만 재사용한다. cursor는 actor와 filter에 묶이므로 날짜·객실을 바꾸면 버리고 첫 페이지부터 요청한다. 정렬은 `(checkInAt,id)`이며 각 page의 `serverTime`은 그 page projection의 DB snapshot이다. `roomId` filter는 이동·취소된 예약의 겹치는 객실 segment history도 포함하므로 프런트가 현재 객실만으로 다시 필터링해 과거 기록을 숨기지 않는다. query 없는 legacy 목록 소비자는 `nextCursor`나 `serverTime`을 기대하지 않는다.
 
-새 예약 또는 체크인 전 일정 변경 화면은 먼저 `POST /v1/reservations/bookability/preview`를 호출할 수 있다. 요청에는 `reservationType: "standard" | "long_stay"`와 1 이상의 정수 `guestCount`를 반드시 보낸다. standard는 strict RFC 3339 `checkOutAt` 필수이고, long_stay는 고정 end 또는 명시적 `null`을 보낸다. 종료 미정 long-stay는 check-in 이후 객실을 무기한 점유하는 것으로 평가되므로 이후 예약 후보가 될 수 없다. `roomTypeIds` 생략과 `[]`는 모두 전체 유형이다. candidate의 `intervalBookable`만 요청 구간 예약 가능 축으로 사용하고, `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`가 있으면 해당 유형의 최신 `maxOccupancy`를 초과한 것이다. `checkInReady`는 현재 청소·PIN 준비 상태의 별도 안내로 표시한다. `PIN_UNCONFIGURED`/`PIN_MISMATCH`는 `evaluatedAt`에 실제 current check-in pending일 때만 이 안내에 나타나며 interval bookability를 바꾸지 않는다. `excludeReservationId`는 신규 예약에서 생략 또는 `null`, 편집에서는 exact active·체크인 전 예약 ID만 보낸다. preview와 commit 사이에는 최대 인원이나 다른 예약이 바뀔 수 있으므로 성공 문구는 “현재 조회 기준 가능”으로 제한하고, 실제 create/change의 capacity/overlap 오류를 최종 판정으로 다시 표시한다.
+새 예약 또는 체크인 전 일정 변경 화면은 먼저 `POST /v1/reservations/bookability/preview`를 호출할 수 있다. 요청에는 `reservationType: "standard" | "long_stay"`를 보내며 `guestCount`는 생략/null 또는 1 이상의 정수다. 생략/null은 임의 1명으로 바꾸지 않고 capacity filter 없이 기간 bookability만 계산한다. 양의 정수이면 해당 유형의 최신 `maxOccupancy`까지 검사한다. 실제 예약 create/change의 `guestCount`는 계속 필수다. standard는 strict RFC 3339 `checkOutAt` 필수이고, long_stay는 고정 end 또는 명시적 `null`을 보낸다. 종료 미정 long-stay는 check-in 이후 객실을 무기한 점유하는 것으로 평가되므로 이후 예약 후보가 될 수 없다. `roomTypeIds` 생략과 `[]`는 모두 전체 유형이다. candidate의 `intervalBookable`만 요청 구간 예약 가능 축으로 사용하고, guestCount를 보낸 요청에서 `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`가 있으면 해당 유형의 최신 `maxOccupancy`를 초과한 것이다. `checkInReady`는 현재 청소·PIN 준비 상태의 별도 안내로 표시한다. `PIN_UNCONFIGURED`/`PIN_MISMATCH`는 `evaluatedAt`에 실제 current check-in pending일 때만 이 안내에 나타나며 interval bookability를 바꾸지 않는다. `excludeReservationId`는 신규 예약에서 생략 또는 `null`, 편집에서는 exact active·체크인 전 예약 ID만 보낸다. preview와 commit 사이에는 최대 인원이나 다른 예약이 바뀔 수 있으므로 성공 문구는 “현재 조회 기준 가능”으로 제한하고, 실제 create/change의 capacity/overlap 오류를 최종 판정으로 다시 표시한다.
 
 예약 응답의 `reservationType`과 nullable `checkOutAt`은 함께 해석한다. 종료 미정 long-stay에는 checkout obligation/청소 target이 아직 없으므로 클라이언트가 가짜 checkout·청소 계획을 만들지 않는다. type은 생성 후 바꿀 수 없고, 고정 checkout을 다시 null로 되돌릴 수 없다. open-ended 예약에 end를 확정하는 change는 최신 `version`과 같은 Idempotency-Key replay 규칙을 사용한다. 체크인 전 객실 변경은 open-ended 상태를 보존하지만, 투숙 중 객실 변경은 먼저 end를 확정해야 하며 `OPEN_ENDED_STAY_REQUIRES_END`를 다른 key로 자동 우회하지 않는다. scheduler가 open-ended 예약을 자동 checkout한다고 가정하지 말고 실제 종료는 관리자 수동 checkout 결과를 정본으로 사용한다.
 
@@ -382,4 +382,4 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 - list/entries/start/replay 응답은 UTF-8 JSON 128 KiB 상한을 갖는다. `PAYROLL_CURSOR_INVALID`, `PAYROLL_CURSOR_NOT_CONFIGURED`, `PAYROLL_RESPONSE_TOO_LARGE`는 message가 아니라 code로 분기한다.
 - 이 계약은 production OpenAPI와 `api` bundle에 반영됐다. 실제 역할별 hosted read/mutation smoke가 없는 경로는 배포 여부와 별도로 표시한다.
 
-현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 OpenAPI 0.4.0, 120 paths / 130 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.
+현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 OpenAPI 0.5.1, 128 paths / 138 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.

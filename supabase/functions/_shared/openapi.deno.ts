@@ -6,10 +6,10 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
-Deno.test("OpenAPI publishes the v0.5.0 developer room catalog candidate", async () => {
+Deno.test("OpenAPI publishes the v0.5.1 bookability hotfix contract", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   assert(
-    document.info.version === "0.5.0",
+    document.info.version === "0.5.1",
     "approved semantic contract version",
   );
 });
@@ -40,8 +40,10 @@ Deno.test("developer room catalog OpenAPI exposes six developer-only safe operat
   const request =
     document.components.schemas.ReservationBookabilityStandardPreviewRequest;
   assert(
-    request.required.includes("guestCount"),
-    "bookability requires guestCount",
+    !(request.required as readonly string[]).includes("guestCount") &&
+      JSON.stringify(request.properties.guestCount.type) ===
+        JSON.stringify(["integer", "null"]),
+    "bookability guestCount is optional and nullable",
   );
 });
 Deno.test("payroll cycle resolver reuses the bounded payroll envelope", async () => {

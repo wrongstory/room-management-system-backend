@@ -1,6 +1,6 @@
 begin;
 
-select plan(23);
+select plan(27);
 
 insert into auth.users(id) values
   ('71000000-0000-4000-8000-000000000001'),
@@ -228,6 +228,52 @@ select lives_ok(
     '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',2,null,null,'long_stay'
   )$$,
   'long-stay preview is part of the nullable checkout contract'
+);
+
+select is(
+  public.preview_reservation_bookability(
+    p_actor_profile_id => '72000000-0000-4000-8000-000000000001',
+    p_check_in_at => '2027-03-01 16:00:00+09',
+    p_check_out_at => '2027-03-02 11:00:00+09'
+  )->'guest_count',
+  'null'::jsonb,
+  'omitted guest count remains null instead of receiving an arbitrary default'
+);
+
+select is(
+  (
+    select count(*)
+    from jsonb_array_elements(public.preview_reservation_bookability(
+      '72000000-0000-4000-8000-000000000001',
+      '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',null,null,null
+    )->'candidates') candidate
+    where candidate->'reason_codes' ? 'GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY'
+  ),
+  0::bigint,
+  'null guest count omits capacity reasons while preserving interval evaluation'
+);
+
+select ok(
+  (
+    select bool_and(
+      not (candidate->>'interval_bookable')::boolean
+      and candidate->'reason_codes' ? 'GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY'
+    )
+    from jsonb_array_elements(public.preview_reservation_bookability(
+      '72000000-0000-4000-8000-000000000001',
+      '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',999,null,null
+    )->'candidates') candidate
+  ),
+  'positive guest count still enforces the latest room-type capacity'
+);
+
+select throws_ok(
+  $$select public.preview_reservation_bookability(
+    '72000000-0000-4000-8000-000000000001',
+    '2027-03-01 16:00:00+09','2027-03-02 11:00:00+09',0,null,null
+  )$$,
+  '22023','INVALID_GUEST_COUNT',
+  'non-positive guest count is still rejected'
 );
 
 select is(

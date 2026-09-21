@@ -23,7 +23,9 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-기능 integration 기준은 PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이고, 운영 source 정본은 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`다. 2026-09-16 production readback은 56 migrations / `api` ACTIVE v16 / OpenAPI `0.3.0` 109 paths / 117 operations 및 5개 Edge bundle이다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+#245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API에 반영됐다. Pages는 공개 readback이 정확히 일치한 뒤에만 완료로 표시한다.
+
+현재 운영 source 정본은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`다. 2026-09-22 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations 및 기존 5개 Edge bundle이다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 #179의 v8 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보를 합친 migration 순서는 57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`이며 OpenAPI는 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
@@ -33,13 +35,13 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 `GET /v1/room-types`는 비밀번호 변경을 완료한 active business admin의 live session만 허용하는 app-owned projection이다. 안정적인 `code`, 현재 `displayName`, 원 단위 `baseCleaningFee`, 저장된 `baseOccupancy/maxOccupancy`, 관리형 `version`, 현재 참조 `roomCount`를 camelCase로 반환한다. 비활성 타입도 기존 객실 참조를 설명하기 위해 목록에는 남지만 기존 `change_room_master_data` command는 신규 선택을 계속 거부한다. `version`은 표시 시각에서 만든 가짜 값이 아니라 객실 타입 업무 필드가 실제 변경될 때만 DB trigger가 증가시킨다.
 
-### #236 Developer 객실·인원 카탈로그 — source candidate
+### #236 Developer 객실·인원 카탈로그 — production source 반영
 
 76번째 append-only migration은 singleton developer만 사용할 수 있는 `GET /v1/developer/room-catalog`와 객실 유형 인원 변경·객실 추가·객실 비활성화 command를 추가한다. 응답은 객실 UUID/번호/유형/active/version과 유형의 code/displayName/인원/version/roomCount 및 집계만 반환하며 예약·고객·PIN·청소·감사 raw state를 섞지 않는다. 모든 응답은 `no-store`다.
 
 인원 변경과 비활성화는 5분 TTL preview를 private FORCE RLS table에 고정한 뒤 actor, entity, CAS version, 요청 payload, 최신 영향 범위, opaque fingerprint를 commit에서 다시 확인한다. mutation은 Idempotency-Key receipt와 source-controlled reason code를 사용하며 기존 활성 예약이 새 최대 인원을 초과하거나 객실에 점유·예약·청소·PIN·미해결 운영 업무가 있으면 fail-closed한다. 객실 추가는 활성 유형의 최신 version을 요구하고 `verification_required`로 시작한다. 객실 제거는 hard delete 없이 inactive metadata와 audit event를 남긴다.
 
-예약 bookability 요청은 `guestCount`를 필수로 받고 candidate마다 최신 유형 최대 인원을 검사한다. preview는 안내일 뿐이며 예약·segment DB trigger와 create/change command가 최종 재검증한다. 이 migration은 현재 `default_guest_count/max_guest_count`를 변경하거나 예시 값으로 backfill하지 않는다.
+예약 bookability 요청은 `guestCount`를 생략하거나 null로 보낼 수 있다. 이 경우 임의 기본값 없이 기간 bookability만 계산하며, 양의 정수가 있으면 candidate마다 최신 유형 최대 인원을 검사한다. 예약 create/change의 `guestCount`는 계속 필수다. preview는 안내일 뿐이며 예약·segment DB trigger와 create/change command가 최종 재검증한다. 이 migration은 현재 `default_guest_count/max_guest_count`를 변경하거나 예시 값으로 backfill하지 않는다.
 
 ### #204 최근 7일 청소 완료 이력
 
@@ -805,7 +807,7 @@ domain lock과 상태 재검증 뒤 `clock_timestamp()`로 다시 확인하고, 
 검증하고 잘못된 달력 날짜나 DB 값을 안전하게 차단합니다. 중단 구간에는 earning·벌점을 생성하지 않습니다.
 Fastify/Edge/OpenAPI의 #133 통합 당시 기준은 108 paths / 115 operations였습니다. #156이 여기에
 `GET·POST /v1/cleaning-templates` 한 path와 두 operation을 추가했으며, #165의 선택형 duration 계약까지
-현재 main/production에 반영된 정본은 109 paths / 117 operations입니다.
+해당 시점의 정본은 109 paths / 117 operations였고, 현재 전체 production 정본은 OpenAPI 0.5.1 / 128 paths / 138 operations입니다.
 
 ### #156 checkout template 운영 게시 경계
 
@@ -896,7 +898,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 완료된 release/운영 반영과 남은 활성화 작업:
 
-- 완료: production 56 migrations, OpenAPI 0.3.0 109/117의 승인 `api` v16, template admin role/CAS/idempotency 및 네 타입 v7 게시
+- 완료: production 78 migrations, OpenAPI 0.5.1 128/138의 승인 `api` v24, template admin role/CAS/idempotency 및 네 타입 v7 게시
 - 대기: 안전한 fixture 기반 reservation/planned-target positive smoke
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
 - Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
@@ -909,7 +911,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-09-16 readback 기준 production API source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`이며 56 migrations / `api` ACTIVE v16 / OpenAPI `0.3.0` 109 paths / 117 operations와 5개 Edge bundle이다. 네 checkout template v7 게시도 완료됐다. 예약 positive mutation은 안전한 fixture 부재로 SKIPPED이고, provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
+2026-09-22 readback 기준 production API source는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`이며 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations와 기존 5개 Edge bundle이다. 네 checkout template v7 게시도 완료됐다. 실행하지 않은 positive mutation은 PASS로 표현하지 않고 provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 

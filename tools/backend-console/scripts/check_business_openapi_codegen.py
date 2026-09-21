@@ -30,6 +30,8 @@ def main() -> None:
     )
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
+    if document.get("info", {}).get("version") != "0.5.1":
+        raise RuntimeError("전체 source OpenAPI version이 0.5.1이 아닙니다.")
     paths = document.get("paths")
     if not isinstance(paths, dict) or len(paths) != 128:
         raise RuntimeError("전체 source OpenAPI path 수가 128이 아닙니다.")
@@ -297,8 +299,13 @@ def main() -> None:
         for request_model in (standard_bookability_request, long_stay_bookability_request):
             if "check_in_at: datetime.datetime" not in request_model:
                 raise RuntimeError("예약 가능성 request의 checkInAt이 누락됐습니다.")
-            if "guest_count: int" not in request_model:
-                raise RuntimeError("예약 가능성 request의 guestCount가 누락됐습니다.")
+            guest_count = re.search(r"^\s+guest_count:\s+([^\r\n=]+)", request_model, re.MULTILINE)
+            if guest_count is None or {
+                part.strip() for part in guest_count.group(1).split("|")
+            } != {"int", "None", "Unset"}:
+                raise RuntimeError(
+                    "예약 가능성 request의 guestCount가 optional nullable 계약이 아닙니다."
+                )
             if "room_type_ids: list[UUID] | Unset" not in request_model:
                 raise RuntimeError("예약 가능성 request의 optional roomTypeIds가 누락됐습니다.")
             if not all(
