@@ -1593,7 +1593,9 @@ export async function previewReservationBookability(
     "roomTypeIds",
   ]);
   const checkInAt = timestampValue(body.checkInAt, "checkInAt");
-  const guestCount = positiveInteger(body.guestCount, "guestCount");
+  const guestCount = body.guestCount == null
+    ? null
+    : positiveInteger(body.guestCount, "guestCount");
   const { reservationType, checkOutAt } = reservationScheduleValues(body);
   const excludeReservationId = body.excludeReservationId == null
     ? null

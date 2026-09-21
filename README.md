@@ -2,6 +2,8 @@
 
 `room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 단일 개발자와 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
 
+운영 API 정본은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`, 78 migrations, Supabase `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations입니다. GitHub Pages Swagger의 v0.5.1 공개 readback은 완료 증거 전까지 별도 pending 상태로 관리합니다.
+
 ## 현재 구현
 
 - Fastify 5 + TypeScript API
@@ -64,7 +66,7 @@ npm run edge:check
 
 Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge runtime PoC](docs/EDGE_RUNTIME_POC.md)에 정리했습니다. 운영 smoke가 끝나기 전까지 기존 Fastify 구현은 개발 기준선으로 유지합니다.
 
-로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 운영 문서는 [GitHub Pages Swagger 포털](https://wrongstory.github.io/room-management-system-backend/)에서 읽고, [정적 OpenAPI JSON](https://wrongstory.github.io/room-management-system-backend/openapi.json)을 타입 생성에 사용할 수 있습니다. Pages artifact는 실제 운영 Edge OpenAPI를 배포 시점에 내려받아 만들며 공개 포털에서는 `Try it out`과 Authorization 입력을 비활성화합니다. 인증·멱등성·오류 처리는 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md), 실제 구현 순서와 화면 검증은 [v0.4.0 프런트 Codex 인계](docs/FRONTEND_CODEX_HANDOFF_V0.4.0.md)를 따릅니다.
+로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 운영 문서는 [GitHub Pages Swagger 포털](https://wrongstory.github.io/room-management-system-backend/)에서 읽고, [정적 OpenAPI JSON](https://wrongstory.github.io/room-management-system-backend/openapi.json)을 타입 생성에 사용할 수 있습니다. Pages artifact는 실제 운영 Edge OpenAPI를 배포 시점에 내려받아 만들며 공개 포털에서는 `Try it out`과 Authorization 입력을 비활성화합니다. 인증·멱등성·오류 처리는 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md), 이번 hotfix의 배포·계약 경계는 [v0.5.1 적용 기록](docs/RELEASE_V0.5.1.md)을 따릅니다.
 
 ## 보안 경계
 

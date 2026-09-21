@@ -417,7 +417,7 @@ export const openApiDocument = {
   openapi: "3.1.1",
   info: {
     title: "CASTLE THE ART Room Management API",
-    version: "0.5.0",
+    version: "0.5.1",
     description: [
       "Supabase Edge API의 인증·계정·객실·주간 가능일·예약 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
       "",
@@ -3958,7 +3958,7 @@ export const openApiDocument = {
         operationId: "previewReservationBookability",
         summary: "임의 기간 객실 예약 가능성 미리보기",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용 read-only preview입니다. standard는 미래 [checkInAt,checkOutAt) 구간을, checkOutAt=null인 long_stay는 checkInAt 이후 무기한 점유 구간을 canonical stay-segment overlap과 create/change 운영 차단 축으로 계산합니다. PIN mismatch/unconfigured는 evaluatedAt에 실제 current check-in pending인 경우에만 checkInReady와 reasonCodes에 나타나며 intervalBookable을 바꾸지 않습니다. excludeReservationId 생략/null은 무제외이고, UUID는 존재하고 아직 체크인하지 않은 active 예약 하나만 정확히 제외합니다. 이 결과는 commit 성공 보장이 아니며 create/change transaction이 최종 overlap 권위입니다.",
+          "비밀번호 변경을 완료한 active business admin 전용 read-only preview입니다. standard는 미래 [checkInAt,checkOutAt) 구간을, checkOutAt=null인 long_stay는 checkInAt 이후 무기한 점유 구간을 canonical stay-segment overlap과 create/change 운영 차단 축으로 계산합니다. guestCount 생략/null은 임의 기본값 없이 인원 상한 필터를 적용하지 않고, 양의 정수일 때만 최신 객실 유형 최대 인원을 검사합니다. PIN mismatch/unconfigured는 evaluatedAt에 실제 current check-in pending인 경우에만 checkInReady와 reasonCodes에 나타나며 intervalBookable을 바꾸지 않습니다. excludeReservationId 생략/null은 무제외이고, UUID는 존재하고 아직 체크인하지 않은 active 예약 하나만 정확히 제외합니다. 이 결과는 commit 성공 보장이 아니며 create/change transaction이 최종 overlap·인원 상한 권위입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         requestBody: {
@@ -3973,7 +3973,6 @@ export const openApiDocument = {
                 reservationType: "standard",
                 checkInAt: "2026-10-01T16:00:00+09:00",
                 checkOutAt: "2026-10-02T11:00:00+09:00",
-                guestCount: 2,
                 roomTypeIds: [],
                 excludeReservationId: null,
               },
@@ -9096,7 +9095,7 @@ export const openApiDocument = {
       ReservationBookabilityStandardPreviewRequest: {
         type: "object",
         additionalProperties: false,
-        required: ["reservationType", "checkInAt", "checkOutAt", "guestCount"],
+        required: ["reservationType", "checkInAt", "checkOutAt"],
         properties: {
           reservationType: { type: "string", const: "standard" },
           checkInAt: {
@@ -9111,9 +9110,10 @@ export const openApiDocument = {
               "예약 구간 종료(미포함). standard는 null을 허용하지 않음",
           },
           guestCount: {
-            type: "integer",
+            type: ["integer", "null"],
             minimum: 1,
-            description: "객실 유형 최대 인원 판정에 사용할 예약 총 인원",
+            description:
+              "선택값. 생략/null이면 인원 상한을 적용하지 않고 기간 가용성만 판정하며, 양의 정수이면 객실 유형 최대 인원을 함께 검사함",
           },
           excludeReservationId: {
             type: ["string", "null"],
@@ -9134,7 +9134,7 @@ export const openApiDocument = {
       ReservationBookabilityLongStayPreviewRequest: {
         type: "object",
         additionalProperties: false,
-        required: ["reservationType", "checkInAt", "checkOutAt", "guestCount"],
+        required: ["reservationType", "checkInAt", "checkOutAt"],
         properties: {
           reservationType: { type: "string", const: "long_stay" },
           checkInAt: {
@@ -9148,9 +9148,10 @@ export const openApiDocument = {
             description: "null이면 checkInAt 이후 미래 전체를 점유하는 preview",
           },
           guestCount: {
-            type: "integer",
+            type: ["integer", "null"],
             minimum: 1,
-            description: "객실 유형 최대 인원 판정에 사용할 예약 총 인원",
+            description:
+              "선택값. 생략/null이면 인원 상한을 적용하지 않고 기간 가용성만 판정하며, 양의 정수이면 객실 유형 최대 인원을 함께 검사함",
           },
           excludeReservationId: {
             type: ["string", "null"],
@@ -9244,7 +9245,12 @@ export const openApiDocument = {
           reservationType: { $ref: "#/components/schemas/ReservationType" },
           checkInAt: { type: "string", format: "date-time" },
           checkOutAt: { type: ["string", "null"], format: "date-time" },
-          guestCount: { type: "integer", minimum: 1 },
+          guestCount: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description:
+              "요청에서 생략/null이면 null, 양의 정수이면 해당 인원 수",
+          },
           excludeReservationId: { type: ["string", "null"], format: "uuid" },
           evaluatedAt: { type: "string", format: "date-time" },
           candidates: {

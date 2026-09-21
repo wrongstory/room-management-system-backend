@@ -420,6 +420,61 @@ Deno.test("reservation bookability keeps PIN readiness separate and supports emp
     "commit is final authority",
   );
 
+  const omittedGuestCount = await previewReservationBookability(
+    commandRequest("/v1/reservations/bookability/preview", {
+      reservationType: "standard",
+      checkInAt: body.checkInAt,
+      checkOutAt: body.checkOutAt,
+    }),
+    clients,
+    admin,
+  );
+  assert(
+    omittedGuestCount.guestCount === null &&
+      rpcInputs.at(-1)?.p_guest_count === null,
+    "omitted guestCount disables capacity filtering without a default",
+  );
+
+  const nullGuestCount = await previewReservationBookability(
+    commandRequest("/v1/reservations/bookability/preview", {
+      reservationType: "standard",
+      checkInAt: body.checkInAt,
+      checkOutAt: body.checkOutAt,
+      guestCount: null,
+    }),
+    clients,
+    admin,
+  );
+  assert(
+    nullGuestCount.guestCount === null &&
+      rpcInputs.at(-1)?.p_guest_count === null,
+    "explicit null guestCount has the same canonical RPC input",
+  );
+
+  const callsBeforeInvalidGuestCounts = rpcInputs.length;
+  for (const invalidGuestCount of [0, -1, 1.5, "2"]) {
+    const invalid = await captureEdgeError(() =>
+      previewReservationBookability(
+        commandRequest("/v1/reservations/bookability/preview", {
+          reservationType: "standard",
+          checkInAt: body.checkInAt,
+          checkOutAt: body.checkOutAt,
+          guestCount: invalidGuestCount,
+        }),
+        clients,
+        admin,
+      )
+    );
+    assert(
+      invalid.status === 400 && invalid.code === "VALIDATION_ERROR",
+      "non-positive, fractional and string guestCount values fail closed",
+    );
+  }
+  assert(
+    rpcInputs.length === callsBeforeInvalidGuestCounts,
+    "invalid guestCount never reaches the database",
+  );
+
   empty = true;
   const none = await previewReservationBookability(
     commandRequest("/v1/reservations/bookability/preview", {
@@ -440,7 +495,7 @@ Deno.test("reservation bookability keeps PIN readiness separate and supports emp
     "empty result keeps evaluatedAt",
   );
   assert(
-    rpcInputs.length === 2 &&
+    rpcInputs.length === 4 &&
       rpcInputs.every((input) =>
         input.p_room_type_ids === null &&
         input.p_exclude_reservation_id === null &&

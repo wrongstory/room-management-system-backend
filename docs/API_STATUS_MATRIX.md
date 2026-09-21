@@ -73,17 +73,15 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 source/readback evidence: **2026-09-20 KST** (Issue #220, PR #221 및 Pages run `35481531782`). v0.4.0 release source 기준은 PR #219의 `dev@9c197ad12ed5cb45db0b451f69f9f91053b139d7`이며, 실제 production source는 아래 `main` exact SHA로 고정한다.
+production 최종 source/readback evidence: **2026-09-22 KST**. #245 v0.5.1 hotfix는 `main`과 production DB/API에 반영됐으며, dev backport와 Pages 공개 readback은 별도 gate다.
 
-- 현재 GitHub·production API source 정본: `main@80f935016d5581d500136fba29c206f6ee797bc0`.
-  - PR #221의 v0.4.0 release source가 `main`에 병합됐고 승인 release tree와 병합 tree가 일치한다.
-  - tag/GitHub Release 발행 여부와 `main`/production source 배포 완료는 별도 상태로 관리한다.
-- production은 **73 migrations / `api` ACTIVE v17 / OpenAPI 0.4.0 120 paths / 130 operations**다. 기존 56개 이력과 업무 원장을 보존한 채 manifest의 57~73을 순서대로 적용했고, public RLS 49/49, FK 384건 위반 0, DB lint error 0을 read-only로 확인했다.
-- Issue #231과 #236까지 통합된 `dev@994d3b61e49f49671acf0c1192b8821ae7f77792`는 **76 migrations / OpenAPI 0.5.0 126 paths / 136 operations**다. Issue #228 source 후보는 이를 보존한 **77 migrations / OpenAPI 0.5.0 128 paths / 138 operations**이며 production DB/API 적용이나 hosted role smoke를 수행하지 않아 production 수치는 위 73/120/130을 유지한다.
-- v0.4.0의 공개 `/health`, `/docs`, `/openapi.json`은 HTTP 200이다. Health와 OpenAPI 계약은 직접 확인했지만 보호 API의 역할별 hosted read와 실제 예약·PIN mutation은 이번 배포에서 재실행하지 않았으므로 별도 완료로 표시하지 않는다.
-- #187 Phase C는 PR #190으로 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`에 source/dev 병합 완료했다. 현재 개발 정본은 기존 61개를 수정하지 않은 **62 migrations / OpenAPI 113 paths / 121 operations**이며 `reservation_stays`/`stay_room_segments`, DURING_STAY preview·commit, source-room checkout cleanup 및 미래 PIN cutoff를 포함한다. `main`/production에는 아직 반영하지 않았으므로 운영 수치와 사용 가능 상태는 기존 production readback을 유지한다.
-- #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
-- 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. 현재 production source 포함 여부는 이 §2의 73 migrations / 120 paths / 130 operations와 5개 Edge bundle snapshot을 우선하고, hosted provider·Google·Cron 및 positive mutation 사용 가능 여부는 별도 gate로 판정한다.
+- 현재 GitHub·production API source 정본: `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`.
+- production은 **78 migrations**, head `reservation_bookability_optional_guest_count`, **`api` ACTIVE v24**, OpenAPI **0.5.1 / 128 paths / 138 operations**다.
+- production `/health`와 `/openapi.json`은 HTTP 200이다. GitHub Pages portal의 v0.5.1 공개 readback은 완료 증거 전까지 pending으로 둔다.
+- #245 dev backport 후보는 최신 dev-only 이력과 v0.5.0 manifest를 보존하면서 동일한 78번째 migration과 OpenAPI 0.5.1 계약을 추가한다.
+- #187 Phase C는 PR #190으로 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`에 source/dev 병합 완료했다. 당시 개발 정본은 기존 61개를 수정하지 않은 **62 migrations / OpenAPI 113 paths / 121 operations**이며 현재 production 포함 여부는 이 절의 v0.5.1 readback을 우선한다.
+- #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다.
+- 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. 현재 production source 포함 여부는 이 §2의 `main@dda676d...`, 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations snapshot을 우선한다.
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했고 해당 API source는 현재 production `api` bundle에 반영됐다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**이었다. hosted 역할별 positive mutation smoke는 미확인이므로 현재 사용은 ⚠️다.
 - #93/#95는 PR #95로 source/dev 병합 완료했다. 개발 통합 계약은 **35 migrations / 76 paths / 82 operations**이며 conceptual OPEN 조회, OPEN→PAYING 잠금과 4개 payroll table의 active+비밀번호 변경 완료+admin/maid-self RLS를 포함한다.
@@ -92,17 +90,17 @@ production 최종 source/readback evidence: **2026-09-20 KST** (Issue #220, PR #
 - #131은 현재 **production 56-migration historical snapshot**에 반영된 #69 PIN Phase A다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. 이 운영 snapshot은 private immutable revision/current pointer, physical-change mismatch lifecycle과 authoritative maid access lease를 change/reveal 양쪽에 사용한다. #194의 64번째 source candidate는 물리 PIN change의 exact in-progress access-lease 경계는 유지하되 reveal만 exact current/notified assignment entitlement + 30초 lease로 대체하며 아직 production 사용 가능 계약이 아니다. 양쪽 모두 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
 - #184 현재 시각 객실 projection, #187 Phase A~C 예약 임박·체크인 전 변경·투숙 중 이동, #180 `extra-proof` 0~10장 collection source는 v0.4.0 production DB/API에 포함됐다. 각 기능의 실제 mutation smoke와 프런트 사용 완료는 별도다.
-- 현재 critical path는 **Issue #222 운영 상태·release gate의 `dev` 역반영 → 보호 API 역할별 hosted read → 안전 fixture가 있을 때만 예약·PIN lifecycle mutation smoke**다. 안전 fixture가 없으면 임의 production 데이터를 만들지 않는다.
-- 운영 migration: **73건**
+- 현재 critical path는 **#245 dev backport exact-head source gate → Pages v0.5.1 공개 readback → 보호 API 역할별 hosted read**다. 안전 fixture가 없으면 임의 production 데이터를 만들지 않는다.
+- 운영 migration: **78건**, head `reservation_bookability_optional_guest_count`
 - 운영 Edge Functions readback:
   - `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 bundle 배포
-  - `api`는 ACTIVE v17이며 version은 runtime revision metadata일 뿐 source identity는 `main@80f9350...`로 판정한다.
+  - `api`는 ACTIVE v24이며 version은 runtime revision metadata일 뿐 source identity는 `main@dda676d...`로 판정한다.
   - Issue #152에서 `notification-delivery` zero-byte 요청을 의도한 503 fail-closed로 보강했으며, provider invoke secret/credential 미활성 상태를 성공으로 표시하지 않는다.
   - version 증가는 source 변경 외 Function Secret 환경 revision도 포함하므로 source identity로 사용하지 않는다.
-- production OpenAPI: **120 paths / 130 operations**, version `0.4.0`
-- Issue #231과 #236까지 통합된 `dev@994d3b61e49f49671acf0c1192b8821ae7f77792`는 **76 migrations / OpenAPI 0.5.0 126 paths / 136 operations**다. Issue #228 source 후보는 기존 76개를 수정하지 않는 77번째 append-only migration과 **128 paths / 138 operations**로, 동일-room lineage에 한정한 관리자 occupancy correction, append-only 표시 분류 override, canonical segment 기반 점유, 객실 문제 전용 `allocationBlocked`, 전체 readiness인 `allocationReady`를 포함하며 production DB/Edge에는 아직 적용하지 않았다.
+- production OpenAPI: **128 paths / 138 operations**, version `0.5.1`
+- `dev@49214bb67f2cf346178bc12321948a810e050234`는 v0.5.0의 과거 integration 지점이다. 이번 별도 backport는 그 이후 dev history를 보존한다.
 - production `/health`, `/docs`, `/openapi.json` HTTP 200과 OpenAPI readback은 확인됐다. 전체 hosted role/domain positive mutation smoke는 안전한 fixture 부재로 미완료이며, Issue #112/#137의 provider/Google target·credential·Vault/Cron/실기기 smoke도 별도 activation gate다.
-- GitHub Pages portal은 run `35481531782`에서 `main@80f9350...`의 fail-closed build를 사용해 production Edge와 0.4.0 / 120 / 130 parity를 확인했다. `portal-manifest.json`의 SHA-256은 공개 `openapi.json` artifact와 일치한다. build 시각 metadata 때문에 raw production JSON과 artifact byte hash가 같다는 뜻은 아니다.
+- GitHub Pages portal은 production Edge와 **0.5.0 / 128 / 138** parity를 확인했다. `portal-manifest.json`의 SHA-256은 공개 Pages `openapi.json` artifact와 일치한다. build 시각 metadata 때문에 raw production JSON과 artifact byte hash가 같다는 뜻은 아니다.
 - production `/docs`는 HTTP 200이지만 hosted 기본 domain의 HTML 렌더링 제약 때문에
   사람용 문서는 GitHub Pages 포털을 사용한다.
 
@@ -126,6 +124,26 @@ GitHub Pages 포털은 Supabase Edge Function이 아닌 별도 정적 배포다.
 - [x] GitHub Pages `workflow_dispatch` 수동 실행 — run `35481531782`
 - [x] 공개 portal과 same-origin OpenAPI snapshot HTTP smoke
 - [x] Pages와 production Edge의 path set·operationId set 동일
+
+### GitHub Pages Swagger v0.5.0 승격 gate
+
+- [x] source fail-closed 기대값 0.5.0 / 128 paths / 138 operations
+- [x] `release/v0.5.0 → main` 승인·병합
+- [x] production 73→77 migration 적용 및 exact `main`의 `api` 배포
+- [x] production `/openapi.json` 0.5.0 / 128 / 138 readback
+- [x] `swagger-pages.yml` 수동 `workflow_dispatch`
+- [x] 공개 portal/OpenAPI/manifest HTTP 200 및 artifact SHA-256 parity
+
+### GitHub Pages Swagger v0.5.1 hotfix gate — #245
+
+- [x] source fail-closed 기대값 0.5.1 / 128 paths / 138 operations
+- [x] v0.5.0 release manifest·문서 정본 byte-identical 보존
+- [x] PR #246 exact head 독립 검토 및 `main` 병합
+- [x] production 77→78 migration 적용 및 exact `main`의 `api` 배포
+- [x] production `/openapi.json` 0.5.1 / 128 / 138 readback
+- [ ] optional/null/positive `guestCount` 역할 인증 hosted smoke 완료 기록
+- [ ] `swagger-pages.yml` 수동 `workflow_dispatch`
+- [ ] 공개 portal/OpenAPI/manifest HTTP 200 및 artifact SHA-256 parity
 
 ## 4. Auth API
 
@@ -179,7 +197,7 @@ login 이후 같은 메모리 세션에서 전체 projection·diagnostics·업�
 - [x] 인원 변경·객실 비활성화 preview/commit의 5분 fingerprint, CAS, reason code, idempotency, audit
 - [x] 객실 추가의 숫자 문자열·유형 version·중복 검사와 `verification_required` 초기 상태
 - [x] 객실 hard delete 차단, inactive 객실의 신규 예약/segment/cleaning target 차단, 과거 이력 보존
-- [x] bookability `guestCount` 필수 및 create/change DB 최종 최대 인원 재검증
+- [x] bookability `guestCount` 선택값(null/생략은 capacity filter 없음), create/change는 필수 및 DB 최종 최대 인원 재검증
 - [x] Fastify/Edge/OpenAPI `0.5.0` 126 paths / 136 operations source parity
 - [x] `dev@994d3b61e49f49671acf0c1192b8821ae7f77792` 병합
 - [ ] production release/migration/API 배포
@@ -627,7 +645,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 
 ## 13. 후속 업무 API·모델 개발 상태
 
-아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production source 반영 여부는 §2의 `main@80f9350` 73 migrations / 120 paths / 130 operations를 따르며, hosted positive smoke와 provider activation은 별도 상태다.
+아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production source 반영 여부는 §2의 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`, 78 migrations, production API OpenAPI 0.5.1 128 paths / 138 operations를 따른다. 공개 GitHub Pages는 아직 OpenAPI 0.5.0이며 v0.5.1 재배포·공개 readback은 pending이고, hosted positive smoke와 provider activation도 별도 상태다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|

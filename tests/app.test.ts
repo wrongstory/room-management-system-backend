@@ -1278,6 +1278,21 @@ describe('application', () => {
       })
     );
     expect(appServices.reservations.get).not.toHaveBeenCalled();
+    const omittedGuestCount = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/bookability/preview',
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        reservationType: 'standard',
+        checkInAt: '2026-10-01T16:00:00+09:00',
+        checkOutAt: '2026-10-02T11:00:00+09:00'
+      }
+    });
+    expect(omittedGuestCount.statusCode).toBe(200);
+    expect(appServices.reservations.previewBookability).toHaveBeenLastCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({ guestCount: null })
+    );
     const openEnded = await app.inject({
       method: 'POST',
       url: '/v1/reservations/bookability/preview',
@@ -1286,13 +1301,14 @@ describe('application', () => {
         reservationType: 'long_stay',
         checkInAt: '2026-10-01T16:00:00+09:00',
         checkOutAt: null,
-        guestCount: 2
+        guestCount: null
       }
     });
     expect(openEnded.statusCode).toBe(200);
     expect(openEnded.json().preview).toMatchObject({
       reservationType: 'long_stay',
-      checkOutAt: null
+      checkOutAt: null,
+      guestCount: null
     });
     const invalid = await app.inject({
       method: 'POST',
@@ -1306,7 +1322,21 @@ describe('application', () => {
       }
     });
     expect(invalid.statusCode).toBe(400);
-    expect(appServices.reservations.previewBookability).toHaveBeenCalledTimes(2);
+    expect(appServices.reservations.previewBookability).toHaveBeenCalledTimes(3);
+
+    const invalidGuestCount = await app.inject({
+      method: 'POST',
+      url: '/v1/reservations/bookability/preview',
+      headers: { authorization: 'Bearer access-token' },
+      payload: {
+        reservationType: 'standard',
+        checkInAt: '2026-10-01T16:00:00+09:00',
+        checkOutAt: '2026-10-02T11:00:00+09:00',
+        guestCount: 0
+      }
+    });
+    expect(invalidGuestCount.statusCode).toBe(400);
+    expect(appServices.reservations.previewBookability).toHaveBeenCalledTimes(3);
     await app.close();
   });
 

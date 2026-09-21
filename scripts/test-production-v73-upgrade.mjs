@@ -7,7 +7,7 @@ const supabaseCli = fileURLToPath(
   new URL("../node_modules/supabase/dist/supabase.js", import.meta.url),
 );
 const container = "supabase_db_room-management-system-backend";
-const baselineVersion = "20260915000628";
+const baselineVersion = "20260919230733";
 const finalVersion = "20260921144731";
 const migrationPattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
 const psqlArgs = [
@@ -109,10 +109,7 @@ function tableRowHashes({ table_schema: schema, table_name: table, columns }) {
 
 function captureBaseline(shape) {
   return Object.fromEntries(
-    shape.map((table) => [
-      `${table.table_schema}.${table.table_name}`,
-      tableRowHashes(table),
-    ]),
+    shape.map((table) => [`${table.table_schema}.${table.table_name}`, tableRowHashes(table)]),
   );
 }
 
@@ -121,11 +118,10 @@ function assertRowsPreserved(before, after, table) {
   for (const hash of after) remaining.set(hash, (remaining.get(hash) ?? 0) + 1);
   for (const hash of before) {
     const count = remaining.get(hash) ?? 0;
-    assert(count > 0, `migration 57 -> 77 changed or removed an existing ${table} row`);
+    assert(count > 0, `migration 74 -> 77 changed or removed an existing ${table} row`);
     remaining.set(hash, count - 1);
   }
 }
-
 function assertHistory(actual, expected, label) {
   assert(actual.length === expected.length, `${label} migration count mismatch`);
   for (const [index, migration] of expected.entries()) {
@@ -141,24 +137,28 @@ try {
   const expectedMigrations = migrationFiles();
   assert(expectedMigrations.length === 78, "hotfix candidate must contain exactly 78 migrations");
   assert(
-    expectedMigrations[55]?.version === baselineVersion &&
-      expectedMigrations[55]?.name === "cleaning_template_duration_optional",
-    "migration 56 must be cleaning_template_duration_optional",
+    expectedMigrations[72]?.version === baselineVersion &&
+      expectedMigrations[72]?.name === "generated_room_pin_confirmation",
+    "production baseline migration 73 must be generated_room_pin_confirmation",
+  );
+  assert(
+    expectedMigrations[73]?.name === "availability_any_day_submission",
+    "release pending migration 74 must be availability_any_day_submission",
   );
   assert(
     expectedMigrations.at(-1)?.version === finalVersion &&
       expectedMigrations.at(-1)?.name === "reservation_bookability_optional_guest_count",
-    "migration 78 must be reservation_bookability_optional_guest_count",
+    "hotfix migration 78 must be reservation_bookability_optional_guest_count",
   );
 
   reset(baselineVersion);
-  assertHistory(migrationHistory(), expectedMigrations.slice(0, 56), "production baseline");
+  assertHistory(migrationHistory(), expectedMigrations.slice(0, 73), "production baseline");
 
   const baselineCardinality = psql(`select concat_ws('|',
     (select count(*) from public.rooms),
     (select count(*) from public.reservations)
   )`);
-  assert(baselineCardinality === "121|0", "v56 baseline must contain 121 rooms and zero reservations");
+  assert(baselineCardinality === "121|0", "v73 local baseline must contain 121 rooms and zero reservations");
 
   const shape = baselineTableShape();
   assert(shape.length > 0, "baseline table inventory must not be empty");
@@ -177,20 +177,21 @@ try {
   const finalState = psql(`select concat_ws('|',
     (select count(*) from public.rooms),
     (select count(*) from public.reservations),
-    to_regprocedure('public.list_room_events(uuid,uuid,uuid,integer)') is not null,
-    to_regprocedure('public.confirm_generated_room_pin(uuid,uuid,uuid,bigint,text,text)') is not null,
+    to_regprocedure('public.get_developer_room_catalog(uuid)') is not null,
+    exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='public' and p.proname='override_room_display_status'),
     (select count(*) from pg_class c
       join pg_namespace n on n.oid=c.relnamespace
       where n.nspname='public' and c.relkind in ('r','p') and not c.relrowsecurity)
   )`);
   assert(
     finalState === "121|0|t|t|0",
-    "upgraded schema/cardinality/RLS state is not the approved v0.5.0 candidate contract",
+    "production 73 -> 78 schema/cardinality/RLS state is not the approved v0.5.1 contract",
   );
 
   passed = true;
   process.stdout.write(
-    `production-baseline 56 -> 78 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
+    `production-baseline 73 -> 78 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
   );
 } finally {
   try {

@@ -323,7 +323,17 @@ describe('reservation privacy and idempotency', () => {
     expect(rpc).toHaveBeenLastCalledWith('preview_reservation_bookability', expect.objectContaining({
       p_reservation_type: 'standard',
       p_room_type_ids: null,
-      p_exclude_reservation_id: null
+      p_exclude_reservation_id: null,
+      p_guest_count: 2
+    }));
+
+    const noCapacityFilter = await service.previewBookability(actor, {
+      ...input,
+      guestCount: null
+    });
+    expect(noCapacityFilter.guestCount).toBeNull();
+    expect(rpc).toHaveBeenLastCalledWith('preview_reservation_bookability', expect.objectContaining({
+      p_guest_count: null
     }));
 
     empty = true;
