@@ -7521,6 +7521,16 @@ export const openApiDocument = {
               caseVersion: { type: "integer", minimum: 1 },
               paymentAttemptNumber: { type: "integer", minimum: 1 },
               paymentMethod: { type: "string", enum: ["bank_transfer"] },
+              occupied: { type: "boolean" },
+              displayStatusOverride: {
+                oneOf: [
+                  { $ref: "#/components/schemas/RoomPrimaryDisplayStatus" },
+                  { type: "null" },
+                ],
+                description:
+                  "표시 분류 override 값. null은 override 해제를 뜻하며 실제 점유·예약·readiness·bookability를 변경하지 않습니다.",
+              },
+              roomStateVersion: { type: "integer", minimum: 1 },
             },
           },
         },

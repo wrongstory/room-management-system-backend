@@ -6,28 +6,26 @@ from uuid import UUID
 
 from attrs import define as _attrs_define
 
-T = TypeVar("T", bound="RoomTypeCatalogItem")
+T = TypeVar("T", bound="DeveloperRoomTypeCatalogItem")
 
 
 @_attrs_define
-class RoomTypeCatalogItem:
+class DeveloperRoomTypeCatalogItem:
     """
     Attributes:
         id (UUID):
-        code (str): 불변 타입 코드
-        display_name (str): 현재 표시명
-        base_cleaning_fee (int): 원 단위 기본 청소비
-        base_occupancy (int): 기준 인원. 이를 넘겨도 예약 가능하며 프런트 강조 기준으로만 사용합니다.
-        max_occupancy (int): 이 객실 유형에 허용되는 예약 총 인원 상한입니다.
-        active (bool): 신규 객실 기준정보 선택 가능 여부
-        version (int): 실제 객실 타입 변경 시 증가하는 버전
-        room_count (int): 현재 참조 객실 수
+        code (str):
+        display_name (str):
+        base_occupancy (int):
+        max_occupancy (int):
+        active (bool):
+        version (int):
+        room_count (int):
     """
 
     id: UUID
     code: str
     display_name: str
-    base_cleaning_fee: int
     base_occupancy: int
     max_occupancy: int
     active: bool
@@ -40,8 +38,6 @@ class RoomTypeCatalogItem:
         code = self.code
 
         display_name = self.display_name
-
-        base_cleaning_fee = self.base_cleaning_fee
 
         base_occupancy = self.base_occupancy
 
@@ -60,7 +56,6 @@ class RoomTypeCatalogItem:
                 "id": id,
                 "code": code,
                 "displayName": display_name,
-                "baseCleaningFee": base_cleaning_fee,
                 "baseOccupancy": base_occupancy,
                 "maxOccupancy": max_occupancy,
                 "active": active,
@@ -80,8 +75,6 @@ class RoomTypeCatalogItem:
 
         display_name = d.pop("displayName")
 
-        base_cleaning_fee = d.pop("baseCleaningFee")
-
         base_occupancy = d.pop("baseOccupancy")
 
         max_occupancy = d.pop("maxOccupancy")
@@ -92,11 +85,10 @@ class RoomTypeCatalogItem:
 
         room_count = d.pop("roomCount")
 
-        room_type_catalog_item = cls(
+        developer_room_type_catalog_item = cls(
             id=id,
             code=code,
             display_name=display_name,
-            base_cleaning_fee=base_cleaning_fee,
             base_occupancy=base_occupancy,
             max_occupancy=max_occupancy,
             active=active,
@@ -104,4 +96,4 @@ class RoomTypeCatalogItem:
             room_count=room_count,
         )
 
-        return room_type_catalog_item
+        return developer_room_type_catalog_item

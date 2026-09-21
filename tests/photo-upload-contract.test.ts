@@ -146,6 +146,14 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     const summary=schemas.DeveloperAuditEvent.properties.summary;
     expect(summary.additionalProperties).toBe(false);
     for(const key of Object.keys(sample))expect(summary.properties).toHaveProperty(key);
+    expect(summary.properties.occupied).toMatchObject({type:'boolean'});
+    expect(summary.properties.roomStateVersion).toMatchObject({type:'integer',minimum:1});
+    expect(summary.properties.displayStatusOverride).toMatchObject({
+      oneOf:[
+        {$ref:'#/components/schemas/RoomPrimaryDisplayStatus'},
+        {type:'null'},
+      ],
+    });
     for(const key of ['requestHash','idempotencyKey','providerLocator','claimDigest','token','rawAfterState'])
       expect(summary.properties).not.toHaveProperty(key);
     expect(Object.keys(openApiDocument.paths)).toHaveLength(128);
