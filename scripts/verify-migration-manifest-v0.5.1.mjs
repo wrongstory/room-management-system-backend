@@ -22,9 +22,10 @@ function canonicalContent(source, fileName) {
 
 const previousManifestSource = await readFile(previousManifestPath, "utf8");
 invariant(
-  createHash("sha256").update(previousManifestSource, "utf8").digest("hex") ===
-    "6483f279f167791b81741a14c99f6fb01f887ada833cbea5feff0d821f052af5",
-  "published v0.5.0 manifest bytes changed",
+  createHash("sha256")
+    .update(canonicalContent(previousManifestSource, "migration-manifest.v0.5.0.json"), "utf8")
+    .digest("hex") === "c9d8f51addba183fa32ab6435865a053dfc268809a88a9fa38efa0c1b3c37213",
+  "published v0.5.0 manifest canonical bytes changed",
 );
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const previousManifest = JSON.parse(previousManifestSource);
