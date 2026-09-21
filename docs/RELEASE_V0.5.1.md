@@ -25,14 +25,14 @@ dev 정본의 v0.5.0 snapshot [`migration-manifest.v0.5.0.json`](../supabase/mig
 
 기존 77개 migration SQL과 v0.5.0 manifest를 수정하거나 재적용하지 않는다. 자동 `db push`, migration history repair, 기존 원장 삭제로 운영 상태를 맞추지 않는다.
 
-## 3. Source gate
+## 3. Source gate 완료 기록
 
-1. exact `main@ed34abe5c5375323dc6952c330183b73c9211547`에서 `hotfix/245-bookability-guest-count-optional`을 구성한다.
-2. fresh 78 migrations와 별도 77→78 upgrade를 검증한다.
-3. Fastify, Edge, OpenAPI, Python generated contract와 DB/RLS/concurrency 검증을 실행한다.
-4. v0.5.0 manifest가 원본과 byte-identical인지 확인한다.
-5. required `application`/`migration` CI와 exact-head 독립 QA P0/P1=0을 통과한다.
-6. hotfix PR은 `main`으로 생성하되 승인 전에는 병합·운영 변경을 하지 않는다.
+1. 당시 `main@ed34abe5c5375323dc6952c330183b73c9211547`에서 `hotfix/245-bookability-guest-count-optional`을 구성했다.
+2. fresh 78 migrations와 별도 77→78 upgrade를 검증했다.
+3. Fastify, Edge, OpenAPI, Python generated contract와 DB/RLS/concurrency 검증을 통과했다.
+4. 기존 v0.5.0 migration entries와 hash를 변경하지 않았다.
+5. required `application`/`migration` CI와 exact-head 독립 QA P0/P1=0을 통과했다.
+6. PR #246을 병합해 현재 정본 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`를 만들었다. production DB/API 적용은 완료됐고 Pages v0.5.1 공개 readback만 pending이다.
 
 ## 4. `main` 병합 후 운영 적용 순서
 

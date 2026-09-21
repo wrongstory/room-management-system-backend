@@ -704,7 +704,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 ### `v0.2.0` 이후 source 통합 이력과 현재 `v0.5.1` 상태
 
-아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production 정본은 문서 상단의 v0.5.0 snapshot을 우선하며, source/bundle 반영과 hosted provider·Google·Cron 활성화를 별도 상태로 해석한다.
+아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production 정본은 문서 상단의 v0.5.1 DB/API snapshot을 우선하며, GitHub Pages v0.5.1 공개 readback은 pending으로 둔다. source/bundle 반영과 hosted provider·Google·Cron 활성화도 각각 별도 상태로 해석한다.
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview와 #4 notified-only 조회는 source/dev 완료 후 현재 `main`/production source에 반영됐다. 다만 #28 lifecycle effect를 포함한 hosted 역할별 positive smoke는 별도 미완료 gate다.

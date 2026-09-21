@@ -645,7 +645,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 
 ## 13. 후속 업무 API·모델 개발 상태
 
-아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production source 반영 여부는 §2의 `main@ed34abe...` 77 migrations / OpenAPI 0.5.0 128 paths / 138 operations를 따르며, hosted positive smoke와 provider activation은 별도 상태다.
+아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production source 반영 여부는 §2의 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`, 78 migrations, production API OpenAPI 0.5.1 128 paths / 138 operations를 따른다. 공개 GitHub Pages는 아직 OpenAPI 0.5.0이며 v0.5.1 재배포·공개 readback은 pending이고, hosted positive smoke와 provider activation도 별도 상태다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|
