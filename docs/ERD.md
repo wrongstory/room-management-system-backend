@@ -1228,7 +1228,7 @@ rotation 및 Data API RLS에서 차단한다. 모든 새 private table은 FORCE 
 
 ### #228 관리자 점유 보정 원장
 
-`private.room_occupancy_corrections`는 관리자 보정 command마다 room/reservation/stay, 교체된 segment와 successor segment, 목표 occupied, effective timestamp, actor/reason, 적용 뒤 room state version, command key/request hash를 한 번만 기록한다. UPDATE/DELETE는 trigger로 거부하고 raw Data API grant는 없다. 이 원장은 projection을 직접 덮어쓰는 override가 아니라 canonical `stay_room_segments` revision을 설명하는 provenance다. vacant 보정은 기존 segment를 retire하고 필요할 때만 `[oldStart,effectiveAt)` successor를 남기며, 시작 경계 보정은 zero-length successor 없이 전체 retire한다. occupied 복원은 effectiveAt을 포함하는 동일 room의 과거 segment lineage를 요구해 #187 room-move 원장 우회를 막는다.
+`private.room_occupancy_corrections`는 관리자 보정 command마다 room/reservation/stay, 교체된 segment와 successor segment, 목표 occupied, effective timestamp, actor/reason, 적용 뒤 room state version, command key/request hash를 한 번만 기록한다. UPDATE/DELETE는 trigger로 거부하고 raw Data API grant는 없다. 이 원장은 projection을 직접 덮어쓰는 override가 아니라 canonical `stay_room_segments` revision을 설명하는 provenance다. vacant 보정은 기존 segment를 retire하고 필요할 때만 `[oldStart,effectiveAt)` successor를 남기며, 시작 경계 보정은 zero-length successor 없이 전체 retire한다. occupied 복원은 effectiveAt을 포함하는 동일 room의 과거 segment lineage를 요구하고, successor의 끝을 그 source segment의 실제 lineage boundary로 제한하며 `source_reservation_id`와 `move_event_id`를 승계해 #187 room-move 원장 우회를 막는다.
 
 `private.room_display_status_overrides`는 여섯 표시 분류 또는 null(clear), room CAS version, actor/reason, command key/request hash를 append-only로 보존한다. projection은 `canonical_primary_display_status`와 `display_status_override`를 별도로 반환하고 effective `primary_display_status`만 override 우선으로 계산한다. 이 원장은 reservation/stay/occupancy/readiness/bookability를 변경하지 않으며 `BLOCKED` override도 실제 operation block을 만들지 않는다.
 

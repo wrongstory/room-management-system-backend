@@ -1,6 +1,6 @@
 begin;
 
-select plan(35);
+select plan(49);
 
 create function pg_temp.checkout_slots() returns jsonb
 language sql immutable as $$
@@ -19,7 +19,14 @@ $$;
 
 insert into auth.users(id) values
   ('91000000-0000-4000-8000-000000000001'),
-  ('91000000-0000-4000-8000-000000000002');
+  ('91000000-0000-4000-8000-000000000002'),
+  ('91000000-0000-4000-8000-000000000003');
+select public.bootstrap_first_developer_profile(
+  '92000000-0000-4000-8000-000000000003',
+  '91000000-0000-4000-8000-000000000003',
+  '점유 보정 개발자','점유 보정 개발자','0003',
+  'room-state-developer-phone-hash','room-state-developer-bootstrap'
+);
 insert into public.profiles(
   id,auth_user_id,display_name,display_name_normalized,login_id,
   login_id_normalized,login_sequence,role,status,must_change_password
@@ -30,17 +37,18 @@ insert into public.profiles(
    '점유 보정 메이드','점유 보정 메이드','점유 보정 메이드','점유 보정 메이드',0,'maid','active',false);
 insert into auth.sessions(id,user_id) values
   ('93000000-0000-4000-8000-000000000001','91000000-0000-4000-8000-000000000001'),
-  ('93000000-0000-4000-8000-000000000002','91000000-0000-4000-8000-000000000002');
-insert into auth.sessions(id,user_id)
-select '93000000-0000-4000-8000-000000000003',auth_user_id
-from public.profiles where role='developer';
+  ('93000000-0000-4000-8000-000000000002','91000000-0000-4000-8000-000000000002'),
+  ('93000000-0000-4000-8000-000000000003','91000000-0000-4000-8000-000000000003');
 
 insert into public.rooms(id,room_number,room_type_id,elevator_zone)
 select fixture.id,fixture.number,room_type.id,'A'
 from (values
   ('94000000-0000-4000-8000-000000000001'::uuid,'971'),
   ('94000000-0000-4000-8000-000000000002'::uuid,'972'),
-  ('94000000-0000-4000-8000-000000000003'::uuid,'973')
+  ('94000000-0000-4000-8000-000000000003'::uuid,'973'),
+  ('94000000-0000-4000-8000-000000000004'::uuid,'974'),
+  ('94000000-0000-4000-8000-000000000005'::uuid,'975'),
+  ('94000000-0000-4000-8000-000000000006'::uuid,'976')
 ) fixture(id,number)
 cross join lateral(select id from public.room_types where code='standard') room_type;
 
@@ -182,6 +190,180 @@ select throws_ok($$select public.correct_room_occupancy(
   '23514','OCCUPANCY_CORRECTION_ROOM_MISMATCH',
   'A vacant correction followed by B occupied restoration is rejected by room lineage');
 
+-- Build a canonical X -> A -> B stay lineage. A's segment has non-null
+-- move-in provenance and ends at the second move boundary, before the
+-- reservation's final checkout.
+create temporary table moved_lineage_times as
+select clock_timestamp() - interval '3 hours' as check_in_at,
+  clock_timestamp() - interval '2 hours' as move_into_a_at,
+  clock_timestamp() - interval '1 hour' as move_into_b_at,
+  clock_timestamp() - interval '90 minutes' as restore_at;
+
+select public.create_reservation_v2(
+  '92000000-0000-4000-8000-000000000001',
+  '95000000-0000-4000-8000-000000000003',
+  '94000000-0000-4000-8000-000000000004','standard',
+  (current_date+3+time '16:00') at time zone 'Asia/Seoul',
+  (current_date+4+time '11:00') at time zone 'Asia/Seoul',1,null,
+  (select state_version from public.rooms
+   where id='94000000-0000-4000-8000-000000000004'),
+  'room-state-moved-lineage',repeat('d',64)
+);
+update public.reservations
+set actual_check_in_at=(select check_in_at from moved_lineage_times)
+where id='95000000-0000-4000-8000-000000000003';
+
+insert into private.reservation_room_move_events(
+  id,reservation_id,stay_id,from_room_id,to_room_id,effective_at,mode,reason_code,
+  actor_profile_id,reservation_version,source_room_version,target_room_version,command_key
+) select '96000000-0000-4000-8000-000000000001',reservation.id,stay.id,
+    '94000000-0000-4000-8000-000000000004','94000000-0000-4000-8000-000000000005',
+    times.move_into_a_at,'DURING_STAY','OPERATIONAL_ADJUSTMENT',
+    '92000000-0000-4000-8000-000000000001',reservation.version,
+    source_room.state_version,target_room.state_version,'room-state-move-into-a'
+from public.reservations reservation
+join private.reservation_stays stay on stay.reservation_id=reservation.id
+cross join moved_lineage_times times
+join public.rooms source_room on source_room.id='94000000-0000-4000-8000-000000000004'
+join public.rooms target_room on target_room.id='94000000-0000-4000-8000-000000000005'
+where reservation.id='95000000-0000-4000-8000-000000000003';
+update private.stay_room_segments
+set ends_at=(select move_into_a_at from moved_lineage_times),
+    terminal_reason_code='DURING_STAY_ROOM_MOVED',version=version+1,
+    updated_at=clock_timestamp()
+where source_reservation_id='95000000-0000-4000-8000-000000000003'
+  and room_id='94000000-0000-4000-8000-000000000004' and retired_at is null;
+insert into private.stay_room_segments(
+  stay_id,room_id,starts_at,ends_at,source_reservation_id,move_event_id
+) select stay.id,'94000000-0000-4000-8000-000000000005',times.move_into_a_at,
+    reservation.check_out_at,reservation.id,'96000000-0000-4000-8000-000000000001'
+from public.reservations reservation
+join private.reservation_stays stay on stay.reservation_id=reservation.id
+cross join moved_lineage_times times
+where reservation.id='95000000-0000-4000-8000-000000000003';
+
+insert into private.reservation_room_move_events(
+  id,reservation_id,stay_id,from_room_id,to_room_id,effective_at,mode,reason_code,
+  actor_profile_id,reservation_version,source_room_version,target_room_version,command_key
+) select '96000000-0000-4000-8000-000000000002',reservation.id,stay.id,
+    '94000000-0000-4000-8000-000000000005','94000000-0000-4000-8000-000000000006',
+    times.move_into_b_at,'DURING_STAY','OPERATIONAL_ADJUSTMENT',
+    '92000000-0000-4000-8000-000000000001',reservation.version,
+    source_room.state_version,target_room.state_version,'room-state-move-into-b'
+from public.reservations reservation
+join private.reservation_stays stay on stay.reservation_id=reservation.id
+cross join moved_lineage_times times
+join public.rooms source_room on source_room.id='94000000-0000-4000-8000-000000000005'
+join public.rooms target_room on target_room.id='94000000-0000-4000-8000-000000000006'
+where reservation.id='95000000-0000-4000-8000-000000000003';
+update private.stay_room_segments
+set ends_at=(select move_into_b_at from moved_lineage_times),
+    terminal_reason_code='DURING_STAY_ROOM_MOVED',version=version+1,
+    updated_at=clock_timestamp()
+where source_reservation_id='95000000-0000-4000-8000-000000000003'
+  and room_id='94000000-0000-4000-8000-000000000005' and retired_at is null;
+insert into private.stay_room_segments(
+  stay_id,room_id,starts_at,ends_at,source_reservation_id,move_event_id
+) select stay.id,'94000000-0000-4000-8000-000000000006',times.move_into_b_at,
+    reservation.check_out_at,reservation.id,'96000000-0000-4000-8000-000000000002'
+from public.reservations reservation
+join private.reservation_stays stay on stay.reservation_id=reservation.id
+cross join moved_lineage_times times
+where reservation.id='95000000-0000-4000-8000-000000000003';
+
+create temporary table moved_b_segment_before as
+select to_jsonb(segment) value from private.stay_room_segments segment
+where segment.source_reservation_id='95000000-0000-4000-8000-000000000003'
+  and segment.room_id='94000000-0000-4000-8000-000000000006'
+  and segment.retired_at is null;
+select public.correct_room_occupancy(
+  '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
+  '94000000-0000-4000-8000-000000000005','95000000-0000-4000-8000-000000000003',
+  false,(select restore_at from moved_lineage_times),
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000005'),
+  'FRONT_DESK_VERIFIED','room-state-moved-a-vacant',repeat('e',64)
+);
+create temporary table moved_a_restore_result as
+select public.correct_room_occupancy(
+  '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
+  '94000000-0000-4000-8000-000000000005','95000000-0000-4000-8000-000000000003',
+  true,(select restore_at from moved_lineage_times),
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000005'),
+  'FRONT_DESK_VERIFIED','room-state-moved-a-restore',repeat('f',64)
+) value;
+
+select is((select value->>'occupied' from moved_a_restore_result),'true',
+  'historical A occupancy restores inside its same-room lineage after A to B move');
+select is((select successor.ends_at from private.room_occupancy_corrections correction
+  join private.stay_room_segments successor on successor.id=correction.successor_segment_id
+  where correction.command_key like '%room-state-moved-a-restore%'),
+  (select move_into_b_at from moved_lineage_times),
+  'historical A restoration ends at the authoritative A to B move boundary');
+select ok((select successor.move_event_id='96000000-0000-4000-8000-000000000001'
+    and successor.source_reservation_id='95000000-0000-4000-8000-000000000003'
+  from private.room_occupancy_corrections correction
+  join private.stay_room_segments successor on successor.id=correction.successor_segment_id
+  where correction.command_key like '%room-state-moved-a-restore%'),
+  'historical A restoration preserves source lineage and move-event provenance');
+select is((select to_jsonb(segment) from private.stay_room_segments segment
+  where segment.source_reservation_id='95000000-0000-4000-8000-000000000003'
+    and segment.room_id='94000000-0000-4000-8000-000000000006'
+    and segment.retired_at is null),(select value from moved_b_segment_before),
+  'historical A correction leaves the active B segment unchanged');
+select ok(private.room_occupied_at('94000000-0000-4000-8000-000000000005',
+    (select restore_at from moved_lineage_times))
+  and private.room_occupied_at('94000000-0000-4000-8000-000000000006',clock_timestamp()),
+  'restored A history and current B occupancy coexist only on their bounded intervals');
+
+create temporary table failed_move_restore_snapshot as
+select jsonb_build_object(
+  'corrections',(select count(*) from private.room_occupancy_corrections),
+  'audits',(select count(*) from public.audit_events
+    where event_type='room.occupancy_corrected'),
+  'receipts',(select count(*) from private.command_executions
+    where command_type='room.occupancy_correction'),
+  'roomVersion',(select state_version from public.rooms
+    where id='94000000-0000-4000-8000-000000000005')
+) value;
+select throws_ok($$select public.correct_room_occupancy(
+  '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
+  '94000000-0000-4000-8000-000000000005','95000000-0000-4000-8000-000000000003',
+  true,(select move_into_b_at+interval '1 microsecond' from moved_lineage_times),
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000005'),
+  'FRONT_DESK_VERIFIED','room-state-beyond-a-lineage',repeat('0',64))$$,
+  '23514','OCCUPANCY_CORRECTION_ROOM_MISMATCH',
+  'historical A restoration beyond the A lineage boundary is rejected');
+select throws_ok($$select public.correct_room_occupancy(
+  '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
+  '94000000-0000-4000-8000-000000000004','95000000-0000-4000-8000-000000000003',
+  true,(select restore_at from moved_lineage_times),
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000004'),
+  'FRONT_DESK_VERIFIED','room-state-wrong-moved-lineage',repeat('7',64))$$,
+  '23514','OCCUPANCY_CORRECTION_ROOM_MISMATCH',
+  'restoration in a different historical room interval is rejected');
+select is(jsonb_build_object(
+  'corrections',(select count(*) from private.room_occupancy_corrections),
+  'audits',(select count(*) from public.audit_events
+    where event_type='room.occupancy_corrected'),
+  'receipts',(select count(*) from private.command_executions
+    where command_type='room.occupancy_correction'),
+  'roomVersion',(select state_version from public.rooms
+    where id='94000000-0000-4000-8000-000000000005')),
+  (select value from failed_move_restore_snapshot),
+  'rejected lineage restorations atomically append no correction, audit, receipt, or CAS change');
+select is((select public.correct_room_occupancy(
+    '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
+    '94000000-0000-4000-8000-000000000005','95000000-0000-4000-8000-000000000003',
+    true,(select restore_at from moved_lineage_times),
+    (select room_state_version-1 from private.room_occupancy_corrections
+     where command_key like '%room-state-moved-a-restore%'),
+    'FRONT_DESK_VERIFIED','room-state-moved-a-restore',repeat('f',64))->>'correction_id'),
+  (select value->>'correction_id' from moved_a_restore_result),
+  'historical A restoration retry replays the original response');
+select is((select count(*)::integer from private.room_occupancy_corrections correction
+  where correction.reservation_id='95000000-0000-4000-8000-000000000003'),2,
+  'historical A restoration replay duplicates no correction or audit effects');
+
 select throws_ok($$select public.correct_room_occupancy(
   '92000000-0000-4000-8000-000000000002','93000000-0000-4000-8000-000000000002',
   '94000000-0000-4000-8000-000000000002','95000000-0000-4000-8000-000000000002',
@@ -195,7 +377,7 @@ select throws_ok($$select public.correct_room_occupancy(
   'DEVELOPER_ATTEMPT','room-state-developer-denied',repeat('5',64))$$,
   '42501','ADMIN_REQUIRED','developer cannot correct occupancy');
 
-select is((select count(*)::integer from private.room_occupancy_corrections),3,
+select is((select count(*)::integer from private.room_occupancy_corrections),5,
   'denied roles append no correction rows');
 
 create temporary table display_override_results(
@@ -275,6 +457,50 @@ select is((select count(*)::integer from private.room_display_status_overrides),
 select is((select count(*)::integer from public.audit_events
   where event_type='room.display_status_overridden'),7,
   'each display override appends one safe audit event');
+
+select ok(cardinality(private.developer_audit_event_types())=73
+    and cardinality(private.developer_audit_event_types())=(
+      select count(distinct event_type) from unnest(
+        private.developer_audit_event_types()) event_type),
+  'database developer audit allowlist contains the same 73 unique types as OpenAPI');
+select ok((select count(distinct event_type)=2
+  from public.list_developer_audit_events(
+    (select id from public.profiles where role='developer'),null,null,
+    clock_timestamp()-interval '1 day',clock_timestamp()+interval '1 day',
+    null,null,100
+  ) where event_type in('room.occupancy_corrected','room.display_status_overridden')),
+  'unfiltered developer audit query includes both room correction event types');
+select set_eq(
+  $$select distinct event_type from public.list_developer_audit_events(
+      (select id from public.profiles where role='developer'),
+      array['room.occupancy_corrected','room.display_status_overridden'],null,
+      clock_timestamp()-interval '1 day',clock_timestamp()+interval '1 day',
+      null,null,100)$$,
+  $$values ('room.occupancy_corrected'),('room.display_status_overridden')$$,
+  'eventType-filtered developer audit query accepts both room correction types');
+select ok(not exists(
+  select 1 from public.list_developer_audit_events(
+    (select id from public.profiles where role='developer'),
+    array['room.occupancy_corrected','room.display_status_overridden'],null,
+    clock_timestamp()-interval '1 day',clock_timestamp()+interval '1 day',
+    null,null,100
+  ) projected
+  where to_jsonb(projected) ?| array[
+      'before_state','after_state','request_hash','requestHash'
+    ]
+    or projected.summary ?| array[
+      'before_state','after_state','request_hash','requestHash','reservationId'
+    ]
+    or not (projected.summary ? 'roomStateVersion')
+    or exists (
+      select 1 from jsonb_object_keys(projected.summary) key
+      where key <> all(case projected.event_type
+        when 'room.occupancy_corrected'
+          then array['occupied','roomStateVersion']::text[]
+        else array['displayStatusOverride','roomStateVersion']::text[] end)
+    )
+  ),
+  'room correction audit projection exposes only approved summaries and no raw state or request hash');
 
 select throws_ok($$select public.override_room_display_status(
   '92000000-0000-4000-8000-000000000002','93000000-0000-4000-8000-000000000002',

@@ -263,7 +263,7 @@ begin
     where segment.room_id = p_room_id and segment.stay_id <> v_stay.id
       and segment.retired_at is null
       and tstzrange(segment.starts_at, segment.ends_at, '[)') &&
-        tstzrange(p_effective_at, v_reservation.check_out_at, '[)')
+        tstzrange(p_effective_at, v_lineage_segment.ends_at, '[)')
     order by segment.starts_at, segment.id
     limit 1 for update;
     if found then
@@ -274,16 +274,18 @@ begin
       where segment.stay_id = v_stay.id and segment.retired_at is null
         and segment.room_id <> p_room_id
         and tstzrange(segment.starts_at, segment.ends_at, '[)') &&
-          tstzrange(p_effective_at, v_reservation.check_out_at, '[)')
+          tstzrange(p_effective_at, v_lineage_segment.ends_at, '[)')
     ) then
       raise exception using errcode = '23514', message = 'OCCUPANCY_CORRECTION_ROOM_MISMATCH';
     end if;
     insert into private.stay_room_segments(
       stay_id, room_id, starts_at, ends_at, source_reservation_id,
-      terminal_reason_code, created_at, updated_at
+      move_event_id, terminal_reason_code, created_at, updated_at
     ) values (
-      v_stay.id, p_room_id, p_effective_at, v_reservation.check_out_at,
-      v_reservation.id, 'ADMIN_OCCUPANCY_CORRECTION', v_recorded_at, v_recorded_at
+      v_lineage_segment.stay_id, v_lineage_segment.room_id, p_effective_at,
+      v_lineage_segment.ends_at, v_lineage_segment.source_reservation_id,
+      v_lineage_segment.move_event_id, 'ADMIN_OCCUPANCY_CORRECTION',
+      v_recorded_at, v_recorded_at
     ) returning * into v_successor;
   else
     if not v_before_occupied then
@@ -516,6 +518,191 @@ revoke all on function public.get_room_operational_projection(uuid, uuid)
   from public, anon, authenticated;
 grant execute on function public.get_room_operational_projection(uuid, uuid) to service_role;
 
+-- Keep the SQL projection allowlist aligned with the public OpenAPI enum. The
+-- public wrapper below remains the only callable surface; this inventory is
+-- private and exists so the complete 73-type contract can be regression-tested.
+create function private.developer_audit_event_types()
+returns text[] language sql immutable set search_path = '' as $$
+  select array[
+    'account.bootstrap_developer_created',
+    'account.bootstrap_admin_created',
+    'account.created',
+    'account.role_changed',
+    'account.status_changed',
+    'account.unlocked',
+    'account.password_reset_requested',
+    'account.password_changed',
+    'availability.submitted',
+    'availability.change_requested',
+    'availability.change_decided',
+    'assignment.draft_saved',
+    'assignment.notified',
+    'assignment.prestart_changed',
+    'assignment.prestart_unassigned',
+    'assignment.cancellation_requested',
+    'assignment.cancellation_decided',
+    'assignment.attempt_activated',
+    'assignment.rolled_over',
+    'assignment.duration_policy_confirmed',
+    'cleaning_template.published',
+    'cleaning.attempt_started',
+    'cleaning.field_completed',
+    'cleaning.finish_current_allowed',
+    'cleaning.upload_only_allowed',
+    'cleaning.interrupted_handover',
+    'cleaning.scheduled_expired',
+    'cleaning.offline_event_resolved',
+    'photo.upload_accepted',
+    'photo.collection_item_deleted',
+    'reservation.created',
+    'reservation.changed',
+    'reservation.room_moved',
+    'reservation.cancelled',
+    'reservation.manual_checkout',
+    'reservation.scheduled_check_in',
+    'reservation.scheduled_checkout',
+    'reservation.guest_name_retention_purged',
+    'checkout.presence_reported',
+    'checkout.presence_decided',
+    'cleaning.manual_request.created',
+    'cleaning.manual_request.cancelled',
+    'room.master_data_changed',
+    'room.create_block',
+    'room.release_block',
+    'room.set_candle_count',
+    'room.report_issue',
+    'room.resolve_issue',
+    'room.record_pin_sync',
+    'room.occupancy_corrected',
+    'room.display_status_overridden',
+    'room.pin_change_prepared',
+    'room.pin_change_confirmed',
+    'room.pin_mismatch_resolved',
+    'room.pin_generated',
+    'room.generated_pin_confirmed',
+    'room_pin_sheet.full_resync_requested',
+    'room_pin_sheet.full_resync_succeeded',
+    'submission.bomb_reported',
+    'submission.created',
+    'inspection.bomb_decided',
+    'inspection.approved',
+    'inspection.rejected',
+    'complaint.rework_materialized',
+    'compensation.earned',
+    'payroll.adjustment_recorded',
+    'payroll.adjustment_reversed',
+    'payroll.offset_settled',
+    'payroll.late_earning_carried',
+    'payroll.payment_started',
+    'payroll.payment_check_recorded',
+    'payroll.payment_paid',
+    'payroll.payment_reopened'
+  ]::text[]
+$$;
+revoke all on function private.developer_audit_event_types()
+  from public, anon, authenticated, service_role;
+
+-- Extend the bounded developer projection without exposing the raw audit
+-- before/after documents or request hash stored in the immutable ledger.
+alter function public.list_developer_audit_events(
+  uuid, text[], uuid, timestamptz, timestamptz, timestamptz, uuid, integer
+) set schema private;
+alter function private.list_developer_audit_events(
+  uuid, text[], uuid, timestamptz, timestamptz, timestamptz, uuid, integer
+) rename to list_developer_audit_events_before_room_status_correction;
+revoke all on function private.list_developer_audit_events_before_room_status_correction(
+  uuid, text[], uuid, timestamptz, timestamptz, timestamptz, uuid, integer
+) from public, anon, authenticated, service_role;
+
+create function public.list_developer_audit_events(
+  p_actor_profile_id uuid,
+  p_event_types text[] default null,
+  p_filter_actor_profile_id uuid default null,
+  p_from timestamptz default null,
+  p_to timestamptz default null,
+  p_before_recorded_at timestamptz default null,
+  p_before_id uuid default null,
+  p_limit integer default 50
+) returns table(
+  id uuid, event_type text, entity_type text, entity_id uuid,
+  actor_profile_id uuid, actor_display_name text, effective_at timestamptz,
+  recorded_at timestamptz, reason_code text, summary jsonb
+)
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_new_types constant text[] := array[
+    'room.occupancy_corrected', 'room.display_status_overridden'
+  ];
+  v_allowed_types constant text[] := private.developer_audit_event_types();
+  v_previous_types text[];
+  v_from timestamptz := coalesce(p_from, clock_timestamp() - interval '7 days');
+  v_to timestamptz := coalesce(p_to, clock_timestamp());
+begin
+  if p_event_types is not null and (
+    coalesce(cardinality(p_event_types), 0) = 0
+    or exists (
+      select 1 from unnest(p_event_types) requested
+      where requested <> all(v_allowed_types)
+    )
+  ) then
+    raise exception using errcode = '22023', message = 'INVALID_AUDIT_QUERY';
+  end if;
+  if p_event_types is null then
+    v_previous_types := null;
+  else
+    select coalesce(array_agg(requested), array[]::text[])
+    into v_previous_types
+    from unnest(p_event_types) requested
+    where requested <> all(v_new_types);
+    if cardinality(v_previous_types) = 0 then
+      v_previous_types := array['account.created'];
+    end if;
+  end if;
+
+  return query
+  select merged.* from (
+    select previous.*
+    from private.list_developer_audit_events_before_room_status_correction(
+      p_actor_profile_id, v_previous_types, p_filter_actor_profile_id,
+      p_from, p_to, p_before_recorded_at, p_before_id, p_limit
+    ) previous
+    where p_event_types is null or previous.event_type = any(p_event_types)
+    union all
+    select audit.id, audit.event_type, audit.entity_type, audit.entity_id,
+      audit.actor_profile_id, audit.actor_display_name_snapshot,
+      audit.effective_at, audit.recorded_at, audit.reason_code,
+      case audit.event_type
+        when 'room.occupancy_corrected' then jsonb_strip_nulls(jsonb_build_object(
+          'occupied', audit.after_state -> 'occupied',
+          'roomStateVersion', audit.after_state -> 'roomStateVersion'
+        ))
+        when 'room.display_status_overridden' then jsonb_strip_nulls(jsonb_build_object(
+          'displayStatusOverride', audit.after_state -> 'displayStatusOverride',
+          'roomStateVersion', audit.after_state -> 'roomStateVersion'
+        ))
+      end
+    from public.audit_events audit
+    where audit.event_type = any(v_new_types)
+      and (p_event_types is null or audit.event_type = any(p_event_types))
+      and audit.recorded_at >= v_from and audit.recorded_at <= v_to
+      and (p_filter_actor_profile_id is null
+        or audit.actor_profile_id = p_filter_actor_profile_id)
+      and (p_before_recorded_at is null
+        or (audit.recorded_at, audit.id) < (p_before_recorded_at, p_before_id))
+    order by recorded_at desc, id desc
+    limit p_limit
+  ) merged
+  order by merged.recorded_at desc, merged.id desc
+  limit p_limit;
+end
+$$;
+revoke all on function public.list_developer_audit_events(
+  uuid, text[], uuid, timestamptz, timestamptz, timestamptz, uuid, integer
+) from public, anon, authenticated;
+grant execute on function public.list_developer_audit_events(
+  uuid, text[], uuid, timestamptz, timestamptz, timestamptz, uuid, integer
+) to service_role;
+
 comment on function public.correct_room_occupancy(
   uuid, uuid, uuid, uuid, boolean, timestamptz, bigint, text, text, text
 ) is 'Admin-only append-only occupancy correction. Preserves reason, effective time, room CAS, idempotency receipt, safe audit, and canonical stay segment history.';
@@ -523,3 +710,7 @@ comment on function public.correct_room_occupancy(
 comment on function public.override_room_display_status(
   uuid, uuid, uuid, text, bigint, text, text, text
 ) is 'Admin-only append-only display classification override. It never changes reservation, occupancy, readiness, bookability, or operation-block authority; null clears the override.';
+
+comment on function public.list_developer_audit_events(
+  uuid, text[], uuid, timestamptz, timestamptz, timestamptz, uuid, integer
+) is 'Lists bounded safe developer audit projections, including room occupancy corrections and display-status overrides, without raw audit states or request hashes.';

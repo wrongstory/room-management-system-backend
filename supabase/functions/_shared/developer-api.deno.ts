@@ -76,14 +76,14 @@ Deno.test("developer runtime reports Google and purge configuration booleans onl
   }
 });
 
-Deno.test("developer audit query accepts all 72 approved event types and rejects 73 before RPC", async () => {
+Deno.test("developer audit query accepts all 73 approved event types and rejects 74 before RPC", async () => {
   let calls = 0;
   const clients = {
     admin: {
       rpc: (_name: string, args: Record<string, unknown>) => {
         calls += 1;
         assert(
-          (args.p_event_types as unknown[]).length === 72,
+          (args.p_event_types as unknown[]).length === 73,
           "full current inventory passed",
         );
         return Promise.resolve({ data: [], error: null });
@@ -102,7 +102,7 @@ Deno.test("developer audit query accepts all 72 approved event types and rejects
     const event of openApiDocument.components.schemas.DeveloperAuditEventType
       .enum
   ) query.append("eventType", event);
-  assert(query.size === 72, "actual source enum inventory");
+  assert(query.size === 73, "actual source enum inventory");
   await developerAuditEvents(
     new Request(
       `https://example.invalid/functions/v1/api/v1/developer/audit-events?${query}`,
@@ -110,7 +110,7 @@ Deno.test("developer audit query accepts all 72 approved event types and rejects
     clients,
     actor,
   );
-  assert(calls === 1, "all 72 accepted");
+  assert(calls === 1, "all 73 accepted");
   query.append("eventType", "cleaning.offline_event_resolved");
   try {
     await developerAuditEvents(
@@ -120,11 +120,11 @@ Deno.test("developer audit query accepts all 72 approved event types and rejects
       clients,
       actor,
     );
-    throw new Error("73 must fail");
+    throw new Error("74 must fail");
   } catch (error) {
     assert(
       error instanceof EdgeError && error.status === 400,
-      "73 rejected with stable validation",
+      "74 rejected with stable validation",
     );
   }
   assert(calls === 1, "over-limit query never reaches DB");

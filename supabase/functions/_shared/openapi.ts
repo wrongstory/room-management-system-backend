@@ -1575,7 +1575,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 72,
+              maxItems: 73,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -6804,6 +6804,7 @@ export const openApiDocument = {
           "payroll.adjustment_reversed",
           "payroll.offset_settled",
           "payroll.late_earning_carried",
+          "payroll.payment_started",
           "payroll.payment_check_recorded",
           "payroll.payment_paid",
           "payroll.payment_reopened",

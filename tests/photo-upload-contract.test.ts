@@ -141,7 +141,8 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     const sample={cleaningTargetId:id(1),attemptId:id(2),targetSlotId:id(3),photoId:id(4),photoItemId:id(5),photoVersion:1,collectionRevision:1,itemRevision:1,uploadedAt:uploaded.uploadedAt,purgeAfter:uploaded.purgeAfter};
     expect(schemas.DeveloperAuditEventType.enum).toContain('room.pin_generated');
     expect(schemas.DeveloperAuditEventType.enum).toContain('room.generated_pin_confirmed');
-    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(72);
+    expect(schemas.DeveloperAuditEventType.enum).toContain('payroll.payment_started');
+    expect(schemas.DeveloperAuditEventType.enum).toHaveLength(73);
     const summary=schemas.DeveloperAuditEvent.properties.summary;
     expect(summary.additionalProperties).toBe(false);
     for(const key of Object.keys(sample))expect(summary.properties).toHaveProperty(key);

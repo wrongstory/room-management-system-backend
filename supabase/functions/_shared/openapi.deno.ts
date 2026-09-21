@@ -1461,7 +1461,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 72,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 73,
     "actual audit allowlist count",
   );
   assert(
@@ -1473,6 +1473,9 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
       ) &&
       doc.components.schemas.DeveloperAuditEventType.enum.includes(
         "photo.collection_item_deleted",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "payroll.payment_started",
       ),
     "complaint compensation events are operator-visible",
   );
