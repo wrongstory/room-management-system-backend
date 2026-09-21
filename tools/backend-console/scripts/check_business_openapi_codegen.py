@@ -24,8 +24,8 @@ def main() -> None:
     source = repository_root / ".tmp" / "full-openapi.json"
     document = json.loads(source.read_text(encoding="utf-8"))
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 126:
-        raise RuntimeError("전체 source OpenAPI path 수가 126이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 128:
+        raise RuntimeError("전체 source OpenAPI path 수가 128이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -34,8 +34,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 136:
-        raise RuntimeError("전체 source OpenAPI operation 수가 136이 아닙니다.")
+    if operation_count != 138:
+        raise RuntimeError("전체 source OpenAPI operation 수가 138이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     legacy_list = schemas.get("ReservationListEnvelope", {})
     range_page = schemas.get("ReservationRangePageEnvelope", {})

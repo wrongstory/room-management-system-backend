@@ -8,6 +8,7 @@ import {
   listRoomOperationBlocks,
   listRooms,
   listRoomTypes,
+  overrideRoomDisplayStatus,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -72,6 +73,8 @@ const roomRow = {
   reservation_lifecycle: "OCCUPIED" as const,
   readiness_status: "READY" as const,
   primary_display_status: "OCCUPIED" as const,
+  canonical_primary_display_status: "OCCUPIED" as const,
+  display_status_override: null,
   next_reservation_id: "30000000-0000-4000-8000-000000000010",
   next_check_in_at: "2026-09-17T07:00:00.000Z",
   next_check_out_at: "2026-09-18T02:00:00.000Z",
@@ -463,6 +466,78 @@ Deno.test("occupancy correction database failures keep stable Edge codes", () =>
     const mapped = roomDatabaseError({ message: databaseCode });
     assert(mapped.status === status, `${databaseCode} status`);
     assert(mapped.code === databaseCode, `${databaseCode} code`);
+  }
+});
+
+Deno.test("display status override is display-only, session-bound, and supports clear", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      async rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        return {
+          data: {
+            override_id: "72000000-0000-4000-8000-000000000001",
+            room_id: roomId,
+            target_status: args.p_target_status,
+            room_state_version: 5,
+            recorded_at: "2026-09-20T00:00:01.000Z",
+          },
+          error: null,
+        };
+      },
+    },
+  } as unknown as EdgeClients;
+
+  for (
+    const targetStatus of [
+      "BLOCKED",
+      "OCCUPIED",
+      "ARRIVAL_PENDING",
+      "RESERVATION_PRESENT",
+      "CLEANING_REQUIRED",
+      "READY",
+      null,
+    ] as const
+  ) {
+    const result = await overrideRoomDisplayStatus(
+      commandRequest(
+        `/v1/rooms/${roomId}/display-status-overrides`,
+        {
+          targetStatus,
+          expectedRoomVersion: 4,
+          reasonCode: "FRONT_DESK_VERIFIED",
+        },
+        "POST",
+        `display-${targetStatus ?? "clear"}`,
+      ),
+      clients,
+      admin,
+      roomId,
+    );
+    assert(result.targetStatus === targetStatus, `${targetStatus} mapped`);
+  }
+  assert(
+    calls.every(([name, args]) =>
+      name === "override_room_display_status" &&
+      args.p_session_id === sessionId
+    ),
+    "dedicated session-bound RPC",
+  );
+  for (const role of ["maid", "developer"] as const) {
+    const denied = await captureEdgeError(() =>
+      overrideRoomDisplayStatus(
+        commandRequest(`/v1/rooms/${roomId}/display-status-overrides`, {
+          targetStatus: "READY",
+          expectedRoomVersion: 5,
+          reasonCode: "FRONT_DESK_VERIFIED",
+        }),
+        clients,
+        { ...admin, role },
+        roomId,
+      )
+    );
+    assert(denied.status === 403, `${role} display override denied`);
   }
 });
 

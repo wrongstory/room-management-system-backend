@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "v0.5.0",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 76,
+  "totalCount": 77,
   "baseline": {
     "count": 74,
     "head": "availability_any_day_submission"
   },
   "pending": {
-    "count": 2,
+    "count": 3,
     "first": "retire_assignment_duration_policy",
-    "head": "developer_room_catalog_capacity"
+    "head": "room_status_admin_correction"
   },
-  "head": "developer_room_catalog_capacity",
+  "head": "room_status_admin_correction",
   "migrations": [
     {
       "order": 1,
@@ -393,6 +393,11 @@
       "order": 76,
       "name": "developer_room_catalog_capacity",
       "sha256": "0facd7de38e32ab4b7b14853bbf49ea8ca942493a0a17aeef09e63b31cc4f434"
+    },
+    {
+      "order": 77,
+      "name": "room_status_admin_correction",
+      "sha256": "4c749838f2172778e5d8c6195a090b8fececcae9d5f65d511fabe4d39d5b049e"
     }
   ]
 }

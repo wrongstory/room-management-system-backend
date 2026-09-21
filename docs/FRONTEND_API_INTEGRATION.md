@@ -32,7 +32,7 @@ Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있�
 
 production Edge는 `main@80f935016d5581d500136fba29c206f6ee797bc0` 기준 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations를 사용한다. GitHub Pages도 workflow run `35481531782`에서 production Edge와 0.4.0 / 120 / 130 parity를 확인했으며 Pages manifest SHA-256은 공개 `openapi.json` artifact와 일치한다. 기존 checkout template 운영 데이터는 보존됐다. 안전한 fixture가 없어 이번 release의 예약·PIN success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, 이를 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
 
-Issue #236의 로컬 source candidate는 OpenAPI `0.5.0` 126 paths / 136 operations이며 아직 production URL이나 Pages 정본이 아니다. 아래 객실 카탈로그·인원 endpoint는 해당 candidate가 `dev`/release/main/production gate를 통과한 뒤에만 운영에서 활성화한다.
+Issue #236까지 통합된 `dev`는 OpenAPI `0.5.0` 126 paths / 136 operations이고 Issue #228 source 후보는 점유 보정과 표시 분류 override 두 경로를 더한 128 paths / 138 operations다. 둘 다 아직 production URL이나 Pages 정본이 아니다. 아래 객실 카탈로그·인원 endpoint는 release/main/production gate를 통과한 뒤에만 운영에서 활성화한다.
 
 ### #131/#140/#169 객실 PIN source 계약
 
@@ -217,6 +217,7 @@ const idempotencyKey = crypto.randomUUID();
 | 객실 운영 차단 | `POST /v1/rooms/{roomId}/operation-blocks` | 시작/종료 시각은 RFC 3339 offset, 생성 결과 ID는 서버 결정 |
 | 객실 운영 차단 해제 | `POST /v1/rooms/{roomId}/operation-blocks/{blockId}/release` | 삭제가 아닌 release 이력 append |
 | 객실 점유 보정 | `POST /v1/rooms/{roomId}/occupancy-corrections` | admin 전용; reservationId·occupied·effectiveAt·expectedRoomVersion·reasonCode와 Idempotency-Key 필수. 복합 표시 status를 덮지 않고 canonical stay segment 이력을 보정 |
+| 객실 표시 분류 강제 조정 | `POST /v1/rooms/{roomId}/display-status-overrides` | admin 전용; targetStatus는 6개 표시 enum 또는 null(clear). 표시만 바꾸며 예약·점유·readiness·bookability는 불변. 실제 BLOCKED는 operation-block command 사용 |
 | 촛불 수량 기록 | `POST /v1/rooms/{roomId}/candles` | count 0 이상, physicallyVerified 기본 false |
 | 객실 이슈 조회 | `GET /v1/rooms/{roomId}/issues?status=open` | 미해결 이슈만; 반환 ID와 roomStateVersion을 해결에 사용 |
 | 객실 이슈 등록 | `POST /v1/rooms/{roomId}/issues` | description 연락처 입력 금지, raw 문구를 오류 로그에 남기지 않음 |
@@ -253,7 +254,7 @@ const idempotencyKey = crypto.randomUUID();
 
 현재 예약 구간은 `checkInAt <= serverTime < checkOutAt`이고 실제 active occupancy도 lifecycle `OCCUPIED`가 우선이다. current가 없으면 가장 이른 미래 active 예약의 KST 체크인 날짜가 오늘이면 `ARRIVAL_PENDING`, 내일이면 `RESERVATION_PRESENT`, 모레 이후이면 `FUTURE`, 없으면 `NONE`이다. `nextReservationId`, `nextCheckInAt`, `nextCheckOutAt`은 current가 아닌 가장 이른 미래 active 예약만 담으며, 현재 투숙 중이어도 뒤 예약이 있으면 값이 존재할 수 있다.
 
-카드·필터·집계의 대표 값은 서버의 `primaryDisplayStatus`를 사용한다. 우선순위는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY`다. 청소만으로 `BLOCKED`를 만들지 않고 `FUTURE`는 현재 readiness 대표 상태를 유지한다. 상세 설명에는 `blockingReasonCodes`와 `readinessReasonCodes`를 사용하되, 기존 `reasonCodes`도 호환 필드로 보존한다.
+카드·필터·집계의 대표 값은 서버의 `primaryDisplayStatus`를 사용한다. 우선순위는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY`다. `canonicalPrimaryDisplayStatus`는 원장에서 계산한 값이고 `displayStatusOverride`는 관리자 강제 분류 또는 null이다. override가 있으면 `primaryDisplayStatus`에만 우선 적용되며 나머지 축은 그대로다. 청소만으로 canonical `BLOCKED`를 만들지 않고 `FUTURE`는 현재 readiness 대표 상태를 유지한다. 상세 설명에는 `blockingReasonCodes`와 `readinessReasonCodes`를 사용하되, 기존 `reasonCodes`도 호환 필드로 보존한다.
 
 이 projection은 저장된 단일 status가 아니다. `occupied`는 서버 평가 시각이 canonical stay segment의 `[startsAt,endsAt)` 안에 있을 때만 true이고, 종료 미정 end=null은 명시 종료 전까지 유지된다. `allocationBlocked`는 운영 차단·배정 차단 이슈·촛불·기준정보 오류 같은 객실 문제만 뜻하므로 점유나 청소만으로 true가 되지 않는다. `allocationReady`는 점유·청소·객실 문제와 current-check-in readiness 경고를 모두 통과할 때만 true다. 미래 예약과 planned checkout만으로 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `pinSyncStatus=unconfigured|mismatch`는 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건이 아니며, current check-in 시점에만 readiness 경고로 표시한다. 실제 체크인·PIN 접근 화면은 기존 #140 계약대로 `verified` 전까지 차단한다.
 

@@ -64,6 +64,8 @@ export interface RoomSummary {
   reservationLifecycle: RoomReservationLifecycle;
   readinessStatus: RoomReadinessStatus;
   primaryDisplayStatus: RoomPrimaryDisplayStatus;
+  canonicalPrimaryDisplayStatus: RoomPrimaryDisplayStatus;
+  displayStatusOverride: RoomPrimaryDisplayStatus | null;
   nextReservationId: string | null;
   nextCheckInAt: string | null;
   nextCheckOutAt: string | null;
@@ -129,6 +131,22 @@ export interface RoomOccupancyCorrectionResult {
   reservationId: string;
   occupied: boolean;
   effectiveAt: string;
+  roomStateVersion: number;
+  recordedAt: string;
+}
+
+export interface OverrideRoomDisplayStatusInput {
+  roomId: string;
+  targetStatus: RoomPrimaryDisplayStatus | null;
+  expectedRoomVersion: number;
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface RoomDisplayStatusOverrideResult {
+  overrideId: string;
+  roomId: string;
+  targetStatus: RoomPrimaryDisplayStatus | null;
   roomStateVersion: number;
   recordedAt: string;
 }
@@ -380,6 +398,10 @@ export interface RoomService {
   changeMasterData(actor: Actor, input: ChangeRoomMasterDataInput): Promise<RoomSummary>;
   mutateOperation(actor: Actor, input: RoomOperationInput): Promise<RoomOperationResult>;
   correctOccupancy(actor: Actor, input: CorrectRoomOccupancyInput): Promise<RoomOccupancyCorrectionResult>;
+  overrideDisplayStatus(
+    actor: Actor,
+    input: OverrideRoomDisplayStatusInput
+  ): Promise<RoomDisplayStatusOverrideResult>;
   preparePinChange(actor: Actor, input: PrepareRoomPinChangeInput): Promise<RoomPinChangeResult>;
   confirmPinChange(actor: Actor, input: ConfirmRoomPinChangeInput): Promise<RoomPinChangeResult>;
   rollbackPinChange(actor: Actor, input: ConfirmRoomPinChangeInput): Promise<RoomPinChangeResult>;
@@ -409,6 +431,8 @@ interface RoomProjectionRow {
   reservation_lifecycle: RoomReservationLifecycle;
   readiness_status: RoomReadinessStatus;
   primary_display_status: RoomPrimaryDisplayStatus;
+  canonical_primary_display_status: RoomPrimaryDisplayStatus;
+  display_status_override: RoomPrimaryDisplayStatus | null;
   next_reservation_id: string | null;
   next_check_in_at: string | null;
   next_check_out_at: string | null;
@@ -465,6 +489,8 @@ function toRoom(row: RoomProjectionRow): RoomSummary {
     reservationLifecycle: row.reservation_lifecycle,
     readinessStatus: row.readiness_status,
     primaryDisplayStatus: row.primary_display_status,
+    canonicalPrimaryDisplayStatus: row.canonical_primary_display_status,
+    displayStatusOverride: row.display_status_override,
     nextReservationId: row.next_reservation_id,
     nextCheckInAt: row.next_check_in_at,
     nextCheckOutAt: row.next_check_out_at,
@@ -568,6 +594,12 @@ function roomError(error: { message?: string } | null): AppError {
   }
   if (message.includes('INVALID_OCCUPANCY_CORRECTION')) {
     return new AppError(400, 'INVALID_OCCUPANCY_CORRECTION', '점유 보정 요청이 올바르지 않습니다.');
+  }
+  if (message.includes('DISPLAY_STATUS_OVERRIDE_ALREADY_APPLIED')) {
+    return new AppError(409, 'DISPLAY_STATUS_OVERRIDE_ALREADY_APPLIED', '이미 요청한 표시 상태가 적용되어 있습니다.');
+  }
+  if (message.includes('INVALID_DISPLAY_STATUS_OVERRIDE')) {
+    return new AppError(400, 'INVALID_DISPLAY_STATUS_OVERRIDE', '표시 상태 보정 요청이 올바르지 않습니다.');
   }
   if (message.includes('RESERVATION_NOT_FOUND')) {
     return new AppError(404, 'RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다.');
@@ -1049,6 +1081,38 @@ export class SupabaseRoomService implements RoomService {
       reservationId: String(row.reservation_id),
       occupied: Boolean(row.occupied),
       effectiveAt: String(row.effective_at),
+      roomStateVersion: Number(row.room_state_version),
+      recordedAt: String(row.recorded_at)
+    };
+  }
+
+  async overrideDisplayStatus(
+    actor: Actor,
+    input: OverrideRoomDisplayStatusInput
+  ): Promise<RoomDisplayStatusOverrideResult> {
+    ensureAdmin(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      targetStatus: input.targetStatus,
+      expectedRoomVersion: input.expectedRoomVersion,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('override_room_display_status', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: input.roomId,
+      p_target_status: input.targetStatus,
+      p_expected_room_version: input.expectedRoomVersion,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    const row = data as Record<string, unknown>;
+    return {
+      overrideId: String(row.override_id),
+      roomId: String(row.room_id),
+      targetStatus: row.target_status as RoomPrimaryDisplayStatus | null,
       roomStateVersion: Number(row.room_state_version),
       recordedAt: String(row.recorded_at)
     };

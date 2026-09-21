@@ -8,7 +8,7 @@ const supabaseCli = fileURLToPath(
 );
 const container = "supabase_db_room-management-system-backend";
 const baselineVersion = "20260915000628";
-const finalVersion = "20260920144042";
+const finalVersion = "20260920150000";
 const migrationPattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
 const psqlArgs = [
   "exec",
@@ -121,7 +121,7 @@ function assertRowsPreserved(before, after, table) {
   for (const hash of after) remaining.set(hash, (remaining.get(hash) ?? 0) + 1);
   for (const hash of before) {
     const count = remaining.get(hash) ?? 0;
-    assert(count > 0, `migration 57 -> 75 changed or removed an existing ${table} row`);
+    assert(count > 0, `migration 57 -> 77 changed or removed an existing ${table} row`);
     remaining.set(hash, count - 1);
   }
 }
@@ -139,7 +139,7 @@ function assertHistory(actual, expected, label) {
 let passed = false;
 try {
   const expectedMigrations = migrationFiles();
-  assert(expectedMigrations.length === 76, "release candidate must contain exactly 76 migrations");
+  assert(expectedMigrations.length === 77, "release candidate must contain exactly 77 migrations");
   assert(
     expectedMigrations[55]?.version === baselineVersion &&
       expectedMigrations[55]?.name === "cleaning_template_duration_optional",
@@ -147,8 +147,8 @@ try {
   );
   assert(
     expectedMigrations.at(-1)?.version === finalVersion &&
-      expectedMigrations.at(-1)?.name === "developer_room_catalog_capacity",
-    "migration 76 must be developer_room_catalog_capacity",
+      expectedMigrations.at(-1)?.name === "room_status_admin_correction",
+    "migration 77 must be room_status_admin_correction",
   );
 
   reset(baselineVersion);
@@ -190,7 +190,7 @@ try {
 
   passed = true;
   process.stdout.write(
-    `production-baseline 56 -> 76 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
+    `production-baseline 56 -> 77 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
   );
 } finally {
   try {

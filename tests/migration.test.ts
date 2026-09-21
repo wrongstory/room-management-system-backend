@@ -147,7 +147,7 @@ const photoSlotContractV8MigrationUrl = new URL(
   import.meta.url
 );
 const roomStatusAdminCorrectionMigrationUrl = new URL(
-  '../supabase/migrations/20260920143711_room_status_admin_correction.sql',
+  '../supabase/migrations/20260920150000_room_status_admin_correction.sql',
   import.meta.url
 );
 
@@ -260,11 +260,19 @@ describe('initial migration contract', () => {
     expect(sql).toContain('p_effective_at');
     expect(sql).toContain('p_reason_code');
     expect(sql).toContain('room_occupancy_corrections_immutable');
+    expect(sql).toContain('create table private.room_display_status_overrides');
+    expect(sql).toContain('create function public.override_room_display_status(');
+    expect(sql).toContain("'room.display_status_override'");
+    expect(sql).toContain('canonical_primary_display_status text');
+    expect(sql).toContain('display_status_override text');
+    expect(sql).toContain('v_lineage_segment.id is null');
+    expect(sql).toContain("message = 'OCCUPANCY_CORRECTION_ROOM_MISMATCH'");
     expect(sql).toContain('cardinality(readiness.blocking_reason_codes) > 0');
     expect(sql).toContain('not state.occupied and cardinality(readiness.readiness_reason_codes) = 0');
     expect(sql).toContain('from public, anon, authenticated, service_role');
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_occupancy_corrections to (anon|authenticated)/);
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_display_status_overrides to (anon|authenticated)/);
   });
 
   it('moves pre-check-in reservations only through a replay-safe dedicated command', async () => {

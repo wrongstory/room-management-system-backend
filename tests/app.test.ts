@@ -124,6 +124,8 @@ function services(): AppServices {
         reservationLifecycle: 'FUTURE' as const,
         readinessStatus: 'READY' as const,
         primaryDisplayStatus: 'READY' as const,
+        canonicalPrimaryDisplayStatus: 'READY' as const,
+        displayStatusOverride: null,
         nextReservationId: '40000000-0000-4000-8000-000000000001',
         nextCheckInAt: '2026-09-18T07:00:00.000Z',
         nextCheckOutAt: '2026-09-19T02:00:00.000Z',
@@ -146,6 +148,13 @@ function services(): AppServices {
         reservationId: input.reservationId,
         occupied: input.occupied,
         effectiveAt: input.effectiveAt,
+        roomStateVersion: input.expectedRoomVersion + 1,
+        recordedAt: '2026-09-20T00:00:01.000Z'
+      })),
+      overrideDisplayStatus: vi.fn(async (_actor, input) => ({
+        overrideId: '72000000-0000-4000-8000-000000000001',
+        roomId: input.roomId,
+        targetStatus: input.targetStatus,
         roomStateVersion: input.expectedRoomVersion + 1,
         recordedAt: '2026-09-20T00:00:01.000Z'
       })),
@@ -526,6 +535,48 @@ describe('application', () => {
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe('ADMIN_REQUIRED');
     expect(appServices.rooms.correctOccupancy).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([
+    'BLOCKED',
+    'OCCUPIED',
+    'ARRIVAL_PENDING',
+    'RESERVATION_PRESENT',
+    'CLEANING_REQUIRED',
+    'READY',
+    null
+  ] as const)('records the %s display classification override without changing source axes', async (targetStatus) => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/display-status-overrides',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': `display-status-${targetStatus ?? 'clear'}`
+      },
+      payload: {
+        targetStatus,
+        expectedRoomVersion: 7,
+        reasonCode: 'FRONT_DESK_VERIFIED'
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().statusOverride).toMatchObject({
+      overrideId: '72000000-0000-4000-8000-000000000001',
+      targetStatus,
+      roomStateVersion: 8
+    });
+    expect(appServices.rooms.overrideDisplayStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({
+        roomId: '11111111-1111-4111-8111-111111111111',
+        targetStatus,
+        expectedRoomVersion: 7
+      })
+    );
     await app.close();
   });
 

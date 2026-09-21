@@ -1,6 +1,6 @@
 begin;
 
-select plan(17);
+select plan(35);
 
 create function pg_temp.checkout_slots() returns jsonb
 language sql immutable as $$
@@ -39,7 +39,8 @@ insert into public.rooms(id,room_number,room_type_id,elevator_zone)
 select fixture.id,fixture.number,room_type.id,'A'
 from (values
   ('94000000-0000-4000-8000-000000000001'::uuid,'971'),
-  ('94000000-0000-4000-8000-000000000002'::uuid,'972')
+  ('94000000-0000-4000-8000-000000000002'::uuid,'972'),
+  ('94000000-0000-4000-8000-000000000003'::uuid,'973')
 ) fixture(id,number)
 cross join lateral(select id from public.room_types where code='standard') room_type;
 
@@ -127,21 +128,59 @@ select is((select count(*)::integer from public.room_occupancy_events
 select is((select count(*)::integer from public.audit_events
   where event_type='room.occupancy_corrected'),1,'correction appends one safe audit event');
 
-select throws_ok($$select public.correct_room_occupancy(
+select is(
+  (select public.correct_room_occupancy(
+    '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
+    '94000000-0000-4000-8000-000000000001','95000000-0000-4000-8000-000000000001',
+    false,(select effective_at from private.room_occupancy_corrections limit 1),
+    (select room_state_version-1 from private.room_occupancy_corrections limit 1),
+    'FRONT_DESK_VERIFIED','room-state-zero-length',repeat('3',64))->>'correction_id'),
+  (select value->>'correction_id' from correction_result),
+  'same occupancy correction request replays the original response');
+select is((select count(*)::integer from private.room_occupancy_corrections),1,
+  'occupancy correction replay duplicates no ledger, event, audit, or segment');
+
+create temporary table restore_result as
+select public.correct_room_occupancy(
   '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
-  '94000000-0000-4000-8000-000000000002','95000000-0000-4000-8000-000000000001',
-  true,clock_timestamp(),(select state_version from public.rooms where id='94000000-0000-4000-8000-000000000002'),
-  'FRONT_DESK_VERIFIED','room-state-target-room-conflict',repeat('7',64))$$,
-  '23514','ROOM_OCCUPANCY_CONFLICT',
-  'a different stay overlapping the target room returns a stable occupancy conflict');
+  '94000000-0000-4000-8000-000000000001','95000000-0000-4000-8000-000000000001',
+  true,(select effective_at from private.room_occupancy_corrections limit 1),
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000001'),
+  'FRONT_DESK_VERIFIED','room-state-same-room-restore',repeat('8',64)
+) value;
+select is((select value->>'occupied' from restore_result),'true',
+  'occupied restoration succeeds inside the same room lineage');
+select is(private.room_occupied_at(
+  '94000000-0000-4000-8000-000000000001',
+  (select effective_at from private.room_occupancy_corrections where occupied limit 1)
+),true,'same-room restoration makes the canonical segment occupied again');
+select is(
+  (select public.correct_room_occupancy(
+    '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
+    '94000000-0000-4000-8000-000000000001','95000000-0000-4000-8000-000000000001',
+    true,(select effective_at from private.room_occupancy_corrections where occupied limit 1),
+    (select room_state_version-1 from private.room_occupancy_corrections where occupied limit 1),
+    'FRONT_DESK_VERIFIED','room-state-same-room-restore',repeat('8',64))->>'correction_id'),
+  (select value->>'correction_id' from restore_result),
+  'same-room occupied restoration replays the original response');
+select is((select count(*)::integer from private.room_occupancy_corrections),2,
+  'same-room restore replay leaves exactly two occupancy corrections');
+
+select public.correct_room_occupancy(
+  '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
+  '94000000-0000-4000-8000-000000000001','95000000-0000-4000-8000-000000000001',
+  false,(select effective_at from private.room_occupancy_corrections where occupied limit 1),
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000001'),
+  'FRONT_DESK_VERIFIED','room-state-vacant-again',repeat('9',64));
 
 select throws_ok($$select public.correct_room_occupancy(
   '92000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000001',
-  '94000000-0000-4000-8000-000000000001','95000000-0000-4000-8000-000000000002',
-  true,clock_timestamp(),(select state_version from public.rooms where id='94000000-0000-4000-8000-000000000001'),
-  'FRONT_DESK_VERIFIED','room-state-other-room-overlap',repeat('6',64))$$,
+  '94000000-0000-4000-8000-000000000003','95000000-0000-4000-8000-000000000001',
+  true,(select effective_at from private.room_occupancy_corrections where occupied limit 1),
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000003'),
+  'FRONT_DESK_VERIFIED','room-state-cross-room-restore',repeat('6',64))$$,
   '23514','OCCUPANCY_CORRECTION_ROOM_MISMATCH',
-  'a future segment in another room rejects an occupied correction with a stable domain error');
+  'A vacant correction followed by B occupied restoration is rejected by room lineage');
 
 select throws_ok($$select public.correct_room_occupancy(
   '92000000-0000-4000-8000-000000000002','93000000-0000-4000-8000-000000000002',
@@ -156,8 +195,110 @@ select throws_ok($$select public.correct_room_occupancy(
   'DEVELOPER_ATTEMPT','room-state-developer-denied',repeat('5',64))$$,
   '42501','ADMIN_REQUIRED','developer cannot correct occupancy');
 
-select is((select count(*)::integer from private.room_occupancy_corrections),1,
+select is((select count(*)::integer from private.room_occupancy_corrections),3,
   'denied roles append no correction rows');
+
+create temporary table display_override_results(
+  target_status text primary key,
+  primary_display_status text not null,
+  canonical_primary_display_status text not null,
+  display_status_override text not null,
+  occupied boolean not null,
+  allocation_blocked boolean not null,
+  allocation_ready boolean not null
+);
+do $$
+declare v_target text; v_index integer := 0;
+begin
+  foreach v_target in array array[
+    'BLOCKED','OCCUPIED','ARRIVAL_PENDING','RESERVATION_PRESENT',
+    'CLEANING_REQUIRED','READY'
+  ] loop
+    v_index := v_index + 1;
+    perform public.override_room_display_status(
+      '92000000-0000-4000-8000-000000000001',
+      '93000000-0000-4000-8000-000000000001',
+      '94000000-0000-4000-8000-000000000003',v_target,
+      (select state_version from public.rooms
+       where id='94000000-0000-4000-8000-000000000003'),
+      'FRONT_DESK_VERIFIED','room-display-'||lower(v_target),repeat(v_index::text,64)
+    );
+    insert into display_override_results
+    select v_target,primary_display_status,canonical_primary_display_status,
+      display_status_override,occupied,allocation_blocked,allocation_ready
+    from public.get_room_operational_projection(
+      '92000000-0000-4000-8000-000000000001',
+      '94000000-0000-4000-8000-000000000003'
+    );
+  end loop;
+end
+$$;
+select set_eq(
+  'select primary_display_status from display_override_results',
+  $$values ('BLOCKED'),('OCCUPIED'),('ARRIVAL_PENDING'),
+    ('RESERVATION_PRESENT'),('CLEANING_REQUIRED'),('READY')$$,
+  'every source-controlled display classification can be forced per room');
+select ok(not exists(select 1 from display_override_results
+  where target_status <> display_status_override),
+  'effective display classification exposes the current override explicitly');
+select ok(not exists(select 1 from display_override_results
+  where canonical_primary_display_status <> 'READY' or occupied
+    or allocation_blocked or not allocation_ready),
+  'display overrides never change canonical occupancy, blocking, or readiness axes');
+
+create temporary table clear_override_result as
+select public.override_room_display_status(
+  '92000000-0000-4000-8000-000000000001',
+  '93000000-0000-4000-8000-000000000001',
+  '94000000-0000-4000-8000-000000000003',null,
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000003'),
+  'FRONT_DESK_VERIFIED','room-display-clear',repeat('a',64)
+) value;
+select ok((select primary_display_status=canonical_primary_display_status
+  and display_status_override is null
+  from public.get_room_operational_projection(
+    '92000000-0000-4000-8000-000000000001',
+    '94000000-0000-4000-8000-000000000003')),
+  'null clears the override and restores the canonical display classification');
+select is(
+  (select public.override_room_display_status(
+    '92000000-0000-4000-8000-000000000001',
+    '93000000-0000-4000-8000-000000000001',
+    '94000000-0000-4000-8000-000000000003',null,
+    (select room_state_version-1 from private.room_display_status_overrides
+     where target_status is null order by room_state_version desc limit 1),
+    'FRONT_DESK_VERIFIED','room-display-clear',repeat('a',64))->>'override_id'),
+  (select value->>'override_id' from clear_override_result),
+  'display override retry replays the original response');
+select is((select count(*)::integer from private.room_display_status_overrides),7,
+  'six display statuses and one clear append exactly seven immutable rows');
+select is((select count(*)::integer from public.audit_events
+  where event_type='room.display_status_overridden'),7,
+  'each display override appends one safe audit event');
+
+select throws_ok($$select public.override_room_display_status(
+  '92000000-0000-4000-8000-000000000002','93000000-0000-4000-8000-000000000002',
+  '94000000-0000-4000-8000-000000000003','BLOCKED',
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000003'),
+  'MAID_ATTEMPT','room-display-maid-denied',repeat('b',64))$$,
+  '42501','ADMIN_REQUIRED','maid cannot override a display classification');
+select throws_ok($$select public.override_room_display_status(
+  (select id from public.profiles where role='developer'),'93000000-0000-4000-8000-000000000003',
+  '94000000-0000-4000-8000-000000000003','BLOCKED',
+  (select state_version from public.rooms where id='94000000-0000-4000-8000-000000000003'),
+  'DEVELOPER_ATTEMPT','room-display-developer-denied',repeat('c',64))$$,
+  '42501','ADMIN_REQUIRED','developer cannot override a display classification');
+select is((select count(*)::integer from private.room_display_status_overrides),7,
+  'denied roles append no display override rows');
+
+select ok(has_function_privilege(
+  'service_role', 'public.get_room_operational_projection(uuid,uuid)', 'EXECUTE'),
+  'projection drop/recreate restores service-role execute authority');
+select ok(not has_function_privilege(
+  'authenticated', 'public.get_room_operational_projection(uuid,uuid)', 'EXECUTE'),
+  'projection drop/recreate does not leak execute to authenticated');
+select ok(to_regprocedure('public.get_room_operational_projection(uuid,uuid)') is not null,
+  'projection drop/recreate leaves the canonical callable signature installed');
 
 select * from finish();
 rollback;
