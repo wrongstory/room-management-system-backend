@@ -2,7 +2,7 @@
 
 이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 바로 실행할 작업 범위와 화면 검증 순서는 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)를 사용한다.
 
-2026-09-20 대조 기준은 프런트 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`, 백엔드 production source `main@80f935016d5581d500136fba29c206f6ee797bc0`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. production source 제공과 hosted provider·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
+2026-09-21 대조 기준은 프런트 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`, 백엔드 production source `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. production source 제공과 hosted provider·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
 
 ## 1. 계약을 받는 위치
 
@@ -30,9 +30,9 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 `main@80f935016d5581d500136fba29c206f6ee797bc0` 기준 73 migrations, `api` ACTIVE v17, OpenAPI `0.4.0` 120 paths / 130 operations를 사용한다. GitHub Pages도 workflow run `35481531782`에서 production Edge와 0.4.0 / 120 / 130 parity를 확인했으며 Pages manifest SHA-256은 공개 `openapi.json` artifact와 일치한다. 기존 checkout template 운영 데이터는 보존됐다. 안전한 fixture가 없어 이번 release의 예약·PIN success mutation은 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`이며, 이를 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
+production Edge는 `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a` 기준 73 migrations, `api` ACTIVE v19, OpenAPI `0.4.0` 120 paths / 130 operations를 사용한다. #238 미등록 객실 최초 PIN 등록 hotfix는 API에 반영됐고 Pages는 기존 0.4.0 / 120 / 130 snapshot을 유지한다. 안전한 fixture가 없는 mutation을 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
 
-Issue #236까지 통합된 `dev`는 OpenAPI `0.5.0` 126 paths / 136 operations이고 Issue #228 source 후보는 점유 보정과 표시 분류 override 두 경로를 더한 128 paths / 138 operations다. 둘 다 아직 production URL이나 Pages 정본이 아니다. 아래 객실 카탈로그·인원 endpoint는 release/main/production gate를 통과한 뒤에만 운영에서 활성화한다.
+v0.5.0 release candidate `dev@49214bb67f2cf346178bc12321948a810e050234`는 OpenAPI `0.5.0` 128 paths / 138 operations다. #229/#231/#236/#228과 #238 backport를 포함하지만 아직 production URL이나 Pages 정본이 아니다. 객실 카탈로그·상태 보정과 새 가능일/Preview 계약은 release/main/production gate를 통과한 뒤에만 운영에서 활성화한다.
 
 ### #131/#140/#169 객실 PIN source 계약
 
