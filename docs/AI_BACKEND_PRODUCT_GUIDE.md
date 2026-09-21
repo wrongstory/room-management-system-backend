@@ -4,14 +4,14 @@
 
 검토 기준:
 
-- production release 기준은 73 migrations / OpenAPI 120 paths / 130 operations이고, v0.5.0 release candidate 기준은 `dev@49214bb67f2cf346178bc12321948a810e050234` — 77 migrations / OpenAPI 0.5.0 128 paths / 138 operations이다. 후보는 #229/#231/#236/#228과 #238 backport를 포함하지만 아직 production 사용 가능 상태가 아니다.
+- Issue #245 v0.5.1 hotfix 후보는 v0.5.0 `main@ed34abe5c5375323dc6952c330183b73c9211547`을 기준으로 78번째 append-only migration과 OpenAPI `0.5.1` 128 paths / 138 operations를 구성한다. bookability preview에서만 `guestCount` 생략/`null`을 같은 값으로 받아 capacity 필터 없이 기간 판정을 하며, 예약 create/change의 인원 필수 계약은 유지한다. 아직 PR 병합·production DB/API/Pages 반영 전이다.
+- 현재 production release 기준은 `main@ed34abe5c5375323dc6952c330183b73c9211547`, 77 migrations(head `room_status_admin_correction`), `api` ACTIVE v23, OpenAPI와 Pages `0.5.0` 128 paths / 138 operations다. `/health`와 `/openapi.json` HTTP 200을 확인했다.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
-- 백엔드 저장소와 직접 검증한 production 배포 source는 `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a`이다. production은 73 migrations, `api` ACTIVE v19, OpenAPI `0.4.0` 120 paths / 130 operations이며 #238 최초 PIN 등록 hotfix와 공개 Health/OpenAPI smoke를 포함한다.
-- Issue #229/#231/#236/#228은 `dev@49214bb67f2cf346178bc12321948a810e050234`에 통합되어 74~77번째 append-only migration과 OpenAPI `0.5.0` 128 paths / 138 operations를 구성한다. 이는 아직 production 배포·운영 데이터 변경을 뜻하지 않는다.
+- Issue #229/#231/#236/#228은 `dev@49214bb67f2cf346178bc12321948a810e050234`에서 v0.5.0 후보를 구성했고 이후 `main`/production에 승격됐다. 74~77번째 append-only migration과 OpenAPI `0.5.0` 128 paths / 138 operations는 현재 운영 정본이며, #245 v0.5.1 미배포 후보와 구분한다.
 - 프런트엔드 정본 저장소: `wrongstory/room-management-system`
 - 프런트엔드 제품·운영 연결 snapshot: `dev@165fed2d62a763d64ac62539e1475c1b3e42868f` (`기능: 운영 API 연결을 완성하라`).
 - 프런트엔드 현재 원격 `main`: `afeb0898879bf8d381ee2e218938dc3160fd6ac0`. 별도 영향 대조 전에는 위 snapshot의 후속 정본으로 자동 승격하지 않는다.
-- 기준일: 2026-09-21 KST
+- 기준일: 2026-09-22 KST
 
 프런트엔드는 단일 HTML 중심의 고충실도 업무 시뮬레이터이며 기준 snapshot은 운영 API를 실제 소비한다. 화면 객체, fixture, dead code를 그대로 실제 API나 테이블로 옮기지 않는다.
 
@@ -132,7 +132,7 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 ### `[확정 — 2026-09-21 #236]` 객실 인원 기준과 개발자 카탈로그
 
 - `room_types.default_guest_count`와 `max_guest_count`를 API의 `baseOccupancy`와 `maxOccupancy`로 공개한다. 두 값은 1 이상의 정수이며 `baseOccupancy <= maxOccupancy`다.
-- 예약 가능 미리보기와 예약 생성·일정 변경은 최신 `maxOccupancy`를 DB에서 다시 확인한다. 초과 요청은 `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`로 거부하고 기존 예약을 자동 변경하지 않는다.
+- 예약 가능 미리보기의 `guestCount`는 선택값이다. 생략/null이면 임의 인원 기본값을 넣지 않고 기간 bookability만 계산하며, 양의 정수이면 최신 `maxOccupancy`를 함께 검사한다. 예약 생성·일정 변경의 `guestCount`는 계속 필수이고 최신 `maxOccupancy`를 DB에서 다시 확인한다. 초과 요청은 `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`로 거부하고 기존 예약을 자동 변경하지 않는다.
 - 현재 DB에 저장된 인원 값은 그대로 보존한다. 화면 예시 숫자를 새 production 기준값이나 backfill 값으로 승격하지 않는다.
 - 객실 유형 인원 변경은 singleton developer만 수행한다. 먼저 5분 유효 impact preview를 받고, 동일 fingerprint와 room-type CAS version, source-controlled reason code, Idempotency-Key로 확정한다. 새 최대 인원을 초과하는 활성 예약이 있으면 확정하지 않는다.
 - 객실 추가는 숫자 문자열 room number, 활성 객실 유형, 최신 객실 유형 version을 요구한다. 새 객실은 `verification_required`로 시작한다.
@@ -704,7 +704,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 ### `v0.2.0` 이후 source 통합 이력과 현재 `v0.5.0` release candidate 상태
 
-아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production 정본은 문서 상단의 Issue #220/PR #221 snapshot을 우선하며, source/bundle 반영과 hosted provider·Google·Cron 활성화를 별도 상태로 해석한다.
+아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production 정본은 문서 상단의 v0.5.0 snapshot을 우선하며, source/bundle 반영과 hosted provider·Google·Cron 활성화를 별도 상태로 해석한다.
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview와 #4 notified-only 조회는 source/dev 완료 후 현재 `main`/production source에 반영됐다. 다만 #28 lifecycle effect를 포함한 hosted 역할별 positive smoke는 별도 미완료 gate다.
@@ -718,8 +718,8 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - #108 알림함, #109 typed catalog/grouping/writer, #110 encrypted Web Push subscription, #111 delivery ledger/worker와 #112 VAPID/provider HTTP source까지 순차적으로 dev에 통합됐다. #112 승인 exact head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`와 PR #119 병합 commit `dfc98b1474f9f890851d49bd904869181d0d7880`의 tree는 동일하고 독립 QA 98/100, P0/P1/P2 0, required `application`/`migration` PASS다. PR #122 문서 동기화와 #124 pgTAP fixture 안정화를 반영한 integration base는 `dev@569bbb62e07a484fe2f6aa67520d6f10797e44f5`이며 기능 snapshot은 45 migrations / 98 paths / 105 operations다.
 - #73은 기존 45 migrations를 수정하지 않고 `cleaning_targets_reservation_room_fk`의 검사 시점만 기존 planned graph의 다른 복합 FK처럼 commit으로 맞추는 46번째 append-only migration이다. FK와 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC` commit trigger는 모두 유지된다. unassigned·draft room move, notified/checked-in 거부, command replay/rollback, 과거 notified room snapshot, room-change↔notify/checkout 경합을 source 회귀로 고정하며 public HTTP/OpenAPI 계약은 바꾸지 않는다.
 - #46은 기존 46 migrations를 수정하지 않은 47번째 append-only private password-change receipt와 password-specific shadow version으로 source/dev에 통합됐다. `(actor, command, key)`와 시작 session digest, actor 단위 미완료 1건, lease/claim으로 Auth mutation을 직렬화하며 비밀번호 원문·변환값·hash/HMAC/verifier·token·raw session ID는 저장하지 않는다. `auth.users.encrypted_password`가 실제로 바뀔 때만 private trigger가 hash를 복사하지 않고 무작위 nonsecret version을 회전하며, response loss는 receipt version·현재 private version·재전송된 새 비밀번호를 모두 확인한 뒤 profile gate·다른 session revoke·audit exactly-once·receipt 완료를 한 transaction으로 수렴한다. release/main·production 승격은 별도 gate다.
-- Issue #220/PR #221 후속 source와 #238 hotfix가 `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a`, production 73 migrations, `api` ACTIVE v19, OpenAPI `0.4.0` 120 paths / 130 operations에 반영됐다. 기존 네 Worker와 Pages 120/130 snapshot은 유지한다. tag/GitHub Release, 안전 fixture 기반 예약·PIN mutation, Issue #112/#137 hosted provider activation은 별도다.
-- Issue #236은 v0.5.0 candidate의 76번째 `developer_room_catalog_capacity` migration으로 developer 전용 안전 카탈로그, 객실 유형 인원 preview/commit, 객실 추가, 객실 비활성화 preview/commit과 예약 인원 상한 재검증을 추가한다. Issue #228의 77번째 `room_status_admin_correction`과 함께 `dev@49214bb67f2cf346178bc12321948a810e050234`, OpenAPI `0.5.0` 128 paths / 138 operations를 구성하며 아직 `main` 병합, production migration/API 배포, hosted 역할 smoke는 완료되지 않았다.
+- Issue #220/PR #221 후속 source와 #238 hotfix가 구성했던 과거 v0.4.0 snapshot은 이후 v0.5.0으로 대체됐다. 안전 fixture 기반 예약·PIN mutation과 Issue #112/#137 hosted provider activation은 source/runtime 배포와 별도다.
+- Issue #236의 76번째 `developer_room_catalog_capacity` migration은 developer 전용 안전 카탈로그, 객실 유형 인원 preview/commit, 객실 추가, 객실 비활성화 preview/commit과 예약 인원 상한 재검증을 추가한다. Issue #228의 77번째 `room_status_admin_correction`과 함께 OpenAPI `0.5.0` 128 paths / 138 operations를 구성하며 현재 `main`/production에 반영됐다.
 - #46, #128, #131, #136, #137, #140, #133의 source는 `dev`와 v0.3.0 production source에 반영됐다. #137의 API와 `room-pin-sheet-sync` bundle도 배포됐지만 hosted target/서비스 계정/ACL/Secrets/Cron/positive smoke는 미완료다. #156/#165 checkout template API와 선택형 duration 계약은 56번째 migration 및 `api` v16으로 production에 반영됐다. `standard`, `premium`, `oceanPremium`, `oceanFamily`의 checkout template은 각각 v7 exactly-one으로 게시됐고 슬롯 수는 10/11/13/15, `durationMinutes`는 모두 `null`이다. 이 게시 완료는 예약 success smoke의 대체가 아니며 안전한 fixture 부재로 해당 mutation은 명시적으로 SKIPPED 상태다.
 - wireframe에는 퇴실점검을 관리자가 직접 완료하거나 퇴실 청소 현장 완료로 대체하는 동작이 있지만, 고정한 제품 정책 문서에는 이 lifecycle의 정본이 없다. 이를 현재 구현만 보고 schema/API로 확정하지 않는다.
 - Issue #36과 v0.2.0 운영 smoke를 거쳐 Supabase-only production runtime을 채택했다. Fastify는 삭제하지 않고 개발·회귀 검증과 rollback 기준선으로 유지한다. 이후 dev source가 존재한다는 사실만으로 production 배포 또는 hosted 사용 가능을 선언하지 않는다.
@@ -821,11 +821,11 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#156/#165/#169와 #238 hotfix까지 production source와 runtime에 반영됐다. production은 73 migrations / `api` ACTIVE v19 / OpenAPI 0.4.0 120 paths / 130 operations이며 기존 네 checkout template 데이터도 보존됐다. 안전한 fixture가 없어 실제 예약·PIN success mutation은 전체 release PASS로 표현하지 않는다.
+P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#156/#165/#169, #229/#231/#236/#228과 #238 hotfix까지 production source와 runtime에 반영됐다. production은 77 migrations / `api` ACTIVE v23 / OpenAPI와 Pages 0.5.0 128 paths / 138 operations이며 기존 네 checkout template 데이터도 보존됐다. 안전한 fixture가 없어 실제 예약·PIN success mutation은 전체 release PASS로 표현하지 않는다.
 
-1. v0.5.0 release candidate의 77 migrations / 128 paths / 138 operations 전체 gate를 통과하고 `release/v0.5.0 → main`으로 승격한다.
-2. production이 여전히 73 migrations / `main@e2f2efa...`인지 read-only로 확인한 뒤 pending 4개와 exact `main`의 `api` bundle만 적용한다.
-3. 사용자 기능 확인과 production OpenAPI parity 뒤 Pages workflow를 수동 실행한다. 네 worker, Secrets, Cron은 변경하지 않는다.
+1. PR #246의 v0.5.1 후보를 exact head에서 검토하고 required CI 및 P0/P1=0을 확인한 뒤에만 `main` 병합을 판단한다.
+2. production이 여전히 77 migrations / head `room_status_admin_correction` / `main@ed34abe...`인지 read-only로 확인한 뒤 78번째 migration 한 건과 병합된 exact `main`의 `api` bundle만 적용한다.
+3. optional/null/positive `guestCount` hosted smoke와 production OpenAPI 0.5.1 / 128 / 138 parity 뒤 Pages workflow를 수동 실행한다. 네 worker, Secrets, Cron은 변경하지 않는다.
 4. 안전하게 되돌릴 수 있는 운영 fixture가 승인되면 예약/PIN mutation을 hosted smoke한다. fixture가 없으면 SKIPPED 상태를 PASS로 바꾸지 않는다.
 5. Issue #137 hosted Google Sheets와 Issue #112 Web Push activation은 실제 대상/자격증명/주기 승인 뒤에만 진행한다.
 6. Issue #12 backup/recovery source와 Issue #13 frontend/browser E2E는 별도 트랙으로 유지한다.

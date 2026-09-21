@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 5
     env:
       PUBLIC_API_BASE_URL: ${{ vars.PUBLIC_API_BASE_URL }}
-      EXPECTED_OPENAPI_VERSION: "0.5.0"
+      EXPECTED_OPENAPI_VERSION: "0.5.1"
       EXPECTED_OPENAPI_PATH_COUNT: "128"
       EXPECTED_OPENAPI_OPERATION_COUNT: "138"
     steps:

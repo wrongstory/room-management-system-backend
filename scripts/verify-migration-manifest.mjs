@@ -36,7 +36,7 @@ export async function verifyMigrationManifest() {
   invariant(manifest.hashAlgorithm === "sha256-lf-utf8", "unexpected hash algorithm");
   invariant(Array.isArray(manifest.migrations), "migrations must be an array");
   invariant(manifest.totalCount === 77, "totalCount must be 77");
-  invariant(files.length === manifest.totalCount, `expected 77 SQL files, found ${files.length}`);
+  invariant(files.filter((fileName) => stableMigration(fileName).version <= "20260920150000").length === manifest.totalCount, `expected 77 v0.5.0 SQL files`);
   invariant(manifest.migrations.length === manifest.totalCount, "manifest entry count mismatch");
   invariant(manifest.baseline?.count === 73, "baseline count must be 73");
   invariant(manifest.pending?.count === 4, "pending count must be 4");
@@ -47,7 +47,9 @@ export async function verifyMigrationManifest() {
 
   const names = new Set();
   let previousVersion = "";
-  for (const [index, fileName] of files.entries()) {
+  for (const [index, fileName] of files.filter(
+    (fileName) => stableMigration(fileName).version <= "20260920150000",
+  ).entries()) {
     const migration = stableMigration(fileName);
     const expected = manifest.migrations[index];
     invariant(migration.version > previousVersion, `${fileName} is not in strict version order`);

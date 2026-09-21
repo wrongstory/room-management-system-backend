@@ -90,7 +90,7 @@ const roomMoveCommitSchema = roomMovePreviewSchema.extend({
 
 const bookabilityPreviewSchema = z.intersection(z.object({
   checkInAt: timestampSchema,
-  guestCount: z.number().int().positive(),
+  guestCount: z.number().int().positive().nullable().optional(),
   excludeReservationId: z.uuid().nullable().optional(),
   roomTypeIds: z.array(z.uuid()).max(20).refine(
     (ids) => new Set(ids).size === ids.length,
@@ -160,7 +160,7 @@ export function createReservationRoutes(service: ReservationService): FastifyPlu
           reservationType: input.reservationType,
           checkInAt: input.checkInAt,
           checkOutAt: input.checkOutAt,
-          guestCount: input.guestCount,
+          guestCount: input.guestCount ?? null,
           excludeReservationId: input.excludeReservationId ?? null,
           ...(input.roomTypeIds ? { roomTypeIds: input.roomTypeIds } : {})
         })

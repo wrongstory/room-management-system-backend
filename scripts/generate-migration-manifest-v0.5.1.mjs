@@ -5,10 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationDirectory = resolve(projectRoot, "supabase", "migrations");
-const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.5.0.json");
+const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.5.1.json");
 const migrationFilePattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
-const baselineCount = 73;
-const releaseHeadVersion = "20260920150000";
+const baselineCount = 77;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(`Migration manifest generation failed: ${message}`);
@@ -22,7 +21,6 @@ function canonicalContent(source, fileName) {
 
 const files = (await readdir(migrationDirectory))
   .filter((fileName) => fileName.endsWith(".sql"))
-  .filter((fileName) => migrationFilePattern.exec(fileName)?.[1] <= releaseHeadVersion)
   .sort();
 
 const migrations = [];
@@ -40,12 +38,19 @@ for (const [index, fileName] of files.entries()) {
   previousVersion = match[1];
 }
 
-invariant(migrations.length === 77, `expected 77 migrations, found ${migrations.length}`);
-invariant(baselineCount < migrations.length, "baseline must precede the release head");
+invariant(migrations.length === 78, `expected 78 migrations, found ${migrations.length}`);
+invariant(
+  migrations[baselineCount - 1]?.name === "room_status_admin_correction",
+  "v0.5.1 baseline must be the immutable v0.5.0 head",
+);
+invariant(
+  migrations.at(-1)?.name === "reservation_bookability_optional_guest_count",
+  "v0.5.1 head must be the #245 hotfix",
+);
 
 const manifest = {
   schemaVersion: 1,
-  release: "v0.5.0",
+  release: "v0.5.1",
   hashAlgorithm: "sha256-lf-utf8",
   totalCount: migrations.length,
   baseline: {
