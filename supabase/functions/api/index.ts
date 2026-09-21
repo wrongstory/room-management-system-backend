@@ -142,6 +142,7 @@ import {
 } from "../_shared/reservation-api.ts";
 import {
   changeRoomMasterData,
+  correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
   listRoomEvents,
@@ -149,6 +150,7 @@ import {
   listRoomOperationBlocks,
   listRooms,
   listRoomTypes,
+  overrideRoomDisplayStatus,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -1646,6 +1648,43 @@ export async function handleApiRequest(
       return jsonResponse(
         {
           operation: await createRoomOperationBlock(
+            request,
+            clients,
+            actor,
+            roomId,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/occupancy-corrections")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        {
+          correction: await correctRoomOccupancy(
+            request,
+            clients,
+            actor,
+            roomId,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") &&
+      path.endsWith("/display-status-overrides")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        {
+          statusOverride: await overrideRoomDisplayStatus(
             request,
             clients,
             actor,

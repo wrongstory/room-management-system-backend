@@ -1575,7 +1575,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 70,
+              maxItems: 73,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -4391,6 +4391,26 @@ export const openApiDocument = {
         roomEntityIdParameter("blockId", "해제할 운영 차단 ID"),
       ),
     },
+    "/v1/rooms/{roomId}/occupancy-corrections": {
+      post: roomMutationOperation(
+        "correctRoomOccupancy",
+        "객실 점유 상태 보정",
+        "RoomOccupancyCorrectionRequest",
+        "correction",
+        201,
+        "예약·투숙 segment의 현재 점유 경계를 관리자 보정 이력으로 append합니다. UI 대표 status를 덮어쓰지 않으며 reasonCode, effectiveAt, room CAS, 멱등 receipt와 감사를 보존합니다.",
+      ),
+    },
+    "/v1/rooms/{roomId}/display-status-overrides": {
+      post: roomMutationOperation(
+        "overrideRoomDisplayStatus",
+        "객실 표시 분류 강제 조정",
+        "RoomDisplayStatusOverrideRequest",
+        "statusOverride",
+        201,
+        "표시/운영 분류만 append-only override로 조정하거나 null로 해제합니다. canonicalPrimaryDisplayStatus와 점유·예약·readiness·bookability 원장은 바뀌지 않습니다. BLOCKED 표시만으로 실제 배정을 막지 않으며 실제 차단에는 operation-block command를 사용해야 합니다.",
+      ),
+    },
     "/v1/rooms/{roomId}/candles": {
       post: roomMutationOperation(
         "setRoomCandleCount",
@@ -6764,6 +6784,8 @@ export const openApiDocument = {
           "room.report_issue",
           "room.resolve_issue",
           "room.record_pin_sync",
+          "room.occupancy_corrected",
+          "room.display_status_overridden",
           "room.pin_change_prepared",
           "room.pin_change_confirmed",
           "room.pin_mismatch_resolved",
@@ -6782,6 +6804,7 @@ export const openApiDocument = {
           "payroll.adjustment_reversed",
           "payroll.offset_settled",
           "payroll.late_earning_carried",
+          "payroll.payment_started",
           "payroll.payment_check_recorded",
           "payroll.payment_paid",
           "payroll.payment_reopened",
@@ -7498,6 +7521,16 @@ export const openApiDocument = {
               caseVersion: { type: "integer", minimum: 1 },
               paymentAttemptNumber: { type: "integer", minimum: 1 },
               paymentMethod: { type: "string", enum: ["bank_transfer"] },
+              occupied: { type: "boolean" },
+              displayStatusOverride: {
+                oneOf: [
+                  { $ref: "#/components/schemas/RoomPrimaryDisplayStatus" },
+                  { type: "null" },
+                ],
+                description:
+                  "표시 분류 override 값. null은 override 해제를 뜻하며 실제 점유·예약·readiness·bookability를 변경하지 않습니다.",
+              },
+              roomStateVersion: { type: "integer", minimum: 1 },
             },
           },
         },
@@ -9791,7 +9824,7 @@ export const openApiDocument = {
           "READY",
         ],
         description:
-          "BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY 우선순위의 파생 표시값입니다. DB 원본 상태가 아닙니다.",
+          "카드의 표시/운영 분류입니다. 기본값은 BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY 우선순위의 canonical projection이고, 관리자 display override가 있으면 표시값에만 우선 적용됩니다. 예약·점유·readiness·bookability 원본 상태가 아닙니다.",
       },
       RoomBlockingReasonCode: {
         type: "string",
@@ -10159,6 +10192,8 @@ export const openApiDocument = {
           "reservationLifecycle",
           "readinessStatus",
           "primaryDisplayStatus",
+          "canonicalPrimaryDisplayStatus",
+          "displayStatusOverride",
           "nextReservationId",
           "nextCheckInAt",
           "nextCheckOutAt",
@@ -10232,6 +10267,19 @@ export const openApiDocument = {
           primaryDisplayStatus: {
             $ref: "#/components/schemas/RoomPrimaryDisplayStatus",
           },
+          canonicalPrimaryDisplayStatus: {
+            $ref: "#/components/schemas/RoomPrimaryDisplayStatus",
+            description:
+              "점유·예약·운영 차단·readiness 원장으로 계산한 override 적용 전 표시 분류입니다.",
+          },
+          displayStatusOverride: {
+            oneOf: [
+              { $ref: "#/components/schemas/RoomPrimaryDisplayStatus" },
+              { type: "null" },
+            ],
+            description:
+              "관리자가 강제 지정한 표시/운영 분류입니다. null이면 override가 없으며 실제 점유·예약·readiness·bookability를 변경하지 않습니다.",
+          },
           nextReservationId: {
             type: ["string", "null"],
             format: "uuid",
@@ -10260,7 +10308,8 @@ export const openApiDocument = {
           },
           occupied: {
             type: "boolean",
-            description: "evaluatedAt 기준 현재 점유 여부",
+            description:
+              "evaluatedAt이 canonical non-retired stay segment의 [startsAt,endsAt) 안에 있는지 여부. null end는 명시 종료 전까지 점유입니다.",
           },
           cleaningRequired: {
             type: "boolean",
@@ -10281,12 +10330,12 @@ export const openApiDocument = {
           allocationBlocked: {
             type: "boolean",
             description:
-              "evaluatedAt 기준 하나 이상의 현재 고객 배정 차단 사유가 있는지 여부",
+              "운영 차단·배정 차단 이슈·촛불·기준정보 오류 같은 객실 문제 사유 존재 여부. 점유와 청소만으로 true가 되지 않습니다.",
           },
           allocationReady: {
             type: "boolean",
             description:
-              "evaluatedAt 기준 현재 고객 배정 준비 조건을 모두 만족하는지 여부",
+              "점유·청소·객실 문제와 current-check-in readiness 경고를 모두 통과했는지 여부",
           },
           reasonCodes: {
             type: "array",
@@ -10332,6 +10381,44 @@ export const openApiDocument = {
         additionalProperties: false,
         required: ["expectedRoomVersion", "reasonCode"],
         properties: {
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+        },
+      },
+      RoomOccupancyCorrectionRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "reservationId",
+          "occupied",
+          "effectiveAt",
+          "expectedRoomVersion",
+          "reasonCode",
+        ],
+        properties: {
+          reservationId: { type: "string", format: "uuid" },
+          occupied: { type: "boolean" },
+          effectiveAt: {
+            type: "string",
+            format: "date-time",
+            description: "현재 또는 과거의 실제 점유 경계 시각",
+          },
+          expectedRoomVersion: { type: "integer", minimum: 1 },
+          reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
+        },
+      },
+      RoomDisplayStatusOverrideRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["targetStatus", "expectedRoomVersion", "reasonCode"],
+        properties: {
+          targetStatus: {
+            oneOf: [
+              { $ref: "#/components/schemas/RoomPrimaryDisplayStatus" },
+              { type: "null" },
+            ],
+            description: "강제 표시 분류. null은 현재 override 해제입니다.",
+          },
           expectedRoomVersion: { type: "integer", minimum: 1 },
           reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
         },
@@ -10831,6 +10918,51 @@ export const openApiDocument = {
         properties: {
           entityId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomOccupancyCorrection: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "correctionId",
+          "roomId",
+          "reservationId",
+          "occupied",
+          "effectiveAt",
+          "roomStateVersion",
+          "recordedAt",
+        ],
+        properties: {
+          correctionId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          reservationId: { type: "string", format: "uuid" },
+          occupied: { type: "boolean" },
+          effectiveAt: { type: "string", format: "date-time" },
+          roomStateVersion: { type: "integer", minimum: 1 },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RoomDisplayStatusOverride: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "overrideId",
+          "roomId",
+          "targetStatus",
+          "roomStateVersion",
+          "recordedAt",
+        ],
+        properties: {
+          overrideId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          targetStatus: {
+            oneOf: [
+              { $ref: "#/components/schemas/RoomPrimaryDisplayStatus" },
+              { type: "null" },
+            ],
+          },
           roomStateVersion: { type: "integer", minimum: 1 },
           recordedAt: { type: "string", format: "date-time" },
         },
@@ -11939,13 +12071,17 @@ function roomMutationOperation(
   operationId: string,
   summary: string,
   requestSchema: string,
-  responseKey: "room" | "operation",
+  responseKey: "room" | "operation" | "correction" | "statusOverride",
   successStatus: 200 | 201,
   description: string,
   entityParameter?: Record<string, unknown>,
 ): Record<string, unknown> {
   const responseSchema = responseKey === "room"
     ? "#/components/schemas/RoomProjection"
+    : responseKey === "correction"
+    ? "#/components/schemas/RoomOccupancyCorrection"
+    : responseKey === "statusOverride"
+    ? "#/components/schemas/RoomDisplayStatusOverride"
     : "#/components/schemas/RoomOperationResult";
   return {
     tags: ["Rooms"],

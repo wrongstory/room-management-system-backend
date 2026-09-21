@@ -2447,6 +2447,35 @@ Table private.reservation_room_move_events {
   command_key text [not null, unique]
   Note: 'Immutable safe event; guest name, PIN, photo locator and raw request are forbidden.'
 }
+Table private.room_occupancy_corrections {
+  id uuid [pk]
+  command_key text [not null, unique]
+  room_id uuid [not null, ref: > public.rooms.id]
+  reservation_id uuid [not null, ref: > public.reservations.id]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  replaced_segment_id uuid [ref: > private.stay_room_segments.id]
+  successor_segment_id uuid [ref: > private.stay_room_segments.id]
+  occupied boolean [not null]
+  effective_at timestamptz [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  reason_code text [not null]
+  room_state_version bigint [not null]
+  request_hash text [not null]
+  recorded_at timestamptz [not null]
+  Note: '#228 immutable provenance for an admin canonical stay-segment correction. occupied restoration requires same-room historical segment lineage and never acts as a room move.'
+}
+Table private.room_display_status_overrides {
+  id uuid [pk]
+  command_key text [not null, unique]
+  room_id uuid [not null, ref: > public.rooms.id]
+  target_status text [note: 'BLOCKED/OCCUPIED/ARRIVAL_PENDING/RESERVATION_PRESENT/CLEANING_REQUIRED/READY; null clears']
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  reason_code text [not null]
+  room_state_version bigint [not null]
+  request_hash text [not null]
+  recorded_at timestamptz [not null]
+  Note: '#228 immutable display-only classification override. Canonical reservation, occupancy, readiness, allocation and bookability axes remain unchanged; BLOCKED does not create an operation block.'
+}
 Table private.stay_segment_checkout_obligations {
   id uuid [pk]
   stay_id uuid [not null, ref: > private.reservation_stays.id]

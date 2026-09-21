@@ -35,7 +35,7 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 ### #236 Developer 객실·인원 카탈로그 — source candidate
 
-75번째 append-only migration은 singleton developer만 사용할 수 있는 `GET /v1/developer/room-catalog`와 객실 유형 인원 변경·객실 추가·객실 비활성화 command를 추가한다. 응답은 객실 UUID/번호/유형/active/version과 유형의 code/displayName/인원/version/roomCount 및 집계만 반환하며 예약·고객·PIN·청소·감사 raw state를 섞지 않는다. 모든 응답은 `no-store`다.
+76번째 append-only migration은 singleton developer만 사용할 수 있는 `GET /v1/developer/room-catalog`와 객실 유형 인원 변경·객실 추가·객실 비활성화 command를 추가한다. 응답은 객실 UUID/번호/유형/active/version과 유형의 code/displayName/인원/version/roomCount 및 집계만 반환하며 예약·고객·PIN·청소·감사 raw state를 섞지 않는다. 모든 응답은 `no-store`다.
 
 인원 변경과 비활성화는 5분 TTL preview를 private FORCE RLS table에 고정한 뒤 actor, entity, CAS version, 요청 payload, 최신 영향 범위, opaque fingerprint를 commit에서 다시 확인한다. mutation은 Idempotency-Key receipt와 source-controlled reason code를 사용하며 기존 활성 예약이 새 최대 인원을 초과하거나 객실에 점유·예약·청소·PIN·미해결 운영 업무가 있으면 fail-closed한다. 객실 추가는 활성 유형의 최신 version을 요구하고 `verification_required`로 시작한다. 객실 제거는 hard delete 없이 inactive metadata와 audit event를 남긴다.
 
@@ -66,6 +66,16 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 `get_room_operational_projection`은 호출마다 서버 시각을 한 번만 캡처해 모든 행에 `evaluated_at`으로 반환한다. Fastify와 Edge adapter는 이를 RFC 3339 `evaluatedAt`으로 동일하게 공개하며, 예약 일정 축은 `reservationPhase=none|upcoming|current`로 반환한다. `current`는 반개구간 `checkInAt <= evaluatedAt < checkOutAt`이고, 미래 active 예약은 `upcoming`이다.
 
 현재 객실 현황은 이 snapshot 시각에 실제로 활성화된 점유·청소 의무·운영 차단만 계산한다. 미래 예약의 준비 의무는 일정과 작업 계획에는 남지만 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `reservationPhase`, `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`, `reasonCodes`, `pinSyncStatus`는 계속 독립 축이며 새 영구 `status` 컬럼이나 단일 API status를 만들지 않는다. 프런트의 5단계 대표 문구는 이 축을 읽는 표시 mapper일 뿐 정본 상태가 아니다.
+
+### #228 점유·객실 문제·배정 준비 분리
+
+77번째 append-only `room_status_admin_correction`은 #236의 76번째 `developer_room_catalog_capacity` 뒤에 적용되며, `occupied`를 canonical non-retired stay segment의 서버 snapshot 반개구간 `[startsAt, endsAt)` 포함 여부로만 계산한다. 시작 직전은 비점유, 시작 시각은 점유, 종료 시각은 비점유이며 null end인 장기투숙 segment는 실제 종료/보정 전까지 계속 점유다. 조기 실제 checkout과 관리자 vacant 보정은 segment를 닫으므로 즉시 projection에서 빠진다.
+
+`allocationBlocked`는 운영 차단·배정 차단 이슈·촛불·기준정보 오류처럼 객실 문제 축만 반영한다. 점유와 청소 의무는 단독으로 blocked를 만들지 않는다. `allocationReady`는 점유가 없고 청소·PIN/current-check-in 경고를 포함한 readiness 사유와 객실 문제 사유가 모두 없을 때만 true다.
+
+`POST /v1/rooms/{roomId}/occupancy-corrections`는 active/password-complete business admin의 live session만 허용한다. 예약 ID, 목표 occupied, 과거/현재 effectiveAt, room CAS version, reasonCode와 Idempotency-Key를 받고 UI 대표 status를 덮어쓰지 않는다. 기존 canonical segment를 retire하고 successor를 append하며 private correction 원장, public safe occupancy event, audit, command receipt를 같은 transaction에 기록한다. segment 시작과 같은 vacant 보정은 zero-length successor를 만들지 않고 전체 segment를 retire한다. occupied 복원은 effectiveAt을 포함하는 동일 room의 기존 segment lineage가 있을 때만 허용하고 successor는 그 source segment의 실제 `endsAt`(다음 이동 시각 또는 lineage boundary), source reservation, `moveEventId`를 승계한다. 따라서 과거 A 구간 복원이 현재 B 구간까지 늘어나지 않으며, lineage 경계 밖이나 A vacant 뒤 B occupied 같은 우회 이동은 `OCCUPANCY_CORRECTION_ROOM_MISMATCH`로 fail-closed한다. 정식 객실 이동은 계속 #187 preview/commit만 사용한다. maid/developer는 DB와 HTTP 양쪽에서 거부한다.
+
+`private.room_display_status_overrides`는 객실별 카드 분류 강제 조정을 immutable event로 보존한다. `POST /v1/rooms/{roomId}/display-status-overrides`는 여섯 source-controlled 표시값 또는 null(clear), room CAS, reason, idempotency를 검증한다. projection은 canonical 계산값과 override를 분리하고 effective `primaryDisplayStatus`만 override 우선으로 합성한다. 점유·예약 lifecycle·readiness·allocation/bookability는 전혀 갱신하지 않는다. 따라서 `BLOCKED` 표시는 운영상 라벨일 뿐 실제 차단 권한이 없고, 실제 배정 차단은 기존 operation-block command가 맡는다. 두 보정의 안전한 감사 유형 `room.occupancy_corrected`, `room.display_status_overridden`과 기존 SQL 승인 이력 `payroll.payment_started`를 developer 감사 OpenAPI allowlist에 정합화해 전체 유형과 filter 상한을 73개로 함께 유지한다.
 
 ### #187 예약 임박 lifecycle projection Phase A
 

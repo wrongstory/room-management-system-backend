@@ -38,7 +38,7 @@ for (const [index, fileName] of files.entries()) {
   previousVersion = match[1];
 }
 
-invariant(migrations.length === 76, `expected 76 migrations, found ${migrations.length}`);
+invariant(migrations.length === 77, `expected 77 migrations, found ${migrations.length}`);
 invariant(baselineCount < migrations.length, "baseline must precede the release head");
 
 const manifest = {

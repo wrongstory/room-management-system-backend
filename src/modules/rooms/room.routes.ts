@@ -41,6 +41,27 @@ const operationDecisionSchema = z.object({
   reasonCode: reasonCodeSchema
 });
 
+const occupancyCorrectionSchema = z.object({
+  reservationId: z.uuid(),
+  occupied: z.boolean(),
+  effectiveAt: z.string().datetime({ offset: true }),
+  expectedRoomVersion: expectedVersionSchema,
+  reasonCode: reasonCodeSchema
+}).strict();
+
+const displayStatusOverrideSchema = z.object({
+  targetStatus: z.enum([
+    'BLOCKED',
+    'OCCUPIED',
+    'ARRIVAL_PENDING',
+    'RESERVATION_PRESENT',
+    'CLEANING_REQUIRED',
+    'READY'
+  ]).nullable(),
+  expectedRoomVersion: expectedVersionSchema,
+  reasonCode: reasonCodeSchema
+}).strict();
+
 const candleSchema = operationDecisionSchema.extend({
   count: z.number().int().nonnegative(),
   physicallyVerified: z.boolean().default(false)
@@ -191,6 +212,28 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ operation });
+    });
+
+    app.post('/:roomId/occupancy-corrections', { preHandler: admin }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      const input = occupancyCorrectionSchema.parse(request.body);
+      const correction = await roomService.correctOccupancy(request.actor, {
+        roomId,
+        ...input,
+        idempotencyKey: idempotencyKey(request)
+      });
+      return reply.code(201).send({ correction });
+    });
+
+    app.post('/:roomId/display-status-overrides', { preHandler: admin }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      const input = displayStatusOverrideSchema.parse(request.body);
+      const statusOverride = await roomService.overrideDisplayStatus(request.actor, {
+        roomId,
+        ...input,
+        idempotencyKey: idempotencyKey(request)
+      });
+      return reply.code(201).send({ statusOverride });
     });
 
     app.get('/:roomId/operation-blocks', { preHandler: admin }, async (request, reply) => {

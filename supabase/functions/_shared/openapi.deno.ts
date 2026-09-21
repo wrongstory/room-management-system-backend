@@ -190,13 +190,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 126 &&
+    Object.keys(document.paths).length === 128 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 136,
-    "combined candidate contract 126/136",
+        ).length === 138,
+    "combined candidate contract 128/138",
   );
 });
 
@@ -1442,7 +1442,17 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
   const summary = doc.components.schemas.DeveloperAuditEvent.properties.summary;
   assert(
     summary.additionalProperties === false &&
-      safeKeys.every((key) => key in summary.properties),
+      safeKeys.every((key) => key in summary.properties) &&
+      summary.properties.occupied.type === "boolean" &&
+      summary.properties.roomStateVersion.type === "integer" &&
+      summary.properties.roomStateVersion.minimum === 1 &&
+      summary.properties.displayStatusOverride.oneOf.some((value) =>
+        "type" in value && value.type === "null"
+      ) &&
+      summary.properties.displayStatusOverride.oneOf.some((value) =>
+        "$ref" in value &&
+        value.$ref === "#/components/schemas/RoomPrimaryDisplayStatus"
+      ),
     "full lifecycle safe audit summary fits strict schema",
   );
   for (
@@ -1461,7 +1471,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 70,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 73,
     "actual audit allowlist count",
   );
   assert(
@@ -1473,8 +1483,23 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
       ) &&
       doc.components.schemas.DeveloperAuditEventType.enum.includes(
         "photo.collection_item_deleted",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "payroll.payment_started",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "room.occupancy_corrected",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "room.display_status_overridden",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "room.pin_generated",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "room.generated_pin_confirmed",
       ),
-    "complaint compensation events are operator-visible",
+    "approved developer audit events are operator-visible",
   );
 });
 
