@@ -1,5 +1,6 @@
 import {
   changeRoomMasterData,
+  correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
   listRoomEvents,
@@ -7,6 +8,7 @@ import {
   listRoomOperationBlocks,
   listRooms,
   listRoomTypes,
+  overrideRoomDisplayStatus,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -71,6 +73,8 @@ const roomRow = {
   reservation_lifecycle: "OCCUPIED" as const,
   readiness_status: "READY" as const,
   primary_display_status: "OCCUPIED" as const,
+  canonical_primary_display_status: "OCCUPIED" as const,
+  display_status_override: null,
   next_reservation_id: "30000000-0000-4000-8000-000000000010",
   next_check_in_at: "2026-09-17T07:00:00.000Z",
   next_check_out_at: "2026-09-18T02:00:00.000Z",
@@ -80,7 +84,7 @@ const roomRow = {
   cleaning_required: false,
   candle_count: 0,
   pin_sync_status: "verified" as const,
-  allocation_blocked: true,
+  allocation_blocked: false,
   allocation_ready: false,
   reason_codes: ["OCCUPIED" as const],
 };
@@ -91,11 +95,14 @@ function commandRequest(
   method = "POST",
   key = "room-command-0001",
 ): Request {
+  const encoded = btoa(JSON.stringify({ session_id: sessionId }))
+    .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   return new Request(`http://localhost${path}`, {
     method,
     headers: {
       "content-type": "application/json",
       "idempotency-key": key,
+      authorization: `Bearer header.${encoded}.signature`,
     },
     body: JSON.stringify(body),
   });
@@ -146,6 +153,8 @@ Deno.test("room type catalog maps the app-owned admin projection", async () => {
             code: "standard",
             display_name: "스탠다드 더블 로프트",
             base_cleaning_fee: 16000,
+            base_occupancy: 2,
+            max_occupancy: 2,
             active: true,
             version: 2,
             room_count: 22,
@@ -384,6 +393,152 @@ Deno.test("all six room operations reuse mutate_room_operation", async () => {
     !JSON.stringify(pinResult).toLowerCase().includes("pin"),
     "operation response has no PIN data",
   );
+});
+
+Deno.test("occupancy correction is a separate admin session-bound command", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const correctionId = "71000000-0000-4000-8000-000000000001";
+  const reservationId = "80000000-0000-4000-8000-000000000001";
+  const clients = {
+    admin: {
+      async rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        return {
+          data: {
+            correction_id: correctionId,
+            room_id: roomId,
+            reservation_id: reservationId,
+            occupied: false,
+            effective_at: "2026-09-20T00:00:00.000Z",
+            room_state_version: 4,
+            recorded_at: "2026-09-20T00:00:01.000Z",
+          },
+          error: null,
+        };
+      },
+    },
+  } as unknown as EdgeClients;
+  const result = await correctRoomOccupancy(
+    commandRequest(`/v1/rooms/${roomId}/occupancy-corrections`, {
+      reservationId,
+      occupied: false,
+      effectiveAt: "2026-09-20T00:00:00.000Z",
+      expectedRoomVersion: 3,
+      reasonCode: "FRONT_DESK_VERIFIED",
+    }),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(result.correctionId === correctionId, "correction mapped");
+  assert(calls[0][0] === "correct_room_occupancy", "dedicated RPC");
+  assert(calls[0][1].p_session_id === sessionId, "live session bound");
+  assert(calls[0][1].p_expected_room_version === 3, "room CAS");
+
+  for (const role of ["maid", "developer"] as const) {
+    const denied = await captureEdgeError(() =>
+      correctRoomOccupancy(
+        commandRequest(`/v1/rooms/${roomId}/occupancy-corrections`, {
+          reservationId,
+          occupied: false,
+          effectiveAt: "2026-09-20T00:00:00.000Z",
+          expectedRoomVersion: 3,
+          reasonCode: "FRONT_DESK_VERIFIED",
+        }),
+        clients,
+        { ...admin, role },
+        roomId,
+      )
+    );
+    assert(denied.status === 403, `${role} denied`);
+  }
+});
+
+Deno.test("occupancy correction database failures keep stable Edge codes", () => {
+  for (
+    const [databaseCode, status] of [
+      ["RESERVATION_NOT_FOUND", 404],
+      ["STAY_SEGMENT_CONTRACT_MISMATCH", 409],
+      ["OCCUPANCY_CORRECTION_ROOM_MISMATCH", 409],
+      ["ROOM_OCCUPANCY_CONFLICT", 409],
+    ] as const
+  ) {
+    const mapped = roomDatabaseError({ message: databaseCode });
+    assert(mapped.status === status, `${databaseCode} status`);
+    assert(mapped.code === databaseCode, `${databaseCode} code`);
+  }
+});
+
+Deno.test("display status override is display-only, session-bound, and supports clear", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      async rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        return {
+          data: {
+            override_id: "72000000-0000-4000-8000-000000000001",
+            room_id: roomId,
+            target_status: args.p_target_status,
+            room_state_version: 5,
+            recorded_at: "2026-09-20T00:00:01.000Z",
+          },
+          error: null,
+        };
+      },
+    },
+  } as unknown as EdgeClients;
+
+  for (
+    const targetStatus of [
+      "BLOCKED",
+      "OCCUPIED",
+      "ARRIVAL_PENDING",
+      "RESERVATION_PRESENT",
+      "CLEANING_REQUIRED",
+      "READY",
+      null,
+    ] as const
+  ) {
+    const result = await overrideRoomDisplayStatus(
+      commandRequest(
+        `/v1/rooms/${roomId}/display-status-overrides`,
+        {
+          targetStatus,
+          expectedRoomVersion: 4,
+          reasonCode: "FRONT_DESK_VERIFIED",
+        },
+        "POST",
+        `display-${targetStatus ?? "clear"}`,
+      ),
+      clients,
+      admin,
+      roomId,
+    );
+    assert(result.targetStatus === targetStatus, `${targetStatus} mapped`);
+  }
+  assert(
+    calls.every(([name, args]) =>
+      name === "override_room_display_status" &&
+      args.p_session_id === sessionId
+    ),
+    "dedicated session-bound RPC",
+  );
+  for (const role of ["maid", "developer"] as const) {
+    const denied = await captureEdgeError(() =>
+      overrideRoomDisplayStatus(
+        commandRequest(`/v1/rooms/${roomId}/display-status-overrides`, {
+          targetStatus: "READY",
+          expectedRoomVersion: 5,
+          reasonCode: "FRONT_DESK_VERIFIED",
+        }),
+        clients,
+        { ...admin, role },
+        roomId,
+      )
+    );
+    assert(denied.status === 403, `${role} display override denied`);
+  }
 });
 
 Deno.test("generated entity IDs stay outside the idempotency fingerprint", async () => {

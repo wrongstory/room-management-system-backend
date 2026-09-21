@@ -2,15 +2,15 @@
 
 이 문서는 `wrongstory/room-management-system`의 exact 제품 snapshot을 백엔드 계약에 대조한 재현 가능한 기록이다. 제품 정책의 최종 우선순위는 [AI 백엔드 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-## 2026-09-20 확인점
+## 2026-09-21 확인점
 
 | 구분 | commit | 용도 |
 |---|---|---|
 | 프런트 제품 snapshot | `165fed2d62a763d64ac62539e1475c1b3e42868f` | 이번 정합화의 exact 기준. 원격 `dev` ref는 삭제됐지만 commit은 재현 가능하다. |
 | 프런트 현재 원격 `main` | `afeb0898879bf8d381ee2e218938dc3160fd6ac0` | 관찰 대상. 위 snapshot의 정책을 자동 대체하지 않는다. |
-| 백엔드 release source `dev` | `9c197ad12ed5cb45db0b451f69f9f91053b139d7` | v0.4.0 기능 통합 기준. 73 migrations / OpenAPI 120 paths / 130 operations이며 #169까지 포함한다. |
-| 백엔드 저장소·production `main` | `80f935016d5581d500136fba29c206f6ee797bc0` | PR #221로 승격되고 production DB/API와 Pages에 배포된 exact source. 보호 API 역할별 read 및 mutation smoke는 별도다. |
-| 백엔드 현재 문서 정본 `dev` | `b2419bba728c9902f8027d1e304b98fb655d2a01` | PR #223으로 production 결과와 release gate를 역반영한 문서 기준. 기능 release source와 구분한다. |
+| 백엔드 release source `dev` | `49214bb67f2cf346178bc12321948a810e050234` | v0.5.0 candidate. 77 migrations / OpenAPI 128 paths / 138 operations이며 아직 production 미배포다. |
+| 백엔드 저장소·production `main` | `e2f2efacb27addfb5c9692f083def6f4631b9f4a` | v0.4.0 source와 #238 API hotfix가 production `api` v19에 배포된 exact source. DB는 73 migrations이고 Pages는 120/130 snapshot이다. |
+| 백엔드 현재 문서 정본 `dev` | `49214bb67f2cf346178bc12321948a810e050234` | #229/#231/#236/#228과 #238 backport를 포함한 release candidate 기준. |
 
 프런트 snapshot의 기능을 현재 원격 `main` 배포 상태로 추정하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.
 

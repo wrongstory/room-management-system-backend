@@ -18,14 +18,9 @@ Deno.test("preview exact routes: admin success is read-only, other roles denied 
             ? {
               serviceDate,
               planningAt: new Date().toISOString(),
-              durationPolicy: {
-                version: 1,
-                status: "confirmed",
-                standardMinutes: 30,
-                premiumMinutes: 40,
-                oceanPremiumMinutes: 50,
-                oceanFamilyMinutes: 60,
-              },
+              durationPolicy: null,
+              durationPolicyStatus: "retired",
+              durationPolicyRequired: false,
               maids: [],
               targets: [],
             }
@@ -54,30 +49,15 @@ Deno.test("preview exact routes: admin success is read-only, other roles denied 
     calls.join(",") === "get_assignment_preview_snapshot",
     "successful preview no ledger write RPC",
   );
-  const unavailable = await handleApiRequest(
-    request("POST", path, { serviceDate }),
-    {
-      ...dependencies,
-      createClients: () => ({
-        admin: {
-          rpc: () =>
-            Promise.resolve({
-              data: null,
-              error: {
-                message: "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
-              },
-            }),
-        },
-      } as unknown as EdgeClients),
-    },
+  const retired = await handleApiRequest(
+    request("POST", "/v1/assignment-preview/duration-policy", {}),
+    dependencies,
   );
-  const unavailableBody = await unavailable.json();
+  const retiredBody = await retired.json();
   assert(
-    unavailable.status === 409 && unavailableBody.decisionReady === false &&
-      unavailableBody.proposedAssignments.length === 0 &&
-      unavailableBody.error.code ===
-        "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
-    "HTTP unconfirmed fails closed without success proposals",
+    retired.status === 410 &&
+      retiredBody.error.code === "ASSIGNMENT_DURATION_POLICY_RETIRED",
+    "HTTP duration policy confirmation is retired",
   );
   for (const role of ["maid", "developer"] as const) {
     const res = await handleApiRequest(request("POST", path, { serviceDate }), {
@@ -839,6 +819,8 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
               code: "standard",
               display_name: "스탠다드 더블 로프트",
               base_cleaning_fee: 16000,
+              base_occupancy: 2,
+              max_occupancy: 2,
               active: true,
               version: 1,
               room_count: 22,
@@ -1010,6 +992,7 @@ Deno.test("reservation bookability static route wins over reservation detail dis
       reservationType: "standard",
       checkInAt: "2026-10-01T16:00:00+09:00",
       checkOutAt: "2026-10-02T11:00:00+09:00",
+      guestCount: 2,
       roomTypeIds: [],
       excludeReservationId: null,
     }),

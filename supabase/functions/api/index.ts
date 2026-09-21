@@ -79,12 +79,20 @@ import {
 } from "../_shared/complaint-api.ts";
 import { assertComplaintResponseSize } from "../_shared/complaint-cursor.ts";
 import {
+  changeDeveloperRoomTypeCapacity,
+  createDeveloperRoom,
+  deactivateDeveloperRoom,
   developerActivityEvents,
   developerAuditEvents,
   developerDatabaseStatus,
   developerOverview,
+  developerRoomCatalog,
+  developerRoomCatalogActionPath,
+  developerRoomTypeCapacityPath,
   developerRuntimeStatus,
   developerSchedulerStatus,
+  previewDeveloperRoomDeactivation,
+  previewDeveloperRoomTypeCapacity,
   runDeveloperDiagnostics,
 } from "../_shared/developer-api.ts";
 import {
@@ -134,6 +142,7 @@ import {
 } from "../_shared/reservation-api.ts";
 import {
   changeRoomMasterData,
+  correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
   listRoomEvents,
@@ -141,6 +150,7 @@ import {
   listRoomOperationBlocks,
   listRooms,
   listRoomTypes,
+  overrideRoomDisplayStatus,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -750,6 +760,91 @@ export async function handleApiRequest(
             clients,
             actor,
             resetProfileId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/developer/room-catalog") {
+      return jsonResponse(
+        { catalog: await developerRoomCatalog(clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    const developerCapacityRoute = developerRoomTypeCapacityPath(path);
+    if (
+      developerCapacityRoute && request.method === "POST" &&
+      developerCapacityRoute.preview
+    ) {
+      return jsonResponse(
+        {
+          preview: await previewDeveloperRoomTypeCapacity(
+            request,
+            clients,
+            actor,
+            developerCapacityRoute.roomTypeId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      developerCapacityRoute && request.method === "PATCH" &&
+      !developerCapacityRoute.preview
+    ) {
+      return jsonResponse(
+        {
+          change: await changeDeveloperRoomTypeCapacity(
+            request,
+            clients,
+            actor,
+            developerCapacityRoute.roomTypeId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && path === "/v1/developer/rooms") {
+      return jsonResponse(
+        { creation: await createDeveloperRoom(request, clients, actor) },
+        201,
+        corsHeaders,
+      );
+    }
+    const developerRoomActionRoute = developerRoomCatalogActionPath(path);
+    if (
+      developerRoomActionRoute && request.method === "POST" &&
+      developerRoomActionRoute.preview
+    ) {
+      return jsonResponse(
+        {
+          preview: await previewDeveloperRoomDeactivation(
+            request,
+            clients,
+            actor,
+            developerRoomActionRoute.roomId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      developerRoomActionRoute && request.method === "POST" &&
+      !developerRoomActionRoute.preview
+    ) {
+      return jsonResponse(
+        {
+          deactivation: await deactivateDeveloperRoom(
+            request,
+            clients,
+            actor,
+            developerRoomActionRoute.roomId,
           ),
         },
         200,
@@ -1553,6 +1648,43 @@ export async function handleApiRequest(
       return jsonResponse(
         {
           operation: await createRoomOperationBlock(
+            request,
+            clients,
+            actor,
+            roomId,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/occupancy-corrections")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        {
+          correction: await correctRoomOccupancy(
+            request,
+            clients,
+            actor,
+            roomId,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") &&
+      path.endsWith("/display-status-overrides")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        {
+          statusOverride: await overrideRoomDisplayStatus(
             request,
             clients,
             actor,

@@ -42,6 +42,10 @@ const availabilityMigrationUrl = new URL(
   '../supabase/migrations/20260828220417_weekly_availability_contract.sql',
   import.meta.url
 );
+const availabilityAnyDayMigrationUrl = new URL(
+  '../supabase/migrations/20260920091536_availability_any_day_submission.sql',
+  import.meta.url
+);
 
 const developerRoleMigrationUrl = new URL(
   '../supabase/migrations/20260829120003_add_developer_role.sql',
@@ -110,6 +114,10 @@ const cleaningTemplateDurationMigrationUrl = new URL(
   '../supabase/migrations/20260915000628_cleaning_template_duration_optional.sql',
   import.meta.url
 );
+const retiredAssignmentDurationMigrationUrl = new URL(
+  '../supabase/migrations/20260920094931_retire_assignment_duration_policy.sql',
+  import.meta.url
+);
 const currentRoomStatusMigrationUrl = new URL(
   '../supabase/migrations/20260916165715_current_room_status_projection.sql',
   import.meta.url
@@ -136,6 +144,10 @@ const photoRetentionV2MigrationUrl = new URL(
 );
 const photoSlotContractV8MigrationUrl = new URL(
   '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
+  import.meta.url
+);
+const roomStatusAdminCorrectionMigrationUrl = new URL(
+  '../supabase/migrations/20260920150000_room_status_admin_correction.sql',
   import.meta.url
 );
 
@@ -174,6 +186,19 @@ describe('initial migration contract', () => {
     expect(sql).toContain("running_attempt.status = 'in_progress'");
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
+  });
+
+  it('retires estimated-time preview decisions without rewriting history', async () => {
+    const sql = await readFile(retiredAssignmentDurationMigrationUrl, 'utf8');
+
+    expect(sql).toContain("message='ASSIGNMENT_DURATION_POLICY_RETIRED'");
+    expect(sql).toContain("'durationPolicyStatus','retired'");
+    expect(sql).toContain("'durationPolicyRequired',false");
+    expect(sql).toContain('private.assignment_preview_source_reason(t,null,p_command_at)');
+    expect(sql).toContain("if p_target.due_at is not null and exists(");
+    expect(sql).not.toContain('make_interval');
+    expect(sql).not.toMatch(/update public\.assignment_duration_policy_versions|delete from public\.assignment_duration_policy_versions/);
+    expect(sql).not.toMatch(/insert into public\.assignment_duration_policy_versions|insert into public\.audit_events|complete_command/);
   });
 
   it('separates future reservation schedules from current cleaning state', async () => {
@@ -216,6 +241,38 @@ describe('initial migration contract', () => {
     expect(sql).toContain('from public, anon, authenticated, service_role');
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/create table|alter table|insert into|update public\./);
+  });
+
+  it('separates canonical occupancy, room blocking, and readiness with an admin correction ledger', async () => {
+    const sql = await readFile(roomStatusAdminCorrectionMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.room_occupancy_corrections');
+    expect(sql).toContain('create or replace function private.room_occupied_at');
+    expect(sql).toContain('segment.starts_at <= p_at');
+    expect(sql).toContain('(segment.ends_at is null or segment.ends_at > p_at)');
+    expect(sql).toContain('reservation.actual_checkout_at is null');
+    expect(sql).toContain('create or replace function public.correct_room_occupancy(');
+    expect(sql).toContain('private.assert_attempt_actor_session(p_actor_profile_id, p_session_id, true)');
+    expect(sql).toContain("'room.occupancy_correction'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('p_expected_room_version');
+    expect(sql).toContain('p_effective_at');
+    expect(sql).toContain('p_reason_code');
+    expect(sql).toContain('room_occupancy_corrections_immutable');
+    expect(sql).toContain('create table private.room_display_status_overrides');
+    expect(sql).toContain('create function public.override_room_display_status(');
+    expect(sql).toContain("'room.display_status_override'");
+    expect(sql).toContain('canonical_primary_display_status text');
+    expect(sql).toContain('display_status_override text');
+    expect(sql).toContain('v_lineage_segment.id is null');
+    expect(sql).toContain("message = 'OCCUPANCY_CORRECTION_ROOM_MISMATCH'");
+    expect(sql).toContain('cardinality(readiness.blocking_reason_codes) > 0');
+    expect(sql).toContain('not state.occupied and cardinality(readiness.readiness_reason_codes) = 0');
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_occupancy_corrections to (anon|authenticated)/);
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_display_status_overrides to (anon|authenticated)/);
   });
 
   it('moves pre-check-in reservations only through a replay-safe dedicated command', async () => {
@@ -552,11 +609,13 @@ describe('initial migration contract', () => {
   });
 
   it('keeps weekly availability versioned, service-only, and RLS scoped', async () => {
-    const sql = await readFile(availabilityMigrationUrl, 'utf8');
+    const [sql, policySql] = await Promise.all([
+      readFile(availabilityMigrationUrl, 'utf8'),
+      readFile(availabilityAnyDayMigrationUrl, 'utf8')
+    ]);
 
     expect(sql).toContain('availability_versions_one_current_per_week');
     expect(sql).toContain('AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS');
-    expect(sql).toContain('OUTSIDE_AVAILABILITY_WINDOW');
     expect(sql).toContain('STALE_VERSION');
     expect(sql).toContain('private.replay_command(');
     expect(sql).toContain('private.complete_command(');
@@ -567,6 +626,15 @@ describe('initial migration contract', () => {
     expect(sql).toContain('alter table public.availability_versions enable row level security');
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
+    expect(policySql).toContain(
+      'create or replace function private.submit_weekly_availability_at('
+    );
+    expect(policySql).toContain('AVAILABILITY_WEEK_OUT_OF_RANGE');
+    expect(policySql).toContain('PAST_AVAILABILITY_DATE_NOT_ALLOWED');
+    expect(policySql).toContain("at time zone 'Asia/Seoul'");
+    expect(policySql).toContain('private.replay_command(');
+    expect(policySql).toContain('private.complete_command(');
+    expect(policySql).not.toContain('OUTSIDE_AVAILABILITY_WINDOW');
   });
 
   it('keeps assignment drafts revisioned, snapshot-bound, and service-only', async () => {

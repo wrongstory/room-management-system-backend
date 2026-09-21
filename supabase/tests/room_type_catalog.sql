@@ -29,6 +29,18 @@ select is(
   4,
   'active password-complete admin sees all four room types'
 );
+select ok(
+  not exists (
+    select 1
+    from public.list_room_type_catalog(pg_temp.cid(1),pg_temp.cid(201)) catalog
+    join public.room_types room_type on room_type.id = catalog.id
+    where catalog.base_occupancy <> room_type.default_guest_count
+       or catalog.max_occupancy <> room_type.max_guest_count
+       or catalog.base_occupancy < 1
+       or catalog.max_occupancy < catalog.base_occupancy
+  ),
+  'catalog exposes the stored valid occupancy values without inventing replacements'
+);
 select is(
   (
     select jsonb_object_agg(code, jsonb_build_object(

@@ -31,7 +31,15 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 ### #202 객실 타입 카탈로그
 
-`GET /v1/room-types`는 비밀번호 변경을 완료한 active business admin의 live session만 허용하는 app-owned projection이다. 안정적인 `code`, 현재 `displayName`, 원 단위 `baseCleaningFee`, 관리형 `version`, 현재 참조 `roomCount`를 camelCase로 반환한다. 비활성 타입도 기존 객실 참조를 설명하기 위해 목록에는 남지만 기존 `change_room_master_data` command는 신규 선택을 계속 거부한다. `version`은 표시 시각에서 만든 가짜 값이 아니라 객실 타입 업무 필드가 실제 변경될 때만 DB trigger가 증가시킨다.
+`GET /v1/room-types`는 비밀번호 변경을 완료한 active business admin의 live session만 허용하는 app-owned projection이다. 안정적인 `code`, 현재 `displayName`, 원 단위 `baseCleaningFee`, 저장된 `baseOccupancy/maxOccupancy`, 관리형 `version`, 현재 참조 `roomCount`를 camelCase로 반환한다. 비활성 타입도 기존 객실 참조를 설명하기 위해 목록에는 남지만 기존 `change_room_master_data` command는 신규 선택을 계속 거부한다. `version`은 표시 시각에서 만든 가짜 값이 아니라 객실 타입 업무 필드가 실제 변경될 때만 DB trigger가 증가시킨다.
+
+### #236 Developer 객실·인원 카탈로그 — source candidate
+
+76번째 append-only migration은 singleton developer만 사용할 수 있는 `GET /v1/developer/room-catalog`와 객실 유형 인원 변경·객실 추가·객실 비활성화 command를 추가한다. 응답은 객실 UUID/번호/유형/active/version과 유형의 code/displayName/인원/version/roomCount 및 집계만 반환하며 예약·고객·PIN·청소·감사 raw state를 섞지 않는다. 모든 응답은 `no-store`다.
+
+인원 변경과 비활성화는 5분 TTL preview를 private FORCE RLS table에 고정한 뒤 actor, entity, CAS version, 요청 payload, 최신 영향 범위, opaque fingerprint를 commit에서 다시 확인한다. mutation은 Idempotency-Key receipt와 source-controlled reason code를 사용하며 기존 활성 예약이 새 최대 인원을 초과하거나 객실에 점유·예약·청소·PIN·미해결 운영 업무가 있으면 fail-closed한다. 객실 추가는 활성 유형의 최신 version을 요구하고 `verification_required`로 시작한다. 객실 제거는 hard delete 없이 inactive metadata와 audit event를 남긴다.
+
+예약 bookability 요청은 `guestCount`를 필수로 받고 candidate마다 최신 유형 최대 인원을 검사한다. preview는 안내일 뿐이며 예약·segment DB trigger와 create/change command가 최종 재검증한다. 이 migration은 현재 `default_guest_count/max_guest_count`를 변경하거나 예시 값으로 backfill하지 않는다.
 
 ### #204 최근 7일 청소 완료 이력
 
@@ -58,6 +66,16 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 `get_room_operational_projection`은 호출마다 서버 시각을 한 번만 캡처해 모든 행에 `evaluated_at`으로 반환한다. Fastify와 Edge adapter는 이를 RFC 3339 `evaluatedAt`으로 동일하게 공개하며, 예약 일정 축은 `reservationPhase=none|upcoming|current`로 반환한다. `current`는 반개구간 `checkInAt <= evaluatedAt < checkOutAt`이고, 미래 active 예약은 `upcoming`이다.
 
 현재 객실 현황은 이 snapshot 시각에 실제로 활성화된 점유·청소 의무·운영 차단만 계산한다. 미래 예약의 준비 의무는 일정과 작업 계획에는 남지만 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `reservationPhase`, `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`, `reasonCodes`, `pinSyncStatus`는 계속 독립 축이며 새 영구 `status` 컬럼이나 단일 API status를 만들지 않는다. 프런트의 5단계 대표 문구는 이 축을 읽는 표시 mapper일 뿐 정본 상태가 아니다.
+
+### #228 점유·객실 문제·배정 준비 분리
+
+77번째 append-only `room_status_admin_correction`은 #236의 76번째 `developer_room_catalog_capacity` 뒤에 적용되며, `occupied`를 canonical non-retired stay segment의 서버 snapshot 반개구간 `[startsAt, endsAt)` 포함 여부로만 계산한다. 시작 직전은 비점유, 시작 시각은 점유, 종료 시각은 비점유이며 null end인 장기투숙 segment는 실제 종료/보정 전까지 계속 점유다. 조기 실제 checkout과 관리자 vacant 보정은 segment를 닫으므로 즉시 projection에서 빠진다.
+
+`allocationBlocked`는 운영 차단·배정 차단 이슈·촛불·기준정보 오류처럼 객실 문제 축만 반영한다. 점유와 청소 의무는 단독으로 blocked를 만들지 않는다. `allocationReady`는 점유가 없고 청소·PIN/current-check-in 경고를 포함한 readiness 사유와 객실 문제 사유가 모두 없을 때만 true다.
+
+`POST /v1/rooms/{roomId}/occupancy-corrections`는 active/password-complete business admin의 live session만 허용한다. 예약 ID, 목표 occupied, 과거/현재 effectiveAt, room CAS version, reasonCode와 Idempotency-Key를 받고 UI 대표 status를 덮어쓰지 않는다. 기존 canonical segment를 retire하고 successor를 append하며 private correction 원장, public safe occupancy event, audit, command receipt를 같은 transaction에 기록한다. segment 시작과 같은 vacant 보정은 zero-length successor를 만들지 않고 전체 segment를 retire한다. occupied 복원은 effectiveAt을 포함하는 동일 room의 기존 segment lineage가 있을 때만 허용하고 successor는 그 source segment의 실제 `endsAt`(다음 이동 시각 또는 lineage boundary), source reservation, `moveEventId`를 승계한다. 따라서 과거 A 구간 복원이 현재 B 구간까지 늘어나지 않으며, lineage 경계 밖이나 A vacant 뒤 B occupied 같은 우회 이동은 `OCCUPANCY_CORRECTION_ROOM_MISMATCH`로 fail-closed한다. 정식 객실 이동은 계속 #187 preview/commit만 사용한다. maid/developer는 DB와 HTTP 양쪽에서 거부한다.
+
+`private.room_display_status_overrides`는 객실별 카드 분류 강제 조정을 immutable event로 보존한다. `POST /v1/rooms/{roomId}/display-status-overrides`는 여섯 source-controlled 표시값 또는 null(clear), room CAS, reason, idempotency를 검증한다. projection은 canonical 계산값과 override를 분리하고 effective `primaryDisplayStatus`만 override 우선으로 합성한다. 점유·예약 lifecycle·readiness·allocation/bookability는 전혀 갱신하지 않는다. 따라서 `BLOCKED` 표시는 운영상 라벨일 뿐 실제 차단 권한이 없고, 실제 배정 차단은 기존 operation-block command가 맡는다. 두 보정의 안전한 감사 유형 `room.occupancy_corrected`, `room.display_status_overridden`과 기존 SQL 승인 이력 `payroll.payment_started`를 developer 감사 OpenAPI allowlist에 정합화해 전체 유형과 filter 상한을 73개로 함께 유지한다.
 
 ### #187 예약 임박 lifecycle projection Phase A
 
@@ -459,8 +477,8 @@ target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참
 | 객실·예약 명령 | actor 최신 상태·admin 역할 + 객실 `state_version`/예약 `version` CAS + actor/명령별 idempotency key + 짧은 전역 advisory lock으로 lock 순서 고정 |
 | 예약 저장 | KST 기준 최소 1박·분 단위 + `[check_in_at, check_out_at)` `tstzrange` GiST exclusion으로 겹침 차단 |
 | 입·퇴실 전이 | 고유 event key + 예약 lock으로 예정/수동 전이 중복 차단. 한 batch에서는 퇴실을 먼저 닫아 같은 instant의 다음 입실을 지연시키지 않고, worker 중단 중 완전히 지난 미입실 예약도 가짜 check-in 없이 checkout으로 catch-up |
-| 주간 가능일 | 일요일 12:00–23:59 KST + 메이드/주차 current version CAS + canonical request hash |
-| 마감 후 가능일 변경 | pending 요청 1건 + 관리자 결정 row lock + 승인 때만 새 immutable version |
+| 주간 가능일 | KST 현재·다음 주의 요일 무관 직접 제출 + 과거 날짜 신규 true 소급 금지 + 메이드/주차 current version CAS + canonical request hash. 일요일은 안내상 주 제출일 |
+| 승인형 가능일 변경 | 대상 주 시작 후 pending 요청 1건 + 관리자 결정 row lock + 승인 때만 새 immutable version |
 | 청소 요청 | 예약·객실·checkout obligation·target을 양방향 복합키로 고정하고 동일 obligation을 한 번만 materialize. 연박/추가 수동 요청은 점유·명시된 접근 구간을 검증하되 열린 checkout 계획을 임의 1분 구간으로 만들지 않으며, 안정적인 target ID 및 CAS soft cancel을 사용 |
 | 입실 준비 증명 | preparation obligation의 current attempt와 approved submission을 같은 수행으로 묶고, target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서가 직전 점유 종료 이후부터 해당 체크인 이전까지 같은 객실에서 완결된 경우만 `approved` 허용. submission 소비 원장은 append-only·전역 unique라 다른 예약에 재사용할 수 없음 |
 | PIN lease | 객실·예약·target·현재 assignment·현재 attempt·담당 메이드·최신 verified PIN version을 한 계약으로 묶음. 수동 checkout은 stale lease를 폐기하고 현재 verified version으로 현재 미공개 lease 한 건만 새 revision으로 재발급 |
@@ -625,17 +643,16 @@ admin을 DB에서 재검증하고 고정 search_path/EXECUTE 최소 권한 아�
 정책·가능일·target·기존 배정·attempt·원 domain schedule을 반환한다. 이 RPC는 업무 DML,
 advisory write lock, audit, command receipt, outbox를 만들지 않는다.
 
-Edge의 platform-neutral `assignment-preview-core`는 snapshot만 입력으로 받는 bounded 순수
+Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 snapshot만 입력으로 받는 bounded 순수
 계산 모듈이다. DB가 source lifecycle 유효성을 판정하고 optimizer가 고정 부하·capacity·fee·route를
-계산한다. 계획만 반환하며 저장은 기존 #25/#26 CAS 명령으로 분리한다. Fastify preview route는
-이번 범위가 아니므로 Edge source와 Fastify rollback parity를 같다고 표시하지 않는다.
+계산한다. #231 이후 capacity는 예상시간 구간이 아니라 명시된 target/source 사실만 뜻하며 가상 종료시각을
+만들지 않는다. 계획만 반환하며 저장은 기존 #25/#26 CAS 명령으로 분리한다. 두 HTTP adapter는
+동일한 세 preview 경로, active admin/session/password gate, camelCase 계약과 error redaction을 유지한다.
 
-`assignment_duration_policy_versions`는 네 타입의 양수 minute 값과 version/상태/확정자를
-보존한다. 확정 정책은 최대 한 건이며 새 관리자 확정 command는 전역 policy lock과 expectedVersion
-CAS, actor/command/key + request hash receipt를 사용해 기존 confirmed를 retired로 전환하고
-새 version 및 `assignment.duration_policy_confirmed` 감사만 append한다. 기존 확정 값 변경·삭제,
-직접 Data API DML은 금지된다. 정책 확정은 preview 자체와 별도 명령이다. confirmed seed나
-template/default 시간 fallback은 없고 production 운영값 설정은 이번 PR에서 하지 않는다.
+`assignment_duration_policy_versions`는 폐기 전 네 타입 minute/version/확정자 이력과 관련 감사·receipt를
+그대로 보존한다. 직접 Data API DML과 기존 값 변경·삭제는 계속 금지된다. 과거 GET은 deprecated read-only로
+남지만 confirm command는 `ASSIGNMENT_DURATION_POLICY_RETIRED`로 차단한다. Preview는 confirmed 유무와 무관하게
+실행하며 정책·template/default/1분 시간을 입력, fingerprint, capacity 또는 예약 충돌 계산에 사용하지 않는다.
 
 상세 입력·출력·계산 한계는 [배정 Preview API 계약](./ASSIGNMENT_PREVIEW.md)을 따른다.
 
@@ -802,8 +819,8 @@ pre-A v7+의 10/11/13/15개 이력은 계속 검증하고, 모든 slot에 `maxPh
 `extra-proof(maxPhotos=10)`, `entry-number` 금지를 우회하지 않습니다. checkout duration은 선택값이며 제공할
 때만 1..10,080분으로 제한합니다.
 실제 수행시간은 attempt의 `started_at → field_completed_at`, turnaround는 실제 checkout → field completion에서
-사후 계산합니다. 배정 preview는 별도 confirmed duration-policy 원장만 사용하므로 template null을 fallback으로
-대체하지 않습니다. stayover/additional 등 기존 비-checkout template duration의 non-null 계약은 유지합니다.
+사후 계산합니다. 배정 preview는 duration-policy 원장과 template duration을 모두 사용하지 않으며 template null을
+fallback으로 대체하지 않습니다. stayover/additional 등 기존 비-checkout template duration의 저장 계약은 유지합니다.
 raw template table은 Data API role에 열지 않고 service-only RPC가 actor/session/password/role을 다시 검증합니다.
 audit에는 slot label/description이나 raw state/hash를 복제하지 않습니다. 설정 게시 자체는 행동 수신자가 없으므로
 notification/outbox를 만들지 않으며, production seed와 stayover/additional/reclean 계약은 #156 범위 밖입니다.
@@ -834,6 +851,7 @@ OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. `20260916090000_extra
 - `GET /v1/rooms`, `GET /v1/rooms/:roomId` (관리자 전용 운영 projection)
 - `GET /v1/developer/overview`, `/runtime-status`, `/database-status`, `/scheduler-status`
 - `GET /v1/developer/audit-events`, `GET /v1/developer/activity-events`, `POST /v1/developer/diagnostics` (singleton developer 전용 bounded projection)
+- `GET /v1/developer/room-catalog`, 객실 유형 인원 preview/commit, 객실 추가, 객실 비활성화 preview/commit (#236 source candidate)
 - `POST /v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId/upload`, `DELETE /v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId` (#180 v8 `extra-proof` source 후보; production 미배포)
 - 객실 기준정보 변경, 운영 차단·해제, 촛불 수량 event, 이슈 등록·해결, PIN 동기화 결과 기록
 - `GET·POST /v1/reservations`, `GET /v1/reservations/:reservationId`

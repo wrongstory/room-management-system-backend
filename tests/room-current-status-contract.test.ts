@@ -4,13 +4,14 @@ import type { SupabaseClients } from '../src/lib/supabase.js';
 import { SupabaseRoomService } from '../src/modules/rooms/room.service.js';
 import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
 
+const adminSessionId = '50000000-0000-4000-8000-000000000000';
 const adminActor: Actor = {
   authUserId: '10000000-0000-4000-8000-000000000001',
   profileId: '20000000-0000-4000-8000-000000000001',
   displayName: '운영 관리자',
   role: 'admin',
   mustChangePassword: false,
-  accessToken: 'access-token'
+  accessToken: `e30.${Buffer.from(JSON.stringify({ session_id: adminSessionId })).toString('base64url')}.signature`
 };
 
 const maidSessionId = '50000000-0000-4000-8000-000000000001';
@@ -38,6 +39,8 @@ const roomRow = {
   reservation_lifecycle: 'FUTURE',
   readiness_status: 'READY',
   primary_display_status: 'READY',
+  canonical_primary_display_status: 'READY',
+  display_status_override: null,
   next_reservation_id: '40000000-0000-4000-8000-000000000001',
   next_check_in_at: '2026-09-18T07:00:00.000Z',
   next_check_out_at: '2026-09-19T02:00:00.000Z',
@@ -97,6 +100,8 @@ describe('current room status public contract', () => {
         reservationLifecycle: 'FUTURE',
         readinessStatus: 'READY',
         primaryDisplayStatus: 'READY',
+        canonicalPrimaryDisplayStatus: 'READY',
+        displayStatusOverride: null,
         nextReservationId: '40000000-0000-4000-8000-000000000001',
         occupied: false,
         cleaningRequired: false,
@@ -116,6 +121,8 @@ describe('current room status public contract', () => {
       'reservationLifecycle',
       'readinessStatus',
       'primaryDisplayStatus',
+      'canonicalPrimaryDisplayStatus',
+      'displayStatusOverride',
       'nextReservationId',
       'blockingReasonCodes',
       'readinessReasonCodes'
@@ -150,6 +157,58 @@ describe('current room status public contract', () => {
     expect(openApiDocument.components.schemas.RoomReasonCode.enum).toContain(
       'RESERVATION_CURRENT'
     );
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(120);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(128);
+  });
+
+  it('publishes an admin-only append-only occupancy correction contract', () => {
+    const operation = openApiDocument.paths['/v1/rooms/{roomId}/occupancy-corrections'].post;
+    expect(operation).toMatchObject({
+      operationId: 'correctRoomOccupancy',
+      'x-required-roles': ['admin']
+    });
+    expect(openApiDocument.components.schemas.RoomOccupancyCorrectionRequest.required)
+      .toEqual(expect.arrayContaining([
+        'reservationId', 'occupied', 'effectiveAt', 'expectedRoomVersion', 'reasonCode'
+      ]));
+  });
+
+  it('publishes a display-only override without weakening canonical room axes', () => {
+    const operation = openApiDocument.paths['/v1/rooms/{roomId}/display-status-overrides'].post;
+    expect(operation).toMatchObject({
+      operationId: 'overrideRoomDisplayStatus',
+      'x-required-roles': ['admin']
+    });
+    expect(operation.description).toContain('bookability');
+    expect(operation.description).toContain('operation-block');
+    expect(openApiDocument.components.schemas.RoomDisplayStatusOverrideRequest.required)
+      .toEqual(['targetStatus', 'expectedRoomVersion', 'reasonCode']);
+  });
+
+  it.each([
+    ['RESERVATION_NOT_FOUND', 404],
+    ['STAY_SEGMENT_CONTRACT_MISMATCH', 409],
+    ['OCCUPANCY_CORRECTION_ROOM_MISMATCH', 409],
+    ['ROOM_OCCUPANCY_CONFLICT', 409]
+  ] as const)('maps %s to a stable Fastify response', async (databaseCode, statusCode) => {
+    const rpc = vi.fn(async () => ({ data: null, error: { message: databaseCode } }));
+    const clients = {
+      admin: { rpc },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseRoomService(clients);
+
+    await expect(service.correctOccupancy(adminActor, {
+      roomId: roomRow.id,
+      reservationId: '40000000-0000-4000-8000-000000000001',
+      occupied: true,
+      effectiveAt: '2026-09-20T00:00:00.000Z',
+      expectedRoomVersion: 3,
+      reasonCode: 'FRONT_DESK_VERIFIED',
+      idempotencyKey: `room-status-${databaseCode.toLowerCase()}`
+    })).rejects.toMatchObject({ statusCode, code: databaseCode });
+    expect(rpc).toHaveBeenCalledWith('correct_room_occupancy', expect.objectContaining({
+      p_session_id: adminSessionId
+    }));
   });
 });

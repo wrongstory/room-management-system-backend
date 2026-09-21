@@ -40,7 +40,7 @@ erDiagram
   PROFILES ||--o| MAID_PROFILES : "메이드일 때만"
   PROFILES ||--o{ AVAILABILITY_VERSIONS : "주차별 제출 버전"
   AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_DAYS : "월~일 선택"
-  AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_CHANGE_REQUESTS : "마감 후 변경 요청"
+  AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_CHANGE_REQUESTS : "승인형 변경 요청"
   PROFILES ||--o{ AVAILABILITY_CHANGE_REQUESTS : "관리자 처리"
   PROFILES ||--o{ PASSWORD_CHANGE_COMMANDS : "응답 유실 복구 receipt"
 
@@ -135,8 +135,9 @@ erDiagram
 - 활성 메이드만 근무 가능일을 제출할 수 있다.
 - `(maid_profile_id, week_start, version)`은 유일하고, 주차별 현재 제출 버전은 한 건이다.
 - version은 7개 날짜 row를 명시적으로 가지며, 새 제출·승인 version이 생겨도 이전 version과 날짜는 삭제하지 않는다.
-- 일요일 12:00–23:59 KST의 일반 제출은 `expectedVersion` CAS와 idempotency key로 직렬화한다.
-- 마감 뒤 변경은 pending 요청을 만들고 활성 관리자의 승인 시에만 새 current version으로 전환한다.
+- 일요일은 다음 주 계획의 주 제출일이지만, KST 기준 현재 주 또는 다음 주는 어느 요일이든 `expectedVersion` CAS와 idempotency key로 직접 제출·변경한다.
+- 현재 주의 지난 날짜는 기존 current version의 `available=true`만 보존할 수 있고 새로 true로 소급 변경할 수 없다.
+- 승인형 변경 요청은 pending 요청과 관리자 승인/반려 이력을 보존하는 별도 호환 흐름이다.
 - 메이드 후보 목록은 `활성 계정 + 활성 maid 역할 + 해당 날짜 available`을 모두 만족해야 한다.
 
 ## 4. 객실·예약·운영
@@ -173,6 +174,8 @@ erDiagram
     uuid id PK
     text code UK
     int base_cleaning_fee
+    int default_guest_count
+    int max_guest_count
     boolean active
     bigint version
   }
@@ -182,6 +185,10 @@ erDiagram
     uuid room_type_id FK
     text elevator_zone
     bigint state_version
+    boolean active
+    timestamptz deactivated_at
+    uuid deactivated_by FK
+    text deactivation_reason_code
   }
   RESERVATIONS {
     uuid id PK
@@ -360,6 +367,9 @@ erDiagram
 ```
 
 핵심 제약:
+
+- #236의 `default_guest_count/max_guest_count`는 API에서 `baseOccupancy/maxOccupancy`로 표시하며 1 이상·기본값 이하 최대값 제약을 유지한다. 예약 preview와 reservation/segment insert·update는 최신 최대 인원을 재검증한다. 현재 저장값은 보존하고 예시 숫자를 backfill하지 않는다.
+- 객실 카탈로그 제거는 `rooms.active=false` 전이만 허용하고 hard delete를 차단한다. developer의 5분 preview는 private FORCE RLS 원장에 actor·entity·CAS version·영향·opaque fingerprint를 고정한다. 현재 점유, 활성/미래 예약, 진행 중 청소, PIN 변경, 미해결 운영 업무가 있으면 비활성화할 수 없다.
 
 - #169 generated initial revision은 current pointer를 만들되 latest sync를 `mismatch`로 기록하고 Sheet outbox를 만들지 않는다. admin의 30초 reveal lease가 평문을 저장하지 않고 암호문을 전달하며, 현장 확인 RPC가 current version을 CAS 검증한 뒤에만 `verified` event와 `GENERATED_PIN_PHYSICALLY_CONFIRMED` outbox를 추가한다.
 
@@ -925,22 +935,22 @@ source 후보 schema다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 
-### #29 versioned duration policy (feature source)
+### #29/#231 historical duration policy (retired decision input)
 
 `profiles`의 관리자 생성자·확정자는 `assignment_duration_policy_versions`의 FK로 보존한다.
-정책은 target/assignment에 새 write pointer를 추가하지 않는다. Preview 응답의 policy version과
-input fingerprint만 조회 시점의 입력을 식별하며, 실제 배정 snapshot 저장은 #25/#26 책임이다.
+정책은 target/assignment에 새 write pointer를 추가하지 않는다. #231 이후 이 원장은 과거 이력만
+보존하며 신규 Preview 응답·fingerprint·배정 판단의 입력이 아니다. 실제 배정 snapshot 저장은 #25/#26 책임이다.
 
 - `id`, 양수 unique `version`, `status = draft | confirmed | retired`
 - `standard_minutes`, `premium_minutes`, `ocean_premium_minutes`, `ocean_family_minutes`: 모두 양수
 - `created_by/created_at`, `confirmed_by/confirmed_at`; confirmed/retired는 확정자·시각 필수
 - confirmed partial unique index로 현재 확정 정책 최대 한 건, FK 자식 index 두 개
-- RLS 활성화·직접 SELECT/DML revoke; 관리자용 read/confirm RPC만 허용
+- RLS 활성화·직접 SELECT/DML revoke; 관리자용 과거 read RPC만 허용하고 confirm RPC는 retired 오류
 - 기존 값 immutable, DELETE 금지; 기존 confirmed의 retired 전환 외 UPDATE 금지
-- fresh confirmed 0건, 55/65/70/80 seed 없음, preview DML 0
+- fresh confirmed 0건 허용, 55/65/70/80 seed 없음, preview DML 0
 
-실제 DDL 정본은 `20260907143843_assignment_preview_duration_policy.sql`이며 기존 24개
-migration을 수정하지 않는다. 운영·recovery 적용 상태와 무관한 feature schema다.
+초기 DDL은 `20260907143843_assignment_preview_duration_policy.sql`, 폐기 전환은 append-only
+`20260920094931_retire_assignment_duration_policy.sql`이다. 과거 row·audit·receipt는 수정하지 않는다.
 
 2026-08-25 기준 공식 Free Plan 범위 안에서만 사용한다.
 
@@ -1186,8 +1196,8 @@ backfill하거나 다시 쓰지 않는다.
 운영 fixture 부재로 예약 성공 mutation smoke만 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 
 실제 청소 수행시간은 `cleaning_attempts.started_at`과 `field_completed_at`의 차이이며, turnaround는 실제
-checkout 시각부터 field completion까지다. 배정 preview는 `assignment_duration_policy_versions`의 confirmed
-정책만 사용한다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도
+checkout 시각부터 field completion까지다. 배정 preview는 예상시간 정책과 template duration을 모두
+사용하지 않는다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도
 추정하지 않는다.
 
 수동 청소 계획은 기존 target과 새 target에 명시된 종료시각이 모두 있을 때만 일정 구간 충돌을 비교한다.
@@ -1215,6 +1225,12 @@ rotation 및 Data API RLS에서 차단한다. 모든 새 private table은 FORCE 
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.
 4. 지급 명령에서 `payroll_items` 잠금 합계와 cycle 상태를 원자적으로 전이한다.
 5. 도메인별 서버 명령과 상태 전이 테스트를 추가한다.
+
+### #228 관리자 점유 보정 원장
+
+`private.room_occupancy_corrections`는 관리자 보정 command마다 room/reservation/stay, 교체된 segment와 successor segment, 목표 occupied, effective timestamp, actor/reason, 적용 뒤 room state version, command key/request hash를 한 번만 기록한다. UPDATE/DELETE는 trigger로 거부하고 raw Data API grant는 없다. 이 원장은 projection을 직접 덮어쓰는 override가 아니라 canonical `stay_room_segments` revision을 설명하는 provenance다. vacant 보정은 기존 segment를 retire하고 필요할 때만 `[oldStart,effectiveAt)` successor를 남기며, 시작 경계 보정은 zero-length successor 없이 전체 retire한다. occupied 복원은 effectiveAt을 포함하는 동일 room의 과거 segment lineage를 요구하고, successor의 끝을 그 source segment의 실제 lineage boundary로 제한하며 `source_reservation_id`와 `move_event_id`를 승계해 #187 room-move 원장 우회를 막는다.
+
+`private.room_display_status_overrides`는 여섯 표시 분류 또는 null(clear), room CAS version, actor/reason, command key/request hash를 append-only로 보존한다. projection은 `canonical_primary_display_status`와 `display_status_override`를 별도로 반환하고 effective `primary_display_status`만 override 우선으로 계산한다. 이 원장은 reservation/stay/occupancy/readiness/bookability를 변경하지 않으며 `BLOCKED` override도 실제 operation block을 만들지 않는다.
 
 ## #194 Assignment-bound PIN entitlement (64번째 source migration)
 

@@ -92,10 +92,10 @@ function services(): AppServices {
     },
     rooms: {
       listTypes: vi.fn(async () => [
-        { id: '10000000-0000-4000-8000-000000000001', code: 'oceanFamily', displayName: '파셜 오션뷰 패밀리 투룸 로프트', baseCleaningFee: 30000, active: true, version: 1, roomCount: 35 },
-        { id: '10000000-0000-4000-8000-000000000002', code: 'oceanPremium', displayName: '파셜 오션뷰 프리미어 더블 로프트', baseCleaningFee: 20000, active: true, version: 1, roomCount: 13 },
-        { id: '10000000-0000-4000-8000-000000000003', code: 'premium', displayName: '프리미어 더블 로프트', baseCleaningFee: 20000, active: true, version: 1, roomCount: 51 },
-        { id: '10000000-0000-4000-8000-000000000004', code: 'standard', displayName: '스탠다드 더블 로프트', baseCleaningFee: 16000, active: true, version: 1, roomCount: 22 }
+        { id: '10000000-0000-4000-8000-000000000001', code: 'oceanFamily', displayName: '파셜 오션뷰 패밀리 투룸 로프트', baseCleaningFee: 30000, baseOccupancy: 4, maxOccupancy: 6, active: true, version: 1, roomCount: 35 },
+        { id: '10000000-0000-4000-8000-000000000002', code: 'oceanPremium', displayName: '파셜 오션뷰 프리미어 더블 로프트', baseCleaningFee: 20000, baseOccupancy: 2, maxOccupancy: 4, active: true, version: 1, roomCount: 13 },
+        { id: '10000000-0000-4000-8000-000000000003', code: 'premium', displayName: '프리미어 더블 로프트', baseCleaningFee: 20000, baseOccupancy: 2, maxOccupancy: 3, active: true, version: 1, roomCount: 51 },
+        { id: '10000000-0000-4000-8000-000000000004', code: 'standard', displayName: '스탠다드 더블 로프트', baseCleaningFee: 16000, baseOccupancy: 2, maxOccupancy: 2, active: true, version: 1, roomCount: 22 }
       ]),
       listOperationBlocks: vi.fn(async () => ({
         roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 4, evaluatedAt: '2026-09-20T00:00:00.000Z',
@@ -124,6 +124,8 @@ function services(): AppServices {
         reservationLifecycle: 'FUTURE' as const,
         readinessStatus: 'READY' as const,
         primaryDisplayStatus: 'READY' as const,
+        canonicalPrimaryDisplayStatus: 'READY' as const,
+        displayStatusOverride: null,
         nextReservationId: '40000000-0000-4000-8000-000000000001',
         nextCheckInAt: '2026-09-18T07:00:00.000Z',
         nextCheckOutAt: '2026-09-19T02:00:00.000Z',
@@ -140,6 +142,22 @@ function services(): AppServices {
       get: vi.fn(),
       changeMasterData: vi.fn(),
       mutateOperation: vi.fn(),
+      correctOccupancy: vi.fn(async (_actor, input) => ({
+        correctionId: '71000000-0000-4000-8000-000000000001',
+        roomId: input.roomId,
+        reservationId: input.reservationId,
+        occupied: input.occupied,
+        effectiveAt: input.effectiveAt,
+        roomStateVersion: input.expectedRoomVersion + 1,
+        recordedAt: '2026-09-20T00:00:01.000Z'
+      })),
+      overrideDisplayStatus: vi.fn(async (_actor, input) => ({
+        overrideId: '72000000-0000-4000-8000-000000000001',
+        roomId: input.roomId,
+        targetStatus: input.targetStatus,
+        roomStateVersion: input.expectedRoomVersion + 1,
+        recordedAt: '2026-09-20T00:00:01.000Z'
+      })),
       preparePinChange: vi.fn(),
       confirmPinChange: vi.fn(),
       rollbackPinChange: vi.fn(),
@@ -164,7 +182,17 @@ function services(): AppServices {
         pinVersion: 1,
         status: 'verified' as const,
         confirmedAt: '2026-09-13T00:01:00.000Z'
-      }))
+      })),
+      getDeveloperCatalog: vi.fn(async () => ({
+        generatedAt: '2026-09-20T00:00:00.000Z',
+        summary: { total: 121, active: 121, inactive: 0 },
+        roomTypes: [], rooms: []
+      })),
+      previewRoomTypeCapacity: vi.fn(),
+      changeRoomTypeCapacity: vi.fn(),
+      createDeveloperRoom: vi.fn(),
+      previewRoomDeactivation: vi.fn(),
+      deactivateDeveloperRoom: vi.fn()
     },
     reservations: {
       list: vi.fn(async () => []),
@@ -177,6 +205,7 @@ function services(): AppServices {
         reservationType: input.reservationType,
         checkInAt: input.checkInAt,
         checkOutAt: input.checkOutAt,
+        guestCount: input.guestCount,
         excludeReservationId: input.excludeReservationId ?? null,
         evaluatedAt: '2026-09-16T08:00:00.000Z',
         candidates: [],
@@ -445,6 +474,112 @@ describe('application', () => {
     await app.close();
   });
 
+  it('records an admin occupancy correction with CAS, effective time, and idempotency', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/occupancy-corrections',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'occupancy-correction-0001'
+      },
+      payload: {
+        reservationId: '80000000-0000-4000-8000-000000000001',
+        occupied: false,
+        effectiveAt: '2026-09-20T00:00:00.000Z',
+        expectedRoomVersion: 6,
+        reasonCode: 'FRONT_DESK_VERIFIED'
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().correction).toMatchObject({
+      correctionId: '71000000-0000-4000-8000-000000000001',
+      occupied: false,
+      roomStateVersion: 7
+    });
+    expect(appServices.rooms.correctOccupancy).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({
+        roomId: '11111111-1111-4111-8111-111111111111',
+        reservationId: '80000000-0000-4000-8000-000000000001',
+        idempotencyKey: 'occupancy-correction-0001'
+      })
+    );
+    await app.close();
+  });
+
+  it.each(['maid', 'developer'] as const)('denies occupancy correction to %s', async (role) => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: `auth-${role}`, profileId: `${role}-1`, displayName: role,
+      role, mustChangePassword: false, accessToken
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/occupancy-corrections',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': 'occupancy-correction-denied-0001'
+      },
+      payload: {
+        reservationId: '80000000-0000-4000-8000-000000000001',
+        occupied: false,
+        effectiveAt: '2026-09-20T00:00:00.000Z',
+        expectedRoomVersion: 6,
+        reasonCode: 'FRONT_DESK_VERIFIED'
+      }
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ADMIN_REQUIRED');
+    expect(appServices.rooms.correctOccupancy).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([
+    'BLOCKED',
+    'OCCUPIED',
+    'ARRIVAL_PENDING',
+    'RESERVATION_PRESENT',
+    'CLEANING_REQUIRED',
+    'READY',
+    null
+  ] as const)('records the %s display classification override without changing source axes', async (targetStatus) => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/rooms/11111111-1111-4111-8111-111111111111/display-status-overrides',
+      headers: {
+        authorization: 'Bearer access-token',
+        'idempotency-key': `display-status-${targetStatus ?? 'clear'}`
+      },
+      payload: {
+        targetStatus,
+        expectedRoomVersion: 7,
+        reasonCode: 'FRONT_DESK_VERIFIED'
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().statusOverride).toMatchObject({
+      overrideId: '72000000-0000-4000-8000-000000000001',
+      targetStatus,
+      roomStateVersion: 8
+    });
+    expect(appServices.rooms.overrideDisplayStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      expect.objectContaining({
+        roomId: '11111111-1111-4111-8111-111111111111',
+        targetStatus,
+        expectedRoomVersion: 7
+      })
+    );
+    await app.close();
+  });
+
   it('returns open issues and rejects unsupported room-operation filters', async () => {
     const appServices = services();
     const app = await buildApp({ env, services: appServices, logger: false });
@@ -543,7 +678,8 @@ describe('application', () => {
     expect(response.json().items).toHaveLength(4);
     expect(response.json().items).toContainEqual(expect.objectContaining({
       code: 'standard', displayName: '스탠다드 더블 로프트',
-      baseCleaningFee: 16000, active: true, version: 1, roomCount: 22
+      baseCleaningFee: 16000, baseOccupancy: 2, maxOccupancy: 2,
+      active: true, version: 1, roomCount: 22
     }));
     await app.close();
   });
@@ -564,6 +700,81 @@ describe('application', () => {
     expect(response.json().error.code).toBe('ADMIN_REQUIRED');
     expect(appServices.rooms.listTypes).not.toHaveBeenCalled();
     await app.close();
+  });
+
+  it('exposes only the dedicated room catalog commands to a developer', async () => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-developer-1', profileId: 'developer-1', displayName: '개발자',
+      role: 'developer' as const, mustChangePassword: false, accessToken
+    }));
+    appServices.rooms.previewRoomTypeCapacity = vi.fn(async (_actor, input) => ({
+      roomTypeId: input.roomTypeId,
+      current: { baseOccupancy: 2, maxOccupancy: 2, version: 1 },
+      proposed: { baseOccupancy: input.baseOccupancy, maxOccupancy: input.maxOccupancy },
+      roomCount: 22,
+      activeReservationCount: 0,
+      exceedingActiveReservationCount: 0,
+      reasonCodes: [],
+      impactFingerprint: 'a'.repeat(64),
+      evaluatedAt: '2026-09-21T00:00:00.000Z',
+      expiresAt: '2026-09-21T00:05:00.000Z'
+    }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const headers = { authorization: 'Bearer access-token' };
+    const catalog = await app.inject({ method: 'GET', url: '/v1/developer/room-catalog', headers });
+    expect(catalog.statusCode).toBe(200);
+    expect(catalog.headers['cache-control']).toBe('no-store');
+    expect(catalog.json().catalog.summary).toEqual({ total: 121, active: 121, inactive: 0 });
+
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/v1/developer/room-types/10000000-0000-4000-8000-000000000004/capacity/preview',
+      headers,
+      payload: { baseOccupancy: 2, maxOccupancy: 3, expectedVersion: 1 }
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json().preview.maxOccupancy).toBeUndefined();
+    expect(appServices.rooms.previewRoomTypeCapacity).toHaveBeenCalledOnce();
+
+    const operational = await app.inject({ method: 'GET', url: '/v1/rooms', headers });
+    expect(operational.statusCode).toBe(403);
+    expect(operational.json().error.code).toBe('ADMIN_REQUIRED');
+    await app.close();
+  });
+
+  it('rejects admin access and invalid capacity values on developer catalog routes', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const headers = { authorization: 'Bearer access-token' };
+    const denied = await app.inject({ method: 'GET', url: '/v1/developer/room-catalog', headers });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().error.code).toBe('DEVELOPER_REQUIRED');
+    expect(appServices.rooms.getDeveloperCatalog).not.toHaveBeenCalled();
+    await app.close();
+
+    const developerServices = services();
+    developerServices.auth.authenticate = vi.fn(async (accessToken: string) => ({
+      authUserId: 'auth-developer-1', profileId: 'developer-1', displayName: '개발자',
+      role: 'developer' as const, mustChangePassword: false, accessToken
+    }));
+    const developerApp = await buildApp({ env, services: developerServices, logger: false });
+    for (const payload of [
+      { baseOccupancy: 0, maxOccupancy: 2, expectedVersion: 1 },
+      { baseOccupancy: 2, maxOccupancy: 0, expectedVersion: 1 },
+      { baseOccupancy: 2.5, maxOccupancy: 3, expectedVersion: 1 },
+      { baseOccupancy: 4, maxOccupancy: 3, expectedVersion: 1 }
+    ]) {
+      const response = await developerApp.inject({
+        method: 'POST',
+        url: '/v1/developer/room-types/10000000-0000-4000-8000-000000000004/capacity/preview',
+        headers,
+        payload
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(developerServices.rooms.previewRoomTypeCapacity).not.toHaveBeenCalled();
+    await developerApp.close();
   });
 
   it('accepts a version-zero PIN edit through the no-store prepare route', async () => {
@@ -1049,6 +1260,7 @@ describe('application', () => {
         reservationType: 'standard',
         checkInAt: '2026-10-01T16:00:00+09:00',
         checkOutAt: '2026-10-02T11:00:00+09:00',
+        guestCount: 2,
         roomTypeIds: [],
         excludeReservationId: null
       }
@@ -1073,7 +1285,8 @@ describe('application', () => {
       payload: {
         reservationType: 'long_stay',
         checkInAt: '2026-10-01T16:00:00+09:00',
-        checkOutAt: null
+        checkOutAt: null,
+        guestCount: 2
       }
     });
     expect(openEnded.statusCode).toBe(200);
@@ -1088,7 +1301,8 @@ describe('application', () => {
       payload: {
         reservationType: 'standard',
         checkInAt: '2026-10-01T16:00:00+09:00',
-        checkOutAt: null
+        checkOutAt: null,
+        guestCount: 2
       }
     });
     expect(invalid.statusCode).toBe(400);

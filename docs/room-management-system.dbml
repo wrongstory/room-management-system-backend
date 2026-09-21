@@ -11,7 +11,7 @@ Enum app_role {
 
 Table assignment_duration_policy_versions {
   id uuid [pk]
-  version bigint [not null, unique, note: 'Positive append-only version; admin expectedVersion CAS']
+  version bigint [not null, unique, note: 'Positive historical append-only version']
   status text [not null, note: 'draft | confirmed | retired; partial unique confirmed <=1']
   standard_minutes int [not null, note: '>0; no default/demo fallback']
   premium_minutes int [not null, note: '>0']
@@ -25,7 +25,7 @@ Table assignment_duration_policy_versions {
     created_by
     confirmed_by
   }
-  Note: 'Issue #29 feature. RLS RPC-only. Confirmed/retired require confirmation metadata. Immutable values, no DELETE; only confirmed→retired lifecycle update. No confirmed seed. Preview reads without writes.'
+  Note: 'Issue #29 historical ledger, retired by #231. RLS RPC-only and immutable with no DELETE. Existing values/audits remain readable through deprecated GET, but confirmation is blocked and preview never uses duration policy.'
 }
 
 Enum account_status {
@@ -188,8 +188,8 @@ Table public.room_types {
   name text [not null]
   base_cleaning_fee int [not null, note: 'KRW integer']
   default_duration_minutes int [not null]
-  default_guest_count int [not null]
-  max_guest_count int [not null]
+  default_guest_count int [not null, note: 'API baseOccupancy; >= 1']
+  max_guest_count int [not null, note: 'API maxOccupancy; >= default_guest_count; reservation authority']
   active boolean [not null, default: true]
   version bigint [not null, default: 1, note: 'managed catalog CAS version']
   created_at timestamptz [not null]
@@ -204,10 +204,30 @@ Table public.rooms {
   data_status text [not null]
   occupancy_override text
   state_version bigint [not null, default: 1]
+  active boolean [not null, default: true]
+  deactivated_at timestamptz
+  deactivated_by uuid
+  deactivation_reason_code text
   operation_suspended_at timestamptz
   operation_suspended_reason text
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
+}
+
+Table private.developer_catalog_previews {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  preview_kind text [not null, note: 'room_type_capacity/room_deactivation']
+  entity_id uuid [not null]
+  expected_version bigint [not null]
+  request_payload jsonb [not null]
+  impact_payload jsonb [not null]
+  impact_fingerprint text [not null, unique]
+  evaluated_at timestamptz [not null]
+  expires_at timestamptz [not null, note: 'evaluated_at + 5 minutes']
+  consumed_at timestamptz
+
+  Note: '#236 private FORCE RLS preview authority; no direct public/anon/authenticated/service_role grants.'
 }
 
 Table public.reservations {
@@ -2426,6 +2446,35 @@ Table private.reservation_room_move_events {
   actor_profile_id uuid [not null, ref: > public.profiles.id]
   command_key text [not null, unique]
   Note: 'Immutable safe event; guest name, PIN, photo locator and raw request are forbidden.'
+}
+Table private.room_occupancy_corrections {
+  id uuid [pk]
+  command_key text [not null, unique]
+  room_id uuid [not null, ref: > public.rooms.id]
+  reservation_id uuid [not null, ref: > public.reservations.id]
+  stay_id uuid [not null, ref: > private.reservation_stays.id]
+  replaced_segment_id uuid [ref: > private.stay_room_segments.id]
+  successor_segment_id uuid [ref: > private.stay_room_segments.id]
+  occupied boolean [not null]
+  effective_at timestamptz [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  reason_code text [not null]
+  room_state_version bigint [not null]
+  request_hash text [not null]
+  recorded_at timestamptz [not null]
+  Note: '#228 immutable provenance for an admin canonical stay-segment correction. occupied restoration requires same-room historical segment lineage and never acts as a room move.'
+}
+Table private.room_display_status_overrides {
+  id uuid [pk]
+  command_key text [not null, unique]
+  room_id uuid [not null, ref: > public.rooms.id]
+  target_status text [note: 'BLOCKED/OCCUPIED/ARRIVAL_PENDING/RESERVATION_PRESENT/CLEANING_REQUIRED/READY; null clears']
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  reason_code text [not null]
+  room_state_version bigint [not null]
+  request_hash text [not null]
+  recorded_at timestamptz [not null]
+  Note: '#228 immutable display-only classification override. Canonical reservation, occupancy, readiness, allocation and bookability axes remain unchanged; BLOCKED does not create an operation block.'
 }
 Table private.stay_segment_checkout_obligations {
   id uuid [pk]

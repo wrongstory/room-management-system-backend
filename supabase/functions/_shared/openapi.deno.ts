@@ -6,11 +6,42 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
-Deno.test("OpenAPI publishes the approved v0.4.0 candidate version", async () => {
+Deno.test("OpenAPI publishes the v0.5.0 developer room catalog candidate", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   assert(
-    document.info.version === "0.4.0",
+    document.info.version === "0.5.0",
     "approved semantic contract version",
+  );
+});
+
+Deno.test("developer room catalog OpenAPI exposes six developer-only safe operations", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const operations = [
+    document.paths["/v1/developer/room-catalog"].get,
+    document.paths["/v1/developer/room-types/{roomTypeId}/capacity/preview"]
+      .post,
+    document.paths["/v1/developer/room-types/{roomTypeId}/capacity"].patch,
+    document.paths["/v1/developer/rooms"].post,
+    document.paths["/v1/developer/rooms/{roomId}/deactivation/preview"].post,
+    document.paths["/v1/developer/rooms/{roomId}/deactivate"].post,
+  ];
+  assert(
+    operations.every((operation) =>
+      operation["x-required-roles"].join(",") === "developer"
+    ),
+    "all catalog operations are developer-only",
+  );
+  const roomType = document.components.schemas.RoomTypeCatalogItem;
+  assert(
+    roomType.required.includes("baseOccupancy") &&
+      roomType.required.includes("maxOccupancy"),
+    "admin catalog includes both occupancy fields",
+  );
+  const request =
+    document.components.schemas.ReservationBookabilityStandardPreviewRequest;
+  assert(
+    request.required.includes("guestCount"),
+    "bookability requires guestCount",
   );
 });
 Deno.test("payroll cycle resolver reuses the bounded payroll envelope", async () => {
@@ -159,13 +190,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 120 &&
+    Object.keys(document.paths).length === 128 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 130,
-    "combined candidate contract 120/130",
+        ).length === 138,
+    "combined candidate contract 128/138",
   );
 });
 
@@ -835,9 +866,10 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "assignment draft and commit concurrency errors must be documented",
   );
   assert(
-    serialized.includes('"OUTSIDE_AVAILABILITY_WINDOW"') &&
+    serialized.includes('"AVAILABILITY_WEEK_OUT_OF_RANGE"') &&
+      serialized.includes('"PAST_AVAILABILITY_DATE_NOT_ALLOWED"') &&
       serialized.includes('"STALE_VERSION"'),
-    "availability KST and CAS errors must be documented",
+    "availability KST week, past-date, and CAS errors must be documented",
   );
   assert(
     serialized.includes('"#/components/schemas/ReservationDetail"') &&
@@ -1201,7 +1233,7 @@ Deno.test("cleaning field-completed audit projection fits the full strict summar
   }
 });
 
-Deno.test("preview OpenAPI documents pure admin preview and separate versioned config", async () => {
+Deno.test("preview OpenAPI documents retired duration policy", async () => {
   const doc = await openApiResponse({}).json() as typeof openApiDocument;
   const operation = doc.paths["/v1/assignments/preview"].post;
   assert(
@@ -1218,9 +1250,22 @@ Deno.test("preview OpenAPI documents pure admin preview and separate versioned c
     "strict preview body",
   );
   assert(
-    doc.paths["/v1/assignment-preview/duration-policy"].post.parameters[0]
-      .name === "Idempotency-Key",
-    "config mutation has own receipt",
+    doc.components.schemas.AssignmentPreviewResult.properties.durationPolicy
+          .type === "null" &&
+      doc.components.schemas.AssignmentPreviewResult.properties
+          .durationPolicyStatus.const === "retired" &&
+      doc.components.schemas.AssignmentPreviewResult.properties
+          .durationPolicyRequired.const === false,
+    "preview needs no duration policy",
+  );
+  const durationRoute = doc.paths["/v1/assignment-preview/duration-policy"];
+  assert(
+    durationRoute.get.deprecated === true &&
+      durationRoute.post.deprecated === true &&
+      "410" in durationRoute.post.responses &&
+      !("200" in durationRoute.post.responses) &&
+      !("parameters" in durationRoute.post),
+    "historical GET remains while mutation is retired",
   );
   assert(
     doc.components.schemas.DeveloperAuditEventType.enum.includes(
@@ -1397,7 +1442,17 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
   const summary = doc.components.schemas.DeveloperAuditEvent.properties.summary;
   assert(
     summary.additionalProperties === false &&
-      safeKeys.every((key) => key in summary.properties),
+      safeKeys.every((key) => key in summary.properties) &&
+      summary.properties.occupied.type === "boolean" &&
+      summary.properties.roomStateVersion.type === "integer" &&
+      summary.properties.roomStateVersion.minimum === 1 &&
+      summary.properties.displayStatusOverride.oneOf.some((value) =>
+        "type" in value && value.type === "null"
+      ) &&
+      summary.properties.displayStatusOverride.oneOf.some((value) =>
+        "$ref" in value &&
+        value.$ref === "#/components/schemas/RoomPrimaryDisplayStatus"
+      ),
     "full lifecycle safe audit summary fits strict schema",
   );
   for (
@@ -1416,7 +1471,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 70,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 73,
     "actual audit allowlist count",
   );
   assert(
@@ -1428,8 +1483,23 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
       ) &&
       doc.components.schemas.DeveloperAuditEventType.enum.includes(
         "photo.collection_item_deleted",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "payroll.payment_started",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "room.occupancy_corrected",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "room.display_status_overridden",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "room.pin_generated",
+      ) &&
+      doc.components.schemas.DeveloperAuditEventType.enum.includes(
+        "room.generated_pin_confirmed",
       ),
-    "complaint compensation events are operator-visible",
+    "approved developer audit events are operator-visible",
   );
 });
 

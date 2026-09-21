@@ -252,12 +252,27 @@ begin
     interval '1 day'+interval '16 hours') at time zone 'Asia/Seoul');
   v_check_out_at:=((date_trunc('day',clock_timestamp() at time zone 'Asia/Seoul')+
     interval '1 day 11 hours') at time zone 'Asia/Seoul');
-  v_effective_at:=clock_timestamp()+interval '2 seconds';
   perform public.create_reservation('8a100000-0000-4000-8000-000000000001',
     p_reservation_id,source_room.id,v_check_in_at,v_check_out_at,2,null,source_room.state_version,
     p_key||'-create',p_hash);
+  update public.reservations set actual_check_in_at=v_check_in_at where id=p_reservation_id;
+  perform pg_temp.install_room_pin_fixture(
+    target_room.id,
+    '8a100000-0000-4000-8000-000000000001',
+    1
+  );
+  insert into public.room_pin_sync_events(
+    room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at
+  ) values(
+    target_room.id,'verified',1,'TEST',
+    '8a100000-0000-4000-8000-000000000001',clock_timestamp()
+  );
+  -- Anchor both boundaries after all unrelated setup. The 15-second future
+  -- window keeps the product's future-effective validation meaningful while
+  -- avoiding a scheduler/load race around the former two-second boundary.
+  v_effective_at:=clock_timestamp()+interval '15 seconds';
   if p_checkout_soon then
-    v_check_out_at:=date_trunc('minute',clock_timestamp())+interval '1 minute';
+    v_check_out_at:=date_trunc('minute',v_effective_at)+interval '1 minute';
     perform set_config('app.reservation_segment_writer_mode','schedule_change_v1',true);
     update public.reservations
     set check_out_at=v_check_out_at,updated_at=clock_timestamp()
@@ -275,24 +290,9 @@ begin
     where obligation.reservation_id=p_reservation_id
       and target.id=obligation.planned_cleaning_target_id;
   end if;
-  update public.reservations set actual_check_in_at=v_check_in_at where id=p_reservation_id;
   select * into strict reservation from public.reservations where id=p_reservation_id;
   select * into strict source_room from public.rooms where id=source_room.id;
   select * into strict target_room from public.rooms where id=target_room.id;
-  perform pg_temp.install_room_pin_fixture(
-    target_room.id,
-    '8a100000-0000-4000-8000-000000000001',
-    1
-  );
-  insert into public.room_pin_sync_events(
-    room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at
-  ) values(
-    target_room.id,'verified',1,'TEST',
-    '8a100000-0000-4000-8000-000000000001',clock_timestamp()
-  );
-  -- Anchor the short future move window after fixture setup so a slower local
-  -- database cannot consume the entire validity interval before preview.
-  v_effective_at:=clock_timestamp()+interval '2 seconds';
   select public.preview_reservation_room_move(
     '8a100000-0000-4000-8000-000000000001',reservation.id,target_room.id,
     reservation.version,source_room.state_version,target_room.state_version,v_effective_at,
@@ -303,7 +303,7 @@ begin
     (preview->>'targetRoomVersion')::bigint,(preview->>'evaluatedAt')::timestamptz,
     (preview->>'expiresAt')::timestamptz,(preview->>'effectiveAt')::timestamptz,
     preview->>'impactFingerprint','OPERATIONAL_ADJUSTMENT',p_key||'-move',p_hash) into result;
-  perform pg_sleep(2.1);
+  perform pg_sleep(greatest(0,extract(epoch from (v_effective_at-clock_timestamp())))+0.1);
   return result;
 end
 $$;
