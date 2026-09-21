@@ -57,6 +57,7 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 ## Secret과 암호화
 
+- Supabase hosted Edge는 플랫폼 기본 `SUPABASE_URL`에서 project ref를 파생한다. Supabase가 `SUPABASE_` prefix의 사용자 Secret 등록을 거부하므로 hosted PIN API에 `SUPABASE_PROJECT_REF` custom secret을 만들지 않는다. production/recovery는 source-controlled exact URL만 허용하고, local/test만 synthetic `SUPABASE_PROJECT_REF`를 명시한다. URL host·경로·query 또는 선택적으로 존재하는 ref가 승인 대상과 다르면 PIN 암호화 전에 `ROOM_PIN_CRYPTO_CONFIG_INVALID`로 중단한다.
 - `ROOM_PIN_KEY_BASE64`는 canonical Base64 32-byte AES-256 key이고 `ROOM_PIN_KEY_VERSION`은 1~32자의 source-controlled version이다.
 - `ROOM_PIN_KEYRING_JSON`은 최대 5개의 prior version→canonical Base64 32-byte key를 가진다. current version을 중복 선언하거나 같은 key를 재사용할 수 없다.
 - reservation PII, Web Push current/prior key와 PIN current/prior key를 재사용하지 않는다. Node 환경 계약은 cursor/pepper 등 다른 목적 secret과의 재사용도 거부한다.

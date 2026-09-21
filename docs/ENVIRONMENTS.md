@@ -15,8 +15,9 @@ Free 프로젝트가 2개뿐이므로 recovery 프로젝트를 개발 DB로 겸�
 
 - 로컬은 `.env.example`을 `.env`로 복사하고 `supabase status -o env` 결과를 입력한다.
 - Fastify 운영값은 배포 플랫폼의 encrypted secret으로만 주입한다. Supabase-only PoC에서는 Function Secrets를 사용하고 Cron 호출 secret은 같은 값의 Vault copy만 허용한다.
-- `APP_ENV=production`에서는 HTTPS 원격 URL, 프로젝트 Ref, HTTPS CORS origin이 모두 필요하다.
-- URL의 호스트와 `SUPABASE_PROJECT_REF`가 다르면 서버가 시작하지 않는다.
+- Fastify의 `APP_ENV=production`에서는 HTTPS 원격 URL, 명시적 프로젝트 Ref, HTTPS CORS origin이 모두 필요하고 URL host와 Ref가 다르면 시작하지 않는다.
+- hosted Edge의 객실 PIN 암호화는 사용자 Secret으로 등록할 수 없는 `SUPABASE_PROJECT_REF`를 요구하지 않는다. `RUNTIME_ENVIRONMENT=production|recovery`와 플랫폼 기본 `SUPABASE_URL`을 source-controlled 운영/복구 exact host와 대조해 project ref를 파생하며, 승인되지 않은 host·경로·query 또는 별도 명시값 mismatch는 암호화 전에 fail-closed한다.
+- local/test Edge PIN 실행은 기존처럼 synthetic `SUPABASE_PROJECT_REF`를 명시한다.
 - publishable key는 브라우저 사용이 가능하지만 secret/service-role key는 서버에만 둔다.
 - 운영·복구 DB 접속 문자열, Google OAuth 값, dump 파일은 Git과 일반 로그에 넣지 않는다.
 - Edge runtime이 자동 제공하는 `SUPABASE_SERVICE_ROLE_KEY`를 custom secret이나 Vault에 복제하지 않는다. custom Function Secret 이름은 `SUPABASE_` prefix를 사용하지 않는다.
