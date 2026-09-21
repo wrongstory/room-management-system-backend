@@ -132,7 +132,7 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 ### `[확정 — 2026-09-21 #236]` 객실 인원 기준과 개발자 카탈로그
 
 - `room_types.default_guest_count`와 `max_guest_count`를 API의 `baseOccupancy`와 `maxOccupancy`로 공개한다. 두 값은 1 이상의 정수이며 `baseOccupancy <= maxOccupancy`다.
-- 예약 가능 미리보기와 예약 생성·일정 변경은 최신 `maxOccupancy`를 DB에서 다시 확인한다. 초과 요청은 `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`로 거부하고 기존 예약을 자동 변경하지 않는다.
+- 예약 가능 미리보기의 `guestCount`는 선택값이다. 생략/null이면 임의 인원 기본값을 넣지 않고 기간 bookability만 계산하며, 양의 정수이면 최신 `maxOccupancy`를 함께 검사한다. 예약 생성·일정 변경의 `guestCount`는 계속 필수이고 최신 `maxOccupancy`를 DB에서 다시 확인한다. 초과 요청은 `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`로 거부하고 기존 예약을 자동 변경하지 않는다.
 - 현재 DB에 저장된 인원 값은 그대로 보존한다. 화면 예시 숫자를 새 production 기준값이나 backfill 값으로 승격하지 않는다.
 - 객실 유형 인원 변경은 singleton developer만 수행한다. 먼저 5분 유효 impact preview를 받고, 동일 fingerprint와 room-type CAS version, source-controlled reason code, Idempotency-Key로 확정한다. 새 최대 인원을 초과하는 활성 예약이 있으면 확정하지 않는다.
 - 객실 추가는 숫자 문자열 room number, 활성 객실 유형, 최신 객실 유형 version을 요구한다. 새 객실은 `verification_required`로 시작한다.

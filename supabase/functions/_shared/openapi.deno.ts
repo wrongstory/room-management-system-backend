@@ -40,8 +40,10 @@ Deno.test("developer room catalog OpenAPI exposes six developer-only safe operat
   const request =
     document.components.schemas.ReservationBookabilityStandardPreviewRequest;
   assert(
-    request.required.includes("guestCount"),
-    "bookability requires guestCount",
+    !(request.required as readonly string[]).includes("guestCount") &&
+      JSON.stringify(request.properties.guestCount.type) ===
+        JSON.stringify(["integer", "null"]),
+    "bookability guestCount is optional and nullable",
   );
 });
 Deno.test("payroll cycle resolver reuses the bounded payroll envelope", async () => {

@@ -39,7 +39,7 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 인원 변경과 비활성화는 5분 TTL preview를 private FORCE RLS table에 고정한 뒤 actor, entity, CAS version, 요청 payload, 최신 영향 범위, opaque fingerprint를 commit에서 다시 확인한다. mutation은 Idempotency-Key receipt와 source-controlled reason code를 사용하며 기존 활성 예약이 새 최대 인원을 초과하거나 객실에 점유·예약·청소·PIN·미해결 운영 업무가 있으면 fail-closed한다. 객실 추가는 활성 유형의 최신 version을 요구하고 `verification_required`로 시작한다. 객실 제거는 hard delete 없이 inactive metadata와 audit event를 남긴다.
 
-예약 bookability 요청은 `guestCount`를 필수로 받고 candidate마다 최신 유형 최대 인원을 검사한다. preview는 안내일 뿐이며 예약·segment DB trigger와 create/change command가 최종 재검증한다. 이 migration은 현재 `default_guest_count/max_guest_count`를 변경하거나 예시 값으로 backfill하지 않는다.
+예약 bookability 요청은 `guestCount`를 생략하거나 null로 보낼 수 있다. 이 경우 임의 기본값 없이 기간 bookability만 계산하며, 양의 정수가 있으면 candidate마다 최신 유형 최대 인원을 검사한다. 예약 create/change의 `guestCount`는 계속 필수다. preview는 안내일 뿐이며 예약·segment DB trigger와 create/change command가 최종 재검증한다. 이 migration은 현재 `default_guest_count/max_guest_count`를 변경하거나 예시 값으로 backfill하지 않는다.
 
 ### #204 최근 7일 청소 완료 이력
 

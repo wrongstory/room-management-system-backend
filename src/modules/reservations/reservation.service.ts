@@ -63,7 +63,7 @@ export interface ReservationBookabilityPreviewInput {
   reservationType: ReservationType;
   checkInAt: string;
   checkOutAt: string | null;
-  guestCount: number;
+  guestCount: number | null;
   excludeReservationId?: string | null;
   roomTypeIds?: string[];
 }
@@ -72,7 +72,7 @@ export interface ReservationBookabilityPreview {
   reservationType: ReservationType;
   checkInAt: string;
   checkOutAt: string | null;
-  guestCount: number;
+  guestCount: number | null;
   excludeReservationId: string | null;
   evaluatedAt: string;
   candidates: ReservationBookabilityCandidate[];

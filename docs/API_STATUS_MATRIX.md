@@ -188,7 +188,7 @@ login 이후 같은 메모리 세션에서 전체 projection·diagnostics·업�
 - [x] 인원 변경·객실 비활성화 preview/commit의 5분 fingerprint, CAS, reason code, idempotency, audit
 - [x] 객실 추가의 숫자 문자열·유형 version·중복 검사와 `verification_required` 초기 상태
 - [x] 객실 hard delete 차단, inactive 객실의 신규 예약/segment/cleaning target 차단, 과거 이력 보존
-- [x] bookability `guestCount` 필수 및 create/change DB 최종 최대 인원 재검증
+- [x] bookability `guestCount` 선택값(null/생략은 capacity filter 없음), create/change는 필수 및 DB 최종 최대 인원 재검증
 - [x] Fastify/Edge/OpenAPI `0.5.0` 126 paths / 136 operations source parity
 - [x] `dev@994d3b61e49f49671acf0c1192b8821ae7f77792` 병합
 - [ ] production release/migration/API 배포
