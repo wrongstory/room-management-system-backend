@@ -136,6 +136,16 @@ GitHub Pages 포털은 Supabase Edge Function이 아닌 별도 정적 배포다.
 - [ ] `swagger-pages.yml` 수동 `workflow_dispatch`
 - [ ] 공개 portal/OpenAPI/manifest HTTP 200 및 artifact SHA-256 parity
 
+### GitHub Pages Swagger v0.5.1 hotfix gate — #245
+
+- [x] source fail-closed 기대값 0.5.1 / 128 paths / 138 operations
+- [x] v0.5.0 release manifest·문서 정본 byte-identical 보존
+- [ ] PR #246 exact head 독립 검토 및 `main` 병합
+- [ ] production 77→78 migration 적용 및 exact `main`의 `api` 배포
+- [ ] production `/openapi.json` 0.5.1 / 128 / 138 readback과 optional/null/positive `guestCount` hosted smoke
+- [ ] `swagger-pages.yml` 수동 `workflow_dispatch`
+- [ ] 공개 portal/OpenAPI/manifest HTTP 200 및 artifact SHA-256 parity
+
 ## 4. Auth API
 
 developer/admin/maid의 실제 hosted login과 role 경계를 검증했다.

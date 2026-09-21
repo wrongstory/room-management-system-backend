@@ -8,7 +8,7 @@
 - `guestCount=null`이면 임의 1명을 넣지 않고 기간 overlap과 기존 운영 차단 조건만 판정한다.
 - 양의 정수이면 객실 유형의 최신 최대 인원 검사를 유지한다.
 - 예약 create/change의 `guestCount` 필수 및 최종 DB 최대 인원 검증은 바꾸지 않는다.
-- OpenAPI info version은 0.5.0, 공개 계약 수는 128 paths / 138 operations를 유지한다.
+- OpenAPI info version은 0.5.1로 올리고, 공개 계약 수는 128 paths / 138 operations를 유지한다. Pages는 이 세 값이 모두 일치할 때만 수동 배포한다.
 
 ## 2. Migration manifest
 
@@ -40,8 +40,10 @@ v0.5.0 정본 [`migration-manifest.v0.5.0.json`](../supabase/migration-manifest.
 2. 기존 77개 hash와 backup/recovery 근거를 확인한다.
 3. 78번째 `reservation_bookability_optional_guest_count` 한 건만 적용하고 history, 함수 signature, 권한과 원장 보존을 확인한다.
 4. hotfix가 병합된 `main` exact SHA에서 만든 `api` bundle만 배포한다.
-5. `/health`, `/docs`, `/openapi.json`의 200 및 0.5.0 / 128 paths / 138 operations를 확인한다.
+5. `/health`, `/docs`, `/openapi.json`의 200 및 0.5.1 / 128 paths / 138 operations를 확인한다.
 6. admin 세션에서 `guestCount` 생략, 명시적 `null`, 양의 정수 요청을 확인한다. 생략/`null`에서는 capacity reason이 없어야 하고, 양의 정수에서는 기존 capacity 판정을 유지해야 한다.
 7. create/change 예약의 `guestCount` 필수 계약이 유지되는지 확인한다.
+8. 앞선 운영 검증이 모두 통과한 뒤 `main`의 `swagger-pages.yml`을 수동 실행한다. Pages build는 production OpenAPI가 0.5.1 / 128 / 138과 정확히 일치하지 않으면 fail-closed한다.
+9. 공개 Pages의 index, same-origin `openapi.json`, `portal-manifest.json`이 HTTP 200이고 version/count/artifact hash가 배포 계약과 일치하는지 확인한다.
 
-이번 hotfix는 다른 Function, Secrets, Cron, worker, Pages 또는 production 업무 데이터를 변경하지 않는다.
+이번 hotfix는 다른 Function, Secrets, Cron, worker 또는 production 업무 데이터를 변경하지 않는다. Pages는 API 배포와 hosted 계약 검증 뒤 별도 수동 단계로만 갱신한다.

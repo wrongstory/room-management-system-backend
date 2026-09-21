@@ -193,7 +193,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/openapi.json"');
     expect(api).toContain('path === "/docs"');
     expect(openApi).toContain('openapi: "3.1.1"');
-    expect(openApi).toContain('version: "0.5.0"');
+    expect(openApi).toContain('version: "0.5.1"');
     expect(openApi).toMatch(/bearerAuth:\s*\{[\s\S]*?type:\s*"http"[\s\S]*?scheme:\s*"bearer"/);
     expect(openApi).toContain('name: "Idempotency-Key"');
     expect(openApi).toContain('"/v1/reservations/{reservationId}/room-change":');

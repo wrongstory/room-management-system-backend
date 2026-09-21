@@ -451,6 +451,30 @@ Deno.test("reservation bookability keeps PIN readiness separate and supports emp
     "explicit null guestCount has the same canonical RPC input",
   );
 
+  const callsBeforeInvalidGuestCounts = rpcInputs.length;
+  for (const invalidGuestCount of [0, -1, 1.5, "2"]) {
+    const invalid = await captureEdgeError(() =>
+      previewReservationBookability(
+        commandRequest("/v1/reservations/bookability/preview", {
+          reservationType: "standard",
+          checkInAt: body.checkInAt,
+          checkOutAt: body.checkOutAt,
+          guestCount: invalidGuestCount,
+        }),
+        clients,
+        admin,
+      )
+    );
+    assert(
+      invalid.status === 400 && invalid.code === "VALIDATION_ERROR",
+      "non-positive, fractional and string guestCount values fail closed",
+    );
+  }
+  assert(
+    rpcInputs.length === callsBeforeInvalidGuestCounts,
+    "invalid guestCount never reaches the database",
+  );
+
   empty = true;
   const none = await previewReservationBookability(
     commandRequest("/v1/reservations/bookability/preview", {

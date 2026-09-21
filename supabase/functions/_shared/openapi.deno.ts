@@ -6,10 +6,10 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
-Deno.test("OpenAPI publishes the v0.5.0 developer room catalog candidate", async () => {
+Deno.test("OpenAPI publishes the v0.5.1 bookability hotfix contract", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   assert(
-    document.info.version === "0.5.0",
+    document.info.version === "0.5.1",
     "approved semantic contract version",
   );
 });

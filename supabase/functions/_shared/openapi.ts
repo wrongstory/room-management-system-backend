@@ -417,7 +417,7 @@ export const openApiDocument = {
   openapi: "3.1.1",
   info: {
     title: "CASTLE THE ART Room Management API",
-    version: "0.5.0",
+    version: "0.5.1",
     description: [
       "Supabase Edge API의 인증·계정·객실·주간 가능일·예약 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
       "",

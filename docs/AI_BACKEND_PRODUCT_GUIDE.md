@@ -4,6 +4,7 @@
 
 검토 기준:
 
+- Issue #245 v0.5.1 hotfix 후보는 v0.5.0 `main@ed34abe5c5375323dc6952c330183b73c9211547`을 기준으로 78번째 append-only migration과 OpenAPI `0.5.1` 128 paths / 138 operations를 구성한다. bookability preview에서만 `guestCount` 생략/`null`을 같은 값으로 받아 capacity 필터 없이 기간 판정을 하며, 예약 create/change의 인원 필수 계약은 유지한다. 아직 PR 병합·production DB/API/Pages 반영 전이다.
 - production release 기준은 73 migrations / OpenAPI 120 paths / 130 operations이고, v0.5.0 release candidate 기준은 `dev@49214bb67f2cf346178bc12321948a810e050234` — 77 migrations / OpenAPI 0.5.0 128 paths / 138 operations이다. 후보는 #229/#231/#236/#228과 #238 backport를 포함하지만 아직 production 사용 가능 상태가 아니다.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
 - 백엔드 저장소와 직접 검증한 production 배포 source는 `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a`이다. production은 73 migrations, `api` ACTIVE v19, OpenAPI `0.4.0` 120 paths / 130 operations이며 #238 최초 PIN 등록 hotfix와 공개 Health/OpenAPI smoke를 포함한다.
