@@ -144,7 +144,7 @@ Production은 이 문서를 작성한 시점에도 기존 `main`/DB/API 상태�
 - [x] production base `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a` 고정
 - [x] 77-migration manifest, production baseline 73, pending 4 계약 작성
 - [x] Pages fail-closed source gate 0.5.0 / 128 / 138 구성
-- [ ] 전체 local release 검증 PASS
+- [x] 전체 local release 검증 PASS
 - [ ] required `application`/`migration` CI PASS
 - [ ] exact-head 독립 QA 90점 이상, P0/P1=0
 - [ ] `release/v0.5.0 → main` 병합
