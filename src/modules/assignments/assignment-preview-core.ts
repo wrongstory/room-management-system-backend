@@ -366,7 +366,9 @@ export async function optimizeAssignmentPreview(
         a.targetAssignmentVersion !== t.assignmentVersion ||
         a.availableFrom === null ||
         Date.parse(a.availableFrom) !== Date.parse(t.availableFrom) ||
-        a.dueAt !== t.dueAt || t.blockedReason ||
+        a.dueAt !== t.dueAt ||
+        (t.blockedReason && !(t.activeAttempt?.status === "in_progress" &&
+          t.blockedReason === "ASSIGNMENT_WINDOW_EXPIRED")) ||
         // A running attempt remains fixed work; follow-up plans append after its sequence.
         (t.activeAttempt !== null &&
           (t.activeAttempt.maidProfileId !== a?.maidProfileId ||
