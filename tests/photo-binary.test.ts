@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { ImageMagick, MagickColors, MagickFormat } from '@imagemagick/magick-wasm';
+import { ImageMagick, MagickColors, MagickFormat, MagickReadSettings } from '@imagemagick/magick-wasm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { checkPhotoEnvelope, initializePhotoDecoder, PhotoError, PHOTO_MAX_BYTES, photoMime, readPhotoBody, verifyPhotoBinary } from '../src/modules/photos/photo-binary.js';
+import { checkPhotoEnvelope, checkPhotoInputEnvelope, initializePhotoDecoder, PhotoError, PHOTO_INPUT_MAX_BYTES, PHOTO_MAX_BYTES, photoMime, readPhotoBody, verifyPhotoBinary } from '../src/modules/photos/photo-binary.js';
 
 beforeAll(async () => { await initializePhotoDecoder(await readFile(new URL(import.meta.resolve('@imagemagick/magick-wasm/magick.wasm')))); });
 const fixture = (mime: 'image/jpeg' | 'image/webp' = 'image/jpeg', width = 16, height = 16) =>
@@ -28,19 +28,54 @@ describe('independent server image verification', () => {
       expect(a.sizeBytes).toBe(a.bytes.length); checkPhotoEnvelope(a.bytes, mime, true);
     }
   });
-  it('raw exact 307200 accepted; 307201 rejects before rescue compression', async () => {
-    for (const n of [307199, 307200]) expect((await verifyPhotoBinary(padJpeg(fixture(), n), 'image/jpeg')).sizeBytes).toBeLessThan(n);
-    await expect(verifyPhotoBinary(padJpeg(fixture(), 307201), 'image/jpeg')).rejects.toMatchObject({ code: 'PHOTO_TOO_LARGE' });
+  it('accepts and strips smartphone-sized JPEG input while keeping stored bytes below 300KiB', async () => {
+    for (const n of [307199, 307200, 307201]) {
+      const output = await verifyPhotoBinary(padJpeg(fixture(), n), 'image/jpeg');
+      expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+    }
+    const twelveMegapixel = fixture('image/jpeg', 4032, 3024);
+    expect((await verifyPhotoBinary(twelveMegapixel, 'image/jpeg')).sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+    await expect(verifyPhotoBinary(padJpeg(fixture(), PHOTO_INPUT_MAX_BYTES + 1), 'image/jpeg')).rejects.toMatchObject({ code: 'PHOTO_TOO_LARGE' });
+  });
+  it('decodes a synthetic HEIF sample to metadata-free JPEG, and rejects malformed containers', async () => {
+    // Synthetic 32px HEVC fixture from libheif fuzzing/data/corpus/hevc32.heif (LGPL-3.0).
+    const heic = Uint8Array.from(Buffer.from('AAAAHGZ0eXBoZWljAAAAAG1pZjFoZWljbWlhZgAAAXttZXRhAAAAAAAAACFoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAAAAAACJpbG9jAAAAAERAAAEAAQAAAAABnwABAAAAAAAAAGwAAAAjaWluZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAAA5waXRtAAAAAAABAAAA+2lwcnAAAADbaXBjbwAAAHZodmNDAQNwAAAAAAAAAAAAHvAA/P34+AAADwNgAAEAGEABDAH//wNwAAADAJAAAAMAAAMAHroCQGEAAQAqQgEBA3AAAAMAkAAAAwAAAwAeoCCBBZbq5Ka5uAhoMCAAAAMDIAAAAwAhYgABAAZEAcFzwIkAAAATY29scm5jbHgAAQANAAaAAAAAFGlzcGUAAAAAAAAAQAAAAEAAAAAoY2xhcAAAACAAAAABAAAAIAAAAAH////gAAAAAv///+AAAAACAAAADnBpeGkAAAAAAQgAAAAYaXBtYQAAAAAAAAABAAEFgQIDBYQAAAB0bWRhdAAAAGgoAa8TgPUrAhGDczL1mz4HCRRzxqbGjnnUrr1cLTO799zRz6nw0QjRMp+4I2Da10D3ghQEMvB53CWoI0S3qXIb99YsvLFaQ9ZLHxsJsZ9SxlvNJ5EgD4Y4miuaKu3bxPGXDHirp/9TzA==', 'base64'));
+    for (const mime of ['image/heic', 'image/heif'] as const) {
+      const output = await verifyPhotoBinary(heic, mime);
+      expect(output.mime).toBe('image/jpeg');
+      expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+      checkPhotoEnvelope(output.bytes, output.mime, true);
+    }
+    const bad = heic.slice(); bad[4] = 0;
+    expect(() => checkPhotoInputEnvelope(bad, 'image/heic')).toThrow(PhotoError);
+    expect(() => checkPhotoInputEnvelope(heic, 'image/jpeg')).toThrow(PhotoError);
+  });
+  it('compresses high-detail JPEG input rather than trusting the original size', async () => {
+    const width = 1280, height = 960, rgb = new Uint8Array(width * height * 3);
+    let seed = 1;
+    for (let index = 0; index < rgb.length; index++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      rgb[index] = (seed >>> 24) & 255;
+    }
+    const raw = ImageMagick.read(rgb, new MagickReadSettings({ format: MagickFormat.Rgb, width, height, depth: 8 }), image => {
+      image.quality = 85;
+      return image.write(MagickFormat.Jpeg, data => Uint8Array.from(data));
+    });
+    expect(raw.length).toBeGreaterThan(PHOTO_MAX_BYTES);
+    const output = await verifyPhotoBinary(raw, 'image/jpeg');
+    expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+    expect(output.sizeBytes).toBeLessThan(raw.length);
   });
   it('cancels oversized unknown/lying-length streams and rejects partial/empty bodies', async () => {
     for (const length of [null, '100']) {
       let cancelled = false;
-      const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(PHOTO_MAX_BYTES)); c.enqueue(new Uint8Array(1)); }, cancel() { cancelled = true; } });
-      await expect(readPhotoBody(stream, length)).rejects.toMatchObject({ code: 'PHOTO_TOO_LARGE' });
+      const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(PHOTO_INPUT_MAX_BYTES)); c.enqueue(new Uint8Array(1)); }, cancel() { cancelled = true; } });
+      await expect(readPhotoBody(stream, length, PHOTO_INPUT_MAX_BYTES)).rejects.toMatchObject({ code: 'PHOTO_TOO_LARGE' });
       expect(cancelled).toBe(true);
     }
     const raw = fixture();
     expect(await readPhotoBody(new Response(raw).body, String(raw.length))).toEqual(raw);
+    expect(await readPhotoBody(new Response(Buffer.from(padJpeg(raw, 307201))).body, '307201', PHOTO_INPUT_MAX_BYTES)).toHaveLength(307201);
     await expect(readPhotoBody(new Response(raw).body, '1')).rejects.toBeInstanceOf(PhotoError);
     await expect(readPhotoBody(new Response(new Uint8Array()).body, null)).rejects.toBeInstanceOf(PhotoError);
   });

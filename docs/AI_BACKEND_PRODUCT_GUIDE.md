@@ -378,7 +378,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 일반 slot의 current 사진은 한 장이다. 재촬영은 current pointer를 CAS로 교체하며, 이전 업로드/교체 이력은 보존 정책에 따라 추적한다.
 - `maxPhotos` 없는 pre-A 퇴실 청소 snapshot은 v7 및 그보다 높은 historical version도 타입별 10/11/13/15개와 필수 `tv-on`을 유지한다. Decision A snapshot은 v8 이상이면서 모든 slot에 `maxPhotos`가 있고, 9/10/12/14개·필수 8/9/11/13개·required `tv-on`·`entry-storage`를 강제하며 `entry-number`를 제외한다. 마지막 `extra-proof`는 선택 slot, `maxPhotos=10`이다.
 - **[현재 source 후보]** v8 `extra-proof`는 안정적인 client item UUID, collection/item CAS revision, 최대 10장, append·동일 item replace·개별 tombstone delete를 제공한다. 제출은 당시 active item을 표시 순서대로 불변 binding하며 이후 교체·삭제가 과거 제출을 바꾸지 않는다. active collection 사진은 폭탄방 신고의 현재 verified 증빙으로 선택할 수 있고, append/replace의 item identity와 삭제 event는 제한된 developer audit projection에 남는다. 최초 append·10장 상한·replace/delete·submit·멱등 key 경쟁은 실제 병렬 DB transaction으로 검증하며 신규 private table/helper의 direct runtime 접근은 금지한다. 기존 pre-A와 일반 slot의 단일 current pointer는 그대로 유지한다. 운영 사용은 #180 독립 QA·CI·사람 리뷰와 release 검증 뒤에만 허용한다.
-- 앱은 JPEG/WebP를 EXIF 제거 후 사진당 최대 300KiB(307,200 bytes)로 압축한다. 서버도 본문 크기와 허용 형식을 독립적으로 강제한다.
+- **[2026-09-23 사용자 결정]** 스마트폰 촬영 파일을 입력 기준으로 삼는다. 앱의 사전 300KiB 압축은 필수가 아니며, 서버가 허용 원본을 방향 보정·metadata 제거·축소/재인코딩해 사진당 최대 300KiB(307,200 bytes)로 저장한다. 클라이언트 최적화는 가능하지만 서버 결과를 대신하지 않는다.
 - 서버는 파일 확장자나 client MIME만 믿지 않고 magic bytes, 허용 MIME, 크기, hash, 현재 담당/attempt/version을 검증한다.
 - 현장 완료, 미전송 업로드, 전체 제출, 검수 요청은 별도 상태다.
 - **[확정 — 2026-09-08 정책 변경]** `field_completed`는 물리적인 현장 청소 완료 선언이다. 필수 photo slot 충족은 현장 완료의 선행조건이 아니며 #30/#9/#31의 전체 submission gate에서 검증한다. 현장 완료만으로 room ready, cleaning/review approval, earning, payroll entitlement를 생성하지 않는다.
@@ -570,7 +570,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 ### `[확정 — 2026-09-17]` 도메인별 보존 기간
 
 - Google Drive에만 저장한다. Supabase Storage에는 사진 객체를 저장하지 않는다.
-- 프런트에서 JPEG/WebP를 300KiB 이하로 압축하고 서버도 크기·magic bytes·MIME·EXIF 제거를 검증한다.
+- 스마트폰 원본 JPEG/WebP/HEIC/HEIF를 서버에 전송할 수 있다. 서버가 입력 형식·크기·binary를 검사하고 방향 보정·metadata 제거·축소 후 JPEG/WebP 300KiB 이하만 저장한다. 프런트가 유효한 원본을 기존 300KiB 제한만으로 차단하지 않는다.
 - 비공개 KST 업로드 일자/객실 폴더에 정리한다.
 - 청소 제출 사진은 최종 검사 결정 전 원본·미리보기·캐시를 보존하고 승인 또는 반려의 `decided_at + 168 hours`에 삭제한다. 검수 대기 시간이 길어져도 먼저 삭제하지 않는다.
 - 객실 이슈·컴플레인 증빙은 해결 또는 종결 시각부터 180일, 중단 업무·동기화 충돌 증빙은 관리자 해결 시각부터 180일 보존한다.
@@ -584,7 +584,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 ### `[확정: #84 착수 승인]` 서버 중계·응답 유실 복구 경계
 
 - 파일명은 서버 사전발급 opaque app `object_id`이며 canonical photo version은 finalize에서 연결한다. Drive ID를 브라우저에 노출하지 않는다.
-- raw body는307200 bytes까지이며 MIME/magic·전체 decode·metadata 제거·최종 출력 검증을 서버가 수행한다. decoder pixel/frame/CPU/memory 상한은 기술상한으로 검증하고 제품 사진 개수 정책으로 승격하지 않는다.
+- 이 변경의 source 계약에서 raw body는 5MiB까지이며 입력은 JPEG/WebP/HEIC/HEIF다. MIME/magic·전체 decode·방향 보정·metadata 제거·최종 JPEG/WebP 307200 bytes 이하 출력을 서버가 검증한다. 12MP/5000px 및 decoder frame/CPU/memory 상한은 기술상한이며, 이를 넘는 스마트폰 원본에는 앱 축소 또는 명확한 재촬영 안내가 필요하다. 운영 반영 전 기존 배포 API는 여전히 307200 bytes 입력 제한일 수 있다.
 - 서버가 preallocated identity/부모/MIME/size/실제SHA를 검증한 Google immutable `createdTime`을 최초 업로드 성공시각으로 사용한다. create에서 시간값을 지정하지 않고 응답 유실/409에서도 같은 clock을 복구한다. 원문 client 촬영시각·retry 수신시각으로 보존기한을 연장하지 않는다.
 - 사전예약 KST 폴더 날짜와 실제 provider 생성 날짜가 다르면 acceptance를 거부한다. 이미 생성된 identity는 move/rebind하지 않고 미수락 여부와 fence를 확인한 보상 경로만 사용한다.
 - limited upload_evidence는 슬롯/업로드/상태 접근만 허용하며 사진 원본 read 권한이 아니다. 원본은 active admin 또는 본인 현재 회차의 active maid를 응답 직전까지 재검증한다.

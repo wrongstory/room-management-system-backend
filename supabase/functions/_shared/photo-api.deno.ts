@@ -243,7 +243,7 @@ Deno.test("photo routing rejects aliases, unsupported methods, oversized raw bod
       `${upload}?assignmentId=${
         id(8)
       }&assignmentRevision=1&expectedPhotoRevision=0`,
-      new Uint8Array(307201),
+      new Uint8Array(5 * 1024 * 1024 + 1),
     ),
     s.dependencies,
   );
