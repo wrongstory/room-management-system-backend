@@ -73,12 +73,12 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 source/readback evidence: **2026-09-22 KST**. #245 v0.5.1 hotfix는 `main`과 production DB/API에 반영됐으며, dev backport와 Pages 공개 readback은 별도 gate다.
+production 공개 HTTP readback: **2026-09-22 KST**, DB/Function metadata read-only 확인: **2026-09-23 KST**. #245 v0.5.1 hotfix는 `main`/`dev` source와 production DB/API/Pages에 반영됐다. 관리자 positive mutation smoke는 포함하지 않는다.
 
-- 현재 GitHub·production API source 정본: `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`.
+- 현재 GitHub `main@68f7afd8436057de85a9b0002579d1544972b128`. 운영 API bundle은 #245 hotfix 병합 source `dda676dc6527a75a2271140d83ae6d2dbfb7cadf`에서 왔고, 이후 main 변경은 Pages workflow·테스트 fixture·문서다.
 - production은 **78 migrations**, head `reservation_bookability_optional_guest_count`, **`api` ACTIVE v24**, OpenAPI **0.5.1 / 128 paths / 138 operations**다.
-- production `/health`와 `/openapi.json`은 HTTP 200이다. GitHub Pages portal의 v0.5.1 공개 readback은 완료 증거 전까지 pending으로 둔다.
-- #245 dev backport 후보는 최신 dev-only 이력과 v0.5.0 manifest를 보존하면서 동일한 78번째 migration과 OpenAPI 0.5.1 계약을 추가한다.
+- production `/health`와 `/openapi.json`은 HTTP 200이다. 공개 GitHub Pages index/OpenAPI/manifest도 HTTP 200 및 **0.5.1 / 128 / 138**으로 일치한다.
+- #245 dev backport는 최신 dev-only 이력과 v0.5.0 manifest를 보존하며 78번째 migration과 OpenAPI 0.5.1 계약을 통합했다.
 - #187 Phase C는 PR #190으로 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`에 source/dev 병합 완료했다. 당시 개발 정본은 기존 61개를 수정하지 않은 **62 migrations / OpenAPI 113 paths / 121 operations**이며 현재 production 포함 여부는 이 절의 v0.5.1 readback을 우선한다.
 - #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다.
 - 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. 현재 production source 포함 여부는 이 §2의 `main@dda676d...`, 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations snapshot을 우선한다.
@@ -90,7 +90,7 @@ production 최종 source/readback evidence: **2026-09-22 KST**. #245 v0.5.1 hotf
 - #131은 현재 **production 56-migration historical snapshot**에 반영된 #69 PIN Phase A다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. 이 운영 snapshot은 private immutable revision/current pointer, physical-change mismatch lifecycle과 authoritative maid access lease를 change/reveal 양쪽에 사용한다. #194의 64번째 source candidate는 물리 PIN change의 exact in-progress access-lease 경계는 유지하되 reveal만 exact current/notified assignment entitlement + 30초 lease로 대체하며 아직 production 사용 가능 계약이 아니다. 양쪽 모두 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
 - #184 현재 시각 객실 projection, #187 Phase A~C 예약 임박·체크인 전 변경·투숙 중 이동, #180 `extra-proof` 0~10장 collection source는 v0.4.0 production DB/API에 포함됐다. 각 기능의 실제 mutation smoke와 프런트 사용 완료는 별도다.
-- 현재 critical path는 **#245 dev backport exact-head source gate → Pages v0.5.1 공개 readback → 보호 API 역할별 hosted read**다. 안전 fixture가 없으면 임의 production 데이터를 만들지 않는다.
+- 현재 v0.5.1 발행 gate는 **운영 관리자 `guestCount` 생략/null/양수 read-only smoke → annotated tag/GitHub Release**다. PR #251 등 차기 개발은 별도이며 안전 fixture가 없으면 임의 production 데이터를 만들지 않는다.
 - 운영 migration: **78건**, head `reservation_bookability_optional_guest_count`
 - 운영 Edge Functions readback:
   - `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 bundle 배포
@@ -100,7 +100,7 @@ production 최종 source/readback evidence: **2026-09-22 KST**. #245 v0.5.1 hotf
 - production OpenAPI: **128 paths / 138 operations**, version `0.5.1`
 - `dev@49214bb67f2cf346178bc12321948a810e050234`는 v0.5.0의 과거 integration 지점이다. 이번 별도 backport는 그 이후 dev history를 보존한다.
 - production `/health`, `/docs`, `/openapi.json` HTTP 200과 OpenAPI readback은 확인됐다. 전체 hosted role/domain positive mutation smoke는 안전한 fixture 부재로 미완료이며, Issue #112/#137의 provider/Google target·credential·Vault/Cron/실기기 smoke도 별도 activation gate다.
-- GitHub Pages portal은 production Edge와 **0.5.0 / 128 / 138** parity를 확인했다. `portal-manifest.json`의 SHA-256은 공개 Pages `openapi.json` artifact와 일치한다. build 시각 metadata 때문에 raw production JSON과 artifact byte hash가 같다는 뜻은 아니다.
+- GitHub Pages portal은 production Edge와 **0.5.1 / 128 / 138** parity를 확인했다. index/OpenAPI/manifest가 HTTP 200이며 `portal-manifest.json`의 SHA-256은 공개 Pages `openapi.json` artifact와 일치한다. build 시각 metadata 때문에 raw production JSON과 artifact byte hash가 같다는 뜻은 아니다.
 - production `/docs`는 HTTP 200이지만 hosted 기본 domain의 HTML 렌더링 제약 때문에
   사람용 문서는 GitHub Pages 포털을 사용한다.
 
@@ -645,7 +645,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 
 ## 13. 후속 업무 API·모델 개발 상태
 
-아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production source 반영 여부는 §2의 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`, 78 migrations, production API OpenAPI 0.5.1 128 paths / 138 operations를 따른다. 공개 GitHub Pages는 아직 OpenAPI 0.5.0이며 v0.5.1 재배포·공개 readback은 pending이고, hosted positive smoke와 provider activation도 별도 상태다.
+아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production source 반영 여부는 §2의 78 migrations / OpenAPI 0.5.1 / 128 paths / 138 operations readback을 따른다. 공개 GitHub Pages도 OpenAPI 0.5.1로 갱신됐으며, hosted positive smoke와 provider activation은 별도 상태다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|

@@ -1,6 +1,6 @@
-# v0.5.1 예약 가능 미리보기 hotfix 적용 계획
+# v0.5.1 예약 가능 미리보기 hotfix 적용·발행 상태
 
-> 상태: #245 hotfix는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`, production 78 migrations, `api` ACTIVE v24, OpenAPI 0.5.1 / 128 / 138까지 반영됐다. dev backport와 Pages v0.5.1 공개 readback은 별도 gate다.
+> 상태: #245 hotfix는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`의 API bundle, production 78 migrations, `api` ACTIVE v24, OpenAPI 0.5.1 / 128 / 138까지 반영됐다. `dev`에도 source가 통합됐고 Pages v0.5.1 공개 readback도 완료됐다. 이후 `main@68f7afd8436057de85a9b0002579d1544972b128`에는 테스트 fixture와 릴리스 문서만 추가됐으며 운영 bundle은 바뀌지 않았다. 운영 관리자 `guestCount` hosted smoke와 `v0.5.1` tag/GitHub Release는 아직 완료되지 않았다.
 
 ## 1. 범위
 
@@ -32,9 +32,11 @@ dev 정본의 v0.5.0 snapshot [`migration-manifest.v0.5.0.json`](../supabase/mig
 3. Fastify, Edge, OpenAPI, Python generated contract와 DB/RLS/concurrency 검증을 통과했다.
 4. 기존 v0.5.0 migration entries와 hash를 변경하지 않았다.
 5. required `application`/`migration` CI와 exact-head 독립 QA P0/P1=0을 통과했다.
-6. PR #246을 병합해 현재 정본 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`를 만들었다. production DB/API 적용은 완료됐고 Pages v0.5.1 공개 readback만 pending이다.
+6. PR #246을 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`에 병합했다. production DB/API와 Pages v0.5.1 공개 readback은 완료했으나 관리자 positive smoke와 tag/Release는 별도 gate다.
 
-## 4. `main` 병합 후 운영 적용 순서
+## 4. 당시 `main` 병합 후 운영 적용 순서
+
+아래는 이미 완료된 DB/API/Pages 배포의 당시 절차이며 재실행 지시가 아니다. 관리자 `guestCount` 생략/null/양수 positive smoke는 문서 정정이나 공개 OpenAPI readback만으로 PASS 처리하지 않는다.
 
 1. production migration history와 schema가 77개/head `room_status_admin_correction`인지 read-only로 확인한다. 다르면 중단한다.
 2. 기존 77개 hash와 backup/recovery 근거를 확인한다.
@@ -47,3 +49,16 @@ dev 정본의 v0.5.0 snapshot [`migration-manifest.v0.5.0.json`](../supabase/mig
 9. 공개 Pages의 index, same-origin `openapi.json`, `portal-manifest.json`이 HTTP 200이고 version/count/artifact hash가 배포 계약과 일치하는지 확인한다.
 
 이번 hotfix는 다른 Function, Secrets, Cron, worker 또는 production 업무 데이터를 변경하지 않는다. Pages는 API 배포와 hosted 계약 검증 뒤 별도 수동 단계로만 갱신한다.
+
+## 5. 2026-09-22~23 readback과 남은 발행 gate
+
+| 항목 | 현재 증거 |
+|---|---|
+| 운영 `/health` | HTTP 200 |
+| 운영 `/openapi.json` | HTTP 200, 0.5.1 / 128 paths / 138 operations |
+| 공개 Pages index / `openapi.json` / `portal-manifest.json` | 모두 HTTP 200, manifest 0.5.1 / 128 / 138; workflow run `35627903617` 성공 |
+| 운영 migration 78건·head | production read-only 확인, head `reservation_bookability_optional_guest_count` |
+| `guestCount` 생략/null/양수 hosted admin smoke | 미완료. 개수·버전 readback으로 대체하지 않음 |
+| `v0.5.1` annotated tag / GitHub Release | 미발행. 위 hosted 계약 확인 후 발행 판단 |
+
+PR #251의 진행 중 메이드 후속 배정 Preview는 `dev` 후보이며 v0.5.1 운영 release의 완료 기능으로 표시하지 않는다.
