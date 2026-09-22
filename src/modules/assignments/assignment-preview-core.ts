@@ -366,8 +366,13 @@ export async function optimizeAssignmentPreview(
         a.targetAssignmentVersion !== t.assignmentVersion ||
         a.availableFrom === null ||
         Date.parse(a.availableFrom) !== Date.parse(t.availableFrom) ||
-        a.dueAt !== t.dueAt || t.blockedReason ||
-        (t.activeAttempt && t.activeAttempt.status !== "scheduled")
+        a.dueAt !== t.dueAt ||
+        (t.blockedReason && !(t.activeAttempt?.status === "in_progress" &&
+          t.blockedReason === "ASSIGNMENT_WINDOW_EXPIRED")) ||
+        // A running attempt remains fixed work; follow-up plans append after its sequence.
+        (t.activeAttempt !== null &&
+          (t.activeAttempt.maidProfileId !== a?.maidProfileId ||
+            !["scheduled", "in_progress"].includes(t.activeAttempt.status)))
       ) unavailable.add(i);
       if (a) seen.add(a.sequenceNumber);
     }
