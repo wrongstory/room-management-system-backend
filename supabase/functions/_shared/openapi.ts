@@ -2533,7 +2533,7 @@ export const openApiDocument = {
         operationId: "previewAssignments",
         summary: "배정 가능 수·요금 균형·동선 기반 배정 초안 계산",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용이며 KST 오늘/내일만 허용합니다. 예상 시간 정책은 폐기되어 없어도 실행되며 template durationMinutes, 객실 타입 기본값, 임의 1분을 판단에 사용하지 않습니다. availableFrom/dueAt과 실제 예약 구간처럼 명시된 사실만 검증하고 가상 종료시각을 만들지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 배정 가능 target 수 → 요금 격차/편차와 기존/reclean 제약 → 구역/호수 → 결정적 동률 순서로 비교합니다. previewSeed는 상관관계 호환 필드이며 동률 결정을 바꾸지 않습니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
+          "비밀번호 변경을 완료한 active business admin 전용이며 KST 오늘/내일만 허용합니다. 예상 시간 정책은 폐기되어 없어도 실행되며 template durationMinutes, 객실 타입 기본값, 임의 1분을 판단에 사용하지 않습니다. availableFrom/dueAt과 실제 예약 구간처럼 명시된 사실만 검증하고 가상 종료시각을 만들지 않습니다. 진행 중인 메이드도 현재 업무를 고정한 채 당일 후속 sequence의 계획 후보가 될 수 있으나 동시 현장 시작은 허용하지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 배정 가능 target 수 → 요금 격차/편차와 기존/reclean 제약 → 구역/호수 → 결정적 동률 순서로 비교합니다. previewSeed는 상관관계 호환 필드이며 동률 결정을 바꾸지 않습니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         requestBody: {

@@ -194,6 +194,50 @@ describe("assignment preview pure optimizer", () => {
     expect(r.proposedAssignments[0]?.maidProfileId).toBe("b");
     expect(r.fixedAssignments).toHaveLength(1);
   });
+  it("offers follow-up work after an in-progress assignment without changing the running work", async () => {
+    const ongoing = fixed("ongoing", "a", 3, { status: "in_progress" });
+    ongoing.activeAttempt = {
+      attemptId: "running-attempt",
+      maidProfileId: "a",
+      status: "in_progress",
+      startedAt: time("10:00"),
+      endedAt: null,
+    };
+    const s = snapshot([ongoing, target("later", { availableFrom: time("11:00") })]);
+    s.maids = s.maids.slice(0, 1);
+    const before = JSON.stringify(s);
+    const r = await optimizeAssignmentPreview(s, "follow-up");
+    expect(r.fixedAssignments).toMatchObject([{
+      cleaningTargetId: "ongoing",
+      maidProfileId: "a",
+      proposedSequenceNumber: 3,
+    }]);
+    expect(r.proposedAssignments).toMatchObject([{
+      cleaningTargetId: "later",
+      maidProfileId: "a",
+      proposedSequenceNumber: 4,
+    }]);
+    expect(r.remainingUnassignedTargets).toEqual([]);
+    expect(JSON.stringify(s)).toBe(before);
+  });
+  it("does not offer follow-up work when an active attempt no longer matches its fixed assignment", async () => {
+    const stale = fixed("stale", "a", 1, { status: "in_progress" });
+    stale.activeAttempt = {
+      attemptId: "other-owner-attempt",
+      maidProfileId: "b",
+      status: "in_progress",
+      startedAt: time("10:00"),
+      endedAt: null,
+    };
+    const s = snapshot([stale, target("later")]);
+    s.maids = s.maids.slice(0, 1);
+    const r = await optimizeAssignmentPreview(s, "owner-check");
+    expect(r.proposedAssignments).toEqual([]);
+    expect(r.remainingUnassignedTargets).toEqual([{
+      cleaningTargetId: "later",
+      reason: "NO_ELIGIBLE_MAID",
+    }]);
+  });
   it("reclean can only belong to original available maid", async () => {
     const s = snapshot([
       target("reclean", {

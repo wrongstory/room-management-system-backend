@@ -39,8 +39,10 @@ additional 예약 overlap, reclean 원 maid/source를 검증한다. Pure TypeScr
 
 - 유효한 당일 미배정 target만 신규 proposal 후보다.
 - draft/notified는 기존 담당·sequence를 유지하는 고정 fee/route 부하다.
-- 실제 진행 중인 attempt의 남은 시간은 정책 duration으로 추정하지 않는다. 불확실한 메이드의
-  추가 배정은 blocked로 남긴다. 미래 날짜의 scheduled 업무를 오늘 업무로 당겨 넣지 않는다.
+- 실제 진행 중인 attempt는 현재 담당·sequence를 고정한 채 유지한다. 그 메이드는 당일 후속
+  sequence의 계획 후보가 될 수 있지만, 남은 시간이나 종료시각을 추정하지 않는다. Preview·draft·notify는
+  다른 작업의 동시 현장 시작 허가가 아니며 시작 명령의 in_progress 제한은 그대로 적용한다.
+  미래 날짜의 scheduled 업무를 오늘 업무로 당겨 넣지 않는다.
 - reclean은 원 maid만 후보이며 그 maid가 inactive/미제출/불가능이면 미배정으로 남긴다.
 - planned checkout은 계획만 가능하다. Attempt/PIN/현장 실행 활성화는 하지 않는다.
 
