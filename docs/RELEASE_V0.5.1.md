@@ -1,6 +1,6 @@
-# v0.5.1 예약 가능 미리보기 hotfix 적용 계획
+# v0.5.1 예약 가능 미리보기 hotfix 적용·발행 상태
 
-> 상태: `main@ed34abe5c5375323dc6952c330183b73c9211547`에서 #245 hotfix 후보를 구성했다. PR 병합, production migration/API 배포, Pages 갱신은 아직 수행하지 않았다.
+> 상태: PR #246은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`에 병합됐다. 2026-09-23 read-only 재확인에서 production migration은 78건/head `reservation_bookability_optional_guest_count`, `api`는 ACTIVE v24였다. 운영 API와 공개 Pages의 OpenAPI는 모두 0.5.1 / 128 paths / 138 operations였다. 이 readback의 기준 `main@273d85f7cbefac0187519e7955e23de48056f927`에는 이후 Pages workflow 변경까지 포함된다. PR #253의 base인 `main@478e6c9aaa1d453d6bc6bc97776f5d97752cbfc0`에는 PR #255의 테스트 fixture만 추가됐으며 운영 bundle은 그대로다. `v0.5.1` tag/GitHub Release는 아직 없다.
 
 ## 1. 범위
 
@@ -25,16 +25,16 @@ v0.5.0 정본 [`migration-manifest.v0.5.0.json`](../supabase/migration-manifest.
 
 기존 77개 migration SQL과 v0.5.0 manifest를 수정하거나 재적용하지 않는다. 자동 `db push`, migration history repair, 기존 원장 삭제로 운영 상태를 맞추지 않는다.
 
-## 3. Source gate
+## 3. Source gate 완료 기록
 
-1. exact `main@ed34abe5c5375323dc6952c330183b73c9211547`에서 `hotfix/245-bookability-guest-count-optional`을 구성한다.
-2. fresh 78 migrations와 별도 77→78 upgrade를 검증한다.
-3. Fastify, Edge, OpenAPI, Python generated contract와 DB/RLS/concurrency 검증을 실행한다.
-4. v0.5.0 manifest가 원본과 byte-identical인지 확인한다.
-5. required `application`/`migration` CI와 exact-head 독립 QA P0/P1=0을 통과한다.
-6. hotfix PR은 `main`으로 생성하되 승인 전에는 병합·운영 변경을 하지 않는다.
+1. 당시 `main@ed34abe5c5375323dc6952c330183b73c9211547`에서 `hotfix/245-bookability-guest-count-optional`을 구성했다.
+2. PR #246에서 fresh 78 migrations, 별도 77→78 upgrade, Fastify/Edge/OpenAPI/Python 계약과 DB/RLS/concurrency를 검증했다.
+3. 기존 v0.5.0 migration entries와 hash를 변경하지 않았고, required `application`/`migration` 및 exact-head 독립 QA P0/P1=0을 통과했다.
+4. PR #246을 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`로 병합했다. 이후 `main`의 Pages-only 변경은 API 명령 계약을 변경하지 않았다.
 
-## 4. `main` 병합 후 운영 적용 순서
+## 4. 당시 `main` 병합 후 운영 적용 순서
+
+아래는 당시 승인한 절차의 기록이며 이미 완료된 DB/API/Pages 배포를 재실행하라는 지시가 아니다. 운영 DB 이력은 2026-09-23 읽기 전용으로 재확인했지만 `guestCount` 역할별 positive smoke는 이번 문서 정정만으로 PASS 처리하지 않는다.
 
 1. production migration history와 schema가 77개/head `room_status_admin_correction`인지 read-only로 확인한다. 다르면 중단한다.
 2. 기존 77개 hash와 backup/recovery 근거를 확인한다.
@@ -47,3 +47,16 @@ v0.5.0 정본 [`migration-manifest.v0.5.0.json`](../supabase/migration-manifest.
 9. 공개 Pages의 index, same-origin `openapi.json`, `portal-manifest.json`이 HTTP 200이고 version/count/artifact hash가 배포 계약과 일치하는지 확인한다.
 
 이번 hotfix는 다른 Function, Secrets, Cron, worker 또는 production 업무 데이터를 변경하지 않는다. Pages는 API 배포와 hosted 계약 검증 뒤 별도 수동 단계로만 갱신한다.
+
+## 5. 2026-09-22~23 readback과 남은 발행 gate
+
+| 항목 | 현재 증거 |
+|---|---|
+| 운영 `/health` | HTTP 200 |
+| 운영 `/openapi.json` | HTTP 200, 0.5.1 / 128 paths / 138 operations |
+| 공개 Pages index / `openapi.json` / `portal-manifest.json` | 모두 HTTP 200, manifest 0.5.1 / 128 / 138; workflow run `35627903617` 성공 |
+| 운영 migration 78건·head | Supabase production read-only list로 78건, head `reservation_bookability_optional_guest_count` 확인 |
+| `guestCount` 생략/null/양수 hosted admin smoke | 이번 턴 미실행; 개수·버전 readback으로 대체하지 않음 |
+| `v0.5.1` annotated tag / GitHub Release | 미발행. production DB history와 hosted 계약을 확인한 뒤 별도 발행 판단 |
+
+PR #251의 진행 중 메이드 후속 배정 Preview는 `dev` 후보이며 이 v0.5.1 운영 release의 완료 기능으로 표시하지 않는다. 해당 변경의 병합·새 릴리즈·운영 배포는 별도 gate다.
