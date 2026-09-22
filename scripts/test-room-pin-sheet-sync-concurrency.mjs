@@ -20,7 +20,15 @@ async function sqlAsync(value) {
 }
 
 export async function testRoomPinSheetSyncConcurrency() {
-  const roomId = sql('select id from public.rooms order by room_number,id limit 1');
+  // Earlier concurrency fixtures may leave a future-dated active entitlement on
+  // the first room. Rotating its PIN now would correctly violate ended_at >= granted_at.
+  const roomId = sql(`select r.id from public.rooms r
+    where not exists (
+      select 1 from private.room_pin_assignment_entitlements e
+      where e.room_id = r.id and e.ended_at is null
+    )
+    order by r.room_number, r.id limit 1`);
+  assert(/^[0-9a-f-]{36}$/.test(roomId), 'sheet-sync fixture needs a room without active PIN entitlement');
   const pinVersion = Number(sql(`select coalesce(max(pin_version),0)+1 from private.room_pin_revisions where room_id='${roomId}'::uuid`));
   assert(Number.isSafeInteger(pinVersion) && pinVersion > 0, 'next local PIN revision is bounded');
   const revisionId = randomUUID(), outboxId = randomUUID(), claimA = randomUUID(), claimB = randomUUID();
