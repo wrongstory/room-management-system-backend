@@ -103,6 +103,29 @@ select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','0','r
 select is(private.photo_quota_context(clock_timestamp())->>'usageBytes','1100','full provider usage retained after absorption');
 select is(public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.val('operation','photoId')::uuid)->>'providerFileId','synthetic_drive_file_84','active exact admin receives internal read context');
 select is(public.authorize_photo_read(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','photoId')::uuid)->>'photoId',pg_temp.val('operation','photoId'),'current active owner may read accepted photo');
+select is((select effective_policy_kind from private.photo_retention_records where photo_version_id=pg_temp.val('operation','photoId')::uuid),'cleaning_submission','selected cleaning evidence receives the domain policy');
+select is((select expires_at from private.photo_retention_records where photo_version_id=pg_temp.val('operation','photoId')::uuid),null::timestamptz,'pending cleaning evidence has no expiry before final inspection');
+select is((select extract(year from purge_after)::integer from private.photo_purge_jobs where photo_version_id=pg_temp.val('operation','photoId')::uuid),9999,'pending evidence is held out of the purge queue without a public expiry');
+savepoint retention_anchor;
+delete from private.photo_retention_links
+where object_id = pg_temp.val('operation','objectId')::uuid;
+delete from private.photo_retention_records
+where object_id = pg_temp.val('operation','objectId')::uuid;
+select is((select count(*) from private.photo_retention_records
+ where object_id = pg_temp.val('operation','objectId')::uuid),0::bigint,
+ 'accepted provider identity can exercise idempotent missing-retention recovery');
+insert into public.cleaning_submissions(id,cleaning_attempt_id,client_submission_id,version,status,photo_manifest,submitted_by)
+values(pg_temp.pid(6501),pg_temp.pid(501),pg_temp.pid(6502),1,'submitted','{}',pg_temp.pid(2));
+insert into private.submission_photo_bindings(submission_id,cleaning_attempt_id,cleaning_target_id,target_photo_slot_id,photo_version_id,photo_version)
+values(pg_temp.pid(6501),pg_temp.pid(501),pg_temp.pid(301),pg_temp.slot(1),pg_temp.val('operation','photoId')::uuid,1);
+select is((select effective_policy_kind from private.photo_retention_records
+ where object_id = pg_temp.val('operation','objectId')::uuid),'cleaning_submission',
+ 'submission binding recreates only an exactly accepted retention identity');
+select is((select expires_at from private.photo_retention_records where photo_version_id=pg_temp.val('operation','photoId')::uuid),null::timestamptz,'review-pending submission remains protected');
+insert into public.inspection_decisions(id,submission_id,decision,reason_code,decided_by,decided_at)
+values(pg_temp.pid(6503),pg_temp.pid(6501),'approved','QUALITY_OK',pg_temp.pid(1),clock_timestamp());
+select is((select expires_at-retention_starts_at from private.photo_retention_records where photo_version_id=pg_temp.val('operation','photoId')::uuid),interval '168 hours','final inspection starts exact 168-hour cleaning retention');
+rollback to retention_anchor;
 select throws_ok($$select public.authorize_photo_read(pg_temp.pid(3),pg_temp.pid(903),pg_temp.val('operation','photoId')::uuid)$$,'42501','PHOTO_ACCESS_REQUIRED','other maid cannot enumerate photo');
 select throws_ok($$select public.authorize_photo_read(pg_temp.pid(4),pg_temp.pid(904),pg_temp.val('operation','photoId')::uuid)$$,'42501','PHOTO_ACCESS_REQUIRED','developer is not business admin');
 select throws_ok($$select public.authorize_photo_read(pg_temp.pid(2),pg_temp.pid(902),pg_temp.pid(9999))$$,'42501','PHOTO_ACCESS_REQUIRED','unknown ID has uniform access denial');
@@ -120,7 +143,7 @@ select throws_ok($$select public.authorize_photo_read(pg_temp.pid(2),pg_temp.pid
 rollback to limited_read;
 savepoint old_assignment;
 update public.cleaning_assignments set is_current=false,ended_at=clock_timestamp() where id=pg_temp.pid(401);
-select throws_ok($$select public.authorize_photo_read(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','photoId')::uuid)$$,'42501','PHOTO_ACCESS_REQUIRED','historical notified access is not current photo-read ownership');
+select lives_ok($$select public.authorize_photo_read(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','photoId')::uuid)$$,'actual performer retains historical content access while media is available');
 rollback to old_assignment;
 select ok(not (select result from flow where label='operation') ?| array['providerFileId','providerFolderId','sha256','sessionId'],'user upload result remains provider-free');
 select ok(not exists(select 1 from public.audit_events where after_state::text like '%synthetic_drive%'),'audit contains no provider identity');
@@ -214,24 +237,38 @@ begin
   update private.photo_upload_states set status='accepted',revision=revision+1 where operation_id=oid;
   return photo;
 end; $$;
-select pg_temp.historical_photo(1,interval '7 days 1 second');
+select pg_temp.historical_photo(1,interval '30 days 1 second');
 select ok(exists(select 1 from private.photo_upload_acceptances where photo_version_id=pg_temp.pid(7201)),'expiry fixture is truly accepted history');
-select throws_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7201))$$,'42501','PHOTO_ACCESS_REQUIRED','even exact admin cannot read after exactly seven-day retention');
-select throws_ok($$select public.authorize_photo_read(pg_temp.pid(2),pg_temp.pid(902),pg_temp.pid(7201))$$,'42501','PHOTO_ACCESS_REQUIRED','current owner does not extend historical retention');
+select throws_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7201))$$,'55000','PHOTO_MEDIA_EXPIRED','orphan media expires after exactly thirty days');
+select throws_ok($$select public.authorize_photo_read(pg_temp.pid(2),pg_temp.pid(902),pg_temp.pid(7201))$$,'55000','PHOTO_MEDIA_EXPIRED','performer receives stable expired media state');
+savepoint historical_marked_purged;
 insert into private.attempt_photo_purge_states(photo_version_id,purged_at) values(pg_temp.pid(7201),clock_timestamp());
-select throws_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7201))$$,'42501','PHOTO_ACCESS_REQUIRED','purged accepted history remains unreadable');
-select pg_temp.historical_photo(2,interval '7 days'-interval '2 seconds');
-select lives_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7202))$$,'legacy accepted photo is readable before exact seven-day boundary');
+select throws_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7201))$$,'55000','PHOTO_MEDIA_PURGED','purged accepted history remains unavailable with stable reason');
+rollback to historical_marked_purged;
+select pg_temp.historical_photo(2,interval '30 days'-interval '2 seconds');
+select lives_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7202))$$,'orphan accepted photo is readable before exact thirty-day boundary');
 select pg_sleep(2.1);
-select throws_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7202))$$,'42501','PHOTO_ACCESS_REQUIRED','fresh server clock revokes read as seven-day boundary is crossed');
+select throws_ok($$select public.authorize_photo_read(pg_temp.pid(1),pg_temp.pid(901),pg_temp.pid(7202))$$,'55000','PHOTO_MEDIA_EXPIRED','fresh server clock exposes stable expiration as thirty-day boundary is crossed');
+savepoint accepted_same_claim_replay;
+insert into flow values('retention_claim_first',public.claim_due_photo_purges(repeat('e',64),1));
+insert into flow values('retention_claim_replay',public.claim_due_photo_purges(repeat('e',64),1));
+select is((select result#>>'{items,0,leaseVersion}' from flow where label='retention_claim_replay'),
+  (select result#>>'{items,0,leaseVersion}' from flow where label='retention_claim_first'),
+  'same claimant replay preserves the existing purge fence when policy clock is unchanged');
+rollback to accepted_same_claim_replay;
 savepoint accepted_eighth_failure;
+update private.photo_purge_jobs set next_attempt_at=clock_timestamp()+interval '1 day',revision=revision+1 where object_id=pg_temp.pid(7101);
 do $$ begin for i in 1..7 loop update private.photo_purge_jobs set status='retry',lease_version=lease_version+1,
   next_attempt_at=clock_timestamp()-interval '1 day',lease_expires_at=clock_timestamp()-interval '1 second',revision=revision+1
   where object_id=pg_temp.pid(7102); end loop; end $$;
 insert into flow values('accepted_eighth_claim',public.claim_due_photo_purges(repeat('b',64),1));
+do $$ begin
+  perform public.get_photo_purge_context(pg_temp.pid(7102),8,repeat('b',64));
+end $$;
 select is(public.settle_photo_purge(pg_temp.pid(7102),8,repeat('b',64),'retryable','PROVIDER_ERROR')->>'status','blocked','eighth accepted provider failure settles as blocked');
 rollback to accepted_eighth_failure;
 savepoint accepted_retry_exhausted;
+update private.photo_purge_jobs set next_attempt_at=clock_timestamp()+interval '1 day',revision=revision+1 where object_id=pg_temp.pid(7101);
 do $$ begin for i in 1..8 loop update private.photo_purge_jobs set status='retry',lease_version=lease_version+1,
   next_attempt_at=clock_timestamp()-interval '1 day',lease_expires_at=clock_timestamp()-interval '1 second',revision=revision+1
   where object_id=pg_temp.pid(7102); end loop; end $$;

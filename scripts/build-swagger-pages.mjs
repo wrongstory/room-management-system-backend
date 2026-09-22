@@ -88,7 +88,7 @@ async function readOpenApiFromUrl(sourceUrl) {
   return body;
 }
 
-function validateOpenApi(document, expectedPathCount, expectedOperationCount) {
+function validateOpenApi(document, expectedVersion, expectedPathCount, expectedOperationCount) {
   if (!document || typeof document !== "object" || Array.isArray(document)) {
     throw new Error("OpenAPI 문서는 JSON object여야 합니다.");
   }
@@ -103,6 +103,11 @@ function validateOpenApi(document, expectedPathCount, expectedOperationCount) {
     !/^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$/.test(document.info.version)
   ) {
     throw new Error("예상한 객실관리 API title/version 계약이 아닙니다.");
+  }
+  if (document.info.version !== expectedVersion) {
+    throw new Error(
+      `운영 OpenAPI version이 release 계약과 다릅니다: expected=${expectedVersion} actual=${document.info.version}`,
+    );
   }
   if (!document.paths || typeof document.paths !== "object" || Array.isArray(document.paths)) {
     throw new Error("OpenAPI paths가 없습니다.");
@@ -157,6 +162,7 @@ export async function buildSwaggerPortal({
   sourceFile,
   apiBaseUrl,
   outputDirectory,
+  expectedVersion,
   expectedPathCount,
   expectedOperationCount,
   generatedAt = new Date(),
@@ -177,6 +183,7 @@ export async function buildSwaggerPortal({
   const document = JSON.parse(rawDocument);
   const { pathNames, operationCount } = validateOpenApi(
     document,
+    expectedVersion,
     expectedPathCount,
     expectedOperationCount,
   );
@@ -256,6 +263,7 @@ async function main() {
   const sourceFile = argumentsMap.get("--source-file");
   const apiBaseUrl = argumentsMap.get("--api-base-url") ?? process.env.PUBLIC_API_BASE_URL;
   const outputDirectory = argumentsMap.get("--output-dir") ?? resolve(projectRoot, ".tmp", "swagger-site");
+  const expectedVersion = argumentsMap.get("--expected-version");
   const expectedPathCount = parseExpectedCount(
     argumentsMap.get("--expected-path-count"),
     "--expected-path-count",
@@ -264,14 +272,17 @@ async function main() {
     argumentsMap.get("--expected-operation-count"),
     "--expected-operation-count",
   );
-  if (!apiBaseUrl) {
-    throw new Error("--api-base-url 또는 PUBLIC_API_BASE_URL이 필요합니다.");
+  if (!apiBaseUrl || !expectedVersion) {
+    throw new Error(
+      "--api-base-url 또는 PUBLIC_API_BASE_URL과 --expected-version이 필요합니다.",
+    );
   }
   const result = await buildSwaggerPortal({
     sourceUrl,
     sourceFile,
     apiBaseUrl,
     outputDirectory,
+    expectedVersion,
     expectedPathCount,
     expectedOperationCount,
   });

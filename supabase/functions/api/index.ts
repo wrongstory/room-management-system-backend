@@ -67,6 +67,8 @@ import {
   reportCheckoutIncident,
 } from "../_shared/checkout-incident-api.ts";
 import { cleaningTemplates } from "../_shared/cleaning-template-api.ts";
+import { listCleaningHistory } from "../_shared/cleaning-history-api.ts";
+import { listWorkHistory } from "../_shared/work-history-api.ts";
 import {
   complaintDetail,
   complaintHistory,
@@ -77,12 +79,20 @@ import {
 } from "../_shared/complaint-api.ts";
 import { assertComplaintResponseSize } from "../_shared/complaint-cursor.ts";
 import {
+  changeDeveloperRoomTypeCapacity,
+  createDeveloperRoom,
+  deactivateDeveloperRoom,
   developerActivityEvents,
   developerAuditEvents,
   developerDatabaseStatus,
   developerOverview,
+  developerRoomCatalog,
+  developerRoomCatalogActionPath,
+  developerRoomTypeCapacityPath,
   developerRuntimeStatus,
   developerSchedulerStatus,
+  previewDeveloperRoomDeactivation,
+  previewDeveloperRoomTypeCapacity,
   runDeveloperDiagnostics,
 } from "../_shared/developer-api.ts";
 import {
@@ -95,6 +105,7 @@ import {
   carryForwardPayroll,
   carryLatePayrollEarning,
   correctPayrollAdjustment,
+  getPayrollCycle,
   listPayroll,
   listPayrollEntries,
   recordPayrollPaymentCheck,
@@ -117,19 +128,29 @@ import {
   cancelReservation,
   changeReservation,
   cleaningTargetIdFromPath,
+  commitReservationRoomMove,
   createManualCleaningRequest,
   createReservation,
   getReservation,
   listReservations,
   manualCheckoutReservation,
+  previewReservationBookability,
+  previewReservationRoomMove,
   processReservationTransitions,
   reservationIdFromPath,
+  reservationRoomMoveIdFromPath,
 } from "../_shared/reservation-api.ts";
 import {
   changeRoomMasterData,
+  correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRoomEvents,
+  listRoomIssues,
+  listRoomOperationBlocks,
   listRooms,
+  listRoomTypes,
+  overrideRoomDisplayStatus,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -140,6 +161,7 @@ import {
 } from "../_shared/room-api.ts";
 import {
   bootstrapRoomPins,
+  confirmGeneratedRoomPin,
   finishRoomPinChange,
   prepareRoomPinChange,
   revealRoomPin,
@@ -281,7 +303,21 @@ export async function handleApiRequest(
         profileStatus: identity.profileStatus,
       };
       const result = photo.kind === "upload"
-        ? await service.upload(request, context, photo.attemptId, photo.slotId)
+        ? await service.upload(
+          request,
+          context,
+          photo.attemptId,
+          photo.slotId,
+          photo.photoItemId,
+        )
+        : photo.kind === "delete-item"
+        ? await service.deleteItem(
+          request,
+          context,
+          photo.attemptId,
+          photo.slotId,
+          photo.photoItemId,
+        )
         : photo.kind === "slots"
         ? await service.slots(request, context, photo.attemptId)
         : await service.status(request, context, photo.operationId);
@@ -395,6 +431,14 @@ export async function handleApiRequest(
           sessionId,
           roomPinRoute.roomId,
         )
+        : roomPinRoute.kind === "generated-confirm"
+        ? await confirmGeneratedRoomPin(
+          request,
+          clients,
+          actor,
+          sessionId,
+          roomPinRoute.roomId,
+        )
         : await finishRoomPinChange(
           request,
           clients,
@@ -403,7 +447,11 @@ export async function handleApiRequest(
           roomPinRoute,
         );
       const response = jsonResponse(
-        roomPinRoute.kind === "reveal" ? { pin: result } : { change: result },
+        roomPinRoute.kind === "reveal"
+          ? { pin: result }
+          : roomPinRoute.kind === "generated-confirm"
+          ? { confirmation: result }
+          : { change: result },
         roomPinRoute.kind === "prepare" ? 201 : 200,
         corsHeaders,
       );
@@ -505,6 +553,20 @@ export async function handleApiRequest(
       return jsonResponse(
         request.method === "GET" ? { templates: result } : { template: result },
         request.method === "GET" ? 200 : 201,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/cleaning-history") {
+      return jsonResponse(
+        await listCleaningHistory(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "GET" && path === "/v1/work-history") {
+      return jsonResponse(
+        await listWorkHistory(request, clients, actor),
+        200,
         corsHeaders,
       );
     }
@@ -698,6 +760,91 @@ export async function handleApiRequest(
             clients,
             actor,
             resetProfileId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/developer/room-catalog") {
+      return jsonResponse(
+        { catalog: await developerRoomCatalog(clients, actor) },
+        200,
+        corsHeaders,
+      );
+    }
+    const developerCapacityRoute = developerRoomTypeCapacityPath(path);
+    if (
+      developerCapacityRoute && request.method === "POST" &&
+      developerCapacityRoute.preview
+    ) {
+      return jsonResponse(
+        {
+          preview: await previewDeveloperRoomTypeCapacity(
+            request,
+            clients,
+            actor,
+            developerCapacityRoute.roomTypeId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      developerCapacityRoute && request.method === "PATCH" &&
+      !developerCapacityRoute.preview
+    ) {
+      return jsonResponse(
+        {
+          change: await changeDeveloperRoomTypeCapacity(
+            request,
+            clients,
+            actor,
+            developerCapacityRoute.roomTypeId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (request.method === "POST" && path === "/v1/developer/rooms") {
+      return jsonResponse(
+        { creation: await createDeveloperRoom(request, clients, actor) },
+        201,
+        corsHeaders,
+      );
+    }
+    const developerRoomActionRoute = developerRoomCatalogActionPath(path);
+    if (
+      developerRoomActionRoute && request.method === "POST" &&
+      developerRoomActionRoute.preview
+    ) {
+      return jsonResponse(
+        {
+          preview: await previewDeveloperRoomDeactivation(
+            request,
+            clients,
+            actor,
+            developerRoomActionRoute.roomId,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      developerRoomActionRoute && request.method === "POST" &&
+      !developerRoomActionRoute.preview
+    ) {
+      return jsonResponse(
+        {
+          deactivation: await deactivateDeveloperRoom(
+            request,
+            clients,
+            actor,
+            developerRoomActionRoute.roomId,
           ),
         },
         200,
@@ -1043,6 +1190,19 @@ export async function handleApiRequest(
       assertPayrollResponseSize(response);
       return jsonResponse(response, 200, corsHeaders);
     }
+    const payrollCycleMatch = path.match(/^\/v1\/payroll\/([0-9A-Fa-f-]{36})$/);
+    if (request.method === "GET" && payrollCycleMatch) {
+      const response = {
+        payroll: await getPayrollCycle(
+          request,
+          clients,
+          actor,
+          payrollCycleMatch[1] ?? "",
+        ),
+      };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
     if (request.method === "POST" && path === "/v1/payroll/start") {
       const response = { payroll: await startPayroll(request, clients, actor) };
       assertPayrollResponseSize(response);
@@ -1172,8 +1332,9 @@ export async function handleApiRequest(
     }
 
     if (request.method === "GET" && path === "/v1/reservations") {
+      const result = await listReservations(request, clients, actor);
       return jsonResponse(
-        { reservations: await listReservations(request, clients, actor) },
+        Array.isArray(result) ? { reservations: result } : result,
         200,
         corsHeaders,
       );
@@ -1182,6 +1343,22 @@ export async function handleApiRequest(
       return jsonResponse(
         { reservation: await createReservation(request, clients, actor) },
         201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path === "/v1/reservations/bookability/preview"
+    ) {
+      return jsonResponse(
+        {
+          preview: await previewReservationBookability(
+            request,
+            clients,
+            actor,
+          ),
+        },
+        200,
         corsHeaders,
       );
     }
@@ -1229,6 +1406,42 @@ export async function handleApiRequest(
             request,
             clients,
             actor,
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/reservations/") &&
+      path.endsWith("/room-change/preview")
+    ) {
+      return jsonResponse(
+        {
+          preview: await previewReservationRoomMove(
+            request,
+            clients,
+            actor,
+            reservationRoomMoveIdFromPath(path, "preview"),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/reservations/") &&
+      /^\/v1\/reservations\/[^/]+\/room-change$/.test(path)
+    ) {
+      return jsonResponse(
+        {
+          result: await commitReservationRoomMove(
+            request,
+            clients,
+            actor,
+            reservationRoomMoveIdFromPath(path, "commit"),
           ),
         },
         200,
@@ -1305,12 +1518,116 @@ export async function handleApiRequest(
       );
     }
 
+    if (request.method === "GET" && path === "/v1/room-types") {
+      const response = jsonResponse(
+        { items: await listRoomTypes(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     if (request.method === "GET" && path === "/v1/rooms") {
       return jsonResponse(
         { rooms: await listRooms(clients, actor) },
         200,
         corsHeaders,
       );
+    }
+    const operationBlocksReadMatch = request.method === "GET"
+      ? /^\/v1\/rooms\/([^/]+)\/operation-blocks$/.exec(path)
+      : null;
+    if (operationBlocksReadMatch) {
+      const params = new URL(request.url).searchParams;
+      if (
+        [...params.keys()].some((key) => key !== "status") ||
+        (params.get("status") ?? "actionable") !== "actionable"
+      ) {
+        throw new EdgeError(
+          400,
+          "VALIDATION_ERROR",
+          "status는 actionable만 사용할 수 있습니다.",
+        );
+      }
+      const response = jsonResponse(
+        await listRoomOperationBlocks(
+          request,
+          clients,
+          actor,
+          operationBlocksReadMatch[1],
+        ),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    const roomIssuesReadMatch = request.method === "GET"
+      ? /^\/v1\/rooms\/([^/]+)\/issues$/.exec(path)
+      : null;
+    if (roomIssuesReadMatch) {
+      const params = new URL(request.url).searchParams;
+      if (
+        [...params.keys()].some((key) => key !== "status") ||
+        (params.get("status") ?? "open") !== "open"
+      ) {
+        throw new EdgeError(
+          400,
+          "VALIDATION_ERROR",
+          "status는 open만 사용할 수 있습니다.",
+        );
+      }
+      const response = jsonResponse(
+        await listRoomIssues(
+          request,
+          clients,
+          actor,
+          roomIssuesReadMatch[1],
+        ),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    const roomEventsReadMatch = request.method === "GET"
+      ? /^\/v1\/rooms\/([^/]+)\/events$/.exec(path)
+      : null;
+    if (roomEventsReadMatch) {
+      const params = new URL(request.url).searchParams;
+      const limitValues = params.getAll("limit");
+      if (
+        [...params.keys()].some((key) => key !== "limit") ||
+        limitValues.length > 1
+      ) {
+        throw new EdgeError(
+          400,
+          "VALIDATION_ERROR",
+          "limit 외의 query 또는 중복 limit은 사용할 수 없습니다.",
+        );
+      }
+      const rawLimit = limitValues[0] ?? "30";
+      if (!/^(?:[1-9]|[1-4]\d|50)$/.test(rawLimit)) {
+        throw new EdgeError(
+          400,
+          "VALIDATION_ERROR",
+          "limit은 1~50의 정수여야 합니다.",
+        );
+      }
+      const limit = Number(rawLimit);
+      const response = jsonResponse(
+        await listRoomEvents(
+          request,
+          clients,
+          actor,
+          roomEventsReadMatch[1],
+          limit,
+        ),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     if (
       request.method === "PATCH" &&
@@ -1331,6 +1648,43 @@ export async function handleApiRequest(
       return jsonResponse(
         {
           operation: await createRoomOperationBlock(
+            request,
+            clients,
+            actor,
+            roomId,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") && path.endsWith("/occupancy-corrections")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        {
+          correction: await correctRoomOccupancy(
+            request,
+            clients,
+            actor,
+            roomId,
+          ),
+        },
+        201,
+        corsHeaders,
+      );
+    }
+    if (
+      request.method === "POST" &&
+      path.startsWith("/v1/rooms/") &&
+      path.endsWith("/display-status-overrides")
+    ) {
+      const { roomId } = roomPathIds(path);
+      return jsonResponse(
+        {
+          statusOverride: await overrideRoomDisplayStatus(
             request,
             clients,
             actor,

@@ -70,38 +70,39 @@ Issue #58에서 현재 성공 mutation의 append 지점을 전수 확인했다. 
 | account | `account.bootstrap_developer_created`, `account.bootstrap_admin_created`, `account.created`, `account.role_changed`, `account.status_changed`, `account.unlocked`, `account.password_reset_requested`, `account.password_changed` |
 | availability | `availability.submitted`, `availability.change_requested`, `availability.change_decided` |
 | assignment | `assignment.draft_saved`, `assignment.notified`, `assignment.prestart_changed`, `assignment.prestart_unassigned`, `assignment.cancellation_requested`, `assignment.cancellation_decided` |
-| reservation | `reservation.created`, `reservation.changed`, `reservation.cancelled`, `reservation.manual_checkout`, `reservation.scheduled_check_in`, `reservation.scheduled_checkout`, `reservation.guest_name_retention_purged` |
+| reservation | `reservation.created`, `reservation.changed`, `reservation.room_moved`, `reservation.cancelled`, `reservation.manual_checkout`, `reservation.scheduled_check_in`, `reservation.scheduled_checkout`, `reservation.guest_name_retention_purged` |
 | cleaning request | `cleaning.manual_request.created`, `cleaning.manual_request.cancelled` |
+| cleaning template | `cleaning_template.published` |
 | room | `room.master_data_changed`, `room.create_block`, `room.release_block`, `room.set_candle_count`, `room.report_issue`, `room.resolve_issue`, `room.record_pin_sync` |
 | submission / inspection | `submission.bomb_reported`, `submission.created`, `inspection.bomb_decided`, `inspection.approved`, `inspection.rejected` |
 | checkout incident | `checkout.presence_reported`, `checkout.presence_decided` |
 
 scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `reservation.scheduled_check_in`/`reservation.scheduled_checkout`으로 같은 domain 원장에 기록된다. scheduler 실행 상태 자체는 `private.scheduler_invocation_heartbeats`의 bounded 운영 projection이다. 현재 구현된 성공 mutation 중 audit append 누락은 발견되지 않았다. 업무 API는 이 event 이름과 공통 activity helper를 재사용하며 자유문 event/source를 추가하지 않는다.
 
-#133 candidate의 checkout incident summary는
+#133 source/main·production 반영의 checkout incident summary는
 `incidentId/reservationId/roomId/cleaningTargetId/assignmentId/attemptId/status/version/decisionId/checkoutDecision/nextAssignmentId/nextAttemptId`
 중 event별 필요한 필드만 반환합니다. `checkoutDecision`은 generic complaint/inspection decision과 분리된
 `EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` enum입니다. raw before/after state, request hash,
 PIN version·암호문·평문, 고객명·전화번호·session/token, 알림 body는 projection과 Python generated model에
-존재하지 않습니다. 두 event는 production
-allowlist에 반영됐습니다. #156은 production runtime의 `expectedMigration`을 55번째
-`cleaning_template_admin_api`까지 전진시켰습니다. #165 source는 이를 56번째
-`cleaning_template_duration_optional`로 전진시키며, production 56번 적용 전에는 새 source runtime에서
-drift가 `behind`인 것이 정상입니다.
+존재하지 않습니다. 두 event는 현재 production allowlist에 반영됐습니다. production runtime의
+`expectedMigration`과 DB head는 현재 56번째 `cleaning_template_duration_optional`로 일치합니다. 최신 `dev`는
+72번째 `payroll_cycle_resolver`까지 통합됐고, #169 후보는 기존 72개를 보존한 73번째
+`generated_room_pin_confirmation`으로 source head를 전진시킵니다. 이 source를 production에 배포하기 전에
+57~73번 migration을 승인된 release 순서로 먼저 적용해야 하며 source와 DB head가 다르면 배포 drift로 처리합니다.
 
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,
 전체 slots, request hash, raw before/after state는 developer projection에 포함하지 않습니다. 이 event를
-포함한 source allowlist는 66개이며 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`와
-GitHub `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`에 반영됐습니다. #165는 이 event allowlist를
-바꾸지 않고 checkout template의 선택형 duration 계약과 runtime migration head만 갱신합니다.
+포함한 production source allowlist는 66개이며 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`에
+반영됐습니다. #180 개발 정본은 `photo.collection_item_deleted`를 더해 67개이고, Phase B/Phase C candidate는 같은 safe `reservation.room_moved` summary를 사용해 68개를 유지합니다. summary는 `mode/reservationId/reservationVersion/sourceRoomId/targetRoomId/plannedCheckoutTargetId`만 허용하고 stay/segment/obligation 같은 private ID, 고객명·PIN·request hash·impact fingerprint는 제외합니다. Phase C는 아직 production 미배포이며 source 후보만으로 운영 event 사용 가능 상태가 되지 않습니다. #165는 기존 event allowlist를 바꾸지 않고 checkout template의 선택형 duration 계약과 runtime
+migration head만 56번으로 갱신했으며, 운영 네 타입 게시 event도 safe summary만 노출합니다.
 
 #29 source의 audit allowlist는 총 36개였습니다. #27 pre-start 필드에
 `assignment.attempt_activated`와 `assignment.rolled_over`를 더하고, attempt/rollover summary는
 `cleaningTargetId/assignmentId/attemptId/maidProfileId/serviceDate/assignmentRevision/attemptNumber/targetAssignmentVersion/rolloverFromDate/rolloverToDate/carryoverCount/reasonCode`만 허용합니다.
 `reasonDetail`, `requestHash`, raw before/after state, notification body는 반환하지 않습니다. Python
 filtered OpenAPI/generated model도 같은 enum/summary로 재생성합니다. developer 콘솔에 업무 activation
-권한을 추가한 것은 아니며 배포 전까지 production allowlist가 source와 같다고 가정하지 않습니다.
+권한을 추가한 것은 아니며 각 환경의 exact OpenAPI와 migration head를 함께 확인합니다.
 
 #29의 `assignment.duration_policy_confirmed`는 별도 관리자 설정 명령의 성공 감사입니다.
 summary는 `policyVersion/status/standardMinutes/premiumMinutes/oceanPremiumMinutes/oceanFamilyMinutes`
@@ -121,8 +122,7 @@ developer에게 청소 시작/완료 권한을 부여하지 않으며 Python 콘
 중 event별 필요한 필드만 반환합니다. 폭탄방 memo·evidence photo ID, 일반 sealed photo ID, provider
 locator/hash/file name, request hash, raw before/after state는 감사 목록에 포함하지 않습니다. 상세 사진
 검수는 active business admin의 inspection detail에서만 수행하며 developer에게 업무 검수 권한을
-추가하지 않습니다. 이 source 모델은 release/main/production 승격 전까지 운영 enum으로 간주하지
-않습니다.
+추가하지 않습니다. 이 모델은 현재 main/production allowlist에 포함됩니다.
 
 #7B feature는 `cleaning.finish_current_allowed`, `cleaning.upload_only_allowed`,
 `cleaning.interrupted_handover`, `cleaning.scheduled_expired` 네 event를 추가해 source allowlist를
@@ -130,7 +130,7 @@ locator/hash/file name, request hash, raw before/after state는 감사 목록에
 `profileVersion`, `nextAttemptId`만 추가합니다. raw capability 원장, 세션 ID, request hash, 원본 state는 반환하지
 않습니다. capability 식별자·metadata는 별도 credential이 아니며 소지만으로 실행할 수 없습니다.
 developer는 감사 조회만 가능하며 admin lifecycle 명령이나 maid limited 실행 권한은 없습니다.
-정확한 source gate는 matrix를 따르며 production allowlist가 함께 변경됐다고 간주하지 않습니다.
+이 모델은 현재 main/production allowlist에 포함되며, #156의 추가 event는 별도 release gate를 따릅니다.
 
 ## 활동/보안 pagination
 

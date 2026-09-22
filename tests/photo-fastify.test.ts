@@ -21,7 +21,8 @@ describe('Fastify photo parity through actual raw parser/router', () => {
     const calls:string[]=[]; const t = new Date().toISOString();
     const service = new PhotoService({ rpc: async name => { calls.push(name);return {error:null,data:name==='admit_photo_upload'?{admissionId:id(9),quotaWarning:false}:name==='begin_admitted_photo_upload'?{
       operationId:id(5),objectId:id(6),attemptId:id(3),targetSlotId:id(4),status:'accepted',leaseVersion:1,leaseExpiresAt:null,photoId:id(7),photoVersion:1,
-      uploadedAt:t,purgeAfter:new Date(Date.parse(t)+604800000).toISOString(),compensationAllowed:false
+      uploadedAt:t,purgeAfter:new Date(Date.parse(t)+604800000).toISOString(),retentionPolicy:'cleaning_submission',retentionStartsAt:t,
+      expiresAt:new Date(Date.parse(t)+604800000).toISOString(),purgedAt:null,mediaAvailability:'available',compensationAllowed:false
     }:null};}},()=>({} as PhotoProvider),async()=>{});
     const app=Fastify({logger:false});await app.register(createPhotoRoutes({service,authenticate:async()=>identity,denied:async()=>{}}));
     const url=`/v1/attempts/${id(3)}/photo-slots/${id(4)}/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedPhotoRevision=0`;

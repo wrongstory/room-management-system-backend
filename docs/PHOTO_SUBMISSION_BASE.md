@@ -22,12 +22,13 @@
 
 ## 템플릿·기존 데이터 처리 원칙
 
-- 확정된 새 퇴실 template v7+는 타입별 10/11/13/15개, 필수 9/10/12/14개이며 필수 `tv-on`이 정확히 하나다.
+- 기존 `maxPhotos` 없는 pre-A 퇴실 template은 version이 v7보다 높아도 타입별 10/11/13/15개, 필수 9/10/12/14개와 required `tv-on`을 그대로 유지한다.
+- Decision #179의 새 v8+ 계약은 9/10/12/14개, 필수 8/9/11/13개다. required `tv-on`·`entry-storage`를 유지하고 `entry-number`를 제외하며 마지막 `extra-proof`만 선택·`maxPhotos=10`이다. #180 source 후보는 이 슬롯에만 안정적 item UUID와 collection/item CAS를 쓰는 0~10장 current collection을 제공한다.
 - 과거 v6 이하 snapshot에 `tv-on`을 소급 추가하지 않는다.
 - 연박·재청소 슬롯과 예상시간의 프런트 데모 값을 운영 정본이나 seed로 승격하지 않는다. 추가 청소의 미확정 구성을 추측하지 않는다.
 - legacy JSON은 실제 저장된 근거를 보존한다. 빈 배열이나 불명확한 snapshot을 현재 v7로 자동 채우지 않는다.
 - 미설정·불완전한 snapshot은 새 전체 제출의 완전성 검증에서 실패해야 한다. 기존 물리 수행과 예약 lifecycle의 의미는 바꾸지 않는다.
-- template의 과거 `duration_minutes`와 #29의 별도 confirmed duration policy는 서로 다른 계약이다.
+- template의 과거 `duration_minutes`와 #29의 duration policy 원장은 서로 다른 보존 이력이며, #231 이후 둘 다 신규 배정 preview 판단에 사용하지 않는다.
 - 내부 projection 검증의 자원 상한은 슬롯 100개, stable key 80자, 표시 순서 0–99의 중복 없는 값이다. 이는 미확정 청소 종류의 필수 사진 수를 정하는 제품 정책이 아니다. 기존 자료가 이 상한이나 지원 형식 밖이면 값을 버리거나 바꾸지 않고 미설정 상태로 보존한다.
 - 필수 슬롯이 하나도 없는 자료는 사진 0장으로 제출 가능한 템플릿으로 인정하지 않는다. 임의 필수 슬롯을 추가하지 않고 완전성 검증에서 거부한다.
 
@@ -35,6 +36,7 @@
 
 - NULL·다른 target/attempt/slot 연결과 중복 current pointer 차단.
 - 사진 교체·제출 pointer CAS·동시 재시도 및 과거 binding 불변.
+- `extra-proof` 10장 상한, append/replace/개별 삭제의 collection/item CAS·멱등 replay, 형제 item 순서/identity 보존과 삭제 후 과거 제출 binding 불변.
 - 미검증·처리 중·실패·purged·7일 만료 사진을 새 제출 증빙으로 인정하지 않음.
 - RLS와 명시적 GRANT/REVOKE, 원장 직접 DML 차단, 안전한 내부 helper 권한.
 - 기존 29 migrations 불변, 새 append-only migration만 허용.

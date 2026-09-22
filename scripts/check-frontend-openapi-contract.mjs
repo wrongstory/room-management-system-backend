@@ -31,9 +31,9 @@ const effectiveParameters = (pathItem, operation) => {
 };
 
 assert(document.openapi === '3.1.1', `Frontend generator requires OpenAPI 3.1.1, received ${document.openapi}.`);
-assert(document.info.version === '0.2.0', `Unexpected source API version ${document.info.version}.`);
-assert(Object.keys(document.paths).length === 109, 'Update the frontend contract snapshot and reviewed path inventory.');
-assert(operations.length === 117, 'Update the frontend contract snapshot and reviewed operation inventory.');
+assert(document.info.version === '0.5.1', `Unexpected source API version ${document.info.version}.`);
+assert(Object.keys(document.paths).length === 128, 'Update the frontend contract snapshot and reviewed path inventory.');
+assert(operations.length === 138, 'Update the frontend contract snapshot and reviewed operation inventory.');
 const operationIds = operations.map(({ operation }) => operation.operationId);
 assert(operationIds.every(Boolean), 'Every frontend-visible operation requires operationId.');
 assert(new Set(operationIds).size === operationIds.length, 'Frontend-visible operationId values must be unique.');
@@ -54,14 +54,19 @@ const requiredAreas = {
 };
 for (const [area, pattern] of Object.entries(requiredAreas)) assert(operations.some(({ path }) => pattern.test(path)), `Frontend ${area} API area is missing.`);
 
-const allowedWithoutIdempotency = new Set(['login', 'runDeveloperDiagnostics', 'syncOfflineCompletion', 'previewAssignments', 'markNotificationRead', 'revealRoomPin']);
+// Read-only POST previews and the retired 410 endpoint have no mutation receipt.
+const allowedWithoutIdempotency = new Set([
+  'login', 'runDeveloperDiagnostics', 'syncOfflineCompletion', 'previewAssignments',
+  'previewDeveloperRoomTypeCapacity', 'previewDeveloperRoomDeactivation',
+  'previewReservationBookability', 'previewReservationRoomMove',
+  'confirmAssignmentDurationPolicy', 'markNotificationRead', 'revealRoomPin',
+]);
+const missingIdempotency = [];
 for (const { operation, pathItem } of operations.filter(({ method }) => method !== 'get')) {
   const parameters = effectiveParameters(pathItem, operation);
-  assert(
-    allowedWithoutIdempotency.has(operation.operationId) || parameters.some((parameter) => parameter.name === 'Idempotency-Key' && parameter.in === 'header' && parameter.required === true),
-    `${operation.operationId} is missing the frontend Idempotency-Key contract.`,
-  );
+  if (!allowedWithoutIdempotency.has(operation.operationId) && !parameters.some((parameter) => parameter.name === 'Idempotency-Key' && parameter.in === 'header' && parameter.required === true)) missingIdempotency.push(operation.operationId);
 }
+assert(missingIdempotency.length === 0, `${missingIdempotency.join(', ')} missing the frontend Idempotency-Key contract.`);
 
 const errorEnvelopeRef = '#/components/schemas/ErrorEnvelope';
 for (const { path, method, operation } of operations) {
@@ -69,7 +74,8 @@ for (const { path, method, operation } of operations) {
     if (Number(status) < 400) continue;
     const responseRef = response.content?.['application/json']?.schema?.$ref;
     const previewConflict = operation.operationId === 'previewAssignments' && status === '409' && responseRef === '#/components/schemas/AssignmentPreviewUnconfirmed';
-    assert(responseRef === errorEnvelopeRef || previewConflict, `${method.toUpperCase()} ${path} ${status} lost the stable error contract.`);
+    const roomChangeConflict = path.startsWith('/v1/reservations/{reservationId}/room-change') && status === '409' && responseRef === '#/components/schemas/RoomChangeConflictEnvelope';
+    assert(responseRef === errorEnvelopeRef || previewConflict || roomChangeConflict, `${method.toUpperCase()} ${path} ${status} lost the stable error contract.`);
   }
 }
 

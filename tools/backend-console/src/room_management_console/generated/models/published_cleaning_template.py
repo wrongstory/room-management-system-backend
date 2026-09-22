@@ -22,7 +22,8 @@ class PublishedCleaningTemplate:
         version (int):
         status (Literal['published']):
         duration_minutes (int | None): 미설정 가능. 실제 청소시간이나 배정 Preview 정책의 정본이 아닙니다.
-        slots (list[CleaningTemplateSlot]):
+        slots (list[CleaningTemplateSlot]): maxPhotos 없는 pre-A historical v7+ template은 10/11/13/15개이고, 모든 slot에
+            metadata가 있는 A-contract v8+ template은 9/10/12/14개입니다.
         published_at (datetime.datetime):
         created_at (datetime.datetime):
     """

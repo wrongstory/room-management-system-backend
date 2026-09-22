@@ -42,6 +42,10 @@ const availabilityMigrationUrl = new URL(
   '../supabase/migrations/20260828220417_weekly_availability_contract.sql',
   import.meta.url
 );
+const availabilityAnyDayMigrationUrl = new URL(
+  '../supabase/migrations/20260920091536_availability_any_day_submission.sql',
+  import.meta.url
+);
 
 const developerRoleMigrationUrl = new URL(
   '../supabase/migrations/20260829120003_add_developer_role.sql',
@@ -110,8 +114,61 @@ const cleaningTemplateDurationMigrationUrl = new URL(
   '../supabase/migrations/20260915000628_cleaning_template_duration_optional.sql',
   import.meta.url
 );
+const retiredAssignmentDurationMigrationUrl = new URL(
+  '../supabase/migrations/20260920094931_retire_assignment_duration_policy.sql',
+  import.meta.url
+);
+const currentRoomStatusMigrationUrl = new URL(
+  '../supabase/migrations/20260916165715_current_room_status_projection.sql',
+  import.meta.url
+);
+const reservationArrivalLifecycleMigrationUrl = new URL(
+  '../supabase/migrations/20260916194539_reservation_arrival_lifecycle_projection.sql',
+  import.meta.url
+);
+const reservationRoomMoveMigrationUrl = new URL(
+  '../supabase/migrations/20260916204500_reservation_room_change_before_checkin.sql',
+  import.meta.url
+);
+const reservationDuringStayMoveMigrationUrl = new URL(
+  '../supabase/migrations/20260916210000_reservation_during_stay_room_move.sql',
+  import.meta.url
+);
+const reservationBookabilityMigrationUrl = new URL(
+  '../supabase/migrations/20260918010000_reservation_bookability.sql',
+  import.meta.url
+);
+const photoRetentionV2MigrationUrl = new URL(
+  '../supabase/migrations/20260917090000_photo_retention_v2.sql',
+  import.meta.url
+);
+const photoSlotContractV8MigrationUrl = new URL(
+  '../supabase/migrations/20260916030930_photo_slot_contract_v8.sql',
+  import.meta.url
+);
+const roomStatusAdminCorrectionMigrationUrl = new URL(
+  '../supabase/migrations/20260920150000_room_status_admin_correction.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
+  it('versions the A-contract without rewriting v7 photo evidence', async () => {
+    const sql = await readFile(photoSlotContractV8MigrationUrl, 'utf8');
+
+    expect(sql).toContain('create or replace function private.photo_snapshot_valid');
+    expect(sql).toContain('when uses_a_contract then 9 else 10');
+    expect(sql).toContain("bool_and(value ? 'maxPhotos')");
+    expect(sql).toContain("if p_snapshot->>'cleaningKind'='checkout' and version_number>=7 and (");
+    expect(sql).toContain("uses_a_contract:=p_snapshot->>'cleaningKind'='checkout'");
+    expect(sql).toContain("where not (slot ? 'maxPhotos')");
+    expect(sql).toContain("value->>'slotKey'='entry-number'");
+    expect(sql).toContain("value->>'slotKey'='entry-storage'");
+    expect(sql).toContain("value->>'slotKey'='extra-proof'");
+    expect(sql).toContain("value->>'maxPhotos'='10'");
+    expect(sql).toContain('greatest(v_max_version + 1, 8)');
+    expect(sql).not.toMatch(/update public\.cleaning_targets|update public\.cleaning_attempts|update public\.cleaning_submissions/);
+  });
+
   it('allows an unestimated checkout template without weakening other template kinds', async () => {
     const sql = await readFile(cleaningTemplateDurationMigrationUrl, 'utf8');
 
@@ -129,6 +186,186 @@ describe('initial migration contract', () => {
     expect(sql).toContain("running_attempt.status = 'in_progress'");
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
+  });
+
+  it('retires estimated-time preview decisions without rewriting history', async () => {
+    const sql = await readFile(retiredAssignmentDurationMigrationUrl, 'utf8');
+
+    expect(sql).toContain("message='ASSIGNMENT_DURATION_POLICY_RETIRED'");
+    expect(sql).toContain("'durationPolicyStatus','retired'");
+    expect(sql).toContain("'durationPolicyRequired',false");
+    expect(sql).toContain('private.assignment_preview_source_reason(t,null,p_command_at)');
+    expect(sql).toContain("if p_target.due_at is not null and exists(");
+    expect(sql).not.toContain('make_interval');
+    expect(sql).not.toMatch(/update public\.assignment_duration_policy_versions|delete from public\.assignment_duration_policy_versions/);
+    expect(sql).not.toMatch(/insert into public\.assignment_duration_policy_versions|insert into public\.audit_events|complete_command/);
+  });
+
+  it('separates future reservation schedules from current cleaning state', async () => {
+    const sql = await readFile(currentRoomStatusMigrationUrl, 'utf8');
+
+    expect(sql).toContain('private.room_current_cleaning_required_at');
+    expect(sql).toContain('obligation.current_cleaning_target_id = target.id');
+    expect(sql).toContain("obligation.status = 'materialized'");
+    expect(sql).toContain('reservation.actual_checkout_at <= p_at');
+    expect(sql).toContain('private.room_reservation_phase_at');
+    expect(sql).toContain("then 'current'");
+    expect(sql).toContain("then 'upcoming'");
+    expect(sql).toContain("array_append(v_reasons, 'RESERVATION_CURRENT')");
+    expect(sql).toContain('and p_preparation_reservation_id is null');
+    expect(sql).toContain('v_evaluated_at timestamptz := clock_timestamp()');
+    expect(sql).toContain('p_preparation_reservation_id is not null');
+    expect(sql).toContain('obligation.reservation_id = p_preparation_reservation_id');
+    expect(sql).toContain('drop function public.get_room_operational_projection(uuid, uuid)');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toContain('current_date');
+  });
+
+  it('adds KST arrival lifecycle axes without replacing the compatible room projection', async () => {
+    const sql = await readFile(reservationArrivalLifecycleMigrationUrl, 'utf8');
+
+    expect(sql).toContain('private.room_reservation_lifecycle_at');
+    expect(sql).toContain("p_at at time zone 'Asia/Seoul'");
+    expect(sql).toContain("then 'ARRIVAL_PENDING'");
+    expect(sql).toContain("then 'RESERVATION_PRESENT'");
+    expect(sql).toContain("else 'FUTURE'");
+    expect(sql).toContain("when v_current then 'OCCUPIED'");
+    expect(sql).toContain('order by reservation.check_in_at, reservation.id');
+    expect(sql).toContain('v_evaluated_at timestamptz := clock_timestamp()');
+    expect(sql).toMatch(/v_evaluated_at,\r?\n\s+case when state\.occupied/);
+    expect(sql).toContain("when readiness.readiness_status = 'CHECKIN_BLOCKED' then 'BLOCKED'");
+    expect(sql).toContain("when lifecycle.reservation_lifecycle = 'OCCUPIED' then 'OCCUPIED'");
+    expect(sql).toContain("when state.cleaning_required then 'CLEANING_REQUIRED'");
+    expect(sql).toContain("when p_pin_sync_status = 'mismatch' then 'PIN_MISMATCH'");
+    expect(sql).toContain("when p_pin_sync_status = 'unconfigured' then 'PIN_UNCONFIGURED'");
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/create table|alter table|insert into|update public\./);
+  });
+
+  it('separates canonical occupancy, room blocking, and readiness with an admin correction ledger', async () => {
+    const sql = await readFile(roomStatusAdminCorrectionMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.room_occupancy_corrections');
+    expect(sql).toContain('create or replace function private.room_occupied_at');
+    expect(sql).toContain('segment.starts_at <= p_at');
+    expect(sql).toContain('(segment.ends_at is null or segment.ends_at > p_at)');
+    expect(sql).toContain('reservation.actual_checkout_at is null');
+    expect(sql).toContain('create or replace function public.correct_room_occupancy(');
+    expect(sql).toContain('private.assert_attempt_actor_session(p_actor_profile_id, p_session_id, true)');
+    expect(sql).toContain("'room.occupancy_correction'");
+    expect(sql).toContain('private.replay_command(');
+    expect(sql).toContain('private.complete_command(');
+    expect(sql).toContain('p_expected_room_version');
+    expect(sql).toContain('p_effective_at');
+    expect(sql).toContain('p_reason_code');
+    expect(sql).toContain('room_occupancy_corrections_immutable');
+    expect(sql).toContain('create table private.room_display_status_overrides');
+    expect(sql).toContain('create function public.override_room_display_status(');
+    expect(sql).toContain("'room.display_status_override'");
+    expect(sql).toContain('canonical_primary_display_status text');
+    expect(sql).toContain('display_status_override text');
+    expect(sql).toContain('v_lineage_segment.id is null');
+    expect(sql).toContain("message = 'OCCUPANCY_CORRECTION_ROOM_MISMATCH'");
+    expect(sql).toContain('cardinality(readiness.blocking_reason_codes) > 0');
+    expect(sql).toContain('not state.occupied and cardinality(readiness.readiness_reason_codes) = 0');
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_occupancy_corrections to (anon|authenticated)/);
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_display_status_overrides to (anon|authenticated)/);
+  });
+
+  it('moves pre-check-in reservations only through a replay-safe dedicated command', async () => {
+    const sql = await readFile(reservationRoomMoveMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create function public.preview_reservation_room_move(');
+    expect(sql).toContain('create function public.commit_reservation_room_move(');
+    expect(sql).toContain('private.replay_command(');
+    expect(sql.indexOf('private.replay_command(')).toBeLessThan(
+      sql.indexOf("message = 'ROOM_CHANGE_PREVIEW_STALE'")
+    );
+    expect(sql).toMatch(
+      /v_response := private\.replay_command\([\s\S]+when unique_violation then[\s\S]+message = 'IDEMPOTENCY_KEY_REUSED'[\s\S]+detail = private\.reservation_room_move_conflict_detail\(/
+    );
+    expect(sql).toMatch(
+      /coalesce\(\r?\n\s+current_setting\('app\.reservation_room_move_writer_mode', true\)/
+    );
+    expect(sql).toContain("'before_checkin_v1'");
+    expect(sql).toContain('order by room.id');
+    expect(sql).toContain("message = 'RESERVATION_VERSION_CONFLICT'");
+    expect(sql).toContain("message = 'SOURCE_ROOM_VERSION_CONFLICT'");
+    expect(sql).toContain("message = 'TARGET_ROOM_VERSION_CONFLICT'");
+    expect(sql).toContain("message = 'TARGET_ROOM_OVERLAP'");
+    expect(sql).toContain("message = 'CLEANING_ASSIGNMENT_LOCKED'");
+    expect(sql).toContain("message = 'PIN_LEASE_ACTIVE'");
+    expect(sql).toContain('create function private.reservation_room_move_conflict_detail(');
+    expect(sql).toContain("'reloadResources', jsonb_build_array(");
+    expect(sql).toContain("'reservationVersion', v_reservation_version");
+    expect(sql).toContain("'sourceRoomVersion', v_source_room_version");
+    expect(sql).toContain("'targetRoomVersion', v_target_room_version");
+    expect(sql).toContain('detail = private.reservation_room_move_conflict_detail(');
+    expect(sql).toMatch(
+      /revoke all on function private\.reservation_room_move_conflict_detail\(\r?\n\s+uuid, uuid, uuid\r?\n\) from public, anon, authenticated, service_role/
+    );
+    expect(sql).toContain("'reservation.room_moved'");
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/\b(?:http_post|net\.http_post)\b/);
+  });
+
+  it('moves checked-in stays through immutable room segments and bounded cleanup', async () => {
+    const sql = await readFile(reservationDuringStayMoveMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.reservation_stays');
+    expect(sql).toContain('create table private.stay_room_segments');
+    expect(sql).toContain('stay_room_segments_no_room_overlap');
+    expect(sql).toContain("mode='DURING_STAY'");
+    expect(sql).toContain("message='INVALID_MOVE_EFFECTIVE_AT'");
+    expect(sql).toContain("'stay_room_move_checkout'");
+    expect(sql).toContain('room_pin_access_scheduled_revocations');
+    expect(sql).toContain('set ends_at=p_effective_at');
+    expect(sql).toContain('p_effective_at,reservation.check_out_at');
+    expect(sql).toContain('private.assignment_preview_source_reason_before_stay_segments');
+    expect(sql).toContain('private.assignment_commit_candidates_at_before_stay_segments');
+    expect(sql).toContain("segment.ends_at>p_checkout_at-interval '1 microsecond'");
+    expect(sql).toContain('update private.stay_segment_checkout_obligations');
+    expect(sql).toContain("'stay_room_move_checkout')");
+    expect(sql).toContain('v_earning.compensation_entitlement_id is not null');
+    // The v61 reservation command parity intentionally keeps the encrypted
+    // guest-name input/retention path. What must never enter the new move
+    // ledger, audit or response projection is a plaintext/public guest-name
+    // field, PIN plaintext, or authorization material.
+    expect(sql).not.toMatch(/['"]guestName['"]|\bpin_plain\b|authorization header/i);
+  });
+
+  it('adds bounded reservation reads and a non-authoritative interval preview', async () => {
+    const sql = await readFile(reservationBookabilityMigrationUrl, 'utf8');
+
+    expect(sql).toContain('create index reservations_calendar_range_idx');
+    expect(sql).toContain('create function public.preview_reservation_bookability(');
+    expect(sql).toContain('create function public.list_reservations_page(');
+    expect(sql).toContain("p_reservation_type is distinct from 'standard'");
+    expect(sql).toContain("v_room_type_ids uuid[] := nullif(p_room_type_ids, array[]::uuid[])");
+    expect(sql).toContain('private.room_reservation_lifecycle_at(');
+    expect(sql).toContain('lifecycle.current_checkin_pending');
+    expect(sql).toContain("tstzrange(p_check_in_at, p_check_out_at, '[)')");
+    expect(sql).toContain('segment.retired_at is null');
+    expect(sql).toContain('segment.source_reservation_id is distinct from p_exclude_reservation_id');
+    expect(sql).toContain("v_excluded.status <> 'active'");
+    expect(sql).toContain("'interval_bookable', candidate.interval_bookable");
+    expect(sql).toContain("'check_in_ready', candidate.check_in_ready");
+    expect(sql).toContain("'evaluated_at', v_evaluated_at");
+    expect(sql).toContain("p_to - p_from > interval '31 days'");
+    expect(sql).toContain('p_limit < 1 or p_limit > 50');
+    expect(sql).toContain('(reservation.check_in_at, reservation.id) > (p_after_check_in_at, p_after_id)');
+    expect(sql).toContain("tstzrange(segment.starts_at, segment.ends_at, '[)')");
+    expect(sql).toContain('private.reservation_projected_room_id(');
+    expect(sql).toContain('v_server_time');
+    expect(sql).toContain("'server_time', v_server_time");
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+    expect(sql).not.toMatch(/['"]guest_name['"]|guest_name_(?:ciphertext|iv|auth_tag)/i);
+    expect(sql).not.toMatch(/\blong_stay\b|open[-_ ]ended/i);
   });
 
   it('seeds 121 unique room numbers', async () => {
@@ -372,11 +609,13 @@ describe('initial migration contract', () => {
   });
 
   it('keeps weekly availability versioned, service-only, and RLS scoped', async () => {
-    const sql = await readFile(availabilityMigrationUrl, 'utf8');
+    const [sql, policySql] = await Promise.all([
+      readFile(availabilityMigrationUrl, 'utf8'),
+      readFile(availabilityAnyDayMigrationUrl, 'utf8')
+    ]);
 
     expect(sql).toContain('availability_versions_one_current_per_week');
     expect(sql).toContain('AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS');
-    expect(sql).toContain('OUTSIDE_AVAILABILITY_WINDOW');
     expect(sql).toContain('STALE_VERSION');
     expect(sql).toContain('private.replay_command(');
     expect(sql).toContain('private.complete_command(');
@@ -387,6 +626,15 @@ describe('initial migration contract', () => {
     expect(sql).toContain('alter table public.availability_versions enable row level security');
     expect(sql).toContain('from public, anon, authenticated');
     expect(sql).toContain('to service_role');
+    expect(policySql).toContain(
+      'create or replace function private.submit_weekly_availability_at('
+    );
+    expect(policySql).toContain('AVAILABILITY_WEEK_OUT_OF_RANGE');
+    expect(policySql).toContain('PAST_AVAILABILITY_DATE_NOT_ALLOWED');
+    expect(policySql).toContain("at time zone 'Asia/Seoul'");
+    expect(policySql).toContain('private.replay_command(');
+    expect(policySql).toContain('private.complete_command(');
+    expect(policySql).not.toContain('OUTSIDE_AVAILABILITY_WINDOW');
   });
 
   it('keeps assignment drafts revisioned, snapshot-bound, and service-only', async () => {
@@ -633,5 +881,23 @@ describe('initial migration contract', () => {
     expect(sql).toContain('to service_role');
     expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.room_pin_sheet_full_resync/);
     expect(sql).not.toMatch(/\b(?:http_post|net\.http_post|oauth|private_key|access_token)\b/i);
+  });
+
+  it('keeps photo retention domain-bound, private, and independent from legacy purge_after', async () => {
+    const sql = await readFile(photoRetentionV2MigrationUrl, 'utf8');
+
+    expect(sql).toContain('create table private.photo_retention_records');
+    expect(sql).toContain('create table private.photo_retention_links');
+    expect(sql).toContain("'cleaning_submission','room_issue','complaint','interruption','sync_conflict','mixed','orphan'");
+    expect(sql).toContain("'retentionPolicy', 'legacy_upload'");
+    expect(sql).toContain("event.event_type = 'closed'");
+    expect(sql).toContain("interval '168 hours'");
+    expect(sql).toContain("interval '180 days'");
+    expect(sql).toContain("interval '30 days'");
+    expect(sql).toContain('private.photo_media_usable');
+    expect(sql).toContain('create or replace function public.authorize_photo_read');
+    expect(sql).toContain('create or replace function public.claim_due_photo_purges');
+    expect(sql).toContain('from public, anon, authenticated, service_role');
+    expect(sql).not.toMatch(/grant (select|insert|update|delete) on (table )?private\.photo_retention/);
   });
 });

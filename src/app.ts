@@ -17,6 +17,16 @@ import {
   type AvailabilityService,
   SupabaseAvailabilityService
 } from './modules/availability/availability.service.js';
+import { createAssignmentRoutes } from './modules/assignments/assignment.routes.js';
+import { type AssignmentService, SupabaseAssignmentService } from './modules/assignments/assignment.service.js';
+import {
+  createAssignmentDurationPolicyRoutes,
+  createAssignmentPreviewRoutes
+} from './modules/assignments/assignment-preview.routes.js';
+import {
+  type AssignmentPreviewService,
+  SupabaseAssignmentPreviewService
+} from './modules/assignments/assignment-preview.service.js';
 import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
 import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
 import { createCleaningTemplateRoutes } from './modules/cleaning-templates/cleaning-template.routes.js';
@@ -24,6 +34,10 @@ import {
   type CleaningTemplateService,
   SupabaseCleaningTemplateService
 } from './modules/cleaning-templates/cleaning-template.service.js';
+import { createCleaningHistoryRoutes } from './modules/cleaning-history/cleaning-history.routes.js';
+import { type CleaningHistoryService, SupabaseCleaningHistoryService } from './modules/cleaning-history/cleaning-history.service.js';
+import { createWorkHistoryRoutes } from './modules/work-history/work-history.routes.js';
+import { type WorkHistoryService, SupabaseWorkHistoryService } from './modules/work-history/work-history.service.js';
 import { createComplaintRoutes } from './modules/complaints/complaint.routes.js';
 import { type ComplaintService, SupabaseComplaintService } from './modules/complaints/complaint.service.js';
 import { createNotificationRoutes } from './modules/notifications/notification.routes.js';
@@ -42,7 +56,7 @@ import {
   type ReservationService,
   SupabaseReservationService
 } from './modules/reservations/reservation.service.js';
-import { createRoomRoutes } from './modules/rooms/room.routes.js';
+import { createDeveloperRoomCatalogRoutes, createRoomRoutes, createRoomTypeRoutes } from './modules/rooms/room.routes.js';
 import { type RoomService, SupabaseRoomService } from './modules/rooms/room.service.js';
 import { createRoomPinSheetOperationsRoutes } from './modules/rooms/room-pin-sheet-operations.routes.js';
 import {
@@ -56,6 +70,8 @@ export interface AppServices {
   auth: AuthService;
   accounts: AccountService;
   availability: AvailabilityService;
+  assignments?: AssignmentService;
+  assignmentPreview?: AssignmentPreviewService;
   rooms: RoomService;
   roomPinSheetOperations?: RoomPinSheetOperationsService;
   reservations: ReservationService;
@@ -65,6 +81,8 @@ export interface AppServices {
   webPushSubscriptions?: WebPushSubscriptionService;
   checkoutIncidents?: CheckoutIncidentService;
   cleaningTemplates?: CleaningTemplateService;
+  cleaningHistory?: CleaningHistoryService;
+  workHistory?: WorkHistoryService;
 }
 
 export interface BuildAppOptions {
@@ -102,13 +120,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
+      assignments: new SupabaseAssignmentService(clients),
+      assignmentPreview: new SupabaseAssignmentPreviewService(clients),
       rooms: new SupabaseRoomService(clients, {
         key: options.env.ROOM_PIN_KEY_BASE64,
         keyVersion: options.env.ROOM_PIN_KEY_VERSION,
         keyring: JSON.parse(options.env.ROOM_PIN_KEYRING_JSON) as Record<string, string>,
         environment: options.env.APP_ENV,
         projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
-      }, options.env.ROOM_PIN_INITIAL_DIGITS),
+      }),
       roomPinSheetOperations: new SupabaseRoomPinSheetOperationsService(clients, {
         target: {
           environment: options.env.APP_ENV,
@@ -151,7 +171,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
       }),
       checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
-      cleaningTemplates: new SupabaseCleaningTemplateService(clients)
+      cleaningTemplates: new SupabaseCleaningTemplateService(clients),
+      cleaningHistory: new SupabaseCleaningHistoryService(clients),
+      workHistory: new SupabaseWorkHistoryService(clients)
     };
     submissionService ??= new SupabaseSubmissionService(clients);
   }
@@ -188,6 +210,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 접근할 수 있습니다.');
     }
   });
+  app.decorate('requireDeveloper', async (request) => {
+    if (request.actor.role !== 'developer') {
+      throw new AppError(403, 'DEVELOPER_REQUIRED', '개발자만 접근할 수 있습니다.');
+    }
+  });
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -205,7 +232,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         reply.headers(error.headers);
       }
       return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message },
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.conflict ? { conflict: error.conflict } : {})
+        },
         requestId: request.id
       });
     }
@@ -226,7 +257,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(createAuthRoutes(services.auth), { prefix: '/v1/auth' });
   await app.register(createAccountRoutes(services.accounts), { prefix: '/v1/accounts' });
   await app.register(createAvailabilityRoutes(services.availability), { prefix: '/v1/availability' });
+  if (services.assignments) {
+    await app.register(createAssignmentRoutes(services.assignments), { prefix: '/v1/assignments' });
+  }
+  if (services.assignmentPreview) {
+    await app.register(createAssignmentPreviewRoutes(services.assignmentPreview), {
+      prefix: '/v1/assignments'
+    });
+    await app.register(createAssignmentDurationPolicyRoutes(services.assignmentPreview), {
+      prefix: '/v1/assignment-preview'
+    });
+  }
+  await app.register(createRoomTypeRoutes(services.rooms), { prefix: '/v1/room-types' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  await app.register(createDeveloperRoomCatalogRoutes(services.rooms), { prefix: '/v1/developer' });
   if (services.roomPinSheetOperations) {
     await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {
       prefix: '/v1/room-pin-sheet-sync'
@@ -249,6 +293,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   if (services.cleaningTemplates) {
     await app.register(createCleaningTemplateRoutes(services.cleaningTemplates), {
       prefix: '/v1/cleaning-templates'
+    });
+  }
+  if (services.cleaningHistory) {
+    await app.register(createCleaningHistoryRoutes(services.cleaningHistory), {
+      prefix: '/v1/cleaning-history'
+    });
+  }
+  if (services.workHistory) {
+    await app.register(createWorkHistoryRoutes(services.workHistory), {
+      prefix: '/v1/work-history'
     });
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);

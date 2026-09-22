@@ -129,16 +129,28 @@ function config(): RoomPinCryptoConfig {
   }
 }
 
-function bootstrapPinDigits(): string {
-  const value = requiredEnv("ROOM_PIN_INITIAL_DIGITS");
-  if (!/^[0-9]{4,8}$/.test(value)) {
-    throw new EdgeError(
-      503,
-      "ROOM_PIN_BOOTSTRAP_CONFIG_INVALID",
-      "객실 초기 PIN 설정을 확인해 주세요.",
-    );
+function secureFourDigitValue(): number {
+  const sample = new Uint16Array(1);
+  do crypto.getRandomValues(sample); while (sample[0] >= 60_000);
+  return sample[0] % 10_000;
+}
+
+export function generateUniqueFourDigitPins(
+  count: number,
+  draw: () => number = secureFourDigitValue,
+): string[] {
+  if (!Number.isSafeInteger(count) || count < 0 || count > 25) {
+    throw new RangeError("PIN generation count must be between 0 and 25");
   }
-  return value;
+  const values = new Set<number>();
+  while (values.size < count) {
+    const value = draw();
+    if (!Number.isSafeInteger(value) || value < 0 || value >= 10_000) {
+      throw new RangeError("PIN generator returned a value outside 0000-9999");
+    }
+    values.add(value);
+  }
+  return [...values].map((value) => value.toString().padStart(4, "0"));
 }
 
 function envelope(row: Record<string, unknown>): RoomPinEnvelope {
@@ -184,7 +196,7 @@ function cryptoError(error: unknown): EdgeError {
 }
 
 export type RoomPinRoute = {
-  kind: "prepare" | "confirm" | "rollback" | "reveal";
+  kind: "prepare" | "confirm" | "rollback" | "reveal" | "generated-confirm";
   roomId: string;
   leaseId?: string;
 };
@@ -196,6 +208,13 @@ export type RoomPinBootstrapResult = {
   skippedCount: number;
   remainingCount: number;
   completedAt: string;
+  generatedPins: Array<{
+    roomId: string;
+    credential: string;
+    pinVersion: number;
+    clearAfterSeconds: number;
+    expiresAt: string;
+  }>;
 };
 export function roomPinPath(path: string): RoomPinRoute | null {
   let match = /^\/v1\/rooms\/([^/]+)\/pin-changes\/prepare$/.exec(path);
@@ -208,6 +227,10 @@ export function roomPinPath(path: string): RoomPinRoute | null {
       roomId: uuid(match[1], "roomId"),
       leaseId: uuid(match[2], "leaseId"),
     };
+  }
+  match = /^\/v1\/rooms\/([^/]+)\/pin\/generated\/confirm$/.exec(path);
+  if (match) {
+    return { kind: "generated-confirm", roomId: uuid(match[1], "roomId") };
   }
   match = /^\/v1\/rooms\/([^/]+)\/pin\/reveal$/.exec(path);
   return match ? { kind: "reveal", roomId: uuid(match[1], "roomId") } : null;
@@ -266,6 +289,11 @@ export async function prepareRoomPinChange(
   if (contextError || !contextData) throw roomDatabaseError(contextError);
   const context = contextData as Record<string, unknown>;
   const roomNumber = String(context.room_number);
+  const currentPinVersion = Number(context.current_pin_version);
+  const effectiveReasonCode = currentPinVersion === 0 &&
+      body.reasonCode === "ADMIN_PHYSICAL_CHANGE"
+    ? "ADMIN_INITIAL_PIN"
+    : body.reasonCode;
   const canonical = canonicalRoomPin(roomNumber, body.pinDigits);
   let encrypted: RoomPinEnvelope;
   try {
@@ -285,11 +313,11 @@ export async function prepareRoomPinChange(
     assignmentId,
     attemptId,
     accessLeaseId,
-    reasonCode: body.reasonCode,
+    reasonCode: effectiveReasonCode,
   });
   const { data, error } = await clients.admin.rpc("prepare_room_pin_change", {
     ...args,
-    p_reason_code: body.reasonCode,
+    p_reason_code: effectiveReasonCode,
     p_room_number_snapshot: roomNumber,
     p_envelope_format: encrypted.envelopeFormat,
     p_ciphertext_base64: encrypted.ciphertextBase64,
@@ -371,7 +399,6 @@ export async function bootstrapRoomPins(
 
   const commandKey = idempotencyKey(request);
   const commandHash = await hash({ operation: "room.pin.bootstrap", limit });
-  const digits = bootstrapPinDigits();
   const cryptoConfig = config();
   const { data: contextData, error: contextError } = await clients.admin.rpc(
     "get_room_pin_bootstrap_context",
@@ -391,43 +418,50 @@ export async function bootstrapRoomPins(
     );
   }
 
-  const candidates = await Promise.all(context.candidates.map(async (value) => {
-    const candidate = value as Record<string, unknown>;
-    const roomId = String(candidate.room_id ?? "");
-    const roomNumber = String(candidate.room_number ?? "");
-    const proposedPinVersion = Number(candidate.proposed_pin_version);
-    if (
-      !uuidPattern.test(roomId) || !roomNumber || proposedPinVersion !== 1
-    ) {
-      throw new EdgeError(
-        500,
-        "ROOM_PIN_BOOTSTRAP_FAILED",
-        "객실 초기 PIN 대상이 올바르지 않습니다.",
-      );
-    }
-    let encrypted: RoomPinEnvelope;
-    try {
-      encrypted = await encryptRoomPin(
-        canonicalRoomPin(roomNumber, digits),
+  const digitsByCandidate = generateUniqueFourDigitPins(
+    context.candidates.length,
+  );
+  const candidates = await Promise.all(
+    context.candidates.map(async (value, index) => {
+      const candidate = value as Record<string, unknown>;
+      const roomId = String(candidate.room_id ?? "");
+      const roomNumber = String(candidate.room_number ?? "");
+      const proposedPinVersion = Number(candidate.proposed_pin_version);
+      const pinDigits = digitsByCandidate[index];
+      if (
+        !uuidPattern.test(roomId) || !roomNumber || proposedPinVersion !== 1 ||
+        !pinDigits
+      ) {
+        throw new EdgeError(
+          500,
+          "ROOM_PIN_BOOTSTRAP_FAILED",
+          "객실 초기 PIN 대상이 올바르지 않습니다.",
+        );
+      }
+      let encrypted: RoomPinEnvelope;
+      try {
+        encrypted = await encryptRoomPin(
+          canonicalRoomPin(roomNumber, pinDigits),
+          roomId,
+          proposedPinVersion,
+          cryptoConfig,
+        );
+      } catch (error) {
+        throw cryptoError(error);
+      }
+      return {
         roomId,
-        proposedPinVersion,
-        cryptoConfig,
-      );
-    } catch (error) {
-      throw cryptoError(error);
-    }
-    return {
-      roomId,
-      roomNumber,
-      envelopeFormat: encrypted.envelopeFormat,
-      ciphertextBase64: encrypted.ciphertextBase64,
-      nonceBase64: encrypted.nonceBase64,
-      authTagBase64: encrypted.authTagBase64,
-      keyVersion: encrypted.keyVersion,
-      aadEnvironment: encrypted.aadEnvironment,
-      aadProjectRef: encrypted.aadProjectRef,
-    };
-  }));
+        roomNumber,
+        envelopeFormat: encrypted.envelopeFormat,
+        ciphertextBase64: encrypted.ciphertextBase64,
+        nonceBase64: encrypted.nonceBase64,
+        authTagBase64: encrypted.authTagBase64,
+        keyVersion: encrypted.keyVersion,
+        aadEnvironment: encrypted.aadEnvironment,
+        aadProjectRef: encrypted.aadProjectRef,
+      };
+    }),
+  );
 
   const { data, error } = await clients.admin.rpc("bootstrap_room_pins", {
     p_actor_profile_id: actor.profileId,
@@ -438,13 +472,125 @@ export async function bootstrapRoomPins(
   });
   if (error || !data) throw roomDatabaseError(error);
   const result = data as Record<string, unknown>;
+  const initializedRoomIds = result.initialized_room_ids as string[];
+  const generatedPins = await Promise.all(
+    initializedRoomIds.map((roomId) =>
+      revealGeneratedRoomPin(clients, actor, sessionId, roomId)
+    ),
+  );
   return {
-    initializedRoomIds: result.initialized_room_ids as string[],
+    initializedRoomIds,
     skippedRoomIds: result.skipped_room_ids as string[],
     initializedCount: Number(result.initialized_count),
     skippedCount: Number(result.skipped_count),
     remainingCount: Number(result.remaining_count),
     completedAt: String(result.completed_at),
+    generatedPins,
+  };
+}
+
+async function revealGeneratedRoomPin(
+  clients: EdgeClients,
+  actor: EdgeActor,
+  sessionId: string,
+  roomId: string,
+) {
+  const requestId = crypto.randomUUID();
+  const { data, error } = await clients.admin.rpc(
+    "begin_generated_room_pin_reveal",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_room_id: roomId,
+      p_request_id: requestId,
+    },
+  );
+  if (error || !data) throw roomDatabaseError(error);
+  const row = data as Record<string, unknown>;
+  let credential: string;
+  try {
+    credential = await decryptRoomPin(
+      envelope(row),
+      roomId,
+      String(row.room_number),
+      Number(row.pin_version),
+      config(),
+    );
+  } catch (cryptoFailure) {
+    throw cryptoError(cryptoFailure);
+  }
+  const { error: finalError } = await clients.admin.rpc(
+    "finalize_generated_room_pin_reveal",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_room_id: roomId,
+      p_reveal_lease_id: row.lease_id,
+      p_request_id: requestId,
+    },
+  );
+  if (finalError) throw roomDatabaseError(finalError);
+  const expiresAt = String(row.expires_at);
+  const clearAfterSeconds = Math.min(
+    30,
+    Math.floor((Date.parse(expiresAt) - Date.now()) / 1000),
+  );
+  if (!Number.isFinite(clearAfterSeconds) || clearAfterSeconds <= 0) {
+    throw new EdgeError(
+      403,
+      "PIN_REVEAL_AUTHORIZATION_CHANGED",
+      "PIN 열람 권한이 변경되었습니다.",
+    );
+  }
+  return {
+    roomId,
+    credential,
+    pinVersion: Number(row.pin_version),
+    clearAfterSeconds,
+    expiresAt,
+  };
+}
+
+export async function confirmGeneratedRoomPin(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  sessionId: string,
+  roomId: string,
+) {
+  requirePasswordChanged(actor);
+  if (actor.role !== "admin") {
+    throw new EdgeError(403, "ADMIN_REQUIRED", "관리자만 접근할 수 있습니다.");
+  }
+  const body = await readJsonBody(request);
+  only(body, ["expectedPinVersion"]);
+  const expected = version(body.expectedPinVersion);
+  if (expected < 1) {
+    throw new EdgeError(
+      400,
+      "VALIDATION_ERROR",
+      "expectedPinVersion이 올바르지 않습니다.",
+    );
+  }
+  const fingerprint = { roomId, expectedPinVersion: expected };
+  const { data, error } = await clients.admin.rpc(
+    "confirm_generated_room_pin",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_room_id: roomId,
+      p_expected_pin_version: expected,
+      p_idempotency_key: idempotencyKey(request),
+      p_request_hash: await hash(fingerprint),
+    },
+  );
+  if (error || !data) throw roomDatabaseError(error);
+  const row = data as Record<string, unknown>;
+  return {
+    roomId: row.room_id,
+    pinVersion: row.pin_version,
+    status: row.status,
+    confirmedAt: row.confirmed_at,
   };
 }
 

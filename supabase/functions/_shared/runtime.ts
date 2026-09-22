@@ -17,12 +17,28 @@ interface ProfileRow {
   must_change_password: boolean;
 }
 
+export type RoomMoveReloadResource =
+  | "reservation"
+  | "sourceRoom"
+  | "targetRoom"
+  | "roomMovePreview";
+
+export interface RoomMoveConflict {
+  reloadResources: RoomMoveReloadResource[];
+  latestVersions: {
+    reservationVersion: number | null;
+    sourceRoomVersion: number | null;
+    targetRoomVersion: number | null;
+  };
+}
+
 export class EdgeError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: string,
     message: string,
     public readonly headers: Record<string, string> = {},
+    public readonly conflict?: RoomMoveConflict,
   ) {
     super(message);
     this.name = "EdgeError";
@@ -286,7 +302,14 @@ export function errorResponse(
 ): Response {
   if (error instanceof EdgeError) {
     return jsonResponse(
-      { error: { code: error.code, message: error.message }, requestId: id },
+      {
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.conflict ? { conflict: error.conflict } : {}),
+        },
+        requestId: id,
+      },
       error.status,
       { ...corsHeaders, ...error.headers },
     );

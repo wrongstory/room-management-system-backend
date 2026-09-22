@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
@@ -14,11 +14,40 @@ import {
 
 export type RoomReasonCode =
   | 'OCCUPIED'
+  | 'RESERVATION_CURRENT'
   | 'CLEANING_REQUIRED'
   | 'CANDLE_PRESENT'
   | 'OPERATION_BLOCKED'
   | 'ROOM_ISSUE_BLOCKED'
   | 'DATA_UNCONFIRMED';
+
+export type RoomReservationPhase = 'none' | 'upcoming' | 'current';
+
+export type RoomOccupancyStatus = 'VACANT' | 'OCCUPIED';
+export type RoomReservationLifecycle =
+  | 'NONE'
+  | 'FUTURE'
+  | 'RESERVATION_PRESENT'
+  | 'ARRIVAL_PENDING'
+  | 'OCCUPIED';
+export type RoomReadinessStatus = 'READY' | 'CLEANING_REQUIRED' | 'CHECKIN_BLOCKED';
+export type RoomPrimaryDisplayStatus =
+  | 'BLOCKED'
+  | 'OCCUPIED'
+  | 'ARRIVAL_PENDING'
+  | 'RESERVATION_PRESENT'
+  | 'CLEANING_REQUIRED'
+  | 'READY';
+export type RoomBlockingReasonCode =
+  | 'CANDLE_PRESENT'
+  | 'OPERATION_BLOCKED'
+  | 'ROOM_ISSUE_BLOCKED'
+  | 'DATA_UNCONFIRMED';
+export type RoomReadinessReasonCode =
+  | RoomBlockingReasonCode
+  | 'CLEANING_REQUIRED'
+  | 'PIN_MISMATCH'
+  | 'PIN_UNCONFIGURED';
 
 export interface RoomSummary {
   id: string;
@@ -28,6 +57,20 @@ export interface RoomSummary {
   elevatorZone: 'A' | 'B' | 'C' | null;
   dataStatus: 'verified' | 'verification_required';
   stateVersion: number;
+  evaluatedAt: string;
+  reservationPhase: RoomReservationPhase;
+  serverTime: string;
+  occupancyStatus: RoomOccupancyStatus;
+  reservationLifecycle: RoomReservationLifecycle;
+  readinessStatus: RoomReadinessStatus;
+  primaryDisplayStatus: RoomPrimaryDisplayStatus;
+  canonicalPrimaryDisplayStatus: RoomPrimaryDisplayStatus;
+  displayStatusOverride: RoomPrimaryDisplayStatus | null;
+  nextReservationId: string | null;
+  nextCheckInAt: string | null;
+  nextCheckOutAt: string | null;
+  blockingReasonCodes: RoomBlockingReasonCode[];
+  readinessReasonCodes: RoomReadinessReasonCode[];
   occupied: boolean;
   cleaningRequired: boolean;
   candleCount: number;
@@ -68,6 +111,42 @@ export interface RoomOperationInput {
 export interface RoomOperationResult {
   entityId: string;
   roomId: string;
+  roomStateVersion: number;
+  recordedAt: string;
+}
+
+export interface CorrectRoomOccupancyInput {
+  roomId: string;
+  reservationId: string;
+  occupied: boolean;
+  effectiveAt: string;
+  expectedRoomVersion: number;
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface RoomOccupancyCorrectionResult {
+  correctionId: string;
+  roomId: string;
+  reservationId: string;
+  occupied: boolean;
+  effectiveAt: string;
+  roomStateVersion: number;
+  recordedAt: string;
+}
+
+export interface OverrideRoomDisplayStatusInput {
+  roomId: string;
+  targetStatus: RoomPrimaryDisplayStatus | null;
+  expectedRoomVersion: number;
+  reasonCode: string;
+  idempotencyKey: string;
+}
+
+export interface RoomDisplayStatusOverrideResult {
+  overrideId: string;
+  roomId: string;
+  targetStatus: RoomPrimaryDisplayStatus | null;
   roomStateVersion: number;
   recordedAt: string;
 }
@@ -130,18 +209,211 @@ export interface RoomPinBootstrapResult {
   skippedCount: number;
   remainingCount: number;
   completedAt: string;
+  generatedPins: RevealedRoomPin[];
+}
+
+export interface ConfirmGeneratedRoomPinInput {
+  roomId: string;
+  expectedPinVersion: number;
+  idempotencyKey: string;
+}
+
+export interface GeneratedRoomPinConfirmation {
+  roomId: string;
+  pinVersion: number;
+  status: 'verified';
+  confirmedAt: string;
+}
+
+export interface RoomTypeCatalogItem {
+  id: string;
+  code: string;
+  displayName: string;
+  baseCleaningFee: number;
+  baseOccupancy: number;
+  maxOccupancy: number;
+  active: boolean;
+  version: number;
+  roomCount: number;
+}
+
+export interface DeveloperRoomCatalogRoom {
+  id: string;
+  roomNumber: string;
+  roomTypeId: string;
+  roomTypeCode: string;
+  active: boolean;
+  version: number;
+}
+
+export type DeveloperRoomTypeCatalogItem = Omit<RoomTypeCatalogItem, 'baseCleaningFee'>;
+
+export interface DeveloperRoomCatalog {
+  generatedAt: string;
+  summary: {
+    total: number;
+    active: number;
+    inactive: number;
+  };
+  roomTypes: DeveloperRoomTypeCatalogItem[];
+  rooms: DeveloperRoomCatalogRoom[];
+}
+
+export interface PreviewRoomTypeCapacityInput {
+  roomTypeId: string;
+  baseOccupancy: number;
+  maxOccupancy: number;
+  expectedVersion: number;
+}
+
+export interface RoomTypeCapacityPreview {
+  roomTypeId: string;
+  current: { baseOccupancy: number; maxOccupancy: number; version: number };
+  proposed: { baseOccupancy: number; maxOccupancy: number };
+  roomCount: number;
+  activeReservationCount: number;
+  exceedingActiveReservationCount: number;
+  reasonCodes: string[];
+  impactFingerprint: string;
+  evaluatedAt: string;
+  expiresAt: string;
+}
+
+export interface ChangeRoomTypeCapacityInput extends PreviewRoomTypeCapacityInput {
+  impactFingerprint: string;
+  reasonCode: 'CAPACITY_POLICY_CHANGE';
+  idempotencyKey: string;
+}
+
+export interface CreateDeveloperRoomInput {
+  roomNumber: string;
+  roomTypeId: string;
+  expectedRoomTypeVersion: number;
+  reasonCode: 'ROOM_CATALOG_ADD';
+  idempotencyKey: string;
+}
+
+export interface PreviewRoomDeactivationInput {
+  roomId: string;
+  expectedVersion: number;
+}
+
+export interface RoomDeactivationPreview {
+  roomId: string;
+  currentlyOccupied: boolean;
+  activeFutureReservationCount: number;
+  activeCleaningTargetCount: number;
+  activeAssignmentCount: number;
+  activeAttemptCount: number;
+  activePinChangeLease: boolean;
+  unresolvedOperationCount: number;
+  canDeactivate: boolean;
+  reasonCodes: string[];
+  impactFingerprint: string;
+  evaluatedAt: string;
+  expiresAt: string;
+}
+
+export interface DeactivateDeveloperRoomInput extends PreviewRoomDeactivationInput {
+  impactFingerprint: string;
+  reasonCode: 'ROOM_CATALOG_REMOVE';
+  idempotencyKey: string;
+}
+
+export interface DeveloperRoomMutationResult {
+  room: DeveloperRoomCatalogRoom;
+  summary: DeveloperRoomCatalog['summary'];
+  roomType?: DeveloperRoomTypeCatalogItem;
+  effectiveAt: string;
+}
+
+export interface RoomTypeCapacityChangeResult {
+  roomType: DeveloperRoomTypeCatalogItem;
+  effectiveAt: string;
+}
+
+export interface RoomOperationBlockItem {
+  id: string;
+  reasonCode: string;
+  startsAt: string;
+  endsAt: string | null;
+  status: 'scheduled' | 'active' | 'expired';
+  createdAt: string;
+}
+
+export interface RoomIssueItem {
+  id: string;
+  category: string;
+  severity: 'info' | 'warning' | 'critical';
+  blocksGuestAssignment: boolean;
+  description: string | null;
+  status: 'open';
+  reportedAt: string;
+}
+
+export interface RoomOperationBlocksResult {
+  roomId: string;
+  roomStateVersion: number;
+  evaluatedAt: string;
+  items: RoomOperationBlockItem[];
+}
+
+export interface RoomIssuesResult {
+  roomId: string;
+  roomStateVersion: number;
+  evaluatedAt: string;
+  items: RoomIssueItem[];
+}
+
+export interface RoomEventItem {
+  id: string;
+  eventKey: string;
+  source: 'room_command' | 'occupancy';
+  category: 'room_configuration' | 'room_block' | 'room_issue' | 'room_candle' | 'room_pin' | 'occupancy';
+  eventType: string;
+  actorProfileId: string | null;
+  actorDisplayName: string | null;
+  entityId: string;
+  reasonCode: string | null;
+  effectiveAt: string;
+  recordedAt: string;
+  reservationId: string | null;
+  summary: Record<string, unknown>;
+}
+
+export interface RoomEventsResult {
+  roomId: string;
+  roomStateVersion: number;
+  evaluatedAt: string;
+  items: RoomEventItem[];
 }
 
 export interface RoomService {
+  listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
+  listOperationBlocks(actor: Actor, roomId: string): Promise<RoomOperationBlocksResult>;
+  listIssues(actor: Actor, roomId: string): Promise<RoomIssuesResult>;
+  listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult>;
   list(actor: Actor): Promise<RoomSummary[]>;
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
   changeMasterData(actor: Actor, input: ChangeRoomMasterDataInput): Promise<RoomSummary>;
   mutateOperation(actor: Actor, input: RoomOperationInput): Promise<RoomOperationResult>;
+  correctOccupancy(actor: Actor, input: CorrectRoomOccupancyInput): Promise<RoomOccupancyCorrectionResult>;
+  overrideDisplayStatus(
+    actor: Actor,
+    input: OverrideRoomDisplayStatusInput
+  ): Promise<RoomDisplayStatusOverrideResult>;
   preparePinChange(actor: Actor, input: PrepareRoomPinChangeInput): Promise<RoomPinChangeResult>;
   confirmPinChange(actor: Actor, input: ConfirmRoomPinChangeInput): Promise<RoomPinChangeResult>;
   rollbackPinChange(actor: Actor, input: ConfirmRoomPinChangeInput): Promise<RoomPinChangeResult>;
   revealPin(actor: Actor, input: RevealRoomPinInput): Promise<RevealedRoomPin>;
   bootstrapPins(actor: Actor, input: BootstrapRoomPinsInput): Promise<RoomPinBootstrapResult>;
+  confirmGeneratedPin(actor: Actor, input: ConfirmGeneratedRoomPinInput): Promise<GeneratedRoomPinConfirmation>;
+  getDeveloperCatalog(actor: Actor): Promise<DeveloperRoomCatalog>;
+  previewRoomTypeCapacity(actor: Actor, input: PreviewRoomTypeCapacityInput): Promise<RoomTypeCapacityPreview>;
+  changeRoomTypeCapacity(actor: Actor, input: ChangeRoomTypeCapacityInput): Promise<RoomTypeCapacityChangeResult>;
+  createDeveloperRoom(actor: Actor, input: CreateDeveloperRoomInput): Promise<DeveloperRoomMutationResult>;
+  previewRoomDeactivation(actor: Actor, input: PreviewRoomDeactivationInput): Promise<RoomDeactivationPreview>;
+  deactivateDeveloperRoom(actor: Actor, input: DeactivateDeveloperRoomInput): Promise<DeveloperRoomMutationResult>;
 }
 
 interface RoomProjectionRow {
@@ -152,6 +424,20 @@ interface RoomProjectionRow {
   elevator_zone: 'A' | 'B' | 'C' | null;
   data_status: 'verified' | 'verification_required';
   state_version: number;
+  evaluated_at: string;
+  reservation_phase: RoomReservationPhase;
+  server_time: string;
+  occupancy_status: RoomOccupancyStatus;
+  reservation_lifecycle: RoomReservationLifecycle;
+  readiness_status: RoomReadinessStatus;
+  primary_display_status: RoomPrimaryDisplayStatus;
+  canonical_primary_display_status: RoomPrimaryDisplayStatus;
+  display_status_override: RoomPrimaryDisplayStatus | null;
+  next_reservation_id: string | null;
+  next_check_in_at: string | null;
+  next_check_out_at: string | null;
+  blocking_reason_codes: RoomBlockingReasonCode[];
+  readiness_reason_codes: RoomReadinessReasonCode[];
   occupied: boolean;
   cleaning_required: boolean;
   candle_count: number;
@@ -159,6 +445,32 @@ interface RoomProjectionRow {
   allocation_blocked: boolean;
   allocation_ready: boolean;
   reason_codes: RoomReasonCode[];
+}
+
+interface RoomTypeCatalogRow {
+  id: string;
+  code: string;
+  display_name: string;
+  base_cleaning_fee: number;
+  base_occupancy: number;
+  max_occupancy: number;
+  active: boolean;
+  version: number;
+  room_count: number;
+}
+
+function toRoomTypeCatalogItem(row: RoomTypeCatalogRow): RoomTypeCatalogItem {
+  return {
+    id: row.id,
+    code: row.code,
+    displayName: row.display_name,
+    baseCleaningFee: row.base_cleaning_fee,
+    baseOccupancy: row.base_occupancy,
+    maxOccupancy: row.max_occupancy,
+    active: row.active,
+    version: row.version,
+    roomCount: row.room_count
+  };
 }
 
 function toRoom(row: RoomProjectionRow): RoomSummary {
@@ -170,6 +482,20 @@ function toRoom(row: RoomProjectionRow): RoomSummary {
     elevatorZone: row.elevator_zone,
     dataStatus: row.data_status,
     stateVersion: row.state_version,
+    evaluatedAt: row.evaluated_at,
+    reservationPhase: row.reservation_phase,
+    serverTime: row.server_time,
+    occupancyStatus: row.occupancy_status,
+    reservationLifecycle: row.reservation_lifecycle,
+    readinessStatus: row.readiness_status,
+    primaryDisplayStatus: row.primary_display_status,
+    canonicalPrimaryDisplayStatus: row.canonical_primary_display_status,
+    displayStatusOverride: row.display_status_override,
+    nextReservationId: row.next_reservation_id,
+    nextCheckInAt: row.next_check_in_at,
+    nextCheckOutAt: row.next_check_out_at,
+    blockingReasonCodes: row.blocking_reason_codes,
+    readinessReasonCodes: row.readiness_reason_codes,
     occupied: row.occupied,
     cleaningRequired: row.cleaning_required,
     candleCount: row.candle_count,
@@ -186,13 +512,100 @@ function ensureAdmin(actor: Actor): void {
   }
 }
 
+function ensureDeveloper(actor: Actor): void {
+  if (actor.role !== 'developer') {
+    throw new AppError(403, 'DEVELOPER_REQUIRED', '개발자 권한이 필요합니다.');
+  }
+}
+
+export function generateUniqueFourDigitPins(
+  count: number,
+  draw: () => number = () => randomInt(10_000)
+): string[] {
+  if (!Number.isSafeInteger(count) || count < 0 || count > 25) {
+    throw new RangeError('PIN generation count must be between 0 and 25');
+  }
+  const values = new Set<number>();
+  while (values.size < count) {
+    const value = draw();
+    if (!Number.isSafeInteger(value) || value < 0 || value >= 10_000) {
+      throw new RangeError('PIN generator returned a value outside 0000-9999');
+    }
+    values.add(value);
+  }
+  return [...values].map((value) => value.toString().padStart(4, '0'));
+}
+
 function roomError(error: { message?: string } | null): AppError {
   const message = error?.message ?? '';
+  if (message.includes('ROOM_TYPE_CAPACITY_INVALID')) {
+    return new AppError(400, 'ROOM_TYPE_CAPACITY_INVALID', '기본 인원은 1명 이상이고 최대 인원을 넘을 수 없습니다.');
+  }
+  if (message.includes('ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT')) {
+    return new AppError(409, 'ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT', '새 최대 인원을 초과하는 활성 예약이 있습니다.');
+  }
+  if (message.includes('ROOM_TYPE_CAPACITY_PREVIEW_STALE')) {
+    return new AppError(409, 'ROOM_TYPE_CAPACITY_PREVIEW_STALE', '정원 변경 미리보기가 만료되었거나 영향 범위가 달라졌습니다.');
+  }
+  if (message.includes('ROOM_DEACTIVATION_PREVIEW_STALE')) {
+    return new AppError(409, 'ROOM_DEACTIVATION_PREVIEW_STALE', '객실 비활성화 미리보기가 만료되었거나 영향 범위가 달라졌습니다.');
+  }
+  if (message.includes('ROOM_DEACTIVATION_BLOCKED')) {
+    return new AppError(409, 'ROOM_DEACTIVATION_BLOCKED', '활성 예약 또는 진행 중인 운영 업무가 있어 객실을 비활성화할 수 없습니다.');
+  }
+  if (message.includes('ROOM_TYPE_VERSION_CONFLICT')) {
+    return new AppError(409, 'ROOM_TYPE_VERSION_CONFLICT', '다른 객실 유형 변경이 먼저 반영됐습니다.');
+  }
+  if (message.includes('ROOM_VERSION_CONFLICT')) {
+    return new AppError(409, 'ROOM_VERSION_CONFLICT', '다른 객실 변경이 먼저 반영됐습니다.');
+  }
+  if (message.includes('ROOM_NUMBER_ALREADY_EXISTS')) {
+    return new AppError(409, 'ROOM_NUMBER_ALREADY_EXISTS', '이미 사용 중인 객실 번호입니다.');
+  }
+  if (message.includes('ROOM_TYPE_INACTIVE')) {
+    return new AppError(409, 'ROOM_TYPE_INACTIVE', '비활성 객실 유형에는 객실을 추가할 수 없습니다.');
+  }
+  if (message.includes('ROOM_ALREADY_INACTIVE')) {
+    return new AppError(409, 'ROOM_ALREADY_INACTIVE', '이미 비활성화된 객실입니다.');
+  }
+  if (message.includes('ROOM_TYPE_NOT_FOUND')) {
+    return new AppError(404, 'ROOM_TYPE_NOT_FOUND', '객실 유형을 찾을 수 없습니다.');
+  }
+  if (message.includes('INVALID_ROOM_NUMBER')) {
+    return new AppError(400, 'INVALID_ROOM_NUMBER', '객실 번호는 1~20자리 숫자여야 합니다.');
+  }
   if (message.includes('CHECKOUT_INCIDENT_OPEN')) {
     return new AppError(409, 'CHECKOUT_INCIDENT_OPEN', '퇴실 미진행 사건을 관리자가 처리한 뒤 PIN 작업을 진행해 주세요.');
   }
   if (message.includes('STALE_VERSION')) {
     return new AppError(409, 'STALE_VERSION', '다른 객실 변경이 먼저 반영됐습니다.');
+  }
+  if (message.includes('OCCUPANCY_CORRECTION_ALREADY_APPLIED')) {
+    return new AppError(409, 'OCCUPANCY_CORRECTION_ALREADY_APPLIED', '이미 요청한 점유 상태가 반영되어 있습니다.');
+  }
+  if (message.includes('OCCUPANCY_CORRECTION_ROOM_MISMATCH')) {
+    return new AppError(409, 'OCCUPANCY_CORRECTION_ROOM_MISMATCH', '해당 시각의 투숙 객실과 요청 객실이 일치하지 않습니다.');
+  }
+  if (message.includes('ROOM_OCCUPANCY_CONFLICT')) {
+    return new AppError(409, 'ROOM_OCCUPANCY_CONFLICT', '해당 시간에는 다른 예약이 객실을 점유하고 있습니다.');
+  }
+  if (message.includes('OCCUPANCY_CORRECTION_NOT_ALLOWED')) {
+    return new AppError(409, 'OCCUPANCY_CORRECTION_NOT_ALLOWED', '현재 예약 상태에서는 점유 상태를 보정할 수 없습니다.');
+  }
+  if (message.includes('INVALID_OCCUPANCY_CORRECTION')) {
+    return new AppError(400, 'INVALID_OCCUPANCY_CORRECTION', '점유 보정 요청이 올바르지 않습니다.');
+  }
+  if (message.includes('DISPLAY_STATUS_OVERRIDE_ALREADY_APPLIED')) {
+    return new AppError(409, 'DISPLAY_STATUS_OVERRIDE_ALREADY_APPLIED', '이미 요청한 표시 상태가 적용되어 있습니다.');
+  }
+  if (message.includes('INVALID_DISPLAY_STATUS_OVERRIDE')) {
+    return new AppError(400, 'INVALID_DISPLAY_STATUS_OVERRIDE', '표시 상태 보정 요청이 올바르지 않습니다.');
+  }
+  if (message.includes('RESERVATION_NOT_FOUND')) {
+    return new AppError(404, 'RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다.');
+  }
+  if (message.includes('STAY_SEGMENT_CONTRACT_MISMATCH')) {
+    return new AppError(409, 'STAY_SEGMENT_CONTRACT_MISMATCH', '예약의 투숙 구간 정보가 현재 상태와 일치하지 않습니다.');
   }
   if (message.includes('IDEMPOTENCY_KEY_REUSED')) {
     return new AppError(409, 'IDEMPOTENCY_KEY_REUSED', '이미 다른 요청에 사용한 Idempotency-Key입니다.');
@@ -215,6 +628,9 @@ function roomError(error: { message?: string } | null): AppError {
   if (message.includes('ROOM_PIN_MISMATCH_UNRESOLVED')) {
     return new AppError(409, 'ROOM_PIN_MISMATCH_UNRESOLVED', '물리 도어락과 저장 상태의 불일치를 먼저 해소해 주세요.');
   }
+  if (message.includes('INVALID_PIN_CHANGE_REASON')) {
+    return new AppError(409, 'INVALID_PIN_CHANGE_REASON', '현재 PIN 상태와 변경 사유가 일치하지 않습니다.');
+  }
   if (message.includes('PIN_CHANGE_IN_PROGRESS_REQUIRED')) {
     return new AppError(403, 'PIN_CHANGE_IN_PROGRESS_REQUIRED', 'PIN 변경은 현재 청소가 진행 중일 때만 가능합니다.');
   }
@@ -229,6 +645,15 @@ function roomError(error: { message?: string } | null): AppError {
   }
   if (message.includes('PIN_REVEAL_AUTHORIZATION_CHANGED')) {
     return new AppError(403, 'PIN_REVEAL_AUTHORIZATION_CHANGED', 'PIN 응답 전 권한 또는 업무 상태가 변경되었습니다.');
+  }
+  if (message.includes('PIN_ENTITLEMENT_REQUIRED')) {
+    return new AppError(403, 'PIN_ENTITLEMENT_REQUIRED', '현재 통보된 배정의 PIN 열람 권한이 필요합니다.');
+  }
+  if (message.includes('GENERATED_PIN_REVEAL_NOT_ALLOWED')) {
+    return new AppError(409, 'GENERATED_PIN_REVEAL_NOT_ALLOWED', '생성된 PIN의 초기 열람 가능 상태가 아닙니다.');
+  }
+  if (message.includes('GENERATED_PIN_CONFIRMATION_NOT_ALLOWED')) {
+    return new AppError(409, 'GENERATED_PIN_CONFIRMATION_NOT_ALLOWED', '생성된 PIN을 물리 도어락에 확인할 수 있는 상태가 아닙니다.');
   }
   if (message.includes('ROOM_PIN_UNCONFIGURED')) {
     return new AppError(404, 'ROOM_PIN_UNCONFIGURED', '등록된 객실 PIN이 없습니다.');
@@ -253,6 +678,9 @@ function roomError(error: { message?: string } | null): AppError {
   }
   if (message.includes('ADMIN_REQUIRED') || message.includes('ACTIVE_ACCOUNT_REQUIRED')) {
     return new AppError(403, 'FORBIDDEN', '현재 계정으로 객실을 변경할 수 없습니다.');
+  }
+  if (message.includes('DEVELOPER_REQUIRED') || message.includes('PASSWORD_CHANGE_REQUIRED')) {
+    return new AppError(403, 'DEVELOPER_REQUIRED', '개발자 권한이 필요합니다.');
   }
   return new AppError(500, 'ROOM_COMMAND_FAILED', '객실 정보를 처리하지 못했습니다.');
 }
@@ -308,8 +736,7 @@ export function assertNoContactInformation(value: string | undefined): void {
 export class SupabaseRoomService implements RoomService {
   constructor(
     private readonly clients: SupabaseClients,
-    private readonly pinConfig?: RoomPinCryptoConfig,
-    private readonly initialPinDigits?: string
+    private readonly pinConfig?: RoomPinCryptoConfig
   ) {}
 
   private cryptoConfig(): RoomPinCryptoConfig {
@@ -317,11 +744,210 @@ export class SupabaseRoomService implements RoomService {
     return this.pinConfig;
   }
 
-  private bootstrapDigits(): string {
-    if (!this.initialPinDigits || !/^[0-9]{4,8}$/.test(this.initialPinDigits)) {
-      throw new AppError(503, 'ROOM_PIN_BOOTSTRAP_CONFIG_INVALID', '객실 초기 PIN 설정을 확인해 주세요.');
+  private async revealGeneratedPin(
+    actor: Actor,
+    sessionId: string,
+    roomId: string
+  ): Promise<RevealedRoomPin> {
+    const requestId = randomUUID();
+    const { data, error } = await this.clients.admin.rpc('begin_generated_room_pin_reveal', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_room_id: roomId,
+      p_request_id: requestId
+    });
+    if (error || !data) throw roomError(error);
+    const row = data as Record<string, unknown>;
+    let credential: string;
+    try {
+      credential = await decryptRoomPin(
+        envelopeFromRow(row),
+        roomId,
+        String(row.room_number),
+        Number(row.pin_version),
+        this.cryptoConfig()
+      );
+    } catch (cryptoError) {
+      throw pinCryptoError(cryptoError);
     }
-    return this.initialPinDigits;
+    const { error: finalError } = await this.clients.admin.rpc('finalize_generated_room_pin_reveal', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_room_id: roomId,
+      p_reveal_lease_id: row.lease_id,
+      p_request_id: requestId
+    });
+    if (finalError) throw roomError(finalError);
+    const expiresAt = String(row.expires_at);
+    const clearAfterSeconds = Math.min(30, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+    if (!Number.isFinite(clearAfterSeconds) || clearAfterSeconds <= 0) {
+      throw new AppError(403, 'PIN_REVEAL_AUTHORIZATION_CHANGED', 'PIN 열람 권한이 변경되었습니다.');
+    }
+    return { roomId, credential, pinVersion: Number(row.pin_version), clearAfterSeconds, expiresAt };
+  }
+
+  async listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('list_room_type_catalog', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken)
+    });
+    if (error) {
+      throw roomError(error);
+    }
+    return ((data ?? []) as RoomTypeCatalogRow[]).map(toRoomTypeCatalogItem);
+  }
+
+  async getDeveloperCatalog(actor: Actor): Promise<DeveloperRoomCatalog> {
+    ensureDeveloper(actor);
+    const { data, error } = await this.clients.admin.rpc('get_developer_room_catalog', {
+      p_actor_profile_id: actor.profileId
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as DeveloperRoomCatalog;
+  }
+
+  async previewRoomTypeCapacity(
+    actor: Actor,
+    input: PreviewRoomTypeCapacityInput
+  ): Promise<RoomTypeCapacityPreview> {
+    ensureDeveloper(actor);
+    const { data, error } = await this.clients.admin.rpc('preview_developer_room_type_capacity', {
+      p_actor_profile_id: actor.profileId,
+      p_room_type_id: input.roomTypeId,
+      p_base_occupancy: input.baseOccupancy,
+      p_max_occupancy: input.maxOccupancy,
+      p_expected_version: input.expectedVersion
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as RoomTypeCapacityPreview;
+  }
+
+  async changeRoomTypeCapacity(
+    actor: Actor,
+    input: ChangeRoomTypeCapacityInput
+  ): Promise<RoomTypeCapacityChangeResult> {
+    ensureDeveloper(actor);
+    const fingerprint = {
+      roomTypeId: input.roomTypeId,
+      baseOccupancy: input.baseOccupancy,
+      maxOccupancy: input.maxOccupancy,
+      expectedVersion: input.expectedVersion,
+      impactFingerprint: input.impactFingerprint,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('change_developer_room_type_capacity', {
+      p_actor_profile_id: actor.profileId,
+      p_room_type_id: input.roomTypeId,
+      p_base_occupancy: input.baseOccupancy,
+      p_max_occupancy: input.maxOccupancy,
+      p_expected_version: input.expectedVersion,
+      p_impact_fingerprint: input.impactFingerprint,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as RoomTypeCapacityChangeResult;
+  }
+
+  async createDeveloperRoom(
+    actor: Actor,
+    input: CreateDeveloperRoomInput
+  ): Promise<DeveloperRoomMutationResult> {
+    ensureDeveloper(actor);
+    const fingerprint = {
+      roomNumber: input.roomNumber,
+      roomTypeId: input.roomTypeId,
+      expectedRoomTypeVersion: input.expectedRoomTypeVersion,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('create_developer_room', {
+      p_actor_profile_id: actor.profileId,
+      p_room_id: randomUUID(),
+      p_room_number: input.roomNumber,
+      p_room_type_id: input.roomTypeId,
+      p_expected_room_type_version: input.expectedRoomTypeVersion,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as DeveloperRoomMutationResult;
+  }
+
+  async previewRoomDeactivation(
+    actor: Actor,
+    input: PreviewRoomDeactivationInput
+  ): Promise<RoomDeactivationPreview> {
+    ensureDeveloper(actor);
+    const { data, error } = await this.clients.admin.rpc('preview_developer_room_deactivation', {
+      p_actor_profile_id: actor.profileId,
+      p_room_id: input.roomId,
+      p_expected_version: input.expectedVersion
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as RoomDeactivationPreview;
+  }
+
+  async deactivateDeveloperRoom(
+    actor: Actor,
+    input: DeactivateDeveloperRoomInput
+  ): Promise<DeveloperRoomMutationResult> {
+    ensureDeveloper(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      expectedVersion: input.expectedVersion,
+      impactFingerprint: input.impactFingerprint,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('deactivate_developer_room', {
+      p_actor_profile_id: actor.profileId,
+      p_room_id: input.roomId,
+      p_expected_version: input.expectedVersion,
+      p_impact_fingerprint: input.impactFingerprint,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    return data as unknown as DeveloperRoomMutationResult;
+  }
+
+  async listOperationBlocks(actor: Actor, roomId: string): Promise<RoomOperationBlocksResult> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('list_room_operation_blocks', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: roomId,
+      p_status: 'actionable'
+    });
+    if (error) throw roomError(error);
+    return data as unknown as RoomOperationBlocksResult;
+  }
+
+  async listIssues(actor: Actor, roomId: string): Promise<RoomIssuesResult> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('list_room_issues', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: roomId,
+      p_status: 'open'
+    });
+    if (error) throw roomError(error);
+    return data as unknown as RoomIssuesResult;
+  }
+
+  async listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult> {
+    ensureAdmin(actor);
+    const { data, error } = await this.clients.admin.rpc('list_room_events', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: roomId,
+      p_limit: limit
+    });
+    if (error) throw roomError(error);
+    return data as unknown as RoomEventsResult;
   }
 
   async list(actor: Actor): Promise<RoomSummary[]> {
@@ -422,6 +1048,76 @@ export class SupabaseRoomService implements RoomService {
     };
   }
 
+  async correctOccupancy(
+    actor: Actor,
+    input: CorrectRoomOccupancyInput
+  ): Promise<RoomOccupancyCorrectionResult> {
+    ensureAdmin(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      reservationId: input.reservationId,
+      occupied: input.occupied,
+      effectiveAt: input.effectiveAt,
+      expectedRoomVersion: input.expectedRoomVersion,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('correct_room_occupancy', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: input.roomId,
+      p_reservation_id: input.reservationId,
+      p_occupied: input.occupied,
+      p_effective_at: input.effectiveAt,
+      p_expected_room_version: input.expectedRoomVersion,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    const row = data as Record<string, unknown>;
+    return {
+      correctionId: String(row.correction_id),
+      roomId: String(row.room_id),
+      reservationId: String(row.reservation_id),
+      occupied: Boolean(row.occupied),
+      effectiveAt: String(row.effective_at),
+      roomStateVersion: Number(row.room_state_version),
+      recordedAt: String(row.recorded_at)
+    };
+  }
+
+  async overrideDisplayStatus(
+    actor: Actor,
+    input: OverrideRoomDisplayStatusInput
+  ): Promise<RoomDisplayStatusOverrideResult> {
+    ensureAdmin(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      targetStatus: input.targetStatus,
+      expectedRoomVersion: input.expectedRoomVersion,
+      reasonCode: input.reasonCode
+    };
+    const { data, error } = await this.clients.admin.rpc('override_room_display_status', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: input.roomId,
+      p_target_status: input.targetStatus,
+      p_expected_room_version: input.expectedRoomVersion,
+      p_reason_code: input.reasonCode,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    const row = data as Record<string, unknown>;
+    return {
+      overrideId: String(row.override_id),
+      roomId: String(row.room_id),
+      targetStatus: row.target_status as RoomPrimaryDisplayStatus | null,
+      roomStateVersion: Number(row.room_state_version),
+      recordedAt: String(row.recorded_at)
+    };
+  }
+
   async preparePinChange(actor: Actor, input: PrepareRoomPinChangeInput): Promise<RoomPinChangeResult> {
     const sessionId = verifiedSessionId(actor.accessToken);
     const binding = {
@@ -439,7 +1135,11 @@ export class SupabaseRoomService implements RoomService {
     if (contextError || !contextData) throw roomError(contextError);
     const context = contextData as Record<string, unknown>;
     const roomNumber = String(context.room_number);
+    const currentPinVersion = Number(context.current_pin_version);
     const proposedVersion = Number(context.proposed_pin_version);
+    const effectiveReasonCode = currentPinVersion === 0 && input.reasonCode === 'ADMIN_PHYSICAL_CHANGE'
+      ? 'ADMIN_INITIAL_PIN'
+      : input.reasonCode;
     let canonical: string;
     let envelope: RoomPinEnvelope;
     try {
@@ -455,7 +1155,7 @@ export class SupabaseRoomService implements RoomService {
       assignmentId: input.assignmentId ?? null,
       attemptId: input.attemptId ?? null,
       accessLeaseId: input.accessLeaseId ?? null,
-      reasonCode: input.reasonCode
+      reasonCode: effectiveReasonCode
     };
     const { data, error } = await this.clients.admin.rpc('prepare_room_pin_change', {
       p_actor_profile_id: actor.profileId,
@@ -464,7 +1164,7 @@ export class SupabaseRoomService implements RoomService {
       p_expected_pin_version: input.expectedPinVersion,
       p_room_number_snapshot: roomNumber,
       ...binding,
-      p_reason_code: input.reasonCode,
+      p_reason_code: effectiveReasonCode,
       p_envelope_format: envelope.envelopeFormat,
       p_ciphertext_base64: envelope.ciphertextBase64,
       p_nonce_base64: envelope.nonceBase64,
@@ -563,7 +1263,6 @@ export class SupabaseRoomService implements RoomService {
     if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 25) {
       throw new AppError(400, 'INVALID_PIN_BOOTSTRAP_LIMIT', '초기화 batch 크기는 1~25여야 합니다.');
     }
-    const digits = this.bootstrapDigits();
     const sessionId = verifiedSessionId(actor.accessToken);
     const { data: contextData, error: contextError } = await this.clients.admin.rpc(
       'get_room_pin_bootstrap_context',
@@ -578,18 +1277,20 @@ export class SupabaseRoomService implements RoomService {
     if (!Array.isArray(context.candidates)) {
       throw new AppError(500, 'ROOM_PIN_BOOTSTRAP_FAILED', '객실 초기 PIN 대상을 확인하지 못했습니다.');
     }
-    const candidates = await Promise.all(context.candidates.map(async (value) => {
+    const digitsByCandidate = generateUniqueFourDigitPins(context.candidates.length);
+    const candidates = await Promise.all(context.candidates.map(async (value, index) => {
       const candidate = value as Record<string, unknown>;
       const roomId = String(candidate.room_id ?? '');
       const roomNumber = String(candidate.room_number ?? '');
       const proposedPinVersion = Number(candidate.proposed_pin_version);
-      if (!/^[0-9a-f-]{36}$/i.test(roomId) || !roomNumber || proposedPinVersion !== 1) {
+      const pinDigits = digitsByCandidate[index];
+      if (!/^[0-9a-f-]{36}$/i.test(roomId) || !roomNumber || proposedPinVersion !== 1 || !pinDigits) {
         throw new AppError(500, 'ROOM_PIN_BOOTSTRAP_FAILED', '객실 초기 PIN 대상이 올바르지 않습니다.');
       }
       let envelope: RoomPinEnvelope;
       try {
         envelope = await encryptRoomPin(
-          canonicalRoomPin(roomNumber, digits),
+          canonicalRoomPin(roomNumber, pinDigits),
           roomId,
           proposedPinVersion,
           this.cryptoConfig()
@@ -618,13 +1319,45 @@ export class SupabaseRoomService implements RoomService {
     });
     if (error || !data) throw roomError(error);
     const result = data as Record<string, unknown>;
+    const initializedRoomIds = result.initialized_room_ids as string[];
+    const generatedPins = await Promise.all(
+      initializedRoomIds.map((roomId) => this.revealGeneratedPin(actor, sessionId, roomId))
+    );
     return {
-      initializedRoomIds: result.initialized_room_ids as string[],
+      initializedRoomIds,
       skippedRoomIds: result.skipped_room_ids as string[],
       initializedCount: Number(result.initialized_count),
       skippedCount: Number(result.skipped_count),
       remainingCount: Number(result.remaining_count),
-      completedAt: String(result.completed_at)
+      completedAt: String(result.completed_at),
+      generatedPins
+    };
+  }
+
+  async confirmGeneratedPin(
+    actor: Actor,
+    input: ConfirmGeneratedRoomPinInput
+  ): Promise<GeneratedRoomPinConfirmation> {
+    ensureAdmin(actor);
+    const fingerprint = {
+      roomId: input.roomId,
+      expectedPinVersion: input.expectedPinVersion
+    };
+    const { data, error } = await this.clients.admin.rpc('confirm_generated_room_pin', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: input.roomId,
+      p_expected_pin_version: input.expectedPinVersion,
+      p_idempotency_key: input.idempotencyKey,
+      p_request_hash: requestHash(fingerprint)
+    });
+    if (error || !data) throw roomError(error);
+    const result = data as Record<string, unknown>;
+    return {
+      roomId: String(result.room_id),
+      pinVersion: Number(result.pin_version),
+      status: 'verified',
+      confirmedAt: String(result.confirmed_at)
     };
   }
 }

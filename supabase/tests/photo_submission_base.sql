@@ -18,10 +18,22 @@ $$;
 create function pg_temp.snapshot(v integer,n integer,p_tv boolean default true,p_type text default 'standard') returns jsonb language sql immutable as $$
  select jsonb_build_object('templateVersionId',pg_temp.pid(200),'version',v,'roomTypeCode',p_type,'cleaningKind','checkout','slots',pg_temp.slots(n,p_tv))
 $$;
+create function pg_temp.v8_slots(n integer) returns jsonb language sql immutable as $$
+ select jsonb_agg(jsonb_build_object(
+  'slotKey',case when i=1 then 'tv-on' when i=2 then 'entry-storage' when i=n then 'extra-proof' else 'slot-'||i end,
+  'required',i<n,'displayOrder',i-1,'maxPhotos',case when i=n then 10 else 1 end,
+  'sectionKey','synthetic-section','label','합성 사진','description','정책 seed 아님') order by i)
+ from generate_series(1,n)i
+$$;
+create function pg_temp.v8_snapshot(n integer,p_type text default 'standard') returns jsonb language sql immutable as $$
+ select jsonb_build_object('templateVersionId',pg_temp.pid(201),'version',8,'roomTypeCode',p_type,'cleaningKind','checkout','slots',pg_temp.v8_slots(n))
+$$;
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,10)),'v7 standard requires 10 slots');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,11,true,'premium')),'v7 premium requires 11 slots');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,13,true,'oceanPremium')),'v7 ocean premium requires 13 slots');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(7,15,true,'oceanFamily')),'v7 ocean family requires 15 slots');
+select ok(private.photo_snapshot_valid(pg_temp.snapshot(8,10)),'pre-A v8 standard snapshot remains a valid legacy contract');
+select ok(private.photo_snapshot_valid(pg_temp.snapshot(12,10)),'pre-A higher-version standard snapshot remains a valid legacy contract');
 select ok(not private.photo_snapshot_valid(pg_temp.snapshot(7,9)),'v7 wrong count fails closed');
 select ok(not private.photo_snapshot_valid(pg_temp.snapshot(7,10,false)),'v7 missing required tv-on fails closed');
 select ok(private.photo_snapshot_valid(pg_temp.snapshot(6,9,false)),'v6 explicit historical slots are not retrofitted with tv-on or v7 count');
@@ -33,6 +45,13 @@ select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.snapshot(6,1),'{slo
 select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.snapshot(7,10),'{slots,1,slotKey}','"tv-on"')),'duplicate slot key rejected');
 select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.snapshot(7,10),'{slots,1,displayOrder}','0')),'duplicate display order rejected');
 select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.snapshot(7,10),'{slots,1,displayOrder}','100')),'technical display order cap enforced');
+select ok(private.photo_snapshot_valid(pg_temp.v8_snapshot(9)),'v8 standard adopts 9-slot A-contract');
+select ok(private.photo_snapshot_valid(pg_temp.v8_snapshot(10,'premium')),'v8 premium adopts 10-slot A-contract');
+select ok(private.photo_snapshot_valid(pg_temp.v8_snapshot(12,'oceanPremium')),'v8 ocean premium adopts 12-slot A-contract');
+select ok(private.photo_snapshot_valid(pg_temp.v8_snapshot(14,'oceanFamily')),'v8 ocean family adopts 14-slot A-contract');
+select ok(not private.photo_snapshot_valid(pg_temp.v8_snapshot(10)),'v8 rejects the former standard total');
+select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.v8_snapshot(9),'{slots,2,slotKey}','"entry-number"')),'v8 excludes redundant entry-number');
+select ok(not private.photo_snapshot_valid(jsonb_set(pg_temp.v8_snapshot(9),'{slots,8,maxPhotos}','9')),'v8 extra-proof requires maxPhotos 10');
 
 -- Synthetic non-checkout slots test the generic model, not an approved operational template.
 insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by)
@@ -87,6 +106,57 @@ select throws_ok($$insert into private.photo_template_slots(template_version_id,
 select throws_ok($$update public.cleaning_targets set template_snapshot='{}' where id=pg_temp.pid(301)$$,'55000','PHOTO_TARGET_SNAPSHOT_IMMUTABLE','target JSON snapshot cannot be rewritten');
 
 create temp table photo_results(label text primary key,id uuid);
+-- This model-level suite predates the provider workflow. Give every successful
+-- direct model insert the same exact accepted object identity that the real
+-- upload finalizer creates, so submission retention never relies on a
+-- storage-less synthetic photo.
+create function pg_temp.accept_direct_photo_model() returns trigger
+language plpgsql as $$
+declare
+  attempt_row public.cleaning_attempts;
+  v_operation_id uuid := gen_random_uuid();
+  v_object_id uuid := gen_random_uuid();
+begin
+  select * into strict attempt_row from public.cleaning_attempts where id = new.cleaning_attempt_id;
+  insert into private.photo_upload_operations(
+    id, actor_profile_id, command_type, idempotency_key_digest, request_hash,
+    cleaning_attempt_id, cleaning_target_id, assignment_id, assignment_revision,
+    target_photo_slot_id, expected_photo_revision, sha256, mime_type, size_bytes,
+    collection_item_id, expected_item_revision
+  ) values (
+    v_operation_id, attempt_row.maid_profile_id,
+    case when new.collection_item_id is null then 'photo.upload' else 'photo.collection.upload' end,
+    encode(extensions.digest(new.id::text || ':fixture-key', 'sha256'), 'hex'),
+    encode(extensions.digest(new.id::text || ':fixture-request', 'sha256'), 'hex'),
+    new.cleaning_attempt_id, new.cleaning_target_id, attempt_row.assignment_id,
+    attempt_row.assignment_revision, new.target_photo_slot_id, new.version - 1,
+    new.sha256, new.mime_type, new.size_bytes,
+    new.collection_item_id,
+    case when new.collection_item_id is null then null else new.item_revision - 1 end
+  );
+  insert into private.photo_provider_objects(
+    id, operation_id, provider_locator, uploaded_at, purge_after
+  ) values (
+    v_object_id, v_operation_id, 'fixture_' || replace(new.id::text, '-', ''),
+    new.uploaded_at, new.purge_after
+  );
+  insert into private.photo_upload_states(
+    operation_id, cleaning_attempt_id, target_photo_slot_id, actor_profile_id,
+    status, lease_version, revision
+  ) values (
+    v_operation_id, new.cleaning_attempt_id, new.target_photo_slot_id,
+    attempt_row.maid_profile_id, 'provider_succeeded', 0, 1
+  );
+  insert into private.photo_upload_acceptances(operation_id, object_id, photo_version_id)
+  values(v_operation_id, v_object_id, new.id);
+  update private.photo_upload_states
+  set status = 'accepted', revision = revision + 1
+  where private.photo_upload_states.operation_id = v_operation_id;
+  return new;
+end $$;
+create trigger accept_direct_photo_model
+after insert on private.attempt_photo_versions
+for each row execute function pg_temp.accept_direct_photo_model();
 insert into photo_results values('first',private.record_validated_attempt_photo(pg_temp.pid(2),pg_temp.pid(501),pg_temp.slot(1),0,repeat('a',64),'image/jpeg',100,clock_timestamp()-interval '30 minutes'));
 select ok(private.photo_attempt_complete(pg_temp.pid(501),clock_timestamp()),'verified required photo completes model even with optional slot empty');
 -- Explicit corruption drill, not a production path: restore the append-only trigger immediately.
@@ -140,7 +210,7 @@ select is((select count(*) from private.submission_photo_bindings where submissi
 select is((select count(*) from private.attempt_photo_changes where cleaning_attempt_id=pg_temp.pid(501)),3::bigint,'replace/clear history is append-only');
 
 insert into photo_results values('third',private.record_validated_attempt_photo(pg_temp.pid(2),pg_temp.pid(501),pg_temp.slot(1),3,repeat('c',64),'image/jpeg',150,clock_timestamp()-interval '1 minute'));
-select ok(not private.photo_attempt_complete(pg_temp.pid(501),(select purge_after from private.attempt_photo_versions where id=(select id from photo_results where label='third'))),'exact seven-day expiry is incomplete');
+select ok(private.photo_attempt_complete(pg_temp.pid(501),(select purge_after from private.attempt_photo_versions where id=(select id from photo_results where label='third'))),'pending evidence stays complete at the deprecated seven-day clock');
 select throws_ok($$insert into private.attempt_photo_purge_states values((select id from photo_results where label='third'),clock_timestamp())$$,'23514','PHOTO_PURGE_TIME_INVALID','purge cannot be recorded before deadline');
 insert into private.attempt_photo_purge_states select id,purge_after from private.attempt_photo_versions where id=(select id from photo_results where label='third');
 select ok(not private.photo_attempt_complete(pg_temp.pid(501),clock_timestamp()),'purged current version cannot count as evidence');
@@ -254,19 +324,118 @@ select is((select status::text from public.cleaning_attempts where id=(select (v
  'field_completed','actual physical completion succeeds without any photos');
 select ok(not private.photo_attempt_complete((select (value->'nextAttempt'->>'attemptId')::uuid from photo_source_results where label='handover'),clock_timestamp()),'physical completion still cannot manufacture submission evidence');
 
+-- #180 v8 extra-proof is a current collection; legacy and ordinary slots stay single-current.
+update public.cleaning_template_versions set status='retired' where id=pg_temp.pid(202);
+insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by)
+select pg_temp.pid(203),id,'checkout',8,'published',1,pg_temp.v8_slots(9),pg_temp.pid(1)
+from public.room_types where code='standard';
+create temp table v8_context(target_id uuid primary key, assignment_id uuid, attempt_id uuid);
+alter table public.cleaning_attempts disable trigger aa_checkout_attempt_execution_guard;
+alter table public.cleaning_attempts disable trigger ab_prestart_attempt_identity;
+do $$ declare r public.rooms; t public.cleaning_targets; day date:=(clock_timestamp() at time zone 'Asia/Seoul')::date+20; begin
+ select * into r from public.rooms where room_type_id=(select id from public.room_types where code='standard') order by room_number offset 10 limit 1;
+ insert into public.room_pin_sync_events(room_id,sync_status,pin_version,reason_code,actor_profile_id,effective_at)
+ values(r.id,'verified',1,'TEST',pg_temp.pid(1),clock_timestamp());
+ perform pg_temp.install_room_pin_fixture(r.id,pg_temp.pid(1),1);
+ perform public.create_reservation(pg_temp.pid(1),pg_temp.pid(803),r.id,(day+time '16:00') at time zone 'Asia/Seoul',
+  (day+1+time '11:00') at time zone 'Asia/Seoul',2,null,r.state_version,'photo-v8-reservation',repeat('9',64));
+ select * into t from public.cleaning_targets where reservation_id=pg_temp.pid(803);
+ update public.reservations set status='checked_out',actual_checkout_at=clock_timestamp()-interval '3 hours'
+  where id=pg_temp.pid(803);
+ update public.cleaning_targets set status='notified',assignment_version=2,available_from=clock_timestamp()-interval '3 hours'
+  where id=t.id returning * into t;
+ update public.checkout_cleaning_obligations set status='materialized',current_cleaning_target_id=t.id
+  where reservation_id=pg_temp.pid(803);
+ select * into t from public.cleaning_targets where id=t.id;
+ insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,notified_at,changed_by)
+ values(pg_temp.pid(410),t.id,pg_temp.pid(2),110,t.assignment_version,clock_timestamp()-interval '2 hours',pg_temp.pid(1));
+ insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,assignment_revision,
+  template_snapshot,room_snapshot,started_at,field_completed_at,ended_at)
+ values(pg_temp.pid(510),t.id,pg_temp.pid(410),pg_temp.pid(2),1,'field_completed',t.assignment_version,
+  t.template_snapshot,jsonb_build_object('roomId',r.id),clock_timestamp()-interval '2 hours',clock_timestamp()-interval '1 hour',clock_timestamp()-interval '1 hour');
+ insert into v8_context values(t.id,pg_temp.pid(410),pg_temp.pid(510));
+end $$;
+alter table public.cleaning_attempts enable trigger aa_checkout_attempt_execution_guard;
+alter table public.cleaning_attempts enable trigger ab_prestart_attempt_identity;
+create function pg_temp.v8_slot(k text) returns uuid language sql stable as $$
+ select id from private.target_photo_slot_snapshots where cleaning_target_id=(select target_id from v8_context) and slot_key=k
+$$;
+do $$ declare slot_row record; begin
+ for slot_row in select id from private.target_photo_slot_snapshots
+   where cleaning_target_id=(select target_id from v8_context) and required order by display_order loop
+  perform private.record_validated_attempt_photo(pg_temp.pid(2),pg_temp.pid(510),slot_row.id,0,repeat('a',64),'image/jpeg',100,clock_timestamp()-interval '30 minutes');
+ end loop;
+end $$;
+select ok(private.photo_attempt_complete(pg_temp.pid(510),clock_timestamp()),'v8 attempt is complete with zero optional extra-proof photos');
+select throws_ok($$select private.record_validated_attempt_photo(pg_temp.pid(2),pg_temp.pid(510),pg_temp.v8_slot('extra-proof'),0,repeat('b',64),'image/jpeg',100,clock_timestamp())$$,
+ '23514','PHOTO_COLLECTION_ROUTE_REQUIRED','v8 extra-proof rejects the legacy single-current upload path');
+do $$ begin
+ for i in 1..10 loop
+  perform private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(510),pg_temp.v8_slot('extra-proof'),pg_temp.pid(920+i),
+    i-1,0,repeat(to_hex(i),64),'image/jpeg',100,clock_timestamp()-interval '10 minutes');
+ end loop;
+end $$;
+select is((select count(*) from private.attempt_photo_collection_items where cleaning_attempt_id=pg_temp.pid(510) and active),10::bigint,'extra-proof accepts ten active items');
+select throws_ok($$select private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(510),pg_temp.v8_slot('extra-proof'),pg_temp.pid(940),
+ 10,0,repeat('c',64),'image/jpeg',100,clock_timestamp())$$,'54000','PHOTO_COLLECTION_LIMIT_EXCEEDED','eleventh extra-proof item fails closed');
+select private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(510),pg_temp.v8_slot('extra-proof'),pg_temp.pid(921),
+ 10,1,repeat('d',64),'image/webp',120,clock_timestamp()-interval '5 minutes');
+select is((select revision from private.attempt_photo_collection_items where id=pg_temp.pid(921)),2::bigint,'replace advances only the selected stable item revision');
+select is((select count(*) from private.attempt_photo_collection_items where cleaning_attempt_id=pg_temp.pid(510) and active and revision=1),9::bigint,'replace leaves sibling item revisions unchanged');
+select lives_ok($$select public.report_bomb_room(
+ pg_temp.pid(2),pg_temp.pid(510),array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(921))],
+ 'collection evidence','photo-v8-bomb-report',repeat('7',64))$$,
+ 'active extra-proof collection photo is valid bomb report evidence');
+select is((select count(*) from private.bomb_room_report_evidence e join private.bomb_room_reports r on r.id=e.report_id
+ where r.cleaning_attempt_id=pg_temp.pid(510)),1::bigint,'bomb report seals the selected collection photo version');
+insert into public.cleaning_submissions(id,cleaning_attempt_id,client_submission_id,version,photo_manifest,submitted_by)
+values(pg_temp.pid(610),pg_temp.pid(510),pg_temp.pid(710),1,'[]',pg_temp.pid(2));
+select is(private.bind_submission_photo_model(pg_temp.pid(2),pg_temp.pid(610),0),1::bigint,'submission seals ordinary and all selected collection photos');
+select is((select count(*) from private.submission_photo_bindings where submission_id=pg_temp.pid(610) and collection_item_id is not null),10::bigint,'sealed binding preserves all ten collection items');
+insert into auth.sessions(id,user_id) values(pg_temp.pid(990),pg_temp.pid(102));
+select is((public.delete_photo_collection_item(pg_temp.pid(2),pg_temp.pid(990),pg_temp.pid(510),pg_temp.pid(410),(select assignment_version from public.cleaning_targets where id=(select target_id from v8_context)),
+ pg_temp.v8_slot('extra-proof'),pg_temp.pid(922),11,1,repeat('e',64),repeat('f',64))->>'collectionRevision')::bigint,12::bigint,
+ 'individual delete advances collection revision');
+select is((select count(*) from private.attempt_photo_collection_items where cleaning_attempt_id=pg_temp.pid(510) and active),9::bigint,'delete removes only one current item');
+select is((select count(*) from private.submission_photo_bindings where submission_id=pg_temp.pid(610) and collection_item_id is not null),10::bigint,'delete preserves historical sealed bindings');
+select is((public.delete_photo_collection_item(pg_temp.pid(2),pg_temp.pid(990),pg_temp.pid(510),pg_temp.pid(410),(select assignment_version from public.cleaning_targets where id=(select target_id from v8_context)),
+ pg_temp.v8_slot('extra-proof'),pg_temp.pid(922),11,1,repeat('e',64),repeat('f',64))->>'collectionRevision')::bigint,12::bigint,
+ 'delete retry replays the same result without a second mutation');
+select throws_ok($$select public.delete_photo_collection_item(pg_temp.pid(2),pg_temp.pid(990),pg_temp.pid(510),pg_temp.pid(410),(select assignment_version from public.cleaning_targets where id=(select target_id from v8_context)),
+ pg_temp.v8_slot('extra-proof'),pg_temp.pid(922),11,1,repeat('e',64),repeat('0',64))$$,
+ '23505','IDEMPOTENCY_KEY_REUSED','delete key reuse with a different request hash is rejected');
+select is((select count(*) from private.attempt_photo_collection_changes where cleaning_attempt_id=pg_temp.pid(510)),12::bigint,'append replace delete history is exact and append-only');
+select ok(private.photo_attempt_complete(pg_temp.pid(510),clock_timestamp()),'valid remaining optional collection keeps required completeness unchanged');
+select is((select count(*) from public.list_developer_audit_events(
+ pg_temp.pid(4),array['photo.collection_item_deleted'],null,null,null,null,null,50)),1::bigint,
+ 'collection delete is visible through the bounded developer audit allowlist');
+select is((select summary->>'photoItemId' from public.list_developer_audit_events(
+ pg_temp.pid(4),array['photo.collection_item_deleted'],null,null,null,null,null,50) limit 1),pg_temp.pid(922)::text,
+ 'collection delete audit keeps the safe item identity projection');
+select ok(pg_get_functiondef('public.finalize_photo_upload(uuid,uuid,uuid,integer,text)'::regprocedure)
+  like '%''collectionRevision'', case when o.collection_item_id is null then null else o.expected_photo_revision + 1 end%',
+  'collection upload acceptance audit preserves the global collection revision');
+
 select ok(bool_and(c.relrowsecurity),'all private model tables have RLS') from pg_class c join pg_namespace n on n.oid=c.relnamespace
-where n.nspname='private' and c.relname in ('photo_template_slots','target_photo_snapshot_contracts','target_photo_slot_snapshots','attempt_photo_versions','attempt_photo_purge_states','attempt_photo_current','attempt_photo_changes','submission_photo_bindings','submission_photo_binding_sets','submission_current_pointers');
+where n.nspname='private' and c.relname in ('photo_template_slots','target_photo_snapshot_contracts','target_photo_slot_snapshots','attempt_photo_versions','attempt_photo_purge_states','attempt_photo_current','attempt_photo_changes','submission_photo_bindings','submission_photo_binding_sets','submission_current_pointers','attempt_photo_collection_states','attempt_photo_collection_items','attempt_photo_collection_changes','photo_collection_commands');
 select ok(not has_function_privilege(r,fn,'EXECUTE'),r||' cannot execute model helper '||fn)
 from unnest(array['anon','authenticated','service_role'])r cross join unnest(array[
  'private.record_validated_attempt_photo(uuid,uuid,uuid,bigint,text,text,integer,timestamptz)',
+ 'private.record_validated_collection_photo(uuid,uuid,uuid,uuid,bigint,bigint,text,text,integer,timestamptz)',
+ 'private.photo_slot_max_photos(uuid,uuid)','private.guard_photo_collection_state()',
+ 'private.guard_photo_collection_item()','private.guard_photo_collection_upload_shape()',
+ 'private.photo_collection_append_only()',
  'private.clear_attempt_photo(uuid,uuid,uuid,bigint)','private.bind_submission_photo_model(uuid,uuid,bigint)',
  'private.photo_attempt_complete(uuid,timestamptz)'])fn;
-select ok(not has_table_privilege(r,'private.attempt_photo_versions','SELECT,INSERT,UPDATE,DELETE'),r||' cannot read/write raw model')
-from unnest(array['anon','authenticated','service_role'])r;
+select ok(not has_table_privilege(r,t,'SELECT,INSERT,UPDATE,DELETE'),r||' cannot read/write raw model '||t)
+from unnest(array['anon','authenticated','service_role'])r cross join unnest(array[
+ 'private.attempt_photo_versions','private.attempt_photo_collection_states','private.attempt_photo_collection_items',
+ 'private.attempt_photo_collection_changes','private.photo_collection_commands'])t;
 select ok(not has_table_privilege('service_role',t,'INSERT,UPDATE,DELETE'),'legacy raw write bypass denied: '||t)
 from unnest(array['public.cleaning_submissions','public.submission_photos'])t;
 set local role service_role;
 select throws_ok($$select * from private.attempt_photo_versions$$,'42501',null,'actual service-role raw table read denied');
+select throws_ok($$select * from private.attempt_photo_collection_items$$,'42501',null,'actual service-role collection table read denied');
 select throws_ok($$select private.photo_attempt_complete('30000000-0000-4000-8000-000000000501',now())$$,'42501',null,'actual service-role model call denied');
 reset role;
 set constraints all immediate;

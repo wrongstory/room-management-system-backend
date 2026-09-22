@@ -10,6 +10,7 @@ const slotSchema = z.object({
   displayOrder: z.number().int().min(0).max(99),
   required: z.boolean(),
   label: boundedText(80),
+  maxPhotos: z.number().int().min(1).max(10).optional(),
   description: boundedText(200).optional(),
   section: boundedText(80).optional(),
   instanceKey: slotKeySchema.optional()
@@ -37,17 +38,30 @@ const publishSchema = z.object({
   if (orders.size > 0 && (Math.min(...orders) !== 0 || Math.max(...orders) !== orders.size - 1)) {
     context.addIssue({ code: 'custom', path: ['slots'], message: 'displayOrder는 0부터 연속이어야 합니다.' });
   }
-  const expectedCount = { standard: 10, premium: 11, oceanPremium: 13, oceanFamily: 15 }[
+  const expectedCount = { standard: 9, premium: 10, oceanPremium: 12, oceanFamily: 14 }[
     input.roomTypeCode
   ];
-  if (input.slots.length !== expectedCount) {
+  const legacyV7Count = { standard: 10, premium: 11, oceanPremium: 13, oceanFamily: 15 }[
+    input.roomTypeCode
+  ];
+  const legacyReplayCandidate = input.slots.length === legacyV7Count &&
+    input.slots.every((slot) => slot.maxPhotos === undefined);
+  const acceptedCount = legacyReplayCandidate ? legacyV7Count : expectedCount;
+  if (input.slots.length !== expectedCount && !legacyReplayCandidate) {
     context.addIssue({ code: 'custom', path: ['slots'], message: '객실 유형별 슬롯 수가 올바르지 않습니다.' });
   }
-  if (input.slots.filter((slot) => slot.required).length !== expectedCount - 1) {
+  if (input.slots.filter((slot) => slot.required).length !== acceptedCount - 1) {
     context.addIssue({ code: 'custom', path: ['slots'], message: '필수 슬롯 수가 올바르지 않습니다.' });
   }
   if (input.slots.filter((slot) => slot.slotKey === 'tv-on' && slot.required).length !== 1) {
     context.addIssue({ code: 'custom', path: ['slots'], message: '필수 tv-on 슬롯이 정확히 하나 필요합니다.' });
+  }
+  if (!legacyReplayCandidate && (input.slots.some((slot) => slot.slotKey === 'entry-number') ||
+    input.slots.filter((slot) => slot.slotKey === 'entry-storage' && slot.required).length !== 1 ||
+    input.slots.filter((slot) => slot.slotKey === 'extra-proof' && !slot.required &&
+      slot.displayOrder === expectedCount - 1 && slot.maxPhotos === 10).length !== 1 ||
+    input.slots.some((slot) => slot.slotKey !== 'extra-proof' && slot.maxPhotos !== 1))) {
+    context.addIssue({ code: 'custom', path: ['slots'], message: 'v8 사진 슬롯 정책이 올바르지 않습니다.' });
   }
 });
 

@@ -15,7 +15,13 @@ const roomTypeCodes = [
   "oceanFamily",
 ] as const;
 type RoomTypeCode = typeof roomTypeCodes[number];
-const expectedSlotCounts: Record<RoomTypeCode, number> = {
+const currentSlotCounts: Record<RoomTypeCode, number> = {
+  standard: 9,
+  premium: 10,
+  oceanPremium: 12,
+  oceanFamily: 14,
+};
+const legacyV7SlotCounts: Record<RoomTypeCode, number> = {
   standard: 10,
   premium: 11,
   oceanPremium: 13,
@@ -26,6 +32,7 @@ const slotKeys = [
   "displayOrder",
   "required",
   "label",
+  "maxPhotos",
   "description",
   "section",
   "instanceKey",
@@ -107,12 +114,30 @@ function hasExactKeys(
     expected.every((key) => Object.hasOwn(row, key));
 }
 
-function normalizeSlots(value: unknown, roomTypeCode: RoomTypeCode) {
-  if (
-    !Array.isArray(value) || value.length !== expectedSlotCounts[roomTypeCode]
-  ) {
+function normalizeSlots(
+  value: unknown,
+  roomTypeCode: RoomTypeCode,
+  version = 8,
+) {
+  if (!Array.isArray(value)) {
     invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   }
+  const metadataCount =
+    value.filter((raw) =>
+      raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
+      Object.hasOwn(raw, "maxPhotos")
+    ).length;
+  if (metadataCount !== 0 && metadataCount !== value.length) {
+    invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
+  }
+  const usesAContract = version >= 8 && metadataCount === value.length;
+  if (
+    (version < 8 && metadataCount > 0) || value.length !== (
+        usesAContract
+          ? currentSlotCounts[roomTypeCode]
+          : legacyV7SlotCounts[roomTypeCode]
+      )
+  ) invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   const keys = new Set<string>();
   const orders = new Set<number>();
   const slots = value.map((raw) => {
@@ -122,14 +147,22 @@ function normalizeSlots(value: unknown, roomTypeCode: RoomTypeCode) {
     const row = raw as Record<string, unknown>;
     if (
       Object.keys(row).some((key) => !slotKeys.includes(key)) ||
-      !["slotKey", "displayOrder", "required", "label"].every((key) =>
-        Object.hasOwn(row, key)
-      ) ||
+      ![
+        "slotKey",
+        "displayOrder",
+        "required",
+        "label",
+        ...(usesAContract ? ["maxPhotos"] : []),
+      ].every((key) => Object.hasOwn(row, key)) ||
       typeof row.slotKey !== "string" ||
       !/^[a-z][a-z0-9-]{0,79}$/.test(row.slotKey) ||
       !Number.isSafeInteger(row.displayOrder) ||
       (row.displayOrder as number) < 0 ||
       (row.displayOrder as number) > 99 || typeof row.required !== "boolean" ||
+      (row.maxPhotos !== undefined && (
+        !Number.isSafeInteger(row.maxPhotos) ||
+        (row.maxPhotos as number) < 1 || (row.maxPhotos as number) > 10
+      )) ||
       (row.instanceKey !== undefined && (
         typeof row.instanceKey !== "string" ||
         !/^[a-z][a-z0-9-]{0,79}$/.test(row.instanceKey)
@@ -145,6 +178,9 @@ function normalizeSlots(value: unknown, roomTypeCode: RoomTypeCode) {
       displayOrder: row.displayOrder as number,
       required: row.required,
       label: boundedText(row.label, 80),
+      ...(row.maxPhotos !== undefined
+        ? { maxPhotos: row.maxPhotos as number }
+        : {}),
       ...(row.description !== undefined
         ? { description: boundedText(row.description, 200) }
         : {}),
@@ -169,6 +205,20 @@ function normalizeSlots(value: unknown, roomTypeCode: RoomTypeCode) {
   ) {
     invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   }
+  if (
+    usesAContract && (
+      slots.some((slot) => slot.slotKey === "entry-number") ||
+      slots.filter((slot) => slot.slotKey === "entry-storage" && slot.required)
+          .length !== 1 ||
+      slots.filter((slot) =>
+          slot.slotKey === "extra-proof" && !slot.required &&
+          slot.displayOrder === slots.length - 1 && slot.maxPhotos === 10
+        ).length !== 1 ||
+      slots.some((slot) =>
+        slot.slotKey !== "extra-proof" && slot.maxPhotos !== 1
+      )
+    )
+  ) invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   return slots;
 }
 
@@ -217,7 +267,7 @@ function publishedProjection(value: unknown, roomTypeCode: RoomTypeCode) {
   }
   let slots: ReturnType<typeof normalizeSlots>;
   try {
-    slots = normalizeSlots(row.slots, roomTypeCode);
+    slots = normalizeSlots(row.slots, roomTypeCode, row.version as number);
   } catch {
     throw templateDatabaseError(null);
   }
@@ -352,7 +402,19 @@ export async function cleaningTemplates(
     invalid();
   }
   const roomTypeCode = body.roomTypeCode as RoomTypeCode;
-  const slots = normalizeSlots(body.slots, roomTypeCode);
+  const legacyReplayCandidate = Array.isArray(body.slots) &&
+    body.slots.length === legacyV7SlotCounts[roomTypeCode] &&
+    body.slots.every((slot) =>
+      typeof slot === "object" && slot !== null && !Array.isArray(slot) &&
+      !Object.hasOwn(slot, "maxPhotos")
+    );
+  // Fresh v7-shaped commands are rejected by the v8-only database publisher.
+  // Passing the exact historical shape through keeps completed v7 receipts replayable.
+  const slots = normalizeSlots(
+    body.slots,
+    roomTypeCode,
+    legacyReplayCandidate ? 7 : 8,
+  );
   const durationMinutes = body.durationMinutes ?? null;
   const fingerprint = {
     command: "cleaning_template.publish_checkout",

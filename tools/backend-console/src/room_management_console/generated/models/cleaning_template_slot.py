@@ -18,6 +18,7 @@ class CleaningTemplateSlot:
         display_order (int):
         required (bool):
         label (str):
+        max_photos (int | Unset): Decision A v8+ 필수 메타데이터입니다. pre-A historical v7+ projection에는 없을 수 있습니다.
         description (str | Unset):
         section (str | Unset):
         instance_key (str | Unset):
@@ -27,6 +28,7 @@ class CleaningTemplateSlot:
     display_order: int
     required: bool
     label: str
+    max_photos: int | Unset = UNSET
     description: str | Unset = UNSET
     section: str | Unset = UNSET
     instance_key: str | Unset = UNSET
@@ -39,6 +41,8 @@ class CleaningTemplateSlot:
         required = self.required
 
         label = self.label
+
+        max_photos = self.max_photos
 
         description = self.description
 
@@ -56,6 +60,8 @@ class CleaningTemplateSlot:
                 "label": label,
             }
         )
+        if max_photos is not UNSET:
+            field_dict["maxPhotos"] = max_photos
         if description is not UNSET:
             field_dict["description"] = description
         if section is not UNSET:
@@ -76,6 +82,8 @@ class CleaningTemplateSlot:
 
         label = d.pop("label")
 
+        max_photos = d.pop("maxPhotos", UNSET)
+
         description = d.pop("description", UNSET)
 
         section = d.pop("section", UNSET)
@@ -87,6 +95,7 @@ class CleaningTemplateSlot:
             display_order=display_order,
             required=required,
             label=label,
+            max_photos=max_photos,
             description=description,
             section=section,
             instance_key=instance_key,

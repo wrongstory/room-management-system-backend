@@ -19,16 +19,23 @@ from room_management_console.generated.api.cleaning_templates import (
     publish_cleaning_template,
 )
 from room_management_console.generated.api.developer import (
+    change_developer_room_type_capacity,
+    create_developer_room,
+    deactivate_developer_room,
     get_developer_database_status,
     get_developer_overview,
+    get_developer_room_catalog,
     get_developer_runtime_status,
     get_developer_scheduler_status,
     list_developer_activity_events,
     list_developer_audit_events,
+    preview_developer_room_deactivation,
+    preview_developer_room_type_capacity,
     run_developer_diagnostics,
 )
 from room_management_console.generated.api.rooms import (
     get_room_pin_sheet_sync_status,
+    list_room_types,
     request_room_pin_sheet_full_resync,
 )
 from room_management_console.generated.models import (
@@ -41,6 +48,7 @@ from room_management_console.generated.models import (
     RoomPinSheetSyncStatus,
     RoomPinSheetSyncStatusActivation,
     RoomPinSheetSyncStatusBacklog,
+    RoomTypeCatalogItem,
 )
 from room_management_console.generated.models.account_status import AccountStatus
 from room_management_console.generated.models.developer_audit_event_summary import (
@@ -84,12 +92,19 @@ def test_phase_a_openapi_operations_are_generated() -> None:
         list_developer_activity_events.sync_detailed,
         list_developer_audit_events.sync_detailed,
         run_developer_diagnostics.sync_detailed,
+        get_developer_room_catalog.sync_detailed,
+        preview_developer_room_type_capacity.sync_detailed,
+        change_developer_room_type_capacity.sync_detailed,
+        create_developer_room.sync_detailed,
+        preview_developer_room_deactivation.sync_detailed,
+        deactivate_developer_room.sync_detailed,
         get_room_pin_sheet_sync_status.sync_detailed,
         request_room_pin_sheet_full_resync.sync_detailed,
+        list_room_types.sync_detailed,
         list_cleaning_templates.sync_detailed,
         publish_cleaning_template.sync_detailed,
     ]
-    assert len(operations) == 20
+    assert len(operations) == 27
 
 
 def test_password_change_replay_errors_are_generated() -> None:
@@ -111,6 +126,26 @@ def test_password_change_replay_errors_are_generated() -> None:
         "PASSWORD_VERIFICATION_RATE_LIMIT_UNAVAILABLE",
         "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
         "PASSWORD_RESET_STATE_UPDATE_FAILED",
+    }
+
+
+def test_during_stay_room_move_errors_are_generated() -> None:
+    from room_management_console.generated.models.error_code import ErrorCode
+
+    assert {
+        ErrorCode.OPEN_ENDED_STAY_REQUIRES_END.value,
+        ErrorCode.INVALID_MOVE_EFFECTIVE_AT.value,
+        ErrorCode.TARGET_ROOM_NOT_READY.value,
+        ErrorCode.TARGET_ROOM_OVERLAP.value,
+        ErrorCode.TARGET_ROOM_BLOCKED.value,
+        ErrorCode.PIN_LEASE_ACTIVE.value,
+    } == {
+        "OPEN_ENDED_STAY_REQUIRES_END",
+        "INVALID_MOVE_EFFECTIVE_AT",
+        "TARGET_ROOM_NOT_READY",
+        "TARGET_ROOM_OVERLAP",
+        "TARGET_ROOM_BLOCKED",
+        "PIN_LEASE_ACTIVE",
     }
 
 
@@ -440,6 +475,7 @@ def test_room_pin_error_codes_are_generated() -> None:
         "PIN_CHANGE_IN_PROGRESS",
         "PIN_CHANGE_LEASE_EXPIRED",
         "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
+        "PIN_ENTITLEMENT_REQUIRED",
         "PIN_REVEAL_AUTHORIZATION_CHANGED",
         "ROOM_PIN_UNCONFIGURED",
         "PIN_ACCESS_LEASE_REQUIRED",
@@ -507,7 +543,7 @@ def test_attempt_lifecycle_audit_contract_preserves_only_safe_generated_fields()
         assert DeveloperAuditEventSummary.from_dict(expired_summary).to_dict() == expired_summary
 
 
-def test_generated_client_contains_only_twenty_authorized_operations() -> None:
+def test_generated_client_contains_only_twenty_seven_authorized_operations() -> None:
     from room_management_console.generated import api
 
     generated_groups = {module.name for module in pkgutil.iter_modules(api.__path__)}
@@ -537,9 +573,36 @@ def test_generated_client_contains_only_twenty_authorized_operations() -> None:
         "developer.list_developer_activity_events",
         "developer.list_developer_audit_events",
         "developer.run_developer_diagnostics",
+        "developer.get_developer_room_catalog",
+        "developer.preview_developer_room_type_capacity",
+        "developer.change_developer_room_type_capacity",
+        "developer.create_developer_room",
+        "developer.preview_developer_room_deactivation",
+        "developer.deactivate_developer_room",
         "rooms.get_room_pin_sheet_sync_status",
+        "rooms.list_room_types",
         "rooms.request_room_pin_sheet_full_resync",
     }
+
+
+def test_room_type_catalog_generated_model_preserves_the_camel_case_contract() -> None:
+    item = RoomTypeCatalogItem.from_dict(
+        {
+            "id": "10000000-0000-4000-8000-000000000001",
+            "code": "standard",
+            "displayName": "스탠다드 더블 로프트",
+            "baseCleaningFee": 16000,
+            "baseOccupancy": 2,
+            "maxOccupancy": 4,
+            "active": True,
+            "version": 2,
+            "roomCount": 22,
+        }
+    )
+    assert item.to_dict()["displayName"] == "스탠다드 더블 로프트"
+    assert item.to_dict()["baseOccupancy"] == 2
+    assert item.to_dict()["maxOccupancy"] == 4
+    assert item.to_dict()["roomCount"] == 22
 
 
 def test_offline_resolution_generated_audit_excludes_ninety_day_client_metadata() -> None:
@@ -806,10 +869,12 @@ def test_payroll_payment_result_audit_and_error_codes_are_generated() -> None:
     from room_management_console.generated.models.error_code import ErrorCode
 
     assert {
+        DeveloperAuditEventType.PAYROLL_PAYMENT_STARTED.value,
         DeveloperAuditEventType.PAYROLL_PAYMENT_CHECK_RECORDED.value,
         DeveloperAuditEventType.PAYROLL_PAYMENT_PAID.value,
         DeveloperAuditEventType.PAYROLL_PAYMENT_REOPENED.value,
     } == {
+        "payroll.payment_started",
         "payroll.payment_check_recorded",
         "payroll.payment_paid",
         "payroll.payment_reopened",
@@ -835,6 +900,33 @@ def test_payroll_payment_result_audit_and_error_codes_are_generated() -> None:
         "PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH",
         "PAYROLL_PAYMENT_TRANSITION_INVALID",
     }
+
+
+def test_room_status_correction_audit_contract_is_generated_exactly() -> None:
+    event_values = {event.value for event in DeveloperAuditEventType}
+    assert len(event_values) == 73
+    assert {
+        "room.occupancy_corrected",
+        "room.display_status_overridden",
+        "payroll.payment_started",
+        "room.pin_generated",
+        "room.generated_pin_confirmed",
+        "assignment.duration_policy_confirmed",
+    } <= event_values
+
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {"occupied", "display_status_override", "room_state_version"} <= field_names
+    assert {
+        "request_hash",
+        "before_state",
+        "after_state",
+        "raw_before_state",
+        "raw_after_state",
+    }.isdisjoint(field_names)
+    occupied_summary = {"occupied": True, "roomStateVersion": 11}
+    override_summary = {"displayStatusOverride": None, "roomStateVersion": 12}
+    assert DeveloperAuditEventSummary.from_dict(occupied_summary).to_dict() == occupied_summary
+    assert DeveloperAuditEventSummary.from_dict(override_summary).to_dict() == override_summary
 
 
 def test_complaint_rework_error_codes_are_generated() -> None:

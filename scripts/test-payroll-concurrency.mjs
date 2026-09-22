@@ -170,6 +170,8 @@ export async function testPayrollConcurrency(client, adminProfileId) {
     const targetId = randomUUID();
     const assignmentId = randomUUID();
     const attemptId = randomUUID();
+    const photoOperationId = randomUUID();
+    const photoObjectId = randomUUID();
     ok(await client.from('rooms').insert({
       id: roomId,
       room_number: `${Date.now()}${sequence}`,
@@ -210,8 +212,28 @@ export async function testPayrollConcurrency(client, adminProfileId) {
       `where cleaning_target_id='${targetId}' and slot_key='proof';`
     );
     sql(
-      `select private.record_validated_attempt_photo('${maidProfileId}','${attemptId}',` +
-      `'${slotId}',0,repeat('9',64),'image/jpeg',100,clock_timestamp()-interval '1 minute');`
+      `do $fixture$ declare photo_id uuid; uploaded_at timestamptz:=clock_timestamp()-interval '1 minute'; begin ` +
+      `insert into private.photo_upload_operations(` +
+      `id,actor_profile_id,command_type,idempotency_key_digest,request_hash,` +
+      `cleaning_attempt_id,cleaning_target_id,assignment_id,assignment_revision,` +
+      `target_photo_slot_id,expected_photo_revision,sha256,mime_type,size_bytes)` +
+      ` values('${photoOperationId}','${maidProfileId}','photo.upload',` +
+      `encode(extensions.digest('${photoOperationId}:payroll-fixture-key','sha256'),'hex'),` +
+      `encode(extensions.digest('${photoOperationId}:payroll-fixture-request','sha256'),'hex'),` +
+      `'${attemptId}','${targetId}','${assignmentId}',2,'${slotId}',0,repeat('9',64),'image/jpeg',100);` +
+      `insert into private.photo_provider_objects(id,operation_id,provider_locator,uploaded_at,purge_after)` +
+      ` values('${photoObjectId}','${photoOperationId}','fixture_${photoObjectId.replaceAll('-', '')}',` +
+      `uploaded_at,uploaded_at+interval '168 hours');` +
+      `insert into private.photo_upload_states(` +
+      `operation_id,cleaning_attempt_id,target_photo_slot_id,actor_profile_id,status,lease_version,revision)` +
+      ` values('${photoOperationId}','${attemptId}','${slotId}','${maidProfileId}',` +
+      `'provider_succeeded',0,1);` +
+      `photo_id:=private.record_validated_attempt_photo('${maidProfileId}','${attemptId}',` +
+      `'${slotId}',0,repeat('9',64),'image/jpeg',100,uploaded_at);` +
+      `insert into private.photo_upload_acceptances(operation_id,object_id,photo_version_id)` +
+      ` values('${photoOperationId}','${photoObjectId}',photo_id);` +
+      `update private.photo_upload_states set status='accepted',revision=revision+1 ` +
+      `where operation_id='${photoOperationId}'; end $fixture$;`
     );
     return ok(await client.rpc('create_cleaning_submission', {
       p_actor_profile_id: maidProfileId,
