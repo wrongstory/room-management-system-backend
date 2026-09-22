@@ -75,7 +75,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 production 공개 HTTP readback: **2026-09-22 KST**, DB/Function metadata read-only 확인: **2026-09-23 KST**. #245 v0.5.1 hotfix는 `main`/운영 API/Pages에 반영됐다. 이번 확인은 관리자 positive mutation smoke를 포함하지 않는다.
 
-- 현재 GitHub `main`: `273d85f7cbefac0187519e7955e23de48056f927`. #245 API hotfix 병합 지점은 `dda676dc6527a75a2271140d83ae6d2dbfb7cadf`이며 이후 Pages workflow 변경이 추가됐다.
+- 이 readback의 GitHub `main` 기준: `273d85f7cbefac0187519e7955e23de48056f927`. #245 API hotfix 병합 지점은 `dda676dc6527a75a2271140d83ae6d2dbfb7cadf`이며 이후 Pages workflow 변경이 추가됐다.
 - Supabase production read-only 확인에서 **78 migrations**, head `reservation_bookability_optional_guest_count`, **`api` ACTIVE v24**다.
 - production `/health`와 `/openapi.json`은 HTTP 200, 운영 OpenAPI는 **0.5.1 / 128 paths / 138 operations**다. 공개 GitHub Pages index/OpenAPI/manifest도 HTTP 200 및 **0.5.1 / 128 / 138**으로 일치한다.
 - #245의 78번째 append-only migration과 source 승격·Pages 공개는 완료 기록과 readback으로 구분한다. `guestCount` 생략/null/양수의 이번 턴 hosted admin positive smoke는 수행하지 않았다.

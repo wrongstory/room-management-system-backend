@@ -1,6 +1,6 @@
 # v0.5.1 예약 가능 미리보기 hotfix 적용·발행 상태
 
-> 상태: PR #246은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`에 병합됐다. 2026-09-23 read-only 재확인에서 production migration은 78건/head `reservation_bookability_optional_guest_count`, `api`는 ACTIVE v24였다. 운영 API와 공개 Pages의 OpenAPI는 모두 0.5.1 / 128 paths / 138 operations였다. 현재 `main@273d85f7cbefac0187519e7955e23de48056f927`에는 이후 Pages workflow 변경까지 포함된다. `v0.5.1` tag/GitHub Release는 아직 없다.
+> 상태: PR #246은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`에 병합됐다. 2026-09-23 read-only 재확인에서 production migration은 78건/head `reservation_bookability_optional_guest_count`, `api`는 ACTIVE v24였다. 운영 API와 공개 Pages의 OpenAPI는 모두 0.5.1 / 128 paths / 138 operations였다. 이 readback의 기준 `main@273d85f7cbefac0187519e7955e23de48056f927`에는 이후 Pages workflow 변경까지 포함된다. `v0.5.1` tag/GitHub Release는 아직 없다.
 
 ## 1. 범위
 
