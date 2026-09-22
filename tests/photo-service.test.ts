@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { ImageMagick, MagickColors, MagickFormat } from '@imagemagick/magick-wasm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { initializePhotoDecoder, PhotoError } from '../src/modules/photos/photo-binary.js';
+import { initializePhotoDecoder, PhotoError, PHOTO_INPUT_MAX_BYTES } from '../src/modules/photos/photo-binary.js';
 import { PhotoService, photoRoute, type PhotoIdentity, type PhotoRpc } from '../src/modules/photos/photo-service.js';
 import type { PhotoProvider } from '../src/modules/photos/google-drive.js';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -64,7 +64,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     const blocked = setup(name => name === 'admit_photo_upload' ? { data: null, error: { message: 'PHOTO_ACCESS_REQUIRED' } } : undefined);
     await expect(blocked.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_ACCESS_REQUIRED' });
     expect(blocked.calls).toEqual(['admit_photo_upload']); expect(blocked.provider.quota).not.toHaveBeenCalled();
-    const large = setup(); await expect(large.service.upload(request(new Uint8Array(307201)), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_TOO_LARGE' });
+    const large = setup(); await expect(large.service.upload(request(new Uint8Array(PHOTO_INPUT_MAX_BYTES + 1)), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_TOO_LARGE' });
     expect(large.calls).toEqual(['admit_photo_upload']); expect(large.provider.upload).not.toHaveBeenCalled();
   });
   it('quota refresh only after an authorized unavailable admission; accepted retry does not create again', async () => {

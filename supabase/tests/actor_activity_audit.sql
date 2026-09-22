@@ -155,11 +155,14 @@ select public.record_actor_activity_event(
   gen_random_uuid()::text, 'INVALID_CREDENTIALS', null, null,
   clock_timestamp() - interval '3 minutes'
 );
+with fixed_minute as materialized (
+  select date_trunc('minute', clock_timestamp()) - interval '2 minutes' as occurred_at
+)
 select public.record_authorization_denial(
   '27000000-0000-4000-8000-000000000003',
   'edge.authorization.availability', 'ADMIN_REQUIRED',
-  clock_timestamp() - interval '2 minutes'
-) from generate_series(1, 1000);
+  fixed_minute.occurred_at
+) from fixed_minute cross join generate_series(1, 1000);
 select public.record_authorization_denial(
   '27000000-0000-4000-8000-000000000002',
   'edge.authorization.availability', 'ADMIN_REQUIRED',

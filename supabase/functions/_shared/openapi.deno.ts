@@ -103,9 +103,12 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
   const upload =
     document.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/upload"].post;
   assert(
-    upload.requestBody.content["image/jpeg"].schema["x-max-bytes"] === 307200 &&
-      upload.requestBody.content["image/webp"].schema.maxLength === 307200,
-    "raw300KiB both encodings",
+    upload.requestBody.content["image/jpeg"].schema["x-max-bytes"] ===
+        5242880 &&
+      upload.requestBody.content["image/webp"].schema.maxLength === 5242880 &&
+      upload.requestBody.content["image/heic"].schema.maxLength === 5242880 &&
+      upload.requestBody.content["image/heif"].schema.maxLength === 5242880,
+    "raw5MiB smartphone encodings with stored300KiB",
   );
   assert(
     !Object.hasOwn(upload.requestBody.content, "multipart/form-data") &&
