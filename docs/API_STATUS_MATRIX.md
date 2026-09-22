@@ -75,7 +75,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 production 공개 HTTP readback: **2026-09-22 KST**, DB/Function metadata read-only 확인: **2026-09-23 KST**. #245 v0.5.1 hotfix는 `main`/운영 API/Pages에 반영됐다. 이번 확인은 관리자 positive mutation smoke를 포함하지 않는다.
 
-- 이 readback의 GitHub `main` 기준: `273d85f7cbefac0187519e7955e23de48056f927`. #245 API hotfix 병합 지점은 `dda676dc6527a75a2271140d83ae6d2dbfb7cadf`이며 이후 Pages workflow 변경이 추가됐다.
+- 이 readback의 GitHub `main` 기준: `273d85f7cbefac0187519e7955e23de48056f927`. #245 API hotfix 병합 지점은 `dda676dc6527a75a2271140d83ae6d2dbfb7cadf`이며 이후 Pages workflow 변경이 추가됐다. 현재 `main@478e6c9aaa1d453d6bc6bc97776f5d97752cbfc0`에는 PR #255의 테스트 fixture만 더해졌고 운영 API bundle은 변경하지 않았다.
 - Supabase production read-only 확인에서 **78 migrations**, head `reservation_bookability_optional_guest_count`, **`api` ACTIVE v24**다.
 - production `/health`와 `/openapi.json`은 HTTP 200, 운영 OpenAPI는 **0.5.1 / 128 paths / 138 operations**다. 공개 GitHub Pages index/OpenAPI/manifest도 HTTP 200 및 **0.5.1 / 128 / 138**으로 일치한다.
 - #245의 78번째 append-only migration과 source 승격·Pages 공개는 완료 기록과 readback으로 구분한다. `guestCount` 생략/null/양수의 이번 턴 hosted admin positive smoke는 수행하지 않았다.
@@ -646,7 +646,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 
 ## 13. 후속 업무 API·모델 개발 상태
 
-아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production source 반영 여부는 §2의 `main@ed34abe...` 77 migrations / OpenAPI 0.5.0 128 paths / 138 operations를 따르며, hosted positive smoke와 provider activation은 별도 상태다.
+아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production source 반영 여부는 §2의 78 migrations / OpenAPI 0.5.1 / 128 paths / 138 operations readback을 따르며, hosted positive smoke와 provider activation은 별도 상태다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|
