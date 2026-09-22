@@ -5,8 +5,8 @@
 - 개발 정본: `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`.
 - source: append-only `20260909120308_submission_inspection_reclean.sql`, Fastify/Edge parity,
   OpenAPI **74 paths / 80 operations**.
-- 상태: exact head `3c283683d8bce5e5b6351c1de1c9271c2099163f` 독립 QA P0/P1=0·required CI·96/100 위임 승인 후 PR #91로 source/dev 병합 완료. release/main·production은 미완료이며 inspection queue cursor pagination은 비차단 P2 후속이다.
-- 승인 후 고객 컴플레인/보상 재작업과 원 maid inactive/departed 예외 이관은 범위 밖이다.
+- 상태: 이 문서의 구현 기준은 PR #91 당시 이력이다. 해당 source는 현재 production에 포함됐고 inspection queue cursor pagination은 비차단 P2 후속이다. 최신 production snapshot은 [API 상태 정본](./API_STATUS_MATRIX.md)을 우선한다.
+- 승인 후 고객 컴플레인/보상 재작업은 별도 도메인이다. 원 maid 퇴사·부상 등 수행 불가 예외는 2026-09-23 결정에 따라 아래 일반 취소·재배정 계약을 사용한다.
 
 ## 상태 전이
 
@@ -43,7 +43,9 @@ base가 0이면 bonus도 0이다. 반려는 earning을 만들지 않고 원 atte
 
 reclean template은 원 room type의 published `cleaning_kind='reclean'` version이 정확히 한 건이어야
 한다. 없거나 모호하면 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 inspection decision, 상태, 알림,
-outbox, audit 전체를 rollback한다. 다른 maid 이관은 허용하지 않는다.
+outbox, audit 전체를 rollback한다. 원 maid가 수행 가능하면 다른 maid에게 임의 이관하지 않는다.
+
+원 maid가 퇴사·부상 등으로 청소 또는 재청소를 수행할 수 없으면 관리자가 현재 배정을 취소한다. 객실은 청소 미완료·미배정으로 남고 관리자에게 재배정 필요 알림을 보낸다. 이후 기존 일반 배정 절차로 다른 maid에게 새 assignment revision을 만든다. 별도 보상 규약이나 compensation 원장을 만들지 않으며, 새 담당자는 일반 완료·검수·earning·payroll 규칙을 따른다. 원 담당자의 미완료 작업 earning은 생성하지 않고 취소 reason, 원 assignment/attempt와 새 revision을 모두 보존한다.
 
 checkout obligation 완료는 root target status만 신뢰하지 않는다. `completion_submission_id`가
 승인된 terminal descendant인지 recursive reclean chain으로 증명하며 새 completed row의 NULL proof는

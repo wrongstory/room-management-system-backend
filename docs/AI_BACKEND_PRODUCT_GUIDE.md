@@ -5,13 +5,14 @@
 검토 기준:
 
 - Issue #245 v0.5.1 hotfix는 78번째 append-only migration과 OpenAPI `0.5.1` 128 paths / 138 operations를 구성한다. bookability preview에서만 `guestCount` 생략/`null`을 같은 값으로 받아 capacity 필터 없이 기간 판정을 하며, 예약 create/change의 인원 필수 계약은 유지한다.
-- 현재 production release 기준은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`, 78 migrations(head `reservation_bookability_optional_guest_count`), `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations다. GitHub Pages v0.5.1 재배포는 공개 readback 완료 전까지 별도 pending gate다.
+- 현재 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, `dev@40edb0681c852d287ded7d0a7af66b81db2ebcdd`다. 두 브랜치에는 #256 스마트폰 원본 사진 정규화 source가 포함됐지만 운영 Edge·Pages·실기기 사진 UAT는 아직 별도다. 마지막으로 검증된 production runtime은 78 migrations(head `reservation_bookability_optional_guest_count`), `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이고 Pages는 이 배포본과 parity를 완료했다. 기존 관리자 계정 UAT에서 bookability `guestCount` 생략·`null`·양수, 예약 현황 인원 표시와 객실 유형 최소·최대 인원 적용을 확인했다. tag/GitHub Release는 아직 발행하지 않았다.
+- Issue #256 source는 스마트폰 JPEG/WebP/HEIC/HEIF 원본을 최대 5MiB·12MP/5000px 안에서 검증하고 EXIF 방향·메타데이터를 제거해 300KiB 이하 JPEG/WebP 저장본으로 정규화한다. 원본은 저장하지 않는다. `main`/`dev` 통합과 운영 배포 완료를 구분하며 Edge/Pages/프런트 제한 해제·실제 휴대폰 UAT 전에는 운영 사용 완료로 표시하지 않는다.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
 - Issue #229/#231/#236/#228은 `dev@49214bb67f2cf346178bc12321948a810e050234`에서 v0.5.0 후보를 구성했고 이후 `main`/production에 승격됐다. 이 backport 후보는 해당 dev-only 이력과 v0.5.0 snapshot을 보존하면서 #245 계약만 추가한다.
 - 프런트엔드 정본 저장소: `wrongstory/room-management-system`
 - 프런트엔드 제품·운영 연결 snapshot: `dev@165fed2d62a763d64ac62539e1475c1b3e42868f` (`기능: 운영 API 연결을 완성하라`).
 - 프런트엔드 현재 원격 `main`: `afeb0898879bf8d381ee2e218938dc3160fd6ac0`. 별도 영향 대조 전에는 위 snapshot의 후속 정본으로 자동 승격하지 않는다.
-- 기준일: 2026-09-22 KST
+- 기준일: 2026-09-23 KST
 
 프런트엔드는 단일 HTML 중심의 고충실도 업무 시뮬레이터이며 기준 snapshot은 운영 API를 실제 소비한다. 화면 객체, fixture, dead code를 그대로 실제 API나 테이블로 옮기지 않는다.
 
@@ -280,7 +281,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 관리자는 가능 메이드만 후보로 오늘/내일 청소를 배정한다.
 - 관리자가 메이드별 작업 순서 1–N을 정하고 저장·통보한다.
 - **[확정 — 2026-09-08 #4 A안]** 메이드는 본인에게 실제 통보된 assignment revision만 조회한다. 과거 superseded/종료 revision도 본인에게 실제 통보됐으면 history에 포함한다. 미통보 draft, 다른 maid의 배정, 자신에게 한 번도 통보되지 않은 revision은 금지한다. 과거 조회 권한은 현재 target 일정·새 담당·새 revision 조회나 수행 권한을 뜻하지 않는다.
-- 배정 preview는 먼저 명시된 사실상 배정 가능한 객실 수를 최대화하고, 그 후보 중 메이드별 기본 청소요금 총액의 최대·최소 격차와 전체 편차를 최소화한다. 기존 배정과 reclean 원 메이드 제약을 지키고, 금액 점수가 같을 때만 같은 엘리베이터 구역·가까운 호수를 보조 기준으로 쓰며 마지막은 안정적인 키로 결정한다.
+- 배정 preview는 먼저 명시된 사실상 배정 가능한 객실 수를 최대화하고, 그 후보 중 메이드별 기본 청소요금 총액의 최대·최소 격차와 전체 편차를 최소화한다. 기존 배정과 수행 가능한 reclean 원 메이드 제약을 지키고, 금액 점수가 같을 때만 같은 엘리베이터 구역·가까운 호수를 보조 기준으로 쓰며 마지막은 안정적인 키로 결정한다. 수행 불가로 관리자가 취소한 재청소는 일반 미배정 target으로만 다시 제안한다.
 - 예상시간 정책은 폐기됐다. 타입별 시간, template `durationMinutes`, 객실 타입 기본값, 임의 1분을 신규 preview의 용량·순서·충돌 판단에 사용하지 않는다.
 - 랜덤 결과는 저장 전 초안이다. 실행만으로 담당·attempt·알림·감사 이력을 만들거나 기존 통보/관리자 수동 배정을 덮지 않는다.
 - 일부 객실만 배정된 상태의 부분 통보를 허용하되 미배정 대상을 숨기지 않는다.
@@ -299,7 +300,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 - Preview는 active business admin의 오늘/내일 계획 조회·계산이며, 기존 target/assignment/attempt/알림/outbox/audit/command receipt를 쓰지 않는다. 자동 저장·통보·attempt 활성화 API가 아니다. 확인·편집한 제안은 #25 draft 저장 → #26 commit/notify에서 최신 CAS/가능일/source를 다시 검증한다.
 - Preview는 confirmed duration policy가 없어도 `decisionReady=true`로 계산한다. 과거 `assignment_duration_policy_versions`와 template duration snapshot은 삭제하지 않지만 신규 판단 입력이나 fingerprint에 포함하지 않는다. 기존 GET은 deprecated read-only 이력 조회로 유지하고 confirmation mutation은 `ASSIGNMENT_DURATION_POLICY_RETIRED`로 거부한다.
-- 유효한 미배정 target만 새로 제안한다. 기존 draft/notified 업무는 담당·순서를 변경하지 않고 fee/route의 고정 부하로 반영한다. 실제 진행 중 attempt는 남은 시간을 추측하지 않으며 그 메이드의 추가 제안을 보류한다. reclean은 원 메이드만 가능하고 부재 시 미배정으로 남긴다. planned checkout은 배정 계획에만 포함하며 materialization/현장 실행 경계는 #28이 계속 소유한다.
+- 유효한 미배정 target만 새로 제안한다. 기존 draft/notified 업무는 담당·순서를 변경하지 않고 fee/route의 고정 부하로 반영한다. 실제 진행 중 attempt는 남은 시간을 추측하지 않으며 그 메이드의 추가 제안을 보류한다. reclean은 원 메이드가 수행 가능한 동안 원 메이드만 후보로 삼는다. 퇴사·부상 등 수행 불가가 관리자 취소로 확정된 뒤에는 같은 target을 일반 미배정 상태로 두고 다른 active maid 후보를 허용한다. planned checkout은 배정 계획에만 포함하며 materialization/현장 실행 경계는 #28이 계속 소유한다.
 - `availableFrom`과 `dueAt`은 원문 그대로 보존한다. 두 시각이 명시된 target만 그 실제 구간을 예약 점유와 비교하며 열린 `dueAt`에 가상 종료시각을 만들지 않는다. 실제 청소 수행시간은 `cleaning_attempts.started_at → field_completed_at`, 객실 turnaround는 실제 checkout 시각 → `field_completed_at`으로 사후 계산한다.
 - 비교는 배정 가능한 수 → 기본 청소요금 spread → 전체 편차와 기존/reclean 제약 → 동선 → 안정적인 target/maid 키 순서다. `previewSeed`는 응답 상관관계 호환 필드일 뿐 결정 결과나 fingerprint를 바꾸지 않는다. 제한된 탐색은 전역 최적해 증명이 아닌 휴리스틱이다.
 - 임의 근무시간·휴게시간·하루 최대 객실 수를 만들지 않는다. target/maid 자원 상한 초과는 부분 자동결정이 아니라 `ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED`로 거부한다.
@@ -308,7 +309,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 ### [확정] #27 시작 전 변경 경계 — 2026-09-05 구현 착수 계약
 
 - 일반 pre-start command는 target에 `status <> superseded` attempt가 하나라도 있으면 `ASSIGNMENT_ALREADY_STARTED`로 거부한다. `started_at` 유무로 우회하지 않는다. 이후 수행·인계는 #28/#7 소유다.
-- active business admin만 draft/notified의 담당·순서를 새 assignment revision으로 바꾸거나 현재 담당을 해제할 수 있다. target version과 current assignment ID를 함께 CAS 검증한다. active maid/current availability와 reclean 원 maid 불변식도 재검증한다.
+- active business admin만 draft/notified의 담당·순서를 새 assignment revision으로 바꾸거나 현재 담당을 해제할 수 있다. target version과 current assignment ID를 함께 CAS 검증한다. active maid/current availability와 reclean 원 maid 기본 규칙을 재검증하고, 수행 불가 예외는 명시적 취소 reason과 원 assignment 종료가 먼저 확정된 경우에만 일반 재배정을 허용한다.
 - unassign은 target을 `unassigned`로 돌리는 명령이지 청소 의무 자체의 취소가 아니다. target 취소는 예약/수동 청소 원 domain이 소유한다.
 - 메이드는 본인 notified assignment에만 취소를 요청한다. pending 요청은 assignment당 최대 한 건이며 결정 전 담당은 유지된다. 관리자 승인/반려도 현재 source revision과 attempt 경계를 다시 검사한다. source가 종료되면 pending은 superseded, 결정된 요청은 수정·삭제 금지다.
 - draft 변경은 통보하지 않는다. notified 변경은 기존 알림을 보존/resolve하고 이전·새 담당에게 필요한 변경/회수 알림과 outbox를 같은 transaction으로 한 번만 기록한다. 외부 push worker는 #10이다.
@@ -338,7 +339,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 인계 뒤 새 scheduled가 만료된 경우에도 같은 해소 계약을 따른다. 불변 인계 관계로 새 책임 구간이 증명된 과거 interrupted는 live 회차로 오인하지 않되, 대체 증명 없는 interrupted나 현재 미종결 회차는 계속 재배정 차단 근거다. 과거 회차의 status를 변경하거나 전체 interrupted 이력을 무시하지 않는다.
 - 관리자 전용 해소 command가 현재 identity/version과 다음 source 일정을 검증한 뒤 기존 담당 종료·통보 회수·회차 supersede·schedule revision을 원자적으로 처리한다. 다음날 담당을 자동 선택하거나 통보 전에 새 회차를 만들지 않는다. 새 통보 후 #28의 실제 실행 가능 조건에서 exactly-once 활성화한다.
 - 만료된 `in_progress`의 인계는 관리자가 새 접근/마감 일정을 명시 확정하고, 현재 점유·예약·source·접근 조건을 재검증한 경우에만 새 담당이 시작할 수 있다. 인계 자체가 시간창·실제 checkout·점유 검사를 우회하는 권한이 아니다. 재계획 불가능한 source는 fail-closed로 관리자 확인 대상에 남긴다.
-- 이미 시작한 기존 회차는 `interrupted`로 보존하며 새 assignment/attempt가 새 책임 구간을 가진다. 이전 완료/현재 제출/수익 연결을 되살리지 않는다. 재청소의 원 maid 불변 및 다른 maid 이관 금지는 그대로 유지한다.
+- 이미 시작한 기존 회차는 `interrupted`로 보존하며 새 assignment/attempt가 새 책임 구간을 가진다. 이전 완료/현재 제출/수익 연결을 되살리지 않는다. 재청소는 원 maid 수행 가능 시 원담당을 유지하고, 퇴사·부상 등 수행 불가 예외에서만 명시적 취소 뒤 일반 재배정을 허용한다.
 - 해소/인계와 동시 시작·완료·계정 변경은 CAS·scoped receipt·공통 잠금·원자 audit/outbox로 직렬화한다. TTL을 새 idempotency key나 재시도로 연장하지 않는다.
 - 이 승인은 #7B source 개발 범위이며 #7C/offline, 사진/제출 구현 또는 production 승격 승인이 아니다.
 
@@ -440,10 +441,11 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 ### `[확정]` 검수 반려 재청소
 
 - 최초 수행 메이드에게 자동 귀속한다.
-- 다른 메이드에게 이관하지 않는다.
+- 최초 수행 메이드가 active 상태로 재청소를 수행할 수 있으면 다른 메이드에게 임의 이관하지 않는다.
 - 0원이며 새 earning을 만들지 않는다.
 - 원 attempt/submission/decision을 불변 FK로 연결한다.
 - 원 반려 제출의 bomb report/decision은 감사 이력으로만 남기고 재청소 회차에 승계하지 않는다. 재청소에서는 새 bomb report나 bonus를 만들지 않는다.
+- `[확정 — 2026-09-23]` 최초 수행 메이드가 퇴사·부상 등으로 청소 또는 재청소를 수행할 수 없으면 관리자가 현재 배정을 취소하고 객실을 미완료·미배정 상태로 유지한다. 관리자에게 재배정 필요 알림을 보내며, 관리자는 기존 일반 배정 절차로 다른 메이드에게 새 revision을 배정한다. 별도 보상 규약이나 compensation 원장을 만들지 않고, 새 담당 메이드는 일반 완료·검수·earning·payroll 규칙을 따른다. 원 담당자에게 미완료 작업 earning을 만들지 않으며 취소된 assignment/attempt/reason과 새 assignment revision을 모두 보존한다.
 
 검수 반려 재청소와 승인 이후 고객 컴플레인으로 생기는 보상/재작업은 같은 종류가 아니다. 후자는 별도 정책·엔티티로 분리하고 아래 규칙을 적용한다.
 
@@ -539,7 +541,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - reveal lease는 entitlement에서 파생되는 최대 30초의 별도 단기 원장이다. PIN 변경은 열려 있는 reveal lease와 과거 revision을 즉시 무효화하고, 현재 담당자 및 이미 알림된 다음 근무일 담당자의 entitlement를 새 revision으로 원자 갱신한다. PIN 조회·변경은 CAS와 감사 event를 남기며 메이드 변경은 기존 정책대로 exact `in_progress`에서만 허용한다.
 - 관리자 변경은 PIN 변경 lease 선점 → 실제 도어락 변경 → confirm/save 순서로 조정한다. prepare 즉시 mismatch가 되어 실제 체크인 전이와 PIN 조회를 차단하지만 예약 생성·변경·배정은 차단하지 않으며, confirm 전에는 current pointer를 바꾸지 않는다. 만료·불확실 상태는 실제 PIN 재입력 후 새 revision confirm 또는 기존 current의 confirmed physical rollback으로만 종결한다. current가 없는 최초 변경이 만료된 경우에도 실제 PIN 재입력으로 version 1을 수립할 수 있다.
 - PIN 평문을 URL, 로그, error, audit payload, notification, analytics, Git, 브라우저 저장소에 넣지 않는다.
-- `[확정 — 2026-09-13 #136]` Google Sheets는 DB PIN current revision의 단방향 운영 projection이다. `room_number`를 business identity로 bounded board에서 정확히 한 행만 갱신하고, equal-version 변조는 DB 정본으로 복구하며 Sheet-ahead/중복 identity/불확실 write는 operator-blocked한다. 전용 service account는 spreadsheets-only scope를 쓰며 source-controlled approved target 검증을 PIN 복호화·OAuth보다 먼저 수행한다. hosted target mapping과 full resync/운영 활성화는 #137/release 승인 전에는 없다.
+- `[확정 — 2026-09-13 #136, 운영 계정 결정 2026-09-23]` Google Sheets는 DB PIN current revision의 단방향 운영 projection이다. `room_number`를 business identity로 bounded board에서 정확히 한 행만 갱신하고, equal-version 변조는 DB 정본으로 복구하며 Sheet-ahead/중복 identity/불확실 write는 operator-blocked한다. 사람 소유자는 `yeosucastletheart@gmail.com`이며 서버 worker는 이 계정의 로그인 자격증명이 아니라 대상 Sheet/Drive 폴더에 최소 권한으로 공유된 별도 service account를 사용한다. service account는 spreadsheets-only scope를 쓰며 source-controlled approved target 검증을 PIN 복호화·OAuth보다 먼저 수행한다. hosted target mapping과 full resync/운영 활성화는 #137/release 승인 전에는 없다.
 - `[확정 — 2026-09-16 #169]` 빈 DB의 PIN 미설정 상태는 예약 업무를 중단시키지 않는다. active admin 전용 bounded bootstrap command는 서버 CSPRNG로 batch 안에서 중복되지 않는 정확히 4자리 숫자를 생성하고 선행 0을 보존해 객실번호와 조합·암호화한 version 1 revision/current를 수립한다. 고정 초기 PIN deployment secret은 사용하지 않는다. bootstrap은 current PIN 또는 unresolved mismatch가 있는 객실을 덮어쓰지 않고 건너뛰며 batch 최대 25건과 멱등 receipt를 유지한다.
 - `[확정 — 2026-09-16 #169]` generated PIN은 생성 직후 `mismatch`이며 Sheet outbox를 만들지 않는다. admin만 30초 reveal lease와 `Cache-Control: no-store` 응답에서 credential을 확인할 수 있고, 평문/envelope는 command receipt·로그·감사·알림에 저장하지 않는다. 메이드와 일반 reveal은 이 상태를 열람할 수 없다. 관리자가 실제 도어락 적용을 version CAS와 새 idempotency key로 확인한 뒤에만 `verified` sync event와 Sheet outbox를 원자적으로 기록한다.
 - `[확정 — 2026-09-13 #140 보강]` 일반 PIN prepare와 bootstrap은 private `(key_version, nonce)` reservation을 공유한다. 같은 실제 PIN 암호키는 keyring 구성에서 여러 version 이름으로 중복 등록할 수 없고, 같은 key version과 12-byte nonce는 객실·AAD가 달라도 서로 다른 암호화에 재사용할 수 없다. prepare가 만든 envelope를 confirm이 그대로 revision으로 승격하는 것은 같은 논리 암호화이므로 reservation을 재사용한다. 52→53 upgrade에서 matching confirmed lease/revision은 한 reservation으로 backfill하며, 서로 다른 과거 암호화의 충돌이 발견되면 원 이력을 삭제·변환하지 않고 migration 전체를 fail-closed한다.
@@ -558,11 +560,11 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 
 ## 11. 사진 저장과 보존
 
-### `[확정]` 저장 보안·Google Drive / `[배포 전]` 운영 계정·OAuth
+### `[확정]` 저장 보안·Google Drive / `[운영 활성화 대기]` service account·OAuth
 
 - 확정된 계약은 비공개 저장, 서버 중계, opaque locator다. 브라우저가 storage token/file ID를 받거나 공개 링크를 만들지 않는다.
 - 사진 저장 provider는 Google Drive로 확정됐다. API에는 보안과 결합도 완화를 위해 Drive file ID, OAuth token, provider 세부를 노출하지 않는다.
-- 아직 배포 전인 항목은 전용 Google 운영 계정, OAuth 자격증명 주입, 실제 용량 감시와 비용 운영이다. 이를 provider 미확정으로 해석하지 않는다.
+- 사람 소유자는 `yeosucastletheart@gmail.com`으로 확정됐다. 서버 worker는 사람 계정 비밀번호나 개인 OAuth refresh token을 쓰지 않고, 승인된 Drive 폴더에만 공유된 별도 service account와 최소 scope를 사용한다. 아직 남은 항목은 해당 service account 자격증명 주입, hosted provider smoke, 실제 용량 감시와 비용 운영이며 이를 provider 미확정으로 해석하지 않는다.
 - DB에는 opaque storage locator, hash, MIME, 크기, 소유 관계, 보존 상태를 둔다.
 - 사진 record 작성과 purge는 서버 command/worker만 수행한다.
 - 삭제 worker는 DB 상태, 만료 시각, 참조 관계를 다시 확인하고 멱등적으로 원본·파생본·캐시를 정리한다.
@@ -704,7 +706,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 ### `v0.2.0` 이후 source 통합 이력과 현재 `v0.5.1` 상태
 
-아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production 정본은 문서 상단의 v0.5.1 DB/API snapshot을 우선하며, GitHub Pages v0.5.1 공개 readback은 pending으로 둔다. source/bundle 반영과 hosted provider·Google·Cron 활성화도 각각 별도 상태로 해석한다.
+아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. production runtime은 문서 상단의 v0.5.1 DB/API snapshot을 우선하며 GitHub Pages도 그 배포본과 공개 parity를 완료했다. 현재 `main`의 #256 source는 아직 운영 Edge/Pages에 미반영이므로 Git source, runtime bundle, hosted provider·Google·Cron 활성화를 각각 별도 상태로 해석한다.
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview와 #4 notified-only 조회는 source/dev 완료 후 현재 `main`/production source에 반영됐다. 다만 #28 lifecycle effect를 포함한 hosted 역할별 positive smoke는 별도 미완료 gate다.
@@ -764,7 +766,7 @@ AI는 아래 항목을 암묵적으로 확정하지 않는다.
 1. 투숙 중이면서 청소가 필요한 객실의 **프런트 대표 표현**: `DOCS/17` 우선순위와 `DOCS/20`/현재 wireframe의 주 상태+하위 상태 중 어느 쪽인지. 백엔드 독립 축은 이 결정과 무관하게 유지한다.
 2. 기본/최대 숙박 인원을 운영 정본으로 확정할지. 타입별 예상시간 정책은 폐기되어 결정 대상이 아니다.
 3. current role 단일값과 역할 이력/복수 역할 구조 중 어느 모델을 채택할지. 단, `upload_only`는 별도 역할이 아니라 제한 capability다.
-4. 최초 검수 반려 뒤 원 메이드가 퇴사·부상 등으로 재청소할 수 없는 예외 처리
+4. 최초 검수 반려 뒤 원 메이드가 퇴사·부상 등으로 수행 불가하면 현재 배정을 취소하고 일반 배정으로 넘기는 예외의 API/UI 연결
 5. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
 6. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
 7. 운영 시작 시 608호 차단이 여전히 유효한지
@@ -824,7 +826,7 @@ npm run db:reset
 P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#156/#165/#169, #229/#231/#236/#228/#245와 #238 hotfix까지 production source와 runtime에 반영됐다. production은 78 migrations / `api` ACTIVE v24 / OpenAPI 0.5.1 128 paths / 138 operations이며 기존 네 checkout template 데이터도 보존됐다. 안전한 fixture가 없어 실제 예약·PIN success mutation은 전체 release PASS로 표현하지 않는다.
 
 1. #245 hotfix를 최신 dev-only 이력을 보존한 별도 PR로 backport하고 exact-head CI와 독립 검토 뒤에만 dev 병합을 판단한다.
-2. production의 optional/null/positive `guestCount` hosted smoke를 유지하고, Pages는 공개 0.5.1 / 128 / 138 readback이 끝난 뒤에만 완료로 표시한다.
+2. production의 optional/null/positive `guestCount` UAT와 Pages 공개 0.5.1 / 128 / 138 readback은 완료됐다. tag/GitHub Release는 별도 승인 전까지 미발행으로 유지한다.
 3. 안전하게 되돌릴 수 있는 운영 fixture가 승인되면 예약/PIN mutation을 hosted smoke한다. fixture가 없으면 SKIPPED 상태를 PASS로 바꾸지 않는다.
 4. Issue #137 hosted Google Sheets와 Issue #112 Web Push activation은 실제 대상/자격증명/주기 승인 뒤에만 진행한다.
 5. Issue #12 backup/recovery source와 Issue #13 frontend/browser E2E는 별도 트랙으로 유지한다.

@@ -1,5 +1,7 @@
 # 프런트엔드 Codex 실행 인계 — production API v0.4.0
 
+> **역사 문서:** 아래 source SHA와 120/130 계약은 v0.4.0 당시 기록이다. 현재 구현에 그대로 사용하지 않는다. 새 프런트 작업은 [프런트 API 연동 가이드](./FRONTEND_API_INTEGRATION.md)와 Pages의 production OpenAPI 0.5.1 / 128 paths / 138 operations를 기준으로 타입을 재생성한다.
+
 > 이 문서는 `wrongstory/room-management-system`에서 작업할 Codex에게 그대로 전달하는 실행 프롬프트다. HTTP 요청·응답의 기계 판독 정본은 production OpenAPI이며, 이 문서는 구현 순서와 화면 의미를 설명한다.
 
 ## 전달용 프롬프트

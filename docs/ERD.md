@@ -507,7 +507,7 @@ erDiagram
 - 미래 planned checkout은 obligation materialization·current pointer·actual checkout 전 attempt 0이다. 같은 객실의 이전 active workflow가 있으면 target/assignment를 유지하고 활성화만 보류한다.
 - 실행 창이 끝난 unassigned/notified attempt-0 target은 같은 ID/original date로 다음 KST 날짜에 이월한다. effective date/carryover/assignment version과 schedule revision만 증가하며 active attempt는 이월 대상이 아니다.
 - 이월 write 전에 다음 source window를 검증한다. 연박은 active·실제 입실·미퇴실·동일 객실 예약 점유 범위/KST 날짜가 유효해야 하며, 추가 청소는 active reservation과 다음 창이 겹치지 않아야 한다. invalid면 blocked/mutation 0이며 기존 notified assignment/알림을 유지한다. 자동 취소·종류 변환은 하지 않는다.
-- 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 다른 메이드에게 배정할 수 없다.
+- 검수 반려 재청소의 원 attempt·원 maid provenance는 변경하지 않는다. 원 maid가 수행 가능하면 그대로 귀속하고, 퇴사·부상 등 수행 불가가 확정된 경우에만 관리자가 현재 배정을 취소해 이력을 보존한 뒤 일반 배정의 새 revision으로 다른 메이드에게 맡긴다. 이 예외는 별도 compensation 원장을 만들지 않는다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.
 - #7A `cleaning_attempts.execution_version`은 양수 CAS version이다. 시작/물리 완료는 해당 회차와
   본인 current notified assignment identity/revision을 확인하고 한 번 증가하며 receipt replay는
@@ -572,7 +572,7 @@ erDiagram
 - submission current pointer는 attempt별 revision CAS다. field completion만으로 제출/검수/earning은 생기지 않으며, 필수 current photo가 하나라도 누락·pending·failed·expired·purged면 새 제출을 거부한다. 일반 재제출은 과거 version/photo bindings를 immutable history로 남긴다.
 - 관리자 검수 queue/detail은 current `inspection_pending`만 사용한다. queue의 roomNumber는 target/live room이 아니라 notified assignment snapshot에서 가져오며, sealed photo ID/slot/version 외 provider locator/hash/file name과 PIN/PII/request hash/raw state는 반환하지 않는다.
 - stale current review와 bomb 선판정은 `STALE_VERSION`으로 실패한다. 최종 approve/reject, notification/outbox/audit, earning 또는 reclean 생성은 한 transaction이며 receipt lock과 unique provenance로 동시 재시도를 exactly-once 처리한다.
-- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유하고 다른 maid 이관은 금지한다.
+- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유한다. 원 maid 수행 불가 예외에서는 기존 assignment를 취소하고 일반 배정의 새 revision을 만들며, 새 담당자는 일반 완료·검수·earning 규칙을 사용하고 원 담당자의 미완료 earning은 생성하지 않는다.
 - checkout completion은 root target status만 신뢰하지 않는다. `completion_submission_id`에서 승인된 terminal descendant를 recursive reclean chain으로 증명하며, 새 completed obligation에 NULL submission proof를 허용하지 않는다.
 
 ### #27 시작 전 취소 요청 원장

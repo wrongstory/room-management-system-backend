@@ -4,6 +4,8 @@
 `private.notification_event_catalog`와 테스트가 이 표를 그대로 검증한다. `source`는 알림 생성과
 해결의 typed provenance이며 audit payload나 문자열 dedupe는 권한 근거가 아니다.
 
+2026-09-23 사용자 UAT에서 실제 기기 Web Push 수신을 확인했다. 이 확인은 공개 알림 계약의 전달 가능성을 입증하지만, provider secret·개별 subscription 원문·내부 worker health를 노출하거나 대신 검증하는 근거는 아니다.
+
 공통 규칙:
 
 - inbox는 수신자 상태와 임시 비밀번호 여부와 무관하게 도메인 transaction 안에서 보존한다.

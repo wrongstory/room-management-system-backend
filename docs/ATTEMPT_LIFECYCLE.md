@@ -29,8 +29,7 @@
 | 즉시 인계 | old interrupted / new scheduled | old는 증빙 upload만, current submission/earning 금지 |
 | 미착수 만료 해소 | old scheduled → superseded | 이전 회차 실행 권한 없음, 새 통보 전 새 attempt 없음 |
 
-재청소는 원 maid 불변·다른 maid 이관 금지를 우선한다. 원 maid가 수행할 수 없는 예외를
-일반 인계로 우회하지 않는다. 승인된 별도 예외 정책 없이는 관리자 확인 상태로 남긴다.
+재청소는 원 maid가 수행 가능한 동안 원담당 유지를 우선한다. 퇴사·부상 등 원 maid 수행 불가가 확정되면 관리자가 현재 배정을 취소하고 일반 미배정 target으로 되돌린 뒤 다른 active maid에게 새 revision을 배정한다. 이 예외는 별도 compensation을 만들지 않으며, 기존 in-progress handover를 악용한 즉시 이관으로 우회하지 않는다. 취소 reason, 원 assignment/attempt와 새 revision을 모두 보존한다.
 
 ## 인증과 capability
 

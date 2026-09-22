@@ -2,7 +2,7 @@
 
 `room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 단일 개발자와 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
 
-운영 API 정본은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`, 78 migrations, Supabase `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations입니다. GitHub Pages Swagger의 v0.5.1 공개 readback은 완료 증거 전까지 별도 pending 상태로 관리합니다.
+현재 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, `dev@40edb0681c852d287ded7d0a7af66b81db2ebcdd`입니다. 두 브랜치에는 스마트폰 JPEG/WebP/HEIC/HEIF 원본을 안전하게 300KiB 이하 저장본으로 정규화하는 #256 source가 포함됐지만 운영 Edge 배포·Pages 갱신·실제 휴대폰 UAT는 아직 별도입니다. 마지막으로 검증된 운영 API는 78 migrations, Supabase `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이며 Pages도 그 배포본과 artifact parity를 완료했습니다. 기존 관리자 UAT에서 예약 가능 미리보기의 `guestCount` 생략·`null`·양수와 예약 현황 인원 표시, 객실 유형별 최소·최대 인원 적용을 확인했습니다. `v0.5.1` tag와 GitHub Release는 아직 발행하지 않았습니다.
 
 ## 현재 구현
 
@@ -24,7 +24,7 @@
 - 공개 스키마 전 테이블 RLS와 Google Drive 사진 메타데이터 정책
 - Biome lint, secret 검사, 타입 검사, 테스트, 빌드 CI 품질 게이트
 - 로컬·개발·운영·복구 환경 분리와 운영 프로젝트 Ref 오접속 방지
-- 원본 정본의 4개 객실 타입, 고정 단가, 121개 객실 seed. 타입별 숙박 인원 상한은 아직 데모값이라 production 제약으로 확정되지 않았습니다.
+- 원본 정본의 4개 객실 타입, 고정 단가, 121개 객실 seed. 타입별 최소·최대 숙박 인원은 DB의 현재 설정값이 정본이며 운영 UAT에서 예약·현황 반영을 확인했습니다. 문서의 예시 숫자를 운영값으로 간주하지 않습니다.
 
 백엔드 GPT/Codex는 구현 전에 [제품·도메인 가이드](docs/AI_BACKEND_PRODUCT_GUIDE.md)를 먼저 읽어야 합니다. 전체 분석과 설계는 [프로젝트 분석](docs/PROJECT_ANALYSIS.md), [백엔드 설계 초안](docs/ARCHITECTURE.md)을 참고하세요. 검토용 관계도는 [ERD 초안](docs/ERD.md)이며, [DBML 원본](docs/room-management-system.dbml)을 dbdiagram.io에 붙여 넣어 전체 다이어그램을 확인할 수 있습니다. ERD/DBML은 제품 가이드와 reconcile되기 전에는 목표 계약이 아닙니다. 계정 규칙은 [계정 수명주기](docs/ACCOUNT_LIFECYCLE.md), 환경 분리는 [환경 운영안](docs/ENVIRONMENTS.md), 권한 경계는 [Auth·RLS 계약](docs/AUTH_RLS_CONTRACT.md), 사진 압축·폴더·자동삭제 규칙은 [사진 저장 운영안](docs/PHOTO_STORAGE.md), Free 프로젝트 2개를 이용한 운영·복구 구조는 [백업·복구 운영안](docs/BACKUP_AND_RECOVERY.md)에 정리했습니다. 정책 문서끼리 충돌하면 제품·도메인 가이드의 우선순위와 `[미확정]` 표시를 따릅니다.
 

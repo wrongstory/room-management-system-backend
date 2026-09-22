@@ -2,7 +2,7 @@
 
 이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 과거 v0.4.0 인계는 historical workflow 참고용이고, 현재 계약은 production OpenAPI 0.5.1과 이 문서를 우선한다.
 
-2026-09-22 백엔드 production source는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 production source 제공과 hosted provider·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
+2026-09-23 백엔드 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, `dev@40edb0681c852d287ded7d0a7af66b81db2ebcdd`다. 마지막으로 검증된 production runtime은 OpenAPI 0.5.1 / 128 / 138의 `api` ACTIVE v24이고, #256 사진 정규화 source의 Edge/Pages 배포는 아직 별도다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 Git source 제공과 hosted runtime·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
 
 ## 1. 계약을 받는 위치
 
@@ -30,7 +30,7 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf` 기준 78 migrations, `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations를 사용한다. GitHub Pages v0.5.1 parity는 공개 readback 완료 전까지 pending이다. 안전한 fixture가 없어 실행하지 않은 예약·PIN mutation은 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
+production Edge는 78 migrations, `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations를 사용한다. GitHub Pages도 이 배포본과 artifact parity를 공개 readback으로 확인했다. 기존 관리자 UAT에서 bookability `guestCount` 생략·`null`·양수, 예약 현황 인원과 유형별 최소·최대 인원을 확인했다. 현재 `main`/`dev`의 #256 source는 스마트폰 원본 최대 5MiB·12MP/5000px을 서버에서 300KiB 이하 JPEG/WebP로 정규화하지만 운영 Edge/Pages에 배포될 때까지 프런트가 이 계약을 운영 API에서 가정하면 안 된다. 이 결과를 다른 예약·PIN mutation이나 전체 프런트 E2E PASS로 확대하지 않는다.
 
 Issue #236/#228의 객실 카탈로그·상태 계약은 v0.5.0으로 production에 반영됐고, #245가 preview의 optional/null `guestCount` 계약만 추가해 OpenAPI 0.5.1 / 128 / 138을 유지한다. 실제 예약 create/change의 `guestCount` 필수 계약은 바뀌지 않는다.
 
@@ -340,7 +340,7 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] duration 없는 게시 template으로 예약 생성이 성공하고 planned checkout target이 생성되는 흐름을 검증한다.
 - [ ] 같은 객실 동시 시작은 정확히 한 요청만 성공하고, 미해결 고객 미퇴실 사건 중에는 시작·완료·제출이 성공으로 표시되지 않는지 검증한다.
 - [x] #165 독립 QA P0/P1=0 → `main` 병합 → production 56번째 migration → 승인 `main` exact source의 `api` 배포 → production OpenAPI nullable 의미 확인 → 네 template 게시 완료.
-- [x] 당시 v0.3.0 OpenAPI 109 paths / 117 operations에서 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인. 현재 정본은 v0.4.0 120 paths / 130 operations다.
+- [x] 당시 v0.3.0 OpenAPI 109 paths / 117 operations에서 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인. 현재 정본은 v0.5.1 128 paths / 138 operations다.
 - [ ] 안전한 운영 fixture에서 예약 생성·동일 요청 replay·planned checkout target/snapshot을 확인. 현재는 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
@@ -355,7 +355,7 @@ developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 
 
 ## 8. 프론트 Codex에 전달할 작업 문구
 
-짧은 작업 요청에는 아래 원칙을 붙이고, 실제 구현 작업에는 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)의 전체 프롬프트를 그대로 전달한다.
+짧은 작업 요청에는 아래 원칙을 붙인다. 과거 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)는 구현 방식 참고용 역사 문서일 뿐 현재 endpoint/count/source 정본이 아니다. 새 작업은 반드시 Pages의 production OpenAPI 0.5.1과 이 문서를 기준으로 타입을 재생성한다.
 
 ```text
 백엔드 HTTP 계약은 제공된 OpenAPI 3.1 JSON을 정본으로 사용한다.
