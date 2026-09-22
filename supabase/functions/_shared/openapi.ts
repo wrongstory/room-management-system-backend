@@ -681,7 +681,7 @@ export const openApiDocument = {
       post: {
         ...photoOperation(
           "uploadAttemptPhoto",
-          "검증된 JPEG/WebP 사진을 슬롯에 업로드",
+          "스마트폰 JPEG/WebP/HEIC/HEIF 사진을 슬롯에 업로드",
           "PhotoUploadResponse",
         ),
         responses: {
@@ -697,7 +697,7 @@ export const openApiDocument = {
           },
         },
         description:
-          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 원문 307200 bytes(300KiB)까지 허용하고 307201번째 byte에서 취소합니다. JPEG/WebP magic·전체 decode·단일 frame·자원상한을 검사하고 EXIF 등 metadata 제거 후 output decode/크기/SHA를 다시 검증합니다. assignmentId/assignmentRevision/expectedPhotoRevision의 3개 query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
+          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 JPEG/WebP/HEIC/HEIF 원문 최대 5242880 bytes(5MiB)를 허용하고 초과 byte에서 취소합니다. 원본 magic·전체 decode·자원상한을 검사하고 방향 보정·EXIF 등 metadata 제거·축소/품질 조정 후 JPEG/WebP 최종본 307200 bytes(300KiB) 이하와 output decode/SHA를 다시 검증합니다. HEIC/HEIF는 JPEG로 저장합니다. assignmentId/assignmentRevision/expectedPhotoRevision의 3개 query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
         parameters: [
           photoPathId("attemptId"),
           photoPathId("slotId"),
@@ -738,16 +738,32 @@ export const openApiDocument = {
               schema: {
                 type: "string",
                 format: "binary",
-                maxLength: 307200,
-                "x-max-bytes": 307200,
+                maxLength: 5242880,
+                "x-max-bytes": 5242880,
               },
             },
             "image/webp": {
               schema: {
                 type: "string",
                 format: "binary",
-                maxLength: 307200,
-                "x-max-bytes": 307200,
+                maxLength: 5242880,
+                "x-max-bytes": 5242880,
+              },
+            },
+            "image/heic": {
+              schema: {
+                type: "string",
+                format: "binary",
+                maxLength: 5242880,
+                "x-max-bytes": 5242880,
+              },
+            },
+            "image/heif": {
+              schema: {
+                type: "string",
+                format: "binary",
+                maxLength: 5242880,
+                "x-max-bytes": 5242880,
               },
             },
           },
@@ -813,16 +829,32 @@ export const openApiDocument = {
                 schema: {
                   type: "string",
                   format: "binary",
-                  maxLength: 307200,
-                  "x-max-bytes": 307200,
+                  maxLength: 5242880,
+                  "x-max-bytes": 5242880,
                 },
               },
               "image/webp": {
                 schema: {
                   type: "string",
                   format: "binary",
-                  maxLength: 307200,
-                  "x-max-bytes": 307200,
+                  maxLength: 5242880,
+                  "x-max-bytes": 5242880,
+                },
+              },
+              "image/heic": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                  maxLength: 5242880,
+                  "x-max-bytes": 5242880,
+                },
+              },
+              "image/heif": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                  maxLength: 5242880,
+                  "x-max-bytes": 5242880,
                 },
               },
             },
@@ -910,7 +942,7 @@ export const openApiDocument = {
             .responses,
           "200": {
             description:
-              "검증 완료된 원본 JPEG/WebP. Drive 응답 header/Location/filename은 전달하지 않습니다.",
+              "검증 완료된 저장본 JPEG/WebP(최대 300KiB). 스마트폰 입력 원본은 저장하지 않으며 Drive 응답 header/Location/filename은 전달하지 않습니다.",
             headers: {
               "Cache-Control": noStoreHeader,
               "X-Content-Type-Options": { schema: { const: "nosniff" } },

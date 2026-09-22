@@ -47,12 +47,12 @@ Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모�
 사진 operation과 retention v2 schema/API는 운영 OpenAPI와 production DB/API에 반영됐다. 검수 결정+168시간·해결+180일·orphan+30일 계약이 정본이며, 업로드 후 7일 고정 정책을 사용하지 않는다. 다만 Google Drive 운영 계정·OAuth·대상 폴더·purge Cron과 역할별 hosted smoke가 끝나기 전에는 실제 업로드/삭제 기능을 production-ready로 표시하지 않는다.
 
 1. `GET /v1/attempts/{attemptId}/photo-slots`로 immutable slotId와 currentRevision을 받는다. 슬롯 key만으로 UUID를 추측하지 않는다.
-2. `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload?assignmentId=...&assignmentRevision=...&expectedPhotoRevision=...`에 JPEG/WebP **raw bytes**를 전송한다. `Content-Type`은 정확히 image/jpeg 또는 image/webp, 원문307200 bytes 이하이며 multipart/base64는 지원하지 않는다.
+2. 새 source 계약의 `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload?assignmentId=...&assignmentRevision=...&expectedPhotoRevision=...`에는 스마트폰 원본 JPEG/WebP/HEIC/HEIF **raw bytes**를 전송한다. `Content-Type`은 실제 파일에 맞는 정확한 image/jpeg, image/webp, image/heic, image/heif 중 하나이고 입력은 최대 5MiB다. multipart/base64는 지원하지 않는다. 브라우저가 부정확한 MIME을 제공하면 확장자만 믿고 유형을 위조하지 않는다. 5MiB 또는 12MP/5000px을 넘는 파일은 클라이언트 축소가 가능할 때 축소 후 전송하고, 불가능하면 사용자가 이해할 수 있는 안내를 표시한다. 운영 API 배포 전에는 기존 300KiB/JPEG/WebP 계약과 혼용하지 않는다.
 3. 같은 사용자 동작 재시도는 같은 `Idempotency-Key`와 같은 효과 입력을 보낸다. `PHOTO_VERSION_CONFLICT`는 최신 슬롯 revision을 다시 확인하고 사용자 결정을 받는다. `PHOTO_UPLOAD_IN_FLIGHT`/429에서 key를 무한 교체하지 않는다.
 4. `GET /v1/photo-uploads/{operationId}`로 확인하고 accepted만 current 사진 저장 완료로 표시한다. provider_succeeded/reconciliation_pending은 제출 가능한 성공으로 표현하지 않는다.
 5. `GET /v1/photos/{photoId}/content`는 인증 proxy다. 공개URL이나 Drive ID를 저장하지 않고 no-store 응답을 영구 브라우저 cache에 넣지 않는다. limited 계정은 photoId=null이며 업로드 권한으로 원본을 읽을 수 없다.
 
-서버가 metadata를 제거하고 output을 재검증하므로 프론트 압축 성공만으로 업로드 성공을 가정하지 않는다.
+서버가 방향·metadata를 정리하고 300KiB 이하 JPEG/WebP output을 재검증하므로 프론트 압축 성공만으로 업로드 성공을 가정하지 않는다.
 408 PHOTO_BODY_TIMEOUT은 본문 수신 시간 초과, 413은 원문/출력 크기 또는 decoder 기술상한, 415는 MIME, 409는 CAS/작업·quota·KST clock 경계, 503은 provider/환경 준비 상태를 구분한다. 업로드 initial/retry 응답의 `quotaWarning:boolean`이 true면 용량 경고를 표시한다. Google raw 사용량은 제공하지 않는다.
 사진 accepted가 field_completed/전체 제출/검수/ready로 자동 전이되지 않는다. Python developer 운영 콘솔은 이 business upload/read API를 생성하거나 호출하지 않는다.
 

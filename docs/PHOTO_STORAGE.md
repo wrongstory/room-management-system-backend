@@ -33,11 +33,11 @@ room-management-system-photos/
 
 ## 업로드 흐름
 
-1. 프론트 앱이 카메라 사진의 방향을 보정하고 EXIF를 제거한다.
-2. JPEG 또는 WebP 품질·해상도를 단계적으로 낮춰 **307,200바이트 이하**로 만든다.
-3. 압축 결과가 제한을 넘으면 전송하지 않고 재촬영/재압축 안내를 표시한다.
+1. 프론트 앱은 스마트폰 원본 JPEG/WebP/HEIC/HEIF를 raw body로 전송한다. 사전 축소는 선택 사항이고 기존 300KiB 상한으로 원본을 거부하지 않는다.
+2. 서버는 입력 5MiB, 12MP/5000px 기술상한을 검사하고 decode·방향 보정·metadata 제거·축소/재인코딩으로 JPEG/WebP **307,200바이트 이하**를 만든다.
+3. 원본이 입력 기술상한을 넘거나 300KiB 출력을 만들 수 없으면 명확한 크기/처리 오류로 거부한다. 이 경우 앱에서 원본 축소 또는 재촬영을 안내한다.
 4. API가 사용자 JWT, 청소 수행 회차, 사진 슬롯, 객실 접근 권한을 검증한다.
-5. API는 본문 크기를 다시 검사하고 SHA-256을 계산한 뒤 Google Drive에 업로드한다.
+5. API는 정규화된 출력의 SHA-256을 계산한 뒤 Google Drive에 업로드한다. 원본 bytes는 Drive에 저장하지 않는다.
 6. 업로드 성공 후 Supabase에 파일 메타데이터와 retention policy를 기록한다. 청소 제출은 최종 검사 전 `expiresAt`을 확정하지 않고 결정 시각을 anchor로 삼으며, 사건 증빙과 진짜 orphan은 각각 해결/종결 또는 업로드 시각을 anchor로 사용한다. 현재 배포 source가 쓰는 `purge_after = uploaded_at + 7 days`는 아래 legacy 절에 별도 기록한다.
 7. DB 응답이 없으면 원자 확정의 성공 여부부터 작업 원장으로 재조회한다. 수락 이력이 있는 파일은 current 사진에서 빠졌거나 계정/session이 폐기돼도 보상 삭제하지 않는다. 미수락 candidate만 reconciliation fence로 finalize를 영구 차단한 뒤 보상 대상으로 삼는다. provider 결과가 불명확하면 삭제하지 않고 동일 object identity를 재조정한다.
 
@@ -51,8 +51,8 @@ v8 checkout의 선택 `extra-proof`만 별도 collection 경로를 사용한다.
 Edge의 업로드/슬롯/상태는 valid Auth+현재 profile+session 후 DB의 exact own attempt/upload_evidence를 재검증한다.
 목표 원본 proxy는 active·권한 있는 admin과 해당 사진의 실제 수행 maid가 만료 전 접근하도록 하며, 다른 maid에게는 허용하지 않는다. limited upload capability 자체는 원본 read 권한을 추가하지 않는다. 현재 source의 current-assignment-only maid 검사는 후속 retention PR의 권한 변경 대상이다.
 
-1. `admit_photo_upload`는 decode 전 현재 권한·slot in-flight·actor 30/min/8 in-flight·총quota를 검증하고 최대307200 bytes를5분 예약한다.
-2. 원문 stream의307201번째 byte를 취소한다. MIME/magic만으로 성공하지 않고 JPEG/WebP 전체 decode → 방향 보정/EXIF 등 제거 → output decode/size/finalSHA를 검증한다.
+1. `admit_photo_upload`는 decode 전 현재 권한·slot in-flight·actor 30/min/8 in-flight·총quota를 검증하고 최종 저장물 최대307200 bytes를5분 예약한다.
+2. 원문 stream의5MiB 초과 byte를 취소한다. MIME/magic만으로 성공하지 않고 JPEG/WebP/HEIC/HEIF decode → 방향 보정/EXIF 등 제거 → JPEG/WebP 출력 decode/size/finalSHA를 검증한다.
 3. provider quota는 `about.storageQuota.usage`의60초 이내 snapshot과 앱 미정산 예약량으로 판단한다. decimal10GB 경고/12GB 차단이며 외부 Gmail/Photos 증가와 완전 원자적인 절대 용량 보장은 아니다.
 4. Drive `generateIds`의 파일 ID와 검증된 부모 폴더를 DB에 먼저 고정한다. timeout/409는 **같은 ID**의 부모/MIME/size/실제 SHA만 확인한다. `appProperties` 자체 hash는 증거가 아니며 provider checksum이 없으면 bounded download+서버SHA로 대조한다.
 5. `uploadedAt`은 검증된 Google immutable `createdTime`이다. create 요청에서 이를 지정하지 않으며 DB operation 생성시각≤createdTime≤관측now를 검증한다. 응답 유실은 같은 metadata의 clock을 재사용하고 기존 DB clock을 변경하지 않는다. KST 폴더 날짜와 생성 날짜가 자정 경합으로 다르면 finalize를 거부하고 known candidate만 fenced compensation으로 처리한다. move/rebind하지 않는다.
@@ -65,7 +65,7 @@ gzip은 `scripts/photo-gzip.mjs`에서 optional header를 금지하고 mtime=0/O
 자산은 Git ignored 생성물이므로 **배포 전 `npm ci` → `npm run edge:check` 성공이 필수**다. 이 과정에서 pinned asset 재생성/양쪽 SHA·크기/정본 drift 검증이 실패하거나 자산이 없으면 배포하지 않는다. runtime CDN fallback은 없다.
 최신 source/NOTICE/checksum 포함 재현값은 **15,149,558 bytes(약14.45MiB)**다. `npm run edge:check`는 pinned `edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c`의 cwd `/workspace/supabase/functions`에서 `bundle --entrypoint api/index.ts --static api/assets/magick.wasm.gz --static api/assets/magick.NOTICE --output <검증된 .tmp 절대경로>/api.eszip --checksum sha256 --timeout 60`을 실행하고 보수적으로20,000,000 bytes 미만을 강제한다. config는 source `deno.json`을 사용하며 npm package 전체 WASM이나 runtime CDN을 묶지 않는다. `assets/*`는 금지하며 static은 gzip+NOTICE 두 파일만 허용한다. 임시 output은 성공/실패 모두 정확한 생성 디렉터리만 검증 후 정리한다. fmt 검사만 LF 임시사본을 사용하며 실제 source check/test/bundle은 원본을 사용한다.
 실제 local Edge runtime v1.74.3 oneshot worker(memory256MB/CPU2000ms)의 합성 cold-start는1280×960 JPEG207ms/51.9MB, WebP391ms/49.0MB, 2048×2048 JPEG345ms/66.4MB, WebP1016ms/79.8MB로 모두HTTP200/accepted, EarlyDrop, exceeded=false였다. 이는 실제 worker의 합성 검증이며 운영 Google/hosted smoke는 release 후 별도 gate다.
-4MP/4096px·native64MiB는 검증된 decoder 기술상한이지 확정 사진 제품 정책이 아니다. 실제 촬영 fixture/향후 dependency 변경도 동일 gate를 재검증한다.
+입력 5MiB·12MP/5000px, 출력 300KiB, decoder 자원 상한은 source 기술상한이다. 기존 합성 4MP Edge 검증은 이 변경의 12MP/HEIC hosted 검증을 대신하지 않는다. 실제 스마트폰 촬영 fixture와 hosted Edge/Google 검증을 release gate에서 수행한다.
 업로드 응답은 initial/retry 모두 `quotaWarning:boolean`만 노출한다. #85 feature는 장기 admission SUM 대신 bounded pending projection을 사용하지만, 외부 Gmail/Photos 사용량과의 원자적 보장을 주장하지 않는다.
 
 실제 운영 OAuth/Google 호출·배포·#85 purge schedule 활성화·#31 전체 제출/검수 hosted smoke는 이번 source/dev 작업에서 하지 않았다.
