@@ -5,11 +5,12 @@ import {
 } from "@imagemagick/magick-wasm";
 import {
   initializeCompressedPhotoDecoder,
+  PHOTO_INPUT_MAX_BYTES,
   readPhotoBody,
   verifyPhotoBinary,
 } from "./photo-binary.ts";
 
-Deno.test("real pinned WASM JPEG/WebP decode, EXIF strip, final hash and 307201 raw boundary", async () => {
+Deno.test("real pinned WASM JPEG/WebP decode, EXIF strip, final hash and 5MiB raw boundary", async () => {
   const start = performance.now();
   const compressed = await Deno.readFile(
     "supabase/functions/api/assets/magick.wasm.gz",
@@ -45,14 +46,14 @@ Deno.test("real pinned WASM JPEG/WebP decode, EXIF strip, final hash and 307201 
   let cancelled = false;
   const body = new ReadableStream<Uint8Array>({
     start(c) {
-      c.enqueue(new Uint8Array(307201));
+      c.enqueue(new Uint8Array(PHOTO_INPUT_MAX_BYTES + 1));
     },
     cancel() {
       cancelled = true;
     },
   });
   try {
-    await readPhotoBody(body, null);
+    await readPhotoBody(body, null, PHOTO_INPUT_MAX_BYTES);
     throw new Error("oversize accepted");
   } catch (error) {
     if (

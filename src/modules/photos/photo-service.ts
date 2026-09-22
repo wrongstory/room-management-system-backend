@@ -1,5 +1,6 @@
 import {
   PhotoError,
+  PHOTO_INPUT_MAX_BYTES,
   photoMime,
   readPhotoBody,
   verifyPhotoBinary,
@@ -190,9 +191,11 @@ function readObject(value: unknown): DriveReadObject {
   }
   const sizeBytes = integer(r.sizeBytes, 1);
   if (sizeBytes > 307200) return failed();
+  const mime = photoMime(typeof r.mimeType === "string" ? r.mimeType : null);
+  if (mime !== "image/jpeg" && mime !== "image/webp") return failed();
   return {
     fileId: locator(r.providerFileId),
-    mime: photoMime(typeof r.mimeType === "string" ? r.mimeType : null),
+    mime,
     sizeBytes,
     sha256: r.sha256,
   };
@@ -367,6 +370,7 @@ export class PhotoService {
     const raw = await readPhotoBody(
       request.body,
       request.headers.get("content-length"),
+      PHOTO_INPUT_MAX_BYTES,
     );
     await this.initializeDecoder();
     const verified = await verifyPhotoBinary(raw, mime);
