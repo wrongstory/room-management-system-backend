@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
-import { PhotoError, initializePhotoDecoder } from './photo-binary.js';
+import { PhotoError, PHOTO_INPUT_MAX_BYTES, initializePhotoDecoder } from './photo-binary.js';
 import { GoogleDriveProvider } from './google-drive.js';
 import { PhotoService, photoError, photoRoute, type PhotoIdentity } from './photo-service.js';
 
@@ -78,7 +78,7 @@ export function createPhotoRoutes(services: PhotoHttpServices): FastifyPluginAsy
       ['GET', '/v1/photo-uploads/:operationId'],
       ['GET', '/v1/photos/:photoId/content']
     ] as const;
-    for (const [method, url] of routes) app.route({ method, url, bodyLimit: 307200, logLevel: 'silent',
+    for (const [method, url] of routes) app.route({ method, url, bodyLimit: method === 'POST' ? PHOTO_INPUT_MAX_BYTES : 307200, logLevel: 'silent',
       onRequest: async request => { identities.set(request, await services.authenticate(webRequest(request), url.endsWith('/content'))); },
       handler: async (request, reply) => {
         const web = webRequest(request, method === 'POST'), route = photoRoute(method, new URL(web.url).pathname), identity = identities.get(request);
