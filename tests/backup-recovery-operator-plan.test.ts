@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   assertPlanContainsNoSecretMaterial,
@@ -66,8 +65,8 @@ describe('backup recovery operator plan', () => {
   });
 
   it('builds a disabled-task-safe plan without secret material', () => {
-    const repositoryRoot = resolve('C:\\workspace\\room-management-system-backend');
-    const configPath = resolve('C:\\RmsConfig\\backup.json');
+    const repositoryRoot = 'C:\\workspace\\room-management-system-backend';
+    const configPath = 'C:\\RmsConfig\\backup.json';
     const plan = buildSafeOperatorPlan(validConfig(), { repositoryRoot, configPath });
     expect(plan.action.executable).toBe('powershell.exe');
     expect(plan.action.arguments).toContain('-NoProfile');

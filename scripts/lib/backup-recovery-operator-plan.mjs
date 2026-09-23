@@ -1,4 +1,4 @@
-import { isAbsolute, normalize, parse, resolve } from "node:path";
+import { win32 } from "node:path";
 
 export const PRODUCTION_PROJECT_REF = "aodikrxcczbogjpsjwjt";
 export const RECOVERY_PROJECT_REF = "matalcofimnhuzslfhdd";
@@ -45,10 +45,10 @@ export function assertWindowsLocalBackupRoot(value) {
   invariant(typeof value === "string" && value.length > 0, "BACKUP_ROOT_REQUIRED");
   invariant(!value.includes("%") && !value.includes("$"), "BACKUP_ROOT_ENV_EXPANSION_FORBIDDEN");
   invariant(!value.startsWith("\\\\"), "BACKUP_ROOT_NETWORK_PATH_FORBIDDEN");
-  invariant(/^[A-Za-z]:[\\/]/u.test(value) && isAbsolute(value), "BACKUP_ROOT_NOT_ABSOLUTE_WINDOWS_PATH");
+  invariant(/^[A-Za-z]:[\\/]/u.test(value) && win32.isAbsolute(value), "BACKUP_ROOT_NOT_ABSOLUTE_WINDOWS_PATH");
 
-  const normalized = normalize(value);
-  const root = parse(normalized).root;
+  const normalized = win32.normalize(value);
+  const root = win32.parse(normalized).root;
   invariant(normalized !== root, "BACKUP_ROOT_DRIVE_ROOT_FORBIDDEN");
   invariant(!normalized.split(/[\\/]/u).includes(".."), "BACKUP_ROOT_TRAVERSAL_FORBIDDEN");
   invariant(!/[/\\](?:Windows|Program Files(?: \(x86\))?|ProgramData)$/iu.test(normalized), "BACKUP_ROOT_SYSTEM_PATH_FORBIDDEN");
@@ -94,10 +94,13 @@ export function validateOperatorConfig(input) {
 
 export function buildSafeOperatorPlan(config, { repositoryRoot, configPath }) {
   const validated = validateOperatorConfig(config);
-  invariant(typeof repositoryRoot === "string" && isAbsolute(repositoryRoot), "BACKUP_REPOSITORY_ROOT_INVALID");
-  invariant(typeof configPath === "string" && isAbsolute(configPath), "BACKUP_CONFIG_PATH_INVALID");
+  invariant(
+    typeof repositoryRoot === "string" && win32.isAbsolute(repositoryRoot),
+    "BACKUP_REPOSITORY_ROOT_INVALID",
+  );
+  invariant(typeof configPath === "string" && win32.isAbsolute(configPath), "BACKUP_CONFIG_PATH_INVALID");
 
-  const scriptPath = resolve(repositoryRoot, "scripts", "windows", "Invoke-RmsBackupRecovery.ps1");
+  const scriptPath = win32.join(repositoryRoot, "scripts", "windows", "Invoke-RmsBackupRecovery.ps1");
   return Object.freeze({
     schemaVersion: 1,
     taskName: "RMS-Production-Backup-Recovery",
@@ -117,9 +120,9 @@ export function buildSafeOperatorPlan(config, { repositoryRoot, configPath }) {
         "-File",
         scriptPath,
         "-RepositoryRoot",
-        normalize(repositoryRoot),
+        win32.normalize(repositoryRoot),
         "-ConfigPath",
-        normalize(configPath),
+        win32.normalize(configPath),
       ],
     }),
   });
