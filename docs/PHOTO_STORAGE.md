@@ -1,9 +1,9 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **기존 #83·#84·#85·#31 production 기록 / Issue #9 Stage 1 도메인별 retention v2 63번째 migration·API source 후보 구현 / 실제 Drive 자격증명·provider/Cron smoke 미완료**
+> 상태: **#83·#84·#85·#31과 Issue #9 retention v2 source는 production 정본에 포함 / #256 스마트폰 원본 정규화는 `main@10a1f814649e92260e9e7353ab242400311b429e`와 최신 dev 기능 정본에 통합 완료 / Edge·Pages·실기기 UAT와 실제 Drive service account·provider/Cron hosted 활성화 미완료**
 > 최신 확정 계약은 Google Drive 전용·300KiB 이하·비공개 저장을 유지하되, 청소 제출은 최종 검사 결정+168시간, 이슈·컴플레인·중단/충돌 증빙은 해결·종결+180일, 진짜 orphan은 업로드+30일에 삭제한다. 아래 `uploaded_at + 7 days` 절은 현재 배포된 legacy 구현을 설명하는 기록이며 목표 정책이 아니다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
-아래 압축·업로드 흐름과 용량 보호 기준은 유지한다. #84의 Drive HTTP adapter와 업로드·열람 API, #85의 legacy 7일 purge worker source 및 Edge bundle은 production에 반영됐다. Issue #9 Stage 1 candidate는 별도 private retention record/link, 권한 projection, late-binding fence와 기존 purge worker의 authoritative expiry 전환을 추가한다. 아직 source/dev 통합·운영 OAuth·Google provider hosted smoke·주기 실행 활성화는 미완료이므로 production 사용 가능으로 표시하지 않는다.
+아래 압축·업로드 흐름과 용량 보호 기준은 유지한다. #84의 Drive HTTP adapter와 업로드·열람 API, #85 purge worker, Issue #9의 private retention record/link·권한 projection·late-binding fence와 authoritative expiry source는 production 정본에 포함됐다. 실제 service account 자격증명 주입, Google provider hosted smoke와 주기 실행 활성화는 미완료이므로 provider 사용 완료로 표시하지 않는다.
 
 #83은 [PR #86](https://github.com/wrongstory/room-management-system-backend/pull/86)의 독립 QA·required CI·
 Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합됐다.
@@ -12,12 +12,12 @@ Codex 96/100 승인 후 `dev@cf91753de8b80ce5abef3c8dc0aa8bf5e85b479b`에 병합
 `dev@520abe7b80501ed9a4573e2251b9b640476d87b5`에 병합됐다. 이어 #85는 PR #90으로
 `dev@92c0f97b412e9a4ccf41934b6924bc59ca2f9dd2`에 병합됐다. 이 개발 통합은 **33 migrations / 67 paths / 72 operations**이며,
 사진 슬롯·업로드·작업 상태·원본 열람과 accepted 168시간 purge, never-accepted orphan 보상, 빈 room/date 폴더 retirement source가 완료됐다.
-PR #91로 #31 전체 제출·검수·반려 재청소까지 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`에 병합됐다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**였다. 2026-09-16 production 정본은 56 migrations / OpenAPI 109 paths / 117 operations이고 관련 API 및 `photo-purge` bundle source가 반영됐다. 다만 실제 Google 환경은 아직 활성화하지 않았다.
+PR #91로 #31 전체 제출·검수·반려 재청소까지 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`에 병합됐다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**였다. 현재 production 정본은 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations이고 관련 API 및 `photo-purge` bundle source가 반영됐다. 다만 실제 Google 환경은 아직 활성화하지 않았다.
 상세 exact head·동일 tree·CI 재실행 및 source/dev 승인 증거는 [API 상태 정본의 #83/#84/#85/#31 gate](./API_STATUS_MATRIX.md)를 따른다.
 
 ## 저장 위치와 폴더
 
-사진 원본·압축본은 Supabase Storage에 저장하지 않는다. 전용 Google 운영 계정이 소유한 비공개 루트 폴더 아래에 백엔드가 다음 구조를 만든다.
+사진 원본·압축본은 Supabase Storage에 저장하지 않는다. 사람 소유자는 `yeosucastletheart@gmail.com`이며, 이 계정이 소유한 비공개 루트 폴더를 서버 전용 service account에 최소 권한으로 공유한다. worker는 사람 계정 로그인 자격증명이 아니라 별도 service account를 사용해 다음 구조를 만든다.
 
 ```text
 room-management-system-photos/
@@ -33,17 +33,17 @@ room-management-system-photos/
 
 ## 업로드 흐름
 
-1. 프론트 앱이 카메라 사진의 방향을 보정하고 EXIF를 제거한다.
-2. JPEG 또는 WebP 품질·해상도를 단계적으로 낮춰 **307,200바이트 이하**로 만든다.
-3. 압축 결과가 제한을 넘으면 전송하지 않고 재촬영/재압축 안내를 표시한다.
+1. 프론트 앱은 스마트폰 원본 JPEG/WebP/HEIC/HEIF를 raw body로 전송한다. 사전 축소는 선택 사항이고 기존 300KiB 상한으로 원본을 거부하지 않는다.
+2. 서버는 입력 5MiB, 12MP/5000px 기술상한을 검사하고 decode·방향 보정·metadata 제거·축소/재인코딩으로 JPEG/WebP **307,200바이트 이하**를 만든다.
+3. 원본이 입력 기술상한을 넘거나 300KiB 출력을 만들 수 없으면 명확한 크기/처리 오류로 거부한다. 이 경우 앱에서 원본 축소 또는 재촬영을 안내한다.
 4. API가 사용자 JWT, 청소 수행 회차, 사진 슬롯, 객실 접근 권한을 검증한다.
-5. API는 본문 크기를 다시 검사하고 SHA-256을 계산한 뒤 Google Drive에 업로드한다.
-6. 업로드 성공 후 Supabase에 파일 메타데이터와 retention policy를 기록한다. 청소 제출은 최종 검사 전 `expiresAt`을 확정하지 않고 결정 시각을 anchor로 삼으며, 사건 증빙과 진짜 orphan은 각각 해결/종결 또는 업로드 시각을 anchor로 사용한다. 현재 배포 source가 쓰는 `purge_after = uploaded_at + 7 days`는 아래 legacy 절에 별도 기록한다.
+5. API는 정규화된 출력의 SHA-256을 계산한 뒤 Google Drive에 업로드한다. 원본 bytes는 Drive에 저장하지 않는다.
+6. 업로드 성공 후 Supabase에 파일 메타데이터와 retention policy를 기록한다. 청소 제출은 최종 검사 전 `expiresAt`을 확정하지 않고 결정 시각을 anchor로 삼으며, 사건 증빙과 진짜 orphan은 각각 해결/종결 또는 업로드 시각을 anchor로 사용한다. 과거 `purge_after = uploaded_at + 7 days` 컬럼과 동작은 아래 legacy 절에 별도 기록한다.
 7. DB 응답이 없으면 원자 확정의 성공 여부부터 작업 원장으로 재조회한다. 수락 이력이 있는 파일은 current 사진에서 빠졌거나 계정/session이 폐기돼도 보상 삭제하지 않는다. 미수락 candidate만 reconciliation fence로 finalize를 영구 차단한 뒤 보상 대상으로 삼는다. provider 결과가 불명확하면 삭제하지 않고 동일 object identity를 재조정한다.
 
 v8 checkout의 선택 `extra-proof`만 별도 collection 경로를 사용한다. client가 만든 안정적 item UUID에 collection/item expected revision을 함께 보내며, append는 새 UUID와 item revision 0, replace는 기존 UUID와 현재 item revision을 사용한다. 활성 item은 최대 10개이고 개별 삭제는 tombstone 이력만 추가한다. 삭제·교체는 accepted 파일의 immutable retention 원장을 지우거나 즉시 provider 삭제하지 않으며, 일반 slot과 pre-A snapshot은 기존 단일 사진 경로를 계속 사용한다.
 
-브라우저에는 Google OAuth access token, refresh token, Drive 루트 폴더 ID를 주지 않는다. 서버는 앱이 생성·관리한 파일에 한정되는 `drive.file` 범위를 우선 사용한다.
+브라우저에는 Google OAuth access token, service-account key, Drive 루트 폴더 ID를 주지 않는다. 서버는 앱이 생성·관리한 파일에 한정되는 `drive.file` 범위를 우선 사용한다.
 
 ### #84 실제 adapter와 운영 전 gate
 
@@ -51,8 +51,8 @@ v8 checkout의 선택 `extra-proof`만 별도 collection 경로를 사용한다.
 Edge의 업로드/슬롯/상태는 valid Auth+현재 profile+session 후 DB의 exact own attempt/upload_evidence를 재검증한다.
 목표 원본 proxy는 active·권한 있는 admin과 해당 사진의 실제 수행 maid가 만료 전 접근하도록 하며, 다른 maid에게는 허용하지 않는다. limited upload capability 자체는 원본 read 권한을 추가하지 않는다. 현재 source의 current-assignment-only maid 검사는 후속 retention PR의 권한 변경 대상이다.
 
-1. `admit_photo_upload`는 decode 전 현재 권한·slot in-flight·actor 30/min/8 in-flight·총quota를 검증하고 최대307200 bytes를5분 예약한다.
-2. 원문 stream의307201번째 byte를 취소한다. MIME/magic만으로 성공하지 않고 JPEG/WebP 전체 decode → 방향 보정/EXIF 등 제거 → output decode/size/finalSHA를 검증한다.
+1. `admit_photo_upload`는 decode 전 현재 권한·slot in-flight·actor 30/min/8 in-flight·총quota를 검증하고 최종 저장물 최대307200 bytes를5분 예약한다.
+2. 원문 stream의5MiB 초과 byte를 취소한다. MIME/magic만으로 성공하지 않고 JPEG/WebP/HEIC/HEIF decode → 방향 보정/EXIF 등 제거 → JPEG/WebP 출력 decode/size/finalSHA를 검증한다.
 3. provider quota는 `about.storageQuota.usage`의60초 이내 snapshot과 앱 미정산 예약량으로 판단한다. decimal10GB 경고/12GB 차단이며 외부 Gmail/Photos 증가와 완전 원자적인 절대 용량 보장은 아니다.
 4. Drive `generateIds`의 파일 ID와 검증된 부모 폴더를 DB에 먼저 고정한다. timeout/409는 **같은 ID**의 부모/MIME/size/실제 SHA만 확인한다. `appProperties` 자체 hash는 증거가 아니며 provider checksum이 없으면 bounded download+서버SHA로 대조한다.
 5. `uploadedAt`은 검증된 Google immutable `createdTime`이다. create 요청에서 이를 지정하지 않으며 DB operation 생성시각≤createdTime≤관측now를 검증한다. 응답 유실은 같은 metadata의 clock을 재사용하고 기존 DB clock을 변경하지 않는다. KST 폴더 날짜와 생성 날짜가 자정 경합으로 다르면 finalize를 거부하고 known candidate만 fenced compensation으로 처리한다. move/rebind하지 않는다.
@@ -65,7 +65,7 @@ gzip은 `scripts/photo-gzip.mjs`에서 optional header를 금지하고 mtime=0/O
 자산은 Git ignored 생성물이므로 **배포 전 `npm ci` → `npm run edge:check` 성공이 필수**다. 이 과정에서 pinned asset 재생성/양쪽 SHA·크기/정본 drift 검증이 실패하거나 자산이 없으면 배포하지 않는다. runtime CDN fallback은 없다.
 최신 source/NOTICE/checksum 포함 재현값은 **15,149,558 bytes(약14.45MiB)**다. `npm run edge:check`는 pinned `edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c`의 cwd `/workspace/supabase/functions`에서 `bundle --entrypoint api/index.ts --static api/assets/magick.wasm.gz --static api/assets/magick.NOTICE --output <검증된 .tmp 절대경로>/api.eszip --checksum sha256 --timeout 60`을 실행하고 보수적으로20,000,000 bytes 미만을 강제한다. config는 source `deno.json`을 사용하며 npm package 전체 WASM이나 runtime CDN을 묶지 않는다. `assets/*`는 금지하며 static은 gzip+NOTICE 두 파일만 허용한다. 임시 output은 성공/실패 모두 정확한 생성 디렉터리만 검증 후 정리한다. fmt 검사만 LF 임시사본을 사용하며 실제 source check/test/bundle은 원본을 사용한다.
 실제 local Edge runtime v1.74.3 oneshot worker(memory256MB/CPU2000ms)의 합성 cold-start는1280×960 JPEG207ms/51.9MB, WebP391ms/49.0MB, 2048×2048 JPEG345ms/66.4MB, WebP1016ms/79.8MB로 모두HTTP200/accepted, EarlyDrop, exceeded=false였다. 이는 실제 worker의 합성 검증이며 운영 Google/hosted smoke는 release 후 별도 gate다.
-4MP/4096px·native64MiB는 검증된 decoder 기술상한이지 확정 사진 제품 정책이 아니다. 실제 촬영 fixture/향후 dependency 변경도 동일 gate를 재검증한다.
+입력 5MiB·12MP/5000px, 출력 300KiB, decoder 자원 상한은 source 기술상한이다. 기존 합성 4MP Edge 검증은 이 변경의 12MP/HEIC hosted 검증을 대신하지 않는다. 실제 스마트폰 촬영 fixture와 hosted Edge/Google 검증을 release gate에서 수행한다.
 업로드 응답은 initial/retry 모두 `quotaWarning:boolean`만 노출한다. #85 feature는 장기 admission SUM 대신 bounded pending projection을 사용하지만, 외부 Gmail/Photos 사용량과의 원자적 보장을 주장하지 않는다.
 
 실제 운영 OAuth/Google 호출·배포·#85 purge schedule 활성화·#31 전체 제출/검수 hosted smoke는 이번 source/dev 작업에서 하지 않았다.
@@ -119,9 +119,9 @@ client가 검증했다고 주장한 값으로 채우면 안 되며, 합성 metad
 
 ## Legacy production source: 업로드 기준 7일 자동삭제
 
-이 절은 새 append-only retention migration 전 production worker 동작의 이력이다. 63번째 source candidate는 이미 accepted된 업무 이력을 삭제·변환하지 않고 도메인별 기산점과 `mediaAvailability`를 별도 원장에 추가한다.
+이 절은 63번째 append-only retention migration 전 production worker 동작의 이력이다. 현재 production source는 이미 accepted된 업무 이력을 삭제·변환하지 않고 도메인별 기산점과 `mediaAvailability`를 별도 원장에 추가했다.
 
-## Stage 1 source candidate: 도메인별 retention v2
+## 현재 정본: 도메인별 retention v2
 
 - `private.photo_retention_records`는 object별 effective policy, performer, 기산·만료·삭제 시각과 media availability를 보존한다. `photo_retention_links`는 실제 존재하는 cleaning submission/complaint/interruption/offline resolution만 typed wrapper로 연결한다.
 - final inspection 전 cleaning evidence는 `expiresAt=NULL`이고 승인·반려의 immutable `decided_at + 168 hours`에 만료된다. complaint는 immutable closed event, interruption은 admin handover event, sync conflict는 server-owned resolution timestamp를 사용한다.
@@ -130,7 +130,7 @@ client가 검증했다고 주장한 값으로 채우면 안 되며, 합성 metad
 - submission evidence 수명은 mutable current pointer와 분리한다. 과거 approved/rejected submission도 자신의 `decidedAt + 168 hours`까지 active link이며, superseded됐지만 final decision이 없는 submission은 임의 orphan clock으로 축소하지 않고 `expiresAt=NULL`로 보존한다.
 - metadata는 purge 뒤에도 남고 `mediaAvailability=purged`가 된다. 이미 purged evidence를 available로 되살리지 않는다.
 
-- 삭제 기준은 날짜 폴더명이 아니라 각 파일의 `uploaded_at + 7일`이다.
+- 아래 삭제 절차의 `uploaded_at + 7일` 기준은 legacy worker 이력이며 현재 retention v2의 authoritative 만료 시각으로 사용하지 않는다.
 - 정리 작업은 최소 1시간마다 `purge_after <= now()`이며 `purged_at is null`인 행을 제한 수량으로 가져온다.
 - Google Drive `files.delete`로 휴지통을 거치지 않고 영구삭제한다. 휴지통은 저장용량을 계속 차지할 수 있으므로 사용하지 않는다.
 - 성공과 404(이미 없음)는 멱등 성공으로 처리하고 `upload_status = purged`, `purged_at`을 기록한다.

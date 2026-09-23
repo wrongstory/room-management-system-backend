@@ -401,6 +401,8 @@ erDiagram
   RESERVATIONS ||--o{ CLEANING_TARGETS : "예약 기반"
   CLEANING_TARGETS ||--o{ CLEANING_ASSIGNMENTS : "revision 이력"
   PROFILES ||--o{ CLEANING_ASSIGNMENTS : "담당 메이드"
+  CLEANING_ASSIGNMENTS ||--o| ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS : "수행 불가 종료"
+  CLEANING_TARGETS ||--o{ ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS : "원 책임/대체 target"
   CLEANING_TARGETS ||--o{ CLEANING_ATTEMPTS : "수행 회차"
   CLEANING_ASSIGNMENTS ||--o{ CLEANING_ATTEMPTS : "통보 근거"
   CLEANING_ATTEMPTS ||--o{ CLEANING_SUBMISSIONS : "제출 버전"
@@ -447,6 +449,20 @@ erDiagram
     timestamptz due_at_snapshot
     timestamptz notified_at
     timestamptz ended_at
+  }
+  ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS {
+    uuid id PK
+    uuid cleaning_target_id FK
+    uuid assignment_id FK
+    uuid attempt_id FK
+    uuid maid_profile_id FK
+    uuid actor_profile_id FK
+    text reason_code
+    bigint target_assignment_version
+    bigint assignment_revision
+    bigint attempt_execution_version
+    uuid replacement_target_id FK
+    timestamptz occurred_at
   }
   CLEANING_ATTEMPTS {
     uuid id PK
@@ -507,7 +523,8 @@ erDiagram
 - 미래 planned checkout은 obligation materialization·current pointer·actual checkout 전 attempt 0이다. 같은 객실의 이전 active workflow가 있으면 target/assignment를 유지하고 활성화만 보류한다.
 - 실행 창이 끝난 unassigned/notified attempt-0 target은 같은 ID/original date로 다음 KST 날짜에 이월한다. effective date/carryover/assignment version과 schedule revision만 증가하며 active attempt는 이월 대상이 아니다.
 - 이월 write 전에 다음 source window를 검증한다. 연박은 active·실제 입실·미퇴실·동일 객실 예약 점유 범위/KST 날짜가 유효해야 하며, 추가 청소는 active reservation과 다음 창이 겹치지 않아야 한다. invalid면 blocked/mutation 0이며 기존 notified assignment/알림을 유지한다. 자동 취소·종류 변환은 하지 않는다.
-- 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 다른 메이드에게 배정할 수 없다.
+- 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 같은 0원 target을 다른 메이드에게 배정할 수 없다. #264 수행 불가 확정은 그 target/assignment/attempt를 종료 이력으로 보존한 뒤 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 정확히 한 건 생성하며, replacement만 일반 배정 흐름에 들어간다.
+- `assignment_unavailability_cancellations`는 assignment당 최대 한 건이며 target/assignment/maid/revision과 선택적 attempt execution version을 종료된 원장 상태와 대조한다. UPDATE/DELETE와 Data API 접근은 금지하고, replacement target이 있는 경우에도 과거 재청소 target과 earning을 수정하지 않는다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.
 - #7A `cleaning_attempts.execution_version`은 양수 CAS version이다. 시작/물리 완료는 해당 회차와
   본인 current notified assignment identity/revision을 확인하고 한 번 증가하며 receipt replay는
@@ -572,7 +589,7 @@ erDiagram
 - submission current pointer는 attempt별 revision CAS다. field completion만으로 제출/검수/earning은 생기지 않으며, 필수 current photo가 하나라도 누락·pending·failed·expired·purged면 새 제출을 거부한다. 일반 재제출은 과거 version/photo bindings를 immutable history로 남긴다.
 - 관리자 검수 queue/detail은 current `inspection_pending`만 사용한다. queue의 roomNumber는 target/live room이 아니라 notified assignment snapshot에서 가져오며, sealed photo ID/slot/version 외 provider locator/hash/file name과 PIN/PII/request hash/raw state는 반환하지 않는다.
 - stale current review와 bomb 선판정은 `STALE_VERSION`으로 실패한다. 최종 approve/reject, notification/outbox/audit, earning 또는 reclean 생성은 한 transaction이며 receipt lock과 unique provenance로 동시 재시도를 exactly-once 처리한다.
-- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유하고 다른 maid 이관은 금지한다.
+- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유한다. 원 maid 수행 불가 예외에서는 기존 0원 target/assignment를 취소 이력으로 종료하고 원 유상 fee/template snapshot의 별도 ordinary replacement target을 만든다. 새 담당자는 replacement의 일반 완료·검수·earning 규칙을 사용하며 원 담당자의 미완료 earning은 생성하지 않는다.
 - checkout completion은 root target status만 신뢰하지 않는다. `completion_submission_id`에서 승인된 terminal descendant를 recursive reclean chain으로 증명하며, 새 completed obligation에 NULL submission proof를 허용하지 않는다.
 
 ### #27 시작 전 취소 요청 원장
@@ -616,7 +633,7 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
-#109/#128의 typed 알림은 private event catalog의 48 event family/32 public category를 정본으로
+#109/#128/#264의 typed 알림은 private event catalog의 53 event family/36 public category를 정본으로
 삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
 검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
 dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫
@@ -964,7 +981,7 @@ source 후보 schema다.
 | Realtime | 월 200만 메시지, 동시 200연결 | MVP 핵심 경로에는 미사용, 필요 화면만 제한 구독 |
 | Edge Functions | 월 500,000회 | 초기 백엔드는 Fastify 서버 사용, 정리 작업만 필요 시 검토 |
 
-사진은 프론트 앱에서 **최대 300KiB(307,200바이트)** JPEG/WebP로 압축하고 EXIF를 제거한 뒤 API에 전송한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜를 사용하며, 중복 방지를 위해 실제 파일명에는 수행 회차·사진 슬롯·사진 UUID를 포함한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
+새 source 후보는 스마트폰 원본 JPEG/WebP/HEIC/HEIF(최대 5MiB·12MP/5000px)를 API에 전송하고 서버가 방향 보정·EXIF 제거·축소/재인코딩 후 **최대 300KiB(307,200바이트)** JPEG/WebP만 저장한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜를 사용하며, 중복 방지를 위해 실제 파일명에는 수행 회차·사진 슬롯·사진 UUID를 포함한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
 
 현재 121개 객실을 모두 하루에 한 번 청소하면 v8 필수 슬롯(8·9·11·13장)은 하루 1,233장이다. 모든 객실의 선택 `extra-proof`를 10장까지 채운 상한은 하루 2,443장, 7일 약 **4.89GiB**다. 모든 객실에 가장 큰 타입의 필수 13장과 선택 10장을 적용한 보수적 상한은 하루 2,783장, 7일 약 **5.57GiB**다. Google 개인 계정 기본 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
 

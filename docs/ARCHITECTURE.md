@@ -23,9 +23,9 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-#245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API에 반영됐다. Pages는 공개 readback이 정확히 일치한 뒤에만 완료로 표시한다.
+#245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API와 Pages에 반영됐다. 기존 관리자 UAT에서 세 입력 형태와 예약 현황 인원·객실 유형 최소/최대 인원 적용을 확인했다.
 
-현재 운영 source 정본은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`다. 2026-09-22 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations 및 기존 5개 Edge bundle이다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 79 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이다. 2026-09-23 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages artifact parity 완료 상태다. #256 스마트폰 사진 정규화와 #250/#264 배정 후속은 개발 정본에 있지만 운영 Edge/Pages·실기기 UAT 또는 release 승격과 구분한다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 #179의 v8 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보를 합친 migration 순서는 57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`이며 OpenAPI는 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
@@ -147,6 +147,7 @@ bootstrap 응답은 initialized room마다 별도 30초 admin reveal lease로 �
 #83 legacy primitive service-role grant는 #84 migration에서 회수하고 admitted wrapper만 HTTP 서비스 경계로 사용한다.
 slot/status metadata와 original content 권한은 분리한다. limited upload는 일반 active guard를 완화하지 않으며 content는 provider wait 이후에도 최신 권한을 재검증한다.
 decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생성 검증이며 runtime CDN fallback이 없다. actual local worker(memory256MB/CPU2초) 합성4MP JPEG/WebP gate는 통과했으며 운영 Google/hosted 검증은 release 후 별도다. ignored asset 재생성 때문에 배포 전 `npm ci`와 `npm run edge:check`가 모두 성공해야 한다. 실패/누락 시 deploy 금지다.
+스마트폰 원본 수용 변경의 source 후보는 입력 JPEG/WebP/HEIC/HEIF 최대 5MiB·12MP/5000px을 서버에서 정규화해 JPEG/WebP 최대 300KiB만 Drive에 저장한다. 앞 문장의 기존 합성4MP worker 결과는 새 입력 상한과 실제 스마트폰 HEIC의 hosted 성능을 입증하지 않으며 release 전에 별도 검증한다.
 상세는 [사진 저장 계약](./PHOTO_STORAGE.md)과 [사진 상태 gate](./API_STATUS_MATRIX.md)를 따른다. #84 업로드·열람, #85 별도 `photo-purge` Function과 #31 제출·검수는 `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`까지 병합됐다. 원격 Google·production 검증은 별도 release gate다.
 
 #85 worker는 accepted 보존 만료, never-accepted orphan 보상, 확인된 빈 room/date 폴더를 서로 다른 durable 원장으로 처리한다. 한 실행의 세 단계 claim 합계는 blocked 전환을 포함해 10 이하이고 DB RPC·OAuth·Drive 호출·settle·heartbeat가 같은 45초 absolute deadline을 공유하며 Edge에서 sleep하지 않는다. provider DELETE는 settle/heartbeat 여유시간이 보장될 때만 시작하고, retry exhaustion으로 blocked가 생기면 heartbeat와 developer status를 degraded로 기록한다. provider `204/404`만 성공이고 retry는 DB `next_attempt_at`이 결정한다. 폴더 retirement는 operation→room-folder binding 및 upload state를 함께 잠가 reserve/provider-success/finalize와 경쟁해도 진행 중 업로드를 삭제하지 않는다. room 폴더를 먼저 정리하고 모든 child가 terminal인 경우에만 date 폴더를 정리한다. raw Drive locator는 terminal settle에서 지우고 private digest tombstone과 immutable cleanup event만 남긴다.
@@ -157,7 +158,13 @@ decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생�
 
 관리자 queue/detail은 current `inspection_pending` 제출만 대상으로 하며 live room master 대신 notified assignment의 immutable room snapshot과 sealed photo ID/slot/version을 반환한다. provider locator/hash/file name, PIN, PII, request hash, raw before/after state는 공개하지 않는다. stale pointer의 폭탄 선판정·승인·반려는 `STALE_VERSION`으로 실패하고 서로 다른 key의 동시 폭탄 판정은 정확히 한 건만 승리한다.
 
-승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다.
+승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다. 이후 관리자가 #264 수행 불가를 명시 확정한 경우에만 기존 0원 재청소 책임을 이력으로 종료하고, 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 미배정으로 정확히 한 건 생성한다. 기존 재청소 row의 담당·금액을 바꾸거나 소급 earning을 만들지 않는다.
+
+### #264 담당 메이드 수행 불가 취소·일반 재배정 — source/dev 완료
+
+79번째 append-only migration은 active admin의 exact target/assignment/attempt CAS와 live session을 확인하는 `POST /v1/assignments/{cleaningTargetId}/unavailable-cancel`을 추가한다. 시작 전 책임은 종료하고 scheduled attempt는 `superseded`, in-progress attempt는 `interrupted`로 보존한다. limited capability와 offline lease는 같은 transaction의 attempt 전이로 revoke되고, assignment 종료 trigger가 PIN entitlement를 닫는다. 일반 target은 `unassigned`로 되돌리고 관리자 재배정 알림을 만든다.
+
+`private.assignment_unavailability_cancellations`는 actor, 기존 담당, target/assignment/attempt version과 선택적 replacement target을 불변 evidence로 남긴다. `inspection_reclean` 예외에서는 기존 0원 target을 soft cancel하고 원 유상 청소 snapshot을 가진 `manual_room_request + additional` replacement를 한 건 생성한다. replacement는 새 담당 없이 시작하고 기존 draft/commit/attempt/inspection/earning 흐름을 재사용한다. 취소 command 자체는 earning, compensation ledger, 외부 호출을 만들지 않는다. PR #265로 source/dev에 통합된 정본은 79 migrations / 129 paths / 139 operations이며 production 78/128/138과 구분한다.
 
 ### #93 주급 주차 조회·PAYING 시작 — source/dev 완료, 현재 production source 반영
 
@@ -673,7 +680,7 @@ Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 sn
 
 ### #109 typed 알림 writer 계약 — source/dev 완료, 현재 production source 반영
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 32 category/48 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 36 category/53 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
@@ -911,7 +918,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-09-22 readback 기준 production API source는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`이며 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations와 기존 5개 Edge bundle이다. 네 checkout template v7 게시도 완료됐다. 실행하지 않은 positive mutation은 PASS로 표현하지 않고 provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
+2026-09-23 readback 기준 production runtime은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages parity 완료 상태다. 현재 Git `main@10a1f81...`의 #256 사진 정규화는 배포 readback 전이므로 runtime에 포함됐다고 추정하지 않는다. 네 checkout template v7 게시도 완료됐다. 실행하지 않은 positive mutation은 PASS로 표현하지 않고 provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 

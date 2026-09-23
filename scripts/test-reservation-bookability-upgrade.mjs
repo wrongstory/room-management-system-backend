@@ -38,6 +38,10 @@ function ledgerSnapshot() {
           false, true, '')))[1]::text, '')) snapshot
       from pg_tables
       where schemaname in ('public','private')
+        and not (schemaname='private' and tablename in (
+          'assignment_unavailability_cancellations',
+          'notification_event_catalog'
+        ))
     ) preserved`);
 }
 
@@ -46,7 +50,10 @@ try {
   reset(baselineVersion);
   const before = ledgerSnapshot();
   run(process.execPath, [supabaseCli, "migration", "up", "--local"], { stdio: "inherit" });
-  assert(before === ledgerSnapshot(), "77 -> 78 must preserve all public/private table rows exactly");
+  assert(
+    before === ledgerSnapshot(),
+    "77 -> 78 and later append-only migrations must preserve all pre-existing ledger rows exactly",
+  );
 
   const result = psql(`select concat_ws('|',
     exists(select 1 from supabase_migrations.schema_migrations where version='${migrationVersion}'),

@@ -1,5 +1,7 @@
 # 사진 슬롯·제출 기반 모델 — Issue #30
 
+> **역사 문서:** 아래 SHA와 migration/API 수치는 #30~#31 통합 당시 기록이다. 현재 production 상태는 [API 상태 정본](./API_STATUS_MATRIX.md)의 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations를 우선한다. 사진 provider hosted 활성화는 source 배포와 별도다.
+
 ## 범위와 현재 상태
 
 - 개발 시작 기준(당시 base): `dev@9ed843ca570d1fccaa95fdb672fb8dc20fe91107`.
@@ -18,7 +20,7 @@
 3. 제출본에 연결한 사진 version은 이후 재촬영·pointer 교체로 바뀌지 않는다. 과거 제출과 증빙 연결은 삭제하거나 덮어쓰지 않는다.
 4. 사진 완전성은 제출 권한과 다르다. 완전한 증빙도 `evidence_upload` 한정 회차에 전체 제출 권한을 주지 않는다.
 5. `field_completed`는 사진 0장에서도 가능한 물리적 완료 선언이다. 이 모델만으로 검수 승인, room ready, earning, payroll을 생성하지 않는다.
-6. 사진 크기 한도는 300KiB, 파일 보존은 업로드 후 정확히 7일이다. 모델 검증을 실제 파일·Drive 검증 완료로 표현하지 않는다.
+6. 저장본 크기 한도는 300KiB다. 현재 보존 정책은 청소 제출의 최종 검사 결정+168시간, 사건 증빙의 해결·종결+180일, 진짜 orphan의 업로드+30일이며 과거 업로드+7일 규칙은 역사 계약이다. 모델 검증을 실제 파일·Drive 검증 완료로 표현하지 않는다.
 
 ## 템플릿·기존 데이터 처리 원칙
 
@@ -66,7 +68,7 @@ role/status·capability·assignment/version 검증, scoped idempotency, audit/ou
 - 새 submission version과 photo bindings/binding-set seal을 append하고 current pointer를 expected revision CAS로 교체한다. 일반 재제출은 과거 version을 superseded history로 유지한다. 폭탄방 report/evidence는 최초 submission에 seal되면 `BOMB_REPORT_SEALED`로 재제출을 막아 다른 version으로 이동하지 않는다.
 - 관리자 pending queue와 detail은 notified assignment의 immutable room snapshot, sealed opaque photo ID/slot/version, 폭탄 evidence photo ID만 공개한다. Drive locator/hash/file name, request hash, raw state, PIN/PII는 공개하지 않는다. 오래된 current pointer의 검수·폭탄 판정은 `STALE_VERSION`으로 거부한다.
 - 승인 transaction은 immutable inspection decision, 상태 전이, 비행동 notification/outbox/audit와 원청소 earning을 exactly-once 생성한다. 반려 transaction은 earning 없이 원 attempt/submission/decision·원 maid에 고정된 0원 notified reclean과 행동 notification/outbox/audit를 만든다. attempt 생성은 #28 activation만 담당한다.
-- `inspection_reclean` template이 room type에 대해 정확히 한 published version이 아니면 반려 transaction 전체를 fail-closed한다. 원 maid inactive/departed 예외는 자동 이관하지 않으며 미확정 정책으로 남긴다.
+- `inspection_reclean` template이 room type에 대해 정확히 한 published version이 아니면 반려 transaction 전체를 fail-closed한다. 2026-09-23 #264 계약에 따라 원 maid 퇴사·부상 등 수행 불가 예외는 관리자가 기존 0원 재청소 target을 취소 이력으로 종료하고 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 만든다. 기존 target 자동 이관이나 별도 compensation은 만들지 않는다.
 
 운영 Supabase·recovery·main·Edge·Pages·Cron·Vault·tag/Release는 이번 작업에서 변경하지 않는다.
 

@@ -135,7 +135,7 @@ function assertHistory(actual, expected, label) {
 let passed = false;
 try {
   const expectedMigrations = migrationFiles();
-  assert(expectedMigrations.length === 78, "hotfix candidate must contain exactly 78 migrations");
+  assert(expectedMigrations.length >= 78, "source must retain the 78-migration hotfix boundary");
   assert(
     expectedMigrations[72]?.version === baselineVersion &&
       expectedMigrations[72]?.name === "generated_room_pin_confirmation",
@@ -146,8 +146,8 @@ try {
     "release pending migration 74 must be availability_any_day_submission",
   );
   assert(
-    expectedMigrations.at(-1)?.version === finalVersion &&
-      expectedMigrations.at(-1)?.name === "reservation_bookability_optional_guest_count",
+    expectedMigrations[77]?.version === finalVersion &&
+      expectedMigrations[77]?.name === "reservation_bookability_optional_guest_count",
     "hotfix migration 78 must be reservation_bookability_optional_guest_count",
   );
 

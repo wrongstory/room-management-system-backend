@@ -681,7 +681,7 @@ export const openApiDocument = {
       post: {
         ...photoOperation(
           "uploadAttemptPhoto",
-          "검증된 JPEG/WebP 사진을 슬롯에 업로드",
+          "스마트폰 JPEG/WebP/HEIC/HEIF 사진을 슬롯에 업로드",
           "PhotoUploadResponse",
         ),
         responses: {
@@ -697,7 +697,7 @@ export const openApiDocument = {
           },
         },
         description:
-          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 원문 307200 bytes(300KiB)까지 허용하고 307201번째 byte에서 취소합니다. JPEG/WebP magic·전체 decode·단일 frame·자원상한을 검사하고 EXIF 등 metadata 제거 후 output decode/크기/SHA를 다시 검증합니다. assignmentId/assignmentRevision/expectedPhotoRevision의 3개 query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
+          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 JPEG/WebP/HEIC/HEIF 원문 최대 5242880 bytes(5MiB)를 허용하고 초과 byte에서 취소합니다. 원본 magic·전체 decode·자원상한을 검사하고 방향 보정·EXIF 등 metadata 제거·축소/품질 조정 후 JPEG/WebP 최종본 307200 bytes(300KiB) 이하와 output decode/SHA를 다시 검증합니다. HEIC/HEIF는 JPEG로 저장합니다. assignmentId/assignmentRevision/expectedPhotoRevision의 3개 query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
         parameters: [
           photoPathId("attemptId"),
           photoPathId("slotId"),
@@ -738,16 +738,32 @@ export const openApiDocument = {
               schema: {
                 type: "string",
                 format: "binary",
-                maxLength: 307200,
-                "x-max-bytes": 307200,
+                maxLength: 5242880,
+                "x-max-bytes": 5242880,
               },
             },
             "image/webp": {
               schema: {
                 type: "string",
                 format: "binary",
-                maxLength: 307200,
-                "x-max-bytes": 307200,
+                maxLength: 5242880,
+                "x-max-bytes": 5242880,
+              },
+            },
+            "image/heic": {
+              schema: {
+                type: "string",
+                format: "binary",
+                maxLength: 5242880,
+                "x-max-bytes": 5242880,
+              },
+            },
+            "image/heif": {
+              schema: {
+                type: "string",
+                format: "binary",
+                maxLength: 5242880,
+                "x-max-bytes": 5242880,
               },
             },
           },
@@ -813,16 +829,32 @@ export const openApiDocument = {
                 schema: {
                   type: "string",
                   format: "binary",
-                  maxLength: 307200,
-                  "x-max-bytes": 307200,
+                  maxLength: 5242880,
+                  "x-max-bytes": 5242880,
                 },
               },
               "image/webp": {
                 schema: {
                   type: "string",
                   format: "binary",
-                  maxLength: 307200,
-                  "x-max-bytes": 307200,
+                  maxLength: 5242880,
+                  "x-max-bytes": 5242880,
+                },
+              },
+              "image/heic": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                  maxLength: 5242880,
+                  "x-max-bytes": 5242880,
+                },
+              },
+              "image/heif": {
+                schema: {
+                  type: "string",
+                  format: "binary",
+                  maxLength: 5242880,
+                  "x-max-bytes": 5242880,
                 },
               },
             },
@@ -910,7 +942,7 @@ export const openApiDocument = {
             .responses,
           "200": {
             description:
-              "검증 완료된 원본 JPEG/WebP. Drive 응답 header/Location/filename은 전달하지 않습니다.",
+              "검증 완료된 저장본 JPEG/WebP(최대 300KiB). 스마트폰 입력 원본은 저장하지 않으며 Drive 응답 header/Location/filename은 전달하지 않습니다.",
             headers: {
               "Cache-Control": noStoreHeader,
               "X-Content-Type-Options": { schema: { const: "nosniff" } },
@@ -1575,7 +1607,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 73,
+              maxItems: 74,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -1973,6 +2005,20 @@ export const openApiDocument = {
         "admin",
         "cleaningTargetId",
       ),
+    },
+    "/v1/assignments/{cleaningTargetId}/unavailable-cancel": {
+      post: {
+        ...prestartOperation(
+          "cancelUnavailableCleaningAssignment",
+          "수행 불가 메이드 담당 종료 및 일반 재배정 대기",
+          "AssignmentUnavailabilityCancellationRequest",
+          "AssignmentUnavailabilityCancellation",
+          "admin",
+          "cleaningTargetId",
+        ),
+        description:
+          "active business admin이 현재 assignment/target/attempt CAS를 확인한 뒤 퇴사·부상·기타 수행 불가 담당을 종료합니다. scheduled attempt는 superseded, in_progress attempt는 interrupted로 보존하며 PIN·offline·제한 capability를 회수합니다. 일반 작업은 같은 target을 unassigned로 유지하고, 0원 inspection reclean은 과거 원장을 취소 보존한 뒤 정상 fee snapshot을 가진 별도 미배정 replacement target을 만듭니다. 후임자는 이 명령에서 정하지 않으며 기존 draft/commit 경로로 배정합니다. 이전 메이드 earning은 만들지 않고 관리자에게 재배정 알림을 남깁니다.",
+      },
     },
     "/v1/assignments/{cleaningTargetId}/cancellation-requests": {
       post: prestartOperation(
@@ -2533,7 +2579,7 @@ export const openApiDocument = {
         operationId: "previewAssignments",
         summary: "배정 가능 수·요금 균형·동선 기반 배정 초안 계산",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용이며 KST 오늘/내일만 허용합니다. 예상 시간 정책은 폐기되어 없어도 실행되며 template durationMinutes, 객실 타입 기본값, 임의 1분을 판단에 사용하지 않습니다. availableFrom/dueAt과 실제 예약 구간처럼 명시된 사실만 검증하고 가상 종료시각을 만들지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 배정 가능 target 수 → 요금 격차/편차와 기존/reclean 제약 → 구역/호수 → 결정적 동률 순서로 비교합니다. previewSeed는 상관관계 호환 필드이며 동률 결정을 바꾸지 않습니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
+          "비밀번호 변경을 완료한 active business admin 전용이며 KST 오늘/내일만 허용합니다. 예상 시간 정책은 폐기되어 없어도 실행되며 template durationMinutes, 객실 타입 기본값, 임의 1분을 판단에 사용하지 않습니다. availableFrom/dueAt과 실제 예약 구간처럼 명시된 사실만 검증하고 가상 종료시각을 만들지 않습니다. 진행 중인 메이드도 현재 업무를 고정한 채 당일 후속 sequence의 계획 후보가 될 수 있으나 동시 현장 시작은 허용하지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 배정 가능 target 수 → 요금 격차/편차와 기존/reclean 제약 → 구역/호수 → 결정적 동률 순서로 비교합니다. previewSeed는 상관관계 호환 필드이며 동률 결정을 바꾸지 않습니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         requestBody: {
@@ -6751,6 +6797,7 @@ export const openApiDocument = {
           "assignment.prestart_unassigned",
           "assignment.cancellation_requested",
           "assignment.cancellation_decided",
+          "assignment.unavailability_cancelled",
           "assignment.attempt_activated",
           "assignment.rolled_over",
           "assignment.duration_policy_confirmed",
@@ -7397,6 +7444,7 @@ export const openApiDocument = {
               maidProfileId: { type: "string", format: "uuid" },
               cleaningTargetId: { type: "string", format: "uuid" },
               assignmentId: { type: "string", format: "uuid" },
+              replacementTargetId: { type: "string", format: "uuid" },
               previousAssignmentId: { type: "string", format: "uuid" },
               previousMaidProfileId: { type: "string", format: "uuid" },
               requestId: { type: "string", format: "uuid" },
@@ -7710,6 +7758,47 @@ export const openApiDocument = {
       },
       AssignmentPrestartChangeRequest: prestartRequestSchema("change"),
       AssignmentPrestartUnassignRequest: prestartRequestSchema("unassign"),
+      AssignmentUnavailabilityCancellationRequest: prestartRequestSchema(
+        "unavailable",
+      ),
+      AssignmentUnavailabilityCancellation: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cancellationId",
+          "cleaningTargetId",
+          "assignmentId",
+          "attemptId",
+          "maidProfileId",
+          "reasonCode",
+          "replacementTargetId",
+          "status",
+          "targetAssignmentVersion",
+          "effectiveAt",
+          "recordedAt",
+        ],
+        properties: {
+          cancellationId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          attemptId: { type: ["string", "null"], format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          reasonCode: {
+            type: "string",
+            enum: ["MAID_DEPARTED", "MAID_INJURED", "MAID_UNAVAILABLE"],
+          },
+          replacementTargetId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "inspection reclean 예외에서만 생성되는 정상 유상 대체 target",
+          },
+          status: { type: "string", const: "unassigned" },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          effectiveAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
       AssignmentCancellationRequest: prestartRequestSchema("request"),
       AssignmentCancellationDecisionRequest: prestartRequestSchema("decision"),
       AssignmentChangeRequest: {
@@ -12426,7 +12515,7 @@ function prestartOperation(
 }
 
 function prestartRequestSchema(
-  action: "change" | "unassign" | "request" | "decision",
+  action: "change" | "unassign" | "request" | "decision" | "unavailable",
 ) {
   const properties: Record<string, unknown> = {
     expectedCurrentAssignmentId: { type: "string", format: "uuid" },
@@ -12442,6 +12531,8 @@ function prestartRequestSchema(
         ]
         : action === "decision"
         ? ["APPROVED", "REJECTED", "OPERATIONAL_CHANGE", "MAID_UNAVAILABLE"]
+        : action === "unavailable"
+        ? ["MAID_DEPARTED", "MAID_INJURED", "MAID_UNAVAILABLE"]
         : [
           "MAID_UNAVAILABLE",
           "SCHEDULE_CHANGED",
@@ -12480,6 +12571,21 @@ function prestartRequestSchema(
   if (action === "decision") {
     properties.decision = { type: "string", enum: ["approved", "rejected"] };
     required.push("decision");
+  }
+  if (action === "unavailable") {
+    properties.expectedAttemptId = {
+      type: ["string", "null"],
+      format: "uuid",
+      description:
+        "attempt가 아직 없으면 null. 현재 scheduled/in_progress attempt면 exact ID.",
+    };
+    properties.expectedExecutionVersion = {
+      type: ["integer", "null"],
+      minimum: 1,
+      description:
+        "expectedAttemptId가 null이면 null, 아니면 exact execution version.",
+    };
+    required.push("expectedAttemptId", "expectedExecutionVersion");
   }
   return { type: "object", additionalProperties: false, required, properties };
 }

@@ -112,6 +112,66 @@ describe('assignment preview Fastify parity', () => {
     await app.close();
   });
 
+  it('offers a later sequence when the sole available maid is already cleaning', async () => {
+    const serviceDate = today();
+    const availableFrom = `${serviceDate}T11:00:00+09:00`;
+    const rpc = vi.fn(async () => ({
+      data: {
+        serviceDate,
+        planningAt: `${serviceDate}T09:00:00+09:00`,
+        maids: [{
+          maidProfileId: 'maid-one',
+          maidDisplayName: '메이드',
+          role: 'maid',
+          status: 'active',
+          availabilityVersion: 1,
+          available: true
+        }],
+        targets: [
+          {
+            cleaningTargetId: 'running', roomId: 'room-one', roomNumber: '101',
+            roomTypeCode: 'standard', elevatorZone: 'A', feeSnapshot: 16000,
+            availableFrom, dueAt: null, serviceDate, status: 'in_progress',
+            assignmentVersion: 1, source: 'manual_room_request', cleaningKind: 'additional',
+            domainIdentity: { sourceId: 'running', roomReservations: [] },
+            blockedReason: null, recleanMaidProfileId: null,
+            currentAssignment: {
+              assignmentId: 'assignment-one', maidProfileId: 'maid-one',
+              sequenceNumber: 2, revision: 1, serviceDate, availableFrom,
+              dueAt: null, targetAssignmentVersion: 1
+            },
+            activeAttempt: {
+              attemptId: 'attempt-one', maidProfileId: 'maid-one',
+              status: 'in_progress', startedAt: availableFrom, endedAt: null
+            }
+          },
+          {
+            cleaningTargetId: 'later', roomId: 'room-two', roomNumber: '102',
+            roomTypeCode: 'standard', elevatorZone: 'A', feeSnapshot: 16000,
+            availableFrom, dueAt: null, serviceDate, status: 'unassigned',
+            assignmentVersion: 1, source: 'manual_room_request', cleaningKind: 'additional',
+            domainIdentity: { sourceId: 'later', roomReservations: [] },
+            blockedReason: null, recleanMaidProfileId: null,
+            currentAssignment: null, activeAttempt: null
+          }
+        ]
+      },
+      error: null
+    }));
+    const app = await appWith(new SupabaseAssignmentPreviewService(clientsWithRpc(rpc)));
+    const response = await app.inject({
+      method: 'POST', url: '/v1/assignments/preview', payload: { serviceDate }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().fixedAssignments).toMatchObject([{
+      cleaningTargetId: 'running', proposedSequenceNumber: 2
+    }]);
+    expect(response.json().proposedAssignments).toMatchObject([{
+      cleaningTargetId: 'later', maidProfileId: 'maid-one', proposedSequenceNumber: 3
+    }]);
+    await app.close();
+  });
+
   it('keeps the historical GET envelope and blocks the retired POST with stable 410', async () => {
     const historical = {
       id: '30000000-0000-4000-8000-000000000001',

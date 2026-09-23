@@ -89,6 +89,25 @@ function prestartClients(errorMessage?: string) {
             error: null,
           };
         }
+        if (name === "cancel_unavailable_cleaning_assignment") {
+          return {
+            data: {
+              cancellationId: "60000000-0000-4000-8000-000000000001",
+              cleaningTargetId: targetId,
+              assignmentId,
+              attemptId: "70000000-0000-4000-8000-000000000001",
+              maidProfileId: maid.profileId,
+              reasonCode: "MAID_INJURED",
+              replacementTargetId: null,
+              status: "unassigned",
+              targetAssignmentVersion: 3,
+              effectiveAt: "2026-09-05T00:00:00Z",
+              recordedAt: "2026-09-05T00:00:01Z",
+              raw: "hidden",
+            },
+            error: null,
+          };
+        }
         if (name.includes("cancellation")) {
           return {
             data: requestRow,
@@ -174,6 +193,72 @@ Deno.test("prestart commands preserve actor CAS canonical retry and safe project
       "canonical retry",
     );
   }
+});
+
+Deno.test("admin unavailable cancellation binds live session and nullable attempt CAS", async () => {
+  const { clients, calls } = prestartClients();
+  const sessionId = "80000000-0000-4000-8000-000000000001";
+  const attemptId = "70000000-0000-4000-8000-000000000001";
+  const result = await prestartCommand(
+    request("/test", "POST", {
+      expectedCurrentAssignmentId: assignmentId,
+      expectedAssignmentVersion: 2,
+      expectedAttemptId: attemptId,
+      expectedExecutionVersion: 4,
+      reasonCode: "MAID_INJURED",
+    }),
+    clients,
+    admin,
+    targetId,
+    "unavailable-cancel",
+    sessionId,
+  );
+  const safeResult = result as { status?: string };
+  assert(
+    safeResult.status === "unassigned" &&
+      !JSON.stringify(result).includes("hidden"),
+    "safe unavailable cancellation projection",
+  );
+  assert(
+    calls.at(-1)?.name === "cancel_unavailable_cleaning_assignment",
+    "unavailable cancellation RPC",
+  );
+  assert(calls.at(-1)?.args.p_session_id === sessionId, "live session binding");
+  assert(
+    calls.at(-1)?.args.p_expected_assignment_id === assignmentId,
+    "assignment CAS",
+  );
+  assert(
+    calls.at(-1)?.args.p_expected_attempt_id === attemptId,
+    "attempt CAS",
+  );
+  assert(
+    calls.at(-1)?.args.p_expected_execution_version === 4,
+    "execution CAS",
+  );
+
+  await prestartCommand(
+    request("/test", "POST", {
+      expectedCurrentAssignmentId: assignmentId,
+      expectedAssignmentVersion: 2,
+      expectedAttemptId: null,
+      expectedExecutionVersion: null,
+      reasonCode: "MAID_UNAVAILABLE",
+    }),
+    clients,
+    admin,
+    targetId,
+    "unavailable-cancel",
+    sessionId,
+  );
+  assert(
+    calls.at(-1)?.args.p_expected_attempt_id === null,
+    "no-attempt identity",
+  );
+  assert(
+    calls.at(-1)?.args.p_expected_execution_version === null,
+    "no-attempt version",
+  );
 });
 
 Deno.test("prestart admin and maid capabilities fail closed before RPC", async () => {

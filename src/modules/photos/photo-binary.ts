@@ -2,10 +2,14 @@ import { initializeImageMagick, MagickImage, MagickReadSettings, MagickFormat, R
 
 // 제품 크기 제한과 별개인, source-controlled decoder 자원 상한이다.
 export const PHOTO_MAX_BYTES = 307200;
+export const PHOTO_INPUT_MAX_BYTES = 5 * 1024 * 1024;
 export const PHOTO_MAX_PIXELS = 4194304;
 export const PHOTO_MAX_DIMENSION = 4096;
+export const PHOTO_INPUT_MAX_PIXELS = 12582912;
+export const PHOTO_INPUT_MAX_DIMENSION = 5000;
 export const PHOTO_DECODE_BUDGET_MS = 1500;
 export type PhotoMime = 'image/jpeg' | 'image/webp';
+export type PhotoInputMime = PhotoMime | 'image/heic' | 'image/heif';
 export class PhotoError extends Error {
   constructor(readonly statusCode: number, readonly code: string) {
     super(code); this.name = 'PhotoError';
@@ -31,17 +35,17 @@ export async function initializeCompressedPhotoDecoder(compressed: Uint8Array): 
 const invalid = (): never => { throw new PhotoError(400, 'INVALID_PHOTO_BINARY'); };
 function byte(bytes: Uint8Array, index: number): number { const value = bytes[index]; if (value === undefined) return invalid(); return value; }
 const tooLarge = (): never => { throw new PhotoError(413, 'PHOTO_TOO_LARGE'); };
-export function photoMime(value: string | null): PhotoMime {
-  if (value !== 'image/jpeg' && value !== 'image/webp') throw new PhotoError(415, 'PHOTO_MEDIA_TYPE_UNSUPPORTED');
+export function photoMime(value: string | null): PhotoInputMime {
+  if (value !== 'image/jpeg' && value !== 'image/webp' && value !== 'image/heic' && value !== 'image/heif') throw new PhotoError(415, 'PHOTO_MEDIA_TYPE_UNSUPPORTED');
   return value;
 }
 
 /** Content-Length는 증거가 아니다. 초과 chunk에서 cancel하고 decoder/provider는 호출하지 않는다. */
-export async function readPhotoBody(stream: ReadableStream<Uint8Array> | null, contentLength: string | null): Promise<Uint8Array> {
-  if (contentLength !== null && (!/^\d{1,10}$/.test(contentLength) || Number(contentLength) > PHOTO_MAX_BYTES)) tooLarge();
+export async function readPhotoBody(stream: ReadableStream<Uint8Array> | null, contentLength: string | null, maxBytes = PHOTO_MAX_BYTES): Promise<Uint8Array> {
+  if (contentLength !== null && (!/^\d{1,10}$/.test(contentLength) || Number(contentLength) > maxBytes)) tooLarge();
   if (!stream) return invalid();
   const reader = stream.getReader();
-  const bytes = new Uint8Array(PHOTO_MAX_BYTES);
+  const bytes = new Uint8Array(maxBytes);
   let length = 0, timedOut = false;
   const timer = setTimeout(() => { timedOut = true; void reader.cancel().catch(() => undefined); }, 5000);
   try {
@@ -49,7 +53,7 @@ export async function readPhotoBody(stream: ReadableStream<Uint8Array> | null, c
       const { value, done } = await reader.read();
       if (done) break;
       if (!(value instanceof Uint8Array)) invalid();
-      if (length + value.byteLength > PHOTO_MAX_BYTES) { await reader.cancel(); tooLarge(); }
+      if (length + value.byteLength > maxBytes) { await reader.cancel(); tooLarge(); }
       bytes.set(value, length); length += value.byteLength;
     }
   } catch (error) {
@@ -60,8 +64,10 @@ export async function readPhotoBody(stream: ReadableStream<Uint8Array> | null, c
   if (!length || (contentLength !== null && Number(contentLength) !== length)) invalid();
   return bytes.slice(0, length);
 }
-function dimensions(width: number, height: number): void {
-  if (width < 1 || height < 1 || width > PHOTO_MAX_DIMENSION || height > PHOTO_MAX_DIMENSION || width * height > PHOTO_MAX_PIXELS) {
+function dimensions(width: number, height: number, input = false): void {
+  const maxDimension = input ? PHOTO_INPUT_MAX_DIMENSION : PHOTO_MAX_DIMENSION;
+  const maxPixels = input ? PHOTO_INPUT_MAX_PIXELS : PHOTO_MAX_PIXELS;
+  if (width < 1 || height < 1 || width > maxDimension || height > maxDimension || width * height > maxPixels) {
     throw new PhotoError(413, 'PHOTO_DECODE_LIMIT_EXCEEDED');
   }
 }
@@ -80,7 +86,7 @@ function jpegShape(b: Uint8Array, clean: boolean): void {
     if (clean && (marker === 225 || marker === 237 || marker === 254)) invalid();
     if ([192, 193, 194].includes(marker)) {
       if (++frames !== 1 || size < 8) invalid();
-      dimensions(byte(b, p + 5) * 256 + byte(b, p + 6), byte(b, p + 3) * 256 + byte(b, p + 4));
+      dimensions(byte(b, p + 5) * 256 + byte(b, p + 6), byte(b, p + 3) * 256 + byte(b, p + 4), !clean);
     } else if (marker >= 195 && marker <= 207 && ![196, 200, 204].includes(marker)) invalid();
     p += size;
     if (marker === 218) {
@@ -111,15 +117,15 @@ function webpShape(b: Uint8Array, clean: boolean): void {
     if (kind === 'VP8X') {
       if (size !== 10 || (byte(b, start) & 2)) invalid();
       const u24 = (i: number) => byte(b, i) + byte(b, i + 1) * 256 + byte(b, i + 2) * 65536;
-      dimensions(u24(start + 4) + 1, u24(start + 7) + 1);
+      dimensions(u24(start + 4) + 1, u24(start + 7) + 1, !clean);
     }
     if (kind === 'VP8 ') {
       if (++frames !== 1 || size < 10 || text(start + 3, 3) !== '\x9d\x01\x2a') invalid();
-      dimensions(view.getUint16(start + 6, true) & 16383, view.getUint16(start + 8, true) & 16383);
+      dimensions(view.getUint16(start + 6, true) & 16383, view.getUint16(start + 8, true) & 16383, !clean);
     }
     if (kind === 'VP8L') {
       if (++frames !== 1 || size < 5 || b[start] !== 47) invalid();
-      dimensions(1 + byte(b, start + 1) + ((byte(b, start + 2) & 63) << 8), 1 + (byte(b, start + 2) >> 6) + (byte(b, start + 3) << 2) + ((byte(b, start + 4) & 15) << 10));
+      dimensions(1 + byte(b, start + 1) + ((byte(b, start + 2) & 63) << 8), 1 + (byte(b, start + 2) >> 6) + (byte(b, start + 3) << 2) + ((byte(b, start + 4) & 15) << 10), !clean);
     }
     p = start + size + (size % 2);
   }
@@ -131,52 +137,108 @@ export function checkPhotoEnvelope(bytes: Uint8Array, mime: PhotoMime, clean = f
   if (mime === 'image/jpeg') jpegShape(bytes, clean); else webpShape(bytes, clean);
 }
 
+function heicShape(bytes: Uint8Array): void {
+  if (bytes.length < 24) invalid();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const text = (offset: number) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
+  let offset = 0;
+  while (offset < bytes.length) {
+    if (offset + 8 > bytes.length) invalid();
+    let size = view.getUint32(offset, false);
+    let headerSize = 8;
+    if (size === 1) {
+      if (offset + 16 > bytes.length) invalid();
+      const extended = view.getBigUint64(offset + 8, false);
+      if (extended > BigInt(bytes.length)) invalid();
+      size = Number(extended);
+      headerSize = 16;
+    } else if (size === 0) size = bytes.length - offset;
+    if (size < headerSize || offset + size > bytes.length) invalid();
+    if (offset === 0) {
+      if (text(offset + 4) !== 'ftyp' || size < headerSize + 8) invalid();
+      const brands = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1']);
+      let compatible = brands.has(text(offset + headerSize));
+      for (let p = offset + headerSize + 8; p + 4 <= offset + size; p += 4) compatible ||= brands.has(text(p));
+      if (!compatible || (size - headerSize - 8) % 4 !== 0) invalid();
+    }
+    offset += size;
+  }
+}
+
+export function checkPhotoInputEnvelope(bytes: Uint8Array, mime: PhotoInputMime): void {
+  if (!bytes.length) invalid();
+  if (bytes.length > PHOTO_INPUT_MAX_BYTES) tooLarge();
+  if (mime === 'image/jpeg') jpegShape(bytes, false);
+  else if (mime === 'image/webp') webpShape(bytes, false);
+  else heicShape(bytes);
+}
+
 let initialization: Promise<void> | undefined;
 /** 정본 wasm bytes는 pinned dependency에서만 가져오고 사용자 URL은 받지 않는다. */
 export function initializePhotoDecoder(wasm: Uint8Array): Promise<void> {
   initialization ??= initializeImageMagick(wasm).then(() => {
-    ResourceLimits.width = BigInt(PHOTO_MAX_DIMENSION);
-    ResourceLimits.height = BigInt(PHOTO_MAX_DIMENSION);
+    ResourceLimits.width = BigInt(PHOTO_INPUT_MAX_DIMENSION);
+    ResourceLimits.height = BigInt(PHOTO_INPUT_MAX_DIMENSION);
     // Area is a cache threshold (>= spills to disk), not our inclusive pixel validation limit.
-    ResourceLimits.area = BigInt(PHOTO_MAX_PIXELS + 1);
+    ResourceLimits.area = BigInt(PHOTO_INPUT_MAX_PIXELS + 1);
     // ImageMagick counts its sentinel as an extra entry; envelope still allows exactly one frame.
     ResourceLimits.listLength = 2n;
-    ResourceLimits.memory = 67108864n;
-    ResourceLimits.maxMemoryRequest = 67108864n;
-    ResourceLimits.maxProfileSize = BigInt(PHOTO_MAX_BYTES);
+    ResourceLimits.memory = 134217728n;
+    ResourceLimits.maxMemoryRequest = 134217728n;
+    ResourceLimits.maxProfileSize = BigInt(PHOTO_INPUT_MAX_BYTES);
     ResourceLimits.disk = 0n;
     ResourceLimits.time = 1n;
   });
   return initialization;
 }
 export interface VerifiedPhoto { bytes: Uint8Array; mime: PhotoMime; sizeBytes: number; sha256: string }
-export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoMime): Promise<VerifiedPhoto> {
-  checkPhotoEnvelope(raw, mime);
+export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): Promise<VerifiedPhoto> {
+  checkPhotoInputEnvelope(raw, mime);
   if (!initialization) throw new PhotoError(503, 'PHOTO_DECODER_UNAVAILABLE');
   await initialization;
   const started = performance.now();
-  const format = mime === 'image/jpeg' ? MagickFormat.Jpeg : MagickFormat.WebP;
+  const inputFormat = mime === 'image/jpeg' ? MagickFormat.Jpeg : mime === 'image/webp' ? MagickFormat.WebP : MagickFormat.Heic;
+  const outputMime: PhotoMime = mime === 'image/webp' ? 'image/webp' : 'image/jpeg';
+  const outputFormat = outputMime === 'image/webp' ? MagickFormat.WebP : MagickFormat.Jpeg;
   let bytes: Uint8Array;
   try {
-    const settings = new MagickReadSettings(); settings.format = format;
+    const settings = new MagickReadSettings(); settings.format = inputFormat;
+    if (mime === 'image/heic' || mime === 'image/heif') settings.frameCount = 1;
     const image = MagickImage.create();
     let warning = false;
     image.onWarning = () => { warning = true; };
     try {
       image.read(raw, settings);
       if (warning) invalid();
-      dimensions(image.width, image.height);
-      if (image.format !== format) invalid();
-      image.autoOrient(); image.strip(); image.quality = 90;
-      bytes = image.write(format, (data) => Uint8Array.from(data));
+      dimensions(image.width, image.height, true);
+      if (mime === 'image/heic' || mime === 'image/heif' ? ![MagickFormat.Heic, MagickFormat.Heif].includes(image.format as 'HEIC' | 'HEIF') : image.format !== inputFormat) invalid();
+      image.autoOrient(); image.strip();
+      const longest = Math.max(image.width, image.height);
+      if (longest > 1280) {
+        const scale = 1280 / longest;
+        image.resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
+      }
+      image.quality = longest <= 1280 && raw.length <= PHOTO_MAX_BYTES ? 90 : 65;
+      bytes = image.write(outputFormat, (data) => Uint8Array.from(data));
+      if (bytes.length > PHOTO_MAX_BYTES) {
+        image.quality = 45;
+        bytes = image.write(outputFormat, (data) => Uint8Array.from(data));
+      }
+      if (bytes.length > PHOTO_MAX_BYTES) {
+        const scale = Math.min(1, 960 / Math.max(image.width, image.height));
+        image.resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
+        image.quality = 45;
+        bytes = image.write(outputFormat, (data) => Uint8Array.from(data));
+      }
       if (warning) invalid();
     } finally { image.dispose(); }
-    checkPhotoEnvelope(bytes, mime, true);
+    checkPhotoEnvelope(bytes, outputMime, true);
     const decoded = MagickImage.create();
     decoded.onWarning = () => { warning = true; };
     try {
-      decoded.read(bytes, settings);
-      if (warning || decoded.format !== format || decoded.profileNames.length !== 0) invalid();
+      const outputSettings = new MagickReadSettings(); outputSettings.format = outputFormat;
+      decoded.read(bytes, outputSettings);
+      if (warning || decoded.format !== outputFormat || decoded.profileNames.length !== 0) invalid();
       dimensions(decoded.width, decoded.height);
     } finally { decoded.dispose(); }
   } catch (error) {
@@ -186,5 +248,5 @@ export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoMime): Promi
   }
   if (performance.now() - started > PHOTO_DECODE_BUDGET_MS) throw new PhotoError(413, 'PHOTO_DECODE_LIMIT_EXCEEDED');
   const hash = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes));
-  return { bytes, mime, sizeBytes: bytes.length, sha256: Array.from(new Uint8Array(hash), x => x.toString(16).padStart(2, '0')).join('') };
+  return { bytes, mime: outputMime, sizeBytes: bytes.length, sha256: Array.from(new Uint8Array(hash), x => x.toString(16).padStart(2, '0')).join('') };
 }

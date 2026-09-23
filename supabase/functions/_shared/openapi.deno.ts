@@ -103,9 +103,12 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
   const upload =
     document.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/upload"].post;
   assert(
-    upload.requestBody.content["image/jpeg"].schema["x-max-bytes"] === 307200 &&
-      upload.requestBody.content["image/webp"].schema.maxLength === 307200,
-    "raw300KiB both encodings",
+    upload.requestBody.content["image/jpeg"].schema["x-max-bytes"] ===
+        5242880 &&
+      upload.requestBody.content["image/webp"].schema.maxLength === 5242880 &&
+      upload.requestBody.content["image/heic"].schema.maxLength === 5242880 &&
+      upload.requestBody.content["image/heif"].schema.maxLength === 5242880,
+    "raw5MiB smartphone encodings with stored300KiB",
   );
   assert(
     !Object.hasOwn(upload.requestBody.content, "multipart/form-data") &&
@@ -192,13 +195,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 128 &&
+    Object.keys(document.paths).length === 129 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 138,
-    "combined candidate contract 128/138",
+        ).length === 139,
+    "combined candidate contract 129/139",
   );
 });
 
@@ -1473,7 +1476,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 73,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 74,
     "actual audit allowlist count",
   );
   assert(

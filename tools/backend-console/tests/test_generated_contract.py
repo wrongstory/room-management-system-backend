@@ -904,7 +904,7 @@ def test_payroll_payment_result_audit_and_error_codes_are_generated() -> None:
 
 def test_room_status_correction_audit_contract_is_generated_exactly() -> None:
     event_values = {event.value for event in DeveloperAuditEventType}
-    assert len(event_values) == 73
+    assert len(event_values) == 74
     assert {
         "room.occupancy_corrected",
         "room.display_status_overridden",
@@ -927,6 +927,26 @@ def test_room_status_correction_audit_contract_is_generated_exactly() -> None:
     override_summary = {"displayStatusOverride": None, "roomStateVersion": 12}
     assert DeveloperAuditEventSummary.from_dict(occupied_summary).to_dict() == occupied_summary
     assert DeveloperAuditEventSummary.from_dict(override_summary).to_dict() == override_summary
+
+
+def test_assignment_unavailability_audit_contract_is_generated_without_raw_state() -> None:
+    assert (
+        DeveloperAuditEventType.ASSIGNMENT_UNAVAILABILITY_CANCELLED.value
+        == "assignment.unavailability_cancelled"
+    )
+    field_names = {field.name for field in fields(DeveloperAuditEventSummary)}
+    assert {
+        "cleaning_target_id",
+        "assignment_id",
+        "attempt_id",
+        "maid_profile_id",
+        "reason_code",
+        "replacement_target_id",
+        "target_assignment_version",
+    } <= field_names
+    assert {"request_hash", "before_state", "after_state", "idempotency_key"}.isdisjoint(
+        field_names
+    )
 
 
 def test_complaint_rework_error_codes_are_generated() -> None:
