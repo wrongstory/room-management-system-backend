@@ -5,7 +5,7 @@
 검토 기준:
 
 - Issue #245 v0.5.1 hotfix는 78번째 append-only migration과 OpenAPI `0.5.1` 128 paths / 138 operations를 구성한다. bookability preview에서만 `guestCount` 생략/`null`을 같은 값으로 받아 capacity 필터 없이 기간 판정을 하며, 예약 create/change의 인원 필수 계약은 유지한다.
-- 현재 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, `dev@40edb0681c852d287ded7d0a7af66b81db2ebcdd`다. 두 브랜치에는 #256 스마트폰 원본 사진 정규화 source가 포함됐지만 운영 Edge·Pages·실기기 사진 UAT는 아직 별도다. 마지막으로 검증된 production runtime은 78 migrations(head `reservation_bookability_optional_guest_count`), `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이고 Pages는 이 배포본과 parity를 완료했다. 기존 관리자 계정 UAT에서 bookability `guestCount` 생략·`null`·양수, 예약 현황 인원 표시와 객실 유형 최소·최대 인원 적용을 확인했다. tag/GitHub Release는 아직 발행하지 않았다.
+- 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 79 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #256 사진 정규화, #250 진행 중 메이드 후속 계획, #264 수행 불가 취소·재배정을 포함한다. 마지막으로 검증된 production runtime은 78 migrations(head `reservation_bookability_optional_guest_count`), `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이고 Pages는 이 배포본과 parity를 완료했다. 기존 관리자 계정 UAT에서 bookability `guestCount` 생략·`null`·양수, 예약 현황 인원 표시와 객실 유형 최소·최대 인원 적용을 확인했다. 개발 정본의 후속 기능은 release 승격 전까지 production에서 사용 가능하다고 표시하지 않으며 tag/GitHub Release도 아직 발행하지 않았다.
 - Issue #256 source는 스마트폰 JPEG/WebP/HEIC/HEIF 원본을 최대 5MiB·12MP/5000px 안에서 검증하고 EXIF 방향·메타데이터를 제거해 300KiB 이하 JPEG/WebP 저장본으로 정규화한다. 원본은 저장하지 않는다. `main`/`dev` 통합과 운영 배포 완료를 구분하며 Edge/Pages/프런트 제한 해제·실제 휴대폰 UAT 전에는 운영 사용 완료로 표시하지 않는다.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
 - Issue #229/#231/#236/#228은 `dev@49214bb67f2cf346178bc12321948a810e050234`에서 v0.5.0 후보를 구성했고 이후 `main`/production에 승격됐다. 이 backport 후보는 해당 dev-only 이력과 v0.5.0 snapshot을 보존하면서 #245 계약만 추가한다.
@@ -281,7 +281,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 관리자는 가능 메이드만 후보로 오늘/내일 청소를 배정한다.
 - 관리자가 메이드별 작업 순서 1–N을 정하고 저장·통보한다.
 - **[확정 — 2026-09-08 #4 A안]** 메이드는 본인에게 실제 통보된 assignment revision만 조회한다. 과거 superseded/종료 revision도 본인에게 실제 통보됐으면 history에 포함한다. 미통보 draft, 다른 maid의 배정, 자신에게 한 번도 통보되지 않은 revision은 금지한다. 과거 조회 권한은 현재 target 일정·새 담당·새 revision 조회나 수행 권한을 뜻하지 않는다.
-- 배정 preview는 먼저 명시된 사실상 배정 가능한 객실 수를 최대화하고, 그 후보 중 메이드별 기본 청소요금 총액의 최대·최소 격차와 전체 편차를 최소화한다. 기존 배정과 수행 가능한 reclean 원 메이드 제약을 지키고, 금액 점수가 같을 때만 같은 엘리베이터 구역·가까운 호수를 보조 기준으로 쓰며 마지막은 안정적인 키로 결정한다. 수행 불가로 관리자가 취소한 재청소는 일반 미배정 target으로만 다시 제안한다.
+- 배정 preview는 먼저 명시된 사실상 배정 가능한 객실 수를 최대화하고, 그 후보 중 메이드별 기본 청소요금 총액의 최대·최소 격차와 전체 편차를 최소화한다. 기존 배정과 수행 가능한 reclean 원 메이드 제약을 지키고, 금액 점수가 같을 때만 같은 엘리베이터 구역·가까운 호수를 보조 기준으로 쓰며 마지막은 안정적인 키로 결정한다. 수행 불가로 관리자가 취소한 일반 작업은 같은 target을, 검수 반려 재청소는 새 ordinary replacement target을 미배정 후보로 제안한다.
 - 예상시간 정책은 폐기됐다. 타입별 시간, template `durationMinutes`, 객실 타입 기본값, 임의 1분을 신규 preview의 용량·순서·충돌 판단에 사용하지 않는다.
 - 랜덤 결과는 저장 전 초안이다. 실행만으로 담당·attempt·알림·감사 이력을 만들거나 기존 통보/관리자 수동 배정을 덮지 않는다.
 - 일부 객실만 배정된 상태의 부분 통보를 허용하되 미배정 대상을 숨기지 않는다.

@@ -8,7 +8,7 @@
 |---|---|---|
 | 프런트 제품 snapshot | `165fed2d62a763d64ac62539e1475c1b3e42868f` | 이번 정합화의 exact 기준. 원격 `dev` ref는 삭제됐지만 commit은 재현 가능하다. |
 | 프런트 현재 원격 `main` | `afeb0898879bf8d381ee2e218938dc3160fd6ac0` | 관찰 대상. 위 snapshot의 정책을 자동 대체하지 않는다. |
-| 백엔드 현재 통합 `dev` | `40edb0681c852d287ded7d0a7af66b81db2ebcdd` | #256 스마트폰 원본 사진 정규화 source까지 통합. production runtime 포함 여부와 구분한다. |
+| 백엔드 기능 통합 `dev` | `1a28263567b44661a1d6fdc3e4f99be8f55ff8de` | 79 migrations / OpenAPI 0.5.1 129/139. #256 사진 정규화, #250 진행 중 메이드 후속 계획, #264 수행 불가 취소·재배정까지 통합. production runtime 포함 여부와 구분한다. |
 | 백엔드 현재 `main` | `10a1f814649e92260e9e7353ab242400311b429e` | #256 운영 hotfix source 병합 완료. Edge/Pages 배포·실제 휴대폰 UAT는 별도다. |
 | 마지막 검증 production/Pages | `api` ACTIVE v24 / `0.5.1` / 128 / 138 | production 78 migrations와 portal/openapi/manifest parity 완료. 현재 main의 #256 schema 내용은 배포 전이므로 포함됐다고 추정하지 않는다. |
 

@@ -2,7 +2,7 @@
 
 `room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 단일 개발자와 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
 
-현재 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, `dev@40edb0681c852d287ded7d0a7af66b81db2ebcdd`입니다. 두 브랜치에는 스마트폰 JPEG/WebP/HEIC/HEIF 원본을 안전하게 300KiB 이하 저장본으로 정규화하는 #256 source가 포함됐지만 운영 Edge 배포·Pages 갱신·실제 휴대폰 UAT는 아직 별도입니다. 마지막으로 검증된 운영 API는 78 migrations, Supabase `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이며 Pages도 그 배포본과 artifact parity를 완료했습니다. 기존 관리자 UAT에서 예약 가능 미리보기의 `guestCount` 생략·`null`·양수와 예약 현황 인원 표시, 객실 유형별 최소·최대 인원 적용을 확인했습니다. `v0.5.1` tag와 GitHub Release는 아직 발행하지 않았습니다.
+운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`입니다. 개발 정본은 79 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #256 사진 정규화, #250 진행 중 메이드의 후속 계획 허용, #264 수행 불가 취소·재배정을 포함합니다. 마지막으로 검증된 운영 API는 78 migrations, Supabase `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이며 Pages도 그 배포본과 artifact parity를 완료했습니다. 기존 관리자 UAT에서 예약 가능 미리보기의 `guestCount` 생략·`null`·양수와 예약 현황 인원 표시, 객실 유형별 최소·최대 인원 적용을 확인했습니다. 개발 정본의 후속 기능은 release 승격 전까지 운영 API에서 사용할 수 없고, `v0.5.1` tag와 GitHub Release도 아직 발행하지 않았습니다.
 
 ## 현재 구현
 

@@ -68,7 +68,7 @@ role/status·capability·assignment/version 검증, scoped idempotency, audit/ou
 - 새 submission version과 photo bindings/binding-set seal을 append하고 current pointer를 expected revision CAS로 교체한다. 일반 재제출은 과거 version을 superseded history로 유지한다. 폭탄방 report/evidence는 최초 submission에 seal되면 `BOMB_REPORT_SEALED`로 재제출을 막아 다른 version으로 이동하지 않는다.
 - 관리자 pending queue와 detail은 notified assignment의 immutable room snapshot, sealed opaque photo ID/slot/version, 폭탄 evidence photo ID만 공개한다. Drive locator/hash/file name, request hash, raw state, PIN/PII는 공개하지 않는다. 오래된 current pointer의 검수·폭탄 판정은 `STALE_VERSION`으로 거부한다.
 - 승인 transaction은 immutable inspection decision, 상태 전이, 비행동 notification/outbox/audit와 원청소 earning을 exactly-once 생성한다. 반려 transaction은 earning 없이 원 attempt/submission/decision·원 maid에 고정된 0원 notified reclean과 행동 notification/outbox/audit를 만든다. attempt 생성은 #28 activation만 담당한다.
-- `inspection_reclean` template이 room type에 대해 정확히 한 published version이 아니면 반려 transaction 전체를 fail-closed한다. 2026-09-23 결정에 따라 원 maid 퇴사·부상 등 수행 불가 예외는 관리자가 현재 배정을 취소한 뒤 일반 미배정 target으로 되돌려 재배정하며, 자동 이관이나 별도 compensation은 만들지 않는다.
+- `inspection_reclean` template이 room type에 대해 정확히 한 published version이 아니면 반려 transaction 전체를 fail-closed한다. 2026-09-23 #264 계약에 따라 원 maid 퇴사·부상 등 수행 불가 예외는 관리자가 기존 0원 재청소 target을 취소 이력으로 종료하고 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 만든다. 기존 target 자동 이관이나 별도 compensation은 만들지 않는다.
 
 운영 Supabase·recovery·main·Edge·Pages·Cron·Vault·tag/Release는 이번 작업에서 변경하지 않는다.
 

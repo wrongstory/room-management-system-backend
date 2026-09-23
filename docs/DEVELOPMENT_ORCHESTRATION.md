@@ -45,10 +45,10 @@ main/release 승격, tag/GitHub Release를 변경하지 않는다. feature/dev s
 
 ## 현재 진행 기준
 
-- 현재 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, `dev@40edb0681c852d287ded7d0a7af66b81db2ebcdd`다. production runtime은 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations이며 Pages parity와 기존 관리자 `guestCount` UAT가 완료됐다. #256 사진 정규화 source의 Edge/Pages 배포와 실제 휴대폰 UAT는 남아 있다.
+- 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 79 migrations / OpenAPI 0.5.1 129 paths / 139 operations, production runtime은 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations이다. Pages parity와 기존 관리자 `guestCount` UAT는 완료됐지만 #256 사진 정규화와 #250/#264 배정 후속의 운영 승격은 남아 있다.
 - Web Push는 사용자 실제 기기 수신을 확인했다. 내부 health와 secret 상태는 별도 안전 projection으로 확인한다.
 - Google human owner는 `yeosucastletheart@gmail.com`으로 정했고, 서버는 별도 최소 권한 service account를 사용한다. 실제 target/credential/Cron 활성화는 별도 운영 gate다.
-- 원 maid가 퇴사·부상 등으로 수행 불가한 청소·재청소는 현재 배정을 취소하고 일반 미배정 상태로 돌려 관리자 알림 후 재배정한다. 별도 보상 원장은 만들지 않는다. 이 API/UI 연결은 후속 기능 작업이다.
+- 원 maid가 퇴사·부상 등으로 수행 불가한 일반 청소는 현재 배정을 취소하고 같은 target을 미배정으로 돌린다. 검수 반려 재청소는 기존 0원 target을 이력으로 종료하고 원 유상 snapshot의 별도 ordinary replacement target을 만든다. 관리자 알림과 backend API는 #264로 source/dev 완료됐고 프런트 연결·운영 승격은 후속이다. 별도 보상 원장은 만들지 않는다.
 - DB 논리 백업은 매일 01:00~06:00 KST, 15일 보관으로 확정했다. 정확한 시각과 추후 지정할 PC 로컬 경로는 아직 입력값이다.
 - `v0.3.0`은 소급 tag/Release를 만들지 않으며, `v0.5.1` tag/GitHub Release도 별도 승인 전까지 발행하지 않는다.
 

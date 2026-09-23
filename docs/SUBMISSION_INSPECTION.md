@@ -45,7 +45,7 @@ reclean template은 원 room type의 published `cleaning_kind='reclean'` version
 한다. 없거나 모호하면 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 inspection decision, 상태, 알림,
 outbox, audit 전체를 rollback한다. 원 maid가 수행 가능하면 다른 maid에게 임의 이관하지 않는다.
 
-원 maid가 퇴사·부상 등으로 청소 또는 재청소를 수행할 수 없으면 관리자가 현재 배정을 취소한다. 객실은 청소 미완료·미배정으로 남고 관리자에게 재배정 필요 알림을 보낸다. 이후 기존 일반 배정 절차로 다른 maid에게 새 assignment revision을 만든다. 별도 보상 규약이나 compensation 원장을 만들지 않으며, 새 담당자는 일반 완료·검수·earning·payroll 규칙을 따른다. 원 담당자의 미완료 작업 earning은 생성하지 않고 취소 reason, 원 assignment/attempt와 새 revision을 모두 보존한다.
+원 maid가 퇴사·부상 등으로 재청소를 수행할 수 없으면 관리자가 현재 배정을 취소한다. 기존 0원 `inspection_reclean` target은 완료로 위장하거나 다른 maid에게 이관하지 않고 취소 이력으로 보존한다. 대신 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 미배정으로 만들고 관리자에게 재배정 필요 알림을 보낸다. 새 담당자는 일반 완료·검수·earning·payroll 규칙을 따르며 별도 compensation 원장이나 원 담당자의 미완료 earning은 만들지 않는다.
 
 checkout obligation 완료는 root target status만 신뢰하지 않는다. `completion_submission_id`가
 승인된 terminal descendant인지 recursive reclean chain으로 증명하며 새 completed row의 NULL proof는

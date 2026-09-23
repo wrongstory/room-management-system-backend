@@ -589,7 +589,7 @@ erDiagram
 - submission current pointer는 attempt별 revision CAS다. field completion만으로 제출/검수/earning은 생기지 않으며, 필수 current photo가 하나라도 누락·pending·failed·expired·purged면 새 제출을 거부한다. 일반 재제출은 과거 version/photo bindings를 immutable history로 남긴다.
 - 관리자 검수 queue/detail은 current `inspection_pending`만 사용한다. queue의 roomNumber는 target/live room이 아니라 notified assignment snapshot에서 가져오며, sealed photo ID/slot/version 외 provider locator/hash/file name과 PIN/PII/request hash/raw state는 반환하지 않는다.
 - stale current review와 bomb 선판정은 `STALE_VERSION`으로 실패한다. 최종 approve/reject, notification/outbox/audit, earning 또는 reclean 생성은 한 transaction이며 receipt lock과 unique provenance로 동시 재시도를 exactly-once 처리한다.
-- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유한다. 원 maid 수행 불가 예외에서는 기존 assignment를 취소하고 일반 배정의 새 revision을 만들며, 새 담당자는 일반 완료·검수·earning 규칙을 사용하고 원 담당자의 미완료 earning은 생성하지 않는다.
+- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유한다. 원 maid 수행 불가 예외에서는 기존 0원 target/assignment를 취소 이력으로 종료하고 원 유상 fee/template snapshot의 별도 ordinary replacement target을 만든다. 새 담당자는 replacement의 일반 완료·검수·earning 규칙을 사용하며 원 담당자의 미완료 earning은 생성하지 않는다.
 - checkout completion은 root target status만 신뢰하지 않는다. `completion_submission_id`에서 승인된 terminal descendant를 recursive reclean chain으로 증명하며, 새 completed obligation에 NULL submission proof를 허용하지 않는다.
 
 ### #27 시작 전 취소 요청 원장
@@ -633,7 +633,7 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
-#109/#128/#264의 typed 알림은 private event catalog의 49 event family/33 public category를 정본으로
+#109/#128/#264의 typed 알림은 private event catalog의 53 event family/36 public category를 정본으로
 삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
 검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
 dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫

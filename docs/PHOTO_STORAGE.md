@@ -1,6 +1,6 @@
 # Google Drive 사진 저장 운영안
 
-> 상태: **#83·#84·#85·#31과 Issue #9 retention v2 source는 production 정본에 포함 / #256 스마트폰 원본 정규화는 `main@10a1f814649e92260e9e7353ab242400311b429e`·`dev@40edb0681c852d287ded7d0a7af66b81db2ebcdd` source 통합 완료 / Edge·Pages·실기기 UAT와 실제 Drive service account·provider/Cron hosted 활성화 미완료**
+> 상태: **#83·#84·#85·#31과 Issue #9 retention v2 source는 production 정본에 포함 / #256 스마트폰 원본 정규화는 `main@10a1f814649e92260e9e7353ab242400311b429e`와 최신 dev 기능 정본에 통합 완료 / Edge·Pages·실기기 UAT와 실제 Drive service account·provider/Cron hosted 활성화 미완료**
 > 최신 확정 계약은 Google Drive 전용·300KiB 이하·비공개 저장을 유지하되, 청소 제출은 최종 검사 결정+168시간, 이슈·컴플레인·중단/충돌 증빙은 해결·종결+180일, 진짜 orphan은 업로드+30일에 삭제한다. 아래 `uploaded_at + 7 days` 절은 현재 배포된 legacy 구현을 설명하는 기록이며 목표 정책이 아니다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
 아래 압축·업로드 흐름과 용량 보호 기준은 유지한다. #84의 Drive HTTP adapter와 업로드·열람 API, #85 purge worker, Issue #9의 private retention record/link·권한 projection·late-binding fence와 authoritative expiry source는 production 정본에 포함됐다. 실제 service account 자격증명 주입, Google provider hosted smoke와 주기 실행 활성화는 미완료이므로 provider 사용 완료로 표시하지 않는다.
