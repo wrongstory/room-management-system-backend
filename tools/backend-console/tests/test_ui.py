@@ -5,16 +5,19 @@ import pytest
 from PySide6.QtWidgets import QDialog, QMessageBox
 from pytestqt.qtbot import QtBot
 
+import room_management_console.ui as ui_module
 from room_management_console.api_client import BackendApiClient
 from room_management_console.approved_targets import APPROVED_HOSTED_TARGETS
 from room_management_console.build_info import BuildInfo
 from room_management_console.config import AppConfig
 from room_management_console.models import Account
+from room_management_console.readonly_db import ReadonlyQueryResult
 from room_management_console.ui import (
     AccountsPage,
     ActivityPage,
     CreateAccountDialog,
     LoginDialog,
+    ReadonlyDatabasePage,
 )
 
 RECOVERY_TARGET = APPROVED_HOSTED_TARGETS["recovery"]
@@ -51,6 +54,63 @@ def test_login_password_field_does_not_echo_plain_text(qtbot: QtBot) -> None:
     dialog = LoginDialog(config(), client)
     qtbot.addWidget(dialog)
     assert dialog.password.echoMode() == dialog.password.EchoMode.Password
+
+
+def test_hosted_readonly_page_is_disabled_by_default(qtbot: QtBot) -> None:
+    page = ReadonlyDatabasePage(config())
+    qtbot.addWidget(page)
+
+    assert not page.run_button.isEnabled()
+    assert "HOSTED_DIRECT_DB_NOT_APPROVED" in page.status_label.text()
+    assert page.db_user.text() == f"rms_diagnostic.{RECOVERY_TARGET.project_ref}"
+
+    page._finished()
+
+    assert not page.run_button.isEnabled()
+
+
+def test_hosted_readonly_page_clears_password_and_renders_bounded_result(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    enabled_config = AppConfig(
+        environment="recovery",
+        project_ref=RECOVERY_TARGET.project_ref,
+        supabase_url=RECOVERY_TARGET.supabase_url,
+        publishable_key="sb_publishable_example_only_1234567890",
+        enable_hosted_readonly_db=True,
+    )
+
+    class FakeExecutor:
+        def __init__(self, _factory: object) -> None:
+            pass
+
+        def execute(self, source: str) -> ReadonlyQueryResult:
+            assert source == "SELECT * FROM public.diagnostic_system_summary"
+            return ReadonlyQueryResult(
+                columns=("room_count",),
+                rows=((121,),),
+                elapsed_ms=7,
+                response_bytes=32,
+            )
+
+        def cancel(self) -> bool:
+            return True
+
+    monkeypatch.setattr(ui_module, "ReadonlyQueryExecutor", FakeExecutor)
+    page = ReadonlyDatabasePage(enabled_config)
+    qtbot.addWidget(page)
+    page.pooler_host.setText("aws-0-ap-northeast-2.pooler.supabase.com")
+    page.project_confirmation.setText(RECOVERY_TARGET.project_ref)
+    page.db_password.setText("runtime-only-password")
+
+    page.run_query()
+
+    assert page.db_password.text() == ""
+    qtbot.waitUntil(lambda: page.result_table.rowCount() == 1)
+    result_item = page.result_table.item(0, 0)
+    assert result_item is not None
+    assert result_item.text() == "121"
+    assert page.result_meta.text() == "1행 / 32 bytes / 7 ms"
 
 
 def test_create_account_clears_phone_before_network_result(

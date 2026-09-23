@@ -5,11 +5,14 @@ from dataclasses import dataclass
 
 import pytest
 
+import room_management_console.readonly_db as readonly_db_module
 from room_management_console.readonly_db import (
+    HostedReadonlyProfile,
     ReadonlyDbAvailability,
     ReadonlyDbError,
     ReadonlyQueryExecutor,
     ReadonlyQueryPolicy,
+    open_hosted_readonly_connection,
     readonly_db_availability,
     validate_readonly_query,
 )
@@ -259,3 +262,92 @@ def test_hosted_direct_database_profiles_remain_disabled() -> None:
         availability = readonly_db_availability(environment)
         assert not availability.enabled
         assert availability.reason == "HOSTED_DIRECT_DB_NOT_APPROVED"
+        assert readonly_db_availability(environment, enable_hosted=True) == ReadonlyDbAvailability(
+            True, None
+        )
+
+
+def test_hosted_profile_requires_exact_project_confirmation_and_pooler_host() -> None:
+    profile = HostedReadonlyProfile.create(
+        environment="production",
+        expected_project_ref="aodikrxcczbogjpsjwjt",
+        confirmed_project_ref="aodikrxcczbogjpsjwjt",
+        host=" AWS-0-AP-NORTHEAST-2.POOLER.SUPABASE.COM ",
+    )
+    assert profile.host == "aws-0-ap-northeast-2.pooler.supabase.com"
+    assert profile.port == 5432
+    assert profile.user == "rms_diagnostic.aodikrxcczbogjpsjwjt"
+    assert "password" not in repr(profile).lower()
+
+    with pytest.raises(ReadonlyDbError, match="PROJECT_CONFIRMATION_MISMATCH"):
+        HostedReadonlyProfile.create(
+            environment="production",
+            expected_project_ref="aodikrxcczbogjpsjwjt",
+            confirmed_project_ref="other-project",
+            host="aws-0-ap-northeast-2.pooler.supabase.com",
+        )
+    with pytest.raises(ReadonlyDbError, match="POOLER_HOST_INVALID"):
+        HostedReadonlyProfile.create(
+            environment="production",
+            expected_project_ref="aodikrxcczbogjpsjwjt",
+            confirmed_project_ref="aodikrxcczbogjpsjwjt",
+            host="db.aodikrxcczbogjpsjwjt.supabase.co",
+        )
+
+
+def test_hosted_connection_requires_exact_readonly_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = HostedReadonlyProfile.create(
+        environment="recovery",
+        expected_project_ref="matalcofimnhuzslfhdd",
+        confirmed_project_ref="matalcofimnhuzslfhdd",
+        host="aws-0-ap-northeast-2.pooler.supabase.com",
+    )
+    cursor = FakeCursor([("rms_diagnostic", "postgres", "on")])
+    connection = FakeConnection(cursor)
+    received: dict[str, object] = {}
+
+    def fake_open(**values: object) -> FakeConnection:
+        received.update(values)
+        return connection
+
+    monkeypatch.setattr(readonly_db_module, "open_psycopg_connection", fake_open)
+
+    result = open_hosted_readonly_connection(profile, "runtime-only-password")
+
+    assert result is connection
+    assert received == {
+        "host": "aws-0-ap-northeast-2.pooler.supabase.com",
+        "port": 5432,
+        "dbname": "postgres",
+        "user": "rms_diagnostic.matalcofimnhuzslfhdd",
+        "password": "runtime-only-password",
+        "sslmode": "verify-full",
+        "sslrootcert": "system",
+    }
+    assert connection.rolled_back
+    assert cursor.closed
+    assert not connection.closed
+
+
+def test_hosted_connection_closes_on_identity_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = HostedReadonlyProfile.create(
+        environment="production",
+        expected_project_ref="aodikrxcczbogjpsjwjt",
+        confirmed_project_ref="aodikrxcczbogjpsjwjt",
+        host="aws-0-ap-northeast-2.pooler.supabase.com",
+    )
+    connection = FakeConnection(FakeCursor([("postgres", "postgres", "off")]))
+    monkeypatch.setattr(
+        readonly_db_module,
+        "open_psycopg_connection",
+        lambda **_values: connection,
+    )
+
+    with pytest.raises(ReadonlyDbError, match="DB_IDENTITY_MISMATCH"):
+        open_hosted_readonly_connection(profile, "runtime-only-password")
+
+    assert connection.closed
