@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'reservation_bookability_optional_guest_count'
+    'assignment_unavailability_reassignment'
   ) ->> 'currentMigration',
-  'reservation_bookability_optional_guest_count',
+  'assignment_unavailability_reassignment',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'reservation_bookability_optional_guest_count'
+    'assignment_unavailability_reassignment'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'reservation_bookability_optional_guest_count';
+where name = 'assignment_unavailability_reassignment';
 
 delete from supabase_migrations.schema_migrations
-where name = 'reservation_bookability_optional_guest_count';
+where name = 'assignment_unavailability_reassignment';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'reservation_bookability_optional_guest_count'
+    'assignment_unavailability_reassignment'
   ) ->> 'currentMigration',
-  'room_status_admin_correction',
-  'database status exposes migration 77 when migration 78 is absent'
+  'reservation_bookability_optional_guest_count',
+  'database status exposes migration 78 when migration 79 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'reservation_bookability_optional_guest_count'
+    'assignment_unavailability_reassignment'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 77 behind source migration 78'
+  'database status reports migration 78 behind source migration 79'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

@@ -139,15 +139,15 @@ function assertHistory(actual, expected, label) {
 let passed = false;
 try {
   const expectedMigrations = migrationFiles();
-  assert(expectedMigrations.length === 78, "hotfix candidate must contain exactly 78 migrations");
+  assert(expectedMigrations.length >= 78, "source must retain the 78-migration hotfix boundary");
   assert(
     expectedMigrations[55]?.version === baselineVersion &&
       expectedMigrations[55]?.name === "cleaning_template_duration_optional",
     "migration 56 must be cleaning_template_duration_optional",
   );
   assert(
-    expectedMigrations.at(-1)?.version === finalVersion &&
-      expectedMigrations.at(-1)?.name === "reservation_bookability_optional_guest_count",
+    expectedMigrations[77]?.version === finalVersion &&
+      expectedMigrations[77]?.name === "reservation_bookability_optional_guest_count",
     "migration 78 must be reservation_bookability_optional_guest_count",
   );
 

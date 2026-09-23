@@ -5,12 +5,12 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationDirectory = resolve(projectRoot, "supabase", "migrations");
-const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.5.1.json");
+const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.dev.json");
 const migrationFilePattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
-const baselineCount = 77;
+const baselineCount = 78;
 
 function invariant(condition, message) {
-  if (!condition) throw new Error(`Migration manifest generation failed: ${message}`);
+  if (!condition) throw new Error(`Development migration manifest generation failed: ${message}`);
 }
 
 function canonicalContent(source, fileName) {
@@ -21,9 +21,7 @@ function canonicalContent(source, fileName) {
 
 const files = (await readdir(migrationDirectory))
   .filter((fileName) => fileName.endsWith(".sql"))
-  .sort()
-  .slice(0, 78);
-
+  .sort();
 const migrations = [];
 let previousVersion = "";
 for (const [index, fileName] of files.entries()) {
@@ -39,19 +37,15 @@ for (const [index, fileName] of files.entries()) {
   previousVersion = match[1];
 }
 
-invariant(migrations.length === 78, `expected 78 migrations, found ${migrations.length}`);
+invariant(migrations.length >= baselineCount, "development history cannot precede v0.5.1");
 invariant(
-  migrations[baselineCount - 1]?.name === "room_status_admin_correction",
-  "v0.5.1 baseline must be the immutable v0.5.0 head",
-);
-invariant(
-  migrations.at(-1)?.name === "reservation_bookability_optional_guest_count",
-  "v0.5.1 head must be the #245 hotfix",
+  migrations[baselineCount - 1]?.name === "reservation_bookability_optional_guest_count",
+  "development baseline must be the immutable v0.5.1 head",
 );
 
 const manifest = {
   schemaVersion: 1,
-  release: "v0.5.1",
+  release: "dev",
   hashAlgorithm: "sha256-lf-utf8",
   totalCount: migrations.length,
   baseline: {
@@ -60,7 +54,7 @@ const manifest = {
   },
   pending: {
     count: migrations.length - baselineCount,
-    first: migrations[baselineCount].name,
+    first: migrations[baselineCount]?.name ?? null,
     head: migrations.at(-1).name,
   },
   head: migrations.at(-1).name,
@@ -69,5 +63,5 @@ const manifest = {
 
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 process.stdout.write(
-  `Migration manifest generated: release=${manifest.release} total=${manifest.totalCount} baseline=${manifest.baseline.count} pending=${manifest.pending.count} head=${manifest.head}\n`,
+  `Development migration manifest generated: total=${manifest.totalCount} baseline=${manifest.baseline.count} pending=${manifest.pending.count} head=${manifest.head}\n`,
 );
