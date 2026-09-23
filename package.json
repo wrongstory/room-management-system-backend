@@ -33,6 +33,7 @@
     "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs",
     "backup:dry-run": "node scripts/backup-recovery-dry-run.mjs --target local-synthetic",
     "backup:dry-run:fresh": "npm run db:verify && npm run backup:dry-run",
+    "backup:operator:plan": "node scripts/backup-recovery-operator-plan.mjs",
     "edge:check": "node scripts/check-edge-functions.mjs",
     "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
     "console:openapi:export": "tsx scripts/export-backend-console-openapi.ts",

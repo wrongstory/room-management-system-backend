@@ -92,6 +92,36 @@ dry-run은 다음을 fail-closed한다.
 
 이 명령은 local synthetic 검증 전용이다. 운영 dump, recovery 초기화·복원, 지정 PC 보관, 스케줄 활성화 권한을 부여하지 않는다.
 
+## Windows 운영 자동화 source 기반
+
+Issue #273은 실제 운영 자격증명이나 원격 프로젝트를 건드리지 않고 Windows Task Scheduler에 전달할 안전한 plan을 먼저 고정한다. 운영 설정 파일에는 다음 비밀 없는 값만 둔다.
+
+- production/recovery project ref
+- 운영자가 지정한 로컬 고정 드라이브의 절대 백업 경로
+- 01:00~06:00 KST 범위의 정확한 실행 시각
+- 15일 retention
+- Windows 보안 저장소의 credential **이름** 세 개
+
+DB URL·비밀번호·암호화 키 자체는 설정 JSON, 명령행, Scheduled Task argument, Git, 로그에 넣지 않는다. plan은 다음 명령으로 사전 검증한다.
+
+```powershell
+npm run backup:operator:plan -- --config C:\RmsConfig\backup.json
+```
+
+`scripts/windows/Install-RmsBackupRecoveryTask.ps1`은 `-Enable`을 명시한 경우에만 작업을 등록하며, 등록 직후에도 기본 상태는 **Disabled**다. credential bridge와 원격 recovery executor가 별도 운영 gate에서 설치·검증되기 전에는 runner가 `BACKUP_OPERATOR_CREDENTIAL_BRIDGE_NOT_ACTIVATED`로 실패한다. 따라서 이 source 기반만으로 운영 백업이 실행 중이라고 표시해서는 안 된다.
+
+정확한 PC 경로와 실행 시각이 정해진 뒤의 순서는 다음과 같다.
+
+1. 비밀 없는 설정 plan 검증
+2. Windows 보안 저장소 credential 이름/ACL 확인
+3. 운영자가 승인한 credential bridge와 원격 dump/recovery executor 설치
+4. Disabled task 등록 및 수동 1회 dry-run
+5. artifact 암호화·SHA-256·recovery 복원·121실/RLS/RPC 검사
+6. 직전 성공본 보존과 실패 복구 확인
+7. 마지막으로 task 활성화
+
+현재 PR 범위는 1과 Disabled task source까지만이며, 2~7은 실행하지 않는다.
+
 ## Free Plan 주의사항
 
 - Free 프로젝트 한도는 소유자·관리자로 속한 모든 조직을 합쳐 활성 2개다.
