@@ -32,8 +32,8 @@ const effectiveParameters = (pathItem, operation) => {
 
 assert(document.openapi === '3.1.1', `Frontend generator requires OpenAPI 3.1.1, received ${document.openapi}.`);
 assert(document.info.version === '0.5.1', `Unexpected source API version ${document.info.version}.`);
-assert(Object.keys(document.paths).length === 128, 'Update the frontend contract snapshot and reviewed path inventory.');
-assert(operations.length === 138, 'Update the frontend contract snapshot and reviewed operation inventory.');
+assert(Object.keys(document.paths).length === 129, 'Update the frontend contract snapshot and reviewed path inventory.');
+assert(operations.length === 139, 'Update the frontend contract snapshot and reviewed operation inventory.');
 const operationIds = operations.map(({ operation }) => operation.operationId);
 assert(operationIds.every(Boolean), 'Every frontend-visible operation requires operationId.');
 assert(new Set(operationIds).size === operationIds.length, 'Frontend-visible operationId values must be unique.');

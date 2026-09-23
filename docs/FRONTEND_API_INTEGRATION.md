@@ -395,7 +395,7 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 - `WIREFRAME/generated/backend-api.d.ts`: `openapi-typescript@7.13.0` 생성 타입
 - `.github/workflows/api-contract.yml`: clean checkout 생성 동일성·필수 영역·민감 필드·OpenAPI 3.1 breaking diff 검증
 
-이 저장소의 `npm run openapi:frontend:check`는 source 단계에서 OpenAPI 0.5.1 / 128 paths / 138 operations, 고유 `operationId`, 주요 업무 영역, mutation 멱등성 header, 안정적 오류 envelope와 금지 민감 필드를 검증한다. API를 추가·변경하는 PR은 기대 개수를 근거 없이 완화하지 않고 프런트 snapshot PR과 새 백엔드 commit 신원을 함께 갱신한다.
+이 저장소의 `npm run openapi:frontend:check`는 source 단계에서 OpenAPI 0.5.1 / 129 paths / 139 operations, 고유 `operationId`, 주요 업무 영역, mutation 멱등성 header, 안정적 오류 envelope와 금지 민감 필드를 검증한다. API를 추가·변경하는 PR은 기대 개수를 근거 없이 완화하지 않고 프런트 snapshot PR과 새 백엔드 commit 신원을 함께 갱신한다. 운영 Edge/Pages의 128/138 snapshot과 `dev` source의 129/139 계약은 release 전까지 구분한다.
 
 프런트 breaking diff는 기존 path/method 제거, `operationId` 변경, request parameter/body 제약 강화, response status/media/property 보장 제거를 차단한다. 새 endpoint 추가 같은 호환 변경은 허용한다. 첫 도입 PR은 base snapshot이 없으므로 baseline으로 통과하고, 이후부터 `dev` snapshot을 기준으로 비교한다.
 
