@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from .api_client import ApiError, BackendApiClient
+from .build_info import BuildInfo, load_build_info
 from .config import AppConfig
 from .models import ACCOUNT_STATUS_TARGETS, Account, AccountStatusTarget
 from .policies import account_action_policy
@@ -46,7 +47,12 @@ def show_api_error(parent: QWidget, error: ApiError) -> None:
 
 
 class LoginDialog(QDialog):
-    def __init__(self, config: AppConfig, client: BackendApiClient) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        client: BackendApiClient,
+        build_info: BuildInfo | None = None,
+    ) -> None:
         super().__init__()
         self._client = client
         self._pool = QThreadPool.globalInstance()
@@ -60,6 +66,9 @@ class LoginDialog(QDialog):
             "font-weight: 700; padding: 10px; background: #182230; color: white;"
         )
         layout.addWidget(self.environment_label)
+        self.build_label = QLabel((build_info or load_build_info()).display_label)
+        self.build_label.setObjectName("buildIdentity")
+        layout.addWidget(self.build_label)
         layout.addWidget(
             QLabel("비밀번호와 세션 토큰은 이 PC의 파일·레지스트리에 저장되지 않습니다.")
         )
@@ -623,7 +632,12 @@ class ActivityFilter(QObject):
 class MainWindow(QMainWindow):
     locked = Signal()
 
-    def __init__(self, config: AppConfig, client: BackendApiClient) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        client: BackendApiClient,
+        build_info: BuildInfo | None = None,
+    ) -> None:
         super().__init__()
         self._client = client
         self._closing_for_lock = False
@@ -638,6 +652,9 @@ class MainWindow(QMainWindow):
             "font-size: 15px; font-weight: 800; padding: 10px; background: #182230; color: white;"
         )
         layout.addWidget(self.environment_banner)
+        self.build_label = QLabel((build_info or load_build_info()).display_label)
+        self.build_label.setObjectName("buildIdentity")
+        layout.addWidget(self.build_label)
         actor = client.actor
         layout.addWidget(
             QLabel(f"로그인: {actor.display_name if actor else 'unknown'} (developer)")

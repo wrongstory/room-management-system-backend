@@ -17,6 +17,10 @@ runtime-status는 Drive CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN/ROOT_FOLDER_ID와 
 자세한 설치·운영·분실 대응 절차는 저장소의
 `docs/BACKEND_CONSOLE_OPERATIONS.md`를 따른다.
 
+Windows 배포본은 변경 파일이 없는 exact Git source에서만 생성된다. zip 안의
+`build-info.json`과 로그인·메인 화면에는 앱 버전과 source SHA가 표시되며, manifest가 없거나
+유효하지 않은 실행본은 `SOURCE: UNVERIFIED`로 표시된다.
+
 ## Phase B 읽기 전용 DB 진단 PoC
 
 - `rms_diagnostic` DB 역할은 password 없이 생성되고 SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE을
