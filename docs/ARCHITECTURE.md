@@ -926,7 +926,9 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 - 마이그레이션 SQL은 GitHub의 `supabase/migrations/`를 정본으로 사용한다.
 - Free Plan의 두 번째 프로젝트는 최신 논리 dump를 실제로 복원하는 warm recovery copy로 사용한다.
-- 매일 roles·schema·data dump를 만들고 recovery 프로젝트에 복원한 뒤 핵심 행 수·RLS·관리자·객실 seed를 검사한다.
+- 운영 자동화는 매일 01:00~06:00 KST 사이 roles·schema·data dump를 만들고, 지정될 PC 저장소에 최근 15일분을 보관한다. 정확한 시각과 저장 경로는 운영 활성화 전에 별도로 확정한다.
+- source/dev의 로컬 dry-run은 fresh synthetic DB만 허용하고 app-owned `public/private` dump를 일회용 로컬 DB에 복원한다. migration stable name/version, SHA-256, 121실, 전체 app table 행 수, public RLS와 critical RPC grant를 검사한 뒤 성공 pointer를 게시한다.
+- 로컬 dry-run과 향후 recovery 복원 모두 `auth`, `storage`, `realtime`, `vault`, `cron`, `net`, `supabase_migrations`를 app-owned reset/restore 대상으로 취급하지 않는다.
 - DB dump는 Google Drive 사진 bytes를 포함하지 않는다. metadata·retention ledger는 DB backup 대상이며, provider bytes는 청소 최종 검사+168시간, 사건 해결/종결+180일, true orphan 업로드+30일 정책으로 별도 purge한다.
 - 전체 주기와 복원 명령은 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)에 정의한다.
 
