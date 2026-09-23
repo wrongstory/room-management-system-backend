@@ -75,7 +75,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 production 최종 runtime/readback evidence: **2026-09-23 KST**. #245 v0.5.1 hotfix는 production DB/API와 Pages 공개 artifact에 반영됐고 dev backport도 완료됐다. 이후 #256 사진 정규화 source가 `main`/`dev`에 통합됐고 #250/#264 배정 후속은 `dev`에 통합됐으나 운영 Edge/Pages 배포와 release 승격은 아직 별도다.
 
-- 운영 Git 정본: `main@10a1f814649e92260e9e7353ab242400311b429e`. 최신 기능 통합 지점: `dev@2ce8953c76fbf5cb33aff9f8a57b303acbf05cdb`, **81 migrations / OpenAPI 0.5.1 129 paths / 139 operations**. #171 로컬 합성 백업·복구 dry-run까지 source/dev 완료했고 #172의 82번째 migration은 feature 후보다.
+- 운영 Git 정본: `main@10a1f814649e92260e9e7353ab242400311b429e`. 최신 기능 통합 지점: `dev@bbfb6ced4900113c2c39890c11c4e1526c5372b0`, **82 migrations / OpenAPI 0.5.1 129 paths / 139 operations**. #172 읽기 전용 진단까지 source/dev 완료했고 #275 메이드 PIN 즉시 조회의 83번째 migration은 source 후보다.
 - 마지막으로 검증된 production API bundle은 #245 v0.5.1 계약을 제공하는 `api` ACTIVE v24다. #256 main source의 Edge 배포·readback은 아직 완료로 표시하지 않는다.
 - production은 **78 migrations**, head `reservation_bookability_optional_guest_count`, **`api` ACTIVE v24**, OpenAPI **0.5.1 / 128 paths / 138 operations**다.
 - production `/health`와 `/openapi.json`은 HTTP 200이다. GitHub Pages portal과 공개 OpenAPI의 v0.5.1 / 128 / 138 readback 및 artifact parity도 완료됐다.
@@ -89,7 +89,7 @@ production 최종 runtime/readback evidence: **2026-09-23 KST**. #245 v0.5.1 hot
 - #96은 PR #97로 source/dev 병합 완료했다. bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 포함한 당시 개발 통합 계약은 **36 migrations / 77 paths / 83 operations**다. 해당 API source는 production `api` bundle에 반영됐지만 hosted 역할별 read/mutation smoke는 미확인이다.
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
 - #131의 #69 PIN Phase A와 #194의 64번째 assignment entitlement migration은 production에 반영됐다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. 물리 PIN change는 exact in-progress access lease를 유지하고 reveal은 exact current/notified assignment entitlement + 30초 lease를 사용한다. PIN 평문·암호문은 public table, audit, outbox, URL, error, 로그에 저장하지 않으며 hosted role/positive mutation smoke는 별도다.
-- #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
+- #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하고 #275부터 현재 담당자의 일반 PIN reveal도 물리 확인 없이 허용하지만, 실제 체크인과 물리 PIN change/confirm은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
 - #184 현재 시각 객실 projection, #187 Phase A~C 예약 임박·체크인 전 변경·투숙 중 이동, #180 `extra-proof` 0~10장 collection source는 v0.4.0 production DB/API에 포함됐다. 각 기능의 실제 mutation smoke와 프런트 사용 완료는 별도다.
 - #245 dev backport, Pages v0.5.1 공개 readback과 기존 관리자 `guestCount` UAT는 완료됐다. 현재 release 전 기능 차이는 #256 사진 정규화와 #250/#264 배정 후속이다. **승인 release exact source 고정 → 운영 migration/API/Pages 반영 → 사진 UAT와 #264 역할별 hosted smoke**를 별도 gate로 수행하며, provider 활성화와 tag/GitHub Release도 별도 승인으로 남긴다. 안전 fixture가 없으면 임의 production 데이터를 만들지 않는다.
 - 운영 migration: **78건**, head `reservation_bookability_optional_guest_count`
@@ -1259,7 +1259,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 | [~] | `POST /v1/rooms/{roomId}/pin/generated/confirm` | active password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | v0.4.0 production source 포함; 실제 PIN bootstrap·물리 확인 mutation 미실행 |
 
 - [x] 예약 생성·변경·객실 projection에서 `unconfigured`/`mismatch` PIN 경고를 allocation blocker와 분리
-- [x] actual check-in preparation context와 reveal/change의 verified-only fail-closed 유지
+- [x] actual check-in preparation context와 물리 PIN change/confirm의 verified-only fail-closed 유지; #275 일반 reveal은 current entitlement 기준 즉시 허용
 - [x] active admin 전용 `POST /v1/rooms/pins/bootstrap`, 최대 25건, idempotent receipt, 기존 current/mismatch 비덮어쓰기
 - [x] #169 candidate에서 고정 초기 PIN secret을 제거하고 CSPRNG batch-unique 4자리 자동 생성으로 교체
 - [x] 생성 직후 mismatch/no Sheet, admin 30초 no-store reveal, 현장 확인 후 verified/Sheet outbox 계약 추가

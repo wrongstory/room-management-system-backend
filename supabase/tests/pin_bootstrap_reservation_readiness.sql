@@ -240,7 +240,7 @@ select throws_ok(
   ),
   '55000',
   'ROOM_PIN_MISMATCH_UNRESOLVED',
-  'ordinary reveal remains closed for an unconfirmed generated PIN'
+  'admin ordinary reveal remains closed for an unconfirmed generated PIN'
 );
 select throws_ok(
   format(
@@ -249,7 +249,7 @@ select throws_ok(
   ),
   '42501',
   'ADMIN_REQUIRED',
-  'maid cannot reveal an unconfirmed generated PIN'
+  'generated bootstrap reveal remains admin-only; maid uses assignment-bound ordinary reveal'
 );
 
 create temp table generated_reveal(value jsonb);

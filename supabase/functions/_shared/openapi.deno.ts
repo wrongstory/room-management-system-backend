@@ -1664,6 +1664,18 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
   const reveal = doc.components.schemas.RoomPinReveal;
   const change = doc.components.schemas.RoomPinChangeResult;
   assert(
+    doc.paths["/v1/rooms/{roomId}/pin/reveal"].post.description.includes(
+      "담당 메이드에게는 pinSyncStatus와 물리 도어락 확인이 reveal 권한 조건이 아니므로",
+    ) &&
+      doc.paths["/v1/rooms/{roomId}/pin/reveal"].post.description.includes(
+        "현재 저장 PIN",
+      ) &&
+      doc.paths["/v1/rooms/{roomId}/pin/reveal"].post.description.includes(
+        "admin 일반 reveal은 기존 verified sync 조건을 유지합니다",
+      ),
+    "maid reveal is immediate without expanding the admin ordinary reveal policy",
+  );
+  assert(
     reveal.properties.credential.readOnly === true &&
       reveal.required.includes("credential") &&
       reveal.properties.clearAfterSeconds.minimum === 1 &&

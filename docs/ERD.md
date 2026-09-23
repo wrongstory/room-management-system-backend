@@ -1284,7 +1284,7 @@ PIN rotation은 assignment→target→profile→entitlement→open reveal 순서
 더 먼 미래 assignment와 inactive/departed/deactivation 진행 계정은 제외한다. 63→64 backfill도 active,
 password-complete, current/notified, nonterminal target, exact typed outbox와 current PIN revision 존재가 모두
 일치하는 row만 생성하고 기존 PIN/assignment/notification/audit/receipt/reveal 이력을 수정하지 않는다.
-물리 mismatch는 durable backfill을 제거하지 않고 실제 reveal에서만 verified 복구 전까지 차단한다.
+물리 mismatch는 durable backfill을 제거하지 않으며 #275부터 exact entitlement를 가진 담당 메이드의 actual reveal도 차단하지 않는다. 메이드 reveal은 authoritative current stored revision을 반환하고, admin 일반 reveal과 체크인 readiness 및 물리 PIN change/confirm은 verified 복구 전까지 차단한다.
 
 ## #196 Reservation bookability read projection (65번째 source migration)
 

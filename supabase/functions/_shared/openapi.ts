@@ -4666,7 +4666,7 @@ export const openApiDocument = {
         operationId: "prepareRoomPinChange",
         summary: "물리 도어락 PIN 변경 준비",
         description:
-          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 모든 PIN reveal이 차단되지만 예약 등록은 차단하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 admin 일반 reveal은 차단하지만 현재 통보된 담당 메이드의 일반 reveal과 예약 등록은 차단하지 않습니다. maid mismatch reveal은 authoritative current stored PIN을 반환하며 물리 도어락 일치를 의미하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter(), idempotencyHeader],
@@ -4791,7 +4791,7 @@ export const openApiDocument = {
         operationId: "revealRoomPin",
         summary: "현재 객실 PIN 일시 표시",
         description:
-          "30초 이하의 private reveal lease로 복호화한 뒤 세션·비밀번호·current PIN revision과 maid의 exact current/notified assignment entitlement를 DB에서 최종 재검증하고 sensitive.read append가 성공한 경우에만 plaintext credential을 반환합니다. entitlement는 통보 delivery outbox와 함께 확정되어 availableFrom 전에도 유효하고 field completion·upload·submission·inspection pending 동안 유지되며, 최종 승인/반려·승인 취소·재배정·계정 비활성화 workflow의 최종 정리·PIN rotation 때 즉시 종료됩니다. deactivation_pending/upload_only 동안 원장 이력은 유지되지만 active가 아닌 계정의 실제 reveal은 차단됩니다. 클라이언트는 clearAfterSeconds와 expiresAt 중 더 이른 시점 또는 화면 이동·background·pagehide·device lock·assignment removal·relock 즉시 plaintext를 지워야 하며 URL, clipboard, cache, offline 또는 영구 저장소에 기록하면 안 됩니다.",
+          "30초 이하의 private reveal lease로 복호화한 뒤 세션·비밀번호·current PIN revision과 maid의 exact current/notified assignment entitlement를 DB에서 최종 재검증하고 sensitive.read append가 성공한 경우에만 plaintext credential을 반환합니다. 담당 메이드에게는 pinSyncStatus와 물리 도어락 확인이 reveal 권한 조건이 아니므로 mismatch에서도 현재 저장 PIN을 즉시 반환하며, 이 값이 물리 도어락과 일치한다는 의미는 아닙니다. admin 일반 reveal은 기존 verified sync 조건을 유지합니다. entitlement는 통보 delivery outbox와 함께 확정되어 availableFrom 전에도 유효하고 field completion·upload·submission·inspection pending 동안 유지되며, 최종 승인/반려·승인 취소·재배정·계정 비활성화 workflow의 최종 정리·PIN rotation 때 즉시 종료됩니다. deactivation_pending/upload_only 동안 원장 이력은 유지되지만 active가 아닌 계정의 실제 reveal은 차단됩니다. 클라이언트는 clearAfterSeconds와 expiresAt 중 더 이른 시점 또는 화면 이동·background·pagehide·device lock·assignment removal·relock 즉시 plaintext를 지워야 하며 URL, clipboard, cache, offline 또는 영구 저장소에 기록하면 안 됩니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter()],
