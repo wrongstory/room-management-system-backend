@@ -71,28 +71,59 @@ function dimensions(width: number, height: number, input = false): void {
     throw new PhotoError(413, 'PHOTO_DECODE_LIMIT_EXCEEDED');
   }
 }
-function isoBmffVideoTail(b: Uint8Array, start: number): boolean {
-  if (start < 0 || start + 16 > b.length) return false;
+function isoBmffVideoTail(b: Uint8Array, start: number, end = b.length): boolean {
+  if (start < 0 || end > b.length || start + 16 > end) return false;
   const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const text = (offset: number) => String.fromCharCode(...b.subarray(offset, offset + 4));
   let offset = start, first = true, media = false, index = false;
-  while (offset < b.length) {
-    if (offset + 8 > b.length) return false;
+  while (offset < end) {
+    if (offset + 8 > end) return false;
     let size = view.getUint32(offset, false), headerSize = 8;
     const kind = text(offset + 4);
     if (size === 1) {
-      if (offset + 16 > b.length) return false;
+      if (offset + 16 > end) return false;
       const extended = view.getBigUint64(offset + 8, false);
       if (extended > BigInt(Number.MAX_SAFE_INTEGER)) return false;
       size = Number(extended); headerSize = 16;
-    } else if (size === 0) size = b.length - offset;
-    if (size < headerSize || offset + size > b.length) return false;
+    } else if (size === 0) size = end - offset;
+    if (size < headerSize || offset + size > end) return false;
     if (first && kind !== 'ftyp') return false;
     if (kind === 'mdat') media = true;
     if (kind === 'moov' || kind === 'moof') index = true;
     first = false; offset += size;
   }
-  return offset === b.length && media && index;
+  return offset === end && media && index;
+}
+function samsungSefMotionPhotoTail(b: Uint8Array, primaryEnd: number, videoStart: number): boolean {
+  if (b.length < 20 || videoStart <= primaryEnd || videoStart >= b.length - 20) return false;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const text = (offset: number, length: number) => String.fromCharCode(...b.subarray(offset, offset + length));
+  if (text(b.length - 4, 4) !== 'SEFT') return false;
+  const directorySize = view.getUint32(b.length - 8, true);
+  const directoryStart = b.length - 8 - directorySize;
+  if (directoryStart <= videoStart || directorySize < 24 || text(directoryStart, 4) !== 'SEFH') return false;
+  const count = view.getUint32(directoryStart + 8, true);
+  if (count < 1 || count > 128 || directorySize !== 12 + count * 12) return false;
+  let expectedStart = primaryEnd, motionField = false;
+  for (let index = 0; index < count; index++) {
+    const entry = directoryStart + 12 + index * 12;
+    const marker = b.subarray(entry, entry + 4);
+    const negativeOffset = view.getUint32(entry + 4, true);
+    const fieldLength = view.getUint32(entry + 8, true);
+    if (!negativeOffset || fieldLength < 8 || negativeOffset > directoryStart) return false;
+    const fieldStart = directoryStart - negativeOffset;
+    if (fieldStart !== expectedStart || fieldStart + fieldLength > directoryStart) return false;
+    if (!marker.every((value, markerIndex) => value === b[fieldStart + markerIndex])) return false;
+    const isMotion = marker[0] === 0 && marker[1] === 0 && marker[2] === 0x30 && marker[3] === 0x0a;
+    if (isMotion) {
+      if (motionField || index !== count - 1 || fieldStart + fieldLength !== directoryStart) return false;
+      const nameLength = view.getUint32(fieldStart + 4, true);
+      if (nameLength !== 16 || text(fieldStart + 8, nameLength) !== 'MotionPhoto_Data' || fieldStart + 8 + nameLength !== videoStart) return false;
+      motionField = true;
+    }
+    expectedStart = fieldStart + fieldLength;
+  }
+  return motionField && expectedStart === directoryStart && isoBmffVideoTail(b, videoStart, directoryStart);
 }
 function motionPhotoTail(b: Uint8Array, primaryEnd: number, xmpPackets: string[]): boolean {
   const xmp = xmpPackets.join('\n');
@@ -115,10 +146,10 @@ function motionPhotoTail(b: Uint8Array, primaryEnd: number, xmpPackets: string[]
     const padding = paddingMatch ? Number(paddingMatch[1]) : 0;
     if (primary && length) {
       const offset = b.length - Number(length[1]);
-      if (offset === primaryEnd + padding) candidates.push(offset);
+      if (offset === primaryEnd + padding || samsungSefMotionPhotoTail(b, primaryEnd, offset)) candidates.push(offset);
     }
   }
-  return candidates.some(offset => isoBmffVideoTail(b, offset));
+  return candidates.some(offset => isoBmffVideoTail(b, offset) || samsungSefMotionPhotoTail(b, primaryEnd, offset));
 }
 function jpegShape(b: Uint8Array, clean: boolean): number {
   if (b[0] !== 255 || b[1] !== 216) invalid();
