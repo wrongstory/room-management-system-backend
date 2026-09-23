@@ -35,7 +35,7 @@ function motionPhotoJpeg(bytes: Uint8Array, legacy = false): Uint8Array {
   const tail = new Uint8Array(ftyp.length + 16); tail.set(ftyp); tail.set(box('moov'), ftyp.length); tail.set(box('mdat'), ftyp.length + 8);
   return new Uint8Array([...bytes.slice(0, 2), ...app1, ...bytes.slice(2), ...tail]);
 }
-function samsungMotionPhotoJpeg(bytes: Uint8Array): Uint8Array {
+function samsungMotionPhotoJpeg(bytes: Uint8Array, versioned = false): Uint8Array {
   const box = (kind: string, payload = new Uint8Array()) => {
     const result = new Uint8Array(8 + payload.length), view = new DataView(result.buffer);
     view.setUint32(0, result.length, false); result.set(new TextEncoder().encode(kind), 4); result.set(payload, 8); return result;
@@ -46,19 +46,33 @@ function samsungMotionPhotoJpeg(bytes: Uint8Array): Uint8Array {
   const motionName = new TextEncoder().encode('MotionPhoto_Data');
   const motionHeader = new Uint8Array(8 + motionName.length);
   motionHeader.set([0, 0, 0x30, 0x0a]); new DataView(motionHeader.buffer).setUint32(4, motionName.length, true); motionHeader.set(motionName, 8);
-  const directorySize = 36, footerSize = 8, videoLength = video.length + directorySize + footerSize;
+  const versionName = new TextEncoder().encode('MotionPhoto_Version');
+  const versionField = versioned ? new Uint8Array(8 + versionName.length + 4) : new Uint8Array();
+  if (versioned) {
+    versionField.set([0, 0, 0x31, 0x0a]);
+    new DataView(versionField.buffer).setUint32(4, versionName.length, true);
+    versionField.set(versionName, 8);
+    versionField.set([0, 0, 0, 1], 8 + versionName.length);
+  }
+  const count = versioned ? 3 : 2, directorySize = 12 + count * 12, footerSize = 8;
+  const videoLength = video.length + versionField.length + directorySize + footerSize;
   const xmpMetadata = `<rdf:Description xmlns:Camera="http://ns.google.com/photos/1.0/camera/" xmlns:Container="http://ns.google.com/photos/1.0/container/" xmlns:Item="http://ns.google.com/photos/1.0/container/item/" Camera:MotionPhoto="1"><Container:Directory><rdf:Seq><rdf:li><Container:Item Item:Semantic="Primary" Item:Mime="image/jpeg" Item:Padding="0"/></rdf:li><rdf:li><Container:Item Item:Semantic="MotionPhoto" Item:Mime="video/mp4" Item:Length="${videoLength}"/></rdf:li></rdf:Seq></Container:Directory></rdf:Description>`;
   const xmp = new TextEncoder().encode(`http://ns.adobe.com/xap/1.0/\0<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">${xmpMetadata}</rdf:RDF></x:xmpmeta>`);
   const app1 = new Uint8Array(xmp.length + 4);
   app1.set([255, 225, (xmp.length + 2) >> 8, (xmp.length + 2) & 255]); app1.set(xmp, 4);
   const primary = new Uint8Array([...bytes.slice(0, 2), ...app1, ...bytes.slice(2)]);
-  const directoryStart = primary.length + metadata.length + motionHeader.length + video.length;
+  const directoryStart = primary.length + metadata.length + motionHeader.length + video.length + versionField.length;
   const directory = new Uint8Array(directorySize + footerSize), view = new DataView(directory.buffer);
-  directory.set(new TextEncoder().encode('SEFH')); view.setUint32(4, 106, true); view.setUint32(8, 2, true);
+  directory.set(new TextEncoder().encode('SEFH')); view.setUint32(4, versioned ? 107 : 106, true); view.setUint32(8, count, true);
   directory.set(metadata.slice(0, 4), 12); view.setUint32(16, directoryStart - primary.length, true); view.setUint32(20, metadata.length, true);
   directory.set(motionHeader.slice(0, 4), 24); view.setUint32(28, directoryStart - primary.length - metadata.length, true); view.setUint32(32, motionHeader.length + video.length, true);
+  if (versioned) {
+    directory.set(versionField.slice(0, 4), 36);
+    view.setUint32(40, versionField.length, true);
+    view.setUint32(44, versionField.length, true);
+  }
   view.setUint32(directorySize, directorySize, true); directory.set(new TextEncoder().encode('SEFT'), directorySize + 4);
-  return new Uint8Array([...primary, ...metadata, ...motionHeader, ...video, ...directory]);
+  return new Uint8Array([...primary, ...metadata, ...motionHeader, ...video, ...versionField, ...directory]);
 }
 describe('independent server image verification', () => {
   it('decodes JPEG/WebP and rechecks stripped output/final digest deterministically', async () => {
@@ -96,6 +110,17 @@ describe('independent server image verification', () => {
     expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
     checkPhotoEnvelope(output.bytes, output.mime, true);
     for (const offset of [motion.length - 1, motion.length - 8, motion.length - 20, motion.length - 44]) {
+      const forged = motion.slice(); forged[offset] = (forged[offset] ?? 0) ^ 1;
+      await expect(verifyPhotoBinary(forged, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
+    }
+  });
+  it('accepts Samsung mpv3 when a verified MotionPhoto_Version field follows the video', async () => {
+    const motion = samsungMotionPhotoJpeg(fixture(), true);
+    const output = await verifyPhotoBinary(motion, 'image/jpeg');
+    expect(output.mime).toBe('image/jpeg');
+    expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+    checkPhotoEnvelope(output.bytes, output.mime, true);
+    for (const offset of [motion.length - 20, motion.length - 56]) {
       const forged = motion.slice(); forged[offset] = (forged[offset] ?? 0) ^ 1;
       await expect(verifyPhotoBinary(forged, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
     }
