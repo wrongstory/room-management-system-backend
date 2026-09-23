@@ -25,7 +25,7 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 #245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API와 Pages에 반영됐다. 기존 관리자 UAT에서 세 입력 형태와 예약 현황 인원·객실 유형 최소/최대 인원 적용을 확인했다.
 
-운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@2ce8953c76fbf5cb33aff9f8a57b303acbf05cdb`다. 개발 정본은 81 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #171 로컬 합성 백업·복구 dry-run까지 포함한다. #172 읽기 전용 진단은 82번째 feature 후보이고 hosted DB 연결은 승인되지 않았다. 2026-09-23 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages artifact parity 완료 상태다. #256 스마트폰 사진 정규화와 #250/#264 배정 후속은 개발 정본에 있지만 운영 Edge/Pages·실기기 UAT 또는 release 승격과 구분한다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@bbfb6ced4900113c2c39890c11c4e1526c5372b0`다. 개발 정본은 82 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #172 읽기 전용 진단까지 포함한다. #275 메이드 PIN 즉시 조회는 기존 migration을 수정하지 않는 83번째 source 후보이며 hosted DB 적용은 승인되지 않았다. 2026-09-23 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages artifact parity 완료 상태다. #256 스마트폰 사진 정규화와 #250/#264 배정 후속은 개발 정본에 있지만 운영 Edge/Pages·실기기 UAT 또는 release 승격과 구분한다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 #179의 v8 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보를 합친 migration 순서는 57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`이며 OpenAPI는 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
@@ -133,11 +133,11 @@ private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 
 
 ### #140/#169 초기 PIN bootstrap과 예약 readiness 분리 — 자동 생성 통합 후보
 
-`pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. reveal/change의 기존 current revision·lease 권한 검사도 유지한다.
+`pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. #275부터 담당 메이드의 일반 reveal은 물리 sync 상태를 권한 조건으로 사용하지 않고 active session과 exact current/notified assignment entitlement, current stored PIN revision, 30초 lease를 재검증한다. admin 일반 reveal과 물리 PIN change/confirm의 기존 verified/in-progress attempt/access lease/CAS 정책은 유지한다.
 
 초기 데이터가 없는 환경에서는 active admin만 `POST /v1/rooms/pins/bootstrap`을 호출한다. 런타임 CSPRNG는 최대 25개 후보마다 batch-unique 4자리 숫자를 만들고 선행 0을 보존해 현재 객실번호와 canonical credential을 조합·AES-GCM 암호화한 뒤 service-role RPC에 envelope만 전달한다. RPC는 global lifecycle lock, sorted room lock, immutable version 1 revision, current pointer, mismatch sync event, safe audit와 command receipt를 한 transaction에 기록한다. current PIN이나 unresolved mismatch가 있으면 덮어쓰지 않으며 고정 초기 PIN secret은 없다.
 
-bootstrap 응답은 initialized room마다 별도 30초 admin reveal lease로 암호문을 복호화·최종 재검증하고 `sensitive.read`를 남긴 뒤 no-store credential만 일시 반환한다. 응답 유실 재시도는 비밀 없는 receipt로 같은 initialized IDs를 찾고 아직 generated-pending이면 새 reveal lease를 발급한다. 일반 reveal과 maid는 mismatch credential을 볼 수 없다. `POST /v1/rooms/{roomId}/pin/generated/confirm`이 current version과 generated-pending 상태를 CAS 재검증한 뒤에만 verified sync event와 Sheet outbox를 기록한다.
+bootstrap 응답은 initialized room마다 별도 30초 admin reveal lease로 암호문을 복호화·최종 재검증하고 `sensitive.read`를 남긴 뒤 no-store credential만 일시 반환한다. 응답 유실 재시도는 비밀 없는 receipt로 같은 initialized IDs를 찾고 아직 generated-pending이면 새 reveal lease를 발급한다. generated 전용 reveal은 admin-only이고, 일반 reveal은 #275에 따라 exact current/notified assignment entitlement가 있는 메이드도 mismatch credential을 확인할 수 있다. `POST /v1/rooms/{roomId}/pin/generated/confirm`이 current version과 generated-pending 상태를 CAS 재검증한 뒤에만 verified sync event와 Sheet outbox를 기록하며 그 전에는 체크인이 차단된다.
 
 성공의 initialized는 generated revision/current/mismatch/audit가 commit된 객실, skipped는 기존 current/unresolved 물리 변경을 보존한 객실이다. DB validation 실패는 batch 전체 rollback이며 오류를 skipped로 은폐하지 않는다. timeout/응답 유실은 commit 여부가 불확실하므로 rollback으로 단정하지 않고 같은 key의 receipt replay로 확인한다. 53번째 보완 migration은 기존 lease/revision을 보존해 registry를 backfill하고, matching confirmed lease/revision만 같은 논리 암호화로 인정한다. 다른 과거 key-version/nonce 충돌은 이력을 고치지 않고 upgrade를 fail-closed한다.
 ### #137 PIN Sheet full resync와 운영 상태 — source/dev 완료
@@ -943,7 +943,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 64번째 append-only migration은 장기 업무 권한과 plaintext 복호화 창을 분리한다. typed assignment
 notification과 exact delivery outbox가 확정될 때 private immutable entitlement를 생성하고, 각 reveal은 그
 entitlement에서 최대 30초 lease를 파생한다. reveal은 매번 live session, active/password-complete profile,
-current assignment/room/revision, current PIN revision, verified/mismatch 상태와 entitlement 종료 여부를 DB에서 다시 확인한다. 알림 outbox 시점이 물리 불일치 중이어도 durable 원장은 current revision에 생성하지만 plaintext reveal은 verified 복구 전까지 fail-closed다.
+current assignment/room/revision, current PIN revision과 entitlement 종료 여부를 DB에서 다시 확인한다. #275부터 물리 sync 상태는 담당 메이드 reveal 권한이 아니므로 알림 outbox 시점이 mismatch여도 current stored revision을 즉시 확인할 수 있다. admin 일반 reveal, 체크인 readiness와 물리 change/confirm은 계속 별도 fail-closed 축이다.
 
 PIN rotation은 이전 entitlement와 열린 reveal을 먼저 폐기하고 current workflow 및 이미 통보된 다음 근무일
 assignment에만 새 PIN revision successor를 발급한다. 물리 PIN 변경의 maid 권한은 기존 exact in-progress

@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'backend_console_readonly_diagnostics'
+    'maid_pin_immediate_reveal'
   ) ->> 'currentMigration',
-  'backend_console_readonly_diagnostics',
+  'maid_pin_immediate_reveal',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'backend_console_readonly_diagnostics'
+    'maid_pin_immediate_reveal'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'backend_console_readonly_diagnostics';
+where name = 'maid_pin_immediate_reveal';
 
 delete from supabase_migrations.schema_migrations
-where name = 'backend_console_readonly_diagnostics';
+where name = 'maid_pin_immediate_reveal';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'backend_console_readonly_diagnostics'
+    'maid_pin_immediate_reveal'
   ) ->> 'currentMigration',
-  'room_operations_pagination',
-  'database status exposes migration 81 when migration 82 is absent'
+  'backend_console_readonly_diagnostics',
+  'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'backend_console_readonly_diagnostics'
+    'maid_pin_immediate_reveal'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 81 behind source migration 82'
+  'database status reports the previous migration behind the source head'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)
