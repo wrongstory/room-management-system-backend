@@ -154,16 +154,87 @@ function dimensions(width: number, height: number, input = false): void {
     throw new PhotoError(413, "PHOTO_DECODE_LIMIT_EXCEEDED");
   }
 }
-function jpegShape(b: Uint8Array, clean: boolean): void {
+function isoBmffVideoTail(b: Uint8Array, start: number): boolean {
+  if (start < 0 || start + 16 > b.length) return false;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const text = (offset: number) =>
+    String.fromCharCode(...b.subarray(offset, offset + 4));
+  let offset = start, first = true, media = false, index = false;
+  while (offset < b.length) {
+    if (offset + 8 > b.length) return false;
+    let size = view.getUint32(offset, false), headerSize = 8;
+    const kind = text(offset + 4);
+    if (size === 1) {
+      if (offset + 16 > b.length) return false;
+      const extended = view.getBigUint64(offset + 8, false);
+      if (extended > BigInt(Number.MAX_SAFE_INTEGER)) return false;
+      size = Number(extended);
+      headerSize = 16;
+    } else if (size === 0) size = b.length - offset;
+    if (size < headerSize || offset + size > b.length) return false;
+    if (first && kind !== "ftyp") return false;
+    if (kind === "mdat") media = true;
+    if (kind === "moov" || kind === "moof") index = true;
+    first = false;
+    offset += size;
+  }
+  return offset === b.length && media && index;
+}
+function motionPhotoTail(
+  b: Uint8Array,
+  primaryEnd: number,
+  xmpPackets: string[],
+): boolean {
+  const xmp = xmpPackets.join("\n");
+  if (!xmp.includes("http://ns.google.com/photos/1.0/camera/")) return false;
+  const enabled = /(?:\bMotionPhoto|\bMicroVideo)\s*=\s*["']1["']/.test(xmp) ||
+    /<[^>]*:(?:MotionPhoto|MicroVideo)>\s*1\s*<\//.test(xmp);
+  if (!enabled) return false;
+  const legacy = /\bMicroVideoOffset\s*=\s*["']([1-9]\d{0,9})["']/.exec(xmp);
+  const candidates: number[] = [];
+  if (legacy) {
+    const offset = Number(legacy[1]);
+    if (offset === b.length - primaryEnd) candidates.push(primaryEnd);
+  }
+  if (
+    xmp.includes("http://ns.google.com/photos/1.0/container/") &&
+    xmp.includes("http://ns.google.com/photos/1.0/container/item/")
+  ) {
+    const items = xmp.match(/<[^>]+>/g) ?? [];
+    const primary = items.find((item) =>
+      /\bSemantic\s*=\s*["']Primary["']/.test(item) &&
+      /\bMime\s*=\s*["']image\/jpeg["']/.test(item)
+    );
+    const motion = items.find((item) =>
+      /\bSemantic\s*=\s*["']MotionPhoto["']/.test(item) &&
+      /\bMime\s*=\s*["']video\/(?:mp4|quicktime)["']/.test(item)
+    );
+    const length = motion &&
+      /\bLength\s*=\s*["']([1-9]\d{0,9})["']/.exec(motion);
+    const paddingMatch = primary &&
+      /\bPadding\s*=\s*["'](\d{1,9})["']/.exec(primary);
+    const padding = paddingMatch ? Number(paddingMatch[1]) : 0;
+    if (primary && length) {
+      const offset = b.length - Number(length[1]);
+      if (offset === primaryEnd + padding) candidates.push(offset);
+    }
+  }
+  return candidates.some((offset) => isoBmffVideoTail(b, offset));
+}
+function jpegShape(b: Uint8Array, clean: boolean): number {
   if (b[0] !== 255 || b[1] !== 216) invalid();
   let p = 2, frames = 0, scans = 0;
+  const xmpPackets: string[] = [];
   while (p < b.length) {
     if (b[p++] !== 255) invalid();
     while (b[p] === 255) p++;
     const marker = byte(b, p++);
     if (marker === 217) {
-      if (p !== b.length || frames !== 1 || scans < 1) invalid();
-      return;
+      if (
+        frames !== 1 || scans < 1 ||
+        p !== b.length && (clean || !motionPhotoTail(b, p, xmpPackets))
+      ) invalid();
+      return p;
     }
     if (
       marker === undefined || marker === 0 || marker === 216 ||
@@ -174,6 +245,13 @@ function jpegShape(b: Uint8Array, clean: boolean): void {
     if (size < 2 || p + size > b.length) invalid();
     if (clean && (marker === 225 || marker === 237 || marker === 254)) {
       invalid();
+    }
+    if (!clean && marker === 225) {
+      const packet = new TextDecoder().decode(b.subarray(p + 2, p + size));
+      if (
+        packet.startsWith("http://ns.adobe.com/xap/1.0/\u0000") ||
+        packet.startsWith("http://ns.adobe.com/xmp/extension/\u0000")
+      ) xmpPackets.push(packet);
     }
     if ([192, 193, 194].includes(marker)) {
       if (++frames !== 1 || size < 8) invalid();
@@ -205,7 +283,7 @@ function jpegShape(b: Uint8Array, clean: boolean): void {
       }
     }
   }
-  invalid();
+  return invalid();
 }
 function webpShape(b: Uint8Array, clean: boolean): void {
   const text = (a: number, n: number) =>
@@ -311,11 +389,18 @@ export function checkPhotoInputEnvelope(
   bytes: Uint8Array,
   mime: PhotoInputMime,
 ): void {
+  void photoInputPayload(bytes, mime);
+}
+function photoInputPayload(
+  bytes: Uint8Array,
+  mime: PhotoInputMime,
+): Uint8Array {
   if (!bytes.length) invalid();
   if (bytes.length > PHOTO_INPUT_MAX_BYTES) tooLarge();
-  if (mime === "image/jpeg") jpegShape(bytes, false);
-  else if (mime === "image/webp") webpShape(bytes, false);
+  if (mime === "image/jpeg") return bytes.subarray(0, jpegShape(bytes, false));
+  if (mime === "image/webp") webpShape(bytes, false);
   else heicShape(bytes);
+  return bytes;
 }
 
 let initialization: Promise<void> | undefined;
@@ -346,7 +431,7 @@ export async function verifyPhotoBinary(
   raw: Uint8Array,
   mime: PhotoInputMime,
 ): Promise<VerifiedPhoto> {
-  checkPhotoInputEnvelope(raw, mime);
+  const source = photoInputPayload(raw, mime);
   if (!initialization) throw new PhotoError(503, "PHOTO_DECODER_UNAVAILABLE");
   await initialization;
   const started = performance.now();
@@ -372,7 +457,7 @@ export async function verifyPhotoBinary(
       warning = true;
     };
     try {
-      image.read(raw, settings);
+      image.read(source, settings);
       if (warning) invalid();
       dimensions(image.width, image.height, true);
       if (
@@ -392,7 +477,7 @@ export async function verifyPhotoBinary(
           Math.max(1, Math.round(image.height * scale)),
         );
       }
-      image.quality = longest <= 1280 && raw.length <= PHOTO_MAX_BYTES
+      image.quality = longest <= 1280 && source.length <= PHOTO_MAX_BYTES
         ? 90
         : 65;
       bytes = image.write(outputFormat, (data) => Uint8Array.from(data));

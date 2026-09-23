@@ -20,6 +20,21 @@ function padJpeg(bytes: Uint8Array, size: number): Uint8Array {
   for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; }
   return result;
 }
+function motionPhotoJpeg(bytes: Uint8Array, legacy = false): Uint8Array {
+  const metadata = legacy
+    ? '<rdf:Description xmlns:Camera="http://ns.google.com/photos/1.0/camera/" Camera:MicroVideo="1" Camera:MicroVideoOffset="36"/>'
+    : '<rdf:Description xmlns:Camera="http://ns.google.com/photos/1.0/camera/" xmlns:Container="http://ns.google.com/photos/1.0/container/" xmlns:Item="http://ns.google.com/photos/1.0/container/item/" Camera:MotionPhoto="1" Camera:MotionPhotoVersion="1"><Container:Directory><rdf:Seq><rdf:li rdf:parseType="Resource" Item:Semantic="Primary" Item:Mime="image/jpeg"/><rdf:li rdf:parseType="Resource" Item:Semantic="MotionPhoto" Item:Mime="video/mp4" Item:Length="36"/></rdf:Seq></Container:Directory></rdf:Description>';
+  const xmp = new TextEncoder().encode(`http://ns.adobe.com/xap/1.0/\0<?xpacket begin=""?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">${metadata}</rdf:RDF></x:xmpmeta>`);
+  const app1 = new Uint8Array(xmp.length + 4);
+  app1.set([255, 225, (xmp.length + 2) >> 8, (xmp.length + 2) & 255]); app1.set(xmp, 4);
+  const box = (kind: string, payload = new Uint8Array()) => {
+    const result = new Uint8Array(8 + payload.length), view = new DataView(result.buffer);
+    view.setUint32(0, result.length, false); result.set(new TextEncoder().encode(kind), 4); result.set(payload, 8); return result;
+  };
+  const ftyp = box('ftyp', new TextEncoder().encode('isom\0\0\0\0isom'));
+  const tail = new Uint8Array(ftyp.length + 16); tail.set(ftyp); tail.set(box('moov'), ftyp.length); tail.set(box('mdat'), ftyp.length + 8);
+  return new Uint8Array([...bytes.slice(0, 2), ...app1, ...bytes.slice(2), ...tail]);
+}
 describe('independent server image verification', () => {
   it('decodes JPEG/WebP and rechecks stripped output/final digest deterministically', async () => {
     for (const mime of ['image/jpeg', 'image/webp'] as const) {
@@ -36,6 +51,18 @@ describe('independent server image verification', () => {
     const twelveMegapixel = fixture('image/jpeg', 4032, 3024);
     expect((await verifyPhotoBinary(twelveMegapixel, 'image/jpeg')).sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
     await expect(verifyPhotoBinary(padJpeg(fixture(), PHOTO_INPUT_MAX_BYTES + 1), 'image/jpeg')).rejects.toMatchObject({ code: 'PHOTO_TOO_LARGE' });
+  });
+  it('extracts a standards-marked Android Motion Photo still while rejecting an unmarked trailer', async () => {
+    const jpg = fixture(), motion = motionPhotoJpeg(jpg);
+    const output = await verifyPhotoBinary(motion, 'image/jpeg');
+    expect(output.mime).toBe('image/jpeg');
+    expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+    checkPhotoEnvelope(output.bytes, output.mime, true);
+    await expect(verifyPhotoBinary(new Uint8Array([...jpg, ...motion.slice(motion.length - 36)]), 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
+    const forged = motion.slice();
+    forged[forged.length - 31] = 0;
+    await expect(verifyPhotoBinary(forged, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
+    expect((await verifyPhotoBinary(motionPhotoJpeg(jpg, true), 'image/jpeg')).sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
   });
   it('decodes a synthetic HEIF sample to metadata-free JPEG, and rejects malformed containers', async () => {
     // Synthetic 32px HEVC fixture from libheif fuzzing/data/corpus/hevc32.heif (LGPL-3.0).
