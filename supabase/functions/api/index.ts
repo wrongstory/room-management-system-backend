@@ -587,6 +587,7 @@ export async function handleApiRequest(
             actor,
             prestart.id,
             prestart.action,
+            verifiedRequestSessionId(request),
           ),
           200,
           corsHeaders,

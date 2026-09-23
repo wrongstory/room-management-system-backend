@@ -1186,7 +1186,7 @@ for (const plan of [scheduledPlan,manualPlan]) {
 console.log('Planning races passed: room-change/notify, cancel/notify, scheduled/retry, room-change/checkout, manual/scheduled; one target and zero premature attempts.');
 await testReservationLongStayConcurrency({ client, actorProfileId });
 await testNotifiedReplanConcurrency(client, { profileId: actorProfileId, email, password });
-await testPrestartConcurrency(client,actorProfileId);
+await testPrestartConcurrency(client,actorProfileId,templateSessionId);
 await testAttemptActivationConcurrency(client,{ profileId: actorProfileId, email, password });
 await testAssignmentPreviewConcurrency(client,actorProfileId);
 await testAttemptExecutionConcurrency(client,actorProfileId);

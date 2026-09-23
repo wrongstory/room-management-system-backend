@@ -1,6 +1,6 @@
 # 알림 이벤트 카탈로그 v1
 
-이 문서는 Issue #109의 기반 계약과 Issue #128의 보완을 반영한 32개 공개 category와 48개 event family의 정본이다. DB의
+이 문서는 Issue #109의 기반 계약과 Issue #128/#264의 보완을 반영한 36개 공개 category와 53개 event family의 정본이다. DB의
 `private.notification_event_catalog`와 테스트가 이 표를 그대로 검증한다. `source`는 알림 생성과
 해결의 typed provenance이며 audit payload나 문자열 dedupe는 권한 근거가 아니다.
 
@@ -36,6 +36,7 @@
 | assignment.cancellation_requested | assignment_cancellation_requested | admin.assignment_decider | yes/yes | assignment_change_request | assignment_request_terminal | assignmentRequest | assignment_cancellation_requested/room |
 | assignment.cancellation_approved | assignment_cancellation_approved | maid.assignment_party | no/yes | assignment_change_request | none | assignmentRequest | assignment_cancellation_approved/room |
 | assignment.cancellation_rejected | assignment_cancellation_rejected | maid.assignment_party | no/yes | assignment_change_request | none | assignmentRequest | assignment_cancellation_rejected/room |
+| assignment.reassignment_required | assignment_reassignment_required | admin.assignment_decider | yes/yes | assignment_unavailability_cancellation | none | cleaningTarget | assignment_reassignment_required/room |
 | assignment.scheduled_rolled_over | cleaning_assignment_rolled_over | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_rolled_over/room |
 | cleaning.field_completed_admin | cleaning_field_completed | admin.inspection_queue | no/yes | cleaning_attempt | none | cleaningTarget | cleaning_field_completed/room |
 | room.operation_block_changed | cleaning_room_operation_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_room_operation_changed/room |

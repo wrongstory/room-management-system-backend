@@ -334,6 +334,18 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] timeout·응답 유실은 같은 body와 같은 `Idempotency-Key`로 결과를 확인한다. body를 바꾸면 새 key를 사용한다.
 - [ ] 오류 수집에는 allowlist code와 `requestId`만 남기고 token·PIN·고객명·전화번호·request body를 보내지 않는다.
 
+#### 담당 메이드 수행 불가 취소·재배정 (#264 source candidate)
+
+- [ ] 관리자만 `POST /v1/assignments/{cleaningTargetId}/unavailable-cancel`을 노출한다. 메이드 본인의 일반 취소 요청 API와 혼합하지 않는다.
+- [ ] 요청에는 현재 assignment의 `expectedAssignmentId`와 `expectedAssignmentVersion`을 보낸다. 현재 attempt가 있으면 `expectedAttemptId`와 `expectedExecutionVersion`을 둘 다 보내고, 없으면 둘 다 `null`로 보낸다.
+- [ ] 사유는 `MAID_DEPARTED`, `MAID_INJURED`, `MAID_UNAVAILABLE`만 제공하며 자유형 퇴사·부상 정보나 개인정보 입력란을 만들지 않는다.
+- [ ] 동일 클릭·응답 유실 재전송은 같은 body와 같은 `Idempotency-Key`를 사용한다. `ASSIGNMENT_VERSION_CONFLICT`이면 assignment/attempt/미배정 현황을 다시 조회하고 자동 덮어쓰지 않는다.
+- [ ] 일반 작업의 성공 응답은 같은 `cleaningTargetId`가 `unassigned`가 된 것으로 표시한다. `replacementTargetId`가 non-null이면 기존 0원 재청소 책임은 이력으로 끝났고 별도 일반 유상 target이 만들어진 예외이므로, 이후 화면과 배정은 이 ID를 사용한다.
+- [ ] 기존 담당·attempt를 완료나 청소 완료로 표시하지 않는다. 수행 중이었다면 중단 이력으로, 시작 전이었다면 취소 이력으로 표시하며 기존 담당자의 earning을 만들지 않는다.
+- [ ] 성공 후 미배정 수·Preview·배정 초안·알림함을 다시 조회한다. 후임 메이드는 이 command에서 직접 선택하지 않고 기존 일반 배정 흐름으로 배정한다.
+- [ ] 관리자 알림 `assignment_reassignment_required`의 deep link는 대상 청소 target으로 이동한다. notification 문구만으로 최신 assignment/version을 추측하지 않는다.
+- [ ] PIN, credential, offline lease, token, raw request body는 성공 응답이나 오류 수집에서 기대하거나 저장하지 않는다.
+
 #### 프론트 회귀와 운영 활성화 gate
 
 - [ ] duration 생략과 명시적 `null` 게시, 조회의 `null` 보존, 양수 기존 입력을 모두 검증한다.

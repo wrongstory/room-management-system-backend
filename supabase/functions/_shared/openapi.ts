@@ -1607,7 +1607,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 73,
+              maxItems: 74,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -2005,6 +2005,20 @@ export const openApiDocument = {
         "admin",
         "cleaningTargetId",
       ),
+    },
+    "/v1/assignments/{cleaningTargetId}/unavailable-cancel": {
+      post: {
+        ...prestartOperation(
+          "cancelUnavailableCleaningAssignment",
+          "수행 불가 메이드 담당 종료 및 일반 재배정 대기",
+          "AssignmentUnavailabilityCancellationRequest",
+          "AssignmentUnavailabilityCancellation",
+          "admin",
+          "cleaningTargetId",
+        ),
+        description:
+          "active business admin이 현재 assignment/target/attempt CAS를 확인한 뒤 퇴사·부상·기타 수행 불가 담당을 종료합니다. scheduled attempt는 superseded, in_progress attempt는 interrupted로 보존하며 PIN·offline·제한 capability를 회수합니다. 일반 작업은 같은 target을 unassigned로 유지하고, 0원 inspection reclean은 과거 원장을 취소 보존한 뒤 정상 fee snapshot을 가진 별도 미배정 replacement target을 만듭니다. 후임자는 이 명령에서 정하지 않으며 기존 draft/commit 경로로 배정합니다. 이전 메이드 earning은 만들지 않고 관리자에게 재배정 알림을 남깁니다.",
+      },
     },
     "/v1/assignments/{cleaningTargetId}/cancellation-requests": {
       post: prestartOperation(
@@ -6783,6 +6797,7 @@ export const openApiDocument = {
           "assignment.prestart_unassigned",
           "assignment.cancellation_requested",
           "assignment.cancellation_decided",
+          "assignment.unavailability_cancelled",
           "assignment.attempt_activated",
           "assignment.rolled_over",
           "assignment.duration_policy_confirmed",
@@ -7429,6 +7444,7 @@ export const openApiDocument = {
               maidProfileId: { type: "string", format: "uuid" },
               cleaningTargetId: { type: "string", format: "uuid" },
               assignmentId: { type: "string", format: "uuid" },
+              replacementTargetId: { type: "string", format: "uuid" },
               previousAssignmentId: { type: "string", format: "uuid" },
               previousMaidProfileId: { type: "string", format: "uuid" },
               requestId: { type: "string", format: "uuid" },
@@ -7742,6 +7758,47 @@ export const openApiDocument = {
       },
       AssignmentPrestartChangeRequest: prestartRequestSchema("change"),
       AssignmentPrestartUnassignRequest: prestartRequestSchema("unassign"),
+      AssignmentUnavailabilityCancellationRequest: prestartRequestSchema(
+        "unavailable",
+      ),
+      AssignmentUnavailabilityCancellation: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cancellationId",
+          "cleaningTargetId",
+          "assignmentId",
+          "attemptId",
+          "maidProfileId",
+          "reasonCode",
+          "replacementTargetId",
+          "status",
+          "targetAssignmentVersion",
+          "effectiveAt",
+          "recordedAt",
+        ],
+        properties: {
+          cancellationId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          attemptId: { type: ["string", "null"], format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          reasonCode: {
+            type: "string",
+            enum: ["MAID_DEPARTED", "MAID_INJURED", "MAID_UNAVAILABLE"],
+          },
+          replacementTargetId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "inspection reclean 예외에서만 생성되는 정상 유상 대체 target",
+          },
+          status: { type: "string", const: "unassigned" },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          effectiveAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
       AssignmentCancellationRequest: prestartRequestSchema("request"),
       AssignmentCancellationDecisionRequest: prestartRequestSchema("decision"),
       AssignmentChangeRequest: {
@@ -12458,7 +12515,7 @@ function prestartOperation(
 }
 
 function prestartRequestSchema(
-  action: "change" | "unassign" | "request" | "decision",
+  action: "change" | "unassign" | "request" | "decision" | "unavailable",
 ) {
   const properties: Record<string, unknown> = {
     expectedCurrentAssignmentId: { type: "string", format: "uuid" },
@@ -12474,6 +12531,8 @@ function prestartRequestSchema(
         ]
         : action === "decision"
         ? ["APPROVED", "REJECTED", "OPERATIONAL_CHANGE", "MAID_UNAVAILABLE"]
+        : action === "unavailable"
+        ? ["MAID_DEPARTED", "MAID_INJURED", "MAID_UNAVAILABLE"]
         : [
           "MAID_UNAVAILABLE",
           "SCHEDULE_CHANGED",
@@ -12512,6 +12571,21 @@ function prestartRequestSchema(
   if (action === "decision") {
     properties.decision = { type: "string", enum: ["approved", "rejected"] };
     required.push("decision");
+  }
+  if (action === "unavailable") {
+    properties.expectedAttemptId = {
+      type: ["string", "null"],
+      format: "uuid",
+      description:
+        "attempt가 아직 없으면 null. 현재 scheduled/in_progress attempt면 exact ID.",
+    };
+    properties.expectedExecutionVersion = {
+      type: ["integer", "null"],
+      minimum: 1,
+      description:
+        "expectedAttemptId가 null이면 null, 아니면 exact execution version.",
+    };
+    required.push("expectedAttemptId", "expectedExecutionVersion");
   }
   return { type: "object", additionalProperties: false, required, properties };
 }

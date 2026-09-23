@@ -19,6 +19,7 @@ class DeveloperAuditEventType(str, Enum):
     ASSIGNMENT_PRESTART_CHANGED = "assignment.prestart_changed"
     ASSIGNMENT_PRESTART_UNASSIGNED = "assignment.prestart_unassigned"
     ASSIGNMENT_ROLLED_OVER = "assignment.rolled_over"
+    ASSIGNMENT_UNAVAILABILITY_CANCELLED = "assignment.unavailability_cancelled"
     AVAILABILITY_CHANGE_DECIDED = "availability.change_decided"
     AVAILABILITY_CHANGE_REQUESTED = "availability.change_requested"
     AVAILABILITY_SUBMITTED = "availability.submitted"
