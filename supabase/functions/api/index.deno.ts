@@ -734,6 +734,7 @@ Deno.test("prestart routes dispatch only exact methods and reject developer capa
   const paths = [
     `/v1/assignments/${cleaningTargetId}/change`,
     `/v1/assignments/${cleaningTargetId}/unassign`,
+    `/v1/assignments/${cleaningTargetId}/unavailable-cancel`,
     `/v1/assignments/${cleaningTargetId}/cancellation-requests`,
     `/v1/assignment-change-requests/${assignmentId}/decision`,
   ];
@@ -764,6 +765,13 @@ Deno.test("prestart routes dispatch only exact methods and reject developer capa
         ? { maidProfileId: actor.profileId, sequenceNumber: 1 }
         : {}),
       ...(path.endsWith("/decision") ? { decision: "approved" } : {}),
+      ...(path.endsWith("/unavailable-cancel")
+        ? {
+          expectedAttemptId: null,
+          expectedExecutionVersion: null,
+          reasonCode: "MAID_UNAVAILABLE",
+        }
+        : {}),
     };
     const response = await handleApiRequest(request("POST", path, body), deps);
     assert(
@@ -786,8 +794,8 @@ Deno.test("prestart routes dispatch only exact methods and reject developer capa
     assert(forbidden.status === 403, "developer forbidden");
   }
   assert(
-    calls.filter((name) => name !== "record_authorization_denial").length === 4,
-    "only four exact mutations invoked",
+    calls.filter((name) => name !== "record_authorization_denial").length === 5,
+    "only five exact mutations invoked",
   );
 });
 const roomRow = {

@@ -300,7 +300,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 - Preview는 active business admin의 오늘/내일 계획 조회·계산이며, 기존 target/assignment/attempt/알림/outbox/audit/command receipt를 쓰지 않는다. 자동 저장·통보·attempt 활성화 API가 아니다. 확인·편집한 제안은 #25 draft 저장 → #26 commit/notify에서 최신 CAS/가능일/source를 다시 검증한다.
 - Preview는 confirmed duration policy가 없어도 `decisionReady=true`로 계산한다. 과거 `assignment_duration_policy_versions`와 template duration snapshot은 삭제하지 않지만 신규 판단 입력이나 fingerprint에 포함하지 않는다. 기존 GET은 deprecated read-only 이력 조회로 유지하고 confirmation mutation은 `ASSIGNMENT_DURATION_POLICY_RETIRED`로 거부한다.
-- 유효한 미배정 target만 새로 제안한다. 기존 draft/notified 업무는 담당·순서를 변경하지 않고 fee/route의 고정 부하로 반영한다. 실제 진행 중 attempt는 남은 시간을 추측하지 않으며 그 메이드의 추가 제안을 보류한다. reclean은 원 메이드가 수행 가능한 동안 원 메이드만 후보로 삼는다. 퇴사·부상 등 수행 불가가 관리자 취소로 확정된 뒤에는 같은 target을 일반 미배정 상태로 두고 다른 active maid 후보를 허용한다. planned checkout은 배정 계획에만 포함하며 materialization/현장 실행 경계는 #28이 계속 소유한다.
+- 유효한 미배정 target만 새로 제안한다. 기존 draft/notified 업무는 담당·순서를 변경하지 않고 fee/route의 고정 부하로 반영한다. 실제 `in_progress` attempt가 있는 메이드도 같은 날 후속 순서의 계획 후보로 포함하되 남은 수행시간이나 종료시각을 추측하지 않는다. Preview·draft·통보는 두 청소의 동시 시작을 허용하지 않으며, 실제 시작은 기존 메이드별 `in_progress` 최대 1건 제약을 다시 검사한다. 일반 `inspection_reclean`은 원 메이드만 가능하지만 #264 수행 불가 확정으로 원 책임이 종료되면 기존 0원 target을 이관하지 않고 별도의 정상 유상 replacement target을 미배정으로 제안한다. planned checkout은 배정 계획에만 포함하며 materialization/현장 실행 경계는 #28이 계속 소유한다.
 - `availableFrom`과 `dueAt`은 원문 그대로 보존한다. 두 시각이 명시된 target만 그 실제 구간을 예약 점유와 비교하며 열린 `dueAt`에 가상 종료시각을 만들지 않는다. 실제 청소 수행시간은 `cleaning_attempts.started_at → field_completed_at`, 객실 turnaround는 실제 checkout 시각 → `field_completed_at`으로 사후 계산한다.
 - 비교는 배정 가능한 수 → 기본 청소요금 spread → 전체 편차와 기존/reclean 제약 → 동선 → 안정적인 target/maid 키 순서다. `previewSeed`는 응답 상관관계 호환 필드일 뿐 결정 결과나 fingerprint를 바꾸지 않는다. 제한된 탐색은 전역 최적해 증명이 아닌 휴리스틱이다.
 - 임의 근무시간·휴게시간·하루 최대 객실 수를 만들지 않는다. target/maid 자원 상한 초과는 부분 자동결정이 아니라 `ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED`로 거부한다.
@@ -339,7 +339,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 인계 뒤 새 scheduled가 만료된 경우에도 같은 해소 계약을 따른다. 불변 인계 관계로 새 책임 구간이 증명된 과거 interrupted는 live 회차로 오인하지 않되, 대체 증명 없는 interrupted나 현재 미종결 회차는 계속 재배정 차단 근거다. 과거 회차의 status를 변경하거나 전체 interrupted 이력을 무시하지 않는다.
 - 관리자 전용 해소 command가 현재 identity/version과 다음 source 일정을 검증한 뒤 기존 담당 종료·통보 회수·회차 supersede·schedule revision을 원자적으로 처리한다. 다음날 담당을 자동 선택하거나 통보 전에 새 회차를 만들지 않는다. 새 통보 후 #28의 실제 실행 가능 조건에서 exactly-once 활성화한다.
 - 만료된 `in_progress`의 인계는 관리자가 새 접근/마감 일정을 명시 확정하고, 현재 점유·예약·source·접근 조건을 재검증한 경우에만 새 담당이 시작할 수 있다. 인계 자체가 시간창·실제 checkout·점유 검사를 우회하는 권한이 아니다. 재계획 불가능한 source는 fail-closed로 관리자 확인 대상에 남긴다.
-- 이미 시작한 기존 회차는 `interrupted`로 보존하며 새 assignment/attempt가 새 책임 구간을 가진다. 이전 완료/현재 제출/수익 연결을 되살리지 않는다. 재청소는 원 maid 수행 가능 시 원담당을 유지하고, 퇴사·부상 등 수행 불가 예외에서만 명시적 취소 뒤 일반 재배정을 허용한다.
+- 이미 시작한 기존 회차는 `interrupted`로 보존하며 새 assignment/attempt가 새 책임 구간을 가진다. 이전 완료/현재 제출/수익 연결을 되살리지 않는다. 일반 재청소는 원 maid 불변이지만, #264의 퇴사·부상·수행 불가 확정은 기존 0원 재청소 target/assignment/attempt를 종료하고 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 정확히 한 건 생성한다. 이는 기존 재청소 이관이나 과거 수익 수정이 아니다.
 - 해소/인계와 동시 시작·완료·계정 변경은 CAS·scoped receipt·공통 잠금·원자 audit/outbox로 직렬화한다. TTL을 새 idempotency key나 재시도로 연장하지 않는다.
 - 이 승인은 #7B source 개발 범위이며 #7C/offline, 사진/제출 구현 또는 production 승격 승인이 아니다.
 
@@ -441,11 +441,19 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 ### `[확정]` 검수 반려 재청소
 
 - 최초 수행 메이드에게 자동 귀속한다.
-- 최초 수행 메이드가 active 상태로 재청소를 수행할 수 있으면 다른 메이드에게 임의 이관하지 않는다.
+- 기존 0원 재청소 target 자체는 다른 메이드에게 이관하지 않는다.
 - 0원이며 새 earning을 만들지 않는다.
 - 원 attempt/submission/decision을 불변 FK로 연결한다.
 - 원 반려 제출의 bomb report/decision은 감사 이력으로만 남기고 재청소 회차에 승계하지 않는다. 재청소에서는 새 bomb report나 bonus를 만들지 않는다.
-- `[확정 — 2026-09-23]` 최초 수행 메이드가 퇴사·부상 등으로 청소 또는 재청소를 수행할 수 없으면 관리자가 현재 배정을 취소하고 객실을 미완료·미배정 상태로 유지한다. 관리자에게 재배정 필요 알림을 보내며, 관리자는 기존 일반 배정 절차로 다른 메이드에게 새 revision을 배정한다. 별도 보상 규약이나 compensation 원장을 만들지 않고, 새 담당 메이드는 일반 완료·검수·earning·payroll 규칙을 따른다. 원 담당자에게 미완료 작업 earning을 만들지 않으며 취소된 assignment/attempt/reason과 새 assignment revision을 모두 보존한다.
+- **[확정 — 2026-09-23 #264]** 원 메이드의 퇴사·부상·기타 수행 불가를 active admin이 확정하면 기존 0원 재청소 책임은 취소 이력으로 보존하고, 원 유상 청소의 fee/template snapshot을 가진 별도 `manual_room_request + additional` replacement target을 정확히 한 건 만든다. replacement는 미배정으로 노출하고 관리자가 일반 배정 흐름으로 다른 메이드에게 배정한다. 별도 보상 원장이나 소급 earning은 만들지 않으며 replacement가 정상 현장 완료·승인을 통과할 때 기존 earning 규칙을 따른다.
+
+### `[확정 — 2026-09-23 #264]` 담당 메이드 수행 불가 취소·재배정
+
+- active admin만 현재 assignment/target과 선택적 scheduled/in-progress attempt의 exact version을 확인해 `MAID_DEPARTED`, `MAID_INJURED`, `MAID_UNAVAILABLE` 중 하나로 수행 불가를 확정한다.
+- 시작 전 assignment는 종료하고 target을 미배정으로 되돌린다. 수행 중 attempt는 `interrupted`, 시작 전 scheduled attempt는 `superseded`로 보존하며 PIN·limited capability·offline lease 접근은 함께 종료한다.
+- 기존 assignment/attempt/audit/notification 이력은 삭제하거나 담당자를 바꿔 쓰지 않는다. 기존 메이드 earning은 만들지 않으며 관리자에게 재배정 필요 알림을 남긴다.
+- 일반 target은 같은 target identity를 재배정한다. 최초 검수 반려의 0원 `inspection_reclean`만 위 예외 계약에 따라 기존 target을 취소하고 별도 정상 유상 replacement target을 생성한다.
+- replacement 담당자 선택, 통보, 수행, 승인, earning은 기존 일반 배정·검수 계약을 그대로 사용한다. 취소 자체에 별도 compensation/reversal 규약을 추가하지 않는다.
 
 검수 반려 재청소와 승인 이후 고객 컴플레인으로 생기는 보상/재작업은 같은 종류가 아니다. 후자는 별도 정책·엔티티로 분리하고 아래 규칙을 적용한다.
 
@@ -766,11 +774,10 @@ AI는 아래 항목을 암묵적으로 확정하지 않는다.
 1. 투숙 중이면서 청소가 필요한 객실의 **프런트 대표 표현**: `DOCS/17` 우선순위와 `DOCS/20`/현재 wireframe의 주 상태+하위 상태 중 어느 쪽인지. 백엔드 독립 축은 이 결정과 무관하게 유지한다.
 2. 기본/최대 숙박 인원을 운영 정본으로 확정할지. 타입별 예상시간 정책은 폐기되어 결정 대상이 아니다.
 3. current role 단일값과 역할 이력/복수 역할 구조 중 어느 모델을 채택할지. 단, `upload_only`는 별도 역할이 아니라 제한 capability다.
-4. 최초 검수 반려 뒤 원 메이드가 퇴사·부상 등으로 수행 불가하면 현재 배정을 취소하고 일반 배정으로 넘기는 예외의 API/UI 연결
-5. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
-6. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
-7. 운영 시작 시 608호 차단이 여전히 유효한지
-8. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
+4. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
+5. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
+6. 운영 시작 시 608호 차단이 여전히 유효한지
+7. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
 
 미확정 항목도 확장 가능한 schema는 설계할 수 있다. 다만 한쪽 정책을 강제하는 irreversible migration, purge, 지급 로직은 결정 전 배포하지 않는다.
 

@@ -158,7 +158,13 @@ decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생�
 
 관리자 queue/detail은 current `inspection_pending` 제출만 대상으로 하며 live room master 대신 notified assignment의 immutable room snapshot과 sealed photo ID/slot/version을 반환한다. provider locator/hash/file name, PIN, PII, request hash, raw before/after state는 공개하지 않는다. stale pointer의 폭탄 선판정·승인·반려는 `STALE_VERSION`으로 실패하고 서로 다른 key의 동시 폭탄 판정은 정확히 한 건만 승리한다.
 
-승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 active하고 수행 가능하면 기존 원-maid 귀속을 유지한다. 퇴사·부상 등 수행 불가가 확정되면 관리자가 현재 배정을 취소하고 미완료·미배정 상태와 취소 이력을 보존한 뒤 일반 배정 command로 다른 메이드에게 새 revision을 만든다. 이 예외는 별도 compensation 원장을 만들지 않으며 새 담당자의 일반 완료·검수·earning·payroll 흐름을 사용한다.
+승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다. 이후 관리자가 #264 수행 불가를 명시 확정한 경우에만 기존 0원 재청소 책임을 이력으로 종료하고, 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 미배정으로 정확히 한 건 생성한다. 기존 재청소 row의 담당·금액을 바꾸거나 소급 earning을 만들지 않는다.
+
+### #264 담당 메이드 수행 불가 취소·일반 재배정 — source candidate
+
+79번째 append-only migration은 active admin의 exact target/assignment/attempt CAS와 live session을 확인하는 `POST /v1/assignments/{cleaningTargetId}/unavailable-cancel`을 추가한다. 시작 전 책임은 종료하고 scheduled attempt는 `superseded`, in-progress attempt는 `interrupted`로 보존한다. limited capability와 offline lease는 같은 transaction의 attempt 전이로 revoke되고, assignment 종료 trigger가 PIN entitlement를 닫는다. 일반 target은 `unassigned`로 되돌리고 관리자 재배정 알림을 만든다.
+
+`private.assignment_unavailability_cancellations`는 actor, 기존 담당, target/assignment/attempt version과 선택적 replacement target을 불변 evidence로 남긴다. `inspection_reclean` 예외에서는 기존 0원 target을 soft cancel하고 원 유상 청소 snapshot을 가진 `manual_room_request + additional` replacement를 한 건 생성한다. replacement는 새 담당 없이 시작하고 기존 draft/commit/attempt/inspection/earning 흐름을 재사용한다. 취소 command 자체는 earning, compensation ledger, 외부 호출을 만들지 않는다. 공개 source 후보는 79 migrations / 129 paths / 139 operations이며 production 78/128/138과 구분한다.
 
 ### #93 주급 주차 조회·PAYING 시작 — source/dev 완료, 현재 production source 반영
 
@@ -674,7 +680,7 @@ Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 sn
 
 ### #109 typed 알림 writer 계약 — source/dev 완료, 현재 production source 반영
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 32 category/48 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 36 category/53 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와

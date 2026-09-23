@@ -401,6 +401,8 @@ erDiagram
   RESERVATIONS ||--o{ CLEANING_TARGETS : "예약 기반"
   CLEANING_TARGETS ||--o{ CLEANING_ASSIGNMENTS : "revision 이력"
   PROFILES ||--o{ CLEANING_ASSIGNMENTS : "담당 메이드"
+  CLEANING_ASSIGNMENTS ||--o| ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS : "수행 불가 종료"
+  CLEANING_TARGETS ||--o{ ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS : "원 책임/대체 target"
   CLEANING_TARGETS ||--o{ CLEANING_ATTEMPTS : "수행 회차"
   CLEANING_ASSIGNMENTS ||--o{ CLEANING_ATTEMPTS : "통보 근거"
   CLEANING_ATTEMPTS ||--o{ CLEANING_SUBMISSIONS : "제출 버전"
@@ -447,6 +449,20 @@ erDiagram
     timestamptz due_at_snapshot
     timestamptz notified_at
     timestamptz ended_at
+  }
+  ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS {
+    uuid id PK
+    uuid cleaning_target_id FK
+    uuid assignment_id FK
+    uuid attempt_id FK
+    uuid maid_profile_id FK
+    uuid actor_profile_id FK
+    text reason_code
+    bigint target_assignment_version
+    bigint assignment_revision
+    bigint attempt_execution_version
+    uuid replacement_target_id FK
+    timestamptz occurred_at
   }
   CLEANING_ATTEMPTS {
     uuid id PK
@@ -507,7 +523,8 @@ erDiagram
 - 미래 planned checkout은 obligation materialization·current pointer·actual checkout 전 attempt 0이다. 같은 객실의 이전 active workflow가 있으면 target/assignment를 유지하고 활성화만 보류한다.
 - 실행 창이 끝난 unassigned/notified attempt-0 target은 같은 ID/original date로 다음 KST 날짜에 이월한다. effective date/carryover/assignment version과 schedule revision만 증가하며 active attempt는 이월 대상이 아니다.
 - 이월 write 전에 다음 source window를 검증한다. 연박은 active·실제 입실·미퇴실·동일 객실 예약 점유 범위/KST 날짜가 유효해야 하며, 추가 청소는 active reservation과 다음 창이 겹치지 않아야 한다. invalid면 blocked/mutation 0이며 기존 notified assignment/알림을 유지한다. 자동 취소·종류 변환은 하지 않는다.
-- 검수 반려 재청소의 원 attempt·원 maid provenance는 변경하지 않는다. 원 maid가 수행 가능하면 그대로 귀속하고, 퇴사·부상 등 수행 불가가 확정된 경우에만 관리자가 현재 배정을 취소해 이력을 보존한 뒤 일반 배정의 새 revision으로 다른 메이드에게 맡긴다. 이 예외는 별도 compensation 원장을 만들지 않는다.
+- 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 같은 0원 target을 다른 메이드에게 배정할 수 없다. #264 수행 불가 확정은 그 target/assignment/attempt를 종료 이력으로 보존한 뒤 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 정확히 한 건 생성하며, replacement만 일반 배정 흐름에 들어간다.
+- `assignment_unavailability_cancellations`는 assignment당 최대 한 건이며 target/assignment/maid/revision과 선택적 attempt execution version을 종료된 원장 상태와 대조한다. UPDATE/DELETE와 Data API 접근은 금지하고, replacement target이 있는 경우에도 과거 재청소 target과 earning을 수정하지 않는다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.
 - #7A `cleaning_attempts.execution_version`은 양수 CAS version이다. 시작/물리 완료는 해당 회차와
   본인 current notified assignment identity/revision을 확인하고 한 번 증가하며 receipt replay는
@@ -616,7 +633,7 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
-#109/#128의 typed 알림은 private event catalog의 48 event family/32 public category를 정본으로
+#109/#128/#264의 typed 알림은 private event catalog의 49 event family/33 public category를 정본으로
 삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
 검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
 dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫

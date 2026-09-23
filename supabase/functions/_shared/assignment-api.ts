@@ -117,9 +117,15 @@ export const decisionReasonCodes = [
   "OPERATIONAL_CHANGE",
   "MAID_UNAVAILABLE",
 ] as const;
+export const unavailabilityReasonCodes = [
+  "MAID_DEPARTED",
+  "MAID_INJURED",
+  "MAID_UNAVAILABLE",
+] as const;
 export type PrestartAction =
   | "change"
   | "unassign"
+  | "unavailable-cancel"
   | "cancellation-requests"
   | "decision";
 
@@ -127,7 +133,7 @@ export function prestartPath(
   path: string,
 ): { id: string; action: PrestartAction } | null {
   const match =
-    /^\/v1\/assignments\/([^/]+)\/(change|unassign|cancellation-requests)$/
+    /^\/v1\/assignments\/([^/]+)\/(change|unassign|unavailable-cancel|cancellation-requests)$/
       .exec(path);
   if (match) {
     return {
@@ -181,6 +187,7 @@ export async function prestartCommand(
   actor: EdgeActor,
   id: string,
   action: PrestartAction,
+  sessionId?: string,
 ) {
   requirePasswordChanged(actor);
   if (action === "cancellation-requests") {
@@ -199,6 +206,9 @@ export async function prestartCommand(
     "reasonCode",
     ...(action === "change" ? ["maidProfileId", "sequenceNumber"] : []),
     ...(action === "decision" ? ["decision"] : []),
+    ...(action === "unavailable-cancel"
+      ? ["expectedAttemptId", "expectedExecutionVersion"]
+      : []),
   ];
   const optional = action === "change"
     ? ["availableFrom", "dueAt"]
@@ -214,6 +224,8 @@ export async function prestartCommand(
     ? cancellationReasonCodes
     : action === "decision"
     ? decisionReasonCodes
+    : action === "unavailable-cancel"
+    ? unavailabilityReasonCodes
     : prestartReasonCodes;
   if (
     typeof body.reasonCode !== "string" || !reasons.includes(body.reasonCode)
@@ -231,6 +243,27 @@ export async function prestartCommand(
     ),
     p_reason_code: body.reasonCode,
   };
+  if (action === "unavailable-cancel") {
+    if (!sessionId) validationError("검증된 sessionId가 필요합니다.");
+    const attemptId = body.expectedAttemptId === null
+      ? null
+      : uuidValue(body.expectedAttemptId, "expectedAttemptId");
+    const executionVersion = body.expectedExecutionVersion === null
+      ? null
+      : integerValue(
+        body.expectedExecutionVersion,
+        "expectedExecutionVersion",
+        1,
+      );
+    if ((attemptId === null) !== (executionVersion === null)) {
+      validationError("attempt ID와 execution version은 함께 지정해야 합니다.");
+    }
+    payload.p_session_id = sessionId;
+    payload.p_expected_assignment_id = payload.p_expected_current_assignment_id;
+    delete payload.p_expected_current_assignment_id;
+    payload.p_expected_attempt_id = attemptId;
+    payload.p_expected_execution_version = executionVersion;
+  }
   if (action === "decision") {
     if (body.decision !== "approved" && body.decision !== "rejected") {
       validationError("decision은 approved 또는 rejected여야 합니다.");
@@ -268,6 +301,7 @@ export async function prestartCommand(
   const rpc = {
     change: "change_cleaning_assignment_prestart",
     unassign: "unassign_cleaning_assignment_prestart",
+    "unavailable-cancel": "cancel_unavailable_cleaning_assignment",
     "cancellation-requests": "request_assignment_cancellation",
     decision: "decide_assignment_cancellation_request",
   }[action];
@@ -278,6 +312,30 @@ export async function prestartCommand(
     p_request_hash: hash,
   });
   if (error || !data) throw prestartDatabaseError(error);
+  if (action === "unavailable-cancel") {
+    const row = objectValue(data);
+    return {
+      cancellationId: uuidValue(row.cancellationId, "cancellationId"),
+      cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
+      assignmentId: uuidValue(row.assignmentId, "assignmentId"),
+      attemptId: row.attemptId === null
+        ? null
+        : uuidValue(row.attemptId, "attemptId"),
+      maidProfileId: uuidValue(row.maidProfileId, "maidProfileId"),
+      reasonCode: row.reasonCode,
+      replacementTargetId: row.replacementTargetId === null
+        ? null
+        : uuidValue(row.replacementTargetId, "replacementTargetId"),
+      status: row.status,
+      targetAssignmentVersion: integerValue(
+        row.targetAssignmentVersion,
+        "targetAssignmentVersion",
+        1,
+      ),
+      effectiveAt: row.effectiveAt,
+      recordedAt: row.recordedAt,
+    };
+  }
   return action === "change" || action === "unassign"
     ? toAssignmentProjection(data)
     : requestProjection(data);
@@ -299,6 +357,8 @@ export function prestartDatabaseError(error: { message?: string } | null) {
     "ASSIGNMENT_CHANGE_REQUEST_ALREADY_DECIDED",
     "ASSIGNMENT_CHANGE_REQUEST_ACCESS_REQUIRED",
     "ASSIGNMENT_ACCESS_REQUIRED",
+    "ASSIGNMENT_UNAVAILABILITY_INPUT_INVALID",
+    "ASSIGNMENT_UNAVAILABILITY_INVALID_TRANSITION",
     "IDEMPOTENCY_KEY_REUSED",
     "ASSIGNMENT_SCHEDULE_INVALID",
     "ASSIGNMENT_QUERY_INVALID",
