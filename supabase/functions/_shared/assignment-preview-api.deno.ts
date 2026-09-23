@@ -115,17 +115,25 @@ Deno.test("preview enforces business admin and password gate", async () => {
   assert(mock.calls.length === 0, "role denied before RPC");
 });
 
-Deno.test("preview unconfirmed/limit failures are stable and raw DB failures redact", async () => {
-  const absent = clients("ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED");
+Deno.test("preview needs no duration policy; limits are stable and raw failures redact", async () => {
+  const absent = clients(null, {
+    serviceDate: today(),
+    planningAt: new Date().toISOString(),
+    durationPolicy: null,
+    durationPolicyStatus: "retired",
+    durationPolicyRequired: false,
+    maids: [],
+    targets: [],
+  });
   const result = await previewAssignments(
     request({ serviceDate: today() }),
     absent.client,
     admin,
   );
   assert(
-    result.decisionReady === false && result.proposedAssignments.length === 0 &&
-      result.error.code === "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
-    "unconfirmed never decision ready",
+    result.decisionReady && result.durationPolicy === null &&
+      result.durationPolicyStatus === "retired",
+    "retired policy must not block preview",
   );
   for (
     const code of [
@@ -161,7 +169,7 @@ Deno.test("preview unconfirmed/limit failures are stable and raw DB failures red
   );
 });
 
-Deno.test("duration config requires complete positive integer values and CAS, canonical replay hash", async () => {
+Deno.test("historical duration config is read-only and confirmation is retired", async () => {
   const data = {
     id: admin.profileId,
     version: 1,
@@ -182,61 +190,23 @@ Deno.test("duration config requires complete positive integer values and CAS, ca
     oceanPremiumMinutes: 50,
     oceanFamilyMinutes: 60,
   };
-  const result = await assignmentDurationPolicy(
-    request(body),
-    mock.client,
-    admin,
-  );
-  await assignmentDurationPolicy(
-    request({
-      oceanFamilyMinutes: 60,
-      oceanPremiumMinutes: 50,
-      premiumMinutes: 40,
-      standardMinutes: 30,
-      expectedVersion: 0,
-    }),
-    mock.client,
-    admin,
-  );
-  assert(
-    mock.calls[0].args.p_request_hash === mock.calls[1].args.p_request_hash,
-    "key order independent request hash",
-  );
-  assert(
-    !JSON.stringify(result).includes("hidden"),
-    "config projection safe fields only",
-  );
-  for (
-    const invalid of [
-      { ...body, standardMinutes: 0 },
-      { ...body, premiumMinutes: 1.5 },
-      { ...body, expectedVersion: -1 },
-      { ...body, extra: true },
-      { standardMinutes: 30 },
-    ]
-  ) {
-    await failure(
-      () => assignmentDurationPolicy(request(invalid), mock.client, admin),
-      "INVALID_ASSIGNMENT_DURATION_POLICY",
-    );
-  }
-  assert(mock.calls.length === 2, "bad config never writes");
-  const reused = clients("IDEMPOTENCY_KEY_REUSED");
   await failure(
-    () => assignmentDurationPolicy(request(body), reused.client, admin),
-    "IDEMPOTENCY_KEY_REUSED",
+    () => assignmentDurationPolicy(request(body), mock.client, admin),
+    "ASSIGNMENT_DURATION_POLICY_RETIRED",
   );
-  assert(
-    previewDatabaseError({ message: "IDEMPOTENCY_KEY_REUSED" }).status === 409,
-    "same key different payload conflicts",
-  );
-  const absent = clients(null, null);
+  assert(mock.calls.length === 0, "retired mutation must not call RPC");
+  const readMock = clients(null, data);
   assert(
     await assignmentDurationPolicy(
       request(null, "GET"),
-      absent.client,
+      readMock.client,
       admin,
-    ) === null,
-    "unconfirmed GET returns null not seed",
+    ) !== null,
+    "historical GET remains available",
+  );
+  assert(
+    readMock.calls.length === 1 &&
+      readMock.calls[0].name === "get_assignment_duration_policy",
+    "historical GET is read-only",
   );
 });

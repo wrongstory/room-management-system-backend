@@ -61,7 +61,8 @@ begin
   foreach name in array array['public.cleaning_targets','public.cleaning_assignments','public.cleaning_attempts',
     'public.assignment_change_requests','public.availability_versions','public.availability_days','public.notifications',
     'private.notification_outbox','public.audit_events','private.command_executions','public.reservations',
-    'public.checkout_cleaning_obligations','public.cleaning_target_schedule_revisions'] loop
+    'public.checkout_cleaning_obligations','public.cleaning_target_schedule_revisions',
+    'public.assignment_duration_policy_versions'] loop
     execute format('select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),''[]''::jsonb) from %s t',name) into value;
     result:=result||jsonb_build_object(name,value);
   end loop;
@@ -73,21 +74,23 @@ insert into snapshots values('before-unconfirmed',pg_temp.ledger_snapshot());
 select is(public.get_assignment_duration_policy(pg_temp.pid(1)),null::jsonb,'fresh config has no confirmed policy');
 insert into snapshots values('unconfirmed',private.assignment_preview_snapshot_at(pg_temp.pid(1),'2038-06-07','2038-06-07 08:00+09'));
 select is((select value->'durationPolicy' from snapshots where label='unconfirmed'),'null'::jsonb,'preview never copies demo durations');
+select is((select value->>'durationPolicyStatus' from snapshots where label='unconfirmed'),'retired','preview marks duration policy retired');
+select is((select (value->>'durationPolicyRequired')::boolean from snapshots where label='unconfirmed'),false,'preview needs no duration policy');
 select is(pg_temp.ledger_snapshot(),(select value from snapshots where label='before-unconfirmed'),'unconfirmed snapshot changes no ledger');
 select is((select count(*)::integer from public.assignment_duration_policy_versions),0,'preview does not seed config');
 
-select throws_ok($$select public.confirm_assignment_duration_policy(pg_temp.pid(1),0,0,40,50,60,'preview-invalid-policy',repeat('a',64))$$,
-  '22023','INVALID_ASSIGNMENT_DURATION_POLICY','zero duration denied');
-select throws_ok($$select public.confirm_assignment_duration_policy(pg_temp.pid(1),0,30,null,50,60,'preview-null-policy',repeat('a',64))$$,
-  '22023','INVALID_ASSIGNMENT_DURATION_POLICY','partial config denied');
-insert into snapshots values('policy1',public.confirm_assignment_duration_policy(pg_temp.pid(1),0,30,40,50,60,'preview-policy-one',repeat('1',64)));
-select is(public.confirm_assignment_duration_policy(pg_temp.pid(1),0,30,40,50,60,'preview-policy-one',repeat('1',64)),
-  (select value from snapshots where label='policy1'),'policy exact retry replays');
-select throws_ok($$select public.confirm_assignment_duration_policy(pg_temp.pid(1),0,31,40,50,60,'preview-policy-one',repeat('2',64))$$,
-  '23505','IDEMPOTENCY_KEY_REUSED','policy changed payload conflict');
-select throws_ok($$select public.confirm_assignment_duration_policy(pg_temp.pid(1),0,31,40,50,60,'preview-policy-stale',repeat('2',64))$$,
-  '40001','ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT','policy stale version fails');
-select is((public.get_assignment_duration_policy(pg_temp.pid(1))->>'standardMinutes')::integer,30,'confirmed test duration used');
+select throws_ok($$select public.confirm_assignment_duration_policy(pg_temp.pid(1),0,30,40,50,60,'preview-retired-policy',repeat('1',64))$$,
+  '0A000','ASSIGNMENT_DURATION_POLICY_RETIRED','new duration policy confirmation is retired');
+select is((select count(*)::integer from public.assignment_duration_policy_versions),0,'retired mutation creates no policy row');
+select is((select count(*)::integer from public.audit_events where event_type='assignment.duration_policy_confirmed'),0,
+  'retired mutation creates no audit row');
+select is((select count(*)::integer from private.command_executions where command_type='assignment.confirm_duration_policy'),0,
+  'retired mutation creates no receipt');
+insert into public.assignment_duration_policy_versions(version,status,standard_minutes,premium_minutes,
+  ocean_premium_minutes,ocean_family_minutes,created_by,confirmed_by,confirmed_at)
+values(1,'confirmed',30,40,50,60,pg_temp.pid(1),pg_temp.pid(1),'2038-06-06 12:00+09');
+select is((public.get_assignment_duration_policy(pg_temp.pid(1))->>'standardMinutes')::integer,30,
+  'historical confirmed policy remains readable');
 
 insert into snapshots values('before-confirmed',pg_temp.ledger_snapshot());
 insert into snapshots values('confirmed',private.assignment_preview_snapshot_at(pg_temp.pid(1),'2038-06-07','2038-06-07 08:00+09'));
@@ -127,17 +130,11 @@ select throws_ok($$update public.assignment_duration_policy_versions set standar
   '23514','ASSIGNMENT_DURATION_POLICY_IMMUTABLE','confirmed snapshot immutable');
 select throws_ok($$delete from public.assignment_duration_policy_versions where version=1$$,
   '23514','ASSIGNMENT_DURATION_POLICY_IMMUTABLE','policy delete forbidden');
-select public.confirm_assignment_duration_policy(pg_temp.pid(1),1,35,45,55,65,'preview-policy-two',repeat('2',64));
-select is((select status from public.assignment_duration_policy_versions where version=1),'retired','old confirmed retired');
-select is((select standard_minutes from public.assignment_duration_policy_versions where version=1),30,'retirement preserves exact values');
+select throws_ok($$select public.confirm_assignment_duration_policy(pg_temp.pid(1),1,35,45,55,65,'preview-policy-two',repeat('2',64))$$,
+  '0A000','ASSIGNMENT_DURATION_POLICY_RETIRED','historical policy cannot be superseded');
+select is((select status from public.assignment_duration_policy_versions where version=1),'confirmed','historical policy status is preserved');
+select is((select standard_minutes from public.assignment_duration_policy_versions where version=1),30,'historical values are preserved');
 select is((select count(*)::integer from public.assignment_duration_policy_versions where status='confirmed'),1,'exactly one current confirmed policy');
-select throws_ok($$update public.assignment_duration_policy_versions set status='confirmed' where version=1$$,
-  '23514','ASSIGNMENT_DURATION_POLICY_IMMUTABLE','retired cannot resurrect');
-select is((select count(*)::integer from public.list_developer_audit_events(pg_temp.pid(8),array['assignment.duration_policy_confirmed'])),2,
-  'developer can read config audit events');
-select ok((select bool_and(summary ?& array['policyVersion','status','standardMinutes','premiumMinutes','oceanPremiumMinutes','oceanFamilyMinutes']
-  and (select count(*) from jsonb_object_keys(summary))=6)
-  from public.list_developer_audit_events(pg_temp.pid(8),array['assignment.duration_policy_confirmed'])), 'config audit safe six-field allowlist');
 
 -- Production reservation command creates tomorrow's private planned checkout;
 -- preview may inspect it but cannot materialize it or create an attempt.
@@ -168,7 +165,7 @@ select is(private.assignment_preview_source_reason(
   'ASSIGNMENT_PREVIEW_INVALID_SCHEDULE','missing available time fails closed') from public.cleaning_targets t where id=pg_temp.pid(303);
 select is(private.assignment_preview_source_reason(
   jsonb_populate_record(null::public.cleaning_targets,to_jsonb(t)||jsonb_build_object('due_at',null)),null,'2038-06-07 08:00+09'),
-  'ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED','null deadline never falls back to template duration') from public.cleaning_targets t where id=pg_temp.pid(303);
+  null::text,'null deadline stays open without a fabricated duration') from public.cleaning_targets t where id=pg_temp.pid(303);
 
 -- Real stayover creation shares reservation/room/window invariants with #1.
 insert into public.cleaning_template_versions(room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,published_at,created_by)
@@ -188,6 +185,9 @@ select is(private.assignment_preview_source_reason(jsonb_populate_record(null::p
 select is(private.assignment_preview_source_reason(jsonb_populate_record(null::public.cleaning_targets,
   to_jsonb(t)||jsonb_build_object('source','manual_room_request','cleaning_kind','additional')),30,'2038-06-07 16:00+09'),
   'ASSIGNMENT_PREVIEW_SOURCE_INVALID','additional request overlapping actual occupancy rejected') from public.cleaning_targets t where id=pg_temp.pid(901);
+select is(private.assignment_preview_source_reason(jsonb_populate_record(null::public.cleaning_targets,
+  to_jsonb(t)||jsonb_build_object('source','manual_room_request','cleaning_kind','additional','due_at',null)),999,'2038-06-07 16:00+09'),
+  null::text,'open additional request does not fabricate an interval from duration input') from public.cleaning_targets t where id=pg_temp.pid(901);
 update public.reservations set actual_check_in_at=null where id=pg_temp.pid(900);
 select is(private.assignment_preview_source_reason(t,30,'2038-06-07 16:00+09'),'ASSIGNMENT_PREVIEW_SOURCE_INVALID',
   'stayover without actual occupancy rejected') from public.cleaning_targets t where id=pg_temp.pid(901);

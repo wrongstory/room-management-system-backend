@@ -106,6 +106,7 @@ export function submissionDatabaseError(
     SUBMISSION_ACCESS_REQUIRED: 403,
     BOMB_REPORT_ACCESS_REQUIRED: 403,
     PHOTO_EVIDENCE_INCOMPLETE: 409,
+    PHOTO_RETENTION_DELETE_PREPARED: 409,
     BOMB_EVIDENCE_INVALID: 409,
     BOMB_REPORT_NOT_ALLOWED: 409,
     BOMB_REPORT_SEALED: 409,
@@ -195,17 +196,66 @@ function publicProjection(
       return Object.fromEntries(
         [
           "photoId",
+          "photoItemId",
+          "itemRevision",
+          "photoDisplayOrder",
           "targetPhotoSlotId",
           "slotKey",
           "label",
           "displayOrder",
           "required",
           "photoVersion",
+          "retentionPolicy",
+          "retentionStartsAt",
+          "expiresAt",
+          "purgedAt",
+          "mediaAvailability",
         ].filter((key) => Object.hasOwn(photo, key)).map((key) => [
           key,
           photo[key],
         ]),
       );
+    });
+  }
+  if (includeBombDetail && Object.hasOwn(row, "photoSlots")) {
+    if (!Array.isArray(row.photoSlots)) throw submissionDatabaseError(null);
+    result.photoSlots = row.photoSlots.map((value) => {
+      const slot = object(value);
+      const projected = Object.fromEntries(
+        [
+          "targetPhotoSlotId",
+          "slotKey",
+          "label",
+          "displayOrder",
+          "required",
+          "photos",
+        ]
+          .filter((key) => Object.hasOwn(slot, key)).map((
+            key,
+          ) => [key, slot[key]]),
+      );
+      if (!Array.isArray(projected.photos)) throw submissionDatabaseError(null);
+      projected.photos = projected.photos.map((nested) => {
+        const photo = object(nested);
+        return Object.fromEntries(
+          [
+            "photoId",
+            "photoItemId",
+            "itemRevision",
+            "displayOrder",
+            "photoVersion",
+            "retentionPolicy",
+            "retentionStartsAt",
+            "expiresAt",
+            "purgedAt",
+            "mediaAvailability",
+          ]
+            .filter((key) => Object.hasOwn(photo, key)).map((
+              key,
+            ) => [key, photo[key]]),
+        );
+      });
+      return projected;
     });
   }
   if (includeBombDetail && Object.hasOwn(row, "reviewContext")) {

@@ -50,9 +50,16 @@ declare
   -- otherwise-valid reassignment interval can exercise the post-lock hard
   -- deadline check without violating the checkout target's available-from
   -- invariant first.
-  v_at timestamptz:=date_trunc('minute',clock_timestamp())-interval '5 minutes';
   v_service_date date:=(clock_timestamp() at time zone 'Asia/Seoul')::date;
-  v_planned_date date:=((clock_timestamp() at time zone 'Asia/Seoul')::date);
+  v_at timestamptz:=case
+    when (clock_timestamp() at time zone 'Asia/Seoul')::time < time '00:01'
+      then ((v_service_date-1)+time '23:58') at time zone 'Asia/Seoul'
+    else greatest(
+      date_trunc('minute',clock_timestamp())-interval '5 minutes',
+      v_service_date::timestamp at time zone 'Asia/Seoul'
+    )
+  end;
+  v_planned_date date:=(v_at at time zone 'Asia/Seoul')::date;
   v_week date;
   v_availability uuid;
   v_result jsonb;
@@ -79,7 +86,7 @@ begin
 
   v_result:=public.create_reservation(
     pg_temp.iid(1),v_reservation_id,v_room.id,
-    ((v_service_date-1)+time '16:00') at time zone 'Asia/Seoul',
+    ((v_planned_date-1)+time '16:00') at time zone 'Asia/Seoul',
     v_at,2,null,v_room.state_version,
     'checkout-incident-create',repeat('1',64)
   );
@@ -354,9 +361,9 @@ select throws_ok(
     'CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(clock_timestamp() at time zone 'Asia/Seoul')::date,
-      'availableFrom',date_trunc('minute',clock_timestamp())-interval '2 minutes',
-      'dueAt',date_trunc('minute',clock_timestamp())-interval '1 minute'
+      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
+      'availableFrom',at_time,
+      'dueAt',at_time+interval '1 minute'
     )::text,'checkout-incident-expired-due',repeat('1',64)
   ) from incident_fixture),
   '22023','INVALID_CHECKOUT_INCIDENT_DECISION',

@@ -107,8 +107,8 @@ select is(
     '26000000-0000-4000-8000-000000000001',
     'inspection_queue_pagination'
   ) ->> 'currentMigration',
-  'cleaning_template_duration_optional',
-  'database status exposes migration 56 when migration 57 is absent'
+  'assignment_unavailability_reassignment',
+  'database status exposes migration 79 when migration 80 is absent'
 );
 
 select is(
@@ -117,7 +117,7 @@ select is(
     'inspection_queue_pagination'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 56 behind source migration 57'
+  'database status reports migration 79 behind source migration 80'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

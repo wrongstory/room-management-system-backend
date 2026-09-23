@@ -9,6 +9,10 @@ from .actor import Actor
 from .app_role import AppRole
 from .change_account_role_response_200 import ChangeAccountRoleResponse200
 from .change_account_status_response_200 import ChangeAccountStatusResponse200
+from .change_developer_room_type_capacity_response_200 import (
+    ChangeDeveloperRoomTypeCapacityResponse200,
+)
+from .checkout_cleaning_template_v8_slot import CheckoutCleaningTemplateV8Slot
 from .cleaning_template_catalog import CleaningTemplateCatalog
 from .cleaning_template_catalog_envelope import CleaningTemplateCatalogEnvelope
 from .cleaning_template_room_type_code import CleaningTemplateRoomTypeCode
@@ -16,6 +20,8 @@ from .cleaning_template_room_type_state import CleaningTemplateRoomTypeState
 from .cleaning_template_slot import CleaningTemplateSlot
 from .create_account_request import CreateAccountRequest
 from .create_account_response_201 import CreateAccountResponse201
+from .create_developer_room_response_201 import CreateDeveloperRoomResponse201
+from .deactivate_developer_room_response_200 import DeactivateDeveloperRoomResponse200
 from .developer_activity_event import DeveloperActivityEvent
 from .developer_activity_event_summary import DeveloperActivityEventSummary
 from .developer_activity_page import DeveloperActivityPage
@@ -73,6 +79,27 @@ from .developer_overview import DeveloperOverview
 from .developer_overview_accounts import DeveloperOverviewAccounts
 from .developer_overview_accounts_by_role import DeveloperOverviewAccountsByRole
 from .developer_overview_rooms import DeveloperOverviewRooms
+from .developer_room_catalog import DeveloperRoomCatalog
+from .developer_room_catalog_item import DeveloperRoomCatalogItem
+from .developer_room_catalog_summary import DeveloperRoomCatalogSummary
+from .developer_room_create_request import DeveloperRoomCreateRequest
+from .developer_room_deactivation_preview import DeveloperRoomDeactivationPreview
+from .developer_room_deactivation_preview_reason_codes_item import (
+    DeveloperRoomDeactivationPreviewReasonCodesItem,
+)
+from .developer_room_deactivation_preview_request import DeveloperRoomDeactivationPreviewRequest
+from .developer_room_deactivation_request import DeveloperRoomDeactivationRequest
+from .developer_room_mutation_result import DeveloperRoomMutationResult
+from .developer_room_type_capacity_change import DeveloperRoomTypeCapacityChange
+from .developer_room_type_capacity_change_request import DeveloperRoomTypeCapacityChangeRequest
+from .developer_room_type_capacity_preview import DeveloperRoomTypeCapacityPreview
+from .developer_room_type_capacity_preview_current import DeveloperRoomTypeCapacityPreviewCurrent
+from .developer_room_type_capacity_preview_proposed import DeveloperRoomTypeCapacityPreviewProposed
+from .developer_room_type_capacity_preview_reason_codes_item import (
+    DeveloperRoomTypeCapacityPreviewReasonCodesItem,
+)
+from .developer_room_type_capacity_preview_request import DeveloperRoomTypeCapacityPreviewRequest
+from .developer_room_type_catalog_item import DeveloperRoomTypeCatalogItem
 from .developer_runtime_status import DeveloperRuntimeStatus
 from .developer_runtime_status_configuration import DeveloperRuntimeStatusConfiguration
 from .developer_runtime_status_configuration_accountphonepepper import (
@@ -200,6 +227,7 @@ from .error_envelope_error import ErrorEnvelopeError
 from .get_current_user_response_200 import GetCurrentUserResponse200
 from .get_developer_database_status_response_200 import GetDeveloperDatabaseStatusResponse200
 from .get_developer_overview_response_200 import GetDeveloperOverviewResponse200
+from .get_developer_room_catalog_response_200 import GetDeveloperRoomCatalogResponse200
 from .get_developer_runtime_status_response_200 import GetDeveloperRuntimeStatusResponse200
 from .get_developer_scheduler_status_response_200 import GetDeveloperSchedulerStatusResponse200
 from .get_room_pin_sheet_sync_status_response_200 import GetRoomPinSheetSyncStatusResponse200
@@ -208,6 +236,12 @@ from .login_request import LoginRequest
 from .login_response import LoginResponse
 from .managed_role import ManagedRole
 from .password_change_request import PasswordChangeRequest
+from .preview_developer_room_deactivation_response_200 import (
+    PreviewDeveloperRoomDeactivationResponse200,
+)
+from .preview_developer_room_type_capacity_response_200 import (
+    PreviewDeveloperRoomTypeCapacityResponse200,
+)
 from .publish_cleaning_template_request import PublishCleaningTemplateRequest
 from .published_cleaning_template import PublishedCleaningTemplate
 from .published_cleaning_template_envelope import PublishedCleaningTemplateEnvelope
@@ -230,6 +264,9 @@ from .room_pin_sheet_sync_status_last_heartbeat_type_0_status import (
 )
 from .room_pin_sheet_sync_status_status import RoomPinSheetSyncStatusStatus
 from .room_pin_sheet_sync_status_worker import RoomPinSheetSyncStatusWorker
+from .room_primary_display_status import RoomPrimaryDisplayStatus
+from .room_type_catalog_envelope import RoomTypeCatalogEnvelope
+from .room_type_catalog_item import RoomTypeCatalogItem
 from .run_developer_diagnostics_response_200 import RunDeveloperDiagnosticsResponse200
 from .status_change_request import StatusChangeRequest
 from .status_change_request_status import StatusChangeRequestStatus
@@ -245,6 +282,8 @@ __all__ = (
     "AppRole",
     "ChangeAccountRoleResponse200",
     "ChangeAccountStatusResponse200",
+    "ChangeDeveloperRoomTypeCapacityResponse200",
+    "CheckoutCleaningTemplateV8Slot",
     "CleaningTemplateCatalog",
     "CleaningTemplateCatalogEnvelope",
     "CleaningTemplateRoomTypeCode",
@@ -252,6 +291,8 @@ __all__ = (
     "CleaningTemplateSlot",
     "CreateAccountRequest",
     "CreateAccountResponse201",
+    "CreateDeveloperRoomResponse201",
+    "DeactivateDeveloperRoomResponse200",
     "DeveloperActivityEvent",
     "DeveloperActivityEventSummary",
     "DeveloperActivityPage",
@@ -291,6 +332,23 @@ __all__ = (
     "DeveloperOverviewAccounts",
     "DeveloperOverviewAccountsByRole",
     "DeveloperOverviewRooms",
+    "DeveloperRoomCatalog",
+    "DeveloperRoomCatalogItem",
+    "DeveloperRoomCatalogSummary",
+    "DeveloperRoomCreateRequest",
+    "DeveloperRoomDeactivationPreview",
+    "DeveloperRoomDeactivationPreviewReasonCodesItem",
+    "DeveloperRoomDeactivationPreviewRequest",
+    "DeveloperRoomDeactivationRequest",
+    "DeveloperRoomMutationResult",
+    "DeveloperRoomTypeCapacityChange",
+    "DeveloperRoomTypeCapacityChangeRequest",
+    "DeveloperRoomTypeCapacityPreview",
+    "DeveloperRoomTypeCapacityPreviewCurrent",
+    "DeveloperRoomTypeCapacityPreviewProposed",
+    "DeveloperRoomTypeCapacityPreviewReasonCodesItem",
+    "DeveloperRoomTypeCapacityPreviewRequest",
+    "DeveloperRoomTypeCatalogItem",
     "DeveloperRuntimeStatus",
     "DeveloperRuntimeStatusConfiguration",
     "DeveloperRuntimeStatusConfigurationACCOUNTPHONEPEPPER",
@@ -342,6 +400,7 @@ __all__ = (
     "GetCurrentUserResponse200",
     "GetDeveloperDatabaseStatusResponse200",
     "GetDeveloperOverviewResponse200",
+    "GetDeveloperRoomCatalogResponse200",
     "GetDeveloperRuntimeStatusResponse200",
     "GetDeveloperSchedulerStatusResponse200",
     "GetRoomPinSheetSyncStatusResponse200",
@@ -350,6 +409,8 @@ __all__ = (
     "LoginResponse",
     "ManagedRole",
     "PasswordChangeRequest",
+    "PreviewDeveloperRoomDeactivationResponse200",
+    "PreviewDeveloperRoomTypeCapacityResponse200",
     "PublishCleaningTemplateRequest",
     "PublishedCleaningTemplate",
     "PublishedCleaningTemplateEnvelope",
@@ -366,6 +427,9 @@ __all__ = (
     "RoomPinSheetSyncStatusLastHeartbeatType0Status",
     "RoomPinSheetSyncStatusStatus",
     "RoomPinSheetSyncStatusWorker",
+    "RoomPrimaryDisplayStatus",
+    "RoomTypeCatalogEnvelope",
+    "RoomTypeCatalogItem",
     "RunDeveloperDiagnosticsResponse200",
     "StatusChangeRequest",
     "StatusChangeRequestStatus",

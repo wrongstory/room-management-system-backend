@@ -193,8 +193,11 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/openapi.json"');
     expect(api).toContain('path === "/docs"');
     expect(openApi).toContain('openapi: "3.1.1"');
+    expect(openApi).toContain('version: "0.5.1"');
     expect(openApi).toMatch(/bearerAuth:\s*\{[\s\S]*?type:\s*"http"[\s\S]*?scheme:\s*"bearer"/);
     expect(openApi).toContain('name: "Idempotency-Key"');
+    expect(openApi).toContain('"/v1/reservations/{reservationId}/room-change":');
+    expect(openApi).not.toContain('"/v1/reservations/{reservationId}/room-change/commit":');
     expect(openApi).toContain('const swaggerUiVersion = "5.32.11"');
     expect(openApi).toMatch(/swagger-ui-dist@\$\{swaggerUiVersion\}/);
     expect(openApi).toContain('persistAuthorization: false');
@@ -260,16 +263,19 @@ describe('Supabase Edge runtime PoC contract', () => {
       'utf8'
     );
     expect(payrollApi).toContain('list_payroll_cycles');
+    expect(payrollApi).toContain('get_payroll_cycle');
     expect(payrollApi).toContain('start_payroll_cycle');
     expect(payrollApi).toContain('record_payroll_payment_check');
     expect(payrollApi).toContain('record_payroll_payment_paid');
     expect(payrollApi).toContain('reopen_payroll_payment_attempt');
     expect(payrollApi).toContain('PAYROLL_ACCESS_REQUIRED');
     expect(edgeIndex).toContain('path === "/v1/payroll"');
+    expect(edgeIndex).toContain('payrollCycleMatch');
     expect(edgeIndex).toContain('path === "/v1/payroll/start"');
     expect(edgeIndex).toContain('const paymentResultMatch = path.match(');
     expect(activity).toContain('edge.authorization.payroll');
     expect(openApi).toContain('operationId: "listPayrollCycles"');
+    expect(openApi).toContain('operationId: "getPayrollCycle"');
     expect(openApi).toContain('operationId: "startPayrollCycle"');
     expect(openApi).toContain('operationId: "recordPayrollPaymentPaid"');
   });
@@ -325,7 +331,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(availabilityApi).toContain('requirePasswordChanged(actor)');
     expect(openApi).toContain('operationId: "submitAvailability"');
     expect(openApi).toContain('AvailabilityChangeRequestInput');
-    expect(openApi).toContain('"OUTSIDE_AVAILABILITY_WINDOW"');
+    expect(openApi).toContain('"AVAILABILITY_WEEK_OUT_OF_RANGE"');
+    expect(openApi).toContain('"PAST_AVAILABILITY_DATE_NOT_ALLOWED"');
     expect(openApi).toContain('"STALE_VERSION"');
   });
 
@@ -373,6 +380,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     ]);
     for (const path of [
       '/v1/reservations',
+      '/v1/reservations/bookability/preview',
       '/v1/reservations/cleaning-requests',
       '/v1/reservations/transitions/process'
     ]) {
@@ -380,9 +388,11 @@ describe('Supabase Edge runtime PoC contract', () => {
     }
     for (const rpc of [
       'list_reservations',
+      'list_reservations_page',
+      'preview_reservation_bookability',
       'get_reservation_detail',
-      'create_reservation',
-      'change_reservation',
+      'create_reservation_v2',
+      'change_reservation_v2',
       'cancel_reservation',
       'manual_checkout_reservation',
       'create_manual_cleaning_request',
@@ -395,6 +405,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(reservationApi).toContain('requireBusinessAdmin(actor)');
     expect(reservationApi).toContain('requirePasswordChanged(actor)');
     expect(openApi).toContain('operationId: "listReservations"');
+    expect(openApi).toContain('operationId: "previewReservationBookability"');
     expect(openApi).toContain('operationId: "processReservationTransitions"');
     expect(reservationApi).toContain('startsWith("reservation-scheduler-")');
     expect(fastifyReservationRoutes).toContain("startsWith('reservation-scheduler-')");
@@ -431,6 +442,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     }
     for (const rpc of [
       'get_room_operational_projection',
+      'list_room_operation_blocks',
+      'list_room_issues',
       'change_room_master_data',
       'mutate_room_operation'
     ]) {

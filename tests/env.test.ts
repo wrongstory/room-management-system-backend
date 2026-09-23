@@ -192,11 +192,9 @@ describe('environment contract', () => {
     ]) expect(()=>loadEnv({...localEnv,...override})).toThrow();
   });
 
-  it('keeps initial PIN bootstrap optional but validates configured digits', () => {
-    expect(loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: '' }).ROOM_PIN_INITIAL_DIGITS).toBeUndefined();
-    expect(loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: '0'.repeat(4) }).ROOM_PIN_INITIAL_DIGITS).toBe('0'.repeat(4));
-    for (const value of ['123', '123456789', '12ab']) {
-      expect(() => loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: value })).toThrow();
-    }
+  it('ignores the removed fixed initial PIN setting', () => {
+    expect(loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: 'legacy-value' })).not.toHaveProperty(
+      'ROOM_PIN_INITIAL_DIGITS'
+    );
   });
 });

@@ -40,7 +40,7 @@ erDiagram
   PROFILES ||--o| MAID_PROFILES : "메이드일 때만"
   PROFILES ||--o{ AVAILABILITY_VERSIONS : "주차별 제출 버전"
   AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_DAYS : "월~일 선택"
-  AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_CHANGE_REQUESTS : "마감 후 변경 요청"
+  AVAILABILITY_VERSIONS ||--o{ AVAILABILITY_CHANGE_REQUESTS : "승인형 변경 요청"
   PROFILES ||--o{ AVAILABILITY_CHANGE_REQUESTS : "관리자 처리"
   PROFILES ||--o{ PASSWORD_CHANGE_COMMANDS : "응답 유실 복구 receipt"
 
@@ -135,8 +135,9 @@ erDiagram
 - 활성 메이드만 근무 가능일을 제출할 수 있다.
 - `(maid_profile_id, week_start, version)`은 유일하고, 주차별 현재 제출 버전은 한 건이다.
 - version은 7개 날짜 row를 명시적으로 가지며, 새 제출·승인 version이 생겨도 이전 version과 날짜는 삭제하지 않는다.
-- 일요일 12:00–23:59 KST의 일반 제출은 `expectedVersion` CAS와 idempotency key로 직렬화한다.
-- 마감 뒤 변경은 pending 요청을 만들고 활성 관리자의 승인 시에만 새 current version으로 전환한다.
+- 일요일은 다음 주 계획의 주 제출일이지만, KST 기준 현재 주 또는 다음 주는 어느 요일이든 `expectedVersion` CAS와 idempotency key로 직접 제출·변경한다.
+- 현재 주의 지난 날짜는 기존 current version의 `available=true`만 보존할 수 있고 새로 true로 소급 변경할 수 없다.
+- 승인형 변경 요청은 pending 요청과 관리자 승인/반려 이력을 보존하는 별도 호환 흐름이다.
 - 메이드 후보 목록은 `활성 계정 + 활성 maid 역할 + 해당 날짜 available`을 모두 만족해야 한다.
 
 ## 4. 객실·예약·운영
@@ -173,7 +174,10 @@ erDiagram
     uuid id PK
     text code UK
     int base_cleaning_fee
+    int default_guest_count
+    int max_guest_count
     boolean active
+    bigint version
   }
   ROOMS {
     uuid id PK
@@ -181,6 +185,10 @@ erDiagram
     uuid room_type_id FK
     text elevator_zone
     bigint state_version
+    boolean active
+    timestamptz deactivated_at
+    uuid deactivated_by FK
+    text deactivation_reason_code
   }
   RESERVATIONS {
     uuid id PK
@@ -322,6 +330,7 @@ erDiagram
     uuid authoritative_access_lease_id FK
     timestamptz expires_at
     timestamptz finalized_at
+    uuid request_id
   }
   ROOM_PIN_SHEET_SYNC_OUTBOX {
     uuid id PK
@@ -359,6 +368,11 @@ erDiagram
 
 핵심 제약:
 
+- #236의 `default_guest_count/max_guest_count`는 API에서 `baseOccupancy/maxOccupancy`로 표시하며 1 이상·기본값 이하 최대값 제약을 유지한다. 예약 preview는 `guestCount`가 양의 정수일 때만 최신 최대 인원을 검사하고 생략/null이면 기간 bookability만 계산한다. reservation/segment insert·update는 필수 guest count와 최신 최대 인원을 항상 재검증한다. 현재 저장값은 보존하고 예시 숫자를 backfill하지 않는다.
+- 객실 카탈로그 제거는 `rooms.active=false` 전이만 허용하고 hard delete를 차단한다. developer의 5분 preview는 private FORCE RLS 원장에 actor·entity·CAS version·영향·opaque fingerprint를 고정한다. 현재 점유, 활성/미래 예약, 진행 중 청소, PIN 변경, 미해결 운영 업무가 있으면 비활성화할 수 없다.
+
+- #169 generated initial revision은 current pointer를 만들되 latest sync를 `mismatch`로 기록하고 Sheet outbox를 만들지 않는다. admin의 30초 reveal lease가 평문을 저장하지 않고 암호문을 전달하며, 현장 확인 RPC가 current version을 CAS 검증한 뒤에만 `verified` event와 `GENERATED_PIN_PHYSICALLY_CONFIRMED` outbox를 추가한다.
+
 - 활성 예약 구간은 `[check_in_at, check_out_at)` 반개구간이며 GiST exclusion으로 객실별 겹침을 막는다. KST 날짜가 다음 날 이상이고 분 단위인 일정만 허용한다.
 - 예약마다 입실 준비 의무와 비공개 퇴실 청소 의무를 정확히 하나씩 만든다. 퇴실 청소 대상은 필요 시 같은 의무에서 한 번만 공개한다.
 - 퇴실 의무와 checkout target은 예약·객실·의무 ID 복합키와 deferred constraint trigger로 commit 시점까지 양방향 동일성을 강제한다. `completed`는 동일 target의 승인 근거가, `cancelled`의 historical pointer는 동일 target의 취소 상태가 있어야 한다.
@@ -387,6 +401,8 @@ erDiagram
   RESERVATIONS ||--o{ CLEANING_TARGETS : "예약 기반"
   CLEANING_TARGETS ||--o{ CLEANING_ASSIGNMENTS : "revision 이력"
   PROFILES ||--o{ CLEANING_ASSIGNMENTS : "담당 메이드"
+  CLEANING_ASSIGNMENTS ||--o| ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS : "수행 불가 종료"
+  CLEANING_TARGETS ||--o{ ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS : "원 책임/대체 target"
   CLEANING_TARGETS ||--o{ CLEANING_ATTEMPTS : "수행 회차"
   CLEANING_ASSIGNMENTS ||--o{ CLEANING_ATTEMPTS : "통보 근거"
   CLEANING_ATTEMPTS ||--o{ CLEANING_SUBMISSIONS : "제출 버전"
@@ -433,6 +449,20 @@ erDiagram
     timestamptz due_at_snapshot
     timestamptz notified_at
     timestamptz ended_at
+  }
+  ASSIGNMENT_UNAVAILABILITY_CANCELLATIONS {
+    uuid id PK
+    uuid cleaning_target_id FK
+    uuid assignment_id FK
+    uuid attempt_id FK
+    uuid maid_profile_id FK
+    uuid actor_profile_id FK
+    text reason_code
+    bigint target_assignment_version
+    bigint assignment_revision
+    bigint attempt_execution_version
+    uuid replacement_target_id FK
+    timestamptz occurred_at
   }
   CLEANING_ATTEMPTS {
     uuid id PK
@@ -493,7 +523,8 @@ erDiagram
 - 미래 planned checkout은 obligation materialization·current pointer·actual checkout 전 attempt 0이다. 같은 객실의 이전 active workflow가 있으면 target/assignment를 유지하고 활성화만 보류한다.
 - 실행 창이 끝난 unassigned/notified attempt-0 target은 같은 ID/original date로 다음 KST 날짜에 이월한다. effective date/carryover/assignment version과 schedule revision만 증가하며 active attempt는 이월 대상이 아니다.
 - 이월 write 전에 다음 source window를 검증한다. 연박은 active·실제 입실·미퇴실·동일 객실 예약 점유 범위/KST 날짜가 유효해야 하며, 추가 청소는 active reservation과 다음 창이 겹치지 않아야 한다. invalid면 blocked/mutation 0이며 기존 notified assignment/알림을 유지한다. 자동 취소·종류 변환은 하지 않는다.
-- 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 다른 메이드에게 배정할 수 없다.
+- 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 같은 0원 target을 다른 메이드에게 배정할 수 없다. #264 수행 불가 확정은 그 target/assignment/attempt를 종료 이력으로 보존한 뒤 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 정확히 한 건 생성하며, replacement만 일반 배정 흐름에 들어간다.
+- `assignment_unavailability_cancellations`는 assignment당 최대 한 건이며 target/assignment/maid/revision과 선택적 attempt execution version을 종료된 원장 상태와 대조한다. UPDATE/DELETE와 Data API 접근은 금지하고, replacement target이 있는 경우에도 과거 재청소 target과 earning을 수정하지 않는다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.
 - #7A `cleaning_attempts.execution_version`은 양수 CAS version이다. 시작/물리 완료는 해당 회차와
   본인 current notified assignment identity/revision을 확인하고 한 번 증가하며 receipt replay는
@@ -501,8 +532,8 @@ erDiagram
 - #7B 전 일반 role/status 변경으로 in_progress 수행자가 고립되지 않도록 DB guard로 거부한다.
   제한 capability/인계/offline lease는 별도 후속이며 active/session 경계를 완화하지 않는다.
 - 제출은 `client_submission_id`로 멱등 처리하며, 수행 회차별 현재 제출은 한 건이다.
-- 사진 파일은 비공개 Google Drive 폴더에만 저장하고 DB에는 Drive 파일 ID·해시·크기·삭제예정일·삭제 결과만 둔다.
-- `purge_after`는 서버가 `uploaded_at + 7일`로 강제하며, 삭제 작업이 Drive 파일을 영구삭제한 뒤 `purged_at`을 기록한다.
+- 사진 파일은 비공개 Google Drive 폴더에만 저장하고 DB에는 opaque locator·해시·크기·도메인 retention·삭제 결과만 둔다.
+- `attempt_photo_versions.purge_after`와 provider의 legacy clock은 이력 호환용이다. Stage 1 runtime은 `photo_retention_records.expires_at/media_availability`를 authoritative하게 사용하며 Drive 영구삭제 뒤 `purged_at`을 기록한다.
 - 템플릿과 슬롯은 **target 생성 시** 고정하고 attempt가 같은 계약을 사용한다. 제출에서는 그 슬롯의 특정 사진 버전 연결만 봉인하여 이후 교체가 과거 검수에 소급되지 않게 한다.
 
 ### #30 사진 슬롯·제출 버전 모델
@@ -517,6 +548,9 @@ erDiagram
   CLEANING_ATTEMPTS ||--o{ ATTEMPT_PHOTO_CURRENT : "회차 + 슬롯 CAS"
   ATTEMPT_PHOTO_VERSIONS ||--o{ ATTEMPT_PHOTO_CURRENT : "null은 비움"
   ATTEMPT_PHOTO_VERSIONS ||--o{ ATTEMPT_PHOTO_CHANGES : "교체·비움 이력"
+  CLEANING_ATTEMPTS ||--o| ATTEMPT_PHOTO_COLLECTION_STATES : "extra-proof collection CAS"
+  ATTEMPT_PHOTO_COLLECTION_STATES ||--o{ ATTEMPT_PHOTO_COLLECTION_ITEMS : "stable item/order"
+  ATTEMPT_PHOTO_COLLECTION_ITEMS ||--o{ ATTEMPT_PHOTO_COLLECTION_CHANGES : "append/replace/delete history"
   CLEANING_SUBMISSIONS ||--o{ SUBMISSION_PHOTO_BINDINGS : "특정 photo version 불변 연결"
   ATTEMPT_PHOTO_VERSIONS ||--o{ SUBMISSION_PHOTO_BINDINGS : "파일 복제 없음"
   CLEANING_SUBMISSIONS ||--o| SUBMISSION_PHOTO_BINDING_SETS : "전체 연결 집합 봉인"
@@ -526,10 +560,11 @@ erDiagram
 - 새 사진 모델 10개 테이블은 모두 `private` + RLS이며 `PUBLIC/anon/authenticated/service_role`의 읽기·직접 DML 권한이 없다. 모델 helper도 owner-only다. #9/#31의 세션·실제 파일 검증 경로가 생기기 전 사진/제출 HTTP는 추가하지 않는다.
 - 기존 `cleaning_template_versions.photo_slots`, `cleaning_targets.template_snapshot`, `cleaning_attempts.template_snapshot`은 제거하지 않는다. 새 슬롯 row는 `slot_snapshot`에 구역·이름·설명·반복 인스턴스를 포함한 정확한 원본 객체를 보존하고, 식별자·필수 여부·표시 순서는 정규화 컬럼으로 검증한다.
 - 기존 v1 `[]` 또는 복원 근거가 없는 JSON은 `ready=false`다. 이 때문에 기존 예약/배정/물리적 완료가 막히지는 않지만 사진 완전성·제출 연결은 실패한다. 최신 템플릿으로 보간하거나 사진 0장을 완료로 인정하지 않는다. v6 명시 슬롯에는 v7 `tv-on`이나 개수를 소급하지 않는다.
-- 새 v7+ checkout 템플릿은 타입별 10/11/13/15개, 그중 선택 1개와 필수 `tv-on` 정확히 1개를 검증한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
+- `maxPhotos` 없는 pre-A checkout 템플릿은 v7보다 높은 historical version도 타입별 10/11/13/15개 계약을 이력으로 유지한다. 모든 slot에 metadata가 있는 새 v8+ A-contract는 9/10/12/14개, 필수 8/9/11/13개를 검증하고 required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지를 강제한다. 연박/추가/재청소 운영 슬롯은 데모에서 seed하지 않는다. 최대 100개 슬롯·80자 key·0–99 표시 순서는 기술적 입력 상한이며 제품별 필수 사진 수를 뜻하지 않는다.
+- #180은 v8 checkout `extra-proof`에만 0~10장 collection을 연다. item UUID와 display order는 형제 교체 때 유지되고, collection/item revision을 함께 CAS한다. 삭제된 item은 tombstone으로 남아 재사용하지 않으며, submission은 active item의 exact photo version/revision/order를 봉인한다. 기존 pre-A와 일반 slot은 단일 current pointer를 계속 사용한다.
 - 증빙 identity는 `(cleaning_attempt_id, cleaning_target_id, target_photo_slot_id, version)`이다. 구 담당자의 interrupted 사진과 새 담당자의 사진은 같은 target slot을 쓰더라도 서로 다른 current pointer를 가진다. NULL/다른 target/다른 attempt 연결은 복합 FK로 거부한다.
-- `attempt_photo_versions`는 불변이다. `uploaded_at + 168시간` 만료는 교체·재제출·retry로 연장하지 않으며, 실제 provider 삭제 확인은 별도 append-only purge marker로 관리한다. #30에서 bytes/Drive 업로드나 삭제를 실제 수행하지 않는다.
-- 필수 슬롯이 전부 verified·미만료·미삭제 사진을 가져야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. frozen JSON과 normalized 슬롯의 전체 집합도 다시 대조한다.
+- `attempt_photo_versions`는 불변이다. 청소 제출 evidence는 최종 inspection 결정 전 만료하지 않고 결정 시각+168시간을 사용한다. 교체·재제출·retry는 clock을 연장하지 않으며 provider 삭제 확인은 별도 append-only marker로 관리한다.
+- 필수 슬롯이 전부 verified이며 authoritative media availability상 사용 가능해야 한다. 선택 슬롯은 비어 있어도 되지만 선택된 current 사진이 pending/failed/만료/삭제 상태이면 완전하지 않다. legacy `purge_after`만으로 pending inspection을 만료시키지 않는다.
 - `cleaning_submissions`가 계속 제출 버전 정본이다. 미소비 제출도 identity/manifest/업무 snapshot/제출자·시각은 수정·삭제할 수 없고 `status/superseded_at`만 기존 lifecycle projection으로 남긴다. `submission_photo_binding_sets`는 정본을 복제하는 제출 테이블이 아니라 연결 봉인 marker다.
 - 봉인 시 현재 photo set과 양방향 동일성을 검증하고, 이후 membership INSERT/UPDATE/DELETE를 금지한다. 사진 교체와 연결은 같은 attempt lock에서 직렬화한다. current pointer는 CAS로 바뀌지만 과거 제출의 특정 photo version은 유지된다.
 - #30 단계 자체는 모델 연결까지만 소유했으며, #31의 후속 append-only migration이 business 전체제출·검수·수익·재청소 명령을 연결한다. canonical `cleaning_submissions` 및 legacy `submission_photos`에 대한 service-role raw DML 차단은 계속 유지한다. legacy manifest/default `uploaded`만으로 verified 증빙을 만들지 않는다.
@@ -554,7 +589,7 @@ erDiagram
 - submission current pointer는 attempt별 revision CAS다. field completion만으로 제출/검수/earning은 생기지 않으며, 필수 current photo가 하나라도 누락·pending·failed·expired·purged면 새 제출을 거부한다. 일반 재제출은 과거 version/photo bindings를 immutable history로 남긴다.
 - 관리자 검수 queue/detail은 current `inspection_pending`만 사용한다. queue의 roomNumber는 target/live room이 아니라 notified assignment snapshot에서 가져오며, sealed photo ID/slot/version 외 provider locator/hash/file name과 PIN/PII/request hash/raw state는 반환하지 않는다.
 - stale current review와 bomb 선판정은 `STALE_VERSION`으로 실패한다. 최종 approve/reject, notification/outbox/audit, earning 또는 reclean 생성은 한 transaction이며 receipt lock과 unique provenance로 동시 재시도를 exactly-once 처리한다.
-- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유하고 다른 maid 이관은 금지한다.
+- 승인 earning은 유상 원청소에만 submission/entitlement identity로 한 건이며 approved bomb bonus는 frozen base와 같다(0원 base도 0원 provenance 허용). 반려는 earning 없이 원 attempt/submission/decision·원 maid에 묶인 0원 `inspection_reclean` target과 notified assignment를 만든다. attempt 생성은 기존 #28 activation만 소유한다. 원 maid 수행 불가 예외에서는 기존 0원 target/assignment를 취소 이력으로 종료하고 원 유상 fee/template snapshot의 별도 ordinary replacement target을 만든다. 새 담당자는 replacement의 일반 완료·검수·earning 규칙을 사용하며 원 담당자의 미완료 earning은 생성하지 않는다.
 - checkout completion은 root target status만 신뢰하지 않는다. `completion_submission_id`에서 승인된 terminal descendant를 recursive reclean chain으로 증명하며, 새 completed obligation에 NULL submission proof를 허용하지 않는다.
 
 ### #27 시작 전 취소 요청 원장
@@ -598,7 +633,7 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
-#109/#128의 typed 알림은 private event catalog의 48 event family/32 public category를 정본으로
+#109/#128/#264의 typed 알림은 private event catalog의 53 event family/36 public category를 정본으로
 삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
 검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
 dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫
@@ -917,22 +952,22 @@ source 후보 schema다.
 
 ## 7. Supabase Free Plan 전용 운영 기준
 
-### #29 versioned duration policy (feature source)
+### #29/#231 historical duration policy (retired decision input)
 
 `profiles`의 관리자 생성자·확정자는 `assignment_duration_policy_versions`의 FK로 보존한다.
-정책은 target/assignment에 새 write pointer를 추가하지 않는다. Preview 응답의 policy version과
-input fingerprint만 조회 시점의 입력을 식별하며, 실제 배정 snapshot 저장은 #25/#26 책임이다.
+정책은 target/assignment에 새 write pointer를 추가하지 않는다. #231 이후 이 원장은 과거 이력만
+보존하며 신규 Preview 응답·fingerprint·배정 판단의 입력이 아니다. 실제 배정 snapshot 저장은 #25/#26 책임이다.
 
 - `id`, 양수 unique `version`, `status = draft | confirmed | retired`
 - `standard_minutes`, `premium_minutes`, `ocean_premium_minutes`, `ocean_family_minutes`: 모두 양수
 - `created_by/created_at`, `confirmed_by/confirmed_at`; confirmed/retired는 확정자·시각 필수
 - confirmed partial unique index로 현재 확정 정책 최대 한 건, FK 자식 index 두 개
-- RLS 활성화·직접 SELECT/DML revoke; 관리자용 read/confirm RPC만 허용
+- RLS 활성화·직접 SELECT/DML revoke; 관리자용 과거 read RPC만 허용하고 confirm RPC는 retired 오류
 - 기존 값 immutable, DELETE 금지; 기존 confirmed의 retired 전환 외 UPDATE 금지
-- fresh confirmed 0건, 55/65/70/80 seed 없음, preview DML 0
+- fresh confirmed 0건 허용, 55/65/70/80 seed 없음, preview DML 0
 
-실제 DDL 정본은 `20260907143843_assignment_preview_duration_policy.sql`이며 기존 24개
-migration을 수정하지 않는다. 운영·recovery 적용 상태와 무관한 feature schema다.
+초기 DDL은 `20260907143843_assignment_preview_duration_policy.sql`, 폐기 전환은 append-only
+`20260920094931_retire_assignment_duration_policy.sql`이다. 과거 row·audit·receipt는 수정하지 않는다.
 
 2026-08-25 기준 공식 Free Plan 범위 안에서만 사용한다.
 
@@ -946,11 +981,11 @@ migration을 수정하지 않는다. 운영·recovery 적용 상태와 무관한
 | Realtime | 월 200만 메시지, 동시 200연결 | MVP 핵심 경로에는 미사용, 필요 화면만 제한 구독 |
 | Edge Functions | 월 500,000회 | 초기 백엔드는 Fastify 서버 사용, 정리 작업만 필요 시 검토 |
 
-사진은 프론트 앱에서 **최대 300KiB(307,200바이트)** JPEG/WebP로 압축하고 EXIF를 제거한 뒤 API에 전송한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜를 사용하며, 중복 방지를 위해 실제 파일명에는 수행 회차·사진 슬롯·사진 UUID를 포함한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
+새 source 후보는 스마트폰 원본 JPEG/WebP/HEIC/HEIF(최대 5MiB·12MP/5000px)를 API에 전송하고 서버가 방향 보정·EXIF 제거·축소/재인코딩 후 **최대 300KiB(307,200바이트)** JPEG/WebP만 저장한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜를 사용하며, 중복 방지를 위해 실제 파일명에는 수행 회차·사진 슬롯·사진 UUID를 포함한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
 
-현재 121개 객실을 모두 하루에 한 번 청소하고 타입별 필수 슬롯 수(10·11·13·15장)를 그대로 적용하면 하루 최대 1,475장, 7일 보관량은 약 **3.17GB**다. 모든 객실에 가장 큰 15장 기준을 적용한 보수적 최악값도 하루 1,815장, 약 **3.90GB**다. Google 개인 계정 기본 15GB 중 20% 여유를 남긴 12GB를 사진에 쓴다고 보면 이론상 약 5,580장/일까지 가능하므로 객실 운영 최대치보다 충분하다. 단, 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
+현재 121개 객실을 모두 하루에 한 번 청소하면 v8 필수 슬롯(8·9·11·13장)은 하루 1,233장이다. 모든 객실의 선택 `extra-proof`를 10장까지 채운 상한은 하루 2,443장, 7일 약 **4.89GiB**다. 모든 객실에 가장 큰 타입의 필수 13장과 선택 10장을 적용한 보수적 상한은 하루 2,783장, 7일 약 **5.57GiB**다. Google 개인 계정 기본 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
 
-각 사진의 `purge_after`는 폴더 날짜가 아니라 정확히 `uploaded_at + 7일`이다. 정리 작업은 주기적으로 만료 레코드를 잠그고 Drive `files.delete`를 호출해 휴지통을 거치지 않고 영구삭제한다. 성공 또는 이미 없는 파일(404)은 `purged`로 완료하고, 일시 오류는 지수 백오프로 재시도한다. 빈 객실·날짜 폴더는 그 안의 관리 대상 파일이 모두 삭제된 뒤 정리한다. 메타데이터·해시·검수 결과는 DB 감사 근거로 유지한다. 상세 규칙은 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
+legacy `purge_after`는 기존 이력으로 남지만 삭제 판단은 도메인별 `expires_at`을 사용한다. 청소 제출은 final decision+168시간, 이슈·컴플레인·중단/충돌 증빙은 해결/종결+180일, true orphan은 uploadedAt+30일이다. worker는 만료 레코드를 잠그고 Drive `files.delete`를 호출하며 성공/404를 `purged`로 멱등 완료한다. 메타데이터·해시·검수 결과는 영구 감사 근거로 유지한다. 상세 규칙은 [사진 저장 운영안](./PHOTO_STORAGE.md)을 따른다.
 
 Free 프로젝트는 낮은 활동이 7일 이어지면 일시 정지될 수 있고 공식 일일 백업 보장·PITR·DB branching·SLA가 없다. 마이그레이션 정본은 Git에 보관하고, 두 번째 Free 프로젝트에는 주기적으로 최신 논리 백업을 복원해 실제 복구 가능성을 검증한다. 구체적인 절차는 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)을 따른다.
 
@@ -989,7 +1024,7 @@ erDiagram
   photo_purge_jobs ||--o{ photo_cleanup_events : "immutable lifecycle"
 ```
 
-- accepted 사진은 DB가 정확히 `uploaded_at + 168 hours`를 due로 판정하고 만료 즉시 읽기 불가다. never-accepted candidate는 별도 orphan ledger로만 정리한다.
+- #85의 accepted `uploaded_at + 168 hours` clock은 legacy production 기록이다. Stage 1 candidate는 accepted object를 domain retention record로 backfill하고 최종 inspection/사건 종결 anchor를 authoritative하게 사용한다. historical submission은 current pointer와 무관하게 자체 final decision clock을 유지하며, provider DELETE는 exact fence/claim/expiry permit 뒤에만 시작한다. never-accepted provider candidate 보상 ledger는 계속 분리한다.
 - 기존 및 신규 upload operation은 exact room-folder binding을 가진다. retirement가 시작되면 reserve/provider-success/finalize가 fail-closed하며, pending upload state 또는 identity가 있으면 folder retirement를 시작할 수 없다.
 - Drive 삭제 `204/404`만 terminal success다. raw locator는 terminal settle 때 제거하고 private SHA-256 tombstone과 append-only cleanup event를 남긴다.
 - room 폴더를 먼저 확인·삭제하고 모든 child가 terminal일 때 date 폴더를 처리한다. provider list emptiness만을 DB authority로 사용하지 않는다.
@@ -1122,7 +1157,7 @@ erDiagram
   source 검증 실패는 전체 rollback이며 reclean 원담당 불변, NULL due 보존, 실제 점유와 다음 입실 경계를 유지한다.
 - 사진 실업로드/제출·offline lease/PIN은 여기서 구현하지 않는다. capability 권한 계약과 실제 구현을 구분한다.
 
-### #133 개발 소스: 자동 checkout 후 퇴실 미진행 사건
+### #133 source/dev 완료, release pending: 자동 checkout 후 퇴실 미진행 사건
 
 `20260913141655_checkout_not_completed_incident_workflow.sql`은 기존 53개 migration을 수정하지 않는
 54번째 append-only feature migration이다.
@@ -1149,18 +1184,21 @@ erDiagram
   결정은 기존 target을 재사용하고 새 current assignment 및 필요 시 새 scheduled attempt를 만들며 과거
   assignment/attempt는 보존한다. 연장은 occupancy resumed 이력을 추가하고 중단 작업의 earning·벌점은 0이다.
 - command lock은 global reservation advisory → scoped receipt → domain row 순서이며 report/decision replay와
-  상반 결정은 stable domain conflict로 수렴한다. production/recovery 적용 상태와 무관한 source candidate다.
+  상반 결정은 stable domain conflict로 수렴한다. #133 통합 당시 기준은
+  `main@e3397e00e5538871d80610c9f0c7ab88535d7be0`과 production 54 migrations였고, 현재 운영 기준은
+  `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` / 56 migrations다.
 
-### #156 개발 소스: checkout template 운영 게시
+### #156 checkout template 운영 게시 — production 반영 완료
 
 `20260914094126_cleaning_template_admin_api.sql`은 기존 54개 migration을 수정하지 않는 55번째 append-only
 feature migration이다. `cleaning_template_versions`는 `(room_type_id,cleaning_kind,version)` 이력과 published
 partial unique를 유지하며, publish command가 동일 타입/kind advisory lock 안에서 current expected version을
-검사하고 이전 row를 retired로 전이한 뒤 v7+ 새 row를 추가한다. `private.photo_template_slots`는 새 JSON의
+검사하고 이전 row를 retired로 전이한 뒤 v8+ 새 row를 추가한다. 기존 pre-A v7+ row와 frozen snapshot은 그대로 유효하다. `private.photo_template_slots`는 새 JSON의
 정규화된 immutable row를 같은 transaction에서 materialize한다. 과거 `cleaning_targets.template_snapshot`은
 current pointer를 다시 읽거나 backfill하지 않으므로 이후 게시에도 변하지 않는다. raw template table은 RLS를
 활성화한 채 Data API policy/grant가 없고, service-only 조회/게시 RPC가 live session과 active/password-complete
-business admin을 매 요청 확인한다. production 운영값·seed·notification/outbox는 이 migration에 포함하지 않는다.
+business admin을 매 요청 확인한다. migration 자체에는 production 운영값·seed·notification/outbox가 없으며,
+운영 게시 명령으로 네 객실 유형의 checkout template v7이 별도 생성됐다.
 
 ### #165 checkout 예상시간 선택화
 
@@ -1172,15 +1210,19 @@ backfill하거나 다시 쓰지 않는다.
 
 ### #170 검수 대기열 bounded pagination
 
-`20260916070500_inspection_queue_pagination.sql`은 기존 56개 migration을 수정하지 않는 57번째 append-only
+`20260923020000_inspection_queue_pagination.sql`은 기존 79개 migration을 수정하지 않는 80번째 append-only
 migration이다. current `submitted` 제출의 `(submitted_at,id)` partial index와 같은 tuple의 oldest-first keyset을
 사용한다. page는 기본 50·최대 100건이며 service-role RPC 안에서도 actor profile과 live `auth.sessions`를 함께
 검증한다. cursor 서명·actor/role/stream/sort scope와 128 KiB HTTP 상한은 Fastify/Edge adapter가 동일하게
 적용하며 기존 immutable submission, decision, earning 원장은 다시 쓰지 않는다.
 
+현재 production은 이 56번째 migration까지 적용됐고, 네 checkout template v7은 `durationMinutes=NULL`과
+승인된 사진 슬롯 수(standard 10 / premium 11 / oceanPremium 13 / oceanFamily 15)를 보존한다. 안전한
+운영 fixture 부재로 예약 성공 mutation smoke만 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
+
 실제 청소 수행시간은 `cleaning_attempts.started_at`과 `field_completed_at`의 차이이며, turnaround는 실제
-checkout 시각부터 field completion까지다. 배정 preview는 `assignment_duration_policy_versions`의 confirmed
-정책만 사용한다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도
+checkout 시각부터 field completion까지다. 배정 preview는 예상시간 정책과 template duration을 모두
+사용하지 않는다. 따라서 checkout template의 null duration은 미설정 상태를 정직하게 나타내며 어떤 고정값도
 추정하지 않는다.
 
 수동 청소 계획은 기존 target과 새 target에 명시된 종료시각이 모두 있을 때만 일정 구간 충돌을 비교한다.
@@ -1189,8 +1231,83 @@ checkout 시각부터 field completion까지다. 배정 preview는 `assignment_d
 `in_progress`와 미해결 `checkout_presence_incidents`를 검사한다. 실패는 attempt·audit·receipt를 함께 0건으로
 유지하므로 예상시간 원장과 실행 권한 원장이 섞이지 않는다.
 
+### #187 Phase C stay/room segment 후보
+
+62번째 append-only 후보는 `private.reservation_stays` 아래 immutable room segment 이력을 둔다. 기존
+`reservations.room_id`는 최초 입실 계약 객실을 보존하고, 현재 객실은 현재 시각을 포함하는 non-retired
+segment, 최종 checkout 객실은 가장 마지막 예정 segment로 계산한다. non-retired segment의 `[startsAt,
+endsAt)` 범위는 객실별 GiST exclusion으로 겹칠 수 없다. 기존 active reservation은 migration에서 한 stay와
+한 segment로 backfill하며 겹침이 발견되면 전체 migration을 fail-closed한다.
+
+투숙 중 이동은 source segment를 `effectiveAt`에서 끝내고 target segment를 같은 시각에 시작한다. 원 객실의
+checkout cleaning은 `stay_segment_checkout_obligations`와 별도 target으로 exactly-once 기록되고, 최종
+checkout obligation/target은 target room으로 이동한다. 미래 이동은 PIN lease를 즉시 폐기하지 않고
+`room_pin_access_scheduled_revocations`에 cutoff를 기록해 effectiveAt 전 접근을 유지하고 이후 reveal/change,
+rotation 및 Data API RLS에서 차단한다. 모든 새 private table은 FORCE RLS이며 raw Data API 권한이 없다.
+
 1. 계정 수명주기 마이그레이션과 관리자 API를 적용한다.
 2. 근무 가능일 3개 테이블과 current pointer, 원자 command, RLS를 `dev` 통합 범위로 적용한다. (Issue #6)
 3. 사진 manifest JSON을 슬롯·사진 테이블로 정규화한다.
 4. 지급 명령에서 `payroll_items` 잠금 합계와 cycle 상태를 원자적으로 전이한다.
 5. 도메인별 서버 명령과 상태 전이 테스트를 추가한다.
+
+### #228 관리자 점유 보정 원장
+
+`private.room_occupancy_corrections`는 관리자 보정 command마다 room/reservation/stay, 교체된 segment와 successor segment, 목표 occupied, effective timestamp, actor/reason, 적용 뒤 room state version, command key/request hash를 한 번만 기록한다. UPDATE/DELETE는 trigger로 거부하고 raw Data API grant는 없다. 이 원장은 projection을 직접 덮어쓰는 override가 아니라 canonical `stay_room_segments` revision을 설명하는 provenance다. vacant 보정은 기존 segment를 retire하고 필요할 때만 `[oldStart,effectiveAt)` successor를 남기며, 시작 경계 보정은 zero-length successor 없이 전체 retire한다. occupied 복원은 effectiveAt을 포함하는 동일 room의 과거 segment lineage를 요구하고, successor의 끝을 그 source segment의 실제 lineage boundary로 제한하며 `source_reservation_id`와 `move_event_id`를 승계해 #187 room-move 원장 우회를 막는다.
+
+`private.room_display_status_overrides`는 여섯 표시 분류 또는 null(clear), room CAS version, actor/reason, command key/request hash를 append-only로 보존한다. projection은 `canonical_primary_display_status`와 `display_status_override`를 별도로 반환하고 effective `primary_display_status`만 override 우선으로 계산한다. 이 원장은 reservation/stay/occupancy/readiness/bookability를 변경하지 않으며 `BLOCKED` override도 실제 operation block을 만들지 않는다.
+
+## #194 Assignment-bound PIN entitlement (64번째 source migration)
+
+`20260918000000_assignment_pin_entitlement.sql`은 기존 63개 migration을 수정하지 않는 append-only
+source migration이다. `private.room_pin_assignment_entitlements`는 exact current/notified assignment,
+target/room/maid, assignment revision, current PIN revision/version과 grant를 발생시킨 typed notification
+delivery outbox를 immutable identity로 보존한다. raw Data API grant는 없고 identity UPDATE/DELETE를 금지하며
+open→ended만 허용한다.
+
+최초 grant는 active/password-complete maid와 exact delivery outbox가 같은 transaction에서 확정된 경우만
+생긴다. `availableFrom` 또는 attempt/access lease는 entitlement 시작 조건이 아니다. field completion,
+upload pending, submission, inspection pending 동안 유지하고 final approve/reject/cancel, current assignment
+종료·revision 교체, inactive/departed 최종 정리에서 entitlement와 열린 reveal lease를 함께 종료한다.
+`deactivation_pending`/`upload_only`에서는 원장 row를 final cleanup 전까지 보존하지만 기존 active-only session
+predicate가 actual reveal을 차단하고 신규/rotation successor grant도 만들지 않는다.
+
+PIN rotation은 assignment→target→profile→entitlement→open reveal 순서로 잠그며 이전 revision authority를
+끝낸 뒤 현재 workflow와 객실별 최소 미래 service date의 이미 통보된 assignment에만 successor를 만든다.
+더 먼 미래 assignment와 inactive/departed/deactivation 진행 계정은 제외한다. 63→64 backfill도 active,
+password-complete, current/notified, nonterminal target, exact typed outbox와 current PIN revision 존재가 모두
+일치하는 row만 생성하고 기존 PIN/assignment/notification/audit/receipt/reveal 이력을 수정하지 않는다.
+물리 mismatch는 durable backfill을 제거하지 않고 실제 reveal에서만 verified 복구 전까지 차단한다.
+
+## #196 Reservation bookability read projection (65번째 source migration)
+
+`20260918010000_reservation_bookability.sql`은 기존 64개 migration을 수정하지 않는다. 새 원장이나 상태
+컬럼은 만들지 않고 `reservations(check_in_at, id)` calendar index와 service-role read RPC 두 개만 추가한다.
+`preview_reservation_bookability`는 `reservationType=standard`만 허용하고 빈/생략 room type filter를 전체로
+정규화한 뒤 canonical non-retired scheduled/active `stay_room_segments`의 반개구간
+overlap과 기존 room block reason을 재사용한다. PIN/현재 readiness는 `check_in_ready` 축으로만 계산하며
+`interval_bookable`을 바꾸지 않는다. 정확히 검증된 active·체크인 전 예약만 exclusion 대상으로 허용한다.
+
+#245의 78번째 append-only hotfix는 같은 RPC의 `p_guest_count`를 optional nullable input으로 확장한다.
+null이면 capacity reason을 만들지 않고 interval overlap과 기존 운영 차단만 평가하며, 양의 정수이면 최신
+room type 최대 인원을 계속 검사한다. 예약 create/change의 non-null guest count 원장은 바꾸지 않는다.
+
+`list_reservations_page`는 최대 31일·50건의 `[from,to)` overlap을 `(check_in_at,id)` keyset으로 읽고,
+한 `server_time` snapshot으로 각 예약의 projected room을 계산한다. optional room filter는 현재 row pointer가
+아니라 범위와 겹친 stay segment 이력을 사용하므로 retired/cancelled segment도 calendar history에 남는다.
+두 RPC 모두 고객명 암호화 필드와 maid identity를 projection하지 않고 PUBLIC/anon/authenticated execute를
+회수한다. HTTP cursor 서명은 DB 원장에 저장하지 않으며 adapter에서 actor와 filter scope를 검증한다.
+
+## #200 Long-stay open-ended reservation contract (66번째 source migration)
+
+`public.reservations.reservation_type`은 `standard|long_stay`이며 기존 행은 `standard`로 보존한다. standard의
+`check_out_at`은 필수이고 long-stay만 null을 허용한다. type은 생성 후 불변이고 고정된 checkout을 다시 null로
+되돌리지 않는다. `public.reservation_schedule_revisions`, `private.reservation_stays`,
+`private.stay_room_segments`도 reservation type과 nullable end를 같은 의미로 보존한다.
+
+종료 미정 long-stay의 current segment는 check-in 이후를 무한 상한처럼 점유하여 새 예약과 precheckin move의
+대상 구간을 차단한다. checkout 시각이 없을 때 `checkout_obligation_id`와 checkout cleaning graph는 null이며,
+null→고정 일정 변경 또는 수동 checkout transaction에서 정확히 하나 생성한다. deferred checkout graph validator가
+commit 시 예약 end, obligation, planned/current target의 일치를 검증한다. 투숙 중 종료 미정 move는
+`OPEN_ENDED_STAY_REQUIRES_END`, standard의 null checkout은 `STANDARD_RESERVATION_REQUIRES_END`로 닫는다.
+Scheduler는 null checkout 예약을 자동 checkout하지 않는다.

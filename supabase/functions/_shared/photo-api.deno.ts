@@ -11,6 +11,8 @@ function assert(value: unknown, message: string): asserts value {
 const auth = `header.${
   btoa(JSON.stringify({ session_id: id(2) }))
 }.verified-by-auth-double`;
+const retentionStartsAt = "2037-01-01T00:00:00.000Z";
+const retentionExpiresAt = "2037-01-02T00:00:00.000Z";
 function setup(
   role = "maid",
   status = "active",
@@ -80,6 +82,11 @@ function setup(
               photoVersion: null,
               uploadedAt: null,
               purgeAfter: null,
+              retentionPolicy: null,
+              retentionStartsAt: null,
+              expiresAt: null,
+              purgedAt: null,
+              mediaAvailability: null,
               compensationAllowed: false,
             }
             : name === "authorize_photo_read"
@@ -89,7 +96,12 @@ function setup(
               sha256: "a".repeat(64),
               mimeType: "image/jpeg",
               sizeBytes: 3,
-              purgeAfter: new Date(Date.now() + 60000).toISOString(),
+              purgeAfter: retentionExpiresAt,
+              retentionPolicy: "cleaning_submission",
+              retentionStartsAt,
+              expiresAt: retentionExpiresAt,
+              purgedAt: null,
+              mediaAvailability: "available",
             }
             : name === "admit_photo_upload"
             ? { admissionId: id(9), quotaWarning: false }
@@ -231,7 +243,7 @@ Deno.test("photo routing rejects aliases, unsupported methods, oversized raw bod
       `${upload}?assignmentId=${
         id(8)
       }&assignmentRevision=1&expectedPhotoRevision=0`,
-      new Uint8Array(307201),
+      new Uint8Array(5 * 1024 * 1024 + 1),
     ),
     s.dependencies,
   );

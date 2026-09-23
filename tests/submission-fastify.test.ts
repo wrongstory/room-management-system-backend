@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Actor } from '../src/domain/actor.js';
 import { AppError } from '../src/lib/app-error.js';
 import { createSubmissionRoutes, type AuthenticateLimitedSubmission } from '../src/modules/submissions/submission.routes.js';
-import { SupabaseSubmissionService, type SubmissionActor, type SubmissionService } from '../src/modules/submissions/submission.service.js';
+import { submissionDatabaseError, SupabaseSubmissionService, type SubmissionActor, type SubmissionService } from '../src/modules/submissions/submission.service.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 
 const id = (n: number) => `92000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -47,6 +47,10 @@ async function appFor(
 }
 
 describe('Fastify submission/review parity', () => {
+  it('maps a prepared purge barrier to the stable conflict contract', () => {
+    expect(submissionDatabaseError({ message: 'PHOTO_RETENTION_DELETE_PREPARED' }))
+      .toMatchObject({ statusCode: 409, code: 'PHOTO_RETENTION_DELETE_PREPARED' });
+  });
   it('allowlists nested bomb detail fields instead of exposing raw RPC state', async () => {
     const clients = {
       admin: {

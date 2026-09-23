@@ -2,11 +2,13 @@
 
 ## 상태와 범위
 
-- #170 개발 기준: `dev@c32aa9eec3945334ddda956afc62cc92d801c410`, 57 migrations / OpenAPI 109 paths / 117 operations.
-- source: append-only `20260909120308_submission_inspection_reclean.sql`과
-  `20260916070500_inspection_queue_pagination.sql`, Fastify/Edge/OpenAPI parity.
-- 상태: #31은 PR #91로 source/dev와 production source에 반영됐다. #170은 검수 대기열의 bounded keyset pagination, signed cursor, 응답 상한을 source 계약에 추가하며 production 승격과 hosted smoke는 별도 release gate다.
-- 승인 후 고객 컴플레인/보상 재작업과 원 maid inactive/departed 예외 이관은 범위 밖이다.
+- 개발 기준: `dev` 79 migrations / OpenAPI 0.5.1 129 paths / 139 operations 위에 #170의 80번째 append-only migration을 추가한다.
+- source: `20260909120308_submission_inspection_reclean.sql`과
+  `20260923020000_inspection_queue_pagination.sql`, Fastify/Edge/OpenAPI parity.
+- 상태: #31 source는 production에 포함됐다. #170은 검수 대기열의 bounded keyset pagination, signed cursor,
+  응답 상한을 source 계약에 추가하며 production 승격과 hosted smoke는 별도 release gate다.
+- 승인 후 고객 컴플레인/보상 재작업은 별도 도메인이다. 원 maid 퇴사·부상 등 수행 불가 예외는
+  2026-09-23 결정과 #264 계약에 따라 일반 취소·재배정을 사용한다.
 
 ## 상태 전이
 
@@ -47,7 +49,9 @@ base가 0이면 bonus도 0이다. 반려는 earning을 만들지 않고 원 atte
 
 reclean template은 원 room type의 published `cleaning_kind='reclean'` version이 정확히 한 건이어야
 한다. 없거나 모호하면 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 inspection decision, 상태, 알림,
-outbox, audit 전체를 rollback한다. 다른 maid 이관은 허용하지 않는다.
+outbox, audit 전체를 rollback한다. 원 maid가 수행 가능하면 다른 maid에게 임의 이관하지 않는다.
+
+원 maid가 퇴사·부상 등으로 재청소를 수행할 수 없으면 관리자가 현재 배정을 취소한다. 기존 0원 `inspection_reclean` target은 완료로 위장하거나 다른 maid에게 이관하지 않고 취소 이력으로 보존한다. 대신 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 미배정으로 만들고 관리자에게 재배정 필요 알림을 보낸다. 새 담당자는 일반 완료·검수·earning·payroll 규칙을 따르며 별도 compensation 원장이나 원 담당자의 미완료 earning은 만들지 않는다.
 
 checkout obligation 완료는 root target status만 신뢰하지 않는다. `completion_submission_id`가
 승인된 terminal descendant인지 recursive reclean chain으로 증명하며 새 completed row의 NULL proof는

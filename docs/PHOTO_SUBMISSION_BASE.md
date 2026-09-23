@@ -1,5 +1,7 @@
 # 사진 슬롯·제출 기반 모델 — Issue #30
 
+> **역사 문서:** 아래 SHA와 migration/API 수치는 #30~#31 통합 당시 기록이다. 현재 production 상태는 [API 상태 정본](./API_STATUS_MATRIX.md)의 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations를 우선한다. 사진 provider hosted 활성화는 source 배포와 별도다.
+
 ## 범위와 현재 상태
 
 - 개발 시작 기준(당시 base): `dev@9ed843ca570d1fccaa95fdb672fb8dc20fe91107`.
@@ -18,16 +20,17 @@
 3. 제출본에 연결한 사진 version은 이후 재촬영·pointer 교체로 바뀌지 않는다. 과거 제출과 증빙 연결은 삭제하거나 덮어쓰지 않는다.
 4. 사진 완전성은 제출 권한과 다르다. 완전한 증빙도 `evidence_upload` 한정 회차에 전체 제출 권한을 주지 않는다.
 5. `field_completed`는 사진 0장에서도 가능한 물리적 완료 선언이다. 이 모델만으로 검수 승인, room ready, earning, payroll을 생성하지 않는다.
-6. 사진 크기 한도는 300KiB, 파일 보존은 업로드 후 정확히 7일이다. 모델 검증을 실제 파일·Drive 검증 완료로 표현하지 않는다.
+6. 저장본 크기 한도는 300KiB다. 현재 보존 정책은 청소 제출의 최종 검사 결정+168시간, 사건 증빙의 해결·종결+180일, 진짜 orphan의 업로드+30일이며 과거 업로드+7일 규칙은 역사 계약이다. 모델 검증을 실제 파일·Drive 검증 완료로 표현하지 않는다.
 
 ## 템플릿·기존 데이터 처리 원칙
 
-- 확정된 새 퇴실 template v7+는 타입별 10/11/13/15개, 필수 9/10/12/14개이며 필수 `tv-on`이 정확히 하나다.
+- 기존 `maxPhotos` 없는 pre-A 퇴실 template은 version이 v7보다 높아도 타입별 10/11/13/15개, 필수 9/10/12/14개와 required `tv-on`을 그대로 유지한다.
+- Decision #179의 새 v8+ 계약은 9/10/12/14개, 필수 8/9/11/13개다. required `tv-on`·`entry-storage`를 유지하고 `entry-number`를 제외하며 마지막 `extra-proof`만 선택·`maxPhotos=10`이다. #180 source 후보는 이 슬롯에만 안정적 item UUID와 collection/item CAS를 쓰는 0~10장 current collection을 제공한다.
 - 과거 v6 이하 snapshot에 `tv-on`을 소급 추가하지 않는다.
 - 연박·재청소 슬롯과 예상시간의 프런트 데모 값을 운영 정본이나 seed로 승격하지 않는다. 추가 청소의 미확정 구성을 추측하지 않는다.
 - legacy JSON은 실제 저장된 근거를 보존한다. 빈 배열이나 불명확한 snapshot을 현재 v7로 자동 채우지 않는다.
 - 미설정·불완전한 snapshot은 새 전체 제출의 완전성 검증에서 실패해야 한다. 기존 물리 수행과 예약 lifecycle의 의미는 바꾸지 않는다.
-- template의 과거 `duration_minutes`와 #29의 별도 confirmed duration policy는 서로 다른 계약이다.
+- template의 과거 `duration_minutes`와 #29의 duration policy 원장은 서로 다른 보존 이력이며, #231 이후 둘 다 신규 배정 preview 판단에 사용하지 않는다.
 - 내부 projection 검증의 자원 상한은 슬롯 100개, stable key 80자, 표시 순서 0–99의 중복 없는 값이다. 이는 미확정 청소 종류의 필수 사진 수를 정하는 제품 정책이 아니다. 기존 자료가 이 상한이나 지원 형식 밖이면 값을 버리거나 바꾸지 않고 미설정 상태로 보존한다.
 - 필수 슬롯이 하나도 없는 자료는 사진 0장으로 제출 가능한 템플릿으로 인정하지 않는다. 임의 필수 슬롯을 추가하지 않고 완전성 검증에서 거부한다.
 
@@ -35,6 +38,7 @@
 
 - NULL·다른 target/attempt/slot 연결과 중복 current pointer 차단.
 - 사진 교체·제출 pointer CAS·동시 재시도 및 과거 binding 불변.
+- `extra-proof` 10장 상한, append/replace/개별 삭제의 collection/item CAS·멱등 replay, 형제 item 순서/identity 보존과 삭제 후 과거 제출 binding 불변.
 - 미검증·처리 중·실패·purged·7일 만료 사진을 새 제출 증빙으로 인정하지 않음.
 - RLS와 명시적 GRANT/REVOKE, 원장 직접 DML 차단, 안전한 내부 helper 권한.
 - 기존 29 migrations 불변, 새 append-only migration만 허용.
@@ -64,7 +68,7 @@ role/status·capability·assignment/version 검증, scoped idempotency, audit/ou
 - 새 submission version과 photo bindings/binding-set seal을 append하고 current pointer를 expected revision CAS로 교체한다. 일반 재제출은 과거 version을 superseded history로 유지한다. 폭탄방 report/evidence는 최초 submission에 seal되면 `BOMB_REPORT_SEALED`로 재제출을 막아 다른 version으로 이동하지 않는다.
 - 관리자 pending queue와 detail은 notified assignment의 immutable room snapshot, sealed opaque photo ID/slot/version, 폭탄 evidence photo ID만 공개한다. Drive locator/hash/file name, request hash, raw state, PIN/PII는 공개하지 않는다. 오래된 current pointer의 검수·폭탄 판정은 `STALE_VERSION`으로 거부한다.
 - 승인 transaction은 immutable inspection decision, 상태 전이, 비행동 notification/outbox/audit와 원청소 earning을 exactly-once 생성한다. 반려 transaction은 earning 없이 원 attempt/submission/decision·원 maid에 고정된 0원 notified reclean과 행동 notification/outbox/audit를 만든다. attempt 생성은 #28 activation만 담당한다.
-- `inspection_reclean` template이 room type에 대해 정확히 한 published version이 아니면 반려 transaction 전체를 fail-closed한다. 원 maid inactive/departed 예외는 자동 이관하지 않으며 미확정 정책으로 남긴다.
+- `inspection_reclean` template이 room type에 대해 정확히 한 published version이 아니면 반려 transaction 전체를 fail-closed한다. 2026-09-23 #264 계약에 따라 원 maid 퇴사·부상 등 수행 불가 예외는 관리자가 기존 0원 재청소 target을 취소 이력으로 종료하고 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 만든다. 기존 target 자동 이관이나 별도 compensation은 만들지 않는다.
 
 운영 Supabase·recovery·main·Edge·Pages·Cron·Vault·tag/Release는 이번 작업에서 변경하지 않는다.
 

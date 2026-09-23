@@ -27,7 +27,7 @@ export function submissionDatabaseError(error: { message?: string } | null): App
   const code = error?.message ?? '';
   const status: Record<string, number> = {
     MAID_REQUIRED: 403, ADMIN_REQUIRED: 403, CAPABILITY_ACCESS_REQUIRED: 403, SUBMISSION_ACCESS_REQUIRED: 403, BOMB_REPORT_ACCESS_REQUIRED: 403,
-    PHOTO_EVIDENCE_INCOMPLETE: 409, BOMB_EVIDENCE_INVALID: 409, BOMB_REPORT_NOT_ALLOWED: 409, BOMB_REPORT_SEALED: 409,
+    PHOTO_EVIDENCE_INCOMPLETE: 409, PHOTO_RETENTION_DELETE_PREPARED: 409, BOMB_EVIDENCE_INVALID: 409, BOMB_REPORT_NOT_ALLOWED: 409, BOMB_REPORT_SEALED: 409,
     SUBMISSION_VERSION_CONFLICT: 409, STALE_VERSION: 409, SUBMISSION_INVALID_TRANSITION: 409,
     BOMB_DECISION_REQUIRED: 409, BOMB_DECISION_ALREADY_RECORDED: 409, BOMB_REPORT_NOT_FOUND: 404, INSPECTION_INVALID_TRANSITION: 409,
     RECLEAN_ORIGINAL_MAID_UNAVAILABLE: 409, RECLEAN_TEMPLATE_NOT_CONFIGURED: 409, RECLEAN_WINDOW_NOT_AVAILABLE: 409,
@@ -94,8 +94,22 @@ export class SupabaseSubmissionService implements SubmissionService {
       const photos = (value as Record<string, unknown>).photos;
       if (!Array.isArray(photos)) throw submissionDatabaseError(null);
       row.photos = photos.map((photo) => this.project(photo, [
-        'photoId', 'targetPhotoSlotId', 'slotKey', 'label', 'displayOrder', 'required', 'photoVersion'
+        'photoId', 'photoItemId', 'itemRevision', 'photoDisplayOrder', 'targetPhotoSlotId', 'slotKey', 'label', 'displayOrder', 'required', 'photoVersion',
+        'retentionPolicy', 'retentionStartsAt', 'expiresAt', 'purgedAt', 'mediaAvailability'
       ]));
+    }
+    if (includeBombDetail && value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'photoSlots')) {
+      const slots = (value as Record<string, unknown>).photoSlots;
+      if (!Array.isArray(slots)) throw submissionDatabaseError(null);
+      row.photoSlots = slots.map((slot) => {
+        const projected = this.project(slot, ['targetPhotoSlotId', 'slotKey', 'label', 'displayOrder', 'required', 'photos']);
+        if (!Array.isArray(projected.photos)) throw submissionDatabaseError(null);
+        projected.photos = projected.photos.map((photo) => this.project(photo, [
+          'photoId', 'photoItemId', 'itemRevision', 'displayOrder', 'photoVersion',
+          'retentionPolicy', 'retentionStartsAt', 'expiresAt', 'purgedAt', 'mediaAvailability'
+        ]));
+        return projected;
+      });
     }
     if (includeBombDetail && value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'reviewContext')) {
       row.reviewContext = this.project((value as Record<string, unknown>).reviewContext, [

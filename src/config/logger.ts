@@ -35,7 +35,7 @@ const sensitiveLogPaths = [
   '*.endpointDigest','*.sessionDigest','*.materialDigest','*.WEB_PUSH_SUBSCRIPTION_KEY_BASE64',
   '*.WEB_PUSH_SUBSCRIPTION_KEYRING_JSON','*.WEB_PUSH_BINDING_DIGEST_SECRET',
   '*.VAPID_PRIVATE_KEY','*.VAPID_KEYRING_JSON','*.NOTIFICATION_DELIVERY_INVOKE_SECRET'
-  ,'*.ROOM_PIN_KEY_BASE64','*.ROOM_PIN_KEYRING_JSON','*.ROOM_PIN_INITIAL_DIGITS'
+  ,'*.ROOM_PIN_KEY_BASE64','*.ROOM_PIN_KEYRING_JSON'
 ] as const;
 
 export function loggerOptions(level: string) {

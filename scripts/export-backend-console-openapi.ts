@@ -20,6 +20,7 @@ const allowedPrefixes = [
   "/v1/accounts",
   "/v1/developer/",
   "/v1/room-pin-sheet-sync/",
+  "/v1/room-types",
   "/v1/cleaning-templates",
 ];
 const source = structuredClone(openApiDocument) as Record<string, unknown> & {

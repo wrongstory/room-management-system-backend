@@ -13,10 +13,14 @@ $$;
 create function pg_temp.checkout_slots(p_count integer) returns jsonb
 language sql immutable as $$
   select jsonb_agg(jsonb_build_object(
-    'slotKey', case when display_order = 0 then 'tv-on' else 'slot-' || display_order end,
+    'slotKey', case when display_order = 0 then 'tv-on'
+      when display_order = 1 then 'entry-storage'
+      when display_order = p_count - 1 then 'extra-proof'
+      else 'slot-' || display_order end,
     'displayOrder', display_order,
     'required', display_order < p_count - 1,
-    'label', '사진 ' || (display_order + 1)
+    'label', '사진 ' || (display_order + 1),
+    'maxPhotos', case when display_order = p_count - 1 then 10 else 1 end
   ) order by display_order)
   from generate_series(0, p_count - 1) display_order
 $$;
@@ -73,22 +77,46 @@ select throws_ok(
 );
 select throws_ok(
   $$select public.publish_checkout_cleaning_template(
-    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(9),
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(8),
     'template-missing-slot',repeat('3',64))$$,
   '23514','INVALID_CLEANING_TEMPLATE_SLOTS',
-  'missing required room-type slots are rejected by the v7 evidence contract'
+  'missing required room-type slots are rejected by the v8 evidence contract'
+);
+select throws_ok(
+  $$select public.publish_checkout_cleaning_template(
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(10),
+    'template-former-v7-count',repeat('3',64))$$,
+  '23514','INVALID_CLEANING_TEMPLATE_SLOTS',
+  'new publication rejects the former v7 standard count'
 );
 select throws_ok(
   $$select public.publish_checkout_cleaning_template(
     pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,
-    jsonb_set(pg_temp.checkout_slots(10),'{1,slotKey}','"tv-on"'),
+    (select jsonb_agg(value - 'maxPhotos' order by (value->>'displayOrder')::integer)
+       from jsonb_array_elements(pg_temp.checkout_slots(10))),
+    'template-fresh-legacy-shape',repeat('3',64))$$,
+  '23514','INVALID_CLEANING_TEMPLATE_SLOTS',
+  'fresh publication cannot use a maxPhotos-less pre-A shape'
+);
+select throws_ok(
+  $$select public.publish_checkout_cleaning_template(
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,
+    pg_temp.checkout_slots(9) #- '{0,maxPhotos}',
+    'template-missing-max-photos',repeat('3',64))$$,
+  '23514','INVALID_CLEANING_TEMPLATE_SLOTS',
+  'v8 publication requires explicit maxPhotos metadata'
+);
+select throws_ok(
+  $$select public.publish_checkout_cleaning_template(
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,
+    jsonb_set(pg_temp.checkout_slots(9),'{1,slotKey}','"tv-on"'),
     'template-duplicate-slot',repeat('4',64))$$,
   '22023','INVALID_CLEANING_TEMPLATE_SLOTS',
   'duplicate slot keys are rejected before publication'
 );
 select throws_ok(
   $$select public.publish_checkout_cleaning_template(
-    pg_temp.tid(1),pg_temp.tid(201),'standard',0,10081,pg_temp.checkout_slots(10),
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,10081,pg_temp.checkout_slots(9),
     'template-duration-overflow',repeat('5',64))$$,
   '22023','INVALID_CLEANING_TEMPLATE',
   'duration technical upper bound is enforced in the database'
@@ -96,21 +124,21 @@ select throws_ok(
 
 create temp table first_publication(response jsonb);
 insert into first_publication select public.publish_checkout_cleaning_template(
-  pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(10),
-  'template-publish-standard-v7',repeat('a',64)
+  pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(9),
+  'template-publish-standard-v8',repeat('a',64)
 );
-select is((select (response->>'version')::integer from first_publication),7,
-  'first checkout publication starts at evidence-contract version 7');
+select is((select (response->>'version')::integer from first_publication),8,
+  'first checkout publication starts at confirmed A-contract version 8');
 select is((select response->>'status' from first_publication),'published',
   'new version is published');
 select is((select count(*) from public.cleaning_template_versions where status='published' and cleaning_kind='checkout'),1::bigint,
   'exactly one published version exists for the configured room type');
-select is((select count(*) from private.photo_template_slots),10::bigint,
+select is((select count(*) from private.photo_template_slots),9::bigint,
   'normalized slot rows exactly match the immutable published JSON snapshot');
 select is(
   public.publish_checkout_cleaning_template(
-    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(10),
-    'template-publish-standard-v7',repeat('a',64)
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(9),
+    'template-publish-standard-v8',repeat('a',64)
   ),
   (select response from first_publication),
   'same scoped key and request hash replay the identical response'
@@ -119,14 +147,14 @@ select is((select count(*) from public.audit_events where event_type='cleaning_t
   'replay does not append a duplicate audit event');
 select throws_ok(
   $$select public.publish_checkout_cleaning_template(
-    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(10),
-    'template-publish-standard-v7',repeat('b',64))$$,
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(9),
+    'template-publish-standard-v8',repeat('b',64))$$,
   '23505','IDEMPOTENCY_KEY_REUSED',
   'same scoped key with a different request hash is rejected'
 );
 select throws_ok(
   $$select public.publish_checkout_cleaning_template(
-    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(10),
+    pg_temp.tid(1),pg_temp.tid(201),'standard',0,60,pg_temp.checkout_slots(9),
     'template-stale-standard',repeat('c',64))$$,
   '40001','CLEANING_TEMPLATE_VERSION_CONFLICT',
   'stale expected version is rejected after publication'
@@ -148,10 +176,10 @@ select id,template_snapshot from public.cleaning_targets where reservation_id=pg
 
 create temp table second_publication(response jsonb);
 insert into second_publication select public.publish_checkout_cleaning_template(
-  pg_temp.tid(1),pg_temp.tid(201),'standard',7,75,pg_temp.checkout_slots(10),
-  'template-publish-standard-v8',repeat('e',64)
+  pg_temp.tid(1),pg_temp.tid(201),'standard',8,75,pg_temp.checkout_slots(9),
+  'template-publish-standard-v9',repeat('e',64)
 );
-select is((select (response->>'version')::integer from second_publication),8,
+select is((select (response->>'version')::integer from second_publication),9,
   'next publication allocates a new immutable version');
 select is((select count(*) from public.cleaning_template_versions where status='published' and cleaning_kind='checkout'),1::bigint,
   'republish preserves exactly one published version');
@@ -167,12 +195,12 @@ select lives_ok(
     $sql$select public.create_reservation(%L,%L,%L,'2043-02-01 16:00+09','2043-02-02 11:00+09',2,null,%s,%L,%L)$sql$,
     pg_temp.tid(1),pg_temp.tid(303),pg_temp.room_for('standard',1),
     (select state_version from public.rooms where id=pg_temp.room_for('standard',1)),
-    'template-reservation-v8',repeat('f',64)
+    'template-reservation-v9',repeat('f',64)
   ),
   'new reservation uses the newly published version'
 );
-select is((select (template_snapshot->>'version')::integer from public.cleaning_targets where reservation_id=pg_temp.tid(303)),8,
-  'new target freezes the current v8 snapshot');
+select is((select (template_snapshot->>'version')::integer from public.cleaning_targets where reservation_id=pg_temp.tid(303)),9,
+  'new target freezes the current v9 snapshot');
 
 select throws_ok(
   $$select public.list_checkout_cleaning_templates(pg_temp.tid(3),pg_temp.tid(203))$$,

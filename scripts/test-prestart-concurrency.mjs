@@ -5,7 +5,7 @@ function assert(value,message) { if(!value) throw new Error(message); }
 function ok(result,label) { assert(!result.error,`${label}: ${result.error?.message}`);return result.data; }
 
 // 기존 runner의 fresh/local client만 받는다. production 연결을 구성하지 않는다.
-export async function testPrestartConcurrency(client,actorProfileId) {
+export async function testPrestartConcurrency(client,actorProfileId,sessionId) {
   const maids=[];
   const day=new Date(Date.now()+9*3600000).toISOString().slice(0,10);
   const weekday=new Date(`${day}T00:00:00Z`).getUTCDay() || 7;
@@ -84,5 +84,44 @@ export async function testPrestartConcurrency(client,actorProfileId) {
   ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
   const audits=ok(await client.from('audit_events').select('id').eq('entity_id',jq.requestId).eq('event_type','assignment.cancellation_decided'),'decision audit');
   assert(noticeCount===1 && requestNoticeAfter===1 && audits.length===1,'exactly one typed decision notification/audit and request resolution');
-  console.log('Prestart races PASS: change/activation (3), two changes/CAS, change/request, decision/change, concurrent decision replay; no ghost pending or duplicate decision.');
+
+  const unavailable=(f,key=`unavailable-${randomUUID()}`)=>({
+    p_actor_profile_id:actorProfileId,p_session_id:sessionId,p_cleaning_target_id:f.target,
+    p_expected_assignment_id:f.assignment,p_expected_assignment_version:2,
+    p_expected_attempt_id:null,p_expected_execution_version:null,p_reason_code:'MAID_UNAVAILABLE',
+    p_idempotency_key:key,p_request_hash:'b'.repeat(64)
+  });
+  const replayFixture=await fixture();const replayKey=`unavailable-replay-${randomUUID()}`;
+  const replays=await Promise.all([
+    client.rpc('cancel_unavailable_cleaning_assignment',unavailable(replayFixture,replayKey)),
+    client.rpc('cancel_unavailable_cleaning_assignment',unavailable(replayFixture,replayKey))
+  ]);
+  assert(replays.every(result=>!result.error) && JSON.stringify(replays[0].data)===JSON.stringify(replays[1].data),
+    'concurrent unavailable cancellation replay converges to one logical response');
+  const unavailableEvidence=Number(execFileSync('docker',[
+    'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
+    '-c',`select count(*) from private.assignment_unavailability_cancellations where assignment_id='${replayFixture.assignment}'::uuid`
+  ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
+  assert(unavailableEvidence===1,'concurrent unavailable replay creates one immutable evidence row');
+
+  for(let repeat=0;repeat<3;repeat++) {
+    const raceFixture=await fixture();
+    const results=await Promise.all([
+      client.rpc('cancel_unavailable_cleaning_assignment',unavailable(raceFixture)),
+      client.from('cleaning_attempts').insert({cleaning_target_id:raceFixture.target,
+        assignment_id:raceFixture.assignment,maid_profile_id:maids[0],attempt_number:1,
+        assignment_revision:2,status:'scheduled',template_snapshot:{},room_snapshot:{}})
+    ]);
+    assert(results.filter(result=>!result.error).length===1,'unavailable cancellation versus activation exactly one winner');
+    closed(results,/ASSIGNMENT_VERSION_CONFLICT|ASSIGNMENT_NOT_CURRENT|ASSIGNMENT_NOT_FOUND/);
+  }
+  const reassignFixture=await fixture();
+  const unavailableChange=await Promise.all([
+    client.rpc('cancel_unavailable_cleaning_assignment',unavailable(reassignFixture)),
+    client.rpc('change_cleaning_assignment_prestart',change(reassignFixture))
+  ]);
+  assert(unavailableChange.filter(result=>!result.error).length===1,
+    'unavailable cancellation versus reassignment exactly one winner');
+  closed(unavailableChange,/ASSIGNMENT_VERSION_CONFLICT|ASSIGNMENT_NOT_FOUND/);
+  console.log('Prestart races PASS: change/activation, change/request, decision/change, unavailable replay/activation/reassignment; no ghost pending or duplicate evidence.');
 }

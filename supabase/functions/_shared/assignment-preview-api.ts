@@ -1,4 +1,4 @@
-import { idempotencyKey, readJsonBody } from "./account-api.ts";
+import { readJsonBody } from "./account-api.ts";
 import {
   AssignmentPreviewError,
   optimizeAssignmentPreview,
@@ -10,13 +10,6 @@ import {
   requireBusinessAdmin,
   requirePasswordChanged,
 } from "./runtime.ts";
-
-const durationKeys = [
-  "standardMinutes",
-  "premiumMinutes",
-  "oceanPremiumMinutes",
-  "oceanFamilyMinutes",
-] as const;
 
 function adminOnly(actor: EdgeActor) {
   requirePasswordChanged(actor);
@@ -78,35 +71,19 @@ export async function previewAssignments(
       p_service_date: serviceDate,
     },
   );
-  const unconfirmed = () => ({
-    serviceDate,
-    previewSeed: seed,
-    decisionReady: false as const,
-    durationPolicyStatus: "unconfirmed" as const,
-    proposedAssignments: [],
-    error: {
-      code: "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
-      message: "청소시간 정책을 먼저 확정해야 합니다.",
-    },
-  });
-  if (error?.message === "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED") {
-    return unconfirmed();
-  }
   if (error || !data) throw previewDatabaseError(error);
   try {
     return await optimizeAssignmentPreview(data, seed);
   } catch (error) {
     if (error instanceof AssignmentPreviewError) {
-      if (error.code === "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED") {
-        return unconfirmed();
-      }
       throw previewDatabaseError({ message: error.code });
     }
     throw previewDatabaseError(null);
   }
 }
 
-// config 확정은 preview와 분리된 audit/receipt/CAS mutation이다.
+// Historical policy is read-only. New confirmation is retired and cannot
+// create a policy, receipt, or audit event.
 export async function assignmentDurationPolicy(
   request: Request,
   clients: EdgeClients,
@@ -122,49 +99,11 @@ export async function assignmentDurationPolicy(
     if (error) throw previewDatabaseError(error);
     return durationProjection(data);
   }
-  const body = await readJsonBody(request);
-  const keys = ["expectedVersion", ...durationKeys];
-  if (
-    Object.keys(body).some((key) => !keys.includes(key)) ||
-    keys.some((key) => !Object.hasOwn(body, key))
-  ) invalid("INVALID_ASSIGNMENT_DURATION_POLICY");
-  for (const key of keys) {
-    if (
-      !Number.isSafeInteger(body[key]) ||
-      (body[key] as number) < (key === "expectedVersion" ? 0 : 1) ||
-      (key !== "expectedVersion" && (body[key] as number) > 2147483647)
-    ) invalid("INVALID_ASSIGNMENT_DURATION_POLICY");
-  }
-  const payload = {
-    p_actor_profile_id: actor.profileId,
-    p_expected_version: body.expectedVersion,
-    p_standard_minutes: body.standardMinutes,
-    p_premium_minutes: body.premiumMinutes,
-    p_ocean_premium_minutes: body.oceanPremiumMinutes,
-    p_ocean_family_minutes: body.oceanFamilyMinutes,
-  };
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(
-      JSON.stringify({
-        command: "assignment.duration_policy_confirmed",
-        ...payload,
-      }),
-    ),
+  throw new EdgeError(
+    410,
+    "ASSIGNMENT_DURATION_POLICY_RETIRED",
+    "예상 시간 정책은 폐기되어 더 이상 확정할 수 없습니다.",
   );
-  const hash = [...new Uint8Array(digest)].map((byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-  const { data, error } = await clients.admin.rpc(
-    "confirm_assignment_duration_policy",
-    {
-      ...payload,
-      p_idempotency_key: idempotencyKey(request),
-      p_request_hash: hash,
-    },
-  );
-  if (error || !data) throw previewDatabaseError(error);
-  return durationProjection(data);
 }
 
 function durationProjection(value: unknown) {
@@ -195,7 +134,7 @@ export function previewDatabaseError(
     PASSWORD_CHANGE_REQUIRED: 403,
     ASSIGNMENT_PREVIEW_DATE_NOT_ALLOWED: 400,
     INVALID_ASSIGNMENT_DURATION_POLICY: 400,
-    ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED: 409,
+    ASSIGNMENT_DURATION_POLICY_RETIRED: 410,
     ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT: 409,
     IDEMPOTENCY_KEY_CONFLICT: 409,
     IDEMPOTENCY_CONFLICT: 409,

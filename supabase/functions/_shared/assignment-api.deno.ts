@@ -89,6 +89,25 @@ function prestartClients(errorMessage?: string) {
             error: null,
           };
         }
+        if (name === "cancel_unavailable_cleaning_assignment") {
+          return {
+            data: {
+              cancellationId: "60000000-0000-4000-8000-000000000001",
+              cleaningTargetId: targetId,
+              assignmentId,
+              attemptId: "70000000-0000-4000-8000-000000000001",
+              maidProfileId: maid.profileId,
+              reasonCode: "MAID_INJURED",
+              replacementTargetId: null,
+              status: "unassigned",
+              targetAssignmentVersion: 3,
+              effectiveAt: "2026-09-05T00:00:00Z",
+              recordedAt: "2026-09-05T00:00:01Z",
+              raw: "hidden",
+            },
+            error: null,
+          };
+        }
         if (name.includes("cancellation")) {
           return {
             data: requestRow,
@@ -174,6 +193,72 @@ Deno.test("prestart commands preserve actor CAS canonical retry and safe project
       "canonical retry",
     );
   }
+});
+
+Deno.test("admin unavailable cancellation binds live session and nullable attempt CAS", async () => {
+  const { clients, calls } = prestartClients();
+  const sessionId = "80000000-0000-4000-8000-000000000001";
+  const attemptId = "70000000-0000-4000-8000-000000000001";
+  const result = await prestartCommand(
+    request("/test", "POST", {
+      expectedCurrentAssignmentId: assignmentId,
+      expectedAssignmentVersion: 2,
+      expectedAttemptId: attemptId,
+      expectedExecutionVersion: 4,
+      reasonCode: "MAID_INJURED",
+    }),
+    clients,
+    admin,
+    targetId,
+    "unavailable-cancel",
+    sessionId,
+  );
+  const safeResult = result as { status?: string };
+  assert(
+    safeResult.status === "unassigned" &&
+      !JSON.stringify(result).includes("hidden"),
+    "safe unavailable cancellation projection",
+  );
+  assert(
+    calls.at(-1)?.name === "cancel_unavailable_cleaning_assignment",
+    "unavailable cancellation RPC",
+  );
+  assert(calls.at(-1)?.args.p_session_id === sessionId, "live session binding");
+  assert(
+    calls.at(-1)?.args.p_expected_assignment_id === assignmentId,
+    "assignment CAS",
+  );
+  assert(
+    calls.at(-1)?.args.p_expected_attempt_id === attemptId,
+    "attempt CAS",
+  );
+  assert(
+    calls.at(-1)?.args.p_expected_execution_version === 4,
+    "execution CAS",
+  );
+
+  await prestartCommand(
+    request("/test", "POST", {
+      expectedCurrentAssignmentId: assignmentId,
+      expectedAssignmentVersion: 2,
+      expectedAttemptId: null,
+      expectedExecutionVersion: null,
+      reasonCode: "MAID_UNAVAILABLE",
+    }),
+    clients,
+    admin,
+    targetId,
+    "unavailable-cancel",
+    sessionId,
+  );
+  assert(
+    calls.at(-1)?.args.p_expected_attempt_id === null,
+    "no-attempt identity",
+  );
+  assert(
+    calls.at(-1)?.args.p_expected_execution_version === null,
+    "no-attempt version",
+  );
 });
 
 Deno.test("prestart admin and maid capabilities fail closed before RPC", async () => {
@@ -479,28 +564,72 @@ function assignmentRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function readClients(rows: unknown[]) {
+function readClients(
+  rows: unknown[],
+  options: {
+    target?: Record<string, unknown>;
+    schedules?: Record<string, unknown>[];
+  } = {},
+) {
   const access = queryResult(rows);
   const targets = queryResult([
     {
       id: targetId,
       room_id: roomId,
+      cleaning_kind: "checkout",
+      original_service_date: "2026-09-03",
+      effective_service_date: "2026-09-04",
+      carryover_count: 4,
+      status: "notified",
       assignment_version: 999,
+      room_type_snapshot: {
+        code: "standard",
+        name: "스탠다드 더블 로프트",
+        elevatorZone: "A",
+      },
+      fee_snapshot: 16000,
+      template_snapshot: { durationMinutes: null },
       rooms: { room_number: "101" },
+      ...options.target,
     },
   ]);
   const maids = queryResult([
     { id: maid.profileId, display_name: "메이드" },
   ]);
+  const attempts = queryResult([{
+    id: "60000000-0000-4000-8000-000000000001",
+    assignment_id: assignmentId,
+    attempt_number: 1,
+    status: "field_completed",
+  }]);
+  const submissions = queryResult([{
+    cleaning_attempt_id: "60000000-0000-4000-8000-000000000001",
+    version: 1,
+    status: "submitted",
+  }]);
+  const schedules = queryResult(
+    options.schedules ?? [{
+      cleaning_target_id: targetId,
+      revision: 2,
+      effective_service_date: "2026-09-04",
+      reason_code: "ROLLED_OVER_NOT_STARTED",
+    }],
+  );
   const clients = {
     forAccessToken: () => ({ from: () => access.query }),
     admin: {
       from(table: string) {
-        return table === "cleaning_targets" ? targets.query : maids.query;
+        if (table === "cleaning_targets") return targets.query;
+        if (table === "cleaning_attempts") return attempts.query;
+        if (table === "cleaning_submissions") return submissions.query;
+        if (table === "cleaning_target_schedule_revisions") {
+          return schedules.query;
+        }
+        return maids.query;
       },
     },
   } as unknown as EdgeClients;
-  return { clients, access, targets, maids };
+  return { clients, access, targets, maids, attempts, submissions, schedules };
 }
 
 Deno.test("assignment path accepts only exact UUID history route", () => {
@@ -543,6 +672,16 @@ Deno.test("admin and maid read assignment lists through scoped RLS", async () =>
       actor,
     );
     assert(result.length === 1 && result[0].roomNumber === "101", "projection");
+    assert(
+      result[0].cleaningKind === "checkout" &&
+        result[0].roomTypeCode === "standard" &&
+        result[0].feeSnapshot === 16000 &&
+        result[0].durationMinutes === null && result[0].rolloverCount === 1 &&
+        result[0].rolloverReason === "ROLLED_OVER_NOT_STARTED" &&
+        result[0].attemptStatus === "field_completed" &&
+        result[0].submissionStatus === "submitted",
+      "card snapshot and workflow summary",
+    );
     if (actor.role === "maid") {
       assert(
         access.filters.some(([column, value]) =>
@@ -600,7 +739,7 @@ Deno.test("maid list and history preserve own notified revisions only, without c
     assignmentRow({ maid_profile_id: otherMaid.profileId, revision: 4 }),
   ];
   for (const historyRoute of [true, false]) {
-    const { clients, access, targets, maids } = readClients(rows);
+    const { clients, access } = readClients(rows);
     const result = historyRoute
       ? await assignmentHistory(
         request(`/v1/assignments/${targetId}/history`),
@@ -635,13 +774,10 @@ Deno.test("maid list and history preserve own notified revisions only, without c
       !access.filters.some(([key]) => key === "is_current"),
       "history not restricted to current",
     );
+    assert(result[0].roomNumber === "101", "notified room snapshot preserved");
     assert(
-      targets.filters.length === 0,
-      "maid history never hydrates mutable target or room",
-    );
-    assert(
-      maids.filters.length === 0,
-      "verified actor supplies own display name without service lookup",
+      result[0].targetStatus === null,
+      "past maid row hides current target status",
     );
   }
   const draftOnly = readClients([assignmentRow({ notified_at: null })]);
@@ -668,6 +804,46 @@ Deno.test("maid list and history preserve own notified revisions only, without c
   );
 });
 
+Deno.test("assignment cards count only rollover evidence visible at that revision", async () => {
+  for (const serviceDate of ["2026-09-02", "2026-09-06"]) {
+    const { clients } = readClients([
+      assignmentRow({ service_date: serviceDate, revision: 4 }),
+    ], {
+      target: {
+        effective_service_date: "2026-09-08",
+        carryover_count: 2,
+        assignment_version: 6,
+      },
+      schedules: [{
+        cleaning_target_id: targetId,
+        revision: 4,
+        effective_service_date: serviceDate,
+        reason_code: "RESERVATION_CHANGED",
+      }, {
+        cleaning_target_id: targetId,
+        revision: 5,
+        effective_service_date: "2026-09-07",
+        reason_code: "ROLLED_OVER_NOT_STARTED",
+      }, {
+        cleaning_target_id: targetId,
+        revision: 6,
+        effective_service_date: "2026-09-08",
+        reason_code: "ROLLED_OVER_UNASSIGNED",
+      }],
+    });
+    const result = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      admin,
+      targetId,
+    );
+    assert(
+      result[0].rolloverCount === 0 && result[0].rolloverReason === null,
+      "reservation date changes never become rollover",
+    );
+  }
+});
+
 Deno.test("legacy notified assignment without a proven room snapshot remains null", async () => {
   const { clients, targets } = readClients([assignmentRow({
     notified_room_id_snapshot: null,
@@ -685,7 +861,7 @@ Deno.test("legacy notified assignment without a proven room snapshot remains nul
       result[0].roomNumber === null,
     "never invent a historical room from current state",
   );
-  assert(targets.filters.length === 0, "current target not read as fallback");
+  assert(targets.filters.length > 0, "immutable target snapshots are loaded");
 });
 
 Deno.test("developer assignment reads and non-admin draft writes are denied", async () => {

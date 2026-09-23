@@ -1,6 +1,8 @@
 import {
   bootstrapRoomPins,
+  confirmGeneratedRoomPin,
   finishRoomPinChange,
+  generateUniqueFourDigitPins,
   prepareRoomPinChange,
   revealRoomPin,
   roomPinPath,
@@ -35,7 +37,6 @@ function configure(): void {
   Deno.env.set("ROOM_PIN_KEY_BASE64", key);
   Deno.env.set("ROOM_PIN_KEY_VERSION", "key-v1");
   Deno.env.set("ROOM_PIN_KEYRING_JSON", "{}");
-  Deno.env.set("ROOM_PIN_INITIAL_DIGITS", "0".repeat(4));
   Deno.env.set("RESERVATION_PII_KEY_BASE64", reservationKey);
   Deno.env.set("RESERVATION_PII_KEYRING_JSON", "{}");
   Deno.env.set("WEB_PUSH_SUBSCRIPTION_KEY_BASE64", webPushKey);
@@ -121,7 +122,167 @@ Deno.test("room PIN paths are exact and reject aliases", () => {
     roomPinPath(`/v1/rooms/${roomId}/pin/reveal`)?.kind === "reveal",
     "reveal path",
   );
+  assert(
+    roomPinPath(`/v1/rooms/${roomId}/pin/generated/confirm`)?.kind ===
+      "generated-confirm",
+    "generated confirm path",
+  );
   assert(roomPinPath(`/v1/rooms/${roomId}/pin`) === null, "no reveal alias");
+});
+
+Deno.test("version-zero admin physical edits canonicalize to initial registration with safe replay", async () => {
+  configure();
+  const prepareCalls: Array<Record<string, unknown>> = [];
+  let saved: Record<string, unknown> | undefined;
+  const clients = {
+    admin: {
+      async rpc(name: string, args: Record<string, unknown>) {
+        if (name === "get_room_pin_change_context") {
+          return {
+            data: {
+              room_number: "0101",
+              current_pin_version: 0,
+              proposed_pin_version: 1,
+            },
+            error: null,
+          };
+        }
+        assert(name === "prepare_room_pin_change", "prepare RPC only");
+        prepareCalls.push(args);
+        if (!saved) {
+          saved = {
+            lease_id: leaseId,
+            room_id: roomId,
+            current_pin_version: 0,
+            proposed_pin_version: 1,
+            status: "prepared",
+            expires_at: new Date(Date.now() + 300_000).toISOString(),
+            envelope_format: args.p_envelope_format,
+            ciphertext_base64: args.p_ciphertext_base64,
+            nonce_base64: args.p_nonce_base64,
+            auth_tag_base64: args.p_auth_tag_base64,
+            key_version: args.p_key_version,
+            aad_environment: args.p_aad_environment,
+            aad_project_ref: args.p_aad_project_ref,
+          };
+          return { data: { ...saved, replay: false }, error: null };
+        }
+        return { data: { ...saved, replay: true }, error: null };
+      },
+    },
+  } as unknown as EdgeClients;
+
+  const physical = await prepareRoomPinChange(
+    command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+      pinDigits: "0012",
+      expectedPinVersion: 0,
+      reasonCode: "ADMIN_PHYSICAL_CHANGE",
+    }, "pin-initial-canonical-0001"),
+    clients,
+    actor,
+    sessionId,
+    roomId,
+  );
+  const explicit = await prepareRoomPinChange(
+    command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+      pinDigits: "0012",
+      expectedPinVersion: 0,
+      reasonCode: "ADMIN_INITIAL_PIN",
+    }, "pin-initial-canonical-0001"),
+    clients,
+    actor,
+    sessionId,
+    roomId,
+  );
+
+  assert(
+    JSON.stringify(physical) === JSON.stringify(explicit),
+    "same canonical replay",
+  );
+  assert(
+    prepareCalls.every((call) => call.p_reason_code === "ADMIN_INITIAL_PIN"),
+    "both client reasons use the effective initial reason",
+  );
+  assert(
+    prepareCalls[0]?.p_request_hash === prepareCalls[1]?.p_request_hash,
+    "effective reason is included in a stable request hash",
+  );
+  assert(
+    !JSON.stringify(physical).includes("0012"),
+    "raw PIN absent from response",
+  );
+
+  try {
+    await prepareRoomPinChange(
+      command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+        pinDigits: "0013",
+        expectedPinVersion: 0,
+        reasonCode: "ADMIN_PHYSICAL_CHANGE",
+      }, "pin-initial-canonical-0001"),
+      clients,
+      actor,
+      sessionId,
+      roomId,
+    );
+    throw new Error("expected replay mismatch");
+  } catch (error) {
+    assert(error instanceof EdgeError, "stable replay error");
+    assert(
+      error.status === 409 && error.code === "IDEMPOTENCY_KEY_REUSED",
+      "different PIN rejected",
+    );
+    assert(!error.message.includes("0013"), "different raw PIN not reflected");
+  }
+});
+
+Deno.test("existing-current admin physical edits keep their physical-change reason", async () => {
+  configure();
+  let prepareArgs: Record<string, unknown> | undefined;
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        if (name === "get_room_pin_change_context") {
+          return Promise.resolve({
+            data: {
+              room_number: "0101",
+              current_pin_version: 1,
+              proposed_pin_version: 2,
+            },
+            error: null,
+          });
+        }
+        prepareArgs = args;
+        return Promise.resolve({
+          data: {
+            lease_id: leaseId,
+            room_id: roomId,
+            current_pin_version: 1,
+            proposed_pin_version: 2,
+            status: "prepared",
+            expires_at: new Date(Date.now() + 300_000).toISOString(),
+            replay: false,
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+
+  await prepareRoomPinChange(
+    command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+      pinDigits: "0012",
+      expectedPinVersion: 1,
+      reasonCode: "ADMIN_PHYSICAL_CHANGE",
+    }),
+    clients,
+    actor,
+    sessionId,
+    roomId,
+  );
+  assert(
+    prepareArgs?.p_reason_code === "ADMIN_PHYSICAL_CHANGE",
+    "existing current keeps the requested physical-change reason",
+  );
 });
 
 Deno.test("prepare binds room snapshot and maid access authority without hashing PIN material", async () => {
@@ -189,9 +350,19 @@ Deno.test("prepare binds room snapshot and maid access authority without hashing
   );
 });
 
-Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN material", async () => {
+Deno.test("four-digit generation preserves leading zeros and retries collisions", () => {
+  const draws = [0, 0, 42];
+  assert(
+    generateUniqueFourDigitPins(2, () => draws.shift() ?? 9999).join(",") ===
+      "0000,0042",
+    "unique fixed-width PIN values",
+  );
+});
+
+Deno.test("bootstrap encrypts a bounded admin-only batch and reveals generated credentials briefly", async () => {
   configure();
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let encryptedCandidate: Record<string, unknown> | undefined;
   const clients = {
     admin: {
       rpc(name: string, args: Record<string, unknown>) {
@@ -209,16 +380,47 @@ Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN mate
             error: null,
           });
         }
+        if (name === "bootstrap_room_pins") {
+          encryptedCandidate =
+            (args.p_candidates as Array<Record<string, unknown>>)[0];
+          return Promise.resolve({
+            data: {
+              initialized_room_ids: [roomId],
+              skipped_room_ids: [],
+              initialized_count: 1,
+              skipped_count: 0,
+              remaining_count: 0,
+              completed_at: "2026-09-13T00:00:00Z",
+            },
+            error: null,
+          });
+        }
+        if (name === "begin_generated_room_pin_reveal") {
+          assert(encryptedCandidate, "encrypted candidate captured");
+          return Promise.resolve({
+            data: {
+              lease_id: leaseId,
+              room_id: roomId,
+              room_number: "0101",
+              pin_version: 1,
+              expires_at: new Date(Date.now() + 30_000).toISOString(),
+              envelope_format: encryptedCandidate.envelopeFormat,
+              ciphertext_base64: encryptedCandidate.ciphertextBase64,
+              nonce_base64: encryptedCandidate.nonceBase64,
+              auth_tag_base64: encryptedCandidate.authTagBase64,
+              key_version: encryptedCandidate.keyVersion,
+              aad_environment: encryptedCandidate.aadEnvironment,
+              aad_project_ref: encryptedCandidate.aadProjectRef,
+            },
+            error: null,
+          });
+        }
+        if (name === "finalize_generated_room_pin_reveal") {
+          return Promise.resolve({ data: { finalized: true }, error: null });
+        }
         return Promise.resolve({
-          data: {
-            initialized_room_ids: [roomId],
-            skipped_room_ids: [],
-            initialized_count: 1,
-            skipped_count: 0,
-            remaining_count: 0,
-            completed_at: "2026-09-13T00:00:00Z",
-          },
-          error: null,
+          data: null,
+          error: { message: "unexpected RPC" },
         });
       },
     },
@@ -236,7 +438,8 @@ Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN mate
   );
   assert(
     calls.map((call) => call.name).join(",") ===
-      "get_room_pin_bootstrap_context,bootstrap_room_pins",
+      "get_room_pin_bootstrap_context,bootstrap_room_pins," +
+        "begin_generated_room_pin_reveal,finalize_generated_room_pin_reveal",
     "bounded bootstrap RPC order",
   );
   const candidate =
@@ -251,12 +454,50 @@ Deno.test("bootstrap encrypts a bounded admin-only batch and returns no PIN mate
   );
   assert(
     result.initializedCount === 1 && result.remainingCount === 0,
-    "safe bootstrap result",
+    "bounded bootstrap result",
   );
   assert(
-    !/pinDigits|credential|ciphertext/i.test(JSON.stringify(result)),
-    "response contains no PIN material",
+    /^0101-[0-9]{4}$/.test(result.generatedPins[0]?.credential ?? "") &&
+      (result.generatedPins[0]?.clearAfterSeconds ?? 0) >= 1 &&
+      (result.generatedPins[0]?.clearAfterSeconds ?? 0) <= 30,
+    "response contains only the short-lived generated credential",
   );
+  assert(
+    !/ciphertext|nonce|authTag/i.test(JSON.stringify(result)),
+    "response excludes encrypted envelope material",
+  );
+});
+
+Deno.test("generated PIN confirmation uses an admin-only idempotent RPC", async () => {
+  let call: { name: string; args: Record<string, unknown> } | undefined;
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        call = { name, args };
+        return Promise.resolve({
+          data: {
+            room_id: roomId,
+            pin_version: 1,
+            status: "verified",
+            confirmed_at: "2026-09-15T00:00:00Z",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const result = await confirmGeneratedRoomPin(
+    command(`/v1/rooms/${roomId}/pin/generated/confirm`, {
+      expectedPinVersion: 1,
+    }),
+    clients,
+    actor,
+    sessionId,
+    roomId,
+  );
+  assert(call?.name === "confirm_generated_room_pin", "confirmation RPC");
+  assert(call?.args.p_expected_pin_version === 1, "version CAS");
+  assert(result.status === "verified", "verified result");
 });
 
 Deno.test("confirm and rollback map database fields to exact camelCase contracts", async () => {
@@ -432,10 +673,21 @@ Deno.test("PIN database errors remain stable and never expose raw details", () =
     ["ROOM_PIN_MISMATCH_UNRESOLVED", 409, "ROOM_PIN_MISMATCH_UNRESOLVED"],
     ["PIN_CHANGE_IN_PROGRESS_REQUIRED", 403, "PIN_CHANGE_IN_PROGRESS_REQUIRED"],
     ["PIN_ACCESS_LEASE_REQUIRED", 403, "PIN_ACCESS_LEASE_REQUIRED"],
+    ["PIN_ENTITLEMENT_REQUIRED", 403, "PIN_ENTITLEMENT_REQUIRED"],
     [
       "PIN_REVEAL_AUTHORIZATION_CHANGED",
       403,
       "PIN_REVEAL_AUTHORIZATION_CHANGED",
+    ],
+    [
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+      409,
+      "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+    ],
+    [
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
+      409,
+      "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
     ],
     ["ROOM_PIN_UNCONFIGURED", 404, "ROOM_PIN_UNCONFIGURED"],
   ];

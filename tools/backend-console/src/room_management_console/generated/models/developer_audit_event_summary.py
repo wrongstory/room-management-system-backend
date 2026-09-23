@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 from uuid import UUID
 
 from attrs import define as _attrs_define
@@ -24,6 +24,7 @@ from ..models.developer_audit_event_summary_profile_status import (
     DeveloperAuditEventSummaryProfileStatus,
 )
 from ..models.developer_audit_event_summary_resolution import DeveloperAuditEventSummaryResolution
+from ..models.room_primary_display_status import RoomPrimaryDisplayStatus
 from ..types import UNSET, Unset
 
 T = TypeVar("T", bound="DeveloperAuditEventSummary")
@@ -42,6 +43,7 @@ class DeveloperAuditEventSummary:
         maid_profile_id (UUID | Unset):
         cleaning_target_id (UUID | Unset):
         assignment_id (UUID | Unset):
+        replacement_target_id (UUID | Unset):
         previous_assignment_id (UUID | Unset):
         previous_maid_profile_id (UUID | Unset):
         request_id (UUID | Unset):
@@ -87,7 +89,10 @@ class DeveloperAuditEventSummary:
         next_attempt_id (UUID | Unset):
         target_slot_id (UUID | Unset):
         photo_id (UUID | Unset):
+        photo_item_id (UUID | Unset):
         photo_version (int | Unset):
+        collection_revision (int | Unset):
+        item_revision (int | Unset):
         uploaded_at (datetime.datetime | Unset):
         purge_after (datetime.datetime | Unset):
         offline_quarantine_id (UUID | Unset): 서버 발급 격리 기록 ID. 원 client event UUID가 아닙니다.
@@ -133,6 +138,10 @@ class DeveloperAuditEventSummary:
         case_version (int | Unset):
         payment_attempt_number (int | Unset):
         payment_method (DeveloperAuditEventSummaryPaymentMethod | Unset):
+        occupied (bool | Unset):
+        display_status_override (None | RoomPrimaryDisplayStatus | Unset): 표시 분류 override 값. null은 override 해제를 뜻하며 실제
+            점유·예약·readiness·bookability를 변경하지 않습니다.
+        room_state_version (int | Unset):
     """
 
     display_name: str | Unset = UNSET
@@ -143,6 +152,7 @@ class DeveloperAuditEventSummary:
     maid_profile_id: UUID | Unset = UNSET
     cleaning_target_id: UUID | Unset = UNSET
     assignment_id: UUID | Unset = UNSET
+    replacement_target_id: UUID | Unset = UNSET
     previous_assignment_id: UUID | Unset = UNSET
     previous_maid_profile_id: UUID | Unset = UNSET
     request_id: UUID | Unset = UNSET
@@ -188,7 +198,10 @@ class DeveloperAuditEventSummary:
     next_attempt_id: UUID | Unset = UNSET
     target_slot_id: UUID | Unset = UNSET
     photo_id: UUID | Unset = UNSET
+    photo_item_id: UUID | Unset = UNSET
     photo_version: int | Unset = UNSET
+    collection_revision: int | Unset = UNSET
+    item_revision: int | Unset = UNSET
     uploaded_at: datetime.datetime | Unset = UNSET
     purge_after: datetime.datetime | Unset = UNSET
     offline_quarantine_id: UUID | Unset = UNSET
@@ -234,6 +247,9 @@ class DeveloperAuditEventSummary:
     case_version: int | Unset = UNSET
     payment_attempt_number: int | Unset = UNSET
     payment_method: DeveloperAuditEventSummaryPaymentMethod | Unset = UNSET
+    occupied: bool | Unset = UNSET
+    display_status_override: None | RoomPrimaryDisplayStatus | Unset = UNSET
+    room_state_version: int | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         display_name = self.display_name
@@ -259,6 +275,10 @@ class DeveloperAuditEventSummary:
         assignment_id: str | Unset = UNSET
         if not isinstance(self.assignment_id, Unset):
             assignment_id = str(self.assignment_id)
+
+        replacement_target_id: str | Unset = UNSET
+        if not isinstance(self.replacement_target_id, Unset):
+            replacement_target_id = str(self.replacement_target_id)
 
         previous_assignment_id: str | Unset = UNSET
         if not isinstance(self.previous_assignment_id, Unset):
@@ -410,7 +430,15 @@ class DeveloperAuditEventSummary:
         if not isinstance(self.photo_id, Unset):
             photo_id = str(self.photo_id)
 
+        photo_item_id: str | Unset = UNSET
+        if not isinstance(self.photo_item_id, Unset):
+            photo_item_id = str(self.photo_item_id)
+
         photo_version = self.photo_version
+
+        collection_revision = self.collection_revision
+
+        item_revision = self.item_revision
 
         uploaded_at: str | Unset = UNSET
         if not isinstance(self.uploaded_at, Unset):
@@ -540,6 +568,18 @@ class DeveloperAuditEventSummary:
         if not isinstance(self.payment_method, Unset):
             payment_method = self.payment_method.value
 
+        occupied = self.occupied
+
+        display_status_override: None | str | Unset
+        if isinstance(self.display_status_override, Unset):
+            display_status_override = UNSET
+        elif isinstance(self.display_status_override, RoomPrimaryDisplayStatus):
+            display_status_override = self.display_status_override.value
+        else:
+            display_status_override = self.display_status_override
+
+        room_state_version = self.room_state_version
+
         field_dict: dict[str, Any] = {}
 
         field_dict.update({})
@@ -559,6 +599,8 @@ class DeveloperAuditEventSummary:
             field_dict["cleaningTargetId"] = cleaning_target_id
         if assignment_id is not UNSET:
             field_dict["assignmentId"] = assignment_id
+        if replacement_target_id is not UNSET:
+            field_dict["replacementTargetId"] = replacement_target_id
         if previous_assignment_id is not UNSET:
             field_dict["previousAssignmentId"] = previous_assignment_id
         if previous_maid_profile_id is not UNSET:
@@ -649,8 +691,14 @@ class DeveloperAuditEventSummary:
             field_dict["targetSlotId"] = target_slot_id
         if photo_id is not UNSET:
             field_dict["photoId"] = photo_id
+        if photo_item_id is not UNSET:
+            field_dict["photoItemId"] = photo_item_id
         if photo_version is not UNSET:
             field_dict["photoVersion"] = photo_version
+        if collection_revision is not UNSET:
+            field_dict["collectionRevision"] = collection_revision
+        if item_revision is not UNSET:
+            field_dict["itemRevision"] = item_revision
         if uploaded_at is not UNSET:
             field_dict["uploadedAt"] = uploaded_at
         if purge_after is not UNSET:
@@ -741,6 +789,12 @@ class DeveloperAuditEventSummary:
             field_dict["paymentAttemptNumber"] = payment_attempt_number
         if payment_method is not UNSET:
             field_dict["paymentMethod"] = payment_method
+        if occupied is not UNSET:
+            field_dict["occupied"] = occupied
+        if display_status_override is not UNSET:
+            field_dict["displayStatusOverride"] = display_status_override
+        if room_state_version is not UNSET:
+            field_dict["roomStateVersion"] = room_state_version
 
         return field_dict
 
@@ -782,6 +836,13 @@ class DeveloperAuditEventSummary:
             assignment_id = UNSET
         else:
             assignment_id = UUID(_assignment_id)
+
+        _replacement_target_id = d.pop("replacementTargetId", UNSET)
+        replacement_target_id: UUID | Unset
+        if isinstance(_replacement_target_id, Unset):
+            replacement_target_id = UNSET
+        else:
+            replacement_target_id = UUID(_replacement_target_id)
 
         _previous_assignment_id = d.pop("previousAssignmentId", UNSET)
         previous_assignment_id: UUID | Unset
@@ -1023,7 +1084,18 @@ class DeveloperAuditEventSummary:
         else:
             photo_id = UUID(_photo_id)
 
+        _photo_item_id = d.pop("photoItemId", UNSET)
+        photo_item_id: UUID | Unset
+        if isinstance(_photo_item_id, Unset):
+            photo_item_id = UNSET
+        else:
+            photo_item_id = UUID(_photo_item_id)
+
         photo_version = d.pop("photoVersion", UNSET)
+
+        collection_revision = d.pop("collectionRevision", UNSET)
+
+        item_revision = d.pop("itemRevision", UNSET)
 
         _uploaded_at = d.pop("uploadedAt", UNSET)
         uploaded_at: datetime.datetime | Unset
@@ -1210,6 +1282,29 @@ class DeveloperAuditEventSummary:
         else:
             payment_method = DeveloperAuditEventSummaryPaymentMethod(_payment_method)
 
+        occupied = d.pop("occupied", UNSET)
+
+        def _parse_display_status_override(data: object) -> None | RoomPrimaryDisplayStatus | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                display_status_override_type_0 = RoomPrimaryDisplayStatus(data)
+
+                return display_status_override_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | RoomPrimaryDisplayStatus | Unset, data)
+
+        display_status_override = _parse_display_status_override(
+            d.pop("displayStatusOverride", UNSET)
+        )
+
+        room_state_version = d.pop("roomStateVersion", UNSET)
+
         developer_audit_event_summary = cls(
             display_name=display_name,
             login_id=login_id,
@@ -1219,6 +1314,7 @@ class DeveloperAuditEventSummary:
             maid_profile_id=maid_profile_id,
             cleaning_target_id=cleaning_target_id,
             assignment_id=assignment_id,
+            replacement_target_id=replacement_target_id,
             previous_assignment_id=previous_assignment_id,
             previous_maid_profile_id=previous_maid_profile_id,
             request_id=request_id,
@@ -1264,7 +1360,10 @@ class DeveloperAuditEventSummary:
             next_attempt_id=next_attempt_id,
             target_slot_id=target_slot_id,
             photo_id=photo_id,
+            photo_item_id=photo_item_id,
             photo_version=photo_version,
+            collection_revision=collection_revision,
+            item_revision=item_revision,
             uploaded_at=uploaded_at,
             purge_after=purge_after,
             offline_quarantine_id=offline_quarantine_id,
@@ -1310,6 +1409,9 @@ class DeveloperAuditEventSummary:
             case_version=case_version,
             payment_attempt_number=payment_attempt_number,
             payment_method=payment_method,
+            occupied=occupied,
+            display_status_override=display_status_override,
+            room_state_version=room_state_version,
         )
 
         return developer_audit_event_summary

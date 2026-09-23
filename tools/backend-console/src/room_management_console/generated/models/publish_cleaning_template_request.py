@@ -9,7 +9,7 @@ from ..models.cleaning_template_room_type_code import CleaningTemplateRoomTypeCo
 from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
-    from ..models.cleaning_template_slot import CleaningTemplateSlot
+    from ..models.checkout_cleaning_template_v8_slot import CheckoutCleaningTemplateV8Slot
 
 
 T = TypeVar("T", bound="PublishCleaningTemplateRequest")
@@ -22,16 +22,17 @@ class PublishCleaningTemplateRequest:
         room_type_code (CleaningTemplateRoomTypeCode):
         cleaning_kind (Literal['checkout']):
         expected_version (int):
-        slots (list[CleaningTemplateSlot]): v7+ checkout 계약: standard/premium/oceanPremium/oceanFamily 순으로 정확히
-            10/11/13/15개, 필수는 총수-1, required tv-on은 정확히 한 개입니다. displayOrder는 0부터 연속입니다.
+        slots (list[CheckoutCleaningTemplateV8Slot]): v8+ checkout 계약: standard/premium/oceanPremium/oceanFamily 순으로 정확히
+            9/10/12/14개, 필수는 8/9/11/13개입니다. required tv-on과 entry-storage는 각각 정확히 한 개, 마지막 extra-proof는 선택·maxPhotos 10이며
+            entry-number는 금지됩니다. 나머지 슬롯은 maxPhotos 1이고 displayOrder는 0부터 연속입니다.
         duration_minutes (int | None | Unset): 선택적인 과거 호환 메타데이터입니다. 미입력/null이어도 예약을 차단하지 않으며 실제 청소시간은
-            attempt.startedAt부터 fieldCompletedAt까지 계산합니다. 배정 Preview는 별도 확정 duration policy를 사용합니다.
+            attempt.startedAt부터 fieldCompletedAt까지 계산합니다. 배정 Preview는 이 값을 사용하지 않습니다.
     """
 
     room_type_code: CleaningTemplateRoomTypeCode
     cleaning_kind: Literal["checkout"]
     expected_version: int
-    slots: list[CleaningTemplateSlot]
+    slots: list[CheckoutCleaningTemplateV8Slot]
     duration_minutes: int | None | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
@@ -69,7 +70,7 @@ class PublishCleaningTemplateRequest:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.cleaning_template_slot import CleaningTemplateSlot
+        from ..models.checkout_cleaning_template_v8_slot import CheckoutCleaningTemplateV8Slot
 
         d = dict(src_dict)
         room_type_code = CleaningTemplateRoomTypeCode(d.pop("roomTypeCode"))
@@ -83,7 +84,7 @@ class PublishCleaningTemplateRequest:
         slots = []
         _slots = d.pop("slots")
         for slots_item_data in _slots:
-            slots_item = CleaningTemplateSlot.from_dict(slots_item_data)
+            slots_item = CheckoutCleaningTemplateV8Slot.from_dict(slots_item_data)
 
             slots.append(slots_item)
 

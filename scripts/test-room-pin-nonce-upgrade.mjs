@@ -81,7 +81,10 @@ function ledgerSnapshot() {
       union select room_id from private.room_pin_revisions where recorded_by='${actorId}'
     ), exact_ledger as (
       select jsonb_build_object(
-        'rooms', coalesce((select jsonb_agg(to_jsonb(x) order by id) from (select * from public.rooms where id in (select room_id from fixture_rooms)) x), '[]'),
+        'rooms', coalesce((select jsonb_agg(
+          to_jsonb(x) - 'active' - 'deactivated_at' - 'deactivated_by' - 'deactivation_reason_code'
+          order by id
+        ) from (select * from public.rooms where id in (select room_id from fixture_rooms)) x), '[]'),
         'leases', coalesce((select jsonb_agg(to_jsonb(x) order by id) from (select * from private.room_pin_change_leases where actor_profile_id='${actorId}') x), '[]'),
         'revisions', coalesce((select jsonb_agg(to_jsonb(x) order by id) from (select * from private.room_pin_revisions where recorded_by='${actorId}') x), '[]'),
         'currentPointers', coalesce((select jsonb_agg(to_jsonb(x) order by room_id) from (select * from private.room_current_pin where room_id in (select room_id from fixture_rooms)) x), '[]'),

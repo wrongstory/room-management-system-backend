@@ -73,30 +73,35 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 기준 스냅샷
 
-production 최종 source/readback evidence: **2026-09-15 KST** (Issue #148/#152/#156). 기능 integration 기준: **2026-09-15 KST** (`main@6604b221...`, PR #167의 `dev@75983b3...`; 이후 문서 전용 commit은 기능 기준에 포함하지 않음).
+production 최종 runtime/readback evidence: **2026-09-23 KST**. #245 v0.5.1 hotfix는 production DB/API와 Pages 공개 artifact에 반영됐고 dev backport도 완료됐다. 이후 #256 사진 정규화 source가 `main`/`dev`에 통합됐고 #250/#264 배정 후속은 `dev`에 통합됐으나 운영 Edge/Pages 배포와 release 승격은 아직 별도다.
 
-- 현재 GitHub 운영 source 정본: `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`
-  - Issue #148의 v0.3.0 source/schema/API/Edge production 승격, Issue #152 notification-delivery hosted 호환 hotfix, Issue #156 cleaning-template admin API와 Issue #165 duration 선택화 hotfix source까지 반영됐다.
-  - annotated `v0.3.0` tag/GitHub Release는 아직 없으므로 `main`/production source 상태와 GitHub Release 완료를 구분한다.
-- PR #167의 기능 통합 지점은 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이며 #165의 **56번째 append-only migration**과 선택형 duration 계약이 역반영됐다. GitHub `main`과 `dev` 모두 같은 hotfix source를 포함하지만 production은 별도 운영 승격 전까지 **55 migrations / OpenAPI 0.3.0 109 paths / 117 operations**와 기존 Edge bundle을 유지한다. #156 API는 production Edge에 배포됐지만 네 checkout template이 미게시라 현재 사용은 ❌이다.
-- #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다. recovery는 immutable self-FK root와 exact execution fence를 함께 검증하고, 성공 시 같은-root 과거 block을 최대 32건만 정리한다. 초과/부분 정리와 recovery `SNAPSHOT_STALE`은 healthy/success 없이 operator-blocked로 유지된다.
-- 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. 현재 production source 포함 여부는 이 §2의 55 migrations / 109 paths / 117 operations와 5개 Edge bundle snapshot을 우선하고, hosted provider·Google·Cron 및 positive mutation 사용 가능 여부는 별도 gate로 판정한다.
+- 운영 Git 정본: `main@10a1f814649e92260e9e7353ab242400311b429e`. 최신 기능 통합 지점: `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`, **79 migrations / OpenAPI 0.5.1 129 paths / 139 operations**.
+- 마지막으로 검증된 production API bundle은 #245 v0.5.1 계약을 제공하는 `api` ACTIVE v24다. #256 main source의 Edge 배포·readback은 아직 완료로 표시하지 않는다.
+- production은 **78 migrations**, head `reservation_bookability_optional_guest_count`, **`api` ACTIVE v24**, OpenAPI **0.5.1 / 128 paths / 138 operations**다.
+- production `/health`와 `/openapi.json`은 HTTP 200이다. GitHub Pages portal과 공개 OpenAPI의 v0.5.1 / 128 / 138 readback 및 artifact parity도 완료됐다.
+- #245 dev backport는 최신 dev-only 이력과 v0.5.0 manifest를 보존하면서 동일한 78번째 migration과 OpenAPI 0.5.1 계약을 통합 완료했다.
+- #187 Phase C는 PR #190으로 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`에 source/dev 병합 완료했다. 당시 개발 정본은 기존 61개를 수정하지 않은 **62 migrations / OpenAPI 113 paths / 121 operations**이며 현재 production 포함 여부는 이 절의 v0.5.1 readback을 우선한다.
+- #137 Phase C의 API와 `room-pin-sheet-sync` bundle source는 production에 반영됐다. 다만 hosted mapping, secret, ACL, Google 호출, Vault/Cron과 positive full-resync smoke는 별도 activation gate이므로 현재 사용은 ⚠️다.
+- 아래 기능별 source gate 절은 병합 당시의 이력을 보존한다. production runtime 포함 여부는 이 §2의 78 migrations / `api` ACTIVE v24 / OpenAPI 0.5.1 128 paths / 138 operations snapshot을 우선하며, 현재 Git `main@10a1f81...`의 #256 source와 `dev@1a28263...`의 #250/#264 source를 구분한다.
 - #85는 PR #90으로 source/dev 병합 완료했다. accepted/orphan/folder purge worker와 45초 absolute deadline, blocked false-green 방지 계약은 개발 정본에 있으며 production Google/Cron hosted 검증은 별도 release gate다.
 - #31은 PR #91로 source/dev 병합 완료했고 해당 API source는 현재 production `api` bundle에 반영됐다. 당시 개발 정본은 **34 migrations / 74 paths / 80 operations**이었다. hosted 역할별 positive mutation smoke는 미확인이므로 현재 사용은 ⚠️다.
 - #93/#95는 PR #95로 source/dev 병합 완료했다. 개발 통합 계약은 **35 migrations / 76 paths / 82 operations**이며 conceptual OPEN 조회, OPEN→PAYING 잠금과 4개 payroll table의 active+비밀번호 변경 완료+admin/maid-self RLS를 포함한다.
 - #96은 PR #97로 source/dev 병합 완료했다. bounded keyset pagination과 signed cursor, nested preview/continuation, 128 KiB 응답 상한을 포함한 당시 개발 통합 계약은 **36 migrations / 77 paths / 83 operations**다. 해당 API source는 production `api` bundle에 반영됐지만 hosted 역할별 read/mutation smoke는 미확인이다.
 - #94는 2026-09-10 Decision Issue로 정책 승인됐다. #100~#103은 각각 PR #104/#105/#106/#107로 **source/dev 병합 완료**했다. #108은 PR #108, #109는 PR #114, #110은 PR #115, #111은 PR #116, #112는 PR #119로 source/dev 병합 완료했고 #117 concurrency 회귀도 통합됐다. 이 알림 트랙의 완료 당시 snapshot은 **45 migrations / 98 paths / 105 operations**다. Issue #112의 hosted 활성화는 pending이며 main/recovery/production은 변경하지 않았다.
-- #131은 #69 승인 PIN 계약의 Phase A source/dev 정본이다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. private immutable revision/current pointer, physical-change mismatch lifecycle, authoritative maid access lease, 30초 이하 reveal과 safe sync/audit/outbox를 포함하며 PIN 평문·암호문을 public table, audit, outbox, URL, error, 로그에 저장하지 않는다.
+- #131의 #69 PIN Phase A와 #194의 64번째 assignment entitlement migration은 production에 반영됐다. 프런트는 선행 0을 보존한 4~8자리 숫자 부분만 보내고 서버가 current room number를 다시 확인해 canonical credential을 암호화한다. 물리 PIN change는 exact in-progress access lease를 유지하고 reveal은 exact current/notified assignment entitlement + 30초 lease를 사용한다. PIN 평문·암호문은 public table, audit, outbox, URL, error, 로그에 저장하지 않으며 hosted role/positive mutation smoke는 별도다.
 - #140은 빈 DB의 PIN 미설정 상태를 예약 차단에서 분리하고, secret 기반 active-admin bounded bootstrap을 추가한다. 예약은 PIN 경고와 무관하게 가능하지만 실제 체크인·PIN 접근은 verified 전까지 차단한다. legacy `pin-sync-events`는 current PIN을 만들지 못하므로 신규 프런트에서 사용하지 않는다.
-- 현재 critical path는 **production 56번째 migration/API 재배포 → 네 객실 타입 slot-only template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다. source bundle 배포와 provider·Google·Cron hosted activation/current use를 분리한다.
-- 운영 migration: **55건**
+- #184 현재 시각 객실 projection, #187 Phase A~C 예약 임박·체크인 전 변경·투숙 중 이동, #180 `extra-proof` 0~10장 collection source는 v0.4.0 production DB/API에 포함됐다. 각 기능의 실제 mutation smoke와 프런트 사용 완료는 별도다.
+- #245 dev backport, Pages v0.5.1 공개 readback과 기존 관리자 `guestCount` UAT는 완료됐다. 현재 release 전 기능 차이는 #256 사진 정규화와 #250/#264 배정 후속이다. **승인 release exact source 고정 → 운영 migration/API/Pages 반영 → 사진 UAT와 #264 역할별 hosted smoke**를 별도 gate로 수행하며, provider 활성화와 tag/GitHub Release도 별도 승인으로 남긴다. 안전 fixture가 없으면 임의 production 데이터를 만들지 않는다.
+- 운영 migration: **78건**, head `reservation_bookability_optional_guest_count`
 - 운영 Edge Functions readback:
   - `api`, `reservation-scheduler`, `photo-purge`, `notification-delivery`, `room-pin-sheet-sync` 5개 bundle 배포
+  - `api`는 ACTIVE v24이며 version은 runtime revision metadata다. 현재 Git main의 #256 hotfix가 실제 배포됐는지는 Edge source/readback으로 별도 판정한다.
   - Issue #152에서 `notification-delivery` zero-byte 요청을 의도한 503 fail-closed로 보강했으며, provider invoke secret/credential 미활성 상태를 성공으로 표시하지 않는다.
   - version 증가는 source 변경 외 Function Secret 환경 revision도 포함하므로 source identity로 사용하지 않는다.
-- production OpenAPI: **109 paths / 117 operations**, version `0.3.0`
+- production OpenAPI: **128 paths / 138 operations**, version `0.5.1`
+- `dev@49214bb67f2cf346178bc12321948a810e050234`는 v0.5.0의 과거 integration 지점이다. 이번 별도 backport는 그 이후 dev history를 보존한다.
 - production `/health`, `/docs`, `/openapi.json` HTTP 200과 OpenAPI readback은 확인됐다. 전체 hosted role/domain positive mutation smoke는 안전한 fixture 부재로 미완료이며, Issue #112/#137의 provider/Google target·credential·Vault/Cron/실기기 smoke도 별도 activation gate다.
-- GitHub Pages portal과 production Edge OpenAPI parity는 Issue #148에서 확인됐지만 annotated `v0.3.0` tag/GitHub Release는 pending이다.
+- GitHub Pages portal은 production Edge와 **0.5.1 / 128 / 138** parity를 확인했다. `portal-manifest.json`의 SHA-256은 공개 Pages `openapi.json` artifact와 일치한다. build 시각 metadata 때문에 raw production JSON과 artifact byte hash가 같다는 뜻은 아니다.
 - production `/docs`는 HTTP 200이지만 hosted 기본 domain의 HTML 렌더링 제약 때문에
   사람용 문서는 GitHub Pages 포털을 사용한다.
 
@@ -115,11 +120,31 @@ GitHub Pages 포털은 Supabase Edge Function이 아닌 별도 정적 배포다.
 
 - [x] 읽기 전용 portal source·build 검증 완료
 - [x] SSRF 경계, CSP/SRI, Try-it-out·Authorization 차단, Pages 최소 권한 독립 리뷰 완료
-- [x] 승인된 source의 현재 `main@e3397e00e5538871d80610c9f0c7ab88535d7be0` snapshot 반영
-- [x] production Edge OpenAPI 0.3.0, 108 paths / 115 operations와 Pages parity 확인 — Issue #148
-- [x] GitHub Pages `workflow_dispatch` 수동 실행 — run `33718438975`
+- [x] 승인된 production source `main@80f935016d5581d500136fba29c206f6ee797bc0` snapshot 반영
+- [x] production Edge OpenAPI 0.4.0, 120 paths / 130 operations와 Pages parity 확인 — Issue #222
+- [x] GitHub Pages `workflow_dispatch` 수동 실행 — run `35481531782`
 - [x] 공개 portal과 same-origin OpenAPI snapshot HTTP smoke
 - [x] Pages와 production Edge의 path set·operationId set 동일
+
+### GitHub Pages Swagger v0.5.0 승격 gate
+
+- [x] source fail-closed 기대값 0.5.0 / 128 paths / 138 operations
+- [x] `release/v0.5.0 → main` 승인·병합
+- [x] production 73→77 migration 적용 및 exact `main`의 `api` 배포
+- [x] production `/openapi.json` 0.5.0 / 128 / 138 readback
+- [x] `swagger-pages.yml` 수동 `workflow_dispatch`
+- [x] 공개 portal/OpenAPI/manifest HTTP 200 및 artifact SHA-256 parity
+
+### GitHub Pages Swagger v0.5.1 hotfix gate — #245
+
+- [x] source fail-closed 기대값 0.5.1 / 128 paths / 138 operations
+- [x] v0.5.0 release manifest·문서 정본 byte-identical 보존
+- [x] PR #246 exact head 독립 검토 및 `main` 병합
+- [x] production 77→78 migration 적용 및 exact `main`의 `api` 배포
+- [x] production `/openapi.json` 0.5.1 / 128 / 138 readback
+- [x] 기존 active admin의 optional/null/positive `guestCount` UAT와 예약 현황 인원·최소/최대 인원 반영 확인
+- [x] `swagger-pages.yml` 수동 `workflow_dispatch`
+- [x] 공개 portal/OpenAPI/manifest HTTP 200 및 artifact SHA-256 parity
 
 ## 4. Auth API
 
@@ -129,7 +154,7 @@ developer/admin/maid의 실제 hosted login과 role 경계를 검증했다.
 |---|---|---|---|---|---|---|---|---|
 | [x] | `POST /v1/auth/login` | all accounts | ✅ | ✅ | ✅ | ✅ | ✅ | developer/admin/maid hosted login PASS |
 | [x] | `GET /v1/auth/me` | authenticated | ✅ | ✅ | ✅ | ✅ | ✅ | 최신 role/session hosted smoke PASS |
-| [x] | `POST /v1/auth/password` | authenticated | ✅ | ✅ | ✅ | ✅ | ✅ | production은 기존 변경 계약; #46 feature는 safe receipt 기반 timeout/response-loss replay source 추가, 운영 미승격 |
+| [x] | `POST /v1/auth/password` | authenticated | ✅ | ✅ | ✅ | ✅ | ✅ | #46 safe receipt 기반 timeout/response-loss replay source도 v0.4.0 production에 포함 |
 
 ## 5. 계정 관리 API
 
@@ -154,11 +179,30 @@ login 이후 같은 메모리 세션에서 전체 projection·diagnostics·업�
 |---|---|---|---|---|---|---|---|---|
 | [x] | `GET /v1/developer/overview` | developer only | ✅ | — | ✅ | ✅ | ✅ | hosted 200 |
 | [x] | `GET /v1/developer/runtime-status` | developer only | — | — | ✅ | ✅ | ✅ | production target 일치, secret은 configured boolean만 |
-| [x] | `GET /v1/developer/database-status` | developer only | ✅ | — | ✅ | ✅ | ✅ | production migration 54 readback; drift/RLS/RPC 정상 |
+| [x] | `GET /v1/developer/database-status` | developer only | ✅ | — | ✅ | ✅ | ✅ | production migration 56 readback; drift/RLS/RPC 정상 |
 | [x] | `GET /v1/developer/scheduler-status` | developer only | ✅ | — | ✅ | ✅ | ✅ | `healthy`, raw Cron/Vault/net body 비노출 |
 | [x] | `GET /v1/developer/audit-events` | developer only | ✅ | — | ✅ | ✅ | ✅ | 승인된 domain summary만 반환 |
 | [x] | `GET /v1/developer/activity-events` | developer only | ✅ | — | ✅ | ✅ | ✅ | 권한 거부 aggregate hosted readback PASS |
 | [x] | `POST /v1/developer/diagnostics` | developer only | ✅ | — | ✅ | ✅ | ✅ | PR #64 zero-byte hosted hotfix 후 200 |
+| [ ] | `GET /v1/developer/room-catalog` | developer only | ✅ | ✅ | ✅ | ✅ | ⚠️ | #236 production source 반영; hosted developer read smoke 미확인 |
+| [ ] | `POST /v1/developer/room-types/{roomTypeId}/capacity/preview` | developer only | ✅ | ✅ | ✅ | ✅ | ⚠️ | 5분 영향 preview·CAS; hosted mutation fixture 미확인 |
+| [ ] | `PATCH /v1/developer/room-types/{roomTypeId}/capacity` | developer only | ✅ | ✅ | ✅ | ✅ | ⚠️ | fingerprint·CAS·idempotency; 기존 예약 자동 변경 없음 |
+| [ ] | `POST /v1/developer/rooms` | developer only | ✅ | ✅ | ✅ | ✅ | ⚠️ | verification-required 객실 추가; hosted mutation fixture 미확인 |
+| [ ] | `POST /v1/developer/rooms/{roomId}/deactivation/preview` | developer only | ✅ | ✅ | ✅ | ✅ | ⚠️ | 점유·예약·청소·PIN·운영 영향 preview |
+| [ ] | `POST /v1/developer/rooms/{roomId}/deactivate` | developer only | ✅ | ✅ | ✅ | ✅ | ⚠️ | hard delete 없는 versioned inactive 전이 |
+
+### #236 Developer 객실·유형별 인원 관리 — production source 반영, hosted smoke 미확인
+
+- [x] 76번째 append-only `developer_room_catalog_capacity` migration, private FORCE RLS preview 원장, service-role-only actor-bound RPC
+- [x] 기존 `default_guest_count/max_guest_count` 보존 및 `baseOccupancy/maxOccupancy` safe projection; 예시 값 backfill 없음
+- [x] 인원 변경·객실 비활성화 preview/commit의 5분 fingerprint, CAS, reason code, idempotency, audit
+- [x] 객실 추가의 숫자 문자열·유형 version·중복 검사와 `verification_required` 초기 상태
+- [x] 객실 hard delete 차단, inactive 객실의 신규 예약/segment/cleaning target 차단, 과거 이력 보존
+- [x] bookability `guestCount` 선택값(null/생략은 capacity filter 없음), create/change는 필수 및 DB 최종 최대 인원 재검증
+- [x] Fastify/Edge/OpenAPI `0.5.0` 126 paths / 136 operations source parity
+- [x] `dev@994d3b61e49f49671acf0c1192b8821ae7f77792` 병합
+- [x] production release/migration/API 배포
+- [ ] hosted developer/admin/maid 권한 및 safe mutation fixture smoke
 
 ### #43 production 반영 조건
 
@@ -252,7 +296,7 @@ maid/admin/developer read·role smoke와 Pages snapshot을 완료했다.
 - [x] Fastify 계약과 동일한 validation/error code/camelCase projection
 - [x] maid self-only / admin exact-role / developer 차단 회귀
 - [x] must-change/inactive/revoked/upload-only 차단
-- [x] KST 제출창, CAS version, Idempotency-Key 계약 유지
+- [x] KST 현재/다음 주 any-day 직접 제출·변경, 일요일 primary reminder, CAS version, Idempotency-Key 계약 유지
 - [x] OpenAPI/Swagger/codegen 갱신
 - [x] Edge Deno tests + required CI + 독립 리뷰 P0/P1=0
 - [x] `dev` 병합
@@ -319,8 +363,8 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
-| [x] | `GET /v1/assignments?serviceDate=...` | maid / admin | ✅ | ❌ | ✅ | ✅ | ⚠️ | production source 배포, hosted role read smoke 미확인 |
-| [x] | `GET /v1/assignments/{cleaningTargetId}/history` | maid / admin | ✅ | ❌ | ✅ | ✅ | ⚠️ | maid self revision 경계의 hosted smoke 미확인 |
+| [x] | `GET /v1/assignments?serviceDate=...` | maid / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | #213 카드 snapshot 계약 추가; production hosted card read smoke 미확인 |
+| [x] | `GET /v1/assignments/{cleaningTargetId}/history` | maid / admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | #213 과거 notified 객실 snapshot 보존; production hosted smoke 미확인 |
 | [x] | `POST /v1/assignments/drafts` | admin | ✅ | ❌ | ✅ | ✅ | ⚠️ | positive mutation fixture 미확인; notification/outbox/attempt 없음 |
 
 ### #25 source gate
@@ -330,6 +374,7 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 - [x] target row lock + assignmentVersion CAS + scoped request hash/idempotency 구현
 - [x] admin write, maid own read, developer/direct DML 차단 구현
 - [x] OpenAPI 3 operation·한글 연동 계약 반영
+- [x] #213 카드용 immutable target snapshot·이월·attempt/submission projection 및 Fastify parity
 - [x] local Edge/application/DB/concurrency 전체 검증
 - [x] feature PR 독립 보안/API 리뷰 P0/P1=0
 - [x] feature PR `dev` 병합 (`dev@c7e0b03` 기준)
@@ -393,6 +438,20 @@ PR #68 P1 보강: 예약 저장부터 `planned_cleaning_target_id`가 배정 계
 source OpenAPI는 49 paths / 53 operations이며 운영 39 / 43 snapshot은 변경하지 않았다.
 중단·인계(#7), PIN/Sheets(#69), 실제 push worker(#10)는 제외한다.
 
+### #264 담당 메이드 수행 불가 취소·일반 재배정 — source/dev 완료, production 미승격
+
+| Method / Path | 권한 | DB/RPC | Fastify | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|---|
+| `POST /v1/assignments/{cleaningTargetId}/unavailable-cancel` | active business admin | ✅ | ❌ | ✅ | ❌ | ❌ |
+
+- [x] exact target/assignment/선택적 attempt version CAS와 live session/password gate
+- [x] scheduled→`superseded`, in-progress→`interrupted`, assignment 종료, PIN/offline/limited 접근 회수
+- [x] 일반 target은 같은 identity로 미배정, 기존 메이드 earning 0, 관리자 재배정 알림
+- [x] `inspection_reclean`은 0원 target 이관 없이 원 유상 fee/template snapshot의 ordinary replacement target exactly-once
+- [x] immutable cancellation evidence, audit/developer projection, idempotency·경쟁·rollback 회귀
+- [x] PR #265 exact head CI와 QA 96/100, P0/P1/P2=0, `dev@1a282635...` 병합
+- [ ] release/main 승격, production 79번째 migration/API 배포, hosted admin mutation smoke
+
 ### #28 Attempt Activation — scheduler bundle 반영, lifecycle positive smoke 미확인
 
 #28은 public 업무 API를 추가하지 않는다. `reservation-scheduler`의 기존 secret/exact-admin 경계가
@@ -422,37 +481,42 @@ reservation-command → target → assignment 잠금 순서를 사용한다.
 OpenAPI operation은 추가하지 않아 source 49 paths / 53 operations를 유지한다. 실제 메이드 시작,
 중단·인계(#7), PIN(#69), 자동 배정(#29)은 포함하지 않는다.
 
-### #29 Assignment Preview — production source 반영, hosted smoke 미확인
+### #29/#231 Assignment Preview — 예상시간 폐기 production source 반영, hosted smoke 미확인
 
 PR #72는 `dev@8bdb5db2cd65359adca13e132959bcdf5f808324`에 병합됐다.
 source/dev 완료와 운영 배포는 별도 gate다.
 
 | Method / Path | 권한 | DB/RPC | Fastify | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|
-| `POST /v1/assignments/preview` | admin | ✅ | ❌ | ✅ | ✅ | ⚠️ |
-| `GET /v1/assignment-preview/duration-policy` | admin | ✅ | ❌ | ✅ | ✅ | ⚠️ |
-| `POST /v1/assignment-preview/duration-policy` | admin | ✅ | ❌ | ✅ | ✅ | ⚠️ |
+| `POST /v1/assignments/preview` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| `GET /v1/assignment-preview/duration-policy` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| `POST /v1/assignment-preview/duration-policy` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 
-- [x] confirmed versioned duration 정책 / 데모·fallback·confirmed seed 없음
-- [x] STABLE snapshot + 순수 bounded optimizer / 기존 고정 부하와 reclean 원 maid 보존
-- [x] count → fee spread/deviation → route → seed 최종 동률 비교
-- [x] 오늘/내일·source schedule·actual interval 재검증 / fingerprint와 expected versions
+- [x] 과거 duration 정책·template snapshot·audit 보존 / 신규 confirm 차단 / confirmed 0건 허용
+- [x] STABLE snapshot + 순수 bounded optimizer / 기존 고정 부하와 수행 가능한 reclean 원 maid 보존; #264 수행 불가 취소 후 ordinary replacement 포함
+- [x] assignable count → fee spread/deviation·기존/reclean 제약 → route → 결정적 동률 비교
+- [x] 오늘/내일·명시된 source schedule/interval 재검증 / fingerprint와 expected versions
+- [x] Fastify 3개 경로 / 동일 optimizer / active admin·session·password gate / 오류 redaction
 - [x] 한국어 OpenAPI / safe duration policy 감사 / Python developer filtered generated contract
-- [x] local fresh 25 migrations·DB/RLS 575건(Preview 65건)·동시성·Edge 84건·application 122건·Python 34건·package source 검증
+- [x] local fresh migration 1~75·Preview SQL 회귀·Edge 273건·application 490건·package source 검증
 - [x] PR #72 exact head GitHub application / migration PASS
 - [x] #29 독립 보안/API 리뷰 P0/P1=0
 - [x] #29 PR #72 `dev` 병합
 - [x] release/main 후 production migration·Edge source 반영
-- [ ] 역할별 hosted smoke 및 운영 소요시간 별도 확정
+- [x] #231 release/main·production migration/Edge 승격
+- [ ] 역할별 hosted Preview smoke
 
-신규 migration은 `20260907143843_assignment_preview_duration_policy.sql` 하나이며 기존
-24개는 변경하지 않는다. Source OpenAPI는 51 paths / 56 operations, production은 계속
-39 paths / 43 operations다. 성공 Preview의 assignment/attempt/알림/outbox/audit/receipt write는
-0이며, 설정 확정 POST만 별도 audit/receipt를 기록한다. `55/65/70/80`분은 운영값이 아니다.
-정책 미확정은 409 / `decisionReady=false` / 빈 제안이다. 상세 한계는
+초기 migration은 `20260907143843_assignment_preview_duration_policy.sql`, #231 전환은 기존 73개를
+고치지 않는 `20260920094931_retire_assignment_duration_policy.sql`이다. Source OpenAPI operation 수는
+유지되며 production도 duration 없는 Preview와 deprecated read-only GET, 410 retired POST 계약을 사용한다.
+Fastify rollback adapter도 같은 3개 경로와 순수 optimizer를 사용한다. 초기 source 이력은
+51 paths / 56 operations, 당시 production은 39 paths / 43 operations였다. 현재 production 수치는
+§2의 0.5.1 / 128 / 138을 우선한다. 성공 Preview의 assignment/attempt/알림/outbox/audit/receipt write는
+0이며, 폐기된 설정 확정 POST도 policy/audit/receipt를 만들지 않는다. `55/65/70/80`분은 운영값이 아니다.
+정책 미확정은 정상 상태이며 `decisionReady=true`로 제안을 계산한다. 상세 한계는
 [Preview 계약](./ASSIGNMENT_PREVIEW.md)을 따른다. 자동 apply/notify/PIN/#7 실행은 포함하지 않는다.
 DB lint 오류 0, local Security Advisor WARN/ERROR 0이다. `notification_outbox`와 새 duration
-정책의 RLS/no-policy INFO 2건은 직접 접근을 막고 RPC만 허용하는 의도된 경계다.
+정책 이력의 RLS INFO는 직접 접근을 막고 deprecated read-only RPC만 허용하는 의도된 경계다.
 
 ### #4 Maid Assignment Visibility — production source 반영, hosted smoke 미확인
 
@@ -544,7 +608,7 @@ DB lint 오류 0, local Security Advisor WARN/ERROR 0이며 기존 RPC-only INFO
 일반 Auth active-only/RLS는 유지하며 기존 session과 회차·revision·action에 묶인 DB capability를
 전용 limited 경로에서 확인한다. 2시간 execution 및 최대24시간 evidence/submission grant는
 발급 시각·만료가 불변이다. 별도 로그인 credential이나 실제 사진/제출 API를 추가하지 않는다.
-인계 시 새 담당의 실제 source·점유·예약·현재 실행창을 재검증하고 reclean 원 maid 제약을 유지한다.
+인계 시 새 담당의 실제 source·점유·예약·현재 실행창을 재검증하고 reclean 원 maid 기본 제약을 유지한다. 퇴사·부상 등 수행 불가 예외는 명시적 취소 후 일반 재배정으로만 처리한다.
 
 - [x] 미착수 만료 해소·만료 진행 회차의 새 인계 일정 정책 승인
 - [x] lifecycle/limited RPC·Edge·OpenAPI 및 DB/RLS/경쟁 회귀 완료
@@ -597,7 +661,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 
 ## 13. 후속 업무 API·모델 개발 상태
 
-아래는 v0.2.0 이후 업무 기능의 통합 이력이다. GitHub source는 §2의 `main@6604b22`를 따르며 production runtime은 55 migrations / 109 paths / 117 operations를 유지한다. hosted positive smoke와 provider activation은 별도 상태다.
+아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production runtime 반영 여부는 §2의 78 migrations, `api` ACTIVE v24, OpenAPI 0.5.1 128 paths / 138 operations를 따른다. 공개 GitHub Pages도 이 배포본의 0.5.1 / 128 / 138 artifact parity와 readback을 완료했다. 현재 Git `main@10a1f81...`의 #256 사진 정규화와 `dev@1a28263...`의 #250/#264 배정 후속은 운영 Edge/Pages·실기기/hosted UAT가 남아 있으며, source 통합을 production 사용 완료로 확대하지 않는다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|
@@ -615,7 +679,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | Google Drive 업로드·조회 | production source 반영 | #9 / #84 | OAuth·Google hosted positive smoke 미완료 |
 | [x] | 7일 영구삭제·orphan 운영 worker | production bundle 반영 | #9 / #85 / PR #90 | provider/Cron hosted purge activation 미완료 |
 | [x] | 제출·검수·재청소 | production source 반영 | #31 / PR #91 | hosted role/positive mutation smoke 미확인 |
-| [x] | 검수 대기열 pagination·응답 상한 | source 계약 | #170 | 57 migrations / 109 paths / 117 operations; production 승격·hosted admin read smoke 미확인 |
+| [x] | 검수 대기열 pagination·응답 상한 | source 계약 | #170 | 80 migrations / OpenAPI 0.5.1 129 paths / 139 operations; production 승격·hosted admin read smoke 미확인 |
 | [x] | earning/payroll 주차 조회·PAYING 시작 | production source 반영 | #8 / #93 / PR #95 | hosted role/positive mutation smoke 미확인 |
 | [x] | payroll pagination·응답 크기 상한 | production source 반영 | #96 / PR #97 | hosted role read/mutation smoke 미확인; 비차단 P2 2건 후속 |
 | [x] | complaint·appeal·correction | production source 반영 | #8 / #94 / #100 / PR #104 | hosted role/positive mutation smoke 미확인 |
@@ -627,12 +691,13 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | encrypted Web Push subscription revision ledger/API | production source 반영 | #10 / #110 / PR #115 | provider/실기기 activation 미완료 |
 | [x] | notification delivery ledger·provider-neutral worker | production bundle 반영 | #10 / #111 / PR #116 | zero-byte 503 fail-closed 확인; provider/invoke/Cron 비활성 |
 | [x] | claim/resume 교차 동시성 회귀 | source/dev 완료 | #10 / #117 | 기능·migration 변경 없이 실제 RPC Promise.all 경합 고정; `dev@cc15f47a74959943cf72a95e69da278243020f15` |
-| [x] | VAPID/provider HTTP source 계약 | source/dev 완료 | #10 / #112 / PR #119 | 45 migrations / 98 paths / 105 operations; 승인 head `eb243c54ebf24cd932d70cb1c6423fa4f319c050`, `dev@dfc98b1474f9f890851d49bd904869181d0d7880`; Issue #112 OPEN, Cron/Vault/production hosted 활성화 미완료 |
-| [x] | 배정 변경·취소 및 청소 완료 알림 coverage | source/dev 완료 | #128 | base 48 migrations / 98 paths / 105 operations; informational push/action 분리, active-admin completion fanout, exact notified replan/revocation provenance; production 미승격·미사용 |
-| [x] | encrypted room PIN Phase A | production source 반영 | #69 / #131 | physical change/reveal/authoritative access lease; hosted role/positive mutation smoke 미확인 |
+| [x] | VAPID/provider HTTP source 계약 | production source 반영 | #10 / #112 / PR #119 | Issue #112 OPEN, Cron/Vault/provider/실기기 활성화 미완료 |
+| [x] | 배정 변경·취소 및 청소 완료 알림 coverage | production source 반영 | #128 | informational push/action 분리, active-admin completion fanout, exact notified replan/revocation provenance; provider 미활성 |
+| [x] | 담당 메이드 수행 불가 취소·일반 재배정 | source/dev 완료 | #264 / PR #265 | 일반 target 재사용, inspection reclean은 별도 유상 replacement; production migration/API·hosted smoke 미완료 |
+| [x] | encrypted room PIN Phase A | production source 반영 | #69 / #131 / #194 | physical change는 authoritative in-progress access lease, reveal은 durable notified assignment entitlement + 30초 lease; hosted role/positive mutation smoke 미확인 |
 | [x] | Google Sheets PIN projection worker Phase B | production bundle 반영 | #69 / #136 / PR #138 | `room-pin-sheet-sync` source 배포; hosted target/secret/ACL/Google/Cron activation 미완료 |
-| [x] | PIN Sheet 안전 상태·full resync Phase C | source/dev 완료 | #69 / #137 | 51 migrations / 104 paths / 111 operations; exact target digest, 121실 snapshot, singleton fence/CAS/audit; production activation은 Issue OPEN |
-| [x] | 초기 PIN bootstrap·예약 readiness 분리 | production source 반영 | #140 / PR #141 / PR #142 | 공통 nonce reservation 반영; production secret/hosted positive smoke 미확인 |
+| [x] | PIN Sheet 안전 상태·full resync Phase C | production source 반영 | #69 / #137 | exact target digest, 121실 snapshot, singleton fence/CAS/audit; Google target/secret/ACL/Cron activation은 Issue OPEN |
+| [~] | 초기 PIN 자동 생성·현장 확인 | production source 반영 | #169 | 73번째 append-only 및 API 배포 완료; 실제 bootstrap·물리 확인 mutation 미실행 |
 | [x] | 자동 checkout 후 퇴실 미진행 신고·관리자 재배정 | source/main·production bundle 반영 | #133 | 54 migrations / 108 paths / 115 operations; Issue #148/#152 production source에 포함, 전체 hosted positive mutation smoke는 별도 pending |
 | [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
@@ -686,10 +751,26 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 | [x] | `POST /v1/rooms/{roomId}/pin-changes/prepare` | active business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 | [x] | `POST /v1/rooms/{roomId}/pin-changes/{leaseId}/confirm` | preparing admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 | [x] | `POST /v1/rooms/{roomId}/pin-changes/{leaseId}/rollback` | preparing admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
-| [x] | `POST /v1/rooms/{roomId}/pin/reveal` | current notified maid + authoritative lease/session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| [x] | `POST /v1/rooms/{roomId}/pin/reveal` | current notified maid + durable assignment entitlement + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 
 Production `api` bundle에는 네 operation이 포함됐지만 PIN 원문이 필요한 hosted positive mutation을
 안전한 운영 fixture 없이 실행하지 않았으므로 현재 사용을 ✅로 올리지 않는다.
+
+### #194 assignment PIN entitlement — production source 반영, hosted smoke 대기
+
+- [x] 기존 63개 migration 불변 + 64번째 append-only migration
+- [x] exact typed delivery outbox와 같은 transaction에서 current/notified assignment entitlement grant
+- [x] `availableFrom` 전부터 field/upload/submission/inspection pending까지 durable authority 유지
+- [x] final approve/reject/cancel, 재배정/revision 교체, inactive/departed 최종 정리에서 atomic end/reveal revoke
+- [x] PIN rotation 시 current workflow + 이미 통보된 객실별 다음 근무일만 successor; 더 먼 미래·비활성화 진행/종료 actor 제외
+- [x] maid PIN 변경의 exact in-progress attempt + authoritative access lease 경계 유지
+- [x] 63→64 이력 보존/backfill, RLS, replay/rotation/account concurrency source 검증
+- [x] feature/dev 병합 및 exact-head independent QA
+- [x] release/main·production migration/API 배포
+- [ ] hosted role/PIN mutation smoke
+
+이 계약은 공개 path/operation 수를 늘리지 않고 OpenAPI `0.4.0`의 기존 PIN reveal 설명과 stable
+`PIN_ENTITLEMENT_REQUIRED` 오류를 정합화한다. 실제 PIN/Google provider 활성화는 별도다.
 
 ### #44 Phase A source gate
 
@@ -1062,6 +1143,22 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 완전한 사진 증빙으로 간주하지 않으며, #7 물리 완료에 사진 선행조건을 추가하지 않는다.
 후속 #83 / PR #86, #84 / PR #88, #85 / PR #90과 #31 / PR #91도 source/dev 완료했으며 현재 본선은 #8 earning/payroll 정산이다. #30 내부 모델 검증과 #84의 실제 decoder·HTTP adapter 합성 검증은 별개이며, 운영 Google 업로드/삭제 검증 완료로 표현하지 않는다.
 
+### #9 Stage 1 사진 retention v2 — production schema/API 반영, provider/Cron 대기
+
+- [x] 신규 63번째 append-only migration으로 policy/anchor/`retentionStartsAt`/`expiresAt`/`purgedAt`/`mediaAvailability` private 원장 추가
+- [x] pending inspection `expiresAt=NULL`, final approve/reject+168시간, complaint close·admin interruption/offline resolution+180일, true orphan uploadedAt+30일 계약 구현
+- [x] 기존 62 migrations와 PIN/사진/audit 이력 불변인 62→63 upgrade fixture 및 hash 보존 검증
+- [x] actual performer maid+admin content 권한, no-store, provider read 전후 재인가와 stable unavailable/expired/purged 오류
+- [x] claim/settle 직전 late binding 재검증, expiry 변경 시 stale fence 무효화, unchanged claim/retry/blocked 상태 보존
+- [x] provider DELETE 전 exact object/fence/claim/authoritative expiry permit 영구 기록과 공통 barrier 적용; permit 뒤 late binding 및 purged resurrection 차단
+- [x] current pointer가 이동한 historical decided submission도 자체 `decidedAt+168h`까지 active evidence로 보존하며 superseded pending은 final decision 전 무기한 보호
+- [x] Fastify/Edge/OpenAPI/Python 생성 계약에 permanent retention metadata와 승인된 source candidate version `0.4.0` 반영
+- [x] 독립 exact-head QA와 source/dev 병합
+- [x] release/main 및 production 63번째 migration/API 반영; 기존 `photo-purge` bundle 유지
+- [ ] 운영 Google provider/Cron hosted smoke
+
+`room_issue`는 실제 resolved entity anchor 검증은 있으나 현재 대응 attachment source가 없어 schema-ready policy enum일 뿐이다. complaint closed event, admin interruption handover, server-owned offline resolution anchor는 실제 domain row로 검증한다. Issue/complaint/interruption/sync-conflict 종류를 attachment API/hosted 완료로 과대평가하지 않는다. schema/API 반영은 Google provider/Cron purge 활성화 완료를 뜻하지 않는다.
+
 ### #83 사진 업로드 작업 원장 — production schema 반영, provider smoke 미확인
 
 개발 시작 기준(당시 base)은 `dev@b7cf567238d162a80841c4dcbca94fc23ee82a01`이고,
@@ -1101,6 +1198,8 @@ production migration/Edge/사용 가능 상태와 OpenAPI 39 paths / 43 operatio
 |---|---|---|---|---|---|
 | `GET /v1/attempts/{attemptId}/photo-slots` | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 | `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload` | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}/upload` | ✅ | ✅ | ✅ | ❌ | source 후보 |
+| `DELETE /v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}` | ✅ | ✅ | ✅ | ❌ | source 후보 |
 | `GET /v1/photo-uploads/{operationId}` | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 | `GET /v1/photos/{photoId}/content` | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 
@@ -1142,11 +1241,16 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
 | [x] | `POST /v1/rooms/pins/bootstrap` | active password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 반영; secret과 positive bootstrap smoke 미확인 |
+| [~] | `POST /v1/rooms/{roomId}/pin/generated/confirm` | active password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | v0.4.0 production source 포함; 실제 PIN bootstrap·물리 확인 mutation 미실행 |
 
 - [x] 예약 생성·변경·객실 projection에서 `unconfigured`/`mismatch` PIN 경고를 allocation blocker와 분리
 - [x] actual check-in preparation context와 reveal/change의 verified-only fail-closed 유지
 - [x] active admin 전용 `POST /v1/rooms/pins/bootstrap`, 최대 25건, idempotent receipt, 기존 current/mismatch 비덮어쓰기
-- [x] 초기 숫자는 `ROOM_PIN_INITIAL_DIGITS` deployment secret에서만 읽고 DB에는 encrypted envelope만 전달
+- [x] #169 candidate에서 고정 초기 PIN secret을 제거하고 CSPRNG batch-unique 4자리 자동 생성으로 교체
+- [x] 생성 직후 mismatch/no Sheet, admin 30초 no-store reveal, 현장 확인 후 verified/Sheet outbox 계약 추가
+- [x] `POST /v1/rooms/{roomId}/pin/generated/confirm` 추가; 최신 dev 통합 candidate는 73 migrations / 120 paths / 130 operations
+- [x] 최초 #169 exact source에서 application 409, Edge 244, DB 47 files / 2,692 assertions, 전체 concurrency, fresh 57 migrations reset·build·typecheck·lint·secret scan PASS
+- [x] `release/v0.4.0` 통합 candidate의 fresh 73 migrations·production 56→73 누적 upgrade·전체 application/Edge/Python/DB·동시성 로컬 재검증 PASS
 - [x] Fastify/Edge/OpenAPI 및 frontend handoff 계약 정합화; legacy `pin-sync-events` deprecated
 - [x] 최신 `dev` 병합 후 fresh local DB reset, 43 SQL files / 2,536 assertions, 전체 concurrency, DB lint, Edge 226 tests·bundle gate PASS
 - [x] PR #141 exact-head required `application` / `migration` PASS와 `dev@322eb363ae9fe6d3f4a497437e4d38f7e3694578` 병합
@@ -1178,30 +1282,259 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `dev` 통합과 v0.3.0 source/main·production 54 migrations·5 Edge bundle·OpenAPI 108/115 반영
 - [ ] annotated `v0.3.0` tag/GitHub Release와 남은 hosted role·mutation/provider/Google activation smoke
 
-### #156/#165 퇴실 청소 템플릿 운영 게시 — API production 배포, 운영 template 미게시
+### #156/#165 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|---|
-| [x] | `GET /v1/cleaning-templates?cleaningKind=checkout` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ❌ |
-| [x] | `POST /v1/cleaning-templates` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ❌ |
+| [x] | `GET /v1/cleaning-templates?cleaningKind=checkout` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ✅ |
+| [x] | `POST /v1/cleaning-templates` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 - [x] 네 stable `roomTypeCode`를 한 번에 조회하며 미설정은 `configured=false/currentPublished=null/expectedVersion=0`으로 명시하고 fallback·seed를 만들지 않음
 - [x] 한 객실 타입씩 `expectedVersion` CAS와 actor/command/key/request-hash scoped idempotency로 새 immutable version 게시
-- [x] 첫 version은 `greatest(existing max + 1, 7)`, 이후 단조 증가; 기존 published는 retired로 보존하고 타입/kind별 published exactly-one 유지
-- [x] checkout 슬롯은 10/11/13/15개, 필수 총수-1, required `tv-on` 1개, 연속 순서·중복·문자열 경계를 DB/Fastify/Edge에서 검증
+- [x] 새 publication은 `greatest(existing max + 1, 8)`, 이후 단조 증가; 기존 pre-A v7+ published는 retired 이력과 frozen snapshot으로 보존하고 타입/kind별 published exactly-one 유지
+- [x] `maxPhotos` 없는 pre-A checkout은 version 8 이상도 10/11/13/15개로 계속 검증하고, 모든 slot에 metadata가 있는 v8+ A-contract는 9/10/12/14개, 필수 8/9/11/13개, required `tv-on`·`entry-storage`, 마지막 optional `extra-proof(maxPhotos=10)`, `entry-number` 금지와 연속 순서·중복·문자열 경계를 DB/Fastify/Edge에서 검증
 - [x] raw template Data API DML/SELECT 차단, service-only RPC에서 최신 actor/session/password/role 재검증
 - [x] audit은 `roomTypeCode`, `cleaningKind`, `version`, `durationMinutes`, `slotCount`만 저장·노출; 게시 자체는 수신자 행동이 없어 notification/outbox 미생성
 - [x] 예약 전 409 fail-closed를 유지하고 게시 뒤 예약당 planned target 1건과 불변 template/slot snapshot 생성
 - [x] `publishedAt`/`createdAt` DB projection은 Fastify/Edge 모두 실제 달력·시간·offset을 검사하는 strict RFC 3339로 fail-closed
 - [x] PR #157 exact-head 독립 QA·required GitHub `application` / `migration` PASS 및 `dev@897c4b845c657401873a08136bd31f351fdb04a8` 병합
-- [x] #156 main·production 55번째 migration/API Edge 배포 — 네 타입 게시와 예약 success smoke는 미완료
+- [x] #156 main·production 55번째 migration/API Edge 배포
 - [x] #165 checkout `durationMinutes` 선택화 source 구현: 56번째 append-only migration, 기존 값 보존, 미확정 시간·1분 종료 추정 금지, 계획과 동일 객실 실행 충돌 분리
-- [x] #165 exact head required GitHub `application` / `migration` PASS와 독립 QA P0/P1=0·90점 이상
-- [x] #165 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` hotfix squash 병합 — 승인·병합 tree 동일
+- [x] #165 최종 exact head required GitHub `application` / `migration` PASS, 독립 QA P0/P1=0·90점 이상 및 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb` 병합
 - [x] PR #167로 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`에 squash 역반영 — QA 97/100, P0/P1=0, required CI PASS, 승인·병합 tree 동일
-- [ ] production 56번째 migration/API 재배포, 네 타입 slot-only 게시, 예약 success hosted smoke
+- [x] production 56번째 `cleaning_template_duration_optional` migration 적용과 기존 55개 원장 보존 확인
+- [x] 승인된 v0.3.0 `main` exact source의 `api` ACTIVE v16 배포, health/OpenAPI 200
+- [x] 네 타입 checkout template v7 exactly-one 게시 — 슬롯 10/11/13/15, `durationMinutes=null`, audit 4건, notification/outbox 0건
+- [x] 운영 OpenAPI와 GitHub Pages 0.3.0 / 109 / 117 parity — workflow run `35051144073`
+- [ ] 예약 success hosted smoke — `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`; 임의 운영 예약을 만들지 않음
+- [x] #179 Decision A source/dev 완료: 57번째 append-only migration, pre-A v7+ 이력 보존, v8 A-contract 슬롯 수·key·`maxPhotos` DB/Fastify/Edge/OpenAPI parity — `dev@3587761b12d97c977bf874ab5e9ac0db1b971ab4`
+- [x] #179 exact-head 독립 QA·required CI·사람 리뷰와 `dev` 병합
+- [x] #180 `extra-proof` 0~10장 collection, stable item/order, append·replace·개별 삭제 CAS/멱등, 과거 제출 binding 불변, collection 폭탄방 증빙·bounded developer audit, 실제 병렬 transaction 경쟁 회귀, Node/Edge/OpenAPI parity
+- [x] #180 exact-head required CI·사람 리뷰와 `dev@0f58d4778523ea2a2e6dfe05a3aa8cb80bb0052e` 병합
+- [x] 승인된 v0.4.0 release의 production 57~73 migration/API 배포 — `main@80f9350...`, `api` ACTIVE v17, OpenAPI 0.4.0 / 120 / 130
+- [ ] 기존 v7→A template 신규 게시와 예약/객실이동·PIN success hosted smoke — 안전 fixture·별도 운영 승인 대기
 
-현재 critical path는 **production 56번째 migration/API 재배포 → 네 객실 타입 slot-only template 게시 → 예약 생성 hosted smoke → Issue #148의 남은 `v0.3.0` tag/GitHub Release**다.
+### #184 현재일 기준 객실 현황 projection — production source 배포, hosted 역할 검증 대기
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | v0.4.0 production source 포함; 최신 역할별 hosted read 미실행 |
+| [x] | `GET /v1/rooms/{roomId}` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | 목록과 동일한 `evaluatedAt`/`reservationPhase` 계약; 최신 hosted read 미실행 |
+
+- [x] 미래 active 예약의 pending preparation obligation을 현재 `CLEANING_REQUIRED`로 오인하던 projection 수정
+- [x] 서버 snapshot 시각 `evaluatedAt`과 `[checkInAt, checkOutAt)` 기반 `reservationPhase=none|upcoming|current` 추가
+- [x] 미래 planned checkout은 현재 청소·배정 차단을 활성화하지 않고, 실제 checkout materialization 뒤에만 청소 필요로 전환
+- [x] Fastify/Edge/OpenAPI 계약 및 프런트 5단계 대표 mapper 문서화 — 공개 path/operation은 109/117 유지
+- [x] append-only `current_room_status_projection` migration과 future/current/checkout 경계 회귀 추가
+- [x] exact-head 독립 QA 98/100·P0/P1/P2=0과 required GitHub `application` / `migration` PASS
+- [x] `dev@fb50775289b14f16b27679af471e282504b5f5f6` 병합
+- [x] v0.4.0 production 57~73 migration/API 배포
+- [ ] hosted 예약·객실이동 회귀 확인
+- 프런트 카드·요약·필터 mapper/browser E2E는 프런트 담당 저장소에서 별도 진행한다.
+
+### #187 예약 임박 lifecycle projection Phase A — source/dev 완료
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | v0.4.0 production source 포함; lifecycle/readiness 최신 hosted read 미실행 |
+| [x] | `GET /v1/rooms/{roomId}` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | 목록과 동일한 lifecycle/readiness/next reservation projection |
+
+- [x] `serverTime === evaluatedAt` 단일 snapshot과 KST D-day/D+1/D+2 lifecycle 분류 추가
+- [x] `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus` 독립 축 및 next future reservation 요약 추가
+- [x] 청소-only 상태를 `BLOCKED`에서 제외하고, current check-in PIN 경고만 readiness 사유로 분리
+- [x] 병합 당시 기존 58 migrations 불변, 신규 append-only migration 및 SECURITY DEFINER fixed search path/execute revoke 적용; #180 병합 후 합산 정렬상 60번째
+- [x] route·stay/segment·room-change preview/commit·Python codegen 변경 없음
+- [x] local fresh DB reset·SQL 회귀 및 exact-head application/migration CI
+- [x] PR #188 / `dev@07a07fcc77907b7d229b8c0df5ce06973c85a01b` source/dev 병합
+- [x] v0.4.0 production migration/API 배포
+- [ ] 역할별 hosted read 및 프런트 mapper/browser E2E
+
+### #187 체크인 전 객실 변경 Phase B — source/dev 완료
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `POST /v1/reservations/{reservationId}/room-change/preview` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; 안전 fixture 기반 hosted preview 미실행 |
+| [x] | `POST /v1/reservations/{reservationId}/room-change` | 동일 + Idempotency-Key | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; hosted mutation 미실행 |
+
+- [x] Phase B 생성 시 기존 59 migrations 불변, 신규 `reservation_room_change_before_checkin` append-only migration; #180 병합 후 합산 정렬상 61번째
+- [x] generic PATCH/Data API/direct update의 `room_id` 변경을 전용 command 표식 없이는 fail-closed
+- [x] 예약 일정·고객·인원과 기존 planned target identity를 보존하고 private obligation/target만 원자 이동
+- [x] public/assigned/notified/attempt cleaning, active PIN lease, target block, interval overlap을 stable conflict로 차단
+- [x] safe `reservation.room_moved` 감사 projection; 고객명/PIN/request body/fingerprint와 self notification/outbox 없음
+- [x] #180 dev와 Phase B를 합친 candidate OpenAPI 113 paths / 121 operations와 ephemeral Python codegen 계약 추가; production 109/117은 미변경
+- [x] local fresh DB pgTAP·별도 세션 concurrency·application/migration 전체 검증
+- [x] Phase C DURING_STAY stay/segment 모델과 별도 승인 — PR #190 / `dev@1571565b9e361e890cba6502aa3acbf9a08816c3`
+- [x] v0.4.0 production 57~73 migration/API 배포
+- [ ] 안전 fixture 기반 hosted smoke
+
+현재 critical path는 **Issue #224 프런트 v0.4.0 인계 정본 → generated client 갱신과 lifecycle/bookability/room-move/청소관리 연결 → 사용자의 browser 기능 확인 → 안전 fixture가 승인되면 예약·객실 이동·PIN hosted mutation smoke → tag/GitHub Release**다.
+
+### #187 Phase C — DURING_STAY room move source/dev 완료
+
+- [x] 기존 61 migrations 불변, 신규 `reservation_during_stay_room_move` append-only migration 추가
+- [x] `reservation.room_id` 최초 입실 계약 이력 유지, current/final room은 bounded stay segment로 분리
+- [x] `serverNow <= effectiveAt < checkOutAt`, 동일 경계 source 종료/target 시작, segment exclusion/CAS/idempotency 적용
+- [x] 원 객실 segment checkout target exactly-once, 최종 checkout target은 마지막 예정 객실 유지
+- [x] 미래 source PIN cutoff는 effectiveAt 전 접근 유지·이후 authority/RLS 차단
+- [x] Fastify/Edge/OpenAPI/Python contract parity; 공개 API 수 113 paths / 121 operations 유지
+- [x] 61→62 upgrade, fresh 62 migration, 전체 DB/RLS·별도 세션 concurrency, Edge·application·Python local 검증 PASS
+- [x] exact head `6389d9d20d4d2d7c5aba2738e4db5a1394d2d05f` GitHub `application` / `migration` required CI PASS — run `35150261542`
+- [x] 독립 QA 99/100, P0/P1/P2=0/0/0 및 PR #190 `dev@1571565b9e361e890cba6502aa3acbf9a08816c3` 병합
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] 안전 fixture 기반 hosted smoke
+
+Phase C는 production source에 포함됐지만 안전 fixture 기반 hosted mutation은 별도다. source 배포만으로 현재 사용 ✅로 판정하지 않는다.
+
+### #196 예약 bookability preview·bounded calendar — source/dev 완료
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `POST /v1/reservations/bookability/preview` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; 최신 hosted 역할 검증 미실행 |
+| [x] | `GET /v1/reservations?from&to&roomId&cursor` | 동일 | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; bounded 계약 유지, 최신 hosted read 미실행 |
+
+- [x] 기존 64 migrations 불변, 65번째 append-only `reservation_bookability` migration과 range index/read RPC 2개 추가
+- [x] query 없는 기존 `GET /v1/reservations`의 `{reservations}` 응답 호환 유지; range query response만 `nextCursor`/`serverTime`을 additive하게 제공
+- [x] `intervalBookable`과 `checkInReady` 분리; PIN mismatch/unconfigured는 readiness만 변경하며 create/change의 최종 overlap authority 유지
+- [x] cursor는 신규 배포 secret 없이 기존 `RESERVATION_GUEST_NAME_PEPPER`에서 목적 분리한 HMAC key 사용; actor/from/to/roomId/sort/keyset scope와 tamper 검증
+- [x] room filter는 요청 범위와 겹친 stay segment history를 기준으로 cancelled/retired segment도 보존; preview overlap은 non-retired scheduled/active segment만 사용
+- [x] OpenAPI `0.4.0` 114 paths / 122 operations와 ephemeral Python generated contract 갱신
+- [x] local fresh 65 migration, 신규 pgTAP, Fastify/Edge contract 검증
+- [x] 전체 local application/DB/concurrency quality gate
+- [x] 독립 리뷰·required CI 및 `dev@3a3409bd38458796126fb5ea2590949c8b807985` 통합 완료
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] hosted read/mutation smoke
+
+#196은 production source에 포함됐지만 hosted 역할 검증은 별도다. preview 성공을 예약 확정으로 표시하지 않고 실제 생성·변경 409를 최종 판정으로 사용한다.
+
+### #200 장기 투숙·종료 미정 예약 — production source 반영
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `POST /v1/reservations/bookability/preview` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | `long_stay` nullable checkout source 배포; hosted preview 미실행 |
+| [x] | `POST /v1/reservations` | 동일 | ✅ | ✅ | ✅ | ✅ | ⚠️ | source 배포 완료; 안전 fixture 부재로 hosted mutation 미실행 |
+| [x] | `PATCH /v1/reservations/{reservationId}` | 동일 | ✅ | ✅ | ✅ | ✅ | ⚠️ | null→fixed만 허용하고 obligation/target exactly-once; hosted mutation 미실행 |
+| [x] | 기존 room-move / manual checkout / scheduler paths | 기존 exact role | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; hosted mutation 재검증 미실행 |
+
+- [x] 기존 65 migrations 불변, 66번째 append-only `long_stay_open_ended_reservations`
+- [x] 공개 API 면 114 paths / 122 operations 유지; reservation response에 `reservationType`, nullable `checkOutAt` additive 확장
+- [x] fresh 66 migrations와 실제 65→66 ledger 보존 검증
+- [x] open-ended future block, graph exactly-once, replay/CAS, manual/scheduled checkout, precheckin/during-stay move 회귀
+- [x] 종료 미정 long-stay의 bounded stayover 생성·배정·attempt 활성화·현장 시작 회귀
+- [x] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev` 병합
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] hosted mutation smoke
+
+#200은 production source에 포함됐고 #196 경로 수를 늘리지 않고 nullable 의미만 확장한다. 안전 fixture 기반 hosted mutation은 별도다.
+
+### #202 객실 타입 카탈로그 — source/dev 완료
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/room-types` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; 최신 hosted read 미실행 |
+
+- [x] 기존 66 migrations 불변, 67번째 append-only `room_type_catalog`에 실제 관리형 `version`과 app-owned projection 추가
+- [x] `id/code/displayName/baseCleaningFee/active/version/roomCount` camelCase 계약 및 Fastify/Edge/OpenAPI/Python parity
+- [x] 공개 API 후보 115 paths / 123 operations
+- [x] PR #203 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev@3f6db953a569f7ebe16adcc0326e2e59ff7768ea` 병합 — 67 migrations / 115 paths / 123 operations
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] hosted read smoke
+
+#202는 production source에 포함됐다. 비활성 타입을 목록에 포함하는 것은 새 선택 허용이 아니며 최신 hosted read는 별도다.
+
+### #204 최근 7일 청소 완료 이력 — source/dev 완료
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/cleaning-history` | active/password-complete admin·maid + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; admin/maid hosted read 미실행 |
+
+- [x] 기존 67 migrations 불변, 68번째 append-only `cleaning_history_projection`
+- [x] admin 전체/maidProfileId/query와 maid self-only bounded projection
+- [x] attempt의 불변 객실 번호·타입 snapshot만 사용; 수행자 표시명은 현재 profile label임을 계약에 명시
+- [x] PIN·guest PII·사진 locator/content 비노출, 사진은 count/availability/expiry metadata만 반환
+- [x] Fastify/Edge/OpenAPI 및 ephemeral Python business codegen parity
+- [x] 공개 API 후보 116 paths / 124 operations
+- [x] PR #205 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev@c12c773d1ba427254fdd36faeede54c0c844a7c5` 병합 — 68 migrations / 116 paths / 124 operations
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] hosted read smoke
+
+#204는 production source에 포함됐다. 완료 이력은 실제 `fieldCompletedAt`만 포함하고 현재 객실 master-data로 과거 표시를 보정하지 않는다. hosted read는 별도다.
+
+### #206 주간 업무 기록 — source/dev 완료
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/work-history` | active/password-complete admin·maid + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; admin/maid hosted read 미실행 |
+
+- [x] 기존 68 migrations 불변, 69번째 append-only `weekly_work_history_projection`
+- [x] current availability, immutable notified assignment history, `fieldCompletedAt` KST 날짜를 독립 집계
+- [x] 같은 메이드·날짜 다중 작업 1일 dedupe, 전체 필터 summary와 bounded opaque cursor
+- [x] 메이드별 availability `submittedAt/currentVersion/versionCount`와 월~일 flags
+- [x] 표시명은 현재 profile label임을 계약에 명시; Fastify/Edge/OpenAPI parity
+- [x] 공개 API 후보 117 paths / 125 operations
+- [x] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev@12f51b131fa6f616d204ef3bee814dae02cd337d` 병합 — 69 migrations / 117 paths / 125 operations
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] hosted read smoke
+
+#206은 production source에 포함됐다. 통보·가능일을 실제 완료로 해석하지 않고, 객실/작업 상세는 #204를 사용한다. hosted read는 별도다.
+
+### #210 객실 운영 차단·이슈 조회 — production source 반영
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms/{roomId}/operation-blocks?status=actionable` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; hosted read 미실행 |
+| [x] | `GET /v1/rooms/{roomId}/issues?status=open` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; hosted read 미실행 |
+
+- [x] 기존 69 migrations 불변, 70번째 append-only `room_operations_read`
+- [x] 새 세션에서 조회한 entity ID와 `roomStateVersion`으로 기존 release/resolve mutation 연결
+- [x] PIN·guest PII·raw audit state를 포함하지 않는 app-owned projection
+- [x] Fastify/Edge/OpenAPI parity, 공개 API 후보 117 paths / 127 operations
+- [x] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev` 병합
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] hosted read smoke
+
+#210은 production source에 포함됐다. `actionable`은 아직 release되지 않아 운영자가 처리할 수 있는 차단을 뜻하며, 시간이 지난 차단도 `expired`로 남아 명시적 release 대상이다. hosted read는 별도다.
+
+### #215 객실 이벤트 타임라인 — production source 반영
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms/{roomId}/events?limit=30` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; hosted read 미실행 |
+
+- [x] 기존 70 migrations 불변, 71번째 append-only `room_event_timeline`
+- [x] 새 테이블·backfill·index 없이 기존 두 immutable 원장의 safe projection
+- [x] 다른 객실 격리, command replay 중복 0, 최대 50건, unknown room 404 SQL 회귀
+- [x] PIN·guest PII·raw audit before/after·request hash 비노출
+- [x] Fastify/Edge/OpenAPI parity, 공개 API 후보 118 paths / 128 operations
+- [x] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev` 병합
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] hosted read smoke
+
+#215는 production source에 포함됐다. 청소·근무 이력 합산과 cursor·기간 통계는 이 endpoint에 포함하지 않으며 hosted read는 별도다.
+
+### #217 주급 주기 stable-ID 조회 — production source 반영
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/payroll/{cycleId}` | active/password-complete admin·maid + live session | ✅ | ✅ | ✅ | ✅ | ⚠️ | production source 포함; admin/maid hosted read 미실행 |
+
+- [x] 기존 71 migrations 불변, 72번째 append-only `payroll_cycle_resolver`
+- [x] 기존 `PayrollCycleEnvelope`와 bounded projector 재사용, conceptual OPEN 제외
+- [x] PAYING/CHECK/PAID/offset-settled projection parity와 stable 404
+- [x] `Cache-Control: no-store`, UTF-8 JSON 128 KiB 상한, read side effect 0
+- [x] Fastify/Edge/OpenAPI/Python 생성 계약 정합화, 공개 API 후보 119 paths / 129 operations
+- [x] 독립 리뷰 P0/P1=0 및 exact-head `application`/`migration` PASS
+- [x] `dev` 병합
+- [x] v0.4.0 release/main 및 production migration/API 배포
+- [ ] hosted read smoke
+
+#217은 production source에 포함됐다. 지급 mutation, complaint, cursor 계약을 변경하지 않으며 hosted read는 별도다.
+
 Issue #112/#137의 provider·Google·Cron activation은 source bundle 배포와 분리한다. #12 Backup/Recovery는 병행하고, #13 frontend/generated client/browser E2E는 운영·프런트 정본 대조 뒤 진행한다.
 #44 Python Windows artifact·Phase B/C는 별도 운영도구 트랙으로 유지한다.
 최신 사용자 위임에 따라 독립 QA·required CI·in-scope P0/P1=0 등 hard gate를 모두 통과하고
@@ -1252,6 +1585,7 @@ Swagger/OpenAPI에 표시된 operation 수와 이 문서의 **Production Edge �
 - Assignment Core: #25
 - `docs/AI_BACKEND_PRODUCT_GUIDE.md`
 - `docs/FRONTEND_API_INTEGRATION.md`
+- `docs/FRONTEND_CODEX_HANDOFF_V0.4.0.md`
 - `docs/DEVELOPER_OPERATIONS_API.md`
 - `docs/EDGE_RUNTIME_POC.md`
 - `docs/RELEASE_V0.2.0.md`

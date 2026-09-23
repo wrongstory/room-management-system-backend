@@ -74,6 +74,38 @@ function service(rpc: ReturnType<typeof vi.fn>): SupabasePayrollService {
 }
 
 describe('payroll pagination service', () => {
+  it('resolves a materialized cycle by ID through the bounded projection RPC', async () => {
+    const cycleId = '40000000-0000-4000-8000-000000000001';
+    const rpc = vi.fn(async () => ({
+      data: { ...projection, cycleId, status: 'paid', version: 3, lockedAmount: 325000,
+        paymentStartedAt: '2026-09-01T00:00:00Z', paidAt: '2026-09-01T00:01:00Z' },
+      error: null
+    }));
+    const result = await service(rpc).get(admin, cycleId);
+
+    expect(result).toMatchObject({ cycleId, status: 'paid', version: 3 });
+    expect(rpc).toHaveBeenCalledWith('get_payroll_cycle', {
+      p_actor_profile_id: admin.profileId,
+      p_cycle_id: cycleId
+    });
+  });
+
+  it('preserves PAYING, CHECK, PAID and offset-settled cycle states', () => {
+    const cycleId = '40000000-0000-4000-8000-000000000001';
+    for (const candidate of [
+      { status: 'paying', version: 1, lockedAmount: 325000, offsetSettled: false,
+        paymentStartedAt: '2026-09-01T00:00:00Z', checkReasonCode: null, paidAt: null },
+      { status: 'check', version: 2, lockedAmount: 325000, offsetSettled: false,
+        paymentStartedAt: '2026-09-01T00:00:00Z', checkReasonCode: 'TRANSFER_RESULT_UNCERTAIN', paidAt: null },
+      { status: 'paid', version: 3, lockedAmount: 325000, offsetSettled: false,
+        paymentStartedAt: '2026-09-01T00:00:00Z', checkReasonCode: null,
+        paidAt: '2026-09-01T00:01:00Z' },
+      { status: 'open', version: 1, lockedAmount: null, offsetSettled: true,
+        paymentStartedAt: null, checkReasonCode: null, paidAt: null }
+    ] as const) {
+      expect(toPayrollCycle({ ...projection, cycleId, ...candidate })).toMatchObject(candidate);
+    }
+  });
   it('lists a bounded conceptual OPEN page and emits opaque continuations', async () => {
     const rpc = vi.fn(async () => ({
       data: {

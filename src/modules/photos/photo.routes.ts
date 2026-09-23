@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
-import { PhotoError, initializePhotoDecoder } from './photo-binary.js';
+import { PhotoError, PHOTO_INPUT_MAX_BYTES, initializePhotoDecoder } from './photo-binary.js';
 import { GoogleDriveProvider } from './google-drive.js';
 import { PhotoService, photoError, photoRoute, type PhotoIdentity } from './photo-service.js';
 
@@ -72,11 +72,13 @@ export function createPhotoRoutes(services: PhotoHttpServices): FastifyPluginAsy
     });
     const routes = [
       ['POST', '/v1/attempts/:attemptId/photo-slots/:slotId/upload'],
+      ['POST', '/v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId/upload'],
+      ['DELETE', '/v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId'],
       ['GET', '/v1/attempts/:attemptId/photo-slots'],
       ['GET', '/v1/photo-uploads/:operationId'],
       ['GET', '/v1/photos/:photoId/content']
     ] as const;
-    for (const [method, url] of routes) app.route({ method, url, bodyLimit: 307200, logLevel: 'silent',
+    for (const [method, url] of routes) app.route({ method, url, bodyLimit: method === 'POST' ? PHOTO_INPUT_MAX_BYTES : 307200, logLevel: 'silent',
       onRequest: async request => { identities.set(request, await services.authenticate(webRequest(request), url.endsWith('/content'))); },
       handler: async (request, reply) => {
         const web = webRequest(request, method === 'POST'), route = photoRoute(method, new URL(web.url).pathname), identity = identities.get(request);
@@ -86,7 +88,8 @@ export function createPhotoRoutes(services: PhotoHttpServices): FastifyPluginAsy
           result.headers.forEach((value, name) => { reply.header(name, value); });
           return reply.code(result.status).send(Buffer.from(await result.arrayBuffer()));
         }
-        const result = route.kind === 'upload' ? await services.service.upload(web, identity, route.attemptId, route.slotId)
+        const result = route.kind === 'upload' ? await services.service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
+          : route.kind === 'delete-item' ? await services.service.deleteItem(web, identity, route.attemptId, route.slotId, route.photoItemId)
           : route.kind === 'slots' ? await services.service.slots(web, identity, route.attemptId) : await services.service.status(web, identity, route.operationId);
         return reply.header('cache-control', 'no-store').send(result);
       }

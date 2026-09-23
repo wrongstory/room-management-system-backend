@@ -18,14 +18,9 @@ Deno.test("preview exact routes: admin success is read-only, other roles denied 
             ? {
               serviceDate,
               planningAt: new Date().toISOString(),
-              durationPolicy: {
-                version: 1,
-                status: "confirmed",
-                standardMinutes: 30,
-                premiumMinutes: 40,
-                oceanPremiumMinutes: 50,
-                oceanFamilyMinutes: 60,
-              },
+              durationPolicy: null,
+              durationPolicyStatus: "retired",
+              durationPolicyRequired: false,
               maids: [],
               targets: [],
             }
@@ -54,30 +49,15 @@ Deno.test("preview exact routes: admin success is read-only, other roles denied 
     calls.join(",") === "get_assignment_preview_snapshot",
     "successful preview no ledger write RPC",
   );
-  const unavailable = await handleApiRequest(
-    request("POST", path, { serviceDate }),
-    {
-      ...dependencies,
-      createClients: () => ({
-        admin: {
-          rpc: () =>
-            Promise.resolve({
-              data: null,
-              error: {
-                message: "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
-              },
-            }),
-        },
-      } as unknown as EdgeClients),
-    },
+  const retired = await handleApiRequest(
+    request("POST", "/v1/assignment-preview/duration-policy", {}),
+    dependencies,
   );
-  const unavailableBody = await unavailable.json();
+  const retiredBody = await retired.json();
   assert(
-    unavailable.status === 409 && unavailableBody.decisionReady === false &&
-      unavailableBody.proposedAssignments.length === 0 &&
-      unavailableBody.error.code ===
-        "ASSIGNMENT_PREVIEW_DURATION_POLICY_UNCONFIRMED",
-    "HTTP unconfirmed fails closed without success proposals",
+    retired.status === 410 &&
+      retiredBody.error.code === "ASSIGNMENT_DURATION_POLICY_RETIRED",
+    "HTTP duration policy confirmation is retired",
   );
   for (const role of ["maid", "developer"] as const) {
     const res = await handleApiRequest(request("POST", path, { serviceDate }), {
@@ -128,11 +108,18 @@ Deno.test("cleaning template router exposes only exact checkout GET and POST rou
   const payload = btoa(JSON.stringify({ session_id: sessionId }))
     .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   const token = `e30.${payload}.signature`;
-  const slots = Array.from({ length: 10 }, (_, displayOrder) => ({
-    slotKey: displayOrder === 0 ? "tv-on" : `slot-${displayOrder}`,
+  const slots = Array.from({ length: 9 }, (_, displayOrder) => ({
+    slotKey: displayOrder === 0
+      ? "tv-on"
+      : displayOrder === 1
+      ? "entry-storage"
+      : displayOrder === 8
+      ? "extra-proof"
+      : `slot-${displayOrder}`,
     displayOrder,
-    required: displayOrder < 9,
+    required: displayOrder < 8,
     label: `사진 ${displayOrder + 1}`,
+    maxPhotos: displayOrder === 8 ? 10 : 1,
   }));
   const roomTypes = ["standard", "premium", "oceanPremium", "oceanFamily"].map(
     (roomTypeCode) => ({
@@ -146,7 +133,7 @@ Deno.test("cleaning template router exposes only exact checkout GET and POST rou
   );
   const published = {
     id: "30000000-0000-4000-8000-000000000001",
-    version: 7,
+    version: 8,
     status: "published",
     durationMinutes: 60,
     slots,
@@ -205,7 +192,7 @@ Deno.test("cleaning template router exposes only exact checkout GET and POST rou
     dependencies,
   );
   assert(
-    posted.status === 201 && (await posted.json()).template.version === 7,
+    posted.status === 201 && (await posted.json()).template.version === 8,
     "exact template publish POST is reachable",
   );
   for (
@@ -292,7 +279,7 @@ Deno.test("room PIN Edge route binds verified session, returns no-store safe sha
         body: JSON.stringify({
           pinDigits: "0012",
           expectedPinVersion: 0,
-          reasonCode: "ADMIN_INITIAL_PIN",
+          reasonCode: "ADMIN_PHYSICAL_CHANGE",
         }),
       },
     );
@@ -315,6 +302,10 @@ Deno.test("room PIN Edge route binds verified session, returns no-store safe sha
   assert(
     calls[1].args.p_room_number_snapshot === "0101",
     "room snapshot reaches prepare RPC",
+  );
+  assert(
+    calls[1].args.p_reason_code === "ADMIN_INITIAL_PIN",
+    "version-zero physical edit reaches the RPC as an initial registration",
   );
 
   denial = "ROOM_NUMBER_CHANGED: internal ciphertext detail";
@@ -601,9 +592,25 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             ? [{
               id: cleaningTargetId,
               room_id: roomId,
+              cleaning_kind: "checkout",
+              original_service_date: "2026-09-04",
+              effective_service_date: "2026-09-04",
+              carryover_count: 0,
+              status: "notified",
               assignment_version: 999,
+              room_type_snapshot: {
+                code: "standard",
+                name: "스탠다드 더블 로프트",
+                elevatorZone: "A",
+              },
+              fee_snapshot: 16000,
+              template_snapshot: { durationMinutes: null },
               rooms: { room_number: "101" },
             }]
+            : table === "cleaning_target_schedule_revisions"
+            ? []
+            : table === "cleaning_attempts" || table === "cleaning_submissions"
+            ? []
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
       rpc: () => Promise.resolve({ data: null, error: null }),
@@ -687,9 +694,26 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
                 ? [{
                   id: cleaningTargetId,
                   room_id: roomId,
+                  cleaning_kind: "checkout",
+                  original_service_date: "2026-09-04",
+                  effective_service_date: "2026-09-04",
+                  carryover_count: 0,
+                  status: "notified",
                   assignment_version: 999,
+                  room_type_snapshot: {
+                    code: "standard",
+                    name: "스탠다드 더블 로프트",
+                    elevatorZone: "A",
+                  },
+                  fee_snapshot: 16000,
+                  template_snapshot: { durationMinutes: null },
                   rooms: { room_number: "101" },
                 }]
+                : table === "cleaning_target_schedule_revisions"
+                ? []
+                : table === "cleaning_attempts" ||
+                    table === "cleaning_submissions"
+                ? []
                 : [{ id: maid.profileId, display_name: "메이드" }, {
                   id: otherId,
                   display_name: "다른 메이드",
@@ -710,6 +734,7 @@ Deno.test("prestart routes dispatch only exact methods and reject developer capa
   const paths = [
     `/v1/assignments/${cleaningTargetId}/change`,
     `/v1/assignments/${cleaningTargetId}/unassign`,
+    `/v1/assignments/${cleaningTargetId}/unavailable-cancel`,
     `/v1/assignments/${cleaningTargetId}/cancellation-requests`,
     `/v1/assignment-change-requests/${assignmentId}/decision`,
   ];
@@ -740,6 +765,13 @@ Deno.test("prestart routes dispatch only exact methods and reject developer capa
         ? { maidProfileId: actor.profileId, sequenceNumber: 1 }
         : {}),
       ...(path.endsWith("/decision") ? { decision: "approved" } : {}),
+      ...(path.endsWith("/unavailable-cancel")
+        ? {
+          expectedAttemptId: null,
+          expectedExecutionVersion: null,
+          reasonCode: "MAID_UNAVAILABLE",
+        }
+        : {}),
     };
     const response = await handleApiRequest(request("POST", path, body), deps);
     assert(
@@ -762,8 +794,8 @@ Deno.test("prestart routes dispatch only exact methods and reject developer capa
     assert(forbidden.status === 403, "developer forbidden");
   }
   assert(
-    calls.filter((name) => name !== "record_authorization_denial").length === 4,
-    "only four exact mutations invoked",
+    calls.filter((name) => name !== "record_authorization_denial").length === 5,
+    "only five exact mutations invoked",
   );
 });
 const roomRow = {
@@ -788,8 +820,86 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
     admin: {
       async rpc(name: string, args: Record<string, unknown>) {
         calls.push(name);
+        if (name === "list_room_type_catalog") {
+          return {
+            data: [{
+              id: roomTypeId,
+              code: "standard",
+              display_name: "스탠다드 더블 로프트",
+              base_cleaning_fee: 16000,
+              base_occupancy: 2,
+              max_occupancy: 2,
+              active: true,
+              version: 1,
+              room_count: 22,
+            }],
+            error: null,
+          };
+        }
         if (name === "get_room_operational_projection") {
           return { data: [roomRow], error: null };
+        }
+        if (name === "list_room_operation_blocks") {
+          return {
+            data: {
+              roomId,
+              roomStateVersion: 3,
+              evaluatedAt: "2026-09-20T00:00:00Z",
+              items: [{
+                id: blockId,
+                reasonCode: "MAINTENANCE",
+                startsAt: "2026-09-19T00:00:00Z",
+                endsAt: null,
+                status: "active",
+                createdAt: "2026-09-19T00:00:00Z",
+              }],
+            },
+            error: null,
+          };
+        }
+        if (name === "list_room_issues") {
+          return {
+            data: {
+              roomId,
+              roomStateVersion: 3,
+              evaluatedAt: "2026-09-20T00:00:00Z",
+              items: [{
+                id: issueId,
+                category: "FACILITY",
+                severity: "warning",
+                blocksGuestAssignment: true,
+                description: null,
+                status: "open",
+                reportedAt: "2026-09-19T00:00:00Z",
+              }],
+            },
+            error: null,
+          };
+        }
+        if (name === "list_room_events") {
+          return {
+            data: {
+              roomId,
+              roomStateVersion: 3,
+              evaluatedAt: "2026-09-20T00:00:00Z",
+              items: [{
+                id: "87000000-0000-4000-8000-000000000001",
+                eventKey: "room_command:87000000-0000-4000-8000-000000000001",
+                source: "room_command",
+                category: "room_candle",
+                eventType: "room.set_candle_count",
+                actorProfileId: actor.profileId,
+                actorDisplayName: actor.displayName,
+                entityId: roomId,
+                reasonCode: "PHYSICAL_CHECK",
+                effectiveAt: "2026-09-19T00:00:00Z",
+                recordedAt: "2026-09-19T00:00:01Z",
+                reservationId: null,
+                summary: { count: 0 },
+              }],
+            },
+            error: null,
+          };
         }
         if (name === "change_room_master_data") {
           return { data: null, error: null };
@@ -843,14 +953,20 @@ function request(
   path: string,
   body?: Record<string, unknown>,
 ): Request {
+  const tokenPayload = btoa(JSON.stringify({
+    session_id: "70000000-0000-4000-8000-000000000001",
+  })).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   return new Request(`http://localhost/functions/v1/api${path}`, {
     method,
-    headers: body
-      ? {
-        "content-type": "application/json",
-        "idempotency-key": "room-route-regression-0001",
-      }
-      : undefined,
+    headers: {
+      authorization: `Bearer header.${tokenPayload}.signature`,
+      ...(body
+        ? {
+          "content-type": "application/json",
+          "idempotency-key": "room-route-regression-0001",
+        }
+        : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
 }
@@ -859,6 +975,48 @@ async function errorCode(response: Response): Promise<string | undefined> {
   const payload = await response.json() as { error?: { code?: string } };
   return payload.error?.code;
 }
+
+Deno.test("reservation bookability static route wins over reservation detail dispatch", async () => {
+  const calls: string[] = [];
+  const dependencies: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve(actor),
+    createClients: () => ({
+      admin: {
+        rpc(name: string) {
+          calls.push(name);
+          return Promise.resolve({
+            data: {
+              evaluated_at: "2026-09-17T00:00:00Z",
+              candidates: [],
+            },
+            error: null,
+          });
+        },
+      },
+    } as unknown as EdgeClients),
+  };
+  const response = await handleApiRequest(
+    request("POST", "/v1/reservations/bookability/preview", {
+      reservationType: "standard",
+      checkInAt: "2026-10-01T16:00:00+09:00",
+      checkOutAt: "2026-10-02T11:00:00+09:00",
+      guestCount: 2,
+      roomTypeIds: [],
+      excludeReservationId: null,
+    }),
+    dependencies,
+  );
+  const body = await response.json();
+  assert(response.status === 200, "static preview route is reachable");
+  assert(
+    body.preview.candidates.length === 0,
+    "empty candidate preview is valid",
+  );
+  assert(
+    calls.join(",") === "preview_reservation_bookability",
+    "preview path cannot fall through to reservation detail",
+  );
+});
 
 Deno.test("limited upload_only submission route uses capability auth and preserves stable denial responses", async () => {
   const attemptId = "93000000-0000-4000-8000-000000000001";
@@ -1050,6 +1208,18 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
     "admin list",
   );
 
+  const cycleId = "96000000-0000-4000-8000-000000000001";
+  const detail = await handleApiRequest(
+    request("GET", `/v1/payroll/${cycleId}`),
+    dependencies,
+  );
+  assert(
+    detail.status === 200 &&
+      (await detail.json()).payroll.cycleId === cycleId &&
+      calls.at(-1)?.name === "get_payroll_cycle",
+    "admin detail uses exact resolver",
+  );
+
   const started = await handleApiRequest(
     request("POST", "/v1/payroll/start", {
       maidProfileId,
@@ -1092,6 +1262,11 @@ Deno.test("payroll exact routes preserve reader/admin roles, IDOR and denial act
     { ...dependencies, authenticateRequest: () => Promise.resolve(maidActor) },
   );
   assert(maidList.status === 200, "maid self list");
+  const maidDetail = await handleApiRequest(
+    request("GET", `/v1/payroll/${cycleId}`),
+    { ...dependencies, authenticateRequest: () => Promise.resolve(maidActor) },
+  );
+  assert(maidDetail.status === 200, "maid self detail");
   const deniedStart = await handleApiRequest(
     request("POST", "/v1/payroll/start", {
       maidProfileId,
@@ -1378,9 +1553,7 @@ Deno.test("complaint exact routes preserve admin commands, maid response, and bo
 Deno.test("Room GET detail route rejects every mutation-shaped alias", async () => {
   const forbiddenGetPaths = [
     `/v1/rooms/${roomId}/master-data`,
-    `/v1/rooms/${roomId}/operation-blocks`,
     `/v1/rooms/${roomId}/candles`,
-    `/v1/rooms/${roomId}/issues`,
     `/v1/rooms/${roomId}/pin-sync-events`,
     `/v1/rooms/${roomId}/operation-blocks/${blockId}/release`,
     `/v1/rooms/${roomId}/issues/${issueId}/resolve`,
@@ -1460,8 +1633,24 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
     status: number;
     body?: Record<string, unknown>;
   }> = [
+    { method: "GET", path: "/v1/room-types", status: 200 },
     { method: "GET", path: "/v1/rooms", status: 200 },
     { method: "GET", path: `/v1/rooms/${roomId}`, status: 200 },
+    {
+      method: "GET",
+      path: `/v1/rooms/${roomId}/operation-blocks?status=actionable`,
+      status: 200,
+    },
+    {
+      method: "GET",
+      path: `/v1/rooms/${roomId}/issues?status=open`,
+      status: 200,
+    },
+    {
+      method: "GET",
+      path: `/v1/rooms/${roomId}/events?limit=30`,
+      status: 200,
+    },
     {
       method: "PATCH",
       path: `/v1/rooms/${roomId}/master-data`,
@@ -1549,6 +1738,26 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
       calls.length > 0,
       `${route.method} ${route.path} must call a Room RPC`,
     );
+  }
+});
+
+Deno.test("room event route rejects non-canonical, out-of-range, and duplicate limits", async () => {
+  for (
+    const path of [
+      `/v1/rooms/${roomId}/events?limit=51`,
+      `/v1/rooms/${roomId}/events?limit=01`,
+      `/v1/rooms/${roomId}/events?limit=1.0`,
+      `/v1/rooms/${roomId}/events?limit=%2B1`,
+      `/v1/rooms/${roomId}/events?limit=10&limit=20`,
+    ]
+  ) {
+    const calls: string[] = [];
+    const response = await handleApiRequest(
+      request("GET", path),
+      routeDependencies(calls),
+    );
+    assert(response.status === 400, `${path} must fail validation`);
+    assert(calls.length === 0, "invalid limit must not call the DB");
   }
 });
 

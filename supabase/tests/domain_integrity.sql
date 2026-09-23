@@ -12,20 +12,21 @@ with checks(test_number, description, passed) as (
     ),
     (
       2,
-      'checkout obligation is unique per reservation',
+      'one live final checkout target is unique per reservation',
       exists (
         select 1 from pg_indexes
-        where schemaname = 'public' and indexname = 'cleaning_targets_one_checkout_per_reservation'
+        where schemaname = 'public' and indexname = 'cleaning_targets_one_final_checkout_per_reservation'
       )
     ),
     (
       3,
-      'cleaning target and reservation must reference the same room',
-      exists (
-        select 1 from pg_constraint
-        where conrelid = 'public.cleaning_targets'::regclass
-          and conname = 'cleaning_targets_reservation_room_fk'
-      )
+      'cleaning target room provenance is enforced by a deferred final-or-segment validator',
+      exists (select 1 from pg_trigger where tgrelid='public.cleaning_targets'::regclass
+        and tgname='cleaning_target_room_provenance_validate' and not tgisinternal)
+      and exists (select 1 from pg_constraint
+        where conrelid='public.cleaning_targets'::regclass
+          and conname='cleaning_targets_checkout_obligation_contract_fk'
+          and condeferrable and condeferred)
     ),
     (
       4,

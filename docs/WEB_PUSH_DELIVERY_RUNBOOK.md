@@ -3,6 +3,8 @@
 이 문서는 #112 source를 release/main 이후 실제 운영에 활성화할 때의 순서와 복구 경계를 고정한다.
 feature PR은 production, Vault, Cron, `pg_net`, Function Secrets를 변경하지 않는다.
 
+> 현재 상태(2026-09-23): 사용자가 실제 기기에서 Web Push 수신을 확인했다. 이는 device-visible UAT 완료 증거이며, secret 값·내부 heartbeat·dead-letter가 정상이라는 추정 근거로 대신 사용하지 않는다. 운영 내부 상태는 developer projection의 안전한 configured/health 값으로 별도 확인한다.
+
 ## 키와 secret 계약
 
 - `VAPID_PUBLIC_KEY`는 uncompressed P-256 raw point 65 bytes의 padding 없는 canonical base64url이다.

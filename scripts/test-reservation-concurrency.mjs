@@ -15,9 +15,12 @@ import { testNotifiedReplanConcurrency } from './test-notified-replan-concurrenc
 import { testPasswordChangeConcurrency } from './test-password-change-concurrency.mjs';
 import { testPayrollConcurrency } from './test-payroll-concurrency.mjs';
 import { testPhotoDriveQuotaConcurrency } from './test-photo-drive-quota-concurrency.mjs';
+import { testPhotoRetentionConcurrency } from './test-photo-retention-concurrency.mjs';
 import { testPhotoStorageOperationsConcurrency } from './test-photo-storage-operations-concurrency.mjs';
 import { testPhotoSubmissionConcurrency } from './test-photo-submission-concurrency.mjs';
 import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
+import { testReservationRoomMoveConcurrency } from './test-reservation-room-move-concurrency.mjs';
+import { testReservationLongStayConcurrency } from './test-reservation-long-stay-concurrency.mjs';
 import { testRoomPinBootstrapConcurrency } from './test-room-pin-bootstrap-concurrency.mjs';
 import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
 import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
@@ -187,10 +190,12 @@ const sessionPayload = JSON.parse(Buffer.from(
 assert(typeof sessionPayload.session_id === 'string', 'template publisher JWT session id');
 const templateSessionId = sessionPayload.session_id;
 const templateSlots = (count) => Array.from({ length: count }, (_, displayOrder) => ({
-  slotKey: displayOrder === 0 ? 'tv-on' : `slot-${displayOrder}`,
+  slotKey: displayOrder === 0 ? 'tv-on' : displayOrder === 1 ? 'entry-storage' :
+    displayOrder === count - 1 ? 'extra-proof' : `slot-${displayOrder}`,
   displayOrder,
   required: displayOrder < count - 1,
-  label: `동시성 사진 ${displayOrder + 1}`
+  label: `동시성 사진 ${displayOrder + 1}`,
+  maxPhotos: displayOrder === count - 1 ? 10 : 1
 }));
 const templatePublishArgs = (roomTypeCode, count, key, hash) => ({
   p_actor_profile_id: actorProfileId,
@@ -204,10 +209,10 @@ const templatePublishArgs = (roomTypeCode, count, key, hash) => ({
 });
 const standardPublishRace = await Promise.all([
   client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
-    'standard', 10, `template-standard-${randomUUID()}`, 'a'.repeat(64)
+    'standard', 9, `template-standard-${randomUUID()}`, 'a'.repeat(64)
   )),
   client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
-    'standard', 10, `template-standard-${randomUUID()}`, 'b'.repeat(64)
+    'standard', 9, `template-standard-${randomUUID()}`, 'b'.repeat(64)
   ))
 ]);
 assert(standardPublishRace.filter((result) => !result.error).length === 1,
@@ -216,13 +221,13 @@ assert(standardPublishRace.filter((result) => result.error).every((result) =>
   result.error.message === 'CLEANING_TEMPLATE_VERSION_CONFLICT'),
   'concurrent template CAS loser must fail with the stable stale-version error');
 for (const [roomTypeCode, count] of [
-  ['premium', 11], ['oceanPremium', 13], ['oceanFamily', 15]
+  ['premium', 10], ['oceanPremium', 12], ['oceanFamily', 14]
 ]) {
   const result = await client.rpc('publish_checkout_cleaning_template', templatePublishArgs(
     roomTypeCode, count, `template-${roomTypeCode}-${randomUUID()}`,
     createHash('sha256').update(`template-${roomTypeCode}-${randomUUID()}`).digest('hex')
   ));
-  assert(!result.error && result.data?.version === 7, `${roomTypeCode} checkout template publication`);
+  assert(!result.error && result.data?.version === 8, `${roomTypeCode} checkout template publication`);
 }
 const templateCatalog = await client.rpc('list_checkout_cleaning_templates', {
   p_actor_profile_id: actorProfileId, p_session_id: templateSessionId
@@ -230,6 +235,8 @@ const templateCatalog = await client.rpc('list_checkout_cleaning_templates', {
 assert(!templateCatalog.error && templateCatalog.data.roomTypes.length === 4 &&
   templateCatalog.data.roomTypes.every((roomType) => roomType.configured),
   'session-bound catalog confirms all four explicit template publications');
+
+await testReservationRoomMoveConcurrency(client, status, actorProfileId);
 
 const accountCandidateIds = [randomUUID(), randomUUID()];
 const accountDisplayName = `동시생성${randomUUID().slice(0, 8)}`;
@@ -476,6 +483,21 @@ const { data: roomAfterDuplicate, error: roomAfterDuplicateError } = await clien
 assert(!roomAfterDuplicateError && roomAfterDuplicate, 'room version after replay failed');
 
 const reservationIds = [randomUUID(), randomUUID()];
+const previewRaceResults = await Promise.all([0, 1].map(() => (
+  client.rpc('preview_reservation_bookability', {
+    p_actor_profile_id: actorProfileId,
+    p_check_in_at: '2035-01-01T07:00:00.000Z',
+    p_check_out_at: '2035-01-02T02:00:00.000Z',
+    p_guest_count: 2,
+    p_exclude_reservation_id: null,
+    p_room_type_ids: null
+  })
+)));
+assert(
+  previewRaceResults.every((result) => !result.error &&
+    result.data.candidates.find((candidate) => candidate.room_id === room.id)?.interval_bookable === true),
+  'both concurrent callers may observe the same non-authoritative bookability preview'
+);
 const createResults = await Promise.all(reservationIds.map((reservationId, index) => (
   client.rpc('create_reservation', {
     p_actor_profile_id: actorProfileId,
@@ -494,6 +516,87 @@ const createSuccesses = createResults.filter((result) => !result.error);
 const createFailures = createResults.filter((result) => result.error);
 assert(createSuccesses.length === 1, 'concurrent overlapping create must have exactly one winner');
 assert(createFailures.length === 1, 'concurrent overlapping create must reject exactly one loser');
+assert(
+  createFailures[0].error?.message?.includes('STALE_VERSION'),
+  'serialized concurrent loser must fail closed on room CAS'
+);
+const { data: roomAfterPreviewRace, error: roomAfterPreviewRaceError } = await client
+  .from('rooms')
+  .select('state_version')
+  .eq('id', room.id)
+  .single();
+assert(
+  !roomAfterPreviewRaceError && roomAfterPreviewRace,
+  'room version after preview race failed'
+);
+const losingReservationIndex = createResults.findIndex((result) => result.error);
+const overlapRetry = await client.rpc('create_reservation', {
+  p_actor_profile_id: actorProfileId,
+  p_reservation_id: reservationIds[losingReservationIndex],
+  p_room_id: room.id,
+  p_check_in_at: '2035-01-01T07:00:00.000Z',
+  p_check_out_at: '2035-01-02T02:00:00.000Z',
+  p_guest_count: 2,
+  p_guest_name_encrypted: null,
+  p_expected_room_version: roomAfterPreviewRace.state_version,
+  p_idempotency_key: `create-overlap-retry-${randomUUID()}`,
+  p_request_hash: 'd'.repeat(64)
+});
+assert(
+  overlapRetry.error?.message?.includes('RESERVATION_OVERLAP'),
+  'commit overlap authority must reject a fresh-version retry after preview race'
+);
+
+const sequentialPreview = await client.rpc('preview_reservation_bookability', {
+  p_actor_profile_id: actorProfileId,
+  p_check_in_at: '2037-01-01T07:00:00.000Z',
+  p_check_out_at: '2037-01-02T02:00:00.000Z',
+  p_guest_count: 2,
+  p_exclude_reservation_id: null,
+  p_room_type_ids: null
+});
+assert(!sequentialPreview.error &&
+  sequentialPreview.data.candidates.find((candidate) => candidate.room_id === room.id)?.interval_bookable === true,
+  'preview reports a future interval before the competing commit'
+);
+const competingCommit = await client.rpc('create_reservation', {
+  p_actor_profile_id: actorProfileId,
+  p_reservation_id: randomUUID(),
+  p_room_id: room.id,
+  p_check_in_at: '2037-01-01T07:00:00.000Z',
+  p_check_out_at: '2037-01-02T02:00:00.000Z',
+  p_guest_count: 2,
+  p_guest_name_encrypted: null,
+  p_expected_room_version: roomAfterPreviewRace.state_version,
+  p_idempotency_key: `preview-competitor-${randomUUID()}`,
+  p_request_hash: 'e'.repeat(64)
+});
+assert(!competingCommit.error, `preview competitor fixture failed: ${competingCommit.error?.message}`);
+const { data: roomAfterCompetingCommit, error: roomAfterCompetingCommitError } = await client
+  .from('rooms')
+  .select('state_version')
+  .eq('id', room.id)
+  .single();
+assert(
+  !roomAfterCompetingCommitError && roomAfterCompetingCommit,
+  'room version after competing preview commit failed'
+);
+const stalePreviewCommit = await client.rpc('create_reservation', {
+  p_actor_profile_id: actorProfileId,
+  p_reservation_id: randomUUID(),
+  p_room_id: room.id,
+  p_check_in_at: '2037-01-01T07:00:00.000Z',
+  p_check_out_at: '2037-01-02T02:00:00.000Z',
+  p_guest_count: 2,
+  p_guest_name_encrypted: null,
+  p_expected_room_version: roomAfterCompetingCommit.state_version,
+  p_idempotency_key: `preview-stale-${randomUUID()}`,
+  p_request_hash: 'f'.repeat(64)
+});
+assert(
+  stalePreviewCommit.error?.message?.includes('RESERVATION_OVERLAP'),
+  'a competing reservation after preview must make the later commit fail closed'
+);
 
 const winner = createSuccesses[0].data;
 const { error: checkInFixtureError } = await client
@@ -848,13 +951,15 @@ async function verifyPlanningRoom(room) {
   assert(!latest.error, 'planning room version');
   return latest.data.state_version;
 }
-async function planningFixture(index) {
+async function planningFixture(index, { createDraft = true } = {}) {
   const id = randomUUID();
   const room = planningRooms[index];
   const roomVersion = await verifyPlanningRoom(room);
   const created = await client.rpc('create_reservation', {
     p_actor_profile_id: actorProfileId, p_reservation_id: id, p_room_id: room.id,
-    p_check_in_at: index === 1 ? `${kstToday.toISOString().slice(0,10)}T23:59:00+09:00` : planningCheckIn,
+    p_check_in_at: [0, 1, 5].includes(index)
+      ? `${kstToday.toISOString().slice(0,10)}T23:59:00+09:00`
+      : planningCheckIn,
     p_check_out_at: planningCheckOut,
     p_guest_count: 2, p_guest_name_encrypted: null,
     p_expected_room_version: roomVersion,
@@ -867,14 +972,62 @@ async function planningFixture(index) {
   assert(!obligation.error && obligation.data.status === 'private' &&
     obligation.data.current_cleaning_target_id === null, 'planning remains private');
   const targetId = obligation.data.planned_cleaning_target_id;
-  const draft = await client.rpc('save_cleaning_assignment_draft', {
-    p_actor_profile_id: actorProfileId, p_cleaning_target_id: targetId,
-    p_maid_profile_id: logicalAccountId, p_sequence_number: 50+index,
-    p_expected_assignment_version: 1, p_idempotency_key: `planning-draft-${id}`,
-    p_request_hash: '3'.repeat(64)
+  if (createDraft) {
+    const draft = await client.rpc('save_cleaning_assignment_draft', {
+      p_actor_profile_id: actorProfileId, p_cleaning_target_id: targetId,
+      p_maid_profile_id: logicalAccountId, p_sequence_number: 50+index,
+      p_expected_assignment_version: 1, p_idempotency_key: `planning-draft-${id}`,
+      p_request_hash: '3'.repeat(64)
+    });
+    assert(!draft.error, `planning draft: ${draft.error?.message}`);
+  }
+  return { id, targetId, roomId: room.id, checkInAt: created.data.check_in_at };
+}
+
+function planningRoomMoveSideEffectCounts(cleaningTargetId, reservationId) {
+  const output = execFileSync('docker', [
+    'exec', '-i', 'supabase_db_room-management-system-backend',
+    'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+    '-c', `select (select count(*) from public.notifications where cleaning_target_id='${cleaningTargetId}'::uuid)::text || ',' || (select count(*) from private.notification_delivery_outbox outbox join public.notifications notification on notification.id=outbox.notification_id where notification.cleaning_target_id='${cleaningTargetId}'::uuid)::text || ',' || (select count(*) from public.audit_events where event_type='reservation.room_moved' and entity_type='reservation' and entity_id='${reservationId}'::uuid)::text`
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
+  return output.split(',').map(Number);
+}
+async function planningRoomMovePreview(plan, targetRoomId) {
+  const [reservation, source, target] = await Promise.all([
+    client.from('reservations').select('version').eq('id', plan.id).single(),
+    client.from('rooms').select('state_version').eq('id', plan.roomId).single(),
+    client.from('rooms').select('state_version').eq('id', targetRoomId).single()
+  ]);
+  assert(!reservation.error && !source.error && !target.error, 'planning room-move versions');
+  const preview = await client.rpc('preview_reservation_room_move', {
+    p_actor_profile_id: actorProfileId,
+    p_reservation_id: plan.id,
+    p_target_room_id: targetRoomId,
+    p_expected_reservation_version: reservation.data.version,
+    p_expected_source_room_version: source.data.state_version,
+    p_expected_target_room_version: target.data.state_version,
+    p_effective_at: null,
+    p_reason_code: 'OPERATIONAL_ADJUSTMENT'
   });
-  assert(!draft.error, `planning draft: ${draft.error?.message}`);
-  return { id, targetId, roomId: room.id };
+  assert(!preview.error && preview.data?.eligible === true, `planning room-move preview: ${preview.error?.message}`);
+  return preview.data;
+}
+function planningRoomMoveCommitArgs(preview, suffix) {
+  return {
+    p_actor_profile_id: actorProfileId,
+    p_reservation_id: preview.reservationId,
+    p_target_room_id: preview.targetRoomId,
+    p_expected_reservation_version: preview.reservationVersion,
+    p_expected_source_room_version: preview.sourceRoomVersion,
+    p_expected_target_room_version: preview.targetRoomVersion,
+    p_preview_evaluated_at: preview.evaluatedAt,
+    p_preview_expires_at: preview.expiresAt,
+    p_effective_at: preview.effectiveAt,
+    p_impact_fingerprint: preview.impactFingerprint,
+    p_reason_code: 'OPERATIONAL_ADJUSTMENT',
+    p_idempotency_key: `planning-room-move-${suffix}-${randomUUID()}`,
+    p_request_hash: randomUUID().replaceAll('-', '').padEnd(64, '0')
+  };
 }
 async function planningCommitArgs(plan) {
   const impact = await client.rpc('get_assignment_commit_impact', {
@@ -888,22 +1041,27 @@ async function planningCommitArgs(plan) {
     p_idempotency_key: `planning-commit-${plan.id}`, p_request_hash:'4'.repeat(64)
   };
 }
-const changePlan = await planningFixture(0);
+const planningRaceClient = createClient(status.API_URL, status.SECRET_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false }
+});
+const changePlan = await planningFixture(0, { createDraft: false });
 const changeRoomId = planningRooms[4].id;
 await verifyPlanningRoom(planningRooms[4]);
+const changeMovePreview = await planningRoomMovePreview(changePlan, changeRoomId);
+const changeDraft = await client.rpc('save_cleaning_assignment_draft', {
+  p_actor_profile_id: actorProfileId, p_cleaning_target_id: changePlan.targetId,
+  p_maid_profile_id: logicalAccountId, p_sequence_number: 50,
+  p_expected_assignment_version: 1, p_idempotency_key: `planning-draft-${changePlan.id}`,
+  p_request_hash: '3'.repeat(64)
+});
+assert(!changeDraft.error, `planning notify-race draft: ${changeDraft.error?.message}`);
 const changeCommitArgs = await planningCommitArgs(changePlan);
 const changeVsCommit = await Promise.all([
-  client.rpc('change_reservation', {
-    p_actor_profile_id:actorProfileId,p_reservation_id:changePlan.id,p_room_id:changeRoomId,
-    p_check_in_at:planningCheckIn,p_check_out_at:`${assignmentCommitServiceDate}T12:00:00+09:00`,
-    p_guest_count:2,p_guest_name_mode:'keep',p_guest_name_encrypted:null,p_expected_version:1,
-    p_reason_code:'PLANNING_RACE_CHANGE',p_idempotency_key:`planning-change-${changePlan.id}`,
-    p_request_hash:'5'.repeat(64)
-  }),
-  client.rpc('commit_and_notify_assignments',changeCommitArgs)
+  client.rpc('commit_reservation_room_move', planningRoomMoveCommitArgs(changeMovePreview, 'notify')),
+  planningRaceClient.rpc('commit_and_notify_assignments',changeCommitArgs)
 ]);
 assert(changeVsCommit.filter(r=>!r.error).length === 1, 'change versus notify exactly one winner');
-assert(changeVsCommit.filter(r=>r.error).every(r=> /REPLAN_REQUIRED|STALE|CONFLICT|ASSIGNMENT_IMPACT_CHANGED/.test(r.error.message)),
+assert(changeVsCommit.filter(r=>r.error).every(r=> /ROOM_CHANGE_PREVIEW_STALE|CLEANING_ASSIGNMENT_LOCKED|REPLAN_REQUIRED|STALE|CONFLICT|ASSIGNMENT_IMPACT_CHANGED/.test(r.error.message)),
   'change versus notify fails closed, never deadlocks');
 const changedReservationGraph = await Promise.all([
   client.from('reservations').select('room_id').eq('id',changePlan.id).single(),
@@ -950,26 +1108,36 @@ const afterPromote = await client.from('cleaning_assignments').select('id').eq('
 assert(!beforePromote.error && !afterPromote.error && beforePromote.data.id===afterPromote.data.id,
   'scheduled promotion preserves notified assignment revision');
 
-const checkoutMovePlan = await planningFixture(5);
+const checkoutMovePlan = await planningFixture(5, { createDraft: false });
 const checkoutMoveRoomId = planningRooms[6].id;
 await verifyPlanningRoom(planningRooms[6]);
+const checkoutMovePreview = await planningRoomMovePreview(checkoutMovePlan, checkoutMoveRoomId);
+const checkoutMoveEffectsBefore = planningRoomMoveSideEffectCounts(
+  checkoutMovePlan.targetId,
+  checkoutMovePlan.id
+);
 const checkoutMoveRace = await Promise.all([
-  client.rpc('change_reservation', {
-    p_actor_profile_id:actorProfileId,p_reservation_id:checkoutMovePlan.id,p_room_id:checkoutMoveRoomId,
-    p_check_in_at:planningCheckIn,p_check_out_at:planningCheckOut,
-    p_guest_count:2,p_guest_name_mode:'keep',p_guest_name_encrypted:null,p_expected_version:1,
-    p_reason_code:'PLANNING_CHECKOUT_MOVE_RACE',p_idempotency_key:`planning-checkout-move-${checkoutMovePlan.id}`,
-    p_request_hash:'a'.repeat(64)
-  }),
-  client.rpc('process_due_reservation_transitions', {
+  client.rpc('commit_reservation_room_move', planningRoomMoveCommitArgs(checkoutMovePreview, 'checkout')),
+  planningRaceClient.rpc('process_due_reservation_transitions', {
     p_actor_profile_id:actorProfileId,p_as_of:planningCheckOut,
     p_idempotency_key:`planning-checkout-move-scheduler-${checkoutMovePlan.id}`,
     p_request_hash:'b'.repeat(64)
   })
 ]);
 assert(!checkoutMoveRace[1].error, `checkout transition race must finish: ${checkoutMoveRace[1].error?.message}`);
-assert(!checkoutMoveRace[0].error || /CHECKED_OUT_RESERVATION_IMMUTABLE|STALE|CONFLICT/.test(checkoutMoveRace[0].error.message),
+assert(!checkoutMoveRace[0].error || /ROOM_CHANGE_PREVIEW_STALE|CHECKED_OUT_RESERVATION_IMMUTABLE|DURING_STAY_NOT_SUPPORTED|STALE|CONFLICT/.test(checkoutMoveRace[0].error.message),
   'room move versus checkout loser fails closed without FK or deadlock error');
+const checkoutMoveEffectsAfter = planningRoomMoveSideEffectCounts(
+  checkoutMovePlan.targetId,
+  checkoutMovePlan.id
+);
+assert(
+  checkoutMoveEffectsAfter[0] === checkoutMoveEffectsBefore[0] &&
+    checkoutMoveEffectsAfter[1] === checkoutMoveEffectsBefore[1] &&
+    checkoutMoveEffectsAfter[2] === checkoutMoveEffectsBefore[2] +
+      (checkoutMoveRace[0].error ? 0 : 1),
+  'room move versus checkout must create no notification/outbox and exactly one audit only when move wins'
+);
 const checkoutMoveReservation = await client.from('reservations').select('room_id,status').eq('id',checkoutMovePlan.id).single();
 const checkoutMoveObligation = await client.from('checkout_cleaning_obligations')
   .select('room_id,status,planned_cleaning_target_id,current_cleaning_target_id').eq('reservation_id',checkoutMovePlan.id).single();
@@ -1016,8 +1184,9 @@ for (const plan of [scheduledPlan,manualPlan]) {
     'checkout race: same identity, one occupancy event, zero premature attempts');
 }
 console.log('Planning races passed: room-change/notify, cancel/notify, scheduled/retry, room-change/checkout, manual/scheduled; one target and zero premature attempts.');
+await testReservationLongStayConcurrency({ client, actorProfileId });
 await testNotifiedReplanConcurrency(client, { profileId: actorProfileId, email, password });
-await testPrestartConcurrency(client,actorProfileId);
+await testPrestartConcurrency(client,actorProfileId,templateSessionId);
 await testAttemptActivationConcurrency(client,{ profileId: actorProfileId, email, password });
 await testAssignmentPreviewConcurrency(client,actorProfileId);
 await testAttemptExecutionConcurrency(client,actorProfileId);
@@ -1030,6 +1199,7 @@ await testCheckoutIncidentConcurrency(client,actorProfileId);
 await testPhotoSubmissionConcurrency(client);
 await testPhotoStorageOperationsConcurrency(client);
 await testPhotoDriveQuotaConcurrency(client);
+await testPhotoRetentionConcurrency(client);
 await testNotificationConcurrency(client);
 await testWebPushConcurrency(client);
 await testNotificationDeliveryConcurrency(client);
