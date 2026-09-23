@@ -18,7 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "secrets:check": "node scripts/check-secrets.mjs",
-    "ci:quality": "npm run secrets:check && npm run lint && npm run typecheck && npm test && npm run build",
+    "ci:quality": "npm run secrets:check && npm run openapi:frontend:check && npm run lint && npm run typecheck && npm test && npm run build",
     "supabase": "supabase",
     "db:new": "supabase migration new",
     "db:start": "supabase start",
@@ -34,7 +34,8 @@
     "edge:check": "node scripts/check-edge-functions.mjs",
     "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
     "console:openapi:export": "tsx scripts/export-backend-console-openapi.ts",
-    "openapi:export:full": "tsx scripts/export-full-openapi.ts"
+    "openapi:export:full": "tsx scripts/export-full-openapi.ts",
+    "openapi:frontend:check": "tsx scripts/check-frontend-openapi-contract.mjs"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",
