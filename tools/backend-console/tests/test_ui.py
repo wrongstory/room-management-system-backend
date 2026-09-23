@@ -7,6 +7,7 @@ from pytestqt.qtbot import QtBot
 
 from room_management_console.api_client import BackendApiClient
 from room_management_console.approved_targets import APPROVED_HOSTED_TARGETS
+from room_management_console.build_info import BuildInfo
 from room_management_console.config import AppConfig
 from room_management_console.models import Account
 from room_management_console.ui import (
@@ -32,11 +33,12 @@ def test_login_always_displays_environment_and_project_ref(qtbot: QtBot) -> None
     client = BackendApiClient(
         config(), transport=httpx.MockTransport(lambda request: httpx.Response(500))
     )
-    dialog = LoginDialog(config(), client)
+    dialog = LoginDialog(config(), client, BuildInfo("0.1.0", "a" * 40, True))
     qtbot.addWidget(dialog)
     assert dialog.environment_label.text() == (
         f"환경: RECOVERY | PROJECT: {RECOVERY_TARGET.project_ref}"
     )
+    assert dialog.build_label.text() == "앱 버전: 0.1.0 | SOURCE: aaaaaaaaaaaa"
     assert dialog.login_id.text() == "admin"
     assert dialog.login_id.isReadOnly()
     assert dialog.password.text() == ""

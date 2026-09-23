@@ -47,16 +47,22 @@ uv sync --python 3.12 --frozen
 uv run --python 3.12 python scripts/build.py
 ```
 
-`dist/RoomManagementBackendConsole-windows-x64.zip`과 SHA-256 파일이 생성된다. artifact에는
-`config.json`, developer 비밀번호, token, service secret이 포함되지 않는다. 압축을 승인된
-폴더에 풀고 `config.example.json`을 `config.json`으로 복사한 뒤 실행한다.
+`dist/RoomManagementBackendConsole-windows-x64.zip`과 SHA-256 파일이 생성된다. 배포 빌드는
+변경 파일이 없는 Git 작업 트리에서만 허용하며, artifact의 `build-info.json`에는 앱 버전과
+정확한 source commit SHA만 기록한다. 로그인과 메인 화면에서 이 버전과 source SHA 앞 12자를
+항상 확인할 수 있다. manifest가 없거나 앱 버전·SHA 형식이 맞지 않으면 `SOURCE: UNVERIFIED`로
+표시하고 임의 source를 추정하지 않는다.
+
+artifact에는 `config.json`, developer 비밀번호, token, service secret이 포함되지 않는다.
+압축을 승인된 폴더에 풀고 `config.example.json`을 `config.json`으로 복사한 뒤 실행한다.
 
 초기 버전은 자동 업데이트와 Authenticode 서명을 제공하지 않는다. release 담당자가 GitHub
 승인 source에서 직접 생성한 checksum과 전달 파일을 대조한다.
 
 ## 운영 절차
 
-1. 상단의 `환경: PRODUCTION|RECOVERY|LOCAL`과 `PROJECT`를 색이 아닌 텍스트로 확인한다.
+1. 상단의 `환경: PRODUCTION|RECOVERY|LOCAL`, `PROJECT`, 앱 버전과 `SOURCE`를 색이 아닌
+   텍스트로 확인한다. `SOURCE: UNVERIFIED`인 배포본은 운영 계정으로 사용하지 않는다.
 2. 고정 developer ID `admin`과 사용자가 직접 입력한 비밀번호로 로그인한다.
 3. 운영 대시보드에서 migration drift, RLS, scheduler, 사진 purge의 bounded backlog/heartbeat, secret configured 여부를 확인한다. purge secret·Drive locator·claim digest 원문은 콘솔이나 보고서에서 조회하지 않는다.
 4. 계정 목록에서 business admin/maid만 생성·변경한다.

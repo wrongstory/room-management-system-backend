@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from . import __version__
 from .api_client import BackendApiClient
+from .build_info import load_build_info
 from .config import load_config
 from .ui import LoginDialog, MainWindow
 
@@ -29,6 +30,7 @@ def main() -> int:
     application.setQuitOnLastWindowClosed(False)
     application.setApplicationName("CASTLE THE ART Backend Console")
     application.setApplicationVersion(__version__)
+    build_info = load_build_info()
     try:
         config = load_config(options.config.resolve())
     except ValueError as error:
@@ -40,11 +42,11 @@ def main() -> int:
     windows: dict[str, MainWindow] = {}
 
     def show_login() -> None:
-        login = LoginDialog(config, client)
+        login = LoginDialog(config, client, build_info)
         if login.exec() != LoginDialog.DialogCode.Accepted:
             application.quit()
             return
-        window = MainWindow(config, client)
+        window = MainWindow(config, client, build_info)
         windows["main"] = window
         window.locked.connect(lambda: QTimer.singleShot(0, show_login))
         window.show()
