@@ -71,19 +71,107 @@ function dimensions(width: number, height: number, input = false): void {
     throw new PhotoError(413, 'PHOTO_DECODE_LIMIT_EXCEEDED');
   }
 }
-function jpegShape(b: Uint8Array, clean: boolean): void {
+function isoBmffVideoTail(b: Uint8Array, start: number, end = b.length): boolean {
+  if (start < 0 || end > b.length || start + 16 > end) return false;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const text = (offset: number) => String.fromCharCode(...b.subarray(offset, offset + 4));
+  let offset = start, first = true, media = false, index = false;
+  while (offset < end) {
+    if (offset + 8 > end) return false;
+    let size = view.getUint32(offset, false), headerSize = 8;
+    const kind = text(offset + 4);
+    if (size === 1) {
+      if (offset + 16 > end) return false;
+      const extended = view.getBigUint64(offset + 8, false);
+      if (extended > BigInt(Number.MAX_SAFE_INTEGER)) return false;
+      size = Number(extended); headerSize = 16;
+    } else if (size === 0) size = end - offset;
+    if (size < headerSize || offset + size > end) return false;
+    if (first && kind !== 'ftyp') return false;
+    if (kind === 'mdat') media = true;
+    if (kind === 'moov' || kind === 'moof') index = true;
+    first = false; offset += size;
+  }
+  return offset === end && media && index;
+}
+function samsungSefMotionPhotoTail(b: Uint8Array, primaryEnd: number, videoStart: number): boolean {
+  if (b.length < 20 || videoStart <= primaryEnd || videoStart >= b.length - 20) return false;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const text = (offset: number, length: number) => String.fromCharCode(...b.subarray(offset, offset + length));
+  if (text(b.length - 4, 4) !== 'SEFT') return false;
+  const directorySize = view.getUint32(b.length - 8, true);
+  const directoryStart = b.length - 8 - directorySize;
+  if (directoryStart <= videoStart || directorySize < 24 || text(directoryStart, 4) !== 'SEFH') return false;
+  const count = view.getUint32(directoryStart + 8, true);
+  if (count < 1 || count > 128 || directorySize !== 12 + count * 12) return false;
+  let expectedStart = primaryEnd, motionField = false;
+  for (let index = 0; index < count; index++) {
+    const entry = directoryStart + 12 + index * 12;
+    const marker = b.subarray(entry, entry + 4);
+    const negativeOffset = view.getUint32(entry + 4, true);
+    const fieldLength = view.getUint32(entry + 8, true);
+    if (!negativeOffset || fieldLength < 8 || negativeOffset > directoryStart) return false;
+    const fieldStart = directoryStart - negativeOffset;
+    if (fieldStart !== expectedStart || fieldStart + fieldLength > directoryStart) return false;
+    if (!marker.every((value, markerIndex) => value === b[fieldStart + markerIndex])) return false;
+    const isMotion = marker[0] === 0 && marker[1] === 0 && marker[2] === 0x30 && marker[3] === 0x0a;
+    if (isMotion) {
+      if (motionField || index !== count - 1 || fieldStart + fieldLength !== directoryStart) return false;
+      const nameLength = view.getUint32(fieldStart + 4, true);
+      if (nameLength !== 16 || text(fieldStart + 8, nameLength) !== 'MotionPhoto_Data' || fieldStart + 8 + nameLength !== videoStart) return false;
+      motionField = true;
+    }
+    expectedStart = fieldStart + fieldLength;
+  }
+  return motionField && expectedStart === directoryStart && isoBmffVideoTail(b, videoStart, directoryStart);
+}
+function motionPhotoTail(b: Uint8Array, primaryEnd: number, xmpPackets: string[]): boolean {
+  const xmp = xmpPackets.join('\n');
+  if (!xmp.includes('http://ns.google.com/photos/1.0/camera/')) return false;
+  const enabled = /(?:\bMotionPhoto|\bMicroVideo)\s*=\s*["']1["']/.test(xmp) ||
+    /<[^>]*:(?:MotionPhoto|MicroVideo)>\s*1\s*<\//.test(xmp);
+  if (!enabled) return false;
+  const legacy = /\bMicroVideoOffset\s*=\s*["']([1-9]\d{0,9})["']/.exec(xmp);
+  const candidates: number[] = [];
+  if (legacy) {
+    const offset = Number(legacy[1]);
+    if (offset === b.length - primaryEnd) candidates.push(primaryEnd);
+  }
+  if (xmp.includes('http://ns.google.com/photos/1.0/container/') && xmp.includes('http://ns.google.com/photos/1.0/container/item/')) {
+    const items = xmp.match(/<[^>]+>/g) ?? [];
+    const primary = items.find(item => /\bSemantic\s*=\s*["']Primary["']/.test(item) && /\bMime\s*=\s*["']image\/jpeg["']/.test(item));
+    const motion = items.find(item => /\bSemantic\s*=\s*["']MotionPhoto["']/.test(item) && /\bMime\s*=\s*["']video\/(?:mp4|quicktime)["']/.test(item));
+    const length = motion && /\bLength\s*=\s*["']([1-9]\d{0,9})["']/.exec(motion);
+    const paddingMatch = primary && /\bPadding\s*=\s*["'](\d{1,9})["']/.exec(primary);
+    const padding = paddingMatch ? Number(paddingMatch[1]) : 0;
+    if (primary && length) {
+      const offset = b.length - Number(length[1]);
+      if (offset === primaryEnd + padding || samsungSefMotionPhotoTail(b, primaryEnd, offset)) candidates.push(offset);
+    }
+  }
+  return candidates.some(offset => isoBmffVideoTail(b, offset) || samsungSefMotionPhotoTail(b, primaryEnd, offset));
+}
+function jpegShape(b: Uint8Array, clean: boolean): number {
   if (b[0] !== 255 || b[1] !== 216) invalid();
   let p = 2, frames = 0, scans = 0;
+  const xmpPackets: string[] = [];
   while (p < b.length) {
     if (b[p++] !== 255) invalid();
     while (b[p] === 255) p++;
     const marker = byte(b, p++);
-    if (marker === 217) { if (p !== b.length || frames !== 1 || scans < 1) invalid(); return; }
+    if (marker === 217) {
+      if (frames !== 1 || scans < 1 || p !== b.length && (clean || !motionPhotoTail(b, p, xmpPackets))) invalid();
+      return p;
+    }
     if (marker === undefined || marker === 0 || marker === 216 || (marker >= 208 && marker <= 215)) invalid();
     if (p + 2 > b.length) invalid();
     const size = byte(b, p) * 256 + byte(b, p + 1);
     if (size < 2 || p + size > b.length) invalid();
     if (clean && (marker === 225 || marker === 237 || marker === 254)) invalid();
+    if (!clean && marker === 225) {
+      const packet = new TextDecoder().decode(b.subarray(p + 2, p + size));
+      if (packet.startsWith('http://ns.adobe.com/xap/1.0/\u0000') || packet.startsWith('http://ns.adobe.com/xmp/extension/\u0000')) xmpPackets.push(packet);
+    }
     if ([192, 193, 194].includes(marker)) {
       if (++frames !== 1 || size < 8) invalid();
       dimensions(byte(b, p + 5) * 256 + byte(b, p + 6), byte(b, p + 3) * 256 + byte(b, p + 4), !clean);
@@ -99,7 +187,7 @@ function jpegShape(b: Uint8Array, clean: boolean): void {
       }
     }
   }
-  invalid();
+  return invalid();
 }
 function webpShape(b: Uint8Array, clean: boolean): void {
   const text = (a: number, n: number) => String.fromCharCode(...b.subarray(a, a + n));
@@ -166,11 +254,15 @@ function heicShape(bytes: Uint8Array): void {
 }
 
 export function checkPhotoInputEnvelope(bytes: Uint8Array, mime: PhotoInputMime): void {
+  void photoInputPayload(bytes, mime);
+}
+function photoInputPayload(bytes: Uint8Array, mime: PhotoInputMime): Uint8Array {
   if (!bytes.length) invalid();
   if (bytes.length > PHOTO_INPUT_MAX_BYTES) tooLarge();
-  if (mime === 'image/jpeg') jpegShape(bytes, false);
-  else if (mime === 'image/webp') webpShape(bytes, false);
+  if (mime === 'image/jpeg') return bytes.subarray(0, jpegShape(bytes, false));
+  if (mime === 'image/webp') webpShape(bytes, false);
   else heicShape(bytes);
+  return bytes;
 }
 
 let initialization: Promise<void> | undefined;
@@ -193,7 +285,7 @@ export function initializePhotoDecoder(wasm: Uint8Array): Promise<void> {
 }
 export interface VerifiedPhoto { bytes: Uint8Array; mime: PhotoMime; sizeBytes: number; sha256: string }
 export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): Promise<VerifiedPhoto> {
-  checkPhotoInputEnvelope(raw, mime);
+  const source = photoInputPayload(raw, mime);
   if (!initialization) throw new PhotoError(503, 'PHOTO_DECODER_UNAVAILABLE');
   await initialization;
   const started = performance.now();
@@ -208,7 +300,7 @@ export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): 
     let warning = false;
     image.onWarning = () => { warning = true; };
     try {
-      image.read(raw, settings);
+      image.read(source, settings);
       if (warning) invalid();
       dimensions(image.width, image.height, true);
       if (mime === 'image/heic' || mime === 'image/heif' ? ![MagickFormat.Heic, MagickFormat.Heif].includes(image.format as 'HEIC' | 'HEIF') : image.format !== inputFormat) invalid();
@@ -218,7 +310,7 @@ export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): 
         const scale = 1280 / longest;
         image.resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
       }
-      image.quality = longest <= 1280 && raw.length <= PHOTO_MAX_BYTES ? 90 : 65;
+      image.quality = longest <= 1280 && source.length <= PHOTO_MAX_BYTES ? 90 : 65;
       bytes = image.write(outputFormat, (data) => Uint8Array.from(data));
       if (bytes.length > PHOTO_MAX_BYTES) {
         image.quality = 45;
