@@ -442,8 +442,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     }
     for (const rpc of [
       'get_room_operational_projection',
-      'list_room_operation_blocks',
-      'list_room_issues',
+      'list_room_operation_blocks_page',
+      'list_room_issues_page',
       'change_room_master_data',
       'mutate_room_operation'
     ]) {

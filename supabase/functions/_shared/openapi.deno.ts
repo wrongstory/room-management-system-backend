@@ -887,6 +887,54 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       serialized.includes('"^(?:[1-9]|[1-4][0-9]|50)$"'),
     "room event contract must publish stable identity, actor/entity fields, and canonical limit",
   );
+  for (
+    const operation of [
+      document.paths["/v1/rooms/{roomId}/operation-blocks"].get,
+      document.paths["/v1/rooms/{roomId}/issues"].get,
+    ]
+  ) {
+    const typed = operation as unknown as {
+      parameters: Array<{ name: string; schema: Record<string, unknown> }>;
+      responses: Record<string, unknown>;
+    };
+    const limit = typed.parameters.find((item) => item.name === "limit");
+    const cursor = typed.parameters.find((item) => item.name === "cursor");
+    assert(
+      limit?.schema.default === 50 && limit.schema.maximum === 100 &&
+        cursor?.schema.maxLength === 1024 && typed.responses["503"],
+      "room operation reads publish bounded signed keyset pagination",
+    );
+  }
+  for (
+    const schema of [
+      document.components.schemas.RoomOperationBlocksEnvelope,
+      document.components.schemas.RoomIssuesEnvelope,
+    ]
+  ) {
+    assert(
+      schema.required.includes("hasMore") &&
+        schema.required.includes("nextCursor") &&
+        schema.properties.items.maxItems === 100,
+      "room operation envelope publishes bounded page metadata",
+    );
+  }
+  for (
+    const code of [
+      "INVALID_ROOM_OPERATION_QUERY",
+      "INVALID_ROOM_OPERATION_CURSOR",
+      "ROOM_OPERATION_CURSOR_NOT_CONFIGURED",
+      "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+      "ROOM_OPERATION_RESPONSE_TOO_LARGE",
+    ]
+  ) {
+    assert(
+      (document.components.schemas.ErrorCode.enum as readonly string[])
+        .includes(
+          code,
+        ),
+      `${code} must be documented`,
+    );
+  }
   assert(
     serialized.includes('"ASSIGNMENT_VERSION_CONFLICT"') &&
       serialized.includes('"ASSIGNMENT_SEQUENCE_CONFLICT"') &&

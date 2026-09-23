@@ -1499,6 +1499,22 @@ Phase C는 production source에 포함됐지만 안전 fixture 기반 hosted mut
 
 #210은 production source에 포함됐다. `actionable`은 아직 release되지 않아 운영자가 처리할 수 있는 차단을 뜻하며, 시간이 지난 차단도 `expired`로 남아 명시적 release 대상이다. hosted read는 별도다.
 
+### #212 객실 운영 조회 bounded pagination — dev candidate
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms/{roomId}/operation-blocks?status=actionable&limit=50&cursor=...` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ⚠️ | dev source candidate; signed keyset |
+| [x] | `GET /v1/rooms/{roomId}/issues?status=open&limit=50&cursor=...` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ⚠️ | dev source candidate; signed keyset |
+
+- [x] 기존 80 migrations 불변, 81번째 append-only `room_operations_pagination`
+- [x] 기본 50·최대 100, stable keyset, 128 KiB response ceiling
+- [x] actor·객실·stream·status·sort scope의 opaque signed cursor
+- [x] Fastify/Edge/OpenAPI 응답 `hasMore` / `nextCursor` parity
+- [ ] required CI / exact-head QA / `dev` 병합
+- [ ] release/main / production Edge 배포
+
+기존 #210 무제한 DB projection은 이전 bundle 호환을 위해 존재하지만, #212 이후 Fastify/Edge HTTP는 bounded page RPC만 사용한다. cursor를 decode·수정·다른 객실/조회에 재사용하지 않는다.
+
 ### #215 객실 이벤트 타임라인 — production source 반영
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |

@@ -4397,7 +4397,7 @@ export const openApiDocument = {
         operationId: "listRoomOperationBlocks",
         summary: "객실 운영 차단 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. actionable은 해제되지 않은 차단 전체를 뜻하며 미래 scheduled, 현재 active, 시간이 지난 expired 항목을 모두 반환합니다. 반환된 id와 roomStateVersion은 차단 해제 명령에 그대로 사용합니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. actionable은 해제되지 않은 차단 전체를 뜻하며 미래 scheduled, 현재 active, 시간이 지난 expired 항목을 모두 반환합니다. startsAt,id 내림차순 keyset으로 limit 기본 50·최대 100이며 opaque cursor는 actor·roomId·status·stream·sort에 서명됩니다. 반환된 id와 roomStateVersion은 차단 해제 명령에 그대로 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -4411,6 +4411,19 @@ export const openApiDocument = {
               enum: ["actionable"],
               default: "actionable",
             },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description: "직전 응답 nextCursor의 opaque 서명값",
           },
         ],
         responses: {
@@ -4430,6 +4443,7 @@ export const openApiDocument = {
           "403": errorResponse,
           "404": errorResponse,
           "500": errorResponse,
+          "503": errorResponse,
         },
       },
       post: roomMutationOperation(
@@ -4488,7 +4502,7 @@ export const openApiDocument = {
         operationId: "listRoomIssues",
         summary: "객실 미해결 이슈 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. status=open인 미해결 이슈만 반환하며 반환된 id와 roomStateVersion은 이슈 해결 명령에 그대로 사용합니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. status=open인 미해결 이슈를 reportedAt,id 내림차순 keyset으로 조회합니다. limit 기본 50·최대 100이며 opaque cursor는 actor·roomId·status·stream·sort에 서명됩니다. 반환된 id와 roomStateVersion은 이슈 해결 명령에 그대로 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -4498,6 +4512,19 @@ export const openApiDocument = {
             in: "query",
             required: false,
             schema: { type: "string", enum: ["open"], default: "open" },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description: "직전 응답 nextCursor의 opaque 서명값",
           },
         ],
         responses: {
@@ -4515,6 +4542,7 @@ export const openApiDocument = {
           "403": errorResponse,
           "404": errorResponse,
           "500": errorResponse,
+          "503": errorResponse,
         },
       },
       post: roomMutationOperation(
@@ -6423,6 +6451,11 @@ export const openApiDocument = {
           "WORK_HISTORY_MAID_SCOPE_REQUIRED",
           "WORK_HISTORY_MAID_NOT_FOUND",
           "WORK_HISTORY_QUERY_FAILED",
+          "INVALID_ROOM_OPERATION_QUERY",
+          "INVALID_ROOM_OPERATION_CURSOR",
+          "ROOM_OPERATION_CURSOR_NOT_CONFIGURED",
+          "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+          "ROOM_OPERATION_RESPONSE_TOO_LARGE",
           "NOTIFICATION_ACCESS_REQUIRED",
           "NOTIFICATION_NOT_FOUND",
           "INVALID_NOTIFICATION_CURSOR",
@@ -10606,15 +10639,25 @@ export const openApiDocument = {
       RoomOperationBlocksEnvelope: {
         type: "object",
         additionalProperties: false,
-        required: ["roomId", "roomStateVersion", "evaluatedAt", "items"],
+        required: [
+          "roomId",
+          "roomStateVersion",
+          "evaluatedAt",
+          "items",
+          "hasMore",
+          "nextCursor",
+        ],
         properties: {
           roomId: { type: "string", format: "uuid" },
           roomStateVersion: { type: "integer", minimum: 1 },
           evaluatedAt: { type: "string", format: "date-time" },
           items: {
             type: "array",
+            maxItems: 100,
             items: { $ref: "#/components/schemas/RoomOperationBlock" },
           },
+          hasMore: { type: "boolean" },
+          nextCursor: { type: ["string", "null"], maxLength: 1024 },
         },
       },
       RoomCandleRequest: {
@@ -10677,15 +10720,25 @@ export const openApiDocument = {
       RoomIssuesEnvelope: {
         type: "object",
         additionalProperties: false,
-        required: ["roomId", "roomStateVersion", "evaluatedAt", "items"],
+        required: [
+          "roomId",
+          "roomStateVersion",
+          "evaluatedAt",
+          "items",
+          "hasMore",
+          "nextCursor",
+        ],
         properties: {
           roomId: { type: "string", format: "uuid" },
           roomStateVersion: { type: "integer", minimum: 1 },
           evaluatedAt: { type: "string", format: "date-time" },
           items: {
             type: "array",
+            maxItems: 100,
             items: { $ref: "#/components/schemas/RoomIssue" },
           },
+          hasMore: { type: "boolean" },
+          nextCursor: { type: ["string", "null"], maxLength: 1024 },
         },
       },
       RoomEventSource: {

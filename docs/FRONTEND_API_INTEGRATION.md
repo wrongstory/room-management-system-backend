@@ -213,13 +213,13 @@ const idempotencyKey = crypto.randomUUID();
 | 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 동일한 `evaluatedAt`/`serverTime` snapshot의 lifecycle·readiness 독립 축 사용 |
 | 객실 운영 상세 | `GET /v1/rooms/{roomId}` | 목록과 동일한 camelCase projection·next reservation 요약, PIN 원문 없음 |
 | 객실 기준정보 변경 | `PATCH /v1/rooms/{roomId}/master-data` | room state `expectedVersion` CAS와 Idempotency-Key |
-| 객실 운영 차단 조회 | `GET /v1/rooms/{roomId}/operation-blocks?status=actionable` | 미해제 scheduled/active/expired 전체; 반환 ID와 roomStateVersion을 해제에 사용 |
+| 객실 운영 차단 조회 | `GET /v1/rooms/{roomId}/operation-blocks?status=actionable&limit=50` | 미해제 scheduled/active/expired 전체를 startsAt/id 역순으로 조회. 기본 50·최대 100, `nextCursor`는 같은 관리자·객실·status에만 재사용. 반환 ID와 roomStateVersion을 해제에 사용 |
 | 객실 운영 차단 | `POST /v1/rooms/{roomId}/operation-blocks` | 시작/종료 시각은 RFC 3339 offset, 생성 결과 ID는 서버 결정 |
 | 객실 운영 차단 해제 | `POST /v1/rooms/{roomId}/operation-blocks/{blockId}/release` | 삭제가 아닌 release 이력 append |
 | 객실 점유 보정 | `POST /v1/rooms/{roomId}/occupancy-corrections` | admin 전용; reservationId·occupied·effectiveAt·expectedRoomVersion·reasonCode와 Idempotency-Key 필수. 복합 표시 status를 덮지 않고 canonical stay segment 이력을 보정 |
 | 객실 표시 분류 강제 조정 | `POST /v1/rooms/{roomId}/display-status-overrides` | admin 전용; targetStatus는 6개 표시 enum 또는 null(clear). 표시만 바꾸며 예약·점유·readiness·bookability는 불변. 실제 BLOCKED는 operation-block command 사용 |
 | 촛불 수량 기록 | `POST /v1/rooms/{roomId}/candles` | count 0 이상, physicallyVerified 기본 false |
-| 객실 이슈 조회 | `GET /v1/rooms/{roomId}/issues?status=open` | 미해결 이슈만; 반환 ID와 roomStateVersion을 해결에 사용 |
+| 객실 이슈 조회 | `GET /v1/rooms/{roomId}/issues?status=open&limit=50` | 미해결 이슈를 reportedAt/id 역순으로 조회. 기본 50·최대 100, `nextCursor`는 같은 관리자·객실·status에만 재사용. 반환 ID와 roomStateVersion을 해결에 사용 |
 | 객실 이슈 등록 | `POST /v1/rooms/{roomId}/issues` | description 연락처 입력 금지, raw 문구를 오류 로그에 남기지 않음 |
 | 객실 이슈 해결 | `POST /v1/rooms/{roomId}/issues/{issueId}/resolve` | hard delete 없이 해결 이력 기록 |
 | PIN 초기화 | `POST /v1/rooms/pins/bootstrap` | active admin, 선택적 limit만 전송; PIN은 서버 secret에서만 읽음 |
