@@ -6,6 +6,9 @@ create function pg_temp.pid(n integer) returns uuid language sql immutable as $$
   select ('91000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid
 $$;
 insert into auth.users(id) select pg_temp.pid(100+n) from generate_series(1,6)n;
+insert into auth.sessions(id,user_id) values
+  (pg_temp.pid(201),pg_temp.pid(101)),
+  (pg_temp.pid(202),pg_temp.pid(102));
 select public.bootstrap_first_developer_profile(pg_temp.pid(6),pg_temp.pid(106),'submission developer','submission developer','0031','submission-bootstrap-hash','submission-bootstrap-key');
 insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password)
 select pg_temp.pid(n),pg_temp.pid(100+n),'submission-'||n,'submission-'||n,'submission-'||n,'submission-'||n,0,
@@ -343,9 +346,91 @@ select is(
     from public.list_cleaning_submissions(pg_temp.pid(1),null,true) item),
   'bounded inspection queue is oldest-first so newer submissions cannot starve older work');
 
+create temp table inspection_pages(page integer primary key,value jsonb);
+insert into inspection_pages values(
+  1,
+  public.list_cleaning_inspections_page(pg_temp.pid(1),pg_temp.pid(201),null,null,2)
+);
+insert into inspection_pages
+select 2,public.list_cleaning_inspections_page(
+  pg_temp.pid(1),
+  pg_temp.pid(201),
+  (value->>'lastSubmittedAt')::timestamptz,
+  (value->>'lastId')::uuid,
+  2
+)
+from inspection_pages where page=1;
+select ok(
+  (select (value->>'hasMore')::boolean and jsonb_array_length(value->'submissions')=2
+    from inspection_pages where page=1),
+  'inspection queue page returns the bounded limit and continuation position'
+);
+select is(
+  (
+    select array_agg(item.value->>'id' order by page,item.ordinality)
+    from inspection_pages
+    cross join lateral jsonb_array_elements(value->'submissions') with ordinality as item(value,ordinality)
+  ),
+  (
+    select array_agg(submission.id::text order by submission.submitted_at,submission.id)
+    from (
+      select submission.id,submission.submitted_at
+      from public.cleaning_submissions submission
+      where submission.status='submitted'
+      order by submission.submitted_at,submission.id
+      limit 4
+    ) submission
+  ),
+  'successive inspection pages follow the stable submitted-at and id keyset without gaps or duplicates'
+);
+select throws_ok(
+  $$select public.list_cleaning_inspections_page(pg_temp.pid(1),pg_temp.pid(201),null,null,101)$$,
+  '22023','INSPECTION_PAGE_LIMIT_INVALID','inspection queue rejects limits above the fixed maximum'
+);
+select throws_ok(
+  $$select public.list_cleaning_inspections_page(pg_temp.pid(1),pg_temp.pid(201),clock_timestamp(),null,2)$$,
+  '22023','INVALID_INSPECTION_CURSOR','inspection queue rejects a partial keyset cursor'
+);
+select throws_ok(
+  $$select public.list_cleaning_inspections_page(pg_temp.pid(2),pg_temp.pid(202),null,null,2)$$,
+  '42501','ADMIN_REQUIRED','inspection queue rejects a non-admin live session'
+);
+select throws_ok(
+  $$select public.list_cleaning_inspections_page(pg_temp.pid(1),pg_temp.pid(299),null,null,2)$$,
+  '42501','ADMIN_REQUIRED','inspection queue rejects a missing or revoked admin session'
+);
+
+create temp table inspection_stability_cursor as
+select
+  (item.value->>'submittedAt')::timestamptz as submitted_at,
+  (item.value->>'id')::uuid as id
+from jsonb_array_elements(
+  public.list_cleaning_inspections_page(pg_temp.pid(1),pg_temp.pid(201),null,null,100)->'submissions'
+) with ordinality as item(value,ordinality)
+order by item.ordinality desc
+limit 1;
+insert into submission_results values('reject-submission',pg_temp.submit(2));
+select public.approve_cleaning_submission(
+  pg_temp.pid(1),
+  (select (value->>'id')::uuid from submission_results where label='approve'),
+  'QUALITY_OK','pagination-concurrent-decision',repeat('7',64)
+);
+select is(
+  (
+    select array_agg(item.value->>'id' order by item.ordinality)
+    from inspection_stability_cursor cursor_position
+    cross join lateral jsonb_array_elements(
+      public.list_cleaning_inspections_page(
+        pg_temp.pid(1),pg_temp.pid(201),cursor_position.submitted_at,cursor_position.id,100
+      )->'submissions'
+    ) with ordinality as item(value,ordinality)
+  ),
+  array[(select value->>'id' from submission_results where label='reject-submission')],
+  'a new submission appears after the prior keyset while a decided item never rewinds the queue'
+);
+
 -- Rejection atomically notifies the reclean owned by the original active maid.
 -- It becomes visible immediately but #28 remains the only attempt activation owner.
-insert into submission_results values('reject-submission',pg_temp.submit(2));
 insert into submission_results values('rejected',public.reject_cleaning_submission(pg_temp.pid(1),(select (value->>'id')::uuid from submission_results where label='reject-submission'),
  'QUALITY_REWORK','reject-key',repeat('5',64)));
 select ok((select target.cleaning_kind='reclean' and target.source='inspection_reclean' and target.status='notified'

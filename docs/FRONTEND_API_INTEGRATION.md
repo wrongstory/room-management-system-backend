@@ -1,8 +1,8 @@
 # 프론트엔드·Codex API 연동 가이드
 
-이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 바로 실행할 작업 범위와 화면 검증 순서는 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)를 사용한다.
+이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 과거 v0.4.0 인계는 historical workflow 참고용이고, 현재 계약은 production OpenAPI 0.5.1과 이 문서를 우선한다.
 
-2026-09-21 대조 기준은 프런트 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`, 백엔드 production source `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a`이다. exact snapshot, 문서 성격, 실제 소비/제공 차이와 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따른다. production source 제공과 hosted provider·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
+2026-09-23 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 OpenAPI 0.5.1 / 129 / 139이고 마지막으로 검증된 production runtime은 OpenAPI 0.5.1 / 128 / 138의 `api` ACTIVE v24다. #256 사진 정규화와 #250/#264 배정 후속의 Edge/Pages 배포는 아직 별도다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 Git source 제공과 hosted runtime·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
 
 ## 1. 계약을 받는 위치
 
@@ -30,15 +30,15 @@ http://127.0.0.1:54321/functions/v1/api
 
 Swagger UI 상단의 **OpenAPI JSON 내려받기**로 파일을 받을 수 있다. API base URL은 Pages OpenAPI의 `servers[0].url` 또는 배포 환경변수에서 읽고 Supabase project ref나 운영 URL을 프론트 소스에 하드코딩하지 않는다. OpenAPI에 없는 path는 production endpoint로 가정하지 않는다.
 
-production Edge는 `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a` 기준 73 migrations, `api` ACTIVE v19, OpenAPI `0.4.0` 120 paths / 130 operations를 사용한다. #238 미등록 객실 최초 PIN 등록 hotfix는 API에 반영됐고 Pages는 기존 0.4.0 / 120 / 130 snapshot을 유지한다. 안전한 fixture가 없는 mutation을 PASS나 전체 프런트 E2E 완료로 표현하지 않는다.
+production Edge는 78 migrations, `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations를 사용한다. GitHub Pages도 이 배포본과 artifact parity를 공개 readback으로 확인했다. 기존 관리자 UAT에서 bookability `guestCount` 생략·`null`·양수, 예약 현황 인원과 유형별 최소·최대 인원을 확인했다. 현재 `main`/`dev`의 #256 source는 스마트폰 원본 최대 5MiB·12MP/5000px을 서버에서 300KiB 이하 JPEG/WebP로 정규화하고, `dev`는 추가로 #250/#264 배정 후속을 제공한다. release/운영 Edge/Pages에 배포될 때까지 프런트가 이 계약들을 운영 API에서 가정하면 안 된다. 이 결과를 다른 예약·PIN mutation이나 전체 프런트 E2E PASS로 확대하지 않는다.
 
-v0.5.0 release candidate `dev@49214bb67f2cf346178bc12321948a810e050234`는 OpenAPI `0.5.0` 128 paths / 138 operations다. #229/#231/#236/#228과 #238 backport를 포함하지만 아직 production URL이나 Pages 정본이 아니다. 객실 카탈로그·상태 보정과 새 가능일/Preview 계약은 release/main/production gate를 통과한 뒤에만 운영에서 활성화한다.
+Issue #236/#228의 객실 카탈로그·상태 계약은 v0.5.0으로 production에 반영됐고, #245가 preview의 optional/null `guestCount` 계약만 추가해 OpenAPI 0.5.1 / 128 / 138을 유지한다. 실제 예약 create/change의 `guestCount` 필수 계약은 바뀌지 않는다.
 
 ### #131/#140/#169 객실 PIN source 계약
 
-production OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. 미등록 객실의 admin 수정 요청이 `expectedPinVersion=0`, `reasonCode=ADMIN_PHYSICAL_CHANGE`를 보내도 서버가 최초 등록 사유로 정규화하므로 client가 PIN 존재 여부와 버튼 이름을 별도 command로 분기할 필요는 없다. 명시적 `ADMIN_INITIAL_PIN`도 계속 유효하다. maid prepare/reveal은 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보낸다. maid confirm 응답이 새 `accessLeaseId`를 주면 이후 reveal에는 이 재발급 lease를 사용한다.
+production OpenAPI에는 prepare/confirm/rollback/reveal과 admin 자동 생성·현장 확인 operation이 있다. 일반 변경에서 `pinDigits`는 선행 0을 보존한 `^[0-9]{4,8}$` 문자열로만 보내고 room prefix를 넣지 않는다. 미등록 객실의 admin 수정 요청이 `expectedPinVersion=0`, `reasonCode=ADMIN_PHYSICAL_CHANGE`를 보내도 서버가 최초 등록 사유로 정규화하므로 client가 PIN 존재 여부와 버튼 이름을 별도 command로 분기할 필요는 없다. 명시적 `ADMIN_INITIAL_PIN`도 계속 유효하다. maid prepare는 현재 통보 assignment, current attempt, current pinVersion의 `accessLeaseId`를 함께 보내지만 일반 reveal은 현재 통보된 `assignmentId`만 권한 입력으로 사용한다. `attemptId`와 `accessLeaseId`는 reveal 호환 필드일 뿐 권한이 아니다. maid confirm 응답의 새 `accessLeaseId`는 이후 물리 PIN 변경에 사용한다.
 
-Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 서버가 batch-unique 4자리 값을 생성한다. 응답의 `generatedPins`를 객실별로 표시하고 현장 도어락 적용 후 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 해당 `pinVersion`을 보낸다. 확인 성공 전에는 mismatch 경고와 체크인 차단을 유지하고 메이드에게 표시하지 않는다. 두 path는 production OpenAPI에 반영됐지만 실제 운영 bootstrap·물리 확인 실행은 별도 승인 전까지 시작하지 않는다.
+Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모리에만 일시 표시한다. `clearAfterSeconds`와 `expiresAt` 중 더 빠른 시각, navigation/background/pagehide/device lock/assignment removal/relock 중 하나라도 발생하면 즉시 지운다. clipboard, analytics, console/error log, browser cache, service worker, offline queue, persistent storage에 넣지 않는다. durable assignment entitlement는 통보/outbox 확정부터 최종 검사·취소·재배정·비활성화 정리까지 유지하고, 30초 reveal lease와 구분한다. 초기화는 `POST /v1/rooms/pins/bootstrap`에 `limit`만 보내며 서버가 batch-unique 4자리 값을 생성한다. 응답의 `generatedPins`를 객실별로 표시하고 현장 도어락 적용 후 `POST /v1/rooms/{roomId}/pin/generated/confirm`에 해당 `pinVersion`을 보낸다. 확인 성공 전에는 mismatch 경고와 체크인 차단을 유지하되, 현재 통보된 담당 메이드의 일반 PIN 보기는 막지 않는다. 이때 저장 PIN과 물리 도어락이 다를 수 있음을 화면에 표시한다. 두 path는 production OpenAPI에 반영됐지만 실제 운영 bootstrap·물리 확인 실행은 별도 승인 전까지 시작하지 않는다.
 
 ## 2. 로컬 백엔드 준비
 
@@ -213,13 +213,13 @@ const idempotencyKey = crypto.randomUUID();
 | 객실 운영 목록 | `GET /v1/rooms` | active admin만 가능, 동일한 `evaluatedAt`/`serverTime` snapshot의 lifecycle·readiness 독립 축 사용 |
 | 객실 운영 상세 | `GET /v1/rooms/{roomId}` | 목록과 동일한 camelCase projection·next reservation 요약, PIN 원문 없음 |
 | 객실 기준정보 변경 | `PATCH /v1/rooms/{roomId}/master-data` | room state `expectedVersion` CAS와 Idempotency-Key |
-| 객실 운영 차단 조회 | `GET /v1/rooms/{roomId}/operation-blocks?status=actionable` | 미해제 scheduled/active/expired 전체; 반환 ID와 roomStateVersion을 해제에 사용 |
+| 객실 운영 차단 조회 | `GET /v1/rooms/{roomId}/operation-blocks?status=actionable&limit=50` | 미해제 scheduled/active/expired 전체를 startsAt/id 역순으로 조회. 기본 50·최대 100, `nextCursor`는 같은 관리자·객실·status에만 재사용. 반환 ID와 roomStateVersion을 해제에 사용 |
 | 객실 운영 차단 | `POST /v1/rooms/{roomId}/operation-blocks` | 시작/종료 시각은 RFC 3339 offset, 생성 결과 ID는 서버 결정 |
 | 객실 운영 차단 해제 | `POST /v1/rooms/{roomId}/operation-blocks/{blockId}/release` | 삭제가 아닌 release 이력 append |
 | 객실 점유 보정 | `POST /v1/rooms/{roomId}/occupancy-corrections` | admin 전용; reservationId·occupied·effectiveAt·expectedRoomVersion·reasonCode와 Idempotency-Key 필수. 복합 표시 status를 덮지 않고 canonical stay segment 이력을 보정 |
 | 객실 표시 분류 강제 조정 | `POST /v1/rooms/{roomId}/display-status-overrides` | admin 전용; targetStatus는 6개 표시 enum 또는 null(clear). 표시만 바꾸며 예약·점유·readiness·bookability는 불변. 실제 BLOCKED는 operation-block command 사용 |
 | 촛불 수량 기록 | `POST /v1/rooms/{roomId}/candles` | count 0 이상, physicallyVerified 기본 false |
-| 객실 이슈 조회 | `GET /v1/rooms/{roomId}/issues?status=open` | 미해결 이슈만; 반환 ID와 roomStateVersion을 해결에 사용 |
+| 객실 이슈 조회 | `GET /v1/rooms/{roomId}/issues?status=open&limit=50` | 미해결 이슈를 reportedAt/id 역순으로 조회. 기본 50·최대 100, `nextCursor`는 같은 관리자·객실·status에만 재사용. 반환 ID와 roomStateVersion을 해결에 사용 |
 | 객실 이슈 등록 | `POST /v1/rooms/{roomId}/issues` | description 연락처 입력 금지, raw 문구를 오류 로그에 남기지 않음 |
 | 객실 이슈 해결 | `POST /v1/rooms/{roomId}/issues/{issueId}/resolve` | hard delete 없이 해결 이력 기록 |
 | PIN 초기화 | `POST /v1/rooms/pins/bootstrap` | active admin, 선택적 limit만 전송; PIN은 서버 secret에서만 읽음 |
@@ -256,7 +256,7 @@ const idempotencyKey = crypto.randomUUID();
 
 카드·필터·집계의 대표 값은 서버의 `primaryDisplayStatus`를 사용한다. 우선순위는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY`다. `canonicalPrimaryDisplayStatus`는 원장에서 계산한 값이고 `displayStatusOverride`는 관리자 강제 분류 또는 null이다. override가 있으면 `primaryDisplayStatus`에만 우선 적용되며 나머지 축은 그대로다. 청소만으로 canonical `BLOCKED`를 만들지 않고 `FUTURE`는 현재 readiness 대표 상태를 유지한다. 상세 설명에는 `blockingReasonCodes`와 `readinessReasonCodes`를 사용하되, 기존 `reasonCodes`도 호환 필드로 보존한다.
 
-이 projection은 저장된 단일 status가 아니다. `occupied`는 서버 평가 시각이 canonical stay segment의 `[startsAt,endsAt)` 안에 있을 때만 true이고, 종료 미정 end=null은 명시 종료 전까지 유지된다. `allocationBlocked`는 운영 차단·배정 차단 이슈·촛불·기준정보 오류 같은 객실 문제만 뜻하므로 점유나 청소만으로 true가 되지 않는다. `allocationReady`는 점유·청소·객실 문제와 current-check-in readiness 경고를 모두 통과할 때만 true다. 미래 예약과 planned checkout만으로 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `pinSyncStatus=unconfigured|mismatch`는 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건이 아니며, current check-in 시점에만 readiness 경고로 표시한다. 실제 체크인·PIN 접근 화면은 기존 #140 계약대로 `verified` 전까지 차단한다.
+이 projection은 저장된 단일 status가 아니다. `occupied`는 서버 평가 시각이 canonical stay segment의 `[startsAt,endsAt)` 안에 있을 때만 true이고, 종료 미정 end=null은 명시 종료 전까지 유지된다. `allocationBlocked`는 운영 차단·배정 차단 이슈·촛불·기준정보 오류 같은 객실 문제만 뜻하므로 점유나 청소만으로 true가 되지 않는다. `allocationReady`는 점유·청소·객실 문제와 current-check-in readiness 경고를 모두 통과할 때만 true다. 미래 예약과 planned checkout만으로 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `pinSyncStatus=unconfigured|mismatch`는 예약 버튼을 비활성화하거나 예약 요청을 생략하는 조건이 아니며, current check-in 시점에 readiness 경고로 표시한다. 실제 체크인은 `verified` 전까지 차단하지만, PIN 보기 버튼은 현재 통보된 본인 assignment entitlement가 있으면 sync 상태와 무관하게 즉시 호출한다. mismatch에서는 반환값이 현재 저장 PIN이며 물리 도어락 일치 확인을 뜻하지 않는다는 경고를 함께 표시한다.
 
 객실 mutation은 최신 상세/목록의 `stateVersion`을 `expectedVersion` 또는 `expectedRoomVersion`으로 그대로 보낸다. `STALE_VERSION`이면 현재 객실을 다시 읽어 사용자 확인을 받고, 키를 바꿔 자동 덮어쓰지 않는다. 동일 payload의 통신 재시도에만 같은 Idempotency-Key를 사용한다. 수동 `PIN 동기화 상태 기록` 화면은 제거하고 bootstrap·prepare/confirm/rollback/reveal API만 사용한다. PIN 관련 목록은 `pinSyncStatus`와 `pinVersion`만 취급하며 `pin`, `rawPin`, `pinCode`, `doorCode`, `credential`, `providerSecret` 필드를 만들거나 analytics·오류 수집에 보내지 않는다.
 
@@ -334,13 +334,25 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] timeout·응답 유실은 같은 body와 같은 `Idempotency-Key`로 결과를 확인한다. body를 바꾸면 새 key를 사용한다.
 - [ ] 오류 수집에는 allowlist code와 `requestId`만 남기고 token·PIN·고객명·전화번호·request body를 보내지 않는다.
 
+#### 담당 메이드 수행 불가 취소·재배정 (#264 source/dev 완료, 운영 미승격)
+
+- [ ] 관리자만 `POST /v1/assignments/{cleaningTargetId}/unavailable-cancel`을 노출한다. 메이드 본인의 일반 취소 요청 API와 혼합하지 않는다.
+- [ ] 요청에는 현재 assignment의 `expectedAssignmentId`와 `expectedAssignmentVersion`을 보낸다. 현재 attempt가 있으면 `expectedAttemptId`와 `expectedExecutionVersion`을 둘 다 보내고, 없으면 둘 다 `null`로 보낸다.
+- [ ] 사유는 `MAID_DEPARTED`, `MAID_INJURED`, `MAID_UNAVAILABLE`만 제공하며 자유형 퇴사·부상 정보나 개인정보 입력란을 만들지 않는다.
+- [ ] 동일 클릭·응답 유실 재전송은 같은 body와 같은 `Idempotency-Key`를 사용한다. `ASSIGNMENT_VERSION_CONFLICT`이면 assignment/attempt/미배정 현황을 다시 조회하고 자동 덮어쓰지 않는다.
+- [ ] 일반 작업의 성공 응답은 같은 `cleaningTargetId`가 `unassigned`가 된 것으로 표시한다. `replacementTargetId`가 non-null이면 기존 0원 재청소 책임은 이력으로 끝났고 별도 일반 유상 target이 만들어진 예외이므로, 이후 화면과 배정은 이 ID를 사용한다.
+- [ ] 기존 담당·attempt를 완료나 청소 완료로 표시하지 않는다. 수행 중이었다면 중단 이력으로, 시작 전이었다면 취소 이력으로 표시하며 기존 담당자의 earning을 만들지 않는다.
+- [ ] 성공 후 미배정 수·Preview·배정 초안·알림함을 다시 조회한다. 후임 메이드는 이 command에서 직접 선택하지 않고 기존 일반 배정 흐름으로 배정한다.
+- [ ] 관리자 알림 `assignment_reassignment_required`의 deep link는 대상 청소 target으로 이동한다. notification 문구만으로 최신 assignment/version을 추측하지 않는다.
+- [ ] PIN, credential, offline lease, token, raw request body는 성공 응답이나 오류 수집에서 기대하거나 저장하지 않는다.
+
 #### 프론트 회귀와 운영 활성화 gate
 
 - [ ] duration 생략과 명시적 `null` 게시, 조회의 `null` 보존, 양수 기존 입력을 모두 검증한다.
 - [ ] duration 없는 게시 template으로 예약 생성이 성공하고 planned checkout target이 생성되는 흐름을 검증한다.
 - [ ] 같은 객실 동시 시작은 정확히 한 요청만 성공하고, 미해결 고객 미퇴실 사건 중에는 시작·완료·제출이 성공으로 표시되지 않는지 검증한다.
 - [x] #165 독립 QA P0/P1=0 → `main` 병합 → production 56번째 migration → 승인 `main` exact source의 `api` 배포 → production OpenAPI nullable 의미 확인 → 네 template 게시 완료.
-- [x] 당시 v0.3.0 OpenAPI 109 paths / 117 operations에서 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인. 현재 정본은 v0.4.0 120 paths / 130 operations다.
+- [x] 당시 v0.3.0 OpenAPI 109 paths / 117 operations에서 요청의 duration 생략·`null` 허용과 게시·조회 응답의 `null` 보존을 실제 운영 HTTP로 확인. 현재 정본은 v0.5.1 128 paths / 138 operations다.
 - [ ] 안전한 운영 fixture에서 예약 생성·동일 요청 replay·planned checkout target/snapshot을 확인. 현재는 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.
 
 developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 함께 표시한다. `migrationDrift=behind`, `rlsValid=false`, `scheduler.status=actor_invalid|degraded`는 정상 성공 payload 안의 운영 경고 상태이므로 HTTP 200과 별개로 사용자에게 차단 수준을 표시한다. `not_configured`는 business admin·Cron 활성화 전의 정상 상태이며 자동으로 scheduler 실행을 시도하지 않는다.
@@ -355,7 +367,7 @@ developer 운영 화면은 `environment`와 `projectRef`를 항상 텍스트로 
 
 ## 8. 프론트 Codex에 전달할 작업 문구
 
-짧은 작업 요청에는 아래 원칙을 붙이고, 실제 구현 작업에는 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)의 전체 프롬프트를 그대로 전달한다.
+짧은 작업 요청에는 아래 원칙을 붙인다. 과거 [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)는 구현 방식 참고용 역사 문서일 뿐 현재 endpoint/count/source 정본이 아니다. 새 작업은 반드시 Pages의 production OpenAPI 0.5.1과 이 문서를 기준으로 타입을 재생성한다.
 
 ```text
 백엔드 HTTP 계약은 제공된 OpenAPI 3.1 JSON을 정본으로 사용한다.
@@ -372,6 +384,23 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 
 ## 9. 현재 범위 제한
 
+### generated client·breaking diff 기반 (#173)
+
+프런트 정본 저장소 `makee-ham/room-management-system`의 Issue #142는 이 저장소의 Issue #173과 연결된다. 과거 `dev@c32aa9eec3945334ddda956afc62cc92d801c410` snapshot은 현재 정본이 아니다. 프런트 snapshot과 generated client는 최신 백엔드 OpenAPI source commit으로 다시 생성·검증해야 한다.
+
+프런트 Issue #142의 완료 시 함께 관리할 산출물은 다음과 같다.
+
+- `contracts/backend-openapi.json`: 백엔드 source snapshot
+- `contracts/backend-openapi.manifest.json`: 백엔드 저장소·source commit·snapshot/generated SHA-256
+- `WIREFRAME/generated/backend-api.d.ts`: `openapi-typescript@7.13.0` 생성 타입
+- `.github/workflows/api-contract.yml`: clean checkout 생성 동일성·필수 영역·민감 필드·OpenAPI 3.1 breaking diff 검증
+
+이 저장소의 `npm run openapi:frontend:check`는 source 단계에서 OpenAPI 0.5.1 / 129 paths / 139 operations, 고유 `operationId`, 주요 업무 영역, mutation 멱등성 header, 안정적 오류 envelope와 금지 민감 필드를 검증한다. API를 추가·변경하는 PR은 기대 개수를 근거 없이 완화하지 않고 프런트 snapshot PR과 새 백엔드 commit 신원을 함께 갱신한다. 운영 Edge/Pages의 128/138 snapshot과 `dev` source의 129/139 계약은 release 전까지 구분한다.
+
+프런트 breaking diff는 기존 path/method 제거, `operationId` 변경, request parameter/body 제약 강화, response status/media/property 보장 제거를 차단한다. 새 endpoint 추가 같은 호환 변경은 허용한다. 첫 도입 PR은 base snapshot이 없으므로 baseline으로 통과하고, 이후부터 `dev` snapshot을 기준으로 비교한다.
+
+이 백엔드 검사는 프런트 generated artifact·breaking diff CI가 완료됐다는 뜻이 아니다. Issue #142의 완료와 화면 adapter 전환, 브라우저 E2E는 별도로 확인하며 운영 배포 여부는 이 문서의 release gate를 그대로 따른다.
+
 ### 주급 pagination 운영 계약 (#96)
 
 - `GET /v1/payroll`은 `payroll` 최대 10개와 `nextCursor`를 반환한다. `maidProfileId`를 생략한 admin-all에서만 여러 cycle page를 순회하며 정렬은 `maidProfileId ASC`로 고정한다.
@@ -382,4 +411,4 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 - list/entries/start/replay 응답은 UTF-8 JSON 128 KiB 상한을 갖는다. `PAYROLL_CURSOR_INVALID`, `PAYROLL_CURSOR_NOT_CONFIGURED`, `PAYROLL_RESPONSE_TOO_LARGE`는 message가 아니라 code로 분기한다.
 - 이 계약은 production OpenAPI와 `api` bundle에 반영됐다. 실제 역할별 hosted read/mutation smoke가 없는 경로는 배포 여부와 별도로 표시한다.
 
-현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 OpenAPI 0.4.0, 120 paths / 130 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.
+현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 OpenAPI 0.5.1, 128 paths / 138 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.

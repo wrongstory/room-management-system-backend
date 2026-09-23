@@ -226,7 +226,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']reservation_bookability_optional_guest_count["']/
+      /expectedMigrationName\s*=\s*["']maid_pin_immediate_reveal["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -442,8 +442,8 @@ describe('Supabase Edge runtime PoC contract', () => {
     }
     for (const rpc of [
       'get_room_operational_projection',
-      'list_room_operation_blocks',
-      'list_room_issues',
+      'list_room_operation_blocks_page',
+      'list_room_issues_page',
       'change_room_master_data',
       'mutate_room_operation'
     ]) {

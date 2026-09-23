@@ -7,7 +7,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationDirectory = resolve(projectRoot, "supabase", "migrations");
 const manifestPath = resolve(projectRoot, "supabase", "migration-manifest.v0.5.0.json");
 const migrationFilePattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
-const baselineCount = 73;
+const baselineCount = 74;
 const releaseHeadVersion = "20260920150000";
 
 function invariant(condition, message) {

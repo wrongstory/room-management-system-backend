@@ -1,6 +1,6 @@
 Project room_management_system {
   database_type: 'PostgreSQL'
-  Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers; a FORCE-RLS cross-flow nonce reservation prevents different AES-GCM encryptions from sharing one key-version/nonce pair.'
+  Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers; a FORCE-RLS cross-flow nonce reservation prevents different AES-GCM encryptions from sharing one key-version/nonce pair. #172 diagnostic role and aggregate views add no persisted entity or FK and are documented outside this relationship diagram.'
 }
 
 Enum app_role {
@@ -903,7 +903,7 @@ Table public.cleaning_targets {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
-  Note: 'Checkout targets are unique per reservation. The reservation-room composite FK remains enforced but is deferred to commit so an allowed reservation/obligation/planned-target room move is atomic; partial graph changes fail. Inspection rejection reclean and #101 post-approval complaint reclean are distinct typed sources. A complaint rework freezes one confirmed source decision, zero-fee target, published template and notified assignee; generic reassignment/handover is forbidden.'
+  Note: 'Checkout targets are unique per reservation. The reservation-room composite FK remains enforced but is deferred to commit so an allowed reservation/obligation/planned-target room move is atomic; partial graph changes fail. Inspection rejection reclean and #101 post-approval complaint reclean are distinct typed sources. A complaint rework freezes one confirmed source decision, zero-fee target, published template and notified assignee; generic reassignment/handover is forbidden. For an inspection reclean whose original maid is confirmed unable to work, #264 preserves and cancels the zero-fee target, then creates one separate ordinary replacement target from the original paid fee/template snapshot; it never rewrites these provenance links in place.'
 }
 
 Table public.cleaning_target_schedule_revisions {
@@ -978,6 +978,27 @@ Table public.assignment_change_requests {
 }
 
 Ref: public.assignment_change_requests.(assignment_id, cleaning_target_id, maid_profile_id, source_assignment_revision) > public.cleaning_assignments.(id, cleaning_target_id, maid_profile_id, revision)
+
+Table private.assignment_unavailability_cancellations {
+  id uuid [pk]
+  cleaning_target_id uuid [not null, ref: > public.cleaning_targets.id]
+  assignment_id uuid [not null, unique, ref: > public.cleaning_assignments.id]
+  attempt_id uuid [ref: > public.cleaning_attempts.id]
+  maid_profile_id uuid [not null, ref: > public.profiles.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  reason_code text [not null, note: 'MAID_DEPARTED / MAID_INJURED / MAID_UNAVAILABLE']
+  target_assignment_version bigint [not null]
+  assignment_revision bigint [not null]
+  attempt_execution_version bigint
+  replacement_target_id uuid [ref: > public.cleaning_targets.id]
+  occurred_at timestamptz [not null]
+  recorded_at timestamptz [not null]
+  Indexes {
+    (cleaning_target_id, occurred_at, id)
+    replacement_target_id
+  }
+  Note: '#264 immutable admin cancellation evidence. The original assignment/attempt is ended, ordinary work returns unassigned, and an inspection-reclean exception links exactly one new ordinary paid replacement without rewriting the zero-fee target or old earning.'
+}
 
 Table public.cleaning_attempts {
   id uuid [pk]
@@ -1564,7 +1585,7 @@ Table private.notification_event_catalog {
   group_family text [not null]
   group_scope_kind text [not null]
 
-  Note: '#109/#128 immutable source-controlled 48 event-family / 32 public-category contract. push_eligible is independent from requires_action; self push is suppressed.'
+  Note: '#109/#128/#264 immutable source-controlled 49 event-family / 33 public-category contract. push_eligible is independent from requires_action; self push is suppressed.'
 }
 
 Table private.notification_groups {

@@ -23,9 +23,9 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-#245 v0.5.1 hotfix 후보는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고, production API readback이 정확히 일치한 뒤에만 Pages를 수동 배포한다.
+#245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API와 Pages에 반영됐다. 기존 관리자 UAT에서 세 입력 형태와 예약 현황 인원·객실 유형 최소/최대 인원 적용을 확인했다.
 
-기능 integration 기준은 PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`이고, 운영 source 정본은 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`다. 2026-09-16 production readback은 56 migrations / `api` ACTIVE v16 / OpenAPI `0.3.0` 109 paths / 117 operations 및 5개 Edge bundle이다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@bbfb6ced4900113c2c39890c11c4e1526c5372b0`다. 개발 정본은 82 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #172 읽기 전용 진단까지 포함한다. #275 메이드 PIN 즉시 조회는 기존 migration을 수정하지 않는 83번째 source 후보이며 hosted DB 적용은 승인되지 않았다. 2026-09-23 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages artifact parity 완료 상태다. #256 스마트폰 사진 정규화와 #250/#264 배정 후속은 개발 정본에 있지만 운영 Edge/Pages·실기기 UAT 또는 release 승격과 구분한다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 #179의 v8 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보를 합친 migration 순서는 57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`이며 OpenAPI는 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
@@ -35,7 +35,7 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 `GET /v1/room-types`는 비밀번호 변경을 완료한 active business admin의 live session만 허용하는 app-owned projection이다. 안정적인 `code`, 현재 `displayName`, 원 단위 `baseCleaningFee`, 저장된 `baseOccupancy/maxOccupancy`, 관리형 `version`, 현재 참조 `roomCount`를 camelCase로 반환한다. 비활성 타입도 기존 객실 참조를 설명하기 위해 목록에는 남지만 기존 `change_room_master_data` command는 신규 선택을 계속 거부한다. `version`은 표시 시각에서 만든 가짜 값이 아니라 객실 타입 업무 필드가 실제 변경될 때만 DB trigger가 증가시킨다.
 
-### #236 Developer 객실·인원 카탈로그 — source candidate
+### #236 Developer 객실·인원 카탈로그 — production source 반영
 
 76번째 append-only migration은 singleton developer만 사용할 수 있는 `GET /v1/developer/room-catalog`와 객실 유형 인원 변경·객실 추가·객실 비활성화 command를 추가한다. 응답은 객실 UUID/번호/유형/active/version과 유형의 code/displayName/인원/version/roomCount 및 집계만 반환하며 예약·고객·PIN·청소·감사 raw state를 섞지 않는다. 모든 응답은 `no-store`다.
 
@@ -56,6 +56,14 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 70번째 append-only `room_operations_read`는 기존 `room_operation_blocks`, `room_issues`, `rooms`만 읽는 service-role app-owned projection RPC 두 개를 추가한다. 두 조회는 active/password-complete business admin의 live session을 DB에서 다시 검증하고, 한 DB 평가 시각의 `roomId`, 현재 `roomStateVersion`, `evaluatedAt`, 안전한 item 목록을 반환한다. raw table, PIN, guest PII, audit before/after state는 반환하지 않는다.
 
 `actionable` 운영 차단은 `released_at is null`인 모든 항목이다. 미래 시작은 `scheduled`, 평가 시각에 유효하면 `active`, 종료 시각이 지났지만 명시적으로 release되지 않았으면 `expired`로 분류한다. 시간이 지났다는 이유로 원장을 숨기거나 자동 해제하지 않는다. 이슈 조회는 `status=open`만 반환한다. 프런트는 조회된 block/issue ID와 같은 envelope의 최신 `roomStateVersion`을 기존 release/resolve mutation의 `expectedRoomVersion`으로 사용하고, version conflict에서는 다시 조회한다.
+
+81번째 append-only `room_operations_pagination`은 기존 무제한 projection을 삭제하지 않고 HTTP adapter용 bounded page RPC를 추가한다. 차단은 `(starts_at,id)`, 이슈는 `(reported_at,id)` 역순 keyset이며 기본 50·최대 100건이다. `nextCursor`는 HMAC 서명된 opaque 값으로 actor profile·객실·stream·status·sort scope에 고정된다. Fastify와 Edge는 동일한 조회 전용 secret과 128 KiB 응답 상한을 사용하고, cursor 조작·다른 객실/조회에서의 재사용을 거부한다.
+
+82번째 append-only `backend_console_readonly_diagnostics`는 #172 로컬 PoC를 위한 passwordless
+`rms_diagnostic` 역할과 PII-free aggregate view 3개만 추가한다. 역할에는 원본 table/function 권한이나
+SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE이 없고 READ ONLY·3초 statement·500ms lock timeout이
+기본값이다. Python adapter는 AST allowlist, 단일 SELECT, 제한된 EXPLAIN, 200행/256KiB와 cancel을
+중복 적용한다. hosted pooler/credential/GUI와 production/recovery 적용은 포함하지 않는다.
 
 ### #215 객실 이벤트 타임라인
 
@@ -125,11 +133,11 @@ private worker state/heartbeat은 FORCE RLS이며 service-owned bounded RPC 외 
 
 ### #140/#169 초기 PIN bootstrap과 예약 readiness 분리 — 자동 생성 통합 후보
 
-`pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. reveal/change의 기존 current revision·lease 권한 검사도 유지한다.
+`pin_sync_status`는 예약 가능 여부와 분리된 운영 경고다. 예약 생성·변경과 객실 projection은 `unconfigured`/`mismatch`만으로 실패하지 않지만, 실제 체크인 전이는 preparation reservation context에서 같은 DB reason 함수가 PIN 상태를 다시 검사해 fail-closed한다. #275부터 담당 메이드의 일반 reveal은 물리 sync 상태를 권한 조건으로 사용하지 않고 active session과 exact current/notified assignment entitlement, current stored PIN revision, 30초 lease를 재검증한다. admin 일반 reveal과 물리 PIN change/confirm의 기존 verified/in-progress attempt/access lease/CAS 정책은 유지한다.
 
 초기 데이터가 없는 환경에서는 active admin만 `POST /v1/rooms/pins/bootstrap`을 호출한다. 런타임 CSPRNG는 최대 25개 후보마다 batch-unique 4자리 숫자를 만들고 선행 0을 보존해 현재 객실번호와 canonical credential을 조합·AES-GCM 암호화한 뒤 service-role RPC에 envelope만 전달한다. RPC는 global lifecycle lock, sorted room lock, immutable version 1 revision, current pointer, mismatch sync event, safe audit와 command receipt를 한 transaction에 기록한다. current PIN이나 unresolved mismatch가 있으면 덮어쓰지 않으며 고정 초기 PIN secret은 없다.
 
-bootstrap 응답은 initialized room마다 별도 30초 admin reveal lease로 암호문을 복호화·최종 재검증하고 `sensitive.read`를 남긴 뒤 no-store credential만 일시 반환한다. 응답 유실 재시도는 비밀 없는 receipt로 같은 initialized IDs를 찾고 아직 generated-pending이면 새 reveal lease를 발급한다. 일반 reveal과 maid는 mismatch credential을 볼 수 없다. `POST /v1/rooms/{roomId}/pin/generated/confirm`이 current version과 generated-pending 상태를 CAS 재검증한 뒤에만 verified sync event와 Sheet outbox를 기록한다.
+bootstrap 응답은 initialized room마다 별도 30초 admin reveal lease로 암호문을 복호화·최종 재검증하고 `sensitive.read`를 남긴 뒤 no-store credential만 일시 반환한다. 응답 유실 재시도는 비밀 없는 receipt로 같은 initialized IDs를 찾고 아직 generated-pending이면 새 reveal lease를 발급한다. generated 전용 reveal은 admin-only이고, 일반 reveal은 #275에 따라 exact current/notified assignment entitlement가 있는 메이드도 mismatch credential을 확인할 수 있다. `POST /v1/rooms/{roomId}/pin/generated/confirm`이 current version과 generated-pending 상태를 CAS 재검증한 뒤에만 verified sync event와 Sheet outbox를 기록하며 그 전에는 체크인이 차단된다.
 
 성공의 initialized는 generated revision/current/mismatch/audit가 commit된 객실, skipped는 기존 current/unresolved 물리 변경을 보존한 객실이다. DB validation 실패는 batch 전체 rollback이며 오류를 skipped로 은폐하지 않는다. timeout/응답 유실은 commit 여부가 불확실하므로 rollback으로 단정하지 않고 같은 key의 receipt replay로 확인한다. 53번째 보완 migration은 기존 lease/revision을 보존해 registry를 backfill하고, matching confirmed lease/revision만 같은 논리 암호화로 인정한다. 다른 과거 key-version/nonce 충돌은 이력을 고치지 않고 upgrade를 fail-closed한다.
 ### #137 PIN Sheet full resync와 운영 상태 — source/dev 완료
@@ -156,9 +164,15 @@ decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생�
 
 `submission_inspection_reclean` append-only migration이 #30의 slot/current-photo/binding 원장을 실제 업무 command로 연결한다. 메이드 제출은 물리 완료, 본인 current notified attempt, 최신 assignment version, 필수 verified·미만료·미삭제 photo set을 같은 attempt lock에서 다시 확인하고 immutable submission version과 exact photo binding set을 만든다. current pointer는 expected revision CAS이며 일반 재제출은 과거 version을 `superseded`로 보존한다. 폭탄방 신고와 선택 증빙은 제출 전에 attempt에 불변 기록한 뒤 최초 submission에 seal하며 제품 계약상 다른 submission version으로 이동하지 않는다.
 
-관리자 queue/detail은 current `inspection_pending` 제출만 대상으로 하며 live room master 대신 notified assignment의 immutable room snapshot과 sealed photo ID/slot/version을 반환한다. provider locator/hash/file name, PIN, PII, request hash, raw before/after state는 공개하지 않는다. stale pointer의 폭탄 선판정·승인·반려는 `STALE_VERSION`으로 실패하고 서로 다른 key의 동시 폭탄 판정은 정확히 한 건만 승리한다.
+관리자 queue/detail은 current `inspection_pending` 제출만 대상으로 하며 live room master 대신 notified assignment의 immutable room snapshot과 sealed photo ID/slot/version을 반환한다. #170 queue는 active password-complete admin의 live session을 DB에서 재검증하고 `(submitted_at ASC,id ASC)` keyset을 page 기본 50·최대 100건으로 조회한다. 전용 HMAC cursor는 actor/role/stream/sort/last key에 묶이며 Fastify와 Edge 모두 no-store와 128 KiB 응답 상한을 적용한다. provider locator/hash/file name, PIN, PII, request hash, raw before/after state는 공개하지 않는다. stale pointer의 폭탄 선판정·승인·반려는 `STALE_VERSION`으로 실패하고 서로 다른 key의 동시 폭탄 판정은 정확히 한 건만 승리한다.
 
-승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다.
+승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다. 이후 관리자가 #264 수행 불가를 명시 확정한 경우에만 기존 0원 재청소 책임을 이력으로 종료하고, 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 미배정으로 정확히 한 건 생성한다. 기존 재청소 row의 담당·금액을 바꾸거나 소급 earning을 만들지 않는다.
+
+### #264 담당 메이드 수행 불가 취소·일반 재배정 — source/dev 완료
+
+79번째 append-only migration은 active admin의 exact target/assignment/attempt CAS와 live session을 확인하는 `POST /v1/assignments/{cleaningTargetId}/unavailable-cancel`을 추가한다. 시작 전 책임은 종료하고 scheduled attempt는 `superseded`, in-progress attempt는 `interrupted`로 보존한다. limited capability와 offline lease는 같은 transaction의 attempt 전이로 revoke되고, assignment 종료 trigger가 PIN entitlement를 닫는다. 일반 target은 `unassigned`로 되돌리고 관리자 재배정 알림을 만든다.
+
+`private.assignment_unavailability_cancellations`는 actor, 기존 담당, target/assignment/attempt version과 선택적 replacement target을 불변 evidence로 남긴다. `inspection_reclean` 예외에서는 기존 0원 target을 soft cancel하고 원 유상 청소 snapshot을 가진 `manual_room_request + additional` replacement를 한 건 생성한다. replacement는 새 담당 없이 시작하고 기존 draft/commit/attempt/inspection/earning 흐름을 재사용한다. 취소 command 자체는 earning, compensation ledger, 외부 호출을 만들지 않는다. PR #265로 source/dev에 통합된 정본은 79 migrations / 129 paths / 139 operations이며 production 78/128/138과 구분한다.
 
 ### #93 주급 주차 조회·PAYING 시작 — source/dev 완료, 현재 production source 반영
 
@@ -674,7 +688,7 @@ Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 sn
 
 ### #109 typed 알림 writer 계약 — source/dev 완료, 현재 production source 반영
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 32 category/48 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 36 category/53 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
@@ -808,7 +822,7 @@ domain lock과 상태 재검증 뒤 `clock_timestamp()`로 다시 확인하고, 
 검증하고 잘못된 달력 날짜나 DB 값을 안전하게 차단합니다. 중단 구간에는 earning·벌점을 생성하지 않습니다.
 Fastify/Edge/OpenAPI의 #133 통합 당시 기준은 108 paths / 115 operations였습니다. #156이 여기에
 `GET·POST /v1/cleaning-templates` 한 path와 두 operation을 추가했으며, #165의 선택형 duration 계약까지
-현재 main/production에 반영된 정본은 109 paths / 117 operations입니다.
+해당 시점의 정본은 109 paths / 117 operations였고, 현재 전체 production 정본은 OpenAPI 0.5.1 / 128 paths / 138 operations입니다.
 
 ### #156 checkout template 운영 게시 경계
 
@@ -899,7 +913,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 완료된 release/운영 반영과 남은 활성화 작업:
 
-- 완료: production 56 migrations, OpenAPI 0.3.0 109/117의 승인 `api` v16, template admin role/CAS/idempotency 및 네 타입 v7 게시
+- 완료: production 78 migrations, OpenAPI 0.5.1 128/138의 승인 `api` v24, template admin role/CAS/idempotency 및 네 타입 v7 게시
 - 대기: 안전한 fixture 기반 reservation/planned-target positive smoke
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
 - Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
@@ -912,13 +926,15 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-09-16 readback 기준 production API source는 `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`이며 56 migrations / `api` ACTIVE v16 / OpenAPI `0.3.0` 109 paths / 117 operations와 5개 Edge bundle이다. 네 checkout template v7 게시도 완료됐다. 예약 positive mutation은 안전한 fixture 부재로 SKIPPED이고, provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
+2026-09-23 readback 기준 production runtime은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages parity 완료 상태다. 현재 Git `main@10a1f81...`의 #256 사진 정규화는 배포 readback 전이므로 runtime에 포함됐다고 추정하지 않는다. 네 checkout template v7 게시도 완료됐다. 실행하지 않은 positive mutation은 PASS로 표현하지 않고 provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 
 - 마이그레이션 SQL은 GitHub의 `supabase/migrations/`를 정본으로 사용한다.
 - Free Plan의 두 번째 프로젝트는 최신 논리 dump를 실제로 복원하는 warm recovery copy로 사용한다.
-- 매일 roles·schema·data dump를 만들고 recovery 프로젝트에 복원한 뒤 핵심 행 수·RLS·관리자·객실 seed를 검사한다.
+- 운영 자동화는 매일 01:00~06:00 KST 사이 roles·schema·data dump를 만들고, 지정될 PC 저장소에 최근 15일분을 보관한다. 정확한 시각과 저장 경로는 운영 활성화 전에 별도로 확정한다.
+- source/dev의 로컬 dry-run은 fresh synthetic DB만 허용하고 app-owned `public/private` dump를 일회용 로컬 DB에 복원한다. migration stable name/version, SHA-256, 121실, 전체 app table 행 수, public RLS와 critical RPC grant를 검사한 뒤 성공 pointer를 게시한다.
+- 로컬 dry-run과 향후 recovery 복원 모두 `auth`, `storage`, `realtime`, `vault`, `cron`, `net`, `supabase_migrations`를 app-owned reset/restore 대상으로 취급하지 않는다.
 - DB dump는 Google Drive 사진 bytes를 포함하지 않는다. metadata·retention ledger는 DB backup 대상이며, provider bytes는 청소 최종 검사+168시간, 사건 해결/종결+180일, true orphan 업로드+30일 정책으로 별도 purge한다.
 - 전체 주기와 복원 명령은 [백업·복구 운영안](./BACKUP_AND_RECOVERY.md)에 정의한다.
 
@@ -927,7 +943,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 64번째 append-only migration은 장기 업무 권한과 plaintext 복호화 창을 분리한다. typed assignment
 notification과 exact delivery outbox가 확정될 때 private immutable entitlement를 생성하고, 각 reveal은 그
 entitlement에서 최대 30초 lease를 파생한다. reveal은 매번 live session, active/password-complete profile,
-current assignment/room/revision, current PIN revision, verified/mismatch 상태와 entitlement 종료 여부를 DB에서 다시 확인한다. 알림 outbox 시점이 물리 불일치 중이어도 durable 원장은 current revision에 생성하지만 plaintext reveal은 verified 복구 전까지 fail-closed다.
+current assignment/room/revision, current PIN revision과 entitlement 종료 여부를 DB에서 다시 확인한다. #275부터 물리 sync 상태는 담당 메이드 reveal 권한이 아니므로 알림 outbox 시점이 mismatch여도 current stored revision을 즉시 확인할 수 있다. admin 일반 reveal, 체크인 readiness와 물리 change/confirm은 계속 별도 fail-closed 축이다.
 
 PIN rotation은 이전 entitlement와 열린 reveal을 먼저 폐기하고 current workflow 및 이미 통보된 다음 근무일
 assignment에만 새 PIN revision successor를 발급한다. 물리 PIN 변경의 maid 권한은 기존 exact in-progress

@@ -13,8 +13,7 @@ import {
 } from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName =
-  "reservation_bookability_optional_guest_count";
+export const expectedMigrationName = "maid_pin_immediate_reveal";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -58,6 +57,7 @@ const secretConfigurationAllowlist = [
   "RESERVATION_GUEST_NAME_PEPPER",
   "PAYROLL_CURSOR_HMAC_SECRET",
   "NOTIFICATION_CURSOR_HMAC_SECRET",
+  "INSPECTION_CURSOR_HMAC_SECRET",
   "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
   "SCHEDULER_INVOKE_SECRET",
   "CORS_ORIGINS",
@@ -830,7 +830,7 @@ function auditQuery(request: Request): {
     );
   }
   const eventTypes = parameters.getAll("eventType");
-  if (eventTypes.length > 73 || eventTypes.some((value) => value.length > 80)) {
+  if (eventTypes.length > 74 || eventTypes.some((value) => value.length > 80)) {
     throw new EdgeError(
       400,
       "VALIDATION_ERROR",

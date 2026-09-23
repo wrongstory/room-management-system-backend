@@ -1,4 +1,13 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
+import {
+  assertRoomOperationResponseSize,
+  decodeRoomOperationCursor,
+  encodeRoomOperationCursor,
+  ROOM_OPERATION_CURSOR_MAX_LENGTH,
+  ROOM_OPERATION_PAGE_DEFAULT,
+  ROOM_OPERATION_PAGE_MAX,
+  roomOperationCursorScope,
+} from "./room-operation-cursor.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import {
   EdgeError,
@@ -322,6 +331,18 @@ export function roomDatabaseError(
 ): EdgeError {
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
+    [
+      "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+      400,
+      "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+      "객실 운영 page 크기가 올바르지 않습니다.",
+    ],
+    [
+      "INVALID_ROOM_OPERATION_CURSOR",
+      400,
+      "INVALID_ROOM_OPERATION_CURSOR",
+      "객실 운영 cursor가 올바르지 않습니다.",
+    ],
     [
       "CHECKOUT_INCIDENT_OPEN",
       409,
@@ -661,6 +682,100 @@ export async function listRoomTypes(
   }));
 }
 
+async function roomOperationPageInput(
+  request: Request,
+  scope: ReturnType<typeof roomOperationCursorScope>,
+  expectedStatus: "actionable" | "open",
+) {
+  const params = new URL(request.url).searchParams;
+  for (const key of params.keys()) {
+    if (
+      !["status", "limit", "cursor"].includes(key) ||
+      params.getAll(key).length !== 1
+    ) {
+      throw new EdgeError(
+        400,
+        "INVALID_ROOM_OPERATION_QUERY",
+        "객실 운영 조회 조건이 올바르지 않습니다.",
+      );
+    }
+  }
+  const status = params.get("status") ?? expectedStatus;
+  if (status !== expectedStatus) {
+    throw new EdgeError(
+      400,
+      "INVALID_ROOM_OPERATION_QUERY",
+      "객실 운영 조회 조건이 올바르지 않습니다.",
+    );
+  }
+  const rawLimit = params.get("limit") ?? String(ROOM_OPERATION_PAGE_DEFAULT);
+  if (!/^[1-9]\d*$/.test(rawLimit)) {
+    throw new EdgeError(
+      400,
+      "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+      "객실 운영 page 크기가 올바르지 않습니다.",
+    );
+  }
+  const limit = Number(rawLimit);
+  if (!Number.isSafeInteger(limit) || limit > ROOM_OPERATION_PAGE_MAX) {
+    throw new EdgeError(
+      400,
+      "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+      "객실 운영 page 크기가 올바르지 않습니다.",
+    );
+  }
+  const rawCursor = params.get("cursor");
+  if (
+    rawCursor !== null &&
+    (rawCursor.length < 1 ||
+      rawCursor.length > ROOM_OPERATION_CURSOR_MAX_LENGTH)
+  ) {
+    throw new EdgeError(
+      400,
+      "INVALID_ROOM_OPERATION_CURSOR",
+      "객실 운영 cursor가 올바르지 않습니다.",
+    );
+  }
+  return {
+    limit,
+    cursor: rawCursor === null
+      ? null
+      : await decodeRoomOperationCursor(rawCursor, scope),
+  };
+}
+
+function roomOperationNextCursor(value: unknown, hasMore: unknown) {
+  if (typeof hasMore !== "boolean") {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 운영 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  if (!hasMore) {
+    if (value !== null) {
+      throw new EdgeError(
+        500,
+        "ROOM_PROJECTION_INVALID",
+        "객실 운영 cursor 결과가 올바르지 않습니다.",
+      );
+    }
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 운영 cursor 결과가 올바르지 않습니다.",
+    );
+  }
+  const row = value as Record<string, unknown>;
+  return {
+    occurredAt: responseTimestamp(row.occurredAt, "occurredAt"),
+    id: uuidValue(row.id, "id"),
+  };
+}
+
 export async function listRoomOperationBlocks(
   request: Request,
   clients: EdgeClients,
@@ -669,26 +784,46 @@ export async function listRoomOperationBlocks(
 ) {
   requireRoomAdmin(actor);
   const normalizedRoomId = uuidValue(roomId, "roomId");
+  const scope = roomOperationCursorScope(
+    actor,
+    normalizedRoomId,
+    "operation-blocks",
+  );
+  const input = await roomOperationPageInput(request, scope, "actionable");
   const { data, error } = await clients.admin.rpc(
-    "list_room_operation_blocks",
+    "list_room_operation_blocks_page",
     {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedRequestSessionId(request),
       p_room_id: normalizedRoomId,
       p_status: "actionable",
+      p_limit: input.limit,
+      p_cursor_at: input.cursor?.occurredAt ?? null,
+      p_cursor_id: input.cursor?.id ?? null,
     },
   );
   if (error) throw roomDatabaseError(error);
   const value = data as Record<string, unknown>;
-  if (!value || !Array.isArray(value.items)) {
+  if (
+    !value || !Array.isArray(value.items) || value.items.length > input.limit
+  ) {
     throw new EdgeError(
       500,
       "ROOM_PROJECTION_INVALID",
       "객실 운영 차단 조회 결과가 올바르지 않습니다.",
     );
   }
-  return {
-    roomId: uuidValue(value.roomId, "roomId"),
+  const responseRoomId = uuidValue(value.roomId, "roomId");
+  if (responseRoomId.toLowerCase() !== normalizedRoomId.toLowerCase()) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 운영 차단 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  const next = roomOperationNextCursor(value.nextCursor, value.hasMore);
+  const result = {
+    roomId: responseRoomId,
     roomStateVersion: positiveInteger(
       value.roomStateVersion,
       "roomStateVersion",
@@ -715,7 +850,13 @@ export async function listRoomOperationBlocks(
         createdAt: responseTimestamp(row.createdAt, "createdAt"),
       };
     }),
+    hasMore: value.hasMore,
+    nextCursor: next === null
+      ? null
+      : await encodeRoomOperationCursor(scope, next),
   };
+  assertRoomOperationResponseSize(result);
+  return result;
 }
 
 export async function listRoomIssues(
@@ -726,23 +867,39 @@ export async function listRoomIssues(
 ) {
   requireRoomAdmin(actor);
   const normalizedRoomId = uuidValue(roomId, "roomId");
-  const { data, error } = await clients.admin.rpc("list_room_issues", {
+  const scope = roomOperationCursorScope(actor, normalizedRoomId, "issues");
+  const input = await roomOperationPageInput(request, scope, "open");
+  const { data, error } = await clients.admin.rpc("list_room_issues_page", {
     p_actor_profile_id: actor.profileId,
     p_session_id: verifiedRequestSessionId(request),
     p_room_id: normalizedRoomId,
     p_status: "open",
+    p_limit: input.limit,
+    p_cursor_at: input.cursor?.occurredAt ?? null,
+    p_cursor_id: input.cursor?.id ?? null,
   });
   if (error) throw roomDatabaseError(error);
   const value = data as Record<string, unknown>;
-  if (!value || !Array.isArray(value.items)) {
+  if (
+    !value || !Array.isArray(value.items) || value.items.length > input.limit
+  ) {
     throw new EdgeError(
       500,
       "ROOM_PROJECTION_INVALID",
       "객실 이슈 조회 결과가 올바르지 않습니다.",
     );
   }
-  return {
-    roomId: uuidValue(value.roomId, "roomId"),
+  const responseRoomId = uuidValue(value.roomId, "roomId");
+  if (responseRoomId.toLowerCase() !== normalizedRoomId.toLowerCase()) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 이슈 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  const next = roomOperationNextCursor(value.nextCursor, value.hasMore);
+  const result = {
+    roomId: responseRoomId,
     roomStateVersion: positiveInteger(
       value.roomStateVersion,
       "roomStateVersion",
@@ -779,7 +936,13 @@ export async function listRoomIssues(
         reportedAt: responseTimestamp(row.reportedAt, "reportedAt"),
       };
     }),
+    hasMore: value.hasMore,
+    nextCursor: next === null
+      ? null
+      : await encodeRoomOperationCursor(scope, next),
   };
+  assertRoomOperationResponseSize(result);
+  return result;
 }
 
 const roomCommandSummaryFields = new Set([

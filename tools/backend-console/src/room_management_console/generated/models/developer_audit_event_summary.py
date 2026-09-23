@@ -43,6 +43,7 @@ class DeveloperAuditEventSummary:
         maid_profile_id (UUID | Unset):
         cleaning_target_id (UUID | Unset):
         assignment_id (UUID | Unset):
+        replacement_target_id (UUID | Unset):
         previous_assignment_id (UUID | Unset):
         previous_maid_profile_id (UUID | Unset):
         request_id (UUID | Unset):
@@ -151,6 +152,7 @@ class DeveloperAuditEventSummary:
     maid_profile_id: UUID | Unset = UNSET
     cleaning_target_id: UUID | Unset = UNSET
     assignment_id: UUID | Unset = UNSET
+    replacement_target_id: UUID | Unset = UNSET
     previous_assignment_id: UUID | Unset = UNSET
     previous_maid_profile_id: UUID | Unset = UNSET
     request_id: UUID | Unset = UNSET
@@ -273,6 +275,10 @@ class DeveloperAuditEventSummary:
         assignment_id: str | Unset = UNSET
         if not isinstance(self.assignment_id, Unset):
             assignment_id = str(self.assignment_id)
+
+        replacement_target_id: str | Unset = UNSET
+        if not isinstance(self.replacement_target_id, Unset):
+            replacement_target_id = str(self.replacement_target_id)
 
         previous_assignment_id: str | Unset = UNSET
         if not isinstance(self.previous_assignment_id, Unset):
@@ -593,6 +599,8 @@ class DeveloperAuditEventSummary:
             field_dict["cleaningTargetId"] = cleaning_target_id
         if assignment_id is not UNSET:
             field_dict["assignmentId"] = assignment_id
+        if replacement_target_id is not UNSET:
+            field_dict["replacementTargetId"] = replacement_target_id
         if previous_assignment_id is not UNSET:
             field_dict["previousAssignmentId"] = previous_assignment_id
         if previous_maid_profile_id is not UNSET:
@@ -828,6 +836,13 @@ class DeveloperAuditEventSummary:
             assignment_id = UNSET
         else:
             assignment_id = UUID(_assignment_id)
+
+        _replacement_target_id = d.pop("replacementTargetId", UNSET)
+        replacement_target_id: UUID | Unset
+        if isinstance(_replacement_target_id, Unset):
+            replacement_target_id = UNSET
+        else:
+            replacement_target_id = UUID(_replacement_target_id)
 
         _previous_assignment_id = d.pop("previousAssignmentId", UNSET)
         previous_assignment_id: UUID | Unset
@@ -1299,6 +1314,7 @@ class DeveloperAuditEventSummary:
             maid_profile_id=maid_profile_id,
             cleaning_target_id=cleaning_target_id,
             assignment_id=assignment_id,
+            replacement_target_id=replacement_target_id,
             previous_assignment_id=previous_assignment_id,
             previous_maid_profile_id=previous_maid_profile_id,
             request_id=request_id,

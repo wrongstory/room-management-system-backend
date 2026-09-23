@@ -19,8 +19,8 @@ jobs:
     env:
       PUBLIC_API_BASE_URL: ${{ vars.PUBLIC_API_BASE_URL }}
       EXPECTED_OPENAPI_VERSION: "0.5.1"
-      EXPECTED_OPENAPI_PATH_COUNT: "128"
-      EXPECTED_OPENAPI_OPERATION_COUNT: "138"
+      EXPECTED_OPENAPI_PATH_COUNT: "129"
+      EXPECTED_OPENAPI_OPERATION_COUNT: "139"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
@@ -45,7 +45,7 @@ jobs:
     name: deploy-pages
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       pages: write
       id-token: write

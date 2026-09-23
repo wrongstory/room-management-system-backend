@@ -46,6 +46,15 @@ def test_approved_hosted_targets_are_accepted(tmp_path: Path, environment: str) 
     config = load_config(path)
     assert config.project_ref == target.project_ref
     assert config.supabase_url == target.supabase_url
+    assert config.enable_hosted_readonly_db is False
+
+
+def test_hosted_readonly_mode_requires_explicit_boolean(tmp_path: Path) -> None:
+    config = load_config(write_config(tmp_path / "enabled.json", enableHostedReadonlyDb=True))
+    assert config.enable_hosted_readonly_db is True
+
+    with pytest.raises(ValueError, match="boolean"):
+        load_config(write_config(tmp_path / "invalid.json", enableHostedReadonlyDb="true"))
 
 
 def test_local_environment_is_loopback_only(tmp_path: Path) -> None:

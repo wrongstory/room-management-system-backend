@@ -3,5 +3,6 @@
   "projectRef": "aodikrxcczbogjpsjwjt",
   "supabaseUrl": "https://aodikrxcczbogjpsjwjt.supabase.co",
   "publishableKey": "replace-with-publishable-key",
-  "inactivityMinutes": 15
+  "inactivityMinutes": 15,
+  "enableHostedReadonlyDb": false
 }

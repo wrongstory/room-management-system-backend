@@ -2,6 +2,8 @@
 
 > 문서 지위: 프런트엔드 분석 snapshot이다. 제품 규칙이나 현재 구현과 충돌하면 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)의 우선순위와 `[미확정]` 표시를 먼저 따른다.
 
+> 현재 상태 메모(2026-09-23): 이 문서의 미소비·미배포 서술은 분석 시점의 기록이다. 현재 production은 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations와 Pages parity 상태이며, 실제 기능별 사용 가능 여부는 [API 상태 정본](./API_STATUS_MATRIX.md)을 따른다.
+
 분석 대상: `wrongstory/room-management-system` 제품 snapshot `dev@165fed2d62a763d64ac62539e1475c1b3e42868f`
 
 최신화 메모(2026-09-17 KST): exact snapshot `165fed2`의 정본을 재대조했다. 객실 대표 상태와 객실 이동은 백엔드 `dev@70154e9`에 source 구현됐지만 production 미배포다. 사진 보존은 최종 결정+168시간/해결+180일/orphan+30일, PIN은 통보부터 최종 종결까지의 durable entitlement가 최신 확정 계약이며 현재 backend source와 충돌한다. 자세한 해결·미해결·후속 migration 계획은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 따른다.

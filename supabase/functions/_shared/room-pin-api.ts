@@ -24,48 +24,6 @@ const reasons = new Set([
   "MAID_CLEANING_CHANGE",
   "ACTUAL_PIN_REENTRY",
 ]);
-const approvedHostedProjectRefs = {
-  production: "aodikrxcczbogjpsjwjt",
-  recovery: "matalcofimnhuzslfhdd",
-} as const;
-
-export function resolveRoomPinProjectRef(
-  read: (name: string) => string | undefined = (name) => Deno.env.get(name),
-): string {
-  const environment = read("RUNTIME_ENVIRONMENT")?.trim() ?? "";
-  const configuredProjectRef = read("SUPABASE_PROJECT_REF")?.trim() ?? "";
-
-  if (environment === "local" || environment === "test") {
-    if (!configuredProjectRef) throw new Error("local project ref required");
-    return configuredProjectRef;
-  }
-
-  if (environment !== "production" && environment !== "recovery") {
-    throw new Error("unsupported room PIN environment");
-  }
-
-  const approvedProjectRef = approvedHostedProjectRefs[environment];
-  const rawUrl = read("SUPABASE_URL")?.trim() ?? "";
-  const url = new URL(rawUrl);
-  if (
-    url.protocol !== "https:" ||
-    url.hostname !== `${approvedProjectRef}.supabase.co` ||
-    url.port !== "" ||
-    url.username !== "" ||
-    url.password !== "" ||
-    (url.pathname !== "" && url.pathname !== "/") ||
-    url.search !== "" ||
-    url.hash !== ""
-  ) {
-    throw new Error("unapproved hosted project URL");
-  }
-  if (
-    configuredProjectRef !== "" && configuredProjectRef !== approvedProjectRef
-  ) {
-    throw new Error("hosted project ref mismatch");
-  }
-  return approvedProjectRef;
-}
 
 function uuid(value: unknown, field: string): string {
   if (typeof value !== "string" || !uuidPattern.test(value)) {
@@ -127,16 +85,23 @@ async function hash(value: unknown): Promise<string> {
 
 function config(): RoomPinCryptoConfig {
   try {
-    const keyring = JSON.parse(requiredEnv("ROOM_PIN_KEYRING_JSON")) as Record<
+    const objectKeyring = (name: string): Record<string, unknown> => {
+      const value = JSON.parse(requiredEnv(name)) as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("keyring object required");
+      }
+      return value as Record<string, unknown>;
+    };
+    const keyring = objectKeyring("ROOM_PIN_KEYRING_JSON") as Record<
       string,
       string
     >;
-    const reservationKeyring = JSON.parse(
-      requiredEnv("RESERVATION_PII_KEYRING_JSON"),
-    ) as Record<string, unknown>;
-    const webPushKeyring = JSON.parse(
-      requiredEnv("WEB_PUSH_SUBSCRIPTION_KEYRING_JSON"),
-    ) as Record<string, unknown>;
+    const reservationKeyring = objectKeyring(
+      "RESERVATION_PII_KEYRING_JSON",
+    );
+    const webPushKeyring = objectKeyring(
+      "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+    );
     const currentKey = requiredEnv("ROOM_PIN_KEY_BASE64");
     const roomPinKeys = [
       currentKey,
@@ -149,8 +114,6 @@ function config(): RoomPinCryptoConfig {
       ...Object.values(webPushKeyring),
     ];
     if (
-      !reservationKeyring || Array.isArray(reservationKeyring) ||
-      !webPushKeyring || Array.isArray(webPushKeyring) ||
       roomPinKeys.some((key) => otherPurposeKeys.includes(key))
     ) {
       throw new Error("purpose-specific key required");
@@ -160,7 +123,7 @@ function config(): RoomPinCryptoConfig {
       keyVersion: requiredEnv("ROOM_PIN_KEY_VERSION"),
       keyring,
       environment: requiredEnv("RUNTIME_ENVIRONMENT"),
-      projectRef: resolveRoomPinProjectRef(),
+      projectRef: requiredEnv("SUPABASE_PROJECT_REF"),
     };
   } catch {
     throw new EdgeError(

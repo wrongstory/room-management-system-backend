@@ -1,10 +1,20 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
+  assertInspectionResponseSize,
+  decodeInspectionCursor,
+  encodeInspectionCursor,
+  INSPECTION_CURSOR_MAX_LENGTH,
+  INSPECTION_PAGE_DEFAULT,
+  INSPECTION_PAGE_MAX,
+  inspectionCursorScope,
+} from "./inspection-cursor.ts";
+import {
   type EdgeActor,
   type EdgeClients,
   EdgeError,
   requireBusinessAdmin,
   requirePasswordChanged,
+  verifiedRequestSessionId,
 } from "./runtime.ts";
 
 const uuidPattern =
@@ -115,6 +125,8 @@ export function submissionDatabaseError(
     INVALID_BOMB_DECISION: 400,
     SUBMISSION_NOT_FOUND: 404,
     CHECKOUT_INCIDENT_OPEN: 409,
+    INSPECTION_PAGE_LIMIT_INVALID: 400,
+    INVALID_INSPECTION_CURSOR: 400,
   };
   if (Object.hasOwn(status, code)) {
     return new EdgeError(
@@ -411,6 +423,75 @@ export async function listSubmissions(
   if (!Array.isArray(value)) throw submissionDatabaseError(null);
   const includeAdminReviewContext = attemptId === undefined;
   return value.map((item) => publicProjection(item, includeAdminReviewContext));
+}
+
+export async function listPendingInspections(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+) {
+  admin(actor);
+  const search = new URL(request.url).searchParams;
+  for (const name of search.keys()) {
+    if (
+      !["limit", "cursor"].includes(name) || search.getAll(name).length !== 1
+    ) invalid();
+  }
+  const rawLimit = search.get("limit");
+  if (rawLimit !== null && !/^[1-9]\d*$/.test(rawLimit)) invalid();
+  const limit = rawLimit === null ? INSPECTION_PAGE_DEFAULT : Number(rawLimit);
+  if (
+    !Number.isSafeInteger(limit) || limit < 1 || limit > INSPECTION_PAGE_MAX
+  ) {
+    invalid();
+  }
+  const rawCursor = search.get("cursor");
+  if (
+    rawCursor !== null &&
+    (rawCursor.length < 1 || rawCursor.length > INSPECTION_CURSOR_MAX_LENGTH)
+  ) {
+    throw new EdgeError(
+      400,
+      "INVALID_INSPECTION_CURSOR",
+      "검수 cursor가 올바르지 않습니다.",
+    );
+  }
+  const scope = inspectionCursorScope(actor);
+  const after = rawCursor
+    ? await decodeInspectionCursor(rawCursor, scope)
+    : null;
+  const page = object(
+    await rpc(clients, "list_cleaning_inspections_page", {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+      p_after_submitted_at: after?.submittedAt ?? null,
+      p_after_id: after?.id ?? null,
+      p_limit: limit,
+    }),
+  );
+  if (!Array.isArray(page.submissions) || typeof page.hasMore !== "boolean") {
+    throw submissionDatabaseError(null);
+  }
+  const submissions = page.submissions.map((item) =>
+    publicProjection(item, true)
+  );
+  let nextCursor: string | null = null;
+  if (page.hasMore) {
+    if (
+      typeof page.lastSubmittedAt !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+        .test(page.lastSubmittedAt) ||
+      !Number.isFinite(Date.parse(page.lastSubmittedAt)) ||
+      typeof page.lastId !== "string"
+    ) throw submissionDatabaseError(null);
+    nextCursor = await encodeInspectionCursor(scope, {
+      submittedAt: page.lastSubmittedAt,
+      id: uuid(page.lastId),
+    });
+  }
+  const result = { submissions, hasMore: page.hasMore, nextCursor };
+  assertInspectionResponseSize(result);
+  return result;
 }
 
 export async function getSubmission(

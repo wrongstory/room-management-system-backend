@@ -4,7 +4,6 @@ import {
   finishRoomPinChange,
   generateUniqueFourDigitPins,
   prepareRoomPinChange,
-  resolveRoomPinProjectRef,
   revealRoomPin,
   roomPinPath,
 } from "./room-pin-api.ts";
@@ -45,131 +44,6 @@ function configure(): void {
   Deno.env.set("RUNTIME_ENVIRONMENT", "test");
   Deno.env.set("SUPABASE_PROJECT_REF", "local-ref");
 }
-
-function env(values: Record<string, string | undefined>) {
-  return (name: string): string | undefined => values[name];
-}
-
-Deno.test("room PIN project binding derives only approved hosted refs and preserves explicit local refs", () => {
-  assert(
-    resolveRoomPinProjectRef(env({
-      RUNTIME_ENVIRONMENT: "production",
-      SUPABASE_URL: "https://aodikrxcczbogjpsjwjt.supabase.co",
-    })) === "aodikrxcczbogjpsjwjt",
-    "production ref derives from the approved hosted URL",
-  );
-  assert(
-    resolveRoomPinProjectRef(env({
-      RUNTIME_ENVIRONMENT: "recovery",
-      SUPABASE_URL: "https://matalcofimnhuzslfhdd.supabase.co/",
-    })) === "matalcofimnhuzslfhdd",
-    "recovery ref derives from the approved hosted URL",
-  );
-  assert(
-    resolveRoomPinProjectRef(env({
-      RUNTIME_ENVIRONMENT: "test",
-      SUPABASE_PROJECT_REF: "local-ref",
-    })) === "local-ref",
-    "test keeps its explicit synthetic ref",
-  );
-
-  for (
-    const values of [
-      {
-        RUNTIME_ENVIRONMENT: "production",
-        SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co",
-      },
-      {
-        RUNTIME_ENVIRONMENT: "production",
-        SUPABASE_URL: "https://aodikrxcczbogjpsjwjt.supabase.co.evil.example",
-      },
-      {
-        RUNTIME_ENVIRONMENT: "production",
-        SUPABASE_URL: "https://aodikrxcczbogjpsjwjt.supabase.co/rest/v1",
-      },
-      {
-        RUNTIME_ENVIRONMENT: "production",
-        SUPABASE_URL: "https://aodikrxcczbogjpsjwjt.supabase.co",
-        SUPABASE_PROJECT_REF: "matalcofimnhuzslfhdd",
-      },
-      {
-        RUNTIME_ENVIRONMENT: "local",
-        SUPABASE_PROJECT_REF: undefined,
-      },
-    ]
-  ) {
-    let failed = false;
-    try {
-      resolveRoomPinProjectRef(env(values));
-    } catch {
-      failed = true;
-    }
-    assert(failed, "unapproved or mismatched project binding fails closed");
-  }
-});
-
-Deno.test("hosted initial PIN prepare binds the approved ref without a reserved custom secret", async () => {
-  configure();
-  Deno.env.set("RUNTIME_ENVIRONMENT", "production");
-  Deno.env.set(
-    "SUPABASE_URL",
-    "https://aodikrxcczbogjpsjwjt.supabase.co",
-  );
-  Deno.env.delete("SUPABASE_PROJECT_REF");
-  let prepareArgs: Record<string, unknown> | undefined;
-  const clients = {
-    admin: {
-      rpc(name: string, args: Record<string, unknown>) {
-        if (name === "get_room_pin_change_context") {
-          return Promise.resolve({
-            data: {
-              room_number: "0101",
-              current_pin_version: 0,
-              proposed_pin_version: 1,
-            },
-            error: null,
-          });
-        }
-        prepareArgs = args;
-        return Promise.resolve({
-          data: {
-            lease_id: leaseId,
-            room_id: roomId,
-            current_pin_version: 0,
-            proposed_pin_version: 1,
-            status: "prepared",
-            expires_at: new Date(Date.now() + 300_000).toISOString(),
-            replay: false,
-          },
-          error: null,
-        });
-      },
-    },
-  } as unknown as EdgeClients;
-  try {
-    await prepareRoomPinChange(
-      command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
-        pinDigits: "0012",
-        expectedPinVersion: 0,
-        reasonCode: "ADMIN_PHYSICAL_CHANGE",
-      }),
-      clients,
-      actor,
-      sessionId,
-      roomId,
-    );
-    assert(
-      prepareArgs?.p_aad_project_ref === "aodikrxcczbogjpsjwjt",
-      "hosted prepare uses the approved derived project ref",
-    );
-    assert(
-      prepareArgs?.p_aad_environment === "production",
-      "hosted prepare preserves the environment binding",
-    );
-  } finally {
-    configure();
-  }
-});
 
 Deno.test("room PIN crypto config rejects cross-purpose key reuse safely", async () => {
   configure();
@@ -212,6 +86,56 @@ Deno.test("room PIN crypto config rejects cross-purpose key reuse safely", async
   } finally {
     configure();
   }
+});
+
+Deno.test("room PIN crypto config requires object-shaped keyrings", async () => {
+  const priorKey = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+  for (const invalid of [[priorKey], null, "scalar", 1, true]) {
+    configure();
+    Deno.env.set("ROOM_PIN_KEYRING_JSON", JSON.stringify(invalid));
+    let mutationCalls = 0;
+    const clients = {
+      admin: {
+        rpc(name: string) {
+          if (name === "get_room_pin_change_context") {
+            return Promise.resolve({
+              data: {
+                room_number: "101",
+                current_pin_version: 0,
+                proposed_pin_version: 1,
+              },
+              error: null,
+            });
+          }
+          mutationCalls += 1;
+          return Promise.resolve({ data: {}, error: null });
+        },
+      },
+    } as unknown as EdgeClients;
+    try {
+      await prepareRoomPinChange(
+        command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+          expectedPinVersion: 0,
+          pinDigits: "0012",
+          reasonCode: "ADMIN_INITIAL_PIN",
+        }),
+        clients,
+        actor,
+        sessionId,
+        roomId,
+      );
+      throw new Error("expected object keyring validation failure");
+    } catch (error) {
+      assert(error instanceof EdgeError, "safe edge error");
+      assert(error.status === 503, "stable config status");
+      assert(
+        error.code === "ROOM_PIN_CRYPTO_CONFIG_INVALID",
+        "stable config code",
+      );
+      assert(mutationCalls === 0, "invalid keyring never reaches mutation RPC");
+    }
+  }
+  configure();
 });
 
 function command(

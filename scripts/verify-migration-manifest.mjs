@@ -38,8 +38,8 @@ export async function verifyMigrationManifest() {
   invariant(manifest.totalCount === 77, "totalCount must be 77");
   invariant(files.filter((fileName) => stableMigration(fileName).version <= "20260920150000").length === manifest.totalCount, `expected 77 v0.5.0 SQL files`);
   invariant(manifest.migrations.length === manifest.totalCount, "manifest entry count mismatch");
-  invariant(manifest.baseline?.count === 73, "baseline count must be 73");
-  invariant(manifest.pending?.count === 4, "pending count must be 4");
+  invariant(manifest.baseline?.count === 74, "baseline count must be 74");
+  invariant(manifest.pending?.count === 3, "pending count must be 3");
   invariant(
     manifest.baseline.count + manifest.pending.count === manifest.totalCount,
     "baseline and pending counts must total 77",

@@ -21,7 +21,8 @@ function canonicalContent(source, fileName) {
 
 const files = (await readdir(migrationDirectory))
   .filter((fileName) => fileName.endsWith(".sql"))
-  .sort();
+  .sort()
+  .slice(0, 78);
 
 const migrations = [];
 let previousVersion = "";

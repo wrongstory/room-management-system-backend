@@ -1,4 +1,4 @@
-# Python 백엔드 운영 콘솔 Phase A 운영 가이드
+# Python 백엔드 운영 콘솔 Phase A / Phase B 로컬 PoC 운영 가이드
 
 ## 목적과 보안 경계
 
@@ -6,16 +6,19 @@
 운영 Supabase Edge API에 로그인해 business admin/maid 계정과 안전한 운영 projection을
 관리한다.
 
-Phase A에는 다음이 **없다**.
+Phase A GUI에는 다음이 **없다**.
 
-- DB connection string, Shared Pooler, `psycopg`
+- DB connection string, Shared Pooler 직접 연결
 - service-role/secret key
 - SQL editor 또는 migration 실행
 - Vault/Cron/secret 변경
 - 별도 서버나 유료 상시 process
 
-DB 직접 진단과 maintenance action catalog는 #44 Phase B/C의 별도 보안 검토 전까지
-비활성이다.
+#172 Phase B 로컬 PoC에 이어 #44는 hosted Session Pooler 연결 화면을 source에 추가한다.
+기본 설정은 비활성이며, 별도 승인 뒤에도 host/project/password를 실행 중에만 입력한다. 실제
+production/recovery role password provision과 hosted smoke 전에는 운영 활성화로 간주하지 않는다.
+maintenance action catalog는 #44 Phase C 전까지 비활성이다. 상세 경계는
+[읽기 전용 DB 진단 PoC](./BACKEND_CONSOLE_READONLY_DIAGNOSTICS.md)를 따른다.
 
 ## 설치
 
@@ -45,16 +48,22 @@ uv sync --python 3.12 --frozen
 uv run --python 3.12 python scripts/build.py
 ```
 
-`dist/RoomManagementBackendConsole-windows-x64.zip`과 SHA-256 파일이 생성된다. artifact에는
-`config.json`, developer 비밀번호, token, service secret이 포함되지 않는다. 압축을 승인된
-폴더에 풀고 `config.example.json`을 `config.json`으로 복사한 뒤 실행한다.
+`dist/RoomManagementBackendConsole-windows-x64.zip`과 SHA-256 파일이 생성된다. 배포 빌드는
+변경 파일이 없는 Git 작업 트리에서만 허용하며, artifact의 `build-info.json`에는 앱 버전과
+정확한 source commit SHA만 기록한다. 로그인과 메인 화면에서 이 버전과 source SHA 앞 12자를
+항상 확인할 수 있다. manifest가 없거나 앱 버전·SHA 형식이 맞지 않으면 `SOURCE: UNVERIFIED`로
+표시하고 임의 source를 추정하지 않는다.
+
+artifact에는 `config.json`, developer 비밀번호, token, service secret이 포함되지 않는다.
+압축을 승인된 폴더에 풀고 `config.example.json`을 `config.json`으로 복사한 뒤 실행한다.
 
 초기 버전은 자동 업데이트와 Authenticode 서명을 제공하지 않는다. release 담당자가 GitHub
 승인 source에서 직접 생성한 checksum과 전달 파일을 대조한다.
 
 ## 운영 절차
 
-1. 상단의 `환경: PRODUCTION|RECOVERY|LOCAL`과 `PROJECT`를 색이 아닌 텍스트로 확인한다.
+1. 상단의 `환경: PRODUCTION|RECOVERY|LOCAL`, `PROJECT`, 앱 버전과 `SOURCE`를 색이 아닌
+   텍스트로 확인한다. `SOURCE: UNVERIFIED`인 배포본은 운영 계정으로 사용하지 않는다.
 2. 고정 developer ID `admin`과 사용자가 직접 입력한 비밀번호로 로그인한다.
 3. 운영 대시보드에서 migration drift, RLS, scheduler, 사진 purge의 bounded backlog/heartbeat, secret configured 여부를 확인한다. purge secret·Drive locator·claim digest 원문은 콘솔이나 보고서에서 조회하지 않는다.
 4. 계정 목록에서 business admin/maid만 생성·변경한다.
@@ -66,6 +75,16 @@ uv run --python 3.12 python scripts/build.py
 9. network/5xx로 결과가 불확실하면 같은 입력으로 재시도한다. 프로세스 메모리의 동일
    idempotency key가 재사용된다. 다른 입력은 fail-closed된다.
 10. 작업 후 `잠금 및 로그아웃`을 누르거나 앱을 종료한다. 일정 시간 미사용 시 자동 잠금된다.
+
+### 선택적 hosted 읽기 전용 DB 진단
+
+1. 운영 승인을 받은 경우에만 `config.json`의 `enableHostedReadonlyDb`를 `true`로 설정한다.
+2. Supabase Dashboard의 Connect 화면에서 Session Pooler host를 복사한다. host를 region으로
+   조합하거나 transaction port `6543`으로 바꾸지 않는다.
+3. `DB 읽기 전용` 탭에서 project ref를 다시 입력하고 runtime DB password를 입력한다.
+4. 세 집계 view만 대상으로 하는 단일 SELECT를 실행한다. password는 실행 즉시 화면에서 지워진다.
+5. 실행이 끝나면 connection은 닫힌다. password/DSN/query/result를 파일이나 로그에 남기지 않는다.
+6. hosted role provision과 smoke가 완료되지 않은 환경에서는 flag를 계속 `false`로 둔다.
 
 developer 계정, 마지막 active business admin, developer로의 승격은 서버 DB 계약과 GUI
 양쪽에서 차단된다. GUI 버튼이 보이지 않거나 비활성인 것을 서버 권한의 대체로 보지 않는다.

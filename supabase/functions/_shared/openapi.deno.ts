@@ -14,6 +14,30 @@ Deno.test("OpenAPI publishes the v0.5.1 bookability hotfix contract", async () =
   );
 });
 
+Deno.test("work history OpenAPI publishes the stable runtime error contract", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const errorCodes = document.components.schemas.ErrorCode
+    .enum as readonly string[];
+  const operation = document.paths["/v1/work-history"].get;
+  for (
+    const code of [
+      "INVALID_WORK_HISTORY_QUERY",
+      "INVALID_WORK_HISTORY_CURSOR",
+      "WORK_HISTORY_ACCESS_REQUIRED",
+      "WORK_HISTORY_MAID_SCOPE_REQUIRED",
+      "WORK_HISTORY_MAID_NOT_FOUND",
+      "WORK_HISTORY_QUERY_FAILED",
+    ]
+  ) {
+    assert(errorCodes.includes(code), `${code} is published`);
+  }
+  assert(
+    operation.description.includes("INVALID_WORK_HISTORY_QUERY") &&
+      operation.description.includes("INVALID_WORK_HISTORY_CURSOR"),
+    "query and cursor failures are documented separately",
+  );
+});
+
 Deno.test("developer room catalog OpenAPI exposes six developer-only safe operations", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const operations = [
@@ -195,13 +219,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 128 &&
+    Object.keys(document.paths).length === 129 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 138,
-    "combined candidate contract 128/138",
+        ).length === 139,
+    "combined candidate contract 129/139",
   );
 });
 
@@ -863,6 +887,54 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
       serialized.includes('"^(?:[1-9]|[1-4][0-9]|50)$"'),
     "room event contract must publish stable identity, actor/entity fields, and canonical limit",
   );
+  for (
+    const operation of [
+      document.paths["/v1/rooms/{roomId}/operation-blocks"].get,
+      document.paths["/v1/rooms/{roomId}/issues"].get,
+    ]
+  ) {
+    const typed = operation as unknown as {
+      parameters: Array<{ name: string; schema: Record<string, unknown> }>;
+      responses: Record<string, unknown>;
+    };
+    const limit = typed.parameters.find((item) => item.name === "limit");
+    const cursor = typed.parameters.find((item) => item.name === "cursor");
+    assert(
+      limit?.schema.default === 50 && limit.schema.maximum === 100 &&
+        cursor?.schema.maxLength === 1024 && typed.responses["503"],
+      "room operation reads publish bounded signed keyset pagination",
+    );
+  }
+  for (
+    const schema of [
+      document.components.schemas.RoomOperationBlocksEnvelope,
+      document.components.schemas.RoomIssuesEnvelope,
+    ]
+  ) {
+    assert(
+      schema.required.includes("hasMore") &&
+        schema.required.includes("nextCursor") &&
+        schema.properties.items.maxItems === 100,
+      "room operation envelope publishes bounded page metadata",
+    );
+  }
+  for (
+    const code of [
+      "INVALID_ROOM_OPERATION_QUERY",
+      "INVALID_ROOM_OPERATION_CURSOR",
+      "ROOM_OPERATION_CURSOR_NOT_CONFIGURED",
+      "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+      "ROOM_OPERATION_RESPONSE_TOO_LARGE",
+    ]
+  ) {
+    assert(
+      (document.components.schemas.ErrorCode.enum as readonly string[])
+        .includes(
+          code,
+        ),
+      `${code} must be documented`,
+    );
+  }
   assert(
     serialized.includes('"ASSIGNMENT_VERSION_CONFLICT"') &&
       serialized.includes('"ASSIGNMENT_SEQUENCE_CONFLICT"') &&
@@ -1476,7 +1548,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 73,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 74,
     "actual audit allowlist count",
   );
   assert(
@@ -1591,6 +1663,18 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
   );
   const reveal = doc.components.schemas.RoomPinReveal;
   const change = doc.components.schemas.RoomPinChangeResult;
+  assert(
+    doc.paths["/v1/rooms/{roomId}/pin/reveal"].post.description.includes(
+      "담당 메이드에게는 pinSyncStatus와 물리 도어락 확인이 reveal 권한 조건이 아니므로",
+    ) &&
+      doc.paths["/v1/rooms/{roomId}/pin/reveal"].post.description.includes(
+        "현재 저장 PIN",
+      ) &&
+      doc.paths["/v1/rooms/{roomId}/pin/reveal"].post.description.includes(
+        "admin 일반 reveal은 기존 verified sync 조건을 유지합니다",
+      ),
+    "maid reveal is immediate without expanding the admin ordinary reveal policy",
+  );
   assert(
     reveal.properties.credential.readOnly === true &&
       reveal.required.includes("credential") &&

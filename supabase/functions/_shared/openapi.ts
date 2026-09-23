@@ -581,10 +581,26 @@ export const openApiDocument = {
           "listPendingInspections",
           "검수 대상 목록 조회",
           "admin",
-          "SubmissionListEnvelope",
+          "InspectionPageEnvelope",
         ),
         description:
-          "current submitted version만 오래된 제출부터 최대 100건 반환합니다. 각 항목에는 immutable 검수 reviewContext가 포함됩니다. developer/maid는 관리자 전체 queue를 볼 수 없습니다. 100건 초과 cursor pagination은 후속 hardening 범위입니다.",
+          "current submitted version만 submittedAt, id 오름차순 keyset으로 반환합니다. limit 기본 50, 최대 100이며 opaque cursor는 관리자 ID·역할·검수 queue·고정 정렬에 서명됩니다. 각 항목에는 immutable 검수 reviewContext가 포함되고 전체 응답은 UTF-8 JSON 128 KiB로 제한됩니다. developer/maid, 비활성·비밀번호 변경 필요·폐기 session은 관리자 queue를 볼 수 없습니다.",
+        parameters: [
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description:
+              "직전 응답 nextCursor의 opaque 서명값. 다른 관리자·queue·정렬에 재사용하거나 수정하지 않습니다.",
+          },
+        ],
       },
     },
     "/v1/inspections/{submissionId}": {
@@ -1607,7 +1623,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 73,
+              maxItems: 74,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -2005,6 +2021,20 @@ export const openApiDocument = {
         "admin",
         "cleaningTargetId",
       ),
+    },
+    "/v1/assignments/{cleaningTargetId}/unavailable-cancel": {
+      post: {
+        ...prestartOperation(
+          "cancelUnavailableCleaningAssignment",
+          "수행 불가 메이드 담당 종료 및 일반 재배정 대기",
+          "AssignmentUnavailabilityCancellationRequest",
+          "AssignmentUnavailabilityCancellation",
+          "admin",
+          "cleaningTargetId",
+        ),
+        description:
+          "active business admin이 현재 assignment/target/attempt CAS를 확인한 뒤 퇴사·부상·기타 수행 불가 담당을 종료합니다. scheduled attempt는 superseded, in_progress attempt는 interrupted로 보존하며 PIN·offline·제한 capability를 회수합니다. 일반 작업은 같은 target을 unassigned로 유지하고, 0원 inspection reclean은 과거 원장을 취소 보존한 뒤 정상 fee snapshot을 가진 별도 미배정 replacement target을 만듭니다. 후임자는 이 명령에서 정하지 않으며 기존 draft/commit 경로로 배정합니다. 이전 메이드 earning은 만들지 않고 관리자에게 재배정 알림을 남깁니다.",
+      },
     },
     "/v1/assignments/{cleaningTargetId}/cancellation-requests": {
       post: prestartOperation(
@@ -2565,7 +2595,7 @@ export const openApiDocument = {
         operationId: "previewAssignments",
         summary: "배정 가능 수·요금 균형·동선 기반 배정 초안 계산",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용이며 KST 오늘/내일만 허용합니다. 예상 시간 정책은 폐기되어 없어도 실행되며 template durationMinutes, 객실 타입 기본값, 임의 1분을 판단에 사용하지 않습니다. availableFrom/dueAt과 실제 예약 구간처럼 명시된 사실만 검증하고 가상 종료시각을 만들지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 배정 가능 target 수 → 요금 격차/편차와 기존/reclean 제약 → 구역/호수 → 결정적 동률 순서로 비교합니다. previewSeed는 상관관계 호환 필드이며 동률 결정을 바꾸지 않습니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
+          "비밀번호 변경을 완료한 active business admin 전용이며 KST 오늘/내일만 허용합니다. 예상 시간 정책은 폐기되어 없어도 실행되며 template durationMinutes, 객실 타입 기본값, 임의 1분을 판단에 사용하지 않습니다. availableFrom/dueAt과 실제 예약 구간처럼 명시된 사실만 검증하고 가상 종료시각을 만들지 않습니다. 진행 중인 메이드도 현재 업무를 고정한 채 당일 후속 sequence의 계획 후보가 될 수 있으나 동시 현장 시작은 허용하지 않습니다. 성공 preview는 assignment/attempt/audit/receipt/알림을 만들지 않습니다. 배정 가능 target 수 → 요금 격차/편차와 기존/reclean 제약 → 구역/호수 → 결정적 동률 순서로 비교합니다. previewSeed는 상관관계 호환 필드이며 동률 결정을 바꾸지 않습니다. 저장과 통보는 기존 draft/commit API에서 CAS를 다시 검증해야 합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         requestBody: {
@@ -2793,7 +2823,7 @@ export const openApiDocument = {
         operationId: "listWorkHistory",
         summary: "주간 업무 기록 조회",
         description:
-          "active/password-complete admin과 maid의 live session 전용입니다. KST 월요일부터 일요일까지 current availability의 가능일, immutable notified assignment 이력, fieldCompletedAt의 실제 KST 완료일을 독립 flag로 반환합니다. 같은 메이드·날짜의 여러 작업은 1일로 집계합니다. maidDisplayName은 과거 snapshot이 아니라 현재 profile 표시명입니다.",
+          "active/password-complete admin과 maid의 live session 전용입니다. KST 월요일부터 일요일까지 current availability의 가능일, immutable notified assignment 이력, fieldCompletedAt의 실제 KST 완료일을 독립 flag로 반환합니다. 같은 메이드·날짜의 여러 작업은 1일로 집계합니다. maidDisplayName은 과거 snapshot이 아니라 현재 profile 표시명입니다. 잘못된 query/cursor는 각각 INVALID_WORK_HISTORY_QUERY/INVALID_WORK_HISTORY_CURSOR로 반환하며 Fastify와 Edge가 같은 stable 오류 계약을 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -4367,7 +4397,7 @@ export const openApiDocument = {
         operationId: "listRoomOperationBlocks",
         summary: "객실 운영 차단 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. actionable은 해제되지 않은 차단 전체를 뜻하며 미래 scheduled, 현재 active, 시간이 지난 expired 항목을 모두 반환합니다. 반환된 id와 roomStateVersion은 차단 해제 명령에 그대로 사용합니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. actionable은 해제되지 않은 차단 전체를 뜻하며 미래 scheduled, 현재 active, 시간이 지난 expired 항목을 모두 반환합니다. startsAt,id 내림차순 keyset으로 limit 기본 50·최대 100이며 opaque cursor는 actor·roomId·status·stream·sort에 서명됩니다. 반환된 id와 roomStateVersion은 차단 해제 명령에 그대로 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -4381,6 +4411,19 @@ export const openApiDocument = {
               enum: ["actionable"],
               default: "actionable",
             },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description: "직전 응답 nextCursor의 opaque 서명값",
           },
         ],
         responses: {
@@ -4400,6 +4443,7 @@ export const openApiDocument = {
           "403": errorResponse,
           "404": errorResponse,
           "500": errorResponse,
+          "503": errorResponse,
         },
       },
       post: roomMutationOperation(
@@ -4458,7 +4502,7 @@ export const openApiDocument = {
         operationId: "listRoomIssues",
         summary: "객실 미해결 이슈 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. status=open인 미해결 이슈만 반환하며 반환된 id와 roomStateVersion은 이슈 해결 명령에 그대로 사용합니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. status=open인 미해결 이슈를 reportedAt,id 내림차순 keyset으로 조회합니다. limit 기본 50·최대 100이며 opaque cursor는 actor·roomId·status·stream·sort에 서명됩니다. 반환된 id와 roomStateVersion은 이슈 해결 명령에 그대로 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -4468,6 +4512,19 @@ export const openApiDocument = {
             in: "query",
             required: false,
             schema: { type: "string", enum: ["open"], default: "open" },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+            description: "직전 응답 nextCursor의 opaque 서명값",
           },
         ],
         responses: {
@@ -4485,6 +4542,7 @@ export const openApiDocument = {
           "403": errorResponse,
           "404": errorResponse,
           "500": errorResponse,
+          "503": errorResponse,
         },
       },
       post: roomMutationOperation(
@@ -4608,7 +4666,7 @@ export const openApiDocument = {
         operationId: "prepareRoomPinChange",
         summary: "물리 도어락 PIN 변경 준비",
         description:
-          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 모든 PIN reveal이 차단되지만 예약 등록은 차단하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 admin 일반 reveal은 차단하지만 현재 통보된 담당 메이드의 일반 reveal과 예약 등록은 차단하지 않습니다. maid mismatch reveal은 authoritative current stored PIN을 반환하며 물리 도어락 일치를 의미하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter(), idempotencyHeader],
@@ -4733,7 +4791,7 @@ export const openApiDocument = {
         operationId: "revealRoomPin",
         summary: "현재 객실 PIN 일시 표시",
         description:
-          "30초 이하의 private reveal lease로 복호화한 뒤 세션·비밀번호·current PIN revision과 maid의 exact current/notified assignment entitlement를 DB에서 최종 재검증하고 sensitive.read append가 성공한 경우에만 plaintext credential을 반환합니다. entitlement는 통보 delivery outbox와 함께 확정되어 availableFrom 전에도 유효하고 field completion·upload·submission·inspection pending 동안 유지되며, 최종 승인/반려·승인 취소·재배정·계정 비활성화 workflow의 최종 정리·PIN rotation 때 즉시 종료됩니다. deactivation_pending/upload_only 동안 원장 이력은 유지되지만 active가 아닌 계정의 실제 reveal은 차단됩니다. 클라이언트는 clearAfterSeconds와 expiresAt 중 더 이른 시점 또는 화면 이동·background·pagehide·device lock·assignment removal·relock 즉시 plaintext를 지워야 하며 URL, clipboard, cache, offline 또는 영구 저장소에 기록하면 안 됩니다.",
+          "30초 이하의 private reveal lease로 복호화한 뒤 세션·비밀번호·current PIN revision과 maid의 exact current/notified assignment entitlement를 DB에서 최종 재검증하고 sensitive.read append가 성공한 경우에만 plaintext credential을 반환합니다. 담당 메이드에게는 pinSyncStatus와 물리 도어락 확인이 reveal 권한 조건이 아니므로 mismatch에서도 현재 저장 PIN을 즉시 반환하며, 이 값이 물리 도어락과 일치한다는 의미는 아닙니다. admin 일반 reveal은 기존 verified sync 조건을 유지합니다. entitlement는 통보 delivery outbox와 함께 확정되어 availableFrom 전에도 유효하고 field completion·upload·submission·inspection pending 동안 유지되며, 최종 승인/반려·승인 취소·재배정·계정 비활성화 workflow의 최종 정리·PIN rotation 때 즉시 종료됩니다. deactivation_pending/upload_only 동안 원장 이력은 유지되지만 active가 아닌 계정의 실제 reveal은 차단됩니다. 클라이언트는 clearAfterSeconds와 expiresAt 중 더 이른 시점 또는 화면 이동·background·pagehide·device lock·assignment removal·relock 즉시 plaintext를 지워야 하며 URL, clipboard, cache, offline 또는 영구 저장소에 기록하면 안 됩니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter()],
@@ -5410,6 +5468,28 @@ export const openApiDocument = {
             type: "array",
             maxItems: 100,
             items: { $ref: "#/components/schemas/CleaningSubmission" },
+          },
+        },
+      },
+      InspectionPageEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["submissions", "hasMore", "nextCursor"],
+        properties: {
+          submissions: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/CleaningSubmission" },
+          },
+          hasMore: {
+            type: "boolean",
+            description: "후속 page가 존재하는지 여부",
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            maxLength: 1024,
+            description:
+              "다음 페이지가 있을 때만 반환하는 opaque signed cursor",
           },
         },
       },
@@ -6361,6 +6441,21 @@ export const openApiDocument = {
           "RECLEAN_TEMPLATE_NOT_CONFIGURED",
           "COMPLAINT_INVALID_TRANSITION",
           "COMPLAINT_COMMAND_FAILED",
+          "INVALID_INSPECTION_CURSOR",
+          "INSPECTION_CURSOR_NOT_CONFIGURED",
+          "INSPECTION_PAGE_LIMIT_INVALID",
+          "INSPECTION_RESPONSE_TOO_LARGE",
+          "INVALID_WORK_HISTORY_QUERY",
+          "INVALID_WORK_HISTORY_CURSOR",
+          "WORK_HISTORY_ACCESS_REQUIRED",
+          "WORK_HISTORY_MAID_SCOPE_REQUIRED",
+          "WORK_HISTORY_MAID_NOT_FOUND",
+          "WORK_HISTORY_QUERY_FAILED",
+          "INVALID_ROOM_OPERATION_QUERY",
+          "INVALID_ROOM_OPERATION_CURSOR",
+          "ROOM_OPERATION_CURSOR_NOT_CONFIGURED",
+          "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+          "ROOM_OPERATION_RESPONSE_TOO_LARGE",
           "NOTIFICATION_ACCESS_REQUIRED",
           "NOTIFICATION_NOT_FOUND",
           "INVALID_NOTIFICATION_CURSOR",
@@ -6783,6 +6878,7 @@ export const openApiDocument = {
           "assignment.prestart_unassigned",
           "assignment.cancellation_requested",
           "assignment.cancellation_decided",
+          "assignment.unavailability_cancelled",
           "assignment.attempt_activated",
           "assignment.rolled_over",
           "assignment.duration_policy_confirmed",
@@ -6920,6 +7016,7 @@ export const openApiDocument = {
               "PHOTO_PURGE_INVOKE_SECRET",
               "PAYROLL_CURSOR_HMAC_SECRET",
               "NOTIFICATION_CURSOR_HMAC_SECRET",
+              "INSPECTION_CURSOR_HMAC_SECRET",
               "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
               "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
               "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
@@ -6957,6 +7054,7 @@ export const openApiDocument = {
                 "PHOTO_PURGE_INVOKE_SECRET",
                 "PAYROLL_CURSOR_HMAC_SECRET",
                 "NOTIFICATION_CURSOR_HMAC_SECRET",
+                "INSPECTION_CURSOR_HMAC_SECRET",
                 "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
                 "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
                 "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
@@ -7429,6 +7527,7 @@ export const openApiDocument = {
               maidProfileId: { type: "string", format: "uuid" },
               cleaningTargetId: { type: "string", format: "uuid" },
               assignmentId: { type: "string", format: "uuid" },
+              replacementTargetId: { type: "string", format: "uuid" },
               previousAssignmentId: { type: "string", format: "uuid" },
               previousMaidProfileId: { type: "string", format: "uuid" },
               requestId: { type: "string", format: "uuid" },
@@ -7742,6 +7841,47 @@ export const openApiDocument = {
       },
       AssignmentPrestartChangeRequest: prestartRequestSchema("change"),
       AssignmentPrestartUnassignRequest: prestartRequestSchema("unassign"),
+      AssignmentUnavailabilityCancellationRequest: prestartRequestSchema(
+        "unavailable",
+      ),
+      AssignmentUnavailabilityCancellation: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cancellationId",
+          "cleaningTargetId",
+          "assignmentId",
+          "attemptId",
+          "maidProfileId",
+          "reasonCode",
+          "replacementTargetId",
+          "status",
+          "targetAssignmentVersion",
+          "effectiveAt",
+          "recordedAt",
+        ],
+        properties: {
+          cancellationId: { type: "string", format: "uuid" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          attemptId: { type: ["string", "null"], format: "uuid" },
+          maidProfileId: { type: "string", format: "uuid" },
+          reasonCode: {
+            type: "string",
+            enum: ["MAID_DEPARTED", "MAID_INJURED", "MAID_UNAVAILABLE"],
+          },
+          replacementTargetId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "inspection reclean 예외에서만 생성되는 정상 유상 대체 target",
+          },
+          status: { type: "string", const: "unassigned" },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          effectiveAt: { type: "string", format: "date-time" },
+          recordedAt: { type: "string", format: "date-time" },
+        },
+      },
       AssignmentCancellationRequest: prestartRequestSchema("request"),
       AssignmentCancellationDecisionRequest: prestartRequestSchema("decision"),
       AssignmentChangeRequest: {
@@ -10499,15 +10639,25 @@ export const openApiDocument = {
       RoomOperationBlocksEnvelope: {
         type: "object",
         additionalProperties: false,
-        required: ["roomId", "roomStateVersion", "evaluatedAt", "items"],
+        required: [
+          "roomId",
+          "roomStateVersion",
+          "evaluatedAt",
+          "items",
+          "hasMore",
+          "nextCursor",
+        ],
         properties: {
           roomId: { type: "string", format: "uuid" },
           roomStateVersion: { type: "integer", minimum: 1 },
           evaluatedAt: { type: "string", format: "date-time" },
           items: {
             type: "array",
+            maxItems: 100,
             items: { $ref: "#/components/schemas/RoomOperationBlock" },
           },
+          hasMore: { type: "boolean" },
+          nextCursor: { type: ["string", "null"], maxLength: 1024 },
         },
       },
       RoomCandleRequest: {
@@ -10570,15 +10720,25 @@ export const openApiDocument = {
       RoomIssuesEnvelope: {
         type: "object",
         additionalProperties: false,
-        required: ["roomId", "roomStateVersion", "evaluatedAt", "items"],
+        required: [
+          "roomId",
+          "roomStateVersion",
+          "evaluatedAt",
+          "items",
+          "hasMore",
+          "nextCursor",
+        ],
         properties: {
           roomId: { type: "string", format: "uuid" },
           roomStateVersion: { type: "integer", minimum: 1 },
           evaluatedAt: { type: "string", format: "date-time" },
           items: {
             type: "array",
+            maxItems: 100,
             items: { $ref: "#/components/schemas/RoomIssue" },
           },
+          hasMore: { type: "boolean" },
+          nextCursor: { type: ["string", "null"], maxLength: 1024 },
         },
       },
       RoomEventSource: {
@@ -12458,7 +12618,7 @@ function prestartOperation(
 }
 
 function prestartRequestSchema(
-  action: "change" | "unassign" | "request" | "decision",
+  action: "change" | "unassign" | "request" | "decision" | "unavailable",
 ) {
   const properties: Record<string, unknown> = {
     expectedCurrentAssignmentId: { type: "string", format: "uuid" },
@@ -12474,6 +12634,8 @@ function prestartRequestSchema(
         ]
         : action === "decision"
         ? ["APPROVED", "REJECTED", "OPERATIONAL_CHANGE", "MAID_UNAVAILABLE"]
+        : action === "unavailable"
+        ? ["MAID_DEPARTED", "MAID_INJURED", "MAID_UNAVAILABLE"]
         : [
           "MAID_UNAVAILABLE",
           "SCHEDULE_CHANGED",
@@ -12512,6 +12674,21 @@ function prestartRequestSchema(
   if (action === "decision") {
     properties.decision = { type: "string", enum: ["approved", "rejected"] };
     required.push("decision");
+  }
+  if (action === "unavailable") {
+    properties.expectedAttemptId = {
+      type: ["string", "null"],
+      format: "uuid",
+      description:
+        "attempt가 아직 없으면 null. 현재 scheduled/in_progress attempt면 exact ID.",
+    };
+    properties.expectedExecutionVersion = {
+      type: ["integer", "null"],
+      minimum: 1,
+      description:
+        "expectedAttemptId가 null이면 null, 아니면 exact execution version.",
+    };
+    required.push("expectedAttemptId", "expectedExecutionVersion");
   }
   return { type: "object", additionalProperties: false, required, properties };
 }

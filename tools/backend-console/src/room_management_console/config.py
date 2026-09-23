@@ -19,6 +19,7 @@ class AppConfig:
     supabase_url: str
     publishable_key: str = field(repr=False)
     inactivity_minutes: int = 15
+    enable_hosted_readonly_db: bool = False
 
     def assert_approved_target(self) -> None:
         _validate_target(self.environment, self.project_ref, self.supabase_url)
@@ -86,6 +87,9 @@ def load_config(path: Path) -> AppConfig:
         raise ValueError("inactivityMinutes는 5~120 사이 정수여야 합니다.")
     if len(publishable_key) < 20 or any(character.isspace() for character in publishable_key):
         raise ValueError("publishableKey 형식이 올바르지 않습니다.")
+    enable_hosted_readonly_db = raw.get("enableHostedReadonlyDb", False)
+    if not isinstance(enable_hosted_readonly_db, bool):
+        raise ValueError("enableHostedReadonlyDb는 boolean이어야 합니다.")
 
     supabase_url = _validate_target(cast(Environment, environment), project_ref, supabase_url)
 
@@ -95,4 +99,5 @@ def load_config(path: Path) -> AppConfig:
         supabase_url=supabase_url,
         publishable_key=publishable_key,
         inactivity_minutes=inactivity,
+        enable_hosted_readonly_db=enable_hosted_readonly_db,
     )

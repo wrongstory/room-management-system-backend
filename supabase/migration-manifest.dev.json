@@ -1,0 +1,433 @@
+{
+  "schemaVersion": 1,
+  "release": "dev",
+  "hashAlgorithm": "sha256-lf-utf8",
+  "totalCount": 83,
+  "baseline": {
+    "count": 78,
+    "head": "reservation_bookability_optional_guest_count"
+  },
+  "pending": {
+    "count": 5,
+    "first": "assignment_unavailability_reassignment",
+    "head": "maid_pin_immediate_reveal"
+  },
+  "head": "maid_pin_immediate_reveal",
+  "migrations": [
+    {
+      "order": 1,
+      "name": "initial_core_schema",
+      "sha256": "34fa4c12bf62e984607d36d20bb1f71366b4b9b8a11a7bdfa4cb2f1cef4f4a5b"
+    },
+    {
+      "order": 2,
+      "name": "harden_data_api_grants",
+      "sha256": "0b0959d6d4d63e1859d22d21a3b72c2367f8c42a45d9aab82e7835b44905949c"
+    },
+    {
+      "order": 3,
+      "name": "account_lifecycle_contract",
+      "sha256": "40d893a25c0d4cbe62774ad100a4fbe268a0f59c5516e4b6003cce5af80f9765"
+    },
+    {
+      "order": 4,
+      "name": "harden_account_command_idempotency",
+      "sha256": "f82de58e633d28f72124f280a06396e8c429095d875102c7729c010b98e6216f"
+    },
+    {
+      "order": 5,
+      "name": "harden_domain_integrity",
+      "sha256": "9aaca2bc1383565172b9da8c7775e509cbc2bd7045eb6eed4218deb5e2b4ba2e"
+    },
+    {
+      "order": 6,
+      "name": "add_domain_integrity_indexes",
+      "sha256": "d45c7bfefd3615f81de34d3f88e8afa6ad95e23485ede6f16d3d93a2ec78f7eb"
+    },
+    {
+      "order": 7,
+      "name": "restrict_non_active_data_api_access",
+      "sha256": "65e80461fd3ea9ab653fc1aaea374268242c1c00f43a80c0a70b97bddbff47bd"
+    },
+    {
+      "order": 8,
+      "name": "close_reviewed_ledger_gaps",
+      "sha256": "4e38018d9b34439b34d0bd914a2c3d546108717daffd86a0f815817a1521b03b"
+    },
+    {
+      "order": 9,
+      "name": "allow_unsent_payroll_reopen",
+      "sha256": "4f928f686e298b31a28c256d049b722545294c992fd8881133b6293ac3196805"
+    },
+    {
+      "order": 10,
+      "name": "restrict_notification_recipient_updates",
+      "sha256": "c730aadddc9017e4b45d54ed786ba28a832e5257fd110b9d25ca13b6c27d964b"
+    },
+    {
+      "order": 11,
+      "name": "room_reservation_commands",
+      "sha256": "a1ac0cc8c0d66476109de87022c1b96497bfbe8ce0a387e61558d16614e3e9d2"
+    },
+    {
+      "order": 12,
+      "name": "weekly_availability_contract",
+      "sha256": "a4c1143a2d6025ee23e19c3ce6815cd0640799e8fc18b481e42e8a0a829fcf5f"
+    },
+    {
+      "order": 13,
+      "name": "add_developer_role",
+      "sha256": "90d4f827cc4d1e7ec8dd045107214f1e134017474e0bd1ee3927cb1260397b2b"
+    },
+    {
+      "order": 14,
+      "name": "developer_account_contract",
+      "sha256": "6381848fb8b404222597b86408b70128b8c9cdbd4f186cb41397efc821527bdb"
+    },
+    {
+      "order": 15,
+      "name": "edge_login_rate_limit",
+      "sha256": "f9af202a9ceb1227720279f6e99d5ea10f28ee0b1368353351cf61d984074337"
+    },
+    {
+      "order": 16,
+      "name": "harden_account_receipts_and_login_limits",
+      "sha256": "890b371c832ac4f6c73b073431a3583e0a068374d9ccc921a5761b4674ebe112"
+    },
+    {
+      "order": 17,
+      "name": "isolate_login_rate_limit_clients",
+      "sha256": "f799bcb75218506dd35bb1570d0b58d8b44208c7411a9a6407a054e356d781f5"
+    },
+    {
+      "order": 18,
+      "name": "developer_operations_projections",
+      "sha256": "2e36bc9529201493db0b53c5a6556f99ff59e4192862ca7504b0a5274eadc94a"
+    },
+    {
+      "order": 19,
+      "name": "actor_activity_audit_contract",
+      "sha256": "ec44d5432e93ef02ad630a67ac18070c1cb2ffd1b1abc016a50e937d6bc9201e"
+    },
+    {
+      "order": 20,
+      "name": "assignment_core",
+      "sha256": "544a76886a678e2220ae4215770edae7609934a57c9af112818af18898e5d23c"
+    },
+    {
+      "order": 21,
+      "name": "assignment_commit",
+      "sha256": "8b73807f653fde62db9b4ccff5dbcd610743bce66b6aa35c59af52a90dbaed09"
+    },
+    {
+      "order": 22,
+      "name": "planned_checkout_targets",
+      "sha256": "f0e7f0927c50cbca7ce14cb7e2b8e0cb0299e72c4abae6312e62206e05be88b6"
+    },
+    {
+      "order": 23,
+      "name": "assignment_prestart_change",
+      "sha256": "2a0cd9956af424f49016f856e5b4dac5828800b6c4a3a1f04c8d5be411aa859e"
+    },
+    {
+      "order": 24,
+      "name": "assignment_attempt_activation",
+      "sha256": "4d5e3b9eff9b43506ff3cfd9a9a6c7a053cb40dd02413f9a7a29c6e217514fe5"
+    },
+    {
+      "order": 25,
+      "name": "assignment_preview_duration_policy",
+      "sha256": "5df606f7d599cd9e7e26a34b158bf5ea4e7efd865eae5c244e0bb24d8d0b380d"
+    },
+    {
+      "order": 26,
+      "name": "maid_assignment_visibility",
+      "sha256": "30ee41f909b89868af88fd42141ddf0bbe122bab6b15e1e243e086d7f6eadd7c"
+    },
+    {
+      "order": 27,
+      "name": "attempt_execution_core",
+      "sha256": "2ac61ee8354abe0a9b8ac94a4a54fb98dece1d8e3ee206cf68073af4cca990bd"
+    },
+    {
+      "order": 28,
+      "name": "attempt_handover_limited_capability",
+      "sha256": "9f4b85d76c5e51a187459c1881967520ff0f5e64c0f0be0368850e916e8548e5"
+    },
+    {
+      "order": 29,
+      "name": "attempt_offline_lease_quarantine",
+      "sha256": "78b3b2737a63e5e936d2b467df8f303987f32417218cc7855dbc1ce1d1acc966"
+    },
+    {
+      "order": 30,
+      "name": "photo_submission_base",
+      "sha256": "fc03c8e68e97efce84fade2b29a3065d7663ad15dabec2a5569b0f7dc11938c5"
+    },
+    {
+      "order": 31,
+      "name": "photo_storage_operations",
+      "sha256": "7998d2b38e12d5665fd75b6e3201bc2e77a53d6ebea78e62c128beeceaf306df"
+    },
+    {
+      "order": 32,
+      "name": "photo_drive_upload_read",
+      "sha256": "82aad2c8dd2687db0da4c5db4292a481c6ee64772fa0547a26c8410600f7df43"
+    },
+    {
+      "order": 33,
+      "name": "photo_purge_reconciliation",
+      "sha256": "87232003021a993d2654f25f8bcb563a245b93868704c1a0211045b67a0cef8f"
+    },
+    {
+      "order": 34,
+      "name": "submission_inspection_reclean",
+      "sha256": "a698c64dbea4de29abaf695484cc7b4f11a425925dc10bdd6d8e8426063565b2"
+    },
+    {
+      "order": 35,
+      "name": "payroll_cycle_assembly_start",
+      "sha256": "9e2d7f79fa725f5bbb2f789e7b09c34b06ac0ad2c3b40118b0f16ce613363888"
+    },
+    {
+      "order": 36,
+      "name": "payroll_bounded_pagination",
+      "sha256": "cad3ee38369131a25d0fe0db4e71f111a5f5f7e12e6c05f4916920de7d09f1fa"
+    },
+    {
+      "order": 37,
+      "name": "complaint_lifecycle",
+      "sha256": "f6f303c8cbd69ef90340c2d86231ad44c018bc0d6473d518814a9389e4ed8914"
+    },
+    {
+      "order": 38,
+      "name": "complaint_compensation_earning",
+      "sha256": "aa3e963fe917d0da1aadb84a3eb05b2b33f3064f0170f0c57d42f91bade50e61"
+    },
+    {
+      "order": 39,
+      "name": "payroll_adjustments",
+      "sha256": "bbded11afbd4f005fde93c339bcb94230d6d83932582415b01380dc9e2d9e22d"
+    },
+    {
+      "order": 40,
+      "name": "payroll_payment_results",
+      "sha256": "83b9bdb4de9c1f75d32a3f712eb3afbc4c74c32596456f2ecb43078fdeb15546"
+    },
+    {
+      "order": 41,
+      "name": "notification_inbox_read_contract",
+      "sha256": "f5ffeb4e712da3345469b2643a123662271d7f7a3ada5308aeff764d7277d693"
+    },
+    {
+      "order": 42,
+      "name": "notification_catalog_grouping_writers",
+      "sha256": "3983162c630326a12e198172af5a4d0200765aedbe4c9568fd8db7be43aea1ba"
+    },
+    {
+      "order": 43,
+      "name": "web_push_subscription_revisions",
+      "sha256": "994ec198089520141adfb65410d4b2776f187562580d9313c1b9ddbc3f58a736"
+    },
+    {
+      "order": 44,
+      "name": "notification_delivery_worker",
+      "sha256": "938498fe8c92bb0014cc4d7efed36c9978b8d3287590dd15b05f7fea872b474b"
+    },
+    {
+      "order": 45,
+      "name": "web_push_vapid_binding",
+      "sha256": "784830d7171fd52d05a48db30e067f80a708ae7e3d30c7d7f8e8ab729bba13f3"
+    },
+    {
+      "order": 46,
+      "name": "planned_checkout_room_change_fk",
+      "sha256": "f8c365a452393dd15ffc817e323478aeedd68d9c93c85aeee67e6194f74cc4df"
+    },
+    {
+      "order": 47,
+      "name": "password_change_replay_receipt",
+      "sha256": "1075d68337513c9d6f6e06daa9cc132e4d1000390c636e1aff4ecae5baf323d6"
+    },
+    {
+      "order": 48,
+      "name": "assignment_notification_coverage",
+      "sha256": "d1b6d695eb6481c100cfcaf7bf436a39e5b23f70a15c6defe31465885011caf4"
+    },
+    {
+      "order": 49,
+      "name": "room_encrypted_pin_domain",
+      "sha256": "5a98e498c848aeb410fecc33d5d2c2d2ebbf2019555f5525783b9663f2db4adb"
+    },
+    {
+      "order": 50,
+      "name": "room_pin_sheet_sync_worker",
+      "sha256": "740937ada371b8e47c8dd06a91d509de6dc7492080509e38622691017fc8beed"
+    },
+    {
+      "order": 51,
+      "name": "room_pin_sheet_full_resync",
+      "sha256": "5734c3b471e1460056a6c5937238928792319b4f097d2dc473b505d9f56e8147"
+    },
+    {
+      "order": 52,
+      "name": "pin_bootstrap_reservation_readiness",
+      "sha256": "3ecb665895cb1bb2611389eb5122a7835ce59674575d2c9c527c97e095239b37"
+    },
+    {
+      "order": 53,
+      "name": "room_pin_nonce_reservation_hardening",
+      "sha256": "500eb882d8d82fdbc0f9748376d7c3e8c5613ba9a351552cf9ef292287e27b31"
+    },
+    {
+      "order": 54,
+      "name": "checkout_not_completed_incident_workflow",
+      "sha256": "f2af0b1ca5ba4af19417618f7db838f95c67970c9d04aa4319ae7b2ce0a08937"
+    },
+    {
+      "order": 55,
+      "name": "cleaning_template_admin_api",
+      "sha256": "b6e1441d215078708062b1ee8ab9983bdea668113f80d6cbea1ec9031b21ae3c"
+    },
+    {
+      "order": 56,
+      "name": "cleaning_template_duration_optional",
+      "sha256": "1fb6e282c891b44f74d5d764bc4a7db88857282bd4d85affa99f7c2293b7f760"
+    },
+    {
+      "order": 57,
+      "name": "photo_slot_contract_v8",
+      "sha256": "3754fce297b8ffbcc4a5b4fd943585408219028ffed484eb80697978297ffde1"
+    },
+    {
+      "order": 58,
+      "name": "extra_proof_photo_collection",
+      "sha256": "62d92cc72edbfe2ab7dc8cd14a013e08551ba8537c83bfa536a9ce8f247a8a7c"
+    },
+    {
+      "order": 59,
+      "name": "current_room_status_projection",
+      "sha256": "1ee952ce521b29cb111e85bab4888c91047ce3e768576939a78ccdbd432f36c7"
+    },
+    {
+      "order": 60,
+      "name": "reservation_arrival_lifecycle_projection",
+      "sha256": "2ab00b8544e5d7ce5edb6bb436b40cdcd67d3e8a72d0a2e73c60dc10450129cd"
+    },
+    {
+      "order": 61,
+      "name": "reservation_room_change_before_checkin",
+      "sha256": "75522c3a78d18045cdd9ea7f75231dacae9733acaf7884937d34a57e5764dd6a"
+    },
+    {
+      "order": 62,
+      "name": "reservation_during_stay_room_move",
+      "sha256": "c90e1b1ffedab8dcd0f7e4aff0133e31619df1124ccd48ae3e2aeaf5aeacf24d"
+    },
+    {
+      "order": 63,
+      "name": "photo_retention_v2",
+      "sha256": "b50c8b798cd4690b3addde844d0fb112b949cc397203264d86a50635d2aba2f6"
+    },
+    {
+      "order": 64,
+      "name": "assignment_pin_entitlement",
+      "sha256": "0880fee2b7e0154440e7cf3ccbcf7998315cf3487830383f1dba173b8da9fc0e"
+    },
+    {
+      "order": 65,
+      "name": "reservation_bookability",
+      "sha256": "673716419213e9ba510f355c55ca08928de4f0f622257ec2d85b301ed4b00bf2"
+    },
+    {
+      "order": 66,
+      "name": "long_stay_open_ended_reservations",
+      "sha256": "4e56f3ef7b0eea1516e43d1478ee9174932215650de568da8a469055864dc7ea"
+    },
+    {
+      "order": 67,
+      "name": "room_type_catalog",
+      "sha256": "97bb0d01e18eaba7ef0a68fb0128a80159cdb16dc853deab72f914b1b231c951"
+    },
+    {
+      "order": 68,
+      "name": "cleaning_history_projection",
+      "sha256": "0152ec20a60ffa7f825f08018b555134ebe528779ec93548fa6997e04cec8826"
+    },
+    {
+      "order": 69,
+      "name": "weekly_work_history_projection",
+      "sha256": "da21cd98a64d7797ee41e3f5f7739a27e1f409f1b2d09bd67a3a158a7de6a6c9"
+    },
+    {
+      "order": 70,
+      "name": "room_operations_read",
+      "sha256": "66622a10387d196557b7fa60d917ba92b9956e0119be49ab249e0badc9b2baa2"
+    },
+    {
+      "order": 71,
+      "name": "room_event_timeline",
+      "sha256": "d7310050d780f641aafb3e03eaec3c220d022facffe5850dd6c953934b9951bf"
+    },
+    {
+      "order": 72,
+      "name": "payroll_cycle_resolver",
+      "sha256": "1b3a5d90f000b72f0e63042386b387313736addae1a28840d02d57f7dc861647"
+    },
+    {
+      "order": 73,
+      "name": "generated_room_pin_confirmation",
+      "sha256": "ed0daa9e163e4cf500c8e6996bfff33c71eb37918e8bd1fb2fdaeabe9d35a0f9"
+    },
+    {
+      "order": 74,
+      "name": "availability_any_day_submission",
+      "sha256": "711e752f07841c241dfd35ca4cd0dafda0d09ed0b5ef8f57760d935fd53b792f"
+    },
+    {
+      "order": 75,
+      "name": "retire_assignment_duration_policy",
+      "sha256": "5ff8920aa6ad55ab3c3b0c798c1ca9d6d74d66584d3b444205a7f5a8fdd7c8b0"
+    },
+    {
+      "order": 76,
+      "name": "developer_room_catalog_capacity",
+      "sha256": "0facd7de38e32ab4b7b14853bbf49ea8ca942493a0a17aeef09e63b31cc4f434"
+    },
+    {
+      "order": 77,
+      "name": "room_status_admin_correction",
+      "sha256": "c4233b42a8968dfdcf13769655686909c5707bf117c1f27c8ebd2eeea4d2b93a"
+    },
+    {
+      "order": 78,
+      "name": "reservation_bookability_optional_guest_count",
+      "sha256": "5dee10cf9b1ee9234fc3ab630a5462d46cb4e077623736aa9f2167a782e06460"
+    },
+    {
+      "order": 79,
+      "name": "assignment_unavailability_reassignment",
+      "sha256": "ba8cb11e3abff0defe22f871afbfe35929961b99fab605c3bf99a2c3598a25c3"
+    },
+    {
+      "order": 80,
+      "name": "inspection_queue_pagination",
+      "sha256": "6513df66a59e383faee55f451dd8b2972328bdf813c2b65f4429456310c7d288"
+    },
+    {
+      "order": 81,
+      "name": "room_operations_pagination",
+      "sha256": "9ccb944390f6f4f05985beebd5e77deb635ad3bbb9f895b6f79ddeed5891b8e0"
+    },
+    {
+      "order": 82,
+      "name": "backend_console_readonly_diagnostics",
+      "sha256": "92956f47e6fd4b7234457f771421bdcabcf1dd7edc963b82a6bfb6d0c24bef07"
+    },
+    {
+      "order": 83,
+      "name": "maid_pin_immediate_reveal",
+      "sha256": "e684587d0a1f1de50a392eaf2c9471c18231450ea85107e27b931ac063191440"
+    }
+  ]
+}

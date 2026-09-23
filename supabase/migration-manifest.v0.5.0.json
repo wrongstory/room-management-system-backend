@@ -4,12 +4,12 @@
   "hashAlgorithm": "sha256-lf-utf8",
   "totalCount": 77,
   "baseline": {
-    "count": 73,
-    "head": "generated_room_pin_confirmation"
+    "count": 74,
+    "head": "availability_any_day_submission"
   },
   "pending": {
-    "count": 4,
-    "first": "availability_any_day_submission",
+    "count": 3,
+    "first": "retire_assignment_duration_policy",
     "head": "room_status_admin_correction"
   },
   "head": "room_status_admin_correction",

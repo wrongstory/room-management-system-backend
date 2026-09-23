@@ -150,8 +150,28 @@ const roomStatusAdminCorrectionMigrationUrl = new URL(
   '../supabase/migrations/20260920150000_room_status_admin_correction.sql',
   import.meta.url
 );
+const inspectionQueuePaginationMigrationUrl = new URL(
+  '../supabase/migrations/20260923020000_inspection_queue_pagination.sql',
+  import.meta.url
+);
 
 describe('initial migration contract', () => {
+  it('keeps inspection pagination session-bound, bounded, and service-only', async () => {
+    const sql = await readFile(inspectionQueuePaginationMigrationUrl, 'utf8');
+
+    expect(sql).toContain('cleaning_submissions_pending_queue_idx');
+    expect(sql).toContain('where status = \'submitted\'');
+    expect(sql).toContain('private.assert_inspection_queue_actor');
+    expect(sql).toContain('join auth.sessions session');
+    expect(sql).toContain("actor.role = 'admin'");
+    expect(sql).toContain('(submission.submitted_at, submission.id) >');
+    expect(sql).toContain('limit p_limit + 1');
+    expect(sql).toContain('INSPECTION_PAGE_LIMIT_INVALID');
+    expect(sql).toContain('INVALID_INSPECTION_CURSOR');
+    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('to service_role');
+  });
+
   it('versions the A-contract without rewriting v7 photo evidence', async () => {
     const sql = await readFile(photoSlotContractV8MigrationUrl, 'utf8');
 

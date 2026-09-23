@@ -52,6 +52,23 @@ select ok(not exists(select 1 from public.audit_events where entity_id=pg_temp.r
   and (after_state::text like '%Y2FuZGlkYXRl%' or after_state::text like '%AAAAAAAAAAAAAAAA%')),
   'audit state contains no envelope material');
 
+select public.mutate_room_operation(
+  pg_temp.pid(1),
+  pg_temp.room_id(1),
+  'record_pin_sync',
+  (select state_version from public.rooms where id=pg_temp.room_id(1)),
+  'LEGACY_VERIFIED_DURING_PIN_CHANGE',
+  jsonb_build_object(
+    'entityId', pg_temp.pid(901),
+    'syncStatus', 'verified',
+    'pinVersion', 1
+  ),
+  'pin-legacy-verified-bypass-0001',
+  repeat('0',64)
+);
+select is(private.current_pin_sync_status(pg_temp.room_id(1)),'mismatch',
+  'prepared change mismatch takes precedence over a later legacy verified sync event');
+
 insert into pin_results values('confirmed',public.confirm_room_pin_change(
   pg_temp.pid(1),pg_temp.pid(201),pg_temp.room_id(1),
   ((select value->>'lease_id' from pin_results where label='initial'))::uuid,0,
@@ -236,11 +253,11 @@ insert into pin_results values('maid-change',public.prepare_room_pin_change(
   pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),1,pg_temp.room_number(1),pg_temp.pid(401),pg_temp.pid(501),pg_temp.pid(601),
   'MAID_CLEANING_CHANGE',1::smallint,'Y2FuZGlkYXRlMg==','AgICAgICAgICAgIC','AAAAAAAAAAAAAAAAAAAAAA==',
   'v1','test','local','pin-maid-0001',repeat('e',64)));
-select is(private.current_pin_sync_status(pg_temp.room_id(1)),'mismatch','maid prepare blocks reveal and check-in readiness immediately');
+select is(private.current_pin_sync_status(pg_temp.room_id(1)),'mismatch','maid prepare keeps check-in readiness mismatched immediately');
 
 -- Durable authority is committed with the exact typed outbox even while a
--- physical mismatch blocks plaintext reveal. Rolling back to the unchanged
--- current PIN revision must not require a pointer rotation to repair it.
+-- physical mismatch remains unresolved. Reveal still returns the authoritative
+-- current stored revision and does not claim that the physical lock matches it.
 insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
   available_from,due_at,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
 values(pg_temp.pid(302),pg_temp.room_id(1),'additional','manual_room_request','pin-work-mismatch',current_date,current_date,
@@ -262,12 +279,21 @@ values(pg_temp.pid(462),pg_temp.pid(461),'assignment.commit_notified');
 select is((select count(*)::int from private.room_pin_assignment_entitlements
   where assignment_id=pg_temp.pid(402) and ended_at is null and pin_version=1),1,
   'typed outbox grants durable authority during a transient physical mismatch');
-select throws_ok($$select public.begin_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
-  pg_temp.pid(401),pg_temp.pid(501),pg_temp.pid(601),pg_temp.pid(702))$$,
-  '55000','ROOM_PIN_MISMATCH_UNRESOLVED','unresolved physical mismatch blocks PIN reveal');
-select throws_ok($$select public.begin_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
-  pg_temp.pid(402),null,null,pg_temp.pid(703))$$,
-  '55000','ROOM_PIN_MISMATCH_UNRESOLVED','mismatch blocks reveal even when durable entitlement exists');
+insert into pin_results values('mismatch-current-reveal',public.begin_room_pin_reveal(
+  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
+  pg_temp.pid(401),pg_temp.pid(501),pg_temp.pid(601),pg_temp.pid(702)));
+select is((select value->>'pin_version' from pin_results where label='mismatch-current-reveal'),'1',
+  'current assigned maid can immediately reveal the authoritative stored PIN during physical mismatch');
+select lives_ok($$select public.finalize_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
+  ((select value->>'lease_id' from pin_results where label='mismatch-current-reveal'))::uuid,pg_temp.pid(702))$$,
+  'physical mismatch does not invalidate an otherwise current reveal before plaintext response');
+insert into pin_results values('mismatch-notified-reveal',public.begin_room_pin_reveal(
+  pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),pg_temp.pid(402),null,null,pg_temp.pid(703)));
+select is((select value->>'pin_version' from pin_results where label='mismatch-notified-reveal'),'1',
+  'newly notified current entitlement reveals immediately without physical confirmation');
+select throws_ok($$select public.begin_room_pin_reveal(pg_temp.pid(3),pg_temp.pid(203),pg_temp.room_id(1),
+  pg_temp.pid(402),null,null,pg_temp.pid(798))$$,
+  '42501','PIN_ENTITLEMENT_REQUIRED','physical mismatch never lets another maid use the assignment');
 
 delete from auth.sessions where id=pg_temp.pid(202);
 select ok(not exists(select 1 from auth.sessions where id=pg_temp.pid(202)),
@@ -283,7 +309,7 @@ select lives_ok($$select public.rollback_room_pin_change(pg_temp.pid(1),pg_temp.
 select is(private.current_pin_sync_status(pg_temp.room_id(1)),'verified','rollback returns exact current version to verified');
 select lives_ok($$select public.begin_room_pin_reveal(pg_temp.pid(2),pg_temp.pid(202),pg_temp.room_id(1),
   pg_temp.pid(402),null,null,pg_temp.pid(704))$$,
-  'rollback makes the already granted mismatch-time entitlement revealable');
+  'rollback preserves the already granted mismatch-time entitlement reveal path');
 insert into pin_results values('admin-pre-rotation-reveal',public.begin_room_pin_reveal(
   pg_temp.pid(1),pg_temp.pid(201),pg_temp.room_id(1),null,null,null,pg_temp.pid(705)));
 

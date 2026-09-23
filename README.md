@@ -2,6 +2,8 @@
 
 `room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 단일 개발자와 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
 
+운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`입니다. 개발 정본은 79 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #256 사진 정규화, #250 진행 중 메이드의 후속 계획 허용, #264 수행 불가 취소·재배정을 포함합니다. 마지막으로 검증된 운영 API는 78 migrations, Supabase `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이며 Pages도 그 배포본과 artifact parity를 완료했습니다. 기존 관리자 UAT에서 예약 가능 미리보기의 `guestCount` 생략·`null`·양수와 예약 현황 인원 표시, 객실 유형별 최소·최대 인원 적용을 확인했습니다. 개발 정본의 후속 기능은 release 승격 전까지 운영 API에서 사용할 수 없고, `v0.5.1` tag와 GitHub Release도 아직 발행하지 않았습니다.
+
 ## 현재 구현
 
 - Fastify 5 + TypeScript API
@@ -22,16 +24,7 @@
 - 공개 스키마 전 테이블 RLS와 Google Drive 사진 메타데이터 정책
 - Biome lint, secret 검사, 타입 검사, 테스트, 빌드 CI 품질 게이트
 - 로컬·개발·운영·복구 환경 분리와 운영 프로젝트 Ref 오접속 방지
-- 원본 정본의 4개 객실 타입, 고정 단가, 121개 객실 seed. 타입별 숙박 인원 상한은 아직 데모값이라 production 제약으로 확정되지 않았습니다.
-
-## 릴리즈 상태
-
-- 현재 production: `main@e2f2efacb27addfb5c9692f083def6f4631b9f4a`, 73 migrations, `api` ACTIVE v19, OpenAPI 0.4.0 / 120 paths / 130 operations
-- v0.5.0 release candidate: `dev@49214bb67f2cf346178bc12321948a810e050234`, 77 migrations, OpenAPI 0.5.0 / 128 paths / 138 operations
-- production pending: 가능일 상시 제출, 예상시간 정책 폐기, developer 객실 카탈로그, 객실 상태 관리자 보정의 append-only migration 4개와 `api` bundle
-- 네 worker bundle, Secrets, Cron과 provider activation은 v0.5.0 API 승격 범위에서 변경하지 않습니다.
-
-배포 순서·rollback·사용자 확인 항목은 [v0.5.0 릴리즈 후보 문서](docs/RELEASE_V0.5.0.md)를 따릅니다. release candidate가 존재한다는 사실만으로 production API나 Pages가 최신화됐다고 판단하지 않습니다.
+- 원본 정본의 4개 객실 타입, 고정 단가, 121개 객실 seed. 타입별 최소·최대 숙박 인원은 DB의 현재 설정값이 정본이며 운영 UAT에서 예약·현황 반영을 확인했습니다. 문서의 예시 숫자를 운영값으로 간주하지 않습니다.
 
 백엔드 GPT/Codex는 구현 전에 [제품·도메인 가이드](docs/AI_BACKEND_PRODUCT_GUIDE.md)를 먼저 읽어야 합니다. 전체 분석과 설계는 [프로젝트 분석](docs/PROJECT_ANALYSIS.md), [백엔드 설계 초안](docs/ARCHITECTURE.md)을 참고하세요. 검토용 관계도는 [ERD 초안](docs/ERD.md)이며, [DBML 원본](docs/room-management-system.dbml)을 dbdiagram.io에 붙여 넣어 전체 다이어그램을 확인할 수 있습니다. ERD/DBML은 제품 가이드와 reconcile되기 전에는 목표 계약이 아닙니다. 계정 규칙은 [계정 수명주기](docs/ACCOUNT_LIFECYCLE.md), 환경 분리는 [환경 운영안](docs/ENVIRONMENTS.md), 권한 경계는 [Auth·RLS 계약](docs/AUTH_RLS_CONTRACT.md), 사진 압축·폴더·자동삭제 규칙은 [사진 저장 운영안](docs/PHOTO_STORAGE.md), Free 프로젝트 2개를 이용한 운영·복구 구조는 [백업·복구 운영안](docs/BACKUP_AND_RECOVERY.md)에 정리했습니다. 정책 문서끼리 충돌하면 제품·도메인 가이드의 우선순위와 `[미확정]` 표시를 따릅니다.
 
@@ -45,7 +38,7 @@ copy .env.example .env
 npm run dev
 ```
 
-macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다. 주급 cursor에는 다른 key/pepper와 재사용하지 않는 `PAYROLL_CURSOR_HMAC_SECRET`을 UTF-8 32바이트 이상으로 생성해 Fastify와 Edge에 각각 설정합니다. production에서는 예정 전이·개인정보 보존 worker가 조용히 중지되지 않도록 활성 관리자 profile ID인 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`도 반드시 설정합니다.
+macOS/Linux에서는 `cp .env.example .env`를 사용합니다. `.env`에는 실제 Supabase 프로젝트의 URL, publishable key, 서버 전용 secret key와 32바이트 예약 개인정보 암호화 키를 입력합니다. 주급·알림함·검수 대기열 cursor에는 서로 또는 다른 key/pepper와 재사용하지 않는 `PAYROLL_CURSOR_HMAC_SECRET`, `NOTIFICATION_CURSOR_HMAC_SECRET`, `INSPECTION_CURSOR_HMAC_SECRET`을 각각 UTF-8 32바이트 이상으로 생성해 Fastify와 Edge에 동일하게 설정합니다. production에서는 예정 전이·개인정보 보존 worker가 조용히 중지되지 않도록 활성 관리자 profile ID인 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`도 반드시 설정합니다.
 
 빈 프로젝트의 단일 최상위 developer만 서버 환경에서 다음 명령으로 생성합니다. `--name`은 표시 이름일 뿐이며 로그인 ID는 입력과 무관하게 `admin`으로 고정합니다. 휴대전화 번호 외 비밀번호는 명령 인자로 전달하지 않습니다.
 
@@ -73,7 +66,7 @@ npm run edge:check
 
 Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge runtime PoC](docs/EDGE_RUNTIME_POC.md)에 정리했습니다. 운영 smoke가 끝나기 전까지 기존 Fastify 구현은 개발 기준선으로 유지합니다.
 
-로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 운영 문서는 [GitHub Pages Swagger 포털](https://wrongstory.github.io/room-management-system-backend/)에서 읽고, [정적 OpenAPI JSON](https://wrongstory.github.io/room-management-system-backend/openapi.json)을 타입 생성에 사용할 수 있습니다. Pages artifact는 실제 운영 Edge OpenAPI를 배포 시점에 내려받아 만들며 공개 포털에서는 `Try it out`과 Authorization 입력을 비활성화합니다. 인증·멱등성·오류 처리는 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md), 현재 production 화면 검증은 [v0.4.0 프런트 Codex 인계](docs/FRONTEND_CODEX_HANDOFF_V0.4.0.md), v0.5.0 승격 후 새 기능 확인은 [v0.5.0 릴리즈 후보 문서](docs/RELEASE_V0.5.0.md)를 따릅니다.
+로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 운영 문서는 [GitHub Pages Swagger 포털](https://wrongstory.github.io/room-management-system-backend/)에서 읽고, [정적 OpenAPI JSON](https://wrongstory.github.io/room-management-system-backend/openapi.json)을 타입 생성에 사용할 수 있습니다. Pages artifact는 실제 운영 Edge OpenAPI를 배포 시점에 내려받아 만들며 공개 포털에서는 `Try it out`과 Authorization 입력을 비활성화합니다. 인증·멱등성·오류 처리는 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md), 이번 hotfix의 배포·계약 경계는 [v0.5.1 적용 기록](docs/RELEASE_V0.5.1.md)을 따릅니다.
 
 ## 보안 경계
 

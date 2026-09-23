@@ -1,8 +1,9 @@
 # 개발 오케스트레이션·source 승인 기준
 
-2026-09-08 사용자의 최신 명시적 위임을 기록한다. 이전 PR #74의 별도 병합 허가 대기는
-아래 source/dev 평가·승인 규칙으로 대체됐다. 제품 정책의 미확정 사항을 결정할 권한이나
-production/recovery/main/release 승격 권한까지 위임된 것은 아니다.
+2026-09-23 기준 개발 진행 원칙을 기록한다. 사용자는 기능 구현·배포와 직접 화면 확인을 우선하고,
+보안·대규모 검증 보강은 기능 흐름 확인 뒤 묶어서 진행하기로 했다. 다만 migration 불변성, 비밀값·PII·PIN
+비노출, required CI, 승인 없는 production 변경 금지처럼 되돌리기 어렵거나 운영 데이터를 위험하게 만드는
+gate는 기능 우선순위와 무관하게 유지한다.
 
 ## 역할과 진행 단위
 
@@ -42,12 +43,13 @@ GitHub 보호 규칙을 우회하지 않으며, 구현·검증·승인·병합·
 main/release 승격, tag/GitHub Release를 변경하지 않는다. feature/dev source를 직접 배포하지 않는다.
 기존 원격 migration 수정·history rewrite, 보호 규칙 완화, secret/PII/PIN 기록은 금지다.
 
-## 지속 진행
+## 현재 진행 기준
 
-현재 task의 30분 주기 heartbeat가 중단 후 작업 상태를 다시 확인한다. 새 사용자 지시를 먼저
-확인하고 실행 중인 서브에이전트·작업 트리·원격 head를 대조해 중복 작업을 시작하지 않는다.
-상태가 그대로면 불필요한 알림을 보내지 않으며, 의미 있는 완료·실패·승인 요청만 전달한다.
-승인된 개발 범위가 끝나면 후속 실행을 멈추고 별도 운영 gate를 보고한다.
+- 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@2ce8953c76fbf5cb33aff9f8a57b303acbf05cdb`다. 개발 정본은 #171까지 81 migrations / OpenAPI 0.5.1 129 paths / 139 operations이고 #172는 82번째 feature 후보다. production runtime은 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations이다. Pages parity와 기존 관리자 `guestCount` UAT는 완료됐지만 #256 사진 정규화와 #250/#264 배정 후속의 운영 승격은 남아 있다.
+- Web Push는 사용자 실제 기기 수신을 확인했다. 내부 health와 secret 상태는 별도 안전 projection으로 확인한다.
+- Google human owner는 `yeosucastletheart@gmail.com`으로 정했고, 서버는 별도 최소 권한 service account를 사용한다. 실제 target/credential/Cron 활성화는 별도 운영 gate다.
+- 원 maid가 퇴사·부상 등으로 수행 불가한 일반 청소는 현재 배정을 취소하고 같은 target을 미배정으로 돌린다. 검수 반려 재청소는 기존 0원 target을 이력으로 종료하고 원 유상 snapshot의 별도 ordinary replacement target을 만든다. 관리자 알림과 backend API는 #264로 source/dev 완료됐고 프런트 연결·운영 승격은 후속이다. 별도 보상 원장은 만들지 않는다.
+- DB 논리 백업은 매일 01:00~06:00 KST, 15일 보관으로 확정했다. 정확한 시각과 추후 지정할 PC 로컬 경로는 아직 입력값이다.
+- `v0.3.0`은 소급 tag/Release를 만들지 않으며, `v0.5.1` tag/GitHub Release도 별도 승인 전까지 발행하지 않는다.
 
-진행 순서는 #7A → #7B → #7C → #30 → #9 → #31이며 정산/알림/복구/전체 E2E와
-#34/#44/#46/#69/#73 후속도 ROADMAP에서 추적한다. 정책 미확정이나 외부 자격증명은 추측하지 않는다.
+새 작업은 사용자가 확인할 실제 기능과 API 연결을 먼저 작은 PR로 닫고, 검증·보안 후속을 숨기지 않고 Issue로 남긴다. 정책 미확정이나 외부 자격증명·저장 경로는 추측하지 않는다.

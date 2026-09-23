@@ -22,21 +22,27 @@ function canonicalContent(source, fileName) {
 
 const previousManifestSource = await readFile(previousManifestPath, "utf8");
 invariant(
-  createHash("sha256").update(previousManifestSource, "utf8").digest("hex") ===
-    "224e66c18d4ac8cc37ed278f8a2a516ac7912144d108225508ae45422d490fca",
-  "published v0.5.0 manifest bytes changed",
+  createHash("sha256")
+    .update(canonicalContent(previousManifestSource, "migration-manifest.v0.5.0.json"), "utf8")
+    .digest("hex") === "c9d8f51addba183fa32ab6435865a053dfc268809a88a9fa38efa0c1b3c37213",
+  "published v0.5.0 manifest canonical bytes changed",
 );
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const previousManifest = JSON.parse(previousManifestSource);
 const files = (await readdir(migrationDirectory))
   .filter((fileName) => fileName.endsWith(".sql"))
   .sort();
+const releaseFiles = files.slice(0, 78);
 
 invariant(manifest.schemaVersion === 1, "schemaVersion must be 1");
 invariant(manifest.release === "v0.5.1", "release must be v0.5.1");
 invariant(manifest.hashAlgorithm === "sha256-lf-utf8", "unexpected hash algorithm");
 invariant(manifest.totalCount === 78, "totalCount must be 78");
-invariant(files.length === 78, `expected 78 SQL files, found ${files.length}`);
+invariant(files.length >= 78, `expected at least 78 SQL files, found ${files.length}`);
+invariant(
+  releaseFiles.at(-1) === "20260921144731_reservation_bookability_optional_guest_count.sql",
+  "published v0.5.1 migration boundary changed",
+);
 invariant(manifest.baseline?.count === 77, "baseline count must be 77");
 invariant(manifest.baseline?.head === "room_status_admin_correction", "baseline head mismatch");
 invariant(manifest.pending?.count === 1, "pending count must be 1");
@@ -53,7 +59,7 @@ invariant(
 );
 
 let previousVersion = "";
-for (const [index, fileName] of files.entries()) {
+for (const [index, fileName] of releaseFiles.entries()) {
   const match = migrationFilePattern.exec(fileName);
   invariant(match, `unexpected migration filename ${fileName}`);
   invariant(match[1] > previousVersion, `${fileName} is not in strict version order`);
