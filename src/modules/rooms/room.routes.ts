@@ -1,5 +1,12 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { AppError } from '../../lib/app-error.js';
+import {
+  ROOM_OPERATION_CURSOR_MAX_LENGTH,
+  ROOM_OPERATION_PAGE_DEFAULT,
+  ROOM_OPERATION_PAGE_MAX
+} from './room-operation-cursor.js';
+import type { RoomOperationPageInput } from './room.service.js';
 import type { RoomService } from './room.service.js';
 
 const roomIdSchema = z.object({ roomId: z.uuid() });
@@ -7,10 +14,6 @@ const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
 const issueIdSchema = z.object({ roomId: z.uuid(), issueId: z.uuid() });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
 const expectedVersionSchema = z.number().int().positive();
-const operationBlockQuerySchema = z
-  .object({ status: z.literal('actionable').default('actionable') })
-  .strict();
-const roomIssueQuerySchema = z.object({ status: z.literal('open').default('open') }).strict();
 const roomEventQuerySchema = z
   .object({
     limit: z.preprocess(
@@ -137,6 +140,35 @@ function idempotencyKey(request: FastifyRequest): string {
     .parse(request.headers['idempotency-key']);
 }
 
+function roomOperationPageInput(
+  request: FastifyRequest,
+  expectedStatus: 'actionable' | 'open'
+): RoomOperationPageInput {
+  const raw = new URL(request.raw.url ?? '/', 'http://internal').searchParams;
+  for (const key of raw.keys()) {
+    if (!['status', 'limit', 'cursor'].includes(key) || raw.getAll(key).length !== 1) {
+      throw new AppError(400, 'INVALID_ROOM_OPERATION_QUERY', '객실 운영 조회 조건이 올바르지 않습니다.');
+    }
+  }
+  const rawStatus = raw.get('status') ?? expectedStatus;
+  if (rawStatus !== expectedStatus) {
+    throw new AppError(400, 'INVALID_ROOM_OPERATION_QUERY', '객실 운영 조회 조건이 올바르지 않습니다.');
+  }
+  const rawLimit = raw.get('limit') ?? String(ROOM_OPERATION_PAGE_DEFAULT);
+  if (!/^[1-9]\d*$/.test(rawLimit)) {
+    throw new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
+  }
+  const limit = Number(rawLimit);
+  if (!Number.isSafeInteger(limit) || limit > ROOM_OPERATION_PAGE_MAX) {
+    throw new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
+  }
+  const cursor = raw.get('cursor');
+  if (cursor !== null && (cursor.length < 1 || cursor.length > ROOM_OPERATION_CURSOR_MAX_LENGTH)) {
+    throw new AppError(400, 'INVALID_ROOM_OPERATION_CURSOR', '객실 운영 cursor가 올바르지 않습니다.');
+  }
+  return { limit, cursor: cursor ?? undefined };
+}
+
 export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
   return async (app) => {
     const authenticated = [app.authenticate, app.requirePasswordChanged];
@@ -238,10 +270,10 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
 
     app.get('/:roomId/operation-blocks', { preHandler: admin }, async (request, reply) => {
       const { roomId } = roomIdSchema.parse(request.params);
-      operationBlockQuerySchema.parse(request.query);
+      const input = roomOperationPageInput(request, 'actionable');
       return reply
         .header('Cache-Control', 'no-store')
-        .send(await roomService.listOperationBlocks(request.actor, roomId));
+        .send(await roomService.listOperationBlocks(request.actor, roomId, input));
     });
 
     app.post('/:roomId/operation-blocks/:blockId/release', { preHandler: admin }, async (request) => {
@@ -294,10 +326,10 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
 
     app.get('/:roomId/issues', { preHandler: admin }, async (request, reply) => {
       const { roomId } = roomIdSchema.parse(request.params);
-      roomIssueQuerySchema.parse(request.query);
+      const input = roomOperationPageInput(request, 'open');
       return reply
         .header('Cache-Control', 'no-store')
-        .send(await roomService.listIssues(request.actor, roomId));
+        .send(await roomService.listIssues(request.actor, roomId, input));
     });
 
     app.post('/:roomId/issues/:issueId/resolve', { preHandler: admin }, async (request) => {

@@ -42,6 +42,7 @@ const sourcePaths = [
   'supabase/functions/_shared/web-push-provider.ts',
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/openapi.ts',
+  'supabase/functions/_shared/room-operation-cursor.ts',
   'supabase/functions/_shared/room-api.ts',
   'supabase/functions/_shared/room-pin-crypto.ts',
   'supabase/functions/_shared/room-pin-api.ts',

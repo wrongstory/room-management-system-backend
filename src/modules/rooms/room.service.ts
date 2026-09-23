@@ -11,6 +11,13 @@ import {
   RoomPinCryptoError,
   type RoomPinEnvelope
 } from './room-pin-crypto.js';
+import {
+  assertRoomOperationResponseSize,
+  ROOM_OPERATION_PAGE_DEFAULT,
+  RoomOperationCursorCodec,
+  roomOperationCursorScope,
+  type RoomOperationCursorPosition
+} from './room-operation-cursor.js';
 
 export type RoomReasonCode =
   | 'OCCUPIED'
@@ -356,6 +363,8 @@ export interface RoomOperationBlocksResult {
   roomStateVersion: number;
   evaluatedAt: string;
   items: RoomOperationBlockItem[];
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 export interface RoomIssuesResult {
@@ -363,6 +372,13 @@ export interface RoomIssuesResult {
   roomStateVersion: number;
   evaluatedAt: string;
   items: RoomIssueItem[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+export interface RoomOperationPageInput {
+  limit?: number | undefined;
+  cursor?: string | undefined;
 }
 
 export interface RoomEventItem {
@@ -390,8 +406,8 @@ export interface RoomEventsResult {
 
 export interface RoomService {
   listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
-  listOperationBlocks(actor: Actor, roomId: string): Promise<RoomOperationBlocksResult>;
-  listIssues(actor: Actor, roomId: string): Promise<RoomIssuesResult>;
+  listOperationBlocks(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomOperationBlocksResult>;
+  listIssues(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomIssuesResult>;
   listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult>;
   list(actor: Actor): Promise<RoomSummary[]>;
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
@@ -518,6 +534,95 @@ function ensureDeveloper(actor: Actor): void {
   }
 }
 
+function roomProjectionError(): AppError {
+  return new AppError(500, 'ROOM_PROJECTION_INVALID', '객실 운영 조회 결과가 올바르지 않습니다.');
+}
+
+function projectionRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw roomProjectionError();
+  return value as Record<string, unknown>;
+}
+
+function projectionUuid(value: unknown): string {
+  if (typeof value !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw roomProjectionError();
+  }
+  return value;
+}
+
+function projectionTimestamp(value: unknown): string {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) throw roomProjectionError();
+  return value;
+}
+
+function projectionText(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) throw roomProjectionError();
+  return value;
+}
+
+function projectionVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw roomProjectionError();
+  return value as number;
+}
+
+function operationPage(value: unknown, expectedRoomId: string) {
+  const page = projectionRecord(value);
+  if (!Array.isArray(page.items) || typeof page.hasMore !== 'boolean') throw roomProjectionError();
+  const roomId = projectionUuid(page.roomId);
+  if (roomId.toLowerCase() !== expectedRoomId.toLowerCase()) throw roomProjectionError();
+  let nextCursor: RoomOperationCursorPosition | null = null;
+  if (page.hasMore) {
+    const next = projectionRecord(page.nextCursor);
+    nextCursor = {
+      occurredAt: projectionTimestamp(next.occurredAt),
+      id: projectionUuid(next.id)
+    };
+  } else if (page.nextCursor !== null) {
+    throw roomProjectionError();
+  }
+  return {
+    roomId,
+    roomStateVersion: projectionVersion(page.roomStateVersion),
+    evaluatedAt: projectionTimestamp(page.evaluatedAt),
+    items: page.items,
+    hasMore: page.hasMore,
+    nextCursor
+  };
+}
+
+function operationBlockItem(value: unknown): RoomOperationBlockItem {
+  const row = projectionRecord(value);
+  const status = projectionText(row.status);
+  if (!['scheduled', 'active', 'expired'].includes(status)) throw roomProjectionError();
+  return {
+    id: projectionUuid(row.id),
+    reasonCode: projectionText(row.reasonCode),
+    startsAt: projectionTimestamp(row.startsAt),
+    endsAt: row.endsAt === null ? null : projectionTimestamp(row.endsAt),
+    status: status as RoomOperationBlockItem['status'],
+    createdAt: projectionTimestamp(row.createdAt)
+  };
+}
+
+function roomIssueItem(value: unknown): RoomIssueItem {
+  const row = projectionRecord(value);
+  const severity = projectionText(row.severity);
+  if (!['info', 'warning', 'critical'].includes(severity)
+    || row.status !== 'open' || typeof row.blocksGuestAssignment !== 'boolean') {
+    throw roomProjectionError();
+  }
+  return {
+    id: projectionUuid(row.id),
+    category: projectionText(row.category),
+    severity: severity as RoomIssueItem['severity'],
+    blocksGuestAssignment: row.blocksGuestAssignment,
+    description: row.description === null ? null : projectionText(row.description),
+    status: 'open',
+    reportedAt: projectionTimestamp(row.reportedAt)
+  };
+}
+
 export function generateUniqueFourDigitPins(
   count: number,
   draw: () => number = () => randomInt(10_000)
@@ -538,6 +643,12 @@ export function generateUniqueFourDigitPins(
 
 function roomError(error: { message?: string } | null): AppError {
   const message = error?.message ?? '';
+  if (message.includes('ROOM_OPERATION_PAGE_LIMIT_INVALID')) {
+    return new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
+  }
+  if (message.includes('INVALID_ROOM_OPERATION_CURSOR')) {
+    return new AppError(400, 'INVALID_ROOM_OPERATION_CURSOR', '객실 운영 cursor가 올바르지 않습니다.');
+  }
   if (message.includes('ROOM_TYPE_CAPACITY_INVALID')) {
     return new AppError(400, 'ROOM_TYPE_CAPACITY_INVALID', '기본 인원은 1명 이상이고 최대 인원을 넘을 수 없습니다.');
   }
@@ -734,10 +845,28 @@ export function assertNoContactInformation(value: string | undefined): void {
 }
 
 export class SupabaseRoomService implements RoomService {
+  private readonly roomOperationCursor?: RoomOperationCursorCodec;
+
   constructor(
     private readonly clients: SupabaseClients,
-    private readonly pinConfig?: RoomPinCryptoConfig
-  ) {}
+    private readonly pinConfig?: RoomPinCryptoConfig,
+    roomOperationCursorSecret?: string
+  ) {
+    if (roomOperationCursorSecret !== undefined) {
+      this.roomOperationCursor = new RoomOperationCursorCodec(roomOperationCursorSecret);
+    }
+  }
+
+  private operationCursor(): RoomOperationCursorCodec {
+    if (!this.roomOperationCursor) {
+      throw new AppError(
+        503,
+        'ROOM_OPERATION_CURSOR_NOT_CONFIGURED',
+        '객실 운영 cursor 서명 설정이 필요합니다.'
+      );
+    }
+    return this.roomOperationCursor;
+  }
 
   private cryptoConfig(): RoomPinCryptoConfig {
     if (!this.pinConfig) throw new AppError(503, 'ROOM_PIN_NOT_CONFIGURED', '객실 PIN 암호화 설정이 필요합니다.');
@@ -914,28 +1043,66 @@ export class SupabaseRoomService implements RoomService {
     return data as unknown as DeveloperRoomMutationResult;
   }
 
-  async listOperationBlocks(actor: Actor, roomId: string): Promise<RoomOperationBlocksResult> {
+  async listOperationBlocks(
+    actor: Actor,
+    roomId: string,
+    input: RoomOperationPageInput
+  ): Promise<RoomOperationBlocksResult> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('list_room_operation_blocks', {
+    const scope = roomOperationCursorScope(actor, roomId, 'operation-blocks');
+    const cursor = input.cursor ? this.operationCursor().decode(input.cursor, scope) : null;
+    const { data, error } = await this.clients.admin.rpc('list_room_operation_blocks_page', {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedSessionId(actor.accessToken),
       p_room_id: roomId,
-      p_status: 'actionable'
+      p_status: 'actionable',
+      p_limit: input.limit ?? ROOM_OPERATION_PAGE_DEFAULT,
+      p_cursor_at: cursor?.occurredAt ?? null,
+      p_cursor_id: cursor?.id ?? null
     });
     if (error) throw roomError(error);
-    return data as unknown as RoomOperationBlocksResult;
+    const page = operationPage(data, roomId);
+    const result: RoomOperationBlocksResult = {
+      roomId: page.roomId,
+      roomStateVersion: page.roomStateVersion,
+      evaluatedAt: page.evaluatedAt,
+      items: page.items.map(operationBlockItem),
+      hasMore: page.hasMore,
+      nextCursor: page.nextCursor === null
+        ? null
+        : this.operationCursor().encode(scope, page.nextCursor)
+    };
+    assertRoomOperationResponseSize(result);
+    return result;
   }
 
-  async listIssues(actor: Actor, roomId: string): Promise<RoomIssuesResult> {
+  async listIssues(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomIssuesResult> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('list_room_issues', {
+    const scope = roomOperationCursorScope(actor, roomId, 'issues');
+    const cursor = input.cursor ? this.operationCursor().decode(input.cursor, scope) : null;
+    const { data, error } = await this.clients.admin.rpc('list_room_issues_page', {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedSessionId(actor.accessToken),
       p_room_id: roomId,
-      p_status: 'open'
+      p_status: 'open',
+      p_limit: input.limit ?? ROOM_OPERATION_PAGE_DEFAULT,
+      p_cursor_at: cursor?.occurredAt ?? null,
+      p_cursor_id: cursor?.id ?? null
     });
     if (error) throw roomError(error);
-    return data as unknown as RoomIssuesResult;
+    const page = operationPage(data, roomId);
+    const result: RoomIssuesResult = {
+      roomId: page.roomId,
+      roomStateVersion: page.roomStateVersion,
+      evaluatedAt: page.evaluatedAt,
+      items: page.items.map(roomIssueItem),
+      hasMore: page.hasMore,
+      nextCursor: page.nextCursor === null
+        ? null
+        : this.operationCursor().encode(scope, page.nextCursor)
+    };
+    assertRoomOperationResponseSize(result);
+    return result;
   }
 
   async listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult> {

@@ -128,7 +128,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         keyring: JSON.parse(options.env.ROOM_PIN_KEYRING_JSON) as Record<string, string>,
         environment: options.env.APP_ENV,
         projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
-      }),
+      }, options.env.INSPECTION_CURSOR_HMAC_SECRET),
       roomPinSheetOperations: new SupabaseRoomPinSheetOperationsService(clients, {
         target: {
           environment: options.env.APP_ENV,

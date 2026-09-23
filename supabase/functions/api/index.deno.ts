@@ -839,7 +839,7 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
         if (name === "get_room_operational_projection") {
           return { data: [roomRow], error: null };
         }
-        if (name === "list_room_operation_blocks") {
+        if (name === "list_room_operation_blocks_page") {
           return {
             data: {
               roomId,
@@ -853,11 +853,13 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
                 status: "active",
                 createdAt: "2026-09-19T00:00:00Z",
               }],
+              hasMore: false,
+              nextCursor: null,
             },
             error: null,
           };
         }
-        if (name === "list_room_issues") {
+        if (name === "list_room_issues_page") {
           return {
             data: {
               roomId,
@@ -872,6 +874,8 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
                 status: "open",
                 reportedAt: "2026-09-19T00:00:00Z",
               }],
+              hasMore: false,
+              nextCursor: null,
             },
             error: null,
           };

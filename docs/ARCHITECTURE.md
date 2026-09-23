@@ -57,6 +57,8 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 `actionable` 운영 차단은 `released_at is null`인 모든 항목이다. 미래 시작은 `scheduled`, 평가 시각에 유효하면 `active`, 종료 시각이 지났지만 명시적으로 release되지 않았으면 `expired`로 분류한다. 시간이 지났다는 이유로 원장을 숨기거나 자동 해제하지 않는다. 이슈 조회는 `status=open`만 반환한다. 프런트는 조회된 block/issue ID와 같은 envelope의 최신 `roomStateVersion`을 기존 release/resolve mutation의 `expectedRoomVersion`으로 사용하고, version conflict에서는 다시 조회한다.
 
+81번째 append-only `room_operations_pagination`은 기존 무제한 projection을 삭제하지 않고 HTTP adapter용 bounded page RPC를 추가한다. 차단은 `(starts_at,id)`, 이슈는 `(reported_at,id)` 역순 keyset이며 기본 50·최대 100건이다. `nextCursor`는 HMAC 서명된 opaque 값으로 actor profile·객실·stream·status·sort scope에 고정된다. Fastify와 Edge는 동일한 조회 전용 secret과 128 KiB 응답 상한을 사용하고, cursor 조작·다른 객실/조회에서의 재사용을 거부한다.
+
 ### #215 객실 이벤트 타임라인
 
 71번째 append-only `room_event_timeline`은 새 원장이나 backfill 없이 기존 `audit_events`의 승인된 객실 command와 `room_occupancy_events`의 실제 점유 전이만 합치는 service-role app-owned projection을 추가한다. `GET /v1/rooms/{roomId}/events?limit=30`은 active/password-complete business admin의 live session만 허용하고, `limit` 1~50 범위에서 `(effectiveAt, recordedAt, id)` 최신순으로 반환한다.

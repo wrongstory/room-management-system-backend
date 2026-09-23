@@ -100,11 +100,15 @@ function services(): AppServices {
       ]),
       listOperationBlocks: vi.fn(async () => ({
         roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 4, evaluatedAt: '2026-09-20T00:00:00.000Z',
-        items: [{ id: '50000000-0000-4000-8000-000000000001', reasonCode: 'MAINTENANCE', startsAt: '2026-09-20T00:00:00.000Z', endsAt: null, status: 'active' as const, createdAt: '2026-09-19T00:00:00.000Z' }]
+        items: [{ id: '50000000-0000-4000-8000-000000000001', reasonCode: 'MAINTENANCE', startsAt: '2026-09-20T00:00:00.000Z', endsAt: null, status: 'active' as const, createdAt: '2026-09-19T00:00:00.000Z' }],
+        hasMore: false,
+        nextCursor: null
       })),
       listIssues: vi.fn(async () => ({
         roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 5, evaluatedAt: '2026-09-20T00:00:00.000Z',
-        items: [{ id: '60000000-0000-4000-8000-000000000001', category: 'FACILITY', severity: 'warning' as const, blocksGuestAssignment: true, description: '창문 점검', status: 'open' as const, reportedAt: '2026-09-19T00:00:00.000Z' }]
+        items: [{ id: '60000000-0000-4000-8000-000000000001', category: 'FACILITY', severity: 'warning' as const, blocksGuestAssignment: true, description: '창문 점검', status: 'open' as const, reportedAt: '2026-09-19T00:00:00.000Z' }],
+        hasMore: false,
+        nextCursor: null
       })),
       listEvents: vi.fn(async () => ({
         roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 6, evaluatedAt: '2026-09-20T00:00:00.000Z',
@@ -470,8 +474,47 @@ describe('application', () => {
     });
     expect(appServices.rooms.listOperationBlocks).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'admin' }),
-      '11111111-1111-4111-8111-111111111111'
+      '11111111-1111-4111-8111-111111111111',
+      { limit: 50, cursor: undefined }
     );
+    await app.close();
+  });
+
+  it('forwards bounded room-operation pagination and rejects malformed query fields', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const roomId = '11111111-1111-4111-8111-111111111111';
+    const cursor = 'opaque.cursor';
+    const page = await app.inject({
+      method: 'GET',
+      url: `/v1/rooms/${roomId}/issues?status=open&limit=25&cursor=${cursor}`,
+      headers: { authorization: 'Bearer access-token' }
+    });
+    expect(page.statusCode).toBe(200);
+    expect(appServices.rooms.listIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      roomId,
+      { limit: 25, cursor }
+    );
+
+    for (const [query, code] of [
+      ['limit=0', 'ROOM_OPERATION_PAGE_LIMIT_INVALID'],
+      ['limit=101', 'ROOM_OPERATION_PAGE_LIMIT_INVALID'],
+      ['limit=01', 'ROOM_OPERATION_PAGE_LIMIT_INVALID'],
+      ['status=active&cursor=x', 'INVALID_ROOM_OPERATION_QUERY'],
+      ['cursor=', 'INVALID_ROOM_OPERATION_CURSOR'],
+      ['status=actionable&status=actionable', 'INVALID_ROOM_OPERATION_QUERY'],
+      ['unknown=value', 'INVALID_ROOM_OPERATION_QUERY']
+    ] as const) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/rooms/${roomId}/operation-blocks?${query}`,
+        headers: { authorization: 'Bearer access-token' }
+      });
+      expect(response.statusCode, query).toBe(400);
+      expect(response.json().error.code, query).toBe(code);
+    }
+    expect(appServices.rooms.listOperationBlocks).not.toHaveBeenCalled();
     await app.close();
   });
 

@@ -51,10 +51,10 @@ const blockId = "50000000-0000-4000-8000-000000000001";
 const issueId = "60000000-0000-4000-8000-000000000001";
 const sessionId = "70000000-0000-4000-8000-000000000001";
 
-function readRequest(): Request {
+function readRequest(path = "/v1/room-types"): Request {
   const encoded = btoa(JSON.stringify({ session_id: sessionId }))
     .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-  return new Request("http://localhost/v1/room-types", {
+  return new Request(`http://localhost${path}`, {
     headers: { authorization: `Bearer header.${encoded}.signature` },
   });
 }
@@ -176,6 +176,111 @@ Deno.test("room type catalog maps the app-owned admin projection", async () => {
   assert(calls[0][0] === "list_room_type_catalog", "app-owned RPC");
   assert(calls[0][1].p_actor_profile_id === admin.profileId, "actor bound");
   assert(calls[0][1].p_session_id === sessionId, "session bound");
+});
+
+Deno.test("room operation cursor is signed, scoped and forwarded as a keyset", async () => {
+  const previous = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET");
+  Deno.env.set(
+    "INSPECTION_CURSOR_HMAC_SECRET",
+    "room-operation-cursor-test-secret-123456789",
+  );
+  const calls: Array<Record<string, unknown>> = [];
+  const clients = {
+    admin: {
+      rpc(_name: string, args: Record<string, unknown>) {
+        calls.push(args);
+        return Promise.resolve({
+          error: null,
+          data: {
+            roomId,
+            roomStateVersion: 9,
+            evaluatedAt: "2026-09-20T01:00:00.000Z",
+            items: [{
+              id: blockId,
+              reasonCode: "MAINTENANCE",
+              startsAt: "2026-09-20T00:00:00.000Z",
+              endsAt: null,
+              status: "active",
+              createdAt: "2026-09-19T00:00:00.000Z",
+            }],
+            hasMore: true,
+            nextCursor: {
+              occurredAt: "2026-09-20T00:00:00.000Z",
+              id: blockId,
+            },
+          },
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  try {
+    const first = await listRoomOperationBlocks(
+      readRequest(`/v1/rooms/${roomId}/operation-blocks?limit=1`),
+      clients,
+      admin,
+      roomId,
+    );
+    assert(
+      first.hasMore && typeof first.nextCursor === "string",
+      "signed cursor returned",
+    );
+    const firstCursor = first.nextCursor;
+    if (typeof firstCursor !== "string") {
+      throw new Error("signed cursor missing");
+    }
+    await listRoomOperationBlocks(
+      readRequest(
+        `/v1/rooms/${roomId}/operation-blocks?limit=1&cursor=${
+          encodeURIComponent(firstCursor)
+        }`,
+      ),
+      clients,
+      admin,
+      roomId,
+    );
+    assert(
+      calls[1]?.p_cursor_at === "2026-09-20T00:00:00.000Z",
+      "timestamp forwarded",
+    );
+    assert(calls[1]?.p_cursor_id === blockId, "id forwarded");
+    const tampered = `${firstCursor.slice(0, -1)}x`;
+    const tamperedError = await captureEdgeError(() =>
+      listRoomOperationBlocks(
+        readRequest(
+          `/v1/rooms/${roomId}/operation-blocks?cursor=${
+            encodeURIComponent(tampered)
+          }`,
+        ),
+        clients,
+        admin,
+        roomId,
+      )
+    );
+    assert(
+      tamperedError.code === "INVALID_ROOM_OPERATION_CURSOR",
+      "tamper rejected",
+    );
+    const scopeError = await captureEdgeError(() =>
+      listRoomIssues(
+        readRequest(
+          `/v1/rooms/${roomId}/issues?cursor=${
+            encodeURIComponent(firstCursor)
+          }`,
+        ),
+        clients,
+        admin,
+        roomId,
+      )
+    );
+    assert(
+      scopeError.code === "INVALID_ROOM_OPERATION_CURSOR",
+      "cross-stream cursor rejected",
+    );
+  } finally {
+    if (previous === undefined) {
+      Deno.env.delete("INSPECTION_CURSOR_HMAC_SECRET");
+    } else Deno.env.set("INSPECTION_CURSOR_HMAC_SECRET", previous);
+  }
 });
 
 Deno.test("room type catalog rejects non-admin and temporary-password actors", async () => {
@@ -726,7 +831,7 @@ Deno.test("room operation reads map only safe fields and bind the live session",
     admin: {
       rpc(name: string, args: Record<string, unknown>) {
         calls.push([name, args]);
-        if (name === "list_room_operation_blocks") {
+        if (name === "list_room_operation_blocks_page") {
           return Promise.resolve({
             error: null,
             data: {
@@ -742,6 +847,8 @@ Deno.test("room operation reads map only safe fields and bind the live session",
                 createdAt: "2026-09-19T00:00:00.000Z",
                 raw_pin: "must-not-leak",
               }],
+              hasMore: false,
+              nextCursor: null,
             },
           });
         }
@@ -761,6 +868,8 @@ Deno.test("room operation reads map only safe fields and bind the live session",
               reportedAt: "2026-09-19T00:00:00.000Z",
               guestName: "must-not-leak",
             }],
+            hasMore: false,
+            nextCursor: null,
           },
         });
       },
@@ -776,8 +885,16 @@ Deno.test("room operation reads map only safe fields and bind the live session",
 
   assert(blocks.roomStateVersion === 9, "block CAS version mapped");
   assert(blocks.items[0]?.status === "active", "derived status mapped");
+  assert(
+    blocks.hasMore === false && blocks.nextCursor === null,
+    "block page metadata mapped",
+  );
   assert(issues.roomStateVersion === 10, "issue CAS version mapped");
   assert(issues.items[0]?.status === "open", "open issue mapped");
+  assert(
+    issues.hasMore === false && issues.nextCursor === null,
+    "issue page metadata mapped",
+  );
   assert(
     !JSON.stringify(blocks).includes("must-not-leak"),
     "PIN field removed",

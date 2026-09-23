@@ -1,6 +1,6 @@
 begin;
 
-select plan(24);
+select plan(40);
 
 insert into auth.users (id) values
   ('70000000-0000-4000-8000-000000000101'),
@@ -158,6 +158,104 @@ select is(
 );
 
 insert into room_operations_read_results values (
+  'block-page-1', public.list_room_operation_blocks_page(
+    '70000000-0000-4000-8000-000000000201',
+    '70000000-0000-4000-8000-000000000301',
+    (select id from public.rooms where room_number = '117'),
+    'actionable', 2, null, null
+  )
+);
+insert into room_operations_read_results values (
+  'block-page-2', public.list_room_operation_blocks_page(
+    '70000000-0000-4000-8000-000000000201',
+    '70000000-0000-4000-8000-000000000301',
+    (select id from public.rooms where room_number = '117'),
+    'actionable', 2,
+    (select (value #>> '{nextCursor,occurredAt}')::timestamptz from room_operations_read_results where name = 'block-page-1'),
+    (select (value #>> '{nextCursor,id}')::uuid from room_operations_read_results where name = 'block-page-1')
+  )
+);
+select is(
+  jsonb_array_length((select value -> 'items' from room_operations_read_results where name = 'block-page-1')),
+  2, 'operation block page respects the requested limit'
+);
+select ok(
+  (select (value ->> 'hasMore')::boolean and value -> 'nextCursor' is not null
+   from room_operations_read_results where name = 'block-page-1'),
+  'first operation block page returns a continuation position'
+);
+select is(
+  jsonb_array_length((select value -> 'items' from room_operations_read_results where name = 'block-page-2')),
+  1, 'second operation block page returns the remaining row'
+);
+select is(
+  (select count(distinct item ->> 'id')::integer
+   from room_operations_read_results results
+   cross join lateral jsonb_array_elements(results.value -> 'items') item
+   where results.name in ('block-page-1', 'block-page-2')),
+  3, 'keyset traversal has no duplicate or missing operation blocks'
+);
+select throws_ok(
+  $$select public.list_room_operation_blocks_page(
+    '70000000-0000-4000-8000-000000000201',
+    '70000000-0000-4000-8000-000000000301',
+    (select id from public.rooms where room_number = '117'), 'actionable', 101, null, null)$$,
+  '22023', 'ROOM_OPERATION_PAGE_LIMIT_INVALID', 'operation block page rejects an oversized limit'
+);
+select throws_ok(
+  $$select public.list_room_operation_blocks_page(
+    '70000000-0000-4000-8000-000000000201',
+    '70000000-0000-4000-8000-000000000301',
+    (select id from public.rooms where room_number = '117'), 'actionable', 2, clock_timestamp(), null)$$,
+  '22023', 'INVALID_ROOM_OPERATION_CURSOR', 'operation block page rejects a partial cursor'
+);
+select ok(
+  has_function_privilege('service_role', 'public.list_room_operation_blocks_page(uuid,uuid,uuid,text,integer,timestamptz,uuid)', 'EXECUTE'),
+  'service role can execute the bounded operation block projection'
+);
+select ok(
+  not has_function_privilege('authenticated', 'public.list_room_operation_blocks_page(uuid,uuid,uuid,text,integer,timestamptz,uuid)', 'EXECUTE'),
+  'authenticated cannot execute the bounded operation block projection directly'
+);
+select ok(
+  has_function_privilege('service_role', 'public.list_room_issues_page(uuid,uuid,uuid,text,integer,timestamptz,uuid)', 'EXECUTE'),
+  'service role can execute the bounded issue projection'
+);
+select ok(
+  not has_function_privilege('authenticated', 'public.list_room_issues_page(uuid,uuid,uuid,text,integer,timestamptz,uuid)', 'EXECUTE'),
+  'authenticated cannot execute the bounded issue projection directly'
+);
+
+insert into public.room_operation_blocks (
+  room_id, reason_code, starts_at, ends_at, created_by
+)
+select
+  (select id from public.rooms where room_number = '117'),
+  'PAGINATION_FIXTURE',
+  clock_timestamp() + make_interval(secs => series),
+  clock_timestamp() + make_interval(secs => series + 1),
+  '70000000-0000-4000-8000-000000000201'
+from generate_series(1, 101) series;
+
+insert into room_operations_read_results values (
+  'block-max-page', public.list_room_operation_blocks_page(
+    '70000000-0000-4000-8000-000000000201',
+    '70000000-0000-4000-8000-000000000301',
+    (select id from public.rooms where room_number = '117'),
+    'actionable', 100, null, null
+  )
+);
+select is(
+  jsonb_array_length((select value -> 'items' from room_operations_read_results where name = 'block-max-page')),
+  100, 'large fixture response remains capped at one hundred items'
+);
+select ok(
+  (select (value ->> 'hasMore')::boolean and value -> 'nextCursor' is not null
+   from room_operations_read_results where name = 'block-max-page'),
+  'large fixture exposes a continuation instead of an unbounded response'
+);
+
+insert into room_operations_read_results values (
   'issue', public.mutate_room_operation(
     '70000000-0000-4000-8000-000000000201',
     (select id from public.rooms where room_number = '117'),
@@ -197,6 +295,52 @@ select is(
   1, 'one open issue is listed'
 );
 
+insert into public.room_issues (
+  id, room_id, category, severity, blocks_guest_assignment,
+  description, reported_by, reported_at
+) values
+  ('70000000-0000-4000-8000-000000000502', (select id from public.rooms where room_number = '117'),
+   'EQUIPMENT', 'info', false, null, '70000000-0000-4000-8000-000000000201', clock_timestamp() + interval '1 second'),
+  ('70000000-0000-4000-8000-000000000503', (select id from public.rooms where room_number = '117'),
+   'FACILITY', 'critical', true, 'door inspection', '70000000-0000-4000-8000-000000000201', clock_timestamp() + interval '2 seconds');
+
+insert into room_operations_read_results values (
+  'issue-page-1', public.list_room_issues_page(
+    '70000000-0000-4000-8000-000000000201',
+    '70000000-0000-4000-8000-000000000301',
+    (select id from public.rooms where room_number = '117'), 'open', 2, null, null
+  )
+);
+insert into room_operations_read_results values (
+  'issue-page-2', public.list_room_issues_page(
+    '70000000-0000-4000-8000-000000000201',
+    '70000000-0000-4000-8000-000000000301',
+    (select id from public.rooms where room_number = '117'), 'open', 2,
+    (select (value #>> '{nextCursor,occurredAt}')::timestamptz from room_operations_read_results where name = 'issue-page-1'),
+    (select (value #>> '{nextCursor,id}')::uuid from room_operations_read_results where name = 'issue-page-1')
+  )
+);
+select is(
+  jsonb_array_length((select value -> 'items' from room_operations_read_results where name = 'issue-page-1')),
+  2, 'issue page respects the requested limit'
+);
+select ok(
+  (select (value ->> 'hasMore')::boolean and value -> 'nextCursor' is not null
+   from room_operations_read_results where name = 'issue-page-1'),
+  'first issue page returns a continuation position'
+);
+select is(
+  jsonb_array_length((select value -> 'items' from room_operations_read_results where name = 'issue-page-2')),
+  1, 'second issue page returns the remaining row'
+);
+select is(
+  (select count(distinct item ->> 'id')::integer
+   from room_operations_read_results results
+   cross join lateral jsonb_array_elements(results.value -> 'items') item
+   where results.name in ('issue-page-1', 'issue-page-2')),
+  3, 'issue keyset traversal has no duplicate or missing rows'
+);
+
 insert into room_operations_read_results values (
   'resolve', public.mutate_room_operation(
     '70000000-0000-4000-8000-000000000201',
@@ -208,11 +352,14 @@ insert into room_operations_read_results values (
   )
 );
 select is(
-  jsonb_array_length(public.list_room_issues(
-    '70000000-0000-4000-8000-000000000201',
-    '70000000-0000-4000-8000-000000000301',
-    (select id from public.rooms where room_number = '117'), 'open'
-  ) -> 'items'), 0, 'resolved issue is excluded from open reads'
+  (select count(*)::integer
+   from jsonb_array_elements(public.list_room_issues(
+     '70000000-0000-4000-8000-000000000201',
+     '70000000-0000-4000-8000-000000000301',
+     (select id from public.rooms where room_number = '117'), 'open'
+   ) -> 'items') item
+   where item ->> 'id' = '70000000-0000-4000-8000-000000000501'),
+  0, 'resolved issue is excluded from open reads'
 );
 select is(
   (select value ->> 'entity_id' from room_operations_read_results where name = 'resolve'),
