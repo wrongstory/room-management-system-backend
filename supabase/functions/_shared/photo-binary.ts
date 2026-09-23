@@ -206,7 +206,7 @@ function samsungSefMotionPhotoTail(
   if (count < 1 || count > 128 || directorySize !== 12 + count * 12) {
     return false;
   }
-  let expectedStart = primaryEnd, motionField = false;
+  let expectedStart = primaryEnd, motionEnd = -1;
   for (let index = 0; index < count; index++) {
     const entry = directoryStart + 12 + index * 12;
     const marker = b.subarray(entry, entry + 4);
@@ -227,22 +227,19 @@ function samsungSefMotionPhotoTail(
     const isMotion = marker[0] === 0 && marker[1] === 0 && marker[2] === 0x30 &&
       marker[3] === 0x0a;
     if (isMotion) {
-      if (
-        motionField || index !== count - 1 ||
-        fieldStart + fieldLength !== directoryStart
-      ) return false;
+      if (motionEnd !== -1) return false;
       const nameLength = view.getUint32(fieldStart + 4, true);
       if (
         nameLength !== 16 ||
         text(fieldStart + 8, nameLength) !== "MotionPhoto_Data" ||
         fieldStart + 8 + nameLength !== videoStart
       ) return false;
-      motionField = true;
+      motionEnd = fieldStart + fieldLength;
     }
     expectedStart = fieldStart + fieldLength;
   }
-  return motionField && expectedStart === directoryStart &&
-    isoBmffVideoTail(b, videoStart, directoryStart);
+  return motionEnd !== -1 && expectedStart === directoryStart &&
+    isoBmffVideoTail(b, videoStart, motionEnd);
 }
 function motionPhotoTail(
   b: Uint8Array,
