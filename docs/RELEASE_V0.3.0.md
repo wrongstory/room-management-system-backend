@@ -1,6 +1,6 @@
-# v0.3.0 릴리즈·운영 승격 계획
+# v0.3.0 릴리즈·운영 승격 기록
 
-> 상태: #165 `main`·production 56번째 migration·`api` v16·네 template v7·Pages 109/117 반영 완료. 예약 success mutation과 tag/GitHub Release는 대기
+> 최종 상태: #165 `main`·production 56번째 migration·`api` v16·네 template v7·Pages 109/117 반영 완료. 사용자는 v0.3.0 tag/GitHub Release의 소급 발행을 원하지 않아 Issue #148을 `NOT_PLANNED`로 닫았다. 이 문서는 당시 배포 이력이며 현재 release 정본이 아니다.
 
 이 문서는 Issue #148의 release gate와 운영 활성화 순서를 기록한다. v0.2.0의 과거 evidence는
 [`RELEASE_V0.2.0.md`](./RELEASE_V0.2.0.md)에 그대로 보존하며 이 문서에서 소급 수정하지 않는다.
@@ -12,14 +12,14 @@
 | production/main source | `main@6604b2215e06b9e9ebf0b3138e3716a000c57ddb`, 56 migrations, OpenAPI 0.3.0 109/117 | #165 source·migration·`api` v16·template 게시 완료 |
 | source/dev 기능 통합 | PR #167의 `dev@75983b3a0fb1bdc109fd57ca2a8c04bff2e4a925`, 56 migrations, OpenAPI 109/117 | 이후 문서 commit은 기능 기준을 바꾸지 않음 |
 | hotfix | `hotfix/165-cleaning-template-duration-optional` | 독립 QA·required CI·main 병합·dev 역반영 완료 |
-| 남은 release gate | Issue #148 | 예약 success mutation 결과, 제외 범위 정리, annotated tag/GitHub Release |
+| 소급 release 발행 | Issue #148 | 사용자 결정으로 `NOT_PLANNED`; v0.3.0 tag/GitHub Release를 만들지 않음 |
 
 - `dev` 또는 `main`에 직접 push하지 않는다.
 - release exact head에서 `application`과 `migration`, 독립 QA 90점 이상, P0/P1=0, 충돌 없음,
   migration manifest 일치를 확인한 뒤에만 main 승격을 요청한다.
 - #165 배포는 승인된 backup/recovery와 운영 실행 순서를 거쳐 완료됐다. 이후 적용된 56번째 migration을 수정하거나 재적용하지 않는다.
 - 추가 production 변경은 다시 별도 승인하며 Google/Push/PIN/Cron activation을 이번 완료 범위에 소급 포함하지 않는다.
-- production smoke 완료 뒤에만 annotated `v0.3.0` tag와 GitHub Release를 발행한다.
+- annotated `v0.3.0` tag와 GitHub Release는 소급 발행하지 않는다. 이후 버전의 현재 상태는 해당 release 문서와 API 상태 정본을 따른다.
 
 ## 2. 현재 production read-only 기준선
 

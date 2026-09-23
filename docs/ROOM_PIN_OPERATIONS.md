@@ -2,7 +2,7 @@
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C, Issue #140 초기화와 Issue #169 자동 생성·현장 확인 계약을 설명한다. 현재 production source는 `main@80f935016d5581d500136fba29c206f6ee797bc0`, 전체 73 migrations / OpenAPI 0.4.0 120 paths / 130 operations이며 `api` ACTIVE v17이다. 73번째 `generated_room_pin_confirmation`까지 production DB/API에 반영됐다. PIN source와 `room-pin-sheet-sync` bundle은 존재하지만 실제 PIN bootstrap·물리 확인, target mapping·Google ACL/Secrets/Cron/hosted activation은 별도 pending이다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C, Issue #140 초기화와 Issue #169 자동 생성·현장 확인 계약을 설명한다. 마지막으로 검증된 production은 전체 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations이며 `api` ACTIVE v24다. 현재 Git main의 후속 #256 사진 hotfix는 PIN 계약을 바꾸지 않는다. PIN API의 실제 사용자 문제는 해결돼 Issue #140을 완료 처리했다. `room-pin-sheet-sync` source/bundle은 존재하지만 production target mapping·Google ACL/Secrets/Cron/hosted full-resync 검증은 별도 pending이다.
 
 Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다. Issue #194의 64번째 append-only migration은 통보 기반 durable assignment entitlement와 최대 30초 reveal lease를 분리하며 production DB/API에 반영됐다. 실제 hosted PIN mutation은 아직 별도다.
 
@@ -23,7 +23,7 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 - Sheet version이 DB current보다 크면 사람/외부 변경으로 보고 block한다. version이 같고 PIN·marker가 모두 같을 때만 no-op이며, 같은 version의 PIN/marker 변조는 DB 정본으로 repair한다. 낮은 version은 최신 DB revision으로 갱신한다.
 - 한 실행은 최대 10개 room identity, provider 시작 33초, DB settle 39초, heartbeat 포함 전체 45초 absolute deadline을 공유한다. 명시적 HTTP 429/5xx는 bounded backoff retry이고, write 시작 뒤 network timeout/abort는 결과 불확실이므로 global operator-blocked다.
 - claim/authorize/settle은 global singleton lease와 증가 fence를 사용한다. 새 PIN version은 과거 pending outbox를 supersede하며 mid-write 변경은 stale settle 후 다음 current outbox로 수렴한다. 불확실 write와 retry 소진은 자동 성공 처리하지 않고 reconciliation 전까지 멈춘다.
-- Google OAuth는 별도 service account, fixed token endpoint, `https://www.googleapis.com/auth/spreadsheets` 단일 scope와 RS256 assertion만 쓴다. Sheet endpoint·private key·OAuth assertion/access token·PIN/envelope·provider raw error는 로그, heartbeat, developer projection, audit에 남기지 않는다.
+- Google Sheet의 사람 소유자는 `yeosucastletheart@gmail.com`이다. worker는 이 사람 계정의 로그인 자격증명을 사용하지 않고 대상 Sheet에 최소 권한으로 공유된 별도 service account, fixed token endpoint, `https://www.googleapis.com/auth/spreadsheets` 단일 scope와 RS256 assertion만 쓴다. Sheet endpoint·private key·OAuth assertion/access token·PIN/envelope·provider raw error는 로그, heartbeat, developer projection, audit에 남기지 않는다.
 - source-controlled approved target에는 현재 local/test synthetic mapping만 있다. 승인되지 않은 hosted environment/projectRef/spreadsheet/tab은 PIN 복호화와 OAuth token exchange 전에 fail-closed한다. production mapping은 release 승인 PR에서만 추가한다.
 - local worker adapter 테스트는 `RUNTIME_ENVIRONMENT=local`, `SUPABASE_PROJECT_REF=local`, synthetic spreadsheet ID, exact `객실_PIN_현황` tab을 함께 써야 한다. 공용 `.env.example`의 빈 project ref를 그대로 두고 worker를 실행할 수 없으며, 다른 local API의 target 계약을 바꾸려고 전역 예시를 임의 수정하지 않는다.
 - developer database status는 secret configured boolean, target approved boolean, safe status/count/time/stable error만 제공한다. raw outbox ID, room ID, PIN, Sheet cell/payload, provider credential은 제공하지 않는다.
@@ -42,14 +42,14 @@ Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안�
 
 ### Production 활성화 체크리스트
 
-1. production DB backup과 적용된 56개 migration 및 PIN 원장 evidence를 확인한다. 이미 적용된 파일은 수정·삭제·재적용하지 않는다.
-2. 승인된 v0.4.0 release manifest에서 production 56개와 pending 57~73번의 stable name/order/content hash를 대조한다. 자동 `db push`나 migration history repair를 사용하지 않는다.
-3. 승인된 release에서 57~73번을 정확한 순서로 적용하고, 중간 실패나 history 불일치는 hosted 적용 실패로 취급해 후속 단계를 중단한다.
-4. 기존 nonce registry/trigger/FORCE RLS와 `bootstrap_room_pins`, generated reveal begin/finalize, `confirm_generated_room_pin`의 최소 EXECUTE·actor/session/admin 재검증을 확인한다.
-5. `api`를 승인된 release exact source로 배포하고 production OpenAPI가 0.4.0 / 120 paths / 130 operations인지 확인한다. `room-pin-sheet-sync` 재배포 여부는 worker source diff와 별도 운영 활성화 범위로 판정한다.
-6. 별도 승인된 안전 대상에서 생성→mismatch/no Sheet→admin no-store reveal→물리 도어락 적용→version CAS confirm→verified/outbox 흐름을 smoke한다.
-7. 일반 reveal과 maid 접근, 확인 전 체크인, 다른 version 확인이 모두 거부되는지 확인한다. PIN 원문은 로그·Issue·PR·브라우저 저장소에 기록하지 않는다.
-8. 승인된 target mapping, 최소 권한 service account, full resync와 Cron/Vault 활성화는 기존 Phase B/C release gate를 그대로 따른다.
+과거 56→73 적용과 PIN API 배포는 완료됐고 현재 production은 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations다. 아래는 아직 남은 Google Sheets hosted 활성화 기준이다.
+
+1. production DB backup, 78개 migration history와 기존 PIN 원장 evidence를 read-only로 확인한다. 이미 적용된 파일은 수정·삭제·재적용하지 않는다.
+2. nonce registry/trigger/FORCE RLS와 `bootstrap_room_pins`, generated reveal begin/finalize, `confirm_generated_room_pin`의 최소 EXECUTE·actor/session/admin 재검증을 확인한다.
+3. 별도 승인된 안전 대상에서 생성→mismatch/no Sheet→admin no-store reveal→물리 도어락 적용→version CAS confirm→verified/outbox 흐름을 smoke한다. 일반 reveal과 maid 접근, 확인 전 체크인, 다른 version 확인이 모두 거부되는지 확인한다.
+4. 사람 소유자 `yeosucastletheart@gmail.com`이 만든 승인 Sheet에 별도 최소 권한 service account만 공유하고 source-controlled target identity와 ACL을 대조한다.
+5. secrets 주입 뒤 negative smoke, bounded incremental sync와 full resync를 확인한 후에만 Cron/Vault를 활성화한다.
+6. PIN 원문·service-account key·OAuth token은 로그·Issue·PR·브라우저 저장소에 기록하지 않는다.
 
 적용 중 lock wait/timeout, validation conflict 또는 transaction 중간 실패는 hosted 적용 실패로 취급한다. 기존 lease/revision/current pointer/sync event/Sheet outbox/audit/completed receipt를 삭제·보정하지 말고 원 evidence를 보존한 채 조사한다. source/main·production schema 반영과 Google target·bootstrap 활성화 승인은 별개다.
 

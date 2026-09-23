@@ -23,9 +23,9 @@
 
 Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. Fastify는 개발·회귀 검증과 Edge 장애 시 rollback 기준선으로 유지한다. 핵심 정합성은 어느 adapter에서도 API 메모리가 아니라 PostgreSQL 제약과 트랜잭션에 둔다.
 
-#245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API에 반영됐다. Pages는 공개 readback이 정확히 일치한 뒤에만 완료로 표시한다.
+#245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API와 Pages에 반영됐다. 기존 관리자 UAT에서 세 입력 형태와 예약 현황 인원·객실 유형 최소/최대 인원 적용을 확인했다.
 
-현재 운영 source 정본은 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`다. 2026-09-22 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations 및 기존 5개 Edge bundle이다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 79 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이다. 2026-09-23 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages artifact parity 완료 상태다. #256 스마트폰 사진 정규화와 #250/#264 배정 후속은 개발 정본에 있지만 운영 Edge/Pages·실기기 UAT 또는 release 승격과 구분한다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 #179의 v8 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보를 합친 migration 순서는 57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`이며 OpenAPI는 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
@@ -160,11 +160,11 @@ decoder packaging은 pinned glue+단일 gzip WASM과 양쪽 SHA/license 재생�
 
 승인은 inspection decision, submission/attempt/target 상태, 비행동 알림/outbox/audit와 원청소 earning을 한 transaction에서 exactly-once 생성한다. 승인된 폭탄방 bonus는 frozen base fee와 같고 0원 snapshot도 0원 provenance로 허용한다. 반려는 earning 없이 원 attempt/submission/decision·원 maid에 고정된 `inspection_reclean` target과 notified assignment, 행동 알림/outbox/audit를 원자 생성한다. 재청소 template은 room type별 published catalog가 정확히 한 건이어야 하며 없거나 모호하면 전체 transaction을 `RECLEAN_TEMPLATE_NOT_CONFIGURED`로 rollback한다. attempt는 반려 transaction에서 만들지 않고 기존 #28 activation만 소유한다. 원 maid가 inactive/departed면 자동 이관하지 않고 fail-closed한다. 이후 관리자가 #264 수행 불가를 명시 확정한 경우에만 기존 0원 재청소 책임을 이력으로 종료하고, 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 미배정으로 정확히 한 건 생성한다. 기존 재청소 row의 담당·금액을 바꾸거나 소급 earning을 만들지 않는다.
 
-### #264 담당 메이드 수행 불가 취소·일반 재배정 — source candidate
+### #264 담당 메이드 수행 불가 취소·일반 재배정 — source/dev 완료
 
 79번째 append-only migration은 active admin의 exact target/assignment/attempt CAS와 live session을 확인하는 `POST /v1/assignments/{cleaningTargetId}/unavailable-cancel`을 추가한다. 시작 전 책임은 종료하고 scheduled attempt는 `superseded`, in-progress attempt는 `interrupted`로 보존한다. limited capability와 offline lease는 같은 transaction의 attempt 전이로 revoke되고, assignment 종료 trigger가 PIN entitlement를 닫는다. 일반 target은 `unassigned`로 되돌리고 관리자 재배정 알림을 만든다.
 
-`private.assignment_unavailability_cancellations`는 actor, 기존 담당, target/assignment/attempt version과 선택적 replacement target을 불변 evidence로 남긴다. `inspection_reclean` 예외에서는 기존 0원 target을 soft cancel하고 원 유상 청소 snapshot을 가진 `manual_room_request + additional` replacement를 한 건 생성한다. replacement는 새 담당 없이 시작하고 기존 draft/commit/attempt/inspection/earning 흐름을 재사용한다. 취소 command 자체는 earning, compensation ledger, 외부 호출을 만들지 않는다. 공개 source 후보는 79 migrations / 129 paths / 139 operations이며 production 78/128/138과 구분한다.
+`private.assignment_unavailability_cancellations`는 actor, 기존 담당, target/assignment/attempt version과 선택적 replacement target을 불변 evidence로 남긴다. `inspection_reclean` 예외에서는 기존 0원 target을 soft cancel하고 원 유상 청소 snapshot을 가진 `manual_room_request + additional` replacement를 한 건 생성한다. replacement는 새 담당 없이 시작하고 기존 draft/commit/attempt/inspection/earning 흐름을 재사용한다. 취소 command 자체는 earning, compensation ledger, 외부 호출을 만들지 않는다. PR #265로 source/dev에 통합된 정본은 79 migrations / 129 paths / 139 operations이며 production 78/128/138과 구분한다.
 
 ### #93 주급 주차 조회·PAYING 시작 — source/dev 완료, 현재 production source 반영
 
@@ -918,7 +918,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-09-22 readback 기준 production API source는 `main@dda676dc6527a75a2271140d83ae6d2dbfb7cadf`이며 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations와 기존 5개 Edge bundle이다. 네 checkout template v7 게시도 완료됐다. 실행하지 않은 positive mutation은 PASS로 표현하지 않고 provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
+2026-09-23 readback 기준 production runtime은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages parity 완료 상태다. 현재 Git `main@10a1f81...`의 #256 사진 정규화는 배포 readback 전이므로 runtime에 포함됐다고 추정하지 않는다. 네 checkout template v7 게시도 완료됐다. 실행하지 않은 positive mutation은 PASS로 표현하지 않고 provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 

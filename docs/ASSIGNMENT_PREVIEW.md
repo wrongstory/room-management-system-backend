@@ -44,7 +44,9 @@ additional 예약 overlap, reclean 원 maid/source를 검증한다. Pure TypeScr
   다른 작업의 동시 현장 시작 허가가 아니며 시작 명령의 in_progress 제한은 그대로 적용한다.
   진행 중인 기존 작업의 dueAt이 지났다는 이유만으로 그 메이드의 후속 계획을 제외하지 않는다.
   미래 날짜의 scheduled 업무를 오늘 업무로 당겨 넣지 않는다.
-- reclean은 원 maid만 후보이며 그 maid가 inactive/미제출/불가능이면 미배정으로 남긴다.
+- 일반 reclean은 원 maid만 후보이며 그 maid가 inactive/미제출/불가능이면 미배정으로 남긴다.
+  관리자가 #264 수행 불가를 확정하면 기존 0원 target은 종료하고, 원 유상 청소의 fee/template snapshot을
+  가진 별도 ordinary replacement target만 일반 미배정 후보로 다른 active maid에게 제안한다.
 - planned checkout은 계획만 가능하다. Attempt/PIN/현장 실행 활성화는 하지 않는다.
 
 `planningAt`, `availableFrom`, `dueAt`은 명시된 시각 사실로 보존한다. 신규 후보의 `dueAt`이 이미
