@@ -52,6 +52,23 @@ select ok(not exists(select 1 from public.audit_events where entity_id=pg_temp.r
   and (after_state::text like '%Y2FuZGlkYXRl%' or after_state::text like '%AAAAAAAAAAAAAAAA%')),
   'audit state contains no envelope material');
 
+select public.mutate_room_operation(
+  pg_temp.pid(1),
+  pg_temp.room_id(1),
+  'record_pin_sync',
+  (select state_version from public.rooms where id=pg_temp.room_id(1)),
+  'LEGACY_VERIFIED_DURING_PIN_CHANGE',
+  jsonb_build_object(
+    'entityId', pg_temp.pid(901),
+    'syncStatus', 'verified',
+    'pinVersion', 1
+  ),
+  'pin-legacy-verified-bypass-0001',
+  repeat('0',64)
+);
+select is(private.current_pin_sync_status(pg_temp.room_id(1)),'mismatch',
+  'prepared change mismatch takes precedence over a later legacy verified sync event');
+
 insert into pin_results values('confirmed',public.confirm_room_pin_change(
   pg_temp.pid(1),pg_temp.pid(201),pg_temp.room_id(1),
   ((select value->>'lease_id' from pin_results where label='initial'))::uuid,0,

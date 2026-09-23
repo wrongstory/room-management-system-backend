@@ -88,6 +88,56 @@ Deno.test("room PIN crypto config rejects cross-purpose key reuse safely", async
   }
 });
 
+Deno.test("room PIN crypto config requires object-shaped keyrings", async () => {
+  const priorKey = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+  for (const invalid of [[priorKey], null, "scalar", 1, true]) {
+    configure();
+    Deno.env.set("ROOM_PIN_KEYRING_JSON", JSON.stringify(invalid));
+    let mutationCalls = 0;
+    const clients = {
+      admin: {
+        rpc(name: string) {
+          if (name === "get_room_pin_change_context") {
+            return Promise.resolve({
+              data: {
+                room_number: "101",
+                current_pin_version: 0,
+                proposed_pin_version: 1,
+              },
+              error: null,
+            });
+          }
+          mutationCalls += 1;
+          return Promise.resolve({ data: {}, error: null });
+        },
+      },
+    } as unknown as EdgeClients;
+    try {
+      await prepareRoomPinChange(
+        command(`/v1/rooms/${roomId}/pin-changes/prepare`, {
+          expectedPinVersion: 0,
+          pinDigits: "0012",
+          reasonCode: "ADMIN_INITIAL_PIN",
+        }),
+        clients,
+        actor,
+        sessionId,
+        roomId,
+      );
+      throw new Error("expected object keyring validation failure");
+    } catch (error) {
+      assert(error instanceof EdgeError, "safe edge error");
+      assert(error.status === 503, "stable config status");
+      assert(
+        error.code === "ROOM_PIN_CRYPTO_CONFIG_INVALID",
+        "stable config code",
+      );
+      assert(mutationCalls === 0, "invalid keyring never reaches mutation RPC");
+    }
+  }
+  configure();
+});
+
 function command(
   path: string,
   body: Record<string, unknown>,

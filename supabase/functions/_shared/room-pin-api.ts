@@ -85,16 +85,23 @@ async function hash(value: unknown): Promise<string> {
 
 function config(): RoomPinCryptoConfig {
   try {
-    const keyring = JSON.parse(requiredEnv("ROOM_PIN_KEYRING_JSON")) as Record<
+    const objectKeyring = (name: string): Record<string, unknown> => {
+      const value = JSON.parse(requiredEnv(name)) as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("keyring object required");
+      }
+      return value as Record<string, unknown>;
+    };
+    const keyring = objectKeyring("ROOM_PIN_KEYRING_JSON") as Record<
       string,
       string
     >;
-    const reservationKeyring = JSON.parse(
-      requiredEnv("RESERVATION_PII_KEYRING_JSON"),
-    ) as Record<string, unknown>;
-    const webPushKeyring = JSON.parse(
-      requiredEnv("WEB_PUSH_SUBSCRIPTION_KEYRING_JSON"),
-    ) as Record<string, unknown>;
+    const reservationKeyring = objectKeyring(
+      "RESERVATION_PII_KEYRING_JSON",
+    );
+    const webPushKeyring = objectKeyring(
+      "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+    );
     const currentKey = requiredEnv("ROOM_PIN_KEY_BASE64");
     const roomPinKeys = [
       currentKey,
@@ -107,8 +114,6 @@ function config(): RoomPinCryptoConfig {
       ...Object.values(webPushKeyring),
     ];
     if (
-      !reservationKeyring || Array.isArray(reservationKeyring) ||
-      !webPushKeyring || Array.isArray(webPushKeyring) ||
       roomPinKeys.some((key) => otherPurposeKeys.includes(key))
     ) {
       throw new Error("purpose-specific key required");

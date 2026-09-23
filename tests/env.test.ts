@@ -192,6 +192,16 @@ describe('environment contract', () => {
     ]) expect(()=>loadEnv({...localEnv,...override})).toThrow();
   });
 
+  it.each([
+    ['array', JSON.stringify([Buffer.alloc(32, 11).toString('base64')])],
+    ['null', 'null'],
+    ['string scalar', JSON.stringify('scalar')],
+    ['number scalar', '1'],
+    ['boolean scalar', 'true']
+  ])('rejects a %s room PIN keyring like Edge', (_label, value) => {
+    expect(() => loadEnv({ ...localEnv, ROOM_PIN_KEYRING_JSON: value })).toThrow();
+  });
+
   it('ignores the removed fixed initial PIN setting', () => {
     expect(loadEnv({ ...localEnv, ROOM_PIN_INITIAL_DIGITS: 'legacy-value' })).not.toHaveProperty(
       'ROOM_PIN_INITIAL_DIGITS'
