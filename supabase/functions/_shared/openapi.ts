@@ -2823,7 +2823,7 @@ export const openApiDocument = {
         operationId: "listWorkHistory",
         summary: "주간 업무 기록 조회",
         description:
-          "active/password-complete admin과 maid의 live session 전용입니다. KST 월요일부터 일요일까지 current availability의 가능일, immutable notified assignment 이력, fieldCompletedAt의 실제 KST 완료일을 독립 flag로 반환합니다. 같은 메이드·날짜의 여러 작업은 1일로 집계합니다. maidDisplayName은 과거 snapshot이 아니라 현재 profile 표시명입니다.",
+          "active/password-complete admin과 maid의 live session 전용입니다. KST 월요일부터 일요일까지 current availability의 가능일, immutable notified assignment 이력, fieldCompletedAt의 실제 KST 완료일을 독립 flag로 반환합니다. 같은 메이드·날짜의 여러 작업은 1일로 집계합니다. maidDisplayName은 과거 snapshot이 아니라 현재 profile 표시명입니다. 잘못된 query/cursor는 각각 INVALID_WORK_HISTORY_QUERY/INVALID_WORK_HISTORY_CURSOR로 반환하며 Fastify와 Edge가 같은 stable 오류 계약을 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -6417,6 +6417,12 @@ export const openApiDocument = {
           "INSPECTION_CURSOR_NOT_CONFIGURED",
           "INSPECTION_PAGE_LIMIT_INVALID",
           "INSPECTION_RESPONSE_TOO_LARGE",
+          "INVALID_WORK_HISTORY_QUERY",
+          "INVALID_WORK_HISTORY_CURSOR",
+          "WORK_HISTORY_ACCESS_REQUIRED",
+          "WORK_HISTORY_MAID_SCOPE_REQUIRED",
+          "WORK_HISTORY_MAID_NOT_FOUND",
+          "WORK_HISTORY_QUERY_FAILED",
           "NOTIFICATION_ACCESS_REQUIRED",
           "NOTIFICATION_NOT_FOUND",
           "INVALID_NOTIFICATION_CURSOR",

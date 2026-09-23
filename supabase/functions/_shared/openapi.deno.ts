@@ -14,6 +14,30 @@ Deno.test("OpenAPI publishes the v0.5.1 bookability hotfix contract", async () =
   );
 });
 
+Deno.test("work history OpenAPI publishes the stable runtime error contract", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const errorCodes = document.components.schemas.ErrorCode
+    .enum as readonly string[];
+  const operation = document.paths["/v1/work-history"].get;
+  for (
+    const code of [
+      "INVALID_WORK_HISTORY_QUERY",
+      "INVALID_WORK_HISTORY_CURSOR",
+      "WORK_HISTORY_ACCESS_REQUIRED",
+      "WORK_HISTORY_MAID_SCOPE_REQUIRED",
+      "WORK_HISTORY_MAID_NOT_FOUND",
+      "WORK_HISTORY_QUERY_FAILED",
+    ]
+  ) {
+    assert(errorCodes.includes(code), `${code} is published`);
+  }
+  assert(
+    operation.description.includes("INVALID_WORK_HISTORY_QUERY") &&
+      operation.description.includes("INVALID_WORK_HISTORY_CURSOR"),
+    "query and cursor failures are documented separately",
+  );
+});
+
 Deno.test("developer room catalog OpenAPI exposes six developer-only safe operations", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const operations = [
