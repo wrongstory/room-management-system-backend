@@ -367,6 +367,8 @@ async function main() {
     createDisposableDatabase(disposableDatabase);
     restoreArtifacts(disposableDatabase, stagingDirectory);
     assertPostRestore(disposableDatabase, sourceTables, sourceCounts);
+    dropDisposableDatabase(disposableDatabase);
+    disposableDatabase = null;
 
     const completedAt = new Date().toISOString();
     const manifest = {
