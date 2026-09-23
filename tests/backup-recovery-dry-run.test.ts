@@ -68,11 +68,21 @@ describe('backup recovery dry-run safety', () => {
     expect(() =>
       validateRolesDump(`
         SET client_encoding = 'UTF8';
+        CREATE ROLE "rms_diagnostic";
+        ALTER ROLE "rms_diagnostic" WITH NOINHERIT NOCREATEROLE NOCREATEDB LOGIN NOBYPASSRLS;
         ALTER ROLE "anon" SET "statement_timeout" TO '3s';
         ALTER ROLE "authenticated" SET "statement_timeout" TO '8s';
+        ALTER ROLE "rms_diagnostic" SET "default_transaction_read_only" TO 'on';
+        ALTER ROLE "rms_diagnostic" SET "statement_timeout" TO '3s';
+        ALTER ROLE "rms_diagnostic" SET "lock_timeout" TO '500ms';
+        ALTER ROLE "rms_diagnostic" SET "idle_in_transaction_session_timeout" TO '5s';
+        ALTER ROLE "rms_diagnostic" SET "search_path" TO 'pg_catalog, public';
         RESET ALL;
       `),
     ).not.toThrow();
+    expect(() =>
+      validateRolesDump('ALTER ROLE "rms_diagnostic" SET "statement_timeout" TO \'30s\';'),
+    ).toThrow('BACKUP_ROLES_COMMAND_NOT_ALLOWED');
     expect(() => validateRolesDump('ALTER ROLE "postgres" PASSWORD \'secret\';')).toThrow(
       'BACKUP_ROLES_COMMAND_NOT_ALLOWED',
     );
@@ -95,16 +105,16 @@ describe('backup recovery dry-run safety', () => {
   it('fails closed when the source migration history is missing or stale', () => {
     expect(() =>
       assertMigrationMatchesSource(
-        { count: 81, name: 'room_operations_pagination', version: '20260923121000' },
-        { totalCount: 81, head: 'room_operations_pagination' },
-        '20260923121000',
+        { count: 82, name: 'backend_console_readonly_diagnostics', version: '20260923150000' },
+        { totalCount: 82, head: 'backend_console_readonly_diagnostics' },
+        '20260923150000',
       ),
     ).not.toThrow();
     expect(() =>
       assertMigrationMatchesSource(
         { count: 80, name: 'inspection_queue_pagination', version: '20260923020000' },
-        { totalCount: 81, head: 'room_operations_pagination' },
-        '20260923121000',
+        { totalCount: 82, head: 'backend_console_readonly_diagnostics' },
+        '20260923150000',
       ),
     ).toThrow('BACKUP_MIGRATION_COUNT_MISMATCH');
   });

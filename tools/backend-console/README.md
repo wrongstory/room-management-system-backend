@@ -1,7 +1,9 @@
-# 백엔드 운영 콘솔 — Phase A
+# 백엔드 운영 콘솔 — Phase A + Phase B 로컬 PoC
 
 승인된 Windows 운영 PC에서 Supabase Edge API만 사용해 계정과 운영 상태를 관리하는
-Python 3.12+ 데스크톱 도구다. Phase A에는 DB 연결, SQL 실행기, service-role key가 없다.
+Python 3.12+ 데스크톱 도구다. Phase A GUI에는 service-role key가 없고 hosted DB 직접 연결은
+비활성이다. #172 Phase B 로컬 PoC는 별도 `readonly_db` 모듈에서만 최소권한 집계 조회를
+검증하며 아직 GUI나 production/recovery pooler에 연결하지 않는다.
 
 #84 사진 업로드/슬롯/원본4 operations는 business maid/admin 권한이며 developer 콘솔에 추가하지 않는다.
 filtered OpenAPI와 생성 client는 auth/accounts/developer, #137의 room PIN Sheet 안전 조회·전체 복구,
@@ -14,6 +16,20 @@ runtime-status는 Drive CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN/ROOT_FOLDER_ID와 
 
 자세한 설치·운영·분실 대응 절차는 저장소의
 `docs/BACKEND_CONSOLE_OPERATIONS.md`를 따른다.
+
+## Phase B 읽기 전용 DB 진단 PoC
+
+- `rms_diagnostic` DB 역할은 password 없이 생성되고 SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE을
+  갖지 않는다.
+- 조회 대상은 식별자·PIN·고객·계정 필드가 없는 `public.diagnostic_*_summary` 집계 뷰 3개뿐이다.
+- Python validator는 단일 SELECT, 안전한 WITH SELECT, 옵션 없는 `EXPLAIN SELECT`만 허용한다.
+- 모든 실행은 READ ONLY transaction과 3초 statement/500ms lock timeout, 200행/256KiB 상한을
+  사용한다.
+- production/recovery는 `HOSTED_DIRECT_DB_NOT_APPROVED`로 닫혀 있다. host·pooler·password를
+  config나 Git에 추가하지 않는다.
+
+상세 허용 목록, 폐기 절차와 로컬 검증은
+`docs/BACKEND_CONSOLE_READONLY_DIAGNOSTICS.md`를 따른다.
 
 ## 개발 실행
 

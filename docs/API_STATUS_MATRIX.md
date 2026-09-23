@@ -75,7 +75,7 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 production 최종 runtime/readback evidence: **2026-09-23 KST**. #245 v0.5.1 hotfix는 production DB/API와 Pages 공개 artifact에 반영됐고 dev backport도 완료됐다. 이후 #256 사진 정규화 source가 `main`/`dev`에 통합됐고 #250/#264 배정 후속은 `dev`에 통합됐으나 운영 Edge/Pages 배포와 release 승격은 아직 별도다.
 
-- 운영 Git 정본: `main@10a1f814649e92260e9e7353ab242400311b429e`. 최신 기능 통합 지점: `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`, **79 migrations / OpenAPI 0.5.1 129 paths / 139 operations**.
+- 운영 Git 정본: `main@10a1f814649e92260e9e7353ab242400311b429e`. 최신 기능 통합 지점: `dev@2ce8953c76fbf5cb33aff9f8a57b303acbf05cdb`, **81 migrations / OpenAPI 0.5.1 129 paths / 139 operations**. #171 로컬 합성 백업·복구 dry-run까지 source/dev 완료했고 #172의 82번째 migration은 feature 후보다.
 - 마지막으로 검증된 production API bundle은 #245 v0.5.1 계약을 제공하는 `api` ACTIVE v24다. #256 main source의 Edge 배포·readback은 아직 완료로 표시하지 않는다.
 - production은 **78 migrations**, head `reservation_bookability_optional_guest_count`, **`api` ACTIVE v24**, OpenAPI **0.5.1 / 128 paths / 138 operations**다.
 - production `/health`와 `/openapi.json`은 HTTP 200이다. GitHub Pages portal과 공개 OpenAPI의 v0.5.1 / 128 / 138 readback 및 artifact parity도 완료됐다.
@@ -741,7 +741,7 @@ Windows artifact, developer hosted smoke를 별도 gate로 관리한다.
 | [ ] | overview/runtime/database/scheduler | ✅ | ✅ | ❌ | ✅ | ⚠️ | developer hosted smoke PASS, Windows artifact 미완료 |
 | [ ] | 안전한 domain 감사 목록·진단 | ✅ | ✅ | ❌ | ✅ | ⚠️ | diagnostics hotfix 후 hosted PASS |
 | [ ] | 활동/보안 로그 | ✅ | ✅ | ❌ | ✅ | ⚠️ | 감사/활동 분리 hosted readback PASS |
-| [ ] | DB direct 진단 | — | ❌ | ❌ | ❌ | ❌ | Phase B 전까지 의도적으로 비활성 |
+| [ ] | DB direct 진단 | — | local PoC 후보 | ❌ | ❌ | ❌ | #172 최소권한 role/view/AST 구현; hosted·GUI 비활성 |
 | [ ] | maintenance action catalog | — | ❌ | ❌ | ❌ | ❌ | Phase C 전까지 의도적으로 비활성 |
 
 ### #131 encrypted room PIN API — production source 반영, hosted smoke 미확인
@@ -790,6 +790,21 @@ Production `api` bundle에는 네 operation이 포함됐지만 PIN 원문이 필
 
 Phase A가 `dev`에 병합돼도 #44 전체 Issue는 Phase B/C와 Windows/hosted gate가 남으므로 Open
 유지한다.
+
+### #172 Phase B 읽기 전용 DB 진단 로컬 PoC 후보
+
+- [x] 기존 81 migrations 불변, 82번째 append-only diagnostic role/view migration
+- [x] passwordless 최소권한 role과 PII-free aggregate view 3개
+- [x] 단일 SELECT·safe WITH·제한된 EXPLAIN AST allowlist
+- [x] READ ONLY transaction, statement/lock/idle timeout, 200행/256KiB, cancel
+- [x] 원본 business/protected table, DML/DDL, volatile function fail-closed 회귀
+- [x] production/recovery `HOSTED_DIRECT_DB_NOT_APPROVED`, credential/config/log 저장 없음
+- [ ] exact-head 전체 CI·독립 QA·source/dev 병합
+- [ ] hosted pooler allowlist·임시 password·TLS·GUI smoke — 별도 승인
+- [ ] Phase C maintenance command catalog — 별도 Issue/승인
+
+이 후보는 OpenAPI와 Edge route를 변경하지 않는다. 로컬 검증 완료를 운영 DB 진단 사용 가능으로
+표현하지 않는다.
 
 ## 15. 통합 이력과 현재 우선순위
 

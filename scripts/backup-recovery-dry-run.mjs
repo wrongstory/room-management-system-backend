@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -340,12 +340,11 @@ async function main() {
   assertLocalContainer();
 
   const migrationManifest = JSON.parse(await readFile(migrationManifestPath, "utf8"));
-  const migrationFiles = run("git", ["ls-files", "supabase/migrations/*.sql"])
-    .split(/\r?\n/u)
-    .filter(Boolean)
+  const migrationFiles = (await readdir(resolve(projectRoot, "supabase", "migrations")))
+    .filter((fileName) => fileName.endsWith(".sql"))
     .sort();
   const headFile = migrationFiles.at(-1);
-  const headVersion = /^supabase\/migrations\/(\d{14})_/u.exec(headFile)?.[1];
+  const headVersion = /^(\d{14})_/u.exec(headFile)?.[1];
   if (!headVersion) throw new Error("BACKUP_MIGRATION_HEAD_FILE_INVALID");
 
   const sourceSafety = sourceSafetySnapshot();
