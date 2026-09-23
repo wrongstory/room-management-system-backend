@@ -699,7 +699,7 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 | [x] | PIN Sheet 안전 상태·full resync Phase C | production source 반영 | #69 / #137 | exact target digest, 121실 snapshot, singleton fence/CAS/audit; Google target/secret/ACL/Cron activation은 Issue OPEN |
 | [~] | 초기 PIN 자동 생성·현장 확인 | production source 반영 | #169 | 73번째 append-only 및 API 배포 완료; 실제 bootstrap·물리 확인 mutation 미실행 |
 | [x] | 자동 checkout 후 퇴실 미진행 신고·관리자 재배정 | source/main·production bundle 반영 | #133 | 54 migrations / 108 paths / 115 operations; Issue #148/#152 production source에 포함, 전체 hosted positive mutation smoke는 별도 pending |
-| [ ] | backup/restore 운영 자동화 | 미개발 | #12 | 핵심 체인과 병행 |
+| [~] | backup/restore | 로컬 합성 dry-run source | #12 / #171 | roles/schema/data hash manifest, 일회용 DB 복원, 121실·RLS·critical RPC·행 수 검증; 운영/recovery 접속·스케줄·지정 PC 저장은 미활성 |
 | [ ] | frontend generated client / browser E2E | 미개발 | #13 | OpenAPI 정본 사용 |
 
 ### #31 Submission / Inspection source gate

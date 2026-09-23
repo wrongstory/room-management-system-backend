@@ -836,7 +836,7 @@ P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#1
 2. production의 optional/null/positive `guestCount` UAT와 Pages 공개 0.5.1 / 128 / 138 readback은 완료됐다. tag/GitHub Release는 별도 승인 전까지 미발행으로 유지한다.
 3. 안전하게 되돌릴 수 있는 운영 fixture가 승인되면 예약/PIN mutation을 hosted smoke한다. fixture가 없으면 SKIPPED 상태를 PASS로 바꾸지 않는다.
 4. Issue #137 hosted Google Sheets와 Issue #112 Web Push activation은 실제 대상/자격증명/주기 승인 뒤에만 진행한다.
-5. Issue #12 backup/recovery source와 Issue #13 frontend/browser E2E는 별도 트랙으로 유지한다.
+5. Issue #12 backup/recovery는 매일 01:00~06:00 KST, 지정 PC 저장소 15일 보관을 운영 정책으로 유지한다. Issue #171 로컬 합성 dry-run source와 실제 production/recovery 접속·스케줄 활성화는 별도 gate이며, Issue #13 frontend/browser E2E도 별도 트랙으로 유지한다.
 
 source/dev 완료, release/main 승격, production migration/secret/Edge/Cron 활성화는 서로 다른 gate다. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 

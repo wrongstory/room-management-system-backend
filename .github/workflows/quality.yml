@@ -63,6 +63,7 @@ jobs:
       - run: npm run db:manifest:verify
       - run: npm run db:start:ci
       - run: npm run db:verify
+      - run: npm run backup:dry-run
       - run: npm run db:test
       - run: npm run db:test:concurrency
       - name: Stop local Supabase
