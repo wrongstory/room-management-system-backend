@@ -10,6 +10,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from room_management_console import __version__ as runtime_version
+
 SOURCE_SHA_LENGTH = 40
 
 
@@ -57,6 +59,8 @@ def read_build_identity(console_root: Path) -> dict[str, str]:
     version = project.get("project", {}).get("version")
     if not isinstance(version, str) or not version:
         raise RuntimeError("backend console version을 확인할 수 없습니다.")
+    if version != runtime_version:
+        raise RuntimeError("pyproject와 실행 앱의 version이 일치하지 않습니다.")
     return {"appVersion": version, "sourceSha": source_sha}
 
 
