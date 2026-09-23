@@ -35,6 +35,7 @@ room-management-system-photos/
 
 1. 프론트 앱은 스마트폰 원본 JPEG/WebP/HEIC/HEIF를 raw body로 전송한다. 사전 축소는 선택 사항이고 기존 300KiB 상한으로 원본을 거부하지 않는다.
 2. 서버는 입력 5MiB, 12MP/5000px 기술상한을 검사하고 decode·방향 보정·metadata 제거·축소/재인코딩으로 JPEG/WebP **307,200바이트 이하**를 만든다.
+   - Android Motion Photo JPEG는 공식 Camera/Container XMP와 끝까지 유효한 MP4/MOV tail이 함께 확인될 때만 정지 JPEG 구간을 decode한다. 영상 tail과 XMP는 저장하지 않으며, 표식 없는 trailing bytes/polyglot은 계속 거절한다.
 3. 원본이 입력 기술상한을 넘거나 300KiB 출력을 만들 수 없으면 명확한 크기/처리 오류로 거부한다. 이 경우 앱에서 원본 축소 또는 재촬영을 안내한다.
 4. API가 사용자 JWT, 청소 수행 회차, 사진 슬롯, 객실 접근 권한을 검증한다.
 5. API는 정규화된 출력의 SHA-256을 계산한 뒤 Google Drive에 업로드한다. 원본 bytes는 Drive에 저장하지 않는다.
