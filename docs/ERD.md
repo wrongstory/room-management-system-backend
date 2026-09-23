@@ -1208,6 +1208,14 @@ stayover/additional/reclean 등 비-checkout row는 constraint로 non-null을 �
 값이 있으면 기존 1..10,080 범위를 그대로 검증한다. 기존 template·planned target snapshot·audit·receipt는
 backfill하거나 다시 쓰지 않는다.
 
+### #170 검수 대기열 bounded pagination
+
+`20260923020000_inspection_queue_pagination.sql`은 기존 79개 migration을 수정하지 않는 80번째 append-only
+migration이다. current `submitted` 제출의 `(submitted_at,id)` partial index와 같은 tuple의 oldest-first keyset을
+사용한다. page는 기본 50·최대 100건이며 service-role RPC 안에서도 actor profile과 live `auth.sessions`를 함께
+검증한다. cursor 서명·actor/role/stream/sort scope와 128 KiB HTTP 상한은 Fastify/Edge adapter가 동일하게
+적용하며 기존 immutable submission, decision, earning 원장은 다시 쓰지 않는다.
+
 현재 production은 이 56번째 migration까지 적용됐고, 네 checkout template v7은 `durationMinutes=NULL`과
 승인된 사진 슬롯 수(standard 10 / premium 11 / oceanPremium 13 / oceanFamily 15)를 보존한다. 안전한
 운영 fixture 부재로 예약 성공 mutation smoke만 `SKIPPED_WITH_REASON=NO_SAFE_PRODUCTION_MUTATION_FIXTURE`다.

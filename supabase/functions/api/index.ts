@@ -191,6 +191,7 @@ import {
   decideBombRoom,
   decideSubmission,
   getSubmission,
+  listPendingInspections,
   listSubmissions,
   reportBombRoom,
   submissionPath,
@@ -607,7 +608,7 @@ export async function handleApiRequest(
 
     if (request.method === "GET" && path === "/v1/inspections") {
       return jsonResponse(
-        { submissions: await listSubmissions(request, clients, actor) },
+        await listPendingInspections(request, clients, actor),
         200,
         corsHeaders,
       );

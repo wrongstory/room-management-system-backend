@@ -23,6 +23,7 @@ const env: AppEnv = {
   RESERVATION_GUEST_NAME_PEPPER: 'reservation-guest-name-pepper-test-value',
   PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456',
   NOTIFICATION_CURSOR_HMAC_SECRET: 'notification-cursor-secret-tests-123456',
+  INSPECTION_CURSOR_HMAC_SECRET: 'inspection-cursor-secret-tests-1234567',
   WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(32, 4).toString('base64'),
   WEB_PUSH_SUBSCRIPTION_KEY_VERSION: 'v1',
   WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{}',

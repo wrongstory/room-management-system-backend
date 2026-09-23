@@ -14,6 +14,7 @@ function service(calls: string[]): SubmissionService {
     async reportBomb() { calls.push('report'); return { id: id(1), attemptId: id(2), evidenceCount: 1 }; },
     async create() { calls.push('submit'); return { id: id(3), attemptId: id(2), version: 1 }; },
     async list(_actor, attemptId) { calls.push(attemptId ? 'history' : 'queue'); return []; },
+    async listPending() { calls.push('queue'); return { submissions: [], hasMore: false, nextCursor: null }; },
     async detail() { calls.push('detail'); return { id: id(3) }; },
     async decideBomb() { calls.push('bomb-decision'); return { id: id(4) }; },
     async decide(_actor, _submissionId, decision) { calls.push(decision); return { decision }; }
@@ -96,7 +97,10 @@ describe('Fastify submission/review parity', () => {
         })
       }
     } as unknown as SupabaseClients;
-    const result = await new SupabaseSubmissionService(clients).detail(actor('admin'), id(3));
+    const result = await new SupabaseSubmissionService(
+      clients,
+      'inspection-cursor-secret-tests-1234567'
+    ).detail(actor('admin'), id(3));
     expect(result).toEqual({
       id: id(3),
       attemptId: id(2),
@@ -160,6 +164,33 @@ describe('Fastify submission/review parity', () => {
       expect(approved.statusCode).toBe(200);
       expect((await app.inject({ method: 'GET', url: `/v1/inspections/${id(3)}/approve` })).statusCode).toBe(404);
       expect(calls).toEqual(['approve']);
+    } finally { await app.close(); }
+  });
+
+  it('accepts only bounded inspection pagination queries and applies no-store', async () => {
+    const calls: string[] = [];
+    const inputs: unknown[] = [];
+    const paginationService = service(calls);
+    paginationService.listPending = async (_actor, input) => {
+      calls.push('queue');
+      inputs.push(input);
+      return { submissions: [], hasMore: false, nextCursor: null };
+    };
+    const { app } = await appFor(actor('admin'), calls, undefined, paginationService);
+    try {
+      const page = await app.inject({ method: 'GET', url: '/v1/inspections?limit=25' });
+      expect(page.statusCode).toBe(200);
+      expect(page.headers['cache-control']).toBe('no-store');
+      expect(inputs).toEqual([{ limit: 25 }]);
+      for (const url of [
+        '/v1/inspections?cursor=',
+        '/v1/inspections?limit=101',
+        '/v1/inspections?limit=1&limit=2',
+        '/v1/inspections?unknown=1'
+      ]) {
+        expect((await app.inject({ method: 'GET', url })).statusCode).toBe(400);
+      }
+      expect(calls).toEqual(['queue']);
     } finally { await app.close(); }
   });
 

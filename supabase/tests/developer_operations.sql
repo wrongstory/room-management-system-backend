@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'assignment_unavailability_reassignment'
+    'inspection_queue_pagination'
   ) ->> 'currentMigration',
-  'assignment_unavailability_reassignment',
+  'inspection_queue_pagination',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'assignment_unavailability_reassignment'
+    'inspection_queue_pagination'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'assignment_unavailability_reassignment';
+where name = 'inspection_queue_pagination';
 
 delete from supabase_migrations.schema_migrations
-where name = 'assignment_unavailability_reassignment';
+where name = 'inspection_queue_pagination';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'assignment_unavailability_reassignment'
+    'inspection_queue_pagination'
   ) ->> 'currentMigration',
-  'reservation_bookability_optional_guest_count',
-  'database status exposes migration 78 when migration 79 is absent'
+  'assignment_unavailability_reassignment',
+  'database status exposes migration 79 when migration 80 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'assignment_unavailability_reassignment'
+    'inspection_queue_pagination'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 78 behind source migration 79'
+  'database status reports migration 79 behind source migration 80'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

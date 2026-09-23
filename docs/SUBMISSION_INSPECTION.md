@@ -1,12 +1,14 @@
-# 전체 제출·검수·재청소 계약 — Issue #31
+# 전체 제출·검수·재청소 계약 — Issue #31 / #170
 
 ## 상태와 범위
 
-- 개발 정본: `dev@f22005d8af6087a3bbab215c76cf7cc7e45b49fb`.
-- source: append-only `20260909120308_submission_inspection_reclean.sql`, Fastify/Edge parity,
-  OpenAPI **74 paths / 80 operations**.
-- 상태: 이 문서의 구현 기준은 PR #91 당시 이력이다. 해당 source는 현재 production에 포함됐고 inspection queue cursor pagination은 비차단 P2 후속이다. 최신 production snapshot은 [API 상태 정본](./API_STATUS_MATRIX.md)을 우선한다.
-- 승인 후 고객 컴플레인/보상 재작업은 별도 도메인이다. 원 maid 퇴사·부상 등 수행 불가 예외는 2026-09-23 결정에 따라 아래 일반 취소·재배정 계약을 사용한다.
+- 개발 기준: `dev` 79 migrations / OpenAPI 0.5.1 129 paths / 139 operations 위에 #170의 80번째 append-only migration을 추가한다.
+- source: `20260909120308_submission_inspection_reclean.sql`과
+  `20260923020000_inspection_queue_pagination.sql`, Fastify/Edge/OpenAPI parity.
+- 상태: #31 source는 production에 포함됐다. #170은 검수 대기열의 bounded keyset pagination, signed cursor,
+  응답 상한을 source 계약에 추가하며 production 승격과 hosted smoke는 별도 release gate다.
+- 승인 후 고객 컴플레인/보상 재작업은 별도 도메인이다. 원 maid 퇴사·부상 등 수행 불가 예외는
+  2026-09-23 결정과 #264 계약에 따라 일반 취소·재배정을 사용한다.
 
 ## 상태 전이
 
@@ -30,10 +32,14 @@ memo를 불변 보관한다. 최초 submission에 seal된 신고·증빙은 다�
 
 ## 검수와 재청소
 
-active business admin만 pending queue/detail/decision을 사용한다. stale current submission은
+active password-complete business admin의 live session만 pending queue/detail/decision을 사용한다. stale current submission은
 `STALE_VERSION`으로 거부하며, 같은 command scope의 retry는 canonical request hash receipt로
-재생하고 다른 payload는 충돌 처리한다. queue는 현재 oldest-first 최대 100건이며 cursor pagination은
-후속 hardening이다.
+재생하고 다른 payload는 충돌 처리한다. queue는 `(submittedAt ASC, id ASC)` keyset으로 oldest-first
+조회하며 page 기본 50건·최대 100건이다. `nextCursor`는 actor profile/role/stream/fixed sort와 마지막
+key를 HMAC-SHA256으로 묶은 opaque 값이고, 응답은 `hasMore`와 `nextCursor`를 함께 반환한다. cursor는
+다른 사용자·목록·정렬에서 재사용할 수 없다. Fastify와
+Edge는 동일 계약으로 `Cache-Control: no-store`를 설정하고 직렬화된 응답이 128 KiB를 넘으면
+`INSPECTION_RESPONSE_TOO_LARGE`로 fail-closed한다.
 
 승인은 inspection decision, submission/attempt/target 상태, notification/outbox/audit와 원청소
 earning을 하나의 transaction에서 확정한다. 승인된 폭탄방 bonus는 frozen base fee와 같고,

@@ -16,7 +16,8 @@ const localEnv = {
   ROOM_PIN_KEY_VERSION: 'pin-v1',
   ROOM_PIN_KEYRING_JSON: '{}',
   PAYROLL_CURSOR_HMAC_SECRET: 'payroll-cursor-secret-for-tests-123456',
-  NOTIFICATION_CURSOR_HMAC_SECRET: 'notification-cursor-secret-tests-123456'
+  NOTIFICATION_CURSOR_HMAC_SECRET: 'notification-cursor-secret-tests-123456',
+  INSPECTION_CURSOR_HMAC_SECRET: 'inspection-cursor-secret-tests-1234567'
   ,WEB_PUSH_SUBSCRIPTION_KEY_BASE64: Buffer.alloc(32, 4).toString('base64')
   ,WEB_PUSH_SUBSCRIPTION_KEY_VERSION: 'v1'
   ,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON: '{}'
@@ -134,6 +135,26 @@ describe('environment contract', () => {
       expect(() => loadEnv({
         ...localEnv,
         NOTIFICATION_CURSOR_HMAC_SECRET: value
+      })).toThrow();
+    }
+  });
+
+  it('requires a distinct inspection cursor secret of at least 32 UTF-8 bytes', () => {
+    for (const value of [
+      undefined,
+      'short',
+      ' '.repeat(32),
+      localEnv.PAYROLL_CURSOR_HMAC_SECRET,
+      localEnv.NOTIFICATION_CURSOR_HMAC_SECRET,
+      localEnv.ACCOUNT_PHONE_PEPPER,
+      localEnv.RESERVATION_GUEST_NAME_PEPPER,
+      localEnv.RESERVATION_PII_KEY_BASE64,
+      localEnv.SUPABASE_SECRET_KEY,
+      localEnv.SUPABASE_PUBLISHABLE_KEY
+    ]) {
+      expect(() => loadEnv({
+        ...localEnv,
+        INSPECTION_CURSOR_HMAC_SECRET: value
       })).toThrow();
     }
   });
