@@ -384,6 +384,23 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 
 ## 9. 현재 범위 제한
 
+### generated client·breaking diff 기반 (#173)
+
+프런트 정본 저장소 `makee-ham/room-management-system`의 Issue #142는 이 저장소의 Issue #173과 연결된다. 과거 `dev@c32aa9eec3945334ddda956afc62cc92d801c410` snapshot은 현재 정본이 아니다. 프런트 snapshot과 generated client는 최신 백엔드 OpenAPI source commit으로 다시 생성·검증해야 한다.
+
+프런트 Issue #142의 완료 시 함께 관리할 산출물은 다음과 같다.
+
+- `contracts/backend-openapi.json`: 백엔드 source snapshot
+- `contracts/backend-openapi.manifest.json`: 백엔드 저장소·source commit·snapshot/generated SHA-256
+- `WIREFRAME/generated/backend-api.d.ts`: `openapi-typescript@7.13.0` 생성 타입
+- `.github/workflows/api-contract.yml`: clean checkout 생성 동일성·필수 영역·민감 필드·OpenAPI 3.1 breaking diff 검증
+
+이 저장소의 `npm run openapi:frontend:check`는 source 단계에서 OpenAPI 0.5.1 / 129 paths / 139 operations, 고유 `operationId`, 주요 업무 영역, mutation 멱등성 header, 안정적 오류 envelope와 금지 민감 필드를 검증한다. API를 추가·변경하는 PR은 기대 개수를 근거 없이 완화하지 않고 프런트 snapshot PR과 새 백엔드 commit 신원을 함께 갱신한다. 운영 Edge/Pages의 128/138 snapshot과 `dev` source의 129/139 계약은 release 전까지 구분한다.
+
+프런트 breaking diff는 기존 path/method 제거, `operationId` 변경, request parameter/body 제약 강화, response status/media/property 보장 제거를 차단한다. 새 endpoint 추가 같은 호환 변경은 허용한다. 첫 도입 PR은 base snapshot이 없으므로 baseline으로 통과하고, 이후부터 `dev` snapshot을 기준으로 비교한다.
+
+이 백엔드 검사는 프런트 generated artifact·breaking diff CI가 완료됐다는 뜻이 아니다. Issue #142의 완료와 화면 adapter 전환, 브라우저 E2E는 별도로 확인하며 운영 배포 여부는 이 문서의 release gate를 그대로 따른다.
+
 ### 주급 pagination 운영 계약 (#96)
 
 - `GET /v1/payroll`은 `payroll` 최대 10개와 `nextCursor`를 반환한다. `maidProfileId`를 생략한 admin-all에서만 여러 cycle page를 순회하며 정렬은 `maidProfileId ASC`로 고정한다.
