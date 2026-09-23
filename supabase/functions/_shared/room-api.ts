@@ -804,7 +804,17 @@ export async function listRoomOperationBlocks(
   );
   if (error) throw roomDatabaseError(error);
   const value = data as Record<string, unknown>;
-  if (!value || !Array.isArray(value.items)) {
+  if (
+    !value || !Array.isArray(value.items) || value.items.length > input.limit
+  ) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 운영 차단 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  const responseRoomId = uuidValue(value.roomId, "roomId");
+  if (responseRoomId.toLowerCase() !== normalizedRoomId.toLowerCase()) {
     throw new EdgeError(
       500,
       "ROOM_PROJECTION_INVALID",
@@ -813,7 +823,7 @@ export async function listRoomOperationBlocks(
   }
   const next = roomOperationNextCursor(value.nextCursor, value.hasMore);
   const result = {
-    roomId: uuidValue(value.roomId, "roomId"),
+    roomId: responseRoomId,
     roomStateVersion: positiveInteger(
       value.roomStateVersion,
       "roomStateVersion",
@@ -870,7 +880,17 @@ export async function listRoomIssues(
   });
   if (error) throw roomDatabaseError(error);
   const value = data as Record<string, unknown>;
-  if (!value || !Array.isArray(value.items)) {
+  if (
+    !value || !Array.isArray(value.items) || value.items.length > input.limit
+  ) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "객실 이슈 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  const responseRoomId = uuidValue(value.roomId, "roomId");
+  if (responseRoomId.toLowerCase() !== normalizedRoomId.toLowerCase()) {
     throw new EdgeError(
       500,
       "ROOM_PROJECTION_INVALID",
@@ -879,7 +899,7 @@ export async function listRoomIssues(
   }
   const next = roomOperationNextCursor(value.nextCursor, value.hasMore);
   const result = {
-    roomId: uuidValue(value.roomId, "roomId"),
+    roomId: responseRoomId,
     roomStateVersion: positiveInteger(
       value.roomStateVersion,
       "roomStateVersion",

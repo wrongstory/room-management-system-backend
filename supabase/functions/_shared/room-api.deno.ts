@@ -909,6 +909,45 @@ Deno.test("room operation reads map only safe fields and bind the live session",
   );
 });
 
+Deno.test("room operation reads reject cross-room and over-limit DB pages", async () => {
+  const data: Record<string, unknown> = {
+    roomId: "30000000-0000-4000-8000-000000000002",
+    roomStateVersion: 9,
+    evaluatedAt: "2026-09-20T01:00:00.000Z",
+    items: [],
+    hasMore: false,
+    nextCursor: null,
+  };
+  const clients = {
+    admin: {
+      rpc() {
+        return Promise.resolve({ error: null, data });
+      },
+    },
+  } as unknown as EdgeClients;
+  const crossRoom = await captureEdgeError(() =>
+    listRoomOperationBlocks(
+      readRequest(`/v1/rooms/${roomId}/operation-blocks?limit=1`),
+      clients,
+      admin,
+      roomId,
+    )
+  );
+  assert(crossRoom.code === "ROOM_PROJECTION_INVALID", "cross-room rejected");
+
+  data.roomId = roomId;
+  data.items = [{}, {}];
+  const overLimit = await captureEdgeError(() =>
+    listRoomOperationBlocks(
+      readRequest(`/v1/rooms/${roomId}/operation-blocks?limit=1`),
+      clients,
+      admin,
+      roomId,
+    )
+  );
+  assert(overLimit.code === "ROOM_PROJECTION_INVALID", "over-limit rejected");
+});
+
 Deno.test("room event timeline maps the bounded safe projection", async () => {
   const reservationId = "80000000-0000-4000-8000-000000000001";
   const clients = {

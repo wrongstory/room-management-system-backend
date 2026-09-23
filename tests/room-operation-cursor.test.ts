@@ -108,4 +108,40 @@ describe('room operation cursor', () => {
       p_cursor_id: after.id
     }));
   });
+
+  it('fails closed when the DB page crosses the requested room or page boundary', async () => {
+    const data: {
+      roomId: string;
+      roomStateVersion: number;
+      evaluatedAt: string;
+      items: unknown[];
+      hasMore: boolean;
+      nextCursor: null;
+    } = {
+      roomId: '30000000-0000-4000-8000-000000000002',
+      roomStateVersion: 4,
+      evaluatedAt: '2026-09-20T01:00:00.000Z',
+      items: [],
+      hasMore: false,
+      nextCursor: null
+    };
+    const rpc = vi.fn(async () => ({ error: null, data }));
+    const clients = {
+      admin: { rpc },
+      publicClient: {},
+      forAccessToken: vi.fn()
+    } as unknown as SupabaseClients;
+    const service = new SupabaseRoomService(
+      clients,
+      undefined,
+      'room-operation-cursor-test-secret-123456789'
+    );
+    await expect(service.listOperationBlocks(adminActor, roomId, { limit: 1 }))
+      .rejects.toMatchObject({ code: 'ROOM_PROJECTION_INVALID' });
+
+    data.roomId = roomId;
+    data.items = [{}, {}];
+    await expect(service.listOperationBlocks(adminActor, roomId, { limit: 1 }))
+      .rejects.toMatchObject({ code: 'ROOM_PROJECTION_INVALID' });
+  });
 });

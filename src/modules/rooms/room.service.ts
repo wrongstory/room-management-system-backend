@@ -566,9 +566,13 @@ function projectionVersion(value: unknown): number {
   return value as number;
 }
 
-function operationPage(value: unknown, expectedRoomId: string) {
+function operationPage(value: unknown, expectedRoomId: string, expectedLimit: number) {
   const page = projectionRecord(value);
-  if (!Array.isArray(page.items) || typeof page.hasMore !== 'boolean') throw roomProjectionError();
+  if (
+    !Array.isArray(page.items)
+    || page.items.length > expectedLimit
+    || typeof page.hasMore !== 'boolean'
+  ) throw roomProjectionError();
   const roomId = projectionUuid(page.roomId);
   if (roomId.toLowerCase() !== expectedRoomId.toLowerCase()) throw roomProjectionError();
   let nextCursor: RoomOperationCursorPosition | null = null;
@@ -1061,7 +1065,7 @@ export class SupabaseRoomService implements RoomService {
       p_cursor_id: cursor?.id ?? null
     });
     if (error) throw roomError(error);
-    const page = operationPage(data, roomId);
+    const page = operationPage(data, roomId, input.limit ?? ROOM_OPERATION_PAGE_DEFAULT);
     const result: RoomOperationBlocksResult = {
       roomId: page.roomId,
       roomStateVersion: page.roomStateVersion,
@@ -1090,7 +1094,7 @@ export class SupabaseRoomService implements RoomService {
       p_cursor_id: cursor?.id ?? null
     });
     if (error) throw roomError(error);
-    const page = operationPage(data, roomId);
+    const page = operationPage(data, roomId, input.limit ?? ROOM_OPERATION_PAGE_DEFAULT);
     const result: RoomIssuesResult = {
       roomId: page.roomId,
       roomStateVersion: page.roomStateVersion,
