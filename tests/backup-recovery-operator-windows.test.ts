@@ -5,6 +5,17 @@ import { describe, expect, it } from 'vitest';
 const scriptsRoot = resolve('scripts/windows');
 
 describe('Windows backup recovery scheduler source', () => {
+  it('creates the future operating-PC Desktop folder and fixed non-secret config', async () => {
+    const source = await readFile(resolve(scriptsRoot, 'New-RmsBackupRecoveryConfig.ps1'), 'utf8');
+    expect(source).toContain("$folderName = 'RoomManagementSystemBackups'");
+    expect(source).toContain('[Environment+SpecialFolder]::Desktop');
+    expect(source).toContain("scheduleTimeKst = '03:00'");
+    expect(source).toContain('System.Text.UTF8Encoding($false)');
+    expect(source).toContain('Move-Item -LiteralPath $temporaryConfigPath');
+    expect(source).toContain('TaskInstalled = $false');
+    expect(source).not.toMatch(/postgres(?:ql)?:\/\//iu);
+  });
+
   it('registers only after explicit enable input and leaves the task disabled', async () => {
     const source = await readFile(resolve(scriptsRoot, 'Install-RmsBackupRecoveryTask.ps1'), 'utf8');
     expect(source).toContain('[switch]$Enable');

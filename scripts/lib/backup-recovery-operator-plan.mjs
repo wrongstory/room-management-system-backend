@@ -4,6 +4,7 @@ export const PRODUCTION_PROJECT_REF = "aodikrxcczbogjpsjwjt";
 export const RECOVERY_PROJECT_REF = "matalcofimnhuzslfhdd";
 export const OPERATOR_RETENTION_DAYS = 15;
 export const SCHEDULE_WINDOW = Object.freeze({ start: "01:00", end: "06:00" });
+export const OPERATOR_SCHEDULE_TIME_KST = "03:00";
 
 const expectedCredentialTargets = Object.freeze({
   productionDatabaseUrl: "RMS.Backup.ProductionDbUrl",
@@ -38,7 +39,8 @@ export function assertScheduleTimeKst(value) {
     minutes >= clockMinutes(SCHEDULE_WINDOW.start) && minutes <= clockMinutes(SCHEDULE_WINDOW.end),
     "BACKUP_SCHEDULE_OUTSIDE_APPROVED_WINDOW",
   );
-  return value;
+  invariant(value === OPERATOR_SCHEDULE_TIME_KST, "BACKUP_SCHEDULE_TIME_POLICY_MISMATCH");
+  return OPERATOR_SCHEDULE_TIME_KST;
 }
 
 export function assertWindowsLocalBackupRoot(value) {

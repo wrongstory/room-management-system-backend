@@ -27,6 +27,7 @@ export const PRODUCTION_PROJECT_REF: "aodikrxcczbogjpsjwjt";
 export const RECOVERY_PROJECT_REF: "matalcofimnhuzslfhdd";
 export const OPERATOR_RETENTION_DAYS: 15;
 export const SCHEDULE_WINDOW: Readonly<{ start: "01:00"; end: "06:00" }>;
+export const OPERATOR_SCHEDULE_TIME_KST: "03:00";
 
 export function assertScheduleTimeKst(value: string): string;
 export function assertWindowsLocalBackupRoot(value: string): string;

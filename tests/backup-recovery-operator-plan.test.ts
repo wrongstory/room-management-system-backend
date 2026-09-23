@@ -26,9 +26,10 @@ function validConfig(overrides: Record<string, unknown> = {}) {
 
 describe('backup recovery operator plan', () => {
   it('accepts only the approved KST execution window', () => {
-    expect(assertScheduleTimeKst('01:00')).toBe('01:00');
-    expect(assertScheduleTimeKst('03:30')).toBe('03:30');
-    expect(assertScheduleTimeKst('06:00')).toBe('06:00');
+    expect(assertScheduleTimeKst('03:00')).toBe('03:00');
+    expect(() => assertScheduleTimeKst('01:00')).toThrow('BACKUP_SCHEDULE_TIME_POLICY_MISMATCH');
+    expect(() => assertScheduleTimeKst('03:30')).toThrow('BACKUP_SCHEDULE_TIME_POLICY_MISMATCH');
+    expect(() => assertScheduleTimeKst('06:00')).toThrow('BACKUP_SCHEDULE_TIME_POLICY_MISMATCH');
     expect(() => assertScheduleTimeKst('00:59')).toThrow('BACKUP_SCHEDULE_OUTSIDE_APPROVED_WINDOW');
     expect(() => assertScheduleTimeKst('06:01')).toThrow('BACKUP_SCHEDULE_OUTSIDE_APPROVED_WINDOW');
     expect(() => assertScheduleTimeKst('3:00')).toThrow('BACKUP_SCHEDULE_TIME_INVALID');
