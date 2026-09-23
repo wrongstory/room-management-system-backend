@@ -1257,6 +1257,13 @@ rotation 및 Data API RLS에서 차단한다. 모든 새 private table은 FORCE 
 
 `private.room_display_status_overrides`는 여섯 표시 분류 또는 null(clear), room CAS version, actor/reason, command key/request hash를 append-only로 보존한다. projection은 `canonical_primary_display_status`와 `display_status_override`를 별도로 반환하고 effective `primary_display_status`만 override 우선으로 계산한다. 이 원장은 reservation/stay/occupancy/readiness/bookability를 변경하지 않으며 `BLOCKED` override도 실제 operation block을 만들지 않는다.
 
+## #172 백엔드 콘솔 읽기 전용 진단 경계 (82번째 source migration 후보)
+
+`rms_diagnostic`은 업무 actor/profile이 아니라 PostgreSQL 접속 역할이므로 ERD entity로 모델링하지
+않는다. 세 `public.diagnostic_*_summary` view도 새 원장이 아니라 rooms/reservations/cleaning workflow의
+식별자 없는 집계 projection이다. 역할은 이 뷰의 SELECT만 받고 원본 public/private/auth 관계에는
+권한이 없다. 따라서 기존 FK·RLS·업무 원장 구조는 바뀌지 않으며 hosted credential과 GUI 연결은 별도다.
+
 ## #194 Assignment-bound PIN entitlement (64번째 source migration)
 
 `20260918000000_assignment_pin_entitlement.sql`은 기존 63개 migration을 수정하지 않는 append-only

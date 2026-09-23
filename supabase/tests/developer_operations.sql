@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_operations_pagination'
+    'backend_console_readonly_diagnostics'
   ) ->> 'currentMigration',
-  'room_operations_pagination',
+  'backend_console_readonly_diagnostics',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_operations_pagination'
+    'backend_console_readonly_diagnostics'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,27 +97,27 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'room_operations_pagination';
+where name = 'backend_console_readonly_diagnostics';
 
 delete from supabase_migrations.schema_migrations
-where name = 'room_operations_pagination';
+where name = 'backend_console_readonly_diagnostics';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_operations_pagination'
+    'backend_console_readonly_diagnostics'
   ) ->> 'currentMigration',
-  'inspection_queue_pagination',
-  'database status exposes migration 80 when migration 81 is absent'
+  'room_operations_pagination',
+  'database status exposes migration 81 when migration 82 is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'room_operations_pagination'
+    'backend_console_readonly_diagnostics'
   ) ->> 'migrationDrift',
   'behind',
-  'database status reports migration 80 behind source migration 81'
+  'database status reports migration 81 behind source migration 82'
 );
 
 insert into supabase_migrations.schema_migrations (version, statements, name)

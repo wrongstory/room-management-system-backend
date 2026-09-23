@@ -8,7 +8,9 @@ license = { text = "Proprietary" }
 dependencies = [
   "attrs==26.1.0",
   "httpx==0.28.1",
+  "psycopg[binary]==3.3.6",
   "pyside6==6.10.3",
+  "sqlglot==30.19.0",
 ]
 
 [project.scripts]

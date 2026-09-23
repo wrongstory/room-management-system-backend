@@ -25,7 +25,7 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 #245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API와 Pages에 반영됐다. 기존 관리자 UAT에서 세 입력 형태와 예약 현황 인원·객실 유형 최소/최대 인원 적용을 확인했다.
 
-운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 79 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이다. 2026-09-23 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages artifact parity 완료 상태다. #256 스마트폰 사진 정규화와 #250/#264 배정 후속은 개발 정본에 있지만 운영 Edge/Pages·실기기 UAT 또는 release 승격과 구분한다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@2ce8953c76fbf5cb33aff9f8a57b303acbf05cdb`다. 개발 정본은 81 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #171 로컬 합성 백업·복구 dry-run까지 포함한다. #172 읽기 전용 진단은 82번째 feature 후보이고 hosted DB 연결은 승인되지 않았다. 2026-09-23 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages artifact parity 완료 상태다. #256 스마트폰 사진 정규화와 #250/#264 배정 후속은 개발 정본에 있지만 운영 Edge/Pages·실기기 UAT 또는 release 승격과 구분한다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 #179의 v8 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보를 합친 migration 순서는 57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`이며 OpenAPI는 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
@@ -58,6 +58,12 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 `actionable` 운영 차단은 `released_at is null`인 모든 항목이다. 미래 시작은 `scheduled`, 평가 시각에 유효하면 `active`, 종료 시각이 지났지만 명시적으로 release되지 않았으면 `expired`로 분류한다. 시간이 지났다는 이유로 원장을 숨기거나 자동 해제하지 않는다. 이슈 조회는 `status=open`만 반환한다. 프런트는 조회된 block/issue ID와 같은 envelope의 최신 `roomStateVersion`을 기존 release/resolve mutation의 `expectedRoomVersion`으로 사용하고, version conflict에서는 다시 조회한다.
 
 81번째 append-only `room_operations_pagination`은 기존 무제한 projection을 삭제하지 않고 HTTP adapter용 bounded page RPC를 추가한다. 차단은 `(starts_at,id)`, 이슈는 `(reported_at,id)` 역순 keyset이며 기본 50·최대 100건이다. `nextCursor`는 HMAC 서명된 opaque 값으로 actor profile·객실·stream·status·sort scope에 고정된다. Fastify와 Edge는 동일한 조회 전용 secret과 128 KiB 응답 상한을 사용하고, cursor 조작·다른 객실/조회에서의 재사용을 거부한다.
+
+82번째 append-only `backend_console_readonly_diagnostics`는 #172 로컬 PoC를 위한 passwordless
+`rms_diagnostic` 역할과 PII-free aggregate view 3개만 추가한다. 역할에는 원본 table/function 권한이나
+SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE이 없고 READ ONLY·3초 statement·500ms lock timeout이
+기본값이다. Python adapter는 AST allowlist, 단일 SELECT, 제한된 EXPLAIN, 200행/256KiB와 cancel을
+중복 적용한다. hosted pooler/credential/GUI와 production/recovery 적용은 포함하지 않는다.
 
 ### #215 객실 이벤트 타임라인
 

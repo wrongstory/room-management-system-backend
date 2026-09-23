@@ -180,15 +180,40 @@ export function validateRolesDump(source) {
   for (const pattern of credentialPatterns) {
     invariant(!pattern.test(source), "BACKUP_ROLES_CONTAINS_CREDENTIAL_MATERIAL");
   }
-  const allowedRoles = new Set(["anon", "authenticated", "authenticator"]);
+  const allowedStatementTimeouts = new Map([
+    ["anon", "3s"],
+    ["authenticated", "8s"],
+    ["authenticator", "8s"],
+  ]);
+  const allowedDiagnosticSettings = new Map([
+    ["default_transaction_read_only", "on"],
+    ["statement_timeout", "3s"],
+    ["lock_timeout", "500ms"],
+    ["idle_in_transaction_session_timeout", "5s"],
+    ["search_path", "pg_catalog, public"],
+  ]);
   for (const rawStatement of source.split(";")) {
     const statement = rawStatement.replaceAll(/--[^\n]*/gu, " ").trim();
     if (!statement) continue;
     if (/^(?:SET|RESET)\b/iu.test(statement)) continue;
-    const match = /^ALTER ROLE\s+"([^"]+)"\s+SET\s+"statement_timeout"\s+TO\s+'[^']+'$/iu.exec(
+    if (/^CREATE ROLE\s+"rms_diagnostic"$/iu.test(statement)) continue;
+    if (
+      /^ALTER ROLE\s+"rms_diagnostic"\s+WITH\s+NOINHERIT\s+NOCREATEROLE\s+NOCREATEDB\s+LOGIN\s+NOBYPASSRLS$/iu.test(
+        statement,
+      )
+    ) continue;
+    const match = /^ALTER ROLE\s+"([^"]+)"\s+SET\s+"([^"]+)"\s+TO\s+'([^']+)'$/iu.exec(
       statement,
     );
-    invariant(match && allowedRoles.has(match[1]), "BACKUP_ROLES_COMMAND_NOT_ALLOWED");
+    const role = match?.[1];
+    const setting = match?.[2];
+    const value = match?.[3];
+    const allowed = role === "rms_diagnostic"
+      ? allowedDiagnosticSettings.get(setting)
+      : setting === "statement_timeout"
+        ? allowedStatementTimeouts.get(role)
+        : undefined;
+    invariant(Boolean(match) && allowed === value, "BACKUP_ROLES_COMMAND_NOT_ALLOWED");
   }
 }
 

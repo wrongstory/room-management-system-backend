@@ -1,4 +1,4 @@
-# Python 백엔드 운영 콘솔 Phase A 운영 가이드
+# Python 백엔드 운영 콘솔 Phase A / Phase B 로컬 PoC 운영 가이드
 
 ## 목적과 보안 경계
 
@@ -6,16 +6,18 @@
 운영 Supabase Edge API에 로그인해 business admin/maid 계정과 안전한 운영 projection을
 관리한다.
 
-Phase A에는 다음이 **없다**.
+Phase A GUI에는 다음이 **없다**.
 
-- DB connection string, Shared Pooler, `psycopg`
+- DB connection string, Shared Pooler 직접 연결
 - service-role/secret key
 - SQL editor 또는 migration 실행
 - Vault/Cron/secret 변경
 - 별도 서버나 유료 상시 process
 
-DB 직접 진단과 maintenance action catalog는 #44 Phase B/C의 별도 보안 검토 전까지
-비활성이다.
+#172 Phase B는 로컬 Supabase에서만 `psycopg` 연결 adapter와 읽기 전용 SQL 정책을 검증한다.
+GUI 연결, hosted pooler, production/recovery 자격증명은 계속 비활성이다. maintenance action
+catalog는 #44 Phase C 전까지 비활성이다. 상세 경계는
+[읽기 전용 DB 진단 PoC](./BACKEND_CONSOLE_READONLY_DIAGNOSTICS.md)를 따른다.
 
 ## 설치
 
