@@ -2,9 +2,10 @@
 
 ## 상태와 범위
 
-이 문서는 `dev@2ce8953...`에서 시작한 #172 후보의 로컬 계약이다. 82번째 append-only
-`backend_console_readonly_diagnostics` migration과 Python `readonly_db` 모듈을 검증한다.
-production/recovery DB, Shared Pooler, secret, migration 적용, GUI 배포는 범위 밖이다.
+이 문서는 #172의 로컬 계약과 #44의 hosted 연결 source gate를 함께 정의한다. 82번째
+append-only `backend_console_readonly_diagnostics` migration과 Python `readonly_db` 모듈을
+사용한다. production/recovery role password provision, 실제 Shared Pooler smoke, GUI 배포는
+별도 운영 승인 전까지 범위 밖이다.
 
 ## 이중 제한
 
@@ -44,10 +45,19 @@ production/recovery DB, Shared Pooler, secret, migration 적용, GUI 배포는 �
 ## 환경 표시와 자격증명
 
 - `local`: 모듈 검증 가능. password는 연결 함수 인자로만 전달하고 객체 repr/config/file에 저장하지 않는다.
-- `production`, `recovery`: `HOSTED_DIRECT_DB_NOT_APPROVED`로 비활성.
-- source-controlled 파일에는 hosted DB host, pooler port/user, password를 추가하지 않는다.
-- 향후 hosted 연결은 정확한 프로젝트/pooler allowlist, TLS, password 직접 입력, role provision/revoke와
-  별도 승인·smoke가 필요하다.
+- `production`, `recovery`: 기본값 `enableHostedReadonlyDb=false`로 비활성이다.
+- 별도 승인 뒤 boolean을 `true`로 바꿔도 접속 정보는 저장하지 않는다. 실행 화면에서 Supabase
+  Dashboard의 **Session Pooler** host와 정확한 project ref, DB role password를 매 실행 입력한다.
+- host는 공식 `aws-<index>-<region>.pooler.supabase.com`, port는 session mode `5432`, username은
+  앱이 `rms_diagnostic.<project-ref>`로 고정한다. pooler host는 region으로 추측하지 않고
+  [Supabase Connect 화면](https://supabase.com/docs/guides/database/connecting-to-postgres)에서 복사한다.
+- TLS는 `sslmode=verify-full`, `sslrootcert=system`으로 고정하며 연결 직후
+  `current_user=rms_diagnostic`, database `postgres`, `default_transaction_read_only=on`을
+  확인한다. 불일치하면 사용자 query를 실행하지 않는다.
+- password는 입력 직후 UI에서 지우고 background query가 끝나면 connection과 함께 폐기한다.
+  host, username, password, DSN, query 결과를 config/Registry/application log에 저장하지 않는다.
+- source-controlled 파일에는 hosted DB host, pooler username, password를 추가하지 않는다.
+- hosted role password provision/revoke와 실제 production/recovery smoke는 별도 승인·기록이 필요하다.
 
 ## 로컬 검증
 
@@ -68,7 +78,7 @@ mock connection을 검증한다.
 
 ## 비활성화와 폐기
 
-hosted 활성화 전 현재 상태에서는 password가 없으므로 별도 credential 폐기가 필요 없다.
+hosted 활성화 전 기본 설정에서는 password가 없으므로 별도 credential 폐기가 필요 없다.
 향후 승인된 환경에서 password를 임시 provision했다면 사고·PC 분실·작업 종료 시 먼저 접속을
 차단하고 active session을 종료한 뒤 password를 NULL로 되돌린다. 뷰나 역할을 즉시 DROP해 migration
 history를 바꾸지 않는다. 후속 append-only migration으로 grants를 회수하고 연결 기능을 비활성화한다.

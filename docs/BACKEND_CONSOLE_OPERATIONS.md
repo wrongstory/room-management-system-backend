@@ -14,9 +14,10 @@ Phase A GUI에는 다음이 **없다**.
 - Vault/Cron/secret 변경
 - 별도 서버나 유료 상시 process
 
-#172 Phase B는 로컬 Supabase에서만 `psycopg` 연결 adapter와 읽기 전용 SQL 정책을 검증한다.
-GUI 연결, hosted pooler, production/recovery 자격증명은 계속 비활성이다. maintenance action
-catalog는 #44 Phase C 전까지 비활성이다. 상세 경계는
+#172 Phase B 로컬 PoC에 이어 #44는 hosted Session Pooler 연결 화면을 source에 추가한다.
+기본 설정은 비활성이며, 별도 승인 뒤에도 host/project/password를 실행 중에만 입력한다. 실제
+production/recovery role password provision과 hosted smoke 전에는 운영 활성화로 간주하지 않는다.
+maintenance action catalog는 #44 Phase C 전까지 비활성이다. 상세 경계는
 [읽기 전용 DB 진단 PoC](./BACKEND_CONSOLE_READONLY_DIAGNOSTICS.md)를 따른다.
 
 ## 설치
@@ -74,6 +75,16 @@ artifact에는 `config.json`, developer 비밀번호, token, service secret이 �
 9. network/5xx로 결과가 불확실하면 같은 입력으로 재시도한다. 프로세스 메모리의 동일
    idempotency key가 재사용된다. 다른 입력은 fail-closed된다.
 10. 작업 후 `잠금 및 로그아웃`을 누르거나 앱을 종료한다. 일정 시간 미사용 시 자동 잠금된다.
+
+### 선택적 hosted 읽기 전용 DB 진단
+
+1. 운영 승인을 받은 경우에만 `config.json`의 `enableHostedReadonlyDb`를 `true`로 설정한다.
+2. Supabase Dashboard의 Connect 화면에서 Session Pooler host를 복사한다. host를 region으로
+   조합하거나 transaction port `6543`으로 바꾸지 않는다.
+3. `DB 읽기 전용` 탭에서 project ref를 다시 입력하고 runtime DB password를 입력한다.
+4. 세 집계 view만 대상으로 하는 단일 SELECT를 실행한다. password는 실행 즉시 화면에서 지워진다.
+5. 실행이 끝나면 connection은 닫힌다. password/DSN/query/result를 파일이나 로그에 남기지 않는다.
+6. hosted role provision과 smoke가 완료되지 않은 환경에서는 flag를 계속 `false`로 둔다.
 
 developer 계정, 마지막 active business admin, developer로의 승격은 서버 DB 계약과 GUI
 양쪽에서 차단된다. GUI 버튼이 보이지 않거나 비활성인 것을 서버 권한의 대체로 보지 않는다.

@@ -41,6 +41,7 @@ APPROVED_FUNCTIONS = frozenset(
 )
 EXPLAIN_PREFIX = re.compile(r"^\s*EXPLAIN\s+(?=(?:SELECT|WITH)\b)", re.IGNORECASE)
 MAX_QUERY_BYTES = 16 * 1024
+HOSTED_POOLER_HOST = re.compile(r"^aws-[0-9]+-[a-z0-9-]+\.pooler\.supabase\.com$")
 
 
 class ReadonlyDbError(RuntimeError):
@@ -90,6 +91,42 @@ class ReadonlyDbAvailability:
     reason: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class HostedReadonlyProfile:
+    environment: Environment
+    project_ref: str
+    host: str
+    port: int = 5432
+    dbname: str = "postgres"
+    role: str = "rms_diagnostic"
+
+    @property
+    def user(self) -> str:
+        return f"{self.role}.{self.project_ref}"
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        environment: Environment,
+        expected_project_ref: str,
+        confirmed_project_ref: str,
+        host: str,
+    ) -> HostedReadonlyProfile:
+        if environment not in {"production", "recovery"}:
+            raise ReadonlyDbError("HOSTED_ENVIRONMENT_REQUIRED")
+        if confirmed_project_ref != expected_project_ref:
+            raise ReadonlyDbError("PROJECT_CONFIRMATION_MISMATCH")
+        normalized_host = host.strip().lower()
+        if not HOSTED_POOLER_HOST.fullmatch(normalized_host):
+            raise ReadonlyDbError("POOLER_HOST_INVALID")
+        return cls(
+            environment=environment,
+            project_ref=expected_project_ref,
+            host=normalized_host,
+        )
+
+
 class ColumnDescription(Protocol):
     @property
     def name(self) -> str: ...
@@ -121,8 +158,12 @@ class ConnectionLike(Protocol):
 ConnectionFactory = Callable[[], ConnectionLike]
 
 
-def readonly_db_availability(environment: Environment) -> ReadonlyDbAvailability:
+def readonly_db_availability(
+    environment: Environment, *, enable_hosted: bool = False
+) -> ReadonlyDbAvailability:
     if environment == "local":
+        return ReadonlyDbAvailability(enabled=True, reason=None)
+    if enable_hosted:
         return ReadonlyDbAvailability(enabled=True, reason=None)
     return ReadonlyDbAvailability(enabled=False, reason="HOSTED_DIRECT_DB_NOT_APPROVED")
 
@@ -200,9 +241,26 @@ def open_psycopg_connection(
     user: str,
     password: str,
     sslmode: str,
+    sslrootcert: str | None = None,
 ) -> ConnectionLike:
     if sslmode not in {"disable", "require", "verify-ca", "verify-full"}:
         raise ValueError("sslmode이 허용되지 않았습니다.")
+    if sslrootcert is not None:
+        return cast(
+            ConnectionLike,
+            psycopg.connect(
+                host=host,
+                port=port,
+                dbname=dbname,
+                user=user,
+                password=password,
+                sslmode=sslmode,
+                sslrootcert=sslrootcert,
+                gssencmode="disable",
+                connect_timeout=5,
+                autocommit=False,
+            ),
+        )
     return cast(
         ConnectionLike,
         psycopg.connect(
@@ -212,10 +270,55 @@ def open_psycopg_connection(
             user=user,
             password=password,
             sslmode=sslmode,
+            gssencmode="disable",
             connect_timeout=5,
             autocommit=False,
         ),
     )
+
+
+def open_hosted_readonly_connection(
+    profile: HostedReadonlyProfile,
+    password: str,
+) -> ConnectionLike:
+    if not password or len(password) > 512 or any(character in "\r\n\0" for character in password):
+        raise ReadonlyDbError("DB_PASSWORD_INVALID")
+    connection: ConnectionLike | None = None
+    cursor: CursorLike | None = None
+    try:
+        connection = open_psycopg_connection(
+            host=profile.host,
+            port=profile.port,
+            dbname=profile.dbname,
+            user=profile.user,
+            password=password,
+            sslmode="verify-full",
+            sslrootcert="system",
+        )
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT current_user, current_database(), "
+            "current_setting('default_transaction_read_only')"
+        )
+        rows = cursor.fetchmany(2)
+        if rows != [(profile.role, profile.dbname, "on")]:
+            raise ReadonlyDbError("DB_IDENTITY_MISMATCH")
+        connection.rollback()
+        return connection
+    except ReadonlyDbError:
+        if connection is not None:
+            with suppress(Exception):
+                connection.close()
+        raise
+    except Exception as error:
+        if connection is not None:
+            with suppress(Exception):
+                connection.close()
+        raise ReadonlyDbError("DB_CONNECTION_FAILED") from error
+    finally:
+        if cursor is not None:
+            with suppress(Exception):
+                cursor.close()
 
 
 class ReadonlyQueryExecutor:

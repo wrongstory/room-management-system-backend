@@ -3,7 +3,8 @@
 승인된 Windows 운영 PC에서 Supabase Edge API만 사용해 계정과 운영 상태를 관리하는
 Python 3.12+ 데스크톱 도구다. Phase A GUI에는 service-role key가 없고 hosted DB 직접 연결은
 비활성이다. #172 Phase B 로컬 PoC는 별도 `readonly_db` 모듈에서만 최소권한 집계 조회를
-검증하며 아직 GUI나 production/recovery pooler에 연결하지 않는다.
+검증한다. #44 hosted 연결 source는 기본 비활성인 `DB 읽기 전용` 탭을 제공하지만,
+production/recovery role password provision과 실제 pooler smoke 전에는 활성화하지 않는다.
 
 #84 사진 업로드/슬롯/원본4 operations는 business maid/admin 권한이며 developer 콘솔에 추가하지 않는다.
 filtered OpenAPI와 생성 client는 auth/accounts/developer, #137의 room PIN Sheet 안전 조회·전체 복구,

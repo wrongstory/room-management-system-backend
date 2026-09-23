@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any, cast
 
 from PySide6.QtCore import QEvent, QObject, Qt, QThreadPool, QTimer, Signal
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -34,6 +36,14 @@ from .build_info import BuildInfo, load_build_info
 from .config import AppConfig
 from .models import ACCOUNT_STATUS_TARGETS, Account, AccountStatusTarget
 from .policies import account_action_policy
+from .readonly_db import (
+    HostedReadonlyProfile,
+    ReadonlyDbError,
+    ReadonlyQueryExecutor,
+    ReadonlyQueryResult,
+    open_hosted_readonly_connection,
+    readonly_db_availability,
+)
 from .worker import Worker
 
 REASON_CODE = re.compile(r"^[A-Z0-9_]{2,80}$")
@@ -488,6 +498,173 @@ class DashboardPage(QWidget):
         self.view.setHtml(f"<h2>진단: {status}</h2><ul>{rows}</ul>")
 
 
+class ReadonlyDatabasePage(QWidget):
+    def __init__(self, config: AppConfig) -> None:
+        super().__init__()
+        self._config = config
+        self._pool = QThreadPool.globalInstance()
+        self._executor: ReadonlyQueryExecutor | None = None
+        layout = QVBoxLayout(self)
+
+        availability = readonly_db_availability(
+            config.environment,
+            enable_hosted=config.enable_hosted_readonly_db,
+        )
+        self.status_label = QLabel()
+        self.status_label.setWordWrap(True)
+        if config.environment == "local":
+            self.status_label.setText(
+                "LOCAL DB 진단은 테스트 adapter에서만 사용합니다. hosted 연결 화면은 비활성입니다."
+            )
+            enabled = False
+        elif availability.enabled:
+            self.status_label.setText(
+                f"{config.environment_label}\n"
+                "Session Pooler(5432)와 rms_diagnostic 역할만 허용합니다. "
+                "입력한 비밀번호는 실행 직후 화면에서 지워지며 저장되지 않습니다."
+            )
+            enabled = True
+        else:
+            self.status_label.setText(
+                "Hosted 읽기 전용 DB 진단이 설정에서 비활성입니다. "
+                f"상태: {availability.reason or 'DISABLED'}"
+            )
+            enabled = False
+        self._enabled = enabled
+        layout.addWidget(self.status_label)
+
+        form = QFormLayout()
+        self.pooler_host = QLineEdit()
+        self.pooler_host.setPlaceholderText("Supabase Connect 화면의 Session Pooler host")
+        self.pooler_host.setMaxLength(253)
+        self.project_confirmation = QLineEdit()
+        self.project_confirmation.setPlaceholderText(config.project_ref)
+        self.project_confirmation.setMaxLength(64)
+        self.db_user = QLineEdit(f"rms_diagnostic.{config.project_ref}")
+        self.db_user.setReadOnly(True)
+        self.db_password = QLineEdit()
+        self.db_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.db_password.setMaxLength(512)
+        form.addRow("Session Pooler host", self.pooler_host)
+        form.addRow("PROJECT 재입력", self.project_confirmation)
+        form.addRow("DB 사용자", self.db_user)
+        form.addRow("DB 비밀번호", self.db_password)
+        layout.addLayout(form)
+
+        self.query = QPlainTextEdit("SELECT * FROM public.diagnostic_system_summary")
+        self.query.setPlaceholderText("승인된 diagnostic view의 단일 SELECT만 허용됩니다.")
+        layout.addWidget(self.query)
+
+        controls = QHBoxLayout()
+        self.run_button = QPushButton("읽기 전용 진단 실행")
+        self.cancel_button = QPushButton("실행 취소")
+        self.cancel_button.setEnabled(False)
+        self.run_button.clicked.connect(self.run_query)
+        self.cancel_button.clicked.connect(self.cancel_query)
+        controls.addWidget(self.run_button)
+        controls.addWidget(self.cancel_button)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.result_meta = QLabel("실행 결과 없음")
+        layout.addWidget(self.result_meta)
+        self.result_table = QTableWidget(0, 0)
+        self.result_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.result_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.result_table)
+
+        for widget in (
+            self.pooler_host,
+            self.project_confirmation,
+            self.db_password,
+            self.query,
+            self.run_button,
+        ):
+            widget.setEnabled(enabled)
+
+    def run_query(self) -> None:
+        password = self.db_password.text()
+        self.db_password.clear()
+        try:
+            profile = HostedReadonlyProfile.create(
+                environment=self._config.environment,
+                expected_project_ref=self._config.project_ref,
+                confirmed_project_ref=self.project_confirmation.text(),
+                host=self.pooler_host.text(),
+            )
+            if not password:
+                raise ReadonlyDbError("DB_PASSWORD_INVALID")
+        except ReadonlyDbError as error:
+            self._show_error(error)
+            return
+
+        executor = ReadonlyQueryExecutor(lambda: open_hosted_readonly_connection(profile, password))
+        self._executor = executor
+        source = self.query.toPlainText()
+        self.run_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+
+        def task() -> ReadonlyQueryResult:
+            try:
+                return executor.execute(source)
+            except ReadonlyDbError as error:
+                raise ApiError(
+                    status_code=0,
+                    code=error.code,
+                    message="읽기 전용 DB 진단을 완료하지 못했습니다.",
+                ) from error
+
+        worker = Worker(task)
+        worker.signals.succeeded.connect(self._render_result)
+        worker.signals.failed.connect(lambda error: show_api_error(self, cast(ApiError, error)))
+        worker.signals.finished.connect(self._finished)
+        self._pool.start(worker)
+
+    def cancel_query(self) -> None:
+        executor = self._executor
+        if executor is None:
+            return
+        try:
+            if not executor.cancel():
+                self.result_meta.setText("취소할 실행이 없습니다.")
+        except ReadonlyDbError as error:
+            self._show_error(error)
+
+    def shutdown(self) -> None:
+        executor = self._executor
+        if executor is None:
+            return
+        with suppress(ReadonlyDbError):
+            executor.cancel()
+
+    def _finished(self) -> None:
+        self._executor = None
+        self.run_button.setEnabled(self._enabled)
+        self.cancel_button.setEnabled(False)
+
+    def _show_error(self, error: ReadonlyDbError) -> None:
+        QMessageBox.warning(
+            self, "읽기 전용 진단 실패", f"요청을 실행하지 않았습니다. [{error.code}]"
+        )
+
+    def _render_result(self, value: object) -> None:
+        result = cast(ReadonlyQueryResult, value)
+        self.result_table.clear()
+        self.result_table.setColumnCount(len(result.columns))
+        self.result_table.setHorizontalHeaderLabels(list(result.columns))
+        self.result_table.setRowCount(len(result.rows))
+        for row_index, row in enumerate(result.rows):
+            for column_index, item in enumerate(row):
+                self.result_table.setItem(
+                    row_index,
+                    column_index,
+                    QTableWidgetItem(str(item)),
+                )
+        self.result_meta.setText(
+            f"{len(result.rows)}행 / {result.response_bytes} bytes / {result.elapsed_ms} ms"
+        )
+
+
 class AuditPage(QWidget):
     def __init__(self, client: BackendApiClient) -> None:
         super().__init__()
@@ -663,10 +840,12 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         self.dashboard = DashboardPage(client)
         self.accounts = AccountsPage(client)
+        self.readonly_database = ReadonlyDatabasePage(config)
         self.audit = AuditPage(client)
         self.activity = ActivityPage(client)
         tabs.addTab(self.dashboard, "운영 대시보드")
         tabs.addTab(self.accounts, "계정 관리")
+        tabs.addTab(self.readonly_database, "DB 읽기 전용")
         tabs.addTab(self.audit, "감사 이벤트")
         tabs.addTab(self.activity, "활동/보안 로그")
         layout.addWidget(tabs)
@@ -694,11 +873,13 @@ class MainWindow(QMainWindow):
     def lock_now(self) -> None:
         self._closing_for_lock = True
         self._inactivity_timer.stop()
+        self.readonly_database.shutdown()
         self._client.lock(logout=True)
         self.locked.emit()
         self.close()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self.readonly_database.shutdown()
         application = QApplication.instance()
         if application is not None:
             application.removeEventFilter(self._activity_filter)
