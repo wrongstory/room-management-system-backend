@@ -125,6 +125,68 @@ function samsungSefMotionPhotoTail(b: Uint8Array, primaryEnd: number, videoStart
   }
   return motionEnd !== -1 && expectedStart === directoryStart && isoBmffVideoTail(b, videoStart, motionEnd);
 }
+interface GContainerItem { semantic: string; mime: string; length?: number; padding: number }
+function gContainerItems(xmp: string, primaryEnd: number): GContainerItem[] | null {
+  if (!xmp.includes('http://ns.google.com/photos/1.0/container/') ||
+    !xmp.includes('http://ns.google.com/photos/1.0/container/item/')) return null;
+  const directory = /<[^>]*:Directory\b[^>]*>([\s\S]*?)<\/[^>]*:Directory\s*>/.exec(xmp);
+  const tags = directory?.[1]?.match(/<[^>]*:Item\b[^>]*>/g);
+  if (!tags || tags.length < 2 || tags.length > 4) return null;
+  const attribute = (tag: string, name: string) => new RegExp(`(?:\\b[A-Za-z_][\\w.-]*:)?${name}\\s*=\\s*["']([^"']*)["']`).exec(tag)?.[1];
+  const decimal = (raw: string | undefined, optional: boolean): number | undefined => {
+    if (raw === undefined) return optional ? undefined : NaN;
+    if (!/^\d{1,10}$/.test(raw)) return NaN;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) ? value : NaN;
+  };
+  const items: GContainerItem[] = [];
+  for (let index = 0; index < tags.length; index++) {
+    const tag = tags[index] ?? '';
+    const semantic = attribute(tag, 'Semantic'), mime = attribute(tag, 'Mime');
+    const length = decimal(attribute(tag, 'Length'), index === 0);
+    const padding = decimal(attribute(tag, 'Padding'), true) ?? 0;
+    if (!semantic || !mime || Number.isNaN(length) || Number.isNaN(padding) || padding > PHOTO_INPUT_MAX_BYTES) return null;
+    if (index === 0 && (semantic !== 'Primary' || mime !== 'image/jpeg' || length !== undefined && length !== primaryEnd)) return null;
+    if (index > 0 && (!length || length > PHOTO_INPUT_MAX_BYTES)) return null;
+    items.push({ semantic, mime, ...(length === undefined ? {} : { length }), padding });
+  }
+  return items;
+}
+function ultraHdrOrGContainerTail(b: Uint8Array, primaryEnd: number, xmpPackets: string[]): boolean {
+  const xmp = xmpPackets.join('\n');
+  const items = gContainerItems(xmp, primaryEnd);
+  if (!items) return false;
+  const motionEnabled = xmp.includes('http://ns.google.com/photos/1.0/camera/') &&
+    (/(?:\bMotionPhoto|\bMicroVideo)\s*=\s*["']1["']/.test(xmp) || /<[^>]*:(?:MotionPhoto|MicroVideo)>\s*1\s*<\//.test(xmp));
+  const ultraHdr = xmp.includes('http://ns.adobe.com/hdr-gain-map/1.0/') &&
+    /\bhdrgm:Version\s*=\s*["']1\.0["']/.test(xmp);
+  let cursor = primaryEnd + (items[0]?.padding ?? 0), gainMap = false, motion = false;
+  if (cursor > b.length) return false;
+  for (const item of items.slice(1)) {
+    const length = item.length ?? 0, end = cursor + length;
+    if (end > b.length) return false;
+    if (item.semantic === 'GainMap' && item.mime === 'image/jpeg' && ultraHdr && !gainMap && !motion) {
+      const gainMapBytes = b.subarray(cursor, end), gainMapXmp: string[] = [];
+      try {
+        if (jpegShape(gainMapBytes, false, gainMapXmp) !== gainMapBytes.length) return false;
+      } catch { return false; }
+      const metadata = gainMapXmp.join('\n');
+      if (!metadata.includes('http://ns.adobe.com/hdr-gain-map/1.0/') ||
+        !/\bhdrgm:Version\s*=\s*["']1\.0["']/.test(metadata)) return false;
+      gainMap = true;
+    } else if (item.semantic === 'MotionPhoto' && /^video\/(?:mp4|quicktime)$/.test(item.mime) && motionEnabled && !motion) {
+      if (!isoBmffVideoTail(b, cursor, end)) return false;
+      motion = true;
+    } else return false;
+    cursor = end + item.padding;
+    if (cursor > b.length) return false;
+  }
+  if (cursor === b.length) return gainMap || motion;
+  // Some recent Samsung files set MotionPhoto=1 but omit the video directory item.
+  // A fully validated Ultra HDR gain map followed by one complete ISO-BMFF resource is
+  // still unambiguous; arbitrary or partially valid trailing bytes remain rejected.
+  return gainMap && !motion && motionEnabled && isoBmffVideoTail(b, cursor, b.length);
+}
 function motionPhotoTail(b: Uint8Array, primaryEnd: number, xmpPackets: string[]): boolean {
   const xmp = xmpPackets.join('\n');
   if (!xmp.includes('http://ns.google.com/photos/1.0/camera/')) return false;
@@ -151,7 +213,7 @@ function motionPhotoTail(b: Uint8Array, primaryEnd: number, xmpPackets: string[]
   }
   return candidates.some(offset => isoBmffVideoTail(b, offset) || samsungSefMotionPhotoTail(b, primaryEnd, offset));
 }
-function jpegShape(b: Uint8Array, clean: boolean): number {
+function jpegShape(b: Uint8Array, clean: boolean, collectedXmp?: string[]): number {
   if (b[0] !== 255 || b[1] !== 216) invalid();
   let p = 2, frames = 0, scans = 0;
   const xmpPackets: string[] = [];
@@ -160,7 +222,8 @@ function jpegShape(b: Uint8Array, clean: boolean): number {
     while (b[p] === 255) p++;
     const marker = byte(b, p++);
     if (marker === 217) {
-      if (frames !== 1 || scans < 1 || p !== b.length && (clean || !motionPhotoTail(b, p, xmpPackets))) invalid();
+      if (frames !== 1 || scans < 1 || p !== b.length && (clean ||
+        !ultraHdrOrGContainerTail(b, p, xmpPackets) && !motionPhotoTail(b, p, xmpPackets))) invalid();
       return p;
     }
     if (marker === undefined || marker === 0 || marker === 216 || (marker >= 208 && marker <= 215)) invalid();
@@ -170,7 +233,9 @@ function jpegShape(b: Uint8Array, clean: boolean): number {
     if (clean && (marker === 225 || marker === 237 || marker === 254)) invalid();
     if (!clean && marker === 225) {
       const packet = new TextDecoder().decode(b.subarray(p + 2, p + size));
-      if (packet.startsWith('http://ns.adobe.com/xap/1.0/\u0000') || packet.startsWith('http://ns.adobe.com/xmp/extension/\u0000')) xmpPackets.push(packet);
+      if (packet.startsWith('http://ns.adobe.com/xap/1.0/\u0000') || packet.startsWith('http://ns.adobe.com/xmp/extension/\u0000')) {
+        xmpPackets.push(packet); collectedXmp?.push(packet);
+      }
     }
     if ([192, 193, 194].includes(marker)) {
       if (++frames !== 1 || size < 8) invalid();
