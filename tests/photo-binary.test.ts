@@ -74,6 +74,29 @@ function samsungMotionPhotoJpeg(bytes: Uint8Array, versioned = false): Uint8Arra
   view.setUint32(directorySize, directorySize, true); directory.set(new TextEncoder().encode('SEFT'), directorySize + 4);
   return new Uint8Array([...primary, ...metadata, ...motionHeader, ...video, ...versionField, ...directory]);
 }
+function ultraHdrJpeg(bytes: Uint8Array, motion: 'none' | 'declared' | 'samsung-fallback' = 'none'): Uint8Array {
+  const app1 = (metadata: string) => {
+    const xmp = new TextEncoder().encode(`http://ns.adobe.com/xap/1.0/\0<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">${metadata}</rdf:RDF></x:xmpmeta>`);
+    const segment = new Uint8Array(xmp.length + 4);
+    segment.set([255, 225, (xmp.length + 2) >> 8, (xmp.length + 2) & 255]); segment.set(xmp, 4);
+    return segment;
+  };
+  const gainMapMetadata = '<rdf:Description xmlns:hdrgm="http://ns.adobe.com/hdr-gain-map/1.0/" hdrgm:Version="1.0" hdrgm:GainMapMax="2" hdrgm:HDRCapacityMax="2"/>';
+  const gainMap = fixture('image/jpeg', 4, 4), gainMapXmp = app1(gainMapMetadata);
+  const gainMapJpeg = new Uint8Array([...gainMap.slice(0, 2), ...gainMapXmp, ...gainMap.slice(2)]);
+  const box = (kind: string, payload = new Uint8Array()) => {
+    const result = new Uint8Array(8 + payload.length), view = new DataView(result.buffer);
+    view.setUint32(0, result.length, false); result.set(new TextEncoder().encode(kind), 4); result.set(payload, 8); return result;
+  };
+  const ftyp = box('ftyp', new TextEncoder().encode('isom\0\0\0\0isom'));
+  const video = new Uint8Array(ftyp.length + 16); video.set(ftyp); video.set(box('moov'), ftyp.length); video.set(box('mdat'), ftyp.length + 8);
+  const motionAttributes = motion === 'none' ? '' : ' xmlns:GCamera="http://ns.google.com/photos/1.0/camera/" GCamera:MotionPhoto="1"';
+  const motionItem = motion === 'declared' ? `<rdf:li><Container:Item Item:Semantic="MotionPhoto" Item:Mime="video/mp4" Item:Length="${video.length}"/></rdf:li>` : '';
+  const primaryMetadata = `<rdf:Description xmlns:Container="http://ns.google.com/photos/1.0/container/" xmlns:Item="http://ns.google.com/photos/1.0/container/item/" xmlns:hdrgm="http://ns.adobe.com/hdr-gain-map/1.0/" hdrgm:Version="1.0"${motionAttributes}><Container:Directory><rdf:Seq><rdf:li><Container:Item Item:Semantic="Primary" Item:Mime="image/jpeg"/></rdf:li><rdf:li><Container:Item Item:Semantic="GainMap" Item:Mime="image/jpeg" Item:Length="${gainMapJpeg.length}"/></rdf:li>${motionItem}</rdf:Seq></Container:Directory></rdf:Description>`;
+  const primaryXmp = app1(primaryMetadata);
+  const primary = new Uint8Array([...bytes.slice(0, 2), ...primaryXmp, ...bytes.slice(2)]);
+  return new Uint8Array([...primary, ...gainMapJpeg, ...(motion === 'none' ? [] : video)]);
+}
 describe('independent server image verification', () => {
   it('decodes JPEG/WebP and rechecks stripped output/final digest deterministically', async () => {
     for (const mime of ['image/jpeg', 'image/webp'] as const) {
@@ -124,6 +147,30 @@ describe('independent server image verification', () => {
       const forged = motion.slice(); forged[offset] = (forged[offset] ?? 0) ^ 1;
       await expect(verifyPhotoBinary(forged, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
     }
+  });
+  it('extracts Android Ultra HDR and Ultra HDR Motion Photo primary images', async () => {
+    for (const motion of ['none', 'declared', 'samsung-fallback'] as const) {
+      const original = ultraHdrJpeg(fixture(), motion);
+      const output = await verifyPhotoBinary(original, 'image/jpeg');
+      expect(output.mime).toBe('image/jpeg');
+      expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+      checkPhotoEnvelope(output.bytes, output.mime, true);
+    }
+  });
+  it('rejects forged Ultra HDR directory lengths, gain maps and undeclared trailers', async () => {
+    const declared = ultraHdrJpeg(fixture(), 'declared');
+    const brokenLength = declared.slice();
+    const lengthText = new TextEncoder().encode('Item:Length="');
+    const index = brokenLength.findIndex((_, offset) => lengthText.every((value, inner) => brokenLength[offset + inner] === value));
+    expect(index).toBeGreaterThan(0);
+    brokenLength[index + lengthText.length] = 57;
+    await expect(verifyPhotoBinary(brokenLength, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
+    const brokenGainMap = ultraHdrJpeg(fixture());
+    const lastGainMapByte = brokenGainMap.length - 1;
+    brokenGainMap[lastGainMapByte] = (brokenGainMap[lastGainMapByte] ?? 0) ^ 1;
+    await expect(verifyPhotoBinary(brokenGainMap, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
+    const undeclared = new Uint8Array([...ultraHdrJpeg(fixture()), ...declared.slice(-36)]);
+    await expect(verifyPhotoBinary(undeclared, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
   });
   it('decodes a synthetic HEIF sample to metadata-free JPEG, and rejects malformed containers', async () => {
     // Synthetic 32px HEVC fixture from libheif fuzzing/data/corpus/hevc32.heif (LGPL-3.0).
