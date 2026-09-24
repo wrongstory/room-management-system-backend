@@ -247,6 +247,51 @@ interface GContainerItem {
   length?: number;
   padding: number;
 }
+/** Samsung still-photo metadata after a validated GainMap, never an unbounded trailer bypass. */
+function samsungSefMetadataTail(b: Uint8Array, start: number): boolean {
+  if (start < 0 || b.length - start < 41) return false;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const text = (offset: number, length: number) =>
+    String.fromCharCode(...b.subarray(offset, offset + length));
+  if (text(b.length - 4, 4) !== "SEFT") return false;
+  const directorySize = view.getUint32(b.length - 8, true);
+  const directoryStart = b.length - 8 - directorySize;
+  if (
+    directorySize < 24 || directoryStart < start + 9 ||
+    text(directoryStart, 4) !== "SEFH"
+  ) return false;
+  const count = view.getUint32(directoryStart + 8, true);
+  if (count < 1 || count > 128 || directorySize !== 12 + count * 12) {
+    return false;
+  }
+  const types = new Set<number>();
+  let expectedStart = start;
+  for (let index = 0; index < count; index++) {
+    const entry = directoryStart + 12 + index * 12;
+    const type = view.getUint32(entry, true);
+    const negativeOffset = view.getUint32(entry + 4, true);
+    const fieldLength = view.getUint32(entry + 8, true);
+    // Motion video has a separate validated path; it is not opaque still metadata.
+    if (
+      types.has(type) || type === 0x0a300000 || (type & 0xffff) !== 0 ||
+      !negativeOffset || negativeOffset > directoryStart || fieldLength < 9
+    ) return false;
+    types.add(type);
+    const fieldStart = directoryStart - negativeOffset;
+    if (
+      fieldStart !== expectedStart ||
+      fieldStart + fieldLength > directoryStart ||
+      view.getUint32(fieldStart, true) !== type
+    ) return false;
+    const nameLength = view.getUint32(fieldStart + 4, true);
+    if (
+      nameLength < 1 || nameLength > 128 || 8 + nameLength > fieldLength ||
+      !/^[A-Za-z][A-Za-z0-9_]*$/.test(text(fieldStart + 8, nameLength))
+    ) return false;
+    expectedStart = fieldStart + fieldLength;
+  }
+  return expectedStart === directoryStart;
+}
 function gContainerItems(
   xmp: string,
   primaryEnd: number,
@@ -346,6 +391,7 @@ function ultraHdrOrGContainerTail(
     if (cursor > b.length) return false;
   }
   if (cursor === b.length) return gainMap || motion;
+  if (gainMap && !motion && samsungSefMetadataTail(b, cursor)) return true;
   // Some recent Samsung files set MotionPhoto=1 but omit the video directory item.
   // A fully validated Ultra HDR gain map followed by one complete ISO-BMFF resource is
   // still unambiguous; arbitrary or partially valid trailing bytes remain rejected.

@@ -163,6 +163,13 @@ GOOGLE_DRIVE_ROOT_FOLDER_ID
 
 GitHub, 프론트 번들, 일반 로그에 값을 넣지 않는다. Codex의 Google Drive 연결은 개발 중 파일을 다루는 연결이며, 배포된 백엔드는 Google Cloud Console에서 발급한 별도 Drive API OAuth 자격증명을 사용해야 한다.
 
+## #291 삼성 Ultra HDR 정지 사진 호환성
+
+- XMP에 선언된 JPEG GainMap의 길이·구조를 검증한 다음 Samsung SEF metadata가 이어지는 정지 사진을 수용한다.
+- SEFH/SEFT directory와 bounded entry 수, 역방향 offset·길이, 연속 구간, type 일치/중복, name 경계를 모두 검증한다. 미선언 gap, 손상된 directory, 추가 trailing bytes와 motion-video entry를 metadata 우회 경로로 허용하지 않는다.
+- decoder에는 주 JPEG만 전달하며 기존 방향 보정·metadata 제거·300KiB 이하 재인코딩을 유지한다. 입력 5MiB·12MP/5000px, MIME, 권한·CAS·멱등성·Drive·DB 계약은 변경하지 않는다.
+- 회귀 fixture는 합성 데이터만 사용한다. 사용자 촬영 원본·metadata·파일 경로를 Git/PR에 포함하지 않는다. 로컬 원본 재현 성공은 운영 업로드·Drive finalize 성공과 구분한다.
+
 ## 공식 근거
 
 - [Google 계정 저장용량 정책](https://support.google.com/drive/answer/6374270?hl=ko)

@@ -97,7 +97,59 @@ function ultraHdrJpeg(bytes: Uint8Array, motion: 'none' | 'declared' | 'samsung-
   const primary = new Uint8Array([...bytes.slice(0, 2), ...primaryXmp, ...bytes.slice(2)]);
   return new Uint8Array([...primary, ...gainMapJpeg, ...(motion === 'none' ? [] : video)]);
 }
+function samsungStillMetadata(bytes: Uint8Array): Uint8Array {
+  // Synthetic metadata only; no user camera bytes, values or identifiers.
+  const fields = ['Image_UTC_Data', 'Camera_Capture_Mode_Info'].map((name, index) => {
+    const encoded = new TextEncoder().encode(name), field = new Uint8Array(8 + encoded.length + 4);
+    const view = new DataView(field.buffer);
+    view.setUint32(0, (0x0a01 + index) * 65536, true);
+    view.setUint32(4, encoded.length, true); field.set(encoded, 8); return field;
+  });
+  const directorySize = 12 + fields.length * 12;
+  const directoryStart = bytes.length + fields.reduce((sum, field) => sum + field.length, 0);
+  const directory = new Uint8Array(directorySize + 8), view = new DataView(directory.buffer);
+  directory.set(new TextEncoder().encode('SEFH')); view.setUint32(4, 106, true); view.setUint32(8, fields.length, true);
+  let offset = bytes.length;
+  fields.forEach((field, index) => {
+    const entry = 12 + index * 12;
+    directory.set(field.subarray(0, 4), entry); view.setUint32(entry + 4, directoryStart - offset, true); view.setUint32(entry + 8, field.length, true);
+    offset += field.length;
+  });
+  view.setUint32(directorySize, directorySize, true); directory.set(new TextEncoder().encode('SEFT'), directorySize + 4);
+  return new Uint8Array([...bytes, ...fields.flatMap(field => [...field]), ...directory]);
+}
+
 describe('independent server image verification', () => {
+  it('normalizes Ultra HDR stills with fully indexed Samsung SEF metadata and strips the trailer', async () => {
+    const hdr = ultraHdrJpeg(fixture()), original = samsungStillMetadata(hdr);
+    const output = await verifyPhotoBinary(original, 'image/jpeg');
+    expect(output).toEqual(await verifyPhotoBinary(hdr, 'image/jpeg'));
+    checkPhotoEnvelope(output.bytes, output.mime, true);
+    expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+  });
+  it('rejects forged Samsung still metadata boundaries, fields, names, video and loose bytes', async () => {
+    const hdr = ultraHdrJpeg(fixture()), original = samsungStillMetadata(hdr);
+    const directory = original.length - 44;
+    const corruptions: Array<(bytes: Uint8Array) => void> = [
+      b => { b[b.length - 1] = 0; },
+      b => { new DataView(b.buffer).setUint32(b.length - 8, 0xffffffff, true); },
+      b => { new DataView(b.buffer).setUint32(directory + 8, 129, true); },
+      b => { new DataView(b.buffer).setUint32(directory + 16, 1, true); },
+      b => { new DataView(b.buffer).setUint32(directory + 28, 0xffffffff, true); },
+      b => { new DataView(b.buffer).setUint32(directory + 20, 0xffffffff, true); },
+      b => { b[hdr.length] = 1; },
+      b => { new DataView(b.buffer).setUint32(hdr.length + 4, 129, true); },
+      b => { b[hdr.length + 8] = 0; },
+      b => { new DataView(b.buffer).setUint32(hdr.length, 0x0a300000, true); new DataView(b.buffer).setUint32(directory + 12, 0x0a300000, true); },
+    ];
+    for (const corrupt of corruptions) {
+      const forged = original.slice(); corrupt(forged);
+      await expect(verifyPhotoBinary(forged, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
+    }
+    for (const forged of [original.slice(0, -1), new Uint8Array([...original, 0]), samsungStillMetadata(new Uint8Array([...hdr, 0])), samsungStillMetadata(fixture())]) {
+      await expect(verifyPhotoBinary(forged, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
+    }
+  });
   it('decodes JPEG/WebP and rechecks stripped output/final digest deterministically', async () => {
     for (const mime of ['image/jpeg', 'image/webp'] as const) {
       const raw = fixture(mime), a = await verifyPhotoBinary(raw, mime), b = await verifyPhotoBinary(raw, mime);
