@@ -170,6 +170,13 @@ GitHub, 프론트 번들, 일반 로그에 값을 넣지 않는다. Codex의 Goo
 - decoder에는 주 JPEG만 전달하며 기존 방향 보정·metadata 제거·300KiB 이하 재인코딩을 유지한다. 입력 5MiB·12MP/5000px, MIME, 권한·CAS·멱등성·Drive·DB 계약은 변경하지 않는다.
 - 회귀 fixture는 합성 데이터만 사용한다. 사용자 촬영 원본·metadata·파일 경로를 Git/PR에 포함하지 않는다. 로컬 원본 재현 성공은 운영 업로드·Drive finalize 성공과 구분한다.
 
+## #294 운영 이미지 실패 진단
+
+- Edge API는 사진 body/입력 envelope/입력 decode/입력 검증/변환/encode/출력 envelope/출력 decode/출력 검증/시간 예산의 실패 지점을 구분한다. 공개 HTTP 상태와 error code, 입력·출력 제한 및 거부 조건은 유지한다.
+- 운영 console에는 `status`, 닫힌 코드 집합의 `PHOTO_<단계>_<종류>`, `requestId` 세 필드만 기록한다. native exception은 숫자 severity만 분류하고 message/stack/related errors를 읽거나 전달하지 않는다. 경고도 최초 발생 단계만 보존한다.
+- request ID는 UUID만 기록하며 그 밖의 값은 `unavailable`로 대체한다. 원본 사진, metadata, 파일명·경로, 크기·해시, 계정/객실 정보, 인증 헤더, OAuth 비밀값은 기록하지 않는다. 추가 DB 저장이나 migration은 없다.
+- 진단 코드는 원인 조사용이지 이미지 수용 범위를 넓히는 수정이 아니다. 로컬 변환 통과와 hosted 업로드 성공을 구분한다. 배포 후 승인된 사용자 재시도에서 얻은 문의 번호로 실패 지점을 확인해야 한다.
+
 ## 공식 근거
 
 - [Google 계정 저장용량 정책](https://support.google.com/drive/answer/6374270?hl=ko)

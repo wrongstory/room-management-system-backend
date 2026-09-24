@@ -1,4 +1,4 @@
-import { initializeImageMagick, MagickImage, MagickReadSettings, MagickFormat, ResourceLimits } from '@imagemagick/magick-wasm';
+import { initializeImageMagick, MagickImage, MagickReadSettings, MagickFormat, MagickError, MagickErrorSeverity, ResourceLimits } from '@imagemagick/magick-wasm';
 
 // 제품 크기 제한과 별개인, source-controlled decoder 자원 상한이다.
 export const PHOTO_MAX_BYTES = 307200;
@@ -10,10 +10,40 @@ export const PHOTO_INPUT_MAX_DIMENSION = 5000;
 export const PHOTO_DECODE_BUDGET_MS = 1500;
 export type PhotoMime = 'image/jpeg' | 'image/webp';
 export type PhotoInputMime = PhotoMime | 'image/heic' | 'image/heif';
+const diagnosticPhases = ['BODY', 'INPUT_ENVELOPE', 'INPUT_DECODE', 'INPUT_VALIDATE', 'TRANSFORM', 'ENCODE', 'OUTPUT_ENVELOPE', 'OUTPUT_DECODE', 'OUTPUT_VALIDATE', 'BUDGET'] as const;
+const diagnosticKinds = ['REJECTED', 'WARNING', 'RESOURCE', 'CORRUPT', 'CACHE', 'POLICY', 'DELEGATE', 'NATIVE', 'LIMIT'] as const;
+type PhotoDiagnosticPhase = typeof diagnosticPhases[number];
+interface PhotoDiagnostic { phase: PhotoDiagnosticPhase; kind: typeof diagnosticKinds[number] }
 export class PhotoError extends Error {
-  constructor(readonly statusCode: number, readonly code: string) {
+  constructor(readonly statusCode: number, readonly code: string, readonly diagnostic?: PhotoDiagnostic) {
     super(code); this.name = 'PhotoError';
   }
+}
+/** Never inspect/retain native message, stack, related errors, bytes or profiles. */
+function diagnosed(error: unknown, phase: PhotoDiagnosticPhase): PhotoError {
+  let kind: PhotoDiagnostic['kind'] = error instanceof PhotoError ? 'REJECTED' : 'NATIVE';
+  if (error instanceof MagickError) {
+    const severity = error.severity;
+    if (severity === MagickErrorSeverity.ResourceLimitError) kind = 'RESOURCE';
+    else if (severity === MagickErrorSeverity.CorruptImageError) kind = 'CORRUPT';
+    else if (severity === MagickErrorSeverity.CacheError) kind = 'CACHE';
+    else if (severity === MagickErrorSeverity.PolicyError) kind = 'POLICY';
+    else if (severity === MagickErrorSeverity.MissingDelegateError) kind = 'DELEGATE';
+  }
+  return error instanceof PhotoError
+    ? new PhotoError(error.statusCode, error.code, error.diagnostic ?? { phase, kind })
+    : new PhotoError(400, 'INVALID_PHOTO_BINARY', { phase, kind });
+}
+/** Only three allowlisted scalars reach the log sink; never serialize the exception/request. */
+export function photoFailureDiagnostic(error: unknown, requestId: string): { status: number; code: string; requestId: string } | null {
+  if (!(error instanceof PhotoError) || !error.diagnostic ||
+      !diagnosticPhases.includes(error.diagnostic.phase) || !diagnosticKinds.includes(error.diagnostic.kind) ||
+      ![400, 408, 413, 415, 503].includes(error.statusCode)) return null;
+  return {
+    status: error.statusCode,
+    code: `PHOTO_${error.diagnostic.phase}_${error.diagnostic.kind}`,
+    requestId: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId) ? requestId : 'unavailable',
+  };
 }
 /** Pinned local build artifact only: no CDN/network fallback, exact compressed and decoded checksums. */
 export async function initializeCompressedPhotoDecoder(compressed: Uint8Array): Promise<void> {
@@ -42,6 +72,10 @@ export function photoMime(value: string | null): PhotoInputMime {
 
 /** Content-Length는 증거가 아니다. 초과 chunk에서 cancel하고 decoder/provider는 호출하지 않는다. */
 export async function readPhotoBody(stream: ReadableStream<Uint8Array> | null, contentLength: string | null, maxBytes = PHOTO_MAX_BYTES): Promise<Uint8Array> {
+  try { return await readPhotoBodyUnchecked(stream, contentLength, maxBytes); }
+  catch (error) { throw diagnosed(error, 'BODY'); }
+}
+async function readPhotoBodyUnchecked(stream: ReadableStream<Uint8Array> | null, contentLength: string | null, maxBytes: number): Promise<Uint8Array> {
   if (contentLength !== null && (!/^\d{1,10}$/.test(contentLength) || Number(contentLength) > maxBytes)) tooLarge();
   if (!stream) return invalid();
   const reader = stream.getReader();
@@ -380,7 +414,9 @@ export function initializePhotoDecoder(wasm: Uint8Array): Promise<void> {
 }
 export interface VerifiedPhoto { bytes: Uint8Array; mime: PhotoMime; sizeBytes: number; sha256: string }
 export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): Promise<VerifiedPhoto> {
-  const source = photoInputPayload(raw, mime);
+  let source: Uint8Array;
+  try { source = photoInputPayload(raw, mime); }
+  catch (error) { throw diagnosed(error, 'INPUT_ENVELOPE'); }
   if (!initialization) throw new PhotoError(503, 'PHOTO_DECODER_UNAVAILABLE');
   await initialization;
   const started = performance.now();
@@ -388,17 +424,21 @@ export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): 
   const outputMime: PhotoMime = mime === 'image/webp' ? 'image/webp' : 'image/jpeg';
   const outputFormat = outputMime === 'image/webp' ? MagickFormat.WebP : MagickFormat.Jpeg;
   let bytes: Uint8Array;
+  let phase: PhotoDiagnosticPhase = 'INPUT_DECODE';
   try {
     const settings = new MagickReadSettings(); settings.format = inputFormat;
     if (mime === 'image/heic' || mime === 'image/heif') settings.frameCount = 1;
     const image = MagickImage.create();
     let warning = false;
-    image.onWarning = () => { warning = true; };
+    let warningPhase: PhotoDiagnosticPhase = phase;
+    image.onWarning = () => { if (!warning) warningPhase = phase; warning = true; };
     try {
       image.read(source, settings);
-      if (warning) invalid();
+      if (warning) throw new PhotoError(400, 'INVALID_PHOTO_BINARY', { phase: warningPhase, kind: 'WARNING' });
+      phase = 'INPUT_VALIDATE';
       dimensions(image.width, image.height, true);
       if (mime === 'image/heic' || mime === 'image/heif' ? ![MagickFormat.Heic, MagickFormat.Heif].includes(image.format as 'HEIC' | 'HEIF') : image.format !== inputFormat) invalid();
+      phase = 'TRANSFORM';
       image.autoOrient(); image.strip();
       const longest = Math.max(image.width, image.height);
       if (longest > 1280) {
@@ -406,6 +446,7 @@ export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): 
         image.resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
       }
       image.quality = longest <= 1280 && source.length <= PHOTO_MAX_BYTES ? 90 : 65;
+      phase = 'ENCODE';
       bytes = image.write(outputFormat, (data) => Uint8Array.from(data));
       if (bytes.length > PHOTO_MAX_BYTES) {
         image.quality = 45;
@@ -413,27 +454,31 @@ export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): 
       }
       if (bytes.length > PHOTO_MAX_BYTES) {
         const scale = Math.min(1, 960 / Math.max(image.width, image.height));
+        phase = 'TRANSFORM';
         image.resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
         image.quality = 45;
+        phase = 'ENCODE';
         bytes = image.write(outputFormat, (data) => Uint8Array.from(data));
       }
-      if (warning) invalid();
+      if (warning) throw new PhotoError(400, 'INVALID_PHOTO_BINARY', { phase: warningPhase, kind: 'WARNING' });
     } finally { image.dispose(); }
+    phase = 'OUTPUT_ENVELOPE';
     checkPhotoEnvelope(bytes, outputMime, true);
+    phase = 'OUTPUT_DECODE';
     const decoded = MagickImage.create();
-    decoded.onWarning = () => { warning = true; };
+    decoded.onWarning = () => { if (!warning) warningPhase = phase; warning = true; };
     try {
       const outputSettings = new MagickReadSettings(); outputSettings.format = outputFormat;
       decoded.read(bytes, outputSettings);
-      if (warning || decoded.format !== outputFormat || decoded.profileNames.length !== 0) invalid();
+      if (warning) throw new PhotoError(400, 'INVALID_PHOTO_BINARY', { phase: warningPhase, kind: 'WARNING' });
+      phase = 'OUTPUT_VALIDATE';
+      if (decoded.format !== outputFormat || decoded.profileNames.length !== 0) invalid();
       dimensions(decoded.width, decoded.height);
     } finally { decoded.dispose(); }
   } catch (error) {
-    if (error instanceof PhotoError) throw error;
-    // Native messages may contain file bytes/profiles; never attach the original cause.
-    throw new PhotoError(400, 'INVALID_PHOTO_BINARY');
+    throw diagnosed(error, phase);
   }
-  if (performance.now() - started > PHOTO_DECODE_BUDGET_MS) throw new PhotoError(413, 'PHOTO_DECODE_LIMIT_EXCEEDED');
+  if (performance.now() - started > PHOTO_DECODE_BUDGET_MS) throw new PhotoError(413, 'PHOTO_DECODE_LIMIT_EXCEEDED', { phase: 'BUDGET', kind: 'LIMIT' });
   const hash = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes));
   return { bytes, mime: outputMime, sizeBytes: bytes.length, sha256: Array.from(new Uint8Array(hash), x => x.toString(16).padStart(2, '0')).join('') };
 }
