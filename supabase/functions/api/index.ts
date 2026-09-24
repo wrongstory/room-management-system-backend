@@ -116,7 +116,7 @@ import {
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
 import { createPhotoService } from "../_shared/photo-api.ts";
-import { PhotoError } from "../_shared/photo-binary.ts";
+import { PhotoError, photoFailureDiagnostic } from "../_shared/photo-binary.ts";
 import {
   photoError,
   photoRoute,
@@ -1801,6 +1801,8 @@ export async function handleApiRequest(
       "요청한 API 경로를 찾을 수 없습니다.",
     );
   } catch (error) {
+    const photoDiagnostic = photoFailureDiagnostic(error, id);
+    if (photoDiagnostic) console.error(JSON.stringify(photoDiagnostic));
     const safeError =
       error instanceof PhotoError || error instanceof PhotoUploadContractError
         ? photoError(error)

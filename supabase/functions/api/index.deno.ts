@@ -1,6 +1,93 @@
 import { type ApiHandlerDependencies, handleApiRequest } from "./index.ts";
 import type { EdgeActor, EdgeClients } from "../_shared/runtime.ts";
 import { EdgeError } from "../_shared/runtime.ts";
+import { PhotoError } from "../_shared/photo-binary.ts";
+import type { PhotoService } from "../_shared/photo-service.ts";
+
+Deno.test("photo failure logs only bounded status/code/request ID and preserves public error", async () => {
+  const requestId = "10000000-0000-4000-8000-000000000001";
+  const logs: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    logs.push(args);
+  };
+  try {
+    const req = request(
+      "POST",
+      "/v1/attempts/10000000-0000-4000-8000-000000000002/photo-slots/10000000-0000-4000-8000-000000000003/upload",
+    );
+    req.headers.set("x-request-id", requestId);
+    const error = new PhotoError(400, "INVALID_PHOTO_BINARY", {
+      phase: "INPUT_DECODE",
+      kind: "RESOURCE",
+    });
+    error.message = "synthetic-private-native-message";
+    const response = await handleApiRequest(req, {
+      createClients: () =>
+        ({
+          publicClient: {
+            auth: {
+              getUser: () =>
+                Promise.resolve({
+                  data: { user: { id: actor.authUserId } },
+                  error: null,
+                }),
+            },
+          },
+          admin: {
+            from: () => ({
+              select: () => ({
+                eq: () => ({
+                  single: () =>
+                    Promise.resolve({
+                      data: {
+                        id: actor.profileId,
+                        auth_user_id: actor.authUserId,
+                        display_name: "test",
+                        role: "maid",
+                        status: "active",
+                        must_change_password: false,
+                      },
+                      error: null,
+                    }),
+                }),
+              }),
+            }),
+            rpc: () => Promise.resolve({ data: true, error: null }),
+          },
+        }) as unknown as EdgeClients,
+      authenticateRequest: () => Promise.resolve(actor),
+      photoService: () =>
+        ({ upload: () => Promise.reject(error) }) as unknown as PhotoService,
+    });
+    const body = await response.json();
+    assert(
+      response.status === 400 && body.error.code === "INVALID_PHOTO_BINARY",
+      "public error unchanged",
+    );
+    assert(body.requestId === requestId, "support request ID preserved");
+    assert(
+      logs.length === 1 && logs[0].length === 1,
+      "single bounded diagnostic",
+    );
+    assert(
+      JSON.stringify(JSON.parse(String(logs[0][0]))) ===
+        JSON.stringify({
+          status: 400,
+          code: "PHOTO_INPUT_DECODE_RESOURCE",
+          requestId,
+        }),
+      "exact allowlist only",
+    );
+    assert(
+      !JSON.stringify(body).includes("RESOURCE") &&
+        !JSON.stringify(body).includes("synthetic-private"),
+      "no private diagnostics in response",
+    );
+  } finally {
+    console.error = original;
+  }
+});
 
 Deno.test("preview exact routes: admin success is read-only, other roles denied and inactive/revoked authentication fails", async () => {
   const calls: string[] = [];
