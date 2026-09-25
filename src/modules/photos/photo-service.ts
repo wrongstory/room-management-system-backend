@@ -463,6 +463,7 @@ export class PhotoService {
           typeof context.uploadDate !== "string" ||
           typeof context.roomNumber !== "string"
         ) return failed();
+        const [dateCandidate, roomCandidate, fileId] = await provider.generateUploadIds();
         let folderId: string | undefined;
         for (const scope of ["date", "room"] as const) {
           const reserved = row(
@@ -471,7 +472,7 @@ export class PhotoService {
               ...worker,
               p_scope: scope,
               p_root_folder_id: provider.rootFolderId(),
-              p_candidate_folder_id: await provider.generateId(),
+              p_candidate_folder_id: scope === "date" ? dateCandidate : roomCandidate,
             }),
           );
           if (
@@ -492,7 +493,6 @@ export class PhotoService {
             name: scope === "date" ? context.uploadDate : context.roomNumber,
           });
         }
-        const fileId = await provider.generateId();
         context = row(
           await this.#rpc("reserve_photo_provider_identity", {
             ...this.#actor(i),

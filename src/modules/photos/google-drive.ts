@@ -8,7 +8,7 @@ export type DriveReadObject = Pick<DriveObject, 'fileId' | 'mime' | 'sizeBytes' 
 export interface DriveFolder { folderId: string; parentFolderId: string; name: string }
 export interface PhotoProvider {
   quota(): Promise<{ refreshStartedAt: string; usageBytes: string }>;
-  generateId(): Promise<string>;
+  generateUploadIds(): Promise<[string, string, string]>;
   rootFolderId(): string;
   ensureFolder(folder: DriveFolder): Promise<void>;
   upload(object: DriveObject, bytes: Uint8Array): Promise<{ uploadedAt: string }>;
@@ -93,12 +93,15 @@ export class GoogleDriveProvider implements PhotoProvider {
     if (typeof usage !== 'string' || !/^\d{1,18}$/.test(usage)) return unavailable();
     return { refreshStartedAt, usageBytes: usage };
   }
-  async generateId(): Promise<string> {
-    const response = await this.#request('files/generateIds?count=1&space=drive&type=files');
+  async generateUploadIds(): Promise<[string, string, string]> {
+    // Candidates only: DB registry/lease still selects each durable identity before create.
+    const response = await this.#request('files/generateIds?count=3&space=drive&type=files');
     if (!response.ok) return unavailable();
     const ids = (await this.#json(response)).ids;
-    if (!Array.isArray(ids) || ids.length !== 1) return unavailable();
-    return id(ids[0]);
+    if (!Array.isArray(ids) || ids.length !== 3) return unavailable();
+    const result: [string, string, string] = [id(ids[0]), id(ids[1]), id(ids[2])];
+    if (new Set(result).size !== 3) return mismatch();
+    return result;
   }
   async #metadata(fileId: string): Promise<Record<string, unknown>> {
     const response = await this.#request(`files/${id(fileId)}?fields=${fields}`);
@@ -113,10 +116,20 @@ export class GoogleDriveProvider implements PhotoProvider {
   async ensureFolder(folder: DriveFolder): Promise<void> {
     const folderId = id(folder.folderId), parent = id(folder.parentFolderId), name = folder.name;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(name) && !/^\d{1,8}$/.test(name)) mismatch();
-    this.#privateFolder(await this.#metadata(parent), parent);
+    // Both GETs are read-only and independent. Never create before validating the parent.
+    // No cross-request privacy cache: every upload checks the durable DB winner again.
+    const [parentMetadata, existing] = await Promise.all([
+      this.#metadata(parent),
+      (async () => {
+        const response = await this.#request(`files/${folderId}?fields=${fields}`);
+        const metadata = response.ok ? await this.#json(response) : undefined;
+        if (!response.ok) await response.body?.cancel();
+        return { ok: response.ok, status: response.status, metadata };
+      })(),
+    ]);
+    this.#privateFolder(parentMetadata, parent);
     // A durable DB registry selected this identity before HTTP. No name lookup or fresh create ID.
-    const existing = await this.#request(`files/${folderId}?fields=${fields}`);
-    if (existing.ok) { this.#privateFolder(await this.#json(existing), folderId, parent, name); return; }
+    if (existing.ok) { this.#privateFolder(record(existing.metadata), folderId, parent, name); return; }
     if (existing.status !== 404) return unavailable();
     try {
       const created = await this.#request(`files?fields=${fields}`, {

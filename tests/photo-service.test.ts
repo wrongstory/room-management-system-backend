@@ -29,7 +29,7 @@ function request(raw = bytes) { return new Request(`http://local/v1/attempts/${i
 }); }
 function setup(override: (name: string, args: Record<string, unknown>) => unknown = () => undefined) {
   const calls: string[] = []; let context: Record<string, unknown> = {}; let collectionItemId: string | null = null;
-  const provider: PhotoProvider = { quota: vi.fn(async () => ({ refreshStartedAt: now, usageBytes: '0' })), generateId: vi.fn(async () => 'provider_file_123'),
+  const provider: PhotoProvider = { quota: vi.fn(async () => ({ refreshStartedAt: now, usageBytes: '0' })), generateUploadIds: vi.fn(async (): Promise<[string, string, string]> => ['candidate_date_123', 'candidate_room_123', 'provider_file_123']),
     rootFolderId: () => 'provider_root_123', ensureFolder: vi.fn(async () => {}), upload: vi.fn(async () => ({ uploadedAt: now })), inspect: vi.fn(async () => ({ uploadedAt: now })),
     read: vi.fn(async () => bytes), remove: vi.fn(async () => 'deleted' as const) };
   const db: PhotoRpc = { rpc: async (name, args) => {
@@ -53,6 +53,38 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
   return { calls, provider, service: new PhotoService(db, () => provider, async () => { calls.push('decode'); }) };
 }
 describe('photo application admission/provider/finalize boundary', () => {
+  it('reserves distinct batched candidates before creating only the DB folder winners', async () => {
+    const reservations: Record<string, unknown>[] = [];
+    const s = setup((name, args) => { if (name === 'reserve_photo_drive_folder') reservations.push(args); return undefined; });
+    expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
+    expect(s.provider.generateUploadIds).toHaveBeenCalledOnce();
+    expect(reservations.map(args => args.p_candidate_folder_id)).toEqual(['candidate_date_123', 'candidate_room_123']);
+    expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(1, expect.objectContaining({ folderId: 'provider_date_123' }));
+    expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(2, expect.objectContaining({ folderId: 'provider_folder_123' }));
+    expect(s.calls.indexOf('reserve_photo_provider_identity')).toBeGreaterThan(s.calls.lastIndexOf('reserve_photo_drive_folder'));
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'provider_file_123', folderId: 'provider_folder_123' }), expect.any(Uint8Array));
+  });
+  it('accepted replay allocates no new Drive identities', async () => {
+    const s = setup(name => name === 'begin_admitted_photo_upload' ? { data: operation('accepted'), error: null } : undefined);
+    expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
+    expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
+    expect(s.provider.ensureFolder).not.toHaveBeenCalled();
+    expect(s.provider.upload).not.toHaveBeenCalled();
+  });
+  it('pending retry with a durable identity reuses it without another candidate batch', async () => {
+    let metadata: Record<string, unknown> = {};
+    const s = setup((name, args) => {
+      if (name === 'begin_admitted_photo_upload') metadata = args;
+      if (name !== 'get_photo_provider_context') return undefined;
+      return { data: { objectId: id(6), sha256: metadata.p_sha256, mimeType: metadata.p_mime_type, sizeBytes: metadata.p_size_bytes,
+        roomNumber: '101', uploadDate: new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10), providerFileId: 'existing_file_123', providerFolderId: 'existing_folder_123' }, error: null };
+    });
+    expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
+    expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
+    expect(s.provider.ensureFolder).not.toHaveBeenCalled();
+    expect(s.calls).not.toContain('reserve_photo_provider_identity');
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'existing_file_123', folderId: 'existing_folder_123' }), expect.any(Uint8Array));
+  });
   it.each([false, true])('replays the exact legacy JPEG hash after begin conflict only (collection=%s)', async collection => {
     const current = { bytes, mime: 'image/jpeg' as const, sizeBytes: bytes.length, sha256: 'a'.repeat(64) };
     const legacy = { ...current, sha256: 'b'.repeat(64) };
