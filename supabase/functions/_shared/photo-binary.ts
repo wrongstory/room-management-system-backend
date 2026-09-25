@@ -337,7 +337,7 @@ interface GContainerItem {
   length?: number;
   padding: number;
 }
-/** Samsung still-photo metadata after a validated GainMap, never an unbounded trailer bypass. */
+/** Fully indexed Samsung still-photo metadata after a JPEG or GainMap, never an unbounded trailer bypass. */
 function samsungSefMetadataTail(b: Uint8Array, start: number): boolean {
   if (start < 0 || b.length - start < 41) return false;
   const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
@@ -539,6 +539,7 @@ function jpegShape(
   b: Uint8Array,
   clean: boolean,
   collectedXmp?: string[],
+  onSize?: (width: number, height: number) => void,
 ): number {
   if (b[0] !== 255 || b[1] !== 216) invalid();
   let p = 2, frames = 0, scans = 0;
@@ -550,7 +551,8 @@ function jpegShape(
     if (marker === 217) {
       if (
         frames !== 1 || scans < 1 || p !== b.length && (clean ||
-            !ultraHdrOrGContainerTail(b, p, xmpPackets) &&
+            !samsungSefMetadataTail(b, p) &&
+              !ultraHdrOrGContainerTail(b, p, xmpPackets) &&
               !motionPhotoTail(b, p, xmpPackets))
       ) invalid();
       return p;
@@ -577,11 +579,10 @@ function jpegShape(
     }
     if ([192, 193, 194].includes(marker)) {
       if (++frames !== 1 || size < 8) invalid();
-      dimensions(
-        byte(b, p + 5) * 256 + byte(b, p + 6),
-        byte(b, p + 3) * 256 + byte(b, p + 4),
-        !clean,
-      );
+      const width = byte(b, p + 5) * 256 + byte(b, p + 6),
+        height = byte(b, p + 3) * 256 + byte(b, p + 4);
+      dimensions(width, height, !clean);
+      onSize?.(width, height);
     } else if (
       marker >= 195 && marker <= 207 && ![196, 200, 204].includes(marker)
     ) invalid();
@@ -716,10 +717,13 @@ export function checkPhotoInputEnvelope(
 function photoInputPayload(
   bytes: Uint8Array,
   mime: PhotoInputMime,
+  onJpegSize?: (width: number, height: number) => void,
 ): Uint8Array {
   if (!bytes.length) invalid();
   if (bytes.length > PHOTO_INPUT_MAX_BYTES) tooLarge();
-  if (mime === "image/jpeg") return bytes.subarray(0, jpegShape(bytes, false));
+  if (mime === "image/jpeg") {
+    return bytes.subarray(0, jpegShape(bytes, false, undefined, onJpegSize));
+  }
   if (mime === "image/webp") webpShape(bytes, false);
   else heicShape(bytes);
   return bytes;
@@ -752,10 +756,16 @@ export interface VerifiedPhoto {
 export async function verifyPhotoBinary(
   raw: Uint8Array,
   mime: PhotoInputMime,
+  jpegDecode: "bounded" | "legacy" = "bounded",
 ): Promise<VerifiedPhoto> {
   let source: Uint8Array;
+  let downsampleJpeg = false;
+  let jpegOriginalLongest = 0;
   try {
-    source = photoInputPayload(raw, mime);
+    source = photoInputPayload(raw, mime, (width, height) => {
+      downsampleJpeg = width > 1280 && height > 1280;
+      jpegOriginalLongest = Math.max(width, height);
+    });
   } catch (error) {
     throw diagnosed(error, "INPUT_ENVELOPE");
   }
@@ -778,6 +788,12 @@ export async function verifyPhotoBinary(
   try {
     const settings = new MagickReadSettings();
     settings.format = inputFormat;
+    // Original JPEG SOF limits were checked above, before this decoder downsampling hint.
+    // Decode near the stored resolution so auto-orientation never rotates a full 12MP cache.
+    // Both original dimensions must exceed the hint: jpeg:size can upscale small inputs.
+    if (downsampleJpeg && jpegDecode === "bounded") {
+      settings.setDefine(MagickFormat.Jpeg, "size", "1280x1280");
+    }
     if (mime === "image/heic" || mime === "image/heif") settings.frameCount = 1;
     const image = MagickImage.create();
     let warning = false;
@@ -814,7 +830,8 @@ export async function verifyPhotoBinary(
           Math.max(1, Math.round(image.height * scale)),
         );
       }
-      image.quality = longest <= 1280 && source.length <= PHOTO_MAX_BYTES
+      image.quality = (jpegOriginalLongest || longest) <= 1280 &&
+          source.length <= PHOTO_MAX_BYTES
         ? 90
         : 65;
       phase = "ENCODE";
