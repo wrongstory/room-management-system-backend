@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GoogleDriveProvider, type DriveObject } from '../src/modules/photos/google-drive.js';
 
 const bytes = Uint8Array.from([1, 2, 3]);
@@ -14,7 +14,10 @@ function harness(options: { uploadStatus?: number; timeout?: boolean; digest?: s
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer synthetic_access_token');
     if (options.redirect) return new Response(null, { status: 302, headers: { location: 'https://unsafe.invalid/credential' } });
     if (url.pathname.endsWith('/about')) return Response.json({ storageQuota: { usage: options.quota ?? '9000000000' } });
-    if (url.pathname.endsWith('/generateIds')) return Response.json({ ids: [object.fileId] });
+    if (url.pathname.endsWith('/generateIds')) {
+      expect(url.searchParams.get('count')).toBe('3');
+      return Response.json({ ids: ['synthetic_date_123', 'synthetic_room_123', object.fileId] });
+    }
     if (init.method === 'DELETE') return new Response(null, { status: 404 });
     if (url.searchParams.get('alt') === 'media') return new Response(Uint8Array.from(options.media ?? bytes), { headers: { 'content-type': 'image/jpeg' } });
     if (url.pathname.includes('/upload/')) {
@@ -33,6 +36,59 @@ function harness(options: { uploadStatus?: number; timeout?: boolean; digest?: s
   return { provider, calls };
 }
 describe('Google Drive HTTP adapter, fake transport only', () => {
+  it.each([[], ['synthetic_one_123'], ['synthetic_one_123', 'synthetic_two_123', 'synthetic_three_123', 'synthetic_four_123'],
+    ['synthetic_one_123', 'synthetic_one_123', 'synthetic_three_123'], ['synthetic_one_123', 'bad/id', 'synthetic_three_123']].map(ids => ({ ids })))('rejects malformed or duplicate candidate batches $ids', async ({ ids }) => {
+    const provider = new GoogleDriveProvider({ clientId: 'synthetic', clientSecret: 'synthetic', refreshToken: 'synthetic', rootFolderId: 'synthetic_root_123' }, async input =>
+      String(input).includes('oauth2.googleapis.com')
+        ? Response.json({ access_token: 'synthetic', expires_in: 3600, token_type: 'Bearer' }) : Response.json({ ids }));
+    await expect(provider.generateUploadIds()).rejects.toBeInstanceOf(Error);
+  });
+  it.each([false, true])('parallel folder reads never allow creation with a shared parent (existing=%s)', async exists => {
+    let release = () => {}; const childStarted = new Promise<void>(resolve => { release = resolve; });
+    const mutations: string[] = [];
+    const provider = new GoogleDriveProvider({ clientId: 'synthetic', clientSecret: 'synthetic', refreshToken: 'synthetic', rootFolderId: 'synthetic_root_123' }, async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.hostname === 'oauth2.googleapis.com') return Response.json({ access_token: 'synthetic', expires_in: 3600, token_type: 'Bearer' });
+      if (init.method) mutations.push(init.method);
+      if (url.pathname.endsWith('synthetic_root_123')) {
+        await childStarted;
+        return Response.json({ id: 'synthetic_root_123', mimeType: 'application/vnd.google-apps.folder', trashed: false, shared: true });
+      }
+      release();
+      return exists ? Response.json({ id: 'synthetic_date_123', name: '2026-09-26', parents: ['synthetic_root_123'], mimeType: 'application/vnd.google-apps.folder', trashed: false, shared: false }) : new Response(null, { status: 404 });
+    });
+    await expect(provider.ensureFolder({ folderId: 'synthetic_date_123', parentFolderId: 'synthetic_root_123', name: '2026-09-26' })).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_IDENTITY_CONFLICT' });
+    expect(mutations).toEqual([]);
+  });
+  it('existing-folder path uses eight HTTP calls and six waits at synthetic 100ms RTT (not a hosted benchmark)', async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: string[] = [], root = 'synthetic_root_123', date = 'synthetic_date_123';
+      const start = Date.now();
+      const provider = new GoogleDriveProvider({ clientId: 'synthetic', clientSecret: 'synthetic', refreshToken: 'synthetic', rootFolderId: root }, async (input, init = {}) => {
+        const url = new URL(String(input)); calls.push(url.pathname);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (url.hostname === 'oauth2.googleapis.com') return Response.json({ access_token: 'synthetic', expires_in: 3600, token_type: 'Bearer' });
+        if (url.pathname.endsWith('/generateIds')) return Response.json({ ids: [date, object.folderId, object.fileId] });
+        if (init.method === 'POST') return new Response(null, { status: 200 });
+        const fileId = url.pathname.split('/').at(-1);
+        if (fileId !== object.fileId) return Response.json({ id: fileId, name: fileId === date ? '2026-09-26' : '101', parents: [fileId === date ? root : date], mimeType: 'application/vnd.google-apps.folder', trashed: false, shared: false });
+        return Response.json({ id: object.fileId, name: `${object.objectId}.jpg`, parents: [object.folderId], mimeType: object.mime, size: '3', sha256Checksum: object.sha256, appProperties: { objectId: object.objectId }, trashed: false, shared: false, createdTime: '2026-01-01T00:00:00.000Z' });
+      });
+      const upload = (async () => {
+        const [dateId, roomId, fileId] = await provider.generateUploadIds();
+        expect(fileId).toBe(object.fileId);
+        await provider.ensureFolder({ folderId: dateId, parentFolderId: root, name: '2026-09-26' });
+        await provider.ensureFolder({ folderId: roomId, parentFolderId: dateId, name: '101' });
+        return provider.upload(object, bytes);
+      })();
+      await vi.runAllTimersAsync(); await upload;
+      expect(calls).toHaveLength(8);
+      expect(Date.now() - start).toBe(600);
+      expect(calls.filter(path => path.endsWith(`/${date}`))).toHaveLength(2); // Privacy is checked again, not cached.
+      expect(calls.at(-1)).toBe(`/drive/v3/files/${object.fileId}`); // Still reverify actual saved metadata.
+    } finally { vi.useRealTimers(); }
+  });
   it('two cold workers use the durable folder winner, never list names or create a loser candidate', async () => {
     const root = 'synthetic_root_123', winner = 'synthetic_winner_123';
     const created = new Map<string, Record<string, unknown>>();
@@ -62,10 +118,11 @@ describe('Google Drive HTTP adapter, fake transport only', () => {
     expect(new Set(posts)).toEqual(new Set([winner])); expect(created.size).toBe(1);
     expect(gets).not.toContain(candidates[1]); expect(posts).not.toContain(candidates[1]);
   });
-  it('generates an ID, reads total usage and single-flights token acquisition', async () => {
+  it('generates three distinct candidates in one request and single-flights token acquisition', async () => {
     const { provider, calls } = harness();
-    const result = await Promise.all([provider.generateId(), provider.quota()]);
-    expect(result[0]).toBe(object.fileId); expect(result[1]).toMatchObject({ usageBytes: '9000000000' });
+    const result = await Promise.all([provider.generateUploadIds(), provider.quota()]);
+    expect(result[0]).toEqual(['synthetic_date_123', 'synthetic_room_123', object.fileId]); expect(result[1]).toMatchObject({ usageBytes: '9000000000' });
+    expect(calls.filter(c => c.url.pathname.endsWith('/generateIds'))).toHaveLength(1);
     expect(calls.filter(c => c.url.hostname === 'oauth2.googleapis.com')).toHaveLength(1);
     expect(JSON.stringify(provider)).not.toMatch(/synthetic|token|secret|root/);
   });

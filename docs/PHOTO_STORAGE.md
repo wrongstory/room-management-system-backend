@@ -33,6 +33,9 @@ room-management-system-photos/
 
 ## 업로드 흐름
 
+성능 최적화 #301은 ID 3개 일괄 발급과 부모/대상 폴더의 읽기 전용 병렬 조회만 적용한다.
+DB registry/lease/CAS와 저장 검증은 유지하며 자세한 기준·관측·후속 순서는 [업로드 성능 계획](./PHOTO_UPLOAD_PERFORMANCE.md)을 따른다.
+
 1. 프론트 앱은 스마트폰 원본 JPEG/WebP/HEIC/HEIF를 raw body로 전송한다. 사전 축소는 선택 사항이고 기존 300KiB 상한으로 원본을 거부하지 않는다.
 2. 서버는 입력 5MiB, 12MP/5000px 기술상한을 검사하고 decode·방향 보정·metadata 제거·축소/재인코딩으로 JPEG/WebP **307,200바이트 이하**를 만든다.
    - Android Motion Photo JPEG는 공식 Camera/Container XMP와 유효한 MP4/MOV tail이 함께 확인될 때만 정지 JPEG 구간을 decode한다. 삼성 SEF 변형은 `MotionPhoto_Data` field, 연속된 field 범위, `SEFH` directory, `SEFT` footer와 그 앞의 완전한 ISO-BMFF 영상 경계를 모두 확인한다. 영상·SEF tail과 XMP는 저장하지 않으며, 표식 없는 trailing bytes/polyglot은 계속 거절한다.
