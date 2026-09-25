@@ -1,10 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { ImageMagick, MagickColors, MagickFormat } from '@imagemagick/magick-wasm';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import * as photoBinary from '../src/modules/photos/photo-binary.js';
 import { initializePhotoDecoder, PhotoError, PHOTO_INPUT_MAX_BYTES } from '../src/modules/photos/photo-binary.js';
 import { PhotoService, photoRoute, type PhotoIdentity, type PhotoRpc } from '../src/modules/photos/photo-service.js';
 import type { PhotoProvider } from '../src/modules/photos/google-drive.js';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+afterEach(() => vi.restoreAllMocks());
 const identity: PhotoIdentity = { profileId: id(1), sessionId: id(2), role: 'maid', profileStatus: 'active' };
 const now = new Date().toISOString(), purgeAfter = new Date(Date.parse(now) + 604800000).toISOString();
 const retention = { retentionPolicy: 'cleaning_submission', retentionStartsAt: now,
@@ -51,6 +53,57 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
   return { calls, provider, service: new PhotoService(db, () => provider, async () => { calls.push('decode'); }) };
 }
 describe('photo application admission/provider/finalize boundary', () => {
+  it.each([false, true])('replays the exact legacy JPEG hash after begin conflict only (collection=%s)', async collection => {
+    const current = { bytes, mime: 'image/jpeg' as const, sizeBytes: bytes.length, sha256: 'a'.repeat(64) };
+    const legacy = { ...current, sha256: 'b'.repeat(64) };
+    const decode = vi.spyOn(photoBinary, 'verifyPhotoBinary').mockResolvedValueOnce(current).mockResolvedValueOnce(legacy);
+    const begins: Record<string, unknown>[] = [];
+    const s = setup((name, args) => {
+      if (!name.startsWith('begin_admitted_photo')) return undefined;
+      begins.push(args);
+      return begins.length === 1 ? { data: null, error: { message: 'IDEMPOTENCY_KEY_REUSED' } }
+        : { data: operation('accepted', collection ? id(7) : null), error: null };
+    });
+    const req = collection ? new Request(`http://local/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedCollectionRevision=0&expectedItemRevision=0`, {
+      method: 'POST', headers: { 'content-type': 'image/jpeg', 'idempotency-key': 'test-key-0001' }, body: Uint8Array.from(bytes),
+    }) : request();
+    expect((await s.service.upload(req, identity, id(3), id(4), collection ? id(7) : undefined)).status).toBe('accepted');
+    expect(decode).toHaveBeenCalledTimes(2);
+    expect(decode).toHaveBeenLastCalledWith(bytes, 'image/jpeg', 'legacy');
+    expect(begins[1]).toMatchObject({ p_sha256: legacy.sha256, p_admission_id: begins[0]?.p_admission_id, p_idempotency_key_digest: begins[0]?.p_idempotency_key_digest });
+    expect(begins[1]?.p_request_hash).not.toBe(begins[0]?.p_request_hash);
+    expect(s.provider.upload).not.toHaveBeenCalled();
+  });
+  it('uses legacy bytes throughout a pending retry, never a new operation or key', async () => {
+    const legacyBytes = Uint8Array.from([1, 2, 3]);
+    vi.spyOn(photoBinary, 'verifyPhotoBinary').mockResolvedValueOnce({ bytes, mime: 'image/jpeg', sizeBytes: bytes.length, sha256: 'a'.repeat(64) })
+      .mockResolvedValueOnce({ bytes: legacyBytes, mime: 'image/jpeg', sizeBytes: 3, sha256: 'b'.repeat(64) });
+    let begins = 0;
+    const s = setup(name => name === 'begin_admitted_photo_upload' && begins++ === 0 ? { data: null, error: { message: 'IDEMPOTENCY_KEY_REUSED' } } : undefined);
+    expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
+    expect(s.provider.upload).toHaveBeenCalledOnce();
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.anything(), legacyBytes);
+  });
+  it('does not bypass a mismatched key, permission failure, or CAS conflict', async () => {
+    for (const code of ['IDEMPOTENCY_KEY_REUSED', 'PHOTO_ACCESS_REQUIRED', 'PHOTO_VERSION_CONFLICT']) {
+      const decode = vi.spyOn(photoBinary, 'verifyPhotoBinary').mockResolvedValueOnce({ bytes, mime: 'image/jpeg', sizeBytes: bytes.length, sha256: 'a'.repeat(64) })
+        .mockResolvedValueOnce({ bytes, mime: 'image/jpeg', sizeBytes: bytes.length, sha256: 'b'.repeat(64) });
+      const s = setup(name => name === 'begin_admitted_photo_upload' ? { data: null, error: { message: code } } : undefined);
+      await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code });
+      expect(decode).toHaveBeenCalledTimes(code === 'IDEMPOTENCY_KEY_REUSED' ? 2 : 1);
+      expect(s.provider.upload).not.toHaveBeenCalled();
+      decode.mockRestore();
+    }
+  });
+  it('keeps a single combined decode budget across legacy recovery', async () => {
+    vi.spyOn(photoBinary, 'verifyPhotoBinary').mockResolvedValueOnce({ bytes, mime: 'image/jpeg', sizeBytes: bytes.length, sha256: 'a'.repeat(64) })
+      .mockResolvedValueOnce({ bytes, mime: 'image/jpeg', sizeBytes: bytes.length, sha256: 'b'.repeat(64) });
+    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValueOnce(800).mockReturnValueOnce(800).mockReturnValueOnce(1601);
+    const s = setup(name => name === 'begin_admitted_photo_upload' ? { data: null, error: { message: 'IDEMPOTENCY_KEY_REUSED' } } : undefined);
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_DECODE_LIMIT_EXCEEDED' });
+    expect(s.calls.filter(name => name === 'begin_admitted_photo_upload')).toHaveLength(1);
+    expect(s.provider.upload).not.toHaveBeenCalled();
+  });
   it('admission before decode, identity committed before provider, final allowlist only', async () => {
     const s = setup(); const result = await s.service.upload(request(), identity, id(3), id(4));
     expect(result.status).toBe('accepted'); expect(s.calls.slice(0, 3)).toEqual(['admit_photo_upload', 'decode', 'begin_admitted_photo_upload']);
