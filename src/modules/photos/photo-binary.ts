@@ -160,7 +160,7 @@ function samsungSefMotionPhotoTail(b: Uint8Array, primaryEnd: number, videoStart
   return motionEnd !== -1 && expectedStart === directoryStart && isoBmffVideoTail(b, videoStart, motionEnd);
 }
 interface GContainerItem { semantic: string; mime: string; length?: number; padding: number }
-/** Samsung still-photo metadata after a validated GainMap, never an unbounded trailer bypass. */
+/** Fully indexed Samsung still-photo metadata after a JPEG or GainMap, never an unbounded trailer bypass. */
 function samsungSefMetadataTail(b: Uint8Array, start: number): boolean {
   if (start < 0 || b.length - start < 41) return false;
   const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
@@ -277,7 +277,7 @@ function motionPhotoTail(b: Uint8Array, primaryEnd: number, xmpPackets: string[]
   }
   return candidates.some(offset => isoBmffVideoTail(b, offset) || samsungSefMotionPhotoTail(b, primaryEnd, offset));
 }
-function jpegShape(b: Uint8Array, clean: boolean, collectedXmp?: string[]): number {
+function jpegShape(b: Uint8Array, clean: boolean, collectedXmp?: string[], onSize?: (width: number, height: number) => void): number {
   if (b[0] !== 255 || b[1] !== 216) invalid();
   let p = 2, frames = 0, scans = 0;
   const xmpPackets: string[] = [];
@@ -287,7 +287,7 @@ function jpegShape(b: Uint8Array, clean: boolean, collectedXmp?: string[]): numb
     const marker = byte(b, p++);
     if (marker === 217) {
       if (frames !== 1 || scans < 1 || p !== b.length && (clean ||
-        !ultraHdrOrGContainerTail(b, p, xmpPackets) && !motionPhotoTail(b, p, xmpPackets))) invalid();
+        !samsungSefMetadataTail(b, p) && !ultraHdrOrGContainerTail(b, p, xmpPackets) && !motionPhotoTail(b, p, xmpPackets))) invalid();
       return p;
     }
     if (marker === undefined || marker === 0 || marker === 216 || (marker >= 208 && marker <= 215)) invalid();
@@ -303,7 +303,9 @@ function jpegShape(b: Uint8Array, clean: boolean, collectedXmp?: string[]): numb
     }
     if ([192, 193, 194].includes(marker)) {
       if (++frames !== 1 || size < 8) invalid();
-      dimensions(byte(b, p + 5) * 256 + byte(b, p + 6), byte(b, p + 3) * 256 + byte(b, p + 4), !clean);
+      const width = byte(b, p + 5) * 256 + byte(b, p + 6), height = byte(b, p + 3) * 256 + byte(b, p + 4);
+      dimensions(width, height, !clean);
+      onSize?.(width, height);
     } else if (marker >= 195 && marker <= 207 && ![196, 200, 204].includes(marker)) invalid();
     p += size;
     if (marker === 218) {
@@ -385,10 +387,10 @@ function heicShape(bytes: Uint8Array): void {
 export function checkPhotoInputEnvelope(bytes: Uint8Array, mime: PhotoInputMime): void {
   void photoInputPayload(bytes, mime);
 }
-function photoInputPayload(bytes: Uint8Array, mime: PhotoInputMime): Uint8Array {
+function photoInputPayload(bytes: Uint8Array, mime: PhotoInputMime, onJpegSize?: (width: number, height: number) => void): Uint8Array {
   if (!bytes.length) invalid();
   if (bytes.length > PHOTO_INPUT_MAX_BYTES) tooLarge();
-  if (mime === 'image/jpeg') return bytes.subarray(0, jpegShape(bytes, false));
+  if (mime === 'image/jpeg') return bytes.subarray(0, jpegShape(bytes, false, undefined, onJpegSize));
   if (mime === 'image/webp') webpShape(bytes, false);
   else heicShape(bytes);
   return bytes;
@@ -413,9 +415,14 @@ export function initializePhotoDecoder(wasm: Uint8Array): Promise<void> {
   return initialization;
 }
 export interface VerifiedPhoto { bytes: Uint8Array; mime: PhotoMime; sizeBytes: number; sha256: string }
-export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): Promise<VerifiedPhoto> {
+export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime, jpegDecode: 'bounded' | 'legacy' = 'bounded'): Promise<VerifiedPhoto> {
   let source: Uint8Array;
-  try { source = photoInputPayload(raw, mime); }
+  let downsampleJpeg = false;
+  let jpegOriginalLongest = 0;
+  try { source = photoInputPayload(raw, mime, (width, height) => {
+    downsampleJpeg = width > 1280 && height > 1280;
+    jpegOriginalLongest = Math.max(width, height);
+  }); }
   catch (error) { throw diagnosed(error, 'INPUT_ENVELOPE'); }
   if (!initialization) throw new PhotoError(503, 'PHOTO_DECODER_UNAVAILABLE');
   await initialization;
@@ -427,6 +434,10 @@ export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): 
   let phase: PhotoDiagnosticPhase = 'INPUT_DECODE';
   try {
     const settings = new MagickReadSettings(); settings.format = inputFormat;
+    // Original JPEG SOF limits were checked above, before this decoder downsampling hint.
+    // Decode near the stored resolution so auto-orientation never rotates a full 12MP cache.
+    // Both original dimensions must exceed the hint: jpeg:size can upscale small inputs.
+    if (downsampleJpeg && jpegDecode === 'bounded') settings.setDefine(MagickFormat.Jpeg, 'size', '1280x1280');
     if (mime === 'image/heic' || mime === 'image/heif') settings.frameCount = 1;
     const image = MagickImage.create();
     let warning = false;
@@ -445,7 +456,7 @@ export async function verifyPhotoBinary(raw: Uint8Array, mime: PhotoInputMime): 
         const scale = 1280 / longest;
         image.resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
       }
-      image.quality = longest <= 1280 && source.length <= PHOTO_MAX_BYTES ? 90 : 65;
+      image.quality = (jpegOriginalLongest || longest) <= 1280 && source.length <= PHOTO_MAX_BYTES ? 90 : 65;
       phase = 'ENCODE';
       bytes = image.write(outputFormat, (data) => Uint8Array.from(data));
       if (bytes.length > PHOTO_MAX_BYTES) {

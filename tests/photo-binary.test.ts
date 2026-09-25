@@ -120,15 +120,48 @@ function samsungStillMetadata(bytes: Uint8Array): Uint8Array {
 }
 
 describe('independent server image verification', () => {
-  it('normalizes Ultra HDR stills with fully indexed Samsung SEF metadata and strips the trailer', async () => {
-    const hdr = ultraHdrJpeg(fixture()), original = samsungStillMetadata(hdr);
+  it('does not upscale small or narrow JPEGs and preserves their legacy bytes', async () => {
+    for (const [width, height] of [[16, 16], [640, 480], [1280, 960], [3000, 300]]) {
+      const input = fixture('image/jpeg', width, height);
+      const output = await verifyPhotoBinary(input, 'image/jpeg');
+      expect(output).toEqual(await verifyPhotoBinary(input, 'image/jpeg', 'legacy'));
+    }
+  });
+  it('downsamples large JPEG decoding while preserving EXIF rotation, colors and stripped output', async () => {
+    const width = 3200, height = 2400, rgb = new Uint8Array(width * height * 3);
+    for (let pixel = 0; pixel < width * height; pixel++) rgb[pixel * 3 + (pixel < width * height / 2 ? 0 : 2)] = 255;
+    const jpg = ImageMagick.read(rgb, new MagickReadSettings({ format: MagickFormat.Rgb, width, height, depth: 8 }), image =>
+      image.write(MagickFormat.Jpeg, data => Uint8Array.from(data)));
+    // Synthetic TIFF IFD0 orientation=6 (90 degrees clockwise), no private metadata.
+    const exif = Uint8Array.from([255,225,0,34,69,120,105,102,0,0,73,73,42,0,8,0,0,0,1,0,18,1,3,0,1,0,0,0,6,0,0,0,0,0,0,0]);
+    const raw = new Uint8Array([...jpg.slice(0, 2), ...exif, ...jpg.slice(2)]);
+    const output = await verifyPhotoBinary(raw, 'image/jpeg');
+    expect(output).toEqual(await verifyPhotoBinary(raw, 'image/jpeg'));
+    expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
+    ImageMagick.read(output.bytes, image => {
+      expect([image.width, image.height]).toEqual([960, 1280]);
+      expect(image.profileNames).toEqual([]);
+      image.getPixels(pixels => {
+        const left = pixels.getPixel(100, 640), right = pixels.getPixel(850, 640);
+        expect(left[2]).toBeGreaterThan(left[0] ?? 0);
+        expect(right[0]).toBeGreaterThan(right[2] ?? 0);
+      });
+    });
+    const bomb = jpg.slice();
+    for (let i = 2; i < bomb.length - 9; i++) if (bomb[i] === 255 && bomb[i + 1] === 192) { bomb[i + 7] = 127; bomb[i + 8] = 255; break; }
+    await expect(verifyPhotoBinary(bomb, 'image/jpeg')).rejects.toMatchObject({ code: 'PHOTO_DECODE_LIMIT_EXCEEDED' });
+  });
+  it.each(['plain', 'ultra-hdr'] as const)('normalizes %s JPEG with fully indexed Samsung SEF metadata and strips the trailer', async (kind) => {
+    const hdr = kind === 'plain' ? fixture() : ultraHdrJpeg(fixture()), original = samsungStillMetadata(hdr);
+    checkPhotoInputEnvelope(original, 'image/jpeg');
+    expect(() => checkPhotoEnvelope(original, 'image/jpeg', true)).toThrow(PhotoError);
     const output = await verifyPhotoBinary(original, 'image/jpeg');
     expect(output).toEqual(await verifyPhotoBinary(hdr, 'image/jpeg'));
     checkPhotoEnvelope(output.bytes, output.mime, true);
     expect(output.sizeBytes).toBeLessThanOrEqual(PHOTO_MAX_BYTES);
   });
-  it('rejects forged Samsung still metadata boundaries, fields, names, video and loose bytes', async () => {
-    const hdr = ultraHdrJpeg(fixture()), original = samsungStillMetadata(hdr);
+  it.each(['plain', 'ultra-hdr'] as const)('rejects forged Samsung %s metadata boundaries, fields, names, video and loose bytes', async (kind) => {
+    const hdr = kind === 'plain' ? fixture() : ultraHdrJpeg(fixture()), original = samsungStillMetadata(hdr);
     const directory = original.length - 44;
     const corruptions: Array<(bytes: Uint8Array) => void> = [
       b => { b[b.length - 1] = 0; },
@@ -146,7 +179,7 @@ describe('independent server image verification', () => {
       const forged = original.slice(); corrupt(forged);
       await expect(verifyPhotoBinary(forged, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
     }
-    for (const forged of [original.slice(0, -1), new Uint8Array([...original, 0]), samsungStillMetadata(new Uint8Array([...hdr, 0])), samsungStillMetadata(fixture())]) {
+    for (const forged of [original.slice(0, -1), new Uint8Array([...original, 0]), samsungStillMetadata(new Uint8Array([...hdr, 0])), samsungStillMetadata(samsungStillMetadata(hdr))]) {
       await expect(verifyPhotoBinary(forged, 'image/jpeg')).rejects.toMatchObject({ code: 'INVALID_PHOTO_BINARY' });
     }
   });

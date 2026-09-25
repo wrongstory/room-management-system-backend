@@ -170,6 +170,17 @@ GitHub, 프론트 번들, 일반 로그에 값을 넣지 않는다. Codex의 Goo
 - decoder에는 주 JPEG만 전달하며 기존 방향 보정·metadata 제거·300KiB 이하 재인코딩을 유지한다. 입력 5MiB·12MP/5000px, MIME, 권한·CAS·멱등성·Drive·DB 계약은 변경하지 않는다.
 - 회귀 fixture는 합성 데이터만 사용한다. 사용자 촬영 원본·metadata·파일 경로를 Git/PR에 포함하지 않는다. 로컬 원본 재현 성공은 운영 업로드·Drive finalize 성공과 구분한다.
 
+## #297 일반 JPEG의 Samsung SEF 호환성
+
+- 일반 JPEG 뒤에 붙은 SEF 정지 사진 metadata도 HDR 경로와 동일한 엄격한 directory/field 경계 검사로 수용한다. 이전 일반 JPEG+유효 SEF 거부 기대는 사용자 승인 Issue #297의 호환성 결정으로 대체한다.
+- 임의 trailer를 잘라 버리는 우회가 아니다. 손상된 offset·길이·type/name, 중첩 SEF, gap, motion-video entry와 추가 bytes는 계속 거부한다. 저장 결과에는 SEF를 허용하지 않는다.
+- Node와 pinned Deno에 일반 JPEG 정상/손상 회귀를 추가하며 실제 촬영 원본은 Git 밖의 로컬 읽기 전용 입력으로만 검증한다. 입력/출력·시간/메모리 제한, DB·Drive·CAS는 변경하지 않는다.
+- 입력 구조 수정 뒤 실제 12MP 원본의 Deno 변환 자원 실패도 재현되어, 원본 SOF 치수를 먼저 검증하고 두 축 모두 1280보다 큰 JPEG만 `jpeg:size=1280x1280` 디코드 축소 힌트를 적용한다. 작은/가늘고 긴 JPEG의 확대를 막고 원본 해상도 기준 품질 선택, EXIF 방향 보정과 metadata 제거를 유지한다. 메모리·시간 제한을 올리지 않는다.
+- 축소 디코딩은 정규화 bytes/SHA를 바꿀 수 있다. 기존 요청의 begin에서 `IDEMPOTENCY_KEY_REUSED`가 반환된 JPEG에만 이전 decoder로 1회 복구 시도한다. 같은 admission/key/binding과 DB의 hash/MIME/size 검사를 유지하고, 두 decode의 합산 1500ms 예산을 지킨다. 기존 원장을 덮어쓰거나 새 키로 중복 생성하지 않는다. 권한/CAS/provider 오류에는 이 경로를 적용하지 않는다.
+- 새 decoder로 생성된 작업은 이전 릴리즈로 단순 rollback하면 재요청 hash가 달라질 수 있다. 문제 시 새 키 발급이나 원장 수정으로 우회하지 않고 이 호환 경로를 보존한 forward-fix를 적용한다. 구버전 복구가 필요하면 진행 중 작업과 응답 유실 복구를 별도로 확인한다.
+- 합산 시간 예산은 동기 WASM 호출 후 결과를 거부하는 검사이지 실행 도중 강제 중단 장치가 아니다. 기존 native 자원 제한을 유지하지만 hosted CPU 강제 종료까지 방지한다고 보장하지 않는다.
+- 실제 hosted 업로드/verified/멱등성 검증은 로컬 변환과 구분한다. 프런트 VALIDATION_ERROR 안내 문제는 별도 후속이며 이 수정으로 해결됐다고 주장하지 않는다.
+
 ## #294 운영 이미지 실패 진단
 
 - Edge API는 사진 body/입력 envelope/입력 decode/입력 검증/변환/encode/출력 envelope/출력 decode/출력 검증/시간 예산의 실패 지점을 구분한다. 공개 HTTP 상태와 error code, 입력·출력 제한 및 거부 조건은 유지한다.
