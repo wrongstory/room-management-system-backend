@@ -3214,7 +3214,7 @@ export const openApiDocument = {
         operationId: "createComplaint",
         summary: "승인된 원 청소 컴플레인 접수",
         description:
-          "active business admin이 원 수익 ID만 전달하면 서버가 room/target/attempt/submission/approved inspection/maid를 실제 FK로 확정합니다. 승인 후 30일 경계를 포함하며 자유문·고객정보·PIN·사진 locator는 입력할 수 없습니다.",
+          "active business admin이 원 수익 ID만 전달하면 서버가 room/target/attempt/submission/approved inspection/maid를 실제 FK로 확정합니다. 승인 후 경과 시간은 접수를 차단하지 않으며 자유문·고객정보·PIN·사진 locator는 입력할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -3347,7 +3347,7 @@ export const openApiDocument = {
         operationId: "decideComplaint",
         summary: "컴플레인 최초 판정",
         description:
-          "active business admin이 finding, 평가 전용 penaltyScore 0..10, reworkRequired를 불변 decision version으로 기록합니다. 벌점은 수익·주급·정정 원장을 자동 변경하지 않으며 최초 판정부터 7일 응답 창이 열립니다.",
+          "active business admin이 finding, 평가 전용 penaltyScore 0..10, reworkRequired를 불변 decision version으로 기록합니다. 벌점은 수익·주급·정정 원장을 자동 변경하지 않습니다. responseDeadline은 관리자 주의 기준이며 응답 권한을 만료시키지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [photoPathId("complaintId"), idempotencyHeader],
@@ -3368,7 +3368,7 @@ export const openApiDocument = {
         operationId: "respondComplaint",
         summary: "담당 메이드 판정 확인 또는 이의",
         description:
-          "active 원 담당 maid만 최초 current decision 후 7일 경계를 포함해 정확히 한 번 acknowledged 또는 source-controlled appeal을 제출합니다. finding·벌점·재작업 판정은 변경할 수 없습니다.",
+          "active 원 담당 maid만 최초 current decision에 정확히 한 번 acknowledged 또는 source-controlled appeal을 제출합니다. 경과 시간은 이 권한을 만료시키지 않으며 finding·벌점·재작업 판정은 변경할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [photoPathId("complaintId"), idempotencyHeader],
@@ -3389,7 +3389,7 @@ export const openApiDocument = {
         operationId: "closeComplaint",
         summary: "컴플레인 종결",
         description:
-          "active business admin만 확인 완료 사건, correction으로 해결된 이의 사건, 또는 7일 응답 창이 지난 미응답 사건을 종결합니다. closed 사건을 reopen하는 API는 존재하지 않습니다.",
+          "active business admin만 메이드가 확인한 사건 또는 correction으로 해결된 이의 사건을 종결합니다. 시간 경과만으로 미응답 사건을 종결할 수 없고 closed 사건을 reopen하는 API는 존재하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [photoPathId("complaintId"), idempotencyHeader],
@@ -6425,10 +6425,8 @@ export const openApiDocument = {
           "INVALID_COMPLAINT_CURSOR",
           "INVALID_COMPLAINT_REWORK",
           "COMPLAINT_COMPENSATION_AMOUNT_INVALID",
-          "COMPLAINT_INTAKE_WINDOW_CLOSED",
           "COMPLAINT_SOURCE_NOT_APPROVED",
-          "COMPLAINT_RESPONSE_WINDOW_CLOSED",
-          "COMPLAINT_RESPONSE_WINDOW_OPEN",
+          "COMPLAINT_RESPONSE_REQUIRED",
           "COMPLAINT_APPEAL_UNRESOLVED",
           "COMPLAINT_RESPONSE_ALREADY_RECORDED",
           "COMPLAINT_DECISION_REQUIRED",
@@ -11475,7 +11473,12 @@ export const openApiDocument = {
           version: { type: "integer", minimum: 1 },
           currentDecisionId: { type: ["string", "null"], format: "uuid" },
           firstDecidedAt: { type: ["string", "null"], format: "date-time" },
-          responseDeadline: { type: ["string", "null"], format: "date-time" },
+          responseDeadline: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "관리자 주의 알림 기준 시각입니다. 이 시각이 지나도 메이드의 최초 응답 권한은 만료되지 않습니다.",
+          },
           receivedAt: { type: "string", format: "date-time" },
           updatedAt: { type: "string", format: "date-time" },
           currentDecision: {

@@ -330,20 +330,14 @@ export function complaintDatabaseError(
     ["INVALID_COMPLAINT_REWORK", 400, "재작업 요청이 올바르지 않습니다."],
     ["COMPLAINT_COMPENSATION_AMOUNT_INVALID", 400, "보상액 범위를 확인해 주세요."],
     [
-      "COMPLAINT_INTAKE_WINDOW_CLOSED",
-      409,
-      "청소 승인 후 30일 접수 기간이 지났습니다.",
-    ],
-    [
       "COMPLAINT_SOURCE_NOT_APPROVED",
       409,
       "승인된 원 청소 수익만 컴플레인에 연결할 수 있습니다.",
     ],
-    ["COMPLAINT_RESPONSE_WINDOW_CLOSED", 409, "7일 응답 기간이 지났습니다."],
     [
-      "COMPLAINT_RESPONSE_WINDOW_OPEN",
+      "COMPLAINT_RESPONSE_REQUIRED",
       409,
-      "메이드 응답 기간이 아직 열려 있습니다.",
+      "담당 메이드의 확인 또는 이의 응답이 필요합니다.",
     ],
     [
       "COMPLAINT_APPEAL_UNRESOLVED",

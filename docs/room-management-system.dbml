@@ -1268,7 +1268,7 @@ Table public.complaint_cases {
   current_decision_id uuid
   current_compensation_decision_id uuid
   first_decided_at timestamptz
-  response_deadline timestamptz
+  response_deadline timestamptz [note: 'Legacy-compatible attention threshold; never expires the maid response right or authorizes no-response closure']
   received_by uuid [not null]
   received_at timestamptz [not null]
   updated_at timestamptz [not null]
