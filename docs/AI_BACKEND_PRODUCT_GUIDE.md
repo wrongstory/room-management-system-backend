@@ -4,8 +4,8 @@
 
 검토 기준:
 
-- Issue #245 v0.5.1 hotfix는 78번째 append-only migration과 OpenAPI `0.5.1` 128 paths / 138 operations를 구성한다. bookability preview에서만 `guestCount` 생략/`null`을 같은 값으로 받아 capacity 필터 없이 기간 판정을 하며, 예약 create/change의 인원 필수 계약은 유지한다.
-- 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@2ce8953c76fbf5cb33aff9f8a57b303acbf05cdb`다. 개발 정본은 81 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #256 사진 정규화, #250 진행 중 메이드 후속 계획, #264 수행 불가 취소·재배정, #171 로컬 합성 백업·복구 dry-run을 포함한다. #172의 82번째 읽기 전용 DB 진단 migration은 아직 feature 후보이며 production/recovery 연결을 승인하지 않는다. 마지막으로 검증된 production runtime은 78 migrations(head `reservation_bookability_optional_guest_count`), `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이고 Pages는 이 배포본과 parity를 완료했다. 기존 관리자 계정 UAT에서 bookability `guestCount` 생략·`null`·양수, 예약 현황 인원 표시와 객실 유형 최소·최대 인원 적용을 확인했다. 개발 정본의 후속 기능은 release 승격 전까지 production에서 사용 가능하다고 표시하지 않으며 tag/GitHub Release도 아직 발행하지 않았다.
+- Issue #245 v0.5.1 hotfix가 도입한 bookability `guestCount` 생략/`null` 계약과 예약 create/change의 인원 필수 계약은 이후 릴리스에서도 유지한다. 당시 78번째 migration / 128 paths / 138 operations snapshot은 현재 운영 기준이 아니라 과거 통합 이력이다.
+- 2026-09-26 KST 배포 전 기준 운영 Git 정본은 `main@65905ff386e642d926a76576884c1f9a4f24f169`이고 최신 기능 통합 지점은 `dev@ab185af2343644a5a2aec85962eb5272243844c4`다. 마지막으로 검증된 production runtime은 83 migrations(head `maid_pin_immediate_reveal`), `api` ACTIVE v34, OpenAPI `0.5.1` 129 paths / 139 operations다. v0.6.5 후보는 기존 83개를 수정하지 않은 84번째 `complaint_deadlines_non_blocking` 한 건만 pending으로 추가한다. release/main 병합과 production 적용 전에는 이 후보를 운영 사용 가능으로 표시하지 않으며, 79~83번을 재적용하거나 migration history를 강제 보정하지 않는다.
 - Issue #256 source는 스마트폰 JPEG/WebP/HEIC/HEIF 원본을 최대 5MiB·12MP/5000px 안에서 검증하고 EXIF 방향·메타데이터를 제거해 300KiB 이하 JPEG/WebP 저장본으로 정규화한다. 원본은 저장하지 않는다. `main`/`dev` 통합과 운영 배포 완료를 구분하며 Edge/Pages/프런트 제한 해제·실제 휴대폰 UAT 전에는 운영 사용 완료로 표시하지 않는다.
 - Issue #169의 초기 4자리 PIN 자동 생성·관리자 제한 열람·물리 확인 계약은 PR #219로 `dev`에 통합되고 PR #221로 `main`에 승격됐다. production DB/API source에도 포함됐지만 실제 PIN bootstrap·물리 확인 mutation은 별도 운영 승인 전까지 미실행이다.
 - Issue #229/#231/#236/#228은 `dev@49214bb67f2cf346178bc12321948a810e050234`에서 v0.5.0 후보를 구성했고 이후 `main`/production에 승격됐다. 이 backport 후보는 해당 dev-only 이력과 v0.5.0 snapshot을 보존하면서 #245 계약만 추가한다.
@@ -714,9 +714,9 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - application/migration GitHub Actions의 fresh DB reset과 SQL test
 - 운영·복구검증 Supabase에 같은 기준 스키마가 적용돼 있으나, 초기 수동 적용 과정에서 Git과 서로 다른 migration version으로 기록됨
 
-### `v0.2.0` 이후 source 통합 이력과 현재 `v0.5.1` 상태
+### `v0.2.0` 이후 source 통합 이력과 현재 `v0.6.5` 후보 상태
 
-아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. production runtime은 문서 상단의 v0.5.1 DB/API snapshot을 우선하며 GitHub Pages도 그 배포본과 공개 parity를 완료했다. 현재 `main`의 #256 source는 아직 운영 Edge/Pages에 미반영이므로 Git source, runtime bundle, hosted provider·Google·Cron 활성화를 각각 별도 상태로 해석한다.
+아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production runtime은 문서 상단의 83 migrations / `api` ACTIVE v34 / OpenAPI 129·139 snapshot을 우선한다. Git source, runtime bundle, Pages artifact, hosted provider·Google·Cron 활성화는 각각 별도 상태로 해석한다.
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview와 #4 notified-only 조회는 source/dev 완료 후 현재 `main`/production source에 반영됐다. 다만 #28 lifecycle effect를 포함한 hosted 역할별 positive smoke는 별도 미완료 gate다.
@@ -832,13 +832,13 @@ npm run db:reset
 
 ## 17. 권장 구현 순서
 
-P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#156/#165/#169, #229/#231/#236/#228/#245와 #238 hotfix까지 production source와 runtime에 반영됐다. production은 78 migrations / `api` ACTIVE v24 / OpenAPI 0.5.1 128 paths / 138 operations이며 기존 네 checkout template 데이터도 보존됐다. 안전한 fixture가 없어 실제 예약·PIN success mutation은 전체 release PASS로 표현하지 않는다.
+P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#156/#165/#169, #229/#231/#236/#228/#245와 후속 release source까지 production에 누적 반영됐다. 2026-09-26 KST 배포 전 production은 83 migrations / `api` ACTIVE v34 / OpenAPI 0.5.1 129 paths / 139 operations이며 기존 네 checkout template 데이터도 보존됐다. v0.6.5는 84번째 `complaint_deadlines_non_blocking` 한 건만 추가하는 후보이고, 안전한 fixture가 없어 실행하지 않은 positive mutation은 전체 release PASS로 표현하지 않는다.
 
-1. #245 hotfix를 최신 dev-only 이력을 보존한 별도 PR로 backport하고 exact-head CI와 독립 검토 뒤에만 dev 병합을 판단한다.
-2. production의 optional/null/positive `guestCount` UAT와 Pages 공개 0.5.1 / 128 / 138 readback은 완료됐다. tag/GitHub Release는 별도 승인 전까지 미발행으로 유지한다.
-3. 안전하게 되돌릴 수 있는 운영 fixture가 승인되면 예약/PIN mutation을 hosted smoke한다. fixture가 없으면 SKIPPED 상태를 PASS로 바꾸지 않는다.
-4. Issue #137 hosted Google Sheets와 Issue #112 Web Push activation은 실제 대상/자격증명/주기 승인 뒤에만 진행한다.
-5. Issue #12 backup/recovery는 매일 01:00~06:00 KST, 지정 PC 저장소 15일 보관을 운영 정책으로 유지한다. Issue #171 로컬 합성 dry-run source와 실제 production/recovery 접속·스케줄 활성화는 별도 gate이며, Issue #13 frontend/browser E2E도 별도 트랙으로 유지한다.
+1. v0.6.5 release exact head의 required CI와 독립 QA를 완료하고, 검증된 `release/v0.6.5`만 `main`에 병합한다.
+2. production을 read-only로 재확인해 83 migrations / head `maid_pin_immediate_reveal`이 아니면 중단한다. 일치할 때만 84번째 `complaint_deadlines_non_blocking` 한 건을 적용하고 exact main의 `api` bundle만 배포한다.
+3. 운영 health와 OpenAPI 0.5.1 / 129 / 139를 재확인하고, 안전한 기존 complaint fixture가 있을 때만 기한 경과 접수·응답과 무응답 종결 차단을 hosted smoke한다. fixture가 없으면 SKIPPED 상태를 PASS로 바꾸지 않는다.
+4. Issue #137 hosted Google Sheets와 Issue #112 Web Push activation은 실제 대상/자격증명/주기 승인 뒤에만 진행하며 v0.6.5 API 배포와 섞지 않는다.
+5. Issue #12 backup/recovery는 매일 03:00 KST, 지정될 운영 PC의 바탕화면 하위 전용 폴더에 최근 15일분을 보관하는 정책으로 유지한다. 운영 PC 설치 전에는 경로와 스케줄을 활성화하지 않는다.
 
 source/dev 완료, release/main 승격, production migration/secret/Edge/Cron 활성화는 서로 다른 gate다. 실제 Postgres RLS·동시성·복구 테스트를 계속 CI 필수 gate로 둔다.
 

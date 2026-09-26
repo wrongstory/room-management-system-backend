@@ -84,12 +84,12 @@ scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `res
 중 event별 필요한 필드만 반환합니다. `checkoutDecision`은 generic complaint/inspection decision과 분리된
 `EXTEND_CHECKOUT | CONFIRM_DEPARTED | FALSE_REPORT` enum입니다. raw before/after state, request hash,
 PIN version·암호문·평문, 고객명·전화번호·session/token, 알림 body는 projection과 Python generated model에
-존재하지 않습니다. 두 event는 현재 production allowlist에 반영됐습니다. production runtime과 DB head는
-현재 78번째 `reservation_bookability_optional_guest_count`까지 일치합니다. 최신 `dev`는 #172까지
-82개 migration을 통합했고, #275는 기존 82개를 보존한 83번째
-`maid_pin_immediate_reveal`로 source head를 전진시켰습니다. #306 후보는 기존 83개를 보존한 84번째
-`complaint_deadlines_non_blocking`으로 개발 source head를 전진시킵니다. 이 source를 production에 배포하기 전에
-79~84번 migration을 승인된 release 순서로 적용해야 하며 source와 DB head가 다르면 drift로 처리합니다.
+존재하지 않습니다. 두 event는 현재 production allowlist에 반영됐습니다. 2026-09-26 KST 배포 전 readback 기준
+production runtime과 DB head는 83번째 `maid_pin_immediate_reveal`까지 일치하고 `api`는 ACTIVE v34,
+OpenAPI는 `0.5.1` / 129 paths / 139 operations입니다. 최신 `dev@ab185af2343644a5a2aec85962eb5272243844c4`는
+기존 83개를 보존한 84번째 `complaint_deadlines_non_blocking`까지 통합했고, release/v0.6.5는 이 84번째
+migration 한 건만 production pending으로 고정합니다. 79~83번을 다시 적용하거나 history를 강제 보정하지 않으며,
+실제 운영 readback이 83개/head `maid_pin_immediate_reveal`과 다르면 84번째 적용 전에 중단합니다.
 
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,
