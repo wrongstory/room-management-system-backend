@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "release": "dev",
+  "release": "v0.6.5",
   "hashAlgorithm": "sha256-lf-utf8",
   "totalCount": 84,
   "baseline": {
-    "count": 78,
-    "head": "reservation_bookability_optional_guest_count"
+    "count": 83,
+    "head": "maid_pin_immediate_reveal"
   },
   "pending": {
-    "count": 6,
-    "first": "assignment_unavailability_reassignment",
+    "count": 1,
+    "first": "complaint_deadlines_non_blocking",
     "head": "complaint_deadlines_non_blocking"
   },
   "head": "complaint_deadlines_non_blocking",

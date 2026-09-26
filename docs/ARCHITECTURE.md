@@ -25,7 +25,9 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 
 #245 v0.5.1 hotfix는 bookability preview의 `guestCount` 생략과 `null`을 canonical `null`로 결합하고 capacity 필터 없이 기간 가용성만 판정한다. 양의 정수 입력에는 기존 room type 최대 인원 검증을 유지하며, 예약 create/change는 계속 인원을 필수로 받는다. 공개 계약은 OpenAPI `0.5.1` 128 paths / 138 operations이고 production DB/API와 Pages에 반영됐다. 기존 관리자 UAT에서 세 입력 형태와 예약 현황 인원·객실 유형 최소/최대 인원 적용을 확인했다.
 
-운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@bbfb6ced4900113c2c39890c11c4e1526c5372b0`다. 개발 정본은 82 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #172 읽기 전용 진단까지 포함한다. #275 메이드 PIN 즉시 조회는 기존 migration을 수정하지 않는 83번째 source 후보이며 hosted DB 적용은 승인되지 않았다. 2026-09-23 production readback은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages artifact parity 완료 상태다. #256 스마트폰 사진 정규화와 #250/#264 배정 후속은 개발 정본에 있지만 운영 Edge/Pages·실기기 UAT 또는 release 승격과 구분한다. 네 checkout template은 immutable v7 exactly-one으로 게시됐고 `durationMinutes=null`을 보존한다. 아래 개별 절의 상태는 각 기능 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
+위 #245의 78 migrations / 128 paths / 138 operations는 당시 hotfix 통합 이력이며 현재 운영 snapshot이 아니다.
+
+2026-09-26 KST 배포 전 운영 Git 정본은 `main@65905ff386e642d926a76576884c1f9a4f24f169`이고 최신 기능 통합 지점은 `dev@ab185af2343644a5a2aec85962eb5272243844c4`다. 마지막으로 검증된 production runtime은 83 migrations / head `maid_pin_immediate_reveal`, `api` ACTIVE v34, OpenAPI `0.5.1` 129 paths / 139 operations다. v0.6.5 후보는 기존 83개를 보존한 84번째 `complaint_deadlines_non_blocking` 한 건만 pending으로 추가한다. release/main 병합 및 production 적용 전까지 후보 기능을 운영 사용 가능으로 표시하지 않으며, 아래 개별 절의 상태는 통합 시점의 이력이고 현재 상태는 이 snapshot과 [API 상태 매트릭스](./API_STATUS_MATRIX.md)를 우선한다.
 
 #179의 v8 슬롯 계약, #184 현재 시각 객실 projection, #187 예약 임박 lifecycle projection은 `dev@07a07fcb4e43402971679975c435207bdbbe86a4`까지 통합됐다. #180 source 후보를 합친 migration 순서는 57번째 `photo_slot_contract_v8`, 58번째 `extra_proof_photo_collection`, 59번째 `current_room_status_projection`, 60번째 `reservation_arrival_lifecycle_projection`이며 OpenAPI는 111 paths / 119 operations다. 아직 운영에는 반영하지 않았으며 #180 required CI·사람 리뷰와 release 승인 전 운영 template을 재게시하지 않는다.
 
@@ -235,9 +237,10 @@ Decision Issue #94는 아래 도메인 경계를 확정했다. 이 절은 후속
 
 - 원청소 entitlement와 타 메이드 compensation entitlement는 각각 실제 typed table/FK다. `earnings`는
   source별 nullable FK와 exactly-one CHECK를 사용하고 임의 polymorphic UUID를 받지 않는다.
-- 컴플레인은 원 청소 승인 뒤 30일 안에 source-controlled reason code로 접수한다. 자유형 고객 정보와
+- 컴플레인은 원 청소 승인 뒤 경과 시간과 무관하게 source-controlled reason code로 접수한다. 자유형 고객 정보와
   PII를 저장하지 않는다. immutable decision version/current pointer CAS로 `confirmed / unverifiable / false`,
-  정수 0~10 평가 벌점, 재작업 결정을 보존한다. 본인 maid appeal은 최초 decision 뒤 7일 안에 한 번뿐이고,
+  정수 0~10 평가 벌점, 재작업 결정을 보존한다. 본인 maid response는 최초 decision에 한 번뿐이며,
+  7일 기준은 관리자 주의 metadata일 뿐 권한 만료나 자동 종결 조건이 아니다.
   종결 뒤 reopen 없이 active business admin correction version만 추가한다.
 - 같은 maid의 승인 후 재작업은 earning 0원이다. 다른 maid의 보상은 0원 이상 원 target base fee snapshot
   이하의 정수 원화 immutable decision이며, 해당 maid의 field completion과 승인 뒤 exactly-once earning을 만든다.
@@ -265,14 +268,13 @@ main/recovery/production에는 적용되지 않았다.
 `complaint_maid_responses`, `complaint_case_events`는 UPDATE/DELETE가 금지된 append-only 원장이다.
 접수 원천은 `scheduled_checkout|manual_checkout|stayover_request|manual_room_request` target과
 승인 submission에 non-null로 정확히 귀속된 original earning만 허용한다. 따라서 inspection/post-approval
-reclean과 향후 alternate compensation source는 SQL NULL까지 fail-closed로 거부한다. 접수는 승인 시각부터
-30일 경계를 포함하고, 최초 판정부터 7일 경계를 포함해 원 담당 maid가
-`acknowledged` 또는 allowlist appeal을 정확히 한 번만 기록한다.
+reclean과 향후 alternate compensation source는 SQL NULL까지 fail-closed로 거부한다. 승인 뒤 경과 시간은
+접수를 차단하지 않고, 원 담당 maid는 최초 판정에 `acknowledged` 또는 allowlist appeal을 정확히 한 번 기록한다.
 
-상태는 `received → under_review → decided → acknowledged|appealed → closed`다. 미응답 사건은 7일
-응답 창이 지난 뒤에만 종결하고, appealed 사건은 appeal event 뒤에 current decision을 prior FK correction으로 교체한 뒤에만
-종결한다. closed는 reopen하지 않으며 post-close correction도 status와 최초 응답 창을 유지한다. correction
-알림은 새 응답 창을 열지 않는 informational event(`requires_action=false`)다. 벌점 0..10은 평가 전용이고
+상태는 `received → under_review → decided → acknowledged|appealed → closed`다. 미응답 사건은 시간 경과만으로
+종결하지 않으며, appealed 사건은 appeal event 뒤에 current decision을 prior FK correction으로 교체한 뒤에만
+종결한다. closed는 reopen하지 않으며 post-close correction도 status와 최초 응답 주의 시각을 유지한다. correction
+알림은 새 응답 권한을 만들지 않는 informational event(`requires_action=false`)다. 벌점 0..10은 평가 전용이고
 migration/RPC는 earning/payroll/adjustment를 쓰지 않는다.
 
 Fastify와 Edge는 동일한 service-role-only RPC와 stable error mapping을 사용한다. 모든 mutation은 actor,
@@ -822,7 +824,7 @@ domain lock과 상태 재검증 뒤 `clock_timestamp()`로 다시 확인하고, 
 검증하고 잘못된 달력 날짜나 DB 값을 안전하게 차단합니다. 중단 구간에는 earning·벌점을 생성하지 않습니다.
 Fastify/Edge/OpenAPI의 #133 통합 당시 기준은 108 paths / 115 operations였습니다. #156이 여기에
 `GET·POST /v1/cleaning-templates` 한 path와 두 operation을 추가했으며, #165의 선택형 duration 계약까지
-해당 시점의 정본은 109 paths / 117 operations였고, 현재 전체 production 정본은 OpenAPI 0.5.1 / 128 paths / 138 operations입니다.
+해당 시점의 정본은 109 paths / 117 operations였고, 현재 전체 production 정본은 OpenAPI 0.5.1 / 129 paths / 139 operations입니다.
 
 ### #156 checkout template 운영 게시 경계
 
@@ -913,7 +915,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 완료된 release/운영 반영과 남은 활성화 작업:
 
-- 완료: production 78 migrations, OpenAPI 0.5.1 128/138의 승인 `api` v24, template admin role/CAS/idempotency 및 네 타입 v7 게시
+- 완료: production 83 migrations / head `maid_pin_immediate_reveal`, OpenAPI 0.5.1 129/139의 승인 `api` v34, template admin role/CAS/idempotency 및 네 타입 v7 게시
 - 대기: 안전한 fixture 기반 reservation/planned-target positive smoke
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
 - Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
@@ -926,7 +928,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 
 고객명 암호화 key version과 idempotency HMAC pepper는 분리합니다. 암호화 키를 회전해도 안정적인 `RESERVATION_GUEST_NAME_PEPPER`는 계획된 별도 migration 전까지 유지하므로 기존 idempotency key 재시도가 다른 요청으로 오인되지 않습니다.
 
-2026-09-23 readback 기준 production runtime은 78 migrations / `api` ACTIVE v24 / OpenAPI `0.5.1` 128 paths / 138 operations, 기존 5개 Edge bundle과 Pages parity 완료 상태다. 현재 Git `main@10a1f81...`의 #256 사진 정규화는 배포 readback 전이므로 runtime에 포함됐다고 추정하지 않는다. 네 checkout template v7 게시도 완료됐다. 실행하지 않은 positive mutation은 PASS로 표현하지 않고 provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
+2026-09-26 배포 전 readback 기준 production runtime은 83 migrations / head `maid_pin_immediate_reveal`, `api` ACTIVE v34, OpenAPI `0.5.1` 129 paths / 139 operations다. v0.6.5의 84번째 migration과 새 API bundle은 아직 후보이므로 적용 전 운영 상태에 포함하지 않는다. 네 checkout template v7 게시도 완료됐다. 실행하지 않은 positive mutation은 PASS로 표현하지 않고 provider·Google·Cron 활성화와 구분한다. 실제 운영 상태 판정은 release evidence와 hosted readback을 따른다.
 
 ## 백업·복구
 

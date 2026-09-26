@@ -1268,7 +1268,7 @@ Table public.complaint_cases {
   current_decision_id uuid
   current_compensation_decision_id uuid
   first_decided_at timestamptz
-  response_deadline timestamptz
+  response_deadline timestamptz [note: 'Legacy-compatible attention threshold; never expires the maid response right or authorizes no-response closure']
   received_by uuid [not null]
   received_at timestamptz [not null]
   updated_at timestamptz [not null]
@@ -1298,7 +1298,7 @@ Table public.complaint_maid_responses {
   response_type text [not null, note: 'acknowledged / appealed']
   appeal_reason_code text [note: 'Exact #100 four-code allowlist; null only for acknowledgement']
   responded_at timestamptz [not null]
-  Note: '#100 append-only one response to the first decision within the inclusive seven-day window.'
+  Note: '#100 append-only one response to the first decision. The seven-day value is attention metadata and never expires the response capability.'
 }
 
 Table public.complaint_case_events {
