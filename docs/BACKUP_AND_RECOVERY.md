@@ -1,7 +1,7 @@
 # Supabase Free Plan 백업·복구 운영안
 
 > 결정일: 2026-08-26
-> 상태: 대상 계정 연결과 Free 프로젝트 2개 확인 완료, 운영·복구검증 migration 적용·재현 완료. 정기 dump 정책은 매일 01:00~06:00 KST, 15일 보관으로 확정했다. 로컬 합성 DB의 dump·격리 복원 dry-run은 source/dev 자동화가 준비됐으며 정확한 운영 실행 시각, 미래 PC 저장 경로, 원격 자동화는 남아 있다.
+> 상태: 대상 계정 연결과 Free 프로젝트 2개 확인 완료, 운영·복구검증 migration 적용·재현 완료. 정기 dump 정책은 매일 03:00 KST, 15일 보관으로 확정했다. 로컬 합성 DB의 dump·격리 복원 dry-run은 source/dev 자동화가 준비됐으며 미래 운영 PC 설치와 원격 자동화는 남아 있다.
 > 사진은 Google Drive에만 비공개 저장한다. 청소 제출은 최종 검사 결정+168시간, 사건 증빙은 해결·종결+180일, 진짜 orphan은 업로드+30일 뒤 삭제하는 retention v2가 정본이다. DB 백업은 사진 객체를 포함하지 않으며 파일 ID·해시·삭제 결과 메타데이터만 보존한다.
 
 ## 목적
@@ -23,13 +23,13 @@ Supabase Free Plan의 활성 프로젝트 2개를 다음처럼 사용한다.
 - DB 논리 백업에는 Google Drive의 실제 사진 파일이 들어가지 않는다. 사진 파일은 백업 대상이 아니라 도메인별 retention v2에 따른 단기 증빙이며, 파일 ID·해시·정책·삭제 결과만 DB에 남긴다.
 - 데이터가 포함된 dump는 개인정보를 포함할 수 있으므로 Git에 커밋하지 않고 로그에도 출력하지 않는다.
 
-recovery 프로젝트는 최신 상태를 실제로 복원해 보는 **warm recovery copy**다. 같은 계정·같은 공급자 안에 있으므로 이것만으로 계정 탈취, 공급자 장애, 잘못된 백업의 전파까지 막는 독립 백업은 아니다. 최근 성공 dump는 15일 동안 암호화해 별도 안전 저장소에 보관한다. 최종 보관 위치는 추후 지정할 PC의 로컬 저장소이며 실제 절대 경로는 지정 전까지 문서나 스크립트에서 추측하지 않는다.
+recovery 프로젝트는 최신 상태를 실제로 복원해 보는 **warm recovery copy**다. 같은 계정·같은 공급자 안에 있으므로 이것만으로 계정 탈취, 공급자 장애, 잘못된 백업의 전파까지 막는 독립 백업은 아니다. 최근 성공 dump는 15일 동안 암호화해 별도 안전 저장소에 보관한다. 최종 보관 위치는 추후 지정할 운영 PC 바탕화면의 `RoomManagementSystemBackups` 폴더다. 설치 전에는 해당 PC의 실제 Desktop 절대 경로를 추측하지 않고 설치 도구가 운영체제에서 조회해 설정 파일에 고정한다.
 
 2026-08-26에 recovery 프로젝트에 Git의 기존 P0/P1 migration과 도메인 무결성 migration을 순서대로 적용했다. 구조 검사 16건과 rollback DML 검사 10건이 통과했으며 검증 fixture는 0건으로 복귀했다. 이는 schema 복구 경로 검증이며, 운영 데이터의 주기적 roles/schema/data dump 자동화와 실제 data restore 검증은 별도 후속 작업이다.
 
 ## 백업 주기
 
-1. 매일 01:00~06:00 KST 사이에 운영 DB에서 roles·schema·data를 각각 dump한다. 정확한 실행 시각은 자동화 전에 확정하며 현재 권장값은 03:00 KST다.
+1. 매일 03:00 KST에 운영 DB에서 roles·schema·data를 각각 dump한다.
 2. 각 파일의 SHA-256과 생성 시각을 검증하고 암호화한 최근 15일분을 지정된 PC 로컬 저장소에 유지한다. 경로가 확정되기 전에는 임시 경로나 클라우드 동기화 폴더를 운영 정본으로 사용하지 않는다.
 3. 두 프로젝트에 같은 Git 마이그레이션이 적용됐는지 확인한다.
 4. recovery 프로젝트의 **앱 소유 스키마와 업무 데이터만** 초기화한 뒤 최신 dump를 복원한다. Supabase가 관리하는 `auth`, `storage`, `realtime` 스키마를 삭제하거나 재생성하지 않는다.
@@ -91,6 +91,42 @@ dry-run은 다음을 fail-closed한다.
 산출물은 `.tmp/backup-recovery/` 아래에서만 만들 수 있다. 각 실행은 새로운 staging 디렉터리를 사용하고 전체 복원 검사가 끝난 뒤에만 immutable success 디렉터리와 `latest-success.json` 포인터를 원자적으로 게시한다. 실패 실행은 직전 성공 포인터를 덮지 않는다. 성공본은 15일 기준으로만 정리하며 failed evidence는 자동 삭제하지 않는다.
 
 이 명령은 local synthetic 검증 전용이다. 운영 dump, recovery 초기화·복원, 지정 PC 보관, 스케줄 활성화 권한을 부여하지 않는다.
+
+## Windows 운영 자동화 source 기반
+
+Issue #273은 실제 운영 자격증명이나 원격 프로젝트를 건드리지 않고 Windows Task Scheduler에 전달할 안전한 plan을 먼저 고정한다. 운영 설정 파일에는 다음 비밀 없는 값만 둔다.
+
+- production/recovery project ref
+- 미래 운영 PC의 바탕화면 아래 `RoomManagementSystemBackups`로 확정된 절대 백업 경로
+- 03:00 KST 실행 시각
+- 15일 retention
+- Windows 보안 저장소의 credential **이름** 세 개
+
+DB URL·비밀번호·암호화 키 자체는 설정 JSON, 명령행, Scheduled Task argument, Git, 로그에 넣지 않는다. plan은 다음 명령으로 사전 검증한다.
+
+```powershell
+npm run backup:operator:plan -- --config C:\RmsConfig\backup.json
+```
+
+운영 PC 설치 시에는 먼저 아래 source 도구를 실행해 운영체제의 실제 Desktop 경로를 조회하고 `RoomManagementSystemBackups` 폴더와 비밀 없는 설정을 만든다. 현재 개발 PC에서는 실행하지 않는다.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows\New-RmsBackupRecoveryConfig.ps1 -RepositoryRoot <배포된-source-절대경로>
+```
+
+`scripts/windows/Install-RmsBackupRecoveryTask.ps1`은 `-Enable`을 명시한 경우에만 작업을 등록하며, 등록 직후에도 기본 상태는 **Disabled**다. credential bridge와 원격 recovery executor가 별도 운영 gate에서 설치·검증되기 전에는 runner가 `BACKUP_OPERATOR_CREDENTIAL_BRIDGE_NOT_ACTIVATED`로 실패한다. 따라서 이 source 기반만으로 운영 백업이 실행 중이라고 표시해서는 안 된다.
+
+운영 PC가 지정된 뒤의 순서는 다음과 같다.
+
+1. 비밀 없는 설정 plan 검증
+2. Windows 보안 저장소 credential 이름/ACL 확인
+3. 운영자가 승인한 credential bridge와 원격 dump/recovery executor 설치
+4. Disabled task 등록 및 수동 1회 dry-run
+5. artifact 암호화·SHA-256·recovery 복원·121실/RLS/RPC 검사
+6. 직전 성공본 보존과 실패 복구 확인
+7. 마지막으로 task 활성화
+
+현재 PR 범위는 1과 Disabled task source까지만이며, 2~7은 실행하지 않는다.
 
 ## Free Plan 주의사항
 
