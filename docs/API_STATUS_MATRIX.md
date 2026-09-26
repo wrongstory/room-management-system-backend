@@ -919,9 +919,10 @@ production DB/Edge/Pages를 변경하지 않는다.
 - 원청소 entitlement와 타 메이드 compensation entitlement는 실제 typed FK이고 `earnings`의 source별
   nullable FK는 exactly-one CHECK를 가진다. 임의 polymorphic UUID를 도입하지 않으며 #31 identity/history는
   future append-only migration으로 보존한다.
-- 컴플레인은 원 청소 승인 후 30일 안에 source-controlled reason code로 접수한다. 자유형 고객 정보와
+- 컴플레인은 원 청소 승인 후 경과 시간과 무관하게 source-controlled reason code로 접수한다. 자유형 고객 정보와
   PII는 금지한다. immutable decision/current pointer CAS의 판정은 `confirmed / unverifiable / false`, 벌점은
-  정수 0~10 평가 전용이며 자동 급여 차감이 아니다. 본인 maid appeal은 최초 decision 뒤 7일 안에 1회다.
+  정수 0~10 평가 전용이며 자동 급여 차감이 아니다. 본인 maid response는 최초 decision에 1회다.
+  7일 기준은 관리자 주의 metadata이고 응답 권한 만료나 미응답 사건 종결 조건이 아니다.
   종결 후 reopen하지 않고 active business admin correction version만 추가한다.
 - 같은 maid의 승인 후 재작업은 earning 0원이다. 다른 maid는 0원 이상 원 target base fee snapshot 이하의
   정수 원화 immutable compensation decision을 가지며 field completion과 승인 뒤 exactly-once earning을 만든다.
@@ -956,8 +957,8 @@ main/recovery/production migration·Edge/Pages/Cron/Vault는 그대로 유지한
 | [x] | `POST /v1/complaints/{complaintId}/close` | active password-complete business admin | ✅ | ✅ | ✅ | ✅ | ⚠️ |
 
 - [x] append-only `complaint_lifecycle` migration 1개; 기존 36 migrations 수정 없음
-- [x] 승인된 원 청소 allowlist target + non-null exact submission entitlement/current earning typed FK와 30일 inclusive intake; reclean/alternate compensation source fail-closed
-- [x] immutable decision/maid response/event, current pointer CAS, 7일 inclusive 1회 응답, 종결 후 reopen 금지
+- [x] 승인된 원 청소 allowlist target + non-null exact submission entitlement/current earning typed FK; 승인 경과 시간은 intake를 차단하지 않고 reclean/alternate compensation source는 fail-closed
+- [x] immutable decision/maid response/event, current pointer CAS, 기한 만료 없는 1회 응답, 미응답 시간경과 종결 금지, 종결 후 reopen 금지
 - [x] 벌점 0~10 평가 전용 및 earning/payroll/adjustment side effect 0
 - [x] source-controlled category/appeal code만 허용하고 자유형 고객·직원 content와 PII/PIN/photo locator 비저장
 - [x] bounded 31일 list, 최대 100 keyset page/history, actor·scope 바인딩 signed cursor

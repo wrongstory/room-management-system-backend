@@ -673,7 +673,7 @@ bounded purge RPC만 허용한다. heartbeat는 비민감 포화 count와 safe r
 ```mermaid
 erDiagram
   CLEANING_SUBMISSIONS ||--o| EARNINGS : "승인 후 1회 적립"
-  EARNINGS ||--o{ COMPLAINT_CASES : "승인 후 30일 접수"
+  EARNINGS ||--o{ COMPLAINT_CASES : "승인 수익 provenance"
   COMPLAINT_CASES ||--o{ COMPLAINT_DECISIONS : "판정·정정 version"
   COMPLAINT_CASES ||--o| COMPLAINT_MAID_RESPONSES : "최초 판정 1회 응답"
   COMPLAINT_CASES ||--o{ COMPLAINT_CASE_EVENTS : "수명주기 원장"

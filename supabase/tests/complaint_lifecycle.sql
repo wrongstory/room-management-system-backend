@@ -81,10 +81,11 @@ create temporary table complaint_results(label text primary key,value jsonb);
 insert into complaint_results values('boundary',public.create_complaint_case(
   pg_temp.pid(1),pg_temp.pid(5001),'cleanliness_general',0,'complaint-create-boundary',repeat('a',64)));
 select is((select value->>'status' from complaint_results where label='boundary'),'received',
-  'approval plus exactly 30 days remains inside the inclusive intake window');
-select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5002),
-  'cleanliness_general',0,'complaint-create-over',repeat('b',64))$$,
-  '22023','COMPLAINT_INTAKE_WINDOW_CLOSED','approval plus more than 30 days is rejected');
+  'approval age does not change valid complaint provenance');
+insert into complaint_results values('over-window',public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5002),
+  'cleanliness_general',0,'complaint-create-over',repeat('b',64)));
+select is((select value->>'status' from complaint_results where label='over-window'),'received',
+  'approval plus more than 30 days remains eligible for complaint intake');
 select throws_ok($$select public.create_complaint_case(pg_temp.pid(1),pg_temp.pid(5003),
   'cleanliness_general',0,'complaint-create-rejected',repeat('c',64))$$,
   '55000','COMPLAINT_SOURCE_NOT_APPROVED','rejected provenance is not complaint intake provenance');
@@ -185,7 +186,7 @@ select is((select value->>'responseDeadline' from complaint_results where label=
   (select value->>'responseDeadline' from complaint_results where label='decision'),
   'correction never resets the first-decision response window');
 
-select is((select count(*) from public.audit_events where event_type like 'complaint.%'),8::bigint,
+select is((select count(*) from public.audit_events where event_type like 'complaint.%'),9::bigint,
   'each successful lifecycle mutation appends one bounded audit event');
 select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
   where n.category like 'complaint_%'),(select count(*) from public.notifications n
@@ -256,10 +257,13 @@ update public.complaint_cases set
   response_deadline=transaction_timestamp()-interval '1 microsecond'
 where id=(select (value->>'id')::uuid from complaint_results where label='deadline-past');
 alter table public.complaint_cases enable trigger complaint_case_projection_guard;
-select throws_ok($$select public.respond_to_complaint(pg_temp.pid(2),
+select lives_ok($$select public.respond_to_complaint(pg_temp.pid(2),
   (select (value->>'id')::uuid from complaint_results where label='deadline-past'),3,
   'appealed','timeline_mismatch','complaint-response-deadline-past',repeat('9',64))$$,
-  '22023','COMPLAINT_RESPONSE_WINDOW_CLOSED','maid response is rejected after the seven-day deadline');
+  'maid response remains available after the attention threshold');
+select is((select status::text from public.complaint_cases
+  where id=(select (value->>'id')::uuid from complaint_results where label='deadline-past')),
+  'appealed','late response records the same immutable appeal transition');
 
 insert into complaint_results values('close-boundary',public.create_complaint_case(
   pg_temp.pid(1),pg_temp.pid(5008),'access_or_handover',0,'complaint-create-close-boundary',repeat('a',64)));
@@ -278,17 +282,17 @@ alter table public.complaint_cases enable trigger complaint_case_projection_guar
 select throws_ok($$select public.close_complaint_case(pg_temp.pid(1),
   (select (value->>'id')::uuid from complaint_results where label='close-boundary'),3,
   'complaint-close-deadline-equal',repeat('d',64))$$,
-  '55000','COMPLAINT_RESPONSE_WINDOW_OPEN','no-response case cannot close at the inclusive response deadline');
+  '55000','COMPLAINT_RESPONSE_REQUIRED','no-response case cannot close at the attention threshold');
 alter table public.complaint_cases disable trigger complaint_case_projection_guard;
 update public.complaint_cases set
   first_decided_at=transaction_timestamp()-interval '7 days'-interval '1 microsecond',
   response_deadline=transaction_timestamp()-interval '1 microsecond'
 where id=(select (value->>'id')::uuid from complaint_results where label='close-boundary');
 alter table public.complaint_cases enable trigger complaint_case_projection_guard;
-select lives_ok($$select public.close_complaint_case(pg_temp.pid(1),
+select throws_ok($$select public.close_complaint_case(pg_temp.pid(1),
   (select (value->>'id')::uuid from complaint_results where label='close-boundary'),3,
   'complaint-close-deadline-past',repeat('e',64))$$,
-  'no-response case may close only after the inclusive seven-day window expires');
+  '55000','COMPLAINT_RESPONSE_REQUIRED','time passage alone never closes the maid response right');
 
 select is((select bool_and(not requires_action) from public.notifications
   where category in ('complaint_received','complaint_corrected','complaint_acknowledged','complaint_closed')),true,

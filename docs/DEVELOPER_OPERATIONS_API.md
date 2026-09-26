@@ -86,9 +86,10 @@ scheduler가 성공시킨 예약 전이는 별도 중복 event가 아니라 `res
 PIN version·암호문·평문, 고객명·전화번호·session/token, 알림 body는 projection과 Python generated model에
 존재하지 않습니다. 두 event는 현재 production allowlist에 반영됐습니다. production runtime과 DB head는
 현재 78번째 `reservation_bookability_optional_guest_count`까지 일치합니다. 최신 `dev`는 #172까지
-82개 migration을 통합했고, #275 후보는 기존 82개를 보존한 83번째
-`maid_pin_immediate_reveal`로 source head를 전진시킵니다. 이 source를 production에 배포하기 전에
-79~83번 migration을 승인된 release 순서로 적용해야 하며 source와 DB head가 다르면 drift로 처리합니다.
+82개 migration을 통합했고, #275는 기존 82개를 보존한 83번째
+`maid_pin_immediate_reveal`로 source head를 전진시켰습니다. #306 후보는 기존 83개를 보존한 84번째
+`complaint_deadlines_non_blocking`으로 개발 source head를 전진시킵니다. 이 source를 production에 배포하기 전에
+79~84번 migration을 승인된 release 순서로 적용해야 하며 source와 DB head가 다르면 drift로 처리합니다.
 
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,

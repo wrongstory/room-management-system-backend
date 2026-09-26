@@ -235,9 +235,10 @@ Decision Issue #94는 아래 도메인 경계를 확정했다. 이 절은 후속
 
 - 원청소 entitlement와 타 메이드 compensation entitlement는 각각 실제 typed table/FK다. `earnings`는
   source별 nullable FK와 exactly-one CHECK를 사용하고 임의 polymorphic UUID를 받지 않는다.
-- 컴플레인은 원 청소 승인 뒤 30일 안에 source-controlled reason code로 접수한다. 자유형 고객 정보와
+- 컴플레인은 원 청소 승인 뒤 경과 시간과 무관하게 source-controlled reason code로 접수한다. 자유형 고객 정보와
   PII를 저장하지 않는다. immutable decision version/current pointer CAS로 `confirmed / unverifiable / false`,
-  정수 0~10 평가 벌점, 재작업 결정을 보존한다. 본인 maid appeal은 최초 decision 뒤 7일 안에 한 번뿐이고,
+  정수 0~10 평가 벌점, 재작업 결정을 보존한다. 본인 maid response는 최초 decision에 한 번뿐이며,
+  7일 기준은 관리자 주의 metadata일 뿐 권한 만료나 자동 종결 조건이 아니다.
   종결 뒤 reopen 없이 active business admin correction version만 추가한다.
 - 같은 maid의 승인 후 재작업은 earning 0원이다. 다른 maid의 보상은 0원 이상 원 target base fee snapshot
   이하의 정수 원화 immutable decision이며, 해당 maid의 field completion과 승인 뒤 exactly-once earning을 만든다.
@@ -265,14 +266,13 @@ main/recovery/production에는 적용되지 않았다.
 `complaint_maid_responses`, `complaint_case_events`는 UPDATE/DELETE가 금지된 append-only 원장이다.
 접수 원천은 `scheduled_checkout|manual_checkout|stayover_request|manual_room_request` target과
 승인 submission에 non-null로 정확히 귀속된 original earning만 허용한다. 따라서 inspection/post-approval
-reclean과 향후 alternate compensation source는 SQL NULL까지 fail-closed로 거부한다. 접수는 승인 시각부터
-30일 경계를 포함하고, 최초 판정부터 7일 경계를 포함해 원 담당 maid가
-`acknowledged` 또는 allowlist appeal을 정확히 한 번만 기록한다.
+reclean과 향후 alternate compensation source는 SQL NULL까지 fail-closed로 거부한다. 승인 뒤 경과 시간은
+접수를 차단하지 않고, 원 담당 maid는 최초 판정에 `acknowledged` 또는 allowlist appeal을 정확히 한 번 기록한다.
 
-상태는 `received → under_review → decided → acknowledged|appealed → closed`다. 미응답 사건은 7일
-응답 창이 지난 뒤에만 종결하고, appealed 사건은 appeal event 뒤에 current decision을 prior FK correction으로 교체한 뒤에만
-종결한다. closed는 reopen하지 않으며 post-close correction도 status와 최초 응답 창을 유지한다. correction
-알림은 새 응답 창을 열지 않는 informational event(`requires_action=false`)다. 벌점 0..10은 평가 전용이고
+상태는 `received → under_review → decided → acknowledged|appealed → closed`다. 미응답 사건은 시간 경과만으로
+종결하지 않으며, appealed 사건은 appeal event 뒤에 current decision을 prior FK correction으로 교체한 뒤에만
+종결한다. closed는 reopen하지 않으며 post-close correction도 status와 최초 응답 주의 시각을 유지한다. correction
+알림은 새 응답 권한을 만들지 않는 informational event(`requires_action=false`)다. 벌점 0..10은 평가 전용이고
 migration/RPC는 earning/payroll/adjustment를 쓰지 않는다.
 
 Fastify와 Edge는 동일한 service-role-only RPC와 stable error mapping을 사용한다. 모든 mutation은 actor,
