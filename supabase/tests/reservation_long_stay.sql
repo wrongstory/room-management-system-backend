@@ -1,6 +1,39 @@
 begin;
 
-select plan(27);
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions;
+
+select plan(29);
+
+-- #279: one transaction-local clock, also injected by the boundary runner.
+-- No server clock or production function is replaced.
+create temp table long_stay_clock as
+select coalesce(nullif(current_setting('rms_test.long_stay_clock', true), ''),
+  '2026-09-24 00:04:00+09')::timestamptz as at_time;
+create function pg_temp.fixture_time() returns timestamptz language sql stable as $$
+  select at_time from pg_temp.long_stay_clock
+$$;
+create temp table long_stay_window as
+select (at_time at time zone 'Asia/Seoul')::date as service_date,
+  greatest(date_trunc('minute', at_time) - interval '5 minutes',
+    date_trunc('day', at_time at time zone 'Asia/Seoul') at time zone 'Asia/Seoul'
+  ) as available_from,
+  least(date_trunc('minute', at_time) + interval '1 hour',
+    (date_trunc('day', at_time at time zone 'Asia/Seoul') + interval '1 day')
+      at time zone 'Asia/Seoul'
+  ) as due_at
+from pg_temp.long_stay_clock;
+
+select is(
+  (select (available_from at time zone 'Asia/Seoul')::date from long_stay_window),
+  (select service_date from long_stay_window),
+  'stayover access starts on its KST service date even just after midnight'
+);
+select ok(
+  (select available_from <= pg_temp.fixture_time() and pg_temp.fixture_time() < due_at
+    from long_stay_window),
+  'stayover window contains the fixed execution instant before and after midnight'
+);
 
 create function pg_temp.checkout_slots() returns jsonb
 language sql immutable as $$
@@ -49,14 +82,14 @@ cross join lateral(select id from public.room_types where code='standard') room_
 insert into public.cleaning_template_versions(
   room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,published_at,created_by
 )
-select room_type.id,'checkout',91,'published',null,pg_temp.checkout_slots(),clock_timestamp(),
+select room_type.id,'checkout',91,'published',null,pg_temp.checkout_slots(),pg_temp.fixture_time(),
   '82000000-0000-4000-8000-000000000001'
 from public.room_types room_type where room_type.code='standard'
 on conflict do nothing;
 insert into public.cleaning_template_versions(
   room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,published_at,created_by
 )
-select room_type.id,'stayover',6,'published',60,'[]'::jsonb,clock_timestamp(),
+select room_type.id,'stayover',6,'published',60,'[]'::jsonb,pg_temp.fixture_time(),
   '82000000-0000-4000-8000-000000000001'
 from public.room_types room_type where room_type.code='standard'
 on conflict do nothing;
@@ -202,11 +235,11 @@ select public.create_reservation_v2(
   '82000000-0000-4000-8000-000000000001',
   '84000000-0000-4000-8000-000000000002',
   '83000000-0000-4000-8000-000000000003','long_stay',
-  date_trunc('minute',clock_timestamp())-interval '2 days',null,1,null,
+  date_trunc('minute',pg_temp.fixture_time())-interval '2 days',null,1,null,
   (select state_version from public.rooms where id='83000000-0000-4000-8000-000000000003'),
   'long-stay-manual-create',repeat('6',64)
 );
-update public.reservations set actual_check_in_at=date_trunc('minute',clock_timestamp())-interval '1 day',
+update public.reservations set actual_check_in_at=date_trunc('minute',pg_temp.fixture_time())-interval '1 day',
   version=version+1 where id='84000000-0000-4000-8000-000000000002';
 select lives_ok(
   $$select public.create_manual_cleaning_request(
@@ -214,15 +247,15 @@ select lives_ok(
     '85000000-0000-4000-8000-000000000010',
     '83000000-0000-4000-8000-000000000003',
     '84000000-0000-4000-8000-000000000002','stayover',
-    (clock_timestamp() at time zone 'Asia/Seoul')::date,
-    date_trunc('minute',clock_timestamp())-interval '5 minutes',
-    date_trunc('minute',clock_timestamp())+interval '1 hour',
+    (select service_date from long_stay_window),
+    (select available_from from long_stay_window),
+    (select due_at from long_stay_window),
     (select state_version from public.rooms where id='83000000-0000-4000-8000-000000000003'),
     'LONG_STAY_STAYOVER','long-stay-stayover-create',repeat('9',64))$$,
   'open-ended long stay accepts a bounded stayover cleaning request'
 );
 select is(
-  (select private.assignment_preview_source_reason(target,60,clock_timestamp())
+  (select private.assignment_preview_source_reason(target,60,pg_temp.fixture_time())
     from public.cleaning_targets target
     where id='85000000-0000-4000-8000-000000000010'),
   null::text,'open-ended segment is valid assignment authority for stayover'
@@ -235,7 +268,7 @@ select
   '86000000-0000-4000-8000-000000000010',target.id,
   '82000000-0000-4000-8000-000000000002',10,2,
   target.effective_service_date,target.available_from,target.due_at,
-  clock_timestamp(),'82000000-0000-4000-8000-000000000001'
+  pg_temp.fixture_time(),'82000000-0000-4000-8000-000000000001'
 from public.cleaning_targets target
 where target.id='85000000-0000-4000-8000-000000000010';
 update public.cleaning_targets set status='notified',assignment_version=2
@@ -243,7 +276,7 @@ where id='85000000-0000-4000-8000-000000000010';
 select is(
   private.activate_cleaning_attempt_at(
     '82000000-0000-4000-8000-000000000001',
-    '85000000-0000-4000-8000-000000000010',clock_timestamp(),
+    '85000000-0000-4000-8000-000000000010',pg_temp.fixture_time(),
     '86000000-0000-4000-8000-000000000010',2
   )->>'status',
   'activated','open-ended stayover assignment activates exactly one attempt'
@@ -254,7 +287,7 @@ select lives_ok(
     (select id from public.cleaning_attempts
       where cleaning_target_id='85000000-0000-4000-8000-000000000010'),
     1,'86000000-0000-4000-8000-000000000010',2,
-    'long-stay-stayover-start',repeat('a',64),'start',clock_timestamp())$$,
+    'long-stay-stayover-start',repeat('a',64),'start',pg_temp.fixture_time())$$,
   'assigned maid can start open-ended stayover field work'
 );
 select ok(
@@ -264,14 +297,16 @@ select ok(
     '83000000-0000-4000-8000-000000000002',2,
     (select state_version from public.rooms where id='83000000-0000-4000-8000-000000000003'),
     (select state_version from public.rooms where id='83000000-0000-4000-8000-000000000002'),
-    date_trunc('minute',clock_timestamp())+interval '1 hour','GUEST_REQUEST'
+    -- This public preview requires a future instant against its own real clock.
+    -- It is independent of the stayover service-date/execution fixture.
+    date_trunc('minute',statement_timestamp())+interval '1 hour','GUEST_REQUEST'
   )->'rejectionReasonCodes' ? 'OPEN_ENDED_STAY_REQUIRES_END',
   'during-stay open-ended room move requires an end before commit'
 );
 select is(
   (public.process_due_reservation_transitions(
     '82000000-0000-4000-8000-000000000001',
-    date_trunc('minute',clock_timestamp()),
+    date_trunc('minute',pg_temp.fixture_time()),
     'long-stay-scheduler-skip-checkout',repeat('8',64)
   )->>'checked_out_count')::integer,
   0,'scheduler never auto-checks-out an open-ended long stay'
@@ -284,7 +319,7 @@ select is(
 select public.manual_checkout_reservation(
   '82000000-0000-4000-8000-000000000001',
   '84000000-0000-4000-8000-000000000002',2,'GUEST_DEPARTED',
-  date_trunc('minute',clock_timestamp()),'long-stay-manual-checkout',repeat('7',64)
+  date_trunc('minute',pg_temp.fixture_time()),'long-stay-manual-checkout',repeat('7',64)
 );
 select is(
   (select check_out_at is null and actual_checkout_at is not null
