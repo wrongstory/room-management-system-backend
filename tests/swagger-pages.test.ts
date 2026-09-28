@@ -97,9 +97,9 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).not.toContain('branches: [main]');
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
-    expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.5.1"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "129"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "139"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.6.0"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "131"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "141"');
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');

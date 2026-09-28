@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "release": "dev",
+  "release": "v0.6.5",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 85,
+  "totalCount": 84,
   "baseline": {
-    "count": 78,
-    "head": "reservation_bookability_optional_guest_count"
+    "count": 83,
+    "head": "maid_pin_immediate_reveal"
   },
   "pending": {
-    "count": 7,
-    "first": "assignment_unavailability_reassignment",
-    "head": "flat_cleaning_evidence_history_payroll"
+    "count": 1,
+    "first": "complaint_deadlines_non_blocking",
+    "head": "complaint_deadlines_non_blocking"
   },
-  "head": "flat_cleaning_evidence_history_payroll",
+  "head": "complaint_deadlines_non_blocking",
   "migrations": [
     {
       "order": 1,
@@ -433,11 +433,6 @@
       "order": 84,
       "name": "complaint_deadlines_non_blocking",
       "sha256": "0e1da5c9e33d991a6439327729faa35d217ba1d7fb09ee2713362f55a88ced75"
-    },
-    {
-      "order": 85,
-      "name": "flat_cleaning_evidence_history_payroll",
-      "sha256": "2be3c320dcf24718f63a297c05f4c7fa5802e5f4fde5a4534eab572d4e166590"
     }
   ]
 }

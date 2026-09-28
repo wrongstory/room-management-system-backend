@@ -170,7 +170,7 @@ export function validatePhotoTemplateSnapshot(
     const maxPhotos = usesAContract ? integer(slot.maxPhotos) : undefined;
     if (
       typeof slot.required !== "boolean" || order > 99 || seenKeys.has(key) ||
-      seenOrders.has(order) || (maxPhotos !== undefined && maxPhotos > 10)
+      seenOrders.has(order) || (maxPhotos !== undefined && maxPhotos > 20)
     ) fail();
     seenKeys.add(key);
     seenOrders.add(order);
@@ -182,7 +182,14 @@ export function validatePhotoTemplateSnapshot(
     });
   }).sort((a, b) => a.displayOrder - b.displayOrder);
   if (!slots.some((slot) => slot.required)) fail();
-  if (cleaningKind === "checkout" && version >= 7) {
+  const flat = version >= 9 && slots.length === 3 &&
+    ["cleaning-proof", "bomb-proof", "issue-proof"].every((key, index) =>
+      slots[index]?.slotKey === key &&
+      slots[index]?.required === (index === 0) &&
+      slots[index]?.maxPhotos === (index === 0 ? 20 : 10)
+    );
+  if (!flat && slots.some((slot) => (slot.maxPhotos ?? 1) > 10)) fail();
+  if (!flat && cleaningKind === "checkout" && version >= 7) {
     const expectedCount = usesAContract
       ? CHECKOUT_V8_COUNTS[roomTypeCode]
       : CHECKOUT_V7_COUNTS[roomTypeCode];

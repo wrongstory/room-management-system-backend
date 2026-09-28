@@ -73,7 +73,7 @@ try {
   reset("20260913075134");
   psql(fixture);
   const before = snapshot();
-  run(process.execPath, [supabaseCli, "migration", "up", "--local"], {
+  run(process.execPath, ["scripts/apply-pre-flat-migrations.mjs"], {
     stdio: "inherit",
   });
   const after = snapshot();

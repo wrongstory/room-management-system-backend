@@ -66,10 +66,24 @@ select throws_ok(
   $$select public.get_payroll_cycle(pg_temp.pid(1), pg_temp.pid(1999))$$,
   'P0002', 'PAYROLL_CYCLE_NOT_FOUND', 'unknown cycle returns the stable not-found error'
 );
-select throws_ok(
-  $$select public.get_payroll_cycle(pg_temp.pid(1), pg_temp.pid(1003))$$,
-  '22023', 'PAYROLL_WEEK_NOT_CLOSED', 'current week cycle is outside the closed-week contract'
+select is(
+  public.get_payroll_cycle(pg_temp.pid(1), pg_temp.pid(1003))->>'weekStart',
+  pg_temp.closed_week(0)::text, 'current week cycle can be read without enabling payment'
 );
+select is(jsonb_array_length(public.list_payroll_cycles_page(pg_temp.pid(2),pg_temp.closed_week(0))->'payroll'),
+  1,'maid can read this week through the public list API');
+select lives_ok($$select public.list_payroll_entries_page(pg_temp.pid(2),pg_temp.closed_week(0),pg_temp.pid(2),'items')$$,
+  'maid can read this week entries');
+select throws_ok($$select public.list_payroll_cycles_page(pg_temp.pid(2),pg_temp.closed_week(0),pg_temp.pid(3))$$,
+  '42501','PAYROLL_ACCESS_REQUIRED','current-week list still rejects another maid');
+select throws_ok($$select public.list_payroll_entries_page(pg_temp.pid(2),pg_temp.closed_week(0),pg_temp.pid(3),'items')$$,
+  '42501','PAYROLL_ACCESS_REQUIRED','current-week entries still reject another maid');
+select throws_ok($$select public.list_payroll_cycles_page(pg_temp.pid(1),pg_temp.closed_week(-1))$$,
+  '22023','PAYROLL_WEEK_NOT_CLOSED','future-week payroll remains unavailable');
+select throws_ok($$select public.list_payroll_cycles_page(pg_temp.pid(1),pg_temp.closed_week(0)+1)$$,
+  '22023','PAYROLL_WEEK_MUST_START_MONDAY','read week still requires a Monday');
+select throws_ok($$select public.start_payroll_cycle(pg_temp.pid(1),pg_temp.pid(2),pg_temp.closed_week(0),0,'resolver-current-payment',repeat('a',64))$$,
+  '22023','PAYROLL_WEEK_NOT_CLOSED','current-week payment stays blocked in the database');
 
 create temporary table resolver_counts_before as
 select

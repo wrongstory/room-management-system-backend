@@ -1,4 +1,7 @@
-import { listCleaningHistory } from "./cleaning-history-api.ts";
+import {
+  getCleaningHistorySubmission,
+  listCleaningHistory,
+} from "./cleaning-history-api.ts";
 import { type EdgeActor, type EdgeClients, EdgeError } from "./runtime.ts";
 
 function assert(value: unknown, message: string): asserts value {
@@ -39,6 +42,33 @@ function clients(data: unknown, error: string | null = null) {
     } as unknown as EdgeClients,
   };
 }
+
+Deno.test("history detail uses a live actor session and strict submission route", async () => {
+  const mock = clients({ id: session, photos: [] });
+  const result = await getCleaningHistorySubmission(
+    request("/" + session),
+    mock.value,
+    maid,
+    session,
+  );
+  assert(!!result.submission, "submission envelope");
+  assert(
+    JSON.stringify(mock.calls).includes("get_cleaning_history_submission"),
+    "detail RPC",
+  );
+  assert(JSON.stringify(mock.calls).includes(session), "session binding");
+  try {
+    await getCleaningHistorySubmission(
+      request("/" + session + "?extra=1"),
+      mock.value,
+      maid,
+      session,
+    );
+    throw new Error("accepted query");
+  } catch (error) {
+    assert(error instanceof EdgeError, "query rejected");
+  }
+});
 
 Deno.test("cleaning history Edge adapter binds KST date, session, projection and cursor", async () => {
   const mock = clients({

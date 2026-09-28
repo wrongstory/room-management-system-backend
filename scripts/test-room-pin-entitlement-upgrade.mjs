@@ -45,7 +45,7 @@ try {
   reset(baselineVersion);
   psql(fixture);
   const before=snapshot();
-  run(process.execPath,[supabaseCli,"migration","up","--local"],{stdio:"inherit"});
+  run(process.execPath,["scripts/apply-pre-flat-migrations.mjs"],{stdio:"inherit"});
   assert(before===snapshot(),"63 -> 64 upgrade must preserve PIN, assignment, notification, audit, receipt, and reveal history");
   assert(psql(`select concat_ws('|',
     exists(select 1 from supabase_migrations.schema_migrations where version='${migrationVersion}'),

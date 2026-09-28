@@ -348,7 +348,7 @@ export function cors(request: Request): Record<string, string> {
     "access-control-allow-origin": origin,
     "access-control-allow-headers":
       "authorization,apikey,content-type,idempotency-key,x-request-id",
-    "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "access-control-allow-credentials": "true",
     vary: "Origin",
   };

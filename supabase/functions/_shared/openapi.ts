@@ -417,7 +417,7 @@ export const openApiDocument = {
   openapi: "3.1.1",
   info: {
     title: "CASTLE THE ART Room Management API",
-    version: "0.5.1",
+    version: "0.6.0",
     description: [
       "Supabase Edge API의 인증·계정·객실·주간 가능일·예약 계약입니다. 이 문서는 프론트 코드 생성의 정본이며 실제 자격증명과 운영 환경값은 포함하지 않습니다.",
       "",
@@ -520,6 +520,42 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    "/v1/attempts/{attemptId}/room-issues": {
+      post: {
+        ...submissionOperation(
+          "reportAttemptRoomIssue",
+          "담당 청소의 특이사항 신고",
+          "maid",
+          "RoomIssueReportEnvelope",
+          "201",
+        ),
+        parameters: [photoPathId("attemptId"), idempotencyHeader],
+        description:
+          "제출 전 담당 메이드가 별도 issue-proof 사진 1~10장과 메모를 등록합니다. 일반 청소 필수 사진을 대신하지 않습니다.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["evidencePhotoIds", "memo"],
+                properties: {
+                  evidencePhotoIds: {
+                    type: "array",
+                    minItems: 1,
+                    maxItems: 10,
+                    uniqueItems: true,
+                    items: { type: "string", format: "uuid" },
+                  },
+                  memo: { type: "string", minLength: 1, maxLength: 500 },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     "/v1/attempts/{attemptId}/bomb-room-reports": {
       post: {
         ...submissionOperation(
@@ -791,11 +827,11 @@ export const openApiDocument = {
         post: {
           ...photoOperation(
             "uploadAttemptPhotoCollectionItem",
-            "extra-proof 사진 추가 또는 교체",
+            "사진 컬렉션 추가 또는 교체",
             "PhotoUploadResponse",
           ),
           description:
-            "v8+ extra-proof 전용 raw binary 업로드입니다. 새 UUID와 expectedItemRevision=0은 append, 기존 UUID와 최신 item revision은 replace입니다. expectedCollectionRevision도 함께 일치해야 하며 active item 10장 상태에서 append는 PHOTO_COLLECTION_LIMIT_EXCEEDED로 실패합니다. 일반 슬롯과 pre-A snapshot에는 사용할 수 없습니다.",
+            "v9+ cleaning-proof는 최대 20장, bomb-proof와 issue-proof는 각각 최대 10장입니다. 기존 v8+ extra-proof는 최대 10장을 유지합니다. raw binary 업로드에서 새 UUID와 expectedItemRevision=0은 append, 기존 UUID와 최신 item revision은 replace입니다. expectedCollectionRevision도 일치해야 하며 상한을 초과하는 append는 PHOTO_COLLECTION_LIMIT_EXCEEDED로 실패합니다. 단일 사진 슬롯에는 사용할 수 없습니다.",
           parameters: [
             photoPathId("attemptId"),
             photoPathId("slotId"),
@@ -881,11 +917,11 @@ export const openApiDocument = {
       delete: {
         ...photoOperation(
           "deleteAttemptPhotoCollectionItem",
-          "extra-proof 사진 개별 삭제",
+          "사진 컬렉션 개별 삭제",
           "PhotoCollectionDeleteResponse",
         ),
         description:
-          "v8+ extra-proof current collection의 한 item만 tombstone 처리합니다. collection/item CAS와 Idempotency-Key가 필수이며 형제 item 및 이미 봉인된 제출 binding은 변경하지 않습니다.",
+          "cleaning-proof, bomb-proof, issue-proof 및 기존 extra-proof current collection의 한 item만 tombstone 처리합니다. collection/item CAS와 Idempotency-Key가 필수이며 형제 item 및 이미 봉인된 제출 binding은 변경하지 않습니다.",
         parameters: [
           photoPathId("attemptId"),
           photoPathId("slotId"),
@@ -2817,6 +2853,46 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/cleaning-history/{submissionId}": {
+      get: {
+        tags: ["Cleaning History"],
+        operationId: "getCleaningHistorySubmission",
+        summary: "청소 이력 사진·제출 상세 조회",
+        description:
+          "관리자 또는 실제 수행자만 조회합니다. 사진은 인증된 content API로 별도 조회하며 일반 사진은 검수 결정 후 168시간 보관합니다. 이력과 정산 metadata는 보존합니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [{
+          name: "submissionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        }],
+        responses: {
+          "200": {
+            description: "본인 또는 관리자 청소 이력 상세",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["submission"],
+                  properties: {
+                    submission: {
+                      $ref: "#/components/schemas/CleaningHistorySubmission",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/work-history": {
       get: {
         tags: ["Work History"],
@@ -3469,7 +3545,7 @@ export const openApiDocument = {
       get: {
         tags: ["Payroll"],
         operationId: "listPayrollCycles",
-        summary: "종료 주차의 메이드별 주급 조회",
+        summary: "현재·과거 주차의 메이드별 주급 조회",
         description:
           "비밀번호 변경을 완료한 active admin은 전체 또는 선택 메이드를, active maid는 본인만 조회합니다. cycle이 아직 없으면 쓰기 없이 cycleId=null, version=0인 conceptual OPEN을 반환합니다. admin 전체 조회는 maidProfileId 오름차순 keyset cursor이며 page 최대 10개입니다. opaque cursor는 actor 역할/ID, weekStart, 적용된 maid filter, 고정 sort와 stream kind에 묶여 있으므로 저장한 URL 전체를 그대로 이어서 사용해야 합니다. 각 cycle의 items/lateEarnings는 최대 10개 preview이며 정확한 count/amount 합계와 별도 continuation을 제공합니다. 모든 payroll HTTP 응답은 UTF-8 JSON 128 KiB 상한을 초과하면 실패합니다. totalAmount는 현재 OPEN에 편입 가능한 확정 수익이며 검수 대기 예상액을 포함하지 않습니다. PAYING 이후 늦게 확정된 수익은 lateEarnings로 분리하며 lockedAmount를 바꾸지 않습니다.",
         security: [{ bearerAuth: [] }],
@@ -3480,7 +3556,8 @@ export const openApiDocument = {
             in: "query",
             required: true,
             schema: { type: "string", format: "date" },
-            description: "KST 기준 월요일인 종료 주차 시작일",
+            description:
+              "KST 기준 월요일인 현재 또는 과거 주차 시작일. 현재 주 조회는 가능하지만 지급 시작은 주차 종료 후에만 가능합니다.",
           },
           {
             name: "maidProfileId",
@@ -3577,7 +3654,7 @@ export const openApiDocument = {
             in: "query",
             required: true,
             schema: { type: "string", format: "date" },
-            description: "KST 기준 월요일인 종료 주차 시작일",
+            description: "KST 기준 월요일인 현재 또는 과거 주차 시작일",
           },
           {
             name: "maidProfileId",
@@ -5088,6 +5165,7 @@ export const openApiDocument = {
           photoCount: { type: "integer", minimum: 1, maximum: 100 },
           candleCount: { type: "integer", minimum: 0 },
           bombReportId: { type: ["string", "null"], format: "uuid" },
+          roomIssues: { $ref: "#/components/schemas/SubmissionRoomIssues" },
           bombDecision: {
             type: ["string", "null"],
             enum: ["approved", "rejected", null],
@@ -5167,7 +5245,7 @@ export const openApiDocument = {
             anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
           },
           photoDisplayOrder: {
-            anyOf: [{ type: "integer", minimum: 0, maximum: 9 }, {
+            anyOf: [{ type: "integer", minimum: 0, maximum: 19 }, {
               type: "null",
             }],
           },
@@ -5220,7 +5298,7 @@ export const openApiDocument = {
                 itemRevision: {
                   anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
                 },
-                displayOrder: { type: "integer", minimum: 0, maximum: 9 },
+                displayOrder: { type: "integer", minimum: 0, maximum: 19 },
                 photoVersion: { type: "integer", minimum: 1 },
                 ...photoRetentionProperties,
               },
@@ -5247,6 +5325,99 @@ export const openApiDocument = {
           roomNumber: { type: "string" },
           serviceDate: { type: "string", format: "date" },
           maidProfileId: { type: "string", format: "uuid" },
+        },
+      },
+      SubmissionRoomIssues: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            memo: { type: "string" },
+            reportedAt: { type: "string", format: "date-time" },
+            evidencePhotoIds: {
+              type: "array",
+              items: { type: "string", format: "uuid" },
+            },
+          },
+        },
+      },
+      RoomIssueReportEnvelope: {
+        type: "object",
+        required: ["roomIssue"],
+        properties: {
+          roomIssue: {
+            type: "object",
+            required: ["id", "attemptId", "evidenceCount"],
+            properties: {
+              id: { type: "string", format: "uuid" },
+              attemptId: { type: "string", format: "uuid" },
+              evidenceCount: { type: "integer", minimum: 1, maximum: 10 },
+            },
+          },
+        },
+      },
+      CleaningHistorySubmission: {
+        type: "object",
+        required: [
+          "id",
+          "attemptId",
+          "status",
+          "photos",
+          "fieldCompletedAt",
+          "reviewContext",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          status: {
+            type: "string",
+            enum: ["submitted", "superseded", "approved", "rejected"],
+          },
+          roomIssues: { $ref: "#/components/schemas/SubmissionRoomIssues" },
+          fieldCompletedAt: { type: ["string", "null"], format: "date-time" },
+          submittedAt: { type: "string", format: "date-time" },
+          candleCount: { type: "integer", minimum: 0 },
+          reviewContext: {
+            $ref: "#/components/schemas/SubmissionReviewContext",
+          },
+          bombReport: {
+            type: ["object", "null"],
+            properties: {
+              id: { type: "string", format: "uuid" },
+              memo: { type: "string" },
+              reportedAt: { type: "string", format: "date-time" },
+              evidencePhotoIds: {
+                type: "array",
+                maxItems: 20,
+                items: { type: "string", format: "uuid" },
+              },
+            },
+          },
+          photos: {
+            type: "array",
+            maxItems: 100,
+            items: {
+              type: "object",
+              required: [
+                "photoId",
+                "slotKey",
+                "label",
+                "mediaAvailability",
+                "expiresAt",
+              ],
+              properties: {
+                photoId: { type: "string", format: "uuid" },
+                slotKey: { type: "string" },
+                label: { type: ["string", "null"] },
+                mediaAvailability: {
+                  type: "string",
+                  enum: ["available", "expired", "purged", "unavailable"],
+                },
+                expiresAt: { type: ["string", "null"], format: "date-time" },
+              },
+            },
+          },
         },
       },
       CleaningHistoryItem: {
@@ -5602,7 +5773,7 @@ export const openApiDocument = {
                 slotKey: { type: "string", pattern: "^[a-z][a-z0-9-]{0,79}$" },
                 required: { type: "boolean" },
                 displayOrder: { type: "integer", minimum: 0, maximum: 99 },
-                maxPhotos: { type: "integer", enum: [1, 10] },
+                maxPhotos: { type: "integer", enum: [1, 10, 20] },
                 currentRevision: { type: "integer", minimum: 0 },
                 collectionRevision: {
                   anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
@@ -5628,7 +5799,7 @@ export const openApiDocument = {
                 },
                 photos: {
                   type: "array",
-                  maxItems: 10,
+                  maxItems: 20,
                   items: { $ref: "#/components/schemas/AttemptPhotoItem" },
                 },
                 ...photoRetentionProperties,
@@ -5662,7 +5833,7 @@ export const openApiDocument = {
             anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
           },
           itemRevision: { type: "integer", minimum: 1 },
-          displayOrder: { type: "integer", minimum: 0, maximum: 9 },
+          displayOrder: { type: "integer", minimum: 0, maximum: 19 },
           photoId: {
             anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
           },
@@ -5893,9 +6064,9 @@ export const openApiDocument = {
           maxPhotos: {
             type: "integer",
             minimum: 1,
-            maximum: 10,
+            maximum: 20,
             description:
-              "Decision A v8+ 필수 메타데이터입니다. pre-A historical v7+ projection에는 없을 수 있습니다.",
+              "일반 청소 사진은 필수 1~20장, 별도 폭탄방·특이사항 증빙은 각 최대 10장입니다. 과거 슬롯은 기존 제한을 유지합니다.",
           },
           description: { type: "string", minLength: 1, maxLength: 200 },
           section: { type: "string", minLength: 1, maxLength: 80 },
@@ -5944,7 +6115,7 @@ export const openApiDocument = {
               $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slot",
             },
             description:
-              "v8+ checkout 계약: standard/premium/oceanPremium/oceanFamily 순으로 정확히 9/10/12/14개, 필수는 8/9/11/13개입니다. required tv-on과 entry-storage는 각각 정확히 한 개, 마지막 extra-proof는 선택·maxPhotos 10이며 entry-number는 금지됩니다. 나머지 슬롯은 maxPhotos 1이고 displayOrder는 0부터 연속입니다.",
+              "새 v9 계약은 cleaning-proof(필수,20), bomb-proof(선택,10), issue-proof(선택,10) 순서입니다. 과거 v8 계약은 기존 슬롯과 멱등 재요청을 위해 유지합니다.",
           },
         },
       },
@@ -5974,11 +6145,11 @@ export const openApiDocument = {
           },
           slots: {
             type: "array",
-            minItems: 9,
+            minItems: 3,
             maxItems: 15,
             items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
             description:
-              "maxPhotos 없는 pre-A historical v7+ template은 10/11/13/15개이고, 모든 slot에 metadata가 있는 A-contract v8+ template은 9/10/12/14개입니다.",
+              "새 v9 일반 사진·폭탄방·특이사항은 3개 collection입니다. 과거 v7/v8 snapshot도 읽을 수 있습니다.",
           },
           publishedAt: { type: "string", format: "date-time" },
           createdAt: { type: "string", format: "date-time" },
@@ -6252,6 +6423,9 @@ export const openApiDocument = {
           "프론트 분기용 안정적 코드입니다. 사용자 표시 문구는 message가 아니라 이 코드 기준으로 관리합니다.",
         enum: [
           "VALIDATION_ERROR",
+          "INVALID_ROOM_ISSUE_REPORT",
+          "ROOM_ISSUE_EVIDENCE_INVALID",
+          "ROOM_ISSUE_REPORT_ACCESS_REQUIRED",
           "INVALID_PHONE",
           "REQUEST_TOO_LARGE",
           "MISSING_ACCESS_TOKEN",
@@ -11861,6 +12035,24 @@ export const openApiDocument = {
           },
           paymentStartedAt: { type: ["string", "null"], format: "date-time" },
           itemCount: { type: "integer", minimum: 0 },
+          accrualAmount: {
+            type: ["integer", "null"],
+            minimum: 0,
+            description:
+              "선택 주차 귀속 승인 수익 합계. 지급 잠금 금액과 별도입니다.",
+          },
+          expectedAmount: {
+            type: ["integer", "null"],
+            minimum: 0,
+            description:
+              "승인 수익과 통보된 유상 청소 예상액. 반려·재청소·취소는 제외합니다.",
+          },
+          pendingAmount: {
+            type: ["integer", "null"],
+            minimum: 0,
+            description: "검수 대기 제출의 고정 단가 합계",
+          },
+          pendingCount: { type: ["integer", "null"], minimum: 0 },
           totalAmount: {
             type: "integer",
             minimum: 0,

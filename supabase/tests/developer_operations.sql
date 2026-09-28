@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'complaint_deadlines_non_blocking'
+    'flat_cleaning_evidence_history_payroll'
   ) ->> 'currentMigration',
-  'complaint_deadlines_non_blocking',
+  'flat_cleaning_evidence_history_payroll',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'complaint_deadlines_non_blocking'
+    'flat_cleaning_evidence_history_payroll'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,24 +97,24 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'complaint_deadlines_non_blocking';
+where name = 'flat_cleaning_evidence_history_payroll';
 
 delete from supabase_migrations.schema_migrations
-where name = 'complaint_deadlines_non_blocking';
+where name = 'flat_cleaning_evidence_history_payroll';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'complaint_deadlines_non_blocking'
+    'flat_cleaning_evidence_history_payroll'
   ) ->> 'currentMigration',
-  'maid_pin_immediate_reveal',
+  'complaint_deadlines_non_blocking',
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'complaint_deadlines_non_blocking'
+    'flat_cleaning_evidence_history_payroll'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'

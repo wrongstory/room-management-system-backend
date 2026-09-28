@@ -45,7 +45,12 @@ export async function testPhotoRetentionConcurrency(client) {
       case when state.purged_at is not null then 'purged' else 'available' end
     from private.photo_purge_jobs job join private.photo_provider_objects object on object.id=job.object_id
     left join private.attempt_photo_purge_states state on state.photo_version_id=job.photo_version_id
-    where job.object_id::text like 'f009%';
+    where job.object_id in (
+      'f0090000-0000-4000-8000-000000000701',
+      'f0090000-0000-4000-8000-000000000702',
+      'f0090000-0000-4000-8000-000000000703',
+      'f0090000-0000-4000-8000-000000000704'
+    );
     update private.photo_purge_jobs set next_attempt_at=clock_timestamp()+interval '1 day',revision=revision+1
       where status <> 'purged';
     update private.photo_purge_jobs set status='blocked',lease_version=8,claim_digest=repeat('3',64),

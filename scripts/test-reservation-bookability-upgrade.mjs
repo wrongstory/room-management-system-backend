@@ -49,7 +49,7 @@ let passed = false;
 try {
   reset(baselineVersion);
   const before = ledgerSnapshot();
-  run(process.execPath, [supabaseCli, "migration", "up", "--local"], { stdio: "inherit" });
+  run(process.execPath, ["scripts/apply-pre-flat-migrations.mjs"], { stdio: "inherit" });
   assert(
     before === ledgerSnapshot(),
     "77 -> 78 and later append-only migrations must preserve all pre-existing ledger rows exactly",

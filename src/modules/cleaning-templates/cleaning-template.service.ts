@@ -73,7 +73,7 @@ const slotSchema = z.object({
   displayOrder: z.number().int().min(0).max(99),
   required: z.boolean(),
   label: z.string().min(1).max(80),
-  maxPhotos: z.number().int().min(1).max(10).optional(),
+  maxPhotos: z.number().int().min(1).max(20).optional(),
   description: z.string().min(1).max(200).optional(),
   section: z.string().min(1).max(80).optional(),
   instanceKey: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/).optional()
@@ -106,10 +106,11 @@ const publishedTemplateSchema = z.object({
   version: z.number().int().min(7).max(2_147_483_647),
   status: z.literal('published'),
   durationMinutes: z.number().int().min(1).max(10_080).nullable(),
-  slots: z.array(slotSchema).min(9).max(15),
+  slots: z.array(slotSchema).min(3).max(15),
   publishedAt: timestampSchema,
   createdAt: timestampSchema
 }).strict().superRefine((template, context) => {
+  if (template.version >= 9 && validFlatSlots(template.slots)) return;
   const contract = templateContract(template.version, template.slots);
   const allowedCounts = contract === 'a'
     ? Object.values(currentSlotCounts)
@@ -128,7 +129,8 @@ const publishedTemplateSchema = z.object({
 function templateContract(
   version: number,
   slots: CleaningTemplateSlot[]
-): 'legacy' | 'a' | null {
+): 'legacy' | 'a' | 'flat' | null {
+  if (version >= 9 && validFlatSlots(slots)) return 'flat';
   const metadataCount = slots.filter((slot) => slot.maxPhotos !== undefined).length;
   if (metadataCount === 0) return 'legacy';
   if (version >= 8 && metadataCount === slots.length) return 'a';
@@ -141,7 +143,15 @@ function expectedSlotCount(
 ): number | null {
   const contract = templateContract(version, slots);
   if (contract === null) return null;
+  if (contract === 'flat') return 3;
   return contract === 'a' ? currentSlotCounts[roomTypeCode] : legacySlotCounts[roomTypeCode];
+}
+export function validFlatSlots(slots: CleaningTemplateSlot[]): boolean {
+  return slots.length === 3 && ['cleaning-proof', 'bomb-proof', 'issue-proof'].every((key, index) => {
+    const slot = slots[index];
+    return slot?.slotKey === key && slot.displayOrder === index && slot.required === (index === 0) &&
+      slot.maxPhotos === (index === 0 ? 20 : 10);
+  });
 }
 function validAContractSlots(slots: CleaningTemplateSlot[]): boolean {
   return !slots.some((slot) => slot.slotKey === 'entry-number') &&
