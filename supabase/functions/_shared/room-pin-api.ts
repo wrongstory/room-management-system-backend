@@ -97,7 +97,10 @@ function runtimeProjectRef(environment: string): string {
   }
   const local = ["local", "development", "test"].includes(environment);
   const localUrl = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?\/?$/;
-  if (local && explicit && (!url || localUrl.test(url))) return explicit;
+  const cliUrl = /^http:\/\/kong:8000\/?$/;
+  if (local && explicit && (!url || localUrl.test(url) || cliUrl.test(url))) {
+    return explicit;
+  }
   throw new Error("canonical runtime project URL required");
 }
 

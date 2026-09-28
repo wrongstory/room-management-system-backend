@@ -63,6 +63,19 @@ Deno.test("hosted PIN prepare derives trusted project context and fails closed o
       environment: "local",
       valid: true,
     },
+    ...["http://kong:8000", "http://kong:8000/"].map((url) => ({
+      url,
+      explicit: "local-ref",
+      environment: "local",
+      valid: true,
+    })),
+    ...["http://kong:8001", "http://kong:8000/path", "http://kong.evil:8000"]
+      .map((url) => ({
+        url,
+        explicit: "local-ref",
+        environment: "local",
+        valid: false,
+      })),
     {
       url: hostedUrl,
       explicit: "other-ref",
@@ -80,6 +93,7 @@ Deno.test("hosted PIN prepare derives trusted project context and fails closed o
       `https://user:password@${ref}.supabase.co`,
       `http://${ref}.supabase.co`,
       "http://localhost:54321",
+      "http://kong:8000",
     ].map((url) => ({
       url,
       explicit: ref,
