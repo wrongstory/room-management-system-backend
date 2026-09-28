@@ -83,6 +83,27 @@ async function hash(value: unknown): Promise<string> {
   ).join("");
 }
 
+function runtimeProjectRef(environment: string): string {
+  // Hosted Edge reserves SUPABASE_* secrets and supplies SUPABASE_URL itself.
+  // Never derive encryption context from request headers or a stored revision.
+  const url = Deno.env.get("SUPABASE_URL")?.trim() ?? "";
+  const explicit = Deno.env.get("SUPABASE_PROJECT_REF")?.trim() ?? "";
+  const hosted = /^https:\/\/([a-z]{20})\.supabase\.co\/?$/.exec(url);
+  if (hosted) {
+    if (explicit && explicit !== hosted[1]) {
+      throw new Error("runtime project mismatch");
+    }
+    return hosted[1];
+  }
+  const local = ["local", "development", "test"].includes(environment);
+  const localUrl = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?\/?$/;
+  const cliUrl = /^http:\/\/kong:8000\/?$/;
+  if (local && explicit && (!url || localUrl.test(url) || cliUrl.test(url))) {
+    return explicit;
+  }
+  throw new Error("canonical runtime project URL required");
+}
+
 function config(): RoomPinCryptoConfig {
   try {
     const objectKeyring = (name: string): Record<string, unknown> => {
@@ -118,12 +139,13 @@ function config(): RoomPinCryptoConfig {
     ) {
       throw new Error("purpose-specific key required");
     }
+    const environment = requiredEnv("RUNTIME_ENVIRONMENT");
     return {
       key: currentKey,
       keyVersion: requiredEnv("ROOM_PIN_KEY_VERSION"),
       keyring,
-      environment: requiredEnv("RUNTIME_ENVIRONMENT"),
-      projectRef: requiredEnv("SUPABASE_PROJECT_REF"),
+      environment,
+      projectRef: runtimeProjectRef(environment),
     };
   } catch {
     throw new EdgeError(
