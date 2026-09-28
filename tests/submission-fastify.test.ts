@@ -11,6 +11,7 @@ const actor = (role: Actor['role']): Actor => ({ authUserId: id(90), profileId: 
 
 function service(calls: string[]): SubmissionService {
   return {
+    async reportIssue() { calls.push('issue'); return { id: id(1), attemptId: id(2), evidenceCount: 1 }; },
     async reportBomb() { calls.push('report'); return { id: id(1), attemptId: id(2), evidenceCount: 1 }; },
     async create() { calls.push('submit'); return { id: id(3), attemptId: id(2), version: 1 }; },
     async list(_actor, attemptId) { calls.push(attemptId ? 'history' : 'queue'); return []; },
@@ -47,6 +48,19 @@ async function appFor(
 }
 
 describe('Fastify submission/review parity', () => {
+  it('keeps room issue reports separate, maid-only and bounded to ten images', async () => {
+    const calls: string[] = [];
+    const { app, setActor } = await appFor(actor('maid'), calls);
+    const url = `/v1/attempts/${id(2)}/room-issues`;
+    const payload = { memo: 'QA issue', evidencePhotoIds: [id(8)] };
+    const headers = { 'idempotency-key': 'issue-qa-key' };
+    expect((await app.inject({ method: 'POST', url, headers, payload })).statusCode).toBe(201);
+    expect(calls).toEqual(['issue']);
+    expect((await app.inject({ method: 'POST', url, headers, payload: { ...payload, evidencePhotoIds: Array.from({length: 11}, (_, n) => id(n + 10)) } })).statusCode).toBe(400);
+    setActor(actor('admin'));
+    expect((await app.inject({ method: 'POST', url, headers, payload })).statusCode).toBe(403);
+    await app.close();
+  });
   it('maps a prepared purge barrier to the stable conflict contract', () => {
     expect(submissionDatabaseError({ message: 'PHOTO_RETENTION_DELETE_PREPARED' }))
       .toMatchObject({ statusCode: 409, code: 'PHOTO_RETENTION_DELETE_PREPARED' });

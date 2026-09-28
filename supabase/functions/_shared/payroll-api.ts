@@ -504,6 +504,18 @@ function projection(value: unknown): InternalProjection {
       paymentStartedAt: nullableTimestamp(row.paymentStartedAt),
       itemCount: integer(row.itemCount),
       totalAmount: integer(row.totalAmount),
+      accrualAmount: row.accrualAmount === undefined
+        ? null
+        : integer(row.accrualAmount),
+      expectedAmount: row.expectedAmount === undefined
+        ? null
+        : integer(row.expectedAmount),
+      pendingAmount: row.pendingAmount === undefined
+        ? null
+        : integer(row.pendingAmount),
+      pendingCount: row.pendingCount === undefined
+        ? null
+        : integer(row.pendingCount),
       items: row.items.map((value) => {
         const item = object(value);
         if (typeof item.alreadyClaimed !== "boolean") {

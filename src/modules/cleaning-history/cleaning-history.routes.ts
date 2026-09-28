@@ -30,6 +30,12 @@ function exactQuery(request: FastifyRequest): void {
 
 export function createCleaningHistoryRoutes(service: CleaningHistoryService): FastifyPluginAsync {
   return async (app) => {
+    app.get('/:submissionId', { preHandler: [app.authenticate, app.requirePasswordChanged] }, async (request, reply) => {
+      z.object({}).strict().parse(request.query);
+      const { submissionId } = z.object({ submissionId: z.uuid() }).parse(request.params);
+      reply.header('cache-control', 'no-store');
+      return service.detail(request.actor, submissionId);
+    });
     app.get('/', {
       preHandler: [app.authenticate, app.requirePasswordChanged],
       prefixTrailingSlash: 'no-slash'

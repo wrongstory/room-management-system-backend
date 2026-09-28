@@ -33,6 +33,7 @@ export interface PayrollCycleProjection {
   paymentAttemptId: string | null; paymentAttemptNumber: number | null;
   paidAt: string | null; checkReasonCode: 'TRANSFER_RESULT_UNCERTAIN' | null;
   lastReopenReasonCode: 'NO_TRANSFER_CONFIRMED' | null;
+  accrualAmount?: number | null; expectedAmount?: number | null; pendingAmount?: number | null; pendingCount?: number | null;
 }
 export interface PayrollListInput {
   weekStart: string;
@@ -242,6 +243,10 @@ function internalCycle(value: unknown): InternalPayrollCycle {
       weekStart: date(row.weekStart), status: status as PayrollStatus, version: integer(row.version),
       lockedAmount: row.lockedAmount === null ? null : integer(row.lockedAmount), paymentStartedAt: nullableTimestamp(row.paymentStartedAt),
       itemCount: integer(row.itemCount), totalAmount: integer(row.totalAmount), items: row.items.map(item), itemsNextCursor: null,
+      accrualAmount: row.accrualAmount === undefined ? null : integer(row.accrualAmount),
+      expectedAmount: row.expectedAmount === undefined ? null : integer(row.expectedAmount),
+      pendingAmount: row.pendingAmount === undefined ? null : integer(row.pendingAmount),
+      pendingCount: row.pendingCount === undefined ? null : integer(row.pendingCount),
       lateEarningCount: integer(row.lateEarningCount), lateEarningAmount: integer(row.lateEarningAmount),
       lateEarnings: row.lateEarnings.map(lateEarning), lateEarningsNextCursor: null
       , offsetSettled: boolean(row.offsetSettled), adjustmentAmount: signedInteger(row.adjustmentAmount),

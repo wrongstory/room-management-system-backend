@@ -214,3 +214,26 @@ export async function listCleaningHistory(
     }),
   };
 }
+
+export async function getCleaningHistorySubmission(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  submissionId: string,
+): Promise<Record<string, unknown>> {
+  requirePasswordChanged(actor);
+  if (actor.role !== "admin" && actor.role !== "maid") {
+    throw dbError({ message: "CLEANING_HISTORY_ACCESS_REQUIRED" });
+  }
+  if (!uuidPattern.test(submissionId) || new URL(request.url).search) invalid();
+  const { data, error } = await clients.admin.rpc(
+    "get_cleaning_history_submission",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+      p_submission_id: submissionId.toLowerCase(),
+    },
+  );
+  if (error || !data) throw dbError(error);
+  return { submission: object(data) };
+}

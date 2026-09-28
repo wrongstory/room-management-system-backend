@@ -39,7 +39,7 @@ try {
   reset(baselineVersion);
   psql(fixture);
   const before=snapshot();
-  run(process.execPath,[supabaseCli,"migration","up","--local"],{stdio:"inherit"});
+  run(process.execPath,["scripts/apply-pre-flat-migrations.mjs"],{stdio:"inherit"});
   assert(before===snapshot(),"61 -> 62 upgrade must preserve reservation/obligation/target/audit/receipt ledgers");
   assert(psql(`select concat_ws('|',
     exists(select 1 from supabase_migrations.schema_migrations where version='${migrationVersion}'),

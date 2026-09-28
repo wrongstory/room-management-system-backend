@@ -12,6 +12,7 @@ export interface CleaningHistoryInput {
 
 export interface CleaningHistoryService {
   list(actor: Actor, input: CleaningHistoryInput): Promise<unknown>;
+  detail(actor: Actor, submissionId: string): Promise<unknown>;
 }
 
 interface CursorValue {
@@ -89,6 +90,15 @@ function databaseError(error: { message?: string } | null): AppError {
 
 export class SupabaseCleaningHistoryService implements CleaningHistoryService {
   constructor(private readonly clients: SupabaseClients) {}
+
+  async detail(actor: Actor, submissionId: string): Promise<unknown> {
+    if (actor.role !== 'admin' && actor.role !== 'maid') throw databaseError({ message: 'CLEANING_HISTORY_ACCESS_REQUIRED' });
+    const { data, error } = await this.clients.admin.rpc('get_cleaning_history_submission', {
+      p_actor_profile_id: actor.profileId, p_session_id: sessionId(actor), p_submission_id: submissionId
+    });
+    if (error || !data || typeof data !== 'object' || Array.isArray(data)) throw databaseError(error);
+    return { submission: data };
+  }
 
   async list(actor: Actor, input: CleaningHistoryInput): Promise<unknown> {
     if (actor.role !== 'admin' && actor.role !== 'maid') {

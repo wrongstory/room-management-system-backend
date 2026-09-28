@@ -26,6 +26,7 @@ function requestHash(value: unknown): string {
 export function submissionDatabaseError(error: { message?: string } | null): AppError {
   const code = error?.message ?? '';
   const status: Record<string, number> = {
+    ROOM_ISSUE_REPORT_ACCESS_REQUIRED: 403, INVALID_ROOM_ISSUE_REPORT: 400, ROOM_ISSUE_EVIDENCE_INVALID: 409,
     MAID_REQUIRED: 403, ADMIN_REQUIRED: 403, CAPABILITY_ACCESS_REQUIRED: 403, SUBMISSION_ACCESS_REQUIRED: 403, BOMB_REPORT_ACCESS_REQUIRED: 403,
     PHOTO_EVIDENCE_INCOMPLETE: 409, PHOTO_RETENTION_DELETE_PREPARED: 409, BOMB_EVIDENCE_INVALID: 409, BOMB_REPORT_NOT_ALLOWED: 409, BOMB_REPORT_SEALED: 409,
     SUBMISSION_VERSION_CONFLICT: 409, STALE_VERSION: 409, SUBMISSION_INVALID_TRANSITION: 409,
@@ -55,6 +56,7 @@ export interface InspectionListPage {
 }
 
 export interface SubmissionService {
+  reportIssue(actor: SubmissionActor, attemptId: string, evidencePhotoIds: string[], memo: string, idempotencyKey: string): Promise<unknown>;
   reportBomb(actor: SubmissionActor, attemptId: string, evidencePhotoIds: string[], memo: string, idempotencyKey: string): Promise<unknown>;
   create(actor: SubmissionActor, attemptId: string, clientSubmissionId: string, expectedRevision: number, candleCount: number, idempotencyKey: string): Promise<unknown>;
   list(actor: SubmissionActor, attemptId?: string): Promise<unknown[]>;
@@ -116,7 +118,15 @@ export class SupabaseSubmissionService implements SubmissionService {
         'cleaningTargetId', 'cleaningKind', 'roomNumber', 'serviceDate', 'maidProfileId'
       ]);
     }
+    if (includeBombDetail && value && typeof value === 'object' && !Array.isArray(value)) {
+      const issues = (value as Record<string, unknown>).roomIssues;
+      if (Array.isArray(issues)) row.roomIssues = issues.map((issue) => this.project(issue, ['id', 'memo', 'evidencePhotoIds', 'reportedAt']));
+    }
     return row;
+  }
+  async reportIssue(actor: SubmissionActor, attemptId: string, evidencePhotoIds: string[], memo: string, key: string) {
+    const input = { actorProfileId: actor.profileId, attemptId, evidencePhotoIds, memo };
+    return this.project(await this.rpc('report_attempt_room_issue', { p_actor_profile_id: actor.profileId, p_attempt_id: attemptId, p_evidence_photo_ids: evidencePhotoIds, p_memo: memo, p_idempotency_key: key, p_request_hash: requestHash(input) }), ['id', 'attemptId', 'evidenceCount']);
   }
   async reportBomb(actor: SubmissionActor, attemptId: string, evidencePhotoIds: string[], memo: string, key: string) {
     const input = { actorProfileId: actor.profileId, attemptId, evidencePhotoIds, memo };
