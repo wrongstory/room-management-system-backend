@@ -14,6 +14,10 @@
 
 프런트 snapshot의 기능을 현재 원격 `main` 배포 상태로 추정하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.
 
+### 2026-09-29 객실 현황 targeted overlay
+
+관리자 객실 현황만 `makee-ham/room-management-system`의 `dev@26a334f2c488223f0b120b45fafcfc0f85e35a58`와 다시 대조했다. live 화면은 날짜 이동을 API 미준비로 막고 있었고, 와이어프레임은 `퇴실점검 대상`, `인원 추가`, `공실`, `촛불 있음`, `특이사항 있음`, `얼리 체크인`, `레이트 체크아웃` 상세 필터를 정의한다. Issue #318은 이를 날짜별 서버 projection 코드로 제공하며 프런트 UI 변경과 미확정 수동 퇴실점검 완료 lifecycle은 포함하지 않는다.
+
 프런트 구현의 공통 원칙은 [프런트 API 연동 가이드](./FRONTEND_API_INTEGRATION.md)를 사용한다. [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)는 역사 기록이며 endpoint와 schema는 production OpenAPI 0.5.1이 최종 정본이다.
 
 ## 프런트 문서 분류

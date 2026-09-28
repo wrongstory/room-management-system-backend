@@ -91,6 +91,10 @@ OpenAPI는 `0.5.1` / 129 paths / 139 operations입니다. 최신 `dev@ab185af234
 migration 한 건만 production pending으로 고정합니다. 79~83번을 다시 적용하거나 history를 강제 보정하지 않으며,
 실제 운영 readback이 83개/head `maid_pin_immediate_reveal`과 다르면 84번째 적용 전에 중단합니다.
 
+Issue #318 source 후보는 85번째 `flat_cleaning_evidence_history_payroll` 뒤에 append-only
+`room_board_date_filters`를 추가하므로 developer runtime의 source migration name도 같은 값으로 갱신합니다.
+이는 운영 DB가 이미 적용됐다는 뜻이 아니며 `behind/equal/ahead/diverged` 비교로 배포 상태를 구분합니다.
+
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,
 전체 slots, request hash, raw before/after state는 developer projection에 포함하지 않습니다. 이 event를
