@@ -2,7 +2,7 @@
 
 ## 범위와 배포 상태
 
-이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C, Issue #140 초기화와 Issue #169 자동 생성·현장 확인 계약을 설명한다. 마지막으로 검증된 production은 전체 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations이며 `api` ACTIVE v24다. 현재 Git main의 후속 #256 사진 hotfix는 PIN 계약을 바꾸지 않는다. PIN API의 실제 사용자 문제는 해결돼 Issue #140을 완료 처리했다. `room-pin-sheet-sync` source/bundle은 존재하지만 production target mapping·Google ACL/Secrets/Cron/hosted full-resync 검증은 별도 pending이다.
+이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C, Issue #140 초기화와 Issue #169 자동 생성·현장 확인 계약을 설명한다. 당시 인계 snapshot은 전체 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations / `api` ACTIVE v24이며 최신 배포 상태는 아니다. 이전 PIN 문제 #140은 완료됐지만 2026-09-29 관리자 PIN 조회 503 재발은 아래 #315 장애 기록으로 별도 추적한다. `room-pin-sheet-sync` source/bundle은 존재하지만 production target mapping·Google ACL/Secrets/Cron/hosted full-resync 검증은 별도 pending이다.
 
 Phase A에는 encrypted PIN revision/current pointer, 물리 변경 조정, 안전한 reveal, public sync event와 sheet outbox 기반이 포함된다. Phase B는 dedicated service account의 Sheets API projection worker, global singleton claim/lease/fence, current-version coalescing, bounded retry와 operator-blocked 관측을 추가한다. Phase C는 안전한 developer/admin status와 DB-authoritative 121실 full resync command를 추가한다. production target mapping·Google hosted ACL/Cron/activation은 release gate로 남긴다. Issue #194의 64번째 append-only migration은 통보 기반 durable assignment entitlement와 최대 30초 reveal lease를 분리하며 production DB/API에 반영됐다. 실제 hosted PIN mutation은 아직 별도다.
 
@@ -99,7 +99,17 @@ PIN version이 오르면 열린 30초 reveal과 이전 revision entitlement를 �
 - `STALE_PIN_VERSION` / `ROOM_NUMBER_CHANGED`: 최신 객실/version을 다시 조회하고 새로운 idempotency key로 재시도한다.
 - `PIN_ENTITLEMENT_REQUIRED` / `PIN_REVEAL_AUTHORIZATION_CHANGED`: 현재 notified assignment entitlement, session, assignment/PIN revision 또는 종료 상태가 바뀐 것이므로 plaintext를 폐기하고 최신 배정 상태를 다시 조회한다.
 - `PIN_ACCESS_REQUIRED` / `PIN_ACCESS_LEASE_REQUIRED`: 물리 PIN 변경용 exact in-progress attempt/access lease가 없으므로 변경을 진행하지 않는다.
-- `ROOM_PIN_KEY_UNAVAILABLE` / `ROOM_PIN_CRYPTO_CONFIG_INVALID`: keyring을 복구하기 전 reveal/change를 중단한다. 오류 응답이나 로그에 key/envelope/PIN을 남기지 않는다.
+- `ROOM_PIN_KEY_UNAVAILABLE` / `ROOM_PIN_CRYPTO_CONFIG_INVALID`: reveal/change를 중단하고 runtime URL/환경 mapping, key version/keyring 구조와 목적별 키 분리를 확인한다. 설정 오류가 곧 키 분실을 의미하지 않는다. 진단 목적으로 키를 회전하거나 PIN revision을 덮어쓰지 않는다. 오류 응답이나 로그에 key/envelope/PIN을 남기지 않는다.
+
+### #315 관리자 PIN 조회 장애 (2026-09-29)
+
+- 신고: 350호 관리자 PIN 조회·변경 확인, 06:15 KST 부근. 문의 ID는 `bbaf9ff5-e7a5-4f5c-8cfc-49684296acb2`다.
+- read-only evidence: 06:05~06:25 KST의 해당 객실 reveal POST 6건 모두 503, begin reveal lease 6건 모두 finalize 미완료. current revision은 존재하고 sync는 verified다. 같은 구간 PIN 변경 endpoint 호출은 확인되지 않았다. 문의 ID 자체를 서버 로그와 직접 연결하지 못했으므로 변경 확인 실패의 독립 원인까지 확정하지 않는다.
+- 관측한 운영 API는 ACTIVE v37이다. 위 문서의 v24/78 migrations 표기는 과거 Phase 인계 snapshot이며 최신 배포 상태를 뜻하지 않는다.
+- 원인 후보 재현: 기존 Edge config는 hosted 기본 변수가 아닌 `SUPABASE_PROJECT_REF`를 필수로 읽는다. 운영 secret 목록에도 이 이름이 없었으며, synthetic hosted URL만 제공하는 회귀 테스트에서 `ROOM_PIN_CRYPTO_CONFIG_INVALID` 503을 재현했다. 실행 bundle과 실제 env 전체를 직접 확인한 것은 아니므로 운영의 다른 key/config 문제까지 배제하지 않는다.
+- 수정: PIN API의 trusted runtime URL에서 project Ref를 도출한다. 저장된 AAD, AES key/version, PIN 원장, 권한·최종 감사·30초 TTL·물리 확인·CAS·멱등성은 변경하지 않는다. DB migration, secret 추가/회전, Sheet 활성화, 프런트 변경은 없다.
+- 배포 gate: 독립 QA와 application/migration CI 이후 승인된 release 절차로 API를 배포한다. source 수정만으로 운영 복구 완료라고 하지 않는다. 승인된 관리자 세션에서 기존 PIN 조회의 200/no-store/TTL과 finalize를 확인하고, 실제 PIN 변경·확인은 운영자가 승인한 안전 대상 및 물리 도어락 일치 확인 하에서만 smoke한다. PIN은 로그·이슈에 기록하지 않는다. 운영 검증 전 #315는 열어 둔다.
+- rollback: 해당 API source를 이전 승인 bundle로 되돌릴 수 있으나 이전 503이 재발할 수 있다. 키/원장/AAD를 변경하지 않았으므로 재암호화나 데이터 rollback은 수행하지 않는다.
 
 DB의 `room_pin_sync_events`와 private sheet outbox에는 room/version/status/source-controlled reason만 있어야 한다. audit developer projection은 `roomId`, `leaseId`, `pinVersion`, `status` 같은 승인 필드만 표시하며 raw state/request hash/envelope을 노출하지 않는다.
 

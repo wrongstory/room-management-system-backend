@@ -34,6 +34,7 @@ const reservationKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
 const webPushKey = "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ=";
 
 function configure(): void {
+  Deno.env.delete("SUPABASE_URL");
   Deno.env.set("ROOM_PIN_KEY_BASE64", key);
   Deno.env.set("ROOM_PIN_KEY_VERSION", "key-v1");
   Deno.env.set("ROOM_PIN_KEYRING_JSON", "{}");
@@ -44,6 +45,142 @@ function configure(): void {
   Deno.env.set("RUNTIME_ENVIRONMENT", "test");
   Deno.env.set("SUPABASE_PROJECT_REF", "local-ref");
 }
+
+Deno.test("hosted PIN prepare derives trusted project context and fails closed on invalid mappings", async () => {
+  const ref = "aaaaaaaaaaaaaaaaaaaa";
+  const hostedUrl = `https://${ref}.supabase.co`;
+  const cases = [
+    { url: hostedUrl, explicit: "", environment: "production", valid: true },
+    {
+      url: `${hostedUrl}/`,
+      explicit: ref,
+      environment: "recovery",
+      valid: true,
+    },
+    {
+      url: "http://127.0.0.1:54321",
+      explicit: "local-ref",
+      environment: "local",
+      valid: true,
+    },
+    {
+      url: hostedUrl,
+      explicit: "other-ref",
+      environment: "production",
+      valid: false,
+    },
+    ...[
+      "",
+      "https://custom.example",
+      `${hostedUrl}.evil.example`,
+      `${hostedUrl}/path`,
+      `${hostedUrl}?x=1`,
+      `${hostedUrl}#fragment`,
+      `${hostedUrl}:443`,
+      `https://user:password@${ref}.supabase.co`,
+      `http://${ref}.supabase.co`,
+      "http://localhost:54321",
+    ].map((url) => ({
+      url,
+      explicit: ref,
+      environment: "production",
+      valid: false,
+    })),
+    {
+      url: "https://custom.example",
+      explicit: "local-ref",
+      environment: "test",
+      valid: false,
+    },
+  ];
+  try {
+    for (const testCase of cases) {
+      configure();
+      Deno.env.set("SUPABASE_URL", testCase.url);
+      Deno.env.set("RUNTIME_ENVIRONMENT", testCase.environment);
+      Deno.env.delete("SUPABASE_PROJECT_REF");
+      if (testCase.explicit) {
+        Deno.env.set("SUPABASE_PROJECT_REF", testCase.explicit);
+      }
+      let prepared: Record<string, unknown> | undefined;
+      const clients = {
+        admin: {
+          rpc(name: string, args: Record<string, unknown>) {
+            if (name === "get_room_pin_change_context") {
+              return Promise.resolve({
+                data: {
+                  room_number: "0101",
+                  current_pin_version: 1,
+                  proposed_pin_version: 2,
+                },
+                error: null,
+              });
+            }
+            assert(
+              name === "prepare_room_pin_change",
+              "only prepare may mutate",
+            );
+            prepared = args;
+            return Promise.resolve({
+              data: {
+                lease_id: leaseId,
+                room_id: roomId,
+                current_pin_version: 1,
+                proposed_pin_version: 2,
+                status: "prepared",
+                expires_at: new Date(Date.now() + 300_000).toISOString(),
+                replay: false,
+              },
+              error: null,
+            });
+          },
+        },
+      } as unknown as EdgeClients;
+      let failure: unknown;
+      try {
+        await prepareRoomPinChange(
+          command("/prepare", {
+            pinDigits: "0012",
+            expectedPinVersion: 1,
+            reasonCode: "ADMIN_PHYSICAL_CHANGE",
+          }),
+          clients,
+          actor,
+          sessionId,
+          roomId,
+        );
+      } catch (error) {
+        failure = error;
+      }
+      if (testCase.valid) {
+        assert(!failure && prepared, "hosted/local mapping permits encryption");
+        assert(
+          prepared.p_aad_environment === testCase.environment,
+          "runtime environment retained",
+        );
+        assert(
+          prepared.p_aad_project_ref ===
+            (testCase.environment === "local" ? "local-ref" : ref),
+          "AAD binds trusted runtime project",
+        );
+      } else {
+        assert(!prepared, "invalid config never prepares a PIN change");
+        assert(
+          failure instanceof EdgeError && failure.status === 503 &&
+            failure.code === "ROOM_PIN_CRYPTO_CONFIG_INVALID",
+          "safe config failure",
+        );
+        assert(
+          !failure.message.includes("password") &&
+            !failure.message.includes(key),
+          "no config secrets reflected",
+        );
+      }
+    }
+  } finally {
+    configure();
+  }
+});
 
 Deno.test("room PIN crypto config rejects cross-purpose key reuse safely", async () => {
   configure();
@@ -606,6 +743,10 @@ Deno.test("confirm and rollback map database fields to exact camelCase contracts
 
 Deno.test("reveal uses stored AAD, finalizes first, and returns only remaining TTL", async () => {
   configure();
+  // Hosted Edge supplies SUPABASE_URL, not a custom SUPABASE_PROJECT_REF.
+  Deno.env.set("RUNTIME_ENVIRONMENT", "recovery");
+  Deno.env.set("SUPABASE_URL", "https://bbbbbbbbbbbbbbbbbbbb.supabase.co");
+  Deno.env.delete("SUPABASE_PROJECT_REF");
   const encrypted = await encryptRoomPin("0101-0012", roomId, 2, {
     key,
     keyVersion: "key-v1",
@@ -642,25 +783,32 @@ Deno.test("reveal uses stored AAD, finalizes first, and returns only remaining T
       },
     },
   } as unknown as EdgeClients;
-  const result = await revealRoomPin(
-    command("/reveal", {}),
-    clients,
-    actor,
-    sessionId,
-    roomId,
-  );
-  assert(
-    result.credential === "0101-0012",
-    "stored production AAD decrypts under recovery runtime",
-  );
-  assert(
-    result.clearAfterSeconds >= 1 && result.clearAfterSeconds <= 5,
-    "remaining TTL returned",
-  );
-  assert(
-    calls.join(",") === "begin_room_pin_reveal,finalize_room_pin_reveal",
-    "final authorization succeeds first",
-  );
+  try {
+    for (const role of ["admin", "maid"] as const) {
+      calls.length = 0;
+      const result = await revealRoomPin(
+        command("/reveal", role === "maid" ? { assignmentId } : {}),
+        clients,
+        { ...actor, role },
+        sessionId,
+        roomId,
+      );
+      assert(
+        result.credential === "0101-0012",
+        "stored production AAD decrypts under hosted recovery runtime",
+      );
+      assert(
+        result.clearAfterSeconds >= 1 && result.clearAfterSeconds <= 5,
+        "remaining TTL returned",
+      );
+      assert(
+        calls.join(",") === "begin_room_pin_reveal,finalize_room_pin_reveal",
+        "final authorization succeeds first",
+      );
+    }
+  } finally {
+    configure();
+  }
 });
 
 Deno.test("expired reveal plaintext is never returned after finalization", async () => {
