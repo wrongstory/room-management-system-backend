@@ -91,7 +91,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(runtime).toMatch(/role:\s*["']developer["']\s*\|\s*["']admin["']\s*\|\s*["']maid["']/);
     expect(runtime).toMatch(/actor\.role !== ["']admin["']/);
     expect(roomApi).toMatch(/requireBusinessAdmin\(actor\)/);
-    expect(roomApi).toMatch(/["']get_room_operational_projection["']/);
+    expect(roomApi).toMatch(/["']get_room_board_projection["']/);
   });
 
   it('keeps the cron invocation secret and scheduler actor checks ahead of the command RPC', async () => {
@@ -226,7 +226,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']flat_cleaning_evidence_history_payroll["']/
+      /expectedMigrationName\s*=\s*["']room_board_date_filters["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -441,7 +441,7 @@ describe('Supabase Edge runtime PoC contract', () => {
       expect(api).toContain(path);
     }
     for (const rpc of [
-      'get_room_operational_projection',
+      'get_room_board_projection',
       'list_room_operation_blocks_page',
       'list_room_issues_page',
       'change_room_master_data',

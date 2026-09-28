@@ -159,6 +159,7 @@ import {
   reportRoomIssue,
   resolveRoomIssue,
   roomDetailIdFromPath,
+  roomListServiceDate,
   roomPathIds,
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
@@ -1560,11 +1561,20 @@ export async function handleApiRequest(
       return response;
     }
     if (request.method === "GET" && path === "/v1/rooms") {
-      return jsonResponse(
-        { rooms: await listRooms(clients, actor) },
+      const response = jsonResponse(
+        {
+          rooms: await listRooms(
+            request,
+            clients,
+            actor,
+            roomListServiceDate(request),
+          ),
+        },
         200,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     const operationBlocksReadMatch = request.method === "GET"
       ? /^\/v1\/rooms\/([^/]+)\/operation-blocks$/.exec(path)
@@ -1819,7 +1829,7 @@ export async function handleApiRequest(
       : null;
     if (roomDetailId) {
       return jsonResponse(
-        { room: await getRoom(clients, actor, roomDetailId) },
+        { room: await getRoom(request, clients, actor, roomDetailId) },
         200,
         corsHeaders,
       );

@@ -54,6 +54,20 @@ export type RoomReadinessReasonCode =
   | "CLEANING_REQUIRED"
   | "PIN_MISMATCH"
   | "PIN_UNCONFIGURED";
+export type RoomProjectionMode =
+  | "LIVE"
+  | "PAST_END_OF_DAY"
+  | "FUTURE_START_OF_DAY";
+export type RoomDetailConditionCode =
+  | "CHECKOUT_INSPECTION_REQUIRED"
+  | "EXTRA_GUESTS"
+  | "VACANT"
+  | "CANDLE_PRESENT"
+  | "ROOM_ISSUE_PRESENT"
+  | "EARLY_CHECK_IN"
+  | "LATE_CHECK_OUT"
+  | "DATA_VERIFICATION_REQUIRED"
+  | "PIN_SYNC_WARNING";
 
 interface RoomProjectionRow {
   id: string;
@@ -84,6 +98,14 @@ interface RoomProjectionRow {
   allocation_blocked: boolean;
   allocation_ready: boolean;
   reason_codes: RoomReasonCode[];
+  service_date: string;
+  projection_mode: RoomProjectionMode;
+  detail_condition_codes: RoomDetailConditionCode[];
+  display_reservation_id: string | null;
+  display_check_in_at: string | null;
+  display_check_out_at: string | null;
+  display_guest_count: number | null;
+  display_base_occupancy: number;
 }
 
 export interface RoomProjection {
@@ -115,6 +137,14 @@ export interface RoomProjection {
   allocationBlocked: boolean;
   allocationReady: boolean;
   reasonCodes: RoomReasonCode[];
+  serviceDate: string;
+  projectionMode: RoomProjectionMode;
+  detailConditionCodes: RoomDetailConditionCode[];
+  displayReservationId: string | null;
+  displayCheckInAt: string | null;
+  displayCheckOutAt: string | null;
+  displayGuestCount: number | null;
+  displayBaseOccupancy: number;
 }
 
 /** DB RPC의 snake_case row를 Fastify와 동일한 프론트 공개 계약으로 변환한다. */
@@ -148,6 +178,14 @@ export function toRoomProjection(row: RoomProjectionRow): RoomProjection {
     allocationBlocked: row.allocation_blocked,
     allocationReady: row.allocation_ready,
     reasonCodes: row.reason_codes,
+    serviceDate: row.service_date,
+    projectionMode: row.projection_mode,
+    detailConditionCodes: row.detail_condition_codes,
+    displayReservationId: row.display_reservation_id,
+    displayCheckInAt: row.display_check_in_at,
+    displayCheckOutAt: row.display_check_out_at,
+    displayGuestCount: row.display_guest_count,
+    displayBaseOccupancy: row.display_base_occupancy,
   };
 }
 
@@ -632,12 +670,42 @@ export function roomDetailIdFromPath(path: string): string | null {
   return match ? uuidValue(match[1], "roomId") : null;
 }
 
-export async function listRooms(clients: EdgeClients, actor: EdgeActor) {
+function validCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day;
+}
+
+export function roomListServiceDate(request: Request): string | null {
+  const search = new URL(request.url).searchParams;
+  for (const key of search.keys()) {
+    if (key !== "serviceDate" || search.getAll(key).length !== 1) {
+      validationError("객실 현황 날짜 조회 조건이 올바르지 않습니다.");
+    }
+  }
+  const value = search.get("serviceDate");
+  if (value !== null && !validCalendarDate(value)) {
+    validationError("serviceDate는 실제 달력의 YYYY-MM-DD 날짜여야 합니다.");
+  }
+  return value;
+}
+
+export async function listRooms(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  serviceDate: string | null = null,
+) {
   requireRoomAdmin(actor);
   const { data, error } = await clients.admin.rpc(
-    "get_room_operational_projection",
+    "get_room_board_projection",
     {
       p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+      p_service_date: serviceDate,
       p_room_id: null,
     },
   );
@@ -1090,6 +1158,7 @@ export async function listRoomEvents(
 }
 
 export async function getRoom(
+  request: Request,
   clients: EdgeClients,
   actor: EdgeActor,
   roomId: string,
@@ -1097,9 +1166,11 @@ export async function getRoom(
   requireRoomAdmin(actor);
   const normalizedRoomId = uuidValue(roomId, "roomId");
   const { data, error } = await clients.admin.rpc(
-    "get_room_operational_projection",
+    "get_room_board_projection",
     {
       p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+      p_service_date: null,
       p_room_id: normalizedRoomId,
     },
   );
@@ -1169,7 +1240,7 @@ export async function changeRoomMasterData(
     p_request_hash: await requestHash(fingerprint),
   });
   if (error) throw roomDatabaseError(error);
-  return getRoom(clients, actor, normalizedRoomId);
+  return getRoom(request, clients, actor, normalizedRoomId);
 }
 
 export async function correctRoomOccupancy(

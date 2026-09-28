@@ -79,6 +79,14 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 
 현재 객실 현황은 이 snapshot 시각에 실제로 활성화된 점유·청소 의무·운영 차단만 계산한다. 미래 예약의 준비 의무는 일정과 작업 계획에는 남지만 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `reservationPhase`, `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`, `reasonCodes`, `pinSyncStatus`는 계속 독립 축이며 새 영구 `status` 컬럼이나 단일 API status를 만들지 않는다. 프런트의 5단계 대표 문구는 이 축을 읽는 표시 mapper일 뿐 정본 상태가 아니다.
 
+### #318 날짜별 객실 현황과 상세 조건 projection
+
+`GET /v1/rooms`는 optional `serviceDate=YYYY-MM-DD`를 받는다. 생략 또는 KST 오늘은 요청 시각의 `LIVE`, 과거는 해당 날짜의 `23:59:59.999999 Asia/Seoul`, 미래는 `00:00:00 Asia/Seoul`을 `evaluatedAt`으로 사용한다. `serverTime`은 응답을 계산한 실제 시각이므로 과거·미래 조회에서는 `evaluatedAt`과 다르다. 잘못된 달력 날짜, 중복 query key, 알려지지 않은 query key는 HTTP 400으로 닫는다.
+
+새 `get_room_board_projection`은 active/password-complete business admin과 live session을 DB에서 다시 검증하며 service role만 실행할 수 있다. 기존 원장을 덮거나 새 복합 상태를 저장하지 않고 예약 segment, cleaning target/attempt, 촛불 event, 객실 issue, operation block, PIN sync event와 표시 override의 평가 시점 값을 조합한다. 객실 타입/기준정보는 effective-dated 이력이 아직 없으므로 최신 catalog 값을 사용한다는 제한을 공개한다.
+
+`detailConditionCodes`는 와이어프레임의 `CHECKOUT_INSPECTION_REQUIRED`, `EXTRA_GUESTS`, `VACANT`, `CANDLE_PRESENT`, `ROOM_ISSUE_PRESENT`, `EARLY_CHECK_IN`, `LATE_CHECK_OUT`과 운영 경고 `DATA_VERIFICATION_REQUIRED`, `PIN_SYNC_WARNING`을 반환한다. `CANDLE_PRESENT` 상세 필터는 와이어프레임대로 공실 카드에서만 표시하지만 기존 blocking/readiness 촛불 축은 점유 여부와 무관하게 유지한다. 고객 PII 없이 표시 예약 ID·입퇴실 시각·인원·기준 인원만 추가한다. 퇴실점검 수동 완료/청소 완료 대체 mutation은 제품 미확정이므로 이 projection에 포함하지 않는다.
+
 ### #228 점유·객실 문제·배정 준비 분리
 
 77번째 append-only `room_status_admin_correction`은 #236의 76번째 `developer_room_catalog_capacity` 뒤에 적용되며, `occupied`를 canonical non-retired stay segment의 서버 snapshot 반개구간 `[startsAt, endsAt)` 포함 여부로만 계산한다. 시작 직전은 비점유, 시작 시각은 점유, 종료 시각은 비점유이며 null end인 장기투숙 segment는 실제 종료/보정 전까지 계속 점유다. 조기 실제 checkout과 관리자 vacant 보정은 segment를 닫으므로 즉시 projection에서 빠진다.
@@ -91,7 +99,7 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 
 ### #187 예약 임박 lifecycle projection Phase A
 
-기존 GET 경로와 필드는 그대로 두고 `serverTime`, `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus`, `nextReservationId/nextCheckInAt/nextCheckOutAt`, `blockingReasonCodes`, `readinessReasonCodes`를 추가한다. `serverTime`과 `evaluatedAt`은 같은 DB snapshot timestamp다. lifecycle은 current 반개구간 또는 실제 active occupancy를 `OCCUPIED`로 우선하고, current가 없을 때 가장 이른 미래 active 예약의 KST 체크인 날짜를 오늘 `ARRIVAL_PENDING`, 내일 `RESERVATION_PRESENT`, 모레 이후 `FUTURE`, 없음 `NONE`으로 분류한다. next 필드는 current가 아닌 가장 이른 미래 active 예약만 가리킨다.
+기존 GET 경로와 필드는 그대로 두고 `serverTime`, `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus`, `nextReservationId/nextCheckInAt/nextCheckOutAt`, `blockingReasonCodes`, `readinessReasonCodes`를 추가한다. 오늘 LIVE 조회에서는 `serverTime`과 `evaluatedAt`이 같은 DB snapshot timestamp다. #318 과거·미래 날짜 조회에서는 평가 경계와 실제 계산 시각을 분리한다. lifecycle은 current 반개구간 또는 실제 active occupancy를 `OCCUPIED`로 우선하고, current가 없을 때 가장 이른 미래 active 예약의 KST 체크인 날짜를 오늘 `ARRIVAL_PENDING`, 내일 `RESERVATION_PRESENT`, 모레 이후 `FUTURE`, 없음 `NONE`으로 분류한다. next 필드는 current가 아닌 가장 이른 미래 active 예약만 가리킨다.
 
 대표 상태는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY` 우선순위다. 청소는 readiness 사유지만 `BLOCKED`를 만들지 않고, `FUTURE`는 현재 readiness 대표 상태를 유지한다. PIN mismatch/unconfigured는 current check-in readiness 경고로만 추가하며 예약 bookability와 기존 #140 권한 계약은 바꾸지 않는다. public projection RPC만 service role에 열고 private SECURITY DEFINER helper는 fixed `search_path`와 PUBLIC/anon/authenticated/service_role EXECUTE revoke를 적용한다. Phase A는 route, reservation move preview/commit, stay/segment 저장, Python codegen을 추가하지 않는다.
 

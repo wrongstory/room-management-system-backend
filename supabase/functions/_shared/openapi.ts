@@ -4372,11 +4372,21 @@ export const openApiDocument = {
       get: {
         tags: ["Rooms"],
         operationId: "listRooms",
-        summary: "전체 객실 운영 projection 조회",
+        summary: "날짜별 전체 객실 운영 projection 조회",
         description:
-          "active business admin 전용입니다. `evaluatedAt`의 서버 시각을 기준으로 `reservationPhase`와 현재 점유·청소·배정 가능 축을 계산합니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 하나의 영구 status enum으로 합치지 않습니다. `allocationReady=false`의 근거는 `reasonCodes`로 표시하세요. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
+          "active business admin 전용입니다. `serviceDate`를 생략하면 오늘의 LIVE projection을 반환합니다. 과거 날짜는 Asia/Seoul 영업일 종료 시점, 미래 날짜는 영업일 시작 시점을 기준으로 계산합니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 하나의 영구 status enum으로 합치지 않습니다. `detailConditionCodes`는 관리자 객실 현황의 상세 조건 필터 계약입니다. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "serviceDate",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "date" },
+            description:
+              "객실 현황 기준 영업일(YYYY-MM-DD). 생략=오늘 LIVE, 과거=Asia/Seoul 23:59:59.999999, 미래=Asia/Seoul 00:00:00 기준입니다.",
+          },
+        ],
         responses: {
           "200": {
             description: "active business admin 전용 객실 projection",
@@ -4396,6 +4406,7 @@ export const openApiDocument = {
               },
             },
           },
+          "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
           "500": errorResponse,
@@ -10140,6 +10151,28 @@ export const openApiDocument = {
         description:
           "객실 예약 배정이 준비되지 않은 독립 사유입니다. RESERVATION_CURRENT는 evaluatedAt이 예약의 [checkInAt, checkOutAt) 구간에 있음을 뜻합니다. 여러 값이 동시에 올 수 있습니다. PIN 상태는 이 enum이 아니라 RoomProjection.pinSyncStatus의 별도 경고 축입니다.",
       },
+      RoomProjectionMode: {
+        type: "string",
+        enum: ["LIVE", "PAST_END_OF_DAY", "FUTURE_START_OF_DAY"],
+        description:
+          "선택 날짜의 projection 평가 방식입니다. 오늘은 요청 시점 LIVE, 과거는 영업일 종료, 미래는 영업일 시작 시점을 사용합니다.",
+      },
+      RoomDetailConditionCode: {
+        type: "string",
+        enum: [
+          "CHECKOUT_INSPECTION_REQUIRED",
+          "EXTRA_GUESTS",
+          "VACANT",
+          "CANDLE_PRESENT",
+          "ROOM_ISSUE_PRESENT",
+          "EARLY_CHECK_IN",
+          "LATE_CHECK_OUT",
+          "DATA_VERIFICATION_REQUIRED",
+          "PIN_SYNC_WARNING",
+        ],
+        description:
+          "프런트 와이어프레임의 객실 현황 상세 조건과 직접 대응하는 서버 계산 코드입니다. 수동 퇴실점검 완료 workflow는 포함하지 않습니다.",
+      },
       RoomOccupancyStatus: {
         type: "string",
         enum: ["VACANT", "OCCUPIED"],
@@ -10535,6 +10568,9 @@ export const openApiDocument = {
           "elevatorZone",
           "dataStatus",
           "stateVersion",
+          "serviceDate",
+          "projectionMode",
+          "detailConditionCodes",
           "evaluatedAt",
           "reservationPhase",
           "serverTime",
@@ -10547,6 +10583,11 @@ export const openApiDocument = {
           "nextReservationId",
           "nextCheckInAt",
           "nextCheckOutAt",
+          "displayReservationId",
+          "displayCheckInAt",
+          "displayCheckOutAt",
+          "displayGuestCount",
+          "displayBaseOccupancy",
           "blockingReasonCodes",
           "readinessReasonCodes",
           "occupied",
@@ -10587,11 +10628,26 @@ export const openApiDocument = {
             description:
               "후속 객실 변경 command에서 expectedVersion으로 사용할 CAS version",
           },
+          serviceDate: {
+            type: "string",
+            format: "date",
+            description: "요청 또는 서버 기본값으로 확정된 Asia/Seoul 영업일",
+          },
+          projectionMode: {
+            $ref: "#/components/schemas/RoomProjectionMode",
+          },
+          detailConditionCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: { $ref: "#/components/schemas/RoomDetailConditionCode" },
+            description:
+              "해당 평가 시점에 성립하는 관리자 객실 현황 상세 조건 목록",
+          },
           evaluatedAt: {
             type: "string",
             format: "date-time",
             description:
-              "이 projection의 모든 현재 시각 판정에 사용한 서버 RFC 3339 timestamp",
+              "선택한 영업일 규칙에 따라 객실 상태 판정에 사용한 RFC 3339 timestamp",
           },
           reservationPhase: {
             type: "string",
@@ -10603,7 +10659,7 @@ export const openApiDocument = {
             type: "string",
             format: "date-time",
             description:
-              "evaluatedAt과 byte-for-byte 같은 서버 snapshot timestamp입니다.",
+              "응답을 계산한 실제 서버 snapshot timestamp입니다. 오늘 LIVE projection에서는 evaluatedAt과 같고 과거·미래 조회에서는 다를 수 있습니다.",
           },
           occupancyStatus: {
             $ref: "#/components/schemas/RoomOccupancyStatus",
@@ -10634,7 +10690,7 @@ export const openApiDocument = {
             type: ["string", "null"],
             format: "uuid",
             description:
-              "serverTime 뒤 가장 이른 future active 예약 ID. 현재 예약 자체는 포함하지 않습니다.",
+              "evaluatedAt 뒤 가장 이른 future active 예약 ID. 현재 예약 자체는 포함하지 않습니다.",
           },
           nextCheckInAt: {
             type: ["string", "null"],
@@ -10643,6 +10699,32 @@ export const openApiDocument = {
           nextCheckOutAt: {
             type: ["string", "null"],
             format: "date-time",
+          },
+          displayReservationId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "선택 시점의 현재 예약 또는 다음 예약 중 객실 카드에 표시할 예약 ID",
+          },
+          displayCheckInAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+          displayCheckOutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+          displayGuestCount: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description:
+              "표시 예약의 투숙 인원. 고객 식별정보는 포함하지 않습니다.",
+          },
+          displayBaseOccupancy: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "현재 객실 타입의 기준 인원. 표시 예약이 있으면 EXTRA_GUESTS 계산에 사용합니다.",
           },
           blockingReasonCodes: {
             type: "array",
@@ -10669,7 +10751,7 @@ export const openApiDocument = {
           candleCount: {
             type: "integer",
             minimum: 0,
-            description: "현재 서버 projection의 촛불 수량",
+            description: "evaluatedAt 기준 촛불 수량",
           },
           pinSyncStatus: {
             type: "string",

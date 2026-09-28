@@ -1348,6 +1348,22 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [ ] hosted 예약·객실이동 회귀 확인
 - 프런트 카드·요약·필터 mapper/browser E2E는 프런트 담당 저장소에서 별도 진행한다.
 
+### #318 날짜별 객실 현황·상세 조건 — source 후보
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms?serviceDate=YYYY-MM-DD` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 생략/오늘 LIVE, 과거 KST EOD, 미래 KST SOD |
+| [x] | `GET /v1/rooms/{roomId}` | 동일 | ✅ | ✅ | ✅ | ❌ | ❌ | 오늘 LIVE 단건은 같은 신규 projection mapper 사용 |
+
+- [x] 프런트 `upstream/dev@26a334f2c488223f0b120b45fafcfc0f85e35a58`의 객실 현황 날짜 UI와 상세조건 와이어프레임 targeted 대조
+- [x] strict 실제 달력 날짜·중복/미지원 query 거부와 Fastify/Edge/OpenAPI parity
+- [x] `detailConditionCodes` 9종 및 PII 없는 표시 예약 요약
+- [x] append-only `room_board_date_filters` migration, service-role-only RPC, actor/session DB 재검증
+- [x] 과거/오늘/미래 경계·상세조건·maid/session 거부 pgTAP 회귀
+- [ ] `dev` 병합, release/main 승격, production migration/API 배포
+- [ ] 프런트 날짜 버튼 활성화·필터 mapper·browser E2E
+- [ ] 수동 퇴실점검 완료/청소 완료 대체 lifecycle 제품 결정
+
 ### #187 예약 임박 lifecycle projection Phase A — source/dev 완료
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |

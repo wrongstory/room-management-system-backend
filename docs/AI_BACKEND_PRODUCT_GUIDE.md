@@ -1,5 +1,15 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+## 2026-09-29 사용자 확정: 관리자 날짜별 객실 현황과 상세 조건
+
+이 범위의 프런트 targeted 대조 기준은 `makee-ham/room-management-system`의 `dev@26a334f2c488223f0b120b45fafcfc0f85e35a58`이다. 전체 제품 snapshot을 이 commit으로 일괄 교체한 것이 아니라 관리자 객실 현황의 날짜 이동·상태/상세조건 UI만 다시 대조했다.
+
+- [확정] 관리자 객실 현황은 `serviceDate=YYYY-MM-DD`로 날짜를 이동할 수 있다. 생략 또는 KST 오늘은 요청 시점 LIVE, 과거는 해당 KST 날짜 종료, 미래는 해당 KST 날짜 시작 시점의 projection이다.
+- [확정] 상세 조건은 와이어프레임의 `퇴실점검 대상`, `인원 추가`, `공실`, `촛불 있음`, `특이사항 있음`, `얼리 체크인`, `레이트 체크아웃`을 서버 코드로 제공한다. 기준정보 확인 필요와 PIN 동기화 경고도 서로 다른 코드로 유지한다.
+- [확정] 응답은 고객명·연락처 없이 카드 표시용 예약 ID, 입퇴실 시각, 인원, 타입 기준 인원만 제공한다. 영구 복합 status 컬럼을 추가하지 않는다.
+- [미확정] 퇴실점검의 수동 완료와 청소 완료 대체 lifecycle은 기존 미확정 상태를 유지한다. 이번 확정은 현재 청소 target/attempt 원장에서 `CHECKOUT_INSPECTION_REQUIRED`를 계산하는 읽기 계약만 포함한다.
+- [현재 구현 후보] Issue #318의 append-only `room_board_date_filters` migration과 `GET /v1/rooms?serviceDate=...` Fastify/Edge/OpenAPI 계약이다. `dev` 병합, release/main 승격, production migration/API 배포와 프런트 버튼 활성화는 각각 별도 상태다.
+
 ## 2026-09-28 사용자 확정: 사진·이력·주급 개편
 
 이 절은 아래의 구역별 사진 정책보다 우선한다. 운영 반영 상태는 `docs/RELEASE_V0.7.0.md`에서 별도로 기록한다.
@@ -208,7 +218,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 ### `[확정]` 백엔드 projection / `[확정 — 2026-09-16]` 현재 객실 대표 표현
 
-백엔드는 기존 `reservation_phase`, `occupied`, `cleaning_required`, `allocation_blocked`, `allocation_ready`와 사유를 호환 유지하고, #187 Phase A에서 `occupancy_status`, `reservation_lifecycle`, `readiness_status`, `primary_display_status`를 독립 projection 축으로 추가한다. 한 호출은 서버 시각을 한 번만 캡처하며 `server_time`은 기존 `evaluated_at`과 정확히 같은 값이다. 현재 일정은 `[check_in_at, check_out_at)` 반개구간이고 실제 active occupancy도 `OCCUPIED`다. current가 없으면 가장 이른 미래 active 예약의 KST 체크인 날짜가 오늘이면 `ARRIVAL_PENDING`, 내일이면 `RESERVATION_PRESENT`, 모레 이후이면 `FUTURE`, 예약이 없으면 `NONE`이다. 현재가 있어도 별도의 `next_reservation_id`, `next_check_in_at`, `next_check_out_at`에는 가장 이른 미래 active 예약을 반환할 수 있다.
+백엔드는 기존 `reservation_phase`, `occupied`, `cleaning_required`, `allocation_blocked`, `allocation_ready`와 사유를 호환 유지하고, #187 Phase A에서 `occupancy_status`, `reservation_lifecycle`, `readiness_status`, `primary_display_status`를 독립 projection 축으로 추가한다. 오늘 LIVE 조회는 서버 시각을 한 번만 캡처하며 `server_time`은 `evaluated_at`과 정확히 같다. #318 날짜 조회에서 `server_time`은 실제 응답 계산 시각, `evaluated_at`은 과거 KST 영업일 종료 또는 미래 영업일 시작 시각이므로 서로 다를 수 있다. 현재 일정은 `[check_in_at, check_out_at)` 반개구간이고 실제 active occupancy도 `OCCUPIED`다. current가 없으면 가장 이른 미래 active 예약의 KST 체크인 날짜가 오늘이면 `ARRIVAL_PENDING`, 내일이면 `RESERVATION_PRESENT`, 모레 이후이면 `FUTURE`, 예약이 없으면 `NONE`이다. 현재가 있어도 별도의 `next_reservation_id`, `next_check_in_at`, `next_check_out_at`에는 가장 이른 미래 active 예약을 반환할 수 있다.
 
 `primary_display_status` 우선순위는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY`다. `BLOCKED`는 청소 외 실제 운영·입실·데이터 차단이 있을 때만 사용하고, 청소만으로 만들지 않는다. `FUTURE`는 현재 readiness 대표 상태를 유지한다. `blocking_reason_codes`와 `readiness_reason_codes`는 분리하며, `PIN_MISMATCH`와 `PIN_UNCONFIGURED`는 current check-in의 readiness 사유로만 노출하고 예약 bookability 차단으로 사용하지 않는다. 이 값들은 저장된 단일 상태가 아니라 동일 snapshot에서 계산한 표시 projection이며, 기존 reason/PIN 경고도 보존한다.
 
