@@ -117,7 +117,7 @@ function hasExactKeys(
 function normalizeSlots(
   value: unknown,
   roomTypeCode: RoomTypeCode,
-  version = 8,
+  version = 9,
 ) {
   if (!Array.isArray(value)) {
     invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
@@ -131,12 +131,15 @@ function normalizeSlots(
     invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   }
   const usesAContract = version >= 8 && metadataCount === value.length;
+  const usesFlatContract = version >= 9 && value.length === 3 &&
+    value[0]?.slotKey === "cleaning-proof";
   if (
-    (version < 8 && metadataCount > 0) || value.length !== (
-        usesAContract
-          ? currentSlotCounts[roomTypeCode]
-          : legacyV7SlotCounts[roomTypeCode]
-      )
+    (version < 8 && metadataCount > 0) ||
+    (!usesFlatContract && value.length !== (
+          usesAContract
+            ? currentSlotCounts[roomTypeCode]
+            : legacyV7SlotCounts[roomTypeCode]
+        ))
   ) invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   const keys = new Set<string>();
   const orders = new Set<number>();
@@ -161,7 +164,7 @@ function normalizeSlots(
       (row.displayOrder as number) > 99 || typeof row.required !== "boolean" ||
       (row.maxPhotos !== undefined && (
         !Number.isSafeInteger(row.maxPhotos) ||
-        (row.maxPhotos as number) < 1 || (row.maxPhotos as number) > 10
+        (row.maxPhotos as number) < 1 || (row.maxPhotos as number) > 20
       )) ||
       (row.instanceKey !== undefined && (
         typeof row.instanceKey !== "string" ||
@@ -197,6 +200,16 @@ function normalizeSlots(
   );
   if (slots.some((slot, index) => slot.displayOrder !== index)) {
     invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
+  }
+  if (usesFlatContract) {
+    if (
+      !["cleaning-proof", "bomb-proof", "issue-proof"].every((key, index) =>
+        slots[index]?.slotKey === key &&
+        slots[index]?.required === (index === 0) &&
+        slots[index]?.maxPhotos === (index === 0 ? 20 : 10)
+      )
+    ) invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
+    return slots;
   }
   if (
     slots.filter((slot) => slot.required).length !== slots.length - 1 ||
@@ -413,7 +426,7 @@ export async function cleaningTemplates(
   const slots = normalizeSlots(
     body.slots,
     roomTypeCode,
-    legacyReplayCandidate ? 7 : 8,
+    legacyReplayCandidate ? 7 : 9,
   );
   const durationMinutes = body.durationMinutes ?? null;
   const fingerprint = {

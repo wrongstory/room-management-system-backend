@@ -406,6 +406,74 @@ select throws_ok($$select public.delete_photo_collection_item(pg_temp.pid(2),pg_
  '23505','IDEMPOTENCY_KEY_REUSED','delete key reuse with a different request hash is rejected');
 select is((select count(*) from private.attempt_photo_collection_changes where cleaning_attempt_id=pg_temp.pid(510)),12::bigint,'append replace delete history is exact and append-only');
 select ok(private.photo_attempt_complete(pg_temp.pid(510),clock_timestamp()),'valid remaining optional collection keeps required completeness unchanged');
+
+-- Flat workflow: general evidence is independent of optional incident evidence.
+create temp table flat_payroll_baseline as select (private.project_payroll_cycle_bounded(
+ date_trunc('week',clock_timestamp() at time zone 'Asia/Seoul')::date,pg_temp.pid(2),10)->>'expectedAmount')::bigint amount;
+update public.cleaning_template_versions set status='retired' where cleaning_kind='additional' and status='published'
+  and room_type_id=(select id from public.room_types where code='standard');
+insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by)
+select pg_temp.pid(1200),id,'additional',9,'published',1,private.flat_cleaning_photo_slots(),pg_temp.pid(1)
+from public.room_types where code='standard';
+do $$ declare r public.rooms; snapshot jsonb; begin
+ select * into r from public.rooms where room_type_id=(select id from public.room_types where code='standard') order by room_number offset 11 limit 1;
+ snapshot:=jsonb_build_object('id',pg_temp.pid(1200),'version',9,'photoSlots',private.flat_cleaning_photo_slots(),'durationMinutes',1);
+ insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
+   status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
+ values(pg_temp.pid(1300),r.id,'additional','manual_room_request','flat-qa-target',current_date,current_date,
+   'notified',2,jsonb_build_object('code','standard'),10000,snapshot,pg_temp.pid(1));
+ insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,notified_at,changed_by)
+ values(pg_temp.pid(1400),pg_temp.pid(1300),pg_temp.pid(2),120,2,clock_timestamp()-interval '2 hours',pg_temp.pid(1));
+ insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,assignment_revision,
+   template_snapshot,room_snapshot,started_at,field_completed_at,ended_at)
+ values(pg_temp.pid(1500),pg_temp.pid(1300),pg_temp.pid(1400),pg_temp.pid(2),1,'field_completed',2,
+   snapshot,jsonb_build_object('roomId',r.id),clock_timestamp()-interval '2 hours',clock_timestamp()-interval '1 hour',clock_timestamp()-interval '1 hour');
+end $$;
+create function pg_temp.flat_slot(k text default 'cleaning-proof') returns uuid language sql stable as $$
+ select id from private.target_photo_slot_snapshots where cleaning_target_id=pg_temp.pid(1300) and slot_key=k
+$$;
+select is(private.photo_slot_max_photos(pg_temp.flat_slot(),pg_temp.pid(1300)),20,'general collection capacity is twenty');
+select is((private.project_payroll_cycle_bounded(date_trunc('week',clock_timestamp() at time zone 'Asia/Seoul')::date,pg_temp.pid(2),10)->>'expectedAmount')::bigint,
+ (select amount+10000 from flat_payroll_baseline),
+ 'expected payroll includes the current notified flat job');
+select ok(not private.photo_attempt_complete(pg_temp.pid(1500),clock_timestamp()),'zero general photos cannot submit');
+select private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(1500),pg_temp.flat_slot('bomb-proof'),pg_temp.pid(1700),0,0,repeat('a',64),'image/jpeg',100,clock_timestamp());
+select ok(not private.photo_attempt_complete(pg_temp.pid(1500),clock_timestamp()),'bomb evidence cannot satisfy required general photo');
+select private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(1500),pg_temp.flat_slot(),pg_temp.pid(1601),0,0,repeat('b',64),'image/jpeg',100,clock_timestamp());
+select ok(private.photo_attempt_complete(pg_temp.pid(1500),clock_timestamp()),'one general photo is sufficient');
+select throws_ok($$select public.report_bomb_room(pg_temp.pid(2),pg_temp.pid(1500),
+ array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1601))],
+ 'QA evidence', 'flat-bomb-invalid',repeat('a',64))$$,'23514','BOMB_EVIDENCE_INVALID','general photos cannot become bomb evidence');
+select private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(1500),pg_temp.flat_slot('issue-proof'),pg_temp.pid(1750),0,0,repeat('a',64),'image/jpeg',100,clock_timestamp());
+select throws_ok($$select public.report_attempt_room_issue(pg_temp.pid(3),pg_temp.pid(1500),
+ array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750))],
+ 'QA issue','flat-issue-other',repeat('b',64))$$,'42501','SUBMISSION_ACCESS_REQUIRED','other maid cannot report issues');
+select lives_ok($$select public.report_attempt_room_issue(pg_temp.pid(2),pg_temp.pid(1500),
+ array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750))],
+ 'QA issue','flat-issue-owner',repeat('b',64))$$,'owner can report separate issue evidence');
+select lives_ok($$select public.report_attempt_room_issue(pg_temp.pid(2),pg_temp.pid(1500),
+ array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750))],
+ 'QA issue','flat-issue-owner',repeat('b',64))$$,'same issue request replays without duplication');
+select is((select count(*) from private.attempt_room_issue_reports where cleaning_attempt_id=pg_temp.pid(1500)),1::bigint,'issue report is created once');
+do $$ begin for i in 2..20 loop
+ perform private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(1500),pg_temp.flat_slot(),pg_temp.pid(1600+i),i-1,0,repeat('c',64),'image/jpeg',100,clock_timestamp());
+end loop; end $$;
+select ok(private.photo_attempt_complete(pg_temp.pid(1500),clock_timestamp()),'twenty general photos are valid');
+select throws_ok($$select private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(1500),pg_temp.flat_slot(),pg_temp.pid(1621),20,0,repeat('d',64),'image/jpeg',100,clock_timestamp())$$,
+ '54000','PHOTO_COLLECTION_LIMIT_EXCEEDED','twenty-first general photo is rejected');
+select is(jsonb_array_length(public.get_attempt_photo_slots(pg_temp.pid(2),pg_temp.pid(990),pg_temp.pid(1500))->'slots'->0->'photos'),20,'public projection returns all twenty items');
+select throws_ok($$select private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(1500),pg_temp.flat_slot(),pg_temp.pid(1601),19,1,repeat('d',64),'image/jpeg',100,clock_timestamp())$$,
+ '40001','PHOTO_COLLECTION_VERSION_CONFLICT','stale collection revision still rejected');
+insert into public.cleaning_submissions(id,cleaning_attempt_id,client_submission_id,version,photo_manifest,submitted_by)
+values(pg_temp.pid(1800),pg_temp.pid(1500),pg_temp.pid(1801),1,'[]',pg_temp.pid(2));
+select is(private.bind_submission_photo_model(pg_temp.pid(2),pg_temp.pid(1800),0),1::bigint,'new submission seals flat photo collection');
+select is(jsonb_array_length(public.get_cleaning_history_submission(pg_temp.pid(2),pg_temp.pid(990),pg_temp.pid(1800))->'photos'),22,'performer can read general and separate incident history evidence');
+select is(public.get_cleaning_history_submission(pg_temp.pid(2),pg_temp.pid(990),pg_temp.pid(1800))->'roomIssues'->0->>'memo','QA issue','history includes the immutable issue memo');
+insert into auth.sessions(id,user_id) values(pg_temp.pid(1993),pg_temp.pid(103));
+select throws_ok($$select public.get_cleaning_history_submission(pg_temp.pid(3),pg_temp.pid(1993),pg_temp.pid(1800))$$,
+ '42501','CLEANING_HISTORY_ACCESS_REQUIRED','other maid cannot read history by guessed submission ID');
+select throws_ok($$select public.get_cleaning_history_submission(pg_temp.pid(2),pg_temp.pid(1993),pg_temp.pid(1800))$$,
+ '42501','CLEANING_HISTORY_ACCESS_REQUIRED','history rejects a session belonging to another user');
 select is((select count(*) from public.list_developer_audit_events(
  pg_temp.pid(4),array['photo.collection_item_deleted'],null,null,null,null,null,50)),1::bigint,
  'collection delete is visible through the bounded developer audit allowlist');
@@ -418,6 +486,16 @@ select ok(pg_get_functiondef('public.finalize_photo_upload(uuid,uuid,uuid,intege
 
 select ok(bool_and(c.relrowsecurity),'all private model tables have RLS') from pg_class c join pg_namespace n on n.oid=c.relnamespace
 where n.nspname='private' and c.relname in ('photo_template_slots','target_photo_snapshot_contracts','target_photo_slot_snapshots','attempt_photo_versions','attempt_photo_purge_states','attempt_photo_current','attempt_photo_changes','submission_photo_bindings','submission_photo_binding_sets','submission_current_pointers','attempt_photo_collection_states','attempt_photo_collection_items','attempt_photo_collection_changes','photo_collection_commands');
+select is((select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
+ where n.nspname='private' and c.relname in ('attempt_room_issue_reports','flat_evidence_migration_receipts')
+ and c.relrowsecurity),2::bigint,'new workflow records have RLS enabled');
+select ok(not has_table_privilege(r,t,'SELECT,INSERT,UPDATE,DELETE'),r||' cannot read/write workflow record '||t)
+from unnest(array['anon','authenticated','service_role'])r cross join unnest(array[
+ 'private.attempt_room_issue_reports','private.flat_evidence_migration_receipts'])t;
+select ok(not has_function_privilege(r,fn,'EXECUTE'),r||' cannot execute workflow command '||fn)
+from unnest(array['anon','authenticated'])r cross join unnest(array[
+ 'public.report_attempt_room_issue(uuid,uuid,uuid[],text,text,text)',
+ 'public.get_cleaning_history_submission(uuid,uuid,uuid)'])fn;
 select ok(not has_function_privilege(r,fn,'EXECUTE'),r||' cannot execute model helper '||fn)
 from unnest(array['anon','authenticated','service_role'])r cross join unnest(array[
  'private.record_validated_attempt_photo(uuid,uuid,uuid,bigint,text,text,integer,timestamptz)',

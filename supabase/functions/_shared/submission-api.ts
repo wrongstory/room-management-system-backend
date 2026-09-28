@@ -105,6 +105,9 @@ export function submissionDatabaseError(
     CAPABILITY_ACCESS_REQUIRED: 403,
     SUBMISSION_ACCESS_REQUIRED: 403,
     BOMB_REPORT_ACCESS_REQUIRED: 403,
+    ROOM_ISSUE_REPORT_ACCESS_REQUIRED: 403,
+    INVALID_ROOM_ISSUE_REPORT: 400,
+    ROOM_ISSUE_EVIDENCE_INVALID: 409,
     PHOTO_EVIDENCE_INCOMPLETE: 409,
     PHOTO_RETENTION_DELETE_PREPARED: 409,
     BOMB_EVIDENCE_INVALID: 409,
@@ -273,6 +276,11 @@ function publicProjection(
       ]),
     );
   }
+  if (includeBombDetail && Array.isArray(row.roomIssues)) {
+    result.roomIssues = row.roomIssues.map((issue) =>
+      commandProjection(issue, ["id", "memo", "evidencePhotoIds", "reportedAt"])
+    );
+  }
   return result;
 }
 function commandProjection(
@@ -297,18 +305,24 @@ async function rpc(
 }
 
 export function submissionPath(path: string):
-  | { kind: "report" | "submit" | "history"; attemptId: string }
+  | { kind: "report" | "issue" | "submit" | "history"; attemptId: string }
   | {
     kind: "detail" | "bomb-decision" | "approve" | "reject";
     submissionId: string;
   }
   | null {
-  let match = /^\/v1\/attempts\/([^/]+)\/(bomb-room-reports|submissions)$/.exec(
-    path,
-  );
+  let match =
+    /^\/v1\/attempts\/([^/]+)\/(bomb-room-reports|room-issues|submissions)$/
+      .exec(
+        path,
+      );
   if (match) {
     return {
-      kind: match[2] === "bomb-room-reports" ? "report" : "submit",
+      kind: match[2] === "bomb-room-reports"
+        ? "report"
+        : match[2] === "room-issues"
+        ? "issue"
+        : "submit",
       attemptId: uuid(match[1]),
     };
   }
@@ -334,6 +348,7 @@ export async function reportBombRoom(
   clients: EdgeClients,
   actor: EdgeActor,
   attemptId: string,
+  issue = false,
 ) {
   maid(actor);
   if (new URL(request.url).search) invalid();
@@ -341,7 +356,7 @@ export async function reportBombRoom(
   fields(body, ["evidencePhotoIds", "memo"]);
   if (
     !Array.isArray(body.evidencePhotoIds) || body.evidencePhotoIds.length < 1 ||
-    body.evidencePhotoIds.length > 20
+    body.evidencePhotoIds.length > (issue ? 10 : 20)
   ) invalid();
   const evidencePhotoIds = body.evidencePhotoIds.map(uuid);
   if (
@@ -357,14 +372,18 @@ export async function reportBombRoom(
     memo: body.memo,
   };
   return commandProjection(
-    await rpc(clients, "report_bomb_room", {
-      p_actor_profile_id: actor.profileId,
-      p_attempt_id: attemptId,
-      p_evidence_photo_ids: evidencePhotoIds,
-      p_memo: body.memo,
-      p_idempotency_key: key,
-      p_request_hash: await hash(input),
-    }),
+    await rpc(
+      clients,
+      issue ? "report_attempt_room_issue" : "report_bomb_room",
+      {
+        p_actor_profile_id: actor.profileId,
+        p_attempt_id: attemptId,
+        p_evidence_photo_ids: evidencePhotoIds,
+        p_memo: body.memo,
+        p_idempotency_key: key,
+        p_request_hash: await hash(input),
+      },
+    ),
     ["id", "attemptId", "evidenceCount", "reportedAt"],
   );
 }

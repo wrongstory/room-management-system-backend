@@ -664,7 +664,7 @@ export class PhotoService {
         const maxPhotos = r.maxPhotos === undefined
           ? 1
           : integer(r.maxPhotos, 1);
-        if (![1, 10].includes(maxPhotos)) return failed();
+        if (![1, 10, 20].includes(maxPhotos)) return failed();
         const legacyPhotos = r.photoId === null || r.photoId === undefined
           ? []
           : [{
@@ -681,7 +681,9 @@ export class PhotoService {
             mediaAvailability: r.mediaAvailability,
           }];
         const photos = r.photos === undefined ? legacyPhotos : r.photos;
-        if (!Array.isArray(photos) || photos.length > 10) return failed();
+        if (!Array.isArray(photos) || photos.length > maxPhotos) {
+          return failed();
+        }
         return {
           slotId: uuid(r.slotId),
           slotKey: r.slotKey,

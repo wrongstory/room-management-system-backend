@@ -6,10 +6,10 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
-Deno.test("OpenAPI publishes the v0.5.1 bookability hotfix contract", async () => {
+Deno.test("OpenAPI publishes the v0.6.0 cleaning workflow contract", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   assert(
-    document.info.version === "0.5.1",
+    document.info.version === "0.6.0",
     "approved semantic contract version",
   );
 });
@@ -219,13 +219,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 129 &&
+    Object.keys(document.paths).length === 131 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 139,
-    "combined candidate contract 129/139",
+        ).length === 141,
+    "combined candidate contract 131/141",
   );
 });
 
@@ -1388,7 +1388,7 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
       schemas.PublishCleaningTemplateRequest.properties.slots.maxItems === 14 &&
       schemas.CheckoutCleaningTemplateV8Slot.allOf[1].required.includes(
         "maxPhotos",
-      ) && schemas.CleaningTemplateSlot.properties.maxPhotos.maximum === 10,
+      ) && schemas.CleaningTemplateSlot.properties.maxPhotos.maximum === 20,
     "v8 A-contract publishes bounded slot and photo counts",
   );
   assert(

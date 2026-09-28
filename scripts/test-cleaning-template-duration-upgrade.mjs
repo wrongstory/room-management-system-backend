@@ -61,7 +61,7 @@ try {
   psql(fixture);
   const before = snapshot();
 
-  run(process.execPath, [supabaseCli, "migration", "up", "--local"], { stdio: "inherit" });
+  run(process.execPath, ["scripts/apply-pre-flat-migrations.mjs"], { stdio: "inherit" });
   assert(before === snapshot(), "55 -> current upgrade must preserve existing template/reservation ledgers");
   assert(
     psql(`select concat_ws('|',

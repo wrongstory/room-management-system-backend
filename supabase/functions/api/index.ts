@@ -67,7 +67,10 @@ import {
   reportCheckoutIncident,
 } from "../_shared/checkout-incident-api.ts";
 import { cleaningTemplates } from "../_shared/cleaning-template-api.ts";
-import { listCleaningHistory } from "../_shared/cleaning-history-api.ts";
+import {
+  getCleaningHistorySubmission,
+  listCleaningHistory,
+} from "../_shared/cleaning-history-api.ts";
 import { listWorkHistory } from "../_shared/work-history-api.ts";
 import {
   complaintDetail,
@@ -557,6 +560,18 @@ export async function handleApiRequest(
         corsHeaders,
       );
     }
+    if (request.method === "GET" && path.startsWith("/v1/cleaning-history/")) {
+      return jsonResponse(
+        await getCleaningHistorySubmission(
+          request,
+          clients,
+          actor,
+          path.slice("/v1/cleaning-history/".length),
+        ),
+        200,
+        corsHeaders,
+      );
+    }
     if (request.method === "GET" && path === "/v1/cleaning-history") {
       return jsonResponse(
         await listCleaningHistory(request, clients, actor),
@@ -615,6 +630,21 @@ export async function handleApiRequest(
     }
     const submissionRoute = submissionPath(path);
     if (submissionRoute) {
+      if (submissionRoute.kind === "issue" && request.method === "POST") {
+        return jsonResponse(
+          {
+            roomIssue: await reportBombRoom(
+              request,
+              clients,
+              actor,
+              submissionRoute.attemptId,
+              true,
+            ),
+          },
+          201,
+          corsHeaders,
+        );
+      }
       if (submissionRoute.kind === "report" && request.method === "POST") {
         return jsonResponse(
           {

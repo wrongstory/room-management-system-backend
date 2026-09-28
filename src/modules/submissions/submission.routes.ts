@@ -75,6 +75,12 @@ export function createSubmissionRoutes(
           limitedActors.set(request, limitedActor);
         }]
       : maid;
+    app.post('/v1/attempts/:attemptId/room-issues', { preHandler: maid }, async (request, reply) => {
+      noQuery(request);
+      const { attemptId } = attemptParams.parse(request.params);
+      const body = z.object({ evidencePhotoIds: z.array(id).min(1).max(10).refine((ids) => new Set(ids).size === ids.length), memo: bombMemo }).strict().parse(request.body);
+      return reply.code(201).send({ roomIssue: await service.reportIssue(request.actor, attemptId, body.evidencePhotoIds, body.memo, key(request)) });
+    });
     app.post('/v1/attempts/:attemptId/bomb-room-reports', { preHandler: maid }, async (request, reply) => {
       noQuery(request);
       const { attemptId } = attemptParams.parse(request.params);

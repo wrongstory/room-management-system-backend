@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { CleaningTemplateService } from './cleaning-template.service.js';
+import { type CleaningTemplateService, validFlatSlots } from './cleaning-template.service.js';
 
 const roomTypeCodeSchema = z.enum(['standard', 'premium', 'oceanPremium', 'oceanFamily']);
 const slotKeySchema = z.string().regex(/^[a-z][a-z0-9-]{0,79}$/);
@@ -10,7 +10,7 @@ const slotSchema = z.object({
   displayOrder: z.number().int().min(0).max(99),
   required: z.boolean(),
   label: boundedText(80),
-  maxPhotos: z.number().int().min(1).max(10).optional(),
+  maxPhotos: z.number().int().min(1).max(20).optional(),
   description: boundedText(200).optional(),
   section: boundedText(80).optional(),
   instanceKey: slotKeySchema.optional()
@@ -23,6 +23,7 @@ const publishSchema = z.object({
   durationMinutes: z.number().int().positive().max(10_080).nullable().optional(),
   slots: z.array(slotSchema).min(1).max(100)
 }).strict().superRefine((input, context) => {
+  if (validFlatSlots(input.slots)) return;
   const keys = new Set<string>();
   const orders = new Set<number>();
   for (const slot of input.slots) {

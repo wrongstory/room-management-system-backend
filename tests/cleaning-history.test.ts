@@ -15,6 +15,18 @@ const next = {
 };
 
 describe('cleaning history service', () => {
+  it('reads a single submission using the authenticated session and rejects other roles', async () => {
+    const data = { id: next.attemptId, photos: [], roomIssues: [] };
+    const rpc = vi.fn(async () => ({ data, error: null }));
+    const service = new SupabaseCleaningHistoryService({ admin: { rpc } } as never);
+    expect(await service.detail(maid, next.attemptId)).toEqual({ submission: data });
+    expect(rpc).toHaveBeenCalledWith('get_cleaning_history_submission', {
+      p_actor_profile_id: maid.profileId, p_session_id: sessionId, p_submission_id: next.attemptId
+    });
+    await expect(service.detail({ ...maid, role: 'developer' }, next.attemptId))
+      .rejects.toMatchObject({ code: 'CLEANING_HISTORY_ACCESS_REQUIRED' });
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
   it('binds the live session and creates a scope-bound cursor', async () => {
     const rpc = vi.fn(async () => ({ data: {
       date: '2026-09-19', fromDate: '2026-09-13', toDate: '2026-09-19', items: [], nextCursor: next
