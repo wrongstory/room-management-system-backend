@@ -405,6 +405,7 @@ export interface RoomEventsResult {
 }
 
 export interface RoomService {
+  listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage>;
   listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
   listOperationBlocks(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomOperationBlocksResult>;
   listIssues(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomIssuesResult>;
@@ -526,6 +527,23 @@ function ensureAdmin(actor: Actor): void {
   if (actor.role !== 'admin') {
     throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 객실 운영 현황을 조회할 수 있습니다.');
   }
+}
+
+export interface RoomCandlePage {
+  items: Array<{ roomId: string; roomNumber: string; count: number; roomStateVersion: number }>;
+  nextCursor: string | null;
+}
+
+function ensureCandleActor(actor: Actor): void {
+  if (actor.role !== 'admin' && actor.role !== 'maid') throw new AppError(403, 'FORBIDDEN', '촛불 조정 권한이 필요합니다.');
+}
+
+function candleError(error: { message?: string } | null): AppError {
+  if (error?.message?.includes('CANDLE_ACCESS_REQUIRED')) return new AppError(403, 'FORBIDDEN', '촛불 조정 권한이 필요합니다.');
+  if (error?.message?.includes('PASSWORD_CHANGE_REQUIRED')) return new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호 변경이 필요합니다.');
+  if (error?.message?.includes('CANDLE_VERIFICATION_REQUIRED')) return new AppError(400, 'VALIDATION_ERROR', '수량 감소는 현장 회수를 확인한 뒤 physicallyVerified=true로 요청해 주세요.');
+  if (error?.message?.includes('INVALID_CANDLE_REQUEST')) return new AppError(400, 'VALIDATION_ERROR', '촛불 요청이 올바르지 않습니다.');
+  return roomError(error);
 }
 
 function ensureDeveloper(actor: Actor): void {
@@ -849,6 +867,27 @@ export function assertNoContactInformation(value: string | undefined): void {
 }
 
 export class SupabaseRoomService implements RoomService {
+  async listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage> {
+    ensureCandleActor(actor);
+    const limit = input.limit ?? 50;
+    const { data, error } = await this.clients.admin.rpc('list_room_candles', {
+      p_actor_profile_id: actor.profileId, p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: input.roomId ?? null, p_after_room_id: input.cursor ?? null, p_limit: limit
+    });
+    if (error || !data) throw candleError(error);
+    const page = projectionRecord(data);
+    if (!Array.isArray(page.items) || page.items.length > limit) throw roomProjectionError();
+    const items = page.items.map((item) => {
+      const row = projectionRecord(item);
+      if (!Number.isInteger(row.count) || (row.count as number) < 0 || (row.count as number) > 2147483647) throw roomProjectionError();
+      const roomId = projectionUuid(row.roomId);
+      if (input.roomId && roomId.toLowerCase() !== input.roomId.toLowerCase()) throw roomProjectionError();
+      return { roomId, roomNumber: projectionText(row.roomNumber), count: row.count as number, roomStateVersion: projectionVersion(row.roomStateVersion) };
+    });
+    const nextCursor = page.nextCursor === null ? null : projectionUuid(page.nextCursor);
+    if (nextCursor && (items.length !== limit || nextCursor !== items.at(-1)?.roomId || input.roomId)) throw roomProjectionError();
+    return { items, nextCursor };
+  }
   private readonly roomOperationCursor?: RoomOperationCursorCodec;
 
   constructor(
@@ -1178,6 +1217,8 @@ export class SupabaseRoomService implements RoomService {
   }
 
   async mutateOperation(actor: Actor, input: RoomOperationInput): Promise<RoomOperationResult> {
+    const candle = input.action === 'set_candle_count';
+    if (candle) ensureCandleActor(actor); else ensureAdmin(actor);
     if (input.action === 'report_issue') {
       assertNoContactInformation(input.payload.description as string | undefined);
     }
@@ -1192,10 +1233,10 @@ export class SupabaseRoomService implements RoomService {
       reasonCode: input.reasonCode,
       payload: input.payload
     };
-    const { data, error } = await this.clients.admin.rpc('mutate_room_operation', {
+    const { data, error } = await this.clients.admin.rpc(candle ? 'set_room_candle_count' : 'mutate_room_operation', {
       p_actor_profile_id: actor.profileId,
       p_room_id: input.roomId,
-      p_action: input.action,
+      ...(candle ? { p_session_id: verifiedSessionId(actor.accessToken) } : { p_action: input.action }),
       p_expected_room_version: input.expectedRoomVersion,
       p_reason_code: input.reasonCode,
       p_payload: payload,
@@ -1203,7 +1244,7 @@ export class SupabaseRoomService implements RoomService {
       p_request_hash: requestHash(fingerprint)
     });
     if (error || !data) {
-      throw roomError(error);
+      throw candle ? candleError(error) : roomError(error);
     }
     const row = data as {
       entity_id: string;

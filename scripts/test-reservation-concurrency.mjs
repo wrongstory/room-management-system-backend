@@ -22,6 +22,7 @@ import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
 import { testReservationRoomMoveConcurrency } from './test-reservation-room-move-concurrency.mjs';
 import { testReservationLongStayConcurrency } from './test-reservation-long-stay-concurrency.mjs';
 import { testRoomPinBootstrapConcurrency } from './test-room-pin-bootstrap-concurrency.mjs';
+import { testRoomCandleConcurrency } from './test-room-candle-concurrency.mjs';
 import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
 import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
 import { testRoomPinSheetSyncConcurrency } from './test-room-pin-sheet-sync-concurrency.mjs';
@@ -1206,6 +1207,7 @@ await testNotificationDeliveryConcurrency(client);
 await testPasswordChangeConcurrency(client);
 await testRoomPinConcurrency(client);
 await testRoomPinBootstrapConcurrency(client);
+await testRoomCandleConcurrency();
 await testRoomPinSheetSyncConcurrency();
 
 console.log(

@@ -1,5 +1,9 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## #330 촛불 공동 관리 — source 후보
+
+활성 관리자·모든 메이드용 `GET /v1/rooms/candles` 최소 조회와 기존 `POST /v1/rooms/{roomId}/candles` 전용 권한 확대를 Fastify/Edge/OpenAPI에 구현했다. 배정·제출/승인·7일 제한 없이 수량을 조정하고 room CAS/멱등성·live session·원장 보존을 유지한다. 86번째 append migration과 source OpenAPI 0.6.0 **132 paths / 142 operations** 기준이며 dev 병합·운영 배포·프런트 연동 완료가 아니다. [인계 및 rollback](./ROOM_CANDLES_330.md)을 따른다.
+
 이 문서는 백엔드 API의 **개발 완료 여부**, **Supabase Edge 이식 여부**, **production 배포 여부**, **현재 실제 사용 가능 여부**를 한 곳에서 추적하는 정본이다.
 
 API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR에서 갱신한다. Fastify 코드나 DB RPC가 존재한다는 이유만으로 production에서 사용할 수 있다고 표시하지 않는다.

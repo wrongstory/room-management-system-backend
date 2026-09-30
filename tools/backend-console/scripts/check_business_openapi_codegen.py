@@ -33,8 +33,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 131:
-        raise RuntimeError("전체 source OpenAPI path 수가 131가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 132:
+        raise RuntimeError("전체 source OpenAPI path 수가 132가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -43,8 +43,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 141:
-        raise RuntimeError("전체 source OpenAPI operation 수가 141가 아닙니다.")
+    if operation_count != 142:
+        raise RuntimeError("전체 source OpenAPI operation 수가 142가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     audit_event_types = schemas.get("DeveloperAuditEventType", {}).get("enum")
     if (
@@ -86,6 +86,9 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "rooms" / "list_room_candles.py",
+            package / "models" / "room_candle_item.py",
+            package / "models" / "room_candle_page.py",
             package / "api" / "reservations" / "list_reservations.py",
             package / "api" / "reservations" / "preview_reservation_bookability.py",
             package / "models" / "reservation_list_envelope.py",

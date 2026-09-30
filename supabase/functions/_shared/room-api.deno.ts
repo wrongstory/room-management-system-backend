@@ -3,6 +3,7 @@ import {
   correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRoomCandles,
   listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
@@ -474,10 +475,14 @@ Deno.test("all six room operations reuse mutate_room_operation", async () => {
     roomId,
   );
 
-  const mutations = calls.filter(([name]) => name === "mutate_room_operation");
+  const mutations = calls.filter(([name]) =>
+    ["mutate_room_operation", "set_room_candle_count"].includes(name)
+  );
   assert(mutations.length === 6, "exact six mutation calls");
   assert(
-    mutations.map(([, args]) => args.p_action).join(",") ===
+    mutations.map(([name, args]) =>
+      name === "set_room_candle_count" ? "set_candle_count" : args.p_action
+    ).join(",") ===
       "create_block,release_block,set_candle_count,report_issue,resolve_issue,record_pin_sync",
     "existing action contract",
   );
@@ -498,6 +503,152 @@ Deno.test("all six room operations reuse mutate_room_operation", async () => {
     !JSON.stringify(pinResult).toLowerCase().includes("pin"),
     "operation response has no PIN data",
   );
+});
+
+Deno.test("all maids get only candle fields and use the session-bound candle command", async () => {
+  const maid = { ...admin, role: "maid" as const };
+  const item = { roomId, roomNumber: "350", count: 2, roomStateVersion: 3 };
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        return Promise.resolve({
+          data: {
+            items: [{
+              ...item,
+              pin: "not-returned",
+              guestName: "not-returned",
+            }],
+            nextCursor: null,
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const page = await listRoomCandles(
+    readRequest(`/v1/rooms/candles?roomId=${roomId}`),
+    clients,
+    maid,
+  );
+  assert(
+    JSON.stringify(page) ===
+      JSON.stringify({ items: [item], nextCursor: null }),
+    "safe minimal projection",
+  );
+  assert(
+    calls[0][1].p_session_id === sessionId && calls[0][1].p_room_id === roomId,
+    "session and filter binding",
+  );
+  for (
+    const query of [
+      "limit=51",
+      "limit=01",
+      "limit=1&limit=2",
+      `roomId=${roomId}&cursor=${roomId}`,
+      "pin=true",
+    ]
+  ) {
+    const error = await captureEdgeError(() =>
+      listRoomCandles(readRequest(`/v1/rooms/candles?${query}`), clients, maid)
+    );
+    assert(error.status === 400, "strict bounded query");
+  }
+  for (
+    const forbidden of [{ ...maid, role: "developer" as const }, {
+      ...maid,
+      mustChangePassword: true,
+    }]
+  ) {
+    const error = await captureEdgeError(() =>
+      listRoomCandles(readRequest("/v1/rooms/candles"), clients, forbidden)
+    );
+    assert(error.status === 403, "developer/password gate");
+  }
+  const mutations: Array<[string, Record<string, unknown>]> = [];
+  await setRoomCandleCount(
+    commandRequest(`/v1/rooms/${roomId}/candles`, {
+      count: 0,
+      physicallyVerified: true,
+      expectedRoomVersion: 3,
+      reasonCode: "CANDLE_COLLECTED",
+    }),
+    operationClients(mutations),
+    maid,
+    roomId,
+  );
+  assert(
+    mutations[0][0] === "set_room_candle_count" &&
+      mutations[0][1].p_session_id === sessionId &&
+      !("p_action" in mutations[0][1]),
+    "narrow command, no arbitrary operation",
+  );
+  const denied = await captureEdgeError(() =>
+    createRoomOperationBlock(
+      commandRequest(`/v1/rooms/${roomId}/operation-blocks`, {}),
+      clients,
+      maid,
+      roomId,
+    )
+  );
+  assert(denied.status === 403, "other room commands remain admin only");
+});
+
+Deno.test("candle commands reject invalid input and redact DB errors", async () => {
+  const body = {
+    count: 0,
+    physicallyVerified: true,
+    expectedRoomVersion: 3,
+    reasonCode: "CANDLE_COLLECTED",
+  };
+  for (
+    const patch of [{ count: -1 }, { count: 2147483648 }, { count: 1.5 }, {
+      expectedRoomVersion: 1e20,
+    }, { assignmentId: roomId }]
+  ) {
+    const error = await captureEdgeError(() =>
+      setRoomCandleCount(
+        commandRequest(`/v1/rooms/${roomId}/candles`, { ...body, ...patch }),
+        operationClients([]),
+        admin,
+        roomId,
+      )
+    );
+    assert(error.status === 400, "invalid input rejected");
+  }
+  for (
+    const [code, status] of [
+      ["CANDLE_ACCESS_REQUIRED", 403],
+      ["CANDLE_VERIFICATION_REQUIRED", 400],
+      ["SESSION_REVOKED", 401],
+      ["STALE_VERSION", 409],
+      ["PASSWORD_CHANGE_REQUIRED", 403],
+      ["INVALID_CANDLE_REQUEST", 400],
+    ] as const
+  ) {
+    const clients = {
+      admin: {
+        rpc: () =>
+          Promise.resolve({
+            data: null,
+            error: { message: `${code}: private-detail` },
+          }),
+      },
+    } as unknown as EdgeClients;
+    const error = await captureEdgeError(() =>
+      setRoomCandleCount(
+        commandRequest(`/v1/rooms/${roomId}/candles`, body),
+        clients,
+        admin,
+        roomId,
+      )
+    );
+    assert(
+      error.status === status && !error.message.includes("private-detail"),
+      "safe error mapping",
+    );
+  }
 });
 
 Deno.test("occupancy correction is a separate admin session-bound command", async () => {

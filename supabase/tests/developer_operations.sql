@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'shared_room_candle_adjustment'
   ) ->> 'currentMigration',
-  'flat_cleaning_evidence_history_payroll',
+  'shared_room_candle_adjustment',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'shared_room_candle_adjustment'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,24 +97,24 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'flat_cleaning_evidence_history_payroll';
+where name = 'shared_room_candle_adjustment';
 
 delete from supabase_migrations.schema_migrations
-where name = 'flat_cleaning_evidence_history_payroll';
+where name = 'shared_room_candle_adjustment';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'shared_room_candle_adjustment'
   ) ->> 'currentMigration',
-  'complaint_deadlines_non_blocking',
+  'flat_cleaning_evidence_history_payroll',
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'shared_room_candle_adjustment'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'
