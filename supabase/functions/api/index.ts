@@ -1570,17 +1570,6 @@ export async function handleApiRequest(
       ? /^\/v1\/rooms\/([^/]+)\/operation-blocks$/.exec(path)
       : null;
     if (operationBlocksReadMatch) {
-      const params = new URL(request.url).searchParams;
-      if (
-        [...params.keys()].some((key) => key !== "status") ||
-        (params.get("status") ?? "actionable") !== "actionable"
-      ) {
-        throw new EdgeError(
-          400,
-          "VALIDATION_ERROR",
-          "status는 actionable만 사용할 수 있습니다.",
-        );
-      }
       const response = jsonResponse(
         await listRoomOperationBlocks(
           request,
@@ -1598,17 +1587,6 @@ export async function handleApiRequest(
       ? /^\/v1\/rooms\/([^/]+)\/issues$/.exec(path)
       : null;
     if (roomIssuesReadMatch) {
-      const params = new URL(request.url).searchParams;
-      if (
-        [...params.keys()].some((key) => key !== "status") ||
-        (params.get("status") ?? "open") !== "open"
-      ) {
-        throw new EdgeError(
-          400,
-          "VALIDATION_ERROR",
-          "status는 open만 사용할 수 있습니다.",
-        );
-      }
       const response = jsonResponse(
         await listRoomIssues(
           request,
