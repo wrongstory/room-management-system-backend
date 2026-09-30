@@ -1,5 +1,15 @@
 # 백엔드 서버 설계
 
+## #332 등록 신고 조회 후보
+
+86번째 append-only `admin_registered_report_read`는 기존 private 신고 원장을 room 단위로
+UNION한 admin-only bounded projection이다. session/active/password/role을 DB에서 먼저 검증하며
+service-role EXECUTE 외 direct table 접근 권한을 추가하지 않는다. 5/10건 keyset과 서명 cursor,
+128 KiB 응답 상한, nested allowlist, no-store를 Fastify/Edge에 동일하게 적용한다.
+현재 사진 collection이 아니라 불변 report evidence만 읽고 provider locator는 읽기 가능 판정에만
+사용하며 공개 응답에서 제외한다. 기존 photo content 재검증·retention·검수 명령은 변경하지 않는다.
+[API와 rollout 경계](./ADMIN_REPORT_READ.md).
+
 > 문서 지위: 설계 검토 초안이다. 구현 전에 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 먼저 읽는다. 이 문서와 ERD/DBML은 제품 가이드와 reconcile되기 전에는 목표 계약이 아니며, `[미확정]` 정책을 기존 코드나 이 문서만으로 확정하지 않는다.
 
 ## 기술 선택

@@ -1,5 +1,13 @@
 # Room Management System ERD 초안
 
+## #332 등록 신고 조회 후보
+
+새 table이나 관계 변경은 없다. `attempt_room_issue_reports.issue_id → room_issues.id`와
+`bomb_room_reports.cleaning_attempt_id → cleaning_attempts → cleaning_targets.room_id`를
+room 범위로 결합한다. 선택 증빙의 immutable photo version → acceptance → retention을 읽으며
+다른 current upload는 열거하지 않는다. 봉인 submission FK·결정·이력은 그대로 보존한다.
+86번째 migration은 조회 RPC만 추가한다. [상세 계약](./ADMIN_REPORT_READ.md).
+
 > 상태: **검토용 v4**
 > P0 핵심 스키마·계정 수명주기·도메인 무결성 계약은 migration으로 관리하며, 이후 업무 API와 원장은 구현 순서에 따라 확장한다.
 > 제품 계약과 미확정 사항은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 우선한다.
