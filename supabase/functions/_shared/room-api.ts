@@ -685,7 +685,7 @@ export async function listRoomTypes(
 async function roomOperationPageInput(
   request: Request,
   scope: ReturnType<typeof roomOperationCursorScope>,
-  expectedStatus: "actionable" | "open",
+  expectedStatus: "actionable" | "open" | "registered",
 ) {
   const params = new URL(request.url).searchParams;
   for (const key of params.keys()) {
@@ -708,7 +708,8 @@ async function roomOperationPageInput(
       "객실 운영 조회 조건이 올바르지 않습니다.",
     );
   }
-  const rawLimit = params.get("limit") ?? String(ROOM_OPERATION_PAGE_DEFAULT);
+  const rawLimit = params.get("limit") ??
+    String(expectedStatus === "registered" ? 5 : ROOM_OPERATION_PAGE_DEFAULT);
   if (!/^[1-9]\d*$/.test(rawLimit)) {
     throw new EdgeError(
       400,
@@ -717,7 +718,10 @@ async function roomOperationPageInput(
     );
   }
   const limit = Number(rawLimit);
-  if (!Number.isSafeInteger(limit) || limit > ROOM_OPERATION_PAGE_MAX) {
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit > (expectedStatus === "registered" ? 10 : ROOM_OPERATION_PAGE_MAX)
+  ) {
     throw new EdgeError(
       400,
       "ROOM_OPERATION_PAGE_LIMIT_INVALID",
@@ -850,6 +854,154 @@ export async function listRoomOperationBlocks(
         createdAt: responseTimestamp(row.createdAt, "createdAt"),
       };
     }),
+    hasMore: value.hasMore,
+    nextCursor: next === null
+      ? null
+      : await encodeRoomOperationCursor(scope, next),
+  };
+  assertRoomOperationResponseSize(result);
+  return result;
+}
+
+function registeredReportItem(value: unknown): Record<string, unknown> {
+  const fail = () =>
+    new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "신고 조회 결과가 올바르지 않습니다.",
+    );
+  const object = (v: unknown): Record<string, unknown> => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw fail();
+    return v as Record<string, unknown>;
+  };
+  const text = (v: unknown): string => {
+    if (typeof v !== "string") throw fail();
+    return v;
+  };
+  const id = (v: unknown): string => {
+    const s = text(v);
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        .test(s)
+    ) throw fail();
+    return s;
+  };
+  const time = (v: unknown): string => {
+    const s = text(v);
+    if (!Number.isFinite(Date.parse(s))) throw fail();
+    return s;
+  };
+  const choice = (v: unknown, allowed: string[]): string => {
+    const s = text(v);
+    if (!allowed.includes(s)) throw fail();
+    return s;
+  };
+  const row = object(value);
+  const kind = choice(row.kind, ["room_issue", "bomb_room"]);
+  const memo = text(row.memo);
+  const unsealed = kind === "room_issue" || row.status === "reported";
+  if (unsealed !== (row.sealedSubmissionId === null)) throw fail();
+  if (
+    !memo.trim() || memo.length > 500 || !Array.isArray(row.evidence) ||
+    row.evidence.length < 1 ||
+    row.evidence.length > (kind === "room_issue" ? 10 : 20)
+  ) throw fail();
+  return {
+    id: id(row.id),
+    attemptId: id(row.attemptId),
+    kind,
+    memo,
+    reportedAt: time(row.reportedAt),
+    status: choice(
+      row.status,
+      kind === "room_issue"
+        ? ["open", "resolved"]
+        : ["reported", "pending", "approved", "rejected"],
+    ),
+    sealedSubmissionId: row.sealedSubmissionId === null
+      ? null
+      : id(row.sealedSubmissionId),
+    evidence: row.evidence.map((v) => {
+      const p = object(v);
+      return {
+        photoId: id(p.photoId),
+        readState: choice(p.readState, [
+          "available",
+          "expired",
+          "purged",
+          "unavailable",
+        ]),
+        retentionPolicy: choice(p.retentionPolicy, [
+          "legacy_upload",
+          "cleaning_submission",
+          "room_issue",
+          "complaint",
+          "interruption",
+          "sync_conflict",
+          "mixed",
+          "orphan",
+        ]),
+        retentionStartsAt: p.retentionStartsAt === null
+          ? null
+          : time(p.retentionStartsAt),
+        expiresAt: p.expiresAt === null ? null : time(p.expiresAt),
+        purgedAt: p.purgedAt === null ? null : time(p.purgedAt),
+        mediaAvailability: choice(p.mediaAvailability, [
+          "available",
+          "purged",
+          "unavailable",
+        ]),
+      };
+    }),
+  };
+}
+
+export async function listRoomReports(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+) {
+  requireRoomAdmin(actor);
+  const normalized = uuidValue(roomId, "roomId").toLowerCase();
+  const scope = roomOperationCursorScope(actor, normalized, "reports");
+  const input = await roomOperationPageInput(request, scope, "registered");
+  const { data, error } = await clients.admin.rpc("list_room_reports_page", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: verifiedRequestSessionId(request),
+    p_room_id: normalized,
+    p_limit: input.limit,
+    p_cursor_at: input.cursor?.occurredAt ?? null,
+    p_cursor_id: input.cursor?.id ?? null,
+  });
+  if (error?.message === "PASSWORD_CHANGE_REQUIRED") {
+    throw new EdgeError(
+      403,
+      "PASSWORD_CHANGE_REQUIRED",
+      "먼저 비밀번호를 변경해 주세요.",
+    );
+  }
+  if (error) throw roomDatabaseError(error);
+  const value = data as Record<string, unknown>;
+  if (
+    !value || value.roomId !== normalized || !Array.isArray(value.items) ||
+    value.items.length > input.limit
+  ) {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "신고 조회 결과가 올바르지 않습니다.",
+    );
+  }
+  const next = roomOperationNextCursor(value.nextCursor, value.hasMore);
+  const result = {
+    roomId: normalized,
+    roomStateVersion: positiveInteger(
+      value.roomStateVersion,
+      "roomStateVersion",
+    ),
+    evaluatedAt: responseTimestamp(value.evaluatedAt, "evaluatedAt"),
+    items: value.items.map(registeredReportItem),
     hasMore: value.hasMore,
     nextCursor: next === null
       ? null

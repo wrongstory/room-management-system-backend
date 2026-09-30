@@ -291,6 +291,12 @@ insert into submission_results values('bomb-report',public.report_bomb_room(pg_t
  array[(select photo_version_id from private.attempt_photo_current where cleaning_attempt_id=pg_temp.pid(503))],
  '폭탄방 합성 메모','bomb-report-key',repeat('1',64)));
 insert into submission_results values('bomb-submission',pg_temp.submit(3));
+select is((public.list_room_reports_page(pg_temp.pid(1),pg_temp.pid(201),
+ (select room_id from public.cleaning_targets where id=pg_temp.pid(303)))->'items'->0->>'status'),
+ 'pending','sealed report status means awaiting bomb decision, not early approval');
+select is((public.list_room_reports_page(pg_temp.pid(1),pg_temp.pid(201),
+ (select room_id from public.cleaning_targets where id=pg_temp.pid(303)))->'items'->0->>'sealedSubmissionId'),
+ (select value->>'id' from submission_results where label='bomb-submission'),'report links only the immutable sealed submission');
 select is((select ((public.get_cleaning_submission(pg_temp.pid(1),(value->>'id')::uuid)->'bombReport'->'evidencePhotoIds'->>0)::uuid)
   from submission_results where label='bomb-submission'),
  (select photo_version_id from private.attempt_photo_current where cleaning_attempt_id=pg_temp.pid(503)),'admin detail receives exact sealed evidence photo ID');
@@ -304,6 +310,9 @@ insert into submission_results values('bomb-decision',public.decide_bomb_room(pg
  'approved','BOMB_CONFIRMED','bomb-decision-key',repeat('3',64)));
 insert into submission_results values('bomb-approved',public.approve_cleaning_submission(pg_temp.pid(1),(select (value->>'id')::uuid from submission_results where label='bomb-submission'),
  'QUALITY_OK','bomb-approve-key',repeat('4',64)));
+select is((public.list_room_reports_page(pg_temp.pid(1),pg_temp.pid(201),
+ (select room_id from public.cleaning_targets where id=pg_temp.pid(303)))->'items'->0->>'status'),
+ 'approved','registered report history retains the existing bomb decision after final approval');
 select is((select base_amount from public.earnings where submission_id=(select (value->>'id')::uuid from submission_results where label='bomb-submission')),12000,'approved submission earns frozen base fee');
 select is((select bomb_room_bonus from public.earnings where submission_id=(select (value->>'id')::uuid from submission_results where label='bomb-submission')),12000,'approved bomb decision adds exactly one frozen-fee bonus');
 select ok((select e.bomb_room_decision_id=d.id from public.earnings e join private.bomb_room_decisions d on d.submission_id=e.submission_id

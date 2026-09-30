@@ -520,6 +520,55 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    "/v1/rooms/{roomId}/reports": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomReports",
+        summary: "등록된 청소 신고와 증빙 조회",
+        description:
+          "active business admin 전용 읽기 API입니다. 제출 전부터 실제 등록된 room_issue·bomb_room 신고만 조회하며 미신고 업로드는 제외합니다. 기존 room issue ID를 재사용합니다. reportedAt,id 내림차순, limit 기본 5·최대 10, actor/room/stream별 서명 cursor입니다. 해결·판정 뒤에도 이력을 보존하며 빈 items는 등록된 신고 없음입니다. readState는 증빙 열람 가능/만료/삭제/미준비 상태이고 provider 장애는 content 요청에서 별도 오류로 반환합니다. 사진은 기존 GET /v1/photos/{photoId}/content로 읽습니다. 조회만으로 제출·검수·수익이 생성되지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          roomIdParameter(),
+          {
+            name: "status",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["registered"],
+              default: "registered",
+            },
+          },
+          {
+            name: "limit",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 10, default: 5 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "등록 신고의 immutable evidence와 현재 보존 상태",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomReportsEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/attempts/{attemptId}/room-issues": {
       post: {
         ...submissionOperation(
@@ -10887,6 +10936,187 @@ export const openApiDocument = {
           description: { type: ["string", "null"], maxLength: 500 },
           status: { type: "string", enum: ["open"] },
           reportedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RegisteredReportEvidence: {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "photoId",
+          "readState",
+          "retentionPolicy",
+          "retentionStartsAt",
+          "expiresAt",
+          "purgedAt",
+          "mediaAvailability",
+        ],
+        "properties": {
+          "photoId": {
+            "type": "string",
+            "format": "uuid",
+          },
+          "readState": {
+            "type": "string",
+            "enum": [
+              "available",
+              "expired",
+              "purged",
+              "unavailable",
+            ],
+          },
+          "retentionPolicy": {
+            "type": "string",
+            "enum": [
+              "legacy_upload",
+              "cleaning_submission",
+              "room_issue",
+              "complaint",
+              "interruption",
+              "sync_conflict",
+              "mixed",
+              "orphan",
+            ],
+          },
+          "retentionStartsAt": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "format": "date-time",
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "format": "date-time",
+          },
+          "purgedAt": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "format": "date-time",
+          },
+          "mediaAvailability": {
+            "type": "string",
+            "enum": [
+              "available",
+              "purged",
+              "unavailable",
+            ],
+          },
+        },
+      },
+      RegisteredRoomReport: {
+        description:
+          "kind=room_issue의 status는 open/resolved입니다. kind=bomb_room의 reported는 제출에 미봉인, pending은 제출 봉인 후 판정 대기, approved/rejected는 기존 검수 흐름에서 기록된 폭탄방 판정입니다. 조회 API는 판정을 수행하지 않습니다. sealedSubmissionId는 폭탄방의 최초 봉인 제출에만 연결되며 room_issue는 null입니다.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "attemptId",
+          "kind",
+          "memo",
+          "reportedAt",
+          "status",
+          "sealedSubmissionId",
+          "evidence",
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+          },
+          "attemptId": {
+            "type": "string",
+            "format": "uuid",
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "room_issue",
+              "bomb_room",
+            ],
+          },
+          "memo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+          },
+          "reportedAt": {
+            "type": "string",
+            "format": "date-time",
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved",
+              "reported",
+              "pending",
+              "approved",
+              "rejected",
+            ],
+          },
+          "sealedSubmissionId": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "format": "uuid",
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/RegisteredReportEvidence",
+            },
+          },
+        },
+      },
+      RoomReportsEnvelope: {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roomId",
+          "roomStateVersion",
+          "evaluatedAt",
+          "items",
+          "hasMore",
+          "nextCursor",
+        ],
+        "properties": {
+          "roomId": {
+            "type": "string",
+            "format": "uuid",
+          },
+          "roomStateVersion": {
+            "type": "integer",
+            "minimum": 1,
+          },
+          "evaluatedAt": {
+            "type": "string",
+            "format": "date-time",
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/components/schemas/RegisteredRoomReport",
+            },
+          },
+          "hasMore": {
+            "type": "boolean",
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "maxLength": 1024,
+          },
         },
       },
       RoomIssuesEnvelope: {

@@ -151,6 +151,7 @@ import {
   listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
+  listRoomReports,
   listRooms,
   listRoomTypes,
   overrideRoomDisplayStatus,
@@ -1588,6 +1589,18 @@ export async function handleApiRequest(
           actor,
           operationBlocksReadMatch[1],
         ),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    const roomReportsMatch = request.method === "GET"
+      ? /^\/v1\/rooms\/([^/]+)\/reports$/.exec(path)
+      : null;
+    if (roomReportsMatch) {
+      const response = jsonResponse(
+        await listRoomReports(request, clients, actor, roomReportsMatch[1]),
         200,
         corsHeaders,
       );

@@ -1,5 +1,16 @@
 # 프런트엔드 계약 snapshot
 
+## 2026-10-01 #332 추가 관찰 및 source 후보
+
+프런트 정본 `makee-ham/room-management-system`의
+`dev@09ed28446a4fd43919cddb29ebe442b848548ab8`에 있는
+`DOCS/28_FRONTEND_CONNECTION_BACKEND_MEETING.md` B07과 사용자 A안 결정을 대조했다.
+이 관찰은 제품 가이드가 고정한 전체 프런트 정책 snapshot을 교체하지 않는다.
+제출 전 등록 신고 조회는 백엔드 `GET /v1/rooms/{roomId}/reports` 후보로 보강한다.
+OpenAPI 0.6.0 / 132 paths / 142 operations, generated Python business client의 임시 생성·컴파일 검증 대상이다.
+관리자 전용 업무 API이므로 developer 운영 콘솔의 filtered client에는 추가하지 않는다.
+프런트 코드·배포·운영 OpenAPI·Pages는 변경하지 않았다. [연동 세부 계약](./ADMIN_REPORT_READ.md).
+
 이 문서는 `wrongstory/room-management-system`의 exact 제품 snapshot을 백엔드 계약에 대조한 재현 가능한 기록이다. 제품 정책의 최종 우선순위는 [AI 백엔드 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
 ## 2026-09-23 확인점

@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 85,
+  "totalCount": 86,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 7,
+    "count": 8,
     "first": "assignment_unavailability_reassignment",
-    "head": "flat_cleaning_evidence_history_payroll"
+    "head": "admin_registered_report_read"
   },
-  "head": "flat_cleaning_evidence_history_payroll",
+  "head": "admin_registered_report_read",
   "migrations": [
     {
       "order": 1,
@@ -438,6 +438,11 @@
       "order": 85,
       "name": "flat_cleaning_evidence_history_payroll",
       "sha256": "2be3c320dcf24718f63a297c05f4c7fa5802e5f4fde5a4534eab572d4e166590"
+    },
+    {
+      "order": 86,
+      "name": "admin_registered_report_read",
+      "sha256": "83541ca1f351b8e6d830cb8e4c2b13e9a58e338c58284854fe4105fa37f938e3"
     }
   ]
 }

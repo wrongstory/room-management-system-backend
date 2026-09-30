@@ -8,6 +8,17 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 ## 1. 상태 판정 규칙
 
+### #332 등록 신고 조회 후보 (2026-10-01)
+
+| 기능 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|
+| 객실별 등록 특이사항·폭탄방과 선택 증빙 조회 | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+
+`GET /v1/rooms/{roomId}/reports`, 86번째 `admin_registered_report_read` migration.
+후보 OpenAPI 0.6.0 / 132 paths / 142 operations이며 기존 #330 후보와 독립 개발한다.
+등록 전 사진은 목록에서 제외하고 전체 제출 전후의 신고 이력·사진 만료/삭제 상태만 조회한다.
+검수·봉인·수익·content 권한은 유지한다. [연동 계약](./ADMIN_REPORT_READ.md).
+
 | 표시 | 의미 |
 |---|---|
 | ✅ | 해당 단계 완료 및 검증됨 |

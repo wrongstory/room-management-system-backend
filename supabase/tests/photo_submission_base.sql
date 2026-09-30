@@ -448,6 +448,13 @@ select private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(1500
 select throws_ok($$select public.report_attempt_room_issue(pg_temp.pid(3),pg_temp.pid(1500),
  array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750))],
  'QA issue','flat-issue-other',repeat('b',64))$$,'42501','SUBMISSION_ACCESS_REQUIRED','other maid cannot report issues');
+insert into auth.sessions(id,user_id) values(pg_temp.pid(1991),pg_temp.pid(101));
+create function pg_temp.registered_reports(p_limit integer default 5,p_at timestamptz default null,p_id uuid default null)
+returns jsonb language sql as $$
+ select public.list_room_reports_page(pg_temp.pid(1),pg_temp.pid(1991),
+   (select room_id from public.cleaning_targets where id=pg_temp.pid(1300)),p_limit,p_at,p_id)
+$$;
+select is(jsonb_array_length(pg_temp.registered_reports()->'items'),0,'unreported issue/bomb/general uploads are excluded');
 select lives_ok($$select public.report_attempt_room_issue(pg_temp.pid(2),pg_temp.pid(1500),
  array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750))],
  'QA issue','flat-issue-owner',repeat('b',64))$$,'owner can report separate issue evidence');
@@ -455,6 +462,75 @@ select lives_ok($$select public.report_attempt_room_issue(pg_temp.pid(2),pg_temp
  array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750))],
  'QA issue','flat-issue-owner',repeat('b',64))$$,'same issue request replays without duplication');
 select is((select count(*) from private.attempt_room_issue_reports where cleaning_attempt_id=pg_temp.pid(1500)),1::bigint,'issue report is created once');
+
+select is(pg_temp.registered_reports()->'items'->0->>'memo','QA issue','admin reads registered memo before submission');
+select is(pg_temp.registered_reports()->'items'->0->>'id',
+ (select issue_id::text from private.attempt_room_issue_reports where cleaning_attempt_id=pg_temp.pid(1500)),
+ 'projection reuses the operational issue identity');
+select is(jsonb_array_length(pg_temp.registered_reports()->'items'->0->'evidence'),1,'only selected immutable issue evidence appears');
+select is(pg_temp.registered_reports()->'items'->0->'evidence'->0->>'photoId',
+ (select photo_version_id::text from private.attempt_photo_collection_items where id=pg_temp.pid(1750)),
+ 'selected issue evidence does not include ordinary or bomb uploads');
+select ok(exists(select 1 from private.photo_upload_acceptances where photo_version_id=
+ (select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750))),
+ 'fixture records accepted provider data through its upload finalizer trigger');
+select is(pg_temp.registered_reports()->'items'->0->'evidence'->0->>'readState','available',
+ 'registered accepted and verified evidence is readable before submission');
+savepoint report_media_unavailable;
+update private.photo_retention_records set media_availability='unavailable' where photo_version_id=(
+ select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750));
+select is(pg_temp.registered_reports()->'items'->0->'evidence'->0->>'readState','unavailable','unavailable provider media is not claimed readable');
+rollback to report_media_unavailable;
+savepoint report_expired;
+update private.photo_retention_records set retention_starts_at=clock_timestamp()-interval '181 days',
+ expires_at=clock_timestamp()-interval '1 day' where photo_version_id=(
+ select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1750));
+select is(pg_temp.registered_reports()->'items'->0->'evidence'->0->>'readState','expired','expired report evidence retains its metadata');
+insert into private.attempt_photo_purge_states(photo_version_id,purged_at)
+ select p.id,p.purge_after from private.attempt_photo_versions p
+ join private.attempt_photo_collection_items i on i.photo_version_id=p.id where i.id=pg_temp.pid(1750);
+select is(pg_temp.registered_reports()->'items'->0->'evidence'->0->>'readState','purged','purged report evidence retains its metadata');
+rollback to report_expired;
+insert into auth.users(id) select pg_temp.pid(100+n) from generate_series(5,7)n;
+insert into auth.sessions(id,user_id) select pg_temp.pid(1990+n),pg_temp.pid(100+n) from generate_series(5,7)n;
+insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password)
+select pg_temp.pid(n),pg_temp.pid(100+n),'report-'||n,'report-'||n,'report-'||n,'report-'||n,0,
+ case when n=6 then 'maid' else 'admin' end::public.app_role,
+ case when n=5 then 'inactive' when n=6 then 'upload_only' else 'active' end::public.account_status,n=7
+from generate_series(5,7)n;
+select throws_ok($$select public.list_room_reports_page(pg_temp.pid(5),pg_temp.pid(1995),pg_temp.pid(99999))$$,
+ '42501','ADMIN_REQUIRED','inactive admin rejected before room lookup');
+select throws_ok($$select public.list_room_reports_page(pg_temp.pid(6),pg_temp.pid(1996),pg_temp.pid(99999))$$,
+ '42501','ADMIN_REQUIRED','upload-only capability never permits admin report reads');
+select throws_ok($$select public.list_room_reports_page(pg_temp.pid(7),pg_temp.pid(1997),pg_temp.pid(99999))$$,
+ '42501','PASSWORD_CHANGE_REQUIRED','temporary-password admin rejected');
+select lives_ok($$select public.report_bomb_room(pg_temp.pid(2),pg_temp.pid(1500),
+ array[(select photo_version_id from private.attempt_photo_collection_items where id=pg_temp.pid(1700))],
+ 'QA registered bomb','flat-bomb-registered',repeat('e',64))$$,'register separate bomb evidence');
+select is(jsonb_array_length(pg_temp.registered_reports()->'items'),2,'both registered report kinds visible before submission');
+select is(pg_temp.registered_reports()->'items'->0->>'status','reported','unsealed bomb report is not a pending inspection or decision');
+select is((pg_temp.registered_reports(1)->>'hasMore')::boolean,true,'bounded report page has continuation');
+select is(jsonb_array_length(pg_temp.registered_reports(1,
+ (pg_temp.registered_reports(1)->'nextCursor'->>'occurredAt')::timestamptz,
+ (pg_temp.registered_reports(1)->'nextCursor'->>'id')::uuid)->'items'),1,'cursor resumes at the older issue without duplication');
+select throws_ok($$select pg_temp.registered_reports(11)$$,'22023','ROOM_OPERATION_PAGE_LIMIT_INVALID','report limit is ten');
+select throws_ok($$select pg_temp.registered_reports(1,now(),null)$$,'22023','INVALID_ROOM_OPERATION_CURSOR','partial keyset rejected');
+select throws_ok($$select public.list_room_reports_page(pg_temp.pid(1),pg_temp.pid(990),pg_temp.pid(99999))$$,
+ '42501','SESSION_REVOKED','foreign session rejected before room lookup');
+select throws_ok($$select public.list_room_reports_page(pg_temp.pid(2),pg_temp.pid(990),pg_temp.pid(99999))$$,
+ '42501','ADMIN_REQUIRED','own performer does not gain administrator report projection');
+select throws_ok($$select public.list_room_reports_page(pg_temp.pid(3),null,pg_temp.pid(99999))$$,
+ '42501','ADMIN_REQUIRED','other maid rejected before entity lookup');
+select throws_ok($$select public.list_room_reports_page(pg_temp.pid(4),null,pg_temp.pid(99999))$$,
+ '42501','ADMIN_REQUIRED','developer is not a business admin');
+select throws_ok($$select public.list_room_reports_page(pg_temp.pid(1),pg_temp.pid(1991),pg_temp.pid(99999))$$,
+ 'P0002','ROOM_NOT_FOUND','authorized admin can distinguish absent room');
+select ok(pg_temp.registered_reports()::text !~ '(providerLocator|providerFileId|sha256|requestHash)','projection omits private storage data');
+set local role service_role;
+select lives_ok($$select pg_temp.registered_reports()$$,'actual service role can execute guarded read RPC');
+reset role;
+select ok(not has_function_privilege(r,'public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)','EXECUTE'),
+ r||' cannot spoof report RPC actor') from unnest(array['anon','authenticated'])r;
 do $$ begin for i in 2..20 loop
  perform private.record_validated_collection_photo(pg_temp.pid(2),pg_temp.pid(1500),pg_temp.flat_slot(),pg_temp.pid(1600+i),i-1,0,repeat('c',64),'image/jpeg',100,clock_timestamp());
 end loop; end $$;
