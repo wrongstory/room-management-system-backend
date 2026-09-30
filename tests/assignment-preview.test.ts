@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { zeroPreviewSnapshot } from "./fixtures/assignment-preview.js";
 import {
   optimizeAssignmentPreview,
   PREVIEW_LIMITS,
@@ -82,6 +84,145 @@ function fixed(
   };
 }
 describe("assignment preview pure optimizer", () => {
+  it("preserves the pre-diagnostics response and fingerprint golden", async () => {
+    // Captured with the optimizer at dev e19f81f; not regenerated from this implementation.
+    const { diagnostics, ...result } = await optimizeAssignmentPreview(
+      zeroPreviewSnapshot("2037-01-05"), "golden",
+    );
+    const legacy = {
+      ...result,
+      remainingUnassignedTargets: result.remainingUnassignedTargets.map(
+        ({ reasonCodes, ...row }) => {
+          expect(reasonCodes).toEqual(["AVAILABILITY_NOT_SUBMITTED"]);
+          return row;
+        },
+      ),
+    };
+    expect(diagnostics.eligibleMaidCount).toBe(0);
+    expect(result.inputFingerprint).toBe("bd06869b18017666b32fbcc35c626ae87e2969096d41ee5ab8cfdd039d37d065");
+    expect(createHash("sha256").update(JSON.stringify(legacy)).digest("hex"))
+      .toBe("d27a759354fca83ebec6c7d054646f71f8e418fbb7e5589e55db72d3691d9310");
+  });
+
+  it.each([
+    ["NO_ACTIVE_MAID", { status: "inactive" }, [0, 0, 0]],
+    ["AVAILABILITY_NOT_SUBMITTED", { availabilityVersion: null }, [2, 0, 0]],
+    ["NO_AVAILABLE_MAID", { available: false }, [2, 2, 0]],
+  ])(
+    "explains 0 proposed / 12 remaining / 0 blocked: %s",
+    async (reason, overrides, counts) => {
+      const s = snapshot(
+        Array.from({ length: 12 }, (_, i) => target(String(i))),
+      );
+      s.maids = s.maids.map((m) => ({ ...m, ...overrides }));
+      const before = JSON.stringify(s);
+      const r = await optimizeAssignmentPreview(s, "diagnostics");
+      expect(r.proposedAssignments).toEqual([]);
+      expect(r.blockedTargets).toEqual([]);
+      expect(r.remainingUnassignedTargets).toHaveLength(12);
+      for (const row of r.remainingUnassignedTargets) {
+        expect(row).toMatchObject({
+          reason: "NO_ELIGIBLE_MAID",
+          reasonCodes: [reason],
+        });
+      }
+      expect(r.diagnostics).toEqual({
+        evaluatedAt: s.planningAt,
+        activeMaidCount: counts[0],
+        submittedAvailabilityMaidCount: counts[1],
+        availableMaidCount: counts[2],
+        fixedExcludedMaidCount: 0,
+        eligibleMaidCount: 0,
+        fixedExclusions: [],
+      });
+      expect(JSON.stringify(s)).toBe(before);
+    },
+  );
+
+  it("distinguishes all fixed exclusions, partial exclusions and reclean ownership", async () => {
+    const s = snapshot([
+      fixed("fixed-a", "a", 1, { blockedReason: "private-source-sentinel" }),
+      fixed("fixed-b", "b", 1, { blockedReason: "SOURCE_STALE" }),
+      ...Array.from({ length: 12 }, (_, i) => target(String(i))),
+    ]);
+    const r = await optimizeAssignmentPreview(s, "all-fixed");
+    expect(r.proposedAssignments).toHaveLength(0);
+    expect(r.blockedTargets).toHaveLength(0);
+    expect(r.remainingUnassignedTargets).toHaveLength(12);
+    expect(
+      r.remainingUnassignedTargets.every((t) =>
+        t.reasonCodes.join() === "FIXED_ASSIGNMENT_CONFLICT"
+      ),
+    ).toBe(true);
+    expect(r.diagnostics).toMatchObject({
+      availableMaidCount: 2,
+      fixedExcludedMaidCount: 2,
+      eligibleMaidCount: 0,
+    });
+    expect(r.diagnostics.fixedExclusions).toEqual(["a", "b"].map((id) => ({
+      maidProfileId: id,
+      cleaningTargetId: `fixed-${id}`,
+      reasonCodes: ["FIXED_SOURCE_BLOCKED"],
+    })));
+    expect(JSON.stringify(r)).not.toContain("private-source-sentinel");
+    required(s.targets.find((t) => t.cleaningTargetId === "fixed-b"))
+      .blockedReason = null;
+    s.targets.push(target("reclean", {
+      source: "inspection_reclean",
+      cleaningKind: "reclean",
+      recleanMaidProfileId: "a",
+    }));
+    const partial = await optimizeAssignmentPreview(s, "partial");
+    expect(partial.proposedAssignments).toHaveLength(12);
+    expect(partial.proposedAssignments.every((t) => t.maidProfileId === "b"))
+      .toBe(true);
+    expect(partial.remainingUnassignedTargets).toEqual([{
+      cleaningTargetId: "reclean",
+      reason: "NO_ELIGIBLE_MAID",
+      reasonCodes: ["RECLEAN_MAID_FIXED_ASSIGNMENT_CONFLICT"],
+    }]);
+    expect(partial.diagnostics.eligibleMaidCount).toBe(1);
+    required(s.maids[0]).available = false;
+    const missingOwner = await optimizeAssignmentPreview(s, "missing-owner");
+    expect(missingOwner.remainingUnassignedTargets[0]).toMatchObject({
+      reason: "RECLEAN_MAID_UNAVAILABLE",
+      reasonCodes: ["RECLEAN_MAID_UNAVAILABLE"],
+    });
+  });
+
+  it("classifies fixed revision, sequence, schedule, date and attempt conflicts", async () => {
+    const first = fixed("first", "a");
+    const second = fixed("second", "a");
+    const assignment = required(second.currentAssignment ?? undefined);
+    assignment.serviceDate = "2037-01-04";
+    assignment.targetAssignmentVersion = 2;
+    assignment.availableFrom = null;
+    second.activeAttempt = {
+      attemptId: "attempt",
+      maidProfileId: "b",
+      status: "submitted",
+      startedAt: null,
+      endedAt: null,
+    };
+    const r = await optimizeAssignmentPreview(
+      snapshot([first, second, target("new")]),
+      "fixed",
+    );
+    expect(r.diagnostics.fixedExclusions).toEqual([{
+      maidProfileId: "a",
+      cleaningTargetId: "second",
+      reasonCodes: [
+        "FIXED_SEQUENCE_CONFLICT",
+        "FIXED_SERVICE_DATE_MISMATCH",
+        "FIXED_ASSIGNMENT_VERSION_MISMATCH",
+        "FIXED_SCHEDULE_MISMATCH",
+        "FIXED_ATTEMPT_OWNER_MISMATCH",
+        "FIXED_ATTEMPT_WORKFLOW_UNRESOLVED",
+      ],
+    }]);
+    expect(r.proposedAssignments[0]?.maidProfileId).toBe("b");
+  });
+
   it("works without a policy and ignores historical/demo duration inputs", async () => {
     const s = {
       ...snapshot([target("1")]),
@@ -260,6 +401,7 @@ describe("assignment preview pure optimizer", () => {
     expect(r.remainingUnassignedTargets).toEqual([{
       cleaningTargetId: "later",
       reason: "NO_ELIGIBLE_MAID",
+      reasonCodes: ["FIXED_ASSIGNMENT_CONFLICT"],
     }]);
   });
   it("reclean can only belong to original available maid", async () => {
