@@ -846,6 +846,10 @@ legacy 중복 key·필수 슬롯 등 교차 항목 조건과 receipt 존재 여�
 검증이 공유합니다. `npm run openapi:template-client:check`는 앱 TypeScript 7을 바꾸지 않고
 격리된 `openapi-typescript@7.13.0` / `typescript@5.9.3`로 클라이언트 타입을 생성·검사합니다.
 TypeScript가 표현하지 못하는 숫자 범위/DB 상태는 JSON Schema·DB 검사로 보완합니다.
+Python 생성기 호환을 위해 tuple의 `items`에는 공통 슬롯 schema를 두고 길이는 `minItems=maxItems=3`으로
+제한합니다. 객실 타입별 과거 슬롯 수는 `allOf`의 `if/then` 조건으로 표현하여 기존 이름의 요청 모델을
+유지합니다. `tools/backend-console/scripts/check_business_openapi_codegen.py`로 실제 모델 생성을 검사하며,
+생성기에서 표현하지 못하는 조건은 위 JSON Schema 검사와 기존 서버 검증을 그대로 적용합니다.
 `npm run db:test:template-contract`는 fresh local DB에서 합성 fixture만 사용하고 transaction을 rollback합니다.
 사람/독립 QA와 운영 배포는 별도 gate입니다.
 

@@ -238,6 +238,17 @@ def main() -> None:
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
             raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+        template_request = (package / "models" / "publish_cleaning_template_request.py").read_text(
+            encoding="utf-8"
+        )
+        for field in (
+            "room_type_code: CleaningTemplateRoomTypeCode",
+            'cleaning_kind: Literal["checkout"]',
+            "expected_version: int",
+            "slots: list[",
+        ):
+            if field not in template_request:
+                raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
         room_event_model = (package / "models" / "room_event.py").read_text(encoding="utf-8")
         for field in (
             "event_key: str",

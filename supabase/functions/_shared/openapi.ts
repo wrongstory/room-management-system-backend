@@ -6087,7 +6087,7 @@ export const openApiDocument = {
         type: "array",
         minItems: 3,
         maxItems: 3,
-        items: false,
+        items: { $ref: "#/components/schemas/CleaningTemplateSlot" },
         prefixItems: [
           ["cleaning-proof", 0, true, "청소 사진", 20],
           ["bomb-proof", 1, false, "폭탄방 증빙", 10],
@@ -6172,28 +6172,31 @@ export const openApiDocument = {
               "v9 신규 게시, v8 호환 게시, pre-A 완료 receipt 재생을 구별합니다. expectedVersion=0은 미설정 타입의 최초 게시이며, 기존 타입은 조회한 current version을 사용합니다. stale version과 key/hash 충돌은 409입니다.",
           },
         },
-        anyOf: Object.entries({
+        allOf: Object.entries({
           standard: 9,
           premium: 10,
           oceanPremium: 12,
           oceanFamily: 14,
         }).map(([roomTypeCode, count]) => ({
-          properties: {
-            roomTypeCode: { const: roomTypeCode },
-            slots: {
-              anyOf: [
-                { minItems: 3, maxItems: 3 },
-                {
-                  minItems: count,
-                  maxItems: count,
-                  items: { required: ["maxPhotos"] },
-                },
-                {
-                  minItems: count + 1,
-                  maxItems: count + 1,
-                  items: { not: { required: ["maxPhotos"] } },
-                },
-              ],
+          if: { properties: { roomTypeCode: { const: roomTypeCode } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword, not a JavaScript thenable.
+          then: {
+            properties: {
+              slots: {
+                anyOf: [
+                  { minItems: 3, maxItems: 3 },
+                  {
+                    minItems: count,
+                    maxItems: count,
+                    items: { required: ["maxPhotos"] },
+                  },
+                  {
+                    minItems: count + 1,
+                    maxItems: count + 1,
+                    items: { not: { required: ["maxPhotos"] } },
+                  },
+                ],
+              },
             },
           },
         })),

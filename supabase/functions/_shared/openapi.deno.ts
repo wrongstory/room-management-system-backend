@@ -1386,7 +1386,8 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
   assert(
     schemas.CheckoutCleaningTemplateV9Slots.minItems === 3 &&
       schemas.CheckoutCleaningTemplateV9Slots.maxItems === 3 &&
-      schemas.CheckoutCleaningTemplateV9Slots.items === false &&
+      schemas.CheckoutCleaningTemplateV9Slots.items.$ref ===
+        "#/components/schemas/CleaningTemplateSlot" &&
       schemas.PublishCleaningTemplateRequest.properties.slots.oneOf.length ===
         3 &&
       schemas.CheckoutCleaningTemplateV8Slot.allOf[1].required.includes(
