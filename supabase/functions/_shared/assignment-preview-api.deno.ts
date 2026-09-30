@@ -5,6 +5,9 @@ import {
   previewServiceDate,
 } from "./assignment-preview-api.ts";
 import { type EdgeActor, type EdgeClients, EdgeError } from "./runtime.ts";
+import { jsonResponse } from "./runtime.ts";
+import { zeroPreviewSnapshot } from "../../../tests/fixtures/assignment-preview.ts";
+import { optimizeAssignmentPreview } from "./assignment-preview-core.ts";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -57,6 +60,36 @@ function clients(error: string | null = null, data: unknown = null) {
     } as unknown as EdgeClients,
   };
 }
+
+Deno.test("preview diagnostics match shared core and Fastify fixture without extra RPC", async () => {
+  const serviceDate = today(), data = zeroPreviewSnapshot(serviceDate);
+  const mock = clients(null, data);
+  const actual = await previewAssignments(
+    request({ serviceDate, previewSeed: "diagnostic-parity" }),
+    mock.client,
+    admin,
+  );
+  const expected = await optimizeAssignmentPreview(data, "diagnostic-parity");
+  assert(
+    JSON.stringify(actual) === JSON.stringify(expected),
+    "full response parity",
+  );
+  assert(actual.remainingUnassignedTargets.length === 12, "12 remaining");
+  assert(
+    actual.diagnostics.activeMaidCount === 1,
+    "same-snapshot active count",
+  );
+  assert(actual.diagnostics.eligibleMaidCount === 0, "no eligible maid");
+  assert(
+    mock.calls.length === 1 &&
+      mock.calls[0]?.name === "get_assignment_preview_snapshot",
+    "readonly RPC only",
+  );
+  assert(
+    jsonResponse(actual).headers.get("Cache-Control") === "no-store",
+    "no-store",
+  );
+});
 
 Deno.test("preview rejects malformed input before readonly RPC", async () => {
   const mock = clients();

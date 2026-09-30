@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import { ZodError } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
+import { zeroPreviewSnapshot } from './fixtures/assignment-preview.js';
+import { optimizeAssignmentPreview } from '../src/modules/assignments/assignment-preview-core.js';
 import type { Actor } from '../src/domain/actor.js';
 import { AppError } from '../src/lib/app-error.js';
 import {
@@ -72,6 +74,29 @@ function clientsWithRpc(rpc: (name: string, args: unknown) => Promise<unknown>) 
 }
 
 describe('assignment preview Fastify parity', () => {
+  it('returns same-snapshot diagnostics for 12 remaining targets with one readonly RPC', async () => {
+    const serviceDate = today();
+    const data = zeroPreviewSnapshot(serviceDate);
+    const rpc = vi.fn(async () => ({ data, error: null }));
+    const app = await appWith(new SupabaseAssignmentPreviewService(clientsWithRpc(rpc)));
+    const response = await app.inject({
+      method: 'POST', url: '/v1/assignments/preview',
+      payload: { serviceDate, previewSeed: 'diagnostic-parity' }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual(await optimizeAssignmentPreview(data, 'diagnostic-parity'));
+    expect(response.json().diagnostics).toMatchObject({
+      activeMaidCount: 1, submittedAvailabilityMaidCount: 0, eligibleMaidCount: 0
+    });
+    expect(response.json().remainingUnassignedTargets).toHaveLength(12);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('get_assignment_preview_snapshot', {
+      p_actor_profile_id: admin.profileId, p_service_date: serviceDate
+    });
+    await app.close();
+  });
+
   it('uses the shared retired-policy optimizer and camel-to-snake RPC arguments', async () => {
     const serviceDate = today();
     const rpc = vi.fn(async (name: string) => {
@@ -220,6 +245,7 @@ describe('assignment preview Fastify parity', () => {
       payload: { serviceDate: today() }
     });
     expect(passwordBlocked.statusCode).toBe(403);
+    expect(passwordBlocked.headers['cache-control']).toBe('no-store');
     expect(passwordBlocked.json().error.code).toBe('PASSWORD_CHANGE_REQUIRED');
     await changing.close();
 

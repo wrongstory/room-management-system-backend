@@ -6,6 +6,52 @@ function assert(condition: unknown, message: string): asserts condition {
     throw new Error(message);
   }
 }
+Deno.test("preview diagnostics have bounded strict schemas and no-store", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const schemas = document.components.schemas;
+  assert(
+    schemas.AssignmentPreviewResult.required.includes("diagnostics"),
+    "diagnostics required",
+  );
+  assert(
+    schemas.AssignmentPreviewRemainingTarget.additionalProperties === false,
+    "strict remaining",
+  );
+  assert(
+    schemas.AssignmentPreviewRemainingTarget.properties.reasonCodes.items.enum
+      .length === 7,
+    "remaining codes",
+  );
+  assert(
+    schemas.AssignmentPreviewDiagnostics.additionalProperties === false,
+    "strict diagnostics",
+  );
+  const fixed = schemas.AssignmentPreviewDiagnostics.properties.fixedExclusions;
+  assert(
+    fixed.maxItems === 242 && fixed.items.additionalProperties === false,
+    "bounded fixed exclusions",
+  );
+  assert(
+    fixed.items.properties.reasonCodes.items.enum.length === 7,
+    "fixed exclusion codes",
+  );
+  assert(
+    document.paths["/v1/assignments/preview"].post.responses["200"]
+      .headers["Cache-Control"].schema.const === "no-store",
+    "no-store contract",
+  );
+  for (
+    const response of Object.values(
+      document.paths["/v1/assignments/preview"].post.responses,
+    )
+  ) {
+    assert(
+      response.headers["Cache-Control"].schema.const === "no-store",
+      "errors are also no-store",
+    );
+  }
+});
+
 Deno.test("OpenAPI publishes the v0.6.0 cleaning workflow contract", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   assert(

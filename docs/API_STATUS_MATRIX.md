@@ -8,6 +8,18 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 ## 1. 상태 판정 규칙
 
+### #320 Preview 진단 보강 (feature source, 운영 미배포)
+
+- Fastify/Edge 공통 계산기의 미배정 reasonCodes와 동일 snapshot의 단계별 후보 수·고정 업무 제외 사유를 추가했다.
+- 기존 배정 기준·reason·응답 분류·fingerprint·CAS를 유지한다. 새 endpoint/migration은 없다.
+- 계약/프런트 전달 사항: [ASSIGNMENT_PREVIEW.md](./ASSIGNMENT_PREVIEW.md).
+- #320의 실제 신고 사례 대조와 프런트 한국어 사유 매핑/UAT는 미완료다. 합성 재현을 운영 원인 확정으로 표시하지 않는다.
+- dev/main 병합·운영 배포는 이 기록에 포함되지 않는다.
+- 로컬 검증: application 587, Edge 290 + pinned bundle, fresh local 85 migrations,
+  전체 SQL 64 files/3,366 assertions, DB lint, Python business OpenAPI codegen PASS.
+  기존 dev 대비 합성 100개 결과·score·fingerprint 동일. 누적 upgrade/전체 동시성/hosted UAT는 이번 변경에서 미실행.
+- 독립 QA: 100/100, 최종 P0/P1/P2 0건. 원격 required CI와 실제 신고 사례 확인은 별도 gate다.
+
 | 표시 | 의미 |
 |---|---|
 | ✅ | 해당 단계 완료 및 검증됨 |
