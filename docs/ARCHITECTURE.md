@@ -828,6 +828,29 @@ Fastify/Edge/OpenAPI의 #133 통합 당시 기준은 108 paths / 115 operations�
 
 ### #156 checkout template 운영 게시 경계
 
+#### #323 v9 게시 명세 정합화
+
+새 v9 요청은 `cleaning-proof / bomb-proof / issue-proof` 순서의 정확히 3개 슬롯이며,
+필수 여부는 `true / false / false`, 최대 사진 수는 `20 / 10 / 10`입니다.
+현재 DB는 `청소 사진 / 폭탄방 증빙 / 특이사항 증빙` label을 포함한 정규 객체와 비교하므로,
+OpenAPI `CheckoutCleaningTemplateV9Slots`는 고정 tuple과 추가 필드 금지로 표현합니다.
+`expectedVersion=0`은 최초 게시, 이후에는 current version CAS를 사용합니다.
+
+과거 호환은 별도 schema입니다. v8 A-contract는 현재 RPC에서 새 게시와 완료 receipt 재생이 모두 가능하고,
+`maxPhotos` 없는 pre-A 요청은 같은 actor/key/hash의 완료 receipt가 있을 때만 재생됩니다.
+fresh pre-A 게시를 허용하거나 기존 v7+ 응답·snapshot을 v9로 재해석하지 않습니다.
+legacy 중복 key·필수 슬롯 등 교차 항목 조건과 receipt 존재 여부의 최종 판단은 기존 서버/DB가 유지합니다.
+이 변경은 명세·검증만 수정하며 migration·권한·운영 템플릿·프런트 메뉴는 변경하지 않습니다.
+
+`tests/fixtures/cleaning-template-contract.ts`를 Fastify·Edge·실제 JSON Schema 검사·생성 클라이언트·로컬 DB
+검증이 공유합니다. `npm run openapi:template-client:check`는 앱 TypeScript 7을 바꾸지 않고
+격리된 `openapi-typescript@7.13.0` / `typescript@5.9.3`로 클라이언트 타입을 생성·검사합니다.
+TypeScript가 표현하지 못하는 숫자 범위/DB 상태는 JSON Schema·DB 검사로 보완합니다.
+`npm run db:test:template-contract`는 fresh local DB에서 합성 fixture만 사용하고 transaction을 rollback합니다.
+사람/독립 QA와 운영 배포는 별도 gate입니다.
+
+아래는 #156/#179 당시 경계이며 v9 기본 계약은 위 절을 우선합니다.
+
 예약 command의 `CLEANING_TEMPLATE_NOT_CONFIGURED`는 제거하지 않습니다. active/password-complete business
 admin의 live session만 네 room type의 current checkout template을 조회하고, 한 타입씩 expected-version CAS로
 새 immutable version을 게시합니다. actor/command/key/request-hash receipt와 room-type advisory lock이 replay와

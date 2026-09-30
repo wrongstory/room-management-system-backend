@@ -40,7 +40,9 @@
     "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
     "console:openapi:export": "tsx scripts/export-backend-console-openapi.ts",
     "openapi:export:full": "tsx scripts/export-full-openapi.ts",
-    "openapi:frontend:check": "tsx scripts/check-frontend-openapi-contract.mjs"
+    "openapi:frontend:check": "tsx scripts/check-frontend-openapi-contract.mjs",
+    "openapi:template-client:check": "tsx scripts/check-cleaning-template-client.mjs",
+    "db:test:template-contract": "tsx scripts/test-cleaning-template-contract.mjs"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",
@@ -55,6 +57,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.10",
     "@types/node": "24.10.2",
+    "ajv": "8.20.0",
     "supabase": "2.115.0",
     "tsx": "4.23.12",
     "typescript": "7.0.2",

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { type AppServices, buildApp } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 import { AppError } from '../src/lib/app-error.js';
+import { flatTemplateRequest, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
 
 const env: AppEnv = {
   APP_ENV: 'local',
@@ -1667,6 +1668,39 @@ describe('application', () => {
       expect.objectContaining({ reservationId, targetRoomId, effectiveAt })
     );
     await app.close();
+  });
+
+  it('validates shared v9 template wire fixtures before reaching the publisher', async () => {
+    const appServices = services();
+    if (!appServices.cleaningTemplates) throw new Error('missing template service');
+    const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
+    appServices.cleaningTemplates.publishCheckout = publish;
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const send = (payload: unknown) => app.inject({
+      method: 'POST', url: '/v1/cleaning-templates', payload: JSON.stringify(payload),
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-shared-fixture', 'content-type': 'application/json' }
+    });
+    try {
+      for (const roomTypeCode of ['standard', 'premium', 'oceanPremium', 'oceanFamily']) {
+        for (const expectedVersion of [0, 9]) {
+          const response = await send({ ...flatTemplateRequest, roomTypeCode, expectedVersion });
+          expect(response.statusCode).toBe(201);
+          expect(response.headers['cache-control']).toBe('no-store');
+        }
+        for (const legacy of [false, true]) {
+          expect((await send(historicalTemplateRequest(roomTypeCode, legacy))).statusCode).toBe(201);
+        }
+      }
+      expect(publish).toHaveBeenCalledTimes(16);
+      for (const [name, payload] of invalidFlatTemplateRequests()) {
+        expect((await send(payload)).statusCode, name).toBe(400);
+      }
+      expect(publish).toHaveBeenCalledTimes(16);
+      for (const code of ['CLEANING_TEMPLATE_VERSION_CONFLICT', 'IDEMPOTENCY_KEY_REUSED']) {
+        publish.mockRejectedValueOnce(new AppError(409, code, '충돌'));
+        expect((await send(flatTemplateRequest)).json().error.code).toBe(code);
+      }
+    } finally { await app.close(); }
   });
 
   it('lists and publishes strict checkout templates for active business admins', async () => {

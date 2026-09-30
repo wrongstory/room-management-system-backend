@@ -3,11 +3,80 @@ import {
   templateDatabaseError,
 } from "./cleaning-template-api.ts";
 import { type EdgeActor, type EdgeClients, EdgeError } from "./runtime.ts";
+import {
+  flatTemplateRequest,
+  historicalTemplateRequest,
+  invalidFlatTemplateRequests,
+  templateProjection,
+} from "../../../tests/fixtures/cleaning-template-contract.ts";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 const sessionId = "51000000-0000-4000-8000-000000000001";
+Deno.test("cleaning template shared v9 fixtures preserve initial/CAS/replay and reject malformed slots", async () => {
+  for (
+    const roomTypeCode of ["standard", "premium", "oceanPremium", "oceanFamily"]
+  ) {
+    for (const expectedVersion of [0, 9]) {
+      const mock = clients(templateProjection());
+      const body = { ...flatTemplateRequest, roomTypeCode, expectedVersion };
+      await cleaningTemplates(request("POST", body), mock.value, admin);
+      await cleaningTemplates(request("POST", body), mock.value, admin);
+      assert(
+        mock.calls[0]?.args.p_expected_version === expectedVersion,
+        "CAS preserved",
+      );
+      assert(
+        mock.calls[0]?.args.p_request_hash ===
+          mock.calls[1]?.args.p_request_hash,
+        "replay hash stable",
+      );
+    }
+    for (const legacy of [false, true]) {
+      const body = historicalTemplateRequest(roomTypeCode, legacy);
+      const mock = clients({
+        ...templateProjection(),
+        version: legacy ? 12 : 8,
+        slots: body.slots,
+      });
+      await cleaningTemplates(request("POST", body), mock.value, admin);
+      assert(
+        JSON.stringify(mock.calls[0]?.args.p_slots) ===
+          JSON.stringify(body.slots),
+        "historical shape preserved",
+      );
+    }
+  }
+  for (const [name, body] of invalidFlatTemplateRequests()) {
+    const mock = clients(templateProjection());
+    await failure(
+      () => cleaningTemplates(request("POST", body), mock.value, admin),
+      name === "invalid version"
+        ? "INVALID_CLEANING_TEMPLATE"
+        : "INVALID_CLEANING_TEMPLATE_SLOTS",
+    );
+    assert(mock.calls.length === 0, `${name} rejected before RPC`);
+  }
+  for (
+    const code of [
+      "CLEANING_TEMPLATE_VERSION_CONFLICT",
+      "IDEMPOTENCY_KEY_REUSED",
+      "INVALID_CLEANING_TEMPLATE_SLOTS",
+    ]
+  ) {
+    const mock = clients(null, code);
+    await failure(
+      () =>
+        cleaningTemplates(
+          request("POST", flatTemplateRequest),
+          mock.value,
+          admin,
+        ),
+      code,
+    );
+  }
+});
 const payload = btoa(JSON.stringify({ session_id: sessionId }))
   .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const token = `e30.${payload}.signature`;
