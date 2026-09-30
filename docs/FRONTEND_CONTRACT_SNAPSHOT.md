@@ -1,5 +1,11 @@
 # 프런트엔드 계약 snapshot
 
+## #330 사용자 결정에 따른 후속 source 후보
+
+활성 관리자와 모든 활성 메이드의 촛불 추가·감소·초기화 및 최소 조회를 제공한다. 배정/제출/승인/최근 7일 조건은 없다. 기존 관리자 전용 정책보다 이번 사용자 결정을 우선하며 프런트 snapshot 자체를 자동 승격하지 않는다. source OpenAPI 0.6.0은 이 후보에서 **132 paths / 142 operations**, migration은 **86개**다. 운영 반영 수치가 아니다. 프런트 수정은 별도 담당이며 [#330 인계](./ROOM_CANDLES_330.md)를 따른다.
+
+2026-09-30 재확인한 프런트 원격은 `makee-ham/room-management-system` main `d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev `09ed28446a4fd43919cddb29ebe442b848548ab8`이다. `DOCS/30_DEPLOYED_WIREFRAME_API_PARITY.md` B01의 관리자 전용/다른 메이드 거부 문구는 #330 후속 사용자 결정으로 대체한다. 새 특이사항 API 요구는 촛불과 별도 결정 대상으로 유지한다. 원격 프런트 파일은 수정하지 않았다.
+
 이 문서는 `wrongstory/room-management-system`의 exact 제품 snapshot을 백엔드 계약에 대조한 재현 가능한 기록이다. 제품 정책의 최종 우선순위는 [AI 백엔드 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
 ## 2026-09-23 확인점

@@ -414,6 +414,7 @@ Table public.room_issues {
 }
 
 Table public.room_candle_events {
+  Note: '#330 append-only events via active admin/maid narrow RPC; independent of assignment/approval/7-day history. Decreases retain actor onsite verification. Insert trigger orders recorded_at under room lock; prior snapshots and other blockers are untouched.'
   id uuid [pk]
   room_id uuid [not null]
   count_before int [not null]

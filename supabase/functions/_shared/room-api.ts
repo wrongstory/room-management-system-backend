@@ -196,6 +196,107 @@ function requireRoomAdmin(actor: EdgeActor): void {
   requireBusinessAdmin(actor);
 }
 
+function requireCandleActor(actor: EdgeActor): void {
+  requirePasswordChanged(actor);
+  if (actor.role !== "admin" && actor.role !== "maid") {
+    throw new EdgeError(403, "FORBIDDEN", "촛불 조정 권한이 필요합니다.");
+  }
+}
+
+function candleError(error: { message?: string } | null): EdgeError {
+  if (error?.message?.includes("CANDLE_ACCESS_REQUIRED")) {
+    return new EdgeError(403, "FORBIDDEN", "촛불 조정 권한이 필요합니다.");
+  }
+  if (error?.message?.includes("PASSWORD_CHANGE_REQUIRED")) {
+    return new EdgeError(
+      403,
+      "PASSWORD_CHANGE_REQUIRED",
+      "비밀번호 변경이 필요합니다.",
+    );
+  }
+  if (error?.message?.includes("CANDLE_VERIFICATION_REQUIRED")) {
+    return new EdgeError(
+      400,
+      "VALIDATION_ERROR",
+      "수량 감소는 현장 회수를 확인한 뒤 physicallyVerified=true로 요청해 주세요.",
+    );
+  }
+  if (error?.message?.includes("INVALID_CANDLE_REQUEST")) {
+    return new EdgeError(
+      400,
+      "VALIDATION_ERROR",
+      "촛불 요청이 올바르지 않습니다.",
+    );
+  }
+  return roomDatabaseError(error);
+}
+
+export async function listRoomCandles(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+) {
+  requireCandleActor(actor);
+  const params = new URL(request.url).searchParams;
+  if (
+    [...params.keys()].some((key) =>
+      !["roomId", "cursor", "limit"].includes(key) ||
+      params.getAll(key).length !== 1
+    )
+  ) validationError("잘못된 촛불 조회 조건입니다.");
+  const roomId = params.has("roomId")
+    ? uuidValue(params.get("roomId"), "roomId")
+    : null;
+  const cursor = params.has("cursor")
+    ? uuidValue(params.get("cursor"), "cursor")
+    : null;
+  const rawLimit = params.get("limit") ?? "50";
+  if ((roomId && cursor) || !/^(?:[1-9]|[1-4]\d|50)$/.test(rawLimit)) {
+    validationError("잘못된 촛불 조회 조건입니다.");
+  }
+  const limit = Number(rawLimit);
+  const { data, error } = await clients.admin.rpc("list_room_candles", {
+    p_actor_profile_id: actor.profileId,
+    p_session_id: verifiedRequestSessionId(request),
+    p_room_id: roomId,
+    p_after_room_id: cursor,
+    p_limit: limit,
+  });
+  if (error || !data) throw candleError(error);
+  const invalid = () => {
+    throw new EdgeError(
+      500,
+      "ROOM_PROJECTION_INVALID",
+      "촛불 조회 결과가 올바르지 않습니다.",
+    );
+  };
+  if (!Array.isArray(data.items) || data.items.length > limit) invalid();
+  const items = (data.items as Record<string, unknown>[]).map((row) => {
+    if (
+      !row || typeof row.roomId !== "string" || !uuidPattern.test(row.roomId) ||
+      typeof row.roomNumber !== "string" || !row.roomNumber ||
+      !Number.isInteger(row.count) || (row.count as number) < 0 ||
+      (row.count as number) > 2147483647 ||
+      !Number.isSafeInteger(row.roomStateVersion) ||
+      (row.roomStateVersion as number) < 1 ||
+      (roomId && row.roomId.toLowerCase() !== roomId.toLowerCase())
+    ) invalid();
+    return {
+      roomId: row.roomId as string,
+      roomNumber: row.roomNumber as string,
+      count: row.count as number,
+      roomStateVersion: row.roomStateVersion as number,
+    };
+  });
+  const nextCursor = data.nextCursor;
+  if (
+    nextCursor !== null &&
+    (typeof nextCursor !== "string" || !uuidPattern.test(nextCursor) ||
+      items.length !== limit || nextCursor !== items.at(-1)?.roomId || roomId)
+  ) invalid();
+  return { items, nextCursor: nextCursor as string | null };
+}
+
 function assertOnlyFields(
   body: Record<string, unknown>,
   allowed: readonly string[],
@@ -1319,23 +1420,31 @@ async function mutateRoomOperation(
     entityId: (input.payload.entityId as string | undefined) ??
       crypto.randomUUID(),
   };
-  const { data, error } = await clients.admin.rpc("mutate_room_operation", {
-    p_actor_profile_id: actor.profileId,
-    p_room_id: normalizedRoomId,
-    p_action: action,
-    p_expected_room_version: input.expectedRoomVersion,
-    p_reason_code: input.reasonCode,
-    p_payload: payload,
-    p_idempotency_key: idempotencyKey(request),
-    p_request_hash: await requestHash({
-      roomId: normalizedRoomId,
-      action,
-      expectedRoomVersion: input.expectedRoomVersion,
-      reasonCode: input.reasonCode,
-      payload: input.payload,
-    }),
-  });
-  if (error || !data) throw roomDatabaseError(error);
+  const candle = action === "set_candle_count";
+  const { data, error } = await clients.admin.rpc(
+    candle ? "set_room_candle_count" : "mutate_room_operation",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_room_id: normalizedRoomId,
+      ...(candle
+        ? { p_session_id: verifiedRequestSessionId(request) }
+        : { p_action: action }),
+      p_expected_room_version: input.expectedRoomVersion,
+      p_reason_code: input.reasonCode,
+      p_payload: payload,
+      p_idempotency_key: idempotencyKey(request),
+      p_request_hash: await requestHash({
+        roomId: normalizedRoomId,
+        action,
+        expectedRoomVersion: input.expectedRoomVersion,
+        reasonCode: input.reasonCode,
+        payload: input.payload,
+      }),
+    },
+  );
+  if (error || !data) {
+    throw candle ? candleError(error) : roomDatabaseError(error);
+  }
   return operationResult(data);
 }
 
@@ -1399,7 +1508,7 @@ export async function setRoomCandleCount(
   actor: EdgeActor,
   roomId: string,
 ) {
-  requireRoomAdmin(actor);
+  requireCandleActor(actor);
   const body = await readJsonBody(request);
   assertOnlyFields(body, [
     "expectedRoomVersion",
@@ -1413,6 +1522,10 @@ export async function setRoomCandleCount(
   ) {
     validationError("physicallyVerified는 boolean이어야 합니다.");
   }
+  if (
+    !Number.isSafeInteger(body.expectedRoomVersion) ||
+    (body.count as number) > 2147483647
+  ) validationError("촛불 수량 또는 버전 범위를 초과했습니다.");
   return mutateRoomOperation(
     request,
     clients,

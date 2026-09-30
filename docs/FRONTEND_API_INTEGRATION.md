@@ -1,5 +1,7 @@
 # 프론트엔드·Codex API 연동 가이드
 
+> #330 촛불 공동 관리 source 후보: [전용 연동 문서](./ROOM_CANDLES_330.md). 새 최소 조회와 기존 변경 endpoint의 메이드 권한 확대는 release/운영 배포 후에만 사용한다. 아래 운영 snapshot 기록과 혼동하지 않는다.
+
 이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 과거 v0.4.0 인계는 historical workflow 참고용이고, 현재 계약은 production OpenAPI 0.5.1과 이 문서를 우선한다.
 
 2026-09-23 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 OpenAPI 0.5.1 / 129 / 139이고 마지막으로 검증된 production runtime은 OpenAPI 0.5.1 / 128 / 138의 `api` ACTIVE v24다. #256 사진 정규화와 #250/#264 배정 후속의 Edge/Pages 배포는 아직 별도다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 Git source 제공과 hosted runtime·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
