@@ -517,11 +517,13 @@ erDiagram
 - 배정 revision은 생성 시 target의 `effective_service_date`, `available_from`, `due_at`을 snapshot으로 고정하고 target·maid·순서·revision·snapshot·변경자·생성시각을 이후 수정하지 않는다.
 - #25 draft 저장은 `unassigned|draft_assigned` target만 row lock 후 `assignment_version` CAS로 갱신하며, 알림·outbox·attempt는 만들지 않는다.
 - #26 commit은 KST 오늘/내일의 선택 draft만 최신 일정·active maid·current availability version과 다시 대조한다. 선택 부분집합은 전부 성공하거나 전부 롤백한다.
+- #308 4B2 후보에서는 요청 계획일이 KST 오늘이면 과거 원 날짜의 unfinished draft도 같은 검사·잠금 집합에 포함한다. 원 assignment/target 날짜·순번·담당은 보존하고 최신 가능일은 요청 계획일에서 읽는다. 내일은 exact-date이며 범위 밖 요청의 기존 차단 사유를 유지한다. impact는 1,000 후보 초과 시 fingerprint/부분 배열을 반환하지 않는다.
+- 오늘 통보한 과거 배정의 가능일 보호는 정확한 assignment/revision과 불변 `assignment.notified` 감사의 요청 계획일을 대조한다. 통보 시각만으로 계획일을 추측하거나 과거 날짜를 backfill하지 않으며 기존 원 날짜 보호도 유지한다.
 - 알림 확정 성공은 target/assignment, 수신자 notification, private persistent outbox, `assignment.notified` 감사를 같은 transaction에 기록한다. 외부 push와 cleaning attempt는 이 transaction에서 만들지 않는다.
 - attempt는 assignment의 target·maid·revision과 모두 일치해야 하며, submission·earning의 maid도 같은 수행자를 가리킨다.
 - #305/#308 후보 scheduler는 오늘 및 과거 날짜의 notified current assignment를 현재 active maid·source·점유 조건으로 재검증한 뒤 `scheduled` attempt를 exactly-once 만든다. invocation당 최대 100건을 private cursor로 회전하며 과거 날짜라는 이유만으로 담당/일정을 바꾸지 않는다. attempt의 target/assignment/maid/revision/template/room snapshot은 생성 뒤 불변이다.
 - 미래 planned checkout은 obligation materialization·current pointer·actual checkout 전 attempt 0이다. 같은 객실의 이전 active workflow가 있으면 target/assignment를 유지하고 활성화만 보류한다.
-- #305/#308 후보에서는 예정 기한이 지나도 unassigned/notified/scheduled 업무의 날짜·담당·version을 자동 변경하지 않으며 `expire_scheduled`도 폐기한다. 지연 알림과 과거 미배정 today-preview 연결은 후속 범위다.
+- #305/#308 후보에서는 예정 기한이 지나도 unassigned/notified/scheduled 업무의 날짜·담당·version을 자동 변경하지 않으며 `expire_scheduled`도 폐기한다. 지연 알림과 과거 미배정 today-preview/list/commit은 source 후보로 연결했고 최신 dev 통합·종료 검토는 후속이다.
 - 과거 private rollover helper의 이월 write 검증은 역사 회귀로 보존하지만 #305/#308 후보 scheduler와 공개 lifecycle은 이 helper를 호출하지 않는다. 자동 취소·종류 변환도 하지 않는다.
 - `private.assignment_activation_scan_cursor`는 singleton/nullable last UUID의 변경 가능한 기술 projection이다. FK를 두지 않아 제거된 후보도 진행을 막지 않으며 FORCE RLS·직접 table 권한 없음으로 service-only scheduler가 reservation advisory lock 아래 100건씩 회전한다.
 - 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 같은 0원 target을 다른 메이드에게 배정할 수 없다. #264 수행 불가 확정은 그 target/assignment/attempt를 종료 이력으로 보존한 뒤 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 정확히 한 건 생성하며, replacement만 일반 배정 흐름에 들어간다.

@@ -1797,7 +1797,7 @@ Table public.audit_events {
   request_hash text
   idempotency_key text [unique]
 
-  Note: 'UPDATE and DELETE are rejected by an append-only trigger. #308 audit_cleaning_started_entity_idx indexes (entity_id,id) only WHERE entity_type=cleaning_attempt AND event_type=cleaning.attempt_started to bound duplicate start-evidence lookup; it is not a historical uniqueness constraint/backfill.'
+  Note: 'UPDATE and DELETE are rejected by an append-only trigger. #308 audit_cleaning_started_entity_idx indexes (entity_id,id) only WHERE entity_type=cleaning_attempt AND event_type=cleaning.attempt_started to bound duplicate start-evidence lookup. Phase4B2 audit_assignment_notified_entity_idx indexes entity_id only WHERE entity_type=cleaning_assignment AND event_type=assignment.notified for exact immutable revision/planning-day availability provenance. Neither index is a historical uniqueness constraint/backfill.'
 }
 
 Table private.password_change_commands {

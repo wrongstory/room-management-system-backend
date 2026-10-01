@@ -589,6 +589,20 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 typed `notifications`, private `notification_delivery_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
+#308 4B2 source 후보는 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
+미완료 업무를 포함합니다. 내일·과거/이력 조회는 기존 exact-date 범위이며 원 날짜/담당/순번은
+갱신하지 않습니다. Fastify/Edge 목록은 access-token RLS 본인 통보 범위를 먼저 제한하고,
+오늘 exact row와 과거 unfinished inner-target row를 합칩니다. 과거 이력에는 현재 target join을
+요구하지 않습니다. 목록 총1,000건·관련 ID100건 batch별1,000건의 exact count/반환 수를 대조해
+잘린 이력으로 최신 attempt/제출을 추측하지 않습니다. 상한 초과는 기존 안전한500 오류입니다.
+DB impact도1,001 sentinel로 전체 후보 상한1,000을 확인한 뒤에만 fingerprint를 만듭니다.
+확정 잠금 집합은 preflight와 동일한 원 날짜 포함 함수를 사용하고 선택 항목 최대121은 그대로입니다.
+배정 응답/impact 항목 날짜는 원 날짜, 최상위 요청과 불변 통보 감사 날짜는 계획일입니다.
+오늘 가능일 보호는 그 감사의 assignment/target/maid/revision/계획일을 정확히 대조하며 기존
+원 날짜 보호도 보존합니다. 감사 조회에는 notified assignment entity 전용 partial index를 사용합니다.
+기존 source preflight는 원 일정 검증이며 실제 현재 점유·선행 업무의 최종 activation/start guard를
+대체하지 않습니다. 최신 dev/#320 통합·원격 exact-head CI와 운영 승격은 별도 gate입니다.
+
 ## 시작 전 배정 변경 — #27
 
 네 개의 service-only RPC(change/unassign/cancellation request/decision)가 같은 private command helper를 사용합니다. Edge는 Auth user → active profile → active session → 비밀번호 변경 완료 → exact admin/maid를 확인하고, DB는 actor·ownership·current assignment·target version·transition을 다시 검증합니다.

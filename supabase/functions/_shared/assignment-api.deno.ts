@@ -512,35 +512,54 @@ function request(
   });
 }
 
-function queryResult(data: unknown) {
+function queryResult(data: unknown, countOverride?: number | null) {
   const filters: Array<[string, unknown]> = [];
-  type Query = Promise<{ data: unknown; error: null }> & {
+  type Query = Promise<{ data: unknown; error: null; count: number | null }> & {
     select: (columns: string) => Query;
     eq: (column: string, value: unknown) => Query;
     not: (column: string, operator: string, value: unknown) => Query;
     in: (column: string, value: unknown[]) => Query;
     order: () => Query;
+    lt: (column: string, value: unknown) => Query;
+    limit: (value: number) => Query;
   };
   let query: Query;
-  query = Object.assign(Promise.resolve({ data, error: null }), {
-    select: (columns: string) => {
-      filters.push(["select", columns]);
-      return query;
+  query = Object.assign(
+    Promise.resolve({
+      data,
+      error: null,
+      count: countOverride === undefined
+        ? (Array.isArray(data) ? data.length : 0)
+        : countOverride,
+    }),
+    {
+      select: (columns: string) => {
+        filters.push(["select", columns]);
+        return query;
+      },
+      eq: (column: string, value: unknown) => {
+        filters.push([column, value]);
+        return query;
+      },
+      not: (column: string, operator: string, value: unknown) => {
+        filters.push([`not.${column}.${operator}`, value]);
+        return query;
+      },
+      in: (column: string, value: unknown[]) => {
+        filters.push([column, value]);
+        return query;
+      },
+      order: () => query,
+      lt: (column: string, value: unknown) => {
+        filters.push([`lt.${column}`, value]);
+        return query;
+      },
+      limit: (value: number) => {
+        filters.push(["limit", value]);
+        return query;
+      },
     },
-    eq: (column: string, value: unknown) => {
-      filters.push([column, value]);
-      return query;
-    },
-    not: (column: string, operator: string, value: unknown) => {
-      filters.push([`not.${column}.${operator}`, value]);
-      return query;
-    },
-    in: (column: string, value: unknown[]) => {
-      filters.push([column, value]);
-      return query;
-    },
-    order: () => query,
-  }) as Query;
+  ) as Query;
   return { query, filters };
 }
 
@@ -569,9 +588,14 @@ function readClients(
   options: {
     target?: Record<string, unknown>;
     schedules?: Record<string, unknown>[];
+    overdue?: unknown[];
+    count?: number | null;
+    attemptCount?: number | null;
   } = {},
 ) {
-  const access = queryResult(rows);
+  const access = queryResult(rows, options.count);
+  const overdue = queryResult(options.overdue ?? []);
+  let accessReads = 0;
   const targets = queryResult([
     {
       id: targetId,
@@ -601,7 +625,7 @@ function readClients(
     assignment_id: assignmentId,
     attempt_number: 1,
     status: "field_completed",
-  }]);
+  }], options.attemptCount);
   const submissions = queryResult([{
     cleaning_attempt_id: "60000000-0000-4000-8000-000000000001",
     version: 1,
@@ -616,7 +640,12 @@ function readClients(
     }],
   );
   const clients = {
-    forAccessToken: () => ({ from: () => access.query }),
+    forAccessToken: () => ({
+      from: () =>
+        ++accessReads > 1 && options.overdue !== undefined
+          ? overdue.query
+          : access.query,
+    }),
     admin: {
       from(table: string) {
         if (table === "cleaning_targets") return targets.query;
@@ -629,8 +658,149 @@ function readClients(
       },
     },
   } as unknown as EdgeClients;
-  return { clients, access, targets, maids, attempts, submissions, schedules };
+  return {
+    clients,
+    access,
+    overdue,
+    targets,
+    maids,
+    attempts,
+    submissions,
+    schedules,
+  };
 }
+
+Deno.test("today current list includes old unfinished with immutable snapshots and scoped bounded queries", async () => {
+  const pastId = "70000000-0000-4000-8000-000000000010";
+  const { clients, access, overdue } = readClients([
+    assignmentRow({ service_date: "2026-09-05" }),
+  ], {
+    overdue: [
+      assignmentRow({ id: pastId }),
+      assignmentRow({ maid_profile_id: otherMaid.profileId }),
+      assignmentRow({ notified_at: null }),
+    ],
+  });
+  let clockReads = 0;
+  const result = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-05"),
+    clients,
+    maid,
+    () => {
+      clockReads++;
+      return new Date("2026-09-04T15:00:00Z");
+    },
+  );
+  assert(clockReads === 1, "single KST clock snapshot");
+  assert(
+    result.length === 2 && result[0].assignmentId === pastId &&
+      result[0].serviceDate === "2026-09-04",
+    "original day retained and own notified only",
+  );
+  assert(
+    result[0].roomNumber === "101" && result[0].targetAssignmentVersion === 2,
+    "maid immutable notification projection",
+  );
+  assert(
+    overdue.filters.some(([key, value]) =>
+      key === "lt.service_date" && value === "2026-09-05"
+    ),
+    "past date DB predicate",
+  );
+  assert(
+    overdue.filters.some(([key, value]) =>
+      key === "not.cleaning_targets.status.in" &&
+      value === "(approved,cancelled)"
+    ),
+    "terminal past excluded in DB before max-row limit",
+  );
+  assert(
+    overdue.filters.some(([key, value]) =>
+      key === "select" &&
+      String(value).includes("cleaning_targets!inner(status)")
+    ),
+    "user RLS inner target join",
+  );
+  for (const scoped of [access, overdue]) {
+    assert(
+      scoped.filters.some(([key, value]) =>
+        key === "maid_profile_id" && value === maid.profileId
+      ),
+      "self DB scope on both reads",
+    );
+    assert(
+      scoped.filters.some(([key]) => key === "not.notified_at.is"),
+      "notified DB scope on both reads",
+    );
+    assert(
+      scoped.filters.some(([key, value]) => key === "limit" && value === 1000),
+      "technical cap",
+    );
+  }
+});
+
+Deno.test("tomorrow history and pre-KST-midnight reads never expand to past dates", async () => {
+  for (
+    const [path, instant] of [
+      ["/v1/assignments?serviceDate=2026-09-05", "2026-09-04T14:59:59.999Z"],
+      ["/v1/assignments?serviceDate=2026-09-06", "2026-09-04T15:00:00Z"],
+      [
+        "/v1/assignments?serviceDate=2026-09-05&includeHistory=true",
+        "2026-09-04T15:00:00Z",
+      ],
+    ]
+  ) {
+    const { clients, overdue } = readClients([assignmentRow()], {
+      overdue: [assignmentRow()],
+    });
+    assert(
+      (await listAssignments(
+        request(path),
+        clients,
+        admin,
+        () => new Date(instant),
+      )).length === 1,
+      "exact date response only",
+    );
+    assert(
+      overdue.filters.length === 0,
+      "no overdue lookup for exact date/history",
+    );
+  }
+});
+
+Deno.test("assignment reads fail closed on unknown excessive truncated main and related counts", async () => {
+  for (const count of [null, 1001, 2]) {
+    const { clients, targets } = readClients([assignmentRow()], { count });
+    const error = await captureEdgeError(() =>
+      listAssignments(
+        request("/v1/assignments?serviceDate=2026-09-04"),
+        clients,
+        admin,
+      )
+    );
+    assert(
+      error.status === 500 && error.code === "ASSIGNMENT_COMMAND_FAILED",
+      "safe existing error contract",
+    );
+    assert(
+      targets.filters.length === 0,
+      "no hydration after incomplete assignment read",
+    );
+  }
+  const { clients } = readClients([assignmentRow()], { attemptCount: 1001 });
+  const error = await captureEdgeError(() =>
+    listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-04"),
+      clients,
+      admin,
+    )
+  );
+  assert(
+    error.status === 500,
+    "never guess latest attempt from capped related history",
+  );
+});
 
 Deno.test("assignment path accepts only exact UUID history route", () => {
   assert(

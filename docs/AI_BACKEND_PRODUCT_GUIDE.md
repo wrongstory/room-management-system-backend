@@ -27,7 +27,16 @@
   private 조회의 `sequenceReservations`는 현재 assignment의 날짜별 최대 점유 순번이며
   approved/cancelled target의 current row도 포함한다. 순수 계산기는 그 번호 뒤에 제안하고
   원 업무/담당/날짜/번호를 변경하지 않는다. 내부 점유 정보는 공개 응답에 넣지 않는다.
-  오늘 목록·저장/통보·오늘 가능일 보호는 여전히 후속이며 운영 기능 완료가 아니다.
+  4B1 당시 오늘 목록·저장/통보·오늘 가능일 보호는 후속이었다.
+- [현재 구현 후보] #308 4B2는 오늘 current 목록에 원 날짜가 과거인 미완료 assignment를 포함한다.
+  내일·과거 날짜·includeHistory 조회 범위는 기존 exact-date다. 메이드 본인 통보 row를 RLS로 먼저
+  제한하며 과거 approved/cancelled는 제외하고 오늘 terminal 카드는 호환 유지한다.
+  90번째 append-only migration은 오늘 preflight/확정/잠금에 과거 draft를 포함하고 요청 오늘의
+  최신 가능일을 사용한다. 항목별 serviceDate는 원 날짜, 최상위 serviceDate는 요청 계획일이다.
+  불변 assignment.notified 감사의 정확한 assignment/revision/계획일을 근거로 오늘 가능일을 보호한다.
+  기존 원 날짜 보호·실제 source/점유·CAS·멱등성·선택 부분집합 원자성은 유지하며 이력 backfill은 없다.
+  목록/관련 이력은 count와 반환 수를 검사하며 기술 상한 초과·잘림은 일부 응답 대신 안전하게 실패한다.
+  최신 dev/#320 통합과 전체 정책 종료 검토는 후속이며 운영 배포 완료가 아니다.
 - 구현 후보는 source/운영 배포 완료 선언이 아니다. [진행 범위](./CLEANING_OVERDUE.md)를 따른다.
 
 ## 2026-09-28 사용자 확정: 사진·이력·주급 개편

@@ -991,6 +991,49 @@ const rolloverReasonCodes = new Set([
   "ROLLED_OVER_UNASSIGNED",
   "ROLLED_OVER_NOT_STARTED",
 ]);
+const assignmentReadLimit = 1000;
+const assignmentHydrationBatchSize = 100;
+
+function completeAssignmentRows(result: {
+  data: unknown;
+  error: { message?: string } | null;
+  count: number | null;
+}): unknown[] {
+  if (result.error) throw assignmentDatabaseError(result.error);
+  if (
+    !Array.isArray(result.data) || !Number.isSafeInteger(result.count) ||
+    result.count === null || result.count < 0 ||
+    result.count > assignmentReadLimit ||
+    result.data.length !== result.count
+  ) {
+    throw assignmentDatabaseError(null);
+  }
+  return result.data;
+}
+
+async function assignmentRelatedRows(
+  clients: EdgeClients,
+  table: string,
+  columns: string,
+  key: string,
+  ids: string[],
+  order?: string,
+): Promise<unknown[]> {
+  const rows: unknown[] = [];
+  for (
+    let offset = 0;
+    offset < ids.length;
+    offset += assignmentHydrationBatchSize
+  ) {
+    let query = clients.admin.from(table).select(columns, { count: "exact" })
+      .in(key, ids.slice(offset, offset + assignmentHydrationBatchSize));
+    if (order) query = query.order(order, { ascending: false });
+    rows.push(
+      ...completeAssignmentRows(await query.limit(assignmentReadLimit)),
+    );
+  }
+  return rows;
+}
 
 function assignmentRolloverSnapshot(
   target: TargetRow,
@@ -1028,73 +1071,69 @@ async function hydrateAssignments(
   const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
   const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
   const assignmentIds = rows.map((row) => row.id);
-  const [targetResult, maidResult, attemptResult, scheduleResult] =
-    await Promise.all([
-      clients.admin
-        .from("cleaning_targets")
-        .select(
-          "id,room_id,cleaning_kind,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
-        )
-        .in("id", targetIds),
-      clients.admin
-        .from("profiles")
-        .select("id,display_name")
-        .in("id", maidIds),
-      clients.admin
-        .from("cleaning_attempts")
-        .select("id,assignment_id,attempt_number,status")
-        .in("assignment_id", assignmentIds)
-        .order("attempt_number", { ascending: false }),
-      clients.admin
-        .from("cleaning_target_schedule_revisions")
-        .select(
-          "cleaning_target_id,revision,effective_service_date,reason_code",
-        )
-        .in("cleaning_target_id", targetIds)
-        .order("revision", { ascending: false }),
-    ]);
-  if (
-    targetResult.error || maidResult.error || attemptResult.error ||
-    scheduleResult.error
-  ) {
-    throw assignmentDatabaseError(
-      targetResult.error ?? maidResult.error ?? attemptResult.error ??
-        scheduleResult.error,
-    );
-  }
+  const [targetRows, maidRows, attemptRows, scheduleRows] = await Promise.all([
+    assignmentRelatedRows(
+      clients,
+      "cleaning_targets",
+      "id,room_id,cleaning_kind,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
+      "id",
+      targetIds,
+    ),
+    assignmentRelatedRows(
+      clients,
+      "profiles",
+      "id,display_name",
+      "id",
+      maidIds,
+    ),
+    assignmentRelatedRows(
+      clients,
+      "cleaning_attempts",
+      "id,assignment_id,attempt_number,status",
+      "assignment_id",
+      assignmentIds,
+      "attempt_number",
+    ),
+    assignmentRelatedRows(
+      clients,
+      "cleaning_target_schedule_revisions",
+      "cleaning_target_id,revision,effective_service_date,reason_code",
+      "cleaning_target_id",
+      targetIds,
+      "revision",
+    ),
+  ]);
   const targets = new Map(
-    ((targetResult.data ?? []) as unknown as TargetRow[]).map((row) => [
+    (targetRows as TargetRow[]).map((row) => [
       row.id,
       row,
     ]),
   );
   const maids = new Map(
-    ((maidResult.data ?? []) as MaidRow[]).map((row) => [row.id, row]),
+    (maidRows as MaidRow[]).map((row) => [row.id, row]),
   );
   const attempts = new Map<string, AttemptRow>();
-  for (const attempt of (attemptResult.data ?? []) as AttemptRow[]) {
+  for (const attempt of attemptRows as AttemptRow[]) {
     if (!attempts.has(attempt.assignment_id)) {
       attempts.set(attempt.assignment_id, attempt);
     }
   }
   const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
-  const submissionResult = attemptIds.length === 0
-    ? { data: [] as SubmissionRow[], error: null }
-    : await clients.admin
-      .from("cleaning_submissions")
-      .select("cleaning_attempt_id,version,status")
-      .in("cleaning_attempt_id", attemptIds)
-      .order("version", { ascending: false });
-  if (submissionResult.error) {
-    throw assignmentDatabaseError(submissionResult.error);
-  }
+  const submissionRows = await assignmentRelatedRows(
+    clients,
+    "cleaning_submissions",
+    "cleaning_attempt_id,version,status",
+    "cleaning_attempt_id",
+    attemptIds,
+    "version",
+  );
   const submissions = new Map<string, SubmissionRow>();
-  for (const submission of (submissionResult.data ?? []) as SubmissionRow[]) {
+  for (const submission of submissionRows as SubmissionRow[]) {
     if (!submissions.has(submission.cleaning_attempt_id)) {
       submissions.set(submission.cleaning_attempt_id, submission);
     }
   }
-  const schedules = (scheduleResult.data ?? []) as TargetScheduleRow[];
+  const schedules = scheduleRows as TargetScheduleRow[];
 
   return rows.map((row) => {
     const target = targets.get(row.cleaning_target_id);
@@ -1153,6 +1192,7 @@ export async function listAssignments(
   request: Request,
   clients: EdgeClients,
   actor: EdgeActor,
+  clock: () => Date = () => new Date(),
 ) {
   requireAssignmentReader(actor);
   const search = queryValues(request, [
@@ -1178,9 +1218,12 @@ export async function listAssignments(
     );
   }
 
+  const today = new Date(clock().getTime() + 9 * 60 * 60 * 1000).toISOString()
+    .slice(0, 10);
+  const includeOverdue = !includeHistory && serviceDate === today;
   let query = accessTokenClient(request, clients)
     .from("cleaning_assignments")
-    .select(assignmentColumns)
+    .select(assignmentColumns, { count: "exact" })
     .eq("service_date", serviceDate)
     .order("sequence_number")
     .order("revision");
@@ -1194,11 +1237,47 @@ export async function listAssignments(
   } else if (maidProfileId) {
     query = query.eq("maid_profile_id", maidProfileId);
   }
-  const { data, error } = await query;
-  if (error) throw assignmentDatabaseError(error);
+  const rows = visibleAssignmentRows(
+    completeAssignmentRows(await query.limit(assignmentReadLimit)),
+    actor,
+  );
+  if (includeOverdue) {
+    let overdue = accessTokenClient(request, clients).from(
+      "cleaning_assignments",
+    )
+      .select(`${assignmentColumns},cleaning_targets!inner(status)`, {
+        count: "exact",
+      })
+      .lt("service_date", today).eq("is_current", true)
+      .not("cleaning_targets.status", "in", "(approved,cancelled)")
+      .order("service_date").order("sequence_number").order("revision").order(
+        "id",
+      );
+    if (actor.role === "maid") {
+      overdue = overdue.eq("maid_profile_id", actor.profileId).not(
+        "notified_at",
+        "is",
+        null,
+      );
+    } else if (maidProfileId) {
+      overdue = overdue.eq("maid_profile_id", maidProfileId);
+    }
+    rows.push(
+      ...visibleAssignmentRows(
+        completeAssignmentRows(await overdue.limit(assignmentReadLimit)),
+        actor,
+      ),
+    );
+    if (rows.length > assignmentReadLimit) throw assignmentDatabaseError(null);
+    rows.sort((left, right) =>
+      left.service_date.localeCompare(right.service_date) ||
+      left.sequence_number - right.sequence_number ||
+      left.revision - right.revision || left.id.localeCompare(right.id)
+    );
+  }
   return hydrateAssignments(
     clients,
-    visibleAssignmentRows(data, actor),
+    rows,
     actor,
   );
 }
@@ -1212,7 +1291,7 @@ export async function assignmentHistory(
   requireAssignmentReader(actor);
   let query = accessTokenClient(request, clients)
     .from("cleaning_assignments")
-    .select(assignmentColumns)
+    .select(assignmentColumns, { count: "exact" })
     .eq("cleaning_target_id", uuidValue(cleaningTargetId, "cleaningTargetId"))
     .order("revision");
   if (actor.role === "maid") {
@@ -1222,9 +1301,10 @@ export async function assignmentHistory(
       null,
     );
   }
-  const { data, error } = await query;
-  if (error) throw assignmentDatabaseError(error);
-  const rows = visibleAssignmentRows(data, actor);
+  const rows = visibleAssignmentRows(
+    completeAssignmentRows(await query.limit(assignmentReadLimit)),
+    actor,
+  );
   if (rows.length === 0) {
     throw actor.role === "maid"
       ? new EdgeError(

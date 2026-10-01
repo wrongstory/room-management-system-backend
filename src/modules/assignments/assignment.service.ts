@@ -56,6 +56,17 @@ function roomNumber(target: TargetRow): string {
 }
 
 const rolloverReasonCodes = new Set(['ROLLED_OVER_UNASSIGNED', 'ROLLED_OVER_NOT_STARTED']);
+const readLimit = 1000;
+const hydrationBatchSize = 100;
+
+function completeRows(result: { data: unknown; error: { message?: string } | null; count: number | null }): unknown[] {
+  if (result.error) throw databaseError(result.error);
+  if (!Array.isArray(result.data) || !Number.isSafeInteger(result.count) ||
+    result.count === null || result.count < 0 || result.count > readLimit || result.data.length !== result.count) {
+    throw databaseError(null);
+  }
+  return result.data;
+}
 
 function rolloverSnapshot(target: TargetRow, row: AssignmentRow, schedules: ScheduleRow[]) {
   if (!Number.isSafeInteger(target.carryover_count) || target.carryover_count < 0) {
@@ -73,35 +84,48 @@ function rolloverSnapshot(target: TargetRow, row: AssignmentRow, schedules: Sche
 }
 
 export class SupabaseAssignmentService implements AssignmentService {
-  constructor(private readonly clients: SupabaseClients) {}
+  constructor(private readonly clients: SupabaseClients, private readonly clock: () => Date = () => new Date()) {}
 
   async list(actor: Actor, input: AssignmentListInput): Promise<unknown[]> {
     this.requireReader(actor);
     if (actor.role === 'maid' && input.maidProfileId && input.maidProfileId !== actor.profileId) {
       throw new AppError(403, 'ASSIGNMENT_ACCESS_REQUIRED', '다른 메이드의 청소 배정은 조회할 수 없습니다.');
     }
+    const today = new Date(this.clock().getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const includeOverdue = !input.includeHistory && input.serviceDate === today;
     let query = this.clients.forAccessToken(actor.accessToken).from('cleaning_assignments')
-      .select(this.assignmentColumns()).eq('service_date', input.serviceDate)
+      .select(this.assignmentColumns(), { count: 'exact' }).eq('service_date', input.serviceDate)
       .order('sequence_number').order('revision');
     if (!input.includeHistory) query = query.eq('is_current', true);
     if (actor.role === 'maid') {
       query = query.eq('maid_profile_id', actor.profileId).not('notified_at', 'is', null);
     } else if (input.maidProfileId) query = query.eq('maid_profile_id', input.maidProfileId);
-    const { data, error } = await query;
-    if (error) throw databaseError(error);
-    return this.hydrate(actor, this.visibleRows(data, actor));
+    const rows = this.visibleRows(completeRows(await query.limit(readLimit)), actor);
+    if (includeOverdue) {
+      let overdue = this.clients.forAccessToken(actor.accessToken).from('cleaning_assignments')
+        .select(`${this.assignmentColumns()},cleaning_targets!inner(status)`, { count: 'exact' })
+        .lt('service_date', today).eq('is_current', true)
+        .not('cleaning_targets.status', 'in', '(approved,cancelled)')
+        .order('service_date').order('sequence_number').order('revision').order('id');
+      if (actor.role === 'maid') {
+        overdue = overdue.eq('maid_profile_id', actor.profileId).not('notified_at', 'is', null);
+      } else if (input.maidProfileId) overdue = overdue.eq('maid_profile_id', input.maidProfileId);
+      rows.push(...this.visibleRows(completeRows(await overdue.limit(readLimit)), actor));
+      if (rows.length > readLimit) throw databaseError(null);
+      rows.sort((left, right) => left.service_date.localeCompare(right.service_date) ||
+        left.sequence_number - right.sequence_number || left.revision - right.revision || left.id.localeCompare(right.id));
+    }
+    return this.hydrate(actor, rows);
   }
 
   async history(actor: Actor, cleaningTargetId: string): Promise<unknown[]> {
     this.requireReader(actor);
     let query = this.clients.forAccessToken(actor.accessToken).from('cleaning_assignments')
-      .select(this.assignmentColumns()).eq('cleaning_target_id', cleaningTargetId).order('revision');
+      .select(this.assignmentColumns(), { count: 'exact' }).eq('cleaning_target_id', cleaningTargetId).order('revision');
     if (actor.role === 'maid') {
       query = query.eq('maid_profile_id', actor.profileId).not('notified_at', 'is', null);
     }
-    const { data, error } = await query;
-    if (error) throw databaseError(error);
-    const rows = this.visibleRows(data, actor);
+    const rows = this.visibleRows(completeRows(await query.limit(readLimit)), actor);
     if (rows.length === 0) {
       throw actor.role === 'maid'
         ? new AppError(403, 'ASSIGNMENT_ACCESS_REQUIRED', '이 청소 대상의 배정 이력을 조회할 수 없습니다.')
@@ -131,41 +155,43 @@ export class SupabaseAssignmentService implements AssignmentService {
     ].join(',');
   }
 
+  private async relatedRows(table: string, columns: string, key: string, ids: string[], order?: string): Promise<unknown[]> {
+    const rows: unknown[] = [];
+    for (let offset = 0; offset < ids.length; offset += hydrationBatchSize) {
+      let query = this.clients.admin.from(table).select(columns, { count: 'exact' })
+        .in(key, ids.slice(offset, offset + hydrationBatchSize));
+      if (order) query = query.order(order, { ascending: false });
+      rows.push(...completeRows(await query.limit(readLimit)));
+    }
+    return rows;
+  }
+
   private async hydrate(actor: Actor, rows: AssignmentRow[]): Promise<unknown[]> {
     if (rows.length === 0) return [];
     const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
     const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
     const assignmentIds = rows.map((row) => row.id);
-    const [targetsResult, profilesResult, attemptsResult, schedulesResult] = await Promise.all([
-      this.clients.admin.from('cleaning_targets').select(
+    const [targetRows, profileRows, attemptRows, scheduleRows] = await Promise.all([
+      this.relatedRows('cleaning_targets',
         'id,room_id,cleaning_kind,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)'
-      ).in('id', targetIds),
-      this.clients.admin.from('profiles').select('id,display_name').in('id', maidIds),
-      this.clients.admin.from('cleaning_attempts').select('id,assignment_id,attempt_number,status')
-        .in('assignment_id', assignmentIds).order('attempt_number', { ascending: false }),
-      this.clients.admin.from('cleaning_target_schedule_revisions')
-        .select('cleaning_target_id,revision,effective_service_date,reason_code')
-        .in('cleaning_target_id', targetIds).order('revision', { ascending: false })
+      , 'id', targetIds),
+      this.relatedRows('profiles', 'id,display_name', 'id', maidIds),
+      this.relatedRows('cleaning_attempts', 'id,assignment_id,attempt_number,status', 'assignment_id', assignmentIds, 'attempt_number'),
+      this.relatedRows('cleaning_target_schedule_revisions', 'cleaning_target_id,revision,effective_service_date,reason_code', 'cleaning_target_id', targetIds, 'revision')
     ]);
-    const firstError = targetsResult.error ?? profilesResult.error ?? attemptsResult.error ?? schedulesResult.error;
-    if (firstError) throw databaseError(firstError);
-    const targets = new Map(((targetsResult.data ?? []) as unknown as TargetRow[]).map((row) => [row.id, row]));
-    const profiles = new Map(((profilesResult.data ?? []) as ProfileRow[]).map((row) => [row.id, row]));
+    const targets = new Map((targetRows as TargetRow[]).map((row) => [row.id, row]));
+    const profiles = new Map((profileRows as ProfileRow[]).map((row) => [row.id, row]));
     const attempts = new Map<string, AttemptRow>();
-    for (const attempt of (attemptsResult.data ?? []) as AttemptRow[]) {
+    for (const attempt of attemptRows as AttemptRow[]) {
       if (!attempts.has(attempt.assignment_id)) attempts.set(attempt.assignment_id, attempt);
     }
     const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
-    const submissionsResult = attemptIds.length === 0
-      ? { data: [] as SubmissionRow[], error: null }
-      : await this.clients.admin.from('cleaning_submissions').select('cleaning_attempt_id,version,status')
-        .in('cleaning_attempt_id', attemptIds).order('version', { ascending: false });
-    if (submissionsResult.error) throw databaseError(submissionsResult.error);
+    const submissionRows = await this.relatedRows('cleaning_submissions', 'cleaning_attempt_id,version,status', 'cleaning_attempt_id', attemptIds, 'version');
     const submissions = new Map<string, SubmissionRow>();
-    for (const submission of (submissionsResult.data ?? []) as SubmissionRow[]) {
+    for (const submission of submissionRows as SubmissionRow[]) {
       if (!submissions.has(submission.cleaning_attempt_id)) submissions.set(submission.cleaning_attempt_id, submission);
     }
-    const schedules = (schedulesResult.data ?? []) as ScheduleRow[];
+    const schedules = scheduleRows as ScheduleRow[];
     return rows.map((row) => {
       const target = targets.get(row.cleaning_target_id);
       const profile = profiles.get(row.maid_profile_id);

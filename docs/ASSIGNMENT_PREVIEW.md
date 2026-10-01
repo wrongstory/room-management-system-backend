@@ -55,8 +55,10 @@ additional 예약 overlap, reclean 원 maid/source를 검증한다. Pure TypeScr
 `planningAt`, `availableFrom`, `dueAt`은 명시된 시각 사실로 보존한다. #305/#308에 따라
 당일 신규 후보의 `dueAt` 경과만으로 거부하지 않는다. `availableFrom >= dueAt`인 잘못된
 일정과 실제 source/점유 충돌은 계속 거부한다. 예상 분수를 더한 종료시각이나 순차 cursor를 만들지 않는다.
-과거 미배정 업무의 DB snapshot 포함은 #308 4B1 후보로 연결했다. 오늘 목록 조회·저장/통보·
-가능일 변경 보호는 [#308 후속 범위](./CLEANING_OVERDUE.md)이며 종단 기능 완료가 아니다.
+과거 미배정 업무의 DB snapshot 포함은 #308 4B1 후보로 연결했다. 4B2 후보는 오늘 current 목록과
+오늘 계획일 기반 preflight/확정/잠금·가능일 보호까지 연결한다. 최상위 serviceDate는 요청 계획일이고
+각 항목 serviceDate는 원 업무 날짜다. Preview는 저장 권한이 아니며 원 CAS/UNIQUE 검사는 그대로다.
+최신 dev/#320 통합·종료 검토는 [#308 후속 범위](./CLEANING_OVERDUE.md)이며 운영 완료가 아니다.
 고정 부하의 slot은 `(원 serviceDate, sequence)`로 구분한다. 날짜가 다르면 같은 번호도
 기존 이력 그대로 유지하고, 같은 날짜의 중복이나 assignment/target 날짜 불일치는 여전히 거부한다.
 동선 점수 계산에서만 날짜→기존 sequence→안정적인 target ID로 정렬하며 이는 실행 순서 지정이나

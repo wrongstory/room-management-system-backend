@@ -24,7 +24,10 @@ scheduler 자동 이월 중단과 bounded/fair 100건 cursor, `expire_scheduled`
 4B1은 89번째 append-only migration으로 오늘 DB snapshot의 과거 미완료 대상집합을 연결하고,
 terminal target의 current assignment까지 원 날짜별 순번 점유로 계산한다. private metadata는 공개
 Preview 응답에서 제외하며 공개 endpoint/schema/RLS 권한은 그대로다. 원 날짜/담당/snapshot/history를
-변경하지 않는다. 오늘 목록·commit 후보/잠금·가능일 보호는 후속이므로 종단 기능 완료가 아니다. 실제 검증/PR 상태는
+변경하지 않는다. 4B2는 오늘 current 목록의 과거 미완료 조회, 오늘 가능일에 기반한 commit 후보/잠금과
+불변 통보 감사에 기반한 계획일 가능일 보호를 연결한다. 내일/이력 조회는 exact-date이며 항목별 원 날짜는
+보존한다. count/실제 반환 수와 기술 상한을 검사하여 일부 목록·잘린 관련 이력으로 응답하지 않는다.
+공개 경로/DTO/권한·보안 TTL은 그대로며 최신 dev/#320 통합 전 종단 종료 선언은 하지 않는다. 실제 검증/PR 상태는
 [지연 업무 계약](./CLEANING_OVERDUE.md)에 기록한다.
 
 ## 1. 상태 판정 규칙

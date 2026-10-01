@@ -1,6 +1,6 @@
 # #308 지연 업무: 기존 업무 보존
 
-정책은 #305와 제품 가이드의 확정 결정을 따른다. 현재 작업은 1·2·3차와 4A/4B1 source 후보이며
+정책은 #305와 제품 가이드의 확정 결정을 따른다. 현재 작업은 1·2·3차와 4A/4B1/4B2 source 후보이며
 production/main/recovery, 실제 객실 데이터·PIN·계정은 변경하지 않는다.
 
 ## 1차 범위
@@ -49,7 +49,8 @@ Fastify와 Edge preview는 같은 순수 optimizer를 사용한다. lifecycle/st
 1. 1·2차 overdue 후보는 exact head `7d2337e`의 독립 QA 98점/required CI PASS. dev 통합은 미완료.
 2. 3차 관리자↔메이드 업무 상태 알림 coverage·정상 시작 누락 보강 및 새 head 검증.
 3. 과거 미배정/draft 업무의 오늘 preview·현재 가능일·sequence 계약:
-   4A/4B1은 DB 대상집합·공유 계산기까지 연결했고 오늘 목록/commit 후보·잠금/가능일 보호는 남았다.
+   4A/4B1은 DB 대상집합·공유 계산기까지, 4B2는 오늘 목록/commit 후보·잠금/가능일 보호까지 연결한다.
+   최신 dev/#320 통합·전체 회귀/종료 검토는 남았다.
    target/assignment의 기존 serviceDate snapshot을 임의 수정하지 않는다.
 4. 위 후속과 통합한 fresh/upgrade/RLS/concurrency/독립 QA/required CI.
 
@@ -254,7 +255,7 @@ PR #340은 Draft이며 #308/#305는 OPEN이다.
 | fresh backup | `npm run backup:dry-run:fresh` PASS; fresh89 local-synthetic dump/restore |
 | local DB lint/Security Advisor | lint exit0/error0, 기존 STABLE/VOLATILE·unused 경고 유지, 새 snapshot 경고 없음; `--level warn --fail-on error` Security Advisor PASS/No issues found |
 | 독립 QA | 98/100(범위25·보안29·검증24·문서20), P0/P1/P2 blocking0; 독립 core50/SQL119/manifest/fixture 보완 PASS. 로컬 Draft/push 준비 평가이며 새 exact-head CI 전 source/dev·병합 승인 아님. commit 후 exact-head 별도 재확인 |
-| 새 head required CI | NOT RUN; commit/push 후 exact head 확인 필요 |
+| 새 head required CI | exact head a5a78d0ec240bda64e93a18502eafa0a6691f241, [run36818593997](https://github.com/wrongstory/room-management-system-backend/actions/runs/36818593997) application/migration PASS; 2026-10-01 14:28:36 KST 완료. 4B2 승인으로 사용하지 않음 |
 | Python/codegen/package | NOT RUN; 공개 API/schema 및 Python 코드 변경 없음 |
 | production/hosted/frontend UAT | NOT RUN; 별도 운영 범위 |
 
@@ -269,3 +270,59 @@ revision이 보존된 상태에서 기존 객실 workflow guard가 올바르게 
 activation fixture는 위치 기반 객실 slice 대신 기존 target/reservation/stay segment가 전혀 없는
 활성·검증·미중단·점유 override 없는 객실 10개를 읽어 서로 분리한다. 실제 RPC 경합·exact count·
 원 날짜/담당/회차 assertion과 제품 guard는 그대로다. 재검증 결과는 위 표에 별도로 기록한다.
+
+## 4B2 범위: 오늘 현재 목록·과거 draft 확정·계획일 가능일 보호
+
+- Fastify/Edge 오늘 `includeHistory=false` 목록만 과거 current unfinished assignment를 함께 읽는다.
+  과거 approved/cancelled는 DB join/filter에서 제외하고 오늘 terminal 카드는 호환 유지한다.
+  내일·다른 날짜·includeHistory/target history는 기존 범위다. 날짜→순번→revision→ID 정렬은
+  표시의 안정성이지 새 수행 순서·재번호화가 아니다. KST 시각은 한 호출에서 한 번 캡처한다.
+- 사용자 access-token RLS에서 메이드 본인 통보 row를 먼저 제한한다. 과거 current의 target innerjoin도
+  기존 exact owner/revision/window/room RLS를 따르며 stale/모호한 조회를 관리자 권한으로 확대하지 않는다.
+  역사 조회는 current target join 없이 자기 통보 revision을 유지한다. 메이드의 객실은 통보 snapshot만 쓴다.
+- 목록 총1,000건, 관련 조회는 ID100건 batch별1,000건이다. exact count·실제 반환 수·상한을 검사하고
+  잘린 attempt/submission/schedule에서 최신 상태를 추측하지 않는다. DB impact는1,001 sentinel로
+  전체 후보1,000 상한을 확인한 뒤 fingerprint를 만든다. 상한 오류는 기존 redacted500 계약을 유지한다.
+- CLI 생성 `20261001064101_cleaning_overdue_commit_planning.sql`은 90번째 append-only 후보다.
+  동일 private 포함 함수로 오늘 preflight와 target/assignment/maid lock 집합에 과거 draft를 포함한다.
+  기존 exact-date 범위 밖 요청의 blocked 사유와 오늘/내일 mutation gate를 유지하고 내일에 과거를 넣지 않는다.
+  선택 항목121 상한·예약 advisory lock·현재 계정/원 schedule·CAS·receipt·부분집합 원자성은 그대로다.
+- 최신 availability는 요청 계획일의 주차/날짜에서 읽는다. 항목별 serviceDate는 원 assignment/target
+  날짜이고 최상위 요청/`assignment.notified` 감사의 serviceDate는 계획일이다. 불변 감사의 exact
+  entity/assignment/target/maid/revision/계획일로 오늘 가능일 변경을 보호하며 원 날짜 보호도 유지한다.
+  감사에는 notified assignment entity 전용 partial index를 추가한다. 새 business table/RLS/backfill은 없다.
+- 기존 source preflight는 원 일정 검증이며 현재 점유/선행 workflow의 최종 activation/start 검사를
+  대체하지 않는다. oversized commit의 기존 전체 후보 lock 뒤 impact 상한 재검증 순서는 유지하므로,
+  forged/stale 요청의 lock 작업량까지1,000으로 제한하는 성능 보완은 후속이다. 일부 write/응답은 허용하지 않는다.
+- PR #340 Draft, #308/#305 OPEN. 최신 dev/#320 통합·전체 coverage/종료 판단과 exact-head CI는
+  별도 gate다. production/main/recovery/프런트/실제 계정·PIN·외부 provider/Release/tag 변경 없음.
+
+### 검증 기록: 4B2 후보
+
+2026-10-01 local synthetic 환경의 이번 후보 결과다. 이전4B1 CI PASS는 새 head 승인으로 사용하지
+않는다. 프런트 dev09ed284/main d509b44를 읽기 전용 재확인했다. 최신 wireframe은 오늘 날짜로 목록/
+preflight를 읽고 draft에는 target/maid/sequence/CAS만, commit에는 요청 계획일과 fingerprint를 보낸다.
+원 target 날짜를 요청으로 변경하지 않는 계약을 유지한다.
+
+| 4B2 검증 | 실제 결과 |
+|---|---|
+| `npm run ci:quality` | PASS;50files/616tests, secret/OpenAPI131paths141operations/typecheck/build, 기존 lint info2 |
+| `npx vitest run tests/assignment-card.test.ts` | PASS;15tests, KST 경계·history/tomorrow·terminal·1000/1001·100ID batch·메이드 snapshot |
+| `npm run edge:check` | PASS;fmt/check/295tests/bundle17,175,800bytes |
+| fresh90 집중 SQL | PASS;`cleaning_overdue_commit.sql`50 + `assignment_commit.sql`35 = 2files/85assertions |
+| `npm run db:manifest:verify` | PASS;기존89개 order/name/SHA 보존, 신규90 head |
+| `npm run db:test` | PASS;fresh90/16upgrade harness/68files3,649assertions. 89→90의14원장 exact digest 보존과 실제 DB Lock 경합 양방향 PASS |
+| KST clock | `npm run db:test:long-stay-clock` PASS;5시각145assertions |
+| 전체 concurrency | `npm run db:reset` 후 `npm run db:test:concurrency` PASS;기존 실제 RPC 경합·과거 확정 양방향 경합 보존 |
+| fresh backup | `npm run backup:dry-run:fresh` PASS;fresh90/121rooms local-synthetic dump/restore |
+| local DB lint/Security Advisor | lint exit0/error0·기존 warning 보존, Security Advisor PASS/No issues found |
+| 독립 QA | 98/100(범위25·보안29·검증24·문서20), blocking P0/P1/P2=0. 독립 전체Node616/typecheck/manifest5/diffcheck/focused15/1000·1001 batch probe/3filesSQL117 PASS. 로컬 Draft commit/push 준비 평가이며 새 commit/tree·exact-head CI 전 source/dev·병합 승인은 아님 |
+| 새 exact-head required CI | NOT RUN;commit/push 뒤 새 head 확인 필요 |
+| Python/codegen/package | 로컬 추가 NOT RUN;공개 schema/enum/생성 Python 변경 없음 |
+| production/hosted/frontend UAT | NOT RUN;별도 운영 범위 |
+
+첫 Edge format과 HTTP mock의 exact count/limit 누락은 보완 후 전체295tests PASS다. 첫 집중 SQL85는
+원 요청 날짜가 범위 밖일 때 기존 preflight의 blocked 사유가 사라지는 회귀2건과 불변 가능일 row를
+직접 UPDATE한 fixture1건에서 FAIL했다. exact-date 조회와 기존 mutation 요청일 gate를 보존하고,
+fixture는 실제 submit RPC·새 버전을 사용하도록 보완한 뒤 같은85assertions를 재실행해 PASS했다.
+제품 guard·기존 날짜 범위·원장 불변성·assertion을 삭제하거나 완화하지 않았다.
