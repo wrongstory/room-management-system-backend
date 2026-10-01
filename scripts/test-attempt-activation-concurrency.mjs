@@ -16,6 +16,8 @@ function kstDate(date = new Date()) {
 }
 
 export async function testAttemptActivationConcurrency(client, actor) {
+  assert(['localhost', '127.0.0.1'].includes(new URL(client.supabaseUrl).hostname),
+    'Attempt activation races require disposable local Supabase');
   const actorProfileId = actor.profileId;
   const today = kstDate();
   const weekday = new Date(`${today}T00:00:00Z`).getUTCDay() || 7;
@@ -63,7 +65,24 @@ export async function testAttemptActivationConcurrency(client, actor) {
     maids.push(profileId);
   }
 
-  const rooms = ok(await client.from('rooms').select('id').order('room_number').range(60, 89), 'activation rooms');
+  // Earlier suites intentionally retain unfinished workflows. Pick ten untouched
+  // rooms instead of positional slices, so their real room-workflow guard does
+  // not legitimately block an unrelated activation fixture.
+  const isolatedRooms = JSON.parse(execFileSync('docker', [
+    'exec', '-i', 'supabase_db_room-management-system-backend',
+    'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+    '-c', `select coalesce(json_agg(r order by r.room_number,r.id),'[]'::json)::text from (
+      select r.id,r.room_number,r.room_type_id,r.state_version from public.rooms r
+      where r.active and r.data_status='verified' and r.operation_suspended_at is null
+        and r.occupancy_override is null
+        and not exists(select 1 from public.cleaning_targets t where t.room_id=r.id)
+        and not exists(select 1 from public.reservations v where v.room_id=r.id)
+        and not exists(select 1 from private.stay_room_segments s where s.room_id=r.id)
+      order by r.room_number,r.id limit 10
+    ) r`
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 }).trim());
+  assert(isolatedRooms.length === 10, 'Ten untouched rooms are required for isolated activation races');
+  const rooms = isolatedRooms.slice(0, 7);
   let sequence = 300;
   async function fixture({ expired = false } = {}) {
     const targetId = randomUUID();
@@ -239,8 +258,7 @@ export async function testAttemptActivationConcurrency(client, actor) {
   // Use one real execution clock for commands and clock_timestamp trigger guards.
   // A future synthetic scheduler clock would activate unrelated future checkout
   // fixtures after deadline removal, while their actual execution guard denies it.
-  const sourceRooms = ok(await client.from('rooms').select('id,room_number,room_type_id,state_version')
-    .order('room_number').range(110, 112), 'source window race rooms');
+  const sourceRooms = isolatedRooms.slice(7, 10);
   for (const roomTypeId of new Set(sourceRooms.map((room) => room.room_type_id))) {
     // stayover is not part of #156's confirmed admin API. Install this older
     // synthetic fixture through the local postgres test harness, never by

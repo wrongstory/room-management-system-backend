@@ -20,7 +20,14 @@
 - [현재 구현 후보] #308 4A는 Fastify/Edge 공유 순수 계산기에 한해 오늘 snapshot의 과거
   미배정 후보와 날짜별 고정 부하를 처리한다. 원 serviceDate·담당·sequence·snapshot은 바꾸지 않는다.
   계산용 날짜/sequence 정렬은 실행 우선순위가 아니며 새 단일 1–N로 과거 업무를 재번호화하지 않는다.
-  DB snapshot·현재 목록·저장/통보·가능일 변경 보호는 후속 미구현이므로 종단 기능 완료가 아니다.
+  4A 당시 DB snapshot·현재 목록·저장/통보·가능일 변경 보호는 후속 범위였으며, 아래 4B1을 포함해도 종단 기능 완료가 아니다.
+- [현재 구현 후보] #308 4B1은 89번째 append-only migration으로 KST 오늘 DB snapshot에
+  원 날짜가 과거인 미완료 업무도 포함한다. 내일 계획에는 과거 attempt-0 후보를 복제하지 않는다.
+  실제 수행 중인 교차 날짜 업무·원 snapshot 불일치·source/점유 충돌은 기존 guard를 유지한다.
+  private 조회의 `sequenceReservations`는 현재 assignment의 날짜별 최대 점유 순번이며
+  approved/cancelled target의 current row도 포함한다. 순수 계산기는 그 번호 뒤에 제안하고
+  원 업무/담당/날짜/번호를 변경하지 않는다. 내부 점유 정보는 공개 응답에 넣지 않는다.
+  오늘 목록·저장/통보·오늘 가능일 보호는 여전히 후속이며 운영 기능 완료가 아니다.
 - 구현 후보는 source/운영 배포 완료 선언이 아니다. [진행 범위](./CLEANING_OVERDUE.md)를 따른다.
 
 ## 2026-09-28 사용자 확정: 사진·이력·주급 개편

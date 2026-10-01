@@ -75,6 +75,39 @@ Deno.test("overdue planning preserves original date slots and uses today's avail
     r.proposedAssignments[0]?.proposedSequenceNumber !== 2 ||
     JSON.stringify(snapshot) !== before
   ) throw new Error("Cross-day snapshot changed or lost");
+  const occupied = await optimizeAssignmentPreview({
+    ...snapshot,
+    sequenceReservations: [{
+      maidProfileId: "maid",
+      serviceDate: "2037-01-03",
+      maxSequenceNumber: 9,
+    }],
+  }, "occupied");
+  if (
+    occupied.proposedAssignments[0]?.proposedSequenceNumber !== 10 ||
+    occupied.proposedAssignments[0]?.serviceDate !== "2037-01-03" ||
+    occupied.inputFingerprint === r.inputFingerprint ||
+    JSON.stringify(occupied.objectiveScore) !==
+      JSON.stringify(r.objectiveScore) ||
+    "sequenceReservations" in occupied || JSON.stringify(snapshot) !== before
+  ) {
+    throw new Error(
+      "Terminal occupancy leaked, changed fee load or lost original slot",
+    );
+  }
+  const exhausted = await optimizeAssignmentPreview({
+    ...snapshot,
+    sequenceReservations: [{
+      maidProfileId: "maid",
+      serviceDate: "2037-01-03",
+      maxSequenceNumber: 2147483647,
+    }],
+  }, "exhausted");
+  if (
+    exhausted.proposedAssignments.length !== 0 ||
+    exhausted.remainingUnassignedTargets[0]?.cleaningTargetId !==
+      "unassigned-old"
+  ) throw new Error("Exhausted sequence integer wrapped or lost candidate");
   const tomorrow = await optimizeAssignmentPreview({
     ...snapshot,
     serviceDate: "2037-01-06",

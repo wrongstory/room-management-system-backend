@@ -10,6 +10,7 @@ export const PREVIEW_LIMITS = {
   candidates: 121,
   maids: 1000,
   candidateMaids: 20,
+  sequenceReservations: 1000,
   evaluations: 100000,
   passes: 3,
 } as const;
@@ -80,7 +81,14 @@ export interface PreviewSnapshot {
   durationPolicyRequired?: false;
   maids: PreviewMaid[];
   targets: PreviewTarget[];
+  /** Internal DB occupancy, including terminal targets; never returned publicly. */
+  sequenceReservations?: {
+    maidProfileId: string;
+    serviceDate: string;
+    maxSequenceNumber: number;
+  }[];
 }
+const MAX_SEQUENCE_NUMBER = 2147483647;
 interface Score {
   count: number;
   spread: number;
@@ -241,7 +249,7 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
       assignment = {
         assignmentId: str(a.assignmentId),
         maidProfileId: str(a.maidProfileId),
-        sequenceNumber: integer(a.sequenceNumber, 1, 1000000),
+        sequenceNumber: integer(a.sequenceNumber, 1, MAX_SEQUENCE_NUMBER),
         revision: integer(a.revision, 1, Number.MAX_SAFE_INTEGER),
         serviceDate: date(a.serviceDate),
         availableFrom: a.availableFrom == null
@@ -298,6 +306,33 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
     new Set(maids.map((m) => m.maidProfileId)).size !== maids.length ||
     new Set(targets.map((t) => t.cleaningTargetId)).size !== targets.length
   ) invalid();
+  const rawReservations = s.sequenceReservations === undefined
+    ? []
+    : s.sequenceReservations;
+  if (!Array.isArray(rawReservations)) invalid();
+  if (rawReservations.length > PREVIEW_LIMITS.sequenceReservations) limited();
+  const maidIds = new Set(maids.map((m) => m.maidProfileId));
+  const targetDates = new Set(targets.map((t) => t.serviceDate));
+  const reservationKeys = new Set<string>();
+  const sequenceReservations = rawReservations.map((value) => {
+    const r = record(value);
+    const maidProfileId = str(r.maidProfileId),
+      serviceDate = date(r.serviceDate);
+    const key = JSON.stringify([maidProfileId, serviceDate]);
+    if (
+      !maidIds.has(maidProfileId) || !targetDates.has(serviceDate) ||
+      reservationKeys.has(key)
+    ) invalid();
+    reservationKeys.add(key);
+    return {
+      maidProfileId,
+      serviceDate,
+      maxSequenceNumber: integer(r.maxSequenceNumber, 1, MAX_SEQUENCE_NUMBER),
+    };
+  }).sort((a, b) =>
+    a.maidProfileId.localeCompare(b.maidProfileId) ||
+    a.serviceDate.localeCompare(b.serviceDate)
+  );
   return {
     serviceDate: date(s.serviceDate),
     planningAt: timestamp(s.planningAt),
@@ -306,6 +341,7 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
     durationPolicyRequired: false,
     maids,
     targets,
+    sequenceReservations,
   };
 }
 
@@ -416,6 +452,35 @@ export async function optimizeAssignmentPreview(
   const fixedFees = fixedByMaid.map((rows) =>
     rows.reduce((sum, t) => sum + t.feeSnapshot, 0)
   );
+  const reservedSequences = new Map(
+    (snapshot.sequenceReservations ?? []).map((r) => [
+      JSON.stringify([r.maidProfileId, r.serviceDate]),
+      r.maxSequenceNumber,
+    ]),
+  );
+  const fixedSequenceStarts = fixedByMaid.map((rows) =>
+    Math.max(0, ...rows.map((t) => t.currentAssignment?.sequenceNumber ?? 0))
+  );
+  // Keep historical fixed numbers. Occupancy belongs to each immutable date,
+  // and terminal current assignments still hold their database UNIQUE slots.
+  function proposedSequences(
+    rows: PreviewTarget[],
+    maidIndex: number,
+  ): number[] | null {
+    const nextByDate = new Map<string, number>();
+    const maidId = required(maids[maidIndex]).maidProfileId;
+    const result: number[] = [];
+    for (const t of rows) {
+      const last = nextByDate.get(t.serviceDate) ?? Math.max(
+        required(fixedSequenceStarts[maidIndex]),
+        reservedSequences.get(JSON.stringify([maidId, t.serviceDate])) ?? 0,
+      );
+      if (last >= MAX_SEQUENCE_NUMBER) return null;
+      nextByDate.set(t.serviceDate, last + 1);
+      result.push(last + 1);
+    }
+    return result;
+  }
   const routeDelta = (prev: PreviewTarget, t: PreviewTarget) => {
     const p = required(roomNumbers.get(prev.cleaningTargetId)),
       n = required(roomNumbers.get(t.cleaningTargetId));
@@ -438,6 +503,7 @@ export async function optimizeAssignmentPreview(
     for (let i = 0; i < maids.length; i++) {
       const newRows = required(board[i]);
       if (newRows.length && unavailable.has(i)) return null;
+      if (proposedSequences(newRows, i) === null) return null;
       if (
         newRows.some((t) =>
           t.recleanMaidProfileId !== null &&
@@ -596,14 +662,9 @@ export async function optimizeAssignmentPreview(
     };
   }
   const proposed = best.flatMap((rows, i) => {
-    const start = Math.max(
-      0,
-      ...required(fixedByMaid[i]).map((t) =>
-        t.currentAssignment?.sequenceNumber ?? 0
-      ),
-    );
+    const sequences = required(proposedSequences(rows, i));
     return rows.map((t, j) =>
-      row(t, required(maids[i]).maidProfileId, start + j + 1)
+      row(t, required(maids[i]).maidProfileId, required(sequences[j]))
     );
   });
   const chosen = new Set(proposed.map((t) => t.cleaningTargetId));

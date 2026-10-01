@@ -322,6 +322,195 @@ describe("assignment preview pure optimizer", () => {
     s.targets = [fixed("blocked", "a", 1, { blockedReason: "PREVIOUS_ROOM_WORKFLOW_ACTIVE" }), target("new")];
     expect((await optimizeAssignmentPreview(s, "blocked-source")).proposedAssignments).toEqual([]);
   });
+  it("reserves terminal current sequence slots independently for original service dates", async () => {
+    const s = snapshot([
+      fixed("old-fixed", "a", 1, { serviceDate: "2037-01-04" }),
+      target("old-new", { serviceDate: "2037-01-04" }),
+      target("today-new"),
+      target("today-more"),
+    ]);
+    s.maids = s.maids.slice(0, 1);
+    s.sequenceReservations = [
+      { maidProfileId: "a", serviceDate: "2037-01-04", maxSequenceNumber: 7 },
+      { maidProfileId: "a", serviceDate: "2037-01-05", maxSequenceNumber: 2 },
+    ];
+    const before = JSON.stringify(s);
+    const r = await optimizeAssignmentPreview(s, "reserved");
+    expect(
+      r.proposedAssignments.find((row) => row.cleaningTargetId === "old-new"),
+    )
+      .toMatchObject({ serviceDate: "2037-01-04", proposedSequenceNumber: 8 });
+    expect(
+      r.proposedAssignments.filter((row) => row.serviceDate === "2037-01-05")
+        .map((row) => row.proposedSequenceNumber).sort(),
+    ).toEqual([3, 4]);
+    expect(r.fixedAssignments[0]?.proposedSequenceNumber).toBe(1);
+    expect(r.maidSummaries[0]?.totalFee).toBe(120000);
+    expect(JSON.stringify(s)).toBe(before);
+    expect(r).not.toHaveProperty("sequenceReservations");
+  });
+  it("fingerprints occupancy changes canonically without adding terminal fee load", async () => {
+    const s = snapshot([
+      target("old", { serviceDate: "2037-01-04" }),
+      target("new"),
+    ]);
+    s.sequenceReservations = [
+      { maidProfileId: "a", serviceDate: "2037-01-04", maxSequenceNumber: 10 },
+      { maidProfileId: "b", serviceDate: "2037-01-05", maxSequenceNumber: 20 },
+    ];
+    const r = await optimizeAssignmentPreview(s, "reserved");
+    const reversed = await optimizeAssignmentPreview({
+      ...s,
+      maids: [...s.maids].reverse(),
+      targets: [...s.targets].reverse(),
+      sequenceReservations: [...s.sequenceReservations].reverse(),
+    }, "other");
+    expect(reversed).toEqual({ ...r, previewSeed: "other" });
+    const changed = await optimizeAssignmentPreview({
+      ...s,
+      sequenceReservations: [
+        { ...required(s.sequenceReservations[0]), maxSequenceNumber: 11 },
+        required(s.sequenceReservations[1]),
+      ],
+    }, "reserved");
+    expect(changed.inputFingerprint).not.toBe(r.inputFingerprint);
+    expect(changed.objectiveScore).toEqual(r.objectiveScore);
+    expect(changed.maidSummaries).toEqual(r.maidSummaries);
+    expect(
+      (await optimizeAssignmentPreview(
+        { ...s, sequenceReservations: [] },
+        "reserved",
+      )).objectiveScore,
+    )
+      .toEqual(r.objectiveScore);
+  });
+  it("normalizes missing legacy occupancy without changing its calculation", async () => {
+    const s = snapshot([target("new")]);
+    const legacy = await optimizeAssignmentPreview(s, "same");
+    expect(
+      await optimizeAssignmentPreview(
+        { ...s, sequenceReservations: [] },
+        "same",
+      ),
+    )
+      .toEqual(legacy);
+    expect(legacy.proposedAssignments[0]?.proposedSequenceNumber).toBe(1);
+  });
+  it("does not let occupancy renumber a higher fixed sequence", async () => {
+    const s = snapshot([fixed("fixed", "a", 8), target("new")]);
+    s.maids = s.maids.slice(0, 1);
+    s.sequenceReservations = [{
+      maidProfileId: "a",
+      serviceDate: s.serviceDate,
+      maxSequenceNumber: 3,
+    }];
+    const r = await optimizeAssignmentPreview(s, "fixed-high");
+    expect(r.proposedAssignments[0]?.proposedSequenceNumber).toBe(9);
+    expect(r.fixedAssignments[0]?.proposedSequenceNumber).toBe(8);
+  });
+  it("avoids exhausted PostgreSQL integer slots without wrapping or blocking other dates or maids", async () => {
+    const s = snapshot([
+      target("old", { serviceDate: "2037-01-04" }),
+      target("new"),
+    ]);
+    s.sequenceReservations = [{
+      maidProfileId: "a",
+      serviceDate: "2037-01-04",
+      maxSequenceNumber: 2147483647,
+    }];
+    const r = await optimizeAssignmentPreview(s, "exhausted");
+    expect(
+      r.proposedAssignments.find((row) => row.cleaningTargetId === "old")
+        ?.maidProfileId,
+    ).toBe("b");
+    s.maids = s.maids.slice(0, 1);
+    const only = await optimizeAssignmentPreview(s, "only-a");
+    expect(only.proposedAssignments).toMatchObject([{
+      cleaningTargetId: "new",
+      proposedSequenceNumber: 1,
+    }]);
+    expect(only.remainingUnassignedTargets).toEqual([{
+      cleaningTargetId: "old",
+      reason: "NO_ELIGIBLE_MAID",
+    }]);
+    s.sequenceReservations = [{
+      maidProfileId: "a",
+      serviceDate: "2037-01-04",
+      maxSequenceNumber: 2147483646,
+    }];
+    const last = await optimizeAssignmentPreview(s, "last-int");
+    expect(
+      last.proposedAssignments.find((row) => row.cleaningTargetId === "old")
+        ?.proposedSequenceNumber,
+    )
+      .toBe(2147483647);
+  });
+  it.each([
+    null,
+    {},
+    [{
+      maidProfileId: "unknown",
+      serviceDate: "2037-01-05",
+      maxSequenceNumber: 1,
+    }],
+    [{ maidProfileId: "a", serviceDate: "2037-02-30", maxSequenceNumber: 1 }],
+    [{ maidProfileId: "a", serviceDate: "2037-01-06", maxSequenceNumber: 1 }],
+    ...[0, -1, 1.5, NaN, 2147483648, "1"].map((
+      maxSequenceNumber,
+    ) => [{
+      maidProfileId: "a",
+      serviceDate: "2037-01-05",
+      maxSequenceNumber,
+    }]),
+    [
+      { maidProfileId: "a", serviceDate: "2037-01-05", maxSequenceNumber: 1 },
+      { maidProfileId: "a", serviceDate: "2037-01-05", maxSequenceNumber: 2 },
+    ],
+  ])(
+    "rejects malformed or duplicate sequence occupancy %j",
+    async (sequenceReservations) => {
+      await expect(
+        optimizeAssignmentPreview({
+          ...snapshot([target("new")]),
+          sequenceReservations,
+        }, "invalid"),
+      )
+        .rejects.toMatchObject({ code: "ASSIGNMENT_PREVIEW_SNAPSHOT_INVALID" });
+    },
+  );
+  it("fails closed beyond 1000 occupied maid/date groups without dropping slots", async () => {
+    const s = snapshot(Array.from({ length: 10 }, (_, i) =>
+      target(`old-${i}`, {
+        serviceDate: new Date(Date.UTC(2036, 11, 26 + i)).toISOString().slice(
+          0,
+          10,
+        ),
+      })));
+    const prototype = required(s.maids[0]);
+    s.maids = Array.from({ length: 100 }, (_, i) => ({
+      ...prototype,
+      maidProfileId: `maid-${i}`,
+      available: i === 0,
+    }));
+    s.sequenceReservations = s.maids.flatMap((maid) =>
+      s.targets.map((t) => ({
+        maidProfileId: maid.maidProfileId,
+        serviceDate: t.serviceDate,
+        maxSequenceNumber: 5,
+      }))
+    );
+    expect((await optimizeAssignmentPreview(s, "at-limit")).proposedAssignments)
+      .toHaveLength(10);
+    await expect(
+      optimizeAssignmentPreview({
+        ...s,
+        sequenceReservations: [
+          ...s.sequenceReservations,
+          required(s.sequenceReservations[0]),
+        ],
+      }, "above-limit"),
+    ).rejects.toMatchObject({ code: "ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED" });
+  });
   it("does not offer follow-up work when an active attempt no longer matches its fixed assignment", async () => {
     const stale = fixed("stale", "a", 1, { status: "in_progress" });
     stale.activeAttempt = {

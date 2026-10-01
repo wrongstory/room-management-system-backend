@@ -226,7 +226,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']cleaning_started_admin_notifications["']/
+      /expectedMigrationName\s*=\s*["']cleaning_overdue_preview_snapshot["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);

@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 88,
+  "totalCount": 89,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 10,
+    "count": 11,
     "first": "assignment_unavailability_reassignment",
-    "head": "cleaning_started_admin_notifications"
+    "head": "cleaning_overdue_preview_snapshot"
   },
-  "head": "cleaning_started_admin_notifications",
+  "head": "cleaning_overdue_preview_snapshot",
   "migrations": [
     {
       "order": 1,
@@ -453,6 +453,11 @@
       "order": 88,
       "name": "cleaning_started_admin_notifications",
       "sha256": "0c554007cba494e5fae5545d350ed0e1c12b620cf383352fc37ebd44a58e9905"
+    },
+    {
+      "order": 89,
+      "name": "cleaning_overdue_preview_snapshot",
+      "sha256": "651305631f7035f591b2ea1adc372a797be26b8f3f4ec5df737f93252dd3a18b"
     }
   ]
 }
