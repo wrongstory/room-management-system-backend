@@ -80,6 +80,13 @@ rollback은 과거 원장 삭제가 아니라 별도 검토된 후속 migration/
 | `npm run db:test:concurrency` | 최종 PASS(exit0); 기존 전체 runner와 별도 fresh DB 신규 실제 RPC 경합, 최종 fresh cleanup 모두 통과 |
 | 독립 QA / 새 exact-head required CI | local source QA 98/100, P0/P1/P2=0·커밋 가능; exact-head CI/postcommit backup·최종 병합 QA는 별도 gate |
 
+필수 CI의 migration job만 유한한 25분 예산을 사용한다. 직전 승인 PR #340의
+run `36864792279`는 19분 33초(DB upgrade/SQL 14분 9초, 동시성 3분 23초)로 기존
+20분 예산의 여유가 27초였다. 이번 18번째 upgrade와 독립 동시성 stage의 추가 fresh reset·
+실제 경합을 수용하기 위한 조정이다. application 20분, 검증 명령·assertion·처리 상한·
+required checks·항상 cleanup·실패 처리는 유지한다. 무제한 timeout이나 검증 우회가 아니다.
+예산 조정 전 첫 원격 실행은 당시 진행 중이었으며 timeout/FAIL로 확정하지 않는다.
+
 독립 QA에서 발견한 신규 family의 late-admin 즉시 TTL 만료는 enrollment clock을 분리해
 보완했다. 기존 `cleaning.overdue_admin`의 같은 경계는 범위 밖 [#345](https://github.com/wrongstory/room-management-system-backend/issues/345)로 분리했다.
 과거 source의 운영 실제 피해를 확정하지 않았으며, 이 PR에서 기존 family나 TTL을 바꾸지 않는다.
