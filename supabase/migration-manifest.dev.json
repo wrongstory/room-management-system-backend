@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 85,
+  "totalCount": 91,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 7,
+    "count": 13,
     "first": "assignment_unavailability_reassignment",
-    "head": "flat_cleaning_evidence_history_payroll"
+    "head": "cleaning_report_decision_notifications"
   },
-  "head": "flat_cleaning_evidence_history_payroll",
+  "head": "cleaning_report_decision_notifications",
   "migrations": [
     {
       "order": 1,
@@ -438,6 +438,36 @@
       "order": 85,
       "name": "flat_cleaning_evidence_history_payroll",
       "sha256": "2be3c320dcf24718f63a297c05f4c7fa5802e5f4fde5a4534eab572d4e166590"
+    },
+    {
+      "order": 86,
+      "name": "cleaning_overdue_preserve_work",
+      "sha256": "9753943398ba768f35f86053dd87dfc069f34ebb90558cd549322c962fd68306"
+    },
+    {
+      "order": 87,
+      "name": "cleaning_overdue_notifications",
+      "sha256": "aeb1d8dba2e2496bbfa0d6361cfff30d6fffbbcbe38ca6aed897f1e06b4857b8"
+    },
+    {
+      "order": 88,
+      "name": "cleaning_started_admin_notifications",
+      "sha256": "0c554007cba494e5fae5545d350ed0e1c12b620cf383352fc37ebd44a58e9905"
+    },
+    {
+      "order": 89,
+      "name": "cleaning_overdue_preview_snapshot",
+      "sha256": "651305631f7035f591b2ea1adc372a797be26b8f3f4ec5df737f93252dd3a18b"
+    },
+    {
+      "order": 90,
+      "name": "cleaning_overdue_commit_planning",
+      "sha256": "000a41260309430d6b62284fcea738ed275e5a86f401851286c71c351574382d"
+    },
+    {
+      "order": 91,
+      "name": "cleaning_report_decision_notifications",
+      "sha256": "991778537952b633682b9761914a1c4df7af461df950b7ddd8a46cf9e7db66e3"
     }
   ]
 }

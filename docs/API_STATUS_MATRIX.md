@@ -6,7 +6,67 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 > 정본 효력: 이 파일이 `dev`에 병합된 이후부터 API 상태 판단의 우선 정본으로 사용한다. production 상태는 Git branch가 아니라 Supabase Edge Function readback과 hosted HTTP smoke를 우선한다.
 
+### #308 1·2·3차 source 후보 — 지연 업무 유지·관리자 알림
+
+당일 preview/commit의 dueAt 차단 제거, 과거 notified 업무 activation/start 허용,
+scheduler 자동 이월 중단과 bounded/fair 100건 cursor, `expire_scheduled` 폐기의 1차 source를 구현했다.
+기존 85개 migration은 보존하고 86번째 append-only migration을 사용한다. Fastify/Edge preview는
+같은 계산기이며 lifecycle/start는 기존 Edge-only다. production/main/recovery는 미변경이다.
+2차 87번째 append-only migration은 target별 최초 지연 원장·관리자별 typed inbox/outbox와
+별도 bounded 100건 cursor를 추가한다. 기존 알림 API/category string/cleaningTarget deep link를
+재사용하고 scheduler 결과에 `overdueCount`를 더한다. 3차 88번째 append-only migration은
+메이드의 정상 청소 시작을 관리자에게 typed informational 알림으로 보완한다. 공개 category
+`cleaning_started`도 기존 Fastify/Edge notification projection과 deep link를 사용하고 새 endpoint는 없다.
+기존 완료·제출·검수·담당 변경 및 자기 push 제외 정책은 유지한다. 과거 미배정
+업무의 종단 저장·통보와 최종 통합은 미완료이며 #308을 닫지 않는다. 4A는 Fastify/Edge 공유 순수
+계산기가 과거 후보·날짜별 고정 sequence를 보존하도록 보완한 부분 후보다. 당시 DB 대상집합,
+현재 목록 조회, 저장/통보 및 가능일 보호는 후속 범위였다. 4A의 공개 schema/경로 및 DB/RLS 변경은 없다.
+4B1은 89번째 append-only migration으로 오늘 DB snapshot의 과거 미완료 대상집합을 연결하고,
+terminal target의 current assignment까지 원 날짜별 순번 점유로 계산한다. private metadata는 공개
+Preview 응답에서 제외하며 공개 endpoint/schema/RLS 권한은 그대로다. 원 날짜/담당/snapshot/history를
+변경하지 않는다. 4B2는 오늘 current 목록의 과거 미완료 조회, 오늘 가능일에 기반한 commit 후보/잠금과
+불변 통보 감사에 기반한 계획일 가능일 보호를 연결한다. 내일/이력 조회는 exact-date이며 항목별 원 날짜는
+보존한다. count/실제 반환 수와 기술 상한을 검사하여 일부 목록·잘린 관련 이력으로 응답하지 않는다.
+공개 경로/DTO/권한·보안 TTL은 그대로며 최신 dev/#320 통합 전 종단 종료 선언은 하지 않는다. 실제 검증/PR 상태는
+[지연 업무 계약](./CLEANING_OVERDUE.md)에 기록한다.
+
 ## 1. 상태 판정 규칙
+
+### #308 6차 — 제출 전 신고·폭탄방 선판정 상대 역할 알림
+
+전체 완료 조건 감사에서 발견한 폭탄방 신고/특이사항 신고→관리자,
+폭탄방 선판정→해당 메이드 통지를 보완하는 source 후보다.
+91번째 append-only migration, 기존 알림 조회/읽음·delivery 경로를 재사용한다.
+신고·판정 API의 응답과 권한·CAS·멱등성·최종 승인/수익 계약은 바꾸지 않는다.
+메모/사진 원문·private provenance는 공개 알림에 넣지 않는다.
+프런트·운영 변경 없음. 실제 검증과 남은 gate는
+[상대 역할 알림 보완](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
+5차 head14676c1의 required CI36833580274 application/migration PASS는
+이전 source 검증이며 6차 새 head의 승인이 아니다.
+
+### #308 5차 — #320 후보의 직접 의존 계약 결합
+
+- 744662c 업무 보존 계산기에 ad91d2e의 허용 목록 진단·no-store·OpenAPI 계약을 결합했다.
+  원 날짜별 slot·terminal 슬롯·오늘 과거 후보·기한 비차단·snapshot fingerprint는 유지한다.
+- 이번 로컬 PASS: quality625/typecheck/build, Edge298/bundle17,194,004, fresh90/68SQL3,649,
+  KST145, manifest5종, Python95/ruff/format/mypy/business OpenAPI codegen/package source.
+  기준744662c와 합성100개 기존 응답·점수·fingerprint·입력 비변경 비교 PASS.
+- 새 migration/운영/프런트 변경 없음. 최신 dev e19f81f와 후보 브랜치를 구분한다.
+  독립 QA98/100·차단0·Node625/focused80·기준744 직접 비교56case PASS는 로컬 Draft
+  commit/push 준비 범위다. 새 exact-head CI·#308/#305 종료·#320 실제 사례는 별도 gate다.
+  상세·초기 실패와 보완은 [지연 업무 기록](./CLEANING_OVERDUE.md)을 따른다.
+
+### #320 Preview 진단 보강 (feature source, 운영 미배포)
+
+- Fastify/Edge 공통 계산기의 미배정 reasonCodes와 동일 snapshot의 단계별 후보 수·고정 업무 제외 사유를 추가했다.
+- 기존 배정 기준·reason·응답 분류·fingerprint·CAS를 유지한다. 새 endpoint/migration은 없다.
+- 계약/프런트 전달 사항: [ASSIGNMENT_PREVIEW.md](./ASSIGNMENT_PREVIEW.md).
+- #320의 실제 신고 사례 대조와 프런트 한국어 사유 매핑/UAT는 미완료다. 합성 재현을 운영 원인 확정으로 표시하지 않는다.
+- dev/main 병합·운영 배포는 이 기록에 포함되지 않는다.
+- #320 단독 후보의 역사 로컬 검증: application 587, Edge 290 + pinned bundle, fresh local 85 migrations,
+  전체 SQL 64 files/3,366 assertions, DB lint, Python business OpenAPI codegen PASS.
+  기존 dev 대비 합성 100개 결과·score·fingerprint 동일. 누적 upgrade/전체 동시성/hosted UAT는 이번 변경에서 미실행.
+- 독립 QA: 100/100, 최종 P0/P1/P2 0건. 원격 required CI와 실제 신고 사례 확인은 별도 gate다.
 
 | 표시 | 의미 |
 |---|---|

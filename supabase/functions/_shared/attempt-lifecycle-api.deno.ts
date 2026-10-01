@@ -222,7 +222,6 @@ Deno.test("admin lifecycle exact routes expose bounded impact and each action wi
     const action of [
       "allow_finish",
       "allow_upload",
-      "expire_scheduled",
       "interrupt_handover",
     ]
   ) {
@@ -240,8 +239,6 @@ Deno.test("admin lifecycle exact routes expose bounded impact and each action wi
       ? "DEACTIVATION_FINISH_CURRENT"
       : action === "allow_upload"
       ? "DEACTIVATION_UPLOAD_ONLY"
-      : action === "expire_scheduled"
-      ? "SCHEDULE_EXPIRED"
       : "DEACTIVATION_HANDOVER";
     const { client, calls } = mock({
       role: "admin",
@@ -302,8 +299,8 @@ Deno.test("admin lifecycle exact routes expose bounded impact and each action wi
   }
 });
 
-Deno.test("admin expiry preserves inactive or departed owners without granting limited access", async () => {
-  for (const profileStatus of ["inactive", "departed"]) {
+Deno.test("retired scheduled expiry is rejected before mutation and disabled owners remain denied", async () => {
+  for (const profileStatus of ["active", "inactive", "departed"]) {
     const { client, calls } = mock({
       role: "admin",
       status: "active",
@@ -330,15 +327,14 @@ Deno.test("admin expiry preserves inactive or departed owners without granting l
     );
     const data = await response.json();
     assert(
-      response.status === 200 && data.profileStatus === profileStatus &&
-        data.capability === null && data.nextAttempt === null &&
-        data.attempt.status === "superseded",
-      "admin preserves disabled owner and superseded history with no new grant",
+      response.status === 400 && data.error.code === "VALIDATION_ERROR",
+      "elapsed schedule cannot authorize superseding a task",
     );
     assert(
-      calls.at(-1)?.name === "manage_cleaning_attempt_lifecycle",
-      "only trusted lifecycle command",
+      !calls.some((call) => call.name === "manage_cleaning_attempt_lifecycle"),
+      "retired action never reaches a mutation RPC",
     );
+    if (profileStatus === "active") continue;
     for (const method of ["GET", "POST"]) {
       const disabled = mock({ status: profileStatus });
       const limitedResponse = await handleApiRequest(

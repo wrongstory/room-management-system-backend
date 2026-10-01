@@ -659,6 +659,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
       },
       in: (_key: string, _values: unknown[]) => builder,
       order: (_key: string) => builder,
+      limit: (_maximum: number) => builder,
       // biome-ignore lint/suspicious/noThenProperty: PostgREST의 lazy thenable을 재현하여 await 시점에 누적된 RLS 대체 필터를 검사한다.
       then: (resolve: (value: unknown) => unknown) =>
         Promise.resolve({
@@ -666,6 +667,11 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             conditions.every((condition) => condition(row))
           ),
           error: null,
+          count: data.filter((row) =>
+            conditions.every((condition) =>
+              condition(row)
+            )
+          ).length,
         }).then(resolve),
     };
     return builder;

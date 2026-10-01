@@ -1,6 +1,19 @@
 # 알림 이벤트 카탈로그 v1
 
-이 문서는 Issue #109의 기반 계약과 Issue #128/#264의 보완을 반영한 36개 공개 category와 53개 event family의 정본이다. DB의
+#305/#308 1차 후보는 시간 만료에 따른 rollover/`scheduled_expired` 신규 이벤트를 만들지 않는다.
+이 카탈로그의 기존 관련 family는 과거 typed 이력의 유효성·조회 증명을 위해 유지한다.
+2차 후보의 `cleaning.overdue_admin`은 미완료 현장 청소의 최초 지연을 관리자에게 알린다.
+target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를 넘어도 중복하지 않는다.
+3차 후보는 `cleaning.started_admin`으로 정상 청소 시작을 업무관리자에게 알린다.
+자기 push를 만들지 않으며 기존 검수 승인 등의 inbox/push 정책은 바꾸지 않는다. 운영 전달 완료가 아니다.
+[진행 범위](./CLEANING_OVERDUE.md)를 따른다.
+
+6차 후보는 성공한 폭탄방·특이사항 신고를 관리자에게, 폭탄방 선판정을 해당 메이드에게
+즉시 informational 알림으로 전달한다. 기존 전체 제출/최종 검수 알림과 다른 사건이며,
+과거 이력 backfill·단순 사진 업로드 알림·원문 복제는 없다.
+[상대 역할 알림 검증](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
+
+이 문서는 Issue #109의 기반 계약과 Issue #128/#264/#308의 보완을 반영한 41개 공개 category와 58개 event family의 후보 정본이다. DB의
 `private.notification_event_catalog`와 테스트가 이 표를 그대로 검증한다. `source`는 알림 생성과
 해결의 typed provenance이며 audit payload나 문자열 dedupe는 권한 근거가 아니다.
 
@@ -41,6 +54,11 @@
 | assignment.reassignment_required | assignment_reassignment_required | admin.assignment_decider | yes/yes | assignment_unavailability_cancellation | none | cleaningTarget | assignment_reassignment_required/room |
 | assignment.scheduled_rolled_over | cleaning_assignment_rolled_over | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_rolled_over/room |
 | cleaning.field_completed_admin | cleaning_field_completed | admin.inspection_queue | no/yes | cleaning_attempt | none | cleaningTarget | cleaning_field_completed/room |
+| cleaning.started_admin | cleaning_started | admin.assignment_decider | no/yes | cleaning_attempt | none | cleaningTarget | cleaning_started/room |
+| cleaning.overdue_admin | cleaning_overdue | admin.assignment_decider | no/yes | cleaning_overdue_event | none | cleaningTarget | cleaning_overdue/room |
+| bomb.reported_admin | bomb_room_reported | admin.inspection_queue | no/yes | bomb_room_report | none | cleaningTarget | bomb_room_reported/room |
+| room_issue.reported_admin | room_issue_reported | admin.inspection_queue | no/yes | attempt_room_issue_report | none | cleaningTarget | room_issue_reported/room |
+| bomb.decided_maid | bomb_room_decided | maid.inspection_subject | no/yes | bomb_room_decision | none | submission | bomb_room_decided/room |
 | room.operation_block_changed | cleaning_room_operation_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_room_operation_changed/room |
 | room.issue_status_changed | cleaning_room_issue_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_room_issue_changed/room |
 | room.pin_sync_status_changed | cleaning_pin_sync_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_pin_sync_changed/room |

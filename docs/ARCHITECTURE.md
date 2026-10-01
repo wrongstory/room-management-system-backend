@@ -589,6 +589,20 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 typed `notifications`, private `notification_delivery_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
+#308 4B2 source 후보는 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
+미완료 업무를 포함합니다. 내일·과거/이력 조회는 기존 exact-date 범위이며 원 날짜/담당/순번은
+갱신하지 않습니다. Fastify/Edge 목록은 access-token RLS 본인 통보 범위를 먼저 제한하고,
+오늘 exact row와 과거 unfinished inner-target row를 합칩니다. 과거 이력에는 현재 target join을
+요구하지 않습니다. 목록 총1,000건·관련 ID100건 batch별1,000건의 exact count/반환 수를 대조해
+잘린 이력으로 최신 attempt/제출을 추측하지 않습니다. 상한 초과는 기존 안전한500 오류입니다.
+DB impact도1,001 sentinel로 전체 후보 상한1,000을 확인한 뒤에만 fingerprint를 만듭니다.
+확정 잠금 집합은 preflight와 동일한 원 날짜 포함 함수를 사용하고 선택 항목 최대121은 그대로입니다.
+배정 응답/impact 항목 날짜는 원 날짜, 최상위 요청과 불변 통보 감사 날짜는 계획일입니다.
+오늘 가능일 보호는 그 감사의 assignment/target/maid/revision/계획일을 정확히 대조하며 기존
+원 날짜 보호도 보존합니다. 감사 조회에는 notified assignment entity 전용 partial index를 사용합니다.
+기존 source preflight는 원 일정 검증이며 실제 현재 점유·선행 업무의 최종 activation/start guard를
+대체하지 않습니다. 최신 dev/#320 통합·원격 exact-head CI와 운영 승격은 별도 gate입니다.
+
 ## 시작 전 배정 변경 — #27
 
 네 개의 service-only RPC(change/unassign/cancellation request/decision)가 같은 private command helper를 사용합니다. Edge는 Auth user → active profile → active session → 비밀번호 변경 완료 → exact admin/maid를 확인하고, DB는 actor·ownership·current assignment·target version·transition을 다시 검증합니다.
@@ -604,6 +618,12 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 요청 목록은 최대 31일/100건, `(requested_at,id)` cursor와 maid/page indexes로 제한합니다. reason detail은 길이/형식 제한된 business 데이터이며 관리자/본인에게만 반환하고 감사/알림에서 제외합니다. 4개 audit event는 developer safe projection/OpenAPI/Python 생성 모델에 동기화합니다. 운영/recovery/Pages 및 #7/#69/#10 실행 기능에는 변경이 없습니다.
 
 ## 수행 회차 활성화와 이월 — #28
+
+#305/#308 후보에서는 이 절의 시간 만료·자동 이월 경로를 폐기한다. 오늘과 과거 날짜의
+통보 업무를 현재 안전 조건으로 활성화하되 원 업무/담당/snapshot은 유지한다.
+한 invocation의 대상은 최대 100건이며 private 회전 cursor가 장기 blocked 선두에 의한
+후속 업무 기아를 막는다. cursor는 변경 가능한 기술 projection이며 업무 원장이 아니다.
+아래 이월 설명은 과거 구현 기록이다. [지연 업무 계약](./CLEANING_OVERDUE.md)에 현재 검증/후속 범위를 기록한다.
 
 기존 `reservation-scheduler`는 예약 전이와 같은 실제 실행 시각을 사용해 service-only
 `process_due_assignment_lifecycle`을 이어서 호출합니다. command receipt는 예약 전이와 별도
@@ -690,7 +710,7 @@ Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 sn
 
 ### #109 typed 알림 writer 계약 — source/dev 완료, 현재 production source 반영
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 36 category/53 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 6차 후보 기준 41 category/58 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
@@ -709,6 +729,23 @@ inactive, 임시 비밀번호 수신자도 inbox history는 남지만 push enque
 provenance가 없는 `private.notification_outbox`는 legacy history로 격리하고 어떤 worker도
 읽지 않습니다. `private.notification_delivery_outbox`만 #111 worker의 유일 입력이며,
 #109 자체 범위에서는 pending append와 raw 권한 차단만 정의했습니다.
+
+#308 2차 후보는 미완료 현장 청소의 최초 지연만 `cleaning.overdue_admin`으로 알립니다.
+private immutable target event와 `(event,recipient)` enrollment가 원 일정·담당·회차 snapshot과
+원 알림 시각을 보존하고 deferred 제약으로 typed inbox/outbox의 양방향 원자성을 검사합니다.
+100건 fair cursor는 global reservation lock 뒤 target/assignment/attempt를 잠그고 admin 상태를
+enrollment와 emitter에서 재검증합니다. 수신자 profile에 추가 역순 잠금을 만들지 않으며
+동시 상태 변경으로 push intent가 불일치하면 전체 transaction을 fail-closed합니다.
+동일 이벤트는 다른 실행 actor·10분 grouping 경계에서도 재생성하지 않습니다. 늦게 활성화된
+관리자의 새 inbox는 허용하지만 원 event 시각과 기존 push 24h TTL을 유지합니다.
+현장 완료·업로드·검수 대기에 새 SLA를 만들지 않으며 original domain row는 변경하지 않습니다.
+
+#308 3차 후보는 기존 start command의 동일 transaction에 삽입되는
+`cleaning.attempt_started` audit에서 관리자 `cleaning.started_admin`을 생성합니다.
+원 attempt/담당/assignment revision/시작 시각과 typed 감사 provenance를 검증하고
+receipt replay는 새 audit·inbox·outbox를 만들지 않습니다. 완료·제출·검수·배정 변경의
+기존 family와 push eligibility는 유지하고, 사진 개별 업로드 등 상태 비전이는 알리지 않습니다.
+시작 감사 중복 검사는 attempt-keyed partial audit index를 사용하며 기존 감사 이력을 재작성하지 않습니다.
 
 ### #110 encrypted Web Push subscription 계약 — source/dev 완료, 현재 production source 반영·hosted 활성화 대기
 

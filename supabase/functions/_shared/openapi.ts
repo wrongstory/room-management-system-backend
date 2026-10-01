@@ -113,6 +113,11 @@ const complaintErrorResponse = {
   headers: { "Cache-Control": noStoreHeader },
 };
 
+const assignmentPreviewErrorResponse = {
+  ...errorResponse,
+  headers: { "Cache-Control": noStoreHeader },
+};
+
 const accountManagerRoles = ["developer", "admin"] as const;
 const photoPathId = (name: string) => ({
   name,
@@ -2645,6 +2650,11 @@ export const openApiDocument = {
         responses: {
           "200": {
             description: "저장되지 않은 배정 초안",
+            headers: {
+              "Cache-Control": {
+                schema: { type: "string", const: "no-store" },
+              },
+            },
             content: {
               "application/json": {
                 schema: {
@@ -2653,12 +2663,12 @@ export const openApiDocument = {
               },
             },
           },
-          "400": errorResponse,
-          "401": errorResponse,
-          "403": errorResponse,
-          "409": errorResponse,
-          "422": errorResponse,
-          "500": errorResponse,
+          "400": assignmentPreviewErrorResponse,
+          "401": assignmentPreviewErrorResponse,
+          "403": assignmentPreviewErrorResponse,
+          "409": assignmentPreviewErrorResponse,
+          "422": assignmentPreviewErrorResponse,
+          "500": assignmentPreviewErrorResponse,
         },
       },
     },
@@ -6281,7 +6291,97 @@ export const openApiDocument = {
           cleaningTargetId: { type: "string", format: "uuid" },
           reason: {
             type: "string",
-            description: "서버의 source/capacity 고정 reason code",
+            description:
+              "서버의 target source/schedule 검증 reason code. 인원 제외와 별개",
+          },
+        },
+      },
+      AssignmentPreviewRemainingTarget: {
+        type: "object",
+        additionalProperties: false,
+        required: ["cleaningTargetId", "reason", "reasonCodes"],
+        properties: {
+          cleaningTargetId: { type: "string", format: "uuid" },
+          reason: {
+            type: "string",
+            enum: ["NO_ELIGIBLE_MAID", "RECLEAN_MAID_UNAVAILABLE"],
+          },
+          reasonCodes: {
+            type: "array",
+            minItems: 1,
+            maxItems: 1,
+            items: {
+              type: "string",
+              enum: [
+                "NO_ACTIVE_MAID",
+                "AVAILABILITY_NOT_SUBMITTED",
+                "NO_AVAILABLE_MAID",
+                "FIXED_ASSIGNMENT_CONFLICT",
+                "RECLEAN_MAID_UNAVAILABLE",
+                "RECLEAN_MAID_FIXED_ASSIGNMENT_CONFLICT",
+                "NO_FEASIBLE_ASSIGNMENT",
+              ],
+            },
+          },
+        },
+      },
+      AssignmentPreviewDiagnostics: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "동일 RPC snapshot의 누적 필터 인원. eligible은 reclean 소유권 적용 전이며 target별 배정 보장이 아님",
+        required: [
+          "evaluatedAt",
+          "activeMaidCount",
+          "submittedAvailabilityMaidCount",
+          "availableMaidCount",
+          "fixedExcludedMaidCount",
+          "eligibleMaidCount",
+          "fixedExclusions",
+        ],
+        properties: {
+          evaluatedAt: { type: "string", format: "date-time" },
+          activeMaidCount: { type: "integer", minimum: 0, maximum: 1000 },
+          submittedAvailabilityMaidCount: {
+            type: "integer",
+            minimum: 0,
+            maximum: 1000,
+          },
+          availableMaidCount: { type: "integer", minimum: 0, maximum: 20 },
+          fixedExcludedMaidCount: { type: "integer", minimum: 0, maximum: 20 },
+          eligibleMaidCount: { type: "integer", minimum: 0, maximum: 20 },
+          fixedExclusions: {
+            type: "array",
+            maxItems: 242,
+            description:
+              "가능일 후보의 기존 고정 업무 충돌. target별 복수 사유이며 인원 합계로 더하지 않음. 미래 scheduled 생략과 별개",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["maidProfileId", "cleaningTargetId", "reasonCodes"],
+              properties: {
+                maidProfileId: { type: "string", format: "uuid" },
+                cleaningTargetId: { type: "string", format: "uuid" },
+                reasonCodes: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 7,
+                  uniqueItems: true,
+                  items: {
+                    type: "string",
+                    enum: [
+                      "FIXED_SEQUENCE_CONFLICT",
+                      "FIXED_SERVICE_DATE_MISMATCH",
+                      "FIXED_ASSIGNMENT_VERSION_MISMATCH",
+                      "FIXED_SCHEDULE_MISMATCH",
+                      "FIXED_SOURCE_BLOCKED",
+                      "FIXED_ATTEMPT_OWNER_MISMATCH",
+                      "FIXED_ATTEMPT_WORKFLOW_UNRESOLVED",
+                    ],
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -6296,6 +6396,7 @@ export const openApiDocument = {
           "durationPolicyRequired",
           "decisionReady",
           "inputFingerprint",
+          "diagnostics",
           "fixedAssignments",
           "proposedAssignments",
           "remainingUnassignedTargets",
@@ -6332,8 +6433,11 @@ export const openApiDocument = {
             type: "array",
             maxItems: 121,
             items: {
-              $ref: "#/components/schemas/AssignmentPreviewBlockedTarget",
+              $ref: "#/components/schemas/AssignmentPreviewRemainingTarget",
             },
+          },
+          diagnostics: {
+            $ref: "#/components/schemas/AssignmentPreviewDiagnostics",
           },
           blockedTargets: {
             type: "array",
@@ -8113,7 +8217,7 @@ export const openApiDocument = {
       },
       AttemptLifecycleRequest: {
         description:
-          "action별 payload/reason은 고정 계약입니다. raw body·자유문·session ID·capability token·TTL은 입력하지 않습니다.",
+          "action별 payload/reason은 고정 계약입니다. 예정 기한 경과만으로 업무를 종료하는 expire_scheduled는 허용하지 않습니다. raw body·자유문·session ID·capability token·TTL은 입력하지 않습니다.",
         oneOf: [
           lifecycleRequestVariant(
             "allow_finish",
@@ -8125,11 +8229,6 @@ export const openApiDocument = {
             ["DEACTIVATION_UPLOAD_ONLY"],
             { type: "object", additionalProperties: false, maxProperties: 0 },
           ),
-          lifecycleRequestVariant("expire_scheduled", ["SCHEDULE_EXPIRED"], {
-            type: "object",
-            additionalProperties: false,
-            maxProperties: 0,
-          }),
           lifecycleRequestVariant(
             "interrupt_handover",
             ["ADMIN_HANDOVER", "DEACTIVATION_HANDOVER"],
