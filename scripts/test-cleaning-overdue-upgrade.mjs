@@ -70,7 +70,7 @@ try {
     where id='28000000-0000-4000-8000-000000000506';`), 'scheduled');
   assert.equal(sql(`select count(*) from public.cleaning_target_schedule_revisions
     where reason_code='ROLLED_OVER_NOT_STARTED';`), '0');
-  console.log('Cleaning overdue upgrade 85→87: PASS; original schedules/owners/history preserved, durable overdue dedupe without rollover.');
+  console.log('Cleaning overdue upgrade 85→88: PASS; original schedules/owners/history preserved, durable overdue dedupe without rollover; no historical start backfill.');
 } finally {
   run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed']);
 }

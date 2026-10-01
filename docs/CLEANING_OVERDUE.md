@@ -1,6 +1,6 @@
 # #308 지연 업무: 기존 업무 보존
 
-정책은 #305와 제품 가이드의 확정 결정을 따른다. 현재 작업은 1·2차 source 후보이며
+정책은 #305와 제품 가이드의 확정 결정을 따른다. 현재 작업은 1·2·3차 source 후보이며
 production/main/recovery, 실제 객실 데이터·PIN·계정은 변경하지 않는다.
 
 ## 1차 범위
@@ -46,13 +46,13 @@ Fastify와 Edge preview는 같은 순수 optimizer를 사용한다. lifecycle/st
 
 ## #308 잔여 범위 — 완료/종료 전 필수
 
-1. 2차 overdue 후보의 fresh/upgrade/RLS/동시성/독립 QA/required CI 완료 및 dev 통합.
-2. 관리자↔메이드 업무 상태 변경별 알림 coverage 확인 및 누락 보강.
+1. 1·2차 overdue 후보는 exact head `7d2337e`의 독립 QA 98점/required CI PASS. dev 통합은 미완료.
+2. 3차 관리자↔메이드 업무 상태 알림 coverage·정상 시작 누락 보강 및 새 head 검증.
 3. 과거 미배정/draft 업무의 오늘 preview·현재 가능일·sequence 계약:
    target/assignment의 기존 serviceDate snapshot을 임의 수정하지 않는다.
 4. 위 후속과 통합한 fresh/upgrade/RLS/concurrency/독립 QA/required CI.
 
-1·2차 후보를 포함한 Draft PR #340은 `Refs #308`로 연결하며 parent Issue를 닫지 않는다. #320 진단 PR과 optimizer
+1·2·3차 후보를 포함한 Draft PR #340은 `Refs #308`로 연결하며 parent Issue를 닫지 않는다. #320 진단 PR과 optimizer
 인접 변경이 있으므로 dev 통합 시 최신 head에서 충돌·회귀·문서 정합성을 다시 검사한다.
 
 ## 검증 기록: 1차 후보
@@ -100,7 +100,7 @@ checkout 보안 trigger는 완화하지 않았다. fresh reset 없이 재시도�
 | `npm run db:verify`, `npm run backup:dry-run` | PASS; fresh 87 migrations local-synthetic dump/restore |
 | DB lint | exit 0/error 0; 기존 STABLE/VOLATILE·unused 경고와 새 helper `notice_id` unused 경고 유지. 오류 없이 writer 부수 효과로 호출하며 응답 UUID는 소비하지 않음 |
 | 독립 QA (2차 범위) | 로컬 98/100, P0=0/P1=0/P2=0; 범위25/25·보안29/30·검증24/25·문서20/20. commit 후 exact-head 재확인/원격 CI 별도 |
-| 새 head 원격 required CI | NOT RUN; commit/push 전 |
+| 새 head 원격 required CI | exact head `7d2337eb2b5239ef0c8b215daa13627fa2355e15`, run `36804535550` attempt 2 application PASS / migration PASS. 독립 QA exact-head 98/100, P0/P1/P2=0. Draft/미병합 유지 |
 | production/hosted/frontend UAT | NOT RUN; 별도 운영 범위 |
 
 첫 fresh reset은 신규 deferred 검사 함수의 CASE 괄호 누락으로 실패했다. 미적용 신규
@@ -113,3 +113,69 @@ ID의 전체 원문과 다른 family는 기존 불변 검사를 유지한다. �
 개수·actor·deep link·원 시각·자기 push 없음도 검사하므로 새 알림을 단순 무시하지 않는다.
 전체 동시성 검사는 해당 보강 뒤 fresh DB에서 재실행해 모두 통과했다. 13 upgrade 검사에
 사용한 source는 바뀌지 않았으며 최종 SQL 재실행 결과와 최초 `db:test` FAIL을 구분한다.
+
+같은 head의 첫 application CI는 pinned ECR 이미지 다운로드 `Rate exceeded`로 실패했다.
+전체 run 종료 후 실패 application job만 한 번 재실행해 PASS했다. migration은 첫 실행에서
+full `db:test`와 전체 concurrency까지 PASS했다. 이미지 digest/테스트 기준/코드는 바꾸지 않았다.
+재발 방지 #341은 별도 OPEN이고 이 재실행으로 해결됐다고 판단하지 않는다.
+
+## 3차 범위: 정상 청소 시작의 상대 역할 알림
+
+- 기존 start/start-with-lease command가 남기는 `cleaning.attempt_started` audit에
+  `cleaning.started_admin` / `cleaning_started`를 추가한다. 새 endpoint·table·외부 호출은 없다.
+- 현재 attempt/assignment identity·revision·owner·시작 시각과 감사 actor/전이 evidence를
+  확인하고 informational inbox(`requiresAction=false`, resolver `none`)를 만든다.
+- 업무관리자 inbox는 계정 상태와 무관하게 보존한다. outbox는 active/password-complete
+  비자기 수신자만 생성하고 기존 worker의 최신 계정/구독/TTL 검사를 유지한다.
+- start 상태/CAS/audit/receipt/inbox/outbox가 같은 transaction이며 실패는 전체 롤백한다.
+  동일 key replay는 같은 응답을 반환하고 새 key/stale version은 새 시작 알림을 만들지 않는다.
+  migration은 기존 start 이력을 backfill하거나 늦게 추가된 관리자에게 과거 알림을 재생하지 않는다.
+  같은 attempt의 start audit 복제도 거부하며 attempt-keyed partial audit index로 이 조회를 지원한다.
+- 프런트 dev `09ed284` / main `d509b44`를 읽기 전용 재확인했다. 프런트 알림 정책의
+  '정상 청소 시작은 관리자 자기 푸시 대상이 아니다'를 자기 actor 제외로 유지한다.
+  #308의 상대 역할 통지는 메이드 시작→관리자이며 메이드 자기 push를 만들지 않는다.
+- 완료·제출·검수·담당 변경의 기존 family와 push eligibility는 유지한다. 정상 사진 한 장 업로드,
+  단순 조회·receipt replay·private draft 저장에는 새 업무 상태 알림을 만들지 않는다.
+
+### 상태 변경 coverage
+
+| 의미 있는 전이 | 상대 역할 통지 |
+|---|---|
+| 관리자 통보·재배정·순서/일정 변경·회수 | 기존 assignment/reservation family → 담당 maid |
+| 관리자 담당 취소 결정·검수 승인/반려·제한 권한·인계 | 기존 decision/capability/handover family → 해당 maid; 승인 inbox/push 기존 정책 유지 |
+| 메이드 담당 취소 요청·수행 불가 후속 | 기존 request/reassignment family → business admin |
+| 메이드 정상 청소 시작(lease 포함) | 3차 started_admin → business admin |
+| online/limited/offline 정상 적용·관리자 correction 현장 완료 | 기존 field_completed_admin → business admin |
+| 최초 제출·재검수 요청 | 기존 initial/reinspection requested → business admin |
+| 기한 경과 미완료 현장 업무 | 2차 overdue_admin → active/password-complete business admin, 원 업무 보존 |
+
+과거 미배정/draft의 오늘 preview·현재 가능일/sequence는 이 단계에서 변경하지 않는다.
+
+### 검증 기록: 3차 후보
+
+2026-10-01 로컬 합성 환경의 88번째 migration과 직접 관련 회귀를 검증한다.
+위 1·2차 결과는 역사 기록이며 3차 새 head 승인으로 사용하지 않는다.
+
+| 검증 | 결과 |
+|---|---|
+| `npm run ci:quality` | PASS; 50 files/584 tests, OpenAPI 131 paths/141 operations, 기존 lint info 2건 |
+| `npm run edge:check` | PASS; 291 tests/fmt/type/bundle 17,167,711 bytes |
+| Python ruff/format/mypy/pytest/codegen/package source | PASS; 95 tests, 기존 generator warning 유지 |
+| `npm run db:reset`, `npm run db:verify` | PASS; fresh 88 migrations |
+| `npm run db:manifest:verify` | PASS; 기존 87개 SHA 보존, 신규 88번 head |
+| `npm run db:test` → 전체 SQL 재실행 | 14 upgrade PASS; 최초 전체 SQL은 신규 start 알림을 미반영한 handover 총계 2건 FAIL. 보강 뒤 `npm run supabase -- test db supabase/tests --local` 전체 66 files/3,545 assertions PASS |
+| `npm run db:test:long-stay-clock` | PASS; KST 경계 145 assertions |
+| `npm run db:test:concurrency` | PASS; fresh 전체 재실행, 신규 actual 8 same-key/4 CAS start 및 기존 모든 RPC 경합 포함 |
+| `npm run backup:dry-run:fresh` | PASS; fresh 88 migrations local-synthetic dump/restore, 121 rooms |
+| DB lint | exit 0/error 0; 기존 STABLE/VOLATILE·unused 경고 유지, 신규 started helper 경고 없음 |
+| local Security Advisor (`--level warn --fail-on error`) | PASS; No issues found |
+| 독립 QA (3차 범위) | 로컬 98/100, P0/P1/P2=0; 범위25/25·보안29/30·검증24/25·문서20/20. Draft/push 준비 판정이며 새 exact-head CI 전 source/dev·병합 승인 아님 |
+| 새 head 원격 required CI | NOT RUN; commit/push 뒤 새 exact-head 확인 필요 |
+| production/hosted/frontend UAT | NOT RUN; 별도 운영 범위 |
+
+최초 focused SQL의 짧은 idempotency key fixture는 기존 입력 규칙을 만족하도록 보완했다.
+최종 신규 SQL 46 assertions는 위 전체 SQL PASS에 포함된다. handover 총계는 기존 3개 family와
+새 start 1건을 각각 exact count로 검증하고, 원 start 알림 전체 JSON과 outbox 귀속도 보존한다.
+최초 concurrency는 두 합성 계정이 같은 normalized 이름/sequence를 사용해 기존 고유 제약에서
+실패했다. UUID별 이름으로 fixture만 보완했고 제품 제약·RPC 경합 수·판정 기준은 바꾸지 않았다.
+이 최초 실패와 최종 fresh 전체 재실행을 구분하며 독립 QA가 보완 근거를 재검토했다.

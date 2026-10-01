@@ -696,7 +696,7 @@ Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 sn
 
 ### #109 typed 알림 writer 계약 — source/dev 완료, 현재 production source 반영
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 37 category/54 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 38 category/55 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
@@ -725,6 +725,13 @@ enrollment와 emitter에서 재검증합니다. 수신자 profile에 추가 역�
 동일 이벤트는 다른 실행 actor·10분 grouping 경계에서도 재생성하지 않습니다. 늦게 활성화된
 관리자의 새 inbox는 허용하지만 원 event 시각과 기존 push 24h TTL을 유지합니다.
 현장 완료·업로드·검수 대기에 새 SLA를 만들지 않으며 original domain row는 변경하지 않습니다.
+
+#308 3차 후보는 기존 start command의 동일 transaction에 삽입되는
+`cleaning.attempt_started` audit에서 관리자 `cleaning.started_admin`을 생성합니다.
+원 attempt/담당/assignment revision/시작 시각과 typed 감사 provenance를 검증하고
+receipt replay는 새 audit·inbox·outbox를 만들지 않습니다. 완료·제출·검수·배정 변경의
+기존 family와 push eligibility는 유지하고, 사진 개별 업로드 등 상태 비전이는 알리지 않습니다.
+시작 감사 중복 검사는 attempt-keyed partial audit index를 사용하며 기존 감사 이력을 재작성하지 않습니다.
 
 ### #110 encrypted Web Push subscription 계약 — source/dev 완료, 현재 production source 반영·hosted 활성화 대기
 

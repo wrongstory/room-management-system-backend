@@ -200,60 +200,67 @@ Deno.test("notification list and markRead expose only safe fields and exact requ
   );
 });
 
-Deno.test("overdue admin history uses the safe notification projection", async () => {
-  Deno.env.set(
-    "NOTIFICATION_CURSOR_HMAC_SECRET",
-    "notification-cursor-edge-test-secret-123456",
-  );
-  const target = "10800000-0000-4000-8000-000000003008";
-  const overdue = {
-    ...notice,
-    category: "cleaning_overdue",
-    title: "청소 업무 지연 안내",
-    body: "예정 기한이 지났습니다. 기존 업무와 담당은 유지됩니다.",
-    cleaningTargetId: target,
-    deepLink: { kind: "cleaningTarget", entityId: target },
-    requiresAction: false,
-    eventFamily: "cleaning.overdue_admin",
-    sourceEntityId: "private-enrollment",
-    recipientProfileId: actor.profileId,
-    actorProfileId: actor.profileId,
-    dedupeKey: "private-dedupe",
-  };
-  const clients = {
-    admin: {
-      rpc: async () => ({
-        data: {
-          notifications: [overdue],
-          hasMore: false,
-          lastOccurredAt: null,
-          lastId: null,
-        },
-        error: null,
-      }),
-    },
-  } as unknown as EdgeClients;
-  const result = await listNotifications(
-    request("GET", "/v1/notifications"),
-    clients,
-    { ...actor, role: "admin" },
-  ) as { notifications: Array<Record<string, unknown>> };
-  const projected = result.notifications[0];
-  assert(
-    projected.category === "cleaning_overdue" &&
-      projected.requiresAction === false,
-    "overdue is informational history",
-  );
-  assert(
-    JSON.stringify(projected.deepLink) === JSON.stringify(overdue.deepLink),
-    "existing cleaningTarget deep link is preserved",
-  );
-  assert(
-    !/private-|sourceEntity|eventFamily|actorProfileId|recipientProfileId|dedupeKey/
-      .test(JSON.stringify(projected)),
-    "private provenance stays hidden",
-  );
-});
+for (
+  const [category, eventFamily] of [
+    ["cleaning_overdue", "cleaning.overdue_admin"],
+    ["cleaning_started", "cleaning.started_admin"],
+  ]
+) {
+  Deno.test(`${category} admin history uses the safe notification projection`, async () => {
+    Deno.env.set(
+      "NOTIFICATION_CURSOR_HMAC_SECRET",
+      "notification-cursor-edge-test-secret-123456",
+    );
+    const target = "10800000-0000-4000-8000-000000003008";
+    const overdue = {
+      ...notice,
+      category,
+      title: "청소 업무 지연 안내",
+      body: "예정 기한이 지났습니다. 기존 업무와 담당은 유지됩니다.",
+      cleaningTargetId: target,
+      deepLink: { kind: "cleaningTarget", entityId: target },
+      requiresAction: false,
+      eventFamily,
+      sourceEntityId: "private-enrollment",
+      recipientProfileId: actor.profileId,
+      actorProfileId: actor.profileId,
+      dedupeKey: "private-dedupe",
+    };
+    const clients = {
+      admin: {
+        rpc: async () => ({
+          data: {
+            notifications: [overdue],
+            hasMore: false,
+            lastOccurredAt: null,
+            lastId: null,
+          },
+          error: null,
+        }),
+      },
+    } as unknown as EdgeClients;
+    const result = await listNotifications(
+      request("GET", "/v1/notifications"),
+      clients,
+      { ...actor, role: "admin" },
+    ) as { notifications: Array<Record<string, unknown>> };
+    const projected = result.notifications[0];
+    assert(
+      projected.category === category &&
+        projected.requiresAction === false,
+      "work-state history is informational",
+    );
+    assert(
+      JSON.stringify(projected.deepLink) === JSON.stringify(overdue.deepLink),
+      "existing cleaningTarget deep link is preserved",
+    );
+    assert(
+      !/private-|sourceEntity|eventFamily|actorProfileId|recipientProfileId|dedupeKey/
+        .test(JSON.stringify(projected)),
+      "private provenance stays hidden",
+    );
+  });
+}
 
 Deno.test("notification responses fail closed above 128 KiB", () => {
   let rejected = false;

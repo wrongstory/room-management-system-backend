@@ -1585,7 +1585,7 @@ Table private.notification_event_catalog {
   group_family text [not null]
   group_scope_kind text [not null]
 
-  Note: '#109/#128/#264 immutable source-controlled 49 event-family / 33 public-category contract. push_eligible is independent from requires_action; self push is suppressed.'
+  Note: '#109/#128/#264/#308 immutable source-controlled 55 event-family / 38 public-category contract. Start/field-complete/overdue are informational, push_eligible is independent from requires_action; self push is suppressed. Start uses exact cleaning_attempt + immutable audit, no historical backfill.'
 }
 
 Table private.notification_groups {
@@ -1797,7 +1797,7 @@ Table public.audit_events {
   request_hash text
   idempotency_key text [unique]
 
-  Note: 'UPDATE and DELETE are rejected by an append-only trigger.'
+  Note: 'UPDATE and DELETE are rejected by an append-only trigger. #308 audit_cleaning_started_entity_idx indexes (entity_id,id) only WHERE entity_type=cleaning_attempt AND event_type=cleaning.attempt_started to bound duplicate start-evidence lookup; it is not a historical uniqueness constraint/backfill.'
 }
 
 Table private.password_change_commands {

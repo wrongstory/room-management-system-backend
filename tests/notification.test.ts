@@ -97,17 +97,20 @@ describe('notification cursor and service', () => {
     })).toThrowError(expect.objectContaining({ code: 'NOTIFICATION_RESPONSE_TOO_LARGE' }));
   });
 
-  it('projects overdue admin history without exposing its private enrollment', async () => {
+  it.each([
+    ['cleaning_overdue', 'cleaning.overdue_admin'],
+    ['cleaning_started', 'cleaning.started_admin']
+  ])('projects %s admin history without exposing its private provenance', async (category, eventFamily) => {
     const target = '10800000-0000-4000-8000-000000003008';
     const overdue = {
       ...notice,
-      category: 'cleaning_overdue',
+      category,
       title: '청소 업무 지연 안내',
       body: '예정 기한이 지났습니다. 기존 업무와 담당은 유지됩니다.',
       cleaningTargetId: target,
       deepLink: { kind: 'cleaningTarget', entityId: target },
       requiresAction: false,
-      eventFamily: 'cleaning.overdue_admin',
+      eventFamily,
       sourceEntityId: 'private-enrollment',
       actorProfileId: actor.profileId,
       recipientProfileId: actor.profileId,

@@ -634,7 +634,7 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
-#109/#128/#264/#308의 typed 알림은 private event catalog의 54 event family/37 public category를 정본으로
+#109/#128/#264/#308의 typed 알림은 private event catalog의 55 event family/38 public category를 정본으로
 삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
 검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
 dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫
@@ -649,6 +649,13 @@ inactive/임시 비밀번호/self-action도 inbox에는 남지만 typed delivery
 deferred event/enrollment/notice/outbox trigger가 수신자별 정확히 한 inbox와 비자기 push intent를
 같은 commit에서 요구한다. 별도 singleton cursor는 mutable 기술 projection이며 100건씩 회전한다.
 알림은 informational history이고 업무 완료 뒤에도 원장·알림을 삭제하거나 다시 쌓지 않는다.
+
+#308 3차 후보는 새 테이블 없이 기존 attempt와 immutable `cleaning.attempt_started` 감사에
+정상 청소 시작 알림을 결합한다. 관리자의 informational inbox와 비자기 push intent는
+시작 상태/CAS/receipt와 동일 transaction에 추가하고 source-controlled writer의 원자성과
+수신자별 logical dedupe를 재사용한다. 기존 알림·감사·배정 이력 backfill은 없다.
+중복 start 감사는 새 writer가 거부하고 `audit_cleaning_started_entity_idx`의
+attempt-keyed partial index로 조회한다. 기존 원장에 소급 UNIQUE 제약을 걸거나 삭제하지 않는다.
 
 #110의 Web Push 구독은 `private.web_push_subscriptions` logical/current projection,
 `web_push_subscription_revisions` immutable revision metadata,

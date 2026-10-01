@@ -136,6 +136,9 @@ insert into public.availability_versions(id,maid_profile_id,week_start,version,i
 values(pg_temp.bid(800),pg_temp.bid(10),(pg_temp.btime() at time zone 'Asia/Seoul')::date-(extract(isodow from pg_temp.btime() at time zone 'Asia/Seoul')::int-1),1,true,pg_temp.btime());
 insert into public.availability_days(availability_version_id,work_date,available)
 select v.id,v.week_start+n,true from public.availability_versions v cross join generate_series(0,6) n where v.id=pg_temp.bid(800);
+insert into b_result values('start-notice-before-handover',
+ (select to_jsonb(n) from public.notifications n where n.cleaning_target_id=pg_temp.bid(302)
+  and n.event_family='cleaning.started_admin'));
 create function pg_temp.bhandover_payload(p_deactivate boolean default false) returns jsonb language sql stable as $$
  select jsonb_build_object('maidProfileId',pg_temp.bid(10),'sequenceNumber',50,'serviceDate',(pg_temp.btime() at time zone 'Asia/Seoul')::date,
   'availableFrom',date_trunc('day',pg_temp.btime() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul',
@@ -146,9 +149,24 @@ select is((select value#>>'{nextAttempt,status}' from b_result where label='hand
 select is((select status::text from public.profiles where id=pg_temp.bid(3)),'active','normal handover does not silently deactivate old maid');
 select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=pg_temp.bid(302)),2,'handover preserves old and creates exactly one new attempt');
 select is((select count(*)::int from private.attempt_handover_events),1,'handover provenance append is atomic');
-select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.bid(302)),3,'capability plus old/new notifications are created exactly once');
-select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.bid(302)),3,
-  'actionable capability/new assignment and informational previous-revoke enter typed outbox');
+select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.bid(302)),4,'handover retains the start notice plus exactly three handover notifications');
+select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=pg_temp.bid(302)),4,
+  'handover retains the start delivery plus exactly three handover deliveries');
+select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.bid(302)
+ and event_family in ('capability.evidence_upload_handover_issued','attempt.handover_previous_revoked','attempt.handover_next_notified')),3,
+ 'capability plus old/new handover notifications remain exactly three');
+select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+ where n.cleaning_target_id=pg_temp.bid(302)
+ and n.event_family in ('capability.evidence_upload_handover_issued','attempt.handover_previous_revoked','attempt.handover_next_notified')),3,
+ 'the three original handover families retain their typed delivery coverage');
+select is((select to_jsonb(n) from public.notifications n where n.cleaning_target_id=pg_temp.bid(302)
+ and n.event_family='cleaning.started_admin'),(select value from b_result where label='start-notice-before-handover'),
+ 'handover preserves the complete original start-notification history');
+select is((select count(*)::int from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+ where n.cleaning_target_id=pg_temp.bid(302) and n.event_family='cleaning.started_admin'
+ and n.actor_profile_id=pg_temp.bid(3) and n.recipient_profile_id=pg_temp.bid(1)
+ and n.source_entity_kind='cleaning_attempt' and n.source_entity_id=pg_temp.bid(502)::text),1,
+ 'the interrupted owner retains exactly one correctly attributed start delivery');
 select is((select value#>>'{capability,kind}' from b_result where label='handover'),'evidence_upload','old attempt receives evidence-only rights');
 select is((select count(*)::int from public.notifications where event_family='capability.evidence_upload_handover_issued'
   and source_entity_id=(select id::text from private.attempt_capability_grants where attempt_id=pg_temp.bid(502) and kind='evidence_upload')),1,

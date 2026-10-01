@@ -120,7 +120,7 @@ select ok((select count(*)=4 from public.notifications where contract_version=1
     and source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text))
   and (select count(*)=4 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
     where n.source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text)),
-  'resolver-only start creates no notification or delivery row');
+  'start resolves existing assignment notices without adding assignment notification or delivery rows');
 create temp table start_resolution as select resolved_at from public.notifications
 where event_family='assignment.commit_notified' and source_entity_id=pg_temp.eid(401)::text;
 select ok(array[

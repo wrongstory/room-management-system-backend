@@ -650,6 +650,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 앱 알림함은 영속 데이터다. 푸시는 그중 즉시 행동이 필요한 사건의 전달 수단이다.
 - 관리자와 메이드의 수신 대상을 분리한다.
 - 사용자가 자기 행동으로 만든 변화는 자신에게 푸시하지 않는다.
+- #308 3차 source 후보는 메이드의 정상 청소 시작을 business admin에게 typed `cleaning.started_admin` / `cleaning_started` informational 알림으로 보완한다. 원 attempt·현재 담당·assignment revision·시작 시각과 immutable `cleaning.attempt_started` 감사를 검증하며, 시작 상태/CAS/receipt/inbox/outbox는 같은 transaction이다. 모든 business admin의 inbox는 보존하고 push는 아래 active/password-complete/nonself 조건을 따른다. 새 idempotency key·완료 receipt replay로 과거 시작 알림이나 늦게 등록된 관리자 알림을 재생성하지 않는다. 기존 완료·제출·검수·담당 변경의 family/push 정책은 유지한다. 운영 반영이나 #308 전체 완료를 뜻하지 않는다.
 - `requiresAction`과 즉시 push 전달 가치는 독립 축이다. `requiresAction=false`인 취소·회수·결정·현장 완료 같은 정보성 알림도 source-controlled catalog의 `push_eligible=true`이면 push할 수 있으며, 이를 위해 inbox의 행동 필요 상태를 거짓으로 올리지 않는다.
 - push outbox는 catalog의 `push_eligible`, actor와 recipient가 다름, 수신자의 active·비밀번호 변경 완료 상태를 모두 만족할 때만 만든다. inbox 원장은 계정 상태와 무관하게 domain transaction에서 보존하고, inactive 또는 임시 비밀번호 상태에는 push를 전달하지 않는다.
 - 같은 객실·같은 사건 종류의 10분 이내 업데이트는 group key로 묶을 수 있다.
