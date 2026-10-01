@@ -11,6 +11,7 @@ import { testCheckoutIncidentConcurrency } from './test-checkout-incident-concur
 import { testComplaintConcurrency } from './test-complaint-concurrency.mjs';
 import { testCleaningOverdueConcurrency } from './test-cleaning-overdue-concurrency.mjs';
 import { testCleaningStartedConcurrency } from './test-cleaning-started-concurrency.mjs';
+import { testCleaningReportNotificationConcurrency } from './test-cleaning-report-notifications-concurrency.mjs';
 import { testNotificationConcurrency } from './test-notification-concurrency.mjs';
 import { testNotificationDeliveryConcurrency } from './test-notification-delivery-concurrency.mjs';
 import { testNotifiedReplanConcurrency } from './test-notified-replan-concurrency.mjs';
@@ -1191,6 +1192,7 @@ await testNotifiedReplanConcurrency(client, { profileId: actorProfileId, email, 
 await testPrestartConcurrency(client,actorProfileId,templateSessionId);
 await testCleaningOverdueConcurrency(client,actorProfileId);
 await testCleaningStartedConcurrency(client,actorProfileId);
+await testCleaningReportNotificationConcurrency(client);
 await testAttemptActivationConcurrency(client,{ profileId: actorProfileId, email, password });
 await testAssignmentPreviewConcurrency(client,actorProfileId);
 await testAttemptExecutionConcurrency(client,actorProfileId);

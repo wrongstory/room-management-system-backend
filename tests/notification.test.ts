@@ -98,17 +98,20 @@ describe('notification cursor and service', () => {
   });
 
   it.each([
-    ['cleaning_overdue', 'cleaning.overdue_admin'],
-    ['cleaning_started', 'cleaning.started_admin']
-  ])('projects %s admin history without exposing its private provenance', async (category, eventFamily) => {
+    ['cleaning_overdue', 'cleaning.overdue_admin', 'admin', 'cleaningTarget'],
+    ['cleaning_started', 'cleaning.started_admin', 'admin', 'cleaningTarget'],
+    ['bomb_room_reported', 'bomb.reported_admin', 'admin', 'cleaningTarget'],
+    ['room_issue_reported', 'room_issue.reported_admin', 'admin', 'cleaningTarget'],
+    ['bomb_room_decided', 'bomb.decided_maid', 'maid', 'submission']
+  ] as const)('projects %s counterpart history without exposing its private provenance', async (category, eventFamily, role, kind) => {
     const target = '10800000-0000-4000-8000-000000003008';
     const overdue = {
       ...notice,
       category,
-      title: '청소 업무 지연 안내',
-      body: '예정 기한이 지났습니다. 기존 업무와 담당은 유지됩니다.',
+      title: '청소 업무 변경 안내',
+      body: '업무 앱에서 변경된 내용을 확인해 주세요.',
       cleaningTargetId: target,
-      deepLink: { kind: 'cleaningTarget', entityId: target },
+      deepLink: { kind, entityId: target },
       requiresAction: false,
       eventFamily,
       sourceEntityId: 'private-enrollment',
@@ -121,7 +124,7 @@ describe('notification cursor and service', () => {
       error: null
     }));
     const service = new SupabaseNotificationService({ admin: { rpc } } as never, secret);
-    const result = await service.list({ ...actor, role: 'admin' }, {});
+    const result = await service.list({ ...actor, role }, {});
     expect(result).toEqual({ notifications: [{
       ...notice,
       category: overdue.category,

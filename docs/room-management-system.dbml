@@ -1585,7 +1585,7 @@ Table private.notification_event_catalog {
   group_family text [not null]
   group_scope_kind text [not null]
 
-  Note: '#109/#128/#264/#308 immutable source-controlled 55 event-family / 38 public-category contract. Start/field-complete/overdue are informational, push_eligible is independent from requires_action; self push is suppressed. Start uses exact cleaning_attempt + immutable audit, no historical backfill.'
+  Note: '#109/#128/#264/#308 phase6 candidate: immutable source-controlled 58 event-family / 41 public-category contract. Start/field-complete/overdue and report/decision counterpart notices are informational, push_eligible is independent from requires_action; self push is suppressed. Exact typed source + immutable audit, no historical backfill; private report/decision provenance never enters public projection.'
 }
 
 Table private.notification_groups {

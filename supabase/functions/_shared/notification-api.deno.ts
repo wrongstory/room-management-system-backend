@@ -201,12 +201,20 @@ Deno.test("notification list and markRead expose only safe fields and exact requ
 });
 
 for (
-  const [category, eventFamily] of [
-    ["cleaning_overdue", "cleaning.overdue_admin"],
-    ["cleaning_started", "cleaning.started_admin"],
-  ]
+  const [category, eventFamily, role, kind] of [
+    ["cleaning_overdue", "cleaning.overdue_admin", "admin", "cleaningTarget"],
+    ["cleaning_started", "cleaning.started_admin", "admin", "cleaningTarget"],
+    ["bomb_room_reported", "bomb.reported_admin", "admin", "cleaningTarget"],
+    [
+      "room_issue_reported",
+      "room_issue.reported_admin",
+      "admin",
+      "cleaningTarget",
+    ],
+    ["bomb_room_decided", "bomb.decided_maid", "maid", "submission"],
+  ] as const
 ) {
-  Deno.test(`${category} admin history uses the safe notification projection`, async () => {
+  Deno.test(`${category} counterpart history uses the safe notification projection`, async () => {
     Deno.env.set(
       "NOTIFICATION_CURSOR_HMAC_SECRET",
       "notification-cursor-edge-test-secret-123456",
@@ -215,10 +223,10 @@ for (
     const overdue = {
       ...notice,
       category,
-      title: "청소 업무 지연 안내",
-      body: "예정 기한이 지났습니다. 기존 업무와 담당은 유지됩니다.",
+      title: "청소 업무 변경 안내",
+      body: "업무 앱에서 변경된 내용을 확인해 주세요.",
       cleaningTargetId: target,
-      deepLink: { kind: "cleaningTarget", entityId: target },
+      deepLink: { kind, entityId: target },
       requiresAction: false,
       eventFamily,
       sourceEntityId: "private-enrollment",
@@ -242,7 +250,7 @@ for (
     const result = await listNotifications(
       request("GET", "/v1/notifications"),
       clients,
-      { ...actor, role: "admin" },
+      { ...actor, role },
     ) as { notifications: Array<Record<string, unknown>> };
     const projected = result.notifications[0];
     assert(
@@ -252,7 +260,7 @@ for (
     );
     assert(
       JSON.stringify(projected.deepLink) === JSON.stringify(overdue.deepLink),
-      "existing cleaningTarget deep link is preserved",
+      "catalog-approved deep link is preserved",
     );
     assert(
       !/private-|sourceEntity|eventFamily|actorProfileId|recipientProfileId|dedupeKey/

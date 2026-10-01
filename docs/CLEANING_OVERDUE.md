@@ -2,6 +2,7 @@
 
 정책은 #305와 제품 가이드의 확정 결정을 따른다. 현재 작업은 1·2·3차와 4A/4B1/4B2·5차 source 후보이며
 production/main/recovery, 실제 객실 데이터·PIN·계정은 변경하지 않는다.
+6차 상대 역할 신고·선판정 통지는 [별도 검증 기록](./CLEANING_REPORT_NOTIFICATIONS.md)에 기록한다.
 
 ## 1차 범위
 
@@ -47,7 +48,8 @@ Fastify와 Edge preview는 같은 순수 optimizer를 사용한다. lifecycle/st
 ## #308 잔여 범위 — 완료/종료 전 필수
 
 1. 1·2차 overdue 후보는 exact head `7d2337e`의 독립 QA 98점/required CI PASS. dev 통합은 미완료.
-2. 3차 관리자↔메이드 업무 상태 알림 coverage·정상 시작 누락 보강 및 새 head 검증.
+2. 3차 정상 시작 보완 이후 전체 종료 감사에서 신고·폭탄방 선판정 3건의 누락을 확인했다.
+   6차 보완과 새 head 검증을 별도 기록하며, 3차의 주요 전이 표를 전체 알림 완료 근거로 사용하지 않는다.
 3. 과거 미배정/draft 업무의 오늘 preview·현재 가능일·sequence 계약:
    4A/4B1은 DB 대상집합·공유 계산기까지, 4B2는 오늘 목록/commit 후보·잠금/가능일 보호까지 연결한다.
    5차는 최신 dev e19f81f 기준 #320 직접 의존 후보 ad91d2e와 source 계약을 결합한다.
@@ -361,7 +363,7 @@ fixture는 실제 submit RPC·새 버전을 사용하도록 보완한 뒤 같은
 | Python ruff/format/mypy/pytest/business OpenAPI codegen/package source | PASS;95tests,226files format/25source mypy;기존 binary-photo/handover generator warning 유지 |
 | 5차 누적 upgrade/전체 RPC concurrency/복구 재실행 | NOT RUN;SQL/migration/worker/command 불변. 이전4B2와 동일90 source의 실제 검증/CI PASS는 역사 근거이며 새 head 승인 아님 |
 | 독립 QA | 98/100(범위25·보안29·검증24·문서20), P0/P1/blockingP2=0. 독립 Node625/focused80/typecheck/manifest5/diffcheck와 기준744662c 직접 비교56case PASS. 로컬 Draft 통합 commit/push 준비만 승인 |
-| 새 exact-head required CI | NOT RUN;commit/tree 재확인 및 push 후 CI gate 별도 |
+| 5차 exact-head required CI | head14676c17d6d05f5149ced2d14139f4516ea464fc, run36833580274 application/migration PASS(2026-10-01 17:17:47 KST 완료). 전체 db:test/16upgrade/SQL3,649/concurrency/backup도 원격에서 PASS. 6차 새 head 승인 아님 |
 | production/hosted/기기/frontend UAT | NOT RUN |
 
 첫 결합 focused는 3건 FAIL이었다. #320의 이전 e19 golden은 #308 빈 sequence metadata

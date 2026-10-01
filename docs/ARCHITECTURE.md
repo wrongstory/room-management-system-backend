@@ -710,7 +710,7 @@ Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 sn
 
 ### #109 typed 알림 writer 계약 — source/dev 완료, 현재 production source 반영
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 38 category/55 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 6차 후보 기준 41 category/58 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와

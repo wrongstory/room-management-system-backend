@@ -32,6 +32,18 @@ Preview 응답에서 제외하며 공개 endpoint/schema/RLS 권한은 그대로
 
 ## 1. 상태 판정 규칙
 
+### #308 6차 — 제출 전 신고·폭탄방 선판정 상대 역할 알림
+
+전체 완료 조건 감사에서 발견한 폭탄방 신고/특이사항 신고→관리자,
+폭탄방 선판정→해당 메이드 통지를 보완하는 source 후보다.
+91번째 append-only migration, 기존 알림 조회/읽음·delivery 경로를 재사용한다.
+신고·판정 API의 응답과 권한·CAS·멱등성·최종 승인/수익 계약은 바꾸지 않는다.
+메모/사진 원문·private provenance는 공개 알림에 넣지 않는다.
+프런트·운영 변경 없음. 실제 검증과 남은 gate는
+[상대 역할 알림 보완](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
+5차 head14676c1의 required CI36833580274 application/migration PASS는
+이전 source 검증이며 6차 새 head의 승인이 아니다.
+
 ### #308 5차 — #320 후보의 직접 의존 계약 결합
 
 - 744662c 업무 보존 계산기에 ad91d2e의 허용 목록 진단·no-store·OpenAPI 계약을 결합했다.

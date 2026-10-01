@@ -636,7 +636,7 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
-#109/#128/#264/#308의 typed 알림은 private event catalog의 55 event family/38 public category를 정본으로
+#109/#128/#264/#308 6차 후보의 typed 알림은 private event catalog의 58 event family/41 public category를 정본으로
 삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
 검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
 dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫
@@ -658,6 +658,11 @@ deferred event/enrollment/notice/outbox trigger가 수신자별 정확히 한 in
 수신자별 logical dedupe를 재사용한다. 기존 알림·감사·배정 이력 backfill은 없다.
 중복 start 감사는 새 writer가 거부하고 `audit_cleaning_started_entity_idx`의
 attempt-keyed partial index로 조회한다. 기존 원장에 소급 UNIQUE 제약을 걸거나 삭제하지 않는다.
+
+#308 6차 후보는 기존 불변 폭탄방 신고·특이사항 신고·폭탄방 판정과 정확한 감사 evidence에
+3개 counterpart family를 결합한다. 새 business table이나 공개 쓰기 권한은 없다.
+기존 typed writer가 신고/판정 transaction 안에서 inbox와 비자기 push intent를 만들며
+메모·사진 ID·원문을 알림에 복제하지 않는다. 과거 신고·판정 알림 backfill은 하지 않는다.
 
 #110의 Web Push 구독은 `private.web_push_subscriptions` logical/current projection,
 `web_push_subscription_revisions` immutable revision metadata,
