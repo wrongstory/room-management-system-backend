@@ -6,6 +6,15 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 > 정본 효력: 이 파일이 `dev`에 병합된 이후부터 API 상태 판단의 우선 정본으로 사용한다. production 상태는 Git branch가 아니라 Supabase Edge Function readback과 hosted HTTP smoke를 우선한다.
 
+### #308 1차 source 후보 — 지연 업무 유지
+
+당일 preview/commit의 dueAt 차단 제거, 과거 notified 업무 activation/start 허용,
+scheduler 자동 이월 중단과 bounded/fair 100건 cursor, `expire_scheduled` 폐기의 1차 source를 구현했다.
+기존 85개 migration은 보존하고 86번째 append-only migration을 사용한다. Fastify/Edge preview는
+같은 계산기이며 lifecycle/start는 기존 Edge-only다. production/main/recovery는 미변경이다.
+overdue typed 알림·상호 역할 알림 누락 보강·과거 미배정 today-preview는 미완료이며 #308을
+닫지 않는다. 실제 검증/PR 상태는 [지연 업무 계약](./CLEANING_OVERDUE.md)에 기록한다.
+
 ## 1. 상태 판정 규칙
 
 | 표시 | 의미 |

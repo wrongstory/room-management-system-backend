@@ -1,5 +1,10 @@
 # 알림 이벤트 카탈로그 v1
 
+#305/#308 1차 후보는 시간 만료에 따른 rollover/`scheduled_expired` 신규 이벤트를 만들지 않는다.
+이 카탈로그의 기존 관련 family는 과거 typed 이력의 유효성·조회 증명을 위해 유지한다.
+overdue 관리자 알림과 시작/완료 상호 알림 coverage 보강은 아직 후속 범위이며
+알림을 전달했다고 표현하지 않는다. [진행 범위](./CLEANING_OVERDUE.md)를 따른다.
+
 이 문서는 Issue #109의 기반 계약과 Issue #128/#264의 보완을 반영한 36개 공개 category와 53개 event family의 정본이다. DB의
 `private.notification_event_catalog`와 테스트가 이 표를 그대로 검증한다. `source`는 알림 생성과
 해결의 typed provenance이며 audit payload나 문자열 dedupe는 권한 근거가 아니다.

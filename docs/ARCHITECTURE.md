@@ -605,6 +605,12 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 
 ## 수행 회차 활성화와 이월 — #28
 
+#305/#308 후보에서는 이 절의 시간 만료·자동 이월 경로를 폐기한다. 오늘과 과거 날짜의
+통보 업무를 현재 안전 조건으로 활성화하되 원 업무/담당/snapshot은 유지한다.
+한 invocation의 대상은 최대 100건이며 private 회전 cursor가 장기 blocked 선두에 의한
+후속 업무 기아를 막는다. cursor는 변경 가능한 기술 projection이며 업무 원장이 아니다.
+아래 이월 설명은 과거 구현 기록이다. [지연 업무 계약](./CLEANING_OVERDUE.md)에 현재 검증/후속 범위를 기록한다.
+
 기존 `reservation-scheduler`는 예약 전이와 같은 실제 실행 시각을 사용해 service-only
 `process_due_assignment_lifecycle`을 이어서 호출합니다. command receipt는 예약 전이와 별도
 `assignment.process_due_lifecycle` scope를 사용하며, target별 core는 #27과 같은

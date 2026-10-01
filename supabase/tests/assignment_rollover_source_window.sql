@@ -131,11 +131,17 @@ select ok((select t.status='notified' and a.is_current and a.ended_at is null
   join public.cleaning_assignments a on a.cleaning_target_id=t.id where c.n=3),
   'invalid notified stayover keeps current assignment and target status');
 
--- Distinct scheduler invocations cannot turn an invalid stayover into an ever-growing zombie.
+-- A failed historical rollover does not invalidate the original still-occupied
+-- stayover window. The scheduler preserves schedules and may activate that work.
 select public.process_due_assignment_lifecycle(pg_temp.pid(1),'2037-10-02 16:00+09'::timestamptz+make_interval(mins=>n),
   'reservation-scheduler-rollover-regression-'||n,repeat('6',64)) from generate_series(1,3) n;
 select is(pg_temp.snapshot(c.target_id),b.value,'three distinct scheduler buckets still zero mutation case '||c.n)
-from cases c join before_state b using(n) where c.n between 2 and 8;
+from cases c join before_state b using(n) where c.n between 2 and 8 and c.n<>3;
+select is(pg_temp.snapshot(c.target_id)-array['attempts','audit'],b.value-array['attempts','audit'],
+  'overdue notified stayover keeps schedule, assignment and notices while activating')
+from cases c join before_state b using(n) where c.n=3;
+select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=(select target_id from cases where n=3)),1,
+  'three scheduler buckets activate original overdue stayover exactly once');
 select is((select carryover_count from public.cleaning_targets where id=(select target_id from cases where n=1)),1,
   'scheduler retry does not duplicate valid next-day rollover');
 

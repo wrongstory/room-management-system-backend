@@ -519,10 +519,11 @@ erDiagram
 - #26 commit은 KST 오늘/내일의 선택 draft만 최신 일정·active maid·current availability version과 다시 대조한다. 선택 부분집합은 전부 성공하거나 전부 롤백한다.
 - 알림 확정 성공은 target/assignment, 수신자 notification, private persistent outbox, `assignment.notified` 감사를 같은 transaction에 기록한다. 외부 push와 cleaning attempt는 이 transaction에서 만들지 않는다.
 - attempt는 assignment의 target·maid·revision과 모두 일치해야 하며, submission·earning의 maid도 같은 수행자를 가리킨다.
-- #28 scheduler는 오늘 notified current assignment의 일정·active maid·source 조건을 다시 확인한 뒤 `scheduled` attempt를 exactly-once 만든다. attempt의 target/assignment/maid/revision/template/room snapshot은 생성 뒤 불변이다.
+- #305/#308 후보 scheduler는 오늘 및 과거 날짜의 notified current assignment를 현재 active maid·source·점유 조건으로 재검증한 뒤 `scheduled` attempt를 exactly-once 만든다. invocation당 최대 100건을 private cursor로 회전하며 과거 날짜라는 이유만으로 담당/일정을 바꾸지 않는다. attempt의 target/assignment/maid/revision/template/room snapshot은 생성 뒤 불변이다.
 - 미래 planned checkout은 obligation materialization·current pointer·actual checkout 전 attempt 0이다. 같은 객실의 이전 active workflow가 있으면 target/assignment를 유지하고 활성화만 보류한다.
-- 실행 창이 끝난 unassigned/notified attempt-0 target은 같은 ID/original date로 다음 KST 날짜에 이월한다. effective date/carryover/assignment version과 schedule revision만 증가하며 active attempt는 이월 대상이 아니다.
-- 이월 write 전에 다음 source window를 검증한다. 연박은 active·실제 입실·미퇴실·동일 객실 예약 점유 범위/KST 날짜가 유효해야 하며, 추가 청소는 active reservation과 다음 창이 겹치지 않아야 한다. invalid면 blocked/mutation 0이며 기존 notified assignment/알림을 유지한다. 자동 취소·종류 변환은 하지 않는다.
+- #305/#308 후보에서는 예정 기한이 지나도 unassigned/notified/scheduled 업무의 날짜·담당·version을 자동 변경하지 않으며 `expire_scheduled`도 폐기한다. 지연 알림과 과거 미배정 today-preview 연결은 후속 범위다.
+- 과거 private rollover helper의 이월 write 검증은 역사 회귀로 보존하지만 #305/#308 후보 scheduler와 공개 lifecycle은 이 helper를 호출하지 않는다. 자동 취소·종류 변환도 하지 않는다.
+- `private.assignment_activation_scan_cursor`는 singleton/nullable last UUID의 변경 가능한 기술 projection이다. FK를 두지 않아 제거된 후보도 진행을 막지 않으며 FORCE RLS·직접 table 권한 없음으로 service-only scheduler가 reservation advisory lock 아래 100건씩 회전한다.
 - 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 같은 0원 target을 다른 메이드에게 배정할 수 없다. #264 수행 불가 확정은 그 target/assignment/attempt를 종료 이력으로 보존한 뒤 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 정확히 한 건 생성하며, replacement만 일반 배정 흐름에 들어간다.
 - `assignment_unavailability_cancellations`는 assignment당 최대 한 건이며 target/assignment/maid/revision과 선택적 attempt execution version을 종료된 원장 상태와 대조한다. UPDATE/DELETE와 Data API 접근은 금지하고, replacement target이 있는 경우에도 과거 재청소 target과 earning을 수정하지 않는다.
 - 메이드마다 `in_progress` 수행 회차는 최대 한 건이다.

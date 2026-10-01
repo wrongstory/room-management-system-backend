@@ -885,7 +885,7 @@ Table public.cleaning_targets {
   effective_service_date date [not null]
   carryover_count int [not null, default: 0]
   available_from timestamptz
-  due_at timestamptz
+  due_at timestamptz [note: '#305/#308: 예정 기한은 업무 권한 만료가 아님. 경과만으로 자동 이월/담당 종료하지 않음. 보안 TTL·현재 점유 검사는 유지.']
   status cleaning_target_status [not null]
   assignment_version bigint [not null]
   room_type_snapshot jsonb [not null]
@@ -2517,4 +2517,10 @@ Table private.room_pin_access_scheduled_revocations {
   effective_at timestamptz [not null]
   reason_code text [not null]
   Note: 'Preserves access before a future move and denies query-time authority at/after effectiveAt.'
+}
+
+Table private.assignment_activation_scan_cursor {
+  singleton boolean [pk, default: true, note: 'CHECK singleton=true. Singleton internal technical projection, not an immutable business ledger.']
+  last_target_id uuid [note: 'UUID keyset cursor, intentionally no business FK; blocked/missing rows must not prevent scan progress.']
+  Note: '#308 candidate: FORCE RLS, no anon/authenticated/service_role table access. Scheduler checks <=100 notified targets per invocation under reservation advisory lock. Does not reschedule or change ownership.'
 }

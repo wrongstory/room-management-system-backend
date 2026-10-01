@@ -49,9 +49,11 @@ additional 예약 overlap, reclean 원 maid/source를 검증한다. Pure TypeScr
   가진 별도 ordinary replacement target만 일반 미배정 후보로 다른 active maid에게 제안한다.
 - planned checkout은 계획만 가능하다. Attempt/PIN/현장 실행 활성화는 하지 않는다.
 
-`planningAt`, `availableFrom`, `dueAt`은 명시된 시각 사실로 보존한다. 신규 후보의 `dueAt`이 이미
-지났거나 `availableFrom >= dueAt`이면 거부하지만 진행 중인 고정 작업의 지난 마감은 종료 증거로
-간주하지 않는다. 예상 분수를 더한 종료시각이나 순차 cursor를 만들지 않는다.
+`planningAt`, `availableFrom`, `dueAt`은 명시된 시각 사실로 보존한다. #305/#308에 따라
+당일 신규 후보의 `dueAt` 경과만으로 거부하지 않는다. `availableFrom >= dueAt`인 잘못된
+일정과 실제 source/점유 충돌은 계속 거부한다. 예상 분수를 더한 종료시각이나 순차 cursor를 만들지 않는다.
+과거 미배정 업무의 오늘 preview 포함 및 cross-day 고정 부하/현재 가능일 연결은
+[#308 후속 범위](./CLEANING_OVERDUE.md)이며 이 1차 변경에서 완료했다고 해석하지 않는다.
 수동 additional은 두 끝점이 모두 명시된 `[availableFrom,dueAt)`만 실제 예약 점유 구간과 비교한다.
 `dueAt=null`은 열린 상태로 유지하고 임의 마감·1분·09~18시 shift·휴게시간·객실 수 상한을 만들지 않는다.
 

@@ -120,15 +120,16 @@ select is((select count(*)::int from public.earnings),0,'limited finish does not
 select is((select count(*)::int from public.room_pin_access_leases),0,'limited grant creates no PIN lease');
 select is((select count(*)::int from public.submission_photos),0,'limited grant does not invent uploaded evidence');
 insert into b_result values('ledger',pg_temp.bledgers());
-select throws_ok($$select pg_temp.bmanage(5,'expire_scheduled',1)$$,'55000','CLEANING_WINDOW_NOT_EXPIRED','unexpired scheduled cannot be retired');
+select throws_ok($$select pg_temp.bmanage(5,'expire_scheduled',1)$$,'22023','INVALID_ATTEMPT_COMMAND','time-based scheduled retirement is no longer a command');
 select is(pg_temp.bledgers(),(select value from b_result where label='ledger'),'rejected expiry changes no business/audit/outbox/capability ledger');
-insert into b_result values('expired',pg_temp.bmanage(4,'expire_scheduled',1));
-select is((select status::text from public.cleaning_attempts where id=pg_temp.bid(504)),'superseded','never-started expired attempt preserved as superseded');
-select ok((select started_at is null and field_completed_at is null and execution_version=2 from public.cleaning_attempts where id=pg_temp.bid(504)),
- 'expiry records no physical work and advances CAS');
-select is((select status::text from public.cleaning_targets where id=pg_temp.bid(304)),'unassigned','expiry reopens next-day assignment');
-select ok((select not is_current from public.cleaning_assignments where id=pg_temp.bid(404)),'expired current assignment ends without DELETE');
-select is((select original_service_date<effective_service_date from public.cleaning_targets where id=pg_temp.bid(304)),true,'rollover preserves original service date');
+select throws_ok($$select pg_temp.bmanage(4,'expire_scheduled',1)$$,'22023','INVALID_ATTEMPT_COMMAND','elapsed business deadline cannot retire a scheduled attempt');
+select is(pg_temp.bledgers(),(select value from b_result where label='ledger'),'retired action creates no mutation or command receipt even after deadline');
+select is((select status::text from public.cleaning_attempts where id=pg_temp.bid(504)),'scheduled','past scheduled attempt remains actionable');
+select ok((select started_at is null and field_completed_at is null and execution_version=1 from public.cleaning_attempts where id=pg_temp.bid(504)),
+ 'retired command does not change physical work or CAS');
+select is((select status::text from public.cleaning_targets where id=pg_temp.bid(304)),'notified','past notified target retains its owner');
+select ok((select is_current from public.cleaning_assignments where id=pg_temp.bid(404)),'past current assignment remains current');
+select is((select original_service_date=effective_service_date from public.cleaning_targets where id=pg_temp.bid(304)),true,'time alone never changes effective service date');
 
 -- Give a different active maid explicit availability for a genuine handover.
 insert into public.availability_versions(id,maid_profile_id,week_start,version,is_current,submitted_at)
@@ -187,7 +188,7 @@ from unnest(array['public.get_cleaning_attempt_lifecycle_impact(uuid,uuid,uuid)'
  'public.manage_cleaning_attempt_lifecycle(uuid,uuid,uuid,bigint,uuid,bigint,bigint,text,jsonb,text,text,text)',
  'public.complete_limited_cleaning_attempt_field_work(uuid,uuid,uuid,bigint,uuid,bigint,text,text)']) sig;
 -- Nested A -> B -> C retains each interrupted history, but only the live leaf
--- blocks reassignment. A later expiry must not strand the target forever.
+-- blocks reassignment. Pre-upgrade superseded history must remain usable.
 select private.execute_cleaning_attempt_at(pg_temp.bid(10),
  (select (value#>>'{nextAttempt,attemptId}')::uuid from b_result where label='handover'),1,
  (select (value#>>'{nextAttempt,assignmentId}')::uuid from b_result where label='handover'),3,
@@ -207,11 +208,21 @@ select is((select count(*)::int from private.attempt_handover_events),2,'nested 
 select throws_ok($$insert into private.attempt_handover_events(previous_attempt_id,next_attempt_id,actor_profile_id,reason_code,occurred_at)
  values(pg_temp.bid(503),pg_temp.bid(506),pg_temp.bid(1),'ADMIN_HANDOVER',pg_temp.btime())$$,
  '23514','HANDOVER_IDENTITY_INVALID','wrong target or non-interrupted proof cannot hide live work');
-insert into b_result values('nested-expiry',private.manage_cleaning_attempt_lifecycle_at(pg_temp.bid(1),pg_temp.bid(201),
+select throws_ok($$select private.manage_cleaning_attempt_lifecycle_at(pg_temp.bid(1),pg_temp.bid(201),
  (select (value#>>'{nextAttempt,attemptId}')::uuid from b_result where label='nested'),1,
  (select (value#>>'{nextAttempt,assignmentId}')::uuid from b_result where label='nested'),4,1,
  'expire_scheduled','{}','SCHEDULE_EXPIRED','nested-expire-leaf',repeat('d',64),
- ((pg_temp.btime() at time zone 'Asia/Seoul')::date+1)::timestamp at time zone 'Asia/Seoul'));
+ ((pg_temp.btime() at time zone 'Asia/Seoul')::date+1)::timestamp at time zone 'Asia/Seoul')$$,
+ '22023','INVALID_ATTEMPT_COMMAND','nested live leaf cannot be retired by time');
+-- Synthetic pre-upgrade history: retain the existing nested-provenance regression
+-- without exposing the retired action through the current public command.
+update public.cleaning_attempts set status='superseded',execution_version=execution_version+1,
+ ended_at=((pg_temp.btime() at time zone 'Asia/Seoul')::date+1)::timestamp at time zone 'Asia/Seoul',end_reason='SCHEDULE_EXPIRED'
+where id=(select (value#>>'{nextAttempt,attemptId}')::uuid from b_result where label='nested');
+select private.rollover_cleaning_target_at(pg_temp.bid(1),pg_temp.bid(302),
+ ((pg_temp.btime() at time zone 'Asia/Seoul')::date+1)::timestamp at time zone 'Asia/Seoul',
+ (select (value#>>'{nextAttempt,assignmentId}')::uuid from b_result where label='nested'),4,
+ (pg_temp.btime() at time zone 'Asia/Seoul')::date);
 select is((select count(*)::int from public.cleaning_attempts a where cleaning_target_id=pg_temp.bid(302)
  and private.attempt_blocks_assignment(a)),0,'superseded leaf frees nested target without deleting prior evidence');
 select is((select status::text from public.cleaning_targets where id=pg_temp.bid(302)),'unassigned','nested expiry reopens target');
@@ -241,16 +252,16 @@ select ok(private.attempt_blocks_assignment(a),'orphan interrupted remains block
 -- Admin retirement grants nothing to inactive/departed/former-maid owners.
 select pg_temp.bfixture(9,12,(pg_temp.btime() at time zone 'Asia/Seoul')::date-1,false,true);
 update public.profiles set status='inactive' where id=pg_temp.bid(12);
-select lives_ok($$select pg_temp.bmanage(9,'expire_scheduled',1,2)$$,'inactive owner does not strand never-started work');
+select throws_ok($$select pg_temp.bmanage(9,'expire_scheduled',1,2)$$,'22023','INVALID_ATTEMPT_COMMAND','inactive owner cannot restore retired time-based command');
 select ok((select due_at is null from public.cleaning_targets where id=pg_temp.bid(309)),'NULL due is preserved rather than guessed');
 select is((select status::text from public.profiles where id=pg_temp.bid(12)),'inactive','expiry never reactivates inactive owner');
 select pg_temp.bfixture(10,6,(pg_temp.btime() at time zone 'Asia/Seoul')::date-1,false);
 update public.profiles set status='inactive' where id=pg_temp.bid(6);
 update public.profiles set status='departed' where id=pg_temp.bid(6);
-select lives_ok($$select pg_temp.bmanage(10,'expire_scheduled',1,3)$$,'departed owner does not strand never-started work');
+select throws_ok($$select pg_temp.bmanage(10,'expire_scheduled',1,3)$$,'22023','INVALID_ATTEMPT_COMMAND','departed owner cannot restore retired time-based command');
 select pg_temp.bfixture(11,5,(pg_temp.btime() at time zone 'Asia/Seoul')::date-1,false);
 update public.profiles set role='admin' where id=pg_temp.bid(5);
-select lives_ok($$select pg_temp.bmanage(11,'expire_scheduled',1,2)$$,'historical owner role change does not grant permission or strand retirement');
+select throws_ok($$select pg_temp.bmanage(11,'expire_scheduled',1,2)$$,'22023','INVALID_ATTEMPT_COMMAND','role change cannot restore retired time-based command');
 select is((select count(*)::int from private.attempt_capability_grants where attempt_id in (pg_temp.bid(509),pg_temp.bid(510),pg_temp.bid(511))),0,
  'retirement creates no capability for inactive/departed/former maid');
 
@@ -273,7 +284,7 @@ values(pg_temp.bid(412),pg_temp.bid(312),pg_temp.bid(9),99,2,pg_temp.btime(),pg_
 insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,assignment_revision,template_snapshot,room_snapshot)
 select pg_temp.bid(512),pg_temp.bid(312),pg_temp.bid(412),pg_temp.bid(9),1,'scheduled',2,'{}',jsonb_build_object('roomId',room_id)
 from public.cleaning_targets where id=pg_temp.bid(312);
-select lives_ok($$select pg_temp.bmanage(12,'expire_scheduled',1)$$,'reclean original maid may retire unstarted expired attempt');
+select throws_ok($$select pg_temp.bmanage(12,'expire_scheduled',1)$$,'22023','INVALID_ATTEMPT_COMMAND','reclean deadline cannot retire original maid work');
 select ok((select reclean_maid_profile_id=pg_temp.bid(9) and reclean_of_attempt_id=pg_temp.bid(508) and fee_snapshot=0 and due_at is null
  from public.cleaning_targets where id=pg_temp.bid(312)),'reclean identity zero fee and NULL deadline stay unchanged');
 
@@ -332,7 +343,7 @@ from public.cleaning_targets where id=pg_temp.bid(305);
 insert into b_result values('replan-source-before',pg_temp.bledgers());
 select throws_ok($$select pg_temp.bmanage(5,'expire_scheduled',1,3,'replan-source-conflict',null,
  ((pg_temp.btime() at time zone 'Asia/Seoul')::date+1)::timestamp at time zone 'Asia/Seoul')$$,
- '23514','ASSIGNMENT_SCHEDULE_INVALID','next-day replan cannot overlap active reservation');
+ '22023','INVALID_ATTEMPT_COMMAND','retired time-based replan is rejected before any source mutation');
 select is(pg_temp.bledgers(),(select value from b_result where label='replan-source-before'),
  'failed next-day source validation has zero retirement/audit/receipt/outbox/schedule mutations');
 insert into public.reservations(id,room_id,check_in_at,check_out_at,actual_check_in_at,guest_count,status,created_by,updated_by)

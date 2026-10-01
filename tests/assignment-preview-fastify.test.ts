@@ -72,6 +72,36 @@ function clientsWithRpc(rpc: (name: string, args: unknown) => Promise<unknown>) 
 }
 
 describe('assignment preview Fastify parity', () => {
+  it('proposes an overdue target without changing its original window', async () => {
+    const serviceDate = today();
+    const availableFrom = `${serviceDate}T10:00:00+09:00`;
+    const dueAt = `${serviceDate}T11:00:00+09:00`;
+    const rpc = vi.fn(async () => ({
+      data: {
+        serviceDate, planningAt: `${serviceDate}T12:00:00+09:00`,
+        maids: [{ maidProfileId: 'maid-one', maidDisplayName: '메이드', role: 'maid',
+          status: 'active', availabilityVersion: 1, available: true }],
+        targets: [{
+          cleaningTargetId: 'overdue', roomId: 'room-one', roomNumber: '101',
+          roomTypeCode: 'standard', elevatorZone: 'A', feeSnapshot: 16000,
+          availableFrom, dueAt, serviceDate, status: 'unassigned', assignmentVersion: 1,
+          source: 'manual_room_request', cleaningKind: 'additional',
+          domainIdentity: { sourceId: 'overdue', roomReservations: [] },
+          blockedReason: null, recleanMaidProfileId: null, currentAssignment: null, activeAttempt: null
+        }]
+      }, error: null
+    }));
+    const app = await appWith(new SupabaseAssignmentPreviewService(clientsWithRpc(rpc)));
+    try {
+      const response = await app.inject({ method: 'POST', url: '/v1/assignments/preview',
+        payload: { serviceDate, previewSeed: 'overdue' } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().proposedAssignments).toMatchObject([{
+        cleaningTargetId: 'overdue', availableFrom, dueAt, serviceDate
+      }]);
+      expect(response.json().blockedTargets).toEqual([]);
+    } finally { await app.close(); }
+  });
   it('uses the shared retired-policy optimizer and camel-to-snake RPC arguments', async () => {
     const serviceDate = today();
     const rpc = vi.fn(async (name: string) => {

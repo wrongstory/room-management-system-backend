@@ -406,7 +406,7 @@ describe("assignment preview pure optimizer", () => {
     const result = await optimizeAssignmentPreview(s, "load");
     expect(result.objectiveScore.completedTargetCount).toBe(121);
   });
-  it("does not simulate fixed duration and still blocks an explicitly expired candidate", async () => {
+  it("does not simulate duration or reject an otherwise valid overdue candidate", async () => {
     const s = snapshot([
       fixed("old", "a", 1, { dueAt: time("18:00") }),
       target("new", { dueAt: time("12:30") }),
@@ -416,6 +416,18 @@ describe("assignment preview pure optimizer", () => {
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
       .toHaveLength(1);
     s.targets = [target("past", { dueAt: time("11:00") })];
+    const overdue = await optimizeAssignmentPreview(s, "s");
+    expect(overdue.proposedAssignments).toMatchObject([{
+      cleaningTargetId: "past", availableFrom: time("10:00"), dueAt: time("11:00"),
+    }]);
+    expect(overdue.blockedTargets).toEqual([]);
+    s.targets = [target("boundary", { dueAt: s.planningAt })];
+    expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
+      .toHaveLength(1);
+    s.targets = [target("invalid", { dueAt: time("10:00") })];
+    expect((await optimizeAssignmentPreview(s, "s")).blockedTargets)
+      .toEqual([{ cleaningTargetId: "invalid", reason: "ASSIGNMENT_PREVIEW_INVALID_SCHEDULE" }]);
+    s.targets = [target("occupied", { dueAt: time("11:00"), blockedReason: "ASSIGNMENT_PREVIEW_SOURCE_INVALID" })];
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
       .toHaveLength(0);
   });

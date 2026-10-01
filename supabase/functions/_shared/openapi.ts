@@ -8113,7 +8113,7 @@ export const openApiDocument = {
       },
       AttemptLifecycleRequest: {
         description:
-          "action별 payload/reason은 고정 계약입니다. raw body·자유문·session ID·capability token·TTL은 입력하지 않습니다.",
+          "action별 payload/reason은 고정 계약입니다. 예정 기한 경과만으로 업무를 종료하는 expire_scheduled는 허용하지 않습니다. raw body·자유문·session ID·capability token·TTL은 입력하지 않습니다.",
         oneOf: [
           lifecycleRequestVariant(
             "allow_finish",
@@ -8125,11 +8125,6 @@ export const openApiDocument = {
             ["DEACTIVATION_UPLOAD_ONLY"],
             { type: "object", additionalProperties: false, maxProperties: 0 },
           ),
-          lifecycleRequestVariant("expire_scheduled", ["SCHEDULE_EXPIRED"], {
-            type: "object",
-            additionalProperties: false,
-            maxProperties: 0,
-          }),
           lifecycleRequestVariant(
             "interrupt_handover",
             ["ADMIN_HANDOVER", "DEACTIVATION_HANDOVER"],

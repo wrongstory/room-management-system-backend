@@ -1,5 +1,19 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+## [확정] #305/#308 업무 기한은 권한 만료가 아님
+
+예정 서비스일·dueAt 경과만으로 배정·시작·완료·제출을 차단하거나 기존 담당·배정·attempt를
+종료하지 않는다. 아래 #28 자동 이월 및 #7B 미착수 만료 해소의 과거 계약보다 이 정책이 우선한다.
+보안 session/PIN/lease/capability TTL, 실제 점유·퇴실 materialization, 현재 담당·CAS·terminal
+검사는 유지한다. 지연 업무는 관리자 확인 알림 대상으로 관리한다.
+
+- [현재 구현 후보] #308 1차는 당일 배정의 dueAt 차단, 과거 통보 업무의 시작 차단,
+  scheduler 자동 이월 및 `expire_scheduled` 명령을 제거한다. scheduler는 기술적 cursor로
+  회전하며 한 번에 최대 100건을 검사한다. 원 업무 날짜·담당·snapshot은 보존한다.
+- [후속 미구현] durable overdue 알림/outbox 중복 방지, 상태 변경별 상호 알림의 누락 보강,
+  과거 미배정 업무의 오늘 preview·현재 가능일 연결은 #308 잔여 범위다.
+- 구현 후보는 source/운영 배포 완료 선언이 아니다. [진행 범위](./CLEANING_OVERDUE.md)를 따른다.
+
 ## 2026-09-28 사용자 확정: 사진·이력·주급 개편
 
 이 절은 아래의 구역별 사진 정책보다 우선한다. 운영 반영 상태는 `docs/RELEASE_V0.7.0.md`에서 별도로 기록한다.
@@ -337,6 +351,9 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 ### [현재 구현] #28 수행 회차 활성화·이월 경계
 
+아래 자동 이월·마감 차단 설명은 과거 구현 기록이다. #305/#308의 위 확정 정책으로 대체되며,
+새 후보에서 scheduler는 원 담당/업무를 유지한다.
+
 - 기존 scheduler의 exact active business admin·secret·분 단위 invocation을 재사용하되, 예약 전이와 배정 lifecycle은 서로 다른 command scope/request hash로 멱등 처리한다. public activation API와 메이드 activation API는 만들지 않는다.
 - 오늘 KST의 notified current assignment만 active maid, current target/version, schedule snapshot, 접근/마감 창, source별 예약·checkout·reclean 계약을 transaction 안에서 다시 확인한 후 `scheduled` attempt를 exactly-once 생성한다. 내일 작업과 private planned checkout은 attempt 0이다.
 - checkout은 planned target이 obligation의 current pointer로 materialize되고 reservation actual checkout이 기록된 뒤에만 같은 target/current assignment revision으로 활성화한다. snapshot은 target의 template/room snapshot을 우선 사용하며 생성 뒤 바꾸지 않는다.
@@ -346,6 +363,9 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 이월은 다음 schedule을 먼저 계산하고 source window가 유효할 때만 저장한다. `stayover_request + stayover`는 같은 객실의 active·실제 입실·미퇴실 예약 안에 다음 접근/마감 창이 모두 포함되고 KST 날짜가 일치해야 한다. 실패하면 `STAYOVER_ROLLOVER_NOT_ALLOWED`로 blocked이며 배정 종료·알림 resolve·일정/version/이력 변경은 모두 0이다. 자동 취소나 cleaning kind 변환은 하지 않는다. 추가 청소도 다음 창이 기존 활성화 규칙의 active 예약 점유와 겹치면 `ADDITIONAL_ROLLOVER_NOT_ALLOWED`로 변경 없이 차단한다.
 
 ### [확정] #7B 만료 회차 해소·인계 — 2026-09-08 사용자 승인
+
+미착수 만료 해소 부분은 #305/#308에 의해 폐기됐다. `expire_scheduled`를 호출하지 않는다.
+실제 수행 불가·명시적 인계와 2h/24h 보안 capability TTL은 계속 유효하다.
 
 이 절은 기존 #27/#28의 구현 제한과 아래 새 회차 생성 제한에 대한 좁은 예외다.
 
@@ -365,7 +385,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 1. **청소 의무/target**: 왜, 어느 객실을, 어느 운영일에 청소해야 하는가
 2. **assignment revision**: 누가 몇 번째 순서로 책임지는가
-3. **attempt**: 실제 수행 회차. 시작 전 담당 변경·순서 변경은 같은 미시작 업무 연결을 갱신하고, 시작한 업무의 이월은 같은 회차를 유지한다. 검수 반려 재청소 또는 명시적 중단·인계가 새 회차를 만든다. 추가로 위 #7B 승인에 한해 실제 미착수 만료 scheduled를 superseded로 보존하고 다음날 재통보 후 새 회차를 활성화할 수 있다.
+3. **attempt**: 실제 수행 회차. 시작 전 담당 변경·순서 변경은 같은 미시작 업무 연결을 갱신하고, 날짜를 넘긴 업무도 같은 회차를 유지한다. 검수 반려 재청소 또는 명시적 중단·인계가 새 회차를 만든다. #305/#308에 따라 예정 기한만으로 scheduled를 superseded 처리하지 않는다.
 4. **submission version**: 메이드가 검수 요청한 불변 제출본
 5. **photo slot snapshot**: target 생성 시 고정되어 해당 attempt가 사용하는 템플릿 version의 필수/선택 증빙
 6. **inspection decision**: 관리자의 승인/반려

@@ -92,6 +92,62 @@ Deno.test("preview rejects malformed input before readonly RPC", async () => {
   );
 });
 
+Deno.test("preview proposes an overdue target without rescheduling or persisting it", async () => {
+  const serviceDate = today();
+  const availableFrom = `${serviceDate}T10:00:00+09:00`;
+  const dueAt = `${serviceDate}T11:00:00+09:00`;
+  const mock = clients(null, {
+    serviceDate,
+    planningAt: `${serviceDate}T12:00:00+09:00`,
+    maids: [{
+      maidProfileId: "maid-one",
+      maidDisplayName: "메이드",
+      role: "maid",
+      status: "active",
+      availabilityVersion: 1,
+      available: true,
+    }],
+    targets: [{
+      cleaningTargetId: "overdue",
+      roomId: "room-one",
+      roomNumber: "101",
+      roomTypeCode: "standard",
+      elevatorZone: "A",
+      feeSnapshot: 16000,
+      availableFrom,
+      dueAt,
+      serviceDate,
+      status: "unassigned",
+      assignmentVersion: 1,
+      source: "manual_room_request",
+      cleaningKind: "additional",
+      domainIdentity: { sourceId: "overdue", roomReservations: [] },
+      blockedReason: null,
+      recleanMaidProfileId: null,
+      currentAssignment: null,
+      activeAttempt: null,
+    }],
+  });
+  const result = await previewAssignments(
+    request({ serviceDate, previewSeed: "overdue" }),
+    mock.client,
+    admin,
+  );
+  assert(
+    result.proposedAssignments.length === 1 &&
+      result.proposedAssignments[0].cleaningTargetId === "overdue" &&
+      result.proposedAssignments[0].dueAt === dueAt &&
+      result.proposedAssignments[0].availableFrom === availableFrom &&
+      result.blockedTargets.length === 0,
+    "elapsed deadline is not a scheduling rejection",
+  );
+  assert(
+    mock.calls.length === 1 &&
+      mock.calls[0].name === "get_assignment_preview_snapshot",
+    "only the readonly snapshot RPC is called",
+  );
+});
+
 Deno.test("preview enforces business admin and password gate", async () => {
   const mock = clients();
   for (const role of ["maid", "developer"] as const) {

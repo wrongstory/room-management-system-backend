@@ -1487,10 +1487,11 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     "limited read and complete response stay restricted to three candidate statuses",
   );
   assert(
-    variants.length === 4 &&
+    variants.length === 3 &&
       variants.every((variant) =>
         variant.additionalProperties === false &&
-        variant.required.includes("expectedProfileVersion")
+        variant.required.includes("expectedProfileVersion") &&
+        variant.properties.action.const !== "expire_scheduled"
       ),
     "all actions strict CAS",
   );

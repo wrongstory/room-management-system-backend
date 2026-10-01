@@ -386,9 +386,6 @@ export async function optimizeAssignmentPreview(
         ? "TARGET_NOT_UNASSIGNED"
         : Date.parse(t.availableFrom) >= Date.parse(t.dueAt ?? "9999-12-31")
         ? "ASSIGNMENT_PREVIEW_INVALID_SCHEDULE"
-        : t.dueAt !== null &&
-            Date.parse(t.dueAt) <= Date.parse(snapshot.planningAt)
-        ? "ASSIGNMENT_WINDOW_EXPIRED"
         : (t.cleaningKind === "reclean" || t.source === "inspection_reclean") &&
             (!t.recleanMaidProfileId || t.cleaningKind !== "reclean" ||
               t.source !== "inspection_reclean")
