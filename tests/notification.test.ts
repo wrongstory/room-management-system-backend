@@ -102,7 +102,8 @@ describe('notification cursor and service', () => {
     ['cleaning_started', 'cleaning.started_admin', 'admin', 'cleaningTarget'],
     ['bomb_room_reported', 'bomb.reported_admin', 'admin', 'cleaningTarget'],
     ['room_issue_reported', 'room_issue.reported_admin', 'admin', 'cleaningTarget'],
-    ['bomb_room_decided', 'bomb.decided_maid', 'maid', 'submission']
+    ['bomb_room_decided', 'bomb.decided_maid', 'maid', 'submission'],
+    ['complaint_response_attention', 'complaint.response_attention_admin', 'admin', 'complaintCase']
   ] as const)('projects %s counterpart history without exposing its private provenance', async (category, eventFamily, role, kind) => {
     const target = '10800000-0000-4000-8000-000000003008';
     const overdue = {

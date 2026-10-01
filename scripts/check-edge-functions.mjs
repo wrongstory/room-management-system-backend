@@ -51,11 +51,13 @@ const sourcePaths = [
   'supabase/functions/_shared/room-pin-sheet-sync.ts',
   'supabase/functions/api/index.ts',
   'supabase/functions/reservation-scheduler/index.ts',
+  'supabase/functions/_shared/scheduler-transition-count.ts',
   'supabase/functions/photo-purge/index.ts'
   ,'supabase/functions/notification-delivery/index.ts',
   'supabase/functions/room-pin-sheet-sync/index.ts'
 ];
 const testPaths = [
+  'supabase/functions/_shared/scheduler-transition-count.deno.ts',
   'supabase/functions/_shared/activity-api.deno.ts',
   'supabase/functions/_shared/account-api.deno.ts',
   'supabase/functions/_shared/availability-api.deno.ts',

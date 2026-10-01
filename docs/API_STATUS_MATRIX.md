@@ -8,6 +8,24 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 ### #308 1·2·3차 source 후보 — 지연 업무 유지·관리자 알림
 
+최신 종료 근거: #308은 PR #340의 source `bdf3cda`와 dev squash
+`4d85458c5d0a900cf87f7318fcd9b2474c03a889`의 tree 동일성, required CI
+`36864792279` application/migration PASS 및 독립 QA98/100으로 source/dev 완료됐다.
+아래 단계별 후보 기록은 역사이며 운영 반영이나 #305 전체 종료를 뜻하지 않는다.
+
+### #343 컴플레인 미응답 주의 알림 — source 구현·로컬 검증 완료, 운영 미반영
+
+92번째 append-only migration 후보로 기존 lifecycle의 미응답 관찰을 추가한다.
+기존 알림 조회·읽음 API와 `complaintCase` deep link를 재사용하며
+`complaint_response_attention` category만 추가한다. 공개 endpoint/OpenAPI 계약과 응답 권한은 유지한다.
+기존 최초 판정 응답 기준을 엄격히 지난 `decided` 사건을 bounded/fair 100건씩 검사하고,
+사건/수신자별 중복을 막는다. scheduler heartbeat에 내부 `complaintAttentionCount`를 합산하며
+이 counter가 없는 이전 완료 receipt와 호환된다.
+실제 검증·QA·CI·dev 승격은 [별도 기록](./COMPLAINT_RESPONSE_ATTENTION.md)을 따른다.
+main/production/recovery·프런트 코드·Cron/provider 설정은 변경하지 않는다.
+
+### #308 단계별 구현 이력
+
 당일 preview/commit의 dueAt 차단 제거, 과거 notified 업무 activation/start 허용,
 scheduler 자동 이월 중단과 bounded/fair 100건 cursor, `expire_scheduled` 폐기의 1차 source를 구현했다.
 기존 85개 migration은 보존하고 86번째 append-only migration을 사용한다. Fastify/Edge preview는

@@ -7,6 +7,11 @@
 보안 session/PIN/lease/capability TTL, 실제 점유·퇴실 materialization, 현재 담당·CAS·terminal
 검사는 유지한다. 지연 업무는 관리자 확인 알림 대상으로 관리한다.
 
+#308의 아래 단계별 후보는 구현 이력이다. 최신 source/dev 완료 근거는 PR #340,
+`dev@4d85458c5d0a900cf87f7318fcd9b2474c03a889`, required CI `36864792279`
+application/migration PASS, 독립 QA98/100 및 승인 source/tree 동일성이다.
+운영 반영을 뜻하지 않으며 #305의 컴플레인 미응답 알림은 #343으로 별도 구현한다.
+
 - [현재 구현 후보] #308 1차는 당일 배정의 dueAt 차단, 과거 통보 업무의 시작 차단,
   scheduler 자동 이월 및 `expire_scheduled` 명령을 제거한다. scheduler는 기술적 cursor로
   회전하며 한 번에 최대 100건을 검사한다. 원 업무 날짜·담당·snapshot은 보존한다.
@@ -544,6 +549,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 벌점은 0~10의 정수이고 평가 전용 데이터다. 청소 반려가 자동 벌점이 되지 않으며, 컴플레인·벌점이 음수 adjustment나 주급 차감을 자동 생성해서는 안 된다.
 - 메이드는 본인 건의 최초 판정에 정확히 한 번 확인 또는 이의를 제출할 수 있다. 7일 주의 기준이 지나도 응답 권한은 만료되지 않으며 판정·벌점·재작업을 직접 바꾸지 못한다.
 - `responseDeadline`은 기존 이력 호환과 관리자 주의 알림을 위한 기준 시각이다. 시간 경과만으로 미응답 사건을 종결하거나 메이드 기능을 막지 않는다.
+- #343 source 후보는 최초 판정의 기존 `responseDeadline`을 엄격히 지난 미응답 `decided` 사건만 관리자에게 informational 주의 알림으로 관찰한다. 정정은 최초 시각·기준을 초기화하지 않으며 확인/이의·종결 사건과 기준이 없는 과거 사건은 제외한다. 사건별 불변 evidence와 수신자별 enrollment로 반복 실행·grouping 경계를 넘어서도 중복하지 않는다. 응답 권한·벌점·수익·보상은 변경하지 않으며 migration 자체의 과거 알림 backfill은 없다. [검증·배포 경계](./COMPLAINT_RESPONSE_ATTENTION.md)를 따른다.
 - 종결 뒤 reopen은 금지한다. 판정 오류는 active business admin이 기존 판정을 보존한 새 correction decision version으로만 바로잡는다.
 - 판정·이의 처리·종결·정정 command는 한 명의 active business admin이 처리하며 actor, `expectedVersion`, actor/command 범위 idempotency key와 canonical request hash, audit을 필수로 한다.
 - 이미 승인된 원 청소의 earning은 컴플레인 때문에 취소하거나 귀속일을 바꾸지 않는다.

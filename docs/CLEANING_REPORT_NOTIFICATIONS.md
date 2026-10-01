@@ -1,5 +1,11 @@
 # #308 6차: 신고·폭탄방 선판정의 상대 역할 알림
 
+최신 상태: #308 source/dev 완료. PR #340의 승인 source `bdf3cda`와
+dev squash `4d85458c5d0a900cf87f7318fcd9b2474c03a889`의 tree가 같고,
+required CI `36864792279` application/migration PASS, 독립 QA98/100·차단0으로
+Issue #308을 닫았다. 아래 후보/gate 기록은 당시의 검증 이력이다.
+운영 배포·프런트 연결과 #305 전체 종료 승인은 포함하지 않는다.
+
 ## 범위와 정책
 
 #305의 확정 상대 역할 통지를 따른다. 5차 head14676c1의 application/migration CI

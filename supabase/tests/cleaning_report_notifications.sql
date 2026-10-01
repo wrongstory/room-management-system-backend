@@ -106,8 +106,8 @@ returns jsonb language sql as $$
 create temp table report_results(label text primary key,value jsonb);
 -- END CLEANING REPORT NOTIFICATION UPGRADE FIXTURE
 select no_plan();
-select is((select count(*) from private.notification_event_catalog),58::bigint,'three new event families preserve all 55 old families');
-select is((select count(distinct category) from private.notification_event_catalog),41::bigint,'three additive public categories');
+select is((select count(*) from private.notification_event_catalog),59::bigint,'report families and later attention family preserve all 55 old families');
+select is((select count(distinct category) from private.notification_event_catalog),42::bigint,'additive report and attention public categories');
 select ok((select bool_and(not requires_action and push_eligible and resolver_kind='none')
  from private.notification_event_catalog where event_family in ('bomb.reported_admin','room_issue.reported_admin','bomb.decided_maid')),
  'report and decision push do not invent action-required workflow');

@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_report_decision_notifications'
+    'complaint_response_attention'
   ) ->> 'currentMigration',
-  'cleaning_report_decision_notifications',
+  'complaint_response_attention',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_report_decision_notifications'
+    'complaint_response_attention'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,24 +97,24 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'cleaning_report_decision_notifications';
+where name = 'complaint_response_attention';
 
 delete from supabase_migrations.schema_migrations
-where name = 'cleaning_report_decision_notifications';
+where name = 'complaint_response_attention';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_report_decision_notifications'
+    'complaint_response_attention'
   ) ->> 'currentMigration',
-  'cleaning_overdue_commit_planning',
+  'cleaning_report_decision_notifications',
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_report_decision_notifications'
+    'complaint_response_attention'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'

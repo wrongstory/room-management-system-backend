@@ -932,6 +932,14 @@ migration이다. complaint source identity 7개는 모두 실제 FK이며 임의
 `auth.sessions` JWT session을 요구하며 authenticated direct write와 privileged RPC 실행을 막고 app-owned
 service-role RPC만 command를 수행한다.
 
+#343의 92번째 append-only 후보는 이 원장과 최초 판정 응답 기준을 보존하면서
+private `complaint_response_attention_events`·`complaint_response_attention_recipients`를 추가한다.
+최초/current decision·case version·room·target의 typed FK를 고정한 사건당 최초 evidence,
+evidence/수신자별 immutable enrollment와 typed notification/outbox를 원자 commit한다.
+별도 private singleton cursor는 최대 100건 공정 순회용 mutable 기술 projection이다.
+미응답 현재 상태만 검사하며 응답/정정/종결 권한이나 과거 원장은 변경하지 않는다.
+raw client/table 접근을 금지하고 [검증·배포 경계](./COMPLAINT_RESPONSE_ATTENTION.md)를 따른다.
+
 `20260910035941_complaint_compensation_earning.sql`은 기존 37개 migration을 수정하지 않는 38번째
 append-only feature migration이다. `post_approval_complaint_reclean`은 최초 검수 반려의
 `inspection_reclean`과 섞이지 않으며 confirmed current complaint decision, 원 target/base fee, active assignee,

@@ -1585,7 +1585,7 @@ Table private.notification_event_catalog {
   group_family text [not null]
   group_scope_kind text [not null]
 
-  Note: '#109/#128/#264/#308 phase6 candidate: immutable source-controlled 58 event-family / 41 public-category contract. Start/field-complete/overdue and report/decision counterpart notices are informational, push_eligible is independent from requires_action; self push is suppressed. Exact typed source + immutable audit, no historical backfill; private report/decision provenance never enters public projection.'
+  Note: '#109/#128/#264/#308/#343 candidate: immutable source-controlled 59 event-family / 42 public-category contract. Start/field-complete/overdue/report/decision and complaint-response attention notices are informational, push_eligible is independent from requires_action; self push is suppressed. Exact typed source, no migration backfill; private provenance never enters public projection.'
 }
 
 Table private.notification_groups {
@@ -2565,4 +2565,46 @@ Table private.cleaning_overdue_scan_cursor {
   singleton boolean [pk, default: true, note: 'CHECK singleton=true']
   last_target_id uuid [note: 'Technical keyset cursor; deliberately no business FK']
   Note: 'Mutable FORCE RLS/private projection. Max100 current-day-or-earlier candidates, wrap scan under reservation global lock. Does not mutate domain work.'
+}
+
+Table private.complaint_response_attention_events {
+  id uuid [pk]
+  complaint_case_id uuid [not null, unique, ref: - public.complaint_cases.id]
+  initial_decision_id uuid [not null, ref: > public.complaint_decisions.id]
+  current_decision_id uuid [not null, ref: > public.complaint_decisions.id]
+  case_version bigint [not null, note: 'Positive version at first observation']
+  room_id uuid [not null, ref: > public.rooms.id]
+  cleaning_target_id uuid [not null, ref: > public.cleaning_targets.id]
+  first_decided_at timestamptz [not null]
+  response_deadline timestamptz [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  occurred_at timestamptz [not null]
+  indexes {
+    initial_decision_id
+    current_decision_id
+    room_id
+    cleaning_target_id
+    actor_profile_id
+  }
+  Note: '#343 source candidate: immutable typed first attention snapshot per case; finite first/deadline/occurrence, deadline=first+7days and occurrence>deadline. INSERT verifies current decided/unanswered case and both real decisions. FORCE RLS/raw deny; no migration backfill or economic side effect.'
+}
+
+Table private.complaint_response_attention_recipients {
+  event_id uuid [not null, ref: > private.complaint_response_attention_events.id]
+  recipient_profile_id uuid [not null, ref: > public.profiles.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  push_expected boolean [not null]
+  enrolled_at timestamptz [not null]
+  indexes {
+    (event_id,recipient_profile_id) [pk]
+    recipient_profile_id
+    actor_profile_id
+  }
+  Note: 'Immutable currently eligible admin enrollment. Exact deferred event/enrollment/inbox/outbox invariant. Original event/inbox/group clock preserved, new outbox uses enrollment clock with unchanged 24h TTL. Self push excluded; recipient/current case changes cannot erase frozen provenance.'
+}
+
+Table private.complaint_response_attention_scan_cursor {
+  singleton boolean [pk, default: true, note: 'CHECK singleton=true']
+  last_case_id uuid [note: 'Technical cursor, deliberately no business FK']
+  Note: 'Mutable FORCE RLS/private bounded 100-case keyset/wrap cursor under shared reservation command lock. Does not change complaint status/version/deadline.'
 }
