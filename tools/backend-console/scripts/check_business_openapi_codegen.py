@@ -86,6 +86,8 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "models" / "assignment_preview_diagnostics.py",
+            package / "models" / "assignment_preview_remaining_target.py",
             package / "api" / "reservations" / "list_reservations.py",
             package / "api" / "reservations" / "preview_reservation_bookability.py",
             package / "models" / "reservation_list_envelope.py",

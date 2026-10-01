@@ -97,6 +97,22 @@ interface Score {
   distance: number;
 }
 type Board = PreviewTarget[][];
+export type FixedExclusionReason =
+  | "FIXED_SEQUENCE_CONFLICT"
+  | "FIXED_SERVICE_DATE_MISMATCH"
+  | "FIXED_ASSIGNMENT_VERSION_MISMATCH"
+  | "FIXED_SCHEDULE_MISMATCH"
+  | "FIXED_SOURCE_BLOCKED"
+  | "FIXED_ATTEMPT_OWNER_MISMATCH"
+  | "FIXED_ATTEMPT_WORKFLOW_UNRESOLVED";
+export type RemainingReason =
+  | "NO_ACTIVE_MAID"
+  | "AVAILABILITY_NOT_SUBMITTED"
+  | "NO_AVAILABLE_MAID"
+  | "FIXED_ASSIGNMENT_CONFLICT"
+  | "RECLEAN_MAID_UNAVAILABLE"
+  | "RECLEAN_MAID_FIXED_ASSIGNMENT_CONFLICT"
+  | "NO_FEASIBLE_ASSIGNMENT";
 export interface PreviewAssignmentRow {
   cleaningTargetId: string;
   roomId: string;
@@ -124,8 +140,25 @@ export interface AssignmentPreviewResult {
   inputFingerprint: string;
   fixedAssignments: PreviewAssignmentRow[];
   proposedAssignments: PreviewAssignmentRow[];
-  remainingUnassignedTargets: { cleaningTargetId: string; reason: string }[];
+  remainingUnassignedTargets: {
+    cleaningTargetId: string;
+    reason: string;
+    reasonCodes: RemainingReason[];
+  }[];
   blockedTargets: { cleaningTargetId: string; reason: string }[];
+  diagnostics: {
+    evaluatedAt: string;
+    activeMaidCount: number;
+    submittedAvailabilityMaidCount: number;
+    availableMaidCount: number;
+    fixedExcludedMaidCount: number;
+    eligibleMaidCount: number;
+    fixedExclusions: {
+      maidProfileId: string;
+      cleaningTargetId: string;
+      reasonCodes: FixedExclusionReason[];
+    }[];
+  };
   maidSummaries: {
     maidProfileId: string;
     totalFee: number;
@@ -399,27 +432,57 @@ export async function optimizeAssignmentPreview(
     )
   );
   const unavailable = new Set<number>();
+  const fixedExclusions:
+    AssignmentPreviewResult["diagnostics"]["fixedExclusions"] = [];
   for (let i = 0; i < maids.length; i++) {
     const rows = required(fixedByMaid[i]), seen = new Set<string>();
     for (const t of rows) {
       const a = t.currentAssignment;
-      const slot = a ? `${a.serviceDate}:${a.sequenceNumber}` : null;
+      // parseSnapshot rejects attempts without assignment provenance. Do not
+      // fabricate a sequence/owner or turn that invalid snapshot into diagnostics.
+      if (a === null) invalid();
+      const slot = `${a.serviceDate}:${a.sequenceNumber}`;
+      const reasons: FixedExclusionReason[] = [];
+      if (seen.has(slot)) reasons.push("FIXED_SEQUENCE_CONFLICT");
       if (
-        !a || (slot !== null && seen.has(slot)) ||
         t.serviceDate > snapshot.serviceDate ||
-        a.serviceDate !== t.serviceDate ||
-        a.targetAssignmentVersion !== t.assignmentVersion ||
+        a.serviceDate !== t.serviceDate
+      ) {
+        reasons.push("FIXED_SERVICE_DATE_MISMATCH");
+      }
+      if (a.targetAssignmentVersion !== t.assignmentVersion) {
+        reasons.push("FIXED_ASSIGNMENT_VERSION_MISMATCH");
+      }
+      if (
         a.availableFrom === null ||
         Date.parse(a.availableFrom) !== Date.parse(t.availableFrom) ||
-        a.dueAt !== t.dueAt ||
-        (t.blockedReason && !(t.activeAttempt?.status === "in_progress" &&
-          t.blockedReason === "ASSIGNMENT_WINDOW_EXPIRED")) ||
+        a.dueAt !== t.dueAt
+      ) reasons.push("FIXED_SCHEDULE_MISMATCH");
+      if (
+        t.blockedReason && !(t.activeAttempt?.status === "in_progress" &&
+          t.blockedReason === "ASSIGNMENT_WINDOW_EXPIRED")
+      ) {
+        // Never echo an unbounded/private source payload as a new diagnostic.
+        reasons.push("FIXED_SOURCE_BLOCKED");
+      }
+      if (t.activeAttempt !== null) {
+        if (t.activeAttempt.maidProfileId !== a.maidProfileId) {
+          reasons.push("FIXED_ATTEMPT_OWNER_MISMATCH");
+        }
         // A running attempt remains fixed work; follow-up plans append after its sequence.
-        (t.activeAttempt !== null &&
-          (t.activeAttempt.maidProfileId !== a?.maidProfileId ||
-            !["scheduled", "in_progress"].includes(t.activeAttempt.status)))
-      ) unavailable.add(i);
-      if (slot !== null) seen.add(slot);
+        if (!["scheduled", "in_progress"].includes(t.activeAttempt.status)) {
+          reasons.push("FIXED_ATTEMPT_WORKFLOW_UNRESOLVED");
+        }
+      }
+      if (reasons.length) {
+        unavailable.add(i);
+        fixedExclusions.push({
+          maidProfileId: required(maids[i]).maidProfileId,
+          cleaningTargetId: t.cleaningTargetId,
+          reasonCodes: reasons,
+        });
+      }
+      seen.add(slot);
     }
   }
   const candidates = snapshot.targets.filter((t) => {
@@ -668,6 +731,27 @@ export async function optimizeAssignmentPreview(
     );
   });
   const chosen = new Set(proposed.map((t) => t.cleaningTargetId));
+  const activeMaids = snapshot.maids.filter((m) =>
+    m.role === "maid" && m.status === "active"
+  );
+  const submittedCount =
+    activeMaids.filter((m) => m.availabilityVersion !== null).length;
+  function remainingReason(t: PreviewTarget): RemainingReason {
+    if (t.recleanMaidProfileId !== null) {
+      const owner = maids.findIndex((m) =>
+        m.maidProfileId === t.recleanMaidProfileId
+      );
+      if (owner === -1) return "RECLEAN_MAID_UNAVAILABLE";
+      if (unavailable.has(owner)) {
+        return "RECLEAN_MAID_FIXED_ASSIGNMENT_CONFLICT";
+      }
+    }
+    if (!activeMaids.length) return "NO_ACTIVE_MAID";
+    if (!submittedCount) return "AVAILABILITY_NOT_SUBMITTED";
+    if (!maids.length) return "NO_AVAILABLE_MAID";
+    if (unavailable.size === maids.length) return "FIXED_ASSIGNMENT_CONFLICT";
+    return "NO_FEASIBLE_ASSIGNMENT";
+  }
   const remaining = candidates.filter((t) => !chosen.has(t.cleaningTargetId))
     .map((t) => ({
       cleaningTargetId: t.cleaningTargetId,
@@ -675,6 +759,7 @@ export async function optimizeAssignmentPreview(
           !maids.some((m) => m.maidProfileId === t.recleanMaidProfileId)
         ? "RECLEAN_MAID_UNAVAILABLE"
         : "NO_ELIGIBLE_MAID",
+      reasonCodes: [remainingReason(t)],
     }));
   return {
     serviceDate: snapshot.serviceDate,
@@ -695,6 +780,15 @@ export async function optimizeAssignmentPreview(
     proposedAssignments: proposed,
     remainingUnassignedTargets: remaining,
     blockedTargets: blocked,
+    diagnostics: {
+      evaluatedAt: snapshot.planningAt,
+      activeMaidCount: activeMaids.length,
+      submittedAvailabilityMaidCount: submittedCount,
+      availableMaidCount: maids.length,
+      fixedExcludedMaidCount: unavailable.size,
+      eligibleMaidCount: maids.length - unavailable.size,
+      fixedExclusions,
+    },
     maidSummaries: maids.map((m, i) => ({
       maidProfileId: m.maidProfileId,
       totalFee: [...required(fixedByMaid[i]), ...required(best[i])].reduce(

@@ -1,6 +1,6 @@
 # #308 지연 업무: 기존 업무 보존
 
-정책은 #305와 제품 가이드의 확정 결정을 따른다. 현재 작업은 1·2·3차와 4A/4B1/4B2 source 후보이며
+정책은 #305와 제품 가이드의 확정 결정을 따른다. 현재 작업은 1·2·3차와 4A/4B1/4B2·5차 source 후보이며
 production/main/recovery, 실제 객실 데이터·PIN·계정은 변경하지 않는다.
 
 ## 1차 범위
@@ -50,12 +50,15 @@ Fastify와 Edge preview는 같은 순수 optimizer를 사용한다. lifecycle/st
 2. 3차 관리자↔메이드 업무 상태 알림 coverage·정상 시작 누락 보강 및 새 head 검증.
 3. 과거 미배정/draft 업무의 오늘 preview·현재 가능일·sequence 계약:
    4A/4B1은 DB 대상집합·공유 계산기까지, 4B2는 오늘 목록/commit 후보·잠금/가능일 보호까지 연결한다.
-   최신 dev/#320 통합·전체 회귀/종료 검토는 남았다.
+   5차는 최신 dev e19f81f 기준 #320 직접 의존 후보 ad91d2e와 source 계약을 결합한다.
+   dev 병합·전체 coverage/종료 검토는 남았다.
    target/assignment의 기존 serviceDate snapshot을 임의 수정하지 않는다.
 4. 위 후속과 통합한 fresh/upgrade/RLS/concurrency/독립 QA/required CI.
 
-1·2·3차 후보를 포함한 Draft PR #340은 `Refs #308`로 연결하며 parent Issue를 닫지 않는다. #320 진단 PR과 optimizer
-인접 변경이 있으므로 dev 통합 시 최신 head에서 충돌·회귀·문서 정합성을 다시 검사한다.
+Draft PR #340은 `Closes #308`을 예약하지만 아직 미병합이므로 #308/#305를 닫지 않는다.
+#320 진단 PR #339의 후보를 직접 의존 관계로 결합하며 `Refs #320`만 사용한다.
+#320 실제 사용자 사례는 미확정이고 PR #339를 임의 종료하지 않는다. dev 통합 시 최신
+head에서 충돌·회귀·문서 정합성을 다시 검사한다.
 
 ## 검증 기록: 1차 후보
 
@@ -317,7 +320,7 @@ preflight를 읽고 draft에는 target/maid/sequence/CAS만, commit에는 요청
 | fresh backup | `npm run backup:dry-run:fresh` PASS;fresh90/121rooms local-synthetic dump/restore |
 | local DB lint/Security Advisor | lint exit0/error0·기존 warning 보존, Security Advisor PASS/No issues found |
 | 독립 QA | 98/100(범위25·보안29·검증24·문서20), blocking P0/P1/P2=0. 독립 전체Node616/typecheck/manifest5/diffcheck/focused15/1000·1001 batch probe/3filesSQL117 PASS. 로컬 Draft commit/push 준비 평가이며 새 commit/tree·exact-head CI 전 source/dev·병합 승인은 아님 |
-| 새 exact-head required CI | NOT RUN;commit/push 뒤 새 head 확인 필요 |
+| 4B2 exact-head required CI | head744662c, run36830906929 application/migration PASS(2026-10-01 16:50:38 KST 완료). 5차 새 head 승인 아님 |
 | Python/codegen/package | 로컬 추가 NOT RUN;공개 schema/enum/생성 Python 변경 없음 |
 | production/hosted/frontend UAT | NOT RUN;별도 운영 범위 |
 
@@ -326,3 +329,47 @@ preflight를 읽고 draft에는 target/maid/sequence/CAS만, commit에는 요청
 직접 UPDATE한 fixture1건에서 FAIL했다. exact-date 조회와 기존 mutation 요청일 gate를 보존하고,
 fixture는 실제 submit RPC·새 버전을 사용하도록 보완한 뒤 같은85assertions를 재실행해 PASS했다.
 제품 guard·기존 날짜 범위·원장 불변성·assertion을 삭제하거나 완화하지 않았다.
+
+## 5차 범위: #320 진단 후보와 업무 보존 계약 결합
+
+같은 bounded assignment context의 직접 의존 후보를 로컬 source 브랜치에서 결합한다.
+기준은 #308 `744662c`, #320 `ad91d2e`, 최신 dev `e19f81f`다. dev/main/운영 및
+프런트 변경은 없다. PR #340 Draft/#308/#305/#320 OPEN을 유지하며 PR #339를 닫지 않는다.
+
+- #320 진단은 #308의 `(원 날짜, 순번)` 고정 슬롯 검사를 사용한다. 과거 날짜와 동일 순번을
+  충돌로 오판하지 않으며 원 target/assignment 날짜 불일치·진짜 중복·revision/owner/source
+  차단·회차 provenance를 유지한다. orphan attempt는 기존 invalid snapshot으로 거부한다.
+- 오늘 과거 후보·dueAt 경과 비차단·terminal 슬롯 예약·PG int 최대값·내일/미래 scheduled
+  경계는 그대로다. 새 허용 목록 진단만 가산하고 fingerprint·점수·기존 배열 의미는 유지한다.
+- Fastify/Edge/OpenAPI와 생성 Python 모델을 함께 검증한다. 성공/오류 preview는 no-store이며
+  진단은 동일 snapshot에서 계산한다. 새 endpoint/migration·원장 write·RLS 변경 없음.
+- 큰 board의 lock 전 상한 보완은 별도 [#342](https://github.com/wrongstory/room-management-system-backend/issues/342)다.
+  이번 변경이 기존 전체 후보 lock 비용까지 제한하거나 #342를 해결한 것으로 표시하지 않는다.
+
+### 5차 검증 기록
+
+| 검증 | 실제 결과 |
+|---|---|
+| 시작 baseline | npm test PASS;50files616tests |
+| npm run ci:quality | PASS;50files625tests/typecheck/build/secret/OpenAPI131paths141operations, 기존 lint info2 |
+| Preview focused | PASS;pure/Fastify65tests. 독립 current-card 포함3files80tests |
+| npm run edge:check | PASS;fmt/type/298tests/bundle17,194,004bytes |
+| 기존744662c 직접 비교 | PASS;합성100개 mixed-date 기존 응답/점수/fingerprint 동일·입력 비변경;새 진단만 가산 |
+| npm run db:reset + supabase test db supabase/tests --local | PASS;fresh90/68files3,649assertions |
+| npm run db:test:long-stay-clock | PASS;5시각145assertions |
+| npm run db:manifest:verify | PASS;5종/90개 기존 migration SHA/order 보존 |
+| Python ruff/format/mypy/pytest/business OpenAPI codegen/package source | PASS;95tests,226files format/25source mypy;기존 binary-photo/handover generator warning 유지 |
+| 5차 누적 upgrade/전체 RPC concurrency/복구 재실행 | NOT RUN;SQL/migration/worker/command 불변. 이전4B2와 동일90 source의 실제 검증/CI PASS는 역사 근거이며 새 head 승인 아님 |
+| 독립 QA | 98/100(범위25·보안29·검증24·문서20), P0/P1/blockingP2=0. 독립 Node625/focused80/typecheck/manifest5/diffcheck와 기준744662c 직접 비교56case PASS. 로컬 Draft 통합 commit/push 준비만 승인 |
+| 새 exact-head required CI | NOT RUN;commit/tree 재확인 및 push 후 CI gate 별도 |
+| production/hosted/기기/frontend UAT | NOT RUN |
+
+첫 결합 focused는 3건 FAIL이었다. #320의 이전 e19 golden은 #308 빈 sequence metadata
+정규화 전 fingerprint이고, 기존 conflict fixture는 날짜가 다른 두 순번을 같은 슬롯으로 가정했다.
+git-show744를 독립 실행한 exact golden과 진짜 동일 원 날짜 중복 fixture로 검증했다.
+overflow는 기존 NO_ELIGIBLE_MAID와 새 NO_FEASIBLE_ASSIGNMENT를 모두 엄격 검증한다.
+계산기 hash·보안/제약·검증 기준을 옛 기대값에 맞추어 완화하지 않았다.
+첫 quality는 새 합성 fixture의 undefined 가능성 typecheck에서 FAIL했다. 명시적 fixture guard를
+추가한 뒤 전체 quality625/Edge298 재실행 PASS다. 최초 실패를 최종 PASS로 숨기지 않는다.
+독립 QA 비교 probe의 첫 TypeScript7 transpile API setup은 실행 도구 오류로 FAIL했고,
+esbuild로 같은 baseline을 변환해 56case PASS했다. 제품 결함·검증 기준 완화로 취급하지 않는다.

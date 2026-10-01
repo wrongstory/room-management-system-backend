@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import { ZodError } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
+import { mixedDatePreviewSnapshot, zeroPreviewSnapshot } from './fixtures/assignment-preview.js';
+import { optimizeAssignmentPreview } from '../src/modules/assignments/assignment-preview-core.js';
 import type { Actor } from '../src/domain/actor.js';
 import { AppError } from '../src/lib/app-error.js';
 import {
@@ -72,6 +74,39 @@ function clientsWithRpc(rpc: (name: string, args: unknown) => Promise<unknown>) 
 }
 
 describe('assignment preview Fastify parity', () => {
+  it('preserves date-qualified fixed slots and terminal reservations with same-snapshot diagnostics', async () => {
+    const serviceDate = today();
+    const data = mixedDatePreviewSnapshot(serviceDate);
+    const before = JSON.stringify(data);
+    const rpc = vi.fn(async () => ({ data, error: null }));
+    const app = await appWith(new SupabaseAssignmentPreviewService(clientsWithRpc(rpc)));
+    try {
+      const response = await app.inject({ method: 'POST', url: '/v1/assignments/preview',
+        payload: { serviceDate, previewSeed: 'mixed-date-parity' } });
+      const body = response.json();
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(body).toEqual(await optimizeAssignmentPreview(data, 'mixed-date-parity'));
+      expect(body.fixedAssignments).toHaveLength(2);
+      expect(body.fixedAssignments.map((row: { proposedSequenceNumber: number }) => row.proposedSequenceNumber))
+        .toEqual([1, 1]);
+      expect(body.proposedAssignments).toHaveLength(10);
+      expect(body.proposedAssignments.filter((row: { serviceDate: string }) => row.serviceDate !== serviceDate))
+        .toMatchObject([{ proposedSequenceNumber: 11 }]);
+      expect(body.proposedAssignments.filter((row: { serviceDate: string }) => row.serviceDate === serviceDate)
+        .map((row: { proposedSequenceNumber: number }) => row.proposedSequenceNumber).sort((a: number, b: number) => a - b))
+        .toEqual([21, 22, 23, 24, 25, 26, 27, 28, 29]);
+      expect(body.diagnostics).toMatchObject({
+        evaluatedAt: data.planningAt, fixedExcludedMaidCount: 0, eligibleMaidCount: 1, fixedExclusions: []
+      });
+      expect(body.remainingUnassignedTargets).toEqual([]);
+      expect(body.blockedTargets).toEqual([]);
+      expect(body).not.toHaveProperty('sequenceReservations');
+      expect(response.body).not.toContain('private-source-not-for-response');
+      expect(JSON.stringify(data)).toBe(before);
+      expect(rpc).toHaveBeenCalledTimes(1);
+    } finally { await app.close(); }
+  });
   it('proposes an overdue target without changing its original window', async () => {
     const serviceDate = today();
     const availableFrom = `${serviceDate}T10:00:00+09:00`;
@@ -102,6 +137,29 @@ describe('assignment preview Fastify parity', () => {
       expect(response.json().blockedTargets).toEqual([]);
     } finally { await app.close(); }
   });
+  it('returns same-snapshot diagnostics for 12 remaining targets with one readonly RPC', async () => {
+    const serviceDate = today();
+    const data = zeroPreviewSnapshot(serviceDate);
+    const rpc = vi.fn(async () => ({ data, error: null }));
+    const app = await appWith(new SupabaseAssignmentPreviewService(clientsWithRpc(rpc)));
+    const response = await app.inject({
+      method: 'POST', url: '/v1/assignments/preview',
+      payload: { serviceDate, previewSeed: 'diagnostic-parity' }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual(await optimizeAssignmentPreview(data, 'diagnostic-parity'));
+    expect(response.json().diagnostics).toMatchObject({
+      activeMaidCount: 1, submittedAvailabilityMaidCount: 0, eligibleMaidCount: 0
+    });
+    expect(response.json().remainingUnassignedTargets).toHaveLength(12);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('get_assignment_preview_snapshot', {
+      p_actor_profile_id: admin.profileId, p_service_date: serviceDate
+    });
+    await app.close();
+  });
+
   it('uses the shared retired-policy optimizer and camel-to-snake RPC arguments', async () => {
     const serviceDate = today();
     const rpc = vi.fn(async (name: string) => {
@@ -250,6 +308,7 @@ describe('assignment preview Fastify parity', () => {
       payload: { serviceDate: today() }
     });
     expect(passwordBlocked.statusCode).toBe(403);
+    expect(passwordBlocked.headers['cache-control']).toBe('no-store');
     expect(passwordBlocked.json().error.code).toBe('PASSWORD_CHANGE_REQUIRED');
     await changing.close();
 

@@ -32,6 +32,30 @@ Preview 응답에서 제외하며 공개 endpoint/schema/RLS 권한은 그대로
 
 ## 1. 상태 판정 규칙
 
+### #308 5차 — #320 후보의 직접 의존 계약 결합
+
+- 744662c 업무 보존 계산기에 ad91d2e의 허용 목록 진단·no-store·OpenAPI 계약을 결합했다.
+  원 날짜별 slot·terminal 슬롯·오늘 과거 후보·기한 비차단·snapshot fingerprint는 유지한다.
+- 이번 로컬 PASS: quality625/typecheck/build, Edge298/bundle17,194,004, fresh90/68SQL3,649,
+  KST145, manifest5종, Python95/ruff/format/mypy/business OpenAPI codegen/package source.
+  기준744662c와 합성100개 기존 응답·점수·fingerprint·입력 비변경 비교 PASS.
+- 새 migration/운영/프런트 변경 없음. 최신 dev e19f81f와 후보 브랜치를 구분한다.
+  독립 QA98/100·차단0·Node625/focused80·기준744 직접 비교56case PASS는 로컬 Draft
+  commit/push 준비 범위다. 새 exact-head CI·#308/#305 종료·#320 실제 사례는 별도 gate다.
+  상세·초기 실패와 보완은 [지연 업무 기록](./CLEANING_OVERDUE.md)을 따른다.
+
+### #320 Preview 진단 보강 (feature source, 운영 미배포)
+
+- Fastify/Edge 공통 계산기의 미배정 reasonCodes와 동일 snapshot의 단계별 후보 수·고정 업무 제외 사유를 추가했다.
+- 기존 배정 기준·reason·응답 분류·fingerprint·CAS를 유지한다. 새 endpoint/migration은 없다.
+- 계약/프런트 전달 사항: [ASSIGNMENT_PREVIEW.md](./ASSIGNMENT_PREVIEW.md).
+- #320의 실제 신고 사례 대조와 프런트 한국어 사유 매핑/UAT는 미완료다. 합성 재현을 운영 원인 확정으로 표시하지 않는다.
+- dev/main 병합·운영 배포는 이 기록에 포함되지 않는다.
+- #320 단독 후보의 역사 로컬 검증: application 587, Edge 290 + pinned bundle, fresh local 85 migrations,
+  전체 SQL 64 files/3,366 assertions, DB lint, Python business OpenAPI codegen PASS.
+  기존 dev 대비 합성 100개 결과·score·fingerprint 동일. 누적 upgrade/전체 동시성/hosted UAT는 이번 변경에서 미실행.
+- 독립 QA: 100/100, 최종 P0/P1/P2 0건. 원격 required CI와 실제 신고 사례 확인은 별도 gate다.
+
 | 표시 | 의미 |
 |---|---|
 | ✅ | 해당 단계 완료 및 검증됨 |

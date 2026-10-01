@@ -1,4 +1,76 @@
-# 배정 Preview API — #29/#231 계약
+# 배정 Preview API — #29/#231/#320 계약
+
+## #308/#320 후보 결합 — 2026-10-01
+
+#308 기준 `744662c`와 #320 진단 후보 `ad91d2e`를 결합했다. 최신 dev는 `e19f81f`로
+변경 없음이며 아래 과거 snapshot의 승인·검증을 새 후보의 승인으로 사용하지 않는다.
+두 기능은 같은 배정 계산기의 직접 의존 관계이며 #320 실제 신고 확인은 OPEN으로 남는다.
+
+- 고정 업무의 충돌 slot은 `(원 serviceDate, sequence)`다. 과거 날짜라는 이유만으로
+  FIXED_SERVICE_DATE_MISMATCH를 만들지 않는다. 실제 target/assignment 원 날짜 불일치,
+  미래 고정 업무, 같은 원 날짜 중복·stale revision·source·owner 검사는 유지한다.
+- 오늘 과거 신규 후보와 기한 경과 비차단, terminal current 슬롯 예약·정수 상한,
+  내일 신규 후보의 exact-date·미래 scheduled 제외, 원 snapshot/CAS는 그대로다.
+- `diagnostics`와 상세 `reasonCodes`만 가산하며 허용 목록 밖 raw state/private metadata는
+  반환하지 않는다. Fastify/Edge 같은 snapshot·단일 read-only RPC·no-store를 검증한다.
+- 같은 입력의 기존 결과·점수·fingerprint는 744662c와 합성 100개 직접 비교하여 동일했다.
+  #320의 e19f81f 역사 golden은 빈 sequenceReservations를 정규화하기 전 hash다.
+  현재 기준 hash는 git-show744 실행으로 독립 확보했으며 hash를 바꿔 옛 golden에 맞추지 않았다.
+- 새 migration/endpoint 없음. 90개 migration은 그대로다. 실제 사용자 사례/프런트 한국어
+  매핑·UAT·dev 병합·운영 적용은 미완료다. 검증은 [지연 업무 기록](./CLEANING_OVERDUE.md)을 따른다.
+
+## #320 진단 보강 — feature source, 운영 미배포
+
+기준 backend는 `dev@e19f81fabe1ff202b5a42ba37b9d5dccbf8215c2`다. Preview 연동만
+프런트 `dev@09ed28446a4fd43919cddb29ebe442b848548ab8`의 `WIREFRAME/index.html`
+9322/9335/9346/9452행과 대조했다. 제품 전체의 프런트 기준 snapshot을 승격한 것은 아니다.
+프런트는 이미 `reasonCodes` 우선, 없으면 기존 `reason`을 표시하지만 한국어 조치 문구는
+매핑하지 않는다. 프런트 수정은 프런트 담당 작업으로 남긴다.
+
+기존 `reason`과 proposed/remaining/blocked 분류, 점수, fingerprint는 유지한다.
+`remainingUnassignedTargets[].reasonCodes`는 아래 우선순위에 따라 정확히 한 코드를 추가한다.
+
+| 순서 | 코드 | 의미와 관리자 확인 사항 |
+|---|---|---|
+| 1 | RECLEAN_MAID_UNAVAILABLE | 재청소 원담당자가 활성·제출·당일 가능 후보가 아님. 해당 담당자 가능일 확인 |
+| 2 | RECLEAN_MAID_FIXED_ASSIGNMENT_CONFLICT | 원담당자의 기존 업무 정합성 확인. 타 메이드로 자동 우회하지 않음 |
+| 3 | NO_ACTIVE_MAID | 활성 메이드 0명. 계정 상태 확인 |
+| 4 | AVAILABILITY_NOT_SUBMITTED | 활성 메이드의 현재 유효 제출 version이 모두 없음. 해당 주 가능일 제출 확인 |
+| 5 | NO_AVAILABLE_MAID | 유효 제출은 있으나 당일 가능 후보 0명. 가능일 확인(일부 미제출이 섞일 수 있음) |
+| 6 | FIXED_ASSIGNMENT_CONFLICT | 가능일 후보 모두 기존 업무 정합성 검증에서 제외. fixedExclusions 확인 |
+| 7 | NO_FEASIBLE_ASSIGNMENT | 위 사유로 설명되지 않는 미배정. 재조회 후 계속되면 지원 문의; 정책 원인 단정 금지 |
+
+`diagnostics`는 동일 read-only RPC snapshot에서 파생하며 추가 DB 조회를 하지 않는다.
+
+- `evaluatedAt`: snapshot의 planningAt. 별도 availability/commit-impact 호출과 같은 시점 보장은 없음.
+- `activeMaidCount`: role=maid, status=active 인원.
+- `submittedAvailabilityMaidCount`: 그중 현재 유효 가능일 제출 version이 있는 인원.
+- `availableMaidCount`: 그중 대상일 available=true인 인원.
+- `fixedExcludedMaidCount`: 가능일 후보 중 기존 고정 업무 때문에 제외된 **고유 메이드 수**.
+- `eligibleMaidCount = availableMaidCount - fixedExcludedMaidCount`: 재청소 소유권 적용 전 후보 수.
+  특정 재청소의 후보 수나 실시간 확정 인원 수가 아니다.
+- `fixedExclusions`: 최대 242개 고정 target 진단(maidProfileId, cleaningTargetId, reasonCodes).
+  미래 scheduled를 당일 고정 업무에서 생략하는 기존 규칙은 이 목록과 별개다.
+  한 메이드의 여러 target·한 target의 여러 사유가 있을 수 있어 배열 길이·사유 합계를 인원으로 더하지 않는다.
+
+고정 업무 사유는 중복 없는 복수 코드이며 순서는
+`FIXED_SEQUENCE_CONFLICT` → `FIXED_SERVICE_DATE_MISMATCH` →
+`FIXED_ASSIGNMENT_VERSION_MISMATCH` → `FIXED_SCHEDULE_MISMATCH` →
+`FIXED_SOURCE_BLOCKED` → `FIXED_ATTEMPT_OWNER_MISMATCH` →
+`FIXED_ATTEMPT_WORKFLOW_UNRESOLVED`다.
+SQL의 고정 업무 blockedReason은 FIXED_SOURCE_BLOCKED로만 집계하고 raw payload를 새 진단에
+복사하지 않는다. 진행 중 업무의 단순 ASSIGNMENT_WINDOW_EXPIRED 예외는 유지한다.
+고정 업무를 삭제하거나 무시해 제안을 만드는 복구 명령이 아니다.
+
+예: active=2, submitted=2, available=2, fixedExcluded=2, eligible=0이면 신규 제안 0 /
+미배정 12 / target 차단 0이 가능하다. 각 미배정에는 기존 NO_ELIGIBLE_MAID와 새
+FIXED_ASSIGNMENT_CONFLICT가 함께 온다. **합성 재현이며 사용자 신고 건의 실제 원인이 아니다.**
+
+권한·CAS·멱등성·RPC·migration은 변경하지 않는다. 기한 경과 비차단은 #305/#308 확정에
+따르며 진단을 이유로 되돌리지 않는다. Fastify/Edge 응답은 no-store다.
+실제 신고 건은 서비스일/당시 응답 및 배포 commit이 없어 아직 미확인이다. 같은 날짜의
+preview, availability candidates, commit-impact를 민감정보 없이 대조하기 전 #320을 종료하지 않는다.
+한국어 조치 문구 매핑, 기능 배포 후 UAT는 별도 프런트/운영 gate다.
 
 기준 integration은 `dev@a98e2ccc0bf86d760b144691aacb0807215ca09e`다. 이 문서는 feature source
 계약이며 production/recovery에 적용하거나 Edge/Pages/Cron을 배포했다는 의미가 아니다.
