@@ -46,6 +46,19 @@ try {
   assert.deepEqual(response.rolloverResults, []);
   assert.equal(response.activatedCount, 1);
   assert.equal(response.alreadyActiveCount, 1);
+  assert.equal(response.overdueCount, 3);
+  assert.equal(sql('select count(*) from private.cleaning_overdue_events;'), '3');
+  assert.equal(sql("select count(*) from public.notifications where event_family='cleaning.overdue_admin';"), '3');
+  assert.equal(sql("select count(*) from private.notification_delivery_outbox where event_family='cleaning.overdue_admin';"), '0');
+  const overdueHistory = sql(`select md5(string_agg(row_to_json(e)::text,'|' order by e.id))
+    from private.cleaning_overdue_events e;`);
+  const later = JSON.parse(sql(`select public.process_due_assignment_lifecycle(
+    '28000000-0000-4000-8000-000000000001','2037-10-02 11:00+09',
+    'overdue-upgrade-later',repeat('e',64));`));
+  assert.equal(later.overdueCount, 0);
+  assert.equal(sql(`select md5(string_agg(row_to_json(e)::text,'|' order by e.id))
+    from private.cleaning_overdue_events e;`), overdueHistory, 'A later day must reuse original overdue evidence');
+  assert.equal(sql("select count(*) from public.notifications where event_family='cleaning.overdue_admin';"), '3');
   assert.equal(sql(`select bool_and(effective_service_date='2037-09-30' and assignment_version=2 and carryover_count=0)
     from public.cleaning_targets where id in (
     '28000000-0000-4000-8000-000000000304','28000000-0000-4000-8000-000000000305',
@@ -57,7 +70,7 @@ try {
     where id='28000000-0000-4000-8000-000000000506';`), 'scheduled');
   assert.equal(sql(`select count(*) from public.cleaning_target_schedule_revisions
     where reason_code='ROLLED_OVER_NOT_STARTED';`), '0');
-  console.log('Cleaning overdue upgrade 85→86: PASS; original schedules/owners/history preserved, overdue activation without rollover.');
+  console.log('Cleaning overdue upgrade 85→87: PASS; original schedules/owners/history preserved, durable overdue dedupe without rollover.');
 } finally {
   run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed']);
 }

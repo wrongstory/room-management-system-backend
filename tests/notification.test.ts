@@ -96,6 +96,40 @@ describe('notification cursor and service', () => {
       nextCursor: null
     })).toThrowError(expect.objectContaining({ code: 'NOTIFICATION_RESPONSE_TOO_LARGE' }));
   });
+
+  it('projects overdue admin history without exposing its private enrollment', async () => {
+    const target = '10800000-0000-4000-8000-000000003008';
+    const overdue = {
+      ...notice,
+      category: 'cleaning_overdue',
+      title: '청소 업무 지연 안내',
+      body: '예정 기한이 지났습니다. 기존 업무와 담당은 유지됩니다.',
+      cleaningTargetId: target,
+      deepLink: { kind: 'cleaningTarget', entityId: target },
+      requiresAction: false,
+      eventFamily: 'cleaning.overdue_admin',
+      sourceEntityId: 'private-enrollment',
+      actorProfileId: actor.profileId,
+      recipientProfileId: actor.profileId,
+      dedupeKey: 'private-dedupe'
+    };
+    const rpc = vi.fn(async () => ({
+      data: { notifications: [overdue], hasMore: false, lastOccurredAt: null, lastId: null },
+      error: null
+    }));
+    const service = new SupabaseNotificationService({ admin: { rpc } } as never, secret);
+    const result = await service.list({ ...actor, role: 'admin' }, {});
+    expect(result).toEqual({ notifications: [{
+      ...notice,
+      category: overdue.category,
+      title: overdue.title,
+      body: overdue.body,
+      cleaningTargetId: target,
+      deepLink: overdue.deepLink,
+      requiresAction: false
+    }], nextCursor: null });
+    expect(JSON.stringify(result)).not.toMatch(/private-|sourceEntity|eventFamily|actorProfileId|recipientProfileId|dedupeKey/);
+  });
 });
 
 describe('notification Fastify routes', () => {

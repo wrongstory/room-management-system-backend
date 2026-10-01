@@ -76,6 +76,8 @@ function transitionCount(
     result.purged_guest_name_count,
     assignment.activatedCount,
     assignment.rolledOverCount,
+    // Optional only for a rolling deployment against the pre-overdue RPC.
+    assignment.overdueCount ?? 0,
   ];
   if (counts.some((count) => typeof count !== "number" || count < 0)) {
     return null;

@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_overdue_preserve_work'
+    'cleaning_overdue_notifications'
   ) ->> 'currentMigration',
-  'cleaning_overdue_preserve_work',
+  'cleaning_overdue_notifications',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_overdue_preserve_work'
+    'cleaning_overdue_notifications'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,24 +97,24 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'cleaning_overdue_preserve_work';
+where name = 'cleaning_overdue_notifications';
 
 delete from supabase_migrations.schema_migrations
-where name = 'cleaning_overdue_preserve_work';
+where name = 'cleaning_overdue_notifications';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_overdue_preserve_work'
+    'cleaning_overdue_notifications'
   ) ->> 'currentMigration',
-  'flat_cleaning_evidence_history_payroll',
+  'cleaning_overdue_preserve_work',
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'cleaning_overdue_preserve_work'
+    'cleaning_overdue_notifications'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'

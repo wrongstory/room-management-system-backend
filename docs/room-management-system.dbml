@@ -2524,3 +2524,45 @@ Table private.assignment_activation_scan_cursor {
   last_target_id uuid [note: 'UUID keyset cursor, intentionally no business FK; blocked/missing rows must not prevent scan progress.']
   Note: '#308 candidate: FORCE RLS, no anon/authenticated/service_role table access. Scheduler checks <=100 notified targets per invocation under reservation advisory lock. Does not reschedule or change ownership.'
 }
+
+Table private.cleaning_overdue_events {
+  id uuid [pk]
+  cleaning_target_id uuid [not null, unique, ref: - public.cleaning_targets.id]
+  room_id uuid [not null, ref: > public.rooms.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  original_service_date date [not null]
+  effective_service_date date [not null]
+  available_from timestamptz
+  due_at timestamptz
+  assignment_id uuid [ref: > public.cleaning_assignments.id]
+  assignment_version bigint [not null]
+  attempt_id uuid [ref: > public.cleaning_attempts.id]
+  occurred_at timestamptz [not null]
+  indexes {
+    room_id
+    actor_profile_id
+    assignment_id
+    attempt_id
+  }
+  Note: '#308 phase2 candidate: immutable original identity/schedule snapshot, first overdue event once per target. INSERT validates current incomplete physical work; completed/upload/review states create no new evidence. FORCE RLS/raw deny, no PII/PIN. Null dueAt uses next KST day for observation only.'
+}
+
+Table private.cleaning_overdue_recipients {
+  event_id uuid [not null, ref: > private.cleaning_overdue_events.id]
+  recipient_profile_id uuid [not null, ref: > public.profiles.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  push_expected boolean [not null]
+  enrolled_at timestamptz [not null]
+  indexes {
+    (event_id,recipient_profile_id) [pk]
+    recipient_profile_id
+    actor_profile_id
+  }
+  Note: 'Immutable admin enrollment. Deferred event/enrollment/typed-notice/outbox commit identity; actor self inbox retained, self push absent. Repeated runs/actor changes/group boundary never re-emit; new eligible admin keeps original event clock and 24h delivery TTL.'
+}
+
+Table private.cleaning_overdue_scan_cursor {
+  singleton boolean [pk, default: true, note: 'CHECK singleton=true']
+  last_target_id uuid [note: 'Technical keyset cursor; deliberately no business FK']
+  Note: 'Mutable FORCE RLS/private projection. Max100 current-day-or-earlier candidates, wrap scan under reservation global lock. Does not mutate domain work.'
+}

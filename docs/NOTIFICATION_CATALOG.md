@@ -2,10 +2,12 @@
 
 #305/#308 1차 후보는 시간 만료에 따른 rollover/`scheduled_expired` 신규 이벤트를 만들지 않는다.
 이 카탈로그의 기존 관련 family는 과거 typed 이력의 유효성·조회 증명을 위해 유지한다.
-overdue 관리자 알림과 시작/완료 상호 알림 coverage 보강은 아직 후속 범위이며
-알림을 전달했다고 표현하지 않는다. [진행 범위](./CLEANING_OVERDUE.md)를 따른다.
+2차 후보의 `cleaning.overdue_admin`은 미완료 현장 청소의 최초 지연을 관리자에게 알린다.
+target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를 넘어도 중복하지 않는다.
+시작/완료 상호 알림 coverage 보강은 후속이며 운영 전달 완료가 아니다.
+[진행 범위](./CLEANING_OVERDUE.md)를 따른다.
 
-이 문서는 Issue #109의 기반 계약과 Issue #128/#264의 보완을 반영한 36개 공개 category와 53개 event family의 정본이다. DB의
+이 문서는 Issue #109의 기반 계약과 Issue #128/#264/#308의 보완을 반영한 37개 공개 category와 54개 event family의 정본이다. DB의
 `private.notification_event_catalog`와 테스트가 이 표를 그대로 검증한다. `source`는 알림 생성과
 해결의 typed provenance이며 audit payload나 문자열 dedupe는 권한 근거가 아니다.
 
@@ -46,6 +48,7 @@ overdue 관리자 알림과 시작/완료 상호 알림 coverage 보강은 아�
 | assignment.reassignment_required | assignment_reassignment_required | admin.assignment_decider | yes/yes | assignment_unavailability_cancellation | none | cleaningTarget | assignment_reassignment_required/room |
 | assignment.scheduled_rolled_over | cleaning_assignment_rolled_over | maid.assignment_party | no/yes | cleaning_assignment | none | cleaningTarget | cleaning_assignment_rolled_over/room |
 | cleaning.field_completed_admin | cleaning_field_completed | admin.inspection_queue | no/yes | cleaning_attempt | none | cleaningTarget | cleaning_field_completed/room |
+| cleaning.overdue_admin | cleaning_overdue | admin.assignment_decider | no/yes | cleaning_overdue_event | none | cleaningTarget | cleaning_overdue/room |
 | room.operation_block_changed | cleaning_room_operation_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_room_operation_changed/room |
 | room.issue_status_changed | cleaning_room_issue_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_room_issue_changed/room |
 | room.pin_sync_status_changed | cleaning_pin_sync_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_pin_sync_changed/room |

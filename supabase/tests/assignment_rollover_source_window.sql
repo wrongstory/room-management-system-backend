@@ -79,12 +79,15 @@ select public.create_reservation(pg_temp.pid(1),reservation_id,room_id,
   (select state_version from public.rooms where id=c.room_id),'rollover-additional-reservation',repeat('5',64))
 from cases c where n=8;
 
--- Complete target-scoped state snapshot: equality detects even accidental notification resolve or timestamp writes.
+-- Preserve every original notice, plus every non-overdue notice. New overdue
+-- evidence is checked separately below; old notice IDs may never be rewritten.
+create temp table original_notice_ids as select id from public.notifications;
 create function pg_temp.snapshot(p_target uuid) returns jsonb language sql stable as $$
   select jsonb_build_object(
     'target',(select to_jsonb(t) from public.cleaning_targets t where id=p_target),
     'assignments',(select coalesce(jsonb_agg(to_jsonb(a) order by id),'[]') from public.cleaning_assignments a where cleaning_target_id=p_target),
-    'notifications',(select coalesce(jsonb_agg(to_jsonb(n) order by id),'[]') from public.notifications n where cleaning_target_id=p_target),
+    'notifications',(select coalesce(jsonb_agg(to_jsonb(n) order by id),'[]') from public.notifications n where cleaning_target_id=p_target
+      and (event_family is distinct from 'cleaning.overdue_admin' or id in(select id from original_notice_ids))),
     'outbox',(select coalesce(jsonb_agg(to_jsonb(o) order by o.id),'[]') from private.notification_outbox o
       join public.notifications n on n.id=o.notification_id where n.cleaning_target_id=p_target),
     'revisions',(select coalesce(jsonb_agg(to_jsonb(r) order by id),'[]') from public.cleaning_target_schedule_revisions r where cleaning_target_id=p_target),
@@ -144,6 +147,34 @@ select is((select count(*)::int from public.cleaning_attempts where cleaning_tar
   'three scheduler buckets activate original overdue stayover exactly once');
 select is((select carryover_count from public.cleaning_targets where id=(select target_id from cases where n=1)),1,
   'scheduler retry does not duplicate valid next-day rollover');
+select is((select count(*)::int from private.cleaning_overdue_events e where e.cleaning_target_id=c.target_id),1,
+  'three scheduler buckets record exactly one overdue identity case '||c.n)
+from cases c where c.n between 2 and 8;
+select is((select count(*)::int from public.notifications n
+  join private.cleaning_overdue_events e on e.id::text=n.source_entity_id
+  where e.cleaning_target_id=c.target_id and n.event_family='cleaning.overdue_admin'
+    and n.category='cleaning_overdue' and n.contract_version=1
+    and n.recipient_profile_id=pg_temp.pid(1) and n.actor_profile_id=pg_temp.pid(1)
+    and not n.requires_action and n.occurred_at=e.occurred_at
+    and n.deep_link_kind='cleaningTarget' and n.deep_link_entity_id=c.target_id),1,
+  'original-admin inbox has one exact typed overdue notice case '||c.n)
+from cases c where c.n between 2 and 8;
+select is((select count(*)::int from private.cleaning_overdue_recipients r
+  join private.cleaning_overdue_events e on e.id=r.event_id
+  where e.cleaning_target_id=c.target_id and r.recipient_profile_id=pg_temp.pid(1)
+    and r.actor_profile_id=pg_temp.pid(1) and not r.push_expected),1,
+  'scheduler retains exactly one self enrollment case '||c.n)
+from cases c where c.n between 2 and 8;
+select is((select count(*)::int from private.cleaning_overdue_events
+  where cleaning_target_id in(select target_id from cases)),7,
+  'three buckets retain exactly seven target observations without new schedule-day events');
+select is((select count(*)::int from public.notifications
+  where event_family='cleaning.overdue_admin' and cleaning_target_id in(select target_id from cases)),7,
+  'three buckets retain exactly seven overdue notices without extras');
+select is((select count(*)::int from private.notification_delivery_outbox o
+  join public.notifications n on n.id=o.notification_id
+  where n.event_family='cleaning.overdue_admin' and n.cleaning_target_id in(select target_id from cases)),0,
+  'scheduler retains actor-self overdue inbox without self push');
 
 select * from finish();
 rollback;

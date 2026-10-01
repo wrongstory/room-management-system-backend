@@ -284,7 +284,8 @@ export async function testAttemptActivationConcurrency(client, actor) {
   }
   async function stayoverFixture(room) {
     const reservationId = await reservationFixture(room);
-    const targetId = randomUUID();
+    // Keep this new observation in the first bounded overdue scan page.
+    const targetId = `00000000-0000-4000-8000-${randomUUID().slice(-12)}`;
     const currentRoom = ok(await client.from('rooms').select('state_version')
       .eq('id', room.id).single(), 'stayover request room version');
     ok(await client.rpc('create_manual_cleaning_request', {
@@ -298,7 +299,7 @@ export async function testAttemptActivationConcurrency(client, actor) {
     }), 'actual create_manual_cleaning_request stayover fixture');
     return { reservationId, targetId, roomId: room.id };
   }
-  async function stayoverSnapshot(item) {
+  async function stayoverSnapshot(item, originalNoticeIds = null) {
     const snapshot = {};
     snapshot.target = ok(await client.from('cleaning_targets').select('*')
       .eq('id', item.targetId).single(), 'source race target snapshot');
@@ -310,6 +311,10 @@ export async function testAttemptActivationConcurrency(client, actor) {
       'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
       '-c',`select coalesce(json_agg(n order by n.id),'[]'::json)::text from public.notifications n where cleaning_target_id='${item.targetId}'::uuid`
     ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
+    if (originalNoticeIds !== null) {
+      snapshot.notifications = snapshot.notifications.filter((notice) =>
+        notice.event_family !== 'cleaning.overdue_admin' || originalNoticeIds.includes(notice.id));
+    }
     snapshot.audit = ok(await client.from('audit_events').select('id')
       .eq('entity_id', item.targetId).eq('event_type', 'assignment.rolled_over').order('id'),
     'source race rollover audit snapshot');
@@ -318,6 +323,11 @@ export async function testAttemptActivationConcurrency(client, actor) {
   for (const [index, action] of ['checkout', 'change'].entries()) {
     const item = await stayoverFixture(sourceRooms[index]);
     const before = await stayoverSnapshot(item);
+    const originalNoticeIds = JSON.parse(before).notifications.map((notice) => notice.id);
+    execFileSync('docker', ['exec', '-i', 'supabase_db_room-management-system-backend',
+      'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      '-c', 'update private.cleaning_overdue_scan_cursor set last_target_id=null where singleton'],
+    { stdio: ['ignore', 'ignore', 'pipe'], timeout: 15000 });
     const reservationCommand = action === 'checkout'
       ? client.rpc('manual_checkout_reservation', {
         p_actor_profile_id: actorProfileId, p_reservation_id: item.reservationId,
@@ -340,8 +350,31 @@ export async function testAttemptActivationConcurrency(client, actor) {
       })
     ]);
     for (const result of race) ok(result, `overdue stayover preservation versus ${action}: no deadlock`);
-    assert(await stayoverSnapshot(item) === before,
+    assert(await stayoverSnapshot(item, originalNoticeIds) === before,
       `overdue stayover versus ${action} keeps schedule/version/assignment/revision/notice/audit unchanged`);
+    const overdue = JSON.parse(execFileSync('docker', ['exec', '-i', 'supabase_db_room-management-system-backend',
+      'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      '-c', `select json_build_object(
+        'events',(select count(*) from private.cleaning_overdue_events where cleaning_target_id='${item.targetId}'),
+        'admins',(select count(*) from public.profiles where role='admin' and status='active' and not must_change_password),
+        'enrollments',count(r.recipient_profile_id),'notices',count(n.id),'outboxes',count(o.id),
+        'valid',coalesce(bool_and(n.contract_version=1 and n.category='cleaning_overdue'
+          and n.actor_profile_id='${actorProfileId}' and not n.requires_action
+          and n.cleaning_target_id=e.cleaning_target_id and n.occurred_at=e.occurred_at
+          and n.deep_link_kind='cleaningTarget' and n.deep_link_entity_id=e.cleaning_target_id),false),
+        'selfNotices',count(n.id) filter(where n.recipient_profile_id='${actorProfileId}'),
+        'selfOutboxes',count(o.id) filter(where n.recipient_profile_id='${actorProfileId}'))
+        from private.cleaning_overdue_events e
+        join private.cleaning_overdue_recipients r on r.event_id=e.id
+        left join public.notifications n on n.event_family='cleaning.overdue_admin'
+          and n.source_entity_id=e.id::text and n.recipient_profile_id=r.recipient_profile_id
+        left join private.notification_delivery_outbox o on o.notification_id=n.id
+        where e.cleaning_target_id='${item.targetId}'`
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 }).trim());
+    assert(overdue.events === 1 && overdue.enrollments === overdue.admins &&
+      overdue.notices === overdue.admins && overdue.outboxes === overdue.admins - 1 &&
+      overdue.valid && overdue.selfNotices === 1 && overdue.selfOutboxes === 0,
+    `overdue stayover versus ${action} adds exactly one typed observation with exact admin fanout, no self push`);
   }
 
   // 실제 퇴실이 먼저면 같은 batch에서, 나중이면 다음 batch에서 attempt 1건으로 수렴한다.

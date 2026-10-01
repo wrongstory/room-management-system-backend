@@ -696,7 +696,7 @@ Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 sn
 
 ### #109 typed 알림 writer 계약 — source/dev 완료, 현재 production source 반영
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 36 category/53 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 37 category/54 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
@@ -715,6 +715,16 @@ inactive, 임시 비밀번호 수신자도 inbox history는 남지만 push enque
 provenance가 없는 `private.notification_outbox`는 legacy history로 격리하고 어떤 worker도
 읽지 않습니다. `private.notification_delivery_outbox`만 #111 worker의 유일 입력이며,
 #109 자체 범위에서는 pending append와 raw 권한 차단만 정의했습니다.
+
+#308 2차 후보는 미완료 현장 청소의 최초 지연만 `cleaning.overdue_admin`으로 알립니다.
+private immutable target event와 `(event,recipient)` enrollment가 원 일정·담당·회차 snapshot과
+원 알림 시각을 보존하고 deferred 제약으로 typed inbox/outbox의 양방향 원자성을 검사합니다.
+100건 fair cursor는 global reservation lock 뒤 target/assignment/attempt를 잠그고 admin 상태를
+enrollment와 emitter에서 재검증합니다. 수신자 profile에 추가 역순 잠금을 만들지 않으며
+동시 상태 변경으로 push intent가 불일치하면 전체 transaction을 fail-closed합니다.
+동일 이벤트는 다른 실행 actor·10분 grouping 경계에서도 재생성하지 않습니다. 늦게 활성화된
+관리자의 새 inbox는 허용하지만 원 event 시각과 기존 push 24h TTL을 유지합니다.
+현장 완료·업로드·검수 대기에 새 SLA를 만들지 않으며 original domain row는 변경하지 않습니다.
 
 ### #110 encrypted Web Push subscription 계약 — source/dev 완료, 현재 production source 반영·hosted 활성화 대기
 

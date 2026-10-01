@@ -634,7 +634,7 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
-#109/#128/#264의 typed 알림은 private event catalog의 53 event family/36 public category를 정본으로
+#109/#128/#264/#308의 typed 알림은 private event catalog의 54 event family/37 public category를 정본으로
 삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
 검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
 dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫
@@ -642,6 +642,13 @@ event에 고정된 10분 half-open window와 비민감 UUID `groupId`를 보존�
 inactive/임시 비밀번호/self-action도 inbox에는 남지만 typed delivery outbox에는 넣지 않는다.
 `push_eligible`은 `requires_action`과 독립이며 informational 취소·회수·결정, 현장 완료, exact
 예약/객실 card-impact 변경도 active 타 수신자에게 push할 수 있다. 상세 표는 [알림 이벤트 카탈로그](./NOTIFICATION_CATALOG.md)다.
+
+#308 2차 후보는 `private.cleaning_overdue_events`의 target UNIQUE와 원 업무 snapshot,
+`cleaning_overdue_recipients`의 `(event_id,recipient_profile_id)` PK로 최초 지연과 수신자를 분리한다.
+두 원장은 INSERT evidence 검증·UPDATE/DELETE 금지·FORCE RLS·raw grant deny이고,
+deferred event/enrollment/notice/outbox trigger가 수신자별 정확히 한 inbox와 비자기 push intent를
+같은 commit에서 요구한다. 별도 singleton cursor는 mutable 기술 projection이며 100건씩 회전한다.
+알림은 informational history이고 업무 완료 뒤에도 원장·알림을 삭제하거나 다시 쌓지 않는다.
 
 #110의 Web Push 구독은 `private.web_push_subscriptions` logical/current projection,
 `web_push_subscription_revisions` immutable revision metadata,
