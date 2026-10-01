@@ -18,7 +18,9 @@ scheduler 자동 이월 중단과 bounded/fair 100건 cursor, `expire_scheduled`
 메이드의 정상 청소 시작을 관리자에게 typed informational 알림으로 보완한다. 공개 category
 `cleaning_started`도 기존 Fastify/Edge notification projection과 deep link를 사용하고 새 endpoint는 없다.
 기존 완료·제출·검수·담당 변경 및 자기 push 제외 정책은 유지한다. 과거 미배정
-today-preview와 최종 통합은 미완료이며 #308을 닫지 않는다. 실제 검증/PR 상태는
+today-preview와 최종 통합은 미완료이며 #308을 닫지 않는다. 4A는 Fastify/Edge 공유 순수
+계산기가 과거 후보·날짜별 고정 sequence를 보존하도록 보완한 부분 후보다. DB 대상집합,
+현재 목록 조회, 저장/통보 및 가능일 보호는 미완료다. 공개 schema/경로 및 DB/RLS 변경은 없다. 실제 검증/PR 상태는
 [지연 업무 계약](./CLEANING_OVERDUE.md)에 기록한다.
 
 ## 1. 상태 판정 규칙

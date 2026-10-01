@@ -37,7 +37,9 @@ DB의 STABLE RPC 한 번으로 active/current availability, target/schedule/sour
 additional 예약 overlap, reclean 원 maid/source를 검증한다. Pure TypeScript optimizer는 I/O를
 하지 않고 이 snapshot만 계산한다.
 
-- 유효한 당일 미배정 target만 신규 proposal 후보다.
+- DB가 제공한 유효한 대상일 미배정 target이 신규 proposal 후보다. #308 4A 계산기는
+  KST 오늘의 snapshot에 포함된 과거 target도 원 serviceDate/접근/마감 그대로 제안할 수 있다.
+  내일 화면에는 과거 신규 후보를 가져오지 않는다. DB 대상집합 확장은 아직 후속 범위다.
 - draft/notified는 기존 담당·sequence를 유지하는 고정 fee/route 부하다.
 - 실제 진행 중인 attempt는 현재 담당·sequence를 고정한 채 유지한다. 그 메이드는 당일 후속
   sequence의 계획 후보가 될 수 있지만, 남은 시간이나 종료시각을 추정하지 않는다. Preview·draft·notify는
@@ -52,8 +54,13 @@ additional 예약 overlap, reclean 원 maid/source를 검증한다. Pure TypeScr
 `planningAt`, `availableFrom`, `dueAt`은 명시된 시각 사실로 보존한다. #305/#308에 따라
 당일 신규 후보의 `dueAt` 경과만으로 거부하지 않는다. `availableFrom >= dueAt`인 잘못된
 일정과 실제 source/점유 충돌은 계속 거부한다. 예상 분수를 더한 종료시각이나 순차 cursor를 만들지 않는다.
-과거 미배정 업무의 오늘 preview 포함 및 cross-day 고정 부하/현재 가능일 연결은
-[#308 후속 범위](./CLEANING_OVERDUE.md)이며 이 1차 변경에서 완료했다고 해석하지 않는다.
+과거 미배정 업무의 DB snapshot 포함·목록 조회·저장/통보·가능일 변경 보호는
+[#308 후속 범위](./CLEANING_OVERDUE.md)다. 4A는 공유 순수 계산기만 보완하며 종단 기능 완료가 아니다.
+고정 부하의 slot은 `(원 serviceDate, sequence)`로 구분한다. 날짜가 다르면 같은 번호도
+기존 이력 그대로 유지하고, 같은 날짜의 중복이나 assignment/target 날짜 불일치는 여전히 거부한다.
+동선 점수 계산에서만 날짜→기존 sequence→안정적인 target ID로 정렬하며 이는 실행 순서 지정이나
+밀린 업무 우선 수행 명령이 아니다. 신규 제안 번호는 고정 부하의 최대 sequence 뒤에 붙인다.
+terminal current assignment의 번호 점유·저장 경쟁은 DB에서 재검증해야 하며 계산 결과가 저장 권한은 아니다.
 수동 additional은 두 끝점이 모두 명시된 `[availableFrom,dueAt)`만 실제 예약 점유 구간과 비교한다.
 `dueAt=null`은 열린 상태로 유지하고 임의 마감·1분·09~18시 shift·휴게시간·객실 수 상한을 만들지 않는다.
 

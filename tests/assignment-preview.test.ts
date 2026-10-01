@@ -244,6 +244,84 @@ describe("assignment preview pure optimizer", () => {
       cleaningTargetId: "later", maidProfileId: "a", proposedSequenceNumber: 3,
     }]);
   });
+  it("accepts overdue targets on today's board without rewriting their original dates or schedules", async () => {
+    const old = target("overdue", {
+      serviceDate: "2037-01-04",
+      availableFrom: "2037-01-04T10:00:00+09:00",
+      dueAt: "2037-01-04T18:00:00+09:00",
+    });
+    const s = snapshot([old]);
+    const before = JSON.stringify(s);
+    const r = await optimizeAssignmentPreview(s, "old-target");
+    expect(r.serviceDate).toBe("2037-01-05");
+    expect(r.proposedAssignments).toMatchObject([{
+      cleaningTargetId: "overdue", serviceDate: "2037-01-04",
+      availableFrom: old.availableFrom, dueAt: old.dueAt,
+      expectedAvailabilityVersion: 4,
+    }]);
+    expect(r.blockedTargets).toEqual([]);
+    expect(JSON.stringify(s)).toBe(before);
+    required(s.maids[0]).available = false;
+    required(s.maids[1]).availabilityVersion = null;
+    expect((await optimizeAssignmentPreview(s, "unavailable")).proposedAssignments)
+      .toEqual([]);
+  });
+  it("uses the KST planning date and does not move past or future work onto tomorrow's board", async () => {
+    const old = target("overdue", { serviceDate: "2037-01-04" });
+    const future = target("future", { serviceDate: "2037-01-06" });
+    const s = snapshot([old, future]);
+    s.planningAt = "2037-01-04T15:00:00Z";
+    const todayResult = await optimizeAssignmentPreview(s, "kst-boundary");
+    expect(todayResult.proposedAssignments.map((r) => r.cleaningTargetId))
+      .toEqual(["overdue"]);
+    expect(todayResult.blockedTargets).toEqual([{
+      cleaningTargetId: "future", reason: "SERVICE_DATE_MISMATCH",
+    }]);
+    s.serviceDate = "2037-01-06";
+    const tomorrowResult = await optimizeAssignmentPreview(s, "tomorrow");
+    expect(tomorrowResult.proposedAssignments.map((r) => r.cleaningTargetId))
+      .toEqual(["future"]);
+    expect(tomorrowResult.blockedTargets).toEqual([{
+      cleaningTargetId: "overdue", reason: "SERVICE_DATE_MISMATCH",
+    }]);
+  });
+  it("preserves cross-day fixed sequence slots and appends plans without renumbering history", async () => {
+    const old = fixed("old", "a", 1, {
+      serviceDate: "2037-01-04", status: "notified",
+      availableFrom: "2037-01-04T10:00:00+09:00",
+      dueAt: "2037-01-04T18:00:00+09:00",
+    });
+    old.activeAttempt = {
+      attemptId: "old-running", maidProfileId: "a", status: "in_progress",
+      startedAt: "2037-01-04T10:00:00+09:00", endedAt: null,
+    };
+    const s = snapshot([old, fixed("today", "a", 1), target("new")]);
+    s.maids = s.maids.slice(0, 1);
+    const before = JSON.stringify(s);
+    const r = await optimizeAssignmentPreview(s, "cross-day");
+    expect(r.fixedAssignments).toMatchObject([
+      { cleaningTargetId: "old", serviceDate: "2037-01-04", proposedSequenceNumber: 1 },
+      { cleaningTargetId: "today", serviceDate: "2037-01-05", proposedSequenceNumber: 1 },
+    ]);
+    expect(r.proposedAssignments).toMatchObject([{
+      cleaningTargetId: "new", maidProfileId: "a", proposedSequenceNumber: 2,
+    }]);
+    expect(r.maidSummaries).toMatchObject([{ fixedCount: 2, proposedCount: 1, totalFee: 90000 }]);
+    expect(JSON.stringify(s)).toBe(before);
+    const shuffled = await optimizeAssignmentPreview({ ...s, targets: [...s.targets].reverse() }, "other-seed");
+    expect(shuffled).toEqual({ ...r, previewSeed: "other-seed" });
+  });
+  it("still blocks duplicate fixed slots within a date and mismatched original snapshots", async () => {
+    const s = snapshot([fixed("first", "a", 1), fixed("duplicate", "a", 1), target("new")]);
+    s.maids = s.maids.slice(0, 1);
+    expect((await optimizeAssignmentPreview(s, "duplicate")).proposedAssignments).toEqual([]);
+    const stale = fixed("stale", "a", 1, { serviceDate: "2037-01-04" });
+    required(stale.currentAssignment ?? undefined).serviceDate = "2037-01-05";
+    s.targets = [stale, target("new")];
+    expect((await optimizeAssignmentPreview(s, "stale-date")).proposedAssignments).toEqual([]);
+    s.targets = [fixed("blocked", "a", 1, { blockedReason: "PREVIOUS_ROOM_WORKFLOW_ACTIVE" }), target("new")];
+    expect((await optimizeAssignmentPreview(s, "blocked-source")).proposedAssignments).toEqual([]);
+  });
   it("does not offer follow-up work when an active attempt no longer matches its fixed assignment", async () => {
     const stale = fixed("stale", "a", 1, { status: "in_progress" });
     stale.activeAttempt = {

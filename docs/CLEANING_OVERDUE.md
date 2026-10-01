@@ -179,3 +179,35 @@ full `db:test`와 전체 concurrency까지 PASS했다. 이미지 digest/테스�
 최초 concurrency는 두 합성 계정이 같은 normalized 이름/sequence를 사용해 기존 고유 제약에서
 실패했다. UUID별 이름으로 fixture만 보완했고 제품 제약·RPC 경합 수·판정 기준은 바꾸지 않았다.
 이 최초 실패와 최종 fresh 전체 재실행을 구분하며 독립 QA가 보완 근거를 재검토했다.
+
+## 4A 범위: 과거 업무를 보존하는 공유 순수 계산기
+
+- 오늘 KST 계획 snapshot에 과거 미배정 target이 제공되면 원 날짜·접근/마감 그대로 제안한다.
+  미래 신규 target을 오늘로 당기거나 과거 신규 target을 내일 계획으로 보내지 않는다.
+- 과거 draft/notified/진행 고정 업무가 있다는 이유만으로 현재 가능 메이드의 새 계획을 제외하지 않는다.
+  slot은 `(원 serviceDate, sequence)`이며 같은 날짜 중복·source 차단·owner/일정 불일치는 유지한다.
+  고정 업무의 담당·날짜·sequence는 변경하지 않으며 동선 계산용 날짜/sequence 정렬을 새 실행 우선순위로 쓰지 않는다.
+- 신규 제안은 고정 부하의 최대 sequence 다음 번호를 사용한다. 승인된 terminal target의 current
+  assignment까지 포함한 실제 번호 점유·동시성 검증은 DB 저장의 책임이며 이번 계산기 변경으로 완료되지 않는다.
+- Fastify/Edge가 같은 코드를 사용한다. 공개 endpoint/schema·DB/RLS/migration·receipt·알림 변경 없음.
+- **종단 기능 미완료**: DB snapshot의 과거 대상집합, 오늘 목록 projection, commit 후보/잠금,
+  오늘 가능일 변경 보호를 다음 단계에서 함께 연결해야 한다. 원 날짜 history 조회 의미는 보존한다.
+  과거 데이터 planningDate 추측 backfill·단일 1–N 재번호화·자동 담당 변경은 하지 않는다.
+
+### 검증 기록: 4A 후보
+
+3차 source `9b039775a26e2a420e27178c9f98d0e6c4050c11`의 [required CI run36810797836](https://github.com/wrongstory/room-management-system-backend/actions/runs/36810797836)는
+application/migration 모두 PASS로 2026-10-01 12:46 KST 완료됐다. 이는 4A 새 head 검증을 대신하지 않는다.
+PR #340은 Draft이며 #308/#305는 OPEN이다.
+
+| 4A 검증 | 실제 결과 |
+|---|---|
+| `npm run ci:quality` | PASS; typecheck/build/secret/OpenAPI/lint 포함, 50 files/588 tests, 131 paths/141 operations, 기존 lint info2 유지 |
+| `npx vitest run tests/assignment-preview.test.ts` | PASS; 32 tests. KST 자정/내일 제외/현재 가능일/날짜별 고정 slot/기존 guard/입력 불변·shuffle 재현성 |
+| `npm run edge:check` | PASS; fmt/type/292 tests/bundle17,167,852 bytes |
+| `git diff --check` | PASS |
+| 독립 QA | 로컬 96/100(범위25·보안29·검증23·문서19), P0/P1/P2 blocking0. focused 32 tests 재실행 PASS. commit 후 exact-head 재확인 별도 |
+| fresh DB/upgrade/SQL/RLS/concurrency | NOT RUN for 4A; migration/DB/RLS/command 변경 없음. 3차 결과를 4A 새 head 승인으로 사용하지 않음 |
+| Python/codegen/package | NOT RUN for 4A; 공개 API/schema 및 Python 코드 변경 없음 |
+| 새 head required CI | NOT RUN; commit/push 후 application/migration 모두 확인 필요 |
+| production/hosted/frontend UAT | NOT RUN; 운영·프런트 변경 없음 |

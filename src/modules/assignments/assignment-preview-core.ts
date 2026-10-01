@@ -333,6 +333,13 @@ export async function optimizeAssignmentPreview(
     throw new AssignmentPreviewError("INVALID_PREVIEW_SEED");
   }
   const snapshot = parseSnapshot(input);
+  // Planning availability belongs to the requested day, not to the immutable
+  // service date of an overdue target. Only today's board accepts past targets.
+  const today = new Date(Date.parse(snapshot.planningAt) + 9 * 60 * 60 * 1000)
+    .toISOString().slice(0, 10);
+  const candidateDateAllowed = (serviceDate: string) =>
+    serviceDate === snapshot.serviceDate ||
+    (snapshot.serviceDate === today && serviceDate < snapshot.serviceDate);
   const maids = snapshot.maids.filter((m) =>
     m.role === "maid" && m.status === "active" && m.available &&
     m.availabilityVersion !== null
@@ -349,6 +356,7 @@ export async function optimizeAssignmentPreview(
       (t.currentAssignment?.maidProfileId ?? t.activeAttempt?.maidProfileId) ===
         m.maidProfileId
     ).sort((a, b) =>
+      a.serviceDate.localeCompare(b.serviceDate) ||
       (a.currentAssignment?.sequenceNumber ?? 0) -
         (b.currentAssignment?.sequenceNumber ?? 0) ||
       a.cleaningTargetId.localeCompare(b.cleaningTargetId)
@@ -356,13 +364,14 @@ export async function optimizeAssignmentPreview(
   );
   const unavailable = new Set<number>();
   for (let i = 0; i < maids.length; i++) {
-    const rows = required(fixedByMaid[i]), seen = new Set<number>();
+    const rows = required(fixedByMaid[i]), seen = new Set<string>();
     for (const t of rows) {
       const a = t.currentAssignment;
+      const slot = a ? `${a.serviceDate}:${a.sequenceNumber}` : null;
       if (
-        !a || seen.has(a.sequenceNumber) ||
-        t.serviceDate !== snapshot.serviceDate ||
-        a.serviceDate !== snapshot.serviceDate ||
+        !a || (slot !== null && seen.has(slot)) ||
+        t.serviceDate > snapshot.serviceDate ||
+        a.serviceDate !== t.serviceDate ||
         a.targetAssignmentVersion !== t.assignmentVersion ||
         a.availableFrom === null ||
         Date.parse(a.availableFrom) !== Date.parse(t.availableFrom) ||
@@ -374,13 +383,13 @@ export async function optimizeAssignmentPreview(
           (t.activeAttempt.maidProfileId !== a?.maidProfileId ||
             !["scheduled", "in_progress"].includes(t.activeAttempt.status)))
       ) unavailable.add(i);
-      if (a) seen.add(a.sequenceNumber);
+      if (slot !== null) seen.add(slot);
     }
   }
   const candidates = snapshot.targets.filter((t) => {
     if (t.currentAssignment || t.activeAttempt) return false;
     const reason = t.blockedReason ??
-      (t.serviceDate !== snapshot.serviceDate
+      (!candidateDateAllowed(t.serviceDate)
         ? "SERVICE_DATE_MISMATCH"
         : t.status !== "unassigned"
         ? "TARGET_NOT_UNASSIGNED"
