@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { Actor } from '../src/domain/actor.js';
 import { AppError } from '../src/lib/app-error.js';
+import { frozenSchedule } from './fixtures/assignment-schedule.js';
 import { createAssignmentRoutes } from '../src/modules/assignments/assignment.routes.js';
 import {
   type AssignmentService,
@@ -12,6 +13,8 @@ const maidId = '10000000-0000-4000-8000-000000000001';
 const otherMaidId = '10000000-0000-4000-8000-000000000002';
 const targetIds = [1, 2, 3, 4].map((value) => `20000000-0000-4000-8000-00000000000${value}`);
 const assignmentIds = [1, 2, 3, 4].map((value) => `30000000-0000-4000-8000-00000000000${value}`);
+const sessionId = '90000000-0000-4000-8000-000000000001';
+const accessToken = `unit.${Buffer.from(JSON.stringify({ session_id: sessionId })).toString('base64url')}.unit`;
 
 const admin: Actor = {
   authUserId: '40000000-0000-4000-8000-000000000001',
@@ -19,7 +22,7 @@ const admin: Actor = {
   displayName: '관리자',
   role: 'admin',
   mustChangePassword: false,
-  accessToken: 'admin-token'
+  accessToken
 };
 const maid: Actor = {
   authUserId: '40000000-0000-4000-8000-000000000002',
@@ -27,7 +30,7 @@ const maid: Actor = {
   displayName: '메이드',
   role: 'maid',
   mustChangePassword: false,
-  accessToken: 'maid-token'
+  accessToken
 };
 
 const assignments = assignmentIds.map((id, index) => ({
@@ -102,7 +105,8 @@ function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: 
   return builder;
 }
 
-function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Date = () => new Date(), counts: Partial<Record<string, number | null>> = {}, onIds?: (ids: unknown[]) => void) {
+function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Date = () => new Date(), counts: Partial<Record<string, number | null>> = {}, onIds?: (ids: unknown[]) => void,
+  read?: (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null }) {
   const tables: Record<string, Row[]> = {
     cleaning_assignments: assignments,
     cleaning_targets: targets,
@@ -135,7 +139,13 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
     ? (tables[table] ?? []).map((row) => ({ ...row, cleaning_targets: tables.cleaning_targets?.find((target) => target.id === row.cleaning_target_id) }))
     : tables[table] ?? [], counts[table], onIds);
   return new SupabaseAssignmentService({
-    admin: { from },
+    admin: { from, rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+      expect(name).toBe('get_assignment_schedule_read');
+      expect(args.p_session_id).toBe(sessionId);
+      expect(['admin', 'maid']).toContain(args.p_expected_actor_role);
+      return read?.(args) ?? { data: (args.p_assignment_ids as string[]).map((assignmentId) =>
+        ({ assignmentId, scheduleSnapshot: null, currentDeparture: null })), error: null };
+    }) },
     publicClient: {},
     forAccessToken: () => ({ from })
   } as never, clock);
@@ -369,6 +379,59 @@ describe('assignment card projection', () => {
       .rejects.toMatchObject({ statusCode: 403, code: 'ASSIGNMENT_ACCESS_REQUIRED' });
     await expect(service().list(maid, { serviceDate: '2026-09-20', maidProfileId: otherMaidId }))
       .rejects.toMatchObject({ statusCode: 403, code: 'ASSIGNMENT_ACCESS_REQUIRED' });
+  });
+});
+
+describe('assignment schedule reads', () => {
+  it('requests current actual facts only for current list, never target history or includeHistory', async () => {
+    const modes: unknown[] = [];
+    const currentDeparture = { evaluatedAt: '2026-10-02T03:00:00Z', actualCheckoutAt: '2026-10-02T02:00:00Z', actualRoomDepartureAt: null };
+    const read = (args: Record<string, unknown>) => {
+      expect(args.p_actor_profile_id).toBe(maid.profileId);
+      expect(args.p_expected_actor_role).toBe('maid');
+      expect(args.p_assignment_ids).toEqual([assignmentIds[0]]);
+      modes.push(args.p_include_current);
+      return { data: [{ assignmentId: assignmentIds[0], scheduleSnapshot: frozenSchedule,
+        currentDeparture: args.p_include_current ? currentDeparture : null }], error: null };
+    };
+    const subject = service({ cleaning_assignments: [assignments[0] as Row] }, undefined, {}, undefined, read);
+    const current = await subject.list(maid, { serviceDate: '2026-09-20' });
+    expect(current[0]).toMatchObject({ scheduleSnapshot: frozenSchedule, currentDeparture });
+    for (const result of [await subject.history(maid, targetIds[0] as string),
+      await subject.list(maid, { serviceDate: '2026-09-20', includeHistory: true })]) {
+      expect(result[0]).toMatchObject({ scheduleSnapshot: frozenSchedule, currentDeparture: null });
+    }
+    expect(modes).toEqual([true, false, false]);
+  });
+  it.each(['ASSIGNMENT_ACCESS_REQUIRED', 'SESSION_REVOKED', 'PASSWORD_CHANGE_REQUIRED', 'unsafe SQL secret'])
+  ('does not publish partial cards after latest DB authorization failure: %s', async (message) => {
+    await expect(service({}, undefined, {}, undefined, () => ({ data: null, error: { message } }))
+      .history(maid, targetIds[0] as string)).rejects.toMatchObject({
+        code: message === 'unsafe SQL secret' ? 'ASSIGNMENT_QUERY_FAILED' : message
+      });
+  });
+  it.each([[], [{ assignmentId: assignmentIds[1], scheduleSnapshot: null, currentDeparture: null }],
+    [{ assignmentId: assignmentIds[0], scheduleSnapshot: { ...frozenSchedule, guestName: 'private' }, currentDeparture: null }]].map((data) => [data]))
+  ('fails safely on truncated/cross-ID/private metadata RPC: %j', async (data) => {
+    await expect(service({}, undefined, {}, undefined, () => ({ data, error: null }))
+      .history(maid, targetIds[0] as string)).rejects.toMatchObject({ code: 'ASSIGNMENT_QUERY_FAILED' });
+  });
+  it('denies invalid bearer session claims and password-incomplete actor', async () => {
+    await expect(service().history({ ...maid, accessToken: 'bad-token' }, targetIds[0] as string))
+      .rejects.toMatchObject({ code: 'INVALID_ACCESS_TOKEN' });
+    await expect(service().history({ ...maid, mustChangePassword: true }, targetIds[0] as string))
+      .rejects.toMatchObject({ code: 'PASSWORD_CHANGE_REQUIRED' });
+  });
+  it.each([['admin', 'maid'], ['maid', 'admin']] as const)
+  ('rejects the entire history when role changes from %s to %s during hydration', async (initialRole, latestRole) => {
+    const original = { ...maid, role: initialRole };
+    await expect(service({}, undefined, {}, undefined, (args) => {
+      expect(args.p_expected_actor_role).toBe(initialRole);
+      expect(args.p_expected_actor_role).not.toBe(latestRole);
+      return { data: null, error: { message: 'ASSIGNMENT_ACCESS_REQUIRED' } };
+    }).history(original, targetIds[0] as string)).rejects.toMatchObject({
+      statusCode: 403, code: 'ASSIGNMENT_ACCESS_REQUIRED'
+    });
   });
 });
 

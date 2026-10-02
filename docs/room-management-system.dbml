@@ -3,6 +3,27 @@ Project room_management_system {
   Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers; a FORCE-RLS cross-flow nonce reservation prevents different AES-GCM encryptions from sharing one key-version/nonce pair. #172 diagnostic role and aggregate views add no persisted entity or FK and are documented outside this relationship diagram.'
 }
 
+// #328 latest gate 2026-10-03: expiry + KST fixture repaired; earlier QA98 is not final signoff.
+// Local individual gates PASS: Node859/Edge323/Python95/21 upgrades/same95 SHA/SQL4161/KST145.
+// Full concurrency/fresh95/advisors0/synthetic restore PASS. Initial aggregate db:test FAIL retained.
+// Final independent QA/new exact-head CI/dev integration pending; PR351 remains Draft.
+// Original CI37017832732 application PASS, migration FAIL at notification delivery fixture drain.
+// Original local full PASS below is historical, not proof for the expiry repair. See schedule contract.
+// #328 candidate migration 95: baseline dev f34dca37 / 94 migrations after #326 PR #350.
+// Creation schedule plan and first-notified actual facts are frozen in separate nullable JSONB columns.
+// Stored source reservation/room binding stays internal; no guest/phone/PIN or extra public IDs.
+// service-only session-bound get_assignment_schedule_read returns nullable scheduleSnapshot/currentDeparture.
+// Exact auth.sessions id/user and not_after NULL or > statement clock required; no business/PIN deadline.
+// p_expected_actor_role binds the adapter's initial DB-verified role to latest DB role; mismatch fails 403.
+// This internal binding adds no client role input/new public error code or authorization privilege.
+// Current facts require exact current notified source; history/includeHistory always returns null current facts.
+// Business authority/RLS unchanged; authenticated table SELECT narrowed to pre95 explicit columns.
+// New JSONB/internal binding and SELECT */whole-row reads are denied (42501); old columns/count/joins remain.
+// Existing service_role table grants remain. No new table/FK/backfill, ledger rewrite or command/preview expansion.
+// Local full SQL/upgrade/concurrency/fresh95/advisors/backup gates PASS; production remains unchanged.
+// Pre-PR record: final independent QA, exact-head CI and dev integration proof live in Issue #328 / linked PR.
+// See docs/ASSIGNMENT_SCHEDULE_SNAPSHOT.md. Historical #326 candidate comments remain validation history.
+
 Enum app_role {
   developer
   admin
@@ -933,6 +954,7 @@ Table public.cleaning_target_schedule_revisions {
   reason_code text [not null]
   changed_by uuid [not null]
   recorded_at timestamptz [not null]
+  reservation_schedule_snapshot jsonb [note: '#328 candidate: nullable legacy; new INSERT freezes plan, actual unknown until first notification. Internal source binding is not public DTO. No current-reservation rehydration/backfill.']
 
   Indexes {
     (cleaning_target_id, revision) [unique]
@@ -952,6 +974,7 @@ Table public.cleaning_assignments {
   notified_at timestamptz
   notified_room_id_snapshot uuid [ref: > public.rooms.id, note: 'Captured on first notification; immutable. Legacy unknown stays null, never current-target fallback.']
   notified_room_number_snapshot text [note: 'Room number at notification; nullable legacy metadata.']
+  notified_reservation_schedule_snapshot jsonb [note: '#328 candidate: first notified INSERT/UPDATE freezes creation plan and known actual departure; immutable thereafter. Unknown legacy remains wholly null. Current facts are separate read-only metadata, never written into this history.']
   ended_at timestamptz
   change_reason_code text
   changed_by uuid [not null]

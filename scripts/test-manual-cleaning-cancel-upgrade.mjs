@@ -35,7 +35,7 @@ function reset(version) {
 }
 function digest() {
   return sql(`select md5(string_agg(tag||':'||data,'|' order by tag,data)) from (
-    ${protectedTables.map((table) => `select '${table}' tag,row_to_json(t)::text data from ${table} t`).join(' union all ')}
+    ${protectedTables.map((table) => `select '${table}' tag,(to_jsonb(t)-array['reservation_schedule_snapshot','notified_reservation_schedule_snapshot'])::text data from ${table} t`).join(' union all ')}
     ) history;`);
 }
 const command = (n, legacy = false, key = `manual-upgrade-cancel-${n}`) => legacy

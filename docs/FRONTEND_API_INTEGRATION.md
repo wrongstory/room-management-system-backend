@@ -1,10 +1,52 @@
 # 프론트엔드·Codex API 연동 가이드
 
+> #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
+
 이 문서는 정본 `makee-ham/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 아래 날짜별 runtime·v0.4.0 인계는 당시 검증 이력이며 최신 운영 상태를 재선언하지 않는다. source 후보를 production 계약으로 간주하지 않는다.
 
 2026-09-23 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 OpenAPI 0.5.1 / 129 / 139이고 마지막으로 검증된 production runtime은 OpenAPI 0.5.1 / 128 / 138의 `api` ACTIVE v24다. #256 사진 정규화와 #250/#264 배정 후속의 Edge/Pages 배포는 아직 별도다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 Git source 제공과 hosted runtime·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
 
-## 2026-10-02 #326 scoped 조회 handoff — 구현 후보
+## 2026-10-02 #328 scoped 일정 handoff — 구현 후보
+
+선행 source/dev는 #326 PR #350이 통합된 `f34dca3746a1e553a773470aba13b55fa95bf816`/94 migrations다.
+#326 required CI `36987938462` application/migration PASS·독립 QA98/100과 동일 source/dev tree를
+확인했다. 아래 #326 구현 후보·PENDING 표현은 병합 전 검증 이력으로 보존한다.
+
+#328은 기존 `GET /v1/assignments` 및 `/{cleaningTargetId}/history`의 AssignmentCard에
+nullable `scheduleSnapshot`/`currentDeparture`를 추가하는 95번째 로컬 검증 완료 후보다.
+이 문서는 PR 생성 전 검증 시점 기록이며 최종 QA·exact-head CI·dev 통합은 연결 Issue/PR에서
+확인하는 후속 gate다. 정확한 필드·capturedAt/최초 통보 actual·KST/legacy null은
+[배정 일정 계약](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)을 따른다. Preview/commit 응답은 확장하지 않는다.
+
+불변 통보 계획과 현재 실제 퇴실을 같은 값으로 덮지 않는다. history/includeHistory에서
+`currentDeparture`는 항상 null이며 다른 담당자의 현재 예약으로 과거를 hydrate하지 않는다.
+`nextCheckInAt`은 guest의 예정 체크인, `nextRoomArrivalAt`은 canonical segment의 객실 도착이다.
+이동을 early guest check-in으로 해석하거나 `dueAt + 30분`·기본 시각을 보충하지 않는다.
+이 정보는 표시이며 시작/PIN/취소 권한을 부여하지 않는다.
+초기 adapter actor role과 마지막 RPC의 최신 DB role이 달라지면 기존
+`ASSIGNMENT_ACCESS_REQUIRED` 403으로 닫는다. `p_expected_actor_role`은 서버 내부 binding이며
+클라이언트가 보내는 신규 role 필드가 아니다. 기존 인증/권한 오류 흐름으로 처리한다.
+
+새 JSONB 원문·내부 binding은 Data API로 직접 읽지 않고 기존 배정 HTTP 카드의 공개 DTO로
+소비한다. 두 저장 테이블의 authenticated SELECT는 pre95 명시 컬럼에만 유지한다.
+기존 명시 컬럼/count/join·RLS는 유지하지만 `SELECT *`/whole-row 및 새 컬럼 직접 SELECT는
+의도적으로 `42501`이다. 업무 authority나 기존 HTTP 경로/오류 코드를 확대하지 않는다.
+마지막 grant 보완 전 Node 859·Edge 323·Python 95와 fresh 95/94→95 upgrade PASS를 확인했으나
+이 보완까지 포함한 최종 local Node 859·Edge 323/bundle 17,240,852 bytes·Python 95·
+SQL 4,152·21 upgrade·KST 145·동시성·fresh 95·advisors 0건·합성 백업 복구는 PASS다.
+최종 QA·CI/dev 근거는 [Issue #328](https://github.com/wrongstory/room-management-system-backend/issues/328)의
+연결 PR에서 확인한다. 22:56 KST 최신 main/dev refs도 동일하며 전체 text tree를 확인한 결과
+두 테이블 직접 Data API/whole-row 소비는 없다. 현재 배정/이력은 HTTP API를 사용한다.
+이는 정적 호환성 점검이며 신규 필드의 실제 소비·운영 UAT를 PASS로 선언하지 않는다.
+
+scoped ref는 main `d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev
+`09ed28446a4fd43919cddb29ebe442b848548ab8`로 유지한다. dev의 admin 예약 cache 기반 badge
+`:9359–9366`와 메이드 API 미제공 문구 `:9312`를 서버 snapshot으로 연결하는 일은 프런트 담당
+범위다. main에는 해당 live badge helper 및 DOCS/29·30이 없다. 전역 제품 snapshot은 갱신하지 않는다.
+검증·승격된 OpenAPI로 generated client를 재생성하고 실제 소비/UAT를 별도로 확인해야 하며
+백엔드 후보만으로 현재 운영 화면 지원을 선언하지 않는다. 다음 backend 순서는 #328 → #327이다.
+
+## 과거 2026-10-02 #326 scoped 조회 handoff — PR #350 병합 전 이력
 
 백엔드 선행 dev 기준은 `f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`/93 migrations다.
 #348 취소 정책은 source/dev 통합됐지만 운영 승격은 별도이고, #326의 94번째 migration·additive

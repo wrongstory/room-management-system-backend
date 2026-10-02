@@ -86,6 +86,11 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "assignments" / "list_assignments.py",
+            package / "api" / "assignments" / "get_assignment_history.py",
+            package / "models" / "assignment_card.py",
+            package / "models" / "assignment_schedule_snapshot.py",
+            package / "models" / "assignment_current_departure.py",
             package / "models" / "assignment_preview_diagnostics.py",
             package / "models" / "assignment_preview_remaining_target.py",
             package / "api" / "reservations" / "list_reservations.py",
@@ -240,6 +245,53 @@ def main() -> None:
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
             raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+        # #328 required nullable fields must not become optional Unset fields
+        # or lose the distinct plan/current types during actual client generation.
+        for model_name, expected_fields in (
+            (
+                "assignment_card",
+                {
+                    "schedule_snapshot": {"AssignmentScheduleSnapshot", "None"},
+                    "current_departure": {"AssignmentCurrentDeparture", "None"},
+                },
+            ),
+            (
+                "assignment_schedule_snapshot",
+                {
+                    "captured_at": {"datetime.datetime"},
+                    "schedule_revision": {"int"},
+                    "schedule_reason_code": {"str"},
+                    "source_reservation_version": {"int", "None"},
+                    "planned_checkout_at": {"datetime.datetime", "None"},
+                    "actual_checkout_at": {"datetime.datetime", "None"},
+                    "planned_room_departure_at": {"datetime.datetime", "None"},
+                    "actual_room_departure_at": {"datetime.datetime", "None"},
+                    "next_check_in_at": {"datetime.datetime", "None"},
+                    "next_room_arrival_at": {"datetime.datetime", "None"},
+                    "is_early_check_in": {"bool", "None"},
+                    "is_late_checkout": {"bool", "None"},
+                    "is_schedule_updated": {"bool"},
+                },
+            ),
+            (
+                "assignment_current_departure",
+                {
+                    "evaluated_at": {"datetime.datetime"},
+                    "actual_checkout_at": {"datetime.datetime", "None"},
+                    "actual_room_departure_at": {"datetime.datetime", "None"},
+                },
+            ),
+        ):
+            generated_model = (package / "models" / f"{model_name}.py").read_text(encoding="utf-8")
+            for field, expected_types in expected_fields.items():
+                declaration = re.search(
+                    rf"^\s+{field}:\s+([^\r\n=]+)", generated_model, re.MULTILINE
+                )
+                if (
+                    declaration is None
+                    or {part.strip() for part in declaration.group(1).split("|")} != expected_types
+                ):
+                    raise RuntimeError(f"배정 일정 codegen 필수 nullable 타입 불일치: {field}")
         room_event_model = (package / "models" / "room_event.py").read_text(encoding="utf-8")
         for field in (
             "event_key: str",

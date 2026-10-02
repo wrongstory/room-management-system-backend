@@ -2,6 +2,7 @@ import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { assignmentCancellationCapability, parseRoomTypeSnapshot } from './assignment-preview-core.js';
+import { type AssignmentScheduleRead, parseAssignmentScheduleReads } from './assignment-schedule-core.js';
 
 export interface AssignmentListInput {
   serviceDate: string;
@@ -39,6 +40,8 @@ function databaseError(error: { message?: string } | null): AppError {
   if (code === 'ASSIGNMENT_ACCESS_REQUIRED') {
     return new AppError(403, code, '청소 배정 조회 권한이 필요합니다.');
   }
+  if (code === 'SESSION_REVOKED') return new AppError(401, code, '다시 로그인해 주세요.');
+  if (code === 'PASSWORD_CHANGE_REQUIRED') return new AppError(403, code, '비밀번호 변경이 필요합니다.');
   return new AppError(500, 'ASSIGNMENT_QUERY_FAILED', '청소 배정을 조회하지 못했습니다.');
 }
 
@@ -113,7 +116,7 @@ export class SupabaseAssignmentService implements AssignmentService {
       rows.sort((left, right) => left.service_date.localeCompare(right.service_date) ||
         left.sequence_number - right.sequence_number || left.revision - right.revision || left.id.localeCompare(right.id));
     }
-    return this.hydrate(actor, rows);
+    return this.hydrate(actor, rows, !input.includeHistory);
   }
 
   async history(actor: Actor, cleaningTargetId: string): Promise<unknown[]> {
@@ -129,13 +132,14 @@ export class SupabaseAssignmentService implements AssignmentService {
         ? new AppError(403, 'ASSIGNMENT_ACCESS_REQUIRED', '이 청소 대상의 배정 이력을 조회할 수 없습니다.')
         : new AppError(404, 'ASSIGNMENT_NOT_FOUND', '청소 배정 이력을 찾을 수 없습니다.');
     }
-    return this.hydrate(actor, rows);
+    return this.hydrate(actor, rows, false);
   }
 
   private requireReader(actor: Actor): void {
     if (actor.role !== 'admin' && actor.role !== 'maid') {
       throw new AppError(403, 'ASSIGNMENT_ACCESS_REQUIRED', '청소 배정 조회 권한이 필요합니다.');
     }
+    if (actor.mustChangePassword) throw databaseError({ message: 'PASSWORD_CHANGE_REQUIRED' });
   }
 
   private visibleRows(data: unknown, actor: Actor): AssignmentRow[] {
@@ -164,7 +168,30 @@ export class SupabaseAssignmentService implements AssignmentService {
     return rows;
   }
 
-  private async hydrate(actor: Actor, rows: AssignmentRow[]): Promise<unknown[]> {
+  private async scheduleReads(actor: Actor, rows: AssignmentRow[], includeCurrent: boolean) {
+    let sessionId: string;
+    try {
+      const claims = JSON.parse(Buffer.from(actor.accessToken.split('.')[1] ?? '', 'base64url').toString('utf8')) as { session_id?: unknown };
+      if (typeof claims.session_id !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claims.session_id)) throw new Error();
+      sessionId = claims.session_id.toLowerCase();
+    } catch { throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.'); }
+    const result = new Map<string, AssignmentScheduleRead>();
+    for (let offset = 0; offset < rows.length; offset += hydrationBatchSize) {
+      const ids = rows.slice(offset, offset + hydrationBatchSize).map((row) => row.id);
+      const response = await this.clients.admin.rpc('get_assignment_schedule_read', {
+        p_actor_profile_id: actor.profileId, p_session_id: sessionId,
+        p_assignment_ids: ids, p_include_current: includeCurrent, p_expected_actor_role: actor.role
+      });
+      if (response.error) throw databaseError(response.error);
+      try {
+        for (const [id, read] of parseAssignmentScheduleReads(response.data, ids, includeCurrent)) result.set(id, read);
+      } catch { throw databaseError(null); }
+    }
+    return result;
+  }
+
+  private async hydrate(actor: Actor, rows: AssignmentRow[], includeCurrent: boolean): Promise<unknown[]> {
     if (rows.length === 0) return [];
     const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
     const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
@@ -194,6 +221,9 @@ export class SupabaseAssignmentService implements AssignmentService {
       if (!submissions.has(submission.cleaning_attempt_id)) submissions.set(submission.cleaning_attempt_id, submission);
     }
     const schedules = scheduleRows as ScheduleRow[];
+    // Revalidate actor/session/ownership last, in the same DB snapshot as the
+    // new facts. History never hydrates current reservation/occupancy state.
+    const scheduleReads = await this.scheduleReads(actor, rows, includeCurrent);
     return rows.map((row) => {
       const target = targets.get(row.cleaning_target_id);
       const profile = profiles.get(row.maid_profile_id);
@@ -214,6 +244,8 @@ export class SupabaseAssignmentService implements AssignmentService {
         target.effective_service_date === row.service_date;
       const cancellation = assignmentCancellationCapability(actor.role, row.is_current,
         target.source, target.status, capabilityAttempts.get(row.id) ?? []);
+      const scheduleRead = scheduleReads.get(row.id);
+      if (!scheduleRead) throw databaseError(null);
       return {
         assignmentId: row.id, cleaningTargetId: row.cleaning_target_id,
         roomId: actor.role === 'maid' ? row.notified_room_id_snapshot : target.room_id,
@@ -232,6 +264,7 @@ export class SupabaseAssignmentService implements AssignmentService {
         targetStatus: actor.role === 'admin' || targetMatchesRevision ? target.status : null,
         attemptStatus: attempt?.status ?? null, submissionStatus: submission?.status ?? null,
         availableFrom: row.available_from_snapshot, dueAt: row.due_at_snapshot,
+        ...scheduleRead,
         notifiedAt: row.notified_at, endedAt: row.ended_at, createdAt: row.created_at
       };
     });

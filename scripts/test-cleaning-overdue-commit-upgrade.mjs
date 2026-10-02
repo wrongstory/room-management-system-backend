@@ -16,7 +16,7 @@ const tables = ['public.cleaning_targets', 'public.cleaning_assignments', 'publi
   'public.audit_events', 'public.notifications', 'private.notification_outbox', 'private.notification_delivery_outbox',
   'private.notification_groups', 'private.command_executions', 'public.reservations', 'public.checkout_cleaning_obligations'];
 const snapshot = () => sql(`select md5(string_agg(data,'|' order by data)) from (
-  ${tables.map((name) => `select '${name}:'||row_to_json(row)::text data from ${name} row`).join(' union all ')}
+  ${tables.map((name) => `select '${name}:'||(to_jsonb(row)-array['reservation_schedule_snapshot','notified_reservation_schedule_snapshot'])::text data from ${name} row`).join(' union all ')}
 ) preserved;`);
 const impact = (day = '2038-06-07') => JSON.parse(sql(`select private.assignment_commit_impact_at('${day}','2038-06-07 08:00+09');`));
 const commit = (target, fingerprint, key, version = 1) => `select private.commit_and_notify_assignments_at(

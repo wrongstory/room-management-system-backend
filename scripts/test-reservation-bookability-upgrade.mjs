@@ -34,7 +34,7 @@ function ledgerSnapshot() {
     from (
       select format('%I.%I|%s', schemaname, tablename,
         coalesce((xpath('/row/hash/text()', query_to_xml(
-          format('select md5(coalesce(string_agg(row_to_json(t)::text, '''' order by row_to_json(t)::text), '''')) hash from %I.%I t', schemaname, tablename),
+          format('select md5(coalesce(string_agg((to_jsonb(t)-array[''reservation_schedule_snapshot'',''notified_reservation_schedule_snapshot''])::text, '''' order by (to_jsonb(t)-array[''reservation_schedule_snapshot'',''notified_reservation_schedule_snapshot''])::text), '''')) hash from %I.%I t', schemaname, tablename),
           false, true, '')))[1]::text, '')) snapshot
       from pg_tables
       where schemaname in ('public','private')

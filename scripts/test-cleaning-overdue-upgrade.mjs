@@ -11,9 +11,9 @@ const sql = (input) => run('docker', ['exec', '-i', 'supabase_db_room-management
   'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], input).trim();
 const snapshot = () => sql(`select md5(string_agg(data,'|' order by data)) from (
   select row_to_json(t)::text data from public.cleaning_targets t union all
-  select row_to_json(a)::text from public.cleaning_assignments a union all
+  select (to_jsonb(a)-'notified_reservation_schedule_snapshot')::text from public.cleaning_assignments a union all
   select row_to_json(a)::text from public.cleaning_attempts a union all
-  select row_to_json(r)::text from public.cleaning_target_schedule_revisions r union all
+  select (to_jsonb(r)-'reservation_schedule_snapshot')::text from public.cleaning_target_schedule_revisions r union all
   select row_to_json(n)::text from public.notifications n union all
   select row_to_json(e)::text from public.audit_events e union all
   select row_to_json(r)::text from private.command_executions r

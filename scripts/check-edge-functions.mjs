@@ -11,6 +11,7 @@ const sourcePaths = [
   'supabase/functions/_shared/account-api.ts',
   'supabase/functions/_shared/availability-api.ts',
   'supabase/functions/_shared/assignment-api.ts',
+  'supabase/functions/_shared/assignment-schedule-core.ts',
   'supabase/functions/_shared/attempt-api.ts',
   'supabase/functions/_shared/attempt-lifecycle-api.ts',
   'supabase/functions/_shared/attempt-offline-api.ts',

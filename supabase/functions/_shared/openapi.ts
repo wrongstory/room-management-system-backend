@@ -2606,7 +2606,7 @@ export const openApiDocument = {
         operationId: "listAssignments",
         summary: "서비스 날짜별 청소 배정 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 본인에게 실제 통보된 revision만 조회합니다. includeHistory=false가 기본이며 현재 통보 배정만 반환합니다. true이면 본인의 과거 실제 통보된 superseded revision도 포함하지만 미통보 draft와 다른 메이드의 revision은 숨깁니다. 카드에는 target 생성 당시 종류·객실 타입·구역·요금·nullable 예상시간과 assignment별 이월·attempt·submission 상태를 함께 반환합니다. developer는 업무 배정을 조회할 수 없습니다.",
+          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 본인에게 실제 통보된 revision만 조회합니다. includeHistory=false가 기본이며 현재 통보 배정만 반환합니다. true이면 본인의 과거 실제 통보된 superseded revision도 포함하지만 미통보 draft와 다른 메이드의 revision은 숨깁니다. 카드에는 target 생성 당시 종류·객실 타입·구역·요금·nullable 예상시간과 assignment별 이월·attempt·submission 상태를 함께 반환합니다. scheduleSnapshot은 해당 revision의 불변 일정이며 legacy 부재는 null입니다. currentDeparture는 현재 목록의 exact current notified 업무만 별도로 관찰하며 includeHistory=true에서는 모든 행이 null입니다. 예정/실제 퇴실·다음 guest check-in·객실 이동 시각을 구분하고 일정 표시만으로 수행 권한을 부여하지 않습니다. developer는 업무 배정을 조회할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -2647,7 +2647,7 @@ export const openApiDocument = {
         operationId: "getAssignmentHistory",
         summary: "청소 대상의 배정 revision 이력 조회",
         description:
-          "active business admin은 전체 revision을 조회하고 active maid는 본인에게 실제 통보된 revision만 조회합니다. 과거 superseded revision도 통보 사실이 있으면 읽기 전용으로 보존합니다. 한 번 통보받은 target이라도 미통보 draft·다른 메이드의 revision·현재 target version은 공개하지 않습니다. 객실 ID/번호는 당시 notified snapshot이고 타입·요금·template은 target 생성 snapshot이므로 현재 master-data로 덮지 않습니다. 본인의 실제 통보 이력이 없으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
+          "active business admin은 전체 revision을 조회하고 active maid는 본인에게 실제 통보된 revision만 조회합니다. 과거 superseded revision도 통보 사실이 있으면 읽기 전용으로 보존합니다. 한 번 통보받은 target이라도 미통보 draft·다른 메이드의 revision·현재 target version은 공개하지 않습니다. 객실 ID/번호는 당시 notified snapshot이고 타입·요금·template은 target 생성 snapshot이므로 현재 master-data로 덮지 않습니다. scheduleSnapshot도 해당 통보 revision에 고정되며 현재 다른 담당자의 예약/일정으로 재수화하지 않습니다. currentDeparture는 현재 행을 포함해 항상 null입니다. 본인의 실제 통보 이력이 없으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -8963,6 +8963,119 @@ export const openApiDocument = {
         description:
           "배정 당시 서비스 날짜·접근 가능 시각·마감 시각을 보존하는 revision projection입니다. 전화번호, 고객명, PIN, provider 식별자는 포함하지 않습니다.",
       },
+      AssignmentScheduleSnapshot: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "capturedAt",
+          "scheduleRevision",
+          "scheduleReasonCode",
+          "sourceReservationVersion",
+          "plannedCheckoutAt",
+          "actualCheckoutAt",
+          "plannedRoomDepartureAt",
+          "actualRoomDepartureAt",
+          "nextCheckInAt",
+          "nextRoomArrivalAt",
+          "nextArrivalKind",
+          "isEarlyCheckIn",
+          "isLateCheckout",
+          "isScheduleUpdated",
+        ],
+        properties: {
+          capturedAt: { type: "string", format: "date-time" },
+          scheduleRevision: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "실제 cleaning_target_schedule_revisions의 revision입니다. assignment CAS나 현재 예약 version에서 추측하지 않습니다.",
+          },
+          scheduleReasonCode: {
+            type: "string",
+            minLength: 1,
+            description:
+              "해당 불변 schedule revision의 source-controlled 사유 코드입니다.",
+          },
+          sourceReservationVersion: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description:
+              "snapshot 캡처 당시 연결 source 예약의 version입니다. 고객 정보·예약 상세 접근 권한을 제공하지 않습니다.",
+          },
+          plannedCheckoutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "source 예약의 예정 퇴실입니다. 실제 퇴실·접근 가능 시각과 구분합니다.",
+          },
+          actualCheckoutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "최초 통보 write의 DB 캡처 시 확인된 source 예약의 실제 퇴실입니다. 계획 capturedAt/notifiedAt과 구분하며 이후 사실로 덮지 않습니다.",
+          },
+          plannedRoomDepartureAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "해당 객실의 예정 점유 종료입니다. 투숙 중 이동이면 이동 effective time이며 예약의 최종 checkout과 다를 수 있습니다.",
+          },
+          actualRoomDepartureAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "최초 통보 write의 DB 캡처 시 확인된 해당 객실의 실제 점유 종료입니다. 미래 객실 이동은 실제 퇴실로 표시하지 않습니다.",
+          },
+          nextCheckInAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "다음 객실 점유 source의 예약 예정 guest check-in입니다. segment 시작/객실 이동 시각이 아니며 dueAt에서 역산하지 않습니다.",
+          },
+          nextRoomArrivalAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "canonical stay segment에 근거한 다음 객실 점유 시작입니다.",
+          },
+          nextArrivalKind: {
+            type: ["string", "null"],
+            enum: ["check_in", "room_move", null],
+          },
+          isEarlyCheckIn: {
+            type: ["boolean", "null"],
+            description:
+              "nextArrivalKind=check_in의 예정 nextCheckInAt이 KST 16:00보다 빠른지 표시합니다. room_move 또는 근거 없음은 null입니다.",
+          },
+          isLateCheckout: {
+            type: ["boolean", "null"],
+            description:
+              "연결 source 예약의 예정 plannedCheckoutAt이 KST 11:00보다 늦은지 표시합니다. 청소 종류로 제한하지 않으며 room_move/해당 근거 없음은 null입니다.",
+          },
+          isScheduleUpdated: {
+            type: "boolean",
+            description:
+              "실제 이전 schedule의 날짜/접근/마감 차이와 명시적 일정 변경 사유가 함께 증명될 때만 true입니다. CAS 증가나 시각 경과 자체는 변경 근거가 아닙니다.",
+          },
+        },
+        description:
+          "불변 계획 snapshot과 통보 당시 알려진 실제 사실입니다. 예약 없는 요청·종료 미정의 시각은 null로 유지하며 고객명·연락처·PIN·내부 lineage ID를 노출하지 않습니다.",
+      },
+      AssignmentCurrentDeparture: {
+        type: "object",
+        additionalProperties: false,
+        required: ["evaluatedAt", "actualCheckoutAt", "actualRoomDepartureAt"],
+        properties: {
+          evaluatedAt: { type: "string", format: "date-time" },
+          actualCheckoutAt: { type: ["string", "null"], format: "date-time" },
+          actualRoomDepartureAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+        },
+        description:
+          "현재 목록의 exact current notified assignment에만 허용하는 source-bound 실제 퇴실 관찰입니다. history/includeHistory는 항상 null이며 점유 재개로 무효화된 퇴실을 현재 사실로 반환하지 않습니다. 계획 snapshot이나 수행 권한을 변경하지 않습니다.",
+      },
       AssignmentCard: {
         type: "object",
         additionalProperties: false,
@@ -8990,6 +9103,8 @@ export const openApiDocument = {
           "targetStatus",
           "attemptStatus",
           "submissionStatus",
+          "scheduleSnapshot",
+          "currentDeparture",
           "availableFrom",
           "dueAt",
           "notifiedAt",
@@ -9085,6 +9200,22 @@ export const openApiDocument = {
             type: ["string", "null"],
             enum: ["submitted", "superseded", "approved", "rejected", null],
           },
+          scheduleSnapshot: {
+            anyOf: [
+              { $ref: "#/components/schemas/AssignmentScheduleSnapshot" },
+              { type: "null" },
+            ],
+            description:
+              "생성 schedule에 고정한 계획 및 최초 통보의 실제 사실입니다. 명시적 재계획/재통보는 새 revision으로만 반영하고 legacy 부재는 전체 null이며 현재 예약으로 재수화/backfill하지 않습니다.",
+          },
+          currentDeparture: {
+            anyOf: [
+              { $ref: "#/components/schemas/AssignmentCurrentDeparture" },
+              { type: "null" },
+            ],
+            description:
+              "현재 목록에서만 exact current notified source의 실제 퇴실을 별도 관찰합니다. history/includeHistory에서는 항상 null입니다.",
+          },
           availableFrom: { type: ["string", "null"], format: "date-time" },
           dueAt: { type: ["string", "null"], format: "date-time" },
           notifiedAt: { type: ["string", "null"], format: "date-time" },
@@ -9092,7 +9223,7 @@ export const openApiDocument = {
           createdAt: { type: "string", format: "date-time" },
         },
         description:
-          "배정 카드용 additive projection입니다. 객실·타입·요금·template은 업무 snapshot을 사용하고 PIN·고객 PII·사진 locator를 포함하지 않습니다.",
+          "배정 카드용 additive projection입니다. 객실·타입·요금·template·일정은 업무 snapshot을 사용하고 PIN·고객 PII·사진 locator를 포함하지 않습니다. 일정 표시는 수행/PIN 권한이 아니며 현재 실제 퇴실 관찰과 불변 통보 snapshot을 구분합니다.",
       },
       AssignmentDraftRequest: {
         type: "object",

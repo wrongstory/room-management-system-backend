@@ -1,6 +1,10 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import {
+  type AssignmentScheduleRead,
+  parseAssignmentScheduleReads,
+} from "./assignment-schedule-core.ts";
+import {
   assignmentCancellationCapability,
   type AssignmentReadMetadata,
   parseAssignmentReadMetadata,
@@ -11,6 +15,7 @@ import {
   EdgeError,
   requireBusinessAdmin,
   requirePasswordChanged,
+  verifiedRequestSessionId,
 } from "./runtime.ts";
 
 interface AssignmentRow {
@@ -92,6 +97,8 @@ export interface AssignmentProjection {
 }
 
 export interface AssignmentCardProjection extends AssignmentProjection {
+  scheduleSnapshot: AssignmentScheduleRead["scheduleSnapshot"];
+  currentDeparture: AssignmentScheduleRead["currentDeparture"];
   cleaningKind: string;
   roomTypeCode: string | null;
   roomTypeName: string | null;
@@ -1097,6 +1104,8 @@ async function hydrateAssignments(
   clients: EdgeClients,
   rows: AssignmentRow[],
   actor: EdgeActor,
+  request: Request,
+  includeCurrent: boolean,
 ): Promise<AssignmentCardProjection[]> {
   if (rows.length === 0) return [];
   const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
@@ -1169,6 +1178,50 @@ async function hydrateAssignments(
     }
   }
   const schedules = scheduleRows as TargetScheduleRow[];
+  // Revalidate actor/session/exact assignment ownership after bounded
+  // hydration. Historical cards never request live reservation facts.
+  const scheduleReads = new Map<string, AssignmentScheduleRead>();
+  const sessionId = verifiedRequestSessionId(request);
+  for (
+    let offset = 0;
+    offset < rows.length;
+    offset += assignmentHydrationBatchSize
+  ) {
+    const ids = rows.slice(offset, offset + assignmentHydrationBatchSize).map((
+      row,
+    ) => row.id);
+    const response = await clients.admin.rpc("get_assignment_schedule_read", {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_assignment_ids: ids,
+      p_include_current: includeCurrent,
+      p_expected_actor_role: actor.role,
+    });
+    if (response.error) {
+      const code = response.error.message;
+      if (code === "ASSIGNMENT_ACCESS_REQUIRED") {
+        throw new EdgeError(403, code, "청소 배정 조회 권한이 필요합니다.");
+      }
+      if (code === "SESSION_REVOKED") {
+        throw new EdgeError(401, code, "다시 로그인해 주세요.");
+      }
+      if (code === "PASSWORD_CHANGE_REQUIRED") {
+        throw new EdgeError(403, code, "비밀번호 변경이 필요합니다.");
+      }
+      throw assignmentDatabaseError(null);
+    }
+    try {
+      for (
+        const [id, read] of parseAssignmentScheduleReads(
+          response.data,
+          ids,
+          includeCurrent,
+        )
+      ) scheduleReads.set(id, read);
+    } catch {
+      throw assignmentDatabaseError(null);
+    }
+  }
 
   return rows.map((row) => {
     const target = targets.get(row.cleaning_target_id);
@@ -1187,6 +1240,8 @@ async function hydrateAssignments(
     const targetMatchesRevision = row.is_current &&
       target.assignment_version === row.revision &&
       target.effective_service_date === row.service_date;
+    const scheduleRead = scheduleReads.get(row.id);
+    if (!scheduleRead) throw assignmentDatabaseError(null);
     return {
       assignmentId: row.id,
       cleaningTargetId: row.cleaning_target_id,
@@ -1224,6 +1279,7 @@ async function hydrateAssignments(
       submissionStatus: submission?.status ?? null,
       availableFrom: row.available_from_snapshot,
       dueAt: row.due_at_snapshot,
+      ...scheduleRead,
       notifiedAt: row.notified_at,
       endedAt: row.ended_at,
       createdAt: row.created_at,
@@ -1322,6 +1378,8 @@ export async function listAssignments(
     clients,
     rows,
     actor,
+    request,
+    !includeHistory,
   );
 }
 
@@ -1361,7 +1419,7 @@ export async function assignmentHistory(
         "청소 배정 이력을 찾을 수 없습니다.",
       );
   }
-  return hydrateAssignments(clients, rows, actor);
+  return hydrateAssignments(clients, rows, actor, request, false);
 }
 
 function visibleAssignmentRows(

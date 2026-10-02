@@ -1,12 +1,33 @@
 # Room Management System ERD 초안
 
+> #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
+
 > 상태: **검토용 v4**
 > P0 핵심 스키마·계정 수명주기·도메인 무결성 계약은 migration으로 관리하며, 이후 업무 API와 원장은 구현 순서에 따라 확장한다.
 > 제품 계약과 미확정 사항은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 우선한다.
 
-> #305 현행 source/dev 기준: #308 PR #340·#343 PR #346 완료, 92 migrations와 typed catalog 59 family / 42 category. 운영 승격·별도 후속 및 과거 후보 이력은 [종료 감사](./WORK_DEADLINE_CLOSURE.md)로 구분한다. 문서 정합화이며 스키마 변경이 아니다.
+> #305 당시 source/dev 기준: #308 PR #340·#343 PR #346 완료, 92 migrations와 typed catalog 59 family / 42 category. 운영 승격·별도 후속 및 과거 후보 이력은 [종료 감사](./WORK_DEADLINE_CLOSURE.md)로 구분한다. 문서 정합화이며 스키마 변경이 아니다.
 
 ## 1. 설계 결론
+
+### #328 일정 snapshot 보강 — 구현 후보
+
+선행 source/dev는 #326 PR #350 완료의 `f34dca37`/94 migrations다. #328은 95번째 append-only
+후보로 `cleaning_target_schedule_revisions.reservation_schedule_snapshot`과
+`cleaning_assignments.notified_reservation_schedule_snapshot` nullable JSONB를 추가한다.
+신규 생성 계획과 최초 통보의 actual을 고정하고 legacy 행을 현재 예약으로 backfill하지 않는다.
+stored source reservation/room binding은 내부 검사에만 사용하며 공개 schedule DTO에 넣지 않는다.
+조회 RPC의 `p_expected_actor_role`은 최초 adapter role을 최신 DB role에 binding하며 불일치
+경합은 기존 403으로 닫는다. 신규 클라이언트 role 입력이나 table 권한 확대가 아니다.
+currentDeparture는 현재 목록의 exact current notified source 관찰이고 history/includeHistory는
+항상 null이다. 새 table/FK·broad DML·RLS 권한 확대·원장 rewrite는 없다. local 전체 SQL/upgrade·
+동시성·fresh 95·advisors 0건·합성 백업 복구는 PASS다. 최종 QA·exact-head CI·dev 통합은
+연결 Issue/PR에서 확인하는 후속 gate이며 [상세 계약](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)을 따른다.
+두 테이블의 authenticated table-level SELECT는 pre95 컬럼별 SELECT로 좁힌다. 신규 JSONB·
+내부 binding 직접 조회 및 `SELECT *`/whole-row는 `42501`로 거부하고 기존 명시 컬럼/count/join·
+RLS·service_role table grant는 유지한다. 업무 권한 불변과 raw-column 권한 축소를 구분한다.
+
+### 기존 설계 결론
 
 - 관리자와 메이드는 인원 수를 코드나 enum에 고정하지 않는다.
 - 한 로그인 계정은 `profiles` 한 건을 가지며 현재 제품 역할은 `developer | admin | maid`다. developer는 singleton이고 admin·maid 계정 수에는 제한이 없다.

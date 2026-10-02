@@ -106,7 +106,7 @@ select throws_ok($$select pg_temp.old_commit(6,'overdue-commit-unavailable')$$,'
 select throws_ok($$select pg_temp.old_commit(5,'overdue-commit-stale-schedule')$$,'23514','ASSIGNMENT_DRAFT_STALE_SCHEDULE','stale schedule rejects old commit');
 select is(pg_temp.overdue_commit_ledgers(),(select value from overdue_commit_results where label='before'),'failed commits preserve every ledger and receipt');
 insert into overdue_commit_results values('assignment-snapshot',
-  (select to_jsonb(assignment)-'notified_at'-'notified_room_id_snapshot'-'notified_room_number_snapshot'
+  (select to_jsonb(assignment)-'notified_at'-'notified_room_id_snapshot'-'notified_room_number_snapshot'-'notified_reservation_schedule_snapshot'
     from public.cleaning_assignments assignment where id=pg_temp.ocid(2002)));
 insert into overdue_commit_results values('target-snapshot',
   (select to_jsonb(target)-'status'-'updated_at' from public.cleaning_targets target where id=pg_temp.ocid(1002)));
@@ -116,9 +116,12 @@ select is((select value->>'serviceDate' from overdue_commit_results where label=
 select is((select value#>>'{notifiedAssignments,0,serviceDate}' from overdue_commit_results where label='commit'),'2038-06-06','notified assignment response retains original date');
 select is((select service_date::text from public.cleaning_assignments where id=pg_temp.ocid(2002)),'2038-06-06','stored assignment date remains original');
 select is((select sequence_number from public.cleaning_assignments where id=pg_temp.ocid(2002)),2,'stored assignment sequence remains original');
-select is((select to_jsonb(assignment)-'notified_at'-'notified_room_id_snapshot'-'notified_room_number_snapshot'
+select is((select to_jsonb(assignment)-'notified_at'-'notified_room_id_snapshot'-'notified_room_number_snapshot'-'notified_reservation_schedule_snapshot'
   from public.cleaning_assignments assignment where id=pg_temp.ocid(2002)),
   (select value from overdue_commit_results where label='assignment-snapshot'),'exact assignment owner/date/revision/windows/changer/creation snapshot preserved');
+select is((select notified_reservation_schedule_snapshot from public.cleaning_assignments where id=pg_temp.ocid(2002)),
+  (select reservation_schedule_snapshot from public.cleaning_target_schedule_revisions where cleaning_target_id=pg_temp.ocid(1002)
+    order by revision desc limit 1),'#328 first notice copies exact frozen no-reservation schedule with unknown actuals');
 select is((select to_jsonb(target)-'status'-'updated_at' from public.cleaning_targets target where id=pg_temp.ocid(1002)),
   (select value from overdue_commit_results where label='target-snapshot'),'exact target/source/schedule/version snapshot preserved');
 select is((select maid_profile_id from public.cleaning_assignments where id=pg_temp.ocid(2002)),pg_temp.ocid(3),'stored owner remains original');

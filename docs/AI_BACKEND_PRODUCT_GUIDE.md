@@ -1,6 +1,33 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
-## 2026-10-02 #326 구현 후보와 선행 dev 기준
+> #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
+
+## 2026-10-02 #328 일정 구현 후보와 #326 source/dev 완료
+
+현재 선행 정본은 `dev@f34dca3746a1e553a773470aba13b55fa95bf816`/94 migrations다.
+#326은 PR #350 source `2eb489c`와 dev squash의 tree 동일성, required CI `36987938462`
+application/migration PASS·독립 QA98/100으로 source/dev 완료했다. 아래 #326의 후보·PENDING
+표현은 당시 검증 이력으로 보존하며 현재 운영 배포 완료로 해석하지 않는다.
+
+#328의 95번째 일정 snapshot 및 기존 카드 DTO 보강은 로컬 검증 완료 후보다.
+Node 859·Edge 323·Python 95·SQL 4,152·21 upgrade·KST 145·전체 동시성·fresh 95·advisors 0건·
+합성 백업 복구가 PASS다. 이 문서는 PR 생성 전 검증 시점 기록이며 최종 독립 QA·exact-head CI·
+dev 통합 근거는 [Issue #328](https://github.com/wrongstory/room-management-system-backend/issues/328)의
+연결 PR에서 확인한다. source/dev 완료와 운영 제공은 구분한다.
+생성 계획·최초 통보 actual과 현재 actual 관찰을 분리하고, guest의 예정 체크인과 room-move
+segment 도착을 구별한다. history/includeHistory는 통보 snapshot만 반환하며 현재 actual은 null이다.
+legacy 누락은 unknown null이고 현재 예약/기본 시각/마감 역산으로 채우지 않는다.
+조회 adapter가 처음 검증한 actor role을 RPC의 `p_expected_actor_role`로 묶고 마지막 최신
+DB role과 달라지면 기존 403으로 닫는다. 이로써 처음 hydrate한 admin/maid 응답 형태를
+다른 역할의 ownership 규칙으로 뒤늦게 허용하지 않는다. 신규 client role 권한 입력은 없다.
+업무 authority/RLS·source 명령·수익·PIN·기한 정책은 변경하지 않는다. 다만 저장 두 테이블의
+authenticated table-level SELECT를 pre95 명시 컬럼 SELECT로 좁혀 새 JSONB 원문과 내부 binding을
+직접 노출하지 않는다. 기존 명시 컬럼/count/join은 유지하고 `SELECT *`/whole-row·새 컬럼 조회는
+의도적으로 `42501`로 거부한다. service_role의 기존 table grant는 유지한다. 필드와 검증 gate는
+[배정 일정 계약](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)을 따른다. main/production/recovery 및
+전역 프런트 제품 snapshot은 그대로 두며 다음 기능 순서는 #328 → #327이다.
+
+## 과거 2026-10-02 #326 구현 후보와 당시 선행 dev 기준
 
 현재 선행 통합 기준은 `dev@f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`의
 93 migrations / OpenAPI 131 paths·141 operations다. #348의 수동 요청 취소 B안·PIN 제한 제거는

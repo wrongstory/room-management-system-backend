@@ -1,6 +1,94 @@
 import type { openApiDocument } from "./openapi.ts";
 import { openApiResponse, swaggerUiResponse } from "./openapi.ts";
 
+Deno.test("assignment schedule separates history and current departure", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const schemas = document.components.schemas;
+  const fields = [
+    "capturedAt",
+    "scheduleRevision",
+    "scheduleReasonCode",
+    "sourceReservationVersion",
+    "plannedCheckoutAt",
+    "actualCheckoutAt",
+    "plannedRoomDepartureAt",
+    "actualRoomDepartureAt",
+    "nextCheckInAt",
+    "nextRoomArrivalAt",
+    "nextArrivalKind",
+    "isEarlyCheckIn",
+    "isLateCheckout",
+    "isScheduleUpdated",
+  ];
+  const snapshot = schemas.AssignmentScheduleSnapshot;
+  assert(
+    snapshot.additionalProperties === false,
+    "strict non-PII schedule pack",
+  );
+  assert(
+    JSON.stringify([...snapshot.required].sort()) ===
+      JSON.stringify([...fields].sort()),
+    "complete required snapshot",
+  );
+  assert(
+    JSON.stringify(Object.keys(snapshot.properties).sort()) ===
+      JSON.stringify([...fields].sort()),
+    "no raw lineage fields",
+  );
+  const card = schemas.AssignmentCard;
+  assert(
+    card.required.includes("scheduleSnapshot") &&
+      card.required.includes("currentDeparture"),
+    "nullable packs required on cards",
+  );
+  assert(
+    card.properties.scheduleSnapshot.anyOf.some((schema) =>
+      "type" in schema && schema.type === "null"
+    ),
+    "legacy snapshot null",
+  );
+  assert(
+    card.properties.currentDeparture.anyOf.some((schema) =>
+      "type" in schema && schema.type === "null"
+    ),
+    "history departure null",
+  );
+  assert(
+    schemas.AssignmentCurrentDeparture.additionalProperties === false,
+    "strict current fact",
+  );
+  assert(
+    schemas.AssignmentCurrentDeparture.required.join(",") ===
+      "evaluatedAt,actualCheckoutAt,actualRoomDepartureAt",
+    "minimal current fact",
+  );
+  assert(
+    snapshot.properties.isEarlyCheckIn.description.includes("KST 16:00") &&
+      snapshot.properties.isEarlyCheckIn.description.includes("room_move"),
+    "early only planned check-in, not room movement",
+  );
+  assert(
+    snapshot.properties.isLateCheckout.description.includes("KST 11:00"),
+    "late planned checkout KST basis",
+  );
+  assert(
+    document.paths["/v1/assignments"].get.description.includes(
+      "includeHistory=true에서는 모든 행이 null",
+    ),
+    "includeHistory never hydrates current facts",
+  );
+  assert(
+    document.paths["/v1/assignments/{cleaningTargetId}/history"].get.description
+      .includes("항상 null"),
+    "history never hydrates current facts",
+  );
+  assert(
+    !("scheduleSnapshot" in schemas.AssignmentPreviewRow.properties) &&
+      !("scheduleSnapshot" in schemas.AssignmentCommitCandidate.properties),
+    "no preview or command response expansion",
+  );
+});
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
