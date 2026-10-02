@@ -6,9 +6,22 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 > 정본 효력: 이 파일이 `dev`에 병합된 이후부터 API 상태 판단의 우선 정본으로 사용한다. production 상태는 Git branch가 아니라 Supabase Edge Function readback과 hosted HTTP smoke를 우선한다.
 
-### #305 현재 source/dev 기준 — 2026-10-02
+### #348 수동 요청 취소 B안 — source 후보, 운영 미승격
 
-현재 개발 기준은 `dev@4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`의
+통합 기준은 #305 문서 감사가 완료된 `dev@fb813cd0d4867f3274ce441fce2d29db1bda1e41`
+(PR #347, 92 migrations)다. 이번 후보는 93번째 `manual_cleaning_cancel_pin_independent`를 추가하며
+OpenAPI 131 paths·141 operations 및 catalog 59 family·42 category는 유지한다.
+수동 연박/추가 요청은 배정·통보 후 미착수면 PIN 조회 이력과 무관하게 취소한다.
+session-bound RPC가 최신 관리자/password/session을 잠가 다시 확인하며 legacy service EXECUTE를
+회수한다. exact current notified 담당자만 알리고 이후 해당 배정의 PIN 접근을 종료한다.
+[수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)과
+[#348](https://github.com/wrongstory/room-management-system-backend/issues/348)의 actual validation,
+독립 QA/required CI/dev 통합 근거를 따른다. DB와 양 adapter는 같은 릴리스 단위이며 운영은 변경하지 않는다.
+#326 snapshot/sourceKind/rollover/canCancel DTO, 프런트 구현 및 운영 UAT는 별도로 OPEN 유지한다.
+
+### #305 기능 통합 당시 source/dev 기준 — 2026-10-02
+
+당시 개발 기준은 `dev@4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`의
 92 migrations / OpenAPI 131 paths·141 operations / catalog 59 family·42 category다.
 #308 PR #340과 #343 PR #346의 source/dev gate는 완료됐다. #305 종료는 이 문서 정합화 PR의
 exact-head CI·독립 QA·dev 통합 확인 뒤에만 수행하며 최종 근거는
@@ -429,7 +442,7 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 | [ ] | `POST /v1/reservations/{reservationId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
 | [ ] | `POST /v1/reservations/{reservationId}/manual-checkout` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
 | [ ] | `POST /v1/reservations/cleaning-requests` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
-| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | 기존 운영 동작 이력. #348 B안·PIN 제한 제거는 source 후보이며 별도 운영 승격/UAT 필요 |
 | [x] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ✅ | ✅ | ✅ | scheduler manual/replay 및 reserved namespace 계약 PASS |
 
 ### #52 source gate

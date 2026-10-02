@@ -4297,7 +4297,7 @@ export const openApiDocument = {
         operationId: "cancelManualCleaningRequest",
         summary: "미착수 수동 청소 요청 soft cancel",
         description:
-          "active business admin이 아직 미배정·미공개·미착수인 수동 요청만 expectedVersion CAS로 취소합니다. 자동 퇴실 의무나 이미 시작된 작업은 취소할 수 없습니다.",
+          "active business admin이 연박·추가 수동 요청을 expectedVersion CAS로 soft cancel합니다. 배정·통보 또는 PIN 조회 여부와 무관하게 실제 착수 전이면 허용하며, 기존 통보 담당자에게 취소를 알리고 해당 배정의 이후 PIN 접근을 종료합니다. 자동 퇴실 의무나 이미 시작·현장 완료·제출·검수 단계인 작업은 취소할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [

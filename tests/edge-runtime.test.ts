@@ -396,7 +396,7 @@ describe('Supabase Edge runtime PoC contract', () => {
       'cancel_reservation',
       'manual_checkout_reservation',
       'create_manual_cleaning_request',
-      'cancel_manual_cleaning_request',
+      'cancel_manual_cleaning_request_with_session',
       'process_due_reservation_transitions'
     ]) {
       expect(reservationApi).toContain(`"${rpc}"`);

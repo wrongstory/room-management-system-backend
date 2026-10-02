@@ -45,13 +45,19 @@ main/release 승격, tag/GitHub Release를 변경하지 않는다. feature/dev s
 
 ## 2026-10-02 source 진행 기준
 
-- 기능 통합 기준은 `dev@4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`(#343 PR #346)이다.
+- 통합 기준은 `dev@fb813cd0d4867f3274ce441fce2d29db1bda1e41`(#305 PR #347)이다.
   #308 PR #340과 #343의 exact-head required CI·독립 QA 및 승인 source/dev tree 동일성을 확인했다.
   92 migrations / OpenAPI 131 paths·141 operations / catalog 59 family·42 category다.
-- #305의 마지막 문서 정합화·종료 감사는 docs-only PR의 exact-head CI·독립 QA·dev 통합 후에만 닫는다.
+- #305는 PR #347의 exact-head CI `36960375990` application/migration PASS·독립 QA98·dev 통합 뒤 CLOSED다.
   근거와 보존할 제한은 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
-- 다음 기능 순서는 #326(snapshot·등록 근거·취소 capability 조회) → #328 → #327이다.
-  #326의 수동 target 취소 가이드/현행 명령 차이는 선행 확인 대상이며 현행 SQL을 새 제품 정책으로 승격하지 않는다.
+- 다음 기능 순서는 #348(수동 요청 취소 선행 정책) → #326(snapshot·등록 근거·취소 capability 조회) → #328 → #327이다.
+  사용자의 #326 B안과 PIN 조회 제한 전부 제거 결정으로 기존 가이드 충돌을 해소했다.
+  #348은 93번째 append-only migration과 session-bound cancel/정확한 기존 담당 알림의 source 후보다.
+  재개 검증에서 전용 SQL 147·Edge 312·Node 715·Python console 95 tests가 PASS다.
+  로컬 complete coverage는 19 upgrades와 전체 SQL 3,931 PASS·KST145·전체 경합·복구 PASS다.
+  이전 두 full-command FAIL은 보존하며 exact-head CI의 전체 db:test SUCCESS·최종 독립 QA는 별도 gate로 유지한다.
+  실제 결과·이전 FAIL 기록·프런트 scoped 확인은 [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)을 따른다.
+  #326 DTO는 PIN 공개 이력을 capability 제한으로 사용하지 않고 후속으로 보강하며 부모 Issue는 OPEN 유지한다.
 - `main@1780728a02144c0816565ba091e43a8b3e126c4f`는 이번 작업에서 변경하지 않는다.
   production/recovery DB·Edge·Cron/provider·프런트·tag/UAT는 별도 승인·검증 범위다.
 - #13/#300/#320/#341/#342/#344/#345는 부모 #305 종료와 별도로 OPEN 추적한다.
