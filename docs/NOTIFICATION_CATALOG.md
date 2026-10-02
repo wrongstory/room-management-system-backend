@@ -13,7 +13,10 @@ target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를
 과거 이력 backfill·단순 사진 업로드 알림·원문 복제는 없다.
 [상대 역할 알림 검증](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
 
-이 문서는 Issue #109의 기반 계약과 Issue #128/#264/#308의 보완을 반영한 41개 공개 category와 58개 event family의 후보 정본이다. DB의
+#343 후보는 최초 판정의 기존 7일 응답 기준을 지난 미응답 사건에 관리자 주의 알림을 추가한다.
+새 SLA·권한 만료·자동 종결·반복 경고가 아니며 [주의 알림 계약](./COMPLAINT_RESPONSE_ATTENTION.md)을 따른다.
+
+이 문서는 Issue #109의 기반 계약과 Issue #128/#264/#308/#343의 보완을 반영한 42개 공개 category와 59개 event family의 후보 정본이다. DB의
 `private.notification_event_catalog`와 테스트가 이 표를 그대로 검증한다. `source`는 알림 생성과
 해결의 typed provenance이며 audit payload나 문자열 dedupe는 권한 근거가 아니다.
 
@@ -80,6 +83,7 @@ target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를
 | complaint.acknowledged | complaint_acknowledged | admin.complaint_decider | no/no | complaint_case_event | none | complaintCase | complaint_acknowledged/room |
 | complaint.appealed | complaint_appealed | admin.complaint_decider | yes/yes | complaint_case_event | complaint_admin_response | complaintCase | complaint_appealed/room |
 | complaint.closed | complaint_closed | maid.complaint_party | no/no | complaint_case_event | none | complaintCase | complaint_closed/room |
+| complaint.response_attention_admin | complaint_response_attention | admin.complaint_decider | no/yes | complaint_response_attention_event | none | complaintCase | complaint_response_attention/room |
 | complaint.rework_assigned | complaint_rework_assigned | maid.rework_assignee | yes/yes | complaint_compensation_decision | rework_submission | cleaningTarget | complaint_rework_assigned/room |
 | payroll.adjustment_recorded | payroll_adjustment_recorded | maid.payroll_owner | no/no | payroll_adjustment | none | payrollProfile | payroll_adjustment_recorded/payrollProfile |
 | payroll.adjustment_reversed | payroll_adjustment_reversed | maid.payroll_owner | no/no | payroll_adjustment | none | payrollProfile | payroll_adjustment_reversed/payrollProfile |

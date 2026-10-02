@@ -287,6 +287,13 @@ actor/complaint stream에 고정하고 HTTP JSON은 128 KiB를 넘으면 실패�
 세션은 cast 오류나 정보 노출 없이 0행으로 실패한다. 모든 Fastify/Edge 성공·오류 응답은
 `Cache-Control: no-store`이며 빈 cursor도 `INVALID_COMPLAINT_CURSOR` 400으로 동일하게 거부한다.
 
+#343 source 후보는 위 수명주기의 최초 판정 응답 주의 기준만 관찰한다.
+`decided`·미응답·유한한 기존 기준 시각 경과를 현재 case row lock에서 재검증하고,
+private immutable evidence/enrollment와 typed inbox/outbox를 같은 짧은 transaction에 쓴다.
+기존 lifecycle RPC의 bounded/fair 100건 cursor를 별도로 추가하며 완료 receipt replay에는
+새 side effect를 붙이지 않는다. 공개 endpoint나 응답 권한, earning/payroll 정책은 변경하지 않는다.
+[컴플레인 미응답 주의 알림](./COMPLAINT_RESPONSE_ATTENTION.md)은 운영 미반영 source다.
+
 ### #101 컴플레인 재작업·typed compensation earning — source/dev 완료, 현재 production source 반영
 
 38번째 append-only migration은 기존 37개와 #31 원청소 earning identity를 수정하지 않는다.

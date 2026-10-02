@@ -212,6 +212,12 @@ for (
       "cleaningTarget",
     ],
     ["bomb_room_decided", "bomb.decided_maid", "maid", "submission"],
+    [
+      "complaint_response_attention",
+      "complaint.response_attention_admin",
+      "admin",
+      "complaintCase",
+    ],
   ] as const
 ) {
   Deno.test(`${category} counterpart history uses the safe notification projection`, async () => {

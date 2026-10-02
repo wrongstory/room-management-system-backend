@@ -5,6 +5,7 @@ import {
   jsonResponse,
   requestId,
 } from "../_shared/runtime.ts";
+import { schedulerTransitionCount } from "../_shared/scheduler-transition-count.ts";
 
 async function matchesSecret(
   provided: string,
@@ -54,35 +55,6 @@ function requiredEnv(name: string): string {
     );
   }
   return value;
-}
-
-function transitionCount(
-  reservationValue: unknown,
-  assignmentValue: unknown,
-): number | null {
-  if (
-    !reservationValue || Array.isArray(reservationValue) ||
-    typeof reservationValue !== "object" || !assignmentValue ||
-    Array.isArray(assignmentValue) || typeof assignmentValue !== "object"
-  ) {
-    return null;
-  }
-  const result = reservationValue as Record<string, unknown>;
-  const assignment = assignmentValue as Record<string, unknown>;
-  const counts = [
-    result.checked_in_count,
-    result.checked_out_count,
-    result.blocked_check_in_count,
-    result.purged_guest_name_count,
-    assignment.activatedCount,
-    assignment.rolledOverCount,
-    // Optional only for a rolling deployment against the pre-overdue RPC.
-    assignment.overdueCount ?? 0,
-  ];
-  if (counts.some((count) => typeof count !== "number" || count < 0)) {
-    return null;
-  }
-  return (counts as number[]).reduce((sum, count) => sum + count, 0);
 }
 
 Deno.serve(async (request) => {
@@ -195,7 +167,7 @@ Deno.serve(async (request) => {
         p_invocation_key: invocationKey,
         p_scheduled_at: scheduledBucketAt.toISOString(),
         p_status: "succeeded",
-        p_transition_count: transitionCount(data, assignmentData),
+        p_transition_count: schedulerTransitionCount(data, assignmentData),
         p_error_code: null,
         p_started_at: startedAt.toISOString(),
         p_completed_at: new Date().toISOString(),
