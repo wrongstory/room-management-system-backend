@@ -1,26 +1,42 @@
 # 알림 이벤트 카탈로그 v1
 
-#305/#308 1차 후보는 시간 만료에 따른 rollover/`scheduled_expired` 신규 이벤트를 만들지 않는다.
-이 카탈로그의 기존 관련 family는 과거 typed 이력의 유효성·조회 증명을 위해 유지한다.
-2차 후보의 `cleaning.overdue_admin`은 미완료 현장 청소의 최초 지연을 관리자에게 알린다.
-target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를 넘어도 중복하지 않는다.
-3차 후보는 `cleaning.started_admin`으로 정상 청소 시작을 업무관리자에게 알린다.
-자기 push를 만들지 않으며 기존 검수 승인 등의 inbox/push 정책은 바꾸지 않는다. 운영 전달 완료가 아니다.
-[진행 범위](./CLEANING_OVERDUE.md)를 따른다.
+2026-10-02 현재 source/dev 기준은 `dev@4fe6c981`의 92 migrations다.
+#308 [PR #340](https://github.com/wrongstory/room-management-system-backend/pull/340)과
+#343 [PR #346](https://github.com/wrongstory/room-management-system-backend/pull/346)은 각각
+승인 source/dev tree 동일성·required CI application/migration PASS·독립 QA98/100으로 통합 완료했다.
+#305 종료는 문서 정합화 PR의 exact-head CI·독립 QA·dev 통합 확인 뒤에만 수행하며
+최종 근거는 [Issue #305](https://github.com/wrongstory/room-management-system-backend/issues/305)에서 추적한다.
+[종료 감사](./WORK_DEADLINE_CLOSURE.md)의 별도 후속을 따른다.
+이 기록은 main/production/recovery·프런트·tag·실기기 UAT 변경이나 최신 운영 재검증이 아니다.
 
-6차 후보는 성공한 폭탄방·특이사항 신고를 관리자에게, 폭탄방 선판정을 해당 메이드에게
-즉시 informational 알림으로 전달한다. 기존 전체 제출/최종 검수 알림과 다른 사건이며,
+#305/#308의 dev 계약은 시간 만료에 따른 rollover/`scheduled_expired` 신규 이벤트를 만들지 않는다.
+이 카탈로그의 기존 관련 family는 과거 typed 이력의 유효성·조회 증명을 위해 유지한다.
+2차로 통합한 `cleaning.overdue_admin`은 미완료 현장 청소의 최초 지연을 관리자에게 알린다.
+target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를 넘어도 중복하지 않는다.
+3차로 통합한 `cleaning.started_admin`은 정상 청소 시작을 업무관리자에게 알린다.
+자기 push를 만들지 않으며 기존 검수 승인 등의 inbox/push 정책은 바꾸지 않는다. 운영 전달 완료가 아니다.
+[계약과 단계별 과거 검증](./CLEANING_OVERDUE.md)을 따른다.
+
+6차로 통합한 계약은 성공한 폭탄방·특이사항 신고를 관리자에게, 폭탄방 선판정을 해당 메이드에게
+즉시 informational inbox/outbox로 기록한다. 실제 기기 전달 완료를 뜻하지 않는다. 기존 전체 제출/최종 검수 알림과 다른 사건이며,
 과거 이력 backfill·단순 사진 업로드 알림·원문 복제는 없다.
 [상대 역할 알림 검증](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
 
-#343 후보는 최초 판정의 기존 7일 응답 기준을 지난 미응답 사건에 관리자 주의 알림을 추가한다.
+#343의 dev 계약은 최초 판정의 기존 7일 응답 기준을 지난 미응답 사건에 관리자 주의 알림을 추가한다.
 새 SLA·권한 만료·자동 종결·반복 경고가 아니며 [주의 알림 계약](./COMPLAINT_RESPONSE_ATTENTION.md)을 따른다.
 
-이 문서는 Issue #109의 기반 계약과 Issue #128/#264/#308/#343의 보완을 반영한 42개 공개 category와 59개 event family의 후보 정본이다. DB의
+이 문서는 Issue #109의 기반 계약과 Issue #128/#264/#308/#343의 보완을 반영한 현재 dev의
+42개 공개 category와 59개 event family 정본이다. DB의
 `private.notification_event_catalog`와 테스트가 이 표를 그대로 검증한다. `source`는 알림 생성과
 해결의 typed provenance이며 audit payload나 문자열 dedupe는 권한 근거가 아니다.
+이번 문서 감사에서 기존 표의 #133 checkout 3행과 #187 DURING_STAY room-move 1행 누락을
+보완했다. 이미 적용된 `20260913141655_checkout_not_completed_incident_workflow.sql`과
+`20260916210000_reservation_during_stay_room_move.sql`의 catalog 계약을 그대로 문서화하며
+새 category/family·권한·runtime 변경은 없다.
 
-2026-09-23 사용자 UAT에서 실제 기기 Web Push 수신을 확인했다. 이 확인은 공개 알림 계약의 전달 가능성을 입증하지만, provider secret·개별 subscription 원문·내부 worker health를 노출하거나 대신 검증하는 근거는 아니다.
+2026-09-23 사용자 UAT에서 실제 기기 Web Push 수신을 확인한 이력은 보존한다. 이 확인은
+당시 공개 알림 계약의 전달 가능성에 한정하며 #308/#343 새 family의 운영 전달·UAT나 현재 worker
+health를 대신 검증하지 않는다. provider secret·개별 subscription 원문도 공개하지 않는다.
 
 공통 규칙:
 
@@ -33,7 +49,8 @@ target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를
   `[startedAt, startedAt + 10m)`이다. 경계 시각은 새 UUID `groupId`를 만든다.
 - 공개 deep link kind는 `cleaningTarget`, `assignmentRequest`, `submission`, `complaintCase`,
   `payrollCycle`, `payrollProfile`만 허용한다.
-- resolver가 `none`이면 informational history이며, 그 밖의 resolver는 표의 exact source와
+- resolver가 `none`이면 자동 terminal resolve를 하지 않는다. 행동 필요 여부는 별도
+  `requiresAction` 계약이며 resolver로 추측하지 않는다. 그 밖의 resolver는 표의 exact source와
   terminal domain evidence가 일치할 때만 `resolved_at`을 최초 1회 기록한다.
 
 | event family | category | recipient capability | action/push | source | resolver | deep link | group family/scope |
@@ -50,6 +67,10 @@ target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를
 | reservation.manual_checkout_rescheduled | cleaning_schedule_changed | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_schedule_changed/room |
 | reservation.notified_schedule_changed | cleaning_schedule_changed | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_schedule_changed/room |
 | reservation.notified_guest_count_changed | cleaning_assignment_changed | maid.assignment_party | no/yes | audit_event_assignment | none | cleaningTarget | cleaning_assignment_changed/room |
+| reservation.room_moved_during_stay | reservation_room_moved | admin.assignment_decider | yes/yes | reservation | none | cleaningTarget | reservation_room_moved/room |
+| checkout.presence_reported_admin | checkout_presence_reported | admin.assignment_decider | yes/yes | checkout_presence_incident | checkout_incident_terminal | cleaningTarget | checkout_presence_reported/room |
+| checkout.presence_resolved_maid | checkout_presence_resolved | maid.assignment_party | no/yes | checkout_presence_incident_decision | none | cleaningTarget | checkout_presence_resolved/room |
+| checkout.presence_previous_maid_resolved | checkout_presence_resolved | maid.assignment_party | no/yes | checkout_presence_incident_decision | none | cleaningTarget | checkout_presence_resolved/room |
 | assignment.prestart_same_maid_changed | cleaning_assignment_changed | maid.assignment_party | yes/yes | cleaning_assignment | assignment_terminal | cleaningTarget | cleaning_assignment_changed/room |
 | assignment.cancellation_requested | assignment_cancellation_requested | admin.assignment_decider | yes/yes | assignment_change_request | assignment_request_terminal | assignmentRequest | assignment_cancellation_requested/room |
 | assignment.cancellation_approved | assignment_cancellation_approved | maid.assignment_party | no/yes | assignment_change_request | none | assignmentRequest | assignment_cancellation_approved/room |
@@ -95,8 +116,8 @@ target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를
 | payroll.payment_reopened | payroll_payment_reopened | maid.payroll_owner | no/no | payroll_payment_result | none | payrollCycle | payroll_payment_reopened/payrollCycle |
 
 `private.notification_outbox`는 provenance가 없는 legacy history로만 보존하며 어떤 worker도 읽지 않는다.
-`private.notification_delivery_outbox`가 #111 worker의 유일한 향후 입력이다. #109에서는 pending append와
-권한 차단만 정의하며 claim, lease, retry, provider 호출은 구현하지 않는다.
+`private.notification_delivery_outbox`가 #111 worker의 유일한 입력이다. 과거 #109 자체 범위에서는
+pending append와 권한 차단만 정의했으며 claim, lease, retry, provider 호출은 후속 #111/#112로 구현했다.
 
 ## #111 delivery 계약
 
@@ -104,6 +125,12 @@ target별 immutable event와 수신자별 enrollment로 10분 grouping 경계를
 job/target 원장에서 최초 claim 때 active subscription의 exact logical ID/version/revision을 한 번만
 snapshot한다. 당시 구독이 없으면 `NO_ACTIVE_SUBSCRIPTION`, enqueue 후 24시간이 지나면
 `STALE_NOTIFICATION` terminal이며 이후 등록으로 과거 push를 재생하지 않는다.
+
+#343 신규 `complaint.response_attention_admin`만 늦게 자격을 갖춘 수신자의 최초 enrollment
+시각을 새 outbox의 enqueue 기준으로 쓴다. inbox/group의 원 event 시각은 그대로이며
+기존 수신자 outbox 재발행·24시간 TTL 연장은 없다. 반면 `cleaning.overdue_admin`은 원 event-clock을
+유지하여 24시간 뒤 새 admin push가 즉시 만료될 수 있다. 이 기존 family 한계는
+[#345](https://github.com/wrongstory/room-management-system-backend/issues/345) OPEN이며 #343 완료로 해결되지 않았다.
 
 send 권한의 선형화점은 encrypted envelope 복호화와 live `auth.sessions` 확인 뒤의 exact-current
 fenced permit이다. permit 전 rotation/retire는 전송을 막는다. permit 직후 동시 retire 또는 provider

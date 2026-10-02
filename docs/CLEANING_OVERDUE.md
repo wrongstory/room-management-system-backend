@@ -1,8 +1,25 @@
 # #308 지연 업무: 기존 업무 보존
 
-정책은 #305와 제품 가이드의 확정 결정을 따른다. 현재 작업은 1·2·3차와 4A/4B1/4B2·5차 source 후보이며
-production/main/recovery, 실제 객실 데이터·PIN·계정은 변경하지 않는다.
+정책은 #305와 제품 가이드의 확정 결정을 따른다. 2026-10-02 기준 #308의 1·2·3차와
+4A/4B1/4B2·5·6차는 PR #340으로 source/dev 완료했다. 아래 후보·Draft·잔여 gate는
+2026-10-01 각 단계의 과거 기록이며 현재의 미완료 상태가 아니다.
 6차 상대 역할 신고·선판정 통지는 [별도 검증 기록](./CLEANING_REPORT_NOTIFICATIONS.md)에 기록한다.
+
+## 현재 source/dev 완료 근거 — 2026-10-02
+
+| 범위 | 승인·통합 근거 |
+|---|---|
+| #308 업무 보존·알림·#320 진단 source 결합 | [PR #340](https://github.com/wrongstory/room-management-system-backend/pull/340), source `bdf3cda2347041134a73708f4209c4a36907f140` → dev `4d85458c5d0a900cf87f7318fcd9b2474c03a889`; 동일 tree `6013c056dd32208ce375138d17918de4bbfa3743`, [CI36864792279](https://github.com/wrongstory/room-management-system-backend/actions/runs/36864792279) application/migration PASS, 독립 QA98/100 |
+| #343 컴플레인 미응답 주의 알림 | [PR #346](https://github.com/wrongstory/room-management-system-backend/pull/346), source `cc7eb199fae8f6b56408c932a8d4ea6b76d881b7` → dev `4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`; 동일 tree `2c8e06ef48846a28670f472f6bdc3b1be8c5221f`, [CI36952950791 attempt 2](https://github.com/wrongstory/room-management-system-backend/actions/runs/36952950791/attempts/2) application/migration PASS, 독립 QA98/100 |
+
+#308/#343의 source/dev gate는 완료했다. #305 종료는 이 문서 정합화 PR의 exact-head CI·
+독립 QA·dev 통합 확인 뒤에만 수행하며 최종 근거는 [Issue #305](https://github.com/wrongstory/room-management-system-backend/issues/305)에서 추적한다.
+최종 92 migrations·18 upgrade·70 SQL/3,784 assertions·Node694·Edge304·Python95·
+KST145·121실 backup PASS와 과거 실패는 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
+이 문서 변경은 main/production/recovery·프런트·tag·UAT의 변경이나 최신 운영 재검증이 아니다.
+#320 실제 신고 사례 원인·프런트 한국어 매핑/UAT, #342 잠금 비용, #345 기존 지연 알림의
+late-admin 원 event-clock 24h TTL 한계는 별도다. #343 신규 family의 enrollment-clock은
+#345 보완이 아니다. 이전 `5267f35` same-key CI FAIL의 원인과 #300 실제 매칭 필드는 미확정이다.
 
 ## 1차 범위
 
@@ -35,6 +52,9 @@ Fastify와 Edge preview는 같은 순수 optimizer를 사용한다. lifecycle/st
   이벤트 identity가 아니다. 이후 실행과 다른 actor는 최초 event 시각/기존 notice를 재사용한다.
 - 자기 수신 inbox는 보존하고 자기 push만 생략한다. 늦게 활성화된 admin의 inbox 추가는
   허용하지만 push의 기존 24시간 TTL을 연장하지 않는다. 완료된 업무에는 새 수신자를 추가하지 않는다.
+  이 family의 outbox는 원 event 시각을 유지하므로 24시간 뒤 신규 admin push가 즉시 만료될 수 있다.
+  이 한계는 [#345](https://github.com/wrongstory/room-management-system-backend/issues/345) OPEN이며
+  [#343 신규 family의 enrollment-clock](./COMPLAINT_RESPONSE_ATTENTION.md)과 구분한다.
 - 수신자 상태는 enrollment와 typed writer에서 다시 확인한다. 계정 변경과의 역순 잠금을
   피하며 상태 변경으로 필요한 outbox가 불일치하면 transaction 전체를 실패·재시도한다.
   intent 생성 이후 비활성화는 역사 inbox/outbox를 보존하고 worker가 최신 상태로 전송을 억제한다.
@@ -45,7 +65,10 @@ Fastify와 Edge preview는 같은 순수 optimizer를 사용한다. lifecycle/st
   `d509b44b1371f25d73891e04d355b0cb0e923f5f`를 읽기 전용 재확인했다.
   알림 category는 string, 기존 deep link와 한국어 title/body를 수용한다. 프런트 변경은 없다.
 
-## #308 잔여 범위 — 완료/종료 전 필수
+## 과거 #308 잔여 범위 — 2026-10-01, PR #340 승인 전
+
+아래는 단계 진행 당시 남았던 gate다. 6차 보완·전체 종료 감사·exact-head CI·dev 승인은
+위 PR #340 근거로 완료됐으며 단계별 PASS/FAIL/NOT RUN 이력은 그대로 보존한다.
 
 1. 1·2차 overdue 후보는 exact head `7d2337e`의 독립 QA 98점/required CI PASS. dev 통합은 미완료.
 2. 3차 정상 시작 보완 이후 전체 종료 감사에서 신고·폭탄방 선판정 3건의 누락을 확인했다.
@@ -57,12 +80,12 @@ Fastify와 Edge preview는 같은 순수 optimizer를 사용한다. lifecycle/st
    target/assignment의 기존 serviceDate snapshot을 임의 수정하지 않는다.
 4. 위 후속과 통합한 fresh/upgrade/RLS/concurrency/독립 QA/required CI.
 
-Draft PR #340은 `Closes #308`을 예약하지만 아직 미병합이므로 #308/#305를 닫지 않는다.
+당시 Draft PR #340은 `Closes #308`을 예약했지만 미병합이어서 #308/#305를 닫지 않았다.
 #320 진단 PR #339의 후보를 직접 의존 관계로 결합하며 `Refs #320`만 사용한다.
-#320 실제 사용자 사례는 미확정이고 PR #339를 임의 종료하지 않는다. dev 통합 시 최신
-head에서 충돌·회귀·문서 정합성을 다시 검사한다.
+#320 실제 사용자 사례는 여전히 미확정이다. 당시 남아 있던 dev 통합 시 최신 head의
+충돌·회귀·문서 정합성 검사는 PR #340의 최종 gate에서 수행했다.
 
-## 검증 기록: 1차 후보
+## 과거 검증 기록: 1차 후보 — 2026-10-01
 
 2026-10-01 로컬 합성 환경에서 실제 실행했다. 운영 검증 결과가 아니다.
 
@@ -88,7 +111,7 @@ head에서 충돌·회귀·문서 정합성을 다시 검사한다.
 checkout 보안 trigger는 완화하지 않았다. fresh reset 없이 재시도한 `DEVELOPER_ALREADY_EXISTS`는
 환경 실패로 분리하고 이후 fresh DB로 실행했다. 독립 QA가 각각의 보완 근거를 재검토했다.
 
-## 검증 기록: 2차 후보
+## 과거 검증 기록: 2차 후보 — 2026-10-01
 
 2026-10-01 로컬 합성 환경의 87번째 migration을 검증한다. 위 1차 결과와 별도이며
 새 commit의 원격 CI와 독립 QA를 마치기 전에는 승인·병합 결과로 사용하지 않는다.
@@ -158,7 +181,7 @@ full `db:test`와 전체 concurrency까지 PASS했다. 이미지 digest/테스�
 
 과거 미배정/draft의 오늘 preview·현재 가능일/sequence는 이 단계에서 변경하지 않는다.
 
-### 검증 기록: 3차 후보
+### 과거 검증 기록: 3차 후보 — 2026-10-01
 
 2026-10-01 로컬 합성 환경의 88번째 migration과 직접 관련 회귀를 검증한다.
 위 1·2차 결과는 역사 기록이며 3차 새 head 승인으로 사용하지 않는다.
@@ -197,15 +220,15 @@ full `db:test`와 전체 concurrency까지 PASS했다. 이미지 digest/테스�
 - 신규 제안은 고정 부하의 최대 sequence 다음 번호를 사용한다. 승인된 terminal target의 current
   assignment까지 포함한 실제 번호 점유·동시성 검증은 DB 저장의 책임이며 이번 계산기 변경으로 완료되지 않는다.
 - Fastify/Edge가 같은 코드를 사용한다. 공개 endpoint/schema·DB/RLS/migration·receipt·알림 변경 없음.
-- **종단 기능 미완료**: DB snapshot의 과거 대상집합, 오늘 목록 projection, commit 후보/잠금,
+- **4A 당시 종단 기능 미완료**: DB snapshot의 과거 대상집합, 오늘 목록 projection, commit 후보/잠금,
   오늘 가능일 변경 보호를 다음 단계에서 함께 연결해야 한다. 원 날짜 history 조회 의미는 보존한다.
   과거 데이터 planningDate 추측 backfill·단일 1–N 재번호화·자동 담당 변경은 하지 않는다.
 
-### 검증 기록: 4A 후보
+### 과거 검증 기록: 4A 후보 — 2026-10-01
 
 3차 source `9b039775a26e2a420e27178c9f98d0e6c4050c11`의 [required CI run36810797836](https://github.com/wrongstory/room-management-system-backend/actions/runs/36810797836)는
 application/migration 모두 PASS로 2026-10-01 12:46 KST 완료됐다. 이는 4A 새 head 검증을 대신하지 않는다.
-PR #340은 Draft이며 #308/#305는 OPEN이다.
+당시 PR #340은 Draft이며 #308/#305는 OPEN이었다.
 
 | 4A 검증 | 실제 결과 |
 |---|---|
@@ -236,11 +259,11 @@ PR #340은 Draft이며 #308/#305는 OPEN이다.
   UUID·날짜별 계산 순서는 업무 실행 우선순위가 아니며 새 단일 1–N·planningDate backfill은 없다.
 - 기존 private helper의 PUBLIC/anon/authenticated/service_role EXECUTE를 계속 막고, 기존 server-only
   public wrapper와 actor gate만 사용한다. RLS/table/public endpoint/schema/worker/외부 호출 변경은 없다.
-- **종단 기능 미완료**: 오늘 현재 목록, commit 후보·잠금, 오늘 가능일 변경 보호와 최신 dev/#320 통합은
+- **4B1 당시 종단 기능 미완료**: 오늘 현재 목록, commit 후보·잠금, 오늘 가능일 변경 보호와 최신 dev/#320 통합은
   후속이다. Preview는 저장 권한이 아니며 최종 UNIQUE/CAS·ownership·멱등성은 저장 DB가 다시 검사한다.
-  PR #340 Draft, #308/#305 OPEN을 유지한다. production/main/recovery/프런트 변경 없음.
+  당시 PR #340 Draft, #308/#305 OPEN을 유지했다. 이 단계에서 production/main/recovery/프런트 변경 없음.
 
-### 검증 기록: 4B1 후보
+### 과거 검증 기록: 4B1 후보 — 2026-10-01
 
 2026-10-01 fresh local synthetic 환경에서 검증한다. 4A exact-head CI PASS는 역사 기록이며
 4B1 새 commit의 required CI를 대신하지 않는다. 프런트 `dev@09ed28446a4fd43919cddb29ebe442b848548ab8` /
@@ -288,7 +311,7 @@ activation fixture는 위치 기반 객실 slice 대신 기존 target/reservatio
 - 목록 총1,000건, 관련 조회는 ID100건 batch별1,000건이다. exact count·실제 반환 수·상한을 검사하고
   잘린 attempt/submission/schedule에서 최신 상태를 추측하지 않는다. DB impact는1,001 sentinel로
   전체 후보1,000 상한을 확인한 뒤 fingerprint를 만든다. 상한 오류는 기존 redacted500 계약을 유지한다.
-- CLI 생성 `20261001064101_cleaning_overdue_commit_planning.sql`은 90번째 append-only 후보다.
+- CLI 생성 `20261001064101_cleaning_overdue_commit_planning.sql`은 90번째 append-only migration이다.
   동일 private 포함 함수로 오늘 preflight와 target/assignment/maid lock 집합에 과거 draft를 포함한다.
   기존 exact-date 범위 밖 요청의 blocked 사유와 오늘/내일 mutation gate를 유지하고 내일에 과거를 넣지 않는다.
   선택 항목121 상한·예약 advisory lock·현재 계정/원 schedule·CAS·receipt·부분집합 원자성은 그대로다.
@@ -299,10 +322,10 @@ activation fixture는 위치 기반 객실 slice 대신 기존 target/reservatio
 - 기존 source preflight는 원 일정 검증이며 현재 점유/선행 workflow의 최종 activation/start 검사를
   대체하지 않는다. oversized commit의 기존 전체 후보 lock 뒤 impact 상한 재검증 순서는 유지하므로,
   forged/stale 요청의 lock 작업량까지1,000으로 제한하는 성능 보완은 후속이다. 일부 write/응답은 허용하지 않는다.
-- PR #340 Draft, #308/#305 OPEN. 최신 dev/#320 통합·전체 coverage/종료 판단과 exact-head CI는
-  별도 gate다. production/main/recovery/프런트/실제 계정·PIN·외부 provider/Release/tag 변경 없음.
+- 4B2 당시 PR #340 Draft, #308/#305 OPEN이었다. 최신 dev/#320 통합·전체 coverage/종료 판단과
+  exact-head CI는 별도 gate였으며 이후 PR #340으로 완료했다. 이 단계의 운영·프런트 변경은 없었다.
 
-### 검증 기록: 4B2 후보
+### 과거 검증 기록: 4B2 후보 — 2026-10-01
 
 2026-10-01 local synthetic 환경의 이번 후보 결과다. 이전4B1 CI PASS는 새 head 승인으로 사용하지
 않는다. 프런트 dev09ed284/main d509b44를 읽기 전용 재확인했다. 최신 wireframe은 오늘 날짜로 목록/
@@ -332,11 +355,11 @@ preflight를 읽고 draft에는 target/maid/sequence/CAS만, commit에는 요청
 fixture는 실제 submit RPC·새 버전을 사용하도록 보완한 뒤 같은85assertions를 재실행해 PASS했다.
 제품 guard·기존 날짜 범위·원장 불변성·assertion을 삭제하거나 완화하지 않았다.
 
-## 5차 범위: #320 진단 후보와 업무 보존 계약 결합
+## 5차 구현 이력: #320 진단 후보와 업무 보존 계약 결합 — 2026-10-01
 
-같은 bounded assignment context의 직접 의존 후보를 로컬 source 브랜치에서 결합한다.
+당시 같은 bounded assignment context의 직접 의존 후보를 로컬 source 브랜치에서 결합했다.
 기준은 #308 `744662c`, #320 `ad91d2e`, 최신 dev `e19f81f`다. dev/main/운영 및
-프런트 변경은 없다. PR #340 Draft/#308/#305/#320 OPEN을 유지하며 PR #339를 닫지 않는다.
+프런트 변경은 없었다. PR #340 Draft/#308/#305/#320 OPEN을 유지했으며 PR #339를 닫지 않았다.
 
 - #320 진단은 #308의 `(원 날짜, 순번)` 고정 슬롯 검사를 사용한다. 과거 날짜와 동일 순번을
   충돌로 오판하지 않으며 원 target/assignment 날짜 불일치·진짜 중복·revision/owner/source
@@ -348,7 +371,7 @@ fixture는 실제 submit RPC·새 버전을 사용하도록 보완한 뒤 같은
 - 큰 board의 lock 전 상한 보완은 별도 [#342](https://github.com/wrongstory/room-management-system-backend/issues/342)다.
   이번 변경이 기존 전체 후보 lock 비용까지 제한하거나 #342를 해결한 것으로 표시하지 않는다.
 
-### 5차 검증 기록
+### 과거 5차 검증 기록 — 2026-10-01
 
 | 검증 | 실제 결과 |
 |---|---|

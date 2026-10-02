@@ -1,10 +1,21 @@
 # 배정 Preview API — #29/#231/#320 계약
 
-## #308/#320 후보 결합 — 2026-10-01
+## 현재 source/dev 계약 — 2026-10-02
 
-#308 기준 `744662c`와 #320 진단 후보 `ad91d2e`를 결합했다. 최신 dev는 `e19f81f`로
-변경 없음이며 아래 과거 snapshot의 승인·검증을 새 후보의 승인으로 사용하지 않는다.
-두 기능은 같은 배정 계산기의 직접 의존 관계이며 #320 실제 신고 확인은 OPEN으로 남는다.
+#308의 업무 보존 계산기와 #320 진단 source 결합은 [PR #340](https://github.com/wrongstory/room-management-system-backend/pull/340)으로
+dev에 통합했다. 승인 source `bdf3cda`와 dev `4d85458`의 동일 tree `6013c056`,
+[CI36864792279](https://github.com/wrongstory/room-management-system-backend/actions/runs/36864792279) application/migration PASS와 독립 QA98/100이 근거다.
+현재 source/dev 기준은 #343을 포함한 `4fe6c981`이며 92 migrations다.
+#320 실제 신고 사례의 원인 대조·프런트 한국어 사유 매핑/UAT 완료 근거는 아니다.
+#305 종료는 문서 정합화 PR의 exact-head CI·독립 QA·dev 통합 확인 뒤에만 수행하며
+최종 근거는 [Issue #305](https://github.com/wrongstory/room-management-system-backend/issues/305)에서 추적한다. 운영 승격은 별도다.
+전체 승인·실패 이력과 후속은 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
+
+## 과거 #308/#320 후보 결합 — 2026-10-01
+
+당시 #308 기준 `744662c`와 #320 진단 후보 `ad91d2e`를 결합했다. 당시 dev는 `e19f81f`였으며
+아래 snapshot의 승인·검증을 새 후보의 승인으로 사용하지 않았다.
+두 기능은 같은 배정 계산기의 직접 의존 관계이며 #320 실제 신고 확인은 현재도 OPEN이다.
 
 - 고정 업무의 충돌 slot은 `(원 serviceDate, sequence)`다. 과거 날짜라는 이유만으로
   FIXED_SERVICE_DATE_MISMATCH를 만들지 않는다. 실제 target/assignment 원 날짜 불일치,
@@ -16,12 +27,13 @@
 - 같은 입력의 기존 결과·점수·fingerprint는 744662c와 합성 100개 직접 비교하여 동일했다.
   #320의 e19f81f 역사 golden은 빈 sequenceReservations를 정규화하기 전 hash다.
   현재 기준 hash는 git-show744 실행으로 독립 확보했으며 hash를 바꿔 옛 golden에 맞추지 않았다.
-- 새 migration/endpoint 없음. 90개 migration은 그대로다. 실제 사용자 사례/프런트 한국어
-  매핑·UAT·dev 병합·운영 적용은 미완료다. 검증은 [지연 업무 기록](./CLEANING_OVERDUE.md)을 따른다.
+- 이 결합 단계에는 새 migration/endpoint가 없었고 90개 migration을 유지했다.
+  당시 dev 병합은 미완료였으나 이후 PR #340으로 완료했다. 실제 사용자 사례/프런트 한국어
+  매핑·UAT·운영 적용은 이 검증 범위 밖이다. [지연 업무 기록](./CLEANING_OVERDUE.md)을 따른다.
 
-## #320 진단 보강 — feature source, 운영 미배포
+## #320 진단 계약 — source/dev 통합, 실제 사례 확인은 별도
 
-기준 backend는 `dev@e19f81fabe1ff202b5a42ba37b9d5dccbf8215c2`다. Preview 연동만
+2026-10-01 단독 후보의 기준 backend는 `dev@e19f81fabe1ff202b5a42ba37b9d5dccbf8215c2`였다. Preview 연동만
 프런트 `dev@09ed28446a4fd43919cddb29ebe442b848548ab8`의 `WIREFRAME/index.html`
 9322/9335/9346/9452행과 대조했다. 제품 전체의 프런트 기준 snapshot을 승격한 것은 아니다.
 프런트는 이미 `reasonCodes` 우선, 없으면 기존 `reason`을 표시하지만 한국어 조치 문구는
@@ -59,7 +71,8 @@
 `FIXED_SOURCE_BLOCKED` → `FIXED_ATTEMPT_OWNER_MISMATCH` →
 `FIXED_ATTEMPT_WORKFLOW_UNRESOLVED`다.
 SQL의 고정 업무 blockedReason은 FIXED_SOURCE_BLOCKED로만 집계하고 raw payload를 새 진단에
-복사하지 않는다. 진행 중 업무의 단순 ASSIGNMENT_WINDOW_EXPIRED 예외는 유지한다.
+복사하지 않는다. 진행 중 업무의 단순 `ASSIGNMENT_WINDOW_EXPIRED` 예외는 legacy snapshot의
+호환 처리로 유지한다. 현재 source가 dueAt 경과 차단을 생성·허용한다는 뜻이 아니다.
 고정 업무를 삭제하거나 무시해 제안을 만드는 복구 명령이 아니다.
 
 예: active=2, submitted=2, available=2, fixedExcluded=2, eligible=0이면 신규 제안 0 /
@@ -72,8 +85,9 @@ FIXED_ASSIGNMENT_CONFLICT가 함께 온다. **합성 재현이며 사용자 신�
 preview, availability candidates, commit-impact를 민감정보 없이 대조하기 전 #320을 종료하지 않는다.
 한국어 조치 문구 매핑, 기능 배포 후 UAT는 별도 프런트/운영 gate다.
 
-기준 integration은 `dev@a98e2ccc0bf86d760b144691aacb0807215ca09e`다. 이 문서는 feature source
-계약이며 production/recovery에 적용하거나 Edge/Pages/Cron을 배포했다는 의미가 아니다.
+기존 #28 integration `dev@a98e2ccc0bf86d760b144691aacb0807215ca09e`는 과거 기준이다.
+위 계약은 현재 source/dev에 통합됐으며 production/recovery 적용이나 Edge/Pages/Cron 배포를
+새로 확인했다는 의미가 아니다.
 HTTP 기계 판독 정본은 source OpenAPI, 운영 상태 정본은 [API 상태표](./API_STATUS_MATRIX.md)다.
 
 ## 권한과 경로
@@ -127,10 +141,11 @@ additional 예약 overlap, reclean 원 maid/source를 검증한다. Pure TypeScr
 `planningAt`, `availableFrom`, `dueAt`은 명시된 시각 사실로 보존한다. #305/#308에 따라
 당일 신규 후보의 `dueAt` 경과만으로 거부하지 않는다. `availableFrom >= dueAt`인 잘못된
 일정과 실제 source/점유 충돌은 계속 거부한다. 예상 분수를 더한 종료시각이나 순차 cursor를 만들지 않는다.
-과거 미배정 업무의 DB snapshot 포함은 #308 4B1 후보로 연결했다. 4B2 후보는 오늘 current 목록과
+과거 미배정 업무의 DB snapshot 포함은 #308 4B1로 연결했다. 4B2는 오늘 current 목록과
 오늘 계획일 기반 preflight/확정/잠금·가능일 보호까지 연결한다. 최상위 serviceDate는 요청 계획일이고
 각 항목 serviceDate는 원 업무 날짜다. Preview는 저장 권한이 아니며 원 CAS/UNIQUE 검사는 그대로다.
-최신 dev/#320 통합·종료 검토는 [#308 후속 범위](./CLEANING_OVERDUE.md)이며 운영 완료가 아니다.
+dev/#320 source 통합·#308 종료 검토는 PR #340으로 완료했다. 단계별 검증은
+[지연 업무 기록](./CLEANING_OVERDUE.md)을 따르며 실제 #320 사례 원인·운영 완료가 아니다.
 고정 부하의 slot은 `(원 serviceDate, sequence)`로 구분한다. 날짜가 다르면 같은 번호도
 기존 이력 그대로 유지하고, 같은 날짜의 중복이나 assignment/target 날짜 불일치는 여전히 거부한다.
 동선 점수 계산에서만 날짜→기존 sequence→안정적인 target ID로 정렬하며 이는 실행 순서 지정이나

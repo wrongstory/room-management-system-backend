@@ -1,6 +1,24 @@
 # v0.6.5 컴플레인 기한 비차단 운영 승격
 
-> 상태: release candidate. `dev@ab185af2343644a5a2aec85962eb5272243844c4`의 #306 변경을 `release/v0.6.5 → main`으로 승격한다. 운영 적용은 release PR 병합과 별도 production preflight 통과 후에만 수행한다.
+> 상태: #309/#310의 2026-09-26 릴리즈 적용 완료 기록. 아래 candidate 검증·배포 순서는 당시 이력이며 이번 문서 정합화에서 운영을 다시 검증하거나 배포하지 않는다.
+
+## 2026-09-26 완료 근거와 남은 hosted 검증
+
+[Issue #309 운영 적용 기록](https://github.com/wrongstory/room-management-system-backend/issues/309#issuecomment-5844084725)에 따라
+PR #310의 merged main은 `08ee81693d997c11cbfca194e987f4acd26a3fe8`이다.
+당시 production은 84 migrations / head `complaint_deadlines_non_blocking`, `api` ACTIVE v36,
+health HTTP 200, OpenAPI 0.5.1 / 129 paths·139 operations, Security Advisor error 0이었다.
+기존 rooms 121/reservations 21과 complaint 원장 0건을 보존했다.
+
+Hosted positive mutation은 안전한 기존 complaint fixture가 없어
+`SKIPPED_WITH_REASON=NO_SAFE_EXISTING_COMPLAINT_FIXTURE`였으며 PASS로 승격하지 않는다.
+실제 역할별 검증은 #13에 남는다. Tag/GitHub Release는 발행하지 않았다.
+이 기록은 현재 운영 재검증이 아니며 #308/#343의 이후 dev-only scheduler 변경 적용을 뜻하지 않는다.
+
+## 당시 release candidate
+
+`dev@ab185af2343644a5a2aec85962eb5272243844c4`의 #306 변경을 `release/v0.6.5 → main`으로 승격했다.
+아래 숫자와 검증 결과는 v0.6.5 당시 candidate·release 범위다.
 
 ## 1. 범위
 

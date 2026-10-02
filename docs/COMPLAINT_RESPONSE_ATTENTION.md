@@ -1,5 +1,20 @@
 # #343 컴플레인 미응답 주의 알림
 
+## 현재 source/dev 상태 — 2026-10-02
+
+[PR #346](https://github.com/wrongstory/room-management-system-backend/pull/346)의 승인 source
+`cc7eb199fae8f6b56408c932a8d4ea6b76d881b7`와 dev squash
+`4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`는 tree
+`2c8e06ef48846a28670f472f6bdc3b1be8c5221f`로 동일하다.
+[CI36952950791 attempt 2](https://github.com/wrongstory/room-management-system-backend/actions/runs/36952950791/attempts/2)
+application/migration PASS와 exact-source 독립 QA98/100으로 #343 source/dev gate를 완료했다.
+최종 검증은 fresh92·18 upgrade·70 SQL/3,784 assertions·Node694·Edge304·Python95·
+KST145·121실 backup PASS다. 아래 후보·로컬 검증·잔여 gate는 승인 전의 과거 기록이다.
+#305 종료는 문서 정합화 PR의 exact-head CI·독립 QA·dev 통합 확인 뒤에만 수행하며
+최종 근거는 [Issue #305](https://github.com/wrongstory/room-management-system-backend/issues/305)에서 추적한다. [종료 감사](./WORK_DEADLINE_CLOSURE.md)는
+운영 승격·프런트·실기기 UAT 및 #300/#345 등 별도 OPEN 범위를 구분한다.
+이 문서 정합화는 main/production/recovery·프런트·tag·UAT를 변경하거나 재검증한 결과가 아니다.
+
 ## 제품 계약과 범위
 
 #305/#306에서 확정한 최초 판정 후 기존 7일 응답 기준을 알림용으로만 사용한다.
@@ -52,15 +67,15 @@ push payload, 감사에 복제하지 않는다. 기존 recipient-only 조회/읽
 실제 화면/UAT·새 category의 한국어 라벨 완성을 뜻하지 않는다. 프런트 수정은 별도 담당 범위다.
 
 92번째 CLI 생성 append-only `20261001210323_complaint_response_attention.sql`을 사용한다.
-이전 91개 migration을 수정하지 않는다. feature → dev source 구현 범위이며
+이전 91개 migration을 수정하지 않는다. PR #346으로 feature → dev source 통합을 완료했으며
 운영/main/recovery DB·Edge·Cron/Vault, 프런트 코드·운영 실제 기기 UAT는 제외한다.
 운영 승격은 승인된 release에서 migration 적용 후 exact source scheduler 배포 순서로 진행한다.
 rollback은 과거 원장 삭제가 아니라 별도 검토된 후속 migration/이전 호환 scheduler로 한다.
 
-## 검증과 상태
+## 과거 로컬 검증 기록 — 2026-10-02, PR #346 승인 전
 
-2026-10-02 로컬 source 검증 기록이다. 구현·전체 SQL/upgrade·동시성 검증 완료,
-최종 독립 QA 및 exact-head CI/dev 승격은 별도 gate다. 후속 승인·병합 근거는
+당시 로컬 source에서 구현·전체 SQL/upgrade·동시성 검증을 완료했으나
+최종 독립 QA 및 exact-head CI/dev 승격은 별도 gate였다. 후속 승인·병합 근거는 위 상태와
 [Issue #343](https://github.com/wrongstory/room-management-system-backend/issues/343)에 기록한다.
 운영 전달 PASS로 판정하지 않는다.
 
@@ -85,7 +100,8 @@ run `36864792279`는 19분 33초(DB upgrade/SQL 14분 9초, 동시성 3분 23초
 20분 예산의 여유가 27초였다. 이번 18번째 upgrade와 독립 동시성 stage의 추가 fresh reset·
 실제 경합을 수용하기 위한 조정이다. application 20분, 검증 명령·assertion·처리 상한·
 required checks·항상 cleanup·실패 처리는 유지한다. 무제한 timeout이나 검증 우회가 아니다.
-예산 조정 전 첫 원격 실행은 당시 진행 중이었으며 timeout/FAIL로 확정하지 않는다.
+예산 조정 당시 첫 원격 실행은 진행 중이었다. 그 시점의 기록을 timeout/FAIL 확정 근거로
+사용하지 않으며, 이후 확정된 `5267f35`의 migration FAIL은 아래에서 별도로 보존한다.
 
 독립 QA에서 발견한 신규 family의 late-admin 즉시 TTL 만료는 enrollment clock을 분리해
 보완했다. 기존 `cleaning.overdue_admin`의 같은 경계는 범위 밖 [#345](https://github.com/wrongstory/room-management-system-backend/issues/345)로 분리했다.
@@ -98,7 +114,7 @@ drain 1,000건 한도를 넘겨 FAIL했다(1,000 suppressed / 253 pending).
 제품 guard·worker·기존 검증 한도·assertion은 완화하지 않았다. 신규 stage는 시작 전 local host를
 검사하고 현재 checkout 전체 migration을 적용하며, 종료 후에도 fresh local DB로 정리한다.
 
-## 원격 실패와 로컬 API 검증 경계
+## 과거 원격 실패와 로컬 API 보완 — 2026-10-02
 
 2026-10-02 KST exact-head `5267f3564c0ab5e0e4b0fe17ecc3fb737bb8f6d1`의
 [CI36935605522](https://github.com/wrongstory/room-management-system-backend/actions/runs/36935605522)는
@@ -119,9 +135,10 @@ key/hash·인물 식별자·PIN을 출력하지 않는다. cleanup 전에 eviden
 정수 건수만 보존하고, 원 실패와 cleanup 실패는 각각 exit failure를 유지한다.
 운영 오류 기록 API가 아니며 제품 DB/migration·권한·API·worker·실제 경합 검증 기준은 바꾸지 않는다.
 
-보완본의 실제 검증·독립 QA·새 exact-head CI 상태는 [Issue #343](https://github.com/wrongstory/room-management-system-backend/issues/343)과
-[PR #346](https://github.com/wrongstory/room-management-system-backend/pull/346)에 별도로 기록한다.
-이전 로컬98점으로 원격 FAIL을 상쇄하거나 source/dev·운영 완료로 표시하지 않는다.
+보완본의 실제 검증·독립 QA·새 exact-head CI는 [Issue #343](https://github.com/wrongstory/room-management-system-backend/issues/343)과
+[PR #346](https://github.com/wrongstory/room-management-system-backend/pull/346)에 별도로 기록했다.
+최종 source/dev 완료는 승인 source/tree·새 CI·QA에 근거하며 이전 로컬98점으로
+이 원격 FAIL을 상쇄하거나 원인 해결·운영 완료로 표시하지 않는다.
 
 2026-10-02 KST 보완본의 `npm run ci:quality`는 52 files/694 tests·typecheck·build·lint·
 secrets·OpenAPI PASS다. helper 단위 53건과 독립 QA98/100(P0/P1 0건)을 확인했다.
@@ -129,4 +146,9 @@ secrets·OpenAPI PASS다. helper 단위 53건과 독립 QA98/100(P0/P1 0건)을 
 최종 fresh cleanup도 exit0/PASS다. synthetic 404/PGRST202 주입은 업무 RPC를 재시도하지 않고
 8개 실패를 모두 관찰해 기존 assertion이 exit1로 실패하며, 민감 sentinel 미노출·정수 건수 기록·
 finally cleanup을 확인했다. 이는 의도된 실패 처리 검증 PASS이지 RPC 기능 성공이 아니다.
-이 로컬 기록 이후 새 commit의 required CI와 exact-source 독립 QA는 별도 필수 gate다.
+이 로컬 기록 당시 새 commit의 required CI와 exact-source 독립 QA는 별도 필수 gate였으며
+최종 PR #346 승인 근거로 완료했다. 이후 CI36952950791 attempt 1의 기존 password-change
+SQL test 85는 FAIL이었다. 같은 source/판정 기준의 attempt 2 PASS를 최초 FAIL 삭제나
+[#300](https://github.com/wrongstory/room-management-system-backend/issues/300) 해결 근거로 사용하지 않는다.
+#300은 OPEN이고 실제 원격 오류와 매칭할 필드는 미확정이다. `5267f35` same-key 실패의
+개별 오류 원인도 여전히 미확정이며, 새 readiness·분류 검증이 이를 확정한 것은 아니다.

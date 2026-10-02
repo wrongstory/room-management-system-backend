@@ -2,6 +2,8 @@
 
 > 문서 지위: 설계 검토 초안이다. 구현 전에 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 먼저 읽는다. 이 문서와 ERD/DBML은 제품 가이드와 reconcile되기 전에는 목표 계약이 아니며, `[미확정]` 정책을 기존 코드나 이 문서만으로 확정하지 않는다.
 
+> #305 source/dev 완료: #308 PR #340·#343 PR #346, 92 migrations / catalog 59 family·42 category. 운영 반영을 뜻하지 않는다. 승인·실패 이력과 별도 후속은 [종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다. 아래 날짜별 운영 snapshot은 해당 시점 기록이다.
+
 ## 기술 선택
 
 - 개발 기준 API: Node.js 22, Fastify 5, TypeScript
@@ -287,7 +289,7 @@ actor/complaint stream에 고정하고 HTTP JSON은 128 KiB를 넘으면 실패�
 세션은 cast 오류나 정보 노출 없이 0행으로 실패한다. 모든 Fastify/Edge 성공·오류 응답은
 `Cache-Control: no-store`이며 빈 cursor도 `INVALID_COMPLAINT_CURSOR` 400으로 동일하게 거부한다.
 
-#343 source 후보는 위 수명주기의 최초 판정 응답 주의 기준만 관찰한다.
+#343의 dev 통합 계약(PR #346)은 위 수명주기의 최초 판정 응답 주의 기준만 관찰한다.
 `decided`·미응답·유한한 기존 기준 시각 경과를 현재 case row lock에서 재검증하고,
 private immutable evidence/enrollment와 typed inbox/outbox를 같은 짧은 transaction에 쓴다.
 기존 lifecycle RPC의 bounded/fair 100건 cursor를 별도로 추가하며 완료 receipt replay에는
@@ -596,7 +598,7 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 typed `notifications`, private `notification_delivery_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
-#308 4B2 source 후보는 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
+#308 4B2의 dev 통합 계약(PR #340)은 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
 미완료 업무를 포함합니다. 내일·과거/이력 조회는 기존 exact-date 범위이며 원 날짜/담당/순번은
 갱신하지 않습니다. Fastify/Edge 목록은 access-token RLS 본인 통보 범위를 먼저 제한하고,
 오늘 exact row와 과거 unfinished inner-target row를 합칩니다. 과거 이력에는 현재 target join을
@@ -608,7 +610,7 @@ DB impact도1,001 sentinel로 전체 후보 상한1,000을 확인한 뒤에만 f
 오늘 가능일 보호는 그 감사의 assignment/target/maid/revision/계획일을 정확히 대조하며 기존
 원 날짜 보호도 보존합니다. 감사 조회에는 notified assignment entity 전용 partial index를 사용합니다.
 기존 source preflight는 원 일정 검증이며 실제 현재 점유·선행 업무의 최종 activation/start guard를
-대체하지 않습니다. 최신 dev/#320 통합·원격 exact-head CI와 운영 승격은 별도 gate입니다.
+대체하지 않습니다. dev/#320 진단 통합과 exact-head CI는 PR #340으로 완료했습니다. #320 실제 사례/UAT와 운영 승격은 별도 gate입니다.
 
 ## 시작 전 배정 변경 — #27
 
@@ -626,7 +628,7 @@ DB impact도1,001 sentinel로 전체 후보 상한1,000을 확인한 뒤에만 f
 
 ## 수행 회차 활성화와 이월 — #28
 
-#305/#308 후보에서는 이 절의 시간 만료·자동 이월 경로를 폐기한다. 오늘과 과거 날짜의
+#305/#308의 dev 통합 계약(PR #340)은 이 절의 시간 만료·자동 이월 경로를 폐기한다. 오늘과 과거 날짜의
 통보 업무를 현재 안전 조건으로 활성화하되 원 업무/담당/snapshot은 유지한다.
 한 invocation의 대상은 최대 100건이며 private 회전 cursor가 장기 blocked 선두에 의한
 후속 업무 기아를 막는다. cursor는 변경 가능한 기술 projection이며 업무 원장이 아니다.
@@ -715,10 +717,11 @@ Fastify와 Edge가 공유하는 platform-neutral `assignment-preview-core`는 sn
 - 인증 사용자의 직접 알림 DML은 금지합니다. `read_at`은 좁은 markRead RPC, `resolved_at`과 업무 상태 변경은 검증된 서버 명령/RPC만 사용합니다.
 - 상세 역할 매트릭스와 상태 변경 규칙은 [Auth·RLS 계약](./AUTH_RLS_CONTRACT.md)을 따릅니다.
 
-### #109 typed 알림 writer 계약 — source/dev 완료, 현재 production source 반영
+### typed 알림 writer — #109 production source / #308·#343 source/dev 완료
 
-[notification catalog](./NOTIFICATION_CATALOG.md)이 6차 후보 기준 41 category/58 event family의 recipient capability,
+[notification catalog](./NOTIFICATION_CATALOG.md)이 현재 dev 기준 42 category/59 event family의 recipient capability,
 source entity, `requiresAction`, push eligibility, resolver, deep-link, group family를 고정합니다.
+#109의 원래 writer는 production source에 반영됐지만 #308/#343 추가 family의 운영 승격은 별도입니다.
 모든 현행 domain writer는 같은 transaction의 audit event에서 typed notice를 추가하며,
 DB helper가 source/actor/recipient/room/target/deep-link 관계를 exact 검증합니다. 초기 검수와
 재검수 요청은 active admin 전체의 inbox로 fan-out하고, 수동 checkout은 동일 logical
@@ -737,7 +740,7 @@ provenance가 없는 `private.notification_outbox`는 legacy history로 격리�
 읽지 않습니다. `private.notification_delivery_outbox`만 #111 worker의 유일 입력이며,
 #109 자체 범위에서는 pending append와 raw 권한 차단만 정의했습니다.
 
-#308 2차 후보는 미완료 현장 청소의 최초 지연만 `cleaning.overdue_admin`으로 알립니다.
+#308 2차의 dev 통합 계약(PR #340)은 미완료 현장 청소의 최초 지연만 `cleaning.overdue_admin`으로 알립니다.
 private immutable target event와 `(event,recipient)` enrollment가 원 일정·담당·회차 snapshot과
 원 알림 시각을 보존하고 deferred 제약으로 typed inbox/outbox의 양방향 원자성을 검사합니다.
 100건 fair cursor는 global reservation lock 뒤 target/assignment/attempt를 잠그고 admin 상태를
@@ -745,9 +748,11 @@ enrollment와 emitter에서 재검증합니다. 수신자 profile에 추가 역�
 동시 상태 변경으로 push intent가 불일치하면 전체 transaction을 fail-closed합니다.
 동일 이벤트는 다른 실행 actor·10분 grouping 경계에서도 재생성하지 않습니다. 늦게 활성화된
 관리자의 새 inbox는 허용하지만 원 event 시각과 기존 push 24h TTL을 유지합니다.
+따라서 24시간 뒤 신규 관리자 push의 즉시 만료 가능성은 별도 #345 OPEN입니다.
+#343 신규 complaint family의 enrollment-clock delivery 보완을 기존 cleaning family 완료로 확대하지 않습니다.
 현장 완료·업로드·검수 대기에 새 SLA를 만들지 않으며 original domain row는 변경하지 않습니다.
 
-#308 3차 후보는 기존 start command의 동일 transaction에 삽입되는
+#308 3차의 dev 통합 계약(PR #340)은 기존 start command의 동일 transaction에 삽입되는
 `cleaning.attempt_started` audit에서 관리자 `cleaning.started_admin`을 생성합니다.
 원 attempt/담당/assignment revision/시작 시각과 typed 감사 provenance를 검증하고
 receipt replay는 새 audit·inbox·outbox를 만들지 않습니다. 완료·제출·검수·배정 변경의
