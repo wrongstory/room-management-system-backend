@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'assignment_target_read_metadata'
+    'assignment_reservation_schedule_snapshot'
   ) ->> 'currentMigration',
-  'assignment_target_read_metadata',
+  'assignment_reservation_schedule_snapshot',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'assignment_target_read_metadata'
+    'assignment_reservation_schedule_snapshot'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -97,24 +97,24 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'assignment_target_read_metadata';
+where name = 'assignment_reservation_schedule_snapshot';
 
 delete from supabase_migrations.schema_migrations
-where name = 'assignment_target_read_metadata';
+where name = 'assignment_reservation_schedule_snapshot';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'assignment_target_read_metadata'
+    'assignment_reservation_schedule_snapshot'
   ) ->> 'currentMigration',
-  'manual_cleaning_cancel_pin_independent',
+  'assignment_target_read_metadata',
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'assignment_target_read_metadata'
+    'assignment_reservation_schedule_snapshot'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'

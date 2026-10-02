@@ -13,6 +13,7 @@ import {
 } from "./assignment-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError } from "./runtime.ts";
+import { parseAssignmentScheduleReads } from "./assignment-schedule-core.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -504,7 +505,12 @@ function request(
   return new Request(`http://localhost${path}`, {
     method,
     headers: {
-      authorization: "Bearer test-token",
+      authorization: "Bearer unit." +
+        btoa(
+          JSON.stringify({
+            session_id: "90000000-0000-4000-8000-000000000001",
+          }),
+        ) + ".unit",
       "content-type": "application/json",
       "idempotency-key": key,
     },
@@ -592,6 +598,9 @@ function readClients(
     count?: number | null;
     attemptCount?: number | null;
     attempts?: Record<string, unknown>[];
+    scheduleRead?: (
+      args: Record<string, unknown>,
+    ) => { data: unknown; error: { message: string } | null };
   } = {},
 ) {
   const access = queryResult(rows, options.count);
@@ -652,6 +661,26 @@ function readClients(
           : access.query,
     }),
     admin: {
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        assert(name === "get_assignment_schedule_read", "exact read-only RPC");
+        assert(
+          args.p_expected_actor_role === "admin" ||
+            args.p_expected_actor_role === "maid",
+          "bind initial adapter role to latest DB role",
+        );
+        assert(
+          args.p_session_id === "90000000-0000-4000-8000-000000000001",
+          "verified live session",
+        );
+        return options.scheduleRead?.(args) ?? {
+          data: (args.p_assignment_ids as string[]).map((assignmentId) => ({
+            assignmentId,
+            scheduleSnapshot: null,
+            currentDeparture: null,
+          })),
+          error: null,
+        };
+      },
       from(table: string) {
         if (table === "cleaning_targets") return targets.query;
         if (table === "cleaning_attempts") return attempts.query;
@@ -1256,6 +1285,225 @@ Deno.test("admin draft save sends actor-bound CAS and request hash", async () =>
   assert(args.p_expected_assignment_version === 1, "CAS forwarded");
   assert(/^[0-9a-f]{64}$/.test(String(args.p_request_hash)), "request hash");
   assert(saved.assignmentId === assignmentId, "response allowlist");
+});
+
+const frozenSchedule = {
+  capturedAt: "2026-10-01T00:00:00Z",
+  scheduleRevision: 1,
+  scheduleReasonCode: "CHECKOUT_PLANNED",
+  sourceReservationVersion: 1,
+  plannedCheckoutAt: "2026-10-02T03:00:00Z",
+  actualCheckoutAt: null,
+  plannedRoomDepartureAt: null,
+  actualRoomDepartureAt: null,
+  nextCheckInAt: "2026-10-02T06:30:00Z",
+  nextRoomArrivalAt: "2026-10-02T06:30:00Z",
+  nextArrivalKind: "check_in",
+  isEarlyCheckIn: true,
+  isLateCheckout: true,
+  isScheduleUpdated: false,
+};
+
+Deno.test("schedule snapshot is frozen while current departure is explicit current-list only", async () => {
+  const modes: unknown[] = [];
+  const currentDeparture = {
+    evaluatedAt: "2026-10-02T03:00:00Z",
+    actualCheckoutAt: "2026-10-02T02:00:00Z",
+    actualRoomDepartureAt: null,
+  };
+  const { clients } = readClients([assignmentRow()], {
+    scheduleRead: (args) => {
+      assert(
+        args.p_actor_profile_id === maid.profileId,
+        "actor-bound schedule read",
+      );
+      assert(args.p_expected_actor_role === "maid", "bind original role");
+      assert(
+        JSON.stringify(args.p_assignment_ids) ===
+          JSON.stringify([assignmentId]),
+        "exact assignment IDs",
+      );
+      modes.push(args.p_include_current);
+      return {
+        data: [{
+          assignmentId,
+          scheduleSnapshot: frozenSchedule,
+          currentDeparture: args.p_include_current ? currentDeparture : null,
+        }],
+        error: null,
+      };
+    },
+  });
+  const current = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-04"),
+    clients,
+    maid,
+  );
+  assert(
+    JSON.stringify(current[0].scheduleSnapshot) ===
+      JSON.stringify(frozenSchedule),
+    "original frozen plan",
+  );
+  assert(
+    JSON.stringify(current[0].currentDeparture) ===
+      JSON.stringify(currentDeparture),
+    "separate actual fact",
+  );
+  const history = await assignmentHistory(
+    request("/history"),
+    clients,
+    maid,
+    targetId,
+  );
+  const included = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-04&includeHistory=true"),
+    clients,
+    maid,
+  );
+  assert(
+    history[0].currentDeparture === null &&
+      included[0].currentDeparture === null,
+    "never live hydrate history",
+  );
+  assert(
+    JSON.stringify(modes) === JSON.stringify([true, false, false]),
+    "explicit mode on every path",
+  );
+});
+
+Deno.test("schedule reads fail closed after latest DB authorization or malformed results", async () => {
+  for (
+    const [message, expected] of [
+      ["ASSIGNMENT_ACCESS_REQUIRED", "ASSIGNMENT_ACCESS_REQUIRED"],
+      ["SESSION_REVOKED", "SESSION_REVOKED"],
+      ["PASSWORD_CHANGE_REQUIRED", "PASSWORD_CHANGE_REQUIRED"],
+      ["unsafe SQL secret", "ASSIGNMENT_COMMAND_FAILED"],
+    ]
+  ) {
+    const { clients } = readClients([assignmentRow()], {
+      scheduleRead: () => ({ data: null, error: { message } }),
+    });
+    const error = await captureEdgeError(() =>
+      assignmentHistory(request("/history"), clients, maid, targetId)
+    );
+    assert(
+      error.code === expected && !error.message.includes("unsafe"),
+      "redacted DB authorization failure",
+    );
+  }
+  for (
+    const data of [
+      [],
+      [{
+        assignmentId: targetId,
+        scheduleSnapshot: null,
+        currentDeparture: null,
+      }],
+      [{
+        assignmentId,
+        scheduleSnapshot: { ...frozenSchedule, guestName: "private" },
+        currentDeparture: null,
+      }],
+      [{
+        assignmentId,
+        scheduleSnapshot: frozenSchedule,
+        currentDeparture: {
+          evaluatedAt: "2026-10-02T03:00:00Z",
+          actualCheckoutAt: null,
+          actualRoomDepartureAt: null,
+        },
+      }],
+    ]
+  ) {
+    const { clients } = readClients([assignmentRow()], {
+      scheduleRead: () => ({ data, error: null }),
+    });
+    const error = await captureEdgeError(() =>
+      assignmentHistory(request("/history"), clients, maid, targetId)
+    );
+    assert(
+      error.code === "ASSIGNMENT_COMMAND_FAILED",
+      "safe all-or-nothing history failure",
+    );
+  }
+});
+
+Deno.test("schedule reads reject adapter role changes during hydration", async () => {
+  for (
+    const [initialRole, latestRole] of [["admin", "maid"], [
+      "maid",
+      "admin",
+    ]] as const
+  ) {
+    const { clients } = readClients([assignmentRow()], {
+      scheduleRead: (args) => {
+        assert(
+          args.p_expected_actor_role === initialRole,
+          "expected original role",
+        );
+        assert(
+          args.p_expected_actor_role !== latestRole,
+          "changed role fails closed in DB",
+        );
+        return { data: null, error: { message: "ASSIGNMENT_ACCESS_REQUIRED" } };
+      },
+    });
+    const error = await captureEdgeError(() =>
+      assignmentHistory(request("/history"), clients, {
+        ...maid,
+        role: initialRole,
+      }, targetId)
+    );
+    assert(
+      error.status === 403 && error.code === "ASSIGNMENT_ACCESS_REQUIRED",
+      "never return partially hydrated elevated cards",
+    );
+  }
+});
+
+Deno.test("schedule pure boundary preserves legacy unknown and rejects partial/private/future facts", () => {
+  const row = { assignmentId, scheduleSnapshot: null, currentDeparture: null };
+  assert(
+    parseAssignmentScheduleReads([row], [assignmentId], false).get(assignmentId)
+      ?.scheduleSnapshot === null,
+    "legacy null",
+  );
+  const invalid: unknown[] = [
+    [],
+    [row, row],
+    [{ ...row, assignmentId: targetId }],
+    [{ ...row, scheduleSnapshot: { ...frozenSchedule, pin: "private" } }],
+    [{ ...row, scheduleSnapshot: { ...frozenSchedule, scheduleRevision: 0 } }],
+    [{
+      ...row,
+      scheduleSnapshot: {
+        ...frozenSchedule,
+        nextCheckInAt: "2026-02-30T01:00:00Z",
+      },
+    }],
+    [{
+      ...row,
+      currentDeparture: {
+        evaluatedAt: "2026-10-02T03:00:00Z",
+        actualCheckoutAt: "2026-10-02T04:00:00Z",
+        actualRoomDepartureAt: null,
+      },
+    }],
+  ];
+  for (const key of Object.keys(frozenSchedule)) {
+    const partial: Record<string, unknown> = { ...frozenSchedule };
+    delete partial[key];
+    invalid.push([{ ...row, scheduleSnapshot: partial }]);
+  }
+  for (const data of invalid) {
+    let rejected = false;
+    try {
+      parseAssignmentScheduleReads(data, [assignmentId], true);
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "malformed and private schedule data rejected");
+  }
 });
 
 Deno.test("assignment validation rejects malformed query and draft input", async () => {

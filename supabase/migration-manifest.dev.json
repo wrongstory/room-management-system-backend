@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 94,
+  "totalCount": 95,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 16,
+    "count": 17,
     "first": "assignment_unavailability_reassignment",
-    "head": "assignment_target_read_metadata"
+    "head": "assignment_reservation_schedule_snapshot"
   },
-  "head": "assignment_target_read_metadata",
+  "head": "assignment_reservation_schedule_snapshot",
   "migrations": [
     {
       "order": 1,
@@ -483,6 +483,11 @@
       "order": 94,
       "name": "assignment_target_read_metadata",
       "sha256": "5fc5a652eea5ebac9e67f9d827cf3f314824b8686299bb98f1b4b13ba85a4f98"
+    },
+    {
+      "order": 95,
+      "name": "assignment_reservation_schedule_snapshot",
+      "sha256": "4bb9014e446cd401bb021cea05636f0b00434aa2e37f691736cc960dd143e228"
     }
   ]
 }

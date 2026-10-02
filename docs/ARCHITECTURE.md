@@ -6,6 +6,35 @@
 
 ## 기술 선택
 
+### #328 일정 조회 구현 후보 — 95번째 append-only migration
+
+현재 선행 source/dev는 #326 PR #350이 통합된 `f34dca37`/94 migrations다.
+#326 required CI `36987938462`·독립 QA98/100·동일 source/dev tree로 완료했으며 아래 후보
+기록은 당시 검증 이력이다. #328의 local 전면 검증은 PASS이며 최종 QA·exact-head CI·dev 통합은
+연결 Issue/PR에서 확인하는 후속 gate다. 이 절은 PR 생성 전 검증 시점 기록이다.
+
+기존 cleaning schedule INSERT는 생성 계획을 nullable JSONB에 고정하고 최초 notified
+INSERT/UPDATE는 그 계획과 당시 알려진 actual을 별도 불변 pack으로 저장한다. legacy backfill,
+기존 migration 수정이나 snapshot 덮어쓰기는 없다. service-only session-bound 조회 RPC가 두
+adapter의 동일 카드 계약을 제공하며 내부 source binding은 공개 DTO에서 제거한다.
+RPC는 내부 `p_expected_actor_role`을 최신 DB role과 대조하며 role 전이 경합이면 기존
+`ASSIGNMENT_ACCESS_REQUIRED` 403으로 fail-closed한다. 초기 role로 hydrate한 응답 형태를
+다른 최신 role의 ownership으로 허용하지 않으며 새로운 HTTP role 입력을 만들지 않는다.
+현재 actual은 exact current notified 업무의 현재 목록에서만 별도로 관찰한다.
+history/includeHistory는 항상 null이며 다른 담당자의 현재 source를 과거에 hydrate하지 않는다.
+guest planned check-in/최종 checkout과 canonical room arrival/departure는 구별한다.
+RLS·source command·CAS/멱등성·동시 시작·PIN·수익과 OpenAPI path/operation 수는 유지한다.
+원문 노출 경계는 별도로 강화한다. 두 저장 테이블의 authenticated table-level SELECT를
+pre95 컬럼별 SELECT로 대체해 신규 JSONB/내부 binding 직접 조회를 차단한다. 기존 명시 컬럼·
+count·join은 유지하지만 `SELECT *`/whole-row는 `42501`로 거부하며 service_role table grant는
+유지한다. 이는 업무 authority/RLS 확대가 아니라 raw-column 권한 축소다. 마지막 grant 보완
+이후 최종 fresh 95·SQL 4,152·21 upgrade·역할별 거부·KST 145·동시성·advisors 0건·
+합성 백업 복구 및 Node 859·Edge 323·Python 95는 PASS다. QA/CI·dev의 최종 근거는
+[Issue #328](https://github.com/wrongstory/room-management-system-backend/issues/328)의 연결 PR을 따른다.
+[상세 계약·검증·프런트 인계](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)를 따른다.
+
+### 기존 기술 기준
+
 - 개발 기준 API: Node.js 22, Fastify 5, TypeScript
 - production runtime: Supabase Edge Functions(Deno 2) + Supabase Cron
 - 데이터·인증: Supabase Auth, PostgreSQL 17

@@ -6,7 +6,42 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 > 정본 효력: 이 파일이 `dev`에 병합된 이후부터 API 상태 판단의 우선 정본으로 사용한다. production 상태는 Git branch가 아니라 Supabase Edge Function readback과 hosted HTTP smoke를 우선한다.
 
-### #326 배정 대상 조회 metadata — 구현 후보, CI/QA/PR 미완료
+### #328 배정 일정 조회 — 로컬 검증 완료, source/dev 최종 근거는 연결 PR
+
+현재 선행 정본은 `dev@f34dca3746a1e553a773470aba13b55fa95bf816`/94 migrations다.
+#326은 PR #350의 source `2eb489c`와 dev squash tree 동일성, required CI `36987938462`
+application/migration PASS·독립 QA98/100으로 source/dev 완료했다. 아래 #326 후보/PENDING/FAIL
+설명은 병합 전 검증 이력을 보존한 것이며 현재 상태를 덮지 않는다.
+
+#328의 95번째 `assignment_reservation_schedule_snapshot`은 기존 AssignmentCard에 nullable
+`scheduleSnapshot`·`currentDeparture`만 추가한다. 예정/실제 최종 퇴실·객실 이동·다음 guest
+check-in을 구분하고 KST early/late를 계획 근거로 표시한다. currentDeparture는 exact current
+notified 현재 목록에서만 관찰하며 history/includeHistory는 항상 null이다. legacy snapshot은
+현재 예약으로 재수화/backfill하지 않는다. Preview/command 응답·경로·version은 변경하지 않는다.
+OpenAPI 0.6.0/131 paths·141 operations, 기존 업무 권한/RLS·CAS/멱등성/동시 시작·PIN·수익 원장은 유지한다.
+두 저장 테이블의 authenticated table-level SELECT는 pre95 컬럼만의 SELECT로 좁힌다.
+신규 JSONB 원문·내부 binding의 직접 조회와 `SELECT *`/whole-row는 `42501`로 거부하며
+기존 명시 컬럼/count/join·service_role table grant는 유지한다.
+
+아래 1차/후속 결과는 각 실행 시점의 검증 이력이다.
+1차 `ci:quality`는 857 application tests·typecheck/build/lint/secrets·OpenAPI 131/141 PASS다.
+당시 전체 Edge 321 PASS/1 FAIL(synthetic-token HTTP mock) 및 fresh 95 reset sourceDrift CRLF
+FAIL→보완/미재실행 이력은 보존한다. 후속 실제 실행은 Node 859·Edge 323/bundle 17,240,776 bytes·
+Python 95와 전체 Ruff/mypy/codegen/build check PASS, CRLF 보완 후 fresh 95와 전용 94→95 upgrade
+PASS, targeted 4 SQL files/339 tests PASS다. 모두 마지막 raw-column grant 보완 전 실행이므로
+그 시점 추가 authenticated/anon 신규 컬럼·RPC 거부 회귀와 최종 전면 재검증은 PENDING이었다.
+독립 QA round 1 P1의 초기 adapter role↔RPC 최신 role race는 내부 `p_expected_actor_role` binding과
+기존 `ASSIGNMENT_ACCESS_REQUIRED` 403 fail-closed로 보완했으며 최종 QA·보완 후 exact-source
+재검증은 당시 미완료였다. 마지막 보완 후 최종 local 실행은 Node 859/57 files·
+Edge 323/bundle 17,240,852 bytes·Python 95·SQL 73 files/4,152 tests·21 upgrade·
+KST 145·동시성 3개 스크립트·fresh 95·local advisors 0건·합성 백업 복구 모두 PASS다.
+이 문서는 PR 생성 전 검증 시점 기록이다. 독립 QA 최종 판정·exact-head application/migration CI·
+dev squash tree/Issue 종료 근거는 [Issue #328](https://github.com/wrongstory/room-management-system-backend/issues/328)의
+연결 PR에서 확인한다. 계약 문서에 실패/보완 이력을 보존하며 운영 완료로 확대하지 않는다.
+원격 운영/main/recovery·프런트·UAT는 변경하지 않는다. [계약·검증 gate](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)를
+따르며, 다음 기능 순서는 #328 → #327이다.
+
+### 과거 #326 배정 대상 조회 metadata — PR #350 병합 전 구현·검증 이력
 
 선행 통합 기준은 `dev@f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`/93 migrations다.
 94번째 `assignment_target_read_metadata`는 기존 배정 카드/impact/Preview/새 commit 응답에
@@ -234,8 +269,8 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 source/dev 기준과 날짜가 고정된 운영 기록
 
-현재 선행 source/dev는 위 `f72c43d4` / 93 migrations / OpenAPI 131 paths·141 operations다.
-#326의 94번째 migration과 DTO는 그 기준 위의 구현 후보이며 source/dev 완료와 구분한다.
+현재 선행 source/dev는 위 `f34dca37` / 94 migrations / OpenAPI 131 paths·141 operations다.
+#326은 PR #350으로 source/dev 완료했고 #328의 95번째 migration과 DTO는 그 기준 위의 구현 후보다.
 아래 운영 runtime/readback과 v0.6.5 후보 문구는 **2026-09-26 KST 배포 전 snapshot**의 기록이다.
 당시 기준은 v0.6.4 main·83 migrations였으며 이를 최신 production 상태로 재선언하지 않는다.
 후속 v0.6.5 이력은 [릴리즈 기록](./RELEASE_V0.6.5.md)을 따른다. 이번 #305 문서 정합화에서는

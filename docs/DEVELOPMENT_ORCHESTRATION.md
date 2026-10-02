@@ -43,7 +43,36 @@ GitHub 보호 규칙을 우회하지 않으며, 구현·검증·승인·병합·
 main/release 승격, tag/GitHub Release를 변경하지 않는다. feature/dev source를 직접 배포하지 않는다.
 기존 원격 migration 수정·history rewrite, 보호 규칙 완화, secret/PII/PIN 기록은 금지다.
 
-## 2026-10-02 source 진행 기준
+## 2026-10-02 #328 진행 기준
+
+- 현재 선행 dev는 #326 PR #350이 통합된 `f34dca3746a1e553a773470aba13b55fa95bf816`/94 migrations다.
+  source `2eb489c`와 dev squash의 동일 tree, required CI `36987938462` application/migration PASS,
+  독립 QA98/100으로 #326 source/dev 완료를 확인했다. 아래 후보/PENDING/FAIL 기록은 당시 이력이다.
+- 다음 기능 순서는 #328(배정 일정 snapshot·현재 actual 분리) → #327(사건 목록)이다.
+  #328의 95번째 migration/카드 DTO는 로컬 검증 완료 후보다. Node 859·Edge 323·Python 95·
+  SQL 4,152·21 upgrade·KST 145·전체 동시성·fresh 95·advisors 0건·합성 백업 복구 PASS다.
+  최종 독립 QA·exact-head CI·dev 통합은 연결 Issue/PR에서 확인하며 #326 결과를 재사용하지 않는다.
+- 독립 QA round 1의 P1 role race는 adapter 초기 role과 RPC 최신 role을 `p_expected_actor_role`로
+  묶어 기존 403으로 닫는 보완을 구현했다. 당시 exact-source 재검증·최종 QA는 PENDING이었으며,
+  이후 local 전면 PASS와 최종 QA/CI 후속 gate를 구분한다.
+  과거 1차 quality 857 PASS, Edge 321 PASS/1 FAIL, fresh 95 sourceDrift CRLF FAIL과 당시 보완/
+  미재실행 상태는 [일정 계약의 실제 실행 이력](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)에 보존한다.
+  후속 Node 859·Edge 323/bundle 17,240,776 bytes·Python 95/전체 Ruff/mypy/codegen/build check,
+  CRLF 보완 fresh 95·전용 94→95 upgrade·targeted 4 SQL files/339 tests는 실제 PASS지만
+  마지막 raw-column grant 보완 전 실행이다. 이후 추가 역할별 거부와 최종 전면 재검증도 위와 같이
+  PASS했다. 이 절은 PR 생성 전 검증 시점 기록이다. 최종 QA 점수·exact-head CI·dev squash/Issue 종료는
+  [Issue #328](https://github.com/wrongstory/room-management-system-backend/issues/328)의 연결 PR을 따른다.
+- scheduleSnapshot은 생성 계획·최초 통보의 실제 사실을 보존한다. 현재 목록에만 exact current
+  notified source의 currentDeparture를 별도로 제공하며 history/includeHistory는 항상 null이다.
+  legacy backfill·현재 예약 재수화·기본 시각 추측·Preview/command 응답 확대는 하지 않는다.
+- 업무 authority/RLS는 유지하되 두 저장 테이블의 authenticated SELECT를 pre95 컬럼별로
+  좁혀 신규 JSONB 원문·내부 binding의 Data API 직접 조회를 차단한다. 기존 명시 컬럼/count/join·
+  service_role table grant는 유지하고 `SELECT *`/whole-row는 의도적으로 `42501`이다.
+- Fastify/Edge/OpenAPI·생성 client·문서는 함께 검증하며 [일정 계약](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)의
+  실제 검증 gate를 따른다. scoped 프런트 main/dev 확인은 전역 제품 snapshot 업그레이드가 아니다.
+  production/main/recovery·프런트 개발·PIN·UAT·tag는 변경하지 않는다.
+
+## 과거 2026-10-02 #326 source 진행 기준 — PR #350 병합 전 검증 이력
 
 - 현재 선행 통합 기준은 `dev@f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`다.
   #348 수동 요청 취소 B안·PIN 제한 제거가 source/dev에 통합된 93 migrations 기준이며
