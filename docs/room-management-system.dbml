@@ -888,8 +888,8 @@ Table public.cleaning_targets {
   due_at timestamptz [note: '#305/#308: 예정 기한은 업무 권한 만료가 아님. 경과만으로 자동 이월/담당 종료하지 않음. 보안 TTL·현재 점유 검사는 유지.']
   status cleaning_target_status [not null]
   assignment_version bigint [not null]
-  room_type_snapshot jsonb [not null]
-  fee_snapshot int [not null]
+  room_type_snapshot jsonb [not null, note: '#326 read candidate: raw missing/empty/nonstring optional code/name/elevatorZone keys normalize to unknown null consistently in SQL/cards; fresh malformed metadata packs fail safely. No current room/catalog hydration. Preview routing classifiers may use unknown separately.']
+  fee_snapshot int [not null, note: '#326 read candidate: immutable fee; zero is valid, never replace with current catalog fee.']
   template_snapshot jsonb [not null]
   cancelled_by uuid
   cancelled_at timestamptz
@@ -906,6 +906,23 @@ Table public.cleaning_targets {
   Note: 'Checkout targets are unique per reservation. The reservation-room composite FK remains enforced but is deferred to commit so an allowed reservation/obligation/planned-target room move is atomic; partial graph changes fail. Inspection rejection reclean and #101 post-approval complaint reclean are distinct typed sources. A complaint rework freezes one confirmed source decision, zero-fee target, published template and notified assignee; generic reassignment/handover is forbidden. For an inspection reclean whose original maid is confirmed unable to work, #264 preserves and cancels the zero-fee target, then creates one separate ordinary replacement target from the original paid fee/template snapshot; it never rewrites these provenance links in place.'
 }
 
+// #326 candidate migration 94 adds private output helpers only, not metadata columns/tables.
+// sourceKind/canonical roomTypeSnapshot/canCancel/cancelReasonCode are additive DTO fields.
+// Rollover reads real ROLLED_OVER_* evidence through the read revision and carryover_count cap.
+// Current-admin cancellation advisory mirrors #348 current-assignment/all-attempt predicates.
+// PIN/history/window/date/stale draft are not extra cancel guards; receipts/snapshots are not backfilled.
+// Helper EXECUTE is revoked from public/anon/authenticated/service_role. See ASSIGNMENT_TARGET_READ_METADATA.md.
+// Display metadata is excluded from fingerprints, but removing legacy current-room elevator A/B fallback
+// changes existing routing input to unknown; not all old preview fingerprints remain byte-identical. Re-preview.
+// Raw snapshot normalization and strict fresh metadata parsing are separate boundaries. Core/parser and SQL
+// Preview classifier fixes statically resolve QA round-1 P2. Local full 20 upgrades and 72 SQL files/4068
+// tests, full concurrency and local advisors passed; exact-source backup/CI/QA/dev evidence is tracked in Issue/PR.
+// Do not invent a 100-character display metadata cap absent from existing card/DB/OpenAPI text contracts.
+// QA round-2 display cap removal and actual 1001-character name/receipt regressions passed locally;
+// round-1/2 are statically resolved (P0/P1/unresolved code P2=0), not final exact-head QA/dev approval.
+// Existing optimizer routing str(100) and fresh type/nonempty/partial-pack checks remain unchanged.
+// Source/dev completion takes effect only after this document and approved source are in dev and linked
+// Issue/PR evidence confirms exact-head required CI/final QA and actual integration; no merge is claimed here.
 Table public.cleaning_target_schedule_revisions {
   id uuid [pk]
   cleaning_target_id uuid [not null]
@@ -926,7 +943,7 @@ Table public.cleaning_assignments {
   id uuid [pk]
   cleaning_target_id uuid [not null]
   maid_profile_id uuid [not null]
-  service_date date [not null]
+  service_date date [not null, note: '#326 card effectiveServiceDate is this immutable revision date, never later target effective date.']
   sequence_number int [not null]
   revision bigint [not null]
   is_current boolean [not null, default: true]

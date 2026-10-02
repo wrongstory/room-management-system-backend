@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { manualCancelFixture, manualCancelId as id } from './test-manual-cleaning-cancel-concurrency.mjs';
 
-// Exact 92→93 disposable local upgrade. No remote project, history repair,
+// Exact92 baseline→current source, preserving the93 cancellation contract.
+// No remote project, history repair,
 // generated credential, provider call, or source migration rewrite is permitted.
 const cli = 'node_modules/supabase/dist/supabase.js';
 const psqlArgs = ['exec', '-i', 'supabase_db_room-management-system-backend', 'psql', '-X', '-qAt',
   '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'];
 const baseline = '20261001210323';
 const added = '20261002042113';
+const expectedMigrationCount = JSON.parse(readFileSync('supabase/migration-manifest.dev.json', 'utf8')).totalCount;
+assert(Number.isSafeInteger(expectedMigrationCount) && expectedMigrationCount >= 93);
 const protectedTables = [
   'public.rooms', 'public.profiles', 'public.reservations', 'public.cleaning_targets',
   'public.checkout_cleaning_obligations', 'public.cleaning_assignments', 'public.cleaning_attempts',
@@ -81,9 +85,9 @@ try {
     end;
   end $probe$;`);
   assert.equal(digest(), preserved, 'Legacy PIN rejection writes no cancellation effects');
-  phase = '92-to-93-install';
+  phase = '92-to-current-install';
   execFileSync(process.execPath, [cli, 'migration', 'up', '--local'], { stdio: 'inherit' });
-  assert.equal(sql('select count(*) from supabase_migrations.schema_migrations;'), '93');
+  assert.equal(sql('select count(*) from supabase_migrations.schema_migrations;'), String(expectedMigrationCount));
   assert.equal(sql(`select exists(select 1 from supabase_migrations.schema_migrations where version='${added}');`), 't');
   assert.equal(digest(), preserved, '92→93 preserves exact target/schedule/snapshot/PIN/receipt/audit/notification history');
   assert.equal(sql("select count(*) from public.notifications where event_family='cleaning_request.cancelled_revoked';"), oldCancellationCount,
@@ -114,7 +118,7 @@ try {
     'openClosed',exists(select 1 from private.room_pin_reveal_leases where assignment_id='${id(2004)}' and finalized_at is null and revoked_at is not null));`));
   assert.deepEqual(newEffects, { audits: 3, notices: 3, deliveries: 3, endedEntitlements: 3,
     legacyClosed: true, finalizedPreserved: true, openClosed: true }, 'New cancellation effects bind exact owners and close only future PIN access');
-  console.log('Manual cleaning cancellation upgrade 92→93: PASS; exact old history/receipt preserved, no backfill, new policy verified.');
+  console.log(`Manual cleaning cancellation contract93 / upgrade92→${expectedMigrationCount}: PASS; exact old history/receipt preserved, no backfill, new policy verified.`);
 } catch (error) {
   const sourceLine = error instanceof Error ? error.stack?.match(/test-manual-cleaning-cancel-upgrade\.mjs:(\d+):\d+/)?.[1] : null;
   console.error(`Manual cancellation upgrade FAIL: ${JSON.stringify({ phase,

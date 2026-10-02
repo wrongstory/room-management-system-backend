@@ -545,6 +545,36 @@ Issue #213부터 Edge와 Fastify의 목록·이력 조회는 같은 카드 proje
 attempt/submission은 그 assignment에 연결된 최신 회차·제출만 표시합니다. 메이드의 과거 카드는
 통보 당시 객실 ID/번호를 유지하며 현재 target 상태나 이후 assignment version으로 덮지 않습니다.
 
+### #326 대상 조회 metadata — 94번째 구현 후보
+
+기존 카드/impact/Preview/새 commit 결과에 실제 target source, canonical room-type snapshot,
+고정 요금·원/유효일·근거 있는 이월·취소 advisory를 additive하게 제공한다. 저장 snapshot 객체의
+누락/빈/비문자 선택 key는 raw normalizer로 unknown null에 정규화하여 SQL/카드가 일치하고,
+malformed 새 metadata pack은 별도 strict parser로 안전한 500을 반환한다. 요금 0은 유지하며
+현재 객실/카탈로그 fallback을 사용하지 않는다. 기존 Preview의
+`unknown` routing classifier는 canonical snapshot null과 별개다. 카드의 유효일과 메이드 CAS는
+해당 assignment revision에 고정한다.
+
+current 관리자/target 취소 표시는 #348 source·허용 phase·현재 assignment의 모든 비-superseded
+attempt 미착수 predicate를 반영한다. PIN·기한·stale schedule은 별도 제한이 아니다. 관리자 history와
+메이드는 false 표시 사유를 받고 실제 command는 actor/session/CAS/transition을 다시 검사한다.
+private helper 세 개의 직접 EXECUTE는 public/anon/authenticated/service_role 모두 회수한다.
+94번째 migration은 기존 private RPC의 output construction만 확장하고 table/RLS/source 원장·
+과거 receipt·fingerprint 산식을 바꾸거나 backfill하지 않는다. 표시 metadata는 fingerprint 입력에서
+제외하며 legacy 완료 receipt는 현재 DB 재수화 없이 unknown null·capability unavailable로 인계한다.
+다만 legacy elevator snapshot 누락 시 current-room A/B fallback 제거는 기존 routing 입력을
+`unknown`으로 바꾸므로 모든 과거 Preview fingerprint가 byte-identical하다고 보장하지 않는다.
+그 경우 재Preview해야 한다. core raw normalizer/fresh strict parser 및 SQL Preview classifier
+보완으로 QA 1차 P2는 정적 resolved다. local full 20 upgrades·72 SQL files/4,068 tests는 PASS이며
+exact-head 최종 QA·CI·dev 통합은 별도 gate다.
+표시 metadata는 기존 카드/text·`room_types.name TEXT`·OpenAPI에 없는 임의 100자 상한을
+추가하지 않는다. 이 QA 2차 P2는 공통 표시 상한 제거·1,001자 이름/실제 receipt 보존 회귀 뒤
+정적 resolved이며 QA 1·2차의 P0/P1/미해결 코드 P2는 0인 실제 구현 후보다. 기존 optimizer
+routing 문자열 상한과 fresh pack reject는 유지한다. source/dev 완료는 문서·승인 source의 dev 정본
+포함과 연결 Issue/PR의 exact-head CI/최종 QA 승인·실제 통합 근거 확인 조건이며 현재 병합 선언이 아니다.
+구현·최종 검증/CI/독립 QA·프런트 소비·운영 승격은 별도 상태이며 상세 계약은
+[배정 대상 조회 metadata](./ASSIGNMENT_TARGET_READ_METADATA.md)를 따른다.
+
 PR #74는 기존 25개 migration을 그대로 두고 `20260908101844_maid_assignment_visibility.sql`만
 추가해 dev에 병합됐습니다. 그 PR에는 #7A/B/C의 실행/lease/limited session을 포함하지 않았습니다.
 field_completed는 물리적 완료 선언, 필수사진은 submission gate라는 최신 제품 가이드를 따릅니다.

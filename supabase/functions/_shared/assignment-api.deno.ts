@@ -591,6 +591,7 @@ function readClients(
     overdue?: unknown[];
     count?: number | null;
     attemptCount?: number | null;
+    attempts?: Record<string, unknown>[];
   } = {},
 ) {
   const access = queryResult(rows, options.count);
@@ -601,6 +602,7 @@ function readClients(
       id: targetId,
       room_id: roomId,
       cleaning_kind: "checkout",
+      source: "scheduled_checkout",
       original_service_date: "2026-09-03",
       effective_service_date: "2026-09-04",
       carryover_count: 4,
@@ -620,12 +622,15 @@ function readClients(
   const maids = queryResult([
     { id: maid.profileId, display_name: "메이드" },
   ]);
-  const attempts = queryResult([{
-    id: "60000000-0000-4000-8000-000000000001",
-    assignment_id: assignmentId,
-    attempt_number: 1,
-    status: "field_completed",
-  }], options.attemptCount);
+  const attempts = queryResult(
+    options.attempts ?? [{
+      id: "60000000-0000-4000-8000-000000000001",
+      assignment_id: assignmentId,
+      attempt_number: 1,
+      status: "field_completed",
+    }],
+    options.attemptCount,
+  );
   const submissions = queryResult([{
     cleaning_attempt_id: "60000000-0000-4000-8000-000000000001",
     version: 1,
@@ -1014,6 +1019,151 @@ Deno.test("assignment cards count only rollover evidence visible at that revisio
   }
 });
 
+Deno.test("card cancellation is advisory admin/current only and checks all relevant started rows", async () => {
+  const target = {
+    source: "manual_room_request",
+    cleaning_kind: "additional",
+    status: "draft_assigned",
+    assignment_version: 999,
+    effective_service_date: "2026-09-09",
+    room_type_snapshot: {},
+    fee_snapshot: 0,
+  };
+  const scheduled = {
+    id: "latest",
+    assignment_id: assignmentId,
+    attempt_number: 3,
+    status: "scheduled",
+    started_at: null,
+  };
+  const cases = [
+    { attempts: [scheduled], allowed: true, reason: null },
+    {
+      attempts: [scheduled, {
+        ...scheduled,
+        id: "old",
+        status: "superseded",
+        started_at: "2026-09-01T01:00:00Z",
+      }],
+      allowed: true,
+      reason: null,
+    },
+    {
+      attempts: [scheduled, {
+        ...scheduled,
+        id: "started",
+        status: "in_progress",
+      }],
+      allowed: false,
+      reason: "CLEANING_REQUEST_CANCEL_CONFLICT",
+    },
+    {
+      attempts: [scheduled, {
+        id: "missing",
+        assignment_id: assignmentId,
+        status: "scheduled",
+        attempt_number: 1,
+      }],
+      allowed: false,
+      reason: "CAPABILITY_UNAVAILABLE",
+    },
+  ];
+  for (const candidate of cases) {
+    const { clients, attempts } = readClients([assignmentRow()], {
+      target,
+      attempts: candidate.attempts,
+    });
+    const result = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      admin,
+      targetId,
+    );
+    assert(
+      result[0].canCancel === candidate.allowed &&
+        result[0].cancelReasonCode === candidate.reason,
+      "exact-current full attempt guidance",
+    );
+    assert(
+      result[0].effectiveServiceDate === "2026-09-04" &&
+        result[0].feeSnapshot === 0 &&
+        result[0].roomTypeSnapshot?.code === null &&
+        result[0].sourceKind === "manual_room_request",
+      "no future date or live catalog fallback",
+    );
+    assert(
+      attempts.filters.some(([key, value]) =>
+        key === "select" && String(value).includes("started_at")
+      ),
+      "start proof selected",
+    );
+  }
+  for (const actor of [admin, maid]) {
+    const { clients } = readClients([assignmentRow({ is_current: false })], {
+      target,
+      attempts: [],
+    });
+    const result = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      actor,
+      targetId,
+    );
+    assert(
+      !result[0].canCancel &&
+        result[0].cancelReasonCode ===
+          (actor.role === "maid" ? "ADMIN_REQUIRED" : "ASSIGNMENT_NOT_CURRENT"),
+      "role/history deny guidance",
+    );
+  }
+});
+
+Deno.test("card raw snapshot optional attributes normalize like SQL without relaxing fresh canonical metadata", async () => {
+  for (
+    const raw of [
+      {},
+      { code: "", name: "", elevatorZone: "" },
+      { code: 1234, name: false, elevatorZone: ["A"] },
+      { code: null, name: {}, elevatorZone: null },
+    ]
+  ) {
+    const { clients } = readClients([assignmentRow()], {
+      target: { room_type_snapshot: raw },
+    });
+    const cards = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      admin,
+      targetId,
+    );
+    assert(
+      cards[0].roomTypeCode === null && cards[0].roomTypeName === null &&
+        cards[0].elevatorZone === null &&
+        JSON.stringify(cards[0].roomTypeSnapshot) ===
+          JSON.stringify({ code: null, name: null, elevatorZone: null }),
+      "raw optional metadata normalized without catalog fill",
+    );
+  }
+  for (const length of [101, 1001]) {
+    const name = "n".repeat(length);
+    const { clients } = readClients([assignmentRow()], {
+      target: { room_type_snapshot: { code: "a".repeat(101), name } },
+    });
+    const cards = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      admin,
+      targetId,
+    );
+    assert(
+      cards[0].roomTypeName === name &&
+        cards[0].roomTypeSnapshot?.name === name &&
+        cards[0].roomTypeCode === "a".repeat(101),
+      "baseline valid historical display strings remain untruncated",
+    );
+  }
+});
+
 Deno.test("legacy notified assignment without a proven room snapshot remains null", async () => {
   const { clients, targets } = readClients([assignmentRow({
     notified_room_id_snapshot: null,
@@ -1200,6 +1350,189 @@ function commitCandidate(overrides: Record<string, unknown> = {}) {
 }
 
 const fingerprint = "a".repeat(64);
+const newReadMetadata = {
+  cleaningKind: "additional",
+  sourceKind: "manual_room_request",
+  roomTypeCode: null,
+  roomTypeName: null,
+  elevatorZone: null,
+  roomTypeSnapshot: { code: null, name: null, elevatorZone: null },
+  feeSnapshot: 0,
+  originalServiceDate: "2026-09-03",
+  effectiveServiceDate: "2026-09-04",
+  rolloverCount: 0,
+  rolloverReason: null,
+  canCancel: true,
+  cancelReasonCode: null,
+};
+
+Deno.test("new commit snapshot metadata and replay preserve long valid names without live hydration", async () => {
+  for (const length of [101, 1001]) {
+    const name = "n".repeat(length);
+    const payload = {
+      serviceDate: "2026-09-04",
+      impactFingerprint: fingerprint,
+      notifiedAssignments: [
+        commitCandidate({
+          ...newReadMetadata,
+          roomTypeName: name,
+          roomTypeSnapshot: { code: null, name, elevatorZone: null },
+          notifiedAt: "2026-09-03T12:00:00Z",
+        }),
+      ],
+      remainingDrafts: [],
+      blockedDrafts: [],
+      unassignedTargets: [],
+    };
+    let reads = 0;
+    const clients = {
+      admin: {
+        rpc: async () => {
+          reads++;
+          return { data: payload, error: null };
+        },
+      },
+    } as unknown as EdgeClients;
+    const body = {
+      serviceDate: "2026-09-04",
+      expectedImpactFingerprint: fingerprint,
+      items: [{
+        cleaningTargetId: targetId,
+        expectedAssignmentVersion: 2,
+        expectedAvailabilityVersion: 3,
+      }],
+    };
+    const first = await commitAssignments(
+      request("/v1/assignments/commit", "POST", body),
+      clients,
+      admin,
+    );
+    const replay = await commitAssignments(
+      request("/v1/assignments/commit", "POST", body),
+      clients,
+      admin,
+    );
+    assert(
+      reads === 2 && JSON.stringify(first) === JSON.stringify(replay),
+      "same immutable receipt mapper without live-table lookup",
+    );
+    assert(
+      first.notifiedAssignments[0].roomTypeName === name &&
+        first.notifiedAssignments[0].roomTypeSnapshot?.name === name,
+      "long canonical metadata retained",
+    );
+  }
+});
+
+Deno.test("commit projections whitelist new snapshot metadata on every collection and preserve legacy unknowns", async () => {
+  let response: Record<string, unknown> = {
+    serviceDate: "2026-09-04",
+    impactFingerprint: fingerprint,
+    committableDrafts: [
+      commitCandidate({ ...newReadMetadata, sourceKey: "private" }),
+    ],
+    blockedDrafts: [
+      commitCandidate({
+        ...newReadMetadata,
+        currentAvailabilityVersion: null,
+        reasonCodes: ["ASSIGNMENT_DRAFT_STALE_SCHEDULE"],
+      }),
+    ],
+    remainingUnassignedTargets: [{
+      ...newReadMetadata,
+      cleaningTargetId: targetId,
+      roomId,
+      roomNumber: "101",
+      serviceDate: "2026-09-04",
+      status: "unassigned",
+      targetAssignmentVersion: 3,
+      availableFrom: null,
+      dueAt: null,
+    }],
+  };
+  const clients = {
+    admin: { rpc: async () => ({ data: response, error: null }) },
+  } as unknown as EdgeClients;
+  const impact = await assignmentCommitImpact(
+    request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+    clients,
+    admin,
+  );
+  for (
+    const row of [
+      impact.committableDrafts[0],
+      impact.blockedDrafts[0],
+      impact.remainingUnassignedTargets[0],
+    ]
+  ) {
+    assert(
+      row.feeSnapshot === 0 && row.rolloverCount === 0 && row.canCancel &&
+        row.roomTypeSnapshot?.code === null,
+      "new exact metadata",
+    );
+  }
+  assert(!JSON.stringify(impact).includes("private"), "source key omitted");
+  response = {
+    ...response,
+    committableDrafts: [commitCandidate()],
+    blockedDrafts: [],
+    remainingUnassignedTargets: [],
+  };
+  const legacy = await assignmentCommitImpact(
+    request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+    clients,
+    admin,
+  );
+  assert(
+    legacy.committableDrafts[0].feeSnapshot === null &&
+      legacy.committableDrafts[0].rolloverCount === null &&
+      !legacy.committableDrafts[0].canCancel &&
+      legacy.committableDrafts[0].cancelReasonCode === "CAPABILITY_UNAVAILABLE",
+    "legacy remains unknown",
+  );
+  for (
+    const malformed of [
+      { canCancel: true },
+      { ...newReadMetadata, feeSnapshot: -1 },
+      {
+        ...newReadMetadata,
+        canCancel: true,
+        cancelReasonCode: "ADMIN_REQUIRED",
+      },
+      { ...newReadMetadata, rolloverCount: 1, rolloverReason: null },
+      { ...newReadMetadata, roomTypeSnapshot: {} },
+      {
+        ...newReadMetadata,
+        roomTypeSnapshot: { code: "", name: null, elevatorZone: null },
+      },
+      {
+        ...newReadMetadata,
+        roomTypeSnapshot: { code: 1234, name: null, elevatorZone: null },
+      },
+      {
+        ...newReadMetadata,
+        roomTypeSnapshot: { code: null, name: false, elevatorZone: null },
+      },
+      {
+        ...newReadMetadata,
+        roomTypeSnapshot: { code: null, name: null, elevatorZone: ["A"] },
+      },
+    ]
+  ) {
+    response = { ...response, committableDrafts: [commitCandidate(malformed)] };
+    const error = await captureEdgeError(() =>
+      assignmentCommitImpact(
+        request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+        clients,
+        admin,
+      )
+    );
+    assert(
+      error.status === 500 && error.code === "ASSIGNMENT_COMMAND_FAILED",
+      "malformed DB output is safe500",
+    );
+  }
+});
 
 Deno.test("assignment commit preflight is admin-only and projects safe impact", async () => {
   for (const actor of [maid, developer]) {

@@ -1,6 +1,7 @@
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
+import { assignmentCancellationCapability, parseRoomTypeSnapshot } from './assignment-preview-core.js';
 
 export interface AssignmentListInput {
   serviceDate: string;
@@ -23,12 +24,13 @@ interface AssignmentRow {
 }
 interface TargetRow {
   id: string; room_id: string; cleaning_kind: string; original_service_date: string;
+  source?: string;
   effective_service_date: string; carryover_count: number; status: string; assignment_version: number;
   room_type_snapshot: unknown; fee_snapshot: number; template_snapshot: unknown;
   rooms?: { room_number: string } | Array<{ room_number: string }> | null;
 }
 interface ProfileRow { id: string; display_name: string }
-interface AttemptRow { id: string; assignment_id: string; attempt_number: number; status: string }
+interface AttemptRow { id: string; assignment_id: string; attempt_number: number; status: string; started_at?: string | null }
 interface SubmissionRow { cleaning_attempt_id: string; version: number; status: string }
 interface ScheduleRow { cleaning_target_id: string; revision: number; effective_service_date: string; reason_code: string }
 
@@ -43,10 +45,6 @@ function databaseError(error: { message?: string } | null): AppError {
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw databaseError(null);
   return value as Record<string, unknown>;
-}
-
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 function roomNumber(target: TargetRow): string {
@@ -173,17 +171,21 @@ export class SupabaseAssignmentService implements AssignmentService {
     const assignmentIds = rows.map((row) => row.id);
     const [targetRows, profileRows, attemptRows, scheduleRows] = await Promise.all([
       this.relatedRows('cleaning_targets',
-        'id,room_id,cleaning_kind,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)'
+        'id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)'
       , 'id', targetIds),
       this.relatedRows('profiles', 'id,display_name', 'id', maidIds),
-      this.relatedRows('cleaning_attempts', 'id,assignment_id,attempt_number,status', 'assignment_id', assignmentIds, 'attempt_number'),
+      this.relatedRows('cleaning_attempts', 'id,assignment_id,attempt_number,status,started_at', 'assignment_id', assignmentIds, 'attempt_number'),
       this.relatedRows('cleaning_target_schedule_revisions', 'cleaning_target_id,revision,effective_service_date,reason_code', 'cleaning_target_id', targetIds, 'revision')
     ]);
     const targets = new Map((targetRows as TargetRow[]).map((row) => [row.id, row]));
     const profiles = new Map((profileRows as ProfileRow[]).map((row) => [row.id, row]));
     const attempts = new Map<string, AttemptRow>();
+    const capabilityAttempts = new Map<string, AttemptRow[]>();
     for (const attempt of attemptRows as AttemptRow[]) {
       if (!attempts.has(attempt.assignment_id)) attempts.set(attempt.assignment_id, attempt);
+      const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
+      all.push(attempt);
+      capabilityAttempts.set(attempt.assignment_id, all);
     }
     const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
     const submissionRows = await this.relatedRows('cleaning_submissions', 'cleaning_attempt_id,version,status', 'cleaning_attempt_id', attemptIds, 'version');
@@ -196,7 +198,9 @@ export class SupabaseAssignmentService implements AssignmentService {
       const target = targets.get(row.cleaning_target_id);
       const profile = profiles.get(row.maid_profile_id);
       if (!target || !profile) throw databaseError(null);
-      const roomType = object(target.room_type_snapshot);
+      let roomType: ReturnType<typeof parseRoomTypeSnapshot>;
+      try { roomType = parseRoomTypeSnapshot(object(target.room_type_snapshot)); }
+      catch { throw databaseError(null); }
       const template = object(target.template_snapshot);
       const duration = template.durationMinutes;
       if (!Number.isSafeInteger(target.fee_snapshot) || target.fee_snapshot < 0 ||
@@ -208,6 +212,8 @@ export class SupabaseAssignmentService implements AssignmentService {
       const submission = attempt ? submissions.get(attempt.id) : undefined;
       const targetMatchesRevision = row.is_current && target.assignment_version === row.revision &&
         target.effective_service_date === row.service_date;
+      const cancellation = assignmentCancellationCapability(actor.role, row.is_current,
+        target.source, target.status, capabilityAttempts.get(row.id) ?? []);
       return {
         assignmentId: row.id, cleaningTargetId: row.cleaning_target_id,
         roomId: actor.role === 'maid' ? row.notified_room_id_snapshot : target.room_id,
@@ -217,10 +223,12 @@ export class SupabaseAssignmentService implements AssignmentService {
         serviceDate: row.service_date, sequenceNumber: row.sequence_number, revision: row.revision,
         isCurrent: row.is_current,
         targetAssignmentVersion: actor.role === 'maid' ? row.revision : target.assignment_version,
-        cleaningKind: target.cleaning_kind, roomTypeCode: text(roomType.code), roomTypeName: text(roomType.name),
-        elevatorZone: text(roomType.elevatorZone), feeSnapshot: target.fee_snapshot,
+        cleaningKind: target.cleaning_kind, sourceKind: target.source ?? null,
+        roomTypeCode: roomType?.code ?? null, roomTypeName: roomType?.name ?? null,
+        elevatorZone: roomType?.elevatorZone ?? null, roomTypeSnapshot: roomType, feeSnapshot: target.fee_snapshot,
         durationMinutes: duration === null || duration === undefined ? null : duration,
-        originalServiceDate: target.original_service_date, ...rollover,
+        originalServiceDate: target.original_service_date, effectiveServiceDate: row.service_date, ...rollover,
+        ...cancellation,
         targetStatus: actor.role === 'admin' || targetMatchesRevision ? target.status : null,
         attemptStatus: attempt?.status ?? null, submissionStatus: submission?.status ?? null,
         availableFrom: row.available_from_snapshot, dueAt: row.due_at_snapshot,

@@ -1,8 +1,47 @@
 # 프론트엔드·Codex API 연동 가이드
 
-이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 과거 v0.4.0 인계는 historical workflow 참고용이고, 현재 계약은 production OpenAPI 0.5.1과 이 문서를 우선한다.
+이 문서는 정본 `makee-ham/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 아래 날짜별 runtime·v0.4.0 인계는 당시 검증 이력이며 최신 운영 상태를 재선언하지 않는다. source 후보를 production 계약으로 간주하지 않는다.
 
 2026-09-23 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 OpenAPI 0.5.1 / 129 / 139이고 마지막으로 검증된 production runtime은 OpenAPI 0.5.1 / 128 / 138의 `api` ACTIVE v24다. #256 사진 정규화와 #250/#264 배정 후속의 Edge/Pages 배포는 아직 별도다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 Git source 제공과 hosted runtime·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
+
+## 2026-10-02 #326 scoped 조회 handoff — 구현 후보
+
+백엔드 선행 dev 기준은 `f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`/93 migrations다.
+#348 취소 정책은 source/dev 통합됐지만 운영 승격은 별도이고, #326의 94번째 migration·additive
+DTO는 구현 후보다. 기존 131 paths·141 operations를 유지한다. 프런트 scoped 확인 ref는 main
+`d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev
+`09ed28446a4fd43919cddb29ebe442b848548ab8`이며 전역 프런트 제품 snapshot을 바꾸지 않는다.
+
+- 배정 카드, impact의 draft/blocked/unassigned 행, Preview, 신규 commit 결과는 실제 `sourceKind`,
+  canonical `roomTypeSnapshot`, snapshot 요금·원/유효일·근거 있는 이월·취소 advisory를 소비한다.
+  저장 원문 객체의 빈/비문자 선택 key는 SQL/카드 모두 unknown null로 정규화하지만 malformed
+  신규 metadata pack은 안전한 500으로 실패한다. null을 현재 카탈로그로 채우지 않고 0원을 유지한다.
+  Preview의 기존 `unknown` classifier와 canonical snapshot null은 구별한다. 과거 카드의
+  날짜·객실·메이드 version도 유지한다.
+- 신규 표시 metadata는 fingerprint에 포함하지 않지만 legacy elevator snapshot 누락 시
+  현재 객실 A/B fallback 제거는 routing 입력을 `unknown`으로 바꾼다. 모든 기존 Preview
+  fingerprint의 byte 동일성을 가정하지 말고 다시 Preview하여 새 제안/fingerprint를 사용한다.
+- 기존 target ID와 `targetAssignmentVersion`을 cancel 경로/body의 `{targetId}`/`expectedVersion`으로
+  연결한다. Preview의 `expectedAssignmentVersion`도 유지한다. 서버에
+  `manualCleaningRequestId`/`targetVersion` 별칭을 추가하도록 요구하지 않는다.
+- `canCancel`은 현재 관리자에게만 주는 advisory다. 메이드/이력의 false 표시 코드와 실제 HTTP
+  오류를 혼합하지 않는다. PIN·기한·stale draft 조건을 클라이언트의 별도 취소 제한으로 복원하지 않는다.
+- dev live 행 병합(`WIREFRAME/index.html:9348–9357`)의 현재 타입/요금 fallback, 취소 버튼
+  (`:9379`)의 생성되지 않는 별칭 요구와 등록 근거 미연결이 남아 있다. 성공 후 객실 외에도
+  배정/미배정/impact를 재조회해야 한다. 기존 생성·취소 endpoint/body는 재사용한다.
+- 검증·승격된 OpenAPI를 받은 뒤 §3의 명령으로 generated client를 재생성하고 consumer를
+  연결하는 일은 **프런트 담당자 범위**다. 프런트 코드를 수정하거나 실제 화면 UAT를 수행하지 않았다.
+
+필드별 출처·legacy receipt null/`CAPABILITY_UNAVAILABLE`·DB 읽기 무변경·exact scoped 근거 및
+검증 gate는 [배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)을 따른다. snapshot 정규화
+QA 1차 P2는 core raw normalizer/fresh strict parser 및 SQL Preview classifier 보완으로 정적
+resolved이며 최종 upgrade/CI/QA/dev 완료와 구분한다.
+표시 metadata에 기존 카드/DB/OpenAPI에 없는 100자 제한을 가정하지 않는다. QA 2차의 임의 상한
+제거·1,001자 이름/실제 receipt 보존 회귀는 실제 검증했고 QA 1·2차는 정적 resolved인 구현 후보다.
+기존 optimizer routing 문자열 상한/fresh pack reject는 유지한다. source/dev 완료는 문서·승인 source가
+dev 정본에 포함되고 연결 GitHub Issue/PR의 exact-head required CI/최종 QA/실제 통합 근거를
+확인해야 효력이 발생한다. 현재 이미 병합됐다는 뜻이 아니다. 후보 API를
+운영 페이지의 사용 가능 기능으로 표시하지 않는다. 다음 backend 순서는 #326 → #328 → #327이다.
 
 ## 1. 계약을 받는 위치
 
@@ -241,7 +280,7 @@ const idempotencyKey = crypto.randomUUID();
 | 예약 취소 | `POST /v1/reservations/{reservationId}/cancel` | reasonCode와 expectedVersion 필요, hard delete 없음 |
 | 수동 체크아웃 | `POST /v1/reservations/{reservationId}/manual-checkout` | 실제 입실 중인 예약만, 청소 obligation과 함께 원자 처리 |
 | 청소 요청 | `POST /v1/reservations/cleaning-requests` | 연박/추가 요청, 객실 version CAS |
-| 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel. #348 source 후보는 배정/통보·PIN 조회와 무관하게 실제 착수 전 수동 추가/연박 요청만 취소; 자동 checkout 제외. 운영 승격은 별도 |
+| 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel. #348 source/dev 통합 계약은 배정/통보·PIN 조회와 무관하게 실제 착수 전 수동 추가/연박 요청만 취소; 자동 checkout 제외. 운영 승격은 별도 |
 | 예약 전이 수동 실행 | `POST /v1/reservations/transitions/process` | admin 운영 명령. scheduler secret endpoint와 별도 |
 | 퇴실 청소 템플릿 조회 | `GET /v1/cleaning-templates?cleaningKind=checkout` | `durationMinutes=null`을 미설정 선택값으로 표시하고 0분·1분으로 변환하지 않음 |
 | 퇴실 청소 템플릿 게시 | `POST /v1/cleaning-templates` | 사진 슬롯은 필수, `durationMinutes`는 선택. 모르면 생략하며 임의 기본값을 보내지 않음 |
@@ -334,12 +373,12 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] timeout·응답 유실은 같은 body와 같은 `Idempotency-Key`로 결과를 확인한다. body를 바꾸면 새 key를 사용한다.
 - [ ] 오류 수집에는 allowlist code와 `requestId`만 남기고 token·PIN·고객명·전화번호·request body를 보내지 않는다.
 
-#### 수동 연박·추가 요청 취소 (#348 source 후보)
+#### 수동 연박·추가 요청 취소 (#348 source/dev 통합, 운영 미승격)
 
 - PIN 조회 여부/표시 숨김/조회 만료를 이유로 수동 요청 취소 버튼을 차단하지 않는다. 관리자만 실제 착수 전 취소하며 `expectedVersion`은 target `assignment_version`이다.
 - target soft cancel과 #27 담당 해제/unassign을 혼합하지 않는다. 자동 퇴실 의무·착수·현장 완료·제출/검수 workflow는 이 endpoint의 일반 취소 대상이 아니다.
 - 기존 current notified 담당자에게만 취소 알림이 생긴다. 취소한 배정의 PIN 화면을 지우고 이후 권한은 서버 재검증을 따른다. 이미 본 PIN이 사람의 기억에서도 회수됐다고 표시하지 않는다.
-- [취소 정책·검증 경계](./MANUAL_CLEANING_CANCEL.md)를 따른다. #326의 snapshot/sourceKind/canCancel DTO 보강 및 프런트 구현·운영 UAT는 이번 취소 명령 변경과 별도다.
+- [취소 정책·검증 경계](./MANUAL_CLEANING_CANCEL.md)를 따른다. #326의 [조회 DTO 구현 후보](./ASSIGNMENT_TARGET_READ_METADATA.md) 및 프런트 구현·운영 UAT는 취소 명령 변경과 별도다.
 - 2026-10-02 scoped 비교: 프런트 main `d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev `09ed28446a4fd43919cddb29ebe442b848548ab8`의 live 요청 endpoint/body는 호환된다. dev 배정 행 버튼은 `manualCleaningRequestId`/`targetVersion`을 요구하나 행 projection에서 이를 보장하지 않아 #326 조회 계약 연결이 필요하다. demo/local 수동 취소의 배정·통보 및 `access-review` PIN 차단도 프런트에서 제거해야 한다. 프런트 코드는 이번 PR에서 변경하지 않으며 전역 프런트 기준 commit도 갱신하지 않는다.
 
 #### 담당 메이드 수행 불가 취소·재배정 (#264 source/dev 완료, 운영 미승격)

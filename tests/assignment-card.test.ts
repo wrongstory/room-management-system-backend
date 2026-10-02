@@ -52,6 +52,7 @@ const targets = targetIds.map((id, index) => ({
   id,
   room_id: `70000000-0000-4000-8000-00000000000${index + 1}`,
   cleaning_kind: kinds[index],
+  source: ['scheduled_checkout', 'stayover_request', 'manual_room_request', 'inspection_reclean'][index],
   original_service_date: '2026-09-20',
   effective_service_date: index === 3 ? '2026-09-22' : '2026-09-20',
   carryover_count: index === 3 ? 2 : 0,
@@ -202,6 +203,78 @@ describe('today current assignment backlog', () => {
 });
 
 describe('assignment card projection', () => {
+  it('adds immutable provenance and preserves historical effective dates instead of future target dates', async () => {
+    const current = await service().list(admin, { serviceDate: '2026-09-20' });
+    expect(current[1]).toMatchObject({ sourceKind: 'stayover_request', canCancel: true, cancelReasonCode: null,
+      roomTypeSnapshot: { code: 'TYPE-2', name: '객실 유형 2', elevatorZone: null }, effectiveServiceDate: '2026-09-20' });
+    const past = await service().history(admin, targetIds[3] as string);
+    expect(past[0]).toMatchObject({ sourceKind: 'inspection_reclean', effectiveServiceDate: '2026-09-21',
+      rolloverCount: 1, canCancel: false, cancelReasonCode: 'ASSIGNMENT_NOT_CURRENT' });
+    const maidRows = await service().list(maid, { serviceDate: '2026-09-20' });
+    expect(maidRows.every((row) => (row as Row).canCancel === false && (row as Row).cancelReasonCode === 'ADMIN_REQUIRED')).toBe(true);
+  });
+
+  it('allows stale current drafts and scheduled attempts without PIN or due-date conditions', async () => {
+    const row = { ...assignments[2], revision: 1, service_date: '2026-09-20' } as Row;
+    const target = { ...targets[2], status: 'draft_assigned', assignment_version: 9,
+      effective_service_date: '2026-09-23', fee_snapshot: 0, room_type_snapshot: {} } as Row;
+    const result = await service({ cleaning_assignments: [row], cleaning_targets: [target],
+      cleaning_attempts: [{ id: 'scheduled', assignment_id: row.id, attempt_number: 3, status: 'scheduled', started_at: null },
+        { id: 'old', assignment_id: row.id, attempt_number: 1, status: 'superseded', started_at: '2026-09-19T01:00:00Z' }] }).history(admin, targetIds[2] as string);
+    expect(result[0]).toMatchObject({ canCancel: true, cancelReasonCode: null, targetAssignmentVersion: 9,
+      effectiveServiceDate: '2026-09-20', feeSnapshot: 0, roomTypeSnapshot: { code: null, name: null, elevatorZone: null } });
+  });
+
+  it.each([
+    ['scheduled', '2026-09-20T02:00:00Z', 'CLEANING_REQUEST_CANCEL_CONFLICT'],
+    ['in_progress', null, 'CLEANING_REQUEST_CANCEL_CONFLICT'],
+    ['field_completed', null, 'CLEANING_REQUEST_CANCEL_CONFLICT'],
+    ['scheduled', undefined, 'CAPABILITY_UNAVAILABLE'],
+  ])('uses all relevant attempts rather than the newest display row: %s/%s', async (status, startedAt, reason) => {
+    const row = assignments[2] as Row;
+    const result = await service({ cleaning_assignments: [row], cleaning_targets: [targets[2] as Row],
+      cleaning_attempts: [{ id: 'latest', assignment_id: row.id, attempt_number: 3, status: 'scheduled', started_at: null },
+        { id: 'earlier', assignment_id: row.id, attempt_number: 2, status, ...(startedAt === undefined ? {} : { started_at: startedAt }) }] }).history(admin, targetIds[2] as string);
+    expect(result[0]).toMatchObject({ attemptStatus: 'scheduled', canCancel: false, cancelReasonCode: reason });
+  });
+
+  it.each(['approved', 'cancelled', 'submitted', 'in_progress'])('denies terminal or started target state %s', async (status) => {
+    const result = await service({ cleaning_assignments: [assignments[2] as Row], cleaning_targets: [{ ...targets[2], status }] })
+      .history(admin, targetIds[2] as string);
+    expect(result[0]).toMatchObject({ canCancel: false, cancelReasonCode: 'CLEANING_REQUEST_CANCEL_CONFLICT' });
+  });
+
+  it('keeps missing legacy source unknown without inferring it from cleaning kind', async () => {
+    const legacy = { ...targets[2] } as Row;
+    delete legacy.source;
+    const result = await service({ cleaning_assignments: [assignments[2] as Row], cleaning_targets: [legacy] })
+      .history(admin, targetIds[2] as string);
+    expect(result[0]).toMatchObject({ sourceKind: null, canCancel: false, cancelReasonCode: 'CAPABILITY_UNAVAILABLE' });
+  });
+
+  it.each([
+    {}, { code: '', name: '', elevatorZone: '' },
+    { code: 1234, name: false, elevatorZone: ['A'] },
+    { code: null, name: {}, elevatorZone: null }
+  ])('normalizes raw stored snapshot optional attributes like the SQL projection: %j', async (roomType) => {
+    // Stored historical optional values are normalized by SQL too. This does
+    // not weaken the separate fresh canonical metadata corruption gate.
+    const result = await service({ cleaning_targets: [{ ...targets[2], room_type_snapshot: roomType }] })
+      .history(admin, targetIds[2] as string);
+    expect(result[0]).toMatchObject({ roomTypeCode: null, roomTypeName: null, elevatorZone: null,
+      roomTypeSnapshot: { code: null, name: null, elevatorZone: null }, feeSnapshot: 12000 });
+  });
+
+  it.each([101, 1001])('preserves a historical snapshot name of %i characters without inventing a display limit', async (length) => {
+    // Baseline card text and the stored TEXT/OpenAPI contract have no length
+    // cap. Keep fresh canonical corruption checks separate from valid length.
+    const name = 'n'.repeat(length);
+    const result = await service({ cleaning_targets: [{ ...targets[2], room_type_snapshot: { code: 'a'.repeat(101), name, elevatorZone: 'A' } }] })
+      .history(admin, targetIds[2] as string);
+    expect(result[0]).toMatchObject({ roomTypeCode: 'a'.repeat(101), roomTypeName: name,
+      roomTypeSnapshot: { code: 'a'.repeat(101), name, elevatorZone: 'A' } });
+  });
+
   it('projects every cleaning kind and immutable card snapshots for admin', async () => {
     const result = await service().list(admin, {
       serviceDate: '2026-09-20',

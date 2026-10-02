@@ -6,10 +6,51 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 > 정본 효력: 이 파일이 `dev`에 병합된 이후부터 API 상태 판단의 우선 정본으로 사용한다. production 상태는 Git branch가 아니라 Supabase Edge Function readback과 hosted HTTP smoke를 우선한다.
 
-### #348 수동 요청 취소 B안 — source 후보, 운영 미승격
+### #326 배정 대상 조회 metadata — 구현 후보, CI/QA/PR 미완료
 
-통합 기준은 #305 문서 감사가 완료된 `dev@fb813cd0d4867f3274ce441fce2d29db1bda1e41`
-(PR #347, 92 migrations)다. 이번 후보는 93번째 `manual_cleaning_cancel_pin_independent`를 추가하며
+선행 통합 기준은 `dev@f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`/93 migrations다.
+94번째 `assignment_target_read_metadata`는 기존 배정 카드/impact/Preview/새 commit 응답에
+immutable snapshot·실제 source·revision까지의 이월·취소 advisory를 추가한다. endpoint는 추가하지
+않고 131 paths·141 operations를 유지한다. source/snapshot/과거 receipt backfill도 없다.
+관리자 current/target에만 #348의 실제 미착수 predicate로 `canCancel`을 표시하며 PIN·기한·
+stale draft를 별도 제한으로 사용하지 않는다. 이력/메이드의 false 사유는 표시 코드다.
+raw 저장 snapshot 객체의 빈/비문자 선택 key는 SQL/카드 모두 unknown null로 정규화하고 malformed
+fresh metadata pack은 strict parser에서 안전한 500으로 거부하는 계약이다. legacy elevator
+snapshot 누락 시 current-room A/B fallback 제거는 routing 입력 변경이므로 새 metadata 제외만으로
+모든 이전 Preview fingerprint byte 동일성을 보장하지 않는다. 해당 Preview는 다시 계산해야 한다.
+
+최신 local PASS는 fresh 94 reset 재실행, focused Node 156/Deno 34 및 typecheck/lint,
+QA 2차 보완 후 `ci:quality` 795 tests/55 files(secrets/lint/typecheck/build/OpenAPI 12 포함),
+전체 Edge 318 tests/bundle 17,204,763 bytes, Python console 95/full Ruff·mypy·codegen·build,
+5 manifests·candidate backup 94·DB lint exit 0이다. 기존 DB lint 10 functions warning은 유지하고
+신규 helper 추가 경고는 없다. public base 49개/RLS 누락 0개를 local readback으로 확인했다.
+초기 focused 기대 객체 7건·ReturnType lint 1건·Edge format FAIL과 각 재검증 PASS 이력을 보존한다.
+QA 1차 P2는 core raw normalizer/fresh strict parser 분리 및 SQL Preview classifier 보완으로
+정적 resolved지만 최종 QA 승인은 아니다. QA 2차 P2는 기존 공개 카드/text·DB/OpenAPI에 없는
+신규 표시 metadata 100자 상한이었다. 임의 표시 상한 제거·1,001자 이름 회귀 후 정적 resolved이며
+P0/P1/미해결 코드 P2=0이다. routing `code`/`elevatorZone`의 기존 `str(100)` 및 fresh pack
+reject는 유지한다. 위 quality/Edge/focused 수치는 QA 2차 보완 후보의 실제 local 실행이다.
+upgrade 1·2차 FAIL은 1일 fixture의 deferred
+`AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS`/`23514`가 원인이다. 제약을 유지하고 정상 7일 fixture로
+보완한 upgrade 3차는 실제 PASS이고 cleanup fresh 94도 PASS다. 전용 SQL 135는
+`SET CONSTRAINTS ALL IMMEDIATE` 추가 뒤에도 PASS였고, 신규 긴 이름을 포함한 SQL 137은 별도
+최신 전용 실행이 아닌 full suite 결과다. 실제 `npm run db:test` exit 0으로 20 upgrade phases와
+72 SQL files/4,068 tests가 모두 PASS했으며 실제 request/신규 receipt 1,001자 이름·보존을 포함한다.
+KST 5 clocks × 29 = 145와 전체 실제 concurrency/cleanup fresh 94도 PASS다. local advisor는
+결과 0건/exit 0이다. clean source commit 이후 exact-source backup·exact-head CI·최종 QA·
+PR/dev 통합 근거는 연결 Issue/PR에서 확인하는 PENDING gate다. 이 문서와 승인 source가 dev
+정본에 포함되고 연결 Issue/PR의 해당 head CI·QA 승인·실제 통합 근거를 확인해야 source/dev
+완료 효력이 발생하며, 지금 이미 병합됐다는 뜻은 아니다. 상세
+실제 결과·중간 실행/실패 이력과 프런트 scoped 인계는
+[배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)을 따른다. 기존 ID/CAS를 재사용하고
+프런트 generated client/consumer 갱신·운영 UAT는 프런트 담당자의 별도 gate다.
+`main@1780728a02144c0816565ba091e43a8b3e126c4f`와 production/recovery는 변경하지 않는다.
+
+### 과거 #348 수동 요청 취소 B안 — dev 통합 전 source 후보 기록
+
+아래는 #348 통합 전 기록이며 현재 선행 dev는 위 #326 절의 `f72c43d4`/93 migrations를 따른다.
+당시 통합 기준은 #305 문서 감사가 완료된 `dev@fb813cd0d4867f3274ce441fce2d29db1bda1e41`
+(PR #347, 92 migrations)다. 당시 후보는 93번째 `manual_cleaning_cancel_pin_independent`를 추가하며
 OpenAPI 131 paths·141 operations 및 catalog 59 family·42 category는 유지한다.
 수동 연박/추가 요청은 배정·통보 후 미착수면 PIN 조회 이력과 무관하게 취소한다.
 session-bound RPC가 최신 관리자/password/session을 잠가 다시 확인하며 legacy service EXECUTE를
@@ -17,7 +58,8 @@ session-bound RPC가 최신 관리자/password/session을 잠가 다시 확인�
 [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)과
 [#348](https://github.com/wrongstory/room-management-system-backend/issues/348)의 actual validation,
 독립 QA/required CI/dev 통합 근거를 따른다. DB와 양 adapter는 같은 릴리스 단위이며 운영은 변경하지 않는다.
-#326 snapshot/sourceKind/rollover/canCancel DTO, 프런트 구현 및 운영 UAT는 별도로 OPEN 유지한다.
+당시 #326 snapshot/sourceKind/rollover/canCancel DTO, 프런트 구현 및 운영 UAT는 별도 OPEN으로
+분리했다. 현재 #326 구현 후보/QA 보완 상태는 위 절을 우선하며 과거 후보 기록을 지우지 않는다.
 
 ### #305 기능 통합 당시 source/dev 기준 — 2026-10-02
 
@@ -192,7 +234,8 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 ## 2. 현재 source/dev 기준과 날짜가 고정된 운영 기록
 
-현재 source/dev는 위 `4fe6c981` / 92 migrations / OpenAPI 131 paths·141 operations다.
+현재 선행 source/dev는 위 `f72c43d4` / 93 migrations / OpenAPI 131 paths·141 operations다.
+#326의 94번째 migration과 DTO는 그 기준 위의 구현 후보이며 source/dev 완료와 구분한다.
 아래 운영 runtime/readback과 v0.6.5 후보 문구는 **2026-09-26 KST 배포 전 snapshot**의 기록이다.
 당시 기준은 v0.6.4 main·83 migrations였으며 이를 최신 production 상태로 재선언하지 않는다.
 후속 v0.6.5 이력은 [릴리즈 기록](./RELEASE_V0.6.5.md)을 따른다. 이번 #305 문서 정합화에서는
@@ -442,7 +485,7 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 | [ ] | `POST /v1/reservations/{reservationId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
 | [ ] | `POST /v1/reservations/{reservationId}/manual-checkout` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
 | [ ] | `POST /v1/reservations/cleaning-requests` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
-| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | 기존 운영 동작 이력. #348 B안·PIN 제한 제거는 source 후보이며 별도 운영 승격/UAT 필요 |
+| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | 기존 운영 동작 이력. #348 B안·PIN 제한 제거는 source/dev 통합이며 별도 운영 승격/UAT 필요 |
 | [x] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ✅ | ✅ | ✅ | scheduler manual/replay 및 reserved namespace 계약 PASS |
 
 ### #52 source gate
