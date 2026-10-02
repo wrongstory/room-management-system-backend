@@ -1,5 +1,15 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+## 2026-10-02 #305 source/dev 종료 감사 기준
+
+#306의 기한 비차단, #308의 지연 업무 보존·상대 역할 알림, #343의 컴플레인 미응답 주의는
+각각 PR #307/#310, #340, #346으로 통합됐다. 최신 기능 dev 기준은
+`4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`이며 92 migrations / OpenAPI 131 paths·141 operations,
+typed catalog 59 event family·42 public category다. #308/#343의 운영 승격은 완료하지 않았다.
+정확한 승인 source/tree·CI·QA, 과거 실패와 별도 OPEN 범위는 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
+아래 날짜별 후보·운영 snapshot은 해당 시점의 이력이며 현재 운영 재검증 결과가 아니다.
+이 정합화는 프런트 제품 기준 commit·미확정 정책·API·migration을 변경하지 않는다.
+
 ## [확정] #305/#308 업무 기한은 권한 만료가 아님
 
 예정 서비스일·dueAt 경과만으로 배정·시작·완료·제출을 차단하거나 기존 담당·배정·attempt를
@@ -10,30 +20,31 @@
 #308의 아래 단계별 후보는 구현 이력이다. 최신 source/dev 완료 근거는 PR #340,
 `dev@4d85458c5d0a900cf87f7318fcd9b2474c03a889`, required CI `36864792279`
 application/migration PASS, 독립 QA98/100 및 승인 source/tree 동일성이다.
-운영 반영을 뜻하지 않으며 #305의 컴플레인 미응답 알림은 #343으로 별도 구현한다.
+운영 반영을 뜻하지 않으며 #305의 컴플레인 미응답 알림도 PR #346으로 source/dev 완료했다.
+아래 단계별 후보·당시 후속 설명은 PR #340 병합 전의 구현 이력이다.
 
-- [현재 구현 후보] #308 1차는 당일 배정의 dueAt 차단, 과거 통보 업무의 시작 차단,
+- [과거 단계별 구현] #308 1차는 당일 배정의 dueAt 차단, 과거 통보 업무의 시작 차단,
   scheduler 자동 이월 및 `expire_scheduled` 명령을 제거한다. scheduler는 기술적 cursor로
   회전하며 한 번에 최대 100건을 검사한다. 원 업무 날짜·담당·snapshot은 보존한다.
-- [현재 구현 후보] #308 2차는 미완료 현장 청소의 최초 지연을 private typed 원장으로
+- [과거 단계별 구현] #308 2차는 미완료 현장 청소의 최초 지연을 private typed 원장으로
   보존하고 활성 business admin에게 기존 알림함/typed outbox로 전달한다. target별 최초 1회,
   수신자별 최초 1회이며 10분 그룹 경계나 실행 actor 변경으로 중복되지 않는다.
   dueAt이 없는 업무는 서비스일 다음 날 KST 시작을 지연 표시 기준으로만 사용한다.
   현장 완료·업로드·제출·검수 대기에 새 검수 SLA를 만들지 않는다.
 - [과거 단계] 상태 변경별 상호 알림, 과거 업무의 오늘 preview·현재 가능일 연결은
-  아래 3차·4A/4B1/4B2 후보로 보완했다. 전체 coverage·통합 및 종료 gate는 별도로 남는다.
-- [현재 구현 후보] #308 4A는 Fastify/Edge 공유 순수 계산기에 한해 오늘 snapshot의 과거
+  아래 3차·4A/4B1/4B2 후보로 보완했다. 당시 남았던 전체 coverage·통합 gate는 PR #340으로 완료했다.
+- [과거 단계별 구현] #308 4A는 Fastify/Edge 공유 순수 계산기에 한해 오늘 snapshot의 과거
   미배정 후보와 날짜별 고정 부하를 처리한다. 원 serviceDate·담당·sequence·snapshot은 바꾸지 않는다.
   계산용 날짜/sequence 정렬은 실행 우선순위가 아니며 새 단일 1–N로 과거 업무를 재번호화하지 않는다.
   4A 당시 DB snapshot·현재 목록·저장/통보·가능일 변경 보호는 후속 범위였으며, 아래 4B1을 포함해도 종단 기능 완료가 아니다.
-- [현재 구현 후보] #308 4B1은 89번째 append-only migration으로 KST 오늘 DB snapshot에
+- [과거 단계별 구현] #308 4B1은 89번째 append-only migration으로 KST 오늘 DB snapshot에
   원 날짜가 과거인 미완료 업무도 포함한다. 내일 계획에는 과거 attempt-0 후보를 복제하지 않는다.
   실제 수행 중인 교차 날짜 업무·원 snapshot 불일치·source/점유 충돌은 기존 guard를 유지한다.
   private 조회의 `sequenceReservations`는 현재 assignment의 날짜별 최대 점유 순번이며
   approved/cancelled target의 current row도 포함한다. 순수 계산기는 그 번호 뒤에 제안하고
   원 업무/담당/날짜/번호를 변경하지 않는다. 내부 점유 정보는 공개 응답에 넣지 않는다.
   4B1 당시 오늘 목록·저장/통보·오늘 가능일 보호는 후속이었다.
-- [현재 구현 후보] #308 4B2는 오늘 current 목록에 원 날짜가 과거인 미완료 assignment를 포함한다.
+- [과거 단계별 구현] #308 4B2는 오늘 current 목록에 원 날짜가 과거인 미완료 assignment를 포함한다.
   내일·과거 날짜·includeHistory 조회 범위는 기존 exact-date다. 메이드 본인 통보 row를 RLS로 먼저
   제한하며 과거 approved/cancelled는 제외하고 오늘 terminal 카드는 호환 유지한다.
   90번째 append-only migration은 오늘 preflight/확정/잠금에 과거 draft를 포함하고 요청 오늘의
@@ -41,26 +52,26 @@ application/migration PASS, 독립 QA98/100 및 승인 source/tree 동일성이�
   불변 assignment.notified 감사의 정확한 assignment/revision/계획일을 근거로 오늘 가능일을 보호한다.
   기존 원 날짜 보호·실제 source/점유·CAS·멱등성·선택 부분집합 원자성은 유지하며 이력 backfill은 없다.
   목록/관련 이력은 count와 반환 수를 검사하며 기술 상한 초과·잘림은 일부 응답 대신 안전하게 실패한다.
-  최신 dev/#320 통합과 전체 정책 종료 검토는 후속이며 운영 배포 완료가 아니다.
+  당시 후속이던 최신 dev/#320 진단 통합은 PR #340으로 완료했다. #320 실제 사례/UAT와 운영 배포는 별도다.
 - 구현 후보는 source/운영 배포 완료 선언이 아니다. [진행 범위](./CLEANING_OVERDUE.md)를 따른다.
 
-- [현재 구현 후보] #308 6차는 전체 종료 감사에서 발견한 상대 역할 알림 3건을 보완한다.
+- [과거 단계별 구현] #308 6차는 전체 종료 감사에서 발견한 상대 역할 알림 3건을 보완한다.
   성공한 메이드 폭탄방·특이사항 신고는 업무관리자에게, 성공한 관리자 폭탄방 선판정은
   해당 불변 수행 회차의 메이드에게 즉시 informational 알림을 만든다. 단순 사진 업로드나
   조회 알림은 아니며 최종 검수·수익·입실 준비 상태를 변경하지 않는다. 기존 신고/판정과
   typed inbox/outbox는 같은 transaction이며 메모·사진 ID·raw payload는 복제하지 않는다.
   기존 수신자 상태·자기 push 제외·worker TTL을 유지하고 과거 신고/판정을 backfill하지 않는다.
   상세 검증/미완료 gate는 [상대 역할 알림 보완](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
-  부모 #305의 컴플레인 응답 지연 주의 알림은 별도 잔여 범위이며 이 보완으로 완료 처리하지 않는다.
+  이 보완 당시 잔여였던 컴플레인 응답 지연 주의 알림은 별도 PR #346으로 source/dev 완료했다.
 
 ## #320 Preview 진단 보강 (정책 변경 없음)
 
 2026-10-01 #308 5차는 `744662c`와 #320 후보 `ad91d2e`를 같은 source 브랜치에서
-결합한다. 최신 `origin/dev@e19f81f`는 변경하지 않았다. 날짜별 원 슬롯·과거 업무 보존을
-기준으로 진단만 가산하며, dev 승인·운영 배포·#320 실제 신고 원인 확정은 아니다.
+결합했고 당시 `origin/dev@e19f81f`는 변경하지 않았다. 이 진단 계약은 이후 PR #340으로 dev에 통합됐다.
+날짜별 원 슬롯·과거 업무 보존 기준의 진단 보강이며 운영 배포·#320 실제 신고 원인 확정은 아니다.
 
-- [현재 구현] feature source는 기존 미배정 reason을 유지하며 상세 reasonCodes와 동일 snapshot의 후보/고정 업무 진단을 추가한다. 운영 배포 완료가 아니다.
-- [현재 구현 후보] 재청소 원담당자·고정 배정·실제 source/점유 검사는 유지한다. 예정 기한 경과는 위 #305/#308 정책에 따라 권한 만료가 아니며 진단만으로 제약을 우회하지 않는다.
+- [현재 구현 — dev 통합 PR #340] source는 기존 미배정 reason을 유지하며 상세 reasonCodes와 동일 snapshot의 후보/고정 업무 진단을 추가한다. 운영 배포 완료가 아니다.
+- [현재 구현 — dev 통합 PR #340] 재청소 원담당자·고정 배정·실제 source/점유 검사는 유지한다. 예정 기한 경과는 위 #305/#308 정책에 따라 권한 만료가 아니며 진단만으로 제약을 우회하지 않는다.
 - Preview UI만 프런트 dev@09ed28446a4fd43919cddb29ebe442b848548ab8과 대조했다. 제품 전체 기준 갱신이 아니다.
 - 실제 신고의 서비스일/당시 응답은 미확인이다. 상세 의미·프런트 한국어 문구 매핑 필요 사항은 [ASSIGNMENT_PREVIEW.md](./ASSIGNMENT_PREVIEW.md)를 따른다.
 
@@ -402,7 +413,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 ### [현재 구현] #28 수행 회차 활성화·이월 경계
 
 아래 자동 이월·마감 차단 설명은 과거 구현 기록이다. #305/#308의 위 확정 정책으로 대체되며,
-새 후보에서 scheduler는 원 담당/업무를 유지한다.
+PR #340으로 dev 통합된 scheduler는 원 담당/업무를 유지한다.
 
 - 기존 scheduler의 exact active business admin·secret·분 단위 invocation을 재사용하되, 예약 전이와 배정 lifecycle은 서로 다른 command scope/request hash로 멱등 처리한다. public activation API와 메이드 activation API는 만들지 않는다.
 - 오늘 KST의 notified current assignment만 active maid, current target/version, schedule snapshot, 접근/마감 창, source별 예약·checkout·reclean 계약을 transaction 안에서 다시 확인한 후 `scheduled` attempt를 exactly-once 생성한다. 내일 작업과 private planned checkout은 attempt 0이다.
@@ -549,7 +560,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 벌점은 0~10의 정수이고 평가 전용 데이터다. 청소 반려가 자동 벌점이 되지 않으며, 컴플레인·벌점이 음수 adjustment나 주급 차감을 자동 생성해서는 안 된다.
 - 메이드는 본인 건의 최초 판정에 정확히 한 번 확인 또는 이의를 제출할 수 있다. 7일 주의 기준이 지나도 응답 권한은 만료되지 않으며 판정·벌점·재작업을 직접 바꾸지 못한다.
 - `responseDeadline`은 기존 이력 호환과 관리자 주의 알림을 위한 기준 시각이다. 시간 경과만으로 미응답 사건을 종결하거나 메이드 기능을 막지 않는다.
-- #343 source 후보는 최초 판정의 기존 `responseDeadline`을 엄격히 지난 미응답 `decided` 사건만 관리자에게 informational 주의 알림으로 관찰한다. 정정은 최초 시각·기준을 초기화하지 않으며 확인/이의·종결 사건과 기준이 없는 과거 사건은 제외한다. 사건별 불변 evidence와 수신자별 enrollment로 반복 실행·grouping 경계를 넘어서도 중복하지 않는다. 응답 권한·벌점·수익·보상은 변경하지 않으며 migration 자체의 과거 알림 backfill은 없다. [검증·배포 경계](./COMPLAINT_RESPONSE_ATTENTION.md)를 따른다.
+- #343의 dev 통합 계약(PR #346)은 최초 판정의 기존 `responseDeadline`을 엄격히 지난 미응답 `decided` 사건만 관리자에게 informational 주의 알림으로 관찰한다. 정정은 최초 시각·기준을 초기화하지 않으며 확인/이의·종결 사건과 기준이 없는 과거 사건은 제외한다. 사건별 불변 evidence와 수신자별 enrollment로 반복 실행·grouping 경계를 넘어서도 중복하지 않는다. 응답 권한·벌점·수익·보상은 변경하지 않으며 migration 자체의 과거 알림 backfill은 없다. [검증·배포 경계](./COMPLAINT_RESPONSE_ATTENTION.md)를 따른다.
 - 종결 뒤 reopen은 금지한다. 판정 오류는 active business admin이 기존 판정을 보존한 새 correction decision version으로만 바로잡는다.
 - 판정·이의 처리·종결·정정 command는 한 명의 active business admin이 처리하며 actor, `expectedVersion`, actor/command 범위 idempotency key와 canonical request hash, audit을 필수로 한다.
 - 이미 승인된 원 청소의 earning은 컴플레인 때문에 취소하거나 귀속일을 바꾸지 않는다.
@@ -696,7 +707,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 앱 알림함은 영속 데이터다. 푸시는 그중 즉시 행동이 필요한 사건의 전달 수단이다.
 - 관리자와 메이드의 수신 대상을 분리한다.
 - 사용자가 자기 행동으로 만든 변화는 자신에게 푸시하지 않는다.
-- #308 3차 source 후보는 메이드의 정상 청소 시작을 business admin에게 typed `cleaning.started_admin` / `cleaning_started` informational 알림으로 보완한다. 원 attempt·현재 담당·assignment revision·시작 시각과 immutable `cleaning.attempt_started` 감사를 검증하며, 시작 상태/CAS/receipt/inbox/outbox는 같은 transaction이다. 모든 business admin의 inbox는 보존하고 push는 아래 active/password-complete/nonself 조건을 따른다. 새 idempotency key·완료 receipt replay로 과거 시작 알림이나 늦게 등록된 관리자 알림을 재생성하지 않는다. 기존 완료·제출·검수·담당 변경의 family/push 정책은 유지한다. 운영 반영이나 #308 전체 완료를 뜻하지 않는다.
+- #308 3차의 dev 통합 계약(PR #340)은 메이드의 정상 청소 시작을 business admin에게 typed `cleaning.started_admin` / `cleaning_started` informational 알림으로 보완한다. 원 attempt·현재 담당·assignment revision·시작 시각과 immutable `cleaning.attempt_started` 감사를 검증하며, 시작 상태/CAS/receipt/inbox/outbox는 같은 transaction이다. 모든 business admin의 inbox는 보존하고 push는 아래 active/password-complete/nonself 조건을 따른다. 새 idempotency key·완료 receipt replay로 과거 시작 알림이나 늦게 등록된 관리자 알림을 재생성하지 않는다. 기존 완료·제출·검수·담당 변경의 family/push 정책은 유지한다. 이 시작 알림은 PR #340에 포함돼 source/dev 완료했으며 운영 반영은 별도다.
 - `requiresAction`과 즉시 push 전달 가치는 독립 축이다. `requiresAction=false`인 취소·회수·결정·현장 완료 같은 정보성 알림도 source-controlled catalog의 `push_eligible=true`이면 push할 수 있으며, 이를 위해 inbox의 행동 필요 상태를 거짓으로 올리지 않는다.
 - push outbox는 catalog의 `push_eligible`, actor와 recipient가 다름, 수신자의 active·비밀번호 변경 완료 상태를 모두 만족할 때만 만든다. inbox 원장은 계정 상태와 무관하게 domain transaction에서 보존하고, inactive 또는 임시 비밀번호 상태에는 push를 전달하지 않는다.
 - 같은 객실·같은 사건 종류의 10분 이내 업데이트는 group key로 묶을 수 있다.
@@ -800,9 +811,9 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - application/migration GitHub Actions의 fresh DB reset과 SQL test
 - 운영·복구검증 Supabase에 같은 기준 스키마가 적용돼 있으나, 초기 수동 적용 과정에서 Git과 서로 다른 migration version으로 기록됨
 
-### `v0.2.0` 이후 source 통합 이력과 현재 `v0.6.5` 후보 상태
+### `v0.2.0` 이후 source 통합 이력과 2026-09-26 배포 전 `v0.6.5` 후보 상태
 
-아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production runtime은 문서 상단의 83 migrations / `api` ACTIVE v34 / OpenAPI 129·139 snapshot을 우선한다. Git source, runtime bundle, Pages artifact, hosted provider·Google·Cron 활성화는 각각 별도 상태로 해석한다.
+아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 이 절의 83 migrations / `api` ACTIVE v34 / OpenAPI 129·139는 2026-09-26 배포 전 snapshot이다. 이후 v0.6.5 완료는 [릴리즈 기록](./RELEASE_V0.6.5.md), #308/#343 dev 완료는 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다. Git source, runtime bundle, Pages artifact, hosted provider·Google·Cron 활성화는 각각 별도 상태로 해석한다.
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview와 #4 notified-only 조회는 source/dev 완료 후 현재 `main`/production source에 반영됐다. 다만 #28 lifecycle effect를 포함한 hosted 역할별 positive smoke는 별도 미완료 gate다.
@@ -916,7 +927,10 @@ npm run db:reset
 
 ---
 
-## 17. 권장 구현 순서
+## 17. 2026-09-26 v0.6.5 배포 전 권장 순서 (과거 기록)
+
+아래 순서는 #309/#310 당시 계획이다. v0.6.5 적용 완료·hosted positive SKIPPED는
+[릴리즈 기록](./RELEASE_V0.6.5.md)에 보존한다. 현재 source 작업 순서는 [개발 오케스트레이션](./DEVELOPMENT_ORCHESTRATION.md)을 따른다.
 
 P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#156/#165/#169, #229/#231/#236/#228/#245와 후속 release source까지 production에 누적 반영됐다. 2026-09-26 KST 배포 전 production은 83 migrations / `api` ACTIVE v34 / OpenAPI 0.5.1 129 paths / 139 operations이며 기존 네 checkout template 데이터도 보존됐다. v0.6.5는 84번째 `complaint_deadlines_non_blocking` 한 건만 추가하는 후보이고, 안전한 fixture가 없어 실행하지 않은 positive mutation은 전체 release PASS로 표현하지 않는다.
 

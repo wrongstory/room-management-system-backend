@@ -1585,7 +1585,7 @@ Table private.notification_event_catalog {
   group_family text [not null]
   group_scope_kind text [not null]
 
-  Note: '#109/#128/#264/#308/#343 candidate: immutable source-controlled 59 event-family / 42 public-category contract. Start/field-complete/overdue/report/decision and complaint-response attention notices are informational, push_eligible is independent from requires_action; self push is suppressed. Exact typed source, no migration backfill; private provenance never enters public projection.'
+  Note: '#109/#128/#264/#308/#343 dev contract (PR #340/#346; production promotion separate): immutable source-controlled 59 event-family / 42 public-category contract. Start/field-complete/overdue/report/decision and complaint-response attention notices are informational, push_eligible is independent from requires_action; self push is suppressed. Exact typed source, no migration backfill; private provenance never enters public projection.'
 }
 
 Table private.notification_groups {
@@ -2522,7 +2522,7 @@ Table private.room_pin_access_scheduled_revocations {
 Table private.assignment_activation_scan_cursor {
   singleton boolean [pk, default: true, note: 'CHECK singleton=true. Singleton internal technical projection, not an immutable business ledger.']
   last_target_id uuid [note: 'UUID keyset cursor, intentionally no business FK; blocked/missing rows must not prevent scan progress.']
-  Note: '#308 candidate: FORCE RLS, no anon/authenticated/service_role table access. Scheduler checks <=100 notified targets per invocation under reservation advisory lock. Does not reschedule or change ownership.'
+  Note: '#308 source/dev complete (PR #340): FORCE RLS, no anon/authenticated/service_role table access. Scheduler checks <=100 notified targets per invocation under reservation advisory lock. Does not reschedule or change ownership.'
 }
 
 Table private.cleaning_overdue_events {
@@ -2544,7 +2544,7 @@ Table private.cleaning_overdue_events {
     assignment_id
     attempt_id
   }
-  Note: '#308 phase2 candidate: immutable original identity/schedule snapshot, first overdue event once per target. INSERT validates current incomplete physical work; completed/upload/review states create no new evidence. FORCE RLS/raw deny, no PII/PIN. Null dueAt uses next KST day for observation only.'
+  Note: '#308 phase2 source/dev complete (PR #340): immutable original identity/schedule snapshot, first overdue event once per target. INSERT validates current incomplete physical work; completed/upload/review states create no new evidence. FORCE RLS/raw deny, no PII/PIN. Null dueAt uses next KST day for observation only.'
 }
 
 Table private.cleaning_overdue_recipients {
@@ -2558,7 +2558,7 @@ Table private.cleaning_overdue_recipients {
     recipient_profile_id
     actor_profile_id
   }
-  Note: 'Immutable admin enrollment. Deferred event/enrollment/typed-notice/outbox commit identity; actor self inbox retained, self push absent. Repeated runs/actor changes/group boundary never re-emit; new eligible admin keeps original event clock and 24h delivery TTL.'
+  Note: 'Immutable admin enrollment. Deferred event/enrollment/typed-notice/outbox commit identity; actor self inbox retained, self push absent. Repeated runs/actor changes/group boundary never re-emit; new eligible admin keeps original event clock and 24h delivery TTL; possible immediate late-admin push expiry remains OPEN #345 (not changed by #343).'
 }
 
 Table private.cleaning_overdue_scan_cursor {
@@ -2586,7 +2586,7 @@ Table private.complaint_response_attention_events {
     cleaning_target_id
     actor_profile_id
   }
-  Note: '#343 source candidate: immutable typed first attention snapshot per case; finite first/deadline/occurrence, deadline=first+7days and occurrence>deadline. INSERT verifies current decided/unanswered case and both real decisions. FORCE RLS/raw deny; no migration backfill or economic side effect.'
+  Note: '#343 source/dev complete (PR #346): immutable typed first attention snapshot per case; finite first/deadline/occurrence, deadline=first+7days and occurrence>deadline. INSERT verifies current decided/unanswered case and both real decisions. FORCE RLS/raw deny; no migration backfill or economic side effect.'
 }
 
 Table private.complaint_response_attention_recipients {

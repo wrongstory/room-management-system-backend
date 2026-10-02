@@ -6,25 +6,49 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 
 > 정본 효력: 이 파일이 `dev`에 병합된 이후부터 API 상태 판단의 우선 정본으로 사용한다. production 상태는 Git branch가 아니라 Supabase Edge Function readback과 hosted HTTP smoke를 우선한다.
 
-### #308 1·2·3차 source 후보 — 지연 업무 유지·관리자 알림
+### #305 현재 source/dev 기준 — 2026-10-02
+
+현재 개발 기준은 `dev@4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`의
+92 migrations / OpenAPI 131 paths·141 operations / catalog 59 family·42 category다.
+#308 PR #340과 #343 PR #346의 source/dev gate는 완료됐다. #305 종료는 이 문서 정합화 PR의
+exact-head CI·독립 QA·dev 통합 확인 뒤에만 수행하며 최종 근거는
+[Issue #305](https://github.com/wrongstory/room-management-system-backend/issues/305)에서 추적한다.
+[종료 감사](./WORK_DEADLINE_CLOSURE.md)가 정확한 승인·실패 이력과 별도 후속을 구분한다.
+이 정합화는 main/production/recovery·프런트·tag·UAT 변경이나 현재 운영 readback이 아니다.
+아래 #308 단계별 후보·Draft·잔여 gate는 2026-10-01~02 당시의 기록이다.
+
+### #308 source/dev 완료 — 지연 업무 유지·관리자 알림
 
 최신 종료 근거: #308은 PR #340의 source `bdf3cda`와 dev squash
 `4d85458c5d0a900cf87f7318fcd9b2474c03a889`의 tree 동일성, required CI
 `36864792279` application/migration PASS 및 독립 QA98/100으로 source/dev 완료됐다.
+동일 tree는 `6013c056dd32208ce375138d17918de4bbfa3743`다.
 아래 단계별 후보 기록은 역사이며 운영 반영이나 #305 전체 종료를 뜻하지 않는다.
 
-### #343 컴플레인 미응답 주의 알림 — source 구현·로컬 검증 완료, 운영 미반영
+### #343 컴플레인 미응답 주의 알림 — source/dev 완료
 
-92번째 append-only migration 후보로 기존 lifecycle의 미응답 관찰을 추가한다.
+PR #346의 승인 source `cc7eb199fae8f6b56408c932a8d4ea6b76d881b7`와 dev squash
+`4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`는
+tree `2c8e06ef48846a28670f472f6bdc3b1be8c5221f`로 동일하다.
+[CI36952950791 attempt 2](https://github.com/wrongstory/room-management-system-backend/actions/runs/36952950791/attempts/2)
+application/migration PASS와 exact-source 독립 QA98/100으로 source/dev gate를 완료했다.
+최종 fresh92·18 upgrade·70 SQL/3,784 assertions·Node694·Edge304·Python95·KST145·
+121실 backup PASS를 확인했다. 이전 `5267f35` 8 same-key FAIL의 원인은 미확정이고,
+CI36952950791 attempt 1의 password-change SQL test85 FAIL도 보존한다. #300은 OPEN이며
+실제 원격 오류와 매칭할 필드는 미확정이다. 후속 PASS로 이전 실패를 해결됐다고 표시하지 않는다.
+
+92번째 append-only migration으로 기존 lifecycle의 미응답 관찰을 추가한다.
 기존 알림 조회·읽음 API와 `complaintCase` deep link를 재사용하며
 `complaint_response_attention` category만 추가한다. 공개 endpoint/OpenAPI 계약과 응답 권한은 유지한다.
 기존 최초 판정 응답 기준을 엄격히 지난 `decided` 사건을 bounded/fair 100건씩 검사하고,
 사건/수신자별 중복을 막는다. scheduler heartbeat에 내부 `complaintAttentionCount`를 합산하며
 이 counter가 없는 이전 완료 receipt와 호환된다.
-실제 검증·QA·CI·dev 승격은 [별도 기록](./COMPLAINT_RESPONSE_ATTENTION.md)을 따른다.
-main/production/recovery·프런트 코드·Cron/provider 설정은 변경하지 않는다.
+단계별 과거 검증·최종 QA·CI·dev 승인 근거는 [별도 기록](./COMPLAINT_RESPONSE_ATTENTION.md)을 따른다.
+#343 신규 family의 delivery enrollment-clock 보완은 기존 `cleaning.overdue_admin`의 원 event-clock
+24h TTL 한계를 해결하지 않는다. 그 late-admin 한계는 #345 OPEN이다.
+이 source/dev 완료는 main/production/recovery·프런트 코드·Cron/provider 설정 변경이나 UAT 완료가 아니다.
 
-### #308 단계별 구현 이력
+### 과거 #308 단계별 구현 이력 — 2026-10-01, PR #340 승인 전
 
 당일 preview/commit의 dueAt 차단 제거, 과거 notified 업무 activation/start 허용,
 scheduler 자동 이월 중단과 bounded/fair 100건 cursor, `expire_scheduled` 폐기의 1차 source를 구현했다.
@@ -36,7 +60,7 @@ scheduler 자동 이월 중단과 bounded/fair 100건 cursor, `expire_scheduled`
 메이드의 정상 청소 시작을 관리자에게 typed informational 알림으로 보완한다. 공개 category
 `cleaning_started`도 기존 Fastify/Edge notification projection과 deep link를 사용하고 새 endpoint는 없다.
 기존 완료·제출·검수·담당 변경 및 자기 push 제외 정책은 유지한다. 과거 미배정
-업무의 종단 저장·통보와 최종 통합은 미완료이며 #308을 닫지 않는다. 4A는 Fastify/Edge 공유 순수
+업무의 종단 저장·통보와 최종 통합은 3차 당시 미완료여서 #308을 닫지 않았다. 4A는 Fastify/Edge 공유 순수
 계산기가 과거 후보·날짜별 고정 sequence를 보존하도록 보완한 부분 후보다. 당시 DB 대상집합,
 현재 목록 조회, 저장/통보 및 가능일 보호는 후속 범위였다. 4A의 공개 schema/경로 및 DB/RLS 변경은 없다.
 4B1은 89번째 append-only migration으로 오늘 DB snapshot의 과거 미완료 대상집합을 연결하고,
@@ -45,46 +69,50 @@ Preview 응답에서 제외하며 공개 endpoint/schema/RLS 권한은 그대로
 변경하지 않는다. 4B2는 오늘 current 목록의 과거 미완료 조회, 오늘 가능일에 기반한 commit 후보/잠금과
 불변 통보 감사에 기반한 계획일 가능일 보호를 연결한다. 내일/이력 조회는 exact-date이며 항목별 원 날짜는
 보존한다. count/실제 반환 수와 기술 상한을 검사하여 일부 목록·잘린 관련 이력으로 응답하지 않는다.
-공개 경로/DTO/권한·보안 TTL은 그대로며 최신 dev/#320 통합 전 종단 종료 선언은 하지 않는다. 실제 검증/PR 상태는
+공개 경로/DTO/권한·보안 TTL은 그대로였으며 당시 dev/#320 통합 전에는 종단 종료를 선언하지 않았다.
+후속 통합·종료 gate는 PR #340으로 완료했다. 실제 검증/PR 이력은
 [지연 업무 계약](./CLEANING_OVERDUE.md)에 기록한다.
 
 ## 1. 상태 판정 규칙
 
-### #308 6차 — 제출 전 신고·폭탄방 선판정 상대 역할 알림
+### 과거 #308 6차 보완 — 2026-10-01, PR #340 승인 전
 
 전체 완료 조건 감사에서 발견한 폭탄방 신고/특이사항 신고→관리자,
-폭탄방 선판정→해당 메이드 통지를 보완하는 source 후보다.
+폭탄방 선판정→해당 메이드 통지를 보완한 source 후보 단계다. 현재는 PR #340으로 dev 통합 완료했다.
 91번째 append-only migration, 기존 알림 조회/읽음·delivery 경로를 재사용한다.
 신고·판정 API의 응답과 권한·CAS·멱등성·최종 승인/수익 계약은 바꾸지 않는다.
 메모/사진 원문·private provenance는 공개 알림에 넣지 않는다.
-프런트·운영 변경 없음. 실제 검증과 남은 gate는
+그 단계의 프런트·운영 변경은 없었다. 실제 검증과 당시 남았던 gate는
 [상대 역할 알림 보완](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
 5차 head14676c1의 required CI36833580274 application/migration PASS는
 이전 source 검증이며 6차 새 head의 승인이 아니다.
 
-### #308 5차 — #320 후보의 직접 의존 계약 결합
+### 과거 #308 5차 결합 — 2026-10-01, PR #340 승인 전
 
 - 744662c 업무 보존 계산기에 ad91d2e의 허용 목록 진단·no-store·OpenAPI 계약을 결합했다.
   원 날짜별 slot·terminal 슬롯·오늘 과거 후보·기한 비차단·snapshot fingerprint는 유지한다.
-- 이번 로컬 PASS: quality625/typecheck/build, Edge298/bundle17,194,004, fresh90/68SQL3,649,
+- 당시 로컬 PASS: quality625/typecheck/build, Edge298/bundle17,194,004, fresh90/68SQL3,649,
   KST145, manifest5종, Python95/ruff/format/mypy/business OpenAPI codegen/package source.
   기준744662c와 합성100개 기존 응답·점수·fingerprint·입력 비변경 비교 PASS.
-- 새 migration/운영/프런트 변경 없음. 최신 dev e19f81f와 후보 브랜치를 구분한다.
+- 새 migration/운영/프런트 변경 없음. 당시 dev e19f81f와 후보 브랜치를 구분했다.
   독립 QA98/100·차단0·Node625/focused80·기준744 직접 비교56case PASS는 로컬 Draft
-  commit/push 준비 범위다. 새 exact-head CI·#308/#305 종료·#320 실제 사례는 별도 gate다.
+  commit/push 준비 범위였다. 새 exact-head CI·#308 source/dev 종료는 이후 PR #340으로 완료했다.
+  #305 최종 문서 승인과 #320 실제 사례는 별도 gate다.
   상세·초기 실패와 보완은 [지연 업무 기록](./CLEANING_OVERDUE.md)을 따른다.
 
-### #320 Preview 진단 보강 (feature source, 운영 미배포)
+### #320 Preview 진단 보강 — source/dev 통합, 실제 신고 사례 미확정
 
 - Fastify/Edge 공통 계산기의 미배정 reasonCodes와 동일 snapshot의 단계별 후보 수·고정 업무 제외 사유를 추가했다.
 - 기존 배정 기준·reason·응답 분류·fingerprint·CAS를 유지한다. 새 endpoint/migration은 없다.
 - 계약/프런트 전달 사항: [ASSIGNMENT_PREVIEW.md](./ASSIGNMENT_PREVIEW.md).
 - #320의 실제 신고 사례 대조와 프런트 한국어 사유 매핑/UAT는 미완료다. 합성 재현을 운영 원인 확정으로 표시하지 않는다.
-- dev/main 병합·운영 배포는 이 기록에 포함되지 않는다.
+- dev source 통합은 PR #340으로 완료했다. 실제 사례 원인·한국어 매핑/UAT·main/운영 승격과 다르다.
+  `ASSIGNMENT_WINDOW_EXPIRED` 예외는 legacy snapshot 호환이며 현재 dueAt 경과 차단을 뜻하지 않는다.
 - #320 단독 후보의 역사 로컬 검증: application 587, Edge 290 + pinned bundle, fresh local 85 migrations,
   전체 SQL 64 files/3,366 assertions, DB lint, Python business OpenAPI codegen PASS.
   기존 dev 대비 합성 100개 결과·score·fingerprint 동일. 누적 upgrade/전체 동시성/hosted UAT는 이번 변경에서 미실행.
-- 독립 QA: 100/100, 최종 P0/P1/P2 0건. 원격 required CI와 실제 신고 사례 확인은 별도 gate다.
+- 단독 후보 당시 독립 QA: 100/100, P0/P1/P2 0건. 당시 원격 CI gate와 실제 신고 사례를 구분했으며
+  결합 source의 최종 승인·CI·QA는 위 PR #340 근거다. 실제 사례 확인은 여전히 별도다.
 
 | 표시 | 의미 |
 |---|---|
@@ -149,11 +177,15 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 따라서 메이드 API를 추가한다고 `maid` Function을 새로 만드는 것이 아니라 기존 `api` Function에 route/adapter를 추가하고 다시 배포한다.
 
-## 2. 현재 기준 스냅샷
+## 2. 현재 source/dev 기준과 날짜가 고정된 운영 기록
 
-production 최종 배포 전 runtime/readback evidence: **2026-09-26 KST**. #245 당시 snapshot은 이후 릴리스로 대체됐고, 현재 운영 기준선은 v0.6.4 main과 83번째 migration이다. v0.6.5의 complaint 기한 비차단은 release candidate이며 main 병합·운영 적용 전까지 production 완료로 표시하지 않는다.
+현재 source/dev는 위 `4fe6c981` / 92 migrations / OpenAPI 131 paths·141 operations다.
+아래 운영 runtime/readback과 v0.6.5 후보 문구는 **2026-09-26 KST 배포 전 snapshot**의 기록이다.
+당시 기준은 v0.6.4 main·83 migrations였으며 이를 최신 production 상태로 재선언하지 않는다.
+후속 v0.6.5 이력은 [릴리즈 기록](./RELEASE_V0.6.5.md)을 따른다. 이번 #305 문서 정합화에서는
+운영 DB/Edge·provider·프런트·UAT를 변경하거나 재검증하지 않았다.
 
-- 운영 Git 정본: `main@65905ff386e642d926a76576884c1f9a4f24f169`. 최신 기능 통합 지점: `dev@ab185af2343644a5a2aec85962eb5272243844c4`, **84 migrations / OpenAPI 0.5.1 129 paths / 139 operations**.
+- 당시 운영 Git 정본: `main@65905ff386e642d926a76576884c1f9a4f24f169`. 당시 기능 통합 지점: `dev@ab185af2343644a5a2aec85962eb5272243844c4`, **84 migrations / OpenAPI 0.5.1 129 paths / 139 operations**.
 - 마지막으로 검증된 production API bundle은 `api` ACTIVE v34이며 OpenAPI 0.5.1 / 129 paths / 139 operations를 제공한다.
 - production은 **83 migrations**, head `maid_pin_immediate_reveal`, **`api` ACTIVE v34**, OpenAPI **0.5.1 / 129 paths / 139 operations**다.
 - v0.6.5 후보는 기존 83 migrations를 수정하지 않은 84번째 `complaint_deadlines_non_blocking` 한 건만 pending이다. 79~83번을 다시 적용하지 않는다.
@@ -588,8 +620,8 @@ source/dev 완료와 운영 배포는 별도 gate다.
 고치지 않는 `20260920094931_retire_assignment_duration_policy.sql`이다. Source OpenAPI operation 수는
 유지되며 production도 duration 없는 Preview와 deprecated read-only GET, 410 retired POST 계약을 사용한다.
 Fastify rollback adapter도 같은 3개 경로와 순수 optimizer를 사용한다. 초기 source 이력은
-51 paths / 56 operations, 당시 production은 39 paths / 43 operations였다. 현재 production 수치는
-§2의 0.5.1 / 129 / 139를 우선한다. 성공 Preview의 assignment/attempt/알림/outbox/audit/receipt write는
+51 paths / 56 operations, 당시 production은 39 paths / 43 operations였다. 운영 수치는
+§2의 날짜 고정 운영 기록과 후속 릴리즈 기록을 구분한다. 성공 Preview의 assignment/attempt/알림/outbox/audit/receipt write는
 0이며, 폐기된 설정 확정 POST도 policy/audit/receipt를 만들지 않는다. `55/65/70/80`분은 운영값이 아니다.
 정책 미확정은 정상 상태이며 `decisionReady=true`로 제안을 계산한다. 상세 한계는
 [Preview 계약](./ASSIGNMENT_PREVIEW.md)을 따른다. 자동 apply/notify/PIN/#7 실행은 포함하지 않는다.
@@ -739,7 +771,11 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 
 ## 13. 후속 업무 API·모델 개발 상태
 
-아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production runtime 반영 여부는 §2의 83 migrations, `api` ACTIVE v34, OpenAPI 0.5.1 129 paths / 139 operations를 따른다. v0.6.5의 84번째 migration과 complaint 기한 비차단 bundle은 main 병합·운영 적용·hosted readback 전까지 production 사용 완료로 확대하지 않는다.
+아래는 v0.2.0 이후 업무 기능의 통합 이력이다. production 열의 기존 근거는 §2의
+2026-09-26 배포 전 83 migrations / `api` ACTIVE v34 / OpenAPI 0.5.1 129·139 기록이며,
+후속 v0.6.5 이력은 [릴리즈 기록](./RELEASE_V0.6.5.md)을 따른다. 이번 문서 정합화는
+이를 최신 운영 readback으로 재검증하지 않는다. #308/#343의 현행 source/dev는 위 92 migration
+기준이며 기존 경로의 운영 배포 표시를 새 계약의 운영 완료로 확대하지 않는다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|
@@ -887,7 +923,8 @@ Phase A가 `dev`에 병합돼도 #44 전체 Issue는 Phase B/C와 Windows/hosted
 ## 15. 통합 이력과 현재 우선순위
 
 아래 1~45번은 각 source/dev 병합 당시의 순서와 당시 production 상태를 보존한 이력이다.
-`운영 미적용`/`production 미승격` 표기는 당시 상태이며 현재 production 정본은 §2와 각 상세 표를 우선한다.
+`운영 미적용`/`production 미승격` 표기는 당시 상태다. §2와 각 상세 표의 날짜 고정 운영 근거 및
+후속 릴리즈 기록을 구분하며 이번 #305 source/dev 감사로 최신 운영 상태를 재선언하지 않는다.
 
 1. [x] #48 `dev` 병합
 2. [x] **#51 Availability Edge parity source/dev** — production 배포·hosted smoke까지 Issue Open

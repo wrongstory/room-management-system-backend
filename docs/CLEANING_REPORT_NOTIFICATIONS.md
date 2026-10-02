@@ -1,10 +1,13 @@
 # #308 6차: 신고·폭탄방 선판정의 상대 역할 알림
 
-최신 상태: #308 source/dev 완료. PR #340의 승인 source `bdf3cda`와
+2026-10-02 source/dev 상태: #308 완료. PR #340의 승인 source `bdf3cda`와
 dev squash `4d85458c5d0a900cf87f7318fcd9b2474c03a889`의 tree가 같고,
 required CI `36864792279` application/migration PASS, 독립 QA98/100·차단0으로
-Issue #308을 닫았다. 아래 후보/gate 기록은 당시의 검증 이력이다.
-운영 배포·프런트 연결과 #305 전체 종료 승인은 포함하지 않는다.
+Issue #308을 닫았다. 동일 tree는 `6013c056dd32208ce375138d17918de4bbfa3743`다.
+아래 후보/gate 기록은 2026-10-01 승인 전 검증 이력이다. #343도 PR #346으로 source/dev
+완료했다. #305 종료는 문서 정합화 PR의 exact-head CI·독립 QA·dev 통합 확인 뒤에만 수행하며
+최종 근거는 [Issue #305](https://github.com/wrongstory/room-management-system-backend/issues/305)에서 추적한다. [종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
+이 정합화는 운영 배포·프런트 연결·tag·UAT 변경이나 최신 운영 상태 재검증을 포함하지 않는다.
 
 ## 범위와 정책
 
@@ -36,12 +39,13 @@ Issue #308을 닫았다. 아래 후보/gate 기록은 당시의 검증 이력이
 - 91번째 CLI 생성 append-only migration을 사용한다. 이전 90개 migration은 변경하지 않는다.
 - 새로운 검수 SLA, 한 장 업로드마다 통지, 고객 배정 차단, 수익 생성/수정은 제외한다.
 
-## 검증과 상태
+## source 완료조건과 과거 검증 이력
 
 ### 전체 #308 source 완료조건 대응
 
 독립 종료 감사는 아래 대응을 다시 확인했다. 정적 coverage 확인과 실제 전체 검증,
-새 exact-head CI·dev 승인·운영 사용 가능 판정은 서로 구분한다.
+새 exact-head CI·dev 승인·운영 사용 가능 판정은 서로 구분한다. source/dev gate는
+위 PR #340 근거로 완료됐으며 아래 로컬 기록을 운영 PASS로 확대하지 않는다.
 
 | 완료조건 | source / 회귀 근거 |
 |---|---|
@@ -57,8 +61,11 @@ Issue #308을 닫았다. 아래 후보/gate 기록은 당시의 검증 이력이
 신규 재청소 생성 시 새 availableFrom과 다음 입실 전 window의 순서 제약은
 기존 업무의 dueAt 만료 차단과 다르다. 예약·source 생성 안전 guard를 이 작업에서 제거하지 않는다.
 
-로컬 구현·필수 검증 완료. 새 exact-head CI/최종 source/dev gate는 별도로 남는다.
-실행하지 않은 검증은 PASS로 표시하지 않는다.
+### 과거 로컬 검증 — 2026-10-01, PR #340 승인 전
+
+당시 로컬 구현·필수 검증 완료 후 새 exact-head CI/최종 source/dev gate가 남아 있었다.
+아래 NOT RUN은 그 단계의 이력이며 최종 승인 CI와 구분한다. 실행하지 않은 운영 검증은
+현재도 PASS로 표시하지 않는다.
 
 | 실제 실행 | 결과 |
 |---|---|
@@ -90,11 +97,13 @@ fixture가 one-published 제약에서 충돌하여 FAIL했다. 신규 검사 종
 로컬 dump·restore는 현재91 SQL/manifest hash를 검증했다. 커밋 전 artifact의 source metadata는
 당시 부모14676c1을 기록하므로 새 commit/tree 검증 근거로 사용하지 않는다.
 
-새 head required CI·독립 QA·최신 dev/리뷰 gate 전 Ready/병합/종료하지 않는다.
-production/main/recovery·프런트·실계정/PIN/provider·release/tag 변경 없음.
+당시 새 head required CI·독립 QA·최신 dev/리뷰 gate 전에는 Ready/병합/종료하지 않았다.
+이 gate는 위 PR #340 근거로 완료했다. 해당 구현의 production/main/recovery·프런트·
+실계정/PIN/provider·release/tag 변경은 없었다.
 
 부모 #305의 컴플레인 응답 지연 주의 알림은 [#343](https://github.com/wrongstory/room-management-system-backend/issues/343)으로 분리했다.
-아직 미완료이며 이 청소 보완과 구분한다.
+당시에는 미완료였지만 이후 PR #346으로 source/dev 완료했다. 이 청소 보완과 검증 근거를
+구분하며 [컴플레인 주의 알림 기록](./COMPLAINT_RESPONSE_ATTENTION.md)을 따른다.
 #320 실제 신고 사례·#342 잠금 비용 보완·프런트/실기기 UAT도 별도다.
 
 ## 프런트 읽기 전용 호환성 대조

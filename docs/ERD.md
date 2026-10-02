@@ -4,6 +4,8 @@
 > P0 핵심 스키마·계정 수명주기·도메인 무결성 계약은 migration으로 관리하며, 이후 업무 API와 원장은 구현 순서에 따라 확장한다.
 > 제품 계약과 미확정 사항은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 우선한다.
 
+> #305 현행 source/dev 기준: #308 PR #340·#343 PR #346 완료, 92 migrations와 typed catalog 59 family / 42 category. 운영 승격·별도 후속 및 과거 후보 이력은 [종료 감사](./WORK_DEADLINE_CLOSURE.md)로 구분한다. 문서 정합화이며 스키마 변경이 아니다.
+
 ## 1. 설계 결론
 
 - 관리자와 메이드는 인원 수를 코드나 enum에 고정하지 않는다.
@@ -517,14 +519,14 @@ erDiagram
 - 배정 revision은 생성 시 target의 `effective_service_date`, `available_from`, `due_at`을 snapshot으로 고정하고 target·maid·순서·revision·snapshot·변경자·생성시각을 이후 수정하지 않는다.
 - #25 draft 저장은 `unassigned|draft_assigned` target만 row lock 후 `assignment_version` CAS로 갱신하며, 알림·outbox·attempt는 만들지 않는다.
 - #26 commit은 KST 오늘/내일의 선택 draft만 최신 일정·active maid·current availability version과 다시 대조한다. 선택 부분집합은 전부 성공하거나 전부 롤백한다.
-- #308 4B2 후보에서는 요청 계획일이 KST 오늘이면 과거 원 날짜의 unfinished draft도 같은 검사·잠금 집합에 포함한다. 원 assignment/target 날짜·순번·담당은 보존하고 최신 가능일은 요청 계획일에서 읽는다. 내일은 exact-date이며 범위 밖 요청의 기존 차단 사유를 유지한다. impact는 1,000 후보 초과 시 fingerprint/부분 배열을 반환하지 않는다.
+- #308 4B2의 dev 통합 계약(PR #340)은 요청 계획일이 KST 오늘이면 과거 원 날짜의 unfinished draft도 같은 검사·잠금 집합에 포함한다. 원 assignment/target 날짜·순번·담당은 보존하고 최신 가능일은 요청 계획일에서 읽는다. 내일은 exact-date이며 범위 밖 요청의 기존 차단 사유를 유지한다. impact는 1,000 후보 초과 시 fingerprint/부분 배열을 반환하지 않는다.
 - 오늘 통보한 과거 배정의 가능일 보호는 정확한 assignment/revision과 불변 `assignment.notified` 감사의 요청 계획일을 대조한다. 통보 시각만으로 계획일을 추측하거나 과거 날짜를 backfill하지 않으며 기존 원 날짜 보호도 유지한다.
 - 알림 확정 성공은 target/assignment, 수신자 notification, private persistent outbox, `assignment.notified` 감사를 같은 transaction에 기록한다. 외부 push와 cleaning attempt는 이 transaction에서 만들지 않는다.
 - attempt는 assignment의 target·maid·revision과 모두 일치해야 하며, submission·earning의 maid도 같은 수행자를 가리킨다.
-- #305/#308 후보 scheduler는 오늘 및 과거 날짜의 notified current assignment를 현재 active maid·source·점유 조건으로 재검증한 뒤 `scheduled` attempt를 exactly-once 만든다. invocation당 최대 100건을 private cursor로 회전하며 과거 날짜라는 이유만으로 담당/일정을 바꾸지 않는다. attempt의 target/assignment/maid/revision/template/room snapshot은 생성 뒤 불변이다.
+- #305/#308의 dev 통합 scheduler(PR #340)는 오늘 및 과거 날짜의 notified current assignment를 현재 active maid·source·점유 조건으로 재검증한 뒤 `scheduled` attempt를 exactly-once 만든다. invocation당 최대 100건을 private cursor로 회전하며 과거 날짜라는 이유만으로 담당/일정을 바꾸지 않는다. attempt의 target/assignment/maid/revision/template/room snapshot은 생성 뒤 불변이다.
 - 미래 planned checkout은 obligation materialization·current pointer·actual checkout 전 attempt 0이다. 같은 객실의 이전 active workflow가 있으면 target/assignment를 유지하고 활성화만 보류한다.
-- #305/#308 후보에서는 예정 기한이 지나도 unassigned/notified/scheduled 업무의 날짜·담당·version을 자동 변경하지 않으며 `expire_scheduled`도 폐기한다. 지연 알림과 과거 미배정 today-preview/list/commit은 source 후보로 연결했고 최신 dev 통합·종료 검토는 후속이다.
-- 과거 private rollover helper의 이월 write 검증은 역사 회귀로 보존하지만 #305/#308 후보 scheduler와 공개 lifecycle은 이 helper를 호출하지 않는다. 자동 취소·종류 변환도 하지 않는다.
+- #305/#308의 dev 통합 계약은 예정 기한이 지나도 unassigned/notified/scheduled 업무의 날짜·담당·version을 자동 변경하지 않으며 `expire_scheduled`도 폐기한다. 지연 알림과 과거 미배정 today-preview/list/commit은 PR #340으로 source/dev 완료했으며 운영 승격은 별도다.
+- 과거 private rollover helper의 이월 write 검증은 역사 회귀로 보존하지만 #305/#308의 dev 통합 scheduler와 공개 lifecycle은 이 helper를 호출하지 않는다. 자동 취소·종류 변환도 하지 않는다.
 - `private.assignment_activation_scan_cursor`는 singleton/nullable last UUID의 변경 가능한 기술 projection이다. FK를 두지 않아 제거된 후보도 진행을 막지 않으며 FORCE RLS·직접 table 권한 없음으로 service-only scheduler가 reservation advisory lock 아래 100건씩 회전한다.
 - 검수 반려 재청소는 생성 뒤에도 원 attempt·원 maid 링크를 변경할 수 없고 같은 0원 target을 다른 메이드에게 배정할 수 없다. #264 수행 불가 확정은 그 target/assignment/attempt를 종료 이력으로 보존한 뒤 원 유상 청소의 fee/template snapshot을 가진 별도 ordinary replacement target을 정확히 한 건 생성하며, replacement만 일반 배정 흐름에 들어간다.
 - `assignment_unavailability_cancellations`는 assignment당 최대 한 건이며 target/assignment/maid/revision과 선택적 attempt execution version을 종료된 원장 상태와 대조한다. UPDATE/DELETE와 Data API 접근은 금지하고, replacement target이 있는 경우에도 과거 재청소 target과 earning을 수정하지 않는다.
@@ -636,7 +638,7 @@ erDiagram
 SELECT/UPDATE를 제공하지 않으며 RLS도 관리자 포함 exact recipient만 허용한다. 알림함 index와 cursor는
 `(recipient_profile_id,occurred_at DESC,id DESC)` 순서를 사용한다.
 
-#109/#128/#264/#308 6차 후보의 typed 알림은 private event catalog의 58 event family/41 public category를 정본으로
+#109/#128/#264와 #308/#343의 dev 통합 typed 알림은 private event catalog의 59 event family/42 public category를 정본으로
 삼는다. `source_entity_*`, actor, recipient capability, room/target, deep-link UUID를 생성 즉시
 검증하고 exact terminal evidence만 actionable notice를 resolve한다. recipient별 logical event
 dedupe와 그룹은 분리된다. `notification_groups`는 `(recipient,groupFamily,scope)`별 첫
@@ -645,21 +647,21 @@ inactive/임시 비밀번호/self-action도 inbox에는 남지만 typed delivery
 `push_eligible`은 `requires_action`과 독립이며 informational 취소·회수·결정, 현장 완료, exact
 예약/객실 card-impact 변경도 active 타 수신자에게 push할 수 있다. 상세 표는 [알림 이벤트 카탈로그](./NOTIFICATION_CATALOG.md)다.
 
-#308 2차 후보는 `private.cleaning_overdue_events`의 target UNIQUE와 원 업무 snapshot,
+#308 2차의 dev 통합 계약(PR #340)은 `private.cleaning_overdue_events`의 target UNIQUE와 원 업무 snapshot,
 `cleaning_overdue_recipients`의 `(event_id,recipient_profile_id)` PK로 최초 지연과 수신자를 분리한다.
 두 원장은 INSERT evidence 검증·UPDATE/DELETE 금지·FORCE RLS·raw grant deny이고,
 deferred event/enrollment/notice/outbox trigger가 수신자별 정확히 한 inbox와 비자기 push intent를
 같은 commit에서 요구한다. 별도 singleton cursor는 mutable 기술 projection이며 100건씩 회전한다.
 알림은 informational history이고 업무 완료 뒤에도 원장·알림을 삭제하거나 다시 쌓지 않는다.
 
-#308 3차 후보는 새 테이블 없이 기존 attempt와 immutable `cleaning.attempt_started` 감사에
+#308 3차의 dev 통합 계약(PR #340)은 새 테이블 없이 기존 attempt와 immutable `cleaning.attempt_started` 감사에
 정상 청소 시작 알림을 결합한다. 관리자의 informational inbox와 비자기 push intent는
 시작 상태/CAS/receipt와 동일 transaction에 추가하고 source-controlled writer의 원자성과
 수신자별 logical dedupe를 재사용한다. 기존 알림·감사·배정 이력 backfill은 없다.
 중복 start 감사는 새 writer가 거부하고 `audit_cleaning_started_entity_idx`의
 attempt-keyed partial index로 조회한다. 기존 원장에 소급 UNIQUE 제약을 걸거나 삭제하지 않는다.
 
-#308 6차 후보는 기존 불변 폭탄방 신고·특이사항 신고·폭탄방 판정과 정확한 감사 evidence에
+#308 6차의 dev 통합 계약(PR #340)은 기존 불변 폭탄방 신고·특이사항 신고·폭탄방 판정과 정확한 감사 evidence에
 3개 counterpart family를 결합한다. 새 business table이나 공개 쓰기 권한은 없다.
 기존 typed writer가 신고/판정 transaction 안에서 inbox와 비자기 push intent를 만들며
 메모·사진 ID·원문을 알림에 복제하지 않는다. 과거 신고·판정 알림 backfill은 하지 않는다.
@@ -932,7 +934,7 @@ migration이다. complaint source identity 7개는 모두 실제 FK이며 임의
 `auth.sessions` JWT session을 요구하며 authenticated direct write와 privileged RPC 실행을 막고 app-owned
 service-role RPC만 command를 수행한다.
 
-#343의 92번째 append-only 후보는 이 원장과 최초 판정 응답 기준을 보존하면서
+#343의 PR #346으로 dev에 통합된 92번째 append-only migration은 이 원장과 최초 판정 응답 기준을 보존하면서
 private `complaint_response_attention_events`·`complaint_response_attention_recipients`를 추가한다.
 최초/current decision·case version·room·target의 typed FK를 고정한 사건당 최초 evidence,
 evidence/수신자별 immutable enrollment와 typed notification/outbox를 원자 commit한다.

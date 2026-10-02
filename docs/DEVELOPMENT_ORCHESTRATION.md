@@ -1,6 +1,6 @@
 # 개발 오케스트레이션·source 승인 기준
 
-2026-09-23 기준 개발 진행 원칙을 기록한다. 사용자는 기능 구현·배포와 직접 화면 확인을 우선하고,
+2026-09-23에 정한 개발 진행 원칙과 이후 source 승인 근거를 기록한다. 사용자는 기능 구현·배포와 직접 화면 확인을 우선하고,
 보안·대규모 검증 보강은 기능 흐름 확인 뒤 묶어서 진행하기로 했다. 다만 migration 불변성, 비밀값·PII·PIN
 비노출, required CI, 승인 없는 production 변경 금지처럼 되돌리기 어렵거나 운영 데이터를 위험하게 만드는
 gate는 기능 우선순위와 무관하게 유지한다.
@@ -43,7 +43,23 @@ GitHub 보호 규칙을 우회하지 않으며, 구현·검증·승인·병합·
 main/release 승격, tag/GitHub Release를 변경하지 않는다. feature/dev source를 직접 배포하지 않는다.
 기존 원격 migration 수정·history rewrite, 보호 규칙 완화, secret/PII/PIN 기록은 금지다.
 
-## 현재 진행 기준
+## 2026-10-02 source 진행 기준
+
+- 기능 통합 기준은 `dev@4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`(#343 PR #346)이다.
+  #308 PR #340과 #343의 exact-head required CI·독립 QA 및 승인 source/dev tree 동일성을 확인했다.
+  92 migrations / OpenAPI 131 paths·141 operations / catalog 59 family·42 category다.
+- #305의 마지막 문서 정합화·종료 감사는 docs-only PR의 exact-head CI·독립 QA·dev 통합 후에만 닫는다.
+  근거와 보존할 제한은 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
+- 다음 기능 순서는 #326(snapshot·등록 근거·취소 capability 조회) → #328 → #327이다.
+  #326의 수동 target 취소 가이드/현행 명령 차이는 선행 확인 대상이며 현행 SQL을 새 제품 정책으로 승격하지 않는다.
+- `main@1780728a02144c0816565ba091e43a8b3e126c4f`는 이번 작업에서 변경하지 않는다.
+  production/recovery DB·Edge·Cron/provider·프런트·tag/UAT는 별도 승인·검증 범위다.
+- #13/#300/#320/#341/#342/#344/#345는 부모 #305 종료와 별도로 OPEN 추적한다.
+  과거 CI FAIL은 재검증 PASS로 지우지 않는다. #300의 검사 기준 변경에는 별도 결정·보안 검토가 필요하다.
+
+## 2026-09-23 진행 snapshot (과거 기록)
+
+아래 head·runtime·입력값은 당시 기록이다. 현재 운영 재검증이나 새 배포 권한을 뜻하지 않는다.
 
 - 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고 최신 기능 통합 지점은 `dev@2ce8953c76fbf5cb33aff9f8a57b303acbf05cdb`다. 개발 정본은 #171까지 81 migrations / OpenAPI 0.5.1 129 paths / 139 operations이고 #172는 82번째 feature 후보다. production runtime은 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations이다. Pages parity와 기존 관리자 `guestCount` UAT는 완료됐지만 #256 사진 정규화와 #250/#264 배정 후속의 운영 승격은 남아 있다.
 - Web Push는 사용자 실제 기기 수신을 확인했다. 내부 health와 secret 상태는 별도 안전 projection으로 확인한다.
