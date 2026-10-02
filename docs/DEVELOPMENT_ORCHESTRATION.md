@@ -1,5 +1,7 @@
 # 개발 오케스트레이션·source 승인 기준
 
+> #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
+
 2026-09-23에 정한 개발 진행 원칙과 이후 source 승인 근거를 기록한다. 사용자는 기능 구현·배포와 직접 화면 확인을 우선하고,
 보안·대규모 검증 보강은 기능 흐름 확인 뒤 묶어서 진행하기로 했다. 다만 migration 불변성, 비밀값·PII·PIN
 비노출, required CI, 승인 없는 production 변경 금지처럼 되돌리기 어렵거나 운영 데이터를 위험하게 만드는

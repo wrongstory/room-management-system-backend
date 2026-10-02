@@ -31,6 +31,33 @@ create temp table incident_fixture(
   decision_available_from timestamptz,decision_due_at timestamptz
 );
 
+-- #354: keep the future-denial fixture structurally valid across KST midnight.
+-- Otherwise the canonical date/window guard masks the intended decision guard.
+create function pg_temp.incident_future_window(p_at timestamptz)
+returns table(service_date date,available_from timestamptz,due_at timestamptz)
+language sql immutable as $$
+  select ((p_at+interval '10 minutes') at time zone 'Asia/Seoul')::date,
+    p_at+interval '10 minutes',p_at+interval '11 minutes'
+$$;
+
+select ok(
+  future_window.service_date=boundary.expected_date
+    and future_window.available_from<future_window.due_at
+    and (future_window.available_from at time zone 'Asia/Seoul')::date=future_window.service_date
+    and future_window.due_at<=(future_window.service_date+1)::timestamp at time zone 'Asia/Seoul'
+    and future_window.available_from=date_trunc('minute',future_window.available_from)
+    and future_window.due_at=date_trunc('minute',future_window.due_at)
+    and future_window.service_date-(extract(isodow from future_window.service_date)::integer-1)=boundary.expected_week,
+  '#354 structurally valid future window: '||boundary.label
+) from (values
+  ('2026-10-02 23:49:00+09'::timestamptz,date '2026-10-02',date '2026-09-28','due exactly midnight'),
+  ('2026-10-02 23:50:00+09'::timestamptz,date '2026-10-03',date '2026-09-28','from next midnight'),
+  ('2026-10-02 23:58:00+09'::timestamptz,date '2026-10-03',date '2026-09-28','prior-day source after midnight'),
+  ('2026-10-03 00:00:00+09'::timestamptz,date '2026-10-03',date '2026-09-28','same-day midnight source'),
+  ('2026-10-04 23:50:00+09'::timestamptz,date '2026-10-05',date '2026-10-05','Sunday to Monday work week')
+) boundary(at_time,expected_date,expected_week,label)
+cross join lateral pg_temp.incident_future_window(boundary.at_time) future_window;
+
 create function pg_temp.incident_slots() returns jsonb language sql immutable as $$
   select jsonb_build_array(jsonb_build_object(
     'slotKey','room-proof','required',true,'displayOrder',0,
@@ -66,6 +93,7 @@ declare
   v_commit_at timestamptz:=((v_planned_date-1)+time '09:00') at time zone 'Asia/Seoul';
   v_decision_available_from timestamptz;
   v_decision_due_at timestamptz;
+  v_future_week date;
 begin
   -- Keep the successful decision window valid at every KST wall-clock hour.
   -- In the first five minutes after midnight v_at belongs to the prior service
@@ -120,6 +148,19 @@ begin
     end loop;
   end if;
 
+  -- A valid future window can cross Sunday -> Monday. Provide that exact work
+  -- week's availability so an unrelated availability guard cannot mask it.
+  select future_window.service_date-(extract(isodow from future_window.service_date)::integer-1)
+    into v_future_week from pg_temp.incident_future_window(v_at) future_window;
+  if not exists(select 1 from public.availability_versions
+    where maid_profile_id=pg_temp.iid(3) and week_start=v_future_week) then
+    v_availability:=pg_temp.iid(723);
+    insert into public.availability_versions(id,maid_profile_id,week_start,version,submitted_at)
+      values(v_availability,pg_temp.iid(3),v_future_week,1,v_at);
+    insert into public.availability_days(availability_version_id,work_date,available)
+      select v_availability,v_future_week+i,true from generate_series(0,6) i;
+  end if;
+
   v_result:=public.save_cleaning_assignment_draft(
     pg_temp.iid(1),v_target_id,pg_temp.iid(2),1,1,
     'checkout-incident-draft',repeat('2',64)
@@ -156,6 +197,13 @@ begin
   );
 end $$;
 
+select ok(exists(select 1 from incident_fixture fixture
+  cross join lateral pg_temp.incident_future_window(fixture.at_time) future_window
+  join public.availability_versions version on version.maid_profile_id=pg_temp.iid(3)
+    and version.week_start=future_window.service_date-(extract(isodow from future_window.service_date)::integer-1)
+  join public.availability_days day on day.availability_version_id=version.id
+    and day.work_date=future_window.service_date and day.available),
+  '#354 future denial fixture includes the next maid exact work-date availability');
 select ok((select attempt_id is not null from incident_fixture),
   'actual scheduler checkout produces a scheduled attempt fixture');
 create temp table scheduled_snapshot_before_report as
@@ -344,10 +392,11 @@ select throws_ok(
     pg_temp.iid(1),pg_temp.iid(201),incident_id,report_result->>'impactFingerprint','CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time+interval '10 minutes','dueAt',at_time+interval '11 minutes'
+      'serviceDate',future_window.service_date,
+      'availableFrom',future_window.available_from,'dueAt',future_window.due_at
     )::text,'checkout-incident-future-departed',repeat('f',64)
-  ) from incident_fixture),
+  ) from incident_fixture
+    cross join lateral pg_temp.incident_future_window(incident_fixture.at_time) future_window),
   '22023','INVALID_CHECKOUT_INCIDENT_DECISION',
   'confirmed departure cannot schedule work in the future'
 );

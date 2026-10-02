@@ -1,5 +1,7 @@
 # #328 배정 일정 snapshot·현재 퇴실 조회 계약
 
+> #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
+
 ## 상태와 범위
 
 2026-10-02의 선행 source/dev 정본은 `f34dca3746a1e553a773470aba13b55fa95bf816`이다.
@@ -105,6 +107,9 @@ authority와 RLS 불변을 뜻하며, 원문 컬럼 조회 권한은 이 보안 
 
 service-role 전용 `public.get_assignment_schedule_read`는 최신 active/password-complete
 admin/maid, live Auth session, maid의 본인 actual notified row를 DB에서 다시 검증한다.
+Auth session은 정확한 `id`/`user_id`와 `not_after IS NULL OR not_after > evaluated_at`을
+조회 statement 시각으로 검사한다. 만료 행이 cleanup 전까지 남아 있다는 이유로 허용하지 않는다.
+이 보안 만료는 업무 기한·PIN 조회 이력·시작/취소 제한을 새로 만드는 조건이 아니다.
 adapter는 최초 검증 actor의 role을 `p_expected_actor_role`로 전달하며 RPC의 최신 DB role과
 불일치하면 기존 `ASSIGNMENT_ACCESS_REQUIRED` 403으로 fail-closed한다. 초기 admin 형태로
 hydrate한 응답을 이후 maid 권한으로 허용하거나 그 반대 전이에서 소유권 경계를 바꾸지 않는다.
@@ -141,6 +146,80 @@ pack만 보며 현재 다른 담당자의 예약·이동 객실·새 계획·현
 현재 이 문서는 계약/구현 후보를 기록한다. 실행 결과·head·tree·실패/보완 이력은 #328의
 Issue/PR과 이 절에 단계별 보존하며 일부 local PASS를 전체 source/dev 완료로 확대하지 않는다.
 
+### 세션 만료 추가 QA 보완
+
+원래 source `efa6609d7e6bf0ba3a65a572beffe8db226d3d74`의 전체 local PASS와 QA98은
+아래에 이력으로 보존한다. 추가 감사는 공용 `is_active_auth_session`이 Auth session의
+존재만 확인하고 `not_after`를 검사하지 않는 P1을 발견했다. 공식
+[Supabase 세션 문서](https://supabase.com/docs/guides/auth/sessions)는 timebox 종료 반영과
+행 정리가 lazy하므로 JWT 잔여 유효시간이 있을 수 있음을 설명한다. 배포 Auth 버전 확인과
+실제 HTTP 재현은 NOT RUN이며, 다음 결과는 로컬 합성 DB의 실제 실행이다.
+
+- 보완 전 전용 SQL: 57 assertions 중 2 FAIL, 만료 maid/current 및 admin/history 조회가 허용됨.
+- 보완: 새 RPC에 exact session/user와 statement-clock `not_after` 경계를 추가한다.
+  STABLE/service-only/read-only·기존 role/ownership/source binding은 그대로이며 공용 helper와
+  다른 RLS/명령을 이 PR에서 바꾸지 않는다. NULL과 미래 timebox는 유효하다. 공용 helper와
+  대표 경로 보완은 [별도 #352](https://github.com/wrongstory/room-management-system-backend/issues/352)로 추적한다.
+- 보완 후 `db:verify`: fresh95 PASS. 전용 SQL: 58 assertions PASS(만료 두 역할 거부·미래 허용).
+- 보완 후 전체 검증·최종 독립 QA·새 head required CI는 진행 중이다. 원래 CI
+  `37017832732`는 application PASS, migration은 SQL/21 upgrade/KST clock PASS 후 기존
+  알림 delivery concurrency의 fixture drain에서 FAIL이며 실패를 무시하거나 삭제하지 않는다.
+  해당 script/RPC는 dev와 동일하고 원 로그에 due 집계가 없어 실제 원인은 미확정이다.
+  parent 상태와 claim predicate 불일치·마지막 claim 뒤 재계수 없는 확정 정적 결함은
+  [별도 #353](https://github.com/wrongstory/room-management-system-backend/issues/353)에서 추적한다.
+- migration95는 dev에 미병합·원격 DB 미적용인 후보여서 해당 파일과 dev manifest를 보완했다.
+  기존 원격 적용 migration/봉인 release manifest는 변경하지 않으며 Git amend/force push도 없다.
+
+### KST 자정 fixture 추가 보완 — #354
+
+2026-10-02 약23:57 KST의 세션 보완 후 `npm run db:test`는 21 upgrade 전부 PASS 뒤
+73 SQL files/4,155 assertions 중 기존 checkout incident test28 한 건 FAIL로 종료했다.
+기대는 `22023 INVALID_CHECKOUT_INCIDENT_DECISION`, 실제는 `23514 ASSIGNMENT_SCHEDULE_INVALID`다.
+이 전체 명령을 PASS로 바꾸지 않는다. source `at_time` 날짜를 사용하면서 from/due만
++10/+11분 이동하던 기존 dev와 같은 fixture가 자정에 날짜 정합성을 먼저 위반한 원인이다.
+독립 QA는 이미 #328에서 보강한 같은 checkout/clock SQL의 직접 검증 gate이므로 최소
+test-only 보완을 허용했다. [추적 #354](https://github.com/wrongstory/room-management-system-backend/issues/354).
+
+- pg_temp constructor가 실제 제안 from의 KST 날짜와 유효 구간을 만든다. minute precision과
+  다음 자정 inclusive 마감을 유지하고 23:49/23:50/23:58/00:00·일→월 구조 5건을 검증한다.
+- 후속 maid의 실제 future work-date/week availability를 fixture에서 확보하고 별도로 확인한다.
+  일→월 clock을 실제로 바꿔 runtime 검증한 것은 아니며 구조·fixture 바인딩 확인이다.
+- 기존 future 거부 `22023`, 별도 날짜 mismatch/마감 초과 `23514`와 무쓰기 검사는 그대로다.
+  제품 command/guard/migration은 변경하지 않으며 95번째 SHA는 세션 보완 후 값 그대로다.
+- 새 fixture 첫 실행은 SQL alias `window` 문법 오류로 FAIL했다. `future_window`로 보완 후
+  두 SQL files/148 assertions(incident90 + schedule58) PASS다. 실패를 삭제하거나 skip하지 않았다.
+- 위 21 upgrade는 같은 migration95 SHA의 실제 PASS다. fixture 보완 후 전체 SQL·필수 검증·
+  독립 QA·최신 exact-head CI를 별도로 수행하며 그 결과 전 source/dev 완료를 선언하지 않는다.
+
+### 보완 후 local 개별 최종 검증
+
+2026-10-03 아래 결과는 실제 재실행이다. 초기 전체 `npm run db:test`의 FAIL을 숨기지 않는다.
+그 실행의 21 upgrades는 이후 fixture-only 수정과 무관한 동일 migration95 SHA
+`fcd3e7833d59602d14959e25c2d0a6eb7fde006217412a741f78b68da38a0433`로 PASS했다.
+그 후 전체 SQL을 수정된 fixture로 다시 실행해 PASS를 확인했다. 로컬에서 이 조합을
+`npm run db:test` 전체 명령 재실행 PASS라고 바꾸지 않으며 최종 CI가 전체 명령을 별도로 검사한다.
+
+| 검증 | 실제 결과 |
+|---|---|
+| `npm run ci:quality` | fixture 보완 뒤 PASS, Node859/57files·lint/typecheck/build/secrets·OpenAPI131/141 |
+| `npm run edge:check` | 세션 보완 뒤 PASS, 323 tests, bundle17,240,852bytes; 이후 adapter source 변경 없음 |
+| Python frozen sync·Ruff check/format·mypy·pytest·codegen·build check | 세션 보완 뒤 PASS, 95 tests; 이후 Python/OpenAPI/source 변경 없음. 기존 generator warnings 유지 |
+| `npm run db:manifest:verify` | PASS, dev95와 위 SHA 일치, 기존 sealed release manifests 보존 |
+| `npm run db:test`의21 upgrade 단계 | PASS, 현재와 같은 migration95; 이어진 당시 전체SQL은 위 자정 fixture1건 FAIL |
+| `supabase test db supabase/tests --local` | fixture 보완 후 PASS, 73files/4,161 assertions |
+| 전용 expiry+incident SQL | PASS, 2files/148 assertions; 만료 거부·미래 세션 허용·KST 구조 포함 |
+| `npm run db:test:long-stay-clock` | PASS, 5 KST 경계×29=145 |
+| `npm run db:test:concurrency` | PASS, main/complaint-attention/manual-cancel 전체; 알림 delivery drain도 이번 실행 PASS |
+| `npm run db:reset -- --local --no-seed` / migration list | PASS, fresh95 및 local history 확인 |
+| `supabase db advisors --local --type all --level warn --fail-on error` | PASS, findings0 |
+| `npm run backup:dry-run` | PASS, local-synthetic migrations95/head/rooms121; actual production 데이터 없음 |
+| 최종 독립 QA·새 exact-head required CI·dev 통합 | PENDING, PR #351의 후속 gate |
+
+이번 local drain PASS로 #353을 해결 처리하지 않는다. 최초 CI의 실제 backlog 상태는 미확정이며
+테스트의 확정 정적 종료 결함은 남았다. drain 실행 후 숫자-only 관측은 pendingJobs0/
+claimableTargets0/allDueTargets1(parent operator_blocked)이며, 이는 해당 실행의 **완료 뒤**
+관측이다. 최초 CI 실패 직전 상태의 증거로 확대하지 않는다. production/main/recovery는 그대로다.
+
 ### 과거 1차 검증·QA 이력
 
 아래는 expected-role 보완을 포함한 최종 exact-source 검증이 아니라 각 실행 시점의 local 결과다.
@@ -172,7 +251,7 @@ authenticated/anon의 신규 컬럼·RPC 거부 SQL 회귀를 추가했다. 따�
 | targeted 4 SQL files | PASS, 339 tests | 마지막 grant 보완 전; 추가 raw-column/RPC 거부 회귀 PASS를 뜻하지 않음 |
 | 마지막 raw-column grant·추가 역할별 거부 회귀 | PENDING | 최종 fresh/전체 SQL·upgrade·RLS 및 독립 QA/CI 재검증 대상 |
 
-### 마지막 보완 후 최종 local 검증 — 전면 PASS
+### 과거 efa6609 source의 전면 local PASS — 세션 만료 보완 전
 
 아래는 raw-column grant·expected-role·통보 window 보완 후의 실제 실행 결과다.
 기존 SQL의 whole-row 기대값은 기존 컬럼 비교를 유지하면서 신규 pack을 별도로 검사했고,

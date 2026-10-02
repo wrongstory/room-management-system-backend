@@ -221,6 +221,19 @@ select throws_ok(format('select pg_temp.schedule_read(%L,%L,array[%L::uuid],true
 select throws_ok(format('select pg_temp.schedule_read(%L,%L,array[%L::uuid],false)',
   pg_temp.schedule_id(2),pg_temp.schedule_id(999),(select assignment_id from schedule_cases where label='checkout')),
   '42501','SESSION_REVOKED','invalid Auth session denied');
+update auth.sessions set not_after=clock_timestamp()-interval '1 second'
+where id in(pg_temp.schedule_id(201),pg_temp.schedule_id(202));
+select throws_ok(format('select pg_temp.schedule_read(%L,%L,array[%L::uuid],true)',
+  pg_temp.schedule_id(2),pg_temp.schedule_id(202),(select assignment_id from schedule_cases where label='checkout')),
+  '42501','SESSION_REVOKED','expired maid Auth session cannot read frozen or current schedule');
+select throws_ok(format('select pg_temp.schedule_read(%L,%L,array[%L::uuid],false)',
+  pg_temp.schedule_id(1),pg_temp.schedule_id(201),(select assignment_id from schedule_cases where label='checkout')),
+  '42501','SESSION_REVOKED','expired admin Auth session cannot read historical schedule');
+update auth.sessions set not_after=clock_timestamp()+interval '1 hour' where id=pg_temp.schedule_id(202);
+select lives_ok(format('select pg_temp.schedule_read(%L,%L,array[%L::uuid],true)',
+  pg_temp.schedule_id(2),pg_temp.schedule_id(202),(select assignment_id from schedule_cases where label='checkout')),
+  'future Auth timebox remains readable without lease or business-deadline changes');
+update auth.sessions set not_after=null where id in(pg_temp.schedule_id(201),pg_temp.schedule_id(202));
 select throws_ok(format('select pg_temp.schedule_read(%L,%L,array[%L::uuid,%L::uuid],false)',
   pg_temp.schedule_id(2),pg_temp.schedule_id(202),(select assignment_id from schedule_cases where label='checkout'),
   (select assignment_id from schedule_cases where label='checkout')),

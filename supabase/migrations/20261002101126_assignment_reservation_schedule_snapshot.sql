@@ -230,7 +230,11 @@ begin
   if actor.must_change_password then
     raise exception using errcode='42501',message='PASSWORD_CHANGE_REQUIRED';
   end if;
-  if p_session_id is null or not public.is_active_auth_session(actor.auth_user_id,p_session_id) then
+  -- Session rows can outlive their configured timebox until Auth cleanup.
+  -- Check the current statement's expiry fence, not only row existence.
+  if p_session_id is null or not exists(select 1 from auth.sessions session
+    where session.id=p_session_id and session.user_id=actor.auth_user_id
+      and (session.not_after is null or session.not_after>evaluated_at)) then
     raise exception using errcode='42501',message='SESSION_REVOKED';
   end if;
   if p_assignment_ids is null or cardinality(p_assignment_ids) not between 1 and 100
