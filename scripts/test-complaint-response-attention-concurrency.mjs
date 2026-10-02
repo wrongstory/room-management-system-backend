@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import { safeRpcResultSummary, waitForLocalPostgrestReady } from './lib/local-postgrest-test-readiness.mjs';
 
 const id = (n) => `34300000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const cli = 'node_modules/supabase/dist/supabase.js';
@@ -319,15 +320,92 @@ export async function testComplaintResponseAttentionConcurrency(client) {
 }
 
 async function runStandalone() {
-  const status = localSupabaseStatus();
-  resetFreshDatabase();
+  let phase = 'local-status';
+  let resetStarted = false;
+  let rpcSequence = 0;
+  const rpcFailures = [];
   try {
+    const status = localSupabaseStatus();
+    phase = 'fresh-reset';
+    resetStarted = true;
+    resetFreshDatabase();
+    phase = 'read-only-api-readiness';
+    const ready = await waitForLocalPostgrestReady({
+      apiUrl: status.API_URL, apiKey: status.SECRET_KEY
+    });
+    console.log(`Complaint attention read-only API readiness PASS: attempts=${ready.attempts}`);
     const client = createClient(status.API_URL, status.SECRET_KEY, {
       auth: { autoRefreshToken: false, persistSession: false }
     });
-    await testComplaintResponseAttentionConcurrency(client);
+    const observedClient = {
+      supabaseUrl: client.supabaseUrl,
+      rpc: async (name, args) => {
+        const sequence = ++rpcSequence;
+        const rpc = ['process_due_assignment_lifecycle', 'respond_to_complaint',
+          'start_complaint_review', 'decide_complaint_case', 'correct_complaint_decision']
+          .includes(name) ? name : 'OTHER_RPC';
+        try {
+          const result = await client.rpc(name, args);
+          if (result.error) {
+            const summary = { sequence, rpc, ...safeRpcResultSummary(result) };
+            rpcFailures.push(summary);
+            console.error(`Complaint attention RPC result: ${JSON.stringify(summary)}`);
+          }
+          return result;
+        } catch {
+          const summary = { sequence, rpc, status: null, code: null };
+          rpcFailures.push(summary);
+          console.error(`Complaint attention RPC transport failure: ${JSON.stringify(summary)}`);
+          // Let every concurrent call settle before the unchanged all-success assertion fails.
+          return { data: null, error: { code: 'LOCAL_RPC_TRANSPORT_FAILURE',
+            message: 'LOCAL_RPC_TRANSPORT_FAILURE' }, status: 0 };
+        }
+      }
+    };
+    phase = 'fixture-and-rpc-races';
+    await testComplaintResponseAttentionConcurrency(observedClient);
+  } catch (error) {
+    // Never dump AssertionError.actual, RPC bodies, request arguments, or raw stack/messages.
+    const sourceLine = error instanceof Error
+      ? error.stack?.match(/test-complaint-response-attention-concurrency\.mjs:(\d+):\d+/)?.[1]
+      : undefined;
+    console.error(`Complaint attention validation FAIL: ${JSON.stringify({
+      phase, kind: error instanceof assert.AssertionError ? 'ASSERTION_FAILED' : 'VALIDATION_FAILED',
+      sourceLine: sourceLine ? Number(sourceLine) : null, rpcFailures
+    })}`);
+    if (phase === 'read-only-api-readiness' && error?.summary) {
+      console.error(`Complaint attention readiness result: ${JSON.stringify({
+        ...safeRpcResultSummary({ status: error.summary.status,
+          error: { code: error.summary.code } })
+      })}`);
+    }
+    if (resetStarted) {
+      try {
+        const counts = execFileSync('docker', ['exec', '-i', 'supabase_db_room-management-system-backend',
+          'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
+          input: `select json_build_array(
+            (select count(*) from private.complaint_response_attention_events),
+            (select count(*) from private.complaint_response_attention_recipients),
+            (select count(*) from public.notifications where event_family='complaint.response_attention_admin'),
+            (select count(*) from private.command_executions where command_type='assignment.process_due_lifecycle'));`,
+          encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000
+        }).trim();
+        const parsed = JSON.parse(counts);
+        if (!Array.isArray(parsed) || parsed.length !== 4 ||
+            !parsed.every(value => Number.isSafeInteger(value) && value >= 0)) throw new Error('INVALID_COUNTS');
+        console.error(`Complaint attention pre-cleanup counts: ${JSON.stringify(parsed)}`);
+      } catch {
+        console.error('Complaint attention pre-cleanup counts: UNAVAILABLE');
+      }
+    }
+    process.exitCode = 1;
   } finally {
-    resetFreshDatabase();
+    if (resetStarted) {
+      try { resetFreshDatabase(); } catch {
+        console.error('Complaint attention cleanup FAIL');
+        process.exitCode = 1;
+      }
+    }
   }
 }
 

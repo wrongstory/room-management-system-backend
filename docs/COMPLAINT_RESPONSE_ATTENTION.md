@@ -97,3 +97,36 @@ drain 1,000건 한도를 넘겨 FAIL했다(1,000 suppressed / 253 pending).
 최종 실행은 기존 runner를 원본 그대로 유지하고 신규 stage만 별도 fresh local DB에서 실행했다.
 제품 guard·worker·기존 검증 한도·assertion은 완화하지 않았다. 신규 stage는 시작 전 local host를
 검사하고 현재 checkout 전체 migration을 적용하며, 종료 후에도 fresh local DB로 정리한다.
+
+## 원격 실패와 로컬 API 검증 경계
+
+2026-10-02 KST exact-head `5267f3564c0ab5e0e4b0fe17ecc3fb737bb8f6d1`의
+[CI36935605522](https://github.com/wrongstory/room-management-system-backend/actions/runs/36935605522)는
+application SUCCESS / migration FAILURE다. 전체 18개 upgrade·70 SQL/3,784 assertions·
+KST145와 기존 전체 동시성 runner 및 cleanup은 통과했으나, 신규 standalone의
+rollback 후 같은 key를 보낸 8개 RPC의 전체 성공 assertion에서 실패했다. timeout 실패가 아니다.
+개별 RPC 오류가 기록되지 않아 원인은 미확정이며, 로컬 동일 경합 재진단 PASS도 이를 상쇄하지 않는다.
+
+검증 도구만 보완해 fresh reset 뒤 read-only PostgREST OpenAPI의 실제 대상 RPC signature를
+유한한 준비 검사로 확인한다. 연결 초기화의 제한된 transient만 준비 검사에서 재시도하고,
+인증·권한·도메인·형식 오류와 잘못된 signature는 즉시 실패한다. 실제 mutation RPC에는
+재시도를 추가하지 않으며 기존 8-way all-success·receipt·원장·CAS assertions를 그대로 실행한다.
+이는 초기화 직후 API 준비 상태를 검증하는 사전조건이지 이전 CI 원인의 확정이나 제품 버그 수정 선언이 아니다.
+
+실패 RPC는 정해진 함수명/호출 순번과 허용된 HTTP status·SQLSTATE/PostgREST code만 남긴다.
+generic failure도 원 Error/AssertionError 객체, 원문 message/details/hint/stack, 요청·응답·
+key/hash·인물 식별자·PIN을 출력하지 않는다. cleanup 전에 evidence/enrollment/notice/receipt의
+정수 건수만 보존하고, 원 실패와 cleanup 실패는 각각 exit failure를 유지한다.
+운영 오류 기록 API가 아니며 제품 DB/migration·권한·API·worker·실제 경합 검증 기준은 바꾸지 않는다.
+
+보완본의 실제 검증·독립 QA·새 exact-head CI 상태는 [Issue #343](https://github.com/wrongstory/room-management-system-backend/issues/343)과
+[PR #346](https://github.com/wrongstory/room-management-system-backend/pull/346)에 별도로 기록한다.
+이전 로컬98점으로 원격 FAIL을 상쇄하거나 source/dev·운영 완료로 표시하지 않는다.
+
+2026-10-02 KST 보완본의 `npm run ci:quality`는 52 files/694 tests·typecheck·build·lint·
+secrets·OpenAPI PASS다. helper 단위 53건과 독립 QA98/100(P0/P1 0건)을 확인했다.
+실제 standalone 및 `npm run db:test:concurrency`의 기존 전체 runner·신규 fresh 단계·
+최종 fresh cleanup도 exit0/PASS다. synthetic 404/PGRST202 주입은 업무 RPC를 재시도하지 않고
+8개 실패를 모두 관찰해 기존 assertion이 exit1로 실패하며, 민감 sentinel 미노출·정수 건수 기록·
+finally cleanup을 확인했다. 이는 의도된 실패 처리 검증 PASS이지 RPC 기능 성공이 아니다.
+이 로컬 기록 이후 새 commit의 required CI와 exact-source 독립 QA는 별도 필수 gate다.
