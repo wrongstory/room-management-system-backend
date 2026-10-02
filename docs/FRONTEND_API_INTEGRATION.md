@@ -241,7 +241,7 @@ const idempotencyKey = crypto.randomUUID();
 | 예약 취소 | `POST /v1/reservations/{reservationId}/cancel` | reasonCode와 expectedVersion 필요, hard delete 없음 |
 | 수동 체크아웃 | `POST /v1/reservations/{reservationId}/manual-checkout` | 실제 입실 중인 예약만, 청소 obligation과 함께 원자 처리 |
 | 청소 요청 | `POST /v1/reservations/cleaning-requests` | 연박/추가 요청, 객실 version CAS |
-| 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel |
+| 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel. #348 source 후보는 배정/통보·PIN 조회와 무관하게 실제 착수 전 수동 추가/연박 요청만 취소; 자동 checkout 제외. 운영 승격은 별도 |
 | 예약 전이 수동 실행 | `POST /v1/reservations/transitions/process` | admin 운영 명령. scheduler secret endpoint와 별도 |
 | 퇴실 청소 템플릿 조회 | `GET /v1/cleaning-templates?cleaningKind=checkout` | `durationMinutes=null`을 미설정 선택값으로 표시하고 0분·1분으로 변환하지 않음 |
 | 퇴실 청소 템플릿 게시 | `POST /v1/cleaning-templates` | 사진 슬롯은 필수, `durationMinutes`는 선택. 모르면 생략하며 임의 기본값을 보내지 않음 |
@@ -333,6 +333,14 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] 예약·배정·attempt·사건 409 후 관련 projection을 재조회한다. notification 문구나 브라우저의 이전 상태를 권한·성공의 근거로 사용하지 않는다.
 - [ ] timeout·응답 유실은 같은 body와 같은 `Idempotency-Key`로 결과를 확인한다. body를 바꾸면 새 key를 사용한다.
 - [ ] 오류 수집에는 allowlist code와 `requestId`만 남기고 token·PIN·고객명·전화번호·request body를 보내지 않는다.
+
+#### 수동 연박·추가 요청 취소 (#348 source 후보)
+
+- PIN 조회 여부/표시 숨김/조회 만료를 이유로 수동 요청 취소 버튼을 차단하지 않는다. 관리자만 실제 착수 전 취소하며 `expectedVersion`은 target `assignment_version`이다.
+- target soft cancel과 #27 담당 해제/unassign을 혼합하지 않는다. 자동 퇴실 의무·착수·현장 완료·제출/검수 workflow는 이 endpoint의 일반 취소 대상이 아니다.
+- 기존 current notified 담당자에게만 취소 알림이 생긴다. 취소한 배정의 PIN 화면을 지우고 이후 권한은 서버 재검증을 따른다. 이미 본 PIN이 사람의 기억에서도 회수됐다고 표시하지 않는다.
+- [취소 정책·검증 경계](./MANUAL_CLEANING_CANCEL.md)를 따른다. #326의 snapshot/sourceKind/canCancel DTO 보강 및 프런트 구현·운영 UAT는 이번 취소 명령 변경과 별도다.
+- 2026-10-02 scoped 비교: 프런트 main `d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev `09ed28446a4fd43919cddb29ebe442b848548ab8`의 live 요청 endpoint/body는 호환된다. dev 배정 행 버튼은 `manualCleaningRequestId`/`targetVersion`을 요구하나 행 projection에서 이를 보장하지 않아 #326 조회 계약 연결이 필요하다. demo/local 수동 취소의 배정·통보 및 `access-review` PIN 차단도 프런트에서 제거해야 한다. 프런트 코드는 이번 PR에서 변경하지 않으며 전역 프런트 기준 commit도 갱신하지 않는다.
 
 #### 담당 메이드 수행 불가 취소·재배정 (#264 source/dev 완료, 운영 미승격)
 

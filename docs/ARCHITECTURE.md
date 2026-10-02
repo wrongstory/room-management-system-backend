@@ -522,6 +522,8 @@ target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참
 
 복수 테이블을 바꾸는 예약 저장·변경·취소·체크아웃, 배정 알림 확정과 #31 검수는 SQL RPC의 짧은 transaction으로 원장, projection, 감사 이벤트를 함께 커밋합니다. 지급 API는 같은 원칙의 후속 구현입니다. 외부 Drive·push 호출은 transaction 밖에서 outbox worker가 처리합니다.
 
+#348의 [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)은 #326 B안과 PIN 조회 제한 제거 결정을 적용한다. 관리자 `cancel_manual_cleaning_request_with_session`은 최신 actor/live session을 잠가 검사하고 기존 reservation-command lock, target CAS, current assignment lock 아래 미착수 연박/추가 요청을 취소한다. PIN 이력은 판정 입력이 아니며 공개 응답/receipt 형태는 유지한다. 감사 `cancelledAssignmentId`는 취소 직전 current assignment만 고정하고 typed dispatcher는 그 종료 row의 사유·시각·actor·target CAS 증거를 결합해 inbox/outbox를 만든다. top-level XID/xmin 동등 비교나 미배정/draft의 역사 담당 fallback에 의존하지 않는다. 기존 종료 trigger의 entitlement/미완료 reveal 회수와 이미 finalized된 이력 보존을 유지하며 자동 checkout, #27 일반 해제, #264 예외는 변경하지 않는다.
+
 #25의 미통보 draft 배정은 기존 `cleaning_targets`와 `cleaning_assignments`를 재사용합니다. active business admin만 service-role RPC를 호출하며 DB가 actor를 다시 검사합니다. target의 `assignment_version`을 CAS로 잠근 뒤 기존 current draft를 `DRAFT_REVISED`로 닫고 새 immutable revision을 추가합니다. 이 단계는 `draft_assigned`까지만 전이하며 notification, outbox, cleaning attempt는 생성하지 않습니다.
 
 ### #4 통보된 배정 조회 경계 — 2026-09-08 승인

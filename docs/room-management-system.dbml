@@ -893,7 +893,7 @@ Table public.cleaning_targets {
   template_snapshot jsonb [not null]
   cancelled_by uuid
   cancelled_at timestamptz
-  cancellation_reason_code text
+  cancellation_reason_code text [note: '#348 / 2026-10-02 B: manual additional/stayover cancel before actual start, even assigned/notified or PIN disclosed. CAS soft cancel preserves history; exact current notified assignment is audit-bound for notification. Automatic checkout and started/terminal workflows excluded.']
   reclean_of_attempt_id uuid [unique]
   reclean_maid_profile_id uuid
   reclean_of_submission_id uuid [unique, ref: - public.cleaning_submissions.id]

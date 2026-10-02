@@ -355,7 +355,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 연박 청소는 예약 점유 구간 안에서 `access_start < requested_complete_at <= access_end`를 검증한다.
 - 다음 체크인이 있는 퇴실·재청소의 준비 마감은 체크인 30분 전이다.
 - 현재 요청의 service date·점유·명시된 접근 구간과 겹치는 활성 수동 요청·자동 퇴실 의무·예정 작업은 새 요청을 만들지 않는다. 다만 종료시각과 예상시간이 모두 없는 열린 checkout 계획을 임의 구간으로 환산해 계획 생성을 막지 않는다. 실제 수행 회차·미승인 제출·미해결 #133 사건은 계획과 분리해 실행 시작 시 최신 상태로 차단한다. 충돌하지 않는 미래 예약의 퇴실 의무와 과거 승인 완료 제출만으로 오늘의 연박/추가 요청을 막지 않는다.
-- 수동 요청은 아직 미배정·미공개·미착수일 때만 soft cancel하며 사유·행위자·시각을 보존한다.
+- **[확정 — 2026-10-02 #326 B안·#348]** 관리자는 수동 연박/추가 요청을 미배정·draft·통보 후에도 실제 착수 전이면 CAS soft cancel할 수 있다. PIN을 조회/공개했거나 화면에서 숨김·만료·회수된 사실은 취소 제한이 아니다. 사유·행위자·시각, 원 대상/담당/수행 snapshot과 이미 성공한 PIN 공개 이력은 보존한다. 취소 당시 current notified 담당자에게만 취소 알림/outbox를 기록하고 해당 배정의 이후 PIN 접근·미완료 reveal을 종료한다. 이미 시작·현장 완료·제출·검수 단계인 작업과 자동 퇴실 청소 의무는 이 명령의 취소 대상이 아니다. #27 일반 담당 변경/해제와 #264 수행 불가 예외의 별도 경계는 유지한다. 구현·운영 gate는 [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)을 따른다.
 
 ---
 
@@ -848,7 +848,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 예약 목록은 고객명을 반환하지 않고 관리자 단건 상세에서만 복호화한다. 체크아웃/취소 후 180일 보존 만료는 예약 전이 worker가 처리하며 멱등성 hash에는 암호화 키와 분리된 HMAC pepper fingerprint만 사용한다.
 - 당시에는 PIN 원문을 저장하지 않고 동기화 상태와 version만 기록하며 `verified`가 아닌 객실의 고객 배정을 차단했다. **#140과 #275 이후 source 계약은 이를 대체해** `unconfigured`/`mismatch`를 예약 생성·변경·배정과 현재 담당자의 일반 PIN reveal에 대한 비차단 경고로 유지한다. 실제 체크인과 물리 PIN change/confirm은 `verified` 및 권한·lease 검증까지 fail-closed한다. production 적용은 별도 release/운영 승인 전까지 완료로 간주하지 않는다.
 - 객실 전체 운영 projection은 관리자 전용이다. 메이드는 자신의 현재 배정·수행 범위 projection만 후속 업무 API에서 제공받는다.
-- 연박/추가 수동 청소 요청은 안정적인 target ID로 생성하고 시작·PIN 공개 전까지만 CAS soft cancel한다.
+- 당시 연박/추가 수동 청소 요청은 안정적인 target ID로 생성하고 시작·PIN 공개 전까지만 CAS soft cancel했다. **2026-10-02 #326 B안·#348의 현재 사용자 결정은 PIN 공개 제한을 제거**하고 배정/통보 후 실제 착수 전 취소를 허용한다. 당시 release 이력을 현재 정책으로 재사용하지 않는다.
 - 예정 전이 worker는 production에서 활성 관리자 actor를 필수로 하며 시작 시 검증 실패를 숨기지 않는다. catch-up은 퇴실을 입실보다 먼저 처리해 같은 instant의 인접 예약을 한 batch에서 전이하고, 완전히 지난 미입실 예약은 가짜 check-in 없이 종결한다.
 - checkout obligation↔target은 deferred commit-time 검증까지 포함해 종료 상태가 반쪽만 저장되지 않게 하고, preparation obligation↔승인 submission/attempt는 직전 점유 종료 이후·해당 체크인 이전 시간창 안에서 target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서를 검증하며 append-only 1회 소비 원장까지 강제한다. PIN lease↔현재 assignment/attempt는 최신 verified PIN version까지 업무 동일성을 복합키와 DB 검증으로 강제한다.
 - 다음 예약 변경은 종결된 과거 의무를 덮지 않는다. 미배정 target은 schedule revision으로 마감을 갱신하며 private 미통보 draft는 stale로 처리한다. 통보된 target은 명시적 재계획 전까지 충돌로 거부한다.
