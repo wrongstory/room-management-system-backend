@@ -13,6 +13,12 @@ function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("Missing fixture");
   return value;
 }
+function legacyTargetReasons<T extends { cleaningTargetId: string; reason: string; reasonCodes?: unknown }>(rows: T[]) {
+  return rows.map((row) => ({
+    cleaningTargetId: row.cleaningTargetId, reason: row.reason,
+    ...(row.reasonCodes === undefined ? {} : { reasonCodes: row.reasonCodes }),
+  }));
+}
 function target(
   id: string,
   values: Partial<PreviewTarget> = {},
@@ -84,6 +90,68 @@ function fixed(
   };
 }
 describe("assignment preview pure optimizer", () => {
+  it.each([101, 1001])("preserves a snapshot display name of %i characters without relaxing routing classifiers", async (length) => {
+    const name = "n".repeat(length);
+    const t = target("long-name");
+    const pack = {
+      ...t, sourceKind: t.source, roomTypeName: name,
+      roomTypeSnapshot: { code: "standard", name, elevatorZone: "A" },
+      originalServiceDate: t.serviceDate, effectiveServiceDate: t.serviceDate,
+      rolloverCount: 0, rolloverReason: null, canCancel: true, cancelReasonCode: null,
+    };
+    const legacy = await optimizeAssignmentPreview(snapshot([t]), "s");
+    const result = await optimizeAssignmentPreview({ ...snapshot(), targets: [pack] }, "s");
+    expect(result.proposedAssignments[0]?.roomTypeName).toBe(name);
+    expect(result.proposedAssignments[0]?.roomTypeSnapshot?.name).toBe(name);
+    expect(result.inputFingerprint).toBe(legacy.inputFingerprint);
+    await expect(optimizeAssignmentPreview({ ...snapshot(), targets: [{ ...pack, elevatorZone: "a".repeat(101) }] }, "s"))
+      .rejects.toMatchObject({ code: "ASSIGNMENT_PREVIEW_SNAPSHOT_INVALID" });
+  });
+
+  it("returns snapshot-only metadata on proposed, fixed, remaining and blocked rows without changing planning fingerprint", async () => {
+    const legacyTarget = target("fresh", { feeSnapshot: 0, roomTypeCode: "unknown", elevatorZone: "unknown" });
+    const pack = {
+      ...legacyTarget,
+      sourceKind: "manual_room_request", roomTypeName: null,
+      roomTypeSnapshot: { code: null, name: null, elevatorZone: null },
+      originalServiceDate: "2037-01-02", effectiveServiceDate: "2037-01-05",
+      rolloverCount: 0, rolloverReason: null, canCancel: true, cancelReasonCode: null,
+      private: "must-not-leak",
+    };
+    const legacy = await optimizeAssignmentPreview(snapshot([legacyTarget]), "s");
+    const result = await optimizeAssignmentPreview({ ...snapshot(), targets: [pack] }, "s");
+    expect(result.inputFingerprint).toBe(legacy.inputFingerprint);
+    expect(result.proposedAssignments[0]).toMatchObject({
+      cleaningKind: "additional", sourceKind: "manual_room_request", roomTypeCode: "unknown",
+      elevatorZone: "unknown", roomTypeName: null, roomTypeSnapshot: { code: null, name: null, elevatorZone: null },
+      feeSnapshot: 0, originalServiceDate: "2037-01-02", effectiveServiceDate: "2037-01-05",
+      rolloverCount: 0, rolloverReason: null, canCancel: true, cancelReasonCode: null,
+      expectedAssignmentVersion: 1, targetAssignmentVersion: 1,
+    });
+    expect(JSON.stringify(result)).not.toContain("must-not-leak");
+    expect(JSON.stringify(result)).not.toContain("domainIdentity");
+    expect(legacy.proposedAssignments[0]).toMatchObject({
+      sourceKind: "manual_room_request", roomTypeSnapshot: null, originalServiceDate: null,
+      effectiveServiceDate: null, rolloverCount: null, canCancel: false, cancelReasonCode: "CAPABILITY_UNAVAILABLE",
+    });
+    const remaining = await optimizeAssignmentPreview({ ...snapshot(), maids: [], targets: [pack] }, "s");
+    expect(remaining.remainingUnassignedTargets[0]).toMatchObject({ feeSnapshot: 0, canCancel: true, sourceKind: "manual_room_request" });
+    const blocked = await optimizeAssignmentPreview({ ...snapshot(), targets: [{ ...pack, blockedReason: "ROOM_BLOCKED" }] }, "s");
+    expect(blocked.blockedTargets[0]).toMatchObject({ reason: "ROOM_BLOCKED", feeSnapshot: 0, canCancel: true });
+    const fixedTarget = fixed("fixed", "a", 1, legacyTarget);
+    const fixedResult = await optimizeAssignmentPreview({ ...snapshot(), targets: [{ ...pack, ...fixedTarget }] }, "s");
+    expect(fixedResult.fixedAssignments[0]).toMatchObject({ feeSnapshot: 0, canCancel: true });
+  });
+
+  it.each([
+    { sourceKind: "manual_room_request" },
+    { roomTypeSnapshot: null },
+    { canCancel: true },
+  ])("rejects partially supplied new preview metadata %j", async (pack) => {
+    await expect(optimizeAssignmentPreview({ ...snapshot(), targets: [{ ...target("t"), ...pack }] }, "s"))
+      .rejects.toMatchObject({ code: "ASSIGNMENT_PREVIEW_SNAPSHOT_INVALID" });
+  });
+
   it("preserves the phase 4B2 pre-diagnostics response and fingerprint golden", async () => {
     // Independently captured by executing git-show 744662c, not regenerated
     // from this implementation. That source canonically includes empty
@@ -99,7 +167,7 @@ describe("assignment preview pure optimizer", () => {
       remainingUnassignedTargets: result.remainingUnassignedTargets.map(
         ({ reasonCodes, ...row }) => {
           expect(reasonCodes).toEqual(["AVAILABILITY_NOT_SUBMITTED"]);
-          return row;
+          return { cleaningTargetId: row.cleaningTargetId, reason: row.reason };
         },
       ),
     };
@@ -181,7 +249,7 @@ describe("assignment preview pure optimizer", () => {
     expect(partial.proposedAssignments).toHaveLength(12);
     expect(partial.proposedAssignments.every((t) => t.maidProfileId === "b"))
       .toBe(true);
-    expect(partial.remainingUnassignedTargets).toEqual([{
+    expect(legacyTargetReasons(partial.remainingUnassignedTargets)).toEqual([{
       cleaningTargetId: "reclean",
       reason: "NO_ELIGIBLE_MAID",
       reasonCodes: ["RECLEAN_MAID_FIXED_ASSIGNMENT_CONFLICT"],
@@ -421,14 +489,14 @@ describe("assignment preview pure optimizer", () => {
     const todayResult = await optimizeAssignmentPreview(s, "kst-boundary");
     expect(todayResult.proposedAssignments.map((r) => r.cleaningTargetId))
       .toEqual(["overdue"]);
-    expect(todayResult.blockedTargets).toEqual([{
+    expect(legacyTargetReasons(todayResult.blockedTargets)).toEqual([{
       cleaningTargetId: "future", reason: "SERVICE_DATE_MISMATCH",
     }]);
     s.serviceDate = "2037-01-06";
     const tomorrowResult = await optimizeAssignmentPreview(s, "tomorrow");
     expect(tomorrowResult.proposedAssignments.map((r) => r.cleaningTargetId))
       .toEqual(["future"]);
-    expect(tomorrowResult.blockedTargets).toEqual([{
+    expect(legacyTargetReasons(tomorrowResult.blockedTargets)).toEqual([{
       cleaningTargetId: "overdue", reason: "SERVICE_DATE_MISMATCH",
     }]);
     expect(tomorrowResult.diagnostics).toMatchObject({
@@ -475,7 +543,7 @@ describe("assignment preview pure optimizer", () => {
       maidProfileId: "a", cleaningTargetId: "first",
       reasonCodes: ["FIXED_SEQUENCE_CONFLICT"],
     }]);
-    expect(duplicate.remainingUnassignedTargets).toEqual([{
+    expect(legacyTargetReasons(duplicate.remainingUnassignedTargets)).toEqual([{
       cleaningTargetId: "new", reason: "NO_ELIGIBLE_MAID",
       reasonCodes: ["FIXED_ASSIGNMENT_CONFLICT"],
     }]);
@@ -605,7 +673,7 @@ describe("assignment preview pure optimizer", () => {
       cleaningTargetId: "new",
       proposedSequenceNumber: 1,
     }]);
-    expect(only.remainingUnassignedTargets).toEqual([{
+    expect(legacyTargetReasons(only.remainingUnassignedTargets)).toEqual([{
       cleaningTargetId: "old",
       reason: "NO_ELIGIBLE_MAID",
       reasonCodes: ["NO_FEASIBLE_ASSIGNMENT"],
@@ -708,7 +776,7 @@ describe("assignment preview pure optimizer", () => {
       maidProfileId: "a", cleaningTargetId: "stale",
       reasonCodes: ["FIXED_ATTEMPT_OWNER_MISMATCH"],
     }]);
-    expect(r.remainingUnassignedTargets).toEqual([{
+    expect(legacyTargetReasons(r.remainingUnassignedTargets)).toEqual([{
       cleaningTargetId: "later",
       reason: "NO_ELIGIBLE_MAID",
       reasonCodes: ["FIXED_ASSIGNMENT_CONFLICT"],
@@ -888,7 +956,7 @@ describe("assignment preview pure optimizer", () => {
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
       .toHaveLength(1);
     s.targets = [target("invalid", { dueAt: time("10:00") })];
-    expect((await optimizeAssignmentPreview(s, "s")).blockedTargets)
+    expect(legacyTargetReasons((await optimizeAssignmentPreview(s, "s")).blockedTargets))
       .toEqual([{ cleaningTargetId: "invalid", reason: "ASSIGNMENT_PREVIEW_INVALID_SCHEDULE" }]);
     s.targets = [target("occupied", { dueAt: time("11:00"), blockedReason: "ASSIGNMENT_PREVIEW_SOURCE_INVALID" })];
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)

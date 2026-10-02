@@ -541,6 +541,33 @@ erDiagram
 - `attempt_photo_versions.purge_after`와 provider의 legacy clock은 이력 호환용이다. Stage 1 runtime은 `photo_retention_records.expires_at/media_availability`를 authoritative하게 사용하며 Drive 영구삭제 뒤 `purged_at`을 기록한다.
 - 템플릿과 슬롯은 **target 생성 시** 고정하고 attempt가 같은 계약을 사용한다. 제출에서는 그 슬롯의 특정 사진 버전 연결만 봉인하여 이후 교체가 과거 검수에 소급되지 않게 한다.
 
+### #326 조회 projection — 94번째 구현 후보, 새 table 없음
+
+`cleaning_targets`의 immutable 종류/source·room-type/fee snapshot·원 날짜와 schedule revision을
+기존 배정/impact/Preview/신규 commit DTO에 투영한다. raw 저장 객체의 누락/빈/비문자 선택 key는
+SQL/카드 모두 unknown null로 정규화한다. malformed 신규 metadata pack은 strict parser에서
+안전한 500으로 실패하며 현재 `rooms`/타입 카탈로그로 보충하지 않는다. 요금 0은 유지한다. 이월 count/reason은 해당
+assignment revision(대상 단독 조회는 current target version)까지의 실제 `ROLLED_OVER_*` 행과
+target count 상한으로 계산한다. 카드 유효일은 immutable assignment의 `service_date`다.
+
+`sourceKind`, `roomTypeSnapshot`, `canCancel`, `cancelReasonCode`는 조회 필드이며 새 저장 컬럼이
+아니다. 관리자 current/target capability는 #348 실제 source/phase/current-assignment-bound
+전체 attempt 미착수 조건이고 PIN·기한·stale draft 제한을 추가하지 않는다. 이력/메이드는 false
+표시 사유로 구분한다. 기존 target ID/`targetAssignmentVersion`을 재사용하고 과거 receipt나
+snapshot을 backfill하지 않는다. private helper의 직접 EXECUTE를 모든 API role에서 회수하며
+기존 public RLS/업무 원장은 변경하지 않는다. 표시 metadata는 fingerprint 입력에서 제외하지만
+legacy elevator snapshot 누락 시 current-room A/B fallback 제거는 routing classifier를
+`unknown`으로 바꾸므로 모든 이전 Preview fingerprint의 동일성을 보장하지 않는다. 재Preview가
+필요하다. core raw normalizer/fresh strict parser 및 SQL Preview classifier 보완은 QA 1차 P2의
+정적 resolved다. local full 20 upgrades·72 SQL files/4,068 tests는 PASS지만 exact-head 최종
+QA/CI/dev 통합 전까지 구현 후보로 표시한다.
+기존 `room_types.name TEXT`/카드/OpenAPI에 없는 100자 표시 제한을 새 DTO의 불변식으로
+추가하지 않는다. QA 2차의 공통 표시 상한 제거·1,001자 이름/실제 receipt 보존 회귀는 검증됐고
+QA 1·2차는 정적 resolved(P0/P1/미해결 코드 P2=0)인 구현 후보다. 기존 optimizer routing
+`str(100)` 및 fresh pack reject는 유지한다. source/dev 완료는 문서·승인 source가 dev 정본에 포함되고
+연결 Issue/PR의 exact-head CI/최종 QA 승인·실제 통합 근거를 확인한 경우이며 현재 병합 선언이 아니다.
+[배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md) 참조.
+
 ### #30 사진 슬롯·제출 버전 모델
 
 ```mermaid

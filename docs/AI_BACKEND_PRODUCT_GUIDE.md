@@ -1,9 +1,20 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
-## 2026-10-02 #305 source/dev 종료 감사 기준
+## 2026-10-02 #326 구현 후보와 선행 dev 기준
+
+현재 선행 통합 기준은 `dev@f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`의
+93 migrations / OpenAPI 131 paths·141 operations다. #348의 수동 요청 취소 B안·PIN 제한 제거는
+source/dev에 통합됐으며 운영 승격과 프런트 UAT는 별도다. #326의 94번째
+`assignment_target_read_metadata` 및 기존 조회 DTO 보강은 아직 구현 후보로, 새로운 endpoint·
+취소 정책·source write·역사 backfill을 추가하지 않는다. 현재 검증과 완료 gate는
+[배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)을 따른다.
+`main@1780728a02144c0816565ba091e43a8b3e126c4f` 및 production/recovery는 변경하지 않는다.
+이번 프런트 main/dev 대조는 #326 live consumer에 한정하며 아래 전역 제품 snapshot을 갱신하지 않는다.
+
+## 2026-10-02 #305 source/dev 종료 감사 당시 기준
 
 #306의 기한 비차단, #308의 지연 업무 보존·상대 역할 알림, #343의 컴플레인 미응답 주의는
-각각 PR #307/#310, #340, #346으로 통합됐다. 최신 기능 dev 기준은
+각각 PR #307/#310, #340, #346으로 통합됐다. 당시 기능 dev 기준은
 `4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`이며 92 migrations / OpenAPI 131 paths·141 operations,
 typed catalog 59 event family·42 public category다. #308/#343의 운영 승격은 완료하지 않았다.
 정확한 승인 source/tree·CI·QA, 과거 실패와 별도 OPEN 범위는 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
@@ -394,6 +405,39 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 비교는 배정 가능한 수 → 기본 청소요금 spread → 전체 편차와 기존/reclean 제약 → 동선 → 안정적인 target/maid 키 순서다. `previewSeed`는 응답 상관관계 호환 필드일 뿐 결정 결과나 fingerprint를 바꾸지 않는다. 제한된 탐색은 전역 최적해 증명이 아닌 휴리스틱이다.
 - 임의 근무시간·휴게시간·하루 최대 객실 수를 만들지 않는다. target/maid 자원 상한 초과는 부분 자동결정이 아니라 `ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED`로 거부한다.
 - 입력 fingerprint는 후보/고정 부하/가능일/source schedule snapshot을 포함하되 폐기된 정책과 seed는 제외한다. 이는 읽은 상태의 식별자이지 저장 권한이나 예약 lock이 아니다.
+
+### [현재 구현 후보] #326 배정 대상 snapshot·등록 근거·취소 가능 표시
+
+기존 목록/이력·commit-impact·Preview·신규 commit 결과에 target의 실제 `sourceKind`, canonical
+`roomTypeSnapshot`, 고정 요금, 원/유효 서비스일, revision까지의 실제 이월 근거와 취소 advisory를
+추가한다. 저장 원문 객체의 누락/빈/비문자 선택 key는 raw normalizer로 unknown null에 정규화하고
+0원은 유지한다. SQL/카드가 같은 canonical snapshot을 제공하며 malformed 신규 metadata pack은
+별도 strict parser에서 안전한 500으로 거부한다. 현재 객실/카탈로그로 과거 snapshot을 채우지 않는다.
+기존 Preview routing classifier의 `unknown`은 canonical null과 구별한다. 새 표시 metadata는
+fingerprint 입력에서 제외하지만 legacy elevator snapshot 누락 시 현재 객실 A/B fallback 제거는
+routing 입력 자체를 바꾸므로 모든 과거 Preview fingerprint의 byte 동일성을 보장하지 않는다.
+해당 Preview는 다시 조회·계산해야 한다. core raw normalizer/fresh strict parser 분리와 SQL Preview
+classifier 보완은 QA 1차 P2의 정적 resolved이며 최종 QA·upgrade/CI/dev 완료와 구분한다.
+표시 이름에는 기존 카드/text·DB/OpenAPI에 없는 100자 상한을 새로 만들지 않는다. QA 2차에서
+발견한 공통 metadata의 임의 표시 상한은 제거했고 1,001자 이름/실제 receipt 보존 회귀를 검증했다.
+QA 1·2차는 정적 resolved(P0/P1/미해결 코드 P2=0)인 실제 구현 후보이며 최종 exact-head QA·CI·
+dev 통합과 구분한다. 기존 optimizer routing `code`/`elevatorZone`의 `str(100)` 및 fresh pack의
+타입/nonempty/partial reject는 별개로 유지한다. source/dev 완료 효력은 계약 문서·승인 source의
+dev 정본 포함 및 연결 GitHub Issue/PR의 exact-head required CI/최종 QA/실제 통합 근거 확인 조건이다.
+지금 이미 dev에 병합됐다는 뜻은 아니다.
+
+관리자 current/target 행의 `canCancel`은 #348의 수동 source·허용 phase·현재 assignment에 연결된
+모든 비-superseded attempt의 미착수 조건을 반영한다. PIN·서비스일/dueAt·시간창·stale draft를
+별도 취소 제한으로 추가하지 않는다. 관리자 이력은 `false/ASSIGNMENT_NOT_CURRENT`, 메이드는
+`false/ADMIN_REQUIRED`이며 이 값은 표시 코드이지 신규 HTTP command 오류 계약이 아니다.
+실제 취소는 기존 actor/live session/CAS/transition을 다시 검사한다.
+
+기존 target ID와 `targetAssignmentVersion`을 재사용하며 Preview의 `expectedAssignmentVersion`도
+유지한다. 배정 카드의 effective date와 메이드 version은 해당 revision에 고정된다. 이전 완료
+receipt를 현재 DB로 hydrate하거나 backfill하지 않으며 신규 정보가 없는 receipt는 unknown null·
+`false/CAPABILITY_UNAVAILABLE`로 표시한다. 상세 출처·호환성·검증 gate와 프런트 담당자 인계는
+[배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)을 따른다. 프런트 구현/운영 UAT
+완료나 전역 프런트 기준 commit 갱신을 뜻하지 않는다.
 
 ### [확정] #27 시작 전 변경 경계 — 2026-09-05 구현 착수 계약
 

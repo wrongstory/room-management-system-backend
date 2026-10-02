@@ -172,3 +172,128 @@ Deno.test("historical duration policy does not affect preview fingerprint", asyn
     throw new Error("Historical policy influenced preview fingerprint");
   }
 });
+
+Deno.test("preview metadata preserves actual snapshots, unknown legacy and original fingerprint", async () => {
+  const t = {
+    cleaningTargetId: "t",
+    roomId: "r",
+    roomNumber: "601",
+    roomTypeCode: "unknown",
+    elevatorZone: "unknown",
+    feeSnapshot: 0,
+    availableFrom: "2037-01-05T01:00:00Z",
+    dueAt: null,
+    serviceDate: "2037-01-05",
+    status: "unassigned",
+    assignmentVersion: 1,
+    source: "manual_room_request",
+    cleaningKind: "additional",
+    domainIdentity: null,
+    blockedReason: null,
+    recleanMaidProfileId: null,
+    currentAssignment: null,
+    activeAttempt: null,
+  };
+  const s = {
+    serviceDate: "2037-01-05",
+    planningAt: "2037-01-05T00:00:00Z",
+    maids: [],
+    targets: [t],
+  };
+  const legacy = await optimizeAssignmentPreview(s, "s");
+  const newTarget = {
+    ...t,
+    sourceKind: "manual_room_request",
+    roomTypeName: null,
+    roomTypeSnapshot: { code: null, name: null, elevatorZone: null },
+    originalServiceDate: "2037-01-04",
+    effectiveServiceDate: "2037-01-05",
+    rolloverCount: 0,
+    rolloverReason: null,
+    canCancel: true,
+    cancelReasonCode: null,
+  };
+  const current = await optimizeAssignmentPreview({
+    ...s,
+    targets: [newTarget],
+  }, "s");
+  if (
+    current.inputFingerprint !== legacy.inputFingerprint ||
+    !current.remainingUnassignedTargets[0]?.canCancel ||
+    current.remainingUnassignedTargets[0].feeSnapshot !== 0 ||
+    legacy.remainingUnassignedTargets[0]?.rolloverCount !== null ||
+    legacy.remainingUnassignedTargets[0].roomTypeSnapshot !== null
+  ) throw new Error("Snapshot/fingerprint/unknown regression");
+  try {
+    await optimizeAssignmentPreview({
+      ...s,
+      targets: [{ ...t, canCancel: true }],
+    }, "s");
+  } catch (error) {
+    if ((error as Error).message === "ASSIGNMENT_PREVIEW_SNAPSHOT_INVALID") {
+      return;
+    }
+    throw error;
+  }
+  throw new Error("Partial metadata accepted");
+});
+
+Deno.test("preview display names retain 101 and 1001 characters while routing classifier guards remain unchanged", async () => {
+  for (const length of [101, 1001]) {
+    const name = "n".repeat(length);
+    const t = {
+      cleaningTargetId: "t",
+      roomId: "r",
+      roomNumber: "601",
+      roomTypeCode: "standard",
+      elevatorZone: "A",
+      feeSnapshot: 0,
+      availableFrom: "2037-01-05T01:00:00Z",
+      dueAt: null,
+      serviceDate: "2037-01-05",
+      status: "unassigned",
+      assignmentVersion: 1,
+      source: "manual_room_request",
+      cleaningKind: "additional",
+      domainIdentity: null,
+      blockedReason: null,
+      recleanMaidProfileId: null,
+      currentAssignment: null,
+      activeAttempt: null,
+      sourceKind: "manual_room_request",
+      roomTypeName: name,
+      roomTypeSnapshot: { code: "standard", name, elevatorZone: "A" },
+      originalServiceDate: "2037-01-05",
+      effectiveServiceDate: "2037-01-05",
+      rolloverCount: 0,
+      rolloverReason: null,
+      canCancel: true,
+      cancelReasonCode: null,
+    };
+    const snapshot = {
+      serviceDate: "2037-01-05",
+      planningAt: "2037-01-05T00:00:00Z",
+      maids: [],
+      targets: [t],
+    };
+    const result = await optimizeAssignmentPreview(snapshot, "s");
+    if (
+      result.remainingUnassignedTargets[0]?.roomTypeName !== name ||
+      result.remainingUnassignedTargets[0].roomTypeSnapshot?.name !== name
+    ) {
+      throw new Error("Long valid display snapshot was lost");
+    }
+    try {
+      await optimizeAssignmentPreview({
+        ...snapshot,
+        targets: [{ ...t, elevatorZone: "a".repeat(101) }],
+      }, "s");
+    } catch (error) {
+      if ((error as Error).message === "ASSIGNMENT_PREVIEW_SNAPSHOT_INVALID") {
+        continue;
+      }
+      throw error;
+    }
+    throw new Error("Existing routing classifier bound changed");
+  }
+});

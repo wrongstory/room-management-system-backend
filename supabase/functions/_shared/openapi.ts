@@ -57,6 +57,74 @@ const noStoreHeader = {
   schema: { const: "no-store" },
 };
 
+// #326: common read-only metadata. Legacy completed commit receipts are not
+// hydrated with current target/catalog state; unknown added fields stay null.
+const assignmentTargetReadProperties = {
+  cleaningKind: { type: ["string", "null"] },
+  sourceKind: {
+    type: ["string", "null"],
+    description: "실제 target.source입니다. cleaningKind로 추측하지 않습니다.",
+  },
+  roomTypeSnapshot: {
+    anyOf: [
+      { $ref: "#/components/schemas/AssignmentRoomTypeSnapshot" },
+      { type: "null" },
+    ],
+    description:
+      "생성 당시 타입·구역 정본입니다. 현재 catalog로 누락을 채우지 않습니다. 과거 receipt에 metadata가 없으면 null입니다.",
+  },
+  roomTypeCode: { type: ["string", "null"] },
+  roomTypeName: { type: ["string", "null"] },
+  elevatorZone: { type: ["string", "null"] },
+  feeSnapshot: {
+    type: ["integer", "null"],
+    minimum: 0,
+    description:
+      "불변 target 요금입니다. 0원은 0원이며 과거 receipt의 미확인은 null입니다.",
+  },
+  originalServiceDate: { type: ["string", "null"], format: "date" },
+  effectiveServiceDate: {
+    type: ["string", "null"],
+    format: "date",
+    description:
+      "impact/preview는 target 유효일, 카드는 조회한 assignment의 고정 서비스일입니다. 최상위 계획일과 구분합니다.",
+  },
+  rolloverCount: {
+    type: ["integer", "null"],
+    minimum: 0,
+    description:
+      "carryover_count 상한과 조회 revision까지의 실제 ROLLED_OVER evidence를 함께 적용합니다. 단순 지연/날짜 변경은 0, 과거 receipt 미확인은 null입니다.",
+  },
+  rolloverReason: {
+    type: ["string", "null"],
+    enum: ["ROLLED_OVER_UNASSIGNED", "ROLLED_OVER_NOT_STARTED", null],
+  },
+  canCancel: {
+    type: "boolean",
+    description:
+      "관리자의 수동 target 취소 안내입니다. 담당 해제 권한이 아니며 최신 command의 session/상태/CAS/멱등성 검사를 대체하지 않습니다. PIN 공개·기한·stale 일정으로 제한하지 않습니다. 완료 receipt replay의 안내는 당시 snapshot입니다.",
+  },
+  cancelReasonCode: {
+    type: ["string", "null"],
+    enum: [
+      "NOT_MANUAL_CLEANING_REQUEST",
+      "CLEANING_REQUEST_CANCEL_CONFLICT",
+      "ASSIGNMENT_NOT_CURRENT",
+      "ADMIN_REQUIRED",
+      "CAPABILITY_UNAVAILABLE",
+      null,
+    ],
+    description:
+      "canCancel=true이면 null입니다. ADMIN_REQUIRED/ASSIGNMENT_NOT_CURRENT/CAPABILITY_UNAVAILABLE는 조회 UI의 적용불가 코드이며 POST의 HTTP error code를 약속하지 않습니다.",
+  },
+} as const;
+
+function assignmentTargetReadRequired(existing: string[]): string[] {
+  return [
+    ...new Set([...existing, ...Object.keys(assignmentTargetReadProperties)]),
+  ];
+}
+
 const checkoutIncidentTimestampSchema = {
   type: "string",
   format: "date-time",
@@ -6224,10 +6292,22 @@ export const openApiDocument = {
           template: { $ref: "#/components/schemas/PublishedCleaningTemplate" },
         },
       },
+      AssignmentRoomTypeSnapshot: {
+        type: "object",
+        additionalProperties: false,
+        required: ["code", "name", "elevatorZone"],
+        properties: {
+          code: { type: ["string", "null"] },
+          name: { type: ["string", "null"] },
+          elevatorZone: { type: ["string", "null"] },
+        },
+        description:
+          "target 생성 snapshot의 whitelist입니다. legacy 누락 key는 null, 현재 객실 타입/구역 대체는 금지합니다.",
+      },
       AssignmentPreviewRow: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "cleaningTargetId",
           "roomId",
           "roomNumber",
@@ -6243,8 +6323,10 @@ export const openApiDocument = {
           "durationMinutes",
           "availableFrom",
           "dueAt",
-        ],
+          "targetAssignmentVersion",
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
           roomNumber: { type: "string" },
@@ -6269,6 +6351,12 @@ export const openApiDocument = {
           },
           serviceDate: { type: "string", format: "date" },
           expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          targetAssignmentVersion: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "expectedAssignmentVersion과 같은 target CAS입니다. assignment row revision과 혼동하지 않습니다.",
+          },
           expectedAvailabilityVersion: {
             type: ["integer", "null"],
             minimum: 1,
@@ -6286,9 +6374,29 @@ export const openApiDocument = {
       AssignmentPreviewBlockedTarget: {
         type: "object",
         additionalProperties: false,
-        required: ["cleaningTargetId", "reason"],
+        required: assignmentTargetReadRequired([
+          "cleaningTargetId",
+          "reason",
+          "roomId",
+          "roomNumber",
+          "serviceDate",
+          "targetAssignmentVersion",
+          "expectedAssignmentVersion",
+          "durationMinutes",
+          "availableFrom",
+          "dueAt",
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          durationMinutes: { type: "null" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
           reason: {
             type: "string",
             description:
@@ -6299,9 +6407,30 @@ export const openApiDocument = {
       AssignmentPreviewRemainingTarget: {
         type: "object",
         additionalProperties: false,
-        required: ["cleaningTargetId", "reason", "reasonCodes"],
+        required: assignmentTargetReadRequired([
+          "cleaningTargetId",
+          "reason",
+          "reasonCodes",
+          "roomId",
+          "roomNumber",
+          "serviceDate",
+          "targetAssignmentVersion",
+          "expectedAssignmentVersion",
+          "durationMinutes",
+          "availableFrom",
+          "dueAt",
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          durationMinutes: { type: "null" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
           reason: {
             type: "string",
             enum: ["NO_ELIGIBLE_MAID", "RECLEAN_MAID_UNAVAILABLE"],
@@ -8837,7 +8966,7 @@ export const openApiDocument = {
       AssignmentCard: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "assignmentId",
           "cleaningTargetId",
           "roomId",
@@ -8866,8 +8995,9 @@ export const openApiDocument = {
           "notifiedAt",
           "endedAt",
           "createdAt",
-        ],
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: {
@@ -8983,7 +9113,7 @@ export const openApiDocument = {
       AssignmentCommitCandidate: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "assignmentId",
           "cleaningTargetId",
           "roomId",
@@ -8997,8 +9127,9 @@ export const openApiDocument = {
           "expectedAvailabilityVersion",
           "availableFrom",
           "dueAt",
-        ],
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
@@ -9017,7 +9148,7 @@ export const openApiDocument = {
       AssignmentCommitBlockedCandidate: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "assignmentId",
           "cleaningTargetId",
           "roomId",
@@ -9032,8 +9163,9 @@ export const openApiDocument = {
           "reasonCodes",
           "availableFrom",
           "dueAt",
-        ],
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
@@ -9060,7 +9192,7 @@ export const openApiDocument = {
       AssignmentCommitUnassignedTarget: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "cleaningTargetId",
           "roomId",
           "roomNumber",
@@ -9069,8 +9201,9 @@ export const openApiDocument = {
           "targetAssignmentVersion",
           "availableFrom",
           "dueAt",
-        ],
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
           roomNumber: { type: "string" },

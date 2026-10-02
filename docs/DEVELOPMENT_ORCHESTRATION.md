@@ -45,19 +45,46 @@ main/release 승격, tag/GitHub Release를 변경하지 않는다. feature/dev s
 
 ## 2026-10-02 source 진행 기준
 
-- 통합 기준은 `dev@fb813cd0d4867f3274ce441fce2d29db1bda1e41`(#305 PR #347)이다.
-  #308 PR #340과 #343의 exact-head required CI·독립 QA 및 승인 source/dev tree 동일성을 확인했다.
-  92 migrations / OpenAPI 131 paths·141 operations / catalog 59 family·42 category다.
+- 현재 선행 통합 기준은 `dev@f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`다.
+  #348 수동 요청 취소 B안·PIN 제한 제거가 source/dev에 통합된 93 migrations 기준이며
+  OpenAPI 131 paths·141 operations / catalog 59 family·42 category는 유지한다.
 - #305는 PR #347의 exact-head CI `36960375990` application/migration PASS·독립 QA98·dev 통합 뒤 CLOSED다.
   근거와 보존할 제한은 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
-- 다음 기능 순서는 #348(수동 요청 취소 선행 정책) → #326(snapshot·등록 근거·취소 capability 조회) → #328 → #327이다.
-  사용자의 #326 B안과 PIN 조회 제한 전부 제거 결정으로 기존 가이드 충돌을 해소했다.
-  #348은 93번째 append-only migration과 session-bound cancel/정확한 기존 담당 알림의 source 후보다.
-  재개 검증에서 전용 SQL 147·Edge 312·Node 715·Python console 95 tests가 PASS다.
-  로컬 complete coverage는 19 upgrades와 전체 SQL 3,931 PASS·KST145·전체 경합·복구 PASS다.
-  이전 두 full-command FAIL은 보존하며 exact-head CI의 전체 db:test SUCCESS·최종 독립 QA는 별도 gate로 유지한다.
-  실제 결과·이전 FAIL 기록·프런트 scoped 확인은 [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)을 따른다.
-  #326 DTO는 PIN 공개 이력을 capability 제한으로 사용하지 않고 후속으로 보강하며 부모 Issue는 OPEN 유지한다.
+- #348 통합 전 재개 검증은 전용 SQL 147·Edge 312·Node 715·Python console 95 tests,
+  19 upgrades·전체 SQL 3,931·KST145·전체 경합·복구 PASS였다. 당시 두 full-command FAIL 이력도
+  보존한다. 이 결과를 신규 #326 검증으로 재사용하지 않는다. 선행 취소 정책·통합 근거와 제한은
+  [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)을 따른다.
+- 다음 기능 순서는 #326(snapshot·등록 근거·취소 capability 조회) → #328(메이드 일정 projection)
+  → #327(사건 목록)이다. 사용자의 B안 및 PIN 제한 전부 제거 결정을 #326 조회에도 그대로 따른다.
+  #326은 기존 endpoint·ID/CAS를 유지하는 94번째 migration/DTO 구현 후보이며 source write·
+  과거 receipt 재수화·snapshot backfill·신규 자동 취소 정책을 넣지 않는다.
+  최신 local PASS는 fresh 94 reset 재실행·focused Node 156/Deno 34/typecheck/lint·QA 2차 후
+  `ci:quality` 795 tests/55 files(secrets/lint/typecheck/build/OpenAPI 12 포함)·Edge 318 tests /
+  bundle 17,204,763 bytes·Python console 95/full Ruff·mypy·codegen·build다.
+  5 manifests·candidate backup 94·DB lint exit 0도 PASS다. 기존 10 functions warning은 유지하고
+  #326 추가 경고는 없으며 local public base 49개/RLS 누락 0개다. 이전 중간 PASS 수치와 첫
+  focused 기대 객체 7건·ReturnType lint 1건·Edge format FAIL/재검증 PASS는 계약 문서에 보존한다.
+  독립 QA 1차 P2는 raw snapshot 빈/비문자 key의 SQL null 대 TS 500 불일치이며 raw normalizer와
+  fresh strict pack parser 분리 및 SQL Preview classifier 보완으로 정적 resolved다. 최종 QA는
+  아직 PENDING이며 조회 계약은 raw optional key unknown null,
+  malformed fresh pack safe 500을 구분한다. legacy elevator A/B fallback 제거는 routing 입력
+  변경이므로 새 metadata fingerprint 제외와 별개로 재Preview가 필요하다.
+  upgrade 1·2차 FAIL은 1일 fixture가 기존 deferred `AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS` /
+  `23514` 제약을 위반한 원인이다. 제약을 유지한 정상 7일 fixture로 upgrade 3차는 실제 PASS했고
+  cleanup fresh 94도 PASS다. 전용 SQL 135는 `SET CONSTRAINTS ALL IMMEDIATE` 추가 후 PASS다.
+  QA 2차 P2는 기존 카드/DB/OpenAPI에 없는 표시 metadata 100자 상한이었으며 임의 상한 제거·
+  1,001자 이름 회귀 후 정적 resolved(P0/P1/미해결 코드 P2=0)다. 기존 optimizer routing `str(100)`와
+  fresh pack reject는 유지한다. 위 최신 quality/Edge/focused는 QA 2차 보완 후보의 실제 실행이다.
+  전체 `npm run db:test` exit 0, 명시 20 upgrades 및 72 SQL files/4,068 tests PASS이며 실제
+  request/신규 receipt 긴 이름·보존 및 전용 SQL 137을 포함한다. 전용 SQL 135는 이전 별도 실행,
+  137은 full suite 결과로 구분한다. KST 5 clocks×29=145 PASS도 확인했다.
+  전체 실제 concurrency 및 cleanup fresh 94, local advisor 결과 0건/exit 0도 PASS다.
+  clean source commit 이후 exact-source backup·exact-head CI·최종 독립 QA·PR/dev 통합 근거는
+  연결 Issue/PR에서 확인하는 PENDING gate다. 이 문서와 승인 source가 dev 정본에 포함되고 연결 Issue/PR의
+  exact-head CI/QA 승인·실제 dev 통합 근거를 확인해야 source/dev 완료 효력이 발생한다.
+  현재 이미 병합/Issue 종료됐다는 주장이나 운영 승격 승인은 아니다.
+  [조회 metadata 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)에 실제 결과를 단계별 기록한다.
+  프런트 scoped main/dev 대조는 인계 근거일 뿐 전역 제품 snapshot 갱신이나 프런트 개발/UAT가 아니다.
 - `main@1780728a02144c0816565ba091e43a8b3e126c4f`는 이번 작업에서 변경하지 않는다.
   production/recovery DB·Edge·Cron/provider·프런트·tag/UAT는 별도 승인·검증 범위다.
 - #13/#300/#320/#341/#342/#344/#345는 부모 #305 종료와 별도로 OPEN 추적한다.
