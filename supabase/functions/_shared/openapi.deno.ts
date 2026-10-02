@@ -1430,12 +1430,16 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
     "strict request and slots",
   );
   assert(
-    schemas.PublishCleaningTemplateRequest.properties.slots.minItems === 9 &&
-      schemas.PublishCleaningTemplateRequest.properties.slots.maxItems === 14 &&
+    schemas.CheckoutCleaningTemplateV9Slots.minItems === 3 &&
+      schemas.CheckoutCleaningTemplateV9Slots.maxItems === 3 &&
+      schemas.CheckoutCleaningTemplateV9Slots.items.$ref ===
+        "#/components/schemas/CleaningTemplateSlot" &&
+      schemas.PublishCleaningTemplateRequest.properties.slots.oneOf.length ===
+        3 &&
       schemas.CheckoutCleaningTemplateV8Slot.allOf[1].required.includes(
         "maxPhotos",
       ) && schemas.CleaningTemplateSlot.properties.maxPhotos.maximum === 20,
-    "v8 A-contract publishes bounded slot and photo counts",
+    "v9 tuple and historical v8/pre-A branches stay distinct",
   );
   assert(
     !(schemas.PublishCleaningTemplateRequest.required as readonly string[])
