@@ -1,3 +1,227 @@
+// #331: display-only remittance contracts, never actual payout commands.
+const integer = { type: "integer", minimum: 0, maximum: 9007199254740991 };
+const signed = { ...integer, minimum: -9007199254740991 };
+const uuid = { type: "string", format: "uuid" };
+const date = {
+  type: "string",
+  format: "date",
+  minLength: 10,
+  maxLength: 10,
+  pattern: "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+};
+const timestamp = { type: ["string", "null"], format: "date-time" };
+const fingerprint = {
+  type: "string",
+  pattern: "^[0-9a-f]{64}$",
+  minLength: 64,
+  maxLength: 64,
+};
+const basisRef = { $ref: "#/components/schemas/PayrollRemittanceBasis" };
+const error = {
+  description:
+    "error.code로 분기하며 원문 DB 오류·민감 정보를 반환하지 않습니다.",
+  headers: { "Cache-Control": { schema: { const: "no-store" } } },
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+    },
+  },
+};
+const idem = {
+  name: "Idempotency-Key",
+  in: "header",
+  required: true,
+  schema: {
+    type: "string",
+    minLength: 8,
+    maxLength: 128,
+    pattern: "^[A-Za-z0-9._:-]{8,128}$",
+  },
+  description:
+    "응답 유실 시 같은 본문·key로 재시도합니다. 다른 본문은 새 key를 사용합니다.",
+};
+const identity = { maidProfileId: uuid, weekStart: date };
+const command = {
+  ...identity,
+  expectedVersion: integer,
+  expectedBasisFingerprint: fingerprint,
+};
+const readParameters = [
+  { name: "maidProfileId", in: "query", required: true, schema: uuid },
+  {
+    name: "weekStart",
+    in: "query",
+    required: true,
+    schema: date,
+    description:
+      "실제 달력의 KST 월요일. 현재·과거 조회 가능, 미래 주차는 409입니다.",
+  },
+];
+function responses(ref: string) {
+  return {
+    "200": {
+      description:
+        "표시 전용 결과입니다. 은행 이체나 실제 지급 원장 변경을 뜻하지 않습니다.",
+      headers: { "Cache-Control": { schema: { const: "no-store" } } },
+      content: {
+        "application/json": { schema: { $ref: `#/components/schemas/${ref}` } },
+      },
+    },
+    "400": error,
+    "401": error,
+    "403": error,
+    "404": error,
+    "409": error,
+    "500": error,
+    "503": error,
+  };
+}
+const common = { tags: ["Payroll"], security: [{ bearerAuth: [] }] };
+const payrollRemittancePaths = {
+  "/v1/payroll/remittance-marker": {
+    get: {
+      ...common,
+      operationId: "getPayrollRemittanceMarker",
+      summary: "주차별 송금 표시 조회",
+      "x-required-roles": ["admin", "maid"],
+      description:
+        "관리자 또는 본인 메이드 조회. cycle.status/PAID와 독립된 표시이며, 기존 PAID에서 표시를 추측하지 않습니다. canSet/canClear/canReconfirm은 advisory이고 메이드는 모두 false입니다. basis 중 lockedAmount metadata를 제외한 7개 금액 근거의 변화는 on을 유지하며 needsReconfirmation으로 표시합니다. 지급 시작·book/cycle version 변화 자체는 재확인 사유가 아닙니다. 읽기는 원장·표시·receipt를 만들지 않습니다. 별칭·HEAD·중복 query는 거부하고 JSON 128KiB 상한을 적용합니다.",
+      parameters: readParameters,
+      responses: responses("PayrollRemittanceMarker"),
+    },
+    put: {
+      ...common,
+      operationId: "setPayrollRemittanceMarker",
+      summary: "송금 표시 on/off 저장",
+      "x-required-roles": ["admin"],
+      parameters: [idem],
+      description:
+        "관리자 전용. 새로운 on은 종료된 KST 주차·양수 (lockedAmount ?? payableAmount)에서만 허용합니다. off는 오표시 정정이며 실제 PAID/지급 잠금/원장/재지급 가능 상태는 변경하지 않습니다. 참조번호·확인창을 요구하지 않고 이체/provider를 호출하지 않습니다. 조회한 표시 expectedVersion과 expectedBasisFingerprint를 재검증하며 충돌 409 후 GET을 재조회합니다. 같은 값은 새 revision 없이 no-op receipt입니다. 같은 key 재시도는 당시 응답만 반환하므로 성공/replay 뒤 GET을 갱신합니다. 금액 변동 경고는 이 endpoint의 동일 on 요청으로 지우지 않고 별도 reconfirm을 사용합니다.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/PayrollRemittanceSetInput" },
+          },
+        },
+      },
+      responses: responses("PayrollRemittanceMarker"),
+    },
+  },
+  "/v1/payroll/remittance-marker/reconfirm": {
+    post: {
+      ...common,
+      operationId: "reconfirmPayrollRemittanceMarker",
+      summary: "on 유지 상태에서 금액 근거 재확인",
+      "x-required-roles": ["admin"],
+      parameters: [idem],
+      description:
+        "표시가 on이고 금액 근거가 달라졌을 때 관리자만 현재 basis를 확인한 새 불변 revision을 저장합니다. on 및 lastChangedBy/At은 유지하고 confirmedBy/At과 확인 근거·표시 version만 갱신합니다. 추가 이체/PAID 기록이 아니며 지금 0원이어도 기존 표시 재확인은 가능합니다. off는 PAYROLL_REMITTANCE_MARKER_NOT_SET, 변화 없음은 PAYROLL_REMITTANCE_RECONFIRM_NOT_REQUIRED 409입니다. 표시 CAS·basis fingerprint·멱등성·최신 역할/세션을 재검증합니다.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              $ref: "#/components/schemas/PayrollRemittanceReconfirmInput",
+            },
+          },
+        },
+      },
+      responses: responses("PayrollRemittanceMarker"),
+    },
+  },
+  "/v1/payroll/remittance-marker/history": {
+    get: {
+      ...common,
+      operationId: "listPayrollRemittanceMarkerHistory",
+      summary: "송금 표시 불변 이력 조회",
+      "x-required-roles": ["admin", "maid"],
+      description:
+        "관리자 또는 본인 메이드만 marked/cleared/reconfirmed 이력을 version ASC keyset으로 조회합니다. HMAC cursor는 actor·role·live session·maid·주차에 묶이고 기존 payroll cursor와 호환되지 않습니다. 기본20/최대100, 128KiB/no-store이며 전체 페이지에 걸친 영구 snapshot은 보장하지 않습니다. raw session/token/은행 참조번호는 반환하지 않습니다.",
+      parameters: [...readParameters, {
+        name: "limit",
+        in: "query",
+        required: false,
+        schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+      }, {
+        name: "cursor",
+        in: "query",
+        required: false,
+        schema: { type: "string", minLength: 1, maxLength: 1024 },
+      }],
+      responses: responses("PayrollRemittanceHistory"),
+    },
+  },
+};
+const basisFields = {
+  accrualAmount: integer,
+  totalAmount: integer,
+  adjustmentAmount: signed,
+  carryInAmount: { ...signed, maximum: 0 },
+  carryOutAmount: { ...signed, maximum: 0 },
+  payableAmount: signed,
+  lateEarningAmount: integer,
+  lockedAmount: { ...integer, minimum: 1, type: ["integer", "null"] },
+};
+const markerFields = {
+  ...identity,
+  marked: { type: "boolean" },
+  version: integer,
+  lastChangedBy: { ...uuid, type: ["string", "null"] },
+  lastChangedAt: timestamp,
+  confirmedBy: { ...uuid, type: ["string", "null"] },
+  confirmedAt: timestamp,
+  needsReconfirmation: { type: "boolean" },
+  basis: basisRef,
+  confirmedBasis: { anyOf: [basisRef, { type: "null" }] },
+  basisFingerprint: fingerprint,
+  canSet: { type: "boolean" },
+  canClear: { type: "boolean" },
+  canReconfirm: { type: "boolean" },
+  setBlockedReason: {
+    type: ["string", "null"],
+    enum: [
+      null,
+      "ADMIN_REQUIRED",
+      "PAYROLL_WEEK_NOT_CLOSED",
+      "NO_PAYROLL_AMOUNT",
+    ],
+  },
+};
+const eventFields = {
+  revisionId: uuid,
+  version: { ...integer, minimum: 1 },
+  eventType: { type: "string", enum: ["marked", "cleared", "reconfirmed"] },
+  marked: { type: "boolean" },
+  actorProfileId: uuid,
+  occurredAt: { type: "string", format: "date-time" },
+  basis: basisRef,
+};
+function exact<T extends Record<string, unknown>>(properties: T) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: Object.keys(properties),
+    properties,
+  };
+}
+const payrollRemittanceSchemas = {
+  PayrollRemittanceBasis: exact(basisFields),
+  PayrollRemittanceMarker: exact(markerFields),
+  PayrollRemittanceSetInput: exact({ ...command, marked: { type: "boolean" } }),
+  PayrollRemittanceReconfirmInput: exact(command),
+  PayrollRemittanceHistoryEvent: exact(eventFields),
+  PayrollRemittanceHistory: exact({
+    ...identity,
+    entries: {
+      type: "array",
+      maxItems: 100,
+      items: { $ref: "#/components/schemas/PayrollRemittanceHistoryEvent" },
+    },
+    nextCursor: { type: ["string", "null"], minLength: 1, maxLength: 1024 },
+  }),
+};
+
 const swaggerUiVersion = "5.32.11";
 const swaggerCss =
   `https://cdn.jsdelivr.net/npm/swagger-ui-dist@${swaggerUiVersion}/swagger-ui.css`;
@@ -674,6 +898,7 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    ...payrollRemittancePaths,
     "/v1/attempts/{attemptId}/room-issues": {
       post: {
         ...submissionOperation(
@@ -5259,6 +5484,7 @@ export const openApiDocument = {
       },
     },
     schemas: {
+      ...payrollRemittanceSchemas,
       CheckoutIncidentReportRequest: {
         type: "object",
         additionalProperties: false,

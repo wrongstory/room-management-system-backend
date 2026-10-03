@@ -1408,6 +1408,52 @@ Table public.compensation_entitlements {
   Note: '#101 other-maid approved work proof. Exact decision/target/maid/attempt/submission/inspection/amount provenance; zero amount remains a real entitlement.'
 }
 
+// #331 display-only marker; actual payroll/payment rows remain unchanged.
+Table private.payroll_remittance_markers {
+  id uuid [pk]
+  maid_profile_id uuid [not null, ref: > public.profiles.id]
+  week_start date [not null]
+  version bigint [not null]
+  marked boolean [not null]
+  current_revision_id uuid [not null]
+  last_changed_revision_id uuid [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Indexes {
+    (maid_profile_id, week_start) [unique]
+    (id, maid_profile_id, week_start) [unique]
+    (current_revision_id, id, maid_profile_id, week_start, version, marked)
+    (last_changed_revision_id, id, maid_profile_id, week_start)
+  }
+  Note: '#331 mutable display pointer only. Current revision is bound by deferred composite FK including same marker/maid/week/version/marked. Last changed pointer excludes reconfirm. RLS enabled; runtime raw reads/writes denied; service-role app RPC only. No cycle/book materialization.'
+}
+
+Table private.payroll_remittance_marker_revisions {
+  id uuid [pk]
+  marker_id uuid [not null]
+  maid_profile_id uuid [not null, ref: > public.profiles.id]
+  week_start date [not null]
+  version bigint [not null]
+  event_type text [not null, note: 'marked/cleared/reconfirmed']
+  marked boolean [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  occurred_at timestamptz [not null]
+  basis jsonb [not null, note: '8 exact financial fields; lockedAmount metadata excluded from fingerprint comparison']
+  basis_fingerprint text [not null]
+  Indexes {
+    (maid_profile_id, week_start, version) [unique]
+    (id, marker_id, maid_profile_id, week_start) [unique]
+    (id, marker_id, maid_profile_id, week_start, version, marked) [unique]
+    (marker_id, maid_profile_id, week_start, version)
+    actor_profile_id
+  }
+  Note: '#331 immutable history. Composite FK binds marker/maid/week; INSERT sequence plus current/history lineage enforced at commit. First event marked; on only closed positive week, off correction never changes actual PAID; reconfirm preserves on. No raw token/session/reference/PII.'
+}
+
+Ref: private.payroll_remittance_marker_revisions.(marker_id, maid_profile_id, week_start) > private.payroll_remittance_markers.(id, maid_profile_id, week_start)
+Ref: private.payroll_remittance_markers.(current_revision_id, id, maid_profile_id, week_start, version, marked) > private.payroll_remittance_marker_revisions.(id, marker_id, maid_profile_id, week_start, version, marked)
+Ref: private.payroll_remittance_markers.(last_changed_revision_id, id, maid_profile_id, week_start) > private.payroll_remittance_marker_revisions.(id, marker_id, maid_profile_id, week_start)
+
 Table public.payroll_cycles {
   id uuid [pk]
   maid_profile_id uuid [not null]

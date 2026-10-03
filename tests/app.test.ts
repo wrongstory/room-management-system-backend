@@ -269,6 +269,8 @@ function services(): AppServices {
       }))
     },
     payroll: {
+      getRemittanceMarker: vi.fn(), setRemittanceMarker: vi.fn(),
+      reconfirmRemittanceMarker: vi.fn(), listRemittanceMarkerHistory: vi.fn(),
       listWorkDetails: vi.fn(),
       getAdjustmentBook: vi.fn(),
       list: vi.fn(async () => ({ payroll: [], nextCursor: null })),

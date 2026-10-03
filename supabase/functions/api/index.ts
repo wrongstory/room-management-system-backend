@@ -121,6 +121,7 @@ import {
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
 import { listPayrollWorkDetails } from "../_shared/payroll-work-details-api.ts";
+import { payrollRemittanceMarker } from "../_shared/payroll-remittance-marker-api.ts";
 import { createPhotoService } from "../_shared/photo-api.ts";
 import { PhotoError, photoFailureDiagnostic } from "../_shared/photo-binary.ts";
 import {
@@ -247,6 +248,32 @@ export async function handleApiRequest(
   try {
     corsHeaders = cors(request);
     path = routePath(request.url);
+    const markerPath = "/v1/payroll/remittance-marker";
+    const markerFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    if (
+      markerFamily === markerPath || markerFamily.startsWith(`${markerPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      const rawPath = pathname.slice(pathname.lastIndexOf("/api") + 4);
+      const allowed =
+        (rawPath === markerPath && ["GET", "PUT"].includes(request.method)) ||
+        (rawPath === `${markerPath}/reconfirm` && request.method === "POST") ||
+        (rawPath === `${markerPath}/history` && request.method === "GET");
+      if (request.method !== "OPTIONS" && !allowed) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
     const workDetailsPath = "/v1/payroll/work-details";
     const workDetailsFamily = path.split("/").map((segment) => {
       try {
@@ -1297,6 +1324,27 @@ export async function handleApiRequest(
           verifiedRequestSessionId(request),
         ),
       };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (
+      path === markerPath || path === `${markerPath}/history` ||
+      path === `${markerPath}/reconfirm`
+    ) {
+      const action = path.endsWith("/history")
+        ? "history"
+        : path.endsWith("/reconfirm")
+        ? "reconfirm"
+        : request.method === "PUT"
+        ? "set"
+        : "get";
+      const response = await payrollRemittanceMarker(
+        request,
+        clients,
+        actor,
+        verifiedRequestSessionId(request),
+        action,
+      );
       assertPayrollResponseSize(response);
       return jsonResponse(response, 200, corsHeaders);
     }
