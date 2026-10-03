@@ -102,6 +102,12 @@ SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE이 없고 READ ONLY·3초 statement·500
 기본값이다. Python adapter는 AST allowlist, 단일 SELECT, 제한된 EXPLAIN, 200행/256KiB와 cancel을
 중복 적용한다. hosted pooler/credential/GUI와 production/recovery 적용은 포함하지 않는다.
 
+### #322 객실 운영 페이지 조회 진입점 정합화
+
+Edge의 두 GET 진입점은 `status`만 허용하던 중복 검사를 제거하고 기존 `roomOperationPageInput`에 query 검증을 위임한다. `status/limit/cursor`만 각각 한 번 허용하며, 기본 50·최대 100, strict 정수와 서명·actor/room/stream scope 검증은 Fastify와 동일하다. 잘못된 status/중복/unknown key는 `INVALID_ROOM_OPERATION_QUERY`, 잘못된 limit은 `ROOM_OPERATION_PAGE_LIMIT_INVALID`, 잘못된 cursor는 `INVALID_ROOM_OPERATION_CURSOR`로 구별한다. 관리자·live session과 성공/오류 `no-store` 경계는 유지한다.
+
+회귀는 helper 직접 호출 외에 실제 `handleApiRequest`를 통해 합성 RPC의 125건을 50/50/25로 조회하고 변조·타 관리자·타 객실·타 stream cursor 및 권한 거부를 검사한다. 실제 DB/운영 다중 페이지 검증과는 구분한다. 기존 cursor에는 시간 만료 필드가 없으므로 새 TTL을 추가하지 않으며, 만료/폐기된 인증 session은 매 요청 기존 인증·DB 검증에서 거부한다. migration·OpenAPI schema·생성 client 변경은 없다. 운영 반영은 별도 release gate다.
+
 ### #215 객실 이벤트 타임라인
 
 71번째 append-only `room_event_timeline`은 새 원장이나 backfill 없이 기존 `audit_events`의 승인된 객실 command와 `room_occupancy_events`의 실제 점유 전이만 합치는 service-role app-owned projection을 추가한다. `GET /v1/rooms/{roomId}/events?limit=30`은 active/password-complete business admin의 live session만 허용하고, `limit` 1~50 범위에서 `(effectiveAt, recordedAt, id)` 최신순으로 반환한다.
