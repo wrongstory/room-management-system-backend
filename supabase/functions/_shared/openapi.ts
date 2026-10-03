@@ -3847,6 +3847,61 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/payroll/adjustment-book": {
+      get: {
+        tags: ["Payroll"],
+        operationId: "getPayrollAdjustmentBook",
+        summary: "관리자 주급 조정 원장의 최신 CAS 버전 조회",
+        description:
+          "active/password-complete 관리자와 정확한 현재 Auth 세션을 DB에서 재검증한 read-only 조회입니다. 원장은 maidProfileId별 전역 CAS이며 weekStart는 KST 기준 현재 또는 과거 월요일의 화면 문맥일 뿐 원장 identity가 아닙니다. 같은 메이드의 다른 유효 주차도 같은 currentBookVersion을 반환합니다. 유효한 메이드의 원장이 없을 때만 서버가 0을 반환하고 원장을 생성하지 않습니다. 기존 adjustment.bookVersion은 생성 당시 불변 버전이므로 최신 CAS로 재사용하지 않습니다. 조회는 정정·반전 가능 여부나 이후 명령 성공을 보장하지 않으며 stale 409 뒤 이 조회를 다시 실행해야 합니다. query는 maidProfileId/weekStart 각 한 건만 허용합니다. HEAD·다른 method·slash alias는 404, 모든 응답은 no-store 및 UTF-8 JSON 128 KiB 상한입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "maidProfileId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description:
+              "조회할 메이드 profile UUID. 비활성·퇴사한 메이드의 과거 원장도 조회할 수 있습니다.",
+          },
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: {
+              type: "string",
+              format: "date",
+              minLength: 10,
+              maxLength: 10,
+              pattern: "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            },
+            description:
+              "실제 달력의 0001~9999년 YYYY-MM-DD, 현재 또는 과거 KST 월요일. 미래 주차는 409입니다.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "현재 메이드 전역 조정 원장 CAS 버전 (없는 원장은 0)",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollAdjustmentBookEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/payroll/start": {
       post: {
         tags: ["Payroll"],
@@ -12891,6 +12946,32 @@ export const openApiDocument = {
         required: ["payroll"],
         properties: {
           payroll: { $ref: "#/components/schemas/PayrollCycle" },
+        },
+      },
+      PayrollAdjustmentBook: {
+        type: "object",
+        additionalProperties: false,
+        required: ["maidProfileId", "weekStart", "currentBookVersion"],
+        properties: {
+          maidProfileId: { type: "string", format: "uuid" },
+          weekStart: { type: "string", format: "date" },
+          currentBookVersion: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9007199254740991,
+            description:
+              "메이드 전역 원장의 최신 CAS 버전. 과거 조정 row 생성 버전이나 주차별 버전이 아닙니다.",
+          },
+        },
+      },
+      PayrollAdjustmentBookEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["adjustmentBook"],
+        properties: {
+          adjustmentBook: {
+            $ref: "#/components/schemas/PayrollAdjustmentBook",
+          },
         },
       },
       PayrollAdjustmentEnvelope: {

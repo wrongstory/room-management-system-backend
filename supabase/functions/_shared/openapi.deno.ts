@@ -1,6 +1,48 @@
 import type { openApiDocument } from "./openapi.ts";
 import { openApiResponse, swaggerUiResponse } from "./openapi.ts";
 
+Deno.test("payroll adjustment book has an exact admin-only global CAS read contract", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const operation = document.paths["/v1/payroll/adjustment-book"].get;
+  const schemas = document.components.schemas;
+  const fields = ["maidProfileId", "weekStart", "currentBookVersion"];
+  assert(
+    operation.operationId === "getPayrollAdjustmentBook",
+    "stable read operation",
+  );
+  assert(operation["x-required-roles"].join() === "admin", "admin-only read");
+  assert(
+    operation.parameters.every((parameter) =>
+      parameter.required === true && parameter.in === "query"
+    ) && operation.parameters.map((parameter) =>
+          parameter.name
+        ).join() === "maidProfileId,weekStart",
+    "two strict required context fields",
+  );
+  assert(
+    operation.responses["200"].headers["Cache-Control"].schema.const ===
+        "no-store" && Object.hasOwn(operation.responses, "409"),
+    "no-store with future week conflict",
+  );
+  assert(
+    schemas.PayrollAdjustmentBook.additionalProperties === false &&
+      schemas.PayrollAdjustmentBook.required.join() === fields.join() &&
+      Object.keys(schemas.PayrollAdjustmentBook.properties).join() ===
+        fields.join(),
+    "minimal current version, no source book ID or private state",
+  );
+  assert(
+    schemas.PayrollAdjustmentBook.properties.currentBookVersion.minimum === 0 &&
+      schemas.PayrollAdjustmentBook.properties.currentBookVersion.maximum ===
+        Number.MAX_SAFE_INTEGER,
+    "exact safe integer range",
+  );
+  assert(
+    schemas.PayrollAdjustmentBookEnvelope.required.join() === "adjustmentBook",
+    "required envelope",
+  );
+});
+
 Deno.test("assignment schedule separates history and current departure", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   const schemas = document.components.schemas;
@@ -353,13 +395,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 132 &&
+    Object.keys(document.paths).length === 133 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 142,
-    "combined candidate contract 132/142",
+        ).length === 143,
+    "combined candidate contract 133/143",
   );
 });
 
