@@ -1422,8 +1422,8 @@ Table private.payroll_remittance_markers {
   Indexes {
     (maid_profile_id, week_start) [unique]
     (id, maid_profile_id, week_start) [unique]
-    current_revision_id
-    last_changed_revision_id
+    (current_revision_id, id, maid_profile_id, week_start, version, marked)
+    (last_changed_revision_id, id, maid_profile_id, week_start)
   }
   Note: '#331 mutable display pointer only. Current revision is bound by deferred composite FK including same marker/maid/week/version/marked. Last changed pointer excludes reconfirm. RLS enabled; runtime raw reads/writes denied; service-role app RPC only. No cycle/book materialization.'
 }
@@ -1444,7 +1444,7 @@ Table private.payroll_remittance_marker_revisions {
     (maid_profile_id, week_start, version) [unique]
     (id, marker_id, maid_profile_id, week_start) [unique]
     (id, marker_id, maid_profile_id, week_start, version, marked) [unique]
-    (marker_id, version)
+    (marker_id, maid_profile_id, week_start, version)
     actor_profile_id
   }
   Note: '#331 immutable history. Composite FK binds marker/maid/week; INSERT sequence plus current/history lineage enforced at commit. First event marked; on only closed positive week, off correction never changes actual PAID; reconfirm preserves on. No raw token/session/reference/PII.'

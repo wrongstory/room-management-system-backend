@@ -5,6 +5,9 @@
 이는 외부 송금 표시를 관리하는 계약이지 은행 이체나 실제 PAID 원장을 변경하는 승인이 아니다.
 기준 dev는 #324 [PR359](https://github.com/wrongstory/room-management-system-backend/pull/359)가
 통합된 `8481e219d7fbd92fe3587081efca9f3bc632bba6`/98 migrations다.
+이 파일은 검증된 source checkpoint를 기록한다. 최신 CI·dev 통합 판정과 exact source/CI/dev
+tree는 [PR361](https://github.com/wrongstory/room-management-system-backend/pull/361)의
+최신 기록을 따른다. dev 통합도 운영 배포나 프런트 연결 완료를 뜻하지 않는다.
 
 ## 제품·금전 경계
 
@@ -87,7 +90,42 @@ live의 disabled switch/cycle.status 기반 표시 및 데모의 PAID→OPEN을 
 프런트 담당자는 별도 marker API를 연결하고 marked와 실제 지급 상태를 구별해야 한다.
 전역 제품 snapshot·프런트 source·운영 main/DB/Edge/recovery/PIN/이체·릴리스/tag는 변경하지 않는다.
 
-## 검증 checkpoint
+## 최신 진단용 보완 checkpoint
+
+사용자는 기존 경고를 [#363](https://github.com/wrongstory/room-management-system-backend/issues/363)으로
+분리하고, **FAIL을 명시한 Draft 진단용 commit/push·CI 재실행만 승인**했다.
+Ready·병합·dev 통합·운영 배포는 이 승인에 포함되지 않는다. 아래 초도 RUNNING/NOT RUN은
+과거 checkpoint이며 최신 결과는 이 절과 PR361을 따른다.
+
+- root의 추가 INFO Advisor에서 복합 FK 인덱스 coverage3건을 발견했다(P2).
+  미적용 신규99 파일의 해당3 index를 전체 child FK 선행 키로 보완했고 DBML도 맞췄다.
+  기존148 SQL 검사 본문을 그대로 두고 strict valid/ready/nonpartial/nonexpression B-tree
+  full-key 검사3건을 추가했다. 기존98 migration/함수/ACL/RLS·실제 원장은 변경하지 않았다.
+- 새99 migration SHA는 `e9d70f667f71c1d1192b3ac4a3ae0f84070041214ba8cdd21c218e61bb8c14bd`다.
+  manifest5개: PASS. fresh99·관련3파일292(32+109+151)·전체77파일4604: PASS.
+- 새 SHA의 전용98→99 upgrade·실제 blocking edge12개·finally fresh99 cleanup: PASS.
+  `ci:quality` Node1220/65·typecheck/build/명세/secret: PASS. API/core는 변경하지 않아 기존
+  Edge467 및 Python95/4API6DTO 검사 근거는 유지하며 새 실행으로 가장하지 않는다.
+- 새 SHA의 local-synthetic99/rooms121 백업·복구: PASS. commit 이후 source metadata를
+  포함한 재실행은 후속 결과로 기록한다.
+- 초도 SHA의 전체25 upgrades·KST145·전체6 concurrency scripts는 PASS였지만 새 SHA의
+  전체25 upgrades/KST/전체6 concurrency를 다시 한 번 실행한 결과는 아직 없다.
+  새 SHA의 영향 범위는 위 전용 upgrade/12경합과 전체SQL로 재검증했고 전체 chain은 새 CI에서 실행한다.
+- strict `db lint --level warning --fail-on warning`: **FAIL**, 기존10함수의 경고17개.
+  정확 dev8481e21/fresh98에서도 동일 명령·경고 상세17개·함수 정의 MD5/volatility/securityDefiner가
+  일치했다(comparison PASS). 신규 표시 함수 경고0이며 comparison이 lint FAIL을 바꾸지 않는다.
+- `db advisors --type all --level info --fail-on info`: **FAIL**, INFO490개/WARN·ERROR0.
+  기존98 INFO484개는 상세 객체까지 동일했다. 새 표시6개는 fresh unused index4개와
+  raw 권한을 revoke한 private deny-by-default RLS2개다. 새 FK coverage 지적은0이다.
+  INFO0을 만들기 위해 필요한 인덱스를 삭제하거나 private 조회 권한을 주지 않는다.
+- 독립 코드 QA98/100. 초도 parser P2와 이후 root가 발견한 FK P2는 발견·보완 이력으로
+  보존한다. 새3 index/3검사/manifest/DBML의 교차 검토와 실제 재실행 뒤 source 내 미해결
+  P0/P1/P2=0이며 exact commit freeze의 최종 검토는 후속이다. 작성자 본인 하네스는
+  독립 코드 판정에서 제외하고 별도 peer review/root 실행과 구분한다.
+- 새 exact-head CI: 재실행 대기. PR은 Draft 유지, Issue331/360/362/363은 종료하지 않는다.
+  운영·main·프런트·원격DB/API·recovery·PIN·provider·release/tag는 변경하지 않는다.
+
+## 초도 검증 checkpoint (과거 이력)
 
 - 기존98 기준 npm ci/ci:quality: PASS, Node1106/63, typecheck/build 및 기존 명세 검사.
 - Docker: 사용자 지정 Safe Start1회 후 실제 server29.7.2/running 확인. 다른 시작/데이터 삭제 없음.
@@ -103,8 +141,12 @@ live의 disabled switch/cycle.status 기반 표시 및 데모의 PAID→OPEN을 
 - 전용 동시성: PASS, 실제 PostgreSQL blocking PID12 edges. CAS·same-key replay·금액 변화·별도
   ACK·actual START 잠금 metadata 무경고·PAID late earning 경고·세션/role/password/receipt wait
   재검증 및 무효 명령 효과0을 확인했다.
-- local-synthetic 백업·복구99: PASS. 전체25 upgrade/전체SQL·KST·기존+신규 경합·최종fresh99:
-  RUNNING. 최종 local advisors: NOT RUN.
+- local-synthetic 백업·복구99: PASS. 전체25 upgrade: PASS(동일99 migration SHA).
+  최초 전체 `npm run db:test`는 이전 developer head 기대3건과 기존 room-move preview의
+  단발성 CAS 중단으로 FAIL했다. developer 기대값만 최신/직전 head로 보완하며32 assertions는
+  유지했다. 관련3파일289 및 전체77파일4601 재실행: PASS. 원래 명령의 FAIL은 삭제하지 않으며
+  upgrade와 SQL을 따로 실행한 결과를 한 번의 전체 `npm run db:test` PASS로 합쳐 쓰지 않는다.
+  KST145: PASS. 기존+신규 전체 경합·최종fresh99/advisors: RUNNING.
 - Edge 전체: 최종467/bundle17,477,907 bytes PASS(공통 코어 mirror 동일).
   최초 전체 Edge는 index.ts 포맷에서 FAIL했고 pinned Deno 포맷 뒤 재실행했다.
 - 초도 독립 QA의 P2(off 응답에 확인 정보가 남아도 parser가 수락함)는 strict guard와
@@ -116,8 +158,20 @@ live의 disabled switch/cycle.status 기반 표시 및 데모의 PAID→OPEN을 
   근거로 migration timeout만30→40분으로 조정했다. application20·모든step·required checks·
   always cleanup·통과 기준·개별 SQL/process 상한은 유지한다. 같은 기능 PR에서 별도 CI
   목적 commit으로 기록하며 실제 신규 CI의30분 초과나 PASS를 예상으로 단정하지 않는다.
-- exact-head application/migration CI·dev 통합: NOT RUN.
+- 초도 source f61198b CI37106808450: application PASS1:41/migration FAIL20:34.
+  CI의 실패는 developer 이전 head 기대3건뿐이며 전체77/4601 및 기존 room-move109를 실행했다.
+  보완 head CI·dev 통합: NOT RUN.
 - 운영 배포·프런트 UAT: 범위 밖, NOT RUN.
+
+하네스 교차 리뷰도98/100·범위 내 P0/P1/P2=0이다. reset/up의 전체 실행은 CI 유한40분 예산에
+포함되며, 강제 종료나 엔진 장애에서 finally 복구는 보장되지 않는다. 중단 뒤 재검증은 local
+identity를 확인하고 fresh reset부터 시작해야 한다.
+
+기존 room-move의 최초 로컬 중단은 [#362](https://github.com/wrongstory/room-management-system-backend/issues/362)에
+원인 추적용으로 분리했다. 같은99에서 단독109·관련289·전체4601·초도CI room-move109가 통과했고
+원본 fixture63 assertions 및 default/12 EXPLAIN-only 계획에서 올바른 source/version/선행 조인을
+확인했지만 최초 실패 원인을 확정하지 않았다. 기존 test109/CAS/production SQL은 바꾸거나
+skip하지 않았으며 #331 완료가 그 원인까지 수정했다는 뜻은 아니다.
 
 실제 후속 실행 결과와 실패/보완 이력은 이 절과
 [Issue331](https://github.com/wrongstory/room-management-system-backend/issues/331)의 연결 PR에

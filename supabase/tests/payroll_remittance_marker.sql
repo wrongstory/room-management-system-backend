@@ -1,6 +1,33 @@
 begin;
 select no_plan();
 
+-- A single-column prefix or INCLUDE-only suffix does not cover a composite FK.
+-- Require its entire ordered child tuple in a valid, ready, nonpartial B-tree.
+create function pg_temp.mark_fk_covered(p_table regclass,p_constraint name)
+returns boolean language sql stable set search_path='' as $$
+  select exists(
+    select 1 from pg_catalog.pg_constraint fk
+    join pg_catalog.pg_index idx on idx.indrelid=fk.conrelid
+    join pg_catalog.pg_class index_relation on index_relation.oid=idx.indexrelid
+    join pg_catalog.pg_am access_method on access_method.oid=index_relation.relam
+    where fk.contype='f' and fk.conrelid=p_table and fk.conname=p_constraint
+      and idx.indisvalid and idx.indisready and idx.indpred is null and idx.indexprs is null
+      and access_method.amname='btree' and idx.indnkeyatts>=pg_catalog.cardinality(fk.conkey)
+      and array(select key_column from pg_catalog.unnest(idx.indkey::smallint[])
+        with ordinality as indexed_columns(key_column,key_position)
+        where key_position<=pg_catalog.cardinality(fk.conkey) order by key_position)=fk.conkey
+  )
+$$;
+select ok(pg_temp.mark_fk_covered('private.payroll_remittance_marker_revisions'::regclass,
+  'payroll_remittance_marker_rev_marker_id_maid_profile_id_we_fkey'),
+  'revision-to-marker full composite FK has a covering leading B-tree key');
+select ok(pg_temp.mark_fk_covered('private.payroll_remittance_markers'::regclass,
+  'payroll_remittance_current_revision_fk'),
+  'current revision full composite FK has a covering leading B-tree key');
+select ok(pg_temp.mark_fk_covered('private.payroll_remittance_markers'::regclass,
+  'payroll_remittance_last_changed_revision_fk'),
+  'last display change full composite FK has a covering leading B-tree key');
+
 -- PAYROLL_REMITTANCE_FIXTURE_BEGIN
 create function pg_temp.mark_id(n integer) returns uuid language sql immutable as $$
   select ('f3310000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid

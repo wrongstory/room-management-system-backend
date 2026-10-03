@@ -83,12 +83,16 @@ alter table private.payroll_remittance_markers add constraint payroll_remittance
   foreign key(last_changed_revision_id,id,maid_profile_id,week_start)
   references private.payroll_remittance_marker_revisions(id,marker_id,maid_profile_id,week_start)
   on delete restrict deferrable initially deferred;
--- Existing unique indexes cover maid/week history keyset and the composite FKs.
--- Standalone child FK prefixes are needed for parent identity/actor checks.
-create index payroll_remittance_revisions_marker_idx on private.payroll_remittance_marker_revisions(marker_id,version);
+-- Existing unique indexes cover maid/week history keyset and maid-profile FKs.
+-- Cover each complete child FK tuple as leading key columns, not only its first
+-- identity column. Revision version remains a suffix after the immutable tuple.
+create index payroll_remittance_revisions_marker_idx
+  on private.payroll_remittance_marker_revisions(marker_id,maid_profile_id,week_start,version);
 create index payroll_remittance_revisions_actor_idx on private.payroll_remittance_marker_revisions(actor_profile_id);
-create index payroll_remittance_current_revision_idx on private.payroll_remittance_markers(current_revision_id);
-create index payroll_remittance_last_changed_idx on private.payroll_remittance_markers(last_changed_revision_id);
+create index payroll_remittance_current_revision_idx
+  on private.payroll_remittance_markers(current_revision_id,id,maid_profile_id,week_start,version,marked);
+create index payroll_remittance_last_changed_idx
+  on private.payroll_remittance_markers(last_changed_revision_id,id,maid_profile_id,week_start);
 alter table private.payroll_remittance_markers enable row level security;
 alter table private.payroll_remittance_marker_revisions enable row level security;
 revoke all on private.payroll_remittance_markers,private.payroll_remittance_marker_revisions
