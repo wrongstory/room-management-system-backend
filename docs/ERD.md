@@ -1,5 +1,18 @@
 # Room Management System ERD 초안
 
+## #329 제한 세션 eligibility 보강 — 구현 중
+
+101번째 append 후보는 기존 capability grant/revocation을 보존하고 최초 제한 전환의
+private immutable restriction root·domain-separated session digest membership·grant→root binding을 추가한다.
+새 원장은 RLS/무권한 raw table·FK/동일 actor identity·UPDATE/DELETE 거부를 요구한다.
+Auth session 원문/token을 저장하지 않고 visible live set만 최초 동결하며 늦게 commit된 세션을 포함하지 않는다.
+finish 완료 후 upload grant는 최초 root를 이어받고 정상 최초24h 발급과 기존 TTL 연장 금지를 구분한다.
+기존 limited grant에는 현재 세션을 추측 backfill하지 않는다. 일반 active handover와 ordinary
+비활성화의 Auth ban/revoke는 별개로 유지한다.
+로컬 schema·RPC·기능·경합 검증과 독립 소스 QA는 완료했으며 기존 strict17 FAIL이 남은 진단용 후보다.
+CI·dev 통합·운영 배포·프런트 UAT 완료 선언이 아니다.
+[정본 계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
+
 > #331 신규99 migration 구현 후보는 `private.payroll_remittance_markers` current와
 > `private.payroll_remittance_marker_revisions` 불변 이력을 추가한다. maid/week 표시 CAS와
 > 실제 cycle/book/payment identity는 독립이며 current→revision의 복합 FK와 commit-time

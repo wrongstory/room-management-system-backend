@@ -1174,6 +1174,40 @@ Table private.attempt_capability_grants {
   Note: '#7B private immutable ledger. No Data API/direct service-role table access. No token/session ID stored. Latest valid Supabase session + role/status + exact attempt/revision/action + unrevoked hard expiry required every dedicated API call. Different command key cannot renew TTL.'
 }
 
+// #329 candidate101, not production deployment. First visible live Auth session
+// membership is frozen at active -> limited transition. No raw session/token,
+// legacy backfill, general active guard relaxation or re-entry TTL renewal.
+Table private.limited_session_roots {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  origin_profile_version bigint [not null]
+  captured_at timestamptz [not null]
+  Indexes {
+    (actor_profile_id, origin_profile_version) [unique]
+    (id, actor_profile_id) [unique]
+  }
+  Note: 'Private immutable restriction episode; profile lifecycle CAS version is historical evidence, not a mutable FK to current profile version. RLS/no raw runtime grants.'
+}
+
+Table private.limited_session_eligibility {
+  root_id uuid [not null, ref: > private.limited_session_roots.id]
+  session_digest text [not null]
+  Indexes { (root_id, session_digest) [pk] }
+  Note: 'Domain-separated SHA-256 of existing Auth UUID, not a credential. Same transition visible/unexpired sessions only; no current-session backfill or delayed commit inclusion. First membership is inherited by later upload grant.'
+}
+
+Table private.attempt_capability_session_roots {
+  capability_id uuid [pk, ref: > private.attempt_capability_grants.id]
+  root_id uuid [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  Indexes {
+    (root_id, actor_profile_id)
+    actor_profile_id
+  }
+  Note: 'Immutable capability -> first restriction root binding. Composite root/actor FK plus INSERT identity guard enforce grant actor equality. Legacy unbound limited grants fail closed, never renew or recapture sessions.'
+}
+Ref: private.attempt_capability_session_roots.(root_id, actor_profile_id) > private.limited_session_roots.(id, actor_profile_id)
+
 Table private.attempt_capability_revocations {
   capability_id uuid [pk, ref: > private.attempt_capability_grants.id]
   revoked_at timestamptz [not null]

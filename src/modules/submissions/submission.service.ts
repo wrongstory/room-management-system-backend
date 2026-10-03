@@ -28,6 +28,8 @@ export function submissionDatabaseError(error: { message?: string } | null): App
   const status: Record<string, number> = {
     ROOM_ISSUE_REPORT_ACCESS_REQUIRED: 403, INVALID_ROOM_ISSUE_REPORT: 400, ROOM_ISSUE_EVIDENCE_INVALID: 409,
     MAID_REQUIRED: 403, ADMIN_REQUIRED: 403, CAPABILITY_ACCESS_REQUIRED: 403, SUBMISSION_ACCESS_REQUIRED: 403, BOMB_REPORT_ACCESS_REQUIRED: 403,
+    SESSION_REVOKED: 401,
+    PASSWORD_CHANGE_REQUIRED: 403,
     PHOTO_EVIDENCE_INCOMPLETE: 409, PHOTO_RETENTION_DELETE_PREPARED: 409, BOMB_EVIDENCE_INVALID: 409, BOMB_REPORT_NOT_ALLOWED: 409, BOMB_REPORT_SEALED: 409,
     SUBMISSION_VERSION_CONFLICT: 409, STALE_VERSION: 409, SUBMISSION_INVALID_TRANSITION: 409,
     BOMB_DECISION_REQUIRED: 409, BOMB_DECISION_ALREADY_RECORDED: 409, BOMB_REPORT_NOT_FOUND: 404, INSPECTION_INVALID_TRANSITION: 409,
@@ -42,7 +44,7 @@ export function submissionDatabaseError(error: { message?: string } | null): App
 }
 
 export type SubmissionActor = Pick<Actor, 'profileId' | 'role' | 'mustChangePassword'>
-  & Partial<Pick<Actor, 'accessToken'>>;
+  & Partial<Pick<Actor, 'accessToken'>> & { sessionId?: string };
 
 export interface InspectionListInput {
   limit?: number | undefined;
@@ -134,7 +136,13 @@ export class SupabaseSubmissionService implements SubmissionService {
   }
   async create(actor: SubmissionActor, attemptId: string, clientSubmissionId: string, expectedRevision: number, candleCount: number, key: string) {
     const input = { actorProfileId: actor.profileId, attemptId, clientSubmissionId, expectedRevision, candleCount };
-    return this.submissionProjection(await this.rpc('create_cleaning_submission', { p_actor_profile_id: actor.profileId, p_attempt_id: attemptId, p_client_submission_id: clientSubmissionId, p_expected_revision: expectedRevision, p_candle_count: candleCount, p_idempotency_key: key, p_request_hash: requestHash(input) }));
+    let sessionId: unknown = actor.sessionId;
+    if (sessionId === undefined) {
+      try { sessionId = JSON.parse(Buffer.from(actor.accessToken?.split('.')[1] ?? '', 'base64url').toString('utf8')).session_id; }
+      catch { throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.'); }
+    }
+    if (typeof sessionId !== 'string' || !uuidPattern.test(sessionId)) throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.');
+    return this.submissionProjection(await this.rpc('create_cleaning_submission_with_session', { p_actor_profile_id: actor.profileId, p_session_id: sessionId, p_attempt_id: attemptId, p_client_submission_id: clientSubmissionId, p_expected_revision: expectedRevision, p_candle_count: candleCount, p_idempotency_key: key, p_request_hash: requestHash(input) }));
   }
   async list(actor: SubmissionActor, attemptId?: string) {
     const value = await this.rpc('list_cleaning_submissions', { p_actor_profile_id: actor.profileId, p_attempt_id: attemptId ?? null, p_pending_only: attemptId === undefined });

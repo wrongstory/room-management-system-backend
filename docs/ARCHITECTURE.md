@@ -1,5 +1,27 @@
 # 백엔드 서버 설계
 
+## #329 기존 세션 제한 업무 재진입 — 구현 중
+
+후속101번째 append는 최초 active→limited 전환 transaction의 실제 visible live session을
+domain-separated digest의 private immutable evidence로 동결한다. grant와 최초 restriction root를
+연결하고 finish→upload에서도 root membership을 상속한다. 현재 세션을 이용한 과거 backfill이나
+새 로그인/credential/일반 active guard 완화는 없다. 정상 완료의 최초24h upload grant는 유지하며
+기존 grant는 재진입·재시도로 갱신하지 않는다.
+
+기존 제한 단건·완료와 사진 actor/accepted 수렴·제출 경로를 같은 eligibility에 맞춘다.
+제출은 명시적인 서버 검증 session 인자를 사용하는 별도 core/wrapper로 처리하며 unbound
+limited 우회를 닫는다. 기존 receipt/global/profile/session/업무 잠금 순서와 post-lock clock을 검증한다.
+외부 Drive 호출은 transaction 밖이고 accepted 이력은 authorization 실패로 삭제하지 않는다.
+기존 public STABLE 조회6개의 요청 snapshot·HTTP/RPC 호환성은 유지한다. 동일 권한 규칙의
+private STABLE at-clock core와 explicit SELECT VOLATILE fresh wrapper를 분리하고,
+기존 VOLATILE caller15개·신규3개의 호출 목록/횟수/속성을 fail-closed 검사한다.
+private snapshot/core/fresh helper는 runtime EXECUTE를 허용하지 않는다. 조회 결과는 이후
+mutation을 승인하지 않으며 이 보완을 전체 기존 RPC의 post-lock gap 해결로 확대하지 않는다.
+최소 discovery의9개 item 필드와 server bound만 반환하며 PIN·객실/고객 PII·raw grant/session/digest는 숨긴다.
+로컬 기능·경합 검증과 독립 소스 QA는 완료했고 기존 strict17 FAIL을 명시한 진단용 Draft 공유 후보이다.
+CI·dev 통합·운영·프런트 UAT는 미완료다. [계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
+v0.8.0 고정 후보·운영/recovery·Auth 설정·프런트는 변경하지 않는다.
+
 ## #331 표시 전용 송금·재확인 구현 후보
 
 사용자는 종료된 KST 주차·양수 신규 on과 on 유지 별도 재확인을 확정했다.

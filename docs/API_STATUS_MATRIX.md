@@ -1,5 +1,16 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 2026-10-04 #329 별도 백엔드 로컬 검증 checkpoint
+
+| 범위 | source 상태 | 운영·프런트 상태 |
+|---|---|---|
+| 기존 세션 기반 제한 업무 발견·단건·완료·사진·제출 정합화 | 정책 A안 확정; 새 SHA Node1275·Edge477·Python95·LF fresh101·upgrade27/SQL79·4774·KST145·경합7·추가 역할 검사4·합성복구 PASS, 독립 소스 QA 새 확정 P0/P1/P2=0. strict 신규0/기존17 FAIL 및 최초 SQL FAIL·재실행 PASS 이력 보존. 승인된 진단용 Draft 공유 단계·CI/통합 미완료 | NOT RUN: v0.8.0 고정 후보에 미포함, 운영 배포·프런트 변경·cold start UAT 제외 |
+
+일반 로그인/me guard를 완화하지 않으며 별도 credential이나 새 세션·TTL을 발급하지 않는다.
+실제 계약과 gate는 [제한 세션 재진입](./LIMITED_SESSION_REENTRY.md)를 따른다.
+기준선 Node 1,229건/65파일은 구현 전 결과다. 신규 결과는 위 checkpoint와 상세 계약을 따른다.
+사용자 승인 LF 임시본만 정규화했고 기존100 SQL·운영 DB는 변경하지 않았다. 실패를 명시한 진단용 공유 승인만 있으며 정상 완료·병합·배포로 승격하지 않는다.
+
 ## 2026-10-03 #325 완료와 #324 후보
 
 #325 PR358 source78582789 → devd65f4f60는 exact-tree CI37093733970 application/migration PASS,
