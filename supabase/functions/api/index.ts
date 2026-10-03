@@ -109,6 +109,7 @@ import {
   carryForwardPayroll,
   carryLatePayrollEarning,
   correctPayrollAdjustment,
+  getPayrollAdjustmentBook,
   getPayrollCycle,
   listPayroll,
   listPayrollEntries,
@@ -244,11 +245,30 @@ export async function handleApiRequest(
   let path = "/";
   try {
     corsHeaders = cors(request);
+    path = routePath(request.url);
+    const adjustmentBookPath = "/v1/payroll/adjustment-book";
+    if (
+      path === adjustmentBookPath || path.startsWith(`${adjustmentBookPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        request.method !== "OPTIONS" &&
+        (request.method !== "GET" ||
+          pathname.slice(pathname.lastIndexOf("/api") + 4) !==
+            adjustmentBookPath)
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    path = routePath(request.url);
     if (request.method === "GET" && path === "/health") {
       return jsonResponse(
         {
@@ -1230,6 +1250,18 @@ export async function handleApiRequest(
       );
     }
 
+    if (path === "/v1/payroll/adjustment-book") {
+      const response = {
+        adjustmentBook: await getPayrollAdjustmentBook(
+          request,
+          clients,
+          actor,
+          verifiedRequestSessionId(request),
+        ),
+      };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
     if (request.method === "GET" && path === "/v1/payroll") {
       const response = await listPayroll(request, clients, actor);
       assertPayrollResponseSize(response);

@@ -1,5 +1,7 @@
 # 프론트엔드·Codex API 연동 가이드
 
+> 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.
+
 > 2026-10-03 현재: #328은 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)의 source `76e2780c0304a7336433cdd17e585610360785e3` → dev squash `3968e42967c8ad223661b7a3eb4ce200aabd2499`로 완료했다. 두 tree와 CI merge tree가 같고 required CI `37027527827` application/migration PASS·독립 QA98/100이다. 아래 Draft·후속 gate 표현은 과거 checkpoint다. #327은 이 dev/95 migrations에서 관리자 open 사건 목록을 구현 중인 후보이며 현재 source OpenAPI 목표는 132 paths·142 operations다. 신규 96번째 migration과 검증·운영 제외 범위는 [관리자 미퇴실 목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md)을 따른다. production/main/recovery·프런트 UI/UAT 완료를 뜻하지 않는다.
 
 > #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
@@ -7,6 +9,18 @@
 이 문서는 정본 `makee-ham/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 아래 날짜별 runtime·v0.4.0 인계는 당시 검증 이력이며 최신 운영 상태를 재선언하지 않는다. source 후보를 production 계약으로 간주하지 않는다.
 
 2026-09-23 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 OpenAPI 0.5.1 / 129 / 139이고 마지막으로 검증된 production runtime은 OpenAPI 0.5.1 / 128 / 138의 `api` ACTIVE v24다. #256 사진 정규화와 #250/#264 배정 후속의 Edge/Pages 배포는 아직 별도다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 Git source 제공과 hosted runtime·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
+
+## 2026-10-03 #325 scoped 주급 CAS handoff — PR 생성 전 checkpoint
+
+새 `GET /v1/payroll/adjustment-book?maidProfileId&weekStart`는 관리자에게
+`{adjustmentBook:{maidProfileId,weekStart,currentBookVersion}}`을 제공한다.
+현재·과거 KST 월요일을 검증하지만 version은 메이드 전체 원장의 CAS다.
+기존 조정 row/mutation의 bookVersion을 최신값으로 사용하지 않는다.
+정정·반전 직전에 조회해 expectedVersion으로 보내며 기존 stale409이면 재조회한다.
+초기0도 서버가 판정한다. 200은 항목 취소 가능이나 이후 명령 성공 보장이 아니다.
+필드·권한·safe error·GET-only/no-store와 검증 상태는
+[최신 조정 원장 조회](./PAYROLL_ADJUSTMENT_BOOK.md)를 따른다.
+프런트 main/dev의 DOCS/28 B02에 한정한 인계이며 프런트 구현·운영 배포는 별도다.
 
 ## 2026-10-02 #328 scoped 일정 handoff — 구현 후보
 

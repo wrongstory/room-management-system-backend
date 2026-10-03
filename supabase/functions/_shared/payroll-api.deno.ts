@@ -2,6 +2,7 @@ import {
   carryForwardPayroll,
   carryLatePayrollEarning,
   correctPayrollAdjustment,
+  getPayrollAdjustmentBook,
   getPayrollCycle,
   listPayroll,
   listPayrollEntries,
@@ -17,6 +18,8 @@ import {
   PAYROLL_RESPONSE_MAX_BYTES,
 } from "./payroll-cursor.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
+import { EdgeError } from "./runtime.ts";
+import { type ApiHandlerDependencies, handleApiRequest } from "../api/index.ts";
 
 Deno.env.set(
   "PAYROLL_CURSOR_HMAC_SECRET",
@@ -55,6 +58,335 @@ const maid: EdgeActor = {
   displayName: "메이드",
   role: "maid",
 };
+
+const bookSessionId = "30000000-0000-4000-8000-000000000001";
+const bookQuery = `maidProfileId=${maid.profileId}&weekStart=2026-09-28`;
+const bookDto = {
+  maidProfileId: maid.profileId,
+  weekStart: "2026-09-28",
+  currentBookVersion: 3,
+};
+function bookRequest(
+  query = bookQuery,
+  method = "GET",
+  path = "/v1/payroll/adjustment-book",
+  session: unknown = bookSessionId,
+): Request {
+  const payload = btoa(JSON.stringify({ session_id: session })).replaceAll(
+    "+",
+    "-",
+  )
+    .replaceAll("/", "_").replaceAll("=", "");
+  return new Request(`http://localhost/functions/v1/api${path}?${query}`, {
+    method,
+    headers: { authorization: `Bearer e30.${payload}.signature` },
+  });
+}
+function bookDependencies(
+  data: unknown = bookDto,
+  failure: string | null = null,
+  identity = admin,
+) {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const options: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve(identity),
+    createClients: () => ({
+      admin: {
+        rpc(name: string, args: Record<string, unknown>) {
+          calls.push([name, args]);
+          if (name === "record_authorization_denial") {
+            return Promise.resolve({ data: null, error: null });
+          }
+          return Promise.resolve({
+            data,
+            error: failure ? { message: failure } : null,
+          });
+        },
+      },
+    } as unknown as EdgeClients),
+  };
+  return { calls, options };
+}
+
+Deno.test("adjustment book GET returns exact current global CAS with verified session and no cursor dependency", async () => {
+  for (const currentBookVersion of [0, 3, Number.MAX_SAFE_INTEGER]) {
+    const fixture = bookDependencies({ ...bookDto, currentBookVersion });
+    const response = await handleApiRequest(bookRequest(), fixture.options);
+    const body = await response.json();
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+      "safe read response",
+    );
+    assert(Object.keys(body).join() === "adjustmentBook", "exact envelope");
+    assert(
+      JSON.stringify(body.adjustmentBook) ===
+        JSON.stringify({ ...bookDto, currentBookVersion }),
+      "three fields exact",
+    );
+    assert(
+      fixture.calls.length === 1 &&
+        fixture.calls[0][0] === "get_payroll_adjustment_book",
+      "single read RPC",
+    );
+    assert(
+      JSON.stringify(fixture.calls[0][1]) === JSON.stringify({
+        p_actor_profile_id: admin.profileId,
+        p_session_id: bookSessionId,
+        p_maid_profile_id: maid.profileId,
+        p_week_start: bookDto.weekStart,
+      }),
+      "exact actor session maid and context binding",
+    );
+  }
+  const lower = "a0000000-0000-4000-8000-000000000001";
+  const upper = lower.toUpperCase();
+  const fixture = bookDependencies({ ...bookDto, maidProfileId: lower });
+  const response = await handleApiRequest(
+    bookRequest(`maidProfileId=${upper}&weekStart=2026-09-28`),
+    fixture.options,
+  );
+  assert(response.status === 200, "UUID case normalized");
+});
+
+Deno.test("adjustment book query rejects unknown duplicate empty malformed calendar and UUID before read", async () => {
+  for (
+    const query of [
+      "",
+      `maidProfileId=${maid.profileId}`,
+      "weekStart=2026-09-28",
+      `maidProfileId=&weekStart=2026-09-28`,
+      `${bookQuery}&bookId=123`,
+      `${bookQuery}&maidProfileId=${maid.profileId}`,
+      `${bookQuery}&weekStart=2026-09-28`,
+      "maidProfileId=bad&weekStart=2026-09-28",
+      `maidProfileId=${maid.profileId}&weekStart=`,
+      ...[
+        "0000-01-01",
+        "2026-02-29",
+        "1900-02-29",
+        "2026-04-31",
+        "2026-00-01",
+        "2026-13-01",
+        "2026-01-00",
+        "10000-01-01",
+        "2026-1-01",
+        "2026-09-28T00:00:00Z",
+      ].map((value) => `maidProfileId=${maid.profileId}&weekStart=${value}`),
+    ]
+  ) {
+    const fixture = bookDependencies();
+    const response = await handleApiRequest(
+      bookRequest(query),
+      fixture.options,
+    );
+    assert(
+      response.status === 400 &&
+        (await response.json()).error.code === "VALIDATION_ERROR",
+      "strict query denied",
+    );
+    assert(
+      response.headers.get("cache-control") === "no-store" &&
+        fixture.calls.length === 0,
+      "no lookup for invalid query",
+    );
+  }
+});
+
+Deno.test("adjustment book accepts real Gregorian dates including years below 100 and leap years", async () => {
+  for (
+    const weekStart of [
+      "0001-01-01",
+      "0099-01-01",
+      "2000-02-29",
+      "2024-02-29",
+      "9999-12-31",
+      "2026-09-21",
+    ]
+  ) {
+    const fixture = bookDependencies({ ...bookDto, weekStart });
+    const response = await handleApiRequest(
+      bookRequest(`maidProfileId=${maid.profileId}&weekStart=${weekStart}`),
+      fixture.options,
+    );
+    assert(
+      response.status === 200 && fixture.calls[0][1].p_week_start === weekStart,
+      "calendar sent to DB Monday/current-week authority",
+    );
+  }
+});
+
+Deno.test("adjustment book HTTP methods aliases remain 404 no-store and OPTIONS preserves CORS", async () => {
+  for (
+    const [method, path] of [
+      ["HEAD", "/v1/payroll/adjustment-book"],
+      ["POST", "/v1/payroll/adjustment-book"],
+      ["PUT", "/v1/payroll/adjustment-book"],
+      ["PATCH", "/v1/payroll/adjustment-book"],
+      ["DELETE", "/v1/payroll/adjustment-book"],
+      ["GET", "/v1/payroll/adjustment-book/"],
+      ["GET", "/v1//payroll/adjustment-book"],
+      ["GET", "//v1/payroll/adjustment-book"],
+      ["GET", "/v1/payroll/adjustment-book/extra"],
+    ]
+  ) {
+    const fixture = bookDependencies();
+    let authenticated = false;
+    fixture.options.authenticateRequest = () => {
+      authenticated = true;
+      return Promise.reject(
+        new EdgeError(401, "MISSING_ACCESS_TOKEN", "missing"),
+      );
+    };
+    const request = bookRequest(bookQuery, method, path);
+    request.headers.delete("authorization");
+    const response = await handleApiRequest(
+      request,
+      fixture.options,
+    );
+    assert(
+      response.status === 404 &&
+        response.headers.get("cache-control") === "no-store" &&
+        fixture.calls.length === 0 && !authenticated,
+      "unsupported unauthenticated route rejected before auth/read",
+    );
+  }
+  const fixture = bookDependencies();
+  const preflight = await handleApiRequest(
+    bookRequest(bookQuery, "OPTIONS"),
+    fixture.options,
+  );
+  assert(
+    preflight.status === 204 &&
+      preflight.headers.get("cache-control") === "no-store" &&
+      fixture.calls.length === 0,
+    "preflight untouched and no-store",
+  );
+});
+
+Deno.test("adjustment book latest DB denials map exact scoped errors and redact raw details", async () => {
+  for (
+    const [code, status] of [
+      ["SESSION_REVOKED", 401],
+      ["PASSWORD_CHANGE_REQUIRED", 403],
+      ["ADMIN_REQUIRED", 403],
+      ["PAYROLL_WEEK_MUST_START_MONDAY", 400],
+      ["PAYROLL_WEEK_NOT_CLOSED", 409],
+      ["PAYROLL_MAID_NOT_FOUND", 404],
+      ["VALIDATION_ERROR", 500],
+      ["PAYROLL_ADJUSTMENT_BOOK_INVARIANT_VIOLATION", 500],
+      ["postgres raw secret ADMIN_REQUIRED", 500],
+      ["STALE_ADJUSTMENT_VERSION", 500],
+    ] as const
+  ) {
+    const fixture = bookDependencies(null, code);
+    const response = await handleApiRequest(bookRequest(), fixture.options);
+    const body = await response.json();
+    assert(
+      response.status === status &&
+        body.error.code === (status === 500 ? "PAYROLL_COMMAND_FAILED" : code),
+      "exact safe code mapping",
+    );
+    assert(
+      response.headers.get("cache-control") === "no-store" &&
+        !JSON.stringify(body).includes("secret"),
+      "safe errors",
+    );
+  }
+});
+
+Deno.test("adjustment book actor password and session metadata are checked before RPC", async () => {
+  for (
+    const identity of [maid, { ...admin, role: "developer" } as EdgeActor, {
+      ...admin,
+      mustChangePassword: true,
+    }]
+  ) {
+    const fixture = bookDependencies(bookDto, null, identity);
+    const response = await handleApiRequest(bookRequest(), fixture.options);
+    assert(
+      response.status === 403 &&
+        !fixture.calls.some(([name]) => name === "get_payroll_adjustment_book"),
+      "admin/password gate",
+    );
+  }
+  for (const session of [null, "", "invalid", 1]) {
+    const fixture = bookDependencies();
+    const response = await handleApiRequest(
+      bookRequest(bookQuery, "GET", "/v1/payroll/adjustment-book", session),
+      fixture.options,
+    );
+    assert(
+      response.status === 401 &&
+        (await response.json()).error.code === "INVALID_ACCESS_TOKEN" &&
+        fixture.calls.length === 0,
+      "verified session only",
+    );
+  }
+  const fixture = bookDependencies();
+  fixture.options.authenticateRequest = () =>
+    Promise.reject(new EdgeError(401, "SESSION_REVOKED", "revoked"));
+  const response = await handleApiRequest(bookRequest(), fixture.options);
+  assert(
+    response.status === 401 &&
+      response.headers.get("cache-control") === "no-store" &&
+      fixture.calls.length === 0,
+    "auth failure no read",
+  );
+});
+
+Deno.test("adjustment book malformed or cross-bound DTO fails closed without guessing latest version", async () => {
+  for (
+    const data of [
+      null,
+      [],
+      { ...bookDto, maidProfileId: admin.profileId },
+      { ...bookDto, weekStart: "2026-09-21" },
+      { ...bookDto, currentBookVersion: undefined },
+      { ...bookDto, currentBookVersion: null },
+      { ...bookDto, currentBookVersion: "3" },
+      { ...bookDto, currentBookVersion: -1 },
+      { ...bookDto, currentBookVersion: 1.5 },
+      { ...bookDto, currentBookVersion: Number.MAX_SAFE_INTEGER + 1 },
+      { ...bookDto, bookVersion: 1 },
+      { ...bookDto, pin: "must-not-leak" },
+    ]
+  ) {
+    const fixture = bookDependencies(data);
+    const response = await handleApiRequest(bookRequest(), fixture.options);
+    const body = await response.json();
+    assert(
+      response.status === 500 && body.error.code === "PAYROLL_COMMAND_FAILED" &&
+        !JSON.stringify(body).includes("must-not-leak"),
+      "malformed DTO safe500",
+    );
+  }
+  const fixture = bookDependencies({
+    ...bookDto,
+    raw: "가".repeat(PAYROLL_RESPONSE_MAX_BYTES),
+  });
+  const response = await handleApiRequest(bookRequest(), fixture.options);
+  assert(
+    response.status === 500 &&
+      (await response.json()).error.code === "PAYROLL_RESPONSE_TOO_LARGE",
+    "raw bounded before DTO parse",
+  );
+});
+
+Deno.test("adjustment book direct read does not use legacy cursor or command RPC", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const result = await getPayrollAdjustmentBook(
+    bookRequest(),
+    clients(calls, bookDto),
+    admin,
+    bookSessionId,
+  );
+  assert(
+    result.currentBookVersion === 3 && calls.length === 1 &&
+      calls[0][0] === "get_payroll_adjustment_book",
+    "read only RPC",
+  );
+});
 const projection = {
   cycleId: null,
   maidProfileId: maid.profileId,

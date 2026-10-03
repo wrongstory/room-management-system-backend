@@ -1,4 +1,10 @@
-// #327 current candidate from dev@3968e429 (95 migrations): append migration 96
+// 2026-10-03 current: #327 PR357 source22cbf0be -> devb6f79981, identical tree,
+// CI37086130779 application/migration PASS and independent QA98/100; old candidate gates are history.
+// #325 candidate append migration97 adds only service-role current adjustment-book read RPC.
+// Book identity remains maid_profile_id alone; weekStart is read context, not a weekly CAS.
+// No table/column/index/RLS/table-grant or existing ledger/command changes. See docs/PAYROLL_ADJUSTMENT_BOOK.md.
+// Source candidate inventory133 paths/143 operations; production/frontend not changed.
+// #327 historical candidate from dev@3968e429 (95 migrations): append migration 96
 // adds only service-role admin open-incident read RPC and partial (reported_at DESC,id DESC) index.
 // No new table/column, RLS, ledger, command, notification or production changes.
 // #328 source 76e2780c -> dev3968e429 merged by PR351, required CI37027527827 PASS; old gates below are history.

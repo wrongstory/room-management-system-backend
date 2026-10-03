@@ -33,8 +33,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 132:
-        raise RuntimeError("전체 source OpenAPI path 수가 132가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 133:
+        raise RuntimeError("전체 source OpenAPI path 수가 133이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -43,9 +43,33 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 142:
-        raise RuntimeError("전체 source OpenAPI operation 수가 142가 아닙니다.")
+    if operation_count != 143:
+        raise RuntimeError("전체 source OpenAPI operation 수가 143이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
+    adjustment_book = schemas.get("PayrollAdjustmentBook", {})
+    book_fields = ["maidProfileId", "weekStart", "currentBookVersion"]
+    if (
+        adjustment_book.get("required") != book_fields
+        or list(adjustment_book.get("properties", {})) != book_fields
+        or adjustment_book.get("additionalProperties") is not False
+        or adjustment_book.get("properties", {}).get("currentBookVersion", {}).get("type")
+        != "integer"
+        or adjustment_book.get("properties", {}).get("currentBookVersion", {}).get("minimum") != 0
+        or adjustment_book.get("properties", {}).get("currentBookVersion", {}).get("maximum")
+        != 9007199254740991
+    ):
+        raise RuntimeError("최신 주급 조정 원장의 필수 필드/safe integer 계약이 잘못됐습니다.")
+    book_operation = paths.get("/v1/payroll/adjustment-book", {}).get("get", {})
+    if (
+        book_operation.get("operationId") != "getPayrollAdjustmentBook"
+        or book_operation.get("x-required-roles") != ["admin"]
+        or [
+            (parameter.get("name"), parameter.get("in"), parameter.get("required"))
+            for parameter in book_operation.get("parameters", [])
+        ]
+        != [("maidProfileId", "query", True), ("weekStart", "query", True)]
+    ):
+        raise RuntimeError("최신 주급 조정 원장의 관리자 조회/query 계약이 누락됐습니다.")
     menu = (
         schemas.get("CheckoutIncidentListItem", {})
         .get("properties", {})
@@ -162,6 +186,9 @@ def main() -> None:
             package / "api" / "payroll" / "list_payroll_cycles.py",
             package / "api" / "payroll" / "get_payroll_cycle.py",
             package / "api" / "payroll" / "list_payroll_entries.py",
+            package / "api" / "payroll" / "get_payroll_adjustment_book.py",
+            package / "models" / "payroll_adjustment_book.py",
+            package / "models" / "payroll_adjustment_book_envelope.py",
             package / "api" / "payroll" / "start_payroll_cycle.py",
             package / "api" / "payroll" / "record_payroll_correction.py",
             package / "api" / "payroll" / "reverse_payroll_source.py",
@@ -259,6 +286,33 @@ def main() -> None:
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
             raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+        for book_model_name, book_expected_fields in (
+            (
+                "payroll_adjustment_book",
+                {
+                    "maid_profile_id": "UUID",
+                    "week_start": "datetime.date",
+                    "current_book_version": "int",
+                },
+            ),
+            ("payroll_adjustment_book_envelope", {"adjustment_book": "PayrollAdjustmentBook"}),
+        ):
+            model = (package / "models" / f"{book_model_name}.py").read_text(encoding="utf-8")
+            for field, expected_type in book_expected_fields.items():
+                declaration = re.search(rf"^\s+{field}:\s+([^\r\n=]+)", model, re.MULTILINE)
+                if declaration is None or declaration.group(1).strip() != expected_type:
+                    raise RuntimeError(f"주급 조정 원장 codegen 필수 타입 불일치: {field}")
+            for forbidden in ("session_id:", "book_id:", "book_version:", "pin:", "request_hash:"):
+                if re.search(rf"^\s+{re.escape(forbidden)}", model, re.MULTILINE):
+                    raise RuntimeError(f"주급 조정 원장 codegen 비공개 필드 노출: {forbidden}")
+        book_api = (package / "api" / "payroll" / "get_payroll_adjustment_book.py").read_text(
+            encoding="utf-8"
+        )
+        for field in ("maid_profile_id: UUID", "week_start: datetime.date"):
+            if field not in book_api or f"{field} | Unset" in book_api:
+                raise RuntimeError(f"주급 조정 원장 codegen 필수 query 불일치: {field}")
+        if '"/v1/payroll/adjustment-book"' not in book_api:
+            raise RuntimeError("주급 조정 원장 codegen 정확한 조회 URL이 누락됐습니다.")
         # #328 required nullable fields must not become optional Unset fields
         # or lose the distinct plan/current types during actual client generation.
         for model_name, expected_fields in (

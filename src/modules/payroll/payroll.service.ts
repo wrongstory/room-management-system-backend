@@ -3,6 +3,15 @@ import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import {
+  normalizePayrollAdjustmentBookInput,
+  payrollAdjustmentBookDatabaseError,
+  payrollAdjustmentBookProjection,
+  payrollAdjustmentBookSessionId,
+  type PayrollAdjustmentBookInput,
+  type PayrollAdjustmentBookProjection
+} from './payroll-adjustment-book.js';
+import {
+  assertPayrollResponseSize,
   PAYROLL_CYCLE_PAGE_DEFAULT,
   PAYROLL_ENTRY_PAGE_DEFAULT,
   PAYROLL_NESTED_PREVIEW_MAX,
@@ -86,6 +95,7 @@ export interface PayrollAdjustmentProjection extends PayrollAdjustmentEntry {
   lateCarriedEarningId?: string | undefined; createdAt: string;
 }
 export interface PayrollService {
+  getAdjustmentBook(actor: Actor, input: PayrollAdjustmentBookInput): Promise<PayrollAdjustmentBookProjection>;
   list(actor: Actor, input: PayrollListInput): Promise<PayrollListPage>;
   listEntries(actor: Actor, input: PayrollEntriesInput): Promise<PayrollEntriesPage>;
   get(actor: Actor, cycleId: string): Promise<PayrollCycleProjection>;
@@ -335,6 +345,21 @@ function afterEntry(position: PayrollCursorPosition | null): { earnedOn: string 
 export class SupabasePayrollService implements PayrollService {
   private readonly cursors: PayrollCursorCodec;
   constructor(private readonly clients: SupabaseClients, cursorSecret: string) { this.cursors = new PayrollCursorCodec(cursorSecret) }
+
+  async getAdjustmentBook(actor: Actor, input: PayrollAdjustmentBookInput): Promise<PayrollAdjustmentBookProjection> {
+    if (actor.role !== 'admin') throw payrollAdjustmentBookDatabaseError({ message: 'ADMIN_REQUIRED' });
+    if (actor.mustChangePassword) throw payrollAdjustmentBookDatabaseError({ message: 'PASSWORD_CHANGE_REQUIRED' });
+    const normalized = normalizePayrollAdjustmentBookInput(input);
+    const { data, error } = await this.clients.admin.rpc('get_payroll_adjustment_book', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: payrollAdjustmentBookSessionId(actor),
+      p_maid_profile_id: normalized.maidProfileId,
+      p_week_start: normalized.weekStart
+    });
+    if (error || !data) throw payrollAdjustmentBookDatabaseError(error);
+    assertPayrollResponseSize(data);
+    return payrollAdjustmentBookProjection(data, normalized);
+  }
 
   private projectCycle(value: unknown, actor: Actor, weekStart: string): PayrollCycleProjection {
     const parsed = internalCycle(value);
