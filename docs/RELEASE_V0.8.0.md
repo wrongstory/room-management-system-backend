@@ -12,9 +12,9 @@
 | 운영 DB / runtime | 85 migrations, head `flat_cleaning_evidence_history_payroll`; `api` ACTIVE v38, `reservation-scheduler` ACTIVE v16 |
 | 운영 HTTP / package | OpenAPI `0.6.0`, 131 paths / 141 operations; npm package `0.1.0` |
 | 릴리스 작업 시작점 | `release/v0.8.0`, dev `eb1ec3e99cfa56bca326064a6c0468714374df75`, source 99 migrations |
-| 선행 #352 후보 | [PR #365](https://github.com/wrongstory/room-management-system-backend/pull/365), source `576b0e5d2d98596eb082b4fee0875ef7ace235e1`, tree `b41786cc435cdff12ed50b6a182c91084d082633` |
+| 최신 dev 통합 | [PR #365](https://github.com/wrongstory/room-management-system-backend/pull/365), source `576b0e5d2d98596eb082b4fee0875ef7ace235e1` → dev `2f9736b97825a38982db6456a3f9cc392bfce7d7`, tree `b41786cc435cdff12ed50b6a182c91084d082633` |
 | #352 CI checkpoint | exact-head run `37116122570`의 application / migration 모두 PASS. dev 병합과 release 자체의 검증은 별도다 |
-| v0.8.0 목표 | #352 dev 통합 후 포함, 100 migrations / 운영85 대비 pending15. OpenAPI `0.6.0` / 137 paths / 148 operations를 최종 source에서 확인한다 |
+| v0.8.0 후보 | #352를 최신dev에서 포함, 100 migrations / 운영85 대비 pending15. OpenAPI `0.6.0` / 137 paths / 148 operations. release 자체의 검증·운영 제공은 별도다 |
 
 Git 릴리스 v0.8.0, OpenAPI 0.6.0, package 0.1.0, 각 Function의 배포 version은 별도 식별자다.
 기존 [v0.7.1 기록](./RELEASE_V0.7.1.md)은 운영 main 원문 그대로 보존하고 이번 결과로 덮어쓰지 않는다.
@@ -62,7 +62,7 @@ Git 릴리스 v0.8.0, OpenAPI 0.6.0, package 0.1.0, 각 Function의 배포 versi
 | 97 | `20261003021153_payroll_adjustment_book_read.sql` |
 | 98 | `20261003042015_payroll_work_details_read.sql` |
 | 99 | `20261003064220_payroll_remittance_marker.sql` |
-| 100 | `20261003095426_auth_session_hard_expiry.sql` (#352 dev 통합 후 후보) |
+| 100 | `20261003095426_auth_session_hard_expiry.sql` (#352 dev 통합 완료) |
 
 - DDL·함수·제약·index/ACL, 알림 catalog, 기술 cursor singleton 등 **설치 상태**는 바뀐다. “DB/데이터 변경 없음”으로 기록하지 않는다.
 - 95는 nullable JSONB 두 컬럼을 추가한다. 과거 schedule/assignment의 누락 snapshot과 완료 receipt를 현재 예약으로 채우지 않는다.
@@ -103,7 +103,7 @@ inbox/outbox는 본체와 같은 DB transaction이고 외부 push는 기존 work
 | gate | 작성 시 상태 |
 |---|---|
 | #352 개별 local | PASS: Node1225/65, Edge469, fresh100, 99→100, manifest5, 전용SQL68. 실제 근거는 PR365를 따른다 |
-| #352 전체DB / required CI | PASS: 정확99→100 포함26 upgrade, SQL78파일·4,640 assertions, KST145, 전체6 경합, fresh100 합성 backup/recovery, WARN/ERROR Advisor0. exact-head CI 두 required checks PASS; 최종 독립 QA·dev 병합은 별도 확인한다 |
+| #352 전체DB / required CI / 독립 QA | PASS: 정확99→100 포함26 upgrade, SQL78파일·4,640 assertions, KST145, 전체6 경합, fresh100 합성 backup/recovery, WARN/ERROR Advisor0. exact-head CI 두 required checks PASS; 최종 구현 미참여 QA·countercheck P0/P1/P2=0 후 보호 squash로 dev 통합 |
 | release exact source 전체 검증 | NOT RUN: quality/typecheck/test/build·Edge·Python·fresh100·26 upgrades·전체SQL·KST·전체concurrency·history/advisors·exact-source 합성 복구 |
 | release→main required checks·독립QA·리뷰/충돌/보호 규칙 | NOT RUN |
 | 호환 recovery artifact | local 격리 fmt/typecheck/old OpenAPI131/141/bundle PASS. 아래 외부 seal을 따른다. 실제 hosted 복구·retry는 NOT RUN |

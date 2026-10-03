@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { ImageMagick, MagickColors, MagickFormat } from '@imagemagick/magick-wasm';
 import Fastify from 'fastify';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { initializePhotoDecoder, PHOTO_INPUT_MAX_BYTES } from '../src/modules/photos/photo-binary.js';
 import { createPhotoRoutes, createPhotoHttpServices } from '../src/modules/photos/photo.routes.js';
 import { PhotoService, type PhotoIdentity } from '../src/modules/photos/photo-service.js';
@@ -17,6 +17,54 @@ function pad(n:number) { const out = new Uint8Array(n), chunks = [jpeg.slice(0,2
   while(remain) { const size = Math.min(65537,remain), c = new Uint8Array(size); c.set([255,254,(size-2)>>8,(size-2)&255]); chunks.push(c);remain-=size; }
   chunks.push(jpeg.slice(2));let p=0;for(const c of chunks){out.set(c,p);p+=c.length;}return out; }
 describe('Fastify photo parity through actual raw parser/router', () => {
+  it.each(['active', 'deactivation_pending', 'upload_only'])('rejects a false session decision before photo RPC/provider/decoder (%s)', async (status) => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      single: async () => ({ error: null, data: {
+        id: id(1), auth_user_id: id(10), role: 'maid', status, must_change_password: false
+      } })
+    };
+    const rpc = vi.fn(async () => ({ data: false, error: null }));
+    const clients = {
+      publicClient: { auth: { getUser: async () => ({ data: { user: { id: id(10) } }, error: null }) } },
+      admin: { from: () => query, rpc }
+    } as unknown as SupabaseClients;
+    const provider = vi.fn(() => ({} as PhotoProvider));
+    const decoder = vi.fn(async () => {});
+    const services = createPhotoHttpServices(clients, {} as AppEnv);
+    services.service = new PhotoService(clients.admin, provider, decoder);
+    const app = Fastify({ logger: false });
+    await app.register(createPhotoRoutes(services));
+    const token = `header.${Buffer.from(JSON.stringify({ session_id: id(2) })).toString('base64url')}.synthetic`;
+    const paths = [
+      { method: 'GET' as const, url: `/v1/attempts/${id(3)}/photo-slots` },
+      { method: 'GET' as const, url: `/v1/photo-uploads/${id(5)}` },
+      { method: 'POST' as const, url: `/v1/attempts/${id(3)}/photo-slots/${id(4)}/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedPhotoRevision=0` },
+      ...(status === 'active' ? [{ method: 'GET' as const, url: `/v1/photos/${id(7)}/content` }] : [])
+    ];
+    try {
+      for (const path of paths) {
+        const response = await app.inject({ ...path, headers: {
+          authorization: `Bearer ${token}`, 'content-type': 'image/jpeg', 'idempotency-key': 'session-expiry-352'
+        }, ...(path.method === 'POST' ? { payload: Buffer.from(jpeg) } : {}) });
+        expect(response.statusCode).toBe(401);
+        expect(response.json().error.code).toBe('SESSION_REVOKED');
+        expect(response.headers['cache-control']).toBe('no-store');
+        expect(response.body).not.toContain(token);
+        expect(response.body).not.toContain(id(2));
+      }
+      expect(rpc).toHaveBeenCalledTimes(paths.length);
+      for (const call of rpc.mock.calls) {
+        expect(call).toEqual(['is_active_auth_session', { p_auth_user_id: id(10), p_session_id: id(2) }]);
+      }
+      expect(provider).not.toHaveBeenCalled();
+      expect(decoder).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
   it('raw smartphone JPEG over 300KiB succeeds, over 5MiB rejects; malformed MIME and aliases do not execute', async () => {
     const calls:string[]=[]; const t = new Date().toISOString();
     const service = new PhotoService({ rpc: async name => { calls.push(name);return {error:null,data:name==='admit_photo_upload'?{admissionId:id(9),quotaWarning:false}:name==='begin_admitted_photo_upload'?{

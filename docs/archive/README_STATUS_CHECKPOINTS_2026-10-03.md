@@ -2,6 +2,10 @@
 
 이 문서는 정리 전 README 머리말의 원문 내용을 보존하며 상대 링크만 이동 위치에 맞게 재기준화한다. 아래 소스/운영 수치와 후보·PENDING 표현은 각 작성 시점의 이력이며 현재 운영 정본이 아니다. 현재 상태는 README·API_STATUS_MATRIX 및 해당 exact-head PR/릴리스 readback을 따른다. 기존 FAIL 이력이나 사용자 UAT 결과를 소급 변경하지 않는다.
 
+## #352 dev 통합 시 추가된 과거 checkpoint
+
+> 2026-10-03 최신: #331 PR361이 `dev@eb1ec3e`로 통합됐다(required CI37111364892·독립 QA98). #329와 첫 중간 릴리스에 선행하는 [#352 공용 세션 강제 만료 검사](../AUTH_SESSION_HARD_EXPIRY.md)를 별도 구현 중이다. [#364 v0.8.0 점검 릴리스](https://github.com/wrongstory/room-management-system-backend/issues/364)는 release/main 검증·병합 후 승인된 pending DB→API/예약 스케줄러를 승격한다. 아래 source 후보·운영 수치는 과거 checkpoint이며 배포/UAT 완료가 아니다. 프런트 개발·Node fallback 활성화·Auth 설정·키·실제 PIN/송금은 포함하지 않는다.
+
 # CASTLE THE ART 객실관리 백엔드
 
 > 2026-10-03 #331 구현 후보: #324 [PR #359](https://github.com/wrongstory/room-management-system-backend/pull/359)가 통합된 `dev@8481e219d7fbd92fe3587081efca9f3bc632bba6`/98 migrations를 기준으로 송금 표시 on/off와 금액 근거 재확인 API를 추가했다. 후보는 99 migrations·137 paths/148 operations이며, 실제 지급 원장은 변경하지 않는다. 검증·독립 QA·CI·통합 상태는 [표시 계약](../PAYROLL_REMITTANCE_MARKER.md)을 따른다. 아래 과거 dev/운영 수치는 당시 checkpoint이며 이번 작업의 운영 배포를 뜻하지 않는다.

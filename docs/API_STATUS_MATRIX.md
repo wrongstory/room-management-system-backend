@@ -11,7 +11,7 @@
 | #348 수동 취소의 PIN 조회 제한 제거, #326 배정 metadata, #328 예약/actual schedule | dev 완료 | 승격 전; 새 metadata 소비·취소 target ID/CAS 매핑은 프런트 연결 필요 |
 | #327 미퇴실 목록, #325 조정 book, #324 객실별 주급 상세 | dev 완료 | 승격 전; 신규 조회 API 호출은 현재 프런트 artifact에 없음 |
 | #331 송금 표시/별도 재확인 | PR361 → dev eb1ec3e 완료 | 승격 전; 실제 PAID·송금과 별도, 프런트 신규 marker 연결 필요 |
-| #352 공용 session 강제 만료 검사 | PR365 source576b0e5, exact-head required CI 모두 PASS·최종 QA 확인 중 | 미배포, #329의 session membership/제출 binding 완료가 아님 |
+| #352 공용 session 강제 만료 검사 | PR365 source576b0e5 → dev2f9736b, exact tree·required CI·전체회귀·독립 QA PASS | 미배포, #329의 session membership/제출 binding 완료가 아님 |
 | #329 → #317 | 첫 점검 릴리스 이후 순차 구현 | 이번 v0.8.0 포함하지 않음 |
 
 현재 운영은 main1780728/v0.7.1, DB85·api38·scheduler16, OpenAPI0.6.0 131/141이다.

@@ -10,8 +10,8 @@ TypeScript·Supabase 기반 객실·예약·청소·검수·주급 API입니다.
 | 구분 | 현재 확인 |
 |---|---|
 | 운영 | Git v0.7.1 / main1780728, DB85, api ACTIVE38, reservation-scheduler ACTIVE16 |
-| 개발 통합 | dev eb1ec3e: #331 송금 표시까지 완료 |
-| 선행 보안 보완 | #352 / PR365: 강제 만료 검사, exact-head required application/migration PASS·최종 QA 확인 중 |
+| 개발 통합 | dev 2f9736b: #331 송금 표시와 #352 세션 검사까지 완료, DB100 |
+| 선행 보안 보완 | #352 / PR365: exact-head required CI·전체 회귀·독립 QA 통과 후 dev 통합. 운영 미적용 |
 | 중간 릴리스 | #364 / v0.8.0 준비 중. 목표 DB100·운영 대비 pending15, OpenAPI0.6.0 137 paths/148 operations |
 | 이후 개발 | #329 기존 로그인 세션 한정 제한 업무 → #317 안전한 장애 진단 |
 
