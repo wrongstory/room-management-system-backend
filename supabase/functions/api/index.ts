@@ -64,6 +64,7 @@ import {
   checkoutIncidentPath,
   decideCheckoutIncident,
   getCheckoutIncident,
+  listCheckoutIncidents,
   reportCheckoutIncident,
 } from "../_shared/checkout-incident-api.ts";
 import { cleaningTemplates } from "../_shared/cleaning-template-api.ts";
@@ -1065,6 +1066,23 @@ export async function handleApiRequest(
           corsHeaders,
         );
       }
+    }
+    if (path === "/v1/checkout-incidents") {
+      if (
+        request.method !== "GET" ||
+        !new URL(request.url).pathname.endsWith("/api/v1/checkout-incidents")
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      return jsonResponse(
+        await listCheckoutIncidents(request, clients, actor),
+        200,
+        corsHeaders,
+      );
     }
     const incidentRoute = checkoutIncidentPath(path);
     if (request.method === "GET" && incidentRoute?.kind === "detail") {

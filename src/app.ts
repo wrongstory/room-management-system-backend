@@ -27,7 +27,7 @@ import {
   type AssignmentPreviewService,
   SupabaseAssignmentPreviewService
 } from './modules/assignments/assignment-preview.service.js';
-import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
+import { checkoutIncidentCollectionGuard, createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
 import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
 import { createCleaningTemplateRoutes } from './modules/cleaning-templates/cleaning-template.routes.js';
 import {
@@ -170,7 +170,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         vapidPublicKey: options.env.VAPID_PUBLIC_KEY,
         vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
       }),
-      checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
+      checkoutIncidents: new SupabaseCheckoutIncidentService(clients, options.env.INSPECTION_CURSOR_HMAC_SECRET),
       cleaningTemplates: new SupabaseCleaningTemplateService(clients),
       cleaningHistory: new SupabaseCleaningHistoryService(clients),
       workHistory: new SupabaseWorkHistoryService(clients)
@@ -181,6 +181,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     );
   }
 
+  if (services.checkoutIncidents) app.addHook('onRequest', checkoutIncidentCollectionGuard);
   await app.register(helmet, { global: true });
   await app.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
   await app.register(cors, {

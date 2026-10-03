@@ -33,8 +33,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 131:
-        raise RuntimeError("전체 source OpenAPI path 수가 131가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 132:
+        raise RuntimeError("전체 source OpenAPI path 수가 132가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -43,9 +43,20 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 141:
-        raise RuntimeError("전체 source OpenAPI operation 수가 141가 아닙니다.")
+    if operation_count != 142:
+        raise RuntimeError("전체 source OpenAPI operation 수가 142가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
+    menu = (
+        schemas.get("CheckoutIncidentListItem", {})
+        .get("properties", {})
+        .get("allowedDecisions", {})
+    )
+    if [item.get("enum") for item in menu.get("prefixItems", [])] != [
+        ["EXTEND_CHECKOUT"],
+        ["CONFIRM_DEPARTED"],
+        ["FALSE_REPORT"],
+    ]:
+        raise RuntimeError("미퇴실 목록 결정 메뉴 순서의 머신 계약이 누락됐습니다.")
     audit_event_types = schemas.get("DeveloperAuditEventType", {}).get("enum")
     if (
         not isinstance(audit_event_types, list)
@@ -126,6 +137,9 @@ def main() -> None:
             package / "models" / "published_cleaning_template.py",
             package / "api" / "checkout_incidents" / "report_checkout_not_completed.py",
             package / "api" / "checkout_incidents" / "get_checkout_incident.py",
+            package / "api" / "checkout_incidents" / "list_checkout_incidents.py",
+            package / "models" / "checkout_incident_list_item.py",
+            package / "models" / "checkout_incident_list_envelope.py",
             package / "api" / "checkout_incidents" / "decide_checkout_incident.py",
             package / "models" / "checkout_incident.py",
             package / "models" / "checkout_incident_decision.py",
@@ -292,6 +306,40 @@ def main() -> None:
                     or {part.strip() for part in declaration.group(1).split("|")} != expected_types
                 ):
                     raise RuntimeError(f"배정 일정 codegen 필수 nullable 타입 불일치: {field}")
+        incident_item = (package / "models" / "checkout_incident_list_item.py").read_text(
+            encoding="utf-8"
+        )
+        for field in (
+            "incident_id: UUID",
+            "room_id: UUID",
+            "room_number: str",
+            "cleaning_target_id: UUID",
+            "assignment_id: UUID",
+            "attempt_id: UUID",
+            "reported_at: datetime.datetime",
+            "service_date: datetime.date",
+            "status:",
+            "allowed_decisions:",
+        ):
+            if field not in incident_item:
+                raise RuntimeError(f"미퇴실 목록 codegen 필수 필드 누락: {field}")
+        for field in ("reservation_id:", "reported_by:", "version:", "impact_fingerprint:"):
+            if field in incident_item:
+                raise RuntimeError(f"미퇴실 목록 codegen에 상세 전용 필드 노출: {field}")
+        incident_envelope = (package / "models" / "checkout_incident_list_envelope.py").read_text(
+            encoding="utf-8"
+        )
+        if (
+            "items: list[CheckoutIncidentListItem]" not in incident_envelope
+            or "next_cursor: None | str" not in incident_envelope
+        ):
+            raise RuntimeError("미퇴실 목록 codegen의 필수 items/nullable cursor 불일치")
+        incident_api = (
+            package / "api" / "checkout_incidents" / "list_checkout_incidents.py"
+        ).read_text(encoding="utf-8")
+        for field in ("room_id:", "cleaning_target_id:", "service_date:", "limit:", "cursor:"):
+            if field not in incident_api:
+                raise RuntimeError(f"미퇴실 목록 codegen query 필드 누락: {field}")
         room_event_model = (package / "models" / "room_event.py").read_text(encoding="utf-8")
         for field in (
             "event_key: str",
