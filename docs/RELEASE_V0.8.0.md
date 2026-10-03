@@ -6,6 +6,18 @@
 이 문서는 **릴리스 후보**이며 main 병합·운영 적용·사용자 UAT 완료 기록이 아니다.
 릴리스 [#364](https://github.com/wrongstory/room-management-system-backend/issues/364)의 최종 exact source와 실제 결과는 아래 표에 갱신한다.
 
+최신 준비 source `b5ff1bb3e74ad7d4880b2509f85412590a032d01`는 최신dev100을 포함한
+[Draft PR366](https://github.com/wrongstory/room-management-system-backend/pull/366)으로 올렸다.
+이 source의 local quality66파일/1,238 tests·Edge469(bundle17,524,352 bytes)·manifest5는 PASS다.
+release 자체의 전체DB/Python/CI/최종QA·운영 적용은 아직 NOT RUN/BLOCKED이며 아래 최초 검증표와 구분한다.
+main과의 과거 squash 분기 충돌81경로는 read-only merge-tree로 확인했고 실제 merge/일괄 ours 선택은 하지 않았다.
+독립 보존 감사에서 현재main의 삭제된 source path0·기존85SQL 동일을 확인했지만
+개발자 진단 기준92↔100 불일치 [#367](https://github.com/wrongstory/room-management-system-backend/issues/367)과
+이미 양쪽 snapshot에서 빠진 historical #248 finite10분 Pages gate/회귀 [#368](https://github.com/wrongstory/room-management-system-backend/issues/368)를 선행 보완으로 분리했다.
+실제 hosted 진단 positive/신규 Pages timeout FAIL 재현은 NOT RUN이다.
+순서는 #367 → #368 → 최신dev·개별 main 충돌/전체 release 검증 → 실제 운영 백업/보안 연결·적용 도구 gate다.
+이번 릴리스의 main 병합·운영 DB/API·Auth/Secrets·실제 PIN/송금·프런트 변경은 아직 실행하지 않는다. #352의 dev 통합과 구분한다.
+
 | 구분 | 작성 시 확인 기준 |
 |---|---|
 | 운영 Git | `main@1780728a02144c0816565ba091e43a8b3e126c4f`, 기존 Git 릴리스/태그 v0.7.1 |
