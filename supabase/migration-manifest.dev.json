@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 100,
+  "totalCount": 101,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 22,
+    "count": 23,
     "first": "assignment_unavailability_reassignment",
-    "head": "auth_session_hard_expiry"
+    "head": "limited_existing_session_discovery"
   },
-  "head": "auth_session_hard_expiry",
+  "head": "limited_existing_session_discovery",
   "migrations": [
     {
       "order": 1,
@@ -513,6 +513,11 @@
       "order": 100,
       "name": "auth_session_hard_expiry",
       "sha256": "2efa743ab78a7d08336b6b11b0e67dc158ce9f9a6289a60c1bc6fb58600a7735"
+    },
+    {
+      "order": 101,
+      "name": "limited_existing_session_discovery",
+      "sha256": "dadd5abddedb74e9e66f20f1b970e53d3398ddabf0764b926a713aeee6e8b603"
     }
   ]
 }

@@ -152,7 +152,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "auth_session_hard_expiry",
+    expectedMigrationName === "limited_existing_session_discovery",
     "expected migration must not depend on a remote execution timestamp",
   );
   const get = Deno.env.get;

@@ -1,5 +1,27 @@
 # 개발 오케스트레이션·source 승인 기준
 
+## 2026-10-03 최신 진행 결정: 릴리스 준비와 #329 개발 분리
+
+사용자는 운영 백업·보안 DB 연결 준비 동안 #329의 별도 개발 병행을 승인했다.
+`release/v0.8.0@5408c54e032273cdf300d90b91ebda38c9587a7c`는 고정하며 #329를 섞지 않는다.
+#329는 `dev@e9fcc564dfb4acd2cc4e175df7d1421dbb6b07e5` 기준 별도 작업 브랜치에서 구현·검증한다.
+#367/PR369·#368/PR370은 dev 통합 완료이나 실제 운영 진단·Pages readback은 후속 gate다.
+#364의 운영 배포 gate를 유지하며 #329 뒤 후속 bounded context는 #317이다.
+#364 CI37127623239는 application PASS / migration FAIL이며 PR366 Draft를 유지한다.
+알림 delivery fixture drain의 정적 보완점은 별도 #371로 분리했다. 실제 CI 잔여 수치는 없어 발생 원인을 단정하지 않는다.
+이번 병행 승인은 #329의 main/release/운영 승격이나 프런트 수정 승인이 아니다.
+아래 릴리스 완료 후 #329 순차 진행 문구는 이 병행 결정 전 checkpoint다.
+[제한 세션 재진입 계약과 실제 검증 상태](./LIMITED_SESSION_REENTRY.md)를 따른다.
+
+2026-10-04 #329 재개 checkpoint: 새 repair cycle에서 Edge allowlist와 strict 신규6경고를 보완했다.
+새 SHA의 Node1275·Edge477·Python95·LF fresh101/핵심SQL307·후보 합성복구는 PASS다.
+원본100 SQL은 보존했고 strict 신규0/기존 #363의17개 FAIL은 구분한다. 기존 예약 이동 fixture의
+첫 전체SQL FAIL·단독109PASS 이력을 보존한다. 새 SHA의 전체upgrade27·SQL79/4774·KST145·
+경합7·추가 역할별 실행 거부4건은 실제 PASS이고 독립 소스 QA의 새 확정 P0/P1/P2=0이다.
+사용자 승인에 따라 기존 strict17 FAIL을 명시한 진단용 commit·push·Draft PR으로 exact-head CI를 확인한다.
+CI·dev 통합·운영·프런트 UAT는 미완료이며 이전 SHA 결과나 로컬 PASS를 운영 완료로 승격하지 않는다.
+다음 순서는 #329 Draft CI·후속 gate 확인이며 #317이나 운영 승격으로 건너뛰지 않는다.
+
 > 2026-10-03 최신 승인: 사용자가 순차 개발과 중간 릴리스·운영 배포·문서 정리를 승인했다. #331은 PR361의 source087407b → dev squash eb1ec3e로 통합됐다. exact-head CI37111364892 application/migration(전체 upgrade·SQL·KST·경합·cleanup) PASS, 독립 QA98/100·범위 내 미해결 P0/P1/P2=0이다. 아래 #331 후보/Draft·진단용 승인만이라는 문구는 과거 checkpoint다. 기존 strict lint17/INFO inventory FAIL은 #363, 단발 CAS 원인 추적은 #362로 유지한다.
 
 > 중간 점검 릴리스는 [#364](https://github.com/wrongstory/room-management-system-backend/issues/364)의 v0.8.0 후보다. #329의 기존 로그인 계약과 운영 배포에 선행하는 공용 세션 `not_after` 검사 #352를 별도 PR로 먼저 보완한다. 현재 dev에 완료된 기능과 #352만 첫 릴리스에 포함하며, #329 → #317은 그 이후 순차 구현한다. release/main 필수 검증·독립 QA·CI·protected 병합 후에만 승인된 pending DB → exact API 및 reservation-scheduler를 배포하고 smoke·문서·태그를 확인한다. 프런트 source, Node fallback 활성화, Auth 설정, 키, 실제 PIN/송금, provider/Cron/TASK는 변경하지 않는다. 실제 배포 완료나 사용자 UAT 통과를 선행 기록하지 않는다.
