@@ -1,6 +1,6 @@
 begin;
 
-select plan(32);
+select plan(33);
 
 insert into auth.users (id) values
   ('16000000-0000-4000-8000-000000000001'),
@@ -92,6 +92,15 @@ select is(
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
+);
+
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'complaint_response_attention'
+  ) ->> 'migrationDrift',
+  'ahead',
+  'stale source expectation reproduces the misleading ahead classification'
 );
 
 create temporary table developer_expected_migration_head as
