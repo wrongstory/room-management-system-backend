@@ -1,6 +1,6 @@
 begin;
 
-select plan(32);
+select plan(33);
 
 insert into auth.users (id) values
   ('16000000-0000-4000-8000-000000000001'),
@@ -79,42 +79,51 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'auth_session_hard_expiry'
   ) ->> 'currentMigration',
-  'flat_cleaning_evidence_history_payroll',
+  'auth_session_hard_expiry',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'auth_session_hard_expiry'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
 );
 
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'complaint_response_attention'
+  ) ->> 'migrationDrift',
+  'ahead',
+  'stale source expectation reproduces the misleading ahead classification'
+);
+
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'flat_cleaning_evidence_history_payroll';
+where name = 'auth_session_hard_expiry';
 
 delete from supabase_migrations.schema_migrations
-where name = 'flat_cleaning_evidence_history_payroll';
+where name = 'auth_session_hard_expiry';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'auth_session_hard_expiry'
   ) ->> 'currentMigration',
-  'complaint_deadlines_non_blocking',
+  'payroll_remittance_marker',
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'auth_session_hard_expiry'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'

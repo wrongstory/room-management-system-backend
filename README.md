@@ -1,8 +1,35 @@
 # CASTLE THE ART 객실관리 백엔드
 
-`room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 단일 개발자와 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
+TypeScript·Supabase 기반 객실·예약·청소·검수·주급 API입니다.
+운영 프런트 개발은 `makee-ham/room-management-system`에서 진행하며 이 저장소는 백엔드를 담당합니다.
 
-운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`입니다. 개발 정본은 79 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #256 사진 정규화, #250 진행 중 메이드의 후속 계획 허용, #264 수행 불가 취소·재배정을 포함합니다. 마지막으로 검증된 운영 API는 78 migrations, Supabase `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이며 Pages도 그 배포본과 artifact parity를 완료했습니다. 기존 관리자 UAT에서 예약 가능 미리보기의 `guestCount` 생략·`null`·양수와 예약 현황 인원 표시, 객실 유형별 최소·최대 인원 적용을 확인했습니다. 개발 정본의 후속 기능은 release 승격 전까지 운영 API에서 사용할 수 없고, `v0.5.1` tag와 GitHub Release도 아직 발행하지 않았습니다.
+## 운영 상태와 중간 점검 릴리스
+
+2026-10-03 확인 기준입니다. 소스 구현·dev 통합·운영 배포·사용자 점검을 구분합니다.
+
+| 구분 | 현재 확인 |
+|---|---|
+| 운영 | Git v0.7.1 / main1780728, DB85, api ACTIVE38, reservation-scheduler ACTIVE16 |
+| 개발 통합 | dev e9fcc56: #331/#352 및 #367 진단100·#368 Swagger budget 통합 완료, source DB100 |
+| 선행 보안 보완 | #352 / PR365: exact-head required CI·전체 회귀·독립 QA 통과 후 dev 통합. 운영 미적용 |
+| 중간 릴리스 | #364 / v0.8.0 준비 중. 목표 DB100·운영 대비 pending15, OpenAPI0.6.0 137 paths/148 operations |
+| 이후 개발 | #329 기존 로그인 세션 한정 제한 업무 → #317 안전한 장애 진단 |
+
+#367/PR369는 dev794c118, #368/PR370는 dev e9fcc56으로 통합했고 각각 required CI·독립 QA를 통과했습니다.
+문서 갱신 직전 release payload는02ba91b입니다. 운영 main 이력의 후보 로컬 통합과 개별 검증을 기록했습니다.
+Python local95·Ruff/format·mypy·codegen/build는 PASS입니다. 최종 exact-head CI·전체 QA는 NOT RUN,
+local KST145·전체6 경합·합성 backup/recovery100/객실121은 PASS입니다. 실제 운영 백업 검증은 아닙니다.
+실제 운영 백업·보안 DB 연결/적용 도구는 BLOCKED/NOT VERIFIED이며 운영 DB/API·Pages·사람 UAT는 NOT RUN입니다.
+
+위 후보 수치를 운영 완료로 해석하지 않습니다. 운영 DB·API 승격은 release/main 필수 검증·독립 QA·protected 병합 후에만 진행합니다.
+Git 릴리스·OpenAPI·npm package 버전은 별도입니다. 프런트 새 화면·Node fallback 활성화·Auth 설정·키·실제 PIN 변경·송금은 포함하지 않습니다.
+
+- [v0.8.0 릴리스 범위·검증·적용 기록](docs/RELEASE_V0.8.0.md)
+- [직접 조작 점검표: 기존 화면 / 프런트 연결 필요 구분](docs/UAT_V0.8.0.md)
+- [API 구현·운영 사용 상태](docs/API_STATUS_MATRIX.md)
+- [프런트 API 인계](docs/FRONTEND_API_INTEGRATION.md)
+- [이전 PIN 복구 릴리스 v0.7.1](docs/RELEASE_V0.7.1.md)
+- [README의 과거 checkpoint 원문](docs/archive/README_STATUS_CHECKPOINTS_2026-10-03.md)
 
 ## 현재 구현
 
@@ -66,7 +93,7 @@ npm run edge:check
 
 Supabase-only 운영 PoC의 endpoint, secret, Cron과 rollback 기준은 [Edge runtime PoC](docs/EDGE_RUNTIME_POC.md)에 정리했습니다. 운영 smoke가 끝나기 전까지 기존 Fastify 구현은 개발 기준선으로 유지합니다.
 
-로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 운영 문서는 [GitHub Pages Swagger 포털](https://wrongstory.github.io/room-management-system-backend/)에서 읽고, [정적 OpenAPI JSON](https://wrongstory.github.io/room-management-system-backend/openapi.json)을 타입 생성에 사용할 수 있습니다. Pages artifact는 실제 운영 Edge OpenAPI를 배포 시점에 내려받아 만들며 공개 포털에서는 `Try it out`과 Authorization 입력을 비활성화합니다. 인증·멱등성·오류 처리는 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md), 이번 hotfix의 배포·계약 경계는 [v0.5.1 적용 기록](docs/RELEASE_V0.5.1.md)을 따릅니다.
+로컬 Edge Function을 실행한 뒤 `http://127.0.0.1:54321/functions/v1/api/docs`에서 한글 Swagger UI로 Edge API를 확인할 수 있습니다. 운영 문서는 [GitHub Pages Swagger 포털](https://wrongstory.github.io/room-management-system-backend/)에서 읽고, [정적 OpenAPI JSON](https://wrongstory.github.io/room-management-system-backend/openapi.json)을 타입 생성에 사용할 수 있습니다. Pages artifact는 실제 운영 Edge OpenAPI를 배포 시점에 내려받아 만들며 공개 포털에서는 `Try it out`과 Authorization 입력을 비활성화합니다. 인증·멱등성·오류 처리는 [프론트 API 연동 가이드](docs/FRONTEND_API_INTEGRATION.md), 현재 릴리스 준비·적용 경계는 [v0.8.0 기록](docs/RELEASE_V0.8.0.md)을 따릅니다. [v0.5.1 적용 기록](docs/RELEASE_V0.5.1.md)은 과거 hotfix 이력입니다.
 
 ## 보안 경계
 

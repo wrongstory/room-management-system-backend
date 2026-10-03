@@ -602,9 +602,7 @@ Deno.test("attempt exact HTTP routes preserve maid-only CAS, denial logging and 
 
 Deno.test("assignment GET routes expose only own notified revisions and preserve superseded history", async () => {
   function readRequest(path: string) {
-    const result = request("GET", path);
-    result.headers.set("authorization", "Bearer synthetic-assignment-test");
-    return result;
+    return request("GET", path);
   }
   const maid = { ...actor, role: "maid" as const };
   const ownPast = "70000000-0000-4000-8000-000000000010";
@@ -637,6 +635,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
     },
   ];
   const queries: Array<Array<string>> = [];
+  const scheduleModes: unknown[] = [];
   function query(data: Array<Record<string, unknown>>) {
     const conditions: Array<(row: Record<string, unknown>) => boolean> = [];
     const filters: string[] = [];
@@ -659,6 +658,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
       },
       in: (_key: string, _values: unknown[]) => builder,
       order: (_key: string) => builder,
+      limit: (_maximum: number) => builder,
       // biome-ignore lint/suspicious/noThenProperty: PostgREST의 lazy thenable을 재현하여 await 시점에 누적된 RLS 대체 필터를 검사한다.
       then: (resolve: (value: unknown) => unknown) =>
         Promise.resolve({
@@ -666,6 +666,11 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             conditions.every((condition) => condition(row))
           ),
           error: null,
+          count: data.filter((row) =>
+            conditions.every((condition) =>
+              condition(row)
+            )
+          ).length,
         }).then(resolve),
     };
     return builder;
@@ -700,7 +705,43 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             ? []
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
-      rpc: () => Promise.resolve({ data: null, error: null }),
+      rpc: (name: string, args: Record<string, unknown>) => {
+        if (name !== "get_assignment_schedule_read") {
+          return Promise.resolve({ data: null, error: null });
+        }
+        assert(
+          args.p_actor_profile_id === maid.profileId,
+          "same verified profile",
+        );
+        assert(
+          args.p_session_id === "70000000-0000-4000-8000-000000000001",
+          "verified live session",
+        );
+        assert(
+          args.p_expected_actor_role === "maid" ||
+            args.p_expected_actor_role === "admin",
+          "original role bound",
+        );
+        const ids = args.p_assignment_ids as string[];
+        assert(
+          ids.length > 0 && ids.length <= 100 &&
+            new Set(ids).size === ids.length,
+          "bounded exact IDs",
+        );
+        assert(
+          ids.every((id) => rows.some((row) => row.id === id)),
+          "no cross-ID hydration",
+        );
+        scheduleModes.push(args.p_include_current);
+        return Promise.resolve({
+          data: ids.map((assignmentId) => ({
+            assignmentId,
+            scheduleSnapshot: null,
+            currentDeparture: null,
+          })),
+          error: null,
+        });
+      },
     },
   } as unknown as EdgeClients;
   const dependencies: ApiHandlerDependencies = {
@@ -731,7 +772,8 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
         row.notifiedAt !== null && row.maidProfileId === maid.profileId &&
         row.targetAssignmentVersion !== 999 &&
         row.roomId === base.notified_room_id_snapshot &&
-        row.roomNumber === "109"
+        row.roomNumber === "109" &&
+        row.scheduleSnapshot === null && row.currentDeparture === null
       ),
       "no unpublished, other owner, or current target version",
     );
@@ -742,6 +784,10 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
       );
     }
   }
+  assert(
+    JSON.stringify(scheduleModes) === JSON.stringify([true, false, false]),
+    "current facts excluded from history modes",
+  );
   rows[0].notified_room_id_snapshot = null;
   rows[0].notified_room_number_snapshot = null;
   const legacy = await handleApiRequest(

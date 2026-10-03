@@ -11,6 +11,7 @@ import {
   requireBusinessAdmin,
   requiredEnv,
   requirePasswordChanged,
+  verifiedRequestSessionId,
 } from "./runtime.ts";
 
 type ReservationStatus = "active" | "cancelled" | "checked_out";
@@ -747,6 +748,19 @@ export function reservationDatabaseError(
 ): EdgeError {
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
+    [
+      "VALIDATION_ERROR",
+      400,
+      "VALIDATION_ERROR",
+      "청소 요청 취소 입력이 올바르지 않습니다.",
+    ],
+    ["SESSION_REVOKED", 401, "SESSION_REVOKED", "로그인이 필요합니다."],
+    [
+      "PASSWORD_CHANGE_REQUIRED",
+      403,
+      "PASSWORD_CHANGE_REQUIRED",
+      "비밀번호를 먼저 변경해 주세요.",
+    ],
     [
       "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
       400,
@@ -2098,9 +2112,10 @@ export async function cancelManualCleaningRequest(
   const normalizedTargetId = uuidValue(targetId, "targetId");
   const input = await reservationMutationInput(request);
   const { data, error } = await clients.admin.rpc(
-    "cancel_manual_cleaning_request",
+    "cancel_manual_cleaning_request_with_session",
     {
       p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
       p_target_id: normalizedTargetId,
       p_expected_version: input.expectedVersion,
       p_reason_code: input.reasonCode,

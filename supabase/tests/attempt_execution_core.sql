@@ -71,8 +71,24 @@ select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,3)$$,'4250
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,1)$$,'42501','MAID_REQUIRED','admin cannot start');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,6)$$,'42501','MAID_REQUIRED','developer cannot start');
 select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,2,'2040-03-01 08:59+09')$$,'55000','CLEANING_WINDOW_NOT_OPEN','start before availableFrom rejected');
-select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,2,'2040-03-01 15:00+09')$$,'55000','CLEANING_WINDOW_EXPIRED','start at due boundary rejected');
-select throws_ok($$select pg_temp.run_execution(1,'start',1,null,null,2,'2040-03-02 10:00+09')$$,'55000','CLEANING_SERVICE_DATE_EXPIRED','yesterday scheduled cannot silently start');
+-- Roll back each probe without rolling back pgTAP's own test counter.
+create function pg_temp.probe_overdue_execution(p_at timestamptz,p_complete boolean default false)
+returns text language plpgsql as $$
+declare result text;
+begin
+ begin
+  result:=pg_temp.run_execution(1,'start',1,null,null,2,p_at)->>'status';
+  if p_complete then
+   result:=pg_temp.run_execution(1,'complete_field_work',2,null,null,2,p_at+interval '1 day')->>'status';
+  end if;
+  raise exception using errcode='PZ308',message='rollback overdue probe';
+ exception when sqlstate 'PZ308' then null;
+ end;
+ return result;
+end $$;
+select is(pg_temp.probe_overdue_execution('2040-03-01 15:00+09'),'in_progress','start at due boundary remains available');
+select is(pg_temp.probe_overdue_execution('2040-03-02 10:00+09'),'in_progress','past service date alone does not revoke current owner start');
+select is(pg_temp.probe_overdue_execution('2040-03-02 10:00+09',true),'field_completed','overdue current owner can complete physical work');
 select private.emit_notification_v1('assignment.commit_notified',pg_temp.eid(1),pg_temp.eid(2),
   'cleaning_assignment',pg_temp.eid(401)::text,'현재 배정','청소를 시작해 주세요.',
   (select room_id from public.cleaning_targets where id=pg_temp.eid(301)),pg_temp.eid(301),pg_temp.eid(301),'2040-03-01 09:00+09');
@@ -104,7 +120,7 @@ select ok((select count(*)=4 from public.notifications where contract_version=1
     and source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text))
   and (select count(*)=4 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
     where n.source_entity_id in (pg_temp.eid(401)::text,pg_temp.eid(402)::text,pg_temp.eid(412)::text)),
-  'resolver-only start creates no notification or delivery row');
+  'start resolves existing assignment notices without adding assignment notification or delivery rows');
 create temp table start_resolution as select resolved_at from public.notifications
 where event_family='assignment.commit_notified' and source_entity_id=pg_temp.eid(401)::text;
 select ok(array[

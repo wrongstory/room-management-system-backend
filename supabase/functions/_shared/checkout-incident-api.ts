@@ -1,5 +1,15 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
+  assertCheckoutIncidentCursorConfigured,
+  assertCheckoutIncidentResponseSize,
+  checkoutIncidentCursorScope,
+  type CheckoutIncidentListItem,
+  checkoutIncidentListQuery,
+  decodeCheckoutIncidentCursor,
+  encodeCheckoutIncidentCursor,
+  projectCheckoutIncidentListItems,
+} from "./checkout-incident-cursor.ts";
+import {
   type EdgeActor,
   type EdgeClients,
   EdgeError,
@@ -111,6 +121,7 @@ export function checkoutIncidentDatabaseError(
   const map: Record<string, number> = {
     MAID_REQUIRED: 403,
     ADMIN_REQUIRED: 403,
+    PASSWORD_CHANGE_REQUIRED: 403,
     PIN_ACCESS_REQUIRED: 403,
     SESSION_REVOKED: 401,
     CHECKOUT_INCIDENT_REPORT_REQUIRED: 403,
@@ -126,6 +137,7 @@ export function checkoutIncidentDatabaseError(
     IDEMPOTENCY_KEY_REUSED: 409,
     INVALID_CHECKOUT_INCIDENT_REPORT: 400,
     INVALID_CHECKOUT_INCIDENT_DECISION: 400,
+    INVALID_CHECKOUT_INCIDENT_LIST: 400,
   };
   return Object.hasOwn(map, code)
     ? new EdgeError(
@@ -290,6 +302,47 @@ export async function getCheckoutIncident(
   );
   if (error) throw checkoutIncidentDatabaseError(error);
   return project(data);
+}
+export async function listCheckoutIncidents(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+): Promise<{ items: CheckoutIncidentListItem[]; nextCursor: string | null }> {
+  actorRole(actor, "admin");
+  const query = checkoutIncidentListQuery(new URL(request.url).searchParams);
+  const scope = checkoutIncidentCursorScope(actor, query);
+  assertCheckoutIncidentCursorConfigured();
+  const after = query.cursor === null
+    ? null
+    : await decodeCheckoutIncidentCursor(query.cursor, scope);
+  const { data, error } = await clients.admin.rpc(
+    "list_checkout_presence_incidents_page",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+      p_room_id: query.roomId,
+      p_cleaning_target_id: query.cleaningTargetId,
+      p_service_date: query.serviceDate,
+      p_after_reported_at: after?.reportedAt ?? null,
+      p_after_incident_id: after?.id ?? null,
+      p_limit: query.limit,
+    },
+  );
+  if (error) throw checkoutIncidentDatabaseError(error);
+  const rows = projectCheckoutIncidentListItems(data, query, after);
+  const items = rows.slice(0, query.limit);
+  const last = items.at(-1);
+  const result = {
+    items,
+    nextCursor: rows.length > query.limit && last
+      ? await encodeCheckoutIncidentCursor(scope, {
+        reportedAt: last.reportedAt,
+        id: last.incidentId,
+      })
+      : null,
+  };
+  assertCheckoutIncidentResponseSize(result);
+  return result;
 }
 export async function decideCheckoutIncident(
   request: Request,
