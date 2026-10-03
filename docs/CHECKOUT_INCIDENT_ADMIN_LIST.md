@@ -122,3 +122,13 @@ main·production/recovery DB·운영 API·secret/provider·실제 PIN·프런트
 #328 때부터 있었던 binary photo/AttemptLifecycleRequest 모델명 경고는
 [후속 #355](https://github.com/wrongstory/room-management-system-backend/issues/355)에서 추적한다.
 목록 관련 실제 생성 계약 PASS를 전체 SDK의 무경고·전 endpoint 생성 완료로 표현하지 않는다.
+
+## #356 필수 CI 실행 예산
+
+직전 CI `37027527827`의 migration job은 24분6초였으며 이번 정확한95→96 upgrade는
+로컬 최종 실행에서 60초가 추가됐다. 환경별 시간은 보장하지 않지만 기존25분에 여유가 없어
+[#356](https://github.com/wrongstory/room-management-system-backend/issues/356)에서
+migration timeout만 유한30분으로 조정하고 기능과 별도 CI commit으로 기록한다.
+application20분·모든 필수 검증 step·always cleanup·check 이름·통과 기준·보호 규칙은 유지한다.
+설치된 ruamel.yaml로 이전/현재 workflow 전체 mapping을 비교해 이 값만 바뀐 것을 검증했다.
+독립 QA98/100, in-scope P0/P1/P2=0이며 새 exact-head CI PASS를 미리 주장하지 않는다.
