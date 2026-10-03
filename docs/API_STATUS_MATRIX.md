@@ -1,5 +1,26 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 최신 중간 릴리스 checkpoint — 2026-10-03
+
+아래 과거 후보·PENDING·운영 수치는 각 작성 시점의 이력이다. 현재 판정은 이 절과
+[v0.8.0 적용 기록](./RELEASE_V0.8.0.md)의 실제 readback을 우선한다.
+
+| 범위 | source/dev | 운영·사용자 화면 |
+|---|---|---|
+| #308 지연 업무/상호 알림, #343 컴플레인 응답 주의 | dev 완료 | v0.8.0 승격 전, 기존 화면 UAT는 미실시 |
+| #348 수동 취소의 PIN 조회 제한 제거, #326 배정 metadata, #328 예약/actual schedule | dev 완료 | 승격 전; 새 metadata 소비·취소 target ID/CAS 매핑은 프런트 연결 필요 |
+| #327 미퇴실 목록, #325 조정 book, #324 객실별 주급 상세 | dev 완료 | 승격 전; 신규 조회 API 호출은 현재 프런트 artifact에 없음 |
+| #331 송금 표시/별도 재확인 | PR361 → dev eb1ec3e 완료 | 승격 전; 실제 PAID·송금과 별도, 프런트 신규 marker 연결 필요 |
+| #352 공용 session 강제 만료 검사 | PR365 source576b0e5, exact-head required CI 모두 PASS·최종 QA 확인 중 | 미배포, #329의 session membership/제출 binding 완료가 아님 |
+| #329 → #317 | 첫 점검 릴리스 이후 순차 구현 | 이번 v0.8.0 포함하지 않음 |
+
+현재 운영은 main1780728/v0.7.1, DB85·api38·scheduler16, OpenAPI0.6.0 131/141이다.
+목표 후보100·137/148은 아직 운영 inventory가 아니며 required CI·QA·release/main 병합 후에만
+pending15를 승격한다. 정확 운영 상태는 Function readback/hosted HTTP를 확인한다.
+기존 UI에서 점검할 사항과 API 준비/프런트 연결 대기는 [사용자 점검표](./UAT_V0.8.0.md)를 따른다.
+공개 프런트 HTML은 dev09ed284와 정적 byte parity만 확인했으며 실제 사용자 UAT PASS가 아니다.
+
+
 ## 2026-10-03 #325 완료와 #324 후보
 
 #325 PR358 source78582789 → devd65f4f60는 exact-tree CI37093733970 application/migration PASS,

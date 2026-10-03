@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
 
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(new URL('../scripts/build-swagger-pages.mjs', import.meta.url));
@@ -98,8 +99,8 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
     expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.6.0"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "131"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "141"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "137"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "148"');
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
@@ -168,6 +169,23 @@ describe('GitHub Pages Swagger portal', () => {
       readOnly: true
     });
     expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('builds the exact v0.8 release source contract and rejects stale production counts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'swagger-v08-release-'));
+    temporaryDirectories.push(directory);
+    const sourceFile = join(directory, 'release-openapi.json');
+    await writeFile(sourceFile, JSON.stringify(openApiDocument), 'utf8');
+    const outputDirectory = join(directory, 'portal');
+    const args = [scriptPath, '--source-file', sourceFile, '--api-base-url', apiBaseUrl,
+      '--expected-version', '0.6.0', '--output-dir', outputDirectory];
+    const result = await execFileAsync(process.execPath, [...args,
+      '--expected-path-count', '137', '--expected-operation-count', '148']);
+    expect(result.stdout).toContain('version=0.6.0 paths=137 operations=148');
+    const manifest = JSON.parse(await readFile(join(outputDirectory, 'portal-manifest.json'), 'utf8'));
+    expect(manifest).toMatchObject({ apiVersion: '0.6.0', pathCount: 137, operationCount: 148, readOnly: true });
+    await expect(execFileAsync(process.execPath, [...args,
+      '--expected-path-count', '131', '--expected-operation-count', '141'])).rejects.toThrow(/path 수가 release 계약/);
   });
 
   it('rejects the stale v0.2.0 production contract', async () => {

@@ -1,5 +1,29 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## v0.8.0 중간 릴리스 인계 — 2026-10-03
+
+현재는 배포 준비 단계다. 실제 운영 제공/검증 여부는 [릴리스 기록](./RELEASE_V0.8.0.md)을 따른다.
+후보 계약은 OpenAPI0.6.0 137 paths/148 operations이며 운영131/141 대비 신규6 paths/7 operations다.
+아래 과거 후보·PENDING 문구는 각 시점 기록이지 현재 상태의 중복 정본이 아니다.
+
+| 프런트 연결 항목 | API/필드 | 계약 |
+|---|---|---|
+| 관리자 미퇴실 목록 | GET /v1/checkout-incidents | [목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md) |
+| 주급 정정 전 최신 CAS | GET /v1/payroll/adjustment-book | [조정 book](./PAYROLL_ADJUSTMENT_BOOK.md) |
+| 객실별 확정/미확정 근거 | GET /v1/payroll/work-details | [상세 조회](./PAYROLL_WORK_DETAILS.md) |
+| 독립 송금 표시 | GET/PUT /v1/payroll/remittance-marker, POST …/reconfirm, GET …/history | [표시·재확인](./PAYROLL_REMITTANCE_MARKER.md) |
+| 배정 등록 근거·취소 advisory | roomTypeSnapshot/sourceKind/canCancel 등 | [target metadata](./ASSIGNMENT_TARGET_READ_METADATA.md) |
+| 예약 계획과 현재 실제 시각 | scheduleSnapshot/currentDeparture | [schedule 계약](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md) |
+| 미착수 수동 요청 취소 | 기존 POST …/cleaning-requests/{targetId}/cancel, expectedVersion | [취소 계약](./MANUAL_CLEANING_CANCEL.md); target ID와 CAS를 정확히 매핑 |
+
+운영 Vercel HTML은 FEdev09ed284의 정적 artifact와 동일하다. 제출 알림의 관리자/메이드 상세
+라우팅은 정적 구현돼 있지만 ownership/필터/실제 클릭 UAT는 미실시다. 위 신규 조회/marker와
+새 schedule/metadata는 현재 artifact에서 소비하지 않으므로 백엔드 승격만으로 새 버튼이 생기지 않는다.
+송금 스위치를 cycle.status/PAID로 계산하거나 off에서 reopen/지급 취소를 호출하지 않는다.
+frontend source 변경은 프런트 담당자의 작업이며 [직접 점검표](./UAT_V0.8.0.md)의 연결 대기 항목을 따른다.
+공개 Swagger Pages는 읽기 전용이다. token/PIN/고객정보를 입력하거나 공개 문서에 저장하지 않는다.
+
+
 > 2026-10-03 #331 구현 후보 인계: 별도 송금 표시 GET/PUT·reconfirm·history 3 paths/4 operations를 추가한다. 사용자 결정은 종료 주차·양수 신규 on 및 on 유지 별도 재확인이다. cycle.status/PAID로 스위치를 계산하거나 off에 reopen을 사용하지 않는다. [표시 전용 API 계약과 검증 상태](./PAYROLL_REMITTANCE_MARKER.md)를 따른다. 목표 source 명세는 137 paths/148 operations이며 프런트 구현·운영 제공 완료는 아니다.
 
 > 2026-10-03 최신 기준: #325는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358), source `78582789ce66a92d9aae3072b7b8fbc6d5fa9843` → dev squash `d65f4f600f856bd990b52762cf57530830970f12`로 source/dev 완료했다. exact tree CI `37093733970` application/migration PASS·독립 QA98/100이며 초기 CI 실패는 이력으로 보존한다. 아래 #325 후보 표현은 과거 checkpoint다. 현재 #324의 객실별 확정/미확정 주급 근거 조회는 이 dev/97 migrations에서 시작한 후보이며 [조회 계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 운영·프런트·main·recovery는 변경하지 않는다.
