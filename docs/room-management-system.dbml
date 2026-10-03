@@ -1,3 +1,7 @@
+// 2026-10-03 latest: #325 PR358 source78582789 -> devd65f4f60, exact CI37093733970 PASS, QA98/100.
+// #324 candidate98 service-only read: separate actual earnings/workflow, frozen snapshots and exact old aggregate membership.
+// No ledger/receipt/PAID/photo retention changes; new read does not create tables/columns. See PAYROLL_WORK_DETAILS.md.
+// Old #325/#327 candidate and gate comments below are historical, not current production proof.
 // 2026-10-03 current: #327 PR357 source22cbf0be -> devb6f79981, identical tree,
 // CI37086130779 application/migration PASS and independent QA98/100; old candidate gates are history.
 // #325 candidate append migration97 adds only service-role current adjustment-book read RPC.

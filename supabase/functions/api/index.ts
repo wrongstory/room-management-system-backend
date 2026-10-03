@@ -120,6 +120,7 @@ import {
   startPayroll,
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
+import { listPayrollWorkDetails } from "../_shared/payroll-work-details-api.ts";
 import { createPhotoService } from "../_shared/photo-api.ts";
 import { PhotoError, photoFailureDiagnostic } from "../_shared/photo-binary.ts";
 import {
@@ -246,6 +247,32 @@ export async function handleApiRequest(
   try {
     corsHeaders = cors(request);
     path = routePath(request.url);
+    const workDetailsPath = "/v1/payroll/work-details";
+    const workDetailsFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    if (
+      workDetailsFamily === workDetailsPath ||
+      workDetailsFamily.startsWith(`${workDetailsPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        request.method !== "OPTIONS" &&
+        (request.method !== "GET" ||
+          pathname.slice(pathname.lastIndexOf("/api") + 4) !== workDetailsPath)
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
     const adjustmentBookPath = "/v1/payroll/adjustment-book";
     // Recognize only this route family after one percent decode. The raw
     // spelling below remains authoritative; decoding must never allow an alias.
@@ -1270,6 +1297,16 @@ export async function handleApiRequest(
           verifiedRequestSessionId(request),
         ),
       };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (path === "/v1/payroll/work-details") {
+      const response = await listPayrollWorkDetails(
+        request,
+        clients,
+        actor,
+        verifiedRequestSessionId(request),
+      );
       assertPayrollResponseSize(response);
       return jsonResponse(response, 200, corsHeaders);
     }

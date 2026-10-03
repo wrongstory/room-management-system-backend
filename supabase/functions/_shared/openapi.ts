@@ -57,6 +57,87 @@ const noStoreHeader = {
   schema: { const: "no-store" },
 };
 
+const payrollWorkAmount = {
+  type: "integer",
+  minimum: 0,
+  maximum: 9007199254740991,
+};
+const payrollWorkSignedAmount = {
+  type: "integer",
+  minimum: -9007199254740991,
+  maximum: 9007199254740991,
+};
+const payrollWorkCommon = {
+  entryId: { type: "string", format: "uuid" },
+  entryDate: { type: "string", format: "date" },
+  cleaningTargetId: { type: "string", format: "uuid" },
+  assignmentId: { type: "string", format: "uuid" },
+  attemptId: { type: "string", format: "uuid" },
+  submissionId: { type: ["string", "null"], format: "uuid" },
+  inspectionDecisionId: { type: ["string", "null"], format: "uuid" },
+  roomNumber: { type: ["string", "null"] },
+  roomTypeCode: { type: ["string", "null"] },
+  roomTypeName: { type: ["string", "null"] },
+  cleaningKind: {
+    type: "string",
+    enum: ["checkout", "stayover", "additional", "reclean"],
+  },
+  sourceKind: {
+    type: "string",
+    enum: [
+      "scheduled_checkout",
+      "manual_checkout",
+      "stayover_request",
+      "manual_room_request",
+      "inspection_reclean",
+      "post_approval_complaint_reclean",
+    ],
+  },
+  fieldCompletedAt: { type: ["string", "null"], format: "date-time" },
+  feeSnapshot: payrollWorkAmount,
+  attemptStatus: {
+    type: "string",
+    enum: [
+      "scheduled",
+      "in_progress",
+      "field_completed",
+      "upload_pending",
+      "submitted",
+      "approved",
+      "rejected",
+      "interrupted",
+      "superseded",
+    ],
+  },
+  submissionStatus: {
+    type: ["string", "null"],
+    enum: ["submitted", "superseded", "approved", "rejected", null],
+  },
+  inspectionDecision: {
+    type: ["string", "null"],
+    enum: ["approved", "rejected", null],
+  },
+};
+const payrollWorkCommonRequired = [
+  "entryId",
+  "entryDate",
+  "cleaningTargetId",
+  "assignmentId",
+  "attemptId",
+  "submissionId",
+  "inspectionDecisionId",
+  "roomNumber",
+  "roomTypeCode",
+  "roomTypeName",
+  "cleaningKind",
+  "sourceKind",
+  "fieldCompletedAt",
+  "feeSnapshot",
+  "attemptStatus",
+  "submissionStatus",
+  "inspectionDecision",
+];
+
 // #326: common read-only metadata. Legacy completed commit receipts are not
 // hydrated with current target/catalog state; unknown added fields stay null.
 const assignmentTargetReadProperties = {
@@ -3888,6 +3969,77 @@ export const openApiDocument = {
               "application/json": {
                 schema: {
                   $ref: "#/components/schemas/PayrollAdjustmentBookEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/work-details": {
+      get: {
+        tags: ["Payroll"],
+        operationId: "listPayrollWorkDetails",
+        summary: "객실별 확정 수익과 미확정 청소 산출 상세",
+        description:
+          "현재·과거 KST 월요일 주차의 read-only 조회입니다. active/password-complete 관리자 또는 본인 메이드의 정확한 live session 및 최신 DB role을 재검증합니다. earnings는 earnedOn 주차의 불변 수익이며 0원 보상과 이미 이월된 수익도 포함하고 합계는 summary.accrualAmount와 비교합니다. workflow는 earning이 없는 실제 수행 회차이며 예상·검수 대기 기여액만 설명하고 확정 지급액이 아닙니다. 기존 totalAmount/lateEarningAmount/adjustment/carry/payable 산식을 변경하지 않습니다. 객실·타입·요금은 당시 snapshot만 사용하고 사진 7일 목록이나 현재 카탈로그로 재구성하지 않습니다. 기본25/최대50, entryDate ASC/entryId ASC의 별도 actor·role·session·주차·메이드·kind bound HMAC cursor를 사용합니다. 기존 entries cursor는 거부합니다. 각 요청 summary/page는 동일 SQL snapshot이지만 여러 HTTP 페이지 사이 영구 snapshot은 보장하지 않으므로 상태 변경 뒤 첫 페이지부터 다시 조회합니다. HEAD·다른 method·slash·encoded alias는404이고 모든 응답은 no-store, UTF-8 JSON128KiB 상한입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: {
+              type: "string",
+              format: "date",
+              minLength: 10,
+              maxLength: 10,
+              pattern: "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            },
+            description:
+              "현재 또는 과거 KST 월요일. 실제 달력 날짜만 허용하고 미래 주차는409입니다.",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "kind",
+            in: "query",
+            required: true,
+            schema: { type: "string", enum: ["earnings", "workflow"] },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 50, default: 25 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "합계와 독립된 확정 수익/미확정 업무 page",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollWorkDetailsEnvelope",
                 },
               },
             },
@@ -12946,6 +13098,138 @@ export const openApiDocument = {
         required: ["payroll"],
         properties: {
           payroll: { $ref: "#/components/schemas/PayrollCycle" },
+        },
+      },
+      PayrollWorkSummary: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cycleId",
+          "cycleStatus",
+          "cycleVersion",
+          "accrualAmount",
+          "expectedAmount",
+          "pendingAmount",
+          "pendingCount",
+          "totalAmount",
+          "lateEarningAmount",
+          "adjustmentAmount",
+          "carryInAmount",
+          "carryOutAmount",
+          "payableAmount",
+          "offsetSettled",
+          "lockedAmount",
+        ],
+        properties: {
+          cycleId: { type: ["string", "null"], format: "uuid" },
+          cycleStatus: { $ref: "#/components/schemas/PayrollStatus" },
+          cycleVersion: payrollWorkAmount,
+          accrualAmount: payrollWorkAmount,
+          expectedAmount: payrollWorkAmount,
+          pendingAmount: payrollWorkAmount,
+          pendingCount: payrollWorkAmount,
+          totalAmount: payrollWorkAmount,
+          lateEarningAmount: payrollWorkAmount,
+          adjustmentAmount: payrollWorkSignedAmount,
+          carryInAmount: payrollWorkSignedAmount,
+          carryOutAmount: payrollWorkSignedAmount,
+          payableAmount: payrollWorkSignedAmount,
+          offsetSettled: { type: "boolean" },
+          lockedAmount: { ...payrollWorkAmount, type: ["integer", "null"] },
+        },
+      },
+      PayrollWorkEarning: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          ...payrollWorkCommonRequired,
+          "earningId",
+          "earnedOn",
+          "earningSource",
+          "baseAmount",
+          "bombRoomBonus",
+          "totalAmount",
+          "itemContributionAmount",
+          "lateContributionAmount",
+          "alreadyClaimed",
+          "lateCarried",
+        ],
+        properties: {
+          ...payrollWorkCommon,
+          earningId: { type: "string", format: "uuid" },
+          earnedOn: { type: "string", format: "date" },
+          earningSource: { type: "string", enum: ["cleaning", "compensation"] },
+          baseAmount: payrollWorkAmount,
+          bombRoomBonus: payrollWorkAmount,
+          totalAmount: payrollWorkAmount,
+          itemContributionAmount: payrollWorkAmount,
+          lateContributionAmount: payrollWorkAmount,
+          alreadyClaimed: {
+            type: "boolean",
+            description:
+              "payroll item membership를 뜻하며 실제 송금 완료 표시가 아닙니다.",
+          },
+          lateCarried: { type: "boolean" },
+        },
+      },
+      PayrollWorkWorkflow: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          ...payrollWorkCommonRequired,
+          "earningId",
+          "baseAmount",
+          "bombRoomBonus",
+          "totalAmount",
+          "expectedContributionAmount",
+          "pendingContributionAmount",
+          "includedInPendingCount",
+          "expectedBaseContributionAmount",
+          "expectedBombContributionAmount",
+        ],
+        properties: {
+          ...payrollWorkCommon,
+          earningId: { type: "null" },
+          baseAmount: { type: "null" },
+          bombRoomBonus: { type: "null" },
+          totalAmount: { type: "null" },
+          expectedContributionAmount: payrollWorkAmount,
+          pendingContributionAmount: payrollWorkAmount,
+          includedInPendingCount: { type: "boolean" },
+          expectedBaseContributionAmount: payrollWorkAmount,
+          expectedBombContributionAmount: payrollWorkAmount,
+        },
+      },
+      PayrollWorkDetailsEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "weekStart",
+          "maidProfileId",
+          "kind",
+          "summary",
+          "entries",
+          "nextCursor",
+        ],
+        properties: {
+          weekStart: { type: "string", format: "date" },
+          maidProfileId: { type: "string", format: "uuid" },
+          kind: { type: "string", enum: ["earnings", "workflow"] },
+          summary: { $ref: "#/components/schemas/PayrollWorkSummary" },
+          entries: {
+            type: "array",
+            maxItems: 50,
+            items: {
+              oneOf: [{ $ref: "#/components/schemas/PayrollWorkEarning" }, {
+                $ref: "#/components/schemas/PayrollWorkWorkflow",
+              }],
+            },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+          },
         },
       },
       PayrollAdjustmentBook: {

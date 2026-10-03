@@ -1,5 +1,14 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 2026-10-03 #325 완료와 #324 후보
+
+#325 PR358 source78582789 → devd65f4f60는 exact-tree CI37093733970 application/migration PASS,
+독립 QA98/100으로 source/dev 완료했다. 기존 후보·PENDING 문구는 당시 checkpoint다.
+현재 #324의 `GET /v1/payroll/work-details`는 별도 실제 earning/workflow stream과
+snapshot/집계 contribution을 제공하는 구현 후보이며 [계약](./PAYROLL_WORK_DETAILS.md)을 따른다.
+source 목표98 migrations·134 paths/144 operations는 운영 inventory가 아니다.
+production/main/recovery·프런트 UI/UAT·Pages는 NOT RUN이며 최종 QA/CI/dev gate는 연결 PR에서 확인한다.
+
 > #325 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358) 후속 checkpoint: percent-encoded alias를 raw canonical GET과 구분해 auth/RPC 전404/no-store로 보완했다. Node1010·Edge343 및 독립 guard/CORS 실측 PASS. 기존 SQL97/원장/권한 변경 없음. 아래 PR 생성 전 기록은 당시 이력이며 최종 whole DB·QA·새 exact-head CI/dev 상태는 연결 PR을 따른다. 운영/프런트 제공은 별도다.
 
 > 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.

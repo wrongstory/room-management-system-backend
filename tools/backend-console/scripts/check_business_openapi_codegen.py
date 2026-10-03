@@ -33,8 +33,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 133:
-        raise RuntimeError("전체 source OpenAPI path 수가 133이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 134:
+        raise RuntimeError("전체 source OpenAPI path 수가 134이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -43,8 +43,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 143:
-        raise RuntimeError("전체 source OpenAPI operation 수가 143이 아닙니다.")
+    if operation_count != 144:
+        raise RuntimeError("전체 source OpenAPI operation 수가 144이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     adjustment_book = schemas.get("PayrollAdjustmentBook", {})
     book_fields = ["maidProfileId", "weekStart", "currentBookVersion"]
@@ -187,6 +187,11 @@ def main() -> None:
             package / "api" / "payroll" / "get_payroll_cycle.py",
             package / "api" / "payroll" / "list_payroll_entries.py",
             package / "api" / "payroll" / "get_payroll_adjustment_book.py",
+            package / "api" / "payroll" / "list_payroll_work_details.py",
+            package / "models" / "payroll_work_details_envelope.py",
+            package / "models" / "payroll_work_summary.py",
+            package / "models" / "payroll_work_earning.py",
+            package / "models" / "payroll_work_workflow.py",
             package / "models" / "payroll_adjustment_book.py",
             package / "models" / "payroll_adjustment_book_envelope.py",
             package / "api" / "payroll" / "start_payroll_cycle.py",
@@ -313,6 +318,67 @@ def main() -> None:
                 raise RuntimeError(f"주급 조정 원장 codegen 필수 query 불일치: {field}")
         if '"/v1/payroll/adjustment-book"' not in book_api:
             raise RuntimeError("주급 조정 원장 codegen 정확한 조회 URL이 누락됐습니다.")
+        work_api = (package / "api" / "payroll" / "list_payroll_work_details.py").read_text(
+            encoding="utf-8"
+        )
+        for field in ("maid_profile_id: UUID", "week_start: datetime.date", "kind:"):
+            if field not in work_api:
+                raise RuntimeError(f"주급 산출 상세 codegen 필수 query가 누락됐습니다: {field}")
+        if '"/v1/payroll/work-details"' not in work_api:
+            raise RuntimeError("주급 산출 상세 codegen 정확한 URL이 누락됐습니다.")
+        for model_name, required_fields in (
+            (
+                "payroll_work_details_envelope",
+                ("week_start", "maid_profile_id", "kind", "summary", "entries", "next_cursor"),
+            ),
+            (
+                "payroll_work_earning",
+                (
+                    "earning_id",
+                    "earned_on",
+                    "base_amount",
+                    "bomb_room_bonus",
+                    "total_amount",
+                    "room_number",
+                    "room_type_code",
+                    "room_type_name",
+                ),
+            ),
+            (
+                "payroll_work_workflow",
+                (
+                    "earning_id",
+                    "base_amount",
+                    "bomb_room_bonus",
+                    "total_amount",
+                    "expected_base_contribution_amount",
+                    "expected_bomb_contribution_amount",
+                    "pending_contribution_amount",
+                    "included_in_pending_count",
+                ),
+            ),
+            (
+                "payroll_work_summary",
+                (
+                    "cycle_id",
+                    "cycle_status",
+                    "cycle_version",
+                    "accrual_amount",
+                    "expected_amount",
+                    "pending_amount",
+                    "locked_amount",
+                    "offset_settled",
+                    "payable_amount",
+                ),
+            ),
+        ):
+            model = (package / "models" / f"{model_name}.py").read_text(encoding="utf-8")
+            for field in required_fields:
+                declaration = re.search(rf"^\s+{field}:\s+([^\r\n=]+)", model, re.MULTILINE)
+                if declaration is None or "Unset" in declaration.group(1):
+                    raise RuntimeError(
+                        f"주급 산출 상세 required nullable codegen 필드 불일치: {field}"
+                    )
         # #328 required nullable fields must not become optional Unset fields
         # or lose the distinct plan/current types during actual client generation.
         for model_name, expected_fields in (

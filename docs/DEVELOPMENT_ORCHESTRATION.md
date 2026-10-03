@@ -13,12 +13,12 @@ gate는 기능 우선순위와 무관하게 유지한다.
 
 ## 2026-10-03 다음 기능 순서
 
-#327 완료 후 별도 bounded context 순서는 #325 최신 조정 원장 CAS 조회 →
+#327 및 #325는 각각 PR357/358로 dev 통합 완료했다. 다음 bounded context 순서는
 #324 객실별 주급 상세 → #331 송금 표시 → #329 제한 계정 재진입 → #317이다.
-먼저 #325만 구현하며 과거 entry version을 최신 CAS로 오인하지 않는다.
+현재 #324만 구현하며 기존 주급 명령·원장·집계/지급 정책을 바꾸지 않는다.
 current/past KST 주차 조회와 source의 실제 maid 귀속은 유지한다.
-정본·호환성·최종 gate는 [#325 조회 계약](./PAYROLL_ADJUSTMENT_BOOK.md)을 따른다.
-현재 구현 후보의 97 migrations·133 paths/143 operations는 운영 배포나
+정본·호환성·최종 gate는 [#324 조회 계약](./PAYROLL_WORK_DETAILS.md)을 따른다.
+현재 구현 후보의 98 migrations·134 paths/144 operations는 운영 배포나
 프런트 완료를 뜻하지 않으며 다른 OPEN PR의 충돌·검증·정책을 임의 해결하지 않는다.
 
 ## 역할과 진행 단위

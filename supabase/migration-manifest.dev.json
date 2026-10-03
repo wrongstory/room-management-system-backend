@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 97,
+  "totalCount": 98,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 19,
+    "count": 20,
     "first": "assignment_unavailability_reassignment",
-    "head": "payroll_adjustment_book_read"
+    "head": "payroll_work_details_read"
   },
-  "head": "payroll_adjustment_book_read",
+  "head": "payroll_work_details_read",
   "migrations": [
     {
       "order": 1,
@@ -498,6 +498,11 @@
       "order": 97,
       "name": "payroll_adjustment_book_read",
       "sha256": "b739d78f870a1c1d2a5ddb2800ce179e153445cb5da038b778515758321047d2"
+    },
+    {
+      "order": 98,
+      "name": "payroll_work_details_read",
+      "sha256": "6e2e419155bb18bd7095d0f7e2d3ee8e21a90af37036ae3b22555473b099b527"
     }
   ]
 }
