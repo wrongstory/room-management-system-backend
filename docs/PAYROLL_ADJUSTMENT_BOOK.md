@@ -1,5 +1,30 @@
 # 최신 주급 조정 원장 CAS 조회 (#325)
 
+## PR #358 전체 CI fixture 보완 이력
+
+초기 source `b3f9077c3fa9c4f86853b62b15f5edde026d1333`의
+[CI 37091019306](https://github.com/wrongstory/room-management-system-backend/actions/runs/37091019306)는
+application PASS / migration FAIL이다. 23개 upgrade와 신규 SQL79는 PASS였지만,
+전체 SQL 75 files/4308 tests 중 `developer_operations.sql`의 tests6–8이 이전
+96번째 migration 이름을 최신 head로 기대해 실패했다. 이 실패를 통과로 재기록하지 않는다.
+경로 보완 source `2d1149a6fbbd0eaeb768514a7a9a8e1094733184`의
+[CI 37092269150](https://github.com/wrongstory/room-management-system-backend/actions/runs/37092269150)는
+application PASS / migration CANCELLED(superseded)이며 최종 승인 증빙이 아니다.
+
+보완은 `developer_operations.sql`의 기대·일시 삭제 대상 head를 신규
+`payroll_adjustment_book_read`(97)로, 삭제 후 직전 head를
+`checkout_incident_admin_list`(96)로 맞춘 8개 문자열뿐이다.
+plan32와 equal/ahead/behind·history 복원·권한·RLS·감사·rate limit 검사는 그대로다.
+기존 적용 migration·신규 migration·manifest·DB harness와 서비스 구현은 변경하지 않는다.
+독립 QA는 검사 기준 약화와 신규 P0/P1/P2가 없음을 확인했다.
+보완 후 `npm run ci:quality` PASS(Node1010/61 files, typecheck/test/build 포함)다.
+보완된 동일 migration SHA의 전체 local `db:test`는 PASS(23 upgrade paths,
+75 SQL files/4308 assertions, `developer_operations.sql`32 포함)다.
+`db:test:long-stay-clock`도 5개 KST 시점/145 assertions PASS다.
+전체 concurrency·최종 fresh97/advisors/history·exact-source 합성 복구와 새
+exact-head required CI·최종 QA·dev 통합은 실제 완료 후
+[PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358)에 기록한다.
+
 ## PR #358 후속 경로 경계 보완 checkpoint
 
 첫 source `b3f9077c3fa9c4f86853b62b15f5edde026d1333` 이후 독립 실측에서 Fastify의
