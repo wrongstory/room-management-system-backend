@@ -2,6 +2,8 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { PayrollService } from './payroll.service.js';
 import { payrollAdjustmentBookQuery } from './payroll-adjustment-book.js';
+import { payrollWorkQuery, PayrollWorkDetailsError, payrollWorkErrorStatus } from './payroll-work-details.js';
+import { AppError } from '../../lib/app-error.js';
 import {
   assertPayrollResponseSize,
   PAYROLL_CURSOR_MAX_LENGTH,
@@ -99,6 +101,18 @@ export function createPayrollRoutes(service: PayrollService): FastifyPluginAsync
     });
     const authenticated = [app.authenticate, app.requirePasswordChanged];
     const admin = [...authenticated, app.requireAdmin];
+
+    app.get('/work-details', { preHandler: authenticated, exposeHeadRoute: false }, async (request) => {
+      try {
+        const input = payrollWorkQuery(new URL(request.url, 'http://backend.internal').searchParams);
+        const response = await service.listWorkDetails(request.actor, input);
+        assertPayrollResponseSize(response);
+        return response;
+      } catch (error) {
+        if (error instanceof PayrollWorkDetailsError) throw new AppError(payrollWorkErrorStatus(error.code), error.code, '주급 조회 값을 확인해 주세요.');
+        throw error;
+      }
+    });
 
     app.get('/adjustment-book', { preHandler: admin, exposeHeadRoute: false }, async (request) => {
       const query = payrollAdjustmentBookQuery(new URL(request.url, 'http://backend.internal').searchParams);

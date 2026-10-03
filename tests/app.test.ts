@@ -269,6 +269,7 @@ function services(): AppServices {
       }))
     },
     payroll: {
+      listWorkDetails: vi.fn(),
       getAdjustmentBook: vi.fn(),
       list: vi.fn(async () => ({ payroll: [], nextCursor: null })),
       get: vi.fn(),
