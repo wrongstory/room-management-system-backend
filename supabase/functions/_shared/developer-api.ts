@@ -13,7 +13,7 @@ import {
 } from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "complaint_response_attention";
+export const expectedMigrationName = "auth_session_hard_expiry";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
