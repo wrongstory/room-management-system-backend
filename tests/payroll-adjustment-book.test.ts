@@ -196,12 +196,14 @@ describe('payroll adjustment-book exact Fastify endpoint', () => {
     } finally { await app.close(); }
   });
   it.each(['/v1/payroll/adjustment-book/', '/v1/payroll//adjustment-book', '//v1/payroll/adjustment-book',
-    '/v1/payroll/adjustment-book/extra'])('rejects slash/path alias %s with no-store', async (path) => {
-    const { app, read } = await httpApp();
+    '/v1/payroll/adjustment-book/extra', '/v1/payroll/%61djustment-book', '/v1/%70ayroll/adjustment-book',
+    '/v1/payroll%2Fadjustment-book', '/v1/payroll/adjustment-book%2f'])('rejects slash/encoded/path alias %s with no-store', async (path) => {
+    const { app, read, authenticate } = await httpApp();
     try {
-      const response = await app.inject({ method: 'GET', url: `${path}?maidProfileId=${input.maidProfileId}&weekStart=${input.weekStart}`, headers });
+      const response = await app.inject({ method: 'GET', url: `${path}?maidProfileId=${input.maidProfileId}&weekStart=${input.weekStart}` });
       expect(response.statusCode).toBe(404);
       expect(response.headers['cache-control']).toBe('no-store');
+      expect(authenticate).not.toHaveBeenCalled();
       expect(read).not.toHaveBeenCalled();
     } finally { await app.close(); }
   });

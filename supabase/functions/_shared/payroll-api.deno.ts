@@ -228,6 +228,13 @@ Deno.test("adjustment book HTTP methods aliases remain 404 no-store and OPTIONS 
       ["GET", "/v1//payroll/adjustment-book"],
       ["GET", "//v1/payroll/adjustment-book"],
       ["GET", "/v1/payroll/adjustment-book/extra"],
+      ["GET", "/v1/payroll/%61djustment-book"],
+      ["GET", "/v1/%70ayroll/adjustment-book"],
+      ["GET", "/%761/payroll/adjustment-book"],
+      ["GET", "/v1%2Fpayroll%2Fadjustment-book"],
+      ["GET", "/v1/payroll%2Fadjustment-book"],
+      ["GET", "/v1/payroll/adjustment-book%2Fextra"],
+      ["GET", "/v1/%70ayroll/%61djustment-book/%ZZ"],
     ]
   ) {
     const fixture = bookDependencies();
@@ -261,6 +268,16 @@ Deno.test("adjustment book HTTP methods aliases remain 404 no-store and OPTIONS 
       preflight.headers.get("cache-control") === "no-store" &&
       fixture.calls.length === 0,
     "preflight untouched and no-store",
+  );
+  const encodedPreflight = await handleApiRequest(
+    bookRequest(bookQuery, "OPTIONS", "/v1/%70ayroll/%61djustment-book"),
+    fixture.options,
+  );
+  assert(
+    encodedPreflight.status === 204 &&
+      encodedPreflight.headers.get("cache-control") === "no-store" &&
+      fixture.calls.length === 0,
+    "encoded family OPTIONS remains non-reading no-store preflight",
   );
 });
 

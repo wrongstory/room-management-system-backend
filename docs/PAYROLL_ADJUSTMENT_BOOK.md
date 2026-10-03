@@ -1,5 +1,22 @@
 # 최신 주급 조정 원장 CAS 조회 (#325)
 
+## PR #358 후속 경로 경계 보완 checkpoint
+
+첫 source `b3f9077c3fa9c4f86853b62b15f5edde026d1333` 이후 독립 실측에서 Fastify의
+percent-encoded static alias가 정상 GET으로 매칭되는 P2를 확인했다. 권한 우회는 아니지만
+Node/Edge exact-route 차이를 보완했다. 한 번 decode한 segment로 이 API family만 인식하고,
+실제 허용은 원래 raw canonical path로만 판정한다. 정상 파싱 가능한 encoded 문자·slash alias는
+인증/RPC 전에404/no-store이며 OPTIONS는204/no-store다. invalid URI의 transport 파싱이나
+double-encoded 미매칭 경로에 recursive decoder/전역 Auth 정책을 추가하지 않는다.
+
+보완 후 `npm run ci:quality` PASS(Node1010/61files), `npm run edge:check`
+PASS(343 tests, bundle17,305,023bytes), 독립 실제 guard/routes/CORS24요청 PASS다.
+기존 SQL97 migration·manifest·두 DB harness는 바이트 변경이 없어 진행 중 전체 DB 회귀는
+동일 migration SHA 검증으로 유지한다. 초기 source CI의 application은 PASS이고,
+최종 승인은 이 보완 commit의 새 exact-head application/migration CI로 판정한다.
+전체 DB·최종 QA점수·CI/dev 상태는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358)에서 갱신한다.
+아래 PR 생성 전 checkpoint와 당시 대기/통과 결과는 이력으로 보존한다.
+
 ## 상태와 기준
 
 2026-10-03 KST PR 생성 전 고정 checkpoint다. 구현과 아래 개별 검증은 완료했고,

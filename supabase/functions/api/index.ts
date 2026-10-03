@@ -247,8 +247,19 @@ export async function handleApiRequest(
     corsHeaders = cors(request);
     path = routePath(request.url);
     const adjustmentBookPath = "/v1/payroll/adjustment-book";
+    // Recognize only this route family after one percent decode. The raw
+    // spelling below remains authoritative; decoding must never allow an alias.
+    const adjustmentBookFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        // A malformed segment cannot crash the guard or rewrite another route.
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
     if (
-      path === adjustmentBookPath || path.startsWith(`${adjustmentBookPath}/`)
+      adjustmentBookFamily === adjustmentBookPath ||
+      adjustmentBookFamily.startsWith(`${adjustmentBookPath}/`)
     ) {
       corsHeaders["cache-control"] = "no-store";
       const pathname = new URL(request.url).pathname;

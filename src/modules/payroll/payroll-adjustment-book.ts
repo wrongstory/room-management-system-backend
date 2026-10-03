@@ -83,7 +83,12 @@ export function payrollAdjustmentBookSessionId(actor: Actor): string {
 // OPTIONS remains transport preflight, not an additional read operation.
 export const payrollAdjustmentBookGuard: onRequestAsyncHookHandler = async (request, reply) => {
   const path = request.url.split('?')[0] ?? '';
-  const normalized = path.replace(/\/+/g, '/').replace(/\/+$/, '');
+  // Fastify decodes unreserved static-path bytes before route matching. Detect
+  // the family after decoding, but allow only the original canonical path.
+  const familyPath = path.split('/').map((segment) => {
+    try { return decodeURIComponent(segment); } catch { return segment; }
+  }).join('/');
+  const normalized = familyPath.replace(/\/+/g, '/').replace(/\/+$/, '');
   const bookPath = '/v1/payroll/adjustment-book';
   if (normalized !== bookPath && !normalized.startsWith(`${bookPath}/`)) return;
   reply.header('Cache-Control', 'no-store');
