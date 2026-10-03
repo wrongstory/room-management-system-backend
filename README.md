@@ -1,5 +1,7 @@
 # CASTLE THE ART 객실관리 백엔드
 
+> 2026-10-03 최신: #331 PR361이 `dev@eb1ec3e`로 통합됐다(required CI37111364892·독립 QA98). #329와 첫 중간 릴리스에 선행하는 [#352 공용 세션 강제 만료 검사](docs/AUTH_SESSION_HARD_EXPIRY.md)를 별도 구현 중이다. [#364 v0.8.0 점검 릴리스](https://github.com/wrongstory/room-management-system-backend/issues/364)는 release/main 검증·병합 후 승인된 pending DB→API/예약 스케줄러를 승격한다. 아래 source 후보·운영 수치는 과거 checkpoint이며 배포/UAT 완료가 아니다. 프런트 개발·Node fallback 활성화·Auth 설정·키·실제 PIN/송금은 포함하지 않는다.
+
 > 2026-10-03 #331 구현 후보: #324 [PR #359](https://github.com/wrongstory/room-management-system-backend/pull/359)가 통합된 `dev@8481e219d7fbd92fe3587081efca9f3bc632bba6`/98 migrations를 기준으로 송금 표시 on/off와 금액 근거 재확인 API를 추가했다. 후보는 99 migrations·137 paths/148 operations이며, 실제 지급 원장은 변경하지 않는다. 검증·독립 QA·CI·통합 상태는 [표시 계약](docs/PAYROLL_REMITTANCE_MARKER.md)을 따른다. 아래 과거 dev/운영 수치는 당시 checkpoint이며 이번 작업의 운영 배포를 뜻하지 않는다.
 
 > 2026-10-03 최신 기준: #325는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358), source `78582789ce66a92d9aae3072b7b8fbc6d5fa9843` → dev squash `d65f4f600f856bd990b52762cf57530830970f12`로 source/dev 완료했다. exact tree CI `37093733970` application/migration PASS·독립 QA98/100이며 초기 CI 실패는 이력으로 보존한다. 아래 #325 후보 표현은 과거 checkpoint다. 현재 #324의 객실별 확정/미확정 주급 근거 조회는 이 dev/97 migrations에서 시작한 후보이며 [조회 계약](docs/PAYROLL_WORK_DETAILS.md)을 따른다. 운영·프런트·main·recovery는 변경하지 않는다.
