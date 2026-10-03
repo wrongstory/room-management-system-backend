@@ -33,8 +33,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 134:
-        raise RuntimeError("전체 source OpenAPI path 수가 134이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 137:
+        raise RuntimeError("전체 source OpenAPI path 수가 137이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -43,8 +43,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 144:
-        raise RuntimeError("전체 source OpenAPI operation 수가 144이 아닙니다.")
+    if operation_count != 148:
+        raise RuntimeError("전체 source OpenAPI operation 수가 148이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     adjustment_book = schemas.get("PayrollAdjustmentBook", {})
     book_fields = ["maidProfileId", "weekStart", "currentBookVersion"]
@@ -188,6 +188,16 @@ def main() -> None:
             package / "api" / "payroll" / "list_payroll_entries.py",
             package / "api" / "payroll" / "get_payroll_adjustment_book.py",
             package / "api" / "payroll" / "list_payroll_work_details.py",
+            package / "api" / "payroll" / "get_payroll_remittance_marker.py",
+            package / "api" / "payroll" / "set_payroll_remittance_marker.py",
+            package / "api" / "payroll" / "reconfirm_payroll_remittance_marker.py",
+            package / "api" / "payroll" / "list_payroll_remittance_marker_history.py",
+            package / "models" / "payroll_remittance_marker.py",
+            package / "models" / "payroll_remittance_basis.py",
+            package / "models" / "payroll_remittance_set_input.py",
+            package / "models" / "payroll_remittance_reconfirm_input.py",
+            package / "models" / "payroll_remittance_history_event.py",
+            package / "models" / "payroll_remittance_history.py",
             package / "models" / "payroll_work_details_envelope.py",
             package / "models" / "payroll_work_summary.py",
             package / "models" / "payroll_work_earning.py",

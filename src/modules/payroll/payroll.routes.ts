@@ -4,6 +4,8 @@ import type { PayrollService } from './payroll.service.js';
 import { payrollAdjustmentBookQuery } from './payroll-adjustment-book.js';
 import { payrollWorkQuery, PayrollWorkDetailsError, payrollWorkErrorStatus } from './payroll-work-details.js';
 import { AppError } from '../../lib/app-error.js';
+import { remittanceQuery, normalizeRemittanceCommand, PayrollRemittanceError, remittanceErrorStatus,
+  type RemittanceInput, type RemittanceHistoryInput, type RemittanceCommand, type RemittanceSetInput } from './payroll-remittance-marker.js';
 import {
   assertPayrollResponseSize,
   PAYROLL_CURSOR_MAX_LENGTH,
@@ -101,6 +103,30 @@ export function createPayrollRoutes(service: PayrollService): FastifyPluginAsync
     });
     const authenticated = [app.authenticate, app.requirePasswordChanged];
     const admin = [...authenticated, app.requireAdmin];
+
+    async function remittanceReply(run: () => Promise<unknown>): Promise<unknown> {
+      try { const response = await run(); assertPayrollResponseSize(response); return response; }
+      catch (error) {
+        if (error instanceof PayrollRemittanceError) throw new AppError(remittanceErrorStatus(error.code), error.code, '송금 표시 요청을 확인해 주세요.');
+        throw error;
+      }
+    }
+    app.get('/remittance-marker', { preHandler: authenticated, exposeHeadRoute: false }, async (request) =>
+      remittanceReply(() => service.getRemittanceMarker(request.actor, remittanceQuery(new URL(request.url, 'http://backend.internal').searchParams) as RemittanceInput)));
+    app.put('/remittance-marker', { preHandler: admin }, async (request) =>
+      remittanceReply(() => {
+        requireExactQuery(request, []);
+        const input = normalizeRemittanceCommand(request.body, request.headers['idempotency-key'], true) as RemittanceSetInput;
+        return service.setRemittanceMarker(request.actor, input);
+      }));
+    app.post('/remittance-marker/reconfirm', { preHandler: admin }, async (request) =>
+      remittanceReply(() => {
+        requireExactQuery(request, []);
+        const input = normalizeRemittanceCommand(request.body, request.headers['idempotency-key'], false) as RemittanceCommand;
+        return service.reconfirmRemittanceMarker(request.actor, input);
+      }));
+    app.get('/remittance-marker/history', { preHandler: authenticated, exposeHeadRoute: false }, async (request) =>
+      remittanceReply(() => service.listRemittanceMarkerHistory(request.actor, remittanceQuery(new URL(request.url, 'http://backend.internal').searchParams, true) as RemittanceHistoryInput)));
 
     app.get('/work-details', { preHandler: authenticated, exposeHeadRoute: false }, async (request) => {
       try {

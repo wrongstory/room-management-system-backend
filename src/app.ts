@@ -48,6 +48,7 @@ import {
 import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
 import { payrollAdjustmentBookGuard } from './modules/payroll/payroll-adjustment-book.js';
 import { payrollWorkDetailsGuard } from './modules/payroll/payroll-work-details-guard.js';
+import { payrollRemittanceGuard } from './modules/payroll/payroll-remittance-guard.js';
 import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
 import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
 import { photoError } from './modules/photos/photo-service.js';
@@ -186,6 +187,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   if (services.checkoutIncidents) app.addHook('onRequest', checkoutIncidentCollectionGuard);
   app.addHook('onRequest', payrollAdjustmentBookGuard);
   app.addHook('onRequest', payrollWorkDetailsGuard);
+  app.addHook('onRequest', payrollRemittanceGuard);
   await app.register(helmet, { global: true });
   await app.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
   await app.register(cors, {

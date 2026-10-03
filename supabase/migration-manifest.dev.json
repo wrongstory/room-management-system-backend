@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 98,
+  "totalCount": 99,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 20,
+    "count": 21,
     "first": "assignment_unavailability_reassignment",
-    "head": "payroll_work_details_read"
+    "head": "payroll_remittance_marker"
   },
-  "head": "payroll_work_details_read",
+  "head": "payroll_remittance_marker",
   "migrations": [
     {
       "order": 1,
@@ -503,6 +503,11 @@
       "order": 98,
       "name": "payroll_work_details_read",
       "sha256": "6e2e419155bb18bd7095d0f7e2d3ee8e21a90af37036ae3b22555473b099b527"
+    },
+    {
+      "order": 99,
+      "name": "payroll_remittance_marker",
+      "sha256": "d67fbe32b18f5b4a93f1b52a6b979c6e2bd0a52043b2f996de293f45f43136f1"
     }
   ]
 }

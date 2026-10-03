@@ -1,5 +1,7 @@
 # 프론트엔드·Codex API 연동 가이드
 
+> 2026-10-03 #331 구현 후보 인계: 별도 송금 표시 GET/PUT·reconfirm·history 3 paths/4 operations를 추가한다. 사용자 결정은 종료 주차·양수 신규 on 및 on 유지 별도 재확인이다. cycle.status/PAID로 스위치를 계산하거나 off에 reopen을 사용하지 않는다. [표시 전용 API 계약과 검증 상태](./PAYROLL_REMITTANCE_MARKER.md)를 따른다. 목표 source 명세는 137 paths/148 operations이며 프런트 구현·운영 제공 완료는 아니다.
+
 > 2026-10-03 최신 기준: #325는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358), source `78582789ce66a92d9aae3072b7b8fbc6d5fa9843` → dev squash `d65f4f600f856bd990b52762cf57530830970f12`로 source/dev 완료했다. exact tree CI `37093733970` application/migration PASS·독립 QA98/100이며 초기 CI 실패는 이력으로 보존한다. 아래 #325 후보 표현은 과거 checkpoint다. 현재 #324의 객실별 확정/미확정 주급 근거 조회는 이 dev/97 migrations에서 시작한 후보이며 [조회 계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 운영·프런트·main·recovery는 변경하지 않는다.
 
 > 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.

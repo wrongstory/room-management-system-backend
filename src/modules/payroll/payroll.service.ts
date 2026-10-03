@@ -5,6 +5,9 @@ import { PayrollWorkCursorCodec } from './payroll-work-details-cursor.js';
 import { normalizePayrollWorkInput, payrollWorkDatabaseErrorCode, PayrollWorkDetailsError, payrollWorkErrorStatus,
   payrollWorkProjection, type PayrollWorkInput, type PayrollWorkPage } from './payroll-work-details.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
+import { SupabasePayrollRemittance } from './payroll-remittance-service.js';
+import type { RemittanceInput, RemittanceCommand, RemittanceSetInput, RemittanceProjection,
+  RemittanceHistoryInput, RemittanceHistoryPage } from './payroll-remittance-marker.js';
 import {
   normalizePayrollAdjustmentBookInput,
   payrollAdjustmentBookDatabaseError,
@@ -98,6 +101,10 @@ export interface PayrollAdjustmentProjection extends PayrollAdjustmentEntry {
   lateCarriedEarningId?: string | undefined; createdAt: string;
 }
 export interface PayrollService {
+  getRemittanceMarker(actor: Actor, input: RemittanceInput): Promise<RemittanceProjection>;
+  setRemittanceMarker(actor: Actor, input: RemittanceSetInput): Promise<RemittanceProjection>;
+  reconfirmRemittanceMarker(actor: Actor, input: RemittanceCommand): Promise<RemittanceProjection>;
+  listRemittanceMarkerHistory(actor: Actor, input: RemittanceHistoryInput): Promise<RemittanceHistoryPage>;
   listWorkDetails(actor: Actor, input: PayrollWorkInput): Promise<PayrollWorkPage>;
   getAdjustmentBook(actor: Actor, input: PayrollAdjustmentBookInput): Promise<PayrollAdjustmentBookProjection>;
   list(actor: Actor, input: PayrollListInput): Promise<PayrollListPage>;
@@ -347,12 +354,19 @@ function afterEntry(position: PayrollCursorPosition | null): { earnedOn: string 
 }
 
 export class SupabasePayrollService implements PayrollService {
+  private readonly remittance: SupabasePayrollRemittance;
   private readonly cursors: PayrollCursorCodec;
   private readonly workCursors: PayrollWorkCursorCodec;
   constructor(private readonly clients: SupabaseClients, cursorSecret: string) {
+    this.remittance = new SupabasePayrollRemittance(clients, cursorSecret);
     this.cursors = new PayrollCursorCodec(cursorSecret);
     this.workCursors = new PayrollWorkCursorCodec(cursorSecret);
   }
+
+  getRemittanceMarker(actor: Actor, input: RemittanceInput): Promise<RemittanceProjection> { return this.remittance.get(actor, input); }
+  setRemittanceMarker(actor: Actor, input: RemittanceSetInput): Promise<RemittanceProjection> { return this.remittance.command(actor, input, true); }
+  reconfirmRemittanceMarker(actor: Actor, input: RemittanceCommand): Promise<RemittanceProjection> { return this.remittance.command(actor, input, false); }
+  listRemittanceMarkerHistory(actor: Actor, input: RemittanceHistoryInput): Promise<RemittanceHistoryPage> { return this.remittance.history(actor, input); }
 
   async listWorkDetails(actor: Actor, input: PayrollWorkInput): Promise<PayrollWorkPage> {
     payrollReader(actor, input.maidProfileId);

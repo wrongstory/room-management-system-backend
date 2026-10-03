@@ -1,5 +1,7 @@
 # 프런트엔드 계약 snapshot
 
+> #331 사용자 추가 결정(2026-10-03)은 종료된 KST 주차·양수 신규 on, on 유지 별도 금액 근거 재확인이다. 이번 scoped DOCS/30 B02의 main d509b44/dev09ed284 대조는 전역 snapshot 승격이 아니다. 백엔드 표시 전용 API는 구현 후보(137 paths/148 operations)이며 [계약과 실제 gate](./PAYROLL_REMITTANCE_MARKER.md)를 따른다. 프런트 source·운영은 변경하지 않는다.
+
 > 2026-10-03 최신: #325 PR358(source78582789 → devd65f4f60)는 exact-tree CI37093733970·독립 QA98/100으로 source/dev 완료했다. 현재 #324 scoped 객실별 주급 근거 조회는 98번째 read migration과 134 paths/144 operations의 후보이며 [계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 아래 후보 표현은 당시 checkpoint이며 전역 프런트 제품 snapshot·운영·main·recovery는 변경하지 않는다.
 
 > 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.
