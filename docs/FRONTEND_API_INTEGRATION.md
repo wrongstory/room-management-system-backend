@@ -6,6 +6,9 @@
 후보 계약은 OpenAPI0.6.0 137 paths/148 operations이며 운영131/141 대비 신규6 paths/7 operations다.
 아래 과거 후보·PENDING 문구는 각 시점 기록이지 현재 상태의 중복 정본이 아니다.
 
+#367/PR369와 #368/PR370은 dev e9fcc56에 통합됐다. source 진단 기준100과 Swagger build5/deploy10·실제 source137/148 회귀의 준비 완료는 hosted 진단·Pages 배포·artifact parity 완료가 아니다. 공개 Pages는 읽기 전용이며 이번 후보의 운영 API 제공·신규 프런트 연결·사용자 UAT는 여전히 NOT RUN이다. [현재 릴리스 checkpoint](./RELEASE_V0.8.0.md)를 따른다.
+scoped FE dev09ed284/main d509b44는 GitHub 재조회에서 같은 ref임을 확인했다. 전역 제품 snapshot은 갱신하지 않으며 아래 HTML 정적 parity 이력은 브라우저/사람 UAT를 대신하지 않는다.
+
 | 프런트 연결 항목 | API/필드 | 계약 |
 |---|---|---|
 | 관리자 미퇴실 목록 | GET /v1/checkout-incidents | [목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md) |

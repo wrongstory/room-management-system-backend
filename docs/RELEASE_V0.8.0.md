@@ -6,7 +6,41 @@
 이 문서는 **릴리스 후보**이며 main 병합·운영 적용·사용자 UAT 완료 기록이 아니다.
 릴리스 [#364](https://github.com/wrongstory/room-management-system-backend/issues/364)의 최종 exact source와 실제 결과는 아래 표에 갱신한다.
 
-최신 준비 source `b5ff1bb3e74ad7d4880b2509f85412590a032d01`는 최신dev100을 포함한
+### 최신 준비 checkpoint — #367/#368 dev 통합 후
+
+문서 갱신 직전 release payload는 `02ba91bff6abbb7131556dae057db98db9b0a823`,
+tree `fd056b39b6e715fc3c48b589cca329d22f7186a3`다. 이것은 최종 문서 포함 HEAD나 운영 배포 source가 아니다.
+#367은 [PR369](https://github.com/wrongstory/room-management-system-backend/pull/369) → dev794c118로 통합했고,
+#368은 [PR370](https://github.com/wrongstory/room-management-system-backend/pull/370)의 source6f2f2a4 →
+dev `e9fcc564dfb4acd2cc4e175df7d1421dbb6b07e5`/tree78f9a1ad로 통합했다.
+#367 required CI·독립 QA, #368 exact 독립 targeted7·scope P0/P1/P2=0 및
+[CI37124760222](https://github.com/wrongstory/room-management-system-backend/actions/runs/37124760222)
+application/migration은 PASS다. 신규 migration·공개 API는 없고100·137/148을 유지한다.
+
+main 이력은 정상 merge `c90c1dc54a71fa7e931574c9da529c2b82c69a9f`로 후보에 연결했다.
+실제82 충돌을 양쪽 의도에 따라 개별 해결했으며 승인 후보 d9665c7의 content tree4f6690c는 불변이었다.
+#368 반영 때의 Swagger 충돌1은 최신dev blob과 같게 해결해 실제 source 회귀를 한 번만 유지했다.
+Node/Edge/API/SQL/migration·config/lock 내용은 최신dev와 같고, 운영 기존85 SQL은 동일하다(A15·M/D0).
+PIN·사진·인증 hotfix 보존의 독립 검토는 해당 범위 P0/P1/P2=0이며 최종 release 전체 QA와 구별한다.
+이 로컬 history 통합은 운영 `main` 승격이나 원격 PR366 갱신/배포 완료가 아니다.
+
+현 payload의 local `ci:quality`1241 tests/66파일은 PASS다. 앞 mainbridge의 Edge470/fmt99/bundle17,520,051 bytes·
+fresh100 `db:verify`·SQL78파일/4,641 assertions·KST145도 개별 PASS지만 최종 release exact-head 결과는 아니다.
+같은 payload의 offline frozen Python3.12 local 검증은 Ruff lint/format226·mypy25·pytest95·ephemeral codegen/build check PASS다.
+추적된 generated/lock 변경은 없다. 실제 `db:test:long-stay-clock`145·`db:test:concurrency`전체6·`backup:dry-run`은 PASS다.
+합성 복구 범위는 local-synthetic100/head `auth_session_hard_expiry`/객실121이며 실제 운영 백업/재무 행 복구 근거가 아니다.
+보존 결과는 `.tmp/backup-recovery/success-20261003T134243289Z-a3aa2139-3c42-43cd-865d-6c6eb5625462`다.
+이번 상태 정정 직전6문서 포함 working에서 quality1241/66·manifest5·Edge470/fmt99/bundle17,520,051 bytes도 PASS 재실행했다.
+최종 commit/exact-head CI·26 upgrades·전체 QA는 아직 NOT RUN이며 새 호환 API recovery artifact는 생성하지 않았다.
+실제 운영 백업·보안 direct/session DB 연결/적용 도구는 BLOCKED/NOT VERIFIED이며,
+운영 DB/API/scheduler·hosted 진단 positive·Swagger Pages·사람 UAT는 NOT RUN이다.
+#368의 local RED→GREEN 회귀는 실행했지만 hosted timeout·artifact 배포를 검증한 것이 아니다.
+이후 순서는 최종 release 검증 → 실제 운영 백업/보안 연결·적용 도구 gate → 승인 범위 운영 적용이다.
+
+### 이전 준비 checkpoint — b5ff1bb, 선행 보완 분리 당시
+
+아래 미실행·후보 문구는 당시 기록이며 위 최신 checkpoint를 대신하지 않는다.
+당시 준비 source `b5ff1bb3e74ad7d4880b2509f85412590a032d01`는 최신dev100을 포함한
 [Draft PR366](https://github.com/wrongstory/room-management-system-backend/pull/366)으로 올렸다.
 이 source의 local quality66파일/1,238 tests·Edge469(bundle17,524,352 bytes)·manifest5는 PASS다.
 release 자체의 전체DB/Python/CI/최종QA·운영 적용은 아직 NOT RUN/BLOCKED이며 아래 최초 검증표와 구분한다.
@@ -24,9 +58,10 @@ main과의 과거 squash 분기 충돌81경로는 read-only merge-tree로 확인
 | 운영 DB / runtime | 85 migrations, head `flat_cleaning_evidence_history_payroll`; `api` ACTIVE v38, `reservation-scheduler` ACTIVE v16 |
 | 운영 HTTP / package | OpenAPI `0.6.0`, 131 paths / 141 operations; npm package `0.1.0` |
 | 릴리스 작업 시작점 | `release/v0.8.0`, dev `eb1ec3e99cfa56bca326064a6c0468714374df75`, source 99 migrations |
-| 최신 dev 통합 | [PR #365](https://github.com/wrongstory/room-management-system-backend/pull/365), source `576b0e5d2d98596eb082b4fee0875ef7ace235e1` → dev `2f9736b97825a38982db6456a3f9cc392bfce7d7`, tree `b41786cc435cdff12ed50b6a182c91084d082633` |
+| #352 dev 통합 당시 | [PR #365](https://github.com/wrongstory/room-management-system-backend/pull/365), source `576b0e5d2d98596eb082b4fee0875ef7ace235e1` → dev `2f9736b97825a38982db6456a3f9cc392bfce7d7`, tree `b41786cc435cdff12ed50b6a182c91084d082633` |
+| 최신 dev 통합 | #367 PR369 → dev794c118 후 #368 PR370 → dev `e9fcc564dfb4acd2cc4e175df7d1421dbb6b07e5`/tree78f9a1ad. 각 source/dev 완료와 release·운영 gate는 별도 |
 | #352 CI checkpoint | exact-head run `37116122570`의 application / migration 모두 PASS. dev 병합과 release 자체의 검증은 별도다 |
-| v0.8.0 후보 | #352를 최신dev에서 포함, 100 migrations / 운영85 대비 pending15. OpenAPI `0.6.0` / 137 paths / 148 operations. release 자체의 검증·운영 제공은 별도다 |
+| v0.8.0 후보 | #352와 #367/#368을 최신dev에서 포함, 100 migrations / 운영85 대비 pending15. OpenAPI `0.6.0` / 137 paths / 148 operations. release 자체의 검증·운영 제공은 별도다 |
 
 Git 릴리스 v0.8.0, OpenAPI 0.6.0, package 0.1.0, 각 Function의 배포 version은 별도 식별자다.
 기존 [v0.7.1 기록](./RELEASE_V0.7.1.md)은 운영 main 원문 그대로 보존하고 이번 결과로 덮어쓰지 않는다.
@@ -116,8 +151,15 @@ inbox/outbox는 본체와 같은 DB transaction이고 외부 push는 기존 work
 |---|---|
 | #352 개별 local | PASS: Node1225/65, Edge469, fresh100, 99→100, manifest5, 전용SQL68. 실제 근거는 PR365를 따른다 |
 | #352 전체DB / required CI / 독립 QA | PASS: 정확99→100 포함26 upgrade, SQL78파일·4,640 assertions, KST145, 전체6 경합, fresh100 합성 backup/recovery, WARN/ERROR Advisor0. exact-head CI 두 required checks PASS; 최종 구현 미참여 QA·countercheck P0/P1/P2=0 후 보호 squash로 dev 통합 |
-| release exact source 전체 검증 | NOT RUN: quality/typecheck/test/build·Edge·Python·fresh100·26 upgrades·전체SQL·KST·전체concurrency·history/advisors·exact-source 합성 복구 |
-| release→main required checks·독립QA·리뷰/충돌/보호 규칙 | NOT RUN |
+| #367/#368 feature source/dev | PASS: 각 required CI·독립 QA. #368 CI37124760222 두 checks와 exact targeted7/미해결 P0/P1/P2=0. release 전체 승인으로 재사용하지 않음 |
+| 문서 갱신 전 payload02ba91b local application | PASS: `npm run ci:quality`, 66파일/1,241 tests. 최종 문서 포함 HEAD 검증과 구분 |
+| 같은 payload local Python | PASS: offline frozen Python3.12 Ruff lint/format226·mypy25·pytest95(직접 count 재확인)·ephemeral codegen/build check. 추적된 generated/lock 변경0. 최종 release exact-head CI와 구분 |
+| 앞 mainbridge local Edge/DB/KST | PASS: Edge470/fmt99/bundle17,520,051 bytes, fresh100 `db:verify`, 전체SQL78/4,641 assertions, KST145. 이 실행을 최종 exact-head 전면 PASS로 확대하지 않음 |
+| local extended6 concurrency / 합성 backup | PASS: 실제 long-stay-clock145·전체6 concurrency·backup:dry-run. local-synthetic100/head auth_session_hard_expiry/객실121. 실제 운영 백업/재무 행 복구가 아니며 과거 #352 실행과 별도 |
+| 상태 정정 직전6문서 포함 working local 재검증 | PASS: quality1241/66·manifest5·Edge470/fmt99/bundle17,520,051 bytes. 이후 상태 문구 정정과 최종 commit/CI는 별도 |
+| release 최종 exact source 전체 검증 | NOT RUN: 최종 문서 포함 HEAD/tree의 전면 quality/Edge/Python·26 upgrades/전체SQL·KST·concurrency·history/advisors·exact-source 합성 복구. 위 개별 완료와 구분 |
+| main history/충돌 해결 보존 | 로컬 PASS: c90c1dc의 실제82 개별 충돌 해결·content tree 불변, #368 Swagger1 해결·최신dev source/blob 동등. 운영 main 승격 아님 |
+| release→main 최종 required checks·전체독립QA·리뷰/보호 규칙 | NOT RUN. feature QA와 main-hotfix 보존 검토만 완료 |
 | 호환 recovery artifact | local 격리 fmt/typecheck/old OpenAPI131/141/bundle PASS. 아래 외부 seal을 따른다. 실제 hosted 복구·retry는 NOT RUN |
 | 실제 운영 백업 / hosted apply·잠금/transaction/history | NOT VERIFIED / BLOCKED: 현재 보안 direct/session DB 연결 설정이 없으며 합성 백업으로 대체하지 않는다 |
 | 운영15건 적용·API/scheduler 배포·각 readback·Swagger Pages | NOT RUN |
@@ -129,7 +171,7 @@ inbox/outbox는 본체와 같은 DB transaction이고 외부 push는 기존 work
 
 ## 운영 런북
 
-1. #352 dev 통합 후 최신dev를 후보에 반영하고15건/manifest·diff·scope를 재확인한다. release exact HEAD/tree·전체 검증·독립QA·required checks·미해결 리뷰0을 고정한 뒤 승인 범위에서 `release/v0.8.0 → main`을 squash한다. main/dev 직접 push와 보호 우회는 금지한다.
+1. #352/#367/#368이 통합된 최신dev를 후보에 반영하고15건/manifest·diff·scope와 main-hotfix 보존을 재확인한다. release 최종 문서 포함 exact HEAD/tree·전체 검증·독립QA·required checks·미해결 리뷰0 및 실제 운영 백업/보안 연결·도구 gate를 확인한 뒤 승인 범위에서 `release/v0.8.0 → main`을 squash한다. main/dev 직접 push와 보호 우회는 금지한다.
 2. merged main exact source를 확정한다. 운영 project identity·85건 head/parity·121실·API38/scheduler16·OpenAPI·주요 원장 건수를 다시 읽는다. 불일치면 중단한다. 승인 범위의 실제 백업과100 호환 recovery 절차를 확보하며 복구 전용 project를 dev DB로 바꾸지 않는다.
 3. 도구·잠금/timeout/transaction/history gate를 확인하고 필요한 짧은 업무 조정을 한다. pending86→100을 한 건씩 적용하고 **각 건 직후** history/name/내용·해당 schema/ACL/제약/index를 읽어 확인한다. 새API를 DB보다 먼저 배포하지 않는다.
 4. 100건 head `auth_session_hard_expiry`, RLS·service-only RPC·구 취소RPC 직접EXECUTE 거부·새 wrapper 존재·기존 원장/receipt 보존·Security Advisor를 확인한다. 기존 warning과 신규 finding을 분리한다.

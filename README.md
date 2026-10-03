@@ -10,10 +10,16 @@ TypeScript·Supabase 기반 객실·예약·청소·검수·주급 API입니다.
 | 구분 | 현재 확인 |
 |---|---|
 | 운영 | Git v0.7.1 / main1780728, DB85, api ACTIVE38, reservation-scheduler ACTIVE16 |
-| 개발 통합 | dev 2f9736b: #331 송금 표시와 #352 세션 검사까지 완료, DB100 |
+| 개발 통합 | dev e9fcc56: #331/#352 및 #367 진단100·#368 Swagger budget 통합 완료, source DB100 |
 | 선행 보안 보완 | #352 / PR365: exact-head required CI·전체 회귀·독립 QA 통과 후 dev 통합. 운영 미적용 |
 | 중간 릴리스 | #364 / v0.8.0 준비 중. 목표 DB100·운영 대비 pending15, OpenAPI0.6.0 137 paths/148 operations |
 | 이후 개발 | #329 기존 로그인 세션 한정 제한 업무 → #317 안전한 장애 진단 |
+
+#367/PR369는 dev794c118, #368/PR370는 dev e9fcc56으로 통합했고 각각 required CI·독립 QA를 통과했습니다.
+문서 갱신 직전 release payload는02ba91b입니다. 운영 main 이력의 후보 로컬 통합과 개별 검증을 기록했습니다.
+Python local95·Ruff/format·mypy·codegen/build는 PASS입니다. 최종 exact-head CI·전체 QA는 NOT RUN,
+local KST145·전체6 경합·합성 backup/recovery100/객실121은 PASS입니다. 실제 운영 백업 검증은 아닙니다.
+실제 운영 백업·보안 DB 연결/적용 도구는 BLOCKED/NOT VERIFIED이며 운영 DB/API·Pages·사람 UAT는 NOT RUN입니다.
 
 위 후보 수치를 운영 완료로 해석하지 않습니다. 운영 DB·API 승격은 release/main 필수 검증·독립 QA·protected 병합 후에만 진행합니다.
 Git 릴리스·OpenAPI·npm package 버전은 별도입니다. 프런트 새 화면·Node fallback 활성화·Auth 설정·키·실제 PIN 변경·송금은 포함하지 않습니다.

@@ -12,7 +12,15 @@
 | #327 미퇴실 목록, #325 조정 book, #324 객실별 주급 상세 | dev 완료 | 승격 전; 신규 조회 API 호출은 현재 프런트 artifact에 없음 |
 | #331 송금 표시/별도 재확인 | PR361 → dev eb1ec3e 완료 | 승격 전; 실제 PAID·송금과 별도, 프런트 신규 marker 연결 필요 |
 | #352 공용 session 강제 만료 검사 | PR365 source576b0e5 → dev2f9736b, exact tree·required CI·전체회귀·독립 QA PASS | 미배포, #329의 session membership/제출 binding 완료가 아님 |
+| #367 개발자 진단 기준 정합화 | PR369 → dev794c118, required CI·독립 QA PASS. manifest/runtime/RPC 기준100 일치; 신규 migration 없음 | 운영 진단 positive NOT RUN. RLS/ACL·drift를 정상으로 덮어쓰지 않음 |
+| #368 Swagger 유한 배포 budget·실제 source 회귀 | PR370 source6f2f2a4 → dev e9fcc56/tree78f9a1ad, CI37124760222 application/migration PASS·독립 targeted7 PASS/미해결 P0/P1/P2=0 | source 준비 완료; build5/deploy10, 137/148. hosted Pages 배포·artifact 검증 NOT RUN, 공개 포털은 읽기 전용 |
 | #329 → #317 | 첫 점검 릴리스 이후 순차 구현 | 이번 v0.8.0 포함하지 않음 |
+
+릴리스 문서 갱신 직전 payload02ba91b에서 local quality1241/66은 PASS다. 앞 main-history bridge의
+Edge470·fresh100·전체SQL78/4641·KST145 PASS와 같은 payload의 Python95·Ruff/format226·mypy25·codegen/build PASS는
+최종 release exact-head CI·전체 QA NOT RUN과 구분한다. local KST145·전체6 경합·합성 backup/recovery100/객실121은 PASS이며 실제 운영 백업/보안 DB 연결은 BLOCKED다.
+6문서 포함 working quality1241/66·manifest5·Edge470/fmt99/bundle17,520,051 bytes 재검증도 PASS지만 최종 commit/CI는 별도다.
+과거 PASS를 최종 release·운영 배포/UAT 완료로 재사용하지 않는다.
 
 현재 운영은 main1780728/v0.7.1, DB85·api38·scheduler16, OpenAPI0.6.0 131/141이다.
 목표 후보100·137/148은 아직 운영 inventory가 아니며 required CI·QA·release/main 병합 후에만
