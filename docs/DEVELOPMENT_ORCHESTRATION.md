@@ -1,5 +1,7 @@
 # 개발 오케스트레이션·source 승인 기준
 
+> 2026-10-03 현재: #328은 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)의 source `76e2780c0304a7336433cdd17e585610360785e3` → dev squash `3968e42967c8ad223661b7a3eb4ce200aabd2499`로 완료했다. 두 tree와 CI merge tree가 같고 required CI `37027527827` application/migration PASS·독립 QA98/100이다. 아래 Draft·후속 gate 표현은 과거 checkpoint다. #327은 이 dev/95 migrations에서 관리자 open 사건 목록을 구현 중인 후보이며 현재 source OpenAPI 목표는 132 paths·142 operations다. 신규 96번째 migration과 검증·운영 제외 범위는 [관리자 미퇴실 목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md)을 따른다. production/main/recovery·프런트 UI/UAT 완료를 뜻하지 않는다.
+
 > #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
 
 2026-09-23에 정한 개발 진행 원칙과 이후 source 승인 근거를 기록한다. 사용자는 기능 구현·배포와 직접 화면 확인을 우선하고,

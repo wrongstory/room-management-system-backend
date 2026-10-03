@@ -1,3 +1,9 @@
+// #327 current candidate from dev@3968e429 (95 migrations): append migration 96
+// adds only service-role admin open-incident read RPC and partial (reported_at DESC,id DESC) index.
+// No new table/column, RLS, ledger, command, notification or production changes.
+// #328 source 76e2780c -> dev3968e429 merged by PR351, required CI37027527827 PASS; old gates below are history.
+// Exact list fields, fixed assignment.service_date, current session guard and seek behavior:
+// docs/CHECKOUT_INCIDENT_ADMIN_LIST.md. Source OpenAPI candidate inventory: 132 paths / 142 operations.
 Project room_management_system {
   database_type: 'PostgreSQL'
   Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers; a FORCE-RLS cross-flow nonce reservation prevents different AES-GCM encryptions from sharing one key-version/nonce pair. #172 diagnostic role and aggregate views add no persisted entity or FK and are documented outside this relationship diagram.'

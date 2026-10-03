@@ -16,6 +16,7 @@ const sourcePaths = [
   'supabase/functions/_shared/attempt-lifecycle-api.ts',
   'supabase/functions/_shared/attempt-offline-api.ts',
   'supabase/functions/_shared/checkout-incident-api.ts',
+  'supabase/functions/_shared/checkout-incident-cursor.ts',
   'supabase/functions/_shared/cleaning-template-api.ts',
   'supabase/functions/_shared/cleaning-history-api.ts',
   'supabase/functions/_shared/work-history-api.ts',
@@ -67,6 +68,7 @@ const testPaths = [
   'supabase/functions/_shared/attempt-lifecycle-api.deno.ts',
   'supabase/functions/_shared/attempt-offline-api.deno.ts',
   'supabase/functions/_shared/checkout-incident-api.deno.ts',
+  'supabase/functions/_shared/checkout-incident-cursor.deno.ts',
   'supabase/functions/_shared/cleaning-template-api.deno.ts',
   'supabase/functions/_shared/cleaning-history-api.deno.ts',
   'supabase/functions/_shared/work-history-api.deno.ts',
@@ -93,6 +95,7 @@ const testPaths = [
   'supabase/functions/_shared/room-pin-api.deno.ts',
   'supabase/functions/_shared/room-pin-sheet-operations-api.deno.ts',
   'supabase/functions/api/index.deno.ts'
+  ,'supabase/functions/api/checkout-incident-list.deno.ts'
   ,'supabase/functions/notification-delivery/index.deno.ts'
 ];
 

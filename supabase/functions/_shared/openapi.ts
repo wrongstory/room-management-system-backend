@@ -2530,6 +2530,67 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/checkout-incidents": {
+      get: {
+        tags: ["Checkout incidents"],
+        operationId: "listCheckoutIncidents",
+        summary: "관리자 미해결 퇴실 미진행 사건 목록",
+        description:
+          "active/password-complete business admin만 현재 open 사건을 조회합니다. roomId·cleaningTargetId·serviceDate를 조합하여 필터링하며 serviceDate는 신고에 연결된 불변 assignment 날짜입니다. reportedAt·incidentId 내림차순의 서명 cursor는 actor와 모든 필터에 바인딩되고 microsecond를 보존합니다. 페이지마다 현재 open 상태를 읽으므로 새 신고는 첫 페이지를 새로고침합니다. allowedDecisions는 메뉴 안내일 뿐 권한이나 확정 snapshot이 아닙니다. 결정 전 기존 상세 조회에서 최신 version·impactFingerprint를 받아야 합니다. 조회는 사건 freeze·coordination·원장·알림을 변경하지 않습니다. 고객·신고자·예약 정보와 PIN은 반환하지 않습니다. 모든 응답은 no-store입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "roomId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "cleaningTargetId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "serviceDate",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "date" },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+          },
+        ],
+        responses: {
+          "200": {
+            description:
+              "최대 limit개의 open 사건과 마지막 반환 행에 연결된 nullable cursor",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/CheckoutIncidentListEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/checkout-incidents/{incidentId}": {
       get: {
         tags: ["Checkout incidents"],
@@ -5131,6 +5192,76 @@ export const openApiDocument = {
           newCheckoutAt: { ...checkoutIncidentTimestampSchema },
           nextAssignmentId: { type: "string", format: "uuid" },
           nextAttemptId: { type: "string", format: "uuid" },
+        },
+      },
+      CheckoutIncidentListItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "incidentId",
+          "status",
+          "roomId",
+          "roomNumber",
+          "cleaningTargetId",
+          "assignmentId",
+          "attemptId",
+          "reportedAt",
+          "serviceDate",
+          "allowedDecisions",
+        ],
+        properties: {
+          incidentId: { type: "string", format: "uuid" },
+          status: { type: "string", enum: ["open"] },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          reportedAt: {
+            type: "string",
+            format: "date-time",
+            pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$",
+            description: "UTC 6자리 microsecond를 그대로 보존하는 seek anchor",
+          },
+          serviceDate: {
+            type: "string",
+            format: "date",
+            description: "신고에 연결된 assignment의 불변 service_date",
+          },
+          allowedDecisions: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            uniqueItems: true,
+            prefixItems: [
+              { type: "string", enum: ["EXTEND_CHECKOUT"] },
+              { type: "string", enum: ["CONFIRM_DEPARTED"] },
+              { type: "string", enum: ["FALSE_REPORT"] },
+            ],
+            items: {
+              type: "string",
+              enum: ["EXTEND_CHECKOUT", "CONFIRM_DEPARTED", "FALSE_REPORT"],
+            },
+            description:
+              "이 순서의 메뉴 안내이며 결정 전에 최신 상세 version·impactFingerprint 조회 필수",
+          },
+        },
+      },
+      CheckoutIncidentListEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["items", "nextCursor"],
+        properties: {
+          items: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/CheckoutIncidentListItem" },
+          },
+          nextCursor: {
+            anyOf: [{ type: "string", minLength: 1, maxLength: 1024 }, {
+              type: "null",
+            }],
+          },
         },
       },
       CheckoutIncidentEnvelope: {
