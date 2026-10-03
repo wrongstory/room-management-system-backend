@@ -45,7 +45,7 @@ jobs:
     name: deploy-pages
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write
