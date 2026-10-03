@@ -1,5 +1,7 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> 2026-10-03 최신 구현 상태: #331은 PR361/source087407b → dev eb1ec3e로 통합됐다(required CI37111364892·독립 QA98). #329의 기존 로그인 계약과 승인된 중간 릴리스에 선행하는 [#352 공용 세션 강제 만료 검사](./AUTH_SESSION_HARD_EXPIRY.md)는 별도 100번째 append 후보다. 유효 session의 정의에 `not_after IS NULL OR not_after > statement_timestamp()`를 반영하며 기존 역할·capability·TTL·서버 전용 ACL을 바꾸지 않는다. Auth 설정·제한 계정 새 로그인·키·실제 PIN/송금은 변경하지 않는다. #329의 최초 제한 전환 세션 자격과 제출 RPC session binding을 구현했다고 표현하지 않는다. [#364 v0.8.0](https://github.com/wrongstory/room-management-system-backend/issues/364)는 별도 release/main 검증·병합 후 운영 승격하며 현재 source 검증을 운영/UAT 완료로 승격하지 않는다.
+
 > 2026-10-03 #331 사용자 최종 확정: 송금 표시는 실제 지급 원장과 분리한다. 새로운 on은 종료된 KST 주차·양수 지급 대상액에서만 허용한다. 표시 후 금액 근거가 바뀌어도 on을 유지하고, 관리자가 별도 재확인 완료를 저장한다. off는 오표시 정정이며 PAID·실제 지급·수익·재지급 가능 상태를 변경하지 않는다. [표시 계약](./PAYROLL_REMITTANCE_MARKER.md)을 따른다. 현재는 dev@8481e21/98 이후의 99번째 migration/API 구현 후보이며 기존 지급 계약·전역 프런트 snapshot·운영 상태는 그대로다.
 
 > 2026-10-03 최신 기준: #325는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358), source `78582789ce66a92d9aae3072b7b8fbc6d5fa9843` → dev squash `d65f4f600f856bd990b52762cf57530830970f12`로 source/dev 완료했다. exact tree CI `37093733970` application/migration PASS·독립 QA98/100이며 초기 CI 실패는 이력으로 보존한다. 아래 #325 후보 표현은 과거 checkpoint다. 현재 #324의 객실별 확정/미확정 주급 근거 조회는 이 dev/97 migrations에서 시작한 후보이며 [조회 계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 운영·프런트·main·recovery는 변경하지 않는다.

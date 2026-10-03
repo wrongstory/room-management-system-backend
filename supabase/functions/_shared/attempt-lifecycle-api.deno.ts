@@ -496,6 +496,68 @@ Deno.test("limited identity preserves Auth/profile/session and never opens the o
   }
 });
 
+Deno.test("false Auth session decisions stop ordinary and limited HTTP paths before business RPC or replay", async () => {
+  const routes = [
+    {
+      role: "admin",
+      status: "active",
+      method: "GET",
+      path: `/v1/attempts/lifecycle-impact?assignmentId=${assignmentId}`,
+    },
+    {
+      role: "maid",
+      status: "deactivation_pending",
+      method: "GET",
+      path: `/v1/limited/attempts/${attemptId}?assignmentRevision=3`,
+    },
+    {
+      role: "maid",
+      status: "deactivation_pending",
+      method: "POST",
+      path: `/v1/limited/attempts/${attemptId}/complete-field-work`,
+      body: command,
+    },
+    {
+      role: "maid",
+      status: "upload_only",
+      method: "POST",
+      path: `/v1/attempts/${attemptId}/submissions`,
+      body: {
+        clientSubmissionId: "35200000-0000-4000-8000-000000000001",
+        expectedRevision: 0,
+        candleCount: 0,
+      },
+    },
+  ];
+  for (const route of routes) {
+    const { client, calls } = mock({
+      role: route.role,
+      status: route.status,
+      revoked: true,
+    });
+    const response = await handleApiRequest(
+      req(route.method, route.path, route.body),
+      { createClients: () => client, authenticateRequest: authenticate },
+    );
+    assert(response.status === 401, "expired/revoked session has stable 401");
+    const body = await response.text();
+    assert(
+      JSON.parse(body).error.code === "SESSION_REVOKED",
+      "Auth session helper failure remains fail-closed",
+    );
+    assert(
+      calls.length === 1 && calls[0].name === "is_active_auth_session" &&
+        calls[0].args.p_auth_user_id === maid.authUserId &&
+        calls[0].args.p_session_id === sessionId,
+      "no business RPC, new capability, or saved receipt replay after false",
+    );
+    assert(
+      !body.includes(token) && !body.includes(sessionId),
+      "public error excludes bearer and session identity",
+    );
+  }
+});
+
 Deno.test("admin lifecycle has strict action/reason/payload, profile CAS and internal session-bound RPC", async () => {
   const body = {
     ...command,

@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 99,
+  "totalCount": 100,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 21,
+    "count": 22,
     "first": "assignment_unavailability_reassignment",
-    "head": "payroll_remittance_marker"
+    "head": "auth_session_hard_expiry"
   },
-  "head": "payroll_remittance_marker",
+  "head": "auth_session_hard_expiry",
   "migrations": [
     {
       "order": 1,
@@ -508,6 +508,11 @@
       "order": 99,
       "name": "payroll_remittance_marker",
       "sha256": "e9d70f667f71c1d1192b3ac4a3ae0f84070041214ba8cdd21c218e61bb8c14bd"
+    },
+    {
+      "order": 100,
+      "name": "auth_session_hard_expiry",
+      "sha256": "2efa743ab78a7d08336b6b11b0e67dc158ce9f9a6289a60c1bc6fb58600a7735"
     }
   ]
 }

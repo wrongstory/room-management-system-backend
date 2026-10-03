@@ -1,5 +1,9 @@
 # 개발 오케스트레이션·source 승인 기준
 
+> 2026-10-03 최신 승인: 사용자가 순차 개발과 중간 릴리스·운영 배포·문서 정리를 승인했다. #331은 PR361의 source087407b → dev squash eb1ec3e로 통합됐다. exact-head CI37111364892 application/migration(전체 upgrade·SQL·KST·경합·cleanup) PASS, 독립 QA98/100·범위 내 미해결 P0/P1/P2=0이다. 아래 #331 후보/Draft·진단용 승인만이라는 문구는 과거 checkpoint다. 기존 strict lint17/INFO inventory FAIL은 #363, 단발 CAS 원인 추적은 #362로 유지한다.
+
+> 중간 점검 릴리스는 [#364](https://github.com/wrongstory/room-management-system-backend/issues/364)의 v0.8.0 후보다. #329의 기존 로그인 계약과 운영 배포에 선행하는 공용 세션 `not_after` 검사 #352를 별도 PR로 먼저 보완한다. 현재 dev에 완료된 기능과 #352만 첫 릴리스에 포함하며, #329 → #317은 그 이후 순차 구현한다. release/main 필수 검증·독립 QA·CI·protected 병합 후에만 승인된 pending DB → exact API 및 reservation-scheduler를 배포하고 smoke·문서·태그를 확인한다. 프런트 source, Node fallback 활성화, Auth 설정, 키, 실제 PIN/송금, provider/Cron/TASK는 변경하지 않는다. 실제 배포 완료나 사용자 UAT 통과를 선행 기록하지 않는다.
+
 > 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.
 
 > 2026-10-03 현재: #328은 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)의 source `76e2780c0304a7336433cdd17e585610360785e3` → dev squash `3968e42967c8ad223661b7a3eb4ce200aabd2499`로 완료했다. 두 tree와 CI merge tree가 같고 required CI `37027527827` application/migration PASS·독립 QA98/100이다. 아래 Draft·후속 gate 표현은 과거 checkpoint다. #327은 이 dev/95 migrations에서 관리자 open 사건 목록을 구현 중인 후보이며 현재 source OpenAPI 목표는 132 paths·142 operations다. 신규 96번째 migration과 검증·운영 제외 범위는 [관리자 미퇴실 목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md)을 따른다. production/main/recovery·프런트 UI/UAT 완료를 뜻하지 않는다.

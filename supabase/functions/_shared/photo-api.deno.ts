@@ -215,6 +215,48 @@ Deno.test("photo exact HTTP routes use verified latest active/limited identity a
     }
   }
 });
+Deno.test("false Auth session decisions stop photo metadata, uploads and content before RPC/provider/decoder", async () => {
+  for (const state of ["active", "deactivation_pending", "upload_only"]) {
+    const routes = [
+      ["GET", `/v1/attempts/${id(3)}/photo-slots`],
+      ["GET", `/v1/photo-uploads/${id(5)}`],
+      [
+        "POST",
+        `/v1/attempts/${id(3)}/photo-slots/${id(4)}/upload?assignmentId=${
+          id(8)
+        }&assignmentRevision=1&expectedPhotoRevision=0`,
+      ],
+      ...(state === "active" ? [["GET", `/v1/photos/${id(7)}/content`]] : []),
+    ];
+    for (const [method, path] of routes) {
+      const s = setup("maid", state, true);
+      const response = await handleApiRequest(
+        request(
+          method,
+          path,
+          method === "POST" ? new Uint8Array([1]) : undefined,
+        ),
+        s.dependencies,
+      );
+      assert(response.status === 401, "expired/revoked session has stable 401");
+      assert(
+        response.headers.get("cache-control") === "no-store",
+        "authentication denial remains noncacheable",
+      );
+      const body = await response.text();
+      assert(
+        JSON.parse(body).error.code === "SESSION_REVOKED" &&
+          s.calls.length === 1 && s.calls[0] === "is_active_auth_session",
+        "no business RPC, Drive call, or decoder after false session decision",
+      );
+      assert(
+        !body.includes(auth) && !body.includes(id(2)),
+        "public error excludes bearer and session identity",
+      );
+    }
+  }
+});
+
 Deno.test("photo routing rejects aliases, unsupported methods, oversized raw body and records bounded capability denial", async () => {
   const upload = `/v1/attempts/${id(3)}/photo-slots/${id(4)}/upload`;
   const s = setup();
