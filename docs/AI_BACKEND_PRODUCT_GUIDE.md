@@ -1,5 +1,7 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> 2026-10-05 #384 구현 후보: 확정된 일반 사진 최소1/최대20장과 선택 폭탄방·특이사항 각각 최대10장 계약을 유지한다. provider context는 ordinary pointer와 collection/item CAS를 구분해야 하며 첫 사진 이후 정상 collection revision을 단일 pointer와 비교하면 안 된다. 권한·session·assignment·fence·rate/quota·이력을 유지한 append 후보와 실제 검증은 [#384 정합성 기록](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)을 따른다. #383 저장 이름/PR #385, #382 배열 순서, 운영 상태를 이 후보에 혼합하지 않는다. 실제 백업/복원은 모든 개발 후속이지만 운영 배포 전 필수다.
+
 > [확정] 2026-10-04 #373 A안: #363의 의도적인 호환 인자9개는 그대로 유지하고 다른 경고8개를 별도 append로 보완한다. 원본 strict lint FAIL은 계속 표시하며 정확한 warning/catalog/source 기준의 비교 gate만 별도 판정한다. 조회 snapshot STABLE과 명령 fresh guard VOLATILE을 분리하고 PIN 잠금·FOUND·알림 발송·권한 검사를 보존한다. [계약·실제 검증 checkpoint](./DB_STATIC_WARNING_BASELINE.md)를 따른다. #329·고정 v0.8.0 후보·main/운영 배포를 섞지 않으며 이번 승인은 병합/배포를 포함하지 않는다.
 
 > 2026-10-03 최신 구현 상태: #331은 PR361/source087407b → dev eb1ec3e로 통합됐다(required CI37111364892·독립 QA98). #329의 기존 로그인 계약과 승인된 중간 릴리스에 선행하는 [#352 공용 세션 강제 만료 검사](./AUTH_SESSION_HARD_EXPIRY.md)는 별도 100번째 append 후보다. 유효 session의 정의에 `not_after IS NULL OR not_after > statement_timestamp()`를 반영하며 기존 역할·capability·TTL·서버 전용 ACL을 바꾸지 않는다. Auth 설정·제한 계정 새 로그인·키·실제 PIN/송금은 변경하지 않는다. #329의 최초 제한 전환 세션 자격과 제출 RPC session binding을 구현했다고 표현하지 않는다. [#364 v0.8.0](https://github.com/wrongstory/room-management-system-backend/issues/364)는 별도 release/main 검증·병합 후 운영 승격하며 현재 source 검증을 운영/UAT 완료로 승격하지 않는다.
