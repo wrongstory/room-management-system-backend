@@ -1,13 +1,31 @@
 # 배포 전 1회 백업의 비활성 안전 기반 — #273
 
+> 최신 사용자 결정(2026-10-04): 로컬 백업 보관을 제외하고 기존 Supabase recovery를 사용하는
+> **B안**으로 전환했다. [현재 원격 백업 계획](./SUPABASE_ONLY_BACKUP.md)이 운영 정본이다.
+> 아래 로컬 config·DPAPI 백업키·외부 PowerShell gate는 과거 비활성 기반의 이력이며 현재
+> 실행 지시가 아니다. 계획 출력·합성 PASS를 실제 원격 백업 완료로 확대하지 않는다.
+> 이후 사용자는 recovery 기존 Auth·테스트 로그인 정보를 운영 사본으로 교체하도록 승인했다.
+> 아래 과거 recovery 계정 보존 문구는 현재 정책이 아니다. 운영 Auth/비밀번호/PIN은 변경하지 않는다.
+
 ## 현재 범위
 
-이번 source는 **계획 검사와 암호화 기반**이다. 운영 연결, credential 복호화,
+이번 source는 **계획 검사·암호화·내부 합성 프로세스 감독 기반**이다. 운영 연결, credential 복호화,
 DPAPI 키 저장, dump, 복원, 보관 폴더 생성, prune 또는 Scheduled Task를 실행하지 않는다.
 `PLANNED_NOT_EXECUTABLE`은 실행 허가·실제 안전 검사 통과·복구 성공을 뜻하지 않는다.
 기존 `backup:dry-run`의 local-synthetic 제한도 변경하지 않는다.
 
-사용자 결정(2026-10-04): 이번 배포 전 성공 백업을 명시 지정한 로컬 전용 경로에
+후속 source의 [합성 프로세스 감독 계약](./BACKUP_PROCESS_BOUNDARY.md)은 고정 Node 프로브만
+실행하며 운영 실행 CLI가 아니다. 과거 Windows 저장소 native 검증은 앱 파일 가상화로 중단됐다.
+최신 B안에서는 외부 PowerShell 저장소 gate를 백업 선행조건으로 유지하지 않는다.
+
+운영 준비 checkpoint(2026-10-04 21:06 KST): 별도 로컬 helper의 기존 credential 보호 저장 후
+실제 session TLS 인증서/hostname·READ ONLY 조회/ROLLBACK·종료는 PASS다. hosted history85,
+객실121/public base RLS누락0을 확인했다. 이 source의 credential/dump/복원 구현 결과가 아니다.
+후속 native metadata 검사에서 credential 파일이 MSIX 앱 캐시에 있음을 확인했고 원문·ciphertext를
+읽거나 옮기지 않았다. 연결 PASS와 credential의 지속 가능한 보안 보관은 구분하되,
+최신 B안에서 로컬 백업 보관 준비를 다시 요구하지 않는다.
+
+과거 사용자 결정(2026-10-04, 최신 B안으로 보관/복원 대상 대체): 성공 백업을 로컬 전용 경로에
 15일 암호화 보관하고, 백업 파일과 분리한 키를 현재 Windows 계정으로 보호한다.
 실제 Auth 데이터까지 로컬 격리 DB에서 전체 복원 검증하며 기존 Supabase recovery
 프로젝트의 Auth·테스트 계정은 보존한다. 개인 PC 경로는 코드의 기본값/제품값으로 고정하지
@@ -70,7 +88,7 @@ reparse point 검사, 현재 SID/SYSTEM만의 보호 ACL과 파일·키 분리 �
 후속 실행기에서 구현·검증해야 한다. source 안의 nonce 충돌 방지는 프로세스 내 방어이며
 재시작 이후의 지속 상태나 실제 운영 credential 준비를 보장하지 않는다.
 
-## 실제 실행 전에 남은 gate
+## 과거 로컬 실행기의 gate — 최신 B안의 실행 지시가 아님
 
 - 안전한 기존 direct/session credential 준비, TLS verify-full 및 CA/연결 대상 확인.
   비밀번호 재설정이나 URI/비밀번호의 명령행·chat·로그 전달은 하지 않는다.
@@ -93,7 +111,7 @@ mutation·정기 Task 활성화는 이번 기반 구현과 자동 smoke에 포�
 
 ## 검증 경계
 
-최종 로컬 검증(2026-10-04):
+계획·암호화 기반 당시 로컬 검증(2026-10-04; 최신 프로세스 검증은 연결 문서 참조):
 
 | 항목 | 실제 실행 결과 |
 |---|---|
@@ -116,7 +134,9 @@ mutation·정기 Task 활성화는 이번 기반 구현과 자동 smoke에 포�
 프로세스 사이의 nonce 유일성 검증을 의미하지 않는다.
 
 source의 단위/CLI·typecheck·lint·build·독립 QA와 actual 운영 연결/백업/격리 복원 결과를 구분한다.
-actual 운영 연결·dump·복원은 아직 **NOT RUN**이다. 기존 synthetic PASS나 계획 출력으로 대체하지 않는다.
+이 라이브러리가 수행하는 actual 운영 연결·dump·복원은 아직 **NOT RUN**이다. 별도 helper의
+21:06 KST 실제 READ ONLY 접속 PASS는 위 checkpoint와 구분한다. 기존 synthetic PASS나
+계획 출력으로 실제 백업·복원 성공을 대체하지 않는다.
 실제 source/검증/CI는 연결 PR에 기록하며, migration/API/권한/DB schema는 변경하지 않는다.
 
 공식 확인 근거:
