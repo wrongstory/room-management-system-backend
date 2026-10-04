@@ -56,6 +56,23 @@ WARN/ERROR0은 PASS다. 새 exact-head required CI·최종 QA/dev 통합·releas
 Windows LF 검증본은101 canonical hash 및294개 원본 raw hash를 보존한다. 운영/recovery·Auth/키·
 API·PIN·태그/Release는 미변경이며 실제 운영 백업이나 복원 검증으로 확대하지 않는다.
 
+후속 CI checkpoint: PR #377의 `c0c655b` / run37193302636은 application PASS, migration FAIL이다.
+4조합·15거부·전체 `db:test`는 통과했지만 `last-source-drift-cli-atomic-rollback`에서
+stdout JSON parse가 중단되어 이 CI의 rollback 후 상태 비교와 후속 KST/경합은 미검증/skip이다.
+고정 CLI2.115.0은 agent auto-detection에 따라 기본 text/JSON을 달리한다. 실제 captured 원문을
+CI 로그에 출력하지 않아 정확한 text 형태는 단정하지 않는다. negative CLI 호출에
+`--output-format json --agent no`를 명시해 non-agent runner 경로의 JSON을 고정했다.
+정확한 첫 오류·tag/code/signature/SQLSTATE 검사는 변경하지 않았고 SQL 문맥 검색으로 완화하지 않는다.
+근거: [pinned CLI 출력 우선순위](https://github.com/supabase/cli/blob/v2.115.0/apps/cli/src/shared/cli/agent-output.ts).
+
+보완 후 local 재검증: `ci:quality`1432/67·manifest5·syntax/diff PASS, 독립 parser20/CLI 출력 옵션3
+PASS(P0/P1/P2=0). 명시 non-agent JSON의 실제 static runner는4조합·15거부·마지막 CLI 실패의
+전체 rollback·known CRLF prestate·happy100→101·receipt replay·최종 fresh101 cleanup까지 exit0이다.
+원본 strict FAIL9/exit1과 exact9/catalog3 PASS는 그대로 구분하며 SQL101개 raw aggregate hash는
+검증 전후 동일하다. 기존 SQL·manifest·API·workflow를 수정하지 않았다.
+같은 LF 검증본의 전체 SQL79파일/4722 assertions도 재실행해 PASS였다.
+새 exact-head required CI는 별도 gate이며 이전 실패를 PASS로 덮거나 운영 배포 근거로 사용하지 않는다.
+
 ## 사용자 결정과 범위
 
 2026-10-04 KST 사용자가 Decision [#373](https://github.com/wrongstory/room-management-system-backend/issues/373)의 A안을 승인했다.

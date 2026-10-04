@@ -313,7 +313,9 @@ try {
   sql(replaceBody(lastOriginal, lastOriginal.source.replace(lastTarget.semanticFrom, () => lastTarget.semanticTo)));
   const driftBaseline = captureState(rowsQuery);
   assert.equal(sourceMd5(driftBaseline.catalog.functions[crlfTargets[0].signature].source), crlfTargets[0].crlf);
-  const rejected = spawnSync(process.execPath, [cli, '--workdir', interval, 'migration', 'up', '--local'],
+  // Fix the error envelope independently of agent auto-detection (local Codex vs CI runner).
+  // Force the non-agent path in this probe; the exact first error/full signature check stays unchanged.
+  const rejected = spawnSync(process.execPath, [cli, '--output-format', 'json', '--agent', 'no', '--workdir', interval, 'migration', 'up', '--local'],
     { cwd: interval, env: cliEnvironment, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
   assertRejected(rejected, lastTarget.signature, true);
   assert.deepEqual(captureState(rowsQuery), driftBaseline,
