@@ -7,7 +7,9 @@
 테스트 코드만 보완한다. 운영 delivery RPC, worker, provider 호출, 테이블·RLS·migration,
 HTTP API 계약은 변경하지 않는다.
 
-기준은 `dev@e9fcc564dfb4acd2cc4e175df7d1421dbb6b07e5`와 100개 migration이다.
+최초 구현·검증 기준은 `dev@e9fcc564dfb4acd2cc4e175df7d1421dbb6b07e5`와 100개 migration이다.
+PR #374 dev 병합 후 `dev@a103db80d4e849db64b79211cff2de96a00a7193`/101 migrations를
+반영해 새 통합본을 재검증한다. #371 자체는 migration을 추가하지 않는다.
 `release/v0.8.0@5408c54e032273cdf300d90b91ebda38c9587a7c` / Draft PR #366과
 별도 #329 후보에는 이 변경을 자동으로 섞지 않는다. 운영·복구 DB, Auth 설정,
 암호키, 실제 PIN·송금, provider·Cron도 변경하지 않는다.
@@ -68,7 +70,7 @@ provider 원문 응답, SQL 오류 원문, PIN을 새 로그에 넣지 않는다
 manifest SHA를 각각 확인하며, 서로 다른 두 SHA 비교를 혼동하지 않는다. 원본
 migration·manifest는 수정하지 않는다.
 
-## 2026-10-04 검증 checkpoint
+## 2026-10-04 최초 source/100 migrations 검증 checkpoint
 
 - 기준 `npm test`: 65개 파일·1,229건 PASS. 최종 `npm run ci:quality`:
   66개 파일·1,294건, typecheck/build/OpenAPI 137/148/secrets835 PASS.
@@ -86,7 +88,8 @@ migration·manifest는 수정하지 않는다.
   fresh cleanup의 100/head 일치·rooms121/profiles0/Auth users0/Auth sessions0을 확인했다.
 - 최종 독립 source QA98/100·확인된 P0/P1/P2=0. QA가 직접 syntax2·targeted65·
   Biome3·diff check를 실행했다. DB·CI·사람 GitHub 승인을 대신 주장하지 않는다.
-- 원격 exact-head application/migration CI는 PR 생성 후 확인한다.
+- source `6177eb93b6f455a6aebc5dfd648aed84f02f46ff`의 원격 required CI
+  `37168729600` application/migration PASS를 확인했다.
 
 실패·보완 이력도 구분한다. QA에서 sync child가 catch 전에 raw stderr를 출력하는
 P2를 찾아 `stdio: 'pipe'`로 보완했다. actual Node child로 최종 probe/summary의
@@ -96,7 +99,39 @@ legacy controls를 추가한 최종65건 PASS다. 추가 ad-hoc SHA 명령은 �
 version 필드를 읽어 ENOENT/FAIL했지만 source/manifest는 변경하지 않았다. sorted
 filename/name 기반으로 명령을 정정해100 SHA 검사를 통과했고 공식 manifest도 재검사했다.
 
-별도 #363/#373 Draft PR #374의 exact-head CI `37165344729`는 application/migration
-PASS다. 해당 구현·검사 정책을 이 브랜치에 섞거나 기존 raw strict17의 해결로 대신
-기록하지 않는다. 이 테스트-only 후보에서는 추가 DB lint를 실행하지 않았다.
-이 문서는 운영 반영·사용자 UAT·dev 병합·릴리스 완료의 증거가 아니다.
+## 2026-10-04 최신 dev/101 migrations 통합 gate
+
+사용자는 #374 → #375 순서의 dev 통합을 승인했다. #363/#373 PR #374는 exact-head
+CI `37165344729` application/migration PASS와 독립 QA98을 확인한 뒤 dev squash
+`a103db80d4e849db64b79211cff2de96a00a7193`로 병합했다. #375는 해당 dev의
+101번째 append와 정확한 호환9개 lint gate를 반영한다. 원본 strict FAIL9/exit1을
+보존하며 #371의 테스트-only 변경과 #363의 이미 통합된 변경 범위를 구분한다.
+
+새 통합본에서 다음 검사를 실제 실행했다. 기존100 PASS와 별개인 검증 기록이다.
+
+- PASS: `ci:quality` Node1,432/67 files·typecheck/build·OpenAPI137/148·secrets843,
+  5개 manifest/101 canonical migration SHA. 기존 Biome INFO5건은 그대로다.
+- PASS: 원본 보존 LF Edge 검증본 fmt99/check/470 tests/bundle17,440,775 bytes.
+  bundle 수치는 LF 검증본 산출값이며 Windows 원본 bundle 크기로 표시하지 않는다.
+  첫 임시 복제본은 test fixture 누락으로 BLOCKED였고 복제 범위를 보완한 뒤 PASS다.
+  원본282개 source와69개 test raw SHA 및 복제 parity를 확인했다.
+- PASS: Python frozen/offline sync·ruff/fmt226·mypy25·pytest95·ephemeral OpenAPI
+  codegen137/148·build check. 기존 사진 binary/AttemptLifecycle 생성기 경고는 유지한다.
+- PASS: 원본 보존 LF DB 검증본 fresh101·local-synthetic backup·26 upgrades·
+  전체 SQL79 files/4,718. 원본294개 파일의 raw SHA도 검증 후 다시 확인했다.
+- 원본 strict lint는 FAIL9/exit1이다. 별도 exact9/catalog3 gate는 PASS이며
+  `db:test:static-warning`의100→101/source-drift 원자 rollback/모든 이전 row·catalog·
+  ACL/RLS/receipt replay·latest fresh101 cleanup도 PASS다.
+- PASS: KST5×29=145 assertions, `db:test:concurrency` 6개 suite 전체 exit0.
+  최종 실제 drain93회/현재 처리 가능 잔여0, 100회/limit10 유지. 마지막 fresh cleanup은
+  migrations101/head 일치·rooms121/profiles0/Auth users0/Auth sessions0이다.
+- PASS: 새 통합 working-tree/index 독립 source QA98/100·P0/P1/P2=0,
+  syntax2·targeted65·Biome3·diff check와 peer baseline138. 첫 peer baseline 실행은
+  ignored LF 복제본까지 발견해2files/276이었으며 `.tmp/**` 복제본만 제외한 재실행은
+  원본1file/138이다. 중복 수치를 새로운 source 검사 건수로 확대하지 않는다.
+- PENDING: commit/push 이후 새 exact-head required application/migration CI와
+  protected dev 통합. 이 문서는 commit 직전 checkpoint이며 이후 최종 판정과
+  source/dev SHA·tree mapping은 PR #375 및 Issue #371에 기록한다.
+
+release PR #366의 source/CI, 운영 반영·사용자 UAT·태그/Release는 별도 gate이며
+이번 dev 통합 승인으로 자동 변경하지 않는다.
