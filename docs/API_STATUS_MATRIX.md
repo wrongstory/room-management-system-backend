@@ -1,5 +1,20 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 2026-10-05 #383 실제 사진 저장 이름 — 개발 후보
+
+사용자 결정에 따라 새 v9 Drive 사진 이름을 날짜·유형·호실·서버 고유 순번으로 구성한다.
+별도 [Issue #383](https://github.com/wrongstory/room-management-system-backend/issues/383)의
+[저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다. 신규 append migration은 private 불변 binding과
+service-only 명명 예약 RPC를 추가하며 공개 업로드 요청 계약과 기존 사진 ID/권한은 유지한다.
+기존 UUID 이름·이미 예약된 identity·legacy 유형은 유지하고 일괄 rename/move/delete하지 않는다.
+Node1547/69·Edge476/0·fresh102·대상SQL71·historical upgrade26 및 보완 후 전체SQL4789/80·KST145는 PASS다.
+최초 통합 `db:test`는 기존 developer 진단 head 기대값3건으로 FAIL했고 fixture 보완 후 전체SQL을 재검증했다.
+통합 명령 재실행 PASS로 표시하지 않는다. 기존 동시 처리6개 명령/cleanup과 독립 범위 QA98/100·신규 P0/P1/P2=0도 PASS다.
+최종 문서/tree와 새 exact-head CI를 확인한 뒤에도 #384 운영 차단 요소와 릴리스 gate를 별도로 판단한다.
+raw strict FAIL9와 사용자 승인 exact baseline PASS를 구분한다. production/main/recovery DB·실제 Drive·배포·UI/UAT는
+NOT RUN이다. #384 다중 사진 업로드 P1은 별도 운영 승격 차단 요소다. 기존 #323/#382 입력 순열 정합화도
+별도이며 이름 변경으로 완료 처리하지 않는다. 실제 백업·복원은 모든 개발 이후 후속으로 유지한다.
+
 ## 2026-10-03 #325 완료와 #324 후보
 
 #325 PR358 source78582789 → devd65f4f60는 exact-tree CI37093733970 application/migration PASS,

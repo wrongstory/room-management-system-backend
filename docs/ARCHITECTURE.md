@@ -468,6 +468,16 @@ flowchart LR
 
 developer 운영 상태는 `private` 원본이나 Supabase 내부 schema를 Edge에서 직접 직렬화하지 않습니다. DB catalog·Cron·감사 원장은 developer role을 다시 검증하는 app-owned `SECURITY DEFINER` projection을 거치고, Edge는 camelCase 응답과 안정적인 error code만 공개합니다. runtime secret은 소스 allowlist의 `configured` boolean만 반환하며 값·길이·해시·부분문자열은 반환하지 않습니다. Python 운영도구 연동은 [developer 운영 API 가이드](./DEVELOPER_OPERATIONS_API.md)를 따른다.
 
+## #383 사진 저장 이름 후보
+
+사진 provider identity는 계속 opaque app object ID와 preallocated Drive file ID로 연결한다.
+신규 v9 저장 이름만 `YYYY-MM-DD_일반방|폭탄방|특이사항_호실_번호.jpg|webp`로 구성하며
+private `photo_storage_names`에서 upload-date/room/slot/MIME/서버 순번과 함께 불변 보관한다.
+명명 예약은 기존 actor/session·admission·lease fence·folder winner를 재검증하는 service-only
+wrapper이며 외부 Drive create 전에 같은 transaction에서 확정한다. 기존 예약 RPC와 UUID 이름은
+보존하고 historical backfill/rename을 하지 않는다. generated Edge는 Node provider/validator를 공유한다.
+상세 배포 순서·이름 인식 rollback 제한 및 검증 상태는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
+
 ## 인증
 
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.

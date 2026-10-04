@@ -44,7 +44,8 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
       roomNumber: '101', uploadDate: new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10), providerFileId: null, providerFolderId: null }; data = operation('reserved', collectionItemId); }
     if (name === 'claim_admitted_photo_upload') data = operation('reserved', collectionItemId);
     if (name === 'get_photo_provider_context') data = context;
-    if (name === 'reserve_photo_provider_identity') { context = { ...context, providerFileId: args.p_provider_file_id, providerFolderId: args.p_provider_folder_id }; data = context; }
+    if (name === 'reserve_named_photo_provider_identity') { context = { ...context, providerFileId: args.p_provider_file_id, providerFolderId: args.p_provider_folder_id,
+      fileName: collectionItemId === null ? null : `${context.uploadDate}_일반방_101_01.jpg` }; data = context; }
     if (name === 'record_admitted_photo_provider_success') data = operation('provider_succeeded', collectionItemId);
     if (name === 'finalize_admitted_photo_upload' || name === 'get_admitted_photo_upload' || name === 'reconcile_admitted_photo_upload') data = operation('accepted', collectionItemId);
     if (name === 'authorize_photo_read') data = { photoId: id(7), providerFileId: 'provider_file_123', sha256: 'a'.repeat(64), mimeType: 'image/jpeg', sizeBytes: bytes.length, ...retention };
@@ -61,7 +62,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(reservations.map(args => args.p_candidate_folder_id)).toEqual(['candidate_date_123', 'candidate_room_123']);
     expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(1, expect.objectContaining({ folderId: 'provider_date_123' }));
     expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(2, expect.objectContaining({ folderId: 'provider_folder_123' }));
-    expect(s.calls.indexOf('reserve_photo_provider_identity')).toBeGreaterThan(s.calls.lastIndexOf('reserve_photo_drive_folder'));
+    expect(s.calls.indexOf('reserve_named_photo_provider_identity')).toBeGreaterThan(s.calls.lastIndexOf('reserve_photo_drive_folder'));
     expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'provider_file_123', folderId: 'provider_folder_123' }), expect.any(Uint8Array));
   });
   it('accepted replay allocates no new Drive identities', async () => {
@@ -82,7 +83,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
     expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
     expect(s.provider.ensureFolder).not.toHaveBeenCalled();
-    expect(s.calls).not.toContain('reserve_photo_provider_identity');
+    expect(s.calls).not.toContain('reserve_named_photo_provider_identity');
     expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'existing_file_123', folderId: 'existing_folder_123' }), expect.any(Uint8Array));
   });
   it.each([false, true])('replays the exact legacy JPEG hash after begin conflict only (collection=%s)', async collection => {
@@ -139,7 +140,7 @@ describe('photo application admission/provider/finalize boundary', () => {
   it('admission before decode, identity committed before provider, final allowlist only', async () => {
     const s = setup(); const result = await s.service.upload(request(), identity, id(3), id(4));
     expect(result.status).toBe('accepted'); expect(s.calls.slice(0, 3)).toEqual(['admit_photo_upload', 'decode', 'begin_admitted_photo_upload']);
-    expect(s.calls.indexOf('reserve_photo_provider_identity')).toBeLessThan(s.calls.indexOf('record_admitted_photo_provider_success'));
+    expect(s.calls.indexOf('reserve_named_photo_provider_identity')).toBeLessThan(s.calls.indexOf('record_admitted_photo_provider_success'));
     expect(s.provider.upload).toHaveBeenCalledOnce(); expect(JSON.stringify(result)).not.toMatch(/provider|session|claimDigest|sha256|test-key/);
     expect(result.quotaWarning).toBe(false);
     expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(1, { folderId: 'provider_date_123', parentFolderId: 'provider_root_123', name: new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10) });
@@ -227,6 +228,47 @@ describe('photo application admission/provider/finalize boundary', () => {
     const result = await s.service.slots(new Request('http://local/'), { ...identity, profileStatus: 'upload_only' }, id(3));
     expect(JSON.stringify(result)).not.toContain('do_not_expose'); expect(result).toMatchObject({ slots: [{ photoId: null }] });
   });
+  it.each(['일반방', '폭탄방', '특이사항'])('uses a frozen readable %s name only after read authorization', async category => {
+    const fileName = `2026-10-05_${category}_350_100.jpg`;
+    const s = setup(name => name === 'authorize_photo_read' ? { data: {
+      photoId: id(7), providerFileId: 'provider_file_123', sha256: 'a'.repeat(64),
+      mimeType: 'image/jpeg', sizeBytes: bytes.length, fileName, ...retention,
+    }, error: null } : undefined);
+    const res = await s.service.content(new Request('http://local/'), identity, id(7));
+    expect(res.headers.get('content-disposition')).toBe(`inline; filename="photo.jpg"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    expect(res.headers.get('access-control-expose-headers')).toBe('Content-Disposition');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(s.calls.filter(name => name === 'authorize_photo_read')).toHaveLength(2);
+    expect(res.headers.get('content-disposition')).not.toContain('provider_file_123');
+  });
+  it('denies corrupt or changed names before returning any protected bytes', async () => {
+    for (const fileNames of [['2026-10-05_일반방_350_01.jpg', '2026-10-05_폭탄방_350_01.jpg'], ['../secret.jpg', '../secret.jpg']]) {
+      let reads = 0;
+      const s = setup(name => name === 'authorize_photo_read' ? { data: {
+        photoId: id(7), providerFileId: 'provider_file_123', sha256: 'a'.repeat(64),
+        mimeType: 'image/jpeg', sizeBytes: bytes.length, fileName: fileNames[reads++], ...retention,
+      }, error: null } : undefined);
+      await expect(s.service.content(new Request('http://local/'), identity, id(7))).rejects.toMatchObject({
+        code: fileNames[0] === '../secret.jpg' ? 'PHOTO_UPLOAD_FAILED' : 'PHOTO_ACCESS_REQUIRED',
+      });
+      expect(s.provider.read).toHaveBeenCalledTimes(fileNames[0] === '../secret.jpg' ? 0 : 1);
+    }
+  });
+  it('pending named identity retry keeps its name and does not reserve a replacement', async () => {
+    let metadata: Record<string, unknown> = {};
+    const date = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+    const fileName = `${date}_폭탄방_101_100.jpg`;
+    const s = setup((name, args) => {
+      if (name === 'begin_admitted_photo_upload') metadata = args;
+      if (name !== 'get_photo_provider_context') return undefined;
+      return { data: { objectId: id(6), sha256: metadata.p_sha256, mimeType: metadata.p_mime_type, sizeBytes: metadata.p_size_bytes,
+        fileName, roomNumber: '101', uploadDate: date, providerFileId: 'existing_file_123', providerFolderId: 'existing_folder_123' }, error: null };
+    });
+    expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
+    expect(s.calls).not.toContain('reserve_named_photo_provider_identity');
+    expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileName }), expect.any(Uint8Array));
+  });
   it('accepts an empty slot without retention metadata and requires metadata for an existing hidden photo', async () => {
     const slotBase = { slotId: id(4), slotKey: 'tv', required: true, displayOrder: 0,
       maxPhotos: 1, collectionRevision: null, photoCount: 0 };
@@ -274,5 +316,8 @@ describe('photo application admission/provider/finalize boundary', () => {
     await expect(s.service.upload(req,identity,id(3),id(4),id(7))).resolves.toMatchObject({status:'accepted',photoItemId:id(7),collectionRevision:1,itemRevision:1});
     expect(s.calls.slice(0,3)).toEqual(['admit_photo_collection_upload','decode','begin_admitted_photo_collection_upload']);
     expect(s.calls).toContain('finalize_admitted_photo_upload');
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({
+      fileName: `${new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)}_일반방_101_01.jpg`,
+    }), expect.any(Uint8Array));
   });
 });

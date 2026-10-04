@@ -1367,7 +1367,7 @@ export const openApiDocument = {
         ),
         parameters: [photoPathId("photoId")],
         description:
-          "비밀번호 변경을 완료한 active business admin 또는 본인의 현재 유효 회차에 속한 active maid만 허용합니다. developer와 upload_only/deactivation_pending/과거 인계 회차의 원본 읽기는 금지합니다. provider bytes를 bounded download/SHA 검증한 뒤 응답 첫 byte 전에 session/ownership/7일 만료를 다시 확인합니다. redirect/Range/공개 URL은 지원하지 않으며 Cache-Control:no-store, nosniff, 서버 고정 filename만 반환합니다.",
+          "비밀번호 변경을 완료한 active business admin 또는 본인의 현재 유효 회차에 속한 active maid만 허용합니다. developer와 upload_only/deactivation_pending/과거 인계 회차의 원본 읽기는 금지합니다. provider bytes를 bounded download/SHA 검증한 뒤 응답 첫 byte 전에 session/ownership/보존 만료를 다시 확인합니다. redirect/Range/공개 URL은 지원하지 않으며 Cache-Control:no-store, nosniff, 서버 고정 filename만 반환합니다. 새 사진의 불변 날짜·유형·호실·순번 이름은 UTF-8 filename*로 제공하고 legacy는 photo.jpg/webp를 유지합니다. client가 파일명을 지정할 수 없습니다.",
         responses: {
           ...photoOperation("unused", "unused", "PhotoUploadOperation")
             .responses,
@@ -1377,6 +1377,11 @@ export const openApiDocument = {
             headers: {
               "Cache-Control": noStoreHeader,
               "X-Content-Type-Options": { schema: { const: "nosniff" } },
+              "Content-Disposition": {
+                description:
+                  "서버 검증 이름만 사용합니다. 새 사진은 날짜_유형_호실_번호 UTF-8 filename*, legacy는 photo.jpg/webp이며 Drive 원문 헤더나 locator를 전달하지 않습니다.",
+                schema: { type: "string" },
+              },
             },
             content: {
               "image/jpeg": { schema: { type: "string", format: "binary" } },

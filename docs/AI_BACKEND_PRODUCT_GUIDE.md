@@ -774,7 +774,8 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 
 ### `[확정: #84 착수 승인]` 서버 중계·응답 유실 복구 경계
 
-- 파일명은 서버 사전발급 opaque app `object_id`이며 canonical photo version은 finalize에서 연결한다. Drive ID를 브라우저에 노출하지 않는다.
+- `[과거 구현 — #84, #383에서 신규 저장 이름 변경]` 기존 사진과 이미 예약된 identity의 파일명은 서버 사전발급 opaque app `object_id`다. 이를 일괄 개명하지 않으며 canonical photo version은 계속 finalize에서 연결한다. Drive ID를 브라우저에 노출하지 않는다.
+- `[확정 — 2026-10-05 사용자 결정, #383]` 새 v9 사진은 실제 Drive 저장 이름도 `YYYY-MM-DD_일반방|폭탄방|특이사항_호실_번호.jpg|webp`로 만든다. 날짜는 기존 KST 업로드 폴더 날짜, 유형은 동결된 `cleaning-proof|bomb-proof|issue-proof` 슬롯, 호실은 통보/Drive identity snapshot을 사용한다. 번호는 서버의 중복 없는 양수 순번이며 최소 2자리다(99 다음 100, 번호의 빈틈 허용). 최초 identity 예약과 같은 transaction에서 이름을 동결하고 재시도·응답 유실·reconciliation에서 재사용한다. client filename·고객 이름·직원 정보는 사용하지 않는다. 과거/기존 예약 UUID 이름과 유형이 확정되지 않은 legacy 슬롯은 유지한다. 표시 이름은 내부 ID·slot·room·CAS·소유권·retention 명세를 대체하지 않는다.
 - 이 변경의 source 계약에서 raw body는 5MiB까지이며 입력은 JPEG/WebP/HEIC/HEIF다. MIME/magic·전체 decode·방향 보정·metadata 제거·최종 JPEG/WebP 307200 bytes 이하 출력을 서버가 검증한다. 12MP/5000px 및 decoder frame/CPU/memory 상한은 기술상한이며, 이를 넘는 스마트폰 원본에는 앱 축소 또는 명확한 재촬영 안내가 필요하다. 운영 반영 전 기존 배포 API는 여전히 307200 bytes 입력 제한일 수 있다.
 - 서버가 preallocated identity/부모/MIME/size/실제SHA를 검증한 Google immutable `createdTime`을 최초 업로드 성공시각으로 사용한다. create에서 시간값을 지정하지 않고 응답 유실/409에서도 같은 clock을 복구한다. 원문 client 촬영시각·retry 수신시각으로 보존기한을 연장하지 않는다.
 - 사전예약 KST 폴더 날짜와 실제 provider 생성 날짜가 다르면 acceptance를 거부한다. 이미 생성된 identity는 move/rebind하지 않고 미수락 여부와 fence를 확인한 보상 경로만 사용한다.

@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'db_static_warning_remediation'
+    'photo_storage_names'
   ) ->> 'currentMigration',
-  'db_static_warning_remediation',
+  'photo_storage_names',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'db_static_warning_remediation'
+    'photo_storage_names'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -106,24 +106,24 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'db_static_warning_remediation';
+where name = 'photo_storage_names';
 
 delete from supabase_migrations.schema_migrations
-where name = 'db_static_warning_remediation';
+where name = 'photo_storage_names';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'db_static_warning_remediation'
+    'photo_storage_names'
   ) ->> 'currentMigration',
-  'auth_session_hard_expiry',
+  'db_static_warning_remediation',
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'db_static_warning_remediation'
+    'photo_storage_names'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'
