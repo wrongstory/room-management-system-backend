@@ -1,5 +1,7 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> [확정] 2026-10-04 #373 A안: #363의 의도적인 호환 인자9개는 그대로 유지하고 다른 경고8개를 별도 append로 보완한다. 원본 strict lint FAIL은 계속 표시하며 정확한 warning/catalog/source 기준의 비교 gate만 별도 판정한다. 조회 snapshot STABLE과 명령 fresh guard VOLATILE을 분리하고 PIN 잠금·FOUND·알림 발송·권한 검사를 보존한다. [계약·실제 검증 checkpoint](./DB_STATIC_WARNING_BASELINE.md)를 따른다. #329·고정 v0.8.0 후보·main/운영 배포를 섞지 않으며 이번 승인은 병합/배포를 포함하지 않는다.
+
 > 2026-10-03 최신 구현 상태: #331은 PR361/source087407b → dev eb1ec3e로 통합됐다(required CI37111364892·독립 QA98). #329의 기존 로그인 계약과 승인된 중간 릴리스에 선행하는 [#352 공용 세션 강제 만료 검사](./AUTH_SESSION_HARD_EXPIRY.md)는 별도 100번째 append 후보다. 유효 session의 정의에 `not_after IS NULL OR not_after > statement_timestamp()`를 반영하며 기존 역할·capability·TTL·서버 전용 ACL을 바꾸지 않는다. Auth 설정·제한 계정 새 로그인·키·실제 PIN/송금은 변경하지 않는다. #329의 최초 제한 전환 세션 자격과 제출 RPC session binding을 구현했다고 표현하지 않는다. [#364 v0.8.0](https://github.com/wrongstory/room-management-system-backend/issues/364)는 별도 release/main 검증·병합 후 운영 승격하며 현재 source 검증을 운영/UAT 완료로 승격하지 않는다.
 
 > 2026-10-03 #331 사용자 최종 확정: 송금 표시는 실제 지급 원장과 분리한다. 새로운 on은 종료된 KST 주차·양수 지급 대상액에서만 허용한다. 표시 후 금액 근거가 바뀌어도 on을 유지하고, 관리자가 별도 재확인 완료를 저장한다. off는 오표시 정정이며 PAID·실제 지급·수익·재지급 가능 상태를 변경하지 않는다. [표시 계약](./PAYROLL_REMITTANCE_MARKER.md)을 따른다. 현재는 dev@8481e21/98 이후의 99번째 migration/API 구현 후보이며 기존 지급 계약·전역 프런트 snapshot·운영 상태는 그대로다.

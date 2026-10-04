@@ -1,5 +1,13 @@
 # 백엔드 서버 설계
 
+## #363/#373 DB warning 보완 후보
+
+기존 함수7개의 body-only append와 private owner-only STABLE developer snapshot guard를 추가한다.
+명령용 developer guard는 원문·VOLATILE을 유지하고, history/catalog는 statement 시각을 사용한다.
+PIN row lock/FOUND·검수 guard·overdue emitter는 실행을 보존한다. public signature·ACL·API shape와
+모든 테이블/원장/RLS를 변경하지 않는다. 원본 strict FAIL과 exact9 비교 PASS를 구분한다.
+[사용자 결정·시간/권한·검증 경계](./DB_STATIC_WARNING_BASELINE.md)를 따른다. 운영 변경은 아니다.
+
 ## #331 표시 전용 송금·재확인 구현 후보
 
 사용자는 종료된 KST 주차·양수 신규 on과 on 유지 별도 재확인을 확정했다.
