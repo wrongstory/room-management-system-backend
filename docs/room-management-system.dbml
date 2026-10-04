@@ -1,3 +1,7 @@
+// 2026-10-04 #363/#373 A candidate: seven function bodies + owner-only STABLE read guard.
+// Existing tables/columns/relationships/ACL/RLS/ledgers remain unchanged. Raw strict FAIL stays visible;
+// exact nine compatibility diagnostics/catalog/source fingerprints are a separate gate.
+// No #329/release/main/production change. See docs/DB_STATIC_WARNING_BASELINE.md.
 // 2026-10-03 latest: #325 PR358 source78582789 -> devd65f4f60, exact CI37093733970 PASS, QA98/100.
 // #324 candidate98 service-only read: separate actual earnings/workflow, frozen snapshots and exact old aggregate membership.
 // No ledger/receipt/PAID/photo retention changes; new read does not create tables/columns. See PAYROLL_WORK_DETAILS.md.

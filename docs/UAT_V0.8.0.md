@@ -2,7 +2,7 @@
 
 ## 상태·진행 원칙
 
-2026-10-03 KST **준비 문서 / 사용자 UAT NOT RUN**이다.
+2026-10-04 KST **준비 문서 / 사용자 UAT NOT RUN**이다. 최신dev의101 migrations 릴리스 검증부터 실제 운영 백업·보안 경로·배포·smoke·문서/태그/Release·프런트 인계까지 순차 진행 승인만 있으며 완료 기록은 아니다.
 [릴리스 런북](./RELEASE_V0.8.0.md)의 운영 DB·API/scheduler 배포와 안전한 smoke가 끝난 뒤 사용한다.
 현재 운영 화면은 [객실관리 앱](https://room-management-system-prod.vercel.app/)이다.
 프런트 담당자가 새 API를 아직 연결하지 않은 기능은 API 배포 성공과 화면 완료를 구분한다.
@@ -64,6 +64,7 @@ main `d509b44b1371f25d73891e04d355b0cb0e923f5f`다.
 공개HTML 1,842,858 bytes / blob `0d4c5e301d559c43eafcfb3c8af32802cfde5140` /
 SHA-256 `6f45a263cf9997e7a42db3a54d5e4cf14aa764a25acfe9e3995b4849f47836a3`의
 정적 parity만 확인했다. 이 값은 API/실제 화면/사람 UAT PASS 증거가 아니다.
+2026-10-04 15:27:46 KST 재확인도 같은 main/dev ref와 공개HTML byte exact다. 기존 maid submission readOnly 진입과 생성 직후 수동 취소 id/version 연결은 정적 구현돼 있으므로 전체 기능 미연결로 확대하지 않는다. 위 배정 행 취소 별칭과 새 canonical 계약의 연결 대기는 유지한다.
 실제 진행 때 배포 API source·Function version과 새 FE artifact를 다시 기록한다.
 
 실패 보고에는 아래 최소 정보만 남긴다.

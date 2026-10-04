@@ -1,13 +1,13 @@
 # 프론트엔드·Codex API 연동 가이드
 
-## v0.8.0 중간 릴리스 인계 — 2026-10-03
+## v0.8.0 중간 릴리스 인계 — 2026-10-04
 
 현재는 배포 준비 단계다. 실제 운영 제공/검증 여부는 [릴리스 기록](./RELEASE_V0.8.0.md)을 따른다.
 후보 계약은 OpenAPI0.6.0 137 paths/148 operations이며 운영131/141 대비 신규6 paths/7 operations다.
 아래 과거 후보·PENDING 문구는 각 시점 기록이지 현재 상태의 중복 정본이 아니다.
 
-#367/PR369와 #368/PR370은 dev e9fcc56에 통합됐다. source 진단 기준100과 Swagger build5/deploy10·실제 source137/148 회귀의 준비 완료는 hosted 진단·Pages 배포·artifact parity 완료가 아니다. 공개 Pages는 읽기 전용이며 이번 후보의 운영 API 제공·신규 프런트 연결·사용자 UAT는 여전히 NOT RUN이다. [현재 릴리스 checkpoint](./RELEASE_V0.8.0.md)를 따른다.
-scoped FE dev09ed284/main d509b44는 GitHub 재조회에서 같은 ref임을 확인했다. 전역 제품 snapshot은 갱신하지 않으며 아래 HTML 정적 parity 이력은 브라우저/사람 UAT를 대신하지 않는다.
+#367/#368 뒤 #363/#371은 dev e93869a에 통합됐다. source101·진단101과 Swagger build5/deploy10·실제 source137/148 회귀의 준비 완료는 hosted 진단·Pages 배포·artifact parity 완료가 아니다. 사용자는 릴리스부터 프런트 인계/UAT까지 순차 진행을 승인했지만 실제 운영 API 제공·신규 프런트 연결·사람 UAT는 여전히 NOT RUN이다. 프런트 개발은 프런트 담당자가 진행하며 [현재 릴리스 checkpoint](./RELEASE_V0.8.0.md)의 실제 gate를 따른다.
+scoped FE dev09ed284/main d509b44는 2026-10-04 15:27:46 KST GitHub 재조회에서도 같은 ref다. 운영HTML HTTP200/1,842,858bytes는 dev WIREFRAME/index.html과 byte exact다. 전역 제품 snapshot은 갱신하지 않으며 아래 정적 parity 이력은 브라우저/사람 UAT를 대신하지 않는다.
 
 | 프런트 연결 항목 | API/필드 | 계약 |
 |---|---|---|

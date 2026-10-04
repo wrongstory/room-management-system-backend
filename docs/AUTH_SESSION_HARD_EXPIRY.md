@@ -1,5 +1,7 @@
 # #352 공용 Auth session 강제 만료 검사
 
+> 2026-10-04 후속 릴리스 기준: #352 원본100 SQL은 변경하지 않는다. #363/#373의101 append는 dev에 통합됐으며 아래 strict17은 당시 이력이다. 최신 source 원본 strict FAIL9와 exact9 gate를 구분하고 실제 운영85에는 아직 미적용이다. 사용자가 승인한 #364 순차 릴리스와 새 exact 검증/백업·보안 경로 gate는 [런북](./RELEASE_V0.8.0.md)을 따른다.
+
 > 최종 source/dev: PR365 source576b0e5 → dev2f9736b, treeb41786cc 동일. exact-head CI37116122570 application/migration·전체26 upgrade/SQL78파일4640·KST145·full6 경합·fresh100 합성복구 PASS. 구현 미참여 독립 QA/countercheck의 신규 scope P0/P1/P2=0 후 보호 squash로 통합했다. 아래 실행 중 표현은 이전 checkpoint이며 strict17 FAIL/#363·운영 NOT RUN은 유지한다.
 
 ## 계약과 범위

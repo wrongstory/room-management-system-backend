@@ -1,6 +1,10 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
+import {
+  assertDeliveryDrainPredicateProbe, DELIVERY_DRAIN_PREDICATE_PROBE_SQL,
+  DELIVERY_DRAIN_SUMMARY_SQL, drainNotificationDeliveryFixtures,
+} from './notification-delivery-fixture-drain.mjs';
 
 const execFileAsync = promisify(execFile);
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -8,7 +12,7 @@ const assert = (condition, message) => { if (!condition) throw new Error(message
 const sql = value => execFileSync('docker', [
   'exec', '-i', 'supabase_db_room-management-system-backend', 'psql', '-X', '-A', '-t', '-q',
   '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', value,
-], { encoding: 'utf8', timeout: 15_000 }).trim();
+], { encoding: 'utf8', timeout: 15_000, stdio: 'pipe' }).trim();
 async function sqlAsync(value) {
   try {
     const { stdout } = await execFileAsync('docker', [
@@ -20,6 +24,10 @@ async function sqlAsync(value) {
 }
 
 export async function testNotificationDeliveryConcurrency(client) {
+  let predicateProbe;
+  try { predicateProbe = sql(DELIVERY_DRAIN_PREDICATE_PROBE_SQL); }
+  catch { throw new Error('Notification delivery fixture drain: PREDICATE_PROBE_EXECUTION_FAILED'); }
+  assertDeliveryDrainPredicateProbe(predicateProbe);
   const authUserId = randomUUID(), profileId = randomUUID(), sessionId = randomUUID(), subscriptionId = randomUUID();
   const notificationId = randomUUID(), groupId = randomUUID(), outboxId = randomUUID();
   const user = await client.auth.admin.createUser({ id: authUserId, email: `delivery-${randomUUID()}@test.invalid`, email_confirm: true });
@@ -43,17 +51,11 @@ export async function testNotificationDeliveryConcurrency(client) {
   // Earlier concurrency suites intentionally leave typed outbox work behind. Drain only
   // currently due work through the public bounded claim contract so this test's first
   // fanout race is not displaced by unrelated fixtures.
-  for (let pass = 0; pass < 100; pass++) {
-    const due = Number(sql(`select
-      (select count(*) from private.notification_delivery_jobs where status='pending')+
-      (select count(*) from private.notification_delivery_targets
-        where status in ('pending','retry','claimed') and next_attempt_at<=clock_timestamp()
-          and (status<>'claimed' or lease_expires_at<=clock_timestamp()))`));
-    if (due === 0) break;
-    const drain = await sqlAsync(`select public.claim_notification_deliveries('${digest(`drain:${randomUUID()}`)}',10)::text`);
-    assert(!drain.error, `bounded delivery fixture drain succeeds: ${drain.error}`);
-    assert(pass < 99, 'bounded delivery fixture drain converges');
-  }
+  await drainNotificationDeliveryFixtures({
+    readSummary: () => sql(DELIVERY_DRAIN_SUMMARY_SQL),
+    claim: limit => sqlAsync(`select public.claim_notification_deliveries('${digest(`drain:${randomUUID()}`)}',${limit})::text`),
+    report: message => console.log(message),
+  });
   sql(`begin;
     select set_config('app.notification_writer_mode','typed_v1',true);
     insert into private.notification_groups(id,recipient_profile_id,group_family,scope_kind,scope_id,started_at,ends_at)

@@ -1,6 +1,6 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
-## 최신 중간 릴리스 checkpoint — 2026-10-03
+## 최신 중간 릴리스 checkpoint — 2026-10-04
 
 아래 과거 후보·PENDING·운영 수치는 각 작성 시점의 이력이다. 현재 판정은 이 절과
 [v0.8.0 적용 기록](./RELEASE_V0.8.0.md)의 실제 readback을 우선한다.
@@ -14,17 +14,20 @@
 | #352 공용 session 강제 만료 검사 | PR365 source576b0e5 → dev2f9736b, exact tree·required CI·전체회귀·독립 QA PASS | 미배포, #329의 session membership/제출 binding 완료가 아님 |
 | #367 개발자 진단 기준 정합화 | PR369 → dev794c118, required CI·독립 QA PASS. manifest/runtime/RPC 기준100 일치; 신규 migration 없음 | 운영 진단 positive NOT RUN. RLS/ACL·drift를 정상으로 덮어쓰지 않음 |
 | #368 Swagger 유한 배포 budget·실제 source 회귀 | PR370 source6f2f2a4 → dev e9fcc56/tree78f9a1ad, CI37124760222 application/migration PASS·독립 targeted7 PASS/미해결 P0/P1/P2=0 | source 준비 완료; build5/deploy10, 137/148. hosted Pages 배포·artifact 검증 NOT RUN, 공개 포털은 읽기 전용 |
+| #363/#373 경고 보완·#371 fixture drain | PR374/dev a103db8, PR375 source64d7f33/dev e93869a(tree79aa15fe)·CI37172945251 application/migration·독립 QA98 PASS. source101·진단101, 원본 strict FAIL9/exact9 별도 gate | 운영85에는 미적용. 새101 release 전체 검증/CI/QA는 별도 |
 | #329 → #317 | 첫 점검 릴리스 이후 순차 구현 | 이번 v0.8.0 포함하지 않음 |
 
-릴리스 문서 갱신 직전 payload02ba91b에서 local quality1241/66은 PASS다. 앞 main-history bridge의
+사용자는 #364의 1~6단계 순차 진행을 승인했다. 새101 working Node1,444/Edge470/Python95·fresh101/exact9/local-synthetic복구·26 upgrades/SQL79파일4,718검사·static upgrade·KST145·전체6경합은 PASS다. 원본295개 raw SHA를 보존했다. working 독립 QA98/100·미해결 P0/P1/P2=0은 final exact-head CI/QA와 별도다. 실제 운영 백업/보안 실행 경로·protected main 병합/배포·smoke/문서/태그/Release·프런트 인계/사람 UAT는 아직 NOT RUN/BLOCKED다.
+
+과거 릴리스 문서 갱신 직전 payload02ba91b에서 local quality1241/66은 PASS다. 앞 main-history bridge의
 Edge470·fresh100·전체SQL78/4641·KST145 PASS와 같은 payload의 Python95·Ruff/format226·mypy25·codegen/build PASS는
 최종 release exact-head CI·전체 QA NOT RUN과 구분한다. local KST145·전체6 경합·합성 backup/recovery100/객실121은 PASS이며 실제 운영 백업/보안 DB 연결은 BLOCKED다.
 6문서 포함 working quality1241/66·manifest5·Edge470/fmt99/bundle17,520,051 bytes 재검증도 PASS지만 최종 commit/CI는 별도다.
 과거 PASS를 최종 release·운영 배포/UAT 완료로 재사용하지 않는다.
 
 현재 운영은 main1780728/v0.7.1, DB85·api38·scheduler16, OpenAPI0.6.0 131/141이다.
-목표 후보100·137/148은 아직 운영 inventory가 아니며 required CI·QA·release/main 병합 후에만
-pending15를 승격한다. 정확 운영 상태는 Function readback/hosted HTTP를 확인한다.
+목표 후보101·137/148은 아직 운영 inventory가 아니며 required CI·QA·실제 백업/보안 경로·release/main 병합 후에만
+pending16을 승격한다. 정확 운영 상태는 Function readback/hosted HTTP를 확인한다.
 기존 UI에서 점검할 사항과 API 준비/프런트 연결 대기는 [사용자 점검표](./UAT_V0.8.0.md)를 따른다.
 공개 프런트 HTML은 dev09ed284와 정적 byte parity만 확인했으며 실제 사용자 UAT PASS가 아니다.
 

@@ -2,11 +2,41 @@
 
 ## 현재 상태와 승인 범위
 
-2026-10-03 KST 작성 checkpoint다. 사용자는 정해진 개발 순서와 중간 릴리스의 운영 배포·문서·UAT를 승인했다.
+2026-10-04 KST 갱신 checkpoint다. 사용자는 1~6단계의 순차 릴리스 검증·실제 백업·보안 실행 경로·운영 배포·문서/태그/Release·프런트 인계/사용자 UAT를 승인했다.
 이 문서는 **릴리스 후보**이며 main 병합·운영 적용·사용자 UAT 완료 기록이 아니다.
 릴리스 [#364](https://github.com/wrongstory/room-management-system-backend/issues/364)의 최종 exact source와 실제 결과는 아래 표에 갱신한다.
 
-### 최신 준비 checkpoint — #367/#368 dev 통합 후
+### 최신 준비 checkpoint — #374/#375 dev 통합 후, 새 release 로컬 전체 검증 완료
+
+#363/#373 PR374는 dev `a103db80d4e849db64b79211cff2de96a00a7193`로,
+#371 PR375는 source `64d7f33ca93b97de97409774ecc72355ce00e75a`의
+[exact CI37172945251](https://github.com/wrongstory/room-management-system-backend/actions/runs/37172945251)
+application/migration PASS·독립 QA98 후 dev `e93869aadc082372e01253e729e6ddbabe2c83d3`로 통합됐다.
+PR375 source/dev tree `79aa15feaacd4dbf75820449c6e0109e84ec1040`는 같다.
+기존 release `5408c54e032273cdf300d90b91ebda38c9587a7c`에서 최신 dev를 정상 merge한다.
+제품 가이드/오케스트레이션 두 문서 충돌은 양쪽 이력과 최신 승인을 모두 보존해 해결한다.
+main의 기존85 migration은 85/85 Git blob 동일이고 기존 릴리스/UAT/recovery 문서·스크립트도 보존한다.
+101번째 append와 exact9/static-upgrade CI, bounded fixture drain만 새 dev 범위다. #329 PR372/#317은 제외한다.
+
+운영 읽기 전용 재확인(2026-10-04): PostgreSQL17.6·85 migrations/head `flat_cleaning_evidence_history_payroll`·121객실,
+public base RLS 누락0·확인한 ltree/GiST float index 후보0, `api` ACTIVE38·`reservation-scheduler` ACTIVE16이다.
+운영85 대비 새101 후보의 pending은16건이며 dev manifest pending23은 historical baseline78 기준이다.
+원본 strict는 FAIL9/exit1이고 승인된 exact9 warning/catalog/source gate만 별도 PASS 조건이다.
+기존 PR366 frozen source의 CI37127623239는 application PASS/migration FAIL이며 새 exact-head CI로 대체 검증해야 한다.
+변경 전 release Node1,241/66은 PASS지만 새101 후보의 전체 검증·독립 QA·CI 결과가 아니다.
+새 working 후보의 quality Node1,444/68·Edge470/fmt99/LFbundle17,440,775 bytes·Python95/Ruff/format226/mypy25/frozen codegen/build·manifest5는 실제 PASS다.
+원본585 application 파일 SHA 및 Edge353개 canonical source를 보존했다. fresh101 reset·exact9/catalog3 gate·local-synthetic101 backup/recovery도 PASS다.
+LF 검증본은101 canonical migration hash와295개 원본 raw SHA를 확인해 만들었고 원본 SQL/manifest를 변경하지 않았다.
+전체26 upgrades/SQL79파일4,718검사·100→101 static upgrade·KST145·전체6경합은 실제 PASS다. 알림 fixture drain checkpoint는93회/당시 현재 처리 가능 잔여0이며 실패 검사를 skip하지 않았다. 모든 gate 뒤 원본295개 raw SHA를 다시 확인했다. 새 final HEAD/CI·artifact/최종 QA와 구분한다.
+working 독립 QA는 보완 후98/100, 미해결 P0/P1/P2=0이며 새 exact-head final QA를 대체하지 않는다.
+새 후보를 고정한 호환 artifact/seal도 아직 NOT RUN이다. 아래 dev99/100 artifact는 과거 기록이다.
+
+실제 운영 백업·보안 direct/session 연결·finite executor/원자 history/응답손실 readback gate는 BLOCKED/NOT VERIFIED다.
+확인한 환경변수/표준 pgpass·pgservice/CLI linkage에는 연결 설정이 없고 다른 보안 저장소는 미확인이다.
+기존 복구 전용 프로젝트는 현재 INACTIVE이며 새 프로젝트·유료 리소스·기존 DB 비밀번호 reset을 임의 실행하지 않는다.
+이 gate를 합성 백업이나 관리 API 호출 접수로 대체하지 않는다. main·운영 DB/API·Pages·태그/Release·사람 UAT는 아직 NOT RUN이다.
+
+### 과거 준비 checkpoint — #367/#368 dev 통합 후
 
 문서 갱신 직전 release payload는 `02ba91bff6abbb7131556dae057db98db9b0a823`,
 tree `fd056b39b6e715fc3c48b589cca329d22f7186a3`다. 이것은 최종 문서 포함 HEAD나 운영 배포 source가 아니다.
@@ -59,9 +89,9 @@ main과의 과거 squash 분기 충돌81경로는 read-only merge-tree로 확인
 | 운영 HTTP / package | OpenAPI `0.6.0`, 131 paths / 141 operations; npm package `0.1.0` |
 | 릴리스 작업 시작점 | `release/v0.8.0`, dev `eb1ec3e99cfa56bca326064a6c0468714374df75`, source 99 migrations |
 | #352 dev 통합 당시 | [PR #365](https://github.com/wrongstory/room-management-system-backend/pull/365), source `576b0e5d2d98596eb082b4fee0875ef7ace235e1` → dev `2f9736b97825a38982db6456a3f9cc392bfce7d7`, tree `b41786cc435cdff12ed50b6a182c91084d082633` |
-| 최신 dev 통합 | #367 PR369 → dev794c118 후 #368 PR370 → dev `e9fcc564dfb4acd2cc4e175df7d1421dbb6b07e5`/tree78f9a1ad. 각 source/dev 완료와 release·운영 gate는 별도 |
+| 최신 dev 통합 | #374 → dev a103db80 후 #375 → dev `e93869aadc082372e01253e729e6ddbabe2c83d3`/tree79aa15fe. exact CI37172945251·독립 QA98 PASS; release·운영 gate는 별도 |
 | #352 CI checkpoint | exact-head run `37116122570`의 application / migration 모두 PASS. dev 병합과 release 자체의 검증은 별도다 |
-| v0.8.0 후보 | #352와 #367/#368을 최신dev에서 포함, 100 migrations / 운영85 대비 pending15. OpenAPI `0.6.0` / 137 paths / 148 operations. release 자체의 검증·운영 제공은 별도다 |
+| v0.8.0 후보 | #352/#367/#368/#363/#371을 최신dev에서 포함, 101 migrations / 운영85 대비 pending16. OpenAPI `0.6.0` / 137 paths / 148 operations. release 자체의 검증·운영 제공은 별도다 |
 
 Git 릴리스 v0.8.0, OpenAPI 0.6.0, package 0.1.0, 각 Function의 배포 version은 별도 식별자다.
 기존 [v0.7.1 기록](./RELEASE_V0.7.1.md)은 운영 main 원문 그대로 보존하고 이번 결과로 덮어쓰지 않는다.
@@ -80,6 +110,8 @@ Git 릴리스 v0.8.0, OpenAPI 0.6.0, package 0.1.0, 각 Function의 배포 versi
 | #324 work-details | 확정 earning과 미확정 workflow를 별도 stream으로 실제 FK·고정 snapshot·기존 집계의 기여 금액에서 조회한다. 기존 entries/receipt/cursor와 지급 원장은 유지한다. |
 | #331 송금 표시 | 실제 PAID와 별도의 on/off·이력을 저장한다. 새 on은 종료 KST 주차·양수 지급 대상에만 허용한다. 금액 근거 변경 뒤에도 on을 유지하고 별도 관리자 재확인을 요구한다. 은행 송금은 실행하지 않는다. |
 | #352 session hard expiry | 기존 session helper가 user/session과 `not_after`를 엄격히 검사한다. 행 정리 지연을 유효 권한으로 보지 않는다. 새 Auth 설정·TTL 연장·제한 계정 재로그인은 추가하지 않는다. |
+| #363/#373 DB 경고 보완 | 7개 함수 본문과 owner-only STABLE 조회 guard를 보완한다. PIN 잠금/FOUND·최신 명령 권한·알림 실행·RPC 호환 인자9개를 보존하며 실제 PIN 값은 변경하지 않는다. 원본 strict FAIL9와 exact9 비교 gate는 별도다. |
+| #371 검증 fixture drain | 테스트 전용 알림 작업을 bounded runner로 처리한다. 운영 scheduler/worker/Cron 동작을 변경하거나 실패를 skip하지 않는다. |
 
 후속 순서 #329 기존 로그인 session 한정 capability → #317 PIN 안전 진단 로그는 **이번에 포함하지 않는다**.
 프런트 구현, 새 provider/Google/Push/Cron 활성화, 실제 PIN 변경, 송금 테스트도 제외한다.
@@ -90,7 +122,7 @@ Git 릴리스 v0.8.0, OpenAPI 0.6.0, package 0.1.0, 각 Function의 배포 versi
 
 ## Pending migration과 데이터 영향
 
-운영85의 exact history/name/내용과 source100 manifest를 확인한 뒤 다음15건만 순서대로 적용한다.
+운영85의 exact history/name/내용과 source101 manifest를 확인한 뒤 다음16건만 순서대로 적용한다.
 번호는 source 순서이며, 기존 hosted history timestamp를 Git filename에 맞춰 고치라는 뜻이 아니다.
 
 | 순번 | source 파일 |
@@ -110,6 +142,7 @@ Git 릴리스 v0.8.0, OpenAPI 0.6.0, package 0.1.0, 각 Function의 배포 versi
 | 98 | `20261003042015_payroll_work_details_read.sql` |
 | 99 | `20261003064220_payroll_remittance_marker.sql` |
 | 100 | `20261003095426_auth_session_hard_expiry.sql` (#352 dev 통합 완료) |
+| 101 | `20261003231702_db_static_warning_remediation.sql` (#363/#373 dev 통합 완료) |
 
 - DDL·함수·제약·index/ACL, 알림 catalog, 기술 cursor singleton 등 **설치 상태**는 바뀐다. “DB/데이터 변경 없음”으로 기록하지 않는다.
 - 95는 nullable JSONB 두 컬럼을 추가한다. 과거 schedule/assignment의 누락 snapshot과 완료 receipt를 현재 예약으로 채우지 않는다.
@@ -118,12 +151,13 @@ Git 릴리스 v0.8.0, OpenAPI 0.6.0, package 0.1.0, 각 Function의 배포 versi
 - migration 자체의 과거 알림 backfill은 없다. 적용 후 실제 업무 command/scheduler는 현재 조건에 맞는 업무에 새 불변 알림 evidence·inbox·outbox를 만들 수 있다.
 - 93은 구 `cancel_manual_cleaning_request`의 service-role 직접 EXECUTE를 회수하고 session-bound wrapper를 사용한다. 새DB+구API, 구DB+새API 혼재는 취소 실패를 일으키므로 DB·adapter를 한 릴리스로 조정한다.
 - 100은 기존 helper predicate만 보강한다. Auth 설정·실제 session 행·업무 기한은 바꾸지 않는다. STABLE statement-clock만으로 모든 잠금 대기 중 만료까지 해결한 것으로 주장하지 않는다.
+- 101은 기존7 함수의 정확한 prosrc MD5/fragment와 일치할 때만 적용한다. PIN 두 함수의 `FOR UPDATE`/FOUND, 알림 side effect, 명령 VOLATILE guard를 보존한다. 새 helper는 owner-only이며 table/RLS/기존 RPC signature·ACL/OID를 바꾸지 않는다. 실제 운영 source drift면 중단하며 fingerprint를 임의 완화하지 않는다.
 
 ### 잠금·적용 도구의 미확인 gate
 
 pending source에는 일반 `CREATE INDEX`와 `ALTER TABLE ADD COLUMN`이 있다.
 일반 index 생성은 쓰기를 기다리게 하고, ALTER TABLE도 강한 잠금을 요구할 수 있다.
-제로 중단·운영 소요 시간·15건 일괄 원자 적용을 보장하지 않는다.
+제로 중단·운영 소요 시간·16건 일괄 원자 적용을 보장하지 않는다.
 ([PostgreSQL CREATE INDEX](https://www.postgresql.org/docs/17/sql-createindex.html), [ALTER TABLE](https://www.postgresql.org/docs/17/sql-altertable.html))
 
 선택할 hosted apply 도구의 hard timeout, 한 건의 SQL/history 기록 transaction 경계,
@@ -157,12 +191,13 @@ inbox/outbox는 본체와 같은 DB transaction이고 외부 push는 기존 work
 | 앞 mainbridge local Edge/DB/KST | PASS: Edge470/fmt99/bundle17,520,051 bytes, fresh100 `db:verify`, 전체SQL78/4,641 assertions, KST145. 이 실행을 최종 exact-head 전면 PASS로 확대하지 않음 |
 | local extended6 concurrency / 합성 backup | PASS: 실제 long-stay-clock145·전체6 concurrency·backup:dry-run. local-synthetic100/head auth_session_hard_expiry/객실121. 실제 운영 백업/재무 행 복구가 아니며 과거 #352 실행과 별도 |
 | 상태 정정 직전6문서 포함 working local 재검증 | PASS: quality1241/66·manifest5·Edge470/fmt99/bundle17,520,051 bytes. 이후 상태 문구 정정과 최종 commit/CI는 별도 |
-| release 최종 exact source 전체 검증 | NOT RUN: 최종 문서 포함 HEAD/tree의 전면 quality/Edge/Python·26 upgrades/전체SQL·KST·concurrency·history/advisors·exact-source 합성 복구. 위 개별 완료와 구분 |
+| 새101 working local 전체 검증 | PASS: quality1,444/68·Edge470·Python95·manifest5·fresh101·exact9/catalog3·합성복구·26 upgrades/SQL79파일4,718검사·static upgrade·KST145·전체6경합. 원본295 DB 검증 파일 raw SHA 보존, application585 SHA 불변. 운영 백업/운영 Advisor 판정이 아님 |
+| release 최종 exact source 전체 검증 | 최종 문서 포함 commit/CI·fresh exact-source 합성복구·새 recovery artifact/최종 QA는 후속 gate. working 검증 source 동일성과 위 과거100 개별 완료를 구분 |
 | main history/충돌 해결 보존 | 로컬 PASS: c90c1dc의 실제82 개별 충돌 해결·content tree 불변, #368 Swagger1 해결·최신dev source/blob 동등. 운영 main 승격 아님 |
 | release→main 최종 required checks·전체독립QA·리뷰/보호 규칙 | NOT RUN. feature QA와 main-hotfix 보존 검토만 완료 |
-| 호환 recovery artifact | local 격리 fmt/typecheck/old OpenAPI131/141/bundle PASS. 아래 외부 seal을 따른다. 실제 hosted 복구·retry는 NOT RUN |
+| 호환 recovery artifact | 과거 dev99 및 frozen5408 준비 기록만 있음. 새101 후보 고정 후 재생성/seal은 NOT RUN. 실제 DB/hosted 복구·retry도 NOT RUN |
 | 실제 운영 백업 / hosted apply·잠금/transaction/history | NOT VERIFIED / BLOCKED: 현재 보안 direct/session DB 연결 설정이 없으며 합성 백업으로 대체하지 않는다 |
-| 운영15건 적용·API/scheduler 배포·각 readback·Swagger Pages | NOT RUN |
+| 운영16건 적용·API/scheduler 배포·각 readback·Swagger Pages | NOT RUN |
 | hosted positive mutation·사람 UAT | NOT RUN. 미실행과 프런트 미연결은 [UAT](./UAT_V0.8.0.md)에서 구분한다 |
 
 과거 feature PASS/CI merge tree를 새 release exact-head PASS로 재사용하지 않는다.
@@ -171,14 +206,14 @@ inbox/outbox는 본체와 같은 DB transaction이고 외부 push는 기존 work
 
 ## 운영 런북
 
-1. #352/#367/#368이 통합된 최신dev를 후보에 반영하고15건/manifest·diff·scope와 main-hotfix 보존을 재확인한다. release 최종 문서 포함 exact HEAD/tree·전체 검증·독립QA·required checks·미해결 리뷰0 및 실제 운영 백업/보안 연결·도구 gate를 확인한 뒤 승인 범위에서 `release/v0.8.0 → main`을 squash한다. main/dev 직접 push와 보호 우회는 금지한다.
-2. merged main exact source를 확정한다. 운영 project identity·85건 head/parity·121실·API38/scheduler16·OpenAPI·주요 원장 건수를 다시 읽는다. 불일치면 중단한다. 승인 범위의 실제 백업과100 호환 recovery 절차를 확보하며 복구 전용 project를 dev DB로 바꾸지 않는다.
-3. 도구·잠금/timeout/transaction/history gate를 확인하고 필요한 짧은 업무 조정을 한다. pending86→100을 한 건씩 적용하고 **각 건 직후** history/name/내용·해당 schema/ACL/제약/index를 읽어 확인한다. 새API를 DB보다 먼저 배포하지 않는다.
-4. 100건 head `auth_session_hard_expiry`, RLS·service-only RPC·구 취소RPC 직접EXECUTE 거부·새 wrapper 존재·기존 원장/receipt 보존·Security Advisor를 확인한다. 기존 warning과 신규 finding을 분리한다.
+1. #352/#367/#368/#363/#371이 통합된 최신dev를 후보에 반영하고16건/manifest·diff·scope와 main-hotfix 보존을 재확인한다. release 최종 문서 포함 exact HEAD/tree·전체 검증·독립QA·required checks·미해결 리뷰0을 확인한다. 이 단계만으로 main 병합하지 않는다.
+2. 운영 project identity·85건 head/parity·121실·API38/scheduler16·OpenAPI·주요 원장 건수를 다시 읽는다. 불일치면 중단한다. main 병합 전에 승인 범위의 실제 운영 백업·격리 복원 근거와101 호환 recovery artifact를 확보한다. 복구 전용 project를 dev DB로 바꾸지 않는다.
+3. 보안 direct/session 실행 경로와 finite lock/statement/transaction/idle timeout·원자 SQL/history·응답손실 readback/retry를 실제 검증한다. 응답 유실 때 원 transaction이 아직 실행 중이면 history 미존재만으로 NOT_APPLIED를 판정하지 않는다. 원 backend 종료·rollback 확정 및 전체 pre-state 일치가 있어야 하며 혼합/미확정 상태는 UNKNOWN으로 중단한다.
+4. 위 gate를 모두 충족하면 승인 범위에서 `release/v0.8.0 → main`을 보호 squash하고 merged main exact source를 확정한다. main/dev 직접 push·보호 우회는 금지한다. 필요한 짧은 업무 조정 후 pending86→101을 한 건씩 적용하고 **각 건 직후** history/name/내용·해당 schema/ACL/제약/index를 읽는다. 최종101 head `db_static_warning_remediation`, RLS·service-only RPC·구 취소RPC EXECUTE 거부·새 wrapper·기존 원장/receipt 보존·Security Advisor를 확인한다. 원본 strict FAIL9/exact9 및 기존/신규 finding을 분리하고 새API를 DB보다 먼저 배포하지 않는다.
 5. exact merged main의 `api`와 `reservation-scheduler`를 배포한다. 기존 verify_jwt/static assets·secret/actor·Cron/provider 설정은 유지한다. **각 Function 직후** ACTIVE version·배포 시각/source 대응·health/실행 상태를 읽어 확인한다. 배포 접수만으로 성공 처리하지 않는다.
 6. health200·OpenAPI0.6.0/137/148과 새path/DTO·CORS·무인증/무효session 거부·no-store·scheduler heartbeat를 확인한다. 업무 데이터가 없는 positive는 NOT RUN이다. Swagger Pages를 같은 source로 갱신하고 공개 artifact를 읽어 확인한다.
-7. 아래 프런트 artifact를 재확인하고 [UAT](./UAT_V0.8.0.md)를 사용자가 실제 필요한 업무에서 선택적으로 진행한다. UI 미연결·데이터 없음·API 결함을 구분하며 결과/code/시각/request ID 등 안전한 정보만 남긴다.
-8. 운영 DB·API/scheduler·artifact·안전한 smoke 확인 뒤 승인 범위에서 v0.8.0 태그를 생성하고 Issue364/PR/이 문서를 실제값으로 갱신한다. GitHub Release 발행과 태그 생성은 별도 행위다.
+7. 운영 DB·API/scheduler·artifact·안전한 smoke 확인 뒤 승인 범위에서 v0.8.0 태그·GitHub Release를 발행하고 Issue364/PR/문서를 실제값으로 갱신한다. 태그와 Release는 별도 행위며 사용자 UAT 완료를 의미하지 않는다.
+8. 아래 프런트 artifact를 재확인하고 계약·[UAT](./UAT_V0.8.0.md)를 인계한다. 사용자가 실제 필요한 업무에서 선택적으로 점검하며 UI 미연결·데이터 없음·API 결함을 구분한다. 결과/code/시각/request ID 등 안전한 정보만 남기고 사람 UAT는 실제 수행 전 NOT RUN이다.
 
 ### 장애 시 중단·복구
 
@@ -213,15 +248,20 @@ manifest 안전 발행·allowlist 회귀 보완 이력은 #364에 보존한다. 
 scoped 기준은 `makee-ham/room-management-system`의 dev
 `09ed28446a4fd43919cddb29ebe442b848548ab8` / main
 `d509b44b1371f25d73891e04d355b0cb0e923f5f`다.
-현재 공개HTML은1,842,858 bytes, git blob `0d4c5e301d559c43eafcfb3c8af32802cfde5140`,
+2026-10-04 15:27:46 KST 읽기 전용 재확인에서도 main/dev ref는 같으며 공개HTML HTTP200·1,842,858 bytes, git blob `0d4c5e301d559c43eafcfb3c8af32802cfde5140`,
 SHA-256 `6f45a263cf9997e7a42db3a54d5e4cf14aa764a25acfe9e3995b4849f47836a3`와
 **정적 parity만** 확인했다. 전역 제품 snapshot 갱신·브라우저 UAT·실기기 PASS가 아니다.
+
+기존 fee/type/rolloverCount와 known-ID incident 상세·submission의 maid readOnly 진입은 정적 연결이 있다.
+새 canonical metadata/schedule/marker·reconfirm/adjustment-book/work-details/incident collection은 미소비다.
+취소는 생성 직후 id/version→expectedVersion 연결이 있지만 배정 행의 manualCleaningRequestId/targetVersion 별칭은
+backend cleaningTargetId/targetAssignmentVersion에 연결되지 않았다. 전체 수동 취소가 불가능하다고 단정하지 않는다.
 
 | 잔여 항목 | 이번 릴리스에서의 처리 |
 |---|---|
 | 신규 metadata/schedule·marker·adjustment-book·work-details·incident 목록 | 공개HTML은 신규 계약을 미소비한다. API 배포만으로 화면 완료를 선언하지 않는다. 프런트 담당의 generated client/연결 뒤 UAT한다 |
 | 취소 버튼 target ID/CAS | `cleaningTargetId`/`targetId`와 `targetAssignmentVersion`을 사용한다. FE의 별칭 `manualCleaningRequestId`/`targetVersion` 변환 gap이 있어 통보 후 취소 화면 성공은 별도 gate다 |
-| [#363](https://github.com/wrongstory/room-management-system-backend/issues/363) | strict DB lint는 기존10함수17warning으로 FAIL이다. 일반 WARN/ERROR Advisor0과 혼동하지 않고 기존 baseline으로 추적한다 |
+| [#363](https://github.com/wrongstory/room-management-system-backend/issues/363) / Decision373 | source/dev CLOSED completed. 이번101 append와 exact9 gate를 포함하되 source 원본 strict FAIL9/exit1은 유지한다. source100 strict17은 과거 checkpoint이며 운영85의 warning 수는 NOT VERIFIED다. 운영 적용 뒤 별도 검증한다 |
 | [#362](https://github.com/wrongstory/room-management-system-backend/issues/362) | 과거 room-move 단발CAS 실패를 추적한다. 이후 PASS만으로 원인 해결을 선언하지 않는다 |
 | [#334](https://github.com/wrongstory/room-management-system-backend/issues/334) | 기존Node 의존성 취약점 조사. 운영은 Supabase Edge만 사용하고 미보완 Fastify fallback은 금지한다 |
 | [#345](https://github.com/wrongstory/room-management-system-backend/issues/345) | 늦게 등록된 관리자 overdue push가 원event 기준24h TTL로 만료될 수 있다. inbox 보존/업무 비차단과 별개다 |

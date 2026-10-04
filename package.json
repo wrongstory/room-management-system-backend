@@ -26,6 +26,8 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:verify": "supabase db reset --local --no-seed",
+    "db:lint:baseline": "node scripts/check-db-lint-baseline.mjs",
+    "db:test:static-warning": "node scripts/test-db-static-warning-upgrade.mjs",
     "db:manifest:generate": "node scripts/generate-migration-manifest-dev.mjs",
     "db:manifest:generate:v0.5.0": "node scripts/generate-migration-manifest.mjs",
     "db:manifest:generate:v0.6.0": "node scripts/generate-migration-manifest-v0.6.0.mjs",

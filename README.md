@@ -5,20 +5,21 @@ TypeScript·Supabase 기반 객실·예약·청소·검수·주급 API입니다.
 
 ## 운영 상태와 중간 점검 릴리스
 
-2026-10-03 확인 기준입니다. 소스 구현·dev 통합·운영 배포·사용자 점검을 구분합니다.
+2026-10-04 확인 기준입니다. 소스 구현·dev 통합·운영 배포·사용자 점검을 구분합니다.
 
 | 구분 | 현재 확인 |
 |---|---|
 | 운영 | Git v0.7.1 / main1780728, DB85, api ACTIVE38, reservation-scheduler ACTIVE16 |
-| 개발 통합 | dev e9fcc56: #331/#352 및 #367 진단100·#368 Swagger budget 통합 완료, source DB100 |
+| 개발 통합 | dev e93869a: #331/#352/#367/#368/#363/#371 통합 완료, source DB101·진단101 |
 | 선행 보안 보완 | #352 / PR365: exact-head required CI·전체 회귀·독립 QA 통과 후 dev 통합. 운영 미적용 |
-| 중간 릴리스 | #364 / v0.8.0 준비 중. 목표 DB100·운영 대비 pending15, OpenAPI0.6.0 137 paths/148 operations |
+| 중간 릴리스 | #364 / PR366 / v0.8.0 최신dev 반영·검증 중. 목표 DB101·운영85 대비 pending16, OpenAPI0.6.0 137 paths/148 operations |
 | 이후 개발 | #329 기존 로그인 세션 한정 제한 업무 → #317 안전한 장애 진단 |
 
-#367/PR369는 dev794c118, #368/PR370는 dev e9fcc56으로 통합했고 각각 required CI·독립 QA를 통과했습니다.
-문서 갱신 직전 release payload는02ba91b입니다. 운영 main 이력의 후보 로컬 통합과 개별 검증을 기록했습니다.
-Python local95·Ruff/format·mypy·codegen/build는 PASS입니다. 최종 exact-head CI·전체 QA는 NOT RUN,
-local KST145·전체6 경합·합성 backup/recovery100/객실121은 PASS입니다. 실제 운영 백업 검증은 아닙니다.
+#374/dev a103db8과 #375/dev e93869a는 required CI·독립 QA를 통과했습니다.
+사용자는 릴리스 검증부터 실제 백업·보안 실행 경로·운영 배포·태그/Release·프런트 인계/UAT까지 1~6단계 순차 진행을 승인했습니다.
+새101 working 후보의 Node1,444·Edge470·Python95·fresh101·exact9·합성 복구·26 upgrades/SQL79파일4,718검사·static upgrade·KST145·전체6경합은 PASS입니다. 원본295개 raw SHA를 보존했습니다. working 독립 QA98/100·미해결 P0/P1/P2=0과 최종 exact-head CI/QA는 구분합니다.
+과거02ba91b/100의 local PASS는 새 후보나 실제 운영 백업 검증을 대신하지 않습니다.
+원본 strict FAIL9/exit1은 공개하고 승인된 exact9 baseline gate를 별도로 확인합니다.
 실제 운영 백업·보안 DB 연결/적용 도구는 BLOCKED/NOT VERIFIED이며 운영 DB/API·Pages·사람 UAT는 NOT RUN입니다.
 
 위 후보 수치를 운영 완료로 해석하지 않습니다. 운영 DB·API 승격은 release/main 필수 검증·독립 QA·protected 병합 후에만 진행합니다.
