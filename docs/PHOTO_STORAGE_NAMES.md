@@ -50,6 +50,52 @@ append migration을 먼저 적용한 뒤 새 API를 배포한다. 기존 API는 
 
 ## 검증 상태
 
+### 2026-10-05 #384 dev 통합 후 보강 후보
+
+#384 PR386은 dev `bb4fa40`에 보호 squash됐으며 #383은 해당 dev를 정상 merge한
+103 migration 후보에서 아래 누락 회귀를 보강했다. 기존 102 후보의 PASS로 대체하지 않는다.
+
+- `npm run ci:quality`: PASS, Node1,591/69파일, 기존 lint INFO5; typecheck/build/비밀 검사 포함.
+- `npm run edge:check`: PASS, 476/0, bundle17,527,955 bytes. 5개 manifest 검증 PASS.
+- Python ruff/format/mypy/pytest95/codegen/build-check PASS. 기존 binary/중복 schema codegen 경고는 유지한다.
+- 원본302개 raw SHA를 보존한 승인된 LF 임시본에서 fresh103/head 일치 PASS.
+- 저장 이름 SQL177: PASS. named/UUID accepted 보존 삭제와 never-accepted 보상/orphan의
+  실제 claim/context/retry/새 fence/404/replay, locator 제거와 이름·photo·acceptance·identity 이력 보존을 검사했다.
+- 새 실제 두 세션 예약 경합7개 및 fresh local cleanup PASS: 동일 재시도/상이 후보 충돌,
+  다른 operation 고유 번호·이름, old→named/named→old, password/session 변경. actor/lease/digest 음성 검사는 별도다.
+- fake-provider worker44 추가: Node 전체에 포함. 불확실 조회·accepted/compensated 무삭제,
+  immutable 이름/정확한 ID, 최신 보상 권한/fence, 응답 유실 재시도를 검사한다. 실제 Drive 검증이 아니다.
+- raw strict FAIL9/exit1, 승인된 exact9/catalog3 baseline gate PASS; local-synthetic 복원 PASS.
+- 전체 `npm run db:test`는 26 upgrades와 81파일/4,979 SQL assertions PASS다.
+  static upgrade100→101 및 KST5×29 검사도 PASS다. staged quality 재실행은 Node1,591/69파일,
+  secret859·OpenAPI137/148·typecheck/build PASS이며 기존 INFO5는 유지한다.
+- 전체8개 경합 첫 실행은 첫 reservation suite 안의 기존 offline fixture가 요청 전에 만료돼
+  `clock fixture has not expired before request`로 FAIL/exit1이었다. 나머지7개 aggregate 명령은
+  그 실행에서 NOT RUN이다. source·lease TTL·guard·assertion을 바꾸지 않고 fresh103 cleanup 후
+  같은 전체 명령을 1회 제한 재실행하여 **전체8개 명령과 최종 cleanup PASS/exit0**를 확인했다.
+  재실행 로그 SHA256은 `f69aef280d10879ff228bc6a6adb347c37a0163a1b92ad2f3431a050ce6aab68`이며
+  최초 FAIL(`22684856edadb0d20bb7f579a8f79e6025bb01bdbd2c7601ea9775a9ff73d568`)과 원 보고서를 보존한다.
+  Windows의 실제 Docker child 호출·직렬103 migration 재설정 관찰은 유한20분 안에 끝났다.
+  SQL/fixture/TTL/assertion/CI timeout 변경이나 세 번째 재시도는 없었다.
+- 최종 읽기 전용 metadata 확인은 migration103/head 일치·public RLS 누락0·객실121,
+  Auth/session/profile/target/photo operation/name binding0이다. 원본302 raw SHA와 실제 준비 규칙
+  (SQL/psql만 LF, 실행 스크립트·config 등은 raw copy) 대응 불일치0이며 이전8개 완료 로그 SHA도 일치한다.
+  [#388 준비시간/clock 보완](https://github.com/wrongstory/room-management-system-backend/issues/388)은 별도다.
+  최종 staged 독립 QA·새 exact-head CI·Ready·dev 병합은 아직 완료하지 않았다.
+
+보강 SQL 첫 실행은 fresh 업로드에 과거 domain 만료만 붙여 immutable `purge_after`와 충돌해
+`PHOTO_PURGE_TIME_INVALID`로 FAIL했다. guard를 유지하고 별도 INSERT-only historical named/UUID
+모델 fixture로 바꿨다. 재실행에서 누락된 historical admission/binding 및 PL/pgSQL local 변수
+qualification을 보완한 뒤 대상177이 통과했다. 세 실패 로그는 보존하며 실제 reservation RPC 회귀와
+historical owner-only cleanup fixture를 구별한다. immutable UPDATE·trigger 해제·기존 SQL 수정은 없다.
+orphan의 실제30일 enqueue/not-due를 먼저 검사하고 worker retry의 mutable queue clock만 합성 fast-forward한다.
+
+운영/복구 DB·Auth·API·실제 사진/PIN·Drive·백업/복원·태그는 변경하지 않았다.
+기존 v0.8.0 후보를 유지하며 최신 기능 운영 승격은 별도 [#387 v0.9.0](https://github.com/wrongstory/room-management-system-backend/issues/387)에서 추적한다.
+실제 백업/복원은 모든 backend 개발 후속이되 운영 배포 전 필수다. #382 배열 순서 정책은 별도 구현이다.
+
+### 과거 102 migration source 후보 checkpoint
+
 source 구현 후보의 검증 결과는 다음과 같다. 운영 완료나 Ready/병합 판정은 아니다.
 
 | 검증 | 실제 결과 |

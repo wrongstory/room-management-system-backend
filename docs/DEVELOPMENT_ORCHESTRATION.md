@@ -1,6 +1,28 @@
 # 개발 오케스트레이션·source 승인 기준
 
-## 2026-10-05 최신 진행과 사용자 결정
+## 2026-10-05 자동 운영 승격·최신 정책
+
+사용자가 운영 배포까지 자동 진행을 승인했다. 기존 v0.8.0 후보는 유지하고 최신 기능은 별도
+v0.9.0 [릴리스 #387](https://github.com/wrongstory/room-management-system-backend/issues/387)로 준비한다.
+#382는 입력 템플릿 배열 순서 제한 제거로 확정됐으며 종류·수량·중복·snapshot 검증은 유지한다.
+#336은 제출·승인 후 신고 허용이 확정됐고 신고 주체 등 최종 matrix는 별도 확인한다.
+
+#384는 exact source ae99532/tree643eacb의 CI37237806986 두 required checks 및 최종 독립 QA
+신규 P0/P1/P2=0을 확인하고 PR386으로 dev bb4fa40에 보호 squash했다. source/dev tree는 같다.
+이것은 운영 배포가 아니다. #383은 이 dev를 정상 merge하고 named 동시 예약·purge/보상·worker
+회귀를 보강하는 후보이다. combined103 fresh·저장 이름 SQL177·실제 예약 경합7 및 cleanup,
+Node1,591·Edge476·Python95·독립 범위 QA(신규 P0/P1/P2=0)는 PASS다. 전체26 upgrades/SQL81파일·
+4,979 및 static/KST145도 PASS다. 전체8경합 첫 실행은 기존 offline fixture의 요청 전 만료로
+FAIL이며 후속7 aggregate 명령은 그 실행에서 NOT RUN이다. 같은 source의 fresh103 cleanup 후
+1회 제한 재실행은 전체8명령/cleanup PASS·exit0다. 원본302 raw SHA/실제 임시본 대응 불일치0,
+최종103/head·RLS누락0·객실121·합성 Auth/session/profile/target/photo operation/name0을 확인했다.
+최초 FAIL을 보존하며 준비시간/clock 개선은 별도 #388이다. 새 exact-head CI·최종 독립 QA·Ready·dev 병합은 후속 gate다.
+다음은 테스트-only #388 기한 fixture 보완 → #382/#323 → #329 → #318 → #330 → #332 → #336 → 최종 release 검증이다.
+백업 개발·보안 입력 재시도·실제 Supabase 복사/복원은 전체 backend 개발 이후 후속이며 운영
+배포 전 필수다. 로컬 운영 backup 파일을 요구하지 않으며 승인된 recovery 격리·복원/FK 검증·
+성공 후 recovery-only 최소15일 Pause 조건을 유지한다.
+
+## 과거 2026-10-05 진행과 사용자 결정 checkpoint
 
 #322는 PR333의 source/dev 통합이 완료됐고, #323은 [Draft PR335](https://github.com/wrongstory/room-management-system-backend/pull/335)의
 source `9d17e5d68b0551148547e124c89788db61c7a9fb`에서 required application/migration CI37225838146가 모두 PASS다.
@@ -23,6 +45,9 @@ named 단독 purge/race 및 실제 Drive/운영 미실행은 [저장 이름 계�
 단 **운영 배포 전 백업·복원 검증은 필수**이며 생략하지 않는다. 이번 변경에서는 운영/복구 DB·Auth·PIN·API/Edge·
 Cron/provider·실제 Drive·frontend·Release/tag·실제 백업/복원을 변경하지 않았다.
 아래 개발 순서·중간 백업·Draft/통합 상태는 작성 당시의 snapshot이며 현재 순서와 경계는 이 절이 우선한다.
+
+### 과거 #384 구현 후보 checkpoint
+> 2026-10-05 현재 순서: #383 실제 저장 이름은 Draft PR #385/head `6884ec7`의 application·migration CI `37230502851` PASS이며 미병합이다. #384의 두 번째 사진 provider context 충돌은 dev `859f7cd`에서 별도102 append로 보완했다. 첫 syntax/기대 오류 분류 실패를 보완한 뒤 Node1,437·Edge474·Python95·fresh102·26 upgrades/SQL4,802·static/KST145·기존6+신규1 전체경합/cleanup·local 합성복원·warn 이상 advisors0·원본299 SHA 보존 PASS다. 독립 소프트웨어 QA PASS·신규 P0/P1/P2=0이며 새 exact-head CI, 최종 source/dev 승인·보호된 통합은 후속 gate다. 이후 #329 기존 PR #372의 최신 dev 통합·재검증 → #318 → #330 → #332 순서를 유지한다. [실제 검증과 남은 gate](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)를 따른다. 프런트 소스·운영 DB/API·복구 DB·실제 Drive·실제 백업·릴리스/태그는 변경하지 않는다. 실제 백업/복원은 모든 개발 이후 후속, 운영 배포 전 필수다. 아래 예전 순서/백업 선행/Draft 표현은 해당 시점의 기록이며 현재 완료로 승격하지 않는다.
 
 > 2026-10-04 최신 승인: 사용자가 #374 → #375의 dev 통합을 승인했다. #363/#373 PR #374는 source `8edc9fb1`의 required CI `37165344729` application/migration PASS·독립 QA98/100·미해결 P0/P1/P2=0을 확인하고 dev에 squash `a103db80d4e849db64b79211cff2de96a00a7193`로 병합했다. source/dev tree `4384747a650026c2359c309897f015441b49fb92`는 같다. 경고8개 보완 및 호환9개 exact baseline gate는 통합됐지만 원본 strict는 FAIL9/exit1을 유지한다. [계약과 과거 실행 기록](./DB_STATIC_WARNING_BASELINE.md)을 따른다. 아래 strict17/Draft/미병합 표현은 과거 checkpoint다.
 

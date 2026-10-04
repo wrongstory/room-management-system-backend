@@ -1003,6 +1003,15 @@ OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. `20260916090000_extra
 
 ## API 단계
 
+### 사진 provider context의 revision 축 (#384)
+
+현재 v9 flat evidence는 `cleaning-proof` 최소1/최대20장, 선택 `bomb-proof`/`issue-proof`
+각 최대10장이다. 위 v8 extra-proof-only 설명은 과거 계약이며 기존 snapshot은 보존한다.
+provider context는 ordinary의 current pointer CAS와 collection의 state/item CAS를 구분한다.
+최신 admitted actor/session·assignment·attempt lock·lease fence/status/quota를 유지하고,
+worker reconciliation에 business CAS를 새로 추가하지 않는다. 최신 함수의 CAS fragment만
+교체하는 append 전략과 후보/실제 검증 구분은 [#384 기록](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)을 따른다.
+
 현재:
 
 - `GET /health`

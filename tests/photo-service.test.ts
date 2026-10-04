@@ -321,3 +321,168 @@ describe('photo application admission/provider/finalize boundary', () => {
     }), expect.any(Uint8Array));
   });
 });
+
+describe('named and legacy reconciliation workers (fake provider only)', () => {
+  const variants = [
+    { label: 'named', fileName: '2026-10-05_특이사항_350_100.jpg' },
+    { label: 'legacy missing name', fileName: undefined },
+    { label: 'legacy null name', fileName: null },
+  ];
+  function worker(fileName: unknown, options: {
+    initialStatus?: string; recordedStatus?: string; failContextRead?: number;
+    compensationAllowed?: boolean;
+  } = {}) {
+    const rpcArgs: { name: string; args: Record<string, unknown> }[] = [];
+    let status = options.initialStatus ?? 'reconciliation_pending';
+    let contextReads = 0, leaseVersion = 0;
+    const s = setup((name, args) => {
+      rpcArgs.push({ name, args: { ...args } });
+      const projection = () => ({ ...operation(status, id(7)), leaseVersion });
+      if (name === 'reconcile_admitted_photo_upload') {
+        leaseVersion++;
+        return { data: projection(), error: null };
+      }
+      if (name === 'get_photo_reconciliation_context') {
+        if (++contextReads === options.failContextRead) {
+          return { data: null, error: { message: 'PHOTO_UPLOAD_FENCE_CONFLICT' } };
+        }
+        return { data: {
+          ...projection(), fileName, providerFileId: 'provider_file_123',
+          providerFolderId: 'provider_folder_123', sha256: 'a'.repeat(64),
+          mimeType: 'image/jpeg', sizeBytes: 100,
+          compensationAllowed: options.compensationAllowed ?? status === 'compensation_pending',
+        }, error: null };
+      }
+      if (name === 'record_admitted_photo_provider_success') {
+        status = options.recordedStatus ?? 'compensation_pending';
+        return { data: projection(), error: null };
+      }
+      if (name === 'settle_admitted_photo_compensation') {
+        status = 'compensated';
+        return { data: projection(), error: null };
+      }
+      return undefined;
+    });
+    return { ...s, rpcArgs };
+  }
+
+  describe.each(variants)('$label identity', ({ fileName }) => {
+    it.each(['accepted', 'compensated'])('returns terminal %s without inspecting or deleting', async initialStatus => {
+      const s = worker(fileName, { initialStatus });
+      const result = await s.service.reconcile(id(5));
+      expect(result.status).toBe(initialStatus);
+      expect(s.calls).toEqual(['reconcile_admitted_photo_upload']);
+      expect(s.provider.inspect).not.toHaveBeenCalled();
+      expect(s.provider.remove).not.toHaveBeenCalled();
+      expect(s.provider.upload).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).not.toMatch(/fileName|provider_file_123|claimDigest/);
+    });
+
+    it('inspects the frozen name and exact object before rechecking the compensation fence', async () => {
+      const s = worker(fileName);
+      const result = await s.service.reconcile(id(5));
+      expect(result.status).toBe('compensated');
+      expect(s.provider.inspect).toHaveBeenCalledExactlyOnceWith({
+        fileId: 'provider_file_123', folderId: 'provider_folder_123',
+        objectId: id(6), mime: 'image/jpeg', sha256: 'a'.repeat(64), sizeBytes: 100,
+        fileName: fileName ?? null,
+      });
+      expect(s.calls).toEqual([
+        'reconcile_admitted_photo_upload', 'get_photo_reconciliation_context',
+        'record_admitted_photo_provider_success', 'get_photo_reconciliation_context',
+        'settle_admitted_photo_compensation',
+      ]);
+      const claim = s.rpcArgs[0]?.args.p_claim_digest;
+      expect(claim).toMatch(/^[a-f0-9]{64}$/);
+      for (const call of s.rpcArgs.slice(1)) expect(call.args).toMatchObject({
+        p_operation_id: id(5), p_lease_version: 1, p_claim_digest: claim,
+      });
+      expect(s.provider.remove).toHaveBeenCalledExactlyOnceWith('provider_file_123');
+      expect(s.provider.upload).not.toHaveBeenCalled();
+      expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).not.toMatch(/fileName|provider_file_123|claimDigest/);
+    });
+
+    it.each([
+      { failure: 'mismatched metadata', code: 'PHOTO_PROVIDER_IDENTITY_CONFLICT', status: 409 },
+      { failure: 'missing exact identity (404)', code: 'PHOTO_PROVIDER_UNAVAILABLE', status: 503 },
+      { failure: 'uncertain provider response', code: 'PHOTO_PROVIDER_UNAVAILABLE', status: 503 },
+    ])('does not turn $failure into compensation permission', async ({ code, status }) => {
+      const s = worker(fileName);
+      vi.mocked(s.provider.inspect).mockRejectedValueOnce(new PhotoError(status, code));
+      await expect(s.service.reconcile(id(5))).rejects.toMatchObject({ code });
+      expect(s.calls).toEqual(['reconcile_admitted_photo_upload', 'get_photo_reconciliation_context']);
+      expect(s.provider.inspect).toHaveBeenCalledOnce();
+      expect(s.provider.remove).not.toHaveBeenCalled();
+      expect(s.provider.upload).not.toHaveBeenCalled();
+    });
+
+    it.each(['accepted', 'reconciliation_pending', 'provider_succeeded'])('does not delete after provider acknowledgement returns %s', async recordedStatus => {
+      const s = worker(fileName, { recordedStatus });
+      expect((await s.service.reconcile(id(5))).status).toBe(recordedStatus);
+      expect(s.provider.inspect).toHaveBeenCalledOnce();
+      expect(s.provider.remove).not.toHaveBeenCalled();
+      expect(s.calls.filter(name => name === 'get_photo_reconciliation_context')).toHaveLength(1);
+      expect(s.calls).not.toContain('settle_admitted_photo_compensation');
+    });
+
+    it('does not delete without the explicit permission in the latest compensation context', async () => {
+      const s = worker(fileName, { compensationAllowed: false });
+      expect((await s.service.reconcile(id(5))).status).toBe('compensation_pending');
+      expect(s.calls.filter(name => name === 'get_photo_reconciliation_context')).toHaveLength(2);
+      expect(s.provider.remove).not.toHaveBeenCalled();
+      expect(s.calls).not.toContain('settle_admitted_photo_compensation');
+    });
+
+    it.each([1, 2])('fails a stale context fence at read %s before deletion', async failContextRead => {
+      const s = worker(fileName, { failContextRead });
+      await expect(s.service.reconcile(id(5))).rejects.toMatchObject({ code: 'PHOTO_UPLOAD_FENCE_CONFLICT' });
+      expect(s.provider.inspect).toHaveBeenCalledTimes(failContextRead - 1);
+      expect(s.provider.remove).not.toHaveBeenCalled();
+      expect(s.calls).not.toContain('settle_admitted_photo_compensation');
+    });
+
+    it('settles an authorized exact-ID delete 404 as compensated, without creating another identity', async () => {
+      const s = worker(fileName, { initialStatus: 'compensation_pending' });
+      vi.mocked(s.provider.remove).mockResolvedValueOnce('not_found');
+      expect((await s.service.reconcile(id(5))).status).toBe('compensated');
+      expect(s.provider.remove).toHaveBeenCalledExactlyOnceWith('provider_file_123');
+      expect(s.rpcArgs.at(-1)).toMatchObject({ name: 'settle_admitted_photo_compensation', args: {
+        p_operation_id: id(5), p_lease_version: 1, p_outcome: 'not_found',
+      } });
+      expect(s.provider.inspect).not.toHaveBeenCalled();
+      expect(s.provider.upload).not.toHaveBeenCalled();
+      expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
+    });
+
+    it('keeps a failed delete unsettled and retries the same identity with a fresh DB fence', async () => {
+      const s = worker(fileName, { initialStatus: 'compensation_pending' });
+      vi.mocked(s.provider.remove)
+        .mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'))
+        .mockResolvedValueOnce('not_found');
+      await expect(s.service.reconcile(id(5))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+      expect(s.calls).not.toContain('settle_admitted_photo_compensation');
+      expect((await s.service.reconcile(id(5))).status).toBe('compensated');
+      expect(s.provider.remove).toHaveBeenNthCalledWith(1, 'provider_file_123');
+      expect(s.provider.remove).toHaveBeenNthCalledWith(2, 'provider_file_123');
+      const claims = s.rpcArgs.filter(call => call.name === 'reconcile_admitted_photo_upload');
+      expect(claims).toHaveLength(2);
+      expect(claims[1]?.args.p_claim_digest).not.toBe(claims[0]?.args.p_claim_digest);
+      expect(s.rpcArgs.at(-1)).toMatchObject({ name: 'settle_admitted_photo_compensation', args: {
+        p_operation_id: id(5), p_lease_version: 2,
+        p_claim_digest: claims[1]?.args.p_claim_digest, p_outcome: 'not_found',
+      } });
+      expect(s.provider.upload).not.toHaveBeenCalled();
+      expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(['../private.jpg', '2026-10-05_특이사항_350_100.webp'])('rejects corrupt filename %s before provider inspection or deletion', async fileName => {
+    const s = worker(fileName);
+    await expect(s.service.reconcile(id(5))).rejects.toMatchObject({ code: 'PHOTO_UPLOAD_FAILED' });
+    expect(s.calls).toEqual(['reconcile_admitted_photo_upload', 'get_photo_reconciliation_context']);
+    expect(s.provider.inspect).not.toHaveBeenCalled();
+    expect(s.provider.remove).not.toHaveBeenCalled();
+    expect(s.provider.upload).not.toHaveBeenCalled();
+  });
+});
