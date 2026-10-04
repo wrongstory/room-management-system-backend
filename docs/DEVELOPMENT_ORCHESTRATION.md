@@ -1,5 +1,29 @@
 # 개발 오케스트레이션·source 승인 기준
 
+## 2026-10-05 최신 진행과 사용자 결정
+
+#322는 PR333의 source/dev 통합이 완료됐고, #323은 [Draft PR335](https://github.com/wrongstory/room-management-system-backend/pull/335)의
+source `9d17e5d68b0551148547e124c89788db61c7a9fb`에서 required application/migration CI37225838146가 모두 PASS다.
+다만 #382 입력 배열 순열의 Fastify/Edge/schema 차이는 별도 P2 OPEN이며 #323 전체 종료·Ready·병합을 선언하지 않는다.
+
+#383은 사용자 요청에 따라 새 canonical v9 사진의 실제 저장 이름을 날짜·유형·호실·고유 순번으로 예약하는
+[Draft PR385](https://github.com/wrongstory/room-management-system-backend/pull/385)다. 구현 source `0c87076283990751a1afaec0642966752f0acb75`는
+정상 push됐고 로컬 기능/DB/기존 경합 회귀와 독립 범위 QA98/100·신규 P0/P1/P2=0이다.
+최초 통합 `db:test` FAIL과 보완 후 별도 whole SQL PASS, raw strict FAIL9와 승인 exact baseline PASS,
+named 단독 purge/race 및 실제 Drive/운영 미실행은 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
+문서 추가 등 head가 바뀌면 새 exact-head CI를 별도로 추적하며 이전 head PASS로 대체하지 않는다.
+이 기능은 기존 사진/이미 예약된 UUID 이름을 바꾸거나 입력 순열 명세를 대체하지 않는다.
+
+다음 순서는 #383 CI·미실행 범위 확인 → **#384 다중 사진 provider-context P1 별도 수정·검증** →
+#382/#323 종료 기준 정리 → 기존 후속 **#329 → #318 → #330 → #332**다.
+#384의 합성 재현9/9는 결함 확인 성공이지 기능 정상 통과가 아니며, 해결 전 사진 기능 운영 승격을 차단한다.
+프런트는 프런트 담당 범위이고, 기능·dev 통합·운영 배포·사용자 UAT 완료를 구별한다.
+
+사용자 최신 결정대로 실제 Supabase 백업·복원·비밀번호 입력은 모든 백엔드 개발 이후 후속이다.
+단 **운영 배포 전 백업·복원 검증은 필수**이며 생략하지 않는다. 이번 변경에서는 운영/복구 DB·Auth·PIN·API/Edge·
+Cron/provider·실제 Drive·frontend·Release/tag·실제 백업/복원을 변경하지 않았다.
+아래 개발 순서·중간 백업·Draft/통합 상태는 작성 당시의 snapshot이며 현재 순서와 경계는 이 절이 우선한다.
+
 > 2026-10-04 최신 승인: 사용자가 #374 → #375의 dev 통합을 승인했다. #363/#373 PR #374는 source `8edc9fb1`의 required CI `37165344729` application/migration PASS·독립 QA98/100·미해결 P0/P1/P2=0을 확인하고 dev에 squash `a103db80d4e849db64b79211cff2de96a00a7193`로 병합했다. source/dev tree `4384747a650026c2359c309897f015441b49fb92`는 같다. 경고8개 보완 및 호환9개 exact baseline gate는 통합됐지만 원본 strict는 FAIL9/exit1을 유지한다. [계약과 과거 실행 기록](./DB_STATIC_WARNING_BASELINE.md)을 따른다. 아래 strict17/Draft/미병합 표현은 과거 checkpoint다.
 
 > [#371 알림 fixture drain](./NOTIFICATION_DELIVERY_FIXTURE_DRAIN.md) PR #375의 기존 source `6177eb93`/100 migrations는 required CI `37168729600` application/migration PASS·독립 QA98이었다. 위 dev/101 통합본의 실제 local Node1,432·Edge470·Python95·fresh101·26 upgrades/SQL4,718·exact9 gate/static upgrade·KST145·6경합/cleanup·독립 QA98도 PASS다. 최종 drain93회/현재 처리 가능 잔여0이며 원본294개 raw SHA를 보존했다. 새 exact-head CI와 dev 병합은 commit 이후 후속 gate이며 최신 판정·source/dev mapping은 PR #375/#371에 기록한다. 기존100 PASS를 새101 통합본이나 동결 release PR #366의 PASS로 대체하지 않는다. #329 Draft PR #372·release/main·운영 DB/API·태그는 이번 dev 통합 승인 범위에서 변경하지 않는다. 아래 과거 checkpoint를 운영 완료로 해석하지 않는다.
