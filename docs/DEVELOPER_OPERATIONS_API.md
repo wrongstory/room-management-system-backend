@@ -29,6 +29,8 @@ business admin과 maid는 developer endpoint에서 항상 `403 DEVELOPER_REQUIRE
 
 ### DB
 
+- #367 source 진단 기준은 dev manifest와 실제 마지막 migration 이름인 `auth_session_hard_expiry`(100)다. runtime의 `source.expectedMigration`과 DB RPC의 `p_expected_migration_name`은 같은 서버 상수를 사용한다. 이전 92번째 `complaint_response_attention` 기준은 fresh100에서도 `ahead`로 판정되므로 사용하지 않는다.
+- Node 회귀는 `migration-manifest.dev.json`의 전체 이름 순서·head를 실제 SQL 파일과 대조하고 서버 진단 상수의 일치를 검사한다. 이후 migration 추가 시 manifest만 갱신하고 진단 기준을 누락하면 실패한다. timestamp history repair·새 migration·권한 변경은 없다. source 검증/CI·dev 통합과 운영 배포는 별도 상태다.
 - `migrationDrift=equal`이고 `rlsValid=true`이며 모든 `criticalRpcs`가 true일 때 정상이다.
 - migration identity는 적용 시점마다 달라질 수 있는 14자리 원격 version이 아니라 Git migration의 안정적인 `name`을 사용한다. `currentMigrationVersion`은 진단 정보일 뿐 source 동일성 판단에 사용하지 않는다.
 - `criticalRpcs`는 같은 이름의 함수 존재 여부가 아니다. 정본 exact signature가 존재하고 `service_role`만 실행할 수 있으며 `anon`·`authenticated`는 실행할 수 없어야 true다.

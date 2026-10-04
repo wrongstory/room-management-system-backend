@@ -1,7 +1,7 @@
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
 import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
-import { flatTemplateRequest, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
+import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
 
 // Validate the serialized document consumers receive, including $ref and 2020-12 tuples.
 const document = JSON.parse(JSON.stringify(openApiDocument));
@@ -14,6 +14,23 @@ const read = ajv.compile({
 });
 
 describe('cleaning template wire schema', () => {
+  it('keeps the six array permutations distinct without changing canonical slot fields', () => {
+    const before = JSON.stringify(flatTemplateRequest);
+    const cases = flatTemplateSlotPermutations();
+    expect(cases).toHaveLength(6);
+    expect(new Set(cases.map(({ body }) => body.slots.map((slot) => slot.slotKey).join(','))).size).toBe(6);
+    for (const { body } of cases) {
+      for (const slot of body.slots) {
+        expect(slot).toEqual(flatTemplateRequest.slots.find((canonical) => canonical.slotKey === slot.slotKey));
+      }
+    }
+    expect(JSON.stringify(flatTemplateRequest)).toBe(before);
+  });
+
+  it.each(flatTemplateSlotPermutations())('characterizes existing JSON Schema array order: $name (#382 remains unresolved)', ({ body, schemaAccepted }) => {
+    expect(validate(JSON.parse(JSON.stringify(body))), JSON.stringify(validate.errors)).toBe(schemaAccepted);
+  });
+
   it.each(['standard', 'premium', 'oceanPremium', 'oceanFamily'])('accepts initial and CAS v9 publication for %s', (roomTypeCode) => {
     for (const expectedVersion of [0, 9, 12]) {
       expect(validate({ ...flatTemplateRequest, roomTypeCode, expectedVersion }), JSON.stringify(validate.errors)).toBe(true);

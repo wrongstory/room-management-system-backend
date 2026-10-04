@@ -4,6 +4,304 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import type { PhotoService } from "../_shared/photo-service.ts";
 
+for (const stream of ["issues", "operation-blocks"] as const) {
+  Deno.test(`room pagination entry route: ${stream} validates query and page bounds`, async () => {
+    const status = stream === "issues" ? "open" : "actionable";
+    const path = `/v1/rooms/${roomId}/${stream}`;
+    const calls: Record<string, unknown>[] = [];
+    const dependencies: ApiHandlerDependencies = {
+      authenticateRequest: () => Promise.resolve(actor),
+      createClients: () =>
+        ({
+          admin: {
+            rpc(name: string, args: Record<string, unknown>) {
+              if (name === "record_authorization_denial") {
+                return Promise.resolve({ error: null, data: null });
+              }
+              assert(
+                name === (stream === "issues"
+                  ? "list_room_issues_page"
+                  : "list_room_operation_blocks_page"),
+                "page RPC only",
+              );
+              calls.push(args);
+              return Promise.resolve({
+                error: null,
+                data: {
+                  roomId,
+                  roomStateVersion: 3,
+                  evaluatedAt: "2026-09-20T00:00:00Z",
+                  items: [],
+                  hasMore: false,
+                  nextCursor: null,
+                },
+              });
+            },
+          },
+        }) as unknown as EdgeClients,
+    };
+    for (
+      const [query, limit] of [["", 50], [`status=${status}`, 50], [
+        "limit=1",
+        1,
+      ], [`status=${status}&limit=100`, 100]] as const
+    ) {
+      const response = await handleApiRequest(
+        request("GET", `${path}?${query}`),
+        dependencies,
+      );
+      assert(response.status === 200, `${query} accepted`);
+      assert(
+        response.headers.get("cache-control") === "no-store",
+        "success not cached",
+      );
+      assert(calls.at(-1)?.p_limit === limit, "bounded limit reaches RPC");
+      assert(calls.at(-1)?.p_status === status, "status reaches RPC");
+      assert(
+        calls.at(-1)?.p_actor_profile_id === actor.profileId,
+        "actor preserved",
+      );
+      assert(
+        calls.at(-1)?.p_session_id === "70000000-0000-4000-8000-000000000001",
+        "session preserved",
+      );
+    }
+    const count = calls.length;
+    for (
+      const [query, code] of [
+        ["limit=0", "ROOM_OPERATION_PAGE_LIMIT_INVALID"],
+        ["limit=101", "ROOM_OPERATION_PAGE_LIMIT_INVALID"],
+        ["limit=01", "ROOM_OPERATION_PAGE_LIMIT_INVALID"],
+        ["limit=1.5", "ROOM_OPERATION_PAGE_LIMIT_INVALID"],
+        ["limit=1e2", "ROOM_OPERATION_PAGE_LIMIT_INVALID"],
+        ["limit=", "ROOM_OPERATION_PAGE_LIMIT_INVALID"],
+        ["limit=9007199254740993", "ROOM_OPERATION_PAGE_LIMIT_INVALID"],
+        ["status=invalid", "INVALID_ROOM_OPERATION_QUERY"],
+        ["status=", "INVALID_ROOM_OPERATION_QUERY"],
+        [`status=${status}&status=${status}`, "INVALID_ROOM_OPERATION_QUERY"],
+        ["limit=1&limit=1", "INVALID_ROOM_OPERATION_QUERY"],
+        ["cursor=x&cursor=x", "INVALID_ROOM_OPERATION_QUERY"],
+        ["unknown=value", "INVALID_ROOM_OPERATION_QUERY"],
+        ["cursor=", "INVALID_ROOM_OPERATION_CURSOR"],
+        [`cursor=${"x".repeat(1025)}`, "INVALID_ROOM_OPERATION_CURSOR"],
+      ]
+    ) {
+      const response = await handleApiRequest(
+        request("GET", `${path}?${query}`),
+        dependencies,
+      );
+      assert(
+        response.status === 400 && await errorCode(response) === code,
+        `${query} uses stable error`,
+      );
+      assert(
+        response.headers.get("cache-control") === "no-store",
+        "error not cached",
+      );
+    }
+    assert(calls.length === count, "invalid query never reaches DB");
+    for (const role of ["maid", "developer"] as const) {
+      const response = await handleApiRequest(
+        request("GET", `${path}?limit=1`),
+        {
+          ...dependencies,
+          authenticateRequest: () => Promise.resolve({ ...actor, role }),
+        },
+      );
+      assert(response.status === 403, "non-admin denied");
+      assert(
+        response.headers.get("cache-control") === "no-store",
+        "role denial not cached",
+      );
+    }
+    assert(calls.length === count, "non-admin never reaches page RPC");
+    const passwordBlocked = await handleApiRequest(
+      request("GET", `${path}?limit=1`),
+      {
+        ...dependencies,
+        authenticateRequest: () =>
+          Promise.resolve({ ...actor, mustChangePassword: true }),
+      },
+    );
+    assert(
+      passwordBlocked.status === 403 &&
+        await errorCode(passwordBlocked) === "PASSWORD_CHANGE_REQUIRED",
+      "password change requirement preserved",
+    );
+    assert(
+      passwordBlocked.headers.get("cache-control") === "no-store",
+      "password denial not cached",
+    );
+    assert(calls.length === count, "password change never reaches page RPC");
+    for (const code of ["ACCOUNT_INACTIVE", "SESSION_REVOKED"]) {
+      const response = await handleApiRequest(
+        request("GET", `${path}?limit=1`),
+        {
+          ...dependencies,
+          authenticateRequest: () =>
+            Promise.reject(new EdgeError(401, code, "denied")),
+        },
+      );
+      assert(
+        response.status === 401 && await errorCode(response) === code,
+        "authentication denial preserved",
+      );
+      assert(
+        response.headers.get("cache-control") === "no-store",
+        "authentication denial not cached",
+      );
+    }
+    assert(calls.length === count, "invalid session never reaches page RPC");
+  });
+
+  Deno.test(`room pagination entry route: ${stream} traverses 125 rows with signed scoped continuation`, async () => {
+    const oldSecret = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET");
+    Deno.env.set(
+      "INSPECTION_CURSOR_HMAC_SECRET",
+      "synthetic-room-pagination-route-secret-123456",
+    );
+    try {
+      const ids = Array.from(
+        { length: 125 },
+        (_, index) =>
+          `50000000-0000-4000-8000-${String(125 - index).padStart(12, "0")}`,
+      );
+      const at = "2026-09-20T00:00:00Z";
+      const path = `/v1/rooms/${roomId}/${stream}`;
+      let calls = 0;
+      const dependencies: ApiHandlerDependencies = {
+        authenticateRequest: () => Promise.resolve(actor),
+        createClients: () =>
+          ({
+            admin: {
+              rpc(name: string, args: Record<string, unknown>) {
+                assert(
+                  name === (stream === "issues"
+                    ? "list_room_issues_page"
+                    : "list_room_operation_blocks_page"),
+                  "read page only",
+                );
+                calls++;
+                const cursorId = args.p_cursor_id;
+                const start = cursorId === null
+                  ? 0
+                  : ids.indexOf(String(cursorId)) + 1;
+                assert(
+                  cursorId === null || (start > 0 && args.p_cursor_at === at),
+                  "exact keyset forwarded",
+                );
+                const pageIds = ids.slice(start, start + Number(args.p_limit));
+                const hasMore = start + pageIds.length < ids.length;
+                return Promise.resolve({
+                  error: null,
+                  data: {
+                    roomId,
+                    roomStateVersion: 3,
+                    evaluatedAt: at,
+                    items: pageIds.map((id) =>
+                      stream === "issues"
+                        ? {
+                          id,
+                          category: "FACILITY",
+                          severity: "warning",
+                          blocksGuestAssignment: false,
+                          description: null,
+                          status: "open",
+                          reportedAt: at,
+                        }
+                        : {
+                          id,
+                          reasonCode: "MAINTENANCE",
+                          startsAt: at,
+                          endsAt: null,
+                          status: "active",
+                          createdAt: at,
+                        }
+                    ),
+                    hasMore,
+                    nextCursor: hasMore
+                      ? { occurredAt: at, id: pageIds.at(-1) }
+                      : null,
+                  },
+                });
+              },
+            },
+          }) as unknown as EdgeClients,
+      };
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let firstCursor = "";
+      for (let page = 0; page < 3; page++) {
+        const query = cursor === null
+          ? ""
+          : `?cursor=${encodeURIComponent(cursor)}`;
+        const response = await handleApiRequest(
+          request("GET", path + query),
+          dependencies,
+        );
+        assert(response.status === 200, "page reachable through entry route");
+        assert(
+          response.headers.get("cache-control") === "no-store",
+          "page not cached",
+        );
+        const body = await response.json();
+        seen.push(...body.items.map((item: { id: string }) => item.id));
+        assert(body.items.length === (page < 2 ? 50 : 25), "default page size");
+        assert(body.hasMore === (page < 2), "continuation accurate");
+        cursor = body.nextCursor;
+        if (page === 0) firstCursor = String(cursor);
+      }
+      assert(
+        cursor === null && JSON.stringify(seen) === JSON.stringify(ids),
+        "no omissions or duplicates",
+      );
+      const count = calls;
+      const otherStream = stream === "issues" ? "operation-blocks" : "issues";
+      const [payload, signature] = firstCursor.split(".");
+      assert(payload && signature, "signed continuation has two parts");
+      const forgedSignature = (signature[0] === "A" ? "B" : "A") +
+        signature.slice(1);
+      const forgedCursor = `${payload}.${forgedSignature}`;
+      assert(
+        forgedCursor.length === firstCursor.length &&
+          /^[A-Za-z0-9_-]{43}$/.test(forgedSignature),
+        "forgery retains canonical SHA-256 signature shape",
+      );
+      for (
+        const [target, value, profileId] of [
+          [path, `${firstCursor}x`, actor.profileId],
+          [path, forgedCursor, actor.profileId],
+          [`/v1/rooms/${roomTypeId}/${stream}`, firstCursor, actor.profileId],
+          [`/v1/rooms/${roomId}/${otherStream}`, firstCursor, actor.profileId],
+          [path, firstCursor, "20000000-0000-4000-8000-000000000002"],
+        ]
+      ) {
+        const response = await handleApiRequest(
+          request("GET", `${target}?cursor=${encodeURIComponent(value)}`),
+          {
+            ...dependencies,
+            authenticateRequest: () => Promise.resolve({ ...actor, profileId }),
+          },
+        );
+        assert(
+          response.status === 400 &&
+            await errorCode(response) === "INVALID_ROOM_OPERATION_CURSOR",
+          "tampered or cross-scope cursor rejected",
+        );
+        assert(
+          response.headers.get("cache-control") === "no-store",
+          "cursor error not cached",
+        );
+      }
+      assert(calls === count, "rejected cursors never reach DB");
+    } finally {
+      if (oldSecret === undefined) {
+        Deno.env.delete("INSPECTION_CURSOR_HMAC_SECRET");
+      } else Deno.env.set("INSPECTION_CURSOR_HMAC_SECRET", oldSecret);
+    }
+  });
+}
+
 Deno.test("photo failure logs only bounded status/code/request ID and preserves public error", async () => {
   const requestId = "10000000-0000-4000-8000-000000000001";
   const logs: unknown[][] = [];
@@ -602,9 +900,7 @@ Deno.test("attempt exact HTTP routes preserve maid-only CAS, denial logging and 
 
 Deno.test("assignment GET routes expose only own notified revisions and preserve superseded history", async () => {
   function readRequest(path: string) {
-    const result = request("GET", path);
-    result.headers.set("authorization", "Bearer synthetic-assignment-test");
-    return result;
+    return request("GET", path);
   }
   const maid = { ...actor, role: "maid" as const };
   const ownPast = "70000000-0000-4000-8000-000000000010";
@@ -637,6 +933,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
     },
   ];
   const queries: Array<Array<string>> = [];
+  const scheduleModes: unknown[] = [];
   function query(data: Array<Record<string, unknown>>) {
     const conditions: Array<(row: Record<string, unknown>) => boolean> = [];
     const filters: string[] = [];
@@ -659,6 +956,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
       },
       in: (_key: string, _values: unknown[]) => builder,
       order: (_key: string) => builder,
+      limit: (_maximum: number) => builder,
       // biome-ignore lint/suspicious/noThenProperty: PostgREST의 lazy thenable을 재현하여 await 시점에 누적된 RLS 대체 필터를 검사한다.
       then: (resolve: (value: unknown) => unknown) =>
         Promise.resolve({
@@ -666,6 +964,11 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             conditions.every((condition) => condition(row))
           ),
           error: null,
+          count: data.filter((row) =>
+            conditions.every((condition) =>
+              condition(row)
+            )
+          ).length,
         }).then(resolve),
     };
     return builder;
@@ -700,7 +1003,43 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             ? []
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
-      rpc: () => Promise.resolve({ data: null, error: null }),
+      rpc: (name: string, args: Record<string, unknown>) => {
+        if (name !== "get_assignment_schedule_read") {
+          return Promise.resolve({ data: null, error: null });
+        }
+        assert(
+          args.p_actor_profile_id === maid.profileId,
+          "same verified profile",
+        );
+        assert(
+          args.p_session_id === "70000000-0000-4000-8000-000000000001",
+          "verified live session",
+        );
+        assert(
+          args.p_expected_actor_role === "maid" ||
+            args.p_expected_actor_role === "admin",
+          "original role bound",
+        );
+        const ids = args.p_assignment_ids as string[];
+        assert(
+          ids.length > 0 && ids.length <= 100 &&
+            new Set(ids).size === ids.length,
+          "bounded exact IDs",
+        );
+        assert(
+          ids.every((id) => rows.some((row) => row.id === id)),
+          "no cross-ID hydration",
+        );
+        scheduleModes.push(args.p_include_current);
+        return Promise.resolve({
+          data: ids.map((assignmentId) => ({
+            assignmentId,
+            scheduleSnapshot: null,
+            currentDeparture: null,
+          })),
+          error: null,
+        });
+      },
     },
   } as unknown as EdgeClients;
   const dependencies: ApiHandlerDependencies = {
@@ -731,7 +1070,8 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
         row.notifiedAt !== null && row.maidProfileId === maid.profileId &&
         row.targetAssignmentVersion !== 999 &&
         row.roomId === base.notified_room_id_snapshot &&
-        row.roomNumber === "109"
+        row.roomNumber === "109" &&
+        row.scheduleSnapshot === null && row.currentDeparture === null
       ),
       "no unpublished, other owner, or current target version",
     );
@@ -742,6 +1082,10 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
       );
     }
   }
+  assert(
+    JSON.stringify(scheduleModes) === JSON.stringify([true, false, false]),
+    "current facts excluded from history modes",
+  );
   rows[0].notified_room_id_snapshot = null;
   rows[0].notified_room_number_snapshot = null;
   const legacy = await handleApiRequest(

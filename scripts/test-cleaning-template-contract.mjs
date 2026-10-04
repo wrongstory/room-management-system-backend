@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { flatTemplateRequest, historicalTemplateRequest, invalidFlatTemplateRequests } from '../tests/fixtures/cleaning-template-contract.ts';
+import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests } from '../tests/fixtures/cleaning-template-contract.ts';
 
 // Local synthetic rollback-only test. No remote connection string or service key.
 const literal = (value) => `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`;
@@ -22,6 +22,21 @@ const statements = [
       raise exception 'Expected rejection: %', expected;
     end $$;`
 ];
+// #382: direct DB publication normalizes every array order. Each isolated case
+// rolls its publication/receipt back so the existing initial/CAS/replay baseline
+// below is unchanged. This records existing DB behavior, not HTTP policy parity.
+for (const [index, { body }] of flatTemplateSlotPermutations().entries()) {
+  const publish = command(body, `permutation-${index}`);
+  statements.push('savepoint template_permutation;');
+  statements.push(`do $$ declare original jsonb; replay jsonb; begin
+    if private.normalized_checkout_template_slots(${literal(body.slots)}) is distinct from ${literal(flatTemplateRequest.slots)} then raise exception 'Permutation normalization failed'; end if;
+    original := ${publish};
+    if original->>'version' is distinct from '9' or original->'slots' is distinct from ${literal(flatTemplateRequest.slots)} then raise exception 'Permutation publication not canonical v9'; end if;
+    replay := ${publish};
+    if replay is distinct from original then raise exception 'Permutation receipt replay changed'; end if;
+  end $$;`);
+  statements.push('rollback to savepoint template_permutation;', 'release savepoint template_permutation;');
+}
 for (const roomTypeCode of ['standard', 'premium', 'oceanPremium', 'oceanFamily']) {
   const body = { ...flatTemplateRequest, roomTypeCode };
   const first = command(body, `flat-${roomTypeCode}`);
@@ -57,4 +72,4 @@ const result = spawnSync('docker', ['exec', '-i', 'supabase_db_room-management-s
 { input: statements.join('\n'), encoding: 'utf8' });
 if (result.error) throw result.error;
 if (result.status !== 0) throw new Error(result.stderr || `Local template contract failed (${result.status})`);
-console.log('Local DB template contract passed: four room types, initial/CAS/replay, 15 malformed requests, fresh pre-A rejection and existing v8 compatibility; rolled back.');
+console.log('Local DB template contract passed: six order-normalized publication/replay characterizations, four room types, initial/CAS/replay, 15 malformed requests, fresh pre-A rejection and existing v8 compatibility; rolled back. #382 HTTP parity remains unresolved.');

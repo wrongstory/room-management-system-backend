@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { openApiDocument } from '../supabase/functions/_shared/openapi.ts';
-import { flatTemplateRequest, historicalTemplateRequest, invalidFlatTemplateRequests } from '../tests/fixtures/cleaning-template-contract.ts';
+import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests } from '../tests/fixtures/cleaning-template-contract.ts';
 
 // Isolated pinned TS5 toolchain: openapi-typescript's peer range excludes the app's TS7.
 // Generated artifacts stay ignored; no application compiler override or frontend edits.
@@ -17,6 +17,10 @@ const source = [
   "import type { components } from './client.js';",
   "type Request = components['schemas']['PublishCleaningTemplateRequest'];",
   ...valid.map((body, index) => `const valid${index} = ${JSON.stringify(body)} satisfies Request;`),
+  // Inspect the precise v9 component, not the broader legacy request union whose
+  // generated array types cannot express minItems/maxItems. No parity claim.
+  ...flatTemplateSlotPermutations().map(({ name, body, schemaAccepted }, index) =>
+    `${schemaAccepted ? '' : `// @ts-expect-error #382 v9 canonical tuple order: ${name}\n`}const permutation${index} = ${JSON.stringify(body.slots)} satisfies components['schemas']['CheckoutCleaningTemplateV9Slots'];`),
   ...invalidFlatTemplateRequests().filter(([name]) => typeInvalid.has(name)).map(([name, body], index) =>
     `// @ts-expect-error ${name}\nconst invalid${index} = ${JSON.stringify(body.slots)} satisfies components['schemas']['CheckoutCleaningTemplateV9Slots'];`)
 ].join('\n');
@@ -30,4 +34,4 @@ run('npm', ['exec', '--yes', '--package=openapi-typescript@7.13.0', '--package=t
   'openapi-typescript', '.tmp/template-client/openapi.json', '-o', '.tmp/template-client/client.d.ts']);
 run('npm', ['exec', '--yes', '--package=typescript@5.9.3', '--', 'tsc', '--noEmit', '--strict', '--skipLibCheck',
   '--target', 'ES2023', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '.tmp/template-client/fixtures.ts']);
-console.log('Generated cleaning-template client: shared valid and invalid fixtures passed.');
+console.log('Generated cleaning-template client: shared fixtures and six v9 tuple order characterizations passed; #382 runtime parity remains unresolved.');

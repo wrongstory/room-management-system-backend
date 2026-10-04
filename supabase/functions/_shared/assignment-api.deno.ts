@@ -13,6 +13,7 @@ import {
 } from "./assignment-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError } from "./runtime.ts";
+import { parseAssignmentScheduleReads } from "./assignment-schedule-core.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -504,7 +505,12 @@ function request(
   return new Request(`http://localhost${path}`, {
     method,
     headers: {
-      authorization: "Bearer test-token",
+      authorization: "Bearer unit." +
+        btoa(
+          JSON.stringify({
+            session_id: "90000000-0000-4000-8000-000000000001",
+          }),
+        ) + ".unit",
       "content-type": "application/json",
       "idempotency-key": key,
     },
@@ -512,35 +518,54 @@ function request(
   });
 }
 
-function queryResult(data: unknown) {
+function queryResult(data: unknown, countOverride?: number | null) {
   const filters: Array<[string, unknown]> = [];
-  type Query = Promise<{ data: unknown; error: null }> & {
+  type Query = Promise<{ data: unknown; error: null; count: number | null }> & {
     select: (columns: string) => Query;
     eq: (column: string, value: unknown) => Query;
     not: (column: string, operator: string, value: unknown) => Query;
     in: (column: string, value: unknown[]) => Query;
     order: () => Query;
+    lt: (column: string, value: unknown) => Query;
+    limit: (value: number) => Query;
   };
   let query: Query;
-  query = Object.assign(Promise.resolve({ data, error: null }), {
-    select: (columns: string) => {
-      filters.push(["select", columns]);
-      return query;
+  query = Object.assign(
+    Promise.resolve({
+      data,
+      error: null,
+      count: countOverride === undefined
+        ? (Array.isArray(data) ? data.length : 0)
+        : countOverride,
+    }),
+    {
+      select: (columns: string) => {
+        filters.push(["select", columns]);
+        return query;
+      },
+      eq: (column: string, value: unknown) => {
+        filters.push([column, value]);
+        return query;
+      },
+      not: (column: string, operator: string, value: unknown) => {
+        filters.push([`not.${column}.${operator}`, value]);
+        return query;
+      },
+      in: (column: string, value: unknown[]) => {
+        filters.push([column, value]);
+        return query;
+      },
+      order: () => query,
+      lt: (column: string, value: unknown) => {
+        filters.push([`lt.${column}`, value]);
+        return query;
+      },
+      limit: (value: number) => {
+        filters.push(["limit", value]);
+        return query;
+      },
     },
-    eq: (column: string, value: unknown) => {
-      filters.push([column, value]);
-      return query;
-    },
-    not: (column: string, operator: string, value: unknown) => {
-      filters.push([`not.${column}.${operator}`, value]);
-      return query;
-    },
-    in: (column: string, value: unknown[]) => {
-      filters.push([column, value]);
-      return query;
-    },
-    order: () => query,
-  }) as Query;
+  ) as Query;
   return { query, filters };
 }
 
@@ -569,14 +594,24 @@ function readClients(
   options: {
     target?: Record<string, unknown>;
     schedules?: Record<string, unknown>[];
+    overdue?: unknown[];
+    count?: number | null;
+    attemptCount?: number | null;
+    attempts?: Record<string, unknown>[];
+    scheduleRead?: (
+      args: Record<string, unknown>,
+    ) => { data: unknown; error: { message: string } | null };
   } = {},
 ) {
-  const access = queryResult(rows);
+  const access = queryResult(rows, options.count);
+  const overdue = queryResult(options.overdue ?? []);
+  let accessReads = 0;
   const targets = queryResult([
     {
       id: targetId,
       room_id: roomId,
       cleaning_kind: "checkout",
+      source: "scheduled_checkout",
       original_service_date: "2026-09-03",
       effective_service_date: "2026-09-04",
       carryover_count: 4,
@@ -596,12 +631,15 @@ function readClients(
   const maids = queryResult([
     { id: maid.profileId, display_name: "메이드" },
   ]);
-  const attempts = queryResult([{
-    id: "60000000-0000-4000-8000-000000000001",
-    assignment_id: assignmentId,
-    attempt_number: 1,
-    status: "field_completed",
-  }]);
+  const attempts = queryResult(
+    options.attempts ?? [{
+      id: "60000000-0000-4000-8000-000000000001",
+      assignment_id: assignmentId,
+      attempt_number: 1,
+      status: "field_completed",
+    }],
+    options.attemptCount,
+  );
   const submissions = queryResult([{
     cleaning_attempt_id: "60000000-0000-4000-8000-000000000001",
     version: 1,
@@ -616,8 +654,33 @@ function readClients(
     }],
   );
   const clients = {
-    forAccessToken: () => ({ from: () => access.query }),
+    forAccessToken: () => ({
+      from: () =>
+        ++accessReads > 1 && options.overdue !== undefined
+          ? overdue.query
+          : access.query,
+    }),
     admin: {
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        assert(name === "get_assignment_schedule_read", "exact read-only RPC");
+        assert(
+          args.p_expected_actor_role === "admin" ||
+            args.p_expected_actor_role === "maid",
+          "bind initial adapter role to latest DB role",
+        );
+        assert(
+          args.p_session_id === "90000000-0000-4000-8000-000000000001",
+          "verified live session",
+        );
+        return options.scheduleRead?.(args) ?? {
+          data: (args.p_assignment_ids as string[]).map((assignmentId) => ({
+            assignmentId,
+            scheduleSnapshot: null,
+            currentDeparture: null,
+          })),
+          error: null,
+        };
+      },
       from(table: string) {
         if (table === "cleaning_targets") return targets.query;
         if (table === "cleaning_attempts") return attempts.query;
@@ -629,8 +692,149 @@ function readClients(
       },
     },
   } as unknown as EdgeClients;
-  return { clients, access, targets, maids, attempts, submissions, schedules };
+  return {
+    clients,
+    access,
+    overdue,
+    targets,
+    maids,
+    attempts,
+    submissions,
+    schedules,
+  };
 }
+
+Deno.test("today current list includes old unfinished with immutable snapshots and scoped bounded queries", async () => {
+  const pastId = "70000000-0000-4000-8000-000000000010";
+  const { clients, access, overdue } = readClients([
+    assignmentRow({ service_date: "2026-09-05" }),
+  ], {
+    overdue: [
+      assignmentRow({ id: pastId }),
+      assignmentRow({ maid_profile_id: otherMaid.profileId }),
+      assignmentRow({ notified_at: null }),
+    ],
+  });
+  let clockReads = 0;
+  const result = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-05"),
+    clients,
+    maid,
+    () => {
+      clockReads++;
+      return new Date("2026-09-04T15:00:00Z");
+    },
+  );
+  assert(clockReads === 1, "single KST clock snapshot");
+  assert(
+    result.length === 2 && result[0].assignmentId === pastId &&
+      result[0].serviceDate === "2026-09-04",
+    "original day retained and own notified only",
+  );
+  assert(
+    result[0].roomNumber === "101" && result[0].targetAssignmentVersion === 2,
+    "maid immutable notification projection",
+  );
+  assert(
+    overdue.filters.some(([key, value]) =>
+      key === "lt.service_date" && value === "2026-09-05"
+    ),
+    "past date DB predicate",
+  );
+  assert(
+    overdue.filters.some(([key, value]) =>
+      key === "not.cleaning_targets.status.in" &&
+      value === "(approved,cancelled)"
+    ),
+    "terminal past excluded in DB before max-row limit",
+  );
+  assert(
+    overdue.filters.some(([key, value]) =>
+      key === "select" &&
+      String(value).includes("cleaning_targets!inner(status)")
+    ),
+    "user RLS inner target join",
+  );
+  for (const scoped of [access, overdue]) {
+    assert(
+      scoped.filters.some(([key, value]) =>
+        key === "maid_profile_id" && value === maid.profileId
+      ),
+      "self DB scope on both reads",
+    );
+    assert(
+      scoped.filters.some(([key]) => key === "not.notified_at.is"),
+      "notified DB scope on both reads",
+    );
+    assert(
+      scoped.filters.some(([key, value]) => key === "limit" && value === 1000),
+      "technical cap",
+    );
+  }
+});
+
+Deno.test("tomorrow history and pre-KST-midnight reads never expand to past dates", async () => {
+  for (
+    const [path, instant] of [
+      ["/v1/assignments?serviceDate=2026-09-05", "2026-09-04T14:59:59.999Z"],
+      ["/v1/assignments?serviceDate=2026-09-06", "2026-09-04T15:00:00Z"],
+      [
+        "/v1/assignments?serviceDate=2026-09-05&includeHistory=true",
+        "2026-09-04T15:00:00Z",
+      ],
+    ]
+  ) {
+    const { clients, overdue } = readClients([assignmentRow()], {
+      overdue: [assignmentRow()],
+    });
+    assert(
+      (await listAssignments(
+        request(path),
+        clients,
+        admin,
+        () => new Date(instant),
+      )).length === 1,
+      "exact date response only",
+    );
+    assert(
+      overdue.filters.length === 0,
+      "no overdue lookup for exact date/history",
+    );
+  }
+});
+
+Deno.test("assignment reads fail closed on unknown excessive truncated main and related counts", async () => {
+  for (const count of [null, 1001, 2]) {
+    const { clients, targets } = readClients([assignmentRow()], { count });
+    const error = await captureEdgeError(() =>
+      listAssignments(
+        request("/v1/assignments?serviceDate=2026-09-04"),
+        clients,
+        admin,
+      )
+    );
+    assert(
+      error.status === 500 && error.code === "ASSIGNMENT_COMMAND_FAILED",
+      "safe existing error contract",
+    );
+    assert(
+      targets.filters.length === 0,
+      "no hydration after incomplete assignment read",
+    );
+  }
+  const { clients } = readClients([assignmentRow()], { attemptCount: 1001 });
+  const error = await captureEdgeError(() =>
+    listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-04"),
+      clients,
+      admin,
+    )
+  );
+  assert(
+    error.status === 500,
+    "never guess latest attempt from capped related history",
+  );
+});
 
 Deno.test("assignment path accepts only exact UUID history route", () => {
   assert(
@@ -844,6 +1048,151 @@ Deno.test("assignment cards count only rollover evidence visible at that revisio
   }
 });
 
+Deno.test("card cancellation is advisory admin/current only and checks all relevant started rows", async () => {
+  const target = {
+    source: "manual_room_request",
+    cleaning_kind: "additional",
+    status: "draft_assigned",
+    assignment_version: 999,
+    effective_service_date: "2026-09-09",
+    room_type_snapshot: {},
+    fee_snapshot: 0,
+  };
+  const scheduled = {
+    id: "latest",
+    assignment_id: assignmentId,
+    attempt_number: 3,
+    status: "scheduled",
+    started_at: null,
+  };
+  const cases = [
+    { attempts: [scheduled], allowed: true, reason: null },
+    {
+      attempts: [scheduled, {
+        ...scheduled,
+        id: "old",
+        status: "superseded",
+        started_at: "2026-09-01T01:00:00Z",
+      }],
+      allowed: true,
+      reason: null,
+    },
+    {
+      attempts: [scheduled, {
+        ...scheduled,
+        id: "started",
+        status: "in_progress",
+      }],
+      allowed: false,
+      reason: "CLEANING_REQUEST_CANCEL_CONFLICT",
+    },
+    {
+      attempts: [scheduled, {
+        id: "missing",
+        assignment_id: assignmentId,
+        status: "scheduled",
+        attempt_number: 1,
+      }],
+      allowed: false,
+      reason: "CAPABILITY_UNAVAILABLE",
+    },
+  ];
+  for (const candidate of cases) {
+    const { clients, attempts } = readClients([assignmentRow()], {
+      target,
+      attempts: candidate.attempts,
+    });
+    const result = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      admin,
+      targetId,
+    );
+    assert(
+      result[0].canCancel === candidate.allowed &&
+        result[0].cancelReasonCode === candidate.reason,
+      "exact-current full attempt guidance",
+    );
+    assert(
+      result[0].effectiveServiceDate === "2026-09-04" &&
+        result[0].feeSnapshot === 0 &&
+        result[0].roomTypeSnapshot?.code === null &&
+        result[0].sourceKind === "manual_room_request",
+      "no future date or live catalog fallback",
+    );
+    assert(
+      attempts.filters.some(([key, value]) =>
+        key === "select" && String(value).includes("started_at")
+      ),
+      "start proof selected",
+    );
+  }
+  for (const actor of [admin, maid]) {
+    const { clients } = readClients([assignmentRow({ is_current: false })], {
+      target,
+      attempts: [],
+    });
+    const result = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      actor,
+      targetId,
+    );
+    assert(
+      !result[0].canCancel &&
+        result[0].cancelReasonCode ===
+          (actor.role === "maid" ? "ADMIN_REQUIRED" : "ASSIGNMENT_NOT_CURRENT"),
+      "role/history deny guidance",
+    );
+  }
+});
+
+Deno.test("card raw snapshot optional attributes normalize like SQL without relaxing fresh canonical metadata", async () => {
+  for (
+    const raw of [
+      {},
+      { code: "", name: "", elevatorZone: "" },
+      { code: 1234, name: false, elevatorZone: ["A"] },
+      { code: null, name: {}, elevatorZone: null },
+    ]
+  ) {
+    const { clients } = readClients([assignmentRow()], {
+      target: { room_type_snapshot: raw },
+    });
+    const cards = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      admin,
+      targetId,
+    );
+    assert(
+      cards[0].roomTypeCode === null && cards[0].roomTypeName === null &&
+        cards[0].elevatorZone === null &&
+        JSON.stringify(cards[0].roomTypeSnapshot) ===
+          JSON.stringify({ code: null, name: null, elevatorZone: null }),
+      "raw optional metadata normalized without catalog fill",
+    );
+  }
+  for (const length of [101, 1001]) {
+    const name = "n".repeat(length);
+    const { clients } = readClients([assignmentRow()], {
+      target: { room_type_snapshot: { code: "a".repeat(101), name } },
+    });
+    const cards = await assignmentHistory(
+      request(`/v1/assignments/${targetId}/history`),
+      clients,
+      admin,
+      targetId,
+    );
+    assert(
+      cards[0].roomTypeName === name &&
+        cards[0].roomTypeSnapshot?.name === name &&
+        cards[0].roomTypeCode === "a".repeat(101),
+      "baseline valid historical display strings remain untruncated",
+    );
+  }
+});
+
 Deno.test("legacy notified assignment without a proven room snapshot remains null", async () => {
   const { clients, targets } = readClients([assignmentRow({
     notified_room_id_snapshot: null,
@@ -938,6 +1287,225 @@ Deno.test("admin draft save sends actor-bound CAS and request hash", async () =>
   assert(saved.assignmentId === assignmentId, "response allowlist");
 });
 
+const frozenSchedule = {
+  capturedAt: "2026-10-01T00:00:00Z",
+  scheduleRevision: 1,
+  scheduleReasonCode: "CHECKOUT_PLANNED",
+  sourceReservationVersion: 1,
+  plannedCheckoutAt: "2026-10-02T03:00:00Z",
+  actualCheckoutAt: null,
+  plannedRoomDepartureAt: null,
+  actualRoomDepartureAt: null,
+  nextCheckInAt: "2026-10-02T06:30:00Z",
+  nextRoomArrivalAt: "2026-10-02T06:30:00Z",
+  nextArrivalKind: "check_in",
+  isEarlyCheckIn: true,
+  isLateCheckout: true,
+  isScheduleUpdated: false,
+};
+
+Deno.test("schedule snapshot is frozen while current departure is explicit current-list only", async () => {
+  const modes: unknown[] = [];
+  const currentDeparture = {
+    evaluatedAt: "2026-10-02T03:00:00Z",
+    actualCheckoutAt: "2026-10-02T02:00:00Z",
+    actualRoomDepartureAt: null,
+  };
+  const { clients } = readClients([assignmentRow()], {
+    scheduleRead: (args) => {
+      assert(
+        args.p_actor_profile_id === maid.profileId,
+        "actor-bound schedule read",
+      );
+      assert(args.p_expected_actor_role === "maid", "bind original role");
+      assert(
+        JSON.stringify(args.p_assignment_ids) ===
+          JSON.stringify([assignmentId]),
+        "exact assignment IDs",
+      );
+      modes.push(args.p_include_current);
+      return {
+        data: [{
+          assignmentId,
+          scheduleSnapshot: frozenSchedule,
+          currentDeparture: args.p_include_current ? currentDeparture : null,
+        }],
+        error: null,
+      };
+    },
+  });
+  const current = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-04"),
+    clients,
+    maid,
+  );
+  assert(
+    JSON.stringify(current[0].scheduleSnapshot) ===
+      JSON.stringify(frozenSchedule),
+    "original frozen plan",
+  );
+  assert(
+    JSON.stringify(current[0].currentDeparture) ===
+      JSON.stringify(currentDeparture),
+    "separate actual fact",
+  );
+  const history = await assignmentHistory(
+    request("/history"),
+    clients,
+    maid,
+    targetId,
+  );
+  const included = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-04&includeHistory=true"),
+    clients,
+    maid,
+  );
+  assert(
+    history[0].currentDeparture === null &&
+      included[0].currentDeparture === null,
+    "never live hydrate history",
+  );
+  assert(
+    JSON.stringify(modes) === JSON.stringify([true, false, false]),
+    "explicit mode on every path",
+  );
+});
+
+Deno.test("schedule reads fail closed after latest DB authorization or malformed results", async () => {
+  for (
+    const [message, expected] of [
+      ["ASSIGNMENT_ACCESS_REQUIRED", "ASSIGNMENT_ACCESS_REQUIRED"],
+      ["SESSION_REVOKED", "SESSION_REVOKED"],
+      ["PASSWORD_CHANGE_REQUIRED", "PASSWORD_CHANGE_REQUIRED"],
+      ["unsafe SQL secret", "ASSIGNMENT_COMMAND_FAILED"],
+    ]
+  ) {
+    const { clients } = readClients([assignmentRow()], {
+      scheduleRead: () => ({ data: null, error: { message } }),
+    });
+    const error = await captureEdgeError(() =>
+      assignmentHistory(request("/history"), clients, maid, targetId)
+    );
+    assert(
+      error.code === expected && !error.message.includes("unsafe"),
+      "redacted DB authorization failure",
+    );
+  }
+  for (
+    const data of [
+      [],
+      [{
+        assignmentId: targetId,
+        scheduleSnapshot: null,
+        currentDeparture: null,
+      }],
+      [{
+        assignmentId,
+        scheduleSnapshot: { ...frozenSchedule, guestName: "private" },
+        currentDeparture: null,
+      }],
+      [{
+        assignmentId,
+        scheduleSnapshot: frozenSchedule,
+        currentDeparture: {
+          evaluatedAt: "2026-10-02T03:00:00Z",
+          actualCheckoutAt: null,
+          actualRoomDepartureAt: null,
+        },
+      }],
+    ]
+  ) {
+    const { clients } = readClients([assignmentRow()], {
+      scheduleRead: () => ({ data, error: null }),
+    });
+    const error = await captureEdgeError(() =>
+      assignmentHistory(request("/history"), clients, maid, targetId)
+    );
+    assert(
+      error.code === "ASSIGNMENT_COMMAND_FAILED",
+      "safe all-or-nothing history failure",
+    );
+  }
+});
+
+Deno.test("schedule reads reject adapter role changes during hydration", async () => {
+  for (
+    const [initialRole, latestRole] of [["admin", "maid"], [
+      "maid",
+      "admin",
+    ]] as const
+  ) {
+    const { clients } = readClients([assignmentRow()], {
+      scheduleRead: (args) => {
+        assert(
+          args.p_expected_actor_role === initialRole,
+          "expected original role",
+        );
+        assert(
+          args.p_expected_actor_role !== latestRole,
+          "changed role fails closed in DB",
+        );
+        return { data: null, error: { message: "ASSIGNMENT_ACCESS_REQUIRED" } };
+      },
+    });
+    const error = await captureEdgeError(() =>
+      assignmentHistory(request("/history"), clients, {
+        ...maid,
+        role: initialRole,
+      }, targetId)
+    );
+    assert(
+      error.status === 403 && error.code === "ASSIGNMENT_ACCESS_REQUIRED",
+      "never return partially hydrated elevated cards",
+    );
+  }
+});
+
+Deno.test("schedule pure boundary preserves legacy unknown and rejects partial/private/future facts", () => {
+  const row = { assignmentId, scheduleSnapshot: null, currentDeparture: null };
+  assert(
+    parseAssignmentScheduleReads([row], [assignmentId], false).get(assignmentId)
+      ?.scheduleSnapshot === null,
+    "legacy null",
+  );
+  const invalid: unknown[] = [
+    [],
+    [row, row],
+    [{ ...row, assignmentId: targetId }],
+    [{ ...row, scheduleSnapshot: { ...frozenSchedule, pin: "private" } }],
+    [{ ...row, scheduleSnapshot: { ...frozenSchedule, scheduleRevision: 0 } }],
+    [{
+      ...row,
+      scheduleSnapshot: {
+        ...frozenSchedule,
+        nextCheckInAt: "2026-02-30T01:00:00Z",
+      },
+    }],
+    [{
+      ...row,
+      currentDeparture: {
+        evaluatedAt: "2026-10-02T03:00:00Z",
+        actualCheckoutAt: "2026-10-02T04:00:00Z",
+        actualRoomDepartureAt: null,
+      },
+    }],
+  ];
+  for (const key of Object.keys(frozenSchedule)) {
+    const partial: Record<string, unknown> = { ...frozenSchedule };
+    delete partial[key];
+    invalid.push([{ ...row, scheduleSnapshot: partial }]);
+  }
+  for (const data of invalid) {
+    let rejected = false;
+    try {
+      parseAssignmentScheduleReads(data, [assignmentId], true);
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "malformed and private schedule data rejected");
+  }
+});
+
 Deno.test("assignment validation rejects malformed query and draft input", async () => {
   const cases = [
     request("/v1/assignments?serviceDate=2026-02-30"),
@@ -1030,6 +1598,189 @@ function commitCandidate(overrides: Record<string, unknown> = {}) {
 }
 
 const fingerprint = "a".repeat(64);
+const newReadMetadata = {
+  cleaningKind: "additional",
+  sourceKind: "manual_room_request",
+  roomTypeCode: null,
+  roomTypeName: null,
+  elevatorZone: null,
+  roomTypeSnapshot: { code: null, name: null, elevatorZone: null },
+  feeSnapshot: 0,
+  originalServiceDate: "2026-09-03",
+  effectiveServiceDate: "2026-09-04",
+  rolloverCount: 0,
+  rolloverReason: null,
+  canCancel: true,
+  cancelReasonCode: null,
+};
+
+Deno.test("new commit snapshot metadata and replay preserve long valid names without live hydration", async () => {
+  for (const length of [101, 1001]) {
+    const name = "n".repeat(length);
+    const payload = {
+      serviceDate: "2026-09-04",
+      impactFingerprint: fingerprint,
+      notifiedAssignments: [
+        commitCandidate({
+          ...newReadMetadata,
+          roomTypeName: name,
+          roomTypeSnapshot: { code: null, name, elevatorZone: null },
+          notifiedAt: "2026-09-03T12:00:00Z",
+        }),
+      ],
+      remainingDrafts: [],
+      blockedDrafts: [],
+      unassignedTargets: [],
+    };
+    let reads = 0;
+    const clients = {
+      admin: {
+        rpc: async () => {
+          reads++;
+          return { data: payload, error: null };
+        },
+      },
+    } as unknown as EdgeClients;
+    const body = {
+      serviceDate: "2026-09-04",
+      expectedImpactFingerprint: fingerprint,
+      items: [{
+        cleaningTargetId: targetId,
+        expectedAssignmentVersion: 2,
+        expectedAvailabilityVersion: 3,
+      }],
+    };
+    const first = await commitAssignments(
+      request("/v1/assignments/commit", "POST", body),
+      clients,
+      admin,
+    );
+    const replay = await commitAssignments(
+      request("/v1/assignments/commit", "POST", body),
+      clients,
+      admin,
+    );
+    assert(
+      reads === 2 && JSON.stringify(first) === JSON.stringify(replay),
+      "same immutable receipt mapper without live-table lookup",
+    );
+    assert(
+      first.notifiedAssignments[0].roomTypeName === name &&
+        first.notifiedAssignments[0].roomTypeSnapshot?.name === name,
+      "long canonical metadata retained",
+    );
+  }
+});
+
+Deno.test("commit projections whitelist new snapshot metadata on every collection and preserve legacy unknowns", async () => {
+  let response: Record<string, unknown> = {
+    serviceDate: "2026-09-04",
+    impactFingerprint: fingerprint,
+    committableDrafts: [
+      commitCandidate({ ...newReadMetadata, sourceKey: "private" }),
+    ],
+    blockedDrafts: [
+      commitCandidate({
+        ...newReadMetadata,
+        currentAvailabilityVersion: null,
+        reasonCodes: ["ASSIGNMENT_DRAFT_STALE_SCHEDULE"],
+      }),
+    ],
+    remainingUnassignedTargets: [{
+      ...newReadMetadata,
+      cleaningTargetId: targetId,
+      roomId,
+      roomNumber: "101",
+      serviceDate: "2026-09-04",
+      status: "unassigned",
+      targetAssignmentVersion: 3,
+      availableFrom: null,
+      dueAt: null,
+    }],
+  };
+  const clients = {
+    admin: { rpc: async () => ({ data: response, error: null }) },
+  } as unknown as EdgeClients;
+  const impact = await assignmentCommitImpact(
+    request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+    clients,
+    admin,
+  );
+  for (
+    const row of [
+      impact.committableDrafts[0],
+      impact.blockedDrafts[0],
+      impact.remainingUnassignedTargets[0],
+    ]
+  ) {
+    assert(
+      row.feeSnapshot === 0 && row.rolloverCount === 0 && row.canCancel &&
+        row.roomTypeSnapshot?.code === null,
+      "new exact metadata",
+    );
+  }
+  assert(!JSON.stringify(impact).includes("private"), "source key omitted");
+  response = {
+    ...response,
+    committableDrafts: [commitCandidate()],
+    blockedDrafts: [],
+    remainingUnassignedTargets: [],
+  };
+  const legacy = await assignmentCommitImpact(
+    request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+    clients,
+    admin,
+  );
+  assert(
+    legacy.committableDrafts[0].feeSnapshot === null &&
+      legacy.committableDrafts[0].rolloverCount === null &&
+      !legacy.committableDrafts[0].canCancel &&
+      legacy.committableDrafts[0].cancelReasonCode === "CAPABILITY_UNAVAILABLE",
+    "legacy remains unknown",
+  );
+  for (
+    const malformed of [
+      { canCancel: true },
+      { ...newReadMetadata, feeSnapshot: -1 },
+      {
+        ...newReadMetadata,
+        canCancel: true,
+        cancelReasonCode: "ADMIN_REQUIRED",
+      },
+      { ...newReadMetadata, rolloverCount: 1, rolloverReason: null },
+      { ...newReadMetadata, roomTypeSnapshot: {} },
+      {
+        ...newReadMetadata,
+        roomTypeSnapshot: { code: "", name: null, elevatorZone: null },
+      },
+      {
+        ...newReadMetadata,
+        roomTypeSnapshot: { code: 1234, name: null, elevatorZone: null },
+      },
+      {
+        ...newReadMetadata,
+        roomTypeSnapshot: { code: null, name: false, elevatorZone: null },
+      },
+      {
+        ...newReadMetadata,
+        roomTypeSnapshot: { code: null, name: null, elevatorZone: ["A"] },
+      },
+    ]
+  ) {
+    response = { ...response, committableDrafts: [commitCandidate(malformed)] };
+    const error = await captureEdgeError(() =>
+      assignmentCommitImpact(
+        request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+        clients,
+        admin,
+      )
+    );
+    assert(
+      error.status === 500 && error.code === "ASSIGNMENT_COMMAND_FAILED",
+      "malformed DB output is safe500",
+    );
+  }
+});
 
 Deno.test("assignment commit preflight is admin-only and projects safe impact", async () => {
   for (const actor of [maid, developer]) {

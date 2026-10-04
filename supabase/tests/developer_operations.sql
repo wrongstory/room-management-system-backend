@@ -1,6 +1,6 @@
 begin;
 
-select plan(32);
+select plan(33);
 
 insert into auth.users (id) values
   ('16000000-0000-4000-8000-000000000001'),
@@ -79,42 +79,51 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'db_static_warning_remediation'
   ) ->> 'currentMigration',
-  'flat_cleaning_evidence_history_payroll',
+  'db_static_warning_remediation',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'db_static_warning_remediation'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
 );
 
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'complaint_response_attention'
+  ) ->> 'migrationDrift',
+  'ahead',
+  'stale source expectation reproduces the misleading ahead classification'
+);
+
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'flat_cleaning_evidence_history_payroll';
+where name = 'db_static_warning_remediation';
 
 delete from supabase_migrations.schema_migrations
-where name = 'flat_cleaning_evidence_history_payroll';
+where name = 'db_static_warning_remediation';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'db_static_warning_remediation'
   ) ->> 'currentMigration',
-  'complaint_deadlines_non_blocking',
+  'auth_session_hard_expiry',
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'db_static_warning_remediation'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'

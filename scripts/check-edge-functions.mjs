@@ -11,10 +11,12 @@ const sourcePaths = [
   'supabase/functions/_shared/account-api.ts',
   'supabase/functions/_shared/availability-api.ts',
   'supabase/functions/_shared/assignment-api.ts',
+  'supabase/functions/_shared/assignment-schedule-core.ts',
   'supabase/functions/_shared/attempt-api.ts',
   'supabase/functions/_shared/attempt-lifecycle-api.ts',
   'supabase/functions/_shared/attempt-offline-api.ts',
   'supabase/functions/_shared/checkout-incident-api.ts',
+  'supabase/functions/_shared/checkout-incident-cursor.ts',
   'supabase/functions/_shared/cleaning-template-api.ts',
   'supabase/functions/_shared/cleaning-history-api.ts',
   'supabase/functions/_shared/work-history-api.ts',
@@ -32,6 +34,13 @@ const sourcePaths = [
   'supabase/functions/_shared/reservation-api.ts',
   'supabase/functions/_shared/payroll-cursor.ts',
   'supabase/functions/_shared/payroll-api.ts',
+  'supabase/functions/_shared/payroll-remittance-marker-core.ts',
+  'supabase/functions/_shared/payroll-remittance-marker-api.ts',
+  'src/modules/payroll/payroll-remittance-marker.ts',
+  'supabase/functions/_shared/payroll-work-details-core.ts',
+  'supabase/functions/_shared/payroll-work-details-api.ts',
+  'supabase/functions/_shared/payroll-work-details-cursor.ts',
+  'src/modules/payroll/payroll-work-details.ts',
   'supabase/functions/_shared/complaint-cursor.ts',
   'supabase/functions/_shared/complaint-api.ts',
   'supabase/functions/_shared/notification-cursor.ts',
@@ -51,11 +60,13 @@ const sourcePaths = [
   'supabase/functions/_shared/room-pin-sheet-sync.ts',
   'supabase/functions/api/index.ts',
   'supabase/functions/reservation-scheduler/index.ts',
+  'supabase/functions/_shared/scheduler-transition-count.ts',
   'supabase/functions/photo-purge/index.ts'
   ,'supabase/functions/notification-delivery/index.ts',
   'supabase/functions/room-pin-sheet-sync/index.ts'
 ];
 const testPaths = [
+  'supabase/functions/_shared/scheduler-transition-count.deno.ts',
   'supabase/functions/_shared/activity-api.deno.ts',
   'supabase/functions/_shared/account-api.deno.ts',
   'supabase/functions/_shared/availability-api.deno.ts',
@@ -64,6 +75,7 @@ const testPaths = [
   'supabase/functions/_shared/attempt-lifecycle-api.deno.ts',
   'supabase/functions/_shared/attempt-offline-api.deno.ts',
   'supabase/functions/_shared/checkout-incident-api.deno.ts',
+  'supabase/functions/_shared/checkout-incident-cursor.deno.ts',
   'supabase/functions/_shared/cleaning-template-api.deno.ts',
   'supabase/functions/_shared/cleaning-history-api.deno.ts',
   'supabase/functions/_shared/work-history-api.deno.ts',
@@ -77,6 +89,8 @@ const testPaths = [
   'supabase/functions/_shared/assignment-preview-api.deno.ts',
   'supabase/functions/_shared/reservation-api.deno.ts',
   'supabase/functions/_shared/payroll-api.deno.ts',
+  'supabase/functions/_shared/payroll-remittance-marker-api.deno.ts',
+  'supabase/functions/_shared/payroll-work-details-api.deno.ts',
   'supabase/functions/_shared/complaint-api.deno.ts',
   'supabase/functions/_shared/notification-api.deno.ts',
   'supabase/functions/_shared/web-push-binding-proof.deno.ts',
@@ -90,6 +104,7 @@ const testPaths = [
   'supabase/functions/_shared/room-pin-api.deno.ts',
   'supabase/functions/_shared/room-pin-sheet-operations-api.deno.ts',
   'supabase/functions/api/index.deno.ts'
+  ,'supabase/functions/api/checkout-incident-list.deno.ts'
   ,'supabase/functions/notification-delivery/index.deno.ts'
 ];
 

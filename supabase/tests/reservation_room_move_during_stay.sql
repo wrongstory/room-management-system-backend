@@ -1,7 +1,7 @@
 begin;
 \ir room_pin_fixture.psql
 
-select plan(94);
+select plan(109);
 
 select is((
   with scoped_tables as (
@@ -161,6 +161,50 @@ select is((select count(*) from public.cleaning_attempts attempt join public.cle
   on target.id=attempt.cleaning_target_id cross join move_context context
   where target.reservation_id=context.reservation_id and target.source='stay_room_move_checkout'),0::bigint,
   'future move does not create a cleaning attempt');
+select is((select (revision.reservation_schedule_snapshot->>'plannedRoomDepartureAt')::timestamptz
+  from public.cleaning_target_schedule_revisions revision join public.cleaning_targets target on target.id=revision.cleaning_target_id
+  cross join move_context context where target.reservation_id=context.reservation_id and target.source='stay_room_move_checkout'),
+  (select effective_at from move_context),'#328 future room departure freezes canonical source segment end');
+select is((select private.assignment_departure_fact_at(target,clock_timestamp())->'actualRoomDepartureAt'
+  from public.cleaning_targets target cross join move_context context
+  where target.reservation_id=context.reservation_id and target.source='stay_room_move_checkout'),
+  'null'::jsonb,'#328 planned future move is not an actual source-room departure');
+select is((select private.assignment_departure_fact_at(target,clock_timestamp())->'actualCheckoutAt'
+  from public.cleaning_targets target cross join move_context context
+  where target.reservation_id=context.reservation_id and target.source='stay_room_move_checkout'),
+  'null'::jsonb,'#328 room movement never becomes guest final checkout');
+select is((select revision.reservation_schedule_snapshot->'isLateCheckout'
+  from public.cleaning_target_schedule_revisions revision join public.cleaning_targets target on target.id=revision.cleaning_target_id
+  cross join move_context context where target.reservation_id=context.reservation_id and target.source='stay_room_move_checkout'),
+  'null'::jsonb,'#328 room move planned guest final checkout cannot produce a departure late badge');
+
+-- The destination's next room arrival is a canonical move, not the guest's
+-- original planned check-in. Create an actual source-less manual request in
+-- the still-vacant destination window; do not change either move source.
+insert into public.cleaning_template_versions(room_type_id,cleaning_kind,version,status,duration_minutes,
+  photo_slots,published_at,created_by)
+select room.room_type_id,'additional',1,'published',30,'[]'::jsonb,clock_timestamp(),
+  '8a100000-0000-4000-8000-000000000001'
+from public.rooms room cross join move_context context where room.id=context.target_room_id;
+select public.create_manual_cleaning_request('8a100000-0000-4000-8000-000000000001',
+  '328a0000-0000-4000-8000-000000003001',context.target_room_id,null,'additional',
+  (context.effective_at at time zone 'Asia/Seoul')::date,
+  context.effective_at-interval '1 hour',context.effective_at-interval '30 minutes',
+  room.state_version,'NEXT_ROOM_MOVE_FIXTURE','next-room-move-request',repeat('a',64))
+from move_context context join public.rooms room on room.id=context.target_room_id;
+create temp table next_room_move_plan as
+select reservation_schedule_snapshot value from public.cleaning_target_schedule_revisions
+where cleaning_target_id='328a0000-0000-4000-8000-000000003001';
+select is((select value->>'nextArrivalKind' from next_room_move_plan),'room_move',
+  '#328 canonical destination arrival is room_move, never inferred guest check-in');
+select is((select (value->>'nextCheckInAt')::timestamptz from next_room_move_plan),
+  (select check_in_at from move_context),'#328 next guest planned check-in retains original reservation time');
+select is((select (value->>'nextRoomArrivalAt')::timestamptz from next_room_move_plan),
+  (select effective_at from move_context),'#328 next room arrival uses exact canonical destination segment start');
+select ok((select (value->>'nextCheckInAt')::timestamptz<>(value->>'nextRoomArrivalAt')::timestamptz
+  from next_room_move_plan),'#328 guest check-in and destination room arrival remain explicitly distinct');
+select is((select value->'isEarlyCheckIn' from next_room_move_plan),'null'::jsonb,
+  '#328 room_move arrival never classifies a guest early-check-in badge');
 select ok((select obligation.room_id=context.target_room_id and target.room_id=context.target_room_id
   from public.checkout_cleaning_obligations obligation join public.cleaning_targets target
     on target.id=obligation.planned_cleaning_target_id cross join move_context context
@@ -899,6 +943,41 @@ select is((select replay->>'room_id' from (
 
 select pg_temp.seed_moved_reservation(
   '8a200000-0000-4000-8000-000000000003','142','211','scheduled-fixture',repeat('6',64),true);
+select is((select (private.assignment_departure_fact_at(target,clock_timestamp())->>'actualRoomDepartureAt')::timestamptz
+  from public.cleaning_targets target join private.stay_segment_checkout_obligations obligation on obligation.cleaning_target_id=target.id
+  join private.stay_room_segments segment on segment.id=obligation.source_segment_id
+  where target.reservation_id='8a200000-0000-4000-8000-000000000003' and target.source='stay_room_move_checkout'),
+  (select event.effective_at from private.reservation_room_move_events event
+    where event.reservation_id='8a200000-0000-4000-8000-000000000003'),
+  '#328 effective actual move proves exact source-room departure');
+select is((select private.assignment_departure_fact_at(target,clock_timestamp())->'actualCheckoutAt'
+  from public.cleaning_targets target where target.reservation_id='8a200000-0000-4000-8000-000000000003'
+    and target.source='stay_room_move_checkout'),'null'::jsonb,
+  '#328 actual move still does not disclose a different-room guest checkout');
+select is((select revision.reservation_schedule_snapshot->'actualRoomDepartureAt'
+  from public.cleaning_target_schedule_revisions revision join public.cleaning_targets target on target.id=revision.cleaning_target_id
+  where target.reservation_id='8a200000-0000-4000-8000-000000000003' and target.source='stay_room_move_checkout'),
+  'null'::jsonb,'#328 schedule-created plan remains frozen after actual move boundary');
+insert into auth.sessions(id,user_id) values
+  ('328a0000-0000-4000-8000-000000000203','8a000000-0000-4000-8000-000000000003');
+insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,
+  is_current,notified_at,ended_at,changed_by,change_reason_code)
+select '328a0000-0000-4000-8000-000000002003',target.id,
+  '8a100000-0000-4000-8000-000000000003',328,target.assignment_version,
+  false,clock_timestamp(),clock_timestamp(),'8a100000-0000-4000-8000-000000000001','TEST_HISTORICAL_CAPTURE'
+from public.cleaning_targets target where target.reservation_id='8a200000-0000-4000-8000-000000000003'
+  and target.source='stay_room_move_checkout';
+create temp table source_move_history_card as select public.get_assignment_schedule_read(
+  '8a100000-0000-4000-8000-000000000003','328a0000-0000-4000-8000-000000000203',
+  array['328a0000-0000-4000-8000-000000002003'::uuid],false,'maid')->0 value;
+select is((select (value->'scheduleSnapshot'->>'actualRoomDepartureAt')::timestamptz from source_move_history_card),
+  (select effective_at from private.reservation_room_move_events
+    where reservation_id='8a200000-0000-4000-8000-000000000003'),
+  '#328 first-notice INSERT captures actual source move after canonical boundary');
+select is((select value->'scheduleSnapshot'->'actualCheckoutAt' from source_move_history_card),'null'::jsonb,
+  '#328 own move history never substitutes guest final checkout');
+select is((select value->'currentDeparture' from source_move_history_card),'null'::jsonb,
+  '#328 actual move history stays frozen without any live current fact');
 select pg_temp.assign_and_notify_moved_checkout(
   '8a200000-0000-4000-8000-000000000003','scheduled-fixture');
 create temporary table scheduled_before as

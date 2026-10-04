@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { type AppServices, buildApp } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 import { AppError } from '../src/lib/app-error.js';
-import { flatTemplateRequest, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
+import type { SupabaseClients } from '../src/lib/supabase.js';
+import { SupabaseAuthService } from '../src/modules/auth/auth.service.js';
+import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
 
 const env: AppEnv = {
   APP_ENV: 'local',
@@ -270,6 +272,10 @@ function services(): AppServices {
       }))
     },
     payroll: {
+      getRemittanceMarker: vi.fn(), setRemittanceMarker: vi.fn(),
+      reconfirmRemittanceMarker: vi.fn(), listRemittanceMarkerHistory: vi.fn(),
+      listWorkDetails: vi.fn(),
+      getAdjustmentBook: vi.fn(),
       list: vi.fn(async () => ({ payroll: [], nextCursor: null })),
       get: vi.fn(),
       listEntries: vi.fn(async () => ({
@@ -285,6 +291,44 @@ function services(): AppServices {
 }
 
 describe('application', () => {
+  it.each([false, true])('uses the real Auth session decision before room work (active=%s)', async (active) => {
+    const authUserId = '35200000-0000-4000-8000-000000000001';
+    const profileId = '35200000-0000-4000-8000-000000000002';
+    const sessionId = '35200000-0000-4000-8000-000000000003';
+    const token = `header.${Buffer.from(JSON.stringify({ session_id: sessionId })).toString('base64url')}.synthetic`;
+    const query = {
+      select: () => query,
+      eq: () => query,
+      single: async () => ({ data: {
+        id: profileId, auth_user_id: authUserId, display_name: '합성 관리자',
+        role: 'admin', status: 'active', must_change_password: false, locked_until: null
+      }, error: null })
+    };
+    const rpc = vi.fn(async () => ({ data: active, error: null }));
+    const clients = {
+      publicClient: { auth: { getUser: vi.fn(async () => ({ data: { user: { id: authUserId } }, error: null })) } },
+      admin: { from: () => query, rpc }
+    } as unknown as SupabaseClients;
+    const appServices = services();
+    appServices.auth = new SupabaseAuthService(clients, env.ACCOUNT_PHONE_PEPPER);
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      const response = await app.inject({ method: 'GET', url: '/v1/rooms', headers: { authorization: `Bearer ${token}` } });
+      expect(rpc).toHaveBeenCalledExactlyOnceWith('is_active_auth_session', { p_auth_user_id: authUserId, p_session_id: sessionId });
+      expect(response.statusCode).toBe(active ? 200 : 401);
+      if (active) {
+        expect(appServices.rooms.list).toHaveBeenCalledOnce();
+      } else {
+        expect(response.json().error.code).toBe('SESSION_REVOKED');
+        expect(appServices.rooms.list).not.toHaveBeenCalled();
+        expect(response.body).not.toContain(token);
+        expect(response.body).not.toContain(sessionId);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it('returns health status', async () => {
     const app = await buildApp({ env, services: services(), logger: false });
     const response = await app.inject({ method: 'GET', url: '/health' });
@@ -1668,6 +1712,29 @@ describe('application', () => {
       expect.objectContaining({ reservationId, targetRoomId, effectiveAt })
     );
     await app.close();
+  });
+
+  it('characterizes existing Fastify v9 array order without changing policy (#382)', async () => {
+    const appServices = services();
+    if (!appServices.cleaningTemplates) throw new Error('missing template service');
+    const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
+    appServices.cleaningTemplates.publishCheckout = publish;
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      for (const { name, body, fastifyAccepted } of flatTemplateSlotPermutations()) {
+        const before = publish.mock.calls.length;
+        const response = await app.inject({
+          method: 'POST', url: '/v1/cleaning-templates', payload: body,
+          headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-permutation-fixture' }
+        });
+        expect(response.statusCode, name).toBe(fastifyAccepted ? 201 : 400);
+        expect(response.headers['cache-control'], name).toBe('no-store');
+        expect(publish.mock.calls.length, name).toBe(before + Number(fastifyAccepted));
+        if (!fastifyAccepted) expect(response.json().error.code, name).toBe('VALIDATION_ERROR');
+        else expect(response.json().template.slots, name).toEqual(flatTemplateRequest.slots);
+      }
+      expect(publish).toHaveBeenCalledTimes(1);
+    } finally { await app.close(); }
   });
 
   it('validates shared v9 template wire fixtures before reaching the publisher', async () => {

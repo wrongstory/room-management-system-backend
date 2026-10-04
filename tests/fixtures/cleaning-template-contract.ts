@@ -8,6 +8,30 @@ export const flatTemplateRequest = {
   ]
 };
 
+// #382 characterization only: retain every slot's fields and permute the array.
+// These are not universally invalid requests or a selected future HTTP policy.
+export function flatTemplateSlotPermutations() {
+  const cases = [
+    { name: 'cleaning/bomb/issue', order: [0, 1, 2], fastifyAccepted: true, edgeAccepted: true, schemaAccepted: true },
+    { name: 'cleaning/issue/bomb', order: [0, 2, 1], fastifyAccepted: false, edgeAccepted: true, schemaAccepted: false },
+    { name: 'bomb/cleaning/issue', order: [1, 0, 2], fastifyAccepted: false, edgeAccepted: false, schemaAccepted: false },
+    { name: 'bomb/issue/cleaning', order: [1, 2, 0], fastifyAccepted: false, edgeAccepted: false, schemaAccepted: false },
+    { name: 'issue/cleaning/bomb', order: [2, 0, 1], fastifyAccepted: false, edgeAccepted: false, schemaAccepted: false },
+    { name: 'issue/bomb/cleaning', order: [2, 1, 0], fastifyAccepted: false, edgeAccepted: false, schemaAccepted: false }
+  ] as const;
+  return cases.map(({ order, ...expectations }) => ({
+    ...expectations,
+    body: {
+      ...flatTemplateRequest,
+      slots: order.map((index) => {
+        const slot = flatTemplateRequest.slots[index];
+        if (!slot) throw new Error('Missing canonical permutation fixture slot');
+        return { ...slot };
+      })
+    }
+  }));
+}
+
 export function invalidFlatTemplateRequests() {
   const change = (patch: Record<string, unknown>, index = 0) => ({
     ...structuredClone(flatTemplateRequest),
@@ -23,6 +47,7 @@ export function invalidFlatTemplateRequests() {
     ['optional issue', change({ required: true }, 2)],
     ['duplicate order', change({ displayOrder: 1 })],
     ['order gap', change({ displayOrder: 3 }, 2)],
+    // Unlike the permutation cases, this changes each role's displayOrder value.
     ['swapped roles', { ...flatTemplateRequest, slots: flatTemplateRequest.slots.map((slot, i) => ({ ...slot, displayOrder: i === 0 ? 1 : i === 1 ? 0 : 2 })) }],
     ['cleaning capacity', change({ maxPhotos: 19 })],
     ['bomb capacity', change({ maxPhotos: 20 }, 1)],

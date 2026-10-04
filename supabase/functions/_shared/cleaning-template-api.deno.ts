@@ -3,8 +3,10 @@ import {
   templateDatabaseError,
 } from "./cleaning-template-api.ts";
 import { type EdgeActor, type EdgeClients, EdgeError } from "./runtime.ts";
+import { handleApiRequest } from "../api/index.ts";
 import {
   flatTemplateRequest,
+  flatTemplateSlotPermutations,
   historicalTemplateRequest,
   invalidFlatTemplateRequests,
   templateProjection,
@@ -14,6 +16,56 @@ function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 const sessionId = "51000000-0000-4000-8000-000000000001";
+Deno.test("cleaning template actual Edge route characterizes all six v9 array orders without selecting policy (#382)", async () => {
+  const hashes: unknown[] = [];
+  for (const { name, body, edgeAccepted } of flatTemplateSlotPermutations()) {
+    const mock = clients(templateProjection());
+    const response = await handleApiRequest(request("POST", body), {
+      authenticateRequest: () => Promise.resolve(admin),
+      createClients: () => mock.value,
+    });
+    assert(response.status === (edgeAccepted ? 201 : 400), `${name} status`);
+    assert(
+      response.headers.get("cache-control") === "no-store",
+      `${name} not cached`,
+    );
+    const result = await response.json();
+    if (edgeAccepted) {
+      assert(
+        mock.calls.length === 1 &&
+          mock.calls[0]?.name === "publish_checkout_cleaning_template",
+        `${name} reaches publisher once`,
+      );
+      assert(
+        JSON.stringify(mock.calls[0]?.args.p_slots) ===
+          JSON.stringify(flatTemplateRequest.slots),
+        `${name} canonical RPC slots`,
+      );
+      assert(
+        mock.calls[0]?.args.p_session_id === sessionId &&
+          mock.calls[0]?.args.p_actor_profile_id === admin.profileId,
+        `${name} actor and session preserved`,
+      );
+      assert(
+        JSON.stringify(result.template.slots) ===
+          JSON.stringify(flatTemplateRequest.slots),
+        `${name} canonical projection`,
+      );
+      hashes.push(mock.calls[0]?.args.p_request_hash);
+    } else {
+      assert(
+        result.error?.code === "INVALID_CLEANING_TEMPLATE_SLOTS",
+        `${name} stable error`,
+      );
+      assert(mock.calls.length === 0, `${name} rejected before publisher RPC`);
+    }
+  }
+  assert(
+    hashes.length === 2 && typeof hashes[0] === "string" &&
+      /^[a-f0-9]{64}$/.test(hashes[0]) && hashes[0] === hashes[1],
+    "both accepted permutations retain the same canonical request hash",
+  );
+});
 Deno.test("cleaning template shared v9 fixtures preserve initial/CAS/replay and reject malformed slots", async () => {
   for (
     const roomTypeCode of ["standard", "premium", "oceanPremium", "oceanFamily"]
@@ -111,15 +163,18 @@ function legacyV7Slots() {
   }));
 }
 function request(method: string, body?: unknown, query = "") {
-  return new Request(`http://localhost/v1/cleaning-templates${query}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "idempotency-key": "template-publish-0001",
+  return new Request(
+    `http://localhost/functions/v1/api/v1/cleaning-templates${query}`,
+    {
+      method,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "idempotency-key": "template-publish-0001",
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+  );
 }
 function clients(data: unknown = null, message: string | null = null) {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];

@@ -1,3 +1,227 @@
+// #331: display-only remittance contracts, never actual payout commands.
+const integer = { type: "integer", minimum: 0, maximum: 9007199254740991 };
+const signed = { ...integer, minimum: -9007199254740991 };
+const uuid = { type: "string", format: "uuid" };
+const date = {
+  type: "string",
+  format: "date",
+  minLength: 10,
+  maxLength: 10,
+  pattern: "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+};
+const timestamp = { type: ["string", "null"], format: "date-time" };
+const fingerprint = {
+  type: "string",
+  pattern: "^[0-9a-f]{64}$",
+  minLength: 64,
+  maxLength: 64,
+};
+const basisRef = { $ref: "#/components/schemas/PayrollRemittanceBasis" };
+const error = {
+  description:
+    "error.code로 분기하며 원문 DB 오류·민감 정보를 반환하지 않습니다.",
+  headers: { "Cache-Control": { schema: { const: "no-store" } } },
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+    },
+  },
+};
+const idem = {
+  name: "Idempotency-Key",
+  in: "header",
+  required: true,
+  schema: {
+    type: "string",
+    minLength: 8,
+    maxLength: 128,
+    pattern: "^[A-Za-z0-9._:-]{8,128}$",
+  },
+  description:
+    "응답 유실 시 같은 본문·key로 재시도합니다. 다른 본문은 새 key를 사용합니다.",
+};
+const identity = { maidProfileId: uuid, weekStart: date };
+const command = {
+  ...identity,
+  expectedVersion: integer,
+  expectedBasisFingerprint: fingerprint,
+};
+const readParameters = [
+  { name: "maidProfileId", in: "query", required: true, schema: uuid },
+  {
+    name: "weekStart",
+    in: "query",
+    required: true,
+    schema: date,
+    description:
+      "실제 달력의 KST 월요일. 현재·과거 조회 가능, 미래 주차는 409입니다.",
+  },
+];
+function responses(ref: string) {
+  return {
+    "200": {
+      description:
+        "표시 전용 결과입니다. 은행 이체나 실제 지급 원장 변경을 뜻하지 않습니다.",
+      headers: { "Cache-Control": { schema: { const: "no-store" } } },
+      content: {
+        "application/json": { schema: { $ref: `#/components/schemas/${ref}` } },
+      },
+    },
+    "400": error,
+    "401": error,
+    "403": error,
+    "404": error,
+    "409": error,
+    "500": error,
+    "503": error,
+  };
+}
+const common = { tags: ["Payroll"], security: [{ bearerAuth: [] }] };
+const payrollRemittancePaths = {
+  "/v1/payroll/remittance-marker": {
+    get: {
+      ...common,
+      operationId: "getPayrollRemittanceMarker",
+      summary: "주차별 송금 표시 조회",
+      "x-required-roles": ["admin", "maid"],
+      description:
+        "관리자 또는 본인 메이드 조회. cycle.status/PAID와 독립된 표시이며, 기존 PAID에서 표시를 추측하지 않습니다. canSet/canClear/canReconfirm은 advisory이고 메이드는 모두 false입니다. basis 중 lockedAmount metadata를 제외한 7개 금액 근거의 변화는 on을 유지하며 needsReconfirmation으로 표시합니다. 지급 시작·book/cycle version 변화 자체는 재확인 사유가 아닙니다. 읽기는 원장·표시·receipt를 만들지 않습니다. 별칭·HEAD·중복 query는 거부하고 JSON 128KiB 상한을 적용합니다.",
+      parameters: readParameters,
+      responses: responses("PayrollRemittanceMarker"),
+    },
+    put: {
+      ...common,
+      operationId: "setPayrollRemittanceMarker",
+      summary: "송금 표시 on/off 저장",
+      "x-required-roles": ["admin"],
+      parameters: [idem],
+      description:
+        "관리자 전용. 새로운 on은 종료된 KST 주차·양수 (lockedAmount ?? payableAmount)에서만 허용합니다. off는 오표시 정정이며 실제 PAID/지급 잠금/원장/재지급 가능 상태는 변경하지 않습니다. 참조번호·확인창을 요구하지 않고 이체/provider를 호출하지 않습니다. 조회한 표시 expectedVersion과 expectedBasisFingerprint를 재검증하며 충돌 409 후 GET을 재조회합니다. 같은 값은 새 revision 없이 no-op receipt입니다. 같은 key 재시도는 당시 응답만 반환하므로 성공/replay 뒤 GET을 갱신합니다. 금액 변동 경고는 이 endpoint의 동일 on 요청으로 지우지 않고 별도 reconfirm을 사용합니다.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/PayrollRemittanceSetInput" },
+          },
+        },
+      },
+      responses: responses("PayrollRemittanceMarker"),
+    },
+  },
+  "/v1/payroll/remittance-marker/reconfirm": {
+    post: {
+      ...common,
+      operationId: "reconfirmPayrollRemittanceMarker",
+      summary: "on 유지 상태에서 금액 근거 재확인",
+      "x-required-roles": ["admin"],
+      parameters: [idem],
+      description:
+        "표시가 on이고 금액 근거가 달라졌을 때 관리자만 현재 basis를 확인한 새 불변 revision을 저장합니다. on 및 lastChangedBy/At은 유지하고 confirmedBy/At과 확인 근거·표시 version만 갱신합니다. 추가 이체/PAID 기록이 아니며 지금 0원이어도 기존 표시 재확인은 가능합니다. off는 PAYROLL_REMITTANCE_MARKER_NOT_SET, 변화 없음은 PAYROLL_REMITTANCE_RECONFIRM_NOT_REQUIRED 409입니다. 표시 CAS·basis fingerprint·멱등성·최신 역할/세션을 재검증합니다.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              $ref: "#/components/schemas/PayrollRemittanceReconfirmInput",
+            },
+          },
+        },
+      },
+      responses: responses("PayrollRemittanceMarker"),
+    },
+  },
+  "/v1/payroll/remittance-marker/history": {
+    get: {
+      ...common,
+      operationId: "listPayrollRemittanceMarkerHistory",
+      summary: "송금 표시 불변 이력 조회",
+      "x-required-roles": ["admin", "maid"],
+      description:
+        "관리자 또는 본인 메이드만 marked/cleared/reconfirmed 이력을 version ASC keyset으로 조회합니다. HMAC cursor는 actor·role·live session·maid·주차에 묶이고 기존 payroll cursor와 호환되지 않습니다. 기본20/최대100, 128KiB/no-store이며 전체 페이지에 걸친 영구 snapshot은 보장하지 않습니다. raw session/token/은행 참조번호는 반환하지 않습니다.",
+      parameters: [...readParameters, {
+        name: "limit",
+        in: "query",
+        required: false,
+        schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+      }, {
+        name: "cursor",
+        in: "query",
+        required: false,
+        schema: { type: "string", minLength: 1, maxLength: 1024 },
+      }],
+      responses: responses("PayrollRemittanceHistory"),
+    },
+  },
+};
+const basisFields = {
+  accrualAmount: integer,
+  totalAmount: integer,
+  adjustmentAmount: signed,
+  carryInAmount: { ...signed, maximum: 0 },
+  carryOutAmount: { ...signed, maximum: 0 },
+  payableAmount: signed,
+  lateEarningAmount: integer,
+  lockedAmount: { ...integer, minimum: 1, type: ["integer", "null"] },
+};
+const markerFields = {
+  ...identity,
+  marked: { type: "boolean" },
+  version: integer,
+  lastChangedBy: { ...uuid, type: ["string", "null"] },
+  lastChangedAt: timestamp,
+  confirmedBy: { ...uuid, type: ["string", "null"] },
+  confirmedAt: timestamp,
+  needsReconfirmation: { type: "boolean" },
+  basis: basisRef,
+  confirmedBasis: { anyOf: [basisRef, { type: "null" }] },
+  basisFingerprint: fingerprint,
+  canSet: { type: "boolean" },
+  canClear: { type: "boolean" },
+  canReconfirm: { type: "boolean" },
+  setBlockedReason: {
+    type: ["string", "null"],
+    enum: [
+      null,
+      "ADMIN_REQUIRED",
+      "PAYROLL_WEEK_NOT_CLOSED",
+      "NO_PAYROLL_AMOUNT",
+    ],
+  },
+};
+const eventFields = {
+  revisionId: uuid,
+  version: { ...integer, minimum: 1 },
+  eventType: { type: "string", enum: ["marked", "cleared", "reconfirmed"] },
+  marked: { type: "boolean" },
+  actorProfileId: uuid,
+  occurredAt: { type: "string", format: "date-time" },
+  basis: basisRef,
+};
+function exact<T extends Record<string, unknown>>(properties: T) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: Object.keys(properties),
+    properties,
+  };
+}
+const payrollRemittanceSchemas = {
+  PayrollRemittanceBasis: exact(basisFields),
+  PayrollRemittanceMarker: exact(markerFields),
+  PayrollRemittanceSetInput: exact({ ...command, marked: { type: "boolean" } }),
+  PayrollRemittanceReconfirmInput: exact(command),
+  PayrollRemittanceHistoryEvent: exact(eventFields),
+  PayrollRemittanceHistory: exact({
+    ...identity,
+    entries: {
+      type: "array",
+      maxItems: 100,
+      items: { $ref: "#/components/schemas/PayrollRemittanceHistoryEvent" },
+    },
+    nextCursor: { type: ["string", "null"], minLength: 1, maxLength: 1024 },
+  }),
+};
+
 const swaggerUiVersion = "5.32.11";
 const swaggerCss =
   `https://cdn.jsdelivr.net/npm/swagger-ui-dist@${swaggerUiVersion}/swagger-ui.css`;
@@ -57,6 +281,155 @@ const noStoreHeader = {
   schema: { const: "no-store" },
 };
 
+const payrollWorkAmount = {
+  type: "integer",
+  minimum: 0,
+  maximum: 9007199254740991,
+};
+const payrollWorkSignedAmount = {
+  type: "integer",
+  minimum: -9007199254740991,
+  maximum: 9007199254740991,
+};
+const payrollWorkCommon = {
+  entryId: { type: "string", format: "uuid" },
+  entryDate: { type: "string", format: "date" },
+  cleaningTargetId: { type: "string", format: "uuid" },
+  assignmentId: { type: "string", format: "uuid" },
+  attemptId: { type: "string", format: "uuid" },
+  submissionId: { type: ["string", "null"], format: "uuid" },
+  inspectionDecisionId: { type: ["string", "null"], format: "uuid" },
+  roomNumber: { type: ["string", "null"] },
+  roomTypeCode: { type: ["string", "null"] },
+  roomTypeName: { type: ["string", "null"] },
+  cleaningKind: {
+    type: "string",
+    enum: ["checkout", "stayover", "additional", "reclean"],
+  },
+  sourceKind: {
+    type: "string",
+    enum: [
+      "scheduled_checkout",
+      "manual_checkout",
+      "stayover_request",
+      "manual_room_request",
+      "inspection_reclean",
+      "post_approval_complaint_reclean",
+    ],
+  },
+  fieldCompletedAt: { type: ["string", "null"], format: "date-time" },
+  feeSnapshot: payrollWorkAmount,
+  attemptStatus: {
+    type: "string",
+    enum: [
+      "scheduled",
+      "in_progress",
+      "field_completed",
+      "upload_pending",
+      "submitted",
+      "approved",
+      "rejected",
+      "interrupted",
+      "superseded",
+    ],
+  },
+  submissionStatus: {
+    type: ["string", "null"],
+    enum: ["submitted", "superseded", "approved", "rejected", null],
+  },
+  inspectionDecision: {
+    type: ["string", "null"],
+    enum: ["approved", "rejected", null],
+  },
+};
+const payrollWorkCommonRequired = [
+  "entryId",
+  "entryDate",
+  "cleaningTargetId",
+  "assignmentId",
+  "attemptId",
+  "submissionId",
+  "inspectionDecisionId",
+  "roomNumber",
+  "roomTypeCode",
+  "roomTypeName",
+  "cleaningKind",
+  "sourceKind",
+  "fieldCompletedAt",
+  "feeSnapshot",
+  "attemptStatus",
+  "submissionStatus",
+  "inspectionDecision",
+];
+
+// #326: common read-only metadata. Legacy completed commit receipts are not
+// hydrated with current target/catalog state; unknown added fields stay null.
+const assignmentTargetReadProperties = {
+  cleaningKind: { type: ["string", "null"] },
+  sourceKind: {
+    type: ["string", "null"],
+    description: "실제 target.source입니다. cleaningKind로 추측하지 않습니다.",
+  },
+  roomTypeSnapshot: {
+    anyOf: [
+      { $ref: "#/components/schemas/AssignmentRoomTypeSnapshot" },
+      { type: "null" },
+    ],
+    description:
+      "생성 당시 타입·구역 정본입니다. 현재 catalog로 누락을 채우지 않습니다. 과거 receipt에 metadata가 없으면 null입니다.",
+  },
+  roomTypeCode: { type: ["string", "null"] },
+  roomTypeName: { type: ["string", "null"] },
+  elevatorZone: { type: ["string", "null"] },
+  feeSnapshot: {
+    type: ["integer", "null"],
+    minimum: 0,
+    description:
+      "불변 target 요금입니다. 0원은 0원이며 과거 receipt의 미확인은 null입니다.",
+  },
+  originalServiceDate: { type: ["string", "null"], format: "date" },
+  effectiveServiceDate: {
+    type: ["string", "null"],
+    format: "date",
+    description:
+      "impact/preview는 target 유효일, 카드는 조회한 assignment의 고정 서비스일입니다. 최상위 계획일과 구분합니다.",
+  },
+  rolloverCount: {
+    type: ["integer", "null"],
+    minimum: 0,
+    description:
+      "carryover_count 상한과 조회 revision까지의 실제 ROLLED_OVER evidence를 함께 적용합니다. 단순 지연/날짜 변경은 0, 과거 receipt 미확인은 null입니다.",
+  },
+  rolloverReason: {
+    type: ["string", "null"],
+    enum: ["ROLLED_OVER_UNASSIGNED", "ROLLED_OVER_NOT_STARTED", null],
+  },
+  canCancel: {
+    type: "boolean",
+    description:
+      "관리자의 수동 target 취소 안내입니다. 담당 해제 권한이 아니며 최신 command의 session/상태/CAS/멱등성 검사를 대체하지 않습니다. PIN 공개·기한·stale 일정으로 제한하지 않습니다. 완료 receipt replay의 안내는 당시 snapshot입니다.",
+  },
+  cancelReasonCode: {
+    type: ["string", "null"],
+    enum: [
+      "NOT_MANUAL_CLEANING_REQUEST",
+      "CLEANING_REQUEST_CANCEL_CONFLICT",
+      "ASSIGNMENT_NOT_CURRENT",
+      "ADMIN_REQUIRED",
+      "CAPABILITY_UNAVAILABLE",
+      null,
+    ],
+    description:
+      "canCancel=true이면 null입니다. ADMIN_REQUIRED/ASSIGNMENT_NOT_CURRENT/CAPABILITY_UNAVAILABLE는 조회 UI의 적용불가 코드이며 POST의 HTTP error code를 약속하지 않습니다.",
+  },
+} as const;
+
+function assignmentTargetReadRequired(existing: string[]): string[] {
+  return [
+    ...new Set([...existing, ...Object.keys(assignmentTargetReadProperties)]),
+  ];
+}
+
 const checkoutIncidentTimestampSchema = {
   type: "string",
   format: "date-time",
@@ -109,6 +482,11 @@ const photoRetentionProperties = {
 } as const;
 
 const complaintErrorResponse = {
+  ...errorResponse,
+  headers: { "Cache-Control": noStoreHeader },
+};
+
+const assignmentPreviewErrorResponse = {
   ...errorResponse,
   headers: { "Cache-Control": noStoreHeader },
 };
@@ -520,6 +898,7 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    ...payrollRemittancePaths,
     "/v1/attempts/{attemptId}/room-issues": {
       post: {
         ...submissionOperation(
@@ -2457,6 +2836,67 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/checkout-incidents": {
+      get: {
+        tags: ["Checkout incidents"],
+        operationId: "listCheckoutIncidents",
+        summary: "관리자 미해결 퇴실 미진행 사건 목록",
+        description:
+          "active/password-complete business admin만 현재 open 사건을 조회합니다. roomId·cleaningTargetId·serviceDate를 조합하여 필터링하며 serviceDate는 신고에 연결된 불변 assignment 날짜입니다. reportedAt·incidentId 내림차순의 서명 cursor는 actor와 모든 필터에 바인딩되고 microsecond를 보존합니다. 페이지마다 현재 open 상태를 읽으므로 새 신고는 첫 페이지를 새로고침합니다. allowedDecisions는 메뉴 안내일 뿐 권한이나 확정 snapshot이 아닙니다. 결정 전 기존 상세 조회에서 최신 version·impactFingerprint를 받아야 합니다. 조회는 사건 freeze·coordination·원장·알림을 변경하지 않습니다. 고객·신고자·예약 정보와 PIN은 반환하지 않습니다. 모든 응답은 no-store입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "roomId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "cleaningTargetId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "serviceDate",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "date" },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+          },
+        ],
+        responses: {
+          "200": {
+            description:
+              "최대 limit개의 open 사건과 마지막 반환 행에 연결된 nullable cursor",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/CheckoutIncidentListEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/checkout-incidents/{incidentId}": {
       get: {
         tags: ["Checkout incidents"],
@@ -2533,7 +2973,7 @@ export const openApiDocument = {
         operationId: "listAssignments",
         summary: "서비스 날짜별 청소 배정 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 본인에게 실제 통보된 revision만 조회합니다. includeHistory=false가 기본이며 현재 통보 배정만 반환합니다. true이면 본인의 과거 실제 통보된 superseded revision도 포함하지만 미통보 draft와 다른 메이드의 revision은 숨깁니다. 카드에는 target 생성 당시 종류·객실 타입·구역·요금·nullable 예상시간과 assignment별 이월·attempt·submission 상태를 함께 반환합니다. developer는 업무 배정을 조회할 수 없습니다.",
+          "비밀번호 변경을 완료한 active business admin은 날짜 전체를, active maid는 본인에게 실제 통보된 revision만 조회합니다. includeHistory=false가 기본이며 현재 통보 배정만 반환합니다. true이면 본인의 과거 실제 통보된 superseded revision도 포함하지만 미통보 draft와 다른 메이드의 revision은 숨깁니다. 카드에는 target 생성 당시 종류·객실 타입·구역·요금·nullable 예상시간과 assignment별 이월·attempt·submission 상태를 함께 반환합니다. scheduleSnapshot은 해당 revision의 불변 일정이며 legacy 부재는 null입니다. currentDeparture는 현재 목록의 exact current notified 업무만 별도로 관찰하며 includeHistory=true에서는 모든 행이 null입니다. 예정/실제 퇴실·다음 guest check-in·객실 이동 시각을 구분하고 일정 표시만으로 수행 권한을 부여하지 않습니다. developer는 업무 배정을 조회할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -2574,7 +3014,7 @@ export const openApiDocument = {
         operationId: "getAssignmentHistory",
         summary: "청소 대상의 배정 revision 이력 조회",
         description:
-          "active business admin은 전체 revision을 조회하고 active maid는 본인에게 실제 통보된 revision만 조회합니다. 과거 superseded revision도 통보 사실이 있으면 읽기 전용으로 보존합니다. 한 번 통보받은 target이라도 미통보 draft·다른 메이드의 revision·현재 target version은 공개하지 않습니다. 객실 ID/번호는 당시 notified snapshot이고 타입·요금·template은 target 생성 snapshot이므로 현재 master-data로 덮지 않습니다. 본인의 실제 통보 이력이 없으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
+          "active business admin은 전체 revision을 조회하고 active maid는 본인에게 실제 통보된 revision만 조회합니다. 과거 superseded revision도 통보 사실이 있으면 읽기 전용으로 보존합니다. 한 번 통보받은 target이라도 미통보 draft·다른 메이드의 revision·현재 target version은 공개하지 않습니다. 객실 ID/번호는 당시 notified snapshot이고 타입·요금·template은 target 생성 snapshot이므로 현재 master-data로 덮지 않습니다. scheduleSnapshot도 해당 통보 revision에 고정되며 현재 다른 담당자의 예약/일정으로 재수화하지 않습니다. currentDeparture는 현재 행을 포함해 항상 null입니다. 본인의 실제 통보 이력이 없으면 ASSIGNMENT_ACCESS_REQUIRED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -2645,6 +3085,11 @@ export const openApiDocument = {
         responses: {
           "200": {
             description: "저장되지 않은 배정 초안",
+            headers: {
+              "Cache-Control": {
+                schema: { type: "string", const: "no-store" },
+              },
+            },
             content: {
               "application/json": {
                 schema: {
@@ -2653,12 +3098,12 @@ export const openApiDocument = {
               },
             },
           },
-          "400": errorResponse,
-          "401": errorResponse,
-          "403": errorResponse,
-          "409": errorResponse,
-          "422": errorResponse,
-          "500": errorResponse,
+          "400": assignmentPreviewErrorResponse,
+          "401": assignmentPreviewErrorResponse,
+          "403": assignmentPreviewErrorResponse,
+          "409": assignmentPreviewErrorResponse,
+          "422": assignmentPreviewErrorResponse,
+          "500": assignmentPreviewErrorResponse,
         },
       },
     },
@@ -2755,7 +3200,7 @@ export const openApiDocument = {
         operationId: "publishCleaningTemplate",
         summary: "퇴실 청소 템플릿의 불변 새 버전 게시",
         description:
-          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과 normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
+          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 immutable version과 normalized slot rows를 원자 게시합니다. 기본 v9 요청은 cleaning-proof/bomb-proof/issue-proof의 정규 3개 사진 모음이며 사진 3장이나 업로드 순서를 뜻하지 않습니다. 기존 v8 A-contract 게시도 호환되고, maxPhotos 없는 pre-A 요청은 완료 receipt 재생만 허용하며 과거 snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 배열 위치만 바꾼 비정규 요청의 기존 runtime 차이는 #382 후속이며 이번 명세가 허용 범위를 확대하지 않습니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -3708,6 +4153,132 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/payroll/adjustment-book": {
+      get: {
+        tags: ["Payroll"],
+        operationId: "getPayrollAdjustmentBook",
+        summary: "관리자 주급 조정 원장의 최신 CAS 버전 조회",
+        description:
+          "active/password-complete 관리자와 정확한 현재 Auth 세션을 DB에서 재검증한 read-only 조회입니다. 원장은 maidProfileId별 전역 CAS이며 weekStart는 KST 기준 현재 또는 과거 월요일의 화면 문맥일 뿐 원장 identity가 아닙니다. 같은 메이드의 다른 유효 주차도 같은 currentBookVersion을 반환합니다. 유효한 메이드의 원장이 없을 때만 서버가 0을 반환하고 원장을 생성하지 않습니다. 기존 adjustment.bookVersion은 생성 당시 불변 버전이므로 최신 CAS로 재사용하지 않습니다. 조회는 정정·반전 가능 여부나 이후 명령 성공을 보장하지 않으며 stale 409 뒤 이 조회를 다시 실행해야 합니다. query는 maidProfileId/weekStart 각 한 건만 허용합니다. HEAD·다른 method·slash alias는 404, 모든 응답은 no-store 및 UTF-8 JSON 128 KiB 상한입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "maidProfileId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description:
+              "조회할 메이드 profile UUID. 비활성·퇴사한 메이드의 과거 원장도 조회할 수 있습니다.",
+          },
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: {
+              type: "string",
+              format: "date",
+              minLength: 10,
+              maxLength: 10,
+              pattern: "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            },
+            description:
+              "실제 달력의 0001~9999년 YYYY-MM-DD, 현재 또는 과거 KST 월요일. 미래 주차는 409입니다.",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "현재 메이드 전역 조정 원장 CAS 버전 (없는 원장은 0)",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollAdjustmentBookEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
+    "/v1/payroll/work-details": {
+      get: {
+        tags: ["Payroll"],
+        operationId: "listPayrollWorkDetails",
+        summary: "객실별 확정 수익과 미확정 청소 산출 상세",
+        description:
+          "현재·과거 KST 월요일 주차의 read-only 조회입니다. active/password-complete 관리자 또는 본인 메이드의 정확한 live session 및 최신 DB role을 재검증합니다. earnings는 earnedOn 주차의 불변 수익이며 0원 보상과 이미 이월된 수익도 포함하고 합계는 summary.accrualAmount와 비교합니다. workflow는 earning이 없는 실제 수행 회차이며 예상·검수 대기 기여액만 설명하고 확정 지급액이 아닙니다. 기존 totalAmount/lateEarningAmount/adjustment/carry/payable 산식을 변경하지 않습니다. 객실·타입·요금은 당시 snapshot만 사용하고 사진 7일 목록이나 현재 카탈로그로 재구성하지 않습니다. 기본25/최대50, entryDate ASC/entryId ASC의 별도 actor·role·session·주차·메이드·kind bound HMAC cursor를 사용합니다. 기존 entries cursor는 거부합니다. 각 요청 summary/page는 동일 SQL snapshot이지만 여러 HTTP 페이지 사이 영구 snapshot은 보장하지 않으므로 상태 변경 뒤 첫 페이지부터 다시 조회합니다. HEAD·다른 method·slash·encoded alias는404이고 모든 응답은 no-store, UTF-8 JSON128KiB 상한입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "weekStart",
+            in: "query",
+            required: true,
+            schema: {
+              type: "string",
+              format: "date",
+              minLength: 10,
+              maxLength: 10,
+              pattern: "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            },
+            description:
+              "현재 또는 과거 KST 월요일. 실제 달력 날짜만 허용하고 미래 주차는409입니다.",
+          },
+          {
+            name: "maidProfileId",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "kind",
+            in: "query",
+            required: true,
+            schema: { type: "string", enum: ["earnings", "workflow"] },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 50, default: 25 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "합계와 독립된 확정 수익/미확정 업무 page",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/PayrollWorkDetailsEnvelope",
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/payroll/start": {
       post: {
         tags: ["Payroll"],
@@ -4287,7 +4858,7 @@ export const openApiDocument = {
         operationId: "cancelManualCleaningRequest",
         summary: "미착수 수동 청소 요청 soft cancel",
         description:
-          "active business admin이 아직 미배정·미공개·미착수인 수동 요청만 expectedVersion CAS로 취소합니다. 자동 퇴실 의무나 이미 시작된 작업은 취소할 수 없습니다.",
+          "active business admin이 연박·추가 수동 요청을 expectedVersion CAS로 soft cancel합니다. 배정·통보 또는 PIN 조회 여부와 무관하게 실제 착수 전이면 허용하며, 기존 통보 담당자에게 취소를 알리고 해당 배정의 이후 PIN 접근을 종료합니다. 자동 퇴실 의무나 이미 시작·현장 완료·제출·검수 단계인 작업은 취소할 수 없습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -4913,6 +5484,7 @@ export const openApiDocument = {
       },
     },
     schemas: {
+      ...payrollRemittanceSchemas,
       CheckoutIncidentReportRequest: {
         type: "object",
         additionalProperties: false,
@@ -5053,6 +5625,76 @@ export const openApiDocument = {
           newCheckoutAt: { ...checkoutIncidentTimestampSchema },
           nextAssignmentId: { type: "string", format: "uuid" },
           nextAttemptId: { type: "string", format: "uuid" },
+        },
+      },
+      CheckoutIncidentListItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "incidentId",
+          "status",
+          "roomId",
+          "roomNumber",
+          "cleaningTargetId",
+          "assignmentId",
+          "attemptId",
+          "reportedAt",
+          "serviceDate",
+          "allowedDecisions",
+        ],
+        properties: {
+          incidentId: { type: "string", format: "uuid" },
+          status: { type: "string", enum: ["open"] },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          reportedAt: {
+            type: "string",
+            format: "date-time",
+            pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$",
+            description: "UTC 6자리 microsecond를 그대로 보존하는 seek anchor",
+          },
+          serviceDate: {
+            type: "string",
+            format: "date",
+            description: "신고에 연결된 assignment의 불변 service_date",
+          },
+          allowedDecisions: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            uniqueItems: true,
+            prefixItems: [
+              { type: "string", enum: ["EXTEND_CHECKOUT"] },
+              { type: "string", enum: ["CONFIRM_DEPARTED"] },
+              { type: "string", enum: ["FALSE_REPORT"] },
+            ],
+            items: {
+              type: "string",
+              enum: ["EXTEND_CHECKOUT", "CONFIRM_DEPARTED", "FALSE_REPORT"],
+            },
+            description:
+              "이 순서의 메뉴 안내이며 결정 전에 최신 상세 version·impactFingerprint 조회 필수",
+          },
+        },
+      },
+      CheckoutIncidentListEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["items", "nextCursor"],
+        properties: {
+          items: {
+            type: "array",
+            maxItems: 100,
+            items: { $ref: "#/components/schemas/CheckoutIncidentListItem" },
+          },
+          nextCursor: {
+            anyOf: [{ type: "string", minLength: 1, maxLength: 1024 }, {
+              type: "null",
+            }],
+          },
         },
       },
       CheckoutIncidentEnvelope: {
@@ -6296,10 +6938,22 @@ export const openApiDocument = {
           template: { $ref: "#/components/schemas/PublishedCleaningTemplate" },
         },
       },
+      AssignmentRoomTypeSnapshot: {
+        type: "object",
+        additionalProperties: false,
+        required: ["code", "name", "elevatorZone"],
+        properties: {
+          code: { type: ["string", "null"] },
+          name: { type: ["string", "null"] },
+          elevatorZone: { type: ["string", "null"] },
+        },
+        description:
+          "target 생성 snapshot의 whitelist입니다. legacy 누락 key는 null, 현재 객실 타입/구역 대체는 금지합니다.",
+      },
       AssignmentPreviewRow: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "cleaningTargetId",
           "roomId",
           "roomNumber",
@@ -6315,8 +6969,10 @@ export const openApiDocument = {
           "durationMinutes",
           "availableFrom",
           "dueAt",
-        ],
+          "targetAssignmentVersion",
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
           roomNumber: { type: "string" },
@@ -6341,6 +6997,12 @@ export const openApiDocument = {
           },
           serviceDate: { type: "string", format: "date" },
           expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          targetAssignmentVersion: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "expectedAssignmentVersion과 같은 target CAS입니다. assignment row revision과 혼동하지 않습니다.",
+          },
           expectedAvailabilityVersion: {
             type: ["integer", "null"],
             minimum: 1,
@@ -6358,12 +7020,143 @@ export const openApiDocument = {
       AssignmentPreviewBlockedTarget: {
         type: "object",
         additionalProperties: false,
-        required: ["cleaningTargetId", "reason"],
+        required: assignmentTargetReadRequired([
+          "cleaningTargetId",
+          "reason",
+          "roomId",
+          "roomNumber",
+          "serviceDate",
+          "targetAssignmentVersion",
+          "expectedAssignmentVersion",
+          "durationMinutes",
+          "availableFrom",
+          "dueAt",
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          durationMinutes: { type: "null" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
           reason: {
             type: "string",
-            description: "서버의 source/capacity 고정 reason code",
+            description:
+              "서버의 target source/schedule 검증 reason code. 인원 제외와 별개",
+          },
+        },
+      },
+      AssignmentPreviewRemainingTarget: {
+        type: "object",
+        additionalProperties: false,
+        required: assignmentTargetReadRequired([
+          "cleaningTargetId",
+          "reason",
+          "reasonCodes",
+          "roomId",
+          "roomNumber",
+          "serviceDate",
+          "targetAssignmentVersion",
+          "expectedAssignmentVersion",
+          "durationMinutes",
+          "availableFrom",
+          "dueAt",
+        ]),
+        properties: {
+          ...assignmentTargetReadProperties,
+          cleaningTargetId: { type: "string", format: "uuid" },
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string" },
+          serviceDate: { type: "string", format: "date" },
+          targetAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          durationMinutes: { type: "null" },
+          availableFrom: { type: "string", format: "date-time" },
+          dueAt: { type: ["string", "null"], format: "date-time" },
+          reason: {
+            type: "string",
+            enum: ["NO_ELIGIBLE_MAID", "RECLEAN_MAID_UNAVAILABLE"],
+          },
+          reasonCodes: {
+            type: "array",
+            minItems: 1,
+            maxItems: 1,
+            items: {
+              type: "string",
+              enum: [
+                "NO_ACTIVE_MAID",
+                "AVAILABILITY_NOT_SUBMITTED",
+                "NO_AVAILABLE_MAID",
+                "FIXED_ASSIGNMENT_CONFLICT",
+                "RECLEAN_MAID_UNAVAILABLE",
+                "RECLEAN_MAID_FIXED_ASSIGNMENT_CONFLICT",
+                "NO_FEASIBLE_ASSIGNMENT",
+              ],
+            },
+          },
+        },
+      },
+      AssignmentPreviewDiagnostics: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "동일 RPC snapshot의 누적 필터 인원. eligible은 reclean 소유권 적용 전이며 target별 배정 보장이 아님",
+        required: [
+          "evaluatedAt",
+          "activeMaidCount",
+          "submittedAvailabilityMaidCount",
+          "availableMaidCount",
+          "fixedExcludedMaidCount",
+          "eligibleMaidCount",
+          "fixedExclusions",
+        ],
+        properties: {
+          evaluatedAt: { type: "string", format: "date-time" },
+          activeMaidCount: { type: "integer", minimum: 0, maximum: 1000 },
+          submittedAvailabilityMaidCount: {
+            type: "integer",
+            minimum: 0,
+            maximum: 1000,
+          },
+          availableMaidCount: { type: "integer", minimum: 0, maximum: 20 },
+          fixedExcludedMaidCount: { type: "integer", minimum: 0, maximum: 20 },
+          eligibleMaidCount: { type: "integer", minimum: 0, maximum: 20 },
+          fixedExclusions: {
+            type: "array",
+            maxItems: 242,
+            description:
+              "가능일 후보의 기존 고정 업무 충돌. target별 복수 사유이며 인원 합계로 더하지 않음. 미래 scheduled 생략과 별개",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["maidProfileId", "cleaningTargetId", "reasonCodes"],
+              properties: {
+                maidProfileId: { type: "string", format: "uuid" },
+                cleaningTargetId: { type: "string", format: "uuid" },
+                reasonCodes: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 7,
+                  uniqueItems: true,
+                  items: {
+                    type: "string",
+                    enum: [
+                      "FIXED_SEQUENCE_CONFLICT",
+                      "FIXED_SERVICE_DATE_MISMATCH",
+                      "FIXED_ASSIGNMENT_VERSION_MISMATCH",
+                      "FIXED_SCHEDULE_MISMATCH",
+                      "FIXED_SOURCE_BLOCKED",
+                      "FIXED_ATTEMPT_OWNER_MISMATCH",
+                      "FIXED_ATTEMPT_WORKFLOW_UNRESOLVED",
+                    ],
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -6378,6 +7171,7 @@ export const openApiDocument = {
           "durationPolicyRequired",
           "decisionReady",
           "inputFingerprint",
+          "diagnostics",
           "fixedAssignments",
           "proposedAssignments",
           "remainingUnassignedTargets",
@@ -6414,8 +7208,11 @@ export const openApiDocument = {
             type: "array",
             maxItems: 121,
             items: {
-              $ref: "#/components/schemas/AssignmentPreviewBlockedTarget",
+              $ref: "#/components/schemas/AssignmentPreviewRemainingTarget",
             },
+          },
+          diagnostics: {
+            $ref: "#/components/schemas/AssignmentPreviewDiagnostics",
           },
           blockedTargets: {
             type: "array",
@@ -8195,7 +8992,7 @@ export const openApiDocument = {
       },
       AttemptLifecycleRequest: {
         description:
-          "action별 payload/reason은 고정 계약입니다. raw body·자유문·session ID·capability token·TTL은 입력하지 않습니다.",
+          "action별 payload/reason은 고정 계약입니다. 예정 기한 경과만으로 업무를 종료하는 expire_scheduled는 허용하지 않습니다. raw body·자유문·session ID·capability token·TTL은 입력하지 않습니다.",
         oneOf: [
           lifecycleRequestVariant(
             "allow_finish",
@@ -8207,11 +9004,6 @@ export const openApiDocument = {
             ["DEACTIVATION_UPLOAD_ONLY"],
             { type: "object", additionalProperties: false, maxProperties: 0 },
           ),
-          lifecycleRequestVariant("expire_scheduled", ["SCHEDULE_EXPIRED"], {
-            type: "object",
-            additionalProperties: false,
-            maxProperties: 0,
-          }),
           lifecycleRequestVariant(
             "interrupt_handover",
             ["ADMIN_HANDOVER", "DEACTIVATION_HANDOVER"],
@@ -8817,10 +9609,123 @@ export const openApiDocument = {
         description:
           "배정 당시 서비스 날짜·접근 가능 시각·마감 시각을 보존하는 revision projection입니다. 전화번호, 고객명, PIN, provider 식별자는 포함하지 않습니다.",
       },
-      AssignmentCard: {
+      AssignmentScheduleSnapshot: {
         type: "object",
         additionalProperties: false,
         required: [
+          "capturedAt",
+          "scheduleRevision",
+          "scheduleReasonCode",
+          "sourceReservationVersion",
+          "plannedCheckoutAt",
+          "actualCheckoutAt",
+          "plannedRoomDepartureAt",
+          "actualRoomDepartureAt",
+          "nextCheckInAt",
+          "nextRoomArrivalAt",
+          "nextArrivalKind",
+          "isEarlyCheckIn",
+          "isLateCheckout",
+          "isScheduleUpdated",
+        ],
+        properties: {
+          capturedAt: { type: "string", format: "date-time" },
+          scheduleRevision: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "실제 cleaning_target_schedule_revisions의 revision입니다. assignment CAS나 현재 예약 version에서 추측하지 않습니다.",
+          },
+          scheduleReasonCode: {
+            type: "string",
+            minLength: 1,
+            description:
+              "해당 불변 schedule revision의 source-controlled 사유 코드입니다.",
+          },
+          sourceReservationVersion: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description:
+              "snapshot 캡처 당시 연결 source 예약의 version입니다. 고객 정보·예약 상세 접근 권한을 제공하지 않습니다.",
+          },
+          plannedCheckoutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "source 예약의 예정 퇴실입니다. 실제 퇴실·접근 가능 시각과 구분합니다.",
+          },
+          actualCheckoutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "최초 통보 write의 DB 캡처 시 확인된 source 예약의 실제 퇴실입니다. 계획 capturedAt/notifiedAt과 구분하며 이후 사실로 덮지 않습니다.",
+          },
+          plannedRoomDepartureAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "해당 객실의 예정 점유 종료입니다. 투숙 중 이동이면 이동 effective time이며 예약의 최종 checkout과 다를 수 있습니다.",
+          },
+          actualRoomDepartureAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "최초 통보 write의 DB 캡처 시 확인된 해당 객실의 실제 점유 종료입니다. 미래 객실 이동은 실제 퇴실로 표시하지 않습니다.",
+          },
+          nextCheckInAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "다음 객실 점유 source의 예약 예정 guest check-in입니다. segment 시작/객실 이동 시각이 아니며 dueAt에서 역산하지 않습니다.",
+          },
+          nextRoomArrivalAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "canonical stay segment에 근거한 다음 객실 점유 시작입니다.",
+          },
+          nextArrivalKind: {
+            type: ["string", "null"],
+            enum: ["check_in", "room_move", null],
+          },
+          isEarlyCheckIn: {
+            type: ["boolean", "null"],
+            description:
+              "nextArrivalKind=check_in의 예정 nextCheckInAt이 KST 16:00보다 빠른지 표시합니다. room_move 또는 근거 없음은 null입니다.",
+          },
+          isLateCheckout: {
+            type: ["boolean", "null"],
+            description:
+              "연결 source 예약의 예정 plannedCheckoutAt이 KST 11:00보다 늦은지 표시합니다. 청소 종류로 제한하지 않으며 room_move/해당 근거 없음은 null입니다.",
+          },
+          isScheduleUpdated: {
+            type: "boolean",
+            description:
+              "실제 이전 schedule의 날짜/접근/마감 차이와 명시적 일정 변경 사유가 함께 증명될 때만 true입니다. CAS 증가나 시각 경과 자체는 변경 근거가 아닙니다.",
+          },
+        },
+        description:
+          "불변 계획 snapshot과 통보 당시 알려진 실제 사실입니다. 예약 없는 요청·종료 미정의 시각은 null로 유지하며 고객명·연락처·PIN·내부 lineage ID를 노출하지 않습니다.",
+      },
+      AssignmentCurrentDeparture: {
+        type: "object",
+        additionalProperties: false,
+        required: ["evaluatedAt", "actualCheckoutAt", "actualRoomDepartureAt"],
+        properties: {
+          evaluatedAt: { type: "string", format: "date-time" },
+          actualCheckoutAt: { type: ["string", "null"], format: "date-time" },
+          actualRoomDepartureAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+        },
+        description:
+          "현재 목록의 exact current notified assignment에만 허용하는 source-bound 실제 퇴실 관찰입니다. history/includeHistory는 항상 null이며 점유 재개로 무효화된 퇴실을 현재 사실로 반환하지 않습니다. 계획 snapshot이나 수행 권한을 변경하지 않습니다.",
+      },
+      AssignmentCard: {
+        type: "object",
+        additionalProperties: false,
+        required: assignmentTargetReadRequired([
           "assignmentId",
           "cleaningTargetId",
           "roomId",
@@ -8844,13 +9749,16 @@ export const openApiDocument = {
           "targetStatus",
           "attemptStatus",
           "submissionStatus",
+          "scheduleSnapshot",
+          "currentDeparture",
           "availableFrom",
           "dueAt",
           "notifiedAt",
           "endedAt",
           "createdAt",
-        ],
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: {
@@ -8938,6 +9846,22 @@ export const openApiDocument = {
             type: ["string", "null"],
             enum: ["submitted", "superseded", "approved", "rejected", null],
           },
+          scheduleSnapshot: {
+            anyOf: [
+              { $ref: "#/components/schemas/AssignmentScheduleSnapshot" },
+              { type: "null" },
+            ],
+            description:
+              "생성 schedule에 고정한 계획 및 최초 통보의 실제 사실입니다. 명시적 재계획/재통보는 새 revision으로만 반영하고 legacy 부재는 전체 null이며 현재 예약으로 재수화/backfill하지 않습니다.",
+          },
+          currentDeparture: {
+            anyOf: [
+              { $ref: "#/components/schemas/AssignmentCurrentDeparture" },
+              { type: "null" },
+            ],
+            description:
+              "현재 목록에서만 exact current notified source의 실제 퇴실을 별도 관찰합니다. history/includeHistory에서는 항상 null입니다.",
+          },
           availableFrom: { type: ["string", "null"], format: "date-time" },
           dueAt: { type: ["string", "null"], format: "date-time" },
           notifiedAt: { type: ["string", "null"], format: "date-time" },
@@ -8945,7 +9869,7 @@ export const openApiDocument = {
           createdAt: { type: "string", format: "date-time" },
         },
         description:
-          "배정 카드용 additive projection입니다. 객실·타입·요금·template은 업무 snapshot을 사용하고 PIN·고객 PII·사진 locator를 포함하지 않습니다.",
+          "배정 카드용 additive projection입니다. 객실·타입·요금·template·일정은 업무 snapshot을 사용하고 PIN·고객 PII·사진 locator를 포함하지 않습니다. 일정 표시는 수행/PIN 권한이 아니며 현재 실제 퇴실 관찰과 불변 통보 snapshot을 구분합니다.",
       },
       AssignmentDraftRequest: {
         type: "object",
@@ -8966,7 +9890,7 @@ export const openApiDocument = {
       AssignmentCommitCandidate: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "assignmentId",
           "cleaningTargetId",
           "roomId",
@@ -8980,8 +9904,9 @@ export const openApiDocument = {
           "expectedAvailabilityVersion",
           "availableFrom",
           "dueAt",
-        ],
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
@@ -9000,7 +9925,7 @@ export const openApiDocument = {
       AssignmentCommitBlockedCandidate: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "assignmentId",
           "cleaningTargetId",
           "roomId",
@@ -9015,8 +9940,9 @@ export const openApiDocument = {
           "reasonCodes",
           "availableFrom",
           "dueAt",
-        ],
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
@@ -9043,7 +9969,7 @@ export const openApiDocument = {
       AssignmentCommitUnassignedTarget: {
         type: "object",
         additionalProperties: false,
-        required: [
+        required: assignmentTargetReadRequired([
           "cleaningTargetId",
           "roomId",
           "roomNumber",
@@ -9052,8 +9978,9 @@ export const openApiDocument = {
           "targetAssignmentVersion",
           "availableFrom",
           "dueAt",
-        ],
+        ]),
         properties: {
+          ...assignmentTargetReadProperties,
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
           roomNumber: { type: "string" },
@@ -12479,6 +13406,164 @@ export const openApiDocument = {
         required: ["payroll"],
         properties: {
           payroll: { $ref: "#/components/schemas/PayrollCycle" },
+        },
+      },
+      PayrollWorkSummary: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cycleId",
+          "cycleStatus",
+          "cycleVersion",
+          "accrualAmount",
+          "expectedAmount",
+          "pendingAmount",
+          "pendingCount",
+          "totalAmount",
+          "lateEarningAmount",
+          "adjustmentAmount",
+          "carryInAmount",
+          "carryOutAmount",
+          "payableAmount",
+          "offsetSettled",
+          "lockedAmount",
+        ],
+        properties: {
+          cycleId: { type: ["string", "null"], format: "uuid" },
+          cycleStatus: { $ref: "#/components/schemas/PayrollStatus" },
+          cycleVersion: payrollWorkAmount,
+          accrualAmount: payrollWorkAmount,
+          expectedAmount: payrollWorkAmount,
+          pendingAmount: payrollWorkAmount,
+          pendingCount: payrollWorkAmount,
+          totalAmount: payrollWorkAmount,
+          lateEarningAmount: payrollWorkAmount,
+          adjustmentAmount: payrollWorkSignedAmount,
+          carryInAmount: payrollWorkSignedAmount,
+          carryOutAmount: payrollWorkSignedAmount,
+          payableAmount: payrollWorkSignedAmount,
+          offsetSettled: { type: "boolean" },
+          lockedAmount: { ...payrollWorkAmount, type: ["integer", "null"] },
+        },
+      },
+      PayrollWorkEarning: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          ...payrollWorkCommonRequired,
+          "earningId",
+          "earnedOn",
+          "earningSource",
+          "baseAmount",
+          "bombRoomBonus",
+          "totalAmount",
+          "itemContributionAmount",
+          "lateContributionAmount",
+          "alreadyClaimed",
+          "lateCarried",
+        ],
+        properties: {
+          ...payrollWorkCommon,
+          earningId: { type: "string", format: "uuid" },
+          earnedOn: { type: "string", format: "date" },
+          earningSource: { type: "string", enum: ["cleaning", "compensation"] },
+          baseAmount: payrollWorkAmount,
+          bombRoomBonus: payrollWorkAmount,
+          totalAmount: payrollWorkAmount,
+          itemContributionAmount: payrollWorkAmount,
+          lateContributionAmount: payrollWorkAmount,
+          alreadyClaimed: {
+            type: "boolean",
+            description:
+              "payroll item membership를 뜻하며 실제 송금 완료 표시가 아닙니다.",
+          },
+          lateCarried: { type: "boolean" },
+        },
+      },
+      PayrollWorkWorkflow: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          ...payrollWorkCommonRequired,
+          "earningId",
+          "baseAmount",
+          "bombRoomBonus",
+          "totalAmount",
+          "expectedContributionAmount",
+          "pendingContributionAmount",
+          "includedInPendingCount",
+          "expectedBaseContributionAmount",
+          "expectedBombContributionAmount",
+        ],
+        properties: {
+          ...payrollWorkCommon,
+          earningId: { type: "null" },
+          baseAmount: { type: "null" },
+          bombRoomBonus: { type: "null" },
+          totalAmount: { type: "null" },
+          expectedContributionAmount: payrollWorkAmount,
+          pendingContributionAmount: payrollWorkAmount,
+          includedInPendingCount: { type: "boolean" },
+          expectedBaseContributionAmount: payrollWorkAmount,
+          expectedBombContributionAmount: payrollWorkAmount,
+        },
+      },
+      PayrollWorkDetailsEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "weekStart",
+          "maidProfileId",
+          "kind",
+          "summary",
+          "entries",
+          "nextCursor",
+        ],
+        properties: {
+          weekStart: { type: "string", format: "date" },
+          maidProfileId: { type: "string", format: "uuid" },
+          kind: { type: "string", enum: ["earnings", "workflow"] },
+          summary: { $ref: "#/components/schemas/PayrollWorkSummary" },
+          entries: {
+            type: "array",
+            maxItems: 50,
+            items: {
+              oneOf: [{ $ref: "#/components/schemas/PayrollWorkEarning" }, {
+                $ref: "#/components/schemas/PayrollWorkWorkflow",
+              }],
+            },
+          },
+          nextCursor: {
+            type: ["string", "null"],
+            minLength: 1,
+            maxLength: 1024,
+          },
+        },
+      },
+      PayrollAdjustmentBook: {
+        type: "object",
+        additionalProperties: false,
+        required: ["maidProfileId", "weekStart", "currentBookVersion"],
+        properties: {
+          maidProfileId: { type: "string", format: "uuid" },
+          weekStart: { type: "string", format: "date" },
+          currentBookVersion: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9007199254740991,
+            description:
+              "메이드 전역 원장의 최신 CAS 버전. 과거 조정 row 생성 버전이나 주차별 버전이 아닙니다.",
+          },
+        },
+      },
+      PayrollAdjustmentBookEnvelope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["adjustmentBook"],
+        properties: {
+          adjustmentBook: {
+            $ref: "#/components/schemas/PayrollAdjustmentBook",
+          },
         },
       },
       PayrollAdjustmentEnvelope: {

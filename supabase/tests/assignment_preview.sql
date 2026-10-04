@@ -98,7 +98,7 @@ select is(pg_temp.ledger_snapshot(),(select value from snapshots where label='be
 select is((select count(*)::integer from jsonb_array_elements((select value->'targets' from snapshots where label='confirmed'))),4,
   'today target board includes cross-day active workflow');
 select is((select item->>'blockedReason' from jsonb_array_elements((select value->'targets' from snapshots where label='confirmed')) item
-  where item->>'cleaningTargetId'=pg_temp.pid(305)::text),'ASSIGNMENT_PREVIEW_ACTIVE_WORKFLOW_UNRESOLVED','cross-day attempt remaining duration is not invented');
+  where item->>'cleaningTargetId'=pg_temp.pid(305)::text),null::text,'past current-day scheduled workload is retained without an age-only block');
 select is((select count(*)::integer from jsonb_array_elements((select value->'maids' from snapshots where label='confirmed')) m
   where m->>'role'='maid' and m->>'status'='active' and (m->>'available')::boolean and m->>'availabilityVersion' is not null),1,
   'only active submitted available maid is eligible');
