@@ -1,5 +1,61 @@
 # #363 DB 정적 경고 보완과 #373 정확 호환 기준
 
+## #376 운영 CRLF 호환 보완 후보 — 2026-10-04
+
+릴리스 preflight에서 운영의 검수 목록·developer catalog 두 함수만 기존 source와 같은 내용의
+전체 CRLF 본문임을 확인했다. 원본101은 raw MD5에서 중단되며, MD5만 추가해 허용하면
+검수 목록의 LF fragment가 여전히 일치하지 않는다. 이를 별도
+[#376](https://github.com/wrongstory/room-management-system-backend/issues/376)에서 보완한다.
+
+| 설치 함수 | 관측 raw CRLF MD5 | CRLF→LF 후 요구 MD5 |
+|---|---|---|
+| `public.list_cleaning_inspections_page(uuid,uuid,timestamptz,uuid,integer)` | `a5105bb901c8f1f507965e9b04f52911` | `af65520fb460db7dc858645f13246450` |
+| `public.get_developer_room_catalog(uuid)` | `62d346e27ad148f7f4807ac536e9197b` | `d75eefbe637fb17d942f0f89a626b5f7` |
+
+기존 LF raw 지문은 그대로 허용한다. LF raw 지문이 다르면 **위 두 함수의 정확한 raw CRLF 지문과
+정확한 canonical LF 지문을 모두** 검사한 뒤 작업 본문만 LF로 바꾼다. `pg_get_functiondef` 교체
+anchor에는 원래 raw 본문을 사용한다. 다른5개 함수의 CRLF, 혼합 줄바꿈, bare CR, 알 수 없는
+본문·의미 변경은 계속 `DB_STATIC_REMEDIATION_SOURCE_DRIFT`로 실패한다. 기존 fragment 횟수와
+definition anchor 검사는 유지한다. 승인된 exact9 경고의3개 함수는 raw 지문 그대로 검사하며
+이 예외를 적용하지 않는다.
+
+현재 원격 history 확인은 운영85/head `flat_cleaning_evidence_history_payroll`, recovery73/head
+`generated_room_pin_confirmation`이다. 두 프로젝트 모두101의 name/local version 및
+`private.assert_active_developer_snapshot(uuid)`가 없다. 현재의101 미적용 근거이며 과거의 모든
+수동 실행·부분 drift가 없었다고 단정하지 않는다. 이 확인에 따라 **미적용101 파일만** 정상
+후속 Git commit으로 보완한다. 기존100개 SQL·history는 불변이고 Git amend/rebase나 remote
+history repair는 하지 않는다. 새 append를101 뒤에 넣으면 먼저 실패하는101을 해결하지 못한다.
+dev manifest는101 hash만 갱신하고 count101·기준78·pending23·순서/head는 유지한다.
+
+검증 후보는 LF/LF·LF/known CRLF·known CRLF/LF·둘 다 known CRLF의4조합과 거부 matrix다.
+같은 DB session 안에서 적용 결과를 관찰하고 전체 catalog/행/history/receipt·replay를 비교한다.
+마지막 catalog 함수의 의미 drift를 transaction 밖에 준비한 실제 CLI upgrade 실패도 검사하여
+앞6개 변경·CRLF 정규화·새 helper·migration history가 모두 rollback되는지 확인한다.
+서명/default/type/owner/ACL/OID/STABLE/security definer/search_path/RLS·업무 원장은 보존한다.
+
+구현 착수 checkpoint(과거): 변경 전 `npm test`1432/67파일 및 manifest5개 PASS. 새 SQL 구현·test 보완 중이며
+4조합/negative/원자 rollback·fresh reset/전체 SQL·독립 QA·exact-head CI는 아직 NOT RUN이다.
+기존 #363/#373 및 release79146d3의 PASS를 새 보완 결과로 사용하지 않는다.
+운영/recovery DB·API·Auth/키·PIN·태그/Release는 변경하지 않았다.
+
+후속 working checkpoint: `ci:quality`의 secret scan843·OpenAPI137/148·lint(기존 INFO5)·typecheck·
+Node1432/67·build는 PASS다. 첫 DB 실행과 진단 재실행은4조합/15거부를 통과했지만 실제 CLI 오류
+검사에서 FAIL했다. pinned CLI가 agent-mode 오류를 stderr가 아닌 stdout의
+`LegacyMigrationApplyError` JSON으로 반환한 것이 확인됐다. 전체 SQL 문맥에서 서명을 검색하지
+않고 실제 오류의 첫 줄만 정확히 대조하도록 보완했다. stderr의 실제 ERROR 첫 줄도 동일하게
+검사하며 signal/transport error/성공 status·다른 오류/tag/code/malformed JSON은 거부한다.
+독립 보완 QA의 비DB38건·syntax/diff 검사 PASS, 정적 미해결 P0/P1/P2=0이다. 두 실패 실행의
+latest fresh101 cleanup은 성공했다. 이 checkpoint 당시 최종 runner의 실제 재실행·전체 SQL·새 CI는 진행 전/중이었다.
+
+최신 local checkpoint: 보완한 runner의 실제100→101 전체 실행 exit0이다.4개 LF/known CRLF조합·
+15개 비허용 본문·마지막 함수 실제 CLI 거부의 원자 catalog/행/receipt/history rollback·known raw
+CRLF prestate 보존·실제 happy upgrade·모든 OID/ACL/속성·기존 receipt replay·latest fresh101 cleanup
+모두 PASS다. 원본 strict FAIL9/exit1과 별도 exact9/catalog3 PASS는 구분한다. 같은 source의 전체
+SQL79파일/4722 assertions(기존4718+canonical4), 역할별 실제 DB 검사와 local Security Advisor
+WARN/ERROR0은 PASS다. 새 exact-head required CI·최종 QA/dev 통합·release 전체 재검증은 후속 gate다.
+Windows LF 검증본은101 canonical hash 및294개 원본 raw hash를 보존한다. 운영/recovery·Auth/키·
+API·PIN·태그/Release는 미변경이며 실제 운영 백업이나 복원 검증으로 확대하지 않는다.
+
 ## 사용자 결정과 범위
 
 2026-10-04 KST 사용자가 Decision [#373](https://github.com/wrongstory/room-management-system-backend/issues/373)의 A안을 승인했다.
