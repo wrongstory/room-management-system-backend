@@ -1,6 +1,8 @@
 # 개발 오케스트레이션·source 승인 기준
 
-> 2026-10-04 최신 승인: 사용자 #373 A안에 따라 #363의 경고8개 보완 → 호환9개 exact baseline gate → 독립 QA/회귀/CI 순으로 별도 개발한다. 원본 strict FAIL은 보존한다. #329 Draft PR372와 고정 release PR366의 기존 승인·차단 요소는 그대로이며 자동 Ready/병합/운영 배포하지 않는다. [계약과 실행 기록](./DB_STATIC_WARNING_BASELINE.md)을 따른다. 아래 strict17은 변경 전 checkpoint다.
+> 2026-10-04 최신 승인: 사용자가 #374 → #375의 dev 통합을 승인했다. #363/#373 PR #374는 source `8edc9fb1`의 required CI `37165344729` application/migration PASS·독립 QA98/100·미해결 P0/P1/P2=0을 확인하고 dev에 squash `a103db80d4e849db64b79211cff2de96a00a7193`로 병합했다. source/dev tree `4384747a650026c2359c309897f015441b49fb92`는 같다. 경고8개 보완 및 호환9개 exact baseline gate는 통합됐지만 원본 strict는 FAIL9/exit1을 유지한다. [계약과 과거 실행 기록](./DB_STATIC_WARNING_BASELINE.md)을 따른다. 아래 strict17/Draft/미병합 표현은 과거 checkpoint다.
+
+> [#371 알림 fixture drain](./NOTIFICATION_DELIVERY_FIXTURE_DRAIN.md) PR #375의 기존 source `6177eb93`/100 migrations는 required CI `37168729600` application/migration PASS·독립 QA98이었다. 위 dev/101 통합본의 실제 local Node1,432·Edge470·Python95·fresh101·26 upgrades/SQL4,718·exact9 gate/static upgrade·KST145·6경합/cleanup·독립 QA98도 PASS다. 최종 drain93회/현재 처리 가능 잔여0이며 원본294개 raw SHA를 보존했다. 새 exact-head CI와 dev 병합은 commit 이후 후속 gate이며 최신 판정·source/dev mapping은 PR #375/#371에 기록한다. 기존100 PASS를 새101 통합본이나 동결 release PR #366의 PASS로 대체하지 않는다. #329 Draft PR #372·release/main·운영 DB/API·태그는 이번 dev 통합 승인 범위에서 변경하지 않는다. 아래 과거 checkpoint를 운영 완료로 해석하지 않는다.
 
 > 2026-10-03 최신 승인: 사용자가 순차 개발과 중간 릴리스·운영 배포·문서 정리를 승인했다. #331은 PR361의 source087407b → dev squash eb1ec3e로 통합됐다. exact-head CI37111364892 application/migration(전체 upgrade·SQL·KST·경합·cleanup) PASS, 독립 QA98/100·범위 내 미해결 P0/P1/P2=0이다. 아래 #331 후보/Draft·진단용 승인만이라는 문구는 과거 checkpoint다. 기존 strict lint17/INFO inventory FAIL은 #363, 단발 CAS 원인 추적은 #362로 유지한다.
 
