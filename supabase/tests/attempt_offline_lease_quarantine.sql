@@ -65,6 +65,18 @@ select is((select field_completed_at from public.cleaning_attempts where id=pg_t
 select is(pg_temp.csync(1),(select value from c_results where label='success'),'same successful event replays exact logical response');
 select is((select execution_version::int from public.cleaning_attempts where id=pg_temp.cid(501)),3,'replay never advances execution CAS twice');
 select is((select count(*)::int from public.audit_events where entity_id=pg_temp.cid(501) and event_type='cleaning.field_completed'),1,'offline completion audit exactly once');
+select is((select count(*) from public.notifications where event_family='cleaning.field_completed_admin'
+ and source_entity_id=pg_temp.cid(501)::text and actor_profile_id=pg_temp.cid(2) and recipient_profile_id=pg_temp.cid(1)),1::bigint,
+ 'direct valid offline application and replay notify the opposite-role admin exactly once');
+select is((select count(*) from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+ where n.event_family='cleaning.field_completed_admin' and n.source_entity_id=pg_temp.cid(501)::text),1::bigint,
+ 'direct offline maid completion creates exactly one nonself admin push intent');
+select ok((select bool_and(not n.requires_action and n.source_entity_kind='cleaning_attempt'
+ and n.deep_link_kind='cleaningTarget' and n.deep_link_entity_id=pg_temp.cid(301)
+ and n.cleaning_target_id=pg_temp.cid(301) and n.occurred_at=a.recorded_at)
+ from public.notifications n join public.audit_events a on a.entity_id=pg_temp.cid(501) and a.event_type='cleaning.field_completed'
+ where n.event_family='cleaning.field_completed_admin' and n.source_entity_id=pg_temp.cid(501)::text),
+ 'direct offline counterpart notice preserves exact target, informational state and server audit time');
 select throws_ok($$select pg_temp.csync(1,'2040-03-01 10:31+09')$$,'23505','OFFLINE_EVENT_CONFLICT','same event changed canonical payload conflicts');
 select throws_ok($$select pg_temp.csync(1,'2040-03-01 10:30+09','2040-03-01 10:31+09',0,pg_temp.cid(1601))$$,
  '23505','OFFLINE_EVENT_CONFLICT','different event identity cannot create second completion slot');

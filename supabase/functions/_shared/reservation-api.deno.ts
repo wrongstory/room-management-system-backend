@@ -913,11 +913,16 @@ Deno.test("reservation mutations preserve RPC, actor, CAS and idempotency", asyn
     clients,
     admin,
   );
+  const cancellationRequest = commandRequest(
+    `/v1/reservations/cleaning-requests/${cleaningRow.id}/cancel`,
+    { expectedVersion: 1, reasonCode: "REQUEST_WITHDRAWN" },
+  );
+  cancellationRequest.headers.set(
+    "authorization",
+    `Bearer ${jwtWithSession("30000000-0000-4000-8000-000000000001")}`,
+  );
   await cancelManualCleaningRequest(
-    commandRequest(
-      `/v1/reservations/cleaning-requests/${cleaningRow.id}/cancel`,
-      { expectedVersion: 1, reasonCode: "REQUEST_WITHDRAWN" },
-    ),
+    cancellationRequest,
     clients,
     admin,
     cleaningRow.id,
@@ -934,7 +939,7 @@ Deno.test("reservation mutations preserve RPC, actor, CAS and idempotency", asyn
       "cancel_reservation",
       "manual_checkout_reservation",
       "create_manual_cleaning_request",
-      "cancel_manual_cleaning_request",
+      "cancel_manual_cleaning_request_with_session",
       "process_due_reservation_transitions",
     ].join(","),
     "exact existing RPC set",
@@ -952,6 +957,10 @@ Deno.test("reservation mutations preserve RPC, actor, CAS and idempotency", asyn
   }
   assert(calls[0][1].p_expected_version === 1, "reservation CAS");
   assert(calls[3][1].p_expected_room_version === 1, "room CAS");
+  assert(
+    calls[4][1].p_session_id === "30000000-0000-4000-8000-000000000001",
+    "verified bearer session for cleaning cancellation",
+  );
 });
 
 Deno.test("manual transitions reject the scheduler idempotency namespace", async () => {
@@ -1648,4 +1657,329 @@ Deno.test("reservation path helpers require exact UUID routes", () => {
     ) === cleaningRow.id,
     "cleaning cancel route",
   );
+});
+
+const manualCancelSessionId = "30000000-0000-4000-8000-000000000001";
+const manualCancelOtherSessionId = "30000000-0000-4000-8000-000000000002";
+const manualCancelRawSentinel = "synthetic-private-source-must-not-leak";
+
+function manualCancelRequest(
+  sessionToken = jwtWithSession(manualCancelSessionId),
+) {
+  const request = commandRequest(
+    `/v1/reservations/cleaning-requests/${cleaningRow.id}/cancel`,
+    {
+      expectedVersion: 1,
+      reasonCode: "REQUEST_WITHDRAWN",
+    },
+  );
+  request.headers.set("authorization", `Bearer ${sessionToken}`);
+  return request;
+}
+
+const manualCancelBodyAttackFields = {
+  sessionId: manualCancelOtherSessionId,
+  pin: manualCancelRawSentinel,
+  sourceKey: manualCancelRawSentinel,
+};
+
+for (const [field, value] of Object.entries(manualCancelBodyAttackFields)) {
+  Deno.test(`manual cancel rejects body ${field} before RPC`, async () => {
+    let rpcCount = 0;
+    const clients = {
+      admin: {
+        rpc: () => {
+          rpcCount += 1;
+          return Promise.resolve({ data: cleaningRow, error: null });
+        },
+      },
+    } as unknown as EdgeClients;
+    const request = commandRequest(
+      `/v1/reservations/cleaning-requests/${cleaningRow.id}/cancel`,
+      {
+        expectedVersion: 1,
+        reasonCode: "REQUEST_WITHDRAWN",
+        [field]: value,
+      },
+    );
+    request.headers.set(
+      "authorization",
+      `Bearer ${jwtWithSession(manualCancelSessionId)}`,
+    );
+    const error = await captureEdgeError(() =>
+      cancelManualCleaningRequest(request, clients, admin, cleaningRow.id)
+    );
+    assert(
+      error.status === 400 && error.code === "VALIDATION_ERROR",
+      `${field} is an unexpected public request field`,
+    );
+    assert(rpcCount === 0, "unexpected fields cannot reach the command RPC");
+    const response = errorResponse(error, "manual-cancel-synthetic", {});
+    assert(response.status === 400, "public validation status is unchanged");
+    const body = await response.text();
+    assert(!body.includes(value), "unexpected field values are not echoed");
+    assert(
+      !body.includes(manualCancelSessionId),
+      "bearer session stays private",
+    );
+  });
+}
+
+async function manualCancelBusinessHash(): Promise<string> {
+  // Independently specify sorted business inputs without the session.
+  const canonical = JSON.stringify({
+    expectedVersion: 1,
+    reasonCode: "REQUEST_WITHDRAWN",
+    targetId: cleaningRow.id,
+  });
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonical),
+  );
+  return Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+Deno.test("manual cancellation forwards the Auth-verified session with exact arguments and unchanged DTO", async () => {
+  const request = manualCancelRequest();
+  const clients = authenticationClients({});
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const cancelledRow = {
+    ...cleaningRow,
+    status: "cancelled",
+    version: 2,
+    pin: manualCancelRawSentinel,
+    source_key: manualCancelRawSentinel,
+    session_id: manualCancelSessionId,
+  };
+  clients.admin.rpc = ((name: string, args: Record<string, unknown>) => {
+    calls.push([name, args]);
+    return Promise.resolve({
+      data: name === "is_active_auth_session" ? true : cancelledRow,
+      error: null,
+    });
+  }) as unknown as typeof clients.admin.rpc;
+  const verifiedActor = await authenticate(request, clients);
+  const result = await cancelManualCleaningRequest(
+    request,
+    clients,
+    verifiedActor,
+    cleaningRow.id,
+  );
+  const expectedArguments = {
+    p_actor_profile_id: admin.profileId,
+    p_session_id: manualCancelSessionId,
+    p_target_id: cleaningRow.id,
+    p_expected_version: 1,
+    p_reason_code: "REQUEST_WITHDRAWN",
+    p_idempotency_key: "reservation-test-0001",
+    p_request_hash: await manualCancelBusinessHash(),
+  };
+  assert(
+    JSON.stringify(calls) === JSON.stringify([
+      ["is_active_auth_session", {
+        p_auth_user_id: admin.authUserId,
+        p_session_id: manualCancelSessionId,
+      }],
+      ["cancel_manual_cleaning_request_with_session", expectedArguments],
+    ]),
+    "exact verified actor/session, CAS, idempotency and business hash",
+  );
+  assert(
+    JSON.stringify(result) === JSON.stringify({
+      id: cleaningRow.id,
+      roomId: cleaningRow.room_id,
+      reservationId: cleaningRow.reservation_id,
+      cleaningKind: "stayover",
+      status: "cancelled",
+      serviceDate: cleaningRow.service_date,
+      availableFrom: cleaningRow.available_from,
+      dueAt: cleaningRow.due_at,
+      version: 2,
+    }),
+    "existing camelCase DTO",
+  );
+  assert(
+    Object.keys(result).sort().join(",") === [
+      "availableFrom",
+      "cleaningKind",
+      "dueAt",
+      "id",
+      "reservationId",
+      "roomId",
+      "serviceDate",
+      "status",
+      "version",
+    ].join(","),
+    "no PIN, raw source or session fields",
+  );
+  assert(
+    !JSON.stringify(result).includes(manualCancelRawSentinel) &&
+      !JSON.stringify(result).includes(manualCancelSessionId),
+    "private values cannot enter the public DTO",
+  );
+});
+
+Deno.test("manual cancellation hash is independent of bearer session and idempotency key", async () => {
+  const args: Array<Record<string, unknown>> = [];
+  const clients = {
+    admin: {
+      rpc: (_name: string, value: Record<string, unknown>) => {
+        args.push(value);
+        return Promise.resolve({ data: cleaningRow, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const first = manualCancelRequest();
+  const second = manualCancelRequest(
+    jwtWithSession(manualCancelOtherSessionId),
+  );
+  second.headers.set("idempotency-key", "reservation-test-0002");
+  for (const request of [first, second]) {
+    await cancelManualCleaningRequest(request, clients, admin, cleaningRow.id);
+  }
+  assert(
+    args[0].p_request_hash === await manualCancelBusinessHash() &&
+      args[1].p_request_hash === args[0].p_request_hash,
+    "same deterministic business-only hash across sessions/keys",
+  );
+  assert(
+    args[0].p_session_id === manualCancelSessionId &&
+      args[1].p_session_id === manualCancelOtherSessionId,
+    "each command still receives its own verified session",
+  );
+});
+
+Deno.test("manual cancellation rejects missing or malformed session before command RPC", async () => {
+  let rpcCount = 0;
+  const clients = {
+    admin: {
+      rpc: () => {
+        rpcCount += 1;
+        return Promise.resolve({ data: cleaningRow, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const tokens = [
+    "test-token",
+    "test.e30.test", // Synthetic empty JSON claims.
+    jwtWithSession(""),
+    jwtWithSession(manualCancelRawSentinel),
+    jwtWithSession("30000000-0000-0000-8000-000000000001"),
+    jwtWithSession("30000000-0000-4000-0000-000000000001"),
+    "test.not-json.test",
+  ];
+  for (const token of tokens) {
+    const error = await captureEdgeError(() =>
+      cancelManualCleaningRequest(
+        manualCancelRequest(token),
+        clients,
+        admin,
+        cleaningRow.id,
+      )
+    );
+    assert(
+      error.status === 401 && error.code === "INVALID_ACCESS_TOKEN",
+      "invalid session is 401",
+    );
+    assert(
+      !error.message.includes(manualCancelRawSentinel),
+      "token errors remain generic",
+    );
+  }
+  const missingBearer = manualCancelRequest();
+  missingBearer.headers.delete("authorization");
+  const missing = await captureEdgeError(() =>
+    cancelManualCleaningRequest(missingBearer, clients, admin, cleaningRow.id)
+  );
+  assert(
+    missing.status === 401 && missing.code === "MISSING_ACCESS_TOKEN",
+    "missing bearer is 401",
+  );
+  assert(
+    rpcCount === 0,
+    "invalid or missing session cannot call the command RPC",
+  );
+});
+
+Deno.test("manual cancellation preserves admin-only and password guards before RPC", async () => {
+  for (
+    const actor of [maid, developer, { ...admin, mustChangePassword: true }]
+  ) {
+    const error = await captureEdgeError(() =>
+      cancelManualCleaningRequest(
+        manualCancelRequest(),
+        {} as EdgeClients,
+        actor,
+        cleaningRow.id,
+      )
+    );
+    assert(
+      error.status === 403,
+      "guard fails before an unavailable RPC client",
+    );
+    assert(
+      error.code ===
+        (actor.mustChangePassword
+          ? "PASSWORD_CHANGE_REQUIRED"
+          : "ADMIN_REQUIRED"),
+      "existing admin/password gate is retained",
+    );
+  }
+});
+
+Deno.test("manual cancellation maps session/password failures consistently and redacts database errors", async () => {
+  for (
+    const [code, status] of [
+      ["SESSION_REVOKED", 401],
+      ["PASSWORD_CHANGE_REQUIRED", 403],
+      ["STALE_VERSION", 409],
+      ["IDEMPOTENCY_KEY_REUSED", 409],
+      ["VALIDATION_ERROR", 400],
+      ["CLEANING_REQUEST_NOT_FOUND", 404],
+      ["UNKNOWN_DATABASE_ERROR", 500],
+    ] as const
+  ) {
+    let rpcCount = 0;
+    const clients = {
+      admin: {
+        rpc: () => {
+          rpcCount += 1;
+          return Promise.resolve({
+            data: null,
+            error: {
+              message: `${code}: ${manualCancelRawSentinel}`,
+              details: manualCancelRawSentinel,
+              hint: manualCancelRawSentinel,
+            },
+          });
+        },
+      },
+    } as unknown as EdgeClients;
+    const error = await captureEdgeError(() =>
+      cancelManualCleaningRequest(
+        manualCancelRequest(),
+        clients,
+        admin,
+        cleaningRow.id,
+      )
+    );
+    assert(error.status === status, `${code} HTTP status parity`);
+    assert(
+      error.code ===
+        (code === "UNKNOWN_DATABASE_ERROR"
+          ? "RESERVATION_COMMAND_FAILED"
+          : code),
+      `${code} public code parity`,
+    );
+    const response = errorResponse(error, "manual-cancel-synthetic", {});
+    assert(response.status === status, "public response status");
+    assert(
+      !(await response.text()).includes(manualCancelRawSentinel),
+      "no raw DB details in response",
+    );
+    assert(rpcCount === 1, "no business command retry");
+  }
 });

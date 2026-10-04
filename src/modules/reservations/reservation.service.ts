@@ -393,6 +393,23 @@ function ensureAdmin(actor: Actor): void {
   }
 }
 
+// Called only with the Auth-verified Actor; the DB rechecks the exact live session.
+function cancellationSessionId(actor: Actor): string {
+  try {
+    const payload = actor.accessToken.split('.')[1];
+    const claims = payload
+      ? JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { session_id?: unknown }
+      : null;
+    if (typeof claims?.session_id !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claims.session_id)) {
+      throw new Error('invalid session');
+    }
+    return claims.session_id.toLowerCase();
+  } catch {
+    throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.');
+  }
+}
+
 const roomMoveReloadResources = new Set<RoomMoveReloadResource>([
   'reservation',
   'sourceRoom',
@@ -474,6 +491,15 @@ function reservationError(
   roomMoveCommand = false
 ): AppError {
   const message = error?.message ?? '';
+  if (message.includes('VALIDATION_ERROR')) {
+    return new AppError(400, 'VALIDATION_ERROR', '청소 요청 취소 입력이 올바르지 않습니다.');
+  }
+  if (message.includes('SESSION_REVOKED')) {
+    return new AppError(401, 'SESSION_REVOKED', '로그인이 필요합니다.');
+  }
+  if (message.includes('PASSWORD_CHANGE_REQUIRED')) {
+    return new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호를 먼저 변경해 주세요.');
+  }
   if (message.includes('GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY')) {
     return new AppError(400, 'GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY', '예약 인원이 객실 유형의 최대 인원을 초과합니다.');
   }
@@ -1299,8 +1325,9 @@ export class SupabaseReservationService implements ReservationService {
       expectedVersion: input.expectedVersion,
       reasonCode: input.reasonCode
     };
-    const { data, error } = await this.clients.admin.rpc('cancel_manual_cleaning_request', {
+    const { data, error } = await this.clients.admin.rpc('cancel_manual_cleaning_request_with_session', {
       p_actor_profile_id: actor.profileId,
+      p_session_id: cancellationSessionId(actor),
       p_target_id: input.targetId,
       p_expected_version: input.expectedVersion,
       p_reason_code: input.reasonCode,
