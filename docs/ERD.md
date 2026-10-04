@@ -1,5 +1,9 @@
 # Room Management System ERD 초안
 
+> #363/#373 A안 후보는 기존 함수7개 body-only 보완과 owner-only snapshot guard 한 개뿐이다.
+> 테이블/컬럼/관계/FK/index/RLS/원장·receipt는 그대로다. 정확한 호환 경고9개 기준과
+> 원본 strict FAIL 보존은 [DB 정적 검사 계약](./DB_STATIC_WARNING_BASELINE.md)을 따른다.
+
 > #331 신규99 migration 구현 후보는 `private.payroll_remittance_markers` current와
 > `private.payroll_remittance_marker_revisions` 불변 이력을 추가한다. maid/week 표시 CAS와
 > 실제 cycle/book/payment identity는 독립이며 current→revision의 복합 FK와 commit-time

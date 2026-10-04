@@ -1,5 +1,7 @@
 # 개발 오케스트레이션·source 승인 기준
 
+> 2026-10-04 최신 승인: 사용자 #373 A안에 따라 #363의 경고8개 보완 → 호환9개 exact baseline gate → 독립 QA/회귀/CI 순으로 별도 개발한다. 원본 strict FAIL은 보존한다. #329 Draft PR372와 고정 release PR366의 기존 승인·차단 요소는 그대로이며 자동 Ready/병합/운영 배포하지 않는다. [계약과 실행 기록](./DB_STATIC_WARNING_BASELINE.md)을 따른다. 아래 strict17은 변경 전 checkpoint다.
+
 > 2026-10-03 최신 승인: 사용자가 순차 개발과 중간 릴리스·운영 배포·문서 정리를 승인했다. #331은 PR361의 source087407b → dev squash eb1ec3e로 통합됐다. exact-head CI37111364892 application/migration(전체 upgrade·SQL·KST·경합·cleanup) PASS, 독립 QA98/100·범위 내 미해결 P0/P1/P2=0이다. 아래 #331 후보/Draft·진단용 승인만이라는 문구는 과거 checkpoint다. 기존 strict lint17/INFO inventory FAIL은 #363, 단발 CAS 원인 추적은 #362로 유지한다.
 
 > 중간 점검 릴리스는 [#364](https://github.com/wrongstory/room-management-system-backend/issues/364)의 v0.8.0 후보다. #329의 기존 로그인 계약과 운영 배포에 선행하는 공용 세션 `not_after` 검사 #352를 별도 PR로 먼저 보완한다. 현재 dev에 완료된 기능과 #352만 첫 릴리스에 포함하며, #329 → #317은 그 이후 순차 구현한다. release/main 필수 검증·독립 QA·CI·protected 병합 후에만 승인된 pending DB → exact API 및 reservation-scheduler를 배포하고 smoke·문서·태그를 확인한다. 프런트 source, Node fallback 활성화, Auth 설정, 키, 실제 PIN/송금, provider/Cron/TASK는 변경하지 않는다. 실제 배포 완료나 사용자 UAT 통과를 선행 기록하지 않는다.
