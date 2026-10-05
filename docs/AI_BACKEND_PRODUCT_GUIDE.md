@@ -1,5 +1,27 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> 2026-10-05 현재 #318 통합: checkpoint `0781d14` 뒤 #329·#382·사진 저장명·#393의 `dev@58a5821`을 정상 통합한106개 후보는 Node1,794·Edge487·Python95/client순열·fresh106·전체27 upgrade/SQL84파일5,193·static/KST145·전체9경합/cleanup·최종fresh106·exact9 baseline을 실제 통과했다. 독립 소스 QA155/날짜79,992도 PASS이며 원본484 hash drift0·RLS누락0·실제 caller7/18/core2를 확인했다. raw strict FAIL9/exit1은 유지한다. exact-head CI와 PR321 보호 병합·운영은 아직 후속이다. 아래104/이전 수치는 각 과거 checkpoint이며 [최신 범위와 증거](./ROOM_BOARD_DATE_FILTERS.md)를 따른다. v0.8.0·운영·프런트는 변경하지 않는다.
+
+### 과거 #318의 bb4fa40 통합 준비
+> 2026-10-05 #318 최신 통합 후보: dev `bb4fa40`의 102개 SQL을 보존하고 원격 미적용인 원 #318 SQL 본문을 변경 없이 뒤로 재정렬했다(#329 strict caller/snapshot 선행 검증 보존). LIVE의 PIN/current-cleaning과 실제active 점유 선택만 기존 helper/계약으로 호환 보완한 총104/head `room_board_live_projection_compatibility` 후보이며, 과거·미래·상세 조건 9종·권한·history는 유지한다. 예정 퇴실 시각 이후 현장 완료 전 inspection 상세조건은 실제 청소 materialization과 다른 축으로 유지한다. [범위·SHA·실제 검증과 남은 gate](./ROOM_BOARD_DATE_FILTERS.md)를 따른다. 기존86/103 검증을 104개 전체 DB PASS로 승격하지 않으며 최신 #383/#382/#329 재통합·fresh DB·exact-head CI·운영 배포는 후속이다.
+
+## 2026-09-29 사용자 확정: 관리자 날짜별 객실 현황과 상세 조건
+
+이 범위의 프런트 targeted 대조 기준은 `makee-ham/room-management-system`의 `dev@26a334f2c488223f0b120b45fafcfc0f85e35a58`이다. 전체 제품 snapshot을 이 commit으로 일괄 교체한 것이 아니라 관리자 객실 현황의 날짜 이동·상태/상세조건 UI만 다시 대조했다.
+
+2026-10-05에는 원격 `dev@09ed28446a4fd43919cddb29ebe442b848548ab8`의 DOCS/30 B05·B06을
+추가로 읽기 전용 대조했다. 날짜 UI 활성화와 날짜별 projection 대기는 프런트 문서의 현재 관찰이다.
+위26a의 UI 차단 기록은 과거 상태이며 전역 snapshot·아래 확정 정책을 자동 교체하지 않는다.
+수동 퇴실점검 완료/홈 과거 주급 재구성은 #318에 포함하지 않는다.
+같은 문서 B01의 촛불 타 메이드 차단 초안보다 사용자의 #330 공동 조정 결정이 우선한다.
+프런트 소스 수정이나 운영 UAT 완료가 아니며 [범위와 알려진 차이](./FRONTEND_CONTRACT_SNAPSHOT.md#2026-10-05-318-연동-문서-재확인)를 따른다.
+
+- [확정] 관리자 객실 현황은 `serviceDate=YYYY-MM-DD`로 날짜를 이동할 수 있다. 생략 또는 KST 오늘은 요청 시점 LIVE, 과거는 해당 KST 날짜 종료, 미래는 해당 KST 날짜 시작 시점의 projection이다.
+- [확정] 상세 조건은 와이어프레임의 `퇴실점검 대상`, `인원 추가`, `공실`, `촛불 있음`, `특이사항 있음`, `얼리 체크인`, `레이트 체크아웃`을 서버 코드로 제공한다. 기준정보 확인 필요와 PIN 동기화 경고도 서로 다른 코드로 유지한다.
+- [확정] 응답은 고객명·연락처 없이 카드 표시용 예약 ID, 입퇴실 시각, 인원, 타입 기준 인원만 제공한다. 영구 복합 status 컬럼을 추가하지 않는다.
+- [미확정] 퇴실점검의 수동 완료와 청소 완료 대체 lifecycle은 기존 미확정 상태를 유지한다. 이번 확정은 현재 청소 target/attempt 원장에서 `CHECKOUT_INSPECTION_REQUIRED`를 계산하는 읽기 계약만 포함한다.
+- [현재 구현 후보] Issue #318의 append-only `room_board_date_filters` migration과 `GET /v1/rooms?serviceDate=...` Fastify/Edge/OpenAPI 계약이다. `dev` 병합, release/main 승격, production migration/API 배포와 프런트 버튼 활성화는 각각 별도 상태다.
+## 과거 #329 통합 검증 이력
 > 2026-10-05 최신 #329 통합 실행 결과: checkpoint4da53b0 +devfdd8d7d 정상 재통합 후보는 Node1,767/74·Edge486/0·Python95/client6순열과 실제 fresh104→template6순열/receipt/CAS/16malformed→전체9경합→finalfresh104 exit0 PASS다. 원본480/사본480 drift0·SQL200/LF/raw280, 최종 fixture0/RLS누락0/객실121을 확인했다. 아래 이전27 upgrades/SQL82·5,119/static/KST145와 최초 cleanup FAIL/후속3PASS를 구분한다. 새 source의 전체upgrade/SQL은 로컬 재실행 NOT RUN이며 exact-head CI가 실행해야 한다. 최종 독립 문서/staged QA·commit/push·CI·dev 병합은 후속이고 운영·v0.8.0·프런트는 불변이다. [정확한 증거](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신-devfdd-통합전체9-경합-완료-checkpoint)를 따른다.
 
 > 2026-10-05 최신 통합 범위: #382/#323은 PR335/source `c15ebd6`의 독립 QA·exact CI37254484170 두 required checks PASS 후 dev `fdd8d7d2ff9f0fed824865c12c121c0cbfa257f1`에 보호 squash됐다. 아래 순열 정책은 확정이며 source/dev 완료, 운영 반영은 아니다. #329는 정상 checkpoint `4da53b0` 뒤 이 dev를 정상 재통합 중이다. 기존 세션 A안·104 migration·과거 이력은 유지하고 새 통합본의 품질·템플릿·전체 경합·독립 QA·exact-head CI는 다시 검증한다. 기존 v0.8.0은 보존하고 최신 기능의 운영 승격은 #387 v0.9.0이며, 실제 Supabase-only 백업/복원은 모든 개발 이후·운영 배포 전에 수행한다.
@@ -361,7 +383,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 ### `[확정]` 백엔드 projection / `[확정 — 2026-09-16]` 현재 객실 대표 표현
 
-백엔드는 기존 `reservation_phase`, `occupied`, `cleaning_required`, `allocation_blocked`, `allocation_ready`와 사유를 호환 유지하고, #187 Phase A에서 `occupancy_status`, `reservation_lifecycle`, `readiness_status`, `primary_display_status`를 독립 projection 축으로 추가한다. 한 호출은 서버 시각을 한 번만 캡처하며 `server_time`은 기존 `evaluated_at`과 정확히 같은 값이다. 현재 일정은 `[check_in_at, check_out_at)` 반개구간이고 실제 active occupancy도 `OCCUPIED`다. current가 없으면 가장 이른 미래 active 예약의 KST 체크인 날짜가 오늘이면 `ARRIVAL_PENDING`, 내일이면 `RESERVATION_PRESENT`, 모레 이후이면 `FUTURE`, 예약이 없으면 `NONE`이다. 현재가 있어도 별도의 `next_reservation_id`, `next_check_in_at`, `next_check_out_at`에는 가장 이른 미래 active 예약을 반환할 수 있다.
+백엔드는 기존 `reservation_phase`, `occupied`, `cleaning_required`, `allocation_blocked`, `allocation_ready`와 사유를 호환 유지하고, #187 Phase A에서 `occupancy_status`, `reservation_lifecycle`, `readiness_status`, `primary_display_status`를 독립 projection 축으로 추가한다. 오늘 LIVE 조회는 서버 시각을 한 번만 캡처하며 `server_time`은 `evaluated_at`과 정확히 같다. #318 날짜 조회에서 `server_time`은 실제 응답 계산 시각, `evaluated_at`은 과거 KST 영업일 종료 또는 미래 영업일 시작 시각이므로 서로 다를 수 있다. 현재 일정은 `[check_in_at, check_out_at)` 반개구간이고 실제 active occupancy도 `OCCUPIED`다. current가 없으면 가장 이른 미래 active 예약의 KST 체크인 날짜가 오늘이면 `ARRIVAL_PENDING`, 내일이면 `RESERVATION_PRESENT`, 모레 이후이면 `FUTURE`, 예약이 없으면 `NONE`이다. 현재가 있어도 별도의 `next_reservation_id`, `next_check_in_at`, `next_check_out_at`에는 가장 이른 미래 active 예약을 반환할 수 있다.
 
 `primary_display_status` 우선순위는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY`다. `BLOCKED`는 청소 외 실제 운영·입실·데이터 차단이 있을 때만 사용하고, 청소만으로 만들지 않는다. `FUTURE`는 현재 readiness 대표 상태를 유지한다. `blocking_reason_codes`와 `readiness_reason_codes`는 분리하며, `PIN_MISMATCH`와 `PIN_UNCONFIGURED`는 current check-in의 readiness 사유로만 노출하고 예약 bookability 차단으로 사용하지 않는다. 이 값들은 저장된 단일 상태가 아니라 동일 snapshot에서 계산한 표시 projection이며, 기존 reason/PIN 경고도 보존한다.
 

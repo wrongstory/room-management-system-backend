@@ -14,6 +14,9 @@ const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
 const issueIdSchema = z.object({ roomId: z.uuid(), issueId: z.uuid() });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
 const expectedVersionSchema = z.number().int().positive();
+const roomListQuerySchema = z.object({
+  serviceDate: z.iso.date().refine((value) => !value.startsWith('0000-')).optional()
+}).strict();
 const roomEventQuerySchema = z
   .object({
     limit: z.preprocess(
@@ -174,9 +177,15 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
     const authenticated = [app.authenticate, app.requirePasswordChanged];
     const admin = [...authenticated, app.requireAdmin];
 
-    app.get('/', { preHandler: admin }, async (request) => ({
-      rooms: await roomService.list(request.actor)
-    }));
+    app.get('/', { preHandler: admin }, async (request, reply) => {
+      const query = roomListQuerySchema.parse(request.query);
+      return reply.header('Cache-Control', 'no-store').send({
+        rooms: await roomService.list(
+          request.actor,
+          query.serviceDate === undefined ? undefined : { serviceDate: query.serviceDate }
+        )
+      });
+    });
 
     app.post('/pins/bootstrap', { preHandler: admin }, async (request, reply) => {
       reply.header('Cache-Control', 'no-store');

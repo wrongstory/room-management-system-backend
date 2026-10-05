@@ -128,6 +128,9 @@ function services(): AppServices {
         elevatorZone: 'A' as const,
         dataStatus: 'verified' as const,
         stateVersion: 1,
+        serviceDate: '2026-09-16',
+        projectionMode: 'LIVE' as const,
+        detailConditionCodes: ['VACANT' as const],
         evaluatedAt: '2026-09-16T08:00:00.000Z',
         reservationPhase: 'upcoming' as const,
         serverTime: '2026-09-16T08:00:00.000Z',
@@ -140,6 +143,11 @@ function services(): AppServices {
         nextReservationId: '40000000-0000-4000-8000-000000000001',
         nextCheckInAt: '2026-09-18T07:00:00.000Z',
         nextCheckOutAt: '2026-09-19T02:00:00.000Z',
+        displayReservationId: '40000000-0000-4000-8000-000000000001',
+        displayCheckInAt: '2026-09-18T07:00:00.000Z',
+        displayCheckOutAt: '2026-09-19T02:00:00.000Z',
+        displayGuestCount: 2,
+        displayBaseOccupancy: 2,
         blockingReasonCodes: [],
         readinessReasonCodes: [],
         occupied: false,
@@ -498,6 +506,38 @@ describe('application', () => {
       cleaningRequired: false,
       allocationReady: true
     });
+    await app.close();
+  });
+
+  it('passes one strict calendar serviceDate to the admin room board', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const headers = { authorization: 'Bearer access-token' };
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms?serviceDate=2026-09-22',
+      headers
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(appServices.rooms.list).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      { serviceDate: '2026-09-22' }
+    );
+
+    for (const query of [
+      'serviceDate=2026-02-30',
+      'serviceDate=2026-9-22',
+      'serviceDate=2026-09-22&unexpected=true'
+    ]) {
+      const invalid = await app.inject({
+        method: 'GET',
+        url: `/v1/rooms?${query}`,
+        headers
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json().error.code).toBe('VALIDATION_ERROR');
+    }
     await app.close();
   });
 

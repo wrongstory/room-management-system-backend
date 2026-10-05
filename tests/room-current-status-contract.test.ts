@@ -32,6 +32,9 @@ const roomRow = {
   elevator_zone: 'A',
   data_status: 'verified',
   state_version: 3,
+  service_date: '2026-09-16',
+  projection_mode: 'LIVE',
+  detail_condition_codes: ['VACANT'],
   evaluated_at: '2026-09-16T08:00:00.000Z',
   reservation_phase: 'upcoming',
   server_time: '2026-09-16T08:00:00.000Z',
@@ -44,6 +47,11 @@ const roomRow = {
   next_reservation_id: '40000000-0000-4000-8000-000000000001',
   next_check_in_at: '2026-09-18T07:00:00.000Z',
   next_check_out_at: '2026-09-19T02:00:00.000Z',
+  display_reservation_id: '40000000-0000-4000-8000-000000000001',
+  display_check_in_at: '2026-09-18T07:00:00.000Z',
+  display_check_out_at: '2026-09-19T02:00:00.000Z',
+  display_guest_count: 2,
+  display_base_occupancy: 2,
   blocking_reason_codes: [],
   readiness_reason_codes: [],
   occupied: false,
@@ -91,9 +99,12 @@ describe('current room status public contract', () => {
     } as unknown as SupabaseClients;
     const service = new SupabaseRoomService(clients);
 
-    await expect(service.list(adminActor)).resolves.toEqual([
+    await expect(service.list(adminActor, { serviceDate: '2026-09-16' })).resolves.toEqual([
       expect.objectContaining({
         evaluatedAt: '2026-09-16T08:00:00.000Z',
+        serviceDate: '2026-09-16',
+        projectionMode: 'LIVE',
+        detailConditionCodes: ['VACANT'],
         reservationPhase: 'upcoming',
         serverTime: '2026-09-16T08:00:00.000Z',
         occupancyStatus: 'VACANT',
@@ -103,11 +114,18 @@ describe('current room status public contract', () => {
         canonicalPrimaryDisplayStatus: 'READY',
         displayStatusOverride: null,
         nextReservationId: '40000000-0000-4000-8000-000000000001',
+        displayReservationId: '40000000-0000-4000-8000-000000000001',
         occupied: false,
         cleaningRequired: false,
         allocationReady: true
       })
     ]);
+    expect(rpc).toHaveBeenCalledWith('get_room_board_projection', {
+      p_actor_profile_id: adminActor.profileId,
+      p_session_id: adminSessionId,
+      p_service_date: '2026-09-16',
+      p_room_id: null
+    });
   });
 
   it('publishes compatible and independent current room axes in OpenAPI', () => {
@@ -123,7 +141,11 @@ describe('current room status public contract', () => {
       'primaryDisplayStatus',
       'canonicalPrimaryDisplayStatus',
       'displayStatusOverride',
+      'serviceDate',
+      'projectionMode',
+      'detailConditionCodes',
       'nextReservationId',
+      'displayReservationId',
       'blockingReasonCodes',
       'readinessReasonCodes'
     ]));
@@ -151,6 +173,20 @@ describe('current room status public contract', () => {
       'READY'
     ]);
     expect(schema.properties.serverTime.description).toContain('evaluatedAt');
+    expect(openApiDocument.paths['/v1/rooms'].get.parameters).toEqual([
+      expect.objectContaining({ name: 'serviceDate', in: 'query', required: false })
+    ]);
+    expect(openApiDocument.components.schemas.RoomDetailConditionCode.enum).toEqual([
+      'CHECKOUT_INSPECTION_REQUIRED',
+      'EXTRA_GUESTS',
+      'VACANT',
+      'CANDLE_PRESENT',
+      'ROOM_ISSUE_PRESENT',
+      'EARLY_CHECK_IN',
+      'LATE_CHECK_OUT',
+      'DATA_VERIFICATION_REQUIRED',
+      'PIN_SYNC_WARNING'
+    ]);
     expect(openApiDocument.components.schemas.RoomReadinessReasonCode.enum).toEqual(
       expect.arrayContaining(['CLEANING_REQUIRED', 'PIN_MISMATCH', 'PIN_UNCONFIGURED'])
     );

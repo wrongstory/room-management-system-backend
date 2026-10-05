@@ -15,6 +15,7 @@ import {
   resolveRoomIssue,
   roomDatabaseError,
   roomDetailIdFromPath,
+  roomListServiceDate,
   roomPathIds,
   setRoomCandleCount,
   toRoomProjections,
@@ -66,6 +67,9 @@ const roomRow = {
   elevator_zone: "A" as const,
   data_status: "verified" as const,
   state_version: 3,
+  service_date: "2026-09-16",
+  projection_mode: "LIVE" as const,
+  detail_condition_codes: ["CHECKOUT_INSPECTION_REQUIRED", "EXTRA_GUESTS"],
   evaluated_at: "2026-09-16T08:00:00.000Z",
   reservation_phase: "current" as const,
   server_time: "2026-09-16T08:00:00.000Z",
@@ -78,6 +82,11 @@ const roomRow = {
   next_reservation_id: "30000000-0000-4000-8000-000000000010",
   next_check_in_at: "2026-09-17T07:00:00.000Z",
   next_check_out_at: "2026-09-18T02:00:00.000Z",
+  display_reservation_id: "30000000-0000-4000-8000-000000000009",
+  display_check_in_at: "2026-09-16T06:00:00.000Z",
+  display_check_out_at: "2026-09-16T11:00:00.000Z",
+  display_guest_count: 3,
+  display_base_occupancy: 2,
   blocking_reason_codes: [],
   readiness_reason_codes: [],
   occupied: true,
@@ -113,7 +122,7 @@ function operationClients(calls: Array<[string, Record<string, unknown>]>) {
     admin: {
       async rpc(name: string, args: Record<string, unknown>) {
         calls.push([name, args]);
-        if (name === "get_room_operational_projection") {
+        if (name === "get_room_board_projection") {
           return { data: [roomRow], error: null };
         }
         if (name === "change_room_master_data") {
@@ -315,8 +324,13 @@ Deno.test("room list and detail use one exact camelCase projection", async () =>
     },
   } as unknown as EdgeClients;
 
-  const rooms = await listRooms(clients, admin);
-  const detail = await getRoom(clients, admin, rows[0].id);
+  const rooms = await listRooms(readRequest("/v1/rooms"), clients, admin);
+  const detail = await getRoom(
+    readRequest(`/v1/rooms/${rows[0].id}`),
+    clients,
+    admin,
+    rows[0].id,
+  );
   assert(rooms.length === 121, "all 121 rooms must remain visible");
   assert(
     JSON.stringify(rooms[0]) === JSON.stringify(detail),
@@ -329,7 +343,12 @@ Deno.test("room list and detail use one exact camelCase projection", async () =>
   );
 
   const missing = await captureEdgeError(() =>
-    getRoom(clients, admin, "30000000-0000-4000-8000-999999999999")
+    getRoom(
+      readRequest("/v1/rooms/30000000-0000-4000-8000-999999999999"),
+      clients,
+      admin,
+      "30000000-0000-4000-8000-999999999999",
+    )
   );
   assert(
     missing.code === "ROOM_NOT_FOUND" && missing.status === 404,
@@ -345,17 +364,66 @@ Deno.test("room routes require a changed password and exact business admin", asy
     ]
   ) {
     const error = await captureEdgeError(() =>
-      listRooms({} as EdgeClients, actor)
+      listRooms(readRequest("/v1/rooms"), {} as EdgeClients, actor)
     );
     assert(error.code === "ADMIN_REQUIRED", `${actor.role} denied`);
   }
   const temporary = await captureEdgeError(() =>
-    listRooms({} as EdgeClients, { ...admin, mustChangePassword: true })
+    listRooms(
+      readRequest("/v1/rooms"),
+      {} as EdgeClients,
+      { ...admin, mustChangePassword: true },
+    )
   );
   assert(
     temporary.code === "PASSWORD_CHANGE_REQUIRED",
     "temporary password denied",
   );
+});
+
+Deno.test("room list serviceDate accepts one real calendar date only", () => {
+  for (
+    const value of [
+      "0001-01-01",
+      "0099-12-31",
+      "0096-02-29",
+      "0100-01-01",
+      "2000-02-29",
+      "2026-09-22",
+      "9999-12-31",
+    ]
+  ) {
+    assert(
+      roomListServiceDate(readRequest(`/v1/rooms?serviceDate=${value}`)) ===
+        value,
+      `${value} valid date without 1900 year remapping`,
+    );
+  }
+  assert(
+    roomListServiceDate(readRequest("/v1/rooms")) === null,
+    "omitted date",
+  );
+  for (
+    const path of [
+      "/v1/rooms?serviceDate=0000-01-01",
+      "/v1/rooms?serviceDate=0099-02-29",
+      "/v1/rooms?serviceDate=0100-02-29",
+      "/v1/rooms?serviceDate=1900-02-29",
+      "/v1/rooms?serviceDate=2026-02-29",
+      "/v1/rooms?serviceDate=2026-02-30",
+      "/v1/rooms?serviceDate=2026-9-22",
+      "/v1/rooms?serviceDate=2026-09-22&serviceDate=2026-09-23",
+      "/v1/rooms?unexpected=true",
+    ]
+  ) {
+    let rejected = false;
+    try {
+      roomListServiceDate(readRequest(path));
+    } catch (error) {
+      rejected = error instanceof EdgeError && error.status === 400;
+    }
+    assert(rejected, `${path} rejected`);
+  }
 });
 
 Deno.test("master-data command preserves actor, CAS, canonical replay hash", async () => {

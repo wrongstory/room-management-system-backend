@@ -1,5 +1,11 @@
 # 개발 오케스트레이션·source 승인 기준
 
+> 2026-10-05 현재: #329 PR372는 dev `79d6fb2`, #393 PR394는 dev `58a5821`에 통합됐다. #318의 checkpoint `0781d14`를 최신 dev58a와 정상 통합한106개 후보는 Node1,794·Edge487·Python95/client순열·fresh106·전체27 upgrade/SQL5,193·static/KST145·전체9경합/최종cleanup·exact9 baseline·독립 소스 QA PASS다. 원본484 hash drift0와 실제 caller7/18/core2도 확인했다. raw strict FAIL9/exit1은 유지한다. 최종 staged QA·새 exact-head CI/PR321 보호 병합이 다음이며 이후 #330 → #332 → #336 및 #376/#378 → 실제 Supabase-only 백업/복원 → v0.9.0 release/main·운영 승격 순서를 유지한다. v0.8.0과 운영·프런트는 불변이다. [현재 #318 증거](./ROOM_BOARD_DATE_FILTERS.md)와 아래 과거 checkpoint를 구분한다.
+
+### 과거 #318의 bb4fa40 통합 준비
+> 2026-10-05 #318 병행 최신 통합 후보: 별도 `codex/318-latest-dev-integration`에서 dev `bb4fa40`/102 SQL과 원 #318 본문 SHA를 보존한다. 원격 미적용 baseline 재정렬로 #329 strict migration-time inventory를 먼저 검증한 뒤 board RPC를 추가하고, LIVE의 PIN/current-cleaning helper·실제active 점유 선택만 후속 append로 호환 보완한 총104개 후보다. 예정 퇴실 이후 inspection 조건은 materialization과 독립 축으로 유지한다. [적용 순서·실제 source 검증·남은 gate](./ROOM_BOARD_DATE_FILTERS.md)를 따른다. 최신383/382/329 재통합·전체 fresh DB·경합·exact-head CI·최종 독립 QA·운영 백업/복원·릴리스 배포는 완료로 표시하지 않는다.
+
+### 과거 #329 통합 검증 checkpoint
 > 2026-10-05 최신 gate: #329의 4da53b0 +devfdd8d7d 정상 통합 후보는 Node1,767/74·Edge486/0·Python95/client6순열·실제 fresh104/template6순열/receipt/CAS/16malformed→전체9경합→finalfresh104 exit0 PASS다. 원본480/사본480 drift0/SQL200LF/raw280·fixture0·RLS0·객실121 확인. 이전 전체27 upgrades/SQL82·5,119/static/KST145 PASS와 새 로컬 재실행NOT RUN, 최초 cleanupFAIL/후속3PASS/새전체9PASS를 구분한다. [현재 증거](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신-devfdd-통합전체9-경합-완료-checkpoint) 뒤 최종 독립 문서/staged QA·commit/push·exact CI·보호 dev 병합을 마친다. #318 → #330 → #332 및 #336·#378·#376 후속과 실제 Supabase-only 백업/복원·v0.9.0 운영 gate를 생략하지 않는다.
 
 > 2026-10-05 최신 순서: #382/#323을 PR335/source `c15ebd6`·exact CI37254484170 두 required PASS·독립 QA 후 dev `fdd8d7d`에 보호 squash했다. #329의 정상 checkpoint `4da53b0`에 이 dev를 재통합하며 양쪽 계약·테스트·Python codegen 검사를 유지한다. 새 전체9 경합과 실제 템플릿 검사는 이전 세 경합의 PASS와 별개로 실행한다. #329 검증·QA·CI·보호 dev 병합 뒤 #318 → #330 → #332와 정적 검사 보완을 통합한다. #336 후속 신고와 #378 실제 실행기 개발은 별도 병행하고, 모든 개발 뒤 실제 Supabase-only 백업/복원·v0.9.0 릴리스·운영 검증을 진행한다. v0.8.0·운영·프런트 변경은 현재 없다.

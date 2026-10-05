@@ -1267,7 +1267,7 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
             error: null,
           };
         }
-        if (name === "get_room_operational_projection") {
+        if (name === "get_room_board_projection") {
           return { data: [roomRow], error: null };
         }
         if (name === "list_room_operation_blocks_page") {

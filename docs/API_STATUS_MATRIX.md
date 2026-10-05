@@ -1,5 +1,7 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+> 2026-10-05 현재: #329/PR372 및 #393/PR394는 dev58a에 통합됐다. #318의106개 재통합 후보는 Node1,794·Edge487·console95/client순열·fresh106·exact9 baseline·로컬 합성복원·실제 템플릿6순열·전체27 upgrade/SQL5,193·static/KST145·전체9경합/최종fresh·독립 소스 QA를 통과했다. 실제 caller7/18/core2, 원본484 hash drift0, RLS누락0을 확인했다. raw strict FAIL9/exit1은 유지하며 새 exact-head CI/보호 병합은 후속이다. 실제 운영 백업/배포·v0.9.0은 아직 아니며 v0.8.0/운영/프런트는 그대로다. [현재 증거](./ROOM_BOARD_DATE_FILTERS.md)를 따르고 아래 과거 checkpoint와 구분한다.
+
 > 2026-10-05 최신 #329: 4da53b0 +devfdd8d7d 정상 통합 후보의 실제 Node1,767/74·Edge486/0(bundle17,577,757)·Python95/client6순열·fresh104/template6순열/receipt/CAS/16malformed·전체9경합·finalfresh104 PASS/exit0다. 원본480/사본480 drift0, fixture0·RLS누락0·객실121 확인. 아래 이전27 upgrades/SQL82·5,119와 strictFAIL9/exact9 catalog3PASS는 그 실행의 증거이며 새 로컬 재실행은 NOT RUN이다. 새 exact CI·최종QA·commit/push·dev 병합은 후속, 운영/v0.8.0/프런트 불변. [실패 이력과 현재 증거](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신-devfdd-통합전체9-경합-완료-checkpoint)를 따른다.
 
 > 2026-10-05 최신 source 통합: #382/#323은 PR335/exact CI37254484170 application·migration SUCCESS와 독립 QA 후 dev `fdd8d7d`에 통합됐다. #329의 checkpoint `4da53b0`는 이 dev를 정상 재통합 중이며, 아래 이전104 PASS는 새 source의 실행 결과로 대체하지 않는다. 새 품질·실제 템플릿·전체9 경합·fresh cleanup·독립 QA·exact-head CI는 진행 단계다. 운영/API·프런트·기존 v0.8.0은 그대로이며 최신 기능은 #387 v0.9.0에서 별도 승격한다.
@@ -1681,6 +1683,24 @@ source/dev 완료·운영 배포·프런트 UAT 완료로 판정하지 않는다
 - [x] v0.4.0 production 57~73 migration/API 배포
 - [ ] hosted 예약·객실이동 회귀 확인
 - 프런트 카드·요약·필터 mapper/browser E2E는 프런트 담당 저장소에서 별도 진행한다.
+
+### #318 날짜별 객실 현황·상세 조건 — source 후보
+
+2026-10-05 최신 통합 후보는 검증된104 checkpoint `0781d14`와 dev `58a5821`을 정상 통합한 총106개다. 원 SQL 본문 SHA와 #329 strict caller/snapshot 선행 검증을 유지하고 LIVE PIN/current-cleaning·실제active 점유 선택을 호환 보완한다. 시간 기준 inspection 조건은 실제 cleaning과 구분해 유지한다. 아래 기존 회귀 체크는 최초86개 후보 기록이며 새106개 전체 SQL 실행 PASS가 아니다. [실제 source 검증·독립 QA·후속 DB/CI gate](./ROOM_BOARD_DATE_FILTERS.md)를 따른다.
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms?serviceDate=YYYY-MM-DD` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 생략/오늘 LIVE, 과거 KST EOD, 미래 KST SOD |
+| [x] | `GET /v1/rooms/{roomId}` | 동일 | ✅ | ✅ | ✅ | ❌ | ❌ | 오늘 LIVE 단건은 같은 신규 projection mapper 사용 |
+
+- [x] 프런트 `upstream/dev@26a334f2c488223f0b120b45fafcfc0f85e35a58`의 객실 현황 날짜 UI와 상세조건 와이어프레임 targeted 대조
+- [x] strict 실제 달력 날짜·중복/미지원 query 거부와 Fastify/Edge/OpenAPI parity
+- [x] `detailConditionCodes` 9종 및 PII 없는 표시 예약 요약
+- [x] append-only `room_board_date_filters` migration, service-role-only RPC, actor/session DB 재검증
+- [x] 과거/오늘/미래 경계·상세조건·maid/session 거부 pgTAP 회귀
+- [ ] `dev` 병합, release/main 승격, production migration/API 배포
+- [ ] 프런트 API adapter·필터 mapper·browser E2E (dev09ed 문서상 날짜 UI 활성화 확인, 운영 UAT 아님)
+- [ ] 수동 퇴실점검 완료/청소 완료 대체 lifecycle 제품 결정
 
 ### #187 예약 임박 lifecycle projection Phase A — source/dev 완료
 

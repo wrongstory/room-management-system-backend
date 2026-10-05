@@ -22,6 +22,25 @@
 
 프런트 snapshot의 기능을 현재 원격 `main` 배포 상태로 추정하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.
 
+### 2026-09-29 객실 현황 targeted overlay
+
+관리자 객실 현황만 `makee-ham/room-management-system`의 `dev@26a334f2c488223f0b120b45fafcfc0f85e35a58`와 다시 대조했다. live 화면은 날짜 이동을 API 미준비로 막고 있었고, 와이어프레임은 `퇴실점검 대상`, `인원 추가`, `공실`, `촛불 있음`, `특이사항 있음`, `얼리 체크인`, `레이트 체크아웃` 상세 필터를 정의한다. Issue #318은 이를 날짜별 서버 projection 코드로 제공하며 프런트 UI 변경과 미확정 수동 퇴실점검 완료 lifecycle은 포함하지 않는다.
+
+### 2026-10-05 #318 연동 문서 재확인
+
+원격 읽기 전용 조회에서 프런트 `dev@09ed28446a4fd43919cddb29ebe442b848548ab8`,
+`main@d509b44b1371f25d73891e04d355b0cb0e923f5f`를 확인했다. dev는 위26a 기준보다
+1 commit 앞서며, 이 확인은 전역 제품 snapshot 변경이나 실제 운영 브라우저 UAT가 아니다.
+[DOCS/30 B05·B06](https://github.com/makee-ham/room-management-system/blob/09ed28446a4fd43919cddb29ebe442b848548ab8/DOCS/30_DEPLOYED_WIREFRAME_API_PARITY.md)은
+날짜 UI가 활성화됐지만 날짜별 객실 projection을 기다린다고 기록한다. 따라서 위의 날짜 UI 차단은
+26a 당시 이력이며 현재 문서 관찰과 구분한다. 백엔드 #318은 `serviceDate` query와 평가 시각·
+상세 조건을 제공하고 프런트 adapter 연결은 담당 저장소의 후속이다. 홈 검수 대기·주급의 과거 재구성,
+퇴실점검 수동 완료 mutation까지 제공한다고 확대하지 않는다.
+
+동일 문서 B01의 다른 메이드 촛불 접근 차단 초안은 사용자의 이후 #330 공동 조정 결정과 다르다.
+명시적 사용자 결정이 우선하며, 촛불 공동 조정을 이유로 #336 신고나 일반 객실/PIN 권한을 확대하지 않는다.
+프런트 소스·배포·운영 데이터는 변경하지 않았다.
+
 프런트 구현의 공통 원칙은 [프런트 API 연동 가이드](./FRONTEND_API_INTEGRATION.md)를 사용한다. [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)는 역사 기록이며 endpoint와 schema는 production OpenAPI 0.5.1이 최종 정본이다.
 
 ## 프런트 문서 분류
