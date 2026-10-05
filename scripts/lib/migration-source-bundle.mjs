@@ -181,6 +181,9 @@ async function observe(run, expected, repositoryPath) {
   const format = gitLine(await run(['rev-parse', '--show-object-format'], 32));
   if (format !== 'sha1') fail('SOURCE_BUNDLE_GIT_FORMAT_UNSUPPORTED');
   const head = gitLine(await run(['rev-parse', '--verify', 'HEAD^{commit}'], 64));
+  // Detached CI checkouts may have no local approved ref. An already-unrelated
+  // HEAD is source drift regardless; never ask a missing ref to classify it.
+  if (head !== expected.headSha1) fail('SOURCE_BUNDLE_SOURCE_DRIFT');
   const ref = gitLine(await run(['rev-parse', '--verify', `${expected.sourceRef}^{commit}`], 64));
   const tree = gitLine(await run(['rev-parse', '--verify', 'HEAD^{tree}'], 64));
   if (head !== expected.headSha1 || ref !== head || tree !== expected.treeSha1) fail('SOURCE_BUNDLE_SOURCE_DRIFT');

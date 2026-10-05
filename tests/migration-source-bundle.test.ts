@@ -414,10 +414,29 @@ describe('#378 immutable local source bundle (synthetic Git driver, actual parse
     await expect(api.createMigrationSourceBundle(value.input)).rejects.toThrow('SOURCE_BUNDLE_DEADLINE');
   });
 
-  it('actually reads the local Git HEAD and fails closed for an unrelated approved-ref claim (no mutations)', async () => {
+  it('rejects an unrelated HEAD before consulting a missing approved local ref', async () => {
+    const value = fixture(); useGit(value, (args) => {
+      if (args.at(-1) === 'HEAD^{commit}') return Buffer.from(`${'f'.repeat(40)}\n`);
+      if (args.at(-1) === 'refs/heads/main^{commit}') return 'ERROR';
+      return undefined;
+    });
+    await expect(api.createMigrationSourceBundle(value.input)).rejects.toThrow('SOURCE_BUNDLE_SOURCE_DRIFT');
+    expect(value.commands).toEqual([
+      ['rev-parse', '--show-toplevel'], ['rev-parse', '--show-object-format'],
+      ['rev-parse', '--verify', 'HEAD^{commit}']
+    ]);
+  });
+  it('still fails closed when the HEAD matches but the approved local ref is missing', async () => {
+    const value = fixture(); useGit(value, (args) => args.at(-1) === 'refs/heads/main^{commit}' ? 'ERROR' : undefined);
+    await expect(api.createMigrationSourceBundle(value.input)).rejects.toThrow('SOURCE_BUNDLE_GIT_FAILED');
+    expect(value.commands.at(-1)).toEqual(['rev-parse', '--verify', 'refs/heads/main^{commit}']);
+    expect(value.commands.some((args) => args[0] === 'cat-file')).toBe(false);
+  });
+  it('actually reads the local Git HEAD and rejects an unrelated claim without requiring a main ref (no mutations)', async () => {
     const value = fixture(); spawnMock.mockImplementation(actualChild.spawn);
     await expect(api.createMigrationSourceBundle(value.input)).rejects.toThrow('SOURCE_BUNDLE_SOURCE_DRIFT');
-    expect(spawnMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(spawnMock.mock.calls).toHaveLength(3);
+    expect(spawnMock.mock.calls[2]?.[1]?.slice(-3)).toEqual(['rev-parse', '--verify', 'HEAD^{commit}']);
   });
   it('actually rejects repo/scripts as the local Git root (no Git/index/filesystem mutation)', async () => {
     const value = fixture(); value.input.repositoryPath = join(repositoryPath, 'scripts'); spawnMock.mockImplementation(actualChild.spawn);
