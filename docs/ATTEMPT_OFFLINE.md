@@ -97,6 +97,37 @@ gate에는 bounded purger의 실제 주기 실행, 삭제 backlog와 실패 감�
 
 ## 검증 gate
 
+### #388 준비 지연과 실제 만료 crossing 분리 — source 후보
+
+`scripts/test-attempt-offline-concurrency.mjs`의 2h/90d 경합 fixture는 Auth·profile·객실·target·assignment·attempt 준비를 먼저 끝낸다. 준비에 필요한 과거 업무 날짜와 통보 시각은 DB 시각에서 계산하지만, 그것을 lease 발행 시각으로 재사용하지 않는다. 준비 후 private start helper를 호출하는 동일 SQL의 단일 `MATERIALIZED clock_timestamp()`에서 과거 발행 anchor를 선택해 정확히 5초의 잔여 창만 만든다. 발행된 lease를 UPDATE하지 않으며 원래 2시간·90일 TTL, CAS·session·업무 권한 검사와 public RPC는 그대로다.
+
+준비가 KST 자정·주차를 넘겨도 원 업무 날짜를 다시 쓰지 않는다. #308의 기한 비차단 계약은 과거 서비스일의 시작을 허용하며, 실제 availableFrom·점유·담당·버전 guard는 계속 적용된다. 새 unit/source 계약은 6,001ms·60,000ms 합성 준비 지연, 자정·주차 경계, 정확한 5초 SQL과 불변 TTL을 구분해서 검사한다. 합성 시계 검사는 실제 DB 경합 PASS의 대체가 아니다.
+
+실제 runner는 완결된 stdout 행에서 얻은 holder의 정확한 backend PID와 `pg_blocking_pids`로 해당 public RPC의 lock 대기를 확인한다. DB 시각으로 처음 live, 대기 도달 시 live, 같은 holder에 계속 막힌 상태에서 expired를 확인한 다음 잠금을 해제한다. 2h crossing의 `LEASE_EXPIRED` quarantine, 90d의 `OFFLINE_EVENT_EXPIRED`, purge/replay, session 회수와 원 발행 시각 검사는 유지한다. 5초 창을 늘리거나 만료 검사를 건너뛰지 않는다.
+
+테스트-only 선택값 `clockFixturePreparationDelayMs`는 기본 0이며 정수 0–10,000ms만 허용한다. 2개 deadline fixture의 업무 준비 후/발행 전 지연에만 적용해, 실제 local DB에서 6초 준비 지연을 주입할 수 있다. DB 경합·전체 aggregate·최신 exact-head CI·독립 QA는 별도 gate이며 이 source 후보 문단은 완료를 선언하지 않는다. 다른 offline expiry runner와 runtime SQL·migration은 변경하지 않는다.
+
+2026-10-05 최신 `dev@c2b5618` 통합103 후보의 실제 로컬 검증은 PASS다. Node1,624건/70파일
+(신규 clock/source33건 포함), secret scan858·OpenAPI137/148·typecheck/build, Edge476/0 및
+Python95/Ruff226/mypy25/codegen/package를 실행했다. 원본302 raw SHA와 LF 검증본197 SQL·psql/
+105 원문 대응 불일치는0이다. migration·전체 SQL·manifest는 위 dev와 같으며 운영 변경은 없다.
+
+- fresh `db:verify` 및 전체 SQL81파일/4,979검사: PASS.
+- 기본 `db:test:concurrency`의 전체8명령과 fresh103 cleanup: PASS(exit 0).
+- 별도 runner에서 두 deadline fixture 각각 발행 전6초 준비 지연을 주입한 실제 offline suite와
+  fresh103 cleanup: PASS(exit 0). 이것은 기본 aggregate·CI의 지연 설정을 바꾼 결과가 아니다.
+- 정리 후 검사한 metadata: migrations103/head `photo_collection_provider_context_axis`, 객실121,
+  Auth 사용자·profile·target·photo operation0. 모든 테이블의 무자료 상태를 추정하지 않는다.
+
+기본 전체 경합 원 로그 `qa388-integrated-concurrency.log` SHA-256은
+`dadcba38dd4c0ae443576f6b9a04a97a5093dff1806d1bb4257225b6a3b5ee9e`,
+별도 지연·cleanup 원 로그 `qa388-integrated-delay-6000.log` SHA-256은
+`e56560f1b20310165781195b1d7c840ef4bc31a9d1f5476ceaae11376616e074`다.
+이 후보에서 전체26 upgrade 명령을 로컬 재실행하지 않았으며, 과거 #383의 PASS를 이 실행으로
+기록하지 않는다. 새 exact-head required CI가 전체 upgrade를 실행해야 한다. 최종 독립 QA·새 CI·
+보호 dev 병합·실제 백업/운영 및 프런트 UAT는 별도 후속 gate다. 유효 발행 후에도 5초 창보다
+요청·잠금 준비가 늦으면 fail-closed로 실패하므로 모든 부하의 timing failure를 제거했다고 표현하지 않는다.
+
 ### 2026-09-09 로컬 검증
 
 - `db:verify`: fresh 29 migrations 순차 적용 PASS (기존 28개 변경 없음).

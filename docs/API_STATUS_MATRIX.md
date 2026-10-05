@@ -1,6 +1,22 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
-## 2026-10-05 현재 통합 경계
+## 2026-10-05 현재 #388 통합 checkpoint
+
+#382/#323은 아래 `c2b5618` 검증 후보를 정상 커밋 `cfc75da`로 보존한 뒤, #388/PR390이 보호
+병합된 `dev@12097563f30d694780c279440c79f12742672d04`를 정상 재통합했다. 새 후보의 실제
+Node1,664/71·Edge479/0·Python95/Ruff226/mypy25/codegen/package·TS/Ajv6순열은 PASS다.
+fresh103·실제6순열/receipt/4타입CAS/16 malformed·SQL81파일/4,979·static100→101와103 cleanup·
+KST145·전체8개 경합과 최종 fresh103 cleanup까지 exit0 PASS다. 실행 후 원본305 raw SHA와
+LF197/원문108 대응 drift0을 재확인했다. 원 strict FAIL9/exit1와 승인 exact9/catalog3 PASS를 구분한다.
+새 후보에서 전체26 upgrade를 재실행하지 않았으며 아래 같은 SQL·manifest의 이전 checkpoint와
+구분한다. 새 exact-head required CI가 전체 upgrade를 실행해야 한다. 최종 독립 staged-tree QA·
+새 CI·Ready·보호 dev 병합과 실제 백업/운영·프런트 UAT는 별도 후속이다.
+전체 경합 로그 SHA256 `03da5a83479d39a75e5af960fbbac60c8c440b36b7025a6b3a25d17eb8b07805`,
+새 whole SQL 로그 `cf06d4e232a2abb17069e179bd1dda8321714136bff011c4cf7379c97d6c347c`를 보존한다.
+이번 입력 순열 정합화는 SQL·manifest·권한·기존 snapshot을 변경하지 않는다. v0.8.0은 보존하며
+최신 기능은 #387 v0.9.0 릴리스에서 별도 승격한다. 운영 DB/API·Auth·PIN·Drive는 변경하지 않았다.
+
+## 과거 2026-10-05 #383 통합 경계
 
 #383은 source `bab817f`의 독립 QA와 필수 CI `37245618199` PASS 후 PR385에서 `dev@c2b5618`로 보호 squash했다.
 운영 반영은 하지 않았다. #382/#323의 local102 검증·독립 QA tree를 merge commit `7b0e3fb`로 보존한 뒤,

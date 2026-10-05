@@ -1046,6 +1046,18 @@ baseline 로그는 `ca9215c8ae1557a39f59749369f9bd043dc77d5882a896a18e2a1ace1739
 原305/임시본 drift0은 전체 실행 후에도 재확인했다. 이 checkpoint 뒤 dev에 보호 병합한
 #388/PR390/1209756의 정상 재통합·전체경합·최종 staged-tree QA·새 exact-head CI·보호 병합은
 별도 후속 gate다. local102/이103 결과를 후속 exact head의 CI나 운영 PASS로 재사용하지 않는다.
+후속 2026-10-05 실제 checkpoint: 위 c2b5618 후보를 정상 커밋 `cfc75da`로 보존한 뒤
+#388이 보호 병합된 `dev@1209756`를 정상 통합했다. Node1,664/71·Edge479/0·Python95/
+Ruff226/mypy25/codegen/package·client6순열, fresh103·template6순열/receipt/CAS/16 malformed·
+SQL81파일/4,979·static100→101/103 cleanup·KST145·전체8개 경합/최종 fresh103 cleanup은
+실제 PASS/exit0다. 원본305 SHA·LF197/원문108 대응 drift0, strictFAIL9/exit1와 승인
+exact9/catalog3 PASS를 재확인했다. 경합 로그 SHA256은
+`03da5a83479d39a75e5af960fbbac60c8c440b36b7025a6b3a25d17eb8b07805`,
+whole SQL 로그는 `cf06d4e232a2abb17069e179bd1dda8321714136bff011c4cf7379c97d6c347c`다.
+이번 후속에서 전체26 upgrade는 로컬 NOT RUN이며 같은 불변 SQL·manifest의 이전 전체26
+PASS와 구분한다. 최종 독립 staged-tree QA·새 exact-head CI의 전체upgrade/required 두 항목·
+Ready/보호 dev 병합·실제 백업/운영·프런트 UAT는 후속 gate다. 입력 배열6순열을 허용하지만
+canonical 역할·수량·중복·객체 order·응답·기존 snapshot·CAS/receipt 및 SQL·manifest는 유지한다.
 사람/독립 QA와 운영 배포는 별도 gate입니다.
 
 아래는 #156/#179 당시 경계이며 v9 기본 계약은 위 절을 우선합니다.
