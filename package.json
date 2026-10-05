@@ -44,7 +44,8 @@
     "openapi:export:full": "tsx scripts/export-full-openapi.ts",
     "openapi:frontend:check": "tsx scripts/check-frontend-openapi-contract.mjs",
     "openapi:template-client:check": "tsx scripts/check-cleaning-template-client.mjs",
-    "db:test:template-contract": "tsx scripts/test-cleaning-template-contract.mjs"
+    "db:test:template-contract": "tsx scripts/test-cleaning-template-contract.mjs",
+    "db:test:migration-readonly-tls": "node scripts/test-migration-readonly-postgres-tls.mjs"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",
@@ -54,6 +55,7 @@
     "@supabase/supabase-js": "2.112.4",
     "dotenv": "17.2.3",
     "fastify": "5.12.5",
+    "pg": "8.23.1",
     "zod": "4.4.3"
   },
   "overrides": {
@@ -65,6 +67,7 @@
     "@biomejs/biome": "2.5.10",
     "@pgsql/parser": "1.5.0",
     "@types/node": "24.10.2",
+    "@types/pg": "8.23.1",
     "ajv": "8.20.0",
     "supabase": "2.115.0",
     "tsx": "4.23.12",
