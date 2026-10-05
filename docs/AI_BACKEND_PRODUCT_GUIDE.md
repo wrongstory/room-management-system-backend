@@ -1,5 +1,7 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> [확정 — 2026-10-05 #382] v9 템플릿의 배열 원소 위치는 역할이나 게시 자격이 아니다. `cleaning-proof`/`bomb-proof`/`issue-proof`의 canonical 객체 값을 보존한 6개 순열을 모두 허용한다. 역할별 `displayOrder=0/1/2`, stable key, 필수 여부, label, 최대 사진 수와 중복·누락·유효성 검증은 그대로다. 서버는 복사본을 정렬해 기존 canonical request hash·저장·응답을 유지한다. 기존 template/target/attempt/submission snapshot·receipt를 수정하거나 displayOrder 필드를 제거하지 않는다. #323/PR #335에 연결된 source 후보이며 새 exact-head 검증·독립 QA·dev 통합·운영 승격은 별도 gate다. [명세 계약](./ARCHITECTURE.md#323-v9-게시-명세-정합화)을 따른다.
+
 > 2026-10-05 #384 구현 후보: 확정된 일반 사진 최소1/최대20장과 선택 폭탄방·특이사항 각각 최대10장 계약을 유지한다. provider context는 ordinary pointer와 collection/item CAS를 구분해야 하며 첫 사진 이후 정상 collection revision을 단일 pointer와 비교하면 안 된다. 권한·session·assignment·fence·rate/quota·이력을 유지한 append 후보와 실제 검증은 [#384 정합성 기록](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)을 따른다. #383 저장 이름/PR #385, #382 배열 순서, 운영 상태를 이 후보에 혼합하지 않는다. 실제 백업/복원은 모든 개발 후속이지만 운영 배포 전 필수다.
 
 > [확정] 2026-10-04 #373 A안: #363의 의도적인 호환 인자9개는 그대로 유지하고 다른 경고8개를 별도 append로 보완한다. 원본 strict lint FAIL은 계속 표시하며 정확한 warning/catalog/source 기준의 비교 gate만 별도 판정한다. 조회 snapshot STABLE과 명령 fresh guard VOLATILE을 분리하고 PIN 잠금·FOUND·알림 발송·권한 검사를 보존한다. [계약·실제 검증 checkpoint](./DB_STATIC_WARNING_BASELINE.md)를 따른다. #329·고정 v0.8.0 후보·main/운영 배포를 섞지 않으며 이번 승인은 병합/배포를 포함하지 않는다.

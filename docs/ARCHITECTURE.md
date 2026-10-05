@@ -980,6 +980,88 @@ Fastify/Edge/OpenAPI의 #133 통합 당시 기준은 108 paths / 115 operations�
 
 ### #156 checkout template 운영 게시 경계
 
+#### #323 v9 게시 명세 정합화
+
+2026-10-05 사용자 결정 #382에서 배열 위치 제한을 제거했습니다. v9 요청에는
+`cleaning-proof / bomb-proof / issue-proof` 역할이 정확히 한 번씩 존재하며 배열의 6개 순열을 허용합니다.
+역할별 `displayOrder=0/1/2`, 필수 여부 `true / false / false`, 최대 사진 수 `20 / 10 / 10`은 유지합니다.
+현재 DB는 `청소 사진 / 폭탄방 증빙 / 특이사항 증빙` label을 포함한 정규 객체와 비교하므로,
+OpenAPI `CheckoutCleaningTemplateV9Slots`는 canonical 역할 union의 `items`와 역할별 exact-one
+`contains`로 표현하며 추가 필드를 금지합니다. 배열 순서 해제는 역할/order 값 자유화가 아닙니다.
+`expectedVersion=0`은 최초 게시, 이후에는 current version CAS를 사용합니다.
+
+과거 호환은 별도 schema입니다. v8 A-contract는 현재 RPC에서 새 게시와 완료 receipt 재생이 모두 가능하고,
+`maxPhotos` 없는 pre-A 요청은 같은 actor/key/hash의 완료 receipt가 있을 때만 재생됩니다.
+fresh pre-A 게시를 허용하거나 기존 v7+ 응답·snapshot을 v9로 재해석하지 않습니다.
+legacy 중복 key·필수 슬롯 등 교차 항목 조건과 receipt 존재 여부의 최종 판단은 기존 서버/DB가 유지합니다.
+이번 source 후보는 명세·검증과 HTTP 입력 순서만 수정하며 migration·권한·운영 템플릿·프런트 메뉴는 변경하지 않습니다.
+
+3개 슬롯은 일반·폭탄방·특이사항 **사진 모음의 분류**이며 사진을 3장만 올리거나 세 번에 나눠
+선택하라는 뜻이 아닙니다. 프런트 `makee-ham/room-management-system`의 scoped `dev@09ed284`는
+여러 파일을 한 번에 선택한 뒤 전역 큐에서 사진별 raw body 요청을 순차 전송합니다. 일반 사진은
+1~20장이고 폭탄방·특이사항 사진은 별도 선택 증빙입니다. 새 bulk/ZIP endpoint나 업로드 순서 정책을
+추가하지 않으며, 이번 대조는 전역 프런트 정책 snapshot 승격이나 운영 UAT 완료가 아닙니다.
+
+과거 #323 checkpoint의 허용 차이(Fastify·명세1개, Edge2개, DB6개)는
+[#382](https://github.com/wrongstory/room-management-system-backend/issues/382)의 이력입니다.
+새 후보는 Fastify 입력의 복사본을 정렬한 뒤 기존 ordered validator로 검사하고, Edge는 첫 슬롯
+조건 대신 v9 3-slot 후보를 정렬 후 역할별로 검사합니다. DB publisher는 이미 같은 정렬을 수행하므로
+원본 SQL·manifest를 바꾸지 않습니다. canonical 응답 검사는 그대로여서 비정렬 DB projection은
+계속 fail-closed합니다. 기존 frozen snapshot의 exact canonical equality와 저장 이름 자격도 재해석하지 않습니다.
+6순열 허용·동일 hash·잘못된 역할/order·누락/중복 회귀를 실제 실행하되, 최종 QA·새 exact-head CI·
+최신 dev 재통합·전체 DB gate가 완료되기 전에는 #323/PR #335의 source/dev 완료를 선언하지 않습니다.
+
+`tests/fixtures/cleaning-template-contract.ts`를 Fastify·Edge·실제 JSON Schema 검사·생성 클라이언트·로컬 DB
+검증이 공유합니다. `npm run openapi:template-client:check`는 앱 TypeScript 7을 바꾸지 않고
+격리된 `openapi-typescript@7.13.0` / `typescript@5.9.3`로 클라이언트 타입을 생성·검사합니다.
+TypeScript의 임시 생성은 `--array-length`로 길이3의 역할 union을 검사합니다. 타입이 표현하지 못하는
+중복/누락 역할의 exact-one 조건·숫자 범위·DB 상태는 JSON Schema·DB 검사로 보완합니다.
+Python 생성기 호환을 위해 `items`는 named 역할 union schema를 참조하고 길이는 `minItems=maxItems=3`으로
+제한합니다. 실제 생성 모델에서 6개 입력 순열의 필드·배열 위치 보존을 검사합니다.
+객실 타입별 과거 슬롯 수는 `allOf`의 `if/then` 조건으로 표현하여 기존 이름의 요청 모델을
+유지합니다. `tools/backend-console/scripts/check_business_openapi_codegen.py`로 실제 모델 생성을 검사하며,
+생성기에서 표현하지 못하는 조건은 위 JSON Schema 검사와 기존 서버 검증을 그대로 적용합니다.
+`npm run db:test:template-contract`는 fresh local DB에서 합성 fixture만 사용하고 transaction을 rollback합니다.
+
+2026-10-05 로컬 checkpoint(`dev@bb4fa40` 통합 후보/102 migrations): 원본302개 raw SHA를 보존한
+LF 임시 검증본에서 fresh `db:verify`, 실제 6순열 게시·동일/정규 순서 receipt replay·4객실 유형
+CAS·16 malformed 거부·v8 호환과 전체 SQL80파일/4,802검사를 PASS했다. exact lint baseline은
+호환 경고9개·catalog3개 일치 PASS이며 원본 strict FAIL9/exit1은 유지한다. Node1,477/69,
+TypeScript 실제 codegen/Ajv, Python95/Ruff226/mypy25/6순열 codegen/package, Edge477/0도 PASS다.
+독립 QA의 이전 operation 설명 P2를 보완하고 Node/Deno 회귀를 추가했다. 새 Deno assertion의
+최초 format FAIL1/99는 원 로그에 보존했으며 출력된 줄바꿈만 보완한 1회 재검증은 PASS다.
+이번 전체26 upgrade runner도 PASS(exit 0)이며, 원 로그 `qa382-db-full-upgrades.log`의 SHA-256은
+`47cb0421a6348e91ccbf86dff82fe2b7edb1d0900633bd6e89e5662877334671`이다. 이는 위 local102 후보의
+검증이며 최신 #383(`dev@c2b5618`, 103 migrations) 재통합 결과는 아니다. 최종 staged-tree 독립 QA·
+새 exact-head CI·Ready/보호 dev 병합·실제 백업/운영·프런트 UAT는 아직 완료하지 않았다.
+local102의 최종 독립 source QA는 신규 P0/P1/P2=0이며 승인 tree `5e0e35235aea7a778a0cc8da0f42365ddd06bb99`를
+정상 merge commit `7b0e3fb`로 보존했다. 이후 `dev@c2b5618`의 #383을 정상 merge한103 후보는
+Node1,631/70·Edge479/0·Python95·6순열 TS/Ajv 및 Python codegen PASS다. LF 임시 검증본은
+원본305 raw SHA/197 SQL·psql LF본/108 원문 대응을 보존하며 migration·manifest는 이 최신 dev와 같다.
+이103 후보의 fresh·실제6순열 게시/동일receipt/4타입CAS/16 malformed·원 strict FAIL9와 승인
+exact9/catalog3 비교 gate·전체26 upgrades 및SQL81파일/4,979 assertions·fresh cleanup도 실제
+exit0 PASS다. full-upgrades 로그 SHA256은 `ec783912a90824904348a3dd0d16fb8beaa5d10e8629fe0c7983a548ace7fce6`,
+template 로그는 `70410e6e88729385f1ebb3b2ade83d28763f4a78d590c0eb2dc69c5d9bb0a1cb`,
+baseline 로그는 `ca9215c8ae1557a39f59749369f9bd043dc77d5882a896a18e2a1ace173952a8`다.
+原305/임시본 drift0은 전체 실행 후에도 재확인했다. 이 checkpoint 뒤 dev에 보호 병합한
+#388/PR390/1209756의 정상 재통합·전체경합·최종 staged-tree QA·새 exact-head CI·보호 병합은
+별도 후속 gate다. local102/이103 결과를 후속 exact head의 CI나 운영 PASS로 재사용하지 않는다.
+후속 2026-10-05 실제 checkpoint: 위 c2b5618 후보를 정상 커밋 `cfc75da`로 보존한 뒤
+#388이 보호 병합된 `dev@1209756`를 정상 통합했다. Node1,664/71·Edge479/0·Python95/
+Ruff226/mypy25/codegen/package·client6순열, fresh103·template6순열/receipt/CAS/16 malformed·
+SQL81파일/4,979·static100→101/103 cleanup·KST145·전체8개 경합/최종 fresh103 cleanup은
+실제 PASS/exit0다. 원본305 SHA·LF197/원문108 대응 drift0, strictFAIL9/exit1와 승인
+exact9/catalog3 PASS를 재확인했다. 경합 로그 SHA256은
+`03da5a83479d39a75e5af960fbbac60c8c440b36b7025a6b3a25d17eb8b07805`,
+whole SQL 로그는 `cf06d4e232a2abb17069e179bd1dda8321714136bff011c4cf7379c97d6c347c`다.
+이번 후속에서 전체26 upgrade는 로컬 NOT RUN이며 같은 불변 SQL·manifest의 이전 전체26
+PASS와 구분한다. 최종 독립 staged-tree QA·새 exact-head CI의 전체upgrade/required 두 항목·
+Ready/보호 dev 병합·실제 백업/운영·프런트 UAT는 후속 gate다. 입력 배열6순열을 허용하지만
+canonical 역할·수량·중복·객체 order·응답·기존 snapshot·CAS/receipt 및 SQL·manifest는 유지한다.
+사람/독립 QA와 운영 배포는 별도 gate입니다.
+
+아래는 #156/#179 당시 경계이며 v9 기본 계약은 위 절을 우선합니다.
+
 예약 command의 `CLEANING_TEMPLATE_NOT_CONFIGURED`는 제거하지 않습니다. active/password-complete business
 admin의 live session만 네 room type의 current checkout template을 조회하고, 한 타입씩 expected-version CAS로
 새 immutable version을 게시합니다. actor/command/key/request-hash receipt와 room-type advisory lock이 replay와
