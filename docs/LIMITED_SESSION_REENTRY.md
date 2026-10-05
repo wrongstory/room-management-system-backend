@@ -1,5 +1,38 @@
 # #329 기존 로그인 세션의 제한 업무 재진입
 
+## 2026-10-05 최신 devfdd 통합·전체9 경합 완료 checkpoint
+
+정상 checkpoint `4da53b09f50056b7a64e75f1d728ce3e70878c2d` 뒤
+`dev@fdd8d7d2ff9f0fed824865c12c121c0cbfa257f1`(#382/PR335)을 정상 재통합한 후보이다.
+템플릿6순열과 기존 세션 A안·SQL104/manifest·TTL/receipt/CAS/권한을 모두 유지했다.
+원본480/실제 사본480 drift0(SQL/psql200만 LF/raw280)을 실행 전후 확인했다.
+
+- `npm run ci:quality`: PASS1,767/74, typecheck/build/secrets/frontend contract 포함.
+- `npm run edge:check`: PASS486/0, bundle17,577,757 bytes.
+- Python Ruff/format226·mypy25·pytest95·business codegen·package source 및 TS/Ajv6순열 PASS.
+  마지막 package 명령 최초 경로 오기는 FAIL이었고 실제 `scripts/build.py --check-only` PASS로
+  보완했다. 기존 binary/lifecycle codegen 경고를 보존하고 모든 operation의 생성 완료를 주장하지 않는다.
+- 새 승인 LF 임시본에서 fresh104 → 실제 템플릿6순열/equivalent receipt/4타입CAS/16malformed
+  rollback → **전체9개 concurrency 명령** → 최종fresh104까지 실제 exit0 PASS다.
+  limited7·context7·named7 및 각 cleanup도 같은 aggregate에서 PASS했다.
+- 최종 read-only inventory: history104/head `photo_collection_provider_context_axis`,
+  RLS 누락0/객실121, Auth users/sessions·profiles·targets·photo operations/identities/names 모두0.
+- 전체27 upgrades/SQL82·5,119/static/KST145는 아래 같은 SQL/manifest의 앞선104 checkpoint에서
+  PASS했고 이번 최신 source에서 전체 SQL/upgrade를 다시 실행한 것으로 표시하지 않는다.
+  새 exact-head CI에서 다시 실행해야 한다. 원 strict FAIL9와 승인 exact9/catalog3 PASS는 별개다.
+
+최신 quality log `fedf91d9f7516d627e2967d7591c4a37e0386649ebe2113bcf411b1254ea0f72`,
+Edge `25a531ebf9d5919dfb3fa7058d596d616fed99cd2aabe70d4bcdf365ccb01fa8`,
+실제 template DB `70410e6e88729385f1ebb3b2ade83d28763f4a78d590c0eb2dc69c5d9bb0a1cb`,
+전체9경합 `a22d66fd693fefad86c2c112fa863be9f2cd401035037090d0c95187df054dcf`,
+최종fresh104 `4efe9d570c7b0d9297628087dfed62f247dd68178260933777eee36cbd26c419`다.
+최초 cleanup 누락 FAIL과 후속3개 PASS 이력은 아래 그대로 보존하며 새 aggregate와 구분한다.
+
+최종 문서/staged 독립 QA·정상 merge commit/push·새 exact-head CI·보호 dev 병합은 후속이다.
+원 #329 installer·6/18/core2 검사는 불변이고 #318/#332 실제7/18→7/19 append는 아직 NOT RUN이다.
+v0.8.0·main/운영·프런트/API·Auth/키/PIN/송금·실제 백업/복원·release/tag/UAT는 변경/실행하지 않았다.
+최신 기능은 #387 v0.9.0이며 실제 Supabase-only 백업/복원은 모든 개발 이후·운영 배포 전 필수다.
+
 ## 2026-10-05 최신104 통합·standalone fixture 정리 checkpoint
 
 `b00e09c` 뒤 `dev@1209756` 정상 merge 후보에서 Node1,712/72·Edge483/0·Python95,

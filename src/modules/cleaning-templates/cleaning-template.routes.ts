@@ -23,7 +23,8 @@ const publishSchema = z.object({
   durationMinutes: z.number().int().positive().max(10_080).nullable().optional(),
   slots: z.array(slotSchema).min(1).max(100)
 }).strict().superRefine((input, context) => {
-  if (validFlatSlots(input.slots)) return;
+  // #382: array position is not a role. Keep the ordered DB projection validator.
+  if (validFlatSlots([...input.slots].sort((left, right) => left.displayOrder - right.displayOrder))) return;
   const keys = new Set<string>();
   const orders = new Set<number>();
   for (const slot of input.slots) {

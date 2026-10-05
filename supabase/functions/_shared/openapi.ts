@@ -3216,7 +3216,7 @@ export const openApiDocument = {
         operationId: "publishCleaningTemplate",
         summary: "퇴실 청소 템플릿의 불변 새 버전 게시",
         description:
-          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과 normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
+          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 immutable version과 normalized slot rows를 원자 게시합니다. 기본 v9 요청은 cleaning-proof/bomb-proof/issue-proof의 정규 3개 사진 모음이며 사진 3장이나 업로드 순서를 뜻하지 않습니다. 기존 v8 A-contract 게시도 호환되고, maxPhotos 없는 pre-A 요청은 완료 receipt 재생만 허용하며 과거 snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. #382에 따라 역할별 정규 객체의 배열 위치만 다른 6개 순서를 모두 허용합니다. 서버는 displayOrder로 정렬해 canonical request hash·저장·응답을 유지하고 역할별 key/order/label/필수 여부/최대 수 및 중복·누락 검증은 바꾸지 않습니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -6741,6 +6741,74 @@ export const openApiDocument = {
           required: ["maxPhotos"],
         }],
       },
+      CheckoutCleaningTemplateV9Slot: {
+        oneOf: [
+          ["cleaning-proof", 0, true, "청소 사진", 20],
+          ["bomb-proof", 1, false, "폭탄방 증빙", 10],
+          ["issue-proof", 2, false, "특이사항 증빙", 10],
+        ].map(([slotKey, displayOrder, required, label, maxPhotos]) => ({
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "slotKey",
+            "displayOrder",
+            "required",
+            "label",
+            "maxPhotos",
+          ],
+          properties: {
+            slotKey: { const: slotKey },
+            displayOrder: { const: displayOrder },
+            required: { const: required },
+            label: { const: label },
+            maxPhotos: { const: maxPhotos },
+          },
+        })),
+        description:
+          "v9 역할별 정규 슬롯 객체. stable slotKey와 displayOrder(0/1/2), required, label, maxPhotos의 결합을 유지하며 label 변경이나 선택 메타데이터 추가를 지원하지 않습니다.",
+      },
+      CheckoutCleaningTemplateV9Slots: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: { $ref: "#/components/schemas/CheckoutCleaningTemplateV9Slot" },
+        allOf: ["cleaning-proof", "bomb-proof", "issue-proof"].map((
+          slotKey,
+        ) => ({
+          contains: {
+            type: "object",
+            required: ["slotKey"],
+            properties: { slotKey: { const: slotKey } },
+          },
+          minContains: 1,
+          maxContains: 1,
+        })),
+        description:
+          "새 v9 일반 사진 계약. 역할별 정규 객체를 정확히 하나씩 보내며 배열 위치만 다른 6개 순서를 모두 허용합니다. 서버는 displayOrder로 정렬하며 역할/order 값, label, 필수 여부, 수량과 추가 필드 금지 계약은 바꾸지 않습니다. 중복/누락 역할은 contains의 정확히 한 번 조건으로 거부합니다.",
+      },
+      CheckoutCleaningTemplateV8Slots: {
+        type: "array",
+        minItems: 9,
+        maxItems: 14,
+        uniqueItems: true,
+        items: { $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slot" },
+        description:
+          "기존 v8 A-contract 호환 형식. 현재 RPC는 새 게시와 완료 receipt 재생 모두 허용합니다. 서버가 타입별 개수, slotKey/displayOrder 유일성, 필수 tv-on·entry-storage, entry-number 금지, 마지막 선택 extra-proof(10), 나머지 필수 슬롯(1)을 재검증합니다. 새 UI의 기본 형식은 v9입니다.",
+      },
+      CheckoutCleaningTemplateLegacyReplaySlots: {
+        type: "array",
+        minItems: 10,
+        maxItems: 15,
+        uniqueItems: true,
+        items: {
+          allOf: [
+            { $ref: "#/components/schemas/CleaningTemplateSlot" },
+            { not: { required: ["maxPhotos"] } },
+          ],
+        },
+        description:
+          "maxPhotos 없는 pre-A v7+ 요청의 완료 receipt 재생 전용. 원 actor·Idempotency-Key·정규 요청 hash가 일치해야 합니다. JSON Schema 통과는 새 게시 허용이 아니며 receipt가 없으면 DB가 INVALID_CLEANING_TEMPLATE_SLOTS로 거부합니다. 과거 version은 7보다 클 수 있습니다.",
+      },
       PublishCleaningTemplateRequest: {
         type: "object",
         additionalProperties: false,
@@ -6765,17 +6833,46 @@ export const openApiDocument = {
               "선택적인 과거 호환 메타데이터입니다. 미입력/null이어도 예약을 차단하지 않으며 실제 청소시간은 attempt.startedAt부터 fieldCompletedAt까지 계산합니다. 배정 Preview는 이 값을 사용하지 않습니다.",
           },
           slots: {
-            type: "array",
-            minItems: 9,
-            maxItems: 14,
-            uniqueItems: true,
-            items: {
-              $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slot",
-            },
+            oneOf: [
+              { $ref: "#/components/schemas/CheckoutCleaningTemplateV9Slots" },
+              { $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slots" },
+              {
+                $ref:
+                  "#/components/schemas/CheckoutCleaningTemplateLegacyReplaySlots",
+              },
+            ],
             description:
-              "새 v9 계약은 cleaning-proof(필수,20), bomb-proof(선택,10), issue-proof(선택,10) 순서입니다. 과거 v8 계약은 기존 슬롯과 멱등 재요청을 위해 유지합니다.",
+              "v9 신규 게시, v8 호환 게시, pre-A 완료 receipt 재생을 구별합니다. expectedVersion=0은 미설정 타입의 최초 게시이며, 기존 타입은 조회한 current version을 사용합니다. stale version과 key/hash 충돌은 409입니다.",
           },
         },
+        allOf: Object.entries({
+          standard: 9,
+          premium: 10,
+          oceanPremium: 12,
+          oceanFamily: 14,
+        }).map(([roomTypeCode, count]) => ({
+          if: { properties: { roomTypeCode: { const: roomTypeCode } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword, not a JavaScript thenable.
+          then: {
+            properties: {
+              slots: {
+                anyOf: [
+                  { minItems: 3, maxItems: 3 },
+                  {
+                    minItems: count,
+                    maxItems: count,
+                    items: { required: ["maxPhotos"] },
+                  },
+                  {
+                    minItems: count + 1,
+                    maxItems: count + 1,
+                    items: { not: { required: ["maxPhotos"] } },
+                  },
+                ],
+              },
+            },
+          },
+        })),
       },
       PublishedCleaningTemplate: {
         type: "object",

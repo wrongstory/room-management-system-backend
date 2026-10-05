@@ -7,6 +7,7 @@ import { SupabaseAuthService } from '../src/modules/auth/auth.service.js';
 import { LimitedAttemptService } from '../src/modules/limited-attempts/limited-attempt.service.js';
 import type { PhotoHttpServices } from '../src/modules/photos/photo.routes.js';
 import type { SubmissionService } from '../src/modules/submissions/submission.service.js';
+import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
 
 const env: AppEnv = {
   APP_ENV: 'local',
@@ -1714,6 +1715,64 @@ describe('application', () => {
       expect.objectContaining({ reservationId, targetRoomId, effectiveAt })
     );
     await app.close();
+  });
+
+  it('accepts all six v9 array orders without changing role fields (#382)', async () => {
+    const appServices = services();
+    if (!appServices.cleaningTemplates) throw new Error('missing template service');
+    const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
+    appServices.cleaningTemplates.publishCheckout = publish;
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      for (const { name, body, fastifyAccepted } of flatTemplateSlotPermutations()) {
+        const fixtureBefore = structuredClone(body);
+        const before = publish.mock.calls.length;
+        const response = await app.inject({
+          method: 'POST', url: '/v1/cleaning-templates', payload: body,
+          headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-permutation-fixture' }
+        });
+        expect(response.statusCode, name).toBe(fastifyAccepted ? 201 : 400);
+        expect(response.headers['cache-control'], name).toBe('no-store');
+        expect(publish.mock.calls.length, name).toBe(before + Number(fastifyAccepted));
+        if (!fastifyAccepted) expect(response.json().error.code, name).toBe('VALIDATION_ERROR');
+        else expect(response.json().template.slots, name).toEqual(flatTemplateRequest.slots);
+        expect(body, name).toEqual(fixtureBefore);
+      }
+      expect(publish).toHaveBeenCalledTimes(6);
+    } finally { await app.close(); }
+  });
+
+  it('validates shared v9 template wire fixtures before reaching the publisher', async () => {
+    const appServices = services();
+    if (!appServices.cleaningTemplates) throw new Error('missing template service');
+    const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
+    appServices.cleaningTemplates.publishCheckout = publish;
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const send = (payload: unknown) => app.inject({
+      method: 'POST', url: '/v1/cleaning-templates', payload: JSON.stringify(payload),
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-shared-fixture', 'content-type': 'application/json' }
+    });
+    try {
+      for (const roomTypeCode of ['standard', 'premium', 'oceanPremium', 'oceanFamily']) {
+        for (const expectedVersion of [0, 9]) {
+          const response = await send({ ...flatTemplateRequest, roomTypeCode, expectedVersion });
+          expect(response.statusCode).toBe(201);
+          expect(response.headers['cache-control']).toBe('no-store');
+        }
+        for (const legacy of [false, true]) {
+          expect((await send(historicalTemplateRequest(roomTypeCode, legacy))).statusCode).toBe(201);
+        }
+      }
+      expect(publish).toHaveBeenCalledTimes(16);
+      for (const [name, payload] of invalidFlatTemplateRequests()) {
+        expect((await send(payload)).statusCode, name).toBe(400);
+      }
+      expect(publish).toHaveBeenCalledTimes(16);
+      for (const code of ['CLEANING_TEMPLATE_VERSION_CONFLICT', 'IDEMPOTENCY_KEY_REUSED']) {
+        publish.mockRejectedValueOnce(new AppError(409, code, '충돌'));
+        expect((await send(flatTemplateRequest)).json().error.code).toBe(code);
+      }
+    } finally { await app.close(); }
   });
 
   it('lists and publishes strict checkout templates for active business admins', async () => {
