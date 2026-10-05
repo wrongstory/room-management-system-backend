@@ -152,9 +152,39 @@ describe('#378 actual internal Client readback path with hermetic driver only', 
     const value = input(); value.target.mode = 'session'; value.target.host = 'aws-0-ap-south-1.pooler.supabase.com';
     await api.observePostgresMigrationHistory(value); expect(clients[0]?.config.user).toBe(`postgres.${projectRef}`);
   });
-  it.each(['localhost', '127.0.0.1', '::1'])('keeps isolated local direct target separate: %s', async (host) => {
+  it.each(['localhost', '127.0.0.1'])('keeps isolated local direct target separate: %s', async (host) => {
     const value = { ...input(), target: { ...input().target, scope: 'ISOLATED_LOCAL', projectRef: null, host, port: 54322 } };
     expect((await api.observePostgresMigrationHistory(value)).scope).toBe('ISOLATED_LOCAL');
+  });
+  it('follows native IPv6 TLS identity verification without a compatibility bypass', async () => {
+    const host = '::1';
+    const value = { ...input(), target: { ...input().target, scope: 'ISOLATED_LOCAL', projectRef: null, host, port: 54322 } };
+    const publicFixture = new X509Certificate(caPem ?? '').toLegacyObject();
+    const certificate = { ...publicFixture, subjectaltname: `DNS:${host}, IP Address:127.0.0.1, IP Address:0:0:0:0:0:0:0:1`, subject: { ...publicFixture.subject, CN: host } };
+    // Node 22.23.x rejects IPv6 IP SANs (#64032 upstream). Never normalize around,
+    // mock out or replace its security check; the adapter must retain that refusal.
+    if (checkServerIdentity(host, certificate)) {
+      await expect(api.observePostgresMigrationHistory(value)).rejects.toThrow('POSTGRES_TLS_INVALID');
+      expect(Client).toHaveBeenCalledOnce();
+      expect(clients[0]?.queries).toHaveLength(0);
+    } else {
+      const result = await api.observePostgresMigrationHistory(value);
+      expect(result.scope).toBe('ISOLATED_LOCAL');
+      expect(api.isOwnedPostgresHistoryObservation(result)).toBe(true);
+    }
+    expect(clients[0]?.config.ssl).toMatchObject({ rejectUnauthorized: true, checkServerIdentity });
+    expect(clients[0]?.connection.stream.destroyed).toBe(true);
+  });
+  it('rejects an IPv6 SAN mismatch on every supported Node version', async () => {
+    const value = { ...input(), target: { ...input().target, scope: 'ISOLATED_LOCAL', projectRef: null, host: '::1', port: 54322 } };
+    scenario.connect = async () => {
+      const socket = clients[0]?.connection.stream;
+      if (!socket) throw new Error('Missing owned fixture socket');
+      Object.defineProperty(socket, 'getPeerCertificate', { value: () => ({ raw: peerRaw, subjectaltname: 'IP Address:0:0:0:0:0:0:0:2' }) });
+    };
+    await expect(api.observePostgresMigrationHistory(value)).rejects.toThrow('POSTGRES_TLS_INVALID');
+    expect(clients[0]?.queries).toHaveLength(0);
+    expect(clients[0]?.connection.stream.destroyed).toBe(true);
   });
   it('does not mint proof from a copied, serialized, fabricated or codec caller-model handle', async () => {
     const result = await observe();

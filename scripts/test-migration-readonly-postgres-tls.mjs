@@ -32,11 +32,16 @@ const emit = text => process.stdout.write(`${text}\n`);
 let created = false;
 let checks = 0;
 let major = null;
+let verifiedImageId = null;
 const verifyOwner = () => {
   const meta = JSON.parse(docker(['inspect', name]))[0];
   assert.equal(meta.Config.Labels['rms.fixture.owner'], owner);
   assert.equal(meta.Config.Labels['rms.fixture.kind'], '378-readonly-tls');
-  assert.equal(meta.Image, image.split('@')[1]);
+  // Classic Docker stores the platform config ID; Desktop's containerd store
+  // can expose the OCI index ID. Bind to the actual exact-digest image inspected
+  // before creation, not an assumption that either kind equals the repo digest.
+  assert.equal(meta.Image, verifiedImageId);
+  assert.equal(meta.Config.Image, image);
   assert.equal(meta.Mounts.length, 0);
   assert.equal(meta.HostConfig.Binds, null);
   assert.deepEqual(meta.HostConfig.Tmpfs, { '/fixture': 'rw,noexec,nosuid,size=256m' });
@@ -57,7 +62,12 @@ const reject = async (label, action, expected) => {
   checks++; emit(`PASS ${label}: fixed safe rejection`);
 };
 try {
-  assert(/^sha256:[a-f0-9]{64}$/u.test(docker(['image','inspect',image,'--format','{{.Id}}']).trim()));
+  const imageMeta = JSON.parse(docker(['image','inspect',image]))[0];
+  assert.equal(imageMeta.Os, 'linux');
+  assert.equal(imageMeta.Architecture, 'amd64');
+  assert(imageMeta.RepoDigests.includes(image));
+  assert(/^sha256:[a-f0-9]{64}$/u.test(imageMeta.Id));
+  verifiedImageId = imageMeta.Id;
   crypto(['req','-x509','-newkey','rsa:2048','-nodes','-sha256','-days','2','-keyout','ca.key','-out','ca.crt','-subj','/CN=RMS isolated test CA','-addext','basicConstraints=critical,CA:TRUE','-addext','keyUsage=critical,keyCertSign,cRLSign']);
   crypto(['req','-new','-newkey','rsa:2048','-nodes','-sha256','-keyout','server.key','-out','server.csr','-subj','/CN=localhost']);
   crypto(['x509','-req','-in','server.csr','-CA','ca.crt','-CAkey','ca.key','-CAcreateserial','-sha256','-days','2','-out','server.crt','-extfile',join(fixtures,'pg378-fixture-server.ext')]);

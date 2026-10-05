@@ -1,5 +1,30 @@
 # #378 실제 PostgreSQL 읽기 전용 adapter — 구현 후보
 
+> 최신 CI 실패 checkpoint: source0f49dde/run37261192734에서 application은2,344 PASS/1 FAIL,
+> migration은 고정 이미지 pull의 ECR rate limit으로 FAIL(TLS19·후속 DB suite NOT RUN)이었다.
+> CI Node22.23.3과 로컬22.20.0의 native IPv6 SAN 판정 차이는 공식 upstream #64032와 일치한다.
+> adapter의 기본 인증서 검사·SSL/CA/SAN/권한 코드는 수정하지 않는다. 테스트는 native IPv6
+> 거부를 그대로 보존하고 모든 버전의 잘못된 IPv6 SAN을 별도로 거부한다. 새 exact-head CI는 후속이다.
+
+최신 좁은 CI portability 보완의 로컬 실제 결과는 targeted128/128, `ci:quality`2,346/76,
+typecheck/build/secrets/OpenAPI/lint(기존 INFO5), 실제 isolated PG17/TLS19가 모두 PASS다.
+quality 로그 SHA-256은 `3722717278f9feceff6f7e14bc90473d6410380db02f85292567b029dafb17ae`,
+TLS 로그는 `b1d648719b307364910b6397393d00af5ef933c41d24e71919e37f01c92afc49`다.
+root의 실제 workflow body 메모리 전용 Bash probe5도 PASS했다(실제 pull/네트워크 결과 아님).
+첫 test 보완의 TypeScript peer certificate fixture 타입 오류 두 차례는 FAIL로 남기고,
+기존 native legacy certificate를 상속해 최종 typecheck를 재실행했다. production adapter는
+SHA-256 `6befb0c233c3bb095420cbc66e33f160a5b78f85634ce1bac7fad49b67f0bb9e`로 불변이다.
+독립 QA의 targeted128/typecheck/lint/syntax/diff, 실제 workflow body double7경로,
+runner ownership/cleanup 순수메모리14경로는 PASS/P0·P1·P2=0이다. 독립 QA는 DB/Docker/TLS를
+실행하지 않았으며 위 실제 TLS는 root 실행 증거다. CI Node22.23.3의 재검증은 아직 NOT RUN이다.
+
+고정 image 준비는 exact-digest cache만 인정하고 최대3회 pull/5초·10초 backoff/3분 step을 사용한다.
+최종 실패는 exit1이고 이미지 변경·검사 skip·임의 tag fallback은 없다. Docker Desktop의 OCI index ID와
+Linux classic store의 platform config ID를 혼동하지 않도록 생성 전 exact RepoDigest/OS/amd64/ID를
+읽고 container Image를 그 observed ID·고정 Config.Image·owner nonce에 결합한다. 원본 registry index
+`694296…`의 linux/amd64 manifest `16c094…`와 config `660892…`를 실제 읽기 전용 확인했다.
+이는 owned fixture portability 보완이고 원격 DB나 migration 실행 증거가 아니다.
+
 > 최신 root checkpoint: 독립 리뷰 P1(physical column order)·P2(startup 수신 cap)를 보완했다.
 > targeted127·전체 ci:quality2,345/76·실제 격리 PG17/TLS19는 PASS다. 아래 author123/2341과
 > 처음 NOT RUN은 이전 시점 이력이다. 최종 non-author 재QA·새 exact-head CI와 실제 PG15/
@@ -128,6 +153,9 @@ release CI·독립 QA·사람 승인·배포/rollback gate는 아직 연결되�
   [PG 15.19/17.11 breaking changes](https://supabase.com/changelog/postgres-15-19-17-11-breaking-changes).
 - [Node 22 TLS 검증](https://nodejs.org/docs/latest-v22.x/api/tls.html#tlscheckserveridentityhostname-cert),
   [PostgreSQL 17 배열 metadata](https://www.postgresql.org/docs/17/functions-array.html).
+- [Node 공식 IPv6 SAN regression #64032](https://github.com/nodejs/node/issues/64032),
+  [22.23.0 native TLS source](https://github.com/nodejs/node/blob/v22.23.0/lib/tls.js).
+  로컬 IPv6 literal의 연결 성공을 모든 Node patch에서 보장하지 않으며 native 거부를 우회하지 않는다.
 - [pinned CLI history](https://github.com/supabase/cli/blob/18ae43a34a2257458197b62f74e2a97e2b5cf7f9/apps/cli/src/legacy/shared/legacy-migration-history.ts).
 
 ## 과거 author 소스 검증 checkpoint
