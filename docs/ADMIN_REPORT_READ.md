@@ -27,14 +27,18 @@ OpenAPI 0.6.0 / 140 paths / 151 operations다. 아래 86/132·142 검증은 최�
   전체 SQL 디렉터리 검증으로 전환하여 87파일/5,327 assertions PASS를 확인했다.
   `db:lint:baseline`은 exact9/catalog3 PASS이며 원 strict는 FAIL9/exit1 그대로다.
   이후 `npm run db:test` 전체27 upgrade와 SQL87파일/5,327 assertions도 exit0 PASS다.
-  static/KST·전체 경합 결과는 후속 기록 전까지 미완료다.
+  이후 static-warning upgrade, KST145, 전체10개 동시성 실행과 마지막 촛불 fresh cleanup도
+  exit0 PASS다. 최종 로컬 readback은 migration110/객실121/profile0/public RLS 누락0이며
+  exact9/catalog3 baseline 재확인 PASS다. 원 strict FAIL9/exit1은 유지한다.
 - 다섯 manifest와 TypeScript template client6순열 검증 PASS.
   이전108개 SQL identity/hash는 그대로이며 #332 두 파일 삽입으로 마지막 촛불 두 파일의
   manifest order만 각각 +2다. 전체 row를 비교한 최초 임시 검사는 이 예상 order 차이를 실패로
   판정했으며, identity/hash 불변과 정확한 +2 위치 이동을 각각 검사하여 PASS를 확인했다.
   LF 검증본의 원본492개 hash drift는0이다.
-- 독립 source QA: 관련7파일109 tests PASS, P0/P1/P2 없음.
-  최종 staged tree QA·필수 CI·dev 병합·release/main·실제 백업/복원·운영 배포는 아직 미완료다.
+- 독립 source QA: 관련7파일109 및 추가5파일28 tests PASS, P0/P1/P2 없음.
+  source staged tree와 문서 delta QA도 PASS다. source7f3e5f4를 PR338에 정상 push했으며
+  새 required CI는 대기 중이다. 이 최종 로컬 결과의 문서 delta는 별도로 리뷰한다.
+  필수 CI·dev 병합·release/main·실제 백업/복원·운영 배포는 아직 미완료다.
 
 Supabase-only B 백업/복원은 모든 개발 후, 운영 반영 전에 완료해야 한다.
 프런트 소스·운영/복구 DB·Auth 설정·실제 PIN·v0.8.0은 변경하지 않았다.

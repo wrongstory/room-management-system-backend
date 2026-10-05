@@ -6,7 +6,9 @@
 required CI·독립 QA·보호 병합을 완료했다. #391도 PR337과 동일 tree/CI 근거로 source/dev 종료했다.
 
 1. #332/PR338: 최신 dev 통합110개·OpenAPI140/151 후보. Node1,831/Edge491/Python95,
-   fresh110·전체SQL87/5,327 및 exact9/catalog3 baseline PASS. 전체27 upgrade·경합·최종QA·CI 후 보호 병합한다.
+   fresh110·전체27 upgrade/SQL87/5,327·static/KST145·전체10경합/최종cleanup·exact9/catalog3
+   baseline과 독립 source/staged QA PASS. source7f3e5f4를 push했고 새 required CI는 대기 중이다.
+   최종 문서 검토·exact-head CI 완료 뒤 보호 병합한다.
 2. #336: 제출·승인 후 새 특이사항 신고를 독립 사건/새 증빙으로 구현한다.
    2026-10-06 사용자 결정에 따라 관리자 간 기능·정보를 공유하고 메이드는 본인 실제 통보
    배정 이력 범위만 접근한다. 담당 종료·제출/승인·경과 일수만으로 #336 접근을 막지 않으며,
