@@ -1,8 +1,25 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import { validateLocalDockerEndpoint } from './db-lint-baseline.mjs';
+
+export const limitedConcurrencyFreshIdentitySQL = `select jsonb_build_object(
+  'authUsers',(select count(*) from auth.users),
+  'profiles',(select count(*) from public.profiles),
+  'targets',(select count(*) from public.cleaning_targets),
+  'operations',(select count(*) from private.photo_upload_operations),
+  'historyCount',(select count(*) from supabase_migrations.schema_migrations),
+  'head',(select name from supabase_migrations.schema_migrations order by version desc limit 1));`;
+
+export function assertLimitedConcurrencyFreshIdentity(value, manifest) {
+  assert(Number.isSafeInteger(manifest.totalCount) && manifest.totalCount > 0);
+  assert(typeof manifest.head === 'string' && /^[a-z0-9_]+$/.test(manifest.head));
+  assert.deepEqual(value, { authUsers: 0, profiles: 0, targets: 0, operations: 0,
+    historyCount: manifest.totalCount, head: manifest.head }, 'Require fresh disposable local DB and exact manifest identity');
+}
 
 // Synthetic local rows and real transactions only. Session UUIDs, SQL, digests,
 // credentials and provider locators remain in memory; never print raw failures.
@@ -246,13 +263,41 @@ export async function testLimitedExistingSessionConcurrency(client) {
 
 // Safe import for the aggregate runner; explicit CLI execution remains local-only.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const cli = fileURLToPath(new URL('../node_modules/supabase/dist/supabase.js', import.meta.url));
+  const args = ['exec', '-i', 'supabase_db_room-management-system-backend', 'psql', '-X', '-qAt',
+    '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'];
+  const freshIdentity = () => JSON.parse(execFileSync('docker', args, { cwd: root,
+    input: `set statement_timeout='15s';${limitedConcurrencyFreshIdentitySQL}`, encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'], timeout: 20000, maxBuffer: 4 * 1024 * 1024 }));
+  let cleanupRequired = false, manifest;
   try {
-    const root = fileURLToPath(new URL('..', import.meta.url));
-    const cli = fileURLToPath(new URL('../node_modules/supabase/dist/supabase.js', import.meta.url));
+    assert.equal(process.argv.length, 2, 'No target/URL overrides');
+    for (const name of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'SUPABASE_WORKDIR', 'SUPABASE_CLI_BINARY_OVERRIDE']) assert(!process.env[name], 'No external runtime overrides');
+    const config = readFileSync(new URL('../supabase/config.toml', import.meta.url), 'utf8');
+    assert.equal((config.match(/^[ \t]*project_id[ \t]*=/gm) ?? []).length, 1);
+    assert(/^[ \t]*project_id[ \t]*=[ \t]*"room-management-system-backend"\r?$/m.test(config));
+    validateLocalDockerEndpoint(execFileSync('docker', ['context', 'inspect', '--format', '{{json .Endpoints.docker.Host}}'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 }));
     const status = JSON.parse(execFileSync(process.execPath,[cli,'--workdir',root,'status','--output','json'],
       { cwd: root, encoding: 'utf8', stdio: ['ignore','pipe','pipe'], timeout: 30000 }));
     assert(['localhost','127.0.0.1'].includes(new URL(status.API_URL).hostname));
+    manifest = JSON.parse(readFileSync(new URL('../supabase/migration-manifest.dev.json', import.meta.url), 'utf8'));
+    assertLimitedConcurrencyFreshIdentity(freshIdentity(), manifest);
+    // Only a positively identified, already-fresh local fixture may be reset.
+    // Import callers retain ownership of their enclosing aggregate fixture.
+    cleanupRequired = true;
     await testLimitedExistingSessionConcurrency(createClient(status.API_URL,status.SECRET_KEY,
       { auth: { autoRefreshToken: false, persistSession: false } }));
   } catch { console.error('Limited existing session concurrency FAIL: redacted local validation failure'); process.exitCode = 1; }
+  finally {
+    if (cleanupRequired) {
+      try {
+        execFileSync(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed'], { cwd: root,
+          stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+        assertLimitedConcurrencyFreshIdentity(freshIdentity(), manifest);
+        console.log('Limited concurrency fresh local cleanup PASS: manifest identity and zero fixture rows verified.');
+      } catch { console.error('Limited concurrency fresh local cleanup FAIL: redacted local validation failure'); process.exitCode = 1; }
+    }
+  }
 }

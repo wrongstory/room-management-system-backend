@@ -1,5 +1,7 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+> 2026-10-05 #329 최신104 로컬 checkpoint: `b00e09c` 뒤 dev1209756 정상 통합 후보의 전체27 upgrade/SQL82·5,119·static/KST145 PASS. 첫9경합 chain은 limited runner의 cleanup 누락으로8번째 빈 DB 확인 FAIL이며 named/마지막verify NOT RUN이었다. 보완 후 fresh104→limited7/cleanup→photo-context7/cleanup→named7/cleanup→최종fresh104가 실제 exit0, Node1,727/73·Edge483/0·Python95·비작성자 source QA0, 원본307/사본307 drift0다. raw strict FAIL9와 exact9/catalog3 PASS를 구분한다. 후속3개 PASS를 새 전체9 aggregate PASS로 바꾸지 않는다. 최신 devfdd8d7d(#382) 재통합·최종 문서/staged QA·새 CI·dev 병합은 후속이며 main/v0.8.0/운영/프런트는 불변이다. [실제 범위·최초 실패·증적](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신104-통합standalone-fixture-정리-checkpoint)을 따른다.
+
 > 2026-10-05 #329/#389 bb4fa40 통합 로컬 checkpoint: Node1,525/70·LF fresh103/cleanup·전체SQL81/4,942·실제100→101 upgrade·제한 세션 경합7 PASS, 원본304/사본304 drift0. raw strict FAIL9/exit1과 exact warning9/catalog3 PASS는 별개다. #389는 exact catalog fixture만 보완하며 원본 installer·runtime 권한은 불변이다. 후속 실제7/18→7/19, 최신 #383/#388/#382 재통합·전체27 upgrades·독립 QA·새 CI·dev/운영·프런트 UAT는 미완료다. [정확한 실행 범위](./LIMITED_SESSION_REENTRY.md#2026-10-05-389-caller-catalog--bb4fa40-통합-로컬-checkpoint)를 따른다. 아래 strict17/101 결과는 당시 기록이다.
 
 ## 2026-10-04 #329 별도 백엔드 로컬 검증 checkpoint
@@ -12,6 +14,36 @@
 실제 계약과 gate는 [제한 세션 재진입](./LIMITED_SESSION_REENTRY.md)를 따른다.
 기준선 Node 1,229건/65파일은 구현 전 결과다. 신규 결과는 위 checkpoint와 상세 계약을 따른다.
 사용자 승인 LF 임시본만 정규화했고 기존100 SQL·운영 DB는 변경하지 않았다. 실패를 명시한 진단용 공유 승인만 있으며 정상 완료·병합·배포로 승격하지 않는다.
+
+## 2026-10-05 #383 최신 combined103 개발 후보
+
+#384가 dev `bb4fa40`에 통합된 뒤 #383을 정상 merge한103 migration source 후보다.
+Node1,591/69·Edge476/0·Python95·fresh103·저장 이름SQL177·실제 named 경합7·worker44,
+전체26 upgrades/SQL81파일·4,979 assertions·static/KST145·승인 exact9/catalog3 baseline PASS다.
+전체8개 경합 첫 실행은 기존 offline fixture 요청 전 만료로 FAIL이며 기록을 보존했다.
+같은 source/TTL/assertion의 제한1회 전체 재실행은8명령/cleanup PASS·exit0다.
+원본302 raw SHA/실제 임시본 대응 불일치0, 최종103/head·RLS누락0·객실121,
+검사한 Auth/session/profile/target/photo operation/name binding0을 확인했다.
+원 strict FAIL9와 승인 baseline PASS를 구분한다. 기한 fixture 개선은 별도 #388로 추적한다.
+최종 staged 독립 QA·새 exact-head CI·Ready·dev 병합은 후속 gate이며 운영 완료는 아니다.
+상세 실패/재실행 증거와 불변 저장 이름·삭제/rollback 경계는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
+최신 기능은 별도 #387 v0.9.0이며 v0.8.0 후보는 보존한다. 실제 백업은 전체 개발 이후이되 운영 배포 전 필수다.
+운영/복구 DB·Auth·API·실제 Drive/PIN·프런트 UI/UAT·백업/복원·Release/tag는 NOT RUN이다.
+
+## 과거 102 migration #383 실제 사진 저장 이름 후보 checkpoint
+
+사용자 결정에 따라 새 v9 Drive 사진 이름을 날짜·유형·호실·서버 고유 순번으로 구성한다.
+별도 [Issue #383](https://github.com/wrongstory/room-management-system-backend/issues/383)의
+[저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다. 신규 append migration은 private 불변 binding과
+service-only 명명 예약 RPC를 추가하며 공개 업로드 요청 계약과 기존 사진 ID/권한은 유지한다.
+기존 UUID 이름·이미 예약된 identity·legacy 유형은 유지하고 일괄 rename/move/delete하지 않는다.
+Node1547/69·Edge476/0·fresh102·대상SQL71·historical upgrade26 및 보완 후 전체SQL4789/80·KST145는 PASS다.
+최초 통합 `db:test`는 기존 developer 진단 head 기대값3건으로 FAIL했고 fixture 보완 후 전체SQL을 재검증했다.
+통합 명령 재실행 PASS로 표시하지 않는다. 기존 동시 처리6개 명령/cleanup과 독립 범위 QA98/100·신규 P0/P1/P2=0도 PASS다.
+최종 문서/tree와 새 exact-head CI를 확인한 뒤에도 #384 운영 차단 요소와 릴리스 gate를 별도로 판단한다.
+raw strict FAIL9와 사용자 승인 exact baseline PASS를 구분한다. production/main/recovery DB·실제 Drive·배포·UI/UAT는
+NOT RUN이다. #384 다중 사진 업로드 P1은 별도 운영 승격 차단 요소다. 기존 #323/#382 입력 순열 정합화도
+별도이며 이름 변경으로 완료 처리하지 않는다. 실제 백업·복원은 모든 개발 이후 후속으로 유지한다.
 
 ## 2026-10-03 #325 완료와 #324 후보
 

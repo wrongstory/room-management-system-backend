@@ -1,5 +1,42 @@
 # #329 기존 로그인 세션의 제한 업무 재진입
 
+## 2026-10-05 최신104 통합·standalone fixture 정리 checkpoint
+
+`b00e09c` 뒤 `dev@1209756` 정상 merge 후보에서 Node1,712/72·Edge483/0·Python95,
+actual LF fresh104·전체27 upgrade/SQL82파일·5,119 assertions·static100→101 보존·KST145는 PASS다.
+원 strict lint FAIL9/exit1과 exact warning9/catalog3 baseline PASS는 별개다.
+최초 전체9경합 chain은 첫7명령 및 제한 세션7 checkpoint PASS 후8번째 photo-context의
+빈 DB 조건에서 FAIL했다. 제한 세션 standalone CLI가 local fixture를 남긴 원인이며,
+read-only local count는 Auth13/profile13/target12/operation6/history104였다. 그 chain의
+9번째 named 및 최종 fresh verify는 NOT RUN이다. 실패 로그 SHA256은
+`959628b87ff880046c00c7f8d1e5187d3e7262174261f2460addd3a33e2147eb`다.
+
+기존 harness/TTL/SQL/검사는 유지하며 명시적 CLI의 Docker endpoint/config/loopback·
+fresh manifest 확인 뒤에만 finally cleanup/reset/빈 행·manifest readback을 추가했다.
+import는 DB/process를 호출하지 않는다. 최초 신규 unit14/15 FAIL은 Windows CRLF의
+source-text assertion이었고 inspection만 LF로 정규화했다. 최초 quality의 static mjs
+import/typecheck FAIL도 URL dynamic import와 명시적 타입으로 보완했다. 검사 skip이나
+runtime SQL/원본 migration 정규화는 없다. 새 root quality1,727/73·type/build와 신규15 unit,
+비작성자 source QA 신규 P0/P1/P2=0은 실제 PASS다.
+
+보완한 새 승인 LF 검증본에서 **fresh104→limited7/cleanup→photo-context7/cleanup→
+named7/cleanup→최종fresh104**를 실제 순차 재실행했고 exit0다. 최종 history104/head
+`photo_collection_provider_context_axis`, public RLS누락0, 객실121, 검사한 합성 Auth/session/
+profile/target/operation/name/limited-root 행0을 확인했다. 최초9 aggregate 실패는 보존하며
+이 후속3 script PASS를 보완 후 전체9 aggregate 재실행 PASS로 표시하지 않는다.
+기존/new 검증 입력307개는 cleanup runner1개만 다르고 모든 SQL/psql·manifest/package/
+다른 runner는 정확히 같다. 각 실행 후 원본307/사본307 drift0(SQL/psql200/raw107)을 확인했다.
+
+원 로그 `qa329-named-integrated-{db-verify,baseline,full-upgrades,static,kst,races}.log`와
+`qa329-fixture-cleanup-{before,limited,context,names,final,quality-recheck}.log`는 `.tmp`에
+보존하며 커밋하지 않는다. 후속 quality SHA는
+`41af433a80c39932f81a544dc77f0e89e9aee781ad421625a9206d18ba2b8949`,
+limited 로그는 `c6eb0afe23837cacc1fbe0b96b6f935ca2b15aa330ffa0f3e4260623c571fba2`다.
+전체27/SQL 로그 SHA는 `f545c9dac28695c3831a478df56436110fd13f558b199652fba3eaedc368e0a1`다.
+최종 문서/staged QA·최신 devfdd8d7d(#382) 정상 재통합·새 exact-head CI·보호 dev 병합은 후속이다.
+caller는 여전히 snapshot6/fresh18/core2이며 #318/#332의 실제7/18→7/19는 NOT RUN이다.
+main/v0.8.0·운영 DB/API·프런트·실제 백업/복원·release/tag는 불변/NOT RUN이며 최신 기능은 #387 v0.9.0이다.
+
 ## 2026-10-05 #389 caller catalog / bb4fa40 통합 로컬 checkpoint
 
 기존 source `8941039`에 `dev@bb4fa40`를 정상 merge한 미커밋 후보에서 실행했다.

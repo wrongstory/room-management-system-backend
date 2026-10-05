@@ -168,6 +168,13 @@ Deno.test("photo exact HTTP routes use verified latest active/limited identity a
       content.status === (state === "active" ? 200 : 403),
       "limited upload permission never grants original read",
     );
+    if (state === "active") {
+      assert(
+        content.headers.get("access-control-expose-headers") ===
+          "Content-Disposition",
+        "authorized frontend can read only the server disposition header",
+      );
+    }
   }
   for (const role of ["admin", "developer"]) {
     const s = setup(role);
