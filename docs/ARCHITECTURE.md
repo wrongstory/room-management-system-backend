@@ -972,17 +972,19 @@ Fastify/Edge/OpenAPI의 #133 통합 당시 기준은 108 paths / 115 operations�
 
 #### #323 v9 게시 명세 정합화
 
-v9 명세와 프런트의 정규 요청은 `cleaning-proof / bomb-proof / issue-proof` 순서의 정확히 3개 슬롯이며,
-필수 여부는 `true / false / false`, 최대 사진 수는 `20 / 10 / 10`입니다.
+2026-10-05 사용자 결정 #382에서 배열 위치 제한을 제거했습니다. v9 요청에는
+`cleaning-proof / bomb-proof / issue-proof` 역할이 정확히 한 번씩 존재하며 배열의 6개 순열을 허용합니다.
+역할별 `displayOrder=0/1/2`, 필수 여부 `true / false / false`, 최대 사진 수 `20 / 10 / 10`은 유지합니다.
 현재 DB는 `청소 사진 / 폭탄방 증빙 / 특이사항 증빙` label을 포함한 정규 객체와 비교하므로,
-OpenAPI `CheckoutCleaningTemplateV9Slots`는 고정 tuple과 추가 필드 금지로 표현합니다.
+OpenAPI `CheckoutCleaningTemplateV9Slots`는 canonical 역할 union의 `items`와 역할별 exact-one
+`contains`로 표현하며 추가 필드를 금지합니다. 배열 순서 해제는 역할/order 값 자유화가 아닙니다.
 `expectedVersion=0`은 최초 게시, 이후에는 current version CAS를 사용합니다.
 
 과거 호환은 별도 schema입니다. v8 A-contract는 현재 RPC에서 새 게시와 완료 receipt 재생이 모두 가능하고,
 `maxPhotos` 없는 pre-A 요청은 같은 actor/key/hash의 완료 receipt가 있을 때만 재생됩니다.
 fresh pre-A 게시를 허용하거나 기존 v7+ 응답·snapshot을 v9로 재해석하지 않습니다.
 legacy 중복 key·필수 슬롯 등 교차 항목 조건과 receipt 존재 여부의 최종 판단은 기존 서버/DB가 유지합니다.
-이 변경은 명세·검증만 수정하며 migration·권한·운영 템플릿·프런트 메뉴는 변경하지 않습니다.
+이번 source 후보는 명세·검증과 HTTP 입력 순서만 수정하며 migration·권한·운영 템플릿·프런트 메뉴는 변경하지 않습니다.
 
 3개 슬롯은 일반·폭탄방·특이사항 **사진 모음의 분류**이며 사진을 3장만 올리거나 세 번에 나눠
 선택하라는 뜻이 아닙니다. 프런트 `makee-ham/room-management-system`의 scoped `dev@09ed284`는
@@ -990,23 +992,38 @@ legacy 중복 key·필수 슬롯 등 교차 항목 조건과 receipt 존재 여�
 1~20장이고 폭탄방·특이사항 사진은 별도 선택 증빙입니다. 새 bulk/ZIP endpoint나 업로드 순서 정책을
 추가하지 않으며, 이번 대조는 전역 프런트 정책 snapshot 승격이나 운영 UAT 완료가 아닙니다.
 
-기존 배열 순서 차이는 [#382](https://github.com/wrongstory/room-management-system-backend/issues/382)로
-추적합니다. 각 객체의 `displayOrder`를 유지하고 배열 위치만 바꾼 6개 순열에서 Fastify·명세는
-정규 순서만 허용하고, Edge는 첫 항목이 `cleaning-proof`인 2개 순서를 정렬해 허용하며, DB 게시
-명령은 6개 모두 정렬합니다. 별도 characterization fixture로 현재 차이를 검증할 뿐 이를 일치한
-계약으로 선언하지 않습니다. #323의 전체 배열 순서 정합화 승인 기준은 아직 완료하지 않았으므로
-Issue와 PR은 열어 둡니다. 사진 다중 선택 UX에 대한 사용자 확인을 배열 순서 정책 결정으로
-해석하지 않으며, 이번 PR에서 런타임 입력 허용 범위를 변경하지 않습니다.
+과거 #323 checkpoint의 허용 차이(Fastify·명세1개, Edge2개, DB6개)는
+[#382](https://github.com/wrongstory/room-management-system-backend/issues/382)의 이력입니다.
+새 후보는 Fastify 입력의 복사본을 정렬한 뒤 기존 ordered validator로 검사하고, Edge는 첫 슬롯
+조건 대신 v9 3-slot 후보를 정렬 후 역할별로 검사합니다. DB publisher는 이미 같은 정렬을 수행하므로
+원본 SQL·manifest를 바꾸지 않습니다. canonical 응답 검사는 그대로여서 비정렬 DB projection은
+계속 fail-closed합니다. 기존 frozen snapshot의 exact canonical equality와 저장 이름 자격도 재해석하지 않습니다.
+6순열 허용·동일 hash·잘못된 역할/order·누락/중복 회귀를 실제 실행하되, 최종 QA·새 exact-head CI·
+최신 dev 재통합·전체 DB gate가 완료되기 전에는 #323/PR #335의 source/dev 완료를 선언하지 않습니다.
 
 `tests/fixtures/cleaning-template-contract.ts`를 Fastify·Edge·실제 JSON Schema 검사·생성 클라이언트·로컬 DB
 검증이 공유합니다. `npm run openapi:template-client:check`는 앱 TypeScript 7을 바꾸지 않고
 격리된 `openapi-typescript@7.13.0` / `typescript@5.9.3`로 클라이언트 타입을 생성·검사합니다.
-TypeScript가 표현하지 못하는 숫자 범위/DB 상태는 JSON Schema·DB 검사로 보완합니다.
-Python 생성기 호환을 위해 tuple의 `items`에는 공통 슬롯 schema를 두고 길이는 `minItems=maxItems=3`으로
-제한합니다. 객실 타입별 과거 슬롯 수는 `allOf`의 `if/then` 조건으로 표현하여 기존 이름의 요청 모델을
+TypeScript의 임시 생성은 `--array-length`로 길이3의 역할 union을 검사합니다. 타입이 표현하지 못하는
+중복/누락 역할의 exact-one 조건·숫자 범위·DB 상태는 JSON Schema·DB 검사로 보완합니다.
+Python 생성기 호환을 위해 `items`는 named 역할 union schema를 참조하고 길이는 `minItems=maxItems=3`으로
+제한합니다. 실제 생성 모델에서 6개 입력 순열의 필드·배열 위치 보존을 검사합니다.
+객실 타입별 과거 슬롯 수는 `allOf`의 `if/then` 조건으로 표현하여 기존 이름의 요청 모델을
 유지합니다. `tools/backend-console/scripts/check_business_openapi_codegen.py`로 실제 모델 생성을 검사하며,
 생성기에서 표현하지 못하는 조건은 위 JSON Schema 검사와 기존 서버 검증을 그대로 적용합니다.
 `npm run db:test:template-contract`는 fresh local DB에서 합성 fixture만 사용하고 transaction을 rollback합니다.
+
+2026-10-05 로컬 checkpoint(`dev@bb4fa40` 통합 후보/102 migrations): 원본302개 raw SHA를 보존한
+LF 임시 검증본에서 fresh `db:verify`, 실제 6순열 게시·동일/정규 순서 receipt replay·4객실 유형
+CAS·16 malformed 거부·v8 호환과 전체 SQL80파일/4,802검사를 PASS했다. exact lint baseline은
+호환 경고9개·catalog3개 일치 PASS이며 원본 strict FAIL9/exit1은 유지한다. Node1,477/69,
+TypeScript 실제 codegen/Ajv, Python95/Ruff226/mypy25/6순열 codegen/package, Edge477/0도 PASS다.
+독립 QA의 이전 operation 설명 P2를 보완하고 Node/Deno 회귀를 추가했다. 새 Deno assertion의
+최초 format FAIL1/99는 원 로그에 보존했으며 출력된 줄바꿈만 보완한 1회 재검증은 PASS다.
+이번 전체26 upgrade runner도 PASS(exit 0)이며, 원 로그 `qa382-db-full-upgrades.log`의 SHA-256은
+`47cb0421a6348e91ccbf86dff82fe2b7edb1d0900633bd6e89e5662877334671`이다. 이는 위 local102 후보의
+검증이며 최신 #383(`dev@c2b5618`, 103 migrations) 재통합 결과는 아니다. 최종 staged-tree 독립 QA·
+새 exact-head CI·Ready/보호 dev 병합·실제 백업/운영·프런트 UAT는 아직 완료하지 않았다.
 사람/독립 QA와 운영 배포는 별도 gate입니다.
 
 아래는 #156/#179 당시 경계이며 v9 기본 계약은 위 절을 우선합니다.
@@ -1033,6 +1050,15 @@ OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. `20260916090000_extra
 `extra-proof`에만 0~10장 current collection을 열고, client item UUID·collection/item CAS·append/replace/개별 tombstone delete·표시 순서 보존·불변 제출 binding을 적용한다. 일반 slot과 pre-A snapshot은 단일 current pointer를 유지한다. Node/Edge는 collection upload·delete 경로와 slot/submission projection을 같은 계약으로 제공한다. 운영 DB 적용과 template 재게시는 포함하지 않는다.
 
 ## API 단계
+
+### 사진 provider context의 revision 축 (#384)
+
+현재 v9 flat evidence는 `cleaning-proof` 최소1/최대20장, 선택 `bomb-proof`/`issue-proof`
+각 최대10장이다. 위 v8 extra-proof-only 설명은 과거 계약이며 기존 snapshot은 보존한다.
+provider context는 ordinary의 current pointer CAS와 collection의 state/item CAS를 구분한다.
+최신 admitted actor/session·assignment·attempt lock·lease fence/status/quota를 유지하고,
+worker reconciliation에 business CAS를 새로 추가하지 않는다. 최신 함수의 CAS fragment만
+교체하는 append 전략과 후보/실제 검증 구분은 [#384 기록](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)을 따른다.
 
 현재:
 

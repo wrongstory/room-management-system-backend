@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
 import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
 
-// Validate the serialized document consumers receive, including $ref and 2020-12 tuples.
+// Validate the serialized document consumers receive, including exact-one role membership.
 const document = JSON.parse(JSON.stringify(openApiDocument));
 const ajv = new Ajv2020({ strict: false, validateFormats: false, allErrors: true });
 const validate = ajv.compile({
@@ -27,7 +27,7 @@ describe('cleaning template wire schema', () => {
     expect(JSON.stringify(flatTemplateRequest)).toBe(before);
   });
 
-  it.each(flatTemplateSlotPermutations())('characterizes existing JSON Schema array order: $name (#382 remains unresolved)', ({ body, schemaAccepted }) => {
+  it.each(flatTemplateSlotPermutations())('accepts unordered canonical v9 slots: $name (#382)', ({ body, schemaAccepted }) => {
     expect(validate(JSON.parse(JSON.stringify(body))), JSON.stringify(validate.errors)).toBe(schemaAccepted);
   });
 
@@ -44,6 +44,11 @@ describe('cleaning template wire schema', () => {
   });
 
   it('describes the DB canonical labels and metadata boundary', () => {
+    const description = document.paths['/v1/cleaning-templates'].post.description;
+    expect(description).toContain('6개 순서를 모두 허용');
+    expect(description).toContain('canonical request hash·저장·응답을 유지');
+    expect(description).not.toContain('#382 후속');
+    expect(description).not.toContain('허용 범위를 확대하지 않습니다');
     for (const patch of [{ label: '다른 이름' }, { section: '새 구역' }]) {
       expect(validate({ ...flatTemplateRequest, slots: flatTemplateRequest.slots.map((slot) => ({ ...slot, ...patch })) })).toBe(false);
     }

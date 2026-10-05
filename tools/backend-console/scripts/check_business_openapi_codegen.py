@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -13,6 +14,68 @@ ENUM_VALUE_PATTERN = re.compile(r'^\s+[A-Z][A-Z0-9_]+ = "([^"]+)"$', re.MULTILIN
 
 def generated_enum_values(path: Path) -> list[str]:
     return ENUM_VALUE_PATTERN.findall(path.read_text(encoding="utf-8"))
+
+
+def check_template_permutation_roundtrip(
+    npm: str, repository_root: Path, destination: Path
+) -> None:
+    # Consume the same synthetic fixtures as Fastify/Edge/Ajv/DB, not a second
+    # independently maintained Python copy of the canonical roles and fields.
+    fixture_result = subprocess.run(  # noqa: S603
+        [
+            npm,
+            "exec",
+            "--",
+            "tsx",
+            "-e",
+            "import { flatTemplateSlotPermutations } from "
+            "'./tests/fixtures/cleaning-template-contract.ts'; "
+            "process.stdout.write(JSON.stringify(flatTemplateSlotPermutations()"
+            ".map(({name, body}) => ({name, body}))));",
+        ],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    # Import only the newly generated package in a child process, so a previously
+    # imported checked-in client cannot mask generation or round-trip failures.
+    # Python codegen does not enforce contains counts; Ajv/DB keep that gate.
+    roundtrip_source = """\
+import json
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from generated.models.publish_cleaning_template_request import PublishCleaningTemplateRequest
+
+cases = json.load(sys.stdin)
+if len(cases) != 6 or len({case['name'] for case in cases}) != 6:
+    raise RuntimeError('Expected six distinct shared v9 permutation fixtures')
+orders = set()
+for case in cases:
+    body = case['body']
+    before = json.dumps(body, ensure_ascii=False, sort_keys=True)
+    actual = PublishCleaningTemplateRequest.from_dict(body).to_dict()
+    expected_order = tuple(slot['slotKey'] for slot in body['slots'])
+    actual_order = tuple(slot['slotKey'] for slot in actual['slots'])
+    if actual != body or actual_order != expected_order:
+        raise RuntimeError('Generated template fields/input array order changed: ' + case['name'])
+    if json.dumps(body, ensure_ascii=False, sort_keys=True) != before:
+        raise RuntimeError('Generated client mutated shared fixture: ' + case['name'])
+    orders.add(actual_order)
+if len(orders) != 6:
+    raise RuntimeError('Generated client collapsed distinct input array orders')
+print('Python template codegen: six shared permutations preserve every field and input array order')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", roundtrip_source, str(destination)],
+        cwd=repository_root,
+        input=fixture_result.stdout,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
 
 
 def main() -> None:
@@ -312,6 +375,7 @@ def main() -> None:
         ):
             if field not in template_request:
                 raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
+        check_template_permutation_roundtrip(npm, repository_root, destination)
         for book_model_name, book_expected_fields in (
             (
                 "payroll_adjustment_book",

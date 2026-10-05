@@ -1714,7 +1714,7 @@ describe('application', () => {
     await app.close();
   });
 
-  it('characterizes existing Fastify v9 array order without changing policy (#382)', async () => {
+  it('accepts all six v9 array orders without changing role fields (#382)', async () => {
     const appServices = services();
     if (!appServices.cleaningTemplates) throw new Error('missing template service');
     const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
@@ -1722,6 +1722,7 @@ describe('application', () => {
     const app = await buildApp({ env, services: appServices, logger: false });
     try {
       for (const { name, body, fastifyAccepted } of flatTemplateSlotPermutations()) {
+        const fixtureBefore = structuredClone(body);
         const before = publish.mock.calls.length;
         const response = await app.inject({
           method: 'POST', url: '/v1/cleaning-templates', payload: body,
@@ -1732,8 +1733,9 @@ describe('application', () => {
         expect(publish.mock.calls.length, name).toBe(before + Number(fastifyAccepted));
         if (!fastifyAccepted) expect(response.json().error.code, name).toBe('VALIDATION_ERROR');
         else expect(response.json().template.slots, name).toEqual(flatTemplateRequest.slots);
+        expect(body, name).toEqual(fixtureBefore);
       }
-      expect(publish).toHaveBeenCalledTimes(1);
+      expect(publish).toHaveBeenCalledTimes(6);
     } finally { await app.close(); }
   });
 

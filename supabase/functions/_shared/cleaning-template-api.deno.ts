@@ -6,6 +6,7 @@ import { type EdgeActor, type EdgeClients, EdgeError } from "./runtime.ts";
 import { handleApiRequest } from "../api/index.ts";
 import {
   flatTemplateRequest,
+  flatTemplateRequestHash,
   flatTemplateSlotPermutations,
   historicalTemplateRequest,
   invalidFlatTemplateRequests,
@@ -16,9 +17,10 @@ function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 const sessionId = "51000000-0000-4000-8000-000000000001";
-Deno.test("cleaning template actual Edge route characterizes all six v9 array orders without selecting policy (#382)", async () => {
+Deno.test("cleaning template actual Edge route accepts all six v9 array orders (#382)", async () => {
   const hashes: unknown[] = [];
   for (const { name, body, edgeAccepted } of flatTemplateSlotPermutations()) {
+    const fixtureBefore = JSON.stringify(body);
     const mock = clients(templateProjection());
     const response = await handleApiRequest(request("POST", body), {
       authenticateRequest: () => Promise.resolve(admin),
@@ -30,6 +32,7 @@ Deno.test("cleaning template actual Edge route characterizes all six v9 array or
       `${name} not cached`,
     );
     const result = await response.json();
+    assert(JSON.stringify(body) === fixtureBefore, `${name} fixture unchanged`);
     if (edgeAccepted) {
       assert(
         mock.calls.length === 1 &&
@@ -61,10 +64,41 @@ Deno.test("cleaning template actual Edge route characterizes all six v9 array or
     }
   }
   assert(
-    hashes.length === 2 && typeof hashes[0] === "string" &&
-      /^[a-f0-9]{64}$/.test(hashes[0]) && hashes[0] === hashes[1],
-    "both accepted permutations retain the same canonical request hash",
+    hashes.length === 6 && typeof hashes[0] === "string" &&
+      /^[a-f0-9]{64}$/.test(hashes[0]) &&
+      hashes.every((hash) => hash === hashes[0]),
+    "all six permutations retain the same canonical request hash",
   );
+  assert(
+    hashes[0] === flatTemplateRequestHash,
+    "existing canonical hash unchanged across Fastify and Edge",
+  );
+});
+Deno.test("cleaning template v9 database projections remain ordered despite unordered input (#382)", async () => {
+  for (const { name, body } of flatTemplateSlotPermutations().slice(1)) {
+    const mock = clients(templateProjection(body.slots));
+    const response = await handleApiRequest(request("POST", body), {
+      authenticateRequest: () => Promise.resolve(admin),
+      createClients: () => mock.value,
+    });
+    assert(
+      response.status === 500,
+      `${name} noncanonical DB projection rejected`,
+    );
+    assert(
+      response.headers.get("cache-control") === "no-store",
+      `${name} not cached`,
+    );
+    const result = await response.json();
+    assert(
+      result.error?.code === "CLEANING_TEMPLATE_COMMAND_FAILED",
+      `${name} safe error`,
+    );
+    assert(
+      mock.calls.length === 1,
+      `${name} input reached publisher exactly once`,
+    );
+  }
 });
 Deno.test("cleaning template shared v9 fixtures preserve initial/CAS/replay and reject malformed slots", async () => {
   for (

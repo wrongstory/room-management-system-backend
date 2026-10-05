@@ -1545,6 +1545,15 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
     "stable publish operation",
   );
   assert(
+    route.post.description.includes("6개 순서를 모두 허용") &&
+      route.post.description.includes(
+        "canonical request hash·저장·응답을 유지",
+      ) &&
+      !route.post.description.includes("#382 후속") &&
+      !route.post.description.includes("허용 범위를 확대하지 않습니다"),
+    "publication description matches the order-independent input contract",
+  );
+  assert(
     route.get["x-required-roles"].join() === "admin" &&
       route.post["x-required-roles"].join() === "admin",
     "business admin only",
@@ -1563,13 +1572,34 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
     schemas.CheckoutCleaningTemplateV9Slots.minItems === 3 &&
       schemas.CheckoutCleaningTemplateV9Slots.maxItems === 3 &&
       schemas.CheckoutCleaningTemplateV9Slots.items.$ref ===
-        "#/components/schemas/CleaningTemplateSlot" &&
+        "#/components/schemas/CheckoutCleaningTemplateV9Slot" &&
+      !("prefixItems" in schemas.CheckoutCleaningTemplateV9Slots) &&
+      schemas.CheckoutCleaningTemplateV9Slots.allOf.length === 3 &&
+      schemas.CheckoutCleaningTemplateV9Slots.allOf.every((rule, index) =>
+        rule.minContains === 1 && rule.maxContains === 1 &&
+        rule.contains.properties.slotKey.const ===
+          ["cleaning-proof", "bomb-proof", "issue-proof"][index]
+      ) &&
       schemas.PublishCleaningTemplateRequest.properties.slots.oneOf.length ===
         3 &&
       schemas.CheckoutCleaningTemplateV8Slot.allOf[1].required.includes(
         "maxPhotos",
       ) && schemas.CleaningTemplateSlot.properties.maxPhotos.maximum === 20,
-    "v9 tuple and historical v8/pre-A branches stay distinct",
+    "unordered v9 roles each occur once; historical v8/pre-A branches stay distinct",
+  );
+  assert(
+    schemas.CheckoutCleaningTemplateV9Slot.oneOf.length === 3 &&
+      schemas.CheckoutCleaningTemplateV9Slot.oneOf.every((slot, index) =>
+        slot.additionalProperties === false && slot.required.length === 5 &&
+        slot.properties.slotKey.const ===
+          ["cleaning-proof", "bomb-proof", "issue-proof"][index] &&
+        slot.properties.displayOrder.const === index &&
+        slot.properties.required.const === (index === 0) &&
+        slot.properties.label.const ===
+          ["청소 사진", "폭탄방 증빙", "특이사항 증빙"][index] &&
+        slot.properties.maxPhotos.const === (index === 0 ? 20 : 10)
+      ),
+    "array order does not change canonical role/order/label/flags/capacities",
   );
   assert(
     !(schemas.PublishCleaningTemplateRequest.required as readonly string[])

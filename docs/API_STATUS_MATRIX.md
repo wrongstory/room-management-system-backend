@@ -1532,17 +1532,23 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `dev` 통합과 v0.3.0 source/main·production 54 migrations·5 Edge bundle·OpenAPI 108/115 반영
 - [ ] annotated `v0.3.0` tag/GitHub Release와 남은 hosted role·mutation/provider/Google activation smoke
 
-### #323 v9 사진 템플릿 명세 후보 — Draft, 전체 배열 순서 정합화 대기
+### #323/#382 v9 사진 템플릿 명세·입력 순서 후보 — Draft, 새 통합 gate 대기
 
-[PR #335](https://github.com/wrongstory/room-management-system-backend/pull/335)은 `dev@859f7cd`를
-통합한 명세·검증 후보다. 정규 3개 사진 모음(일반 20/폭탄방 10/특이사항 10), 최초
+[PR #335](https://github.com/wrongstory/room-management-system-backend/pull/335)의 과거 후보는 `dev@859f7cd`를
+통합했다. 현재 #382 후보는 `dev@bb4fa40`의 #384를 포함하되 #383 최신 dev 재통합은 후속이다.
+정규 3개 사진 모음(일반 20/폭탄방 10/특이사항 10), 최초
 `expectedVersion=0`/current CAS, v8 호환과 pre-A 완료 receipt 재생을 구분한다.
 3개 모음은 사진 3장 제한이 아니다. 프런트 scoped `dev@09ed284`의 다중 파일 선택·사진별 전역
-업로드 큐를 보존하며 업로드 endpoint/런타임/권한/기존 migration은 변경하지 않는다.
+업로드 큐를 보존하며 업로드 endpoint/권한/기존 migration은 변경하지 않는다.
 
-6개 배열 순열의 기존 Fastify·Edge·DB 허용 차이는 [#382](https://github.com/wrongstory/room-management-system-backend/issues/382)에
-남기고 characterization 테스트로 표시한다. 검사가 PASS여도 **전체 배열 순서 parity PASS가 아니며**
-#323/PR #335은 OPEN/Draft다. 새 exact-head CI·독립 QA의 실제 결과는 PR에 기록한다.
+6개 배열 순열의 과거 Fastify1/Edge2/DB6 차이는 [#382](https://github.com/wrongstory/room-management-system-backend/issues/382)의
+이력이다. 2026-10-05 사용자 결정으로 배열 위치만 해제하며 역할별 key/order/label/필수 여부/최대 수는 유지한다.
+새 후보는 Fastify/Edge 입력을 정렬해 동일 payload/hash를 사용하며 OpenAPI/Ajv/생성 client를 같이 검증한다.
+ordered DB projection·immutable snapshot·receipt와 기존 migration/manifest는 보존한다.
+#323/PR #335은 OPEN/Draft다. 새 exact-head CI·독립 QA·전체 DB 및 #383 재통합의 실제 결과는 PR에 기록한다.
+현재 local102의 실제 6순열 게시·receipt/4타입 CAS·16 malformed·전체SQL80/4,802와 HTTP/schema/client 검사는 PASS다.
+전체26 upgrade runner도 PASS(exit 0)다. 이는 local102 후보의 결과이며 최신 #383 통합103 검증이 아니다.
+새 exact-head CI·최신 통합·보호 병합·운영/UAT 완료로 확대하지 않는다.
 source/dev 완료·운영 배포·프런트 UAT 완료로 판정하지 않는다. 상세는 [명세 계약](./ARCHITECTURE.md#323-v9-게시-명세-정합화)을 따른다.
 
 ### #156/#165 당시 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기

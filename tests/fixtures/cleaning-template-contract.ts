@@ -7,17 +7,19 @@ export const flatTemplateRequest = {
     { slotKey: 'issue-proof', displayOrder: 2, required: false, label: '특이사항 증빙', maxPhotos: 10 }
   ]
 };
+// Golden SHA-256 of the existing canonical publish fingerprint (durationMinutes:null).
+// Input permutation must not change a successful command's byte-level identity.
+export const flatTemplateRequestHash = '39b8512d6604ff67d64d23b2e7418e82e46d59ff106dcb213438c53ab594f5d6';
 
-// #382 characterization only: retain every slot's fields and permute the array.
-// These are not universally invalid requests or a selected future HTTP policy.
+// #382 confirmed: array position is irrelevant; every canonical slot field stays fixed.
 export function flatTemplateSlotPermutations() {
   const cases = [
     { name: 'cleaning/bomb/issue', order: [0, 1, 2], fastifyAccepted: true, edgeAccepted: true, schemaAccepted: true },
-    { name: 'cleaning/issue/bomb', order: [0, 2, 1], fastifyAccepted: false, edgeAccepted: true, schemaAccepted: false },
-    { name: 'bomb/cleaning/issue', order: [1, 0, 2], fastifyAccepted: false, edgeAccepted: false, schemaAccepted: false },
-    { name: 'bomb/issue/cleaning', order: [1, 2, 0], fastifyAccepted: false, edgeAccepted: false, schemaAccepted: false },
-    { name: 'issue/cleaning/bomb', order: [2, 0, 1], fastifyAccepted: false, edgeAccepted: false, schemaAccepted: false },
-    { name: 'issue/bomb/cleaning', order: [2, 1, 0], fastifyAccepted: false, edgeAccepted: false, schemaAccepted: false }
+    { name: 'cleaning/issue/bomb', order: [0, 2, 1], fastifyAccepted: true, edgeAccepted: true, schemaAccepted: true },
+    { name: 'bomb/cleaning/issue', order: [1, 0, 2], fastifyAccepted: true, edgeAccepted: true, schemaAccepted: true },
+    { name: 'bomb/issue/cleaning', order: [1, 2, 0], fastifyAccepted: true, edgeAccepted: true, schemaAccepted: true },
+    { name: 'issue/cleaning/bomb', order: [2, 0, 1], fastifyAccepted: true, edgeAccepted: true, schemaAccepted: true },
+    { name: 'issue/bomb/cleaning', order: [2, 1, 0], fastifyAccepted: true, edgeAccepted: true, schemaAccepted: true }
   ] as const;
   return cases.map(({ order, ...expectations }) => ({
     ...expectations,
@@ -41,6 +43,10 @@ export function invalidFlatTemplateRequests() {
     ['missing slot', { ...flatTemplateRequest, slots: flatTemplateRequest.slots.slice(0, 2) }],
     ['extra slot', { ...flatTemplateRequest, slots: [...flatTemplateRequest.slots, flatTemplateRequest.slots[0]] }],
     ['duplicate key', change({ slotKey: 'bomb-proof' })],
+    // Each item is individually canonical; exact-one role membership must still fail.
+    ['duplicate canonical role', { ...flatTemplateRequest, slots: [
+      { ...flatTemplateRequest.slots[0] }, { ...flatTemplateRequest.slots[1] }, { ...flatTemplateRequest.slots[1] }
+    ] }],
     ['wrong key', change({ slotKey: 'extra-proof' }, 2)],
     ['required cleaning', change({ required: false })],
     ['optional bomb', change({ required: true }, 1)],
