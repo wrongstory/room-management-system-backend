@@ -3,6 +3,7 @@ import {
   correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRoomCandles,
   listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
@@ -16,6 +17,7 @@ import {
   resolveRoomIssue,
   roomDatabaseError,
   roomDetailIdFromPath,
+  roomListServiceDate,
   roomPathIds,
   setRoomCandleCount,
   toRoomProjections,
@@ -177,6 +179,9 @@ const roomRow = {
   elevator_zone: "A" as const,
   data_status: "verified" as const,
   state_version: 3,
+  service_date: "2026-09-16",
+  projection_mode: "LIVE" as const,
+  detail_condition_codes: ["CHECKOUT_INSPECTION_REQUIRED", "EXTRA_GUESTS"],
   evaluated_at: "2026-09-16T08:00:00.000Z",
   reservation_phase: "current" as const,
   server_time: "2026-09-16T08:00:00.000Z",
@@ -189,6 +194,11 @@ const roomRow = {
   next_reservation_id: "30000000-0000-4000-8000-000000000010",
   next_check_in_at: "2026-09-17T07:00:00.000Z",
   next_check_out_at: "2026-09-18T02:00:00.000Z",
+  display_reservation_id: "30000000-0000-4000-8000-000000000009",
+  display_check_in_at: "2026-09-16T06:00:00.000Z",
+  display_check_out_at: "2026-09-16T11:00:00.000Z",
+  display_guest_count: 3,
+  display_base_occupancy: 2,
   blocking_reason_codes: [],
   readiness_reason_codes: [],
   occupied: true,
@@ -224,7 +234,7 @@ function operationClients(calls: Array<[string, Record<string, unknown>]>) {
     admin: {
       async rpc(name: string, args: Record<string, unknown>) {
         calls.push([name, args]);
-        if (name === "get_room_operational_projection") {
+        if (name === "get_room_board_projection") {
           return { data: [roomRow], error: null };
         }
         if (name === "change_room_master_data") {
@@ -426,8 +436,13 @@ Deno.test("room list and detail use one exact camelCase projection", async () =>
     },
   } as unknown as EdgeClients;
 
-  const rooms = await listRooms(clients, admin);
-  const detail = await getRoom(clients, admin, rows[0].id);
+  const rooms = await listRooms(readRequest("/v1/rooms"), clients, admin);
+  const detail = await getRoom(
+    readRequest(`/v1/rooms/${rows[0].id}`),
+    clients,
+    admin,
+    rows[0].id,
+  );
   assert(rooms.length === 121, "all 121 rooms must remain visible");
   assert(
     JSON.stringify(rooms[0]) === JSON.stringify(detail),
@@ -440,7 +455,12 @@ Deno.test("room list and detail use one exact camelCase projection", async () =>
   );
 
   const missing = await captureEdgeError(() =>
-    getRoom(clients, admin, "30000000-0000-4000-8000-999999999999")
+    getRoom(
+      readRequest("/v1/rooms/30000000-0000-4000-8000-999999999999"),
+      clients,
+      admin,
+      "30000000-0000-4000-8000-999999999999",
+    )
   );
   assert(
     missing.code === "ROOM_NOT_FOUND" && missing.status === 404,
@@ -456,17 +476,66 @@ Deno.test("room routes require a changed password and exact business admin", asy
     ]
   ) {
     const error = await captureEdgeError(() =>
-      listRooms({} as EdgeClients, actor)
+      listRooms(readRequest("/v1/rooms"), {} as EdgeClients, actor)
     );
     assert(error.code === "ADMIN_REQUIRED", `${actor.role} denied`);
   }
   const temporary = await captureEdgeError(() =>
-    listRooms({} as EdgeClients, { ...admin, mustChangePassword: true })
+    listRooms(
+      readRequest("/v1/rooms"),
+      {} as EdgeClients,
+      { ...admin, mustChangePassword: true },
+    )
   );
   assert(
     temporary.code === "PASSWORD_CHANGE_REQUIRED",
     "temporary password denied",
   );
+});
+
+Deno.test("room list serviceDate accepts one real calendar date only", () => {
+  for (
+    const value of [
+      "0001-01-01",
+      "0099-12-31",
+      "0096-02-29",
+      "0100-01-01",
+      "2000-02-29",
+      "2026-09-22",
+      "9999-12-31",
+    ]
+  ) {
+    assert(
+      roomListServiceDate(readRequest(`/v1/rooms?serviceDate=${value}`)) ===
+        value,
+      `${value} valid date without 1900 year remapping`,
+    );
+  }
+  assert(
+    roomListServiceDate(readRequest("/v1/rooms")) === null,
+    "omitted date",
+  );
+  for (
+    const path of [
+      "/v1/rooms?serviceDate=0000-01-01",
+      "/v1/rooms?serviceDate=0099-02-29",
+      "/v1/rooms?serviceDate=0100-02-29",
+      "/v1/rooms?serviceDate=1900-02-29",
+      "/v1/rooms?serviceDate=2026-02-29",
+      "/v1/rooms?serviceDate=2026-02-30",
+      "/v1/rooms?serviceDate=2026-9-22",
+      "/v1/rooms?serviceDate=2026-09-22&serviceDate=2026-09-23",
+      "/v1/rooms?unexpected=true",
+    ]
+  ) {
+    let rejected = false;
+    try {
+      roomListServiceDate(readRequest(path));
+    } catch (error) {
+      rejected = error instanceof EdgeError && error.status === 400;
+    }
+    assert(rejected, `${path} rejected`);
+  }
 });
 
 Deno.test("master-data command preserves actor, CAS, canonical replay hash", async () => {
@@ -585,10 +654,14 @@ Deno.test("all six room operations reuse mutate_room_operation", async () => {
     roomId,
   );
 
-  const mutations = calls.filter(([name]) => name === "mutate_room_operation");
+  const mutations = calls.filter(([name]) =>
+    ["mutate_room_operation", "set_room_candle_count"].includes(name)
+  );
   assert(mutations.length === 6, "exact six mutation calls");
   assert(
-    mutations.map(([, args]) => args.p_action).join(",") ===
+    mutations.map(([name, args]) =>
+      name === "set_room_candle_count" ? "set_candle_count" : args.p_action
+    ).join(",") ===
       "create_block,release_block,set_candle_count,report_issue,resolve_issue,record_pin_sync",
     "existing action contract",
   );
@@ -609,6 +682,152 @@ Deno.test("all six room operations reuse mutate_room_operation", async () => {
     !JSON.stringify(pinResult).toLowerCase().includes("pin"),
     "operation response has no PIN data",
   );
+});
+
+Deno.test("all maids get only candle fields and use the session-bound candle command", async () => {
+  const maid = { ...admin, role: "maid" as const };
+  const item = { roomId, roomNumber: "350", count: 2, roomStateVersion: 3 };
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        return Promise.resolve({
+          data: {
+            items: [{
+              ...item,
+              pin: "not-returned",
+              guestName: "not-returned",
+            }],
+            nextCursor: null,
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const page = await listRoomCandles(
+    readRequest(`/v1/rooms/candles?roomId=${roomId}`),
+    clients,
+    maid,
+  );
+  assert(
+    JSON.stringify(page) ===
+      JSON.stringify({ items: [item], nextCursor: null }),
+    "safe minimal projection",
+  );
+  assert(
+    calls[0][1].p_session_id === sessionId && calls[0][1].p_room_id === roomId,
+    "session and filter binding",
+  );
+  for (
+    const query of [
+      "limit=51",
+      "limit=01",
+      "limit=1&limit=2",
+      `roomId=${roomId}&cursor=${roomId}`,
+      "pin=true",
+    ]
+  ) {
+    const error = await captureEdgeError(() =>
+      listRoomCandles(readRequest(`/v1/rooms/candles?${query}`), clients, maid)
+    );
+    assert(error.status === 400, "strict bounded query");
+  }
+  for (
+    const forbidden of [{ ...maid, role: "developer" as const }, {
+      ...maid,
+      mustChangePassword: true,
+    }]
+  ) {
+    const error = await captureEdgeError(() =>
+      listRoomCandles(readRequest("/v1/rooms/candles"), clients, forbidden)
+    );
+    assert(error.status === 403, "developer/password gate");
+  }
+  const mutations: Array<[string, Record<string, unknown>]> = [];
+  await setRoomCandleCount(
+    commandRequest(`/v1/rooms/${roomId}/candles`, {
+      count: 0,
+      physicallyVerified: true,
+      expectedRoomVersion: 3,
+      reasonCode: "CANDLE_COLLECTED",
+    }),
+    operationClients(mutations),
+    maid,
+    roomId,
+  );
+  assert(
+    mutations[0][0] === "set_room_candle_count" &&
+      mutations[0][1].p_session_id === sessionId &&
+      !("p_action" in mutations[0][1]),
+    "narrow command, no arbitrary operation",
+  );
+  const denied = await captureEdgeError(() =>
+    createRoomOperationBlock(
+      commandRequest(`/v1/rooms/${roomId}/operation-blocks`, {}),
+      clients,
+      maid,
+      roomId,
+    )
+  );
+  assert(denied.status === 403, "other room commands remain admin only");
+});
+
+Deno.test("candle commands reject invalid input and redact DB errors", async () => {
+  const body = {
+    count: 0,
+    physicallyVerified: true,
+    expectedRoomVersion: 3,
+    reasonCode: "CANDLE_COLLECTED",
+  };
+  for (
+    const patch of [{ count: -1 }, { count: 2147483648 }, { count: 1.5 }, {
+      expectedRoomVersion: 1e20,
+    }, { assignmentId: roomId }]
+  ) {
+    const error = await captureEdgeError(() =>
+      setRoomCandleCount(
+        commandRequest(`/v1/rooms/${roomId}/candles`, { ...body, ...patch }),
+        operationClients([]),
+        admin,
+        roomId,
+      )
+    );
+    assert(error.status === 400, "invalid input rejected");
+  }
+  for (
+    const [code, status] of [
+      ["CANDLE_ACCESS_REQUIRED", 403],
+      ["CANDLE_VERIFICATION_REQUIRED", 400],
+      ["SESSION_REVOKED", 401],
+      ["STALE_VERSION", 409],
+      ["PASSWORD_CHANGE_REQUIRED", 403],
+      ["INVALID_CANDLE_REQUEST", 400],
+    ] as const
+  ) {
+    const clients = {
+      admin: {
+        rpc: () =>
+          Promise.resolve({
+            data: null,
+            error: { message: `${code}: private-detail` },
+          }),
+      },
+    } as unknown as EdgeClients;
+    const error = await captureEdgeError(() =>
+      setRoomCandleCount(
+        commandRequest(`/v1/rooms/${roomId}/candles`, body),
+        clients,
+        admin,
+        roomId,
+      )
+    );
+    assert(
+      error.status === status && !error.message.includes("private-detail"),
+      "safe error mapping",
+    );
+  }
 });
 
 Deno.test("occupancy correction is a separate admin session-bound command", async () => {

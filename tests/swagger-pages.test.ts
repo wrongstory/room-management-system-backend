@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
 
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(new URL('../scripts/build-swagger-pages.mjs', import.meta.url));
@@ -26,6 +27,20 @@ interface FixtureOptions {
   version?: string;
   pathCount?: number;
   operationCount?: number;
+}
+
+function pagesJobTimeout(workflow: string, job: 'build' | 'deploy'): number {
+  const normalized = workflow.replaceAll('\r\n', '\n');
+  const body = normalized.split(`\n  ${job}:\n`)[1]
+    ?.split(/\n {2}[a-z][a-z0-9_-]*:\n/)[0];
+  const raw = body?.match(/^ {4}timeout-minutes:[ \t]*([^\n]*)$/m)?.[1]?.trim();
+  return raw && /^[0-9]+$/.test(raw) ? Number(raw) : Number.NaN;
+}
+
+function hasApprovedPagesBudget(workflow: string): boolean {
+  const build = pagesJobTimeout(workflow, 'build');
+  const deploy = pagesJobTimeout(workflow, 'deploy');
+  return Number.isFinite(build) && build === 5 && Number.isFinite(deploy) && deploy === 10;
 }
 
 async function createFixture({
@@ -85,6 +100,29 @@ afterEach(async () => {
 });
 
 describe('GitHub Pages Swagger portal', () => {
+  it('keeps the build budget at five minutes and the bounded deploy budget at ten', async () => {
+    const workflow = await readFile(workflowUrl, 'utf8');
+    expect(pagesJobTimeout(workflow, 'build')).toBe(5);
+    expect(pagesJobTimeout(workflow, 'deploy')).toBe(10);
+    expect(hasApprovedPagesBudget(workflow)).toBe(true);
+  });
+
+  it('rejects stale, missing, unbounded and non-literal Pages deployment budgets', () => {
+    const fixture = (deploy: string | null, build = '5') =>
+      `jobs:\n  build:\n    timeout-minutes: ${build}\n  deploy:\n${deploy === null ? '' : `    timeout-minutes: ${deploy}\n`}    steps: []\n`;
+    expect(hasApprovedPagesBudget(fixture('10'))).toBe(true);
+    expect(hasApprovedPagesBudget(fixture('10').replaceAll('\n', '\r\n'))).toBe(true);
+    for (const timeout of [
+      null, '', '5', '0', '-1', '10.5', 'Infinity', 'NaN',
+      `\${{ vars.DEPLOY_TIMEOUT }}`, '9'.repeat(400)
+    ]) {
+      expect(hasApprovedPagesBudget(fixture(timeout))).toBe(false);
+    }
+    for (const timeout of ['0', '4', '10', `\${{ vars.BUILD_TIMEOUT }}`]) {
+      expect(hasApprovedPagesBudget(fixture('10', timeout))).toBe(false);
+    }
+  });
+
   it('deploys only by manual dispatch with minimum Pages permissions', async () => {
     const [workflow, template, initializer] = await Promise.all([
       readFile(workflowUrl, 'utf8'),
@@ -98,8 +136,8 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
     expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.6.0"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "131"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "141"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "140"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "151"');
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
@@ -168,6 +206,32 @@ describe('GitHub Pages Swagger portal', () => {
       readOnly: true
     });
     expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('builds the exact current source contract and rejects stale release and production counts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'swagger-v08-release-'));
+    temporaryDirectories.push(directory);
+    const sourceFile = join(directory, 'release-openapi.json');
+    await writeFile(sourceFile, JSON.stringify(openApiDocument), 'utf8');
+    const outputDirectory = join(directory, 'portal');
+    const args = [
+      scriptPath, '--source-file', sourceFile, '--api-base-url', apiBaseUrl,
+      '--expected-version', '0.6.0', '--output-dir', outputDirectory
+    ];
+    const result = await execFileAsync(process.execPath, [
+      ...args, '--expected-path-count', '140', '--expected-operation-count', '151'
+    ]);
+    expect(result.stdout).toContain('version=0.6.0 paths=140 operations=151');
+    const manifest = JSON.parse(await readFile(join(outputDirectory, 'portal-manifest.json'), 'utf8'));
+    expect(manifest).toMatchObject({
+      apiVersion: '0.6.0', pathCount: 140, operationCount: 151, readOnly: true
+    });
+    await expect(execFileAsync(process.execPath, [
+      ...args, '--expected-path-count', '131', '--expected-operation-count', '141'
+    ])).rejects.toThrow(/path 수가 release 계약/);
+    await expect(execFileAsync(process.execPath, [
+      ...args, '--expected-path-count', '137', '--expected-operation-count', '148'
+    ])).rejects.toThrow(/path 수가 release 계약/);
   });
 
   it('rejects the stale v0.2.0 production contract', async () => {

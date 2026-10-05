@@ -1,10 +1,21 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import {
+  type AssignmentScheduleRead,
+  parseAssignmentScheduleReads,
+} from "./assignment-schedule-core.ts";
+import {
+  assignmentCancellationCapability,
+  type AssignmentReadMetadata,
+  parseAssignmentReadMetadata,
+  parseRoomTypeSnapshot,
+} from "./assignment-preview-core.ts";
+import {
   bearerToken,
   EdgeError,
   requireBusinessAdmin,
   requirePasswordChanged,
+  verifiedRequestSessionId,
 } from "./runtime.ts";
 
 interface AssignmentRow {
@@ -28,6 +39,7 @@ interface TargetRow {
   id: string;
   room_id: string;
   cleaning_kind: string;
+  source?: string;
   original_service_date: string;
   effective_service_date: string;
   carryover_count: number;
@@ -51,6 +63,7 @@ interface AttemptRow {
   assignment_id: string;
   attempt_number: number;
   status: string;
+  started_at?: string | null;
 }
 
 interface SubmissionRow {
@@ -84,18 +97,25 @@ export interface AssignmentProjection {
 }
 
 export interface AssignmentCardProjection extends AssignmentProjection {
+  scheduleSnapshot: AssignmentScheduleRead["scheduleSnapshot"];
+  currentDeparture: AssignmentScheduleRead["currentDeparture"];
   cleaningKind: string;
   roomTypeCode: string | null;
   roomTypeName: string | null;
+  sourceKind: string | null;
+  roomTypeSnapshot: AssignmentReadMetadata["roomTypeSnapshot"];
   elevatorZone: string | null;
   feeSnapshot: number;
   durationMinutes: number | null;
   originalServiceDate: string;
+  effectiveServiceDate: string;
   rolloverCount: number;
   rolloverReason: string | null;
   targetStatus: string | null;
   attemptStatus: string | null;
   submissionStatus: string | null;
+  canCancel: boolean;
+  cancelReasonCode: AssignmentReadMetadata["cancelReasonCode"];
 }
 
 // 사용자가 입력한 상세 사유는 감사·알림으로 복제하지 않는다.
@@ -471,7 +491,7 @@ export async function listAssignmentChangeRequests(
   };
 }
 
-export interface AssignmentCommitCandidate {
+export interface AssignmentCommitCandidate extends AssignmentReadMetadata {
   assignmentId: string;
   cleaningTargetId: string;
   roomId: string;
@@ -487,7 +507,8 @@ export interface AssignmentCommitCandidate {
   dueAt: string | null;
 }
 
-export interface AssignmentCommitBlockedCandidate {
+export interface AssignmentCommitBlockedCandidate
+  extends AssignmentReadMetadata {
   assignmentId: string;
   cleaningTargetId: string;
   roomId: string;
@@ -504,7 +525,8 @@ export interface AssignmentCommitBlockedCandidate {
   dueAt: string | null;
 }
 
-export interface AssignmentCommitUnassignedTarget {
+export interface AssignmentCommitUnassignedTarget
+  extends AssignmentReadMetadata {
   cleaningTargetId: string;
   roomId: string;
   roomNumber: string;
@@ -798,9 +820,20 @@ function stringArray(value: unknown): string[] {
   return value as string[];
 }
 
+function commitReadMetadata(
+  row: Record<string, unknown>,
+): AssignmentReadMetadata {
+  try {
+    return parseAssignmentReadMetadata(row);
+  } catch {
+    throw assignmentDatabaseError(null);
+  }
+}
+
 function toCommitCandidate(value: unknown): AssignmentCommitCandidate {
   const row = objectValue(value);
   return {
+    ...commitReadMetadata(row),
     assignmentId: uuidValue(row.assignmentId, "assignmentId"),
     cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
     roomId: uuidValue(row.roomId, "roomId"),
@@ -832,6 +865,7 @@ function toBlockedCandidate(
 ): AssignmentCommitBlockedCandidate {
   const row = objectValue(value);
   return {
+    ...commitReadMetadata(row),
     assignmentId: uuidValue(row.assignmentId, "assignmentId"),
     cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
     roomId: uuidValue(row.roomId, "roomId"),
@@ -864,6 +898,7 @@ function toUnassignedTarget(
   const row = objectValue(value);
   if (row.status !== "unassigned") throw assignmentDatabaseError(null);
   return {
+    ...commitReadMetadata(row),
     cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
     roomId: uuidValue(row.roomId, "roomId"),
     roomNumber: String(row.roomNumber),
@@ -956,12 +991,13 @@ function snapshotObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function snapshotText(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
 function assignmentCardSnapshot(target: TargetRow) {
-  const roomType = snapshotObject(target.room_type_snapshot);
+  let roomType: ReturnType<typeof parseRoomTypeSnapshot>;
+  try {
+    roomType = parseRoomTypeSnapshot(snapshotObject(target.room_type_snapshot));
+  } catch {
+    throw assignmentDatabaseError(null);
+  }
   const template = snapshotObject(target.template_snapshot);
   const duration = template.durationMinutes;
   if (
@@ -973,9 +1009,11 @@ function assignmentCardSnapshot(target: TargetRow) {
   }
   return {
     cleaningKind: target.cleaning_kind,
-    roomTypeCode: snapshotText(roomType.code),
-    roomTypeName: snapshotText(roomType.name),
-    elevatorZone: snapshotText(roomType.elevatorZone),
+    sourceKind: target.source ?? null,
+    roomTypeCode: roomType?.code ?? null,
+    roomTypeName: roomType?.name ?? null,
+    elevatorZone: roomType?.elevatorZone ?? null,
+    roomTypeSnapshot: roomType,
     feeSnapshot: target.fee_snapshot,
     durationMinutes: duration === null || duration === undefined
       ? null
@@ -991,6 +1029,49 @@ const rolloverReasonCodes = new Set([
   "ROLLED_OVER_UNASSIGNED",
   "ROLLED_OVER_NOT_STARTED",
 ]);
+const assignmentReadLimit = 1000;
+const assignmentHydrationBatchSize = 100;
+
+function completeAssignmentRows(result: {
+  data: unknown;
+  error: { message?: string } | null;
+  count: number | null;
+}): unknown[] {
+  if (result.error) throw assignmentDatabaseError(result.error);
+  if (
+    !Array.isArray(result.data) || !Number.isSafeInteger(result.count) ||
+    result.count === null || result.count < 0 ||
+    result.count > assignmentReadLimit ||
+    result.data.length !== result.count
+  ) {
+    throw assignmentDatabaseError(null);
+  }
+  return result.data;
+}
+
+async function assignmentRelatedRows(
+  clients: EdgeClients,
+  table: string,
+  columns: string,
+  key: string,
+  ids: string[],
+  order?: string,
+): Promise<unknown[]> {
+  const rows: unknown[] = [];
+  for (
+    let offset = 0;
+    offset < ids.length;
+    offset += assignmentHydrationBatchSize
+  ) {
+    let query = clients.admin.from(table).select(columns, { count: "exact" })
+      .in(key, ids.slice(offset, offset + assignmentHydrationBatchSize));
+    if (order) query = query.order(order, { ascending: false });
+    rows.push(
+      ...completeAssignmentRows(await query.limit(assignmentReadLimit)),
+    );
+  }
+  return rows;
+}
 
 function assignmentRolloverSnapshot(
   target: TargetRow,
@@ -1023,78 +1104,124 @@ async function hydrateAssignments(
   clients: EdgeClients,
   rows: AssignmentRow[],
   actor: EdgeActor,
+  request: Request,
+  includeCurrent: boolean,
 ): Promise<AssignmentCardProjection[]> {
   if (rows.length === 0) return [];
   const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
   const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
   const assignmentIds = rows.map((row) => row.id);
-  const [targetResult, maidResult, attemptResult, scheduleResult] =
-    await Promise.all([
-      clients.admin
-        .from("cleaning_targets")
-        .select(
-          "id,room_id,cleaning_kind,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
-        )
-        .in("id", targetIds),
-      clients.admin
-        .from("profiles")
-        .select("id,display_name")
-        .in("id", maidIds),
-      clients.admin
-        .from("cleaning_attempts")
-        .select("id,assignment_id,attempt_number,status")
-        .in("assignment_id", assignmentIds)
-        .order("attempt_number", { ascending: false }),
-      clients.admin
-        .from("cleaning_target_schedule_revisions")
-        .select(
-          "cleaning_target_id,revision,effective_service_date,reason_code",
-        )
-        .in("cleaning_target_id", targetIds)
-        .order("revision", { ascending: false }),
-    ]);
-  if (
-    targetResult.error || maidResult.error || attemptResult.error ||
-    scheduleResult.error
-  ) {
-    throw assignmentDatabaseError(
-      targetResult.error ?? maidResult.error ?? attemptResult.error ??
-        scheduleResult.error,
-    );
-  }
+  const [targetRows, maidRows, attemptRows, scheduleRows] = await Promise.all([
+    assignmentRelatedRows(
+      clients,
+      "cleaning_targets",
+      "id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
+      "id",
+      targetIds,
+    ),
+    assignmentRelatedRows(
+      clients,
+      "profiles",
+      "id,display_name",
+      "id",
+      maidIds,
+    ),
+    assignmentRelatedRows(
+      clients,
+      "cleaning_attempts",
+      "id,assignment_id,attempt_number,status,started_at",
+      "assignment_id",
+      assignmentIds,
+      "attempt_number",
+    ),
+    assignmentRelatedRows(
+      clients,
+      "cleaning_target_schedule_revisions",
+      "cleaning_target_id,revision,effective_service_date,reason_code",
+      "cleaning_target_id",
+      targetIds,
+      "revision",
+    ),
+  ]);
   const targets = new Map(
-    ((targetResult.data ?? []) as unknown as TargetRow[]).map((row) => [
+    (targetRows as TargetRow[]).map((row) => [
       row.id,
       row,
     ]),
   );
   const maids = new Map(
-    ((maidResult.data ?? []) as MaidRow[]).map((row) => [row.id, row]),
+    (maidRows as MaidRow[]).map((row) => [row.id, row]),
   );
   const attempts = new Map<string, AttemptRow>();
-  for (const attempt of (attemptResult.data ?? []) as AttemptRow[]) {
+  const capabilityAttempts = new Map<string, AttemptRow[]>();
+  for (const attempt of attemptRows as AttemptRow[]) {
     if (!attempts.has(attempt.assignment_id)) {
       attempts.set(attempt.assignment_id, attempt);
     }
+    const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
+    all.push(attempt);
+    capabilityAttempts.set(attempt.assignment_id, all);
   }
   const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
-  const submissionResult = attemptIds.length === 0
-    ? { data: [] as SubmissionRow[], error: null }
-    : await clients.admin
-      .from("cleaning_submissions")
-      .select("cleaning_attempt_id,version,status")
-      .in("cleaning_attempt_id", attemptIds)
-      .order("version", { ascending: false });
-  if (submissionResult.error) {
-    throw assignmentDatabaseError(submissionResult.error);
-  }
+  const submissionRows = await assignmentRelatedRows(
+    clients,
+    "cleaning_submissions",
+    "cleaning_attempt_id,version,status",
+    "cleaning_attempt_id",
+    attemptIds,
+    "version",
+  );
   const submissions = new Map<string, SubmissionRow>();
-  for (const submission of (submissionResult.data ?? []) as SubmissionRow[]) {
+  for (const submission of submissionRows as SubmissionRow[]) {
     if (!submissions.has(submission.cleaning_attempt_id)) {
       submissions.set(submission.cleaning_attempt_id, submission);
     }
   }
-  const schedules = (scheduleResult.data ?? []) as TargetScheduleRow[];
+  const schedules = scheduleRows as TargetScheduleRow[];
+  // Revalidate actor/session/exact assignment ownership after bounded
+  // hydration. Historical cards never request live reservation facts.
+  const scheduleReads = new Map<string, AssignmentScheduleRead>();
+  const sessionId = verifiedRequestSessionId(request);
+  for (
+    let offset = 0;
+    offset < rows.length;
+    offset += assignmentHydrationBatchSize
+  ) {
+    const ids = rows.slice(offset, offset + assignmentHydrationBatchSize).map((
+      row,
+    ) => row.id);
+    const response = await clients.admin.rpc("get_assignment_schedule_read", {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_assignment_ids: ids,
+      p_include_current: includeCurrent,
+      p_expected_actor_role: actor.role,
+    });
+    if (response.error) {
+      const code = response.error.message;
+      if (code === "ASSIGNMENT_ACCESS_REQUIRED") {
+        throw new EdgeError(403, code, "청소 배정 조회 권한이 필요합니다.");
+      }
+      if (code === "SESSION_REVOKED") {
+        throw new EdgeError(401, code, "다시 로그인해 주세요.");
+      }
+      if (code === "PASSWORD_CHANGE_REQUIRED") {
+        throw new EdgeError(403, code, "비밀번호 변경이 필요합니다.");
+      }
+      throw assignmentDatabaseError(null);
+    }
+    try {
+      for (
+        const [id, read] of parseAssignmentScheduleReads(
+          response.data,
+          ids,
+          includeCurrent,
+        )
+      ) scheduleReads.set(id, read);
+    } catch {
+      throw assignmentDatabaseError(null);
+    }
+  }
 
   return rows.map((row) => {
     const target = targets.get(row.cleaning_target_id);
@@ -1113,6 +1240,8 @@ async function hydrateAssignments(
     const targetMatchesRevision = row.is_current &&
       target.assignment_version === row.revision &&
       target.effective_service_date === row.service_date;
+    const scheduleRead = scheduleReads.get(row.id);
+    if (!scheduleRead) throw assignmentDatabaseError(null);
     return {
       assignmentId: row.id,
       cleaningTargetId: row.cleaning_target_id,
@@ -1134,7 +1263,15 @@ async function hydrateAssignments(
         ? row.revision
         : target.assignment_version,
       ...card,
+      effectiveServiceDate: row.service_date,
       ...rollover,
+      ...assignmentCancellationCapability(
+        actor.role,
+        row.is_current,
+        target.source,
+        target.status,
+        capabilityAttempts.get(row.id) ?? [],
+      ),
       targetStatus: actor.role === "admin" || targetMatchesRevision
         ? target.status
         : null,
@@ -1142,6 +1279,7 @@ async function hydrateAssignments(
       submissionStatus: submission?.status ?? null,
       availableFrom: row.available_from_snapshot,
       dueAt: row.due_at_snapshot,
+      ...scheduleRead,
       notifiedAt: row.notified_at,
       endedAt: row.ended_at,
       createdAt: row.created_at,
@@ -1153,6 +1291,7 @@ export async function listAssignments(
   request: Request,
   clients: EdgeClients,
   actor: EdgeActor,
+  clock: () => Date = () => new Date(),
 ) {
   requireAssignmentReader(actor);
   const search = queryValues(request, [
@@ -1178,9 +1317,12 @@ export async function listAssignments(
     );
   }
 
+  const today = new Date(clock().getTime() + 9 * 60 * 60 * 1000).toISOString()
+    .slice(0, 10);
+  const includeOverdue = !includeHistory && serviceDate === today;
   let query = accessTokenClient(request, clients)
     .from("cleaning_assignments")
-    .select(assignmentColumns)
+    .select(assignmentColumns, { count: "exact" })
     .eq("service_date", serviceDate)
     .order("sequence_number")
     .order("revision");
@@ -1194,12 +1336,50 @@ export async function listAssignments(
   } else if (maidProfileId) {
     query = query.eq("maid_profile_id", maidProfileId);
   }
-  const { data, error } = await query;
-  if (error) throw assignmentDatabaseError(error);
+  const rows = visibleAssignmentRows(
+    completeAssignmentRows(await query.limit(assignmentReadLimit)),
+    actor,
+  );
+  if (includeOverdue) {
+    let overdue = accessTokenClient(request, clients).from(
+      "cleaning_assignments",
+    )
+      .select(`${assignmentColumns},cleaning_targets!inner(status)`, {
+        count: "exact",
+      })
+      .lt("service_date", today).eq("is_current", true)
+      .not("cleaning_targets.status", "in", "(approved,cancelled)")
+      .order("service_date").order("sequence_number").order("revision").order(
+        "id",
+      );
+    if (actor.role === "maid") {
+      overdue = overdue.eq("maid_profile_id", actor.profileId).not(
+        "notified_at",
+        "is",
+        null,
+      );
+    } else if (maidProfileId) {
+      overdue = overdue.eq("maid_profile_id", maidProfileId);
+    }
+    rows.push(
+      ...visibleAssignmentRows(
+        completeAssignmentRows(await overdue.limit(assignmentReadLimit)),
+        actor,
+      ),
+    );
+    if (rows.length > assignmentReadLimit) throw assignmentDatabaseError(null);
+    rows.sort((left, right) =>
+      left.service_date.localeCompare(right.service_date) ||
+      left.sequence_number - right.sequence_number ||
+      left.revision - right.revision || left.id.localeCompare(right.id)
+    );
+  }
   return hydrateAssignments(
     clients,
-    visibleAssignmentRows(data, actor),
+    rows,
     actor,
+    request,
+    !includeHistory,
   );
 }
 
@@ -1212,7 +1392,7 @@ export async function assignmentHistory(
   requireAssignmentReader(actor);
   let query = accessTokenClient(request, clients)
     .from("cleaning_assignments")
-    .select(assignmentColumns)
+    .select(assignmentColumns, { count: "exact" })
     .eq("cleaning_target_id", uuidValue(cleaningTargetId, "cleaningTargetId"))
     .order("revision");
   if (actor.role === "maid") {
@@ -1222,9 +1402,10 @@ export async function assignmentHistory(
       null,
     );
   }
-  const { data, error } = await query;
-  if (error) throw assignmentDatabaseError(error);
-  const rows = visibleAssignmentRows(data, actor);
+  const rows = visibleAssignmentRows(
+    completeAssignmentRows(await query.limit(assignmentReadLimit)),
+    actor,
+  );
   if (rows.length === 0) {
     throw actor.role === "maid"
       ? new EdgeError(
@@ -1238,7 +1419,7 @@ export async function assignmentHistory(
         "청소 배정 이력을 찾을 수 없습니다.",
       );
   }
-  return hydrateAssignments(clients, rows, actor);
+  return hydrateAssignments(clients, rows, actor, request, false);
 }
 
 function visibleAssignmentRows(

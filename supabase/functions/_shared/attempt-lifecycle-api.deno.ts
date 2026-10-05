@@ -1,5 +1,6 @@
 import { handleApiRequest } from "../api/index.ts";
 import {
+  completeLimitedAttempt,
   getLimitedAttempt,
   lifecycleDatabaseError,
   manageAttemptLifecycle,
@@ -222,7 +223,6 @@ Deno.test("admin lifecycle exact routes expose bounded impact and each action wi
     const action of [
       "allow_finish",
       "allow_upload",
-      "expire_scheduled",
       "interrupt_handover",
     ]
   ) {
@@ -240,8 +240,6 @@ Deno.test("admin lifecycle exact routes expose bounded impact and each action wi
       ? "DEACTIVATION_FINISH_CURRENT"
       : action === "allow_upload"
       ? "DEACTIVATION_UPLOAD_ONLY"
-      : action === "expire_scheduled"
-      ? "SCHEDULE_EXPIRED"
       : "DEACTIVATION_HANDOVER";
     const { client, calls } = mock({
       role: "admin",
@@ -302,8 +300,8 @@ Deno.test("admin lifecycle exact routes expose bounded impact and each action wi
   }
 });
 
-Deno.test("admin expiry preserves inactive or departed owners without granting limited access", async () => {
-  for (const profileStatus of ["inactive", "departed"]) {
+Deno.test("retired scheduled expiry is rejected before mutation and disabled owners remain denied", async () => {
+  for (const profileStatus of ["active", "inactive", "departed"]) {
     const { client, calls } = mock({
       role: "admin",
       status: "active",
@@ -330,15 +328,14 @@ Deno.test("admin expiry preserves inactive or departed owners without granting l
     );
     const data = await response.json();
     assert(
-      response.status === 200 && data.profileStatus === profileStatus &&
-        data.capability === null && data.nextAttempt === null &&
-        data.attempt.status === "superseded",
-      "admin preserves disabled owner and superseded history with no new grant",
+      response.status === 400 && data.error.code === "VALIDATION_ERROR",
+      "elapsed schedule cannot authorize superseding a task",
     );
     assert(
-      calls.at(-1)?.name === "manage_cleaning_attempt_lifecycle",
-      "only trusted lifecycle command",
+      !calls.some((call) => call.name === "manage_cleaning_attempt_lifecycle"),
+      "retired action never reaches a mutation RPC",
     );
+    if (profileStatus === "active") continue;
     for (const method of ["GET", "POST"]) {
       const disabled = mock({ status: profileStatus });
       const limitedResponse = await handleApiRequest(
@@ -496,6 +493,68 @@ Deno.test("limited identity preserves Auth/profile/session and never opens the o
     assert(
       !calls.some((call) => call.name.includes("limited_cleaning")),
       "no capability command before identity verification",
+    );
+  }
+});
+
+Deno.test("false Auth session decisions stop ordinary and limited HTTP paths before business RPC or replay", async () => {
+  const routes = [
+    {
+      role: "admin",
+      status: "active",
+      method: "GET",
+      path: `/v1/attempts/lifecycle-impact?assignmentId=${assignmentId}`,
+    },
+    {
+      role: "maid",
+      status: "deactivation_pending",
+      method: "GET",
+      path: `/v1/limited/attempts/${attemptId}?assignmentRevision=3`,
+    },
+    {
+      role: "maid",
+      status: "deactivation_pending",
+      method: "POST",
+      path: `/v1/limited/attempts/${attemptId}/complete-field-work`,
+      body: command,
+    },
+    {
+      role: "maid",
+      status: "upload_only",
+      method: "POST",
+      path: `/v1/attempts/${attemptId}/submissions`,
+      body: {
+        clientSubmissionId: "35200000-0000-4000-8000-000000000001",
+        expectedRevision: 0,
+        candleCount: 0,
+      },
+    },
+  ];
+  for (const route of routes) {
+    const { client, calls } = mock({
+      role: route.role,
+      status: route.status,
+      revoked: true,
+    });
+    const response = await handleApiRequest(
+      req(route.method, route.path, route.body),
+      { createClients: () => client, authenticateRequest: authenticate },
+    );
+    assert(response.status === 401, "expired/revoked session has stable 401");
+    const body = await response.text();
+    assert(
+      JSON.parse(body).error.code === "SESSION_REVOKED",
+      "Auth session helper failure remains fail-closed",
+    );
+    assert(
+      calls.length === 1 && calls[0].name === "is_active_auth_session" &&
+        calls[0].args.p_auth_user_id === maid.authUserId &&
+        calls[0].args.p_session_id === sessionId,
+      "no business RPC, new capability, or saved receipt replay after false",
+    );
+    assert(
+      !body.includes(token) && !body.includes(sessionId),
+      "public error excludes bearer and session identity",
     );
   }
 });
@@ -746,6 +805,297 @@ Deno.test("limited unknown methods, fake photo/start routes and extra query/body
           call.name === "complete_limited_cleaning_attempt_field_work"
         ),
       "server-owned sensitive claims cannot enter RPC/hash",
+    );
+  }
+});
+
+function discovery() {
+  return {
+    profileStatus: "deactivation_pending",
+    evaluatedAt: "2026-09-08T01:00:00.000001Z",
+    items: [{
+      attemptId,
+      assignmentId,
+      assignmentRevision: 3,
+      executionVersion: 2,
+      status: "in_progress",
+      kind: "finish_current",
+      allowedActions: ["complete_field_work"],
+      issuedAt: "2026-09-08T00:00:00Z",
+      expiresAt: "2026-09-08T02:00:00Z",
+    }],
+  };
+}
+
+Deno.test("limited discovery real router verifies the existing session, uses exact RPC args and redacts all private fields", async () => {
+  const expected = discovery();
+  const { client, calls, order } = mock({
+    data: {
+      ...expected,
+      sessionId,
+      roomNumber: "private",
+      items: [{
+        ...expected.items[0],
+        pin: "private",
+        capabilityId: "private",
+        guestName: "private",
+        sessionDigest: "private",
+      }],
+    },
+  });
+  const response = await handleApiRequest(req("GET", "/v1/limited/attempts"), {
+    createClients: () => client,
+    authenticateRequest: () => {
+      throw new Error("ordinary active guard must not run");
+    },
+  });
+  const body = await response.json();
+  assert(
+    response.status === 200 &&
+      response.headers.get("cache-control") === "no-store",
+    "safe non-cacheable success",
+  );
+  assert(
+    JSON.stringify(body) === JSON.stringify(expected) &&
+      Object.keys(body.items[0]).length === 9,
+    "exact bounded public fields",
+  );
+  assert(
+    order.join(",") ===
+      "getUser,profile,is_active_auth_session,list_limited_cleaning_attempts",
+    "Auth and DB profile before discovery",
+  );
+  assert(
+    JSON.stringify(calls[1]) ===
+      JSON.stringify({
+        name: "list_limited_cleaning_attempts",
+        args: { p_actor_profile_id: maid.profileId, p_session_id: sessionId },
+      }),
+    "only verified actor and original session",
+  );
+  const empty = mock({ data: { ...expected, items: [] } });
+  const result = await handleApiRequest(req("GET", "/v1/limited/attempts"), {
+    createClients: () => empty.client,
+    authenticateRequest: authenticate,
+  });
+  assert(
+    result.status === 200 && (await result.json()).items.length === 0,
+    "eligible without a live grant is empty, not a new grant",
+  );
+});
+
+Deno.test("limited discovery denies invalid identities before business RPC and preserves late SQL status decisions", async () => {
+  for (
+    const options of [
+      { role: "admin" },
+      { role: "developer" },
+      { status: "inactive" },
+      { status: "departed" },
+      { password: true },
+      { revoked: true },
+      { authFailed: true },
+    ]
+  ) {
+    const { client, calls } = mock(options);
+    const response = await handleApiRequest(
+      req("GET", "/v1/limited/attempts"),
+      { createClients: () => client, authenticateRequest: authenticate },
+    );
+    assert(
+      [401, 403].includes(response.status) &&
+        response.headers.get("cache-control") === "no-store",
+      "identity denial is stable and not cacheable",
+    );
+    assert(
+      !calls.some((call) => call.name === "list_limited_cleaning_attempts"),
+      "no discovery before verified existing session",
+    );
+  }
+  for (
+    const [code, status] of [
+      ["CAPABILITY_ACCESS_REQUIRED", 403],
+      ["SESSION_REVOKED", 401],
+      ["PASSWORD_CHANGE_REQUIRED", 403],
+      ["LIMITED_DISCOVERY_LIMIT_EXCEEDED", 500],
+      ["LIMITED_SESSION_LIMIT_EXCEEDED", 500],
+    ] as const
+  ) {
+    const { client } = mock({ code });
+    const response = await handleApiRequest(
+      req("GET", "/v1/limited/attempts"),
+      { createClients: () => client, authenticateRequest: authenticate },
+    );
+    const body = await response.text();
+    assert(
+      response.status === status && JSON.parse(body).error.code === code &&
+        response.headers.get("cache-control") === "no-store",
+      "transaction decision kept finite",
+    );
+    assert(
+      !body.includes(token) && !body.includes(sessionId),
+      "identity secrets redacted from denial",
+    );
+  }
+});
+
+Deno.test("limited discovery missing bearer and canonical aliases fail before Auth, never enabling unbound fallback", async () => {
+  for (
+    const path of [
+      "/v1/%6cimited/attempts",
+      "/v1/limited/%61ttempts",
+      "/v1/limited/attempts/",
+      "/v1//limited/attempts",
+    ]
+  ) {
+    const { client, order } = mock();
+    const response = await handleApiRequest(
+      new Request(`https://example.invalid/functions/v1/api${path}`),
+      { createClients: () => client, authenticateRequest: authenticate },
+    );
+    assert(
+      response.status === 404 &&
+        response.headers.get("cache-control") === "no-store" &&
+        order.length === 0,
+      "canonical limited paths reject aliases without auth",
+    );
+  }
+  const { client, order } = mock();
+  const missing = await handleApiRequest(
+    new Request("https://example.invalid/functions/v1/api/v1/limited/attempts"),
+    { createClients: () => client, authenticateRequest: authenticate },
+  );
+  assert(
+    missing.status === 401 && order.length === 0 &&
+      missing.headers.get("cache-control") === "no-store",
+    "missing bearer no business or Auth lookup",
+  );
+});
+
+Deno.test("limited discovery rejects query and malformed, duplicated, oversized or non-live DB projections without partial data", async () => {
+  for (const query of ["?limit=1", "?cursor=private", "?sessionId=private"]) {
+    const { client, calls } = mock({ data: discovery() });
+    const response = await handleApiRequest(
+      req("GET", `/v1/limited/attempts${query}`),
+      { createClients: () => client, authenticateRequest: authenticate },
+    );
+    assert(
+      response.status === 400 &&
+        !calls.some((call) => call.name === "list_limited_cleaning_attempts"),
+      "fixed server bound, no client scope",
+    );
+  }
+  const first = discovery().items[0];
+  for (
+    const data of [
+      { ...discovery(), profileStatus: "upload_only", items: [] },
+      { ...discovery(), profileStatus: ["deactivation_pending"] },
+      { ...discovery(), profileStatus: {} },
+      { ...discovery(), items: [first, first] },
+      { ...discovery(), items: [{ ...first, executionVersion: "2" }] },
+      {
+        ...discovery(),
+        profileStatus: "upload_only",
+        items: [{
+          ...first,
+          status: ["upload_pending"],
+          kind: "upload_submit",
+          allowedActions: ["upload_evidence", "validate_evidence", "submit"],
+        }],
+      },
+      { ...discovery(), items: [{ ...first, status: {} }] },
+      {
+        ...discovery(),
+        items: [{ ...first, expiresAt: discovery().evaluatedAt }],
+      },
+      { ...discovery(), items: Array.from({ length: 1001 }, () => first) },
+    ]
+  ) {
+    const { client } = mock({ data });
+    const response = await handleApiRequest(
+      req("GET", "/v1/limited/attempts"),
+      { createClients: () => client, authenticateRequest: authenticate },
+    );
+    const text = await response.text();
+    assert(
+      response.status === 500 && !text.includes(attemptId) &&
+        response.headers.get("cache-control") === "no-store",
+      "bad projection fails closed without partial list",
+    );
+  }
+});
+
+Deno.test("limited completion executes the Node shared receipt hash vector and preserves receipt replay after profile transition", async () => {
+  const id = (n: number) =>
+    `69000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const actor = { ...maid, profileId: id(90) };
+  const data = {
+    ...mutationResult(),
+    attempt: attempt({
+      attemptId: id(1),
+      assignmentId: id(2),
+      maidProfileId: id(90),
+      status: "field_completed",
+      executionVersion: 3,
+      fieldCompletedAt: "2026-09-08T01:00:00Z",
+      endedAt: "2026-09-08T01:00:00Z",
+    }),
+    capability: {
+      ...cap("upload_submit"),
+      attemptId: id(1),
+      assignmentId: id(2),
+    },
+    profileStatus: "upload_only",
+    profileVersion: 2,
+  };
+  const { client, calls } = mock({ data });
+  for (
+    const profileStatus of ["deactivation_pending", "upload_only"] as const
+  ) {
+    await completeLimitedAttempt(
+      req("POST", "/", {
+        expectedAssignmentRevision: 3,
+        expectedAssignmentId: id(2),
+        expectedExecutionVersion: 2,
+      }),
+      client,
+      { actor, profileStatus, sessionId: id(91) },
+      id(1),
+    );
+  }
+  assert(
+    calls.length === 2 &&
+      calls.every((call) =>
+        call.name === "complete_limited_cleaning_attempt_field_work" &&
+        call.args.p_actor_profile_id === id(90) &&
+        call.args.p_session_id === id(91) &&
+        call.args.p_request_hash ===
+          "49248f20339b56cca0f12f12f3d26afe64f48194996bc92d2e0716e7531644e3"
+      ),
+    "actual Edge and actual Node hash vector are identical despite JSON property order/profile transition",
+  );
+});
+
+Deno.test("limited single DTO keeps strict string parity for profile status and capability kind without coercion", async () => {
+  for (
+    const data of [
+      { ...readResult(), profileStatus: ["deactivation_pending"] },
+      { ...readResult(), profileStatus: {} },
+      { ...readResult(), capability: { ...cap(), kind: ["finish_current"] } },
+      { ...readResult(), capability: { ...cap(), kind: {} } },
+      { ...readResult(), attempt: attempt({ status: ["in_progress"] }) },
+      { ...readResult(), attempt: attempt({ status: {} }) },
+    ]
+  ) {
+    const { client } = mock({ data });
+    const response = await handleApiRequest(
+      req("GET", `/v1/limited/attempts/${attemptId}?assignmentRevision=3`),
+      { createClients: () => client, authenticateRequest: authenticate },
+    );
+    const text = await response.text();
+    assert(
+      response.status === 500 && !text.includes(attemptId) &&
+        response.headers.get("cache-control") === "no-store",
+      "malformed field types fail closed instead of returning array/object DTOs",
     );
   }
 });

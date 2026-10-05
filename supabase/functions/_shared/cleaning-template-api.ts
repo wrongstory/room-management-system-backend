@@ -131,8 +131,8 @@ function normalizeSlots(
     invalid("INVALID_CLEANING_TEMPLATE_SLOTS");
   }
   const usesAContract = version >= 8 && metadataCount === value.length;
-  const usesFlatContract = version >= 9 && value.length === 3 &&
-    value[0]?.slotKey === "cleaning-proof";
+  // #382: validate the roles after sorting; no role must appear first on the wire.
+  const usesFlatContract = version >= 9 && value.length === 3;
   if (
     (version < 8 && metadataCount > 0) ||
     (!usesFlatContract && value.length !== (

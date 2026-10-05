@@ -152,7 +152,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "admin_registered_report_read",
+    expectedMigrationName === "room_candle_session_hard_expiry",
     "expected migration must not depend on a remote execution timestamp",
   );
   const get = Deno.env.get;
@@ -168,8 +168,90 @@ Deno.test("developer source migration head uses a stable migration name", () => 
         .apiVersion === openApiDocument.info.version,
       "runtime source version must match the deployed OpenAPI contract",
     );
+    assert(
+      (developerRuntimeStatus().source as Record<string, unknown>)
+        .expectedMigration === expectedMigrationName,
+      "runtime source migration must match the database diagnostic expectation",
+    );
   } finally {
     Deno.env.get = get;
+  }
+});
+
+Deno.test("developer database diagnosis binds the actor and source head without rewriting drift", async () => {
+  const originalGet = Deno.env.get;
+  const actor = {
+    authUserId: "10000000-0000-4000-8000-000000000001",
+    profileId: "20000000-0000-4000-8000-000000000001",
+    displayName: "개발자",
+    role: "developer" as const,
+    mustChangePassword: false,
+  };
+  try {
+    Deno.env.get = (key: string) =>
+      key === "RUNTIME_ENVIRONMENT" ? "local" : undefined;
+    for (const drift of ["equal", "ahead", "behind", "unknown"]) {
+      const calls: { name: string; args: Record<string, unknown> }[] = [];
+      const clients = {
+        admin: {
+          rpc: (name: string, args: Record<string, unknown>) => {
+            calls.push({ name, args });
+            return Promise.resolve({
+              data: name === "get_developer_database_status"
+                ? {
+                  expectedMigration: expectedMigrationName,
+                  migrationDrift: drift,
+                  rlsValid: true,
+                  criticalRpcs: { get_developer_database_status: true },
+                }
+                : {},
+              error: null,
+            });
+          },
+        },
+      } as unknown as EdgeClients;
+      const result = await developerDatabaseStatus(clients, actor);
+      assert(
+        calls.length === 4,
+        "only the existing four projections are called",
+      );
+      const database = calls.find((call) =>
+        call.name === "get_developer_database_status"
+      );
+      assert(database !== undefined, "database projection is called");
+      assert(
+        JSON.stringify(database.args) === JSON.stringify({
+          p_actor_profile_id: actor.profileId,
+          p_expected_migration_name:
+            (developerRuntimeStatus().source as Record<string, unknown>)
+              .expectedMigration,
+        }),
+        "RPC receives only the exact actor and runtime source migration name",
+      );
+      assert(result.migrationDrift === drift, "DB drift is not made healthy");
+      assert(result.rlsValid === true, "existing RLS projection is preserved");
+      assert(
+        (result.criticalRpcs as Record<string, unknown>)
+          .get_developer_database_status === true,
+        "existing RPC ACL projection is preserved",
+      );
+      calls.length = 0;
+      for (const role of ["admin", "maid"] as const) {
+        try {
+          await developerDatabaseStatus(clients, { ...actor, role });
+          throw new Error("non-developer must fail");
+        } catch (error) {
+          assert(
+            error instanceof EdgeError && error.status === 403 &&
+              error.code === "DEVELOPER_REQUIRED",
+            "non-developer is refused before projections",
+          );
+        }
+      }
+      assert(calls.length === 0, "denied callers never reach RPC");
+    }
+  } finally {
+    Deno.env.get = originalGet;
   }
 });
 

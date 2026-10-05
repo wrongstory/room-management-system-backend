@@ -9,6 +9,9 @@ import { testAttemptOfflineConcurrency } from './test-attempt-offline-concurrenc
 import { testAttemptOfflineExpiryConcurrency } from './test-attempt-offline-expiry-concurrency.mjs';
 import { testCheckoutIncidentConcurrency } from './test-checkout-incident-concurrency.mjs';
 import { testComplaintConcurrency } from './test-complaint-concurrency.mjs';
+import { testCleaningOverdueConcurrency } from './test-cleaning-overdue-concurrency.mjs';
+import { testCleaningStartedConcurrency } from './test-cleaning-started-concurrency.mjs';
+import { testCleaningReportNotificationConcurrency } from './test-cleaning-report-notifications-concurrency.mjs';
 import { testNotificationConcurrency } from './test-notification-concurrency.mjs';
 import { testNotificationDeliveryConcurrency } from './test-notification-delivery-concurrency.mjs';
 import { testNotifiedReplanConcurrency } from './test-notified-replan-concurrency.mjs';
@@ -22,6 +25,7 @@ import { testPrestartConcurrency } from './test-prestart-concurrency.mjs';
 import { testReservationRoomMoveConcurrency } from './test-reservation-room-move-concurrency.mjs';
 import { testReservationLongStayConcurrency } from './test-reservation-long-stay-concurrency.mjs';
 import { testRoomPinBootstrapConcurrency } from './test-room-pin-bootstrap-concurrency.mjs';
+import { testRoomCandleConcurrency } from './test-room-candle-concurrency.mjs';
 import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-room-pin-concurrency.mjs';
 import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
 import { testRoomPinSheetSyncConcurrency } from './test-room-pin-sheet-sync-concurrency.mjs';
@@ -1187,6 +1191,9 @@ console.log('Planning races passed: room-change/notify, cancel/notify, scheduled
 await testReservationLongStayConcurrency({ client, actorProfileId });
 await testNotifiedReplanConcurrency(client, { profileId: actorProfileId, email, password });
 await testPrestartConcurrency(client,actorProfileId,templateSessionId);
+await testCleaningOverdueConcurrency(client,actorProfileId);
+await testCleaningStartedConcurrency(client,actorProfileId);
+await testCleaningReportNotificationConcurrency(client);
 await testAttemptActivationConcurrency(client,{ profileId: actorProfileId, email, password });
 await testAssignmentPreviewConcurrency(client,actorProfileId);
 await testAttemptExecutionConcurrency(client,actorProfileId);
@@ -1206,6 +1213,7 @@ await testNotificationDeliveryConcurrency(client);
 await testPasswordChangeConcurrency(client);
 await testRoomPinConcurrency(client);
 await testRoomPinBootstrapConcurrency(client);
+await testRoomCandleConcurrency();
 await testRoomPinSheetSyncConcurrency();
 
 console.log(

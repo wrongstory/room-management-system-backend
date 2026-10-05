@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -13,6 +14,68 @@ ENUM_VALUE_PATTERN = re.compile(r'^\s+[A-Z][A-Z0-9_]+ = "([^"]+)"$', re.MULTILIN
 
 def generated_enum_values(path: Path) -> list[str]:
     return ENUM_VALUE_PATTERN.findall(path.read_text(encoding="utf-8"))
+
+
+def check_template_permutation_roundtrip(
+    npm: str, repository_root: Path, destination: Path
+) -> None:
+    # Consume the same synthetic fixtures as Fastify/Edge/Ajv/DB, not a second
+    # independently maintained Python copy of the canonical roles and fields.
+    fixture_result = subprocess.run(  # noqa: S603
+        [
+            npm,
+            "exec",
+            "--",
+            "tsx",
+            "-e",
+            "import { flatTemplateSlotPermutations } from "
+            "'./tests/fixtures/cleaning-template-contract.ts'; "
+            "process.stdout.write(JSON.stringify(flatTemplateSlotPermutations()"
+            ".map(({name, body}) => ({name, body}))));",
+        ],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    # Import only the newly generated package in a child process, so a previously
+    # imported checked-in client cannot mask generation or round-trip failures.
+    # Python codegen does not enforce contains counts; Ajv/DB keep that gate.
+    roundtrip_source = """\
+import json
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from generated.models.publish_cleaning_template_request import PublishCleaningTemplateRequest
+
+cases = json.load(sys.stdin)
+if len(cases) != 6 or len({case['name'] for case in cases}) != 6:
+    raise RuntimeError('Expected six distinct shared v9 permutation fixtures')
+orders = set()
+for case in cases:
+    body = case['body']
+    before = json.dumps(body, ensure_ascii=False, sort_keys=True)
+    actual = PublishCleaningTemplateRequest.from_dict(body).to_dict()
+    expected_order = tuple(slot['slotKey'] for slot in body['slots'])
+    actual_order = tuple(slot['slotKey'] for slot in actual['slots'])
+    if actual != body or actual_order != expected_order:
+        raise RuntimeError('Generated template fields/input array order changed: ' + case['name'])
+    if json.dumps(body, ensure_ascii=False, sort_keys=True) != before:
+        raise RuntimeError('Generated client mutated shared fixture: ' + case['name'])
+    orders.add(actual_order)
+if len(orders) != 6:
+    raise RuntimeError('Generated client collapsed distinct input array orders')
+print('Python template codegen: six shared permutations preserve every field and input array order')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", roundtrip_source, str(destination)],
+        cwd=repository_root,
+        input=fixture_result.stdout,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
 
 
 def main() -> None:
@@ -33,8 +96,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 132:
-        raise RuntimeError("전체 source OpenAPI path 수가 132가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 140:
+        raise RuntimeError("전체 source OpenAPI path 수가 140이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -43,9 +106,81 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 142:
-        raise RuntimeError("전체 source OpenAPI operation 수가 142가 아닙니다.")
+    if operation_count != 151:
+        raise RuntimeError("전체 source OpenAPI operation 수가 151가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
+    discovery_fields = [
+        "attemptId",
+        "assignmentId",
+        "assignmentRevision",
+        "executionVersion",
+        "status",
+        "kind",
+        "allowedActions",
+        "issuedAt",
+        "expiresAt",
+    ]
+    discovery_item = schemas.get("LimitedAttemptDiscoveryItem", {})
+    discovery = schemas.get("LimitedAttemptDiscovery", {})
+    if (
+        discovery_item.get("required") != discovery_fields
+        or list(discovery_item.get("properties", {})) != discovery_fields
+        or discovery_item.get("additionalProperties") is not False
+        or discovery.get("required") != ["profileStatus", "evaluatedAt", "items"]
+        or discovery.get("additionalProperties") is not False
+        or discovery.get("properties", {}).get("items", {}).get("maxItems") != 1000
+    ):
+        raise RuntimeError("기존 세션 제한 조회의 정확 9필드/1000건 계약이 잘못됐습니다.")
+    discovery_operation = paths.get("/v1/limited/attempts", {}).get("get", {})
+    if (
+        discovery_operation.get("operationId") != "listLimitedAttempts"
+        or discovery_operation.get("x-required-roles") != ["maid"]
+        or discovery_operation.get("security") != [{"bearerAuth": []}]
+        or discovery_operation.get("parameters")
+        or discovery_operation.get("responses", {})
+        .get("200", {})
+        .get("headers", {})
+        .get("Cache-Control", {})
+        .get("schema", {})
+        .get("const")
+        != "no-store"
+    ):
+        raise RuntimeError("기존 세션 제한 조회의 인증/no-store/무 query 계약이 누락됐습니다.")
+    adjustment_book = schemas.get("PayrollAdjustmentBook", {})
+    book_fields = ["maidProfileId", "weekStart", "currentBookVersion"]
+    if (
+        adjustment_book.get("required") != book_fields
+        or list(adjustment_book.get("properties", {})) != book_fields
+        or adjustment_book.get("additionalProperties") is not False
+        or adjustment_book.get("properties", {}).get("currentBookVersion", {}).get("type")
+        != "integer"
+        or adjustment_book.get("properties", {}).get("currentBookVersion", {}).get("minimum") != 0
+        or adjustment_book.get("properties", {}).get("currentBookVersion", {}).get("maximum")
+        != 9007199254740991
+    ):
+        raise RuntimeError("최신 주급 조정 원장의 필수 필드/safe integer 계약이 잘못됐습니다.")
+    book_operation = paths.get("/v1/payroll/adjustment-book", {}).get("get", {})
+    if (
+        book_operation.get("operationId") != "getPayrollAdjustmentBook"
+        or book_operation.get("x-required-roles") != ["admin"]
+        or [
+            (parameter.get("name"), parameter.get("in"), parameter.get("required"))
+            for parameter in book_operation.get("parameters", [])
+        ]
+        != [("maidProfileId", "query", True), ("weekStart", "query", True)]
+    ):
+        raise RuntimeError("최신 주급 조정 원장의 관리자 조회/query 계약이 누락됐습니다.")
+    menu = (
+        schemas.get("CheckoutIncidentListItem", {})
+        .get("properties", {})
+        .get("allowedDecisions", {})
+    )
+    if [item.get("enum") for item in menu.get("prefixItems", [])] != [
+        ["EXTEND_CHECKOUT"],
+        ["CONFIRM_DEPARTED"],
+        ["FALSE_REPORT"],
+    ]:
+        raise RuntimeError("미퇴실 목록 결정 메뉴 순서의 머신 계약이 누락됐습니다.")
     audit_event_types = schemas.get("DeveloperAuditEventType", {}).get("enum")
     if (
         not isinstance(audit_event_types, list)
@@ -90,6 +225,21 @@ def main() -> None:
             package / "models" / "room_reports_envelope.py",
             package / "models" / "registered_room_report.py",
             package / "models" / "registered_report_evidence.py",
+            package / "api" / "rooms" / "list_room_candles.py",
+            package / "models" / "room_candle_item.py",
+            package / "models" / "room_candle_page.py",
+            package / "api" / "attempts" / "list_limited_attempts.py",
+            package / "api" / "attempts" / "get_limited_attempt.py",
+            package / "api" / "attempts" / "complete_limited_field_work.py",
+            package / "models" / "limited_attempt_discovery.py",
+            package / "models" / "limited_attempt_discovery_item.py",
+            package / "api" / "assignments" / "list_assignments.py",
+            package / "api" / "assignments" / "get_assignment_history.py",
+            package / "models" / "assignment_card.py",
+            package / "models" / "assignment_schedule_snapshot.py",
+            package / "models" / "assignment_current_departure.py",
+            package / "models" / "assignment_preview_diagnostics.py",
+            package / "models" / "assignment_preview_remaining_target.py",
             package / "api" / "reservations" / "list_reservations.py",
             package / "api" / "reservations" / "preview_reservation_bookability.py",
             package / "models" / "reservation_list_envelope.py",
@@ -123,6 +273,9 @@ def main() -> None:
             package / "models" / "published_cleaning_template.py",
             package / "api" / "checkout_incidents" / "report_checkout_not_completed.py",
             package / "api" / "checkout_incidents" / "get_checkout_incident.py",
+            package / "api" / "checkout_incidents" / "list_checkout_incidents.py",
+            package / "models" / "checkout_incident_list_item.py",
+            package / "models" / "checkout_incident_list_envelope.py",
             package / "api" / "checkout_incidents" / "decide_checkout_incident.py",
             package / "models" / "checkout_incident.py",
             package / "models" / "checkout_incident_decision.py",
@@ -145,6 +298,24 @@ def main() -> None:
             package / "api" / "payroll" / "list_payroll_cycles.py",
             package / "api" / "payroll" / "get_payroll_cycle.py",
             package / "api" / "payroll" / "list_payroll_entries.py",
+            package / "api" / "payroll" / "get_payroll_adjustment_book.py",
+            package / "api" / "payroll" / "list_payroll_work_details.py",
+            package / "api" / "payroll" / "get_payroll_remittance_marker.py",
+            package / "api" / "payroll" / "set_payroll_remittance_marker.py",
+            package / "api" / "payroll" / "reconfirm_payroll_remittance_marker.py",
+            package / "api" / "payroll" / "list_payroll_remittance_marker_history.py",
+            package / "models" / "payroll_remittance_marker.py",
+            package / "models" / "payroll_remittance_basis.py",
+            package / "models" / "payroll_remittance_set_input.py",
+            package / "models" / "payroll_remittance_reconfirm_input.py",
+            package / "models" / "payroll_remittance_history_event.py",
+            package / "models" / "payroll_remittance_history.py",
+            package / "models" / "payroll_work_details_envelope.py",
+            package / "models" / "payroll_work_summary.py",
+            package / "models" / "payroll_work_earning.py",
+            package / "models" / "payroll_work_workflow.py",
+            package / "models" / "payroll_adjustment_book.py",
+            package / "models" / "payroll_adjustment_book_envelope.py",
             package / "api" / "payroll" / "start_payroll_cycle.py",
             package / "api" / "payroll" / "record_payroll_correction.py",
             package / "api" / "payroll" / "reverse_payroll_source.py",
@@ -242,6 +413,229 @@ def main() -> None:
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
             raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+        for model_name, fields in (
+            ("limited_attempt_discovery", ("profile_status", "evaluated_at", "items")),
+            (
+                "limited_attempt_discovery_item",
+                (
+                    "attempt_id",
+                    "assignment_id",
+                    "assignment_revision",
+                    "execution_version",
+                    "status",
+                    "kind",
+                    "allowed_actions",
+                    "issued_at",
+                    "expires_at",
+                ),
+            ),
+        ):
+            model = (package / "models" / f"{model_name}.py").read_text(encoding="utf-8")
+            for field in fields:
+                declaration = re.search(rf"^\s+{field}:\s+([^\r\n=]+)", model, re.MULTILINE)
+                if declaration is None or "Unset" in declaration.group(1):
+                    raise RuntimeError(f"제한 조회 codegen 필수 필드 누락: {model_name}.{field}")
+            for forbidden in (
+                "session_id:",
+                "session_digest:",
+                "capability_id:",
+                "room_id:",
+                "room_number:",
+                "pin:",
+                "guest_name:",
+                "request_hash:",
+            ):
+                if re.search(rf"^\s+{re.escape(forbidden)}", model, re.MULTILINE):
+                    raise RuntimeError(f"제한 조회 codegen 비공개 필드 노출: {forbidden}")
+        discovery_api = (package / "api" / "attempts" / "list_limited_attempts.py").read_text(
+            encoding="utf-8"
+        )
+        if '"/v1/limited/attempts"' not in discovery_api:
+            raise RuntimeError("기존 세션 제한 조회 codegen 정확한 URL이 누락됐습니다.")
+        for forbidden in ("session_id:", "limit:", "cursor:", "attempt_id:"):
+            if re.search(rf"^\s+{re.escape(forbidden)}", discovery_api, re.MULTILINE):
+                raise RuntimeError(f"제한 조회 codegen 임의 scope/query 노출: {forbidden}")
+        template_request = (package / "models" / "publish_cleaning_template_request.py").read_text(
+            encoding="utf-8"
+        )
+        for field in (
+            "room_type_code: CleaningTemplateRoomTypeCode",
+            'cleaning_kind: Literal["checkout"]',
+            "expected_version: int",
+            "slots: list[",
+        ):
+            if field not in template_request:
+                raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
+        check_template_permutation_roundtrip(npm, repository_root, destination)
+        for book_model_name, book_expected_fields in (
+            (
+                "payroll_adjustment_book",
+                {
+                    "maid_profile_id": "UUID",
+                    "week_start": "datetime.date",
+                    "current_book_version": "int",
+                },
+            ),
+            ("payroll_adjustment_book_envelope", {"adjustment_book": "PayrollAdjustmentBook"}),
+        ):
+            model = (package / "models" / f"{book_model_name}.py").read_text(encoding="utf-8")
+            for field, expected_type in book_expected_fields.items():
+                declaration = re.search(rf"^\s+{field}:\s+([^\r\n=]+)", model, re.MULTILINE)
+                if declaration is None or declaration.group(1).strip() != expected_type:
+                    raise RuntimeError(f"주급 조정 원장 codegen 필수 타입 불일치: {field}")
+            for forbidden in ("session_id:", "book_id:", "book_version:", "pin:", "request_hash:"):
+                if re.search(rf"^\s+{re.escape(forbidden)}", model, re.MULTILINE):
+                    raise RuntimeError(f"주급 조정 원장 codegen 비공개 필드 노출: {forbidden}")
+        book_api = (package / "api" / "payroll" / "get_payroll_adjustment_book.py").read_text(
+            encoding="utf-8"
+        )
+        for field in ("maid_profile_id: UUID", "week_start: datetime.date"):
+            if field not in book_api or f"{field} | Unset" in book_api:
+                raise RuntimeError(f"주급 조정 원장 codegen 필수 query 불일치: {field}")
+        if '"/v1/payroll/adjustment-book"' not in book_api:
+            raise RuntimeError("주급 조정 원장 codegen 정확한 조회 URL이 누락됐습니다.")
+        work_api = (package / "api" / "payroll" / "list_payroll_work_details.py").read_text(
+            encoding="utf-8"
+        )
+        for field in ("maid_profile_id: UUID", "week_start: datetime.date", "kind:"):
+            if field not in work_api:
+                raise RuntimeError(f"주급 산출 상세 codegen 필수 query가 누락됐습니다: {field}")
+        if '"/v1/payroll/work-details"' not in work_api:
+            raise RuntimeError("주급 산출 상세 codegen 정확한 URL이 누락됐습니다.")
+        for model_name, required_fields in (
+            (
+                "payroll_work_details_envelope",
+                ("week_start", "maid_profile_id", "kind", "summary", "entries", "next_cursor"),
+            ),
+            (
+                "payroll_work_earning",
+                (
+                    "earning_id",
+                    "earned_on",
+                    "base_amount",
+                    "bomb_room_bonus",
+                    "total_amount",
+                    "room_number",
+                    "room_type_code",
+                    "room_type_name",
+                ),
+            ),
+            (
+                "payroll_work_workflow",
+                (
+                    "earning_id",
+                    "base_amount",
+                    "bomb_room_bonus",
+                    "total_amount",
+                    "expected_base_contribution_amount",
+                    "expected_bomb_contribution_amount",
+                    "pending_contribution_amount",
+                    "included_in_pending_count",
+                ),
+            ),
+            (
+                "payroll_work_summary",
+                (
+                    "cycle_id",
+                    "cycle_status",
+                    "cycle_version",
+                    "accrual_amount",
+                    "expected_amount",
+                    "pending_amount",
+                    "locked_amount",
+                    "offset_settled",
+                    "payable_amount",
+                ),
+            ),
+        ):
+            model = (package / "models" / f"{model_name}.py").read_text(encoding="utf-8")
+            for field in required_fields:
+                declaration = re.search(rf"^\s+{field}:\s+([^\r\n=]+)", model, re.MULTILINE)
+                if declaration is None or "Unset" in declaration.group(1):
+                    raise RuntimeError(
+                        f"주급 산출 상세 required nullable codegen 필드 불일치: {field}"
+                    )
+        # #328 required nullable fields must not become optional Unset fields
+        # or lose the distinct plan/current types during actual client generation.
+        for model_name, expected_fields in (
+            (
+                "assignment_card",
+                {
+                    "schedule_snapshot": {"AssignmentScheduleSnapshot", "None"},
+                    "current_departure": {"AssignmentCurrentDeparture", "None"},
+                },
+            ),
+            (
+                "assignment_schedule_snapshot",
+                {
+                    "captured_at": {"datetime.datetime"},
+                    "schedule_revision": {"int"},
+                    "schedule_reason_code": {"str"},
+                    "source_reservation_version": {"int", "None"},
+                    "planned_checkout_at": {"datetime.datetime", "None"},
+                    "actual_checkout_at": {"datetime.datetime", "None"},
+                    "planned_room_departure_at": {"datetime.datetime", "None"},
+                    "actual_room_departure_at": {"datetime.datetime", "None"},
+                    "next_check_in_at": {"datetime.datetime", "None"},
+                    "next_room_arrival_at": {"datetime.datetime", "None"},
+                    "is_early_check_in": {"bool", "None"},
+                    "is_late_checkout": {"bool", "None"},
+                    "is_schedule_updated": {"bool"},
+                },
+            ),
+            (
+                "assignment_current_departure",
+                {
+                    "evaluated_at": {"datetime.datetime"},
+                    "actual_checkout_at": {"datetime.datetime", "None"},
+                    "actual_room_departure_at": {"datetime.datetime", "None"},
+                },
+            ),
+        ):
+            generated_model = (package / "models" / f"{model_name}.py").read_text(encoding="utf-8")
+            for field, expected_types in expected_fields.items():
+                declaration = re.search(
+                    rf"^\s+{field}:\s+([^\r\n=]+)", generated_model, re.MULTILINE
+                )
+                if (
+                    declaration is None
+                    or {part.strip() for part in declaration.group(1).split("|")} != expected_types
+                ):
+                    raise RuntimeError(f"배정 일정 codegen 필수 nullable 타입 불일치: {field}")
+        incident_item = (package / "models" / "checkout_incident_list_item.py").read_text(
+            encoding="utf-8"
+        )
+        for field in (
+            "incident_id: UUID",
+            "room_id: UUID",
+            "room_number: str",
+            "cleaning_target_id: UUID",
+            "assignment_id: UUID",
+            "attempt_id: UUID",
+            "reported_at: datetime.datetime",
+            "service_date: datetime.date",
+            "status:",
+            "allowed_decisions:",
+        ):
+            if field not in incident_item:
+                raise RuntimeError(f"미퇴실 목록 codegen 필수 필드 누락: {field}")
+        for field in ("reservation_id:", "reported_by:", "version:", "impact_fingerprint:"):
+            if field in incident_item:
+                raise RuntimeError(f"미퇴실 목록 codegen에 상세 전용 필드 노출: {field}")
+        incident_envelope = (package / "models" / "checkout_incident_list_envelope.py").read_text(
+            encoding="utf-8"
+        )
+        if (
+            "items: list[CheckoutIncidentListItem]" not in incident_envelope
+            or "next_cursor: None | str" not in incident_envelope
+        ):
+            raise RuntimeError("미퇴실 목록 codegen의 필수 items/nullable cursor 불일치")
+        incident_api = (
+            package / "api" / "checkout_incidents" / "list_checkout_incidents.py"
+        ).read_text(encoding="utf-8")
+        for field in ("room_id:", "cleaning_target_id:", "service_date:", "limit:", "cursor:"):
+            if field not in incident_api:
+                raise RuntimeError(f"미퇴실 목록 codegen query 필드 누락: {field}")
         room_event_model = (package / "models" / "room_event.py").read_text(encoding="utf-8")
         for field in (
             "event_key: str",

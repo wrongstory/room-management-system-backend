@@ -198,6 +198,7 @@ update public.profiles set status='active' where id in (pg_temp.pid(4),pg_temp.p
 select pg_temp.fixture(9,5); select pg_temp.fixture(10,5); select pg_temp.fixture(11,5);
 select pg_temp.fixture(12,5); select pg_temp.fixture(13,4); select pg_temp.fixture(17,5);
 select pg_temp.photo(9,5); select pg_temp.photo(10,5); select pg_temp.photo(11,5); select pg_temp.photo(12,5); select pg_temp.photo(13,4); select pg_temp.photo(17,5);
+insert into auth.sessions(id,user_id) values(pg_temp.pid(205),pg_temp.pid(105));
 update public.profiles set status='upload_only' where id=pg_temp.pid(5);
 update public.profiles set status='inactive' where id=pg_temp.pid(4);
 insert into private.attempt_capability_grants(id,actor_profile_id,attempt_id,assignment_id,assignment_revision,kind,allowed_actions,issued_at,expires_at,granted_by)
@@ -209,23 +210,23 @@ values
  (pg_temp.pid(917),pg_temp.pid(5),pg_temp.pid(517),pg_temp.pid(417),2,'finish_current',array['complete_field_work'],now()-interval '1 minute',now()+interval '119 minutes',pg_temp.pid(1));
 insert into private.attempt_capability_revocations(capability_id,revoked_at,reason_code,actor_profile_id)
 values(pg_temp.pid(912),clock_timestamp(),'ACCOUNT_CHANGED',pg_temp.pid(1));
-select is((public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(509),gen_random_uuid(),0,0,
+select is((public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(509),gen_random_uuid(),0,0,
   'upload-only-live-submit',repeat('a',64)))->>'status','submitted',
   'upload_only maid with exact live upload_submit capability may submit owned completed work');
-select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(510),gen_random_uuid(),0,0,
+select throws_ok($$select public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(510),gen_random_uuid(),0,0,
   'evidence-only-submit',repeat('b',64))$$,'42501','CAPABILITY_ACCESS_REQUIRED',
   'evidence_upload capability never grants submission');
-select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(511),gen_random_uuid(),0,0,
+select throws_ok($$select public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(511),gen_random_uuid(),0,0,
   'expired-upload-submit',repeat('c',64))$$,'42501','CAPABILITY_ACCESS_REQUIRED',
   'expired upload_submit capability cannot submit');
-select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(512),gen_random_uuid(),0,0,
+select throws_ok($$select public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(512),gen_random_uuid(),0,0,
   'revoked-upload-submit',repeat('d',64))$$,'42501','CAPABILITY_ACCESS_REQUIRED',
   'revoked upload_submit capability cannot submit');
 select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(4),pg_temp.pid(513),gen_random_uuid(),0,0,
   'inactive-submit',repeat('e',64))$$,'42501','SUBMISSION_ACCESS_REQUIRED',
   'inactive maid without a live capability cannot submit');
 update public.profiles set status='deactivation_pending' where id=pg_temp.pid(5);
-select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(517),gen_random_uuid(),0,0,
+select throws_ok($$select public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(517),gen_random_uuid(),0,0,
   'deactivation-pending-submit',repeat('f',64))$$,'42501','SUBMISSION_ACCESS_REQUIRED',
   'deactivation_pending finish_current capability never grants submission');
 update public.profiles set status='upload_only' where id=pg_temp.pid(5);
@@ -536,6 +537,21 @@ select ok((select obligation.status='completed' and obligation.current_cleaning_
   and obligation.completion_submission_id=(select value from checkout_chain where label='final-submission')
   from public.checkout_cleaning_obligations obligation where obligation.reservation_id=(select value from checkout_chain where label='reservation')),
  'two rejected recleans followed by approval complete checkout obligation with immutable final proof');
+select ok((select bool_and(target.reservation_id is null
+    and assignment.notified_reservation_schedule_snapshot is not null
+    and assignment.notified_reservation_schedule_snapshot->'sourceReservationVersion'='null'::jsonb
+    and assignment.notified_reservation_schedule_snapshot->'plannedCheckoutAt'='null'::jsonb
+    and assignment.notified_reservation_schedule_snapshot->'actualCheckoutAt'='null'::jsonb
+    and assignment.notified_reservation_schedule_snapshot->'isLateCheckout'='null'::jsonb)
+  from public.cleaning_targets target join public.cleaning_assignments assignment on assignment.cleaning_target_id=target.id
+  where target.id in(select value from checkout_chain where label in('reclean-one','reclean-two'))),
+  '#328 inspection descendants capture unknown source instead of inheriting original reservation checkout');
+select ok((select bool_and(card->'scheduleSnapshot'->'actualCheckoutAt'='null'::jsonb
+    and card->'currentDeparture'->'actualCheckoutAt'='null'::jsonb)
+  from jsonb_array_elements(public.get_assignment_schedule_read(pg_temp.pid(2),pg_temp.pid(202),
+    (select array_agg(assignment.id) from public.cleaning_assignments assignment
+      where cleaning_target_id in(select value from checkout_chain where label in('reclean-one','reclean-two'))),
+    true,'maid')) card),'#328 own reclean card never queries ancestor reservation as current actual source');
 select ok(private.checkout_submission_proves_completion(
   (select id from public.checkout_cleaning_obligations where reservation_id=(select value from checkout_chain where label='reservation')),
   (select value from checkout_chain where label='final-submission')),'recursive checkout completion helper verifies the exact terminal descendant');
@@ -575,5 +591,31 @@ select ok(not exists(select 1 from unnest(array['INSERT','UPDATE','DELETE','TRUN
   where has_table_privilege('service_role',relation,privilege)),
  'service role has no raw decision or earning mutation/DDL-adjacent grant');
 
+-- #330: a different maid can adjust a room after an actual approved submission.
+insert into auth.sessions(id,user_id) values(pg_temp.pid(203),pg_temp.pid(103));
+create temporary table candle_preserved_snapshots as
+select 'submission' as kind,to_jsonb(s) as value from public.cleaning_submissions s
+union all select 'inspection',to_jsonb(d) from public.inspection_decisions d
+union all select 'earning',to_jsonb(e) from public.earnings e
+union all select 'photo',to_jsonb(p) from private.submission_photo_bindings p;
+create temporary table candle_approved_room as
+select t.room_id from public.cleaning_submissions s join public.cleaning_attempts a on a.id=s.cleaning_attempt_id
+join public.cleaning_targets t on t.id=a.cleaning_target_id
+where s.id=(select (value->>'id')::uuid from submission_results where label='bomb-submission');
+select lives_ok($$select public.set_room_candle_count(pg_temp.pid(3),pg_temp.pid(203),(select room_id from candle_approved_room),
+ (select state_version from public.rooms where id=(select room_id from candle_approved_room)),
+ 'CANDLE_ADDED','{"count":4,"physicallyVerified":false}','approved-other-maid-add',repeat('a',64))$$,
+ 'other maid adjusts current candles after approved work');
+select lives_ok($$select public.set_room_candle_count(pg_temp.pid(3),pg_temp.pid(203),(select room_id from candle_approved_room),
+ (select state_version from public.rooms where id=(select room_id from candle_approved_room)),
+ 'CANDLE_COLLECTED','{"count":0,"physicallyVerified":true}','approved-other-maid-reset',repeat('b',64))$$,
+ 'other maid resets approved room without reopening submission');
+select is((select count(*) from (
+ select kind,value from candle_preserved_snapshots except
+ (select 'submission',to_jsonb(s) from public.cleaning_submissions s
+ union all select 'inspection',to_jsonb(d) from public.inspection_decisions d
+ union all select 'earning',to_jsonb(e) from public.earnings e
+ union all select 'photo',to_jsonb(p) from private.submission_photo_bindings p)
+) changed),0::bigint,'submission/photo/inspection/earning snapshots unchanged');
 select * from finish();
 rollback;

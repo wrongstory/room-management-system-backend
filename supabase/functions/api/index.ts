@@ -40,6 +40,7 @@ import {
   lifecycleImpact,
   lifecyclePath,
   limitedAttemptPath,
+  listLimitedAttempts,
   manageAttemptLifecycle,
 } from "../_shared/attempt-lifecycle-api.ts";
 import {
@@ -64,6 +65,7 @@ import {
   checkoutIncidentPath,
   decideCheckoutIncident,
   getCheckoutIncident,
+  listCheckoutIncidents,
   reportCheckoutIncident,
 } from "../_shared/checkout-incident-api.ts";
 import { cleaningTemplates } from "../_shared/cleaning-template-api.ts";
@@ -108,6 +110,7 @@ import {
   carryForwardPayroll,
   carryLatePayrollEarning,
   correctPayrollAdjustment,
+  getPayrollAdjustmentBook,
   getPayrollCycle,
   listPayroll,
   listPayrollEntries,
@@ -118,6 +121,8 @@ import {
   startPayroll,
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
+import { listPayrollWorkDetails } from "../_shared/payroll-work-details-api.ts";
+import { payrollRemittanceMarker } from "../_shared/payroll-remittance-marker-api.ts";
 import { createPhotoService } from "../_shared/photo-api.ts";
 import { PhotoError, photoFailureDiagnostic } from "../_shared/photo-binary.ts";
 import {
@@ -148,6 +153,7 @@ import {
   correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRoomCandles,
   listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
@@ -160,6 +166,7 @@ import {
   reportRoomIssue,
   resolveRoomIssue,
   roomDetailIdFromPath,
+  roomListServiceDate,
   roomPathIds,
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
@@ -244,11 +251,117 @@ export async function handleApiRequest(
   let path = "/";
   try {
     corsHeaders = cors(request);
+    path = routePath(request.url);
+    const decodedLimitedPath = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/");
+    if (
+      decodedLimitedPath === "/v1/limited/attempts" ||
+      decodedLimitedPath.startsWith("/v1/limited/attempts/")
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        path !== decodedLimitedPath ||
+        pathname.slice(pathname.lastIndexOf("/api") + 4) !== path
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
+    const markerPath = "/v1/payroll/remittance-marker";
+    const markerFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    if (
+      markerFamily === markerPath || markerFamily.startsWith(`${markerPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      const rawPath = pathname.slice(pathname.lastIndexOf("/api") + 4);
+      const allowed =
+        (rawPath === markerPath && ["GET", "PUT"].includes(request.method)) ||
+        (rawPath === `${markerPath}/reconfirm` && request.method === "POST") ||
+        (rawPath === `${markerPath}/history` && request.method === "GET");
+      if (request.method !== "OPTIONS" && !allowed) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
+    const workDetailsPath = "/v1/payroll/work-details";
+    const workDetailsFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    if (
+      workDetailsFamily === workDetailsPath ||
+      workDetailsFamily.startsWith(`${workDetailsPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        request.method !== "OPTIONS" &&
+        (request.method !== "GET" ||
+          pathname.slice(pathname.lastIndexOf("/api") + 4) !== workDetailsPath)
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
+    const adjustmentBookPath = "/v1/payroll/adjustment-book";
+    // Recognize only this route family after one percent decode. The raw
+    // spelling below remains authoritative; decoding must never allow an alias.
+    const adjustmentBookFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        // A malformed segment cannot crash the guard or rewrite another route.
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    if (
+      adjustmentBookFamily === adjustmentBookPath ||
+      adjustmentBookFamily.startsWith(`${adjustmentBookPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        request.method !== "OPTIONS" &&
+        (request.method !== "GET" ||
+          pathname.slice(pathname.lastIndexOf("/api") + 4) !==
+            adjustmentBookPath)
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    path = routePath(request.url);
     if (request.method === "GET" && path === "/health") {
       return jsonResponse(
         {
@@ -340,7 +453,25 @@ export async function handleApiRequest(
       );
     }
 
-    // 제한 capability는 정확히 이 두 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
+    // 기존 세션 전용 discovery. 인증 결과만으로 capability를 부여하지 않는다.
+    if (request.method === "GET" && path === "/v1/limited/attempts") {
+      const pathname = new URL(request.url).pathname;
+      if (pathname.slice(pathname.lastIndexOf("/api") + 4) !== path) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      const identity = await authenticateLimitedAttempt(request, clients);
+      actor = identity.actor;
+      return jsonResponse(
+        await listLimitedAttempts(request, clients, identity),
+        200,
+        corsHeaders,
+      );
+    }
+    // 제한 capability는 전용 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
     const limited = limitedAttemptPath(path);
     if (
       limited && ((limited.action === "read" && request.method === "GET") ||
@@ -376,6 +507,7 @@ export async function handleApiRequest(
             clients,
             actor,
             limitedSubmissionRoute.attemptId,
+            identity.sessionId,
           ),
         },
         201,
@@ -1067,6 +1199,23 @@ export async function handleApiRequest(
         );
       }
     }
+    if (path === "/v1/checkout-incidents") {
+      if (
+        request.method !== "GET" ||
+        !new URL(request.url).pathname.endsWith("/api/v1/checkout-incidents")
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      return jsonResponse(
+        await listCheckoutIncidents(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
     const incidentRoute = checkoutIncidentPath(path);
     if (request.method === "GET" && incidentRoute?.kind === "detail") {
       return jsonResponse(
@@ -1213,6 +1362,49 @@ export async function handleApiRequest(
       );
     }
 
+    if (path === "/v1/payroll/adjustment-book") {
+      const response = {
+        adjustmentBook: await getPayrollAdjustmentBook(
+          request,
+          clients,
+          actor,
+          verifiedRequestSessionId(request),
+        ),
+      };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (
+      path === markerPath || path === `${markerPath}/history` ||
+      path === `${markerPath}/reconfirm`
+    ) {
+      const action = path.endsWith("/history")
+        ? "history"
+        : path.endsWith("/reconfirm")
+        ? "reconfirm"
+        : request.method === "PUT"
+        ? "set"
+        : "get";
+      const response = await payrollRemittanceMarker(
+        request,
+        clients,
+        actor,
+        verifiedRequestSessionId(request),
+        action,
+      );
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (path === "/v1/payroll/work-details") {
+      const response = await listPayrollWorkDetails(
+        request,
+        clients,
+        actor,
+        verifiedRequestSessionId(request),
+      );
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
     if (request.method === "GET" && path === "/v1/payroll") {
       const response = await listPayroll(request, clients, actor);
       assertPayrollResponseSize(response);
@@ -1560,28 +1752,35 @@ export async function handleApiRequest(
       response.headers.set("Cache-Control", "no-store");
       return response;
     }
-    if (request.method === "GET" && path === "/v1/rooms") {
-      return jsonResponse(
-        { rooms: await listRooms(clients, actor) },
+    if (request.method === "GET" && path === "/v1/rooms/candles") {
+      const response = jsonResponse(
+        await listRoomCandles(request, clients, actor),
         200,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    if (request.method === "GET" && path === "/v1/rooms") {
+      const response = jsonResponse(
+        {
+          rooms: await listRooms(
+            request,
+            clients,
+            actor,
+            roomListServiceDate(request),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     const operationBlocksReadMatch = request.method === "GET"
       ? /^\/v1\/rooms\/([^/]+)\/operation-blocks$/.exec(path)
       : null;
     if (operationBlocksReadMatch) {
-      const params = new URL(request.url).searchParams;
-      if (
-        [...params.keys()].some((key) => key !== "status") ||
-        (params.get("status") ?? "actionable") !== "actionable"
-      ) {
-        throw new EdgeError(
-          400,
-          "VALIDATION_ERROR",
-          "status는 actionable만 사용할 수 있습니다.",
-        );
-      }
       const response = jsonResponse(
         await listRoomOperationBlocks(
           request,
@@ -1611,17 +1810,6 @@ export async function handleApiRequest(
       ? /^\/v1\/rooms\/([^/]+)\/issues$/.exec(path)
       : null;
     if (roomIssuesReadMatch) {
-      const params = new URL(request.url).searchParams;
-      if (
-        [...params.keys()].some((key) => key !== "status") ||
-        (params.get("status") ?? "open") !== "open"
-      ) {
-        throw new EdgeError(
-          400,
-          "VALIDATION_ERROR",
-          "status는 open만 사용할 수 있습니다.",
-        );
-      }
       const response = jsonResponse(
         await listRoomIssues(
           request,
@@ -1771,13 +1959,15 @@ export async function handleApiRequest(
       path.startsWith("/v1/rooms/") && path.endsWith("/candles")
     ) {
       const { roomId } = roomPathIds(path);
-      return jsonResponse(
+      const response = jsonResponse(
         {
           operation: await setRoomCandleCount(request, clients, actor, roomId),
         },
         201,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     if (
       request.method === "POST" &&
@@ -1832,7 +2022,7 @@ export async function handleApiRequest(
       : null;
     if (roomDetailId) {
       return jsonResponse(
-        { room: await getRoom(clients, actor, roomDetailId) },
+        { room: await getRoom(request, clients, actor, roomDetailId) },
         200,
         corsHeaders,
       );

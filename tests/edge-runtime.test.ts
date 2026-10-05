@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 const configUrl = new URL('../supabase/config.toml', import.meta.url);
@@ -91,7 +91,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(runtime).toMatch(/role:\s*["']developer["']\s*\|\s*["']admin["']\s*\|\s*["']maid["']/);
     expect(runtime).toMatch(/actor\.role !== ["']admin["']/);
     expect(roomApi).toMatch(/requireBusinessAdmin\(actor\)/);
-    expect(roomApi).toMatch(/["']get_room_operational_projection["']/);
+    expect(roomApi).toMatch(/["']get_room_board_projection["']/);
   });
 
   it('keeps the cron invocation secret and scheduler actor checks ahead of the command RPC', async () => {
@@ -226,7 +226,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']admin_registered_report_read["']/
+      /expectedMigrationName\s*=\s*["']room_candle_session_hard_expiry["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -243,6 +243,27 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(activityMigration).toContain('public.list_developer_activity_events');
     expect(openApi).toContain('DeveloperAuditPage');
     expect(openApi).toContain('DIAGNOSTICS_RATE_LIMITED');
+  });
+
+  it('binds developer diagnostics to the manifest and actual source migration head', async () => {
+    const [developerApi, manifestText, files] = await Promise.all([
+      readFile(developerApiUrl, 'utf8'),
+      readFile(new URL('../supabase/migration-manifest.dev.json', import.meta.url), 'utf8'),
+      readdir(new URL('../supabase/migrations/', import.meta.url))
+    ]);
+    const manifest = JSON.parse(manifestText) as {
+      head: string;
+      totalCount: number;
+      migrations: { name: string }[];
+    };
+    const sourceNames = files.filter((file) => /^\d{14}_[a-z][a-z0-9_]+\.sql$/.test(file))
+      .sort().map((file) => file.slice(15, -4));
+    expect(sourceNames.length).toBeGreaterThan(0);
+    expect(manifest.totalCount).toBe(sourceNames.length);
+    expect(manifest.migrations.map((migration) => migration.name)).toEqual(sourceNames);
+    expect(manifest.head).toBe(sourceNames.at(-1));
+    const expected = developerApi.match(/export const expectedMigrationName\s*=\s*["']([^"']+)["']/)?.[1];
+    expect(expected).toBe(manifest.head);
   });
 
   it('ports payroll through exact actor-bound RPCs and a bounded denial source', async () => {
@@ -396,7 +417,7 @@ describe('Supabase Edge runtime PoC contract', () => {
       'cancel_reservation',
       'manual_checkout_reservation',
       'create_manual_cleaning_request',
-      'cancel_manual_cleaning_request',
+      'cancel_manual_cleaning_request_with_session',
       'process_due_reservation_transitions'
     ]) {
       expect(reservationApi).toContain(`"${rpc}"`);
@@ -441,7 +462,7 @@ describe('Supabase Edge runtime PoC contract', () => {
       expect(api).toContain(path);
     }
     for (const rpc of [
-      'get_room_operational_projection',
+      'get_room_board_projection',
       'list_room_operation_blocks_page',
       'list_room_issues_page',
       'change_room_master_data',

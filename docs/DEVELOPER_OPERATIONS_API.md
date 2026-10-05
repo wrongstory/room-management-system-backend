@@ -29,6 +29,8 @@ business admin과 maid는 developer endpoint에서 항상 `403 DEVELOPER_REQUIRE
 
 ### DB
 
+- #367 source 진단 기준은 dev manifest와 실제 마지막 migration 이름인 `auth_session_hard_expiry`(100)다. runtime의 `source.expectedMigration`과 DB RPC의 `p_expected_migration_name`은 같은 서버 상수를 사용한다. 이전 92번째 `complaint_response_attention` 기준은 fresh100에서도 `ahead`로 판정되므로 사용하지 않는다.
+- Node 회귀는 `migration-manifest.dev.json`의 전체 이름 순서·head를 실제 SQL 파일과 대조하고 서버 진단 상수의 일치를 검사한다. 이후 migration 추가 시 manifest만 갱신하고 진단 기준을 누락하면 실패한다. timestamp history repair·새 migration·권한 변경은 없다. source 검증/CI·dev 통합과 운영 배포는 별도 상태다.
 - `migrationDrift=equal`이고 `rlsValid=true`이며 모든 `criticalRpcs`가 true일 때 정상이다.
 - migration identity는 적용 시점마다 달라질 수 있는 14자리 원격 version이 아니라 Git migration의 안정적인 `name`을 사용한다. `currentMigrationVersion`은 진단 정보일 뿐 source 동일성 판단에 사용하지 않는다.
 - `criticalRpcs`는 같은 이름의 함수 존재 여부가 아니다. 정본 exact signature가 존재하고 `service_role`만 실행할 수 있으며 `anon`·`authenticated`는 실행할 수 없어야 true다.
@@ -90,6 +92,20 @@ OpenAPI는 `0.5.1` / 129 paths / 139 operations입니다. 최신 `dev@ab185af234
 기존 83개를 보존한 84번째 `complaint_deadlines_non_blocking`까지 통합했고, release/v0.6.5는 이 84번째
 migration 한 건만 production pending으로 고정합니다. 79~83번을 다시 적용하거나 history를 강제 보정하지 않으며,
 실제 운영 readback이 83개/head `maid_pin_immediate_reveal`과 다르면 84번째 적용 전에 중단합니다.
+
+Issue #318의 최초 source 후보는 85번째 `flat_cleaning_evidence_history_payroll` 뒤에 append-only
+`room_board_date_filters`를 추가했으며 당시 developer source head는 같은 이름이었습니다. 이 이력은 보존합니다.
+2026-10-05 이전 `dev@bb4fa40`/102 migrations와의 별도 통합 checkpoint는 원격 미적용인 원 #318 본문을
+그대로 뒤로 이동하고 LIVE helper 호환 append를 추가한 총104 migrations입니다. head는
+`room_board_live_projection_compatibility`, 바로 이전은 `room_board_date_filters`, 그 앞은
+`photo_collection_provider_context_axis`입니다. runtime 기대값과 SQL/Edge 진단 회귀도 이 최신 head에 맞춥니다.
+미적용 baseline 재정렬은 #329 strict caller/snapshot 선행 검증을 보존하며 history repair나 guard 완화가 아닙니다.
+원본 SHA·실제 검증 상태는 [객실 날짜 projection 계약](./ROOM_BOARD_DATE_FILTERS.md)을 따릅니다.
+현재 `dev@58a5821` 재통합 후보는 총106개이며 head와 바로 이전 이름은 위와 같습니다.
+그 앞은 `photo_collection_provider_context_axis`입니다. fresh106·전체27 upgrade/SQL84파일5,193개·전체9경합과
+독립 소스 QA를 실제 통과했습니다. 기존86/104 검증을 현재 검증으로 재사용하지 않습니다.
+새 exact-head required CI·보호 병합·운영 적용은 후속이며 운영 적용 완료가 아닙니다.
+`behind/equal/ahead/diverged` 비교로 실제 DB와 source의 배포 상태를 계속 구분합니다.
 
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,

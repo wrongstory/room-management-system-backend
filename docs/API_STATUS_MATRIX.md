@@ -1,10 +1,286 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+> 2026-10-06 현재: #318/PR321·#330/PR337 dev 병합 뒤 `109d6b7`에 #332를 통합한110 migrations/OpenAPI140 paths·151 operations 후보다. 아래86/132·142 등 이전 숫자는 과거 checkpoint이며 [현재 검증·남은 gate](./ADMIN_REPORT_READ.md)를 우선한다. 운영·프런트 배포 완료는 아니다.
+
+> 최신 #330 검증: migration108/API139 paths150 operations 후보는 Node1826·Edge490·Python95/codegen·전체27 upgrade/SQL5266·static/KST145·전체10경합/최종fresh·승인 exact9 baseline PASS다. raw strict FAIL9를 유지하고 최종 staged QA·새CI·dev/운영은 후속이다. 아래 진행 중 기록과 [현재 증거](./ROOM_CANDLES_330.md)를 구분한다.
+
+> 현재: #318/PR321은 dev cf22727 병합 완료, 운영 미반영이다. #330은 이 dev와 통합한108개 migration·139 paths/150 operations 후보를 검증 중이다. 아래104/106개 PASS 및 후속 표기는 당시 checkpoint이며 새 통합의 PASS가 아니다. [현재 범위](./ROOM_CANDLES_330.md)를 따른다.
+
+> 2026-10-05 #330 최신 dev 통합 후보는 기존 PR #337/source `95033682`와 `dev@bb4fa40`를 정상 merge한 103 migrations/source OpenAPI 목표138 paths/149 operations다. 모든 활성·비밀번호 변경 완료·live-session admin/maid의 전용 권한 및 CAS/멱등성/이력 보존을 유지한다. 아래 86/132·142는 원래 후보 checkpoint이며 운영 inventory가 아니다. #383/#382/#329/#318 재통합·전체 DB·독립 QA·새 exact-head CI는 후속이고 원본 strict FAIL9와 exact9 gate를 구분한다. 실제 백업/복원은 모든 개발 후속·운영 배포 전 필수다.
+
+## #330 촛불 공동 관리 — 최초 source 후보 checkpoint
+
+활성 관리자·모든 메이드용 `GET /v1/rooms/candles` 최소 조회와 기존 `POST /v1/rooms/{roomId}/candles` 전용 권한 확대를 Fastify/Edge/OpenAPI에 구현했다. 배정·제출/승인·7일 제한 없이 수량을 조정하고 room CAS/멱등성·live session·원장 보존을 유지한다. 86번째 append migration과 source OpenAPI 0.6.0 **132 paths / 142 operations** 기준이며 dev 병합·운영 배포·프런트 연동 완료가 아니다. [인계 및 rollback](./ROOM_CANDLES_330.md)을 따른다.
+
+> 2026-10-05 현재: #329/PR372 및 #393/PR394는 dev58a에 통합됐다. #318의106개 재통합 후보는 Node1,794·Edge487·console95/client순열·fresh106·exact9 baseline·로컬 합성복원·실제 템플릿6순열·전체27 upgrade/SQL5,193·static/KST145·전체9경합/최종fresh·독립 소스 QA를 통과했다. 실제 caller7/18/core2, 원본484 hash drift0, RLS누락0을 확인했다. raw strict FAIL9/exit1은 유지하며 새 exact-head CI/보호 병합은 후속이다. 실제 운영 백업/배포·v0.9.0은 아직 아니며 v0.8.0/운영/프런트는 그대로다. [현재 증거](./ROOM_BOARD_DATE_FILTERS.md)를 따르고 아래 과거 checkpoint와 구분한다.
+
+> 2026-10-05 최신 #329: 4da53b0 +devfdd8d7d 정상 통합 후보의 실제 Node1,767/74·Edge486/0(bundle17,577,757)·Python95/client6순열·fresh104/template6순열/receipt/CAS/16malformed·전체9경합·finalfresh104 PASS/exit0다. 원본480/사본480 drift0, fixture0·RLS누락0·객실121 확인. 아래 이전27 upgrades/SQL82·5,119와 strictFAIL9/exact9 catalog3PASS는 그 실행의 증거이며 새 로컬 재실행은 NOT RUN이다. 새 exact CI·최종QA·commit/push·dev 병합은 후속, 운영/v0.8.0/프런트 불변. [실패 이력과 현재 증거](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신-devfdd-통합전체9-경합-완료-checkpoint)를 따른다.
+
+> 2026-10-05 최신 source 통합: #382/#323은 PR335/exact CI37254484170 application·migration SUCCESS와 독립 QA 후 dev `fdd8d7d`에 통합됐다. #329의 checkpoint `4da53b0`는 이 dev를 정상 재통합 중이며, 아래 이전104 PASS는 새 source의 실행 결과로 대체하지 않는다. 새 품질·실제 템플릿·전체9 경합·fresh cleanup·독립 QA·exact-head CI는 진행 단계다. 운영/API·프런트·기존 v0.8.0은 그대로이며 최신 기능은 #387 v0.9.0에서 별도 승격한다.
+
+> 2026-10-05 #329 최신104 로컬 checkpoint: `b00e09c` 뒤 dev1209756 정상 통합 후보의 전체27 upgrade/SQL82·5,119·static/KST145 PASS. 첫9경합 chain은 limited runner의 cleanup 누락으로8번째 빈 DB 확인 FAIL이며 named/마지막verify NOT RUN이었다. 보완 후 fresh104→limited7/cleanup→photo-context7/cleanup→named7/cleanup→최종fresh104가 실제 exit0, Node1,727/73·Edge483/0·Python95·비작성자 source QA0, 원본307/사본307 drift0다. raw strict FAIL9와 exact9/catalog3 PASS를 구분한다. 후속3개 PASS를 새 전체9 aggregate PASS로 바꾸지 않는다. 최신 devfdd8d7d(#382) 재통합·최종 문서/staged QA·새 CI·dev 병합은 후속이며 main/v0.8.0/운영/프런트는 불변이다. [실제 범위·최초 실패·증적](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신104-통합standalone-fixture-정리-checkpoint)을 따른다.
+
+> 2026-10-05 #329/#389 bb4fa40 통합 로컬 checkpoint: Node1,525/70·LF fresh103/cleanup·전체SQL81/4,942·실제100→101 upgrade·제한 세션 경합7 PASS, 원본304/사본304 drift0. raw strict FAIL9/exit1과 exact warning9/catalog3 PASS는 별개다. #389는 exact catalog fixture만 보완하며 원본 installer·runtime 권한은 불변이다. 후속 실제7/18→7/19, 최신 #383/#388/#382 재통합·전체27 upgrades·독립 QA·새 CI·dev/운영·프런트 UAT는 미완료다. [정확한 실행 범위](./LIMITED_SESSION_REENTRY.md#2026-10-05-389-caller-catalog--bb4fa40-통합-로컬-checkpoint)를 따른다. 아래 strict17/101 결과는 당시 기록이다.
+
+## 2026-10-04 #329 별도 백엔드 로컬 검증 checkpoint
+
+| 범위 | source 상태 | 운영·프런트 상태 |
+|---|---|---|
+| 기존 세션 기반 제한 업무 발견·단건·완료·사진·제출 정합화 | 정책 A안 확정; 새 SHA Node1275·Edge477·Python95·LF fresh101·upgrade27/SQL79·4774·KST145·경합7·추가 역할 검사4·합성복구 PASS, 독립 소스 QA 새 확정 P0/P1/P2=0. strict 신규0/기존17 FAIL 및 최초 SQL FAIL·재실행 PASS 이력 보존. 승인된 진단용 Draft 공유 단계·CI/통합 미완료 | NOT RUN: v0.8.0 고정 후보에 미포함, 운영 배포·프런트 변경·cold start UAT 제외 |
+
+일반 로그인/me guard를 완화하지 않으며 별도 credential이나 새 세션·TTL을 발급하지 않는다.
+실제 계약과 gate는 [제한 세션 재진입](./LIMITED_SESSION_REENTRY.md)를 따른다.
+기준선 Node 1,229건/65파일은 구현 전 결과다. 신규 결과는 위 checkpoint와 상세 계약을 따른다.
+사용자 승인 LF 임시본만 정규화했고 기존100 SQL·운영 DB는 변경하지 않았다. 실패를 명시한 진단용 공유 승인만 있으며 정상 완료·병합·배포로 승격하지 않는다.
+
+## 과거 2026-10-05 #388 통합 checkpoint
+
+#382/#323은 아래 `c2b5618` 검증 후보를 정상 커밋 `cfc75da`로 보존한 뒤, #388/PR390이 보호
+병합된 `dev@12097563f30d694780c279440c79f12742672d04`를 정상 재통합했다. 새 후보의 실제
+Node1,664/71·Edge479/0·Python95/Ruff226/mypy25/codegen/package·TS/Ajv6순열은 PASS다.
+fresh103·실제6순열/receipt/4타입CAS/16 malformed·SQL81파일/4,979·static100→101와103 cleanup·
+KST145·전체8개 경합과 최종 fresh103 cleanup까지 exit0 PASS다. 실행 후 원본305 raw SHA와
+LF197/원문108 대응 drift0을 재확인했다. 원 strict FAIL9/exit1와 승인 exact9/catalog3 PASS를 구분한다.
+새 후보에서 전체26 upgrade를 재실행하지 않았으며 아래 같은 SQL·manifest의 이전 checkpoint와
+구분한다. 새 exact-head required CI가 전체 upgrade를 실행해야 한다. 최종 독립 staged-tree QA·
+새 CI·Ready·보호 dev 병합과 실제 백업/운영·프런트 UAT는 별도 후속이다.
+전체 경합 로그 SHA256 `03da5a83479d39a75e5af960fbbac60c8c440b36b7025a6b3a25d17eb8b07805`,
+새 whole SQL 로그 `cf06d4e232a2abb17069e179bd1dda8321714136bff011c4cf7379c97d6c347c`를 보존한다.
+이번 입력 순열 정합화는 SQL·manifest·권한·기존 snapshot을 변경하지 않는다. v0.8.0은 보존하며
+최신 기능은 #387 v0.9.0 릴리스에서 별도 승격한다. 운영 DB/API·Auth·PIN·Drive는 변경하지 않았다.
+
+## 과거 2026-10-05 #383 통합 경계
+
+#383은 source `bab817f`의 독립 QA와 필수 CI `37245618199` PASS 후 PR385에서 `dev@c2b5618`로 보호 squash했다.
+운영 반영은 하지 않았다. #382/#323의 local102 검증·독립 QA tree를 merge commit `7b0e3fb`로 보존한 뒤,
+이 최신 dev와 정상 merge한103 후보의 Node1,631/70·Edge479/0·Python95·생성 client 6순열 검사는 PASS다.
+원본305 raw SHA/197 LF/108 원문 대응 drift0을 보존한다. 이103 후보는 fresh DB·실제6순열/receipt/
+4타입 CAS/16 malformed·전체26 upgrades/SQL81파일·4,979 assertions와 fresh cleanup까지 exit0 PASS다.
+전체 DB 로그 SHA256은 `ec783912a90824904348a3dd0d16fb8beaa5d10e8629fe0c7983a548ace7fce6`다.
+원 strict FAIL9/exit1는 보존하고 승인 exact9/catalog3 비교 gate는 PASS다.
+이 checkpoint 이후 dev에 통합된 #388/PR390(1209756) 재통합·전체경합·최종 tree QA·새 exact-head CI·보호 병합은 후속이다.
+아래 #383 combined103 검증 수치는 #383 당시 checkpoint이며 새 #382 통합 검증을 대체하지 않는다.
+
+## 과거 2026-10-05 #383 combined103 개발 후보 checkpoint
+
+#384가 dev `bb4fa40`에 통합된 뒤 #383을 정상 merge한103 migration source 후보다.
+Node1,591/69·Edge476/0·Python95·fresh103·저장 이름SQL177·실제 named 경합7·worker44,
+전체26 upgrades/SQL81파일·4,979 assertions·static/KST145·승인 exact9/catalog3 baseline PASS다.
+전체8개 경합 첫 실행은 기존 offline fixture 요청 전 만료로 FAIL이며 기록을 보존했다.
+같은 source/TTL/assertion의 제한1회 전체 재실행은8명령/cleanup PASS·exit0다.
+원본302 raw SHA/실제 임시본 대응 불일치0, 최종103/head·RLS누락0·객실121,
+검사한 Auth/session/profile/target/photo operation/name binding0을 확인했다.
+원 strict FAIL9와 승인 baseline PASS를 구분한다. 기한 fixture 개선은 별도 #388로 추적한다.
+최종 staged 독립 QA·새 exact-head CI·Ready·dev 병합은 후속 gate이며 운영 완료는 아니다.
+상세 실패/재실행 증거와 불변 저장 이름·삭제/rollback 경계는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
+최신 기능은 별도 #387 v0.9.0이며 v0.8.0 후보는 보존한다. 실제 백업은 전체 개발 이후이되 운영 배포 전 필수다.
+운영/복구 DB·Auth·API·실제 Drive/PIN·프런트 UI/UAT·백업/복원·Release/tag는 NOT RUN이다.
+
+## 과거 102 migration #383 실제 사진 저장 이름 후보 checkpoint
+
+사용자 결정에 따라 새 v9 Drive 사진 이름을 날짜·유형·호실·서버 고유 순번으로 구성한다.
+별도 [Issue #383](https://github.com/wrongstory/room-management-system-backend/issues/383)의
+[저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다. 신규 append migration은 private 불변 binding과
+service-only 명명 예약 RPC를 추가하며 공개 업로드 요청 계약과 기존 사진 ID/권한은 유지한다.
+기존 UUID 이름·이미 예약된 identity·legacy 유형은 유지하고 일괄 rename/move/delete하지 않는다.
+Node1547/69·Edge476/0·fresh102·대상SQL71·historical upgrade26 및 보완 후 전체SQL4789/80·KST145는 PASS다.
+최초 통합 `db:test`는 기존 developer 진단 head 기대값3건으로 FAIL했고 fixture 보완 후 전체SQL을 재검증했다.
+통합 명령 재실행 PASS로 표시하지 않는다. 기존 동시 처리6개 명령/cleanup과 독립 범위 QA98/100·신규 P0/P1/P2=0도 PASS다.
+최종 문서/tree와 새 exact-head CI를 확인한 뒤에도 #384 운영 차단 요소와 릴리스 gate를 별도로 판단한다.
+raw strict FAIL9와 사용자 승인 exact baseline PASS를 구분한다. production/main/recovery DB·실제 Drive·배포·UI/UAT는
+NOT RUN이다. #384 다중 사진 업로드 P1은 별도 운영 승격 차단 요소다. 기존 #323/#382 입력 순열 정합화도
+별도이며 이름 변경으로 완료 처리하지 않는다. 실제 백업·복원은 모든 개발 이후 후속으로 유지한다.
+
+## 2026-10-03 #325 완료와 #324 후보
+
+#325 PR358 source78582789 → devd65f4f60는 exact-tree CI37093733970 application/migration PASS,
+독립 QA98/100으로 source/dev 완료했다. 기존 후보·PENDING 문구는 당시 checkpoint다.
+현재 #324의 `GET /v1/payroll/work-details`는 별도 실제 earning/workflow stream과
+snapshot/집계 contribution을 제공하는 구현 후보이며 [계약](./PAYROLL_WORK_DETAILS.md)을 따른다.
+source 목표98 migrations·134 paths/144 operations는 운영 inventory가 아니다.
+production/main/recovery·프런트 UI/UAT·Pages는 NOT RUN이며 최종 QA/CI/dev gate는 연결 PR에서 확인한다.
+
+> #325 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358) 후속 checkpoint: percent-encoded alias를 raw canonical GET과 구분해 auth/RPC 전404/no-store로 보완했다. Node1010·Edge343 및 독립 guard/CORS 실측 PASS. 기존 SQL97/원장/권한 변경 없음. 아래 PR 생성 전 기록은 당시 이력이며 최종 whole DB·QA·새 exact-head CI/dev 상태는 연결 PR을 따른다. 운영/프런트 제공은 별도다.
+
+> 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.
+
+> 2026-10-03 현재: #328은 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)의 source `76e2780c0304a7336433cdd17e585610360785e3` → dev squash `3968e42967c8ad223661b7a3eb4ce200aabd2499`로 완료했다. 두 tree와 CI merge tree가 같고 required CI `37027527827` application/migration PASS·독립 QA98/100이다. 아래 Draft·후속 gate 표현은 과거 checkpoint다. #327은 이 dev/95 migrations에서 관리자 open 사건 목록을 구현 중인 후보이며 현재 source OpenAPI 목표는 132 paths·142 operations다. 신규 96번째 migration과 검증·운영 제외 범위는 [관리자 미퇴실 목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md)을 따른다. production/main/recovery·프런트 UI/UAT 완료를 뜻하지 않는다.
+
+> #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
+
+## 2026-10-03 #325 PR 생성 전 source checkpoint
+
+| 범위 | source 상태 | 운영/프런트 상태 |
+|---|---|---|
+| GET /v1/payroll/adjustment-book | 기본 구현·개별 local 검증 PASS, 전체 DB/최종 QA/CI/dev는 연결 PR에서 후속 갱신 | NOT RUN: 배포·UI 연결·UAT 제외 |
+
+새 조회와 기존 mutation의 호환·현재 global CAS·초기0의 서버 판정은
+[최신 조정 원장 계약](./PAYROLL_ADJUSTMENT_BOOK.md)을 따른다.
+source 후보 97 migrations / 133 paths·143 operations를 운영 inventory에 합산하지 않는다.
+이 절은 PR 생성 전 고정 기록이며 최신 통합 상태는 [Issue #325의 연결 PR](https://github.com/wrongstory/room-management-system-backend/issues/325)을 확인한다.
+
 이 문서는 백엔드 API의 **개발 완료 여부**, **Supabase Edge 이식 여부**, **production 배포 여부**, **현재 실제 사용 가능 여부**를 한 곳에서 추적하는 정본이다.
 
 API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR에서 갱신한다. Fastify 코드나 DB RPC가 존재한다는 이유만으로 production에서 사용할 수 있다고 표시하지 않는다.
 
 > 정본 효력: 이 파일이 `dev`에 병합된 이후부터 API 상태 판단의 우선 정본으로 사용한다. production 상태는 Git branch가 아니라 Supabase Edge Function readback과 hosted HTTP smoke를 우선한다.
+
+### #328 배정 일정 조회 — 로컬 검증 완료, source/dev 최종 근거는 연결 PR
+
+현재 선행 정본은 `dev@f34dca3746a1e553a773470aba13b55fa95bf816`/94 migrations다.
+#326은 PR #350의 source `2eb489c`와 dev squash tree 동일성, required CI `36987938462`
+application/migration PASS·독립 QA98/100으로 source/dev 완료했다. 아래 #326 후보/PENDING/FAIL
+설명은 병합 전 검증 이력을 보존한 것이며 현재 상태를 덮지 않는다.
+
+#328의 95번째 `assignment_reservation_schedule_snapshot`은 기존 AssignmentCard에 nullable
+`scheduleSnapshot`·`currentDeparture`만 추가한다. 예정/실제 최종 퇴실·객실 이동·다음 guest
+check-in을 구분하고 KST early/late를 계획 근거로 표시한다. currentDeparture는 exact current
+notified 현재 목록에서만 관찰하며 history/includeHistory는 항상 null이다. legacy snapshot은
+현재 예약으로 재수화/backfill하지 않는다. Preview/command 응답·경로·version은 변경하지 않는다.
+OpenAPI 0.6.0/131 paths·141 operations, 기존 업무 권한/RLS·CAS/멱등성/동시 시작·PIN·수익 원장은 유지한다.
+두 저장 테이블의 authenticated table-level SELECT는 pre95 컬럼만의 SELECT로 좁힌다.
+신규 JSONB 원문·내부 binding의 직접 조회와 `SELECT *`/whole-row는 `42501`로 거부하며
+기존 명시 컬럼/count/join·service_role table grant는 유지한다.
+
+아래 1차/후속 결과는 각 실행 시점의 검증 이력이다.
+1차 `ci:quality`는 857 application tests·typecheck/build/lint/secrets·OpenAPI 131/141 PASS다.
+당시 전체 Edge 321 PASS/1 FAIL(synthetic-token HTTP mock) 및 fresh 95 reset sourceDrift CRLF
+FAIL→보완/미재실행 이력은 보존한다. 후속 실제 실행은 Node 859·Edge 323/bundle 17,240,776 bytes·
+Python 95와 전체 Ruff/mypy/codegen/build check PASS, CRLF 보완 후 fresh 95와 전용 94→95 upgrade
+PASS, targeted 4 SQL files/339 tests PASS다. 모두 마지막 raw-column grant 보완 전 실행이므로
+그 시점 추가 authenticated/anon 신규 컬럼·RPC 거부 회귀와 최종 전면 재검증은 PENDING이었다.
+독립 QA round 1 P1의 초기 adapter role↔RPC 최신 role race는 내부 `p_expected_actor_role` binding과
+기존 `ASSIGNMENT_ACCESS_REQUIRED` 403 fail-closed로 보완했으며 최종 QA·보완 후 exact-source
+재검증은 당시 미완료였다. 마지막 보완 후 최종 local 실행은 Node 859/57 files·
+Edge 323/bundle 17,240,852 bytes·Python 95·SQL 73 files/4,152 tests·21 upgrade·
+KST 145·동시성 3개 스크립트·fresh 95·local advisors 0건·합성 백업 복구 모두 PASS다.
+이 문서는 PR 생성 전 검증 시점 기록이다. 독립 QA 최종 판정·exact-head application/migration CI·
+dev squash tree/Issue 종료 근거는 [Issue #328](https://github.com/wrongstory/room-management-system-backend/issues/328)의
+연결 PR에서 확인한다. 계약 문서에 실패/보완 이력을 보존하며 운영 완료로 확대하지 않는다.
+원격 운영/main/recovery·프런트·UAT는 변경하지 않는다. [계약·검증 gate](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)를
+따르며, 다음 기능 순서는 #328 → #327이다.
+
+### 과거 #326 배정 대상 조회 metadata — PR #350 병합 전 구현·검증 이력
+
+선행 통합 기준은 `dev@f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`/93 migrations다.
+94번째 `assignment_target_read_metadata`는 기존 배정 카드/impact/Preview/새 commit 응답에
+immutable snapshot·실제 source·revision까지의 이월·취소 advisory를 추가한다. endpoint는 추가하지
+않고 131 paths·141 operations를 유지한다. source/snapshot/과거 receipt backfill도 없다.
+관리자 current/target에만 #348의 실제 미착수 predicate로 `canCancel`을 표시하며 PIN·기한·
+stale draft를 별도 제한으로 사용하지 않는다. 이력/메이드의 false 사유는 표시 코드다.
+raw 저장 snapshot 객체의 빈/비문자 선택 key는 SQL/카드 모두 unknown null로 정규화하고 malformed
+fresh metadata pack은 strict parser에서 안전한 500으로 거부하는 계약이다. legacy elevator
+snapshot 누락 시 current-room A/B fallback 제거는 routing 입력 변경이므로 새 metadata 제외만으로
+모든 이전 Preview fingerprint byte 동일성을 보장하지 않는다. 해당 Preview는 다시 계산해야 한다.
+
+최신 local PASS는 fresh 94 reset 재실행, focused Node 156/Deno 34 및 typecheck/lint,
+QA 2차 보완 후 `ci:quality` 795 tests/55 files(secrets/lint/typecheck/build/OpenAPI 12 포함),
+전체 Edge 318 tests/bundle 17,204,763 bytes, Python console 95/full Ruff·mypy·codegen·build,
+5 manifests·candidate backup 94·DB lint exit 0이다. 기존 DB lint 10 functions warning은 유지하고
+신규 helper 추가 경고는 없다. public base 49개/RLS 누락 0개를 local readback으로 확인했다.
+초기 focused 기대 객체 7건·ReturnType lint 1건·Edge format FAIL과 각 재검증 PASS 이력을 보존한다.
+QA 1차 P2는 core raw normalizer/fresh strict parser 분리 및 SQL Preview classifier 보완으로
+정적 resolved지만 최종 QA 승인은 아니다. QA 2차 P2는 기존 공개 카드/text·DB/OpenAPI에 없는
+신규 표시 metadata 100자 상한이었다. 임의 표시 상한 제거·1,001자 이름 회귀 후 정적 resolved이며
+P0/P1/미해결 코드 P2=0이다. routing `code`/`elevatorZone`의 기존 `str(100)` 및 fresh pack
+reject는 유지한다. 위 quality/Edge/focused 수치는 QA 2차 보완 후보의 실제 local 실행이다.
+upgrade 1·2차 FAIL은 1일 fixture의 deferred
+`AVAILABILITY_WEEK_REQUIRES_SEVEN_DAYS`/`23514`가 원인이다. 제약을 유지하고 정상 7일 fixture로
+보완한 upgrade 3차는 실제 PASS이고 cleanup fresh 94도 PASS다. 전용 SQL 135는
+`SET CONSTRAINTS ALL IMMEDIATE` 추가 뒤에도 PASS였고, 신규 긴 이름을 포함한 SQL 137은 별도
+최신 전용 실행이 아닌 full suite 결과다. 실제 `npm run db:test` exit 0으로 20 upgrade phases와
+72 SQL files/4,068 tests가 모두 PASS했으며 실제 request/신규 receipt 1,001자 이름·보존을 포함한다.
+KST 5 clocks × 29 = 145와 전체 실제 concurrency/cleanup fresh 94도 PASS다. local advisor는
+결과 0건/exit 0이다. clean source commit 이후 exact-source backup·exact-head CI·최종 QA·
+PR/dev 통합 근거는 연결 Issue/PR에서 확인하는 PENDING gate다. 이 문서와 승인 source가 dev
+정본에 포함되고 연결 Issue/PR의 해당 head CI·QA 승인·실제 통합 근거를 확인해야 source/dev
+완료 효력이 발생하며, 지금 이미 병합됐다는 뜻은 아니다. 상세
+실제 결과·중간 실행/실패 이력과 프런트 scoped 인계는
+[배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)을 따른다. 기존 ID/CAS를 재사용하고
+프런트 generated client/consumer 갱신·운영 UAT는 프런트 담당자의 별도 gate다.
+`main@1780728a02144c0816565ba091e43a8b3e126c4f`와 production/recovery는 변경하지 않는다.
+
+### 과거 #348 수동 요청 취소 B안 — dev 통합 전 source 후보 기록
+
+아래는 #348 통합 전 기록이며 현재 선행 dev는 위 #326 절의 `f72c43d4`/93 migrations를 따른다.
+당시 통합 기준은 #305 문서 감사가 완료된 `dev@fb813cd0d4867f3274ce441fce2d29db1bda1e41`
+(PR #347, 92 migrations)다. 당시 후보는 93번째 `manual_cleaning_cancel_pin_independent`를 추가하며
+OpenAPI 131 paths·141 operations 및 catalog 59 family·42 category는 유지한다.
+수동 연박/추가 요청은 배정·통보 후 미착수면 PIN 조회 이력과 무관하게 취소한다.
+session-bound RPC가 최신 관리자/password/session을 잠가 다시 확인하며 legacy service EXECUTE를
+회수한다. exact current notified 담당자만 알리고 이후 해당 배정의 PIN 접근을 종료한다.
+[수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)과
+[#348](https://github.com/wrongstory/room-management-system-backend/issues/348)의 actual validation,
+독립 QA/required CI/dev 통합 근거를 따른다. DB와 양 adapter는 같은 릴리스 단위이며 운영은 변경하지 않는다.
+당시 #326 snapshot/sourceKind/rollover/canCancel DTO, 프런트 구현 및 운영 UAT는 별도 OPEN으로
+분리했다. 현재 #326 구현 후보/QA 보완 상태는 위 절을 우선하며 과거 후보 기록을 지우지 않는다.
+
+### #305 기능 통합 당시 source/dev 기준 — 2026-10-02
+
+당시 개발 기준은 `dev@4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`의
+92 migrations / OpenAPI 131 paths·141 operations / catalog 59 family·42 category다.
+#308 PR #340과 #343 PR #346의 source/dev gate는 완료됐다. #305 종료는 이 문서 정합화 PR의
+exact-head CI·독립 QA·dev 통합 확인 뒤에만 수행하며 최종 근거는
+[Issue #305](https://github.com/wrongstory/room-management-system-backend/issues/305)에서 추적한다.
+[종료 감사](./WORK_DEADLINE_CLOSURE.md)가 정확한 승인·실패 이력과 별도 후속을 구분한다.
+이 정합화는 main/production/recovery·프런트·tag·UAT 변경이나 현재 운영 readback이 아니다.
+아래 #308 단계별 후보·Draft·잔여 gate는 2026-10-01~02 당시의 기록이다.
+
+### #308 source/dev 완료 — 지연 업무 유지·관리자 알림
+
+최신 종료 근거: #308은 PR #340의 source `bdf3cda`와 dev squash
+`4d85458c5d0a900cf87f7318fcd9b2474c03a889`의 tree 동일성, required CI
+`36864792279` application/migration PASS 및 독립 QA98/100으로 source/dev 완료됐다.
+동일 tree는 `6013c056dd32208ce375138d17918de4bbfa3743`다.
+아래 단계별 후보 기록은 역사이며 운영 반영이나 #305 전체 종료를 뜻하지 않는다.
+
+### #343 컴플레인 미응답 주의 알림 — source/dev 완료
+
+PR #346의 승인 source `cc7eb199fae8f6b56408c932a8d4ea6b76d881b7`와 dev squash
+`4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`는
+tree `2c8e06ef48846a28670f472f6bdc3b1be8c5221f`로 동일하다.
+[CI36952950791 attempt 2](https://github.com/wrongstory/room-management-system-backend/actions/runs/36952950791/attempts/2)
+application/migration PASS와 exact-source 독립 QA98/100으로 source/dev gate를 완료했다.
+최종 fresh92·18 upgrade·70 SQL/3,784 assertions·Node694·Edge304·Python95·KST145·
+121실 backup PASS를 확인했다. 이전 `5267f35` 8 same-key FAIL의 원인은 미확정이고,
+CI36952950791 attempt 1의 password-change SQL test85 FAIL도 보존한다. #300은 OPEN이며
+실제 원격 오류와 매칭할 필드는 미확정이다. 후속 PASS로 이전 실패를 해결됐다고 표시하지 않는다.
+
+92번째 append-only migration으로 기존 lifecycle의 미응답 관찰을 추가한다.
+기존 알림 조회·읽음 API와 `complaintCase` deep link를 재사용하며
+`complaint_response_attention` category만 추가한다. 공개 endpoint/OpenAPI 계약과 응답 권한은 유지한다.
+기존 최초 판정 응답 기준을 엄격히 지난 `decided` 사건을 bounded/fair 100건씩 검사하고,
+사건/수신자별 중복을 막는다. scheduler heartbeat에 내부 `complaintAttentionCount`를 합산하며
+이 counter가 없는 이전 완료 receipt와 호환된다.
+단계별 과거 검증·최종 QA·CI·dev 승인 근거는 [별도 기록](./COMPLAINT_RESPONSE_ATTENTION.md)을 따른다.
+#343 신규 family의 delivery enrollment-clock 보완은 기존 `cleaning.overdue_admin`의 원 event-clock
+24h TTL 한계를 해결하지 않는다. 그 late-admin 한계는 #345 OPEN이다.
+이 source/dev 완료는 main/production/recovery·프런트 코드·Cron/provider 설정 변경이나 UAT 완료가 아니다.
+
+### 과거 #308 단계별 구현 이력 — 2026-10-01, PR #340 승인 전
+
+당일 preview/commit의 dueAt 차단 제거, 과거 notified 업무 activation/start 허용,
+scheduler 자동 이월 중단과 bounded/fair 100건 cursor, `expire_scheduled` 폐기의 1차 source를 구현했다.
+기존 85개 migration은 보존하고 86번째 append-only migration을 사용한다. Fastify/Edge preview는
+같은 계산기이며 lifecycle/start는 기존 Edge-only다. production/main/recovery는 미변경이다.
+2차 87번째 append-only migration은 target별 최초 지연 원장·관리자별 typed inbox/outbox와
+별도 bounded 100건 cursor를 추가한다. 기존 알림 API/category string/cleaningTarget deep link를
+재사용하고 scheduler 결과에 `overdueCount`를 더한다. 3차 88번째 append-only migration은
+메이드의 정상 청소 시작을 관리자에게 typed informational 알림으로 보완한다. 공개 category
+`cleaning_started`도 기존 Fastify/Edge notification projection과 deep link를 사용하고 새 endpoint는 없다.
+기존 완료·제출·검수·담당 변경 및 자기 push 제외 정책은 유지한다. 과거 미배정
+업무의 종단 저장·통보와 최종 통합은 3차 당시 미완료여서 #308을 닫지 않았다. 4A는 Fastify/Edge 공유 순수
+계산기가 과거 후보·날짜별 고정 sequence를 보존하도록 보완한 부분 후보다. 당시 DB 대상집합,
+현재 목록 조회, 저장/통보 및 가능일 보호는 후속 범위였다. 4A의 공개 schema/경로 및 DB/RLS 변경은 없다.
+4B1은 89번째 append-only migration으로 오늘 DB snapshot의 과거 미완료 대상집합을 연결하고,
+terminal target의 current assignment까지 원 날짜별 순번 점유로 계산한다. private metadata는 공개
+Preview 응답에서 제외하며 공개 endpoint/schema/RLS 권한은 그대로다. 원 날짜/담당/snapshot/history를
+변경하지 않는다. 4B2는 오늘 current 목록의 과거 미완료 조회, 오늘 가능일에 기반한 commit 후보/잠금과
+불변 통보 감사에 기반한 계획일 가능일 보호를 연결한다. 내일/이력 조회는 exact-date이며 항목별 원 날짜는
+보존한다. count/실제 반환 수와 기술 상한을 검사하여 일부 목록·잘린 관련 이력으로 응답하지 않는다.
+공개 경로/DTO/권한·보안 TTL은 그대로였으며 당시 dev/#320 통합 전에는 종단 종료를 선언하지 않았다.
+후속 통합·종료 gate는 PR #340으로 완료했다. 실제 검증/PR 이력은
+[지연 업무 계약](./CLEANING_OVERDUE.md)에 기록한다.
 
 ## 1. 상태 판정 규칙
 
@@ -18,6 +294,45 @@ API/DB/Edge 관련 PR은 상태가 바뀌면 반드시 이 문서를 같은 PR�
 후보 OpenAPI 0.6.0 / 132 paths / 142 operations이며 기존 #330 후보와 독립 개발한다.
 등록 전 사진은 목록에서 제외하고 전체 제출 전후의 신고 이력·사진 만료/삭제 상태만 조회한다.
 검수·봉인·수익·content 권한은 유지한다. [연동 계약](./ADMIN_REPORT_READ.md).
+
+### 과거 #308 6차 보완 — 2026-10-01, PR #340 승인 전
+
+전체 완료 조건 감사에서 발견한 폭탄방 신고/특이사항 신고→관리자,
+폭탄방 선판정→해당 메이드 통지를 보완한 source 후보 단계다. 현재는 PR #340으로 dev 통합 완료했다.
+91번째 append-only migration, 기존 알림 조회/읽음·delivery 경로를 재사용한다.
+신고·판정 API의 응답과 권한·CAS·멱등성·최종 승인/수익 계약은 바꾸지 않는다.
+메모/사진 원문·private provenance는 공개 알림에 넣지 않는다.
+그 단계의 프런트·운영 변경은 없었다. 실제 검증과 당시 남았던 gate는
+[상대 역할 알림 보완](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
+5차 head14676c1의 required CI36833580274 application/migration PASS는
+이전 source 검증이며 6차 새 head의 승인이 아니다.
+
+### 과거 #308 5차 결합 — 2026-10-01, PR #340 승인 전
+
+- 744662c 업무 보존 계산기에 ad91d2e의 허용 목록 진단·no-store·OpenAPI 계약을 결합했다.
+  원 날짜별 slot·terminal 슬롯·오늘 과거 후보·기한 비차단·snapshot fingerprint는 유지한다.
+- 당시 로컬 PASS: quality625/typecheck/build, Edge298/bundle17,194,004, fresh90/68SQL3,649,
+  KST145, manifest5종, Python95/ruff/format/mypy/business OpenAPI codegen/package source.
+  기준744662c와 합성100개 기존 응답·점수·fingerprint·입력 비변경 비교 PASS.
+- 새 migration/운영/프런트 변경 없음. 당시 dev e19f81f와 후보 브랜치를 구분했다.
+  독립 QA98/100·차단0·Node625/focused80·기준744 직접 비교56case PASS는 로컬 Draft
+  commit/push 준비 범위였다. 새 exact-head CI·#308 source/dev 종료는 이후 PR #340으로 완료했다.
+  #305 최종 문서 승인과 #320 실제 사례는 별도 gate다.
+  상세·초기 실패와 보완은 [지연 업무 기록](./CLEANING_OVERDUE.md)을 따른다.
+
+### #320 Preview 진단 보강 — source/dev 통합, 실제 신고 사례 미확정
+
+- Fastify/Edge 공통 계산기의 미배정 reasonCodes와 동일 snapshot의 단계별 후보 수·고정 업무 제외 사유를 추가했다.
+- 기존 배정 기준·reason·응답 분류·fingerprint·CAS를 유지한다. 새 endpoint/migration은 없다.
+- 계약/프런트 전달 사항: [ASSIGNMENT_PREVIEW.md](./ASSIGNMENT_PREVIEW.md).
+- #320의 실제 신고 사례 대조와 프런트 한국어 사유 매핑/UAT는 미완료다. 합성 재현을 운영 원인 확정으로 표시하지 않는다.
+- dev source 통합은 PR #340으로 완료했다. 실제 사례 원인·한국어 매핑/UAT·main/운영 승격과 다르다.
+  `ASSIGNMENT_WINDOW_EXPIRED` 예외는 legacy snapshot 호환이며 현재 dueAt 경과 차단을 뜻하지 않는다.
+- #320 단독 후보의 역사 로컬 검증: application 587, Edge 290 + pinned bundle, fresh local 85 migrations,
+  전체 SQL 64 files/3,366 assertions, DB lint, Python business OpenAPI codegen PASS.
+  기존 dev 대비 합성 100개 결과·score·fingerprint 동일. 누적 upgrade/전체 동시성/hosted UAT는 이번 변경에서 미실행.
+- 단독 후보 당시 독립 QA: 100/100, P0/P1/P2 0건. 당시 원격 CI gate와 실제 신고 사례를 구분했으며
+  결합 source의 최종 승인·CI·QA는 위 PR #340 근거다. 실제 사례 확인은 여전히 별도다.
 
 | 표시 | 의미 |
 |---|---|
@@ -82,11 +397,16 @@ Git에 TypeScript 코드가 있거나 DB RPC가 존재하는 것만으로는 Edg
 
 따라서 메이드 API를 추가한다고 `maid` Function을 새로 만드는 것이 아니라 기존 `api` Function에 route/adapter를 추가하고 다시 배포한다.
 
-## 2. 현재 기준 스냅샷
+## 2. 현재 source/dev 기준과 날짜가 고정된 운영 기록
 
-production 최종 배포 전 runtime/readback evidence: **2026-09-26 KST**. #245 당시 snapshot은 이후 릴리스로 대체됐고, 현재 운영 기준선은 v0.6.4 main과 83번째 migration이다. v0.6.5의 complaint 기한 비차단은 release candidate이며 main 병합·운영 적용 전까지 production 완료로 표시하지 않는다.
+현재 선행 source/dev는 위 `f34dca37` / 94 migrations / OpenAPI 131 paths·141 operations다.
+#326은 PR #350으로 source/dev 완료했고 #328의 95번째 migration과 DTO는 그 기준 위의 구현 후보다.
+아래 운영 runtime/readback과 v0.6.5 후보 문구는 **2026-09-26 KST 배포 전 snapshot**의 기록이다.
+당시 기준은 v0.6.4 main·83 migrations였으며 이를 최신 production 상태로 재선언하지 않는다.
+후속 v0.6.5 이력은 [릴리즈 기록](./RELEASE_V0.6.5.md)을 따른다. 이번 #305 문서 정합화에서는
+운영 DB/Edge·provider·프런트·UAT를 변경하거나 재검증하지 않았다.
 
-- 운영 Git 정본: `main@65905ff386e642d926a76576884c1f9a4f24f169`. 최신 기능 통합 지점: `dev@ab185af2343644a5a2aec85962eb5272243844c4`, **84 migrations / OpenAPI 0.5.1 129 paths / 139 operations**.
+- 당시 운영 Git 정본: `main@65905ff386e642d926a76576884c1f9a4f24f169`. 당시 기능 통합 지점: `dev@ab185af2343644a5a2aec85962eb5272243844c4`, **84 migrations / OpenAPI 0.5.1 129 paths / 139 operations**.
 - 마지막으로 검증된 production API bundle은 `api` ACTIVE v34이며 OpenAPI 0.5.1 / 129 paths / 139 operations를 제공한다.
 - production은 **83 migrations**, head `maid_pin_immediate_reveal`, **`api` ACTIVE v34**, OpenAPI **0.5.1 / 129 paths / 139 operations**다.
 - v0.6.5 후보는 기존 83 migrations를 수정하지 않은 84번째 `complaint_deadlines_non_blocking` 한 건만 pending이다. 79~83번을 다시 적용하지 않는다.
@@ -330,7 +650,7 @@ hosted 검증했고 상세 PII와 성공 mutation은 release acceptance exceptio
 | [ ] | `POST /v1/reservations/{reservationId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
 | [ ] | `POST /v1/reservations/{reservationId}/manual-checkout` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
 | [ ] | `POST /v1/reservations/cleaning-requests` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
-| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | success mutation hosted smoke release exception |
+| [ ] | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | admin | ✅ | ✅ | ✅ | ✅ | ⚠️ | 기존 운영 동작 이력. #348 B안·PIN 제한 제거는 source/dev 통합이며 별도 운영 승격/UAT 필요 |
 | [x] | `POST /v1/reservations/transitions/process` | admin | ✅ | ✅ | ✅ | ✅ | ✅ | scheduler manual/replay 및 reserved namespace 계약 PASS |
 
 ### #52 source gate
@@ -521,8 +841,8 @@ source/dev 완료와 운영 배포는 별도 gate다.
 고치지 않는 `20260920094931_retire_assignment_duration_policy.sql`이다. Source OpenAPI operation 수는
 유지되며 production도 duration 없는 Preview와 deprecated read-only GET, 410 retired POST 계약을 사용한다.
 Fastify rollback adapter도 같은 3개 경로와 순수 optimizer를 사용한다. 초기 source 이력은
-51 paths / 56 operations, 당시 production은 39 paths / 43 operations였다. 현재 production 수치는
-§2의 0.5.1 / 129 / 139를 우선한다. 성공 Preview의 assignment/attempt/알림/outbox/audit/receipt write는
+51 paths / 56 operations, 당시 production은 39 paths / 43 operations였다. 운영 수치는
+§2의 날짜 고정 운영 기록과 후속 릴리즈 기록을 구분한다. 성공 Preview의 assignment/attempt/알림/outbox/audit/receipt write는
 0이며, 폐기된 설정 확정 POST도 policy/audit/receipt를 만들지 않는다. `55/65/70/80`분은 운영값이 아니다.
 정책 미확정은 정상 상태이며 `decisionReady=true`로 제안을 계산한다. 상세 한계는
 [Preview 계약](./ASSIGNMENT_PREVIEW.md)을 따른다. 자동 apply/notify/PIN/#7 실행은 포함하지 않는다.
@@ -672,7 +992,11 @@ hosted/client offline E2E는 아직 실행하지 않았다. #7은 해당 후속 
 
 ## 13. 후속 업무 API·모델 개발 상태
 
-아래는 v0.2.0 이후 업무 기능의 통합 이력이다. 현재 production runtime 반영 여부는 §2의 83 migrations, `api` ACTIVE v34, OpenAPI 0.5.1 129 paths / 139 operations를 따른다. v0.6.5의 84번째 migration과 complaint 기한 비차단 bundle은 main 병합·운영 적용·hosted readback 전까지 production 사용 완료로 확대하지 않는다.
+아래는 v0.2.0 이후 업무 기능의 통합 이력이다. production 열의 기존 근거는 §2의
+2026-09-26 배포 전 83 migrations / `api` ACTIVE v34 / OpenAPI 0.5.1 129·139 기록이며,
+후속 v0.6.5 이력은 [릴리즈 기록](./RELEASE_V0.6.5.md)을 따른다. 이번 문서 정합화는
+이를 최신 운영 readback으로 재검증하지 않는다. #308/#343의 현행 source/dev는 위 92 migration
+기준이며 기존 경로의 운영 배포 표시를 새 계약의 운영 완료로 확대하지 않는다.
 
 | 체크 | 영역 | 상태 | 관련 Issue | 비고 |
 |---|---|---|---|---|
@@ -820,7 +1144,8 @@ Phase A가 `dev`에 병합돼도 #44 전체 Issue는 Phase B/C와 Windows/hosted
 ## 15. 통합 이력과 현재 우선순위
 
 아래 1~45번은 각 source/dev 병합 당시의 순서와 당시 production 상태를 보존한 이력이다.
-`운영 미적용`/`production 미승격` 표기는 당시 상태이며 현재 production 정본은 §2와 각 상세 표를 우선한다.
+`운영 미적용`/`production 미승격` 표기는 당시 상태다. §2와 각 상세 표의 날짜 고정 운영 근거 및
+후속 릴리즈 기록을 구분하며 이번 #305 source/dev 감사로 최신 운영 상태를 재선언하지 않는다.
 
 1. [x] #48 `dev` 병합
 2. [x] **#51 Availability Edge parity source/dev** — production 배포·hosted smoke까지 Issue Open
@@ -1309,7 +1634,30 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `dev` 통합과 v0.3.0 source/main·production 54 migrations·5 Edge bundle·OpenAPI 108/115 반영
 - [ ] annotated `v0.3.0` tag/GitHub Release와 남은 hosted role·mutation/provider/Google activation smoke
 
-### #156/#165 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기
+### 과거 #323/#382 v9 사진 템플릿 source checkpoint — 당시 Draft·통합 gate 대기
+
+아래 상태와 검증은 당시 후보의 이력이며, 현재 source/dev 완료 상태는 최상단의 `dev@fdd8d7d` 보호 통합 기록을 따른다.
+
+[PR #335](https://github.com/wrongstory/room-management-system-backend/pull/335)의 과거 후보는 `dev@859f7cd`를
+통합했다. local102 후보는 `dev@bb4fa40`의 #384를 포함했다. 그 검증을 commit `7b0e3fb`로 보존하고
+당시에는 #383의 `dev@c2b5618` 통합103 후보를 별도 검증했다.
+정규 3개 사진 모음(일반 20/폭탄방 10/특이사항 10), 최초
+`expectedVersion=0`/current CAS, v8 호환과 pre-A 완료 receipt 재생을 구분한다.
+3개 모음은 사진 3장 제한이 아니다. 프런트 scoped `dev@09ed284`의 다중 파일 선택·사진별 전역
+업로드 큐를 보존하며 업로드 endpoint/권한/기존 migration은 변경하지 않는다.
+
+6개 배열 순열의 과거 Fastify1/Edge2/DB6 차이는 [#382](https://github.com/wrongstory/room-management-system-backend/issues/382)의
+이력이다. 2026-10-05 사용자 결정으로 배열 위치만 해제하며 역할별 key/order/label/필수 여부/최대 수는 유지한다.
+새 후보는 Fastify/Edge 입력을 정렬해 동일 payload/hash를 사용하며 OpenAPI/Ajv/생성 client를 같이 검증한다.
+ordered DB projection·immutable snapshot·receipt와 기존 migration/manifest는 보존한다.
+#323/PR #335은 당시 OPEN/Draft였다. 당시 새 exact-head CI·독립 QA·전체 DB 및 #383 재통합의 실제 결과는 PR에 기록했다.
+현재 local102의 실제 6순열 게시·receipt/4타입 CAS·16 malformed·전체SQL80/4,802와 HTTP/schema/client 검사는 PASS다.
+전체26 upgrade runner도 PASS(exit 0)다. 이는 local102 후보의 결과이며 최신 #383 통합103 검증이 아니다.
+최신 #383/c2b5618 통합103의 fresh·6순열 게시·전체26 upgrades/SQL81·4,979/cleanup도 실제 PASS다.
+#388/1209756 후속 재통합·최종 tree QA·새 exact-head CI·보호 병합·운영/UAT 완료로 확대하지 않는다.
+source/dev 완료·운영 배포·프런트 UAT 완료로 판정하지 않는다. 상세는 [명세 계약](./ARCHITECTURE.md#323-v9-게시-명세-정합화)을 따른다.
+
+### #156/#165 당시 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|---|
@@ -1358,6 +1706,24 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] v0.4.0 production 57~73 migration/API 배포
 - [ ] hosted 예약·객실이동 회귀 확인
 - 프런트 카드·요약·필터 mapper/browser E2E는 프런트 담당 저장소에서 별도 진행한다.
+
+### #318 날짜별 객실 현황·상세 조건 — source 후보
+
+2026-10-05 최신 통합 후보는 검증된104 checkpoint `0781d14`와 dev `58a5821`을 정상 통합한 총106개다. 원 SQL 본문 SHA와 #329 strict caller/snapshot 선행 검증을 유지하고 LIVE PIN/current-cleaning·실제active 점유 선택을 호환 보완한다. 시간 기준 inspection 조건은 실제 cleaning과 구분해 유지한다. 아래 기존 회귀 체크는 최초86개 후보 기록이며 새106개 전체 SQL 실행 PASS가 아니다. [실제 source 검증·독립 QA·후속 DB/CI gate](./ROOM_BOARD_DATE_FILTERS.md)를 따른다.
+
+| 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
+|---|---|---|---|---|---|---|---|---|
+| [x] | `GET /v1/rooms?serviceDate=YYYY-MM-DD` | active/password-complete business admin + live session | ✅ | ✅ | ✅ | ❌ | ❌ | 생략/오늘 LIVE, 과거 KST EOD, 미래 KST SOD |
+| [x] | `GET /v1/rooms/{roomId}` | 동일 | ✅ | ✅ | ✅ | ❌ | ❌ | 오늘 LIVE 단건은 같은 신규 projection mapper 사용 |
+
+- [x] 프런트 `upstream/dev@26a334f2c488223f0b120b45fafcfc0f85e35a58`의 객실 현황 날짜 UI와 상세조건 와이어프레임 targeted 대조
+- [x] strict 실제 달력 날짜·중복/미지원 query 거부와 Fastify/Edge/OpenAPI parity
+- [x] `detailConditionCodes` 9종 및 PII 없는 표시 예약 요약
+- [x] append-only `room_board_date_filters` migration, service-role-only RPC, actor/session DB 재검증
+- [x] 과거/오늘/미래 경계·상세조건·maid/session 거부 pgTAP 회귀
+- [ ] `dev` 병합, release/main 승격, production migration/API 배포
+- [ ] 프런트 API adapter·필터 mapper·browser E2E (dev09ed 문서상 날짜 UI 활성화 확인, 운영 UAT 아님)
+- [ ] 수동 퇴실점검 완료/청소 완료 대체 lifecycle 제품 결정
 
 ### #187 예약 임박 lifecycle projection Phase A — source/dev 완료
 
@@ -1541,6 +1907,12 @@ Phase C는 production source에 포함됐지만 안전 fixture 기반 hosted mut
 - [ ] release/main / production Edge 배포
 
 기존 #210 무제한 DB projection은 이전 bundle 호환을 위해 존재하지만, #212 이후 Fastify/Edge HTTP는 bounded page RPC만 사용한다. cursor를 decode·수정·다른 객실/조회에 재사용하지 않는다.
+
+#### #322 실제 Edge GET 진입점 정합화
+
+두 GET의 status 전용 중복 검사를 제거해 위 `limit/cursor` 계약이 실제 `handleApiRequest`에서 기존 shared parser까지 도달하도록 한다. 합성 RPC 125행의 50/50/25 traversal, limit 1/100·잘못된 query, canonical HMAC 변조·교차 actor/room/stream cursor, 권한/비밀번호/세션 거부와 `no-store`를 진입점 회귀로 검사한다. 새로운 TTL·DB/migration·권한·OpenAPI schema 변경은 없다. 최신 exact-head CI·QA·dev 통합 결과는 [PR333](https://github.com/wrongstory/room-management-system-backend/pull/333)에 별도 기록하며, 운영 Edge 배포와 실제 데이터의 다중 페이지 조회 완료를 뜻하지 않는다.
+
+프런트 scoped 비교 기준은 main `d509b44b1371f25d73891e04d355b0cb0e923f5f`와 dev `09ed28446a4fd43919cddb29ebe442b848548ab8`이다. dev의 `livePageItems`는 `status=actionable/open`과 응답 `nextCursor`를 사용하며 limit은 생략해 서버 기본 50과 호환된다. main 와이어프레임에는 두 목록의 실제 GET 연결이 없으므로 프런트/운영 사용 완료로 표시하지 않는다. 전역 제품 snapshot은 승격하지 않으며 프런트 코드는 변경하지 않는다.
 
 ### #215 객실 이벤트 타임라인 — production source 반영
 

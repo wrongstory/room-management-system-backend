@@ -45,11 +45,13 @@ Edge는 Auth user → 최신 active profile → 유효·미폐기 session → �
 검증한다. DB command도 최신 actor, 본인 attempt, current notified assignment/revision, target 관계,
 CAS와 상태 전이를 확인한다. service-role 호출이나 idempotency replay도 현재 권한을 우회하지 않는다.
 
-시작은 현재 KST 서비스 날짜·접근 시간창·source 관계·실제 checkout/materialization·점유를 다시
+시작은 서비스 날짜 미도래·접근 시각 미도래·source 관계·실제 checkout/materialization·점유를 다시
 검증한다. additional의 과거 activation 창이 유효했다는 이유로 현재 투숙 중인 객실에서 시작할 수
 없다. demo/fallback duration을 새로운 최대 청소시간이나 미래 점유 예측 정본으로 쓰지 않는다.
 처음 통보 당시 객실 identity와 immutable attempt room snapshot이 현재 target의 객실과 일치해야
 시작할 수 있다. legacy snapshot null/missing을 현재 객실로 추측해서 채우지 않는다.
+#305/#308 후보에서는 서비스 날짜/dueAt이 지났다는 이유만으로 시작을 거부하지 않는다.
+기존 scheduled/assignment/maid identity를 유지하며 현재 안전 조건을 재검증한다.
 
 완료는 합법적으로 시작한 물리 수행의 종료 선언이다. 자정, dueAt 경과 또는 stayover 시작 뒤
 정상 scheduled checkout이 발생했다는 이유만으로 거부하지 않는다. 현재 actor/ownership,
@@ -91,6 +93,9 @@ raw before/after state, template/room snapshot, request hash, PIN, PII, auth/ses
   거부한다. 따라서 활성화만 되고 시작하지 않은 scheduled가 마감/자정을 넘으면 start가
   fail-closed된다. #7A 범위에는 관리자 해소 경로가 없었다. 2026-09-08 사용자 승인에 따른
   #7B feature가 별도 관리자 만료 해소를 구현하며, 이를 #7A의 자동 처리로 소급해 표현하지 않는다.
+
+위 만료 차단·해소 설명은 과거 구현 기록이다. #305/#308 후보는 시간 경과만으로 시작을
+차단하거나 supersede/자동 이월하지 않는다. 현재 검증·후속·배포 범위는 [지연 업무 계약](./CLEANING_OVERDUE.md)을 따른다.
 
 기존 dev26 migrations는 수정하지 않고 append-only migration을 추가한다. 운영 19 migrations,
 production OpenAPI 39 paths / 43 operations, main/recovery/Edge/Pages/Cron/tag는 이번 작업에서 변경하지 않는다.

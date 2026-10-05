@@ -14,6 +14,9 @@ const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
 const issueIdSchema = z.object({ roomId: z.uuid(), issueId: z.uuid() });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
 const expectedVersionSchema = z.number().int().positive();
+const roomListQuerySchema = z.object({
+  serviceDate: z.iso.date().refine((value) => !value.startsWith('0000-')).optional()
+}).strict();
 const roomEventQuerySchema = z
   .object({
     limit: z.preprocess(
@@ -66,9 +69,14 @@ const displayStatusOverrideSchema = z.object({
 }).strict();
 
 const candleSchema = operationDecisionSchema.extend({
-  count: z.number().int().nonnegative(),
+  count: z.number().int().min(0).max(2147483647),
   physicallyVerified: z.boolean().default(false)
-});
+}).strict();
+const candleQuerySchema = z.object({
+  roomId: z.uuid().optional(),
+  cursor: z.uuid().optional(),
+  limit: z.string().regex(/^(?:[1-9]|[1-4]\d|50)$/).transform(Number).optional()
+}).strict().refine((input) => !input.roomId || !input.cursor, 'roomId와 cursor를 함께 사용할 수 없습니다.');
 
 const issueSchema = operationDecisionSchema.extend({
   category: z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/),
@@ -173,10 +181,19 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
   return async (app) => {
     const authenticated = [app.authenticate, app.requirePasswordChanged];
     const admin = [...authenticated, app.requireAdmin];
+    const candleAccess = [...authenticated, async (request: FastifyRequest) => {
+      if (!['admin', 'maid'].includes(request.actor.role)) throw new AppError(403, 'FORBIDDEN', '촛불 조정 권한이 필요합니다.');
+    }];
 
-    app.get('/', { preHandler: admin }, async (request) => ({
-      rooms: await roomService.list(request.actor)
-    }));
+    app.get('/', { preHandler: admin }, async (request, reply) => {
+      const query = roomListQuerySchema.parse(request.query);
+      return reply.header('Cache-Control', 'no-store').send({
+        rooms: await roomService.list(
+          request.actor,
+          query.serviceDate === undefined ? undefined : { serviceDate: query.serviceDate }
+        )
+      });
+    });
 
     app.post('/pins/bootstrap', { preHandler: admin }, async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
@@ -291,7 +308,13 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       };
     });
 
-    app.post('/:roomId/candles', { preHandler: admin }, async (request, reply) => {
+    app.get('/candles', { preHandler: candleAccess }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      return roomService.listCandles(request.actor, candleQuerySchema.parse(request.query));
+    });
+
+    app.post('/:roomId/candles', { preHandler: candleAccess }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
       const { roomId } = roomIdSchema.parse(request.params);
       const input = candleSchema.parse(request.body);
       const operation = await roomService.mutateOperation(request.actor, {

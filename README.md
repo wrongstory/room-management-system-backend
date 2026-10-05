@@ -1,5 +1,17 @@
 # CASTLE THE ART 객실관리 백엔드
 
+> 2026-10-04 최신 작업: #367/PR369·#368/PR370은 `dev@e9fcc564`까지 통합했다. v0.8.0 후보 `release/v0.8.0@5408c54`는 고정하며 운영 gate를 유지한다. 사용자 승인 별도 개발 [#329 기존 세션의 제한 업무 재진입](docs/LIMITED_SESSION_REENTRY.md)은 새 SHA에서 Node1275·Edge477·Python95·LF fresh101·upgrade27/SQL79·4774·KST145·경합7·추가 권한4·합성복구 PASS, 독립 소스 QA 새 확정 P0/P1/P2=0이다. strict 신규0/기존17 FAIL과 최초 전체SQL FAIL·동일 소스 재실행 PASS 이력을 보존한다. 승인된 진단용 commit·push·Draft PR 공유 단계이며 CI·dev 통합·운영 제공·프런트 UAT는 미완료다. 프런트 source·새 로그인 권한·Auth 설정·키/PIN/송금은 변경하지 않는다. 아래 선행 작업/후보 상태는 과거 checkpoint다.
+
+> 릴리스 CI `37127623239`는 application PASS / migration FAIL이다. 전체26 upgrade·SQL78/4641·KST145는 PASS지만 알림 delivery fixture drain이 실패했고 뒤5개 경합 script는 NOT RUN이다. [#371](https://github.com/wrongstory/room-management-system-backend/issues/371)에서 테스트 종료 판정·claim 조건 정합화를 별도로 처리한다. 실패 CI와 실제 운영 백업·보안 DB 연결 gate가 해소되기 전 병합·배포하지 않는다.
+
+> 2026-10-03 최신: #331 PR361이 `dev@eb1ec3e`로 통합됐다(required CI37111364892·독립 QA98). #329와 첫 중간 릴리스에 선행하는 [#352 공용 세션 강제 만료 검사](docs/AUTH_SESSION_HARD_EXPIRY.md)를 별도 구현 중이다. [#364 v0.8.0 점검 릴리스](https://github.com/wrongstory/room-management-system-backend/issues/364)는 release/main 검증·병합 후 승인된 pending DB→API/예약 스케줄러를 승격한다. 아래 source 후보·운영 수치는 과거 checkpoint이며 배포/UAT 완료가 아니다. 프런트 개발·Node fallback 활성화·Auth 설정·키·실제 PIN/송금은 포함하지 않는다.
+
+> 2026-10-03 #331 구현 후보: #324 [PR #359](https://github.com/wrongstory/room-management-system-backend/pull/359)가 통합된 `dev@8481e219d7fbd92fe3587081efca9f3bc632bba6`/98 migrations를 기준으로 송금 표시 on/off와 금액 근거 재확인 API를 추가했다. 후보는 99 migrations·137 paths/148 operations이며, 실제 지급 원장은 변경하지 않는다. 검증·독립 QA·CI·통합 상태는 [표시 계약](docs/PAYROLL_REMITTANCE_MARKER.md)을 따른다. 아래 과거 dev/운영 수치는 당시 checkpoint이며 이번 작업의 운영 배포를 뜻하지 않는다.
+
+> 2026-10-03 최신 기준: #325는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358), source `78582789ce66a92d9aae3072b7b8fbc6d5fa9843` → dev squash `d65f4f600f856bd990b52762cf57530830970f12`로 source/dev 완료했다. exact tree CI `37093733970` application/migration PASS·독립 QA98/100이며 초기 CI 실패는 이력으로 보존한다. 아래 #325 후보 표현은 과거 checkpoint다. 현재 #324의 객실별 확정/미확정 주급 근거 조회는 이 dev/97 migrations에서 시작한 후보이며 [조회 계약](docs/PAYROLL_WORK_DETAILS.md)을 따른다. 운영·프런트·main·recovery는 변경하지 않는다.
+
+> 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](docs/PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.
+
 `room-management-system` 정적 와이어프레임을 실제 운영 서버로 전환하기 위한 TypeScript 백엔드입니다. 인증 경계, 단일 개발자와 관리자·메이드 개별 계정 수명주기, 객실·예약 원자 명령, Supabase 스키마·RLS, 121개 객실 초기 마스터와 자동 테스트가 들어 있습니다.
 
 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`이고, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`입니다. 개발 정본은 79 migrations / OpenAPI `0.5.1` 129 paths / 139 operations이며 #256 사진 정규화, #250 진행 중 메이드의 후속 계획 허용, #264 수행 불가 취소·재배정을 포함합니다. 마지막으로 검증된 운영 API는 78 migrations, Supabase `api` ACTIVE v24, OpenAPI `0.5.1` 128 paths / 138 operations이며 Pages도 그 배포본과 artifact parity를 완료했습니다. 기존 관리자 UAT에서 예약 가능 미리보기의 `guestCount` 생략·`null`·양수와 예약 현황 인원 표시, 객실 유형별 최소·최대 인원 적용을 확인했습니다. 개발 정본의 후속 기능은 release 승격 전까지 운영 API에서 사용할 수 없고, `v0.5.1` tag와 GitHub Release도 아직 발행하지 않았습니다.

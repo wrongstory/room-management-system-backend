@@ -27,7 +27,7 @@ import {
   type AssignmentPreviewService,
   SupabaseAssignmentPreviewService
 } from './modules/assignments/assignment-preview.service.js';
-import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
+import { checkoutIncidentCollectionGuard, createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
 import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
 import { createCleaningTemplateRoutes } from './modules/cleaning-templates/cleaning-template.routes.js';
 import {
@@ -46,6 +46,9 @@ import {
   SupabaseNotificationService
 } from './modules/notifications/notification.service.js';
 import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
+import { payrollAdjustmentBookGuard } from './modules/payroll/payroll-adjustment-book.js';
+import { payrollWorkDetailsGuard } from './modules/payroll/payroll-work-details-guard.js';
+import { payrollRemittanceGuard } from './modules/payroll/payroll-remittance-guard.js';
 import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
 import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
 import { photoError } from './modules/photos/photo-service.js';
@@ -64,6 +67,8 @@ import {
   SupabaseRoomPinSheetOperationsService
 } from './modules/rooms/room-pin-sheet-operations.service.js';
 import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
+import { createLimitedAttemptRoutes, limitedAttemptPathGuard } from './modules/limited-attempts/limited-attempt.routes.js';
+import { LimitedAttemptService } from './modules/limited-attempts/limited-attempt.service.js';
 import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
 
 export interface AppServices {
@@ -91,6 +96,7 @@ export interface BuildAppOptions {
   logger?: boolean;
   photoServices?: PhotoHttpServices;
   submissionService?: SubmissionService;
+  limitedAttemptService?: LimitedAttemptService;
 }
 
 function bearerToken(authorization: string | undefined): string {
@@ -170,7 +176,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         vapidPublicKey: options.env.VAPID_PUBLIC_KEY,
         vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
       }),
-      checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
+      checkoutIncidents: new SupabaseCheckoutIncidentService(clients, options.env.INSPECTION_CURSOR_HMAC_SECRET),
       cleaningTemplates: new SupabaseCleaningTemplateService(clients),
       cleaningHistory: new SupabaseCleaningHistoryService(clients),
       workHistory: new SupabaseWorkHistoryService(clients)
@@ -181,6 +187,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     );
   }
 
+  if (services.checkoutIncidents) app.addHook('onRequest', checkoutIncidentCollectionGuard);
+  app.addHook('onRequest', payrollAdjustmentBookGuard);
+  app.addHook('onRequest', payrollWorkDetailsGuard);
+  app.addHook('onRequest', payrollRemittanceGuard);
+  app.addHook('onRequest', limitedAttemptPathGuard);
   await app.register(helmet, { global: true });
   await app.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
   await app.register(cors, {
@@ -310,11 +321,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
   await app.register(createPhotoRoutes(photoServices));
+  let limitedClients: ReturnType<typeof createSupabaseClients> | undefined;
+  await app.register(createLimitedAttemptRoutes(
+    options.limitedAttemptService ?? new LimitedAttemptService({ rpc: async (name, args) => {
+      limitedClients ??= createSupabaseClients(options.env);
+      return limitedClients.admin.rpc(name, args);
+    } }),
+    photoServices.authenticate,
+  ));
   if (submissionService) {
     await app.register(createSubmissionRoutes(submissionService, async (request) => {
       try {
         const identity = await photoServices.authenticate(webRequest(request), false);
-        return { profileId: identity.profileId, role: identity.role, mustChangePassword: false };
+        return { profileId: identity.profileId, role: identity.role, mustChangePassword: false, sessionId: identity.sessionId };
       } catch (error) {
         const safe = photoError(error);
         throw new AppError(safe.statusCode, safe.code, '허용된 제한 수행 권한이 필요합니다.');

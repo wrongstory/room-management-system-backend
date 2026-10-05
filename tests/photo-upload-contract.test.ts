@@ -157,7 +157,7 @@ describe('photo upload pure application contract (no provider or HTTP calls)', (
     });
     for(const key of ['requestHash','idempotencyKey','providerLocator','claimDigest','token','rawAfterState'])
       expect(summary.properties).not.toHaveProperty(key);
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(132);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(140);
     const removal = openApiDocument.paths["/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}"]?.delete;
     for (const name of ["assignmentRevision", "expectedCollectionRevision", "expectedItemRevision"]) {
       const parameter = removal?.parameters?.find((value) => "name" in value && value.name === name);

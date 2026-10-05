@@ -31,6 +31,33 @@ create temp table incident_fixture(
   decision_available_from timestamptz,decision_due_at timestamptz
 );
 
+-- #354: keep the future-denial fixture structurally valid across KST midnight.
+-- Otherwise the canonical date/window guard masks the intended decision guard.
+create function pg_temp.incident_future_window(p_at timestamptz)
+returns table(service_date date,available_from timestamptz,due_at timestamptz)
+language sql immutable as $$
+  select ((p_at+interval '10 minutes') at time zone 'Asia/Seoul')::date,
+    p_at+interval '10 minutes',p_at+interval '11 minutes'
+$$;
+
+select ok(
+  future_window.service_date=boundary.expected_date
+    and future_window.available_from<future_window.due_at
+    and (future_window.available_from at time zone 'Asia/Seoul')::date=future_window.service_date
+    and future_window.due_at<=(future_window.service_date+1)::timestamp at time zone 'Asia/Seoul'
+    and future_window.available_from=date_trunc('minute',future_window.available_from)
+    and future_window.due_at=date_trunc('minute',future_window.due_at)
+    and future_window.service_date-(extract(isodow from future_window.service_date)::integer-1)=boundary.expected_week,
+  '#354 structurally valid future window: '||boundary.label
+) from (values
+  ('2026-10-02 23:49:00+09'::timestamptz,date '2026-10-02',date '2026-09-28','due exactly midnight'),
+  ('2026-10-02 23:50:00+09'::timestamptz,date '2026-10-03',date '2026-09-28','from next midnight'),
+  ('2026-10-02 23:58:00+09'::timestamptz,date '2026-10-03',date '2026-09-28','prior-day source after midnight'),
+  ('2026-10-03 00:00:00+09'::timestamptz,date '2026-10-03',date '2026-09-28','same-day midnight source'),
+  ('2026-10-04 23:50:00+09'::timestamptz,date '2026-10-05',date '2026-10-05','Sunday to Monday work week')
+) boundary(at_time,expected_date,expected_week,label)
+cross join lateral pg_temp.incident_future_window(boundary.at_time) future_window;
+
 create function pg_temp.incident_slots() returns jsonb language sql immutable as $$
   select jsonb_build_array(jsonb_build_object(
     'slotKey','room-proof','required',true,'displayOrder',0,
@@ -66,6 +93,7 @@ declare
   v_commit_at timestamptz:=((v_planned_date-1)+time '09:00') at time zone 'Asia/Seoul';
   v_decision_available_from timestamptz;
   v_decision_due_at timestamptz;
+  v_future_week date;
 begin
   -- Keep the successful decision window valid at every KST wall-clock hour.
   -- In the first five minutes after midnight v_at belongs to the prior service
@@ -120,6 +148,19 @@ begin
     end loop;
   end if;
 
+  -- A valid future window can cross Sunday -> Monday. Provide that exact work
+  -- week's availability so an unrelated availability guard cannot mask it.
+  select future_window.service_date-(extract(isodow from future_window.service_date)::integer-1)
+    into v_future_week from pg_temp.incident_future_window(v_at) future_window;
+  if not exists(select 1 from public.availability_versions
+    where maid_profile_id=pg_temp.iid(3) and week_start=v_future_week) then
+    v_availability:=pg_temp.iid(723);
+    insert into public.availability_versions(id,maid_profile_id,week_start,version,submitted_at)
+      values(v_availability,pg_temp.iid(3),v_future_week,1,v_at);
+    insert into public.availability_days(availability_version_id,work_date,available)
+      select v_availability,v_future_week+i,true from generate_series(0,6) i;
+  end if;
+
   v_result:=public.save_cleaning_assignment_draft(
     pg_temp.iid(1),v_target_id,pg_temp.iid(2),1,1,
     'checkout-incident-draft',repeat('2',64)
@@ -156,8 +197,26 @@ begin
   );
 end $$;
 
+select ok(exists(select 1 from incident_fixture fixture
+  cross join lateral pg_temp.incident_future_window(fixture.at_time) future_window
+  join public.availability_versions version on version.maid_profile_id=pg_temp.iid(3)
+    and version.week_start=future_window.service_date-(extract(isodow from future_window.service_date)::integer-1)
+  join public.availability_days day on day.availability_version_id=version.id
+    and day.work_date=future_window.service_date and day.available),
+  '#354 future denial fixture includes the next maid exact work-date availability');
 select ok((select attempt_id is not null from incident_fixture),
   'actual scheduler checkout produces a scheduled attempt fixture');
+create temp table scheduled_snapshot_before_report as
+select assignment.notified_reservation_schedule_snapshot value,assignment.id
+from public.cleaning_assignments assignment join incident_fixture fixture on fixture.assignment_id=assignment.id;
+select is((select value->'actualCheckoutAt' from scheduled_snapshot_before_report),'null'::jsonb,
+  '#328 automatic checkout never hydrates earlier notification snapshot');
+select is((public.get_assignment_schedule_read(pg_temp.iid(2),pg_temp.iid(202),
+  array[(select assignment_id from incident_fixture)],true,'maid')->0->'currentDeparture'->>'actualCheckoutAt')::timestamptz,
+  (select at_time from incident_fixture),'#328 exact current card observes committed automatic checkout');
+select is(public.get_assignment_schedule_read(pg_temp.iid(2),pg_temp.iid(202),
+  array[(select assignment_id from incident_fixture)],false,'maid')->0->'currentDeparture',
+  'null'::jsonb,'#328 history never includes automatic live checkout');
 select ok(exists(
   select 1 from public.room_occupancy_events occupancy
   join incident_fixture fixture on fixture.reservation_id=occupancy.reservation_id
@@ -333,10 +392,11 @@ select throws_ok(
     pg_temp.iid(1),pg_temp.iid(201),incident_id,report_result->>'impactFingerprint','CONFIRM_DEPARTED','GUEST_DEPARTURE_CONFIRMED',
     jsonb_build_object(
       'maidProfileId',pg_temp.iid(3),'sequenceNumber',1,
-      'serviceDate',(at_time at time zone 'Asia/Seoul')::date,
-      'availableFrom',at_time+interval '10 minutes','dueAt',at_time+interval '11 minutes'
+      'serviceDate',future_window.service_date,
+      'availableFrom',future_window.available_from,'dueAt',future_window.due_at
     )::text,'checkout-incident-future-departed',repeat('f',64)
-  ) from incident_fixture),
+  ) from incident_fixture
+    cross join lateral pg_temp.incident_future_window(incident_fixture.at_time) future_window),
   '22023','INVALID_CHECKOUT_INCIDENT_DECISION',
   'confirmed departure cannot schedule work in the future'
 );
@@ -644,6 +704,78 @@ select throws_ok(
   $$select public.get_checkout_presence_incident(
     pg_temp.iid(3),pg_temp.iid(203),(select incident_id from incident_fixture)
   )$$,'42501','SESSION_REVOKED','revoked maid session cannot read an incident');
+
+-- Execute the real EXTEND decision after every original #133 assertion. This
+-- deliberately reopens a completed stay that retains its old checkout event;
+-- stale event history must not leak into the new notification or current fact.
+create temp table schedule_extension_fixture as
+select (result->>'incidentId')::uuid incident_id,result->>'impactFingerprint' fingerprint,
+  (((clock_timestamp() at time zone 'Asia/Seoul')::date+1)+time '12:00')
+    at time zone 'Asia/Seoul' new_checkout,
+  assignment.id old_assignment_id,assignment.notified_reservation_schedule_snapshot old_snapshot,
+  reservation.version old_reservation_version,
+  (select count(*) from public.cleaning_assignments where cleaning_target_id=assignment.cleaning_target_id) assignment_count,
+  (select count(*) from public.notifications where event_family='assignment.commit_notified') notice_count
+from second_report
+join started_incident_fixture started on true
+join public.cleaning_assignments assignment on assignment.id=started.assignment_id
+join public.reservations reservation on reservation.id=started.reservation_id;
+do $$
+declare v_work_date date:=(select (new_checkout at time zone 'Asia/Seoul')::date from schedule_extension_fixture);
+  v_week_start date:=v_work_date-(extract(isodow from v_work_date)::int-1); availability_id uuid;
+begin
+  if not exists(select 1 from public.availability_versions where maid_profile_id=pg_temp.iid(2)
+    and is_current and public.availability_versions.week_start=v_week_start) then
+    insert into public.availability_versions(maid_profile_id,week_start,version,submitted_at)
+    values(pg_temp.iid(2),v_week_start,1,clock_timestamp()) returning id into availability_id;
+    insert into public.availability_days(availability_version_id,work_date,available)
+    select availability_id,v_week_start+n,true from generate_series(0,6) n;
+  end if;
+end $$;
+create temp table schedule_extension_result as
+select public.decide_checkout_presence_incident(pg_temp.iid(1),pg_temp.iid(201),fixture.incident_id,1,
+  fixture.fingerprint,'EXTEND_CHECKOUT','GUEST_STILL_PRESENT_EXTENDED',fixture.new_checkout,
+  jsonb_build_object('maidProfileId',pg_temp.iid(2),'sequenceNumber',100,
+    'serviceDate',(fixture.new_checkout at time zone 'Asia/Seoul')::date,
+    'availableFrom',fixture.new_checkout,'dueAt',fixture.new_checkout+interval '1 hour'),
+  'checkout-incident-schedule-extension',repeat('e',64)) value
+from schedule_extension_fixture fixture;
+select ok((select reservation.status='active' and reservation.actual_checkout_at is null
+  and reservation.version=fixture.old_reservation_version+1
+  from public.reservations reservation join incident_fixture initial on initial.reservation_id=reservation.id
+  cross join schedule_extension_fixture fixture),'#328 real EXTEND reopens exact source once');
+select ok((select count(*)=fixture.assignment_count+1
+  from public.cleaning_assignments assignment cross join schedule_extension_fixture fixture
+  where assignment.cleaning_target_id=(select target_id from incident_fixture) group by fixture.assignment_count),
+  '#328 moving reservation UPDATE does not double-create successor responsibility');
+select ok((select count(*)=fixture.notice_count+1 from public.notifications cross join schedule_extension_fixture fixture
+  where event_family='assignment.commit_notified' group by fixture.notice_count),
+  '#328 EXTEND emits exactly one new actionable notification');
+select ok((select (assignment.notified_reservation_schedule_snapshot->>'plannedCheckoutAt')::timestamptz=fixture.new_checkout
+    and (assignment.notified_reservation_schedule_snapshot->>'sourceReservationVersion')::bigint=reservation.version
+    and assignment.notified_reservation_schedule_snapshot->'actualCheckoutAt'='null'::jsonb
+    and assignment.notified_reservation_schedule_snapshot->>'isScheduleUpdated'='true'
+  from public.cleaning_assignments assignment join incident_fixture initial on assignment.cleaning_target_id=initial.target_id
+  join public.reservations reservation on reservation.id=initial.reservation_id
+  cross join schedule_extension_fixture fixture where assignment.is_current),
+  '#328 successor captures new checkout plan/version and no stale actual checkout');
+select is((select assignment.notified_reservation_schedule_snapshot from public.cleaning_assignments assignment
+  join schedule_extension_fixture fixture on fixture.old_assignment_id=assignment.id),
+  (select old_snapshot from schedule_extension_fixture),'#328 extension preserves exact previously captured history');
+select is(public.get_assignment_schedule_read(pg_temp.iid(2),pg_temp.iid(202),
+  array[(select id from public.cleaning_assignments where cleaning_target_id=(select target_id from incident_fixture)
+    and is_current)],true,'maid')->0->'currentDeparture'->'actualCheckoutAt','null'::jsonb,
+  '#328 old scheduled checkout event cannot survive live reopened occupancy proof');
+select is(public.get_assignment_schedule_read(pg_temp.iid(1),pg_temp.iid(201),
+  array[(select old_assignment_id from schedule_extension_fixture)],true,'admin')->0->'currentDeparture','null'::jsonb,
+  '#328 ended historical responsibility never receives current reservation facts');
+select is((select public.decide_checkout_presence_incident(pg_temp.iid(1),pg_temp.iid(201),fixture.incident_id,1,
+  fixture.fingerprint,'EXTEND_CHECKOUT','GUEST_STILL_PRESENT_EXTENDED',fixture.new_checkout,
+  jsonb_build_object('maidProfileId',pg_temp.iid(2),'sequenceNumber',100,
+    'serviceDate',(fixture.new_checkout at time zone 'Asia/Seoul')::date,
+    'availableFrom',fixture.new_checkout,'dueAt',fixture.new_checkout+interval '1 hour'),
+  'checkout-incident-schedule-extension',repeat('e',64)) from schedule_extension_fixture fixture),
+  (select value from schedule_extension_result),'#328 EXTEND keeps exact successful receipt replay');
 
 select * from finish();
 rollback;

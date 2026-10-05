@@ -1,6 +1,6 @@
 begin;
 
-select plan(33);
+select plan(35);
 
 insert into auth.users (id) values
   ('19000000-0000-4000-8000-000000000001'),
@@ -310,13 +310,18 @@ select ok(
     from jsonb_array_elements(
       private.assignment_commit_impact_at(
         '2027-10-01', '2027-10-01 17:00:00+09'
-      ) -> 'blockedDrafts'
+      ) -> 'committableDrafts'
     ) blocked
     where blocked ->> 'cleaningTargetId' = '49000000-0000-4000-8000-000000000002'
-      and blocked #>> '{reasonCodes,0}' = 'ASSIGNMENT_WINDOW_EXPIRED'
   ),
-  'an expired due window is reported with a stable reason code'
+  'elapsed dueAt alone does not block a current-day draft'
 );
+select is((select reason_code from private.assignment_commit_candidates_at('2027-10-01','2027-10-02 09:00+09')
+  where target_id='49000000-0000-4000-8000-000000000002'), 'ASSIGNMENT_COMMIT_NOT_ALLOWED',
+  'deadline removal does not clear the separate past-date new-commit scope guard');
+select is((select reason_code from private.assignment_commit_candidates_at('2027-10-01','2027-09-29 09:00+09')
+  where target_id='49000000-0000-4000-8000-000000000002'), 'ASSIGNMENT_COMMIT_NOT_ALLOWED',
+  'deadline removal does not clear the separate beyond-tomorrow new-commit scope guard');
 
 update public.cleaning_targets
 set due_at = '2027-10-01 16:30:00+09'

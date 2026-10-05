@@ -1,11 +1,187 @@
 import type { openApiDocument } from "./openapi.ts";
 import { openApiResponse, swaggerUiResponse } from "./openapi.ts";
 
+Deno.test("payroll adjustment book has an exact admin-only global CAS read contract", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const operation = document.paths["/v1/payroll/adjustment-book"].get;
+  const schemas = document.components.schemas;
+  const fields = ["maidProfileId", "weekStart", "currentBookVersion"];
+  assert(
+    operation.operationId === "getPayrollAdjustmentBook",
+    "stable read operation",
+  );
+  assert(operation["x-required-roles"].join() === "admin", "admin-only read");
+  assert(
+    operation.parameters.every((parameter) =>
+      parameter.required === true && parameter.in === "query"
+    ) && operation.parameters.map((parameter) =>
+          parameter.name
+        ).join() === "maidProfileId,weekStart",
+    "two strict required context fields",
+  );
+  assert(
+    operation.responses["200"].headers["Cache-Control"].schema.const ===
+        "no-store" && Object.hasOwn(operation.responses, "409"),
+    "no-store with future week conflict",
+  );
+  assert(
+    schemas.PayrollAdjustmentBook.additionalProperties === false &&
+      schemas.PayrollAdjustmentBook.required.join() === fields.join() &&
+      Object.keys(schemas.PayrollAdjustmentBook.properties).join() ===
+        fields.join(),
+    "minimal current version, no source book ID or private state",
+  );
+  assert(
+    schemas.PayrollAdjustmentBook.properties.currentBookVersion.minimum === 0 &&
+      schemas.PayrollAdjustmentBook.properties.currentBookVersion.maximum ===
+        Number.MAX_SAFE_INTEGER,
+    "exact safe integer range",
+  );
+  assert(
+    schemas.PayrollAdjustmentBookEnvelope.required.join() === "adjustmentBook",
+    "required envelope",
+  );
+});
+
+Deno.test("assignment schedule separates history and current departure", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const schemas = document.components.schemas;
+  const fields = [
+    "capturedAt",
+    "scheduleRevision",
+    "scheduleReasonCode",
+    "sourceReservationVersion",
+    "plannedCheckoutAt",
+    "actualCheckoutAt",
+    "plannedRoomDepartureAt",
+    "actualRoomDepartureAt",
+    "nextCheckInAt",
+    "nextRoomArrivalAt",
+    "nextArrivalKind",
+    "isEarlyCheckIn",
+    "isLateCheckout",
+    "isScheduleUpdated",
+  ];
+  const snapshot = schemas.AssignmentScheduleSnapshot;
+  assert(
+    snapshot.additionalProperties === false,
+    "strict non-PII schedule pack",
+  );
+  assert(
+    JSON.stringify([...snapshot.required].sort()) ===
+      JSON.stringify([...fields].sort()),
+    "complete required snapshot",
+  );
+  assert(
+    JSON.stringify(Object.keys(snapshot.properties).sort()) ===
+      JSON.stringify([...fields].sort()),
+    "no raw lineage fields",
+  );
+  const card = schemas.AssignmentCard;
+  assert(
+    card.required.includes("scheduleSnapshot") &&
+      card.required.includes("currentDeparture"),
+    "nullable packs required on cards",
+  );
+  assert(
+    card.properties.scheduleSnapshot.anyOf.some((schema) =>
+      "type" in schema && schema.type === "null"
+    ),
+    "legacy snapshot null",
+  );
+  assert(
+    card.properties.currentDeparture.anyOf.some((schema) =>
+      "type" in schema && schema.type === "null"
+    ),
+    "history departure null",
+  );
+  assert(
+    schemas.AssignmentCurrentDeparture.additionalProperties === false,
+    "strict current fact",
+  );
+  assert(
+    schemas.AssignmentCurrentDeparture.required.join(",") ===
+      "evaluatedAt,actualCheckoutAt,actualRoomDepartureAt",
+    "minimal current fact",
+  );
+  assert(
+    snapshot.properties.isEarlyCheckIn.description.includes("KST 16:00") &&
+      snapshot.properties.isEarlyCheckIn.description.includes("room_move"),
+    "early only planned check-in, not room movement",
+  );
+  assert(
+    snapshot.properties.isLateCheckout.description.includes("KST 11:00"),
+    "late planned checkout KST basis",
+  );
+  assert(
+    document.paths["/v1/assignments"].get.description.includes(
+      "includeHistory=true에서는 모든 행이 null",
+    ),
+    "includeHistory never hydrates current facts",
+  );
+  assert(
+    document.paths["/v1/assignments/{cleaningTargetId}/history"].get.description
+      .includes("항상 null"),
+    "history never hydrates current facts",
+  );
+  assert(
+    !("scheduleSnapshot" in schemas.AssignmentPreviewRow.properties) &&
+      !("scheduleSnapshot" in schemas.AssignmentCommitCandidate.properties),
+    "no preview or command response expansion",
+  );
+});
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
 }
+Deno.test("preview diagnostics have bounded strict schemas and no-store", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const schemas = document.components.schemas;
+  assert(
+    schemas.AssignmentPreviewResult.required.includes("diagnostics"),
+    "diagnostics required",
+  );
+  assert(
+    schemas.AssignmentPreviewRemainingTarget.additionalProperties === false,
+    "strict remaining",
+  );
+  assert(
+    schemas.AssignmentPreviewRemainingTarget.properties.reasonCodes.items.enum
+      .length === 7,
+    "remaining codes",
+  );
+  assert(
+    schemas.AssignmentPreviewDiagnostics.additionalProperties === false,
+    "strict diagnostics",
+  );
+  const fixed = schemas.AssignmentPreviewDiagnostics.properties.fixedExclusions;
+  assert(
+    fixed.maxItems === 242 && fixed.items.additionalProperties === false,
+    "bounded fixed exclusions",
+  );
+  assert(
+    fixed.items.properties.reasonCodes.items.enum.length === 7,
+    "fixed exclusion codes",
+  );
+  assert(
+    document.paths["/v1/assignments/preview"].post.responses["200"]
+      .headers["Cache-Control"].schema.const === "no-store",
+    "no-store contract",
+  );
+  for (
+    const response of Object.values(
+      document.paths["/v1/assignments/preview"].post.responses,
+    )
+  ) {
+    assert(
+      response.headers["Cache-Control"].schema.const === "no-store",
+      "errors are also no-store",
+    );
+  }
+});
+
 Deno.test("OpenAPI publishes the v0.6.0 cleaning workflow contract", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   assert(
@@ -219,13 +395,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 132 &&
+    Object.keys(document.paths).length === 140 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 142,
-    "combined candidate contract 132/142",
+        ).length === 151,
+    "combined candidate contract 140/151",
   );
 });
 
@@ -1369,6 +1545,15 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
     "stable publish operation",
   );
   assert(
+    route.post.description.includes("6개 순서를 모두 허용") &&
+      route.post.description.includes(
+        "canonical request hash·저장·응답을 유지",
+      ) &&
+      !route.post.description.includes("#382 후속") &&
+      !route.post.description.includes("허용 범위를 확대하지 않습니다"),
+    "publication description matches the order-independent input contract",
+  );
+  assert(
     route.get["x-required-roles"].join() === "admin" &&
       route.post["x-required-roles"].join() === "admin",
     "business admin only",
@@ -1384,12 +1569,37 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
     "strict request and slots",
   );
   assert(
-    schemas.PublishCleaningTemplateRequest.properties.slots.minItems === 9 &&
-      schemas.PublishCleaningTemplateRequest.properties.slots.maxItems === 14 &&
+    schemas.CheckoutCleaningTemplateV9Slots.minItems === 3 &&
+      schemas.CheckoutCleaningTemplateV9Slots.maxItems === 3 &&
+      schemas.CheckoutCleaningTemplateV9Slots.items.$ref ===
+        "#/components/schemas/CheckoutCleaningTemplateV9Slot" &&
+      !("prefixItems" in schemas.CheckoutCleaningTemplateV9Slots) &&
+      schemas.CheckoutCleaningTemplateV9Slots.allOf.length === 3 &&
+      schemas.CheckoutCleaningTemplateV9Slots.allOf.every((rule, index) =>
+        rule.minContains === 1 && rule.maxContains === 1 &&
+        rule.contains.properties.slotKey.const ===
+          ["cleaning-proof", "bomb-proof", "issue-proof"][index]
+      ) &&
+      schemas.PublishCleaningTemplateRequest.properties.slots.oneOf.length ===
+        3 &&
       schemas.CheckoutCleaningTemplateV8Slot.allOf[1].required.includes(
         "maxPhotos",
       ) && schemas.CleaningTemplateSlot.properties.maxPhotos.maximum === 20,
-    "v8 A-contract publishes bounded slot and photo counts",
+    "unordered v9 roles each occur once; historical v8/pre-A branches stay distinct",
+  );
+  assert(
+    schemas.CheckoutCleaningTemplateV9Slot.oneOf.length === 3 &&
+      schemas.CheckoutCleaningTemplateV9Slot.oneOf.every((slot, index) =>
+        slot.additionalProperties === false && slot.required.length === 5 &&
+        slot.properties.slotKey.const ===
+          ["cleaning-proof", "bomb-proof", "issue-proof"][index] &&
+        slot.properties.displayOrder.const === index &&
+        slot.properties.required.const === (index === 0) &&
+        slot.properties.label.const ===
+          ["청소 사진", "폭탄방 증빙", "특이사항 증빙"][index] &&
+        slot.properties.maxPhotos.const === (index === 0 ? 20 : 10)
+      ),
+    "array order does not change canonical role/order/label/flags/capacities",
   );
   assert(
     !(schemas.PublishCleaningTemplateRequest.required as readonly string[])
@@ -1440,10 +1650,92 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
   }
 });
 
+function assertLimitedOperationSet(
+  paths: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+): void {
+  const expectedPaths = [
+    "/v1/limited/attempts",
+    "/v1/limited/attempts/{attemptId}",
+    "/v1/limited/attempts/{attemptId}/complete-field-work",
+  ];
+  const limitedPaths = Object.keys(paths).filter((path) =>
+    path.startsWith("/v1/limited/")
+  ).sort();
+  assert(
+    JSON.stringify(limitedPaths) === JSON.stringify(expectedPaths),
+    "only exact discovery, read and complete limited paths exist",
+  );
+  const methods = [
+    "get",
+    "put",
+    "post",
+    "delete",
+    "options",
+    "head",
+    "patch",
+    "trace",
+  ];
+  const operations = limitedPaths.flatMap((path) =>
+    Object.keys(paths[path]).filter((method) => methods.includes(method)).map(
+      (method) => `${method.toUpperCase()} ${path}`,
+    )
+  ).sort();
+  assert(
+    JSON.stringify(operations) === JSON.stringify([
+      "GET /v1/limited/attempts",
+      "GET /v1/limited/attempts/{attemptId}",
+      "POST /v1/limited/attempts/{attemptId}/complete-field-work",
+    ]),
+    "only exact discovery GET, read GET and complete POST operations exist",
+  );
+}
+
+Deno.test("limited OpenAPI rejects unexpected methods and paths without count-only checks", async () => {
+  const doc = await openApiResponse({}).json() as typeof openApiDocument;
+  const discoveryPath = "/v1/limited/attempts";
+  const discovery = doc.paths[discoveryPath];
+  const missingDiscovery: Record<string, Record<string, unknown>> = {
+    ...doc.paths,
+  };
+  delete missingDiscovery[discoveryPath];
+  const invalidPaths = [
+    missingDiscovery,
+    {
+      ...doc.paths,
+      [discoveryPath]: { post: discovery.get },
+    },
+    {
+      ...missingDiscovery,
+      "/v1/limited/attempts/discover": discovery,
+    },
+    {
+      ...doc.paths,
+      "/v1/limited/attempts/unapproved": { get: discovery.get },
+    },
+    { ...doc.paths, "/v1/limited/attempts/unapproved": {} },
+    ...["post", "put", "patch", "delete", "options", "head", "trace"].map(
+      (method) => ({
+        ...doc.paths,
+        [discoveryPath]: { ...discovery, [method]: discovery.get },
+      }),
+    ),
+  ];
+  for (const paths of invalidPaths) {
+    let rejected = false;
+    try {
+      assertLimitedOperationSet(paths);
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "missing or unexpected limited operation is rejected");
+  }
+});
+
 Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and future media contracts", async () => {
   const doc = await openApiResponse({}).json() as typeof openApiDocument;
   const impact = doc.paths["/v1/attempts/lifecycle-impact"].get;
   const manage = doc.paths["/v1/attempts/{attemptId}/lifecycle"].post;
+  const discovery = doc.paths["/v1/limited/attempts"].get;
   const read = doc.paths["/v1/limited/attempts/{attemptId}"].get;
   const complete =
     doc.paths["/v1/limited/attempts/{attemptId}/complete-field-work"].post;
@@ -1453,7 +1745,8 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     "business admin lifecycle",
   );
   assert(
-    read["x-required-roles"].join(",") === "maid" &&
+    discovery["x-required-roles"].join(",") === "maid" &&
+      read["x-required-roles"].join(",") === "maid" &&
       complete["x-required-roles"].join(",") === "maid",
     "limited maid only",
   );
@@ -1487,18 +1780,15 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     "limited read and complete response stay restricted to three candidate statuses",
   );
   assert(
-    variants.length === 4 &&
+    variants.length === 3 &&
       variants.every((variant) =>
         variant.additionalProperties === false &&
-        variant.required.includes("expectedProfileVersion")
+        variant.required.includes("expectedProfileVersion") &&
+        variant.properties.action.const !== "expire_scheduled"
       ),
     "all actions strict CAS",
   );
-  assert(
-    Object.keys(doc.paths).filter((path) => path.startsWith("/v1/limited/"))
-      .length === 2,
-    "only read and complete limited endpoints exist",
-  );
+  assertLimitedOperationSet(doc.paths);
   const safeKeys = [
     "attemptId",
     "cleaningTargetId",
