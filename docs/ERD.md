@@ -432,6 +432,8 @@ erDiagram
 - 퇴실 의무와 checkout target은 예약·객실·의무 ID 복합키와 deferred constraint trigger로 commit 시점까지 양방향 동일성을 강제한다. `completed`는 동일 target의 승인 근거가, `cancelled`의 historical pointer는 동일 target의 취소 상태가 있어야 한다.
 - 입실 준비 `approved`는 같은 current attempt가 승인 상태이고, target 접근 가능 시각 이후 `시작 → 현장 완료 → 종료 → 제출 → 승인` 순서가 직전 점유 종료 이후·해당 체크인 이전에 같은 객실에서 완결됐음을 요구한다. `private.preparation_proof_usages`는 submission 소비를 append-only·전역 unique로 기록해 무효화 뒤에도 다른 예약에서 재사용하지 못하게 한다.
 - 예약 일정, 점유, 촛불, PIN 동기화 이력은 append-only다. 예약·객실 current row는 CAS version으로만 갱신한다.
+- #330 촛불 조정은 활성 admin/maid의 전용 RPC만 사용한다. 배정·승인·7일 이력 제한과 독립적이며 actor/time/before/after를 추가하고 다른 원장은 보존한다. 86번째 migration의 insert trigger는 room lock 뒤 기록 시각을 단조 증가시킨다. 테이블/컬럼 및 기존 RLS·FK index는 변경하지 않는다. 세부 계약은 `ROOM_CANDLES_330.md`를 따른다.
+
 - #318 최신 통합 후보는 원격 미적용인 원 SQL 본문 SHA를 보존해 #329 strict caller/snapshot 선행 검증 뒤로 재정렬한다. LIVE raw-state는 encrypted-current PIN/version/unresolved lease와 실제 materialized cleaning 의무를 기존 helper로 확인하며, 실제입실/미퇴실 active 최종 객실은 예정 종료 뒤에도 LIVE occupied다. 예정 퇴실 이후 inspection 상세조건은 cleaning materialization과 별개다. 날짜별 과거·미래·원장은 변경하지 않는다. [dev58a 재통합106개 후보와 이전104개 checkpoint](./ROOM_BOARD_DATE_FILTERS.md)를 따르며 DBML 테이블/권한 변경은 없다.
 - 예약 취소는 입실 전에만 soft cancel한다. 수동 체크아웃은 예정 일정을 덮어쓰지 않고 실제 시각과 점유 event를 추가한다.
 - 연박·추가 청소 요청은 `cleaning_targets`의 안정적인 ID와 `stayover_request`/`manual_room_request` source로 생성한다. 실제 초과 점유와 자정을 넘는 access window까지 interval로 충돌 검사한다. 2026-10-02 #326 B안·#348은 미배정/draft/notified 및 미착수 scheduled 요청을 PIN 공개 이력과 무관하게 CAS soft cancel한다. 취소 직전 잠근 current assignment ID를 감사에 고정해 통보된 당사자만 알리며 과거 담당자로 fallback하지 않는다. 대상·담당·수행·성공한 공개 이력은 삭제하지 않고 배정 종료 trigger로 entitlement와 미완료 reveal을 회수한다. 착수/terminal 및 자동 checkout 취소 경계는 유지한다. [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md) 참조.

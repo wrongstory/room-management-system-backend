@@ -5161,6 +5161,55 @@ export const openApiDocument = {
         "표시/운영 분류만 append-only override로 조정하거나 null로 해제합니다. canonicalPrimaryDisplayStatus와 점유·예약·readiness·bookability 원장은 바뀌지 않습니다. BLOCKED 표시만으로 실제 배정을 막지 않으며 실제 차단에는 operation-block command를 사용해야 합니다.",
       ),
     },
+    "/v1/rooms/candles": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomCandles",
+        summary: "객실 촛불 최소 정보 조회",
+        description:
+          "active/password-complete 관리자와 모든 메이드의 live session 전용. 담당·제출·승인·7일 조건 없이 객실 식별/현재 수량/CAS만 조회합니다. UUID 오름차순 keyset, 기본/최대 50건이며 nextCursor가 null일 때 종료합니다. roomId 단건 필터와 cursor는 함께 사용할 수 없습니다. 다른 객실 정보·이력·PIN 권한은 부여하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "roomId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: {
+              type: "string",
+              pattern: "^(?:[1-9]|[1-4]\\d|50)$",
+              default: "50",
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "촛불 최소 조회 page",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomCandlePage" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
     "/v1/rooms/{roomId}/candles": {
       post: roomMutationOperation(
         "setRoomCandleCount",
@@ -5168,7 +5217,9 @@ export const openApiDocument = {
         "RoomCandleRequest",
         "operation",
         201,
-        "현재 수량을 append-only event로 기록합니다. physicallyVerified를 생략하면 false이며 count는 0 이상입니다.",
+        "active/password-complete 관리자와 모든 메이드가 live session으로 현재 수량을 조정합니다. 담당 여부·제출·승인·7일 제한이나 관리자 재승인은 없습니다. 감소/0 초기화는 실제 회수 확인인 physicallyVerified=true를 요구하며 관리자 승인 필드가 아닙니다. CAS와 기존 멱등 receipt를 유지합니다. 0은 촛불 사유만 해소하며 다른 차단·준비 조건과 제출/검수/수익 이력은 바꾸지 않습니다.",
+        undefined,
+        ["admin", "maid"],
       ),
     },
     "/v1/rooms/{roomId}/issues": {
@@ -12034,14 +12085,48 @@ export const openApiDocument = {
           nextCursor: { type: ["string", "null"], maxLength: 1024 },
         },
       },
+      RoomCandleItem: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomId", "roomNumber", "count", "roomStateVersion"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string", minLength: 1 },
+          count: { type: "integer", minimum: 0, maximum: 2147483647 },
+          roomStateVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: 9007199254740991,
+          },
+        },
+      },
+      RoomCandlePage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["items", "nextCursor"],
+        properties: {
+          items: {
+            type: "array",
+            maxItems: 50,
+            items: { $ref: "#/components/schemas/RoomCandleItem" },
+          },
+          nextCursor: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+        },
+      },
       RoomCandleRequest: {
         type: "object",
         additionalProperties: false,
         required: ["expectedRoomVersion", "reasonCode", "count"],
         properties: {
-          expectedRoomVersion: { type: "integer", minimum: 1 },
+          expectedRoomVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: 9007199254740991,
+          },
           reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
-          count: { type: "integer", minimum: 0 },
+          count: { type: "integer", minimum: 0, maximum: 2147483647 },
           physicallyVerified: { type: "boolean", default: false },
         },
       },
@@ -13828,6 +13913,7 @@ function roomMutationOperation(
   successStatus: 200 | 201,
   description: string,
   entityParameter?: Record<string, unknown>,
+  allowedRoles: string[] = ["admin"],
 ): Record<string, unknown> {
   const responseSchema = responseKey === "room"
     ? "#/components/schemas/RoomProjection"
@@ -13840,10 +13926,11 @@ function roomMutationOperation(
     tags: ["Rooms"],
     operationId,
     summary,
-    description:
-      `${description} 비밀번호 변경을 완료한 active business admin만 실행할 수 있고, Idempotency-Key 재시도와 expected version CAS를 적용합니다.`,
+    description: `${description} 비밀번호 변경을 완료한 active ${
+      allowedRoles.join("/")
+    }만 실행할 수 있고, Idempotency-Key 재시도와 expected version CAS를 적용합니다.`,
     security: [{ bearerAuth: [] }],
-    "x-required-roles": ["admin"],
+    "x-required-roles": allowedRoles,
     parameters: [
       roomIdParameter(),
       ...(entityParameter ? [entityParameter] : []),

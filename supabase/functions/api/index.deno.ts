@@ -4,6 +4,86 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import type { PhotoService } from "../_shared/photo-service.ts";
 
+Deno.test("candle HTTP routes allow maid minimal reads and writes without opening general room access", async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        const data = name === "list_room_candles"
+          ? {
+            items: [{
+              roomId,
+              roomNumber: "117",
+              count: 0,
+              roomStateVersion: 8,
+            }],
+            nextCursor: null,
+          }
+          : {
+            entity_id: issueId,
+            room_id: roomId,
+            room_state_version: 8,
+            recorded_at: "2026-09-30T00:00:00Z",
+          };
+        return Promise.resolve({ data, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => clients,
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+  };
+  const read = await handleApiRequest(
+    request("GET", `/v1/rooms/candles?roomId=${roomId}`),
+    dependencies,
+  );
+  assert(
+    read.status === 200 && read.headers.get("cache-control") === "no-store",
+    "exact static route and no-store",
+  );
+  assert((await read.json()).items[0].count === 0, "minimal page envelope");
+  const write = await handleApiRequest(
+    request("POST", `/v1/rooms/${roomId}/candles`, {
+      expectedRoomVersion: 7,
+      reasonCode: "CANDLE_ADJUSTED",
+      count: 0,
+      physicallyVerified: true,
+    }),
+    dependencies,
+  );
+  assert(
+    write.status === 201 && write.headers.get("cache-control") === "no-store",
+    "maid write and no-store",
+  );
+  assert(
+    (await write.json()).operation.roomStateVersion === 8,
+    "existing operation envelope",
+  );
+  assert(
+    calls.length === 2 && calls[0].name === "list_room_candles" &&
+      calls[1].name === "set_room_candle_count",
+    "only narrow RPCs",
+  );
+  assert(
+    calls.every((call) =>
+      call.args.p_session_id === "70000000-0000-4000-8000-000000000001"
+    ),
+    "verified session binding",
+  );
+  for (const path of [`/v1/rooms/${roomId}`, `/v1/rooms/${roomId}/issues`]) {
+    const response = await handleApiRequest(request("GET", path), dependencies);
+    assert(response.status === 403, "maid cannot read general room data");
+    await response.body?.cancel();
+  }
+  assert(
+    calls.slice().length === 4 &&
+      calls.slice(2).every((call) =>
+        call.name === "record_authorization_denial"
+      ),
+    "forbidden requests only record denial, never access room RPC",
+  );
+});
 for (const stream of ["issues", "operation-blocks"] as const) {
   Deno.test(`room pagination entry route: ${stream} validates query and page bounds`, async () => {
     const status = stream === "issues" ? "open" : "actionable";

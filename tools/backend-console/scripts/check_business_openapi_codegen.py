@@ -96,8 +96,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 138:
-        raise RuntimeError("전체 source OpenAPI path 수가 138이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 139:
+        raise RuntimeError("전체 source OpenAPI path 수가 139이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -106,8 +106,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 149:
-        raise RuntimeError("전체 source OpenAPI operation 수가 149이 아닙니다.")
+    if operation_count != 150:
+        raise RuntimeError("전체 source OpenAPI operation 수가 150가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     discovery_fields = [
         "attemptId",
@@ -221,6 +221,9 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "rooms" / "list_room_candles.py",
+            package / "models" / "room_candle_item.py",
+            package / "models" / "room_candle_page.py",
             package / "api" / "attempts" / "list_limited_attempts.py",
             package / "api" / "attempts" / "get_limited_attempt.py",
             package / "api" / "attempts" / "complete_limited_field_work.py",

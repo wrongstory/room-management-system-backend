@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 106,
+  "totalCount": 108,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 28,
+    "count": 30,
     "first": "assignment_unavailability_reassignment",
-    "head": "room_board_live_projection_compatibility"
+    "head": "room_candle_session_hard_expiry"
   },
-  "head": "room_board_live_projection_compatibility",
+  "head": "room_candle_session_hard_expiry",
   "migrations": [
     {
       "order": 1,
@@ -543,6 +543,16 @@
       "order": 106,
       "name": "room_board_live_projection_compatibility",
       "sha256": "95926a7344804a9fab778c5773115ff85778be443bf6bfff92f2cb6fd69e338a"
+    },
+    {
+      "order": 107,
+      "name": "shared_room_candle_adjustment",
+      "sha256": "0f2d86b199831e446a5a3d06a78caeca7ccad21b62223395224de94087734579"
+    },
+    {
+      "order": 108,
+      "name": "room_candle_session_hard_expiry",
+      "sha256": "ab46f199a5b6e38a21c8c685d29487cd162cb071df17357fbc82f03dbb7d13e6"
     }
   ]
 }

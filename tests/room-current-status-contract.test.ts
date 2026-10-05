@@ -193,7 +193,7 @@ describe('current room status public contract', () => {
     expect(openApiDocument.components.schemas.RoomReasonCode.enum).toContain(
       'RESERVATION_CURRENT'
     );
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(138);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(139);
   });
 
   it('publishes an admin-only append-only occupancy correction contract', () => {

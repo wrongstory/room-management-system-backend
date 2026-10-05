@@ -1,5 +1,13 @@
 # 프런트엔드 계약 snapshot
 
+> 2026-10-05 #330 최신 dev 통합 후보: 기존 PR #337/source `95033682`와 `dev@bb4fa40` 기준103 migrations/source OpenAPI 목표138 paths/149 operations다. 아래 원래86/132·142와 원격 프런트 commit은 당시 scoped 확인점으로 보존하며 전역 제품 snapshot을 승격하지 않는다. 촛불 공동 관리와 #336 신고 정책을 분리하고 후속 dev 재통합·전체 DB·독립 QA·새 exact-head CI·운영/UAT는 미완료다.
+
+## #330 사용자 결정에 따른 최초 source 후보 checkpoint
+
+활성 관리자와 모든 활성 메이드의 촛불 추가·감소·초기화 및 최소 조회를 제공한다. 배정/제출/승인/최근 7일 조건은 없다. 기존 관리자 전용 정책보다 이번 사용자 결정을 우선하며 프런트 snapshot 자체를 자동 승격하지 않는다. source OpenAPI 0.6.0은 이 후보에서 **132 paths / 142 operations**, migration은 **86개**다. 운영 반영 수치가 아니다. 프런트 수정은 별도 담당이며 [#330 인계](./ROOM_CANDLES_330.md)를 따른다.
+
+2026-09-30 재확인한 프런트 원격은 `makee-ham/room-management-system` main `d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev `09ed28446a4fd43919cddb29ebe442b848548ab8`이다. `DOCS/30_DEPLOYED_WIREFRAME_API_PARITY.md` B01의 관리자 전용/다른 메이드 거부 문구는 #330 후속 사용자 결정으로 대체한다. 새 특이사항 API 요구는 촛불과 별도 결정 대상으로 유지한다. 원격 프런트 파일은 수정하지 않았다.
+
 > #331 사용자 추가 결정(2026-10-03)은 종료된 KST 주차·양수 신규 on, on 유지 별도 금액 근거 재확인이다. 이번 scoped DOCS/30 B02의 main d509b44/dev09ed284 대조는 전역 snapshot 승격이 아니다. 백엔드 표시 전용 API는 구현 후보(137 paths/148 operations)이며 [계약과 실제 gate](./PAYROLL_REMITTANCE_MARKER.md)를 따른다. 프런트 source·운영은 변경하지 않는다.
 
 > 2026-10-03 최신: #325 PR358(source78582789 → devd65f4f60)는 exact-tree CI37093733970·독립 QA98/100으로 source/dev 완료했다. 현재 #324 scoped 객실별 주급 근거 조회는 98번째 read migration과 134 paths/144 operations의 후보이며 [계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 아래 후보 표현은 당시 checkpoint이며 전역 프런트 제품 snapshot·운영·main·recovery는 변경하지 않는다.

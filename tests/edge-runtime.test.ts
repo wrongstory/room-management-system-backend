@@ -226,7 +226,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']room_board_live_projection_compatibility["']/
+      /expectedMigrationName\s*=\s*["']room_candle_session_hard_expiry["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);

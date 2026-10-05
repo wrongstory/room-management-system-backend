@@ -33,9 +33,9 @@ describe('#325 latest payroll adjustment book OpenAPI', () => {
     expect(schemas.PayrollAdjustment.properties).toHaveProperty('bookVersion');
   });
   it('keeps a reviewed complete inventory and documents strict real-calendar query', () => {
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(138);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(139);
     expect(Object.values(openApiDocument.paths).flatMap((item) => Object.keys(item)
-      .filter((method) => ['get', 'post', 'put', 'patch', 'delete'].includes(method)))).toHaveLength(149);
+      .filter((method) => ['get', 'post', 'put', 'patch', 'delete'].includes(method)))).toHaveLength(150);
     const date = operation.parameters.find(({ name }) => name === 'weekStart');
     if (!date) throw new Error('weekStart query contract missing');
     expect(date.schema).toMatchObject({ type: 'string', format: 'date', minLength: 10, maxLength: 10 });

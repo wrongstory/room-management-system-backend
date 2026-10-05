@@ -161,6 +161,7 @@ function services(): AppServices {
       get: vi.fn(),
       changeMasterData: vi.fn(),
       mutateOperation: vi.fn(),
+      listCandles: vi.fn(),
       correctOccupancy: vi.fn(async (_actor, input) => ({
         correctionId: '71000000-0000-4000-8000-000000000001',
         roomId: input.roomId,
@@ -738,6 +739,35 @@ describe('application', () => {
     });
     expect(invalid.statusCode).toBe(400);
     expect(appServices.rooms.listOperationBlocks).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each(['admin', 'maid', 'developer'] as const)('keeps candle HTTP access narrow for %s', async (role) => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({ authUserId: 'synthetic', profileId: 'synthetic', displayName: '합성', role, mustChangePassword: false, accessToken }));
+    appServices.rooms.listCandles = vi.fn(async () => ({ items: [], nextCursor: null }));
+    appServices.rooms.mutateOperation = vi.fn(async () => ({ entityId: 'test', roomId: 'test', roomStateVersion: 2, recordedAt: '2026-09-30T00:00:00Z' }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const headers = { authorization: 'Bearer token', 'idempotency-key': 'candle-route-key' };
+    const roomId = '33000000-0000-4000-8000-000000000001';
+    const read = await app.inject({ method: 'GET', url: `/v1/rooms/candles?roomId=${roomId}`, headers });
+    const write = await app.inject({ method: 'POST', url: `/v1/rooms/${roomId}/candles`, headers, payload: { expectedRoomVersion: 1, reasonCode: 'CANDLE_COLLECTED', count: 0, physicallyVerified: true } });
+    expect(read.statusCode).toBe(role === 'developer' ? 403 : 200);
+    expect(write.statusCode).toBe(role === 'developer' ? 403 : 201);
+    if (role !== 'developer') {
+      expect(read.headers['cache-control']).toBe('no-store');
+      expect(write.headers['cache-control']).toBe('no-store');
+      for (const query of ['limit=51', 'limit=01', 'limit=1&limit=2', `roomId=${roomId}&cursor=${roomId}`, 'pin=true']) {
+        expect((await app.inject({ method: 'GET', url: `/v1/rooms/candles?${query}`, headers })).statusCode).toBe(400);
+      }
+      for (const patch of [{ count: -1 }, { count: 2147483648 }, { count: 1.5 }, { assignmentId: roomId }]) {
+        expect((await app.inject({ method: 'POST', url: `/v1/rooms/${roomId}/candles`, headers, payload: { expectedRoomVersion: 1, reasonCode: 'CANDLE_ADJUSTED', count: 1, ...patch } })).statusCode).toBe(400);
+      }
+    }
+    if (role === 'maid') {
+      expect((await app.inject({ method: 'GET', url: `/v1/rooms/${roomId}`, headers })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'POST', url: `/v1/rooms/${roomId}/issues`, headers, payload: {} })).statusCode).toBe(403);
+    }
     await app.close();
   });
 

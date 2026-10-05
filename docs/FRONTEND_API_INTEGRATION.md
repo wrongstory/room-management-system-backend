@@ -1,5 +1,17 @@
 # 프론트엔드·Codex API 연동 가이드
 
+> 현재 #330은 dev cf22727(#318 병합 완료) 통합 후보로 migration108/OpenAPI139 paths·150 operations다. 아래 초기 수치는 과거 이력이며 새 후보의 전체 검증·운영 반영은 후속이다. 촛불 최소 조회/공동 조정과 날짜 조회·제한 세션 계약을 함께 보존한다. 프런트 소스는 변경하지 않았다.
+
+> 2026-10-05 #330 최신 dev 통합 후보는 103 migrations/source OpenAPI 목표138 paths/149 operations다. 최소 조회와 기존 촛불 변경만 active/password-complete/live-session admin/maid가 사용하며 일반 객실/PIN 권한은 넓히지 않는다. #336 신고 정책은 제외한다. #383/#382/#329/#318 후속 dev 재통합·전체 DB·독립 QA·새 exact-head CI와 release/운영 승격은 별도 gate다. 프런트 source·운영/UAT는 이번 병합 준비로 완료되지 않는다.
+
+> #330 촛불 공동 관리 source 후보: [전용 연동 문서](./ROOM_CANDLES_330.md). 새 최소 조회와 기존 변경 endpoint의 메이드 권한 확대는 release/운영 배포 후에만 사용한다. 아래 운영 snapshot 기록과 혼동하지 않는다.
+
+### 과거 #330 최초 인계 문구
+
+이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 과거 v0.4.0 인계는 historical workflow 참고용이고, 현재 계약은 production OpenAPI 0.5.1과 이 문서를 우선한다.
+
+### 후속 scoped 인계 이력
+
 ## 2026-10-03 #329 A안 handoff — 백엔드 구현 중
 
 제한 업무는 최초 제한 전환 당시의 유효·미폐기 로그인 세션으로만 재진입한다.

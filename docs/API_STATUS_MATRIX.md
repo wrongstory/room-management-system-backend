@@ -1,5 +1,15 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+> 최신 #330 검증: migration108/API139 paths150 operations 후보는 Node1826·Edge490·Python95/codegen·전체27 upgrade/SQL5266·static/KST145·전체10경합/최종fresh·승인 exact9 baseline PASS다. raw strict FAIL9를 유지하고 최종 staged QA·새CI·dev/운영은 후속이다. 아래 진행 중 기록과 [현재 증거](./ROOM_CANDLES_330.md)를 구분한다.
+
+> 현재: #318/PR321은 dev cf22727 병합 완료, 운영 미반영이다. #330은 이 dev와 통합한108개 migration·139 paths/150 operations 후보를 검증 중이다. 아래104/106개 PASS 및 후속 표기는 당시 checkpoint이며 새 통합의 PASS가 아니다. [현재 범위](./ROOM_CANDLES_330.md)를 따른다.
+
+> 2026-10-05 #330 최신 dev 통합 후보는 기존 PR #337/source `95033682`와 `dev@bb4fa40`를 정상 merge한 103 migrations/source OpenAPI 목표138 paths/149 operations다. 모든 활성·비밀번호 변경 완료·live-session admin/maid의 전용 권한 및 CAS/멱등성/이력 보존을 유지한다. 아래 86/132·142는 원래 후보 checkpoint이며 운영 inventory가 아니다. #383/#382/#329/#318 재통합·전체 DB·독립 QA·새 exact-head CI는 후속이고 원본 strict FAIL9와 exact9 gate를 구분한다. 실제 백업/복원은 모든 개발 후속·운영 배포 전 필수다.
+
+## #330 촛불 공동 관리 — 최초 source 후보 checkpoint
+
+활성 관리자·모든 메이드용 `GET /v1/rooms/candles` 최소 조회와 기존 `POST /v1/rooms/{roomId}/candles` 전용 권한 확대를 Fastify/Edge/OpenAPI에 구현했다. 배정·제출/승인·7일 제한 없이 수량을 조정하고 room CAS/멱등성·live session·원장 보존을 유지한다. 86번째 append migration과 source OpenAPI 0.6.0 **132 paths / 142 operations** 기준이며 dev 병합·운영 배포·프런트 연동 완료가 아니다. [인계 및 rollback](./ROOM_CANDLES_330.md)을 따른다.
+
 > 2026-10-05 현재: #329/PR372 및 #393/PR394는 dev58a에 통합됐다. #318의106개 재통합 후보는 Node1,794·Edge487·console95/client순열·fresh106·exact9 baseline·로컬 합성복원·실제 템플릿6순열·전체27 upgrade/SQL5,193·static/KST145·전체9경합/최종fresh·독립 소스 QA를 통과했다. 실제 caller7/18/core2, 원본484 hash drift0, RLS누락0을 확인했다. raw strict FAIL9/exit1은 유지하며 새 exact-head CI/보호 병합은 후속이다. 실제 운영 백업/배포·v0.9.0은 아직 아니며 v0.8.0/운영/프런트는 그대로다. [현재 증거](./ROOM_BOARD_DATE_FILTERS.md)를 따르고 아래 과거 checkpoint와 구분한다.
 
 > 2026-10-05 최신 #329: 4da53b0 +devfdd8d7d 정상 통합 후보의 실제 Node1,767/74·Edge486/0(bundle17,577,757)·Python95/client6순열·fresh104/template6순열/receipt/CAS/16malformed·전체9경합·finalfresh104 PASS/exit0다. 원본480/사본480 drift0, fixture0·RLS누락0·객실121 확인. 아래 이전27 upgrades/SQL82·5,119와 strictFAIL9/exact9 catalog3PASS는 그 실행의 증거이며 새 로컬 재실행은 NOT RUN이다. 새 exact CI·최종QA·commit/push·dev 병합은 후속, 운영/v0.8.0/프런트 불변. [실패 이력과 현재 증거](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신-devfdd-통합전체9-경합-완료-checkpoint)를 따른다.

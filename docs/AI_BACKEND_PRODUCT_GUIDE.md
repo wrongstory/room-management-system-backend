@@ -1,5 +1,20 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> 최신 #330 실행: dev cf22727 통합108개 후보의 Node1826·Edge490·Python95/codegen·fresh108·전체27 upgrade/SQL5266·static/KST145·전체10경합/최종cleanup·exact9 baseline PASS. 원본489 hash drift0, raw strict FAIL9 유지. 아래 진행/이전 수치는 과거 checkpoint이며 [실제 증거](./ROOM_CANDLES_330.md)를 따른다. 최종 staged QA·새 CI·dev/운영 승격은 후속이다.
+
+> 현재 #330 통합: #318/PR321은 CI37303164280 두 required PASS와 독립 QA 후 dev cf22727에 병합됐다. 이 dev와 촛불 checkpoint8860189를 합친 새 후보는 migration108/OpenAPI139 paths·150 operations이며 전체 검증은 후속이다. 아래104/106개 기록은 각 과거 checkpoint다. 확정 정책은 양쪽 모두 보존하며 [현재 검증 범위](./ROOM_CANDLES_330.md)를 따른다. 운영 배포 완료가 아니다.
+
+> 2026-10-05 #330 최신 dev 통합 후보: 기존 PR #337/source `95033682`를 `dev@bb4fa40`(#384 포함)와 정상 merge해 검증한다. 아래 촛불 공동 관리 결정과 원본 #330 SQL을 유지하며 신규 사건 신고 #336은 포함하지 않는다. 잠금 대기 중 세션 만료 보완은 후속 append로 추가하며 개발 manifest는 104개(현재 `room_candle_session_hard_expiry`, 직전 `shared_room_candle_adjustment`), source OpenAPI 목표는 138 paths/149 operations다. #391의 새 hosted 미적용 확인 후 원본·후속 SQL을 CLI 생성 시각 `20261005011849`·`20261005011912`로 byte/hash 그대로 이동하여 기존 exact 역사 검증 구간을 보존했다. 상세 매핑은 [촛불 문서](./ROOM_CANDLES_330.md)를 따른다. 과거 86개/132·142 및 기존 CI의 ECR rate-limit 실패는 당시 checkpoint이며 새 통합 PASS가 아니다. #383/#382/#329/#318 dev 재통합·fresh/전체 DB·독립 QA·새 exact-head CI는 후속 gate다. 실제 백업/복원은 모든 개발 후속이지만 운영 배포 전 필수이며 지금 dev·운영·프런트 UAT 완료를 선언하지 않는다.
+
+## #330 사용자 확정: 촛불 수량 공동 관리
+
+- [확정] 비밀번호 변경을 마친 활성 관리자와 모든 활성 메이드는 배정·원 수행자·제출·검수 승인·최근 7일 여부와 무관하게 촛불 수량을 추가·감소·0으로 초기화할 수 있다. 다른 메이드와 관리자도 회수 후 처리할 수 있으며 별도 관리자 승인을 요구하지 않는다.
+- [현재 구현] 감소 시 기존 `physicallyVerified=true` 현장 회수 확인은 유지한다. 이는 처리자 자신의 회수 확인이지 관리자 승인이나 도어락 PIN 확인이 아니다.
+- [확정] 0으로 변경하면 촛불 차단만 해소한다. 다른 운영 차단·점유·청소 의무·이슈를 지우거나 과거 제출·사진·검수·수익·지급 snapshot을 수정하지 않는다.
+- [현재 구현] 최소 조회 `GET /v1/rooms/candles`와 기존 변경 `POST /v1/rooms/{roomId}/candles`를 별도 capability로 제공한다. 메이드의 일반 객실 상세·이슈·PIN 권한은 넓히지 않는다. 최신 DB 역할·상태·세션, room CAS와 actor별 멱등성을 재검증하고 수량 변경·감사 이력을 추가한다.
+- [확정] 제출·승인 이후 새 특이사항 신고는 사용자 결정대로 #336에서 추가하며 #330에 포함하지 않는다. 신고 주체와 독립 사건·증빙의 세부 범위는 별도 확인한다.
+- source 후보이며 운영 배포 완료를 뜻하지 않는다. [연동·검증·배포 경계](./ROOM_CANDLES_330.md)를 따른다. 프런트 기준 commit은 아래 기존 snapshot을 유지한다.
+
 > 2026-10-05 현재 #318 통합: checkpoint `0781d14` 뒤 #329·#382·사진 저장명·#393의 `dev@58a5821`을 정상 통합한106개 후보는 Node1,794·Edge487·Python95/client순열·fresh106·전체27 upgrade/SQL84파일5,193·static/KST145·전체9경합/cleanup·최종fresh106·exact9 baseline을 실제 통과했다. 독립 소스 QA155/날짜79,992도 PASS이며 원본484 hash drift0·RLS누락0·실제 caller7/18/core2를 확인했다. raw strict FAIL9/exit1은 유지한다. exact-head CI와 PR321 보호 병합·운영은 아직 후속이다. 아래104/이전 수치는 각 과거 checkpoint이며 [최신 범위와 증거](./ROOM_BOARD_DATE_FILTERS.md)를 따른다. v0.8.0·운영·프런트는 변경하지 않는다.
 
 ### 과거 #318의 bb4fa40 통합 준비
@@ -339,8 +354,8 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 ### `[확정]` 객실 차단·촛불 규칙
 
 - 촛불이 1개라도 남아 있으면 고객 배정과 체크인을 막는다.
-- 촛불 전량 회수 뒤 관리자가 0개를 확정해야 차단이 풀린다.
-- 메이드는 이번 작업에서 새로 둔 촛불 수량을 보고할 수 있지만 기존 객실 수량을 임의로 줄이지 못한다. 청소 검수 승인이 촛불 수량을 자동으로 0으로 만들지 않는다.
+- 촛불 전량 회수 뒤 활성 관리자 또는 활성 메이드가 0개로 변경하면 촛불 차단이 풀린다. #330 사용자 결정에 따라 다른 메이드도 감소·초기화할 수 있다.
+- 청소 검수 승인이 촛불 수량을 자동으로 0으로 만들지 않는다. 수량 조정은 승인 이후에도 독립적인 객실 event로 기록한다.
 - 특정 객실의 청소·고객 배정 제외는 `room_number` 조건문이 아니라 유효기간·사유·행위자·해제 이력이 있는 객실 운영 차단 데이터로 표현한다.
 
 ### `[운영 입력값]` 608호
@@ -974,7 +989,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 다음 항목은 release candidate `4da80cb` 당시 계약이다. source가 `main`에 병합됐는지, 운영 migration까지 적용됐는지는 서로 다른 상태이며 Release Issue #24에서 확인한다. 특히 당시의 PIN 배정 차단 문구는 #140 이후 계약으로 대체됐고, 이 문서 갱신만으로 production 동작이 바뀌었다는 뜻은 아니다.
 
 - 객실 목록·상세는 점유, 청소 필요, 배정 차단/가능과 안정적인 reason code를 독립 축으로 반환한다.
-- 객실 기준정보, 운영 차단, 촛불, 이슈, PIN 동기화는 최신 active admin과 객실 `state_version`을 재검증하는 원자 명령이다.
+- 객실 기준정보, 운영 차단, 이슈, PIN 동기화는 최신 active admin과 객실 `state_version`을 재검증하는 원자 명령이다. #330 촛불 전용 명령만 active admin/maid와 live session을 허용하며 일반 객실 명령 권한은 그대로다.
 - 예약 생성·일정 변경·취소·수동 체크아웃·시각 기반 전이는 예약/객실 lock, CAS, actor별 idempotency key와 request hash를 사용한다.
 - 예약 일정 revision, 입실 준비 의무, 예약별 비공개 퇴실 청소 의무, 점유 event를 추가하고 원장을 UPDATE/DELETE하지 않는다.
 - 고객명은 API 서버가 AES-256-GCM으로 암호화하며 명령 응답·감사 payload에 원문이나 암호문을 포함하지 않는다.

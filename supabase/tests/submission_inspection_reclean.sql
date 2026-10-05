@@ -582,5 +582,31 @@ select ok(not exists(select 1 from unnest(array['INSERT','UPDATE','DELETE','TRUN
   where has_table_privilege('service_role',relation,privilege)),
  'service role has no raw decision or earning mutation/DDL-adjacent grant');
 
+-- #330: a different maid can adjust a room after an actual approved submission.
+insert into auth.sessions(id,user_id) values(pg_temp.pid(203),pg_temp.pid(103));
+create temporary table candle_preserved_snapshots as
+select 'submission' as kind,to_jsonb(s) as value from public.cleaning_submissions s
+union all select 'inspection',to_jsonb(d) from public.inspection_decisions d
+union all select 'earning',to_jsonb(e) from public.earnings e
+union all select 'photo',to_jsonb(p) from private.submission_photo_bindings p;
+create temporary table candle_approved_room as
+select t.room_id from public.cleaning_submissions s join public.cleaning_attempts a on a.id=s.cleaning_attempt_id
+join public.cleaning_targets t on t.id=a.cleaning_target_id
+where s.id=(select (value->>'id')::uuid from submission_results where label='bomb-submission');
+select lives_ok($$select public.set_room_candle_count(pg_temp.pid(3),pg_temp.pid(203),(select room_id from candle_approved_room),
+ (select state_version from public.rooms where id=(select room_id from candle_approved_room)),
+ 'CANDLE_ADDED','{"count":4,"physicallyVerified":false}','approved-other-maid-add',repeat('a',64))$$,
+ 'other maid adjusts current candles after approved work');
+select lives_ok($$select public.set_room_candle_count(pg_temp.pid(3),pg_temp.pid(203),(select room_id from candle_approved_room),
+ (select state_version from public.rooms where id=(select room_id from candle_approved_room)),
+ 'CANDLE_COLLECTED','{"count":0,"physicallyVerified":true}','approved-other-maid-reset',repeat('b',64))$$,
+ 'other maid resets approved room without reopening submission');
+select is((select count(*) from (
+ select kind,value from candle_preserved_snapshots except
+ (select 'submission',to_jsonb(s) from public.cleaning_submissions s
+ union all select 'inspection',to_jsonb(d) from public.inspection_decisions d
+ union all select 'earning',to_jsonb(e) from public.earnings e
+ union all select 'photo',to_jsonb(p) from private.submission_photo_bindings p)
+) changed),0::bigint,'submission/photo/inspection/earning snapshots unchanged');
 select * from finish();
 rollback;

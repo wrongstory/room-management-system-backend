@@ -153,6 +153,7 @@ import {
   correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRoomCandles,
   listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
@@ -1750,6 +1751,15 @@ export async function handleApiRequest(
       response.headers.set("Cache-Control", "no-store");
       return response;
     }
+    if (request.method === "GET" && path === "/v1/rooms/candles") {
+      const response = jsonResponse(
+        await listRoomCandles(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     if (request.method === "GET" && path === "/v1/rooms") {
       const response = jsonResponse(
         {
@@ -1936,13 +1946,15 @@ export async function handleApiRequest(
       path.startsWith("/v1/rooms/") && path.endsWith("/candles")
     ) {
       const { roomId } = roomPathIds(path);
-      return jsonResponse(
+      const response = jsonResponse(
         {
           operation: await setRoomCandleCount(request, clients, actor, roomId),
         },
         201,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     if (
       request.method === "POST" &&
