@@ -13,6 +13,10 @@ import type {
   PhotoProvider,
 } from "./google-drive.ts";
 import {
+  photoContentDisposition,
+  photoStorageFileName,
+} from "./photo-storage-name.ts";
+import {
   createPhotoUploadClaim,
   photoMediaAvailabilities,
   type PhotoMediaAvailability,
@@ -206,10 +210,12 @@ function readObject(value: unknown): DriveReadObject {
 }
 function workerObject(value: unknown): DriveObject {
   const r = row(value);
+  const object = readObject(r);
   return {
-    ...readObject(r),
+    ...object,
     folderId: locator(r.providerFolderId),
     objectId: uuid(r.objectId),
+    fileName: photoStorageFileName(r.fileName, object.mime),
   };
 }
 export class PhotoService {
@@ -500,7 +506,7 @@ export class PhotoService {
           });
         }
         context = row(
-          await this.#rpc("reserve_photo_provider_identity", {
+          await this.#rpc("reserve_named_photo_provider_identity", {
             ...this.#actor(i),
             ...worker,
             p_provider_file_id: fileId,
@@ -536,11 +542,26 @@ export class PhotoService {
       );
     } catch (error) {
       // Lost finalize response is not rejection. A failed reconciliation NEVER authorizes deletion.
+      let reconciled: PhotoUploadOperationProjection | undefined;
       try {
-        const reconciled = await this.reconcile(begin.operationId);
-        if (reconciled.status === "accepted") return response(reconciled);
+        reconciled = await this.reconcile(begin.operationId);
       } catch {
         /* Durable operation remains for fenced reconciliation; do not log raw provider errors. */
+      }
+      if (reconciled?.status === "accepted") {
+        // Worker convergence is not HTTP authorization. Recheck the exact caller/session
+        // after provider waits, without undoing the immutable accepted operation.
+        const accepted = projectPhotoUploadOperation(
+          await this.#rpc("get_photo_upload_receipt_with_session", {
+            ...this.#actor(i),
+            p_operation_id: begin.operationId,
+          }),
+        );
+        if (
+          accepted.status !== "accepted" ||
+          accepted.operationId !== begin.operationId
+        ) return failed();
+        return response(accepted);
       }
       throw photoError(error);
     }
@@ -749,6 +770,7 @@ export class PhotoService {
     const args = { ...this.#actor(i), p_photo_id: uuid(photoId) };
     const first = row(await this.#rpc("authorize_photo_read", args));
     const object = readObject(first);
+    const fileName = photoStorageFileName(first.fileName, object.mime);
     const firstRetention = retentionMetadata(first);
     if (
       firstRetention.mediaAvailability !== "available" ||
@@ -761,6 +783,7 @@ export class PhotoService {
     if (
       latest.providerFileId !== first.providerFileId ||
       latest.sha256 !== first.sha256 ||
+      photoStorageFileName(latest.fileName, object.mime) !== fileName ||
       JSON.stringify(latestRetention) !== JSON.stringify(firstRetention) ||
       latestRetention.mediaAvailability !== "available" ||
       (latestRetention.expiresAt !== null &&
@@ -772,9 +795,8 @@ export class PhotoService {
         "content-length": String(bytes.length),
         "cache-control": "no-store",
         "x-content-type-options": "nosniff",
-        "content-disposition": `inline; filename="photo.${
-          object.mime === "image/jpeg" ? "jpg" : "webp"
-        }"`,
+        "content-disposition": photoContentDisposition(fileName, object.mime),
+        "access-control-expose-headers": "Content-Disposition",
       },
     });
   }

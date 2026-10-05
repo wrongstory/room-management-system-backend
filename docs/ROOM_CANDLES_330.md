@@ -2,6 +2,42 @@
 
 상태: 백엔드 source 후보. 운영 DB/API 및 프런트 변경은 이번 작업에 포함하지 않는다.
 
+## 2026-10-05 최신 dev 통합 — 검증 진행 중
+
+최신 실행 결과: Node1,826/80·Edge490·Python95/전체codegen·manifest108·fresh108·전체27 upgrade/
+SQL86파일5,266개·static upgrade·KST145·전체10경합/cleanup·최종fresh108/exact9 baseline PASS다.
+원본489 hash drift0이며 기존dev106 SQL과 사용자 EOL4파일을 보존했다. raw strict FAIL9/exit1은 유지한다.
+독립 소스 QA102건 PASS 뒤 최종 staged QA·새 exact-head CI·PR337 보호 병합은 후속이다.
+전체 SQL 로그 SHA256: `fcdcc2086fffb28c15b6cf1346a9552652464d849a771b4f7f1c80f3dfe92141`.
+전체 경합 로그 SHA256: `525c5356c41c32f24cd6f1fec111a4589dca26dba35cbbd41413a7b386e0be31`.
+아래 진행 중 표기는 각 실행 당시 이력이다. 운영/실제 백업/프런트 UAT 완료는 아니다.
+
+#318은 source25cfb80의 required CI37303164280 두 항목과 독립 QA 통과 후 PR321로
+dev `cf22727248e991034d1cca21eb74386bb7254284`에 병합됐다. #330의 로컬 `8860189`에
+이 dev를 정상 통합한 새 후보는 migration108개, source OpenAPI139 paths/150 operations다.
+head/previous는 `room_candle_session_hard_expiry`/`shared_room_candle_adjustment`이며 원 SQL은 보존한다.
+제한 세션·사진 저장명·촛불 경합을 모두 유지한 전체10개 경합 명령과 최신 generated client 검사를 유지한다.
+이 후보의 Node1,823/79·typecheck/build/품질, Edge490/bundle, manifest108, 실제 LF fresh108과
+촛불·세션 만료·날짜 조회·개발자 진단 SQL5파일176개는 PASS다. 최초 Node6건과 Edge1건의
+이전 API 개수/진단 head 기대 실패를 실제139/150 및 최신 head로 정합화한 뒤 재실행했다.
+기존dev106 name→SHA drift0을 확인했다. 전체 SQL86파일5,266개 및 생성 TS client의6순열/
+잘못된 입력 거부도 실제 PASS다. 후속 전체27 upgrade와 SQL86파일5,266개 재실행도 PASS다.
+10경합·최종 독립 QA·exact-head CI는 후속이다.
+
+### 후속 검증 진행
+
+Python은 Windows hardlink 설치 오류 후 `UV_LINK_MODE=copy`로 복구해 ruff/format/mypy·pytest95·
+전체 client 생성·package source 검사를 통과했다. 독립 소스 QA7파일102개 PASS·신규 P0/P1/P2 없음이다.
+전체27 upgrade는 별도 LF 임시본에서 실제 exit0로 완료했고, 마지막 전체 SQL도86파일5,266개 PASS다.
+앞선 사진 runner가 fresh cleanup한 뒤 촛불 standalone가 실행되는 순서를 위해 CLI 분기에만
+로컬 endpoint/환경 override/project/정확한 fresh manifest 검증, 합성 developer 준비,
+성공·실패 모두의 finally reset 및 fresh 재확인을 추가했다. aggregate import/실제 경합은 그대로다.
+이 보완의 source 회귀와 실제 standalone CAS/replay/정지/철회/room·Auth lock hard-expiry 및
+fresh108 cleanup은 PASS다. 원본489 hash drift0과 승인 exact9/catalog3 baseline PASS도 확인했다.
+raw strict FAIL9/exit1은 유지한다. 정적 upgrade·KST·전체10경합·최종fresh/baseline을 순차 실행 중이며
+전체 경합 및 최종QA/CI 완료를 주장하지 않는다.
+아래104개 checkpoint의 PASS를 새108개 후보의 PASS로 사용하지 않는다. 운영·프런트는 변경하지 않았다.
+
 ## 2026-10-05 전용 DB·경합 검증 완료 — bb4 기반104 checkpoint
 
 아래의 기존 bb4 통합 후보에서 실제 LF fresh104와 촛불/세션 만료 pgTAP2파일·70개가 PASS다.
@@ -82,7 +118,7 @@ Docker 엔진은 AGENTS의 Safe Start 규칙을 따른다. 명령은 저장소 �
 1. `npm run db:reset` → 전체 migration과 seed 재적용.
 2. `npm run db:manifest:verify`, `npm run db:test` → upgrade 및 전체 rollback-only pgTAP.
 3. `npm run db:test:concurrency` → 기존 전체 경쟁 검증과 촛불 CAS/멱등/계정·세션 경합 포함. synthetic 행을 남기므로 SQL 회귀보다 뒤에 실행한다.
-4. `npm run db:test:candles`는 developer bootstrap이 이미 존재하는 위 concurrency 실행 이후의 부분 재검증용이다. 단독 빈 DB에서는 bootstrap 전제로 실행하지 않는다. fixture는 다음 로컬 reset에서 제거된다.
+4. `npm run db:verify`로 초기화한 정확한 fresh 로컬 DB에서 `npm run db:test:candles`를 단독 실행한다. CLI가 환경·프로젝트·manifest·빈 fixture를 확인한 뒤 합성 developer를 준비하고 성공/실패 모두 finally reset과 fresh 재확인을 수행한다. 기존 fixture가 남은 DB는 거부한다. 함수를 import하는 aggregate runner만 자신의 fixture와 cleanup을 소유한다.
 5. `npm run ci:quality`, `npm run edge:check`, backend-console의 `uv run python scripts/check_business_openapi_codegen.py`.
 
 새 pgTAP은 다른 메이드 감소·초기화, 감소 확인, 다른 차단 보존, 과거 관리자 receipt 호환, live session/role, 실제 DB 역할별 RPC·DML 거부를 검증한다. 기존 승인 제출 fixture에서도 제3 메이드 조정 후 제출/사진 연결/검수/수익 보존을 확인한다. 운영 실사용 성공으로 확대 해석하지 않는다.

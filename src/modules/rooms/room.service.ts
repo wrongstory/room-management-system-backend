@@ -55,6 +55,21 @@ export type RoomReadinessReasonCode =
   | 'CLEANING_REQUIRED'
   | 'PIN_MISMATCH'
   | 'PIN_UNCONFIGURED';
+export type RoomProjectionMode = 'LIVE' | 'PAST_END_OF_DAY' | 'FUTURE_START_OF_DAY';
+export type RoomDetailConditionCode =
+  | 'CHECKOUT_INSPECTION_REQUIRED'
+  | 'EXTRA_GUESTS'
+  | 'VACANT'
+  | 'CANDLE_PRESENT'
+  | 'ROOM_ISSUE_PRESENT'
+  | 'EARLY_CHECK_IN'
+  | 'LATE_CHECK_OUT'
+  | 'DATA_VERIFICATION_REQUIRED'
+  | 'PIN_SYNC_WARNING';
+
+export interface RoomListInput {
+  serviceDate?: string;
+}
 
 export interface RoomSummary {
   id: string;
@@ -85,6 +100,14 @@ export interface RoomSummary {
   allocationBlocked: boolean;
   allocationReady: boolean;
   reasonCodes: RoomReasonCode[];
+  serviceDate: string;
+  projectionMode: RoomProjectionMode;
+  detailConditionCodes: RoomDetailConditionCode[];
+  displayReservationId: string | null;
+  displayCheckInAt: string | null;
+  displayCheckOutAt: string | null;
+  displayGuestCount: number | null;
+  displayBaseOccupancy: number;
 }
 
 export interface ChangeRoomMasterDataInput {
@@ -410,7 +433,7 @@ export interface RoomService {
   listOperationBlocks(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomOperationBlocksResult>;
   listIssues(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomIssuesResult>;
   listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult>;
-  list(actor: Actor): Promise<RoomSummary[]>;
+  list(actor: Actor, input?: RoomListInput): Promise<RoomSummary[]>;
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
   changeMasterData(actor: Actor, input: ChangeRoomMasterDataInput): Promise<RoomSummary>;
   mutateOperation(actor: Actor, input: RoomOperationInput): Promise<RoomOperationResult>;
@@ -462,6 +485,14 @@ interface RoomProjectionRow {
   allocation_blocked: boolean;
   allocation_ready: boolean;
   reason_codes: RoomReasonCode[];
+  service_date: string;
+  projection_mode: RoomProjectionMode;
+  detail_condition_codes: RoomDetailConditionCode[];
+  display_reservation_id: string | null;
+  display_check_in_at: string | null;
+  display_check_out_at: string | null;
+  display_guest_count: number | null;
+  display_base_occupancy: number;
 }
 
 interface RoomTypeCatalogRow {
@@ -519,7 +550,15 @@ function toRoom(row: RoomProjectionRow): RoomSummary {
     pinSyncStatus: row.pin_sync_status,
     allocationBlocked: row.allocation_blocked,
     allocationReady: row.allocation_ready,
-    reasonCodes: row.reason_codes
+    reasonCodes: row.reason_codes,
+    serviceDate: row.service_date,
+    projectionMode: row.projection_mode,
+    detailConditionCodes: row.detail_condition_codes,
+    displayReservationId: row.display_reservation_id,
+    displayCheckInAt: row.display_check_in_at,
+    displayCheckOutAt: row.display_check_out_at,
+    displayGuestCount: row.display_guest_count,
+    displayBaseOccupancy: row.display_base_occupancy
   };
 }
 
@@ -1160,10 +1199,12 @@ export class SupabaseRoomService implements RoomService {
     return data as unknown as RoomEventsResult;
   }
 
-  async list(actor: Actor): Promise<RoomSummary[]> {
+  async list(actor: Actor, input: RoomListInput = {}): Promise<RoomSummary[]> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('get_room_operational_projection', {
+    const { data, error } = await this.clients.admin.rpc('get_room_board_projection', {
       p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_service_date: input.serviceDate ?? null,
       p_room_id: null
     });
     if (error) {
@@ -1174,8 +1215,10 @@ export class SupabaseRoomService implements RoomService {
 
   async get(actor: Actor, roomId: string): Promise<RoomSummary> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('get_room_operational_projection', {
+    const { data, error } = await this.clients.admin.rpc('get_room_board_projection', {
       p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_service_date: null,
       p_room_id: roomId
     });
     if (error) {

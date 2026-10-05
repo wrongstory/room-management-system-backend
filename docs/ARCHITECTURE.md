@@ -1,5 +1,31 @@
 # 백엔드 서버 설계
 
+> 2026-10-05 최신 통합 경계: #382/#323은 독립 QA와 exact CI 후 `dev@fdd8d7d`에 보호 통합됐다. 이를 정상 재통합한 #329 후보는 기존 A안·snapshot6/fresh18/core2를 유지하고, 실제 fresh104·template6순열·전체9경합·최종fresh104 및 Node1,767/Edge486/Python95를 PASS했다. 최종 문서 QA·commit/push·새 exact-head CI·dev 병합은 후속이다. SQL/manifest와 원본 installer는 불변이며 운영·프런트·v0.8.0은 변경하지 않았다. 현재 상태와 증거는 [API 상태 정본](./API_STATUS_MATRIX.md) 및 [제한 세션 검증 기록](./LIMITED_SESSION_REENTRY.md)을 따른다.
+
+> 과거 bb4 checkpoint 설명: 아래 이전 #329 후보의 103개/head/previous 및 미완료 표기는 당시 source 준비 설명이며 현재104 검증이나 최신 manifest로 재사용하지 않는다. 기존 A안·21 baseline caller의 strict source 분류와 최종 snapshot6/fresh18/core2 matrix를 그대로 유지했다. `dev@bb4fa40`의 #373/#384를 정상 merge한 source이며 당시 #383/#382 후속 dev 재통합·fresh/전체 DB·독립 QA·새 exact-head CI는 미완료였다. 원본 #329 migration/LF SHA는 불변이다. 이전 설명의 head `photo_collection_provider_context_axis`·previous `db_static_warning_remediation`·103개 준비 문구는 이력으로 보존하며, 과거 strict17/101 checkpoint를 현재 검증으로 재사용하지 않는다. 원본 strict FAIL9·exact9 비교 gate를 분리한다.
+
+## #329 기존 세션 제한 업무 재진입 — 구현 중
+
+후속101번째 append는 최초 active→limited 전환 transaction의 실제 visible live session을
+domain-separated digest의 private immutable evidence로 동결한다. grant와 최초 restriction root를
+연결하고 finish→upload에서도 root membership을 상속한다. 현재 세션을 이용한 과거 backfill이나
+새 로그인/credential/일반 active guard 완화는 없다. 정상 완료의 최초24h upload grant는 유지하며
+기존 grant는 재진입·재시도로 갱신하지 않는다.
+
+기존 제한 단건·완료와 사진 actor/accepted 수렴·제출 경로를 같은 eligibility에 맞춘다.
+제출은 명시적인 서버 검증 session 인자를 사용하는 별도 core/wrapper로 처리하며 unbound
+limited 우회를 닫는다. 기존 receipt/global/profile/session/업무 잠금 순서와 post-lock clock을 검증한다.
+외부 Drive 호출은 transaction 밖이고 accepted 이력은 authorization 실패로 삭제하지 않는다.
+기존 public STABLE 조회6개의 요청 snapshot·HTTP/RPC 호환성은 유지한다. 동일 권한 규칙의
+private STABLE at-clock core와 explicit SELECT VOLATILE fresh wrapper를 분리하고,
+기존 VOLATILE caller15개·신규3개의 호출 목록/횟수/속성을 fail-closed 검사한다.
+private snapshot/core/fresh helper는 runtime EXECUTE를 허용하지 않는다. 조회 결과는 이후
+mutation을 승인하지 않으며 이 보완을 전체 기존 RPC의 post-lock gap 해결로 확대하지 않는다.
+최소 discovery의9개 item 필드와 server bound만 반환하며 PIN·객실/고객 PII·raw grant/session/digest는 숨긴다.
+로컬 기능·경합 검증과 독립 소스 QA는 완료했고 기존 strict17 FAIL을 명시한 진단용 Draft 공유 후보이다.
+CI·dev 통합·운영·프런트 UAT는 미완료다. [계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
+v0.8.0 고정 후보·운영/recovery·Auth 설정·프런트는 변경하지 않는다.
+
 ## #363/#373 DB warning 보완 후보
 
 기존 함수7개의 body-only append와 private owner-only STABLE developer snapshot guard를 추가한다.
@@ -142,6 +168,16 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 
 현재 객실 현황은 이 snapshot 시각에 실제로 활성화된 점유·청소 의무·운영 차단만 계산한다. 미래 예약의 준비 의무는 일정과 작업 계획에는 남지만 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `reservationPhase`, `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`, `reasonCodes`, `pinSyncStatus`는 계속 독립 축이며 새 영구 `status` 컬럼이나 단일 API status를 만들지 않는다. 프런트의 5단계 대표 문구는 이 축을 읽는 표시 mapper일 뿐 정본 상태가 아니다.
 
+### #318 날짜별 객실 현황과 상세 조건 projection
+
+2026-10-05 최신 통합 후보는 [날짜 projection 계약](./ROOM_BOARD_DATE_FILTERS.md)의 미적용 baseline 전략을 따른다. 원격 미적용인 #318 본문 SHA를 보존해 #329 strict caller/snapshot migration 뒤로 재정렬하고 LIVE의 PIN/current-cleaning helper와 실제active 점유 선택을 후속 append로 호환 유지한다. STABLE 요청 시각은 `statement_timestamp()`다. 과거·미래 날짜 경계·조건 계산식·권한·history는 변경하지 않는다. 예정 퇴실 이후 inspection과 실제 cleaning materialization은 독립 축이다. 현재 dev58a 재통합 총106/head `room_board_live_projection_compatibility`이며 fresh106·전체27 upgrade/SQL·static/KST·전체9경합/최종cleanup은 통과했다. 새 CI·보호 병합·운영은 후속이고 이전104 checkpoint와 구분한다.
+
+`GET /v1/rooms`는 optional `serviceDate=YYYY-MM-DD`를 받는다. 생략 또는 KST 오늘은 요청 시각의 `LIVE`, 과거는 해당 날짜의 `23:59:59.999999 Asia/Seoul`, 미래는 `00:00:00 Asia/Seoul`을 `evaluatedAt`으로 사용한다. `serverTime`은 응답을 계산한 실제 시각이므로 과거·미래 조회에서는 `evaluatedAt`과 다르다. 잘못된 달력 날짜, 중복 query key, 알려지지 않은 query key는 HTTP 400으로 닫는다.
+
+새 `get_room_board_projection`은 active/password-complete business admin과 live session을 DB에서 다시 검증하며 service role만 실행할 수 있다. 기존 원장을 덮거나 새 복합 상태를 저장하지 않고 예약 segment, cleaning target/attempt, 촛불 event, 객실 issue, operation block, PIN sync event와 표시 override의 평가 시점 값을 조합한다. 객실 타입/기준정보는 effective-dated 이력이 아직 없으므로 최신 catalog 값을 사용한다는 제한을 공개한다.
+
+`detailConditionCodes`는 와이어프레임의 `CHECKOUT_INSPECTION_REQUIRED`, `EXTRA_GUESTS`, `VACANT`, `CANDLE_PRESENT`, `ROOM_ISSUE_PRESENT`, `EARLY_CHECK_IN`, `LATE_CHECK_OUT`과 운영 경고 `DATA_VERIFICATION_REQUIRED`, `PIN_SYNC_WARNING`을 반환한다. `CANDLE_PRESENT` 상세 필터는 와이어프레임대로 공실 카드에서만 표시하지만 기존 blocking/readiness 촛불 축은 점유 여부와 무관하게 유지한다. 고객 PII 없이 표시 예약 ID·입퇴실 시각·인원·기준 인원만 추가한다. 퇴실점검 수동 완료/청소 완료 대체 mutation은 제품 미확정이므로 이 projection에 포함하지 않는다.
+
 ### #228 점유·객실 문제·배정 준비 분리
 
 77번째 append-only `room_status_admin_correction`은 #236의 76번째 `developer_room_catalog_capacity` 뒤에 적용되며, `occupied`를 canonical non-retired stay segment의 서버 snapshot 반개구간 `[startsAt, endsAt)` 포함 여부로만 계산한다. 시작 직전은 비점유, 시작 시각은 점유, 종료 시각은 비점유이며 null end인 장기투숙 segment는 실제 종료/보정 전까지 계속 점유다. 조기 실제 checkout과 관리자 vacant 보정은 segment를 닫으므로 즉시 projection에서 빠진다.
@@ -154,7 +190,7 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 
 ### #187 예약 임박 lifecycle projection Phase A
 
-기존 GET 경로와 필드는 그대로 두고 `serverTime`, `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus`, `nextReservationId/nextCheckInAt/nextCheckOutAt`, `blockingReasonCodes`, `readinessReasonCodes`를 추가한다. `serverTime`과 `evaluatedAt`은 같은 DB snapshot timestamp다. lifecycle은 current 반개구간 또는 실제 active occupancy를 `OCCUPIED`로 우선하고, current가 없을 때 가장 이른 미래 active 예약의 KST 체크인 날짜를 오늘 `ARRIVAL_PENDING`, 내일 `RESERVATION_PRESENT`, 모레 이후 `FUTURE`, 없음 `NONE`으로 분류한다. next 필드는 current가 아닌 가장 이른 미래 active 예약만 가리킨다.
+기존 GET 경로와 필드는 그대로 두고 `serverTime`, `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus`, `nextReservationId/nextCheckInAt/nextCheckOutAt`, `blockingReasonCodes`, `readinessReasonCodes`를 추가한다. 오늘 LIVE 조회에서는 `serverTime`과 `evaluatedAt`이 같은 DB snapshot timestamp다. #318 과거·미래 날짜 조회에서는 평가 경계와 실제 계산 시각을 분리한다. lifecycle은 current 반개구간 또는 실제 active occupancy를 `OCCUPIED`로 우선하고, current가 없을 때 가장 이른 미래 active 예약의 KST 체크인 날짜를 오늘 `ARRIVAL_PENDING`, 내일 `RESERVATION_PRESENT`, 모레 이후 `FUTURE`, 없음 `NONE`으로 분류한다. next 필드는 current가 아닌 가장 이른 미래 active 예약만 가리킨다.
 
 대표 상태는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY` 우선순위다. 청소는 readiness 사유지만 `BLOCKED`를 만들지 않고, `FUTURE`는 현재 readiness 대표 상태를 유지한다. PIN mismatch/unconfigured는 current check-in readiness 경고로만 추가하며 예약 bookability와 기존 #140 권한 계약은 바꾸지 않는다. public projection RPC만 service role에 열고 private SECURITY DEFINER helper는 fixed `search_path`와 PUBLIC/anon/authenticated/service_role EXECUTE revoke를 적용한다. Phase A는 route, reservation move preview/commit, stay/segment 저장, Python codegen을 추가하지 않는다.
 
@@ -467,6 +503,16 @@ flowchart LR
 - GitHub Pages에는 production OpenAPI snapshot과 정적 UI만 배포합니다. token 입력과 API 실행을 비활성화하고 service-role key나 repository secret을 artifact에 포함하지 않습니다.
 
 developer 운영 상태는 `private` 원본이나 Supabase 내부 schema를 Edge에서 직접 직렬화하지 않습니다. DB catalog·Cron·감사 원장은 developer role을 다시 검증하는 app-owned `SECURITY DEFINER` projection을 거치고, Edge는 camelCase 응답과 안정적인 error code만 공개합니다. runtime secret은 소스 allowlist의 `configured` boolean만 반환하며 값·길이·해시·부분문자열은 반환하지 않습니다. Python 운영도구 연동은 [developer 운영 API 가이드](./DEVELOPER_OPERATIONS_API.md)를 따른다.
+
+## #383 사진 저장 이름 후보
+
+사진 provider identity는 계속 opaque app object ID와 preallocated Drive file ID로 연결한다.
+신규 v9 저장 이름만 `YYYY-MM-DD_일반방|폭탄방|특이사항_호실_번호.jpg|webp`로 구성하며
+private `photo_storage_names`에서 upload-date/room/slot/MIME/서버 순번과 함께 불변 보관한다.
+명명 예약은 기존 actor/session·admission·lease fence·folder winner를 재검증하는 service-only
+wrapper이며 외부 Drive create 전에 같은 transaction에서 확정한다. 기존 예약 RPC와 UUID 이름은
+보존하고 historical backfill/rename을 하지 않는다. generated Edge는 Node provider/validator를 공유한다.
+상세 배포 순서·이름 인식 rollback 제한 및 검증 상태는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
 
 ## 인증
 
@@ -970,6 +1016,89 @@ Fastify/Edge/OpenAPI의 #133 통합 당시 기준은 108 paths / 115 operations�
 
 ### #156 checkout template 운영 게시 경계
 
+#### #323 v9 게시 명세 정합화
+
+2026-10-05 사용자 결정 #382에서 배열 위치 제한을 제거했습니다. v9 요청에는
+`cleaning-proof / bomb-proof / issue-proof` 역할이 정확히 한 번씩 존재하며 배열의 6개 순열을 허용합니다.
+역할별 `displayOrder=0/1/2`, 필수 여부 `true / false / false`, 최대 사진 수 `20 / 10 / 10`은 유지합니다.
+현재 DB는 `청소 사진 / 폭탄방 증빙 / 특이사항 증빙` label을 포함한 정규 객체와 비교하므로,
+OpenAPI `CheckoutCleaningTemplateV9Slots`는 canonical 역할 union의 `items`와 역할별 exact-one
+`contains`로 표현하며 추가 필드를 금지합니다. 배열 순서 해제는 역할/order 값 자유화가 아닙니다.
+`expectedVersion=0`은 최초 게시, 이후에는 current version CAS를 사용합니다.
+
+과거 호환은 별도 schema입니다. v8 A-contract는 현재 RPC에서 새 게시와 완료 receipt 재생이 모두 가능하고,
+`maxPhotos` 없는 pre-A 요청은 같은 actor/key/hash의 완료 receipt가 있을 때만 재생됩니다.
+fresh pre-A 게시를 허용하거나 기존 v7+ 응답·snapshot을 v9로 재해석하지 않습니다.
+legacy 중복 key·필수 슬롯 등 교차 항목 조건과 receipt 존재 여부의 최종 판단은 기존 서버/DB가 유지합니다.
+이번 source 후보는 명세·검증과 HTTP 입력 순서만 수정하며 migration·권한·운영 템플릿·프런트 메뉴는 변경하지 않습니다.
+
+3개 슬롯은 일반·폭탄방·특이사항 **사진 모음의 분류**이며 사진을 3장만 올리거나 세 번에 나눠
+선택하라는 뜻이 아닙니다. 프런트 `makee-ham/room-management-system`의 scoped `dev@09ed284`는
+여러 파일을 한 번에 선택한 뒤 전역 큐에서 사진별 raw body 요청을 순차 전송합니다. 일반 사진은
+1~20장이고 폭탄방·특이사항 사진은 별도 선택 증빙입니다. 새 bulk/ZIP endpoint나 업로드 순서 정책을
+추가하지 않으며, 이번 대조는 전역 프런트 정책 snapshot 승격이나 운영 UAT 완료가 아닙니다.
+
+과거 #323 checkpoint의 허용 차이(Fastify·명세1개, Edge2개, DB6개)는
+[#382](https://github.com/wrongstory/room-management-system-backend/issues/382)의 이력입니다.
+새 후보는 Fastify 입력의 복사본을 정렬한 뒤 기존 ordered validator로 검사하고, Edge는 첫 슬롯
+조건 대신 v9 3-slot 후보를 정렬 후 역할별로 검사합니다. DB publisher는 이미 같은 정렬을 수행하므로
+원본 SQL·manifest를 바꾸지 않습니다. canonical 응답 검사는 그대로여서 비정렬 DB projection은
+계속 fail-closed합니다. 기존 frozen snapshot의 exact canonical equality와 저장 이름 자격도 재해석하지 않습니다.
+당시 후보에서는 6순열 허용·동일 hash·잘못된 역할/order·누락/중복 회귀를 실제 실행하되, 최종 QA·새 exact-head CI·
+최신 dev 재통합·전체 DB gate 완료 전에는 #323/PR #335의 source/dev 완료를 선언하지 않았습니다.
+이는 과거 검증 checkpoint이며 현재 완료 상태는 [API 상태 정본](./API_STATUS_MATRIX.md)의 `dev@fdd8d7d` 보호 통합 기록을 따릅니다.
+
+`tests/fixtures/cleaning-template-contract.ts`를 Fastify·Edge·실제 JSON Schema 검사·생성 클라이언트·로컬 DB
+검증이 공유합니다. `npm run openapi:template-client:check`는 앱 TypeScript 7을 바꾸지 않고
+격리된 `openapi-typescript@7.13.0` / `typescript@5.9.3`로 클라이언트 타입을 생성·검사합니다.
+TypeScript의 임시 생성은 `--array-length`로 길이3의 역할 union을 검사합니다. 타입이 표현하지 못하는
+중복/누락 역할의 exact-one 조건·숫자 범위·DB 상태는 JSON Schema·DB 검사로 보완합니다.
+Python 생성기 호환을 위해 `items`는 named 역할 union schema를 참조하고 길이는 `minItems=maxItems=3`으로
+제한합니다. 실제 생성 모델에서 6개 입력 순열의 필드·배열 위치 보존을 검사합니다.
+객실 타입별 과거 슬롯 수는 `allOf`의 `if/then` 조건으로 표현하여 기존 이름의 요청 모델을
+유지합니다. `tools/backend-console/scripts/check_business_openapi_codegen.py`로 실제 모델 생성을 검사하며,
+생성기에서 표현하지 못하는 조건은 위 JSON Schema 검사와 기존 서버 검증을 그대로 적용합니다.
+`npm run db:test:template-contract`는 fresh local DB에서 합성 fixture만 사용하고 transaction을 rollback합니다.
+
+2026-10-05 로컬 checkpoint(`dev@bb4fa40` 통합 후보/102 migrations): 원본302개 raw SHA를 보존한
+LF 임시 검증본에서 fresh `db:verify`, 실제 6순열 게시·동일/정규 순서 receipt replay·4객실 유형
+CAS·16 malformed 거부·v8 호환과 전체 SQL80파일/4,802검사를 PASS했다. exact lint baseline은
+호환 경고9개·catalog3개 일치 PASS이며 원본 strict FAIL9/exit1은 유지한다. Node1,477/69,
+TypeScript 실제 codegen/Ajv, Python95/Ruff226/mypy25/6순열 codegen/package, Edge477/0도 PASS다.
+독립 QA의 이전 operation 설명 P2를 보완하고 Node/Deno 회귀를 추가했다. 새 Deno assertion의
+최초 format FAIL1/99는 원 로그에 보존했으며 출력된 줄바꿈만 보완한 1회 재검증은 PASS다.
+이번 전체26 upgrade runner도 PASS(exit 0)이며, 원 로그 `qa382-db-full-upgrades.log`의 SHA-256은
+`47cb0421a6348e91ccbf86dff82fe2b7edb1d0900633bd6e89e5662877334671`이다. 이는 위 local102 후보의
+검증이며 최신 #383(`dev@c2b5618`, 103 migrations) 재통합 결과는 아니다. 최종 staged-tree 독립 QA·
+새 exact-head CI·Ready/보호 dev 병합·실제 백업/운영·프런트 UAT는 아직 완료하지 않았다.
+local102의 최종 독립 source QA는 신규 P0/P1/P2=0이며 승인 tree `5e0e35235aea7a778a0cc8da0f42365ddd06bb99`를
+정상 merge commit `7b0e3fb`로 보존했다. 이후 `dev@c2b5618`의 #383을 정상 merge한103 후보는
+Node1,631/70·Edge479/0·Python95·6순열 TS/Ajv 및 Python codegen PASS다. LF 임시 검증본은
+원본305 raw SHA/197 SQL·psql LF본/108 원문 대응을 보존하며 migration·manifest는 이 최신 dev와 같다.
+이103 후보의 fresh·실제6순열 게시/동일receipt/4타입CAS/16 malformed·원 strict FAIL9와 승인
+exact9/catalog3 비교 gate·전체26 upgrades 및SQL81파일/4,979 assertions·fresh cleanup도 실제
+exit0 PASS다. full-upgrades 로그 SHA256은 `ec783912a90824904348a3dd0d16fb8beaa5d10e8629fe0c7983a548ace7fce6`,
+template 로그는 `70410e6e88729385f1ebb3b2ade83d28763f4a78d590c0eb2dc69c5d9bb0a1cb`,
+baseline 로그는 `ca9215c8ae1557a39f59749369f9bd043dc77d5882a896a18e2a1ace173952a8`다.
+原305/임시본 drift0은 전체 실행 후에도 재확인했다. 이 checkpoint 뒤 dev에 보호 병합한
+#388/PR390/1209756의 정상 재통합·전체경합·최종 staged-tree QA·새 exact-head CI·보호 병합은
+별도 후속 gate다. local102/이103 결과를 후속 exact head의 CI나 운영 PASS로 재사용하지 않는다.
+후속 2026-10-05 실제 checkpoint: 위 c2b5618 후보를 정상 커밋 `cfc75da`로 보존한 뒤
+#388이 보호 병합된 `dev@1209756`를 정상 통합했다. Node1,664/71·Edge479/0·Python95/
+Ruff226/mypy25/codegen/package·client6순열, fresh103·template6순열/receipt/CAS/16 malformed·
+SQL81파일/4,979·static100→101/103 cleanup·KST145·전체8개 경합/최종 fresh103 cleanup은
+실제 PASS/exit0다. 원본305 SHA·LF197/원문108 대응 drift0, strictFAIL9/exit1와 승인
+exact9/catalog3 PASS를 재확인했다. 경합 로그 SHA256은
+`03da5a83479d39a75e5af960fbbac60c8c440b36b7025a6b3a25d17eb8b07805`,
+whole SQL 로그는 `cf06d4e232a2abb17069e179bd1dda8321714136bff011c4cf7379c97d6c347c`다.
+이번 후속에서 전체26 upgrade는 로컬 NOT RUN이며 같은 불변 SQL·manifest의 이전 전체26
+PASS와 구분한다. 최종 독립 staged-tree QA·새 exact-head CI의 전체upgrade/required 두 항목·
+Ready/보호 dev 병합·실제 백업/운영·프런트 UAT는 후속 gate다. 입력 배열6순열을 허용하지만
+canonical 역할·수량·중복·객체 order·응답·기존 snapshot·CAS/receipt 및 SQL·manifest는 유지한다.
+사람/독립 QA와 운영 배포는 별도 gate입니다.
+
+아래는 #156/#179 당시 경계이며 v9 기본 계약은 위 절을 우선합니다.
+
 예약 command의 `CLEANING_TEMPLATE_NOT_CONFIGURED`는 제거하지 않습니다. active/password-complete business
 admin의 live session만 네 room type의 current checkout template을 조회하고, 한 타입씩 expected-version CAS로
 새 immutable version을 게시합니다. actor/command/key/request-hash receipt와 room-type advisory lock이 replay와
@@ -1055,7 +1184,7 @@ Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대�
 
 `list_room_candles`는 최대 50개 UUID keyset page의 `roomId`, `roomNumber`, `count`, `roomStateVersion`만 반환한다. 두 RPC 모두 profile 및 해당 actor의 `auth.sessions` 행을 SHARE lock으로 재검증한다. 변경은 기존 `room.operation.set_candle_count` receipt namespace/hash를 유지하고 receipt → actor/session → room 잠금 순서로 직렬화한다. 감소는 처리자의 `physicallyVerified=true`를 요구하지만 관리자 승인·배정·제출/승인·7일 제한은 없다. room CAS 증가, append-only candle/audit event와 receipt를 한 transaction에 기록한다.
 
-86번째 migration은 기존 85개와 과거 event를 수정하지 않는다. before-insert trigger가 room lock 뒤 `recorded_at`을 기존 최댓값보다 최소 1μs 뒤로 부여하여 기존/신규 writer와 동일 transaction에서도 최신 수량 순서를 보장한다. 기존 room/time 및 actor FK index, RLS, 원장 UPDATE/DELETE 금지는 유지한다. 제출·검수·사진·수익·지급 snapshot과 다른 차단은 변경하지 않는다. 상세 HTTP/rollback 계약은 [#330 연동 문서](./ROOM_CANDLES_330.md)를 따른다.
+최초 후보의 86번째 migration은 당시 기존 85개와 과거 event를 수정하지 않았다. 현재 dev106 통합에서는 미적용 원본 본문을 보존한 107번째 촛불 migration과 108번째 세션 hard-expiry append를 사용한다. before-insert trigger가 room lock 뒤 `recorded_at`을 기존 최댓값보다 최소 1μs 뒤로 부여하여 기존/신규 writer와 동일 transaction에서도 최신 수량 순서를 보장한다. 기존 room/time 및 actor FK index, RLS, 원장 UPDATE/DELETE 금지는 유지한다. 제출·검수·사진·수익·지급 snapshot과 다른 차단은 변경하지 않는다. 상세 HTTP/rollback 계약은 [#330 연동 문서](./ROOM_CANDLES_330.md)를 따른다.
 
 Edge `/v1/reservations*`도 예약·청소요청 command RPC 9개와 #196 read projection RPC 2개만 재사용하며 raw DML을 허용하지 않는다. actor는 exact active business admin이고 최초 비밀번호 변경과 active session까지 매 요청 확인한다. 목록·mutation projection에는 고객명과 암호문이 없고, 단건 상세에서 고객명을 실제 복호화할 때만 server-generated request ID를 가진 `sensitive.read` activity를 append한다. activity append가 실패하면 상세 응답도 fail-closed한다. Edge Web Crypto AES-256-GCM envelope와 HMAC request fingerprint는 Fastify 계약과 호환하며, scheduler와 관리자 수동 전이의 인증·멱등성 namespace는 분리한다.
 

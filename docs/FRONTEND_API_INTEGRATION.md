@@ -1,5 +1,7 @@
 # 프론트엔드·Codex API 연동 가이드
 
+> 현재 #330은 dev cf22727(#318 병합 완료) 통합 후보로 migration108/OpenAPI139 paths·150 operations다. 아래 초기 수치는 과거 이력이며 새 후보의 전체 검증·운영 반영은 후속이다. 촛불 최소 조회/공동 조정과 날짜 조회·제한 세션 계약을 함께 보존한다. 프런트 소스는 변경하지 않았다.
+
 > 2026-10-05 #330 최신 dev 통합 후보는 103 migrations/source OpenAPI 목표138 paths/149 operations다. 최소 조회와 기존 촛불 변경만 active/password-complete/live-session admin/maid가 사용하며 일반 객실/PIN 권한은 넓히지 않는다. #336 신고 정책은 제외한다. #383/#382/#329/#318 후속 dev 재통합·전체 DB·독립 QA·새 exact-head CI와 release/운영 승격은 별도 gate다. 프런트 source·운영/UAT는 이번 병합 준비로 완료되지 않는다.
 
 > #330 촛불 공동 관리 source 후보: [전용 연동 문서](./ROOM_CANDLES_330.md). 새 최소 조회와 기존 변경 endpoint의 메이드 권한 확대는 release/운영 배포 후에만 사용한다. 아래 운영 snapshot 기록과 혼동하지 않는다.
@@ -9,6 +11,19 @@
 이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 과거 v0.4.0 인계는 historical workflow 참고용이고, 현재 계약은 production OpenAPI 0.5.1과 이 문서를 우선한다.
 
 ### 후속 scoped 인계 이력
+
+## 2026-10-03 #329 A안 handoff — 백엔드 구현 중
+
+제한 업무는 최초 제한 전환 당시의 유효·미폐기 로그인 세션으로만 재진입한다.
+`/v1/auth/me`나 새 로그인을 제한 계정 bootstrap으로 사용하거나 일반 active 계정으로 위장하지 않는다.
+기존 token을 정상 복원한 경우에만 전용 제한 업무 discovery를 호출하고 서버가 반환한 exact
+attempt/revision/action 범위만 표시한다. 최초 freeze에 포함된 여러 기기는 각각 기존 유효 세션을 사용할 수 있다.
+token을 삭제한 cold start·freeze에 없던 새 기기/새 로그인·폐기/만료·정상 refresh 불가이면
+관리자 인계·재배정 안내가 필요하다. 앱 재진입은 2h/24h 유예를 연장하지 않는다.
+새 목록은 로컬 검증을 마친 진단용 Draft source 계약이며 현재 운영 사용 가능 API로 간주하지 않는다.
+프런트 source는 담당자가 별도로 개발하며 백엔드 합성 검증만으로 실제 cold start E2E PASS를 선언하지 않는다.
+[제한 세션 재진입 계약](./LIMITED_SESSION_REENTRY.md)에 DTO·오류·검증 상태를 기록한다.
+scoped 프런트 기준 main `d509b44`/dev `09ed284`는 유지하며 전역 제품 snapshot을 갱신하지 않는다.
 
 > 2026-10-03 #331 구현 후보 인계: 별도 송금 표시 GET/PUT·reconfirm·history 3 paths/4 operations를 추가한다. 사용자 결정은 종료 주차·양수 신규 on 및 on 유지 별도 재확인이다. cycle.status/PAID로 스위치를 계산하거나 off에 reopen을 사용하지 않는다. [표시 전용 API 계약과 검증 상태](./PAYROLL_REMITTANCE_MARKER.md)를 따른다. 목표 source 명세는 137 paths/148 operations이며 프런트 구현·운영 제공 완료는 아니다.
 
@@ -161,7 +176,7 @@ Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모�
 2. 새 source 계약의 `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload?assignmentId=...&assignmentRevision=...&expectedPhotoRevision=...`에는 스마트폰 원본 JPEG/WebP/HEIC/HEIF **raw bytes**를 전송한다. `Content-Type`은 실제 파일에 맞는 정확한 image/jpeg, image/webp, image/heic, image/heif 중 하나이고 입력은 최대 5MiB다. multipart/base64는 지원하지 않는다. 브라우저가 부정확한 MIME을 제공하면 확장자만 믿고 유형을 위조하지 않는다. 5MiB 또는 12MP/5000px을 넘는 파일은 클라이언트 축소가 가능할 때 축소 후 전송하고, 불가능하면 사용자가 이해할 수 있는 안내를 표시한다. 운영 API 배포 전에는 기존 300KiB/JPEG/WebP 계약과 혼용하지 않는다.
 3. 같은 사용자 동작 재시도는 같은 `Idempotency-Key`와 같은 효과 입력을 보낸다. `PHOTO_VERSION_CONFLICT`는 최신 슬롯 revision을 다시 확인하고 사용자 결정을 받는다. `PHOTO_UPLOAD_IN_FLIGHT`/429에서 key를 무한 교체하지 않는다.
 4. `GET /v1/photo-uploads/{operationId}`로 확인하고 accepted만 current 사진 저장 완료로 표시한다. provider_succeeded/reconciliation_pending은 제출 가능한 성공으로 표현하지 않는다.
-5. `GET /v1/photos/{photoId}/content`는 인증 proxy다. 공개URL이나 Drive ID를 저장하지 않고 no-store 응답을 영구 브라우저 cache에 넣지 않는다. limited 계정은 photoId=null이며 업로드 권한으로 원본을 읽을 수 없다.
+5. `GET /v1/photos/{photoId}/content`는 인증 proxy다. 공개URL이나 Drive ID를 저장하지 않고 no-store 응답을 영구 브라우저 cache에 넣지 않는다. limited 계정은 photoId=null이며 업로드 권한으로 원본을 읽을 수 없다. #383 신규 사진의 실제 Drive 이름은 서버가 날짜·유형·호실·고유 순번으로 구성한다. 새 client 필드는 필요 없으며 사진 ID/컬렉션 CAS 계약은 유지한다. 권한 검증 후 content 응답의 `Content-Disposition`은 서버 불변 이름을 UTF-8 `filename*`로 제공하고 legacy는 `photo.jpg|webp`를 유지한다. Drive 응답 이름/헤더는 그대로 전달하지 않는다. 개발 후보 계약이며 hosted 배포 여부는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 확인한다.
 
 서버가 방향·metadata를 정리하고 300KiB 이하 JPEG/WebP output을 재검증하므로 프론트 압축 성공만으로 업로드 성공을 가정하지 않는다.
 408 PHOTO_BODY_TIMEOUT은 본문 수신 시간 초과, 413은 원문/출력 크기 또는 decoder 기술상한, 415는 MIME, 409는 CAS/작업·quota·KST clock 경계, 503은 provider/환경 준비 상태를 구분한다. 업로드 initial/retry 응답의 `quotaWarning:boolean`이 true면 용량 경고를 표시한다. Google raw 사용량은 제공하지 않는다.

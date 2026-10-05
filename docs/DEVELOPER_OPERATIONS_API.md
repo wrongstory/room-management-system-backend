@@ -93,6 +93,20 @@ OpenAPI는 `0.5.1` / 129 paths / 139 operations입니다. 최신 `dev@ab185af234
 migration 한 건만 production pending으로 고정합니다. 79~83번을 다시 적용하거나 history를 강제 보정하지 않으며,
 실제 운영 readback이 83개/head `maid_pin_immediate_reveal`과 다르면 84번째 적용 전에 중단합니다.
 
+Issue #318의 최초 source 후보는 85번째 `flat_cleaning_evidence_history_payroll` 뒤에 append-only
+`room_board_date_filters`를 추가했으며 당시 developer source head는 같은 이름이었습니다. 이 이력은 보존합니다.
+2026-10-05 이전 `dev@bb4fa40`/102 migrations와의 별도 통합 checkpoint는 원격 미적용인 원 #318 본문을
+그대로 뒤로 이동하고 LIVE helper 호환 append를 추가한 총104 migrations입니다. head는
+`room_board_live_projection_compatibility`, 바로 이전은 `room_board_date_filters`, 그 앞은
+`photo_collection_provider_context_axis`입니다. runtime 기대값과 SQL/Edge 진단 회귀도 이 최신 head에 맞춥니다.
+미적용 baseline 재정렬은 #329 strict caller/snapshot 선행 검증을 보존하며 history repair나 guard 완화가 아닙니다.
+원본 SHA·실제 검증 상태는 [객실 날짜 projection 계약](./ROOM_BOARD_DATE_FILTERS.md)을 따릅니다.
+현재 `dev@58a5821` 재통합 후보는 총106개이며 head와 바로 이전 이름은 위와 같습니다.
+그 앞은 `photo_collection_provider_context_axis`입니다. fresh106·전체27 upgrade/SQL84파일5,193개·전체9경합과
+독립 소스 QA를 실제 통과했습니다. 기존86/104 검증을 현재 검증으로 재사용하지 않습니다.
+새 exact-head required CI·보호 병합·운영 적용은 후속이며 운영 적용 완료가 아닙니다.
+`behind/equal/ahead/diverged` 비교로 실제 DB와 source의 배포 상태를 계속 구분합니다.
+
 #156 source의 `cleaning_template.published` summary는
 `roomTypeCode/cleaningKind/version/durationMinutes/slotCount`만 허용합니다. slot의 label·description,
 전체 slots, request hash, raw before/after state는 developer projection에 포함하지 않습니다. 이 event를

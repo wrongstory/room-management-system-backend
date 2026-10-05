@@ -1179,6 +1179,40 @@ Table private.attempt_capability_grants {
   Note: '#7B private immutable ledger. No Data API/direct service-role table access. No token/session ID stored. Latest valid Supabase session + role/status + exact attempt/revision/action + unrevoked hard expiry required every dedicated API call. Different command key cannot renew TTL.'
 }
 
+// #329 candidate101, not production deployment. First visible live Auth session
+// membership is frozen at active -> limited transition. No raw session/token,
+// legacy backfill, general active guard relaxation or re-entry TTL renewal.
+Table private.limited_session_roots {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  origin_profile_version bigint [not null]
+  captured_at timestamptz [not null]
+  Indexes {
+    (actor_profile_id, origin_profile_version) [unique]
+    (id, actor_profile_id) [unique]
+  }
+  Note: 'Private immutable restriction episode; profile lifecycle CAS version is historical evidence, not a mutable FK to current profile version. RLS/no raw runtime grants.'
+}
+
+Table private.limited_session_eligibility {
+  root_id uuid [not null, ref: > private.limited_session_roots.id]
+  session_digest text [not null]
+  Indexes { (root_id, session_digest) [pk] }
+  Note: 'Domain-separated SHA-256 of existing Auth UUID, not a credential. Same transition visible/unexpired sessions only; no current-session backfill or delayed commit inclusion. First membership is inherited by later upload grant.'
+}
+
+Table private.attempt_capability_session_roots {
+  capability_id uuid [pk, ref: > private.attempt_capability_grants.id]
+  root_id uuid [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  Indexes {
+    (root_id, actor_profile_id)
+    actor_profile_id
+  }
+  Note: 'Immutable capability -> first restriction root binding. Composite root/actor FK plus INSERT identity guard enforce grant actor equality. Legacy unbound limited grants fail closed, never renew or recapture sessions.'
+}
+Ref: private.attempt_capability_session_roots.(root_id, actor_profile_id) > private.limited_session_roots.(id, actor_profile_id)
+
 Table private.attempt_capability_revocations {
   capability_id uuid [pk, ref: > private.attempt_capability_grants.id]
   revoked_at timestamptz [not null]
@@ -2143,6 +2177,19 @@ Table private.photo_drive_folder_identities {
   }
   Note: 'Immutable private pre-create folder winner. Date binds root; room binds same-date date winner. Service-only latest-authorized reservation returns existing winner on conflict, never registers losing candidate. File identity must use exact room winner. Raw provider IDs are not HTTP/Data API fields.'
 }
+Table private.photo_storage_names {
+  object_id uuid [pk, ref: - private.photo_drive_identities.object_id]
+  operation_id uuid [not null, unique]
+  naming_number bigint [not null, unique, note: 'Positive private global sequence; min two digits, gaps permitted, never truncate 100']
+  upload_date date [not null]
+  room_number text [not null, note: 'Same frozen three-digit Drive identity room snapshot']
+  slot_key text [not null, note: 'cleaning-proof/bomb-proof/issue-proof only']
+  mime_type text [not null, note: 'Stored JPEG/WebP only']
+  file_name text [not null, unique]
+  created_at timestamptz [not null]
+  Note: '#383 immutable server-only naming binding. YYYY-MM-DD_일반방|폭탄방|특이사항_호실_번호.jpg|webp constructed and checked against frozen identity/slot/MIME. RLS, no direct grants. Explicit new named reservation RPC only; existing UUID identities and old API reservations stay unmodified. Retry/reconciliation reuse the same name; no provider rename/move/delete.'
+}
+Ref: private.photo_storage_names.(object_id,operation_id) - private.photo_provider_objects.(id,operation_id)
 Ref: private.photo_upload_admissions.(cleaning_attempt_id,cleaning_target_id) > public.cleaning_attempts.(id,cleaning_target_id)
 Ref: private.photo_upload_admissions.(target_photo_slot_id,cleaning_target_id) > private.target_photo_slot_snapshots.(id,cleaning_target_id)
 Ref: private.photo_drive_identities.(object_id,operation_id) - private.photo_provider_objects.(id,operation_id)

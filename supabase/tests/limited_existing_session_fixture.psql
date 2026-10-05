@@ -1,0 +1,62 @@
+-- Synthetic shared setup: no TAP, credentials, production values or backfill.
+create function pg_temp.lid(n integer) returns uuid language sql immutable as $$
+  select ('f3290000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid
+$$;
+insert into auth.users(id) select pg_temp.lid(100+n) from generate_series(1,5)n;
+insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,
+  login_id_normalized,login_sequence,role,status,must_change_password)
+select pg_temp.lid(n),pg_temp.lid(100+n),'limited-fixture-'||n,'limited-fixture-'||n,
+  'limited-fixture-'||n,'limited-fixture-'||n,0,
+  case when n=1 then 'admin' else 'maid' end::public.app_role,
+  case when n=5 then 'upload_only' else 'active' end::public.account_status,false
+from generate_series(1,5)n;
+insert into auth.sessions(id,user_id,not_after) select pg_temp.lid(200+n),pg_temp.lid(100+n),null from generate_series(1,5)n;
+insert into auth.sessions(id,user_id,not_after) values
+  (pg_temp.lid(302),pg_temp.lid(102),clock_timestamp()+interval '1 day'),
+  (pg_temp.lid(402),pg_temp.lid(102),clock_timestamp()-interval '1 day');
+create function pg_temp.lslots() returns jsonb language sql immutable as $$
+ select jsonb_build_array(jsonb_build_object('slotKey','limited-proof','required',true,'displayOrder',0,
+   'sectionKey','synthetic','label','합성 증빙','description','정책 seed 아님','instanceNumber',1,'instanceCount',1))
+$$;
+insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by)
+select pg_temp.lid(250),id,'additional',329,'published',30,pg_temp.lslots(),pg_temp.lid(1)
+from public.room_types where code='standard';
+create function pg_temp.lfixture(n integer,p_maid integer,p_status public.attempt_status default 'field_completed')
+returns void language plpgsql as $$
+declare room_row public.rooms; snapshot jsonb; started timestamptz:=clock_timestamp()-interval '1 hour';
+begin
+  select * into room_row from public.rooms where room_type_id=(select id from public.room_types where code='standard')
+    order by room_number offset n limit 1;
+  snapshot:=jsonb_build_object('id',pg_temp.lid(250),'version',329,'durationMinutes',30,'photoSlots',pg_temp.lslots());
+  insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,effective_service_date,
+    available_from,due_at,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
+  values(pg_temp.lid(300+n),room_row.id,'additional','manual_room_request','limited-target-'||n,
+    (clock_timestamp() at time zone 'Asia/Seoul')::date,(clock_timestamp() at time zone 'Asia/Seoul')::date,
+    started-interval '1 hour',clock_timestamp()+interval '1 day','notified',2,
+    jsonb_build_object('code','standard'),10000,snapshot,pg_temp.lid(1));
+  insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,notified_at,changed_by)
+    values(pg_temp.lid(400+n),pg_temp.lid(300+n),pg_temp.lid(p_maid),n+1,2,started,pg_temp.lid(1));
+  insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,
+    assignment_revision,started_at,field_completed_at,ended_at,end_reason,template_snapshot,room_snapshot)
+  values(pg_temp.lid(500+n),pg_temp.lid(300+n),pg_temp.lid(400+n),pg_temp.lid(p_maid),1,p_status,2,started,
+    case when p_status='field_completed' then started+interval '10 minutes' end,
+    case when p_status in ('field_completed','interrupted') then started+interval '10 minutes' end,
+    case when p_status='interrupted' then 'ADMIN_HANDOVER' end,
+    snapshot,jsonb_build_object('roomId',room_row.id));
+end $$;
+select pg_temp.lfixture(1,2,'in_progress');
+select pg_temp.lfixture(2,3);
+select pg_temp.lfixture(3,4,'interrupted');
+-- Profile5 models an unbound legacy account only. New assignments require an
+-- actually active maid; old live legacy-grant preservation is exercised by the
+-- exact100->101 upgrade fixture, not by bypassing the fresh assignment guard.
+create function pg_temp.lmanage(n integer,action text,p_profile_version bigint default 1)
+returns jsonb language sql as $$
+  select public.manage_cleaning_attempt_lifecycle(pg_temp.lid(1),pg_temp.lid(201),pg_temp.lid(500+n),1,
+    pg_temp.lid(400+n),2,p_profile_version,action,'{}',
+    case when action='allow_finish' then 'DEACTIVATION_FINISH_CURRENT' else 'DEACTIVATION_UPLOAD_ONLY' end,
+    'limited-allow-'||n,repeat('a',64));
+$$;
+create function pg_temp.lslot(n integer) returns uuid language sql stable as $$
+  select id from private.target_photo_slot_snapshots where cleaning_target_id=pg_temp.lid(300+n) and slot_key='limited-proof'
+$$;

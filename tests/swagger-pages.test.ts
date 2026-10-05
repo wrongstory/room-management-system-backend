@@ -136,8 +136,8 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
     expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.6.0"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "137"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "148"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "139"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "150"');
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
@@ -208,7 +208,7 @@ describe('GitHub Pages Swagger portal', () => {
     expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it('builds the exact current candidate source contract and rejects stale production counts', async () => {
+  it('builds the exact current source contract and rejects stale release and production counts', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'swagger-v08-release-'));
     temporaryDirectories.push(directory);
     const sourceFile = join(directory, 'release-openapi.json');
@@ -219,15 +219,18 @@ describe('GitHub Pages Swagger portal', () => {
       '--expected-version', '0.6.0', '--output-dir', outputDirectory
     ];
     const result = await execFileAsync(process.execPath, [
-      ...args, '--expected-path-count', '138', '--expected-operation-count', '149'
+      ...args, '--expected-path-count', '139', '--expected-operation-count', '150'
     ]);
-    expect(result.stdout).toContain('version=0.6.0 paths=138 operations=149');
+    expect(result.stdout).toContain('version=0.6.0 paths=139 operations=150');
     const manifest = JSON.parse(await readFile(join(outputDirectory, 'portal-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({
-      apiVersion: '0.6.0', pathCount: 138, operationCount: 149, readOnly: true
+      apiVersion: '0.6.0', pathCount: 139, operationCount: 150, readOnly: true
     });
     await expect(execFileAsync(process.execPath, [
       ...args, '--expected-path-count', '131', '--expected-operation-count', '141'
+    ])).rejects.toThrow(/path 수가 release 계약/);
+    await expect(execFileAsync(process.execPath, [
+      ...args, '--expected-path-count', '137', '--expected-operation-count', '148'
     ])).rejects.toThrow(/path 수가 release 계약/);
   });
 

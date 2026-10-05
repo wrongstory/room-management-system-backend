@@ -6,6 +6,7 @@ import {
   readPhotoBody,
 } from "./photo-binary.ts";
 import { PhotoPurgeProviderError } from "./photo-purge.ts";
+import { photoStorageFileName } from "./photo-storage-name.ts";
 
 type Fetch = typeof fetch;
 export interface DriveConfig {
@@ -21,6 +22,7 @@ export interface DriveObject {
   mime: PhotoMime;
   sizeBytes: number;
   sha256: string;
+  fileName?: string | null;
 }
 export type DriveReadObject = Pick<
   DriveObject,
@@ -61,6 +63,10 @@ function record(value: unknown): Record<string, unknown> {
     return unavailable();
   }
   return value as Record<string, unknown>;
+}
+function storageName(object: DriveObject): string {
+  return photoStorageFileName(object.fileName, object.mime) ??
+    `${object.objectId}.${object.mime === "image/jpeg" ? "jpg" : "webp"}`;
 }
 const fields =
   "id,name,mimeType,parents,size,sha256Checksum,appProperties,trashed,shared,createdTime";
@@ -268,11 +274,10 @@ export class GoogleDriveProvider implements PhotoProvider {
     this.#privateFolder(await this.#metadata(folderId), folderId, parent, name);
   }
   async #verify(object: DriveObject): Promise<string> {
+    const expectedName = storageName(object);
     const row = await this.#metadata(object.fileId);
     if (
-      row.id !== object.fileId ||
-      row.name !==
-        `${object.objectId}.${object.mime === "image/jpeg" ? "jpg" : "webp"}` ||
+      row.id !== object.fileId || row.name !== expectedName ||
       row.mimeType !== object.mime || row.size !== String(object.sizeBytes) ||
       row.trashed !== false || row.shared !== false ||
       !Array.isArray(row.parents) || row.parents.length !== 1 ||
@@ -303,12 +308,11 @@ export class GoogleDriveProvider implements PhotoProvider {
       bytes.length !== object.sizeBytes || bytes.length > PHOTO_MAX_BYTES ||
       !/^[0-9a-f]{64}$/.test(object.sha256)
     ) mismatch();
+    const name = storageName(object);
     const boundary = `photo_${crypto.randomUUID().replaceAll("-", "")}`;
     const metadata = {
       id: object.fileId,
-      name: `${object.objectId}.${
-        object.mime === "image/jpeg" ? "jpg" : "webp"
-      }`,
+      name,
       mimeType: object.mime,
       parents: [object.folderId],
       appProperties: { objectId: object.objectId },

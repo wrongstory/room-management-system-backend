@@ -4,6 +4,10 @@ import type { AppEnv } from '../src/config/env.js';
 import { AppError } from '../src/lib/app-error.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import { SupabaseAuthService } from '../src/modules/auth/auth.service.js';
+import { LimitedAttemptService } from '../src/modules/limited-attempts/limited-attempt.service.js';
+import type { PhotoHttpServices } from '../src/modules/photos/photo.routes.js';
+import type { SubmissionService } from '../src/modules/submissions/submission.service.js';
+import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
 
 const env: AppEnv = {
   APP_ENV: 'local',
@@ -124,6 +128,9 @@ function services(): AppServices {
         elevatorZone: 'A' as const,
         dataStatus: 'verified' as const,
         stateVersion: 1,
+        serviceDate: '2026-09-16',
+        projectionMode: 'LIVE' as const,
+        detailConditionCodes: ['VACANT' as const],
         evaluatedAt: '2026-09-16T08:00:00.000Z',
         reservationPhase: 'upcoming' as const,
         serverTime: '2026-09-16T08:00:00.000Z',
@@ -136,6 +143,11 @@ function services(): AppServices {
         nextReservationId: '40000000-0000-4000-8000-000000000001',
         nextCheckInAt: '2026-09-18T07:00:00.000Z',
         nextCheckOutAt: '2026-09-19T02:00:00.000Z',
+        displayReservationId: '40000000-0000-4000-8000-000000000001',
+        displayCheckInAt: '2026-09-18T07:00:00.000Z',
+        displayCheckOutAt: '2026-09-19T02:00:00.000Z',
+        displayGuestCount: 2,
+        displayBaseOccupancy: 2,
         blockingReasonCodes: [],
         readinessReasonCodes: [],
         occupied: false,
@@ -495,6 +507,38 @@ describe('application', () => {
       cleaningRequired: false,
       allocationReady: true
     });
+    await app.close();
+  });
+
+  it('passes one strict calendar serviceDate to the admin room board', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const headers = { authorization: 'Bearer access-token' };
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms?serviceDate=2026-09-22',
+      headers
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(appServices.rooms.list).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      { serviceDate: '2026-09-22' }
+    );
+
+    for (const query of [
+      'serviceDate=2026-02-30',
+      'serviceDate=2026-9-22',
+      'serviceDate=2026-09-22&unexpected=true'
+    ]) {
+      const invalid = await app.inject({
+        method: 'GET',
+        url: `/v1/rooms?${query}`,
+        headers
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json().error.code).toBe('VALIDATION_ERROR');
+    }
     await app.close();
   });
 
@@ -1743,6 +1787,64 @@ describe('application', () => {
     await app.close();
   });
 
+  it('accepts all six v9 array orders without changing role fields (#382)', async () => {
+    const appServices = services();
+    if (!appServices.cleaningTemplates) throw new Error('missing template service');
+    const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
+    appServices.cleaningTemplates.publishCheckout = publish;
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      for (const { name, body, fastifyAccepted } of flatTemplateSlotPermutations()) {
+        const fixtureBefore = structuredClone(body);
+        const before = publish.mock.calls.length;
+        const response = await app.inject({
+          method: 'POST', url: '/v1/cleaning-templates', payload: body,
+          headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-permutation-fixture' }
+        });
+        expect(response.statusCode, name).toBe(fastifyAccepted ? 201 : 400);
+        expect(response.headers['cache-control'], name).toBe('no-store');
+        expect(publish.mock.calls.length, name).toBe(before + Number(fastifyAccepted));
+        if (!fastifyAccepted) expect(response.json().error.code, name).toBe('VALIDATION_ERROR');
+        else expect(response.json().template.slots, name).toEqual(flatTemplateRequest.slots);
+        expect(body, name).toEqual(fixtureBefore);
+      }
+      expect(publish).toHaveBeenCalledTimes(6);
+    } finally { await app.close(); }
+  });
+
+  it('validates shared v9 template wire fixtures before reaching the publisher', async () => {
+    const appServices = services();
+    if (!appServices.cleaningTemplates) throw new Error('missing template service');
+    const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
+    appServices.cleaningTemplates.publishCheckout = publish;
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const send = (payload: unknown) => app.inject({
+      method: 'POST', url: '/v1/cleaning-templates', payload: JSON.stringify(payload),
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-shared-fixture', 'content-type': 'application/json' }
+    });
+    try {
+      for (const roomTypeCode of ['standard', 'premium', 'oceanPremium', 'oceanFamily']) {
+        for (const expectedVersion of [0, 9]) {
+          const response = await send({ ...flatTemplateRequest, roomTypeCode, expectedVersion });
+          expect(response.statusCode).toBe(201);
+          expect(response.headers['cache-control']).toBe('no-store');
+        }
+        for (const legacy of [false, true]) {
+          expect((await send(historicalTemplateRequest(roomTypeCode, legacy))).statusCode).toBe(201);
+        }
+      }
+      expect(publish).toHaveBeenCalledTimes(16);
+      for (const [name, payload] of invalidFlatTemplateRequests()) {
+        expect((await send(payload)).statusCode, name).toBe(400);
+      }
+      expect(publish).toHaveBeenCalledTimes(16);
+      for (const code of ['CLEANING_TEMPLATE_VERSION_CONFLICT', 'IDEMPOTENCY_KEY_REUSED']) {
+        publish.mockRejectedValueOnce(new AppError(409, code, '충돌'));
+        expect((await send(flatTemplateRequest)).json().error.code).toBe(code);
+      }
+    } finally { await app.close(); }
+  });
+
   it('lists and publishes strict checkout templates for active business admins', async () => {
     const appServices = services();
     const app = await buildApp({ env, services: appServices, logger: false });
@@ -2190,6 +2292,47 @@ describe('application', () => {
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe('ADMIN_REQUIRED');
     expect(appServices.payroll.start).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('registers limited discovery/single/complete and keeps the verified session in submission identity', async () => {
+    const id = (n: number) => `69000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const identity = { profileId: id(90), sessionId: id(91), role: 'maid' as const, profileStatus: 'deactivation_pending' };
+    const attempt = { attemptId: id(1), assignmentId: id(2), cleaningTargetId: id(5), maidProfileId: id(90), assignmentRevision: 3,
+      executionVersion: 2, status: 'in_progress', startedAt: '2026-10-03T00:00:00Z', fieldCompletedAt: null,
+      endedAt: null, effectiveAt: '2026-10-03T00:00:00Z', recordedAt: '2026-10-03T00:00:00Z' };
+    const capability = { capabilityId: id(7), attemptId: id(1), assignmentId: id(2), assignmentRevision: 3, kind: 'finish_current',
+      allowedActions: ['complete_field_work'], issuedAt: '2026-10-03T00:00:00Z', expiresAt: '2026-10-03T02:00:00Z', revokedAt: null };
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const limited = new LimitedAttemptService({ rpc: async (name, args) => {
+      calls.push({ name, args });
+      const data = name === 'list_limited_cleaning_attempts' ? { profileStatus: identity.profileStatus, evaluatedAt: '2026-10-03T01:00:00Z', items: [] }
+        : name === 'get_limited_cleaning_attempt' ? { attempt, capability, profileStatus: identity.profileStatus }
+        : { attempt: { ...attempt, status: 'field_completed', executionVersion: 3, fieldCompletedAt: '2026-10-03T01:00:00Z', endedAt: '2026-10-03T01:00:00Z' },
+          capability: { ...capability, kind: 'upload_submit', allowedActions: ['upload_evidence', 'validate_evidence', 'submit'] }, profileStatus: 'upload_only',
+          profileVersion: 2, nextAttempt: null, effectiveAt: '2026-10-03T01:00:00Z', recordedAt: '2026-10-03T01:00:00Z' };
+      return { data, error: null };
+    } });
+    const photoServices = { authenticate: vi.fn(async () => identity), service: {}, denied: vi.fn() } as unknown as PhotoHttpServices;
+    const create = vi.fn(async () => ({ id: id(8), attemptId: id(1) }));
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async () => { throw new Error('ordinary active-only auth must not run'); });
+    const app = await buildApp({ env, services: appServices, logger: false, photoServices, limitedAttemptService: limited,
+      submissionService: { create } as unknown as SubmissionService });
+    for (const url of ['/v1/limited/attempts', `/v1/limited/attempts/${id(1)}?assignmentRevision=3`]) {
+      const response = await app.inject({ method: 'GET', url });
+      expect(response.statusCode).toBe(200); expect(response.headers['cache-control']).toBe('no-store');
+    }
+    const complete = await app.inject({ method: 'POST', url: `/v1/limited/attempts/${id(1)}/complete-field-work`,
+      headers: { 'idempotency-key': 'limited-build-app-01' }, payload: { expectedExecutionVersion: 2, expectedAssignmentId: id(2), expectedAssignmentRevision: 3 } });
+    expect(complete.statusCode).toBe(200);
+    expect(calls.map((call) => call.name)).toEqual(['list_limited_cleaning_attempts', 'get_limited_cleaning_attempt', 'complete_limited_cleaning_attempt_field_work']);
+    expect(calls.every((call) => call.args.p_actor_profile_id === id(90) && call.args.p_session_id === id(91))).toBe(true);
+    const submit = await app.inject({ method: 'POST', url: `/v1/attempts/${id(1)}/submissions`, headers: { 'idempotency-key': 'submit-build-app-01' },
+      payload: { clientSubmissionId: id(8), expectedRevision: 0, candleCount: 0 } });
+    expect(submit.statusCode).toBe(201);
+    expect(create).toHaveBeenCalledWith({ profileId: id(90), sessionId: id(91), role: 'maid', mustChangePassword: false }, id(1), id(8), 0, 0, 'submit-build-app-01');
+    expect(appServices.auth.authenticate).not.toHaveBeenCalled();
     await app.close();
   });
 

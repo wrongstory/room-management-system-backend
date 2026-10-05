@@ -40,6 +40,7 @@ import {
   lifecycleImpact,
   lifecyclePath,
   limitedAttemptPath,
+  listLimitedAttempts,
   manageAttemptLifecycle,
 } from "../_shared/attempt-lifecycle-api.ts";
 import {
@@ -164,6 +165,7 @@ import {
   reportRoomIssue,
   resolveRoomIssue,
   roomDetailIdFromPath,
+  roomListServiceDate,
   roomPathIds,
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
@@ -249,6 +251,30 @@ export async function handleApiRequest(
   try {
     corsHeaders = cors(request);
     path = routePath(request.url);
+    const decodedLimitedPath = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/");
+    if (
+      decodedLimitedPath === "/v1/limited/attempts" ||
+      decodedLimitedPath.startsWith("/v1/limited/attempts/")
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        path !== decodedLimitedPath ||
+        pathname.slice(pathname.lastIndexOf("/api") + 4) !== path
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
     const markerPath = "/v1/payroll/remittance-marker";
     const markerFamily = path.split("/").map((segment) => {
       try {
@@ -426,7 +452,25 @@ export async function handleApiRequest(
       );
     }
 
-    // 제한 capability는 정확히 이 두 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
+    // 기존 세션 전용 discovery. 인증 결과만으로 capability를 부여하지 않는다.
+    if (request.method === "GET" && path === "/v1/limited/attempts") {
+      const pathname = new URL(request.url).pathname;
+      if (pathname.slice(pathname.lastIndexOf("/api") + 4) !== path) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      const identity = await authenticateLimitedAttempt(request, clients);
+      actor = identity.actor;
+      return jsonResponse(
+        await listLimitedAttempts(request, clients, identity),
+        200,
+        corsHeaders,
+      );
+    }
+    // 제한 capability는 전용 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
     const limited = limitedAttemptPath(path);
     if (
       limited && ((limited.action === "read" && request.method === "GET") ||
@@ -462,6 +506,7 @@ export async function handleApiRequest(
             clients,
             actor,
             limitedSubmissionRoute.attemptId,
+            identity.sessionId,
           ),
         },
         201,
@@ -1716,11 +1761,20 @@ export async function handleApiRequest(
       return response;
     }
     if (request.method === "GET" && path === "/v1/rooms") {
-      return jsonResponse(
-        { rooms: await listRooms(clients, actor) },
+      const response = jsonResponse(
+        {
+          rooms: await listRooms(
+            request,
+            clients,
+            actor,
+            roomListServiceDate(request),
+          ),
+        },
         200,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     const operationBlocksReadMatch = request.method === "GET"
       ? /^\/v1\/rooms\/([^/]+)\/operation-blocks$/.exec(path)
@@ -1955,7 +2009,7 @@ export async function handleApiRequest(
       : null;
     if (roomDetailId) {
       return jsonResponse(
-        { room: await getRoom(clients, actor, roomDetailId) },
+        { room: await getRoom(request, clients, actor, roomDetailId) },
         200,
         corsHeaders,
       );

@@ -67,6 +67,8 @@ import {
   SupabaseRoomPinSheetOperationsService
 } from './modules/rooms/room-pin-sheet-operations.service.js';
 import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
+import { createLimitedAttemptRoutes, limitedAttemptPathGuard } from './modules/limited-attempts/limited-attempt.routes.js';
+import { LimitedAttemptService } from './modules/limited-attempts/limited-attempt.service.js';
 import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
 
 export interface AppServices {
@@ -94,6 +96,7 @@ export interface BuildAppOptions {
   logger?: boolean;
   photoServices?: PhotoHttpServices;
   submissionService?: SubmissionService;
+  limitedAttemptService?: LimitedAttemptService;
 }
 
 function bearerToken(authorization: string | undefined): string {
@@ -188,6 +191,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.addHook('onRequest', payrollAdjustmentBookGuard);
   app.addHook('onRequest', payrollWorkDetailsGuard);
   app.addHook('onRequest', payrollRemittanceGuard);
+  app.addHook('onRequest', limitedAttemptPathGuard);
   await app.register(helmet, { global: true });
   await app.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
   await app.register(cors, {
@@ -317,11 +321,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
   await app.register(createPhotoRoutes(photoServices));
+  let limitedClients: ReturnType<typeof createSupabaseClients> | undefined;
+  await app.register(createLimitedAttemptRoutes(
+    options.limitedAttemptService ?? new LimitedAttemptService({ rpc: async (name, args) => {
+      limitedClients ??= createSupabaseClients(options.env);
+      return limitedClients.admin.rpc(name, args);
+    } }),
+    photoServices.authenticate,
+  ));
   if (submissionService) {
     await app.register(createSubmissionRoutes(submissionService, async (request) => {
       try {
         const identity = await photoServices.authenticate(webRequest(request), false);
-        return { profileId: identity.profileId, role: identity.role, mustChangePassword: false };
+        return { profileId: identity.profileId, role: identity.role, mustChangePassword: false, sessionId: identity.sessionId };
       } catch (error) {
         const safe = photoError(error);
         throw new AppError(safe.statusCode, safe.code, '허용된 제한 수행 권한이 필요합니다.');

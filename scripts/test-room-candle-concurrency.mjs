@@ -1,7 +1,10 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
+import { validateLocalDockerEndpoint } from './db-lint-baseline.mjs';
+import { assertLimitedConcurrencyFreshIdentity, limitedConcurrencyFreshIdentitySQL } from './test-limited-existing-session-concurrency.mjs';
 
 const run = promisify(execFile);
 const container = 'supabase_db_room-management-system-backend';
@@ -167,4 +170,44 @@ export async function testRoomCandleConcurrency() {
   console.log('Room candle concurrency PASS: CAS add/reduce/reset, receipt replay/hash conflict, suspension, session revocation and actual room/session lock hard-expiry denials with unchanged ledgers.');
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await testRoomCandleConcurrency();
+// Import callers own their fixture. Standalone execution requires a fresh local DB.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const cli = fileURLToPath(new URL('../node_modules/supabase/dist/supabase.js', import.meta.url));
+  let cleanupRequired = false, manifest;
+  const freshIdentity = async () => JSON.parse(await must(limitedConcurrencyFreshIdentitySQL));
+  try {
+    assert(process.argv.length === 2, 'CANDLE_TARGET_OVERRIDE');
+    for (const name of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'SUPABASE_WORKDIR', 'SUPABASE_CLI_BINARY_OVERRIDE']) {
+      assert(!process.env[name], 'CANDLE_RUNTIME_OVERRIDE');
+    }
+    const config = readFileSync(new URL('../supabase/config.toml', import.meta.url), 'utf8');
+    assert((config.match(/^[ \t]*project_id[ \t]*=/gm) ?? []).length === 1, 'CANDLE_PROJECT_INVALID');
+    assert(/^[ \t]*project_id[ \t]*=[ \t]*"room-management-system-backend"\r?$/m.test(config), 'CANDLE_PROJECT_INVALID');
+    validateLocalDockerEndpoint(execFileSync('docker', ['context', 'inspect', '--format', '{{json .Endpoints.docker.Host}}'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 }));
+    manifest = JSON.parse(readFileSync(new URL('../supabase/migration-manifest.dev.json', import.meta.url), 'utf8'));
+    assertLimitedConcurrencyFreshIdentity(await freshIdentity(), manifest);
+    cleanupRequired = true;
+    const user = randomUUID(), profile = randomUUID();
+    await must(`begin; insert into auth.users(id) values(${literal(user)});
+      insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password)
+      values(${literal(profile)},${literal(user)},'candle-test-developer','candle-test-developer','admin','admin',0,'developer','active',false); commit;`);
+    await testRoomCandleConcurrency();
+  } catch {
+    console.error('Room candle standalone FAIL: redacted local validation failure');
+    process.exitCode = 1;
+  } finally {
+    if (cleanupRequired) {
+      try {
+        await run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed'],
+          { cwd: root, timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+        assertLimitedConcurrencyFreshIdentity(await freshIdentity(), manifest);
+        console.log('Room candle standalone fresh local cleanup PASS');
+      } catch {
+        console.error('Room candle standalone cleanup FAIL: redacted local validation failure');
+        process.exitCode = 1;
+      }
+    }
+  }
+}
