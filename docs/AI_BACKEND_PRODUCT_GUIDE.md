@@ -1,13 +1,142 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> 2026-10-05 #330 최신 dev 통합 후보: 기존 PR #337/source `95033682`를 `dev@bb4fa40`(#384 포함)와 정상 merge해 검증한다. 아래 촛불 공동 관리 결정과 원본 #330 SQL을 유지하며 신규 사건 신고 #336은 포함하지 않는다. 잠금 대기 중 세션 만료 보완은 후속 append로 추가하며 개발 manifest는 104개(현재 `room_candle_session_hard_expiry`, 직전 `shared_room_candle_adjustment`), source OpenAPI 목표는 138 paths/149 operations다. #391의 새 hosted 미적용 확인 후 원본·후속 SQL을 CLI 생성 시각 `20261005011849`·`20261005011912`로 byte/hash 그대로 이동하여 기존 exact 역사 검증 구간을 보존했다. 상세 매핑은 [촛불 문서](./ROOM_CANDLES_330.md)를 따른다. 과거 86개/132·142 및 기존 CI의 ECR rate-limit 실패는 당시 checkpoint이며 새 통합 PASS가 아니다. #383/#382/#329/#318 dev 재통합·fresh/전체 DB·독립 QA·새 exact-head CI는 후속 gate다. 실제 백업/복원은 모든 개발 후속이지만 운영 배포 전 필수이며 지금 dev·운영·프런트 UAT 완료를 선언하지 않는다.
+
 ## #330 사용자 확정: 촛불 수량 공동 관리
 
 - [확정] 비밀번호 변경을 마친 활성 관리자와 모든 활성 메이드는 배정·원 수행자·제출·검수 승인·최근 7일 여부와 무관하게 촛불 수량을 추가·감소·0으로 초기화할 수 있다. 다른 메이드와 관리자도 회수 후 처리할 수 있으며 별도 관리자 승인을 요구하지 않는다.
 - [현재 구현] 감소 시 기존 `physicallyVerified=true` 현장 회수 확인은 유지한다. 이는 처리자 자신의 회수 확인이지 관리자 승인이나 도어락 PIN 확인이 아니다.
 - [확정] 0으로 변경하면 촛불 차단만 해소한다. 다른 운영 차단·점유·청소 의무·이슈를 지우거나 과거 제출·사진·검수·수익·지급 snapshot을 수정하지 않는다.
 - [현재 구현] 최소 조회 `GET /v1/rooms/candles`와 기존 변경 `POST /v1/rooms/{roomId}/candles`를 별도 capability로 제공한다. 메이드의 일반 객실 상세·이슈·PIN 권한은 넓히지 않는다. 최신 DB 역할·상태·세션, room CAS와 actor별 멱등성을 재검증하고 수량 변경·감사 이력을 추가한다.
-- [미확정] 승인 이후 새 특이사항 신고는 #336에서 결정하며 #330에 포함하지 않는다.
+- [확정] 제출·승인 이후 새 특이사항 신고는 사용자 결정대로 #336에서 추가하며 #330에 포함하지 않는다. 신고 주체와 독립 사건·증빙의 세부 범위는 별도 확인한다.
 - source 후보이며 운영 배포 완료를 뜻하지 않는다. [연동·검증·배포 경계](./ROOM_CANDLES_330.md)를 따른다. 프런트 기준 commit은 아래 기존 snapshot을 유지한다.
+
+> 2026-10-05 #384 구현 후보: 확정된 일반 사진 최소1/최대20장과 선택 폭탄방·특이사항 각각 최대10장 계약을 유지한다. provider context는 ordinary pointer와 collection/item CAS를 구분해야 하며 첫 사진 이후 정상 collection revision을 단일 pointer와 비교하면 안 된다. 권한·session·assignment·fence·rate/quota·이력을 유지한 append 후보와 실제 검증은 [#384 정합성 기록](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)을 따른다. #383 저장 이름/PR #385, #382 배열 순서, 운영 상태를 이 후보에 혼합하지 않는다. 실제 백업/복원은 모든 개발 후속이지만 운영 배포 전 필수다.
+
+> [확정] 2026-10-04 #373 A안: #363의 의도적인 호환 인자9개는 그대로 유지하고 다른 경고8개를 별도 append로 보완한다. 원본 strict lint FAIL은 계속 표시하며 정확한 warning/catalog/source 기준의 비교 gate만 별도 판정한다. 조회 snapshot STABLE과 명령 fresh guard VOLATILE을 분리하고 PIN 잠금·FOUND·알림 발송·권한 검사를 보존한다. [계약·실제 검증 checkpoint](./DB_STATIC_WARNING_BASELINE.md)를 따른다. #329·고정 v0.8.0 후보·main/운영 배포를 섞지 않으며 이번 승인은 병합/배포를 포함하지 않는다.
+
+> 2026-10-03 최신 구현 상태: #331은 PR361/source087407b → dev eb1ec3e로 통합됐다(required CI37111364892·독립 QA98). #329의 기존 로그인 계약과 승인된 중간 릴리스에 선행하는 [#352 공용 세션 강제 만료 검사](./AUTH_SESSION_HARD_EXPIRY.md)는 별도 100번째 append 후보다. 유효 session의 정의에 `not_after IS NULL OR not_after > statement_timestamp()`를 반영하며 기존 역할·capability·TTL·서버 전용 ACL을 바꾸지 않는다. Auth 설정·제한 계정 새 로그인·키·실제 PIN/송금은 변경하지 않는다. #329의 최초 제한 전환 세션 자격과 제출 RPC session binding을 구현했다고 표현하지 않는다. [#364 v0.8.0](https://github.com/wrongstory/room-management-system-backend/issues/364)는 별도 release/main 검증·병합 후 운영 승격하며 현재 source 검증을 운영/UAT 완료로 승격하지 않는다.
+
+> 2026-10-03 #331 사용자 최종 확정: 송금 표시는 실제 지급 원장과 분리한다. 새로운 on은 종료된 KST 주차·양수 지급 대상액에서만 허용한다. 표시 후 금액 근거가 바뀌어도 on을 유지하고, 관리자가 별도 재확인 완료를 저장한다. off는 오표시 정정이며 PAID·실제 지급·수익·재지급 가능 상태를 변경하지 않는다. [표시 계약](./PAYROLL_REMITTANCE_MARKER.md)을 따른다. 현재는 dev@8481e21/98 이후의 99번째 migration/API 구현 후보이며 기존 지급 계약·전역 프런트 snapshot·운영 상태는 그대로다.
+
+> 2026-10-03 최신 기준: #325는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358), source `78582789ce66a92d9aae3072b7b8fbc6d5fa9843` → dev squash `d65f4f600f856bd990b52762cf57530830970f12`로 source/dev 완료했다. exact tree CI `37093733970` application/migration PASS·독립 QA98/100이며 초기 CI 실패는 이력으로 보존한다. 아래 #325 후보 표현은 과거 checkpoint다. 현재 #324의 객실별 확정/미확정 주급 근거 조회는 이 dev/97 migrations에서 시작한 후보이며 [조회 계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 운영·프런트·main·recovery는 변경하지 않는다.
+
+> 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.
+
+> 2026-10-03 현재: #328은 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)의 source `76e2780c0304a7336433cdd17e585610360785e3` → dev squash `3968e42967c8ad223661b7a3eb4ce200aabd2499`로 완료했다. 두 tree와 CI merge tree가 같고 required CI `37027527827` application/migration PASS·독립 QA98/100이다. 아래 Draft·후속 gate 표현은 과거 checkpoint다. #327은 이 dev/95 migrations에서 관리자 open 사건 목록을 구현 중인 후보이며 현재 source OpenAPI 목표는 132 paths·142 operations다. 신규 96번째 migration과 검증·운영 제외 범위는 [관리자 미퇴실 목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md)을 따른다. production/main/recovery·프런트 UI/UAT 완료를 뜻하지 않는다.
+
+> #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
+
+## 2026-10-02 #328 일정 구현 후보와 #326 source/dev 완료
+
+현재 선행 정본은 `dev@f34dca3746a1e553a773470aba13b55fa95bf816`/94 migrations다.
+#326은 PR #350 source `2eb489c`와 dev squash의 tree 동일성, required CI `36987938462`
+application/migration PASS·독립 QA98/100으로 source/dev 완료했다. 아래 #326의 후보·PENDING
+표현은 당시 검증 이력으로 보존하며 현재 운영 배포 완료로 해석하지 않는다.
+
+#328의 95번째 일정 snapshot 및 기존 카드 DTO 보강은 로컬 검증 완료 후보다.
+Node 859·Edge 323·Python 95·SQL 4,152·21 upgrade·KST 145·전체 동시성·fresh 95·advisors 0건·
+합성 백업 복구가 PASS다. 이 문서는 PR 생성 전 검증 시점 기록이며 최종 독립 QA·exact-head CI·
+dev 통합 근거는 [Issue #328](https://github.com/wrongstory/room-management-system-backend/issues/328)의
+연결 PR에서 확인한다. source/dev 완료와 운영 제공은 구분한다.
+생성 계획·최초 통보 actual과 현재 actual 관찰을 분리하고, guest의 예정 체크인과 room-move
+segment 도착을 구별한다. history/includeHistory는 통보 snapshot만 반환하며 현재 actual은 null이다.
+legacy 누락은 unknown null이고 현재 예약/기본 시각/마감 역산으로 채우지 않는다.
+조회 adapter가 처음 검증한 actor role을 RPC의 `p_expected_actor_role`로 묶고 마지막 최신
+DB role과 달라지면 기존 403으로 닫는다. 이로써 처음 hydrate한 admin/maid 응답 형태를
+다른 역할의 ownership 규칙으로 뒤늦게 허용하지 않는다. 신규 client role 권한 입력은 없다.
+업무 authority/RLS·source 명령·수익·PIN·기한 정책은 변경하지 않는다. 다만 저장 두 테이블의
+authenticated table-level SELECT를 pre95 명시 컬럼 SELECT로 좁혀 새 JSONB 원문과 내부 binding을
+직접 노출하지 않는다. 기존 명시 컬럼/count/join은 유지하고 `SELECT *`/whole-row·새 컬럼 조회는
+의도적으로 `42501`로 거부한다. service_role의 기존 table grant는 유지한다. 필드와 검증 gate는
+[배정 일정 계약](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)을 따른다. main/production/recovery 및
+전역 프런트 제품 snapshot은 그대로 두며 다음 기능 순서는 #328 → #327이다.
+
+## 과거 2026-10-02 #326 구현 후보와 당시 선행 dev 기준
+
+현재 선행 통합 기준은 `dev@f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`의
+93 migrations / OpenAPI 131 paths·141 operations다. #348의 수동 요청 취소 B안·PIN 제한 제거는
+source/dev에 통합됐으며 운영 승격과 프런트 UAT는 별도다. #326의 94번째
+`assignment_target_read_metadata` 및 기존 조회 DTO 보강은 아직 구현 후보로, 새로운 endpoint·
+취소 정책·source write·역사 backfill을 추가하지 않는다. 현재 검증과 완료 gate는
+[배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)을 따른다.
+`main@1780728a02144c0816565ba091e43a8b3e126c4f` 및 production/recovery는 변경하지 않는다.
+이번 프런트 main/dev 대조는 #326 live consumer에 한정하며 아래 전역 제품 snapshot을 갱신하지 않는다.
+
+## 2026-10-02 #305 source/dev 종료 감사 당시 기준
+
+#306의 기한 비차단, #308의 지연 업무 보존·상대 역할 알림, #343의 컴플레인 미응답 주의는
+각각 PR #307/#310, #340, #346으로 통합됐다. 당시 기능 dev 기준은
+`4fe6c981ff8252a55ce707525d2e659ed9f2d0a0`이며 92 migrations / OpenAPI 131 paths·141 operations,
+typed catalog 59 event family·42 public category다. #308/#343의 운영 승격은 완료하지 않았다.
+정확한 승인 source/tree·CI·QA, 과거 실패와 별도 OPEN 범위는 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다.
+아래 날짜별 후보·운영 snapshot은 해당 시점의 이력이며 현재 운영 재검증 결과가 아니다.
+이 정합화는 프런트 제품 기준 commit·미확정 정책·API·migration을 변경하지 않는다.
+
+## [확정] #305/#308 업무 기한은 권한 만료가 아님
+
+예정 서비스일·dueAt 경과만으로 배정·시작·완료·제출을 차단하거나 기존 담당·배정·attempt를
+종료하지 않는다. 아래 #28 자동 이월 및 #7B 미착수 만료 해소의 과거 계약보다 이 정책이 우선한다.
+보안 session/PIN/lease/capability TTL, 실제 점유·퇴실 materialization, 현재 담당·CAS·terminal
+검사는 유지한다. 지연 업무는 관리자 확인 알림 대상으로 관리한다.
+
+#308의 아래 단계별 후보는 구현 이력이다. 최신 source/dev 완료 근거는 PR #340,
+`dev@4d85458c5d0a900cf87f7318fcd9b2474c03a889`, required CI `36864792279`
+application/migration PASS, 독립 QA98/100 및 승인 source/tree 동일성이다.
+운영 반영을 뜻하지 않으며 #305의 컴플레인 미응답 알림도 PR #346으로 source/dev 완료했다.
+아래 단계별 후보·당시 후속 설명은 PR #340 병합 전의 구현 이력이다.
+
+- [과거 단계별 구현] #308 1차는 당일 배정의 dueAt 차단, 과거 통보 업무의 시작 차단,
+  scheduler 자동 이월 및 `expire_scheduled` 명령을 제거한다. scheduler는 기술적 cursor로
+  회전하며 한 번에 최대 100건을 검사한다. 원 업무 날짜·담당·snapshot은 보존한다.
+- [과거 단계별 구현] #308 2차는 미완료 현장 청소의 최초 지연을 private typed 원장으로
+  보존하고 활성 business admin에게 기존 알림함/typed outbox로 전달한다. target별 최초 1회,
+  수신자별 최초 1회이며 10분 그룹 경계나 실행 actor 변경으로 중복되지 않는다.
+  dueAt이 없는 업무는 서비스일 다음 날 KST 시작을 지연 표시 기준으로만 사용한다.
+  현장 완료·업로드·제출·검수 대기에 새 검수 SLA를 만들지 않는다.
+- [과거 단계] 상태 변경별 상호 알림, 과거 업무의 오늘 preview·현재 가능일 연결은
+  아래 3차·4A/4B1/4B2 후보로 보완했다. 당시 남았던 전체 coverage·통합 gate는 PR #340으로 완료했다.
+- [과거 단계별 구현] #308 4A는 Fastify/Edge 공유 순수 계산기에 한해 오늘 snapshot의 과거
+  미배정 후보와 날짜별 고정 부하를 처리한다. 원 serviceDate·담당·sequence·snapshot은 바꾸지 않는다.
+  계산용 날짜/sequence 정렬은 실행 우선순위가 아니며 새 단일 1–N로 과거 업무를 재번호화하지 않는다.
+  4A 당시 DB snapshot·현재 목록·저장/통보·가능일 변경 보호는 후속 범위였으며, 아래 4B1을 포함해도 종단 기능 완료가 아니다.
+- [과거 단계별 구현] #308 4B1은 89번째 append-only migration으로 KST 오늘 DB snapshot에
+  원 날짜가 과거인 미완료 업무도 포함한다. 내일 계획에는 과거 attempt-0 후보를 복제하지 않는다.
+  실제 수행 중인 교차 날짜 업무·원 snapshot 불일치·source/점유 충돌은 기존 guard를 유지한다.
+  private 조회의 `sequenceReservations`는 현재 assignment의 날짜별 최대 점유 순번이며
+  approved/cancelled target의 current row도 포함한다. 순수 계산기는 그 번호 뒤에 제안하고
+  원 업무/담당/날짜/번호를 변경하지 않는다. 내부 점유 정보는 공개 응답에 넣지 않는다.
+  4B1 당시 오늘 목록·저장/통보·오늘 가능일 보호는 후속이었다.
+- [과거 단계별 구현] #308 4B2는 오늘 current 목록에 원 날짜가 과거인 미완료 assignment를 포함한다.
+  내일·과거 날짜·includeHistory 조회 범위는 기존 exact-date다. 메이드 본인 통보 row를 RLS로 먼저
+  제한하며 과거 approved/cancelled는 제외하고 오늘 terminal 카드는 호환 유지한다.
+  90번째 append-only migration은 오늘 preflight/확정/잠금에 과거 draft를 포함하고 요청 오늘의
+  최신 가능일을 사용한다. 항목별 serviceDate는 원 날짜, 최상위 serviceDate는 요청 계획일이다.
+  불변 assignment.notified 감사의 정확한 assignment/revision/계획일을 근거로 오늘 가능일을 보호한다.
+  기존 원 날짜 보호·실제 source/점유·CAS·멱등성·선택 부분집합 원자성은 유지하며 이력 backfill은 없다.
+  목록/관련 이력은 count와 반환 수를 검사하며 기술 상한 초과·잘림은 일부 응답 대신 안전하게 실패한다.
+  당시 후속이던 최신 dev/#320 진단 통합은 PR #340으로 완료했다. #320 실제 사례/UAT와 운영 배포는 별도다.
+- 구현 후보는 source/운영 배포 완료 선언이 아니다. [진행 범위](./CLEANING_OVERDUE.md)를 따른다.
+
+- [과거 단계별 구현] #308 6차는 전체 종료 감사에서 발견한 상대 역할 알림 3건을 보완한다.
+  성공한 메이드 폭탄방·특이사항 신고는 업무관리자에게, 성공한 관리자 폭탄방 선판정은
+  해당 불변 수행 회차의 메이드에게 즉시 informational 알림을 만든다. 단순 사진 업로드나
+  조회 알림은 아니며 최종 검수·수익·입실 준비 상태를 변경하지 않는다. 기존 신고/판정과
+  typed inbox/outbox는 같은 transaction이며 메모·사진 ID·raw payload는 복제하지 않는다.
+  기존 수신자 상태·자기 push 제외·worker TTL을 유지하고 과거 신고/판정을 backfill하지 않는다.
+  상세 검증/미완료 gate는 [상대 역할 알림 보완](./CLEANING_REPORT_NOTIFICATIONS.md)을 따른다.
+  이 보완 당시 잔여였던 컴플레인 응답 지연 주의 알림은 별도 PR #346으로 source/dev 완료했다.
+
+## #320 Preview 진단 보강 (정책 변경 없음)
+
+2026-10-01 #308 5차는 `744662c`와 #320 후보 `ad91d2e`를 같은 source 브랜치에서
+결합했고 당시 `origin/dev@e19f81f`는 변경하지 않았다. 이 진단 계약은 이후 PR #340으로 dev에 통합됐다.
+날짜별 원 슬롯·과거 업무 보존 기준의 진단 보강이며 운영 배포·#320 실제 신고 원인 확정은 아니다.
+
+- [현재 구현 — dev 통합 PR #340] source는 기존 미배정 reason을 유지하며 상세 reasonCodes와 동일 snapshot의 후보/고정 업무 진단을 추가한다. 운영 배포 완료가 아니다.
+- [현재 구현 — dev 통합 PR #340] 재청소 원담당자·고정 배정·실제 source/점유 검사는 유지한다. 예정 기한 경과는 위 #305/#308 정책에 따라 권한 만료가 아니며 진단만으로 제약을 우회하지 않는다.
+- Preview UI만 프런트 dev@09ed28446a4fd43919cddb29ebe442b848548ab8과 대조했다. 제품 전체 기준 갱신이 아니다.
+- 실제 신고의 서비스일/당시 응답은 미확인이다. 상세 의미·프런트 한국어 문구 매핑 필요 사항은 [ASSIGNMENT_PREVIEW.md](./ASSIGNMENT_PREVIEW.md)를 따른다.
 
 ## 2026-09-28 사용자 확정: 사진·이력·주급 개편
 
@@ -289,7 +418,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 연박 청소는 예약 점유 구간 안에서 `access_start < requested_complete_at <= access_end`를 검증한다.
 - 다음 체크인이 있는 퇴실·재청소의 준비 마감은 체크인 30분 전이다.
 - 현재 요청의 service date·점유·명시된 접근 구간과 겹치는 활성 수동 요청·자동 퇴실 의무·예정 작업은 새 요청을 만들지 않는다. 다만 종료시각과 예상시간이 모두 없는 열린 checkout 계획을 임의 구간으로 환산해 계획 생성을 막지 않는다. 실제 수행 회차·미승인 제출·미해결 #133 사건은 계획과 분리해 실행 시작 시 최신 상태로 차단한다. 충돌하지 않는 미래 예약의 퇴실 의무와 과거 승인 완료 제출만으로 오늘의 연박/추가 요청을 막지 않는다.
-- 수동 요청은 아직 미배정·미공개·미착수일 때만 soft cancel하며 사유·행위자·시각을 보존한다.
+- **[확정 — 2026-10-02 #326 B안·#348]** 관리자는 수동 연박/추가 요청을 미배정·draft·통보 후에도 실제 착수 전이면 CAS soft cancel할 수 있다. PIN을 조회/공개했거나 화면에서 숨김·만료·회수된 사실은 취소 제한이 아니다. 사유·행위자·시각, 원 대상/담당/수행 snapshot과 이미 성공한 PIN 공개 이력은 보존한다. 취소 당시 current notified 담당자에게만 취소 알림/outbox를 기록하고 해당 배정의 이후 PIN 접근·미완료 reveal을 종료한다. 이미 시작·현장 완료·제출·검수 단계인 작업과 자동 퇴실 청소 의무는 이 명령의 취소 대상이 아니다. #27 일반 담당 변경/해제와 #264 수행 불가 예외의 별도 경계는 유지한다. 구현·운영 gate는 [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md)을 따른다.
 
 ---
 
@@ -329,6 +458,39 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 임의 근무시간·휴게시간·하루 최대 객실 수를 만들지 않는다. target/maid 자원 상한 초과는 부분 자동결정이 아니라 `ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED`로 거부한다.
 - 입력 fingerprint는 후보/고정 부하/가능일/source schedule snapshot을 포함하되 폐기된 정책과 seed는 제외한다. 이는 읽은 상태의 식별자이지 저장 권한이나 예약 lock이 아니다.
 
+### [현재 구현 후보] #326 배정 대상 snapshot·등록 근거·취소 가능 표시
+
+기존 목록/이력·commit-impact·Preview·신규 commit 결과에 target의 실제 `sourceKind`, canonical
+`roomTypeSnapshot`, 고정 요금, 원/유효 서비스일, revision까지의 실제 이월 근거와 취소 advisory를
+추가한다. 저장 원문 객체의 누락/빈/비문자 선택 key는 raw normalizer로 unknown null에 정규화하고
+0원은 유지한다. SQL/카드가 같은 canonical snapshot을 제공하며 malformed 신규 metadata pack은
+별도 strict parser에서 안전한 500으로 거부한다. 현재 객실/카탈로그로 과거 snapshot을 채우지 않는다.
+기존 Preview routing classifier의 `unknown`은 canonical null과 구별한다. 새 표시 metadata는
+fingerprint 입력에서 제외하지만 legacy elevator snapshot 누락 시 현재 객실 A/B fallback 제거는
+routing 입력 자체를 바꾸므로 모든 과거 Preview fingerprint의 byte 동일성을 보장하지 않는다.
+해당 Preview는 다시 조회·계산해야 한다. core raw normalizer/fresh strict parser 분리와 SQL Preview
+classifier 보완은 QA 1차 P2의 정적 resolved이며 최종 QA·upgrade/CI/dev 완료와 구분한다.
+표시 이름에는 기존 카드/text·DB/OpenAPI에 없는 100자 상한을 새로 만들지 않는다. QA 2차에서
+발견한 공통 metadata의 임의 표시 상한은 제거했고 1,001자 이름/실제 receipt 보존 회귀를 검증했다.
+QA 1·2차는 정적 resolved(P0/P1/미해결 코드 P2=0)인 실제 구현 후보이며 최종 exact-head QA·CI·
+dev 통합과 구분한다. 기존 optimizer routing `code`/`elevatorZone`의 `str(100)` 및 fresh pack의
+타입/nonempty/partial reject는 별개로 유지한다. source/dev 완료 효력은 계약 문서·승인 source의
+dev 정본 포함 및 연결 GitHub Issue/PR의 exact-head required CI/최종 QA/실제 통합 근거 확인 조건이다.
+지금 이미 dev에 병합됐다는 뜻은 아니다.
+
+관리자 current/target 행의 `canCancel`은 #348의 수동 source·허용 phase·현재 assignment에 연결된
+모든 비-superseded attempt의 미착수 조건을 반영한다. PIN·서비스일/dueAt·시간창·stale draft를
+별도 취소 제한으로 추가하지 않는다. 관리자 이력은 `false/ASSIGNMENT_NOT_CURRENT`, 메이드는
+`false/ADMIN_REQUIRED`이며 이 값은 표시 코드이지 신규 HTTP command 오류 계약이 아니다.
+실제 취소는 기존 actor/live session/CAS/transition을 다시 검사한다.
+
+기존 target ID와 `targetAssignmentVersion`을 재사용하며 Preview의 `expectedAssignmentVersion`도
+유지한다. 배정 카드의 effective date와 메이드 version은 해당 revision에 고정된다. 이전 완료
+receipt를 현재 DB로 hydrate하거나 backfill하지 않으며 신규 정보가 없는 receipt는 unknown null·
+`false/CAPABILITY_UNAVAILABLE`로 표시한다. 상세 출처·호환성·검증 gate와 프런트 담당자 인계는
+[배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)을 따른다. 프런트 구현/운영 UAT
+완료나 전역 프런트 기준 commit 갱신을 뜻하지 않는다.
+
 ### [확정] #27 시작 전 변경 경계 — 2026-09-05 구현 착수 계약
 
 - 일반 pre-start command는 target에 `status <> superseded` attempt가 하나라도 있으면 `ASSIGNMENT_ALREADY_STARTED`로 거부한다. `started_at` 유무로 우회하지 않는다. 이후 수행·인계는 #28/#7 소유다.
@@ -346,6 +508,9 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 ### [현재 구현] #28 수행 회차 활성화·이월 경계
 
+아래 자동 이월·마감 차단 설명은 과거 구현 기록이다. #305/#308의 위 확정 정책으로 대체되며,
+PR #340으로 dev 통합된 scheduler는 원 담당/업무를 유지한다.
+
 - 기존 scheduler의 exact active business admin·secret·분 단위 invocation을 재사용하되, 예약 전이와 배정 lifecycle은 서로 다른 command scope/request hash로 멱등 처리한다. public activation API와 메이드 activation API는 만들지 않는다.
 - 오늘 KST의 notified current assignment만 active maid, current target/version, schedule snapshot, 접근/마감 창, source별 예약·checkout·reclean 계약을 transaction 안에서 다시 확인한 후 `scheduled` attempt를 exactly-once 생성한다. 내일 작업과 private planned checkout은 attempt 0이다.
 - checkout은 planned target이 obligation의 current pointer로 materialize되고 reservation actual checkout이 기록된 뒤에만 같은 target/current assignment revision으로 활성화한다. snapshot은 target의 template/room snapshot을 우선 사용하며 생성 뒤 바꾸지 않는다.
@@ -355,6 +520,9 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 - 이월은 다음 schedule을 먼저 계산하고 source window가 유효할 때만 저장한다. `stayover_request + stayover`는 같은 객실의 active·실제 입실·미퇴실 예약 안에 다음 접근/마감 창이 모두 포함되고 KST 날짜가 일치해야 한다. 실패하면 `STAYOVER_ROLLOVER_NOT_ALLOWED`로 blocked이며 배정 종료·알림 resolve·일정/version/이력 변경은 모두 0이다. 자동 취소나 cleaning kind 변환은 하지 않는다. 추가 청소도 다음 창이 기존 활성화 규칙의 active 예약 점유와 겹치면 `ADDITIONAL_ROLLOVER_NOT_ALLOWED`로 변경 없이 차단한다.
 
 ### [확정] #7B 만료 회차 해소·인계 — 2026-09-08 사용자 승인
+
+미착수 만료 해소 부분은 #305/#308에 의해 폐기됐다. `expire_scheduled`를 호출하지 않는다.
+실제 수행 불가·명시적 인계와 2h/24h 보안 capability TTL은 계속 유효하다.
 
 이 절은 기존 #27/#28의 구현 제한과 아래 새 회차 생성 제한에 대한 좁은 예외다.
 
@@ -374,7 +542,7 @@ DB에는 카드 색이나 최종 표시 문자열을 원본 상태로 저장하�
 
 1. **청소 의무/target**: 왜, 어느 객실을, 어느 운영일에 청소해야 하는가
 2. **assignment revision**: 누가 몇 번째 순서로 책임지는가
-3. **attempt**: 실제 수행 회차. 시작 전 담당 변경·순서 변경은 같은 미시작 업무 연결을 갱신하고, 시작한 업무의 이월은 같은 회차를 유지한다. 검수 반려 재청소 또는 명시적 중단·인계가 새 회차를 만든다. 추가로 위 #7B 승인에 한해 실제 미착수 만료 scheduled를 superseded로 보존하고 다음날 재통보 후 새 회차를 활성화할 수 있다.
+3. **attempt**: 실제 수행 회차. 시작 전 담당 변경·순서 변경은 같은 미시작 업무 연결을 갱신하고, 날짜를 넘긴 업무도 같은 회차를 유지한다. 검수 반려 재청소 또는 명시적 중단·인계가 새 회차를 만든다. #305/#308에 따라 예정 기한만으로 scheduled를 superseded 처리하지 않는다.
 4. **submission version**: 메이드가 검수 요청한 불변 제출본
 5. **photo slot snapshot**: target 생성 시 고정되어 해당 attempt가 사용하는 템플릿 version의 필수/선택 증빙
 6. **inspection decision**: 관리자의 승인/반려
@@ -488,6 +656,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - 벌점은 0~10의 정수이고 평가 전용 데이터다. 청소 반려가 자동 벌점이 되지 않으며, 컴플레인·벌점이 음수 adjustment나 주급 차감을 자동 생성해서는 안 된다.
 - 메이드는 본인 건의 최초 판정에 정확히 한 번 확인 또는 이의를 제출할 수 있다. 7일 주의 기준이 지나도 응답 권한은 만료되지 않으며 판정·벌점·재작업을 직접 바꾸지 못한다.
 - `responseDeadline`은 기존 이력 호환과 관리자 주의 알림을 위한 기준 시각이다. 시간 경과만으로 미응답 사건을 종결하거나 메이드 기능을 막지 않는다.
+- #343의 dev 통합 계약(PR #346)은 최초 판정의 기존 `responseDeadline`을 엄격히 지난 미응답 `decided` 사건만 관리자에게 informational 주의 알림으로 관찰한다. 정정은 최초 시각·기준을 초기화하지 않으며 확인/이의·종결 사건과 기준이 없는 과거 사건은 제외한다. 사건별 불변 evidence와 수신자별 enrollment로 반복 실행·grouping 경계를 넘어서도 중복하지 않는다. 응답 권한·벌점·수익·보상은 변경하지 않으며 migration 자체의 과거 알림 backfill은 없다. [검증·배포 경계](./COMPLAINT_RESPONSE_ATTENTION.md)를 따른다.
 - 종결 뒤 reopen은 금지한다. 판정 오류는 active business admin이 기존 판정을 보존한 새 correction decision version으로만 바로잡는다.
 - 판정·이의 처리·종결·정정 command는 한 명의 active business admin이 처리하며 actor, `expectedVersion`, actor/command 범위 idempotency key와 canonical request hash, audit을 필수로 한다.
 - 이미 승인된 원 청소의 earning은 컴플레인 때문에 취소하거나 귀속일을 바꾸지 않는다.
@@ -634,6 +803,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 앱 알림함은 영속 데이터다. 푸시는 그중 즉시 행동이 필요한 사건의 전달 수단이다.
 - 관리자와 메이드의 수신 대상을 분리한다.
 - 사용자가 자기 행동으로 만든 변화는 자신에게 푸시하지 않는다.
+- #308 3차의 dev 통합 계약(PR #340)은 메이드의 정상 청소 시작을 business admin에게 typed `cleaning.started_admin` / `cleaning_started` informational 알림으로 보완한다. 원 attempt·현재 담당·assignment revision·시작 시각과 immutable `cleaning.attempt_started` 감사를 검증하며, 시작 상태/CAS/receipt/inbox/outbox는 같은 transaction이다. 모든 business admin의 inbox는 보존하고 push는 아래 active/password-complete/nonself 조건을 따른다. 새 idempotency key·완료 receipt replay로 과거 시작 알림이나 늦게 등록된 관리자 알림을 재생성하지 않는다. 기존 완료·제출·검수·담당 변경의 family/push 정책은 유지한다. 이 시작 알림은 PR #340에 포함돼 source/dev 완료했으며 운영 반영은 별도다.
 - `requiresAction`과 즉시 push 전달 가치는 독립 축이다. `requiresAction=false`인 취소·회수·결정·현장 완료 같은 정보성 알림도 source-controlled catalog의 `push_eligible=true`이면 push할 수 있으며, 이를 위해 inbox의 행동 필요 상태를 거짓으로 올리지 않는다.
 - push outbox는 catalog의 `push_eligible`, actor와 recipient가 다름, 수신자의 active·비밀번호 변경 완료 상태를 모두 만족할 때만 만든다. inbox 원장은 계정 상태와 무관하게 domain transaction에서 보존하고, inactive 또는 임시 비밀번호 상태에는 push를 전달하지 않는다.
 - 같은 객실·같은 사건 종류의 10분 이내 업데이트는 group key로 묶을 수 있다.
@@ -737,9 +907,9 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - application/migration GitHub Actions의 fresh DB reset과 SQL test
 - 운영·복구검증 Supabase에 같은 기준 스키마가 적용돼 있으나, 초기 수동 적용 과정에서 Git과 서로 다른 migration version으로 기록됨
 
-### `v0.2.0` 이후 source 통합 이력과 현재 `v0.6.5` 후보 상태
+### `v0.2.0` 이후 source 통합 이력과 2026-09-26 배포 전 `v0.6.5` 후보 상태
 
-아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 현재 production runtime은 문서 상단의 83 migrations / `api` ACTIVE v34 / OpenAPI 129·139 snapshot을 우선한다. Git source, runtime bundle, Pages artifact, hosted provider·Google·Cron 활성화는 각각 별도 상태로 해석한다.
+아래 개별 Issue의 `production 미승격` 문구는 각 source/dev 병합 시점의 이력이다. 이 절의 83 migrations / `api` ACTIVE v34 / OpenAPI 129·139는 2026-09-26 배포 전 snapshot이다. 이후 v0.6.5 완료는 [릴리즈 기록](./RELEASE_V0.6.5.md), #308/#343 dev 완료는 [#305 종료 감사](./WORK_DEADLINE_CLOSURE.md)를 따른다. Git source, runtime bundle, Pages artifact, hosted provider·Google·Cron 활성화는 각각 별도 상태로 해석한다.
 
 - DBML/ERD도 review draft다. 현재 migration의 table 수와 DBML의 32개 table 수를 완성도 지표로 사용하지 않는다.
 - #25~#29 배정 revision/current pointer·순서·commit·pre-start·activation·preview와 #4 notified-only 조회는 source/dev 완료 후 현재 `main`/production source에 반영됐다. 다만 #28 lifecycle effect를 포함한 hosted 역할별 positive smoke는 별도 미완료 gate다.
@@ -774,7 +944,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 - 예약 목록은 고객명을 반환하지 않고 관리자 단건 상세에서만 복호화한다. 체크아웃/취소 후 180일 보존 만료는 예약 전이 worker가 처리하며 멱등성 hash에는 암호화 키와 분리된 HMAC pepper fingerprint만 사용한다.
 - 당시에는 PIN 원문을 저장하지 않고 동기화 상태와 version만 기록하며 `verified`가 아닌 객실의 고객 배정을 차단했다. **#140과 #275 이후 source 계약은 이를 대체해** `unconfigured`/`mismatch`를 예약 생성·변경·배정과 현재 담당자의 일반 PIN reveal에 대한 비차단 경고로 유지한다. 실제 체크인과 물리 PIN change/confirm은 `verified` 및 권한·lease 검증까지 fail-closed한다. production 적용은 별도 release/운영 승인 전까지 완료로 간주하지 않는다.
 - 객실 전체 운영 projection은 관리자 전용이다. 메이드는 자신의 현재 배정·수행 범위 projection만 후속 업무 API에서 제공받는다.
-- 연박/추가 수동 청소 요청은 안정적인 target ID로 생성하고 시작·PIN 공개 전까지만 CAS soft cancel한다.
+- 당시 연박/추가 수동 청소 요청은 안정적인 target ID로 생성하고 시작·PIN 공개 전까지만 CAS soft cancel했다. **2026-10-02 #326 B안·#348의 현재 사용자 결정은 PIN 공개 제한을 제거**하고 배정/통보 후 실제 착수 전 취소를 허용한다. 당시 release 이력을 현재 정책으로 재사용하지 않는다.
 - 예정 전이 worker는 production에서 활성 관리자 actor를 필수로 하며 시작 시 검증 실패를 숨기지 않는다. catch-up은 퇴실을 입실보다 먼저 처리해 같은 instant의 인접 예약을 한 batch에서 전이하고, 완전히 지난 미입실 예약은 가짜 check-in 없이 종결한다.
 - checkout obligation↔target은 deferred commit-time 검증까지 포함해 종료 상태가 반쪽만 저장되지 않게 하고, preparation obligation↔승인 submission/attempt는 직전 점유 종료 이후·해당 체크인 이전 시간창 안에서 target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서를 검증하며 append-only 1회 소비 원장까지 강제한다. PIN lease↔현재 assignment/attempt는 최신 verified PIN version까지 업무 동일성을 복합키와 DB 검증으로 강제한다.
 - 다음 예약 변경은 종결된 과거 의무를 덮지 않는다. 미배정 target은 schedule revision으로 마감을 갱신하며 private 미통보 draft는 stale로 처리한다. 통보된 target은 명시적 재계획 전까지 충돌로 거부한다.
@@ -853,7 +1023,10 @@ npm run db:reset
 
 ---
 
-## 17. 권장 구현 순서
+## 17. 2026-09-26 v0.6.5 배포 전 권장 순서 (과거 기록)
+
+아래 순서는 #309/#310 당시 계획이다. v0.6.5 적용 완료·hosted positive SKIPPED는
+[릴리즈 기록](./RELEASE_V0.6.5.md)에 보존한다. 현재 source 작업 순서는 [개발 오케스트레이션](./DEVELOPMENT_ORCHESTRATION.md)을 따른다.
 
 P2 배정부터 #112 Web Push provider, #73/#46/#128/#131/#136/#137/#140/#133/#156/#165/#169, #229/#231/#236/#228/#245와 후속 release source까지 production에 누적 반영됐다. 2026-09-26 KST 배포 전 production은 83 migrations / `api` ACTIVE v34 / OpenAPI 0.5.1 129 paths / 139 operations이며 기존 네 checkout template 데이터도 보존됐다. v0.6.5는 84번째 `complaint_deadlines_non_blocking` 한 건만 추가하는 후보이고, 안전한 fixture가 없어 실행하지 않은 positive mutation은 전체 release PASS로 표현하지 않는다.
 

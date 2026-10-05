@@ -16,7 +16,6 @@ const lifecycleActions = [
   "allow_finish",
   "allow_upload",
   "interrupt_handover",
-  "expire_scheduled",
 ] as const;
 type LifecycleAction = typeof lifecycleActions[number];
 const capabilityActions: Record<string, string[]> = {
@@ -331,8 +330,6 @@ export async function manageAttemptLifecycle(
     ? "DEACTIVATION_FINISH_CURRENT"
     : action === "allow_upload"
     ? "DEACTIVATION_UPLOAD_ONLY"
-    : action === "expire_scheduled"
-    ? "SCHEDULE_EXPIRED"
     : payload.deactivateOld
     ? "DEACTIVATION_HANDOVER"
     : "ADMIN_HANDOVER";
@@ -359,7 +356,7 @@ export async function manageAttemptLifecycle(
     },
   );
   if (error) throw lifecycleDatabaseError(error);
-  // 만료 scheduled 정리는 owner를 재활성화하지 않으므로 inactive/departed도 결과로 보존한다.
+  // 관리자 projection은 계정을 재활성화하거나 수행 권한을 부여하지 않는다.
   const result = mutationProjection(data, actor, true);
   if (
     result.attempt.attemptId !== input.attemptId ||

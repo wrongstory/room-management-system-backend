@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { type AppServices, buildApp } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 import { AppError } from '../src/lib/app-error.js';
+import type { SupabaseClients } from '../src/lib/supabase.js';
+import { SupabaseAuthService } from '../src/modules/auth/auth.service.js';
 
 const env: AppEnv = {
   APP_ENV: 'local',
@@ -270,6 +272,10 @@ function services(): AppServices {
       }))
     },
     payroll: {
+      getRemittanceMarker: vi.fn(), setRemittanceMarker: vi.fn(),
+      reconfirmRemittanceMarker: vi.fn(), listRemittanceMarkerHistory: vi.fn(),
+      listWorkDetails: vi.fn(),
+      getAdjustmentBook: vi.fn(),
       list: vi.fn(async () => ({ payroll: [], nextCursor: null })),
       get: vi.fn(),
       listEntries: vi.fn(async () => ({
@@ -285,6 +291,44 @@ function services(): AppServices {
 }
 
 describe('application', () => {
+  it.each([false, true])('uses the real Auth session decision before room work (active=%s)', async (active) => {
+    const authUserId = '35200000-0000-4000-8000-000000000001';
+    const profileId = '35200000-0000-4000-8000-000000000002';
+    const sessionId = '35200000-0000-4000-8000-000000000003';
+    const token = `header.${Buffer.from(JSON.stringify({ session_id: sessionId })).toString('base64url')}.synthetic`;
+    const query = {
+      select: () => query,
+      eq: () => query,
+      single: async () => ({ data: {
+        id: profileId, auth_user_id: authUserId, display_name: '합성 관리자',
+        role: 'admin', status: 'active', must_change_password: false, locked_until: null
+      }, error: null })
+    };
+    const rpc = vi.fn(async () => ({ data: active, error: null }));
+    const clients = {
+      publicClient: { auth: { getUser: vi.fn(async () => ({ data: { user: { id: authUserId } }, error: null })) } },
+      admin: { from: () => query, rpc }
+    } as unknown as SupabaseClients;
+    const appServices = services();
+    appServices.auth = new SupabaseAuthService(clients, env.ACCOUNT_PHONE_PEPPER);
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      const response = await app.inject({ method: 'GET', url: '/v1/rooms', headers: { authorization: `Bearer ${token}` } });
+      expect(rpc).toHaveBeenCalledExactlyOnceWith('is_active_auth_session', { p_auth_user_id: authUserId, p_session_id: sessionId });
+      expect(response.statusCode).toBe(active ? 200 : 401);
+      if (active) {
+        expect(appServices.rooms.list).toHaveBeenCalledOnce();
+      } else {
+        expect(response.json().error.code).toBe('SESSION_REVOKED');
+        expect(appServices.rooms.list).not.toHaveBeenCalled();
+        expect(response.body).not.toContain(token);
+        expect(response.body).not.toContain(sessionId);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it('returns health status', async () => {
     const app = await buildApp({ env, services: services(), logger: false });
     const response = await app.inject({ method: 'GET', url: '/health' });

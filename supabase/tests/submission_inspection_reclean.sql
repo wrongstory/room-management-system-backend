@@ -527,6 +527,21 @@ select ok((select obligation.status='completed' and obligation.current_cleaning_
   and obligation.completion_submission_id=(select value from checkout_chain where label='final-submission')
   from public.checkout_cleaning_obligations obligation where obligation.reservation_id=(select value from checkout_chain where label='reservation')),
  'two rejected recleans followed by approval complete checkout obligation with immutable final proof');
+select ok((select bool_and(target.reservation_id is null
+    and assignment.notified_reservation_schedule_snapshot is not null
+    and assignment.notified_reservation_schedule_snapshot->'sourceReservationVersion'='null'::jsonb
+    and assignment.notified_reservation_schedule_snapshot->'plannedCheckoutAt'='null'::jsonb
+    and assignment.notified_reservation_schedule_snapshot->'actualCheckoutAt'='null'::jsonb
+    and assignment.notified_reservation_schedule_snapshot->'isLateCheckout'='null'::jsonb)
+  from public.cleaning_targets target join public.cleaning_assignments assignment on assignment.cleaning_target_id=target.id
+  where target.id in(select value from checkout_chain where label in('reclean-one','reclean-two'))),
+  '#328 inspection descendants capture unknown source instead of inheriting original reservation checkout');
+select ok((select bool_and(card->'scheduleSnapshot'->'actualCheckoutAt'='null'::jsonb
+    and card->'currentDeparture'->'actualCheckoutAt'='null'::jsonb)
+  from jsonb_array_elements(public.get_assignment_schedule_read(pg_temp.pid(2),pg_temp.pid(202),
+    (select array_agg(assignment.id) from public.cleaning_assignments assignment
+      where cleaning_target_id in(select value from checkout_chain where label in('reclean-one','reclean-two'))),
+    true,'maid')) card),'#328 own reclean card never queries ancestor reservation as current actual source');
 select ok(private.checkout_submission_proves_completion(
   (select id from public.checkout_cleaning_obligations where reservation_id=(select value from checkout_chain where label='reservation')),
   (select value from checkout_chain where label='final-submission')),'recursive checkout completion helper verifies the exact terminal descendant');

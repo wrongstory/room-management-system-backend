@@ -1,5 +1,11 @@
 # #7B — 인계·비활성화 제한 권한
 
+> #305/#308 정책 변경: 미착수 기한 경과만으로 scheduled를 superseded 처리하는
+> `expire_scheduled` 명령은 후보 source에서 폐기(HTTP 400, mutation 0)됐다.
+> 아래 미착수 만료 해소 설명과 기존 검증 결과는 과거 provenance이며 현재 권한이 아니다.
+> 명시적 인계·수행 불가 처리·capability의 2h/24h 보안 TTL은 유지한다.
+> [현재 범위와 미완료 항목](./CLEANING_OVERDUE.md)을 따른다.
+
 개발 시작 기준: `dev@bcc74c0515624ce8c9f3dfd8e167cd8b1030454c`.
 현재 통합 source: `dev@5882509afed6faf31f5e9d7775a163e19954c4c2` (PR #77 squash 병합).
 이 문서는 #7B source/dev 완료 계약이며 production 배포 선언이 아니다. 실제 gate는

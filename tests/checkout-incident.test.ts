@@ -143,6 +143,10 @@ async function appFor(role: Actor["role"] = "maid") {
   const calls: string[] = [];
   const decisions: unknown[] = [];
   const service: CheckoutIncidentService = {
+    async list() {
+      calls.push("list");
+      return { items: [], nextCursor: null };
+    },
     async report() {
       calls.push("report");
       return incident;

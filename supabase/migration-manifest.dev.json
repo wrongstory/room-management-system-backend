@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 86,
+  "totalCount": 104,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 8,
+    "count": 26,
     "first": "assignment_unavailability_reassignment",
-    "head": "shared_room_candle_adjustment"
+    "head": "room_candle_session_hard_expiry"
   },
-  "head": "shared_room_candle_adjustment",
+  "head": "room_candle_session_hard_expiry",
   "migrations": [
     {
       "order": 1,
@@ -441,8 +441,98 @@
     },
     {
       "order": 86,
+      "name": "cleaning_overdue_preserve_work",
+      "sha256": "9753943398ba768f35f86053dd87dfc069f34ebb90558cd549322c962fd68306"
+    },
+    {
+      "order": 87,
+      "name": "cleaning_overdue_notifications",
+      "sha256": "aeb1d8dba2e2496bbfa0d6361cfff30d6fffbbcbe38ca6aed897f1e06b4857b8"
+    },
+    {
+      "order": 88,
+      "name": "cleaning_started_admin_notifications",
+      "sha256": "0c554007cba494e5fae5545d350ed0e1c12b620cf383352fc37ebd44a58e9905"
+    },
+    {
+      "order": 89,
+      "name": "cleaning_overdue_preview_snapshot",
+      "sha256": "651305631f7035f591b2ea1adc372a797be26b8f3f4ec5df737f93252dd3a18b"
+    },
+    {
+      "order": 90,
+      "name": "cleaning_overdue_commit_planning",
+      "sha256": "000a41260309430d6b62284fcea738ed275e5a86f401851286c71c351574382d"
+    },
+    {
+      "order": 91,
+      "name": "cleaning_report_decision_notifications",
+      "sha256": "991778537952b633682b9761914a1c4df7af461df950b7ddd8a46cf9e7db66e3"
+    },
+    {
+      "order": 92,
+      "name": "complaint_response_attention",
+      "sha256": "2708014fb60425ecfaacd623d849a1a7c9583b814f0cbfec3b3a8e5c7851852b"
+    },
+    {
+      "order": 93,
+      "name": "manual_cleaning_cancel_pin_independent",
+      "sha256": "cd29785cf4e4870c7b850272f07c61ad35dee54264c208ad0ba389ff7f520ef4"
+    },
+    {
+      "order": 94,
+      "name": "assignment_target_read_metadata",
+      "sha256": "5fc5a652eea5ebac9e67f9d827cf3f314824b8686299bb98f1b4b13ba85a4f98"
+    },
+    {
+      "order": 95,
+      "name": "assignment_reservation_schedule_snapshot",
+      "sha256": "fcd3e7833d59602d14959e25c2d0a6eb7fde006217412a741f78b68da38a0433"
+    },
+    {
+      "order": 96,
+      "name": "checkout_incident_admin_list",
+      "sha256": "f192c52a39315e10dd28bdbee1915f6a5591d1539a42962e425a8efce257e0c5"
+    },
+    {
+      "order": 97,
+      "name": "payroll_adjustment_book_read",
+      "sha256": "b739d78f870a1c1d2a5ddb2800ce179e153445cb5da038b778515758321047d2"
+    },
+    {
+      "order": 98,
+      "name": "payroll_work_details_read",
+      "sha256": "6e2e419155bb18bd7095d0f7e2d3ee8e21a90af37036ae3b22555473b099b527"
+    },
+    {
+      "order": 99,
+      "name": "payroll_remittance_marker",
+      "sha256": "e9d70f667f71c1d1192b3ac4a3ae0f84070041214ba8cdd21c218e61bb8c14bd"
+    },
+    {
+      "order": 100,
+      "name": "auth_session_hard_expiry",
+      "sha256": "2efa743ab78a7d08336b6b11b0e67dc158ce9f9a6289a60c1bc6fb58600a7735"
+    },
+    {
+      "order": 101,
+      "name": "db_static_warning_remediation",
+      "sha256": "9f6eab7b1389b5c552ace273726533a69a1b0aebc6813090771b068d28f16dc8"
+    },
+    {
+      "order": 102,
+      "name": "photo_collection_provider_context_axis",
+      "sha256": "ce1b566a1330dcd33e3baa77d86720a32b579811e8f3774707b2a5949a0cec64"
+    },
+    {
+      "order": 103,
       "name": "shared_room_candle_adjustment",
       "sha256": "0f2d86b199831e446a5a3d06a78caeca7ccad21b62223395224de94087734579"
+    },
+    {
+      "order": 104,
+      "name": "room_candle_session_hard_expiry",
+      "sha256": "ab46f199a5b6e38a21c8c685d29487cd162cb071df17357fbc82f03dbb7d13e6"
     }
   ]
 }
