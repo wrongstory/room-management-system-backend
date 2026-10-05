@@ -2,7 +2,37 @@
 
 `GET /v1/rooms?serviceDate=YYYY-MM-DD`와 관리자 단건 읽기는 business admin의 최신 active/password-complete profile·유효 session을 검증한다. 생략/오늘은 LIVE, 과거는 KST 날짜 종료, 미래는 KST 날짜 시작이다. strict 달력 날짜와 단일 query만 허용하며 PIN 원문·고객명·연락처는 제공하지 않는다. 상세 조건 9종은 기존 제품 가이드대로 유지한다.
 
-## 2026-10-05 #393 반영 재검증 — 현재 로컬 통합 후보
+## 2026-10-05 dev58a 재통합 — 현재 106개 후보
+
+검증된 checkpoint `0781d144a7d8e351846f0d20afe8ddd9e6e8a515` 뒤
+`dev@58a58218e20c0f771b7ed979204fdff0c85ff1b5`를 정상 merge했다.
+두 문서는 양쪽 사용자 결정과 과거 이력을 보존했고, developer status fixture의 이전 head는
+실제 적용 순서대로 `room_board_date_filters`를 유지했다. manifest는 생성기로 106개를 반영했다.
+기존 SQL 본문을 수정하지 않고 #329 → #318 설치 순서를 유지한다.
+
+- 새 `ci:quality`: PASS — 1,794개/77파일과 typecheck/build/lint/secret/OpenAPI.
+- 새 Edge487/bundle gate 및 관리 도구 ruff/format/mypy/pytest95/codegen/build source: PASS.
+- fresh106, exact9 lint baseline, 로컬 합성 백업·복원: PASS.
+- 실제 DB 템플릿6순열·동등 요청 replay·4타입·CAS·16malformed·v8 호환: PASS.
+- 새 전체27 upgrade와 SQL84파일/5,193개, static-warning upgrade, KST5시각/145개,
+  전체9경합 명령과 각 cleanup, 최종fresh106/exact9 baseline까지 실제 exit0 PASS다.
+- 최종 읽기 전용 확인: history106/head 일치, 객실121, profile/Auth user/session0,
+  public base table RLS누락0, 실제 snapshot7/fresh18/core2 catalog를 확인했다.
+  #389의 #318 추가 단계가 실제 검증됐으며 #332 이후7/19 단계는 아직 아니다.
+- 독립 소스 QA:155개/7파일·79,992 날짜·secret883 PASS, 신규 P0/P1/P2 없음.
+  원본484개 hash drift0이며 원 strict lint FAIL9/exit1과 승인 exact baseline PASS를 구분한다.
+- 이전104 후보나 #329 부모의 검증을 새 후보의 완료 결과로 대체하지 않는다.
+- 실제 운영 백업·복원, PR321 최신-head CI/보호 병합, 운영/API·v0.9.0 승격은 후속이다.
+
+현재 LF 임시본은 원본484개 해시를 보존하며 `.tmp/qa318-latest-*`에 실제 로그를 남긴다.
+로컬 합성 백업 PASS는 실제 Supabase-only B 백업 완료가 아니다.
+현재 전체 DB 로그 SHA256은 `84d2c823550ba15173ccb36b7cd0938cf3846234f71693eaee06c31d26875358`,
+전체 경합 로그 SHA256은 `6e93dfc942721c232f4ef96b8b71f4e6adcfb7b5fe3d5d562420ac5c1f1d6b33`이다.
+프런트 dev09ed284의 DOCS/30 B05·B06도 재확인했다. 날짜 UI는 문서상 활성화됐고 이 API의
+연동은 후속이다. [scoped 관찰과 정책 차이](./FRONTEND_CONTRACT_SNAPSHOT.md#2026-10-05-318-연동-문서-재확인)를
+전역 snapshot이나 운영 UAT 완료로 해석하지 않는다.
+
+## 2026-10-05 #393 반영 재검증 — 이전 104개 통합 checkpoint
 
 아래 04:54 후보에 `dev` 병합 완료 #393의 fixture/test/doc 3개 파일을 그대로 반영했다.
 예약 이동 fixture의 세 평가 경계만 고정하며 109개 assertion과 실제 업무 RPC는 유지한다.

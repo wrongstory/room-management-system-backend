@@ -3,11 +3,166 @@ import {
   templateDatabaseError,
 } from "./cleaning-template-api.ts";
 import { type EdgeActor, type EdgeClients, EdgeError } from "./runtime.ts";
+import { handleApiRequest } from "../api/index.ts";
+import {
+  flatTemplateRequest,
+  flatTemplateRequestHash,
+  flatTemplateSlotPermutations,
+  historicalTemplateRequest,
+  invalidFlatTemplateRequests,
+  templateProjection,
+} from "../../../tests/fixtures/cleaning-template-contract.ts";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 const sessionId = "51000000-0000-4000-8000-000000000001";
+Deno.test("cleaning template actual Edge route accepts all six v9 array orders (#382)", async () => {
+  const hashes: unknown[] = [];
+  for (const { name, body, edgeAccepted } of flatTemplateSlotPermutations()) {
+    const fixtureBefore = JSON.stringify(body);
+    const mock = clients(templateProjection());
+    const response = await handleApiRequest(request("POST", body), {
+      authenticateRequest: () => Promise.resolve(admin),
+      createClients: () => mock.value,
+    });
+    assert(response.status === (edgeAccepted ? 201 : 400), `${name} status`);
+    assert(
+      response.headers.get("cache-control") === "no-store",
+      `${name} not cached`,
+    );
+    const result = await response.json();
+    assert(JSON.stringify(body) === fixtureBefore, `${name} fixture unchanged`);
+    if (edgeAccepted) {
+      assert(
+        mock.calls.length === 1 &&
+          mock.calls[0]?.name === "publish_checkout_cleaning_template",
+        `${name} reaches publisher once`,
+      );
+      assert(
+        JSON.stringify(mock.calls[0]?.args.p_slots) ===
+          JSON.stringify(flatTemplateRequest.slots),
+        `${name} canonical RPC slots`,
+      );
+      assert(
+        mock.calls[0]?.args.p_session_id === sessionId &&
+          mock.calls[0]?.args.p_actor_profile_id === admin.profileId,
+        `${name} actor and session preserved`,
+      );
+      assert(
+        JSON.stringify(result.template.slots) ===
+          JSON.stringify(flatTemplateRequest.slots),
+        `${name} canonical projection`,
+      );
+      hashes.push(mock.calls[0]?.args.p_request_hash);
+    } else {
+      assert(
+        result.error?.code === "INVALID_CLEANING_TEMPLATE_SLOTS",
+        `${name} stable error`,
+      );
+      assert(mock.calls.length === 0, `${name} rejected before publisher RPC`);
+    }
+  }
+  assert(
+    hashes.length === 6 && typeof hashes[0] === "string" &&
+      /^[a-f0-9]{64}$/.test(hashes[0]) &&
+      hashes.every((hash) => hash === hashes[0]),
+    "all six permutations retain the same canonical request hash",
+  );
+  assert(
+    hashes[0] === flatTemplateRequestHash,
+    "existing canonical hash unchanged across Fastify and Edge",
+  );
+});
+Deno.test("cleaning template v9 database projections remain ordered despite unordered input (#382)", async () => {
+  for (const { name, body } of flatTemplateSlotPermutations().slice(1)) {
+    const mock = clients(templateProjection(body.slots));
+    const response = await handleApiRequest(request("POST", body), {
+      authenticateRequest: () => Promise.resolve(admin),
+      createClients: () => mock.value,
+    });
+    assert(
+      response.status === 500,
+      `${name} noncanonical DB projection rejected`,
+    );
+    assert(
+      response.headers.get("cache-control") === "no-store",
+      `${name} not cached`,
+    );
+    const result = await response.json();
+    assert(
+      result.error?.code === "CLEANING_TEMPLATE_COMMAND_FAILED",
+      `${name} safe error`,
+    );
+    assert(
+      mock.calls.length === 1,
+      `${name} input reached publisher exactly once`,
+    );
+  }
+});
+Deno.test("cleaning template shared v9 fixtures preserve initial/CAS/replay and reject malformed slots", async () => {
+  for (
+    const roomTypeCode of ["standard", "premium", "oceanPremium", "oceanFamily"]
+  ) {
+    for (const expectedVersion of [0, 9]) {
+      const mock = clients(templateProjection());
+      const body = { ...flatTemplateRequest, roomTypeCode, expectedVersion };
+      await cleaningTemplates(request("POST", body), mock.value, admin);
+      await cleaningTemplates(request("POST", body), mock.value, admin);
+      assert(
+        mock.calls[0]?.args.p_expected_version === expectedVersion,
+        "CAS preserved",
+      );
+      assert(
+        mock.calls[0]?.args.p_request_hash ===
+          mock.calls[1]?.args.p_request_hash,
+        "replay hash stable",
+      );
+    }
+    for (const legacy of [false, true]) {
+      const body = historicalTemplateRequest(roomTypeCode, legacy);
+      const mock = clients({
+        ...templateProjection(),
+        version: legacy ? 12 : 8,
+        slots: body.slots,
+      });
+      await cleaningTemplates(request("POST", body), mock.value, admin);
+      assert(
+        JSON.stringify(mock.calls[0]?.args.p_slots) ===
+          JSON.stringify(body.slots),
+        "historical shape preserved",
+      );
+    }
+  }
+  for (const [name, body] of invalidFlatTemplateRequests()) {
+    const mock = clients(templateProjection());
+    await failure(
+      () => cleaningTemplates(request("POST", body), mock.value, admin),
+      name === "invalid version"
+        ? "INVALID_CLEANING_TEMPLATE"
+        : "INVALID_CLEANING_TEMPLATE_SLOTS",
+    );
+    assert(mock.calls.length === 0, `${name} rejected before RPC`);
+  }
+  for (
+    const code of [
+      "CLEANING_TEMPLATE_VERSION_CONFLICT",
+      "IDEMPOTENCY_KEY_REUSED",
+      "INVALID_CLEANING_TEMPLATE_SLOTS",
+    ]
+  ) {
+    const mock = clients(null, code);
+    await failure(
+      () =>
+        cleaningTemplates(
+          request("POST", flatTemplateRequest),
+          mock.value,
+          admin,
+        ),
+      code,
+    );
+  }
+});
 const payload = btoa(JSON.stringify({ session_id: sessionId }))
   .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const token = `e30.${payload}.signature`;
@@ -42,15 +197,18 @@ function legacyV7Slots() {
   }));
 }
 function request(method: string, body?: unknown, query = "") {
-  return new Request(`http://localhost/v1/cleaning-templates${query}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "idempotency-key": "template-publish-0001",
+  return new Request(
+    `http://localhost/functions/v1/api/v1/cleaning-templates${query}`,
+    {
+      method,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "idempotency-key": "template-publish-0001",
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+  );
 }
 function clients(data: unknown = null, message: string | null = null) {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];

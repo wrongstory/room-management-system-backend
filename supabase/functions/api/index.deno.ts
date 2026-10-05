@@ -1464,12 +1464,14 @@ Deno.test("limited upload_only submission route uses capability auth and preserv
   };
   const route = `/v1/attempts/${attemptId}/submissions`;
   const successCalls: string[] = [];
+  const successArgs: Record<string, unknown>[] = [];
   const successClients = {
     admin: {
-      rpc(name: string) {
+      rpc(name: string, args: Record<string, unknown>) {
         successCalls.push(name);
+        successArgs.push(args);
         return Promise.resolve({
-          data: name === "create_cleaning_submission"
+          data: name === "create_cleaning_submission_with_session"
             ? {
               id: submissionId,
               attemptId,
@@ -1498,8 +1500,14 @@ Deno.test("limited upload_only submission route uses capability auth and preserv
   });
   assert(success.status === 201, "live upload_submit route succeeds");
   assert(
-    successCalls.join(",") === "create_cleaning_submission",
+    successCalls.join(",") === "create_cleaning_submission_with_session",
     "limited route delegates exact capability decision to submission RPC",
+  );
+  assert(
+    successArgs[0].p_actor_profile_id === maid.profileId &&
+      successArgs[0].p_session_id === "93000000-0000-4000-8000-000000000003" &&
+      Object.keys(successArgs[0]).length === 8,
+    "dedicated verified identity session is forwarded, never recovered from an unbound fallback",
   );
 
   for (
@@ -1549,7 +1557,7 @@ Deno.test("limited upload_only submission route uses capability auth and preserv
     );
     assert(
       calls.join(",") ===
-        "create_cleaning_submission,record_authorization_denial",
+        "create_cleaning_submission_with_session,record_authorization_denial",
       `${fixture} denial is bounded without replacing the intended response`,
     );
   }

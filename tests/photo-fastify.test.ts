@@ -17,6 +17,25 @@ function pad(n:number) { const out = new Uint8Array(n), chunks = [jpeg.slice(0,2
   while(remain) { const size = Math.min(65537,remain), c = new Uint8Array(size); c.set([255,254,(size-2)>>8,(size-2)&255]); chunks.push(c);remain-=size; }
   chunks.push(jpeg.slice(2));let p=0;for(const c of chunks){out.set(c,p);p+=c.length;}return out; }
 describe('Fastify photo parity through actual raw parser/router', () => {
+  it('forwards the authorized immutable name and exposes only its safe disposition header', async () => {
+    const fileName = '2026-10-05_일반방_350_100.jpg';
+    const service = new PhotoService({ rpc: async () => ({ error: null, data: {
+      providerFileId: 'synthetic_file_383', mimeType: 'image/jpeg', sizeBytes: jpeg.length, sha256: 'a'.repeat(64),
+      fileName, retentionPolicy: 'cleaning_submission', retentionStartsAt: null, expiresAt: null,
+      purgedAt: null, mediaAvailability: 'available',
+    } }) }, () => ({ read: async () => jpeg } as unknown as PhotoProvider), async () => {});
+    const app = Fastify({ logger: false });
+    await app.register(createPhotoRoutes({ service, authenticate: async () => identity, denied: async () => {} }));
+    try {
+      const res = await app.inject({ method: 'GET', url: `/v1/photos/${id(7)}/content` });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-disposition']).toBe(`inline; filename="photo.jpg"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+      expect(res.headers['access-control-expose-headers']).toBe('Content-Disposition');
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.headers).not.toHaveProperty('location');
+      expect(res.headers['content-disposition']).not.toContain('synthetic_file_383');
+    } finally { await app.close(); }
+  });
   it.each(['active', 'deactivation_pending', 'upload_only'])('rejects a false session decision before photo RPC/provider/decoder (%s)', async (status) => {
     const query = {
       select: () => query,

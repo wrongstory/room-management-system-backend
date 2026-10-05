@@ -8,9 +8,59 @@ function ok(result, label) {
   return result.data;
 }
 
+const clockSpans = { execution: '2 hours', metadata: '90 days' };
+function clockSpan(horizon) {
+  assert(Object.hasOwn(clockSpans, horizon), 'fixed offline clock horizon');
+  return clockSpans[horizon];
+}
+function fixtureUuid(value) {
+  assert(typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value), 'fixed offline fixture UUID');
+  return value;
+}
+
+// Preparation may take longer than the crossing window. It must complete before
+// the private start statement selects its DB clock; an issued lease is never moved.
+export async function prepareAndStartOfflineFixture(prepare, start) {
+  const prepared = await prepare();
+  return start(prepared);
+}
+export function offlineFixtureInputClockSQL(horizon) {
+  return `select to_json(clock_timestamp()-interval '${clockSpan(horizon)}');`;
+}
+export function offlineFixtureStartSQL(input, horizon) {
+  const values = ['p_actor_profile_id', 'p_session_id', 'p_attempt_id', 'p_expected_assignment_id', 'p_idempotency_key']
+    .map((key) => fixtureUuid(input[key]));
+  assert(input.p_expected_execution_version === 1 && input.p_expected_assignment_revision === 2
+    && /^[0-9a-f]{64}$/.test(input.p_request_hash), 'fixed offline fixture start');
+  return `with fixture_clock as materialized (select clock_timestamp() as at_time)
+select private.start_attempt_with_lease_at('${values[0]}','${values[1]}','${values[2]}',1,'${values[3]}',2,
+'${values[4]}','${input.p_request_hash}',fixture_clock.at_time-interval '${clockSpan(horizon)}'+interval '5 seconds')
+from fixture_clock;`;
+}
+export function offlineClockProbeSQL(leaseId, horizon) {
+  const column = horizon === 'execution' ? 'expires_at' : 'metadata_expires_at';
+  clockSpan(horizon);
+  return `with fixture_clock as materialized (select clock_timestamp() as at_time)
+select jsonb_build_object('live',lease.${column}>fixture_clock.at_time,
+'remainingMs',extract(epoch from (lease.${column}-fixture_clock.at_time))*1000)
+from private.offline_work_leases lease cross join fixture_clock where lease.id='${fixtureUuid(leaseId)}';`;
+}
+export function offlineLockProbeSQL(rpcName, holderPid) {
+  assert(/^[a-z_]+$/.test(rpcName) && Number.isSafeInteger(holderPid) && holderPid > 0, 'fixed offline lock filter');
+  return `select exists(select 1 from pg_stat_activity where pid<>pg_backend_pid() and state='active'
+and wait_event_type='Lock' and query like '%${rpcName}%' and ${holderPid}=any(pg_blocking_pids(pid)));`;
+}
+export function offlineLockReadyPid(output) {
+  const marker = output.match(/LOCK_READY:(\d+)\r?\n/);
+  const pid = marker ? Number(marker[1]) : null;
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
 // Real local Auth/session/RPC races. Every credential, UUID and SQL result remains in memory.
-export async function testAttemptOfflineConcurrency(client) {
+export async function testAttemptOfflineConcurrency(client, { clockFixturePreparationDelayMs = 0 } = {}) {
   assert(['localhost', '127.0.0.1'].includes(new URL(client.supabaseUrl).hostname), 'offline races require local Supabase');
+  assert(Number.isSafeInteger(clockFixturePreparationDelayMs) && clockFixturePreparationDelayMs >= 0
+    && clockFixturePreparationDelayMs <= 10000, 'bounded offline clock fixture preparation delay');
   function sql(statement) {
     try {
       return execFileSync('docker', ['exec', '-i', 'supabase_db_room-management-system-backend', 'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'], { input: statement, encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
@@ -20,6 +70,7 @@ export async function testAttemptOfflineConcurrency(client) {
     const child = spawn('docker', ['exec', '-i', 'supabase_db_room-management-system-backend', 'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'], { stdio: ['pipe', 'pipe', 'pipe'] });
     const closed = new Promise((resolve) => child.once('close', resolve));
     child.stderr.on('data', () => {});
+    let backendPid;
     await new Promise((resolve, reject) => {
       let ready = false; let output = '';
       const timeout = setTimeout(() => { child.kill(); reject(new Error('offline lock setup timed out')); }, 10000);
@@ -27,20 +78,22 @@ export async function testAttemptOfflineConcurrency(client) {
       child.once('close', () => { if (!ready) { clearTimeout(timeout); reject(new Error('offline lock closed prematurely')); } });
       child.stdout.on('data', (chunk) => {
         output += chunk.toString();
-        if (!ready && output.includes('LOCK_READY')) { ready = true; clearTimeout(timeout); output = ''; resolve(); }
+        const pid = offlineLockReadyPid(output);
+        if (!ready && pid !== null) { backendPid = pid; ready = true; clearTimeout(timeout); output = ''; resolve(); }
       });
-      child.stdin.write(`begin;set local statement_timeout='12s';set local idle_in_transaction_session_timeout='15s';${statement};\n\\echo LOCK_READY\n`);
+      child.stdin.write(`begin;set local statement_timeout='12s';set local idle_in_transaction_session_timeout='15s';${statement};select 'LOCK_READY:'||pg_backend_pid();\n`);
     });
     let promise;
-    return (beforeCommit = '') => promise ??= (async () => {
+    const release = (beforeCommit = '') => promise ??= (async () => {
       child.stdin.end(`${beforeCommit};commit;\n\\q\n`);
       assert(await closed === 0, 'offline lock released without deadlock');
     })();
+    release.backendPid = backendPid;
+    return release;
   }
-  async function waitForLock(rpcName) {
-    assert(/^[a-z_]+$/.test(rpcName), 'fixed RPC filter');
+  async function waitForLock(rpcName, holderPid) {
     for (let i = 0; i < 50; i += 1) {
-      if (sql(`select exists(select 1 from pg_stat_activity where pid<>pg_backend_pid() and state='active' and wait_event_type='Lock' and query like '%${rpcName}%');`) === 't') return;
+      if (sql(offlineLockProbeSQL(rpcName, holderPid)) === 't') return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     throw new Error('offline RPC did not reach expected lock');
@@ -57,22 +110,35 @@ export async function testAttemptOfflineConcurrency(client) {
   const admin = await account('admin');
   const roomType = ok(await client.from('room_types').select('id').limit(1).single(), 'offline room type');
   let sequence = 0;
-  async function fixture(startAt = null) {
+  async function prepareFixture(horizon) {
     const owner = await account('maid');
     const roomId = randomUUID(); const targetId = randomUUID(); const assignmentId = randomUUID(); const attemptId = randomUUID();
-    const now = startAt ? new Date(startAt) : new Date(); const day = new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10);
+    // This historical clock supplies only the original business date/notice.
+    // It is not the issued lease anchor. A KST midnight during setup preserves
+    // the earlier service date; the current overdue-start contract permits it.
+    const now = horizon ? new Date(JSON.parse(sql(offlineFixtureInputClockSQL(horizon)))) : new Date();
+    const day = new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10);
     ok(await client.from('rooms').insert({ id: roomId, room_number: `${Date.now()}${++sequence}`, room_type_id: roomType.id, elevator_zone: 'A' }), 'offline room');
     ok(await client.from('cleaning_targets').insert({ id: targetId, room_id: roomId, cleaning_kind: 'additional', source: 'manual_room_request', source_key: `offline-${targetId}`, original_service_date: day, effective_service_date: day, available_from: `${day}T00:00:00+09:00`, due_at: `${day}T23:59:59+09:00`, status: 'notified', assignment_version: 2, room_type_snapshot: {}, template_snapshot: {}, fee_snapshot: 10000, created_by: admin.id }), 'offline target');
     ok(await client.from('cleaning_assignments').insert({ id: assignmentId, cleaning_target_id: targetId, maid_profile_id: owner.id, sequence_number: 1, revision: 2, notified_at: now.toISOString(), changed_by: admin.id }), 'offline assignment');
     ok(await client.from('cleaning_attempts').insert({ id: attemptId, cleaning_target_id: targetId, assignment_id: assignmentId, maid_profile_id: owner.id, attempt_number: 1, status: 'scheduled', assignment_revision: 2, room_snapshot: { roomId }, template_snapshot: {} }), 'offline attempt');
-    const input = { p_actor_profile_id: owner.id, p_session_id: owner.sessionId, p_attempt_id: attemptId, p_expected_execution_version: 1, p_expected_assignment_id: assignmentId, p_expected_assignment_revision: 2, p_idempotency_key: randomUUID(), p_request_hash: 'd'.repeat(64) };
-    const starts = startAt
-      ? [{ data: JSON.parse(sql(`select private.start_attempt_with_lease_at('${owner.id}','${owner.sessionId}','${attemptId}',1,'${assignmentId}',2,'${input.p_idempotency_key}','${input.p_request_hash}','${now.toISOString()}');`)), error: null }]
-      : await Promise.all([client.rpc('start_cleaning_attempt_with_lease', input), client.rpc('start_cleaning_attempt_with_lease', input)]);
-    starts.forEach((result) => { ok(result, 'offline concurrent start'); });
-    if (!startAt) assert(JSON.stringify(starts[0].data.lease) === JSON.stringify(starts[1].data.lease), 'start race must issue one lease with immutable expiry');
-    assert(sql(`select count(*) from private.offline_work_leases where attempt_id='${attemptId}';`) === '1', 'exactly one lease per attempt');
-    return { owner, attemptId, assignmentId, targetId, lease: starts[0].data.lease, day, startInput: input };
+    if (horizon && clockFixturePreparationDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, clockFixturePreparationDelayMs));
+    }
+    return { owner, attemptId, assignmentId, targetId, day };
+  }
+  async function fixture(horizon = null) {
+    return prepareAndStartOfflineFixture(() => prepareFixture(horizon), async (prepared) => {
+      const { owner, attemptId, assignmentId, targetId, day } = prepared;
+      const input = { p_actor_profile_id: owner.id, p_session_id: owner.sessionId, p_attempt_id: attemptId, p_expected_execution_version: 1, p_expected_assignment_id: assignmentId, p_expected_assignment_revision: 2, p_idempotency_key: randomUUID(), p_request_hash: 'd'.repeat(64) };
+      const starts = horizon
+        ? [{ data: JSON.parse(sql(offlineFixtureStartSQL(input, horizon))), error: null }]
+        : await Promise.all([client.rpc('start_cleaning_attempt_with_lease', input), client.rpc('start_cleaning_attempt_with_lease', input)]);
+      starts.forEach((result) => { ok(result, 'offline concurrent start'); });
+      if (!horizon) assert(JSON.stringify(starts[0].data.lease) === JSON.stringify(starts[1].data.lease), 'start race must issue one lease with immutable expiry');
+      assert(sql(`select count(*) from private.offline_work_leases where attempt_id='${attemptId}';`) === '1', 'exactly one lease per attempt');
+      return { owner, attemptId, assignmentId, targetId, lease: starts[0].data.lease, day, startInput: input };
+    });
   }
   function event(item, overrides = {}) {
     return { p_actor_profile_id: item.owner.id, p_session_id: item.owner.sessionId, p_lease_id: item.lease.leaseId, p_event_id: randomUUID(), p_expected_execution_version: 2, p_occurred_at: new Date().toISOString(), p_server_offset_ms: 0, ...overrides };
@@ -131,17 +197,27 @@ export async function testAttemptOfflineConcurrency(client) {
   }
   // Cross 2h/90d during an actual target-row lock wait; server clocks must refresh after it.
   for (const horizon of ['execution', 'metadata']) {
-    const span = horizon === 'execution' ? 2 * 3600000 : 90 * 86400000;
-    const item = await fixture(new Date(Date.now() - span + 5000).toISOString());
-    const deadline = Date.parse(horizon === 'execution' ? item.lease.expiresAt : item.lease.metadataExpiresAt);
-    assert(deadline > Date.now(), 'clock fixture has not expired before request');
+    const item = await fixture(horizon);
+    const readClock = () => JSON.parse(sql(offlineClockProbeSQL(item.lease.leaseId, horizon)));
+    const initialClock = readClock();
+    assert(initialClock.live && initialClock.remainingMs > 0 && initialClock.remainingMs <= 5000, 'clock fixture has not expired before request and remains bounded to five seconds');
+    const immutableClock = () => sql(`select issued_at='${item.lease.issuedAt}'::timestamptz
+and expires_at='${item.lease.expiresAt}'::timestamptz and metadata_expires_at='${item.lease.metadataExpiresAt}'::timestamptz
+and expires_at=issued_at+interval '2 hours' and metadata_expires_at=issued_at+interval '90 days'
+from private.offline_work_leases where id='${item.lease.leaseId}';`);
+    assert(immutableClock() === 't', 'original issued lease clocks and TTL are unchanged');
     const release = await holdLock(`select id from public.cleaning_targets where id='${item.targetId}' for update`);
     const input = event(item, { p_occurred_at: new Date(Date.parse(item.lease.issuedAt) + 1000).toISOString() });
     const rpcName = horizon === 'execution' ? 'sync_cleaning_attempt_event' : 'start_cleaning_attempt_with_lease';
     const pending = Promise.resolve(client.rpc(rpcName, horizon === 'execution' ? input : item.startInput));
     try {
-      await waitForLock(rpcName);
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, deadline - Date.now() + 100)));
+      await waitForLock(rpcName, release.backendPid);
+      const blockedClock = readClock();
+      assert(blockedClock.live && blockedClock.remainingMs > 0, 'actual public RPC reaches this fixture lock before expiry');
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, blockedClock.remainingMs + 100)));
+      assert(sql(offlineLockProbeSQL(rpcName, release.backendPid)) === 't', 'same public RPC remains blocked on this fixture holder during expiry');
+      assert(readClock().live === false, 'DB deadline is crossed while the public RPC is still blocked');
+      assert(immutableClock() === 't', 'waiting never rewrites the original issued lease clocks');
       await release();
       const result = await pending;
       if (horizon === 'execution') {
@@ -161,7 +237,7 @@ export async function testAttemptOfflineConcurrency(client) {
   const revokedInput = event(revoked);
   const pendingRevoke = Promise.resolve(client.rpc('sync_cleaning_attempt_event', revokedInput));
   try {
-    await waitForLock('sync_cleaning_attempt_event');
+    await waitForLock('sync_cleaning_attempt_event', releaseSession.backendPid);
     await releaseSession(`delete from auth.sessions where id='${revoked.owner.sessionId}'`);
     assert((await pendingRevoke).error?.message === 'SESSION_REVOKED', 'revoked session cannot ingest after lock wait');
     assert(sql(`select count(*) from private.offline_completion_events where lease_id='${revoked.lease.leaseId}';`) === '0', 'revocation creates no quarantine or effect');

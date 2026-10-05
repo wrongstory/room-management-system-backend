@@ -1367,7 +1367,7 @@ export const openApiDocument = {
         ),
         parameters: [photoPathId("photoId")],
         description:
-          "비밀번호 변경을 완료한 active business admin 또는 본인의 현재 유효 회차에 속한 active maid만 허용합니다. developer와 upload_only/deactivation_pending/과거 인계 회차의 원본 읽기는 금지합니다. provider bytes를 bounded download/SHA 검증한 뒤 응답 첫 byte 전에 session/ownership/7일 만료를 다시 확인합니다. redirect/Range/공개 URL은 지원하지 않으며 Cache-Control:no-store, nosniff, 서버 고정 filename만 반환합니다.",
+          "비밀번호 변경을 완료한 active business admin 또는 본인의 현재 유효 회차에 속한 active maid만 허용합니다. developer와 upload_only/deactivation_pending/과거 인계 회차의 원본 읽기는 금지합니다. provider bytes를 bounded download/SHA 검증한 뒤 응답 첫 byte 전에 session/ownership/보존 만료를 다시 확인합니다. redirect/Range/공개 URL은 지원하지 않으며 Cache-Control:no-store, nosniff, 서버 고정 filename만 반환합니다. 새 사진의 불변 날짜·유형·호실·순번 이름은 UTF-8 filename*로 제공하고 legacy는 photo.jpg/webp를 유지합니다. client가 파일명을 지정할 수 없습니다.",
         responses: {
           ...photoOperation("unused", "unused", "PhotoUploadOperation")
             .responses,
@@ -1377,6 +1377,11 @@ export const openApiDocument = {
             headers: {
               "Cache-Control": noStoreHeader,
               "X-Content-Type-Options": { schema: { const: "nosniff" } },
+              "Content-Disposition": {
+                description:
+                  "서버 검증 이름만 사용합니다. 새 사진은 날짜_유형_호실_번호 UTF-8 filename*, legacy는 photo.jpg/webp이며 Drive 원문 헤더나 locator를 전달하지 않습니다.",
+                schema: { type: "string" },
+              },
             },
             content: {
               "image/jpeg": { schema: { type: "string", format: "binary" } },
@@ -2689,12 +2694,23 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/limited/attempts": {
+      get: {
+        ...lifecycleOperation(
+          "listLimitedAttempts",
+          "기존 로그인 세션의 본인 제한 업무 찾기",
+          "최초 제한 전환 때 동결한 기존 live Supabase session만 허용합니다. 새 로그인·bearer 복구 credential·TTL 연장은 없으며 일반 login/me는 active-only입니다. 본인 live capability의 최소 ID/version/status/kind/actions/발급·만료 metadata만 UUID 오름차순으로 반환합니다. query는 없으며 1000건 초과는 partial response 대신 안전하게 실패합니다. 적격 세션에 live grant가 없으면 items=[]입니다. PIN·객실·고객정보·raw grant/session/digest를 반환하지 않습니다. 프런트 cold-boot 복원 구현·운영 제공은 별도입니다.",
+          "maid",
+          "LimitedAttemptDiscovery",
+        ),
+      },
+    },
     "/v1/limited/attempts/{attemptId}": {
       get: {
         ...lifecycleOperation(
           "getLimitedAttempt",
           "본인 제한 수행 범위 조회",
-          "기존 Supabase Auth 사용자와 유효 세션, 최신 maid profile, 정확한 attempt/revision, 미만료 DB capability를 모두 확인합니다. active(인계 뒤 증빙 범위)·deactivation_pending·upload_only만 후보이며 상태만으로 허용하지 않습니다. 별도 bearer capability token을 발급하지 않고 PIN·사진·현재 target 상세를 노출하지 않습니다. upload/validate/submit allowedActions는 후속 계약이며 실행 endpoint가 아닙니다.",
+          "기존 Supabase Auth 사용자와 최초 제한 전환 때 동결한 유효 세션, 최신 maid profile, 정확한 attempt/revision, 미만료 DB capability를 모두 확인합니다. active(인계 뒤 증빙 범위)·deactivation_pending·upload_only만 후보이며 상태만으로 허용하지 않습니다. 별도 bearer capability token을 발급하지 않고 PIN·사진·현재 target 상세를 노출하지 않습니다. 이 조회는 실행 endpoint가 아닙니다. upload/validate/submit은 각각 현재 photo/submission 전용 경로에서 다시 검증하며 evidence_upload로 전체 제출하거나 사진 원본을 읽을 수 없습니다.",
           "maid",
           "LimitedAttempt",
         ),
@@ -3200,7 +3216,7 @@ export const openApiDocument = {
         operationId: "publishCleaningTemplate",
         summary: "퇴실 청소 템플릿의 불변 새 버전 게시",
         description:
-          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 A-contract v8 이상 immutable version과 normalized slot rows를 원자 게시합니다. 기존 maxPhotos 없는 pre-A v7+ snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
+          "active business admin/live session 전용 command입니다. 한 객실 유형의 current published version을 expectedVersion(최초 0)으로 CAS 검증하고, 기존 published를 retired로 보존한 뒤 immutable version과 normalized slot rows를 원자 게시합니다. 기본 v9 요청은 cleaning-proof/bomb-proof/issue-proof의 정규 3개 사진 모음이며 사진 3장이나 업로드 순서를 뜻하지 않습니다. 기존 v8 A-contract 게시도 호환되고, maxPhotos 없는 pre-A 요청은 완료 receipt 재생만 허용하며 과거 snapshot은 재작성하지 않습니다. 같은 actor/command/Idempotency-Key와 canonical request hash는 replay되고 다른 payload 재사용은 409입니다. #382에 따라 역할별 정규 객체의 배열 위치만 다른 6개 순서를 모두 허용합니다. 서버는 displayOrder로 정렬해 canonical request hash·저장·응답을 유지하고 역할별 key/order/label/필수 여부/최대 수 및 중복·누락 검증은 바꾸지 않습니다. 게시 자체는 수신자의 행동을 요구하지 않아 notification/outbox를 만들지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [idempotencyHeader],
@@ -6736,6 +6752,74 @@ export const openApiDocument = {
           required: ["maxPhotos"],
         }],
       },
+      CheckoutCleaningTemplateV9Slot: {
+        oneOf: [
+          ["cleaning-proof", 0, true, "청소 사진", 20],
+          ["bomb-proof", 1, false, "폭탄방 증빙", 10],
+          ["issue-proof", 2, false, "특이사항 증빙", 10],
+        ].map(([slotKey, displayOrder, required, label, maxPhotos]) => ({
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "slotKey",
+            "displayOrder",
+            "required",
+            "label",
+            "maxPhotos",
+          ],
+          properties: {
+            slotKey: { const: slotKey },
+            displayOrder: { const: displayOrder },
+            required: { const: required },
+            label: { const: label },
+            maxPhotos: { const: maxPhotos },
+          },
+        })),
+        description:
+          "v9 역할별 정규 슬롯 객체. stable slotKey와 displayOrder(0/1/2), required, label, maxPhotos의 결합을 유지하며 label 변경이나 선택 메타데이터 추가를 지원하지 않습니다.",
+      },
+      CheckoutCleaningTemplateV9Slots: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: { $ref: "#/components/schemas/CheckoutCleaningTemplateV9Slot" },
+        allOf: ["cleaning-proof", "bomb-proof", "issue-proof"].map((
+          slotKey,
+        ) => ({
+          contains: {
+            type: "object",
+            required: ["slotKey"],
+            properties: { slotKey: { const: slotKey } },
+          },
+          minContains: 1,
+          maxContains: 1,
+        })),
+        description:
+          "새 v9 일반 사진 계약. 역할별 정규 객체를 정확히 하나씩 보내며 배열 위치만 다른 6개 순서를 모두 허용합니다. 서버는 displayOrder로 정렬하며 역할/order 값, label, 필수 여부, 수량과 추가 필드 금지 계약은 바꾸지 않습니다. 중복/누락 역할은 contains의 정확히 한 번 조건으로 거부합니다.",
+      },
+      CheckoutCleaningTemplateV8Slots: {
+        type: "array",
+        minItems: 9,
+        maxItems: 14,
+        uniqueItems: true,
+        items: { $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slot" },
+        description:
+          "기존 v8 A-contract 호환 형식. 현재 RPC는 새 게시와 완료 receipt 재생 모두 허용합니다. 서버가 타입별 개수, slotKey/displayOrder 유일성, 필수 tv-on·entry-storage, entry-number 금지, 마지막 선택 extra-proof(10), 나머지 필수 슬롯(1)을 재검증합니다. 새 UI의 기본 형식은 v9입니다.",
+      },
+      CheckoutCleaningTemplateLegacyReplaySlots: {
+        type: "array",
+        minItems: 10,
+        maxItems: 15,
+        uniqueItems: true,
+        items: {
+          allOf: [
+            { $ref: "#/components/schemas/CleaningTemplateSlot" },
+            { not: { required: ["maxPhotos"] } },
+          ],
+        },
+        description:
+          "maxPhotos 없는 pre-A v7+ 요청의 완료 receipt 재생 전용. 원 actor·Idempotency-Key·정규 요청 hash가 일치해야 합니다. JSON Schema 통과는 새 게시 허용이 아니며 receipt가 없으면 DB가 INVALID_CLEANING_TEMPLATE_SLOTS로 거부합니다. 과거 version은 7보다 클 수 있습니다.",
+      },
       PublishCleaningTemplateRequest: {
         type: "object",
         additionalProperties: false,
@@ -6760,17 +6844,46 @@ export const openApiDocument = {
               "선택적인 과거 호환 메타데이터입니다. 미입력/null이어도 예약을 차단하지 않으며 실제 청소시간은 attempt.startedAt부터 fieldCompletedAt까지 계산합니다. 배정 Preview는 이 값을 사용하지 않습니다.",
           },
           slots: {
-            type: "array",
-            minItems: 9,
-            maxItems: 14,
-            uniqueItems: true,
-            items: {
-              $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slot",
-            },
+            oneOf: [
+              { $ref: "#/components/schemas/CheckoutCleaningTemplateV9Slots" },
+              { $ref: "#/components/schemas/CheckoutCleaningTemplateV8Slots" },
+              {
+                $ref:
+                  "#/components/schemas/CheckoutCleaningTemplateLegacyReplaySlots",
+              },
+            ],
             description:
-              "새 v9 계약은 cleaning-proof(필수,20), bomb-proof(선택,10), issue-proof(선택,10) 순서입니다. 과거 v8 계약은 기존 슬롯과 멱등 재요청을 위해 유지합니다.",
+              "v9 신규 게시, v8 호환 게시, pre-A 완료 receipt 재생을 구별합니다. expectedVersion=0은 미설정 타입의 최초 게시이며, 기존 타입은 조회한 current version을 사용합니다. stale version과 key/hash 충돌은 409입니다.",
           },
         },
+        allOf: Object.entries({
+          standard: 9,
+          premium: 10,
+          oceanPremium: 12,
+          oceanFamily: 14,
+        }).map(([roomTypeCode, count]) => ({
+          if: { properties: { roomTypeCode: { const: roomTypeCode } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword, not a JavaScript thenable.
+          then: {
+            properties: {
+              slots: {
+                anyOf: [
+                  { minItems: 3, maxItems: 3 },
+                  {
+                    minItems: count,
+                    maxItems: count,
+                    items: { required: ["maxPhotos"] },
+                  },
+                  {
+                    minItems: count + 1,
+                    maxItems: count + 1,
+                    items: { not: { required: ["maxPhotos"] } },
+                  },
+                ],
+              },
+            },
+          },
+        })),
       },
       PublishedCleaningTemplate: {
         type: "object",
@@ -7249,6 +7362,8 @@ export const openApiDocument = {
           "MAID_ALREADY_IN_PROGRESS",
           "ATTEMPT_COMMAND_FAILED",
           "CAPABILITY_ACCESS_REQUIRED",
+          "LIMITED_DISCOVERY_LIMIT_EXCEEDED",
+          "LIMITED_SESSION_LIMIT_EXCEEDED",
           "PHOTO_RETENTION_DELETE_PREPARED",
           "ACCOUNT_VERSION_CONFLICT",
           "CLEANING_WINDOW_NOT_EXPIRED",
@@ -9010,6 +9125,84 @@ export const openApiDocument = {
           issuedAt: { type: "string", format: "date-time" },
           expiresAt: { type: "string", format: "date-time" },
           revokedAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      LimitedAttemptDiscoveryItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "attemptId",
+          "assignmentId",
+          "assignmentRevision",
+          "executionVersion",
+          "status",
+          "kind",
+          "allowedActions",
+          "issuedAt",
+          "expiresAt",
+        ],
+        properties: {
+          attemptId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          assignmentRevision: {
+            type: "integer",
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
+          executionVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
+          status: {
+            type: "string",
+            enum: [
+              "in_progress",
+              "field_completed",
+              "upload_pending",
+              "interrupted",
+            ],
+          },
+          kind: {
+            type: "string",
+            enum: ["finish_current", "upload_submit", "evidence_upload"],
+          },
+          allowedActions: {
+            type: "array",
+            minItems: 1,
+            maxItems: 3,
+            uniqueItems: true,
+            items: {
+              type: "string",
+              enum: [
+                "complete_field_work",
+                "upload_evidence",
+                "validate_evidence",
+                "submit",
+              ],
+            },
+            description:
+              "kind별 고정 순서: finish_current=[complete_field_work], upload_submit=[upload_evidence,validate_evidence,submit], evidence_upload=[upload_evidence,validate_evidence].",
+          },
+          issuedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+        },
+      },
+      LimitedAttemptDiscovery: {
+        type: "object",
+        additionalProperties: false,
+        required: ["profileStatus", "evaluatedAt", "items"],
+        properties: {
+          profileStatus: {
+            type: "string",
+            enum: ["active", "deactivation_pending", "upload_only"],
+          },
+          evaluatedAt: { type: "string", format: "date-time" },
+          items: {
+            type: "array",
+            maxItems: 1000,
+            items: { $ref: "#/components/schemas/LimitedAttemptDiscoveryItem" },
+          },
         },
       },
       LimitedAttempt: {

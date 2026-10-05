@@ -1,5 +1,20 @@
 # Room Management System ERD 초안
 
+> 2026-10-05 #329 최신 dev 통합 후보: 원래100개 뒤의101번째 append를 수정·재번호화하지 않고 `dev@bb4fa40`의 #373/#384와 정상 병합한 103개 구성을 검증한다. A안·immutable 최초 세션 자격·TTL·권한·기존 원장을 유지하며 새로운 schema 변경은 추가하지 않는다. 아래 기존 strict17/101 검증은 당시 이력이다. 현재 원본 strict FAIL9와 exact9 비교 gate를 구분하고 #383/#382 재통합·fresh/전체 DB·독립 QA·새 exact-head CI·운영/UAT는 별도 미완료다.
+
+## #329 제한 세션 eligibility 보강 — 구현 중
+
+101번째 append 후보는 기존 capability grant/revocation을 보존하고 최초 제한 전환의
+private immutable restriction root·domain-separated session digest membership·grant→root binding을 추가한다.
+새 원장은 RLS/무권한 raw table·FK/동일 actor identity·UPDATE/DELETE 거부를 요구한다.
+Auth session 원문/token을 저장하지 않고 visible live set만 최초 동결하며 늦게 commit된 세션을 포함하지 않는다.
+finish 완료 후 upload grant는 최초 root를 이어받고 정상 최초24h 발급과 기존 TTL 연장 금지를 구분한다.
+기존 limited grant에는 현재 세션을 추측 backfill하지 않는다. 일반 active handover와 ordinary
+비활성화의 Auth ban/revoke는 별개로 유지한다.
+로컬 schema·RPC·기능·경합 검증과 독립 소스 QA는 완료했으며 기존 strict17 FAIL이 남은 진단용 후보다.
+CI·dev 통합·운영 배포·프런트 UAT 완료 선언이 아니다.
+[정본 계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
+
 > #363/#373 A안 후보는 기존 함수7개 body-only 보완과 owner-only snapshot guard 한 개뿐이다.
 > 테이블/컬럼/관계/FK/index/RLS/원장·receipt는 그대로다. 정확한 호환 경고9개 기준과
 > 원본 strict FAIL 보존은 [DB 정적 검사 계약](./DB_STATIC_WARNING_BASELINE.md)을 따른다.
@@ -417,7 +432,7 @@ erDiagram
 - 퇴실 의무와 checkout target은 예약·객실·의무 ID 복합키와 deferred constraint trigger로 commit 시점까지 양방향 동일성을 강제한다. `completed`는 동일 target의 승인 근거가, `cancelled`의 historical pointer는 동일 target의 취소 상태가 있어야 한다.
 - 입실 준비 `approved`는 같은 current attempt가 승인 상태이고, target 접근 가능 시각 이후 `시작 → 현장 완료 → 종료 → 제출 → 승인` 순서가 직전 점유 종료 이후·해당 체크인 이전에 같은 객실에서 완결됐음을 요구한다. `private.preparation_proof_usages`는 submission 소비를 append-only·전역 unique로 기록해 무효화 뒤에도 다른 예약에서 재사용하지 못하게 한다.
 - 예약 일정, 점유, 촛불, PIN 동기화 이력은 append-only다. 예약·객실 current row는 CAS version으로만 갱신한다.
-- #318 최신 통합 후보는 원격 미적용인 원 SQL 본문 SHA를 보존해 #329 strict caller/snapshot 선행 검증 뒤로 재정렬한다. LIVE raw-state는 encrypted-current PIN/version/unresolved lease와 실제 materialized cleaning 의무를 기존 helper로 확인하며, 실제입실/미퇴실 active 최종 객실은 예정 종료 뒤에도 LIVE occupied다. 예정 퇴실 이후 inspection 상세조건은 cleaning materialization과 별개다. 날짜별 과거·미래·원장은 변경하지 않는다. [104개 후보 적용 순서·남은 실제 DB gate](./ROOM_BOARD_DATE_FILTERS.md)를 따르며 DBML 테이블/권한 변경은 없다.
+- #318 최신 통합 후보는 원격 미적용인 원 SQL 본문 SHA를 보존해 #329 strict caller/snapshot 선행 검증 뒤로 재정렬한다. LIVE raw-state는 encrypted-current PIN/version/unresolved lease와 실제 materialized cleaning 의무를 기존 helper로 확인하며, 실제입실/미퇴실 active 최종 객실은 예정 종료 뒤에도 LIVE occupied다. 예정 퇴실 이후 inspection 상세조건은 cleaning materialization과 별개다. 날짜별 과거·미래·원장은 변경하지 않는다. [dev58a 재통합106개 후보와 이전104개 checkpoint](./ROOM_BOARD_DATE_FILTERS.md)를 따르며 DBML 테이블/권한 변경은 없다.
 - 예약 취소는 입실 전에만 soft cancel한다. 수동 체크아웃은 예정 일정을 덮어쓰지 않고 실제 시각과 점유 event를 추가한다.
 - 연박·추가 청소 요청은 `cleaning_targets`의 안정적인 ID와 `stayover_request`/`manual_room_request` source로 생성한다. 실제 초과 점유와 자정을 넘는 access window까지 interval로 충돌 검사한다. 2026-10-02 #326 B안·#348은 미배정/draft/notified 및 미착수 scheduled 요청을 PIN 공개 이력과 무관하게 CAS soft cancel한다. 취소 직전 잠근 current assignment ID를 감사에 고정해 통보된 당사자만 알리며 과거 담당자로 fallback하지 않는다. 대상·담당·수행·성공한 공개 이력은 삭제하지 않고 배정 종료 trigger로 entitlement와 미완료 reveal을 회수한다. 착수/terminal 및 자동 checkout 취소 경계는 유지한다. [수동 요청 취소 계약](./MANUAL_CLEANING_CANCEL.md) 참조.
 - 고객명 암호문은 예약에만 존재하고 목록 projection에서는 제외한다. 관리자 단건 상세에서만 복호화하며 체크아웃/취소 후 180일 보존 만료 시 암호문만 제거한다.
@@ -1078,7 +1093,7 @@ source 후보 schema다.
 | Realtime | 월 200만 메시지, 동시 200연결 | MVP 핵심 경로에는 미사용, 필요 화면만 제한 구독 |
 | Edge Functions | 월 500,000회 | 초기 백엔드는 Fastify 서버 사용, 정리 작업만 필요 시 검토 |
 
-새 source 후보는 스마트폰 원본 JPEG/WebP/HEIC/HEIF(최대 5MiB·12MP/5000px)를 API에 전송하고 서버가 방향 보정·EXIF 제거·축소/재인코딩 후 **최대 300KiB(307,200바이트)** JPEG/WebP만 저장한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜를 사용하며, 중복 방지를 위해 실제 파일명에는 수행 회차·사진 슬롯·사진 UUID를 포함한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
+새 source 후보는 스마트폰 원본 JPEG/WebP/HEIC/HEIF(최대 5MiB·12MP/5000px)를 API에 전송하고 서버가 방향 보정·EXIF 제거·축소/재인코딩 후 **최대 300KiB(307,200바이트)** JPEG/WebP만 저장한다. 백엔드는 `room-management-system-photos/YYYY-MM-DD/객실번호` 폴더를 찾아 만들고 비공개 Google Drive에 업로드한다. 날짜는 서비스 표준 시간대인 KST의 업로드 날짜다. #383 사용자 결정에 따라 새 v9 저장 이름은 `YYYY-MM-DD_일반방|폭탄방|특이사항_호실_번호.jpg|webp`이며 private 불변 이름 binding과 서버 고유 순번으로 재시도·중복을 구분한다. 기존/이미 예약된 UUID 이름은 유지하고 수행 회차·슬롯·사진 UUID 관계는 DB에서 계속 검증한다. Drive OAuth 토큰은 브라우저에 주지 않는다.
 
 현재 121개 객실을 모두 하루에 한 번 청소하면 v8 필수 슬롯(8·9·11·13장)은 하루 1,233장이다. 모든 객실의 선택 `extra-proof`를 10장까지 채운 상한은 하루 2,443장, 7일 약 **4.89GiB**다. 모든 객실에 가장 큰 타입의 필수 13장과 선택 10장을 적용한 보수적 상한은 하루 2,783장, 7일 약 **5.57GiB**다. Google 개인 계정 기본 15GB는 Gmail·Drive·Google Photos 공유 용량이므로 전용 운영 계정을 쓰고 10GB에서 경고, 12GB에서 신규 업로드 차단과 관리자 알림을 적용한다.
 

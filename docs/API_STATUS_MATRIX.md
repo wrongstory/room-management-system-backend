@@ -1,5 +1,84 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+> 2026-10-05 현재: #329/PR372 및 #393/PR394는 dev58a에 통합됐다. #318의106개 재통합 후보는 Node1,794·Edge487·console95/client순열·fresh106·exact9 baseline·로컬 합성복원·실제 템플릿6순열·전체27 upgrade/SQL5,193·static/KST145·전체9경합/최종fresh·독립 소스 QA를 통과했다. 실제 caller7/18/core2, 원본484 hash drift0, RLS누락0을 확인했다. raw strict FAIL9/exit1은 유지하며 새 exact-head CI/보호 병합은 후속이다. 실제 운영 백업/배포·v0.9.0은 아직 아니며 v0.8.0/운영/프런트는 그대로다. [현재 증거](./ROOM_BOARD_DATE_FILTERS.md)를 따르고 아래 과거 checkpoint와 구분한다.
+
+> 2026-10-05 최신 #329: 4da53b0 +devfdd8d7d 정상 통합 후보의 실제 Node1,767/74·Edge486/0(bundle17,577,757)·Python95/client6순열·fresh104/template6순열/receipt/CAS/16malformed·전체9경합·finalfresh104 PASS/exit0다. 원본480/사본480 drift0, fixture0·RLS누락0·객실121 확인. 아래 이전27 upgrades/SQL82·5,119와 strictFAIL9/exact9 catalog3PASS는 그 실행의 증거이며 새 로컬 재실행은 NOT RUN이다. 새 exact CI·최종QA·commit/push·dev 병합은 후속, 운영/v0.8.0/프런트 불변. [실패 이력과 현재 증거](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신-devfdd-통합전체9-경합-완료-checkpoint)를 따른다.
+
+> 2026-10-05 최신 source 통합: #382/#323은 PR335/exact CI37254484170 application·migration SUCCESS와 독립 QA 후 dev `fdd8d7d`에 통합됐다. #329의 checkpoint `4da53b0`는 이 dev를 정상 재통합 중이며, 아래 이전104 PASS는 새 source의 실행 결과로 대체하지 않는다. 새 품질·실제 템플릿·전체9 경합·fresh cleanup·독립 QA·exact-head CI는 진행 단계다. 운영/API·프런트·기존 v0.8.0은 그대로이며 최신 기능은 #387 v0.9.0에서 별도 승격한다.
+
+> 2026-10-05 #329 최신104 로컬 checkpoint: `b00e09c` 뒤 dev1209756 정상 통합 후보의 전체27 upgrade/SQL82·5,119·static/KST145 PASS. 첫9경합 chain은 limited runner의 cleanup 누락으로8번째 빈 DB 확인 FAIL이며 named/마지막verify NOT RUN이었다. 보완 후 fresh104→limited7/cleanup→photo-context7/cleanup→named7/cleanup→최종fresh104가 실제 exit0, Node1,727/73·Edge483/0·Python95·비작성자 source QA0, 원본307/사본307 drift0다. raw strict FAIL9와 exact9/catalog3 PASS를 구분한다. 후속3개 PASS를 새 전체9 aggregate PASS로 바꾸지 않는다. 최신 devfdd8d7d(#382) 재통합·최종 문서/staged QA·새 CI·dev 병합은 후속이며 main/v0.8.0/운영/프런트는 불변이다. [실제 범위·최초 실패·증적](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신104-통합standalone-fixture-정리-checkpoint)을 따른다.
+
+> 2026-10-05 #329/#389 bb4fa40 통합 로컬 checkpoint: Node1,525/70·LF fresh103/cleanup·전체SQL81/4,942·실제100→101 upgrade·제한 세션 경합7 PASS, 원본304/사본304 drift0. raw strict FAIL9/exit1과 exact warning9/catalog3 PASS는 별개다. #389는 exact catalog fixture만 보완하며 원본 installer·runtime 권한은 불변이다. 후속 실제7/18→7/19, 최신 #383/#388/#382 재통합·전체27 upgrades·독립 QA·새 CI·dev/운영·프런트 UAT는 미완료다. [정확한 실행 범위](./LIMITED_SESSION_REENTRY.md#2026-10-05-389-caller-catalog--bb4fa40-통합-로컬-checkpoint)를 따른다. 아래 strict17/101 결과는 당시 기록이다.
+
+## 2026-10-04 #329 별도 백엔드 로컬 검증 checkpoint
+
+| 범위 | source 상태 | 운영·프런트 상태 |
+|---|---|---|
+| 기존 세션 기반 제한 업무 발견·단건·완료·사진·제출 정합화 | 정책 A안 확정; 새 SHA Node1275·Edge477·Python95·LF fresh101·upgrade27/SQL79·4774·KST145·경합7·추가 역할 검사4·합성복구 PASS, 독립 소스 QA 새 확정 P0/P1/P2=0. strict 신규0/기존17 FAIL 및 최초 SQL FAIL·재실행 PASS 이력 보존. 승인된 진단용 Draft 공유 단계·CI/통합 미완료 | NOT RUN: v0.8.0 고정 후보에 미포함, 운영 배포·프런트 변경·cold start UAT 제외 |
+
+일반 로그인/me guard를 완화하지 않으며 별도 credential이나 새 세션·TTL을 발급하지 않는다.
+실제 계약과 gate는 [제한 세션 재진입](./LIMITED_SESSION_REENTRY.md)를 따른다.
+기준선 Node 1,229건/65파일은 구현 전 결과다. 신규 결과는 위 checkpoint와 상세 계약을 따른다.
+사용자 승인 LF 임시본만 정규화했고 기존100 SQL·운영 DB는 변경하지 않았다. 실패를 명시한 진단용 공유 승인만 있으며 정상 완료·병합·배포로 승격하지 않는다.
+
+## 과거 2026-10-05 #388 통합 checkpoint
+
+#382/#323은 아래 `c2b5618` 검증 후보를 정상 커밋 `cfc75da`로 보존한 뒤, #388/PR390이 보호
+병합된 `dev@12097563f30d694780c279440c79f12742672d04`를 정상 재통합했다. 새 후보의 실제
+Node1,664/71·Edge479/0·Python95/Ruff226/mypy25/codegen/package·TS/Ajv6순열은 PASS다.
+fresh103·실제6순열/receipt/4타입CAS/16 malformed·SQL81파일/4,979·static100→101와103 cleanup·
+KST145·전체8개 경합과 최종 fresh103 cleanup까지 exit0 PASS다. 실행 후 원본305 raw SHA와
+LF197/원문108 대응 drift0을 재확인했다. 원 strict FAIL9/exit1와 승인 exact9/catalog3 PASS를 구분한다.
+새 후보에서 전체26 upgrade를 재실행하지 않았으며 아래 같은 SQL·manifest의 이전 checkpoint와
+구분한다. 새 exact-head required CI가 전체 upgrade를 실행해야 한다. 최종 독립 staged-tree QA·
+새 CI·Ready·보호 dev 병합과 실제 백업/운영·프런트 UAT는 별도 후속이다.
+전체 경합 로그 SHA256 `03da5a83479d39a75e5af960fbbac60c8c440b36b7025a6b3a25d17eb8b07805`,
+새 whole SQL 로그 `cf06d4e232a2abb17069e179bd1dda8321714136bff011c4cf7379c97d6c347c`를 보존한다.
+이번 입력 순열 정합화는 SQL·manifest·권한·기존 snapshot을 변경하지 않는다. v0.8.0은 보존하며
+최신 기능은 #387 v0.9.0 릴리스에서 별도 승격한다. 운영 DB/API·Auth·PIN·Drive는 변경하지 않았다.
+
+## 과거 2026-10-05 #383 통합 경계
+
+#383은 source `bab817f`의 독립 QA와 필수 CI `37245618199` PASS 후 PR385에서 `dev@c2b5618`로 보호 squash했다.
+운영 반영은 하지 않았다. #382/#323의 local102 검증·독립 QA tree를 merge commit `7b0e3fb`로 보존한 뒤,
+이 최신 dev와 정상 merge한103 후보의 Node1,631/70·Edge479/0·Python95·생성 client 6순열 검사는 PASS다.
+원본305 raw SHA/197 LF/108 원문 대응 drift0을 보존한다. 이103 후보는 fresh DB·실제6순열/receipt/
+4타입 CAS/16 malformed·전체26 upgrades/SQL81파일·4,979 assertions와 fresh cleanup까지 exit0 PASS다.
+전체 DB 로그 SHA256은 `ec783912a90824904348a3dd0d16fb8beaa5d10e8629fe0c7983a548ace7fce6`다.
+원 strict FAIL9/exit1는 보존하고 승인 exact9/catalog3 비교 gate는 PASS다.
+이 checkpoint 이후 dev에 통합된 #388/PR390(1209756) 재통합·전체경합·최종 tree QA·새 exact-head CI·보호 병합은 후속이다.
+아래 #383 combined103 검증 수치는 #383 당시 checkpoint이며 새 #382 통합 검증을 대체하지 않는다.
+
+## 과거 2026-10-05 #383 combined103 개발 후보 checkpoint
+
+#384가 dev `bb4fa40`에 통합된 뒤 #383을 정상 merge한103 migration source 후보다.
+Node1,591/69·Edge476/0·Python95·fresh103·저장 이름SQL177·실제 named 경합7·worker44,
+전체26 upgrades/SQL81파일·4,979 assertions·static/KST145·승인 exact9/catalog3 baseline PASS다.
+전체8개 경합 첫 실행은 기존 offline fixture 요청 전 만료로 FAIL이며 기록을 보존했다.
+같은 source/TTL/assertion의 제한1회 전체 재실행은8명령/cleanup PASS·exit0다.
+원본302 raw SHA/실제 임시본 대응 불일치0, 최종103/head·RLS누락0·객실121,
+검사한 Auth/session/profile/target/photo operation/name binding0을 확인했다.
+원 strict FAIL9와 승인 baseline PASS를 구분한다. 기한 fixture 개선은 별도 #388로 추적한다.
+최종 staged 독립 QA·새 exact-head CI·Ready·dev 병합은 후속 gate이며 운영 완료는 아니다.
+상세 실패/재실행 증거와 불변 저장 이름·삭제/rollback 경계는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
+최신 기능은 별도 #387 v0.9.0이며 v0.8.0 후보는 보존한다. 실제 백업은 전체 개발 이후이되 운영 배포 전 필수다.
+운영/복구 DB·Auth·API·실제 Drive/PIN·프런트 UI/UAT·백업/복원·Release/tag는 NOT RUN이다.
+
+## 과거 102 migration #383 실제 사진 저장 이름 후보 checkpoint
+
+사용자 결정에 따라 새 v9 Drive 사진 이름을 날짜·유형·호실·서버 고유 순번으로 구성한다.
+별도 [Issue #383](https://github.com/wrongstory/room-management-system-backend/issues/383)의
+[저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다. 신규 append migration은 private 불변 binding과
+service-only 명명 예약 RPC를 추가하며 공개 업로드 요청 계약과 기존 사진 ID/권한은 유지한다.
+기존 UUID 이름·이미 예약된 identity·legacy 유형은 유지하고 일괄 rename/move/delete하지 않는다.
+Node1547/69·Edge476/0·fresh102·대상SQL71·historical upgrade26 및 보완 후 전체SQL4789/80·KST145는 PASS다.
+최초 통합 `db:test`는 기존 developer 진단 head 기대값3건으로 FAIL했고 fixture 보완 후 전체SQL을 재검증했다.
+통합 명령 재실행 PASS로 표시하지 않는다. 기존 동시 처리6개 명령/cleanup과 독립 범위 QA98/100·신규 P0/P1/P2=0도 PASS다.
+최종 문서/tree와 새 exact-head CI를 확인한 뒤에도 #384 운영 차단 요소와 릴리스 gate를 별도로 판단한다.
+raw strict FAIL9와 사용자 승인 exact baseline PASS를 구분한다. production/main/recovery DB·실제 Drive·배포·UI/UAT는
+NOT RUN이다. #384 다중 사진 업로드 P1은 별도 운영 승격 차단 요소다. 기존 #323/#382 입력 순열 정합화도
+별도이며 이름 변경으로 완료 처리하지 않는다. 실제 백업·복원은 모든 개발 이후 후속으로 유지한다.
+
 ## 2026-10-03 #325 완료와 #324 후보
 
 #325 PR358 source78582789 → devd65f4f60는 exact-tree CI37093733970 application/migration PASS,
@@ -1532,7 +1611,30 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `dev` 통합과 v0.3.0 source/main·production 54 migrations·5 Edge bundle·OpenAPI 108/115 반영
 - [ ] annotated `v0.3.0` tag/GitHub Release와 남은 hosted role·mutation/provider/Google activation smoke
 
-### #156/#165 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기
+### 과거 #323/#382 v9 사진 템플릿 source checkpoint — 당시 Draft·통합 gate 대기
+
+아래 상태와 검증은 당시 후보의 이력이며, 현재 source/dev 완료 상태는 최상단의 `dev@fdd8d7d` 보호 통합 기록을 따른다.
+
+[PR #335](https://github.com/wrongstory/room-management-system-backend/pull/335)의 과거 후보는 `dev@859f7cd`를
+통합했다. local102 후보는 `dev@bb4fa40`의 #384를 포함했다. 그 검증을 commit `7b0e3fb`로 보존하고
+당시에는 #383의 `dev@c2b5618` 통합103 후보를 별도 검증했다.
+정규 3개 사진 모음(일반 20/폭탄방 10/특이사항 10), 최초
+`expectedVersion=0`/current CAS, v8 호환과 pre-A 완료 receipt 재생을 구분한다.
+3개 모음은 사진 3장 제한이 아니다. 프런트 scoped `dev@09ed284`의 다중 파일 선택·사진별 전역
+업로드 큐를 보존하며 업로드 endpoint/권한/기존 migration은 변경하지 않는다.
+
+6개 배열 순열의 과거 Fastify1/Edge2/DB6 차이는 [#382](https://github.com/wrongstory/room-management-system-backend/issues/382)의
+이력이다. 2026-10-05 사용자 결정으로 배열 위치만 해제하며 역할별 key/order/label/필수 여부/최대 수는 유지한다.
+새 후보는 Fastify/Edge 입력을 정렬해 동일 payload/hash를 사용하며 OpenAPI/Ajv/생성 client를 같이 검증한다.
+ordered DB projection·immutable snapshot·receipt와 기존 migration/manifest는 보존한다.
+#323/PR #335은 당시 OPEN/Draft였다. 당시 새 exact-head CI·독립 QA·전체 DB 및 #383 재통합의 실제 결과는 PR에 기록했다.
+현재 local102의 실제 6순열 게시·receipt/4타입 CAS·16 malformed·전체SQL80/4,802와 HTTP/schema/client 검사는 PASS다.
+전체26 upgrade runner도 PASS(exit 0)다. 이는 local102 후보의 결과이며 최신 #383 통합103 검증이 아니다.
+최신 #383/c2b5618 통합103의 fresh·6순열 게시·전체26 upgrades/SQL81·4,979/cleanup도 실제 PASS다.
+#388/1209756 후속 재통합·최종 tree QA·새 exact-head CI·보호 병합·운영/UAT 완료로 확대하지 않는다.
+source/dev 완료·운영 배포·프런트 UAT 완료로 판정하지 않는다. 상세는 [명세 계약](./ARCHITECTURE.md#323-v9-게시-명세-정합화)을 따른다.
+
+### #156/#165 당시 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|---|
@@ -1584,7 +1686,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 
 ### #318 날짜별 객실 현황·상세 조건 — source 후보
 
-2026-10-05 최신 통합 후보는 dev `bb4fa40`/102개 SQL과 원 #318 본문 SHA를 보존한 총104개다. 원격 미적용 baseline 재정렬로 #329 strict caller/snapshot 선행 검증을 유지하고 LIVE PIN/current-cleaning·실제active 점유 선택을 호환 보완한다. 시간 기준 inspection 조건은 실제 cleaning과 구분해 유지한다. 아래 기존 회귀 체크는 최초86개 후보 기록이며 새104개 SQL 실행 PASS가 아니다. [실제 source 검증·독립 QA·후속 fresh DB/재통합/CI gate](./ROOM_BOARD_DATE_FILTERS.md)를 따른다.
+2026-10-05 최신 통합 후보는 검증된104 checkpoint `0781d14`와 dev `58a5821`을 정상 통합한 총106개다. 원 SQL 본문 SHA와 #329 strict caller/snapshot 선행 검증을 유지하고 LIVE PIN/current-cleaning·실제active 점유 선택을 호환 보완한다. 시간 기준 inspection 조건은 실제 cleaning과 구분해 유지한다. 아래 기존 회귀 체크는 최초86개 후보 기록이며 새106개 전체 SQL 실행 PASS가 아니다. [실제 source 검증·독립 QA·후속 DB/CI gate](./ROOM_BOARD_DATE_FILTERS.md)를 따른다.
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 | 비고 |
 |---|---|---|---|---|---|---|---|---|
@@ -1597,7 +1699,7 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] append-only `room_board_date_filters` migration, service-role-only RPC, actor/session DB 재검증
 - [x] 과거/오늘/미래 경계·상세조건·maid/session 거부 pgTAP 회귀
 - [ ] `dev` 병합, release/main 승격, production migration/API 배포
-- [ ] 프런트 날짜 버튼 활성화·필터 mapper·browser E2E
+- [ ] 프런트 API adapter·필터 mapper·browser E2E (dev09ed 문서상 날짜 UI 활성화 확인, 운영 UAT 아님)
 - [ ] 수동 퇴실점검 완료/청소 완료 대체 lifecycle 제품 결정
 
 ### #187 예약 임박 lifecycle projection Phase A — source/dev 완료

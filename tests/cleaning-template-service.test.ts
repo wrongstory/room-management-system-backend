@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Actor } from '../src/domain/actor.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import { SupabaseCleaningTemplateService } from '../src/modules/cleaning-templates/cleaning-template.service.js';
+import { flatTemplateRequest, flatTemplateRequestHash, flatTemplateSlotPermutations, templateProjection } from './fixtures/cleaning-template-contract.js';
 
 const sessionId = '51000000-0000-4000-8000-000000000001';
 const token = `e30.${Buffer.from(JSON.stringify({ session_id: sessionId })).toString('base64url')}.signature`;
@@ -59,6 +60,44 @@ function catalog() {
 }
 
 describe('SupabaseCleaningTemplateService', () => {
+  it('normalizes all six v9 input orders to one scoped hash without changing the caller fixture', async () => {
+    const hashes: unknown[] = [];
+    for (const { name, body } of flatTemplateSlotPermutations()) {
+      const before = structuredClone(body);
+      const current = setup(templateProjection());
+      await expect(current.service.publishCheckout(actor, {
+        ...body, roomTypeCode: 'standard', cleaningKind: 'checkout',
+        idempotencyKey: 'template-v9-permutation'
+      })).resolves.toEqual(templateProjection());
+      expect(current.calls, name).toHaveLength(1);
+      expect(current.calls[0]?.args, name).toMatchObject({
+        p_actor_profile_id: actor.profileId, p_session_id: sessionId,
+        p_expected_version: 0, p_slots: flatTemplateRequest.slots,
+        p_idempotency_key: 'template-v9-permutation'
+      });
+      hashes.push(current.calls[0]?.args.p_request_hash);
+      expect(body, name).toEqual(before);
+    }
+    expect(hashes).toHaveLength(6);
+    expect(new Set(hashes).size).toBe(1);
+    expect(hashes[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(hashes[0]).toBe(flatTemplateRequestHash);
+  });
+
+  it.each(flatTemplateSlotPermutations().slice(1))('rejects noncanonical v9 database projection: $name', async ({ body }) => {
+    const data = templateProjection(body.slots);
+    await expect(setup(data).service.publishCheckout(actor, {
+      ...body, roomTypeCode: 'standard', cleaningKind: 'checkout', idempotencyKey: 'template-v9-output'
+    })).rejects.toMatchObject({ statusCode: 500, code: 'CLEANING_TEMPLATE_COMMAND_FAILED' });
+    const listed = catalog();
+    const room = listed.roomTypes[0];
+    if (!room) throw new Error('catalog fixture is empty');
+    Object.assign(room, { configured: true, expectedVersion: 9, currentPublished: data });
+    await expect(setup(listed).service.listCheckout(actor)).rejects.toMatchObject({
+      statusCode: 500, code: 'CLEANING_TEMPLATE_COMMAND_FAILED'
+    });
+  });
+
   it('binds GET to the authenticated JWT session', async () => {
     const data = catalog();
     const { calls, service } = setup(data);
