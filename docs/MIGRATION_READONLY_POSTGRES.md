@@ -177,7 +177,9 @@ owned PID/start/nonce, 잘못된 CA/password/SAN,2D/unknown/추가 row/4번째 c
 Safe Start만 사용), OpenSSL(Windows Git 배포 경로/Linux PATH), 다음 이미지를 먼저 준비한다:
 `public.ecr.aws/supabase/postgres@sha256:6942962433a569e87f228b4d4ab7e11db5deca64e43babb3a038443ad6c4f1bb`.
 runner는 remote host/env/connection string을 받지 않고 loopback 새 fixture만 사용한다.
-CI 연결·해당 exact-head required result는 후속 별도 gate다.
+CI source 연결은 별도 변경으로 migration job에 exact digest image pull과 실제19개 검사를
+각3분 이내 step으로 추가한다. 기존 검사·40분 job deadline·Supabase cleanup을 유지한다.
+새 exact-head required result는 아직 PENDING/미실행이며 로컬19 PASS를 Linux CI PASS로 바꾸지 않는다.
 
 첫 임시 fixture는 Docker inspect의 tmpfs 표현(Mounts0/HostConfig.Tmpfs)을 잘못 기대했고,
 archive copy를 tmpfs에 직접 보내 파일4개가 보이지 않는 환경 실패도 기록했다. /tmp archive copy
