@@ -1,6 +1,34 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
-## 2026-10-05 #383 최신 combined103 개발 후보
+## 2026-10-05 현재 #388 통합 checkpoint
+
+#382/#323은 아래 `c2b5618` 검증 후보를 정상 커밋 `cfc75da`로 보존한 뒤, #388/PR390이 보호
+병합된 `dev@12097563f30d694780c279440c79f12742672d04`를 정상 재통합했다. 새 후보의 실제
+Node1,664/71·Edge479/0·Python95/Ruff226/mypy25/codegen/package·TS/Ajv6순열은 PASS다.
+fresh103·실제6순열/receipt/4타입CAS/16 malformed·SQL81파일/4,979·static100→101와103 cleanup·
+KST145·전체8개 경합과 최종 fresh103 cleanup까지 exit0 PASS다. 실행 후 원본305 raw SHA와
+LF197/원문108 대응 drift0을 재확인했다. 원 strict FAIL9/exit1와 승인 exact9/catalog3 PASS를 구분한다.
+새 후보에서 전체26 upgrade를 재실행하지 않았으며 아래 같은 SQL·manifest의 이전 checkpoint와
+구분한다. 새 exact-head required CI가 전체 upgrade를 실행해야 한다. 최종 독립 staged-tree QA·
+새 CI·Ready·보호 dev 병합과 실제 백업/운영·프런트 UAT는 별도 후속이다.
+전체 경합 로그 SHA256 `03da5a83479d39a75e5af960fbbac60c8c440b36b7025a6b3a25d17eb8b07805`,
+새 whole SQL 로그 `cf06d4e232a2abb17069e179bd1dda8321714136bff011c4cf7379c97d6c347c`를 보존한다.
+이번 입력 순열 정합화는 SQL·manifest·권한·기존 snapshot을 변경하지 않는다. v0.8.0은 보존하며
+최신 기능은 #387 v0.9.0 릴리스에서 별도 승격한다. 운영 DB/API·Auth·PIN·Drive는 변경하지 않았다.
+
+## 과거 2026-10-05 #383 통합 경계
+
+#383은 source `bab817f`의 독립 QA와 필수 CI `37245618199` PASS 후 PR385에서 `dev@c2b5618`로 보호 squash했다.
+운영 반영은 하지 않았다. #382/#323의 local102 검증·독립 QA tree를 merge commit `7b0e3fb`로 보존한 뒤,
+이 최신 dev와 정상 merge한103 후보의 Node1,631/70·Edge479/0·Python95·생성 client 6순열 검사는 PASS다.
+원본305 raw SHA/197 LF/108 원문 대응 drift0을 보존한다. 이103 후보는 fresh DB·실제6순열/receipt/
+4타입 CAS/16 malformed·전체26 upgrades/SQL81파일·4,979 assertions와 fresh cleanup까지 exit0 PASS다.
+전체 DB 로그 SHA256은 `ec783912a90824904348a3dd0d16fb8beaa5d10e8629fe0c7983a548ace7fce6`다.
+원 strict FAIL9/exit1는 보존하고 승인 exact9/catalog3 비교 gate는 PASS다.
+이 checkpoint 이후 dev에 통합된 #388/PR390(1209756) 재통합·전체경합·최종 tree QA·새 exact-head CI·보호 병합은 후속이다.
+아래 #383 combined103 검증 수치는 #383 당시 checkpoint이며 새 #382 통합 검증을 대체하지 않는다.
+
+## 과거 2026-10-05 #383 combined103 개발 후보 checkpoint
 
 #384가 dev `bb4fa40`에 통합된 뒤 #383을 정상 merge한103 migration source 후보다.
 Node1,591/69·Edge476/0·Python95·fresh103·저장 이름SQL177·실제 named 경합7·worker44,
@@ -1562,7 +1590,28 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 - [x] `dev` 통합과 v0.3.0 source/main·production 54 migrations·5 Edge bundle·OpenAPI 108/115 반영
 - [ ] annotated `v0.3.0` tag/GitHub Release와 남은 hosted role·mutation/provider/Google activation smoke
 
-### #156/#165 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기
+### #323/#382 v9 사진 템플릿 명세·입력 순서 후보 — Draft, 새 통합 gate 대기
+
+[PR #335](https://github.com/wrongstory/room-management-system-backend/pull/335)의 과거 후보는 `dev@859f7cd`를
+통합했다. local102 후보는 `dev@bb4fa40`의 #384를 포함했다. 그 검증을 commit `7b0e3fb`로 보존하고
+현재는 #383의 `dev@c2b5618` 통합103 후보를 별도 검증한다.
+정규 3개 사진 모음(일반 20/폭탄방 10/특이사항 10), 최초
+`expectedVersion=0`/current CAS, v8 호환과 pre-A 완료 receipt 재생을 구분한다.
+3개 모음은 사진 3장 제한이 아니다. 프런트 scoped `dev@09ed284`의 다중 파일 선택·사진별 전역
+업로드 큐를 보존하며 업로드 endpoint/권한/기존 migration은 변경하지 않는다.
+
+6개 배열 순열의 과거 Fastify1/Edge2/DB6 차이는 [#382](https://github.com/wrongstory/room-management-system-backend/issues/382)의
+이력이다. 2026-10-05 사용자 결정으로 배열 위치만 해제하며 역할별 key/order/label/필수 여부/최대 수는 유지한다.
+새 후보는 Fastify/Edge 입력을 정렬해 동일 payload/hash를 사용하며 OpenAPI/Ajv/생성 client를 같이 검증한다.
+ordered DB projection·immutable snapshot·receipt와 기존 migration/manifest는 보존한다.
+#323/PR #335은 OPEN/Draft다. 새 exact-head CI·독립 QA·전체 DB 및 #383 재통합의 실제 결과는 PR에 기록한다.
+현재 local102의 실제 6순열 게시·receipt/4타입 CAS·16 malformed·전체SQL80/4,802와 HTTP/schema/client 검사는 PASS다.
+전체26 upgrade runner도 PASS(exit 0)다. 이는 local102 후보의 결과이며 최신 #383 통합103 검증이 아니다.
+최신 #383/c2b5618 통합103의 fresh·6순열 게시·전체26 upgrades/SQL81·4,979/cleanup도 실제 PASS다.
+#388/1209756 후속 재통합·최종 tree QA·새 exact-head CI·보호 병합·운영/UAT 완료로 확대하지 않는다.
+source/dev 완료·운영 배포·프런트 UAT 완료로 판정하지 않는다. 상세는 [명세 계약](./ARCHITECTURE.md#323-v9-게시-명세-정합화)을 따른다.
+
+### #156/#165 당시 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기
 
 | 체크 | Method / Path | 권한 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
 |---|---|---|---|---|---|---|---|
