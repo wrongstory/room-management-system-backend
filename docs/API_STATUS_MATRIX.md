@@ -1,5 +1,47 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 2026-10-05 현재 통합 경계
+
+#383은 source `bab817f`의 독립 QA와 필수 CI `37245618199` PASS 후 PR385에서 `dev@c2b5618`로 보호 squash했다.
+운영 반영은 하지 않았다. #382/#323의 local102 검증·독립 QA tree를 merge commit `7b0e3fb`로 보존한 뒤,
+이 최신 dev와 정상 merge한103 후보의 Node1,631/70·Edge479/0·Python95·생성 client 6순열 검사는 PASS다.
+원본305 raw SHA/197 LF/108 원문 대응 drift0을 보존한다. 이103 후보는 fresh DB·실제6순열/receipt/
+4타입 CAS/16 malformed·전체26 upgrades/SQL81파일·4,979 assertions와 fresh cleanup까지 exit0 PASS다.
+전체 DB 로그 SHA256은 `ec783912a90824904348a3dd0d16fb8beaa5d10e8629fe0c7983a548ace7fce6`다.
+원 strict FAIL9/exit1는 보존하고 승인 exact9/catalog3 비교 gate는 PASS다.
+이 checkpoint 이후 dev에 통합된 #388/PR390(1209756) 재통합·전체경합·최종 tree QA·새 exact-head CI·보호 병합은 후속이다.
+아래 #383 combined103 검증 수치는 #383 당시 checkpoint이며 새 #382 통합 검증을 대체하지 않는다.
+
+## 과거 2026-10-05 #383 combined103 개발 후보 checkpoint
+
+#384가 dev `bb4fa40`에 통합된 뒤 #383을 정상 merge한103 migration source 후보다.
+Node1,591/69·Edge476/0·Python95·fresh103·저장 이름SQL177·실제 named 경합7·worker44,
+전체26 upgrades/SQL81파일·4,979 assertions·static/KST145·승인 exact9/catalog3 baseline PASS다.
+전체8개 경합 첫 실행은 기존 offline fixture 요청 전 만료로 FAIL이며 기록을 보존했다.
+같은 source/TTL/assertion의 제한1회 전체 재실행은8명령/cleanup PASS·exit0다.
+원본302 raw SHA/실제 임시본 대응 불일치0, 최종103/head·RLS누락0·객실121,
+검사한 Auth/session/profile/target/photo operation/name binding0을 확인했다.
+원 strict FAIL9와 승인 baseline PASS를 구분한다. 기한 fixture 개선은 별도 #388로 추적한다.
+최종 staged 독립 QA·새 exact-head CI·Ready·dev 병합은 후속 gate이며 운영 완료는 아니다.
+상세 실패/재실행 증거와 불변 저장 이름·삭제/rollback 경계는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
+최신 기능은 별도 #387 v0.9.0이며 v0.8.0 후보는 보존한다. 실제 백업은 전체 개발 이후이되 운영 배포 전 필수다.
+운영/복구 DB·Auth·API·실제 Drive/PIN·프런트 UI/UAT·백업/복원·Release/tag는 NOT RUN이다.
+
+## 과거 102 migration #383 실제 사진 저장 이름 후보 checkpoint
+
+사용자 결정에 따라 새 v9 Drive 사진 이름을 날짜·유형·호실·서버 고유 순번으로 구성한다.
+별도 [Issue #383](https://github.com/wrongstory/room-management-system-backend/issues/383)의
+[저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다. 신규 append migration은 private 불변 binding과
+service-only 명명 예약 RPC를 추가하며 공개 업로드 요청 계약과 기존 사진 ID/권한은 유지한다.
+기존 UUID 이름·이미 예약된 identity·legacy 유형은 유지하고 일괄 rename/move/delete하지 않는다.
+Node1547/69·Edge476/0·fresh102·대상SQL71·historical upgrade26 및 보완 후 전체SQL4789/80·KST145는 PASS다.
+최초 통합 `db:test`는 기존 developer 진단 head 기대값3건으로 FAIL했고 fixture 보완 후 전체SQL을 재검증했다.
+통합 명령 재실행 PASS로 표시하지 않는다. 기존 동시 처리6개 명령/cleanup과 독립 범위 QA98/100·신규 P0/P1/P2=0도 PASS다.
+최종 문서/tree와 새 exact-head CI를 확인한 뒤에도 #384 운영 차단 요소와 릴리스 gate를 별도로 판단한다.
+raw strict FAIL9와 사용자 승인 exact baseline PASS를 구분한다. production/main/recovery DB·실제 Drive·배포·UI/UAT는
+NOT RUN이다. #384 다중 사진 업로드 P1은 별도 운영 승격 차단 요소다. 기존 #323/#382 입력 순열 정합화도
+별도이며 이름 변경으로 완료 처리하지 않는다. 실제 백업·복원은 모든 개발 이후 후속으로 유지한다.
+
 ## 2026-10-03 #325 완료와 #324 후보
 
 #325 PR358 source78582789 → devd65f4f60는 exact-tree CI37093733970 application/migration PASS,
@@ -1535,7 +1577,8 @@ production DB/Edge/Pages/Google 자격증명 변경은 없다. 기존 production
 ### #323/#382 v9 사진 템플릿 명세·입력 순서 후보 — Draft, 새 통합 gate 대기
 
 [PR #335](https://github.com/wrongstory/room-management-system-backend/pull/335)의 과거 후보는 `dev@859f7cd`를
-통합했다. 현재 #382 후보는 `dev@bb4fa40`의 #384를 포함하되 #383 최신 dev 재통합은 후속이다.
+통합했다. local102 후보는 `dev@bb4fa40`의 #384를 포함했다. 그 검증을 commit `7b0e3fb`로 보존하고
+현재는 #383의 `dev@c2b5618` 통합103 후보를 별도 검증한다.
 정규 3개 사진 모음(일반 20/폭탄방 10/특이사항 10), 최초
 `expectedVersion=0`/current CAS, v8 호환과 pre-A 완료 receipt 재생을 구분한다.
 3개 모음은 사진 3장 제한이 아니다. 프런트 scoped `dev@09ed284`의 다중 파일 선택·사진별 전역
@@ -1548,7 +1591,8 @@ ordered DB projection·immutable snapshot·receipt와 기존 migration/manifest�
 #323/PR #335은 OPEN/Draft다. 새 exact-head CI·독립 QA·전체 DB 및 #383 재통합의 실제 결과는 PR에 기록한다.
 현재 local102의 실제 6순열 게시·receipt/4타입 CAS·16 malformed·전체SQL80/4,802와 HTTP/schema/client 검사는 PASS다.
 전체26 upgrade runner도 PASS(exit 0)다. 이는 local102 후보의 결과이며 최신 #383 통합103 검증이 아니다.
-새 exact-head CI·최신 통합·보호 병합·운영/UAT 완료로 확대하지 않는다.
+최신 #383/c2b5618 통합103의 fresh·6순열 게시·전체26 upgrades/SQL81·4,979/cleanup도 실제 PASS다.
+#388/1209756 후속 재통합·최종 tree QA·새 exact-head CI·보호 병합·운영/UAT 완료로 확대하지 않는다.
 source/dev 완료·운영 배포·프런트 UAT 완료로 판정하지 않는다. 상세는 [명세 계약](./ARCHITECTURE.md#323-v9-게시-명세-정합화)을 따른다.
 
 ### #156/#165 당시 퇴실 청소 템플릿 운영 게시 — migration/API/네 타입 게시 완료, 예약 success smoke 대기

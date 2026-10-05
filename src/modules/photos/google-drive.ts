@@ -1,9 +1,10 @@
 import { PhotoError, PHOTO_MAX_BYTES, type PhotoMime, readPhotoBody } from './photo-binary.js';
 import { PhotoPurgeProviderError } from './photo-purge.js';
+import { photoStorageFileName } from './photo-storage-name.js';
 
 type Fetch = typeof fetch;
 export interface DriveConfig { clientId: string; clientSecret: string; refreshToken: string; rootFolderId: string }
-export interface DriveObject { fileId: string; folderId: string; objectId: string; mime: PhotoMime; sizeBytes: number; sha256: string }
+export interface DriveObject { fileId: string; folderId: string; objectId: string; mime: PhotoMime; sizeBytes: number; sha256: string; fileName?: string | null }
 export type DriveReadObject = Pick<DriveObject, 'fileId' | 'mime' | 'sizeBytes' | 'sha256'>;
 export interface DriveFolder { folderId: string; parentFolderId: string; name: string }
 export interface PhotoProvider {
@@ -25,6 +26,9 @@ function id(value: unknown): string {
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return unavailable();
   return value as Record<string, unknown>;
+}
+function storageName(object: DriveObject): string {
+  return photoStorageFileName(object.fileName, object.mime) ?? `${object.objectId}.${object.mime === 'image/jpeg' ? 'jpg' : 'webp'}`;
 }
 const fields = 'id,name,mimeType,parents,size,sha256Checksum,appProperties,trashed,shared,createdTime';
 export class GoogleDriveProvider implements PhotoProvider {
@@ -141,8 +145,9 @@ export class GoogleDriveProvider implements PhotoProvider {
     this.#privateFolder(await this.#metadata(folderId), folderId, parent, name);
   }
   async #verify(object: DriveObject): Promise<string> {
+    const expectedName = storageName(object);
     const row = await this.#metadata(object.fileId);
-    if (row.id !== object.fileId || row.name !== `${object.objectId}.${object.mime === 'image/jpeg' ? 'jpg' : 'webp'}` || row.mimeType !== object.mime || row.size !== String(object.sizeBytes) || row.trashed !== false || row.shared !== false ||
+    if (row.id !== object.fileId || row.name !== expectedName || row.mimeType !== object.mime || row.size !== String(object.sizeBytes) || row.trashed !== false || row.shared !== false ||
       !Array.isArray(row.parents) || row.parents.length !== 1 || row.parents[0] !== object.folderId || record(row.appProperties).objectId !== object.objectId) mismatch();
     // appProperties의 자체 hash 주장은 증명이 아니다. 실제 checksum이 없으면 bytes를 읽어 검증한다.
     if (row.sha256Checksum !== undefined) { if (row.sha256Checksum !== object.sha256) mismatch(); }
@@ -153,8 +158,9 @@ export class GoogleDriveProvider implements PhotoProvider {
   async upload(object: DriveObject, bytes: Uint8Array): Promise<{ uploadedAt: string }> {
     id(object.fileId); id(object.folderId);
     if (bytes.length !== object.sizeBytes || bytes.length > PHOTO_MAX_BYTES || !/^[0-9a-f]{64}$/.test(object.sha256)) mismatch();
+    const name = storageName(object);
     const boundary = `photo_${crypto.randomUUID().replaceAll('-', '')}`;
-    const metadata = { id: object.fileId, name: `${object.objectId}.${object.mime === 'image/jpeg' ? 'jpg' : 'webp'}`,
+    const metadata = { id: object.fileId, name,
       mimeType: object.mime, parents: [object.folderId], appProperties: { objectId: object.objectId } };
     const prefix = new TextEncoder().encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${object.mime}\r\n\r\n`);
     const suffix = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);

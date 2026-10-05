@@ -468,6 +468,16 @@ flowchart LR
 
 developer 운영 상태는 `private` 원본이나 Supabase 내부 schema를 Edge에서 직접 직렬화하지 않습니다. DB catalog·Cron·감사 원장은 developer role을 다시 검증하는 app-owned `SECURITY DEFINER` projection을 거치고, Edge는 camelCase 응답과 안정적인 error code만 공개합니다. runtime secret은 소스 allowlist의 `configured` boolean만 반환하며 값·길이·해시·부분문자열은 반환하지 않습니다. Python 운영도구 연동은 [developer 운영 API 가이드](./DEVELOPER_OPERATIONS_API.md)를 따른다.
 
+## #383 사진 저장 이름 후보
+
+사진 provider identity는 계속 opaque app object ID와 preallocated Drive file ID로 연결한다.
+신규 v9 저장 이름만 `YYYY-MM-DD_일반방|폭탄방|특이사항_호실_번호.jpg|webp`로 구성하며
+private `photo_storage_names`에서 upload-date/room/slot/MIME/서버 순번과 함께 불변 보관한다.
+명명 예약은 기존 actor/session·admission·lease fence·folder winner를 재검증하는 service-only
+wrapper이며 외부 Drive create 전에 같은 transaction에서 확정한다. 기존 예약 RPC와 UUID 이름은
+보존하고 historical backfill/rename을 하지 않는다. generated Edge는 Node provider/validator를 공유한다.
+상세 배포 순서·이름 인식 rollback 제한 및 검증 상태는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
+
 ## 인증
 
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.
@@ -1024,6 +1034,18 @@ TypeScript 실제 codegen/Ajv, Python95/Ruff226/mypy25/6순열 codegen/package, 
 `47cb0421a6348e91ccbf86dff82fe2b7edb1d0900633bd6e89e5662877334671`이다. 이는 위 local102 후보의
 검증이며 최신 #383(`dev@c2b5618`, 103 migrations) 재통합 결과는 아니다. 최종 staged-tree 독립 QA·
 새 exact-head CI·Ready/보호 dev 병합·실제 백업/운영·프런트 UAT는 아직 완료하지 않았다.
+local102의 최종 독립 source QA는 신규 P0/P1/P2=0이며 승인 tree `5e0e35235aea7a778a0cc8da0f42365ddd06bb99`를
+정상 merge commit `7b0e3fb`로 보존했다. 이후 `dev@c2b5618`의 #383을 정상 merge한103 후보는
+Node1,631/70·Edge479/0·Python95·6순열 TS/Ajv 및 Python codegen PASS다. LF 임시 검증본은
+원본305 raw SHA/197 SQL·psql LF본/108 원문 대응을 보존하며 migration·manifest는 이 최신 dev와 같다.
+이103 후보의 fresh·실제6순열 게시/동일receipt/4타입CAS/16 malformed·원 strict FAIL9와 승인
+exact9/catalog3 비교 gate·전체26 upgrades 및SQL81파일/4,979 assertions·fresh cleanup도 실제
+exit0 PASS다. full-upgrades 로그 SHA256은 `ec783912a90824904348a3dd0d16fb8beaa5d10e8629fe0c7983a548ace7fce6`,
+template 로그는 `70410e6e88729385f1ebb3b2ade83d28763f4a78d590c0eb2dc69c5d9bb0a1cb`,
+baseline 로그는 `ca9215c8ae1557a39f59749369f9bd043dc77d5882a896a18e2a1ace173952a8`다.
+原305/임시본 drift0은 전체 실행 후에도 재확인했다. 이 checkpoint 뒤 dev에 보호 병합한
+#388/PR390/1209756의 정상 재통합·전체경합·최종 staged-tree QA·새 exact-head CI·보호 병합은
+별도 후속 gate다. local102/이103 결과를 후속 exact head의 CI나 운영 PASS로 재사용하지 않는다.
 사람/독립 QA와 운영 배포는 별도 gate입니다.
 
 아래는 #156/#179 당시 경계이며 v9 기본 계약은 위 절을 우선합니다.
