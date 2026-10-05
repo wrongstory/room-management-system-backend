@@ -806,21 +806,30 @@ select ok((select segment.starts_at=segment.ends_at
   where stay.reservation_id='8a200000-0000-4000-8000-000000000007'
     and segment.retired_at is null),
   'same-instant checkout preserves an empty historical segment');
-select ok((select not (preview->>'eligible')::boolean
-    and preview->'rejectionReasonCodes'?'RESERVATION_NOT_ACTIVE'
-    and (preview->>'sourceSegmentId')::uuid=segment.id
-    and (preview->>'sourceRoomId')::uuid=segment.room_id
+-- #393: finish the relational identity/CAS lookup before invoking the
+-- VOLATILE RPC. It must not observe an intermediate join's source-room row.
+with zero_length_preview_context as materialized (
+  select reservation.id reservation_id,reservation.version reservation_version,
+    segment.id source_segment_id,segment.room_id source_room_id,
+    source_room.state_version source_room_version,
+    target_room.id target_room_id,target_room.state_version target_room_version
   from public.reservations reservation
   join private.reservation_stays stay on stay.reservation_id=reservation.id
   join private.stay_room_segments segment on segment.stay_id=stay.id
     and segment.retired_at is null
   join public.rooms source_room on source_room.id=segment.room_id
   join public.rooms target_room on target_room.room_number='410'
+  where reservation.id='8a200000-0000-4000-8000-000000000007'
+)
+select ok((select not (preview->>'eligible')::boolean
+    and preview->'rejectionReasonCodes'?'RESERVATION_NOT_ACTIVE'
+    and (preview->>'sourceSegmentId')::uuid=context.source_segment_id
+    and (preview->>'sourceRoomId')::uuid=context.source_room_id
+  from zero_length_preview_context context
   cross join lateral public.preview_reservation_room_move(
-    '8a100000-0000-4000-8000-000000000001',reservation.id,target_room.id,
-    reservation.version,source_room.state_version,target_room.state_version,
-    null,'GUEST_REQUEST') preview
-  where reservation.id='8a200000-0000-4000-8000-000000000007'),
+    '8a100000-0000-4000-8000-000000000001',context.reservation_id,context.target_room_id,
+    context.reservation_version,context.source_room_version,context.target_room_version,
+    null,'GUEST_REQUEST') preview),
   'same-instant checked-out preview uses the empty historical segment and returns 200 ineligible');
 
 select public.create_reservation(
@@ -834,21 +843,28 @@ select public.cancel_reservation(
   'TEST','cancelled-history-cancel',repeat('2',64)
 ) from public.reservations reservation
 where reservation.id='8a200000-0000-4000-8000-000000000008';
-select ok((select not (preview->>'eligible')::boolean
-    and preview->'rejectionReasonCodes'?'RESERVATION_NOT_ACTIVE'
-    and (preview->>'sourceSegmentId')::uuid=segment.id
-    and (preview->>'sourceRoomId')::uuid=segment.room_id
+with cancelled_preview_context as materialized (
+  select reservation.id reservation_id,reservation.version reservation_version,
+    segment.id source_segment_id,segment.room_id source_room_id,
+    source_room.state_version source_room_version,
+    target_room.id target_room_id,target_room.state_version target_room_version
   from public.reservations reservation
   join private.reservation_stays stay on stay.reservation_id=reservation.id
   join private.stay_room_segments segment on segment.stay_id=stay.id
     and segment.retired_at is not null
   join public.rooms source_room on source_room.id=segment.room_id
   join public.rooms target_room on target_room.room_number='444'
+  where reservation.id='8a200000-0000-4000-8000-000000000008'
+)
+select ok((select not (preview->>'eligible')::boolean
+    and preview->'rejectionReasonCodes'?'RESERVATION_NOT_ACTIVE'
+    and (preview->>'sourceSegmentId')::uuid=context.source_segment_id
+    and (preview->>'sourceRoomId')::uuid=context.source_room_id
+  from cancelled_preview_context context
   cross join lateral public.preview_reservation_room_move(
-    '8a100000-0000-4000-8000-000000000001',reservation.id,target_room.id,
-    reservation.version,source_room.state_version,target_room.state_version,
-    null,'GUEST_REQUEST') preview
-  where reservation.id='8a200000-0000-4000-8000-000000000008'),
+    '8a100000-0000-4000-8000-000000000001',context.reservation_id,context.target_room_id,
+    context.reservation_version,context.source_room_version,context.target_room_version,
+    null,'GUEST_REQUEST') preview),
   'cancelled preview uses the last retired historical segment and returns 200 ineligible');
 
 select pg_temp.seed_moved_reservation(
@@ -1150,17 +1166,24 @@ join private.stay_room_segments source_segment on source_segment.id=source_oblig
 join private.stay_room_segments target_segment on target_segment.stay_id=stay.id
   and target_segment.move_event_id=event.id
 where reservation.id='8a200000-0000-4000-8000-000000000009';
-select ok((select not (preview->>'eligible')::boolean
-    and preview->'rejectionReasonCodes'?'TARGET_ROOM_NOT_READY'
+with chained_preview_context as materialized (
+  select reservation.id reservation_id,reservation.version reservation_version,
+    source_room.state_version source_room_version,
+    target_room.id target_room_id,target_room.state_version target_room_version,
+    context.return_at effective_at
   from chained_context context
   join public.reservations reservation on reservation.id=context.reservation_id
   join private.stay_room_segments source_segment on source_segment.id=context.target_segment_id
   join public.rooms source_room on source_room.id=source_segment.room_id
   join public.rooms target_room on target_room.id=context.original_room_id
+)
+select ok((select not (preview->>'eligible')::boolean
+    and preview->'rejectionReasonCodes'?'TARGET_ROOM_NOT_READY'
+  from chained_preview_context context
   cross join lateral public.preview_reservation_room_move(
-    '8a100000-0000-4000-8000-000000000001',reservation.id,target_room.id,
-    reservation.version,source_room.state_version,target_room.state_version,
-    context.return_at,'OPERATIONAL_ADJUSTMENT') preview),
+    '8a100000-0000-4000-8000-000000000001',context.reservation_id,context.target_room_id,
+    context.reservation_version,context.source_room_version,context.target_room_version,
+    context.effective_at,'OPERATIONAL_ADJUSTMENT') preview),
   'A to B to A remains fail-closed while the first A source cleanup is incomplete');
 update public.cleaning_targets target set status='notified'
 from chained_context context where target.id=context.source_target_id;
