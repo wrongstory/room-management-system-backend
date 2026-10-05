@@ -1,5 +1,35 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 2026-10-05 #383 최신 combined103 개발 후보
+
+#384가 dev `bb4fa40`에 통합된 뒤 #383을 정상 merge한103 migration source 후보다.
+Node1,591/69·Edge476/0·Python95·fresh103·저장 이름SQL177·실제 named 경합7·worker44,
+전체26 upgrades/SQL81파일·4,979 assertions·static/KST145·승인 exact9/catalog3 baseline PASS다.
+전체8개 경합 첫 실행은 기존 offline fixture 요청 전 만료로 FAIL이며 기록을 보존했다.
+같은 source/TTL/assertion의 제한1회 전체 재실행은8명령/cleanup PASS·exit0다.
+원본302 raw SHA/실제 임시본 대응 불일치0, 최종103/head·RLS누락0·객실121,
+검사한 Auth/session/profile/target/photo operation/name binding0을 확인했다.
+원 strict FAIL9와 승인 baseline PASS를 구분한다. 기한 fixture 개선은 별도 #388로 추적한다.
+최종 staged 독립 QA·새 exact-head CI·Ready·dev 병합은 후속 gate이며 운영 완료는 아니다.
+상세 실패/재실행 증거와 불변 저장 이름·삭제/rollback 경계는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
+최신 기능은 별도 #387 v0.9.0이며 v0.8.0 후보는 보존한다. 실제 백업은 전체 개발 이후이되 운영 배포 전 필수다.
+운영/복구 DB·Auth·API·실제 Drive/PIN·프런트 UI/UAT·백업/복원·Release/tag는 NOT RUN이다.
+
+## 과거 102 migration #383 실제 사진 저장 이름 후보 checkpoint
+
+사용자 결정에 따라 새 v9 Drive 사진 이름을 날짜·유형·호실·서버 고유 순번으로 구성한다.
+별도 [Issue #383](https://github.com/wrongstory/room-management-system-backend/issues/383)의
+[저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다. 신규 append migration은 private 불변 binding과
+service-only 명명 예약 RPC를 추가하며 공개 업로드 요청 계약과 기존 사진 ID/권한은 유지한다.
+기존 UUID 이름·이미 예약된 identity·legacy 유형은 유지하고 일괄 rename/move/delete하지 않는다.
+Node1547/69·Edge476/0·fresh102·대상SQL71·historical upgrade26 및 보완 후 전체SQL4789/80·KST145는 PASS다.
+최초 통합 `db:test`는 기존 developer 진단 head 기대값3건으로 FAIL했고 fixture 보완 후 전체SQL을 재검증했다.
+통합 명령 재실행 PASS로 표시하지 않는다. 기존 동시 처리6개 명령/cleanup과 독립 범위 QA98/100·신규 P0/P1/P2=0도 PASS다.
+최종 문서/tree와 새 exact-head CI를 확인한 뒤에도 #384 운영 차단 요소와 릴리스 gate를 별도로 판단한다.
+raw strict FAIL9와 사용자 승인 exact baseline PASS를 구분한다. production/main/recovery DB·실제 Drive·배포·UI/UAT는
+NOT RUN이다. #384 다중 사진 업로드 P1은 별도 운영 승격 차단 요소다. 기존 #323/#382 입력 순열 정합화도
+별도이며 이름 변경으로 완료 처리하지 않는다. 실제 백업·복원은 모든 개발 이후 후속으로 유지한다.
+
 ## 2026-10-03 #325 완료와 #324 후보
 
 #325 PR358 source78582789 → devd65f4f60는 exact-tree CI37093733970 application/migration PASS,

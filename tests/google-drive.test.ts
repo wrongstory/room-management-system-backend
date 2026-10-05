@@ -4,7 +4,8 @@ import { GoogleDriveProvider, type DriveObject } from '../src/modules/photos/goo
 
 const bytes = Uint8Array.from([1, 2, 3]);
 const object: DriveObject = { fileId: 'synthetic_file_123', folderId: 'synthetic_folder_123', objectId: '00000000-0000-4000-8000-000000000001', mime: 'image/jpeg', sizeBytes: 3, sha256: createHash('sha256').update(bytes).digest('hex') };
-function harness(options: { uploadStatus?: number; timeout?: boolean; digest?: string | null; media?: Uint8Array; badParent?: boolean; redirect?: boolean; quota?: unknown } = {}) {
+function harness(options: { uploadStatus?: number; timeout?: boolean; digest?: string | null; media?: Uint8Array; badParent?: boolean; redirect?: boolean; quota?: unknown; uploadObject?: DriveObject; metadata?: Record<string, unknown> } = {}) {
+  const expectedObject = options.uploadObject ?? object;
   const calls: { url: URL; init: RequestInit }[] = [];
   const transport: typeof fetch = async (input, init = {}) => {
     const url = new URL(String(input)); calls.push({ url, init });
@@ -16,21 +17,21 @@ function harness(options: { uploadStatus?: number; timeout?: boolean; digest?: s
     if (url.pathname.endsWith('/about')) return Response.json({ storageQuota: { usage: options.quota ?? '9000000000' } });
     if (url.pathname.endsWith('/generateIds')) {
       expect(url.searchParams.get('count')).toBe('3');
-      return Response.json({ ids: ['synthetic_date_123', 'synthetic_room_123', object.fileId] });
+      return Response.json({ ids: ['synthetic_date_123', 'synthetic_room_123', expectedObject.fileId] });
     }
     if (init.method === 'DELETE') return new Response(null, { status: 404 });
-    if (url.searchParams.get('alt') === 'media') return new Response(Uint8Array.from(options.media ?? bytes), { headers: { 'content-type': 'image/jpeg' } });
+    if (url.searchParams.get('alt') === 'media') return new Response(Uint8Array.from(options.media ?? bytes), { headers: { 'content-type': expectedObject.mime } });
     if (url.pathname.includes('/upload/')) {
       const body = init.body as Uint8Array;
       const text = new TextDecoder().decode(body);
-      expect(text).toContain(object.fileId); expect(text).toContain(object.objectId);
+      expect(text).toContain(expectedObject.fileId); expect(text).toContain(expectedObject.objectId);
       expect(text).not.toContain('createdTime'); expect(text).not.toContain('synthetic_access_token');
       if (options.timeout) throw new Error('raw provider secret body must never propagate');
       return new Response(null, { status: options.uploadStatus ?? 200 });
     }
-    return Response.json({ id: object.fileId, name: `${object.objectId}.jpg`, mimeType: object.mime, size: '3', parents: [options.badParent ? 'wrong_parent_123' : object.folderId],
-      appProperties: { objectId: object.objectId, sha256: object.sha256 }, trashed: false, shared: false, createdTime: '2026-01-01T00:00:00.000Z',
-      ...(options.digest === null ? {} : { sha256Checksum: options.digest ?? object.sha256 }) });
+    return Response.json({ id: expectedObject.fileId, name: expectedObject.fileName ?? `${expectedObject.objectId}.${expectedObject.mime === 'image/jpeg' ? 'jpg' : 'webp'}`, mimeType: expectedObject.mime, size: '3', parents: [options.badParent ? 'wrong_parent_123' : expectedObject.folderId],
+      appProperties: { objectId: expectedObject.objectId, sha256: expectedObject.sha256 }, trashed: false, shared: false, createdTime: '2026-01-01T00:00:00.000Z',
+      ...(options.digest === null ? {} : { sha256Checksum: options.digest ?? expectedObject.sha256 }), ...options.metadata });
   };
   const provider = new GoogleDriveProvider({ clientId: 'synthetic-client', clientSecret: 'synthetic-secret', refreshToken: 'synthetic-refresh', rootFolderId: 'synthetic_root_123' }, transport);
   return { provider, calls };
@@ -160,5 +161,86 @@ describe('Google Drive HTTP adapter, fake transport only', () => {
   });
   it('provider delete 404 is idempotent; caller still must acquire DB compensation fence', async () => {
     expect(await harness().provider.remove(object.fileId)).toBe('not_found');
+  });
+});
+
+function multipartMetadata(calls: { url: URL; init: RequestInit }[]): Record<string, unknown>[] {
+  return calls.filter(call => call.url.pathname.includes('/upload/')).map(call => {
+    const text = new TextDecoder().decode(call.init.body as Uint8Array);
+    const start = text.indexOf('\r\n\r\n') + 4;
+    return JSON.parse(text.slice(start, text.indexOf('\r\n--', start))) as Record<string, unknown>;
+  });
+}
+
+describe('Google Drive immutable server-reserved photo names, fake transport only', () => {
+  const kinds = ['일반방', '폭탄방', '특이사항'];
+  const cases = kinds.flatMap(kind => (['image/jpeg', 'image/webp'] as const).map(mime => ({ kind, mime })));
+  it.each(cases)('actual multipart metadata uses $kind name for $mime', async ({ kind, mime }) => {
+    const named: DriveObject = { ...object, mime, fileName: `2026-01-01_${kind}_350_100.${mime === 'image/jpeg' ? 'jpg' : 'webp'}` };
+    const { provider, calls } = harness({ uploadObject: named });
+    await expect(provider.upload(named, bytes)).resolves.toEqual({ uploadedAt: '2026-01-01T00:00:00.000Z' });
+    expect(multipartMetadata(calls)).toEqual([{ id: named.fileId, name: named.fileName, mimeType: mime,
+      parents: [named.folderId], appProperties: { objectId: named.objectId } }]);
+  });
+  it.each([200, 409, 'response_lost'] as const)('same persisted name and identity survive retry/reconciliation after %s', async outcome => {
+    const named: DriveObject = { ...object, fileName: '2026-01-01_일반방_350_9223372036854775807.jpg' };
+    const { provider, calls } = harness({ uploadObject: named, ...(outcome === 'response_lost' ? { timeout: true } : { uploadStatus: outcome }) });
+    await provider.upload(named, bytes);
+    await provider.upload(named, bytes);
+    await expect(provider.inspect(named)).resolves.toEqual({ uploadedAt: '2026-01-01T00:00:00.000Z' });
+    expect(multipartMetadata(calls).map(metadata => ({ id: metadata.id, name: metadata.name })))
+      .toEqual([{ id: named.fileId, name: named.fileName }, { id: named.fileId, name: named.fileName }]);
+    expect(calls.filter(call => call.url.pathname.endsWith(`/files/${named.fileId}`))).toHaveLength(3);
+    expect(calls.some(call => call.init.method === 'DELETE' || call.url.searchParams.has('q') || call.url.pathname.endsWith('/generateIds'))).toBe(false);
+  });
+  it.each([
+    { name: `${object.objectId}.jpg` },
+    { name: '2026-01-01_폭탄방_350_01.jpg' },
+    { name: '2026-01-01_일반방_351_01.jpg' },
+    { name: '2026-01-02_일반방_350_01.jpg' },
+    { name: '2026-01-01_일반방_350_02.jpg' },
+    { name: '2026-01-01_일반방_350_01.webp' },
+    { name: '2026-01-01_일반방_350_01.jpg\r\n' },
+    { id: 'different_file_123' },
+    { parents: ['different_folder_123'] },
+    { parents: [object.folderId, 'another_folder_123'] },
+    { mimeType: 'image/webp' },
+    { size: '4' },
+    { appProperties: { objectId: '00000000-0000-4000-8000-000000000002' } },
+    { sha256Checksum: 'f'.repeat(64) },
+    { shared: true },
+    { trashed: true },
+    { createdTime: 'invalid' },
+    { createdTime: '2999-01-01T00:00:00.000Z' },
+  ])('inspect still rejects changed name or identity $metadata', async metadata => {
+    const named: DriveObject = { ...object, fileName: '2026-01-01_일반방_350_01.jpg' };
+    const { provider, calls } = harness({ uploadObject: named, metadata });
+    await expect(provider.inspect(named)).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_IDENTITY_CONFLICT' });
+    expect(calls.some(call => call.init.method === 'POST' && call.url.hostname === 'www.googleapis.com' || call.init.method === 'DELETE')).toBe(false);
+  });
+  it('named photo without a provider checksum still requires the actual binary hash', async () => {
+    const named: DriveObject = { ...object, fileName: '2026-01-01_특이사항_350_01.jpg' };
+    const verified = harness({ uploadObject: named, digest: null });
+    await verified.provider.inspect(named);
+    expect(verified.calls.some(call => call.url.searchParams.get('alt') === 'media')).toBe(true);
+    const different = harness({ uploadObject: named, digest: null, media: Uint8Array.of(4, 5, 6) });
+    await expect(different.provider.inspect(named)).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_IDENTITY_CONFLICT' });
+  });
+  it.each([undefined, null])('legacy name remains the opaque object UUID when fileName=%s', async fileName => {
+    for (const mime of ['image/jpeg', 'image/webp'] as const) {
+      const legacy: DriveObject = { ...object, mime, ...(fileName === null ? { fileName } : {}) };
+      const { provider, calls } = harness({ uploadObject: legacy });
+      await provider.upload(legacy, bytes); await provider.inspect(legacy);
+      expect(multipartMetadata(calls)[0]?.name).toBe(`${object.objectId}.${mime === 'image/jpeg' ? 'jpg' : 'webp'}`);
+      const unexpectedRename = harness({ uploadObject: legacy, metadata: { name: `2026-01-01_일반방_350_01.${mime === 'image/jpeg' ? 'jpg' : 'webp'}` } });
+      await expect(unexpectedRename.provider.inspect(legacy)).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_IDENTITY_CONFLICT' });
+    }
+  });
+  it.each(['arbitrary-client-name.jpg', '2026-01-01_일반방_350_01.webp', '2026-01-01_일반방_350_01.jpg\r\n'])('invalid frozen DB name %s never reaches OAuth or Drive', async fileName => {
+    const named: DriveObject = { ...object, fileName };
+    const { provider, calls } = harness({ uploadObject: named });
+    await expect(provider.upload(named, bytes)).rejects.toMatchObject({ statusCode: 500, code: 'PHOTO_UPLOAD_FAILED' });
+    await expect(provider.inspect(named)).rejects.toMatchObject({ statusCode: 500, code: 'PHOTO_UPLOAD_FAILED' });
+    expect(calls).toEqual([]);
   });
 });

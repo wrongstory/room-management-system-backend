@@ -116,7 +116,7 @@ select is(
     '26000000-0000-4000-8000-000000000001',
     'photo_collection_provider_context_axis'
   ) ->> 'currentMigration',
-  'db_static_warning_remediation',
+  'photo_storage_names',
   'database status exposes the previous migration when the current head is absent'
 );
 
