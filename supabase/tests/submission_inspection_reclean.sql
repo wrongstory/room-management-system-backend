@@ -198,6 +198,7 @@ update public.profiles set status='active' where id in (pg_temp.pid(4),pg_temp.p
 select pg_temp.fixture(9,5); select pg_temp.fixture(10,5); select pg_temp.fixture(11,5);
 select pg_temp.fixture(12,5); select pg_temp.fixture(13,4); select pg_temp.fixture(17,5);
 select pg_temp.photo(9,5); select pg_temp.photo(10,5); select pg_temp.photo(11,5); select pg_temp.photo(12,5); select pg_temp.photo(13,4); select pg_temp.photo(17,5);
+insert into auth.sessions(id,user_id) values(pg_temp.pid(205),pg_temp.pid(105));
 update public.profiles set status='upload_only' where id=pg_temp.pid(5);
 update public.profiles set status='inactive' where id=pg_temp.pid(4);
 insert into private.attempt_capability_grants(id,actor_profile_id,attempt_id,assignment_id,assignment_revision,kind,allowed_actions,issued_at,expires_at,granted_by)
@@ -209,23 +210,23 @@ values
  (pg_temp.pid(917),pg_temp.pid(5),pg_temp.pid(517),pg_temp.pid(417),2,'finish_current',array['complete_field_work'],now()-interval '1 minute',now()+interval '119 minutes',pg_temp.pid(1));
 insert into private.attempt_capability_revocations(capability_id,revoked_at,reason_code,actor_profile_id)
 values(pg_temp.pid(912),clock_timestamp(),'ACCOUNT_CHANGED',pg_temp.pid(1));
-select is((public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(509),gen_random_uuid(),0,0,
+select is((public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(509),gen_random_uuid(),0,0,
   'upload-only-live-submit',repeat('a',64)))->>'status','submitted',
   'upload_only maid with exact live upload_submit capability may submit owned completed work');
-select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(510),gen_random_uuid(),0,0,
+select throws_ok($$select public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(510),gen_random_uuid(),0,0,
   'evidence-only-submit',repeat('b',64))$$,'42501','CAPABILITY_ACCESS_REQUIRED',
   'evidence_upload capability never grants submission');
-select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(511),gen_random_uuid(),0,0,
+select throws_ok($$select public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(511),gen_random_uuid(),0,0,
   'expired-upload-submit',repeat('c',64))$$,'42501','CAPABILITY_ACCESS_REQUIRED',
   'expired upload_submit capability cannot submit');
-select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(512),gen_random_uuid(),0,0,
+select throws_ok($$select public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(512),gen_random_uuid(),0,0,
   'revoked-upload-submit',repeat('d',64))$$,'42501','CAPABILITY_ACCESS_REQUIRED',
   'revoked upload_submit capability cannot submit');
 select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(4),pg_temp.pid(513),gen_random_uuid(),0,0,
   'inactive-submit',repeat('e',64))$$,'42501','SUBMISSION_ACCESS_REQUIRED',
   'inactive maid without a live capability cannot submit');
 update public.profiles set status='deactivation_pending' where id=pg_temp.pid(5);
-select throws_ok($$select public.create_cleaning_submission(pg_temp.pid(5),pg_temp.pid(517),gen_random_uuid(),0,0,
+select throws_ok($$select public.create_cleaning_submission_with_session(pg_temp.pid(5),pg_temp.pid(205),pg_temp.pid(517),gen_random_uuid(),0,0,
   'deactivation-pending-submit',repeat('f',64))$$,'42501','SUBMISSION_ACCESS_REQUIRED',
   'deactivation_pending finish_current capability never grants submission');
 update public.profiles set status='upload_only' where id=pg_temp.pid(5);

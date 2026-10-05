@@ -395,13 +395,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 137 &&
+    Object.keys(document.paths).length === 138 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 148,
-    "combined candidate contract 137/148",
+        ).length === 149,
+    "combined candidate contract 138/149",
   );
 });
 
@@ -1650,10 +1650,92 @@ Deno.test("cleaning template OpenAPI exposes strict checkout-only admin publicat
   }
 });
 
+function assertLimitedOperationSet(
+  paths: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+): void {
+  const expectedPaths = [
+    "/v1/limited/attempts",
+    "/v1/limited/attempts/{attemptId}",
+    "/v1/limited/attempts/{attemptId}/complete-field-work",
+  ];
+  const limitedPaths = Object.keys(paths).filter((path) =>
+    path.startsWith("/v1/limited/")
+  ).sort();
+  assert(
+    JSON.stringify(limitedPaths) === JSON.stringify(expectedPaths),
+    "only exact discovery, read and complete limited paths exist",
+  );
+  const methods = [
+    "get",
+    "put",
+    "post",
+    "delete",
+    "options",
+    "head",
+    "patch",
+    "trace",
+  ];
+  const operations = limitedPaths.flatMap((path) =>
+    Object.keys(paths[path]).filter((method) => methods.includes(method)).map(
+      (method) => `${method.toUpperCase()} ${path}`,
+    )
+  ).sort();
+  assert(
+    JSON.stringify(operations) === JSON.stringify([
+      "GET /v1/limited/attempts",
+      "GET /v1/limited/attempts/{attemptId}",
+      "POST /v1/limited/attempts/{attemptId}/complete-field-work",
+    ]),
+    "only exact discovery GET, read GET and complete POST operations exist",
+  );
+}
+
+Deno.test("limited OpenAPI rejects unexpected methods and paths without count-only checks", async () => {
+  const doc = await openApiResponse({}).json() as typeof openApiDocument;
+  const discoveryPath = "/v1/limited/attempts";
+  const discovery = doc.paths[discoveryPath];
+  const missingDiscovery: Record<string, Record<string, unknown>> = {
+    ...doc.paths,
+  };
+  delete missingDiscovery[discoveryPath];
+  const invalidPaths = [
+    missingDiscovery,
+    {
+      ...doc.paths,
+      [discoveryPath]: { post: discovery.get },
+    },
+    {
+      ...missingDiscovery,
+      "/v1/limited/attempts/discover": discovery,
+    },
+    {
+      ...doc.paths,
+      "/v1/limited/attempts/unapproved": { get: discovery.get },
+    },
+    { ...doc.paths, "/v1/limited/attempts/unapproved": {} },
+    ...["post", "put", "patch", "delete", "options", "head", "trace"].map(
+      (method) => ({
+        ...doc.paths,
+        [discoveryPath]: { ...discovery, [method]: discovery.get },
+      }),
+    ),
+  ];
+  for (const paths of invalidPaths) {
+    let rejected = false;
+    try {
+      assertLimitedOperationSet(paths);
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "missing or unexpected limited operation is rejected");
+  }
+});
+
 Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and future media contracts", async () => {
   const doc = await openApiResponse({}).json() as typeof openApiDocument;
   const impact = doc.paths["/v1/attempts/lifecycle-impact"].get;
   const manage = doc.paths["/v1/attempts/{attemptId}/lifecycle"].post;
+  const discovery = doc.paths["/v1/limited/attempts"].get;
   const read = doc.paths["/v1/limited/attempts/{attemptId}"].get;
   const complete =
     doc.paths["/v1/limited/attempts/{attemptId}/complete-field-work"].post;
@@ -1663,7 +1745,8 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     "business admin lifecycle",
   );
   assert(
-    read["x-required-roles"].join(",") === "maid" &&
+    discovery["x-required-roles"].join(",") === "maid" &&
+      read["x-required-roles"].join(",") === "maid" &&
       complete["x-required-roles"].join(",") === "maid",
     "limited maid only",
   );
@@ -1705,11 +1788,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
       ),
     "all actions strict CAS",
   );
-  assert(
-    Object.keys(doc.paths).filter((path) => path.startsWith("/v1/limited/"))
-      .length === 2,
-    "only read and complete limited endpoints exist",
-  );
+  assertLimitedOperationSet(doc.paths);
   const safeKeys = [
     "attemptId",
     "cleaningTargetId",

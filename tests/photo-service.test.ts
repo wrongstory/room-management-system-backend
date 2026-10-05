@@ -47,7 +47,7 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
     if (name === 'reserve_named_photo_provider_identity') { context = { ...context, providerFileId: args.p_provider_file_id, providerFolderId: args.p_provider_folder_id,
       fileName: collectionItemId === null ? null : `${context.uploadDate}_일반방_101_01.jpg` }; data = context; }
     if (name === 'record_admitted_photo_provider_success') data = operation('provider_succeeded', collectionItemId);
-    if (name === 'finalize_admitted_photo_upload' || name === 'get_admitted_photo_upload' || name === 'reconcile_admitted_photo_upload') data = operation('accepted', collectionItemId);
+    if (name === 'finalize_admitted_photo_upload' || name === 'get_admitted_photo_upload' || name === 'reconcile_admitted_photo_upload' || name === 'get_photo_upload_receipt_with_session') data = operation('accepted', collectionItemId);
     if (name === 'authorize_photo_read') data = { photoId: id(7), providerFileId: 'provider_file_123', sha256: 'a'.repeat(64), mimeType: 'image/jpeg', sizeBytes: bytes.length, ...retention };
     return { data, error: null };
   } };
@@ -161,10 +161,26 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(result.status).toBe('accepted'); expect(s.provider.quota).toHaveBeenCalledOnce(); expect(s.provider.upload).not.toHaveBeenCalled();
     expect(s.calls.slice(0,3)).toEqual(['admit_photo_upload', 'refresh_photo_storage_quota', 'admit_photo_upload']);
   });
-  it('lost finalize response reconciles accepted; no deletion after old access disappears', async () => {
+  it('lost finalize response reconciles accepted only after exact HTTP session reauthorization', async () => {
     const s = setup(name => name === 'finalize_admitted_photo_upload' ? Promise.reject(new Error('raw secret provider failure')) : undefined);
     expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
     expect(s.provider.remove).not.toHaveBeenCalled(); expect(s.calls).toContain('reconcile_admitted_photo_upload');
+    expect(s.calls.at(-1)).toBe('get_photo_upload_receipt_with_session');
+  });
+  it.each(['SESSION_REVOKED', 'CAPABILITY_ACCESS_REQUIRED', 'PHOTO_ACCESS_REQUIRED'])('accepted reconciliation does not reopen HTTP access after %s', async (code) => {
+    let args: Record<string, unknown> | undefined;
+    const s = setup((name, input) => {
+      if (name === 'finalize_admitted_photo_upload') return Promise.reject(new Error('lost response'));
+      if (name === 'get_photo_upload_receipt_with_session') {
+        args = input;
+        return { data: null, error: { message: code } };
+      }
+      return undefined;
+    });
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code });
+    expect(args).toEqual({ p_actor_profile_id: identity.profileId, p_session_id: identity.sessionId, p_operation_id: id(5) });
+    expect(s.provider.remove).not.toHaveBeenCalled();
+    expect(s.calls).toContain('reconcile_admitted_photo_upload');
   });
   it('exposes only the admission quota warning on initial and accepted retry responses', async () => {
     for (const replay of [false, true]) {

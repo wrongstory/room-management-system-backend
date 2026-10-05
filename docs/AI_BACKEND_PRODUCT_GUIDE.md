@@ -1,5 +1,29 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> 2026-10-05 최신 #329 통합 실행 결과: checkpoint4da53b0 +devfdd8d7d 정상 재통합 후보는 Node1,767/74·Edge486/0·Python95/client6순열과 실제 fresh104→template6순열/receipt/CAS/16malformed→전체9경합→finalfresh104 exit0 PASS다. 원본480/사본480 drift0·SQL200/LF/raw280, 최종 fixture0/RLS누락0/객실121을 확인했다. 아래 이전27 upgrades/SQL82·5,119/static/KST145와 최초 cleanup FAIL/후속3PASS를 구분한다. 새 source의 전체upgrade/SQL은 로컬 재실행 NOT RUN이며 exact-head CI가 실행해야 한다. 최종 독립 문서/staged QA·commit/push·CI·dev 병합은 후속이고 운영·v0.8.0·프런트는 불변이다. [정확한 증거](./LIMITED_SESSION_REENTRY.md#2026-10-05-최신-devfdd-통합전체9-경합-완료-checkpoint)를 따른다.
+
+> 2026-10-05 최신 통합 범위: #382/#323은 PR335/source `c15ebd6`의 독립 QA·exact CI37254484170 두 required checks PASS 후 dev `fdd8d7d2ff9f0fed824865c12c121c0cbfa257f1`에 보호 squash됐다. 아래 순열 정책은 확정이며 source/dev 완료, 운영 반영은 아니다. #329는 정상 checkpoint `4da53b0` 뒤 이 dev를 정상 재통합 중이다. 기존 세션 A안·104 migration·과거 이력은 유지하고 새 통합본의 품질·템플릿·전체 경합·독립 QA·exact-head CI는 다시 검증한다. 기존 v0.8.0은 보존하고 최신 기능의 운영 승격은 #387 v0.9.0이며, 실제 Supabase-only 백업/복원은 모든 개발 이후·운영 배포 전에 수행한다.
+
+> 2026-10-05 #329/#389 로컬 checkpoint: bb4fa40 통합 source에서 Node1,525/70·LF fresh103/SQL81·4,942/100→101 upgrade/제한 세션 경합7/최종103 cleanup PASS, 원본304·사본304 drift0다. 기존 세션 A안·installer·runtime 권한은 불변이고 exact catalog fixture만 보완했다. raw strict FAIL9/exit1을 유지하며 exact9/catalog3 gate만 PASS다. 실제 후속 caller7/18→7/19 및 #383/#388/#382 최신 통합·전체27 upgrades·QA·새 CI·dev/운영 승격은 미완료다. 사용자 결정에 따라 기존 v0.8.0을 보존하고 최신 기능은 #387 v0.9.0으로 준비한다. [실행 범위와 제한](./LIMITED_SESSION_REENTRY.md)을 따른다. 아래 과거 준비 중/strict17/101 문구는 당시 checkpoint다.
+
+> 2026-10-05 #329 최신 dev 통합 후보: 기존 PR #372/source `8941039`를 `dev@bb4fa40`(#384 포함)에 정상 merge해 검증 준비 중이다. 아래 A안과 최초 제한 전환의 기존 세션 자격을 유지한다. 원본 #329 SQL의 LF SHA `dadd5abddedb74e9e66f20f1b970e53d3398ddabf0764b926a713aeee6e8b603`와 기존 migration은 수정·재번호화하지 않는다. #373의 원본 strict FAIL9와 exact9 비교 gate를 구분하고, 아래 strict17/101 및 과거 CI·QA는 당시 checkpoint로 보존한다. #383/#382 최신 dev 재통합·fresh/전체 DB·독립 QA·새 exact-head CI는 후속 gate이며 현재 source/dev·운영·프런트 UAT 완료가 아니다. 실제 백업/복원은 모든 개발 후속이지만 운영 배포 전 필수다.
+
+## [확정] 2026-10-03 #329 기존 로그인 세션의 제한 업무 재진입
+
+사용자는 #329 A안과 v0.8.0 운영 준비 중 별도 백엔드 개발 병행을 승인했다.
+유효하고 폐기되지 않은 **최초 제한 전환 당시의 기존 로그인 세션**만 해당 업무에 접근한다.
+새 로그인·재로그인·복구 credential·active 위장·앱 재진입에 따른 TTL 연장은 허용하지 않는다.
+완료 후 업로드 권한은 최초 세션 자격을 이어받으며 새 세션을 추가하지 않는다.
+일반 로그인·`/v1/auth/me`·일반 업무의 active-only guard와 기존 비활성화의 Auth ban/revoke는 유지한다.
+제한 목록/단건/완료/사진/제출은 최신 role/status, live session의 hard expiry, 정확한 본인 업무·
+assignment revision·action·capability TTL/철회를 다시 검사한다. 제한 상태에는 PIN·예약·주급 등 일반 권한을 추가하지 않는다.
+일반 active 인계는 기존 active 권한을 별도로 유지하며 이 제한 목록으로 새 권한을 부여하지 않는다.
+폐기/만료/refresh 불가이면 관리자 인계·재배정으로 처리한다.
+
+현재는 `dev@e9fcc564dfb4acd2cc4e175df7d1421dbb6b07e5`에서 분리한 #329 구현 작업이다.
+고정한 v0.8.0 후보·main·운영 DB/API·프런트 source는 변경하지 않는다. 검증·독립 QA·CI·dev 통합과
+운영 승격·프런트 cold start UAT는 별도 gate다. [제한 세션 재진입 계약](./LIMITED_SESSION_REENTRY.md)을 따른다.
+아래 기존 기능의 후보·운영 수치는 해당 시점의 checkpoint이며 위 최신 병행 결정을 대체하지 않는다.
 > [확정 — 2026-10-05 #382] v9 템플릿의 배열 원소 위치는 역할이나 게시 자격이 아니다. `cleaning-proof`/`bomb-proof`/`issue-proof`의 canonical 객체 값을 보존한 6개 순열을 모두 허용한다. 역할별 `displayOrder=0/1/2`, stable key, 필수 여부, label, 최대 사진 수와 중복·누락·유효성 검증은 그대로다. 서버는 복사본을 정렬해 기존 canonical request hash·저장·응답을 유지한다. 기존 template/target/attempt/submission snapshot·receipt를 수정하거나 displayOrder 필드를 제거하지 않는다. #323/PR #335에 연결된 source 후보이며 새 exact-head 검증·독립 QA·dev 통합·운영 승격은 별도 gate다. [명세 계약](./ARCHITECTURE.md#323-v9-게시-명세-정합화)을 따른다.
 
 > 2026-10-05 #384 구현 후보: 확정된 일반 사진 최소1/최대20장과 선택 폭탄방·특이사항 각각 최대10장 계약을 유지한다. provider context는 ordinary pointer와 collection/item CAS를 구분해야 하며 첫 사진 이후 정상 collection revision을 단일 pointer와 비교하면 안 된다. 권한·session·assignment·fence·rate/quota·이력을 유지한 append 후보와 실제 검증은 [#384 정합성 기록](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)을 따른다. #383 저장 이름/PR #385, #382 배열 순서, 운영 상태를 이 후보에 혼합하지 않는다. 실제 백업/복원은 모든 개발 후속이지만 운영 배포 전 필수다.

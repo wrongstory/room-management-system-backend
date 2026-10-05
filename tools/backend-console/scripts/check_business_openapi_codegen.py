@@ -96,8 +96,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 137:
-        raise RuntimeError("전체 source OpenAPI path 수가 137이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 138:
+        raise RuntimeError("전체 source OpenAPI path 수가 138이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -106,9 +106,46 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 148:
-        raise RuntimeError("전체 source OpenAPI operation 수가 148이 아닙니다.")
+    if operation_count != 149:
+        raise RuntimeError("전체 source OpenAPI operation 수가 149이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
+    discovery_fields = [
+        "attemptId",
+        "assignmentId",
+        "assignmentRevision",
+        "executionVersion",
+        "status",
+        "kind",
+        "allowedActions",
+        "issuedAt",
+        "expiresAt",
+    ]
+    discovery_item = schemas.get("LimitedAttemptDiscoveryItem", {})
+    discovery = schemas.get("LimitedAttemptDiscovery", {})
+    if (
+        discovery_item.get("required") != discovery_fields
+        or list(discovery_item.get("properties", {})) != discovery_fields
+        or discovery_item.get("additionalProperties") is not False
+        or discovery.get("required") != ["profileStatus", "evaluatedAt", "items"]
+        or discovery.get("additionalProperties") is not False
+        or discovery.get("properties", {}).get("items", {}).get("maxItems") != 1000
+    ):
+        raise RuntimeError("기존 세션 제한 조회의 정확 9필드/1000건 계약이 잘못됐습니다.")
+    discovery_operation = paths.get("/v1/limited/attempts", {}).get("get", {})
+    if (
+        discovery_operation.get("operationId") != "listLimitedAttempts"
+        or discovery_operation.get("x-required-roles") != ["maid"]
+        or discovery_operation.get("security") != [{"bearerAuth": []}]
+        or discovery_operation.get("parameters")
+        or discovery_operation.get("responses", {})
+        .get("200", {})
+        .get("headers", {})
+        .get("Cache-Control", {})
+        .get("schema", {})
+        .get("const")
+        != "no-store"
+    ):
+        raise RuntimeError("기존 세션 제한 조회의 인증/no-store/무 query 계약이 누락됐습니다.")
     adjustment_book = schemas.get("PayrollAdjustmentBook", {})
     book_fields = ["maidProfileId", "weekStart", "currentBookVersion"]
     if (
@@ -184,6 +221,11 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "attempts" / "list_limited_attempts.py",
+            package / "api" / "attempts" / "get_limited_attempt.py",
+            package / "api" / "attempts" / "complete_limited_field_work.py",
+            package / "models" / "limited_attempt_discovery.py",
+            package / "models" / "limited_attempt_discovery_item.py",
             package / "api" / "assignments" / "list_assignments.py",
             package / "api" / "assignments" / "get_assignment_history.py",
             package / "models" / "assignment_card.py",
@@ -364,6 +406,48 @@ def main() -> None:
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
             raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+        for model_name, fields in (
+            ("limited_attempt_discovery", ("profile_status", "evaluated_at", "items")),
+            (
+                "limited_attempt_discovery_item",
+                (
+                    "attempt_id",
+                    "assignment_id",
+                    "assignment_revision",
+                    "execution_version",
+                    "status",
+                    "kind",
+                    "allowed_actions",
+                    "issued_at",
+                    "expires_at",
+                ),
+            ),
+        ):
+            model = (package / "models" / f"{model_name}.py").read_text(encoding="utf-8")
+            for field in fields:
+                declaration = re.search(rf"^\s+{field}:\s+([^\r\n=]+)", model, re.MULTILINE)
+                if declaration is None or "Unset" in declaration.group(1):
+                    raise RuntimeError(f"제한 조회 codegen 필수 필드 누락: {model_name}.{field}")
+            for forbidden in (
+                "session_id:",
+                "session_digest:",
+                "capability_id:",
+                "room_id:",
+                "room_number:",
+                "pin:",
+                "guest_name:",
+                "request_hash:",
+            ):
+                if re.search(rf"^\s+{re.escape(forbidden)}", model, re.MULTILINE):
+                    raise RuntimeError(f"제한 조회 codegen 비공개 필드 노출: {forbidden}")
+        discovery_api = (package / "api" / "attempts" / "list_limited_attempts.py").read_text(
+            encoding="utf-8"
+        )
+        if '"/v1/limited/attempts"' not in discovery_api:
+            raise RuntimeError("기존 세션 제한 조회 codegen 정확한 URL이 누락됐습니다.")
+        for forbidden in ("session_id:", "limit:", "cursor:", "attempt_id:"):
+            if re.search(rf"^\s+{re.escape(forbidden)}", discovery_api, re.MULTILINE):
+                raise RuntimeError(f"제한 조회 codegen 임의 scope/query 노출: {forbidden}")
         template_request = (package / "models" / "publish_cleaning_template_request.py").read_text(
             encoding="utf-8"
         )

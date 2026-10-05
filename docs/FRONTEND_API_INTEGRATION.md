@@ -1,5 +1,18 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-03 #329 A안 handoff — 백엔드 구현 중
+
+제한 업무는 최초 제한 전환 당시의 유효·미폐기 로그인 세션으로만 재진입한다.
+`/v1/auth/me`나 새 로그인을 제한 계정 bootstrap으로 사용하거나 일반 active 계정으로 위장하지 않는다.
+기존 token을 정상 복원한 경우에만 전용 제한 업무 discovery를 호출하고 서버가 반환한 exact
+attempt/revision/action 범위만 표시한다. 최초 freeze에 포함된 여러 기기는 각각 기존 유효 세션을 사용할 수 있다.
+token을 삭제한 cold start·freeze에 없던 새 기기/새 로그인·폐기/만료·정상 refresh 불가이면
+관리자 인계·재배정 안내가 필요하다. 앱 재진입은 2h/24h 유예를 연장하지 않는다.
+새 목록은 로컬 검증을 마친 진단용 Draft source 계약이며 현재 운영 사용 가능 API로 간주하지 않는다.
+프런트 source는 담당자가 별도로 개발하며 백엔드 합성 검증만으로 실제 cold start E2E PASS를 선언하지 않는다.
+[제한 세션 재진입 계약](./LIMITED_SESSION_REENTRY.md)에 DTO·오류·검증 상태를 기록한다.
+scoped 프런트 기준 main `d509b44`/dev `09ed284`는 유지하며 전역 제품 snapshot을 갱신하지 않는다.
+
 > 2026-10-03 #331 구현 후보 인계: 별도 송금 표시 GET/PUT·reconfirm·history 3 paths/4 operations를 추가한다. 사용자 결정은 종료 주차·양수 신규 on 및 on 유지 별도 재확인이다. cycle.status/PAID로 스위치를 계산하거나 off에 reopen을 사용하지 않는다. [표시 전용 API 계약과 검증 상태](./PAYROLL_REMITTANCE_MARKER.md)를 따른다. 목표 source 명세는 137 paths/148 operations이며 프런트 구현·운영 제공 완료는 아니다.
 
 > 2026-10-03 최신 기준: #325는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358), source `78582789ce66a92d9aae3072b7b8fbc6d5fa9843` → dev squash `d65f4f600f856bd990b52762cf57530830970f12`로 source/dev 완료했다. exact tree CI `37093733970` application/migration PASS·독립 QA98/100이며 초기 CI 실패는 이력으로 보존한다. 아래 #325 후보 표현은 과거 checkpoint다. 현재 #324의 객실별 확정/미확정 주급 근거 조회는 이 dev/97 migrations에서 시작한 후보이며 [조회 계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 운영·프런트·main·recovery는 변경하지 않는다.

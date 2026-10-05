@@ -1,5 +1,31 @@
 # 백엔드 서버 설계
 
+> 2026-10-05 최신 통합 경계: #382/#323은 독립 QA와 exact CI 후 `dev@fdd8d7d`에 보호 통합됐다. 이를 정상 재통합한 #329 후보는 기존 A안·snapshot6/fresh18/core2를 유지하고, 실제 fresh104·template6순열·전체9경합·최종fresh104 및 Node1,767/Edge486/Python95를 PASS했다. 최종 문서 QA·commit/push·새 exact-head CI·dev 병합은 후속이다. SQL/manifest와 원본 installer는 불변이며 운영·프런트·v0.8.0은 변경하지 않았다. 현재 상태와 증거는 [API 상태 정본](./API_STATUS_MATRIX.md) 및 [제한 세션 검증 기록](./LIMITED_SESSION_REENTRY.md)을 따른다.
+
+> 과거 bb4 checkpoint 설명: 아래 이전 #329 후보의 103개/head/previous 및 미완료 표기는 당시 source 준비 설명이며 현재104 검증이나 최신 manifest로 재사용하지 않는다. 기존 A안·21 baseline caller의 strict source 분류와 최종 snapshot6/fresh18/core2 matrix를 그대로 유지했다. `dev@bb4fa40`의 #373/#384를 정상 merge한 source이며 당시 #383/#382 후속 dev 재통합·fresh/전체 DB·독립 QA·새 exact-head CI는 미완료였다. 원본 #329 migration/LF SHA는 불변이다. 이전 설명의 head `photo_collection_provider_context_axis`·previous `db_static_warning_remediation`·103개 준비 문구는 이력으로 보존하며, 과거 strict17/101 checkpoint를 현재 검증으로 재사용하지 않는다. 원본 strict FAIL9·exact9 비교 gate를 분리한다.
+
+## #329 기존 세션 제한 업무 재진입 — 구현 중
+
+후속101번째 append는 최초 active→limited 전환 transaction의 실제 visible live session을
+domain-separated digest의 private immutable evidence로 동결한다. grant와 최초 restriction root를
+연결하고 finish→upload에서도 root membership을 상속한다. 현재 세션을 이용한 과거 backfill이나
+새 로그인/credential/일반 active guard 완화는 없다. 정상 완료의 최초24h upload grant는 유지하며
+기존 grant는 재진입·재시도로 갱신하지 않는다.
+
+기존 제한 단건·완료와 사진 actor/accepted 수렴·제출 경로를 같은 eligibility에 맞춘다.
+제출은 명시적인 서버 검증 session 인자를 사용하는 별도 core/wrapper로 처리하며 unbound
+limited 우회를 닫는다. 기존 receipt/global/profile/session/업무 잠금 순서와 post-lock clock을 검증한다.
+외부 Drive 호출은 transaction 밖이고 accepted 이력은 authorization 실패로 삭제하지 않는다.
+기존 public STABLE 조회6개의 요청 snapshot·HTTP/RPC 호환성은 유지한다. 동일 권한 규칙의
+private STABLE at-clock core와 explicit SELECT VOLATILE fresh wrapper를 분리하고,
+기존 VOLATILE caller15개·신규3개의 호출 목록/횟수/속성을 fail-closed 검사한다.
+private snapshot/core/fresh helper는 runtime EXECUTE를 허용하지 않는다. 조회 결과는 이후
+mutation을 승인하지 않으며 이 보완을 전체 기존 RPC의 post-lock gap 해결로 확대하지 않는다.
+최소 discovery의9개 item 필드와 server bound만 반환하며 PIN·객실/고객 PII·raw grant/session/digest는 숨긴다.
+로컬 기능·경합 검증과 독립 소스 QA는 완료했고 기존 strict17 FAIL을 명시한 진단용 Draft 공유 후보이다.
+CI·dev 통합·운영·프런트 UAT는 미완료다. [계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
+v0.8.0 고정 후보·운영/recovery·Auth 설정·프런트는 변경하지 않는다.
+
 ## #363/#373 DB warning 보완 후보
 
 기존 함수7개의 body-only append와 private owner-only STABLE developer snapshot guard를 추가한다.
@@ -1008,8 +1034,9 @@ legacy 중복 key·필수 슬롯 등 교차 항목 조건과 receipt 존재 여�
 조건 대신 v9 3-slot 후보를 정렬 후 역할별로 검사합니다. DB publisher는 이미 같은 정렬을 수행하므로
 원본 SQL·manifest를 바꾸지 않습니다. canonical 응답 검사는 그대로여서 비정렬 DB projection은
 계속 fail-closed합니다. 기존 frozen snapshot의 exact canonical equality와 저장 이름 자격도 재해석하지 않습니다.
-6순열 허용·동일 hash·잘못된 역할/order·누락/중복 회귀를 실제 실행하되, 최종 QA·새 exact-head CI·
-최신 dev 재통합·전체 DB gate가 완료되기 전에는 #323/PR #335의 source/dev 완료를 선언하지 않습니다.
+당시 후보에서는 6순열 허용·동일 hash·잘못된 역할/order·누락/중복 회귀를 실제 실행하되, 최종 QA·새 exact-head CI·
+최신 dev 재통합·전체 DB gate 완료 전에는 #323/PR #335의 source/dev 완료를 선언하지 않았습니다.
+이는 과거 검증 checkpoint이며 현재 완료 상태는 [API 상태 정본](./API_STATUS_MATRIX.md)의 `dev@fdd8d7d` 보호 통합 기록을 따릅니다.
 
 `tests/fixtures/cleaning-template-contract.ts`를 Fastify·Edge·실제 JSON Schema 검사·생성 클라이언트·로컬 DB
 검증이 공유합니다. `npm run openapi:template-client:check`는 앱 TypeScript 7을 바꾸지 않고

@@ -4,6 +4,9 @@ import type { AppEnv } from '../src/config/env.js';
 import { AppError } from '../src/lib/app-error.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import { SupabaseAuthService } from '../src/modules/auth/auth.service.js';
+import { LimitedAttemptService } from '../src/modules/limited-attempts/limited-attempt.service.js';
+import type { PhotoHttpServices } from '../src/modules/photos/photo.routes.js';
+import type { SubmissionService } from '../src/modules/submissions/submission.service.js';
 import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
 
 const env: AppEnv = {
@@ -2219,6 +2222,47 @@ describe('application', () => {
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe('ADMIN_REQUIRED');
     expect(appServices.payroll.start).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('registers limited discovery/single/complete and keeps the verified session in submission identity', async () => {
+    const id = (n: number) => `69000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const identity = { profileId: id(90), sessionId: id(91), role: 'maid' as const, profileStatus: 'deactivation_pending' };
+    const attempt = { attemptId: id(1), assignmentId: id(2), cleaningTargetId: id(5), maidProfileId: id(90), assignmentRevision: 3,
+      executionVersion: 2, status: 'in_progress', startedAt: '2026-10-03T00:00:00Z', fieldCompletedAt: null,
+      endedAt: null, effectiveAt: '2026-10-03T00:00:00Z', recordedAt: '2026-10-03T00:00:00Z' };
+    const capability = { capabilityId: id(7), attemptId: id(1), assignmentId: id(2), assignmentRevision: 3, kind: 'finish_current',
+      allowedActions: ['complete_field_work'], issuedAt: '2026-10-03T00:00:00Z', expiresAt: '2026-10-03T02:00:00Z', revokedAt: null };
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const limited = new LimitedAttemptService({ rpc: async (name, args) => {
+      calls.push({ name, args });
+      const data = name === 'list_limited_cleaning_attempts' ? { profileStatus: identity.profileStatus, evaluatedAt: '2026-10-03T01:00:00Z', items: [] }
+        : name === 'get_limited_cleaning_attempt' ? { attempt, capability, profileStatus: identity.profileStatus }
+        : { attempt: { ...attempt, status: 'field_completed', executionVersion: 3, fieldCompletedAt: '2026-10-03T01:00:00Z', endedAt: '2026-10-03T01:00:00Z' },
+          capability: { ...capability, kind: 'upload_submit', allowedActions: ['upload_evidence', 'validate_evidence', 'submit'] }, profileStatus: 'upload_only',
+          profileVersion: 2, nextAttempt: null, effectiveAt: '2026-10-03T01:00:00Z', recordedAt: '2026-10-03T01:00:00Z' };
+      return { data, error: null };
+    } });
+    const photoServices = { authenticate: vi.fn(async () => identity), service: {}, denied: vi.fn() } as unknown as PhotoHttpServices;
+    const create = vi.fn(async () => ({ id: id(8), attemptId: id(1) }));
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async () => { throw new Error('ordinary active-only auth must not run'); });
+    const app = await buildApp({ env, services: appServices, logger: false, photoServices, limitedAttemptService: limited,
+      submissionService: { create } as unknown as SubmissionService });
+    for (const url of ['/v1/limited/attempts', `/v1/limited/attempts/${id(1)}?assignmentRevision=3`]) {
+      const response = await app.inject({ method: 'GET', url });
+      expect(response.statusCode).toBe(200); expect(response.headers['cache-control']).toBe('no-store');
+    }
+    const complete = await app.inject({ method: 'POST', url: `/v1/limited/attempts/${id(1)}/complete-field-work`,
+      headers: { 'idempotency-key': 'limited-build-app-01' }, payload: { expectedExecutionVersion: 2, expectedAssignmentId: id(2), expectedAssignmentRevision: 3 } });
+    expect(complete.statusCode).toBe(200);
+    expect(calls.map((call) => call.name)).toEqual(['list_limited_cleaning_attempts', 'get_limited_cleaning_attempt', 'complete_limited_cleaning_attempt_field_work']);
+    expect(calls.every((call) => call.args.p_actor_profile_id === id(90) && call.args.p_session_id === id(91))).toBe(true);
+    const submit = await app.inject({ method: 'POST', url: `/v1/attempts/${id(1)}/submissions`, headers: { 'idempotency-key': 'submit-build-app-01' },
+      payload: { clientSubmissionId: id(8), expectedRevision: 0, candleCount: 0 } });
+    expect(submit.statusCode).toBe(201);
+    expect(create).toHaveBeenCalledWith({ profileId: id(90), sessionId: id(91), role: 'maid', mustChangePassword: false }, id(1), id(8), 0, 0, 'submit-build-app-01');
+    expect(appServices.auth.authenticate).not.toHaveBeenCalled();
     await app.close();
   });
 

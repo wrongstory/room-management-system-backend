@@ -542,11 +542,26 @@ export class PhotoService {
       );
     } catch (error) {
       // Lost finalize response is not rejection. A failed reconciliation NEVER authorizes deletion.
+      let reconciled: PhotoUploadOperationProjection | undefined;
       try {
-        const reconciled = await this.reconcile(begin.operationId);
-        if (reconciled.status === "accepted") return response(reconciled);
+        reconciled = await this.reconcile(begin.operationId);
       } catch {
         /* Durable operation remains for fenced reconciliation; do not log raw provider errors. */
+      }
+      if (reconciled?.status === "accepted") {
+        // Worker convergence is not HTTP authorization. Recheck the exact caller/session
+        // after provider waits, without undoing the immutable accepted operation.
+        const accepted = projectPhotoUploadOperation(
+          await this.#rpc("get_photo_upload_receipt_with_session", {
+            ...this.#actor(i),
+            p_operation_id: begin.operationId,
+          }),
+        );
+        if (
+          accepted.status !== "accepted" ||
+          accepted.operationId !== begin.operationId
+        ) return failed();
+        return response(accepted);
       }
       throw photoError(error);
     }

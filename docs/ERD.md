@@ -1,5 +1,20 @@
 # Room Management System ERD 초안
 
+> 2026-10-05 #329 최신 dev 통합 후보: 원래100개 뒤의101번째 append를 수정·재번호화하지 않고 `dev@bb4fa40`의 #373/#384와 정상 병합한 103개 구성을 검증한다. A안·immutable 최초 세션 자격·TTL·권한·기존 원장을 유지하며 새로운 schema 변경은 추가하지 않는다. 아래 기존 strict17/101 검증은 당시 이력이다. 현재 원본 strict FAIL9와 exact9 비교 gate를 구분하고 #383/#382 재통합·fresh/전체 DB·독립 QA·새 exact-head CI·운영/UAT는 별도 미완료다.
+
+## #329 제한 세션 eligibility 보강 — 구현 중
+
+101번째 append 후보는 기존 capability grant/revocation을 보존하고 최초 제한 전환의
+private immutable restriction root·domain-separated session digest membership·grant→root binding을 추가한다.
+새 원장은 RLS/무권한 raw table·FK/동일 actor identity·UPDATE/DELETE 거부를 요구한다.
+Auth session 원문/token을 저장하지 않고 visible live set만 최초 동결하며 늦게 commit된 세션을 포함하지 않는다.
+finish 완료 후 upload grant는 최초 root를 이어받고 정상 최초24h 발급과 기존 TTL 연장 금지를 구분한다.
+기존 limited grant에는 현재 세션을 추측 backfill하지 않는다. 일반 active handover와 ordinary
+비활성화의 Auth ban/revoke는 별개로 유지한다.
+로컬 schema·RPC·기능·경합 검증과 독립 소스 QA는 완료했으며 기존 strict17 FAIL이 남은 진단용 후보다.
+CI·dev 통합·운영 배포·프런트 UAT 완료 선언이 아니다.
+[정본 계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
+
 > #363/#373 A안 후보는 기존 함수7개 body-only 보완과 owner-only snapshot guard 한 개뿐이다.
 > 테이블/컬럼/관계/FK/index/RLS/원장·receipt는 그대로다. 정확한 호환 경고9개 기준과
 > 원본 strict FAIL 보존은 [DB 정적 검사 계약](./DB_STATIC_WARNING_BASELINE.md)을 따른다.

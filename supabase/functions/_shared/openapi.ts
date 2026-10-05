@@ -2694,12 +2694,23 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/limited/attempts": {
+      get: {
+        ...lifecycleOperation(
+          "listLimitedAttempts",
+          "기존 로그인 세션의 본인 제한 업무 찾기",
+          "최초 제한 전환 때 동결한 기존 live Supabase session만 허용합니다. 새 로그인·bearer 복구 credential·TTL 연장은 없으며 일반 login/me는 active-only입니다. 본인 live capability의 최소 ID/version/status/kind/actions/발급·만료 metadata만 UUID 오름차순으로 반환합니다. query는 없으며 1000건 초과는 partial response 대신 안전하게 실패합니다. 적격 세션에 live grant가 없으면 items=[]입니다. PIN·객실·고객정보·raw grant/session/digest를 반환하지 않습니다. 프런트 cold-boot 복원 구현·운영 제공은 별도입니다.",
+          "maid",
+          "LimitedAttemptDiscovery",
+        ),
+      },
+    },
     "/v1/limited/attempts/{attemptId}": {
       get: {
         ...lifecycleOperation(
           "getLimitedAttempt",
           "본인 제한 수행 범위 조회",
-          "기존 Supabase Auth 사용자와 유효 세션, 최신 maid profile, 정확한 attempt/revision, 미만료 DB capability를 모두 확인합니다. active(인계 뒤 증빙 범위)·deactivation_pending·upload_only만 후보이며 상태만으로 허용하지 않습니다. 별도 bearer capability token을 발급하지 않고 PIN·사진·현재 target 상세를 노출하지 않습니다. upload/validate/submit allowedActions는 후속 계약이며 실행 endpoint가 아닙니다.",
+          "기존 Supabase Auth 사용자와 최초 제한 전환 때 동결한 유효 세션, 최신 maid profile, 정확한 attempt/revision, 미만료 DB capability를 모두 확인합니다. active(인계 뒤 증빙 범위)·deactivation_pending·upload_only만 후보이며 상태만으로 허용하지 않습니다. 별도 bearer capability token을 발급하지 않고 PIN·사진·현재 target 상세를 노출하지 않습니다. 이 조회는 실행 endpoint가 아닙니다. upload/validate/submit은 각각 현재 photo/submission 전용 경로에서 다시 검증하며 evidence_upload로 전체 제출하거나 사진 원본을 읽을 수 없습니다.",
           "maid",
           "LimitedAttempt",
         ),
@@ -7340,6 +7351,8 @@ export const openApiDocument = {
           "MAID_ALREADY_IN_PROGRESS",
           "ATTEMPT_COMMAND_FAILED",
           "CAPABILITY_ACCESS_REQUIRED",
+          "LIMITED_DISCOVERY_LIMIT_EXCEEDED",
+          "LIMITED_SESSION_LIMIT_EXCEEDED",
           "PHOTO_RETENTION_DELETE_PREPARED",
           "ACCOUNT_VERSION_CONFLICT",
           "CLEANING_WINDOW_NOT_EXPIRED",
@@ -9101,6 +9114,84 @@ export const openApiDocument = {
           issuedAt: { type: "string", format: "date-time" },
           expiresAt: { type: "string", format: "date-time" },
           revokedAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      LimitedAttemptDiscoveryItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "attemptId",
+          "assignmentId",
+          "assignmentRevision",
+          "executionVersion",
+          "status",
+          "kind",
+          "allowedActions",
+          "issuedAt",
+          "expiresAt",
+        ],
+        properties: {
+          attemptId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          assignmentRevision: {
+            type: "integer",
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
+          executionVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
+          status: {
+            type: "string",
+            enum: [
+              "in_progress",
+              "field_completed",
+              "upload_pending",
+              "interrupted",
+            ],
+          },
+          kind: {
+            type: "string",
+            enum: ["finish_current", "upload_submit", "evidence_upload"],
+          },
+          allowedActions: {
+            type: "array",
+            minItems: 1,
+            maxItems: 3,
+            uniqueItems: true,
+            items: {
+              type: "string",
+              enum: [
+                "complete_field_work",
+                "upload_evidence",
+                "validate_evidence",
+                "submit",
+              ],
+            },
+            description:
+              "kind별 고정 순서: finish_current=[complete_field_work], upload_submit=[upload_evidence,validate_evidence,submit], evidence_upload=[upload_evidence,validate_evidence].",
+          },
+          issuedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+        },
+      },
+      LimitedAttemptDiscovery: {
+        type: "object",
+        additionalProperties: false,
+        required: ["profileStatus", "evaluatedAt", "items"],
+        properties: {
+          profileStatus: {
+            type: "string",
+            enum: ["active", "deactivation_pending", "upload_only"],
+          },
+          evaluatedAt: { type: "string", format: "date-time" },
+          items: {
+            type: "array",
+            maxItems: 1000,
+            items: { $ref: "#/components/schemas/LimitedAttemptDiscoveryItem" },
+          },
         },
       },
       LimitedAttempt: {
