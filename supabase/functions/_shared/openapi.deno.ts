@@ -1,11 +1,187 @@
 import type { openApiDocument } from "./openapi.ts";
 import { openApiResponse, swaggerUiResponse } from "./openapi.ts";
 
+Deno.test("payroll adjustment book has an exact admin-only global CAS read contract", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const operation = document.paths["/v1/payroll/adjustment-book"].get;
+  const schemas = document.components.schemas;
+  const fields = ["maidProfileId", "weekStart", "currentBookVersion"];
+  assert(
+    operation.operationId === "getPayrollAdjustmentBook",
+    "stable read operation",
+  );
+  assert(operation["x-required-roles"].join() === "admin", "admin-only read");
+  assert(
+    operation.parameters.every((parameter) =>
+      parameter.required === true && parameter.in === "query"
+    ) && operation.parameters.map((parameter) =>
+          parameter.name
+        ).join() === "maidProfileId,weekStart",
+    "two strict required context fields",
+  );
+  assert(
+    operation.responses["200"].headers["Cache-Control"].schema.const ===
+        "no-store" && Object.hasOwn(operation.responses, "409"),
+    "no-store with future week conflict",
+  );
+  assert(
+    schemas.PayrollAdjustmentBook.additionalProperties === false &&
+      schemas.PayrollAdjustmentBook.required.join() === fields.join() &&
+      Object.keys(schemas.PayrollAdjustmentBook.properties).join() ===
+        fields.join(),
+    "minimal current version, no source book ID or private state",
+  );
+  assert(
+    schemas.PayrollAdjustmentBook.properties.currentBookVersion.minimum === 0 &&
+      schemas.PayrollAdjustmentBook.properties.currentBookVersion.maximum ===
+        Number.MAX_SAFE_INTEGER,
+    "exact safe integer range",
+  );
+  assert(
+    schemas.PayrollAdjustmentBookEnvelope.required.join() === "adjustmentBook",
+    "required envelope",
+  );
+});
+
+Deno.test("assignment schedule separates history and current departure", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const schemas = document.components.schemas;
+  const fields = [
+    "capturedAt",
+    "scheduleRevision",
+    "scheduleReasonCode",
+    "sourceReservationVersion",
+    "plannedCheckoutAt",
+    "actualCheckoutAt",
+    "plannedRoomDepartureAt",
+    "actualRoomDepartureAt",
+    "nextCheckInAt",
+    "nextRoomArrivalAt",
+    "nextArrivalKind",
+    "isEarlyCheckIn",
+    "isLateCheckout",
+    "isScheduleUpdated",
+  ];
+  const snapshot = schemas.AssignmentScheduleSnapshot;
+  assert(
+    snapshot.additionalProperties === false,
+    "strict non-PII schedule pack",
+  );
+  assert(
+    JSON.stringify([...snapshot.required].sort()) ===
+      JSON.stringify([...fields].sort()),
+    "complete required snapshot",
+  );
+  assert(
+    JSON.stringify(Object.keys(snapshot.properties).sort()) ===
+      JSON.stringify([...fields].sort()),
+    "no raw lineage fields",
+  );
+  const card = schemas.AssignmentCard;
+  assert(
+    card.required.includes("scheduleSnapshot") &&
+      card.required.includes("currentDeparture"),
+    "nullable packs required on cards",
+  );
+  assert(
+    card.properties.scheduleSnapshot.anyOf.some((schema) =>
+      "type" in schema && schema.type === "null"
+    ),
+    "legacy snapshot null",
+  );
+  assert(
+    card.properties.currentDeparture.anyOf.some((schema) =>
+      "type" in schema && schema.type === "null"
+    ),
+    "history departure null",
+  );
+  assert(
+    schemas.AssignmentCurrentDeparture.additionalProperties === false,
+    "strict current fact",
+  );
+  assert(
+    schemas.AssignmentCurrentDeparture.required.join(",") ===
+      "evaluatedAt,actualCheckoutAt,actualRoomDepartureAt",
+    "minimal current fact",
+  );
+  assert(
+    snapshot.properties.isEarlyCheckIn.description.includes("KST 16:00") &&
+      snapshot.properties.isEarlyCheckIn.description.includes("room_move"),
+    "early only planned check-in, not room movement",
+  );
+  assert(
+    snapshot.properties.isLateCheckout.description.includes("KST 11:00"),
+    "late planned checkout KST basis",
+  );
+  assert(
+    document.paths["/v1/assignments"].get.description.includes(
+      "includeHistory=true에서는 모든 행이 null",
+    ),
+    "includeHistory never hydrates current facts",
+  );
+  assert(
+    document.paths["/v1/assignments/{cleaningTargetId}/history"].get.description
+      .includes("항상 null"),
+    "history never hydrates current facts",
+  );
+  assert(
+    !("scheduleSnapshot" in schemas.AssignmentPreviewRow.properties) &&
+      !("scheduleSnapshot" in schemas.AssignmentCommitCandidate.properties),
+    "no preview or command response expansion",
+  );
+});
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
 }
+Deno.test("preview diagnostics have bounded strict schemas and no-store", async () => {
+  const document = await openApiResponse({}).json() as typeof openApiDocument;
+  const schemas = document.components.schemas;
+  assert(
+    schemas.AssignmentPreviewResult.required.includes("diagnostics"),
+    "diagnostics required",
+  );
+  assert(
+    schemas.AssignmentPreviewRemainingTarget.additionalProperties === false,
+    "strict remaining",
+  );
+  assert(
+    schemas.AssignmentPreviewRemainingTarget.properties.reasonCodes.items.enum
+      .length === 7,
+    "remaining codes",
+  );
+  assert(
+    schemas.AssignmentPreviewDiagnostics.additionalProperties === false,
+    "strict diagnostics",
+  );
+  const fixed = schemas.AssignmentPreviewDiagnostics.properties.fixedExclusions;
+  assert(
+    fixed.maxItems === 242 && fixed.items.additionalProperties === false,
+    "bounded fixed exclusions",
+  );
+  assert(
+    fixed.items.properties.reasonCodes.items.enum.length === 7,
+    "fixed exclusion codes",
+  );
+  assert(
+    document.paths["/v1/assignments/preview"].post.responses["200"]
+      .headers["Cache-Control"].schema.const === "no-store",
+    "no-store contract",
+  );
+  for (
+    const response of Object.values(
+      document.paths["/v1/assignments/preview"].post.responses,
+    )
+  ) {
+    assert(
+      response.headers["Cache-Control"].schema.const === "no-store",
+      "errors are also no-store",
+    );
+  }
+});
+
 Deno.test("OpenAPI publishes the v0.6.0 cleaning workflow contract", async () => {
   const document = await openApiResponse({}).json() as typeof openApiDocument;
   assert(
@@ -219,13 +395,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 131 &&
+    Object.keys(document.paths).length === 137 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 141,
-    "combined candidate contract 131/141",
+        ).length === 148,
+    "combined candidate contract 137/148",
   );
 });
 
@@ -1487,10 +1663,11 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     "limited read and complete response stay restricted to three candidate statuses",
   );
   assert(
-    variants.length === 4 &&
+    variants.length === 3 &&
       variants.every((variant) =>
         variant.additionalProperties === false &&
-        variant.required.includes("expectedProfileVersion")
+        variant.required.includes("expectedProfileVersion") &&
+        variant.properties.action.const !== "expire_scheduled"
       ),
     "all actions strict CAS",
   );

@@ -81,6 +81,8 @@ Supabase Cron (pg_cron)
 
 로컬 `/api/docs`는 `/api/openapi.json`을 읽는 한글 Swagger UI다. Swagger asset version과 SRI hash를 소스에 고정하고 CSP를 적용하며 bearer token은 브라우저 저장소에 유지하지 않는다. Supabase Free 기본 domain에서는 HTML이 `text/plain`으로 강제되므로 운영 사람용 문서는 `https://wrongstory.github.io/room-management-system-backend/`의 정적 Swagger 포털이 담당한다. Pages workflow는 배포된 production OpenAPI를 최대 2MiB·HTTPS·project domain·title/version/필수 path 기준으로 검증한 뒤 same-origin snapshot으로 포함한다. 공개 portal은 `Try it out`과 Authorization UI를 비활성화한다. 프론트와 프론트 Codex는 [API 연동 가이드](./FRONTEND_API_INTEGRATION.md)에 따라 이 snapshot에서 타입을 생성하고 endpoint·role·error code를 와이어프레임에서 추측하지 않는다.
 
+#368의 v0.8.0 준비 source는 OpenAPI `0.6.0`의 137 paths / 148 operations를 기대하며, #248의 유한한 deploy 10분·build 5분 제한을 복원한다. 로컬 회귀는 실제 source 문서의 포털 생성과 이전 131/141 수치 거부, stale 5분·누락·0/비유한/환경표현식 timeout 거부를 검사한다. workflow는 main-only 수동 dispatch와 실제 hosted OpenAPI 다운로드를 유지하며 source 파일 fallback으로 운영 불일치를 숨기지 않는다. 이는 source/dev 및 릴리스 준비 기준이지 운영 API나 공개 Pages 배포 완료가 아니다. 이 변경에서 hosted Pages deploy와 공개 artifact parity/readback은 `NOT RUN`이며 실제 main/API 승격 후 별도로 검증한다. 아래 과거 PoC·운영 snapshot은 당시 이력으로 보존한다.
+
 Scheduler 시간값은 두 역할로 분리한다. 요청의 `scheduledAt`은 해당 Cron 호출을 식별하는 minute bucket과 idempotency key에만 사용하며 업무 전이의 기준 시각으로 사용하지 않는다. 실제 `p_as_of`는 Function이 RPC를 실행하는 현재 시각이다. 따라서 같은 `scheduledAt` 재시도는 같은 호출로 처리하면서도 pause나 전달 지연 뒤에는 실제 실행 시각까지 누락된 예약 전이를 catch-up한다.
 
 각 인증된 scheduler 실행은 업무 RPC 완료 뒤 `private.scheduler_invocation_heartbeats`에 7일 app-owned 상태를 기록한다. 같은 invocation key 재시도는 attempt count와 마지막 결과만 갱신하며 secret·Authorization·HTTP body·원문 DB 오류는 저장하지 않는다. developer scheduler projection은 Cron SQL이나 `net._http_response` raw row를 공개하지 않고 활성 여부·cadence·최근 run 시각, exact-admin actor 유효성, 안전한 heartbeat 필드만 반환한다.

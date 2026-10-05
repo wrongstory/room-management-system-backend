@@ -16,6 +16,8 @@ function kstDate(date = new Date()) {
 }
 
 export async function testAttemptActivationConcurrency(client, actor) {
+  assert(['localhost', '127.0.0.1'].includes(new URL(client.supabaseUrl).hostname),
+    'Attempt activation races require disposable local Supabase');
   const actorProfileId = actor.profileId;
   const today = kstDate();
   const weekday = new Date(`${today}T00:00:00Z`).getUTCDay() || 7;
@@ -63,7 +65,24 @@ export async function testAttemptActivationConcurrency(client, actor) {
     maids.push(profileId);
   }
 
-  const rooms = ok(await client.from('rooms').select('id').order('room_number').range(60, 89), 'activation rooms');
+  // Earlier suites intentionally retain unfinished workflows. Pick ten untouched
+  // rooms instead of positional slices, so their real room-workflow guard does
+  // not legitimately block an unrelated activation fixture.
+  const isolatedRooms = JSON.parse(execFileSync('docker', [
+    'exec', '-i', 'supabase_db_room-management-system-backend',
+    'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+    '-c', `select coalesce(json_agg(r order by r.room_number,r.id),'[]'::json)::text from (
+      select r.id,r.room_number,r.room_type_id,r.state_version from public.rooms r
+      where r.active and r.data_status='verified' and r.operation_suspended_at is null
+        and r.occupancy_override is null
+        and not exists(select 1 from public.cleaning_targets t where t.room_id=r.id)
+        and not exists(select 1 from public.reservations v where v.room_id=r.id)
+        and not exists(select 1 from private.stay_room_segments s where s.room_id=r.id)
+      order by r.room_number,r.id limit 10
+    ) r`
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 }).trim());
+  assert(isolatedRooms.length === 10, 'Ten untouched rooms are required for isolated activation races');
+  const rooms = isolatedRooms.slice(0, 7);
   let sequence = 300;
   async function fixture({ expired = false } = {}) {
     const targetId = randomUUID();
@@ -133,11 +152,31 @@ export async function testAttemptActivationConcurrency(client, actor) {
     ]);
     assert(results.every((result) => !result.error || /ASSIGNMENT_ALREADY_STARTED|ASSIGNMENT_VERSION_CONFLICT/.test(result.error.message)),
       'activation versus change must fail closed without deadlock');
-    const attempts = ok(await client.from('cleaning_attempts').select('assignment_id').eq('cleaning_target_id', item.targetId), 'activation/change attempts');
-    const current = ok(await client.from('cleaning_assignments').select('id,maid_profile_id').eq('cleaning_target_id', item.targetId).eq('is_current', true), 'activation/change current');
-    assert((attempts.length === 1 && attempts[0].assignment_id === item.assignmentId && current[0]?.id === item.assignmentId) ||
-      (attempts.length === 0 && current.length === 1 && current[0].maid_profile_id === maids[1]),
-    'activation and pre-start change cannot both mutate the same revision');
+    const attempts = ok(await client.from('cleaning_attempts').select('assignment_id,assignment_revision,maid_profile_id,attempt_number,status')
+      .eq('cleaning_target_id', item.targetId), 'activation/change attempts');
+    const assignments = ok(await client.from('cleaning_assignments').select('id,maid_profile_id,revision,is_current,ended_at,change_reason_code')
+      .eq('cleaning_target_id', item.targetId), 'activation/change assignments');
+    const current = assignments.filter((assignment) => assignment.is_current);
+    const target = ok(await client.from('cleaning_targets').select('assignment_version,status,effective_service_date,available_from,due_at')
+      .eq('id', item.targetId).single(), 'activation/change target');
+    const changed = !results[1].error;
+    assert(current.length === 1 && current[0].revision === (changed ? 3 : 2) &&
+      target.assignment_version === current[0].revision && target.status === 'notified' &&
+      target.effective_service_date === today && Date.parse(target.available_from) === Date.parse(availableFrom) &&
+      Date.parse(target.due_at) === Date.parse(dueAt),
+    'activation/change keeps one exact current revision and never reschedules the target');
+    const original = assignments.find((assignment) => assignment.id === item.assignmentId);
+    assert(original && (changed
+      ? assignments.length === 2 && !original.is_current && original.ended_at !== null &&
+        original.change_reason_code === 'OPERATIONAL_CHANGE' && current[0].maid_profile_id === maids[1]
+      : assignments.length === 1 && original.is_current && current[0].maid_profile_id === maids[0]),
+    'only an explicit successful change ends the original assignment and changes its owner');
+    // Under the scheduler's global lock, change may commit first and the scheduler
+    // legitimately activate revision 3. Neither order may leave an old-owner attempt.
+    assert(attempts.length <= 1 && (changed || attempts.length === 1) && attempts.every((attempt) =>
+      attempt.assignment_id === current[0].id && attempt.assignment_revision === current[0].revision &&
+      attempt.maid_profile_id === current[0].maid_profile_id && attempt.attempt_number === 1 && attempt.status === 'scheduled'),
+    'both serialization orders create at most one attempt on the exact current assignment/owner/revision');
   }
 
   const unassignItem = await fixture();
@@ -168,11 +207,22 @@ export async function testAttemptActivationConcurrency(client, actor) {
     client.rpc('process_due_assignment_lifecycle', lifecycle('rollover-a')),
     client.rpc('process_due_assignment_lifecycle', lifecycle('rollover-b'))
   ]);
-  assert(rolloverWorkers.every((result) => !result.error), 'two rollover workers must complete');
+  assert(rolloverWorkers.every((result) => !result.error &&
+    result.data.rolledOverCount === 0 && result.data.rolloverResults.length === 0),
+  'two overdue workers must complete without automatic rollover');
   const rolled = ok(await client.from('cleaning_targets').select('carryover_count,assignment_version,effective_service_date,status').eq('id', rolloverItem.targetId).single(), 'rolled target');
   const revisions = ok(await client.from('cleaning_target_schedule_revisions').select('id').eq('cleaning_target_id', rolloverItem.targetId).eq('reason_code', 'ROLLED_OVER_NOT_STARTED'), 'rollover revisions');
-  assert(rolled.carryover_count === 1 && rolled.assignment_version === 3 && rolled.status === 'unassigned' && revisions.length === 1,
-    'two rollover workers advance date/version/carryover exactly once');
+  const overdueAssignments = ok(await client.from('cleaning_assignments').select('id,service_date')
+    .eq('cleaning_target_id', rolloverItem.targetId).eq('is_current', true), 'overdue current assignment');
+  const overdueAttempts = ok(await client.from('cleaning_attempts').select('assignment_id,attempt_number')
+    .eq('cleaning_target_id', rolloverItem.targetId), 'overdue attempts');
+  assert(rolled.carryover_count === 0 && rolled.assignment_version === 2 && rolled.status === 'notified' && revisions.length === 0 &&
+    rolled.effective_service_date === kstDate(new Date(now.getTime() - 86_400_000)) &&
+    overdueAssignments.length === 1 && overdueAssignments[0].id === rolloverItem.assignmentId &&
+    overdueAssignments[0].service_date === rolled.effective_service_date &&
+    overdueAttempts.length === 1 && overdueAttempts[0].assignment_id === rolloverItem.assignmentId &&
+    overdueAttempts[0].attempt_number === 1,
+  'two overdue workers preserve original date/owner/revision and activate exactly one original attempt');
 
   const decisionItem = await fixture();
   const request = ok(await client.rpc('request_assignment_cancellation', {
@@ -205,10 +255,10 @@ export async function testAttemptActivationConcurrency(client, actor) {
     (decisionAttempts.length === 0 && decisionTarget.status === 'unassigned'),
   'activation and cancellation approval cannot both mutate the revision');
 
-  // 실제 예약/연박 생성 command로 만든 창을 경쟁시킨다. 원 command의
-  // reservation-command lock과 lifecycle lock 순서가 같아야 반쪽 이월이 없다.
-  const sourceRooms = ok(await client.from('rooms').select('id,room_number,room_type_id,state_version')
-    .order('room_number').range(110, 112), 'source window race rooms');
+  // Use one real execution clock for commands and clock_timestamp trigger guards.
+  // A future synthetic scheduler clock would activate unrelated future checkout
+  // fixtures after deadline removal, while their actual execution guard denies it.
+  const sourceRooms = isolatedRooms.slice(7, 10);
   for (const roomTypeId of new Set(sourceRooms.map((room) => room.room_type_id))) {
     // stayover is not part of #156's confirmed admin API. Install this older
     // synthetic fixture through the local postgres test harness, never by
@@ -223,9 +273,13 @@ export async function testAttemptActivationConcurrency(client, actor) {
         and cleaning_kind='stayover' and status='published')`
     ], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 15000 });
   }
-  const stayCheckIn = '2039-10-01T16:00:00+09:00';
-  const stayCheckOut = '2039-10-03T11:00:00+09:00';
-  const rolloverAt = '2039-10-02T16:00:00+09:00';
+  const reservationClock = Math.floor(now.getTime() / 60_000) * 60_000;
+  const stayCheckIn = new Date(reservationClock - 2 * 86_400_000).toISOString();
+  const stayCheckOut = new Date(reservationClock + 86_400_000).toISOString();
+  const overdueAvailableFrom = new Date(now.getTime() - 2 * 3_600_000).toISOString();
+  const overdueDueAt = new Date(now.getTime() - 3_600_000).toISOString();
+  const overdueServiceDate = kstDate(new Date(overdueAvailableFrom));
+  const rolloverAt = now.toISOString();
   async function reservationFixture(room, checkIn = stayCheckIn, checkOut = stayCheckOut) {
     const reservationId = randomUUID();
     await configureRoomPinForConcurrency(client, actor, {
@@ -248,21 +302,22 @@ export async function testAttemptActivationConcurrency(client, actor) {
   }
   async function stayoverFixture(room) {
     const reservationId = await reservationFixture(room);
-    const targetId = randomUUID();
+    // Keep this new observation in the first bounded overdue scan page.
+    const targetId = `00000000-0000-4000-8000-${randomUUID().slice(-12)}`;
     const currentRoom = ok(await client.from('rooms').select('state_version')
       .eq('id', room.id).single(), 'stayover request room version');
     ok(await client.rpc('create_manual_cleaning_request', {
       p_actor_profile_id: actorProfileId, p_target_id: targetId, p_room_id: room.id,
       p_reservation_id: reservationId, p_cleaning_kind: 'stayover',
-      p_service_date: '2039-10-02', p_available_from: '2039-10-02T10:00:00+09:00',
-      p_due_at: '2039-10-02T15:00:00+09:00',
+      p_service_date: overdueServiceDate, p_available_from: overdueAvailableFrom,
+      p_due_at: overdueDueAt,
       p_expected_room_version: currentRoom.state_version,
       p_reason_code: 'ACTIVATION_SOURCE_RACE_FIXTURE',
       p_idempotency_key: `source-stayover-${targetId}`, p_request_hash: '3'.repeat(64)
     }), 'actual create_manual_cleaning_request stayover fixture');
     return { reservationId, targetId, roomId: room.id };
   }
-  async function stayoverSnapshot(item) {
+  async function stayoverSnapshot(item, originalNoticeIds = null) {
     const snapshot = {};
     snapshot.target = ok(await client.from('cleaning_targets').select('*')
       .eq('id', item.targetId).single(), 'source race target snapshot');
@@ -274,6 +329,10 @@ export async function testAttemptActivationConcurrency(client, actor) {
       'exec','-i','supabase_db_room-management-system-backend','psql','-X','-qAt','-U','postgres','-d','postgres',
       '-c',`select coalesce(json_agg(n order by n.id),'[]'::json)::text from public.notifications n where cleaning_target_id='${item.targetId}'::uuid`
     ],{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim());
+    if (originalNoticeIds !== null) {
+      snapshot.notifications = snapshot.notifications.filter((notice) =>
+        notice.event_family !== 'cleaning.overdue_admin' || originalNoticeIds.includes(notice.id));
+    }
     snapshot.audit = ok(await client.from('audit_events').select('id')
       .eq('entity_id', item.targetId).eq('event_type', 'assignment.rolled_over').order('id'),
     'source race rollover audit snapshot');
@@ -282,6 +341,11 @@ export async function testAttemptActivationConcurrency(client, actor) {
   for (const [index, action] of ['checkout', 'change'].entries()) {
     const item = await stayoverFixture(sourceRooms[index]);
     const before = await stayoverSnapshot(item);
+    const originalNoticeIds = JSON.parse(before).notifications.map((notice) => notice.id);
+    execFileSync('docker', ['exec', '-i', 'supabase_db_room-management-system-backend',
+      'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      '-c', 'update private.cleaning_overdue_scan_cursor set last_target_id=null where singleton'],
+    { stdio: ['ignore', 'ignore', 'pipe'], timeout: 15000 });
     const reservationCommand = action === 'checkout'
       ? client.rpc('manual_checkout_reservation', {
         p_actor_profile_id: actorProfileId, p_reservation_id: item.reservationId,
@@ -292,8 +356,7 @@ export async function testAttemptActivationConcurrency(client, actor) {
       : client.rpc('change_reservation', {
         p_actor_profile_id: actorProfileId, p_reservation_id: item.reservationId,
         p_room_id: item.roomId, p_check_in_at: stayCheckIn,
-        // 연장 후에도 다음 마감 15:00보다 이르므로 어느 직렬화 순서든 이월은 거부한다.
-        p_check_out_at: '2039-10-03T12:00:00+09:00', p_guest_count: 2,
+        p_check_out_at: new Date(Date.parse(stayCheckOut) + 3_600_000).toISOString(), p_guest_count: 2,
         p_guest_name_mode: 'keep', p_guest_name_encrypted: null, p_expected_version: 1,
         p_reason_code: 'SOURCE_WINDOW_RACE',
         p_idempotency_key: `source-change-${item.reservationId}`, p_request_hash: '5'.repeat(64)
@@ -304,9 +367,32 @@ export async function testAttemptActivationConcurrency(client, actor) {
         ...lifecycle(`source-${action}`), p_as_of: rolloverAt
       })
     ]);
-    for (const result of race) ok(result, `stayover invalid rollover versus ${action}: no deadlock`);
-    assert(await stayoverSnapshot(item) === before,
-      `stayover invalid rollover versus ${action} keeps schedule/version/assignment/revision/notice/audit unchanged`);
+    for (const result of race) ok(result, `overdue stayover preservation versus ${action}: no deadlock`);
+    assert(await stayoverSnapshot(item, originalNoticeIds) === before,
+      `overdue stayover versus ${action} keeps schedule/version/assignment/revision/notice/audit unchanged`);
+    const overdue = JSON.parse(execFileSync('docker', ['exec', '-i', 'supabase_db_room-management-system-backend',
+      'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      '-c', `select json_build_object(
+        'events',(select count(*) from private.cleaning_overdue_events where cleaning_target_id='${item.targetId}'),
+        'admins',(select count(*) from public.profiles where role='admin' and status='active' and not must_change_password),
+        'enrollments',count(r.recipient_profile_id),'notices',count(n.id),'outboxes',count(o.id),
+        'valid',coalesce(bool_and(n.contract_version=1 and n.category='cleaning_overdue'
+          and n.actor_profile_id='${actorProfileId}' and not n.requires_action
+          and n.cleaning_target_id=e.cleaning_target_id and n.occurred_at=e.occurred_at
+          and n.deep_link_kind='cleaningTarget' and n.deep_link_entity_id=e.cleaning_target_id),false),
+        'selfNotices',count(n.id) filter(where n.recipient_profile_id='${actorProfileId}'),
+        'selfOutboxes',count(o.id) filter(where n.recipient_profile_id='${actorProfileId}'))
+        from private.cleaning_overdue_events e
+        join private.cleaning_overdue_recipients r on r.event_id=e.id
+        left join public.notifications n on n.event_family='cleaning.overdue_admin'
+          and n.source_entity_id=e.id::text and n.recipient_profile_id=r.recipient_profile_id
+        left join private.notification_delivery_outbox o on o.notification_id=n.id
+        where e.cleaning_target_id='${item.targetId}'`
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 }).trim());
+    assert(overdue.events === 1 && overdue.enrollments === overdue.admins &&
+      overdue.notices === overdue.admins && overdue.outboxes === overdue.admins - 1 &&
+      overdue.valid && overdue.selfNotices === 1 && overdue.selfOutboxes === 0,
+    `overdue stayover versus ${action} adds exactly one typed observation with exact admin fanout, no self push`);
   }
 
   // 실제 퇴실이 먼저면 같은 batch에서, 나중이면 다음 batch에서 attempt 1건으로 수렴한다.
@@ -359,5 +445,5 @@ export async function testAttemptActivationConcurrency(client, actor) {
     materialized.current_cleaning_target_id === checkoutTargetId && materialized.status === 'materialized',
   'checkout materialization race preserves target/assignment identity and creates exactly attempt one');
 
-  console.log('Attempt activation races PASS: change (3), unassign, cancellation decision, two activation/rollover workers, stayover invalid rollover versus checkout/change, checkout materialization versus activation; exactly-one/fail-closed state preserved.');
+  console.log('Attempt activation races PASS: change (3), unassign, cancellation decision, two activation/overdue workers without rollover, stayover preservation versus checkout/change, checkout materialization versus activation; exactly-one/fail-closed state preserved.');
 }

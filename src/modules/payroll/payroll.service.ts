@@ -1,8 +1,23 @@
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
+import { PayrollWorkCursorCodec } from './payroll-work-details-cursor.js';
+import { normalizePayrollWorkInput, payrollWorkDatabaseErrorCode, PayrollWorkDetailsError, payrollWorkErrorStatus,
+  payrollWorkProjection, type PayrollWorkInput, type PayrollWorkPage } from './payroll-work-details.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
+import { SupabasePayrollRemittance } from './payroll-remittance-service.js';
+import type { RemittanceInput, RemittanceCommand, RemittanceSetInput, RemittanceProjection,
+  RemittanceHistoryInput, RemittanceHistoryPage } from './payroll-remittance-marker.js';
 import {
+  normalizePayrollAdjustmentBookInput,
+  payrollAdjustmentBookDatabaseError,
+  payrollAdjustmentBookProjection,
+  payrollAdjustmentBookSessionId,
+  type PayrollAdjustmentBookInput,
+  type PayrollAdjustmentBookProjection
+} from './payroll-adjustment-book.js';
+import {
+  assertPayrollResponseSize,
   PAYROLL_CYCLE_PAGE_DEFAULT,
   PAYROLL_ENTRY_PAGE_DEFAULT,
   PAYROLL_NESTED_PREVIEW_MAX,
@@ -86,6 +101,12 @@ export interface PayrollAdjustmentProjection extends PayrollAdjustmentEntry {
   lateCarriedEarningId?: string | undefined; createdAt: string;
 }
 export interface PayrollService {
+  getRemittanceMarker(actor: Actor, input: RemittanceInput): Promise<RemittanceProjection>;
+  setRemittanceMarker(actor: Actor, input: RemittanceSetInput): Promise<RemittanceProjection>;
+  reconfirmRemittanceMarker(actor: Actor, input: RemittanceCommand): Promise<RemittanceProjection>;
+  listRemittanceMarkerHistory(actor: Actor, input: RemittanceHistoryInput): Promise<RemittanceHistoryPage>;
+  listWorkDetails(actor: Actor, input: PayrollWorkInput): Promise<PayrollWorkPage>;
+  getAdjustmentBook(actor: Actor, input: PayrollAdjustmentBookInput): Promise<PayrollAdjustmentBookProjection>;
   list(actor: Actor, input: PayrollListInput): Promise<PayrollListPage>;
   listEntries(actor: Actor, input: PayrollEntriesInput): Promise<PayrollEntriesPage>;
   get(actor: Actor, cycleId: string): Promise<PayrollCycleProjection>;
@@ -333,8 +354,62 @@ function afterEntry(position: PayrollCursorPosition | null): { earnedOn: string 
 }
 
 export class SupabasePayrollService implements PayrollService {
+  private readonly remittance: SupabasePayrollRemittance;
   private readonly cursors: PayrollCursorCodec;
-  constructor(private readonly clients: SupabaseClients, cursorSecret: string) { this.cursors = new PayrollCursorCodec(cursorSecret) }
+  private readonly workCursors: PayrollWorkCursorCodec;
+  constructor(private readonly clients: SupabaseClients, cursorSecret: string) {
+    this.remittance = new SupabasePayrollRemittance(clients, cursorSecret);
+    this.cursors = new PayrollCursorCodec(cursorSecret);
+    this.workCursors = new PayrollWorkCursorCodec(cursorSecret);
+  }
+
+  getRemittanceMarker(actor: Actor, input: RemittanceInput): Promise<RemittanceProjection> { return this.remittance.get(actor, input); }
+  setRemittanceMarker(actor: Actor, input: RemittanceSetInput): Promise<RemittanceProjection> { return this.remittance.command(actor, input, true); }
+  reconfirmRemittanceMarker(actor: Actor, input: RemittanceCommand): Promise<RemittanceProjection> { return this.remittance.command(actor, input, false); }
+  listRemittanceMarkerHistory(actor: Actor, input: RemittanceHistoryInput): Promise<RemittanceHistoryPage> { return this.remittance.history(actor, input); }
+
+  async listWorkDetails(actor: Actor, input: PayrollWorkInput): Promise<PayrollWorkPage> {
+    payrollReader(actor, input.maidProfileId);
+    if (actor.mustChangePassword) throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호 변경이 필요합니다.');
+    if (actor.role !== 'admin' && actor.role !== 'maid') throw new AppError(403, 'PAYROLL_ACCESS_REQUIRED', '주급 조회 권한이 필요합니다.');
+    try {
+      const normalized = normalizePayrollWorkInput(input);
+      const sessionId = payrollAdjustmentBookSessionId(actor);
+      const scope = this.workCursors.scope(actor.profileId, actor.role, sessionId, normalized);
+      const after = normalized.cursor ? this.workCursors.decode(normalized.cursor, scope) : null;
+      const { data, error } = await this.clients.admin.rpc('list_payroll_work_details_page', {
+        p_actor_profile_id: actor.profileId, p_session_id: sessionId, p_expected_actor_role: actor.role,
+        p_week_start: normalized.weekStart, p_maid_profile_id: normalized.maidProfileId, p_kind: normalized.kind,
+        p_after_entry_date: after?.entryDate ?? null, p_after_entry_id: after?.entryId ?? null, p_limit: normalized.limit
+      });
+      if (error) throw new PayrollWorkDetailsError(payrollWorkDatabaseErrorCode(error));
+      assertPayrollResponseSize(data);
+      const page = payrollWorkProjection(data, normalized, after);
+      const response: PayrollWorkPage = { weekStart: page.weekStart, maidProfileId: page.maidProfileId, kind: page.kind,
+        summary: page.summary, entries: page.entries, nextCursor: page.hasMore && page.lastEntryDate && page.lastEntryId
+          ? this.workCursors.encode(scope, { entryDate: page.lastEntryDate, entryId: page.lastEntryId }) : null };
+      assertPayrollResponseSize(response);
+      return response;
+    } catch (error) {
+      if (error instanceof PayrollWorkDetailsError) throw new AppError(payrollWorkErrorStatus(error.code), error.code, '주급 상세 정보를 처리하지 못했습니다.');
+      throw error;
+    }
+  }
+
+  async getAdjustmentBook(actor: Actor, input: PayrollAdjustmentBookInput): Promise<PayrollAdjustmentBookProjection> {
+    if (actor.role !== 'admin') throw payrollAdjustmentBookDatabaseError({ message: 'ADMIN_REQUIRED' });
+    if (actor.mustChangePassword) throw payrollAdjustmentBookDatabaseError({ message: 'PASSWORD_CHANGE_REQUIRED' });
+    const normalized = normalizePayrollAdjustmentBookInput(input);
+    const { data, error } = await this.clients.admin.rpc('get_payroll_adjustment_book', {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: payrollAdjustmentBookSessionId(actor),
+      p_maid_profile_id: normalized.maidProfileId,
+      p_week_start: normalized.weekStart
+    });
+    if (error || !data) throw payrollAdjustmentBookDatabaseError(error);
+    assertPayrollResponseSize(data);
+    return payrollAdjustmentBookProjection(data, normalized);
+  }
 
   private projectCycle(value: unknown, actor: Actor, weekStart: string): PayrollCycleProjection {
     const parsed = internalCycle(value);

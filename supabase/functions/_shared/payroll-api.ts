@@ -1,6 +1,7 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
   assertPayrollCursorConfigured,
+  assertPayrollResponseSize,
   type CursorPosition,
   decodePayrollCursor,
   encodePayrollCursor,
@@ -53,6 +54,103 @@ function date(value: unknown): string {
     invalid("weekStart에 유효한 날짜가 필요합니다.");
   }
   return value;
+}
+
+// This new read accepts the full SQL Gregorian year range without Date.UTC's 0..99 alias.
+function adjustmentBookDate(value: unknown): string {
+  if (typeof value !== "string" || !datePattern.test(value)) invalid();
+  const [year, month, day] = value.split("-").map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [
+    31,
+    leap ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  if (
+    year < 1 || year > 9999 || month < 1 || month > 12 || day < 1 ||
+    day > monthDays[month - 1]
+  ) invalid("weekStart에 유효한 날짜가 필요합니다.");
+  return value;
+}
+
+function adjustmentBookQuery(request: Request): {
+  maidProfileId: string;
+  weekStart: string;
+} {
+  const search = new URL(request.url).searchParams;
+  for (const key of search.keys()) {
+    if (
+      !["maidProfileId", "weekStart"].includes(key) ||
+      search.getAll(key).length !== 1
+    ) invalid("허용되지 않거나 중복된 query 항목입니다.");
+  }
+  return {
+    maidProfileId: uuid(search.get("maidProfileId"), "maidProfileId"),
+    weekStart: adjustmentBookDate(search.get("weekStart")),
+  };
+}
+
+function adjustmentBookDatabaseError(
+  error: { message?: string } | null,
+): EdgeError {
+  // Isolated from legacy command mapping: a read must not reinterpret mutation errors.
+  const messages: Array<[string, number, string]> = [
+    ["SESSION_REVOKED", 401, "로그인 세션이 만료되었습니다."],
+    ["PASSWORD_CHANGE_REQUIRED", 403, "비밀번호 변경이 필요합니다."],
+    ["ADMIN_REQUIRED", 403, "관리자 권한이 필요합니다."],
+    ["PAYROLL_MAID_NOT_FOUND", 404, "메이드 계정을 찾을 수 없습니다."],
+    ["PAYROLL_WEEK_MUST_START_MONDAY", 400, "weekStart는 월요일이어야 합니다."],
+    ["PAYROLL_WEEK_NOT_CLOSED", 409, "미래 주차는 조회할 수 없습니다."],
+  ];
+  for (const [code, status, message] of messages) {
+    if (error?.message === code) return new EdgeError(status, code, message);
+  }
+  return payrollDatabaseError(null);
+}
+
+export async function getPayrollAdjustmentBook(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  admin(actor);
+  const input = adjustmentBookQuery(request);
+  const { data, error } = await clients.admin.rpc(
+    "get_payroll_adjustment_book",
+    {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: sessionId,
+      p_maid_profile_id: input.maidProfileId,
+      p_week_start: input.weekStart,
+    },
+  );
+  if (error) throw adjustmentBookDatabaseError(error);
+  assertPayrollResponseSize(data);
+  const row = object(data);
+  const fields = ["maidProfileId", "weekStart", "currentBookVersion"];
+  if (
+    Object.keys(row).length !== fields.length ||
+    fields.some((key) => !Object.hasOwn(row, key)) ||
+    row.maidProfileId !== input.maidProfileId ||
+    row.weekStart !== input.weekStart ||
+    typeof row.currentBookVersion !== "number" ||
+    !Number.isSafeInteger(row.currentBookVersion) || row.currentBookVersion < 0
+  ) throw payrollDatabaseError(null);
+  return {
+    maidProfileId: input.maidProfileId,
+    weekStart: input.weekStart,
+    currentBookVersion: row.currentBookVersion,
+  };
 }
 
 function noQuery(request: Request): void {

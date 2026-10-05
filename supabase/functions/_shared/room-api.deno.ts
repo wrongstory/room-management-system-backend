@@ -382,17 +382,34 @@ Deno.test("room routes require a changed password and exact business admin", asy
 });
 
 Deno.test("room list serviceDate accepts one real calendar date only", () => {
-  assert(
-    roomListServiceDate(readRequest("/v1/rooms?serviceDate=2026-09-22")) ===
+  for (
+    const value of [
+      "0001-01-01",
+      "0099-12-31",
+      "0096-02-29",
+      "0100-01-01",
+      "2000-02-29",
       "2026-09-22",
-    "valid date",
-  );
+      "9999-12-31",
+    ]
+  ) {
+    assert(
+      roomListServiceDate(readRequest(`/v1/rooms?serviceDate=${value}`)) ===
+        value,
+      `${value} valid date without 1900 year remapping`,
+    );
+  }
   assert(
     roomListServiceDate(readRequest("/v1/rooms")) === null,
     "omitted date",
   );
   for (
     const path of [
+      "/v1/rooms?serviceDate=0000-01-01",
+      "/v1/rooms?serviceDate=0099-02-29",
+      "/v1/rooms?serviceDate=0100-02-29",
+      "/v1/rooms?serviceDate=1900-02-29",
+      "/v1/rooms?serviceDate=2026-02-29",
       "/v1/rooms?serviceDate=2026-02-30",
       "/v1/rooms?serviceDate=2026-9-22",
       "/v1/rooms?serviceDate=2026-09-22&serviceDate=2026-09-23",

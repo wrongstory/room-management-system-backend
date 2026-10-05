@@ -100,7 +100,7 @@ export async function testAttemptExecutionConcurrency(client, actorProfileId) {
       where n.source_entity_kind='cleaning_assignment' and n.source_entity_id='${replay.assignmentId}'))
     from public.notifications where id='${noticeId}'::uuid`));
   assert(firstResolution.resolvedAt && firstResolution.notificationCount === 1 && firstResolution.outboxCount === 1,
-    'concurrent start resolves the current actionable notice without creating inbox or outbox rows');
+    'concurrent start resolves the current actionable notice without adding assignment inbox or outbox rows');
   ok(await start(replay, startKey), 'start replay after concurrent winner');
   const replayResolution = JSON.parse(psqlScalar(`select json_build_object('resolvedAt',resolved_at)
     from public.notifications where id='${noticeId}'::uuid`));

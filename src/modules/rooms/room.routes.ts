@@ -15,7 +15,7 @@ const issueIdSchema = z.object({ roomId: z.uuid(), issueId: z.uuid() });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
 const expectedVersionSchema = z.number().int().positive();
 const roomListQuerySchema = z.object({
-  serviceDate: z.iso.date().optional()
+  serviceDate: z.iso.date().refine((value) => !value.startsWith('0000-')).optional()
 }).strict();
 const roomEventQuerySchema = z
   .object({
