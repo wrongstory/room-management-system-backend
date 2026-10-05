@@ -1,5 +1,7 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+> 2026-10-05 #329/#389 bb4fa40 통합 로컬 checkpoint: Node1,525/70·LF fresh103/cleanup·전체SQL81/4,942·실제100→101 upgrade·제한 세션 경합7 PASS, 원본304/사본304 drift0. raw strict FAIL9/exit1과 exact warning9/catalog3 PASS는 별개다. #389는 exact catalog fixture만 보완하며 원본 installer·runtime 권한은 불변이다. 후속 실제7/18→7/19, 최신 #383/#388/#382 재통합·전체27 upgrades·독립 QA·새 CI·dev/운영·프런트 UAT는 미완료다. [정확한 실행 범위](./LIMITED_SESSION_REENTRY.md#2026-10-05-389-caller-catalog--bb4fa40-통합-로컬-checkpoint)를 따른다. 아래 strict17/101 결과는 당시 기록이다.
+
 ## 2026-10-04 #329 별도 백엔드 로컬 검증 checkpoint
 
 | 범위 | source 상태 | 운영·프런트 상태 |
@@ -1775,6 +1777,12 @@ Phase C는 production source에 포함됐지만 안전 fixture 기반 hosted mut
 - [ ] release/main / production Edge 배포
 
 기존 #210 무제한 DB projection은 이전 bundle 호환을 위해 존재하지만, #212 이후 Fastify/Edge HTTP는 bounded page RPC만 사용한다. cursor를 decode·수정·다른 객실/조회에 재사용하지 않는다.
+
+#### #322 실제 Edge GET 진입점 정합화
+
+두 GET의 status 전용 중복 검사를 제거해 위 `limit/cursor` 계약이 실제 `handleApiRequest`에서 기존 shared parser까지 도달하도록 한다. 합성 RPC 125행의 50/50/25 traversal, limit 1/100·잘못된 query, canonical HMAC 변조·교차 actor/room/stream cursor, 권한/비밀번호/세션 거부와 `no-store`를 진입점 회귀로 검사한다. 새로운 TTL·DB/migration·권한·OpenAPI schema 변경은 없다. 최신 exact-head CI·QA·dev 통합 결과는 [PR333](https://github.com/wrongstory/room-management-system-backend/pull/333)에 별도 기록하며, 운영 Edge 배포와 실제 데이터의 다중 페이지 조회 완료를 뜻하지 않는다.
+
+프런트 scoped 비교 기준은 main `d509b44b1371f25d73891e04d355b0cb0e923f5f`와 dev `09ed28446a4fd43919cddb29ebe442b848548ab8`이다. dev의 `livePageItems`는 `status=actionable/open`과 응답 `nextCursor`를 사용하며 limit은 생략해 서버 기본 50과 호환된다. main 와이어프레임에는 두 목록의 실제 GET 연결이 없으므로 프런트/운영 사용 완료로 표시하지 않는다. 전역 제품 snapshot은 승격하지 않으며 프런트 코드는 변경하지 않는다.
 
 ### #215 객실 이벤트 타임라인 — production source 반영
 

@@ -1,5 +1,7 @@
 # 백엔드 서버 설계
 
+> 2026-10-05 #329 최신 dev 통합 후보는 기존 A안·21 baseline caller의 strict source 분류와 최종 snapshot6/fresh18/core2 matrix를 그대로 유지한다. `dev@bb4fa40`의 #373/#384를 정상 merge한 source이며 #383/#382 후속 dev 재통합·fresh/전체 DB·독립 QA·새 exact-head CI는 미완료다. 원본 #329 migration/LF SHA는 불변이고 개발 manifest의 현재 head는 `photo_collection_provider_context_axis`, 이전 head는 `db_static_warning_remediation`인 103개 구성이어야 한다. 과거 strict17/101 checkpoint를 현재 검증으로 재사용하지 않으며 원본 strict FAIL9·exact9 비교 gate를 분리한다.
+
 ## #329 기존 세션 제한 업무 재진입 — 구현 중
 
 후속101번째 append는 최초 active→limited 전환 transaction의 실제 visible live session을
@@ -21,6 +23,14 @@ mutation을 승인하지 않으며 이 보완을 전체 기존 RPC의 post-lock 
 로컬 기능·경합 검증과 독립 소스 QA는 완료했고 기존 strict17 FAIL을 명시한 진단용 Draft 공유 후보이다.
 CI·dev 통합·운영·프런트 UAT는 미완료다. [계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
 v0.8.0 고정 후보·운영/recovery·Auth 설정·프런트는 변경하지 않는다.
+
+## #363/#373 DB warning 보완 후보
+
+기존 함수7개의 body-only append와 private owner-only STABLE developer snapshot guard를 추가한다.
+명령용 developer guard는 원문·VOLATILE을 유지하고, history/catalog는 statement 시각을 사용한다.
+PIN row lock/FOUND·검수 guard·overdue emitter는 실행을 보존한다. public signature·ACL·API shape와
+모든 테이블/원장/RLS를 변경하지 않는다. 원본 strict FAIL과 exact9 비교 PASS를 구분한다.
+[사용자 결정·시간/권한·검증 경계](./DB_STATIC_WARNING_BASELINE.md)를 따른다. 운영 변경은 아니다.
 
 ## #331 표시 전용 송금·재확인 구현 후보
 
@@ -137,6 +147,12 @@ Supabase-only production runtime은 v0.2.0 운영 smoke를 거쳐 채택됐다. 
 SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE이 없고 READ ONLY·3초 statement·500ms lock timeout이
 기본값이다. Python adapter는 AST allowlist, 단일 SELECT, 제한된 EXPLAIN, 200행/256KiB와 cancel을
 중복 적용한다. hosted pooler/credential/GUI와 production/recovery 적용은 포함하지 않는다.
+
+### #322 객실 운영 페이지 조회 진입점 정합화
+
+Edge의 두 GET 진입점은 `status`만 허용하던 중복 검사를 제거하고 기존 `roomOperationPageInput`에 query 검증을 위임한다. `status/limit/cursor`만 각각 한 번 허용하며, 기본 50·최대 100, strict 정수와 서명·actor/room/stream scope 검증은 Fastify와 동일하다. 잘못된 status/중복/unknown key는 `INVALID_ROOM_OPERATION_QUERY`, 잘못된 limit은 `ROOM_OPERATION_PAGE_LIMIT_INVALID`, 잘못된 cursor는 `INVALID_ROOM_OPERATION_CURSOR`로 구별한다. 관리자·live session과 성공/오류 `no-store` 경계는 유지한다.
+
+회귀는 helper 직접 호출 외에 실제 `handleApiRequest`를 통해 합성 RPC의 125건을 50/50/25로 조회하고 형식 오류·canonical 길이를 보존한 HMAC 서명 변조·타 관리자·타 객실·타 stream cursor를 거부한다. 메이드/개발자·비밀번호 변경 필요·인증/세션 거부 시 page RPC 미호출과 `no-store`도 검사한다. 실제 DB/운영 다중 페이지 검증과는 구분한다. 기존 cursor에는 시간 만료 필드가 없으므로 새 TTL을 추가하지 않으며, 만료/폐기된 인증 session은 매 요청 기존 인증·DB 검증에서 거부한다. migration·OpenAPI schema·생성 client 변경은 없다. 운영 반영은 별도 release gate다.
 
 ### #215 객실 이벤트 타임라인
 
@@ -1000,6 +1016,15 @@ OpenAPI도 같은 v8 `maxPhotos` metadata를 검증한다. `20260916090000_extra
 `extra-proof`에만 0~10장 current collection을 열고, client item UUID·collection/item CAS·append/replace/개별 tombstone delete·표시 순서 보존·불변 제출 binding을 적용한다. 일반 slot과 pre-A snapshot은 단일 current pointer를 유지한다. Node/Edge는 collection upload·delete 경로와 slot/submission projection을 같은 계약으로 제공한다. 운영 DB 적용과 template 재게시는 포함하지 않는다.
 
 ## API 단계
+
+### 사진 provider context의 revision 축 (#384)
+
+현재 v9 flat evidence는 `cleaning-proof` 최소1/최대20장, 선택 `bomb-proof`/`issue-proof`
+각 최대10장이다. 위 v8 extra-proof-only 설명은 과거 계약이며 기존 snapshot은 보존한다.
+provider context는 ordinary의 current pointer CAS와 collection의 state/item CAS를 구분한다.
+최신 admitted actor/session·assignment·attempt lock·lease fence/status/quota를 유지하고,
+worker reconciliation에 business CAS를 새로 추가하지 않는다. 최신 함수의 CAS fragment만
+교체하는 append 전략과 후보/실제 검증 구분은 [#384 기록](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)을 따른다.
 
 현재:
 

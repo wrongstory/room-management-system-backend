@@ -1,6 +1,10 @@
 # 개발 오케스트레이션·source 승인 기준
 
-## 2026-10-03 최신 진행 결정: 릴리스 준비와 #329 개발 분리
+> 2026-10-05 #329/#389의 bb4fa40 통합 후보는 Node1,525/70·실제 LF fresh103/전체SQL81·4,942/100→101 upgrade/제한 세션 경합7/최종103 cleanup PASS, 원본304·사본304 drift0까지 완료했다. 원본 strict FAIL9와 exact9/catalog3 gate PASS를 구분한다. #389는 승인된 두 후속 signature만 정확히 검사하는 fixture이며 원본 installer·권한을 변경하지 않는다. 실제 후속7/18→7/19와 최신 dev의 #383/#388/#382 재통합·최종27 upgrades·QA·새 CI·dev 승격은 후속이다. 기존 v0.8.0은 보존하고 최신 기능은 #387 v0.9.0으로 준비한다. 운영/백업/복원/프런트 UAT 완료는 아니다. [현재 실행 checkpoint](./LIMITED_SESSION_REENTRY.md)를 따른다.
+
+> 2026-10-05 #329 병렬 통합 후보: 별도 managed worktree에서 기존 PR #372/source `8941039`와 `dev@bb4fa40`(#384 source/dev 통합)을 정상 merge한다. A안의 기존 세션만 허용하는 정책과 원본 migration/LF SHA·snapshot6/fresh18/core2·TTL/CAS/receipt를 보존한다. #329 upgrade·#373 exact9/static upgrade·#384 concurrency를 모두 품질 명령에 유지하며 raw strict FAIL9를 PASS로 숨기지 않는다. #383/#382 최신 dev 통합 뒤 정상 재통합·fresh/전체 DB·독립 QA·새 exact-head CI가 필수다. 현재 source/dev·운영 완료를 선언하지 않으며 기존 PR372의 CI와 아래 과거 strict17/101 checkpoint는 새 통합 PASS가 아니다. 이후 #318 → #330 → #332 순서와 실제 백업/복원의 모든 개발 후속·운영 배포 전 필수 경계를 유지한다. #336 reporter 정책·운영 Auth 설정·PIN·송금·프런트 변경은 포함하지 않는다.
+
+## 과거 2026-10-03 진행 결정: 릴리스 준비와 #329 개발 분리
 
 사용자는 운영 백업·보안 DB 연결 준비 동안 #329의 별도 개발 병행을 승인했다.
 `release/v0.8.0@5408c54e032273cdf300d90b91ebda38c9587a7c`는 고정하며 #329를 섞지 않는다.
@@ -21,6 +25,12 @@
 사용자 승인에 따라 기존 strict17 FAIL을 명시한 진단용 commit·push·Draft PR으로 exact-head CI를 확인한다.
 CI·dev 통합·운영·프런트 UAT는 미완료이며 이전 SHA 결과나 로컬 PASS를 운영 완료로 승격하지 않는다.
 다음 순서는 #329 Draft CI·후속 gate 확인이며 #317이나 운영 승격으로 건너뛰지 않는다.
+
+> 2026-10-05 현재 순서: #383 실제 저장 이름은 Draft PR #385/head `6884ec7`의 application·migration CI `37230502851` PASS이며 미병합이다. #384의 두 번째 사진 provider context 충돌은 dev `859f7cd`에서 별도102 append로 보완했다. 첫 syntax/기대 오류 분류 실패를 보완한 뒤 Node1,437·Edge474·Python95·fresh102·26 upgrades/SQL4,802·static/KST145·기존6+신규1 전체경합/cleanup·local 합성복원·warn 이상 advisors0·원본299 SHA 보존 PASS다. 독립 소프트웨어 QA PASS·신규 P0/P1/P2=0이며 새 exact-head CI, 최종 source/dev 승인·보호된 통합은 후속 gate다. 이후 #329 기존 PR #372의 최신 dev 통합·재검증 → #318 → #330 → #332 순서를 유지한다. [실제 검증과 남은 gate](./PHOTO_COLLECTION_PROVIDER_CONTEXT.md)를 따른다. 프런트 소스·운영 DB/API·복구 DB·실제 Drive·실제 백업·릴리스/태그는 변경하지 않는다. 실제 백업/복원은 모든 개발 이후 후속, 운영 배포 전 필수다. 아래 예전 순서/백업 선행/Draft 표현은 해당 시점의 기록이며 현재 완료로 승격하지 않는다.
+
+> 2026-10-04 최신 승인: 사용자가 #374 → #375의 dev 통합을 승인했다. #363/#373 PR #374는 source `8edc9fb1`의 required CI `37165344729` application/migration PASS·독립 QA98/100·미해결 P0/P1/P2=0을 확인하고 dev에 squash `a103db80d4e849db64b79211cff2de96a00a7193`로 병합했다. source/dev tree `4384747a650026c2359c309897f015441b49fb92`는 같다. 경고8개 보완 및 호환9개 exact baseline gate는 통합됐지만 원본 strict는 FAIL9/exit1을 유지한다. [계약과 과거 실행 기록](./DB_STATIC_WARNING_BASELINE.md)을 따른다. 아래 strict17/Draft/미병합 표현은 과거 checkpoint다.
+
+> [#371 알림 fixture drain](./NOTIFICATION_DELIVERY_FIXTURE_DRAIN.md) PR #375의 기존 source `6177eb93`/100 migrations는 required CI `37168729600` application/migration PASS·독립 QA98이었다. 위 dev/101 통합본의 실제 local Node1,432·Edge470·Python95·fresh101·26 upgrades/SQL4,718·exact9 gate/static upgrade·KST145·6경합/cleanup·독립 QA98도 PASS다. 최종 drain93회/현재 처리 가능 잔여0이며 원본294개 raw SHA를 보존했다. 새 exact-head CI와 dev 병합은 commit 이후 후속 gate이며 최신 판정·source/dev mapping은 PR #375/#371에 기록한다. 기존100 PASS를 새101 통합본이나 동결 release PR #366의 PASS로 대체하지 않는다. #329 Draft PR #372·release/main·운영 DB/API·태그는 이번 dev 통합 승인 범위에서 변경하지 않는다. 아래 과거 checkpoint를 운영 완료로 해석하지 않는다.
 
 > 2026-10-03 최신 승인: 사용자가 순차 개발과 중간 릴리스·운영 배포·문서 정리를 승인했다. #331은 PR361의 source087407b → dev squash eb1ec3e로 통합됐다. exact-head CI37111364892 application/migration(전체 upgrade·SQL·KST·경합·cleanup) PASS, 독립 QA98/100·범위 내 미해결 P0/P1/P2=0이다. 아래 #331 후보/Draft·진단용 승인만이라는 문구는 과거 checkpoint다. 기존 strict lint17/INFO inventory FAIL은 #363, 단발 CAS 원인 추적은 #362로 유지한다.
 

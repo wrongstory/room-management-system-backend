@@ -1,5 +1,7 @@
 # Room Management System ERD 초안
 
+> 2026-10-05 #329 최신 dev 통합 후보: 원래100개 뒤의101번째 append를 수정·재번호화하지 않고 `dev@bb4fa40`의 #373/#384와 정상 병합한 103개 구성을 검증한다. A안·immutable 최초 세션 자격·TTL·권한·기존 원장을 유지하며 새로운 schema 변경은 추가하지 않는다. 아래 기존 strict17/101 검증은 당시 이력이다. 현재 원본 strict FAIL9와 exact9 비교 gate를 구분하고 #383/#382 재통합·fresh/전체 DB·독립 QA·새 exact-head CI·운영/UAT는 별도 미완료다.
+
 ## #329 제한 세션 eligibility 보강 — 구현 중
 
 101번째 append 후보는 기존 capability grant/revocation을 보존하고 최초 제한 전환의
@@ -12,6 +14,10 @@ finish 완료 후 upload grant는 최초 root를 이어받고 정상 최초24h �
 로컬 schema·RPC·기능·경합 검증과 독립 소스 QA는 완료했으며 기존 strict17 FAIL이 남은 진단용 후보다.
 CI·dev 통합·운영 배포·프런트 UAT 완료 선언이 아니다.
 [정본 계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
+
+> #363/#373 A안 후보는 기존 함수7개 body-only 보완과 owner-only snapshot guard 한 개뿐이다.
+> 테이블/컬럼/관계/FK/index/RLS/원장·receipt는 그대로다. 정확한 호환 경고9개 기준과
+> 원본 strict FAIL 보존은 [DB 정적 검사 계약](./DB_STATIC_WARNING_BASELINE.md)을 따른다.
 
 > #331 신규99 migration 구현 후보는 `private.payroll_remittance_markers` current와
 > `private.payroll_remittance_marker_revisions` 불변 이력을 추가한다. maid/week 표시 CAS와

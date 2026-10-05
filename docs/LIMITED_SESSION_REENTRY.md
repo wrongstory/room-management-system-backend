@@ -1,5 +1,40 @@
 # #329 기존 로그인 세션의 제한 업무 재진입
 
+## 2026-10-05 #389 caller catalog / bb4fa40 통합 로컬 checkpoint
+
+기존 source `8941039`에 `dev@bb4fa40`를 정상 merge한 미커밋 후보에서 실행했다.
+원본 installer `20261003140716_limited_existing_session_discovery.sql`의 canonical LF SHA
+`dadd5abddedb74e9e66f20f1b970e53d3398ddabf0764b926a713aeee6e8b603`는 그대로다.
+#389는 installer를 완화하거나 새 runtime 권한을 추가하는 migration이 아니라,
+기존 exact catalog 검사를 승인된 후속 두 signature에만 확장하는 회귀 fixture다.
+
+- 실제 local LF fresh103 및 마지막 fresh103 cleanup: PASS.
+- 원본 strict lint: FAIL9/exit1 유지. 정확한 warning9/catalog3 baseline: PASS.
+- 전체 SQL `supabase test db supabase/tests --local`: 81 files / 4,942 assertions PASS.
+- 실제 `test-limited-existing-session-upgrade.mjs`: 100→101의 격리 upgrade PASS,
+  old whole rows/receipts/catalog 보존·legacy no-backfill·기존 세션만 freeze 검사 후 fresh103 복원 PASS.
+- 실제 `test-limited-existing-session-concurrency.mjs`: 지연 session commit 제외,
+  종료 replay/승계, 실제 revoke 및 잠금 뒤 hard expiry, receipt writer 뒤2h/24h TTL rollback,
+  사진/제출 경합·동일 제출 수렴·잠금 순서 검사를 포함한 7개 PASS checkpoint.
+- `npm run ci:quality`: 1,525 tests / 70 files, lint/typecheck/build/OpenAPI PASS.
+  #389의 추가42 source/mock 검사는 실제 pgTAP 실행과 별개다.
+- 승인된 LF 검증본의 원본304 hash와 대응 사본304: 실행 후 drift0.
+
+증적은 `.tmp/qa329-catalog-{db-verify,baseline,whole-sql,upgrade,races,final-cleanup}.log`와
+`.tmp/qa389-session-caller-quality.log`에 보존하며 커밋하지 않는다.
+이번 실제 DB의 caller는 기존 snapshot6/fresh18/core2다. 후속 #318의 정확한
+`public.get_room_board_projection(uuid,uuid,date,uuid)` STABLE snapshot과 #332의
+`public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)` VOLATILE fresh가
+설치된 경우에만 각각7/18→7/19를 허용한다. overload·알 수 없는 caller·순서·body·
+owner/ACL/security/search_path/language/volatility drift는 계속 거부한다.
+7/18·7/19의 실제 DB 검증은 두 후속 기능 통합 후에 수행해야 한다.
+
+최신 dev의 #383/#388/#382 재통합, 그 최종 source의 전체27 upgrade·Edge/Python·독립 QA·
+새 exact-head CI·dev 병합은 아직 미완료다. 아래 최초101의 전체27 upgrade PASS를 이
+새103 후보의 전체 upgrade 실행으로 승격하지 않는다. v0.8.0은 보존하고 최신 기능은
+#387 v0.9.0으로 준비하며 main/운영 DB/API·백업/복원·프런트 UAT는 NOT RUN이다.
+아래 이전 strict17/101 및 진단용 공유 경계는 해당 시점의 기록이다.
+
 ## 확정 정책과 작업 상태
 
 사용자 A안: 유효하고 폐기되지 않은 기존 로그인 세션에서만 제한 업무를 허용한다.

@@ -17,33 +17,127 @@ select ok((select strpos(prosrc,'select * into result from private.assert_attemp
 select ok((select strpos(prosrc,'clock_timestamp')=0 and strpos(prosrc,'statement_timestamp')=0
   from pg_proc where oid='private.assert_attempt_actor_session_at_clock(uuid,uuid,boolean,timestamptz)'::regprocedure),
   'core cannot accidentally choose a different clock');
+
+-- #389: only these exact, separately approved post-#329 append signatures may
+-- extend the installed catalog. This never edits the migration's strict initial
+-- 21 / final 6 snapshot + 18 fresh + 2 core installation inventories.
+-- BEGIN APPROVED SESSION CALLER EXTENSIONS
+create temp table limited_session_caller_extensions(signature text primary key,qualified_name text unique,
+  helper_kind text not null,volatility text not null);
+insert into limited_session_caller_extensions values
+  ('public.get_room_board_projection(uuid,uuid,date,uuid)','public.get_room_board_projection','snapshot','s'),
+  ('public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)','public.list_room_reports_page','fresh','v');
+-- END APPROVED SESSION CALLER EXTENSIONS
+select ok(not exists(select 1 from limited_session_caller_extensions e
+  join pg_namespace n on n.nspname=split_part(e.qualified_name,'.',1)
+  join pg_proc p on p.pronamespace=n.oid and p.proname=split_part(e.qualified_name,'.',2)
+  where p.oid is distinct from to_regprocedure(e.signature)::oid),
+  'approved extension names cannot hide a missing exact signature or an extra overload');
+select ok(to_regprocedure('public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)') is null
+  or to_regprocedure('public.get_room_board_projection(uuid,uuid,date,uuid)') is not null,
+  'approved installation order is baseline 6/18 then room board 7/18 then registered reports 7/19');
+select ok(coalesce((select p.prokind='f' and l.lanname='plpgsql' and p.provolatile::text=e.volatility
+  and p.prosecdef and p.proowner='postgres'::regrole and p.proconfig=array['search_path=""']::text[]
+  and (length(p.prosrc)-length(replace(p.prosrc,case when e.helper_kind='snapshot'
+    then 'private.assert_attempt_actor_session(' else 'private.assert_attempt_actor_session_fresh(' end,'')))
+    /length(case when e.helper_kind='snapshot' then 'private.assert_attempt_actor_session('
+      else 'private.assert_attempt_actor_session_fresh(' end)=1
+  and strpos(p.prosrc,case when e.helper_kind='snapshot'
+    then 'private.assert_attempt_actor_session_fresh(' else 'private.assert_attempt_actor_session(' end)=0
+  and strpos(p.prosrc,'private.assert_attempt_actor_session_at_clock(')=0
+  and (select array_agg(a.grantor::text||':'||a.grantee::text||':'||a.privilege_type||':'||a.is_grantable::text
+    order by a.grantor,a.grantee,a.privilege_type,a.is_grantable)
+    from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a)
+    = array[(p.proowner::text||':'||p.proowner::text||':EXECUTE:false'),
+      (p.proowner::text||':'||('service_role'::regrole::oid)::text||':EXECUTE:false')]
+  from pg_proc p join pg_language l on l.oid=p.prolang where p.oid=to_regprocedure(e.signature)),false),
+  'installed approved extension has exact helper/attributes/owner/service-only ACL: '||e.signature)
+from limited_session_caller_extensions e where to_regprocedure(e.signature) is not null;
+
 select is((select array_agg(n.nspname||'.'||p.proname order by n.nspname,p.proname)
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
   where n.nspname in ('public','private') and strpos(p.prosrc,'private.assert_attempt_actor_session(')>0),
-  array['public.get_cleaning_attempt_lifecycle_impact','public.get_limited_cleaning_attempt',
+  (select array_agg(name order by name) from (select unnest(array[
+    'public.get_cleaning_attempt_lifecycle_impact','public.get_limited_cleaning_attempt',
     'public.get_offline_event_quarantine','public.list_checkout_cleaning_templates',
-    'public.list_offline_event_quarantine','public.list_room_type_catalog']::text[],
-  'exact six public read-only RPCs retain the original snapshot helper with no mutation caller');
-select ok((select count(*)=6 and bool_and(p.provolatile='s')
+    'public.list_offline_event_quarantine','public.list_room_type_catalog']::text[]) name
+    union all select qualified_name from limited_session_caller_extensions
+      where helper_kind='snapshot' and to_regprocedure(signature) is not null) expected),
+  'exact six baseline snapshot RPCs plus only installed approved snapshot signatures');
+select ok(coalesce((select count(*)=6+(select count(*) from limited_session_caller_extensions
+    where helper_kind='snapshot' and to_regprocedure(signature) is not null) and bool_and(p.provolatile='s')
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-  where n.nspname in ('public','private') and strpos(p.prosrc,'private.assert_attempt_actor_session(')>0),
-  'all six snapshot RPCs preserve STABLE GET/HEAD and POST read-only attributes');
+  where n.nspname in ('public','private') and strpos(p.prosrc,'private.assert_attempt_actor_session(')>0),false),
+  'all baseline and approved snapshot RPCs preserve STABLE GET/HEAD and POST read-only attributes');
 select is((select array_agg(n.nspname||'.'||p.proname order by n.nspname,p.proname)
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
   where n.nspname in ('public','private') and strpos(p.prosrc,'private.assert_attempt_actor_session_fresh(')>0),
-  array['private.assert_photo_upload_actor','private.cancel_unavailable_cleaning_assignment_at',
+  (select array_agg(name order by name) from (select unnest(array[
+    'private.assert_photo_upload_actor','private.cancel_unavailable_cleaning_assignment_at',
     'private.complete_limited_attempt_at','private.create_cleaning_submission_session_core',
     'private.manage_cleaning_attempt_lifecycle_at','private.resolve_offline_quarantine_at',
     'private.start_attempt_with_lease_at','private.sync_attempt_event_at',
     'public.correct_room_occupancy','public.get_photo_upload_receipt_with_session',
     'public.list_limited_cleaning_attempts','public.list_room_events','public.list_room_issues',
     'public.list_room_issues_page','public.list_room_operation_blocks','public.list_room_operation_blocks_page',
-    'public.override_room_display_status','public.publish_checkout_cleaning_template']::text[],
-  'exact eighteen direct fresh callers include every baseline volatile caller and three new session-bound cores');
-select ok((select count(*)=18 and bool_and(p.provolatile='v')
+    'public.override_room_display_status','public.publish_checkout_cleaning_template']::text[]) name
+    union all select qualified_name from limited_session_caller_extensions
+      where helper_kind='fresh' and to_regprocedure(signature) is not null) expected),
+  'exact eighteen baseline direct fresh callers plus only installed approved fresh signatures');
+select ok(coalesce((select count(*)=18+(select count(*) from limited_session_caller_extensions
+    where helper_kind='fresh' and to_regprocedure(signature) is not null) and bool_and(p.provolatile='v')
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-  where n.nspname in ('public','private') and strpos(p.prosrc,'private.assert_attempt_actor_session_fresh(')>0),
-  'fresh caller attributes are explicitly preserved as VOLATILE');
+  where n.nspname in ('public','private') and strpos(p.prosrc,'private.assert_attempt_actor_session_fresh(')>0),false),
+  'baseline and approved fresh caller attributes are explicitly preserved as VOLATILE');
+select is((select array_agg(n.nspname||'.'||p.proname order by n.nspname,p.proname)
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+  where n.nspname in ('public','private') and strpos(p.prosrc,'private.assert_attempt_actor_session_at_clock(')>0),
+  array['private.assert_attempt_actor_session','private.assert_attempt_actor_session_fresh']::text[],
+  'exact two original clock-core callers remain unchanged by approved extensions');
+
+-- A signature/OID comparison additionally rejects removed baseline signatures
+-- replaced by same-name overloads, even when the name/count comparisons match.
+select is((select array_agg(p.oid order by p.oid) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+  where n.nspname in ('public','private') and (strpos(p.prosrc,'private.assert_attempt_actor_session(')>0
+    or strpos(p.prosrc,'private.assert_attempt_actor_session_fresh(')>0)),
+  (select array_agg(to_regprocedure(signature)::oid order by to_regprocedure(signature)::oid) from (
+    values ('public.get_limited_cleaning_attempt(uuid,uuid,uuid,bigint)'),
+      ('public.get_cleaning_attempt_lifecycle_impact(uuid,uuid,uuid)'),
+      ('public.get_offline_event_quarantine(uuid,uuid,uuid)'),
+      ('public.list_offline_event_quarantine(uuid,uuid,timestamptz,timestamptz,integer,timestamptz,uuid)'),
+      ('public.list_checkout_cleaning_templates(uuid,uuid)'),('public.list_room_type_catalog(uuid,uuid)'),
+      ('private.manage_cleaning_attempt_lifecycle_at(uuid,uuid,uuid,bigint,uuid,bigint,bigint,text,jsonb,text,text,text,timestamptz)'),
+      ('private.complete_limited_attempt_at(uuid,uuid,uuid,bigint,uuid,bigint,text,text,timestamptz)'),
+      ('private.start_attempt_with_lease_at(uuid,uuid,uuid,bigint,uuid,bigint,text,text,timestamptz)'),
+      ('private.sync_attempt_event_at(uuid,uuid,uuid,uuid,bigint,timestamptz,bigint,timestamptz)'),
+      ('private.resolve_offline_quarantine_at(uuid,uuid,uuid,text,bigint,text,text,text,timestamptz)'),
+      ('private.assert_photo_upload_actor(uuid,uuid,uuid)'),
+      ('public.publish_checkout_cleaning_template(uuid,uuid,text,integer,integer,jsonb,text,text)'),
+      ('public.list_room_operation_blocks(uuid,uuid,uuid,text)'),('public.list_room_issues(uuid,uuid,uuid,text)'),
+      ('public.list_room_events(uuid,uuid,uuid,integer)'),
+      ('public.correct_room_occupancy(uuid,uuid,uuid,uuid,boolean,timestamptz,bigint,text,text,text)'),
+      ('public.override_room_display_status(uuid,uuid,uuid,text,bigint,text,text,text)'),
+      ('private.cancel_unavailable_cleaning_assignment_at(uuid,uuid,uuid,uuid,bigint,uuid,bigint,text,text,text,timestamptz)'),
+      ('public.list_room_operation_blocks_page(uuid,uuid,uuid,text,integer,timestamptz,uuid)'),
+      ('public.list_room_issues_page(uuid,uuid,uuid,text,integer,timestamptz,uuid)'),
+      ('public.list_limited_cleaning_attempts(uuid,uuid)'),
+      ('private.create_cleaning_submission_session_core(uuid,uuid,uuid,uuid,bigint,integer,text,text)'),
+      ('public.get_photo_upload_receipt_with_session(uuid,uuid,uuid)')
+    union all select signature from limited_session_caller_extensions where to_regprocedure(signature) is not null
+  ) expected(signature)), 'global direct caller OIDs exactly match every original signature plus approved installed signatures');
+select ok(coalesce((select p.prokind='f' and l.lanname='plpgsql' and p.prosecdef
+  and p.proowner='postgres'::regrole and p.proconfig=array['search_path=""']::text[]
+  and (select count(*)=1 from pg_proc same_name where same_name.pronamespace=p.pronamespace
+    and same_name.proname=p.proname)
+  and (select array_agg(a.grantor::text||':'||a.grantee::text||':'||a.privilege_type||':'||a.is_grantable::text
+    order by a.grantor,a.grantee,a.privilege_type,a.is_grantable)
+    from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a)
+    = array[(p.proowner::text||':'||p.proowner::text||':EXECUTE:false')]
+  from pg_proc p join pg_language l on l.oid=p.prolang where p.oid=signature::regprocedure),false),
+  'private helper exact owner-only ACL/kind/language/security/search_path remains unchanged: '||signature)
+from unnest(array['private.assert_attempt_actor_session(uuid,uuid,boolean)',
+  'private.assert_attempt_actor_session_at_clock(uuid,uuid,boolean,timestamptz)',
+  'private.assert_attempt_actor_session_fresh(uuid,uuid,boolean)'])signature;
 select ok((select bool_and(not has_function_privilege(role_name,p.oid,'EXECUTE'))
   from pg_proc p cross join (values ('anon'),('authenticated'),('service_role')) roles(role_name)
   where p.oid in ('private.assert_attempt_actor_session(uuid,uuid,boolean)'::regprocedure,

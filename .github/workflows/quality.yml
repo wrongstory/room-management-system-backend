@@ -63,8 +63,11 @@ jobs:
       - run: npm run db:manifest:verify
       - run: npm run db:start:ci
       - run: npm run db:verify
+      - name: Strict lint with exact compatibility baseline (#363, Decision #373)
+        run: npm run db:lint:baseline
       - run: npm run backup:dry-run
       - run: npm run db:test
+      - run: npm run db:test:static-warning
       - run: npm run db:test:long-stay-clock
       - run: npm run db:test:concurrency
       - name: Stop local Supabase
