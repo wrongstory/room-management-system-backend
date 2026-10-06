@@ -45,7 +45,8 @@ describe('#334 dependency security patch', () => {
     };
     expect(manifest.dependencies.fastify).toBe('5.12.5');
     expect(manifest.overrides).toEqual({
-      'fast-uri@^3.0.0': '3.1.8', 'fast-uri@^4.0.0': '4.1.5', 'ip-address': '10.7.1'
+      'fast-uri@^3.0.0': '3.1.8', 'fast-uri@^4.0.0': '4.1.5', 'ip-address': '10.7.1',
+      'source-map-js': '1.2.2'
     });
     expect(lock.packages['']?.dependencies?.fastify).toBe('5.12.5');
     // Overrides can move copies underneath consumers; do not assume root hoisting.
@@ -56,6 +57,8 @@ describe('#334 dependency security patch', () => {
     expect(new Set(versions('fast-uri'))).toEqual(new Set(['3.1.8', '4.1.5']));
     expect(versions('ip-address').length).toBeGreaterThan(0);
     expect(versions('ip-address').every(version => version === '10.7.1')).toBe(true);
+    expect(versions('source-map-js').length).toBeGreaterThan(0);
+    expect(versions('source-map-js').every(version => version === '1.2.2')).toBe(true);
     expect(lock.packages['node_modules/ajv']?.dependencies?.['fast-uri']).toBe('^3.0.1');
   });
 
@@ -64,7 +67,8 @@ describe('#334 dependency security patch', () => {
       ['ajv', 'fast-uri', '3.1.8'],
       ['@fastify/ajv-compiler', 'fast-uri', '4.1.5'],
       ['fast-json-stringify', 'fast-uri', '4.1.5'],
-      ['@fastify/rate-limit', 'ip-address', '10.7.1']
+      ['@fastify/rate-limit', 'ip-address', '10.7.1'],
+      ['postcss', 'source-map-js', '1.2.2']
     ] as const) {
       const consumerRequire = createRequire(require.resolve(`${consumer}/package.json`));
       const installed = JSON.parse(await readFile(consumerRequire.resolve(`${dependency}/package.json`), 'utf8'));
