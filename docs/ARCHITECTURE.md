@@ -1,5 +1,17 @@
 # 백엔드 서버 설계
 
+> 2026-10-06 현재: #318/PR321과 #330/PR337은 required CI·독립 QA 후 dev에 병합됐다. #332는 `dev@109d6b7` 통합110개/OpenAPI140 paths·151 operations 후보이며 제출 전 실제 등록 신고의 관리자 조회만 추가한다. 아래 이전 수치와 후보 설명은 각 과거 checkpoint다. 현재 검증·남은 gate는 [#332 기록](./ADMIN_REPORT_READ.md)을 따른다. 운영 배포 완료는 아니다.
+
+## #332 등록 신고 조회 후보
+
+86번째 append-only `admin_registered_report_read`는 기존 private 신고 원장을 room 단위로
+UNION한 admin-only bounded projection이다. session/active/password/role을 DB에서 먼저 검증하며
+service-role EXECUTE 외 direct table 접근 권한을 추가하지 않는다. 5/10건 keyset과 서명 cursor,
+128 KiB 응답 상한, nested allowlist, no-store를 Fastify/Edge에 동일하게 적용한다.
+현재 사진 collection이 아니라 불변 report evidence만 읽고 provider locator는 읽기 가능 판정에만
+사용하며 공개 응답에서 제외한다. 기존 photo content 재검증·retention·검수 명령은 변경하지 않는다.
+[API와 rollout 경계](./ADMIN_REPORT_READ.md).
+
 > 2026-10-05 최신 통합 경계: #382/#323은 독립 QA와 exact CI 후 `dev@fdd8d7d`에 보호 통합됐다. 이를 정상 재통합한 #329 후보는 기존 A안·snapshot6/fresh18/core2를 유지하고, 실제 fresh104·template6순열·전체9경합·최종fresh104 및 Node1,767/Edge486/Python95를 PASS했다. 최종 문서 QA·commit/push·새 exact-head CI·dev 병합은 후속이다. SQL/manifest와 원본 installer는 불변이며 운영·프런트·v0.8.0은 변경하지 않았다. 현재 상태와 증거는 [API 상태 정본](./API_STATUS_MATRIX.md) 및 [제한 세션 검증 기록](./LIMITED_SESSION_REENTRY.md)을 따른다.
 
 > 과거 bb4 checkpoint 설명: 아래 이전 #329 후보의 103개/head/previous 및 미완료 표기는 당시 source 준비 설명이며 현재104 검증이나 최신 manifest로 재사용하지 않는다. 기존 A안·21 baseline caller의 strict source 분류와 최종 snapshot6/fresh18/core2 matrix를 그대로 유지했다. `dev@bb4fa40`의 #373/#384를 정상 merge한 source이며 당시 #383/#382 후속 dev 재통합·fresh/전체 DB·독립 QA·새 exact-head CI는 미완료였다. 원본 #329 migration/LF SHA는 불변이다. 이전 설명의 head `photo_collection_provider_context_axis`·previous `db_static_warning_remediation`·103개 준비 문구는 이력으로 보존하며, 과거 strict17/101 checkpoint를 현재 검증으로 재사용하지 않는다. 원본 strict FAIL9·exact9 비교 gate를 분리한다.

@@ -7,6 +7,7 @@ import {
   listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
+  listRoomReports,
   listRooms,
   listRoomTypes,
   overrideRoomDisplayStatus,
@@ -60,6 +61,116 @@ function readRequest(path = "/v1/room-types"): Request {
     headers: { authorization: `Bearer header.${encoded}.signature` },
   });
 }
+Deno.test("registered reports bind admin session, validate paging and allowlist evidence", async () => {
+  const previous = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET");
+  Deno.env.set(
+    "INSPECTION_CURSOR_HMAC_SECRET",
+    "room-operation-cursor-test-secret-123456789",
+  );
+  const calls: Array<Record<string, unknown>> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        assert(name === "list_room_reports_page", "registered report RPC");
+        calls.push(args);
+        return Promise.resolve({
+          error: null,
+          data: {
+            roomId,
+            roomStateVersion: 1,
+            evaluatedAt: "2026-09-30T00:00:00Z",
+            items: [{
+              id: issueId,
+              attemptId: blockId,
+              kind: "bomb_room",
+              memo: "registered",
+              reportedAt: "2026-09-30T00:00:00Z",
+              status: "reported",
+              sealedSubmissionId: null,
+              providerLocator: "must-not-leak",
+              evidence: [{
+                photoId: issueId,
+                readState: "purged",
+                retentionPolicy: "cleaning_submission",
+                retentionStartsAt: null,
+                expiresAt: null,
+                purgedAt: "2026-09-30T00:00:00Z",
+                mediaAvailability: "purged",
+                token: "must-not-leak",
+              }],
+            }],
+            hasMore: true,
+            nextCursor: { occurredAt: "2026-09-30T00:00:00Z", id: issueId },
+          },
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const path = `/v1/rooms/${roomId}/reports`;
+  try {
+    const page = await listRoomReports(
+      readRequest(path),
+      clients,
+      admin,
+      roomId,
+    );
+    assert(
+      !JSON.stringify(page).includes("must-not-leak"),
+      "no private fields",
+    );
+    assert(
+      calls[0].p_session_id === sessionId && calls[0].p_limit === 5,
+      "session/default limit",
+    );
+    await listRoomReports(
+      readRequest(`${path}?cursor=${page.nextCursor}`),
+      clients,
+      admin,
+      roomId,
+    );
+    assert(calls[1].p_cursor_id === issueId, "keyset forwarded");
+    for (
+      const query of [
+        "limit=11",
+        "limit=0",
+        "limit=1&limit=2",
+        "status=open",
+        "unknown=1",
+      ]
+    ) {
+      const error = await captureEdgeError(() =>
+        listRoomReports(readRequest(`${path}?${query}`), clients, admin, roomId)
+      );
+      assert(error.status === 400, "invalid query rejected");
+    }
+    const denied = await captureEdgeError(() =>
+      listRoomReports(
+        readRequest(path),
+        clients,
+        { ...admin, role: "maid" },
+        roomId,
+      )
+    );
+    assert(denied.status === 403, "maid forbidden");
+    const cross = await captureEdgeError(() =>
+      listRoomIssues(
+        readRequest(`/v1/rooms/${roomId}/issues?cursor=${page.nextCursor}`),
+        clients,
+        admin,
+        roomId,
+      )
+    );
+    assert(
+      cross.code === "INVALID_ROOM_OPERATION_CURSOR",
+      "cross stream cursor rejected",
+    );
+  } finally {
+    if (previous === undefined) {
+      Deno.env.delete("INSPECTION_CURSOR_HMAC_SECRET");
+    } else Deno.env.set("INSPECTION_CURSOR_HMAC_SECRET", previous);
+  }
+});
+
 const roomRow = {
   id: roomId,
   room_number: "101",

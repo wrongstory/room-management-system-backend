@@ -60,9 +60,9 @@ describe('#326 assignment read OpenAPI contract', () => {
 
   it('does not add endpoints or change the target-cancel request keys', () => {
     const paths = openApiDocument.paths;
-    expect(Object.keys(paths)).toHaveLength(139);
+    expect(Object.keys(paths)).toHaveLength(140);
     expect(Object.values(paths).flatMap((path) => Object.keys(path).filter((method) =>
-      ['get', 'post', 'put', 'patch', 'delete'].includes(method)))).toHaveLength(150);
+      ['get', 'post', 'put', 'patch', 'delete'].includes(method)))).toHaveLength(151);
     expect(schemas.ReservationMutationRequest.required).toEqual(['expectedVersion', 'reasonCode']);
   });
 });

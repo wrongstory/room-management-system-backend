@@ -110,6 +110,10 @@ function services(): AppServices {
         hasMore: false,
         nextCursor: null
       })),
+      listReports: vi.fn(async () => ({
+        roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 5, evaluatedAt: '2026-09-20T00:00:00.000Z',
+        items: [], hasMore: false, nextCursor: null
+      })),
       listIssues: vi.fn(async () => ({
         roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 5, evaluatedAt: '2026-09-20T00:00:00.000Z',
         items: [{ id: '60000000-0000-4000-8000-000000000001', category: 'FACILITY', severity: 'warning' as const, blocksGuestAssignment: true, description: '창문 점검', status: 'open' as const, reportedAt: '2026-09-19T00:00:00.000Z' }],
@@ -507,6 +511,25 @@ describe('application', () => {
       cleaningRequired: false,
       allocationReady: true
     });
+    await app.close();
+  });
+
+  it('serves registered reports no-store with strict bounded query parameters', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const url = '/v1/rooms/11111111-1111-4111-8111-111111111111/reports';
+    const headers = { authorization: 'Bearer access-token' };
+    const result = await app.inject({ method: 'GET', url, headers });
+    expect(result.statusCode).toBe(200);
+    expect(result.headers['cache-control']).toBe('no-store');
+    expect(result.json()).toMatchObject({ items: [], hasMore: false, nextCursor: null });
+    expect(appServices.rooms.listReports).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }), '11111111-1111-4111-8111-111111111111', { limit: 5, cursor: undefined }
+    );
+    for (const query of ['limit=11', 'limit=0', 'limit=1&limit=2', 'status=open', 'cursor=', 'unknown=x']) {
+      expect((await app.inject({ method: 'GET', url: `${url}?${query}`, headers })).statusCode).toBe(400);
+    }
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(401);
     await app.close();
   });
 

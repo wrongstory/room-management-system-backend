@@ -150,7 +150,7 @@ function idempotencyKey(request: FastifyRequest): string {
 
 function roomOperationPageInput(
   request: FastifyRequest,
-  expectedStatus: 'actionable' | 'open'
+  expectedStatus: 'actionable' | 'open' | 'registered'
 ): RoomOperationPageInput {
   const raw = new URL(request.raw.url ?? '/', 'http://internal').searchParams;
   for (const key of raw.keys()) {
@@ -162,12 +162,12 @@ function roomOperationPageInput(
   if (rawStatus !== expectedStatus) {
     throw new AppError(400, 'INVALID_ROOM_OPERATION_QUERY', '객실 운영 조회 조건이 올바르지 않습니다.');
   }
-  const rawLimit = raw.get('limit') ?? String(ROOM_OPERATION_PAGE_DEFAULT);
+  const rawLimit = raw.get('limit') ?? String(expectedStatus === 'registered' ? 5 : ROOM_OPERATION_PAGE_DEFAULT);
   if (!/^[1-9]\d*$/.test(rawLimit)) {
     throw new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
   }
   const limit = Number(rawLimit);
-  if (!Number.isSafeInteger(limit) || limit > ROOM_OPERATION_PAGE_MAX) {
+  if (!Number.isSafeInteger(limit) || limit > (expectedStatus === 'registered' ? 10 : ROOM_OPERATION_PAGE_MAX)) {
     throw new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
   }
   const cursor = raw.get('cursor');
@@ -347,6 +347,15 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       return reply.code(201).send({ operation });
     });
 
+    app.get('/:roomId/reports', {
+      onRequest: async (_request, reply) => { reply.header('Cache-Control', 'no-store'); },
+      preHandler: admin
+    }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      return reply.header('Cache-Control', 'no-store').send(
+        await roomService.listReports(request.actor, roomId, roomOperationPageInput(request, 'registered'))
+      );
+    });
     app.get('/:roomId/issues', { preHandler: admin }, async (request, reply) => {
       const { roomId } = roomIdSchema.parse(request.params);
       const input = roomOperationPageInput(request, 'open');

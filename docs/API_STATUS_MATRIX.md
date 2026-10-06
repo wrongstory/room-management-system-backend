@@ -1,5 +1,7 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+> 2026-10-06 현재: #318/PR321·#330/PR337 dev 병합 뒤 `109d6b7`에 #332를 통합한110 migrations/OpenAPI140 paths·151 operations 후보다. 아래86/132·142 등 이전 숫자는 과거 checkpoint이며 [현재 검증·남은 gate](./ADMIN_REPORT_READ.md)를 우선한다. 운영·프런트 배포 완료는 아니다.
+
 > 최신 #330 검증: migration108/API139 paths150 operations 후보는 Node1826·Edge490·Python95/codegen·전체27 upgrade/SQL5266·static/KST145·전체10경합/최종fresh·승인 exact9 baseline PASS다. raw strict FAIL9를 유지하고 최종 staged QA·새CI·dev/운영은 후속이다. 아래 진행 중 기록과 [현재 증거](./ROOM_CANDLES_330.md)를 구분한다.
 
 > 현재: #318/PR321은 dev cf22727 병합 완료, 운영 미반영이다. #330은 이 dev와 통합한108개 migration·139 paths/150 operations 후보를 검증 중이다. 아래104/106개 PASS 및 후속 표기는 당시 checkpoint이며 새 통합의 PASS가 아니다. [현재 범위](./ROOM_CANDLES_330.md)를 따른다.
@@ -281,6 +283,17 @@ Preview 응답에서 제외하며 공개 endpoint/schema/RLS 권한은 그대로
 [지연 업무 계약](./CLEANING_OVERDUE.md)에 기록한다.
 
 ## 1. 상태 판정 규칙
+
+### #332 등록 신고 조회 후보 (2026-10-01)
+
+| 기능 | DB/RPC | Fastify HTTP | Edge source | Production Edge | 현재 사용 |
+|---|---|---|---|---|---|
+| 객실별 등록 특이사항·폭탄방과 선택 증빙 조회 | 🟡 | 🟡 | 🟡 | ❌ | ❌ |
+
+`GET /v1/rooms/{roomId}/reports`, 86번째 `admin_registered_report_read` migration.
+후보 OpenAPI 0.6.0 / 132 paths / 142 operations이며 기존 #330 후보와 독립 개발한다.
+등록 전 사진은 목록에서 제외하고 전체 제출 전후의 신고 이력·사진 만료/삭제 상태만 조회한다.
+검수·봉인·수익·content 권한은 유지한다. [연동 계약](./ADMIN_REPORT_READ.md).
 
 ### 과거 #308 6차 보완 — 2026-10-01, PR #340 승인 전
 

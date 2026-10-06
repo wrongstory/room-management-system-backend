@@ -1,5 +1,18 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+> 2026-10-06 현재: #318/PR321과 #330/PR337은 required CI·독립 QA 후 dev에 병합됐다. #332는 `dev@109d6b7` 통합110개/OpenAPI140 paths·151 operations 후보이며 제출 전 실제 등록 신고의 관리자 조회만 추가한다. 아래 이전 수치와 후보 설명은 각 과거 checkpoint다. 현재 검증·남은 gate는 [#332 기록](./ADMIN_REPORT_READ.md)을 따른다. 운영 배포 완료는 아니다.
+
+## [확정 — 사용자 #332 A안] 제출 전 등록 신고의 관리자 열람
+
+전체 제출 전이라도 메이드가 서버에 등록한 객실 특이사항·폭탄방 신고의 메모와 선택 증빙을
+관리자가 읽을 수 있다. 미신고 업로드나 클라이언트 초안은 신고 목록으로 노출하지 않는다.
+신고 ID와 exact evidence photo version은 그대로 사용하고 제출 후 봉인·판정·보존 정책은 바꾸지 않는다.
+제출 전 조회는 읽기 전용이며 폭탄방 최종 판정이나 전체 검수를 조기에 실행하지 않는다.
+기존 관리자 accepted-photo content 및 실제 수행 메이드 본인 사진 권한은 유지한다.
+다른 메이드·limited capability에는 관리자 신고 목록을 열지 않는다.
+source 후보의 API·상태·보존 계약은 [등록 신고 조회](./ADMIN_REPORT_READ.md)를 따른다.
+이 결정은 #336 제출·승인 이후 새 신고 정책이나 운영 배포 승인이 아니다.
+
 > 최신 #330 실행: dev cf22727 통합108개 후보의 Node1826·Edge490·Python95/codegen·fresh108·전체27 upgrade/SQL5266·static/KST145·전체10경합/최종cleanup·exact9 baseline PASS. 원본489 hash drift0, raw strict FAIL9 유지. 아래 진행/이전 수치는 과거 checkpoint이며 [실제 증거](./ROOM_CANDLES_330.md)를 따른다. 최종 staged QA·새 CI·dev/운영 승격은 후속이다.
 
 > 현재 #330 통합: #318/PR321은 CI37303164280 두 required PASS와 독립 QA 후 dev cf22727에 병합됐다. 이 dev와 촛불 checkpoint8860189를 합친 새 후보는 migration108/OpenAPI139 paths·150 operations이며 전체 검증은 후속이다. 아래104/106개 기록은 각 과거 checkpoint다. 확정 정책은 양쪽 모두 보존하며 [현재 검증 범위](./ROOM_CANDLES_330.md)를 따른다. 운영 배포 완료가 아니다.

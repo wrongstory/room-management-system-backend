@@ -1370,6 +1370,19 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
             error: null,
           };
         }
+        if (name === "list_room_reports_page") {
+          return {
+            error: null,
+            data: {
+              roomId,
+              roomStateVersion: 3,
+              evaluatedAt: "2026-09-20T00:00:00Z",
+              items: [],
+              hasMore: false,
+              nextCursor: null,
+            },
+          };
+        }
         if (name === "list_room_issues_page") {
           return {
             data: {
@@ -2159,6 +2172,11 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
     { method: "GET", path: "/v1/room-types", status: 200 },
     { method: "GET", path: "/v1/rooms", status: 200 },
     { method: "GET", path: `/v1/rooms/${roomId}`, status: 200 },
+    {
+      method: "GET",
+      path: `/v1/rooms/${roomId}/reports?limit=1&status=registered`,
+      status: 200,
+    },
     {
       method: "GET",
       path: `/v1/rooms/${roomId}/operation-blocks?status=actionable`,

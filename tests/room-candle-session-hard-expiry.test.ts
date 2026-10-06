@@ -117,7 +117,7 @@ describe('#330 post-lock session hard-expiry append source contract', () => {
     expect(runner).toContain('await effects(room, actors) === before');
     expect(runner).toContain('setTimeout(() => { timedOut = true; child.kill(); }, 45000)');
     expect(runner).not.toMatch(/\.skip|continue;|not_after=clock_timestamp\(\)\+interval.*(?:retry|extend)/);
-    expect(fixture).toContain('select * from finish();\nrollback;');
+    expect(fixture.replaceAll('\r\n', '\n')).toContain('select * from finish();\nrollback;');
     expect(fixture).toContain('pg_temp.cestate()=before_state');
     expect(fixture).toContain('perform pg_sleep(3)');
     expect(fixture).not.toMatch(/update auth.sessions[^;]+new\./);

@@ -1,5 +1,15 @@
 # Room Management System ERD 초안
 
+> 2026-10-06 현재: #318/PR321·#330/PR337 dev 병합 뒤 `109d6b7`에 #332를 통합한110 migrations/OpenAPI140 paths·151 operations 후보다. 아래86/132·142 등 이전 숫자는 과거 checkpoint이며 [현재 검증·남은 gate](./ADMIN_REPORT_READ.md)를 우선한다. 운영·프런트 배포 완료는 아니다.
+
+## #332 등록 신고 조회 후보
+
+새 table이나 관계 변경은 없다. `attempt_room_issue_reports.issue_id → room_issues.id`와
+`bomb_room_reports.cleaning_attempt_id → cleaning_attempts → cleaning_targets.room_id`를
+room 범위로 결합한다. 선택 증빙의 immutable photo version → acceptance → retention을 읽으며
+다른 current upload는 열거하지 않는다. 봉인 submission FK·결정·이력은 그대로 보존한다.
+86번째 migration은 조회 RPC만 추가한다. [상세 계약](./ADMIN_REPORT_READ.md).
+
 > 2026-10-05 #329 최신 dev 통합 후보: 원래100개 뒤의101번째 append를 수정·재번호화하지 않고 `dev@bb4fa40`의 #373/#384와 정상 병합한 103개 구성을 검증한다. A안·immutable 최초 세션 자격·TTL·권한·기존 원장을 유지하며 새로운 schema 변경은 추가하지 않는다. 아래 기존 strict17/101 검증은 당시 이력이다. 현재 원본 strict FAIL9와 exact9 비교 gate를 구분하고 #383/#382 재통합·fresh/전체 DB·독립 QA·새 exact-head CI·운영/UAT는 별도 미완료다.
 
 ## #329 제한 세션 eligibility 보강 — 구현 중

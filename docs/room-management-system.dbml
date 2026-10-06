@@ -1285,6 +1285,8 @@ Table public.submission_photos {
 }
 
 Table private.bomb_room_reports {
+  // #332 admin read-only room report projection may expose registered memo/evidence before sealing.
+  // No table/RLS/retention mutation; see docs/ADMIN_REPORT_READ.md.
   id uuid [pk]
   cleaning_attempt_id uuid [not null, unique, ref: - public.cleaning_attempts.id]
   reported_by uuid [not null, ref: > public.profiles.id]

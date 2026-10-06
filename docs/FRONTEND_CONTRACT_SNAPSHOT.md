@@ -1,5 +1,18 @@
 # 프런트엔드 계약 snapshot
 
+> 2026-10-06 현재: #318/PR321·#330/PR337 dev 병합 뒤 `109d6b7`에 #332를 통합한110 migrations/OpenAPI140 paths·151 operations 후보다. 아래86/132·142 등 이전 숫자는 과거 checkpoint이며 [현재 검증·남은 gate](./ADMIN_REPORT_READ.md)를 우선한다. 운영·프런트 배포 완료는 아니다.
+
+## 2026-10-01 #332 추가 관찰 및 source 후보
+
+프런트 정본 `makee-ham/room-management-system`의
+`dev@09ed28446a4fd43919cddb29ebe442b848548ab8`에 있는
+`DOCS/28_FRONTEND_CONNECTION_BACKEND_MEETING.md` B07과 사용자 A안 결정을 대조했다.
+이 관찰은 제품 가이드가 고정한 전체 프런트 정책 snapshot을 교체하지 않는다.
+제출 전 등록 신고 조회는 백엔드 `GET /v1/rooms/{roomId}/reports` 후보로 보강한다.
+OpenAPI 0.6.0 / 132 paths / 142 operations, generated Python business client의 임시 생성·컴파일 검증 대상이다.
+관리자 전용 업무 API이므로 developer 운영 콘솔의 filtered client에는 추가하지 않는다.
+프런트 코드·배포·운영 OpenAPI·Pages는 변경하지 않았다. [연동 세부 계약](./ADMIN_REPORT_READ.md).
+
 > 2026-10-05 #330 최신 dev 통합 후보: 기존 PR #337/source `95033682`와 `dev@bb4fa40` 기준103 migrations/source OpenAPI 목표138 paths/149 operations다. 아래 원래86/132·142와 원격 프런트 commit은 당시 scoped 확인점으로 보존하며 전역 제품 snapshot을 승격하지 않는다. 촛불 공동 관리와 #336 신고 정책을 분리하고 후속 dev 재통합·전체 DB·독립 QA·새 exact-head CI·운영/UAT는 미완료다.
 
 ## #330 사용자 결정에 따른 최초 source 후보 checkpoint

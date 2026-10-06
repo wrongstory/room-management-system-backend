@@ -399,6 +399,10 @@ export interface RoomIssuesResult {
   nextCursor: string | null;
 }
 
+export interface RoomReportsResult extends Omit<RoomIssuesResult, 'items'> {
+  items: Record<string, unknown>[];
+}
+
 export interface RoomOperationPageInput {
   limit?: number | undefined;
   cursor?: string | undefined;
@@ -432,6 +436,7 @@ export interface RoomService {
   listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
   listOperationBlocks(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomOperationBlocksResult>;
   listIssues(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomIssuesResult>;
+  listReports(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomReportsResult>;
   listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult>;
   list(actor: Actor, input?: RoomListInput): Promise<RoomSummary[]>;
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
@@ -663,6 +668,44 @@ function operationBlockItem(value: unknown): RoomOperationBlockItem {
     endsAt: row.endsAt === null ? null : projectionTimestamp(row.endsAt),
     status: status as RoomOperationBlockItem['status'],
     createdAt: projectionTimestamp(row.createdAt)
+  };
+}
+
+function registeredReportItem(value: unknown): Record<string, unknown> {
+  const fail = () => new AppError(500, 'ROOM_PROJECTION_INVALID', '신고 조회 결과가 올바르지 않습니다.');
+  const object = (v: unknown): Record<string, unknown> => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) throw fail();
+    return v as Record<string, unknown>;
+  };
+  const text = (v: unknown): string => { if (typeof v !== 'string') throw fail(); return v; };
+  const id = (v: unknown): string => {
+    const s = text(v);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s)) throw fail();
+    return s;
+  };
+  const time = (v: unknown): string => { const s = text(v); if (!Number.isFinite(Date.parse(s))) throw fail(); return s; };
+  const choice = (v: unknown, allowed: string[]): string => { const s = text(v); if (!allowed.includes(s)) throw fail(); return s; };
+  const row = object(value);
+  const kind = choice(row.kind, ['room_issue', 'bomb_room']);
+  const memo = text(row.memo);
+  const unsealed = kind === 'room_issue' || row.status === 'reported';
+  if (unsealed !== (row.sealedSubmissionId === null)) throw fail();
+  if (!memo.trim() || memo.length > 500 || !Array.isArray(row.evidence) || row.evidence.length < 1 || row.evidence.length > (kind === 'room_issue' ? 10 : 20)) throw fail();
+  return {
+    id: id(row.id), attemptId: id(row.attemptId), kind, memo, reportedAt: time(row.reportedAt),
+    status: choice(row.status, kind === 'room_issue' ? ['open', 'resolved'] : ['reported', 'pending', 'approved', 'rejected']),
+    sealedSubmissionId: row.sealedSubmissionId === null ? null : id(row.sealedSubmissionId),
+    evidence: row.evidence.map((v) => {
+      const p = object(v);
+      return {
+        photoId: id(p.photoId), readState: choice(p.readState, ['available', 'expired', 'purged', 'unavailable']),
+        retentionPolicy: choice(p.retentionPolicy, ['legacy_upload', 'cleaning_submission', 'room_issue', 'complaint', 'interruption', 'sync_conflict', 'mixed', 'orphan']),
+        retentionStartsAt: p.retentionStartsAt === null ? null : time(p.retentionStartsAt),
+        expiresAt: p.expiresAt === null ? null : time(p.expiresAt),
+        purgedAt: p.purgedAt === null ? null : time(p.purgedAt),
+        mediaAvailability: choice(p.mediaAvailability, ['available', 'purged', 'unavailable'])
+      };
+    })
   };
 }
 
@@ -1182,6 +1225,29 @@ export class SupabaseRoomService implements RoomService {
       nextCursor: page.nextCursor === null
         ? null
         : this.operationCursor().encode(scope, page.nextCursor)
+    };
+    assertRoomOperationResponseSize(result);
+    return result;
+  }
+
+  async listReports(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomReportsResult> {
+    ensureAdmin(actor);
+    const scope = roomOperationCursorScope(actor, roomId, 'reports');
+    const cursor = input.cursor ? this.operationCursor().decode(input.cursor, scope) : null;
+    const { data, error } = await this.clients.admin.rpc('list_room_reports_page', {
+      p_actor_profile_id: actor.profileId, p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: roomId, p_limit: input.limit ?? 5,
+      p_cursor_at: cursor?.occurredAt ?? null, p_cursor_id: cursor?.id ?? null
+    });
+    if (error?.message === 'PASSWORD_CHANGE_REQUIRED') {
+      throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '먼저 비밀번호를 변경해 주세요.');
+    }
+    if (error) throw roomError(error);
+    const page = operationPage(data, roomId, input.limit ?? 5);
+    const result = {
+      roomId: page.roomId, roomStateVersion: page.roomStateVersion, evaluatedAt: page.evaluatedAt,
+      items: page.items.map(registeredReportItem), hasMore: page.hasMore,
+      nextCursor: page.nextCursor === null ? null : this.operationCursor().encode(scope, page.nextCursor)
     };
     assertRoomOperationResponseSize(result);
     return result;

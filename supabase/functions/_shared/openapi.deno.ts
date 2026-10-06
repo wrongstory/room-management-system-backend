@@ -395,13 +395,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 139 &&
+    Object.keys(document.paths).length === 140 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 150,
-    "combined candidate contract 139/150",
+        ).length === 151,
+    "combined candidate contract 140/151",
   );
 });
 

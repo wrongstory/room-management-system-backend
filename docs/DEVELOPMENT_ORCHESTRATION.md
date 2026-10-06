@@ -1,5 +1,33 @@
 # 개발 오케스트레이션·source 승인 기준
 
+## 2026-10-06 자동 진행 순서
+
+현재 개발 정본은 `dev@109d6b7`/108 migrations다. #318/PR321과 #330/PR337은
+required CI·독립 QA·보호 병합을 완료했다. #391도 PR337과 동일 tree/CI 근거로 source/dev 종료했다.
+
+1. #332/PR338: 최신 dev 통합110개·OpenAPI140/151 후보. Node1,831/Edge491/Python95,
+   fresh110·전체27 upgrade/SQL87/5,327·static/KST145·전체10경합/최종cleanup·exact9/catalog3
+   baseline과 독립 source/staged QA PASS. source7f3e5f4를 push했고 새 required CI는 대기 중이다.
+   최종 문서 검토·exact-head CI 완료 뒤 보호 병합한다.
+2. #336: 제출·승인 후 새 특이사항 신고를 독립 사건/새 증빙으로 구현한다.
+   2026-10-06 사용자 결정에 따라 관리자 간 기능·정보를 공유하고 메이드는 본인 실제 통보
+   배정 이력 범위만 접근한다. 담당 종료·제출/승인·경과 일수만으로 #336 접근을 막지 않으며,
+   배정자·수행자·처리자는 기록한다. 기존 원 수행자/작성자 전용 guard를 감사·보완한다.
+3. #376/PR377와 #378/PR392: 최신 dev에서 CRLF 엄격 지문 호환 및 유한·원자 migration 실행,
+   응답 손실/중단 상태 판정과 실제 DB fault 검증을 완료한다. 기존 실패를 우회하지 않는다.
+4. 개발 종료 뒤 #273/PR379의 Supabase-only B 실제 백업·복원·동일성·FK 검증을 완료한다.
+   로컬 운영 백업 파일은 제외하며 성공 검증 뒤 복구 프로젝트만 최소15일 Pause한다.
+5. 최신 dev에서 별도 `release/v0.9.0 → main`을 검증·리뷰·보호 병합한다.
+   기존 v0.8.0 후보는 보존하고 운영 pending SQL만 적용한 뒤 exact main API/scheduler를 반영한다.
+6. hosted smoke·API/Pages/릴리스 문서·프런트 인계를 확인하고 실제 완료 뒤 tag/Release를 발행한다.
+
+운영 쓰기·Auth 변경·worker의 배포 직전 일시 중지는 2026-10-06 사용자가 승인했다.
+시행 직전 안내하고 실제 백업·검증·배포 뒤 정상화하며 승인 자체를 시행 완료로 표시하지 않는다.
+운영 프로젝트 Pause, 비밀번호/암호키/실제 PIN 변경, 실제 송금, 프런트 소스 개발은 이 범위에 포함하지 않는다.
+이 목록은 완료 선언이 아니며 raw strict FAIL9와 승인된 exact9 gate의 구분을 유지한다.
+현재 #332 증거는 [등록 신고 조회](./ADMIN_REPORT_READ.md), 전체 릴리스 gate는
+[Issue387](https://github.com/wrongstory/room-management-system-backend/issues/387)을 따른다.
+
 > 2026-10-05 현재: #329 PR372는 dev `79d6fb2`, #393 PR394는 dev `58a5821`에 통합됐다. #318의 checkpoint `0781d14`를 최신 dev58a와 정상 통합한106개 후보는 Node1,794·Edge487·Python95/client순열·fresh106·전체27 upgrade/SQL5,193·static/KST145·전체9경합/최종cleanup·exact9 baseline·독립 소스 QA PASS다. 원본484 hash drift0와 실제 caller7/18/core2도 확인했다. raw strict FAIL9/exit1은 유지한다. 최종 staged QA·새 exact-head CI/PR321 보호 병합이 다음이며 이후 #330 → #332 → #336 및 #376/#378 → 실제 Supabase-only 백업/복원 → v0.9.0 release/main·운영 승격 순서를 유지한다. v0.8.0과 운영·프런트는 불변이다. [현재 #318 증거](./ROOM_BOARD_DATE_FILTERS.md)와 아래 과거 checkpoint를 구분한다.
 
 ### 과거 #318의 bb4fa40 통합 준비

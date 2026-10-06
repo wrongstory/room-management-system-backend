@@ -7,13 +7,13 @@ export const ROOM_OPERATION_PAGE_MAX = 100;
 export const ROOM_OPERATION_CURSOR_MAX_LENGTH = 1024;
 export const ROOM_OPERATION_RESPONSE_MAX_BYTES = 128 * 1024;
 
-export type RoomOperationStream = 'operation-blocks' | 'issues';
+export type RoomOperationStream = 'operation-blocks' | 'issues' | 'reports';
 export interface RoomOperationCursorScope {
   actorProfileId: string;
   actorRole: 'admin';
   roomId: string;
   stream: RoomOperationStream;
-  status: 'actionable' | 'open';
+  status: 'actionable' | 'open' | 'registered';
   sort: 'occurredAt:desc,id:desc';
 }
 export interface RoomOperationCursorPosition {
@@ -69,7 +69,7 @@ export function roomOperationCursorScope(
     actorRole: 'admin',
     roomId: roomId.toLowerCase(),
     stream,
-    status: stream === 'operation-blocks' ? 'actionable' : 'open',
+    status: stream === 'operation-blocks' ? 'actionable' : stream === 'reports' ? 'registered' : 'open',
     sort: 'occurredAt:desc,id:desc'
   };
 }

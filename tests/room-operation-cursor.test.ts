@@ -38,6 +38,40 @@ function code(run: () => unknown): string | undefined {
 }
 
 describe('room operation cursor', () => {
+  it('reads registered reports only through the scoped admin RPC and strips nested private fields', async () => {
+    const item = {
+      id: after.id, attemptId: roomId, kind: 'room_issue', memo: '신고 메모', reportedAt: after.occurredAt,
+      status: 'open', sealedSubmissionId: null, providerLocator: 'must-not-leak',
+      evidence: [{ photoId: after.id, readState: 'expired', retentionPolicy: 'room_issue',
+        retentionStartsAt: after.occurredAt, expiresAt: after.occurredAt, purgedAt: null,
+        mediaAvailability: 'available', providerFileId: 'must-not-leak' }]
+    };
+    const rpc = vi.fn(async () => ({ error: null, data: {
+      roomId, roomStateVersion: 2, evaluatedAt: after.occurredAt, items: [item],
+      hasMore: true, nextCursor: after, token: 'must-not-leak'
+    } }));
+    const service = new SupabaseRoomService({ admin: { rpc } } as unknown as SupabaseClients,
+      undefined, 'room-operation-cursor-test-secret-123456789');
+    const page = await service.listReports(adminActor, roomId, {});
+    expect(JSON.stringify(page)).not.toContain('must-not-leak');
+    expect(page.items[0]).toMatchObject({ evidence: [{ readState: 'expired' }] });
+    expect(rpc).toHaveBeenCalledWith('list_room_reports_page', expect.objectContaining({
+      p_actor_profile_id: adminActor.profileId, p_session_id: sessionId, p_room_id: roomId, p_limit: 5
+    }));
+    await service.listReports(adminActor, roomId, { cursor: page.nextCursor ?? undefined });
+    expect(rpc).toHaveBeenLastCalledWith('list_room_reports_page', expect.objectContaining({
+      p_cursor_at: after.occurredAt, p_cursor_id: after.id
+    }));
+    await expect(service.listIssues(adminActor, roomId, { cursor: page.nextCursor ?? undefined }))
+      .rejects.toMatchObject({ code: 'INVALID_ROOM_OPERATION_CURSOR' });
+    await expect(service.listReports({ ...adminActor, role: 'maid' }, roomId, {}))
+      .rejects.toMatchObject({ statusCode: 403 });
+    item.kind = 'bomb_room';
+    item.status = 'pending';
+    await expect(service.listReports(adminActor, roomId, {})).rejects.toMatchObject({ code: 'ROOM_PROJECTION_INVALID' });
+    item.kind = 'unreported';
+    await expect(service.listReports(adminActor, roomId, {})).rejects.toMatchObject({ code: 'ROOM_PROJECTION_INVALID' });
+  });
   it('round-trips only in the exact actor, room and stream scope', () => {
     const codec = new RoomOperationCursorCodec('room-operation-cursor-test-secret-123456789');
     const scope = roomOperationCursorScope(actor, roomId, 'operation-blocks');
