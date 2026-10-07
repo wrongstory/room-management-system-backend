@@ -123,7 +123,12 @@ import {
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
 import { listPayrollWorkDetails } from "../_shared/payroll-work-details-api.ts";
 import { payrollRemittanceMarker } from "../_shared/payroll-remittance-marker-api.ts";
-import { createPhotoService } from "../_shared/photo-api.ts";
+import {
+  configuredPhotoProvider,
+  createPhotoService,
+  initializePhotoDecoder,
+} from "../_shared/photo-api.ts";
+import { createSupabasePostApprovalModuleEdgeHandler } from "../_shared/post-approval-report.bundle.js";
 import { PhotoError, photoFailureDiagnostic } from "../_shared/photo-binary.ts";
 import {
   photoError,
@@ -224,6 +229,107 @@ function routePath(url: string): string {
   return `/${segments.slice(functionIndex + 1).join("/")}`;
 }
 
+function postApprovalFamily(path: string): boolean {
+  return (/^\/v1\/cleaning-history\/submissions\//.test(path) &&
+    /\/supplemental-room-issues(?:\/|$)/.test(path)) ||
+    /^\/v1\/post-approval-room-issue-evidence(?:-uploads)?(?:\/|$)/.test(path);
+}
+function postApprovalRoute(method: string, path: string): boolean {
+  const base =
+    "^/v1/cleaning-history/submissions/[^/]+/supplemental-room-issues";
+  const patterns = method === "GET"
+    ? [
+      new RegExp(`${base}$`),
+      new RegExp(`${base}/source$`),
+      new RegExp(`${base}/drafts/[^/]+$`),
+      // source/drafts are reserved report siblings, not report identities.
+      new RegExp(`${base}/(?!source$|drafts$)[^/]+$`),
+      /^\/v1\/post-approval-room-issue-evidence-uploads\/[^/]+$/,
+      /^\/v1\/post-approval-room-issue-evidence\/[^/]+\/versions\/[^/]+\/content$/,
+    ]
+    : method === "POST"
+    ? [
+      new RegExp(`${base}$`),
+      new RegExp(`${base}/drafts$`),
+      new RegExp(`${base}/(?!source/|drafts/)[^/]+/close$`),
+      new RegExp(`${base}/drafts/[^/]+/evidence/[^/]+/upload$`),
+      /^\/v1\/post-approval-room-issue-evidence-uploads\/[^/]+\/handover$/,
+    ]
+    : [];
+  return patterns.some((pattern) => pattern.test(path));
+}
+
+/** Read only during recovery, never startup/read/preflight. No secret values are
+ * returned, logged, placed in errors, or borrowed from another key purpose. */
+export function configuredPostApprovalHandoverKey(): Uint8Array | undefined {
+  try {
+    const encoded = Deno.env.get(
+      "POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64",
+    );
+    if (!encoded || !/^[A-Za-z0-9+/]{43}=$/.test(encoded)) return undefined;
+    const decoded = atob(encoded);
+    if (decoded.length !== 32 || btoa(decoded) !== encoded) return undefined;
+    const otherSecrets = [
+      "SUPABASE_ANON_KEY",
+      "SUPABASE_PUBLISHABLE_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "SUPABASE_SECRET_KEY",
+      "ACCOUNT_PHONE_PEPPER",
+      "RESERVATION_PII_KEY_BASE64",
+      "RESERVATION_GUEST_NAME_PEPPER",
+      "ROOM_PIN_KEY_BASE64",
+      "PAYROLL_CURSOR_HMAC_SECRET",
+      "NOTIFICATION_CURSOR_HMAC_SECRET",
+      "INSPECTION_CURSOR_HMAC_SECRET",
+      "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+      "WEB_PUSH_BINDING_DIGEST_SECRET",
+      "GOOGLE_DRIVE_CLIENT_ID",
+      "GOOGLE_DRIVE_CLIENT_SECRET",
+      "GOOGLE_DRIVE_REFRESH_TOKEN",
+      "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+      "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+      "SCHEDULER_INVOKE_SECRET",
+      "PHOTO_PURGE_INVOKE_SECRET",
+      "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+      "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+      "VAPID_PRIVATE_KEY",
+    ];
+    if (otherSecrets.some((name) => Deno.env.get(name) === encoded)) {
+      return undefined;
+    }
+    for (
+      const name of [
+        "ROOM_PIN_KEYRING_JSON",
+        "RESERVATION_PII_KEYRING_JSON",
+        "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+      ]
+    ) {
+      const keyring: unknown = JSON.parse(Deno.env.get(name) || "{}");
+      if (
+        !keyring || typeof keyring !== "object" || Array.isArray(keyring) ||
+        Object.values(keyring).some((value) =>
+          typeof value !== "string" || value === encoded
+        )
+      ) return undefined;
+    }
+    const vapid: unknown = JSON.parse(
+      Deno.env.get("VAPID_KEYRING_JSON") || "{}",
+    );
+    if (!vapid || typeof vapid !== "object" || Array.isArray(vapid)) {
+      return undefined;
+    }
+    for (const value of Object.values(vapid)) {
+      if (
+        !value || typeof value !== "object" || Array.isArray(value) ||
+        ("privateKey" in value && value.privateKey === encoded)
+      ) return undefined;
+    }
+    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ApiHandlerDependencies {
   createClients: () => EdgeClients;
   authenticateRequest: (
@@ -233,11 +339,24 @@ export interface ApiHandlerDependencies {
   authenticateLimitedRequest?: typeof authenticateLimitedAttempt;
   photoService?: (clients: EdgeClients) => PhotoService;
   webPushCryptoConfig?: WebPushCryptoConfig;
+  /** Override for isolated tests; the default uses the reviewed generated JS bundle. */
+  supplementalRoomIssueHandler?: (
+    request: Request,
+    path: string,
+    clients: EdgeClients,
+  ) => Promise<Response | null>;
 }
 
 const defaultDependencies: ApiHandlerDependencies = {
   createClients: createEdgeClients,
   authenticateRequest: authenticate,
+  supplementalRoomIssueHandler: async (request, path, clients) =>
+    await createSupabasePostApprovalModuleEdgeHandler({
+      clients,
+      provider: configuredPhotoProvider,
+      initializeDecoder: initializePhotoDecoder,
+      handoverFenceKey: configuredPostApprovalHandoverKey,
+    })(request, path) ?? null,
 };
 
 export async function handleApiRequest(
@@ -259,6 +378,40 @@ export async function handleApiRequest(
         return segment;
       }
     }).join("/");
+    // Decode/collapse for family recognition only. Raw spelling remains the
+    // authority; routePath must not turn aliases into accepted commands.
+    const supplementalFamilyPath = decodedLimitedPath.replace(/\/+/g, "/")
+      .replace(/\/+$/, "");
+    const decodedMountSegments = new URL(request.url).pathname.split("/")
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment);
+        } catch {
+          return segment;
+        }
+      }).join("/").split("/").filter(Boolean);
+    const decodedFunctionIndex = decodedMountSegments.lastIndexOf("api");
+    const decodedMountPath = decodedFunctionIndex < 0
+      ? "/"
+      : `/${decodedMountSegments.slice(decodedFunctionIndex + 1).join("/")}`;
+    const supplementalFamily = postApprovalFamily(supplementalFamilyPath) ||
+      postApprovalFamily(decodedMountPath);
+    if (supplementalFamily) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      const rawPath = pathname.slice(pathname.lastIndexOf("/api") + 4);
+      if (
+        request.method !== "OPTIONS" &&
+        (rawPath !== path || path !== supplementalFamilyPath ||
+          !postApprovalRoute(request.method, rawPath))
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
     if (
       decodedLimitedPath === "/v1/limited/attempts" ||
       decodedLimitedPath.startsWith("/v1/limited/attempts/")
@@ -382,6 +535,33 @@ export async function handleApiRequest(
     }
 
     clients = dependencies.createClients();
+    if (supplementalFamily) {
+      const handler = dependencies.supplementalRoomIssueHandler ??
+        defaultDependencies.supplementalRoomIssueHandler;
+      if (!handler) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      const supplemental = await handler(
+        request,
+        path,
+        clients,
+      );
+      if (supplemental) {
+        for (const [key, value] of Object.entries(corsHeaders)) {
+          supplemental.headers.set(key, value);
+        }
+        return supplemental;
+      }
+      throw new EdgeError(
+        404,
+        "ROUTE_NOT_FOUND",
+        "요청한 API 경로를 찾을 수 없습니다.",
+      );
+    }
     if (request.method === "POST" && path === "/v1/auth/login") {
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }

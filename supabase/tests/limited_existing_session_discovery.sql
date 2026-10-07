@@ -18,15 +18,17 @@ select ok((select strpos(prosrc,'clock_timestamp')=0 and strpos(prosrc,'statemen
   from pg_proc where oid='private.assert_attempt_actor_session_at_clock(uuid,uuid,boolean,timestamptz)'::regprocedure),
   'core cannot accidentally choose a different clock');
 
--- #389: only these exact, separately approved post-#329 append signatures may
+-- #389/#336: only these exact, separately approved post-#329 append signatures may
 -- extend the installed catalog. This never edits the migration's strict initial
 -- 21 / final 6 snapshot + 18 fresh + 2 core installation inventories.
 -- BEGIN APPROVED SESSION CALLER EXTENSIONS
 create temp table limited_session_caller_extensions(signature text primary key,qualified_name text unique,
-  helper_kind text not null,volatility text not null);
+  helper_kind text not null,volatility text not null,acl_kind text not null);
 insert into limited_session_caller_extensions values
-  ('public.get_room_board_projection(uuid,uuid,date,uuid)','public.get_room_board_projection','snapshot','s'),
-  ('public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)','public.list_room_reports_page','fresh','v');
+  ('public.get_room_board_projection(uuid,uuid,date,uuid)','public.get_room_board_projection','snapshot','s','service-only'),
+  ('public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)','public.list_room_reports_page','fresh','v','service-only'),
+  ('public.get_post_approval_room_issue_source(uuid,uuid,uuid)','public.get_post_approval_room_issue_source','snapshot','s','service-only'),
+  ('private.assert_post_approval_room_issue_actor_fresh(uuid,uuid)','private.assert_post_approval_room_issue_actor_fresh','fresh','v','owner-only');
 -- END APPROVED SESSION CALLER EXTENSIONS
 select ok(not exists(select 1 from limited_session_caller_extensions e
   join pg_namespace n on n.nspname=split_part(e.qualified_name,'.',1)
@@ -36,6 +38,13 @@ select ok(not exists(select 1 from limited_session_caller_extensions e
 select ok(to_regprocedure('public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)') is null
   or to_regprocedure('public.get_room_board_projection(uuid,uuid,date,uuid)') is not null,
   'approved installation order is baseline 6/18 then room board 7/18 then registered reports 7/19');
+select ok((to_regprocedure('public.get_post_approval_room_issue_source(uuid,uuid,uuid)') is null
+    and to_regprocedure('private.assert_post_approval_room_issue_actor_fresh(uuid,uuid)') is null)
+  or (to_regprocedure('public.get_post_approval_room_issue_source(uuid,uuid,uuid)') is not null
+    and to_regprocedure('private.assert_post_approval_room_issue_actor_fresh(uuid,uuid)') is not null
+    and to_regprocedure('public.get_room_board_projection(uuid,uuid,date,uuid)') is not null
+    and to_regprocedure('public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)') is not null),
+  'approved #336 snapshot/fresh pair installs atomically after registered reports as exact 8/20 and core2');
 select ok(coalesce((select p.prokind='f' and l.lanname='plpgsql' and p.provolatile::text=e.volatility
   and p.prosecdef and p.proowner='postgres'::regrole and p.proconfig=array['search_path=""']::text[]
   and (length(p.prosrc)-length(replace(p.prosrc,case when e.helper_kind='snapshot'
@@ -48,10 +57,19 @@ select ok(coalesce((select p.prokind='f' and l.lanname='plpgsql' and p.provolati
   and (select array_agg(a.grantor::text||':'||a.grantee::text||':'||a.privilege_type||':'||a.is_grantable::text
     order by a.grantor,a.grantee,a.privilege_type,a.is_grantable)
     from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a)
-    = array[(p.proowner::text||':'||p.proowner::text||':EXECUTE:false'),
-      (p.proowner::text||':'||('service_role'::regrole::oid)::text||':EXECUTE:false')]
+    = case e.acl_kind when 'service-only' then
+      array[(p.proowner::text||':'||p.proowner::text||':EXECUTE:false'),
+        (p.proowner::text||':'||('service_role'::regrole::oid)::text||':EXECUTE:false')]
+      when 'owner-only' then array[(p.proowner::text||':'||p.proowner::text||':EXECUTE:false')] end
   from pg_proc p join pg_language l on l.oid=p.prolang where p.oid=to_regprocedure(e.signature)),false),
-  'installed approved extension has exact helper/attributes/owner/service-only ACL: '||e.signature)
+  'installed approved extension has exact helper/attributes/owner/'||e.acl_kind||' ACL: '||e.signature)
+from limited_session_caller_extensions e where to_regprocedure(e.signature) is not null;
+select ok(coalesce((select bool_and(case when role_name='service_role' and e.acl_kind='service-only'
+    then has_function_privilege(role_name,p.oid,'EXECUTE')
+    else not has_function_privilege(role_name,p.oid,'EXECUTE') end)
+  from pg_proc p cross join (values ('anon'),('authenticated'),('service_role')) roles(role_name)
+  where p.oid=to_regprocedure(e.signature)),false),
+  'runtime roles preserve exact approved extension '||e.acl_kind||' execution: '||e.signature)
 from limited_session_caller_extensions e where to_regprocedure(e.signature) is not null;
 
 select is((select array_agg(n.nspname||'.'||p.proname order by n.nspname,p.proname)

@@ -112,7 +112,7 @@ select public.correct_complaint_decision(pg_temp.attention_pid(1),pg_temp.attent
 -- END COMPLAINT RESPONSE ATTENTION UPGRADE FIXTURE
 
 select is((select count(*) from private.complaint_response_attention_events),0::bigint,'no eager historical backfill');
-select is((select count(*) from private.notification_event_catalog),59::bigint,'one additive typed family');
+select is((select count(*) from private.notification_event_catalog),60::bigint,'attention and subsequent post-approval typed families are additive');
 select is((select count(distinct category) from private.notification_event_catalog),42::bigint,'one additive public category');
 select is(private.detect_complaint_response_attention_at(pg_temp.attention_pid(1),transaction_timestamp()+interval '7 days'),0,
  'strict deadline equality is not overdue');

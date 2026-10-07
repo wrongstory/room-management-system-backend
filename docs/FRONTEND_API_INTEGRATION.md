@@ -1,5 +1,58 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-07 #336 정식 source API·Swagger 연결 — 운영 미배포
+
+`dev@ac8c775` 기반 `codex/336-latest-dev-integration`의 미게시 후보에 #336을 기본
+Fastify/Edge dispatcher와 전역 source Swagger로 연결했다. 현재 source OpenAPI는
+**150 paths / 162 operations / 335 unique safe error codes**, migration111개다.
+신규11개 operation의 `x-implementation-status`는 `source-registered-not-deployed`다.
+운영 API·hosted Swagger·Pages 또는 프런트 화면 제공 완료를 뜻하지 않는다.
+최종 검증·QA·CI·dev/릴리스·운영 승격 후 해당 계약으로 client를 재생성한다.
+
+`B = /v1/cleaning-history/submissions/{sourceSubmissionId}/supplemental-room-issues`다.
+모든 명령은 Bearer 인증·최신 DB session/role/status 및 실제 업무 접근을 재검증한다.
+
+GET/list의 신고마다 현재 종결 상태를 제공한다. `closureRevision: 0`이면 `closedAt`과
+`closedByProfileId`는 null, `closureRevision: 1`이면 종결 시각과 실제 처리 관리자 UUID다.
+관리자 공동 화면은 종결 후 GET/list를 다시 조회해 현재 상태를 반영한다. POST finalize의
+응답/멱등 재시도는 최초 신고 snapshot이며 이 세 필드를 포함하지 않는다. 이를 현재
+종결 상태로 해석하지 않는다. 이 계약은 검증된 source 후보이며 아직 운영 미배포다.
+
+| 경로 | 메서드 / operationId | 소비 기준 |
+| --- | --- | --- |
+| `B/source` | GET `getPostApprovalRoomIssueSource` | 원 제출과 접근 범위 조회 |
+| `B/drafts` | POST `savePostApprovalRoomIssueDraft` | 새 초안/메모 CAS 저장 |
+| `B/drafts/{clientReportId}` | GET `getPostApprovalRoomIssueDraft` | 현재 draft/evidence revision과 nullable reportId 복구 |
+| `B` | GET `listPostApprovalRoomIssueReports` | 같은 source 최신50개, query/cursor 입력 없음 |
+| `B` | POST `finalizePostApprovalRoomIssueReport` | 새 accepted 증빙으로 불변 신고 확정 |
+| `B/{reportId}` | GET `getPostApprovalRoomIssueReport` | 확정 신고 상세 조회 |
+| `B/{reportId}/close` | POST `closePostApprovalRoomIssueReport` | 관리자 종결 event 추가 |
+| `B/drafts/{clientReportId}/evidence/{evidenceId}/upload` | POST `uploadPostApprovalRoomIssueEvidence` | raw JPEG/WebP/HEIC/HEIF 최대5MiB, 3개 CAS header |
+| `/v1/post-approval-room-issue-evidence-uploads/{operationId}` | GET `getPostApprovalRoomIssueEvidenceUpload` | 안전한 상태/leaseVersion 조회, 실행 권한 부여 아님 |
+| `/v1/post-approval-room-issue-evidence/{evidenceId}/versions/{revision}/content` | GET `getPostApprovalRoomIssueEvidenceContent` | 서버 중계 JPEG/WebP binary, no-store |
+| `/v1/post-approval-room-issue-evidence-uploads/{operationId}/handover` | POST `handoverPostApprovalRoomIssueEvidenceUpload` | 관리자만 expectedLeaseVersion으로 인계 |
+
+활성·비밀번호 변경 완료 관리자는 같은 초안/신고/안전한 업로드 상태를 공유한다. 메이드는
+원 수행 여부와 무관하게 본인 실제 통보 배정 이력이 있는 source만 접근하며 다른 메이드 초안/업로드 실행 권한은
+받지 않는다. 담당 종료·제출/승인·경과 일수만으로 조회를 차단하지 않는다. 원 제출이
+반려/대체된 후에도 기존 신고 조회·증빙 열람·관리자 종결은 유지하지만 신규 확정 가능
+여부는 별도 서버 상태로 판정한다. 작성자·원 수행자·실제 신고/인계/종결 처리자는 보존한다.
+
+POST는 `Idempotency-Key`를 사용하고 동일 키·동일 payload 재시도만 receipt를 재사용한다.
+업로드는 단일 `If-Draft-Revision`/`If-Evidence-Revision`/`If-Item-Revision` decimal header를
+보낸다. 409이면 최신 revision/state를 다시 조회하며 client가 actor/session/fence/provider
+locator를 지정하지 않는다. 최종 신고의 evidence 배열은 새 증빙의 현재 revision 및
+displayOrder를 그대로 보낸다. 기존 원 제출 사진을 새 신고 증빙으로 재사용하지 않는다.
+
+전용 `POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64`가 없으면 조회는 유지하고 인계만
+503 `POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED`로 안전하게 거부한다.
+[키 구성과 저장 기준](./ENVIRONMENTS.md)을 따른다. ephemeral Python codegen은 신규
+JSON operation9개를 검증했지만 raw binary upload 메서드 및 content binary parser는
+자동 생성되지 않으므로 프런트 client에서 각각 별도 binary transport로 연결해야 한다.
+현재 실제 Drive/UAT·프런트 소스 변경은 없다. [전체 증거와 후속 gate](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)를 따른다.
+
+### 이하 과거 scoped handoff 이력
+
 > 현재 #330은 dev cf22727(#318 병합 완료) 통합 후보로 migration108/OpenAPI139 paths·150 operations다. 아래 초기 수치는 과거 이력이며 새 후보의 전체 검증·운영 반영은 후속이다. 촛불 최소 조회/공동 조정과 날짜 조회·제한 세션 계약을 함께 보존한다. 프런트 소스는 변경하지 않았다.
 
 > 2026-10-05 #330 최신 dev 통합 후보는 103 migrations/source OpenAPI 목표138 paths/149 operations다. 최소 조회와 기존 촛불 변경만 active/password-complete/live-session admin/maid가 사용하며 일반 객실/PIN 권한은 넓히지 않는다. #336 신고 정책은 제외한다. #383/#382/#329/#318 후속 dev 재통합·전체 DB·독립 QA·새 exact-head CI와 release/운영 승격은 별도 gate다. 프런트 source·운영/UAT는 이번 병합 준비로 완료되지 않는다.

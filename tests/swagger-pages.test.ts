@@ -136,8 +136,8 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
     expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.6.0"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "140"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "151"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "150"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "162"');
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
@@ -219,12 +219,12 @@ describe('GitHub Pages Swagger portal', () => {
       '--expected-version', '0.6.0', '--output-dir', outputDirectory
     ];
     const result = await execFileAsync(process.execPath, [
-      ...args, '--expected-path-count', '140', '--expected-operation-count', '151'
+      ...args, '--expected-path-count', '150', '--expected-operation-count', '162'
     ]);
-    expect(result.stdout).toContain('version=0.6.0 paths=140 operations=151');
+    expect(result.stdout).toContain('version=0.6.0 paths=150 operations=162');
     const manifest = JSON.parse(await readFile(join(outputDirectory, 'portal-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({
-      apiVersion: '0.6.0', pathCount: 140, operationCount: 151, readOnly: true
+      apiVersion: '0.6.0', pathCount: 150, operationCount: 162, readOnly: true
     });
     await expect(execFileAsync(process.execPath, [
       ...args, '--expected-path-count', '131', '--expected-operation-count', '141'
