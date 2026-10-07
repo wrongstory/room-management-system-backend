@@ -6,7 +6,11 @@
 최종 통합 후보의 필수 CI로 검증한다. 운영 적용은 최종 한 번의 배포 절차로 수행한다.
 PR377/source83e7122는 required CI37603160916·독립 QA 후 devbec3dbe로 보호 squash됐다.
 release의 main 충돌121개는 e2f703e에서 해소했고 CI37604470137 두 check도 PASS다.
-최신dev를 release/v0.9.0에 정상 통합 중이며 최종 CI/운영 반영은 아직 미완료다.
+#404 감사 검사 오탐 보완 PR405/sourcec3803be는 CI37626935185 두 check와 독립 QA PASS 후
+dev1a91ad8로 보호 squash됐다. release에 테스트 한 파일을 정상 통합했다.
+승인된 #336 전용 키 준비·기존 키 보존은 확인했지만 실제 인계 hosted 검증은 미완료다.
+최종 release exact-head CI 및 운영 적용 도구 원자성/timeout·짧은 업무 중지 통제가 남았다.
+운영 DB/API·Swagger 승격은 아직 하지 않았다.
 
 최신 지시는 완료된 프런트 요구 기능의 운영 배포·Swagger 인계·실사용 확인을 먼저 수행하는 것이다.
 아래 과거의 #396 전체 개발 → #378 전체 실행기 → #273 실제 백업/복원 → 배포 직전 정지 순서는

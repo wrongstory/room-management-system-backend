@@ -70,8 +70,10 @@ B05 홈 과거 주급/검수 대기 재구성과 B06 수동 완료는 이 배포
 3. 최종 후보의 필수 CI·독립 QA, 운영 85→후보 migration 적용 가능성·기존 이력 보존 확인.
    새 범용 #378 실행기 전체 개발 완료를 임의 선행조건으로 추가하지 않는다. 기존 승인된
    적용 경로의 원자성·timeout·history/readback을 확인하고 불확실 결과에는 재실행하지 않는다.
-4. #336 증빙 인계의 전용 영속 키 준비 여부 확인. 미설정 시 인계만503이라는 제한을
-   명확히 표시한다. 기존 PIN/Auth/암호키를 교체하거나 재사용하지 않는다.
+4. #336 증빙 인계 전용 영속 키는 사용자 승인 후 2026-10-07 준비했다.
+   생성값과 원격 메타데이터 일치 및 기존 secret 메타데이터 보존을 확인했다.
+   값·해시는 파일/로그/Git에 기록하지 않았다. 기존 PIN/Auth/암호키 변경은 없다.
+   키 준비는 실제 인계 기능의 운영 검증 완료가 아니며 hosted smoke는 배포 후 수행한다.
 5. 보호된 release→main 병합 후 pending SQL만 적용·readback, exact main API와 필요한
    scheduler runtime 배포, health/OpenAPI/CORS/no-store/권한 smoke.
 6. 실제 운영 OpenAPI로 Swagger Pages 갱신, 프런트 인계 후 사용자 화면 점검.
@@ -85,6 +87,20 @@ B05 홈 과거 주급/검수 대기 재구성과 B06 수동 완료는 이 배포
 
 ## 현재 검증
 
+- 2026-10-07 최종 후보fdae86d의 CI37615894938은 application PASS/migration FAIL이었다.
+  password_change_replay.sql의 전체 행 숫자 부분문자열 검사 오탐을 #404로 분리했다.
+  실제 CI 충돌 행은 보존되지 않아 정확한 충돌 필드는 미확인이다. 합성 UUID 충돌은
+  로컬111에서 rollback-only로 재현했고, exact 감사 내용 계약 검사로 보완 후 SQL96 PASS다.
+  PR405/sourcec3803be는 Node2664/type/build/독립 QA와 CI37626935185 두 check PASS 후
+  dev1a91ad83aabc1066a732f4f334667bf5eebac893으로 보호 squash됐다. 이 릴리스에
+  동일 테스트 한 파일만 정상 통합했다. 운영 코드·migration은 변경하지 않았다.
+- pending86–111의26개 SQL은 manifest hash와 일치하며 독립 소스 QA에서 설치 시
+  기존 업무 행 삭제·Auth 비밀번호/PIN 변경·Drive rename/purge는 발견되지 않았다.
+  SQL 자체에 transaction/timeout 경계가 없어 실제 도구의 원자성·유한 timeout/readback이
+  필요하다. order93 구 취소 RPC 권한 회수와 order95 컬럼 grant 전환으로 DB/API 사이
+  무중단 호환을 보장하지 않는다. 승인된 짧은 업무 중지의 실제 통제 방법을 확인하고
+  SQL→API/scheduler 교체→권한 smoke 후 재개한다. 구현되지 않은 maintenance gate를
+  가정하지 않으며 API-only rollback이 전체 DB 복구를 보장하지 않는다.
 - 후보 출발점 `npm test`: 105파일/2,663 PASS (2026-10-07).
 - 릴리스 범위 문서 추가 뒤 `npm run ci:quality`: PASS, 2,663 tests/typecheck/build,
   secret scan/OpenAPI 포함. 기존 lint info18건은 오류가 아니다.
