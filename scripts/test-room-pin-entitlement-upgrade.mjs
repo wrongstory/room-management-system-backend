@@ -22,7 +22,7 @@ function snapshot() {
   return psql(`select encode(extensions.digest(convert_to(jsonb_build_object(
     'profiles',(select jsonb_agg(to_jsonb(row) order by id) from public.profiles row where id::text like 'f1940063%'),
     'targets',(select jsonb_agg(to_jsonb(row) order by id) from public.cleaning_targets row where id::text like 'f1940063%'),
-    'assignments',(select jsonb_agg(to_jsonb(row) order by id) from public.cleaning_assignments row where id::text like 'f1940063%'),
+    'assignments',(select jsonb_agg(to_jsonb(row)-'notified_reservation_schedule_snapshot' order by id) from public.cleaning_assignments row where id::text like 'f1940063%'),
     'notifications',(select jsonb_agg(to_jsonb(row) order by id) from public.notifications row where id::text like 'f1940063%'),
     'outbox',(select jsonb_agg(to_jsonb(row) order by id) from private.notification_delivery_outbox row where id::text like 'f1940063%'),
     'revisions',(select jsonb_agg(to_jsonb(row) order by id) from private.room_pin_revisions row where recorded_by='f1940063-0000-4000-8000-000000000001'),

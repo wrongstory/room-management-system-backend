@@ -24,6 +24,12 @@ const envSchema = z.object({
   ROOM_PIN_KEY_BASE64: z.string().min(1),
   ROOM_PIN_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/),
   ROOM_PIN_KEYRING_JSON: z.string().default('{}').transform((value) => value.trim() || '{}'),
+  // Optional for startup/report reads; explicit handover requires a persistent,
+  // purpose-specific key. Empty example values must never generate a fallback.
+  POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().max(128).optional()
+  ),
   PAYROLL_CURSOR_HMAC_SECRET: z.string().trim().refine(
     (value) => Buffer.byteLength(value, 'utf8') >= 32,
     '주급 cursor HMAC 비밀값은 UTF-8 기준 32바이트 이상이어야 합니다.'
@@ -124,6 +130,28 @@ const envSchema = z.object({
     if(roomPinKeyringSecrets.some((secret)=>otherPurposeSecrets.includes(secret))) throw new Error();
   } catch {
     context.addIssue({code:'custom',path:['ROOM_PIN_KEYRING_JSON'],message:'객실 PIN current/prior 키는 서로 분리된 canonical Base64 32바이트 키이며 이전 키는 최대 5개여야 합니다.'});
+  }
+
+  if (env.POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64 !== undefined) {
+    const encoded = env.POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64;
+    const key = Buffer.from(encoded, 'base64');
+    const otherPurposeSecrets = [
+      env.SUPABASE_PUBLISHABLE_KEY, env.SUPABASE_SECRET_KEY, env.ACCOUNT_PHONE_PEPPER,
+      env.RESERVATION_PII_KEY_BASE64, env.RESERVATION_GUEST_NAME_PEPPER,
+      env.ROOM_PIN_KEY_BASE64, env.WEB_PUSH_SUBSCRIPTION_KEY_BASE64,
+      env.WEB_PUSH_BINDING_DIGEST_SECRET, env.PAYROLL_CURSOR_HMAC_SECRET,
+      env.NOTIFICATION_CURSOR_HMAC_SECRET, env.INSPECTION_CURSOR_HMAC_SECRET,
+      env.GOOGLE_DRIVE_CLIENT_ID, env.GOOGLE_DRIVE_CLIENT_SECRET,
+      env.GOOGLE_DRIVE_REFRESH_TOKEN, env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
+      env.GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,
+      ...reservationPiiKeyringSecrets, ...roomPinKeyringSecrets, ...webPushKeyringSecrets
+    ];
+    if (key.byteLength !== 32 || key.toString('base64') !== encoded || otherPurposeSecrets.includes(encoded)) {
+      context.addIssue({
+        code: 'custom', path: ['POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64'],
+        message: '사후 특이사항 인계 키는 기존 current/prior 비밀값과 분리된 canonical Base64 32바이트 키여야 합니다.'
+      });
+    }
   }
 
   if ([

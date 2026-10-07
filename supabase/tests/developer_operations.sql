@@ -1,6 +1,6 @@
 begin;
 
-select plan(32);
+select plan(33);
 
 insert into auth.users (id) values
   ('16000000-0000-4000-8000-000000000001'),
@@ -79,42 +79,58 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'post_approval_room_issue_ledger'
   ) ->> 'currentMigration',
-  'flat_cleaning_evidence_history_payroll',
+  'post_approval_room_issue_ledger',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'post_approval_room_issue_ledger'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
 );
 
+select is(
+  public.get_developer_database_status(
+    '26000000-0000-4000-8000-000000000001',
+    'complaint_response_attention'
+  ) ->> 'migrationDrift',
+  'ahead',
+  'stale source expectation reproduces the misleading ahead classification'
+);
+
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'flat_cleaning_evidence_history_payroll';
+where name = 'post_approval_room_issue_ledger';
+
+-- Preserve the exact preceding installed entry before removing the expected
+-- head. Integration may append dependencies before this feature migration.
+create temporary table developer_previous_migration_head as
+select name from supabase_migrations.schema_migrations
+where version < (select version from developer_expected_migration_head)
+order by version desc limit 1;
 
 delete from supabase_migrations.schema_migrations
-where name = 'flat_cleaning_evidence_history_payroll';
+where name = 'post_approval_room_issue_ledger';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'post_approval_room_issue_ledger'
   ) ->> 'currentMigration',
-  'complaint_deadlines_non_blocking',
+  (select name from developer_previous_migration_head),
   'database status exposes the previous migration when the current head is absent'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'flat_cleaning_evidence_history_payroll'
+    'post_approval_room_issue_ledger'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'

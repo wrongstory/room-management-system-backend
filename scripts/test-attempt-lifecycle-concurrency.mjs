@@ -250,12 +250,11 @@ export async function testAttemptLifecycleConcurrency(client) {
       p_expected_execution_version: 1, p_expected_assignment_id: expired.assignmentId, p_expected_assignment_revision: 2,
       p_idempotency_key: randomUUID(), p_request_hash: 'd'.repeat(64) })
   ]);
-  assert(!expiryRace[0].error && expiryRace[1].error &&
-    ['CLEANING_WINDOW_EXPIRED', 'ATTEMPT_VERSION_CONFLICT', 'ASSIGNMENT_VERSION_CONFLICT'].includes(expiryRace[1].error.message),
-  'expired scheduled cleanup wins while start fails closed');
+  assert(expiryRace[0].error?.message === 'INVALID_ATTEMPT_COMMAND' && !expiryRace[1].error,
+  'retired expiry action is rejected while an otherwise valid overdue start succeeds');
   const expiredState = ok(await client.from('cleaning_attempts').select('status,started_at,execution_version').eq('id', expired.attemptId).single(), 'expiry race state');
-  assert(expiredState.status === 'superseded' && expiredState.started_at === null && expiredState.execution_version === 2,
-    'expiration preserves unstarted immutable history');
+  assert(expiredState.status === 'in_progress' && expiredState.started_at !== null && expiredState.execution_version === 2,
+    'overdue start preserves the same attempt instead of superseding it');
 
   for (let index = 0; index < 4; index += 1) {
     const accountRace = await fixture();
@@ -272,5 +271,5 @@ export async function testAttemptLifecycleConcurrency(client) {
     assert(state.status === 'field_completed' && ['upload_only', 'inactive'].includes(profile.status), 'account race preserves completed work and no active reactivation');
     if (profile.status === 'inactive') assert((await complete(accountRace)).error?.message === 'CAPABILITY_ACCESS_REQUIRED', 'inactive account has no replay/execute permission');
   }
-  console.log('Attempt lifecycle concurrency passed: fixed TTL/replay, handover/complete, availability approval/clock waits, session revocation, scheduled expiry/start, account change/completion.');
+  console.log('Attempt lifecycle concurrency passed: fixed TTL/replay, handover/complete, availability approval/clock waits, session revocation, retired expiry versus overdue start, account change/completion.');
 }

@@ -27,8 +27,10 @@ const adminGuards = (app: Parameters<FastifyPluginAsync>[0]) => [
 
 export function createAssignmentPreviewRoutes(service: AssignmentPreviewService): FastifyPluginAsync {
   return async (app) => {
-    app.post('/preview', { preHandler: adminGuards(app) }, async (request) =>
-      service.preview(request.actor, previewBody.parse(request.body)));
+    app.post('/preview', {
+      onRequest: async (_request, reply) => { reply.header('Cache-Control', 'no-store'); },
+      preHandler: adminGuards(app)
+    }, async (request) => service.preview(request.actor, previewBody.parse(request.body)));
   };
 }
 

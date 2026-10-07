@@ -14,6 +14,9 @@ const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
 const issueIdSchema = z.object({ roomId: z.uuid(), issueId: z.uuid() });
 const reasonCodeSchema = z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/);
 const expectedVersionSchema = z.number().int().positive();
+const roomListQuerySchema = z.object({
+  serviceDate: z.iso.date().refine((value) => !value.startsWith('0000-')).optional()
+}).strict();
 const roomEventQuerySchema = z
   .object({
     limit: z.preprocess(
@@ -66,9 +69,14 @@ const displayStatusOverrideSchema = z.object({
 }).strict();
 
 const candleSchema = operationDecisionSchema.extend({
-  count: z.number().int().nonnegative(),
+  count: z.number().int().min(0).max(2147483647),
   physicallyVerified: z.boolean().default(false)
-});
+}).strict();
+const candleQuerySchema = z.object({
+  roomId: z.uuid().optional(),
+  cursor: z.uuid().optional(),
+  limit: z.string().regex(/^(?:[1-9]|[1-4]\d|50)$/).transform(Number).optional()
+}).strict().refine((input) => !input.roomId || !input.cursor, 'roomId와 cursor를 함께 사용할 수 없습니다.');
 
 const issueSchema = operationDecisionSchema.extend({
   category: z.string().trim().min(2).max(80).regex(/^[A-Z0-9_]+$/),
@@ -142,7 +150,7 @@ function idempotencyKey(request: FastifyRequest): string {
 
 function roomOperationPageInput(
   request: FastifyRequest,
-  expectedStatus: 'actionable' | 'open'
+  expectedStatus: 'actionable' | 'open' | 'registered'
 ): RoomOperationPageInput {
   const raw = new URL(request.raw.url ?? '/', 'http://internal').searchParams;
   for (const key of raw.keys()) {
@@ -154,12 +162,12 @@ function roomOperationPageInput(
   if (rawStatus !== expectedStatus) {
     throw new AppError(400, 'INVALID_ROOM_OPERATION_QUERY', '객실 운영 조회 조건이 올바르지 않습니다.');
   }
-  const rawLimit = raw.get('limit') ?? String(ROOM_OPERATION_PAGE_DEFAULT);
+  const rawLimit = raw.get('limit') ?? String(expectedStatus === 'registered' ? 5 : ROOM_OPERATION_PAGE_DEFAULT);
   if (!/^[1-9]\d*$/.test(rawLimit)) {
     throw new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
   }
   const limit = Number(rawLimit);
-  if (!Number.isSafeInteger(limit) || limit > ROOM_OPERATION_PAGE_MAX) {
+  if (!Number.isSafeInteger(limit) || limit > (expectedStatus === 'registered' ? 10 : ROOM_OPERATION_PAGE_MAX)) {
     throw new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
   }
   const cursor = raw.get('cursor');
@@ -173,10 +181,19 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
   return async (app) => {
     const authenticated = [app.authenticate, app.requirePasswordChanged];
     const admin = [...authenticated, app.requireAdmin];
+    const candleAccess = [...authenticated, async (request: FastifyRequest) => {
+      if (!['admin', 'maid'].includes(request.actor.role)) throw new AppError(403, 'FORBIDDEN', '촛불 조정 권한이 필요합니다.');
+    }];
 
-    app.get('/', { preHandler: admin }, async (request) => ({
-      rooms: await roomService.list(request.actor)
-    }));
+    app.get('/', { preHandler: admin }, async (request, reply) => {
+      const query = roomListQuerySchema.parse(request.query);
+      return reply.header('Cache-Control', 'no-store').send({
+        rooms: await roomService.list(
+          request.actor,
+          query.serviceDate === undefined ? undefined : { serviceDate: query.serviceDate }
+        )
+      });
+    });
 
     app.post('/pins/bootstrap', { preHandler: admin }, async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
@@ -291,7 +308,13 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       };
     });
 
-    app.post('/:roomId/candles', { preHandler: admin }, async (request, reply) => {
+    app.get('/candles', { preHandler: candleAccess }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      return roomService.listCandles(request.actor, candleQuerySchema.parse(request.query));
+    });
+
+    app.post('/:roomId/candles', { preHandler: candleAccess }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
       const { roomId } = roomIdSchema.parse(request.params);
       const input = candleSchema.parse(request.body);
       const operation = await roomService.mutateOperation(request.actor, {
@@ -324,6 +347,15 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       return reply.code(201).send({ operation });
     });
 
+    app.get('/:roomId/reports', {
+      onRequest: async (_request, reply) => { reply.header('Cache-Control', 'no-store'); },
+      preHandler: admin
+    }, async (request, reply) => {
+      const { roomId } = roomIdSchema.parse(request.params);
+      return reply.header('Cache-Control', 'no-store').send(
+        await roomService.listReports(request.actor, roomId, roomOperationPageInput(request, 'registered'))
+      );
+    });
     app.get('/:roomId/issues', { preHandler: admin }, async (request, reply) => {
       const { roomId } = roomIdSchema.parse(request.params);
       const input = roomOperationPageInput(request, 'open');

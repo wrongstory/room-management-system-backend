@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Actor } from '../src/domain/actor.js';
 import { AppError } from '../src/lib/app-error.js';
@@ -8,6 +9,42 @@ import type { SupabaseClients } from '../src/lib/supabase.js';
 
 const id = (n: number) => `92000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const actor = (role: Actor['role']): Actor => ({ authUserId: id(90), profileId: id(91), displayName: role, role, mustChangePassword: false, accessToken: 'transient-test-token' });
+
+describe('session-bound submission service', () => {
+  function setup(code?: string) {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const clients = { admin: { rpc: async (name: string, args: Record<string, unknown>) => {
+      calls.push({ name, args });
+      return { data: { id: id(3), attemptId: id(2), version: 1, sessionId: 'private', pin: 'private' }, error: code ? { message: code } : null };
+    } } } as unknown as SupabaseClients;
+    return { calls, service: new SupabaseSubmissionService(clients, 'inspection-cursor-secret-tests-1234567') };
+  }
+  it('uses only the session-bound wrapper for both active bearer and dedicated limited identity with exact args', async () => {
+    const { calls, service } = setup();
+    const sessionId = id(92);
+    const accessToken = `header.${Buffer.from(JSON.stringify({ session_id: sessionId })).toString('base64url')}.signature`;
+    for (const identity of [{ ...actor('maid'), accessToken }, { profileId: id(91), role: 'maid' as const, mustChangePassword: false, sessionId }]) {
+      expect(await service.create(identity, id(2), id(3), 0, 4, 'submit-session-01')).toEqual({ id: id(3), attemptId: id(2), version: 1 });
+    }
+    const p_request_hash = createHash('sha256').update(JSON.stringify({ actorProfileId: id(91), attemptId: id(2), candleCount: 4, clientSubmissionId: id(3), expectedRevision: 0 })).digest('hex');
+    expect(calls).toEqual(Array.from({ length: 2 }, () => ({ name: 'create_cleaning_submission_with_session', args: {
+      p_actor_profile_id: id(91), p_session_id: sessionId, p_attempt_id: id(2), p_client_submission_id: id(3), p_expected_revision: 0,
+      p_candle_count: 4, p_idempotency_key: 'submit-session-01', p_request_hash,
+    } })));
+  });
+  it('missing or malformed session never invokes an unbound compatibility RPC', async () => {
+    for (const identity of [{ ...actor('maid') }, { ...actor('maid'), sessionId: 'invalid' }, { profileId: id(91), role: 'maid' as const, mustChangePassword: false }]) {
+      const { calls, service } = setup();
+      await expect(service.create(identity, id(2), id(3), 0, 0, 'submit-session-01')).rejects.toMatchObject({ statusCode: 401, code: 'INVALID_ACCESS_TOKEN' });
+      expect(calls).toEqual([]);
+    }
+  });
+  it.each([['SESSION_REVOKED', 401], ['PASSWORD_CHANGE_REQUIRED', 403], ['CAPABILITY_ACCESS_REQUIRED', 403]] as const)('preserves transaction revalidation %s', async (code, statusCode) => {
+    const { service, calls } = setup(code);
+    await expect(service.create({ ...actor('maid'), sessionId: id(92) }, id(2), id(3), 0, 0, 'submit-session-01')).rejects.toMatchObject({ code, statusCode });
+    expect(calls).toHaveLength(1); expect(calls[0]?.name).toBe('create_cleaning_submission_with_session');
+  });
+});
 
 function service(calls: string[]): SubmissionService {
   return {

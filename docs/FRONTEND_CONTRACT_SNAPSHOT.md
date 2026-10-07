@@ -1,5 +1,36 @@
 # 프런트엔드 계약 snapshot
 
+> 2026-10-07 #336 source 연결: `dev@ac8c775` 기준 별도 미게시 후보는111 migrations·전역 OpenAPI150 paths/162 operations다. 신규11개 API를 기본 Fastify/Edge·source Swagger에 등록했고 `source-registered-not-deployed`로 표시한다. scoped 프런트 dev `09ed28446a4fd43919cddb29ebe442b848548ab8`은 이번 재확인에서도 동일하며 전역 제품 snapshot·프런트 소스·운영/hosted Swagger는 변경하지 않았다. [신규 operation 및 binary client 인계](./FRONTEND_API_INTEGRATION.md#2026-10-07-336-정식-source-apiswagger-연결--운영-미배포), [현재 검증](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)을 우선하고 아래 숫자는 당시 checkpoint로 보존한다.
+
+> 2026-10-06 현재: #318/PR321·#330/PR337 dev 병합 뒤 `109d6b7`에 #332를 통합한110 migrations/OpenAPI140 paths·151 operations 후보다. 아래86/132·142 등 이전 숫자는 과거 checkpoint이며 [현재 검증·남은 gate](./ADMIN_REPORT_READ.md)를 우선한다. 운영·프런트 배포 완료는 아니다.
+
+## 2026-10-01 #332 추가 관찰 및 source 후보
+
+프런트 정본 `makee-ham/room-management-system`의
+`dev@09ed28446a4fd43919cddb29ebe442b848548ab8`에 있는
+`DOCS/28_FRONTEND_CONNECTION_BACKEND_MEETING.md` B07과 사용자 A안 결정을 대조했다.
+이 관찰은 제품 가이드가 고정한 전체 프런트 정책 snapshot을 교체하지 않는다.
+제출 전 등록 신고 조회는 백엔드 `GET /v1/rooms/{roomId}/reports` 후보로 보강한다.
+OpenAPI 0.6.0 / 132 paths / 142 operations, generated Python business client의 임시 생성·컴파일 검증 대상이다.
+관리자 전용 업무 API이므로 developer 운영 콘솔의 filtered client에는 추가하지 않는다.
+프런트 코드·배포·운영 OpenAPI·Pages는 변경하지 않았다. [연동 세부 계약](./ADMIN_REPORT_READ.md).
+
+> 2026-10-05 #330 최신 dev 통합 후보: 기존 PR #337/source `95033682`와 `dev@bb4fa40` 기준103 migrations/source OpenAPI 목표138 paths/149 operations다. 아래 원래86/132·142와 원격 프런트 commit은 당시 scoped 확인점으로 보존하며 전역 제품 snapshot을 승격하지 않는다. 촛불 공동 관리와 #336 신고 정책을 분리하고 후속 dev 재통합·전체 DB·독립 QA·새 exact-head CI·운영/UAT는 미완료다.
+
+## #330 사용자 결정에 따른 최초 source 후보 checkpoint
+
+활성 관리자와 모든 활성 메이드의 촛불 추가·감소·초기화 및 최소 조회를 제공한다. 배정/제출/승인/최근 7일 조건은 없다. 기존 관리자 전용 정책보다 이번 사용자 결정을 우선하며 프런트 snapshot 자체를 자동 승격하지 않는다. source OpenAPI 0.6.0은 이 후보에서 **132 paths / 142 operations**, migration은 **86개**다. 운영 반영 수치가 아니다. 프런트 수정은 별도 담당이며 [#330 인계](./ROOM_CANDLES_330.md)를 따른다.
+
+2026-09-30 재확인한 프런트 원격은 `makee-ham/room-management-system` main `d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev `09ed28446a4fd43919cddb29ebe442b848548ab8`이다. `DOCS/30_DEPLOYED_WIREFRAME_API_PARITY.md` B01의 관리자 전용/다른 메이드 거부 문구는 #330 후속 사용자 결정으로 대체한다. 새 특이사항 API 요구는 촛불과 별도 결정 대상으로 유지한다. 원격 프런트 파일은 수정하지 않았다.
+
+> #331 사용자 추가 결정(2026-10-03)은 종료된 KST 주차·양수 신규 on, on 유지 별도 금액 근거 재확인이다. 이번 scoped DOCS/30 B02의 main d509b44/dev09ed284 대조는 전역 snapshot 승격이 아니다. 백엔드 표시 전용 API는 구현 후보(137 paths/148 operations)이며 [계약과 실제 gate](./PAYROLL_REMITTANCE_MARKER.md)를 따른다. 프런트 source·운영은 변경하지 않는다.
+
+> 2026-10-03 최신: #325 PR358(source78582789 → devd65f4f60)는 exact-tree CI37093733970·독립 QA98/100으로 source/dev 완료했다. 현재 #324 scoped 객실별 주급 근거 조회는 98번째 read migration과 134 paths/144 operations의 후보이며 [계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 아래 후보 표현은 당시 checkpoint이며 전역 프런트 제품 snapshot·운영·main·recovery는 변경하지 않는다.
+
+> 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.
+
+> 2026-10-03 현재: #328은 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)의 source `76e2780c0304a7336433cdd17e585610360785e3` → dev squash `3968e42967c8ad223661b7a3eb4ce200aabd2499`로 완료했다. 두 tree와 CI merge tree가 같고 required CI `37027527827` application/migration PASS·독립 QA98/100이다. 아래 Draft·후속 gate 표현은 과거 checkpoint다. #327은 이 dev/95 migrations에서 관리자 open 사건 목록을 구현 중인 후보이며 현재 source OpenAPI 목표는 132 paths·142 operations다. 신규 96번째 migration과 검증·운영 제외 범위는 [관리자 미퇴실 목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md)을 따른다. production/main/recovery·프런트 UI/UAT 완료를 뜻하지 않는다.
+
 이 문서는 `wrongstory/room-management-system`의 exact 제품 snapshot을 백엔드 계약에 대조한 재현 가능한 기록이다. 제품 정책의 최종 우선순위는 [AI 백엔드 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
 ## 2026-09-23 확인점
@@ -13,6 +44,25 @@
 | 마지막 검증 production/Pages | `api` ACTIVE v24 / `0.5.1` / 128 / 138 | production 78 migrations와 portal/openapi/manifest parity 완료. 현재 main의 #256 schema 내용은 배포 전이므로 포함됐다고 추정하지 않는다. |
 
 프런트 snapshot의 기능을 현재 원격 `main` 배포 상태로 추정하지 않는다. 백엔드 source, production Edge 배포, 운영 secret/provider 활성화도 서로 다른 완료 단계로 기록한다.
+
+### 2026-09-29 객실 현황 targeted overlay
+
+관리자 객실 현황만 `makee-ham/room-management-system`의 `dev@26a334f2c488223f0b120b45fafcfc0f85e35a58`와 다시 대조했다. live 화면은 날짜 이동을 API 미준비로 막고 있었고, 와이어프레임은 `퇴실점검 대상`, `인원 추가`, `공실`, `촛불 있음`, `특이사항 있음`, `얼리 체크인`, `레이트 체크아웃` 상세 필터를 정의한다. Issue #318은 이를 날짜별 서버 projection 코드로 제공하며 프런트 UI 변경과 미확정 수동 퇴실점검 완료 lifecycle은 포함하지 않는다.
+
+### 2026-10-05 #318 연동 문서 재확인
+
+원격 읽기 전용 조회에서 프런트 `dev@09ed28446a4fd43919cddb29ebe442b848548ab8`,
+`main@d509b44b1371f25d73891e04d355b0cb0e923f5f`를 확인했다. dev는 위26a 기준보다
+1 commit 앞서며, 이 확인은 전역 제품 snapshot 변경이나 실제 운영 브라우저 UAT가 아니다.
+[DOCS/30 B05·B06](https://github.com/makee-ham/room-management-system/blob/09ed28446a4fd43919cddb29ebe442b848548ab8/DOCS/30_DEPLOYED_WIREFRAME_API_PARITY.md)은
+날짜 UI가 활성화됐지만 날짜별 객실 projection을 기다린다고 기록한다. 따라서 위의 날짜 UI 차단은
+26a 당시 이력이며 현재 문서 관찰과 구분한다. 백엔드 #318은 `serviceDate` query와 평가 시각·
+상세 조건을 제공하고 프런트 adapter 연결은 담당 저장소의 후속이다. 홈 검수 대기·주급의 과거 재구성,
+퇴실점검 수동 완료 mutation까지 제공한다고 확대하지 않는다.
+
+동일 문서 B01의 다른 메이드 촛불 접근 차단 초안은 사용자의 이후 #330 공동 조정 결정과 다르다.
+명시적 사용자 결정이 우선하며, 촛불 공동 조정을 이유로 #336 신고나 일반 객실/PIN 권한을 확대하지 않는다.
+프런트 소스·배포·운영 데이터는 변경하지 않았다.
 
 프런트 구현의 공통 원칙은 [프런트 API 연동 가이드](./FRONTEND_API_INTEGRATION.md)를 사용한다. [production API v0.4.0 프런트 Codex 인계](./FRONTEND_CODEX_HANDOFF_V0.4.0.md)는 역사 기록이며 endpoint와 schema는 production OpenAPI 0.5.1이 최종 정본이다.
 

@@ -1,27 +1,20 @@
-import { readFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
-import { PhotoError, PHOTO_INPUT_MAX_BYTES, initializePhotoDecoder } from './photo-binary.js';
-import { GoogleDriveProvider } from './google-drive.js';
+import { PhotoError, PHOTO_INPUT_MAX_BYTES } from './photo-binary.js';
 import { PhotoService, photoError, photoRoute, type PhotoIdentity } from './photo-service.js';
+import { createPhotoRuntimeDependencies, type PhotoRuntimeDependencies } from './photo.runtime.js';
 
 export interface PhotoHttpServices {
   service: PhotoService;
   authenticate(request: Request, read: boolean): Promise<PhotoIdentity>;
   denied(identity: PhotoIdentity, code: string): Promise<void>;
 }
-export function createPhotoHttpServices(clients: SupabaseClients, env: AppEnv): PhotoHttpServices {
-  let provider: GoogleDriveProvider | undefined, decoder: Promise<void> | undefined;
+export function createPhotoHttpServices(clients: SupabaseClients, env: AppEnv,
+  runtime: PhotoRuntimeDependencies = createPhotoRuntimeDependencies(env)): PhotoHttpServices {
   return {
-    service: new PhotoService(clients.admin, () => {
-      provider ??= new GoogleDriveProvider({ clientId: env.GOOGLE_DRIVE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_DRIVE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_DRIVE_REFRESH_TOKEN ?? '', rootFolderId: env.GOOGLE_DRIVE_ROOT_FOLDER_ID ?? '' });
-      return provider;
-    }, () => {
-      decoder ??= readFile(new URL(import.meta.resolve('@imagemagick/magick-wasm/magick.wasm'))).then(initializePhotoDecoder);
-      return decoder;
-    }),
+    service: new PhotoService(clients.admin, runtime.provider, runtime.initializeDecoder),
     async authenticate(request, read) {
       const auth = request.headers.get('authorization');
       if (!auth?.startsWith('Bearer ') || !auth.slice(7).trim()) throw new PhotoError(401, 'MISSING_ACCESS_TOKEN');

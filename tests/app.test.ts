@@ -2,6 +2,164 @@ import { describe, expect, it, vi } from 'vitest';
 import { type AppServices, buildApp } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 import { AppError } from '../src/lib/app-error.js';
+import type { SupabaseClients } from '../src/lib/supabase.js';
+import * as supabaseRuntime from '../src/lib/supabase.js';
+import { SupabasePostApprovalRoomIssueEvidenceService } from '../src/modules/post-approval-room-issues/post-approval-room-issue-evidence.service.js';
+import { SupabaseAuthService } from '../src/modules/auth/auth.service.js';
+import { LimitedAttemptService } from '../src/modules/limited-attempts/limited-attempt.service.js';
+import type { PhotoHttpServices } from '../src/modules/photos/photo.routes.js';
+import type { SubmissionService } from '../src/modules/submissions/submission.service.js';
+import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
+
+import type { PostApprovalRoomIssueModuleServices } from '../src/modules/post-approval-room-issues/post-approval-room-issue.module.js';
+
+describe('supplemental default app runtime', () => {
+  const operationId = '10000000-0000-4000-8000-000000000001';
+  const path = `/v1/post-approval-room-issue-evidence-uploads/${operationId}/handover`;
+  function supplemental(): PostApprovalRoomIssueModuleServices {
+    return {
+      reports: { source: vi.fn(), list: vi.fn(), draft: vi.fn(), saveDraft: vi.fn(), finalize: vi.fn(), report: vi.fn(), close: vi.fn() },
+      evidence: { upload: vi.fn(), status: vi.fn(), content: vi.fn() },
+      handover: { recover: vi.fn(async () => ({ operationId, evidenceId: operationId, status: 'accepted' as const,
+        leaseVersion: 2, itemRevision: 1, evidenceRevision: 1, mimeType: 'image/jpeg' as const, sizeBytes: 3, sha256: 'a'.repeat(64) })) }
+    };
+  }
+  it('exposes supplemental paths by default and authenticates before the lazy key boundary', async () => {
+    const app = await buildApp({ env, services: services(), logger: false });
+    try { expect((await app.inject({ method: 'POST', url: path,
+      headers: { 'idempotency-key': 'synthetic-key-001' }, payload: { expectedLeaseVersion: 1 } })).statusCode).toBe(401); }
+    finally { await app.close(); }
+  });
+  it('does not construct default supplemental clients for startup, siblings or unauthenticated requests with an injected minimal environment', async () => {
+    const clientFactory = vi.spyOn(supabaseRuntime, 'createSupabaseClients').mockImplementation(() => {
+      throw new Error('Supplemental clients must remain lazy');
+    });
+    const app = await buildApp({ env: { LOG_LEVEL: 'silent', corsOrigins: ['http://127.0.0.1:4173'] } as AppEnv,
+      services: services(), photoServices: {} as PhotoHttpServices, logger: false });
+    try {
+      expect((await app.inject('/health')).statusCode).toBe(200);
+      expect((await app.inject({ method: 'GET', url: '/v1/room-types', headers: { authorization: 'Bearer synthetic-access' } })).statusCode).toBe(200);
+      expect((await app.inject({ method: 'GET', url: `/v1/cleaning-history/submissions/${operationId}/supplemental-room-issues/source` })).statusCode).toBe(401);
+      expect(clientFactory).not.toHaveBeenCalled();
+    } finally { await app.close(); clientFactory.mockRestore(); }
+  });
+  it.each(['development', 'production'] as const)('preserves the explicit dependency override in %s', async APP_ENV => {
+    const candidate = supplemental();
+    const app = await buildApp({ env: { ...env, APP_ENV }, services: services(), logger: false,
+      postApprovalRoomIssueServices: candidate });
+    try {
+      expect((await app.inject({ method: 'POST', url: path, headers: { authorization: 'Bearer synthetic-access',
+        'idempotency-key': 'synthetic-key-001' }, payload: { expectedLeaseVersion: 1 } })).statusCode).toBe(200);
+      expect(candidate.handover.recover).toHaveBeenCalledOnce();
+    } finally { await app.close(); }
+  });
+  it('uses the default RPC adapter for source/status while missing handover configuration causes no domain work', async () => {
+    const rpc = vi.fn(async (name: string) => ({ data: name === 'get_post_approval_room_issue_source'
+      ? { source: { sourceSubmissionId: operationId, originalPerformerProfileId: operationId, sourceStatus: 'approved' } }
+      : { operationId, evidenceId: operationId, status: 'reserved', leaseVersion: 0,
+        itemRevision: 0, evidenceRevision: 0, mimeType: 'image/jpeg', sizeBytes: 3, sha256: 'a'.repeat(64) }, error: null }));
+    const clients = { admin: { rpc }, publicClient: {}, forAccessToken: vi.fn() } as unknown as SupabaseClients;
+    const clientFactory = vi.spyOn(supabaseRuntime, 'createSupabaseClients').mockReturnValue(clients);
+    const appServices = services();
+    const token = `verified.${Buffer.from(JSON.stringify({ session_id: operationId })).toString('base64url')}.signature`;
+    vi.mocked(appServices.auth.authenticate).mockResolvedValue({ authUserId: operationId, profileId: operationId,
+      displayName: 'synthetic', role: 'admin', mustChangePassword: false, accessToken: token });
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      expect(rpc).not.toHaveBeenCalled();
+      expect((await app.inject('/health')).statusCode).toBe(200);
+      expect(rpc).not.toHaveBeenCalled();
+      const headers = { authorization: `Bearer ${token}`, 'idempotency-key': 'synthetic-key-001' };
+      const source = await app.inject({ method: 'GET', url: `/v1/cleaning-history/submissions/${operationId}/supplemental-room-issues/source`, headers });
+      expect(source.statusCode).toBe(200); expect(source.headers['cache-control']).toBe('no-store');
+      expect(rpc).toHaveBeenCalledWith('get_post_approval_room_issue_source', {
+        p_actor_profile_id: operationId, p_session_id: operationId, p_source_submission_id: operationId
+      });
+      const status = await app.inject({ method: 'GET', url: path.replace('/handover', ''), headers });
+      expect(status.statusCode).toBe(200); expect(status.json().operationId).toBe(operationId);
+      const missing = await app.inject({ method: 'POST', url: path, headers, payload: { expectedLeaseVersion: 1 } });
+      expect(missing.statusCode).toBe(503);
+      expect(missing.json().error.code).toBe('POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED');
+      expect(missing.headers['cache-control']).toBe('no-store'); expect(rpc).toHaveBeenCalledTimes(2);
+      const invalid = await app.inject({ method: 'POST', url: path, headers, payload: { expectedLeaseVersion: 8 } });
+      expect(invalid.statusCode).toBe(400); expect(rpc).toHaveBeenCalledTimes(2);
+      vi.mocked(appServices.auth.authenticate).mockRejectedValueOnce(new AppError(403, 'ACCOUNT_INACTIVE', 'private-canary'));
+      expect((await app.inject({ method: 'GET', url: path.replace('/handover', ''), headers })).statusCode).toBe(403);
+      expect(rpc).toHaveBeenCalledTimes(2);
+    } finally { await app.close(); clientFactory.mockRestore(); }
+  });
+  it('rejects supplemental aliases and unsupported methods before authentication without affecting siblings or preflight', async () => {
+    const appServices = services(), candidate = supplemental();
+    const app = await buildApp({ env, services: appServices, logger: false, postApprovalRoomIssueServices: candidate });
+    const sourcePath = `/v1/cleaning-history/submissions/${operationId}/supplemental-room-issues/source`;
+    const origin = 'http://127.0.0.1:4173';
+    try {
+      for (const url of [path + '/', path.replace('/v1/', '/v1//'), path.replace('handover', '%68andover'),
+        sourcePath.replace(operationId, `%31${operationId.slice(1)}`)]) {
+        const response = await app.inject({ method: 'POST', url, headers: { origin }, payload: { expectedLeaseVersion: 1 } });
+        expect(response.statusCode, url).toBe(404); expect(response.headers['cache-control'], url).toBe('no-store');
+        expect(response.headers['access-control-allow-origin'], url).toBe(origin);
+      }
+      for (const method of ['HEAD', 'PUT', 'DELETE'] as const) {
+        expect((await app.inject({ method, url: sourcePath })).statusCode).toBe(404);
+      }
+      expect(appServices.auth.authenticate).not.toHaveBeenCalled();
+      expect(candidate.handover.recover).not.toHaveBeenCalled();
+      expect((await app.inject({ method: 'HEAD', url: '/health' })).statusCode).toBe(200);
+      expect((await app.inject({ method: 'OPTIONS', url: sourcePath, headers: {
+        origin, 'access-control-request-method': 'GET'
+      } })).statusCode).toBe(204);
+    } finally { await app.close(); }
+  });
+  it('connects the configured dedicated key to default authenticated handover and the shared evidence recovery', async () => {
+    const operation = { operationId, evidenceId: operationId, status: 'accepted' as const,
+      leaseVersion: 2, itemRevision: 1, evidenceRevision: 1, mimeType: 'image/jpeg' as const, sizeBytes: 3, sha256: 'a'.repeat(64) };
+    const rpc = vi.fn(async () => ({ data: operation, error: null }));
+    const clients = { admin: { rpc }, publicClient: {}, forAccessToken: vi.fn() } as unknown as SupabaseClients;
+    const clientFactory = vi.spyOn(supabaseRuntime, 'createSupabaseClients').mockReturnValue(clients);
+    const recovery = vi.spyOn(SupabasePostApprovalRoomIssueEvidenceService.prototype, 'recoverHandover').mockResolvedValue(operation);
+    const appServices = services();
+    const token = `verified.${Buffer.from(JSON.stringify({ session_id: operationId })).toString('base64url')}.signature`;
+    vi.mocked(appServices.auth.authenticate).mockResolvedValue({ authUserId: operationId, profileId: operationId,
+      displayName: 'synthetic', role: 'admin', mustChangePassword: false, accessToken: token });
+    const app = await buildApp({ env: { ...env, POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64: Buffer.alloc(32, 73).toString('base64') },
+      services: appServices, logger: false });
+    try {
+      expect(rpc).not.toHaveBeenCalled();
+      const response = await app.inject({ method: 'POST', url: path, headers: { authorization: `Bearer ${token}`,
+        'idempotency-key': 'synthetic-key-001' }, payload: { expectedLeaseVersion: 1 } });
+      expect(response.statusCode).toBe(200); expect(response.json()).toEqual(operation);
+      expect(rpc).toHaveBeenCalledExactlyOnceWith('handover_post_approval_room_issue_evidence_upload', {
+        p_actor_profile_id: operationId, p_session_id: operationId, p_operation_id: operationId,
+        p_expected_lease_version: 1, p_idempotency_key_digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        p_request_hash: expect.stringMatching(/^[0-9a-f]{64}$/), p_fence_token_digest: expect.stringMatching(/^[0-9a-f]{64}$/)
+      });
+      expect(recovery).toHaveBeenCalledOnce();
+      expect(recovery).toHaveBeenCalledWith(expect.objectContaining({ profileId: operationId, accessToken: token }), operation,
+        expect.stringMatching(/^[0-9a-f]{64}$/));
+    } finally { await app.close(); recovery.mockRestore(); clientFactory.mockRestore(); }
+  });
+  it('uses app bearer authentication and password guard before handover', async () => {
+    const appServices = services(), candidate = supplemental();
+    const app = await buildApp({ env, services: appServices, logger: false, postApprovalRoomIssueServices: candidate });
+    const send = (authorization?: string) => app.inject({ method: 'POST', url: path,
+      headers: { 'idempotency-key': 'synthetic-key-001', ...(authorization ? { authorization } : {}) }, payload: { expectedLeaseVersion: 1 } });
+    try {
+      expect((await send()).statusCode).toBe(401);
+      expect(candidate.handover.recover).not.toHaveBeenCalled();
+      const success = await send('Bearer synthetic-access');
+      expect(success.statusCode).toBe(200); expect(success.headers['cache-control']).toBe('no-store');
+      expect(appServices.auth.authenticate).toHaveBeenCalledWith('synthetic-access');
+      expect(candidate.handover.recover).toHaveBeenCalledOnce();
+      vi.mocked(appServices.auth.authenticate).mockResolvedValueOnce({ authUserId: operationId, profileId: operationId,
+        displayName: 'synthetic', role: 'admin', mustChangePassword: true, accessToken: 'synthetic-access' });
+      expect((await send('Bearer synthetic-access')).statusCode).toBe(403);
+      vi.mocked(appServices.auth.authenticate).mockRejectedValueOnce(new AppError(401, 'SESSION_REVOKED', 'private-canary'));
+      const denied = await send('Bearer synthetic-access'); expect(denied.statusCode).toBe(401);
+      expect(denied.body).not.toContain('private-canary'); expect(candidate.handover.recover).toHaveBeenCalledOnce();
+    } finally { await app.close(); }
+  });
+});
 
 const env: AppEnv = {
   APP_ENV: 'local',
@@ -104,6 +262,10 @@ function services(): AppServices {
         hasMore: false,
         nextCursor: null
       })),
+      listReports: vi.fn(async () => ({
+        roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 5, evaluatedAt: '2026-09-20T00:00:00.000Z',
+        items: [], hasMore: false, nextCursor: null
+      })),
       listIssues: vi.fn(async () => ({
         roomId: '11111111-1111-4111-8111-111111111111', roomStateVersion: 5, evaluatedAt: '2026-09-20T00:00:00.000Z',
         items: [{ id: '60000000-0000-4000-8000-000000000001', category: 'FACILITY', severity: 'warning' as const, blocksGuestAssignment: true, description: '창문 점검', status: 'open' as const, reportedAt: '2026-09-19T00:00:00.000Z' }],
@@ -122,6 +284,9 @@ function services(): AppServices {
         elevatorZone: 'A' as const,
         dataStatus: 'verified' as const,
         stateVersion: 1,
+        serviceDate: '2026-09-16',
+        projectionMode: 'LIVE' as const,
+        detailConditionCodes: ['VACANT' as const],
         evaluatedAt: '2026-09-16T08:00:00.000Z',
         reservationPhase: 'upcoming' as const,
         serverTime: '2026-09-16T08:00:00.000Z',
@@ -134,6 +299,11 @@ function services(): AppServices {
         nextReservationId: '40000000-0000-4000-8000-000000000001',
         nextCheckInAt: '2026-09-18T07:00:00.000Z',
         nextCheckOutAt: '2026-09-19T02:00:00.000Z',
+        displayReservationId: '40000000-0000-4000-8000-000000000001',
+        displayCheckInAt: '2026-09-18T07:00:00.000Z',
+        displayCheckOutAt: '2026-09-19T02:00:00.000Z',
+        displayGuestCount: 2,
+        displayBaseOccupancy: 2,
         blockingReasonCodes: [],
         readinessReasonCodes: [],
         occupied: false,
@@ -147,6 +317,7 @@ function services(): AppServices {
       get: vi.fn(),
       changeMasterData: vi.fn(),
       mutateOperation: vi.fn(),
+      listCandles: vi.fn(),
       correctOccupancy: vi.fn(async (_actor, input) => ({
         correctionId: '71000000-0000-4000-8000-000000000001',
         roomId: input.roomId,
@@ -269,6 +440,10 @@ function services(): AppServices {
       }))
     },
     payroll: {
+      getRemittanceMarker: vi.fn(), setRemittanceMarker: vi.fn(),
+      reconfirmRemittanceMarker: vi.fn(), listRemittanceMarkerHistory: vi.fn(),
+      listWorkDetails: vi.fn(),
+      getAdjustmentBook: vi.fn(),
       list: vi.fn(async () => ({ payroll: [], nextCursor: null })),
       get: vi.fn(),
       listEntries: vi.fn(async () => ({
@@ -284,6 +459,44 @@ function services(): AppServices {
 }
 
 describe('application', () => {
+  it.each([false, true])('uses the real Auth session decision before room work (active=%s)', async (active) => {
+    const authUserId = '35200000-0000-4000-8000-000000000001';
+    const profileId = '35200000-0000-4000-8000-000000000002';
+    const sessionId = '35200000-0000-4000-8000-000000000003';
+    const token = `header.${Buffer.from(JSON.stringify({ session_id: sessionId })).toString('base64url')}.synthetic`;
+    const query = {
+      select: () => query,
+      eq: () => query,
+      single: async () => ({ data: {
+        id: profileId, auth_user_id: authUserId, display_name: '합성 관리자',
+        role: 'admin', status: 'active', must_change_password: false, locked_until: null
+      }, error: null })
+    };
+    const rpc = vi.fn(async () => ({ data: active, error: null }));
+    const clients = {
+      publicClient: { auth: { getUser: vi.fn(async () => ({ data: { user: { id: authUserId } }, error: null })) } },
+      admin: { from: () => query, rpc }
+    } as unknown as SupabaseClients;
+    const appServices = services();
+    appServices.auth = new SupabaseAuthService(clients, env.ACCOUNT_PHONE_PEPPER);
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      const response = await app.inject({ method: 'GET', url: '/v1/rooms', headers: { authorization: `Bearer ${token}` } });
+      expect(rpc).toHaveBeenCalledExactlyOnceWith('is_active_auth_session', { p_auth_user_id: authUserId, p_session_id: sessionId });
+      expect(response.statusCode).toBe(active ? 200 : 401);
+      if (active) {
+        expect(appServices.rooms.list).toHaveBeenCalledOnce();
+      } else {
+        expect(response.json().error.code).toBe('SESSION_REVOKED');
+        expect(appServices.rooms.list).not.toHaveBeenCalled();
+        expect(response.body).not.toContain(token);
+        expect(response.body).not.toContain(sessionId);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it('returns health status', async () => {
     const app = await buildApp({ env, services: services(), logger: false });
     const response = await app.inject({ method: 'GET', url: '/health' });
@@ -450,6 +663,57 @@ describe('application', () => {
       cleaningRequired: false,
       allocationReady: true
     });
+    await app.close();
+  });
+
+  it('serves registered reports no-store with strict bounded query parameters', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const url = '/v1/rooms/11111111-1111-4111-8111-111111111111/reports';
+    const headers = { authorization: 'Bearer access-token' };
+    const result = await app.inject({ method: 'GET', url, headers });
+    expect(result.statusCode).toBe(200);
+    expect(result.headers['cache-control']).toBe('no-store');
+    expect(result.json()).toMatchObject({ items: [], hasMore: false, nextCursor: null });
+    expect(appServices.rooms.listReports).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }), '11111111-1111-4111-8111-111111111111', { limit: 5, cursor: undefined }
+    );
+    for (const query of ['limit=11', 'limit=0', 'limit=1&limit=2', 'status=open', 'cursor=', 'unknown=x']) {
+      expect((await app.inject({ method: 'GET', url: `${url}?${query}`, headers })).statusCode).toBe(400);
+    }
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(401);
+    await app.close();
+  });
+
+  it('passes one strict calendar serviceDate to the admin room board', async () => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const headers = { authorization: 'Bearer access-token' };
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/rooms?serviceDate=2026-09-22',
+      headers
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(appServices.rooms.list).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' }),
+      { serviceDate: '2026-09-22' }
+    );
+
+    for (const query of [
+      'serviceDate=2026-02-30',
+      'serviceDate=2026-9-22',
+      'serviceDate=2026-09-22&unexpected=true'
+    ]) {
+      const invalid = await app.inject({
+        method: 'GET',
+        url: `/v1/rooms?${query}`,
+        headers
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json().error.code).toBe('VALIDATION_ERROR');
+    }
     await app.close();
   });
 
@@ -650,6 +914,35 @@ describe('application', () => {
     });
     expect(invalid.statusCode).toBe(400);
     expect(appServices.rooms.listOperationBlocks).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each(['admin', 'maid', 'developer'] as const)('keeps candle HTTP access narrow for %s', async (role) => {
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async (accessToken: string) => ({ authUserId: 'synthetic', profileId: 'synthetic', displayName: '합성', role, mustChangePassword: false, accessToken }));
+    appServices.rooms.listCandles = vi.fn(async () => ({ items: [], nextCursor: null }));
+    appServices.rooms.mutateOperation = vi.fn(async () => ({ entityId: 'test', roomId: 'test', roomStateVersion: 2, recordedAt: '2026-09-30T00:00:00Z' }));
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const headers = { authorization: 'Bearer token', 'idempotency-key': 'candle-route-key' };
+    const roomId = '33000000-0000-4000-8000-000000000001';
+    const read = await app.inject({ method: 'GET', url: `/v1/rooms/candles?roomId=${roomId}`, headers });
+    const write = await app.inject({ method: 'POST', url: `/v1/rooms/${roomId}/candles`, headers, payload: { expectedRoomVersion: 1, reasonCode: 'CANDLE_COLLECTED', count: 0, physicallyVerified: true } });
+    expect(read.statusCode).toBe(role === 'developer' ? 403 : 200);
+    expect(write.statusCode).toBe(role === 'developer' ? 403 : 201);
+    if (role !== 'developer') {
+      expect(read.headers['cache-control']).toBe('no-store');
+      expect(write.headers['cache-control']).toBe('no-store');
+      for (const query of ['limit=51', 'limit=01', 'limit=1&limit=2', `roomId=${roomId}&cursor=${roomId}`, 'pin=true']) {
+        expect((await app.inject({ method: 'GET', url: `/v1/rooms/candles?${query}`, headers })).statusCode).toBe(400);
+      }
+      for (const patch of [{ count: -1 }, { count: 2147483648 }, { count: 1.5 }, { assignmentId: roomId }]) {
+        expect((await app.inject({ method: 'POST', url: `/v1/rooms/${roomId}/candles`, headers, payload: { expectedRoomVersion: 1, reasonCode: 'CANDLE_ADJUSTED', count: 1, ...patch } })).statusCode).toBe(400);
+      }
+    }
+    if (role === 'maid') {
+      expect((await app.inject({ method: 'GET', url: `/v1/rooms/${roomId}`, headers })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'POST', url: `/v1/rooms/${roomId}/issues`, headers, payload: {} })).statusCode).toBe(403);
+    }
     await app.close();
   });
 
@@ -1669,6 +1962,64 @@ describe('application', () => {
     await app.close();
   });
 
+  it('accepts all six v9 array orders without changing role fields (#382)', async () => {
+    const appServices = services();
+    if (!appServices.cleaningTemplates) throw new Error('missing template service');
+    const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
+    appServices.cleaningTemplates.publishCheckout = publish;
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      for (const { name, body, fastifyAccepted } of flatTemplateSlotPermutations()) {
+        const fixtureBefore = structuredClone(body);
+        const before = publish.mock.calls.length;
+        const response = await app.inject({
+          method: 'POST', url: '/v1/cleaning-templates', payload: body,
+          headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-permutation-fixture' }
+        });
+        expect(response.statusCode, name).toBe(fastifyAccepted ? 201 : 400);
+        expect(response.headers['cache-control'], name).toBe('no-store');
+        expect(publish.mock.calls.length, name).toBe(before + Number(fastifyAccepted));
+        if (!fastifyAccepted) expect(response.json().error.code, name).toBe('VALIDATION_ERROR');
+        else expect(response.json().template.slots, name).toEqual(flatTemplateRequest.slots);
+        expect(body, name).toEqual(fixtureBefore);
+      }
+      expect(publish).toHaveBeenCalledTimes(6);
+    } finally { await app.close(); }
+  });
+
+  it('validates shared v9 template wire fixtures before reaching the publisher', async () => {
+    const appServices = services();
+    if (!appServices.cleaningTemplates) throw new Error('missing template service');
+    const publish = vi.fn(async () => templateProjection() as Awaited<ReturnType<typeof appServices.cleaningTemplates.publishCheckout>>);
+    appServices.cleaningTemplates.publishCheckout = publish;
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const send = (payload: unknown) => app.inject({
+      method: 'POST', url: '/v1/cleaning-templates', payload: JSON.stringify(payload),
+      headers: { authorization: 'Bearer access-token', 'idempotency-key': 'template-shared-fixture', 'content-type': 'application/json' }
+    });
+    try {
+      for (const roomTypeCode of ['standard', 'premium', 'oceanPremium', 'oceanFamily']) {
+        for (const expectedVersion of [0, 9]) {
+          const response = await send({ ...flatTemplateRequest, roomTypeCode, expectedVersion });
+          expect(response.statusCode).toBe(201);
+          expect(response.headers['cache-control']).toBe('no-store');
+        }
+        for (const legacy of [false, true]) {
+          expect((await send(historicalTemplateRequest(roomTypeCode, legacy))).statusCode).toBe(201);
+        }
+      }
+      expect(publish).toHaveBeenCalledTimes(16);
+      for (const [name, payload] of invalidFlatTemplateRequests()) {
+        expect((await send(payload)).statusCode, name).toBe(400);
+      }
+      expect(publish).toHaveBeenCalledTimes(16);
+      for (const code of ['CLEANING_TEMPLATE_VERSION_CONFLICT', 'IDEMPOTENCY_KEY_REUSED']) {
+        publish.mockRejectedValueOnce(new AppError(409, code, '충돌'));
+        expect((await send(flatTemplateRequest)).json().error.code).toBe(code);
+      }
+    } finally { await app.close(); }
+  });
+
   it('lists and publishes strict checkout templates for active business admins', async () => {
     const appServices = services();
     const app = await buildApp({ env, services: appServices, logger: false });
@@ -2116,6 +2467,47 @@ describe('application', () => {
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe('ADMIN_REQUIRED');
     expect(appServices.payroll.start).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('registers limited discovery/single/complete and keeps the verified session in submission identity', async () => {
+    const id = (n: number) => `69000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const identity = { profileId: id(90), sessionId: id(91), role: 'maid' as const, profileStatus: 'deactivation_pending' };
+    const attempt = { attemptId: id(1), assignmentId: id(2), cleaningTargetId: id(5), maidProfileId: id(90), assignmentRevision: 3,
+      executionVersion: 2, status: 'in_progress', startedAt: '2026-10-03T00:00:00Z', fieldCompletedAt: null,
+      endedAt: null, effectiveAt: '2026-10-03T00:00:00Z', recordedAt: '2026-10-03T00:00:00Z' };
+    const capability = { capabilityId: id(7), attemptId: id(1), assignmentId: id(2), assignmentRevision: 3, kind: 'finish_current',
+      allowedActions: ['complete_field_work'], issuedAt: '2026-10-03T00:00:00Z', expiresAt: '2026-10-03T02:00:00Z', revokedAt: null };
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const limited = new LimitedAttemptService({ rpc: async (name, args) => {
+      calls.push({ name, args });
+      const data = name === 'list_limited_cleaning_attempts' ? { profileStatus: identity.profileStatus, evaluatedAt: '2026-10-03T01:00:00Z', items: [] }
+        : name === 'get_limited_cleaning_attempt' ? { attempt, capability, profileStatus: identity.profileStatus }
+        : { attempt: { ...attempt, status: 'field_completed', executionVersion: 3, fieldCompletedAt: '2026-10-03T01:00:00Z', endedAt: '2026-10-03T01:00:00Z' },
+          capability: { ...capability, kind: 'upload_submit', allowedActions: ['upload_evidence', 'validate_evidence', 'submit'] }, profileStatus: 'upload_only',
+          profileVersion: 2, nextAttempt: null, effectiveAt: '2026-10-03T01:00:00Z', recordedAt: '2026-10-03T01:00:00Z' };
+      return { data, error: null };
+    } });
+    const photoServices = { authenticate: vi.fn(async () => identity), service: {}, denied: vi.fn() } as unknown as PhotoHttpServices;
+    const create = vi.fn(async () => ({ id: id(8), attemptId: id(1) }));
+    const appServices = services();
+    appServices.auth.authenticate = vi.fn(async () => { throw new Error('ordinary active-only auth must not run'); });
+    const app = await buildApp({ env, services: appServices, logger: false, photoServices, limitedAttemptService: limited,
+      submissionService: { create } as unknown as SubmissionService });
+    for (const url of ['/v1/limited/attempts', `/v1/limited/attempts/${id(1)}?assignmentRevision=3`]) {
+      const response = await app.inject({ method: 'GET', url });
+      expect(response.statusCode).toBe(200); expect(response.headers['cache-control']).toBe('no-store');
+    }
+    const complete = await app.inject({ method: 'POST', url: `/v1/limited/attempts/${id(1)}/complete-field-work`,
+      headers: { 'idempotency-key': 'limited-build-app-01' }, payload: { expectedExecutionVersion: 2, expectedAssignmentId: id(2), expectedAssignmentRevision: 3 } });
+    expect(complete.statusCode).toBe(200);
+    expect(calls.map((call) => call.name)).toEqual(['list_limited_cleaning_attempts', 'get_limited_cleaning_attempt', 'complete_limited_cleaning_attempt_field_work']);
+    expect(calls.every((call) => call.args.p_actor_profile_id === id(90) && call.args.p_session_id === id(91))).toBe(true);
+    const submit = await app.inject({ method: 'POST', url: `/v1/attempts/${id(1)}/submissions`, headers: { 'idempotency-key': 'submit-build-app-01' },
+      payload: { clientSubmissionId: id(8), expectedRevision: 0, candleCount: 0 } });
+    expect(submit.statusCode).toBe(201);
+    expect(create).toHaveBeenCalledWith({ profileId: id(90), sessionId: id(91), role: 'maid', mustChangePassword: false }, id(1), id(8), 0, 0, 'submit-build-app-01');
+    expect(appServices.auth.authenticate).not.toHaveBeenCalled();
     await app.close();
   });
 

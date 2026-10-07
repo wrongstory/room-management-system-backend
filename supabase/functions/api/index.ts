@@ -40,6 +40,7 @@ import {
   lifecycleImpact,
   lifecyclePath,
   limitedAttemptPath,
+  listLimitedAttempts,
   manageAttemptLifecycle,
 } from "../_shared/attempt-lifecycle-api.ts";
 import {
@@ -64,6 +65,7 @@ import {
   checkoutIncidentPath,
   decideCheckoutIncident,
   getCheckoutIncident,
+  listCheckoutIncidents,
   reportCheckoutIncident,
 } from "../_shared/checkout-incident-api.ts";
 import { cleaningTemplates } from "../_shared/cleaning-template-api.ts";
@@ -108,6 +110,7 @@ import {
   carryForwardPayroll,
   carryLatePayrollEarning,
   correctPayrollAdjustment,
+  getPayrollAdjustmentBook,
   getPayrollCycle,
   listPayroll,
   listPayrollEntries,
@@ -118,7 +121,14 @@ import {
   startPayroll,
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
-import { createPhotoService } from "../_shared/photo-api.ts";
+import { listPayrollWorkDetails } from "../_shared/payroll-work-details-api.ts";
+import { payrollRemittanceMarker } from "../_shared/payroll-remittance-marker-api.ts";
+import {
+  configuredPhotoProvider,
+  createPhotoService,
+  initializePhotoDecoder,
+} from "../_shared/photo-api.ts";
+import { createSupabasePostApprovalModuleEdgeHandler } from "../_shared/post-approval-report.bundle.js";
 import { PhotoError, photoFailureDiagnostic } from "../_shared/photo-binary.ts";
 import {
   photoError,
@@ -148,9 +158,11 @@ import {
   correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRoomCandles,
   listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
+  listRoomReports,
   listRooms,
   listRoomTypes,
   overrideRoomDisplayStatus,
@@ -159,6 +171,7 @@ import {
   reportRoomIssue,
   resolveRoomIssue,
   roomDetailIdFromPath,
+  roomListServiceDate,
   roomPathIds,
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
@@ -216,6 +229,107 @@ function routePath(url: string): string {
   return `/${segments.slice(functionIndex + 1).join("/")}`;
 }
 
+function postApprovalFamily(path: string): boolean {
+  return (/^\/v1\/cleaning-history\/submissions\//.test(path) &&
+    /\/supplemental-room-issues(?:\/|$)/.test(path)) ||
+    /^\/v1\/post-approval-room-issue-evidence(?:-uploads)?(?:\/|$)/.test(path);
+}
+function postApprovalRoute(method: string, path: string): boolean {
+  const base =
+    "^/v1/cleaning-history/submissions/[^/]+/supplemental-room-issues";
+  const patterns = method === "GET"
+    ? [
+      new RegExp(`${base}$`),
+      new RegExp(`${base}/source$`),
+      new RegExp(`${base}/drafts/[^/]+$`),
+      // source/drafts are reserved report siblings, not report identities.
+      new RegExp(`${base}/(?!source$|drafts$)[^/]+$`),
+      /^\/v1\/post-approval-room-issue-evidence-uploads\/[^/]+$/,
+      /^\/v1\/post-approval-room-issue-evidence\/[^/]+\/versions\/[^/]+\/content$/,
+    ]
+    : method === "POST"
+    ? [
+      new RegExp(`${base}$`),
+      new RegExp(`${base}/drafts$`),
+      new RegExp(`${base}/(?!source/|drafts/)[^/]+/close$`),
+      new RegExp(`${base}/drafts/[^/]+/evidence/[^/]+/upload$`),
+      /^\/v1\/post-approval-room-issue-evidence-uploads\/[^/]+\/handover$/,
+    ]
+    : [];
+  return patterns.some((pattern) => pattern.test(path));
+}
+
+/** Read only during recovery, never startup/read/preflight. No secret values are
+ * returned, logged, placed in errors, or borrowed from another key purpose. */
+export function configuredPostApprovalHandoverKey(): Uint8Array | undefined {
+  try {
+    const encoded = Deno.env.get(
+      "POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64",
+    );
+    if (!encoded || !/^[A-Za-z0-9+/]{43}=$/.test(encoded)) return undefined;
+    const decoded = atob(encoded);
+    if (decoded.length !== 32 || btoa(decoded) !== encoded) return undefined;
+    const otherSecrets = [
+      "SUPABASE_ANON_KEY",
+      "SUPABASE_PUBLISHABLE_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "SUPABASE_SECRET_KEY",
+      "ACCOUNT_PHONE_PEPPER",
+      "RESERVATION_PII_KEY_BASE64",
+      "RESERVATION_GUEST_NAME_PEPPER",
+      "ROOM_PIN_KEY_BASE64",
+      "PAYROLL_CURSOR_HMAC_SECRET",
+      "NOTIFICATION_CURSOR_HMAC_SECRET",
+      "INSPECTION_CURSOR_HMAC_SECRET",
+      "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+      "WEB_PUSH_BINDING_DIGEST_SECRET",
+      "GOOGLE_DRIVE_CLIENT_ID",
+      "GOOGLE_DRIVE_CLIENT_SECRET",
+      "GOOGLE_DRIVE_REFRESH_TOKEN",
+      "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+      "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+      "SCHEDULER_INVOKE_SECRET",
+      "PHOTO_PURGE_INVOKE_SECRET",
+      "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+      "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+      "VAPID_PRIVATE_KEY",
+    ];
+    if (otherSecrets.some((name) => Deno.env.get(name) === encoded)) {
+      return undefined;
+    }
+    for (
+      const name of [
+        "ROOM_PIN_KEYRING_JSON",
+        "RESERVATION_PII_KEYRING_JSON",
+        "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+      ]
+    ) {
+      const keyring: unknown = JSON.parse(Deno.env.get(name) || "{}");
+      if (
+        !keyring || typeof keyring !== "object" || Array.isArray(keyring) ||
+        Object.values(keyring).some((value) =>
+          typeof value !== "string" || value === encoded
+        )
+      ) return undefined;
+    }
+    const vapid: unknown = JSON.parse(
+      Deno.env.get("VAPID_KEYRING_JSON") || "{}",
+    );
+    if (!vapid || typeof vapid !== "object" || Array.isArray(vapid)) {
+      return undefined;
+    }
+    for (const value of Object.values(vapid)) {
+      if (
+        !value || typeof value !== "object" || Array.isArray(value) ||
+        ("privateKey" in value && value.privateKey === encoded)
+      ) return undefined;
+    }
+    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ApiHandlerDependencies {
   createClients: () => EdgeClients;
   authenticateRequest: (
@@ -225,11 +339,24 @@ export interface ApiHandlerDependencies {
   authenticateLimitedRequest?: typeof authenticateLimitedAttempt;
   photoService?: (clients: EdgeClients) => PhotoService;
   webPushCryptoConfig?: WebPushCryptoConfig;
+  /** Override for isolated tests; the default uses the reviewed generated JS bundle. */
+  supplementalRoomIssueHandler?: (
+    request: Request,
+    path: string,
+    clients: EdgeClients,
+  ) => Promise<Response | null>;
 }
 
 const defaultDependencies: ApiHandlerDependencies = {
   createClients: createEdgeClients,
   authenticateRequest: authenticate,
+  supplementalRoomIssueHandler: async (request, path, clients) =>
+    await createSupabasePostApprovalModuleEdgeHandler({
+      clients,
+      provider: configuredPhotoProvider,
+      initializeDecoder: initializePhotoDecoder,
+      handoverFenceKey: configuredPostApprovalHandoverKey,
+    })(request, path) ?? null,
 };
 
 export async function handleApiRequest(
@@ -243,11 +370,151 @@ export async function handleApiRequest(
   let path = "/";
   try {
     corsHeaders = cors(request);
+    path = routePath(request.url);
+    const decodedLimitedPath = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/");
+    // Decode/collapse for family recognition only. Raw spelling remains the
+    // authority; routePath must not turn aliases into accepted commands.
+    const supplementalFamilyPath = decodedLimitedPath.replace(/\/+/g, "/")
+      .replace(/\/+$/, "");
+    const decodedMountSegments = new URL(request.url).pathname.split("/")
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment);
+        } catch {
+          return segment;
+        }
+      }).join("/").split("/").filter(Boolean);
+    const decodedFunctionIndex = decodedMountSegments.lastIndexOf("api");
+    const decodedMountPath = decodedFunctionIndex < 0
+      ? "/"
+      : `/${decodedMountSegments.slice(decodedFunctionIndex + 1).join("/")}`;
+    const supplementalFamily = postApprovalFamily(supplementalFamilyPath) ||
+      postApprovalFamily(decodedMountPath);
+    if (supplementalFamily) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      const rawPath = pathname.slice(pathname.lastIndexOf("/api") + 4);
+      if (
+        request.method !== "OPTIONS" &&
+        (rawPath !== path || path !== supplementalFamilyPath ||
+          !postApprovalRoute(request.method, rawPath))
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
+    if (
+      decodedLimitedPath === "/v1/limited/attempts" ||
+      decodedLimitedPath.startsWith("/v1/limited/attempts/")
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        path !== decodedLimitedPath ||
+        pathname.slice(pathname.lastIndexOf("/api") + 4) !== path
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
+    const markerPath = "/v1/payroll/remittance-marker";
+    const markerFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    if (
+      markerFamily === markerPath || markerFamily.startsWith(`${markerPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      const rawPath = pathname.slice(pathname.lastIndexOf("/api") + 4);
+      const allowed =
+        (rawPath === markerPath && ["GET", "PUT"].includes(request.method)) ||
+        (rawPath === `${markerPath}/reconfirm` && request.method === "POST") ||
+        (rawPath === `${markerPath}/history` && request.method === "GET");
+      if (request.method !== "OPTIONS" && !allowed) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
+    const workDetailsPath = "/v1/payroll/work-details";
+    const workDetailsFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    if (
+      workDetailsFamily === workDetailsPath ||
+      workDetailsFamily.startsWith(`${workDetailsPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        request.method !== "OPTIONS" &&
+        (request.method !== "GET" ||
+          pathname.slice(pathname.lastIndexOf("/api") + 4) !== workDetailsPath)
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
+    const adjustmentBookPath = "/v1/payroll/adjustment-book";
+    // Recognize only this route family after one percent decode. The raw
+    // spelling below remains authoritative; decoding must never allow an alias.
+    const adjustmentBookFamily = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        // A malformed segment cannot crash the guard or rewrite another route.
+        return segment;
+      }
+    }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
+    if (
+      adjustmentBookFamily === adjustmentBookPath ||
+      adjustmentBookFamily.startsWith(`${adjustmentBookPath}/`)
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        request.method !== "OPTIONS" &&
+        (request.method !== "GET" ||
+          pathname.slice(pathname.lastIndexOf("/api") + 4) !==
+            adjustmentBookPath)
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    path = routePath(request.url);
     if (request.method === "GET" && path === "/health") {
       return jsonResponse(
         {
@@ -268,6 +535,33 @@ export async function handleApiRequest(
     }
 
     clients = dependencies.createClients();
+    if (supplementalFamily) {
+      const handler = dependencies.supplementalRoomIssueHandler ??
+        defaultDependencies.supplementalRoomIssueHandler;
+      if (!handler) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      const supplemental = await handler(
+        request,
+        path,
+        clients,
+      );
+      if (supplemental) {
+        for (const [key, value] of Object.entries(corsHeaders)) {
+          supplemental.headers.set(key, value);
+        }
+        return supplemental;
+      }
+      throw new EdgeError(
+        404,
+        "ROUTE_NOT_FOUND",
+        "요청한 API 경로를 찾을 수 없습니다.",
+      );
+    }
     if (request.method === "POST" && path === "/v1/auth/login") {
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
@@ -339,7 +633,25 @@ export async function handleApiRequest(
       );
     }
 
-    // 제한 capability는 정확히 이 두 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
+    // 기존 세션 전용 discovery. 인증 결과만으로 capability를 부여하지 않는다.
+    if (request.method === "GET" && path === "/v1/limited/attempts") {
+      const pathname = new URL(request.url).pathname;
+      if (pathname.slice(pathname.lastIndexOf("/api") + 4) !== path) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      const identity = await authenticateLimitedAttempt(request, clients);
+      actor = identity.actor;
+      return jsonResponse(
+        await listLimitedAttempts(request, clients, identity),
+        200,
+        corsHeaders,
+      );
+    }
+    // 제한 capability는 전용 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
     const limited = limitedAttemptPath(path);
     if (
       limited && ((limited.action === "read" && request.method === "GET") ||
@@ -375,6 +687,7 @@ export async function handleApiRequest(
             clients,
             actor,
             limitedSubmissionRoute.attemptId,
+            identity.sessionId,
           ),
         },
         201,
@@ -1066,6 +1379,23 @@ export async function handleApiRequest(
         );
       }
     }
+    if (path === "/v1/checkout-incidents") {
+      if (
+        request.method !== "GET" ||
+        !new URL(request.url).pathname.endsWith("/api/v1/checkout-incidents")
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      return jsonResponse(
+        await listCheckoutIncidents(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+    }
     const incidentRoute = checkoutIncidentPath(path);
     if (request.method === "GET" && incidentRoute?.kind === "detail") {
       return jsonResponse(
@@ -1212,6 +1542,49 @@ export async function handleApiRequest(
       );
     }
 
+    if (path === "/v1/payroll/adjustment-book") {
+      const response = {
+        adjustmentBook: await getPayrollAdjustmentBook(
+          request,
+          clients,
+          actor,
+          verifiedRequestSessionId(request),
+        ),
+      };
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (
+      path === markerPath || path === `${markerPath}/history` ||
+      path === `${markerPath}/reconfirm`
+    ) {
+      const action = path.endsWith("/history")
+        ? "history"
+        : path.endsWith("/reconfirm")
+        ? "reconfirm"
+        : request.method === "PUT"
+        ? "set"
+        : "get";
+      const response = await payrollRemittanceMarker(
+        request,
+        clients,
+        actor,
+        verifiedRequestSessionId(request),
+        action,
+      );
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (path === "/v1/payroll/work-details") {
+      const response = await listPayrollWorkDetails(
+        request,
+        clients,
+        actor,
+        verifiedRequestSessionId(request),
+      );
+      assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
     if (request.method === "GET" && path === "/v1/payroll") {
       const response = await listPayroll(request, clients, actor);
       assertPayrollResponseSize(response);
@@ -1559,28 +1932,35 @@ export async function handleApiRequest(
       response.headers.set("Cache-Control", "no-store");
       return response;
     }
-    if (request.method === "GET" && path === "/v1/rooms") {
-      return jsonResponse(
-        { rooms: await listRooms(clients, actor) },
+    if (request.method === "GET" && path === "/v1/rooms/candles") {
+      const response = jsonResponse(
+        await listRoomCandles(request, clients, actor),
         200,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    if (request.method === "GET" && path === "/v1/rooms") {
+      const response = jsonResponse(
+        {
+          rooms: await listRooms(
+            request,
+            clients,
+            actor,
+            roomListServiceDate(request),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     const operationBlocksReadMatch = request.method === "GET"
       ? /^\/v1\/rooms\/([^/]+)\/operation-blocks$/.exec(path)
       : null;
     if (operationBlocksReadMatch) {
-      const params = new URL(request.url).searchParams;
-      if (
-        [...params.keys()].some((key) => key !== "status") ||
-        (params.get("status") ?? "actionable") !== "actionable"
-      ) {
-        throw new EdgeError(
-          400,
-          "VALIDATION_ERROR",
-          "status는 actionable만 사용할 수 있습니다.",
-        );
-      }
       const response = jsonResponse(
         await listRoomOperationBlocks(
           request,
@@ -1594,21 +1974,22 @@ export async function handleApiRequest(
       response.headers.set("Cache-Control", "no-store");
       return response;
     }
+    const roomReportsMatch = request.method === "GET"
+      ? /^\/v1\/rooms\/([^/]+)\/reports$/.exec(path)
+      : null;
+    if (roomReportsMatch) {
+      const response = jsonResponse(
+        await listRoomReports(request, clients, actor, roomReportsMatch[1]),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     const roomIssuesReadMatch = request.method === "GET"
       ? /^\/v1\/rooms\/([^/]+)\/issues$/.exec(path)
       : null;
     if (roomIssuesReadMatch) {
-      const params = new URL(request.url).searchParams;
-      if (
-        [...params.keys()].some((key) => key !== "status") ||
-        (params.get("status") ?? "open") !== "open"
-      ) {
-        throw new EdgeError(
-          400,
-          "VALIDATION_ERROR",
-          "status는 open만 사용할 수 있습니다.",
-        );
-      }
       const response = jsonResponse(
         await listRoomIssues(
           request,
@@ -1758,13 +2139,15 @@ export async function handleApiRequest(
       path.startsWith("/v1/rooms/") && path.endsWith("/candles")
     ) {
       const { roomId } = roomPathIds(path);
-      return jsonResponse(
+      const response = jsonResponse(
         {
           operation: await setRoomCandleCount(request, clients, actor, roomId),
         },
         201,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     if (
       request.method === "POST" &&
@@ -1819,7 +2202,7 @@ export async function handleApiRequest(
       : null;
     if (roomDetailId) {
       return jsonResponse(
-        { room: await getRoom(clients, actor, roomDetailId) },
+        { room: await getRoom(request, clients, actor, roomDetailId) },
         200,
         corsHeaders,
       );

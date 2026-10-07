@@ -1,7 +1,48 @@
+// 2026-10-04 #363/#373 A candidate: seven function bodies + owner-only STABLE read guard.
+// Existing tables/columns/relationships/ACL/RLS/ledgers remain unchanged. Raw strict FAIL stays visible;
+// exact nine compatibility diagnostics/catalog/source fingerprints are a separate gate.
+// No #329/release/main/production change. See docs/DB_STATIC_WARNING_BASELINE.md.
+// 2026-10-03 latest: #325 PR358 source78582789 -> devd65f4f60, exact CI37093733970 PASS, QA98/100.
+// #324 candidate98 service-only read: separate actual earnings/workflow, frozen snapshots and exact old aggregate membership.
+// No ledger/receipt/PAID/photo retention changes; new read does not create tables/columns. See PAYROLL_WORK_DETAILS.md.
+// Old #325/#327 candidate and gate comments below are historical, not current production proof.
+// 2026-10-03 current: #327 PR357 source22cbf0be -> devb6f79981, identical tree,
+// CI37086130779 application/migration PASS and independent QA98/100; old candidate gates are history.
+// #325 candidate append migration97 adds only service-role current adjustment-book read RPC.
+// Book identity remains maid_profile_id alone; weekStart is read context, not a weekly CAS.
+// No table/column/index/RLS/table-grant or existing ledger/command changes. See docs/PAYROLL_ADJUSTMENT_BOOK.md.
+// Source candidate inventory133 paths/143 operations; production/frontend not changed.
+// #327 historical candidate from dev@3968e429 (95 migrations): append migration 96
+// adds only service-role admin open-incident read RPC and partial (reported_at DESC,id DESC) index.
+// No new table/column, RLS, ledger, command, notification or production changes.
+// #328 source 76e2780c -> dev3968e429 merged by PR351, required CI37027527827 PASS; old gates below are history.
+// Exact list fields, fixed assignment.service_date, current session guard and seek behavior:
+// docs/CHECKOUT_INCIDENT_ADMIN_LIST.md. Source OpenAPI candidate inventory: 132 paths / 142 operations.
 Project room_management_system {
   database_type: 'PostgreSQL'
   Note: 'ERD review draft v4. #140 separates PIN warnings from reservation allocation readiness while actual check-in and PIN access remain verified-only. Initial PIN bootstrap reuses the private immutable PIN ledgers; a FORCE-RLS cross-flow nonce reservation prevents different AES-GCM encryptions from sharing one key-version/nonce pair. #172 diagnostic role and aggregate views add no persisted entity or FK and are documented outside this relationship diagram.'
 }
+
+// #328 latest gate 2026-10-03: expiry + KST fixture repaired; earlier QA98 is not final signoff.
+// Local individual gates PASS: Node859/Edge323/Python95/21 upgrades/same95 SHA/SQL4161/KST145.
+// Full concurrency/fresh95/advisors0/synthetic restore PASS. Initial aggregate db:test FAIL retained.
+// Final independent QA/new exact-head CI/dev integration pending; PR351 remains Draft.
+// Original CI37017832732 application PASS, migration FAIL at notification delivery fixture drain.
+// Original local full PASS below is historical, not proof for the expiry repair. See schedule contract.
+// #328 candidate migration 95: baseline dev f34dca37 / 94 migrations after #326 PR #350.
+// Creation schedule plan and first-notified actual facts are frozen in separate nullable JSONB columns.
+// Stored source reservation/room binding stays internal; no guest/phone/PIN or extra public IDs.
+// service-only session-bound get_assignment_schedule_read returns nullable scheduleSnapshot/currentDeparture.
+// Exact auth.sessions id/user and not_after NULL or > statement clock required; no business/PIN deadline.
+// p_expected_actor_role binds the adapter's initial DB-verified role to latest DB role; mismatch fails 403.
+// This internal binding adds no client role input/new public error code or authorization privilege.
+// Current facts require exact current notified source; history/includeHistory always returns null current facts.
+// Business authority/RLS unchanged; authenticated table SELECT narrowed to pre95 explicit columns.
+// New JSONB/internal binding and SELECT */whole-row reads are denied (42501); old columns/count/joins remain.
+// Existing service_role table grants remain. No new table/FK/backfill, ledger rewrite or command/preview expansion.
+// Local full SQL/upgrade/concurrency/fresh95/advisors/backup gates PASS; production remains unchanged.
+// Pre-PR record: final independent QA, exact-head CI and dev integration proof live in Issue #328 / linked PR.
+// See docs/ASSIGNMENT_SCHEDULE_SNAPSHOT.md. Historical #326 candidate comments remain validation history.
 
 Enum app_role {
   developer
@@ -414,6 +455,7 @@ Table public.room_issues {
 }
 
 Table public.room_candle_events {
+  Note: '#330 append-only events via active admin/maid narrow RPC; independent of assignment/approval/7-day history. Decreases retain actor onsite verification. Insert trigger orders recorded_at under room lock; prior snapshots and other blockers are untouched.'
   id uuid [pk]
   room_id uuid [not null]
   count_before int [not null]
@@ -885,15 +927,15 @@ Table public.cleaning_targets {
   effective_service_date date [not null]
   carryover_count int [not null, default: 0]
   available_from timestamptz
-  due_at timestamptz
+  due_at timestamptz [note: '#305/#308: 예정 기한은 업무 권한 만료가 아님. 경과만으로 자동 이월/담당 종료하지 않음. 보안 TTL·현재 점유 검사는 유지.']
   status cleaning_target_status [not null]
   assignment_version bigint [not null]
-  room_type_snapshot jsonb [not null]
-  fee_snapshot int [not null]
+  room_type_snapshot jsonb [not null, note: '#326 read candidate: raw missing/empty/nonstring optional code/name/elevatorZone keys normalize to unknown null consistently in SQL/cards; fresh malformed metadata packs fail safely. No current room/catalog hydration. Preview routing classifiers may use unknown separately.']
+  fee_snapshot int [not null, note: '#326 read candidate: immutable fee; zero is valid, never replace with current catalog fee.']
   template_snapshot jsonb [not null]
   cancelled_by uuid
   cancelled_at timestamptz
-  cancellation_reason_code text
+  cancellation_reason_code text [note: '#348 / 2026-10-02 B: manual additional/stayover cancel before actual start, even assigned/notified or PIN disclosed. CAS soft cancel preserves history; exact current notified assignment is audit-bound for notification. Automatic checkout and started/terminal workflows excluded.']
   reclean_of_attempt_id uuid [unique]
   reclean_maid_profile_id uuid
   reclean_of_submission_id uuid [unique, ref: - public.cleaning_submissions.id]
@@ -906,6 +948,23 @@ Table public.cleaning_targets {
   Note: 'Checkout targets are unique per reservation. The reservation-room composite FK remains enforced but is deferred to commit so an allowed reservation/obligation/planned-target room move is atomic; partial graph changes fail. Inspection rejection reclean and #101 post-approval complaint reclean are distinct typed sources. A complaint rework freezes one confirmed source decision, zero-fee target, published template and notified assignee; generic reassignment/handover is forbidden. For an inspection reclean whose original maid is confirmed unable to work, #264 preserves and cancels the zero-fee target, then creates one separate ordinary replacement target from the original paid fee/template snapshot; it never rewrites these provenance links in place.'
 }
 
+// #326 candidate migration 94 adds private output helpers only, not metadata columns/tables.
+// sourceKind/canonical roomTypeSnapshot/canCancel/cancelReasonCode are additive DTO fields.
+// Rollover reads real ROLLED_OVER_* evidence through the read revision and carryover_count cap.
+// Current-admin cancellation advisory mirrors #348 current-assignment/all-attempt predicates.
+// PIN/history/window/date/stale draft are not extra cancel guards; receipts/snapshots are not backfilled.
+// Helper EXECUTE is revoked from public/anon/authenticated/service_role. See ASSIGNMENT_TARGET_READ_METADATA.md.
+// Display metadata is excluded from fingerprints, but removing legacy current-room elevator A/B fallback
+// changes existing routing input to unknown; not all old preview fingerprints remain byte-identical. Re-preview.
+// Raw snapshot normalization and strict fresh metadata parsing are separate boundaries. Core/parser and SQL
+// Preview classifier fixes statically resolve QA round-1 P2. Local full 20 upgrades and 72 SQL files/4068
+// tests, full concurrency and local advisors passed; exact-source backup/CI/QA/dev evidence is tracked in Issue/PR.
+// Do not invent a 100-character display metadata cap absent from existing card/DB/OpenAPI text contracts.
+// QA round-2 display cap removal and actual 1001-character name/receipt regressions passed locally;
+// round-1/2 are statically resolved (P0/P1/unresolved code P2=0), not final exact-head QA/dev approval.
+// Existing optimizer routing str(100) and fresh type/nonempty/partial-pack checks remain unchanged.
+// Source/dev completion takes effect only after this document and approved source are in dev and linked
+// Issue/PR evidence confirms exact-head required CI/final QA and actual integration; no merge is claimed here.
 Table public.cleaning_target_schedule_revisions {
   id uuid [pk]
   cleaning_target_id uuid [not null]
@@ -916,6 +975,7 @@ Table public.cleaning_target_schedule_revisions {
   reason_code text [not null]
   changed_by uuid [not null]
   recorded_at timestamptz [not null]
+  reservation_schedule_snapshot jsonb [note: '#328 candidate: nullable legacy; new INSERT freezes plan, actual unknown until first notification. Internal source binding is not public DTO. No current-reservation rehydration/backfill.']
 
   Indexes {
     (cleaning_target_id, revision) [unique]
@@ -926,7 +986,7 @@ Table public.cleaning_assignments {
   id uuid [pk]
   cleaning_target_id uuid [not null]
   maid_profile_id uuid [not null]
-  service_date date [not null]
+  service_date date [not null, note: '#326 card effectiveServiceDate is this immutable revision date, never later target effective date.']
   sequence_number int [not null]
   revision bigint [not null]
   is_current boolean [not null, default: true]
@@ -935,6 +995,7 @@ Table public.cleaning_assignments {
   notified_at timestamptz
   notified_room_id_snapshot uuid [ref: > public.rooms.id, note: 'Captured on first notification; immutable. Legacy unknown stays null, never current-target fallback.']
   notified_room_number_snapshot text [note: 'Room number at notification; nullable legacy metadata.']
+  notified_reservation_schedule_snapshot jsonb [note: '#328 candidate: first notified INSERT/UPDATE freezes creation plan and known actual departure; immutable thereafter. Unknown legacy remains wholly null. Current facts are separate read-only metadata, never written into this history.']
   ended_at timestamptz
   change_reason_code text
   changed_by uuid [not null]
@@ -1118,6 +1179,40 @@ Table private.attempt_capability_grants {
   Note: '#7B private immutable ledger. No Data API/direct service-role table access. No token/session ID stored. Latest valid Supabase session + role/status + exact attempt/revision/action + unrevoked hard expiry required every dedicated API call. Different command key cannot renew TTL.'
 }
 
+// #329 candidate101, not production deployment. First visible live Auth session
+// membership is frozen at active -> limited transition. No raw session/token,
+// legacy backfill, general active guard relaxation or re-entry TTL renewal.
+Table private.limited_session_roots {
+  id uuid [pk]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  origin_profile_version bigint [not null]
+  captured_at timestamptz [not null]
+  Indexes {
+    (actor_profile_id, origin_profile_version) [unique]
+    (id, actor_profile_id) [unique]
+  }
+  Note: 'Private immutable restriction episode; profile lifecycle CAS version is historical evidence, not a mutable FK to current profile version. RLS/no raw runtime grants.'
+}
+
+Table private.limited_session_eligibility {
+  root_id uuid [not null, ref: > private.limited_session_roots.id]
+  session_digest text [not null]
+  Indexes { (root_id, session_digest) [pk] }
+  Note: 'Domain-separated SHA-256 of existing Auth UUID, not a credential. Same transition visible/unexpired sessions only; no current-session backfill or delayed commit inclusion. First membership is inherited by later upload grant.'
+}
+
+Table private.attempt_capability_session_roots {
+  capability_id uuid [pk, ref: > private.attempt_capability_grants.id]
+  root_id uuid [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  Indexes {
+    (root_id, actor_profile_id)
+    actor_profile_id
+  }
+  Note: 'Immutable capability -> first restriction root binding. Composite root/actor FK plus INSERT identity guard enforce grant actor equality. Legacy unbound limited grants fail closed, never renew or recapture sessions.'
+}
+Ref: private.attempt_capability_session_roots.(root_id, actor_profile_id) > private.limited_session_roots.(id, actor_profile_id)
+
 Table private.attempt_capability_revocations {
   capability_id uuid [pk, ref: > private.attempt_capability_grants.id]
   revoked_at timestamptz [not null]
@@ -1190,6 +1285,8 @@ Table public.submission_photos {
 }
 
 Table private.bomb_room_reports {
+  // #332 admin read-only room report projection may expose registered memo/evidence before sealing.
+  // No table/RLS/retention mutation; see docs/ADMIN_REPORT_READ.md.
   id uuid [pk]
   cleaning_attempt_id uuid [not null, unique, ref: - public.cleaning_attempts.id]
   reported_by uuid [not null, ref: > public.profiles.id]
@@ -1351,6 +1448,52 @@ Table public.compensation_entitlements {
   entitled_at timestamptz [not null]
   Note: '#101 other-maid approved work proof. Exact decision/target/maid/attempt/submission/inspection/amount provenance; zero amount remains a real entitlement.'
 }
+
+// #331 display-only marker; actual payroll/payment rows remain unchanged.
+Table private.payroll_remittance_markers {
+  id uuid [pk]
+  maid_profile_id uuid [not null, ref: > public.profiles.id]
+  week_start date [not null]
+  version bigint [not null]
+  marked boolean [not null]
+  current_revision_id uuid [not null]
+  last_changed_revision_id uuid [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Indexes {
+    (maid_profile_id, week_start) [unique]
+    (id, maid_profile_id, week_start) [unique]
+    (current_revision_id, id, maid_profile_id, week_start, version, marked)
+    (last_changed_revision_id, id, maid_profile_id, week_start)
+  }
+  Note: '#331 mutable display pointer only. Current revision is bound by deferred composite FK including same marker/maid/week/version/marked. Last changed pointer excludes reconfirm. RLS enabled; runtime raw reads/writes denied; service-role app RPC only. No cycle/book materialization.'
+}
+
+Table private.payroll_remittance_marker_revisions {
+  id uuid [pk]
+  marker_id uuid [not null]
+  maid_profile_id uuid [not null, ref: > public.profiles.id]
+  week_start date [not null]
+  version bigint [not null]
+  event_type text [not null, note: 'marked/cleared/reconfirmed']
+  marked boolean [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  occurred_at timestamptz [not null]
+  basis jsonb [not null, note: '8 exact financial fields; lockedAmount metadata excluded from fingerprint comparison']
+  basis_fingerprint text [not null]
+  Indexes {
+    (maid_profile_id, week_start, version) [unique]
+    (id, marker_id, maid_profile_id, week_start) [unique]
+    (id, marker_id, maid_profile_id, week_start, version, marked) [unique]
+    (marker_id, maid_profile_id, week_start, version)
+    actor_profile_id
+  }
+  Note: '#331 immutable history. Composite FK binds marker/maid/week; INSERT sequence plus current/history lineage enforced at commit. First event marked; on only closed positive week, off correction never changes actual PAID; reconfirm preserves on. No raw token/session/reference/PII.'
+}
+
+Ref: private.payroll_remittance_marker_revisions.(marker_id, maid_profile_id, week_start) > private.payroll_remittance_markers.(id, maid_profile_id, week_start)
+Ref: private.payroll_remittance_markers.(current_revision_id, id, maid_profile_id, week_start, version, marked) > private.payroll_remittance_marker_revisions.(id, marker_id, maid_profile_id, week_start, version, marked)
+Ref: private.payroll_remittance_markers.(last_changed_revision_id, id, maid_profile_id, week_start) > private.payroll_remittance_marker_revisions.(id, marker_id, maid_profile_id, week_start)
 
 Table public.payroll_cycles {
   id uuid [pk]
@@ -1585,7 +1728,7 @@ Table private.notification_event_catalog {
   group_family text [not null]
   group_scope_kind text [not null]
 
-  Note: '#109/#128/#264 immutable source-controlled 49 event-family / 33 public-category contract. push_eligible is independent from requires_action; self push is suppressed.'
+  Note: '#109/#128/#264/#308/#343 dev contract (PR #340/#346; production promotion separate): immutable source-controlled 59 event-family / 42 public-category contract. Start/field-complete/overdue/report/decision and complaint-response attention notices are informational, push_eligible is independent from requires_action; self push is suppressed. Exact typed source, no migration backfill; private provenance never enters public projection.'
 }
 
 Table private.notification_groups {
@@ -1797,7 +1940,7 @@ Table public.audit_events {
   request_hash text
   idempotency_key text [unique]
 
-  Note: 'UPDATE and DELETE are rejected by an append-only trigger.'
+  Note: 'UPDATE and DELETE are rejected by an append-only trigger. #308 audit_cleaning_started_entity_idx indexes (entity_id,id) only WHERE entity_type=cleaning_attempt AND event_type=cleaning.attempt_started to bound duplicate start-evidence lookup. Phase4B2 audit_assignment_notified_entity_idx indexes entity_id only WHERE entity_type=cleaning_assignment AND event_type=assignment.notified for exact immutable revision/planning-day availability provenance. Neither index is a historical uniqueness constraint/backfill.'
 }
 
 Table private.password_change_commands {
@@ -2036,6 +2179,19 @@ Table private.photo_drive_folder_identities {
   }
   Note: 'Immutable private pre-create folder winner. Date binds root; room binds same-date date winner. Service-only latest-authorized reservation returns existing winner on conflict, never registers losing candidate. File identity must use exact room winner. Raw provider IDs are not HTTP/Data API fields.'
 }
+Table private.photo_storage_names {
+  object_id uuid [pk, ref: - private.photo_drive_identities.object_id]
+  operation_id uuid [not null, unique]
+  naming_number bigint [not null, unique, note: 'Positive private global sequence; min two digits, gaps permitted, never truncate 100']
+  upload_date date [not null]
+  room_number text [not null, note: 'Same frozen three-digit Drive identity room snapshot']
+  slot_key text [not null, note: 'cleaning-proof/bomb-proof/issue-proof only']
+  mime_type text [not null, note: 'Stored JPEG/WebP only']
+  file_name text [not null, unique]
+  created_at timestamptz [not null]
+  Note: '#383 immutable server-only naming binding. YYYY-MM-DD_일반방|폭탄방|특이사항_호실_번호.jpg|webp constructed and checked against frozen identity/slot/MIME. RLS, no direct grants. Explicit new named reservation RPC only; existing UUID identities and old API reservations stay unmodified. Retry/reconciliation reuse the same name; no provider rename/move/delete.'
+}
+Ref: private.photo_storage_names.(object_id,operation_id) - private.photo_provider_objects.(id,operation_id)
 Ref: private.photo_upload_admissions.(cleaning_attempt_id,cleaning_target_id) > public.cleaning_attempts.(id,cleaning_target_id)
 Ref: private.photo_upload_admissions.(target_photo_slot_id,cleaning_target_id) > private.target_photo_slot_snapshots.(id,cleaning_target_id)
 Ref: private.photo_drive_identities.(object_id,operation_id) - private.photo_provider_objects.(id,operation_id)
@@ -2518,3 +2674,460 @@ Table private.room_pin_access_scheduled_revocations {
   reason_code text [not null]
   Note: 'Preserves access before a future move and denies query-time authority at/after effectiveAt.'
 }
+
+Table private.assignment_activation_scan_cursor {
+  singleton boolean [pk, default: true, note: 'CHECK singleton=true. Singleton internal technical projection, not an immutable business ledger.']
+  last_target_id uuid [note: 'UUID keyset cursor, intentionally no business FK; blocked/missing rows must not prevent scan progress.']
+  Note: '#308 source/dev complete (PR #340): FORCE RLS, no anon/authenticated/service_role table access. Scheduler checks <=100 notified targets per invocation under reservation advisory lock. Does not reschedule or change ownership.'
+}
+
+Table private.cleaning_overdue_events {
+  id uuid [pk]
+  cleaning_target_id uuid [not null, unique, ref: - public.cleaning_targets.id]
+  room_id uuid [not null, ref: > public.rooms.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  original_service_date date [not null]
+  effective_service_date date [not null]
+  available_from timestamptz
+  due_at timestamptz
+  assignment_id uuid [ref: > public.cleaning_assignments.id]
+  assignment_version bigint [not null]
+  attempt_id uuid [ref: > public.cleaning_attempts.id]
+  occurred_at timestamptz [not null]
+  indexes {
+    room_id
+    actor_profile_id
+    assignment_id
+    attempt_id
+  }
+  Note: '#308 phase2 source/dev complete (PR #340): immutable original identity/schedule snapshot, first overdue event once per target. INSERT validates current incomplete physical work; completed/upload/review states create no new evidence. FORCE RLS/raw deny, no PII/PIN. Null dueAt uses next KST day for observation only.'
+}
+
+Table private.cleaning_overdue_recipients {
+  event_id uuid [not null, ref: > private.cleaning_overdue_events.id]
+  recipient_profile_id uuid [not null, ref: > public.profiles.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  push_expected boolean [not null]
+  enrolled_at timestamptz [not null]
+  indexes {
+    (event_id,recipient_profile_id) [pk]
+    recipient_profile_id
+    actor_profile_id
+  }
+  Note: 'Immutable admin enrollment. Deferred event/enrollment/typed-notice/outbox commit identity; actor self inbox retained, self push absent. Repeated runs/actor changes/group boundary never re-emit; new eligible admin keeps original event clock and 24h delivery TTL; possible immediate late-admin push expiry remains OPEN #345 (not changed by #343).'
+}
+
+Table private.cleaning_overdue_scan_cursor {
+  singleton boolean [pk, default: true, note: 'CHECK singleton=true']
+  last_target_id uuid [note: 'Technical keyset cursor; deliberately no business FK']
+  Note: 'Mutable FORCE RLS/private projection. Max100 current-day-or-earlier candidates, wrap scan under reservation global lock. Does not mutate domain work.'
+}
+
+Table private.complaint_response_attention_events {
+  id uuid [pk]
+  complaint_case_id uuid [not null, unique, ref: - public.complaint_cases.id]
+  initial_decision_id uuid [not null, ref: > public.complaint_decisions.id]
+  current_decision_id uuid [not null, ref: > public.complaint_decisions.id]
+  case_version bigint [not null, note: 'Positive version at first observation']
+  room_id uuid [not null, ref: > public.rooms.id]
+  cleaning_target_id uuid [not null, ref: > public.cleaning_targets.id]
+  first_decided_at timestamptz [not null]
+  response_deadline timestamptz [not null]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  occurred_at timestamptz [not null]
+  indexes {
+    initial_decision_id
+    current_decision_id
+    room_id
+    cleaning_target_id
+    actor_profile_id
+  }
+  Note: '#343 source/dev complete (PR #346): immutable typed first attention snapshot per case; finite first/deadline/occurrence, deadline=first+7days and occurrence>deadline. INSERT verifies current decided/unanswered case and both real decisions. FORCE RLS/raw deny; no migration backfill or economic side effect.'
+}
+
+Table private.complaint_response_attention_recipients {
+  event_id uuid [not null, ref: > private.complaint_response_attention_events.id]
+  recipient_profile_id uuid [not null, ref: > public.profiles.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  push_expected boolean [not null]
+  enrolled_at timestamptz [not null]
+  indexes {
+    (event_id,recipient_profile_id) [pk]
+    recipient_profile_id
+    actor_profile_id
+  }
+  Note: 'Immutable currently eligible admin enrollment. Exact deferred event/enrollment/inbox/outbox invariant. Original event/inbox/group clock preserved, new outbox uses enrollment clock with unchanged 24h TTL. Self push excluded; recipient/current case changes cannot erase frozen provenance.'
+}
+
+Table private.complaint_response_attention_scan_cursor {
+  singleton boolean [pk, default: true, note: 'CHECK singleton=true']
+  last_case_id uuid [note: 'Technical cursor, deliberately no business FK']
+  Note: 'Mutable FORCE RLS/private bounded 100-case keyset/wrap cursor under shared reservation command lock. Does not change complaint status/version/deadline.'
+}
+
+// #336 typed post-approval issue source candidate: independent historical provenance; no old/current-room writes.
+
+Table private.post_approval_room_issue_drafts {
+  id uuid [pk]
+  reported_by_profile_id uuid [not null]
+  client_report_id uuid [not null]
+  source_submission_id uuid [not null]
+  cleaning_attempt_id uuid [not null]
+  cleaning_target_id uuid [not null]
+  assignment_id uuid [not null]
+  assignment_revision bigint [not null]
+  original_performer_profile_id uuid [not null]
+  room_id uuid [not null]
+  draft_revision bigint [not null]
+  memo text [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (reported_by_profile_id,client_report_id) [unique]
+    (source_submission_id,client_report_id) [unique]
+    (id,source_submission_id,client_report_id,reported_by_profile_id,original_performer_profile_id) [unique]
+    (source_submission_id,created_at,id) [name: 'post_approval_issue_drafts_source_idx']
+    (cleaning_attempt_id,cleaning_target_id) [name: 'post_approval_issue_drafts_attempt_idx']
+    (cleaning_target_id) [name: 'post_approval_issue_drafts_target_idx']
+    (assignment_id) [name: 'post_approval_issue_drafts_assignment_idx']
+    (original_performer_profile_id) [name: 'post_approval_issue_drafts_performer_idx']
+    (room_id) [name: 'post_approval_issue_drafts_room_idx']
+  }
+  Note: 'Mutable memo/current draft CAS; historical source provenance is immutable. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_room_issue_draft_revisions {
+  draft_id uuid [not null]
+  actor_profile_id uuid [not null]
+  revision bigint [not null]
+  memo text [not null]
+  recorded_at timestamptz [not null]
+  indexes {
+    (draft_id,revision) [pk]
+    (actor_profile_id) [name: 'post_approval_issue_revision_actor_idx']
+  }
+  Note: 'Append-only memo revision ledger. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_room_issue_reports {
+  id uuid [pk]
+  draft_id uuid [not null, unique]
+  source_submission_id uuid [not null]
+  client_report_id uuid [not null]
+  reported_by_profile_id uuid [not null]
+  draft_created_by_profile_id uuid [not null]
+  original_performer_profile_id uuid [not null]
+  memo text [not null]
+  draft_revision bigint [not null]
+  evidence_revision bigint [not null]
+  evidence_count integer [not null]
+  reported_at timestamptz [not null]
+  indexes {
+    (source_submission_id,reported_at,id) [name: 'post_approval_issue_reports_source_idx']
+    (reported_by_profile_id,reported_at,id) [name: 'post_approval_issue_reports_actor_idx']
+    (original_performer_profile_id) [name: 'post_approval_issue_reports_performer_idx']
+  }
+  Note: 'Immutable memo/report/evidence snapshot; exact typed seal count is deferred-checked. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_collections {
+  draft_id uuid [pk]
+  revision bigint [not null]
+  item_count integer [not null]
+  Note: 'Mutable collection CAS/count projection; count bounded 0..10. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_upload_admissions {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  draft_id uuid [not null]
+  evidence_id uuid [not null]
+  expected_draft_revision bigint [not null]
+  expected_evidence_revision bigint [not null]
+  expected_item_revision bigint [not null]
+  idempotency_key_digest text [not null]
+  reserved_bytes integer [not null]
+  created_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  quota_revision bigint [not null]
+  indexes {
+    (actor_profile_id,idempotency_key_digest) [unique]
+    (draft_id,evidence_id) [name: 'post_approval_issue_admission_draft_idx']
+    (expires_at) [name: 'post_approval_issue_admission_expiry_idx']
+  }
+  Note: 'Immutable owned admission; aggregate old/new rate, inflight and quota gate. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_quota_permits {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  draft_id uuid [not null]
+  evidence_id uuid [not null]
+  expected_draft_revision bigint [not null]
+  expected_evidence_revision bigint [not null]
+  expected_item_revision bigint [not null]
+  key_digest text [not null]
+  gate_request_digest text [not null]
+  created_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  indexes {
+    (actor_profile_id,gate_request_digest) [unique]
+    (draft_id) [name: 'post_approval_issue_quota_permit_draft_idx']
+    (actor_profile_id,key_digest,expires_at) [name: 'post_approval_issue_quota_permit_key_idx']
+  }
+  Note: 'Immutable pre-provider cold-quota gate; each actor/key has one logical capacity reservation. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_quota_refreshes {
+  permit_id uuid [pk]
+  refresh_started_at timestamptz [not null]
+  usage_bytes bigint [not null]
+  Note: 'Immutable exact permit refresh receipt; provider quota remains outside the transaction. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_quota_permit_uses {
+  permit_id uuid [pk]
+  admission_id uuid [not null]
+  indexes {
+    (admission_id) [name: 'post_approval_issue_quota_use_admission_idx']
+  }
+  Note: 'Append-only permit-to-admission consumption; no second CPU charge. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_upload_operations {
+  id uuid [pk]
+  admission_id uuid [not null, unique]
+  request_hash text [not null]
+  sha256 text [not null]
+  mime_type text [not null]
+  size_bytes integer [not null]
+  created_at timestamptz [not null]
+  Note: 'Immutable normalized binary hash/MIME/size and owned admission. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_upload_handovers {
+  operation_id uuid [not null, ref: > private.post_approval_issue_upload_operations.id]
+  lease_version integer [not null]
+  previous_actor_profile_id uuid [not null, ref: > public.profiles.id]
+  actor_profile_id uuid [not null, ref: > public.profiles.id]
+  expected_lease_version integer [not null]
+  key_digest text [not null]
+  request_hash text [not null]
+  fence_token_digest text [not null]
+  occurred_at timestamptz [not null]
+  indexes {
+    (operation_id,lease_version) [pk]
+    (actor_profile_id,key_digest) [unique]
+    (previous_actor_profile_id) [name: 'post_approval_issue_handover_previous_idx']
+  }
+  Note: 'Append-only explicit admin execution transfers. Original admission actor is unchanged. Lease version increments by one within 1..8; latest handover determines executor. Private FORCE RLS/raw deny. #336 unpublished candidate, public HTTP recovery integration remains pending.'
+}
+
+Table private.post_approval_issue_upload_states {
+  operation_id uuid [pk]
+  status text [not null]
+  lease_version integer [not null]
+  fence_token_digest text
+  lease_expires_at timestamptz
+  revision bigint [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (status,lease_expires_at,operation_id) [name: 'post_approval_issue_upload_live_idx']
+  }
+  Note: 'Mutable lease/fence/state; provider-I/O intent persists before external write. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_upload_events {
+  operation_id uuid [not null]
+  revision bigint [not null]
+  state text [not null]
+  lease_version integer [not null]
+  occurred_at timestamptz [not null]
+  indexes {
+    (operation_id,revision) [pk]
+  }
+  Note: 'Append-only operation state/revision events. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_provider_objects {
+  id uuid [pk]
+  operation_id uuid [not null, unique]
+  upload_date date [not null]
+  room_number text [not null]
+  naming_number bigint [not null, unique]
+  file_name text [not null]
+  provider_file_id text [unique]
+  provider_folder_id text
+  provider_created_at timestamptz
+  provider_observed_at timestamptz
+  date_mismatch boolean [not null]
+  purged_at timestamptz
+  indexes {
+    (id,operation_id) [unique]
+    (provider_folder_id) [name: 'post_approval_issue_object_folder_idx']
+    (provider_created_at,id) [name: 'post_approval_issue_object_created_idx']
+  }
+  Note: 'Immutable naming/provenance/first provider clock; verified locator/observation/purge lifecycle is guarded. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_folder_bindings {
+  operation_id uuid [not null]
+  scope text [not null]
+  folder_registry_id uuid [not null]
+  indexes {
+    (operation_id,scope) [pk]
+    (folder_registry_id,operation_id) [name: 'post_approval_issue_folder_registry_idx']
+  }
+  Note: 'Append-only typed binding to shared folder registry; old/new live references prevent retire/delete. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_identity_tombstones {
+  locator_digest text [pk]
+  object_id uuid [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (object_id) [name: 'post_approval_issue_tombstone_object_idx']
+  }
+  Note: 'Permanent immutable physical locator digest; deletion cannot reopen identity allocation. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_evidence_acceptances {
+  operation_id uuid [pk]
+  object_id uuid [not null, unique]
+  draft_id uuid [not null]
+  evidence_id uuid [not null]
+  item_revision bigint [not null]
+  collection_revision bigint [not null]
+  display_order integer [not null]
+  accepted_at timestamptz [not null]
+  indexes {
+    (draft_id,evidence_id,item_revision) [unique]
+    (operation_id,draft_id,evidence_id,item_revision,display_order) [unique]
+    (evidence_id,item_revision) [name: 'post_approval_issue_acceptance_evidence_idx']
+  }
+  Note: 'Immutable actual provider acceptance; replaced versions remain business-bound. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_evidence_items {
+  id uuid [pk]
+  draft_id uuid [not null]
+  revision bigint [not null]
+  operation_id uuid [not null, unique]
+  display_order integer [not null]
+  indexes {
+    (draft_id,display_order) [unique]
+    (id,draft_id,revision,operation_id,display_order) [unique]
+    (draft_id,id) [name: 'post_approval_issue_items_draft_idx']
+  }
+  Note: 'Mutable stable evidence ID/current acceptance pointer with exact item/collection CAS. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_report_seals {
+  report_id uuid [not null]
+  draft_id uuid [not null]
+  evidence_id uuid [not null]
+  item_revision bigint [not null]
+  operation_id uuid [not null]
+  display_order integer [not null]
+  indexes {
+    (report_id,evidence_id) [pk]
+    (report_id,display_order) [unique]
+    (operation_id,draft_id,evidence_id,item_revision,display_order) [name: 'post_approval_issue_seal_acceptance_idx']
+    (draft_id) [name: 'post_approval_issue_seal_draft_idx']
+  }
+  Note: 'Immutable exact report evidence ID/revision/order membership; no original-photo binding reuse. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_report_closures {
+  report_id uuid [pk]
+  closed_by_profile_id uuid [not null]
+  closed_at timestamptz [not null]
+  indexes {
+    (closed_by_profile_id) [name: 'post_approval_issue_closure_actor_idx']
+  }
+  Note: 'Immutable admin-only closure; accepted retention anchor is closed_at+180 days. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_quota_pending {
+  admission_id uuid [pk]
+  operation_id uuid [unique]
+  reserved_bytes integer [not null]
+  expires_at timestamptz [not null]
+  provider_created_at timestamptz
+  provider_observed_at timestamptz
+  indexes {
+    (expires_at) [name: 'post_approval_issue_quota_expiry_idx']
+  }
+  Note: 'Mutable global pending projection counted by shared old/new quota context and watermark. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_delete_barriers {
+  object_id uuid [pk]
+  delete_token uuid [not null, unique]
+  reason text [not null]
+  anchor_at timestamptz [not null]
+  prepared_at timestamptz [not null]
+  settled_at timestamptz
+  outcome text
+  Note: 'Permanent prepared delete token/proof; guarded settlement never reopens attach/content/accept. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_purge_jobs {
+  object_id uuid [pk]
+  lease_version integer [not null]
+  claim_digest text
+  lease_expires_at timestamptz
+  revision bigint [not null]
+  status text [not null]
+  next_attempt_at timestamptz [not null]
+  indexes {
+    (status,lease_expires_at,object_id) [name: 'post_approval_issue_purge_due_idx']
+  }
+  Note: 'Mutable service-only worker lease/fence/retry; not human upload/finalization authority. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Table private.post_approval_issue_purge_scan {
+  singleton boolean [pk]
+  last_created_at timestamptz [not null]
+  last_object_id uuid [not null]
+  Note: 'Mutable bounded worker cursor without a business FK. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+}
+
+Ref: private.post_approval_room_issue_drafts.reported_by_profile_id > public.profiles.id
+Ref: private.post_approval_room_issue_drafts.assignment_id > public.cleaning_assignments.id
+Ref: private.post_approval_room_issue_drafts.original_performer_profile_id > public.profiles.id
+Ref: private.post_approval_room_issue_drafts.room_id > public.rooms.id
+Ref: private.post_approval_room_issue_drafts.(source_submission_id,cleaning_attempt_id) > public.cleaning_submissions.(id,cleaning_attempt_id)
+Ref: private.post_approval_room_issue_drafts.(cleaning_attempt_id,cleaning_target_id) > public.cleaning_attempts.(id,cleaning_target_id)
+Ref: private.post_approval_room_issue_draft_revisions.draft_id > private.post_approval_room_issue_drafts.id
+Ref: private.post_approval_room_issue_draft_revisions.actor_profile_id > public.profiles.id
+Ref: private.post_approval_room_issue_reports.reported_by_profile_id > public.profiles.id
+Ref: private.post_approval_room_issue_reports.(draft_id,source_submission_id,client_report_id,draft_created_by_profile_id,original_performer_profile_id) > private.post_approval_room_issue_drafts.(id,source_submission_id,client_report_id,reported_by_profile_id,original_performer_profile_id)
+Ref: private.post_approval_issue_collections.draft_id > private.post_approval_room_issue_drafts.id
+Ref: private.post_approval_issue_upload_admissions.actor_profile_id > public.profiles.id
+Ref: private.post_approval_issue_upload_admissions.draft_id > private.post_approval_room_issue_drafts.id
+Ref: private.post_approval_issue_quota_permits.actor_profile_id > public.profiles.id
+Ref: private.post_approval_issue_quota_permits.draft_id > private.post_approval_room_issue_drafts.id
+Ref: private.post_approval_issue_quota_refreshes.permit_id > private.post_approval_issue_quota_permits.id
+Ref: private.post_approval_issue_quota_permit_uses.permit_id > private.post_approval_issue_quota_permits.id
+Ref: private.post_approval_issue_quota_permit_uses.admission_id > private.post_approval_issue_upload_admissions.id
+Ref: private.post_approval_issue_upload_operations.admission_id > private.post_approval_issue_upload_admissions.id
+Ref: private.post_approval_issue_upload_states.operation_id > private.post_approval_issue_upload_operations.id
+Ref: private.post_approval_issue_upload_events.operation_id > private.post_approval_issue_upload_operations.id
+Ref: private.post_approval_issue_provider_objects.operation_id > private.post_approval_issue_upload_operations.id
+Ref: private.post_approval_issue_folder_bindings.operation_id > private.post_approval_issue_upload_operations.id
+Ref: private.post_approval_issue_folder_bindings.folder_registry_id > private.photo_drive_folder_identities.id
+Ref: private.post_approval_issue_identity_tombstones.object_id > private.post_approval_issue_provider_objects.id
+Ref: private.post_approval_issue_evidence_acceptances.operation_id > private.post_approval_issue_upload_operations.id
+Ref: private.post_approval_issue_evidence_acceptances.draft_id > private.post_approval_room_issue_drafts.id
+Ref: private.post_approval_issue_evidence_acceptances.(object_id,operation_id) > private.post_approval_issue_provider_objects.(id,operation_id)
+Ref: private.post_approval_issue_evidence_items.draft_id > private.post_approval_room_issue_drafts.id
+Ref: private.post_approval_issue_evidence_items.operation_id > private.post_approval_issue_evidence_acceptances.operation_id
+Ref: private.post_approval_issue_report_seals.report_id > private.post_approval_room_issue_reports.id
+Ref: private.post_approval_issue_report_seals.(operation_id,draft_id,evidence_id,item_revision,display_order) > private.post_approval_issue_evidence_acceptances.(operation_id,draft_id,evidence_id,item_revision,display_order)
+Ref: private.post_approval_issue_report_closures.report_id > private.post_approval_room_issue_reports.id
+Ref: private.post_approval_issue_report_closures.closed_by_profile_id > public.profiles.id
+Ref: private.post_approval_issue_quota_pending.admission_id > private.post_approval_issue_upload_admissions.id
+Ref: private.post_approval_issue_quota_pending.operation_id > private.post_approval_issue_upload_operations.id
+Ref: private.post_approval_issue_delete_barriers.object_id > private.post_approval_issue_provider_objects.id
+Ref: private.post_approval_issue_purge_jobs.object_id > private.post_approval_issue_provider_objects.id

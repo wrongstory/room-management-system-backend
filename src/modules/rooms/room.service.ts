@@ -55,6 +55,21 @@ export type RoomReadinessReasonCode =
   | 'CLEANING_REQUIRED'
   | 'PIN_MISMATCH'
   | 'PIN_UNCONFIGURED';
+export type RoomProjectionMode = 'LIVE' | 'PAST_END_OF_DAY' | 'FUTURE_START_OF_DAY';
+export type RoomDetailConditionCode =
+  | 'CHECKOUT_INSPECTION_REQUIRED'
+  | 'EXTRA_GUESTS'
+  | 'VACANT'
+  | 'CANDLE_PRESENT'
+  | 'ROOM_ISSUE_PRESENT'
+  | 'EARLY_CHECK_IN'
+  | 'LATE_CHECK_OUT'
+  | 'DATA_VERIFICATION_REQUIRED'
+  | 'PIN_SYNC_WARNING';
+
+export interface RoomListInput {
+  serviceDate?: string;
+}
 
 export interface RoomSummary {
   id: string;
@@ -85,6 +100,14 @@ export interface RoomSummary {
   allocationBlocked: boolean;
   allocationReady: boolean;
   reasonCodes: RoomReasonCode[];
+  serviceDate: string;
+  projectionMode: RoomProjectionMode;
+  detailConditionCodes: RoomDetailConditionCode[];
+  displayReservationId: string | null;
+  displayCheckInAt: string | null;
+  displayCheckOutAt: string | null;
+  displayGuestCount: number | null;
+  displayBaseOccupancy: number;
 }
 
 export interface ChangeRoomMasterDataInput {
@@ -376,6 +399,10 @@ export interface RoomIssuesResult {
   nextCursor: string | null;
 }
 
+export interface RoomReportsResult extends Omit<RoomIssuesResult, 'items'> {
+  items: Record<string, unknown>[];
+}
+
 export interface RoomOperationPageInput {
   limit?: number | undefined;
   cursor?: string | undefined;
@@ -405,11 +432,13 @@ export interface RoomEventsResult {
 }
 
 export interface RoomService {
+  listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage>;
   listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
   listOperationBlocks(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomOperationBlocksResult>;
   listIssues(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomIssuesResult>;
+  listReports(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomReportsResult>;
   listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult>;
-  list(actor: Actor): Promise<RoomSummary[]>;
+  list(actor: Actor, input?: RoomListInput): Promise<RoomSummary[]>;
   get(actor: Actor, roomId: string): Promise<RoomSummary>;
   changeMasterData(actor: Actor, input: ChangeRoomMasterDataInput): Promise<RoomSummary>;
   mutateOperation(actor: Actor, input: RoomOperationInput): Promise<RoomOperationResult>;
@@ -461,6 +490,14 @@ interface RoomProjectionRow {
   allocation_blocked: boolean;
   allocation_ready: boolean;
   reason_codes: RoomReasonCode[];
+  service_date: string;
+  projection_mode: RoomProjectionMode;
+  detail_condition_codes: RoomDetailConditionCode[];
+  display_reservation_id: string | null;
+  display_check_in_at: string | null;
+  display_check_out_at: string | null;
+  display_guest_count: number | null;
+  display_base_occupancy: number;
 }
 
 interface RoomTypeCatalogRow {
@@ -518,7 +555,15 @@ function toRoom(row: RoomProjectionRow): RoomSummary {
     pinSyncStatus: row.pin_sync_status,
     allocationBlocked: row.allocation_blocked,
     allocationReady: row.allocation_ready,
-    reasonCodes: row.reason_codes
+    reasonCodes: row.reason_codes,
+    serviceDate: row.service_date,
+    projectionMode: row.projection_mode,
+    detailConditionCodes: row.detail_condition_codes,
+    displayReservationId: row.display_reservation_id,
+    displayCheckInAt: row.display_check_in_at,
+    displayCheckOutAt: row.display_check_out_at,
+    displayGuestCount: row.display_guest_count,
+    displayBaseOccupancy: row.display_base_occupancy
   };
 }
 
@@ -526,6 +571,23 @@ function ensureAdmin(actor: Actor): void {
   if (actor.role !== 'admin') {
     throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 객실 운영 현황을 조회할 수 있습니다.');
   }
+}
+
+export interface RoomCandlePage {
+  items: Array<{ roomId: string; roomNumber: string; count: number; roomStateVersion: number }>;
+  nextCursor: string | null;
+}
+
+function ensureCandleActor(actor: Actor): void {
+  if (actor.role !== 'admin' && actor.role !== 'maid') throw new AppError(403, 'FORBIDDEN', '촛불 조정 권한이 필요합니다.');
+}
+
+function candleError(error: { message?: string } | null): AppError {
+  if (error?.message?.includes('CANDLE_ACCESS_REQUIRED')) return new AppError(403, 'FORBIDDEN', '촛불 조정 권한이 필요합니다.');
+  if (error?.message?.includes('PASSWORD_CHANGE_REQUIRED')) return new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호 변경이 필요합니다.');
+  if (error?.message?.includes('CANDLE_VERIFICATION_REQUIRED')) return new AppError(400, 'VALIDATION_ERROR', '수량 감소는 현장 회수를 확인한 뒤 physicallyVerified=true로 요청해 주세요.');
+  if (error?.message?.includes('INVALID_CANDLE_REQUEST')) return new AppError(400, 'VALIDATION_ERROR', '촛불 요청이 올바르지 않습니다.');
+  return roomError(error);
 }
 
 function ensureDeveloper(actor: Actor): void {
@@ -606,6 +668,44 @@ function operationBlockItem(value: unknown): RoomOperationBlockItem {
     endsAt: row.endsAt === null ? null : projectionTimestamp(row.endsAt),
     status: status as RoomOperationBlockItem['status'],
     createdAt: projectionTimestamp(row.createdAt)
+  };
+}
+
+function registeredReportItem(value: unknown): Record<string, unknown> {
+  const fail = () => new AppError(500, 'ROOM_PROJECTION_INVALID', '신고 조회 결과가 올바르지 않습니다.');
+  const object = (v: unknown): Record<string, unknown> => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) throw fail();
+    return v as Record<string, unknown>;
+  };
+  const text = (v: unknown): string => { if (typeof v !== 'string') throw fail(); return v; };
+  const id = (v: unknown): string => {
+    const s = text(v);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s)) throw fail();
+    return s;
+  };
+  const time = (v: unknown): string => { const s = text(v); if (!Number.isFinite(Date.parse(s))) throw fail(); return s; };
+  const choice = (v: unknown, allowed: string[]): string => { const s = text(v); if (!allowed.includes(s)) throw fail(); return s; };
+  const row = object(value);
+  const kind = choice(row.kind, ['room_issue', 'bomb_room']);
+  const memo = text(row.memo);
+  const unsealed = kind === 'room_issue' || row.status === 'reported';
+  if (unsealed !== (row.sealedSubmissionId === null)) throw fail();
+  if (!memo.trim() || memo.length > 500 || !Array.isArray(row.evidence) || row.evidence.length < 1 || row.evidence.length > (kind === 'room_issue' ? 10 : 20)) throw fail();
+  return {
+    id: id(row.id), attemptId: id(row.attemptId), kind, memo, reportedAt: time(row.reportedAt),
+    status: choice(row.status, kind === 'room_issue' ? ['open', 'resolved'] : ['reported', 'pending', 'approved', 'rejected']),
+    sealedSubmissionId: row.sealedSubmissionId === null ? null : id(row.sealedSubmissionId),
+    evidence: row.evidence.map((v) => {
+      const p = object(v);
+      return {
+        photoId: id(p.photoId), readState: choice(p.readState, ['available', 'expired', 'purged', 'unavailable']),
+        retentionPolicy: choice(p.retentionPolicy, ['legacy_upload', 'cleaning_submission', 'room_issue', 'complaint', 'interruption', 'sync_conflict', 'mixed', 'orphan']),
+        retentionStartsAt: p.retentionStartsAt === null ? null : time(p.retentionStartsAt),
+        expiresAt: p.expiresAt === null ? null : time(p.expiresAt),
+        purgedAt: p.purgedAt === null ? null : time(p.purgedAt),
+        mediaAvailability: choice(p.mediaAvailability, ['available', 'purged', 'unavailable'])
+      };
+    })
   };
 }
 
@@ -849,6 +949,27 @@ export function assertNoContactInformation(value: string | undefined): void {
 }
 
 export class SupabaseRoomService implements RoomService {
+  async listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage> {
+    ensureCandleActor(actor);
+    const limit = input.limit ?? 50;
+    const { data, error } = await this.clients.admin.rpc('list_room_candles', {
+      p_actor_profile_id: actor.profileId, p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: input.roomId ?? null, p_after_room_id: input.cursor ?? null, p_limit: limit
+    });
+    if (error || !data) throw candleError(error);
+    const page = projectionRecord(data);
+    if (!Array.isArray(page.items) || page.items.length > limit) throw roomProjectionError();
+    const items = page.items.map((item) => {
+      const row = projectionRecord(item);
+      if (!Number.isInteger(row.count) || (row.count as number) < 0 || (row.count as number) > 2147483647) throw roomProjectionError();
+      const roomId = projectionUuid(row.roomId);
+      if (input.roomId && roomId.toLowerCase() !== input.roomId.toLowerCase()) throw roomProjectionError();
+      return { roomId, roomNumber: projectionText(row.roomNumber), count: row.count as number, roomStateVersion: projectionVersion(row.roomStateVersion) };
+    });
+    const nextCursor = page.nextCursor === null ? null : projectionUuid(page.nextCursor);
+    if (nextCursor && (items.length !== limit || nextCursor !== items.at(-1)?.roomId || input.roomId)) throw roomProjectionError();
+    return { items, nextCursor };
+  }
   private readonly roomOperationCursor?: RoomOperationCursorCodec;
 
   constructor(
@@ -1109,6 +1230,29 @@ export class SupabaseRoomService implements RoomService {
     return result;
   }
 
+  async listReports(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomReportsResult> {
+    ensureAdmin(actor);
+    const scope = roomOperationCursorScope(actor, roomId, 'reports');
+    const cursor = input.cursor ? this.operationCursor().decode(input.cursor, scope) : null;
+    const { data, error } = await this.clients.admin.rpc('list_room_reports_page', {
+      p_actor_profile_id: actor.profileId, p_session_id: verifiedSessionId(actor.accessToken),
+      p_room_id: roomId, p_limit: input.limit ?? 5,
+      p_cursor_at: cursor?.occurredAt ?? null, p_cursor_id: cursor?.id ?? null
+    });
+    if (error?.message === 'PASSWORD_CHANGE_REQUIRED') {
+      throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '먼저 비밀번호를 변경해 주세요.');
+    }
+    if (error) throw roomError(error);
+    const page = operationPage(data, roomId, input.limit ?? 5);
+    const result = {
+      roomId: page.roomId, roomStateVersion: page.roomStateVersion, evaluatedAt: page.evaluatedAt,
+      items: page.items.map(registeredReportItem), hasMore: page.hasMore,
+      nextCursor: page.nextCursor === null ? null : this.operationCursor().encode(scope, page.nextCursor)
+    };
+    assertRoomOperationResponseSize(result);
+    return result;
+  }
+
   async listEvents(actor: Actor, roomId: string, limit: number): Promise<RoomEventsResult> {
     ensureAdmin(actor);
     const { data, error } = await this.clients.admin.rpc('list_room_events', {
@@ -1121,10 +1265,12 @@ export class SupabaseRoomService implements RoomService {
     return data as unknown as RoomEventsResult;
   }
 
-  async list(actor: Actor): Promise<RoomSummary[]> {
+  async list(actor: Actor, input: RoomListInput = {}): Promise<RoomSummary[]> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('get_room_operational_projection', {
+    const { data, error } = await this.clients.admin.rpc('get_room_board_projection', {
       p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_service_date: input.serviceDate ?? null,
       p_room_id: null
     });
     if (error) {
@@ -1135,8 +1281,10 @@ export class SupabaseRoomService implements RoomService {
 
   async get(actor: Actor, roomId: string): Promise<RoomSummary> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('get_room_operational_projection', {
+    const { data, error } = await this.clients.admin.rpc('get_room_board_projection', {
       p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedSessionId(actor.accessToken),
+      p_service_date: null,
       p_room_id: roomId
     });
     if (error) {
@@ -1178,6 +1326,8 @@ export class SupabaseRoomService implements RoomService {
   }
 
   async mutateOperation(actor: Actor, input: RoomOperationInput): Promise<RoomOperationResult> {
+    const candle = input.action === 'set_candle_count';
+    if (candle) ensureCandleActor(actor); else ensureAdmin(actor);
     if (input.action === 'report_issue') {
       assertNoContactInformation(input.payload.description as string | undefined);
     }
@@ -1192,10 +1342,10 @@ export class SupabaseRoomService implements RoomService {
       reasonCode: input.reasonCode,
       payload: input.payload
     };
-    const { data, error } = await this.clients.admin.rpc('mutate_room_operation', {
+    const { data, error } = await this.clients.admin.rpc(candle ? 'set_room_candle_count' : 'mutate_room_operation', {
       p_actor_profile_id: actor.profileId,
       p_room_id: input.roomId,
-      p_action: input.action,
+      ...(candle ? { p_session_id: verifiedSessionId(actor.accessToken) } : { p_action: input.action }),
       p_expected_room_version: input.expectedRoomVersion,
       p_reason_code: input.reasonCode,
       p_payload: payload,
@@ -1203,7 +1353,7 @@ export class SupabaseRoomService implements RoomService {
       p_request_hash: requestHash(fingerprint)
     });
     if (error || !data) {
-      throw roomError(error);
+      throw candle ? candleError(error) : roomError(error);
     }
     const row = data as {
       entity_id: string;

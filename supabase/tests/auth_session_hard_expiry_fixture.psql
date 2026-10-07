@@ -1,0 +1,40 @@
+-- Shared synthetic setup for fresh100 pgTAP and exact99→100 upgrade checks.
+-- No TAP statements: the upgrade runner commits this fixture before migration.
+create function pg_temp.session_id(n integer) returns uuid language sql immutable as $$
+  select ('f3520000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid
+$$;
+create temp table session_fixture_clock as select date_trunc('minute',clock_timestamp()) as at_time;
+insert into auth.users(id) values(pg_temp.session_id(101)),(pg_temp.session_id(102));
+insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,
+  login_id_normalized,login_sequence,role,status,must_change_password) values
+  (pg_temp.session_id(1),pg_temp.session_id(101),'session-admin','session-admin',
+   'session-admin','session-admin',0,'admin','active',false),
+  (pg_temp.session_id(2),pg_temp.session_id(102),'session-maid','session-maid',
+   'session-maid','session-maid',0,'maid','active',false);
+insert into auth.sessions(id,user_id,not_after) values
+  (pg_temp.session_id(201),pg_temp.session_id(101),null),
+  (pg_temp.session_id(202),pg_temp.session_id(102),null),
+  (pg_temp.session_id(301),pg_temp.session_id(101),statement_timestamp()+interval '1 day'),
+  (pg_temp.session_id(401),pg_temp.session_id(101),statement_timestamp()-interval '1 day'),
+  (pg_temp.session_id(501),pg_temp.session_id(101),statement_timestamp()+interval '1 day');
+insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,
+  effective_service_date,available_from,due_at,status,assignment_version,room_type_snapshot,
+  fee_snapshot,template_snapshot,created_by)
+select pg_temp.session_id(601),r.id,'additional','manual_room_request','session-expiry-fixture',
+  (c.at_time at time zone 'Asia/Seoul')::date,(c.at_time at time zone 'Asia/Seoul')::date,
+  (c.at_time at time zone 'Asia/Seoul')::date::timestamp at time zone 'Asia/Seoul',
+  ((c.at_time at time zone 'Asia/Seoul')::date+1)::timestamp at time zone 'Asia/Seoul'-interval '1 second',
+  'notified',2,'{}',10000,'{}',pg_temp.session_id(1)
+from (select id from public.rooms order by room_number limit 1) r cross join session_fixture_clock c;
+insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,
+  revision,notified_at,changed_by)
+select pg_temp.session_id(701),pg_temp.session_id(601),pg_temp.session_id(2),1,2,c.at_time,pg_temp.session_id(1)
+from session_fixture_clock c;
+insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,
+  status,assignment_revision,template_snapshot,room_snapshot)
+select pg_temp.session_id(801),pg_temp.session_id(601),pg_temp.session_id(701),pg_temp.session_id(2),
+  1,'scheduled',2,'{}',jsonb_build_object('roomId',t.room_id)
+from public.cleaning_targets t where t.id=pg_temp.session_id(601);
+select private.execute_cleaning_attempt_at(pg_temp.session_id(2),pg_temp.session_id(801),1,
+  pg_temp.session_id(701),2,'session-fixture-start',repeat('a',64),'start',c.at_time)
+from session_fixture_clock c;

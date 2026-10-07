@@ -3,8 +3,14 @@ import {
   checkoutIncidentPath,
   decideCheckoutIncident,
   getCheckoutIncident,
+  listCheckoutIncidents,
   reportCheckoutIncident,
 } from "./checkout-incident-api.ts";
+import {
+  checkoutIncidentCursorScope,
+  checkoutIncidentListQuery,
+  decodeCheckoutIncidentCursor,
+} from "./checkout-incident-cursor.ts";
 import { type EdgeActor, type EdgeClients, EdgeError } from "./runtime.ts";
 
 function assert(value: unknown, message: string): asserts value {
@@ -372,4 +378,237 @@ Deno.test("checkout incident validation and database errors fail closed without 
     hidden.status === 500 && !hidden.message.includes("raw SQL"),
     "unknown details redacted",
   );
+});
+
+function listItem(extra: Record<string, unknown> = {}) {
+  return {
+    incidentId: ids.incident,
+    status: "open",
+    roomId: ids.room,
+    roomNumber: "350",
+    cleaningTargetId: ids.target,
+    assignmentId: ids.assignment,
+    attemptId: ids.attempt,
+    reportedAt: "2026-10-03T00:00:00.123456Z",
+    serviceDate: "2026-10-02",
+    allowedDecisions: ["EXTEND_CHECKOUT", "CONFIRM_DEPARTED", "FALSE_REPORT"],
+    ...extra,
+  };
+}
+Deno.test("checkout collection adapter uses last returned exact microsecond anchor and rechecks even empty pages", async () => {
+  const original = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET");
+  Deno.env.set(
+    "INSPECTION_CURSOR_HMAC_SECRET",
+    "checkout-incident-adapter-test-secret-distinct-123456789",
+  );
+  try {
+    const admin = { ...maid, role: "admin" as const };
+    const first = listItem();
+    const lookahead = listItem({
+      incidentId: ids.nextAssignment,
+      reportedAt: "2026-10-03T00:00:00.123455Z",
+    });
+    const pack = clientsFor({ items: [first, lookahead] });
+    const response = await listCheckoutIncidents(
+      request("/v1/checkout-incidents?limit=1"),
+      pack.clients,
+      admin,
+    );
+    assert(
+      response.items.length === 1 &&
+        response.items[0].incidentId === first.incidentId &&
+        response.nextCursor !== null,
+      "lookahead is not public",
+    );
+    assert(
+      pack.calls[0].name === "list_checkout_presence_incidents_page" &&
+        JSON.stringify(pack.calls[0].args) === JSON.stringify({
+            p_actor_profile_id: ids.actor,
+            p_session_id: ids.session,
+            p_room_id: null,
+            p_cleaning_target_id: null,
+            p_service_date: null,
+            p_after_reported_at: null,
+            p_after_incident_id: null,
+            p_limit: 1,
+          }),
+      "exact read-only RPC parameters",
+    );
+    const after = await decodeCheckoutIncidentCursor(
+      response.nextCursor,
+      checkoutIncidentCursorScope(
+        admin,
+        checkoutIncidentListQuery(new URLSearchParams()),
+      ),
+    );
+    assert(
+      after.reportedAt === first.reportedAt && after.id === first.incidentId,
+      "returned row, not discarded lookahead anchor",
+    );
+    const second = clientsFor({ items: [lookahead] });
+    const next = await listCheckoutIncidents(
+      request(`/v1/checkout-incidents?limit=100&cursor=${response.nextCursor}`),
+      second.clients,
+      admin,
+    );
+    assert(
+      next.items.length === 1 && next.nextCursor === null &&
+        second.calls[0].args.p_after_reported_at ===
+          "2026-10-03T00:00:00.123456Z" &&
+        second.calls[0].args.p_limit === 100,
+      "limit may change without key truncation",
+    );
+    const empty = clientsFor({ items: [] });
+    assert(
+      (await listCheckoutIncidents(
+            request("/v1/checkout-incidents"),
+            empty.clients,
+            admin,
+          )).items.length === 0 && empty.calls.length === 1,
+      "empty page still reaches latest actor/session RPC",
+    );
+    const filtered = clientsFor({ items: [first] });
+    await listCheckoutIncidents(
+      request(
+        `/v1/checkout-incidents?roomId=${ids.room.toUpperCase()}&cleaningTargetId=${ids.target}&serviceDate=2026-10-02`,
+      ),
+      filtered.clients,
+      admin,
+    );
+    assert(
+      filtered.calls[0].args.p_room_id === ids.room &&
+        filtered.calls[0].args.p_cleaning_target_id === ids.target &&
+        filtered.calls[0].args.p_service_date === "2026-10-02",
+      "all normalized filters forwarded",
+    );
+  } finally {
+    if (original === undefined) {
+      Deno.env.delete("INSPECTION_CURSOR_HMAC_SECRET");
+    } else Deno.env.set("INSPECTION_CURSOR_HMAC_SECRET", original);
+  }
+});
+
+Deno.test("checkout collection adapter rejects stale authority and malformed responses with stable safe errors", async () => {
+  const original = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET");
+  Deno.env.set(
+    "INSPECTION_CURSOR_HMAC_SECRET",
+    "checkout-incident-adapter-denial-secret-distinct-123456789",
+  );
+  try {
+    const admin = { ...maid, role: "admin" as const };
+    for (const role of ["maid", "developer"] as const) {
+      const client = clientsFor({ items: [] });
+      assert(
+        (await failure(() =>
+              listCheckoutIncidents(
+                request("/v1/checkout-incidents"),
+                client.clients,
+                { ...admin, role },
+              )
+            )).code === "ADMIN_REQUIRED" && client.calls.length === 0,
+        "admin-only",
+      );
+    }
+    const password = clientsFor({ items: [] });
+    assert(
+      (await failure(() =>
+            listCheckoutIncidents(
+              request("/v1/checkout-incidents"),
+              password.clients,
+              { ...admin, mustChangePassword: true },
+            )
+          )).code === "PASSWORD_CHANGE_REQUIRED" && password.calls.length === 0,
+      "password gate before query",
+    );
+    for (
+      const [code, status] of [
+        ["SESSION_REVOKED", 401],
+        ["PASSWORD_CHANGE_REQUIRED", 403],
+        ["ADMIN_REQUIRED", 403],
+        ["INVALID_CHECKOUT_INCIDENT_LIST", 400],
+      ] as const
+    ) {
+      const client = clientsFor({ items: [] }, code);
+      const error = await failure(() =>
+        listCheckoutIncidents(
+          request("/v1/checkout-incidents"),
+          client.clients,
+          admin,
+        )
+      );
+      assert(
+        error.status === status && error.code === code &&
+          client.calls.length === 1,
+        "latest RPC race denial preserved",
+      );
+    }
+    for (
+      const value of [{ items: [listItem({ rawPin: "private" })] }, {
+        items: [listItem(), listItem()],
+      }, { items: [listItem({ roomNumber: "가".repeat(44000) })] }]
+    ) {
+      const client = clientsFor(value);
+      const error = await failure(() =>
+        listCheckoutIncidents(
+          request("/v1/checkout-incidents"),
+          client.clients,
+          admin,
+        )
+      );
+      assert(
+        error.status === 500 &&
+          error.code === "CHECKOUT_INCIDENT_COMMAND_FAILED" &&
+          !error.message.includes("private"),
+        "bounded malformed projection",
+      );
+    }
+    for (
+      const query of [
+        "status=open",
+        "cursor=",
+        "limit=1&limit=2",
+        "serviceDate=2026-02-29",
+      ]
+    ) {
+      const client = clientsFor({ items: [] });
+      assert(
+        (await failure(() =>
+              listCheckoutIncidents(
+                request(`/v1/checkout-incidents?${query}`),
+                client.clients,
+                admin,
+              )
+            )).code === "VALIDATION_ERROR" && client.calls.length === 0,
+        "raw invalid query rejected before RPC",
+      );
+    }
+    const unknown = clientsFor(null, "private SQL details");
+    assert(
+      (await failure(() =>
+        listCheckoutIncidents(
+          request("/v1/checkout-incidents"),
+          unknown.clients,
+          admin,
+        )
+      )).code === "CHECKOUT_INCIDENT_COMMAND_FAILED",
+      "unknown SQL redacted",
+    );
+    Deno.env.delete("INSPECTION_CURSOR_HMAC_SECRET");
+    const missing = clientsFor({ items: [] });
+    assert(
+      (await failure(() =>
+            listCheckoutIncidents(
+              request("/v1/checkout-incidents"),
+              missing.clients,
+              admin,
+            )
+          )).code === "CHECKOUT_INCIDENT_COMMAND_FAILED" &&
+        missing.calls.length === 0,
+      "missing key does not bypass empty first-page gate",
+    );
+  } finally {
+    if (original === undefined) {
+      Deno.env.delete("INSPECTION_CURSOR_HMAC_SECRET");
+    } else Deno.env.set("INSPECTION_CURSOR_HMAC_SECRET", original);
+  }
 });

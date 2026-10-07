@@ -1,6 +1,7 @@
-import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest, onRequestAsyncHookHandler } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../../lib/app-error.js';
+import { checkoutIncidentListQuery } from './checkout-incident-cursor.js';
 import {
   type CheckoutIncidentService,
   isCheckoutIncidentTimestamp,
@@ -26,9 +27,33 @@ function noQuery(request: FastifyRequest): void {
   }
 }
 
+// Register on the root app before CORS/rate-limit: unmatched methods and paths do
+// not run an encapsulated route hook. Only this API family gains cache headers.
+export const checkoutIncidentCollectionGuard: onRequestAsyncHookHandler = async (request, reply) => {
+  const path = request.url.split('?')[0] ?? '';
+  const normalized = path.replace(/\/+/g, '/').replace(/\/+$/, '');
+  const collectionPath = '/v1/checkout-incidents';
+  if (normalized !== collectionPath && !normalized.startsWith(`${collectionPath}/`)) return;
+  reply.header('Cache-Control', 'no-store');
+  // OPTIONS is transport-level CORS preflight, not a collection operation.
+  if (normalized === collectionPath && request.method !== 'OPTIONS'
+    && (request.method !== 'GET' || path !== collectionPath)) {
+    throw new AppError(404, 'ROUTE_NOT_FOUND', '요청한 API 경로를 찾을 수 없습니다.');
+  }
+};
+
 export function createCheckoutIncidentRoutes(service: CheckoutIncidentService): FastifyPluginAsync {
   return async (app) => {
     const authenticated = [app.authenticate, app.requirePasswordChanged];
+    app.get('/v1/checkout-incidents', {
+      exposeHeadRoute: false,
+      onRequest: async (_request, reply) => { reply.header('Cache-Control', 'no-store'); },
+      preHandler: authenticated
+    }, async (request) => {
+      if (request.actor.role !== 'admin') throw new AppError(403, 'ADMIN_REQUIRED', '관리자만 목록을 조회할 수 있습니다.');
+      const query = checkoutIncidentListQuery(new URL(request.url, 'http://localhost').searchParams);
+      return service.list(request.actor, query);
+    });
     app.post('/v1/attempts/:attemptId/checkout-not-completed', { preHandler: authenticated }, async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
       noQuery(request);

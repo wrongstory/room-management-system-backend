@@ -1,8 +1,187 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-07 #336 정식 source API·Swagger 연결 — 운영 미배포
+
+`dev@ac8c775` 기반 `codex/336-latest-dev-integration`의 미게시 후보에 #336을 기본
+Fastify/Edge dispatcher와 전역 source Swagger로 연결했다. 현재 source OpenAPI는
+**150 paths / 162 operations / 335 unique safe error codes**, migration111개다.
+신규11개 operation의 `x-implementation-status`는 `source-registered-not-deployed`다.
+운영 API·hosted Swagger·Pages 또는 프런트 화면 제공 완료를 뜻하지 않는다.
+최종 검증·QA·CI·dev/릴리스·운영 승격 후 해당 계약으로 client를 재생성한다.
+
+`B = /v1/cleaning-history/submissions/{sourceSubmissionId}/supplemental-room-issues`다.
+모든 명령은 Bearer 인증·최신 DB session/role/status 및 실제 업무 접근을 재검증한다.
+
+GET/list의 신고마다 현재 종결 상태를 제공한다. `closureRevision: 0`이면 `closedAt`과
+`closedByProfileId`는 null, `closureRevision: 1`이면 종결 시각과 실제 처리 관리자 UUID다.
+관리자 공동 화면은 종결 후 GET/list를 다시 조회해 현재 상태를 반영한다. POST finalize의
+응답/멱등 재시도는 최초 신고 snapshot이며 이 세 필드를 포함하지 않는다. 이를 현재
+종결 상태로 해석하지 않는다. 이 계약은 검증된 source 후보이며 아직 운영 미배포다.
+
+| 경로 | 메서드 / operationId | 소비 기준 |
+| --- | --- | --- |
+| `B/source` | GET `getPostApprovalRoomIssueSource` | 원 제출과 접근 범위 조회 |
+| `B/drafts` | POST `savePostApprovalRoomIssueDraft` | 새 초안/메모 CAS 저장 |
+| `B/drafts/{clientReportId}` | GET `getPostApprovalRoomIssueDraft` | 현재 draft/evidence revision과 nullable reportId 복구 |
+| `B` | GET `listPostApprovalRoomIssueReports` | 같은 source 최신50개, query/cursor 입력 없음 |
+| `B` | POST `finalizePostApprovalRoomIssueReport` | 새 accepted 증빙으로 불변 신고 확정 |
+| `B/{reportId}` | GET `getPostApprovalRoomIssueReport` | 확정 신고 상세 조회 |
+| `B/{reportId}/close` | POST `closePostApprovalRoomIssueReport` | 관리자 종결 event 추가 |
+| `B/drafts/{clientReportId}/evidence/{evidenceId}/upload` | POST `uploadPostApprovalRoomIssueEvidence` | raw JPEG/WebP/HEIC/HEIF 최대5MiB, 3개 CAS header |
+| `/v1/post-approval-room-issue-evidence-uploads/{operationId}` | GET `getPostApprovalRoomIssueEvidenceUpload` | 안전한 상태/leaseVersion 조회, 실행 권한 부여 아님 |
+| `/v1/post-approval-room-issue-evidence/{evidenceId}/versions/{revision}/content` | GET `getPostApprovalRoomIssueEvidenceContent` | 서버 중계 JPEG/WebP binary, no-store |
+| `/v1/post-approval-room-issue-evidence-uploads/{operationId}/handover` | POST `handoverPostApprovalRoomIssueEvidenceUpload` | 관리자만 expectedLeaseVersion으로 인계 |
+
+활성·비밀번호 변경 완료 관리자는 같은 초안/신고/안전한 업로드 상태를 공유한다. 메이드는
+원 수행 여부와 무관하게 본인 실제 통보 배정 이력이 있는 source만 접근하며 다른 메이드 초안/업로드 실행 권한은
+받지 않는다. 담당 종료·제출/승인·경과 일수만으로 조회를 차단하지 않는다. 원 제출이
+반려/대체된 후에도 기존 신고 조회·증빙 열람·관리자 종결은 유지하지만 신규 확정 가능
+여부는 별도 서버 상태로 판정한다. 작성자·원 수행자·실제 신고/인계/종결 처리자는 보존한다.
+
+POST는 `Idempotency-Key`를 사용하고 동일 키·동일 payload 재시도만 receipt를 재사용한다.
+업로드는 단일 `If-Draft-Revision`/`If-Evidence-Revision`/`If-Item-Revision` decimal header를
+보낸다. 409이면 최신 revision/state를 다시 조회하며 client가 actor/session/fence/provider
+locator를 지정하지 않는다. 최종 신고의 evidence 배열은 새 증빙의 현재 revision 및
+displayOrder를 그대로 보낸다. 기존 원 제출 사진을 새 신고 증빙으로 재사용하지 않는다.
+
+전용 `POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64`가 없으면 조회는 유지하고 인계만
+503 `POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED`로 안전하게 거부한다.
+[키 구성과 저장 기준](./ENVIRONMENTS.md)을 따른다. ephemeral Python codegen은 신규
+JSON operation9개를 검증했지만 raw binary upload 메서드 및 content binary parser는
+자동 생성되지 않으므로 프런트 client에서 각각 별도 binary transport로 연결해야 한다.
+현재 실제 Drive/UAT·프런트 소스 변경은 없다. [전체 증거와 후속 gate](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)를 따른다.
+
+### 이하 과거 scoped handoff 이력
+
+> 현재 #330은 dev cf22727(#318 병합 완료) 통합 후보로 migration108/OpenAPI139 paths·150 operations다. 아래 초기 수치는 과거 이력이며 새 후보의 전체 검증·운영 반영은 후속이다. 촛불 최소 조회/공동 조정과 날짜 조회·제한 세션 계약을 함께 보존한다. 프런트 소스는 변경하지 않았다.
+
+> 2026-10-05 #330 최신 dev 통합 후보는 103 migrations/source OpenAPI 목표138 paths/149 operations다. 최소 조회와 기존 촛불 변경만 active/password-complete/live-session admin/maid가 사용하며 일반 객실/PIN 권한은 넓히지 않는다. #336 신고 정책은 제외한다. #383/#382/#329/#318 후속 dev 재통합·전체 DB·독립 QA·새 exact-head CI와 release/운영 승격은 별도 gate다. 프런트 source·운영/UAT는 이번 병합 준비로 완료되지 않는다.
+
+> #330 촛불 공동 관리 source 후보: [전용 연동 문서](./ROOM_CANDLES_330.md). 새 최소 조회와 기존 변경 endpoint의 메이드 권한 확대는 release/운영 배포 후에만 사용한다. 아래 운영 snapshot 기록과 혼동하지 않는다.
+
+### 과거 #330 최초 인계 문구
+
 이 문서는 `wrongstory/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 과거 v0.4.0 인계는 historical workflow 참고용이고, 현재 계약은 production OpenAPI 0.5.1과 이 문서를 우선한다.
 
+### 후속 scoped 인계 이력
+
+## 2026-10-03 #329 A안 handoff — 백엔드 구현 중
+
+제한 업무는 최초 제한 전환 당시의 유효·미폐기 로그인 세션으로만 재진입한다.
+`/v1/auth/me`나 새 로그인을 제한 계정 bootstrap으로 사용하거나 일반 active 계정으로 위장하지 않는다.
+기존 token을 정상 복원한 경우에만 전용 제한 업무 discovery를 호출하고 서버가 반환한 exact
+attempt/revision/action 범위만 표시한다. 최초 freeze에 포함된 여러 기기는 각각 기존 유효 세션을 사용할 수 있다.
+token을 삭제한 cold start·freeze에 없던 새 기기/새 로그인·폐기/만료·정상 refresh 불가이면
+관리자 인계·재배정 안내가 필요하다. 앱 재진입은 2h/24h 유예를 연장하지 않는다.
+새 목록은 로컬 검증을 마친 진단용 Draft source 계약이며 현재 운영 사용 가능 API로 간주하지 않는다.
+프런트 source는 담당자가 별도로 개발하며 백엔드 합성 검증만으로 실제 cold start E2E PASS를 선언하지 않는다.
+[제한 세션 재진입 계약](./LIMITED_SESSION_REENTRY.md)에 DTO·오류·검증 상태를 기록한다.
+scoped 프런트 기준 main `d509b44`/dev `09ed284`는 유지하며 전역 제품 snapshot을 갱신하지 않는다.
+
+> 2026-10-03 #331 구현 후보 인계: 별도 송금 표시 GET/PUT·reconfirm·history 3 paths/4 operations를 추가한다. 사용자 결정은 종료 주차·양수 신규 on 및 on 유지 별도 재확인이다. cycle.status/PAID로 스위치를 계산하거나 off에 reopen을 사용하지 않는다. [표시 전용 API 계약과 검증 상태](./PAYROLL_REMITTANCE_MARKER.md)를 따른다. 목표 source 명세는 137 paths/148 operations이며 프런트 구현·운영 제공 완료는 아니다.
+
+> 2026-10-03 최신 기준: #325는 [PR #358](https://github.com/wrongstory/room-management-system-backend/pull/358), source `78582789ce66a92d9aae3072b7b8fbc6d5fa9843` → dev squash `d65f4f600f856bd990b52762cf57530830970f12`로 source/dev 완료했다. exact tree CI `37093733970` application/migration PASS·독립 QA98/100이며 초기 CI 실패는 이력으로 보존한다. 아래 #325 후보 표현은 과거 checkpoint다. 현재 #324의 객실별 확정/미확정 주급 근거 조회는 이 dev/97 migrations에서 시작한 후보이며 [조회 계약](./PAYROLL_WORK_DETAILS.md)을 따른다. 운영·프런트·main·recovery는 변경하지 않는다.
+
+> 2026-10-03 현재: #327은 [PR #357](https://github.com/wrongstory/room-management-system-backend/pull/357)의 source `22cbf0be9ed2c5e228e6c5091059c2052a61adce` → dev squash `b6f799811416fad6f80dba3d721ba279159c0aa8`로 완료했다. source/dev/CI merge tree 동일, required CI `37086130779` application/migration PASS·독립 QA98/100이다. 아래 #327 후보·#328 Draft 문구는 과거 checkpoint다. #325는 이 dev/96 migrations에서 최신 주급 조정 원장 CAS 조회를 추가하는 별도 후보다. [조회 계약과 검증 상태](./PAYROLL_ADJUSTMENT_BOOK.md)를 따르며, 운영·프런트 제공 완료를 뜻하지 않는다.
+
+> 2026-10-03 현재: #328은 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)의 source `76e2780c0304a7336433cdd17e585610360785e3` → dev squash `3968e42967c8ad223661b7a3eb4ce200aabd2499`로 완료했다. 두 tree와 CI merge tree가 같고 required CI `37027527827` application/migration PASS·독립 QA98/100이다. 아래 Draft·후속 gate 표현은 과거 checkpoint다. #327은 이 dev/95 migrations에서 관리자 open 사건 목록을 구현 중인 후보이며 현재 source OpenAPI 목표는 132 paths·142 operations다. 신규 96번째 migration과 검증·운영 제외 범위는 [관리자 미퇴실 목록 계약](./CHECKOUT_INCIDENT_ADMIN_LIST.md)을 따른다. production/main/recovery·프런트 UI/UAT 완료를 뜻하지 않는다.
+
+> #328 최신 gate(2026-10-03): 세션 만료·KST fixture 보완 후 local 개별 검증은 PASS다(Node859·Edge323·Python95·같은 migration SHA의21 upgrades·전체SQL4161·KST145·전체동시성·fresh95·advisors0·합성복구). 초기 전체 `db:test` FAIL과 원래 CI `37017832732`의 migration FAIL은 이력으로 보존한다. 최종 독립 QA·새 exact-head CI·dev 통합은 후속 gate이며 [PR #351](https://github.com/wrongstory/room-management-system-backend/pull/351)은 아직 Draft다. [상세 실행 기록](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md#보완-후-local-개별-최종-검증)을 따른다.
+
+이 문서는 정본 `makee-ham/room-management-system` 프론트와 해당 저장소에서 작업하는 Codex가 백엔드 동작을 추측하지 않고 연동하도록 만든 handoff 문서다. 제품 정책은 [AI 백엔드 제품 가이드](./AI_BACKEND_PRODUCT_GUIDE.md), HTTP 계약은 **실행 중인 Edge Function의 OpenAPI JSON**이 정본이다. 아래 날짜별 runtime·v0.4.0 인계는 당시 검증 이력이며 최신 운영 상태를 재선언하지 않는다. source 후보를 production 계약으로 간주하지 않는다.
+
 2026-09-23 운영 Git 정본은 `main@10a1f814649e92260e9e7353ab242400311b429e`, 최신 기능 통합 지점은 `dev@1a28263567b44661a1d6fdc3e4f99be8f55ff8de`다. 개발 정본은 OpenAPI 0.5.1 / 129 / 139이고 마지막으로 검증된 production runtime은 OpenAPI 0.5.1 / 128 / 138의 `api` ACTIVE v24다. #256 사진 정규화와 #250/#264 배정 후속의 Edge/Pages 배포는 아직 별도다. 프런트 제품 snapshot과 실제 소비/제공 차이, 변경 감시 규칙은 [프런트엔드 계약 snapshot](./FRONTEND_CONTRACT_SNAPSHOT.md)을 함께 따르며 Git source 제공과 hosted runtime·실제 업무 mutation 검증을 같은 상태로 표현하지 않는다.
+
+## 2026-10-03 #325 scoped 주급 CAS handoff — PR 생성 전 checkpoint
+
+새 `GET /v1/payroll/adjustment-book?maidProfileId&weekStart`는 관리자에게
+`{adjustmentBook:{maidProfileId,weekStart,currentBookVersion}}`을 제공한다.
+현재·과거 KST 월요일을 검증하지만 version은 메이드 전체 원장의 CAS다.
+기존 조정 row/mutation의 bookVersion을 최신값으로 사용하지 않는다.
+정정·반전 직전에 조회해 expectedVersion으로 보내며 기존 stale409이면 재조회한다.
+초기0도 서버가 판정한다. 200은 항목 취소 가능이나 이후 명령 성공 보장이 아니다.
+필드·권한·safe error·GET-only/no-store와 검증 상태는
+[최신 조정 원장 조회](./PAYROLL_ADJUSTMENT_BOOK.md)를 따른다.
+프런트 main/dev의 DOCS/28 B02에 한정한 인계이며 프런트 구현·운영 배포는 별도다.
+
+## 2026-10-02 #328 scoped 일정 handoff — 구현 후보
+
+선행 source/dev는 #326 PR #350이 통합된 `f34dca3746a1e553a773470aba13b55fa95bf816`/94 migrations다.
+#326 required CI `36987938462` application/migration PASS·독립 QA98/100과 동일 source/dev tree를
+확인했다. 아래 #326 구현 후보·PENDING 표현은 병합 전 검증 이력으로 보존한다.
+
+#328은 기존 `GET /v1/assignments` 및 `/{cleaningTargetId}/history`의 AssignmentCard에
+nullable `scheduleSnapshot`/`currentDeparture`를 추가하는 95번째 로컬 검증 완료 후보다.
+이 문서는 PR 생성 전 검증 시점 기록이며 최종 QA·exact-head CI·dev 통합은 연결 Issue/PR에서
+확인하는 후속 gate다. 정확한 필드·capturedAt/최초 통보 actual·KST/legacy null은
+[배정 일정 계약](./ASSIGNMENT_SCHEDULE_SNAPSHOT.md)을 따른다. Preview/commit 응답은 확장하지 않는다.
+
+불변 통보 계획과 현재 실제 퇴실을 같은 값으로 덮지 않는다. history/includeHistory에서
+`currentDeparture`는 항상 null이며 다른 담당자의 현재 예약으로 과거를 hydrate하지 않는다.
+`nextCheckInAt`은 guest의 예정 체크인, `nextRoomArrivalAt`은 canonical segment의 객실 도착이다.
+이동을 early guest check-in으로 해석하거나 `dueAt + 30분`·기본 시각을 보충하지 않는다.
+이 정보는 표시이며 시작/PIN/취소 권한을 부여하지 않는다.
+초기 adapter actor role과 마지막 RPC의 최신 DB role이 달라지면 기존
+`ASSIGNMENT_ACCESS_REQUIRED` 403으로 닫는다. `p_expected_actor_role`은 서버 내부 binding이며
+클라이언트가 보내는 신규 role 필드가 아니다. 기존 인증/권한 오류 흐름으로 처리한다.
+
+새 JSONB 원문·내부 binding은 Data API로 직접 읽지 않고 기존 배정 HTTP 카드의 공개 DTO로
+소비한다. 두 저장 테이블의 authenticated SELECT는 pre95 명시 컬럼에만 유지한다.
+기존 명시 컬럼/count/join·RLS는 유지하지만 `SELECT *`/whole-row 및 새 컬럼 직접 SELECT는
+의도적으로 `42501`이다. 업무 authority나 기존 HTTP 경로/오류 코드를 확대하지 않는다.
+마지막 grant 보완 전 Node 859·Edge 323·Python 95와 fresh 95/94→95 upgrade PASS를 확인했으나
+이 보완까지 포함한 최종 local Node 859·Edge 323/bundle 17,240,852 bytes·Python 95·
+SQL 4,152·21 upgrade·KST 145·동시성·fresh 95·advisors 0건·합성 백업 복구는 PASS다.
+최종 QA·CI/dev 근거는 [Issue #328](https://github.com/wrongstory/room-management-system-backend/issues/328)의
+연결 PR에서 확인한다. 22:56 KST 최신 main/dev refs도 동일하며 전체 text tree를 확인한 결과
+두 테이블 직접 Data API/whole-row 소비는 없다. 현재 배정/이력은 HTTP API를 사용한다.
+이는 정적 호환성 점검이며 신규 필드의 실제 소비·운영 UAT를 PASS로 선언하지 않는다.
+
+scoped ref는 main `d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev
+`09ed28446a4fd43919cddb29ebe442b848548ab8`로 유지한다. dev의 admin 예약 cache 기반 badge
+`:9359–9366`와 메이드 API 미제공 문구 `:9312`를 서버 snapshot으로 연결하는 일은 프런트 담당
+범위다. main에는 해당 live badge helper 및 DOCS/29·30이 없다. 전역 제품 snapshot은 갱신하지 않는다.
+검증·승격된 OpenAPI로 generated client를 재생성하고 실제 소비/UAT를 별도로 확인해야 하며
+백엔드 후보만으로 현재 운영 화면 지원을 선언하지 않는다. 다음 backend 순서는 #328 → #327이다.
+
+## 과거 2026-10-02 #326 scoped 조회 handoff — PR #350 병합 전 이력
+
+백엔드 선행 dev 기준은 `f72c43d4ac9d8b5abc4e700dd38392cc01ba804a`/93 migrations다.
+#348 취소 정책은 source/dev 통합됐지만 운영 승격은 별도이고, #326의 94번째 migration·additive
+DTO는 구현 후보다. 기존 131 paths·141 operations를 유지한다. 프런트 scoped 확인 ref는 main
+`d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev
+`09ed28446a4fd43919cddb29ebe442b848548ab8`이며 전역 프런트 제품 snapshot을 바꾸지 않는다.
+
+- 배정 카드, impact의 draft/blocked/unassigned 행, Preview, 신규 commit 결과는 실제 `sourceKind`,
+  canonical `roomTypeSnapshot`, snapshot 요금·원/유효일·근거 있는 이월·취소 advisory를 소비한다.
+  저장 원문 객체의 빈/비문자 선택 key는 SQL/카드 모두 unknown null로 정규화하지만 malformed
+  신규 metadata pack은 안전한 500으로 실패한다. null을 현재 카탈로그로 채우지 않고 0원을 유지한다.
+  Preview의 기존 `unknown` classifier와 canonical snapshot null은 구별한다. 과거 카드의
+  날짜·객실·메이드 version도 유지한다.
+- 신규 표시 metadata는 fingerprint에 포함하지 않지만 legacy elevator snapshot 누락 시
+  현재 객실 A/B fallback 제거는 routing 입력을 `unknown`으로 바꾼다. 모든 기존 Preview
+  fingerprint의 byte 동일성을 가정하지 말고 다시 Preview하여 새 제안/fingerprint를 사용한다.
+- 기존 target ID와 `targetAssignmentVersion`을 cancel 경로/body의 `{targetId}`/`expectedVersion`으로
+  연결한다. Preview의 `expectedAssignmentVersion`도 유지한다. 서버에
+  `manualCleaningRequestId`/`targetVersion` 별칭을 추가하도록 요구하지 않는다.
+- `canCancel`은 현재 관리자에게만 주는 advisory다. 메이드/이력의 false 표시 코드와 실제 HTTP
+  오류를 혼합하지 않는다. PIN·기한·stale draft 조건을 클라이언트의 별도 취소 제한으로 복원하지 않는다.
+- dev live 행 병합(`WIREFRAME/index.html:9348–9357`)의 현재 타입/요금 fallback, 취소 버튼
+  (`:9379`)의 생성되지 않는 별칭 요구와 등록 근거 미연결이 남아 있다. 성공 후 객실 외에도
+  배정/미배정/impact를 재조회해야 한다. 기존 생성·취소 endpoint/body는 재사용한다.
+- 검증·승격된 OpenAPI를 받은 뒤 §3의 명령으로 generated client를 재생성하고 consumer를
+  연결하는 일은 **프런트 담당자 범위**다. 프런트 코드를 수정하거나 실제 화면 UAT를 수행하지 않았다.
+
+필드별 출처·legacy receipt null/`CAPABILITY_UNAVAILABLE`·DB 읽기 무변경·exact scoped 근거 및
+검증 gate는 [배정 대상 조회 계약](./ASSIGNMENT_TARGET_READ_METADATA.md)을 따른다. snapshot 정규화
+QA 1차 P2는 core raw normalizer/fresh strict parser 및 SQL Preview classifier 보완으로 정적
+resolved이며 최종 upgrade/CI/QA/dev 완료와 구분한다.
+표시 metadata에 기존 카드/DB/OpenAPI에 없는 100자 제한을 가정하지 않는다. QA 2차의 임의 상한
+제거·1,001자 이름/실제 receipt 보존 회귀는 실제 검증했고 QA 1·2차는 정적 resolved인 구현 후보다.
+기존 optimizer routing 문자열 상한/fresh pack reject는 유지한다. source/dev 완료는 문서·승인 source가
+dev 정본에 포함되고 연결 GitHub Issue/PR의 exact-head required CI/최종 QA/실제 통합 근거를
+확인해야 효력이 발생한다. 현재 이미 병합됐다는 뜻이 아니다. 후보 API를
+운영 페이지의 사용 가능 기능으로 표시하지 않는다. 다음 backend 순서는 #326 → #328 → #327이다.
 
 ## 1. 계약을 받는 위치
 
@@ -50,7 +229,7 @@ Reveal 응답은 `Cache-Control: no-store`이며 `credential`은 화면 메모�
 2. 새 source 계약의 `POST /v1/attempts/{attemptId}/photo-slots/{slotId}/upload?assignmentId=...&assignmentRevision=...&expectedPhotoRevision=...`에는 스마트폰 원본 JPEG/WebP/HEIC/HEIF **raw bytes**를 전송한다. `Content-Type`은 실제 파일에 맞는 정확한 image/jpeg, image/webp, image/heic, image/heif 중 하나이고 입력은 최대 5MiB다. multipart/base64는 지원하지 않는다. 브라우저가 부정확한 MIME을 제공하면 확장자만 믿고 유형을 위조하지 않는다. 5MiB 또는 12MP/5000px을 넘는 파일은 클라이언트 축소가 가능할 때 축소 후 전송하고, 불가능하면 사용자가 이해할 수 있는 안내를 표시한다. 운영 API 배포 전에는 기존 300KiB/JPEG/WebP 계약과 혼용하지 않는다.
 3. 같은 사용자 동작 재시도는 같은 `Idempotency-Key`와 같은 효과 입력을 보낸다. `PHOTO_VERSION_CONFLICT`는 최신 슬롯 revision을 다시 확인하고 사용자 결정을 받는다. `PHOTO_UPLOAD_IN_FLIGHT`/429에서 key를 무한 교체하지 않는다.
 4. `GET /v1/photo-uploads/{operationId}`로 확인하고 accepted만 current 사진 저장 완료로 표시한다. provider_succeeded/reconciliation_pending은 제출 가능한 성공으로 표현하지 않는다.
-5. `GET /v1/photos/{photoId}/content`는 인증 proxy다. 공개URL이나 Drive ID를 저장하지 않고 no-store 응답을 영구 브라우저 cache에 넣지 않는다. limited 계정은 photoId=null이며 업로드 권한으로 원본을 읽을 수 없다.
+5. `GET /v1/photos/{photoId}/content`는 인증 proxy다. 공개URL이나 Drive ID를 저장하지 않고 no-store 응답을 영구 브라우저 cache에 넣지 않는다. limited 계정은 photoId=null이며 업로드 권한으로 원본을 읽을 수 없다. #383 신규 사진의 실제 Drive 이름은 서버가 날짜·유형·호실·고유 순번으로 구성한다. 새 client 필드는 필요 없으며 사진 ID/컬렉션 CAS 계약은 유지한다. 권한 검증 후 content 응답의 `Content-Disposition`은 서버 불변 이름을 UTF-8 `filename*`로 제공하고 legacy는 `photo.jpg|webp`를 유지한다. Drive 응답 이름/헤더는 그대로 전달하지 않는다. 개발 후보 계약이며 hosted 배포 여부는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 확인한다.
 
 서버가 방향·metadata를 정리하고 300KiB 이하 JPEG/WebP output을 재검증하므로 프론트 압축 성공만으로 업로드 성공을 가정하지 않는다.
 408 PHOTO_BODY_TIMEOUT은 본문 수신 시간 초과, 413은 원문/출력 크기 또는 decoder 기술상한, 415는 MIME, 409는 CAS/작업·quota·KST clock 경계, 503은 provider/환경 준비 상태를 구분한다. 업로드 initial/retry 응답의 `quotaWarning:boolean`이 true면 용량 경고를 표시한다. Google raw 사용량은 제공하지 않는다.
@@ -241,7 +420,7 @@ const idempotencyKey = crypto.randomUUID();
 | 예약 취소 | `POST /v1/reservations/{reservationId}/cancel` | reasonCode와 expectedVersion 필요, hard delete 없음 |
 | 수동 체크아웃 | `POST /v1/reservations/{reservationId}/manual-checkout` | 실제 입실 중인 예약만, 청소 obligation과 함께 원자 처리 |
 | 청소 요청 | `POST /v1/reservations/cleaning-requests` | 연박/추가 요청, 객실 version CAS |
-| 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel |
+| 청소 요청 취소 | `POST /v1/reservations/cleaning-requests/{targetId}/cancel` | target version CAS soft cancel. #348 source/dev 통합 계약은 배정/통보·PIN 조회와 무관하게 실제 착수 전 수동 추가/연박 요청만 취소; 자동 checkout 제외. 운영 승격은 별도 |
 | 예약 전이 수동 실행 | `POST /v1/reservations/transitions/process` | admin 운영 명령. scheduler secret endpoint와 별도 |
 | 퇴실 청소 템플릿 조회 | `GET /v1/cleaning-templates?cleaningKind=checkout` | `durationMinutes=null`을 미설정 선택값으로 표시하고 0분·1분으로 변환하지 않음 |
 | 퇴실 청소 템플릿 게시 | `POST /v1/cleaning-templates` | 사진 슬롯은 필수, `durationMinutes`는 선택. 모르면 생략하며 임의 기본값을 보내지 않음 |
@@ -333,6 +512,14 @@ calendar 화면은 `from`과 `to`를 함께 strict RFC 3339 offset으로 보내�
 - [ ] 예약·배정·attempt·사건 409 후 관련 projection을 재조회한다. notification 문구나 브라우저의 이전 상태를 권한·성공의 근거로 사용하지 않는다.
 - [ ] timeout·응답 유실은 같은 body와 같은 `Idempotency-Key`로 결과를 확인한다. body를 바꾸면 새 key를 사용한다.
 - [ ] 오류 수집에는 allowlist code와 `requestId`만 남기고 token·PIN·고객명·전화번호·request body를 보내지 않는다.
+
+#### 수동 연박·추가 요청 취소 (#348 source/dev 통합, 운영 미승격)
+
+- PIN 조회 여부/표시 숨김/조회 만료를 이유로 수동 요청 취소 버튼을 차단하지 않는다. 관리자만 실제 착수 전 취소하며 `expectedVersion`은 target `assignment_version`이다.
+- target soft cancel과 #27 담당 해제/unassign을 혼합하지 않는다. 자동 퇴실 의무·착수·현장 완료·제출/검수 workflow는 이 endpoint의 일반 취소 대상이 아니다.
+- 기존 current notified 담당자에게만 취소 알림이 생긴다. 취소한 배정의 PIN 화면을 지우고 이후 권한은 서버 재검증을 따른다. 이미 본 PIN이 사람의 기억에서도 회수됐다고 표시하지 않는다.
+- [취소 정책·검증 경계](./MANUAL_CLEANING_CANCEL.md)를 따른다. #326의 [조회 DTO 구현 후보](./ASSIGNMENT_TARGET_READ_METADATA.md) 및 프런트 구현·운영 UAT는 취소 명령 변경과 별도다.
+- 2026-10-02 scoped 비교: 프런트 main `d509b44b1371f25d73891e04d355b0cb0e923f5f`, dev `09ed28446a4fd43919cddb29ebe442b848548ab8`의 live 요청 endpoint/body는 호환된다. dev 배정 행 버튼은 `manualCleaningRequestId`/`targetVersion`을 요구하나 행 projection에서 이를 보장하지 않아 #326 조회 계약 연결이 필요하다. demo/local 수동 취소의 배정·통보 및 `access-review` PIN 차단도 프런트에서 제거해야 한다. 프런트 코드는 이번 PR에서 변경하지 않으며 전역 프런트 기준 commit도 갱신하지 않는다.
 
 #### 담당 메이드 수행 불가 취소·재배정 (#264 source/dev 완료, 운영 미승격)
 

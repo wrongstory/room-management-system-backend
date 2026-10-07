@@ -2,6 +2,15 @@ import { createHash } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
+import {
+  assertCheckoutIncidentListResponseSize,
+  CheckoutIncidentCursorCodec,
+  checkoutIncidentCursorScope,
+  type CheckoutIncidentListInput,
+  type CheckoutIncidentListPage,
+  checkoutIncidentListProjection,
+  normalizeCheckoutIncidentListInput
+} from './checkout-incident-cursor.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const checkoutIncidentTimestampPattern =
@@ -109,7 +118,7 @@ export function checkoutIncidentProjection(value: unknown): Record<string, unkno
 export function checkoutIncidentDatabaseError(error: { message?: string } | null): AppError {
   const code = error?.message ?? '';
   const statuses: Record<string, number> = {
-    MAID_REQUIRED: 403, ADMIN_REQUIRED: 403, PIN_ACCESS_REQUIRED: 403, SESSION_REVOKED: 401,
+    MAID_REQUIRED: 403, ADMIN_REQUIRED: 403, PASSWORD_CHANGE_REQUIRED: 403, PIN_ACCESS_REQUIRED: 403, SESSION_REVOKED: 401,
     CHECKOUT_INCIDENT_REPORT_REQUIRED: 403, CHECKOUT_INCIDENT_ACCESS_REQUIRED: 403,
     CHECKOUT_INCIDENT_NOT_FOUND: 404, CHECKOUT_INCIDENT_OPEN: 409,
     CHECKOUT_INCIDENT_REPORT_CONFLICT: 409, CHECKOUT_INCIDENT_VERSION_CONFLICT: 409,
@@ -117,7 +126,7 @@ export function checkoutIncidentDatabaseError(error: { message?: string } | null
     ASSIGNMENT_MAID_UNAVAILABLE: 409, ASSIGNMENT_SEQUENCE_CONFLICT: 409,
     ASSIGNMENT_SCHEDULE_INVALID: 409,
     IDEMPOTENCY_KEY_REUSED: 409, INVALID_CHECKOUT_INCIDENT_REPORT: 400,
-    INVALID_CHECKOUT_INCIDENT_DECISION: 400
+    INVALID_CHECKOUT_INCIDENT_DECISION: 400, INVALID_CHECKOUT_INCIDENT_LIST: 400
   };
   return Object.hasOwn(statuses, code)
     ? new AppError(statuses[code] ?? 500, code, '퇴실 미진행 사건의 권한·상태·version을 확인해 주세요.')
@@ -125,17 +134,40 @@ export function checkoutIncidentDatabaseError(error: { message?: string } | null
 }
 
 export interface CheckoutIncidentService {
+  list(actor: Actor, input: CheckoutIncidentListInput): Promise<CheckoutIncidentListPage>;
   report(actor: Actor, attemptId: string, input: CheckoutIncidentReportInput, key: string): Promise<unknown>;
   get(actor: Actor, incidentId: string): Promise<unknown>;
   decide(actor: Actor, incidentId: string, input: CheckoutIncidentDecisionInput, key: string): Promise<unknown>;
 }
 
 export class SupabaseCheckoutIncidentService implements CheckoutIncidentService {
-  constructor(private readonly clients: SupabaseClients) {}
+  constructor(private readonly clients: SupabaseClients, private readonly cursorSecret?: string) {}
   private async rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
     const { data, error } = await this.clients.admin.rpc(name, args);
     if (error) throw checkoutIncidentDatabaseError(error);
     return checkoutIncidentProjection(data);
+  }
+  async list(actor: Actor, input: CheckoutIncidentListInput): Promise<CheckoutIncidentListPage> {
+    if (actor.role !== 'admin') throw checkoutIncidentDatabaseError({ message: 'ADMIN_REQUIRED' });
+    if (actor.mustChangePassword) throw checkoutIncidentDatabaseError({ message: 'PASSWORD_CHANGE_REQUIRED' });
+    const query = normalizeCheckoutIncidentListInput(input);
+    const scope = checkoutIncidentCursorScope(actor, query);
+    const cursor = new CheckoutIncidentCursorCodec(this.cursorSecret);
+    const after = query.cursor !== null ? cursor.decode(query.cursor, scope) : null;
+    // Even an empty page goes through the service-only RPC's latest actor/session checks.
+    const { data, error } = await this.clients.admin.rpc('list_checkout_presence_incidents_page', {
+      p_actor_profile_id: scope.actorProfileId, p_session_id: sessionId(actor),
+      p_room_id: query.roomId, p_cleaning_target_id: query.cleaningTargetId, p_service_date: query.serviceDate,
+      p_after_reported_at: after?.reportedAt ?? null, p_after_incident_id: after?.id ?? null, p_limit: query.limit
+    });
+    if (error) throw checkoutIncidentDatabaseError(error);
+    const rows = checkoutIncidentListProjection(data, query, after);
+    const items = rows.slice(0, query.limit);
+    const last = items.at(-1);
+    const page = { items, nextCursor: rows.length > query.limit && last
+      ? cursor.encode(scope, { reportedAt: last.reportedAt, id: last.incidentId }) : null };
+    assertCheckoutIncidentListResponseSize(page);
+    return page;
   }
   async report(actor: Actor, attemptId: string, input: CheckoutIncidentReportInput, key: string) {
     const canonicalActorId = uuid(actor.profileId);

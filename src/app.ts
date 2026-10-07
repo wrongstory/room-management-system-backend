@@ -7,7 +7,7 @@ import type { AppEnv } from './config/env.js';
 import { loggerOptions } from './config/logger.js';
 import { type Actor, canManageAccounts } from './domain/actor.js';
 import { AppError } from './lib/app-error.js';
-import { createSupabaseClients } from './lib/supabase.js';
+import { createSupabaseClients, type SupabaseClients } from './lib/supabase.js';
 import { createAccountRoutes } from './modules/accounts/account.routes.js';
 import { type AccountService, SupabaseAccountService } from './modules/accounts/account.service.js';
 import { createAuthRoutes } from './modules/auth/auth.routes.js';
@@ -27,7 +27,7 @@ import {
   type AssignmentPreviewService,
   SupabaseAssignmentPreviewService
 } from './modules/assignments/assignment-preview.service.js';
-import { createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
+import { checkoutIncidentCollectionGuard, createCheckoutIncidentRoutes } from './modules/checkout-incidents/checkout-incident.routes.js';
 import { type CheckoutIncidentService, SupabaseCheckoutIncidentService } from './modules/checkout-incidents/checkout-incident.service.js';
 import { createCleaningTemplateRoutes } from './modules/cleaning-templates/cleaning-template.routes.js';
 import {
@@ -46,9 +46,13 @@ import {
   SupabaseNotificationService
 } from './modules/notifications/notification.service.js';
 import { createPayrollRoutes } from './modules/payroll/payroll.routes.js';
+import { payrollAdjustmentBookGuard } from './modules/payroll/payroll-adjustment-book.js';
+import { payrollWorkDetailsGuard } from './modules/payroll/payroll-work-details-guard.js';
+import { payrollRemittanceGuard } from './modules/payroll/payroll-remittance-guard.js';
 import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
 import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
 import { photoError } from './modules/photos/photo-service.js';
+import { createPhotoRuntimeDependencies } from './modules/photos/photo.runtime.js';
 import { createWebPushSubscriptionRoutes } from './modules/push-subscriptions/web-push-subscription.routes.js';
 import { SupabaseWebPushSubscriptionService, type WebPushSubscriptionService } from './modules/push-subscriptions/web-push-subscription.service.js';
 import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
@@ -64,7 +68,11 @@ import {
   SupabaseRoomPinSheetOperationsService
 } from './modules/rooms/room-pin-sheet-operations.service.js';
 import { createSubmissionRoutes } from './modules/submissions/submission.routes.js';
+import { createLimitedAttemptRoutes, limitedAttemptPathGuard } from './modules/limited-attempts/limited-attempt.routes.js';
+import { LimitedAttemptService } from './modules/limited-attempts/limited-attempt.service.js';
 import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
+import { createPostApprovalRoomIssueModule, type PostApprovalRoomIssueModuleServices } from './modules/post-approval-room-issues/post-approval-room-issue.module.js';
+import { createLazyPostApprovalRoomIssueRuntime, createPostApprovalRoomIssueRuntime } from './modules/post-approval-room-issues/post-approval-room-issue.runtime.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -91,6 +99,9 @@ export interface BuildAppOptions {
   logger?: boolean;
   photoServices?: PhotoHttpServices;
   submissionService?: SubmissionService;
+  limitedAttemptService?: LimitedAttemptService;
+  /** Optional dependency override; defaults to the shared backend runtime. */
+  postApprovalRoomIssueServices?: PostApprovalRoomIssueModuleServices;
 }
 
 function bearerToken(authorization: string | undefined): string {
@@ -114,8 +125,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   let services = options.services;
   let submissionService = options.submissionService;
+  let runtimeClients: SupabaseClients | undefined;
+  const clientsForRuntime = () => runtimeClients ??= createSupabaseClients(options.env);
+  const photoRuntime = createPhotoRuntimeDependencies(options.env);
   if (!services) {
-    const clients = createSupabaseClients(options.env);
+    const clients = clientsForRuntime();
     services = {
       auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
@@ -170,7 +184,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         vapidPublicKey: options.env.VAPID_PUBLIC_KEY,
         vapidPublicKeyring: JSON.parse(options.env.VAPID_PUBLIC_KEYRING_JSON) as Record<string,string>
       }),
-      checkoutIncidents: new SupabaseCheckoutIncidentService(clients),
+      checkoutIncidents: new SupabaseCheckoutIncidentService(clients, options.env.INSPECTION_CURSOR_HMAC_SECRET),
       cleaningTemplates: new SupabaseCleaningTemplateService(clients),
       cleaningHistory: new SupabaseCleaningHistoryService(clients),
       workHistory: new SupabaseWorkHistoryService(clients)
@@ -181,6 +195,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     );
   }
 
+  if (services.checkoutIncidents) app.addHook('onRequest', checkoutIncidentCollectionGuard);
+  app.addHook('onRequest', payrollAdjustmentBookGuard);
+  app.addHook('onRequest', payrollWorkDetailsGuard);
+  app.addHook('onRequest', payrollRemittanceGuard);
+  app.addHook('onRequest', limitedAttemptPathGuard);
   await app.register(helmet, { global: true });
   await app.register(rateLimit, { global: true, max: 120, timeWindow: '1 minute' });
   await app.register(cors, {
@@ -191,6 +210,28 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         return;
       }
       callback(new Error('허용되지 않은 Origin입니다.'), false);
+    }
+  });
+
+  // Fastify automatically adds HEAD for GET and decodes path parameters.
+  // Supplemental APIs intentionally expose only the reviewed canonical methods
+  // and paths; keep this guard scoped so existing siblings retain their policy.
+  // CORS precedes this guard so browser clients can read safe 404 responses.
+  app.addHook('onRequest', async (request, reply) => {
+    const rawPath = (request.raw.url ?? '/').split('?')[0] ?? '/';
+    const decoded = rawPath.split('/').map(segment => {
+      try { return decodeURIComponent(segment); } catch { return segment; }
+    }).join('/');
+    const familyPath = decoded.replace(/\/+/g, '/').replace(/\/+$/, '');
+    const supplemental = /^\/v1\/cleaning-history\/submissions\/[^/]+\/supplemental-room-issues(?:\/|$)/.test(familyPath)
+      || /^\/v1\/post-approval-room-issue-evidence(?:-uploads)?(?:\/|$)/.test(familyPath);
+    if (!supplemental) return;
+    reply.header('cache-control', 'no-store');
+    if (rawPath !== decoded || rawPath !== familyPath || !['GET', 'POST', 'OPTIONS'].includes(request.method)) {
+      return reply.code(404).send({
+        error: { code: 'ROUTE_NOT_FOUND', message: '요청한 API 경로를 찾을 수 없습니다.' },
+        requestId: 'unavailable'
+      });
     }
   });
 
@@ -308,13 +349,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       prefix: '/v1/work-history'
     });
   }
-  const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
+  const photoServices = options.photoServices ?? createPhotoHttpServices(clientsForRuntime(), options.env, photoRuntime);
   await app.register(createPhotoRoutes(photoServices));
+  let limitedClients: ReturnType<typeof createSupabaseClients> | undefined;
+  await app.register(createLimitedAttemptRoutes(
+    options.limitedAttemptService ?? new LimitedAttemptService({ rpc: async (name, args) => {
+      limitedClients ??= createSupabaseClients(options.env);
+      return limitedClients.admin.rpc(name, args);
+    } }),
+    photoServices.authenticate,
+  ));
   if (submissionService) {
     await app.register(createSubmissionRoutes(submissionService, async (request) => {
       try {
         const identity = await photoServices.authenticate(webRequest(request), false);
-        return { profileId: identity.profileId, role: identity.role, mustChangePassword: false };
+        return { profileId: identity.profileId, role: identity.role, mustChangePassword: false, sessionId: identity.sessionId };
       } catch (error) {
         const safe = photoError(error);
         throw new AppError(safe.statusCode, safe.code, '허용된 제한 수행 권한이 필요합니다.');
@@ -323,6 +372,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
 
   const schedulerActorId = options.env.RESERVATION_SCHEDULER_ACTOR_PROFILE_ID;
+  const handoverKey = options.env.POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64;
+  const supplementalServices = options.postApprovalRoomIssueServices ?? createLazyPostApprovalRoomIssueRuntime(() => createPostApprovalRoomIssueRuntime({
+    clients: clientsForRuntime(), ...photoRuntime,
+    ...(handoverKey !== undefined ? { handoverFenceKey: Buffer.from(handoverKey, 'base64') } : {})
+  }));
+  await app.register(createPostApprovalRoomIssueModule(supplementalServices));
+
   if (schedulerActorId) {
     const schedulerActor: Actor = {
       authUserId: 'system-reservation-scheduler',
