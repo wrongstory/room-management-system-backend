@@ -1,5 +1,7 @@
 # 프런트엔드 계약 snapshot
 
+> 2026-10-07 #336 source 연결: `dev@ac8c775` 기준 별도 미게시 후보는111 migrations·전역 OpenAPI150 paths/162 operations다. 신규11개 API를 기본 Fastify/Edge·source Swagger에 등록했고 `source-registered-not-deployed`로 표시한다. scoped 프런트 dev `09ed28446a4fd43919cddb29ebe442b848548ab8`은 이번 재확인에서도 동일하며 전역 제품 snapshot·프런트 소스·운영/hosted Swagger는 변경하지 않았다. [신규 operation 및 binary client 인계](./FRONTEND_API_INTEGRATION.md#2026-10-07-336-정식-source-apiswagger-연결--운영-미배포), [현재 검증](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)을 우선하고 아래 숫자는 당시 checkpoint로 보존한다.
+
 > 2026-10-06 현재: #318/PR321·#330/PR337 dev 병합 뒤 `109d6b7`에 #332를 통합한110 migrations/OpenAPI140 paths·151 operations 후보다. 아래86/132·142 등 이전 숫자는 과거 checkpoint이며 [현재 검증·남은 gate](./ADMIN_REPORT_READ.md)를 우선한다. 운영·프런트 배포 완료는 아니다.
 
 ## 2026-10-01 #332 추가 관찰 및 source 후보

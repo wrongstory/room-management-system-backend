@@ -7,7 +7,7 @@ import type { AppEnv } from './config/env.js';
 import { loggerOptions } from './config/logger.js';
 import { type Actor, canManageAccounts } from './domain/actor.js';
 import { AppError } from './lib/app-error.js';
-import { createSupabaseClients } from './lib/supabase.js';
+import { createSupabaseClients, type SupabaseClients } from './lib/supabase.js';
 import { createAccountRoutes } from './modules/accounts/account.routes.js';
 import { type AccountService, SupabaseAccountService } from './modules/accounts/account.service.js';
 import { createAuthRoutes } from './modules/auth/auth.routes.js';
@@ -52,6 +52,7 @@ import { payrollRemittanceGuard } from './modules/payroll/payroll-remittance-gua
 import { type PayrollService, SupabasePayrollService } from './modules/payroll/payroll.service.js';
 import { createPhotoHttpServices, createPhotoRoutes, type PhotoHttpServices, webRequest } from './modules/photos/photo.routes.js';
 import { photoError } from './modules/photos/photo-service.js';
+import { createPhotoRuntimeDependencies } from './modules/photos/photo.runtime.js';
 import { createWebPushSubscriptionRoutes } from './modules/push-subscriptions/web-push-subscription.routes.js';
 import { SupabaseWebPushSubscriptionService, type WebPushSubscriptionService } from './modules/push-subscriptions/web-push-subscription.service.js';
 import { createReservationRoutes } from './modules/reservations/reservation.routes.js';
@@ -70,6 +71,8 @@ import { createSubmissionRoutes } from './modules/submissions/submission.routes.
 import { createLimitedAttemptRoutes, limitedAttemptPathGuard } from './modules/limited-attempts/limited-attempt.routes.js';
 import { LimitedAttemptService } from './modules/limited-attempts/limited-attempt.service.js';
 import { type SubmissionService, SupabaseSubmissionService } from './modules/submissions/submission.service.js';
+import { createPostApprovalRoomIssueModule, type PostApprovalRoomIssueModuleServices } from './modules/post-approval-room-issues/post-approval-room-issue.module.js';
+import { createLazyPostApprovalRoomIssueRuntime, createPostApprovalRoomIssueRuntime } from './modules/post-approval-room-issues/post-approval-room-issue.runtime.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -97,6 +100,8 @@ export interface BuildAppOptions {
   photoServices?: PhotoHttpServices;
   submissionService?: SubmissionService;
   limitedAttemptService?: LimitedAttemptService;
+  /** Optional dependency override; defaults to the shared backend runtime. */
+  postApprovalRoomIssueServices?: PostApprovalRoomIssueModuleServices;
 }
 
 function bearerToken(authorization: string | undefined): string {
@@ -120,8 +125,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   let services = options.services;
   let submissionService = options.submissionService;
+  let runtimeClients: SupabaseClients | undefined;
+  const clientsForRuntime = () => runtimeClients ??= createSupabaseClients(options.env);
+  const photoRuntime = createPhotoRuntimeDependencies(options.env);
   if (!services) {
-    const clients = createSupabaseClients(options.env);
+    const clients = clientsForRuntime();
     services = {
       auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
@@ -202,6 +210,28 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         return;
       }
       callback(new Error('허용되지 않은 Origin입니다.'), false);
+    }
+  });
+
+  // Fastify automatically adds HEAD for GET and decodes path parameters.
+  // Supplemental APIs intentionally expose only the reviewed canonical methods
+  // and paths; keep this guard scoped so existing siblings retain their policy.
+  // CORS precedes this guard so browser clients can read safe 404 responses.
+  app.addHook('onRequest', async (request, reply) => {
+    const rawPath = (request.raw.url ?? '/').split('?')[0] ?? '/';
+    const decoded = rawPath.split('/').map(segment => {
+      try { return decodeURIComponent(segment); } catch { return segment; }
+    }).join('/');
+    const familyPath = decoded.replace(/\/+/g, '/').replace(/\/+$/, '');
+    const supplemental = /^\/v1\/cleaning-history\/submissions\/[^/]+\/supplemental-room-issues(?:\/|$)/.test(familyPath)
+      || /^\/v1\/post-approval-room-issue-evidence(?:-uploads)?(?:\/|$)/.test(familyPath);
+    if (!supplemental) return;
+    reply.header('cache-control', 'no-store');
+    if (rawPath !== decoded || rawPath !== familyPath || !['GET', 'POST', 'OPTIONS'].includes(request.method)) {
+      return reply.code(404).send({
+        error: { code: 'ROUTE_NOT_FOUND', message: '요청한 API 경로를 찾을 수 없습니다.' },
+        requestId: 'unavailable'
+      });
     }
   });
 
@@ -319,7 +349,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       prefix: '/v1/work-history'
     });
   }
-  const photoServices = options.photoServices ?? createPhotoHttpServices(createSupabaseClients(options.env), options.env);
+  const photoServices = options.photoServices ?? createPhotoHttpServices(clientsForRuntime(), options.env, photoRuntime);
   await app.register(createPhotoRoutes(photoServices));
   let limitedClients: ReturnType<typeof createSupabaseClients> | undefined;
   await app.register(createLimitedAttemptRoutes(
@@ -342,6 +372,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
 
   const schedulerActorId = options.env.RESERVATION_SCHEDULER_ACTOR_PROFILE_ID;
+  const handoverKey = options.env.POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64;
+  const supplementalServices = options.postApprovalRoomIssueServices ?? createLazyPostApprovalRoomIssueRuntime(() => createPostApprovalRoomIssueRuntime({
+    clients: clientsForRuntime(), ...photoRuntime,
+    ...(handoverKey !== undefined ? { handoverFenceKey: Buffer.from(handoverKey, 'base64') } : {})
+  }));
+  await app.register(createPostApprovalRoomIssueModule(supplementalServices));
+
   if (schedulerActorId) {
     const schedulerActor: Actor = {
       authUserId: 'system-reservation-scheduler',

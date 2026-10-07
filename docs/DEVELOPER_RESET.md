@@ -1,5 +1,26 @@
 # #396 운영 인계 전 초기화
 
+## 2026-10-07 #336 dev 통합 후 재대조
+
+#336/PR401은 source0cc368c → dev f1d1f6d로 보호 squash됐다. required CI37579027245
+application/migration PASS, 독립 기능·빌드·staged QA PASS와 source/CI/dev tree 동일성을
+확인했다. #336/#400은 source/dev 완료로 종료했으며 운영 배포는 하지 않았다.
+
+#396 진단 foundation에 이 dev를 정상 merge하며 제품 가이드의 두 추가 절을 모두 보존했다.
+기존 로컬111 DB를 읽기 전용 재대조한 결과 관계183·FK474·사용자 trigger333·외부 schema
+FK2·unsupported0, inventory 누락0·미분류0이다. preserve3/mixed10/reseed2/clear43/review125
+분류 후보는 변하지 않았다. catalog fingerprint는
+`2946481ddaf3576bd5c7c4e0b963e8455e2b4ccaa095711c5f9b2c9d329049a8`이다.
+행/컬럼별 정책 완료나 삭제 순서 검증을 뜻하지 않는다. executionEnabled=false를 유지한다.
+
+계정 집계는 빈 로컬 DB의 모든 건수0이며 개발자 단일성/연결 필요조건을 올바르게 차단했다.
+계정을 생성하거나 Auth/PIN/업무 행을 바꾸지 않았다. 이번 단계 fresh reset/전체 SQL은
+NOT RUN이며 PR401의 CI 성공을 #396 새 head의 성공으로 대신하지 않는다.
+통합본 `ci:quality`105파일/2,663 tests·typecheck/build·secret988·OpenAPI150/162 PASS,
+manifest111 PASS다. 별도 독립 QA가 기존 진단 source 보존·두 정책 절·실행 비활성을 확인하고
+전용6파일/139 tests를 재실행해 PASS했다. 새 exact-head CI는 후속이다.
+아래 미게시 #336 설명은 과거 기록이다.
+
 ## 확정 정책
 
 개발자 계정·DB 구조·migration history·검토된 객실/요금 기준정보를 유지한다.

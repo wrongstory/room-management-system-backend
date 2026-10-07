@@ -1,5 +1,46 @@
 # 개발 오케스트레이션·source 승인 기준
 
+## 2026-10-07 최신 실행 checkpoint
+
+#336/PR401은 dev f1d1f6d에 보호 squash 완료, #336/#400 source/dev 종료다.
+source0cc368c·CI merge·dev tree6e7873a3b4298df7978097f28c9953302dad9f33 동일,
+CI37579027245 application/migration PASS와 독립 QA·미해결 리뷰0을 확인했다.
+운영 미반영이며 다음은 #396 PR399 진단 foundation의 최신 dev 통합·전체 보존/삭제 설계다.
+로컬111 재대조는183관계/FK474/trigger333·누락0이지만 review125/mixed10은 여전히
+후속 검토이고 실제 초기화는 비활성이다. 아래31차의 미병합 문구는 당시 기록이다.
+
+최신은 [#336 31차 checkpoint](./POST_APPROVAL_ROOM_ISSUE_REPORT.md#31차-checkpoint--2026-10-07-종결-조회-보완과-전체-재검증)다.
+종결 GET/list 필드 보완 후 Node2,524·SQL5,568·fresh111·110→111 upgrade·18경합·전체 Edge가
+PASS다. 독립 기능 재QA189 PASS이며 마지막 mock 보완 뒤 API46 PASS다. 후보 번들19,185,148 bytes.
+exact9 baseline PASS와 raw strict FAIL9를 구분한다. 최종 증거 독립 QA PASS(미해결 P0/P1/P2 없음),
+마지막 보완 후 전체 Node2,524 재실행 PASS다. 변경 범위 확정·PR/CI·dev/운영은 후속이다.
+아래30차는 보완 전 기록이다.
+
+최신 진행은 [#336 30차 checkpoint](./POST_APPROVAL_ROOM_ISSUE_REPORT.md#30차-checkpoint--2026-10-07-독립-qa-보완-판정)다.
+독립 QA는 P2 두 건으로 보완 판정했다. 종결 상태 GET/list 누락은 미해결이고,
+#400 frozen lock 검사는 수정·독립 재QA PASS다. 아래 PASS는29차 실행 증거이지 최종 승인 아니다.
+신규11개 기본 API/source Swagger 등록150/162/335, Node2,517 및 실제110→111 upgrade PASS다.
+#400 실행/검증 lock 분리 후 실제 기본 Edge18,550,494 bytes·별도 후보19,171,562 bytes와
+전체 Edge(raw65/기존491/생성본65)가 통과했다. 기존18–27 upgrade 분할 재실행 및 전체 SQL88파일/
+5,560·static·KST145·전체11경합·최종fresh111 및 exact9 baseline도 PASS다. 최초 실패 이력은 보존한다. 신규 전체
+QA·CI·dev/운영은 미완료이며 아래27차 수치는 이전 실행 이력이다.
+
+개발 정본은 `dev@ac8c775` /110 migrations다. #332/PR338 및 #397/PR398은 required CI·
+독립 QA를 거쳐 dev에 보호 squash됐다. 아래109d6b7/108개 및 CI 대기 문구는 과거 기록이다.
+
+아래는27차 당시의 통합 이력이다. #336은 별도 `codex/336-latest-dev-integration`에 이전 미커밋 후보를 보존해 통합했다.
+manifest111·기존110 SHA/순서 불변, Node2,363·Edge 실제 후보18,262,301 bytes·Python95·
+template client·audit 취약점0 및 독립 caller/통합 QA144 PASS다. fresh111·template DB·exact9
+baseline·합성복구도 PASS이고, 전체27 upgrade/SQL은 진행 중이다. 전용110→111 upgrade,
+전체 경합, 정식 API/Swagger 등록·새 exact-head CI·dev 병합·운영은 완료가 아니다.
+[정확한 범위와 최초 실패/후속 PASS](./POST_APPROVAL_ROOM_ISSUE_REPORT.md#27차-checkpoint--2026-10-07-최신-dev-격리-통합-전체-db-진행-중)를 따른다.
+
+진행 순서는 #336 완성 → 최종 스키마의 #396 개발자 초기화 실행/복구·보존 삭제 manifest →
+#376/#378 실행기/실제 fault → 개발 완료 후 #273 Supabase-only B 실제 백업/복원 →
+별도 v0.9.0 릴리스 준비다. #396 PR399는 실행 비활성 진단 foundation Draft이며,
+진단 도구 PASS를 실제 DB 초기화 완성으로 해석하지 않는다. v0.8.0·프런트·운영은 보존하고
+현재 지시대로 실제 운영 반영·tag/Release 직전에 정지한다.
+
 ## 2026-10-06 자동 진행 순서
 
 현재 개발 정본은 `dev@109d6b7`/108 migrations다. #318/PR321과 #330/PR337은

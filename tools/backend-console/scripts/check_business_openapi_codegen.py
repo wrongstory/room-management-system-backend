@@ -8,12 +8,118 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 ENUM_VALUE_PATTERN = re.compile(r'^\s+[A-Z][A-Z0-9_]+ = "([^"]+)"$', re.MULTILINE)
 
 
 def generated_enum_values(path: Path) -> list[str]:
     return ENUM_VALUE_PATTERN.findall(path.read_text(encoding="utf-8"))
+
+
+def check_post_approval_contract(document: dict[str, Any]) -> None:
+    base = "/v1/cleaning-history/submissions/{sourceSubmissionId}/supplemental-room-issues"
+    expected = {
+        "getPostApprovalRoomIssueSource": (base + "/source", "get"),
+        "savePostApprovalRoomIssueDraft": (base + "/drafts", "post"),
+        "getPostApprovalRoomIssueDraft": (base + "/drafts/{clientReportId}", "get"),
+        "listPostApprovalRoomIssueReports": (base, "get"),
+        "finalizePostApprovalRoomIssueReport": (base, "post"),
+        "getPostApprovalRoomIssueReport": (base + "/{reportId}", "get"),
+        "closePostApprovalRoomIssueReport": (base + "/{reportId}/close", "post"),
+        "uploadPostApprovalRoomIssueEvidence": (
+            base + "/drafts/{clientReportId}/evidence/{evidenceId}/upload",
+            "post",
+        ),
+        "getPostApprovalRoomIssueEvidenceUpload": (
+            "/v1/post-approval-room-issue-evidence-uploads/{operationId}",
+            "get",
+        ),
+        "getPostApprovalRoomIssueEvidenceContent": (
+            "/v1/post-approval-room-issue-evidence/{evidenceId}/versions/{revision}/content",
+            "get",
+        ),
+        "handoverPostApprovalRoomIssueEvidenceUpload": (
+            "/v1/post-approval-room-issue-evidence-uploads/{operationId}/handover",
+            "post",
+        ),
+    }
+    paths = document["paths"]
+    for operation_id, (path, method) in expected.items():
+        operation = paths.get(path, {}).get(method, {})
+        roles = (
+            ["admin"]
+            if operation_id
+            in {"closePostApprovalRoomIssueReport", "handoverPostApprovalRoomIssueEvidenceUpload"}
+            else ["admin", "maid"]
+        )
+        if (
+            operation.get("operationId") != operation_id
+            or operation.get("security") != [{"bearerAuth": []}]
+            or operation.get("x-required-roles") != roles
+            or operation.get("x-implementation-status") != "source-registered-not-deployed"
+            or operation.get("tags") != ["Post-approval Room Issues"]
+        ):
+            raise RuntimeError("#336 정식 source 등록/권한 계약이 잘못됐습니다: " + operation_id)
+        parameters = operation.get("parameters", [])
+        if method == "post" and not any(
+            p.get("in") == "header"
+            and p.get("name") == "Idempotency-Key"
+            and p.get("required") is True
+            for p in parameters
+        ):
+            raise RuntimeError("#336 명령 멱등성 계약 누락: " + operation_id)
+        for status, response in operation["responses"].items():
+            if (
+                response.get("headers", {}).get("Cache-Control", {}).get("schema", {}).get("const")
+                != "no-store"
+            ):
+                raise RuntimeError("#336 캐시 금지 계약 누락: " + operation_id)
+            if int(status) >= 400 and response.get("content", {}).get("application/json", {}).get(
+                "schema"
+            ) != {"$ref": "#/components/schemas/ErrorEnvelope"}:
+                raise RuntimeError("#336 공통 safe error envelope 누락: " + operation_id)
+    draft = paths[base + "/drafts/{clientReportId}"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    if (
+        draft.get("additionalProperties") is not False
+        or draft.get("required") != ["source", "draft", "evidence", "reportId"]
+        or draft["properties"]["reportId"].get("anyOf")
+        != [{"type": "string", "format": "uuid"}, {"type": "null"}]
+    ):
+        raise RuntimeError("#336 초안 복구 nullable reportId 계약이 잘못됐습니다.")
+    upload = paths[expected["uploadPostApprovalRoomIssueEvidence"][0]]["post"]
+    headers = [p for p in upload["parameters"] if p["in"] == "header"]
+    if [p["name"] for p in headers] != [
+        "Idempotency-Key",
+        "If-Draft-Revision",
+        "If-Evidence-Revision",
+        "If-Item-Revision",
+    ] or not all(p.get("required") is True and p.get("x-single-header") is True for p in headers):
+        raise RuntimeError("#336 증빙 단일 헤더/CAS 계약이 잘못됐습니다.")
+    for header, minimum, maximum in zip(
+        headers[1:], [1, 0, 0], [9007199254740991, 9007199254740990, 9007199254740990], strict=True
+    ):
+        if header["schema"].get("pattern") != "^[0-9]+$" or (
+            header["schema"].get("x-integer-minimum"),
+            header["schema"].get("x-integer-maximum"),
+        ) != (minimum, maximum):
+            raise RuntimeError("#336 증빙 CAS safe integer 경계가 잘못됐습니다.")
+    content = upload["requestBody"]["content"]
+    if set(content) != {"image/jpeg", "image/webp", "image/heic", "image/heif"} or not all(
+        item["schema"]
+        == {"type": "string", "format": "binary", "maxLength": 5242880, "x-max-bytes": 5242880}
+        for item in content.values()
+    ):
+        raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
+    codes = document["components"]["schemas"]["ErrorCode"]["enum"]
+    if (
+        len(codes) != 335
+        or len(set(codes)) != 335
+        or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
+    ):
+        raise RuntimeError("#336 공통 safe error code union은 정확335개여야 합니다.")
 
 
 def check_template_permutation_roundtrip(
@@ -96,8 +202,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 140:
-        raise RuntimeError("전체 source OpenAPI path 수가 140이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 150:
+        raise RuntimeError("전체 source OpenAPI path 수가 150이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -106,9 +212,10 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 151:
-        raise RuntimeError("전체 source OpenAPI operation 수가 151가 아닙니다.")
+    if operation_count != 162:
+        raise RuntimeError("전체 source OpenAPI operation 수가 162가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
+    check_post_approval_contract(document)
     discovery_fields = [
         "attemptId",
         "assignmentId",
@@ -221,6 +328,20 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            *[
+                package / "api" / "post_approval_room_issues" / (name + ".py")
+                for name in [
+                    "get_post_approval_room_issue_source",
+                    "save_post_approval_room_issue_draft",
+                    "get_post_approval_room_issue_draft",
+                    "list_post_approval_room_issue_reports",
+                    "finalize_post_approval_room_issue_report",
+                    "get_post_approval_room_issue_report",
+                    "close_post_approval_room_issue_report",
+                    "get_post_approval_room_issue_evidence_upload",
+                    "handover_post_approval_room_issue_evidence_upload",
+                ]
+            ],
             package / "api" / "rooms" / "list_room_reports.py",
             package / "models" / "room_reports_envelope.py",
             package / "models" / "registered_room_report.py",

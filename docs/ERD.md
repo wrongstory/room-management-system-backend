@@ -1,5 +1,15 @@
 # Room Management System ERD 초안
 
+> 2026-10-07 최신 #336: dev `ac8c775` 기반111 migration/source API150 paths·162 operations
+> 후보는 기본 Fastify/Edge 등록과 전체 로컬 SQL·동시성·fresh 검증을 완료했다. 아래 과거
+> 후보 수치는 당시 이력이며 [31차 checkpoint](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)를 우선한다.
+> 최종 독립 QA PASS이며 PR/CI·dev 병합·운영 migration/API 배포는 별도 미완료다. 이 ERD는 설계 초안이다.
+
+> #336 미게시 후보의 `private.post_approval_issue_upload_handovers`는 operation/lease별
+> 불변 인계 원장이다. 이전/새 actor FK와 actor/key UNIQUE를 갖고 최초 admission actor는
+> 변경하지 않는다. 현재 실행자는 마지막 인계 row에서 파생되며 같은 transaction에서
+> upload state lease/fence를 회전한다. 실제 검증과 공개 연결 여부는 #336 계약 문서를 따른다.
+
 > 2026-10-06 현재: #318/PR321·#330/PR337 dev 병합 뒤 `109d6b7`에 #332를 통합한110 migrations/OpenAPI140 paths·151 operations 후보다. 아래86/132·142 등 이전 숫자는 과거 checkpoint이며 [현재 검증·남은 gate](./ADMIN_REPORT_READ.md)를 우선한다. 운영·프런트 배포 완료는 아니다.
 
 ## #332 등록 신고 조회 후보
@@ -1442,3 +1452,73 @@ null→고정 일정 변경 또는 수동 checkout transaction에서 정확히 �
 commit 시 예약 end, obligation, planned/current target의 일치를 검증한다. 투숙 중 종료 미정 move는
 `OPEN_ENDED_STAY_REQUIRES_END`, standard의 null checkout은 `STANDARD_RESERVATION_REQUIRES_END`로 닫는다.
 Scheduler는 null checkout 예약을 자동 checkout하지 않는다.
+
+## #336 제출·승인 후 독립 특이사항 보고 (source candidate, DB 미적용)
+
+2026-10-06 사용자 결정은 관리자 공동 업무와 메이드 본인 실제 통보 배정 이력 접근이다.
+이전 original-performer/creator-only 제한을 최종 정책으로 사용하지 않는다. 후보 SQL은 역사
+접근과 신규 신고 상태 검사를 분리한다. 기존 사건의 source/초안 복구/목록/단건/content/
+관리자 close는 원 제출의 반려·대체 후에도 허용하지만 보존 만료와 세션·역할 검사는 유지한다.
+신규 신고/write 상태 검사는 별도다. 관리자 공동 draft 조회/save/finalize와 본인 실제 통보
+배정 이력 접근·명시적 upload 인계는 source 후보이며 최신 dev와의 전체 통합 검증은 후속이다.
+draft의 reported_by는 최초 작성자, revision의 actor_profile_id는 실제 수정자,
+report의 reported_by는 실제 최종 신고자다. report의 draft_created_by_profile_id는 기존 5컬럼
+복합 FK로 최초 작성자를 보존한다. source/client UNIQUE가 관리자별 중복 draft를 막고 기존
+creator/client UNIQUE도 유지한다. [실행 결과](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)를 따른다.
+
+`20261005023103_post_approval_room_issue_ledger.sql`은 root가 CLI로 생성한 미게시·미적용 append다.
+현재 standalone API/SQL 후보의 관계를 아래에 기록한다. 이 문서는 최신 dev 통합본의 실제
+설치·pgTAP·경합·catalogue PASS나 default app/Edge 활성화를 뜻하지 않는다. 적용된 과거
+migration과 원 제출 DTO는 변경하지 않는다. 정확한 컬럼·FK/index는 [DBML](./room-management-system.dbml),
+정책/검증 경계는 [사후 보고 기록](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)을 함께 참조한다.
+
+```text
+기존 submission → attempt → historical assignment revision → original performer / notified room
+  └─ 독립 draft ─ append-only memo revisions
+       ├─ collection CAS ─ stable evidence item/current acceptance
+       ├─ admission ─ operation ─ mutable state/fence + append-only events
+       │    ├─ cold-quota permit → refresh receipt → admission consumption
+       │    ├─ global quota pending (기존 pending과 공동 합산)
+       │    └─ typed provider object ─ shared folder binding + permanent identity tombstone
+       │           ├─ immutable actual acceptance → exact report evidence seal
+       │           └─ permanent delete barrier → worker purge job/scan
+       └─ immutable report → immutable admin closure → 새 증빙만 closure+180일
+                └─ safe typed notification source → 기존 inbox / delivery outbox
+```
+
+새 private 테이블23개는 FORCE RLS와 runtime raw DML deny를 가진다. source 복합 FK/guard는
+submission/attempt/target/assignment revision/원 수행자/객실 snapshot을 함께 검증한다. 신규 신고는
+submitted와 approved를 허용하고 current assignment·담당 종료·현재/다음 occupancy를 자동 차단
+조건으로 쓰지 않는다. 새 원장에는 실제 통보 배정 이력이 있는 active/password-complete maid
+또는 같은 상태의 admin만 접근하며, 관리자는 다른 작성자의 초안 조회·메모 수정·최종 신고가
+가능하다. 메이드의 타 작성자 draft는 계속 거부한다. 원 제출을 바꾸지 않는 same-source 최신50개
+보고 조회를 별도로 제공한다. 원 사진/seal/검수/수익/payroll/현재 객실·점유 축에는 이 명령으로 쓰지 않는다.
+
+관리자의 operation `get`은 다른 관리자의 안전한 상태·leaseVersion 읽기를 공유하지만 executor/
+lease/fence/state를 바꾸지 않는다. 반려·대체 후 역사 상태도 읽을 수 있고 메이드 본인 draft/
+executor 제한은 유지한다. 실제 claim/write/accept/보상 delete는 현재 executor·fresh session·
+신규 source 상태·fence를 계속 검사하며, 읽기만으로 인계를 받거나 provider I/O를 실행하지 않는다.
+
+admission과 begin은 기존 actor별 두 rate 원장30/min, global reservation-command lock, old/new inflight8,
+shared quota snapshot/pending/watermark를 함께 사용한다. legacy single begin의 transition에서는 **정확한
+현재 actor/source/key/admission tuple 하나만** 이미 합산된 unbound admission에서 제외한다. 상한을9로
+늘리거나 다른 reservation을 빼지 않는다. cold-quota provider read 전에도 old/new pending 및 distinct
+unconsumed permit의 알려진 하한을 검사하되 stale snapshot의 usage를 추측하지 않는다.
+
+provider object의 명명은 기존 global sequence와 `issue-proof` formatter, 고정 KST date·historical room을
+사용한다. typed binding/acceptance만 만들고 기존 provider-object/storage-name/retention FK를 우회하지
+않는다. external write 직전3-CAS/fresh/fence를 확인해 durable I/O intent를 남긴다. I/O 중 business CAS가
+바뀌면 새 acceptance는409로 거부하되 exact owned object의 최초 물리 생성 시각을 reconciliation으로
+보존한다. session 만료는 새 I/O를 막고 이미 남은 uncertainty를 성공/삭제로 추측하지 않는다.
+
+accepted replacement도 live business binding이며 immutable admin closure 이후180일이 anchor다.
+never-accepted 객체는 live draft binding이 없을 때만 최초 provider createdTime+30일 true orphan이고,
+정확히 증명한 date-mismatch failed-create compensation만 즉시 삭제할 수 있다. prepared barrier/tombstone은
+유실 뒤에도 attach/accept/content/rebind를 막는다. shared folder retirement와 physical locator collision은
+old/new 참조를 모두 검사한다. 무인 purge는 service-only typed lease/fence/retention-proof RPC로 수행하며
+로그인 admin session을 요구하거나 worker 권한을 human upload/finalization에 재사용하지 않는다.
+
+새 `post_approval_room_issue.reported_admin` source는 immutable report/seal와 safe audit만 연결한다.
+기존 current-assignment/pre-submission notification validator는 완화하지 않는다. memo·evidence ID·provider
+locator·PIN은 audit/notification payload에서 제외한다. 신규 direct #329 caller는 source snapshot1개와
+active-only fresh wrapper1개뿐이며, 선행 실제7/19 chain 뒤 **source 예상8/20**이다. 설치 census는 NOT RUN이다.

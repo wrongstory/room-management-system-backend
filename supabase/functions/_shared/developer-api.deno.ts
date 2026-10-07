@@ -30,6 +30,7 @@ Deno.test("developer runtime reports Google and purge configuration booleans onl
     "GOOGLE_DRIVE_REFRESH_TOKEN",
     "GOOGLE_DRIVE_ROOT_FOLDER_ID",
     "PHOTO_PURGE_INVOKE_SECRET",
+    "POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64",
   ];
   const configured = new Set<string>();
   const allowed: readonly string[] =
@@ -152,7 +153,7 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "room_candle_session_hard_expiry",
+    expectedMigrationName === "post_approval_room_issue_ledger",
     "expected migration must not depend on a remote execution timestamp",
   );
   const get = Deno.env.get;

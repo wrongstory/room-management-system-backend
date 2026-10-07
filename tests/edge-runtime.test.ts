@@ -62,6 +62,49 @@ const photoPurgeMigrationUrl = new URL(
 );
 
 describe('Supabase Edge runtime PoC contract', () => {
+  it('formally wires #336 through generated JS and shared lazy photo dependencies after public paths', async () => {
+    const [api, photo, module] = await Promise.all([
+      readFile(apiUrl, 'utf8'),
+      readFile(new URL('../supabase/functions/_shared/photo-api.ts', import.meta.url), 'utf8'),
+      readFile(
+        new URL('../supabase/functions/_shared/post-approval-module-runtime.ts', import.meta.url),
+        'utf8'
+      )
+    ]);
+    expect(api).toContain('from "../_shared/post-approval-report.bundle.js"');
+    expect(api).not.toMatch(/from ["'][^"']*post-approval-(?:module|report)-runtime\.ts/);
+    expect(api).toMatch(/supplementalRoomIssueHandler:\s*async \(request, path, clients\)/);
+    expect(api).toContain('provider: configuredPhotoProvider');
+    expect(api).toContain('initializeDecoder: initializePhotoDecoder');
+    expect(api.indexOf('clients = dependencies.createClients()')).toBeGreaterThan(
+      api.indexOf('path === "/docs"')
+    );
+    expect(photo).toContain('export function configuredPhotoProvider');
+    expect(photo).toContain('export function initializePhotoDecoder');
+    expect(module).toMatch(/handoverFenceKey\?: Uint8Array/);
+    expect(module.indexOf('new SupabasePostApprovalRoomIssueHandoverService')).toBeGreaterThan(
+      module.indexOf('recover: async')
+    );
+    expect(
+      module.indexOf('preparePostApprovalRoomIssueHandover(trusted, input, key)')
+    ).toBeLessThan(module.indexOf('dependencies.handoverFenceKey()'));
+  });
+
+  it('guards only raw #336 route families and isolates the persistent handover key purpose', async () => {
+    const api = await readFile(apiUrl, 'utf8');
+    expect(api).toContain('rawPath !== path');
+    expect(api).toContain('!postApprovalRoute(request.method, rawPath)');
+    expect(api).toContain('if (supplementalFamily)');
+    expect(api).toContain('POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64');
+    expect(api).toContain('btoa(decoded) !== encoded');
+    for (const name of [
+      'ROOM_PIN_KEYRING_JSON',
+      'RESERVATION_PII_KEYRING_JSON',
+      'WEB_PUSH_SUBSCRIPTION_KEYRING_JSON'
+    ])
+      expect(api).toContain(name);
+    expect(api).toContain('value === encoded');
+  });
   it('backfills existing Drive identities into the exact folder retirement barrier', async () => {
     const migration = await readFile(photoPurgeMigrationUrl, 'utf8');
     expect(migration).toContain('insert into private.photo_drive_folder_bindings(operation_id,folder_registry_id)');
@@ -226,7 +269,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']room_candle_session_hard_expiry["']/
+      /expectedMigrationName\s*=\s*["']post_approval_room_issue_ledger["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);

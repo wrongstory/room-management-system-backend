@@ -1,5 +1,27 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 2026-10-07 #336 정식 source 등록 후보
+
+최신31차: 종결 GET/list 보완 후 Node2,524·SQL5,568·fresh111·실제110→111 upgrade·18경합·
+전체 Edge PASS(기본18,563,363/후보19,185,148 bytes). 독립 기능 재QA189 및 마지막 테스트
+fixture 보완 후 API46 및 전체 Node2,524 PASS. exact9 baseline PASS, raw strict FAIL9 유지.
+최종 증거 독립 QA PASS(미해결 P0/P1/P2 없음). 변경 범위 확정·PR/CI·dev/운영은 후속이며
+아래 표는30차 당시 상태다. [최신 근거](./POST_APPROVAL_ROOM_ISSUE_REPORT.md).
+
+| 구분 | 현재 상태 |
+| --- | --- |
+| 최종 독립 QA | 보완 필요: 종결 상태 GET/list 누락 미해결; #400 lock 검사 frozen 수정·독립 재QA PASS. 아래 PASS는29차 실행 증거 |
+| 기준 | dev ac8c775/110개 + 별도 #336 미게시 후보111개 |
+| 기본 Fastify/Edge 연결 | 신규 신고·증빙·관리자 인계11개 operation 연결; 전용 키와 provider lazy 구성 |
+| 전역 source Swagger | 150 paths /162 operations /335 deduplicated safe error codes; 신규 상태 `source-registered-not-deployed` |
+| 애플리케이션 | ci:quality 99파일/2,517 PASS; 신규 lint warning2건 제거 후 전체 재검증 PASS, 기존 info18 |
+| 전체 Edge | #400 lock 분리·후보 import-map 보완 후 전체 exit0 PASS: 기본18,550,494 bytes·별도 후보19,171,562 bytes·raw65/기존491/생성본65 |
+| 전체 DB | 첫 aggregate/SQL FAIL 이력 보존; 기존18–27 분할 재실행 및 신규110→111 upgrade PASS; 전체 SQL88파일/5,560·static·KST145·전체11경합·fresh111·exact9 baseline PASS |
+| 원격·운영 | commit/push/PR·dev 병합·release/운영·hosted Swagger/Pages·실제 프런트 UAT 미완료 |
+
+현재 운영 기능은 새 source 수치로 승격하지 않는다. [신규 API 인계](./FRONTEND_API_INTEGRATION.md),
+[실행 증거/미완료 gate](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)를 따른다. 아래는 과거 기록이다.
+
 > 2026-10-06 현재: #318/PR321·#330/PR337 dev 병합 뒤 `109d6b7`에 #332를 통합한110 migrations/OpenAPI140 paths·151 operations 후보다. 아래86/132·142 등 이전 숫자는 과거 checkpoint이며 [현재 검증·남은 gate](./ADMIN_REPORT_READ.md)를 우선한다. 운영·프런트 배포 완료는 아니다.
 
 > 최신 #330 검증: migration108/API139 paths150 operations 후보는 Node1826·Edge490·Python95/codegen·전체27 upgrade/SQL5266·static/KST145·전체10경합/최종fresh·승인 exact9 baseline PASS다. raw strict FAIL9를 유지하고 최종 staged QA·새CI·dev/운영은 후속이다. 아래 진행 중 기록과 [현재 증거](./ROOM_CANDLES_330.md)를 구분한다.
