@@ -2,6 +2,13 @@
 
 ## 2026-10-07 최신 실행 checkpoint
 
+#336/PR401은 dev f1d1f6d에 보호 squash 완료, #336/#400 source/dev 종료다.
+source0cc368c·CI merge·dev tree6e7873a3b4298df7978097f28c9953302dad9f33 동일,
+CI37579027245 application/migration PASS와 독립 QA·미해결 리뷰0을 확인했다.
+운영 미반영이며 다음은 #396 PR399 진단 foundation의 최신 dev 통합·전체 보존/삭제 설계다.
+로컬111 재대조는183관계/FK474/trigger333·누락0이지만 review125/mixed10은 여전히
+후속 검토이고 실제 초기화는 비활성이다. 아래31차의 미병합 문구는 당시 기록이다.
+
 최신은 [#336 31차 checkpoint](./POST_APPROVAL_ROOM_ISSUE_REPORT.md#31차-checkpoint--2026-10-07-종결-조회-보완과-전체-재검증)다.
 종결 GET/list 필드 보완 후 Node2,524·SQL5,568·fresh111·110→111 upgrade·18경합·전체 Edge가
 PASS다. 독립 기능 재QA189 PASS이며 마지막 mock 보완 뒤 API46 PASS다. 후보 번들19,185,148 bytes.
