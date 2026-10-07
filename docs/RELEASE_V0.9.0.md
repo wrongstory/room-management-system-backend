@@ -10,6 +10,11 @@ Swagger 인계를 우선하고, 전체 후속 내부 검증·백업/복원·DB �
 백업 없이 진행하므로 이번 작업의 검증된 복구 사본은 없으며, DB 변경 뒤 단순 API rollback이
 전체 복구를 보장하지 않는다. 데이터 삭제/변환 위험이 드러난 작업은 따로 중단·보고한다.
 
+추가 사용자 결정: 개발 단계마다 로컬 전체 migration/reset/upgrade를 반복하지 않는다.
+중간에는 변경 기능·타입·빌드·독립 QA를 검증하고, 최종 통합 후보의 필수 migration CI를
+배포 검증 근거로 사용한다. 운영 pending migration은 최종 한 번의 배포 절차에서 적용한다.
+이는 기존 migration 파일·적용 이력을 합치거나 필수 CI를 삭제/우회한다는 뜻이 아니다.
+
 ## 후보와 실제 운영의 구분
 
 - 출발 dev: `8bdaec35cb845426173ec23941824785445f5e1a`.
@@ -53,12 +58,15 @@ B05 홈 과거 주급/검수 대기 재구성과 B06 수동 완료는 이 배포
    사진 생성 파일2개와 manifest는 기존 생성기로 재생성·동일성을 확인했다.
    main-only `docs/RELEASE_V0.7.1.md`를 원본 blob 그대로 보존한다.
 2. #376 배포 차단 보완 통합: 운영의 검수 목록/개발자 catalog 함수는 알려진 CRLF 본문이다.
-   현재 후보의 정적 경고 보완 migration은 raw LF 지문만 받아 이 상태에서 실패한다.
+   보완 전 정적 경고 migration은 raw LF 지문만 받아 이 상태에서 실패했다.
    2026-10-07 원격 read-only raw/LF MD5 재확인 결과는 #376의 알려진 두 쌍과 일치했다.
    검증된 좁은 호환 보완만 반영하며 지문 검사를 제거하거나 운영 함수를 미리 수정하지 않는다.
    최신 dev 통합 source83e7122를 PR377에 정상 push했다. 로컬 Node2664·SQL5572·fresh111·
    CRLF4조합/15거부/실제 원자 rollback·#336 upgrade·Edge·독립QA PASS다.
-   CI37603160916 application PASS/migration PENDING이며 아직 dev/release 통합 전이다.
+   CI37603160916 application/migration 모두 PASS, 독립 QA·미해결 리뷰0·보호 규칙 확인 후
+   PR377을 dev `bec3dbe1ea964782510a5c43fe1670875a8a033e`로 squash했다.
+   source83e7122와 dev tree는 동일하며, 이 release에 충돌 없이 정상 통합했다.
+   기존111개 순서·이름은 유지하며 remediation hash 한 개 외 SQL 변경은 없다.
 3. 최종 후보의 필수 CI·독립 QA, 운영 85→후보 migration 적용 가능성·기존 이력 보존 확인.
    새 범용 #378 실행기 전체 개발 완료를 임의 선행조건으로 추가하지 않는다. 기존 승인된
    적용 경로의 원자성·timeout·history/readback을 확인하고 불확실 결과에는 재실행하지 않는다.
@@ -85,5 +93,11 @@ B05 홈 과거 주급/검수 대기 재구성과 B06 수동 완료는 이 배포
   기존 release blob와 동일하고 main 문서1개만 추가된다. 필수 최종 QA/CI는 별도다.
 - 충돌 해소 후 `npm run ci:quality` 재실행: 105파일/2,663 tests·typecheck·build·
   secret/OpenAPI PASS. 독립 staged/doc QA도 PASS(P0/P1/P2=0), 미해결 충돌0이다.
+- 충돌 해소 sourcee2f703e의 CI37604470137 application/migration 모두 PASS.
+- #376 통합은 이미 검증된 dev와 동일한7파일이며 새 업무 기능/SQL 변경을 추가하지 않았다.
+  통합 후 quality105파일/2,664 tests·typecheck·build·secret/OpenAPI와 manifest5종 PASS다.
+  중간 로컬 DB 전체 실행은 반복하지 않았다. 독립 통합 QA109 PASS(P0/P1/P2=0),
+  코드/SQL/테스트/package/workflow의 dev 동일성과 기존 운영85 SQL 보존을 확인했다.
+  push 후 required CI는 최종 exact head에서 따로 확인한다.
 - 기존 #336/PR401·#396/PR399 필수 CI/독립 QA 이력은 각 PR에 보존한다.
-- release 통합·새 exact-head CI·운영 migration/API 배포·Swagger 갱신·사용자 UAT: 미완료.
+- 최종 exact-head CI·운영 migration/API 배포·Swagger 갱신·사용자 UAT: 미완료.
