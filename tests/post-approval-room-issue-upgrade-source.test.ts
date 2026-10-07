@@ -75,6 +75,20 @@ const files = (await readdir(migrationRoot)).filter(file => file.endsWith('.sql'
 const entries: UpgradeSourceEntry[] = await Promise.all(files.map(async file => ({ file,
   raw: await readFile(new URL(file, migrationRoot)), isFile: true, isSymbolicLink: false })));
 const source = validatePostApprovalUpgradeSource(manifest, entries);
+describe('#376 reviewed prefix transition', () => {
+  it('differs from the previous pinned prefix only in the unapplied remediation hash', () => {
+    const previous = structuredClone(manifest.migrations.slice(0, 110));
+    const remediation = previous.find(row => row.name === 'db_static_warning_remediation');
+    expect(remediation?.sha256).toBe('3a1e8ac07b23b04e5f4745f5a079d5bb9493e4bc6d07b0033d14905385c3338b');
+    if (!remediation) throw new Error('REMEDIATION_MISSING');
+    remediation.sha256 = '9f6eab7b1389b5c552ace273726533a69a1b0aebc6813090771b068d28f16dc8';
+    expect(createHash('sha256').update(JSON.stringify(previous)).digest('hex'))
+      .toBe('42bc765c49aa9bf5e31fd0ef775afc1182420a3eb73860c465d44eca51080c66');
+    expect(createHash('sha256').update(JSON.stringify(files.slice(0, 110).map((file, i) =>
+      ({ file, sha256: previous[i]?.sha256 })))).digest('hex'))
+      .toBe('508f635d1981de6f9a881ab5cc60c1188a152019094f8a23bc97ea369d0deaa0');
+  });
+});
 const plan = parsePostApprovalUpgradePlan(source.ledger);
 const clone = <T>(value: T): T => structuredClone(value);
 function get<T>(record: Record<string, T>, key: string): T {

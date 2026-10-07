@@ -1,6 +1,7 @@
 -- #363 / Decision #373 A: fix eight diagnostics without changing legacy RPC parameters.
 -- Applied migrations are immutable. Preserve existing OIDs, ACLs, attributes and ledgers.
 -- Read-only developer checks use the calling statement snapshot; command guards stay VOLATILE.
+-- #376: only the two observed, exact CRLF variants may canonicalize to their approved LF body.
 create function private.assert_active_developer_snapshot(p_actor_profile_id uuid)
 returns void
 language plpgsql
@@ -31,6 +32,7 @@ declare
   function_oid oid;
   old_source text;
   new_source text;
+  known_crlf_md5 text;
   definition text;
   old_fragment text;
   expected_count integer;
@@ -84,10 +86,21 @@ begin
     end if;
     select prosrc, pg_get_functiondef(oid) into strict old_source, definition
     from pg_proc where oid = function_oid;
-    if md5(old_source) <> patch.source_md5 then
-      raise exception 'DB_STATIC_REMEDIATION_SOURCE_DRIFT: %', patch.signature;
-    end if;
     new_source := old_source;
+    if md5(old_source) <> patch.source_md5 then
+      known_crlf_md5 := case patch.signature
+        when 'public.list_cleaning_inspections_page(uuid,uuid,timestamptz,uuid,integer)'
+          then 'a5105bb901c8f1f507965e9b04f52911'
+        when 'public.get_developer_room_catalog(uuid)'
+          then '62d346e27ad148f7f4807ac536e9197b'
+        else null
+      end;
+      new_source := replace(old_source, E'\r\n', E'\n');
+      if known_crlf_md5 is null or md5(old_source) <> known_crlf_md5 or
+        md5(new_source) <> patch.source_md5 or position(E'\r' in new_source) <> 0 then
+        raise exception 'DB_STATIC_REMEDIATION_SOURCE_DRIFT: %', patch.signature;
+      end if;
+    end if;
     for replacement in select value from jsonb_array_elements(patch.replacements)
     loop
       old_fragment := replacement ->> 0;

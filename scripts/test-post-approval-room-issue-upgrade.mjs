@@ -17,11 +17,12 @@ const manifestPath = join(root, 'supabase', 'migration-manifest.dev.json');
 const migrationPattern = /^(\d{14})_([a-z0-9_]+)\.sql$/;
 const temporaryPrefix = 'post-approval-room-issue-upgrade-';
 const baselineVersion = '20261005011912', ledgerVersion = '20261005023103';
-// dev ac8c775: SHA256(JSON.stringify(the exact ordered 110 manifest records)).
-export const POST_APPROVAL_UPGRADE_PREFIX_SHA256 = '42bc765c49aa9bf5e31fd0ef775afc1182420a3eb73860c465d44eca51080c66';
-// dev ac8c775: SHA256(JSON.stringify(ordered {file,sha256} pairs)).
+// dev8bdaec3 + #376: only unapplied db_static_warning_remediation changes.
+// SHA256(JSON.stringify(the exact ordered 110 manifest records)).
+export const POST_APPROVAL_UPGRADE_PREFIX_SHA256 = '607b6a288718b250a74319027a4b63ba43dd47212c7fc8fec1f7985a1e5de6d5';
+// Same reviewed prefix: SHA256(JSON.stringify(ordered {file,sha256} pairs)).
 // Manifest records omit versions; this independently pins every filename too.
-export const POST_APPROVAL_UPGRADE_FILE_PREFIX_SHA256 = '508f635d1981de6f9a881ab5cc60c1188a152019094f8a23bc97ea369d0deaa0';
+export const POST_APPROVAL_UPGRADE_FILE_PREFIX_SHA256 = 'c2d8a88d2d458fc7ae185fbbb4f358c12a5074fb96493aeb77a638070b6d90b9';
 export const POST_APPROVAL_UPGRADE_TABLES = Object.freeze([
   'private.post_approval_room_issue_drafts', 'private.post_approval_room_issue_draft_revisions',
   'private.post_approval_room_issue_reports', 'private.post_approval_issue_collections',
