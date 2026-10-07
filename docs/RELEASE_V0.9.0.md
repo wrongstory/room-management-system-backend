@@ -48,12 +48,17 @@ B05 홈 과거 주급/검수 대기 재구성과 B06 수동 완료는 이 배포
 ## 배포에 직접 필요한 남은 작업
 
 1. main의 기존 hotfix와 운영 문서를 보존하며 누적 squash 이력의 병합 충돌 해소.
-   현재 merge-tree 사전 검사에서 충돌을 확인했으며 실제 merge는 아직 하지 않았다.
-   main-only `docs/RELEASE_V0.7.1.md`를 반드시 보존한다.
+   실제 정상 merge에서 발생한121개 충돌을 파일별 이력 근거로 해소했다. 각 main blob가
+   dev 이력에 존재함을 전부 확인했고, 해소 결과121개는 기존 릴리스 HEAD와 정확히 같다.
+   사진 생성 파일2개와 manifest는 기존 생성기로 재생성·동일성을 확인했다.
+   main-only `docs/RELEASE_V0.7.1.md`를 원본 blob 그대로 보존한다.
 2. #376 배포 차단 보완 통합: 운영의 검수 목록/개발자 catalog 함수는 알려진 CRLF 본문이다.
    현재 후보의 정적 경고 보완 migration은 raw LF 지문만 받아 이 상태에서 실패한다.
    2026-10-07 원격 read-only raw/LF MD5 재확인 결과는 #376의 알려진 두 쌍과 일치했다.
    검증된 좁은 호환 보완만 반영하며 지문 검사를 제거하거나 운영 함수를 미리 수정하지 않는다.
+   최신 dev 통합 source83e7122를 PR377에 정상 push했다. 로컬 Node2664·SQL5572·fresh111·
+   CRLF4조합/15거부/실제 원자 rollback·#336 upgrade·Edge·독립QA PASS다.
+   CI37603160916 application PASS/migration PENDING이며 아직 dev/release 통합 전이다.
 3. 최종 후보의 필수 CI·독립 QA, 운영 85→후보 migration 적용 가능성·기존 이력 보존 확인.
    새 범용 #378 실행기 전체 개발 완료를 임의 선행조건으로 추가하지 않는다. 기존 승인된
    적용 경로의 원자성·timeout·history/readback을 확인하고 불확실 결과에는 재실행하지 않는다.
@@ -76,6 +81,9 @@ B05 홈 과거 주급/검수 대기 재구성과 B06 수동 완료는 이 배포
 - 릴리스 범위 문서 추가 뒤 `npm run ci:quality`: PASS, 2,663 tests/typecheck/build,
   secret scan/OpenAPI 포함. 기존 lint info18건은 오류가 아니다.
 - 독립 read-only 충돌 감사: main727파일 중605개 동일·121개 후속 변경·main-only 문서1개.
-  기존85 migration 및 PIN/Samsung 사진 핵심 hotfix 보존 확인. 실제 충돌 해소·전체 QA는 후속.
+  기존85 migration 및 PIN/Samsung 사진 핵심 hotfix 보존 확인. 실제 해소 뒤121개 모두
+  기존 release blob와 동일하고 main 문서1개만 추가된다. 필수 최종 QA/CI는 별도다.
+- 충돌 해소 후 `npm run ci:quality` 재실행: 105파일/2,663 tests·typecheck·build·
+  secret/OpenAPI PASS. 독립 staged/doc QA도 PASS(P0/P1/P2=0), 미해결 충돌0이다.
 - 기존 #336/PR401·#396/PR399 필수 CI/독립 QA 이력은 각 PR에 보존한다.
 - release 통합·새 exact-head CI·운영 migration/API 배포·Swagger 갱신·사용자 UAT: 미완료.
