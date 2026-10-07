@@ -1,5 +1,46 @@
 # 백엔드 서버 설계
 
+## #336 역사 접근과 신규 신고의 상태 분리 (source 등록·운영 미배포)
+
+2026-10-07 최신 상태: dev `ac8c775` 기반111 migration 후보에 신규11 operation을 기본
+Fastify/Edge 및 source Swagger150 paths/162 operations로 연결했다. 영속 인계 키의
+lazy 구성과 로컬 전체 SQL·Edge·동시성 검증 및 최종 독립 QA를 완료했다. PR/CI·dev 병합 및
+운영 반영은 아직 미완료다. 아래 원본 후보의 미등록 설명은 과거 검증 이력이며 현재
+[31차 checkpoint](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)를 우선한다.
+
+private source authority는 기존 submission/attempt/assignment snapshot provenance를 읽는다.
+historical-access 검사는 기존 사건의 source/draft recovery/list/report/content/admin close에
+사용하며 반려·대체만으로 차단하지 않는다. 신규 draft/finalize/upload는 별도의 생성 상태
+검사를 유지한다. content의 보존 만료·delete barrier와 close의 admin-only CAS/receipt는 유지한다.
+메이드 source 접근은 본인의 실제 notified assignment 이력을 DB에서 확인하며 현재 담당·
+담당 종료·경과 일수만으로 막지 않는다. 과거 이력은 현재 PIN/수행/지급 권한을 부여하지 않는다.
+
+관리자 공동 draft 조회/save/finalize는 `(source_submission_id, client_report_id)` 유일 identity를
+사용한다. draft creator는 불변이며 memo revision은 실제 actor, 최종 report는 draft creator와
+실제 reporter를 별도 FK로 보존한다. actor별 receipt·CAS·seal·live session은 유지한다.
+관리자는 다른 작성자의 draft에도 본인 admission/permit으로 새 사진을 추가할 수 있다.
+업로드 실제 actor와 draft creator는 분리하며, admit/begin은 최초 admission actor를 검사한다.
+`get`은 활성 관리자가 다른 관리자의 operation 상태·leaseVersion CAS를 안전하게 읽는 예외다.
+조회는 executor·lease·fence·upload state를 변경하지 않고 역사 접근 검사를 사용하므로 원 제출의
+반려·대체 후에도 가능하다. 메이드는 본인 draft/current executor 제한을 유지한다.
+실제 claim/write/accept 및 compensation/delete는 현재 executor와 draft 접근 권한·신규 source
+상태·fresh session·fence를 계속 검사한다. 읽기 공유는 실행 인계나 provider I/O 허가가 아니다.
+역할 변경 뒤 permit/receipt 재사용도 재검증한다.
+명시적 관리자 인계 DB 후보는 최초 admission actor와 현재 executor를 구별한다.
+불변 handover 원장·lease CAS·새 fence는 한 transaction이며 이전 executor의 mutation과
+compensation은 차단한다. 원 admission과 현 실행자의 in-flight를 함께 제한하되 storage
+reservation을 복제하지 않는다. source에 등록된 인계 service adapter는 인증 actor의 독립 command를
+RPC에 연결하고 서버 전용 고정 키 HMAC으로 재시도 fence를 보존한다. 키는 완료 receipt를
+포함한 재생 수명 동안 유지해야 한다. 서버 내부 inspect 복구는 기존 provider identity만
+확인하며 current executor의 same-fence claim으로 만료 lease를 상한8 안에서 재획득한다.
+receipt는 원 인계 기록을 보존하며 같은 fence의 최신 lease projection을 재생할 수 있다.
+과거 원본 #336 후보의 report7·증빙/인계4 Edge 동작은 명시 factory와 기존 API 선택 hook으로
+조합 검증됐고, 영속32-byte 인계 키를 명시 인자로만 받는다. 원본·생성본 각각59건 및
+후보 번들18,147,616 bytes가 PASS다. 검토 manifest/입력 SHA·라이선스를 보존하고
+checksum-pinned 사진 자산을 후보 검사 전에 준비한다. default 운영 route는 활성화하지
+않았다. 이 결과는 최신 dev 통합본의 PASS가 아니며 정식 runtime 키 구성·API/Swagger 등록·
+최신 dev 및 실제 DB 전체 통합은 후속이다. [실제 검증·미완료 범위](./POST_APPROVAL_ROOM_ISSUE_REPORT.md).
+
 > 2026-10-06 현재: #318/PR321과 #330/PR337은 required CI·독립 QA 후 dev에 병합됐다. #332는 `dev@109d6b7` 통합110개/OpenAPI140 paths·151 operations 후보이며 제출 전 실제 등록 신고의 관리자 조회만 추가한다. 아래 이전 수치와 후보 설명은 각 과거 checkpoint다. 현재 검증·남은 gate는 [#332 기록](./ADMIN_REPORT_READ.md)을 따른다. 운영 배포 완료는 아니다.
 
 ## #332 등록 신고 조회 후보

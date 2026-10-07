@@ -13,7 +13,7 @@ import {
 } from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "room_candle_session_hard_expiry";
+export const expectedMigrationName = "post_approval_room_issue_ledger";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -66,6 +66,7 @@ const secretConfigurationAllowlist = [
   "GOOGLE_DRIVE_REFRESH_TOKEN",
   "GOOGLE_DRIVE_ROOT_FOLDER_ID",
   "PHOTO_PURGE_INVOKE_SECRET",
+  "POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64",
   "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
   "WEB_PUSH_SUBSCRIPTION_KEY_VERSION",
   "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
