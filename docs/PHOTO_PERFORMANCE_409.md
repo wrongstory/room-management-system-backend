@@ -54,3 +54,19 @@ Fastify body parser 이전 수신, 인증, 응답 전송, 브라우저 준비/�
 `npm run edge:check` PASS(492 + 번들 runtime 65 tests, 최종 번들 19,206,149 bytes),
 Python business OpenAPI codegen PASS 및 pytest 102 PASS. 독립 QA 관련 105 tests PASS,
 미해결 P0/P1/P2 없음. 실제 DB 검증/운영 성능/UAT는 NOT RUN이며 migration/SQL 변경은 없다.
+
+### 최신 dev 통합 검증 (2026-10-09)
+
+`dev@05d163d`(#421)를 원 PR 브랜치에 병합해 재검증했다. 사진 기능 코드는
+원 PR과 같으며, 최신 dev 대비 migration/SQL/manifest 변경은 없다.
+
+- `npm run ci:quality`: PASS, 107files/2693tests 및 typecheck/build. 기존 lint info20.
+- `npm run edge:check`: PASS, 최종 번들 19,242,386bytes.
+- Python `check_business_openapi_codegen.py`: PASS. 기존 binary media/handover 생성기 경고는 남으며 모든 경로 자동 생성 성공을 의미하지 않는다.
+- Python `pytest`: 102 PASS.
+- 독립 QA: 사진105 + 인덱스 통합145, 총250tests PASS; P0/P1/P2 없음.
+- 로컬 DB reset/전체 SQL 재실행: NOT RUN. #421에서 검증·병합된 SQL과 동일하며 이번 통합의 원격 필수 migration CI는 별도로 확인한다.
+- 운영 미반영. 최신 통합 commit의 필수 CI 확인 전 병합하지 않고, 운영 배포 확인 전 프런트 snapshot 옵션을 켜지 않는다.
+
+#410의 미완료 operation nullable 스키마 불일치는 기존 독립 결함으로 남는다.
+#411 thumbnail/안전한 병렬 업로드는 이번 옵션과 분리한다.
