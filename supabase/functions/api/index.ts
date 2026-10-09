@@ -582,12 +582,13 @@ export async function handleApiRequest(
           "요청한 API 경로를 찾을 수 없습니다.",
         );
       }
-      const service = (dependencies.photoService ?? createPhotoService)(
+      let service = (dependencies.photoService ?? createPhotoService)(
         clients,
       );
       if (photo.kind === "content") {
         actor = await dependencies.authenticateRequest(request, clients);
         requirePasswordChanged(actor);
+        service = service.withTiming();
         const result = await service.content(request, {
           profileId: actor.profileId,
           sessionId: verifiedRequestSessionId(request),
@@ -597,10 +598,16 @@ export async function handleApiRequest(
         for (const [key, value] of Object.entries(corsHeaders)) {
           result.headers.set(key, value);
         }
+        result.headers.set("server-timing", service.timingHeader() ?? "");
+        result.headers.set(
+          "access-control-expose-headers",
+          "Content-Disposition, Server-Timing",
+        );
         return result;
       }
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      service = service.withTiming();
       const context = {
         profileId: actor.profileId,
         sessionId: identity.sessionId,
@@ -626,7 +633,11 @@ export async function handleApiRequest(
         : photo.kind === "slots"
         ? await service.slots(request, context, photo.attemptId)
         : await service.status(request, context, photo.operationId);
-      return jsonResponse(result, 200, corsHeaders);
+      return jsonResponse(result, 200, {
+        ...corsHeaders,
+        "server-timing": service.timingHeader() ?? "",
+        "access-control-expose-headers": "Server-Timing",
+      });
     }
 
     // 늦은 기록 수신은 수행 권한이 아니다. 이 단일 경로만 3-state identity를 검증한 뒤 DB에서 lease를 다시 검사한다.

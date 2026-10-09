@@ -2,6 +2,11 @@
 
 상태: 개발 후보, 운영 미반영. #414 중 HTTP/Auth 왕복 감소 단계이며 반복 DB 집계 제거는 후속이다.
 
+2026-10-10 최신 사용자 조정은 가능일 누락 방지 #427을 우선하고 사진 정상 UAT는 별도로
+진행하며, 공통 계측 PR417·이 PR418·배정 조회 PR419를 통합해 릴리스하는 순서다.
+프런트 e2b95d8/DOCS33은 첫 페이지 우선 표시·단건 최대3병렬을 이미 구현했다고 인계했다.
+따라서 아래 묶음 조회는 그 프런트 개선을 대체·중복 구현하지 않고 배포 후 연결할 추가 API다.
+
 ## 프런트 계약
 
 - `GET /v1/payroll/remittance-markers?weekStart=2026-09-21&maidProfileIds=<uuid>,<uuid>`
@@ -58,3 +63,17 @@ DB/migration/환경변수 변경 없음. dev PR과 필수 CI 통과 후 별도 �
   최종 후보 포함 번들 19,208,072 bytes, 20,000,000 bytes 미만).
 - DB reset/실DB 경합/운영 성능 측정: NOT RUN. SQL/쓰기 로직 변경 없음.
 - #414는 후속 집계 계측이 남으므로 이번 PR에서 종료하지 않는다.
+
+## 최신 dev 통합 checkpoint (2026-10-10)
+
+- dev `5787158`의 사진 snapshot/timing·nullable·클라이언트 검사를 보존해 통합했다.
+  Python codegen의 사진 roundtrip과 묶음 CSV 검사를 둘 다 유지했다.
+- `npm run ci:quality`: PASS, Node 2733건 및 secrets/OpenAPI/lint/typecheck/build.
+- `npm run edge:check`: PASS, Edge 497 + 보고 runtime 65건,
+  후보 포함 bundle 19,263,451 bytes (상한 20,000,000 미만).
+- Python 변경 파일 ruff check/format 및 `mypy src tests scripts`: PASS.
+- 독립 QA: Node 136 + Edge 84 = 220건 PASS, 생성 Edge 일치 PASS,
+  P0/P1/P2 차단 결함 없음. 실제 Python codegen·CSV 단일 query·사진8상태
+  roundtrip·템플릿6순열 PASS. 기존 binary/schema 생성 경고는 남아 있으며 신규 batch 경고는 없다.
+- 신규 SQL은 없으며 운영 DB 재적용/실계정 UAT/실측 성능 검증은 NOT RUN.
+- 최신 commit의 필수 CI를 다시 확인한 뒤에만 병합하며 현재 운영 기능으로 안내하지 않는다.
