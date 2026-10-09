@@ -6678,6 +6678,41 @@ export const openApiDocument = {
       PhotoUploadOperation: {
         type: "object",
         additionalProperties: false,
+        // Only pre-provider/uncertain operations may lack retention metadata.
+        // Keep the shared photo-item retention contract non-nullable.
+        allOf: [
+          {
+            if: {
+              properties: {
+                status: {
+                  enum: [
+                    "provider_succeeded",
+                    "accepted",
+                    "compensation_pending",
+                    "compensated",
+                  ],
+                },
+              },
+            },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword; value is data, not a callable thenable.
+            then: {
+              properties: {
+                retentionPolicy: photoRetentionProperties.retentionPolicy,
+                mediaAvailability: photoRetentionProperties.mediaAvailability,
+              },
+            },
+          },
+          {
+            if: { properties: { retentionPolicy: { type: "null" } } },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword; value is data, not a callable thenable.
+            then: { properties: { mediaAvailability: { type: "null" } } },
+            else: {
+              properties: {
+                mediaAvailability: photoRetentionProperties.mediaAvailability,
+              },
+            },
+          },
+        ],
         required: [
           "operationId",
           "objectId",
@@ -6747,6 +6782,18 @@ export const openApiDocument = {
               "호환 별칭입니다. 새 클라이언트는 expiresAt을 사용합니다.",
           },
           ...photoRetentionProperties,
+          retentionPolicy: {
+            anyOf: [photoRetentionProperties.retentionPolicy, { type: "null" }],
+            description:
+              "reserved/reconciliation_pending에서 아직 보존 메타데이터가 없으면 null. mediaAvailability와 함께 null이며 저장 후에는 기존 정책 enum을 유지합니다.",
+          },
+          mediaAvailability: {
+            anyOf: [photoRetentionProperties.mediaAvailability, {
+              type: "null",
+            }],
+            description:
+              "보존 메타데이터가 없는 미완료 operation에서만 null. 업로드 완료나 삭제 성공을 뜻하지 않습니다.",
+          },
           compensationAllowed: {
             type: "boolean",
             description:
