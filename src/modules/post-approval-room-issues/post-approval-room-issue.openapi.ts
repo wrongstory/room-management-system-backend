@@ -39,8 +39,9 @@ const keyParameter = { name: 'Idempotency-Key', in: 'header', required: true,
   schema: { type: 'string', minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' } } as const;
 const base = POST_APPROVAL_ROOM_ISSUE_BASE_PATH.replace(':sourceSubmissionId', '{sourceSubmissionId}');
 const common = { tags: ['Post-approval Room Issues'], security: [{ bearerAuth: [] }], 'x-required-roles': ['admin', 'maid'],
-  'x-implementation-status': 'source-registered-not-deployed',
-  description: '활성·비밀번호 변경 완료 업무 관리자 또는 본인 실제 통보 배정 이력이 있는 메이드만 접근한다. 메이드는 원 수행 여부와 무관하게 같은 target의 본인 실제 통보 배정 이력이 필요하며 original_performer/notified_assignee는 응답 ownership 구분이지 별도 접근 권한이 아니다. DB가 매 응답마다 actor/session/source에 묶어 확인하며 내부 근거는 공개 응답과 저장된 처리 결과에 포함하지 않는다. 운영 배포 전 후보 계약이다. 7일은 신고 마감이 아니며 현재 객실·검수·수익·주급을 변경하지 않는다.' } as const;
+  'x-implementation-status': 'deployed',
+  'x-deployed-release': 'v0.9.0',
+  description: '활성·비밀번호 변경 완료 업무 관리자 또는 본인 실제 통보 배정 이력이 있는 메이드만 접근한다. 메이드는 원 수행 여부와 무관하게 같은 target의 본인 실제 통보 배정 이력이 필요하며 original_performer/notified_assignee는 응답 ownership 구분이지 별도 접근 권한이 아니다. DB가 매 응답마다 actor/session/source에 묶어 확인하며 내부 근거는 공개 응답과 저장된 처리 결과에 포함하지 않는다. v0.9.0에서 운영 배포된 계약이며 실제 업무 UAT 완료를 뜻하지 않는다. 7일은 신고 마감이 아니며 현재 객실·검수·수익·주급을 변경하지 않는다.' } as const;
 
 /** Registered source fragment. Hosted API/Swagger promotion is a separate release gate. */
 export const postApprovalRoomIssueOpenApiFragment = {
@@ -59,7 +60,7 @@ export const postApprovalRoomIssueOpenApiFragment = {
       description: `${common.description} 같은 source의 최신50개를 reportedAt DESC/reportId DESC로 조회한다. client query/cursor/version을 받지 않으며 새 날짜 마감/타 메이드/초안 권한을 만들지 않는다.`,
       responses: { '200': response(object({ source, reports: { type: 'array', maxItems: 50, items: reportRead } }), '같은 원 source의 불변 신고와 현재 종결 상태'), ...errors } },
       post: { ...common, operationId: 'finalizePostApprovalRoomIssueReport', summary: '새 증빙으로 추가 특이사항 신고 확정', parameters: [pathParameter, keyParameter],
-      description: `${common.description} 새 typed accepted evidence의 정확한 CAS·불변 seal·receipt·typed notification/outbox를 하나의 transaction으로 저장한다. source 등록이며 운영 DB·API 승격은 별도 릴리스 gate다.`,
+      description: `${common.description} 새 typed accepted evidence의 정확한 CAS·불변 seal·receipt·typed notification/outbox를 하나의 transaction으로 저장한다. 이후 수정본의 운영 반영은 별도 릴리스 절차를 따른다.`,
       requestBody: { required: true, content: { 'application/json': { schema: object({ clientReportId: id, expectedDraftRevision: positiveRevision,
         expectedEvidenceRevision: positiveRevision, memo, evidence }) } } },
       responses: { '201': response(object({ source, report }), 'typed evidence 검증·immutable seal·receipt/outbox commit'), ...errors } } },

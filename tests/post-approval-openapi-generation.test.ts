@@ -22,7 +22,7 @@ export const postApprovalOpenApiInventory = {} as const;
 `;
 
 describe('#336 data-only registered source OpenAPI generation', () => {
-  it('registers the exact 10 paths / 11 operations without claiming hosted deployment', () => {
+  it('registers the exact 10 paths / 11 operations with the verified deployed release', () => {
     const prepared = preparePostApprovalOpenApi();
     expect(prepared.fragment).toEqual(postApprovalOpenApiFragment);
     expect(prepared.errorCodes).toEqual(postApprovalOpenApiErrorCodes);
@@ -33,7 +33,8 @@ describe('#336 data-only registered source OpenAPI generation', () => {
     for (const [path, item] of Object.entries(postApprovalOpenApiFragment.paths)) {
       expect(openApiDocument.paths).toHaveProperty(path, item);
       for (const value of Object.values(item)) {
-        expect(value['x-implementation-status']).toBe('source-registered-not-deployed');
+        expect(value['x-implementation-status']).toBe('deployed');
+        expect(value['x-deployed-release']).toBe('v0.9.0');
         expect(value.security).toEqual([{ bearerAuth: [] }]);
         expect(value.summary).toMatch(/[가-힣]/);
         expect(value.description).toMatch(/[가-힣]/);
@@ -85,7 +86,8 @@ describe('#336 data-only registered source OpenAPI generation', () => {
     for (const policy of ['본인 초안 작성자·현재 실행자 조건을 모두 충족', '관리자는 안전한 상태·leaseVersion을 공동 조회',
       'rejected/superseded(반려·대체)되어도 조회 권한만 유지', '실제 인계·provider 쓰기 권한은 별도',
       '조회로 실행자·fence를 변경하지 않는다', '최신 session·role/status 권한 재검증']) expect(description).toContain(policy);
-    expect(status['x-implementation-status']).toBe('source-registered-not-deployed');
+    expect(status['x-implementation-status']).toBe('deployed');
+    expect(status['x-deployed-release']).toBe('v0.9.0');
   });
   it('documents actual notified assignment as the maid access basis, not original performance alone', () => {
     const source = postApprovalOpenApiFragment.paths['/v1/cleaning-history/submissions/{sourceSubmissionId}/supplemental-room-issues/source'].get;
@@ -104,7 +106,7 @@ describe('#336 data-only registered source OpenAPI generation', () => {
     if (mutation === 'wrong method') input.paths[firstPath] = { patch: source };
     if (mutation === 'missing idempotency') operation(input, 'savePostApprovalRoomIssueDraft').parameters = [];
     if (mutation === 'path parameter drift') source.parameters = [];
-    if (mutation === 'wrong status') source['x-implementation-status'] = 'deployed';
+    if (mutation === 'wrong status') source['x-implementation-status'] = 'source-registered-not-deployed';
     if (mutation === 'invalid response status') source.responses = { invalid: {} };
     if (mutation === 'wrong cache policy') source.responses = { '200': { headers: { 'Cache-Control': { schema: { const: 'public' } } } } };
     expect(() => preparePostApprovalOpenApi(input)).toThrow(/OpenAPI candidate/);

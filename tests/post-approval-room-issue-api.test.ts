@@ -164,16 +164,18 @@ describe('#336 isolated HTTP/RPC source slice (synthetic, not DB authorization)'
       expect(f.calls[0]?.args.p_evidence).toEqual(finalize.evidence);
     } finally { await f.app.close(); }
   });
-  it('registers typed seal/read/admin-closure source contracts without claiming a production release', () => {
+  it('registers typed seal/read/admin-closure contracts with the verified production release', () => {
     const entries = Object.values(postApprovalRoomIssueOpenApiFragment.paths);
     expect(entries).toHaveLength(6);
     for (const entry of entries) for (const operation of Object.values(entry)) {
-      expect(operation['x-implementation-status']).toBe('source-registered-not-deployed');
+      expect(operation['x-implementation-status']).toBe('deployed');
+      expect(operation['x-deployed-release']).toBe('v0.9.0');
       expect(operation['x-required-roles']).toEqual(operation.operationId === 'closePostApprovalRoomIssueReport' ? ['admin'] : ['admin', 'maid']);
       expect(operation.responses['503']).toBeDefined();
     }
     const operation = postApprovalRoomIssueOpenApiFragment.paths[base.replace(id(3), '{sourceSubmissionId}')]?.post;
-    expect(operation?.description).toContain('운영 DB·API 승격은 별도 릴리스 gate다');
+    expect(operation?.description).toContain('이후 수정본의 운영 반영은 별도 릴리스 절차를 따른다');
+    expect(operation?.description).not.toContain('source 등록이며');
     expect(operation?.description).toContain('CAS·불변 seal·receipt');
   });
   it('reads only exact source/report IDs and strips hidden fields', async () => {

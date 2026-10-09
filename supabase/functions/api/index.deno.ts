@@ -4,6 +4,83 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import type { PhotoService } from "../_shared/photo-service.ts";
 
+Deno.test("#406 PUT preflight preserves exact origins and all CAS headers without auth or DB", async () => {
+  const previous = Deno.env.get("CORS_ORIGINS");
+  const origins = [
+    "https://room-management-system-prod.vercel.app",
+    "https://synthetic-preview.example",
+  ];
+  Deno.env.set("CORS_ORIGINS", origins.join(","));
+  let calls = 0;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => {
+      calls++;
+      throw new Error("preflight must not create clients");
+    },
+    authenticateRequest: () => {
+      calls++;
+      throw new Error("preflight must not authenticate");
+    },
+  };
+  const headers =
+    "authorization,content-type,idempotency-key,if-draft-revision,if-evidence-revision,if-item-revision";
+  try {
+    for (
+      const origin of [
+        ...origins,
+        "https://untrusted.example",
+        origins[0] + ".evil.example",
+      ]
+    ) {
+      const response = await handleApiRequest(
+        new Request("https://api.example/v1/payroll/remittance-marker", {
+          method: "OPTIONS",
+          headers: {
+            origin,
+            "access-control-request-method": "PUT",
+            "access-control-request-headers": headers,
+          },
+        }),
+        dependencies,
+      );
+      if (origins.includes(origin)) {
+        assert(response.status === 204, "allowed preflight");
+        assert(
+          response.headers.get("access-control-allow-origin") === origin,
+          "exact origin",
+        );
+        assert(
+          response.headers.get("access-control-allow-methods")?.split(",")
+            .includes("PUT"),
+          "PUT advertised",
+        );
+        for (const header of headers.split(",")) {
+          assert(
+            response.headers.get("access-control-allow-headers")?.split(",")
+              .includes(header),
+            header,
+          );
+        }
+        assert(
+          response.headers.get("vary") === "Origin",
+          "cache origin separation",
+        );
+      } else {
+        assert(response.status === 403, "unlisted origin rejected");
+        assert(
+          !response.headers.has("access-control-allow-origin"),
+          "no reflected untrusted origin",
+        );
+      }
+      await response.body?.cancel();
+    }
+    assert(calls === 0, "no auth or DB effects");
+  } finally {
+    if (previous === undefined) Deno.env.delete("CORS_ORIGINS");
+    else Deno.env.set("CORS_ORIGINS", previous);
+  }
+});
+
 Deno.test("candle HTTP routes allow maid minimal reads and writes without opening general room access", async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const clients = {

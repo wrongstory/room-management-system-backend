@@ -57,7 +57,8 @@ def check_post_approval_contract(document: dict[str, Any]) -> None:
             operation.get("operationId") != operation_id
             or operation.get("security") != [{"bearerAuth": []}]
             or operation.get("x-required-roles") != roles
-            or operation.get("x-implementation-status") != "source-registered-not-deployed"
+            or operation.get("x-implementation-status") != "deployed"
+            or operation.get("x-deployed-release") != "v0.9.0"
             or operation.get("tags") != ["Post-approval Room Issues"]
         ):
             raise RuntimeError("#336 정식 source 등록/권한 계약이 잘못됐습니다: " + operation_id)
