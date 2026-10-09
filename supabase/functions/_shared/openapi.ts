@@ -503,6 +503,14 @@ const photoPathId = (name: string) => ({
   required: true,
   schema: { type: "string", format: "uuid" },
 });
+const includePhotoSlotsParameter = {
+  name: "includePhotoSlots",
+  in: "query",
+  required: false,
+  schema: { type: "boolean", enum: [true] },
+  description:
+    "선택적 true만 허용. accepted 후 같은 actor/session으로 조회한 photoSlots를 반환합니다. 조회 실패·배정 변경이면 null이며 accepted를 취소하지 않습니다. null/미지원은 GET photo-slots로 복구하고 새 key로 업로드하지 않습니다. snapshot은 별도 조회 시점이며 다음 CAS 성공 보장이 아닙니다.",
+};
 function photoOperation(
   operationId: string,
   summary: string,
@@ -519,7 +527,14 @@ function photoOperation(
       "200": {
         description:
           "최신 DB 권한과 상태를 검증한 안전한 결과. Drive ID·locator·OAuth·원문 hash는 반환하지 않습니다.",
-        headers: { "Cache-Control": noStoreHeader },
+        headers: {
+          "Cache-Control": noStoreHeader,
+          "Server-Timing": {
+            schema: { type: "string" },
+            description:
+              "인증된 성공 응답의 요청별 고정 단계 duration(ms). photo_total은 인증 후 서비스 범위이며 전체 사용자 대기시간이 아닙니다. 사용자/파일/Drive ID·URL·비밀정보는 포함하지 않습니다.",
+          },
+        },
         content: {
           "application/json": {
             schema: { $ref: `#/components/schemas/${schema}` },
@@ -1189,11 +1204,12 @@ export const openApiDocument = {
           },
         },
         description:
-          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 JPEG/WebP/HEIC/HEIF 원문 최대 5242880 bytes(5MiB)를 허용하고 초과 byte에서 취소합니다. 원본 magic·전체 decode·자원상한을 검사하고 방향 보정·EXIF 등 metadata 제거·축소/품질 조정 후 JPEG/WebP 최종본 307200 bytes(300KiB) 이하와 output decode/SHA를 다시 검증합니다. HEIC/HEIF는 JPEG로 저장합니다. assignmentId/assignmentRevision/expectedPhotoRevision의 3개 query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
+          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 JPEG/WebP/HEIC/HEIF 원문 최대 5242880 bytes(5MiB)를 허용하고 초과 byte에서 취소합니다. 원본 magic·전체 decode·자원상한을 검사하고 방향 보정·EXIF 등 metadata 제거·축소/품질 조정 후 JPEG/WebP 최종본 307200 bytes(300KiB) 이하와 output decode/SHA를 다시 검증합니다. HEIC/HEIF는 JPEG로 저장합니다. assignmentId/assignmentRevision/expectedPhotoRevision 및 선택 includePhotoSlots=true query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
         parameters: [
           photoPathId("attemptId"),
           photoPathId("slotId"),
           idempotencyHeader,
+          includePhotoSlotsParameter,
           {
             name: "assignmentId",
             in: "query",
@@ -1277,6 +1293,7 @@ export const openApiDocument = {
             photoPathId("slotId"),
             photoPathId("photoItemId"),
             idempotencyHeader,
+            includePhotoSlotsParameter,
             {
               name: "assignmentId",
               in: "query",
@@ -1437,6 +1454,11 @@ export const openApiDocument = {
               "검증 완료된 저장본 JPEG/WebP(최대 300KiB). 스마트폰 입력 원본은 저장하지 않으며 Drive 응답 header/Location/filename은 전달하지 않습니다.",
             headers: {
               "Cache-Control": noStoreHeader,
+              "Server-Timing": {
+                schema: { type: "string" },
+                description:
+                  "권한 재검증 성공 후 photo_db/photo_drive/photo_total의 duration(ms)만 제공.",
+              },
               "X-Content-Type-Options": { schema: { const: "nosniff" } },
               "Content-Disposition": {
                 description:
@@ -6595,7 +6617,7 @@ export const openApiDocument = {
           { type: "object", required: ["quotaWarning"] },
         ],
         description:
-          "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
+          "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. includePhotoSlots=true일 때만 photoSlots를 포함합니다. accepted 이외 또는 후속 조회 실패·배정 변경이면 null입니다. 재시도의 photoSlots는 새 조회 시점 결과이며 불변 receipt가 아닙니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
       },
       AttemptPhotoItem: {
         type: "object",
@@ -6656,6 +6678,41 @@ export const openApiDocument = {
       PhotoUploadOperation: {
         type: "object",
         additionalProperties: false,
+        // Only pre-provider/uncertain operations may lack retention metadata.
+        // Keep the shared photo-item retention contract non-nullable.
+        allOf: [
+          {
+            if: {
+              properties: {
+                status: {
+                  enum: [
+                    "provider_succeeded",
+                    "accepted",
+                    "compensation_pending",
+                    "compensated",
+                  ],
+                },
+              },
+            },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword; value is data, not a callable thenable.
+            then: {
+              properties: {
+                retentionPolicy: photoRetentionProperties.retentionPolicy,
+                mediaAvailability: photoRetentionProperties.mediaAvailability,
+              },
+            },
+          },
+          {
+            if: { properties: { retentionPolicy: { type: "null" } } },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword; value is data, not a callable thenable.
+            then: { properties: { mediaAvailability: { type: "null" } } },
+            else: {
+              properties: {
+                mediaAvailability: photoRetentionProperties.mediaAvailability,
+              },
+            },
+          },
+        ],
         required: [
           "operationId",
           "objectId",
@@ -6725,6 +6782,18 @@ export const openApiDocument = {
               "호환 별칭입니다. 새 클라이언트는 expiresAt을 사용합니다.",
           },
           ...photoRetentionProperties,
+          retentionPolicy: {
+            anyOf: [photoRetentionProperties.retentionPolicy, { type: "null" }],
+            description:
+              "reserved/reconciliation_pending에서 아직 보존 메타데이터가 없으면 null. mediaAvailability와 함께 null이며 저장 후에는 기존 정책 enum을 유지합니다.",
+          },
+          mediaAvailability: {
+            anyOf: [photoRetentionProperties.mediaAvailability, {
+              type: "null",
+            }],
+            description:
+              "보존 메타데이터가 없는 미완료 operation에서만 null. 업로드 완료나 삭제 성공을 뜻하지 않습니다.",
+          },
           compensationAllowed: {
             type: "boolean",
             description:
@@ -6734,6 +6803,13 @@ export const openApiDocument = {
             type: "boolean",
             description:
               "업로드 응답에서 필수. admission 기준 decimal10GB 이상 경고이며 raw 사용량은 노출하지 않습니다. 상태 조회에는 생략됩니다.",
+          },
+          photoSlots: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptPhotoSlots" }, {
+              type: "null",
+            }],
+            description:
+              "업로드 includePhotoSlots=true 전용. 기존 photo-slots GET과 같은 권한·projection. null이면 별도 GET fallback. 다음 변경은 snapshot의 최신 collection/item revision을 사용하며 409를 처리해야 합니다.",
           },
         },
       },
