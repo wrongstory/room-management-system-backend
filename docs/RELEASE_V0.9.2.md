@@ -3,8 +3,9 @@
 ## 승인 및 범위
 
 2026-10-09 사용자가 운영 배포를 승인했다. Issue #425로 추적한다.
-사진 #409/PR412, nullable 명세 #410/PR423, CI 오탐 #422/PR424를 필수 CI·독립 QA 후
-dev에 통합하고, 이미 dev에 병합된 #416/PR421 인덱스와 함께 release → main으로 승격한다.
+사진 #409/PR412에 nullable 명세 #410/PR423, CI 오탐 #422/PR424를 통합했다.
+필수 CI·독립 QA 후 dev에 통합하고, 이미 dev에 병합된 #416/PR421 인덱스와 함께
+release → main으로 승격한다. 각 수정의 원래 독립 QA 및 Draft PR 기록은 보존한다.
 v0.8.0 후보 및 백업/복원/초기화 후속, PR417~420의 별도 성능 개발은 보존·제외한다.
 기존 사용자 결정대로 최종 통합 CI를 사용하고 중간 로컬 DB 전체 재적용을 반복하지 않는다.
 
@@ -31,7 +32,12 @@ release/v0.9.2는 dev `05d163d`에서 만들었다. main과 정상 merge 시 충
 이는 사진 기능까지 합친 최종 release 검증을 대신하지 않는다.
 
 PR412의 과거 application FAIL은 Auth 테스트 오탐으로 기록하며 #424를 통합한 새 head로
-다시 검증한다. PR423/424 로컬 및 독립 QA는 PASS이며 원격 CI는 각 exact head로 확인한다.
+다시 검증한다. 통합 사진 후보 `14b1c7b`는 전체 2713tests/typecheck/build,
+Edge(최종 bundle19,247,463bytes), Python codegen/102tests,
+독립 QA9files/295tests PASS이며 미해결 P0/P1/P2는 없다.
+후보와 릴리스 CI는 동일 코드로 병행하되, dev 병합 및 릴리스 코드 일치 확인 전 main 병합을 금지한다.
+릴리스는 기존 main 문서7개 및 이 문서만 추가로 보존하고 후보와 코드·SQL·테스트가 동일하다.
+main 병합 전 최신 base 충돌/필수 check/미해결 리뷰를 다시 확인한다.
 최종 source·필수 CI·독립 QA·운영 결과는 #425와 release PR에 기록한다.
 
 ## 운영 적용 순서
