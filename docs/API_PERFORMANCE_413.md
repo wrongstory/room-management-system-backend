@@ -1,7 +1,12 @@
 # 전체 처리 속도 개선 — #413
 
-2026-10-09 사용자 승인 순서: 공통 계측 → 가능일·주급 요청 감소 → 배정 조회 통합 → 느린 SQL 개선 → 사진 썸네일.
+2026-10-09 최초 승인 순서: 공통 계측 → 가능일·주급 요청 감소 → 배정 조회 통합 → 느린 SQL 개선 → 사진 썸네일.
 현재 이 문서의 공통 계측은 source 후보이며 운영 적용이나 실제 속도 개선 완료를 뜻하지 않는다.
+
+최신 사용자 조정: 가능일 누락 방지 #427을 먼저, 사진 정상 UAT는 별도 트랙으로 진행하고
+#417/#418/#419를 최신 dev와 통합·릴리스한다. 드문 null을 운영 장애 유발로 강제 재현하지
+않으며 fixture와 실제 미검증을 구분한다. 사진 flag는 임의 활성화하지 않는다. 실제 측정 후
+#411을 추진한다. 현재 프런트 e2b95d8의 DOCS/32·33/#206·207에 이 순서를 인계했다.
 
 ## 1차 구현: 공통 handler 시간
 
@@ -31,17 +36,23 @@ cleaning-templates, photos, photo-uploads. 정확한 경로 구분자를 검사�
 
 | 순서 | 작업 | 추적 | 상태 |
 | --- | --- | --- | --- |
-| 1 | 공통 handler timing와 회귀 검사 | #413 | source 후보 |
-| 2 | 가능일 관리자 전체 조회 활용·첫 화면 핵심 데이터 우선 표시 | frontend #207 | 프런트 인계 |
-| 3 | 주급 marker 일괄 반환·상세 반복 집계 감소 | #414 | 설계/계측 후 구현 |
-| 4 | 배정 카드 hydration의 다중 DB 왕복 통합 | #415 | 설계/계측 후 구현 |
-| 5 | 객실/주급 실행계획과 인덱스·반복 계산 | #416 | 실행계획 미측정 |
-| 6 | private 썸네일·안전한 사진 병렬 계약 | #411 | 후속 |
+| 1 | 가능일 목록의 조용한 누락 방지 | #427 / PR428 | 로컬·독립 QA PASS, CI 대기·미배포 |
+| 별도 | 사진 지정 계정 정상 UAT·옵션 활성화 | frontend #206 | 백엔드 v0.9.2 배포, 실제 UAT/프런트 flag 후속 |
+| 2 | 공통 handler timing와 회귀 검사 | #413 / PR417 | 최신 dev 통합 후보 |
+| 3 | 주급 marker 일괄 반환 | #414 / PR418 | 기존 후보·새 통합 필요, 반복 DB 집계 제거는 후속 |
+| 4 | 배정 카드 hydration 대기 감소 | #415 / PR419 | 기존 후보·새 통합 필요, DB 왕복 통합은 후속 |
+| 반영됨 | 객실 이력 인덱스 2개 | #416 / PR421 | v0.9.2 반영, 운영 개선율 미측정 |
+| 5 | private 썸네일·안전한 사진 병렬 계약 | #411 | 측정 후 후속 |
 
-사진 선택 snapshot/단계 계측 #409/PR412는 별도 후보이며 이 PR에 섞지 않는다.
+사진 선택 snapshot/단계 계측 #409/PR412는 v0.9.2에 반영됐다. 이 PR의 최신 dev 통합은
+그 동작과 nullable/CORS·입력 검증을 보존하며 공통 api_total을 추가한다.
 과대 배정 확정의 전체 잠금 전 상한 #342와 중복 구현하지 않는다.
 
-## 프런트 확인 결과와 주의사항
+## 과거 프런트 확인 결과와 주의사항
+
+아래는 최초314f0d7 조사다. 최신 e2b95d8/PR210은 관리자 가능일 전체 조회, 주급 첫 페이지
+표시·단건 marker 최대3병렬·홈 단계별 표시를 구현/배포했다고 인계했다. 주급 batch는
+백엔드 미배포라 사용하지 않으며 사진 UAT와 가능일 완전성은 별도 후속이다.
 
 정본 repo dev `314f0d74288b8017ec3a902cc30cf149e77e550a`의 사진·조회 경로를 읽기 전용 조사했다.
 제품 가이드의 전체 정책 snapshot을 이 commit으로 교체하지 않는다.
@@ -63,8 +74,23 @@ SQL은 로컬 합성 자료의 EXPLAIN(ANALYZE,BUFFERS)로 확인하며 운영 m
 
 ## 실제 검증
 
-2026-10-09: `npm run ci:quality` PASS (2689 tests, secrets/OpenAPI/lint/typecheck/build),
+최초 후보 2026-10-09: `npm run ci:quality` PASS (2689 tests, secrets/OpenAPI/lint/typecheck/build),
 `npm run edge:check` PASS (493 tests + candidate runtime 65, bundle 19,199,664 bytes),
 독립 QA 96 tests 및 생성 원본 일치/diff 검사 PASS. 기존 clean baseline 2666 tests PASS.
 DB 검증/운영 성능 실측/Python 소비자 로컬 검증은 NOT RUN (DB/API 본문 계약 변경 없음).
 필수 GitHub CI·보호 규칙 확인과 운영 승격은 별도다.
+
+2026-10-10 최신 dev `5787158` 통합 후보:
+
+- `npm run ci:quality`: PASS, Node 2736건 및 secrets/OpenAPI/lint/typecheck/build.
+- `npm run edge:check`: PASS, Edge 493건 + 보고 runtime 65건,
+  후보 포함 bundle 19,254,485 bytes (20,000,000 bytes 미만).
+- `git diff --check` 및 staged diff 검사 PASS. 사진 snapshot/nullable와
+  photo/common timing·Content-Disposition/CORS 회귀를 함께 실행했다.
+- DB/reset/운영 계정 UAT·성능 실측은 NOT RUN. 최신 dev의 이미 적용된 migration을
+  통합했을 뿐 이 기능의 신규 SQL은 없으며, 운영 DB 재적용은 하지 않았다.
+- 독립 QA: Node 98 + Edge 27 = 125건 PASS, 생성 원본 일치 PASS,
+  변경 범위의 P0/P1/P2 결함 없음. Edge 두 파일 단독 최초 실행은 합성 환경값 누락으로
+  25 PASS/2 FAIL이었고, 다른 전체 테스트 파일에 의존하던 합성 설정을 명시 제공하자
+  동일 27건 PASS했다. 실제 키나 소스 수정은 사용하지 않았다.
+- 새 commit의 필수 원격 CI를 확인하기 전에는 병합 완료로 표시하지 않는다.

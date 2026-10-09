@@ -154,6 +154,17 @@ Deno.test("photo exact HTTP routes use verified latest active/limited identity a
         s.dependencies,
       );
       assert(response.status === 200, "own authorized safe metadata");
+      assert(
+        /photo_db;dur=\d+\.\d/.test(
+          response.headers.get("server-timing") ?? "",
+        ),
+        "request timing exposed only after authorized success",
+      );
+      assert(
+        response.headers.get("access-control-expose-headers") ===
+          "Server-Timing",
+        "browser header readable",
+      );
       const text = await response.text();
       assert(
         !/private_provider|session_id|claimDigest/.test(text),
@@ -172,7 +183,7 @@ Deno.test("photo exact HTTP routes use verified latest active/limited identity a
       assert(
         content.headers.get("access-control-expose-headers") ===
           "Content-Disposition, Server-Timing",
-        "authorized frontend can read disposition and common handler timing",
+        "authorized frontend can read disposition and photo/common timings",
       );
     }
   }
