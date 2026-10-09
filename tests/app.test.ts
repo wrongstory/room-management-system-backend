@@ -13,6 +13,27 @@ import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRe
 
 import type { PostApprovalRoomIssueModuleServices } from '../src/modules/post-approval-room-issues/post-approval-room-issue.module.js';
 
+describe('common business handler timing', () => {
+  it('measures successful authenticated responses and never trusts supplied timing headers', async () => {
+    const app = await buildApp({ env, services: services(), logger: false });
+    try {
+      const result = await app.inject({ method: 'GET', url: '/v1/rooms', headers: {
+        authorization: 'Bearer synthetic-token', 'server-timing': 'private-secret', origin: env.corsOrigins[0]!,
+      } });
+      expect(result.statusCode).toBe(200);
+      expect(result.headers['server-timing']).toMatch(/^api_total;dur=\d+\.\d$/);
+      expect(result.headers['access-control-expose-headers']).toContain('Server-Timing');
+      expect(result.headers['server-timing']).not.toContain('private-secret');
+      const denied = await app.inject({ method: 'GET', url: '/v1/rooms' });
+      expect(denied.statusCode).toBe(401);
+      expect(denied.headers).not.toHaveProperty('server-timing');
+      const unknown = await app.inject({ method: 'GET', url: '/v1/rooms/not/a/route' });
+      expect(unknown.statusCode).toBe(404);
+      expect(unknown.headers).not.toHaveProperty('server-timing');
+    } finally { await app.close(); }
+  });
+});
+
 describe('supplemental default app runtime', () => {
   const operationId = '10000000-0000-4000-8000-000000000001';
   const path = `/v1/post-approval-room-issue-evidence-uploads/${operationId}/handover`;

@@ -183,7 +183,7 @@ Deno.test("photo exact HTTP routes use verified latest active/limited identity a
       assert(
         content.headers.get("access-control-expose-headers") ===
           "Content-Disposition, Server-Timing",
-        "authorized frontend can read disposition and bounded timings",
+        "authorized frontend can read disposition and photo/common timings",
       );
     }
   }

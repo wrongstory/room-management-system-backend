@@ -54,12 +54,16 @@ PostgREST의 실제 row cap보다 결과가 많으면 조용한 부분 성공이
   실제 후보 bundle 19,222,261 bytes로 20,000,000 byte 한도 이내다.
 - 독립 QA: 소스·문서 검토와 Node 27/Edge 32 직접 재실행 PASS, P0/P1/P2 차단 결함 없음.
   SQL/schema/RLS 변경 0, 새 migration/reset/실제 운영 계정 UAT/실 DB 부하 검증은 NOT RUN.
-- exact-head 원격 CI·dev 병합·릴리스는 후속이다. source 후보이고 미배포다.
+- 2026-10-10 KST exact head `f985350`의 required application/migration CI
+  `37948265087` PASS. fresh DB·전체 upgrade/SQL·정적 baseline·KST·동시성 검사까지
+  CI에서 통과했고 미해결 리뷰0/독립 QA/보호 규칙 확인 후 PR428을 dev
+  `2f97cca92c434c0b4e9b8145da4863493ae179d5`에 squash 병합했다.
+  운영 cap·실계정 UAT·실제 성능 및 운영 배포는 여전히 미확인/미실행이다.
 
 ## 남은 작업
 
 - [x] 후보 전체 검증·독립 QA
-- [ ] PR/CI·dev 병합
+- [x] PR/CI·dev 병합 (#428, 2f97cca)
 - [ ] 명시적인 목록 pagination/total/cursor 후속 계약
 - [ ] 실제 PostgREST row cap 확인 또는 승인된 실제 계정의 완전성 확인
 - [ ] #417/#418/#419 최신 통합·릴리스
