@@ -6559,7 +6559,7 @@ export const openApiDocument = {
                 collectionRevision: {
                   anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
                 },
-                photoCount: { type: "integer", minimum: 0, maximum: 10 },
+                photoCount: { type: "integer", minimum: 0, maximum: 20 },
                 uploadStatus: {
                   type: "string",
                   enum: [

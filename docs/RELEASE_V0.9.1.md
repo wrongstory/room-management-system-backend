@@ -6,7 +6,9 @@
 v0.9.0은 보존하고 후속 patch release로 API와 Swagger만 갱신한다.
 release/v0.9.1은 최신 dev1a91ad8에서 시작해 main d9e053b의 기존 문서183줄을
 정상 merge로 보존했다. 최초 통합 tree는 main과 정확히 동일하다.
-PR407의 최신 필수 CI 통과 및 dev squash 후 그 dev를 통합해야 한다.
+PR407의 CI37862675635 application/migration PASS 및 독립 QA·미해결 리뷰0 확인 후
+dev3e91d88로 보호 squash했다. 그 최신 dev를 충돌 없이 정상 통합했다.
+런타임·SQL·테스트·생성 검사는 이 dev와 동일하며 릴리스 문서만 추가 보존한다.
 
 - Edge CORS PUT 허용. exact Origin allowlist, credentials, CAS/멱등성 헤더 유지.
 - AttemptPhotoSlots.photoCount 0..20 정합화. 실제 일반20/선택10/legacy1 제한 불변.
@@ -27,7 +29,7 @@ Auth 설정을 임의 변경하지 않는다. private deny-by-default RLS/no-pol
 ## 검증과 승격 절차
 
 1. PR407: Node2666, Python102, Edge, 독립 QA PASS. 최초 application CI 실패는
-   Python codegen 미배포 표기 누락으로 보완했고 새 exact-head CI를 확인한다.
+   Python codegen 미배포 표기 누락으로 보완했고 새 exact-head CI37862675635가 통과했다.
 2. dev 통합 후 release→main PR의 application/migration·독립 QA·보호 규칙·
    미해결 리뷰0과 기존 main 문서 보존을 확인한다. CI 우회 없음.
 3. 병합된 exact main에서 기존 runtime lock/static assets/verify_jwt=false를 유지해

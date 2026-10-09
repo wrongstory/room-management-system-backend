@@ -80,7 +80,8 @@ export function preparePostApprovalOpenApi(input: unknown = postApprovalRoomIssu
       if (typeof operation.summary !== 'string' || !/[가-힣]/.test(operation.summary)
         || typeof operation.description !== 'string' || !/[가-힣]/.test(operation.description)) throw new Error('OpenAPI candidate Korean integration guidance missing');
       if (JSON.stringify(operation.security) !== JSON.stringify([{ bearerAuth: [] }])
-        || operation['x-implementation-status'] !== 'source-registered-not-deployed'
+        || operation['x-implementation-status'] !== 'deployed'
+        || operation['x-deployed-release'] !== 'v0.9.0'
         || JSON.stringify(operation.tags) !== JSON.stringify(['Post-approval Room Issues'])) throw new Error('OpenAPI candidate auth/status drift');
       if (!Array.isArray(operation.parameters)) throw new Error('OpenAPI candidate parameters missing');
       const parameters = operation.parameters.map(value => object(value, 'parameter'));
