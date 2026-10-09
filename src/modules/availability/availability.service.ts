@@ -160,6 +160,27 @@ function ensureAdmin(actor: Actor): void {
   }
 }
 
+function requireCompleteList(data: unknown, count: number | null): void {
+  if (!Array.isArray(data) || !Number.isSafeInteger(count) || count !== data.length || count > 1000) {
+    throw new AppError(500, 'AVAILABILITY_COMMAND_FAILED', '가능일 목록 전체를 확인하지 못했습니다. 다시 조회해 주세요.');
+  }
+}
+
+function requireCompleteWeek(row: AvailabilityVersionRow): void {
+  const days = row.availability_days;
+  const start = Date.parse(`${row.week_start}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Array.isArray(days) || days.length !== 7
+    || days.some((day) => !day || typeof day.work_date !== 'string' || typeof day.available !== 'boolean')) {
+    throw new AppError(500, 'AVAILABILITY_COMMAND_FAILED', '주간 가능일 전체를 확인하지 못했습니다. 다시 조회해 주세요.');
+  }
+  const dates = new Set(days.map((day) => day.work_date));
+  if (dates.size !== 7
+    || Array.from({ length: 7 }, (_, index) => new Date(start + index * 86400000).toISOString().slice(0, 10))
+      .some((date) => !dates.has(date))) {
+    throw new AppError(500, 'AVAILABILITY_COMMAND_FAILED', '주간 가능일 전체를 확인하지 못했습니다. 다시 조회해 주세요.');
+  }
+}
+
 function toAvailabilityVersion(row: AvailabilityVersionRow): AvailabilityVersion {
   return {
     id: row.id,
@@ -236,10 +257,11 @@ export class SupabaseAvailabilityService implements AvailabilityService {
     const client = this.clients.forAccessToken(actor.accessToken);
     let query = client
       .from('availability_versions')
-      .select(availabilityVersionColumns)
+      .select(availabilityVersionColumns, { count: 'exact' })
       .eq('week_start', weekStart)
       .eq('is_current', true)
-      .order('maid_profile_id');
+      .order('maid_profile_id')
+      .limit(1000);
 
     if (actor.role === 'maid') {
       query = query.eq('maid_profile_id', actor.profileId);
@@ -247,11 +269,15 @@ export class SupabaseAvailabilityService implements AvailabilityService {
       query = query.eq('maid_profile_id', maidProfileId);
     }
 
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) {
       throw availabilityDatabaseError(error);
     }
-    return (data as unknown as AvailabilityVersionRow[]).map(toAvailabilityVersion);
+    requireCompleteList(data, count);
+    return (data as unknown as AvailabilityVersionRow[]).map((row) => {
+      requireCompleteWeek(row);
+      return toAvailabilityVersion(row);
+    });
   }
 
   async submit(actor: Actor, input: SubmitAvailabilityInput): Promise<AvailabilityVersion> {
@@ -279,8 +305,10 @@ export class SupabaseAvailabilityService implements AvailabilityService {
     const client = this.clients.forAccessToken(actor.accessToken);
     let query = client
       .from('availability_change_requests')
-      .select(changeRequestColumns)
-      .order('requested_at', { ascending: false });
+      .select(changeRequestColumns, { count: 'exact' })
+      .order('requested_at', { ascending: false })
+      .order('id')
+      .limit(1000);
 
     if (actor.role === 'maid') {
       query = query.eq('maid_profile_id', actor.profileId);
@@ -294,10 +322,11 @@ export class SupabaseAvailabilityService implements AvailabilityService {
       query = query.eq('week_start', filters.weekStart);
     }
 
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) {
       throw availabilityDatabaseError(error);
     }
+    requireCompleteList(data, count);
     return (data as unknown as AvailabilityChangeRequestRow[]).map(toChangeRequest);
   }
 
@@ -342,14 +371,17 @@ export class SupabaseAvailabilityService implements AvailabilityService {
   async listCandidates(actor: Actor, workDate: string): Promise<AvailabilityCandidate[]> {
     ensureAdmin(actor);
     const client = this.clients.forAccessToken(actor.accessToken);
-    const { data, error } = await client
+    const { data, error, count } = await client
       .from('availability_candidates')
-      .select('work_date,week_start,availability_version,maid_profile_id,display_name')
+      .select('work_date,week_start,availability_version,maid_profile_id,display_name', { count: 'exact' })
       .eq('work_date', workDate)
-      .order('display_name');
+      .order('display_name')
+      .order('maid_profile_id')
+      .limit(1000);
     if (error) {
       throw availabilityDatabaseError(error);
     }
+    requireCompleteList(data, count);
     return (data ?? []).map((row) => ({
       workDate: row.work_date,
       weekStart: row.week_start,

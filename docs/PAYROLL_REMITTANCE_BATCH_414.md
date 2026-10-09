@@ -77,3 +77,17 @@ DB/migration/환경변수 변경 없음. dev PR과 필수 CI 통과 후 별도 �
   roundtrip·템플릿6순열 PASS. 기존 binary/schema 생성 경고는 남아 있으며 신규 batch 경고는 없다.
 - 신규 SQL은 없으며 운영 DB 재적용/실계정 UAT/실측 성능 검증은 NOT RUN.
 - 최신 commit의 필수 CI를 다시 확인한 뒤에만 병합하며 현재 운영 기능으로 안내하지 않는다.
+
+## 가능일 누락 방지 통합 checkpoint (2026-10-10)
+
+- dev `2f97cca`의 #427 가능일 누락 방지 병합본을 통합했다. 제품 가이드의
+  #414/#427 절을 모두 보존했고 묶음 조회 구현과 기존 Python CSV 검사는 변경하지 않았다.
+- `npm run ci:quality`: PASS, Node 2757건 및 secrets/OpenAPI/lint/typecheck/build.
+- `npm run edge:check`: PASS, Edge 520 + 보고 runtime 65건,
+  후보 포함 bundle 19,269,407 bytes (상한 20,000,000 미만).
+- 독립 증분 QA: Node 161 + Edge 116 = 277건 PASS, 생성 원본 일치 PASS,
+  신규 P0/P1/P2 없음. dev 대비 가능일 구현과 이전 HEAD 대비 묶음 조회 구현 변경 없음.
+- Python codegen은 관련 구현 변경이 없어 직전 PASS 근거를 유지하며 이번 증분에서
+  재실행하지 않았다. SQL 변경/운영 DB 적용/실계정 UAT/실측 성능 검증 없음.
+- 공통 계측 PR417 병합을 먼저 기다리며, 이후 그 dev를 통합한 최종 HEAD의 필수 CI를
+  확인한다. 이 checkpoint 자체는 원격 CI 또는 운영 배포 완료를 의미하지 않는다.
