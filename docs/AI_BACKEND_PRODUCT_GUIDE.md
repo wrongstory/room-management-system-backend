@@ -1,5 +1,12 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+## 2026-10-09 #415 배정 카드 읽기 대기 최적화 후보
+
+attempt→submission 분기만 target/profile/schedule-history 읽기와 겹친다. 최종 live
+actor/session/ownership RPC와 실제 통보 이력·currentDeparture 경계는 그대로다.
+DB/정책/API 계약 변경이나 운영 배포는 없으며 요청 수 감소를 주장하지 않는다.
+[1차 범위·검증 및 후속 실측](./ASSIGNMENT_READ_PERFORMANCE.md)을 따른다.
+
 ## 2026-10-08 #406 프런트 인계 계약 정합화
 
 프런트 dev@3bb0bb3930511b9ef0ad105e95f87c8e6e353991의 DOCS/31을 CORS·사진 수량·

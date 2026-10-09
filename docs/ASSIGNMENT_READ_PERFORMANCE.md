@@ -1,0 +1,65 @@
+# #415 배정 카드 조회 최적화 — 1차 후보
+
+2026-10-09, `dev@3e91d88` 기준. source 후보이며 운영 반영을 뜻하지 않는다.
+사용자의 권장 순서 승인에 따른 #413 후속이다. #415 전체 완료/종료가 아니다.
+
+## 변경과 유지 계약
+
+Node와 Edge에서 `attempts → 최신 attempt의 submissions` 조회를 하나의 의존 분기로
+묶어 target/profile/schedule-history 조회와 겹쳐 실행한다. 다른 세 조회가 끝날 때까지
+submissions를 대기시키던 순서만 변경한다. 관련 row 조회의 최대 동시 실행은 여전히 4다.
+
+마지막 `get_assignment_schedule_read`는 모든 hydration이 성공한 뒤 실행한다.
+최신 actor role/status, live session, 메이드의 실제 통보·본인 소유권을 다시 검증하는
+기존 DB 경계를 앞당기지 않는다. historical 모드의 currentDeparture=null,
+불변 통보 snapshot, 오늘 overdue/과거 exact-date, 제한 계정 차단을 유지한다.
+
+최신 attempt/submission의 선택 순서와 취소 판정에 쓰는 **모든 attempt**를 보존한다.
+쿼리별 exact count, 1,000건 상한 및 100-ID 순차 분할도 유지하며 누락/초과 결과는
+부분 성공으로 반환하지 않는다. 추가 캐시·권한 완화·새 RPC·SQL·migration은 없다.
+GET 두 경로의 요청/응답·Swagger·SDK는 그대로여서 프런트 코드 변경이 필요하지 않다.
+
+## 호출 비용과 검증 방법
+
+동일 메이드, 카드별 target/attempt 1개, 빈 rollover 이력, exact-date 목록 fixture 기준:
+
+| 카드 수 | 이전 총 DB 요청 | 후보 총 DB 요청 | 최대 ID 묶음 |
+| --- | --- | --- | --- |
+| 1 | 7 | 7 | 1 |
+| 100 | 7 | 7 | 100 |
+| 1,000 | 52 | 52 | 100 |
+
+목록 1 + profile 1 + 관계 조회 4×ceil(N/100) + 최종 RPC ceil(N/100)이다.
+오늘 목록의 overdue 추가 조회, 여러 메이드, 여러 회차/이력은 별도 비용이다.
+이 단계는 **DB 요청 수/부하 감소가 아닌 불필요한 의존 대기 제거**다.
+시간 모델은 종전 `max(target,profile,attempt,history)+submission+authority`에서
+`max(target,profile,attempt+submission,history)+authority`로 바뀐다.
+이미 attempt가 가장 느리거나 submissions가 없으면 이득이 없을 수 있다.
+
+Node 1/100/1,000 합성 fixture는 실제 adapter의 분할·호출수·순서·동일 카드 필드를 확인한다.
+Node/Edge gate 테스트는 느린 target/profile/history를 의도적으로 멈춘 상태에서
+submission 완료와 최종 권한 RPC의 미실행을 검증한 뒤, gate 해제 후 SESSION_REVOKED로
+전체 응답이 거부되는지 확인한다. 타이머 기반 성능 비율을 통과 기준으로 쓰지 않는다.
+
+## 검증 상태
+
+- PASS: `npm run ci:quality` — secret scan, frontend OpenAPI 150 paths/162 operations,
+  lint(기존 info 19개), typecheck, Node 106파일/2,675건, build.
+- PASS: 독립 QA의 assignment-card 52건·Edge assignment 36건 직접 실행 및
+  source/최종 문서 검토, 미해결 P0/P1/P2 없음.
+- PASS: `npm run edge:check` — 전체 format/type/test/runtime 및 후보 bundle
+  19,224,850 bytes (<20,000,000). 첫 실행의 변경 파일 format 2건 실패는
+  Deno formatter 적용 뒤 전체 재실행(exit 0)으로 해소했다.
+- NOT RUN: 이번 후보의 fresh DB·역할별 실제 DB/경합·운영 UAT·실제 p50/p95 및 payload 계측.
+  SQL/RLS/schema 변경이 없어 로컬 migration 재적용은 하지 않았다. required CI는 별도다.
+
+## 다음 단계 / 배포
+
+#413 계측과 함께 실제 목록 크기·응답 bytes·DB 시간·왕복을 비교한다. 남은 DB 왕복 통합은
+권한·snapshot 경계를 유지하는 bounded read RPC가 필요한지 #415에서 후속 판단한다.
+인덱스/계획은 #416에서 다룬다. 위 합성 검증을 운영 속도 향상 수치로 제시하지 않는다.
+프런트 인계는 기존 endpoint 유지 및 운영 미반영을 명시한다.
+
+일반 PR은 dev 대상이며 필수 application/migration CI와 독립 QA를 통과해야 한다.
+최종 release 승인 범위에서 API 코드를 반영한다. 이 변경의 DB 적용/secret/설정 변경은 없다.
+문제 시 이전 API artifact로 rollback하며 DB rollback이나 이력 수정은 하지 않는다.
