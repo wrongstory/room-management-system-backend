@@ -1,5 +1,15 @@
 # #406 프런트 인계 HTTP 계약 정합화
 
+## 2026-10-09 병합·운영 재배포 승인
+
+사용자가 PR407 병합과 운영 재배포를 승인했다. 아래 10월8일 배포 보류는
+당시 경계다. 필수 CI·독립 QA 후 dev 및 release/main 절차를 진행하며 DB는 변경하지 않는다.
+최초 PR407 CI37780825139는 migration PASS/application FAIL이었다.
+Python codegen 검사에 남아 있던 미배포 literal을 deployed/v0.9.0의 엄격 검사로
+정합화했다. 권한·인증 검사 유지 및 상태/버전/권한 drift 거절 회귀7건 추가,
+Python102·ruff·format·mypy·codegen·package source 검증 PASS다.
+실제 병합·배포 결과는 릴리스 기록과 PR에서 별도로 확인한다.
+
 2026-10-08 사용자 승인 범위: CORS, 사진 개수 스키마, Swagger 배포 표기.
 프런트 targeted snapshot은 makee-ham/room-management-system
 dev@3bb0bb3930511b9ef0ad105e95f87c8e6e353991의
