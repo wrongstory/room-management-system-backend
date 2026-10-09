@@ -68,5 +68,16 @@ Python business OpenAPI codegen PASS 및 pytest 102 PASS. 독립 QA 관련 105 t
 - 로컬 DB reset/전체 SQL 재실행: NOT RUN. #421에서 검증·병합된 SQL과 동일하며 이번 통합의 원격 필수 migration CI는 별도로 확인한다.
 - 운영 미반영. 최신 통합 commit의 필수 CI 확인 전 병합하지 않고, 운영 배포 확인 전 프런트 snapshot 옵션을 켜지 않는다.
 
-#410의 미완료 operation nullable 스키마 불일치는 기존 독립 결함으로 남는다.
+#410의 미완료 operation nullable 스키마 보정은 아래 배포 통합 후보에 포함했다.
 #411 thumbnail/안전한 병렬 업로드는 이번 옵션과 분리한다.
+
+### v0.9.2 배포 통합 후보 (2026-10-09)
+
+PR423의 #410 명세 보정과 PR424의 #422 테스트 오탐 보완을 PR412에 정상 merge했다.
+각 수정의 독립 검토 기록은 유지하며 이 통합본으로 필수 CI를 확인한다.
+추가 SQL 또는 Auth 런타임 변경은 없다. 아직 운영 미반영이다.
+
+- `npm run ci:quality`: PASS, 108files/2713tests, typecheck/build 포함.
+- 독립 QA: 9files/295tests PASS, P0/P1/P2 없음. manifest112 및 diff 검사 PASS.
+- 전체 Edge/Python 및 원격 필수 CI 결과는 배포 기록 #425에서 최종 확인한다.
+- 운영 반영 후 Swagger 확인과 프런트 #206의 실제 계정 UAT를 거쳐 옵션을 활성화한다.
