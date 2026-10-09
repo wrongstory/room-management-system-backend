@@ -36,7 +36,7 @@ cleaning-templates, photos, photo-uploads. 정확한 경로 구분자를 검사�
 
 | 순서 | 작업 | 추적 | 상태 |
 | --- | --- | --- | --- |
-| 1 | 가능일 목록의 조용한 누락 방지 | #427 / PR428 | 로컬·독립 QA PASS, CI 대기·미배포 |
+| 1 | 가능일 목록의 조용한 누락 방지 | #427 / PR428 | required CI PASS, dev 2f97cca 병합·운영 미배포 |
 | 별도 | 사진 지정 계정 정상 UAT·옵션 활성화 | frontend #206 | 백엔드 v0.9.2 배포, 실제 UAT/프런트 flag 후속 |
 | 2 | 공통 handler timing와 회귀 검사 | #413 / PR417 | 최신 dev 통합 후보 |
 | 3 | 주급 marker 일괄 반환 | #414 / PR418 | 기존 후보·새 통합 필요, 반복 DB 집계 제거는 후속 |
@@ -94,3 +94,16 @@ DB 검증/운영 성능 실측/Python 소비자 로컬 검증은 NOT RUN (DB/API
   25 PASS/2 FAIL이었고, 다른 전체 테스트 파일에 의존하던 합성 설정을 명시 제공하자
   동일 27건 PASS했다. 실제 키나 소스 수정은 사용하지 않았다.
 - 새 commit의 필수 원격 CI를 확인하기 전에는 병합 완료로 표시하지 않는다.
+
+2026-10-10 KST #427 병합 후 dev `2f97cca` 재통합:
+
+- PR428/source `f985350`은 required CI `37948265087`의 application/migration PASS,
+  독립 QA·미해결 리뷰0·보호 규칙 확인 후 dev에 squash 병합됐다. 운영 미배포다.
+- 이 공통 계측 후보에 dev를 정상 merge했다. 충돌은 제품 가이드 양쪽 문구를 보존해
+  해결했고 가능일 완전성 검사와 공통 계측 소스는 각각 그대로 유지했다.
+- `npm run ci:quality`: PASS, Node 2760건 및 secrets/OpenAPI/lint/typecheck/build.
+- `npm run edge:check`: PASS, Edge 516 + 보고 runtime 65건,
+  후보 포함 bundle 19,260,441 bytes. 신규 DB migration은 없다.
+- 독립 QA: Node 123 + Edge 56 = 179건 PASS, P0/P1/P2 없음. 가능일 500 오류의
+  timing 제외·정상 빈 결과·count/7일 검사를 확인했다. 실제 DB/UAT·성능은 NOT RUN.
+- 새 exact head의 필수 CI·dev 병합·릴리스는 후속이며 기존 head의 PASS와 구분한다.
