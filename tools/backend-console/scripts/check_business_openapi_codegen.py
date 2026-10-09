@@ -185,6 +185,54 @@ print('Python template codegen: six shared permutations preserve every field and
     )
 
 
+def check_photo_operation_roundtrip(npm: str, repository_root: Path, destination: Path) -> None:
+    fixture_result = subprocess.run(  # noqa: S603
+        [
+            npm,
+            "exec",
+            "--",
+            "tsx",
+            "-e",
+            "import { photoOperationRetentionCases } from "
+            "'./tests/fixtures/photo-operation-retention.ts'; "
+            "process.stdout.write(JSON.stringify(photoOperationRetentionCases()));",
+        ],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    # The generated consumer must retain explicit None, not invent an enum/default.
+    # Conditional state validation remains in Ajv/runtime, not this DTO generator.
+    source = """\
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+from generated.models.photo_upload_operation import PhotoUploadOperation
+from generated.models.photo_upload_response import PhotoUploadResponse
+cases = json.load(sys.stdin)
+if len(cases) != 8:
+    raise RuntimeError('Expected eight actual operation projections')
+for case in cases:
+    body = case['body']
+    if PhotoUploadOperation.from_dict(body).to_dict() != body:
+        raise RuntimeError('Operation retention roundtrip failed: ' + case['name'])
+    uploaded = dict(body, quotaWarning=False)
+    if PhotoUploadResponse.from_dict(uploaded).to_dict() != uploaded:
+        raise RuntimeError('Upload retention roundtrip failed: ' + case['name'])
+print('Python photo operation codegen: eight state/retention roundtrips PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source, str(destination)],
+        cwd=repository_root,
+        input=fixture_result.stdout,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+
 def main() -> None:
     console_root = Path(__file__).resolve().parents[1]
     repository_root = console_root.parents[1]
@@ -589,6 +637,7 @@ def main() -> None:
             if field not in template_request:
                 raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
         check_template_permutation_roundtrip(npm, repository_root, destination)
+        check_photo_operation_roundtrip(npm, repository_root, destination)
         for book_model_name, book_expected_fields in (
             (
                 "payroll_adjustment_book",
