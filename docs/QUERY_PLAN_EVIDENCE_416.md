@@ -1,7 +1,8 @@
-# #416 조회 계획 점검 — 1차 합성 근거
+# #416 조회 계획 점검 — 합성 component 및 실제 로컬 RPC 근거
 
 2026-10-09, `dev@3e91d88` 기준. **진단 도구·근거만 추가**하며 운영 API/DB/index/migration을
-변경하지 않는다. #416 전체 완료가 아니며 실제 적용 전 아래 후속 검증을 수행한다.
+영속 변경하지 않는다. 2차 실제-table 실험도 로컬 transaction 안에서만 수행하고 rollback한다.
+#416 전체 완료가 아니며 실제 적용 전 아래 후속 검증을 수행한다.
 
 ## 실행과 보안 경계
 
@@ -86,10 +87,77 @@ index 유지에 따른 INSERT 지연·WAL·lock·쓰기 증폭은 아직 측정�
 - 최종 fixture에서 effective/recorded 완전 동률을 보장하고 SQL assertion으로 확인했다.
   위 표는 이 보완 뒤 재실행 값이며, 이전 fixture의 수치를 최종 결과로 재사용하지 않는다.
 
-다음은 최종 스키마의 local synthetic 실제 RPC/역할별 계획과 쓰기 비용을 검증한다.
+위 NOT RUN은 1차 시점이며 실제 RPC/쓰기 후속 결과는 아래 2차를 따른다.
 근거가 유지될 때만 후속 append migration을 만들고 기존 인덱스 유지/중복을 검토한다.
-주급 날짜·summary와 issue_count도 같은 단계에서 측정하며 #416은 계속 열어둔다.
+주급 날짜·summary와 issue_count도 후속 측정하며 #416은 계속 열어둔다.
 이번 PR은 도구/문서뿐이어서 서비스 배포·DB rollback이 필요하지 않다.
 
 Supabase/Postgres 성능 스킬에 따라 EXPLAIN 근거와 과잉 인덱스 비용을 함께 검토했다.
 [공식 query optimization 가이드](https://supabase.com/docs/guides/database/query-optimization).
+
+## 2차 — 실제 로컬 room-board RPC 및 이벤트 쓰기 비용
+
+```text
+node scripts/benchmark-room-board.mjs
+```
+
+동일한 local Docker/socket 제한을 재사용한다. 121개 객실, migration history111개,
+profiles/Auth users·sessions/예약/두 event table이 빈 상태, board 및 두 historical helper의
+설치된 본문 MD5 일치를 요구한다. **모든 앱 테이블이 빈 상태임을 전수 검증하는 것은 아니다.**
+history 개수/3함수 본문 fingerprint는 전체 schema/의존 함수·ACL fingerprint도 아니다.
+변경된 설치본은 이 기준을 명시적으로 재검토해야 하며 drift를 자동 승인하지 않는다.
+
+합성 관리자·메이드와 세션, 촛불/PIN 상태 이벤트 각12,100건을 실제 table에 transaction 내
+삽입한다. FK/check/촛불 기록 순서 trigger를 끄지 않는다. PIN 원문·키·실제 사용자 자료는
+필요 없다. 후보 인덱스 두 개는 transaction 안에서만 추가한다. 실제 RPC는 `service_role`로
+호출하며 관리자 허용, 메이드 `ADMIN_REQUIRED`, 없는 세션 `SESSION_REVOKED`를 전후 확인한다.
+전체 RLS/역할/상태/만료·경합 행렬을 재검증한 것은 아니다.
+
+한 DO statement의 같은 `statement_timestamp`에서 과거2일/오늘/미래1일을 조회한다.
+서버 시각을 포함한 **전체121행 DTO**를 ID순으로 해시 비교하여 세 경우 모두 동일했다.
+warm-up 후3회 × 날짜3 × index모드2 = **18 read samples**.
+Function Scan의 시간·root buffer를 기록한다. 중첩 함수 각각의 내부 실행계획이나 특정
+index 사용 여부를 전체 RPC EXPLAIN으로 확인했다고 주장하지 않는다.
+
+2026-10-09 로컬 PG17.6, 마지막 부모 실행 3회 중앙값:
+
+| 실제 RPC 평가 날짜 | 기존 ms | 후보 ms | 기존/후보 shared buffer 접근 |
+| --- | --- | --- | --- |
+| 과거2일 | 71.421 | 23.039 | 87,699 / 3,677 |
+| 오늘(LIVE) | 65.265 | 29.064 | 51,360 / 3,300 |
+| 미래1일 | 81.761 | 26.064 | 87,693 / 3,663 |
+
+각 event table에121건씩 INSERT RETURNING을 실행해 warm-up 후3회 × table2 × mode2 =
+**12 write samples**를 추가했다. 실제 제약/trigger 포함 시간이며 command RPC의 actor/CAS/
+idempotency 비용은 아니다. 매 sample의 subtransaction을 의도된 SQLSTATE로 rollback하여
+가시 행 수 각12,100건 유지도 확인했다. 다른 SQL 오류는 삼키지 않는다.
+
+| 121건 INSERT | 기존/후보 ms | 기존/후보 executor WAL bytes | 기존/후보 trigger ms |
+| --- | --- | --- | --- |
+| 촛불 상태 이벤트 | 5.187 / 6.324 | 44,572 / 57,523 | 4.125 / 4.793 |
+| PIN 동기화 상태 이벤트(원문 없음) | 1.942 / 2.948 | 48,519 / 57,052 | 1.257 / 1.681 |
+
+WAL은 EXPLAIN root의 executor counter이며 cluster LSN 차이·전체 background/commit WAL이
+아니다. trigger 시간은 별도 관찰값이며 전체 Execution Time에 다시 더하지 않는다.
+두 추가 index 공간 합은 **1,671,168 bytes**(각event12,100건 기준)였다.
+
+판정: 이 합성 workload에서 조회 비용 감소가 재현됐지만 추가 공간·INSERT/WAL 비용도
+늘었다. 따라서 두 effective 정렬 인덱스는 **후속 append migration 후보**로 유지한다.
+현재 recorded index는 current/trigger 경로에도 사용하므로 그대로 둔다. latency 임계값을
+테스트에 고정하거나 운영 p95/개선 배율로 외삽하지 않는다.
+
+제한: 예약/점유/업무 이력은 빈 상태여서 전체 room-board의 모든 경로를 부하 생성하지는
+않았다. 기존→후보 고정 순서, warm cache, 앞선 write의 dead tuple·page 배치와 ANALYZE가
+결과에 영향을 준다. 최종 rollback 및 사후 확인으로 합성 Auth/profile/session/event와
+후보 index의 가시 잔존은 없지만 **WAL·dead tuple·물리 공간·통계 영향까지 되돌리지는 않는다.**
+실험 timeout/에러는 성공으로 출력하지 않는다. 운영·recovery 프로젝트에서는 실행하지 않는다.
+
+- PASS: 부모 실제18read+12write, 전체DTO 동등성3조합 및 권한 거부4회, 최종 정리 확인.
+- PASS: 독립 QA 별도 실제30samples 및 신규26+기존20 단위 검증, P0/P1/P2 없음.
+- PASS: `npm run ci:quality` — secrets/OpenAPI/lint/typecheck、108파일/2,712건、build.
+  lint는 기존 info19이며 새 warning/error는 없다. 신규 unit26 포함.
+- NOT RUN: HTTP/프런트 UAT, 전체 역할/RLS·동시성, 주급 실행계획, 신규 migration 적용.
+- 변경 없음: 운영 API/Swagger 계약, migration 파일·원격 DB·배포·Auth/PIN 원문.
+
+다음 순서: candidate index의 append migration/최종 DB 회귀 → #414/#415와 개발 통합 →
+릴리스 범위 및 프런트 인계 갱신. 주급 날짜·summary와 중복 issue_count는 #416 잔여 범위다.
