@@ -25,9 +25,18 @@ describe('historical upgrade notification catalog compatibility', () => {
       expect(() => assertUpgradeNotificationCatalog(old, after, 111)).toThrow();
     }
     expect(() => assertUpgradeNotificationCatalog(installed(), installed(), 111)).toThrow();
-    for (const count of [94, 112, 111.5, Number.NaN]) {
+    for (const count of [94, 113, 111.5, Number.NaN]) {
       expect(() => assertUpgradeNotificationCatalog(old, installed(), count)).toThrow();
     }
+  });
+  it('keeps exactly the same111 catalog exception at index-only112, rejecting all other changes', () => {
+    expect(() => assertUpgradeNotificationCatalog(old, installed(), 112)).not.toThrow();
+    for (const after of [old, [...installed(), { event_family: 'unknown' }],
+      [{ ...old[0], preserved: { value: 2 } }, addition], [...old, { ...addition, extra: true }]]) {
+      expect(() => assertUpgradeNotificationCatalog(old, after, 112)).toThrow();
+    }
+    const shape = [{ table: 'private.notification_event_catalog', columns: Object.keys(addition) }];
+    expect(upgradeHistorySnapshotSql(shape,112,true)).toBe(upgradeHistorySnapshotSql(shape,111,true));
   });
   it('does not invent a catalog for older schemas or accept a missing111 catalog', () => {
     expect(() => assertUpgradeNotificationCatalog(null, null, 95)).not.toThrow();
