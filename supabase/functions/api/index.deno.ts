@@ -513,7 +513,9 @@ Deno.test("photo failure logs only bounded status/code/request ID and preserves 
         }) as unknown as EdgeClients,
       authenticateRequest: () => Promise.resolve(actor),
       photoService: () =>
-        ({ upload: () => Promise.reject(error) }) as unknown as PhotoService,
+        ({
+          withTiming: () => ({ upload: () => Promise.reject(error) }),
+        }) as unknown as PhotoService,
     });
     const body = await response.json();
     assert(

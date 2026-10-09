@@ -125,10 +125,10 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert.equal(manifest.totalCount, 111);
-  assert.equal(manifest.migrations.length, 111); assert.equal(entries.length, 111);
-  assert.equal(manifest.head, 'post_approval_room_issue_ledger');
-  assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, 33);
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112].includes(manifest.totalCount));
+  assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
+  assert.equal(manifest.head, manifest.totalCount === 111 ? 'post_approval_room_issue_ledger' : 'room_event_effective_lookup_indexes');
+  assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
   let previous = '';
@@ -147,6 +147,11 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
     POST_APPROVAL_UPGRADE_FILE_PREFIX_SHA256, 'Exact dev110 filename/version and source SHA prefix required');
   assert.equal(validated[109].file, `${baselineVersion}_room_candle_session_hard_expiry.sql`);
   assert.equal(validated[110].file, `${ledgerVersion}_post_approval_room_issue_ledger.sql`);
+  if (validated.length === 112) {
+    assert.equal(validated[111].file, '20261009081846_room_event_effective_lookup_indexes.sql');
+    assert.equal(validated[111].sha256, 'dc9ee95371faa2b0daae9cd3b279c0b0d38c243581ca73bdc5e5260375aae41c',
+      'Only the reviewed index-only112 tail is permitted, not arbitrary future migrations');
+  }
   return { entries: validated, ledger: validated[110].canonical };
 }
 export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, status, container, cliVersion }) {
@@ -163,8 +168,8 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   assert.equal(cliVersion.trim(), SUPABASE_CLI_VERSION);
   return { ...local, endpoint: localEndpoint };
 }
-export function assertPostApprovalUpgradeHistory(actual, source, installed = 111) {
-  assert([110, 111].includes(installed));
+export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
+  assert([110, 111, 112].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }
@@ -439,6 +444,7 @@ export function postApprovalUpgradeSqlState(error) {
 export function runPostApprovalRoomIssueUpgrade() {
   let phase = 'source-preflight', resetStarted = false, workspace, source;
   const failures = [];
+  const workspaces = [];
   const options = { cwd: root, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 60000, maxBuffer: 64 * 1024 * 1024, windowsHide: true, shell: false };
   const run = (binary, args, settings = {}) => execFileSync(binary, args, { ...options, ...settings });
   let localEnv;
@@ -478,8 +484,11 @@ export function runPostApprovalRoomIssueUpgrade() {
       cliVersion: run(process.execPath, [cli, '--version']) });
     localEnv = { ...process.env, DOCKER_HOST: local.endpoint, DOCKER_CONTEXT: 'default', SUPABASE_PROJECT_ID: LOCAL_PROJECT_ID,
       SUPABASE_DB_PORT: String(local.dbPort), SUPABASE_SERVICES_HOSTNAME: '127.0.0.1' };
-    phase = 'initial-exact111-fresh'; assertPostApprovalUpgradeHistory(history(), source); fresh();
-    workspace = preparePostApprovalUpgradeWorkspace(source); resetStarted = true;
+    phase = 'initial-exact-tip-fresh'; assertPostApprovalUpgradeHistory(history(), source); fresh();
+    // Keep the historical110->111 experiment exact. Never let a later index
+    // migration run before the original whole-row/catalog preservation checks.
+    workspace = preparePostApprovalUpgradeWorkspace({ ...source, entries: source.entries.slice(0,111) });
+    workspaces.push(workspace); resetStarted = true;
     phase = 'baseline110'; reset(baselineVersion); assertPostApprovalUpgradeHistory(history(), source, 110);
     phase = 'legacy-fixture-seed';
     // Only historical fixture seeding disables triggers. Migration, replay and
@@ -497,7 +506,7 @@ export function runPostApprovalRoomIssueUpgrade() {
     const oldDigest = rowsDigest(tables), protectedDigest = rowsDigest(oldProtectedTables);
     const oldDto = sql(`select private.submission_projection('${id(4002)}');`);
     phase = 'upgrade110-to111'; run(process.execPath, [cli, '--workdir', workspace, 'migration', 'up', '--local'], { cwd: workspace, env: localEnv, timeout: 180000 });
-    assertPostApprovalUpgradeHistory(history(), source);
+    assertPostApprovalUpgradeHistory(history(), source, 111);
     const after = JSON.parse(sql(catalogSql)); assertPostApprovalUpgradeCatalog(before, after, plan);
     assert.equal(rowsDigest(tables, true), oldDigest, 'Every old whole row is preserved except the exact one new notification catalog row');
     assert.deepEqual(JSON.parse(sql("select to_jsonb(c) from private.notification_event_catalog c where event_family='post_approval_room_issue.reported_admin';")), POST_APPROVAL_UPGRADE_NOTIFICATION);
@@ -534,7 +543,13 @@ export function runPostApprovalRoomIssueUpgrade() {
   }
   finally {
     if (resetStarted) {
-      try { phase = 'final-fresh111-cleanup'; reset(); assertPostApprovalUpgradeHistory(history(), source); fresh(); }
+      try {
+        phase = 'final-fresh-tip-cleanup';
+        if (source.entries.length > 111) {
+          workspace = preparePostApprovalUpgradeWorkspace(source); workspaces.push(workspace);
+        }
+        reset(); assertPostApprovalUpgradeHistory(history(), source); fresh();
+      }
       catch { failures.push({ phase, kind: 'FRESH_CLEANUP_FAILED' }); }
     }
     if (source) {
@@ -548,13 +563,13 @@ export function runPostApprovalRoomIssueUpgrade() {
       }
       catch { failures.push({ phase: 'source-raw-preservation', kind: 'SOURCE_CHANGED' }); }
     }
-    if (workspace) {
-      try { rmSync(assertGeneratedWorkspace(workspace), { recursive: true, force: false }); }
+    for (const generated of workspaces) {
+      try { rmSync(assertGeneratedWorkspace(generated), { recursive: true, force: false }); }
       catch { failures.push({ phase: 'temporary-workspace-cleanup', kind: 'GENERATED_CLEANUP_FAILED' }); }
     }
   }
   if (failures.length) { console.error(`Post-approval room issue upgrade FAIL: ${JSON.stringify({ failures })}`); return false; }
-  console.log('Post-approval room issue upgrade110->111 PASS: exact frozen110 prefix +111; old whole rows, OID/ACL/RLS/catalog preserved; seven exact source patches/two old-table triggers plus exact FK action triggers; 23 empty new private tables; real old receipt replay/denial; actual new typed report; final fresh111 cleanup; raw originals unchanged.');
+  console.log(`Post-approval room issue upgrade110->111 PASS: exact frozen110 prefix +111; old whole rows, OID/ACL/RLS/catalog preserved; seven exact source patches/two old-table triggers plus exact FK action triggers; 23 empty new private tables; real old receipt replay/denial; actual new typed report; final fresh${source.entries.length} cleanup; raw originals unchanged.`);
   return true;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -30,7 +30,9 @@ describe('Fastify photo parity through actual raw parser/router', () => {
       const res = await app.inject({ method: 'GET', url: `/v1/photos/${id(7)}/content` });
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-disposition']).toBe(`inline; filename="photo.jpg"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-      expect(res.headers['access-control-expose-headers']).toBe('Content-Disposition');
+      expect(res.headers['access-control-expose-headers']).toBe('Content-Disposition, Server-Timing');
+      expect(res.headers['server-timing']).toMatch(/photo_db;dur=\d+\.\d/);
+      expect(res.headers['server-timing']).toContain('photo_drive;dur=');
       expect(res.headers['cache-control']).toBe('no-store');
       expect(res.headers).not.toHaveProperty('location');
       expect(res.headers['content-disposition']).not.toContain('synthetic_file_383');
@@ -90,7 +92,7 @@ describe('Fastify photo parity through actual raw parser/router', () => {
       operationId:id(5),objectId:id(6),attemptId:id(3),targetSlotId:id(4),status:'accepted',leaseVersion:1,leaseExpiresAt:null,photoId:id(7),photoVersion:1,
       uploadedAt:t,purgeAfter:new Date(Date.parse(t)+604800000).toISOString(),retentionPolicy:'cleaning_submission',retentionStartsAt:t,
       expiresAt:new Date(Date.parse(t)+604800000).toISOString(),purgedAt:null,mediaAvailability:'available',compensationAllowed:false
-    }:null};}},()=>({} as PhotoProvider),async()=>{});
+    }:name==='get_attempt_photo_slots'?{attemptId:id(3),assignmentId:id(8),assignmentRevision:1,slots:[]}:null};}},()=>({} as PhotoProvider),async()=>{});
     const app=Fastify({logger:false});await app.register(createPhotoRoutes({service,authenticate:async()=>identity,denied:async()=>{}}));
     const url=`/v1/attempts/${id(3)}/photo-slots/${id(4)}/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedPhotoRevision=0`;
     try {
@@ -101,6 +103,14 @@ describe('Fastify photo parity through actual raw parser/router', () => {
       const mime=await app.inject({method:'POST',url,headers:{'content-type':'image/png','idempotency-key':'synthetic-key-03'},payload:Buffer.from(jpeg)});
       expect(mime.statusCode).toBe(415); expect(calls.filter(x=>x==='begin_admitted_photo_upload')).toHaveLength(1);
       const alias=await app.inject({method:'GET',url});expect(alias.statusCode).toBe(404);
+      expect(good.json()).not.toHaveProperty('photoSlots');
+      expect(calls.filter(x=>x==='get_attempt_photo_slots')).toHaveLength(0);
+      const snapshot=await app.inject({method:'POST',url:`${url}&includePhotoSlots=true`,headers:{'content-type':'image/jpeg','idempotency-key':'synthetic-key-01'},payload:Buffer.from(jpeg)});
+      expect(snapshot.statusCode).toBe(200);
+      expect(snapshot.json().photoSlots).toEqual({attemptId:id(3),assignmentId:id(8),assignmentRevision:1,slots:[]});
+      expect(snapshot.headers['server-timing']).toContain('photo_db;dur=');
+      expect(snapshot.headers['access-control-expose-headers']).toBe('Server-Timing');
+      expect(calls.filter(x=>x==='get_attempt_photo_slots')).toHaveLength(1);
     } finally {await app.close();}
   });
   it('separate photo authentication validates Auth, latest status, password and active session without exposing bearer', async () => {
