@@ -2311,7 +2311,7 @@ export const openApiDocument = {
         operationId: "listAvailability",
         summary: "현재 주간 가능일 조회",
         description:
-          "비밀번호 변경을 완료한 active maid 또는 active business admin 전용입니다. maid는 본인 자료만 조회할 수 있으며, admin만 maidProfileId로 특정 메이드를 선택할 수 있습니다. weekStart는 조회할 주의 월요일 날짜입니다.",
+          "비밀번호 변경을 완료한 active maid 또는 active business admin 전용입니다. maid는 본인 자료만 조회할 수 있으며, admin만 maidProfileId로 특정 메이드를 선택할 수 있습니다. weekStart는 조회할 주의 월요일 날짜입니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 7일 상세가 불완전하면 500 AVAILABILITY_COMMAND_FAILED로 거부합니다. 오류를 미제출이나 근무 불가로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid", "admin"],
         parameters: [
@@ -2404,7 +2404,7 @@ export const openApiDocument = {
         operationId: "listAvailabilityChangeRequests",
         summary: "가능일 변경 요청 목록 조회",
         description:
-          "active maid는 본인 요청만, active business admin은 전체 요청을 조회합니다. status·weekStart·maidProfileId 필터는 모두 선택이며 maid가 다른 profile ID를 전달하면 403입니다.",
+          "active maid는 본인 요청만, active business admin은 전체 요청을 조회합니다. status·weekStart·maidProfileId 필터는 모두 선택이며 maid가 다른 profile ID를 전달하면 403입니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 전체 건수를 확인할 수 없으면 500 AVAILABILITY_COMMAND_FAILED입니다. 필요하면 기존 주차·상태·메이드 필터로 범위를 좁힙니다. 오류를 요청 0건으로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid", "admin"],
         parameters: [
@@ -2484,7 +2484,7 @@ export const openApiDocument = {
         operationId: "listAvailabilityCandidates",
         summary: "날짜별 배정 가능 메이드 후보 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. 해당 날짜가 가능하다고 제출한 현재 version의 active maid만 반환하며 developer와 maid는 조회할 수 없습니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 해당 날짜가 가능하다고 제출한 현재 version의 active maid만 반환하며 developer와 maid는 조회할 수 없습니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 전체 건수를 확인할 수 없으면 500 AVAILABILITY_COMMAND_FAILED입니다. 오류를 후보 없음으로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [

@@ -79,3 +79,16 @@ submission 완료와 최종 권한 RPC의 미실행을 검증한 뒤, gate 해�
   P0/P1/P2 차단 결함 없음. 최종 권한·세션 재확인과 누락·통보 이력 경계 보존 확인.
 - `git diff --check` 및 staged diff PASS. 신규 SQL·운영 DB 적용은 없으며
   실제 DB/운영 성능/UAT는 NOT RUN. 새 head의 필수 CI 확인과 병합·릴리스는 후속이다.
+
+## 가능일 누락 방지 통합 검증 (2026-10-10)
+
+- dev `2f97cca`의 #427을 통합했고 가이드 #415/#427 양쪽 계약을 보존했다.
+  배정 구현은 직전 HEAD와 같고 가능일 구현은 dev와 같으며 새 SQL은 없다.
+- `npm run ci:quality`: PASS, Node 2746건 및 secrets/OpenAPI/lint/typecheck/build.
+- `npm run edge:check`: PASS, Edge 519 + 보고 runtime 65건,
+  후보 포함 bundle 19,254,568 bytes (20,000,000 bytes 미만).
+- 독립 증분 QA: Node 79 + Edge 68 = 147건 PASS. 생성/구현 보존과 제품 가이드
+  통합 검토 완료, 신규 P0/P1/P2 차단 결함 없음.
+- 실제 DB/운영 UAT/실측 성능은 이번 검증에 포함하지 않았다.
+  공통 계측 PR417 → 묶음 조회 PR418 → 이 PR419 순서로 최종 dev와 통합하며,
+  각 최종 HEAD의 필수 CI·리뷰·보호 규칙을 확인하기 전 병합하지 않는다.
