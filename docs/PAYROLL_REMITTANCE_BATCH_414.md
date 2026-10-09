@@ -91,3 +91,17 @@ DB/migration/환경변수 변경 없음. dev PR과 필수 CI 통과 후 별도 �
   재실행하지 않았다. SQL 변경/운영 DB 적용/실계정 UAT/실측 성능 검증 없음.
 - 공통 계측 PR417 병합을 먼저 기다리며, 이후 그 dev를 통합한 최종 HEAD의 필수 CI를
   확인한다. 이 checkpoint 자체는 원격 CI 또는 운영 배포 완료를 의미하지 않는다.
+
+## 공통 계측 병합 후 통합 checkpoint (2026-10-10)
+
+- PR417이 source `a678e3c`의 CI37952825621 application/migration PASS 및 독립 QA179,
+  미해결 리뷰0·보호 규칙 확인 뒤 dev `03f425a`로 squash됐다. 아직 운영 미배포다.
+- 그 dev를 정상 merge했다. 가이드의 #414/#413 절과 Edge 검사기의 batch/timing
+  생성 원본 검사 둘 다 보존했다. 기존 batch 구현과 timing helper는 변경하지 않았다.
+- `npm run ci:quality`: PASS, Node 2780건 및 secrets/OpenAPI/lint/typecheck/build.
+- `npm run edge:check`: PASS, Edge 521 + 보고 runtime 65건,
+  후보 포함 bundle 19,276,429 bytes (20,000,000 미만).
+- 독립 통합 QA: Node 230 + Edge 111 = 341건 PASS. 두 생성 원본 검사 PASS,
+  실제 dispatcher의 batch/timing·사진·body·권한 경계 보존, 신규 P0/P1/P2 없음.
+- 신규 SQL/운영 DB 적용 없음. 이번 통합의 실제 DB·실계정 UAT·실측 성능은 NOT RUN.
+  새 HEAD의 required CI가 통과해야 이 PR을 병합하고 PR419와 릴리스 #429를 진행한다.

@@ -9,6 +9,7 @@ import {
   resetAccountPassword,
   unlockAccount,
 } from "../_shared/account-api.ts";
+import { apiTimingEligible, apiTimingHeaders } from "../_shared/api-timing.ts";
 import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import {
   authorizationSourceForPath,
@@ -365,6 +366,32 @@ const defaultDependencies: ApiHandlerDependencies = {
 export async function handleApiRequest(
   request: Request,
   dependencies: ApiHandlerDependencies = defaultDependencies,
+): Promise<Response> {
+  const started = performance.now();
+  const response = await handleApiRequestCore(request, dependencies);
+  const path = routePath(request.url);
+  if (!apiTimingEligible(request.method, path, response.status)) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  for (
+    const [name, value] of Object.entries(apiTimingHeaders(
+      performance.now() - started,
+      headers.get("server-timing") ?? "",
+      headers.get("access-control-expose-headers") ?? "",
+    ))
+  ) headers.set(name, value);
+  // Preserve the body stream. Timing never reads, clones or logs business payloads.
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function handleApiRequestCore(
+  request: Request,
+  dependencies: ApiHandlerDependencies,
 ): Promise<Response> {
   const id = requestId(request);
   let corsHeaders: Record<string, string> = {};

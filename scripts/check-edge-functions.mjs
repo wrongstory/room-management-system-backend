@@ -7,6 +7,7 @@ import { generateReportBundle } from './generate-post-approval-report-bundle.mjs
 
 const image = 'denoland/deno:2.1.4@sha256:3bf75873714baa410dcf7fabaf76d806d20f0ac8a7579df11577b4ed97416e34';
 const sourcePaths = [
+  'supabase/functions/_shared/api-timing.ts',
   'supabase/functions/_shared/runtime.ts',
   'supabase/functions/_shared/activity-contract.ts',
   'supabase/functions/_shared/activity-api.ts',
@@ -243,6 +244,8 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
 function main() {
 const batch = spawnSync(process.execPath, ['scripts/generate-remittance-batch-edge.mjs', '--check'], { stdio: 'inherit' });
 if (batch.status !== 0) throw new Error('Remittance batch generated source verification failed');
+const timing = spawnSync(process.execPath, ['scripts/generate-api-timing-edge.mjs', '--check'], { stdio: 'inherit' });
+if (timing.status !== 0) throw new Error('API timing generated source verification failed');
 const reports = spawnSync(process.execPath, ['scripts/generate-post-approval-report-edge.mjs', '--check'], { stdio: 'inherit' });
 if (reports.status !== 0) throw new Error('Report generated source verification failed');
 // Fresh npm ci builds the ignored JS from the reviewed manifest, without rewriting it.
