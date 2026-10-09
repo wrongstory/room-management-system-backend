@@ -3,6 +3,11 @@
 2026-10-09, `dev@3e91d88` 기준. source 후보이며 운영 반영을 뜻하지 않는다.
 사용자의 권장 순서 승인에 따른 #413 후속이다. #415 전체 완료/종료가 아니다.
 
+2026-10-10에는 v0.9.2 사진 기능이 반영된 최신 dev `5787158`과 통합해 재검증한다.
+최신 사용자 조정 순서는 가능일 누락 방지 #427 우선, 사진 정상 UAT 별도 진행,
+공통 계측 PR417·묶음 조회 PR418·이 PR419 통합 및 릴리스다. 프런트가 이미 완료한
+첫 페이지·단계별 표시를 중복 개발하지 않고 기존 조회 계약을 그대로 유지한다.
+
 ## 변경과 유지 계약
 
 Node와 Edge에서 `attempts → 최신 attempt의 submissions` 조회를 하나의 의존 분기로
@@ -63,3 +68,14 @@ submission 완료와 최종 권한 RPC의 미실행을 검증한 뒤, gate 해�
 일반 PR은 dev 대상이며 필수 application/migration CI와 독립 QA를 통과해야 한다.
 최종 release 승인 범위에서 API 코드를 반영한다. 이 변경의 DB 적용/secret/설정 변경은 없다.
 문제 시 이전 API artifact로 rollback하며 DB rollback이나 이력 수정은 하지 않는다.
+
+## 최신 dev 통합 검증 (2026-10-10)
+
+- dev `5787158` 통합. 충돌은 제품 가이드 양쪽 변경을 보존해 해결했다.
+- `npm run ci:quality`: PASS, Node 2722건 및 secrets/OpenAPI/lint/typecheck/build.
+- `npm run edge:check`: PASS, Edge 496 + 보고 runtime 65건,
+  후보 포함 bundle 19,248,612 bytes (20,000,000 bytes 미만).
+- 독립 QA: Node assignment-card 52 + Edge assignment 36 = 88건 PASS,
+  P0/P1/P2 차단 결함 없음. 최종 권한·세션 재확인과 누락·통보 이력 경계 보존 확인.
+- `git diff --check` 및 staged diff PASS. 신규 SQL·운영 DB 적용은 없으며
+  실제 DB/운영 성능/UAT는 NOT RUN. 새 head의 필수 CI 확인과 병합·릴리스는 후속이다.

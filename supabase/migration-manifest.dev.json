@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 111,
+  "totalCount": 112,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 33,
+    "count": 34,
     "first": "assignment_unavailability_reassignment",
-    "head": "post_approval_room_issue_ledger"
+    "head": "room_event_effective_lookup_indexes"
   },
-  "head": "post_approval_room_issue_ledger",
+  "head": "room_event_effective_lookup_indexes",
   "migrations": [
     {
       "order": 1,
@@ -568,6 +568,11 @@
       "order": 111,
       "name": "post_approval_room_issue_ledger",
       "sha256": "d5c9933a91f8841b3f31404eccd14bd34725c458ed471bf10c0deac50fc42ee1"
+    },
+    {
+      "order": 112,
+      "name": "room_event_effective_lookup_indexes",
+      "sha256": "dc9ee95371faa2b0daae9cd3b279c0b0d38c243581ca73bdc5e5260375aae41c"
     }
   ]
 }
