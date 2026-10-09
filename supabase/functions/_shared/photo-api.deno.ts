@@ -171,8 +171,8 @@ Deno.test("photo exact HTTP routes use verified latest active/limited identity a
     if (state === "active") {
       assert(
         content.headers.get("access-control-expose-headers") ===
-          "Content-Disposition",
-        "authorized frontend can read only the server disposition header",
+          "Content-Disposition, Server-Timing",
+        "authorized frontend can read disposition and common handler timing",
       );
     }
   }

@@ -7,6 +7,7 @@ import type { AppEnv } from './config/env.js';
 import { loggerOptions } from './config/logger.js';
 import { type Actor, canManageAccounts } from './domain/actor.js';
 import { AppError } from './lib/app-error.js';
+import { apiTimingEligible, apiTimingHeaders } from './lib/api-timing.js';
 import { createSupabaseClients, type SupabaseClients } from './lib/supabase.js';
 import { createAccountRoutes } from './modules/accounts/account.routes.js';
 import { type AccountService, SupabaseAccountService } from './modules/accounts/account.service.js';
@@ -121,6 +122,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     logger: options.logger === false ? false : loggerOptions(options.env.LOG_LEVEL),
     requestIdHeader: 'x-request-id',
     trustProxy: true
+  });
+  const requestStarts = new WeakMap<object, number>();
+  app.addHook('onRequest', async (request) => { requestStarts.set(request, performance.now()); });
+  app.addHook('onSend', async (request, reply, payload) => {
+    const started = requestStarts.get(request);
+    const path = (request.raw.url ?? '/').split('?')[0] ?? '/';
+    if (started !== undefined && apiTimingEligible(request.method, path, reply.statusCode)) {
+      const headers = apiTimingHeaders(performance.now() - started,
+        String(reply.getHeader('server-timing') ?? ''), String(reply.getHeader('access-control-expose-headers') ?? ''));
+      reply.headers(headers);
+    }
+    return payload;
   });
 
   let services = options.services;

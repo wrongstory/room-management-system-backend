@@ -4,6 +4,65 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import type { PhotoService } from "../_shared/photo-service.ts";
 
+Deno.test("common timing exposes only fixed duration on successful business responses", async () => {
+  const deps: ApiHandlerDependencies = {
+    createClients: () =>
+      ({
+        admin: { rpc: () => Promise.resolve({ data: [], error: null }) },
+      }) as unknown as EdgeClients,
+    authenticateRequest: () =>
+      Promise.resolve({
+        authUserId: "synthetic",
+        profileId: "synthetic",
+        displayName: "synthetic",
+        role: "admin",
+        mustChangePassword: false,
+      }),
+  };
+  const token = `h.${
+    btoa(JSON.stringify({ session_id: "10000000-0000-4000-8000-000000000001" }))
+  }.synthetic`;
+  for (const prefix of ["/api", "/functions/v1/api"]) {
+    const response = await handleApiRequest(
+      new Request(`https://api.example${prefix}/v1/rooms`, {
+        headers: {
+          authorization: `Bearer ${token}`,
+          "server-timing": "private-secret",
+        },
+      }),
+      deps,
+    );
+    assert(response.status === 200, "success");
+    assert(
+      /^api_total;dur=\d+\.\d$/.test(
+        response.headers.get("server-timing") ?? "",
+      ),
+      "numeric only",
+    );
+    assert(
+      response.headers.get("access-control-expose-headers") === "Server-Timing",
+      "browser-readable",
+    );
+    assert(
+      JSON.stringify(await response.json()) === JSON.stringify({ rooms: [] }),
+      "same payload",
+    );
+  }
+  const denied = await handleApiRequest(
+    new Request("https://api.example/api/v1/rooms"),
+    {
+      ...deps,
+      authenticateRequest: () =>
+        Promise.reject(new EdgeError(401, "INVALID_ACCESS_TOKEN", "denied")),
+    },
+  );
+  assert(
+    denied.status === 401 && !denied.headers.has("server-timing"),
+    "no denial timing",
+  );
+  await denied.body?.cancel();
+});
+
 Deno.test("#406 PUT preflight preserves exact origins and all CAS headers without auth or DB", async () => {
   const previous = Deno.env.get("CORS_ORIGINS");
   const origins = [
