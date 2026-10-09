@@ -32,7 +32,8 @@ describe('isolated administrator evidence handover HTTP', () => {
     expect(spec.security).toEqual([{ bearerAuth: [] }]);
     expect(spec['x-required-roles']).toEqual(['admin']);
     expect(spec['x-query-allowed']).toBe(false);
-    expect(spec['x-implementation-status']).toBe('source-registered-not-deployed');
+    expect(spec['x-implementation-status']).toBe('deployed');
+    expect(spec['x-deployed-release']).toBe('v0.9.0');
     expect(spec.parameters.map(p => [p.name, p.in, p.required])).toEqual([
       ['operationId', 'path', true], ['Idempotency-Key', 'header', true]
     ]);
