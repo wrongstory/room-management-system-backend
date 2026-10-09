@@ -7,6 +7,7 @@
 실제 업무 UAT 완료를 의미하지 않는다. #406은 PUT CORS·사진 개수20 schema·
 배포 표기만 정정한다. 사용자 병합/재배포 승인 후 [v0.9.1](./RELEASE_V0.9.1.md)을
 준비 중이고, 이 패치의 운영 반영은 아직 완료하지 않았다.
+
 ## 2026-10-07 #336 정식 source API·Swagger 연결 — 운영 미배포
 
 `dev@ac8c775` 기반 `codex/336-latest-dev-integration`의 미게시 후보에 #336을 기본

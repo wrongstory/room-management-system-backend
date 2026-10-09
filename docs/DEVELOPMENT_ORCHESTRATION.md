@@ -19,6 +19,7 @@ dev1a91ad8로 보호 squash됐다. release에 테스트 한 파일을 정상 통
 하지 않는다. 최신 범위·실제 미완료 gate는 [v0.9.0 빠른 배포](./RELEASE_V0.9.0.md)를 따른다.
 release/v0.9.0은 dev8bdaec3에서 시작했으며 미병합 초기화 PR402와 v0.8.0은 보존·분리한다.
 운영85/source111 및 main 누적 충돌·#376 실제 CRLF 호환이 현재 직접 배포 점검 대상이다.
+
 ## 2026-10-07 최신 실행 checkpoint
 
 #336/PR401은 dev f1d1f6d에 보호 squash 완료, #336/#400 source/dev 종료다.
