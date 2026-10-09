@@ -7,6 +7,8 @@ import {
 const integer = { type: "integer", minimum: 0, maximum: 9007199254740991 };
 const signed = { ...integer, minimum: -9007199254740991 };
 const uuid = { type: "string", format: "uuid" };
+const batchUuid =
+  "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}";
 const date = {
   type: "string",
   format: "date",
@@ -83,6 +85,33 @@ function responses(ref: string) {
 }
 const common = { tags: ["Payroll"], security: [{ bearerAuth: [] }] };
 const payrollRemittancePaths = {
+  "/v1/payroll/remittance-markers": {
+    get: {
+      ...common,
+      operationId: "listPayrollRemittanceMarkers",
+      summary: "주차별 송금 표시 일괄 조회 (최대 10명)",
+      "x-required-roles": ["admin", "maid"],
+      description:
+        "관리자는 최대 10명, 메이드는 본인만 조회합니다. maidProfileIds는 쉼표로 구분한 UUID이며 중복(대소문자 포함)·빈 값·반복 query는 거부합니다. 입력 순서를 유지하고 내부 조회 동시성은 3입니다. 각 항목은 기존 세션·권한 검사와 basisFingerprint/version/needsReconfirmation을 유지합니다. 항목 간 동일 DB snapshot은 보장하지 않으며 DB RPC 개수는 인원수와 같습니다. 한 항목이라도 실패하면 전체 오류이며 미조회 항목을 marked=false로 추측하지 마세요. 기존 단건 GET은 유지합니다. 조회는 지급·표시를 변경하지 않고 128KiB/no-store를 적용합니다.",
+      parameters: [
+        {
+          name: "maidProfileIds",
+          in: "query",
+          required: true,
+          style: "form",
+          explode: false,
+          schema: {
+            type: "string",
+            minLength: 36,
+            maxLength: 369,
+            pattern: `^${batchUuid}(,${batchUuid}){0,9}$`,
+          },
+        },
+        readParameters[1],
+      ],
+      responses: responses("PayrollRemittanceBatch"),
+    },
+  },
   "/v1/payroll/remittance-marker": {
     get: {
       ...common,
@@ -211,6 +240,15 @@ function exact<T extends Record<string, unknown>>(properties: T) {
   };
 }
 const payrollRemittanceSchemas = {
+  PayrollRemittanceBatch: exact({
+    weekStart: date,
+    markers: {
+      type: "array",
+      minItems: 1,
+      maxItems: 10,
+      items: { $ref: "#/components/schemas/PayrollRemittanceMarker" },
+    },
+  }),
   PayrollRemittanceBasis: exact(basisFields),
   PayrollRemittanceMarker: exact(markerFields),
   PayrollRemittanceSetInput: exact({ ...command, marked: { type: "boolean" } }),

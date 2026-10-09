@@ -10,6 +10,7 @@ const sourcePaths = [
   'supabase/functions/_shared/runtime.ts',
   'supabase/functions/_shared/activity-contract.ts',
   'supabase/functions/_shared/activity-api.ts',
+  'supabase/functions/_shared/payroll-remittance-batch.ts',
   'supabase/functions/_shared/post-approval-openapi.ts',
   'supabase/functions/_shared/account-api.ts',
   'supabase/functions/_shared/availability-api.ts',
@@ -240,6 +241,8 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
 }
 
 function main() {
+const batch = spawnSync(process.execPath, ['scripts/generate-remittance-batch-edge.mjs', '--check'], { stdio: 'inherit' });
+if (batch.status !== 0) throw new Error('Remittance batch generated source verification failed');
 const reports = spawnSync(process.execPath, ['scripts/generate-post-approval-report-edge.mjs', '--check'], { stdio: 'inherit' });
 if (reports.status !== 0) throw new Error('Report generated source verification failed');
 // Fresh npm ci builds the ignored JS from the reviewed manifest, without rewriting it.

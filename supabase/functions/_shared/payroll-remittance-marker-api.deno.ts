@@ -140,6 +140,168 @@ const common = {
   p_maid_profile_id: input.maidProfileId,
   p_week_start: input.weekStart,
 };
+const batchPath = "/v1/payroll/remittance-markers";
+const batchQuery = (ids = [id(3)]) =>
+  new URLSearchParams({
+    weekStart: input.weekStart,
+    maidProfileIds: ids.join(","),
+  }).toString();
+Deno.test("#414 Edge bounded batch uses one auth and scoped read per item", async () => {
+  const mock = dependencies();
+  let active = 0, peak = 0;
+  const drift = {
+    ...on,
+    basis: { ...basis, accrualAmount: 33000 },
+    needsReconfirmation: true,
+    canReconfirm: true,
+  };
+  mock.clients.admin.rpc = ((name: string, args: Record<string, unknown>) => {
+    mock.calls.push([name, args]);
+    active++;
+    peak = Math.max(peak, active);
+    return new Promise((resolve) =>
+      setTimeout(() => {
+        active--;
+        resolve({
+          data: { ...drift, maidProfileId: args.p_maid_profile_id },
+          error: null,
+        });
+      }, 1)
+    );
+  }) as unknown as typeof mock.clients.admin.rpc;
+  const ids = Array.from({ length: 10 }, (_, i) => id(i + 3));
+  const response = await handleApiRequest(
+    request(batchPath, "GET", batchQuery(ids)),
+    mock.options,
+  );
+  assert(
+    response.status === 200 &&
+      response.headers.get("cache-control") === "no-store",
+  );
+  assert(
+    JSON.stringify(await response.json()) === JSON.stringify({
+      weekStart: input.weekStart,
+      markers: ids.map((maidProfileId) => ({ ...drift, maidProfileId })),
+    }),
+  );
+  assert(
+    peak === 3 && active === 0 && mock.authenticated() === 1 &&
+      mock.calls.length === 10,
+  );
+  for (const [name, args] of mock.calls) {
+    assert(name === "get_payroll_remittance_marker");
+    assert(
+      args.p_actor_profile_id === admin.profileId &&
+        args.p_session_id === session && args.p_expected_actor_role === "admin",
+    );
+  }
+});
+Deno.test("#414 Edge rejects invalid batch before any RPC", async () => {
+  for (
+    const query of [
+      "",
+      batchQuery() + "&extra=1",
+      batchQuery() + "&weekStart=2026-09-21",
+      batchQuery() + "&maidProfileIds=" + id(4),
+      batchQuery([id(3), id(3).toUpperCase()]),
+      batchQuery(Array.from({ length: 11 }, (_, i) => id(i + 3))),
+      "weekStart=2026-02-29&maidProfileIds=" + id(3),
+      batchQuery([id(3), ""]),
+    ]
+  ) {
+    const mock = dependencies();
+    const response = await handleApiRequest(
+      request(batchPath, "GET", query),
+      mock.options,
+    );
+    assert(response.status === 400 && mock.calls.length === 0);
+    assert((await response.json()).error.code === "VALIDATION_ERROR");
+  }
+});
+Deno.test("#414 Edge role, self, password and session gates", async () => {
+  for (
+    const actor of [maid, { ...maid, profileId: id(4) }, {
+      ...admin,
+      role: "developer" as const,
+    }, { ...admin, mustChangePassword: true }]
+  ) {
+    const mock = dependencies(
+      { ...marker, canSet: false, setBlockedReason: "ADMIN_REQUIRED" },
+      null,
+      actor,
+    );
+    const response = await handleApiRequest(
+      request(batchPath, "GET", batchQuery()),
+      mock.options,
+    );
+    assert(response.status === (actor === maid ? 200 : 403));
+    assert(
+      mock.calls.filter(([name]) => name === "get_payroll_remittance_marker")
+        .length === (actor === maid ? 1 : 0),
+    );
+  }
+  const mock = dependencies();
+  const response = await handleApiRequest(
+    request(batchPath, "GET", batchQuery(), null),
+    mock.options,
+  );
+  assert(response.status === 401 && mock.calls.length === 0);
+});
+Deno.test("#414 Edge fails whole batch on RPC, scope or size failure", async () => {
+  for (
+    const [data, failure, status, code] of [
+      [marker, "SESSION_REVOKED", 401, "SESSION_REVOKED"],
+      [
+        { ...marker, maidProfileId: id(4) },
+        null,
+        500,
+        "PAYROLL_COMMAND_FAILED",
+      ],
+      [
+        { ...marker, private: "x".repeat(140000) },
+        null,
+        500,
+        "PAYROLL_RESPONSE_TOO_LARGE",
+      ],
+    ] as const
+  ) {
+    const mock = dependencies(data, failure);
+    const response = await handleApiRequest(
+      request(batchPath, "GET", batchQuery()),
+      mock.options,
+    );
+    const body = await response.json();
+    assert(
+      response.status === status && body.error.code === code &&
+        !("markers" in body),
+    );
+    assert(response.headers.get("cache-control") === "no-store");
+  }
+});
+Deno.test("#414 Edge rejects wrong methods and aliases before auth", async () => {
+  for (
+    const [method, path] of [
+      ["HEAD", batchPath],
+      ["PUT", batchPath],
+      ["POST", batchPath],
+      ["DELETE", batchPath],
+      ["GET", batchPath + "/"],
+      ["GET", batchPath + "/history"],
+      ["GET", "/v1/payroll/remittance%2Dmarkers"],
+      ["GET", "/v1/payroll//remittance-markers"],
+    ]
+  ) {
+    const mock = dependencies();
+    const response = await handleApiRequest(
+      request(path, method, ""),
+      mock.options,
+    );
+    assert(
+      response.status === 404 && mock.authenticated() === 0 &&
+        mock.calls.length === 0,
+    );
+  }
+});
 Deno.test("#331 Edge GET exact sixteen fields and role/session-bound RPC", async () => {
   const mock = dependencies(),
     response = await handleApiRequest(request(), mock.options);
