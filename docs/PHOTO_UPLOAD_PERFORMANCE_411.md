@@ -22,6 +22,14 @@ POST는 모두 200/accepted, 장별 서버 실행 시간은 10,175 / 6,120 / 5,9
 첫 장 지연을 cold start로 확정하거나 전체 시간을 파일 전송 시간으로 해석하지 않는다.
 실제 사진 원문·credential을 내려받거나 업무 상태를 변경하지 않았다.
 
+PR 준비 중 확인한 [프런트 추가 1장 실측](https://github.com/makee-ham/room-management-system/issues/206#issuecomment-6095868309):
+브라우저 요청10.581초, photo_db=4,128.2ms, photo_drive=4,491.5ms,
+photo_decode=489.3ms, api_total=9,851.5ms다. 첫 5장과 다른 추가 표본이며
+DB/Drive 지연의 세부 원인이나 평균을 확정하지 않는다. 프런트 첫 5장 POST 간 공백 합계는
+약18ms로, 큐 사이의 인위적 대기가 주 병목이라는 근거는 없다.
+정상 snapshot UAT는 통과했지만 전역 옵션/배포 설정은 변경하지 않았다는 프런트 보고다.
+다음 upload 우선 작업은 DB 조회/RPC/최종 확정/snapshot별 숫자 계측과 중복 왕복 조사다.
+
 ## 1차: Drive 중복 조회 제거와 세부 계측
 
 - Google `files.create` 성공 응답의 완전한 File metadata를 기존 검증기에 전달한다.
