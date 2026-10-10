@@ -1,6 +1,20 @@
 # 프론트엔드·Codex API 연동 가이드
 
-## 2026-10-10 #411 업로드 성능 후속 — 운영 미배포 후보
+## 2026-10-10 최신 운영 상태 — v0.9.4 / API45
+
+[v0.9.4 배포 및 프런트 인계](./RELEASE_V0.9.4_DEPLOYED.md)가 아래 과거 후보/미배포 기록보다 우선한다.
+main `a0cef206c7672541494696bec47ae0ca62723322`, API ACTIVE45, Swagger151 paths/163 operations.
+Drive 생성 ACK 재사용(#434/435)과 DB·Drive 세부 계측(#436/437)이 운영에 반영됐다.
+신규 SQL0/이번 배포 migration 실행0. 승인된 release 전체 DB 증거는 main에서 재사용했다.
+
+프런트 DOCS/32(dev82bc340) 보고상 snapshot 옵션은 Production/Preview에서 이미 활성화됐다.
+프런트 소스/옵션은 이 작업에서 변경하지 않았다. 현재 운영 화면에서 재측정할 수 있지만
+v0.9.4 실제 업로드 속도·HEIC/20장·오류 복구 UAT는 아직 NOT RUN이다.
+전역 순차 큐·같은 key/Blob 복구·nullable snapshot fallback을 유지하고 숫자 timing은 선택적으로 읽는다.
+세부 계약과 재측정 항목은 위 인계 문서 및 [#436](./PHOTO_STAGE_TIMING_436.md)을 따른다.
+삭제·썸네일·안전한 병렬화는 이번 배포 완료 범위가 아니다.
+
+## 과거 checkpoint: 2026-10-10 #411 업로드 성능 후속 — 당시 운영 미배포 후보
 
 #435는 dev 병합 완료/운영 미배포다. 후속 [DB·Drive 세부 계측 #436](./PHOTO_STAGE_TIMING_436.md)은
 DB RPC별 시간과 Drive token 대기 누적을 추가한다. 합계/하위/병렬 대기의 중복을 주의하며
@@ -13,7 +27,7 @@ JSON·인증·CAS 계약 변경은 없고 프런트 수정 없이도 배포 뒤 
 아래의 옵션 활성화 미확인 문구는 이전 배포 시점 기록이며 전체 실기기 UAT PASS를 뜻하지 않는다.
 같은 collection의 전송 병렬화는 아직 지원하지 않는다. 숫자 timing/브라우저 구간별 실측을 프런트에서 담당한다.
 
-## 2026-10-10 최신 운영 상태 — v0.9.3 / API44
+## 과거 checkpoint: 2026-10-10 v0.9.3 / API44
 
 [운영 배포 기록](./RELEASE_V0.9.3_DEPLOYED.md)이 아래 과거 후보/미배포 표기보다 우선한다.
 main72771b5, API ACTIVE44, Swagger151 paths/163 operations 게시·동일성 검증 완료.
