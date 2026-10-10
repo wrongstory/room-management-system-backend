@@ -1,5 +1,12 @@
 # 백엔드 서버 설계
 
+## #416 조회 계획·인덱스 근거 수집
+
+최신-event의 effective/recorded/id 순서와 기존 recorded 중심 인덱스를 로컬 임시 합성
+테이블에서 비교하는 도구를 추가한다. 앱 SQL·DB·RLS·운영 인덱스는 변경하지 않는다.
+주급 coalesce 및 반복 summary, 객실 issue count는 아직 실측할 후속 후보다.
+[과거 측정 결과와 최신 기준의 미검증 범위](./QUERY_PLAN_EVIDENCE_416.md).
+
 ## #415 배정 카드 조회 의존 분기 최적화 후보
 
 Node/Edge의 bounded 관계 조회에서 attempt→submission만 하나의 병렬 분기로 묶는다.
