@@ -7,6 +7,8 @@ import {
 const integer = { type: "integer", minimum: 0, maximum: 9007199254740991 };
 const signed = { ...integer, minimum: -9007199254740991 };
 const uuid = { type: "string", format: "uuid" };
+const batchUuid =
+  "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}";
 const date = {
   type: "string",
   format: "date",
@@ -83,6 +85,33 @@ function responses(ref: string) {
 }
 const common = { tags: ["Payroll"], security: [{ bearerAuth: [] }] };
 const payrollRemittancePaths = {
+  "/v1/payroll/remittance-markers": {
+    get: {
+      ...common,
+      operationId: "listPayrollRemittanceMarkers",
+      summary: "주차별 송금 표시 일괄 조회 (최대 10명)",
+      "x-required-roles": ["admin", "maid"],
+      description:
+        "관리자는 최대 10명, 메이드는 본인만 조회합니다. maidProfileIds는 쉼표로 구분한 UUID이며 중복(대소문자 포함)·빈 값·반복 query는 거부합니다. 입력 순서를 유지하고 내부 조회 동시성은 3입니다. 각 항목은 기존 세션·권한 검사와 basisFingerprint/version/needsReconfirmation을 유지합니다. 항목 간 동일 DB snapshot은 보장하지 않으며 DB RPC 개수는 인원수와 같습니다. 한 항목이라도 실패하면 전체 오류이며 미조회 항목을 marked=false로 추측하지 마세요. 기존 단건 GET은 유지합니다. 조회는 지급·표시를 변경하지 않고 128KiB/no-store를 적용합니다.",
+      parameters: [
+        {
+          name: "maidProfileIds",
+          in: "query",
+          required: true,
+          style: "form",
+          explode: false,
+          schema: {
+            type: "string",
+            minLength: 36,
+            maxLength: 369,
+            pattern: `^${batchUuid}(,${batchUuid}){0,9}$`,
+          },
+        },
+        readParameters[1],
+      ],
+      responses: responses("PayrollRemittanceBatch"),
+    },
+  },
   "/v1/payroll/remittance-marker": {
     get: {
       ...common,
@@ -211,6 +240,15 @@ function exact<T extends Record<string, unknown>>(properties: T) {
   };
 }
 const payrollRemittanceSchemas = {
+  PayrollRemittanceBatch: exact({
+    weekStart: date,
+    markers: {
+      type: "array",
+      minItems: 1,
+      maxItems: 10,
+      items: { $ref: "#/components/schemas/PayrollRemittanceMarker" },
+    },
+  }),
   PayrollRemittanceBasis: exact(basisFields),
   PayrollRemittanceMarker: exact(markerFields),
   PayrollRemittanceSetInput: exact({ ...command, marked: { type: "boolean" } }),
@@ -503,6 +541,14 @@ const photoPathId = (name: string) => ({
   required: true,
   schema: { type: "string", format: "uuid" },
 });
+const includePhotoSlotsParameter = {
+  name: "includePhotoSlots",
+  in: "query",
+  required: false,
+  schema: { type: "boolean", enum: [true] },
+  description:
+    "선택적 true만 허용. accepted 후 같은 actor/session으로 조회한 photoSlots를 반환합니다. 조회 실패·배정 변경이면 null이며 accepted를 취소하지 않습니다. null/미지원은 GET photo-slots로 복구하고 새 key로 업로드하지 않습니다. snapshot은 별도 조회 시점이며 다음 CAS 성공 보장이 아닙니다.",
+};
 function photoOperation(
   operationId: string,
   summary: string,
@@ -519,7 +565,14 @@ function photoOperation(
       "200": {
         description:
           "최신 DB 권한과 상태를 검증한 안전한 결과. Drive ID·locator·OAuth·원문 hash는 반환하지 않습니다.",
-        headers: { "Cache-Control": noStoreHeader },
+        headers: {
+          "Cache-Control": noStoreHeader,
+          "Server-Timing": {
+            schema: { type: "string" },
+            description:
+              "인증된 성공 응답의 요청별 고정 단계 duration(ms). photo_total은 인증 후 서비스 범위이며 전체 사용자 대기시간이 아닙니다. 사용자/파일/Drive ID·URL·비밀정보는 포함하지 않습니다.",
+          },
+        },
         content: {
           "application/json": {
             schema: { $ref: `#/components/schemas/${schema}` },
@@ -810,11 +863,15 @@ export const openApiDocument = {
       "3. `mustChangePassword=true`이면 계정·객실 화면으로 보내지 말고 `POST /v1/auth/password`만 허용합니다.",
       "4. 변경 API에는 사용자 동작별 `Idempotency-Key`를 보내며, 같은 본문 재시도에만 같은 키를 재사용합니다.",
       "5. 실패 처리는 HTTP 상태와 함께 안정적인 `error.code`를 기준으로 분기합니다.",
+      "공통 인증 확인 장애는 503 AUTH_CONTEXT_UNAVAILABLE입니다. 계정 폐기/로그인 만료(401 SESSION_REVOKED)와 다르므로 자동 로그아웃하거나 빈 데이터로 대체하지 마세요. 재시도 UI를 제공하고 변경 요청은 같은 본문·Idempotency-Key를 유지합니다. #442 source 후보이며 운영 적용은 릴리스 기록으로 확인합니다.",
       "",
       "## 역할 경계",
       "- `developer`: 계정 관리·운영 상태와 별도의 안전한 객실 기준정보 카탈로그만 관리할 수 있으며 예약·점유·청소·PIN 운영 데이터는 금지됩니다.",
       "- `admin`: 계정 관리와 객실 업무가 가능합니다.",
       "- `maid`: 계정·전체 객실 API는 사용할 수 없고 본인의 주간 가능일만 조회·제출·변경 요청할 수 있습니다.",
+      "",
+      "## 성능 계측 (source 후보)",
+      "선택 업무 경로의 성공 응답은 Server-Timing: api_total;dur=<ms>를 제공합니다. 허용된 브라우저 Origin에서 응답 헤더를 읽을 수 있습니다. 오류·인증/공개 경로·HEAD/OPTIONS는 제외하며 고정 숫자만 반환합니다. api_total은 handler 시작부터 응답 생성까지이며 전체 업로드/다운로드·렌더링·콜드 시작 시간 또는 DB 단독 시간이 아닙니다. 계약·권한·캐시 정책은 바뀌지 않습니다. 운영 적용 여부와 경로 목록은 docs/API_PERFORMANCE_413.md를 확인하세요.",
       "",
       "프론트 구현 절차와 타입 생성 명령은 저장소의 `docs/FRONTEND_API_INTEGRATION.md`를 참고하세요.",
     ].join("\n"),
@@ -1189,11 +1246,12 @@ export const openApiDocument = {
           },
         },
         description:
-          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 JPEG/WebP/HEIC/HEIF 원문 최대 5242880 bytes(5MiB)를 허용하고 초과 byte에서 취소합니다. 원본 magic·전체 decode·자원상한을 검사하고 방향 보정·EXIF 등 metadata 제거·축소/품질 조정 후 JPEG/WebP 최종본 307200 bytes(300KiB) 이하와 output decode/SHA를 다시 검증합니다. HEIC/HEIF는 JPEG로 저장합니다. assignmentId/assignmentRevision/expectedPhotoRevision의 3개 query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
+          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 JPEG/WebP/HEIC/HEIF 원문 최대 5242880 bytes(5MiB)를 허용하고 초과 byte에서 취소합니다. 원본 magic·전체 decode·자원상한을 검사하고 방향 보정·EXIF 등 metadata 제거·축소/품질 조정 후 JPEG/WebP 최종본 307200 bytes(300KiB) 이하와 output decode/SHA를 다시 검증합니다. HEIC/HEIF는 JPEG로 저장합니다. assignmentId/assignmentRevision/expectedPhotoRevision 및 선택 includePhotoSlots=true query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
         parameters: [
           photoPathId("attemptId"),
           photoPathId("slotId"),
           idempotencyHeader,
+          includePhotoSlotsParameter,
           {
             name: "assignmentId",
             in: "query",
@@ -1277,6 +1335,7 @@ export const openApiDocument = {
             photoPathId("slotId"),
             photoPathId("photoItemId"),
             idempotencyHeader,
+            includePhotoSlotsParameter,
             {
               name: "assignmentId",
               in: "query",
@@ -1437,6 +1496,11 @@ export const openApiDocument = {
               "검증 완료된 저장본 JPEG/WebP(최대 300KiB). 스마트폰 입력 원본은 저장하지 않으며 Drive 응답 header/Location/filename은 전달하지 않습니다.",
             headers: {
               "Cache-Control": noStoreHeader,
+              "Server-Timing": {
+                schema: { type: "string" },
+                description:
+                  "권한 재검증 성공 후 photo_db/photo_drive/photo_total의 duration(ms)만 제공.",
+              },
               "X-Content-Type-Options": { schema: { const: "nosniff" } },
               "Content-Disposition": {
                 description:
@@ -2289,7 +2353,7 @@ export const openApiDocument = {
         operationId: "listAvailability",
         summary: "현재 주간 가능일 조회",
         description:
-          "비밀번호 변경을 완료한 active maid 또는 active business admin 전용입니다. maid는 본인 자료만 조회할 수 있으며, admin만 maidProfileId로 특정 메이드를 선택할 수 있습니다. weekStart는 조회할 주의 월요일 날짜입니다.",
+          "비밀번호 변경을 완료한 active maid 또는 active business admin 전용입니다. maid는 본인 자료만 조회할 수 있으며, admin만 maidProfileId로 특정 메이드를 선택할 수 있습니다. weekStart는 조회할 주의 월요일 날짜입니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 7일 상세가 불완전하면 500 AVAILABILITY_COMMAND_FAILED로 거부합니다. 오류를 미제출이나 근무 불가로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid", "admin"],
         parameters: [
@@ -2382,7 +2446,7 @@ export const openApiDocument = {
         operationId: "listAvailabilityChangeRequests",
         summary: "가능일 변경 요청 목록 조회",
         description:
-          "active maid는 본인 요청만, active business admin은 전체 요청을 조회합니다. status·weekStart·maidProfileId 필터는 모두 선택이며 maid가 다른 profile ID를 전달하면 403입니다.",
+          "active maid는 본인 요청만, active business admin은 전체 요청을 조회합니다. status·weekStart·maidProfileId 필터는 모두 선택이며 maid가 다른 profile ID를 전달하면 403입니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 전체 건수를 확인할 수 없으면 500 AVAILABILITY_COMMAND_FAILED입니다. 필요하면 기존 주차·상태·메이드 필터로 범위를 좁힙니다. 오류를 요청 0건으로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid", "admin"],
         parameters: [
@@ -2462,7 +2526,7 @@ export const openApiDocument = {
         operationId: "listAvailabilityCandidates",
         summary: "날짜별 배정 가능 메이드 후보 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. 해당 날짜가 가능하다고 제출한 현재 version의 active maid만 반환하며 developer와 maid는 조회할 수 없습니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 해당 날짜가 가능하다고 제출한 현재 version의 active maid만 반환하며 developer와 maid는 조회할 수 없습니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 전체 건수를 확인할 수 없으면 500 AVAILABILITY_COMMAND_FAILED입니다. 오류를 후보 없음으로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -6595,7 +6659,7 @@ export const openApiDocument = {
           { type: "object", required: ["quotaWarning"] },
         ],
         description:
-          "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
+          "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. includePhotoSlots=true일 때만 photoSlots를 포함합니다. accepted 이외 또는 후속 조회 실패·배정 변경이면 null입니다. 재시도의 photoSlots는 새 조회 시점 결과이며 불변 receipt가 아닙니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
       },
       AttemptPhotoItem: {
         type: "object",
@@ -6656,6 +6720,41 @@ export const openApiDocument = {
       PhotoUploadOperation: {
         type: "object",
         additionalProperties: false,
+        // Only pre-provider/uncertain operations may lack retention metadata.
+        // Keep the shared photo-item retention contract non-nullable.
+        allOf: [
+          {
+            if: {
+              properties: {
+                status: {
+                  enum: [
+                    "provider_succeeded",
+                    "accepted",
+                    "compensation_pending",
+                    "compensated",
+                  ],
+                },
+              },
+            },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword; value is data, not a callable thenable.
+            then: {
+              properties: {
+                retentionPolicy: photoRetentionProperties.retentionPolicy,
+                mediaAvailability: photoRetentionProperties.mediaAvailability,
+              },
+            },
+          },
+          {
+            if: { properties: { retentionPolicy: { type: "null" } } },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword; value is data, not a callable thenable.
+            then: { properties: { mediaAvailability: { type: "null" } } },
+            else: {
+              properties: {
+                mediaAvailability: photoRetentionProperties.mediaAvailability,
+              },
+            },
+          },
+        ],
         required: [
           "operationId",
           "objectId",
@@ -6725,6 +6824,18 @@ export const openApiDocument = {
               "호환 별칭입니다. 새 클라이언트는 expiresAt을 사용합니다.",
           },
           ...photoRetentionProperties,
+          retentionPolicy: {
+            anyOf: [photoRetentionProperties.retentionPolicy, { type: "null" }],
+            description:
+              "reserved/reconciliation_pending에서 아직 보존 메타데이터가 없으면 null. mediaAvailability와 함께 null이며 저장 후에는 기존 정책 enum을 유지합니다.",
+          },
+          mediaAvailability: {
+            anyOf: [photoRetentionProperties.mediaAvailability, {
+              type: "null",
+            }],
+            description:
+              "보존 메타데이터가 없는 미완료 operation에서만 null. 업로드 완료나 삭제 성공을 뜻하지 않습니다.",
+          },
           compensationAllowed: {
             type: "boolean",
             description:
@@ -6734,6 +6845,13 @@ export const openApiDocument = {
             type: "boolean",
             description:
               "업로드 응답에서 필수. admission 기준 decimal10GB 이상 경고이며 raw 사용량은 노출하지 않습니다. 상태 조회에는 생략됩니다.",
+          },
+          photoSlots: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptPhotoSlots" }, {
+              type: "null",
+            }],
+            description:
+              "업로드 includePhotoSlots=true 전용. 기존 photo-slots GET과 같은 권한·projection. null이면 별도 GET fallback. 다음 변경은 snapshot의 최신 collection/item revision을 사용하며 409를 처리해야 합니다.",
           },
         },
       },
@@ -7492,6 +7610,7 @@ export const openApiDocument = {
             "RECLEAN_MAID_IMMUTABLE",
             "PREVIOUS_ROOM_WORKFLOW_ACTIVE",
             "SESSION_REVOKED",
+            "AUTH_CONTEXT_UNAVAILABLE",
             "INVALID_CREDENTIALS",
             "ACCOUNT_LOCKED",
             "LOGIN_RATE_LIMITED",
@@ -14102,6 +14221,50 @@ export const openApiDocument = {
     },
   },
 } as const;
+
+// Authentication availability is independent of domain-specific 503 contracts.
+for (const [path, item] of Object.entries(openApiDocument.paths)) {
+  for (const [method, raw] of Object.entries(item)) {
+    if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
+    const operation = raw as unknown as {
+      security?: Array<Record<string, unknown>>;
+      tags?: string[];
+      responses: Record<string, {
+        description?: string;
+        headers?: Record<string, unknown>;
+      }>;
+    };
+    if (!operation.security?.some((security) => "bearerAuth" in security)) {
+      continue;
+    }
+    // Match the router's separate limited identity paths, not broad UI tags:
+    // photo content uses ordinary auth; upload/slots/status use limited identity.
+    if (
+      path.startsWith("/v1/limited/") || path === "/v1/offline-events" ||
+      (path === "/v1/attempts/{attemptId}/submissions" && method === "post") ||
+      (operation.tags?.includes("Photos") &&
+        path !== "/v1/photos/{photoId}/content")
+    ) {
+      continue;
+    }
+    const existing = operation.responses["503"];
+    if (existing?.headers?.["Cache-Control"]) continue;
+    const unavailable = {
+      ...(existing ?? {
+        ...errorResponse,
+        description:
+          "공통 인증 조회 불가 시 AUTH_CONTEXT_UNAVAILABLE. 401과 구분하며 자동 로그아웃하지 않고 재시도합니다.",
+      }),
+      headers: { ...existing?.headers, "Cache-Control": noStoreHeader },
+    };
+    Object.assign(item, {
+      [method]: {
+        ...operation,
+        responses: { ...operation.responses, "503": unavailable },
+      },
+    });
+  }
+}
 
 function roomIdParameter(): Record<string, unknown> {
   return {

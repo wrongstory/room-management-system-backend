@@ -43,7 +43,38 @@ export interface PhotoRpc {
 }
 export type PhotoUploadResponse = PhotoUploadOperationProjection & {
   quotaWarning: boolean;
+  /** Fresh, separately authorized projection; null means GET fallback, not upload failure. */
+  photoSlots?: unknown;
 };
+const dbTimingStages = {
+  admit_photo_upload: 'db_admit', admit_photo_collection_upload: 'db_admit',
+  begin_admitted_photo_upload: 'db_begin', begin_admitted_photo_collection_upload: 'db_begin',
+  claim_admitted_photo_upload: 'db_claim', get_photo_provider_context: 'db_context',
+  reserve_photo_drive_folder: 'db_folder', reserve_named_photo_provider_identity: 'db_identity',
+  record_admitted_photo_provider_success: 'db_record', finalize_admitted_photo_upload: 'db_finalize',
+  get_photo_upload_receipt_with_session: 'db_receipt', get_attempt_photo_slots: 'db_snapshot',
+  refresh_photo_storage_quota: 'db_quota',
+} as const;
+type PhotoTimingStage = typeof dbTimingStages[keyof typeof dbTimingStages] | 'db_other' |
+  'db' | 'body' | 'decoder_init' | 'decode' | 'drive' | 'drive_ids' | 'drive_folders' | 'drive_upload' | 'drive_verify' | 'drive_token';
+/** Request-local, fixed names/numeric durations only. Never retain IDs, URLs, errors or bytes. */
+export class PhotoTiming {
+  readonly #started: number;
+  readonly #durations = new Map<PhotoTimingStage, number>();
+  constructor(private readonly clock: () => number = () => performance.now()) {
+    this.#started = clock();
+  }
+  async measure<T>(stage: PhotoTimingStage, work: () => T | PromiseLike<T>): Promise<T> {
+    const start = this.clock();
+    try { return await work(); }
+    finally { this.#durations.set(stage, (this.#durations.get(stage) ?? 0) + Math.max(0, this.clock() - start)); }
+  }
+  header(): string {
+    const duration = (value: number) => Number.isFinite(value) ? Math.min(3600000, Math.max(0, value)).toFixed(1) : '0.0';
+    return [...this.#durations].map(([stage, ms]) => `photo_${stage};dur=${duration(ms)}`)
+      .concat(`photo_total;dur=${duration(this.clock() - this.#started)}`).join(', ');
+  }
+}
 export type PhotoRoute =
   | { kind: "upload"; attemptId: string; slotId: string; photoItemId?: string }
   | {
@@ -213,16 +244,28 @@ function workerObject(value: unknown): DriveObject {
   };
 }
 export class PhotoService {
-  #quotaRefresh: Promise<void> | undefined;
   constructor(
     private readonly db: PhotoRpc,
     private readonly provider: () => PhotoProvider,
     private readonly initializeDecoder: () => Promise<void>,
+    private readonly timing?: PhotoTiming,
+    private readonly quotaRefresh: { pending?: Promise<void> | undefined } = {},
   ) {}
+  /** HTTP adapters create one scope per authenticated request, even with a shared Fastify service. */
+  withTiming(timing = new PhotoTiming()): PhotoService {
+    return new PhotoService(this.db, this.provider, this.initializeDecoder, timing, this.quotaRefresh);
+  }
+  timingHeader(): string | undefined { return this.timing?.header(); }
+  #providerTiming(): [] | [PhotoTiming] { return this.timing ? [this.timing] : []; }
+  #measure<T>(stage: PhotoTimingStage, work: () => T | PromiseLike<T>): Promise<T> {
+    return this.timing ? this.timing.measure(stage, work) : Promise.resolve().then(work);
+  }
   async #rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
     let response: { data: unknown; error: unknown };
     try {
-      response = await this.db.rpc(name, args);
+      const stage = Object.hasOwn(dbTimingStages, name)
+        ? dbTimingStages[name as keyof typeof dbTimingStages] : 'db_other';
+      response = await this.#measure('db', () => this.#measure(stage, () => this.db.rpc(name, args)));
     } catch {
       return failed();
     }
@@ -260,8 +303,8 @@ export class PhotoService {
     ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
   }
   async #refreshQuota(): Promise<void> {
-    this.#quotaRefresh ??= (async () => {
-      const value = await this.provider().quota();
+    this.quotaRefresh.pending ??= (async () => {
+      const value = await this.#measure('drive', () => this.provider().quota(...this.#providerTiming()));
       try {
         await this.#rpc("refresh_photo_storage_quota", {
           p_request_started_at: value.refreshStartedAt,
@@ -274,12 +317,32 @@ export class PhotoService {
       }
     })();
     try {
-      await this.#quotaRefresh;
+      await this.quotaRefresh.pending;
     } finally {
-      this.#quotaRefresh = undefined;
+      this.quotaRefresh.pending = undefined;
     }
   }
   async upload(
+    request: Request, i: PhotoIdentity, attemptId: string, slotId: string, photoItemId?: string,
+  ): Promise<PhotoUploadResponse> {
+    const options = new URL(request.url).searchParams.getAll('includePhotoSlots');
+    if (options.length > 1 || options.length === 1 && options[0] !== 'true') invalid();
+    const accepted = await this.#upload(request, i, attemptId, slotId, photoItemId);
+    if (options.length === 0) return accepted;
+    let photoSlots: unknown = null;
+    if (accepted.status === 'accepted') {
+      // Outside upload compensation/reconciliation: a failed read must never retry a saved file.
+      try {
+        const url = new URL(request.url); url.search = '';
+        const snapshot = row(await this.slots(new Request(url), i, attemptId));
+        const params = new URL(request.url).searchParams;
+        if (snapshot.attemptId === uuid(attemptId) && snapshot.assignmentId === uuid(params.get('assignmentId')) &&
+            snapshot.assignmentRevision === Number(params.get('assignmentRevision'))) photoSlots = snapshot;
+      } catch { /* Preserve the accepted receipt; client may independently retry GET. */ }
+    }
+    return { ...accepted, photoSlots };
+  }
+  async #upload(
     request: Request,
     i: PhotoIdentity,
     attemptId: string,
@@ -300,6 +363,7 @@ export class PhotoService {
       "assignmentId",
       "assignmentRevision",
       ...revisionKeys,
+      ...(new URL(request.url).searchParams.has('includePhotoSlots') ? ['includePhotoSlots'] : []),
     ]);
     for (const key of ["assignmentRevision", ...revisionKeys]) {
       if (!/^(0|[1-9]\d{0,15})$/.test(params.get(key) ?? "")) invalid();
@@ -371,14 +435,14 @@ export class PhotoService {
       value: PhotoUploadOperationProjection,
     ): PhotoUploadResponse => ({ ...value, quotaWarning });
     // No allocation/decode before latest ownership and durable CPU/quota admission.
-    const raw = await readPhotoBody(
+    const raw = await this.#measure('body', () => readPhotoBody(
       request.body,
       request.headers.get("content-length"),
       PHOTO_INPUT_MAX_BYTES,
-    );
-    await this.initializeDecoder();
+    ));
+    await this.#measure('decoder_init', () => this.initializeDecoder());
     const decodeStarted = performance.now();
-    let verified = await verifyPhotoBinary(raw, mime);
+    let verified = await this.#measure('decode', () => verifyPhotoBinary(raw, mime));
     const decodeElapsed = performance.now() - decodeStarted;
     const beginUpload = async () => {
       const prepared = "photoItemId" in binding
@@ -422,7 +486,7 @@ export class PhotoService {
         photoError(error).code !== "IDEMPOTENCY_KEY_REUSED"
       ) throw error;
       const legacyStarted = performance.now();
-      const legacy = await verifyPhotoBinary(raw, mime, "legacy");
+      const legacy = await this.#measure('decode', () => verifyPhotoBinary(raw, mime, "legacy"));
       if (
         decodeElapsed + performance.now() - legacyStarted >
           PHOTO_DECODE_BUDGET_MS
@@ -466,7 +530,7 @@ export class PhotoService {
           typeof context.uploadDate !== "string" ||
           typeof context.roomNumber !== "string"
         ) return failed();
-        const [dateCandidate, roomCandidate, fileId] = await provider.generateUploadIds();
+        const [dateCandidate, roomCandidate, fileId] = await this.#measure('drive', () => this.#measure('drive_ids', () => provider.generateUploadIds(...this.#providerTiming())));
         let folderId: string | undefined;
         for (const scope of ["date", "room"] as const) {
           const reserved = row(
@@ -489,12 +553,14 @@ export class PhotoService {
             parentFolderId !==
               (scope === "date" ? provider.rootFolderId() : folderId)
           ) return failed();
-          folderId = locator(reserved.folderId);
-          await provider.ensureFolder({
-            folderId,
+          const verifiedFolderId = locator(reserved.folderId);
+          folderId = verifiedFolderId;
+          const folderName = String(scope === 'date' ? context.uploadDate : context.roomNumber);
+          await this.#measure('drive', () => this.#measure('drive_folders', () => provider.ensureFolder({
+            folderId: verifiedFolderId,
             parentFolderId,
-            name: scope === "date" ? context.uploadDate : context.roomNumber,
-          });
+            name: folderName,
+          }, ...this.#providerTiming())));
         }
         context = row(
           await this.#rpc("reserve_named_photo_provider_identity", {
@@ -516,7 +582,7 @@ export class PhotoService {
           context.uploadDate !==
             new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)
         ) throw new PhotoError(409, "PHOTO_PROVIDER_DATE_MISMATCH");
-        const success = await provider.upload(object, verified.bytes);
+        const success = await this.#measure('drive', () => provider.upload(object, verified.bytes, this.timing));
         await this.#rpc("record_admitted_photo_provider_success", {
           ...worker,
           p_provider_locator: object.fileId,
@@ -760,7 +826,7 @@ export class PhotoService {
       (firstRetention.expiresAt !== null &&
         Date.parse(firstRetention.expiresAt) <= Date.now())
     ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
-    const bytes = await this.provider().read(object);
+    const bytes = await this.#measure('drive', () => this.provider().read(object, ...this.#providerTiming()));
     const latest = row(await this.#rpc("authorize_photo_read", args));
     const latestRetention = retentionMetadata(latest);
     if (
@@ -808,7 +874,7 @@ export class PhotoService {
     if (result.status === "reconciliation_pending") {
       // No second upload. Only verified existing bytes at the reserved identity can resolve uncertainty.
       const object = workerObject(context),
-        success = await this.provider().inspect(object);
+        success = await this.#measure('drive', () => this.provider().inspect(object, ...this.#providerTiming()));
       result = projectPhotoUploadOperation(
         await this.#rpc("record_admitted_photo_provider_success", {
           ...args,

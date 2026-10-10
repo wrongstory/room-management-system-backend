@@ -195,6 +195,29 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
+  it('pins the source-reviewed113 tail without accepting a rehashed replacement', () => {
+    const changed = clone(entries), last = changed[112];
+    const changedManifest = clone(manifest), record = changedManifest.migrations[112];
+    if (!last || !record) throw new Error('EXPECTED113_TAIL');
+    last.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(last.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed auth-context113 tail');
+  });
+  it('accepts historical111 and only the reviewed112 tail despite a matching altered manifest hash', () => {
+    const historical = { ...manifest, totalCount: 111, head: 'post_approval_room_issue_ledger',
+      pending: { count: 33, head: 'post_approval_room_issue_ledger' }, migrations: manifest.migrations.slice(0,111) };
+    expect(() => validatePostApprovalUpgradeSource(historical, entries.slice(0,111))).not.toThrow();
+    const changed = clone(entries), last = changed[111];
+    const changedManifest = clone(manifest), record = changedManifest.migrations[111];
+    if (!last || !record) throw new Error('EXPECTED112_TAIL');
+    last.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(last.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the reviewed index-only112 tail');
+    const renamed = clone(entries), tail = renamed[111];
+    if (!tail) throw new Error('EXPECTED112_TAIL');
+    tail.file = '20261009081847_room_event_effective_lookup_indexes.sql';
+    expect(() => validatePostApprovalUpgradeSource(manifest, renamed)).toThrow();
+  });
   it('runs every prior27 upgrade unchanged, the candidate exactly once as28, then the unchanged full local SQL suite', () => {
     expect(previousUpgradeCommands).toHaveLength(27);
     const command = get(packageJson.scripts, 'db:test');
@@ -235,7 +258,9 @@ describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () =>
     expect(script).toContain("same(readdirSync(migrationDirectory).filter(file => file.endsWith('.sql')), source.entries.map(entry => entry.file))");
     expect(script).toContain("flag: 'wx'"); expect(script).toContain('constants.COPYFILE_EXCL');
     expect(script).toContain('rmSync(assertGeneratedWorkspace(workspace), { recursive: true, force: false })');
-    expect(script).toContain("phase = 'final-fresh111-cleanup'");
+    expect(script).toContain("phase = 'final-fresh-tip-cleanup'");
+    expect(script).toContain('entries: source.entries.slice(0,111)');
+    expect(script).toContain('assertPostApprovalUpgradeHistory(history(), source, 111)');
     expect(script).not.toMatch(/--linked|--db-url|--project-ref|docker desktop start|Docker Desktop\.exe|SUPABASE_ACCESS_TOKEN/iu);
   });
   it('pins the exact dev110 prefix and exact111 manifest without modifying original CRLF bytes', () => {
@@ -255,7 +280,7 @@ describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () =>
     if (kind === 'old-order') { const entry = changed.migrations[0]; if (entry) entry.order = 2; }
     if (kind === 'new-sha') { const entry = changed.migrations[110]; if (entry) entry.sha256 = '0'.repeat(64); }
     if (kind === 'new-name') { const entry = changed.migrations[110]; if (entry) entry.name = 'unknown'; }
-    if (kind === 'count') changed.totalCount = 112;
+    if (kind === 'count') changed.totalCount = manifest.totalCount + 1;
     if (kind === 'extra-record') changed.migrations.push({ order: 112, name: 'unknown', sha256: '0'.repeat(64) });
     expect(() => validatePostApprovalUpgradeSource(changed, entries)).toThrow();
   });

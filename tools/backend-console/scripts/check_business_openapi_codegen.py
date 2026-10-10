@@ -116,11 +116,14 @@ def check_post_approval_contract(document: dict[str, Any]) -> None:
         raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
     codes = document["components"]["schemas"]["ErrorCode"]["enum"]
     if (
-        len(codes) != 335
-        or len(set(codes)) != 335
+        len(codes) != 336
+        or len(set(codes)) != 336
         or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
+        or "AUTH_CONTEXT_UNAVAILABLE" not in codes
     ):
-        raise RuntimeError("#336 공통 safe error code union은 정확335개여야 합니다.")
+        raise RuntimeError(
+            "#442 공통 safe error code union은 신규 인증 오류를 포함한 정확336개여야 합니다."
+        )
 
 
 def check_template_permutation_roundtrip(
@@ -185,6 +188,54 @@ print('Python template codegen: six shared permutations preserve every field and
     )
 
 
+def check_photo_operation_roundtrip(npm: str, repository_root: Path, destination: Path) -> None:
+    fixture_result = subprocess.run(  # noqa: S603
+        [
+            npm,
+            "exec",
+            "--",
+            "tsx",
+            "-e",
+            "import { photoOperationRetentionCases } from "
+            "'./tests/fixtures/photo-operation-retention.ts'; "
+            "process.stdout.write(JSON.stringify(photoOperationRetentionCases()));",
+        ],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    # The generated consumer must retain explicit None, not invent an enum/default.
+    # Conditional state validation remains in Ajv/runtime, not this DTO generator.
+    source = """\
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+from generated.models.photo_upload_operation import PhotoUploadOperation
+from generated.models.photo_upload_response import PhotoUploadResponse
+cases = json.load(sys.stdin)
+if len(cases) != 8:
+    raise RuntimeError('Expected eight actual operation projections')
+for case in cases:
+    body = case['body']
+    if PhotoUploadOperation.from_dict(body).to_dict() != body:
+        raise RuntimeError('Operation retention roundtrip failed: ' + case['name'])
+    uploaded = dict(body, quotaWarning=False)
+    if PhotoUploadResponse.from_dict(uploaded).to_dict() != uploaded:
+        raise RuntimeError('Upload retention roundtrip failed: ' + case['name'])
+print('Python photo operation codegen: eight state/retention roundtrips PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source, str(destination)],
+        cwd=repository_root,
+        input=fixture_result.stdout,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+
 def main() -> None:
     console_root = Path(__file__).resolve().parents[1]
     repository_root = console_root.parents[1]
@@ -203,8 +254,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 150:
-        raise RuntimeError("전체 source OpenAPI path 수가 150이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 151:
+        raise RuntimeError("전체 source OpenAPI path 수가 151이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -213,8 +264,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 162:
-        raise RuntimeError("전체 source OpenAPI operation 수가 162가 아닙니다.")
+    if operation_count != 163:
+        raise RuntimeError("전체 source OpenAPI operation 수가 163가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     check_post_approval_contract(document)
     discovery_fields = [
@@ -423,6 +474,8 @@ def main() -> None:
             package / "api" / "payroll" / "get_payroll_adjustment_book.py",
             package / "api" / "payroll" / "list_payroll_work_details.py",
             package / "api" / "payroll" / "get_payroll_remittance_marker.py",
+            package / "api" / "payroll" / "list_payroll_remittance_markers.py",
+            package / "models" / "payroll_remittance_batch.py",
             package / "api" / "payroll" / "set_payroll_remittance_marker.py",
             package / "api" / "payroll" / "reconfirm_payroll_remittance_marker.py",
             package / "api" / "payroll" / "list_payroll_remittance_marker_history.py",
@@ -589,6 +642,27 @@ def main() -> None:
             if field not in template_request:
                 raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
         check_template_permutation_roundtrip(npm, repository_root, destination)
+        batch_roundtrip = """
+import sys
+from datetime import date
+from uuid import UUID
+import httpx
+sys.path.insert(0, sys.argv[1])
+from generated.api.payroll.list_payroll_remittance_markers import _get_kwargs
+ids = [UUID('c1000000-0000-4000-8000-000000000003'),
+       UUID('c1000000-0000-4000-8000-000000000004')]
+kwargs = _get_kwargs(maid_profile_ids=','.join(map(str, ids)), week_start=date(2026, 9, 21))
+params = httpx.QueryParams(kwargs['params'])
+if params.get_list('maidProfileIds') != [','.join(map(str, ids))]:
+    raise RuntimeError('Generated batch client must send one CSV query, not repeated keys')
+print('Python remittance batch codegen CSV serialization PASS')
+"""
+        subprocess.run(  # noqa: S603
+            [sys.executable, "-c", batch_roundtrip, str(destination)],
+            cwd=repository_root,
+            check=True,
+        )
+        check_photo_operation_roundtrip(npm, repository_root, destination)
         for book_model_name, book_expected_fields in (
             (
                 "payroll_adjustment_book",

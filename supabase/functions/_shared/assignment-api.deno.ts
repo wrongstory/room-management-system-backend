@@ -518,7 +518,11 @@ function request(
   });
 }
 
-function queryResult(data: unknown, countOverride?: number | null) {
+function queryResult(
+  data: unknown,
+  countOverride?: number | null,
+  beforeRead?: () => Promise<void>,
+) {
   const filters: Array<[string, unknown]> = [];
   type Query = Promise<{ data: unknown; error: null; count: number | null }> & {
     select: (columns: string) => Query;
@@ -531,13 +535,20 @@ function queryResult(data: unknown, countOverride?: number | null) {
   };
   let query: Query;
   query = Object.assign(
-    Promise.resolve({
-      data,
-      error: null,
-      count: countOverride === undefined
-        ? (Array.isArray(data) ? data.length : 0)
-        : countOverride,
-    }),
+    {
+      // biome-ignore lint/suspicious/noThenProperty: Supabase query builders are intentionally awaitable.
+      then: (
+        resolve: (result: unknown) => unknown,
+        reject: (reason: unknown) => unknown,
+      ) =>
+        Promise.resolve().then(beforeRead).then(() => ({
+          data,
+          error: null,
+          count: countOverride === undefined
+            ? (Array.isArray(data) ? data.length : 0)
+            : countOverride,
+        })).then(resolve, reject),
+    },
     {
       select: (columns: string) => {
         filters.push(["select", columns]);
@@ -598,6 +609,8 @@ function readClients(
     count?: number | null;
     attemptCount?: number | null;
     attempts?: Record<string, unknown>[];
+    submissionCount?: number | null;
+    beforeRead?: (table: string) => Promise<void>;
     scheduleRead?: (
       args: Record<string, unknown>,
     ) => { data: unknown; error: { message: string } | null };
@@ -606,31 +619,39 @@ function readClients(
   const access = queryResult(rows, options.count);
   const overdue = queryResult(options.overdue ?? []);
   let accessReads = 0;
-  const targets = queryResult([
-    {
-      id: targetId,
-      room_id: roomId,
-      cleaning_kind: "checkout",
-      source: "scheduled_checkout",
-      original_service_date: "2026-09-03",
-      effective_service_date: "2026-09-04",
-      carryover_count: 4,
-      status: "notified",
-      assignment_version: 999,
-      room_type_snapshot: {
-        code: "standard",
-        name: "스탠다드 더블 로프트",
-        elevatorZone: "A",
+  const targets = queryResult(
+    [
+      {
+        id: targetId,
+        room_id: roomId,
+        cleaning_kind: "checkout",
+        source: "scheduled_checkout",
+        original_service_date: "2026-09-03",
+        effective_service_date: "2026-09-04",
+        carryover_count: 4,
+        status: "notified",
+        assignment_version: 999,
+        room_type_snapshot: {
+          code: "standard",
+          name: "스탠다드 더블 로프트",
+          elevatorZone: "A",
+        },
+        fee_snapshot: 16000,
+        template_snapshot: { durationMinutes: null },
+        rooms: { room_number: "101" },
+        ...options.target,
       },
-      fee_snapshot: 16000,
-      template_snapshot: { durationMinutes: null },
-      rooms: { room_number: "101" },
-      ...options.target,
-    },
-  ]);
-  const maids = queryResult([
-    { id: maid.profileId, display_name: "메이드" },
-  ]);
+    ],
+    undefined,
+    () => options.beforeRead?.("cleaning_targets") ?? Promise.resolve(),
+  );
+  const maids = queryResult(
+    [
+      { id: maid.profileId, display_name: "메이드" },
+    ],
+    undefined,
+    () => options.beforeRead?.("profiles") ?? Promise.resolve(),
+  );
   const attempts = queryResult(
     options.attempts ?? [{
       id: "60000000-0000-4000-8000-000000000001",
@@ -639,12 +660,17 @@ function readClients(
       status: "field_completed",
     }],
     options.attemptCount,
+    () => options.beforeRead?.("cleaning_attempts") ?? Promise.resolve(),
   );
-  const submissions = queryResult([{
-    cleaning_attempt_id: "60000000-0000-4000-8000-000000000001",
-    version: 1,
-    status: "submitted",
-  }]);
+  const submissions = queryResult(
+    [{
+      cleaning_attempt_id: "60000000-0000-4000-8000-000000000001",
+      version: 1,
+      status: "submitted",
+    }],
+    options.submissionCount,
+    () => options.beforeRead?.("cleaning_submissions") ?? Promise.resolve(),
+  );
   const schedules = queryResult(
     options.schedules ?? [{
       cleaning_target_id: targetId,
@@ -652,6 +678,10 @@ function readClients(
       effective_service_date: "2026-09-04",
       reason_code: "ROLLED_OVER_NOT_STARTED",
     }],
+    undefined,
+    () =>
+      options.beforeRead?.("cleaning_target_schedule_revisions") ??
+        Promise.resolve(),
   );
   const clients = {
     forAccessToken: () => ({
@@ -703,6 +733,112 @@ function readClients(
     schedules,
   };
 }
+
+for (
+  const slowTable of [
+    "cleaning_targets",
+    "profiles",
+    "cleaning_target_schedule_revisions",
+  ]
+) {
+  Deno.test(`assignment submissions overlap slow ${slowTable}, final authority remains last`, async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached = () => {};
+    const submitted = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const events: string[] = [];
+    const { clients } = readClients([assignmentRow()], {
+      beforeRead: async (table) => {
+        events.push(`start:${table}`);
+        if (table === slowTable) await gate;
+        events.push(`end:${table}`);
+        if (table === "cleaning_submissions") reached();
+      },
+      scheduleRead: () => {
+        events.push("authority");
+        return { data: null, error: { message: "SESSION_REVOKED" } };
+      },
+    });
+    const pending = captureEdgeError(() =>
+      listAssignments(
+        request("/v1/assignments?serviceDate=2026-09-04"),
+        clients,
+        admin,
+      )
+    );
+    let timeout: number | undefined;
+    try {
+      await Promise.race([
+        submitted,
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("submissions blocked by unrelated read")),
+            2000,
+          );
+        }),
+      ]);
+      assert(
+        !events.includes(`end:${slowTable}`),
+        "unrelated read still blocked",
+      );
+      assert(
+        !events.includes("authority"),
+        "authority must wait for all hydration",
+      );
+    } finally {
+      clearTimeout(timeout);
+      release();
+    }
+    const error = await pending;
+    assert(
+      error.status === 401 && error.code === "SESSION_REVOKED",
+      "late revocation rejects whole response",
+    );
+    assert(events.at(-1) === "authority", "final DB authority remains last");
+  });
+}
+
+Deno.test("pipelined submissions retain exact-count failure and empty-attempt behavior", async () => {
+  for (const submissionCount of [null, 1001, 2]) {
+    let authorityCalled = false;
+    const { clients } = readClients([assignmentRow()], {
+      submissionCount,
+      scheduleRead: () => {
+        authorityCalled = true;
+        return { data: [], error: null };
+      },
+    });
+    const error = await captureEdgeError(() =>
+      listAssignments(
+        request("/v1/assignments?serviceDate=2026-09-04"),
+        clients,
+        admin,
+      )
+    );
+    assert(error.status === 500, "incomplete submissions fail closed");
+    assert(!authorityCalled, "no partial response after submission failure");
+  }
+  const { clients, submissions } = readClients([assignmentRow()], {
+    attempts: [],
+  });
+  const result = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-04"),
+    clients,
+    admin,
+  );
+  assert(
+    result.length === 1 && result[0].submissionStatus === null,
+    "no fabricated submission",
+  );
+  assert(
+    submissions.filters.length === 0,
+    "no submission query without latest attempt IDs",
+  );
+});
 
 Deno.test("today current list includes old unfinished with immutable snapshots and scoped bounded queries", async () => {
   const pastId = "70000000-0000-4000-8000-000000000010";

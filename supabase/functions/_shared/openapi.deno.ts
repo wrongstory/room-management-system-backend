@@ -316,7 +316,9 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "no multipart/base64",
   );
   assert(
-    upload.parameters.filter((p) => p.in === "query").length === 3 &&
+    upload.parameters.filter((p) => p.in === "query").map((p) => p.name).sort()
+          .join() ===
+        "assignmentId,assignmentRevision,expectedPhotoRevision,includePhotoSlots" &&
       upload["x-required-roles"].join() === "maid",
     "exact binding query and maid",
   );
@@ -327,13 +329,27 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}"
   ].delete;
   assert(
-    collectionUpload.parameters.filter((p) => p.in === "query").length === 4 &&
+    collectionUpload.parameters.filter((p) => p.in === "query").map((p) =>
+          p.name
+        ).sort().join() ===
+        "assignmentId,assignmentRevision,expectedCollectionRevision,expectedItemRevision,includePhotoSlots" &&
       collectionDelete.parameters.filter((p) => p.in === "query").length ===
         4 &&
       collectionUpload["x-required-roles"].join() === "maid" &&
       collectionDelete["x-required-roles"].join() === "maid",
     "collection upload and delete require exact item and collection CAS",
   );
+  for (const operation of [upload, collectionUpload]) {
+    const option = operation.parameters.find((p) =>
+      p.name === "includePhotoSlots"
+    );
+    assert(
+      option?.required === false && option.schema.type === "boolean" &&
+        "enum" in option.schema &&
+        JSON.stringify(option.schema.enum) === "[true]",
+      "snapshot is optional true-only and does not replace CAS bindings",
+    );
+  }
   assert(
     document.paths["/v1/photos/{photoId}/content"].get["x-required-roles"]
       .join() === "admin,maid",
@@ -395,13 +411,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 150 &&
+    Object.keys(document.paths).length === 151 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 162,
-    "combined source contract 150/162 (not hosted deployment)",
+        ).length === 163,
+    "combined source contract 151/163 (not hosted deployment)",
   );
 });
 

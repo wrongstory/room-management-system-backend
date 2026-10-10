@@ -5,7 +5,14 @@
 최신-event의 effective/recorded/id 순서와 기존 recorded 중심 인덱스를 로컬 임시 합성
 테이블에서 비교하는 도구를 추가한다. 앱 SQL·DB·RLS·운영 인덱스는 변경하지 않는다.
 주급 coalesce 및 반복 summary, 객실 issue count는 아직 실측할 후속 후보다.
-[component 측정 결과와 전체 RPC/쓰기 비용의 미검증 범위](./QUERY_PLAN_EVIDENCE_416.md).
+[과거 측정 결과와 최신 기준의 미검증 범위](./QUERY_PLAN_EVIDENCE_416.md).
+
+## #415 배정 카드 조회 의존 분기 최적화 후보
+
+Node/Edge의 bounded 관계 조회에서 attempt→submission만 하나의 병렬 분기로 묶는다.
+모든 hydration 후 최종 schedule RPC에서 latest actor/session/ownership을 검증하는
+순서는 불변이다. 새 SQL/RPC/schema/DTO·캐시를 추가하지 않는다.
+[검증·운영 미반영 경계](./ASSIGNMENT_READ_PERFORMANCE.md).
 
 ## #336 역사 접근과 신규 신고의 상태 분리 (source 등록·운영 미배포)
 
@@ -575,6 +582,10 @@ wrapper이며 외부 Drive create 전에 같은 transaction에서 확정한다. 
 상세 배포 순서·이름 인식 rollback 제한 및 검증 상태는 [저장 이름 계약](./PHOTO_STORAGE_NAMES.md)을 따른다.
 
 ## 인증
+
+#442 미배포 후보는 일반 인증의 profile/session을 서버 전용 `get_active_auth_context` 1회로
+통합한다. 순차 SQL·fresh snapshot·hard expiry·권한은 유지하고 limited/사진 전용 인증은
+변경하지 않는다. [설계와 배포 gate](./AUTH_CONTEXT_PERFORMANCE_442.md)를 따른다.
 
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.
 2. 내부 이메일은 `user-{profile_id}@auth.castletheart.invalid` 형식으로 서버만 계산합니다.

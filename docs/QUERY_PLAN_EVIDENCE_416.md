@@ -1,5 +1,25 @@
 # #416 조회 계획 점검 — 합성 component 및 실제 로컬 RPC 근거
 
+## 2026-10-11 최신 통합 상태
+
+PR #420을 최신 dev(#444 포함, dev113 소스)에 맞춰 통합한다. 아래 2026-10-09의
+111개 migration 기준 실측은 **과거 기준선**이며 최신 스키마 재검증 결과가 아니다.
+두 effective 정렬 인덱스는 이미 migration112에 있으므로 다시 추가하지 않는다.
+현재 실제 RPC 실행기의 111 history/본문 fingerprint gate는 그대로 보존한다.
+113 환경에서 실행되도록 조건을 느슨하게 바꾸거나 과거 실행값을 새 PASS로 사용하지 않는다.
+
+이번 갱신은 문서 충돌 해결·최신 application/manifest 및 합성 source 검사만 수행한다.
+DB benchmark/DDL/migration/reset은 실행하지 않는다. 실제 DB 실행 필요 시 사전 승인을 받는다.
+남은 범위는 객실당 issue_count/blocking_issue_count의 중복 조회와 주급 반복 집계다.
+먼저 경계/응답 동등성 후보·비교 fixture를 준비하고, 최종 통합 DB 검증에서 실제 계획과
+읽기/쓰기 비용을 측정한다. 이 PR은 진단 근거 통합이지 #416 전체 구현 완료가 아니다.
+
+최신 통합 검증: `ci:quality` 117파일/2,967 tests·typecheck/build PASS,
+독립 합성2파일/46 PASS, manifest113 소스/해시 PASS, diff check PASS.
+이 회차의 실제 DB/benchmark/SQL/경합/운영 검증은 NOT RUN이다.
+
+## 2026-10-09 과거 측정 기록
+
 2026-10-09, `dev@3e91d88` 기준. **진단 도구·근거만 추가**하며 운영 API/DB/index/migration을
 영속 변경하지 않는다. 2차 실제-table 실험도 로컬 transaction 안에서만 수행하고 rollback한다.
 #416 전체 완료가 아니며 실제 적용 전 아래 후속 검증을 수행한다.

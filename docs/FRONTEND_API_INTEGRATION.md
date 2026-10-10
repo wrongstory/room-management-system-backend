@@ -1,5 +1,52 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## #442 공통 인증 성능 개선 — 미배포 후보
+
+[공통 인증 조회 통합 후보](./AUTH_CONTEXT_PERFORMANCE_442.md)는 일반 API 인증 DB 왕복을 2→1로
+줄이며 성공 DTO·프런트 호출은 유지한다. 신규 503 `AUTH_CONTEXT_UNAVAILABLE`은 로그인 만료가
+아니므로 자동 로그아웃/빈 목록 대체 없이 재시도 안내가 필요하다. 401 처리는 그대로다.
+Swagger source에 반영했지만 DB 검증·운영 배포 전이다. 아래 v0.9.4의 운영 완료 항목과 구분한다.
+
+## 2026-10-10 최신 운영 상태 — v0.9.4 / API45
+
+[v0.9.4 배포 및 프런트 인계](./RELEASE_V0.9.4_DEPLOYED.md)가 아래 과거 후보/미배포 기록보다 우선한다.
+main `a0cef206c7672541494696bec47ae0ca62723322`, API ACTIVE45, Swagger151 paths/163 operations.
+Drive 생성 ACK 재사용(#434/435)과 DB·Drive 세부 계측(#436/437)이 운영에 반영됐다.
+신규 SQL0/이번 배포 migration 실행0. 승인된 release 전체 DB 증거는 main에서 재사용했다.
+
+프런트 DOCS/32(dev82bc340) 보고상 snapshot 옵션은 Production/Preview에서 이미 활성화됐다.
+프런트 소스/옵션은 이 작업에서 변경하지 않았다. 현재 운영 화면에서 재측정할 수 있지만
+v0.9.4 실제 업로드 속도·HEIC/20장·오류 복구 UAT는 아직 NOT RUN이다.
+전역 순차 큐·같은 key/Blob 복구·nullable snapshot fallback을 유지하고 숫자 timing은 선택적으로 읽는다.
+세부 계약과 재측정 항목은 위 인계 문서 및 [#436](./PHOTO_STAGE_TIMING_436.md)을 따른다.
+삭제·썸네일·안전한 병렬화는 이번 배포 완료 범위가 아니다.
+
+## 과거 checkpoint: 2026-10-10 #411 업로드 성능 후속 — 당시 운영 미배포 후보
+
+#435는 dev 병합 완료/운영 미배포다. 후속 [DB·Drive 세부 계측 #436](./PHOTO_STAGE_TIMING_436.md)은
+DB RPC별 시간과 Drive token 대기 누적을 추가한다. 합계/하위/병렬 대기의 중복을 주의하며
+클라이언트 호출 시간만으로 DB 잠금이나 Google 내부 지연을 확정하지 않는다.
+
+사용자 우선순위는 업로드 개선이며 삭제 기능 개발은 보류한다.
+Drive 중복 조회 감소와 추가 Server-Timing은 [#411 후보 인계](./PHOTO_UPLOAD_PERFORMANCE_411.md)를 따른다.
+JSON·인증·CAS 계약 변경은 없고 프런트 수정 없이도 배포 뒤 정상 ACK 경로에 적용된다.
+142호 5장 실사용에서는 이미 includePhotoSlots=true 및 성공 후 GET 생략이 확인됐다.
+아래의 옵션 활성화 미확인 문구는 이전 배포 시점 기록이며 전체 실기기 UAT PASS를 뜻하지 않는다.
+같은 collection의 전송 병렬화는 아직 지원하지 않는다. 숫자 timing/브라우저 구간별 실측을 프런트에서 담당한다.
+
+## 과거 checkpoint: 2026-10-10 v0.9.3 / API44
+
+[운영 배포 기록](./RELEASE_V0.9.3_DEPLOYED.md)이 아래 과거 후보/미배포 표기보다 우선한다.
+main72771b5, API ACTIVE44, Swagger151 paths/163 operations 게시·동일성 검증 완료.
+신규 SQL/운영 migration0이며 전체 DB 검증은 최종 릴리스1회 후 main에서 성공 증거를 재사용했다.
+
+송금 표시 `GET /v1/payroll/remittance-markers`에 `weekStart`와 최대10명의 `maidProfileIds`
+CSV 문자열을 전달할 수 있다. 기존 단건 API도 유지한다. 가능일 완전성 검사·배정 조회 병렬화와
+성공 업무 응답의 선택 `api_total` 계측이 운영에 반영됐다. 오류를 빈 목록/미송금으로 숨기지 않는다.
+[프런트 #207 인계](https://github.com/makee-ham/room-management-system/issues/207#issuecomment-6094034492)에
+연결 계약·후속 범위·미검증 항목을 구분했다. 프런트 소스/flag는 변경하지 않았으며 실제 계정
+UAT·사진 snapshot 옵션 활성화·p50/p95는 여전히 후속이다. 공개 smoke PASS와 실사용 검증을 구분한다.
+
 ## 2026-10-07 #336 정식 source API·Swagger 연결 — 운영 미배포
 
 `dev@ac8c775` 기반 `codex/336-latest-dev-integration`의 미게시 후보에 #336을 기본

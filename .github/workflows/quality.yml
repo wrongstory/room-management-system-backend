@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
@@ -60,18 +62,35 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
+      - name: Select final DB validation or verify prior proof
+        id: db_gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/db-validation-gate.mjs
       - run: npm ci
       - run: npm run db:manifest:verify
       - run: npm run db:start:ci
+        if: steps.db_gate.outputs.full == 'true'
       - run: npm run db:verify
+        if: steps.db_gate.outputs.full == 'true'
       - run: npm run db:test:template-contract
+        if: steps.db_gate.outputs.full == 'true'
       - name: Strict lint with exact compatibility baseline (#363, Decision #373)
+        if: steps.db_gate.outputs.full == 'true'
         run: npm run db:lint:baseline
       - run: npm run backup:dry-run
+        if: steps.db_gate.outputs.full == 'true'
       - run: npm run db:test
+        if: steps.db_gate.outputs.full == 'true'
       - run: npm run db:test:static-warning
+        if: steps.db_gate.outputs.full == 'true'
       - run: npm run db:test:long-stay-clock
+        if: steps.db_gate.outputs.full == 'true'
       - run: npm run db:test:concurrency
+        if: steps.db_gate.outputs.full == 'true'
       - name: Stop local Supabase
-        if: always()
+        if: always() && steps.db_gate.outputs.full == 'true'
         run: npm run db:stop
+      - name: Full DB proof ${{ steps.db_gate.outputs.fingerprint }}
+        if: success() && steps.db_gate.outputs.full == 'true'
+        run: echo "Full DB validation PASS; proof is bound to the tested merge tree inputs."
