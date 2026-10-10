@@ -1,5 +1,18 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-10 최신 운영 상태 — v0.9.3 / API44
+
+[운영 배포 기록](./RELEASE_V0.9.3_DEPLOYED.md)이 아래 과거 후보/미배포 표기보다 우선한다.
+main72771b5, API ACTIVE44, Swagger151 paths/163 operations 게시·동일성 검증 완료.
+신규 SQL/운영 migration0이며 전체 DB 검증은 최종 릴리스1회 후 main에서 성공 증거를 재사용했다.
+
+송금 표시 `GET /v1/payroll/remittance-markers`에 `weekStart`와 최대10명의 `maidProfileIds`
+CSV 문자열을 전달할 수 있다. 기존 단건 API도 유지한다. 가능일 완전성 검사·배정 조회 병렬화와
+성공 업무 응답의 선택 `api_total` 계측이 운영에 반영됐다. 오류를 빈 목록/미송금으로 숨기지 않는다.
+[프런트 #207 인계](https://github.com/makee-ham/room-management-system/issues/207#issuecomment-6094034492)에
+연결 계약·후속 범위·미검증 항목을 구분했다. 프런트 소스/flag는 변경하지 않았으며 실제 계정
+UAT·사진 snapshot 옵션 활성화·p50/p95는 여전히 후속이다. 공개 smoke PASS와 실사용 검증을 구분한다.
+
 ## 2026-10-07 #336 정식 source API·Swagger 연결 — 운영 미배포
 
 `dev@ac8c775` 기반 `codex/336-latest-dev-integration`의 미게시 후보에 #336을 기본
