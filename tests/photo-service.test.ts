@@ -5,6 +5,7 @@ import * as photoBinary from '../src/modules/photos/photo-binary.js';
 import { initializePhotoDecoder, PhotoError, PHOTO_INPUT_MAX_BYTES } from '../src/modules/photos/photo-binary.js';
 import { PhotoService, PhotoTiming, photoRoute, type PhotoIdentity, type PhotoRpc } from '../src/modules/photos/photo-service.js';
 import type { PhotoProvider } from '../src/modules/photos/google-drive.js';
+import { projectPhotoUploadOperation } from '../src/modules/photos/photo-upload-contract.js';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 afterEach(() => vi.restoreAllMocks());
 const identity: PhotoIdentity = { profileId: id(1), sessionId: id(2), role: 'maid', profileStatus: 'active' };
@@ -155,6 +156,68 @@ describe('photo application admission/provider/finalize boundary', () => {
     await timing.measure('db', async () => { clock += 12; });
     await expect(timing.measure('db', () => { clock += 3; throw new Error('private-secret'); })).rejects.toThrow('private-secret');
     expect(timing.header()).toBe('photo_db;dur=15.0, photo_total;dur=15.0');
+  });
+  it.each([false, true])('accounts fixed DB stages without changing RPC order (collection=%s)', async collection => {
+    let clock = 0;
+    const s = setup(name => {
+      clock += 10;
+      return name === 'get_attempt_photo_slots' ? { data: emptySlots, error: null } : undefined;
+    });
+    const timed = s.service.withTiming(new PhotoTiming(() => clock));
+    const req = collection ? new Request(`http://local/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedCollectionRevision=0&expectedItemRevision=0&includePhotoSlots=true`, {
+      method: 'POST', headers: { 'content-type': 'image/jpeg', 'idempotency-key': 'timing-collection-436' }, body: Uint8Array.from(bytes),
+    }) : includedRequest();
+    await timed.upload(req, identity, id(3), id(4), collection ? id(11) : undefined);
+    for (const stage of ['admit', 'begin', 'claim', 'context', 'identity', 'record', 'finalize', 'snapshot']) {
+      expect(timed.timingHeader()).toContain(`photo_db_${stage};dur=10.0`);
+    }
+    expect(timed.timingHeader()).toContain('photo_db_folder;dur=20.0');
+    expect(timed.timingHeader()).toContain('photo_db;dur=100.0');
+    expect(timed.timingHeader()).not.toContain('photo_db_receipt');
+    expect(s.calls.filter(n => n !== 'decode')).toEqual([
+      collection ? 'admit_photo_collection_upload' : 'admit_photo_upload',
+      collection ? 'begin_admitted_photo_collection_upload' : 'begin_admitted_photo_upload',
+      'claim_admitted_photo_upload', 'get_photo_provider_context', 'reserve_photo_drive_folder',
+      'reserve_photo_drive_folder', 'reserve_named_photo_provider_identity', 'record_admitted_photo_provider_success',
+      'finalize_admitted_photo_upload', 'get_attempt_photo_slots',
+    ]);
+    expect(vi.mocked(s.provider.generateUploadIds).mock.calls[0]?.[0]).toBeInstanceOf(PhotoTiming);
+    expect(vi.mocked(s.provider.ensureFolder).mock.calls[0]?.[1]).toBeInstanceOf(PhotoTiming);
+    expect(timed.timingHeader()).not.toMatch(/10000000|admit_photo|session|https/);
+  });
+  it('measures a recovery receipt only when response loss actually requires it', async () => {
+    let clock = 0;
+    const s = setup(name => {
+      clock += 5;
+      if (name === 'finalize_admitted_photo_upload') return { data: null, error: { message: 'response lost' } };
+      return undefined;
+    });
+    const timed = s.service.withTiming(new PhotoTiming(() => clock));
+    vi.spyOn(timed, 'reconcile').mockResolvedValue(projectPhotoUploadOperation(operation('accepted')));
+    expect(await timed.upload(request(), identity, id(3), id(4))).toMatchObject({ status: 'accepted' });
+    expect(timed.timingHeader()).toContain('photo_db_receipt;dur=5.0');
+    expect(s.calls.at(-1)).toBe('get_photo_upload_receipt_with_session');
+  });
+  it('keeps failed snapshot timing separate without changing accepted/null behavior', async () => {
+    let clock = 0;
+    const s = setup(name => {
+      clock += 7;
+      if (name === 'get_attempt_photo_slots') return { data: null, error: { message: 'private diagnostic' } };
+      return undefined;
+    });
+    const timed = s.service.withTiming(new PhotoTiming(() => clock));
+    expect(await timed.upload(includedRequest(), identity, id(3), id(4))).toMatchObject({ status: 'accepted', photoSlots: null });
+    expect(timed.timingHeader()).toContain('photo_db_snapshot;dur=7.0');
+    expect(timed.timingHeader()).not.toContain('private');
+  });
+  it('groups unlisted read RPCs under db_other without exposing their names or arguments', async () => {
+    let clock = 0; const s = setup(() => { clock += 5; return undefined; });
+    const timed = s.service.withTiming(new PhotoTiming(() => clock));
+    await timed.content(new Request('http://local'), identity, id(7));
+    expect(timed.timingHeader()).toContain('photo_db_other;dur=10.0');
+    expect(timed.timingHeader()).not.toContain('authorize_photo_read');
+    expect(timed.timingHeader()).not.toContain('photo_db_admit');
+    expect(vi.mocked(s.provider.read).mock.calls[0]?.[1]).toBeInstanceOf(PhotoTiming);
   });
   it('reserves distinct batched candidates before creating only the DB folder winners', async () => {
     const reservations: Record<string, unknown>[] = [];
