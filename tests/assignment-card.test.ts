@@ -73,7 +73,7 @@ const targets = targetIds.map((id, index) => ({
 
 type Row = Record<string, unknown>;
 
-function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: unknown[]) => void) {
+function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: unknown[]) => void, beforeRead?: () => Promise<void>) {
   let rows = [...initialRows];
   let maximum = 1000;
   const builder = {
@@ -100,13 +100,14 @@ function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: 
     order: () => builder,
     // biome-ignore lint/suspicious/noThenProperty: Supabase query builders are intentionally awaitable.
     then: (resolve: (value: { data: Row[]; error: null; count: number | null }) => unknown) =>
-      Promise.resolve({ data: rows.slice(0, maximum), error: null, count: countOverride === undefined ? rows.length : countOverride }).then(resolve)
+      Promise.resolve().then(beforeRead).then(() => ({ data: rows.slice(0, maximum), error: null, count: countOverride === undefined ? rows.length : countOverride })).then(resolve)
   };
   return builder;
 }
 
 function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Date = () => new Date(), counts: Partial<Record<string, number | null>> = {}, onIds?: (ids: unknown[]) => void,
-  read?: (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null }) {
+  read?: (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null },
+  beforeRead?: (table: string) => Promise<void>) {
   const tables: Record<string, Row[]> = {
     cleaning_assignments: assignments,
     cleaning_targets: targets,
@@ -137,7 +138,7 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
   };
   const from = (table: string) => query(table === 'cleaning_assignments'
     ? (tables[table] ?? []).map((row) => ({ ...row, cleaning_targets: tables.cleaning_targets?.find((target) => target.id === row.cleaning_target_id) }))
-    : tables[table] ?? [], counts[table], onIds);
+    : tables[table] ?? [], counts[table], onIds, () => beforeRead?.(table) ?? Promise.resolve());
   return new SupabaseAssignmentService({
     admin: { from, rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
       expect(name).toBe('get_assignment_schedule_read');
@@ -150,6 +151,65 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
     forAccessToken: () => ({ from })
   } as never, clock);
 }
+
+describe('assignment hydration dependency pipeline', () => {
+  it.each(['cleaning_targets', 'profiles', 'cleaning_target_schedule_revisions'])(
+    'reads submissions before slow %s finishes, but revalidates authority last', async (slowTable) => {
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const events: string[] = [];
+      const read = vi.fn(() => { events.push('authority'); return { data: [], error: { message: 'SESSION_REVOKED' } }; });
+      const pending = service({}, undefined, {}, undefined, read, async (table) => {
+        events.push(`start:${table}`);
+        if (table === slowTable) await gate;
+        events.push(`end:${table}`);
+      }).list(admin, { serviceDate: '2026-09-20' });
+      const rejection = expect(pending).rejects.toMatchObject({ code: 'SESSION_REVOKED' });
+      try {
+        await vi.waitFor(() => expect(events).toContain('end:cleaning_submissions'));
+        expect(events).not.toContain(`end:${slowTable}`);
+        expect(read).not.toHaveBeenCalled();
+      } finally { release(); }
+      await rejection;
+      expect(events.at(-1)).toBe('authority');
+    }
+  );
+
+  it.each([null, 1001, 2])('rejects incomplete submissions (%s), without returning partial cards', async (count) => {
+    const read = vi.fn();
+    await expect(service({}, undefined, { cleaning_submissions: count }, undefined, read)
+      .list(admin, { serviceDate: '2026-09-20' })).rejects.toMatchObject({ code: 'ASSIGNMENT_QUERY_FAILED' });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 100, 1000])('keeps bounded calls, order and payload for %s complete cards', async (size) => {
+    const rows = Array.from({ length: size }, (_, i) => ({ ...assignments[0], id: `assignment-${i}`, cleaning_target_id: `target-${i}`, sequence_number: i + 1 }));
+    const targetRows = rows.map((row) => ({ ...targets[0], id: row.cleaning_target_id }));
+    const attempts = rows.map((row, i) => ({ id: `attempt-${i}`, assignment_id: row.id, attempt_number: 1, status: 'in_progress' }));
+    const submissions = attempts.map((row) => ({ cleaning_attempt_id: row.id, version: 1, status: 'submitted' }));
+    const calls: string[] = [];
+    const batches: number[] = [];
+    const authorityBatches: number[] = [];
+    const result = await service({ cleaning_assignments: rows, cleaning_targets: targetRows, cleaning_attempts: attempts,
+      cleaning_submissions: submissions, cleaning_target_schedule_revisions: [] }, () => new Date('2026-09-19T00:00:00Z'), {},
+      (ids) => batches.push(ids.length), (args) => {
+        const ids = args.p_assignment_ids as string[];
+        authorityBatches.push(ids.length);
+        return { data: ids.map((assignmentId) => ({ assignmentId, scheduleSnapshot: null, currentDeparture: null })), error: null };
+      }, async (table) => { calls.push(table); })
+      .list(admin, { serviceDate: '2026-09-20' });
+    expect(result).toHaveLength(size);
+    expect(batches.every((size) => size <= 100)).toBe(true);
+    // Assignment read + one profile read + four batched relation reads; final RPC is unchanged.
+    expect(calls).toHaveLength(2 + 4 * Math.ceil(size / 100));
+    expect(authorityBatches).toHaveLength(Math.ceil(size / 100));
+    expect(authorityBatches.every((size) => size <= 100)).toBe(true);
+    for (let i = 0; i < size; i++) {
+      expect(result[i]).toEqual({ ...(result[0] as Row), assignmentId: `assignment-${i}`, cleaningTargetId: `target-${i}`, sequenceNumber: i + 1 });
+      expect(result[i]).toMatchObject({ attemptStatus: 'in_progress', submissionStatus: 'submitted', scheduleSnapshot: null, currentDeparture: null });
+    }
+  });
+});
 
 describe('today current assignment backlog', () => {
   const midnight = () => new Date('2026-09-20T15:00:00Z');

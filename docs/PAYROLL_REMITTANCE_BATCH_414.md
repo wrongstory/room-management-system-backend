@@ -105,3 +105,12 @@ DB/migration/환경변수 변경 없음. dev PR과 필수 CI 통과 후 별도 �
   실제 dispatcher의 batch/timing·사진·body·권한 경계 보존, 신규 P0/P1/P2 없음.
 - 신규 SQL/운영 DB 적용 없음. 이번 통합의 실제 DB·실계정 UAT·실측 성능은 NOT RUN.
   새 HEAD의 required CI가 통과해야 이 PR을 병합하고 PR419와 릴리스 #429를 진행한다.
+
+## dev 병합 완료 (2026-10-10 KST)
+
+- source `494286c`의 CI `37957957149` application/migration PASS. Python 소비자·
+  codegen, fresh DB·upgrade/SQL·기존 경고 기준·KST·경합 검사를 포함한다.
+- 독립 QA341, 미해결 리뷰0, 최신 base·보호 규칙 확인 후 PR418을 dev `a50355a`로
+  squash했다(2026-10-10T01:30:50Z). 운영은 아직 v0.9.2이며 묶음 조회는 미배포다.
+- PR419 최종 통합과 v0.9.3/#429 릴리스·운영 API/Swagger 반영을 마친 뒤 프런트에
+  연결을 인계한다. 반복 DB 집계 제거와 실측은 #414 후속으로 유지한다.

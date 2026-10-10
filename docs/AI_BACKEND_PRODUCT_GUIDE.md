@@ -1,5 +1,12 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+## 2026-10-09 #415 배정 카드 읽기 대기 최적화 후보
+
+attempt→submission 분기만 target/profile/schedule-history 읽기와 겹친다. 최종 live
+actor/session/ownership RPC와 실제 통보 이력·currentDeparture 경계는 그대로다.
+DB/정책/API 계약 변경이나 운영 배포는 없으며 요청 수 감소를 주장하지 않는다.
+[1차 범위·검증 및 후속 실측](./ASSIGNMENT_READ_PERFORMANCE.md)을 따른다.
+
 ## 2026-10-09 #414 송금 표시 묶음 조회 후보
 
 주급 페이지의 단건 HTTP 순차 대기를 줄이는 최대 10명/내부 동시 3건 GET 후보를

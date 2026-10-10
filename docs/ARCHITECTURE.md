@@ -1,5 +1,12 @@
 # 백엔드 서버 설계
 
+## #415 배정 카드 조회 의존 분기 최적화 후보
+
+Node/Edge의 bounded 관계 조회에서 attempt→submission만 하나의 병렬 분기로 묶는다.
+모든 hydration 후 최종 schedule RPC에서 latest actor/session/ownership을 검증하는
+순서는 불변이다. 새 SQL/RPC/schema/DTO·캐시를 추가하지 않는다.
+[검증·운영 미반영 경계](./ASSIGNMENT_READ_PERFORMANCE.md).
+
 ## #336 역사 접근과 신규 신고의 상태 분리 (source 등록·운영 미배포)
 
 2026-10-07 최신 상태: dev `ac8c775` 기반111 migration 후보에 신규11 operation을 기본

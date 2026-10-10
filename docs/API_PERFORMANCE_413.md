@@ -39,8 +39,8 @@ cleaning-templates, photos, photo-uploads. 정확한 경로 구분자를 검사�
 | 1 | 가능일 목록의 조용한 누락 방지 | #427 / PR428 | required CI PASS, dev 2f97cca 병합·운영 미배포 |
 | 별도 | 사진 지정 계정 정상 UAT·옵션 활성화 | frontend #206 | 백엔드 v0.9.2 배포, 실제 UAT/프런트 flag 후속 |
 | 2 | 공통 handler timing와 회귀 검사 | #413 / PR417 | required CI PASS, dev 03f425a 병합·운영 미배포 |
-| 3 | 주급 marker 일괄 반환 | #414 / PR418 | 공통 계측과 통합 검증 중, 반복 DB 집계 제거는 후속 |
-| 4 | 배정 카드 hydration 대기 감소 | #415 / PR419 | #427 통합 후보 df0f689, 선행 PR 통합·DB 왕복 개선은 후속 |
+| 3 | 주급 marker 일괄 반환 | #414 / PR418 | required CI PASS, dev a50355a 병합·운영 미배포, 반복 DB 집계 제거는 후속 |
+| 4 | 배정 카드 hydration 대기 감소 | #415 / PR419 | 공통 계측·주급 묶음 조회와 최종 통합 검증 중, DB 왕복 개선은 후속 |
 | 반영됨 | 객실 이력 인덱스 2개 | #416 / PR421 | v0.9.2 반영, 운영 개선율 미측정 |
 | 5 | private 썸네일·안전한 사진 병렬 계약 | #411 | 측정 후 후속 |
 
