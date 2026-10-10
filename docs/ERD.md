@@ -589,6 +589,7 @@ erDiagram
 - 예약 객실 변경 command는 reservation·checkout obligation·동일 planned target의 `(reservation_id, room_id)` 복합 FK를 transaction commit에서 함께 검증한다. FK는 `DEFERRABLE INITIALLY DEFERRED`이지만 비활성화되지 않으며 반쪽 update는 `CHECKOUT_PLANNED_CONTRACT_NOT_ATOMIC`으로 실패한다. 미통보 draft는 stale로 남고 과거 notified 객실 snapshot은 변경하지 않는다.
 - 오늘/내일 계획 배정·통보는 가능하지만 checkout attempt/PIN은 materialized current target과 실제 checkout/access 시각 검증을 통과해야 한다. #28만 attempt 활성화를 소유한다.
 - 실제 checkout은 같은 planned target을 current로 승격한다. 조기 수동 퇴실은 schedule/assignment revision, 미통보 예약 변경은 draft stale로 처리한다. 통보 후 같은 객실의 퇴실 연장은 미착수·PIN/offline lease 미발급일 때만 immutable schedule/assignment replan을 허용하고, 그 외에는 stable conflict로 전체 롤백한다. 취소는 soft cancel/current 종료/회수 알림으로 처리한다.
+- #446: 관리자 오늘·내일 계획 모두 과거 미완료를 포함한다. 요청 계획일의 근무 희망을 검사하되 원 target/assignment 날짜를 재작성하지 않는다. DB 적용 전 후보이며 상세는 `ASSIGNMENT_PLANNING_TABS_446.md`를 따른다.
 - 작업마다 현재 배정은 최대 한 건이고, 과거 revision은 삭제하지 않는다.
 - 현재 배정의 `(maid, service_date, sequence_number)`는 유일하다. 같은 순서는 메이드나 서비스 날짜가 다를 때만 재사용한다.
 - 배정 revision은 생성 시 target의 `effective_service_date`, `available_from`, `due_at`을 snapshot으로 고정하고 target·maid·순서·revision·snapshot·변경자·생성시각을 이후 수정하지 않는다.

@@ -9952,6 +9952,12 @@ export const openApiDocument = {
           sequenceNumber: { type: "integer", minimum: 1 },
           revision: { type: "integer", minimum: 1 },
           isCurrent: { type: "boolean" },
+          planningDate: {
+            type: "string",
+            format: "date",
+            description:
+              "불변 통보/변경 근거의 배정 계획일. 원 serviceDate와 구분하며 메이드 오늘/내일 목록 및 실행일 판정에 사용. #446 미배포 후보.",
+          },
           targetAssignmentVersion: {
             type: "integer",
             minimum: 1,
@@ -10141,6 +10147,12 @@ export const openApiDocument = {
             minimum: 1,
             description:
               "admin은 현재 target CAS 값입니다. maid는 본인 통보 revision에 고정된 값이며 과거 조회는 mutation 권한이 아닙니다.",
+          },
+          planningDate: {
+            type: "string",
+            format: "date",
+            description:
+              "통보/담당 변경 근거의 계획일. 원 serviceDate를 덮어쓰지 않으며 생성일·통보일과 다릅니다. #446 미배포 후보.",
           },
           cleaningKind: {
             type: "string",
@@ -14698,6 +14710,12 @@ function prestartRequestSchema(
   };
   const required = Object.keys(properties);
   if (action === "change") {
+    properties.serviceDate = {
+      type: "string",
+      format: "date",
+      description:
+        "오늘/내일 배정 탭에서 선택한 KST 계획일. 과거 업무 담당 변경 시 반드시 전달. 생략은 기존 통보 계획일/원 날짜 호환이며 생성일·통보일이 아님. #446 미배포 후보.",
+    };
     properties.maidProfileId = { type: "string", format: "uuid" };
     properties.sequenceNumber = { type: "integer", minimum: 1 };
     required.push("maidProfileId", "sequenceNumber");

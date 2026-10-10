@@ -808,7 +808,11 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 typed `notifications`, private `notification_delivery_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
-#308 4B2의 dev 통합 계약(PR #340)은 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
+#446 최신 사용자 정책은 관리자 내일 배정에도 과거 미완료 업무를 포함합니다. 요청 계획일의
+근무 희망을 검사하며 원 업무 날짜/이력은 유지합니다. [후보 계약](./ASSIGNMENT_PLANNING_TABS_446.md)은
+아래 #308의 내일 exact-date 제한을 대체합니다. 실제 DB 적용 전 후보입니다.
+
+#308 4B2의 당시 dev 통합 계약(PR #340)은 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
 미완료 업무를 포함합니다. 내일·과거/이력 조회는 기존 exact-date 범위이며 원 날짜/담당/순번은
 갱신하지 않습니다. Fastify/Edge 목록은 access-token RLS 본인 통보 범위를 먼저 제한하고,
 오늘 exact row와 과거 unfinished inner-target row를 합칩니다. 과거 이력에는 현재 target join을

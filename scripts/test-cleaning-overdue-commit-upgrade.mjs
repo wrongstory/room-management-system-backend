@@ -79,7 +79,8 @@ try {
     '2038-06-06', 'Original assignment date preserved in preflight');
   assert.equal(current.blockedDrafts.length, 2, 'Stale snapshot and today unavailable remain blocked');
   assert.equal(current.remainingUnassignedTargets[0].serviceDate, '2038-06-06');
-  assert.equal(impact('2038-06-08').committableDrafts.length, 1, 'Tomorrow does not adopt old drafts');
+  assert.deepEqual(impact('2038-06-08').committableDrafts.map(row => row.cleaningTargetId).sort(),
+    [1002,1003,1004].map(id).sort(), 'Latest head includes safe backlog using tomorrow availability');
   assert.equal(snapshot(), before, '90 install/preflight cannot rewrite history or notify');
 
   const holders = [];

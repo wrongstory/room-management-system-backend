@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 113,
+  "totalCount": 114,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 35,
+    "count": 36,
     "first": "assignment_unavailability_reassignment",
-    "head": "common_auth_context_read"
+    "head": "assignment_tomorrow_backlog"
   },
-  "head": "common_auth_context_read",
+  "head": "assignment_tomorrow_backlog",
   "migrations": [
     {
       "order": 1,
@@ -578,6 +578,11 @@
       "order": 113,
       "name": "common_auth_context_read",
       "sha256": "522b9c0c146243a0c78013f756a4711ac491569361faae24cbd8749969784ffd"
+    },
+    {
+      "order": 114,
+      "name": "assignment_tomorrow_backlog",
+      "sha256": "3e1b9c6829ee4b7869c09471ccee289d49818633ff72c3b956550f1a82a33e2b"
     }
   ]
 }

@@ -658,12 +658,15 @@ export async function optimizeAssignmentPreview(
   }
   const snapshot = parseSnapshot(input);
   // Planning availability belongs to the requested day, not to the immutable
-  // service date of an overdue target. Only today's board accepts past targets.
+  // service date of an overdue target. Both planning boards accept unfinished backlog.
   const today = new Date(Date.parse(snapshot.planningAt) + 9 * 60 * 60 * 1000)
+    .toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000)
     .toISOString().slice(0, 10);
   const candidateDateAllowed = (serviceDate: string) =>
     serviceDate === snapshot.serviceDate ||
-    (snapshot.serviceDate === today && serviceDate < snapshot.serviceDate);
+    ([today, tomorrow].includes(snapshot.serviceDate) &&
+      serviceDate < snapshot.serviceDate);
   const maids = snapshot.maids.filter((m) =>
     m.role === "maid" && m.status === "active" && m.available &&
     m.availabilityVersion !== null
@@ -671,6 +674,15 @@ export async function optimizeAssignmentPreview(
   if (maids.length > PREVIEW_LIMITS.candidateMaids) limited();
   const fixed = snapshot.targets.filter((t) =>
     (t.currentAssignment !== null || t.activeAttempt !== null) &&
+    // Physical cleaning from an earlier day is not tomorrow's maid workload.
+    // Keep the snapshot itself intact: source/room workflow guards on other
+    // targets must still block starting a second job in that same room.
+    !(snapshot.serviceDate === tomorrow &&
+      t.serviceDate < snapshot.serviceDate &&
+      t.activeAttempt !== null &&
+      ["field_completed", "upload_pending", "submitted"].includes(
+        t.activeAttempt.status,
+      )) &&
     !(t.serviceDate > snapshot.serviceDate &&
       t.activeAttempt?.status === "scheduled")
   );

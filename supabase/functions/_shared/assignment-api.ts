@@ -97,6 +97,7 @@ export interface AssignmentProjection {
 }
 
 export interface AssignmentCardProjection extends AssignmentProjection {
+  planningDate?: string;
   scheduleSnapshot: AssignmentScheduleRead["scheduleSnapshot"];
   currentDeparture: AssignmentScheduleRead["currentDeparture"];
   cleaningKind: string;
@@ -231,7 +232,7 @@ export async function prestartCommand(
       : []),
   ];
   const optional = action === "change"
-    ? ["availableFrom", "dueAt"]
+    ? ["availableFrom", "dueAt", "serviceDate"]
     : action === "cancellation-requests"
     ? ["reasonDetail"]
     : [];
@@ -292,6 +293,9 @@ export async function prestartCommand(
     payload.p_decision = body.decision;
   } else payload.p_cleaning_target_id = uuidValue(id, "cleaningTargetId");
   if (action === "change") {
+    if (body.serviceDate !== undefined) {
+      payload.p_service_date = dateValue(body.serviceDate, "serviceDate");
+    }
     payload.p_maid_profile_id = uuidValue(body.maidProfileId, "maidProfileId");
     payload.p_sequence_number = integerValue(
       body.sequenceNumber,
@@ -319,7 +323,9 @@ export async function prestartCommand(
     payload.p_reason_detail = body.reasonDetail ?? null;
   }
   const rpc = {
-    change: "change_cleaning_assignment_prestart",
+    change: body.serviceDate === undefined
+      ? "change_cleaning_assignment_prestart"
+      : "change_cleaning_assignment_for_plan",
     unassign: "unassign_cleaning_assignment_prestart",
     "unavailable-cancel": "cancel_unavailable_cleaning_assignment",
     "cancellation-requests": "request_assignment_cancellation",
@@ -1201,13 +1207,16 @@ async function hydrateAssignments(
     const ids = rows.slice(offset, offset + assignmentHydrationBatchSize).map((
       row,
     ) => row.id);
-    const response = await clients.admin.rpc("get_assignment_schedule_read", {
-      p_actor_profile_id: actor.profileId,
-      p_session_id: sessionId,
-      p_assignment_ids: ids,
-      p_include_current: includeCurrent,
-      p_expected_actor_role: actor.role,
-    });
+    const response = await clients.admin.rpc(
+      "get_assignment_schedule_read_for_plan",
+      {
+        p_actor_profile_id: actor.profileId,
+        p_session_id: sessionId,
+        p_assignment_ids: ids,
+        p_include_current: includeCurrent,
+        p_expected_actor_role: actor.role,
+      },
+    );
     if (response.error) {
       const code = response.error.message;
       if (code === "ASSIGNMENT_ACCESS_REQUIRED") {
@@ -1330,7 +1339,11 @@ export async function listAssignments(
 
   const today = new Date(clock().getTime() + 9 * 60 * 60 * 1000).toISOString()
     .slice(0, 10);
-  const includeOverdue = !includeHistory && serviceDate === today;
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000)
+    .toISOString().slice(0, 10);
+  const tomorrowPlanning = actor.role === "admin" && serviceDate === tomorrow;
+  const includeOverdue = !includeHistory &&
+    (serviceDate === today || serviceDate === tomorrow);
   let query = accessTokenClient(request, clients)
     .from("cleaning_assignments")
     .select(assignmentColumns, { count: "exact" })
@@ -1358,8 +1371,14 @@ export async function listAssignments(
       .select(`${assignmentColumns},cleaning_targets!inner(status)`, {
         count: "exact",
       })
-      .lt("service_date", today).eq("is_current", true)
-      .not("cleaning_targets.status", "in", "(approved,cancelled)")
+      .lt("service_date", serviceDate).eq("is_current", true)
+      .not(
+        "cleaning_targets.status",
+        "in",
+        tomorrowPlanning
+          ? "(approved,cancelled,inspection_pending,upload_pending,rejected)"
+          : "(approved,cancelled)",
+      )
       .order("service_date").order("sequence_number").order("revision").order(
         "id",
       );
@@ -1385,13 +1404,24 @@ export async function listAssignments(
       left.revision - right.revision || left.id.localeCompare(right.id)
     );
   }
-  return hydrateAssignments(
+  const hydrated = await hydrateAssignments(
     clients,
     rows,
     actor,
     request,
     !includeHistory,
   );
+  if (actor.role !== "maid" || includeHistory || !includeOverdue) {
+    return hydrated;
+  }
+  return hydrated.filter((row) => {
+    const card = snapshotObject(row);
+    const planningDate = card.planningDate ?? card.serviceDate;
+    if (typeof planningDate !== "string") throw assignmentDatabaseError(null);
+    return serviceDate === today
+      ? planningDate <= today
+      : planningDate === serviceDate;
+  });
 }
 
 export async function assignmentHistory(

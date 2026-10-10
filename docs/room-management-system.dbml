@@ -343,6 +343,7 @@ Table public.checkout_cleaning_obligations {
   reservation_id uuid [not null, unique]
   room_id uuid [not null]
   status text [not null]
+  // #446: 오늘/내일 계획에 미완료 원 업무를 포함해도 원 날짜를 재작성하지 않는다.
   original_service_date date [not null]
   effective_service_date date [not null]
   available_from timestamptz [not null]

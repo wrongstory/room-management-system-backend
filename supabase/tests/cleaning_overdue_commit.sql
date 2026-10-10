@@ -87,10 +87,10 @@ select is((select availability_version from private.assignment_commit_candidates
 select is((select availability_day_available from private.assignment_commit_candidates_at('2038-06-07','2038-06-07 08:00+09') where target_id=pg_temp.ocid(1002)),true,'old unavailable original date does not override today availability');
 select is((select reason_code from private.assignment_commit_candidates_at('2038-06-07','2038-06-07 08:00+09') where target_id=pg_temp.ocid(1006)),'ASSIGNMENT_MAID_UNAVAILABLE','old available date does not authorize unavailable today');
 select is((select reason_code from private.assignment_commit_candidates_at('2038-06-07','2038-06-07 08:00+09') where target_id=pg_temp.ocid(1005)),'ASSIGNMENT_DRAFT_STALE_SCHEDULE','stale snapshots remain blocked');
-select is((select jsonb_array_length(value->'committableDrafts') from overdue_commit_results where label='tomorrow'),1,'tomorrow includes exact tomorrow only');
-select is((select count(*)::integer from private.assignment_commit_candidates_at('2038-06-08','2038-06-07 08:00+09') where assignment_service_date<'2038-06-08'),0,'tomorrow cannot adopt old drafts');
+select is((select jsonb_array_length(value->'committableDrafts') from overdue_commit_results where label='tomorrow'),3,'tomorrow includes exact tomorrow and safe unfinished drafts');
+select is((select count(*)::integer from private.assignment_commit_candidates_at('2038-06-08','2038-06-07 08:00+09') where assignment_service_date<'2038-06-08'),4,'tomorrow evaluates old drafts including blocked drafts');
 select is((select count(*)::integer from private.assignment_commit_candidates_at('2038-06-09','2038-06-07 08:00+09')),0,'outside today/tomorrow has no candidates');
-select ok(not private.assignment_planning_includes_date('2038-06-06','2038-06-08','2038-06-07 08:00+09'),'planning helper excludes old tomorrow');
+select ok(private.assignment_planning_includes_date('2038-06-06','2038-06-08','2038-06-07 08:00+09'),'planning helper includes old unfinished work for tomorrow');
 select ok(not private.assignment_planning_includes_date('infinity','2038-06-07','2038-06-07 08:00+09'),'planning helper rejects nonfinite dates');
 select ok(not private.assignment_planning_includes_date(null,'2038-06-07','2038-06-07 08:00+09'),'planning helper rejects null');
 
@@ -191,5 +191,69 @@ select is((select jsonb_array_length(value->'committableDrafts')+jsonb_array_len
   1000,'exact1000 complete candidate impact accepted without truncation');
 select throws_ok($$select pg_temp.overdue_commit_limit(1001)$$,'54000','ASSIGNMENT_COMMIT_LIMIT_EXCEEDED',
   '1001 candidate sentinel rejects whole impact before partial fingerprint');
+-- #446: tomorrow notification of an old target keeps the original schedule but
+-- cannot be activated by today's scheduler. This is an actual DB test only
+-- when the explicitly approved release runner executes it.
+select pg_temp.overdue_commit_fixture(9,'2038-06-06','draft_assigned',99);
+select private.commit_and_notify_assignments_at(pg_temp.ocid(1),'2038-06-08',
+  private.assignment_commit_impact_at('2038-06-08','2038-06-07 08:00+09')->>'impactFingerprint',
+  jsonb_build_array(jsonb_build_object('cleaningTargetId',pg_temp.ocid(1009),'expectedAssignmentVersion',2,
+    'expectedAvailabilityVersion',(select version from public.availability_versions
+      where maid_profile_id=pg_temp.ocid(3) and week_start='2038-06-07' and is_current))),
+  'tomorrow-overdue-planning-proof',repeat('b',64),'2038-06-07 08:00+09');
+select is((select private.assignment_requested_planning_date(a) from public.cleaning_assignments a
+  where id=pg_temp.ocid(2009)),'2038-06-08'::date,'immutable notification binds tomorrow planning day');
+select is((select service_date from public.cleaning_assignments where id=pg_temp.ocid(2009)),
+  '2038-06-06'::date,'original assignment date is not rewritten');
+select is((select private.activation_reason_at(t,a,'2038-06-07 08:00+09')
+  from public.cleaning_targets t join public.cleaning_assignments a on a.cleaning_target_id=t.id and a.is_current
+  where t.id=pg_temp.ocid(1009)),'CLEANING_SERVICE_DATE_NOT_DUE','tomorrow backlog cannot activate today');
+select ok(not has_function_privilege('authenticated',
+  'private.assignment_requested_planning_date(public.cleaning_assignments)','execute'),
+  'planning evidence helper is not exposed to authenticated callers');
+-- Source-only regression fixture for the exact successor evidence reader. This
+-- does not claim to exercise the public checkout/replan command. Every probe
+-- rolls its synthetic successor back, preserving the original notified row and
+-- audit proof for the next case; no migration/DB execution is implied here.
+create function pg_temp.planning_successor_probe(p_maid uuid,p_end_reason text,p_schedule_reason text,
+  p_sequence integer default 99) returns date language plpgsql as $$
+declare old_a public.cleaning_assignments; next_a public.cleaning_assignments;
+  target public.cleaning_targets; result date;
+begin
+  begin
+    select * into strict old_a from public.cleaning_assignments where id=pg_temp.ocid(2009);
+    update public.cleaning_assignments set is_current=false,ended_at='2038-06-07 09:00+09',
+      change_reason_code=p_end_reason where id=old_a.id;
+    update public.cleaning_targets set assignment_version=assignment_version+1
+      where id=old_a.cleaning_target_id returning * into target;
+    insert into public.cleaning_target_schedule_revisions(cleaning_target_id,revision,effective_service_date,
+      available_from,due_at,reason_code,changed_by)
+    values(target.id,target.assignment_version,target.effective_service_date,target.available_from,target.due_at,
+      p_schedule_reason,pg_temp.ocid(1));
+    insert into public.cleaning_assignments(cleaning_target_id,maid_profile_id,sequence_number,revision,
+      changed_by,notified_at)
+    values(target.id,p_maid,p_sequence,target.assignment_version,pg_temp.ocid(1),'2038-06-07 09:00+09')
+    returning * into next_a;
+    result:=private.assignment_requested_planning_date(next_a);
+    raise exception using errcode='PZ446',message='rollback planning successor fixture';
+  exception when sqlstate 'PZ446' then null;
+  end;
+  return result;
+end $$;
+insert into overdue_commit_results values('before-successor-probes',pg_temp.overdue_commit_ledgers());
+select is(pg_temp.planning_successor_probe(pg_temp.ocid(3),'MANUAL_CHECKOUT_RESCHEDULE','MANUAL_CHECKOUT'),
+  '2038-06-08'::date,'same-owner immediate checkout successor retains exact tomorrow notification proof');
+select is(pg_temp.planning_successor_probe(pg_temp.ocid(3),'RESERVATION_SCHEDULE_CHANGED','RESERVATION_SCHEDULE_CHANGED'),
+  '2038-06-08'::date,'same-owner immediate schedule successor retains exact tomorrow notification proof');
+select is(pg_temp.planning_successor_probe(pg_temp.ocid(4),'MANUAL_CHECKOUT_RESCHEDULE','MANUAL_CHECKOUT'),
+  '2038-06-06'::date,'different owner cannot inherit a previous maid planning-day proof');
+select is(pg_temp.planning_successor_probe(pg_temp.ocid(3),'OPERATIONAL_CHANGE','MANUAL_CHECKOUT'),
+  '2038-06-06'::date,'ordinary reassignment is not a checkout successor merely because the schedule reason matches');
+select is(pg_temp.planning_successor_probe(pg_temp.ocid(3),'MANUAL_CHECKOUT_RESCHEDULE','RESERVATION_SCHEDULE_CHANGED'),
+  '2038-06-06'::date,'mismatched end and schedule reasons do not inherit a planning-day proof');
+select is(pg_temp.planning_successor_probe(pg_temp.ocid(3),'MANUAL_CHECKOUT_RESCHEDULE','MANUAL_CHECKOUT',100),
+  '2038-06-06'::date,'changed sequence is not silently treated as the same planning successor');
+select is(pg_temp.overdue_commit_ledgers(),(select value from overdue_commit_results where label='before-successor-probes'),
+  'successor proof probes preserve original assignments, snapshots, audit and side-effect ledgers');
 select * from finish();
 rollback;

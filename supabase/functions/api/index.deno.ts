@@ -1222,7 +1222,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
       rpc: (name: string, args: Record<string, unknown>) => {
-        if (name !== "get_assignment_schedule_read") {
+        if (name !== "get_assignment_schedule_read_for_plan") {
           return Promise.resolve({ data: null, error: null });
         }
         assert(
@@ -1252,6 +1252,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
         return Promise.resolve({
           data: ids.map((assignmentId) => ({
             assignmentId,
+            planningDate: "2026-09-04",
             scheduleSnapshot: null,
             currentDeparture: null,
           })),
