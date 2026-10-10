@@ -16,8 +16,9 @@
 - 운영 긴급 수정은 `main`에서 `hotfix/*`를 만들어 `main`으로 PR한다. 병합한 hotfix는 반드시 별도 PR로 `dev`에도 반영한다.
 - `main`과 `dev`에는 PR 필수, `application`/`migration` required checks, 관리자 우회 금지, force push 금지, 브랜치 삭제 금지, 미해결 리뷰 대화 해결 필수를 적용한다.
 - Git 브랜치와 원격 Supabase 프로젝트를 1:1로 연결하지 않는다. 복구검증용 Supabase 프로젝트는 recovery 전용으로 유지하고 `dev DB`로 전환하지 않는다.
-- feature → `dev` PR에서는 원격 운영 Supabase에 migration을 적용하지 않고 fresh local Supabase에서 `db:verify`, `db:test`, RLS/DML 검증과 application/migration CI를 완료한다.
-- release → `main` PR에서는 전체 migration 재적용, 전체 SQL·application 회귀 검증, migration history, Security Advisor, release notes를 확인한다.
+- [2026-10-10 사용자 결정, #431] feature → `dev` PR에서는 application·변경 기능 검사 및 migration manifest 검사를 수행한다. 전체 DB 재구축/SQL/upgrade/경합 검사는 최종 릴리스로 미루고 `Full DB NOT RUN`으로 명시한다. 원격 운영 Supabase에는 적용하지 않는다.
+- release → `main` PR(승인된 hotfix 포함)의 최종 통합 입력에 전체 DB 검증을 1회 수행한다. 같은 PR의 성공 증거와 검증 입력 지문이 일치하면 재사용한다. 입력 변경/실패/취소/증거 부재를 PASS로 취급하지 않는다. migration history, Security Advisor, release notes도 확인한다.
+- main 병합 후에는 해당 merged PR의 동일 검증 입력 성공 증거를 확인할 뿐 전체 DB를 다시 구축하지 않는다. 증거가 없거나 입력이 다르면 배포를 중단한다. required `application`/`migration`, 독립 QA와 관리자 우회 금지는 유지한다. 세부 기준은 `docs/FINAL_DB_VALIDATION.md`를 따른다.
 - `main` 릴리즈 병합 후에만 운영 Supabase의 pending migration을 적용하고 smoke test 후 `vX.Y.Z` 태그를 생성한다. 원격 DB 적용과 태그 생성은 해당 릴리즈 승인 범위 안에서만 수행한다.
 
 ## 구현 규칙
@@ -35,6 +36,6 @@
 ## 검증과 보고
 
 - 변경 뒤 `npm run typecheck`, `npm test`, `npm run build`를 실행한다.
-- migration/RLS 변경은 Docker 환경에서 `npm run db:reset`과 역할별 실제 DB 검사를 추가한다.
-- `db:reset`을 실행하지 못했으면 migration이 검증됐다고 말하지 않는다.
+- migration/RLS 변경도 중간 전체 reset을 반복하지 않고 변경 관련 검사를 수행하며, 최종 릴리스에서 fresh DB·역할별 실제 SQL·경합 검사를 완료한다.
+- 실제 전체 DB 실행 또는 동일 입력의 성공 증거를 확인하지 않았으면 migration이 검증됐다고 말하지 않는다. 개발 manifest PASS와 전체 DB PASS를 구분한다.
 - PR에는 참조한 제품 규칙, 변경한 불변식·권한, migration 영향, 동시성/멱등성 처리, 실제 실행한 검증과 남은 미확정 사항을 적는다.
