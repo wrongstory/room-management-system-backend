@@ -66,3 +66,22 @@
   실제 SQL compile/ACL/MVCC/경합/EXPLAIN/성능은 NOT RUN임을 별도 확인했다.
 - `git diff --check`: PASS. 원래 존재하던 Edge 줄바꿈 변경은 포함하지 않는다.
 - PR/원격 CI는 후속 확인이며 이 기록을 DB 실행 증거로 사용하지 않는다.
+
+### 2026-10-11 후속: 비교 검증의 미적용 통과 방지
+
+PR #445의 d4307f8은 원격 CI38064746029의 application/manifest-only 모두 PASS다.
+실제 DB 단계가 skipped임도 확인했다. 이후 SQL 비교 fixture를 보완했다.
+
+- 비교 전에 설치된 후보 본문 MD5 `5feb3200aab310af19244723ee3c0c0f`를 요구한다.
+  미적용 기준 함수가 자기 자신과 비교되어 PASS하는 것을 막는다.
+- 단건뿐 아니라 `p_room_id=null` 전체 목록을 과거/LIVE/미래5날짜에서 FULL JOIN으로
+  비교해 누락/추가 객실을 검출한다. 빈 fixture 객실5행도 별도 검사한다. SQL 계획6개.
+- Node가 후보/기준 본문 hash, 역치환 literal, guard의 선실행, 전체 필드·시계 보존,
+  SQL assertion 개수와 rollback 구조를 검사한다. SQL 실행을 대체하지 않는다.
+- 보완 후 `ci:quality`: 118파일/2,971 tests·typecheck/build PASS.
+  독립 소스 QA2파일/115 tests PASS, 신규 P0/P1/P2 없음. diff check PASS.
+- migration114와 그 해시는 변경하지 않았다. 실제 DB/SQL/성능은 계속 NOT RUN이다.
+  이전 CI를 새 head의 성공으로 재사용하지 않고 추가 push의 필수 CI를 다시 확인한다.
+
+#431에 따라 개발 소스의 dev 통합과 최종 DB 검증은 분리한다. dev 통합 후에도 이 문서의
+릴리스 gate가 남으며, 준비된 SQL fixture나 원격 manifest PASS를 운영 사용 가능으로 표시하지 않는다.

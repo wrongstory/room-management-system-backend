@@ -6,6 +6,7 @@ const read = async (name: string) => (await readFile(new URL(`../supabase/migrat
 const initial = await read('20261004231650_room_board_date_filters.sql');
 const compatibility = await read('20261004231704_room_board_live_projection_compatibility.sql');
 const patch = await read('20261010153508_room_board_issue_counts_single_scan.sql');
+const fixture = (await readFile(new URL('../supabase/tests/room_board_issue_counts.sql', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const md5 = (value: string) => createHash('md5').update(value).digest('hex');
 // Reconstruct only the reviewed four literal patches. No subprocess, SQL or DB execution.
 const initialSource = initial.split('create function public.get_room_board_projection(')[1]?.split('as $$')[1]?.split('$$;')[0];
@@ -51,5 +52,23 @@ describe('#416 issue aggregate source only; real SQL/plan/ACL NOT RUN', () => {
     expect(afterJoin).not.toMatch(/group by|issue\.status|limit /i);
     expect(patch).toContain('after_catalog is distinct from before_catalog');
     expect(patch).not.toMatch(/^\s*(grant|revoke|insert|update|delete|create index|alter table)\b/im);
+  });
+  it('requires the installed candidate before cloning and compares the entire list without dropping missing rooms', () => {
+    const next = currentSource.replace(beforeCounts, afterCounts).replace(beforeJoin, afterJoin);
+    expect(md5(next)).not.toBe(md5(currentSource));
+    expect(fixture).toContain(`if md5(source) <> '${md5(next)}' then`);
+    const guard = fixture.indexOf('ISSUE_COUNTS_TEST_CANDIDATE_NOT_INSTALLED');
+    expect(guard).toBeGreaterThan(0);
+    expect(guard).toBeLessThan(fixture.indexOf('execute definition;'));
+    // Check the exact inverse fragments too: a mismatched comparison cannot silently pass.
+    for (const fragment of [afterCounts, afterJoin]) expect(fixture).toContain(`$new$${fragment}$new$`);
+    for (const fragment of [beforeCounts, beforeJoin]) expect(fixture).toContain(`$old$${fragment}$old$`);
+    expect(fixture).toContain(`<> '${md5(currentSource)}' then`);
+    expect(fixture).toContain('from candidate full join baseline using (day_offset, id)');
+    expect(fixture).toContain('where candidate is distinct from baseline');
+    expect(fixture).not.toMatch(/to_jsonb\([^)]*\)\s*-/); // Do not mask any DTO/clock fields.
+    expect(fixture).toContain('select plan(6);');
+    expect(fixture.match(/^select is\(/gm)).toHaveLength(6);
+    expect(fixture.trim()).toMatch(/^--[\s\S]*\bbegin;[\s\S]*rollback;$/);
   });
 });

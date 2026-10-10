@@ -1,6 +1,6 @@
 -- #416 final approved DB gate only. This file is not evidence of an executed test.
 begin;
-select plan(4);
+select plan(6);
 
 -- Recover the pinned prior RPC as a transaction-local comparison function.
 do $baseline$
@@ -11,6 +11,10 @@ begin
   select replace(prosrc, E'\r\n', E'\n'),
     replace(pg_get_functiondef(oid), E'\r\n', E'\n') into strict source, definition
   from pg_proc where oid = 'public.get_room_board_projection(uuid,uuid,date,uuid)'::regprocedure;
+  -- Otherwise an unapplied migration could compare the old RPC to itself.
+  if md5(source) <> '5feb3200aab310af19244723ee3c0c0f' then
+    raise exception 'ISSUE_COUNTS_TEST_CANDIDATE_NOT_INSTALLED';
+  end if;
   definition := replace(definition, source,
     replace(replace(source,
       $new$      issue_counts.issue_count,
@@ -99,5 +103,30 @@ select is((select count(*)::integer from issue_count_comparison), 10,
   'both empty and populated rooms survive all five service dates');
 select is((select count(*)::integer from issue_count_comparison where candidate is distinct from baseline),
   0, 'complete room board response equals pinned baseline for past/live/future dates');
+
+-- Exercise the production list path too, including every pre-existing room.
+-- FULL JOIN detects missing/extra rows, not only differences among matching IDs.
+create temporary table issue_count_list_comparison as
+with candidate as (
+  select dates.day_offset, result.id, to_jsonb(result) as value
+  from (values (-2), (-1), (0), (1), (2)) dates(day_offset)
+  cross join lateral public.get_room_board_projection(
+    'b4160000-0000-4000-8000-000000000002', 'b4160000-0000-4000-8000-000000000003',
+    (statement_timestamp() at time zone 'Asia/Seoul')::date + dates.day_offset, null) result
+), baseline as (
+  select dates.day_offset, result.id, to_jsonb(result) as value
+  from (values (-2), (-1), (0), (1), (2)) dates(day_offset)
+  cross join lateral pg_temp.room_board_before(
+    'b4160000-0000-4000-8000-000000000002', 'b4160000-0000-4000-8000-000000000003',
+    (statement_timestamp() at time zone 'Asia/Seoul')::date + dates.day_offset, null) result
+)
+select candidate.value as candidate, baseline.value as baseline
+from candidate full join baseline using (day_offset, id);
+select is((select count(*)::integer from issue_count_list_comparison
+  where candidate is distinct from baseline), 0,
+  'complete list matches baseline including missing or extra room detection');
+select is((select count(*)::integer from issue_count_list_comparison
+  where candidate ->> 'id' = 'b4160000-0000-4000-8000-000000000005'), 5,
+  'list preserves empty fixture room on every date');
 select * from finish();
 rollback;
