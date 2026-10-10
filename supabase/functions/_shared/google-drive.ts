@@ -33,6 +33,12 @@ export interface DriveFolder {
   parentFolderId: string;
   name: string;
 }
+export interface PhotoProviderTiming {
+  measure<T>(
+    stage: "drive_upload" | "drive_verify",
+    work: () => Promise<T>,
+  ): Promise<T>;
+}
 export interface PhotoProvider {
   quota(): Promise<{ refreshStartedAt: string; usageBytes: string }>;
   generateUploadIds(): Promise<[string, string, string]>;
@@ -41,6 +47,7 @@ export interface PhotoProvider {
   upload(
     object: DriveObject,
     bytes: Uint8Array,
+    timing?: PhotoProviderTiming,
   ): Promise<{ uploadedAt: string }>;
   inspect(object: DriveObject): Promise<{ uploadedAt: string }>;
   read(object: DriveReadObject): Promise<Uint8Array>;
@@ -70,6 +77,23 @@ function storageName(object: DriveObject): string {
 }
 const fields =
   "id,name,mimeType,parents,size,sha256Checksum,appProperties,trashed,shared,createdTime";
+// Missing fields require a fresh GET; present-but-wrong values must fail validation.
+// A provider checksum is optional only because #verify reads and hashes actual bytes otherwise.
+function completeAcknowledgement(
+  row: Record<string, unknown> | undefined,
+  photo: boolean,
+): row is Record<string, unknown> {
+  const required = [
+    "id",
+    "name",
+    "mimeType",
+    "parents",
+    "trashed",
+    "shared",
+    ...(photo ? ["size", "appProperties", "createdTime"] : []),
+  ];
+  return row !== undefined && required.every((key) => Object.hasOwn(row, key));
+}
 export class GoogleDriveProvider implements PhotoProvider {
   #config: DriveConfig;
   #fetch: Fetch;
@@ -256,6 +280,7 @@ export class GoogleDriveProvider implements PhotoProvider {
       return;
     }
     if (existing.status !== 404) return unavailable();
+    let acknowledgement: Record<string, unknown> | undefined;
     try {
       const created = await this.#request(`files?fields=${fields}`, {
         method: "POST",
@@ -268,14 +293,26 @@ export class GoogleDriveProvider implements PhotoProvider {
         }),
       });
       if (!created.ok && created.status !== 409) return unavailable();
+      if (created.ok) acknowledgement = await this.#json(created);
+      else await created.body?.cancel();
     } catch {
       /* Same generated identity only. Never create a second candidate after timeout. */
     }
-    this.#privateFolder(await this.#metadata(folderId), folderId, parent, name);
+    this.#privateFolder(
+      completeAcknowledgement(acknowledgement, false)
+        ? acknowledgement
+        : await this.#metadata(folderId),
+      folderId,
+      parent,
+      name,
+    );
   }
-  async #verify(object: DriveObject): Promise<string> {
+  async #verify(
+    object: DriveObject,
+    acknowledgement?: Record<string, unknown>,
+  ): Promise<string> {
     const expectedName = storageName(object);
-    const row = await this.#metadata(object.fileId);
+    const row = acknowledgement ?? await this.#metadata(object.fileId);
     if (
       row.id !== object.fileId || row.name !== expectedName ||
       row.mimeType !== object.mime || row.size !== String(object.sizeBytes) ||
@@ -301,6 +338,7 @@ export class GoogleDriveProvider implements PhotoProvider {
   async upload(
     object: DriveObject,
     bytes: Uint8Array,
+    timing?: PhotoProviderTiming,
   ): Promise<{ uploadedAt: string }> {
     id(object.fileId);
     id(object.folderId);
@@ -327,24 +365,44 @@ export class GoogleDriveProvider implements PhotoProvider {
     body.set(prefix);
     body.set(bytes, prefix.length);
     body.set(suffix, prefix.length + bytes.length);
-    try {
-      const response = await this.#request(
-        `files?uploadType=multipart&fields=${fields}`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": `multipart/related; boundary=${boundary}`,
+    const create = async () => {
+      try {
+        const response = await this.#request(
+          `files?uploadType=multipart&fields=${fields}`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": `multipart/related; boundary=${boundary}`,
+            },
+            body,
           },
-          body,
-        },
-        true,
-      );
-      if (!response.ok && response.status !== 409) return unavailable();
-    } catch {
-      /* 불확실한 create는 같은 private preallocated identity를 재조회한다. */
-    }
+          true,
+        );
+        if (response.ok) return await this.#json(response);
+        await response.body?.cancel();
+      } catch {
+        /* 불확실한 create는 같은 private preallocated identity를 재조회한다. */
+      }
+      return undefined;
+    };
+    const acknowledgement = timing
+      ? await timing.measure("drive_upload", create)
+      : await create();
     // create 요청에 createdTime을 지정하지 않는다. DB도 operation 생성~관측 now 경계를 재검증한다.
-    return { uploadedAt: await this.#verify(object) };
+    // Validation is deliberately outside create's transport catch: a conflicting ACK cannot
+    // be hidden by a subsequent successful GET. Reconciliation/inspect always does a fresh GET.
+    const verify = () =>
+      this.#verify(
+        object,
+        completeAcknowledgement(acknowledgement, true)
+          ? acknowledgement
+          : undefined,
+      );
+    return {
+      uploadedAt: timing
+        ? await timing.measure("drive_verify", verify)
+        : await verify(),
+    };
   }
   /** Read-only reconciliation of the one preallocated identity. Missing/unknown never authorizes deletion. */
   async inspect(object: DriveObject): Promise<{ uploadedAt: string }> {
