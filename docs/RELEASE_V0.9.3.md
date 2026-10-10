@@ -1,5 +1,16 @@
 # v0.9.3 가능일 완전성·조회 성능 개선
 
+## 2026-10-10 #431 검증 시점 정책 반영
+
+사용자가 전체 DB 검증을 CI까지 최종1회로 변경 승인했다. PR432/source3436f1a의
+application2분10초/migration14초·독립 QA26 PASS 후 dev4eb16a1에 보호 병합했고 이
+릴리스에 정상 통합했다. 코드/테스트/workflow는 최신 dev와 동일하며 SQL 변경은 없다.
+구 정책 PR430/run38019212225는 application PASS/전체 DB 실행 중 cancelled이며 성공
+근거로 사용하지 않는다. 아래 이전 exact-head 반복 gate는 [새 정책](./FINAL_DB_VALIDATION.md)으로 대체한다.
+새 최종 입력에서 전체 DB 검증1회를 수행하고, 이후 같은 입력의 main 병합 후에는
+해당 릴리스 성공 증거만 확인한다. 증거 누락/불일치는 배포 차단이다.
+실제 새 release full/main 재사용은 아직 미실행이며 배포 완료가 아니다.
+
 ## 상태와 범위
 
 2026-10-10 준비 기록이며 운영 배포 완료가 아니다. 사용자 승인 후속 순서와 #429를 따른다.
@@ -51,9 +62,9 @@ manifest5종도 PASS다. 새 릴리스 HEAD의 원격 application/migration은 �
 
 ## 배포 순서와 복구
 
-1. release → main PR의 exact-head application/migration PASS, 독립 QA,
+1. release → main PR의 application 및 최종 입력 migration 증거 PASS, 독립 QA,
    미해결 리뷰0·충돌 없음·보호 규칙·최종 dev 코드 일치를 확인하고 squash한다.
-2. exact main의 기존 runtime lock/static assets/verify_jwt=false 및 내부 인증을 유지해
+2. exact main의 동일 입력 DB 증거 확인 후 기존 runtime lock/static assets/verify_jwt=false 및 내부 인증을 유지해
    api만 배포한다. DB push/reset/history repair, Secrets/Cron/다른 worker 변경은 없다.
 3. ACTIVE 버전·health200·정확한 Origin preflight204/비허용403·보호 경로 비인증401·
    no-store를 확인한다. 공개 OpenAPI는 151 paths/163 operations이며 info.version은 0.6.0이다.
