@@ -94,5 +94,14 @@ Swagger 보호 API의 503 및 공통 ErrorCode에 AUTH_CONTEXT_UNAVAILABLE을 �
 (한도 20,000,000). manifest113·프런트 생성 client·diff check PASS.
 실제 DB/ACL/MVCC/경합 및 운영 성능 비교는 계속 NOT RUN이다.
 
+### PR #444 CI 보완
+
+첫 CI의 application은 Python 관리 도구의 과거 오류 코드 수(335) 고정 검사에서 실패했다.
+실제 현재 계약은 신규 `AUTH_CONTEXT_UNAVAILABLE`을 포함한 336개다. 정확한 전체 수/고유 수
+검사를 유지하고 신규 코드 필수 포함, 누락/중복/동수 치환 거부 회귀 3건을 추가했다.
+Python 전체105·독립 targeted10, ruff/format/mypy·임시 client codegen·package check PASS.
+코드 생성기의 기존 바이너리 등 미지원 경고는 그대로이며 전체 지원으로 주장하지 않는다.
+소스만 수정했으며 migration/reset/운영 호출 없이 기존 PR의 application CI를 재확인한다.
+
 후속: #416 객실 계산 → #414 주급 조회 → #415 배정 조회 → 승인된 최종 DB 검증·배포.
 사진/Drive 후속은 #411에서 별도로 진행한다.
