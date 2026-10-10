@@ -141,6 +141,9 @@ describe('photo application admission/provider/finalize boundary', () => {
     const first = s.service.withTiming(), second = s.service.withTiming();
     await Promise.all([first.upload(request(), identity, id(3), id(4)), second.content(new Request('http://local'), identity, id(7))]);
     expect(first.timingHeader()).toContain('photo_decode;dur=');
+    expect(first.timingHeader()).toContain('photo_drive_ids;dur=');
+    expect(first.timingHeader()).toContain('photo_drive_folders;dur=');
+    expect(vi.mocked(s.provider.upload).mock.calls[0]?.[2]).toBeInstanceOf(PhotoTiming);
     expect(second.timingHeader()).not.toContain('photo_decode');
     expect(second.timingHeader()).toContain('photo_drive;dur=');
     expect(s.service.timingHeader()).toBeUndefined();
@@ -162,7 +165,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(1, expect.objectContaining({ folderId: 'provider_date_123' }));
     expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(2, expect.objectContaining({ folderId: 'provider_folder_123' }));
     expect(s.calls.indexOf('reserve_named_photo_provider_identity')).toBeGreaterThan(s.calls.lastIndexOf('reserve_photo_drive_folder'));
-    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'provider_file_123', folderId: 'provider_folder_123' }), expect.any(Uint8Array));
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'provider_file_123', folderId: 'provider_folder_123' }), expect.any(Uint8Array), undefined);
   });
   it('accepted replay allocates no new Drive identities', async () => {
     const s = setup(name => name === 'begin_admitted_photo_upload' ? { data: operation('accepted'), error: null } : undefined);
@@ -183,7 +186,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
     expect(s.provider.ensureFolder).not.toHaveBeenCalled();
     expect(s.calls).not.toContain('reserve_named_photo_provider_identity');
-    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'existing_file_123', folderId: 'existing_folder_123' }), expect.any(Uint8Array));
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'existing_file_123', folderId: 'existing_folder_123' }), expect.any(Uint8Array), undefined);
   });
   it.each([false, true])('replays the exact legacy JPEG hash after begin conflict only (collection=%s)', async collection => {
     const current = { bytes, mime: 'image/jpeg' as const, sizeBytes: bytes.length, sha256: 'a'.repeat(64) };
@@ -214,7 +217,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     const s = setup(name => name === 'begin_admitted_photo_upload' && begins++ === 0 ? { data: null, error: { message: 'IDEMPOTENCY_KEY_REUSED' } } : undefined);
     expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
     expect(s.provider.upload).toHaveBeenCalledOnce();
-    expect(s.provider.upload).toHaveBeenCalledWith(expect.anything(), legacyBytes);
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.anything(), legacyBytes, undefined);
   });
   it('does not bypass a mismatched key, permission failure, or CAS conflict', async () => {
     for (const code of ['IDEMPOTENCY_KEY_REUSED', 'PHOTO_ACCESS_REQUIRED', 'PHOTO_VERSION_CONFLICT']) {
@@ -382,7 +385,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
     expect(s.calls).not.toContain('reserve_named_photo_provider_identity');
     expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
-    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileName }), expect.any(Uint8Array));
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileName }), expect.any(Uint8Array), undefined);
   });
   it('accepts an empty slot without retention metadata and requires metadata for an existing hidden photo', async () => {
     const slotBase = { slotId: id(4), slotKey: 'tv', required: true, displayOrder: 0,
@@ -433,7 +436,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(s.calls).toContain('finalize_admitted_photo_upload');
     expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({
       fileName: `${new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)}_일반방_101_01.jpg`,
-    }), expect.any(Uint8Array));
+    }), expect.any(Uint8Array), undefined);
   });
 });
 

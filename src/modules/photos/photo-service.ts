@@ -46,7 +46,7 @@ export type PhotoUploadResponse = PhotoUploadOperationProjection & {
   /** Fresh, separately authorized projection; null means GET fallback, not upload failure. */
   photoSlots?: unknown;
 };
-type PhotoTimingStage = 'db' | 'body' | 'decoder_init' | 'decode' | 'drive';
+type PhotoTimingStage = 'db' | 'body' | 'decoder_init' | 'decode' | 'drive' | 'drive_ids' | 'drive_folders' | 'drive_upload' | 'drive_verify';
 /** Request-local, fixed names/numeric durations only. Never retain IDs, URLs, errors or bytes. */
 export class PhotoTiming {
   readonly #started: number;
@@ -517,7 +517,7 @@ export class PhotoService {
           typeof context.uploadDate !== "string" ||
           typeof context.roomNumber !== "string"
         ) return failed();
-        const [dateCandidate, roomCandidate, fileId] = await this.#measure('drive', () => provider.generateUploadIds());
+        const [dateCandidate, roomCandidate, fileId] = await this.#measure('drive', () => this.#measure('drive_ids', () => provider.generateUploadIds()));
         let folderId: string | undefined;
         for (const scope of ["date", "room"] as const) {
           const reserved = row(
@@ -543,11 +543,11 @@ export class PhotoService {
           const verifiedFolderId = locator(reserved.folderId);
           folderId = verifiedFolderId;
           const folderName = String(scope === 'date' ? context.uploadDate : context.roomNumber);
-          await this.#measure('drive', () => provider.ensureFolder({
+          await this.#measure('drive', () => this.#measure('drive_folders', () => provider.ensureFolder({
             folderId: verifiedFolderId,
             parentFolderId,
             name: folderName,
-          }));
+          })));
         }
         context = row(
           await this.#rpc("reserve_named_photo_provider_identity", {
@@ -569,7 +569,7 @@ export class PhotoService {
           context.uploadDate !==
             new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)
         ) throw new PhotoError(409, "PHOTO_PROVIDER_DATE_MISMATCH");
-        const success = await this.#measure('drive', () => provider.upload(object, verified.bytes));
+        const success = await this.#measure('drive', () => provider.upload(object, verified.bytes, this.timing));
         await this.#rpc("record_admitted_photo_provider_success", {
           ...worker,
           p_provider_locator: object.fileId,
