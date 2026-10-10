@@ -9,6 +9,7 @@ import {
   resetAccountPassword,
   unlockAccount,
 } from "../_shared/account-api.ts";
+import { apiTimingEligible, apiTimingHeaders } from "../_shared/api-timing.ts";
 import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import {
   authorizationSourceForPath,
@@ -122,7 +123,10 @@ import {
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
 import { listPayrollWorkDetails } from "../_shared/payroll-work-details-api.ts";
-import { payrollRemittanceMarker } from "../_shared/payroll-remittance-marker-api.ts";
+import {
+  payrollRemittanceMarker,
+  payrollRemittanceMarkers,
+} from "../_shared/payroll-remittance-marker-api.ts";
 import {
   configuredPhotoProvider,
   createPhotoService,
@@ -363,6 +367,32 @@ export async function handleApiRequest(
   request: Request,
   dependencies: ApiHandlerDependencies = defaultDependencies,
 ): Promise<Response> {
+  const started = performance.now();
+  const response = await handleApiRequestCore(request, dependencies);
+  const path = routePath(request.url);
+  if (!apiTimingEligible(request.method, path, response.status)) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  for (
+    const [name, value] of Object.entries(apiTimingHeaders(
+      performance.now() - started,
+      headers.get("server-timing") ?? "",
+      headers.get("access-control-expose-headers") ?? "",
+    ))
+  ) headers.set(name, value);
+  // Preserve the body stream. Timing never reads, clones or logs business payloads.
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function handleApiRequestCore(
+  request: Request,
+  dependencies: ApiHandlerDependencies,
+): Promise<Response> {
   const id = requestId(request);
   let corsHeaders: Record<string, string> = {};
   let clients: EdgeClients | undefined;
@@ -430,6 +460,7 @@ export async function handleApiRequest(
       }
     }
     const markerPath = "/v1/payroll/remittance-marker";
+    const markerBatchPath = "/v1/payroll/remittance-markers";
     const markerFamily = path.split("/").map((segment) => {
       try {
         return decodeURIComponent(segment);
@@ -438,12 +469,15 @@ export async function handleApiRequest(
       }
     }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
     if (
-      markerFamily === markerPath || markerFamily.startsWith(`${markerPath}/`)
+      [markerPath, markerBatchPath].some((prefix) =>
+        markerFamily === prefix || markerFamily.startsWith(`${prefix}/`)
+      )
     ) {
       corsHeaders["cache-control"] = "no-store";
       const pathname = new URL(request.url).pathname;
       const rawPath = pathname.slice(pathname.lastIndexOf("/api") + 4);
       const allowed =
+        (rawPath === markerBatchPath && request.method === "GET") ||
         (rawPath === markerPath && ["GET", "PUT"].includes(request.method)) ||
         (rawPath === `${markerPath}/reconfirm` && request.method === "POST") ||
         (rawPath === `${markerPath}/history` && request.method === "GET");
@@ -1563,6 +1597,17 @@ export async function handleApiRequest(
         ),
       };
       assertPayrollResponseSize(response);
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (
+      path === markerBatchPath
+    ) {
+      const response = await payrollRemittanceMarkers(
+        request,
+        clients,
+        actor,
+        verifiedRequestSessionId(request),
+      );
       return jsonResponse(response, 200, corsHeaders);
     }
     if (

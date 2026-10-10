@@ -1100,57 +1100,19 @@ function assignmentRolloverSnapshot(
   };
 }
 
-async function hydrateAssignments(
+async function assignmentAttemptRead(
   clients: EdgeClients,
-  rows: AssignmentRow[],
-  actor: EdgeActor,
-  request: Request,
-  includeCurrent: boolean,
-): Promise<AssignmentCardProjection[]> {
-  if (rows.length === 0) return [];
-  const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
-  const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
-  const assignmentIds = rows.map((row) => row.id);
-  const [targetRows, maidRows, attemptRows, scheduleRows] = await Promise.all([
-    assignmentRelatedRows(
-      clients,
-      "cleaning_targets",
-      "id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
-      "id",
-      targetIds,
-    ),
-    assignmentRelatedRows(
-      clients,
-      "profiles",
-      "id,display_name",
-      "id",
-      maidIds,
-    ),
-    assignmentRelatedRows(
-      clients,
-      "cleaning_attempts",
-      "id,assignment_id,attempt_number,status,started_at",
-      "assignment_id",
-      assignmentIds,
-      "attempt_number",
-    ),
-    assignmentRelatedRows(
-      clients,
-      "cleaning_target_schedule_revisions",
-      "cleaning_target_id,revision,effective_service_date,reason_code",
-      "cleaning_target_id",
-      targetIds,
-      "revision",
-    ),
-  ]);
-  const targets = new Map(
-    (targetRows as TargetRow[]).map((row) => [
-      row.id,
-      row,
-    ]),
-  );
-  const maids = new Map(
-    (maidRows as MaidRow[]).map((row) => [row.id, row]),
+  assignmentIds: string[],
+) {
+  // Submissions depend only on the latest attempts, not on target/profile/history reads.
+  // Keep all attempts for cancellation guards and the final authority RPC in hydration.
+  const attemptRows = await assignmentRelatedRows(
+    clients,
+    "cleaning_attempts",
+    "id,assignment_id,attempt_number,status,started_at",
+    "assignment_id",
+    assignmentIds,
+    "attempt_number",
   );
   const attempts = new Map<string, AttemptRow>();
   const capabilityAttempts = new Map<string, AttemptRow[]>();
@@ -1171,6 +1133,55 @@ async function hydrateAssignments(
     attemptIds,
     "version",
   );
+  return { attempts, capabilityAttempts, submissionRows };
+}
+
+async function hydrateAssignments(
+  clients: EdgeClients,
+  rows: AssignmentRow[],
+  actor: EdgeActor,
+  request: Request,
+  includeCurrent: boolean,
+): Promise<AssignmentCardProjection[]> {
+  if (rows.length === 0) return [];
+  const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
+  const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
+  const assignmentIds = rows.map((row) => row.id);
+  const [targetRows, maidRows, attemptData, scheduleRows] = await Promise.all([
+    assignmentRelatedRows(
+      clients,
+      "cleaning_targets",
+      "id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
+      "id",
+      targetIds,
+    ),
+    assignmentRelatedRows(
+      clients,
+      "profiles",
+      "id,display_name",
+      "id",
+      maidIds,
+    ),
+    assignmentAttemptRead(clients, assignmentIds),
+    assignmentRelatedRows(
+      clients,
+      "cleaning_target_schedule_revisions",
+      "cleaning_target_id,revision,effective_service_date,reason_code",
+      "cleaning_target_id",
+      targetIds,
+      "revision",
+    ),
+  ]);
+  const targets = new Map(
+    (targetRows as TargetRow[]).map((row) => [
+      row.id,
+      row,
+    ]),
+  );
+  const maids = new Map(
+    (maidRows as MaidRow[]).map((row) => [row.id, row]),
+  );
+  const { attempts, capabilityAttempts, submissionRows } = attemptData;
   const submissions = new Map<string, SubmissionRow>();
   for (const submission of submissionRows as SubmissionRow[]) {
     if (!submissions.has(submission.cleaning_attempt_id)) {

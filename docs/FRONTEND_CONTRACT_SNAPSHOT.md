@@ -1,5 +1,10 @@
 # 프런트엔드 계약 snapshot
 
+> 2026-10-10: 운영 v0.9.2/API43/history112 재확인. v0.9.3의 source151paths/163operations는
+> dev85d8d69 통합 완료/운영 미배포다. 전역 프런트 정책 snapshot과 프런트 소스는 변경하지 않는다.
+> [이번 릴리스 범위·gate](./RELEASE_V0.9.3.md), [묶음 조회 계약](./PAYROLL_REMITTANCE_BATCH_414.md)을
+> 따르며 아래 과거의 후보/운영 표기는 당시 기록이다. 실제 사용자 UAT 완료를 의미하지 않는다.
+
 > 2026-10-09: 운영 v0.9.0/API41/history111을 확인했다. 아래 10월7일의 미배포 설명은
 > 과거 이력이다. #406은 프런트 dev3bb0bb3 DOCS/31의 세 계약(CORS·사진 수량·배포 표기)에
 > 한정한 보완이며 전역 제품 snapshot을 바꾸지 않는다. [v0.9.1 준비](./RELEASE_V0.9.1.md)는

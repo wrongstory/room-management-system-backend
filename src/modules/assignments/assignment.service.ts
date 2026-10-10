@@ -196,26 +196,17 @@ export class SupabaseAssignmentService implements AssignmentService {
     const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
     const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
     const assignmentIds = rows.map((row) => row.id);
-    const [targetRows, profileRows, attemptRows, scheduleRows] = await Promise.all([
+    const [targetRows, profileRows, attemptData, scheduleRows] = await Promise.all([
       this.relatedRows('cleaning_targets',
         'id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)'
       , 'id', targetIds),
       this.relatedRows('profiles', 'id,display_name', 'id', maidIds),
-      this.relatedRows('cleaning_attempts', 'id,assignment_id,attempt_number,status,started_at', 'assignment_id', assignmentIds, 'attempt_number'),
+      this.attemptRead(assignmentIds),
       this.relatedRows('cleaning_target_schedule_revisions', 'cleaning_target_id,revision,effective_service_date,reason_code', 'cleaning_target_id', targetIds, 'revision')
     ]);
     const targets = new Map((targetRows as TargetRow[]).map((row) => [row.id, row]));
     const profiles = new Map((profileRows as ProfileRow[]).map((row) => [row.id, row]));
-    const attempts = new Map<string, AttemptRow>();
-    const capabilityAttempts = new Map<string, AttemptRow[]>();
-    for (const attempt of attemptRows as AttemptRow[]) {
-      if (!attempts.has(attempt.assignment_id)) attempts.set(attempt.assignment_id, attempt);
-      const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
-      all.push(attempt);
-      capabilityAttempts.set(attempt.assignment_id, all);
-    }
-    const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
-    const submissionRows = await this.relatedRows('cleaning_submissions', 'cleaning_attempt_id,version,status', 'cleaning_attempt_id', attemptIds, 'version');
+    const { attempts, capabilityAttempts, submissionRows } = attemptData;
     const submissions = new Map<string, SubmissionRow>();
     for (const submission of submissionRows as SubmissionRow[]) {
       if (!submissions.has(submission.cleaning_attempt_id)) submissions.set(submission.cleaning_attempt_id, submission);
@@ -268,5 +259,22 @@ export class SupabaseAssignmentService implements AssignmentService {
         notifiedAt: row.notified_at, endedAt: row.ended_at, createdAt: row.created_at
       };
     });
+  }
+
+  private async attemptRead(assignmentIds: string[]) {
+    // Submissions depend only on the latest attempts, not on target/profile/history reads.
+    // Keep all attempts for cancellation guards and the final authority RPC in hydrate.
+    const attemptRows = await this.relatedRows('cleaning_attempts', 'id,assignment_id,attempt_number,status,started_at', 'assignment_id', assignmentIds, 'attempt_number');
+    const attempts = new Map<string, AttemptRow>();
+    const capabilityAttempts = new Map<string, AttemptRow[]>();
+    for (const attempt of attemptRows as AttemptRow[]) {
+      if (!attempts.has(attempt.assignment_id)) attempts.set(attempt.assignment_id, attempt);
+      const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
+      all.push(attempt);
+      capabilityAttempts.set(attempt.assignment_id, all);
+    }
+    const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
+    const submissionRows = await this.relatedRows('cleaning_submissions', 'cleaning_attempt_id,version,status', 'cleaning_attempt_id', attemptIds, 'version');
+    return { attempts, capabilityAttempts, submissionRows };
   }
 }
