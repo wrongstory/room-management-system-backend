@@ -163,6 +163,25 @@ function mock(options: Options = {}) {
       },
       rpc: (name: string, args: Record<string, unknown>) => {
         calls.push({ name, args });
+        if (name === "get_active_auth_context") {
+          return Promise.resolve({
+            error: null,
+            data: (options.status ?? "active") !== "active"
+              ? { code: "ACCOUNT_INACTIVE" }
+              : options.revoked
+              ? { code: "SESSION_REVOKED" }
+              : {
+                code: "OK",
+                profile: {
+                  id: maid.profileId,
+                  auth_user_id: maid.authUserId,
+                  display_name: maid.displayName,
+                  role: options.role ?? "maid",
+                  must_change_password: options.password ?? false,
+                },
+              },
+          });
+        }
         if (name === "is_active_auth_session") {
           return Promise.resolve({ data: !options.revoked, error: null });
         }

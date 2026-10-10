@@ -863,6 +863,7 @@ export const openApiDocument = {
       "3. `mustChangePassword=true`이면 계정·객실 화면으로 보내지 말고 `POST /v1/auth/password`만 허용합니다.",
       "4. 변경 API에는 사용자 동작별 `Idempotency-Key`를 보내며, 같은 본문 재시도에만 같은 키를 재사용합니다.",
       "5. 실패 처리는 HTTP 상태와 함께 안정적인 `error.code`를 기준으로 분기합니다.",
+      "공통 인증 확인 장애는 503 AUTH_CONTEXT_UNAVAILABLE입니다. 계정 폐기/로그인 만료(401 SESSION_REVOKED)와 다르므로 자동 로그아웃하거나 빈 데이터로 대체하지 마세요. 재시도 UI를 제공하고 변경 요청은 같은 본문·Idempotency-Key를 유지합니다. #442 source 후보이며 운영 적용은 릴리스 기록으로 확인합니다.",
       "",
       "## 역할 경계",
       "- `developer`: 계정 관리·운영 상태와 별도의 안전한 객실 기준정보 카탈로그만 관리할 수 있으며 예약·점유·청소·PIN 운영 데이터는 금지됩니다.",
@@ -7609,6 +7610,7 @@ export const openApiDocument = {
             "RECLEAN_MAID_IMMUTABLE",
             "PREVIOUS_ROOM_WORKFLOW_ACTIVE",
             "SESSION_REVOKED",
+            "AUTH_CONTEXT_UNAVAILABLE",
             "INVALID_CREDENTIALS",
             "ACCOUNT_LOCKED",
             "LOGIN_RATE_LIMITED",
@@ -14219,6 +14221,50 @@ export const openApiDocument = {
     },
   },
 } as const;
+
+// Authentication availability is independent of domain-specific 503 contracts.
+for (const [path, item] of Object.entries(openApiDocument.paths)) {
+  for (const [method, raw] of Object.entries(item)) {
+    if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
+    const operation = raw as unknown as {
+      security?: Array<Record<string, unknown>>;
+      tags?: string[];
+      responses: Record<string, {
+        description?: string;
+        headers?: Record<string, unknown>;
+      }>;
+    };
+    if (!operation.security?.some((security) => "bearerAuth" in security)) {
+      continue;
+    }
+    // Match the router's separate limited identity paths, not broad UI tags:
+    // photo content uses ordinary auth; upload/slots/status use limited identity.
+    if (
+      path.startsWith("/v1/limited/") || path === "/v1/offline-events" ||
+      (path === "/v1/attempts/{attemptId}/submissions" && method === "post") ||
+      (operation.tags?.includes("Photos") &&
+        path !== "/v1/photos/{photoId}/content")
+    ) {
+      continue;
+    }
+    const existing = operation.responses["503"];
+    if (existing?.headers?.["Cache-Control"]) continue;
+    const unavailable = {
+      ...(existing ?? {
+        ...errorResponse,
+        description:
+          "공통 인증 조회 불가 시 AUTH_CONTEXT_UNAVAILABLE. 401과 구분하며 자동 로그아웃하지 않고 재시도합니다.",
+      }),
+      headers: { ...existing?.headers, "Cache-Control": noStoreHeader },
+    };
+    Object.assign(item, {
+      [method]: {
+        ...operation,
+        responses: { ...operation.responses, "503": unavailable },
+      },
+    });
+  }
+}
 
 function roomIdParameter(): Record<string, unknown> {
   return {

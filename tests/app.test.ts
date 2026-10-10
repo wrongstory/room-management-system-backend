@@ -493,7 +493,8 @@ describe('application', () => {
         role: 'admin', status: 'active', must_change_password: false, locked_until: null
       }, error: null })
     };
-    const rpc = vi.fn(async () => ({ data: active, error: null }));
+    const rpc = vi.fn(async () => ({ data: active ? { code: 'OK', profile: (await query.single()).data }
+      : { code: 'SESSION_REVOKED' }, error: null }));
     const clients = {
       publicClient: { auth: { getUser: vi.fn(async () => ({ data: { user: { id: authUserId } }, error: null })) } },
       admin: { from: () => query, rpc }
@@ -503,7 +504,7 @@ describe('application', () => {
     const app = await buildApp({ env, services: appServices, logger: false });
     try {
       const response = await app.inject({ method: 'GET', url: '/v1/rooms', headers: { authorization: `Bearer ${token}` } });
-      expect(rpc).toHaveBeenCalledExactlyOnceWith('is_active_auth_session', { p_auth_user_id: authUserId, p_session_id: sessionId });
+      expect(rpc).toHaveBeenCalledExactlyOnceWith('get_active_auth_context', { p_auth_user_id: authUserId, p_session_id: sessionId });
       expect(response.statusCode).toBe(active ? 200 : 401);
       if (active) {
         expect(appServices.rooms.list).toHaveBeenCalledOnce();

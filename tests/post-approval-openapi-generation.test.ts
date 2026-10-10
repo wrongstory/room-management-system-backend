@@ -62,8 +62,9 @@ describe('#336 data-only registered source OpenAPI generation', () => {
     expect(postApprovalOpenApiErrorCodes).toContain('PHOTO_UPLOAD_FENCE_CONFLICT');
     expect(new Set(postApprovalOpenApiErrorCodes).size).toBe(postApprovalOpenApiErrorCodes.length);
     const globalCodes = openApiDocument.components.schemas.ErrorCode.enum;
-    expect(globalCodes).toHaveLength(335);
-    expect(new Set(globalCodes).size).toBe(335);
+    expect(globalCodes).toHaveLength(336);
+    expect(new Set(globalCodes).size).toBe(336);
+    expect(globalCodes).toContain('AUTH_CONTEXT_UNAVAILABLE');
     for (const code of postApprovalOpenApiErrorCodes) expect(globalCodes).toContain(code);
     expect(Object.keys(openApiDocument.paths)).toHaveLength(151);
     const globalOperations = Object.values(openApiDocument.paths).flatMap(item => Object.values(item))

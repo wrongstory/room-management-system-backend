@@ -9,6 +9,7 @@ const image = 'denoland/deno:2.1.4@sha256:3bf75873714baa410dcf7fabaf76d806d20f0a
 const sourcePaths = [
   'supabase/functions/_shared/api-timing.ts',
   'supabase/functions/_shared/runtime.ts',
+  'src/modules/auth/auth-context.ts',
   'supabase/functions/_shared/activity-contract.ts',
   'supabase/functions/_shared/activity-api.ts',
   'supabase/functions/_shared/payroll-remittance-batch.ts',

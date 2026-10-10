@@ -576,6 +576,10 @@ wrapper이며 외부 Drive create 전에 같은 transaction에서 확정한다. 
 
 ## 인증
 
+#442 미배포 후보는 일반 인증의 profile/session을 서버 전용 `get_active_auth_context` 1회로
+통합한다. 순차 SQL·fresh snapshot·hard expiry·권한은 유지하고 limited/사진 전용 인증은
+변경하지 않는다. [설계와 배포 gate](./AUTH_CONTEXT_PERFORMANCE_442.md)를 따른다.
+
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.
 2. 내부 이메일은 `user-{profile_id}@auth.castletheart.invalid` 형식으로 서버만 계산합니다.
 3. 사용자가 이름형 `loginId`와 최초 휴대전화 끝 4자리 임시 비밀번호 또는 허용된 개인 비밀번호를 보냅니다. 개인 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합이며, 4자리 임시값은 서버 내부에서만 Supabase 최소 길이를 만족하는 namespace 값으로 변환합니다.

@@ -27,7 +27,13 @@ function fixture() {
   const eq = vi.fn(() => ({ single }));
   const select = vi.fn(() => ({ eq }));
   const from = vi.fn(() => ({ select }));
-  const rpc = vi.fn(async () => ({ data: sessionActive, error: null }));
+  // Contract double only: the real SQL snapshot/race tests require approved DB execution.
+  const rpc = vi.fn(async (_name: string, args: { p_session_id: string | null }) => {
+    const { data: p } = await single();
+    const code = !p ? 'PROFILE_NOT_FOUND' : p.status !== 'active' ? 'ACCOUNT_INACTIVE'
+      : !args.p_session_id ? 'INVALID_ACCESS_TOKEN' : !sessionActive ? 'SESSION_REVOKED' : 'OK';
+    return { data: code === 'OK' ? { code, profile: p } : { code }, error: null };
+  });
   const clients = { publicClient: { auth: { getUser } }, admin: { from, rpc } };
   const nodeService = new SupabaseAuthService(clients as unknown as SupabaseClients, 'synthetic-pepper');
   return { auth, profile, getUser, single, eq, from, rpc,
@@ -58,17 +64,17 @@ for (const [runtime, authenticate] of Object.entries(runners)) {
       expect(f.rpc).not.toHaveBeenCalled();
     });
 
-    it('checks live session after a delayed profile read and rejects an intervening revocation', async () => {
+    it('rejects the RPC denial after a simulated profile delay and intervening revocation', async () => {
       const f = fixture();
       const rejected = expect(authenticate(f)).rejects.toMatchObject({ code: 'SESSION_REVOKED' });
       f.auth.resolve({ data: { user: { id: authUserId } }, error: null });
       await vi.waitFor(() => expect(f.single).toHaveBeenCalledOnce());
-      expect(f.rpc).not.toHaveBeenCalled();
+      expect(f.rpc).toHaveBeenCalledOnce();
       f.revoke();
       f.profile.resolve({ data: activeProfile, error: null });
       await rejected;
-      expect(f.eq).toHaveBeenCalledWith('auth_user_id', authUserId);
-      expect(f.rpc).toHaveBeenCalledExactlyOnceWith('is_active_auth_session', {
+      expect(f.from).not.toHaveBeenCalled();
+      expect(f.rpc).toHaveBeenCalledExactlyOnceWith('get_active_auth_context', {
         p_auth_user_id: authUserId, p_session_id: sessionId
       });
     });
@@ -79,7 +85,7 @@ for (const [runtime, authenticate] of Object.entries(runners)) {
       f.auth.resolve({ data: { user: { id: authUserId } }, error: null });
       f.profile.resolve({ data: { ...activeProfile, status }, error: null });
       await rejected;
-      expect(f.rpc).not.toHaveBeenCalled();
+      expect(f.rpc).toHaveBeenCalledOnce();
     });
 
     it('preserves missing profile precedence even when the session claim is missing', async () => {
@@ -88,7 +94,9 @@ for (const [runtime, authenticate] of Object.entries(runners)) {
       f.auth.resolve({ data: { user: { id: authUserId } }, error: null });
       f.profile.resolve({ data: null, error: null });
       await rejected;
-      expect(f.rpc).not.toHaveBeenCalled();
+      expect(f.rpc).toHaveBeenCalledExactlyOnceWith('get_active_auth_context', {
+        p_auth_user_id: authUserId, p_session_id: null
+      });
     });
 
     it('does not cache successful authentication across requests', async () => {
@@ -101,6 +109,55 @@ for (const [runtime, authenticate] of Object.entries(runners)) {
       expect(f.getUser).toHaveBeenCalledTimes(2);
       expect(f.single).toHaveBeenCalledTimes(2);
       expect(f.rpc).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['developer', 'admin', 'maid'])('returns only current %s actor fields with one DB call', async role => {
+      const f = fixture();
+      f.auth.resolve({ data: { user: { id: authUserId } }, error: null });
+      f.profile.resolve({ data: { ...activeProfile, role, must_change_password: true }, error: null });
+      const result = await authenticate(f);
+      expect(result).toMatchObject({ profileId, authUserId, role, mustChangePassword: true });
+      expect(result).not.toHaveProperty('status');
+      expect(result).not.toHaveProperty('session_id');
+      expect(f.rpc).toHaveBeenCalledOnce();
+      expect(f.from).not.toHaveBeenCalled();
+    });
+
+    it.each([null, true, [], {}, { code: 'OK' },
+      { code: 'OK', profile: { ...activeProfile, auth_user_id: profileId } },
+      { code: 'OK', profile: { ...activeProfile, id: 'invalid' } },
+      { code: 'OK', profile: { ...activeProfile, role: 'owner' } },
+      { code: 'OK', profile: { ...activeProfile, must_change_password: null } },
+      { code: 'OK', profile: { ...activeProfile, display_name: 42 } },
+      { code: 'toString' }, { code: 'AUTH_CONTEXT_UNAVAILABLE' }
+    ])('fails closed on malformed/unavailable context %# without another lookup', async data => {
+      const f = fixture();
+      f.auth.resolve({ data: { user: { id: authUserId } }, error: null });
+      f.rpc.mockResolvedValueOnce({ data, error: null } as never);
+      await expect(authenticate(f)).rejects.toMatchObject({ code: 'AUTH_CONTEXT_UNAVAILABLE', [runtime === 'node' ? 'statusCode' : 'status']: 503 });
+      expect(f.rpc).toHaveBeenCalledOnce();
+      expect(f.from).not.toHaveBeenCalled();
+    });
+
+    it('does not expose RPC errors or fall back to a stale successful response', async () => {
+      const f = fixture();
+      f.auth.resolve({ data: { user: { id: authUserId } }, error: null });
+      f.rpc.mockResolvedValueOnce({ data: { code: 'OK', profile: activeProfile },
+        error: { message: 'private-canary', code: 'PGRST202' } } as never);
+      await expect(authenticate(f)).rejects.toMatchObject({ code: 'AUTH_CONTEXT_UNAVAILABLE', [runtime === 'node' ? 'statusCode' : 'status']: 503 });
+      expect(f.rpc).toHaveBeenCalledOnce();
+      expect(f.from).not.toHaveBeenCalled();
+    });
+    it('replaces thrown/rejected provider errors with a safe typed error', async () => {
+      const f = fixture();
+      f.auth.resolve({ data: { user: { id: authUserId } }, error: null });
+      f.rpc.mockRejectedValueOnce(new Error('private-rpc-canary'));
+      const error = await authenticate(f).catch((value: unknown) => value);
+      expect(error).toMatchObject({ code: 'AUTH_CONTEXT_UNAVAILABLE', [runtime === 'node' ? 'statusCode' : 'status']: 503 });
+      expect(String(error)).not.toContain('private-rpc-canary');
+      expect(JSON.stringify(error)).not.toContain('private-rpc-canary');
+      expect(error).not.toHaveProperty('cause');
+      expect(f.from).not.toHaveBeenCalled();
     });
   });
 }

@@ -59,8 +59,24 @@ function fixture(revoked = false, options: {
       rpc: (name: string, args: Record<string, unknown>) => {
         calls.push(name);
         assert(args.p_session_id === id(2));
-        if (name === "is_active_auth_session") {
-          return Promise.resolve({ data: !revoked, error: null });
+        if (name === "get_active_auth_context") {
+          return Promise.resolve({
+            error: null,
+            data: (options.status ?? "active") !== "active"
+              ? { code: "ACCOUNT_INACTIVE" }
+              : revoked
+              ? { code: "SESSION_REVOKED" }
+              : {
+                code: "OK",
+                profile: {
+                  id: id(1),
+                  auth_user_id: id(9),
+                  display_name: "synthetic",
+                  role: options.role ?? "admin",
+                  must_change_password: options.mustChangePassword ?? false,
+                },
+              },
+          });
         }
         if (name === "get_post_approval_room_issue_source") {
           return Promise.resolve({
@@ -150,7 +166,10 @@ Deno.test("module revoked auth denies handover before JSON or domain RPC", async
     },
   );
   const response = await handleApiRequest(request, f.dependencies);
-  assert(response.status === 401 && !request.bodyUsed && f.calls.length === 3);
+  assert(
+    response.status === 401 && !request.bodyUsed &&
+      f.calls.join(",") === "auth,get_active_auth_context",
+  );
 });
 Deno.test("parent preflight and CORS cover evidence CAS headers and safe report errors", async () => {
   const previous = Deno.env.get("CORS_ORIGINS");
@@ -207,7 +226,7 @@ Deno.test("formal default uses generated module with latest active admin auth, n
     assert(response.status === 200);
     assert(
       f.calls.join(",") ===
-        "auth,profile,is_active_auth_session,get_post_approval_room_issue_source",
+        "auth,get_active_auth_context,get_post_approval_room_issue_source",
     );
   }
 });
@@ -304,7 +323,7 @@ Deno.test("missing or invalid recovery key is lazy 503 after auth and valid body
       response.status === 503 &&
         body.error.code === "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED",
     );
-    assert(f.calls.join(",") === "auth,profile,is_active_auth_session");
+    assert(f.calls.join(",") === "auth,get_active_auth_context");
     assert(!JSON.stringify(body).includes("private config"));
   }
   const env = "POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64";
@@ -335,7 +354,7 @@ Deno.test("missing or invalid recovery key is lazy 503 after auth and valid body
           (await response.json()).error.code ===
             "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED",
       );
-      assert(f.calls.join(",") === "auth,profile,is_active_auth_session");
+      assert(f.calls.join(",") === "auth,get_active_auth_context");
     }
   } finally {
     if (previous === undefined) Deno.env.delete(env);

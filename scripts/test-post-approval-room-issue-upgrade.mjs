@@ -125,9 +125,9 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112].includes(manifest.totalCount));
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113].includes(manifest.totalCount));
   assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
-  assert.equal(manifest.head, manifest.totalCount === 111 ? 'post_approval_room_issue_ledger' : 'room_event_effective_lookup_indexes');
+  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read' }[manifest.totalCount]);
   assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
@@ -147,10 +147,15 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
     POST_APPROVAL_UPGRADE_FILE_PREFIX_SHA256, 'Exact dev110 filename/version and source SHA prefix required');
   assert.equal(validated[109].file, `${baselineVersion}_room_candle_session_hard_expiry.sql`);
   assert.equal(validated[110].file, `${ledgerVersion}_post_approval_room_issue_ledger.sql`);
-  if (validated.length === 112) {
+  if (validated.length >= 112) {
     assert.equal(validated[111].file, '20261009081846_room_event_effective_lookup_indexes.sql');
     assert.equal(validated[111].sha256, 'dc9ee95371faa2b0daae9cd3b279c0b0d38c243581ca73bdc5e5260375aae41c',
       'Only the reviewed index-only112 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length === 113) {
+    assert.equal(validated[112].file, '20261010143530_common_auth_context_read.sql');
+    assert.equal(validated[112].sha256, '522b9c0c146243a0c78013f756a4711ac491569361faae24cbd8749969784ffd',
+      'Only the source-reviewed auth-context113 tail is permitted, not arbitrary future migrations');
   }
   return { entries: validated, ledger: validated[110].canonical };
 }
@@ -169,7 +174,7 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   return { ...local, endpoint: localEndpoint };
 }
 export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
-  assert([110, 111, 112].includes(installed) && installed <= source.entries.length);
+  assert([110, 111, 112, 113].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }
