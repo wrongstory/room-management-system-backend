@@ -5,6 +5,7 @@ import * as photoBinary from '../src/modules/photos/photo-binary.js';
 import { initializePhotoDecoder, PhotoError, PHOTO_INPUT_MAX_BYTES } from '../src/modules/photos/photo-binary.js';
 import { PhotoService, PhotoTiming, photoRoute, type PhotoIdentity, type PhotoRpc } from '../src/modules/photos/photo-service.js';
 import type { PhotoProvider } from '../src/modules/photos/google-drive.js';
+import { projectPhotoUploadOperation } from '../src/modules/photos/photo-upload-contract.js';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 afterEach(() => vi.restoreAllMocks());
 const identity: PhotoIdentity = { profileId: id(1), sessionId: id(2), role: 'maid', profileStatus: 'active' };
@@ -141,6 +142,9 @@ describe('photo application admission/provider/finalize boundary', () => {
     const first = s.service.withTiming(), second = s.service.withTiming();
     await Promise.all([first.upload(request(), identity, id(3), id(4)), second.content(new Request('http://local'), identity, id(7))]);
     expect(first.timingHeader()).toContain('photo_decode;dur=');
+    expect(first.timingHeader()).toContain('photo_drive_ids;dur=');
+    expect(first.timingHeader()).toContain('photo_drive_folders;dur=');
+    expect(vi.mocked(s.provider.upload).mock.calls[0]?.[2]).toBeInstanceOf(PhotoTiming);
     expect(second.timingHeader()).not.toContain('photo_decode');
     expect(second.timingHeader()).toContain('photo_drive;dur=');
     expect(s.service.timingHeader()).toBeUndefined();
@@ -153,6 +157,68 @@ describe('photo application admission/provider/finalize boundary', () => {
     await expect(timing.measure('db', () => { clock += 3; throw new Error('private-secret'); })).rejects.toThrow('private-secret');
     expect(timing.header()).toBe('photo_db;dur=15.0, photo_total;dur=15.0');
   });
+  it.each([false, true])('accounts fixed DB stages without changing RPC order (collection=%s)', async collection => {
+    let clock = 0;
+    const s = setup(name => {
+      clock += 10;
+      return name === 'get_attempt_photo_slots' ? { data: emptySlots, error: null } : undefined;
+    });
+    const timed = s.service.withTiming(new PhotoTiming(() => clock));
+    const req = collection ? new Request(`http://local/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedCollectionRevision=0&expectedItemRevision=0&includePhotoSlots=true`, {
+      method: 'POST', headers: { 'content-type': 'image/jpeg', 'idempotency-key': 'timing-collection-436' }, body: Uint8Array.from(bytes),
+    }) : includedRequest();
+    await timed.upload(req, identity, id(3), id(4), collection ? id(11) : undefined);
+    for (const stage of ['admit', 'begin', 'claim', 'context', 'identity', 'record', 'finalize', 'snapshot']) {
+      expect(timed.timingHeader()).toContain(`photo_db_${stage};dur=10.0`);
+    }
+    expect(timed.timingHeader()).toContain('photo_db_folder;dur=20.0');
+    expect(timed.timingHeader()).toContain('photo_db;dur=100.0');
+    expect(timed.timingHeader()).not.toContain('photo_db_receipt');
+    expect(s.calls.filter(n => n !== 'decode')).toEqual([
+      collection ? 'admit_photo_collection_upload' : 'admit_photo_upload',
+      collection ? 'begin_admitted_photo_collection_upload' : 'begin_admitted_photo_upload',
+      'claim_admitted_photo_upload', 'get_photo_provider_context', 'reserve_photo_drive_folder',
+      'reserve_photo_drive_folder', 'reserve_named_photo_provider_identity', 'record_admitted_photo_provider_success',
+      'finalize_admitted_photo_upload', 'get_attempt_photo_slots',
+    ]);
+    expect(vi.mocked(s.provider.generateUploadIds).mock.calls[0]?.[0]).toBeInstanceOf(PhotoTiming);
+    expect(vi.mocked(s.provider.ensureFolder).mock.calls[0]?.[1]).toBeInstanceOf(PhotoTiming);
+    expect(timed.timingHeader()).not.toMatch(/10000000|admit_photo|session|https/);
+  });
+  it('measures a recovery receipt only when response loss actually requires it', async () => {
+    let clock = 0;
+    const s = setup(name => {
+      clock += 5;
+      if (name === 'finalize_admitted_photo_upload') return { data: null, error: { message: 'response lost' } };
+      return undefined;
+    });
+    const timed = s.service.withTiming(new PhotoTiming(() => clock));
+    vi.spyOn(timed, 'reconcile').mockResolvedValue(projectPhotoUploadOperation(operation('accepted')));
+    expect(await timed.upload(request(), identity, id(3), id(4))).toMatchObject({ status: 'accepted' });
+    expect(timed.timingHeader()).toContain('photo_db_receipt;dur=5.0');
+    expect(s.calls.at(-1)).toBe('get_photo_upload_receipt_with_session');
+  });
+  it('keeps failed snapshot timing separate without changing accepted/null behavior', async () => {
+    let clock = 0;
+    const s = setup(name => {
+      clock += 7;
+      if (name === 'get_attempt_photo_slots') return { data: null, error: { message: 'private diagnostic' } };
+      return undefined;
+    });
+    const timed = s.service.withTiming(new PhotoTiming(() => clock));
+    expect(await timed.upload(includedRequest(), identity, id(3), id(4))).toMatchObject({ status: 'accepted', photoSlots: null });
+    expect(timed.timingHeader()).toContain('photo_db_snapshot;dur=7.0');
+    expect(timed.timingHeader()).not.toContain('private');
+  });
+  it('groups unlisted read RPCs under db_other without exposing their names or arguments', async () => {
+    let clock = 0; const s = setup(() => { clock += 5; return undefined; });
+    const timed = s.service.withTiming(new PhotoTiming(() => clock));
+    await timed.content(new Request('http://local'), identity, id(7));
+    expect(timed.timingHeader()).toContain('photo_db_other;dur=10.0');
+    expect(timed.timingHeader()).not.toContain('authorize_photo_read');
+    expect(timed.timingHeader()).not.toContain('photo_db_admit');
+    expect(vi.mocked(s.provider.read).mock.calls[0]?.[1]).toBeInstanceOf(PhotoTiming);
+  });
   it('reserves distinct batched candidates before creating only the DB folder winners', async () => {
     const reservations: Record<string, unknown>[] = [];
     const s = setup((name, args) => { if (name === 'reserve_photo_drive_folder') reservations.push(args); return undefined; });
@@ -162,7 +228,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(1, expect.objectContaining({ folderId: 'provider_date_123' }));
     expect(s.provider.ensureFolder).toHaveBeenNthCalledWith(2, expect.objectContaining({ folderId: 'provider_folder_123' }));
     expect(s.calls.indexOf('reserve_named_photo_provider_identity')).toBeGreaterThan(s.calls.lastIndexOf('reserve_photo_drive_folder'));
-    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'provider_file_123', folderId: 'provider_folder_123' }), expect.any(Uint8Array));
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'provider_file_123', folderId: 'provider_folder_123' }), expect.any(Uint8Array), undefined);
   });
   it('accepted replay allocates no new Drive identities', async () => {
     const s = setup(name => name === 'begin_admitted_photo_upload' ? { data: operation('accepted'), error: null } : undefined);
@@ -183,7 +249,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
     expect(s.provider.ensureFolder).not.toHaveBeenCalled();
     expect(s.calls).not.toContain('reserve_named_photo_provider_identity');
-    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'existing_file_123', folderId: 'existing_folder_123' }), expect.any(Uint8Array));
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileId: 'existing_file_123', folderId: 'existing_folder_123' }), expect.any(Uint8Array), undefined);
   });
   it.each([false, true])('replays the exact legacy JPEG hash after begin conflict only (collection=%s)', async collection => {
     const current = { bytes, mime: 'image/jpeg' as const, sizeBytes: bytes.length, sha256: 'a'.repeat(64) };
@@ -214,7 +280,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     const s = setup(name => name === 'begin_admitted_photo_upload' && begins++ === 0 ? { data: null, error: { message: 'IDEMPOTENCY_KEY_REUSED' } } : undefined);
     expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
     expect(s.provider.upload).toHaveBeenCalledOnce();
-    expect(s.provider.upload).toHaveBeenCalledWith(expect.anything(), legacyBytes);
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.anything(), legacyBytes, undefined);
   });
   it('does not bypass a mismatched key, permission failure, or CAS conflict', async () => {
     for (const code of ['IDEMPOTENCY_KEY_REUSED', 'PHOTO_ACCESS_REQUIRED', 'PHOTO_VERSION_CONFLICT']) {
@@ -382,7 +448,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect((await s.service.upload(request(), identity, id(3), id(4))).status).toBe('accepted');
     expect(s.calls).not.toContain('reserve_named_photo_provider_identity');
     expect(s.provider.generateUploadIds).not.toHaveBeenCalled();
-    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileName }), expect.any(Uint8Array));
+    expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({ fileName }), expect.any(Uint8Array), undefined);
   });
   it('accepts an empty slot without retention metadata and requires metadata for an existing hidden photo', async () => {
     const slotBase = { slotId: id(4), slotKey: 'tv', required: true, displayOrder: 0,
@@ -433,7 +499,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(s.calls).toContain('finalize_admitted_photo_upload');
     expect(s.provider.upload).toHaveBeenCalledWith(expect.objectContaining({
       fileName: `${new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)}_일반방_101_01.jpg`,
-    }), expect.any(Uint8Array));
+    }), expect.any(Uint8Array), undefined);
   });
 });
 

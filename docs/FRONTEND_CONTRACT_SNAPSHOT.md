@@ -1,5 +1,10 @@
 # 프런트엔드 계약 snapshot
 
+> 최신 기준(2026-10-10): [v0.9.3 운영 반영 기록](./RELEASE_V0.9.3_DEPLOYED.md)이
+> 현재 배포 기준이며 [v0.9.4 후보](./RELEASE_V0.9.4.md)는 운영 미배포다.
+> 아래 v0.9.2/API43·v0.9.3 미배포 설명은 과거 준비 checkpoint로 보존한다.
+> 실제 사용자 UAT 및 신규 후보의 운영 성능 검증 완료를 의미하지 않는다.
+
 > 2026-10-10: 운영 v0.9.2/API43/history112 재확인. v0.9.3의 source151paths/163operations는
 > dev85d8d69 통합 완료/운영 미배포다. 전역 프런트 정책 snapshot과 프런트 소스는 변경하지 않는다.
 > [이번 릴리스 범위·gate](./RELEASE_V0.9.3.md), [묶음 조회 계약](./PAYROLL_REMITTANCE_BATCH_414.md)을

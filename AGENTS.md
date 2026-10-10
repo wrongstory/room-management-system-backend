@@ -10,6 +10,8 @@
 
 ## 브랜치와 릴리즈 정책
 
+- [2026-10-10 최신 사용자 결정] 로컬·CI·운영의 migration 적용/DB reset·재구축은 실행 전에 매번 사용자 명시 승인을 받는다. 과거 자동 진행·릴리스 승인은 이를 대체하지 않는다. 자동 전체 DB 실행을 유발하는 release/hotfix PR 생성·push·재실행도 승인 전에 하지 않는다. DB를 실행하지 않는 manifest/source/합성 검사는 가능하다. 최종 1회 원칙과 검증 기준은 유지하며 승인 대기를 PASS로 기록하지 않는다.
+
 - `main`은 실제 운영 가능한 릴리즈 정본이고, `dev`는 다음 릴리즈의 개발 통합본이다. 두 브랜치 모두 직접 push하지 않는다.
 - 일반 작업은 `codex/*`, `feature/*`, `feat/*`, `fix/*`, `refactor/*`, `test/*`, `docs/*`, `ci/*`, `chore/*`, `data/*`, `model/*`, `eval/*`, `security/*`에서 수행하고 PR 대상을 `dev`로 지정한다.
 - `main`으로의 일반 작업 PR과 `dev → main` 직접 PR은 금지한다. 릴리즈는 최신 `dev`에서 `release/vX.Y.Z`를 만든 뒤 `main`으로 PR을 생성한다.

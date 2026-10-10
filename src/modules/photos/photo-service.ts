@@ -46,7 +46,17 @@ export type PhotoUploadResponse = PhotoUploadOperationProjection & {
   /** Fresh, separately authorized projection; null means GET fallback, not upload failure. */
   photoSlots?: unknown;
 };
-type PhotoTimingStage = 'db' | 'body' | 'decoder_init' | 'decode' | 'drive';
+const dbTimingStages = {
+  admit_photo_upload: 'db_admit', admit_photo_collection_upload: 'db_admit',
+  begin_admitted_photo_upload: 'db_begin', begin_admitted_photo_collection_upload: 'db_begin',
+  claim_admitted_photo_upload: 'db_claim', get_photo_provider_context: 'db_context',
+  reserve_photo_drive_folder: 'db_folder', reserve_named_photo_provider_identity: 'db_identity',
+  record_admitted_photo_provider_success: 'db_record', finalize_admitted_photo_upload: 'db_finalize',
+  get_photo_upload_receipt_with_session: 'db_receipt', get_attempt_photo_slots: 'db_snapshot',
+  refresh_photo_storage_quota: 'db_quota',
+} as const;
+type PhotoTimingStage = typeof dbTimingStages[keyof typeof dbTimingStages] | 'db_other' |
+  'db' | 'body' | 'decoder_init' | 'decode' | 'drive' | 'drive_ids' | 'drive_folders' | 'drive_upload' | 'drive_verify' | 'drive_token';
 /** Request-local, fixed names/numeric durations only. Never retain IDs, URLs, errors or bytes. */
 export class PhotoTiming {
   readonly #started: number;
@@ -246,13 +256,16 @@ export class PhotoService {
     return new PhotoService(this.db, this.provider, this.initializeDecoder, timing, this.quotaRefresh);
   }
   timingHeader(): string | undefined { return this.timing?.header(); }
+  #providerTiming(): [] | [PhotoTiming] { return this.timing ? [this.timing] : []; }
   #measure<T>(stage: PhotoTimingStage, work: () => T | PromiseLike<T>): Promise<T> {
     return this.timing ? this.timing.measure(stage, work) : Promise.resolve().then(work);
   }
   async #rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
     let response: { data: unknown; error: unknown };
     try {
-      response = await this.#measure('db', () => this.db.rpc(name, args));
+      const stage = Object.hasOwn(dbTimingStages, name)
+        ? dbTimingStages[name as keyof typeof dbTimingStages] : 'db_other';
+      response = await this.#measure('db', () => this.#measure(stage, () => this.db.rpc(name, args)));
     } catch {
       return failed();
     }
@@ -291,7 +304,7 @@ export class PhotoService {
   }
   async #refreshQuota(): Promise<void> {
     this.quotaRefresh.pending ??= (async () => {
-      const value = await this.#measure('drive', () => this.provider().quota());
+      const value = await this.#measure('drive', () => this.provider().quota(...this.#providerTiming()));
       try {
         await this.#rpc("refresh_photo_storage_quota", {
           p_request_started_at: value.refreshStartedAt,
@@ -517,7 +530,7 @@ export class PhotoService {
           typeof context.uploadDate !== "string" ||
           typeof context.roomNumber !== "string"
         ) return failed();
-        const [dateCandidate, roomCandidate, fileId] = await this.#measure('drive', () => provider.generateUploadIds());
+        const [dateCandidate, roomCandidate, fileId] = await this.#measure('drive', () => this.#measure('drive_ids', () => provider.generateUploadIds(...this.#providerTiming())));
         let folderId: string | undefined;
         for (const scope of ["date", "room"] as const) {
           const reserved = row(
@@ -543,11 +556,11 @@ export class PhotoService {
           const verifiedFolderId = locator(reserved.folderId);
           folderId = verifiedFolderId;
           const folderName = String(scope === 'date' ? context.uploadDate : context.roomNumber);
-          await this.#measure('drive', () => provider.ensureFolder({
+          await this.#measure('drive', () => this.#measure('drive_folders', () => provider.ensureFolder({
             folderId: verifiedFolderId,
             parentFolderId,
             name: folderName,
-          }));
+          }, ...this.#providerTiming())));
         }
         context = row(
           await this.#rpc("reserve_named_photo_provider_identity", {
@@ -569,7 +582,7 @@ export class PhotoService {
           context.uploadDate !==
             new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)
         ) throw new PhotoError(409, "PHOTO_PROVIDER_DATE_MISMATCH");
-        const success = await this.#measure('drive', () => provider.upload(object, verified.bytes));
+        const success = await this.#measure('drive', () => provider.upload(object, verified.bytes, this.timing));
         await this.#rpc("record_admitted_photo_provider_success", {
           ...worker,
           p_provider_locator: object.fileId,
@@ -813,7 +826,7 @@ export class PhotoService {
       (firstRetention.expiresAt !== null &&
         Date.parse(firstRetention.expiresAt) <= Date.now())
     ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
-    const bytes = await this.#measure('drive', () => this.provider().read(object));
+    const bytes = await this.#measure('drive', () => this.provider().read(object, ...this.#providerTiming()));
     const latest = row(await this.#rpc("authorize_photo_read", args));
     const latestRetention = retentionMetadata(latest);
     if (
@@ -861,7 +874,7 @@ export class PhotoService {
     if (result.status === "reconciliation_pending") {
       // No second upload. Only verified existing bytes at the reserved identity can resolve uncertainty.
       const object = workerObject(context),
-        success = await this.#measure('drive', () => this.provider().inspect(object));
+        success = await this.#measure('drive', () => this.provider().inspect(object, ...this.#providerTiming()));
       result = projectPhotoUploadOperation(
         await this.#rpc("record_admitted_photo_provider_success", {
           ...args,
