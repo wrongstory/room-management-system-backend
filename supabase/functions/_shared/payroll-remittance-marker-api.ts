@@ -1,4 +1,5 @@
 import { readJsonBody } from "./account-api.ts";
+import { readRemittanceBatch } from "./payroll-remittance-batch.ts";
 import { assertPayrollResponseSize } from "./payroll-cursor.ts";
 import {
   type EdgeActor,
@@ -24,6 +25,50 @@ import {
   remittanceRequestHash,
   type RemittanceSetInput,
 } from "./payroll-remittance-marker-core.ts";
+
+export async function payrollRemittanceMarkers(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  sessionId: string,
+) {
+  try {
+    const response = await readRemittanceBatch(
+      actor,
+      new URL(request.url).searchParams,
+      async (input) => {
+        const { data, error } = await clients.admin.rpc(
+          "get_payroll_remittance_marker",
+          {
+            p_actor_profile_id: actor.profileId,
+            p_session_id: sessionId.toLowerCase(),
+            p_expected_actor_role: actor.role,
+            p_maid_profile_id: input.maidProfileId,
+            p_week_start: input.weekStart,
+          },
+        );
+        if (error) throw remittanceDatabaseError(error);
+        assertPayrollResponseSize(data);
+        return remittanceProjection(
+          data,
+          input,
+          actor.role as "admin" | "maid",
+        );
+      },
+    );
+    assertPayrollResponseSize(response);
+    return response;
+  } catch (error) {
+    if (error instanceof PayrollRemittanceError) {
+      throw new EdgeError(
+        remittanceErrorStatus(error.code),
+        error.code,
+        "송금 표시 정보를 처리하지 못했습니다.",
+      );
+    }
+    throw error;
+  }
+}
 
 export async function payrollRemittanceMarker(
   request: Request,
