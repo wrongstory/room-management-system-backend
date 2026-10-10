@@ -1,5 +1,23 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-10 v0.9.3 준비 — 운영과 후보 구분
+
+현재 운영은 v0.9.2/API43/history112이며 아래 과거 준비 기록은 보존한다.
+최종 dev85d8d69의 가능일 완전성·공통 timing·송금 묶음 GET·배정 대기 개선은
+dev 병합 완료/운영 미배포다. 후보 Swagger는151 paths/163 operations이며
+현재 운영150/162와 구분한다. [v0.9.3 gate·복구·미검증](./RELEASE_V0.9.3.md)을 따른다.
+운영 배포 확인 전 batch 연결이나 사진 snapshot 옵션 활성화를 요청하는 문서가 아니다.
+GET `/v1/payroll/remittance-markers`의 `maidProfileIds`는 UUID 배열이 아닌
+쉼표로 합친 문자열(1~10명)이다. 기존 단건은 유지하며 오류를 미송금으로 치환하지 않는다.
+
+## 2026-10-09 운영 기준과 #406 패치 준비
+
+운영은 v0.9.0/main d9e053b, API41, migration111 기준이다. 아래 10월7일
+미배포 설명은 당시 source 등록 이력이다. #336의 11개 API는 이미 배포됐으며
+실제 업무 UAT 완료를 의미하지 않는다. #406은 PUT CORS·사진 개수20 schema·
+배포 표기만 정정한다. 사용자 병합/재배포 승인 후 [v0.9.1](./RELEASE_V0.9.1.md)을
+준비 중이고, 이 패치의 운영 반영은 아직 완료하지 않았다.
+
 ## 2026-10-07 #336 정식 source API·Swagger 연결 — 운영 미배포
 
 `dev@ac8c775` 기반 `codex/336-latest-dev-integration`의 미게시 후보에 #336을 기본
