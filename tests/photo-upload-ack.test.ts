@@ -82,12 +82,63 @@ describe('#411 upload acknowledgement reuse (fake provider only)', () => {
     const s = harness(); let firstClock = 0, secondClock = 0;
     const first = new PhotoTiming(() => ++firstClock), second = new PhotoTiming(() => { secondClock += 10; return secondClock; });
     await Promise.all([s.provider.upload(object, bytes, first), s.provider.upload(object, bytes, second)]);
-    expect(first.header()).toContain('photo_drive_upload;dur=1.0');
+    expect(first.header()).toContain('photo_drive_upload;dur=3.0');
+    expect(first.header()).toContain('photo_drive_token;dur=1.0');
     expect(first.header()).toContain('photo_drive_verify;dur=1.0');
-    expect(second.header()).toContain('photo_drive_upload;dur=10.0');
+    expect(second.header()).toContain('photo_drive_upload;dur=30.0');
+    expect(second.header()).toContain('photo_drive_token;dur=10.0');
     expect(second.header()).toContain('photo_drive_verify;dur=10.0');
     expect(first.header()).not.toMatch(/synthetic|142|secret|https/);
     expect(JSON.stringify(s.provider)).toBe('{}');
+  });
+  it('measures cold token wait and warm reuse without persisting request timing', async () => {
+    let clock = 0, tokenCalls = 0;
+    const provider = new GoogleDriveProvider(config, async input => {
+      const url = new URL(String(input));
+      if (url.hostname === 'oauth2.googleapis.com') {
+        ++tokenCalls; clock += 40;
+        return Response.json({ access_token: 'synthetic', expires_in: 3600, token_type: 'Bearer' });
+      }
+      clock += 100; return Response.json(metadata());
+    });
+    const cold = new PhotoTiming(() => clock);
+    await provider.upload(object, bytes, cold);
+    expect(cold.header()).toContain('photo_drive_token;dur=40.0');
+    expect(cold.header()).toContain('photo_drive_upload;dur=140.0');
+    const frozen = cold.header(), warm = new PhotoTiming(() => clock);
+    await provider.upload(object, bytes, warm);
+    expect(warm.header()).toContain('photo_drive_token;dur=0.0');
+    expect(warm.header()).toContain('photo_drive_upload;dur=100.0');
+    expect(tokenCalls).toBe(1);
+    // total is a live clock, but old stage values must remain unchanged.
+    expect(cold.header().split(', photo_total')[0]).toBe(frozen.split(', photo_total')[0]);
+  });
+  it('shares an in-flight token refresh but accounts wait independently in both requests', async () => {
+    let clock = 0, tokenCalls = 0; let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const provider = new GoogleDriveProvider(config, async input => {
+      if (new URL(String(input)).hostname === 'oauth2.googleapis.com') {
+        ++tokenCalls; await gate;
+        return Response.json({ access_token: 'synthetic', expires_in: 3600, token_type: 'Bearer' });
+      }
+      return Response.json(metadata());
+    });
+    const first = new PhotoTiming(() => clock), second = new PhotoTiming(() => clock);
+    const requests = [provider.upload(object, bytes, first), provider.upload(object, bytes, second)];
+    clock = 50; release(); await Promise.all(requests);
+    expect(tokenCalls).toBe(1);
+    expect(first.header()).toContain('photo_drive_token;dur=50.0');
+    expect(second.header()).toContain('photo_drive_token;dur=50.0');
+  });
+  it('records token wait on failed OAuth without retaining credentials or raw error payload', async () => {
+    let clock = 0;
+    const provider = new GoogleDriveProvider(config, async () => {
+      clock += 20; return Response.json({ error: 'private-oauth-diagnostic' }, { status: 500 });
+    });
+    const timing = new PhotoTiming(() => clock);
+    await expect(provider.generateUploadIds(timing)).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(timing.header()).toContain('photo_drive_token;dur=20.0');
+    expect(timing.header()).not.toMatch(/private|synthetic|secret|https/);
   });
 });
 
@@ -95,6 +146,24 @@ describe('#411 folder create acknowledgement', () => {
   const folder = { folderId: 'synthetic_date_123', parentFolderId: config.rootFolderId, name: '2026-01-01' };
   const row = { id: folder.folderId, name: folder.name, mimeType: 'application/vnd.google-apps.folder',
     parents: [folder.parentFolderId], shared: false, trashed: false };
+  it('counts parallel folder token waits as cumulative caller time, not exclusive wall time', async () => {
+    let clock = 0, tokenCalls = 0; let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const provider = new GoogleDriveProvider(config, async input => {
+      const url = new URL(String(input));
+      if (url.hostname === 'oauth2.googleapis.com') {
+        ++tokenCalls; await gate;
+        return Response.json({ access_token: 'synthetic', expires_in: 3600, token_type: 'Bearer' });
+      }
+      return Response.json(url.pathname.endsWith(folder.folderId) ? row : { ...row, id: folder.parentFolderId });
+    });
+    const timing = new PhotoTiming(() => clock);
+    const pending = timing.measure('drive_folders', () => provider.ensureFolder(folder, timing));
+    clock = 50; release(); await pending;
+    expect(tokenCalls).toBe(1);
+    expect(timing.header()).toContain('photo_drive_token;dur=100.0');
+    expect(timing.header()).toContain('photo_drive_folders;dur=50.0');
+  });
   it.each(['complete', 'partial', '409', 'lost', 'shared', 'wrong-parent'] as const)('%s retains private parent validation and same identity', async outcome => {
     const reads: string[] = []; let posted = false;
     const provider = new GoogleDriveProvider(config, async (input, init = {}) => {

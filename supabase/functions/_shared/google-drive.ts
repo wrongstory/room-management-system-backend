@@ -35,22 +35,35 @@ export interface DriveFolder {
 }
 export interface PhotoProviderTiming {
   measure<T>(
-    stage: "drive_upload" | "drive_verify",
+    stage: "drive_upload" | "drive_verify" | "drive_token",
     work: () => Promise<T>,
   ): Promise<T>;
 }
 export interface PhotoProvider {
-  quota(): Promise<{ refreshStartedAt: string; usageBytes: string }>;
-  generateUploadIds(): Promise<[string, string, string]>;
+  quota(
+    timing?: PhotoProviderTiming,
+  ): Promise<{ refreshStartedAt: string; usageBytes: string }>;
+  generateUploadIds(
+    timing?: PhotoProviderTiming,
+  ): Promise<[string, string, string]>;
   rootFolderId(): string;
-  ensureFolder(folder: DriveFolder): Promise<void>;
+  ensureFolder(
+    folder: DriveFolder,
+    timing?: PhotoProviderTiming,
+  ): Promise<void>;
   upload(
     object: DriveObject,
     bytes: Uint8Array,
     timing?: PhotoProviderTiming,
   ): Promise<{ uploadedAt: string }>;
-  inspect(object: DriveObject): Promise<{ uploadedAt: string }>;
-  read(object: DriveReadObject): Promise<Uint8Array>;
+  inspect(
+    object: DriveObject,
+    timing?: PhotoProviderTiming,
+  ): Promise<{ uploadedAt: string }>;
+  read(
+    object: DriveReadObject,
+    timing?: PhotoProviderTiming,
+  ): Promise<Uint8Array>;
   remove(fileId: string): Promise<"deleted" | "not_found">;
 }
 const unavailable = (): never => {
@@ -180,9 +193,12 @@ export class GoogleDriveProvider implements PhotoProvider {
     init: RequestInit = {},
     upload = false,
     deadlineAt?: number,
+    timing?: PhotoProviderTiming,
   ): Promise<Response> {
     // path는 이 class의 고정 builder에서만 생성한다. redirect/사용자 URL/외부 filename을 받지 않는다.
-    const token = await this.#accessToken(deadlineAt);
+    const token = timing
+      ? await timing.measure("drive_token", () => this.#accessToken(deadlineAt))
+      : await this.#accessToken(deadlineAt);
     try {
       const response = await this.#fetch(
         `https://www.googleapis.com/${upload ? "upload/" : ""}drive/v3/${path}`,
@@ -200,9 +216,17 @@ export class GoogleDriveProvider implements PhotoProvider {
       return unavailable();
     }
   }
-  async quota(): Promise<{ refreshStartedAt: string; usageBytes: string }> {
+  async quota(
+    timing?: PhotoProviderTiming,
+  ): Promise<{ refreshStartedAt: string; usageBytes: string }> {
     const refreshStartedAt = new Date().toISOString();
-    const response = await this.#request("about?fields=storageQuota(usage)");
+    const response = await this.#request(
+      "about?fields=storageQuota(usage)",
+      {},
+      false,
+      undefined,
+      timing,
+    );
     if (!response.ok) return unavailable();
     const usage = record((await this.#json(response)).storageQuota).usage;
     if (typeof usage !== "string" || !/^\d{1,18}$/.test(usage)) {
@@ -210,10 +234,16 @@ export class GoogleDriveProvider implements PhotoProvider {
     }
     return { refreshStartedAt, usageBytes: usage };
   }
-  async generateUploadIds(): Promise<[string, string, string]> {
+  async generateUploadIds(
+    timing?: PhotoProviderTiming,
+  ): Promise<[string, string, string]> {
     // Candidates only: DB registry/lease still selects each durable identity before create.
     const response = await this.#request(
       "files/generateIds?count=3&space=drive&type=files",
+      {},
+      false,
+      undefined,
+      timing,
     );
     if (!response.ok) return unavailable();
     const ids = (await this.#json(response)).ids;
@@ -226,9 +256,16 @@ export class GoogleDriveProvider implements PhotoProvider {
     if (new Set(result).size !== 3) return mismatch();
     return result;
   }
-  async #metadata(fileId: string): Promise<Record<string, unknown>> {
+  async #metadata(
+    fileId: string,
+    timing?: PhotoProviderTiming,
+  ): Promise<Record<string, unknown>> {
     const response = await this.#request(
       `files/${id(fileId)}?fields=${fields}`,
+      {},
+      false,
+      undefined,
+      timing,
     );
     if (!response.ok) return unavailable();
     return this.#json(response);
@@ -253,7 +290,10 @@ export class GoogleDriveProvider implements PhotoProvider {
   rootFolderId(): string {
     return this.#config.rootFolderId;
   }
-  async ensureFolder(folder: DriveFolder): Promise<void> {
+  async ensureFolder(
+    folder: DriveFolder,
+    timing?: PhotoProviderTiming,
+  ): Promise<void> {
     const folderId = id(folder.folderId),
       parent = id(folder.parentFolderId),
       name = folder.name;
@@ -263,10 +303,14 @@ export class GoogleDriveProvider implements PhotoProvider {
     // Both GETs are read-only and independent. Never create before validating the parent.
     // No cross-request privacy cache: every upload checks the durable DB winner again.
     const [parentMetadata, existing] = await Promise.all([
-      this.#metadata(parent),
+      this.#metadata(parent, timing),
       (async () => {
         const response = await this.#request(
           `files/${folderId}?fields=${fields}`,
+          {},
+          false,
+          undefined,
+          timing,
         );
         const metadata = response.ok ? await this.#json(response) : undefined;
         if (!response.ok) await response.body?.cancel();
@@ -282,16 +326,22 @@ export class GoogleDriveProvider implements PhotoProvider {
     if (existing.status !== 404) return unavailable();
     let acknowledgement: Record<string, unknown> | undefined;
     try {
-      const created = await this.#request(`files?fields=${fields}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          id: folderId,
-          name,
-          mimeType: "application/vnd.google-apps.folder",
-          parents: [parent],
-        }),
-      });
+      const created = await this.#request(
+        `files?fields=${fields}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: folderId,
+            name,
+            mimeType: "application/vnd.google-apps.folder",
+            parents: [parent],
+          }),
+        },
+        false,
+        undefined,
+        timing,
+      );
       if (!created.ok && created.status !== 409) return unavailable();
       if (created.ok) acknowledgement = await this.#json(created);
       else await created.body?.cancel();
@@ -301,7 +351,7 @@ export class GoogleDriveProvider implements PhotoProvider {
     this.#privateFolder(
       completeAcknowledgement(acknowledgement, false)
         ? acknowledgement
-        : await this.#metadata(folderId),
+        : await this.#metadata(folderId, timing),
       folderId,
       parent,
       name,
@@ -310,9 +360,10 @@ export class GoogleDriveProvider implements PhotoProvider {
   async #verify(
     object: DriveObject,
     acknowledgement?: Record<string, unknown>,
+    timing?: PhotoProviderTiming,
   ): Promise<string> {
     const expectedName = storageName(object);
-    const row = acknowledgement ?? await this.#metadata(object.fileId);
+    const row = acknowledgement ?? await this.#metadata(object.fileId, timing);
     if (
       row.id !== object.fileId || row.name !== expectedName ||
       row.mimeType !== object.mime || row.size !== String(object.sizeBytes) ||
@@ -326,7 +377,7 @@ export class GoogleDriveProvider implements PhotoProvider {
       if (row.sha256Checksum !== object.sha256) {
         mismatch();
       }
-    } else await this.read(object);
+    } else await this.read(object, timing);
     if (
       typeof row.createdTime !== "string" ||
       !/^\d{4}-\d{2}-\d{2}T/.test(row.createdTime) ||
@@ -377,6 +428,8 @@ export class GoogleDriveProvider implements PhotoProvider {
             body,
           },
           true,
+          undefined,
+          timing,
         );
         if (response.ok) return await this.#json(response);
         await response.body?.cancel();
@@ -397,6 +450,7 @@ export class GoogleDriveProvider implements PhotoProvider {
         completeAcknowledgement(acknowledgement, true)
           ? acknowledgement
           : undefined,
+        timing,
       );
     return {
       uploadedAt: timing
@@ -405,12 +459,22 @@ export class GoogleDriveProvider implements PhotoProvider {
     };
   }
   /** Read-only reconciliation of the one preallocated identity. Missing/unknown never authorizes deletion. */
-  async inspect(object: DriveObject): Promise<{ uploadedAt: string }> {
-    return { uploadedAt: await this.#verify(object) };
+  async inspect(
+    object: DriveObject,
+    timing?: PhotoProviderTiming,
+  ): Promise<{ uploadedAt: string }> {
+    return { uploadedAt: await this.#verify(object, undefined, timing) };
   }
-  async read(object: DriveReadObject): Promise<Uint8Array> {
+  async read(
+    object: DriveReadObject,
+    timing?: PhotoProviderTiming,
+  ): Promise<Uint8Array> {
     const response = await this.#request(
       `files/${id(object.fileId)}?alt=media`,
+      {},
+      false,
+      undefined,
+      timing,
     );
     if (
       !response.ok ||

@@ -67,7 +67,8 @@ for (const complete of [true, false]) {
     assert(gets === (complete ? 0 : 1), "only incomplete ACK adds GET");
     assert(
       timing.header().includes("photo_drive_upload;dur=") &&
-        timing.header().includes("photo_drive_verify;dur="),
+        timing.header().includes("photo_drive_verify;dur=") &&
+        timing.header().includes("photo_drive_token;dur="),
       "request-local provider stages",
     );
     await provider.inspect(object);
