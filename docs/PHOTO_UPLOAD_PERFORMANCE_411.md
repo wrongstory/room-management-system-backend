@@ -3,7 +3,8 @@
 ## 범위와 상태
 
 2026-10-10 사용자 결정: 삭제 기능은 후속으로 보류하고 업로드 성능을 최우선으로 개선한다.
-이 문서는 **개발 후보**이며 운영 v0.9.3/API44의 변경 또는 실사용 속도 개선 완료가 아니다.
+아래 1차 ACK 최적화와 [세부 계측](./PHOTO_STAGE_TIMING_436.md)은
+[v0.9.4/API45로 운영 배포됐다](./RELEASE_V0.9.4_DEPLOYED.md). 실사용 속도 개선율은 아직 미측정이다.
 이번 1차 구현 추적은 [#434](https://github.com/wrongstory/room-management-system-backend/issues/434)이며
 상위 #411의 병렬 업로드·썸네일 전체 범위를 종료하지 않는다.
 DB/schema/migration, 보존·삭제 worker, 사진 품질/용량, 인증·권한·CAS는 변경하지 않는다.
@@ -27,8 +28,9 @@ PR 준비 중 확인한 [프런트 추가 1장 실측](https://github.com/makee-
 photo_decode=489.3ms, api_total=9,851.5ms다. 첫 5장과 다른 추가 표본이며
 DB/Drive 지연의 세부 원인이나 평균을 확정하지 않는다. 프런트 첫 5장 POST 간 공백 합계는
 약18ms로, 큐 사이의 인위적 대기가 주 병목이라는 근거는 없다.
-정상 snapshot UAT는 통과했지만 전역 옵션/배포 설정은 변경하지 않았다는 프런트 보고다.
-다음 upload 우선 작업은 DB 조회/RPC/최종 확정/snapshot별 숫자 계측과 중복 왕복 조사다.
+당시 정상 snapshot UAT는 통과했고 전역 옵션은 미변경으로 보고됐다. 이후 프런트
+DOCS/32(dev82bc340)에서 Production/Preview 전역 옵션 활성화가 확인됐다.
+DB 조회/RPC/최종 확정/snapshot별 계측은 이제 운영에 반영됐고, 다음은 재측정과 병목별 추가 최적화다.
 
 ## 1차: Drive 중복 조회 제거와 세부 계측
 
@@ -76,7 +78,8 @@ Supabase changelog의 관련 breaking change와 [Edge 제한](https://supabase.c
 검사 범위: 완전/부분/잘못된 ACK, checksum 누락·실제 bytes 변조, response loss/409/5xx,
 폴더 부모·privacy, 기존 immutable 이름, 재조회 reconciliation, 공유 provider의 timing 격리,
 1/5/20장 합성 요청 수, Fastify/Edge 공용 코드 및 번들.
-전체 DB 검증은 사용자 #431 결정대로 최종 릴리스1회이며 이번 개발 단계에서는 NOT RUN이다.
+아래는 개발 단계 검증 기록이다. 전체 DB는 당시 NOT RUN이었으며, 이후 승인된
+release CI38044427623에서 PASS했다. main은 그 증거를 재사용했다. 향후 DB 실행도 매번 사전 승인받는다.
 
 2026-10-10 로컬 결과:
 
@@ -93,7 +96,7 @@ Supabase changelog의 관련 breaking change와 [Edge 제한](https://supabase.c
 
 ## 프런트 인계 및 다음 단계
 
-현재 API 요청/응답 JSON 변경은 없다. 배포 전에는 운영에 이 최적화가 적용됐다고 표시하지 않는다.
+현재 API 요청/응답 JSON 변경은 없다. v0.9.4에 반영됐지만 실제 속도 개선율은 아직 검증하지 않았다.
 사진 준비·서버 요청·화면 반영을 구분하고 1/5/20장 및 첫 요청/후속 요청의 소요 시간과
 Server-Timing의 고정 숫자 항목만 수집한다. 실제 파일/토큰/URL을 분석 로그에 저장하지 않는다.
 이미 적용된 snapshot과 null fallback, 동일 key/Blob 재시도를 유지한다.
