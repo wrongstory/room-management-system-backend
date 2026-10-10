@@ -1,5 +1,14 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+## [확정 — 2026-10-10 #431] 전체 DB 검증은 최종 릴리스 1회
+
+사용자 결정은 로컬뿐 아니라 CI에도 적용한다. 개발 PR은 application/변경 기능/manifest를
+검사하고 전체 DB 검증은 NOT RUN으로 남긴다. 최종 release→main에서 전체 DB 검증을
+수행하며 동일 PR·검증 입력의 실제 성공 증거만 재사용한다. main 병합 후에는 해당
+증거/입력 일치 확인만 하고 전체 DB를 다시 구축하지 않는다. 불일치/누락은 배포 차단이다.
+검사 내용·권한/정합성 기준·독립 QA·보호 규칙은 유지한다. 아래 과거의 매 PR/매 변경
+fresh reset 규칙보다 이 결정을 우선하며 [실행 정책](./FINAL_DB_VALIDATION.md)을 따른다.
+
 ## 2026-10-09 #415 배정 카드 읽기 대기 최적화 후보
 
 attempt→submission 분기만 target/profile/schedule-history 읽기와 겹친다. 최종 live
@@ -1140,10 +1149,11 @@ AI는 아래 항목을 암묵적으로 확정하지 않는다.
 npm run typecheck
 npm test
 npm run build
-npm run db:reset
+npm run db:manifest:verify
 ```
 
-`db:reset`은 Docker가 필요하다. 실행하지 못했다면 migration이 검증됐다고 말하지 않는다.
+전체 `db:verify`/SQL/upgrade/경합은 최종 릴리스 검증에서 수행한다. 개발 manifest PASS를
+전체 migration 검증 완료로 표시하지 않는다. 필요 시 Docker는 지정 Safe Start 규칙을 따른다.
 
 업무 mutation을 추가했다면 최소 다음 테스트를 포함한다.
 
