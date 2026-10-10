@@ -54,7 +54,7 @@ export function generateReportBundle({ check = false, assetsOnly = false } = {})
   const inputs = Object.keys(built.metafile.inputs).filter(path => path !== '<stdin>');
   inputs.push('scripts/generate-post-approval-report-bundle.mjs', 'scripts/generate-post-approval-report-edge.mjs',
     'package.json', 'package-lock.json', 'node_modules/zod/LICENSE', 'node_modules/esbuild/lib/main.js',
-    'supabase/functions/_shared/runtime.ts', 'src/domain/actor.ts', 'src/lib/app-error.ts', 'src/lib/command.ts',
+    'supabase/functions/_shared/runtime.ts', 'src/modules/auth/auth-context.ts', 'src/domain/actor.ts', 'src/lib/app-error.ts', 'src/lib/command.ts',
     'src/modules/post-approval-room-issues/post-approval-room-issue-contract.ts',
     'src/modules/post-approval-room-issues/post-approval-room-issue.service.ts',
     'src/modules/post-approval-room-issues/post-approval-room-issue.routes.ts');

@@ -195,6 +195,14 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
+  it('pins the source-reviewed113 tail without accepting a rehashed replacement', () => {
+    const changed = clone(entries), last = changed[112];
+    const changedManifest = clone(manifest), record = changedManifest.migrations[112];
+    if (!last || !record) throw new Error('EXPECTED113_TAIL');
+    last.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(last.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed auth-context113 tail');
+  });
   it('accepts historical111 and only the reviewed112 tail despite a matching altered manifest hash', () => {
     const historical = { ...manifest, totalCount: 111, head: 'post_approval_room_issue_ledger',
       pending: { count: 33, head: 'post_approval_room_issue_ledger' }, migrations: manifest.migrations.slice(0,111) };

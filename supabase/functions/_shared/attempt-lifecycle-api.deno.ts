@@ -156,6 +156,25 @@ function mock(options: MockOptions = {}) {
       rpc: (name: string, args: Record<string, unknown>) => {
         order.push(name);
         calls.push({ name, args });
+        if (name === "get_active_auth_context") {
+          return Promise.resolve({
+            error: null,
+            data: (options.status ?? "deactivation_pending") !== "active"
+              ? { code: "ACCOUNT_INACTIVE" }
+              : options.revoked
+              ? { code: "SESSION_REVOKED" }
+              : {
+                code: "OK",
+                profile: {
+                  id: maid.profileId,
+                  auth_user_id: maid.authUserId,
+                  display_name: maid.displayName,
+                  role: options.role ?? "maid",
+                  must_change_password: options.password ?? false,
+                },
+              },
+          });
+        }
         if (name === "is_active_auth_session") {
           return Promise.resolve({
             data: !options.revoked,
@@ -547,7 +566,10 @@ Deno.test("false Auth session decisions stop ordinary and limited HTTP paths bef
       "Auth session helper failure remains fail-closed",
     );
     assert(
-      calls.length === 1 && calls[0].name === "is_active_auth_session" &&
+      calls.length === 1 && calls[0].name ===
+          (route.status === "active"
+            ? "get_active_auth_context"
+            : "is_active_auth_session") &&
         calls[0].args.p_auth_user_id === maid.authUserId &&
         calls[0].args.p_session_id === sessionId,
       "no business RPC, new capability, or saved receipt replay after false",
@@ -764,7 +786,7 @@ Deno.test("limited unknown methods, fake photo/start routes and extra query/body
       "no invented/aliased limited endpoint",
     );
     assert(
-      calls.every((call) => call.name === "is_active_auth_session"),
+      calls.every((call) => call.name === "get_active_auth_context"),
       "no domain RPC",
     );
   }

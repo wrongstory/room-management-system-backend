@@ -116,11 +116,14 @@ def check_post_approval_contract(document: dict[str, Any]) -> None:
         raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
     codes = document["components"]["schemas"]["ErrorCode"]["enum"]
     if (
-        len(codes) != 335
-        or len(set(codes)) != 335
+        len(codes) != 336
+        or len(set(codes)) != 336
         or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
+        or "AUTH_CONTEXT_UNAVAILABLE" not in codes
     ):
-        raise RuntimeError("#336 공통 safe error code union은 정확335개여야 합니다.")
+        raise RuntimeError(
+            "#442 공통 safe error code union은 신규 인증 오류를 포함한 정확336개여야 합니다."
+        )
 
 
 def check_template_permutation_roundtrip(

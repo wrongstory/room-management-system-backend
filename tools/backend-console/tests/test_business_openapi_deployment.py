@@ -31,6 +31,20 @@ def test_deployed_contract(document: dict[str, Any]) -> None:
     CHECK(document)
 
 
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "replacement"])
+def test_rejects_auth_error_code_drift(document: dict[str, Any], mutation: str) -> None:
+    candidate = copy.deepcopy(document)
+    codes = candidate["components"]["schemas"]["ErrorCode"]["enum"]
+    if mutation == "duplicate":
+        codes.append("AUTH_CONTEXT_UNAVAILABLE")
+    else:
+        codes.remove("AUTH_CONTEXT_UNAVAILABLE")
+        if mutation == "replacement":
+            codes.append("UNREVIEWED_ERROR")
+    with pytest.raises(RuntimeError, match="#442"):
+        CHECK(candidate)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
