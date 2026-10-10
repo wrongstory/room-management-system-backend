@@ -32,8 +32,14 @@ const effectiveParameters = (pathItem, operation) => {
 
 assert(document.openapi === '3.1.1', `Frontend generator requires OpenAPI 3.1.1, received ${document.openapi}.`);
 assert(document.info.version === '0.6.0', `Unexpected source API version ${document.info.version}.`);
-assert(Object.keys(document.paths).length === 150, 'Update the frontend contract snapshot and reviewed path inventory.');
-assert(operations.length === 162, 'Update the frontend contract snapshot and reviewed operation inventory.');
+assert(Object.keys(document.paths).length === 151, 'Update the frontend contract snapshot and reviewed path inventory.');
+assert(operations.length === 163, 'Update the frontend contract snapshot and reviewed operation inventory.');
+const remittanceBatch = document.paths['/v1/payroll/remittance-markers']?.get;
+assert(remittanceBatch?.operationId === 'listPayrollRemittanceMarkers', 'Bounded remittance batch contract is missing.');
+const batchIds = remittanceBatch.parameters.find((parameter) => parameter.name === 'maidProfileIds');
+assert(batchIds?.style === 'form' && batchIds.explode === false && batchIds.schema.type === 'string'
+  && batchIds.schema.minLength === 36 && batchIds.schema.maxLength === 369
+  && batchIds.schema.pattern.endsWith('{0,9}$'), 'Batch UUID CSV bounds changed.');
 const operationIds = operations.map(({ operation }) => operation.operationId);
 assert(operationIds.every(Boolean), 'Every frontend-visible operation requires operationId.');
 assert(new Set(operationIds).size === operationIds.length, 'Frontend-visible operationId values must be unique.');

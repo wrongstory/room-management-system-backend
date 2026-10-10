@@ -92,3 +92,19 @@ submission 완료와 최종 권한 RPC의 미실행을 검증한 뒤, gate 해�
 - 실제 DB/운영 UAT/실측 성능은 이번 검증에 포함하지 않았다.
   공통 계측 PR417 → 묶음 조회 PR418 → 이 PR419 순서로 최종 dev와 통합하며,
   각 최종 HEAD의 필수 CI·리뷰·보호 규칙을 확인하기 전 병합하지 않는다.
+
+## 공통 계측·묶음 조회 병합 후 최종 통합 (2026-10-10)
+
+- PR417/418이 필수 CI·독립 QA·리뷰·보호 규칙 확인 후 병합된 dev `a50355a`를 통합했다.
+  제품 가이드 #415/#414/#413 절을 모두 보존했다. 배정 구현은 이전 HEAD `df0f689`와
+  같고 timing/batch/photo/availability/dispatcher는 dev와 같다. SQL 변경은 없다.
+- `npm run ci:quality`: PASS, Node 109파일/2789건 및 secrets/OpenAPI/lint/typecheck/build.
+- `npm run edge:check`: 최종 PASS, Edge 525 + 보고 runtime 65건,
+  후보 포함 bundle 19,277,578 bytes (20,000,000 미만).
+- 첫 Edge 실행은 꺼진 Docker 엔진의 pipe 부재로 generated-format 단계에서 종료됐다
+  (exit1, 환경 BLOCKED). 지정 Safe Start 1회 후 desktop running/server29.7.2 확인,
+  같은 전체 명령 재실행 exit0으로 해소했다. 이미지/volume/WSL 삭제나 DB reset은 없다.
+- 독립 QA: Node 235 + Edge 144 = 379건 PASS. 초기 Edge 환경 BLOCKED와 복구 후
+  PASS를 구분한다. 생성 원본 두 종류·diff 검사 PASS, 신규 P0/P1/P2 없음.
+- 실제 DB/운영 UAT/성능은 NOT RUN. 새 HEAD의 필수 application/migration CI 확인 후
+  PR419 dev 병합과 별도 v0.9.3/#429 릴리스를 진행하며 현재 운영 기능으로 표시하지 않는다.
