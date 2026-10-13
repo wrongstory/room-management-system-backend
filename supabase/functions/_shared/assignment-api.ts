@@ -2,6 +2,7 @@ import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import {
   type AssignmentScheduleRead,
+  indexAssignmentSchedules,
   parseAssignmentScheduleReads,
 } from "./assignment-schedule-core.ts";
 import {
@@ -1194,7 +1195,9 @@ async function hydrateAssignments(
       submissions.set(submission.cleaning_attempt_id, submission);
     }
   }
-  const schedules = scheduleRows as TargetScheduleRow[];
+  const schedules = indexAssignmentSchedules(
+    scheduleRows as TargetScheduleRow[],
+  );
   // Revalidate actor/session/exact assignment ownership after bounded
   // hydration. Historical cards never request live reservation facts.
   const scheduleReads = new Map<string, AssignmentScheduleRead>();
@@ -1256,7 +1259,11 @@ async function hydrateAssignments(
     const attempt = attempts.get(row.id);
     const submission = attempt ? submissions.get(attempt.id) : undefined;
     const card = assignmentCardSnapshot(target);
-    const rollover = assignmentRolloverSnapshot(target, row, schedules);
+    const rollover = assignmentRolloverSnapshot(
+      target,
+      row,
+      schedules.get(row.cleaning_target_id) ?? [],
+    );
     const targetMatchesRevision = row.is_current &&
       target.assignment_version === row.revision &&
       target.effective_service_date === row.service_date;
