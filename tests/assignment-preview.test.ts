@@ -481,7 +481,7 @@ describe("assignment preview pure optimizer", () => {
     expect((await optimizeAssignmentPreview(s, "unavailable")).proposedAssignments)
       .toEqual([]);
   });
-  it("uses the KST planning date and does not move past or future work onto tomorrow's board", async () => {
+  it("uses the KST planning date and includes backlog on tomorrow without rewriting source dates", async () => {
     const old = target("overdue", { serviceDate: "2037-01-04" });
     const future = target("future", { serviceDate: "2037-01-06" });
     const s = snapshot([old, future]);
@@ -494,16 +494,32 @@ describe("assignment preview pure optimizer", () => {
     }]);
     s.serviceDate = "2037-01-06";
     const tomorrowResult = await optimizeAssignmentPreview(s, "tomorrow");
-    expect(tomorrowResult.proposedAssignments.map((r) => r.cleaningTargetId))
-      .toEqual(["future"]);
-    expect(legacyTargetReasons(tomorrowResult.blockedTargets)).toEqual([{
-      cleaningTargetId: "overdue", reason: "SERVICE_DATE_MISMATCH",
-    }]);
+    expect(tomorrowResult.proposedAssignments.map((r) => r.cleaningTargetId).sort())
+      .toEqual(["future", "overdue"]);
+    expect(tomorrowResult.proposedAssignments.find(r => r.cleaningTargetId === "overdue")?.serviceDate).toBe("2037-01-04");
+    expect(tomorrowResult.blockedTargets).toEqual([]);
     expect(tomorrowResult.diagnostics).toMatchObject({
       evaluatedAt: s.planningAt, eligibleMaidCount: 2, fixedExclusions: [],
     });
     expect(tomorrowResult.remainingUnassignedTargets).toEqual([]);
   });
+  it.each(["field_completed", "upload_pending", "submitted"])("does not exclude tomorrow's maid for past %s work but preserves room blockers", async (status) => {
+    const old = fixed("old-completed", "a", 1, { serviceDate: "2037-01-04" });
+    old.activeAttempt = { attemptId: "old-attempt", maidProfileId: "a", status,
+      startedAt: "2037-01-04T10:00:00+09:00", endedAt: null };
+    const s = snapshot([old, target("new", { serviceDate: "2037-01-06" }),
+      target("same-room-blocked", { serviceDate: "2037-01-06", blockedReason: "PREVIOUS_ROOM_WORKFLOW_ACTIVE" })]);
+    s.serviceDate = "2037-01-06";
+    s.maids = s.maids.slice(0, 1);
+    const before = JSON.stringify(s);
+    const result = await optimizeAssignmentPreview(s, "completed-past");
+    expect(result.proposedAssignments.map(row => row.cleaningTargetId)).toEqual(["new"]);
+    expect(result.fixedAssignments).toEqual([]);
+    expect(result.diagnostics.fixedExclusions).toEqual([]);
+    expect(result.blockedTargets.some(row => row.cleaningTargetId === "same-room-blocked")).toBe(true);
+    expect(JSON.stringify(s)).toBe(before);
+  });
+
   it("preserves cross-day fixed sequence slots and appends plans without renumbering history", async () => {
     const old = fixed("old", "a", 1, {
       serviceDate: "2037-01-04", status: "notified",

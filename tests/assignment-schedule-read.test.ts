@@ -7,6 +7,12 @@ const row = { assignmentId: id, scheduleSnapshot: frozenSchedule, currentDepartu
 const parse = (value: unknown, current = false) => parseAssignmentScheduleReads(value, [id], current);
 
 describe('exact safe assignment schedule read boundary', () => {
+  it('preserves a separate planning day without changing the original schedule', () => {
+    expect(parse([{ ...row, planningDate: '2026-10-11' }]).get(id)?.planningDate).toBe('2026-10-11');
+  });
+  it.each([null, 20261011, '2026-02-30', '2026-13-01', '2026-10-11T00:00:00Z'])('rejects invalid planning date %j', planningDate => {
+    expect(() => parse([{ ...row, planningDate }])).toThrow('ASSIGNMENT_SCHEDULE_READ_INVALID');
+  });
   it('preserves frozen source times and known false/null without inference or mutation', () => {
     const input = [{ ...row, scheduleSnapshot: { ...frozenSchedule, sourceReservationVersion: null,
       plannedCheckoutAt: null, nextCheckInAt: null, nextRoomArrivalAt: null, nextArrivalKind: null,

@@ -93,7 +93,9 @@ export class SupabaseAssignmentService implements AssignmentService {
       throw new AppError(403, 'ASSIGNMENT_ACCESS_REQUIRED', '다른 메이드의 청소 배정은 조회할 수 없습니다.');
     }
     const today = new Date(this.clock().getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const includeOverdue = !input.includeHistory && input.serviceDate === today;
+    const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+    const tomorrowPlanning = actor.role === 'admin' && input.serviceDate === tomorrow;
+    const includeOverdue = !input.includeHistory && (input.serviceDate === today || input.serviceDate === tomorrow);
     let query = this.clients.forAccessToken(actor.accessToken).from('cleaning_assignments')
       .select(this.assignmentColumns(), { count: 'exact' }).eq('service_date', input.serviceDate)
       .order('sequence_number').order('revision');
@@ -105,8 +107,8 @@ export class SupabaseAssignmentService implements AssignmentService {
     if (includeOverdue) {
       let overdue = this.clients.forAccessToken(actor.accessToken).from('cleaning_assignments')
         .select(`${this.assignmentColumns()},cleaning_targets!inner(status)`, { count: 'exact' })
-        .lt('service_date', today).eq('is_current', true)
-        .not('cleaning_targets.status', 'in', '(approved,cancelled)')
+        .lt('service_date', input.serviceDate).eq('is_current', true)
+        .not('cleaning_targets.status', 'in', tomorrowPlanning ? '(approved,cancelled,inspection_pending,upload_pending,rejected)' : '(approved,cancelled)')
         .order('service_date').order('sequence_number').order('revision').order('id');
       if (actor.role === 'maid') {
         overdue = overdue.eq('maid_profile_id', actor.profileId).not('notified_at', 'is', null);
@@ -116,7 +118,14 @@ export class SupabaseAssignmentService implements AssignmentService {
       rows.sort((left, right) => left.service_date.localeCompare(right.service_date) ||
         left.sequence_number - right.sequence_number || left.revision - right.revision || left.id.localeCompare(right.id));
     }
-    return this.hydrate(actor, rows, !input.includeHistory);
+    const hydrated = await this.hydrate(actor, rows, !input.includeHistory);
+    if (actor.role !== 'maid' || input.includeHistory || !includeOverdue) return hydrated;
+    return hydrated.filter(row => {
+      const card = object(row);
+      const planningDate = card.planningDate ?? card.serviceDate;
+      if (typeof planningDate !== 'string') throw databaseError(null);
+      return input.serviceDate === today ? planningDate <= today : planningDate === input.serviceDate;
+    });
   }
 
   async history(actor: Actor, cleaningTargetId: string): Promise<unknown[]> {
@@ -179,7 +188,7 @@ export class SupabaseAssignmentService implements AssignmentService {
     const result = new Map<string, AssignmentScheduleRead>();
     for (let offset = 0; offset < rows.length; offset += hydrationBatchSize) {
       const ids = rows.slice(offset, offset + hydrationBatchSize).map((row) => row.id);
-      const response = await this.clients.admin.rpc('get_assignment_schedule_read', {
+      const response = await this.clients.admin.rpc('get_assignment_schedule_read_for_plan', {
         p_actor_profile_id: actor.profileId, p_session_id: sessionId,
         p_assignment_ids: ids, p_include_current: includeCurrent, p_expected_actor_role: actor.role
       });

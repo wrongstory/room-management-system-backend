@@ -82,9 +82,9 @@ function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: 
       rows = rows.filter((row) => row[column] === value);
       return builder;
     },
-    not: (column: string, operator: string) => {
+    not: (column: string, operator: string, value?: string) => {
       if (operator === 'is') rows = rows.filter((row) => row[column] !== null);
-      if (column === 'cleaning_targets.status') rows = rows.filter((row) => !['approved', 'cancelled'].includes((row.cleaning_targets as Row).status as string));
+      if (column === 'cleaning_targets.status') rows = rows.filter((row) => !(value ?? '').slice(1, -1).split(',').includes((row.cleaning_targets as Row).status as string));
       return builder;
     },
     lt: (column: string, value: string) => {
@@ -141,7 +141,7 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
     : tables[table] ?? [], counts[table], onIds, () => beforeRead?.(table) ?? Promise.resolve());
   return new SupabaseAssignmentService({
     admin: { from, rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
-      expect(name).toBe('get_assignment_schedule_read');
+      expect(name).toBe('get_assignment_schedule_read_for_plan');
       expect(args.p_session_id).toBe(sessionId);
       expect(['admin', 'maid']).toContain(args.p_expected_actor_role);
       return read?.(args) ?? { data: (args.p_assignment_ids as string[]).map((assignmentId) =>
@@ -201,7 +201,8 @@ describe('assignment hydration dependency pipeline', () => {
     expect(result).toHaveLength(size);
     expect(batches.every((size) => size <= 100)).toBe(true);
     // Assignment read + one profile read + four batched relation reads; final RPC is unchanged.
-    expect(calls).toHaveLength(2 + 4 * Math.ceil(size / 100));
+    // Tomorrow planning adds one bounded backlog query, not one query per card.
+    expect(calls).toHaveLength(3 + 4 * Math.ceil(size / 100));
     expect(authorityBatches).toHaveLength(Math.ceil(size / 100));
     expect(authorityBatches.every((size) => size <= 100)).toBe(true);
     for (let i = 0; i < size; i++) {
@@ -231,19 +232,38 @@ describe('today current assignment backlog', () => {
     expect(result[0]).toMatchObject({ assignmentId: todayRow.id });
   });
 
-  it('keeps tomorrow and history exact-date and captures KST clock once', async () => {
+  it('expands admin tomorrow backlog but keeps history and maid tomorrow exact-date', async () => {
     const clock = vi.fn(midnight);
     const subject = service({ cleaning_assignments: [oldRow, todayRow], cleaning_targets: currentTargets }, clock);
-    expect(await subject.list(admin, { serviceDate: '2026-09-22' })).toEqual([]);
+    expect(await subject.list(admin, { serviceDate: '2026-09-22' })).toHaveLength(1);
     expect(await subject.list(admin, { serviceDate: '2026-09-21', includeHistory: true })).toHaveLength(1);
     expect(clock).toHaveBeenCalledTimes(2);
     expect(await service({ cleaning_assignments: [oldRow, todayRow], cleaning_targets: currentTargets }, () => new Date('2026-09-20T14:59:59.999Z'))
-      .list(admin, { serviceDate: '2026-09-21' })).toHaveLength(1);
+      .list(admin, { serviceDate: '2026-09-21' })).toHaveLength(2);
+    expect(await subject.list(maid, { serviceDate: '2026-09-22' })).toEqual([]);
+    expect(await subject.list(admin, { serviceDate: '2026-09-23' })).toEqual([]);
+    expect(await service({ cleaning_assignments: [oldRow], cleaning_targets: currentTargets.map(row => ({ ...row, status: 'inspection_pending' })) }, midnight)
+      .list(admin, { serviceDate: '2026-09-22' })).toEqual([]);
+  });
+
+  it('shows a past assignment on the maid notified planning day, not prematurely on today', async () => {
+    const subject = service({ cleaning_assignments: [oldRow], cleaning_targets: currentTargets }, midnight, {}, undefined,
+      args => ({ data: (args.p_assignment_ids as string[]).map(assignmentId => ({ assignmentId,
+        scheduleSnapshot: null, currentDeparture: null, planningDate: '2026-09-22' })), error: null }));
+    expect(await subject.list(maid, { serviceDate: '2026-09-21' })).toEqual([]);
+    const tomorrow = await subject.list(maid, { serviceDate: '2026-09-22' });
+    expect(tomorrow).toHaveLength(1);
+    expect(tomorrow[0]).toMatchObject({ serviceDate: oldRow.service_date, planningDate: '2026-09-22' });
   });
 
   it.each([null, 1001, 2])('rejects unavailable, excessive or truncated counts (%s) without returning partial cards', async (count) => {
     await expect(service({ cleaning_assignments: [oldRow] }, midnight, { cleaning_assignments: count })
       .list(admin, { serviceDate: '2026-09-20' })).rejects.toMatchObject({ code: 'ASSIGNMENT_QUERY_FAILED' });
+  });
+
+  it.each(['approved', 'cancelled', 'inspection_pending', 'upload_pending', 'rejected'])('excludes past %s from admin tomorrow planning', async (status) => {
+    expect(await service({ cleaning_assignments: [oldRow], cleaning_targets: currentTargets.map(row => ({ ...row, status })) }, midnight)
+      .list(admin, { serviceDate: '2026-09-22' })).toEqual([]);
   });
 
   it('rejects truncated related histories rather than projecting a wrong attempt or rollover', async () => {
