@@ -119,12 +119,13 @@ export class SupabaseAssignmentService implements AssignmentService {
         left.sequence_number - right.sequence_number || left.revision - right.revision || left.id.localeCompare(right.id));
     }
     const hydrated = await this.hydrate(actor, rows, !input.includeHistory);
-    if (actor.role !== 'maid' || input.includeHistory || !includeOverdue) return hydrated;
+    if (input.includeHistory || !includeOverdue) return hydrated;
     return hydrated.filter(row => {
       const card = object(row);
       const planningDate = card.planningDate ?? card.serviceDate;
       if (typeof planningDate !== 'string') throw databaseError(null);
-      return input.serviceDate === today ? planningDate <= today : planningDate === input.serviceDate;
+      return input.serviceDate === today ? planningDate <= today
+        : actor.role === 'admin' ? planningDate <= input.serviceDate : planningDate === input.serviceDate;
     });
   }
 

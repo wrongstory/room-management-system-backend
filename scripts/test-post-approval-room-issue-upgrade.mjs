@@ -125,9 +125,9 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115].includes(manifest.totalCount));
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116].includes(manifest.totalCount));
   assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
-  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog' }[manifest.totalCount]);
+  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'assignment_midnight_rollover' }[manifest.totalCount]);
   assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
@@ -162,10 +162,15 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
     assert.equal(validated[113].sha256, '609b0846902173b91ca7f081d8e38329c1c0d3cd94ec2f5e194912819b59992c',
       'Only the source-reviewed issue-count114 tail is permitted, not arbitrary future migrations');
   }
-  if (validated.length === 115) {
+  if (validated.length >= 115) {
     assert.equal(validated[114].file, '20261010154753_assignment_tomorrow_backlog.sql');
     assert.equal(validated[114].sha256, '3e1b9c6829ee4b7869c09471ccee289d49818633ff72c3b956550f1a82a33e2b',
       'Only the source-reviewed planning115 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length === 116) {
+    assert.equal(validated[115].file, '20261013065246_assignment_midnight_rollover.sql');
+    assert.equal(validated[115].sha256, 'dc7fee28c3049c870072ff53f93427af14b11179c5e208321924d72c49613da8',
+      'Only the source-reviewed midnight116 tail is permitted, not arbitrary future migrations');
   }
   return { entries: validated, ledger: validated[110].canonical };
 }
@@ -184,7 +189,7 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   return { ...local, endpoint: localEndpoint };
 }
 export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
-  assert([110, 111, 112, 113, 114, 115].includes(installed) && installed <= source.entries.length);
+  assert([110, 111, 112, 113, 114, 115, 116].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }
