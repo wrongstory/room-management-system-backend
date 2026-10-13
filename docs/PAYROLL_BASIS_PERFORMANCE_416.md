@@ -12,7 +12,7 @@
 읽는다. 기존 단일 참조 CTE는 planner가 펼칠 수 있어 비싼 projection이
 여러 표현식에서 재평가될 가능성이 있다. 실제 기존 실행 횟수는 측정하지 않았다.
 
-신규 미적용 migration115 `20261013063440_payroll_remittance_basis_materialized.sql`은
+신규 미적용 migration116 `20261013063440_payroll_remittance_basis_materialized.sql`은
 해당 CTE에 `MATERIALIZED`만 추가하여 helper 한 번 호출 안에서 집계 결과를 재사용한다.
 요청 간 캐시가 아니며 주급 목록 전체나 별도 RPC 호출 간 중복을 없애는 변경은 아니다.
 [PostgreSQL 공식 CTE 설명](https://www.postgresql.org/docs/17/queries-with.html#QUERIES-WITH-CTE-MATERIALIZATION).
@@ -29,7 +29,7 @@
 - 최신 actor/session/메이드 본인 접근, 관리자 명령 권한, CAS·멱등성·잠금 순서 동일.
 - 테이블/인덱스/RLS/원장/사진/PIN/Auth 데이터 변경 없음. 날짜 predicate는 별도 후속.
 - API/Swagger 요청·응답 변경 없음. 프런트 재연결 불필요, 운영 적용 전 사용 가능으로 표시 금지.
-- ERD/DBML 관계는 변경하지 않는다. 개발자 진단 schema head/manifest만115로 동기화.
+- ERD/DBML 관계는 변경하지 않는다. 개발자 진단 schema head/manifest만116으로 동기화.
 
 ## 검증 계획과 한계
 
@@ -38,7 +38,7 @@
   -6~0주 basis 및 관리자/메이드 전체 표시 DTO를 비교하는 검사를 추가한다.
   이 fixture는 승인 후 실행하며, 준비된 SQL을 실행 PASS로 계산하지 않는다.
 - feature→dev CI는 application/manifest만. release→main 전체 DB 자동 실행도 사전 승인 필요.
-- 승인 후 fresh DB/전체 SQL·권한·경합과114→115 guard/metadata 보존 검사,
+- 승인 후 fresh DB/전체 SQL·권한·경합과115→116 guard/metadata 보존 검사,
   합성 규모별 basis 및 실제 목록/RPC의 EXPLAIN(ANALYZE,BUFFERS)·반복 측정이 필요하다.
   읽기 개선·명령 지연/쓰기 회귀 없음 확인 전 성능 향상률이나 운영 준비 완료를 주장하지 않는다.
 
@@ -55,3 +55,15 @@
 - 독립 소스 QA: PASS, P0/P1/P2 없음. 대상4파일267 tests PASS,
   최신49개 조합 보완 후116 재PASS, manifest/diff 검사 PASS. 원격 CI는 후속 확인.
 - 실제 DB·SQL·성능·운영: NOT RUN.
+
+### 최신 dev 통합 재검증
+
+PR447/448의 dev `4e6ae57`이 먼저 병합돼 assignment migration115를 그대로 보존하고
+이 후보는 순서116이 됐다. 후보 SQL 파일/해시는 변경하지 않았고 양쪽 해시·부정 검사를
+모두 유지했다. 기존9개 미커밋 Edge 줄바꿈 변경은 커밋에서 제외한다.
+
+- 통합 후 `ci:quality`: PASS, 119파일/2,991 tests·typecheck·build.
+- manifest116 PASS, 독립 QA4파일268 tests PASS, 코드 P0/P1/P2 없음.
+- 통합 후 `edge:check`: PASS, bundle19,305,398 bytes. 원격 CI는 후속 확인하며
+  이전 head의 성공을 재사용하지 않는다.
+- 실제 DB·SQL·운영·속도 측정 NOT RUN 유지.

@@ -21,6 +21,7 @@ export interface AssignmentCurrentDeparture {
   actualRoomDepartureAt: string | null;
 }
 export interface AssignmentScheduleRead {
+  planningDate?: string;
   scheduleSnapshot: AssignmentScheduleSnapshot | null;
   currentDeparture: AssignmentCurrentDeparture | null;
 }
@@ -162,13 +163,31 @@ export function parseAssignmentScheduleReads(
     result = new Map<string, AssignmentScheduleRead>();
   for (const item of value) {
     const row = record(item);
-    exactKeys(row, ["assignmentId", "scheduleSnapshot", "currentDeparture"]);
+    exactKeys(row, [
+      "assignmentId",
+      "scheduleSnapshot",
+      "currentDeparture",
+      ...(Object.hasOwn(row, "planningDate") ? ["planningDate"] : []),
+    ]);
+    if (
+      Object.hasOwn(row, "planningDate") &&
+      (typeof row.planningDate !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(row.planningDate) ||
+        !Number.isFinite(Date.parse(row.planningDate)) ||
+        new Date(row.planningDate).toISOString().slice(0, 10) !==
+          row.planningDate)
+    ) {
+      throw new AssignmentScheduleReadError();
+    }
     if (
       typeof row.assignmentId !== "string" || !ids.has(row.assignmentId) ||
       result.has(row.assignmentId) ||
       (!includeCurrent && row.currentDeparture !== null)
     ) throw new AssignmentScheduleReadError();
     result.set(row.assignmentId, {
+      ...(Object.hasOwn(row, "planningDate")
+        ? { planningDate: row.planningDate as string }
+        : {}),
       scheduleSnapshot: snapshot(row.scheduleSnapshot),
       currentDeparture: departure(row.currentDeparture),
     });
