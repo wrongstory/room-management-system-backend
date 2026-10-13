@@ -27,6 +27,12 @@ PR453 최초 CI는 Edge 파일2개의 Deno 서식 불일치로 FAIL했다. 고�
 서식만 보정 후 3파일 fmt check·Node3001/typecheck/build 재실행·Edge assignment39개
 PASS를 확인했다. 코드 의미·검증 기준은 그대로이며 원격 전체 CI는 새 head에서 확인한다.
 
+dev a5ab90d의 주급 서명 최적화를 통합했다. 충돌은 프런트 인계문서 한 곳이며
+양쪽 절을 모두 보존했다. 주급 구현/검사는 dev와 동일하다. ci:quality Node3001 PASS.
+Edge assignment+payroll 합성63개 PASS. 최초 두 수동 명령은 환경변수 접근 허용 목록
+누락으로 FAIL했으며, 기존 CI와 같은 명시적 허용 목록으로 재실행하여 통과했다.
+Docker/DB/마이그레이션은 실행하지 않았다.
+
 2026-10-09, `dev@3e91d88` 기준. source 후보이며 운영 반영을 뜻하지 않는다.
 사용자의 권장 순서 승인에 따른 #413 후속이다. #415 전체 완료/종료가 아니다.
 
