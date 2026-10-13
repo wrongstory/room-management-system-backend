@@ -741,6 +741,19 @@ async function handleApiRequestCore(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    if (
+      (request.method === "GET" && path === "/v1/rooms/pins/export") ||
+      (request.method === "POST" &&
+        ["/v1/rooms/pins/import/preview", "/v1/rooms/pins/import/apply"]
+          .includes(path))
+    ) {
+      return await roomPinTransferResponse(
+        request,
+        clients,
+        actor,
+        corsHeaders,
+      );
+    }
     if (request.method === "POST" && path === "/v1/rooms/pins/bootstrap") {
       const response = jsonResponse(
         {
@@ -2306,3 +2319,4 @@ async function handleApiRequestCore(
 if (import.meta.main) {
   Deno.serve((request) => handleApiRequest(request));
 }
+import { roomPinTransferResponse } from "../_shared/room-pin-transfer-api.ts";
