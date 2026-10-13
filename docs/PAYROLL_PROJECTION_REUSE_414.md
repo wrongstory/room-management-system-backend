@@ -18,12 +18,17 @@ before_workflow wrapper만 담당한다. 아래 최초 두 함수/116 설명은 
 
 ## 최소 변경
 
-두 함수의 한 행짜리 projected CTE에 MATERIALIZED만 추가한다. 동일 호출 안에서 결과를
+117번 before_workflow 함수의 한 행짜리 projected CTE에 MATERIALIZED만 추가한다.
+송금 basis는 먼저 병합된 #416/116에서 담당한다. 동일 호출 안에서 결과를
 재사용할 뿐 요청 간·사용자 간·페이지 간 캐시가 아니다. 매 RPC의 actor/session 검사,
 금액 계산식/PAID/송금표시 fingerprint/멱등성/잠금/후속 재검증은 유지한다.
 기존 before_workflow는 과거 payment wrapper의 복제본임을 소스 검사로 고정한다.
 본문 MD5·치환1회·OID와 prosrc 외 전체pg_proc 동등성 검사로 예상과 다른 DB에서 중단한다.
-이미 적용된 SQL은 변경하지 않고 CLI로 생성한116번째 파일을 추가했다. 실행하지 않았다.
+이미 적용된 SQL은 변경하지 않고 CLI로 생성한117번째 후보 파일을 추가했다. 실행하지 않았다.
+
+최신 병합 checkpoint: #450 → dev07e582a. Node120파일2996·독립 통합 QA167·
+CI38359779767 application/manifest117 PASS. 첫 CI의 외부 runtime 다운로드 제한은
+실패 application만 재실행하여 해소했으며 검증 기준 변경은 없다. DB/성능은 NOT RUN이다.
 
 ## 프런트 인계
 
