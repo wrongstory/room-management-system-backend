@@ -1,5 +1,30 @@
 # v0.9.5 최종 검증 후보 — 운영 미반영
 
+## PR460 3차 CI 실패 및 지연 업무 경합 회귀 보완 — 2026-10-14
+
+CI38422638426/248e409 attempt1은 application PASS, migration FAIL이다.
+이전 SQL 실패5건은 해소됐으며 전체 SQL95파일5692건, upgrade, static-warning,
+KST clock 검사는 PASS다. 경합 검사의 지연 업무 whole-row 불변 assertion이
+#446의 미착수 자정 이월(version/carryover 갱신)과 충돌했다. 이후 경합은 미실행이며
+cleanup PASS, Full DB proof SKIPPED다. 전체 DB 성공 증거로 재사용하지 않는다.
+
+검증 코드만 보완한다. 어제 미배정 업무에8개 동시 scheduler 요청을 보내
+version/carryover 각각 정확히+1, 유효한 갱신 시각과 나머지 전체 컬럼 보존을 검사한다.
+이월 감사/일정 revision 각각1건 및 날짜·버전 근거 일치, 새 담당/attempt/회수 알림0건,
+응답상 대상 이월1회와 최대100건 상한을 검증한다. 기존 지연 event·관리자 fanout·
+자기 push 억제·완료 경쟁 검사는 유지하고 receipt replay 뒤 target/이월 근거 불변을 추가한다.
+낮은 fixture UUID와 기술 cursor 준비로 기존 합성 업무 누적에 의한 조회 순서 영향을 줄인다.
+
+로컬 ci:quality PASS:123파일3075 tests, typecheck/build/OpenAPI154/166/secrets.
+신규 순수 회귀22개, manifest119, script syntax 및 diff 검사 PASS.
+별도 검토 에이전트의 독립 source QA PASS(P0/P1/P2 신규 finding 없음), 순수22개 재실행 PASS.
+기존 lint20 warning/57 info 유지. DB 실행 없는 검사는 실제 RPC/경합 PASS가 아니다.
+SQL migration/API/운영은 변경하지 않았으며 release push·전체 DB CI 재실행은 승인 대기다.
+
+후속 검토: 기존 offline 경합 fixture의 setup이 KST 자정(역사 clock은 해당 날짜 경계)을
+넘으면 과거 미착수 start 허용 가정과 #446가 충돌할 가능성이 있다. 이번 CI의 관측 실패는
+아니며 lease/expiry 검증 기준을 바꾸지 않고 별도 시간 경계 보완으로 추적한다.
+
 ## PR460 2차 CI 실패 및 SQL 회귀 보완 — 2026-10-14
 
 CI38403330268/f3598fb attempt1은 application PASS, 전체 DB FAIL이다.
