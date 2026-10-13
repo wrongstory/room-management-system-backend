@@ -1,5 +1,21 @@
 # #415 배정 카드 조회 최적화 — 1차 후보
 
+## 2026-10-13 단일 순회 이월 표시 후보
+
+PR453은 dev153ab78에 병합했다(CI38361677993 PASS). 후속 후보는 각 카드의
+대상별 이력에서 기존 filter→revision 내림차순 sort→count/첫 reason 선택을
+한 번 순회하는 count/최대 revision 선택으로 바꾼다. 같은 revision에서는 먼저 등장한
+행을 유지하여 stable sort와 일치한다. cap=0에서도 reason=null을 유지하며 caller의
+유효 carryover 검사와 target ID/revision/reason 조건을 그대로 사용한다.
+
+필터 결과 배열 할당과 정렬을 제거하지만 DB 왕복·조회량·최종 권한 RPC 순서는
+변경하지 않는다. #453의 요청-local 색인을 유지하며 카드 간 캐시도 추가하지 않는다.
+이전 방법과 1200개 합성 조합 비교, tie/빈 이력/범위/횟수 상한/비변이성을 검사한다.
+Node3003/typecheck/build와 Edge assignment39 PASS. 실제 운영 성능과 DB는 NOT RUN이다.
+새 SQL/migration은 없고 Swagger/프런트 호출도 동일하다. 독립 QA4파일184개 PASS,
+추가 P0/P1/P2 없음. 원격 전체 CI는 별도 확인한다.
+Supabase 스킬의 권한 보존 기준을 따라 표시 계산만 변경하며 DB 검증은 승인 전 실행하지 않는다.
+
 ## 2026-10-13 후속: 요청 안의 일정 이력 색인 (미배포)
 
 Node/Edge가 카드마다 전체 일정 이력을 필터링하던 부분을 대상 ID별 Map으로 한 번 묶는다.
