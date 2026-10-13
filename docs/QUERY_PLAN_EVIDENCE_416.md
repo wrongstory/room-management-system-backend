@@ -2,7 +2,10 @@
 
 ## 2026-10-11 최신 통합 상태
 
-PR #420을 최신 dev(#444 포함, dev113 소스)에 맞춰 통합한다. 아래 2026-10-09의
+PR #420은 최신 dev(#444 포함, dev113 소스)에 통합해 `de15bbe`로 squash 병합했다.
+필수 application/migration(manifest-only) CI run38063617037 PASS, 실제 DB NOT RUN.
+후속 [객실 issue count 후보](./ROOM_BOARD_ISSUE_COUNTS_416.md)는 별도 dev114 소스이며 미배포다.
+아래 2026-10-09의
 111개 migration 기준 실측은 **과거 기준선**이며 최신 스키마 재검증 결과가 아니다.
 두 effective 정렬 인덱스는 이미 migration112에 있으므로 다시 추가하지 않는다.
 현재 실제 RPC 실행기의 111 history/본문 fingerprint gate는 그대로 보존한다.

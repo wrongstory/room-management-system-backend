@@ -7,6 +7,11 @@
 주급 coalesce 및 반복 summary, 객실 issue count는 아직 실측할 후속 후보다.
 [과거 측정 결과와 최신 기준의 미검증 범위](./QUERY_PLAN_EVIDENCE_416.md).
 
+후속 dev114 소스 후보는 객실별 두 issue count helper 호출을 동일 시간 조건의
+단일 lateral aggregate로 대체한다. 빈 객실도 0 집계행을 유지하며 현재 status만으로
+과거 특이사항을 누락하지 않는다. 기존 함수 OID/권한/서명/시계/나머지 본문은 보존한다.
+[후보·승인 대기 DB 검증](./ROOM_BOARD_ISSUE_COUNTS_416.md). 운영 미적용이며 속도 실측은 없다.
+
 ## #415 배정 카드 조회 의존 분기 최적화 후보
 
 Node/Edge의 bounded 관계 조회에서 attempt→submission만 하나의 병렬 분기로 묶는다.

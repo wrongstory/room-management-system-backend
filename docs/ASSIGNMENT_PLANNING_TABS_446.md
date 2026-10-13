@@ -1,9 +1,14 @@
 # #446 오늘·내일 배정 기준 정합화
 
-상태: 독립 QA 지적 소스 보완, DB 검증 대기 후보. 병합/배포 금지.
+상태: 독립 QA 지적 소스 보완, 개발 통합 CI 확인 중. 운영 배포 금지.
 운영 미배포, 실제 DB 검증·migration 적용 NOT RUN.
 
 ## 보완 checkpoint — 2026-10-11
+
+2026-10-13 통합: 최신 dev의 #416을 보존하여 객실 집계 SQL은114, 배정 계획 SQL은115로
+manifest 순서와 exact-tail 검사를 정합화했다. 두 SQL 파일의 이름/내용/hash는 변경하지 않았다.
+사용자 결정에 따라 application/manifest CI 후 dev 병합하며, 전체 DB 검증은 최종 릴리스에서
+명시 실행 승인 후 1회 수행한다. 개발 CI 통과를 실제 DB PASS로 표시하지 않는다.
 
 초기 4건에 대해 아래 source 보완을 작성했다. Node 117파일/2,983개·typecheck·build·
 manifest·OpenAPI source는 PASS이며 실제 SQL/upgrade/경합은 NOT RUN이다.
@@ -95,5 +100,5 @@ createdAt/notifiedAt도 탭 분류 기준이 아니다. 기존 담당자와 clea
 availability 보호를 정확한 source 지문으로 교체한다. 계획일 helper, 변경용 RPC·내부 command,
 변경 감사 조회 index를 추가하며 기존 prestart 검사를 복제·위임해 보존한다. 새 테이블·데이터
 backfill은 없다. 로컬/CI/운영 적용과 DB reset은 실행 전에 별도 사용자 승인이 필요하다.
-다른 브랜치의 #416 후속 SQL은 이 후보에 포함하지 않았다. 통합 시 manifest 및 exact-tail
-검증을 함께 재정렬해야 한다. 소스 검사 통과를 실제 DB 검증으로 표시하지 않는다.
+최신 dev의 #416 후속 SQL과 통합하여 manifest 및 exact-tail은115개 기준으로 정합화했다.
+소스 검사 통과를 실제 DB 검증으로 표시하지 않는다.
