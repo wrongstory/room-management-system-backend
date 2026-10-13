@@ -2,7 +2,7 @@ import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { assignmentCancellationCapability, parseRoomTypeSnapshot } from './assignment-preview-core.js';
-import { type AssignmentScheduleRead, parseAssignmentScheduleReads } from './assignment-schedule-core.js';
+import { type AssignmentScheduleRead, indexAssignmentSchedules, parseAssignmentScheduleReads } from './assignment-schedule-core.js';
 
 export interface AssignmentListInput {
   serviceDate: string;
@@ -221,7 +221,7 @@ export class SupabaseAssignmentService implements AssignmentService {
     for (const submission of submissionRows as SubmissionRow[]) {
       if (!submissions.has(submission.cleaning_attempt_id)) submissions.set(submission.cleaning_attempt_id, submission);
     }
-    const schedules = scheduleRows as ScheduleRow[];
+    const schedules = indexAssignmentSchedules(scheduleRows as ScheduleRow[]);
     // Revalidate actor/session/ownership last, in the same DB snapshot as the
     // new facts. History never hydrates current reservation/occupancy state.
     const scheduleReads = await this.scheduleReads(actor, rows, includeCurrent);
@@ -238,7 +238,7 @@ export class SupabaseAssignmentService implements AssignmentService {
         (duration !== null && duration !== undefined && (!Number.isSafeInteger(duration) || (duration as number) <= 0))) {
         throw databaseError(null);
       }
-      const rollover = rolloverSnapshot(target, row, schedules);
+      const rollover = rolloverSnapshot(target, row, schedules.get(row.cleaning_target_id) ?? []);
       const attempt = attempts.get(row.id);
       const submission = attempt ? submissions.get(attempt.id) : undefined;
       const targetMatchesRevision = row.is_current && target.assignment_version === row.revision &&

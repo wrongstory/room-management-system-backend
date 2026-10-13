@@ -25,7 +25,7 @@ makee-ham/room-management-system#219다.
 
 ## 구현과 경쟁
 
-116번째 append-only migration `20261013065246_assignment_midnight_rollover.sql`을 추가한다.
+118번째 append-only migration `20261013065246_assignment_midnight_rollover.sql`을 추가한다.
 기존 migration은 수정하지 않는다. private helper 세 개와 회전 cursor 컬럼·조회 index만
 추가하며 public table/RLS/새 HTTP 경로는 없다. 새 helper는 runtime role에 직접 grant하지 않는다.
 
@@ -66,3 +66,8 @@ target/current assignment row lock과 version CAS, 실제 회차 상태를 다�
 독립 QA는 신규 pgTAP fixture의 typed writer mode 누락을 발견했다. 공개 scheduler가 receipt에서
 설정하는 동일 `typed_v1` 모드를 직접 helper fixture에도 설정해 알림 검사가 실제 dispatcher를
 통과하도록 보완했다. SQL 실행 PASS를 주장하지 않는다.
+
+최신 dev `153ab78` 통합 source QA는 미해결 finding 없이 종료했다. 독립 Node 4파일255개와
+통합 Node120파일3,004개, typecheck/build/OpenAPI/manifest118 검사가 PASS다. 기존
+payroll migration116/117의 이름·내용·hash를 유지하고 자정 파일은118로 추가했다.
+병렬 회귀의 과거 접근 창은 어제 KST09~15로 고정해 새벽 실행 시 원 날짜와 어긋나지 않는다.

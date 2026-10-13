@@ -195,13 +195,29 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
-  it('pins the midnight116 tail without accepting a rehashed replacement', () => {
+  it('pins the midnight118 tail without accepting a rehashed replacement', () => {
+    const changed = clone(entries), last = changed[117];
+    const changedManifest = clone(manifest), record = changedManifest.migrations[117];
+    if (!last || !record) throw new Error('EXPECTED118_TAIL');
+    last.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(last.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed midnight118 tail');
+  });
+  it('pins the payroll117 tail without accepting a rehashed replacement', () => {
+    const changed = clone(entries), last = changed[116];
+    const changedManifest = clone(manifest), record = changedManifest.migrations[116];
+    if (!last || !record) throw new Error('EXPECTED117_TAIL');
+    last.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(last.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed payroll117 tail');
+  });
+  it('pins the source-reviewed116 tail without accepting a rehashed replacement', () => {
     const changed = clone(entries), last = changed[115];
     const changedManifest = clone(manifest), record = changedManifest.migrations[115];
     if (!last || !record) throw new Error('EXPECTED116_TAIL');
     last.raw = Buffer.from('select 1;\n');
     record.sha256 = createHash('sha256').update(last.raw).digest('hex');
-    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed midnight116 tail');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed payroll-basis116 tail');
   });
   it('pins the planning115 tail without accepting a rehashed replacement', () => {
     const changed = clone(entries), last = changed[114];

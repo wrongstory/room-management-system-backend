@@ -1,3 +1,19 @@
+/** Request-local display lookup; not a cache or an authorization boundary. */
+export function indexAssignmentSchedules<
+  T extends { cleaning_target_id: string },
+>(
+  rows: readonly T[],
+): Map<string, T[]> {
+  const result = new Map<string, T[]>();
+  for (const row of rows) {
+    const id = row.cleaning_target_id;
+    const group = result.get(id);
+    if (group) group.push(row);
+    else result.set(id, [row]);
+  }
+  return result;
+}
+
 /** Read-only schedule facts. Never use these display fields as command authority. */
 export interface AssignmentScheduleSnapshot {
   capturedAt: string;

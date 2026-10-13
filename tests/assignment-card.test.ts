@@ -394,6 +394,22 @@ describe('assignment card projection', () => {
     expect(result[1]).toMatchObject({ durationMinutes: 31, attemptStatus: null, submissionStatus: null });
   });
 
+  it('keeps per-target rollover facts separate in a multi-card read', async () => {
+    const result = await service({
+      cleaning_targets: targets.map(target => ({ ...target, carryover_count: 5 })),
+      cleaning_target_schedule_revisions: [
+        { cleaning_target_id: targetIds[0], revision: 1, effective_service_date: '2026-09-20', reason_code: 'ROLLED_OVER_NOT_STARTED' },
+        { cleaning_target_id: targetIds[1], revision: 1, effective_service_date: '2026-09-20', reason_code: 'ROLLED_OVER_UNASSIGNED' },
+        { cleaning_target_id: targetIds[0], revision: 2, effective_service_date: '2026-09-21', reason_code: 'ROLLED_OVER_UNASSIGNED' },
+        { cleaning_target_id: targetIds[2], revision: 1, effective_service_date: '2026-09-20', reason_code: 'RESERVATION_CHANGED' }
+      ]
+    }).list(admin, { serviceDate: '2026-09-20', includeHistory: true });
+    expect(result.map(value => {
+      const card = value as Row;
+      return [card.rolloverCount, card.rolloverReason];
+    })).toEqual([[1, 'ROLLED_OVER_NOT_STARTED'], [1, 'ROLLED_OVER_UNASSIGNED'], [0, null]]);
+  });
+
   it('keeps a historical maid card on its notified room and assignment revision', async () => {
     const result = await service().history(maid, '20000000-0000-4000-8000-000000000004');
 
