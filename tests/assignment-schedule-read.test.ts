@@ -1,10 +1,43 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { parseAssignmentScheduleReads } from '../src/modules/assignments/assignment-schedule-core.js';
+import { indexAssignmentSchedules, parseAssignmentScheduleReads } from '../src/modules/assignments/assignment-schedule-core.js';
 import { frozenSchedule } from './fixtures/assignment-schedule.js';
 const id = '30000000-0000-4000-8000-000000000001';
 const row = { assignmentId: id, scheduleSnapshot: frozenSchedule, currentDeparture: null };
 const parse = (value: unknown, current = false) => parseAssignmentScheduleReads(value, [id], current);
+
+describe('request-local schedule history index', () => {
+  it('preserves identity, input order, duplicate revisions and separate requests', () => {
+    const first = Object.freeze({ cleaning_target_id: 'a', revision: 2 });
+    const second = Object.freeze({ cleaning_target_id: 'b', revision: 3 });
+    const third = Object.freeze({ cleaning_target_id: 'a', revision: 2 });
+    const rows = Object.freeze([first, second, third]);
+    const index = indexAssignmentSchedules(rows);
+    expect(index.get('a')).toEqual([first, third]);
+    expect(index.get('a')?.[0]).toBe(first);
+    expect(index.get('b')).toEqual([second]);
+    expect(index.get('missing')).toBeUndefined();
+    expect(indexAssignmentSchedules([]).size).toBe(0);
+    expect(indexAssignmentSchedules(rows).get('a')).not.toBe(index.get('a'));
+    expect(rows).toEqual([first, second, third]);
+  });
+  it.each([1, 100, 1000])('indexes %i targets once and visits only each target history', count => {
+    let reads = 0;
+    const rows = Array.from({ length: count }, (_, i) => ({
+      get cleaning_target_id() { reads++; return String(i); },
+      revision: 1
+    }));
+    const index = indexAssignmentSchedules(rows);
+    expect(reads).toBe(count);
+    for (let i = 0; i < count; i++) {
+      expect(index.get(String(i))?.filter(row => row.cleaning_target_id === String(i)))
+        .toEqual([rows[i]]);
+    }
+    expect(reads).toBe(2 * count);
+    // Old per-card global filter examines count * count IDs.
+    // This is deterministic work counting, not a production latency claim.
+  });
+});
 
 describe('exact safe assignment schedule read boundary', () => {
   it('preserves a separate planning day without changing the original schedule', () => {
