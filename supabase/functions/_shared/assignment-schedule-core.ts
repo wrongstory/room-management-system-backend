@@ -14,6 +14,37 @@ export function indexAssignmentSchedules<
   return result;
 }
 
+interface RolloverEvidenceRow {
+  cleaning_target_id: string;
+  revision: number;
+  reason_code: string;
+}
+/** Display-only reduction. The caller validates the carryover cap. Ties keep
+ * input order, matching the former stable descending sort without allocations. */
+export function summarizeAssignmentRollover(
+  rows: readonly RolloverEvidenceRow[],
+  targetId: string,
+  revision: number,
+  carryoverCap: number,
+): { rolloverCount: number; rolloverReason: string | null } {
+  let count = 0;
+  let latest: RolloverEvidenceRow | undefined;
+  for (const row of rows) {
+    if (
+      row.cleaning_target_id !== targetId || !(row.revision <= revision) ||
+      (row.reason_code !== "ROLLED_OVER_UNASSIGNED" &&
+        row.reason_code !== "ROLLED_OVER_NOT_STARTED")
+    ) continue;
+    count++;
+    if (!latest || row.revision > latest.revision) latest = row;
+  }
+  const rolloverCount = Math.min(carryoverCap, count);
+  return {
+    rolloverCount,
+    rolloverReason: rolloverCount === 0 ? null : latest?.reason_code ?? null,
+  };
+}
+
 /** Read-only schedule facts. Never use these display fields as command authority. */
 export interface AssignmentScheduleSnapshot {
   capturedAt: string;

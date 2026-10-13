@@ -2,7 +2,7 @@ import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { assignmentCancellationCapability, parseRoomTypeSnapshot } from './assignment-preview-core.js';
-import { type AssignmentScheduleRead, indexAssignmentSchedules, parseAssignmentScheduleReads } from './assignment-schedule-core.js';
+import { type AssignmentScheduleRead, indexAssignmentSchedules, parseAssignmentScheduleReads, summarizeAssignmentRollover } from './assignment-schedule-core.js';
 
 export interface AssignmentListInput {
   serviceDate: string;
@@ -56,7 +56,6 @@ function roomNumber(target: TargetRow): string {
   return room.room_number;
 }
 
-const rolloverReasonCodes = new Set(['ROLLED_OVER_UNASSIGNED', 'ROLLED_OVER_NOT_STARTED']);
 const readLimit = 1000;
 const hydrationBatchSize = 100;
 
@@ -73,15 +72,7 @@ function rolloverSnapshot(target: TargetRow, row: AssignmentRow, schedules: Sche
   if (!Number.isSafeInteger(target.carryover_count) || target.carryover_count < 0) {
     throw databaseError(null);
   }
-  const evidence = schedules
-    .filter((candidate) => candidate.cleaning_target_id === row.cleaning_target_id &&
-      candidate.revision <= row.revision && rolloverReasonCodes.has(candidate.reason_code))
-    .sort((left, right) => right.revision - left.revision);
-  const rolloverCount = Math.min(target.carryover_count, evidence.length);
-  return {
-    rolloverCount,
-    rolloverReason: rolloverCount === 0 ? null : evidence[0]?.reason_code ?? null
-  };
+  return summarizeAssignmentRollover(schedules, row.cleaning_target_id, row.revision, target.carryover_count);
 }
 
 export class SupabaseAssignmentService implements AssignmentService {
