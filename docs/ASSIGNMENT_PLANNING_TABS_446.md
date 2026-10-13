@@ -1,7 +1,20 @@
 # #446 오늘·내일 배정 기준 정합화
 
-상태: 독립 QA 지적 소스 보완, 개발 통합 CI 확인 중. 운영 배포 금지.
+상태: PR #447 dev 병합 완료, 최종 릴리스 DB gate 대기. 운영 미배포.
 운영 미배포, 실제 DB 검증·migration 적용 NOT RUN.
+
+## 2026-10-13 개발 통합 완료
+
+PR #447 head `00b3bfd`의 required application/migration CI38357361243 PASS,
+독립 통합 QA 7파일340개 PASS 및 미해결 리뷰0·보호 규칙 확인 후 dev `8f13d09`에
+squash 병합했다. 두 tree는 동일하다. Node118파일2,987개/typecheck/build/OpenAPI/
+manifest115 PASS. CI migration은 manifest만 검사했으며 모든 실제 DB 단계는 SKIPPED다.
+운영 배포·사용자 UAT·실제 DB 보존/경합 검증 완료와 구분한다.
+
+다음 순서: 프런트 계획일/원 업무일 구분 인계 → 남은 성능 후보(#414 주급 반복 집계 등)의
+릴리스 포함 범위 확정 → 최종 입력에서 사전 승인된 전체 DB 검증1회 → 별도 승인 운영 적용.
+#446 prestart/legacy 근무 희망·실제 checkout successor·권한/경합은 최종 DB gate에 남는다.
+승인 전 release PR/push로 전체 검사를 자동 실행하지 않는다.
 
 ## 보완 checkpoint — 2026-10-11
 
