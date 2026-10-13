@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { indexAssignmentSchedules, parseAssignmentScheduleReads } from '../src/modules/assignments/assignment-schedule-core.js';
+import { indexAssignmentSchedules, parseAssignmentScheduleReads, summarizeAssignmentRollover } from '../src/modules/assignments/assignment-schedule-core.js';
 import { frozenSchedule } from './fixtures/assignment-schedule.js';
 const id = '30000000-0000-4000-8000-000000000001';
 const row = { assignmentId: id, scheduleSnapshot: frozenSchedule, currentDeparture: null };
@@ -36,6 +36,45 @@ describe('request-local schedule history index', () => {
     expect(reads).toBe(2 * count);
     // Old per-card global filter examines count * count IDs.
     // This is deterministic work counting, not a production latency claim.
+  });
+});
+
+describe('single-pass rollover display reduction', () => {
+  const reasons = ['ROLLED_OVER_UNASSIGNED', 'ROLLED_OVER_NOT_STARTED', 'RESERVATION_CHANGED'] as const;
+  it('matches the former stable filter/sort for mixed targets, revisions, ties and caps', () => {
+    for (let seed = 0; seed < 60; seed++) {
+      const rows = Object.freeze(Array.from({ length: seed }, (_, i) => Object.freeze({
+        cleaning_target_id: i % 3 === 0 ? 'other' : 'target',
+        revision: (i * 7 + seed) % 11,
+        reason_code: reasons[(i + seed) % 3] ?? 'RESERVATION_CHANGED'
+      })));
+      for (const revision of [0, 1, 5, 10, 20]) {
+        for (const cap of [0, 1, 4, 100]) {
+          const evidence = rows.filter(row => row.cleaning_target_id === 'target' &&
+            row.revision <= revision && reasons.slice(0, 2).includes(row.reason_code))
+            .sort((a, b) => b.revision - a.revision);
+          const count = Math.min(cap, evidence.length);
+          expect(summarizeAssignmentRollover(rows, 'target', revision, cap)).toEqual({
+            rolloverCount: count, rolloverReason: count === 0 ? null : evidence[0]?.reason_code ?? null
+          });
+        }
+      }
+    }
+  });
+  it('visits unsorted evidence once and keeps the first reason on equal revisions', () => {
+    let visits = 0;
+    const rows = [
+      { cleaning_target_id: 'a', revision: 2, reason_code: reasons[1] },
+      { cleaning_target_id: 'a', revision: 2, reason_code: reasons[0] },
+      { cleaning_target_id: 'a', revision: 1, reason_code: reasons[0] }
+    ].map(row => ({ ...row, get cleaning_target_id() { visits++; return row.cleaning_target_id; } }));
+    expect(summarizeAssignmentRollover(rows, 'a', 2, 10)).toEqual({
+      rolloverCount: 3, rolloverReason: reasons[1]
+    });
+    expect(visits).toBe(3);
+    expect(summarizeAssignmentRollover(rows, 'a', 1, 10)).toEqual({
+      rolloverCount: 1, rolloverReason: reasons[0]
+    });
   });
 });
 
