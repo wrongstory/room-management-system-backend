@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 114,
+  "totalCount": 115,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 36,
+    "count": 37,
     "first": "assignment_unavailability_reassignment",
-    "head": "room_board_issue_counts_single_scan"
+    "head": "payroll_remittance_basis_materialized"
   },
-  "head": "room_board_issue_counts_single_scan",
+  "head": "payroll_remittance_basis_materialized",
   "migrations": [
     {
       "order": 1,
@@ -583,6 +583,11 @@
       "order": 114,
       "name": "room_board_issue_counts_single_scan",
       "sha256": "609b0846902173b91ca7f081d8e38329c1c0d3cd94ec2f5e194912819b59992c"
+    },
+    {
+      "order": 115,
+      "name": "payroll_remittance_basis_materialized",
+      "sha256": "3f6f47b6969a12ffe61b9a2ef56a5cef87dbd9b124a6ab5630889e1763248462"
     }
   ]
 }
