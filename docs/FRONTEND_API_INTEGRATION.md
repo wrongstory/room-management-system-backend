@@ -1,5 +1,15 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## #415 후속 상태 — 2026-10-13 운영 미반영
+
+PR453은 최신 CI38361677993 application/manifest PASS와 독립 QA 확인 후
+dev153ab78에 병합했다. 대상별 일정 이력 색인은 개발 통합 완료이며 운영 미배포다.
+후속 후보는 이월 표시의 filter/sort 임시 배열을 한 번 순회하는 집계로 바꾼다.
+API/Swagger/프런트 호출 변경, DB/SQL/migration 변경은 없다.
+최근 이월 사유·동일 revision의 입력 순서·횟수 상한·과거 배정 표시는 유지한다.
+실제 속도 개선률은 미측정이다. 전체 DB 검증은 최종 릴리스 1회,
+마이그레이션/재구축은 실행 전 사전 승인을 받아야 한다.
+
 ## 2026-10-13 후속 인계 — 운영 미반영
 
 - #450은 dev `07e582a`에 squash 병합했다. CI38359779767 재실행 PASS,
@@ -34,6 +44,12 @@ DB/migration 변경은 없다. [범위와 검증 상태](./PAYROLL_CURSOR_PERFOR
 운영 기능이나 측정된 속도 개선으로 안내하지 않는다. [검증 상태와 릴리스 gate](./PAYROLL_BASIS_PERFORMANCE_416.md).
 
 ## #446 오늘·내일 배정 — 미배포 후보
+
+자정 후속 후보는 [KST 00:00 이월 계약](./ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md)을 따른다.
+전날 내일 계획은 담당을 유지하며 오늘로 표시되고, 전일 미착수는 현재 담당이 종료된다.
+선택일 D와 카드 `planningDate`를 사용하고 원 `serviceDate`를 재작성하지 않는다.
+신규 HTTP 경로/필드는 없으며 admin/maid 오늘 목록은 미래 계획을 제외한다.
+실제 DB/운영 적용은 NOT RUN이다. 프런트 #219 연동은 배포 확인 후 진행한다.
 
 2026-10-13: PR #447은 required application/migration CI38357361243 및 독립 통합 QA 후
 dev `8f13d09`에 병합됐다. Node2,987개·독립 통합340개 PASS. 개발 migration 검사는

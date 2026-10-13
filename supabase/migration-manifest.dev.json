@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 118,
+  "totalCount": 119,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 40,
+    "count": 41,
     "first": "assignment_unavailability_reassignment",
     "head": "room_pin_transfer"
   },
@@ -601,6 +601,11 @@
     },
     {
       "order": 118,
+      "name": "assignment_midnight_rollover",
+      "sha256": "dc7fee28c3049c870072ff53f93427af14b11179c5e208321924d72c49613da8"
+    },
+    {
+      "order": 119,
       "name": "room_pin_transfer",
       "sha256": "77a5de1fcb89d355bb59a2247c6b36414defb4ec911e1e8afcc30aaaa8e64725"
     }

@@ -590,6 +590,7 @@ erDiagram
 - 오늘/내일 계획 배정·통보는 가능하지만 checkout attempt/PIN은 materialized current target과 실제 checkout/access 시각 검증을 통과해야 한다. #28만 attempt 활성화를 소유한다.
 - 실제 checkout은 같은 planned target을 current로 승격한다. 조기 수동 퇴실은 schedule/assignment revision, 미통보 예약 변경은 draft stale로 처리한다. 통보 후 같은 객실의 퇴실 연장은 미착수·PIN/offline lease 미발급일 때만 immutable schedule/assignment replan을 허용하고, 그 외에는 stable conflict로 전체 롤백한다. 취소는 soft cancel/current 종료/회수 알림으로 처리한다.
 - #446: 관리자 오늘·내일 계획 모두 과거 미완료를 포함한다. 요청 계획일의 근무 희망을 검사하되 원 target/assignment 날짜를 재작성하지 않는다. DB 적용 전 후보이며 상세는 `ASSIGNMENT_PLANNING_TABS_446.md`를 따른다.
+- #446 자정 후속: 전일 미착수만 담당을 종료하며 원 날짜/접근 창 대신 감사의 `rolloverFromDate`/`rolloverToDate`로 일별 계획일을 기록한다. target version/carryover_count와 schedule revision은 증가한다. `private.assignment_activation_scan_cursor.last_rollover_target_id`는 회전 조회 위치이며 업무 FK가 아니다. 감사 entity별 partial index와 미착수 target ID partial index를 추가한다. 실제 DB NOT RUN; `ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md` 참조.
 - 작업마다 현재 배정은 최대 한 건이고, 과거 revision은 삭제하지 않는다.
 - 현재 배정의 `(maid, service_date, sequence_number)`는 유일하다. 같은 순서는 메이드나 서비스 날짜가 다를 때만 재사용한다.
 - 배정 revision은 생성 시 target의 `effective_service_date`, `available_from`, `due_at`을 snapshot으로 고정하고 target·maid·순서·revision·snapshot·변경자·생성시각을 이후 수정하지 않는다.

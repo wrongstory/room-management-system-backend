@@ -982,39 +982,51 @@ Deno.test("admin tomorrow planning includes bounded unfinished backlog but maid 
   }
 });
 
-Deno.test("maid tomorrow backlog uses authoritative planning day and preserves original day", async () => {
-  const makeClients = () =>
-    readClients([], {
-      overdue: [assignmentRow()],
-      scheduleRead: (args) => ({
-        data: (args.p_assignment_ids as string[]).map((assignmentId) => ({
-          assignmentId,
-          scheduleSnapshot: null,
-          currentDeparture: null,
-          planningDate: "2026-09-06",
-        })),
-        error: null,
-      }),
-    });
-  const tomorrow = await listAssignments(
-    request("/v1/assignments?serviceDate=2026-09-06"),
-    makeClients().clients,
-    maid,
-    () => new Date("2026-09-04T15:00:00Z"),
-  );
-  assert(
-    tomorrow.length === 1 && tomorrow[0].serviceDate === "2026-09-04" &&
-      tomorrow[0].planningDate === "2026-09-06",
-    "planned tomorrow",
-  );
-  const today = await listAssignments(
-    request("/v1/assignments?serviceDate=2026-09-05"),
-    makeClients().clients,
-    maid,
-    () => new Date("2026-09-04T15:00:00Z"),
-  );
-  assert(today.length === 0, "not today");
-});
+for (const actor of [admin, maid]) {
+  Deno.test(`${actor.role} tomorrow backlog becomes today at KST midnight with identical card`, async () => {
+    const makeClients = () =>
+      readClients([], {
+        overdue: [assignmentRow()],
+        scheduleRead: (args) => ({
+          data: (args.p_assignment_ids as string[]).map((assignmentId) => ({
+            assignmentId,
+            scheduleSnapshot: null,
+            currentDeparture: null,
+            planningDate: "2026-09-06",
+          })),
+          error: null,
+        }),
+      });
+    const tomorrow = await listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-06"),
+      makeClients().clients,
+      actor,
+      () => new Date("2026-09-05T14:59:59.999Z"),
+    );
+    assert(
+      tomorrow.length === 1 && tomorrow[0].serviceDate === "2026-09-04" &&
+        tomorrow[0].planningDate === "2026-09-06",
+      "planned tomorrow",
+    );
+    const today = await listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-05"),
+      makeClients().clients,
+      actor,
+      () => new Date("2026-09-05T14:59:59.999Z"),
+    );
+    assert(today.length === 0, "not today");
+    const afterMidnight = await listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-06"),
+      makeClients().clients,
+      actor,
+      () => new Date("2026-09-05T15:00:00Z"),
+    );
+    assert(
+      JSON.stringify(afterMidnight) === JSON.stringify(tomorrow),
+      "same target, owner, and immutable snapshot after midnight",
+    );
+  });
+}
 
 Deno.test("outside planning days and history reads never expand to past dates", async () => {
   for (

@@ -4,6 +4,7 @@ import {
   type AssignmentScheduleRead,
   indexAssignmentSchedules,
   parseAssignmentScheduleReads,
+  summarizeAssignmentRollover,
 } from "./assignment-schedule-core.ts";
 import {
   assignmentCancellationCapability,
@@ -1032,10 +1033,6 @@ function assignmentCardSnapshot(target: TargetRow) {
   };
 }
 
-const rolloverReasonCodes = new Set([
-  "ROLLED_OVER_UNASSIGNED",
-  "ROLLED_OVER_NOT_STARTED",
-]);
 const assignmentReadLimit = 1000;
 const assignmentHydrationBatchSize = 100;
 
@@ -1091,20 +1088,12 @@ function assignmentRolloverSnapshot(
   ) {
     throw assignmentDatabaseError(null);
   }
-  const evidence = schedules
-    .filter((candidate) =>
-      candidate.cleaning_target_id === row.cleaning_target_id &&
-      candidate.revision <= row.revision &&
-      rolloverReasonCodes.has(candidate.reason_code)
-    )
-    .sort((left, right) => right.revision - left.revision);
-  const rolloverCount = Math.min(target.carryover_count, evidence.length);
-  return {
-    rolloverCount,
-    rolloverReason: rolloverCount === 0
-      ? null
-      : evidence[0]?.reason_code ?? null,
-  };
+  return summarizeAssignmentRollover(
+    schedules,
+    row.cleaning_target_id,
+    row.revision,
+    target.carryover_count,
+  );
 }
 
 async function assignmentAttemptRead(
@@ -1418,7 +1407,7 @@ export async function listAssignments(
     request,
     !includeHistory,
   );
-  if (actor.role !== "maid" || includeHistory || !includeOverdue) {
+  if (includeHistory || !includeOverdue) {
     return hydrated;
   }
   return hydrated.filter((row) => {
@@ -1427,6 +1416,8 @@ export async function listAssignments(
     if (typeof planningDate !== "string") throw assignmentDatabaseError(null);
     return serviceDate === today
       ? planningDate <= today
+      : actor.role === "admin"
+      ? planningDate <= serviceDate
       : planningDate === serviceDate;
   });
 }
