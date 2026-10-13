@@ -24,6 +24,9 @@ export async function testAttemptActivationConcurrency(client, actor) {
   const week = new Date(Date.parse(`${today}T00:00:00Z`) - (weekday - 1) * 86_400_000)
     .toISOString().slice(0, 10);
   const now = new Date();
+  const yesterday = kstDate(new Date(now.getTime() - 86_400_000));
+  const expiredAvailableFrom = new Date(`${yesterday}T09:00:00+09:00`).toISOString();
+  const expiredDueAt = new Date(`${yesterday}T15:00:00+09:00`).toISOString();
   const availableFrom = new Date(now.getTime() - 3_600_000).toISOString();
   const dueAt = new Date(now.getTime() + 3_600_000).toISOString();
   const maids = [];
@@ -96,8 +99,8 @@ export async function testAttemptActivationConcurrency(client, actor) {
       source_key: `activation-race-${targetId}`,
       original_service_date: expired ? kstDate(new Date(now.getTime() - 86_400_000)) : today,
       effective_service_date: expired ? kstDate(new Date(now.getTime() - 86_400_000)) : today,
-      available_from: expired ? new Date(now.getTime() - 30 * 3_600_000).toISOString() : availableFrom,
-      due_at: expired ? new Date(now.getTime() - 20 * 3_600_000).toISOString() : dueAt,
+      available_from: expired ? expiredAvailableFrom : availableFrom,
+      due_at: expired ? expiredDueAt : dueAt,
       status: 'notified',
       assignment_version: 2,
       room_type_snapshot: {},
@@ -203,26 +206,89 @@ export async function testAttemptActivationConcurrency(client, actor) {
     'two activation workers create exactly attempt one');
 
   const rolloverItem = await fixture({ expired: true });
+  const oldAttemptId = randomUUID();
+  ok(await client.from('cleaning_attempts').insert({
+    id: oldAttemptId, cleaning_target_id: rolloverItem.targetId,
+    assignment_id: rolloverItem.assignmentId, maid_profile_id: maids[0],
+    attempt_number: 1, status: 'scheduled', assignment_revision: 2,
+    template_snapshot: {}, room_snapshot: {}
+  }), 'unstarted yesterday attempt fixture');
+  const rolloverCommands = [lifecycle('rollover-a'), lifecycle('rollover-b')];
   const rolloverWorkers = await Promise.all([
-    client.rpc('process_due_assignment_lifecycle', lifecycle('rollover-a')),
-    client.rpc('process_due_assignment_lifecycle', lifecycle('rollover-b'))
+    client.rpc('process_due_assignment_lifecycle', rolloverCommands[0]),
+    client.rpc('process_due_assignment_lifecycle', rolloverCommands[1])
   ]);
-  assert(rolloverWorkers.every((result) => !result.error &&
-    result.data.rolledOverCount === 0 && result.data.rolloverResults.length === 0),
-  'two overdue workers must complete without automatic rollover');
-  const rolled = ok(await client.from('cleaning_targets').select('carryover_count,assignment_version,effective_service_date,status').eq('id', rolloverItem.targetId).single(), 'rolled target');
+  assert(rolloverWorkers.every((result) => !result.error), 'two midnight workers must complete without deadlock');
+  const matchingRollovers = rolloverWorkers.flatMap(result => result.data.rolloverResults)
+    .filter(result => result.cleaningTargetId === rolloverItem.targetId);
+  assert(matchingRollovers.length === 1 && matchingRollovers[0].rolloverToDate === today,
+    'parallel workers report exactly one transition for the same old responsibility');
+  const rolled = ok(await client.from('cleaning_targets').select('carryover_count,assignment_version,original_service_date,effective_service_date,available_from,due_at,status').eq('id', rolloverItem.targetId).single(), 'rolled target');
   const revisions = ok(await client.from('cleaning_target_schedule_revisions').select('id').eq('cleaning_target_id', rolloverItem.targetId).eq('reason_code', 'ROLLED_OVER_NOT_STARTED'), 'rollover revisions');
-  const overdueAssignments = ok(await client.from('cleaning_assignments').select('id,service_date')
-    .eq('cleaning_target_id', rolloverItem.targetId).eq('is_current', true), 'overdue current assignment');
-  const overdueAttempts = ok(await client.from('cleaning_attempts').select('assignment_id,attempt_number')
+  const overdueAssignments = ok(await client.from('cleaning_assignments').select('id,service_date,is_current,ended_at,change_reason_code')
+    .eq('cleaning_target_id', rolloverItem.targetId), 'overdue assignment history');
+  const overdueAttempts = ok(await client.from('cleaning_attempts').select('id,assignment_id,attempt_number,status,execution_version,started_at,ended_at,end_reason')
     .eq('cleaning_target_id', rolloverItem.targetId), 'overdue attempts');
-  assert(rolled.carryover_count === 0 && rolled.assignment_version === 2 && rolled.status === 'notified' && revisions.length === 0 &&
+  const rolloverAudits = ok(await client.from('audit_events').select('id,after_state')
+    .eq('entity_id', rolloverItem.targetId).eq('event_type', 'assignment.rolled_over'), 'rollover audit');
+  assert(rolled.carryover_count === 1 && rolled.assignment_version === 3 && rolled.status === 'unassigned' && revisions.length === 1 &&
+    rolled.original_service_date === rolled.effective_service_date &&
     rolled.effective_service_date === kstDate(new Date(now.getTime() - 86_400_000)) &&
+    Date.parse(rolled.available_from) === Date.parse(expiredAvailableFrom) &&
+    Date.parse(rolled.due_at) === Date.parse(expiredDueAt) &&
     overdueAssignments.length === 1 && overdueAssignments[0].id === rolloverItem.assignmentId &&
     overdueAssignments[0].service_date === rolled.effective_service_date &&
+    !overdueAssignments[0].is_current && overdueAssignments[0].ended_at !== null &&
+    overdueAssignments[0].change_reason_code === 'ROLLED_OVER_NOT_STARTED' &&
     overdueAttempts.length === 1 && overdueAttempts[0].assignment_id === rolloverItem.assignmentId &&
-    overdueAttempts[0].attempt_number === 1,
-  'two overdue workers preserve original date/owner/revision and activate exactly one original attempt');
+    overdueAttempts[0].id === oldAttemptId && overdueAttempts[0].attempt_number === 1 &&
+    overdueAttempts[0].status === 'superseded' && overdueAttempts[0].execution_version === 2 &&
+    overdueAttempts[0].started_at === null && overdueAttempts[0].ended_at !== null &&
+    overdueAttempts[0].end_reason === 'ROLLED_OVER_NOT_STARTED' && rolloverAudits.length === 1 &&
+    rolloverAudits[0].after_state.rolloverToDate === today,
+  'parallel midnight workers preserve source dates, retire yesterday owner/attempt and append exactly one revision/audit');
+
+  // Reassign through the real draft/notify commands using today's availability.
+  // Replaying old worker receipts must not release this newly notified owner.
+  ok(await client.rpc('save_cleaning_assignment_draft', {
+    p_actor_profile_id: actorProfileId, p_cleaning_target_id: rolloverItem.targetId,
+    p_maid_profile_id: maids[1], p_sequence_number: rolloverItem.sequence,
+    p_expected_assignment_version: 3,
+    p_idempotency_key: `midnight-draft-${randomUUID()}`, p_request_hash: '8'.repeat(64)
+  }), 'midnight successor draft');
+  const successorImpact = ok(await client.rpc('get_assignment_commit_impact', {
+    p_actor_profile_id: actorProfileId, p_service_date: today
+  }), 'midnight successor impact');
+  ok(await client.rpc('commit_and_notify_assignments', {
+    p_actor_profile_id: actorProfileId, p_service_date: today,
+    p_expected_impact_fingerprint: successorImpact.impactFingerprint,
+    p_items: [{ cleaningTargetId: rolloverItem.targetId, expectedAssignmentVersion: 4, expectedAvailabilityVersion: 1 }],
+    p_idempotency_key: `midnight-notify-${randomUUID()}`, p_request_hash: '9'.repeat(64)
+  }), 'midnight successor notification');
+  const successor = ok(await client.from('cleaning_assignments').select('id,revision,maid_profile_id,notified_at')
+    .eq('cleaning_target_id', rolloverItem.targetId).eq('is_current', true).single(), 'midnight successor identity');
+  const replayedWorkers = await Promise.all(rolloverCommands.map(command => client.rpc('process_due_assignment_lifecycle', command)));
+  replayedWorkers.forEach((result, index) => { assert(
+    JSON.stringify(ok(result, 'midnight receipt replay')) === JSON.stringify(rolloverWorkers[index].data),
+    'each concurrent worker replays its own immutable receipt'); });
+  ok(await client.rpc('process_due_assignment_lifecycle', lifecycle('midnight-successor')), 'midnight successor activation');
+  const successorTarget = ok(await client.from('cleaning_targets').select('status,assignment_version,carryover_count,effective_service_date')
+    .eq('id', rolloverItem.targetId).single(), 'midnight successor target');
+  const successorAssignments = ok(await client.from('cleaning_assignments').select('id,is_current,ended_at')
+    .eq('cleaning_target_id', rolloverItem.targetId), 'midnight successor history');
+  const successorAttempts = ok(await client.from('cleaning_attempts').select('assignment_id,assignment_revision,maid_profile_id,status,attempt_number')
+    .eq('cleaning_target_id', rolloverItem.targetId).neq('status', 'superseded'), 'midnight successor attempt');
+  const finalRolloverAudits = ok(await client.from('audit_events').select('id')
+    .eq('entity_id', rolloverItem.targetId).eq('event_type', 'assignment.rolled_over'), 'midnight successor audit count');
+  assert(successor.revision === 4 && successor.maid_profile_id === maids[1] && successor.notified_at !== null &&
+    successorTarget.status === 'notified' && successorTarget.assignment_version === 4 && successorTarget.carryover_count === 1 &&
+    successorTarget.effective_service_date === rolled.effective_service_date && successorAssignments.length === 2 &&
+    successorAssignments.filter(row => row.is_current).length === 1 &&
+    successorAssignments.some(row => row.id === successor.id && row.is_current && row.ended_at === null) &&
+    successorAttempts.length === 1 && successorAttempts[0].assignment_id === successor.id &&
+    successorAttempts[0].assignment_revision === 4 && successorAttempts[0].maid_profile_id === maids[1] &&
+    successorAttempts[0].status === 'scheduled' && successorAttempts[0].attempt_number === 2 && finalRolloverAudits.length === 1,
+  'old receipt replay and fresh scheduler preserve the new owner and exactly one successor attempt without a second rollover');
 
   const decisionItem = await fixture();
   const request = ok(await client.rpc('request_assignment_cancellation', {
@@ -276,8 +342,12 @@ export async function testAttemptActivationConcurrency(client, actor) {
   const reservationClock = Math.floor(now.getTime() / 60_000) * 60_000;
   const stayCheckIn = new Date(reservationClock - 2 * 86_400_000).toISOString();
   const stayCheckOut = new Date(reservationClock + 86_400_000).toISOString();
-  const overdueAvailableFrom = new Date(now.getTime() - 2 * 3_600_000).toISOString();
-  const overdueDueAt = new Date(now.getTime() - 3_600_000).toISOString();
+  const elapsedToday = now.getTime() - Date.parse(`${today}T00:00:00+09:00`);
+  assert(elapsedToday > 0, 'Source-window fixtures need a nonzero elapsed current day');
+  // These races test due-time expiry, not midnight. Keep both window timestamps
+  // inside today even when the harness runs shortly after KST 00:00.
+  const overdueAvailableFrom = new Date(now.getTime() - Math.min(2 * 3_600_000, Math.floor(elapsedToday / 2))).toISOString();
+  const overdueDueAt = new Date(now.getTime() - Math.min(3_600_000, Math.floor(elapsedToday / 4))).toISOString();
   const overdueServiceDate = kstDate(new Date(overdueAvailableFrom));
   const rolloverAt = now.toISOString();
   async function reservationFixture(room, checkIn = stayCheckIn, checkOut = stayCheckOut) {
@@ -445,5 +515,5 @@ export async function testAttemptActivationConcurrency(client, actor) {
     materialized.current_cleaning_target_id === checkoutTargetId && materialized.status === 'materialized',
   'checkout materialization race preserves target/assignment identity and creates exactly attempt one');
 
-  console.log('Attempt activation races PASS: change (3), unassign, cancellation decision, two activation/overdue workers without rollover, stayover preservation versus checkout/change, checkout materialization versus activation; exactly-one/fail-closed state preserved.');
+  console.log('Attempt activation races PASS: change (3), unassign, cancellation decision, duplicate activation, midnight retirement and successor receipt replay, same-day stayover preservation versus checkout/change, checkout materialization versus activation; exactly-one/fail-closed state preserved.');
 }

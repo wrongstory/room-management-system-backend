@@ -76,7 +76,7 @@ insert into public.cleaning_attempts(
   id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,
   assignment_revision,template_snapshot,room_snapshot
 ) values (
-  pg_temp.pid(506),pg_temp.pid(306),pg_temp.pid(406),pg_temp.pid(2),1,'scheduled',2,
+  pg_temp.pid(506),pg_temp.pid(306),pg_temp.pid(406),pg_temp.pid(2),1,'upload_pending',2,
   jsonb_build_object('durationMinutes',60),jsonb_build_object('fixture',6)
 );
 select pg_temp.add_target(7,'notified','2037-10-01','2037-10-01 10:00+09','2037-10-01 16:00+09',20);
@@ -124,34 +124,34 @@ select ok((select value->'activationResults' @> jsonb_build_array(jsonb_build_ob
   )) from run_results where label='today'),'blocked result uses stable previous-workflow reason');
 
 select ok((select original_service_date='2037-09-30' and effective_service_date='2037-09-30'
-  and carryover_count=0 and status='unassigned' from public.cleaning_targets where id=pg_temp.pid(304)),
-  'past unassigned target retains its original schedule without automatic rollover');
+  and carryover_count=1 and status='unassigned' from public.cleaning_targets where id=pg_temp.pid(304)),
+  'past unassigned target retains source schedule and appends midnight rollover');
 select is((select count(*)::int from public.cleaning_target_schedule_revisions
-  where cleaning_target_id=pg_temp.pid(304) and reason_code='ROLLED_OVER_UNASSIGNED'),0,
-  'elapsed time appends no schedule revision');
+  where cleaning_target_id=pg_temp.pid(304) and reason_code='ROLLED_OVER_UNASSIGNED'),1,
+  'midnight appends one schedule revision');
 select ok((select original_service_date='2037-09-30' and effective_service_date='2037-09-30'
-  and carryover_count=0 and status='notified' from public.cleaning_targets where id=pg_temp.pid(305)),
-  'past notified target retains its schedule and notification state');
-select ok((select is_current and ended_at is null
+  and carryover_count=1 and status='unassigned' from public.cleaning_targets where id=pg_temp.pid(305)),
+  'past notified target retains source schedule and releases responsibility');
+select ok((select not is_current and ended_at is not null
   from public.cleaning_assignments where id=pg_temp.pid(405)),
-  'past notified assignment remains current');
-select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=pg_temp.pid(305) and status='scheduled'),1,
-  'scheduler activates past notified work without replacing its identity');
-select ok((select value->>'rolledOverCount'='0' and value->'rolloverResults'='[]'::jsonb from run_results where label='today'),
-  'legacy response fields report zero automatic rollovers');
-select ok((select resolved_at is null from public.notifications where dedupe_key='activation-old-notice'),
-  'elapsed time does not resolve the current assignment notice');
+  'past notified assignment is retained as history');
+select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=pg_temp.pid(305) and status='scheduled'),0,
+  'scheduler does not activate yesterday responsibility');
+select ok((select value->>'rolledOverCount'='3' and jsonb_array_length(value->'rolloverResults')=3 from run_results where label='today'),
+  'rollover response reports unassigned, notified and scheduled cases');
+select ok((select resolved_at is not null from public.notifications where dedupe_key='activation-old-notice'),
+  'rollover resolves the old assignment notice');
 select is((select count(*)::int from public.notifications where cleaning_target_id=pg_temp.pid(305)
-  and category='cleaning_assignment_rolled_over'),0,'elapsed time emits no rollover notification');
+  and category='cleaning_assignment_rolled_over'),1,'midnight emits one typed rollover notification');
 select is((select count(*)::int from private.notification_delivery_outbox outbox join public.notifications notice
   on notice.id=outbox.notification_id where notice.cleaning_target_id=pg_temp.pid(305)
   and notice.category='cleaning_assignment_rolled_over'),0,'elapsed time emits no rollover push');
 select ok((select effective_service_date='2037-09-30' and carryover_count=0 from public.cleaning_targets
-  where id=pg_temp.pid(306)),'active scheduled attempt is excluded from rollover');
+  where id=pg_temp.pid(306)),'physical upload workflow is excluded from rollover');
 select is((select count(*)::int from public.cleaning_targets
   where id=any(array[pg_temp.pid(320),pg_temp.pid(321),pg_temp.pid(322),pg_temp.pid(323),pg_temp.pid(324)])
-    and effective_service_date='2037-09-30' and carryover_count=0 and status='notified'),5,
-  'all five active workflow statuses are excluded from rollover');
+    and effective_service_date='2037-09-30' and carryover_count=0 and status='notified'),4,
+  'four physical workflow statuses are excluded; scheduled is retired');
 
 -- Once the earlier room workflow is terminal, the unchanged notified revision can activate.
 update public.cleaning_attempts set status='approved' where id=pg_temp.pid(506);
@@ -168,8 +168,8 @@ select is(public.process_due_assignment_lifecycle(
 select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=pg_temp.pid(301)),1,
   'retry does not create another attempt');
 select is((select count(*)::int from public.cleaning_target_schedule_revisions
-  where cleaning_target_id=pg_temp.pid(304) and reason_code='ROLLED_OVER_UNASSIGNED'),0,
-  'retry still creates no rollover revision');
+  where cleaning_target_id=pg_temp.pid(304) and reason_code='ROLLED_OVER_UNASSIGNED'),1,
+  'retry retains exactly one rollover revision');
 select throws_ok($$select public.process_due_assignment_lifecycle(
   pg_temp.pid(1),'2037-10-01 11:00+09','activation-run-today',repeat('b',64)
 )$$,'23505','IDEMPOTENCY_KEY_REUSED','same key with a different hash is rejected');
@@ -306,6 +306,12 @@ select ok(not has_function_privilege('anon','private.activate_cleaning_attempt_a
 select is((select count(*)::int from public.cleaning_targets where id=(select target_id from checkout_case)),1,
   'checkout materialization and activation never duplicate target identity');
 
+-- Explicitly plan a historical source window for the occupancy probe's date.
+select pg_temp.add_target(15,'notified','2037-10-01','2037-10-01 09:00+09','2037-10-01 15:00+09',15);
+insert into public.audit_events(actor_profile_id,actor_display_name_snapshot,event_type,entity_type,entity_id,effective_at,after_state)
+select pg_temp.pid(1),'활성화 관리자','assignment.notified','cleaning_assignment',a.id,'2040-01-03 00:00+09',
+ jsonb_build_object('assignmentId',a.id,'cleaningTargetId',a.cleaning_target_id,'maidProfileId',a.maid_profile_id,
+   'revision',a.revision,'serviceDate','2040-01-03') from public.cleaning_assignments a where id=pg_temp.pid(415);
 -- A historical clear window must not hide actual occupancy at execution time.
 -- Each reservation probe is rolled back, including its canonical stay segments.
 create function pg_temp.occupied_activation_reason(p_target uuid,p_actual boolean,p_overstay boolean)
@@ -325,18 +331,18 @@ begin
  end;
  return reason;
 end $$;
-select is(pg_temp.occupied_activation_reason(pg_temp.pid(301),true,false),'ATTEMPT_ACTIVATION_NOT_ALLOWED',
+select is(pg_temp.occupied_activation_reason(pg_temp.pid(315),true,false),'ATTEMPT_ACTIVATION_NOT_ALLOWED',
   'historical additional window cannot bypass a current actual occupant');
-select is(pg_temp.occupied_activation_reason(pg_temp.pid(301),true,true),'ATTEMPT_ACTIVATION_NOT_ALLOWED',
+select is(pg_temp.occupied_activation_reason(pg_temp.pid(315),true,true),'ATTEMPT_ACTIVATION_NOT_ALLOWED',
   'actual occupant blocks additional work even after planned checkout');
 select is(pg_temp.occupied_activation_reason(pg_temp.pid(309),true,true),'ATTEMPT_ACTIVATION_NOT_ALLOWED',
   'actual occupant after planned checkout blocks reclean too');
 select is(pg_temp.occupied_activation_reason((select target_id from checkout_case),true,true),'ATTEMPT_ACTIVATION_NOT_ALLOWED',
   'materialized checkout of an earlier stay cannot bypass a later physical occupant');
-select is(pg_temp.occupied_activation_reason(pg_temp.pid(301),false,false),'ATTEMPT_ACTIVATION_NOT_ALLOWED',
+select is(pg_temp.occupied_activation_reason(pg_temp.pid(315),false,false),'ATTEMPT_ACTIVATION_NOT_ALLOWED',
   'current scheduled reservation interval remains protected');
-select is(pg_temp.occupied_activation_reason(pg_temp.pid(301),false,true),null::text,
-  'elapsed scheduled reservation with no physical check-in does not invent occupancy');
+select is(pg_temp.occupied_activation_reason(pg_temp.pid(315),false,true),null::text,
+  'explicit current-day plan remains valid when elapsed reservation has no physical check-in');
 
 -- Exercise the actual room-move API, then activate historical additional work
 -- after the planned checkout while the guest is still physically checked in.
@@ -366,6 +372,11 @@ begin
   -- (not a historical overlap or future reservation interval) distinguishes them.
   perform pg_temp.add_target(2001,'notified','2037-10-01','2037-10-01 09:00+09','2037-10-01 10:00+09',50);
   perform pg_temp.add_target(2002,'notified','2037-10-01','2037-10-01 09:00+09','2037-10-01 10:00+09',51);
+  insert into public.audit_events(actor_profile_id,actor_display_name_snapshot,event_type,entity_type,entity_id,effective_at,after_state)
+  select pg_temp.pid(1),'활성화 관리자','assignment.notified','cleaning_assignment',a.id,'2041-01-04 00:00+09',
+    jsonb_build_object('assignmentId',a.id,'cleaningTargetId',a.cleaning_target_id,'maidProfileId',a.maid_profile_id,
+      'revision',a.revision,'serviceDate','2041-01-04')
+  from public.cleaning_assignments a where a.id in(pg_temp.pid(2401),pg_temp.pid(2402));
   select jsonb_build_object('targets',(select jsonb_agg(t order by id) from public.cleaning_targets t
       where id in(pg_temp.pid(2301),pg_temp.pid(2302))),
     'assignments',(select jsonb_agg(a order by id) from public.cleaning_assignments a

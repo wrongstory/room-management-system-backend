@@ -1407,7 +1407,7 @@ export async function listAssignments(
     request,
     !includeHistory,
   );
-  if (actor.role !== "maid" || includeHistory || !includeOverdue) {
+  if (includeHistory || !includeOverdue) {
     return hydrated;
   }
   return hydrated.filter((row) => {
@@ -1416,6 +1416,8 @@ export async function listAssignments(
     if (typeof planningDate !== "string") throw assignmentDatabaseError(null);
     return serviceDate === today
       ? planningDate <= today
+      : actor.role === "admin"
+      ? planningDate <= serviceDate
       : planningDate === serviceDate;
   });
 }

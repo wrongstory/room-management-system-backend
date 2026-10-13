@@ -828,6 +828,12 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 근무 희망을 검사하며 원 업무 날짜/이력은 유지합니다. [후보 계약](./ASSIGNMENT_PLANNING_TABS_446.md)은
 아래 #308의 내일 exact-date 제한을 대체합니다. 실제 DB 적용 전 후보입니다.
 
+2026-10-13 #446 후속은 KST 자정에 전일 미착수 담당을 종료하고 미배정 계획일을 하루씩
+이월합니다. 원 source 날짜/접근 창은 유지하고 append-only `assignment.rolled_over`의
+`rolloverToDate`와 target version으로 현재 계획일을 읽습니다. 기존 scheduler의 예약 공통
+잠금 아래 activation 전에 실행하며, 별도 회전 cursor와 일별 전이 100건 상한으로 catch-up합니다.
+실제 시작/완료된 회차와 당일 사전 배정은 보존합니다. [상세 계약·검증 경계](./ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md)를 따릅니다.
+
 #308 4B2의 당시 dev 통합 계약(PR #340)은 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
 미완료 업무를 포함합니다. 내일·과거/이력 조회는 기존 exact-date 범위이며 원 날짜/담당/순번은
 갱신하지 않습니다. Fastify/Edge 목록은 access-token RLS 본인 통보 범위를 먼저 제한하고,

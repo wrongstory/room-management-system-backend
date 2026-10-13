@@ -479,6 +479,21 @@ describe('assignment card projection', () => {
 });
 
 describe('assignment schedule reads', () => {
+  it.each([admin, maid])('moves the same notified planning day from tomorrow to today at KST midnight ($role)', async (actor) => {
+    let instant = '2026-09-20T14:59:59.999Z';
+    const row = { ...assignments[0], service_date: '2026-09-20' } as Row;
+    const subject = service({ cleaning_assignments: [row] }, () => new Date(instant), {}, undefined,
+      args => ({ data: (args.p_assignment_ids as string[]).map(assignmentId => ({ assignmentId,
+        scheduleSnapshot: null, currentDeparture: null, planningDate: '2026-09-21' })), error: null }));
+    expect(await subject.list(actor, { serviceDate: '2026-09-20' })).toEqual([]);
+    const before = await subject.list(actor, { serviceDate: '2026-09-21' });
+    expect(before).toHaveLength(1);
+    instant = '2026-09-20T15:00:00.000Z';
+    const after = await subject.list(actor, { serviceDate: '2026-09-21' });
+    expect(after).toEqual(before);
+    expect(after[0]).toMatchObject({ assignmentId: assignmentIds[0], serviceDate: '2026-09-20', planningDate: '2026-09-21' });
+  });
+
   it('requests current actual facts only for current list, never target history or includeHistory', async () => {
     const modes: unknown[] = [];
     const currentDeparture = { evaluatedAt: '2026-10-02T03:00:00Z', actualCheckoutAt: '2026-10-02T02:00:00Z', actualRoomDepartureAt: null };

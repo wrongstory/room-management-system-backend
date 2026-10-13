@@ -45,6 +45,12 @@ DB/migration 변경은 없다. [범위와 검증 상태](./PAYROLL_CURSOR_PERFOR
 
 ## #446 오늘·내일 배정 — 미배포 후보
 
+자정 후속 후보는 [KST 00:00 이월 계약](./ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md)을 따른다.
+전날 내일 계획은 담당을 유지하며 오늘로 표시되고, 전일 미착수는 현재 담당이 종료된다.
+선택일 D와 카드 `planningDate`를 사용하고 원 `serviceDate`를 재작성하지 않는다.
+신규 HTTP 경로/필드는 없으며 admin/maid 오늘 목록은 미래 계획을 제외한다.
+실제 DB/운영 적용은 NOT RUN이다. 프런트 #219 연동은 배포 확인 후 진행한다.
+
 2026-10-13: PR #447은 required application/migration CI38357361243 및 독립 통합 QA 후
 dev `8f13d09`에 병합됐다. Node2,987개·독립 통합340개 PASS. 개발 migration 검사는
 manifest115 검사만 수행했으며 전체 DB·SQL·운영 적용은 NOT RUN이다. 운영 연결은
