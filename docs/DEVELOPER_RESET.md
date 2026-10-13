@@ -185,6 +185,27 @@ nullable FK도 명시적인 null edge가 필요하며, SQL MATCH 규칙에 따�
 누락, 순환 경로를 검증했으며 실제 업무 스키마의 데이터 fixture·전체 수집 검증은 후속이다.
 항상 executionEnabled=false이며 API·DB mutation·삭제 SQL 생성에 연결하지 않는다.
 
+### #396 후속: 관계별 행 누락 검출
+
+내부 입력 `relationRowCounts`는 모든 관계(빈 관계는 0 포함)의 독립 `COUNT(*)`를
+요구한다. 수집된 행의 길이에서 역산하지 않고 행 그래프와 같은 trusted transaction
+snapshot에서 수집해야 한다. 관계별 고유 행 수가 다르면 `ROW_COUNT_MISMATCH`,
+집계 누락·중복·미등록 관계이면 각각 `MISSING_RELATION_COUNT`,
+`DUPLICATE_RELATION_COUNT`, `UNKNOWN_RELATION_COUNT`로 차단한다.
+음수·소수·문자열·안전 정수 범위 밖 값과 집계 없는 과거 내부 입력도 거부한다.
+따라서 다른 행에서 참조하지 않는 keep/remove 행의 누락도 검출한다.
+
+이는 행 내용 지문이나 완전한 수집기 구현이 아니다. 같은 수의 다른 행으로 바꾸거나
+행과 집계를 동시에 조작한 입력을 증명할 수 없으며, trusted 수집기의 snapshot·내용
+검증을 대체하지 않는다. 공개 API 계약·실행 권한·삭제 정책은 변경하지 않는다.
+
+2026-10-07 후속 검증: `npm run ci:quality` PASS(105파일/2,680 tests,
+typecheck/build/secret scan/OpenAPI 150 paths·162 operations 포함; lint는 기존 info 18건,
+오류 없음), 독립 QA reset 6파일/156 tests PASS 및 검토 범위 P0/P1/P2 없음.
+`npx tsx scripts/test-reset-reference-fixture.ts`의 충돌·보존·독립 집계 누락 검사 PASS.
+DB migration/RLS 변경 없음. fresh DB reset·전체 SQL 회귀·원격 CI는 이 기록 시점 NOT RUN이며
+임시 fixture 결과를 실제 초기화·백업/복구 검증으로 승격하지 않는다.
+
 ## 8단계: PostgreSQL 임시 fixture 연동 검증
 
 `npx tsx scripts/test-reset-reference-fixture.ts`는 기존 로컬 대상 안전 검사를 재사용하고
@@ -201,6 +222,9 @@ CLI 인자와 Docker 대상 override를 거부하고 시간·출력 상한을 �
 로컬 PostgreSQL에서 충돌 차단 PASS를 확인했다. 같은 합성 입력의 모든 행을 보존하는
 메모리 내 계획 변형도 PASS지만 SQL의 보존 실행이나 실제 삭제 시험은 아니다.
 fixture hash는 합성 FK 정의에 대한 진단 hash일 뿐 전체 실제 schema proof가 아니다.
+후속 fixture는 같은 SQL statement에서 TEMP 관계별 독립 COUNT(*)를 함께 수집한다.
+참조받지 않는 optional 행만 메모리에서 제거한 변형이 ROW_COUNT_MISMATCH로 차단되는지도
+검증한다. 실제 업무 행 누락 재현이나 DB 삭제 검증으로 표현하지 않는다.
 이 결과를 실제 업무 DB 전체 행 수집기 완성으로 간주하지 않는다. 복합 FK/MATCH FULL,
 최종 분류 predicate, 운영 스키마 전체 적용, 유지보수 잠금과 실제 초기화는 여전히 후속이다.
 
