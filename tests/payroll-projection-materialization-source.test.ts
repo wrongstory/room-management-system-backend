@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest';
 const read = (file: string) => readFileSync(new URL(`../supabase/migrations/${file}`, import.meta.url), 'utf8').replaceAll('\r\n', '\n');
 const candidate = read('20261013064056_payroll_projection_materialization.sql');
 describe('#414 one-call payroll projection reuse (source only, DB NOT RUN)', () => {
+  it('does not reapply the earlier #416 basis patch', () => {
+    expect(candidate).not.toContain('private.payroll_remittance_basis(');
+  });
   for (const [file, name, installed, hash] of [
     ['20260910114525_payroll_payment_results.sql', 'private.project_payroll_cycle_bounded', 'private.project_payroll_cycle_before_workflow(date,uuid,integer)', '0f2f288532d83a8b49259e96815d4628'],
-    ['20261003064220_payroll_remittance_marker.sql', 'private.payroll_remittance_basis', 'private.payroll_remittance_basis(uuid,date)', '76783f5e09455472ee2774ba6d3e9766'],
   ]) {
     it(`pins and preserves every other byte of ${installed}`, () => {
       const source = read(file!);

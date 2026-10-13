@@ -1,6 +1,24 @@
 begin;
 select no_plan();
 
+-- #416 final-DB-only differential check. Never accept old-vs-old as a PASS.
+do $basis_baseline$
+declare source text; baseline text;
+begin
+  select replace(prosrc, E'\r\n', E'\n') into strict source from pg_proc
+    where oid='private.payroll_remittance_basis(uuid,date)'::regprocedure;
+  if md5(source) <> '5bb5b63b12c4055efeb00057859eb6bc' then
+    raise exception 'PAYROLL_BASIS_TEST_CANDIDATE_NOT_INSTALLED';
+  end if;
+  baseline:=replace(source,'with projected as materialized (','with projected as (');
+  if md5(baseline) <> '76783f5e09455472ee2774ba6d3e9766' then
+    raise exception 'PAYROLL_BASIS_TEST_BASELINE_DRIFT';
+  end if;
+  execute format($ddl$create function pg_temp.baseline_remittance_basis(p_maid uuid,p_week date)
+    returns jsonb language sql stable set search_path='' as %L$ddl$,baseline);
+end;
+$basis_baseline$;
+
 -- A single-column prefix or INCLUDE-only suffix does not cover a composite FK.
 -- Require its entire ordered child tuple in a valid, ready, nonpartial B-tree.
 create function pg_temp.mark_fk_covered(p_table regclass,p_constraint name)
@@ -399,5 +417,22 @@ select throws_ok($$select pg_temp.mark_set(true,3,'marker-other-zero-reon',null,
   '22023','NO_PAYROLL_AMOUNT','cleared zero cannot be marked again');
 set constraints all immediate;
 select pass('zero amount transitions satisfy all immutable source and marker lineage constraints');
+-- Compare all eight fields (including JSON null/zero/signed values), fingerprint,
+-- and the complete marker DTO for every synthetic maid/week and both roles.
+-- Existing command tests above exercise changed amounts, frozen payments,
+-- re-confirmation, CAS, replay, session expiry, cross-maid denial and ledger hashes.
+select is((select count(*) from public.profiles p cross join generate_series(-6,0) w
+  where p.role='maid'),49::bigint,'differential check contains seven fixture maids and seven weeks');
+select is((select count(*) from public.profiles p cross join generate_series(-6,0) w
+  where p.role='maid' and private.payroll_remittance_basis(p.id,pg_temp.mark_week(w))
+    is distinct from pg_temp.baseline_remittance_basis(p.id,pg_temp.mark_week(w))),0::bigint,
+  'materialized basis preserves every field across all fixture maids and weeks');
+select is((select count(*) from public.profiles p cross join generate_series(-6,0) w
+  cross join unnest(array['admin','maid']) r
+  where p.role='maid' and private.payroll_remittance_projection(p.id,pg_temp.mark_week(w),
+      private.payroll_remittance_basis(p.id,pg_temp.mark_week(w)),r)
+    is distinct from private.payroll_remittance_projection(p.id,pg_temp.mark_week(w),
+      pg_temp.baseline_remittance_basis(p.id,pg_temp.mark_week(w)),r)),0::bigint,
+  'materialized basis preserves full marker DTO including fingerprint and re-confirm flags');
 select * from finish();
 rollback;

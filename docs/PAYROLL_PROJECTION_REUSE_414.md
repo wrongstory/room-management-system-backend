@@ -2,6 +2,11 @@
 
 2026-10-13: PR448 인계문서 병합 후 dev4e6ae57 기반. 운영 미배포·전체 DB NOT RUN.
 
+최신 통합: devd92eb35의 #416/PR449가 송금표시 basis를116번째로 먼저 구현했다.
+그 파일·동등성 회귀를 보존하고 #450의 중복 basis 변경을 제거했다. #450은117번째의
+before_workflow wrapper만 담당한다. 아래 최초 두 함수/116 설명은 통합 전 기록이다.
+이미 실행된 SQL을 수정한 것이 아니라 미적용 #450 후보만 축소했으며 실제 DB는 NOT RUN이다.
+
 ## 확인한 경로
 
 - work-details는 페이지마다 project_payroll_cycle_bounded(...,1)을 호출한다. 페이지별 최신

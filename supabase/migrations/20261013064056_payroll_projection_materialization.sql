@@ -11,8 +11,7 @@ declare
   after_catalog jsonb;
 begin
   for patch in select * from (values
-    ('private.project_payroll_cycle_before_workflow(date,uuid,integer)', '0f2f288532d83a8b49259e96815d4628'),
-    ('private.payroll_remittance_basis(uuid,date)', '76783f5e09455472ee2774ba6d3e9766')
+    ('private.project_payroll_cycle_before_workflow(date,uuid,integer)', '0f2f288532d83a8b49259e96815d4628')
   ) reviewed(signature, source_md5) loop
     function_oid:=to_regprocedure(patch.signature);
     if function_oid is null then raise exception 'PAYROLL_PROJECTION_FUNCTION_MISSING'; end if;
