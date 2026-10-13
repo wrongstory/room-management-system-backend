@@ -1,5 +1,7 @@
 /** Request-local display lookup; not a cache or an authorization boundary. */
-export function indexAssignmentSchedules<T extends { cleaning_target_id: string }>(
+export function indexAssignmentSchedules<
+  T extends { cleaning_target_id: string },
+>(
   rows: readonly T[],
 ): Map<string, T[]> {
   const result = new Map<string, T[]>();

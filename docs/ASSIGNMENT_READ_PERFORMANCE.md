@@ -23,6 +23,10 @@ secrets/OpenAPI/lint). lint의 기존 warning2/info37은 남아 있다. manifest
 여러 revision에서도 기존 필터·순서·비변이성을 검토했다. Edge 전체 검증/원격 CI는
 별도 확인하며 이 로컬 결과로 대체하지 않는다.
 
+PR453 최초 CI는 Edge 파일2개의 Deno 서식 불일치로 FAIL했다. 고정 Deno2.1.4로
+서식만 보정 후 3파일 fmt check·Node3001/typecheck/build 재실행·Edge assignment39개
+PASS를 확인했다. 코드 의미·검증 기준은 그대로이며 원격 전체 CI는 새 head에서 확인한다.
+
 2026-10-09, `dev@3e91d88` 기준. source 후보이며 운영 반영을 뜻하지 않는다.
 사용자의 권장 순서 승인에 따른 #413 후속이다. #415 전체 완료/종료가 아니다.
 

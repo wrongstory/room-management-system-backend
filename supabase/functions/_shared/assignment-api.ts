@@ -1195,7 +1195,9 @@ async function hydrateAssignments(
       submissions.set(submission.cleaning_attempt_id, submission);
     }
   }
-  const schedules = indexAssignmentSchedules(scheduleRows as TargetScheduleRow[]);
+  const schedules = indexAssignmentSchedules(
+    scheduleRows as TargetScheduleRow[],
+  );
   // Revalidate actor/session/exact assignment ownership after bounded
   // hydration. Historical cards never request live reservation facts.
   const scheduleReads = new Map<string, AssignmentScheduleRead>();
