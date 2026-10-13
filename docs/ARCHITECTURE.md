@@ -12,6 +12,10 @@
 과거 특이사항을 누락하지 않는다. 기존 함수 OID/권한/서명/시계/나머지 본문은 보존한다.
 [후보·승인 대기 DB 검증](./ROOM_BOARD_ISSUE_COUNTS_416.md). 운영 미적용이며 속도 실측은 없다.
 
+주급·송금 표시 후속 dev116 후보는 basis helper 내부 CTE만 materialize한다.
+8개 금액·표시 재확인·권한/명령 잠금은 동일하고 요청 간 캐시를 만들지 않는다.
+[후보·미실행 DB/성능 검증](./PAYROLL_BASIS_PERFORMANCE_416.md). 운영 미반영이다.
+
 ## #415 배정 카드 조회 의존 분기 최적화 후보
 
 Node/Edge의 bounded 관계 조회에서 attempt→submission만 하나의 병렬 분기로 묶는다.
