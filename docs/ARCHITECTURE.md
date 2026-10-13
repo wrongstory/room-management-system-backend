@@ -1,5 +1,12 @@
 # 백엔드 서버 설계
 
+## #414 주급 projection 재사용 후보
+
+116번째 후보는 private before_workflow/송금표시 basis의 단일행 CTE만 MATERIALIZED로
+명시한다. schema/API·권한·시계·금액 계약과 요청/페이지별 재검증은 보존한다.
+전역 cache가 아니며 [실행계획·금액 동등성 gate](./PAYROLL_PROJECTION_REUSE_414.md)는
+최종 릴리스의 사전 승인 DB 검증에 남는다. 실제 DB·운영 반영은 NOT RUN이다.
+
 ## #416 조회 계획·인덱스 근거 수집
 
 최신-event의 effective/recorded/id 순서와 기존 recorded 중심 인덱스를 로컬 임시 합성

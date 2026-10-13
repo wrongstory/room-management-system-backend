@@ -195,6 +195,14 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
+  it('pins the payroll116 tail without accepting a rehashed replacement', () => {
+    const changed = clone(entries), last = changed[115];
+    const changedManifest = clone(manifest), record = changedManifest.migrations[115];
+    if (!last || !record) throw new Error('EXPECTED116_TAIL');
+    last.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(last.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed payroll116 tail');
+  });
   it('pins the planning115 tail without accepting a rehashed replacement', () => {
     const changed = clone(entries), last = changed[114];
     const changedManifest = clone(manifest), record = changedManifest.migrations[114];
