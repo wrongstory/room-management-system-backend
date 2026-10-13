@@ -1,5 +1,14 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-13 #455 병합과 다음 병목
+
+#455는 CI38362812640 및 독립 QA 후 devf57132f에 병합했다. 운영 미배포다.
+[합성 비용 기준선](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)을 추가했다.
+계산 구간 개선은 확인했으나 DB·네트워크·실제 화면 속도 측정은 아니다.
+다음 후보는 배정 카드 hydration의 bounded read RPC 통합이며 아직 SQL/API 구현 전이다.
+기존 endpoint/Swagger/프런트 호출을 유지한다. 전체 DB 검증은 최종 릴리스 1회,
+마이그레이션 실행은 사전 승인 후에만 진행한다.
+
 ## #415 후속 상태 — 2026-10-13 운영 미반영
 
 PR453은 최신 CI38361677993 application/manifest PASS와 독립 QA 확인 후
