@@ -970,6 +970,7 @@ export const openApiDocument = {
       get: {
         tags: ["Rooms"],
         operationId: "exportRoomPins",
+        "x-required-roles": ["admin"],
         security: [{ bearerAuth: [] }],
         summary: "객실 번호·비밀번호 Excel 내보내기",
         description:
@@ -1026,6 +1027,7 @@ export const openApiDocument = {
       post: {
         tags: ["Rooms"],
         operationId: "previewRoomPinImport",
+        "x-required-roles": ["admin"],
         security: [{ bearerAuth: [] }],
         summary: "지정 Drive 시트 객실 비밀번호 검증",
         description:
@@ -1156,6 +1158,7 @@ export const openApiDocument = {
       post: {
         tags: ["Rooms"],
         operationId: "applyRoomPinImport",
+        "x-required-roles": ["admin"],
         security: [{ bearerAuth: [] }],
         summary: "검증한 Drive 비밀번호를 원자 적용",
         description:
@@ -8131,6 +8134,13 @@ export const openApiDocument = {
             "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
             "ROOM_OPERATION_NOT_FOUND",
             "INVALID_ROOM_PIN",
+            "INVALID_PIN_TRANSFER_REQUEST",
+            "ROOM_PIN_TRANSFER_NOT_CONFIGURED",
+            "ROOM_PIN_TRANSFER_STALE",
+            "ROOM_PIN_TRANSFER_BUSY",
+            "ROOM_PIN_IMPORT_SOURCE_UNAVAILABLE",
+            "ROOM_PIN_TRANSFER_FAILED",
+
             "INVALID_PIN_BOOTSTRAP_LIMIT",
             "INVALID_PIN_BOOTSTRAP",
             "ROOM_PIN_BOOTSTRAP_CONFIG_INVALID",
