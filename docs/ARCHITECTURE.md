@@ -1303,7 +1303,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
 - Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
 
-예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 4~8자리 `pinDigits`만 받고 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는다. PIN source/schema와 Edge bundle은 production에 반영됐지만 Google target·ACL·Cron/worker hosted 활성화는 별도 pending이다.
+예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 UTF-8 128바이트 이하 비어 있지 않은 `pinDigits` 문자열을 받고(#452, 숙박 유형/숫자 자릿수 제한 없음) 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는다. PIN source/schema와 Edge bundle은 production에 반영됐지만 Google target·ACL·Cron/worker hosted 활성화는 별도 pending이다.
 
 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`는 production에서 활성 관리자 profile ID로 설정한다. Fastify 기준선은 시작 시 첫 실행으로 actor를 검증하고, Supabase-only runtime은 Cron이 1분마다 별도 secret으로 scheduler Function을 호출하며 DB command가 actor의 최신 역할·상태를 매 실행 재검증한다. 어느 runtime이든 퇴실을 먼저 처리하므로 반개구간 경계의 다음 입실이 같은 batch에서 진행되고, 중단 기간 전체가 지난 미입실 예약도 가짜 check-in 없이 예정 checkout으로 종결된다. 자세한 운영·rollback 계약은 [Edge runtime PoC](./EDGE_RUNTIME_POC.md)를 따른다.
 
@@ -1335,3 +1335,7 @@ assignment에만 새 PIN revision successor를 발급한다. 물리 PIN 변경�
 attempt와 authoritative access lease를 그대로 요구한다. entitlement/outbox/audit에는 PIN, envelope, raw session,
 token, request body 또는 idempotency payload를 저장하지 않는다. 이 source 계약은 production PIN/Sheets/Cron
 활성화를 포함하지 않는다.
+
+## #452 명시적 PIN 파일 전송
+
+관리자 전용 export/preview/apply는 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다. 읽기 원본과 쓰기 projection은 분리하며 transaction에는 암호화 envelope만 전달한다. 새 revision source `sheet_import`, current CAS/nonce reservation/entitlement rotation을 재사용한다. 전체 SQL 실행은 최종 릴리스 승인 때 수행한다.

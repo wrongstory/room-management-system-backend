@@ -116,13 +116,13 @@ def check_post_approval_contract(document: dict[str, Any]) -> None:
         raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
     codes = document["components"]["schemas"]["ErrorCode"]["enum"]
     if (
-        len(codes) != 336
-        or len(set(codes)) != 336
+        len(codes) != 342
+        or len(set(codes)) != 342
         or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
         or "AUTH_CONTEXT_UNAVAILABLE" not in codes
     ):
         raise RuntimeError(
-            "#442 공통 safe error code union은 신규 인증 오류를 포함한 정확336개여야 합니다."
+            "#442 공통 safe error code union은 신규 인증 오류를 포함한 정확342개여야 합니다."
         )
 
 
@@ -254,8 +254,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 151:
-        raise RuntimeError("전체 source OpenAPI path 수가 151이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 154:
+        raise RuntimeError("전체 source OpenAPI path 수가 154가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -264,8 +264,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 163:
-        raise RuntimeError("전체 source OpenAPI operation 수가 163가 아닙니다.")
+    if operation_count != 166:
+        raise RuntimeError("전체 source OpenAPI operation 수가 166이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     check_post_approval_contract(document)
     discovery_fields = [
@@ -855,6 +855,16 @@ print('Python remittance batch codegen CSV serialization PASS')
             raise RuntimeError("PIN prepare codegen request에 pinDigits가 누락됐습니다.")
         if "credential: str" not in reveal_model or '"credential": credential' not in reveal_model:
             raise RuntimeError("PIN reveal codegen response에 credential이 누락됐습니다.")
+        for operation in ("export_room_pins", "preview_room_pin_import", "apply_room_pin_import"):
+            api = package / "api" / "rooms" / f"{operation}.py"
+            if not api.is_file() or "sync_detailed" not in api.read_text(encoding="utf-8"):
+                raise RuntimeError(f"PIN transfer codegen API 누락: {operation}")
+        export_api = (package / "api" / "rooms" / "export_room_pins.py").read_text(encoding="utf-8")
+        if (
+            "response.status_code == 200" not in export_api
+            or "BytesIO(response.content)" not in export_api
+        ):
+            raise RuntimeError("PIN Excel codegen이 200 바이너리 응답을 누락했습니다.")
         room_move_preview_path = package / "models" / "reservation_room_move_preview.py"
         room_move_preview_model = room_move_preview_path.read_text(encoding="utf-8")
         room_move_result_model = (package / "models" / "reservation_room_move_result.py").read_text(

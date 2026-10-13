@@ -1524,3 +1524,7 @@ old/new 참조를 모두 검사한다. 무인 purge는 service-only typed lease/
 기존 current-assignment/pre-submission notification validator는 완화하지 않는다. memo·evidence ID·provider
 locator·PIN은 audit/notification payload에서 제외한다. 신규 direct #329 caller는 source snapshot1개와
 active-only fresh wrapper1개뿐이며, 선행 실제7/19 chain 뒤 **source 예상8/20**이다. 설치 census는 NOT RUN이다.
+
+## #452 PIN 가져오기
+
+private.room_pin_revisions.source에 sheet_import를 추가한다. 신규 public table 없이 current CAS·기존 nonce/entitlement trigger를 재사용한다. 상세 계약은 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다.

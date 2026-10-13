@@ -1,4 +1,5 @@
 const sensitiveLogPaths = [
+  '*.ROOM_PIN_TRANSFER_HMAC_SECRET', '*.ROOM_PIN_IMPORT_SPREADSHEET_ID', '*.previewToken', 'req.body.previewToken',
   'req.headers.authorization',
   'req.headers.cookie',
   'req.body.bindingProof',

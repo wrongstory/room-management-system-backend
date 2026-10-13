@@ -966,6 +966,299 @@ export const openApiDocument = {
   ],
   paths: {
     ...postApprovalOpenApiFragment.paths,
+    "/v1/rooms/pins/export": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "exportRoomPins",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "객실 번호·비밀번호 Excel 내보내기",
+        description:
+          "active admin 전용. 시트 1의 B/C열에 문자열로 저장합니다. 미설정 PIN은 빈 셀입니다. 현재 저장값이며 도어락 확인을 의미하지 않습니다. no-store 다운로드만 허용하며 원본 Drive에 쓰지 않습니다.",
+        responses: {
+          "200": {
+            description: "Excel 파일",
+            headers: {
+              "Cache-Control": {
+                schema: { type: "string", const: "no-store" },
+              },
+            },
+            content: {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                { schema: { type: "string", format: "binary" } },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "객실 변경 또는 미해결 PIN 변경 lease",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "설정 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/rooms/pins/import/preview": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "previewRoomPinImport",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "지정 Drive 시트 객실 비밀번호 검증",
+        description:
+          "active admin 전용. 서버 설정의 정확한 시트 1 B2:C1001만 읽습니다. PIN 원문 없이 행 번호·오류 코드·건수 및 5분 유효 previewToken을 반환합니다. 요일·특이사항은 읽지 않습니다. 최대 300실/1000행이며 숫자나 수식 PIN 셀을 거절합니다.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", additionalProperties: false },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "no-store 검증 결과",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["preview"],
+                  properties: {
+                    preview: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: [
+                        "valid",
+                        "total",
+                        "changed",
+                        "unchanged",
+                        "ignored",
+                        "issues",
+                        "expiresAt",
+                        "previewToken",
+                      ],
+                      properties: {
+                        valid: { type: "boolean" },
+                        total: { type: "integer", minimum: 0, maximum: 300 },
+                        changed: { type: "integer", minimum: 0, maximum: 300 },
+                        unchanged: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 300,
+                        },
+                        ignored: { type: "integer", minimum: 0, maximum: 1000 },
+                        expiresAt: { type: "string", format: "date-time" },
+                        previewToken: {
+                          type: ["string", "null"],
+                          maxLength: 160,
+                        },
+                        issues: {
+                          type: "array",
+                          maxItems: 1000,
+                          items: {
+                            type: "object",
+                            additionalProperties: false,
+                            required: ["row", "code"],
+                            properties: {
+                              row: {
+                                type: "integer",
+                                minimum: 0,
+                                maximum: 1001,
+                              },
+                              code: {
+                                type: "string",
+                                enum: [
+                                  "INVALID_SHEET_HEADER",
+                                  "UNKNOWN_ROOM",
+                                  "DUPLICATE_ROOM",
+                                  "INVALID_ROOM_CREDENTIAL",
+                                  "NO_ROOM_ROWS",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "요청 형식 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "객실 정보 변경/lease 충돌",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "Google 연결·시트 형식·서버 설정 확인 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/rooms/pins/import/apply": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "applyRoomPinImport",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "검증한 Drive 비밀번호를 원자 적용",
+        description:
+          "active admin 전용. 동일 actor/session의 previewToken과 Idempotency-Key가 필요합니다. 원본·객실/PIN 버전 변경 또는 5분 만료 시 409로 재검증합니다. 동일 요청 재시도는 receipt를 반환합니다. 변경한 객실은 물리 확인 전 mismatch이며 기존 ACTUAL_PIN_REENTRY 절차로 도어락 확인을 완료합니다. 자동 Sheet 쓰기 없음.",
+        parameters: [{
+          in: "header",
+          name: "Idempotency-Key",
+          required: true,
+          schema: { type: "string", pattern: "^[A-Za-z0-9._:-]{8,128}$" },
+        }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["previewToken"],
+                properties: {
+                  previewToken: {
+                    type: "string",
+                    pattern: "^\\d{13}\\.[a-f0-9]{64}\\.[a-f0-9]{64}$",
+                    maxLength: 160,
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "no-store 적용 결과",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["imported"],
+                  properties: {
+                    imported: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["updated", "unchanged"],
+                      properties: {
+                        updated: { type: "integer", minimum: 0, maximum: 300 },
+                        unchanged: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 300,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "잘못된 token/요청",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "미리보기 만료·변경·lease 충돌·멱등키 재사용",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "Google 연결/서버 설정 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
     "/v1/rooms/{roomId}/reports": {
       get: {
         tags: ["Rooms"],
@@ -5517,7 +5810,7 @@ export const openApiDocument = {
         operationId: "prepareRoomPinChange",
         summary: "물리 도어락 PIN 변경 준비",
         description:
-          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 admin 일반 reveal은 차단하지만 현재 통보된 담당 메이드의 일반 reveal과 예약 등록은 차단하지 않습니다. maid mismatch reveal은 authoritative current stored PIN을 반환하며 물리 도어락 일치를 의미하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+          "서버가 현재 roomNumber와 128 UTF-8 바이트 이하 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 admin 일반 reveal은 차단하지만 현재 통보된 담당 메이드의 일반 reveal과 예약 등록은 차단하지 않습니다. maid mismatch reveal은 authoritative current stored PIN을 반환하며 물리 도어락 일치를 의미하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter(), idempotencyHeader],
@@ -7841,6 +8134,13 @@ export const openApiDocument = {
             "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
             "ROOM_OPERATION_NOT_FOUND",
             "INVALID_ROOM_PIN",
+            "INVALID_PIN_TRANSFER_REQUEST",
+            "ROOM_PIN_TRANSFER_NOT_CONFIGURED",
+            "ROOM_PIN_TRANSFER_STALE",
+            "ROOM_PIN_TRANSFER_BUSY",
+            "ROOM_PIN_IMPORT_SOURCE_UNAVAILABLE",
+            "ROOM_PIN_TRANSFER_FAILED",
+
             "INVALID_PIN_BOOTSTRAP_LIMIT",
             "INVALID_PIN_BOOTSTRAP",
             "ROOM_PIN_BOOTSTRAP_CONFIG_INVALID",
@@ -12724,12 +13024,11 @@ export const openApiDocument = {
         properties: {
           pinDigits: {
             type: "string",
-            pattern: "^[0-9]{4,8}$",
-            minLength: 4,
-            maxLength: 8,
+            minLength: 1,
+            maxLength: 128,
             writeOnly: true,
             description:
-              "선행 0을 보존하는 숫자 문자열. roomNumber 접두사는 서버만 추가합니다.",
+              "선행 0과 원문을 보존하는 문자열. 숙박 유형별 길이/숫자 제한 없음. 공백만 있는 값, 제어문자, 잘못된 Unicode를 거절하며 UTF-8 128바이트 이하. roomNumber 접두사는 서버가 추가합니다.",
           },
           expectedPinVersion: { type: "integer", minimum: 0 },
           reasonCode: {
@@ -12919,7 +13218,8 @@ export const openApiDocument = {
           roomId: { type: "string", format: "uuid" },
           credential: {
             type: "string",
-            pattern: "^[A-Za-z0-9]{1,32}-[0-9]{4,8}$",
+            minLength: 3,
+            maxLength: 161,
             readOnly: true,
             description:
               "일시 표시 전용 plaintext. clipboard/cache/offline/persistent storage 금지.",

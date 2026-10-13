@@ -1,3 +1,4 @@
+// Generated from src/modules/rooms/room-pin-crypto.ts. DO NOT EDIT.
 export interface RoomPinCryptoConfig {
   key: string;
   keyVersion: string;
@@ -29,7 +30,26 @@ const versionPattern = /^[A-Za-z0-9._-]{1,32}$/;
 const bindingPattern = /^[A-Za-z0-9._:-]{1,80}$/;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const pinPattern = /^[0-9]{4,8}$/;
+/** A storage/resource bound, not a room-type or numeric-length policy. */
+export function isValidRoomPin(value: unknown): value is string {
+  if (
+    typeof value !== "string" || value.trim().length === 0 ||
+    new TextEncoder().encode(value).length > 128
+  ) return false;
+  return [...value].every((character) => {
+    const point = character.codePointAt(0) ?? 0;
+    return point >= 32 && !(point >= 127 && point <= 159) &&
+      !(point >= 0xd800 && point <= 0xdfff) && point !== 0xfffe &&
+      point !== 0xffff;
+  });
+}
+
+function validCredential(value: string): boolean {
+  const separator = value.indexOf("-");
+  return separator > 0 &&
+    /^[A-Za-z0-9]{1,32}$/.test(value.slice(0, separator)) &&
+    isValidRoomPin(value.slice(separator + 1));
+}
 
 function fail(code: string): never {
   throw new RoomPinCryptoError(code);
@@ -121,7 +141,7 @@ export function canonicalRoomPin(
 ): string {
   if (
     typeof roomNumber !== "string" || !/^[A-Za-z0-9]{1,32}$/.test(roomNumber) ||
-    typeof pinDigits !== "string" || !pinPattern.test(pinDigits)
+    !isValidRoomPin(pinDigits)
   ) {
     fail("INVALID_ROOM_PIN");
   }
@@ -135,9 +155,7 @@ export async function encryptRoomPin(
   config: RoomPinCryptoConfig,
 ): Promise<RoomPinEnvelope> {
   validateBinding(config, roomId, pinVersion);
-  if (!/^[A-Za-z0-9]{1,32}-[0-9]{4,8}$/.test(canonicalCredential)) {
-    fail("INVALID_ROOM_PIN");
-  }
+  if (!validCredential(canonicalCredential)) fail("INVALID_ROOM_PIN");
   const nonce = config.nonce === undefined
     ? crypto.getRandomValues(new Uint8Array(12))
     : new Uint8Array(config.nonce);
@@ -227,8 +245,7 @@ export async function decryptRoomPin(
       ),
     );
     if (
-      !/^[A-Za-z0-9]{1,32}-[0-9]{4,8}$/.test(plaintext) ||
-      !plaintext.startsWith(`${roomNumber}-`)
+      !validCredential(plaintext) || !plaintext.startsWith(`${roomNumber}-`)
     ) {
       fail("ROOM_PIN_DECRYPT_FAILED");
     }

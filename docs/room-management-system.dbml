@@ -3133,3 +3133,5 @@ Ref: private.post_approval_issue_quota_pending.admission_id > private.post_appro
 Ref: private.post_approval_issue_quota_pending.operation_id > private.post_approval_issue_upload_operations.id
 Ref: private.post_approval_issue_delete_barriers.object_id > private.post_approval_issue_provider_objects.id
 Ref: private.post_approval_issue_purge_jobs.object_id > private.post_approval_issue_provider_objects.id
+
+// #452: room_pin_revisions.source adds sheet_import; service-role import uses immutable revision/current CAS. See docs/ROOM_PIN_TRANSFER.md.

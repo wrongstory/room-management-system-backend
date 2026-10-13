@@ -4,6 +4,9 @@ const normalizeText = (value) => value.replace(/\r\n?/g, '\n');
 const readText = async (path) => normalizeText(await readFile(path, 'utf8'));
 
 const files = [
+  ...['room-pin-crypto', 'room-pin-xlsx', 'room-pin-transfer', 'room-pin-transfer-http', 'google-sheets-pin-import'].map(name => [
+    'src/modules/rooms/' + name + '.ts', 'supabase/functions/_shared/' + name + '.ts'
+  ]),
   ['src/modules/rooms/google-sheets-pin.ts', 'supabase/functions/_shared/google-sheets-pin.ts'],
   ['src/modules/rooms/room-pin-sheet-sync.ts', 'supabase/functions/_shared/room-pin-sheet-sync.ts']
 ];

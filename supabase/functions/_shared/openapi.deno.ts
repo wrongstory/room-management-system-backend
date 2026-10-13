@@ -411,13 +411,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 151 &&
+    Object.keys(document.paths).length === 154 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 163,
-    "combined source contract 151/163 (not hosted deployment)",
+        ).length === 166,
+    "combined source contract 154/166 (not hosted deployment)",
   );
 });
 
@@ -1903,7 +1903,8 @@ Deno.test("room PIN OpenAPI keeps exact sensitive request and response contracts
   const bootstrap = doc.components.schemas.RoomPinBootstrapResult;
   assert(
     prepare.properties.pinDigits.writeOnly === true &&
-      prepare.properties.pinDigits.pattern === "^[0-9]{4,8}$" &&
+      prepare.properties.pinDigits.minLength === 1 &&
+      prepare.properties.pinDigits.maxLength === 128 &&
       "accessLeaseId" in prepare.properties,
     "request retains write-only digits and maid lease binding",
   );

@@ -63,6 +63,12 @@ const sourcePaths = [
   'supabase/functions/_shared/room-api.ts',
   'supabase/functions/_shared/room-pin-crypto.ts',
   'supabase/functions/_shared/room-pin-api.ts',
+  'supabase/functions/_shared/room-pin-transfer.ts',
+  'supabase/functions/_shared/room-pin-transfer-api.ts',
+  'supabase/functions/_shared/room-pin-transfer-http.ts',
+  'supabase/functions/_shared/room-pin-xlsx.ts',
+  'supabase/functions/_shared/google-sheets-pin-import.ts',
+
   'supabase/functions/_shared/room-pin-sheet-operations-api.ts',
   'supabase/functions/_shared/google-sheets-pin.ts',
   'supabase/functions/_shared/room-pin-sheet-sync.ts',
@@ -74,6 +80,7 @@ const sourcePaths = [
   'supabase/functions/room-pin-sheet-sync/index.ts'
 ];
 const testPaths = [
+  'supabase/functions/_shared/room-pin-transfer-api.deno.ts',
   'supabase/functions/_shared/scheduler-transition-count.deno.ts',
   'supabase/functions/_shared/activity-api.deno.ts',
   'supabase/functions/_shared/account-api.deno.ts',
@@ -203,7 +210,8 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
         'from "file:///workspace/supabase/functions/_shared/runtime.ts"').replaceAll('from "./photo-binary.ts"',
         'from "file:///workspace/supabase/functions/_shared/photo-binary.ts"'));
       console.log(`Generated report JavaScript bytes: ${statSync(resolve(temporary, 'report.js')).size}`);
-      const testPaths = [];
+      const testPaths = [
+  'supabase/functions/_shared/room-pin-transfer-api.deno.ts',];
       for (const name of ['report-service', 'report-api', 'report-runtime', 'evidence-api', 'module-runtime']) {
         const source = readFileSync(`supabase/functions/_shared/post-approval-${name}.deno.ts`, 'utf8');
         const testCode = transformSync(source, { loader: 'ts', format: 'esm', target: 'es2022' }).code;
@@ -293,7 +301,7 @@ runDeno([
 runDeno([
   'test',
   '--allow-read=supabase/functions/api/assets',
-  '--allow-env=CORS_ORIGINS,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET,VAPID_SUBJECT,VAPID_CURRENT_KEY_VERSION,VAPID_PUBLIC_KEY,VAPID_PUBLIC_KEYRING_JSON,VAPID_PRIVATE_KEY,VAPID_KEYRING_JSON,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_KEY_BASE64,ROOM_PIN_KEY_VERSION,ROOM_PIN_KEYRING_JSON,ROOM_PIN_INITIAL_DIGITS,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,GOOGLE_SHEETS_SPREADSHEET_ID,GOOGLE_SHEETS_ROOM_PIN_TAB,RUNTIME_ENVIRONMENT,SUPABASE_PROJECT_REF',
+  '--allow-env=CORS_ORIGINS,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET,VAPID_SUBJECT,VAPID_CURRENT_KEY_VERSION,VAPID_PUBLIC_KEY,VAPID_PUBLIC_KEYRING_JSON,VAPID_PRIVATE_KEY,VAPID_KEYRING_JSON,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_KEY_BASE64,ROOM_PIN_KEY_VERSION,ROOM_PIN_KEYRING_JSON,ROOM_PIN_IMPORT_SPREADSHEET_ID,ROOM_PIN_IMPORT_SHEET_ID,ROOM_PIN_TRANSFER_HMAC_SECRET,ROOM_PIN_INITIAL_DIGITS,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,GOOGLE_SHEETS_SPREADSHEET_ID,GOOGLE_SHEETS_ROOM_PIN_TAB,RUNTIME_ENVIRONMENT,SUPABASE_PROJECT_REF',
   '--frozen',
   '--lock',
   'supabase/functions/post-approval-report.deno.lock',
