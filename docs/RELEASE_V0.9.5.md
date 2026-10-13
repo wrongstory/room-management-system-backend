@@ -1,5 +1,25 @@
 # v0.9.5 최종 검증 후보 — 운영 미반영
 
+## PR460 2차 CI 실패 및 SQL 회귀 보완 — 2026-10-14
+
+CI38403330268/f3598fb attempt1은 application PASS, 전체 DB FAIL이다.
+이전 실패였던 배정94→119 upgrade는 PASS했다. 전체 SQL95파일5689건에서
+activation17/61 및 developer diagnostics6/7/9 총5건이 실패했다.
+후속 static/KST/concurrency와 full proof는 SKIPPED, cleanup은 PASS다.
+
+현재 확정 #446 정책에 따라 과거 통보 미착수 이월은 typed outbox1건을 기대하며
+동일 receipt 재시도 후에도1건임을 추가 검사한다. 회전 처리에서는 과거 업무 이월을
+허용하되 activation/rollover 각각100건 상한, 결과 개수 일치, 당일102개 업무의
+원 날짜·담당 유지와 이월 결과 제외를 검사한다. 테스트 삭제/skip은 없다.
+개발자 진단은 source head119 `room_pin_transfer`를 기대하며 equal/ahead/behind,
+head 제거/복원과 직전 migration 검사는 유지한다. Node source 회귀가 SQL fixture의
+7개 head 참조를 실제 manifest와 대조하여 다음 head 추가 때 누락을 조기 검출한다.
+
+로컬 ci:quality(122파일3053 tests·typecheck·build·OpenAPI·secrets) 및 manifest119 PASS.
+독립 source QA PASS(P0/P1/P2 없음), 별도 edge-runtime19 PASS 및 diff 검사 PASS.
+기존 lint20 warning/57 info는 유지한다. SQL 자체의 수정 후 실제 실행은 NOT RUN이다.
+수정본 push와 격리 전체 DB 재실행은 새 승인 대기. 운영 migration/배포는 미실행이다.
+
 ## PR460 1차 CI 실패 및 로컬 보완 — 2026-10-13
 
 CI38390172872 attempt1은 application PASS, migration FAIL이다. fresh119,
