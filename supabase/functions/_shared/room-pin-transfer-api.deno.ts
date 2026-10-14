@@ -1,9 +1,73 @@
 import { roomPinTransferResponse } from "./room-pin-transfer-api.ts";
 import { RoomPinTransfer } from "./room-pin-transfer.ts";
+import { GoogleRoomPinImportSource } from "./google-sheets-pin-import.ts";
+import { roomPinImportCredentials } from "./google-sheets-pin.ts";
 import { type EdgeActor, type EdgeClients, EdgeError } from "./runtime.ts";
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
+Deno.test("PIN import reuses photo OAuth with GET-only exact tab access", async () => {
+  const values: Record<string, string> = {
+    GOOGLE_DRIVE_CLIENT_ID: "synthetic-client",
+    GOOGLE_DRIVE_CLIENT_SECRET: "synthetic-secret",
+    GOOGLE_DRIVE_REFRESH_TOKEN: "synthetic-refresh",
+  };
+  let calls = 0;
+  const source = new GoogleRoomPinImportSource(
+    "synthetic-import-spreadsheet",
+    0,
+    roomPinImportCredentials((name) => values[name]),
+    undefined,
+    async (url, init) => {
+      calls++;
+      assert(
+        init && "redirect" in init && init.redirect === "error",
+        "no credential redirects",
+      );
+      if (calls === 1) {
+        assert(
+          String(url) === "https://oauth2.googleapis.com/token",
+          "fixed auth origin",
+        );
+        const body = init?.body as URLSearchParams;
+        assert(
+          body.get("grant_type") === "refresh_token",
+          "photo refresh grant",
+        );
+        assert(
+          !body.has("scope") && !body.has("assertion"),
+          "no expanded grant",
+        );
+        return Response.json({
+          access_token: "synthetic-access-token",
+          token_type: "Bearer",
+        });
+      }
+      assert(init?.method === "GET", "no sheet writes");
+      return Response.json({
+        sheets: [{
+          properties: {
+            sheetId: 0,
+            title: "시트 1",
+            gridProperties: { rowCount: 1000 },
+          },
+          data: [{
+            startRow: 1,
+            startColumn: 1,
+            rowData: [{
+              values: [
+                { userEnteredValue: { stringValue: "객실" } },
+                { userEnteredValue: { stringValue: "비번" } },
+              ],
+            }],
+          }],
+        }],
+      });
+    },
+  );
+  const rows = await source.read();
+  assert(rows[0]?.[1] === "비번" && calls === 2, "exact sheet read");
+});
 Deno.test("PIN transfer rejects maid/developer before reading provider or DB", async () => {
   for (const role of ["maid", "developer"] as const) {
     const actor = { role, mustChangePassword: false } as EdgeActor;
