@@ -65,7 +65,7 @@ const fingerprint = {
 
 function cancellationFixture(error: { message: string; details?: string; hint?: string } | null = null) {
   const rpc = vi.fn(async (name: string, _args: Record<string, unknown>) => {
-    if (name === 'is_active_auth_session') return { data: true, error: null };
+    if (name === 'get_active_auth_context') return { data: { code: 'OK', profile }, error: null };
     return { data: error ? null : row, error };
   });
   const getUser = vi.fn(async (_token: string) => ({

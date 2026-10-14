@@ -15,7 +15,11 @@ import {
 } from "./payroll-api.ts";
 import {
   assertPayrollResponseSize,
+  createPayrollCursorEncoder,
+  decodePayrollCursor,
+  encodePayrollCursor,
   PAYROLL_RESPONSE_MAX_BYTES,
+  payrollCursorScope,
 } from "./payroll-cursor.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import { EdgeError } from "./runtime.ts";
@@ -676,6 +680,175 @@ function clients(
     },
   } as unknown as EdgeClients;
 }
+
+Deno.test("payroll list shares one lazy signing key for 21 cursors, not across requests", async () => {
+  const original = crypto.subtle.importKey;
+  let imports = 0;
+  crypto.subtle.importKey = ((...args: unknown[]) => {
+    imports++;
+    return Reflect.apply(original, crypto.subtle, args);
+  }) as typeof original;
+  try {
+    const rows = Array.from({ length: 10 }, (_, index) => ({
+      ...projection,
+      maidProfileId: `20000000-0000-4000-8000-${
+        String(index + 1).padStart(12, "0")
+      }`,
+      itemCount: 2,
+      itemsHasMore: true,
+      lateEarningCount: 2,
+      lateEarningsHasMore: true,
+      lateEarningsLastEarnedOn: "2026-08-25",
+      lateEarningsLastEarningId: "30000000-0000-4000-8000-000000000002",
+    }));
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    const read = () =>
+      listPayroll(
+        new Request("http://localhost/v1/payroll?weekStart=2026-08-24"),
+        clients(calls, {
+          payroll: rows,
+          hasMore: true,
+          lastMaidProfileId: rows[9].maidProfileId,
+        }),
+        admin,
+      );
+    const result = await read();
+    assert(
+      imports === 1 && calls.length === 1,
+      "one signing import and unchanged single RPC",
+    );
+    const returned = result.payroll as Array<Record<string, unknown>>;
+    assert(
+      returned.length === 10 && typeof result.nextCursor === "string",
+      "bounded complete page",
+    );
+    for (let i = 0; i < rows.length; i++) {
+      assert(
+        returned[i].maidProfileId === rows[i].maidProfileId,
+        "order preserved",
+      );
+      for (const kind of ["items", "lateEarnings"] as const) {
+        const after = {
+          earnedOn: "2026-08-25",
+          earningId: kind === "items"
+            ? projection.itemsLastEarningId
+            : rows[i].lateEarningsLastEarningId,
+        };
+        const expected = await encodePayrollCursor(
+          payrollCursorScope(admin, "2026-08-24", rows[i].maidProfileId, kind),
+          after,
+        );
+        assert(
+          returned[i][`${kind}NextCursor`] === expected,
+          "legacy token bytes unchanged",
+        );
+      }
+    }
+    imports = 0;
+    await read();
+    assert(imports === 1, "second request imports its own key");
+    imports = 0;
+    await listPayroll(
+      new Request("http://localhost/v1/payroll?weekStart=2026-08-24"),
+      clients([]),
+      admin,
+    );
+    assert(imports === 0, "no continuation means no crypto import");
+  } finally {
+    crypto.subtle.importKey = original;
+  }
+});
+
+Deno.test("payroll request encoder rechecks rotation and forbidden secret reuse", async () => {
+  const previous = Deno.env.get("PAYROLL_CURSOR_HMAC_SECRET");
+  assert(previous !== undefined, "synthetic test key configured");
+  const previousPepper = Deno.env.get("ACCOUNT_PHONE_PEPPER");
+  const encode = createPayrollCursorEncoder();
+  const scope = payrollCursorScope(admin, "2026-08-24", null, "cycles");
+  const after = { maidProfileId: maid.profileId };
+  try {
+    const first = await encode(scope, after);
+    Deno.env.set(
+      "PAYROLL_CURSOR_HMAC_SECRET",
+      "new-synthetic-payroll-cursor-secret-12345678",
+    );
+    const second = await encode(scope, after);
+    assert(first !== second, "rotated key is used");
+    assert(
+      second === await encodePayrollCursor(scope, after),
+      "current legacy encoding",
+    );
+    try {
+      await decodePayrollCursor(first, scope);
+      throw new Error("old cursor accepted");
+    } catch (error) {
+      assert(
+        (error as EdgeError).code === "PAYROLL_CURSOR_INVALID",
+        "old key denied",
+      );
+    }
+    Deno.env.set(
+      "ACCOUNT_PHONE_PEPPER",
+      "new-synthetic-payroll-cursor-secret-12345678",
+    );
+    try {
+      await encode(scope, after);
+      throw new Error("reused secret accepted");
+    } catch (error) {
+      assert(
+        (error as EdgeError).code === "PAYROLL_CURSOR_NOT_CONFIGURED",
+        "reuse denied even after warm key",
+      );
+    }
+    Deno.env.delete("PAYROLL_CURSOR_HMAC_SECRET");
+    try {
+      await encode(scope, after);
+      throw new Error("missing secret accepted");
+    } catch (error) {
+      assert(
+        (error as EdgeError).code === "PAYROLL_CURSOR_NOT_CONFIGURED",
+        "missing key denied",
+      );
+    }
+  } finally {
+    Deno.env.set("PAYROLL_CURSOR_HMAC_SECRET", previous);
+    if (previousPepper === undefined) Deno.env.delete("ACCOUNT_PHONE_PEPPER");
+    else Deno.env.set("ACCOUNT_PHONE_PEPPER", previousPepper);
+  }
+});
+
+Deno.test("payroll request encoder drains shared import rejection and permits a clean retry", async () => {
+  const original = crypto.subtle.importKey;
+  let imports = 0;
+  const failure = new Error("synthetic import failure");
+  crypto.subtle.importKey = ((...args: unknown[]) => {
+    imports++;
+    return imports === 1
+      ? Promise.reject(failure)
+      : Reflect.apply(original, crypto.subtle, args);
+  }) as typeof original;
+  try {
+    const encode = createPayrollCursorEncoder();
+    const scope = payrollCursorScope(admin, "2026-08-24", null, "cycles");
+    const after = { maidProfileId: maid.profileId };
+    const results = await Promise.allSettled([
+      encode(scope, after),
+      encode(scope, after),
+    ]);
+    assert(
+      imports === 1 &&
+        results.every((r) => r.status === "rejected" && r.reason === failure),
+      "shared failure, no partial success",
+    );
+    const retry = await encode(scope, after);
+    assert(
+      Number(imports) === 2 && typeof retry === "string",
+      "failed key not retained",
+    );
+  } finally {
+    crypto.subtle.importKey = original;
+  }
+});
 
 Deno.test("payroll list is side-effect free and maid access is self-only", async () => {
   const calls: Array<[string, Record<string, unknown>]> = [];

@@ -4,6 +4,7 @@ import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { toSupabaseAuthPassword } from './password.js';
+import { parseAuthContext } from './auth-context.js';
 
 export interface LoginInput {
   loginId: string;
@@ -152,22 +153,21 @@ export class SupabaseAuthService implements AuthService {
       throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.');
     }
 
-    const profile = await this.getProfileByAuthUserId(data.user.id);
-    if (profile.status !== 'active') {
-      throw new AppError(403, 'ACCOUNT_INACTIVE', '현재 사용할 수 없는 계정입니다.');
+    let contextData: unknown;
+    try {
+      const result = await this.clients.admin.rpc('get_active_auth_context', {
+        p_auth_user_id: data.user.id, p_session_id: sessionId(accessToken)
+      });
+      contextData = result.error ? null : result.data;
+    } catch {
+      // Do not forward raw provider exceptions to the common logger or client.
+      contextData = null;
     }
-
-    const activeSessionId = sessionId(accessToken);
-    if (!activeSessionId) {
-      throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.');
+    const context = parseAuthContext(contextData, data.user.id);
+    if (context.failure) {
+      throw new AppError(context.failure.status, context.failure.code, context.failure.message);
     }
-    const { data: isActiveSession, error: sessionError } = await this.clients.admin.rpc(
-      'is_active_auth_session',
-      { p_auth_user_id: data.user.id, p_session_id: activeSessionId }
-    );
-    if (sessionError || isActiveSession !== true) {
-      throw new AppError(401, 'SESSION_REVOKED', '로그인이 만료되었습니다. 다시 로그인해 주세요.');
-    }
+    const profile = context.profile;
 
     return {
       authUserId: profile.auth_user_id,
@@ -556,10 +556,6 @@ export class SupabaseAuthService implements AuthService {
 
   private async getProfileById(profileId: string): Promise<ProfileRow> {
     return this.fetchProfile('id', profileId);
-  }
-
-  private async getProfileByAuthUserId(authUserId: string): Promise<ProfileRow> {
-    return this.fetchProfile('auth_user_id', authUserId);
   }
 
   private async fetchProfile(column: 'id' | 'auth_user_id', value: string): Promise<ProfileRow> {

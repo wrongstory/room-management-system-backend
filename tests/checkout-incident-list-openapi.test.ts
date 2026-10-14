@@ -14,7 +14,7 @@ describe('#327 checkout incident list OpenAPI', () => {
     expect(operation.parameters.find((parameter) => parameter.name === 'limit')?.schema)
       .toEqual({ type: 'integer', minimum: 1, maximum: 100, default: 50 });
     expect(operation.responses['200'].headers['Cache-Control'].schema.const).toBe('no-store');
-    expect(Object.keys(operation.responses)).toEqual(['200', '400', '401', '403', '500']);
+    expect(Object.keys(operation.responses)).toEqual(['200', '400', '401', '403', '500', '503']);
     expect(operation.responses['200'].content['application/json'].schema.$ref)
       .toBe('#/components/schemas/CheckoutIncidentListEnvelope');
   });

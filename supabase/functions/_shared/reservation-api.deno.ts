@@ -163,10 +163,19 @@ function authenticationClients(options: {
         };
         return builder;
       },
-      rpc: (name: string) =>
+      rpc: (name: string, args: Record<string, unknown>) =>
         Promise.resolve(
-          name === "is_active_auth_session"
-            ? { data: options.activeSession ?? true, error: null }
+          name === "get_active_auth_context"
+            ? {
+              data: profile.status !== "active"
+                ? { code: "ACCOUNT_INACTIVE" }
+                : !args.p_session_id
+                ? { code: "INVALID_ACCESS_TOKEN" }
+                : options.activeSession === false
+                ? { code: "SESSION_REVOKED" }
+                : { code: "OK", profile },
+              error: null,
+            }
             : { data: [reservationRow], error: null },
         ),
     },
@@ -1754,10 +1763,12 @@ Deno.test("manual cancellation forwards the Auth-verified session with exact arg
     source_key: manualCancelRawSentinel,
     session_id: manualCancelSessionId,
   };
+  const contextRpc = clients.admin.rpc.bind(clients.admin);
   clients.admin.rpc = ((name: string, args: Record<string, unknown>) => {
     calls.push([name, args]);
+    if (name === "get_active_auth_context") return contextRpc(name, args);
     return Promise.resolve({
-      data: name === "is_active_auth_session" ? true : cancelledRow,
+      data: cancelledRow,
       error: null,
     });
   }) as unknown as typeof clients.admin.rpc;
@@ -1779,7 +1790,7 @@ Deno.test("manual cancellation forwards the Auth-verified session with exact arg
   };
   assert(
     JSON.stringify(calls) === JSON.stringify([
-      ["is_active_auth_session", {
+      ["get_active_auth_context", {
         p_auth_user_id: admin.authUserId,
         p_session_id: manualCancelSessionId,
       }],

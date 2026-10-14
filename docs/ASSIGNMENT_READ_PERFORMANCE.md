@@ -1,5 +1,54 @@
 # #415 배정 카드 조회 최적화 — 1차 후보
 
+## 2026-10-13 단일 순회 이월 표시 후보
+
+PR453은 dev153ab78에 병합했다(CI38361677993 PASS). 후속 후보는 각 카드의
+대상별 이력에서 기존 filter→revision 내림차순 sort→count/첫 reason 선택을
+한 번 순회하는 count/최대 revision 선택으로 바꾼다. 같은 revision에서는 먼저 등장한
+행을 유지하여 stable sort와 일치한다. cap=0에서도 reason=null을 유지하며 caller의
+유효 carryover 검사와 target ID/revision/reason 조건을 그대로 사용한다.
+
+필터 결과 배열 할당과 정렬을 제거하지만 DB 왕복·조회량·최종 권한 RPC 순서는
+변경하지 않는다. #453의 요청-local 색인을 유지하며 카드 간 캐시도 추가하지 않는다.
+이전 방법과 1200개 합성 조합 비교, tie/빈 이력/범위/횟수 상한/비변이성을 검사한다.
+Node3003/typecheck/build와 Edge assignment39 PASS. 실제 운영 성능과 DB는 NOT RUN이다.
+새 SQL/migration은 없고 Swagger/프런트 호출도 동일하다. 독립 QA4파일184개 PASS,
+추가 P0/P1/P2 없음. 원격 전체 CI는 별도 확인한다.
+Supabase 스킬의 권한 보존 기준을 따라 표시 계산만 변경하며 DB 검증은 승인 전 실행하지 않는다.
+
+## 2026-10-13 후속: 요청 안의 일정 이력 색인 (미배포)
+
+Node/Edge가 카드마다 전체 일정 이력을 필터링하던 부분을 대상 ID별 Map으로 한 번 묶는다.
+각 카드에서는 자기 대상 이력만 기존 revision/reason 조건으로 필터링·정렬한다.
+중복 revision, 입력 순서, 과거 배정, rollover 계산 및 응답 필드는 보존한다.
+요청 간 캐시가 아니며 새 요청마다 새 Map을 만든다. DB/SQL/migration 변경은 없다.
+
+대상마다 이력 1개인 N개 카드의 ID 검사량은 기존 N×N 대신 색인 N + 카드 N이다.
+동일 대상에 여러 배정 revision이 있으면 대상 내부의 반복 필터링/정렬은 여전히 남는다.
+이는 합성 검사에서 확인하는 탐색량이지 운영 지연시간 개선률이 아니다.
+DB 왕복 수(기존 1/100/1000 fixture의 7/7/52), 100-ID 분할, exact count/누락 거부는 유지한다.
+최신 #446의 최종 `get_assignment_schedule_read_for_plan` 권한·세션 검사는
+모든 관계 조회 뒤에 그대로 남는다. 아래 이전 RPC명/검증 기록은 과거 checkpoint다.
+
+API·Swagger·프런트 호출 변경 없음. 배포 전 후보이며 실제 DB/성능/UAT는 NOT RUN이다.
+전체 DB 검증은 최종 릴리스에 1회, 마이그레이션/재구축 실행은 사전 사용자 승인 후만 한다.
+
+로컬 검증: `npm run ci:quality` PASS (Node120파일3001개, typecheck/build,
+secrets/OpenAPI/lint). lint의 기존 warning2/info37은 남아 있다. manifest117 PASS.
+독립 QA4파일182개 PASS, 신규 P0/P1/P2 없음. Node/Edge core 일치 및 동일 대상의
+여러 revision에서도 기존 필터·순서·비변이성을 검토했다. Edge 전체 검증/원격 CI는
+별도 확인하며 이 로컬 결과로 대체하지 않는다.
+
+PR453 최초 CI는 Edge 파일2개의 Deno 서식 불일치로 FAIL했다. 고정 Deno2.1.4로
+서식만 보정 후 3파일 fmt check·Node3001/typecheck/build 재실행·Edge assignment39개
+PASS를 확인했다. 코드 의미·검증 기준은 그대로이며 원격 전체 CI는 새 head에서 확인한다.
+
+dev a5ab90d의 주급 서명 최적화를 통합했다. 충돌은 프런트 인계문서 한 곳이며
+양쪽 절을 모두 보존했다. 주급 구현/검사는 dev와 동일하다. ci:quality Node3001 PASS.
+Edge assignment+payroll 합성63개 PASS. 최초 두 수동 명령은 환경변수 접근 허용 목록
+누락으로 FAIL했으며, 기존 CI와 같은 명시적 허용 목록으로 재실행하여 통과했다.
+Docker/DB/마이그레이션은 실행하지 않았다.
+
 2026-10-09, `dev@3e91d88` 기준. source 후보이며 운영 반영을 뜻하지 않는다.
 사용자의 권장 순서 승인에 따른 #413 후속이다. #415 전체 완료/종료가 아니다.
 

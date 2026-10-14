@@ -2,6 +2,7 @@ import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
   assertPayrollCursorConfigured,
   assertPayrollResponseSize,
+  createPayrollCursorEncoder,
   type CursorPosition,
   decodePayrollCursor,
   encodePayrollCursor,
@@ -689,19 +690,20 @@ async function publicProjection(
   value: unknown,
   actor: EdgeActor,
   weekStart: string,
+  encode = encodePayrollCursor,
 ): Promise<Record<string, unknown>> {
   const projected = projection(value);
   const maidProfileId = projected.cycle.maidProfileId as string;
   return {
     ...projected.cycle,
     itemsNextCursor: projected.itemsAfter
-      ? await encodePayrollCursor(
+      ? await encode(
         payrollCursorScope(actor, weekStart, maidProfileId, "items"),
         projected.itemsAfter,
       )
       : null,
     lateEarningsNextCursor: projected.lateEarningsAfter
-      ? await encodePayrollCursor(
+      ? await encode(
         payrollCursorScope(actor, weekStart, maidProfileId, "lateEarnings"),
         projected.lateEarningsAfter,
       )
@@ -840,8 +842,11 @@ export async function listPayroll(
   const page = object(data);
   if (!Array.isArray(page.payroll)) throw payrollDatabaseError(null);
   if (page.payroll.length > input.limit) throw payrollDatabaseError(null);
+  const encode = createPayrollCursorEncoder();
   const payroll = await Promise.all(
-    page.payroll.map((item) => publicProjection(item, actor, input.weekStart)),
+    page.payroll.map((item) =>
+      publicProjection(item, actor, input.weekStart, encode)
+    ),
   );
   const hasMore = boolean(page.hasMore);
   const lastMaidProfileId = nullableUuid(page.lastMaidProfileId);
@@ -849,7 +854,7 @@ export async function listPayroll(
   return {
     payroll,
     nextCursor: hasMore && lastMaidProfileId
-      ? await encodePayrollCursor(scope, {
+      ? await encode(scope, {
         maidProfileId: lastMaidProfileId,
       })
       : null,

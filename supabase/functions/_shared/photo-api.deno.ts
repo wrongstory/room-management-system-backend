@@ -115,6 +115,16 @@ function setup(
       from: () => query,
       rpc: (name: string) => {
         calls.push(name);
+        if (name === "get_active_auth_context") {
+          return Promise.resolve({
+            error: null,
+            data: status !== "active"
+              ? { code: "ACCOUNT_INACTIVE" }
+              : revoked
+              ? { code: "SESSION_REVOKED" }
+              : { code: "OK", profile },
+          });
+        }
         const error = denied && name !== "is_active_auth_session" &&
             name !== "record_authorization_denial"
           ? { message: "PHOTO_ACCESS_REQUIRED" }
@@ -334,7 +344,10 @@ Deno.test("false Auth session decisions stop photo metadata, uploads and content
       const body = await response.text();
       assert(
         JSON.parse(body).error.code === "SESSION_REVOKED" &&
-          s.calls.length === 1 && s.calls[0] === "is_active_auth_session",
+          s.calls.length === 1 && s.calls[0] ===
+            (path.endsWith("/content")
+              ? "get_active_auth_context"
+              : "is_active_auth_session"),
         "no business RPC, Drive call, or decoder after false session decision",
       );
       assert(

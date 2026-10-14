@@ -1,5 +1,28 @@
 # 백엔드 서버 설계
 
+## #414 주급 projection 재사용 후보
+
+117번째 후보는 private before_workflow의 단일행 CTE만 MATERIALIZED로
+명시한다. schema/API·권한·시계·금액 계약과 요청/페이지별 재검증은 보존한다.
+전역 cache가 아니며 [실행계획·금액 동등성 gate](./PAYROLL_PROJECTION_REUSE_414.md)는
+최종 릴리스의 사전 승인 DB 검증에 남는다. 실제 DB·운영 반영은 NOT RUN이다.
+
+## #416 조회 계획·인덱스 근거 수집
+
+최신-event의 effective/recorded/id 순서와 기존 recorded 중심 인덱스를 로컬 임시 합성
+테이블에서 비교하는 도구를 추가한다. 앱 SQL·DB·RLS·운영 인덱스는 변경하지 않는다.
+주급 coalesce 및 반복 summary, 객실 issue count는 아직 실측할 후속 후보다.
+[과거 측정 결과와 최신 기준의 미검증 범위](./QUERY_PLAN_EVIDENCE_416.md).
+
+후속 dev114 소스 후보는 객실별 두 issue count helper 호출을 동일 시간 조건의
+단일 lateral aggregate로 대체한다. 빈 객실도 0 집계행을 유지하며 현재 status만으로
+과거 특이사항을 누락하지 않는다. 기존 함수 OID/권한/서명/시계/나머지 본문은 보존한다.
+[후보·승인 대기 DB 검증](./ROOM_BOARD_ISSUE_COUNTS_416.md). 운영 미적용이며 속도 실측은 없다.
+
+주급·송금 표시 후속 dev116 후보는 basis helper 내부 CTE만 materialize한다.
+8개 금액·표시 재확인·권한/명령 잠금은 동일하고 요청 간 캐시를 만들지 않는다.
+[후보·미실행 DB/성능 검증](./PAYROLL_BASIS_PERFORMANCE_416.md). 운영 미반영이다.
+
 ## #415 배정 카드 조회 의존 분기 최적화 후보
 
 Node/Edge의 bounded 관계 조회에서 attempt→submission만 하나의 병렬 분기로 묶는다.
@@ -576,6 +599,10 @@ wrapper이며 외부 Drive create 전에 같은 transaction에서 확정한다. 
 
 ## 인증
 
+#442 미배포 후보는 일반 인증의 profile/session을 서버 전용 `get_active_auth_context` 1회로
+통합한다. 순차 SQL·fresh snapshot·hard expiry·권한은 유지하고 limited/사진 전용 인증은
+변경하지 않는다. [설계와 배포 gate](./AUTH_CONTEXT_PERFORMANCE_442.md)를 따른다.
+
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.
 2. 내부 이메일은 `user-{profile_id}@auth.castletheart.invalid` 형식으로 서버만 계산합니다.
 3. 사용자가 이름형 `loginId`와 최초 휴대전화 끝 4자리 임시 비밀번호 또는 허용된 개인 비밀번호를 보냅니다. 개인 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합이며, 4자리 임시값은 서버 내부에서만 Supabase 최소 길이를 만족하는 namespace 값으로 변환합니다.
@@ -797,7 +824,17 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 typed `notifications`, private `notification_delivery_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
-#308 4B2의 dev 통합 계약(PR #340)은 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
+#446 최신 사용자 정책은 관리자 내일 배정에도 과거 미완료 업무를 포함합니다. 요청 계획일의
+근무 희망을 검사하며 원 업무 날짜/이력은 유지합니다. [후보 계약](./ASSIGNMENT_PLANNING_TABS_446.md)은
+아래 #308의 내일 exact-date 제한을 대체합니다. 실제 DB 적용 전 후보입니다.
+
+2026-10-13 #446 후속은 KST 자정에 전일 미착수 담당을 종료하고 미배정 계획일을 하루씩
+이월합니다. 원 source 날짜/접근 창은 유지하고 append-only `assignment.rolled_over`의
+`rolloverToDate`와 target version으로 현재 계획일을 읽습니다. 기존 scheduler의 예약 공통
+잠금 아래 activation 전에 실행하며, 별도 회전 cursor와 일별 전이 100건 상한으로 catch-up합니다.
+실제 시작/완료된 회차와 당일 사전 배정은 보존합니다. [상세 계약·검증 경계](./ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md)를 따릅니다.
+
+#308 4B2의 당시 dev 통합 계약(PR #340)은 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
 미완료 업무를 포함합니다. 내일·과거/이력 조회는 기존 exact-date 범위이며 원 날짜/담당/순번은
 갱신하지 않습니다. Fastify/Edge 목록은 access-token RLS 본인 통보 범위를 먼저 제한하고,
 오늘 exact row와 과거 unfinished inner-target row를 합칩니다. 과거 이력에는 현재 target join을
@@ -1266,7 +1303,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
 - Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
 
-예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 4~8자리 `pinDigits`만 받고 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는다. PIN source/schema와 Edge bundle은 production에 반영됐지만 Google target·ACL·Cron/worker hosted 활성화는 별도 pending이다.
+예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 UTF-8 128바이트 이하 비어 있지 않은 `pinDigits` 문자열을 받고(#452, 숙박 유형/숫자 자릿수 제한 없음) 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는다. PIN source/schema와 Edge bundle은 production에 반영됐지만 Google target·ACL·Cron/worker hosted 활성화는 별도 pending이다.
 
 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`는 production에서 활성 관리자 profile ID로 설정한다. Fastify 기준선은 시작 시 첫 실행으로 actor를 검증하고, Supabase-only runtime은 Cron이 1분마다 별도 secret으로 scheduler Function을 호출하며 DB command가 actor의 최신 역할·상태를 매 실행 재검증한다. 어느 runtime이든 퇴실을 먼저 처리하므로 반개구간 경계의 다음 입실이 같은 batch에서 진행되고, 중단 기간 전체가 지난 미입실 예약도 가짜 check-in 없이 예정 checkout으로 종결된다. 자세한 운영·rollback 계약은 [Edge runtime PoC](./EDGE_RUNTIME_POC.md)를 따른다.
 
@@ -1298,3 +1335,7 @@ assignment에만 새 PIN revision successor를 발급한다. 물리 PIN 변경�
 attempt와 authoritative access lease를 그대로 요구한다. entitlement/outbox/audit에는 PIN, envelope, raw session,
 token, request body 또는 idempotency payload를 저장하지 않는다. 이 source 계약은 production PIN/Sheets/Cron
 활성화를 포함하지 않는다.
+
+## #452 명시적 PIN 파일 전송
+
+관리자 전용 export/preview/apply는 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다. 읽기 원본과 쓰기 projection은 분리하며 transaction에는 암호화 envelope만 전달한다. 새 revision source `sheet_import`, current CAS/nonce reservation/entitlement rotation을 재사용한다. 전체 SQL 실행은 최종 릴리스 승인 때 수행한다.

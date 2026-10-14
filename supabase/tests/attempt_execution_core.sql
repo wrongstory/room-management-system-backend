@@ -87,8 +87,8 @@ begin
  return result;
 end $$;
 select is(pg_temp.probe_overdue_execution('2040-03-01 15:00+09'),'in_progress','start at due boundary remains available');
-select is(pg_temp.probe_overdue_execution('2040-03-02 10:00+09'),'in_progress','past service date alone does not revoke current owner start');
-select is(pg_temp.probe_overdue_execution('2040-03-02 10:00+09',true),'field_completed','overdue current owner can complete physical work');
+select throws_ok($$select pg_temp.probe_overdue_execution('2040-03-02 10:00+09')$$,'55000','ASSIGNMENT_VERSION_CONFLICT','midnight requires new assignment responsibility before a late start');
+select is(pg_temp.probe_overdue_execution('2040-03-01 15:00+09',true),'field_completed','overdue current owner can complete physical work');
 select private.emit_notification_v1('assignment.commit_notified',pg_temp.eid(1),pg_temp.eid(2),
   'cleaning_assignment',pg_temp.eid(401)::text,'현재 배정','청소를 시작해 주세요.',
   (select room_id from public.cleaning_targets where id=pg_temp.eid(301)),pg_temp.eid(301),pg_temp.eid(301),'2040-03-01 09:00+09');

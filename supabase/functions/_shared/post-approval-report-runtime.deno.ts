@@ -64,9 +64,22 @@ for (
         rpc(name: string, args: Record<string, unknown>) {
           calls.push(name);
           assert(args.p_session_id === id(2));
-          if (name === "is_active_auth_session") {
+          if (name === "get_active_auth_context") {
             return Promise.resolve({
-              data: stage !== "session-revoked",
+              data: stage === "inactive"
+                ? { code: "ACCOUNT_INACTIVE" }
+                : stage === "session-revoked"
+                ? { code: "SESSION_REVOKED" }
+                : {
+                  code: "OK",
+                  profile: {
+                    id: id(1),
+                    auth_user_id: id(9),
+                    display_name: "synthetic",
+                    role: "maid",
+                    must_change_password: false,
+                  },
+                },
               error: null,
             });
           }
@@ -103,8 +116,8 @@ for (
       : stage === "inactive"
       ? 2
       : stage === "session-revoked"
-      ? 3
-      : 4;
+      ? 2
+      : 3;
     assert(calls.length === count);
     assert(response.headers.get("cache-control") === "no-store");
   });

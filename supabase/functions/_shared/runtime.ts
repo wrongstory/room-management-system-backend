@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { parseAuthContext } from "../../../src/modules/auth/auth-context.ts";
 
 export interface EdgeActor {
   authUserId: string;
@@ -200,43 +201,25 @@ export async function authenticate(
     throw new EdgeError(401, "INVALID_ACCESS_TOKEN", "로그인이 필요합니다.");
   }
 
-  const { data, error } = await clients.admin
-    .from("profiles")
-    .select("id,auth_user_id,display_name,role,status,must_change_password")
-    .eq("auth_user_id", userData.user.id)
-    .single();
-  if (error || !data) {
+  let contextData: unknown;
+  try {
+    const result = await clients.admin.rpc("get_active_auth_context", {
+      p_auth_user_id: userData.user.id,
+      p_session_id: sessionId(accessToken),
+    });
+    contextData = result.error ? null : result.data;
+  } catch {
+    contextData = null;
+  }
+  const context = parseAuthContext(contextData, userData.user.id);
+  if (context.failure) {
     throw new EdgeError(
-      401,
-      "PROFILE_NOT_FOUND",
-      "계정 프로필을 찾을 수 없습니다.",
+      context.failure.status,
+      context.failure.code,
+      context.failure.message,
     );
   }
-  const profile = data as ProfileRow;
-  if (profile.status !== "active") {
-    throw new EdgeError(
-      403,
-      "ACCOUNT_INACTIVE",
-      "현재 사용할 수 없는 계정입니다.",
-    );
-  }
-
-  const activeSessionId = sessionId(accessToken);
-  if (!activeSessionId) {
-    throw new EdgeError(401, "INVALID_ACCESS_TOKEN", "로그인이 필요합니다.");
-  }
-  const { data: isActiveSession, error: sessionError } = await clients.admin
-    .rpc(
-      "is_active_auth_session",
-      { p_auth_user_id: userData.user.id, p_session_id: activeSessionId },
-    );
-  if (sessionError || isActiveSession !== true) {
-    throw new EdgeError(
-      401,
-      "SESSION_REVOKED",
-      "로그인이 만료되었습니다. 다시 로그인해 주세요.",
-    );
-  }
+  const profile = context.profile;
 
   return {
     authUserId: profile.auth_user_id,

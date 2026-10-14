@@ -1,5 +1,5 @@
 // Generated from src/modules/rooms/google-sheets-pin.ts. DO NOT EDIT.
-/** Google Sheets is a one-way projection. Database PIN revisions remain authoritative. */
+/** Projection writes and explicit operator imports use separate configured documents. */
 export const ROOM_PIN_SHEET_TAB = "객실_PIN_현황";
 export const ROOM_PIN_SHEET_HEADERS = [
   "room_number",
@@ -76,6 +76,121 @@ const safeTimestamp = (value: string): string => {
   ) return fail("PROVIDER_RESPONSE_INVALID");
   return value;
 };
+
+/** Read-only credentials and exact tab identity; no mutations or formula evaluation. */
+export async function readRoomPinImportSheet(
+  spreadsheetId: string,
+  sheetId: number,
+  serviceAccount: GoogleSheetsServiceAccount,
+  fetcher: typeof fetch = fetch,
+): Promise<unknown[][]> {
+  const deadline = Date.now() + 15000;
+  try {
+    const key = await importServiceAccountKey(serviceAccount),
+      issued = Math.floor(Date.now() / 1000);
+    const input = b64url(utf8(JSON.stringify({ alg: "RS256", typ: "JWT" }))) +
+      "." + b64url(utf8(JSON.stringify({
+        iss: serviceAccount.email,
+        scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+        aud: "https://oauth2.googleapis.com/token",
+        iat: issued,
+        exp: issued + 300,
+      })));
+    const signature = b64url(
+      new Uint8Array(
+        await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, bytes(utf8(input))),
+      ),
+    );
+    const auth = await boundedFetch(
+      fetcher,
+      "https://oauth2.googleapis.com/token",
+      {
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+          assertion: input + "." + signature,
+        }),
+      },
+      deadline,
+      Date.now,
+    );
+    if (!auth.ok) return fail("AUTHENTICATION_FAILED");
+    const token = await boundedJson(auth, deadline, Date.now);
+    if (
+      typeof token.access_token !== "string" ||
+      token.access_token.length < 20 || token.access_token.length > 4096 ||
+      token.token_type !== "Bearer"
+    ) return fail("PROVIDER_RESPONSE_INVALID");
+    const query = new URLSearchParams({
+      ranges: "'시트 1'!B2:C1002",
+      fields:
+        "sheets(properties(sheetId,title,gridProperties(rowCount)),data(startRow,startColumn,rowData(values(userEnteredValue,formattedValue))))",
+    });
+    const response = await boundedFetch(
+      fetcher,
+      "https://sheets.googleapis.com/v4/spreadsheets/" +
+        encodeURIComponent(spreadsheetId) + "?" + query,
+      {
+        method: "GET",
+        headers: { authorization: "Bearer " + token.access_token },
+      },
+      deadline,
+      Date.now,
+    );
+    if (response.status === 403) return fail("AUTHORIZATION_FAILED");
+    if (response.status === 429) return fail("RATE_LIMITED");
+    if (!response.ok) return fail("PROVIDER_UNAVAILABLE");
+    const data = await boundedJson(response, deadline, Date.now, 256 * 1024);
+    type Sheet = {
+      properties?: {
+        sheetId?: number;
+        title?: string;
+        gridProperties?: { rowCount?: number };
+      };
+      data?: Array<{
+        startRow?: number;
+        startColumn?: number;
+        rowData?: Array<
+          {
+            values?: Array<
+              {
+                userEnteredValue?: {
+                  stringValue?: unknown;
+                  formulaValue?: unknown;
+                  numberValue?: unknown;
+                };
+                formattedValue?: unknown;
+              }
+            >;
+          }
+        >;
+      }>;
+    };
+    const sheets = data.sheets as Sheet[] | undefined, sheet = sheets?.[0];
+    if (
+      !Array.isArray(sheets) || sheets.length !== 1 || !sheet ||
+      sheet.properties?.sheetId !== sheetId ||
+      sheet.properties.title !== "시트 1" ||
+      (sheet.properties.gridProperties?.rowCount ?? Infinity) > 1001 ||
+      !Array.isArray(sheet.data) || sheet.data.length !== 1 ||
+      sheet.data[0]?.startRow !== 1 ||
+      sheet.data[0]?.startColumn !== 1 || !Array.isArray(sheet.data[0]?.rowData)
+    ) return fail("PROVIDER_RESPONSE_INVALID");
+    return sheet.data[0].rowData.map((row) =>
+      (row.values ?? []).map((cell) => {
+        const value = cell.userEnteredValue;
+        // Formulas/numeric credentials cannot guarantee exact leading-zero preservation.
+        if (
+          value?.formulaValue !== undefined || value?.numberValue !== undefined
+        ) return null;
+        return value?.stringValue ?? "";
+      })
+    );
+  } catch (error) {
+    if (error instanceof RoomPinSheetProviderError) throw error;
+    return fail("PROVIDER_UNAVAILABLE");
+  }
+}
 
 /** Hosted targets remain absent until a release approval adds an exact mapping. */
 export function assertApprovedRoomPinSheetTarget(

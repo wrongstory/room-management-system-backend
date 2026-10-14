@@ -125,9 +125,9 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112].includes(manifest.totalCount));
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119].includes(manifest.totalCount));
   assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
-  assert.equal(manifest.head, manifest.totalCount === 111 ? 'post_approval_room_issue_ledger' : 'room_event_effective_lookup_indexes');
+  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer' }[manifest.totalCount]);
   assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
@@ -147,10 +147,45 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
     POST_APPROVAL_UPGRADE_FILE_PREFIX_SHA256, 'Exact dev110 filename/version and source SHA prefix required');
   assert.equal(validated[109].file, `${baselineVersion}_room_candle_session_hard_expiry.sql`);
   assert.equal(validated[110].file, `${ledgerVersion}_post_approval_room_issue_ledger.sql`);
-  if (validated.length === 112) {
+  if (validated.length >= 112) {
     assert.equal(validated[111].file, '20261009081846_room_event_effective_lookup_indexes.sql');
     assert.equal(validated[111].sha256, 'dc9ee95371faa2b0daae9cd3b279c0b0d38c243581ca73bdc5e5260375aae41c',
       'Only the reviewed index-only112 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length >= 113) {
+    assert.equal(validated[112].file, '20261010143530_common_auth_context_read.sql');
+    assert.equal(validated[112].sha256, '522b9c0c146243a0c78013f756a4711ac491569361faae24cbd8749969784ffd',
+      'Only the source-reviewed auth-context113 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length >= 114) {
+    assert.equal(validated[113].file, '20261010153508_room_board_issue_counts_single_scan.sql');
+    assert.equal(validated[113].sha256, '609b0846902173b91ca7f081d8e38329c1c0d3cd94ec2f5e194912819b59992c',
+      'Only the source-reviewed issue-count114 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length >= 115) {
+    assert.equal(validated[114].file, '20261010154753_assignment_tomorrow_backlog.sql');
+    assert.equal(validated[114].sha256, '3e1b9c6829ee4b7869c09471ccee289d49818633ff72c3b956550f1a82a33e2b',
+      'Only the source-reviewed planning115 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length >= 116) {
+    assert.equal(validated[115].file, '20261013063440_payroll_remittance_basis_materialized.sql');
+    assert.equal(validated[115].sha256, '3f6f47b6969a12ffe61b9a2ef56a5cef87dbd9b124a6ab5630889e1763248462',
+      'Only the source-reviewed payroll-basis116 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length >= 117) {
+    assert.equal(validated[116].file, '20261013064056_payroll_projection_materialization.sql');
+    assert.equal(validated[116].sha256, '02dd365a9e9356595b903becd7f07513c27c640d35118bee460f24589fd2094a',
+      'Only the source-reviewed payroll117 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length >= 118) {
+    assert.equal(validated[117].file, '20261013065246_assignment_midnight_rollover.sql');
+    assert.equal(validated[117].sha256, 'dc7fee28c3049c870072ff53f93427af14b11179c5e208321924d72c49613da8',
+      'Only the source-reviewed midnight118 tail is permitted, not arbitrary future migrations');
+  }
+  if (validated.length === 119) {
+    assert.equal(validated[118].file, '20261013072848_room_pin_transfer.sql');
+    assert.equal(validated[118].sha256, '77a5de1fcb89d355bb59a2247c6b36414defb4ec911e1e8afcc30aaaa8e64725',
+      'Only the source-reviewed PIN-transfer119 tail is permitted');
   }
   return { entries: validated, ledger: validated[110].canonical };
 }
@@ -169,7 +204,7 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   return { ...local, endpoint: localEndpoint };
 }
 export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
-  assert([110, 111, 112].includes(installed) && installed <= source.entries.length);
+  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }

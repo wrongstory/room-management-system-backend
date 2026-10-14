@@ -1,4 +1,8 @@
 import cors from '@fastify/cors';
+import { RoomPinTransfer } from './modules/rooms/room-pin-transfer.js';
+import { GoogleRoomPinImportSource } from './modules/rooms/google-sheets-pin-import.js';
+import { roomPinTransferDatabaseError } from './modules/rooms/room-pin-transfer-http.js';
+import { createRoomPinTransferRoutes } from './modules/rooms/room-pin-transfer.routes.js';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -83,6 +87,7 @@ export interface AppServices {
   assignmentPreview?: AssignmentPreviewService;
   rooms: RoomService;
   roomPinSheetOperations?: RoomPinSheetOperationsService;
+  roomPinTransfer?: RoomPinTransfer;
   reservations: ReservationService;
   payroll: PayrollService;
   complaints?: ComplaintService;
@@ -147,6 +152,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
+      roomPinTransfer: new RoomPinTransfer(async (name, args) => {
+        const { data, error } = await clients.admin.rpc(name, args);
+        if (error) throw roomPinTransferDatabaseError(error.message);
+        return data;
+      }, {
+        key: options.env.ROOM_PIN_KEY_BASE64, keyVersion: options.env.ROOM_PIN_KEY_VERSION,
+        keyring: JSON.parse(options.env.ROOM_PIN_KEYRING_JSON) as Record<string, string>,
+        environment: options.env.APP_ENV, projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
+      }, new GoogleRoomPinImportSource(options.env.ROOM_PIN_IMPORT_SPREADSHEET_ID ?? '',
+        options.env.ROOM_PIN_IMPORT_SHEET_ID ? Number(options.env.ROOM_PIN_IMPORT_SHEET_ID) : -1, {
+          email: options.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL ?? '',
+          privateKeyPem: options.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY ?? ''
+        }, options.env.GOOGLE_SHEETS_SPREADSHEET_ID), options.env.ROOM_PIN_TRANSFER_HMAC_SECRET),
       assignments: new SupabaseAssignmentService(clients),
       assignmentPreview: new SupabaseAssignmentPreviewService(clients),
       rooms: new SupabaseRoomService(clients, {
@@ -327,6 +345,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   await app.register(createRoomTypeRoutes(services.rooms), { prefix: '/v1/room-types' });
   await app.register(createRoomRoutes(services.rooms), { prefix: '/v1/rooms' });
+  if (services.roomPinTransfer) {
+    await app.register(createRoomPinTransferRoutes(services.roomPinTransfer), { prefix: '/v1/rooms/pins' });
+  }
   await app.register(createDeveloperRoomCatalogRoutes(services.rooms), { prefix: '/v1/developer' });
   if (services.roomPinSheetOperations) {
     await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {

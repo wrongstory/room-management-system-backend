@@ -1,5 +1,29 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+## [확정 — 2026-10-13 #446] 미착수 배정의 KST 자정 이월
+
+Asia/Seoul 00:00에 전날 미배정·미착수 업무를 새 오늘 계획으로 이월한다. 원 target ID와
+최초 업무일·접근/마감 snapshot은 보존한다. 전날 수행 예정이던 미착수 담당·순서는 이력으로
+종료하고 새 날짜의 근무 희망으로 다시 배정한다. 전날 미리 새 오늘용으로 통보한 계획은
+담당·순서를 유지한다. 전날 생성됐다는 이유만으로 회수하지 않는다.
+이미 시작한 업무는 담당·attempt·사진을 유지하고 현장 완료/업로드/제출/검수는 이월하지 않는다.
+원 메이드 귀속인 검수 반려 재청소도 일반 재배정 풀에 넣지 않는다.
+이 결정은 아래 #305/#308의 날짜 경과만으로 미착수 담당을 유지하던 정책보다 우선한다.
+`dueAt` 경과 자체는 이월/완료 차단 근거가 아니며 실제 시작한 회차의 완료는 자정을 넘어도 허용한다.
+구현 후보는 일별 감사 근거와 schedule revision에 이월을 기록하고 `planningDate`로 계획일을
+표시한다. scheduler 지연 동안 과거 미착수 회차의 신규 시작은 차단한다. 소스/검증/운영 상태는
+[자정 이월 계약](./ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md)을 따른다.
+
+## [확정 — 2026-10-11 #446] 오늘·내일 배정은 계획일 기준
+
+내일 배정은 오늘까지 미완료 업무와 내일 체크아웃 객실을 내일 근무 희망자에게 배정하는
+주 계획 화면이다. 오늘 배정은 어제 계획한 오늘 업무를 중심으로 오늘까지 미완료 및 오늘
+체크아웃 객실과 담당자를 조회·수정하며 추가 배정도 가능하다. 두 UI의 기능은 같다.
+생성/통보 날짜로 탭을 구분하지 않는다. 과거 업무의 원 날짜·이력을 재작성하지 않고
+요청 계획일의 근무 희망을 검사한다. 시작된 업무 고정·권한·CAS는 유지한다.
+이 결정은 아래 과거 #308의 '내일은 과거 미완료 제외'보다 우선한다.
+[구현 차이와 후보 상태](./ASSIGNMENT_PLANNING_TABS_446.md)를 따른다.
+
 ## [확정 — 2026-10-10 최신 결정] migration 실행 전 매번 승인
 
 로컬·CI·운영 migration 적용/DB reset·재구축 전에 반드시 사용자 명시 승인을 받는다.
@@ -899,7 +923,7 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 ### `[확정 — 2026-09-04 #69]` 객실 PIN
 
 - 로그인 비밀번호와 별도 암호키/수명주기로 관리한다.
-- 프런트 입력은 PIN 숫자 부분만 받으며 `^[0-9]{4,8}$`를 만족하는 문자열이어야 한다. 숫자형으로 변환하지 않고 `0256`, `00000001` 같은 선행 0을 보존한다.
+- `[확정 — 2026-10-13 사용자 결정, #452]` 백엔드는 객실/숙박 유형과 무관하게 비밀번호 문자열을 자유롭게 허용한다. 기존 숫자 4~8자리 제한을 폐기한다. 빈 값·공백만 있는 값·제어문자·잘못된 Unicode는 거절하고 저장 보호를 위해 UTF-8 128바이트로 제한한다. 원문과 선행 0을 보존한다. 자동 생성은 계속 정확히 숫자 4자리다. 프런트의 일반 4자리/장기숙박 4·6자리 입력 UX는 별도 계약이다.
 - 서버는 요청의 `room_id`로 현재 `rooms.room_number`를 다시 조회하고 저장·표시용 canonical credential을 `<room_number>-<pin_digits>`로 조합한다. 클라이언트가 보낸 객실번호 prefix를 신뢰하거나 다른 객실 credential 생성에 사용하지 않는다.
 - DB에는 canonical credential 전체를 AES-256-GCM으로 암호화한 ciphertext, 12-byte random nonce, authentication tag, key version과 bounded nonsecret AAD context(`format/environment/projectRef/roomId/pinVersion`)를 private immutable revision으로 저장하고 current pointer만 CAS 갱신한다. 복구 프로젝트에서는 runtime context가 아니라 revision에 저장된 exact context로 복호화한다. 키는 DB와 분리된 secret manager에 두며 public table, 감사, outbox, 로그에는 평문이나 암호문을 저장하지 않는다.
 - PIN 접근 자격(entitlement)과 최대 30초 원문 reveal lease를 분리한다. entitlement는 assignment 저장·알림 outbox가 같은 transaction에서 확정되는 시점부터 정확한 assignment/room/maid/PIN revision에 귀속되며 `availableFrom` 전이라도 이미 알림된 본인 담당이면 유효하다.
@@ -917,6 +941,14 @@ target, assignment, attempt, submission의 `room_id`, `maid_id`, revision이 서
 - bootstrap 성공의 `initialized`는 그 batch transaction에서 신규 revision/current/mismatch sync/audit가 확정된 객실이고, `skipped`는 기존 current PIN 또는 미해결 물리 변경을 보존하기 위해 의도적으로 건너뛴 객실이다. 검증 오류를 `skipped`로 숨기지 않으며 DB validation 오류는 batch transaction 전체를 rollback해 업무 원장 변경 0건으로 끝난다. timeout·응답 유실은 rollback 증거가 아니므로 같은 `Idempotency-Key`로 receipt를 재생하고, 아직 현장 확인 전이면 새 30초 admin reveal lease로 같은 암호화 revision을 다시 확인한다.
 - `[확정 — 2026-09-13 #137 source]` developer/admin은 `pending`, `failed`, `operatorBlocked`, `oldestPendingAt`, `lastSuccessAt`, `lastErrorCode`와 CAS version만 조회한다. full resync는 서버가 요청 시점의 정확한 121실 room/PIN current snapshot을 만들고 global singleton fence의 유일한 provider permit으로 `A1:H122`를 DB 정본에서 재작성한다. 요청·claim은 environment/project/spreadsheet/tab 전체의 source-controlled SHA-256 target identity에 묶이며 mapping 변경·stale snapshot·경쟁은 fail-closed한다. 성공 marker 이전에 생성된 snapshot-room incremental/uncertain 작업만 supersede하고 이후 PIN 변경은 보존한다. Sheet→DB 입력, PIN/envelope/credential/token/raw Google response 공개, production mapping·활성화는 금지한다.
 - `[현재 구현 — Issue #194 production source 배포, hosted 활성화 별도]` 64번째 append-only migration은 exact typed delivery outbox를 source evidence로 고정한 private immutable entitlement ledger와 30초 reveal lease를 연결한다. 최초 grant는 active/password-complete actor만 허용하고, PIN rotation successor는 current workflow와 객실별 최소 미래 service date의 이미 통보된 assignment만 허용한다. deactivation 진행 상태에는 신규 successor를 만들지 않고 inactive/departed 최종 정리에서 남은 entitlement/reveal을 닫는다. DB/API 배포 완료는 hosted provider·Google Sheets/Cron 활성화나 실제 PIN mutation smoke 완료를 뜻하지 않는다.
+
+### `[확정 — 2026-10-13 사용자 결정, #452]` 명시적 PIN 가져오기·내보내기
+
+- 위 #69/#137의 역방향 금지는 관리자 명시 실행에 한해 예외로 한다. 지정 Google Drive 문서의 정확한 `시트 1` B/C열(객실 번호/비밀번호)만 직접 읽는다. 요일·특이사항을 읽거나 숙박 유형을 추론하지 않는다. 공용시설은 명시적 이름으로 제외한다.
+- 관리자는 원문 없는 미리보기 후 같은 actor/session에 묶인 5분 token으로 원자 적용한다. source/room/PIN 변경·중복·미등록·빈 값·접두부 불일치는 재검증 또는 전체 거절한다. Google 호출은 transaction 밖에서 수행한다.
+- 새 암호화 revision의 source는 `sheet_import`이며 상태는 물리 확인 전 `mismatch`다. 기존 실제 PIN 재입력/confirm 절차로 도어락 확인을 완료한다. PIN rotation의 기존 entitlement/reveal 무효화 정책을 재사용한다.
+- 관리자 명시 Excel 다운로드는 일반 30초 reveal과 별도의 승인된 파일 반출 경로다. active 객실의 현재 저장값(미확인 포함)을 B/C 문자열로 제공하고 `sensitive.read` 감사, no-store, 최종 권한/version 재검증을 적용한다. 미설정은 빈 셀이며 PIN은 감사·오류·로그·임시파일에 남기지 않는다.
+- 원본 읽기 대상과 기존 단방향 쓰기 projection은 서로 다른 spreadsheet로 설정한다. 가져오기는 원본에 쓰거나 Sheet outbox를 발생시키지 않는다. 운영 연결/배포는 별도 승인 범위다. 구현·설정·검증은 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다.
 
 ### `[확정]` 개인정보 보존
 
