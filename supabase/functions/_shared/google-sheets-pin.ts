@@ -29,6 +29,29 @@ export interface GoogleSheetsServiceAccount {
   email: string;
   privateKeyPem: string;
 }
+export interface GoogleSheetsPhotoOAuth {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+export type GoogleSheetsImportCredentials =
+  | GoogleSheetsServiceAccount
+  | GoogleSheetsPhotoOAuth;
+
+/** Prefer the approved photo OAuth; partial configuration must not silently fall back. */
+export function roomPinImportCredentials(
+  env: (name: string) => string | undefined,
+): GoogleSheetsImportCredentials {
+  const oauth = {
+    clientId: env("GOOGLE_DRIVE_CLIENT_ID") ?? "",
+    clientSecret: env("GOOGLE_DRIVE_CLIENT_SECRET") ?? "",
+    refreshToken: env("GOOGLE_DRIVE_REFRESH_TOKEN") ?? "",
+  };
+  return Object.values(oauth).some(Boolean) ? oauth : {
+    email: env("GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL") ?? "",
+    privateKeyPem: env("GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY") ?? "",
+  };
+}
 export interface RoomPinSheetRow {
   sheetRow: number;
   roomNumber: string;
@@ -77,48 +100,72 @@ const safeTimestamp = (value: string): string => {
   return value;
 };
 
-/** Read-only credentials and exact tab identity; no mutations or formula evaluation. */
+/** Read-only operations with exact tab identity; OAuth grants are never expanded. */
 export async function readRoomPinImportSheet(
   spreadsheetId: string,
   sheetId: number,
-  serviceAccount: GoogleSheetsServiceAccount,
+  serviceAccount: GoogleSheetsImportCredentials,
   fetcher: typeof fetch = fetch,
 ): Promise<unknown[][]> {
   const deadline = Date.now() + 15000;
   try {
-    const key = await importServiceAccountKey(serviceAccount),
-      issued = Math.floor(Date.now() / 1000);
-    const input = b64url(utf8(JSON.stringify({ alg: "RS256", typ: "JWT" }))) +
-      "." + b64url(utf8(JSON.stringify({
-        iss: serviceAccount.email,
-        scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
-        aud: "https://oauth2.googleapis.com/token",
-        iat: issued,
-        exp: issued + 300,
-      })));
-    const signature = b64url(
-      new Uint8Array(
-        await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, bytes(utf8(input))),
-      ),
-    );
+    let authBody: URLSearchParams;
+    if ("refreshToken" in serviceAccount) {
+      if (
+        Object.values(serviceAccount).some((value) =>
+          !value || value.length > 4096 || /[\r\n]/.test(value)
+        )
+      ) return fail("PROVIDER_CONFIGURATION_ERROR");
+      authBody = new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: serviceAccount.clientId,
+        client_secret: serviceAccount.clientSecret,
+        refresh_token: serviceAccount.refreshToken,
+      });
+    } else {
+      const key = await importServiceAccountKey(serviceAccount),
+        issued = Math.floor(Date.now() / 1000);
+      const input = b64url(utf8(JSON.stringify({ alg: "RS256", typ: "JWT" }))) +
+        "." + b64url(utf8(JSON.stringify({
+          iss: serviceAccount.email,
+          scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+          aud: "https://oauth2.googleapis.com/token",
+          iat: issued,
+          exp: issued + 300,
+        })));
+      const signature = b64url(
+        new Uint8Array(
+          await crypto.subtle.sign(
+            "RSASSA-PKCS1-v1_5",
+            key,
+            bytes(utf8(input)),
+          ),
+        ),
+      );
+      authBody = new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion: input + "." + signature,
+      });
+    }
     const auth = await boundedFetch(
       fetcher,
       "https://oauth2.googleapis.com/token",
       {
         method: "POST",
-        body: new URLSearchParams({
-          grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-          assertion: input + "." + signature,
-        }),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: authBody,
       },
       deadline,
       Date.now,
     );
+    if (auth.status === 429) return fail("RATE_LIMITED");
+    if (auth.status >= 500) return fail("PROVIDER_UNAVAILABLE");
     if (!auth.ok) return fail("AUTHENTICATION_FAILED");
     const token = await boundedJson(auth, deadline, Date.now);
     if (
       typeof token.access_token !== "string" ||
       token.access_token.length < 20 || token.access_token.length > 4096 ||
+      !/^[A-Za-z0-9._~+/-]+$/.test(token.access_token) ||
       token.token_type !== "Bearer"
     ) return fail("PROVIDER_RESPONSE_INVALID");
     const query = new URLSearchParams({
@@ -137,7 +184,10 @@ export async function readRoomPinImportSheet(
       deadline,
       Date.now,
     );
-    if (response.status === 403) return fail("AUTHORIZATION_FAILED");
+    if (response.status === 401) return fail("AUTHENTICATION_FAILED");
+    if (response.status === 403 || response.status === 404) {
+      return fail("AUTHORIZATION_FAILED");
+    }
     if (response.status === 429) return fail("RATE_LIMITED");
     if (!response.ok) return fail("PROVIDER_UNAVAILABLE");
     const data = await boundedJson(response, deadline, Date.now, 256 * 1024);
