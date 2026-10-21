@@ -1,5 +1,15 @@
 # 백엔드 GPT/Codex 제품·구현 가이드
 
+## [확정 — 2026-10-14 #452] 지정 PIN 시트 읽기 인증 재사용
+
+사용자 결정에 따라 명시적 PIN 가져오기의 읽기 adapter는 기존 사진 저장의
+`GOOGLE_DRIVE_CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN` OAuth를 재사용한다.
+토큰 권한을 확장하거나 원본 시트를 공개하지 않는다. 지정 문서·탭 B/C만 GET으로 읽고,
+권한 부족은 실패로 처리한다. 일부 OAuth 설정이 누락되면 다른 계정으로 자동 전환하지 않는다.
+OAuth 설정이 전혀 없는 기존 환경의 서비스계정 읽기 호환은 보존한다.
+기존 DB→Sheet projection worker의 서비스계정·대상 allowlist와 사진 동작은 변경하지 않는다.
+실제 접근 검증·source 병합·운영 API 배포·PIN 적용은 각각 별도 상태로 기록한다.
+
 ## [확정 — 2026-10-13 #446] 미착수 배정의 KST 자정 이월
 
 Asia/Seoul 00:00에 전날 미배정·미착수 업무를 새 오늘 계획으로 이월한다. 원 target ID와

@@ -1,6 +1,7 @@
 import cors from '@fastify/cors';
 import { RoomPinTransfer } from './modules/rooms/room-pin-transfer.js';
 import { GoogleRoomPinImportSource } from './modules/rooms/google-sheets-pin-import.js';
+import { roomPinImportCredentials } from './modules/rooms/google-sheets-pin.js';
 import { roomPinTransferDatabaseError } from './modules/rooms/room-pin-transfer-http.js';
 import { createRoomPinTransferRoutes } from './modules/rooms/room-pin-transfer.routes.js';
 import helmet from '@fastify/helmet';
@@ -161,10 +162,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         keyring: JSON.parse(options.env.ROOM_PIN_KEYRING_JSON) as Record<string, string>,
         environment: options.env.APP_ENV, projectRef: options.env.SUPABASE_PROJECT_REF ?? 'local'
       }, new GoogleRoomPinImportSource(options.env.ROOM_PIN_IMPORT_SPREADSHEET_ID ?? '',
-        options.env.ROOM_PIN_IMPORT_SHEET_ID ? Number(options.env.ROOM_PIN_IMPORT_SHEET_ID) : -1, {
-          email: options.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL ?? '',
-          privateKeyPem: options.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY ?? ''
-        }, options.env.GOOGLE_SHEETS_SPREADSHEET_ID), options.env.ROOM_PIN_TRANSFER_HMAC_SECRET),
+        options.env.ROOM_PIN_IMPORT_SHEET_ID ? Number(options.env.ROOM_PIN_IMPORT_SHEET_ID) : -1,
+        roomPinImportCredentials(name => options.env[name as keyof typeof options.env] as string | undefined),
+        options.env.GOOGLE_SHEETS_SPREADSHEET_ID), options.env.ROOM_PIN_TRANSFER_HMAC_SECRET),
       assignments: new SupabaseAssignmentService(clients),
       assignmentPreview: new SupabaseAssignmentPreviewService(clients),
       rooms: new SupabaseRoomService(clients, {

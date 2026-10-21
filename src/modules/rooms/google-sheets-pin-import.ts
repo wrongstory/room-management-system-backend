@@ -1,5 +1,5 @@
 import {
-  type GoogleSheetsServiceAccount,
+  type GoogleSheetsImportCredentials,
   readRoomPinImportSheet,
   RoomPinSheetProviderError,
 } from "./google-sheets-pin.js";
@@ -10,7 +10,7 @@ export class GoogleRoomPinImportSource implements TransferSource {
   constructor(
     private readonly spreadsheetId: string,
     private readonly sheetId: number,
-    private readonly serviceAccount: GoogleSheetsServiceAccount,
+    private readonly serviceAccount: GoogleSheetsImportCredentials,
     private readonly projectionSpreadsheetId?: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {

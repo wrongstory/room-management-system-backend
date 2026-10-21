@@ -1,6 +1,6 @@
 // Generated from src/modules/rooms/google-sheets-pin-import.ts. DO NOT EDIT.
 import {
-  type GoogleSheetsServiceAccount,
+  type GoogleSheetsImportCredentials,
   readRoomPinImportSheet,
   RoomPinSheetProviderError,
 } from "./google-sheets-pin.ts";
@@ -11,7 +11,7 @@ export class GoogleRoomPinImportSource implements TransferSource {
   constructor(
     private readonly spreadsheetId: string,
     private readonly sheetId: number,
-    private readonly serviceAccount: GoogleSheetsServiceAccount,
+    private readonly serviceAccount: GoogleSheetsImportCredentials,
     private readonly projectionSpreadsheetId?: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {

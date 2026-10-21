@@ -2,6 +2,7 @@ import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import { config } from "./room-pin-api.ts";
 import { RoomPinTransfer } from "./room-pin-transfer.ts";
 import { GoogleRoomPinImportSource } from "./google-sheets-pin-import.ts";
+import { roomPinImportCredentials } from "./google-sheets-pin.ts";
 import {
   roomPinTransferDatabaseError,
   roomPinTransferFailure,
@@ -71,11 +72,7 @@ export async function roomPinTransferResponse(
         Deno.env.get("ROOM_PIN_IMPORT_SHEET_ID")
           ? Number(Deno.env.get("ROOM_PIN_IMPORT_SHEET_ID"))
           : -1,
-        {
-          email: Deno.env.get("GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL") ?? "",
-          privateKeyPem:
-            Deno.env.get("GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY") ?? "",
-        },
+        roomPinImportCredentials((name) => Deno.env.get(name)),
         Deno.env.get("GOOGLE_SHEETS_SPREADSHEET_ID"),
       ),
       Deno.env.get("ROOM_PIN_TRANSFER_HMAC_SECRET"),
