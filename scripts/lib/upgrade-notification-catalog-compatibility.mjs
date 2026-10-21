@@ -12,8 +12,12 @@ const catalogTable = 'private.notification_event_catalog';
 const literal = value => `'${value.replaceAll("'", "''")}'`;
 
 function checkExpectedCount(expectedCount) {
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 112,
-    'Only the audited95..112 upgrade range is supported; index-only112 adds no catalog rows');
+  // The runner pins the exact reviewed source before resetting the database.
+  // 113..119 add/patch functions, indexes and a nullable cursor column, but do
+  // not backfill old rows or add notification catalog rows. Keep the sole111
+  // exception and whole-row comparison; never accept an unknown future tail.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 119,
+    'Only the audited95..119 upgrade range is supported; 112..119 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
