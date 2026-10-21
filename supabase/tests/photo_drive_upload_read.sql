@@ -64,6 +64,20 @@ insert into flow values('operation',pg_temp.begin_upload('admission',1));
 select is(pg_temp.begin_upload('admission',1), (select result from flow where label='operation'),'same canonical upload retries operation');
 select is((select count(*) from private.photo_upload_admission_bindings),1::bigint,'admission binding is exactly once');
 select public.claim_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,repeat('c',64));
+-- #464 final-release coverage; SQL execution requires separate approval.
+savepoint retry_release;
+select throws_ok($$select public.release_pre_provider_photo_upload(pg_temp.pid(3),pg_temp.pid(903),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64))$$,
+ '42501','PHOTO_ACCESS_REQUIRED','other maid cannot release upload');
+select throws_ok($$select public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('d',64))$$,
+ '40001','PHOTO_UPLOAD_FENCE_CONFLICT','wrong claim cannot release upload');
+select is(public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)),true,
+ 'pre-file failure releases exact live claim');
+select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','307200','release keeps quota reservation');
+select is((select count(*) from private.photo_upload_events where operation_id=pg_temp.val('operation','operationId')::uuid),3::bigint,'release appends state event');
+select is(public.claim_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,repeat('d',64))->>'leaseVersion','2','same operation can immediately reclaim');
+select throws_ok($$select public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64))$$,
+ '40001','PHOTO_UPLOAD_FENCE_CONFLICT','late old caller cannot release successor lease');
+rollback to retry_release;
 insert into flow values('context',public.get_photo_provider_context(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)));
 select ok((select result->'providerFileId'='null'::jsonb from flow where label='context'),'provider context starts without fabricated file identity');
 select ok((select result->>'roomNumber'=(select notified_room_number_snapshot from public.cleaning_assignments where id=pg_temp.pid(401)) from flow where label='context'),'folder room comes from notified snapshot');
@@ -85,6 +99,8 @@ select throws_ok($$select public.reserve_photo_provider_identity(pg_temp.pid(2),
   '23514','PHOTO_FOLDER_PARENT_REQUIRED','file identity cannot bypass the room folder winner');
 select public.reserve_photo_provider_identity(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'synthetic_drive_file_84','synthetic_drive_folder_84');
 select is((select count(*) from private.photo_drive_identities),1::bigint,'pre-generated file identity persisted before external create');
+select is(public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)),false,
+ 'reserved external identity cannot be released as pre-file failure');
 select is((select count(*) from private.photo_provider_objects where uploaded_at is not null),0::bigint,'identity reservation is not provider success');
 select lives_ok($$select public.reserve_photo_provider_identity(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'synthetic_drive_file_84','synthetic_drive_folder_84')$$,'same pre-generated ID replay');
 select throws_ok($$select public.reserve_photo_provider_identity(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'synthetic_drive_rotated_84','synthetic_drive_folder_84')$$,'23505','PHOTO_PROVIDER_IDENTITY_CONFLICT','timeout cannot rotate file ID');
@@ -97,6 +113,8 @@ select public.record_admitted_photo_provider_success(pg_temp.val('operation','op
 select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','307200','late DB success stays reserved even when Google createdTime predates snapshot');
 update flow set result=public.finalize_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)) where label='operation';
 select is(pg_temp.val('operation','status'),'accepted','same actual-upload KST date is accepted normally');
+select is(public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)),false,
+ 'accepted upload cannot be released');
 select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','307200','acceptance does not prematurely release quota before new about response');
 select public.refresh_photo_storage_quota(clock_timestamp(),1100);
 select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','0','refresh started after provider success absorbs exactly prior bytes');

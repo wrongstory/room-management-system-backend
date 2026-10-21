@@ -709,6 +709,39 @@ export class PhotoService {
       );
     } catch (error) {
       // Lost finalize response is not rejection. A failed reconciliation NEVER authorizes deletion.
+      // Only DB-proven pre-file failures may relinquish this exact claim immediately.
+      // An identity reservation/uncertain upload must keep its existing recovery fence.
+      let released = false;
+      if (photoError(error).statusCode === 503) {
+        try {
+          released = await this.#rpc("release_pre_provider_photo_upload", {
+            ...this.#actor(i),
+            ...worker,
+          }) === true;
+        } catch {
+          // Missing rollout RPC, revoked session or lost response never bypasses the lease.
+        }
+        if (!released) {
+          // Release may have committed despite response loss. Never convert the
+          // now-unleased pre-file operation into a terminal reconciliation state.
+          // Only a read-only, live-session receipt can turn this failure into success.
+          try {
+            const receipt = projectPhotoUploadOperation(
+              await this.#rpc("get_photo_upload_receipt_with_session", {
+                ...this.#actor(i),
+                p_operation_id: begin.operationId,
+              }),
+            );
+            if (
+              receipt.status === "accepted" &&
+              receipt.operationId === begin.operationId
+            ) return response(receipt);
+          } catch {
+            /* Keep durable state and the original provider diagnostic. */
+          }
+        }
+        throw photoError(error);
+      }
       let reconciled: PhotoUploadOperationProjection | undefined;
       try {
         reconciled = await this.reconcile(begin.operationId);

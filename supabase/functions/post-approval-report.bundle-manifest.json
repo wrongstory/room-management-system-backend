@@ -116,7 +116,7 @@
     "src/modules/post-approval-room-issues/post-approval-room-issue-upload-contract.ts": "f6e8a15de44036733f6c595fd2ab3af55d3483fb4b5c8c4c3fa250e72e63c71e",
     "src/modules/post-approval-room-issues/post-approval-room-issue.routes.ts": "4e21f391d9c4358b1c3f8bfd6dcabf27c8ca0a1a8af9823b3ffd1475277599d6",
     "src/modules/post-approval-room-issues/post-approval-room-issue.service.ts": "42f68f8214f91aebd3274af1c466c636865d6f23b1229b8bc40b5fb96b4902a6",
-    "supabase/functions/_shared/photo-binary.ts": "010b643d6b193ab916280065e8f3e591ccf0633f23fd27e2d61ab4c013a60399",
+    "supabase/functions/_shared/photo-binary.ts": "575b498f9150903625a59fbee9b744757b1a0991140c734e5af6b69349cd5578",
     "supabase/functions/_shared/post-approval-evidence-api.ts": "80d4d885b2f5415a281f2f212f7d38a69c3936a83b6daa6840489dc4420a1bfd",
     "supabase/functions/_shared/post-approval-evidence-contract.ts": "2edbf644326452b420bb67805a8f9c8c34fcd2a3dfbd99f107207c9f3a046833",
     "supabase/functions/_shared/post-approval-evidence-handover-contract.ts": "e969dda7f616a479c2d0d16f7e788f855301682ad38a4632d78639edd2c183ad",
