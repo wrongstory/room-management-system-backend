@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { GoogleDriveProvider, type DriveObject } from '../src/modules/photos/google-drive.js';
+import { photoFailureDiagnostic } from '../src/modules/photos/photo-binary.js';
 
 const bytes = Uint8Array.from([1, 2, 3]);
 const object: DriveObject = { fileId: 'synthetic_file_123', folderId: 'synthetic_folder_123', objectId: '00000000-0000-4000-8000-000000000001', mime: 'image/jpeg', sizeBytes: 3, sha256: createHash('sha256').update(bytes).digest('hex') };
@@ -37,6 +38,28 @@ function harness(options: { uploadStatus?: number; timeout?: boolean; digest?: s
   return { provider, calls };
 }
 describe('Google Drive HTTP adapter, fake transport only', () => {
+  it.each([401, 403, 429, 500, 503])('diagnoses HTTP %s without storing provider body or credentials', async status => {
+    const provider = new GoogleDriveProvider({ clientId: 'synthetic', clientSecret: 'synthetic-secret', refreshToken: 'synthetic-refresh', rootFolderId: 'synthetic_root_123' },
+      async input => String(input).includes('oauth2.googleapis.com')
+        ? Response.json({ access_token: 'synthetic', token_type: 'Bearer', expires_in: 3600 })
+        : new Response('synthetic-private-provider-body', { status }));
+    const error = await provider.generateUploadIds().catch(error => error);
+    expect(error).toMatchObject({ statusCode: 503, code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(photoFailureDiagnostic(error, '10000000-0000-4000-8000-000000000001')?.code)
+      .toBe('PHOTO_PROVIDER_HTTP_' + (status === 401 || status === 403 ? 'AUTH' : status === 429 ? 'THROTTLED' : 'UPSTREAM'));
+    expect(JSON.stringify(error)).not.toMatch(/synthetic|private/);
+  });
+  it('distinguishes OAuth rejection and transport failure', async () => {
+    for (const transport of [
+      async () => new Response('private', { status: 400 }),
+      async () => { throw new Error('private transport message'); },
+    ]) {
+      const provider = new GoogleDriveProvider({ clientId: 'synthetic', clientSecret: 'synthetic', refreshToken: 'synthetic', rootFolderId: 'synthetic_root_123' }, transport);
+      const error = await provider.quota().catch(error => error);
+      expect(error).toMatchObject({ statusCode: 503, diagnostic: { phase: 'PROVIDER_AUTH' } });
+      expect(JSON.stringify(error)).not.toContain('private');
+    }
+  });
   it.each([[], ['synthetic_one_123'], ['synthetic_one_123', 'synthetic_two_123', 'synthetic_three_123', 'synthetic_four_123'],
     ['synthetic_one_123', 'synthetic_one_123', 'synthetic_three_123'], ['synthetic_one_123', 'bad/id', 'synthetic_three_123']].map(ids => ({ ids })))('rejects malformed or duplicate candidate batches $ids', async ({ ids }) => {
     const provider = new GoogleDriveProvider({ clientId: 'synthetic', clientSecret: 'synthetic', refreshToken: 'synthetic', rootFolderId: 'synthetic_root_123' }, async input =>
