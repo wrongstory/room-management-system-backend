@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { classify, fingerprint, hasFullProof, planValidation } from '../scripts/db-validation-gate.mjs';
+import { assertUiOnlyChange, classify, fingerprint, hasFullProof, planValidation,
+  reuseApprovedUiProof, uiProof, verifyApprovedUiEvidence } from '../scripts/db-validation-gate.mjs';
 
 const repository = 'wrongstory/room-management-system-backend';
 const sha = 'a'.repeat(40);
@@ -13,6 +14,69 @@ const run = { id: 123, run_attempt: 1, head_sha: sha, head_repository: { full_na
   path: '.github/workflows/quality.yml', status: 'completed', conclusion: 'success', event: 'pull_request',
   pull_requests: [{ number: 430, base: { ref: 'main' } }] };
 const job = { name: 'migration', conclusion: 'success', steps: [{ name: `Full DB proof ${hash}`, conclusion: 'success' }] };
+
+describe('#469 bounded UI-only proof bridge', () => {
+  const paths = ['tools/backend-console/src/room_management_console/ui.py',
+    'tools/backend-console/tests/test_ui.py', 'scripts/db-validation-gate.mjs',
+    'tests/db-validation-gate.test.js', 'supabase/migrations/example.sql', 'src/server.ts',
+    'tools/backend-console/src/room_management_console/api_client.py', 'package-lock.json',
+    'tools/backend-console/uv.lock', '.github/workflows/quality.yml'];
+  const entry = (path, blob = 'a'.repeat(40), mode = '100644') => `${mode} blob ${blob}\t${path}`;
+  const tree = paths.map(path => entry(path)).join('\0');
+  it('allows only the four reviewed UI/policy paths plus narrative docs', () => {
+    for (const path of paths.slice(0, 4)) {
+      expect(() => assertUiOnlyChange(tree, tree.replace(entry(path), entry(path, 'b'.repeat(40))))).not.toThrow();
+    }
+    expect(() => assertUiOnlyChange(tree, tree + '\0' + entry('docs/UI.md'))).not.toThrow();
+  });
+  it.each(paths.slice(4))('rejects protected input mutation/addition/deletion: %s', path => {
+    for (const changed of [tree.replace(entry(path), entry(path, 'b'.repeat(40))),
+      tree.replace(entry(path), ''), tree + '\0' + entry(`${path}.new`)]) {
+      expect(() => assertUiOnlyChange(tree, changed)).toThrow();
+    }
+  });
+  it.each(paths.slice(0, 4))('rejects deleting UI/policy files or replacing them with symlinks: %s', path => {
+    expect(() => assertUiOnlyChange(tree, tree.replace(entry(path), ''))).toThrow();
+    expect(() => assertUiOnlyChange(tree, tree.replace(entry(path), entry(path, 'a'.repeat(40), '120000')))).toThrow();
+  });
+  const evidence = (changeRun = {}, changePr = {}, jobs) => {
+    const approvedPr = { ...pr, merged_at: '2026-10-22', merge_commit_sha: uiProof.baseline,
+      head: { ...pr.head, ref: 'release/v0.9.7', sha: uiProof.head }, ...changePr };
+    const approvedRun = { ...run, id: uiProof.runId, head_sha: uiProof.head,
+      head_branch: 'release/v0.9.7', ...changeRun };
+    return vi.fn(async path => {
+      if (path === 'pulls/468') return approvedPr;
+      if (path === `actions/runs/${uiProof.runId}`) return approvedRun;
+      if (path === `actions/runs/${uiProof.runId}/attempts/1/jobs?per_page=100`) return {
+        total_count: 1, jobs: jobs ?? [{ ...job, steps: [{ name: `Full DB proof ${uiProof.hash}`, conclusion: 'success' }] }],
+      };
+      throw new Error('Unexpected evidence route');
+    });
+  };
+  it('follows the original full proof, not a reuse marker', async () => {
+    expect(await verifyApprovedUiEvidence({ repository, api: evidence() })).toEqual({
+      mode: 'reused', full: false, hash: uiProof.hash, runId: uiProof.runId, attempt: 1,
+    });
+    for (const jobs of [[], [{ ...job, steps: [] }], [{ ...job, conclusion: 'failure' }]]) {
+      await expect(verifyApprovedUiEvidence({ repository, api: evidence({}, {}, jobs) })).rejects.toThrow();
+    }
+  });
+  it.each([{ conclusion: 'failure' }, { status: 'in_progress' }, { run_attempt: 2 },
+    { head_sha: sha }, { head_branch: 'other' }, { event: 'push' }, { path: 'other.yml' },
+    { head_repository: { full_name: 'fork/repo' } }])('rejects changed source run %j', async change => {
+    await expect(verifyApprovedUiEvidence({ repository, api: evidence(change) })).rejects.toThrow();
+  });
+  it('rejects wrong merge, tree, repository, unavailable evidence; never falls back to a DB run', async () => {
+    await expect(verifyApprovedUiEvidence({ repository, api: evidence({}, { merge_commit_sha: sha }) })).rejects.toThrow();
+    await expect(verifyApprovedUiEvidence({ repository: 'fork/repo', api: evidence() })).rejects.toThrow();
+    await expect(verifyApprovedUiEvidence({ repository, api: async () => { throw new Error('offline'); } })).rejects.toThrow();
+    await expect(reuseApprovedUiProof({ repository, api: evidence(), baselineTree: tree, currentTree: tree })).rejects.toThrow('baseline');
+    await expect(planValidation({ ...harness().input,
+      event: { pull_request: { ...pr, head: { ...pr.head, ref: uiProof.branch } } },
+      loadUiTrees: () => { throw new Error('changed API input'); },
+    })).rejects.toThrow('changed API input');
+  });
+});
 function harness({ runs = [run], jobs = [job], blobs = sourceBlobs, pulls, reject = false } = {}) {
   const api = vi.fn(async path => {
     if (reject) throw new Error('API unavailable');
