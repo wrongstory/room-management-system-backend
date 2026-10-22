@@ -23,6 +23,16 @@ describe('#469 bounded UI-only proof bridge', () => {
     'tools/backend-console/uv.lock', '.github/workflows/quality.yml'];
   const entry = (path, blob = 'a'.repeat(40), mode = '100644') => `${mode} blob ${blob}\t${path}`;
   const tree = paths.map(path => entry(path)).join('\0');
+  it('accepts only the exact reviewed registry-only checker blob', () => {
+    const path = 'scripts/check-edge-functions.mjs';
+    const base = `${tree}\0${entry(path)}`;
+    const approved = `${tree}\0${entry(path, '823dcc7941479afec047295482ada316dc17a053')}`;
+    expect(() => assertUiOnlyChange(base, approved)).not.toThrow();
+    for (const changed of [tree, `${tree}\0${entry(path, 'b'.repeat(40))}`,
+      `${tree}\0${entry(path, '823dcc7941479afec047295482ada316dc17a053', '120000')}`]) {
+      expect(() => assertUiOnlyChange(base, changed)).toThrow();
+    }
+  });
   it('allows only the four reviewed UI/policy paths plus narrative docs', () => {
     for (const path of paths.slice(0, 4)) {
       expect(() => assertUiOnlyChange(tree, tree.replace(entry(path), entry(path, 'b'.repeat(40))))).not.toThrow();

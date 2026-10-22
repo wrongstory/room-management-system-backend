@@ -40,6 +40,16 @@ Windows/PySide6 6.10.3 최소 진단에서 기존 finished lambda도 GUI thread�
 
 ## 현재 상태
 
+### CI 이미지 경로 안정화 추가 승인
+
+2026-10-22 application attempt1~3의 ECR Data limit exceeded에 따라 사용자가
+이미지 다운로드 경로 안정화를 승인했다. checker의 두 ECR 주소만 공식 GHCR로
+변경하며 v1.74.3 및 sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c는 유지한다.
+GHCR에서 동일 digest manifest 조회 성공. 검사 옵션/기준과 workflow는 변경하지 않는다.
+DB bridge는 checker의 정확한 Git blob 823dcc7941479afec047295482ada316dc17a053만
+추가 허용한다. 임의 checker 수정·삭제·symlink는 차단하며 기존 원본 proof를 재사용한다.
+추가 검증: Node3133, gate48, typecheck/build, 독립 QA PASS. 전체 DB NOT RUN.
+
 로컬 Node 3132건(2 workers), gate 47건, Python 113건 PASS.
 Python ruff/format/mypy 26파일 PASS. 독립 소스 QA P0/P1/P2 없음.
 전체 DB NOT RUN(재실행 금지), 운영 migration/API 미실행. 원격 application CI는 대기.

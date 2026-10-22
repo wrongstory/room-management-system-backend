@@ -44,7 +44,14 @@ export function assertUiOnlyChange(baselineTree, currentTree) {
       throw new Error('UI bridge cannot add/delete/replace allowed files with links');
     }
   }
-  const withoutUi = tree => entries(tree).filter(entry => !uiPaths.has(pathOf(entry))).join('\0');
+  // #469 explicit registry-only approval: exact reviewed blob, never arbitrary
+  // checker/workflow edits. Both runtime references retain the original digest.
+  const imagePath = 'scripts/check-edge-functions.mjs';
+  const approvedImage = `100644 blob 823dcc7941479afec047295482ada316dc17a053\t${imagePath}`;
+  if (current.get(imagePath) !== base.get(imagePath) && current.get(imagePath) !== approvedImage) {
+    throw new Error('Unapproved Edge checker change; DB rerun is NOT authorized');
+  }
+  const withoutUi = tree => entries(tree).filter(entry => !uiPaths.has(pathOf(entry)) && pathOf(entry) !== imagePath).join('\0');
   if (fingerprint(withoutUi(baselineTree)) !== fingerprint(withoutUi(currentTree))) {
     throw new Error('Non-UI input changed; DB rerun is NOT authorized');
   }
