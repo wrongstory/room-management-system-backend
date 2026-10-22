@@ -125,9 +125,9 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120].includes(manifest.totalCount));
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121].includes(manifest.totalCount));
   assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
-  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry' }[manifest.totalCount]);
+  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot' }[manifest.totalCount]);
   assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
@@ -187,10 +187,15 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
     assert.equal(validated[118].sha256, '77a5de1fcb89d355bb59a2247c6b36414defb4ec911e1e8afcc30aaaa8e64725',
       'Only the source-reviewed PIN-transfer119 tail is permitted');
   }
-  if (validated.length === 120) {
+  if (validated.length >= 120) {
     assert.equal(validated[119].file, '20261021142440_photo_upload_pre_provider_retry.sql');
     assert.equal(validated[119].sha256, 'a2e2e5383ad8c280b38fcbb4df3d5c9fa02b1b5c750c78dced935b845446c814',
       'Only the source-reviewed photo-retry120 tail is permitted');
+  }
+  if (validated.length === 121) {
+    assert.equal(validated[120].file, '20261022041603_photo_finalize_snapshot.sql');
+    assert.equal(validated[120].sha256, '739c075894943666b8a546a10d838fc406a4bacfd7ddcfc550383468b7bee415',
+      'Only the source-reviewed photo-finalize121 tail is permitted');
   }
   return { entries: validated, ledger: validated[110].canonical };
 }
@@ -209,7 +214,7 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   return { ...local, endpoint: localEndpoint };
 }
 export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
-  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120].includes(installed) && installed <= source.entries.length);
+  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }
