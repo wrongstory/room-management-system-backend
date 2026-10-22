@@ -21,6 +21,11 @@ export interface PhotoProvider {
   remove(fileId: string): Promise<'deleted' | 'not_found'>;
 }
 const unavailable = (): never => { throw new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'); };
+function providerFailure(phase: 'PROVIDER_AUTH' | 'PROVIDER_HTTP' | 'PROVIDER_RESPONSE', status?: number): never {
+  const kind = status === undefined ? 'NETWORK' : status === 401 || status === 403 ? 'AUTH'
+    : status === 429 ? 'THROTTLED' : status >= 500 ? 'UPSTREAM' : 'REJECTED';
+  throw new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE', { phase, kind });
+}
 const mismatch = (): never => { throw new PhotoError(409, 'PHOTO_PROVIDER_IDENTITY_CONFLICT'); };
 function id(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{10,200}$/.test(value)) return mismatch();
@@ -59,7 +64,7 @@ export class GoogleDriveProvider implements PhotoProvider {
       const body = await readPhotoBody(response.body, response.headers.get('content-length'));
       if (body.length > 65536) return unavailable();
       return record(JSON.parse(new TextDecoder().decode(body)));
-    } catch { return unavailable(); }
+    } catch { return providerFailure('PROVIDER_RESPONSE', 400); }
   }
   #signal(deadlineAt?: number): AbortSignal {
     const remaining = deadlineAt === undefined ? 10000 : Math.floor(deadlineAt - Date.now());
@@ -76,13 +81,16 @@ export class GoogleDriveProvider implements PhotoProvider {
           body: new URLSearchParams({ client_id: this.#config.clientId, client_secret: this.#config.clientSecret,
             refresh_token: this.#config.refreshToken, grant_type: 'refresh_token' })
         });
-        if (!response.ok) return unavailable();
+        if (!response.ok) return providerFailure('PROVIDER_AUTH', response.status);
         const row = await this.#json(response);
         if (typeof row.access_token !== 'string' || !/^[A-Za-z0-9._~+/-]{1,4096}$/.test(row.access_token) ||
           row.token_type !== 'Bearer' || typeof row.expires_in !== 'number' || row.expires_in < 60 || row.expires_in > 3600) return unavailable();
         this.#token = { value: row.access_token, expiresAt: Date.now() + row.expires_in * 1000 };
         return row.access_token;
-      } catch { return unavailable(); }
+      } catch (error) {
+        if (error instanceof PhotoError && error.diagnostic) throw error;
+        return providerFailure('PROVIDER_AUTH');
+      }
     })();
     try { return await this.#refresh; } finally { this.#refresh = undefined; }
   }
@@ -96,9 +104,16 @@ export class GoogleDriveProvider implements PhotoProvider {
         headers: { ...init.headers, authorization: `Bearer ${token}` }
       });
       if (response.status === 401) this.#token = undefined;
+      if ([401, 403, 429].includes(response.status) || response.status >= 500) {
+        await response.body?.cancel();
+        return providerFailure('PROVIDER_HTTP', response.status);
+      }
       if (response.status >= 300 && response.status < 400) return unavailable();
       return response;
-    } catch { return unavailable(); }
+    } catch (error) {
+      if (error instanceof PhotoError && error.diagnostic) throw error;
+      return providerFailure('PROVIDER_HTTP');
+    }
   }
   async quota(timing?: PhotoProviderTiming): Promise<{ refreshStartedAt: string; usageBytes: string }> {
     const refreshStartedAt = new Date().toISOString();
@@ -222,7 +237,14 @@ export class GoogleDriveProvider implements PhotoProvider {
   async #purgeRequest(path: string, deadlineAt: number, init: RequestInit = {}): Promise<Response> {
     let response: Response;
     try { response = await this.#request(path, init, false, deadlineAt); }
-    catch { throw new PhotoPurgeProviderError('NETWORK_ERROR'); }
+    catch (error) {
+      if (error instanceof PhotoError && error.diagnostic?.phase === 'PROVIDER_HTTP') {
+        const kind = error.diagnostic.kind;
+        if (kind === 'THROTTLED') throw new PhotoPurgeProviderError('RATE_LIMITED');
+        if (kind !== 'NETWORK') throw new PhotoPurgeProviderError('PROVIDER_ERROR');
+      }
+      throw new PhotoPurgeProviderError('NETWORK_ERROR');
+    }
     if (response.status === 429) throw new PhotoPurgeProviderError('RATE_LIMITED');
     if (!response.ok && response.status !== 404) throw new PhotoPurgeProviderError('PROVIDER_ERROR');
     return response;

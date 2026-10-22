@@ -10,8 +10,8 @@ export const PHOTO_INPUT_MAX_DIMENSION = 5000;
 export const PHOTO_DECODE_BUDGET_MS = 1500;
 export type PhotoMime = 'image/jpeg' | 'image/webp';
 export type PhotoInputMime = PhotoMime | 'image/heic' | 'image/heif';
-const diagnosticPhases = ['BODY', 'INPUT_ENVELOPE', 'INPUT_DECODE', 'INPUT_VALIDATE', 'TRANSFORM', 'ENCODE', 'OUTPUT_ENVELOPE', 'OUTPUT_DECODE', 'OUTPUT_VALIDATE', 'BUDGET'] as const;
-const diagnosticKinds = ['REJECTED', 'WARNING', 'RESOURCE', 'CORRUPT', 'CACHE', 'POLICY', 'DELEGATE', 'NATIVE', 'LIMIT'] as const;
+const diagnosticPhases = ['BODY', 'INPUT_ENVELOPE', 'INPUT_DECODE', 'INPUT_VALIDATE', 'TRANSFORM', 'ENCODE', 'OUTPUT_ENVELOPE', 'OUTPUT_DECODE', 'OUTPUT_VALIDATE', 'BUDGET', 'PROVIDER_AUTH', 'PROVIDER_HTTP', 'PROVIDER_RESPONSE'] as const;
+const diagnosticKinds = ['REJECTED', 'WARNING', 'RESOURCE', 'CORRUPT', 'CACHE', 'POLICY', 'DELEGATE', 'NATIVE', 'LIMIT', 'NETWORK', 'AUTH', 'THROTTLED', 'UPSTREAM'] as const;
 type PhotoDiagnosticPhase = typeof diagnosticPhases[number];
 interface PhotoDiagnostic { phase: PhotoDiagnosticPhase; kind: typeof diagnosticKinds[number] }
 export class PhotoError extends Error {

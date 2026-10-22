@@ -69,6 +69,21 @@ export interface PhotoProvider {
 const unavailable = (): never => {
   throw new PhotoError(503, "PHOTO_PROVIDER_UNAVAILABLE");
 };
+function providerFailure(
+  phase: "PROVIDER_AUTH" | "PROVIDER_HTTP" | "PROVIDER_RESPONSE",
+  status?: number,
+): never {
+  const kind = status === undefined
+    ? "NETWORK"
+    : status === 401 || status === 403
+    ? "AUTH"
+    : status === 429
+    ? "THROTTLED"
+    : status >= 500
+    ? "UPSTREAM"
+    : "REJECTED";
+  throw new PhotoError(503, "PHOTO_PROVIDER_UNAVAILABLE", { phase, kind });
+}
 const mismatch = (): never => {
   throw new PhotoError(409, "PHOTO_PROVIDER_IDENTITY_CONFLICT");
 };
@@ -134,7 +149,7 @@ export class GoogleDriveProvider implements PhotoProvider {
       if (body.length > 65536) return unavailable();
       return record(JSON.parse(new TextDecoder().decode(body)));
     } catch {
-      return unavailable();
+      return providerFailure("PROVIDER_RESPONSE", 400);
     }
   }
   #signal(deadlineAt?: number): AbortSignal {
@@ -165,7 +180,9 @@ export class GoogleDriveProvider implements PhotoProvider {
             }),
           },
         );
-        if (!response.ok) return unavailable();
+        if (!response.ok) {
+          return providerFailure("PROVIDER_AUTH", response.status);
+        }
         const row = await this.#json(response);
         if (
           typeof row.access_token !== "string" ||
@@ -178,8 +195,9 @@ export class GoogleDriveProvider implements PhotoProvider {
           expiresAt: Date.now() + row.expires_in * 1000,
         };
         return row.access_token;
-      } catch {
-        return unavailable();
+      } catch (error) {
+        if (error instanceof PhotoError && error.diagnostic) throw error;
+        return providerFailure("PROVIDER_AUTH");
       }
     })();
     try {
@@ -210,10 +228,15 @@ export class GoogleDriveProvider implements PhotoProvider {
         },
       );
       if (response.status === 401) this.#token = undefined;
+      if ([401, 403, 429].includes(response.status) || response.status >= 500) {
+        await response.body?.cancel();
+        return providerFailure("PROVIDER_HTTP", response.status);
+      }
       if (response.status >= 300 && response.status < 400) return unavailable();
       return response;
-    } catch {
-      return unavailable();
+    } catch (error) {
+      if (error instanceof PhotoError && error.diagnostic) throw error;
+      return providerFailure("PROVIDER_HTTP");
     }
   }
   async quota(
@@ -513,7 +536,19 @@ export class GoogleDriveProvider implements PhotoProvider {
     let response: Response;
     try {
       response = await this.#request(path, init, false, deadlineAt);
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof PhotoError &&
+        error.diagnostic?.phase === "PROVIDER_HTTP"
+      ) {
+        const kind = error.diagnostic.kind;
+        if (kind === "THROTTLED") {
+          throw new PhotoPurgeProviderError("RATE_LIMITED");
+        }
+        if (kind !== "NETWORK") {
+          throw new PhotoPurgeProviderError("PROVIDER_ERROR");
+        }
+      }
       throw new PhotoPurgeProviderError("NETWORK_ERROR");
     }
     if (response.status === 429) {

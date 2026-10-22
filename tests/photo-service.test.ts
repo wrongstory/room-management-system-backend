@@ -55,6 +55,58 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
   return { calls, provider, service: new PhotoService(db, () => provider, async () => { calls.push('decode'); }) };
 }
 describe('photo application admission/provider/finalize boundary', () => {
+  it('releases a DB-proven pre-provider failure and retries the same request without compensation', async () => {
+    let claimedArgs: Record<string, unknown> = {};
+    const s = setup((name, args) => {
+      if (name === 'claim_admitted_photo_upload') claimedArgs = args;
+      if (name === 'release_pre_provider_photo_upload') {
+        expect(args).toEqual({ ...claimedArgs, p_lease_version: 1 });
+        return { data: true, error: null };
+      }
+      return undefined;
+    });
+    vi.mocked(s.provider.generateUploadIds).mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'));
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(s.calls).toContain('release_pre_provider_photo_upload');
+    expect(s.calls).not.toContain('reconcile_admitted_photo_upload');
+    expect(s.provider.upload).not.toHaveBeenCalled();
+    expect(s.provider.remove).not.toHaveBeenCalled();
+    expect(await s.service.upload(request(), identity, id(3), id(4))).toMatchObject({ status: 'accepted' });
+  });
+  it.each([false, null, 'true'])('does not assume pre-provider release from %s', async released => {
+    const s = setup(name => name === 'release_pre_provider_photo_upload' ? { data: released, error: null }
+      : name === 'get_photo_upload_receipt_with_session' ? { data: operation(), error: null } : undefined);
+    vi.mocked(s.provider.generateUploadIds).mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'));
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(s.calls).not.toContain('reconcile_admitted_photo_upload');
+    expect(s.provider.remove).not.toHaveBeenCalled();
+  });
+  it('keeps the original failure when lease release is unavailable', async () => {
+    const s = setup(name => ['release_pre_provider_photo_upload', 'reconcile_admitted_photo_upload'].includes(name)
+      ? { data: null, error: { message: 'PHOTO_UPLOAD_FENCE_CONFLICT' } }
+      : name === 'get_photo_upload_receipt_with_session' ? { data: operation(), error: null } : undefined);
+    vi.mocked(s.provider.generateUploadIds).mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'));
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(s.provider.remove).not.toHaveBeenCalled();
+    expect(s.calls).not.toContain('reconcile_admitted_photo_upload');
+  });
+  it('preserves a successfully released operation after the release response is lost', async () => {
+    let releaseCommitted = false;
+    const s = setup(name => {
+      if (name === 'release_pre_provider_photo_upload') {
+        releaseCommitted = true;
+        return Promise.reject(new Error('synthetic response loss'));
+      }
+      if (name === 'get_photo_upload_receipt_with_session') return { data: operation(), error: null };
+      return undefined;
+    });
+    vi.mocked(s.provider.generateUploadIds).mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'));
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(releaseCommitted).toBe(true);
+    expect(s.calls).not.toContain('reconcile_admitted_photo_upload');
+    expect(await s.service.upload(request(), identity, id(3), id(4))).toMatchObject({ status: 'accepted' });
+    expect(s.provider.remove).not.toHaveBeenCalled();
+  });
   const emptySlots = { attemptId: id(3), assignmentId: id(8), assignmentRevision: 1, slots: [] };
   function includedRequest(option = 'true') { const base = request(); return new Request(base.url + '&includePhotoSlots=' + option, base); }
   it('keeps legacy upload response and RPC sequence unchanged without opt-in', async () => {
