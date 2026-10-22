@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from PySide6.QtCore import QCoreApplication, QThread, Slot
 from PySide6.QtWidgets import QDialog, QMessageBox
 from pytestqt.qtbot import QtBot
+from shiboken6 import delete
 
 import room_management_console.ui as ui_module
-from room_management_console.api_client import BackendApiClient
+from room_management_console.api_client import ApiError, BackendApiClient
 from room_management_console.approved_targets import APPROVED_HOSTED_TARGETS
 from room_management_console.build_info import BuildInfo
 from room_management_console.config import AppConfig
@@ -19,8 +21,121 @@ from room_management_console.ui import (
     LoginDialog,
     ReadonlyDatabasePage,
 )
+from room_management_console.worker import Worker
 
 RECOVERY_TARGET = APPROVED_HOSTED_TARGETS["recovery"]
+
+
+@pytest.mark.parametrize("kind", ["login", "create"])
+@pytest.mark.parametrize("fails", [False, True])
+def test_dialog_destroyed_before_worker_result_has_no_late_widget_callback(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, kind: str, fails: bool
+) -> None:
+    pending: list[Worker] = []
+
+    class DeferredPool:
+        def start(self, worker: Worker) -> None:
+            pending.append(worker)
+
+    def task(*args: object, **kwargs: object) -> None:
+        if fails:
+            raise ApiError(status_code=503, code="TEST_UNAVAILABLE", message="synthetic")
+
+    client = BackendApiClient(
+        config(), transport=httpx.MockTransport(lambda _: httpx.Response(500))
+    )
+    monkeypatch.setattr(client, "login", task)
+    monkeypatch.setattr(client, "create_account", task)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes)
+    dialog: LoginDialog | CreateAccountDialog
+    if kind == "login":
+        dialog = LoginDialog(config(), client)
+        dialog.password.setText("synthetic-password")
+    else:
+        dialog = CreateAccountDialog(client, None)
+        dialog.display_name.setText("합성 계정")
+        dialog.phone.setText("01000000000")
+    monkeypatch.setattr(dialog, "_pool", DeferredPool())
+    try:
+        dialog._submit()
+        assert len(pending) == 1
+    finally:
+        delete(dialog)
+    # Deliver a real Worker result after the C++ receiver has been destroyed.
+    # pytest-qt must see no exception from a dangling Python widget callback.
+    pending[0].run()
+    qtbot.wait(1)
+
+
+@pytest.mark.parametrize("kind", ["login", "create"])
+@pytest.mark.parametrize("fails", [False, True])
+def test_dialog_worker_callbacks_are_bound_to_gui_thread(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, kind: str, fails: bool
+) -> None:
+    events: list[tuple[str, bool]] = []
+    app = QCoreApplication.instance()
+    assert app is not None
+
+    def record(name: str) -> None:
+        events.append((name, QThread.currentThread() == app.thread()))
+
+    class LoginProbe(LoginDialog):
+        @Slot(object)
+        def _logged_in(self, _actor: object) -> None:
+            record("success")
+
+        @Slot(object)
+        def _failed(self, error: object) -> None:
+            record("error")
+
+        @Slot()
+        def _finished(self) -> None:
+            record("finished")
+            super()._finished()
+
+    class CreateProbe(CreateAccountDialog):
+        @Slot(object)
+        def _created(self, result: object) -> None:
+            record("success")
+
+        @Slot(object)
+        def _failed(self, error: object) -> None:
+            record("error")
+
+        @Slot()
+        def _finished(self) -> None:
+            record("finished")
+            super()._finished()
+
+    def task(*args: object, **kwargs: object) -> object:
+        assert QThread.currentThread() != app.thread()
+        if fails:
+            raise ApiError(status_code=503, code="TEST_UNAVAILABLE", message="synthetic")
+        return object()
+
+    client = BackendApiClient(
+        config(), transport=httpx.MockTransport(lambda _: httpx.Response(500))
+    )
+    monkeypatch.setattr(client, "login", task)
+    monkeypatch.setattr(client, "create_account", task)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes)
+    dialog: LoginProbe | CreateProbe
+    if kind == "login":
+        dialog = LoginProbe(config(), client)
+        dialog.password.setText("synthetic-password")
+    else:
+        dialog = CreateProbe(client, None)
+        dialog.display_name.setText("합성 계정")
+        dialog.phone.setText("01000000000")
+    qtbot.addWidget(dialog)
+    dialog._submit()
+    try:
+        qtbot.waitUntil(lambda: len(events) == 2)
+    except Exception:
+        pytest.fail(f"Missing queued callbacks: {events!r}")
+    assert events == [("error" if fails else "success", True), ("finished", True)]
+    assert dialog.buttons.isEnabled()
+    assert dialog._worker is None
 
 
 def config() -> AppConfig:

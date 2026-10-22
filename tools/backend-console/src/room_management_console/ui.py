@@ -6,7 +6,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Any, cast
 
-from PySide6.QtCore import QEvent, QObject, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -57,6 +57,8 @@ def show_api_error(parent: QWidget, error: ApiError) -> None:
 
 
 class LoginDialog(QDialog):
+    _worker: Worker | None = None
+
     def __init__(
         self,
         config: AppConfig,
@@ -109,14 +111,29 @@ class LoginDialog(QDialog):
             return
         self.buttons.setEnabled(False)
         worker = Worker(lambda: self._client.login("admin", password))
-        worker.signals.succeeded.connect(lambda _actor: self.accept())
-        worker.signals.failed.connect(lambda error: show_api_error(self, cast(ApiError, error)))
-        worker.signals.finished.connect(lambda: self.buttons.setEnabled(True))
+        worker.signals.succeeded.connect(self._logged_in, Qt.ConnectionType.QueuedConnection)
+        worker.signals.failed.connect(self._failed, Qt.ConnectionType.QueuedConnection)
+        worker.signals.finished.connect(self._finished, Qt.ConnectionType.QueuedConnection)
+        self._worker = worker
         self._pool.start(worker)
+
+    @Slot(object)
+    def _logged_in(self, _actor: object) -> None:
+        self.accept()
+
+    @Slot(object)
+    def _failed(self, error: object) -> None:
+        show_api_error(self, cast(ApiError, error))
+
+    @Slot()
+    def _finished(self) -> None:
+        self.buttons.setEnabled(True)
+        self._worker = None
 
 
 class CreateAccountDialog(QDialog):
     account_created = Signal(object, str)
+    _worker: Worker | None = None
 
     def __init__(self, client: BackendApiClient, parent: QWidget | None) -> None:
         super().__init__(parent)
@@ -177,11 +194,24 @@ class CreateAccountDialog(QDialog):
                 phone=phone,
             )
         )
-        worker.signals.succeeded.connect(self._created)
-        worker.signals.failed.connect(lambda error: show_api_error(self, cast(ApiError, error)))
-        worker.signals.finished.connect(lambda: self.buttons.setEnabled(True))
+        # QObject-bound queued slots run on the UI thread and disconnect when
+        # the dialog is destroyed. Anonymous callbacks have no widget context.
+        worker.signals.succeeded.connect(self._created, Qt.ConnectionType.QueuedConnection)
+        worker.signals.failed.connect(self._failed, Qt.ConnectionType.QueuedConnection)
+        worker.signals.finished.connect(self._finished, Qt.ConnectionType.QueuedConnection)
+        self._worker = worker
         self._pool.start(worker)
 
+    @Slot(object)
+    def _failed(self, error: object) -> None:
+        show_api_error(self, cast(ApiError, error))
+
+    @Slot()
+    def _finished(self) -> None:
+        self.buttons.setEnabled(True)
+        self._worker = None
+
+    @Slot(object)
     def _created(self, result: object) -> None:
         account, temporary_password = cast(tuple[Account, str], result)
         dialog = QMessageBox(self)
