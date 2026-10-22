@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { validatePostApprovalUpgradeSource } from './test-post-approval-room-issue-upgrade.mjs';
 import { manualCancelFixture, manualCancelId as id } from './test-manual-cleaning-cancel-concurrency.mjs';
 import { assertUpgradeNotificationCatalog, upgradeHistorySnapshotSql } from './lib/upgrade-notification-catalog-compatibility.mjs';
 
@@ -11,7 +12,8 @@ const psqlArgs = ['exec', '-i', 'supabase_db_room-management-system-backend', 'p
   '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'];
 const baseline = '20261002074234';
 const added = '20261002101126';
-const expectedCount = JSON.parse(readFileSync('supabase/migration-manifest.dev.json', 'utf8')).totalCount;
+const manifest = JSON.parse(readFileSync('supabase/migration-manifest.dev.json', 'utf8'));
+const expectedCount = manifest.totalCount;
 assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95);
 const serviceDate = '2041-06-07';
 const commandAt = '2041-06-07 09:00+09';
@@ -70,6 +72,18 @@ function preservedDigest(shape, baselineCatalog) {
 const scheduleRead = (assignments, includeCurrent) => `select public.get_assignment_schedule_read(
   '${id(2)}','${id(202)}',array[${assignments.map((value) => `'${value}'::uuid`).join(',')}],${includeCurrent},'maid');`;
 try {
+  // Fail before any DB access/reset on unreviewed, renamed or rehashed SQL.
+  // Reuse the existing exact source pins rather than trusting a count alone.
+  phase = 'reviewed-source';
+  if (expectedCount >= 111) {
+    validatePostApprovalUpgradeSource(manifest, readdirSync('supabase/migrations', { withFileTypes: true })
+      .filter(entry => entry.name.endsWith('.sql'))
+      .map(entry => ({ file: entry.name, isFile: entry.isFile(), isSymbolicLink: entry.isSymbolicLink(),
+        raw: readFileSync(`supabase/migrations/${entry.name}`) })));
+  }
+  // Check the helper's supported range before the expensive baseline rebuild.
+  upgradeHistorySnapshotSql([{ table: 'public.profiles', columns: ['id'] }], expectedCount);
+  phase = 'local-identity';
   const status = JSON.parse(execFileSync(process.execPath, [cli, 'status', '--output', 'json'],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
   assert(['localhost', '127.0.0.1'].includes(new URL(status.API_URL).hostname), 'Only disposable local database is allowed');
