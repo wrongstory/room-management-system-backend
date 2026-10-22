@@ -175,7 +175,7 @@ export function verifyEdgeBundle() {
     const output = resolve(temporary, 'api.eszip');
     const relativeOutput = relative(process.cwd(), output).split(sep).join('/');
     const result = spawnSync('docker', ['run', '--rm', '-v', `${process.cwd()}:/workspace`, '-w', '/workspace/supabase/functions',
-      'public.ecr.aws/supabase/edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c',
+      'ghcr.io/supabase/edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c',
       'bundle', '--entrypoint', 'api/index.ts',
       '--static', 'api/assets/magick.wasm.gz',
       '--static', 'api/assets/magick.NOTICE',
@@ -239,7 +239,7 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
       `export { ${rawSourceDiagnostic ? 'createSupabasePostApprovalReportEdgeHandler' : 'createSupabasePostApprovalReportEdgeHandler, createSupabasePostApprovalModuleEdgeHandler'} } from "${reportEntry}";\n`);
     const result = spawnSync('docker', ['run', '--rm', '-v', `${process.cwd()}:/workspace:ro`, '-v', `${temporary}:/output`,
       '-w', '/output',
-      'public.ecr.aws/supabase/edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c',
+      'ghcr.io/supabase/edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c',
       'bundle', '--entrypoint', '/output/candidate.ts',
       '--static', '/workspace/supabase/functions/api/assets/magick.wasm.gz', '--static', '/workspace/supabase/functions/api/assets/magick.NOTICE',
       '--output', '/output/candidate.eszip', '--checksum', 'sha256', '--timeout', '60'], { stdio: 'inherit', timeout: 70000 });

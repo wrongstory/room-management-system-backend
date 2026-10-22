@@ -1,6 +1,21 @@
 # #464 사진 업로드 실패·재시도 인계
 
-상태: 개발 후보. 운영 미배포, 신규 migration 미실행. 전체 DB 검증 NOT RUN.
+상태: 2026-10-22 운영 반영 완료. api51, migration120. 아래 개발 단계의 NOT RUN은 과거 기록이다.
+
+## 운영 적용 결과 (2026-10-22)
+
+- PR468 사진 릴리스 및 PR470 Qt/CI 보완 병합 main ad1b1a0.
+- PR470 CI39705842954 및 main CI39706149605 application/migration PASS.
+  전체 DB는 재실행하지 않고 승인된 PR468 run39678174846 attempt1 성공 증거를 재사용했다.
+- 운영에는 photo_upload_pre_provider_retry 한 건만 적용했다(원격20261022013407).
+  history119→120, service_role 실행 허용/anon·authenticated 거부 확인.
+- api51 ACTIVE, artifact e63bdb3561007c797ebf0dd0d5db1b7ffbdccf33cdb7827becd2d3416c671023.
+  다른 함수 4개 불변. health/OpenAPI200, 154 paths/166 operations,
+  무인증 auth-me/rooms401 및 운영 Origin CORS204 확인.
+- Security Advisor는 적용 전후 동일(기존 INFO127/WARN1); 보안 정책 변경 없음.
+- 실제 사진 업로드·PIN/Auth 변경·데이터 backfill·삭제·태그 발행은 수행하지 않았다.
+  첫503 상세 원인은 여전히 미확정이며 실제 사용자 사진 재시도 UAT는 별도다.
+- 프런트는 아래 오류 분류 및 동일 key/item/파일 보존 계약을 유지한다.
 
 ## 확인된 운영 사건 (2026-10-21 KST)
 
