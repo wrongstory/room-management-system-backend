@@ -108,7 +108,7 @@
     "src/lib/app-error.ts": "0372ddabf09fb7f075347c616a0e0d594201ea6f969918e98172b93a1285ff3c",
     "src/lib/command.ts": "7809e021decaea87744f8370999187f19c0b4864819c73ae5821cb628c76a0ae",
     "src/modules/auth/auth-context.ts": "ae1c1c097eda7186ef7a9f7d441d4aa25655d517d973c0459354f20a22d6951b",
-    "src/modules/post-approval-room-issues/post-approval-room-issue-contract.ts": "eca9a612829fa3a7bde6b743c7a0685ebe81a4aabcaf5133fe58bd405c4ee7ec",
+    "src/modules/post-approval-room-issues/post-approval-room-issue-contract.ts": "305bb74c03ed611cdae862ee0d21ad37248215fd3b1aae72310d5519644a3326",
     "src/modules/post-approval-room-issues/post-approval-room-issue-evidence.routes.ts": "82dd673bbe2ad214dfc88a8051c5097b51edc25f279fbb6f750c8bf22758a936",
     "src/modules/post-approval-room-issues/post-approval-room-issue-evidence.service.ts": "50d8c0b5cb55891432d9e8d92dfcc21250809de490c9535f815da7285e490953",
     "src/modules/post-approval-room-issues/post-approval-room-issue-handover-contract.ts": "70b5aafd11fd042e2ab31fd3ff421fccaf41344006b8966df1c74f89a3a1ec87",
@@ -126,7 +126,7 @@
     "supabase/functions/_shared/post-approval-module-runtime.ts": "0b324b37615fb1c9a85f72b4b1f08cbc30e8d54d77739ed2fde8b3c22934e123",
     "supabase/functions/_shared/post-approval-report-api.ts": "fb3f79a4245858944f9473f72e1eaef44e98867d903554dd3132ee059cfd3091",
     "supabase/functions/_shared/post-approval-report-command.ts": "0bfc1ab50d0d70d19273d6d7f87b1f395a9ecf8564c3f840b3fb7d33824a152b",
-    "supabase/functions/_shared/post-approval-report-contract.ts": "f25c2e0df89a85a20e6ce7c6add1123cef28664595d2b54e7f97c6efac0044c2",
+    "supabase/functions/_shared/post-approval-report-contract.ts": "6f3328334369a3839931b183063ce24c3d5a9a644ae18879e8f3314a92f25ed6",
     "supabase/functions/_shared/post-approval-report-error.ts": "3bf877e146355baf5d7afe4d6b0e35c762d73ee2ff09329e3f92314676ff181d",
     "supabase/functions/_shared/post-approval-report-http-errors.ts": "efc55906229e791e1fad720c5616baa10ed360d90a80247e50ce614dcbd8ca48",
     "supabase/functions/_shared/post-approval-report-runtime.ts": "b925d42ab7b2373b599cbb6e4a99def7c6c1936c8d1432fd4b6cf86ecf940c63",
@@ -134,6 +134,6 @@
     "supabase/functions/_shared/runtime.ts": "49af3951bd6b59d5243e3f42e7b07d6f9f95c32edb2614b4cff3329a2f2557e5"
   },
   "artifact": "supabase/functions/_shared/post-approval-report.bundle.js",
-  "bytes": 620911,
-  "sha256": "88399fb8cd21932930fbc7e7dd756c615d215e2e5634e4ff02f6ac60ee8a3c99"
+  "bytes": 621003,
+  "sha256": "a8987d6b7196492a4ed61eae0f4040255f50578a65e2c4052c2e7d2b864d5368"
 }

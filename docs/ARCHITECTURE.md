@@ -32,6 +32,11 @@ Node/Edge의 bounded 관계 조회에서 attempt→submission만 하나의 병�
 
 ## #336 역사 접근과 신규 신고의 상태 분리 (source 등록·운영 미배포)
 
+2026-10-22 #474 후보는 사진 없는 새 초안에서 업로드 없이 메모 전용 확정을 허용한다.
+evidence=[]/expectedEvidenceRevision=0과 현재 collection을 검증하며 사진이 이미 있는
+초안의 증빙 누락은 허용하지 않는다. 메모 필수·접근 권한·멱등 receipt는 유지한다.
+DB/API 적용 전 상태와 요청 계약은 [메모 전용 신고](MEMO_ONLY_SUPPLEMENTAL_REPORT.md)를 따른다.
+
 2026-10-07 최신 상태: dev `ac8c775` 기반111 migration 후보에 신규11 operation을 기본
 Fastify/Edge 및 source Swagger150 paths/162 operations로 연결했다. 영속 인계 키의
 lazy 구성과 로컬 전체 SQL·Edge·동시성 검증 및 최종 독립 QA를 완료했다. PR/CI·dev 병합 및
